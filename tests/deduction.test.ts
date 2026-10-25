@@ -1,0 +1,107 @@
+// 本金与赠金场景：三种候选扣款规则分别验证，撤销按原单构成恢复。
+
+import { randomUUID } from 'node:crypto';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { splitDeduction } from '../src/shared/deduction';
+import { api, balanceOf, consumeBody, createMember, rechargeBody, setRule, setup, type TestContext } from './helpers';
+
+let ctx: TestContext;
+beforeAll(async () => {
+  ctx = await setup();
+});
+afterAll(async () => ctx.close());
+
+describe('splitDeduction 纯函数', () => {
+  const bal = { principal: 50000, bonus: 5000 };
+  it('先本金', () => {
+    expect(splitDeduction(10000, bal, 'principal_first')).toEqual({ ok: true, principal: 10000, bonus: 0 });
+    expect(splitDeduction(52000, bal, 'principal_first')).toEqual({ ok: true, principal: 50000, bonus: 2000 });
+  });
+  it('先赠金', () => {
+    expect(splitDeduction(3000, bal, 'bonus_first')).toEqual({ ok: true, principal: 0, bonus: 3000 });
+    expect(splitDeduction(10000, bal, 'bonus_first')).toEqual({ ok: true, principal: 5000, bonus: 5000 });
+  });
+  it('按比例，赠金向下取整、零头计入本金', () => {
+    expect(splitDeduction(11000, bal, 'proportional')).toEqual({ ok: true, principal: 10000, bonus: 1000 });
+    expect(splitDeduction(101, { principal: 100, bonus: 1 }, 'proportional')).toEqual({ ok: true, principal: 100, bonus: 1 });
+    expect(splitDeduction(1, { principal: 1, bonus: 1 }, 'proportional')).toEqual({ ok: true, principal: 1, bonus: 0 });
+  });
+  it('余额不足', () => {
+    expect(splitDeduction(55001, bal, 'principal_first')).toEqual({ ok: false, reason: 'insufficient', available: 55000, shortfall: 1 });
+  });
+});
+
+describe('接口：本金 + 赠金', () => {
+  const cases = [
+    { rule: 'principal_first', consume: 52000, expect: { principal: 50000, bonus: 2000 } },
+    { rule: 'bonus_first', consume: 10000, expect: { principal: 5000, bonus: 5000 } },
+    { rule: 'proportional', consume: 11000, expect: { principal: 10000, bonus: 1000 } },
+  ] as const;
+
+  for (const [i, c] of cases.entries()) {
+    it(`${c.rule}：充 500 送 50，消费后撤销恢复原构成`, async () => {
+      await setRule(ctx, c.rule);
+      const member = await createMember(ctx, `赠金会员${i}`, `1990000100${i}`);
+      // 自定义赠金需要店主权限
+      const r = await api(ctx.app, ctx.owner, 'POST', '/api/recharges', rechargeBody(member.id, 50000, 5000));
+      expect(r.status).toBe(200);
+      expect(r.body.balanceAfter).toEqual({ principal: 50000, bonus: 5000 });
+
+      const cr = await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', consumeBody(member.id, c.consume));
+      expect(cr.status).toBe(200);
+      expect(cr.body.consumption.deductionRule).toBe(c.rule);
+      expect({ principal: cr.body.consumption.principalAmount, bonus: cr.body.consumption.bonusAmount }).toEqual(c.expect);
+      expect(await balanceOf(ctx, member.id)).toEqual({ principal: 50000 - c.expect.principal, bonus: 5000 - c.expect.bonus });
+
+      // 撤销前把规则改掉，撤销仍按原单构成恢复
+      await setRule(ctx, 'principal_first');
+      const rv = await api(ctx.app, ctx.owner, 'POST', `/api/consumptions/${cr.body.consumption.id}/reverse`, {
+        idempotencyKey: randomUUID(),
+        reason: '金额录入错误',
+      });
+      expect(rv.status).toBe(200);
+      expect({ principal: rv.body.reversal.principalAmount, bonus: rv.body.reversal.bonusAmount }).toEqual(c.expect);
+      expect(await balanceOf(ctx, member.id)).toEqual({ principal: 50000, bonus: 5000 });
+    });
+  }
+
+  it('店员不能自定义赠金，但可以选套餐', async () => {
+    const member = await createMember(ctx, '套餐会员', '19900002001');
+    const denied = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(member.id, 50000, 5000));
+    expect(denied.status).toBe(403);
+
+    const [plan] = await ctx.sql<{ id: number }[]>`
+      INSERT INTO recharge_plans (name, pay_amount, bonus_amount) VALUES ('常泡 500', 50000, 5000) RETURNING id`;
+    const ok = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(member.id, 50000, 5000, { planId: plan!.id }));
+    expect(ok.status).toBe(200);
+    expect(ok.body.recharge.planName).toBe('常泡 500');
+
+    // 套餐金额与提交不一致（例如刚被修改）时拒绝
+    const mismatch = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(member.id, 50000, 6000, { planId: plan!.id }));
+    expect(mismatch.status).toBe(409);
+    expect(mismatch.body.error.code).toBe('PLAN_CHANGED');
+  });
+
+  it('项目价格以服务端为准，价格变动时要求重新确认', async () => {
+    const member = await createMember(ctx, '项目会员', '19900002002');
+    await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(member.id, 100000));
+    const [item] = await ctx.sql<{ id: number }[]>`INSERT INTO service_items (name, price) VALUES ('汤泉入场', 12800) RETURNING id`;
+    const ok = await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', {
+      idempotencyKey: randomUUID(),
+      memberId: member.id,
+      lines: [{ itemId: item!.id, quantity: 2 }],
+      expectedTotal: 25600,
+    });
+    expect(ok.status).toBe(200);
+    expect(ok.body.consumption.lines[0]).toMatchObject({ name: '汤泉入场', unitPrice: 12800, quantity: 2, amount: 25600 });
+
+    const stale = await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', {
+      idempotencyKey: randomUUID(),
+      memberId: member.id,
+      lines: [{ itemId: item!.id, quantity: 1 }],
+      expectedTotal: 9900,
+    });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error.code).toBe('PRICE_CHANGED');
+  });
+});

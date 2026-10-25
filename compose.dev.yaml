@@ -1,0 +1,25 @@
+# 本地开发只用容器跑数据库，应用用 `npm run dev` 直接运行（支持热更新）。
+# 启动：docker compose -f compose.dev.yaml up -d
+name: yuzu-dev
+
+services:
+  db:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    environment:
+      POSTGRES_USER: yuzu
+      POSTGRES_PASSWORD: yuzu_dev_only
+      POSTGRES_DB: yuzu_dev
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - dev-pgdata:/var/lib/postgresql/data
+      - ./scripts/dev-init-db.sql:/docker-entrypoint-initdb.d/10-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yuzu -d yuzu_dev"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  dev-pgdata:
