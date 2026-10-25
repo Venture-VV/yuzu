@@ -1,0 +1,69 @@
+# 浴族 yuzu 运行环境（试用 / 正式）
+#   启动：docker compose up -d --build
+#   查看：docker compose ps / docker compose logs -f app
+# 同一台机器上要同时跑试用和正式环境时，用不同的 .env 与项目名区分，数据卷互不影响：
+#   docker compose --env-file .env.trial -p yuzu-trial up -d
+
+services:
+  db:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: yuzu
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}
+      POSTGRES_DB: yuzu
+      TZ: ${APP_TIMEZONE:-Asia/Shanghai}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yuzu -d yuzu"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    # 数据库不对局域网开放端口，只供 app 与 backup 容器访问
+
+  app:
+    build:
+      context: .
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+        APP_VERSION: ${YUZU_VERSION:-0.1.0}
+    image: yuzu-app:local
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-trial}
+      DATABASE_URL: postgres://yuzu:${POSTGRES_PASSWORD}@db:5432/yuzu
+      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      INIT_OWNER_USERNAME: ${INIT_OWNER_USERNAME:-}
+      INIT_OWNER_PASSWORD: ${INIT_OWNER_PASSWORD:-}
+      INIT_OWNER_NAME: ${INIT_OWNER_NAME:-店主}
+      TZ: ${APP_TIMEZONE:-Asia/Shanghai}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+
+  backup:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: yuzu
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: yuzu
+      BACKUP_HOUR: ${BACKUP_HOUR:-4}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-30}
+      TZ: ${APP_TIMEZONE:-Asia/Shanghai}
+    volumes:
+      - ${BACKUP_DIR:-./backups}:/backups
+      - ./scripts/backup-loop.sh:/usr/local/bin/backup-loop.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/backup-loop.sh"]
+
+volumes:
+  pgdata:
