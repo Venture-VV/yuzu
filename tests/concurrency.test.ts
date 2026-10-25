@@ -116,6 +116,28 @@ describe('多人同时操作', () => {
     expect(await balanceOf(ctx, member.id)).toEqual({ principal: 9000, bonus: 0 });
   });
 
+  it('会员被长时间锁住时，记账在 5 秒内明确失败且不入账', async () => {
+    const member = await createMember(ctx, '锁等待', '19900003104');
+    await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(member.id, 10000));
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const locker = ctx.sql.begin(async (tx) => {
+      await tx`SELECT id FROM members WHERE id = ${member.id} FOR UPDATE`;
+      await held;
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    const started = Date.now();
+    const res = await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', consumeBody(member.id, 1000));
+    const waited = Date.now() - started;
+    release();
+    await locker;
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('BUSY');
+    expect(waited).toBeLessThan(9000);
+    expect(await balanceOf(ctx, member.id)).toEqual({ principal: 10000, bonus: 0 });
+    expect(await ledgerCount(member.id)).toBe(1);
+  });
+
   it('单号按营业日连续编号，不会重复', async () => {
     const rows = await ctx.sql<{ docNo: string }[]>`SELECT doc_no FROM recharges ORDER BY id`;
     const numbers = rows.map((r) => r.docNo);

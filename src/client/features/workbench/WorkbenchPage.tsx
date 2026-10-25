@@ -12,7 +12,7 @@ import { Sheet } from '../../components/Overlay';
 import { Notice } from '../../components/ui';
 import { ConsumeFlow } from '../flows/ConsumeFlow';
 import { RechargeFlow } from '../flows/RechargeFlow';
-import { ReversalDialog } from '../flows/ReversalDialog';
+import { ReversalDialog, type ReversalTarget } from '../flows/ReversalDialog';
 import { MemberDetail, MemberDetailSkeleton } from './MemberDetail';
 import { MemberFormDialog } from './MemberFormDialog';
 import { MemberList } from './MemberList';
@@ -40,10 +40,11 @@ export function WorkbenchPage() {
   const member = useMember(selectedId);
   const [flow, setFlow] = useState<Flow>(null);
   const [form, setForm] = useState<{ mode: 'create' | 'edit'; prefill?: string } | null>(null);
-  const [reverseId, setReverseId] = useState<number | null>(null);
+  const [reverseTarget, setReverseTarget] = useState<ReversalTarget | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const wide = useMedia('(min-width: 1280px)');
+  const extraWide = useMedia('(min-width: 1536px)');
   const mid = useMedia('(min-width: 900px)');
 
   const select = useCallback(
@@ -61,10 +62,24 @@ export function WorkbenchPage() {
       if (f === 'consume' && !can('consume.create')) return;
       // 打开流程前刷新一次余额，确保核对时是最新数字
       void qc.invalidateQueries({ queryKey: ['member', member.data.id] });
+      void qc.invalidateQueries({ queryKey: ['session'] }); // 取最新的扣款规则
       setFlow(f);
     },
     [member.data, can, qc],
   );
+
+  // 从页面顶部「待确认操作」进入：打开对应流程，由流程按原操作编号自动查回结果
+  const resume = params.get('resume');
+  const resumeConsumption = Number(params.get('c')) || null;
+  useEffect(() => {
+    if (!resume || !member.data || member.data.id !== selectedId) return;
+    if (resume === 'reversal' && resumeConsumption) {
+      setReverseTarget({ consumptionId: resumeConsumption, memberId: member.data.id, memberName: member.data.name });
+    } else if (resume === 'recharge' || resume === 'consume') {
+      setFlow(resume);
+    }
+    setParams({ m: String(member.data.id) }, { replace: true });
+  }, [resume, resumeConsumption, member.data, selectedId, setParams]);
 
   // 键盘快捷键
   useEffect(() => {
@@ -112,7 +127,13 @@ export function WorkbenchPage() {
       <div
         className={cn(
           'grid min-h-0 flex-1',
-          wide ? 'grid-cols-[320px_minmax(0,1fr)_400px]' : mid ? 'grid-cols-[300px_minmax(0,1fr)]' : 'grid-cols-1',
+          extraWide
+            ? 'grid-cols-[320px_minmax(0,1fr)_400px]'
+            : wide
+              ? 'grid-cols-[288px_minmax(0,1fr)_380px]'
+              : mid
+                ? 'grid-cols-[300px_minmax(0,1fr)]'
+                : 'grid-cols-1',
         )}
       >
         {showList && (
@@ -149,7 +170,9 @@ export function WorkbenchPage() {
                 onRecharge={() => openFlow('recharge')}
                 onConsume={() => openFlow('consume')}
                 onEdit={() => setForm({ mode: 'edit' })}
-                onReverse={setReverseId}
+                onReverse={(consumptionId) =>
+                  setReverseTarget({ consumptionId, memberId: member.data!.id, memberName: member.data!.name })
+                }
                 onBack={mid ? undefined : () => select(null)}
               />
             ) : null}
@@ -183,7 +206,7 @@ export function WorkbenchPage() {
           select(id);
         }}
       />
-      <ReversalDialog consumptionId={reverseId} onClose={() => setReverseId(null)} />
+      <ReversalDialog target={reverseTarget} onClose={() => setReverseTarget(null)} />
     </>
   );
 }

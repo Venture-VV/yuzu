@@ -1,17 +1,17 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Banknote, CreditCard, Ellipsis, Gift, Smartphone, WalletCards } from 'lucide-react';
 import { PAYMENT_METHOD_LABELS, PAYMENT_METHODS, type PaymentMethod } from '@shared/labels';
 import { formatYuan, parseYuan } from '@shared/money';
 import type { MemberDetail, OperationResult } from '@shared/types';
-import { api } from '../../lib/api';
+import { findPending } from '../../lib/pendingOps';
 import { useCatalog } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Button, ConfirmCheck, Field, Input, MoneyInput, Notice, PendingBadge, Skeleton } from '../../components/ui';
-import { BalanceChange, FlowFrame, OperationStatus, SuccessHeader, SummaryRow, type Step } from './parts';
-import { useOperation } from './useOperation';
+import { BalanceChange, FlowFrame, OperationStatus, PendingRecovery, SuccessHeader, SummaryRow, type Step } from './parts';
+import { isBusy, isLocked, useOperation } from './useOperation';
 
 const METHOD_ICONS: Record<PaymentMethod, typeof Smartphone> = {
   wechat: Smartphone,
@@ -54,26 +54,38 @@ export function RechargeFlow({
   const before = { principal: member.principalBalance, bonus: member.bonusBalance };
   const after = { principal: before.principal + (paid ?? 0), bonus: before.bonus + (bonus ?? 0) };
 
-  const submitFn = useCallback(
-    (idempotencyKey: string) =>
-      api.post<OperationResult>(
-        '/api/recharges',
-        {
-          idempotencyKey,
-          memberId: member.id,
-          planId: plan?.id ?? null,
-          paidAmount: paid,
-          bonusAmount: bonus,
-          paymentMethod: method,
-          paymentRef,
-          note,
-          paymentConfirmed: confirmed,
-        },
-        { timeoutMs: 15_000 },
-      ),
-    [member.id, plan?.id, paid, bonus, method, paymentRef, note, confirmed],
-  );
-  const op = useOperation(submitFn);
+  const op = useOperation({
+    type: 'recharge',
+    url: '/api/recharges',
+    build: (idempotencyKey) => ({
+      body: {
+        idempotencyKey,
+        memberId: member.id,
+        planId: plan?.id ?? null,
+        paidAmount: paid,
+        bonusAmount: bonus,
+        paymentMethod: method,
+        paymentRef,
+        note,
+        paymentConfirmed: confirmed,
+      },
+      meta: {
+        memberId: member.id,
+        memberName: member.name,
+        amount: paid ?? 0,
+        summary: [plan?.name ?? '自定义金额', method ? PAYMENT_METHOD_LABELS[method] : '', bonus ? `赠金 ${formatYuan(bonus)}` : '']
+          .filter(Boolean)
+          .join(' · '),
+        staffName: session.staff.displayName,
+      },
+    }),
+  });
+
+  // 这位会员有之前留下的待确认充值：先处理它，再开始新的一笔
+  useEffect(() => {
+    const pending = findPending(member.id, 'recharge');
+    if (pending) op.adopt(pending);
+  }, [member.id]); // 只在打开面板（或切换会员）时检查一次
 
   useEffect(() => {
     if (op.state.status === 'success') setStep('result');
@@ -97,8 +109,16 @@ export function RechargeFlow({
     setStep('confirm');
   };
 
-  const busy = op.state.status === 'submitting' || op.state.status === 'checking';
-  const locked = op.state.status === 'uncertain' || op.state.status === 'checking' || op.state.status === 'not_found';
+  const busy = isBusy(op.state);
+  const locked = isLocked(op.state);
+
+  if (op.adopted && op.state.status !== 'success') {
+    return (
+      <FlowFrame title="会员充值" tone="pine" member={member} step="confirm" onClose={onClose} closeDisabled={op.state.status === 'submitting'}>
+        <PendingRecovery op={op.adopted} state={op.state} onCheck={op.check} onRetry={op.retry} onDiscard={op.discard} />
+      </FlowFrame>
+    );
+  }
 
   if (step === 'result' && op.state.status === 'success') {
     const r = op.state.result as Extract<OperationResult, { type: 'recharge' }>;
@@ -147,6 +167,7 @@ export function RechargeFlow({
         member={member}
         step="confirm"
         onClose={onClose}
+        closeDisabled={op.state.status === 'submitting'}
         footer={
           <div className="flex gap-2.5">
             <Button
@@ -205,7 +226,7 @@ export function RechargeFlow({
           </ConfirmCheck>
         </div>
         <div className="mt-4">
-          <OperationStatus state={op.state} onCheck={op.check} onRetry={op.submit} />
+          <OperationStatus state={op.state} onCheck={op.check} onRetry={op.retry} />
         </div>
       </FlowFrame>
     );

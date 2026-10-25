@@ -6,7 +6,7 @@ import { businessDateOf, ISO_DATE } from '@shared/business-date';
 import { PAYMENT_METHOD_LABELS, type PaymentMethod } from '@shared/labels';
 import { formatAmount, formatYuan } from '@shared/money';
 import type { SettlementAnomaly, SettlementCheck, SettlementSummary, SettlementTotals } from '@shared/types';
-import type { Db } from '../db';
+import { readSnapshot, type Db } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
@@ -274,7 +274,8 @@ export function registerSettlementRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/settlements/:date', { preHandler: guard('ledger.readToday') }, async (req) => {
     const { date } = parse(DateParam, req.params);
     const target = await resolveReadableDate(deps, req, date);
-    return computeSettlement(sql, target, await todayNow());
+    const today = await todayNow();
+    return readSnapshot(sql, (tx) => computeSettlement(tx, target, today));
   });
 
   app.post('/api/settlements/:date/close', { preHandler: guard('settlement.close') }, async (req) => {
@@ -282,10 +283,10 @@ export function registerSettlementRoutes(app: FastifyInstance, deps: Deps) {
     const { note } = parse(CloseInput, req.body ?? {});
     const today = await todayNow();
     if (date > today) throw unprocessable('FUTURE_DATE', '营业日尚未开始，不能日结');
+    // 快照取自同一时刻的数据；写入单独一个事务，并串行化同一营业日的日结确认
+    const totals = await readSnapshot(sql, (tx) => computeTotals(tx, date));
     await sql.begin(async (tx) => {
-      // 串行化同一营业日的日结确认
       await tx`SELECT pg_advisory_xact_lock(hashtext(${'settle:' + date}))`;
-      const totals = await computeTotals(tx, date);
       const [prev] = await tx<{ snapshot: SettlementTotals; revision: number }[]>`
         SELECT snapshot, revision FROM daily_settlements WHERE business_date = ${date}`;
       await tx`
@@ -304,13 +305,14 @@ export function registerSettlementRoutes(app: FastifyInstance, deps: Deps) {
         businessDate: date,
       });
     });
-    return computeSettlement(sql, date, today);
+    return readSnapshot(sql, (tx) => computeSettlement(tx, date, today));
   });
 
   app.get('/api/settlements/:date/export', { preHandler: guard('ledger.export') }, async (req, reply) => {
     const { date } = parse(DateParam, req.params);
     const target = await resolveReadableDate(deps, req, date);
-    const summary = await computeSettlement(sql, target, await todayNow());
+    const today = await todayNow();
+    const summary = await readSnapshot(sql, (tx) => computeSettlement(tx, target, today));
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'settlement', targetId: target, ip: req.ip });
     reply
       .header('content-type', 'text/csv; charset=utf-8')

@@ -18,7 +18,8 @@ export function TodayPanel() {
   const recent = (ledger.data ?? []).slice(0, 6);
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto p-5 scroll-thin">
+    // 子项不允许被压缩：屏幕较矮时整栏滚动，而不是把汇总卡压扁
+    <div className="scroll-thin flex h-full flex-col gap-4 overflow-y-auto p-5 [&>*]:shrink-0">
       <div>
         <p className="text-[12px] font-bold tracking-[0.18em] text-ink-3">TODAY</p>
         <p className="mt-0.5 flex items-baseline gap-2">

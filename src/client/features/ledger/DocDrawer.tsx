@@ -10,10 +10,19 @@ import { Sheet } from '../../components/Overlay';
 import { Money } from '../../components/Money';
 import { Badge, Button, IconButton, Notice, Skeleton } from '../../components/ui';
 import { BalanceChange, SummaryRow } from '../flows/parts';
+import type { ReversalTarget } from '../flows/ReversalDialog';
 import { ENTRY_META } from '../workbench/ActivityList';
 
 /** 流水单据详情：充值单 / 消费单 / 撤销单，含余额变化与关联单据 */
-export function DocDrawer({ row, onClose, onReverse }: { row: LedgerRow | null; onClose: () => void; onReverse: (id: number) => void }) {
+export function DocDrawer({
+  row,
+  onClose,
+  onReverse,
+}: {
+  row: LedgerRow | null;
+  onClose: () => void;
+  onReverse: (target: ReversalTarget) => void;
+}) {
   const can = useCan();
   const url =
     row?.entryType === 'recharge'
@@ -92,7 +101,7 @@ export function DocDrawer({ row, onClose, onReverse }: { row: LedgerRow | null; 
 
       {row.entryType === 'consume' && row.consumptionStatus === 'completed' && can('consume.reverse') && row.consumptionId && (
         <footer className="border-t border-line bg-card px-5 py-4">
-          <Button variant="danger" className="w-full" icon={<Undo2 className="size-4" />} onClick={() => onReverse(row.consumptionId!)}>
+          <Button variant="danger" className="w-full" icon={<Undo2 className="size-4" />} onClick={() => onReverse({ consumptionId: row.consumptionId!, memberId: row.memberId, memberName: row.memberName })}>
             撤销这张消费单
           </Button>
         </footer>

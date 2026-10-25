@@ -73,31 +73,33 @@ export function MemberDetail({
           </div>
         )}
 
-        {/* 余额：合计 / 本金 / 赠金 分层展示 */}
-        <div className="grid grid-cols-1 border-t border-line bg-card sm:grid-cols-[1.25fr_1fr_1fr]">
-          <div className="px-5 py-4">
-            <p className="text-[12.5px] font-semibold text-ink-3">可用余额</p>
-            <Money cents={total} className={cn('mt-1 text-[36px] leading-none font-bold tracking-tight', total ? 'text-ink' : 'text-ink-4')} />
-          </div>
-          <div className="border-t border-line px-5 py-4 sm:border-t-0 sm:border-l">
-            <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink-3">
-              <span className="size-2 rounded-full bg-pine" />
-              本金
-            </p>
-            <Money cents={member.principalBalance} className="mt-1.5 text-[22px] leading-none font-bold text-pine" />
-            <p className="mt-1.5 text-[12px] text-ink-3">
-              累计实收 <Money cents={member.stats.totalPaid} />
-            </p>
-          </div>
-          <div className="border-t border-line px-5 py-4 sm:border-t-0 sm:border-l">
-            <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink-3">
-              <span className="size-2 rounded-full bg-yuzu" />
-              赠金
-            </p>
-            <Money cents={member.bonusBalance} className="mt-1.5 text-[22px] leading-none font-bold text-yuzu-deep" />
-            <p className="mt-1.5 text-[12px] text-ink-3">
-              累计赠送 <Money cents={member.stats.totalBonusGranted} />
-            </p>
+        {/* 余额：合计 / 本金 / 赠金 分层展示。按卡片实际宽度（容器查询）决定是否三栏并排，金额始终完整显示 */}
+        <div className="@container border-t border-line bg-card">
+          <div className="grid grid-cols-2 @2xl:grid-cols-[1.25fr_1fr_1fr]">
+            <div className="col-span-2 min-w-0 px-5 py-4 @2xl:col-span-1">
+              <p className="text-[12.5px] font-semibold text-ink-3">可用余额</p>
+              <Money cents={total} className={cn('mt-1 text-[36px] leading-none font-bold tracking-tight', total ? 'text-ink' : 'text-ink-4')} />
+            </div>
+            <div className="min-w-0 border-t border-line px-5 py-4 @2xl:border-t-0 @2xl:border-l">
+              <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink-3">
+                <span className="size-2 rounded-full bg-pine" />
+                本金
+              </p>
+              <Money cents={member.principalBalance} className="mt-1.5 text-[22px] leading-none font-bold text-pine" />
+              <p className="mt-1.5 text-[12px] text-ink-3">
+                累计实收 <Money cents={member.stats.totalPaid} />
+              </p>
+            </div>
+            <div className="min-w-0 border-t border-l border-line px-5 py-4 @2xl:border-t-0">
+              <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink-3">
+                <span className="size-2 rounded-full bg-yuzu" />
+                赠金
+              </p>
+              <Money cents={member.bonusBalance} className="mt-1.5 text-[22px] leading-none font-bold text-yuzu-deep" />
+              <p className="mt-1.5 text-[12px] text-ink-3">
+                累计赠送 <Money cents={member.stats.totalBonusGranted} />
+              </p>
+            </div>
           </div>
         </div>
       </Card>

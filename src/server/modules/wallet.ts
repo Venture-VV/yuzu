@@ -43,6 +43,8 @@ export const RechargeInput = z.object({
 });
 export type RechargeInputData = z.input<typeof RechargeInput>;
 
+const ExpectedSplit = z.object({ principal: cents('扣本金'), bonus: cents('扣赠金') });
+
 export const ConsumeInput = z
   .object({
     idempotencyKey,
@@ -60,6 +62,8 @@ export const ConsumeInput = z
     expectedTotal: positiveCents('应扣金额'),
     /** 员工确认时看到的会员余额；不一致说明其他终端刚刚操作过，需要重新确认 */
     expectedBalance: z.object({ principal: cents('本金'), bonus: cents('赠金') }).optional(),
+    /** 员工确认时看到的扣款构成；扣款规则或余额变化导致构成不同时拒绝，实际入账必须与确认内容一致 */
+    expectedSplit: ExpectedSplit.optional(),
   })
   .refine((v) => v.lines.length + v.customLines.length > 0, '请至少选择一个消费项目');
 export type ConsumeInputData = z.input<typeof ConsumeInput>;
@@ -124,6 +128,8 @@ async function runIdempotent(
 ): Promise<{ refId: number; replayed: boolean }> {
   try {
     return await sql.begin(async (tx) => {
+      // 限制等待时间：页面 15 秒超时之前，这笔操作要么已提交、要么已回滚，查询结果才可信
+      await tx.unsafe("SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '10s'");
       const member = await lockMember(tx, opts.memberId);
       const existing = await findKey(tx, opts.key);
       if (existing) {
@@ -387,6 +393,13 @@ export async function consume(deps: Deps, raw: ConsumeInputData, ctx: OpContext)
           total,
         });
       }
+      if (input.expectedSplit && (input.expectedSplit.principal !== split.principal || input.expectedSplit.bonus !== split.bonus)) {
+        throw conflict('SPLIT_CHANGED', '扣款规则刚刚有调整，本金 / 赠金的扣款构成与确认时不同，请重新核对', {
+          split: { principal: split.principal, bonus: split.bonus },
+          rule: settings.deductionRule,
+          balance,
+        });
+      }
 
       const at = ctx.at ?? new Date();
       const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
@@ -508,6 +521,8 @@ export function registerWalletRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   app.post('/api/consumptions', { preHandler: guard('consume.create') }, async (req) => {
+    // 页面提交必须带上员工确认过的扣款构成（内部生成演示数据时可省略）
+    parse(z.object({ expectedSplit: z.object(ExpectedSplit.shape, '缺少确认时的扣款构成，请刷新页面后重新核对') }), req.body);
     try {
       return await consume(deps, req.body as ConsumeInputData, ctxOf(req));
     } catch (error) {

@@ -12,7 +12,7 @@ import { DateNav } from '../../components/DateNav';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
 import { Badge, Button, Notice, Segmented, Select, Skeleton } from '../../components/ui';
-import { ReversalDialog } from '../flows/ReversalDialog';
+import { ReversalDialog, type ReversalTarget } from '../flows/ReversalDialog';
 import { ActivityRow, ENTRY_META } from '../workbench/ActivityList';
 import { DocDrawer } from './DocDrawer';
 
@@ -27,7 +27,7 @@ export function LedgerPage() {
   const [q, setQ] = useState(params.get('q') ?? '');
   const [operator, setOperator] = useState('');
   const [open, setOpen] = useState<LedgerRow | null>(null);
-  const [reverseId, setReverseId] = useState<number | null>(null);
+  const [reverseTarget, setReverseTarget] = useState<ReversalTarget | null>(null);
   const historyAllowed = can('ledger.readHistory');
 
   const update = (patch: Record<string, string | null>) => {
@@ -224,12 +224,12 @@ export function LedgerPage() {
       <DocDrawer
         row={open}
         onClose={() => setOpen(null)}
-        onReverse={(id) => {
+        onReverse={(target) => {
           setOpen(null);
-          setReverseId(id);
+          setReverseTarget(target);
         }}
       />
-      <ReversalDialog consumptionId={reverseId} onClose={() => setReverseId(null)} />
+      <ReversalDialog target={reverseTarget} onClose={() => setReverseTarget(null)} />
     </>
   );
 }

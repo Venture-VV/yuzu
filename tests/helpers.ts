@@ -94,12 +94,14 @@ export function rechargeBody(memberId: number, paid: number, bonus = 0, extra: R
   };
 }
 
+/** 默认假设会员只有本金（扣款构成 = 全部扣本金）；有赠金的场景通过 extra.expectedSplit 指定 */
 export function consumeBody(memberId: number, amount: number, extra: Record<string, unknown> = {}) {
   return {
     idempotencyKey: randomUUID(),
     memberId,
     customLines: [{ name: '测试消费', amount }],
     expectedTotal: amount,
+    expectedSplit: { principal: amount, bonus: 0 },
     ...extra,
   };
 }

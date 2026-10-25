@@ -1,19 +1,29 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Undo2 } from 'lucide-react';
 import { DEDUCTION_RULE_LABELS, REVERSAL_REASONS } from '@shared/labels';
-import type { ConsumptionDoc, OperationResult } from '@shared/types';
+import type { ConsumptionDoc } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
+import { findPending } from '../../lib/pendingOps';
+import { useSession } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { Money } from '../../components/Money';
 import { Badge, Button, Field, Notice, Skeleton, Textarea } from '../../components/ui';
-import { BalanceChange, OperationStatus, SuccessHeader, SummaryRow } from './parts';
-import { useOperation } from './useOperation';
+import { BalanceChange, OperationStatus, PendingRecovery, SuccessHeader, SummaryRow } from './parts';
+import { isBusy, isLocked, useOperation } from './useOperation';
+
+export interface ReversalTarget {
+  consumptionId: number;
+  memberId: number;
+  memberName: string;
+}
 
 /** 整单撤销：按原单的本金/赠金构成恢复余额，原单保留并标记为已撤销 */
-export function ReversalDialog({ consumptionId, onClose }: { consumptionId: number | null; onClose: () => void }) {
-  const open = consumptionId !== null;
+export function ReversalDialog({ target, onClose }: { target: ReversalTarget | null; onClose: () => void }) {
+  const session = useSession();
+  const consumptionId = target?.consumptionId ?? null;
+  const open = target !== null;
   const doc = useQuery({
     queryKey: ['consumption', consumptionId],
     queryFn: () => api.get<ConsumptionDoc>(`/api/consumptions/${consumptionId}`),
@@ -23,22 +33,39 @@ export function ReversalDialog({ consumptionId, onClose }: { consumptionId: numb
   const [detail, setDetail] = useState('');
   const reason = [preset, detail.trim()].filter(Boolean).join('：');
 
-  const submitFn = useCallback(
-    (idempotencyKey: string) => api.post<OperationResult>(`/api/consumptions/${consumptionId}/reverse`, { idempotencyKey, reason }),
-    [consumptionId, reason],
-  );
-  const op = useOperation(submitFn);
+  const op = useOperation({
+    type: 'reversal',
+    url: `/api/consumptions/${consumptionId}/reverse`,
+    build: (idempotencyKey) => ({
+      body: { idempotencyKey, reason },
+      meta: {
+        memberId: target?.memberId ?? 0,
+        memberName: target?.memberName ?? '',
+        consumptionId: consumptionId ?? undefined,
+        amount: doc.data ? doc.data.principalAmount + doc.data.bonusAmount : 0,
+        summary: `${doc.data?.docNo ?? ''} · ${reason}`,
+        staffName: session.staff.displayName,
+      },
+    }),
+  });
 
   useEffect(() => {
-    if (open) {
-      setPreset(null);
-      setDetail('');
+    if (!target) {
+      // 对话框关闭：未确认的撤销交给页面顶部的提醒继续处理
       op.reset();
+      return;
     }
-  }, [consumptionId]); // 只在切换撤销对象时重置
+    setPreset(null);
+    setDetail('');
+    op.reset();
+    // 这张消费单有之前留下的待确认撤销：先查回结果
+    const pending = findPending(target.memberId, 'reversal', target.consumptionId);
+    if (pending) op.adopt(pending);
+  }, [consumptionId]); // 只在切换撤销对象时检查
 
-  const busy = op.state.status === 'submitting' || op.state.status === 'checking';
-  const locked = op.state.status === 'uncertain' || op.state.status === 'checking' || op.state.status === 'not_found';
+  const busy = isBusy(op.state);
+  const locked = isLocked(op.state);
+  const recovering = !!op.adopted && op.state.status !== 'success';
   const done = op.state.status === 'success';
   const c = doc.data;
 
@@ -53,6 +80,10 @@ export function ReversalDialog({ consumptionId, onClose }: { consumptionId: numb
         done ? (
           <Button variant="primary" onClick={onClose} data-autofocus>
             完成
+          </Button>
+        ) : recovering ? (
+          <Button variant="secondary" onClick={onClose} disabled={op.state.status === 'submitting'}>
+            稍后处理
           </Button>
         ) : (
           <>
@@ -80,6 +111,8 @@ export function ReversalDialog({ consumptionId, onClose }: { consumptionId: numb
             原单 {op.state.result.consumption.docNo} 已标记为已撤销 · 原因：{op.state.result.reversal.reason}
           </p>
         </div>
+      ) : recovering && op.adopted ? (
+        <PendingRecovery op={op.adopted} state={op.state} onCheck={op.check} onRetry={op.retry} onDiscard={op.discard} />
       ) : doc.isPending ? (
         <div className="space-y-3">
           <Skeleton className="h-24" />
@@ -147,7 +180,7 @@ export function ReversalDialog({ consumptionId, onClose }: { consumptionId: numb
               <Field label="补充说明" htmlFor="rdetail" hint={preset ? '选填' : '未选择常用原因时必填，至少 2 个字'}>
                 <Textarea id="rdetail" value={detail} maxLength={150} onChange={(e) => setDetail(e.target.value)} placeholder="例如：应为儿童票，登记成了成人票" />
               </Field>
-              <OperationStatus state={op.state} onCheck={op.check} onRetry={op.submit} />
+              <OperationStatus state={op.state} onCheck={op.check} onRetry={op.retry} />
             </>
           )}
         </div>

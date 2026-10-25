@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react';
-import { ArrowRight, CloudOff, RotateCw, Search, X } from 'lucide-react';
+import { ArrowRight, CloudOff, Hourglass, RotateCw, Search, Undo2, X } from 'lucide-react';
 import type { WalletBalance } from '@shared/deduction';
 import { maskPhone } from '@shared/labels';
 import type { MemberSummary } from '@shared/types';
-import { cn, avatarTone } from '../../lib/utils';
+import { PENDING_LABELS, type PendingOp } from '../../lib/pendingOps';
+import { cn, avatarTone, formatDateTime } from '../../lib/utils';
 import { AnimatedMoney, Money } from '../../components/Money';
-import { Badge, Button, IconButton, Notice } from '../../components/ui';
+import { Badge, Button, IconButton, Notice, Spinner } from '../../components/ui';
 import type { OperationState } from './useOperation';
 
 export type Step = 'form' | 'confirm' | 'result';
@@ -19,12 +20,15 @@ export function FlowFrame({
   onClose,
   children,
   footer,
+  closeDisabled,
 }: {
   title: string;
   tone: 'pine' | 'yuzu';
   member: MemberSummary;
   step: Step;
   onClose: () => void;
+  /** 提交中不允许关闭，避免员工以为操作已取消 */
+  closeDisabled?: boolean;
   children: ReactNode;
   footer?: ReactNode;
 }) {
@@ -42,6 +46,7 @@ export function FlowFrame({
           <IconButton
             label="关闭"
             onClick={onClose}
+            disabled={closeDisabled}
             className={cn('-mr-2', tone === 'pine' ? 'text-paper/80 hover:bg-white/10 hover:text-paper' : 'text-ink/70 hover:bg-black/5')}
           >
             <X className="size-[18px]" />
@@ -170,6 +175,12 @@ export function SuccessHeader({ title, docNo, recovered }: { title: string; docN
 }
 
 /** 提交出错 / 结果待确认 / 查询中 等状态的统一展示 */
+const UNCERTAIN_REASON = {
+  timeout: '服务器长时间没有响应',
+  network: '网络连接中断',
+  server: '服务器出现异常',
+} as const;
+
 export function OperationStatus({
   state,
   onCheck,
@@ -193,7 +204,7 @@ export function OperationStatus({
       >
         {state.status === 'checking'
           ? '正在按操作编号查询…'
-          : `${state.status === 'uncertain' && state.reason === 'timeout' ? '服务器长时间没有响应' : '网络连接中断'}，这笔操作可能已经入账。请先查询结果，不要重复收款或重复登记。`}
+          : `${UNCERTAIN_REASON[state.reason]}，这笔操作可能已经入账。请先查询结果，不要重复收款或重复登记。关闭面板后也可以在页面顶部继续处理。`}
       </Notice>
     );
   }
@@ -204,11 +215,11 @@ export function OperationStatus({
         title="系统中没有这笔记录"
         action={
           <Button variant="primary" size="sm" icon={<RotateCw className="size-4" />} onClick={onRetry}>
-            重新提交
+            按原内容重新提交
           </Button>
         }
       >
-        刚才的操作没有入账，余额未发生变化，可以放心重新提交。
+        刚才的操作没有入账，余额未发生变化。重新提交会沿用原操作编号，不会重复入账。
       </Notice>
     );
   }
@@ -216,6 +227,104 @@ export function OperationStatus({
     return <Notice tone="error" title={state.error.message} />;
   }
   return null;
+}
+
+const RECOVERY_TEXT = {
+  recharge: { amount: '实收金额', retry: '按原内容重新提交充值', hint: '顾客的款项确已到账时，按原内容重新提交；没有收款或顾客不再办理时，放弃这笔即可。' },
+  consume: { amount: '应扣金额', retry: '按原内容重新提交消费', hint: '顾客确实消费了这些项目时，按原内容重新提交；登记有误或不再办理时，放弃这笔后重新填写。' },
+  reversal: { amount: '恢复金额', retry: '重新提交撤销', hint: '仍需撤销这张消费单时重新提交；不再撤销时放弃即可。' },
+} as const;
+
+/**
+ * 处理一笔之前留下的「结果待确认」操作：先按原编号查询；
+ * 查不到时由员工选择「按原内容重新提交」（同一编号，安全）或「放弃，重新填写」。
+ */
+export function PendingRecovery({
+  op,
+  state,
+  onCheck,
+  onRetry,
+  onDiscard,
+}: {
+  op: PendingOp;
+  state: OperationState;
+  onCheck: () => void;
+  onRetry: () => void;
+  onDiscard: () => void;
+}) {
+  const text = RECOVERY_TEXT[op.type];
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg border border-yuzu-deep/30 bg-yuzu-tint p-4">
+        <p className="flex items-center gap-2 text-[14.5px] font-bold text-yuzu-deep">
+          <Hourglass className="size-4" />
+          上一笔{PENDING_LABELS[op.type]}结果待确认
+        </p>
+        <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
+          {formatDateTime(op.createdAt)} 由 {op.staffName} 提交，当时没有收到系统答复。处理完这笔之前，请不要重复收款或重复登记。
+        </p>
+        <div className="mt-3 rounded-md bg-card px-3 py-0.5 ring-1 ring-line">
+          <SummaryRow label={text.amount}>
+            <Money cents={op.amount} className="text-[16px]" />
+          </SummaryRow>
+          <SummaryRow label="内容">{op.summary}</SummaryRow>
+          <SummaryRow label="操作编号">
+            <span className="num text-ink-2">{op.key.slice(0, 8)}</span>
+          </SummaryRow>
+        </div>
+      </div>
+
+      {(state.status === 'checking' || state.status === 'idle') && (
+        <Notice tone="info" icon={<Spinner className="size-5 text-lake" />} title="正在按操作编号查询结果…" />
+      )}
+      {state.status === 'submitting' && <Notice tone="info" icon={<Spinner className="size-5 text-lake" />} title="正在按原内容重新提交…" />}
+      {state.status === 'uncertain' && (
+        <Notice
+          tone="warning"
+          icon={<CloudOff className="size-5" />}
+          title="暂时无法确认结果"
+          action={
+            <Button variant="secondary" size="sm" icon={<Search className="size-4" />} onClick={onCheck}>
+              再次查询
+            </Button>
+          }
+        >
+          {UNCERTAIN_REASON[state.reason]}。结果确认之前，这笔操作会一直保留在这里。
+        </Notice>
+      )}
+      {state.status === 'not_found' && (
+        <Notice
+          tone="info"
+          title="系统中没有这笔记录，余额没有变化"
+          action={
+            <>
+              <Button variant="primary" size="sm" icon={<RotateCw className="size-4" />} onClick={onRetry}>
+                {text.retry}
+              </Button>
+              <Button variant="secondary" size="sm" icon={<Undo2 className="size-4" />} onClick={onDiscard}>
+                放弃这笔，重新填写
+              </Button>
+            </>
+          }
+        >
+          {text.hint}重新提交会沿用原操作编号，不会重复入账。
+        </Notice>
+      )}
+      {state.status === 'error' && (
+        <Notice
+          tone="error"
+          title={state.error.message}
+          action={
+            <Button variant="secondary" size="sm" onClick={onDiscard}>
+              放弃这笔，重新填写
+            </Button>
+          }
+        >
+          系统已明确拒绝这笔操作，没有入账。
+        </Notice>
+      )}
+    </div>
+  );
 }
 
 export function SummaryRow({ label, children, className }: { label: ReactNode; children: ReactNode; className?: string }) {

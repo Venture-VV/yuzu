@@ -67,6 +67,12 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
       reply.status(422).send({ error: { code: 'CONSTRAINT', message: '数据校验未通过，操作未生效，请核对后重试' } });
       return;
     }
+    if (e.code === '55P03' || e.code === '57014') {
+      // 等锁或执行超时：事务已回滚，操作没有生效
+      req.log.warn({ err: error }, '记账等待超时');
+      reply.status(409).send({ error: { code: 'BUSY', message: '该会员正在被其他终端操作，本次未生效，请稍后重试' } });
+      return;
+    }
     if (e.code === 'P0001') {
       req.log.warn({ err: error }, '只追加保护拦截');
       reply.status(409).send({ error: { code: 'IMMUTABLE', message: '已入账记录不可修改' } });

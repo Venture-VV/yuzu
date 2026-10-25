@@ -1,19 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Minus, Plus, Trash2, Wallet } from 'lucide-react';
-import { splitDeduction } from '@shared/deduction';
+import { splitDeduction, type DeductionRule, type WalletBalance } from '@shared/deduction';
 import { DEDUCTION_RULE_LABELS } from '@shared/labels';
 import { formatYuan, parseYuan } from '@shared/money';
 import type { MemberDetail, OperationResult, ServiceItem } from '@shared/types';
-import { api } from '../../lib/api';
+import { findPending } from '../../lib/pendingOps';
 import { useCatalog } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
 import { Button, Field, Input, MoneyInput, Notice, PendingBadge, Skeleton } from '../../components/ui';
-import { BalanceChange, FlowFrame, OperationStatus, SuccessHeader, SummaryRow, type Step } from './parts';
-import { useOperation } from './useOperation';
+import { BalanceChange, FlowFrame, OperationStatus, PendingRecovery, SuccessHeader, SummaryRow, type Step } from './parts';
+import { isBusy, isLocked, useOperation } from './useOperation';
 
 interface CustomLine {
   name: string;
@@ -42,7 +42,10 @@ export function ConsumeFlow({
   const [formError, setFormError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // 确认时看到的余额，提交给服务端校验（其他终端同时操作时要求重新确认）
-  const [seenBalance, setSeenBalance] = useState({ principal: member.principalBalance, bonus: member.bonusBalance });
+  const [seenBalance, setSeenBalance] = useState<WalletBalance>({ principal: member.principalBalance, bonus: member.bonusBalance });
+  // 服务端告知扣款规则已调整时，核对页按新规则重新计算，等员工再次确认
+  const [ruleOverride, setRuleOverride] = useState<DeductionRule | null>(null);
+  const activeRule = ruleOverride ?? session.rules.deductionRule;
 
   const groups = useMemo(() => {
     const map = new Map<string, ServiceItem[]>();
@@ -61,8 +64,8 @@ export function ConsumeFlow({
   const total = cartLines.reduce((s, l) => s + l.amount, 0) + (customAmount ?? 0);
   const balance = { principal: member.principalBalance, bonus: member.bonusBalance };
   const available = balance.principal + balance.bonus;
-  const split = total > 0 ? splitDeduction(total, balance, session.rules.deductionRule) : null;
-  const confirmSplit = total > 0 ? splitDeduction(total, seenBalance, session.rules.deductionRule) : null;
+  const split = total > 0 ? splitDeduction(total, balance, activeRule) : null;
+  const confirmSplit = total > 0 ? splitDeduction(total, seenBalance, activeRule) : null;
 
   const add = (id: number, delta: number) =>
     setCart((prev) => {
@@ -73,9 +76,11 @@ export function ConsumeFlow({
       return next;
     });
 
-  const submitFn = useCallback(
-    (idempotencyKey: string) =>
-      api.post<OperationResult>('/api/consumptions', {
+  const op = useOperation({
+    type: 'consume',
+    url: '/api/consumptions',
+    build: (idempotencyKey) => ({
+      body: {
         idempotencyKey,
         memberId: member.id,
         lines: [...cart].map(([itemId, quantity]) => ({ itemId, quantity })),
@@ -83,20 +88,44 @@ export function ConsumeFlow({
         note,
         expectedTotal: total,
         expectedBalance: seenBalance,
-      }),
-    [member.id, cart, custom, customAmount, note, total, seenBalance],
-  );
-  const op = useOperation(submitFn);
+        // 员工在核对页确认的本金 / 赠金扣款构成，服务端必须按此入账
+        expectedSplit: confirmSplit?.ok ? { principal: confirmSplit.principal, bonus: confirmSplit.bonus } : undefined,
+      },
+      meta: {
+        memberId: member.id,
+        memberName: member.name,
+        amount: total,
+        summary: [
+          ...cartLines.map((l) => `${l.item.name}${l.qty > 1 ? ` ×${l.qty}` : ''}`),
+          ...(custom && customAmount ? [custom.name.trim() || '其他消费'] : []),
+        ].join('、'),
+        staffName: session.staff.displayName,
+      },
+    }),
+  });
+
+  // 这位会员有之前留下的待确认消费：先处理它，再开始新的一笔
+  useEffect(() => {
+    const pending = findPending(member.id, 'consume');
+    if (pending) op.adopt(pending);
+  }, [member.id]); // 只在打开面板（或切换会员）时检查一次
 
   useEffect(() => {
     const s = op.state;
     if (s.status === 'success') setStep('result');
-    if (s.status !== 'error') return;
+    if (s.status !== 'error' || op.adopted) return;
     if (s.error.code === 'BALANCE_CHANGED') {
       void qc.invalidateQueries({ queryKey: ['member', member.id] });
       void qc.invalidateQueries({ queryKey: ['activity', member.id] });
       setNotice('会员余额刚刚有变化（可能其他终端在操作），已刷新为最新余额，请再次核对。');
       setStep('form');
+      op.reset();
+    } else if (s.error.code === 'SPLIT_CHANGED') {
+      const details = s.error.details as { rule?: DeductionRule; balance?: WalletBalance } | undefined;
+      void qc.invalidateQueries({ queryKey: ['session'] });
+      if (details?.rule) setRuleOverride(details.rule);
+      if (details?.balance) setSeenBalance(details.balance);
+      setNotice(`扣款规则刚刚调整为「${DEDUCTION_RULE_LABELS[details?.rule ?? activeRule].title}」，本金 / 赠金的扣款构成已更新，请核对后再次确认。`);
       op.reset();
     } else if (s.error.code === 'PRICE_CHANGED' || s.error.code === 'ITEM_UNAVAILABLE') {
       void qc.invalidateQueries({ queryKey: ['catalog'] });
@@ -104,7 +133,7 @@ export function ConsumeFlow({
       setStep('form');
       op.reset();
     }
-  }, [op.state, qc, member.id, op.reset]);
+  }, [op.state, op.adopted, qc, member.id, op.reset, activeRule]);
 
   const toConfirm = () => {
     if (total <= 0) return setFormError('请至少选择一个消费项目');
@@ -113,14 +142,23 @@ export function ConsumeFlow({
     if (split && !split.ok) return setFormError(`余额不足，还差 ${formatYuan(split.shortfall)}`);
     setFormError(null);
     setNotice(null);
+    setRuleOverride(null);
     setSeenBalance(balance);
     op.reset();
     setStep('confirm');
   };
 
-  const busy = op.state.status === 'submitting' || op.state.status === 'checking';
-  const locked = op.state.status === 'uncertain' || op.state.status === 'checking' || op.state.status === 'not_found';
-  const rule = DEDUCTION_RULE_LABELS[session.rules.deductionRule];
+  const busy = isBusy(op.state);
+  const locked = isLocked(op.state);
+  const rule = DEDUCTION_RULE_LABELS[activeRule];
+
+  if (op.adopted && op.state.status !== 'success') {
+    return (
+      <FlowFrame title="登记消费" tone="yuzu" member={member} step="confirm" onClose={onClose} closeDisabled={op.state.status === 'submitting'}>
+        <PendingRecovery op={op.adopted} state={op.state} onCheck={op.check} onRetry={op.retry} onDiscard={op.discard} />
+      </FlowFrame>
+    );
+  }
 
   if (step === 'result' && op.state.status === 'success') {
     const r = op.state.result as Extract<OperationResult, { type: 'consume' }>;
@@ -183,6 +221,7 @@ export function ConsumeFlow({
         member={member}
         step="confirm"
         onClose={onClose}
+        closeDisabled={op.state.status === 'submitting'}
         footer={
           <div className="flex gap-2.5">
             <Button
@@ -203,6 +242,7 @@ export function ConsumeFlow({
           </div>
         }
       >
+        {notice && <Notice tone="warning" className="mb-4" title={notice} />}
         <div className="rounded-lg border border-line bg-card p-4">
           <p className="text-[12.5px] font-semibold text-ink-3">应扣金额</p>
           <Money cents={total} className="mt-1 text-[34px] leading-none font-bold text-ink" />
@@ -244,7 +284,7 @@ export function ConsumeFlow({
         <p className="mt-5 mb-2 text-[13px] font-bold text-ink-2">扣款后余额</p>
         <BalanceChange before={seenBalance} after={after} />
         <div className="mt-4">
-          <OperationStatus state={op.state} onCheck={op.check} onRetry={op.submit} />
+          <OperationStatus state={op.state} onCheck={op.check} onRetry={op.retry} />
         </div>
       </FlowFrame>
     );

@@ -11,7 +11,7 @@ import { businessDateOf } from '@shared/business-date';
 import { checkPasswordStrength, generateTempPassword, hashPassword } from './auth/password';
 import { destroyStaffSessions } from './auth/session';
 import { loadConfig } from './config';
-import { createSql } from './db';
+import { createSql, readSnapshot } from './db';
 import { writeAudit } from './lib/audit';
 import { migrate } from './migrate';
 import { seedDemo, DEMO_PASSWORD } from './seed';
@@ -80,7 +80,7 @@ async function main() {
       case 'check': {
         const settings = await loadSettings(sql);
         const today = businessDateOf(new Date(), config.timezone, settings.businessDayStartHour);
-        const summary = await computeSettlement(sql, today, today);
+        const summary = await readSnapshot(sql, (tx) => computeSettlement(tx, today, today));
         for (const c of summary.checks) console.log(`${c.ok ? '✓' : '✗'} ${c.label}：${c.detail}`);
         if (summary.checks.some((c) => !c.ok)) process.exitCode = 1;
         break;

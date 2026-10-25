@@ -7,6 +7,7 @@ import { api } from '../lib/api';
 import { useCan, useSession } from '../lib/session';
 import { cn } from '../lib/utils';
 import { LogoMark } from './Brand';
+import { PendingOpsBanner } from './PendingOpsBanner';
 import { Badge } from './ui';
 
 const NAV = [
@@ -51,7 +52,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="flex-1" />
         <UserMenu />
       </nav>
-      <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <PendingOpsBanner />
+        {children}
+      </div>
     </div>
   );
 }

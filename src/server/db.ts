@@ -27,6 +27,14 @@ export function createSql(databaseUrl: string, options: { max?: number } = {}): 
   }) as unknown as Sql;
 }
 
+/**
+ * 在同一个数据库快照里执行一组只读查询（REPEATABLE READ）。
+ * 日结要分多条 SQL 汇总单据、流水与余额，必须读同一时刻的数据，否则营业中查询会出现假差异。
+ */
+export function readSnapshot<T>(sql: Sql, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return sql.begin('isolation level repeatable read read only', fn) as Promise<T>;
+}
+
 /** PostgreSQL 唯一约束冲突 */
 export function isUniqueViolation(error: unknown, constraint?: string): boolean {
   const e = error as { code?: string; constraint_name?: string };
