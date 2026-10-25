@@ -1,2 +1,216 @@
-# yuzu
-轻量化智能ai企业模块化管理系统
+# 浴族 yuzu · 门店经营系统
+
+面向自有汤泉门店的会员与账务工作台。首版聚焦一条完整闭环：
+
+**员工登录 → 查找或新建会员 → 确认充值收款 → 消费扣款 → 必要时撤销误扣 → 查看流水与日结**
+
+![会员工作台](docs/screenshots/desktop-workbench.png)
+
+> 当前版本 v0.1.0，可在门店局域网内试用。所有经营规则均为**模拟规则（待确认）**，演示数据为合成数据。正式启用前请先完成 [待确认经营事项](docs/PENDING_DECISIONS.md)。
+
+---
+
+## 目录
+
+1. [已完成范围](#已完成范围)
+2. [技术选择](#技术选择)
+3. [本地开发](#本地开发)
+4. [试用 / 正式部署](#试用--正式部署)
+5. [设置管理员](#设置管理员)
+6. [更新、备份与恢复](#更新备份与恢复)
+7. [账务设计要点](#账务设计要点)
+8. [测试](#测试)
+9. [目录结构](#目录结构)
+10. [后续清单](#后续清单)
+
+相关文档：[Mac mini 部署手册](docs/DEPLOY_MAC_MINI.md) · [待确认经营事项](docs/PENDING_DECISIONS.md) · [设计语言](docs/DESIGN.md) · [变更记录](CHANGELOG.md)
+
+---
+
+## 已完成范围
+
+| 能力 | 已实现 |
+| --- | --- |
+| 员工与权限 | 店主 / 店员两类岗位；账号密码登录、首次登录强制改密、登录失败锁定、停用即下线；权限矩阵集中在 `src/shared/permissions.ts`（待确认） |
+| 会员档案 | 手机号 / 后四位 / 姓名 / 会员号搜索；新建与编辑；本金、赠金、合计分层展示；余额记录时间线 |
+| 充值 | 选择套餐或自定义金额 → 选收款方式 → 核对并勾选「已核实到账」后才入账；本金与赠金分别记录，保留收款方式与备注 |
+| 消费 | 选择项目（价格以服务端为准）或输入其他金额 → 核对扣款构成与扣后余额 → 扣款并生成消费单；余额不足时拦截并提示差额 |
+| 误扣处理 | 店主整单撤销，按原单的本金 / 赠金构成恢复；原单保留并标记已撤销，记录原因、经办人与撤销单号 |
+| 流水与日结 | 按营业日查看、筛选、导出 CSV；日结分开展示充值实收、储值消费、赠金与撤销；四项余额核对；撤销、跨日撤销、重复提交、余额不足等异常记录；店主确认日结并保存快照 |
+| 异常与恢复 | 重复点击、超时重试、多人同时操作不会重复记账或透支；超时后显示「结果待确认」，可按操作编号查回原单 |
+| 管理 | 员工账号、充值套餐、消费项目、经营规则（扣款顺序、营业日切换时间、单笔上限）、操作审计 |
+| 部署运维 | Docker Compose（应用 + PostgreSQL + 自动备份）；启动自动迁移；备份 / 恢复 / 更新脚本；前端资源全部本地打包，外网中断不影响局域网使用 |
+
+**合成验收案例已通过**（集成测试 + 浏览器实操 + 已部署环境各跑一遍）：充值本金 100 → 消费 30 → 余额 70 → 撤销 → 恢复 100；本金 + 赠金场景按三种候选扣款规则分别验证。
+
+| 门店电脑 | 平板 |
+| --- | --- |
+| ![充值核对](docs/screenshots/desktop-recharge-confirm.png) | ![平板充值](docs/screenshots/tablet-recharge.png) |
+| ![日结](docs/screenshots/desktop-settlement.png) | ![平板会员](docs/screenshots/tablet-member.png) |
+
+更多截图见 [docs/screenshots](docs/screenshots)。
+
+## 技术选择
+
+| 部分 | 选择 | 理由 |
+| --- | --- | --- |
+| 语言 | TypeScript（前后端统一） | 一个人维护只需一种语言；金额计算、扣款规则、权限矩阵在前后端共用同一份代码，界面预览与实际入账算法一致 |
+| 后端 | Node.js 22 + Fastify 5 | 成熟、轻量、启动快；单进程即可满足单店并发 |
+| 数据库 | PostgreSQL 16 | 事务、行锁、约束和触发器可靠，适合「单据、余额、流水一起成功或一起失败」 |
+| 数据访问 | postgres.js + 手写 SQL 迁移 | 账务 SQL 清晰可审阅，不隐藏锁与事务细节 |
+| 前端 | React 19 + Vite + Tailwind CSS 4 + TanStack Query | 生态成熟，构建产物为静态文件，由后端统一托管 |
+| 运行 | Docker Compose | Mac mini（Apple Silicon）与 Linux 一致；重启自动恢复；数据卷持久保存 |
+
+前端字体（Plus Jakarta Sans、Instrument Serif）与图标全部随应用打包；中文使用设备自带字体（苹方 / 微软雅黑）。
+
+## 本地开发
+
+需要：Node.js 22+、Docker（只用来跑数据库）。
+
+```bash
+npm install
+docker compose -f compose.dev.yaml up -d      # 启动开发数据库（同时创建测试库 yuzu_test）
+cp .env.example .env                          # 然后把 .env 改成下面这几行
+```
+
+开发用 `.env`：
+
+```ini
+APP_ENV=development
+DATABASE_URL=postgres://yuzu:yuzu_dev_only@127.0.0.1:5432/yuzu_dev
+PORT=8080
+```
+
+```bash
+npm run seed      # 写入合成演示数据（会员 25 位 + 最近 7 天业务）
+npm run dev       # 后端 :8080 + 前端 :5173（热更新），浏览器打开 http://localhost:5173
+```
+
+演示账号：店主 `linlan`、店员 `xiaozhou` / `ajie`，密码均为 `yuzu2026`（仅演示数据存在时登录页会提示）。
+
+常用命令：
+
+| 命令 | 作用 |
+| --- | --- |
+| `npm run typecheck` | 类型检查 |
+| `npm test` | 后端集成测试（使用 yuzu_test 库，会清空该库） |
+| `npm run build && npm start` | 构建并以生产方式运行 |
+| `npm run e2e` | 浏览器验收（需先启动应用并写入演示数据） |
+| `npm run cli -- check` | 核对全部会员余额与流水 |
+
+## 试用 / 正式部署
+
+详细步骤见 **[Mac mini 部署手册](docs/DEPLOY_MAC_MINI.md)**，简要流程：
+
+```bash
+git clone https://github.com/Venture-VV/yuzu.git && cd yuzu
+git checkout v0.1.0                 # 正式环境只部署经过验证的版本标签
+cp .env.example .env                # 修改数据库密码、初始店主、备份目录
+docker compose up -d --build
+docker compose ps                   # app / db 显示 healthy 即可
+```
+
+门店电脑或平板浏览器访问 `http://<Mac mini 局域网 IP>:8080`。
+
+**开发、试用、正式三套环境互相隔离**：各自使用独立的 `.env` 与数据库卷。在同一台机器上并行时，用不同的项目名和端口：
+
+```bash
+docker compose --env-file .env.trial -p yuzu-trial up -d --build   # .env.trial 里设置 APP_PORT=8081
+```
+
+## 设置管理员
+
+二选一：
+
+1. **首次启动自动创建**：在 `.env` 设置 `INIT_OWNER_USERNAME` / `INIT_OWNER_PASSWORD`（至少 8 位，含字母和数字）。仅在数据库里还没有任何员工时生效，该店主首次登录必须修改密码。
+2. **命令行创建**：
+   ```bash
+   docker compose exec app node dist/server/cli.js create-owner boss --name 林岚
+   ```
+   会输出一个临时密码。
+
+之后添加店员、重置密码、停用账号都在页面「管理 → 员工」中完成，无需进入终端。
+
+店主忘记密码时：
+
+```bash
+docker compose exec app node dist/server/cli.js reset-password boss
+```
+
+## 更新、备份与恢复
+
+**更新到新版本**（会先自动备份）：
+
+```bash
+./scripts/update.sh v0.2.0
+```
+
+应用启动时自动执行数据库迁移；更新失败时 `git checkout <上个版本>` 后再执行一次即可回退。
+
+**自动备份**：`backup` 容器每天 `BACKUP_HOUR` 点做一次完整备份（`pg_dump` 自定义格式），写入 `BACKUP_DIR`，保留 `BACKUP_KEEP_DAYS` 天。请把 `BACKUP_DIR` 指向外置硬盘或另一块磁盘，并定期复制一份到店外。
+
+**手动备份**：
+
+```bash
+./scripts/backup.sh            # 生成 BACKUP_DIR/yuzu-日期时间-manual.dump 并校验可读
+```
+
+**恢复**：
+
+```bash
+./scripts/restore.sh /Volumes/YuzuBackup/yuzu/yuzu-20261025-040000.dump
+```
+
+脚本会先备份当前数据，再停止应用、重建数据库、导入备份、启动应用，最后自动核对余额与流水。建议每月做一次恢复演练（可在另一台电脑上进行）。
+
+## 账务设计要点
+
+- **金额一律为整数「分」**，前后端都不使用浮点数计算金额。
+- **本金与赠金分账**：会员表分别保存本金、赠金余额；充值的实收金额等额计入本金，赠送部分计入赠金；数据库约束保证两者都不会小于 0。
+- **一笔操作 = 一个事务**：单据、流水、余额在同一事务内写入，要么全部成功，要么全部不生效。
+- **唯一的记账来源是余额流水表**（`ledger_entries`）：每笔余额变化一行，记录变动前后余额、关联单据和经办人。日结时逐项核对：单据合计 = 流水合计、期初 + 变动 = 期末、每笔流水余额连续、会员余额 = 全部流水之和。
+- **只追加、不修改**：充值单、撤销单、流水、审计记录由数据库触发器禁止修改和删除；消费单只允许「已完成 → 已撤销」这一种变化。纠错只能通过新增撤销记录完成。
+- **防重复与防透支**：每次提交带一个操作编号（幂等键）；服务端先锁定会员行，再检查该编号是否已处理，重复提交直接返回第一次的结果；并发扣款在锁内串行执行，余额不足即拒绝。
+- **价格与余额以服务端为准**：提交时带上员工确认时看到的应扣金额与会员余额，若期间价格调整或其他终端改动了余额，会要求重新确认。
+- **撤销**：整单撤销，按原单记录的本金 / 赠金构成恢复，不受之后扣款规则调整影响；每张消费单最多撤销一次。充值退款不在首版范围内。
+- **超时可查**：页面超时或断网时显示「结果待确认」，用同一个操作编号查询服务端是否已入账，查不到再安全地重新提交。
+
+## 测试
+
+| 层级 | 位置 | 覆盖 |
+| --- | --- | --- |
+| 集成测试（34 项） | `tests/` | 验收案例、三种扣款规则、撤销恢复构成、重复提交、10 路并发同键、并发扣款不透支、并发撤销只恢复一次、余额变动需重新确认、只追加保护、权限、首次改密、停用下线、跨站请求拦截、跨日撤销与日结核对、日结快照变动提示、CSV 导出 |
+| 浏览器验收（6 项，门店电脑 / 平板横屏 / 平板竖屏） | `e2e/` | 店员充值 + 消费、店主撤销 + 日结、请求超时后查回原单、店员权限、外网中断时的本地资源、键盘快捷键 |
+
+```bash
+npm test                    # 需要开发数据库在运行
+npm run seed && npm start   # 另开终端
+npm run e2e                 # 首次运行前执行 npx playwright install chromium
+```
+
+## 目录结构
+
+```
+src/
+  shared/          前后端共用：金额、扣款规则、权限矩阵、营业日、接口类型
+  server/
+    migrations/    SQL 迁移（按文件名顺序执行）
+    auth/          密码、会话、权限守卫、登录接口
+    modules/       members 会员 · wallet 充值/消费/撤销 · ledger 流水 · settlement 日结
+                   staff 员工 · catalog 套餐与项目 · settings 经营规则 · audit 审计
+    cli.ts         运维命令：migrate / create-owner / reset-password / seed-demo / check
+    seed.ts        合成演示数据
+  client/
+    components/    设计系统组件（按钮、表单、金额、对话框、品牌插画…）
+    features/      auth · workbench 工作台 · flows 充值/消费/撤销流程 · ledger · settlement · admin
+tests/             后端集成测试
+e2e/               浏览器验收
+scripts/           backup / restore / update / 备份循环
+docs/              部署手册、待确认事项、设计语言、截图
+```
+
+## 后续清单
+
+按试点反馈排序，首版未包含：次卡、第三方平台核销补录、充值退款、小票打印、历史数据迁移（旧 EBC 只读）、会员停用 / 合并、多门店、顾客端（小程序 / 线上菜单）、通用优惠与权益引擎、会员等级、库存采购、AI 辅助。
+
+详见 [待确认经营事项](docs/PENDING_DECISIONS.md) 末尾的后续事项。

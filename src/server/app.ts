@@ -18,6 +18,14 @@ import { registerSettlementRoutes } from './modules/settlement';
 import { registerStaffRoutes } from './modules/staff';
 import { registerWalletRoutes } from './modules/wallet';
 
+function originHost(origin: string): string | null {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return null; // 例如 "null"，按跨站处理
+  }
+}
+
 export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInstance> {
   const app = Fastify({
     logger: { level: config.logLevel },
@@ -34,7 +42,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
     // 修改类请求必须来自本站页面（防止跨站请求伪造）
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       const origin = req.headers.origin;
-      if (origin && new URL(origin).host !== req.headers.host) {
+      if (origin && originHost(origin) !== req.headers.host) {
         throw new AppError(403, 'BAD_ORIGIN', '请求来源不正确');
       }
     }
@@ -93,7 +101,6 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   if (hasClient) {
     await app.register(fastifyStatic, {
       root: staticDir,
-      wildcard: false,
       setHeaders(reply, path) {
         reply.header('cache-control', path.includes('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache');
       },

@@ -29,7 +29,8 @@ export const MemberList = forwardRef<
   const [cursor, setCursor] = useState(0);
   const list = members.data ?? [];
 
-  useEffect(() => setCursor(0), [query]);
+  // 结果变化时高亮回到第一位，避免回车选中旧列表里鼠标悬停的位置
+  useEffect(() => setCursor(0), [query, members.data]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown') {
@@ -38,9 +39,9 @@ export const MemberList = forwardRef<
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setCursor((c) => Math.max(0, c - 1));
-    } else if (e.key === 'Enter' && list[cursor]) {
+    } else if (e.key === 'Enter' && list.length > 0) {
       e.preventDefault();
-      onSelect(list[cursor]!);
+      onSelect(list[Math.min(cursor, list.length - 1)]!);
     } else if (e.key === 'Escape' && q) {
       e.preventDefault();
       setQ('');
@@ -117,7 +118,7 @@ export const MemberList = forwardRef<
                 role="option"
                 aria-selected={selected}
                 onClick={() => onSelect(m)}
-                onMouseEnter={() => setCursor(i)}
+                onPointerMove={(e) => e.pointerType === 'mouse' && setCursor(i)}
                 className={cn(
                   'relative mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors',
                   selected ? 'bg-card shadow-lift ring-1 ring-line' : i === cursor && query ? 'bg-paper-2' : 'hover:bg-paper-2/70',

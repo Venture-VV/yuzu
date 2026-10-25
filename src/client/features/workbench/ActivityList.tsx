@@ -30,7 +30,7 @@ export function ActivityRow({
   return (
     <div
       className={cn(
-        'group flex items-start gap-3 rounded-lg px-3 py-3 transition-colors',
+        'group flex items-start gap-3 px-3 py-3 transition-colors',
         onOpen && 'cursor-pointer hover:bg-paper-2/70',
       )}
       onClick={onOpen ? () => onOpen(row) : undefined}

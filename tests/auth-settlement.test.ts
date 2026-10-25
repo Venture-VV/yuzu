@@ -69,6 +69,13 @@ describe('登录与权限', () => {
       payload: { name: '跨站', phone: '19912345678' },
     });
     expect(res.statusCode).toBe(403);
+    const nullOrigin = await ctx.app.inject({
+      method: 'POST',
+      url: '/api/members',
+      headers: { cookie: ctx.clerk, origin: 'null', host: 'localhost' },
+      payload: { name: '跨站', phone: '19912345678' },
+    });
+    expect(nullOrigin.statusCode).toBe(403);
   });
 
   it('同一手机号不能重复建档', async () => {
