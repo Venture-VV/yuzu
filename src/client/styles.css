@@ -1,0 +1,191 @@
+@import 'tailwindcss';
+
+/*
+ * 浴族设计语言 · 城市度假 × 山野自然 × 年轻当代
+ * 米白纸感底色 + 松林绿主色 + 柚黄点缀；石色线条与柔和阴影；数字一律等宽对齐。
+ * 本金 = 松林绿，赠金 = 柚黄（深），实收 = 湖水青，撤销/危险 = 陶土红。
+ */
+@theme {
+  --color-paper: #f6f3ec;
+  --color-paper-2: #efebe2;
+  --color-paper-3: #e8e3d7;
+  --color-card: #fffdf8;
+  --color-line: #e4ded1;
+  --color-line-strong: #d3cbbb;
+
+  --color-ink: #1c231f;
+  --color-ink-2: #4a524c;
+  --color-ink-3: #808780;
+  --color-ink-4: #b2b6ae;
+
+  --color-pine: #24493a;
+  --color-pine-hover: #1a3a2d;
+  --color-pine-soft: #dfe9e2;
+  --color-pine-tint: #eef4ef;
+
+  --color-moss: #6a7c44;
+  --color-moss-soft: #e9eddb;
+
+  --color-yuzu: #f2c230;
+  --color-yuzu-hover: #e8b51c;
+  --color-yuzu-deep: #a87508;
+  --color-yuzu-soft: #fcf0c8;
+  --color-yuzu-tint: #fdf7e3;
+
+  --color-ember: #dc7432;
+  --color-ember-soft: #fae4d4;
+
+  --color-clay: #b0503a;
+  --color-clay-hover: #973f2b;
+  --color-clay-soft: #f6e0d8;
+
+  --color-lake: #2c6066;
+  --color-lake-soft: #dcebea;
+
+  --font-sans:
+    'Plus Jakarta Sans Variable', 'PingFang SC', 'HarmonyOS Sans SC', 'MiSans', 'Microsoft YaHei UI',
+    'Microsoft YaHei', 'Noto Sans CJK SC', 'Source Han Sans SC', system-ui, sans-serif;
+  --font-display: 'Instrument Serif', 'Songti SC', 'STSong', 'Noto Serif CJK SC', serif;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+
+  --shadow-card: 0 1px 0 rgb(28 35 31 / 0.03), 0 1px 3px rgb(28 35 31 / 0.05);
+  --shadow-lift: 0 2px 4px rgb(28 35 31 / 0.04), 0 10px 24px -14px rgb(28 35 31 / 0.22);
+  --shadow-pop: 0 2px 6px rgb(28 35 31 / 0.06), 0 24px 48px -20px rgb(28 35 31 / 0.32);
+
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --animate-rise: rise 0.32s var(--ease-out-soft) both;
+  --animate-fade: fade 0.2s ease-out both;
+  --animate-slide-in: slide-in 0.34s var(--ease-out-soft) both;
+  --animate-pop: pop 0.42s var(--ease-out-soft) both;
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes slide-in {
+    from { opacity: 0; transform: translateX(24px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes pop {
+    0% { opacity: 0; transform: scale(0.6); }
+    60% { opacity: 1; transform: scale(1.06); }
+    100% { transform: scale(1); }
+  }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.55;
+    font-feature-settings: 'ss01';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: var(--color-yuzu-soft);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-pine);
+    outline-offset: 2px;
+  }
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-ink-4);
+  }
+  /* 数字输入框不显示上下箭头 */
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}
+
+@layer utilities {
+  /* 金额与单号：等宽数字，便于纵向对齐核对 */
+  .num {
+    font-variant-numeric: tabular-nums lining-nums;
+    font-feature-settings: 'tnum', 'lnum';
+    letter-spacing: -0.01em;
+  }
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+  .paper-grain {
+    background-image:
+      radial-gradient(120% 80% at 0% 0%, rgb(242 194 48 / 0.10), transparent 55%),
+      radial-gradient(90% 70% at 100% 100%, rgb(36 73 58 / 0.07), transparent 60%);
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* 撤销后的消费单金额划线 */
+.struck {
+  text-decoration: line-through;
+  text-decoration-color: rgb(176 80 58 / 0.55);
+  text-decoration-thickness: 1.5px;
+}
+
+/* 登录页蒸汽缓慢上升 */
+@keyframes steam {
+  0% { transform: translateY(8px); opacity: 0; }
+  30% { opacity: 0.75; }
+  100% { transform: translateY(-36px); opacity: 0; }
+}
+.steam path {
+  animation: steam 6s ease-in-out infinite;
+}
+.steam path:nth-child(2) { animation-delay: 2s; }
+.steam path:nth-child(3) { animation-delay: 4s; }
+
+/* 成功勾选描线 */
+@keyframes draw {
+  to { stroke-dashoffset: 0; }
+}
+.draw-check {
+  stroke-dasharray: 32;
+  stroke-dashoffset: 32;
+  animation: draw 0.5s 0.15s var(--ease-out-soft) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

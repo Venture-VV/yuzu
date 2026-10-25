@@ -1,0 +1,473 @@
+import { useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  ArrowRight,
+  BadgeCheck,
+  CircleAlert,
+  CircleCheck,
+  CircleX,
+  Copy,
+  Download,
+  Hourglass,
+  Lock,
+  Undo2,
+  WalletMinimal,
+} from 'lucide-react';
+import { describeDate, PAYMENT_METHOD_LABELS } from '@shared/labels';
+import type { SettlementAnomaly, SettlementSummary } from '@shared/types';
+import { api, errorMessage } from '../../lib/api';
+import { qk, useSettlement } from '../../lib/queries';
+import { useCan, useSession } from '../../lib/session';
+import { cn, downloadUrl, formatDateTime, formatTime } from '../../lib/utils';
+import { PageHeader } from '../../components/AppShell';
+import { DateNav } from '../../components/DateNav';
+import { EmptyState } from '../../components/EmptyState';
+import { Money } from '../../components/Money';
+import { Dialog } from '../../components/Overlay';
+import { useToast } from '../../components/Toast';
+import { Badge, Button, Card, ConfirmCheck, Field, Notice, PendingBadge, SectionTitle, Skeleton, Textarea } from '../../components/ui';
+
+export function SettlementPage() {
+  const session = useSession();
+  const can = useCan();
+  const navigate = useNavigate();
+  const params = useParams();
+  const historyAllowed = can('ledger.readHistory');
+  const date = historyAllowed ? (params.date ?? session.today) : session.today;
+  const s = useSettlement(date);
+  const [closing, setClosing] = useState(false);
+  const d = describeDate(date);
+
+  return (
+    <>
+      <PageHeader
+        title="日结"
+        subtitle="先看清当天，再定位明细与异常"
+        actions={
+          <div className="flex gap-2">
+            {can('ledger.export') && (
+              <Button size="sm" variant="secondary" icon={<Download className="size-4" />} onClick={() => downloadUrl(`/api/settlements/${date}/export`)}>
+                导出
+              </Button>
+            )}
+            {can('settlement.close') && s.data && !s.data.isFuture && (
+              <Button size="sm" variant="primary" icon={<BadgeCheck className="size-4" />} onClick={() => setClosing(true)}>
+                {s.data.closed ? '重新确认日结' : '确认日结'}
+              </Button>
+            )}
+          </div>
+        }
+      />
+      <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-line px-5 py-3 md:px-7">
+        <DateNav value={date} today={session.today} locked={!historyAllowed} onChange={(v) => navigate(v === session.today ? '/settlement' : `/settlement/${v}`)} />
+        {s.data && <CloseStatus s={s.data} />}
+        <span className="flex-1" />
+        <span className="flex items-center gap-1.5 text-[12px] text-ink-3">
+          营业日每天 {String(session.rules.businessDayStartHour).padStart(2, '0')}:00 切换 <PendingBadge />
+        </span>
+      </div>
+
+      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-[1180px] px-5 py-6 md:px-7">
+          {s.error ? (
+            <Notice tone="error" title={errorMessage(s.error)} />
+          ) : s.isPending || !s.data ? (
+            <div className="grid gap-4 lg:grid-cols-3">
+              <Skeleton className="h-24 lg:col-span-3" />
+              <Skeleton className="h-48" />
+              <Skeleton className="h-48" />
+              <Skeleton className="h-48" />
+            </div>
+          ) : (
+            <Summary s={s.data} dayLabel={`${d.md} ${d.weekday}`} />
+          )}
+        </div>
+      </div>
+
+      {s.data && <CloseDialog open={closing} onClose={() => setClosing(false)} s={s.data} />}
+    </>
+  );
+}
+
+function CloseStatus({ s }: { s: SettlementSummary }) {
+  if (s.closed) {
+    return s.closed.changedSinceClose ? (
+      <Badge tone="ember" icon={<CircleAlert className="size-3.5" />}>
+        日结后有变动
+      </Badge>
+    ) : (
+      <Badge tone="pine" icon={<Lock className="size-3" />}>
+        已日结 · {s.closed.closedByName} {formatTime(s.closed.closedAt)}
+      </Badge>
+    );
+  }
+  return s.isToday ? (
+    <Badge tone="yuzu" icon={<Hourglass className="size-3" />}>
+      营业中
+    </Badge>
+  ) : (
+    <Badge tone="neutral">未确认日结</Badge>
+  );
+}
+
+function Summary({ s, dayLabel }: { s: SettlementSummary; dayLabel: string }) {
+  const allOk = s.checks.every((c) => c.ok);
+  const empty = s.recharge.count + s.consume.count + s.reversal.count === 0;
+
+  return (
+    <div className="space-y-5">
+      {/* 核对结论 */}
+      <div
+        className={cn(
+          'flex flex-wrap items-center gap-4 rounded-xl border px-5 py-4',
+          allOk ? 'border-pine/15 bg-pine text-paper' : 'border-clay/30 bg-clay-soft text-clay',
+        )}
+      >
+        <span className={cn('flex size-11 items-center justify-center rounded-full', allOk ? 'bg-white/12' : 'bg-clay text-paper')}>
+          {allOk ? <CircleCheck className="size-6" /> : <CircleX className="size-6" />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[17px] font-bold">{allOk ? `${dayLabel} · 余额与流水核对一致` : `${dayLabel} · 核对发现差异`}</p>
+          <p className={cn('text-[13px]', allOk ? 'text-paper/70' : 'text-ink-2')}>
+            {allOk
+              ? `${s.checks.length} 项核对全部通过：单据、流水、期初期末与会员余额相互吻合。`
+              : '请先查看下方核对项与异常记录，必要时联系维护人员。'}
+          </p>
+        </div>
+        {s.closed?.note && (
+          <p className={cn('max-w-xs text-[12.5px]', allOk ? 'text-paper/80' : 'text-ink-2')}>日结备注：{s.closed.note}</p>
+        )}
+      </div>
+
+      {s.closed?.changedSinceClose && (
+        <Notice tone="warning" title="日结确认后又有新的业务">
+          {s.closed.closedByName} 于 {formatDateTime(s.closed.closedAt)} 确认过日结（第 {s.closed.revision} 次）。之后数据有变化，建议核对后重新确认。
+        </Notice>
+      )}
+
+      {empty && (
+        <Card>
+          <EmptyState art="calm" title="这个营业日没有充值、消费或撤销" description="余额核对仍会照常进行。" />
+        </Card>
+      )}
+
+      {/* 三类金额分开展示：实收现金、储值消费、赠金 */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="overflow-hidden">
+          <div className="border-b border-line px-5 pt-4 pb-3">
+            <p className="flex items-center gap-2 text-[13px] font-bold text-ink-2">
+              <span className="size-2 rounded-full bg-lake" />
+              充值实收
+            </p>
+            <Money cents={s.recharge.paid} className="mt-1.5 text-[32px] leading-none font-bold text-lake" />
+            <p className="mt-1.5 text-[12.5px] text-ink-3">{s.recharge.count} 笔充值 · 实际收到的钱</p>
+          </div>
+          <div className="space-y-2.5 px-5 py-4">
+            {s.recharge.byMethod.length === 0 ? (
+              <p className="text-[13px] text-ink-4">无收款</p>
+            ) : (
+              s.recharge.byMethod.map((m) => (
+                <div key={m.method}>
+                  <div className="flex items-center justify-between text-[13px]">
+                    <span className="font-semibold text-ink-2">
+                      {PAYMENT_METHOD_LABELS[m.method]} <span className="font-normal text-ink-3">· {m.count} 笔</span>
+                    </span>
+                    <Money cents={m.amount} className="font-bold" />
+                  </div>
+                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-paper-2">
+                    <div className="h-full rounded-full bg-lake/70" style={{ width: `${s.recharge.paid ? (m.amount / s.recharge.paid) * 100 : 0}%` }} />
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
+
+        <Card className="overflow-hidden">
+          <div className="border-b border-line px-5 pt-4 pb-3">
+            <p className="flex items-center gap-2 text-[13px] font-bold text-ink-2">
+              <WalletMinimal className="size-4 text-ink-3" />
+              储值消费
+            </p>
+            <Money cents={s.consume.total} className="mt-1.5 text-[32px] leading-none font-bold text-ink" />
+            <p className="mt-1.5 text-[12.5px] text-ink-3">
+              {s.consume.count} 笔 · 其中 {s.consume.reversedCount} 笔已撤销
+            </p>
+          </div>
+          <div className="px-5 py-4">
+            <SplitBar principal={s.consume.principal} bonus={s.consume.bonus} />
+            <div className="mt-3 grid grid-cols-2 gap-3 text-[13px]">
+              <div>
+                <p className="text-ink-3">扣本金</p>
+                <Money cents={s.consume.principal} className="font-bold text-pine" />
+              </div>
+              <div>
+                <p className="text-ink-3">扣赠金</p>
+                <Money cents={s.consume.bonus} className="font-bold text-yuzu-deep" />
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="overflow-hidden">
+          <div className="border-b border-line px-5 pt-4 pb-3">
+            <p className="flex items-center gap-2 text-[13px] font-bold text-ink-2">
+              <Undo2 className="size-4 text-clay" />
+              撤销与赠金
+            </p>
+            <Money cents={s.reversal.principal + s.reversal.bonus} className="mt-1.5 text-[32px] leading-none font-bold text-clay" />
+            <p className="mt-1.5 text-[12.5px] text-ink-3">
+              {s.reversal.count} 笔撤销恢复{s.reversal.crossDayCount ? ` · ${s.reversal.crossDayCount} 笔跨日` : ''}
+            </p>
+          </div>
+          <div className="space-y-2 px-5 py-4 text-[13px]">
+            <Row label="恢复本金" cents={s.reversal.principal} className="text-pine" />
+            <Row label="恢复赠金" cents={s.reversal.bonus} className="text-yuzu-deep" />
+            <div className="my-1 border-t border-dashed border-line" />
+            <Row label="本日发放赠金" cents={s.recharge.bonus} className="text-yuzu-deep" />
+            <Row label="本日使用赠金" cents={s.consume.bonus} className="text-ink-2" />
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+        {/* 余额核对 */}
+        <Card className="p-5">
+          <SectionTitle>余额核对</SectionTitle>
+          <div className="mt-3 overflow-hidden rounded-lg border border-line">
+            <table className="w-full text-[13px]">
+              <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
+                <tr>
+                  <th className="px-3 py-2 text-left">会员储值</th>
+                  <th className="px-3 py-2 text-right">期初</th>
+                  <th className="px-3 py-2 text-right">本日变动</th>
+                  <th className="px-3 py-2 text-right">期末</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {(['principal', 'bonus'] as const).map((k) => (
+                  <tr key={k}>
+                    <td className="px-3 py-2.5 font-semibold">
+                      <span className={cn('mr-2 inline-block size-2 rounded-full', k === 'principal' ? 'bg-pine' : 'bg-yuzu')} />
+                      {k === 'principal' ? '本金' : '赠金'}
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <Money cents={s.balances.opening[k]} className="text-ink-2" />
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <Money cents={s.net[k]} signed className={cn('font-semibold', s.net[k] < 0 ? 'text-clay' : s.net[k] > 0 ? 'text-moss' : 'text-ink-4')} />
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <Money cents={s.balances.closing[k]} className="font-bold" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <ul className="mt-4 space-y-2.5">
+            {s.checks.map((c) => (
+              <li key={c.key} className="flex gap-2.5">
+                {c.ok ? <CircleCheck className="mt-0.5 size-[18px] shrink-0 text-pine" /> : <CircleX className="mt-0.5 size-[18px] shrink-0 text-clay" />}
+                <div className="min-w-0">
+                  <p className={cn('text-[13.5px] font-bold', c.ok ? 'text-ink' : 'text-clay')}>{c.label}</p>
+                  <p className="text-[12.5px] break-all text-ink-3">{c.detail}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Card>
+
+        <div className="space-y-4">
+          {/* 异常与提醒 */}
+          <Card className="p-5">
+            <SectionTitle aside={<span className="text-[12px] text-ink-3">{s.anomalies.length} 条</span>}>异常与提醒</SectionTitle>
+            {s.anomalies.length === 0 ? (
+              <EmptyState art="leaf" title="没有异常记录" description="没有撤销、重复提交或核对差异。" className="py-6" />
+            ) : (
+              <ul className="mt-3 space-y-2">
+                {s.anomalies.map((a, i) => (
+                  <AnomalyItem key={i} a={a} />
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          {/* 按员工 */}
+          <Card className="p-5">
+            <SectionTitle>按员工</SectionTitle>
+            {s.byStaff.length === 0 ? (
+              <p className="mt-3 text-[13px] text-ink-4">无业务</p>
+            ) : (
+              <table className="mt-2 w-full text-[13px]">
+                <thead className="text-[12px] text-ink-3">
+                  <tr>
+                    <th className="py-1.5 text-left font-semibold">员工</th>
+                    <th className="py-1.5 text-right font-semibold">充值实收</th>
+                    <th className="py-1.5 text-right font-semibold">消费</th>
+                    <th className="py-1.5 text-right font-semibold">撤销</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line/70">
+                  {s.byStaff.map((st) => (
+                    <tr key={st.staffId}>
+                      <td className="py-2 font-semibold">{st.name}</td>
+                      <td className="py-2 text-right">
+                        <Money cents={st.rechargePaid} className="text-lake" />
+                        <span className="ml-1 text-[11.5px] text-ink-3">/{st.rechargeCount}</span>
+                      </td>
+                      <td className="py-2 text-right">
+                        <Money cents={st.consumeTotal} />
+                        <span className="ml-1 text-[11.5px] text-ink-3">/{st.consumeCount}</span>
+                      </td>
+                      <td className="num py-2 text-right">{st.reversalCount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Card>
+        </div>
+      </div>
+
+      <Link
+        to={`/ledger${s.isToday ? '' : `?date=${s.businessDate}`}`}
+        className="flex items-center justify-between rounded-lg border border-line bg-card px-5 py-4 text-[14px] font-bold text-pine shadow-card transition-colors hover:bg-pine-tint"
+      >
+        查看本营业日全部流水明细
+        <ArrowRight className="size-5" />
+      </Link>
+    </div>
+  );
+}
+
+function Row({ label, cents, className }: { label: string; cents: number; className?: string }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-ink-3">{label}</span>
+      <Money cents={cents} className={cn('font-bold', className)} />
+    </div>
+  );
+}
+
+function SplitBar({ principal, bonus }: { principal: number; bonus: number }) {
+  const total = principal + bonus;
+  const p = total ? (principal / total) * 100 : 0;
+  return (
+    <div className="flex h-2.5 overflow-hidden rounded-full bg-paper-2" aria-label={`本金占 ${p.toFixed(0)}%`}>
+      <div className="h-full bg-pine" style={{ width: `${p}%` }} />
+      <div className="h-full bg-yuzu" style={{ width: `${total ? 100 - p : 0}%` }} />
+    </div>
+  );
+}
+
+const ANOMALY_META: Record<
+  SettlementAnomaly['kind'],
+  { label: string; tone: 'clay' | 'ember' | 'lake' | 'yuzu'; icon: typeof Undo2; iconClass: string }
+> = {
+  reversal: { label: '撤销', tone: 'clay', icon: Undo2, iconClass: 'bg-clay-soft text-clay' },
+  cross_day_reversal: { label: '跨日撤销', tone: 'ember', icon: Undo2, iconClass: 'bg-ember-soft text-ember' },
+  duplicate_blocked: { label: '重复提交', tone: 'lake', icon: Copy, iconClass: 'bg-lake-soft text-lake' },
+  rejected: { label: '余额不足', tone: 'yuzu', icon: WalletMinimal, iconClass: 'bg-yuzu-soft text-yuzu-deep' },
+  balance_mismatch: { label: '余额不符', tone: 'clay', icon: CircleX, iconClass: 'bg-clay-soft text-clay' },
+  chain_break: { label: '流水不连续', tone: 'clay', icon: CircleX, iconClass: 'bg-clay-soft text-clay' },
+};
+
+function AnomalyItem({ a }: { a: SettlementAnomaly }) {
+  const meta = ANOMALY_META[a.kind];
+  const Icon = meta.icon;
+  return (
+    <li className="flex gap-3 rounded-lg bg-paper/70 px-3 py-2.5 ring-1 ring-line/70">
+      <span className={cn('mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full', meta.iconClass)}>
+        <Icon className="size-3.5" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <Badge tone={meta.tone}>{meta.label}</Badge>
+          {a.memberName && <span className="text-[13px] font-bold">{a.memberName}</span>}
+          {a.docNo && <span className="num text-[12px] text-ink-3">{a.docNo}</span>}
+          {a.at && <span className="num text-[12px] text-ink-3">{formatTime(a.at)}</span>}
+        </div>
+        <p className="mt-1 text-[12.5px] leading-relaxed text-ink-2">{a.description}</p>
+      </div>
+      {a.amount != null && <Money cents={a.amount} className="shrink-0 text-[13px] font-bold" />}
+    </li>
+  );
+}
+
+function CloseDialog({ open, onClose, s }: { open: boolean; onClose: () => void; s: SettlementSummary }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [note, setNote] = useState('');
+  const [checked, setChecked] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const allOk = s.checks.every((c) => c.ok);
+
+  const submit = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await api.post<SettlementSummary>(`/api/settlements/${s.businessDate}/close`, { note });
+      qc.setQueryData(qk.settlement(s.businessDate), result);
+      toast({ tone: 'success', title: '日结已确认', body: `${s.businessDate} · 第 ${result.closed?.revision ?? 1} 次确认` });
+      onClose();
+      setNote('');
+      setChecked(false);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={s.closed ? '重新确认日结' : '确认日结'}
+      description={`营业日 ${s.businessDate}。确认会保存当前汇总快照，之后如有变动会提示。`}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            取消
+          </Button>
+          <Button variant="primary" loading={saving} disabled={!checked} onClick={submit}>
+            确认日结
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {s.isToday && (
+          <Notice tone="warning" title="营业日还没结束">
+            现在确认后，如果今天还有新业务，日结会显示「有变动」，届时需要重新确认。
+          </Notice>
+        )}
+        {!allOk && <Notice tone="error" title="核对存在差异，请先排查后再确认" />}
+        <div className="grid grid-cols-3 gap-2.5 rounded-lg bg-paper-2/70 p-3 text-[12.5px]">
+          <div>
+            <p className="text-ink-3">充值实收</p>
+            <Money cents={s.recharge.paid} className="text-[15px] font-bold text-lake" />
+          </div>
+          <div>
+            <p className="text-ink-3">储值消费</p>
+            <Money cents={s.consume.total} className="text-[15px] font-bold" />
+          </div>
+          <div>
+            <p className="text-ink-3">撤销恢复</p>
+            <Money cents={s.reversal.principal + s.reversal.bonus} className="text-[15px] font-bold text-clay" />
+          </div>
+        </div>
+        <Field label="日结备注" htmlFor="close-note" hint="选填，如现金盘点结果">
+          <Textarea id="close-note" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} />
+        </Field>
+        <ConfirmCheck checked={checked} onChange={setChecked}>
+          我已核对实际收款（微信、支付宝、现金等）与「充值实收」一致
+        </ConfirmCheck>
+        {error && <Notice tone="error" title={error} />}
+      </div>
+    </Dialog>
+  );
+}

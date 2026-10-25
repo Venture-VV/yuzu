@@ -74,6 +74,18 @@ export function registerAuthRoutes(app: FastifyInstance, deps: Deps) {
       maxAge: config.sessionTtlHours * 3600 * 4,
     });
 
+  // 登录页使用：门店名称；非正式环境且存在演示数据时提示演示账号
+  app.get('/api/public/info', async () => {
+    const settings = await loadSettings(sql);
+    const [synthetic] = await sql<{ exists: boolean }[]>`SELECT EXISTS (SELECT 1 FROM members WHERE is_synthetic) AS exists`;
+    return {
+      storeName: settings.storeName,
+      env: config.env,
+      version: config.version,
+      demoHint: config.env !== 'production' && (synthetic?.exists ?? false),
+    };
+  });
+
   app.post('/api/auth/login', async (req, reply) => {
     const { username, password } = parse(LoginInput, req.body);
     checkLock(username);

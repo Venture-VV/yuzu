@@ -1,0 +1,332 @@
+import { useCallback, useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, Banknote, CreditCard, Ellipsis, Gift, Smartphone, WalletCards } from 'lucide-react';
+import { PAYMENT_METHOD_LABELS, PAYMENT_METHODS, type PaymentMethod } from '@shared/labels';
+import { formatYuan, parseYuan } from '@shared/money';
+import type { MemberDetail, OperationResult } from '@shared/types';
+import { api } from '../../lib/api';
+import { useCatalog } from '../../lib/queries';
+import { useCan, useSession } from '../../lib/session';
+import { cn } from '../../lib/utils';
+import { Money } from '../../components/Money';
+import { Button, ConfirmCheck, Field, Input, MoneyInput, Notice, PendingBadge, Skeleton } from '../../components/ui';
+import { BalanceChange, FlowFrame, OperationStatus, SuccessHeader, SummaryRow, type Step } from './parts';
+import { useOperation } from './useOperation';
+
+const METHOD_ICONS: Record<PaymentMethod, typeof Smartphone> = {
+  wechat: Smartphone,
+  alipay: WalletCards,
+  cash: Banknote,
+  bank_card: CreditCard,
+  other: Ellipsis,
+};
+
+export function RechargeFlow({
+  member,
+  onClose,
+  onSwitchToConsume,
+}: {
+  member: MemberDetail;
+  onClose: () => void;
+  onSwitchToConsume: () => void;
+}) {
+  const can = useCan();
+  const session = useSession();
+  const qc = useQueryClient();
+  const catalog = useCatalog();
+  const plans = catalog.data?.plans ?? [];
+  const canCustomBonus = can('recharge.customBonus');
+
+  const [step, setStep] = useState<Step>('form');
+  const [planId, setPlanId] = useState<number | 'custom' | null>(null);
+  const [paidText, setPaidText] = useState('');
+  const [bonusText, setBonusText] = useState('');
+  const [method, setMethod] = useState<PaymentMethod | null>(null);
+  const [paymentRef, setPaymentRef] = useState('');
+  const [note, setNote] = useState('');
+  const [confirmed, setConfirmed] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const plan = typeof planId === 'number' ? plans.find((p) => p.id === planId) : undefined;
+  const paid = plan ? plan.payAmount : parseYuan(paidText);
+  const bonus = plan ? plan.bonusAmount : bonusText.trim() ? parseYuan(bonusText) : 0;
+
+  const before = { principal: member.principalBalance, bonus: member.bonusBalance };
+  const after = { principal: before.principal + (paid ?? 0), bonus: before.bonus + (bonus ?? 0) };
+
+  const submitFn = useCallback(
+    (idempotencyKey: string) =>
+      api.post<OperationResult>(
+        '/api/recharges',
+        {
+          idempotencyKey,
+          memberId: member.id,
+          planId: plan?.id ?? null,
+          paidAmount: paid,
+          bonusAmount: bonus,
+          paymentMethod: method,
+          paymentRef,
+          note,
+          paymentConfirmed: confirmed,
+        },
+        { timeoutMs: 15_000 },
+      ),
+    [member.id, plan?.id, paid, bonus, method, paymentRef, note, confirmed],
+  );
+  const op = useOperation(submitFn);
+
+  useEffect(() => {
+    if (op.state.status === 'success') setStep('result');
+    if (op.state.status === 'error' && ['PLAN_CHANGED', 'PLAN_UNAVAILABLE'].includes(op.state.error.code)) {
+      void qc.invalidateQueries({ queryKey: ['catalog'] });
+      setPlanId(null);
+      setStep('form');
+      setFormError(op.state.error.message);
+    }
+  }, [op.state, qc]);
+
+  const toConfirm = () => {
+    if (planId === null) return setFormError('请选择充值套餐或自定义金额');
+    if (!paid || paid <= 0) return setFormError('请填写正确的实收金额（最多两位小数）');
+    if (bonus === null) return setFormError('赠金格式不正确');
+    if (paid > session.rules.maxRechargeCents) return setFormError(`超过单笔充值上限 ${formatYuan(session.rules.maxRechargeCents)}`);
+    if (!method) return setFormError('请选择收款方式');
+    setFormError(null);
+    setConfirmed(false);
+    op.reset();
+    setStep('confirm');
+  };
+
+  const busy = op.state.status === 'submitting' || op.state.status === 'checking';
+  const locked = op.state.status === 'uncertain' || op.state.status === 'checking' || op.state.status === 'not_found';
+
+  if (step === 'result' && op.state.status === 'success') {
+    const r = op.state.result as Extract<OperationResult, { type: 'recharge' }>;
+    return (
+      <FlowFrame
+        title="会员充值"
+        tone="pine"
+        member={r.member}
+        step="result"
+        onClose={onClose}
+        footer={
+          <div className="flex gap-2.5">
+            <Button variant="secondary" size="lg" className="flex-1" onClick={onSwitchToConsume}>
+              接着登记消费
+            </Button>
+            <Button variant="primary" size="lg" className="flex-1" onClick={onClose} data-autofocus>
+              完成
+            </Button>
+          </div>
+        }
+      >
+        <SuccessHeader title="充值已入账" docNo={r.recharge.docNo} recovered={op.state.recovered} />
+        <div className="rounded-lg border border-line bg-card px-4 py-1">
+          <SummaryRow label="实收金额">
+            <Money cents={r.recharge.paidAmount} className="text-lake" />
+          </SummaryRow>
+          <SummaryRow label="收款方式">{PAYMENT_METHOD_LABELS[r.recharge.paymentMethod]}</SummaryRow>
+          {r.recharge.bonusAmount > 0 && (
+            <SummaryRow label="赠金">
+              <Money cents={r.recharge.bonusAmount} className="text-yuzu-deep" signed />
+            </SummaryRow>
+          )}
+          <SummaryRow label="经办">{r.recharge.operatorName}</SummaryRow>
+        </div>
+        <p className="mt-5 mb-2 text-[13px] font-bold text-ink-2">余额变化</p>
+        <BalanceChange before={r.balanceBefore} after={r.balanceAfter} animate />
+      </FlowFrame>
+    );
+  }
+
+  if (step === 'confirm') {
+    return (
+      <FlowFrame
+        title="会员充值"
+        tone="pine"
+        member={member}
+        step="confirm"
+        onClose={onClose}
+        footer={
+          <div className="flex gap-2.5">
+            <Button
+              variant="secondary"
+              size="lg"
+              icon={<ArrowLeft className="size-4" />}
+              disabled={busy || locked}
+              onClick={() => {
+                op.reset();
+                setStep('form');
+              }}
+            >
+              返回修改
+            </Button>
+            <Button
+              variant="primary"
+              size="lg"
+              className="flex-1"
+              disabled={!confirmed || locked}
+              loading={op.state.status === 'submitting'}
+              onClick={op.submit}
+            >
+              确认入账 {paid ? formatYuan(paid) : ''}
+            </Button>
+          </div>
+        }
+      >
+        <div className="rounded-lg border border-line bg-card p-4">
+          <p className="text-[12.5px] font-semibold text-ink-3">本次实收</p>
+          <div className="mt-1 flex items-end justify-between gap-3">
+            <Money cents={paid ?? 0} className="text-[34px] leading-none font-bold text-lake" />
+            <span className="mb-1 rounded-full bg-lake-soft px-2.5 py-1 text-[12.5px] font-bold text-lake">
+              {method ? PAYMENT_METHOD_LABELS[method] : ''}
+            </span>
+          </div>
+          <div className="mt-4 border-t border-dashed border-line pt-1">
+            <SummaryRow label="充值方案">{plan ? plan.name : '自定义金额'}</SummaryRow>
+            <SummaryRow label="计入本金">
+              <Money cents={paid ?? 0} className="text-pine" signed />
+            </SummaryRow>
+            <SummaryRow label="赠金">
+              <Money cents={bonus ?? 0} className={bonus ? 'text-yuzu-deep' : 'text-ink-4'} signed />
+            </SummaryRow>
+            {paymentRef && <SummaryRow label="收款备注">{paymentRef}</SummaryRow>}
+            {note && <SummaryRow label="备注">{note}</SummaryRow>}
+          </div>
+        </div>
+
+        <p className="mt-5 mb-2 text-[13px] font-bold text-ink-2">入账后余额</p>
+        <BalanceChange before={before} after={after} />
+
+        <div className="mt-5">
+          <ConfirmCheck checked={confirmed} onChange={setConfirmed}>
+            我已核实 <span className="num font-bold text-lake">{formatYuan(paid ?? 0)}</span> 已通过
+            {method ? PAYMENT_METHOD_LABELS[method] : ''}到账
+          </ConfirmCheck>
+        </div>
+        <div className="mt-4">
+          <OperationStatus state={op.state} onCheck={op.check} onRetry={op.submit} />
+        </div>
+      </FlowFrame>
+    );
+  }
+
+  return (
+    <FlowFrame
+      title="会员充值"
+      tone="pine"
+      member={member}
+      step="form"
+      onClose={onClose}
+      footer={
+        <Button variant="primary" size="lg" className="w-full" onClick={toConfirm} disabled={catalog.isPending}>
+          下一步：核对收款
+        </Button>
+      }
+    >
+      <div className="flex items-center justify-between">
+        <p className="text-[13px] font-bold text-ink-2">充值方案</p>
+        <PendingBadge title="实际充值与赠送方案待店主确认，当前为模拟方案" />
+      </div>
+      {catalog.isPending ? (
+        <div className="mt-3 grid grid-cols-2 gap-2.5">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-[84px]" />
+          ))}
+        </div>
+      ) : (
+        <div className="mt-3 grid grid-cols-2 gap-2.5">
+          {plans.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => setPlanId(p.id)}
+              aria-pressed={planId === p.id}
+              className={cn(
+                'relative flex min-h-[84px] flex-col items-start rounded-lg border bg-card px-3.5 py-3 text-left transition-all',
+                planId === p.id ? 'border-pine shadow-[0_0_0_3px_rgb(36_73_58/0.12)]' : 'border-line hover:border-line-strong',
+              )}
+            >
+              <span className="text-[13px] font-semibold text-ink-2">{p.name}</span>
+              <Money cents={p.payAmount} className="mt-1 text-[20px] font-bold text-ink" />
+              {p.bonusAmount > 0 ? (
+                <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-yuzu-soft px-2 py-0.5 text-[12px] font-bold text-yuzu-deep">
+                  <Gift className="size-3" />送 <Money cents={p.bonusAmount} />
+                </span>
+              ) : (
+                <span className="mt-1 text-[12px] text-ink-3">无赠送</span>
+              )}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setPlanId('custom')}
+            aria-pressed={planId === 'custom'}
+            className={cn(
+              'flex min-h-[84px] flex-col items-start justify-center rounded-lg border border-dashed bg-card/60 px-3.5 py-3 text-left transition-all',
+              planId === 'custom' ? 'border-pine bg-card shadow-[0_0_0_3px_rgb(36_73_58/0.12)]' : 'border-line-strong hover:border-ink-4',
+            )}
+          >
+            <span className="text-[14px] font-bold text-ink">自定义金额</span>
+            <span className="mt-0.5 text-[12px] text-ink-3">{canCustomBonus ? '手动填写实收与赠金' : '只计本金，不含赠金'}</span>
+          </button>
+        </div>
+      )}
+
+      {planId === 'custom' && (
+        <div className="mt-4 grid animate-rise gap-4 rounded-lg border border-line bg-card p-4">
+          <Field label="实收金额" htmlFor="paid" hint="实际收到的钱，等额计入本金">
+            <MoneyInput id="paid" large value={paidText} onChange={(e) => setPaidText(e.target.value)} placeholder="0.00" autoFocus />
+          </Field>
+          {canCustomBonus ? (
+            <Field label="赠金" htmlFor="bonus" hint="不填即为 0">
+              <MoneyInput id="bonus" value={bonusText} onChange={(e) => setBonusText(e.target.value)} placeholder="0.00" />
+            </Field>
+          ) : (
+            <p className="text-[12.5px] text-ink-3">自定义赠金需店主操作；有赠送请选择上方套餐。</p>
+          )}
+        </div>
+      )}
+
+      <p className="mt-6 mb-3 text-[13px] font-bold text-ink-2">收款方式</p>
+      <div className="grid grid-cols-5 gap-2">
+        {PAYMENT_METHODS.map((m) => {
+          const Icon = METHOD_ICONS[m];
+          const active = method === m;
+          return (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMethod(m)}
+              aria-pressed={active}
+              className={cn(
+                'flex h-[68px] flex-col items-center justify-center gap-1.5 rounded-lg border text-[12.5px] font-semibold transition-all',
+                active ? 'border-lake bg-lake-soft/70 text-lake' : 'border-line bg-card text-ink-2 hover:border-line-strong',
+              )}
+            >
+              <Icon className="size-5" strokeWidth={active ? 2.2 : 1.8} />
+              {PAYMENT_METHOD_LABELS[m]}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-5 grid gap-4">
+        <Field label="收款备注" htmlFor="ref" hint="选填，如支付单号后 4 位，便于对账">
+          <Input id="ref" value={paymentRef} maxLength={64} onChange={(e) => setPaymentRef(e.target.value)} placeholder="选填" />
+        </Field>
+        <Field label="备注" htmlFor="note">
+          <Input id="note" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} placeholder="选填" />
+        </Field>
+      </div>
+
+      {paid != null && paid > 0 && planId !== null && (
+        <div className="mt-5 flex items-center justify-between rounded-lg bg-pine-tint px-4 py-3 text-[13px]">
+          <span className="font-semibold text-ink-2">充值后可用余额</span>
+          <Money cents={after.principal + after.bonus} className="text-[17px] font-bold text-pine" />
+        </div>
+      )}
+      {formError && <Notice tone="error" className="mt-4" title={formError} />}
+    </FlowFrame>
+  );
+}

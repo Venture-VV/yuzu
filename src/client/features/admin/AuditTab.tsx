@@ -1,0 +1,81 @@
+import { useState } from 'react';
+import { useAudit } from '../../lib/queries';
+import { useSession } from '../../lib/session';
+import { formatDateTime } from '../../lib/utils';
+import { DateNav } from '../../components/DateNav';
+import { EmptyState } from '../../components/EmptyState';
+import { Badge, Card, Skeleton } from '../../components/ui';
+
+const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 'clay' | 'lake' | 'yuzu' | 'ember' }> = {
+  login: { label: '登录', tone: 'neutral' },
+  login_failed: { label: '登录失败', tone: 'clay' },
+  logout: { label: '退出', tone: 'neutral' },
+  password_changed: { label: '修改密码', tone: 'neutral' },
+  staff_created: { label: '添加员工', tone: 'pine' },
+  staff_updated: { label: '修改员工', tone: 'pine' },
+  staff_password_reset: { label: '重置密码', tone: 'ember' },
+  member_created: { label: '新建会员', tone: 'lake' },
+  member_updated: { label: '修改会员', tone: 'lake' },
+  recharge_created: { label: '充值', tone: 'lake' },
+  consumption_created: { label: '消费', tone: 'yuzu' },
+  consumption_reversed: { label: '撤销', tone: 'clay' },
+  consume_rejected: { label: '余额不足', tone: 'yuzu' },
+  duplicate_blocked: { label: '重复提交', tone: 'ember' },
+  settlement_closed: { label: '确认日结', tone: 'pine' },
+  settings_updated: { label: '修改规则', tone: 'ember' },
+  plan_saved: { label: '保存套餐', tone: 'neutral' },
+  item_saved: { label: '保存项目', tone: 'neutral' },
+  export: { label: '导出', tone: 'neutral' },
+};
+
+function describe(detail: Record<string, unknown>): string {
+  const parts: string[] = [];
+  if (typeof detail.docNo === 'string') parts.push(detail.docNo);
+  if (typeof detail.username === 'string') parts.push(`账号 ${detail.username}`);
+  if (typeof detail.name === 'string') parts.push(detail.name);
+  if (typeof detail.reason === 'string') parts.push(detail.reason);
+  if (typeof detail.note === 'string' && detail.note) parts.push(detail.note);
+  if (detail.via === 'cli') parts.push('命令行');
+  return parts.join(' · ');
+}
+
+/** 操作审计：按自然日查看登录、余额操作、配置变更 */
+export function AuditTab() {
+  const session = useSession();
+  const [date, setDate] = useState(session.today);
+  const audit = useAudit(date);
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <DateNav value={date} today={session.today} onChange={setDate} />
+        <p className="text-[12.5px] text-ink-3">审计记录只追加、不可修改，按自然日显示最近 200 条。</p>
+      </div>
+      <Card>
+        {audit.isPending ? (
+          <div className="space-y-2 p-4">
+            {[0, 1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-10" />
+            ))}
+          </div>
+        ) : (audit.data ?? []).length === 0 ? (
+          <EmptyState art="calm" title="这一天没有操作记录" />
+        ) : (
+          <ul className="divide-y divide-line/70">
+            {audit.data!.map((a) => {
+              const meta = ACTION_LABELS[a.action] ?? { label: a.action, tone: 'neutral' as const };
+              return (
+                <li key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-[13px]">
+                  <span className="num w-24 shrink-0 text-ink-3">{formatDateTime(a.createdAt)}</span>
+                  <Badge tone={meta.tone}>{meta.label}</Badge>
+                  <span className="font-semibold">{a.staffName ?? '系统'}</span>
+                  <span className="min-w-0 flex-1 truncate text-ink-2">{describe(a.detail)}</span>
+                  {a.ip && <span className="num text-[11.5px] text-ink-4">{a.ip}</span>}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Card>
+    </div>
+  );
+}

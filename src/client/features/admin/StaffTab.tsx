@@ -1,0 +1,224 @@
+import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { KeyRound, UserPlus } from 'lucide-react';
+import { ROLE_LABELS } from '@shared/labels';
+import type { Role } from '@shared/permissions';
+import type { StaffRecord } from '@shared/types';
+import { api, errorMessage } from '../../lib/api';
+import { qk, useStaff } from '../../lib/queries';
+import { useSession } from '../../lib/session';
+import { avatarTone, cn, relativeTime } from '../../lib/utils';
+import { Dialog } from '../../components/Overlay';
+import { useToast } from '../../components/Toast';
+import { Badge, Button, Card, Field, Input, Notice, Segmented, Skeleton } from '../../components/ui';
+
+export function StaffTab() {
+  const session = useSession();
+  const staff = useStaff();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [editing, setEditing] = useState<StaffRecord | 'new' | null>(null);
+  const [secret, setSecret] = useState<{ name: string; password: string } | null>(null);
+  const [resetting, setResetting] = useState<StaffRecord | null>(null);
+
+  const reset = async (s: StaffRecord) => {
+    try {
+      const r = await api.post<{ temporaryPassword: string }>(`/api/staff/${s.id}/reset-password`);
+      setResetting(null);
+      setSecret({ name: s.displayName, password: r.temporaryPassword });
+      void qc.invalidateQueries({ queryKey: qk.staff });
+    } catch (err) {
+      toast({ tone: 'error', title: errorMessage(err) });
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-[13px] text-ink-3">每位员工使用自己的账号，所有余额操作都记录经办人。停用后立即退出登录。</p>
+        <Button variant="primary" size="sm" icon={<UserPlus className="size-4" />} onClick={() => setEditing('new')}>
+          添加员工
+        </Button>
+      </div>
+      <Card className="divide-y divide-line/70">
+        {staff.isPending
+          ? [0, 1, 2].map((i) => <Skeleton key={i} className="m-3 h-12" />)
+          : staff.data?.map((s) => (
+              <div key={s.id} className={cn('flex flex-wrap items-center gap-3 px-4 py-3', !s.active && 'opacity-55')}>
+                <span className={cn('flex size-10 items-center justify-center rounded-full text-[15px] font-bold', avatarTone(s.id))}>
+                  {s.displayName.slice(0, 1)}
+                </span>
+                <div className="min-w-[140px] flex-1">
+                  <p className="flex items-center gap-2 text-[14.5px] font-bold">
+                    {s.displayName}
+                    {s.id === session.staff.id && <span className="text-[12px] font-semibold text-ink-3">（我）</span>}
+                  </p>
+                  <p className="num text-[12.5px] text-ink-3">
+                    {s.username} · 上次登录 {relativeTime(s.lastLoginAt)}
+                  </p>
+                </div>
+                <Badge tone={s.role === 'owner' ? 'pine' : 'neutral'}>{ROLE_LABELS[s.role]}</Badge>
+                {!s.active && <Badge tone="clay">已停用</Badge>}
+                {s.mustChangePassword && s.active && <Badge tone="yuzu">待首次改密</Badge>}
+                <div className="flex gap-1.5">
+                  <Button size="sm" variant="ghost" icon={<KeyRound className="size-3.5" />} onClick={() => setResetting(s)}>
+                    重置密码
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => setEditing(s)}>
+                    编辑
+                  </Button>
+                </div>
+              </div>
+            ))}
+      </Card>
+
+      <StaffDialog
+        target={editing}
+        onClose={() => setEditing(null)}
+        onCreated={(name, password) => setSecret({ name, password })}
+      />
+
+      <Dialog
+        open={!!resetting}
+        onClose={() => setResetting(null)}
+        title="重置密码"
+        description={resetting ? `${resetting.displayName}（${resetting.username}）` : ''}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setResetting(null)}>
+              取消
+            </Button>
+            <Button variant="primary" onClick={() => resetting && reset(resetting)}>
+              生成临时密码
+            </Button>
+          </>
+        }
+      >
+        <p className="text-[14px] text-ink-2">将生成一个临时密码，并让该员工在所有设备上退出登录。员工用临时密码登录后需要设置新密码。</p>
+      </Dialog>
+
+      <Dialog
+        open={!!secret}
+        onClose={() => setSecret(null)}
+        title="临时密码"
+        description="只显示这一次，请当面告知员工。"
+        footer={
+          <Button variant="primary" onClick={() => setSecret(null)}>
+            我已告知
+          </Button>
+        }
+      >
+        <div className="rounded-lg border border-dashed border-pine/40 bg-pine-tint px-4 py-5 text-center">
+          <p className="text-[13px] text-ink-2">{secret?.name} 的临时密码</p>
+          <p className="num mt-2 text-[26px] font-bold tracking-wider text-pine select-all">{secret?.password}</p>
+        </div>
+      </Dialog>
+    </div>
+  );
+}
+
+function StaffDialog({
+  target,
+  onClose,
+  onCreated,
+}: {
+  target: StaffRecord | 'new' | null;
+  onClose: () => void;
+  onCreated: (name: string, password: string) => void;
+}) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const isNew = target === 'new';
+  const existing = target && target !== 'new' ? target : null;
+  const [username, setUsername] = useState('');
+  const [name, setName] = useState('');
+  const [role, setRole] = useState<Role>('clerk');
+  const [active, setActive] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [lastTarget, setLastTarget] = useState<typeof target>(null);
+
+  if (target !== lastTarget) {
+    setLastTarget(target);
+    setUsername(existing?.username ?? '');
+    setName(existing?.displayName ?? '');
+    setRole(existing?.role ?? 'clerk');
+    setActive(existing?.active ?? true);
+    setError(null);
+  }
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      if (isNew) {
+        const r = await api.post<{ temporaryPassword: string }>('/api/staff', { username, displayName: name, role });
+        onCreated(name, r.temporaryPassword);
+      } else if (existing) {
+        await api.put(`/api/staff/${existing.id}`, { displayName: name, role, active });
+        toast({ tone: 'success', title: '已保存' });
+      }
+      void qc.invalidateQueries({ queryKey: qk.staff });
+      onClose();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={!!target}
+      onClose={onClose}
+      title={isNew ? '添加员工' : '编辑员工'}
+      description={isNew ? '保存后会生成临时密码，员工首次登录时设置自己的密码。' : existing?.username}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            取消
+          </Button>
+          <Button variant="primary" loading={saving} onClick={save}>
+            保存
+          </Button>
+        </>
+      }
+    >
+      <div className="grid gap-4">
+        {isNew && (
+          <Field label="登录账号" htmlFor="s-user" hint="2–32 位小写字母、数字或 _ . -，如 xiaozhou">
+            <Input id="s-user" value={username} onChange={(e) => setUsername(e.target.value.toLowerCase())} autoCapitalize="none" data-autofocus />
+          </Field>
+        )}
+        <Field label="姓名" htmlFor="s-name">
+          <Input id="s-name" value={name} maxLength={32} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Field label="岗位" aside={<span className="text-[12px] text-ink-3">权限见「经营规则」</span>}>
+          <Segmented
+            value={role}
+            onChange={setRole}
+            className="w-full"
+            options={[
+              { value: 'clerk', label: '店员' },
+              { value: 'owner', label: '店主' },
+            ]}
+          />
+        </Field>
+        {!isNew && (
+          <Field label="状态">
+            <Segmented
+              value={active ? 'on' : 'off'}
+              onChange={(v) => setActive(v === 'on')}
+              className="w-full"
+              options={[
+                { value: 'on', label: '在职' },
+                { value: 'off', label: '停用' },
+              ]}
+            />
+          </Field>
+        )}
+        {error && <Notice tone="error" title={error} />}
+      </div>
+    </Dialog>
+  );
+}

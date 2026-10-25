@@ -1,0 +1,103 @@
+import { useEffect } from 'react';
+import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation, useNavigate } from 'react-router';
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { ApiError, onAuthError } from './lib/api';
+import { qk, useSessionQuery } from './lib/queries';
+import { SessionProvider } from './lib/session';
+import { setDisplayTimeZone } from './lib/utils';
+import { AppShell } from './components/AppShell';
+import { ToastProvider } from './components/Toast';
+import { Spinner } from './components/ui';
+import { LogoMark } from './components/Brand';
+import { LoginPage } from './features/auth/LoginPage';
+import { ChangePasswordPage } from './features/auth/ChangePasswordPage';
+import { WorkbenchPage } from './features/workbench/WorkbenchPage';
+import { LedgerPage } from './features/ledger/LedgerPage';
+import { SettlementPage } from './features/settlement/SettlementPage';
+import { AdminPage } from './features/admin/AdminPage';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: (count, error) => !(error instanceof ApiError && error.status < 500) && count < 2,
+      refetchOnWindowFocus: true,
+      staleTime: 5_000,
+    },
+  },
+});
+
+/** 登录守卫：未登录跳转登录页；首次登录强制修改密码。 */
+function AuthGate() {
+  const session = useSessionQuery();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const qc = useQueryClient();
+
+  useEffect(
+    () =>
+      onAuthError((error) => {
+        if (error.status === 401) {
+          qc.clear();
+          navigate('/login', { replace: true, state: { expired: true } });
+        } else {
+          void qc.invalidateQueries({ queryKey: qk.session });
+        }
+      }),
+    [navigate, qc],
+  );
+
+  useEffect(() => {
+    if (session.data) setDisplayTimeZone(session.data.timezone);
+  }, [session.data]);
+
+  if (session.isPending) {
+    return (
+      <div className="flex h-dvh flex-col items-center justify-center gap-4 bg-paper">
+        <LogoMark className="size-12 animate-pulse" />
+        <Spinner />
+      </div>
+    );
+  }
+  if (session.error || !session.data) {
+    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+  }
+  if (session.data.staff.mustChangePassword) {
+    return (
+      <SessionProvider value={session.data}>
+        <ChangePasswordPage forced />
+      </SessionProvider>
+    );
+  }
+  return (
+    <SessionProvider value={session.data}>
+      <AppShell>
+        <Outlet />
+      </AppShell>
+    </SessionProvider>
+  );
+}
+
+const router = createBrowserRouter([
+  { path: '/login', element: <LoginPage /> },
+  {
+    element: <AuthGate />,
+    children: [
+      { index: true, element: <WorkbenchPage /> },
+      { path: 'ledger', element: <LedgerPage /> },
+      { path: 'settlement/:date?', element: <SettlementPage /> },
+      { path: 'admin/:tab?', element: <AdminPage /> },
+      { path: 'password', element: <ChangePasswordPage /> },
+      { path: '*', element: <Navigate to="/" replace /> },
+    ],
+  },
+]);
+
+export function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>
+        <RouterProvider router={router} />
+      </ToastProvider>
+    </QueryClientProvider>
+  );
+}
