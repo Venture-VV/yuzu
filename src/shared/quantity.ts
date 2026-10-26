@@ -51,6 +51,14 @@ export function toPurchaseQty(baseMilli: Milli, factorMilli: Milli): Milli | nul
   return Number(scaled / BigInt(factorMilli));
 }
 
+/** 「9 箱 + 67 双」：按整包装拆分，不足一个包装时返回 null（用于提示，不用于计算） */
+export function packText(baseMilli: Milli, factorMilli: Milli, purchaseUnit: string, inventoryUnit: string): string | null {
+  if (purchaseUnit === inventoryUnit || factorMilli <= MILLI || baseMilli < factorMilli) return null;
+  const packs = Math.floor(baseMilli / factorMilli);
+  const rest = baseMilli - packs * factorMilli;
+  return rest === 0 ? `${packs} ${purchaseUnit}` : `${packs} ${purchaseUnit} + ${formatQty(rest)} ${inventoryUnit}`;
+}
+
 /**
  * 行金额（分）= 库存单位数量 × 每采购单位价格 ÷ 换算，四舍五入到分。
  * 用整数有理数计算，例：800 双 × 180 元/箱 ÷ 100 双/箱 = 1,440.00 元。

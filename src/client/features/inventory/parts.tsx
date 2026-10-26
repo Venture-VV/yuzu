@@ -12,7 +12,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { INV_DOC_META, INV_STATUS_LABELS, MOVE_TYPE_LABELS, type InvDocStatus, type InvDocType, type MoveType } from '@shared/inventory';
-import { formatQty, toPurchaseQty } from '@shared/quantity';
+import { formatQty, packText } from '@shared/quantity';
 import { cn } from '../../lib/utils';
 
 export const DOC_VISUAL: Record<InvDocType, { icon: LucideIcon; tone: string; dot: string }> = {
@@ -98,12 +98,11 @@ export function Qty({
   );
 }
 
-/** 「= 8 箱」：只在能整除时提示采购单位数量 */
+/** 「= 9 箱 + 67 双」：按整包装提示，便于对照货架清点；不足一个包装时不显示 */
 export function PackHint({ milli, factorMilli, purchaseUnit, inventoryUnit, className }: { milli: number; factorMilli: number; purchaseUnit: string; inventoryUnit: string; className?: string }) {
-  if (purchaseUnit === inventoryUnit || factorMilli === 1000 || milli === 0) return null;
-  const packs = toPurchaseQty(Math.abs(milli), factorMilli);
-  if (packs === null) return null;
-  return <span className={cn('num text-[11.5px] text-ink-3', className)}>= {formatQty(packs)} {purchaseUnit}</span>;
+  const text = packText(Math.abs(milli), factorMilli, purchaseUnit, inventoryUnit);
+  if (!text) return null;
+  return <span className={cn('num text-[11.5px] text-ink-3', className)}>= {text}</span>;
 }
 
 /** 「模拟规则」：未经店主确认的经营规则统一标注 */

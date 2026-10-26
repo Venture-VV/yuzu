@@ -60,7 +60,7 @@ docker compose logs app      # 应看到「已应用迁移」「已创建初始�
 - [ ] `docker compose restart` 后数据仍在；**拔电重启 Mac mini** 后服务自动恢复（等 Docker 启动约 1–2 分钟）
 - [ ] 断开门店外网（拔掉光猫上行），局域网内仍可正常登录、充值、消费
 - [ ] `./scripts/backup.sh` 成功，备份文件出现在外置盘
-- [ ] 做一次恢复演练：`./scripts/restore.sh <备份文件>`，结束时显示 4 项核对 ✓
+- [ ] 做一次恢复演练：`./scripts/restore.sh <备份文件>`，结束时会员 4 项、库存 5 项核对全部 ✓
 - [ ] 清理演示数据：试用结束转正式时，建议使用全新的数据库卷（见下文「环境隔离」）
 
 ## 5. 日常运维
@@ -71,7 +71,7 @@ docker compose logs app      # 应看到「已应用迁移」「已创建初始�
 | 查看日志 | `docker compose logs -f app`、`docker compose logs backup` |
 | 重启服务 | `docker compose restart app` |
 | 立即备份 | `./scripts/backup.sh` |
-| 核对余额与流水 | `docker compose exec app node dist/server/cli.js check` |
+| 核对余额与流水、库存结存与库存流水 | `docker compose exec app node dist/server/cli.js check` |
 | 店主忘记密码 | `docker compose exec app node dist/server/cli.js reset-password <账号>` |
 | 更新版本 | `./scripts/update.sh v0.2.0` |
 | 恢复备份 | `./scripts/restore.sh <备份文件>` |
@@ -91,7 +91,26 @@ docker compose logs app      # 应看到「已应用迁移」「已创建初始�
 
 - **不要**执行 `docker compose down -v`，`-v` 会删除数据库卷。
 
-## 7. 备份策略建议
+## 7. 升级到库存与采购版本
+
+库存与采购随应用一起发布，**不需要单独部署**：
+
+1. `./scripts/update.sh <新版本标签>`：先自动备份，启动时增量执行迁移 `002_inventory.sql`、`003_purchasing.sql`（只新增表和列，不改动会员数据）。
+2. 升级后原有员工的岗位不变、库存职责为空：前台店员看不到库存；店主拥有全部权限。在「管理 → 员工」为后勤同事新建「后勤人员」账号并勾选职责。
+3. 在「管理 → 经营规则 → 库存与采购」确认库存范围、价格口径、哪些单据需要负责人确认。
+4. 在「库存 → 档案」建立首批物料与供应商，再由物资经办录入期初盘点、负责人确认。
+5. 运行 `check`，会员与库存核对全部 ✓。
+
+**演示数据只放独立的演示库。** 试用 / 正式环境执行 `seed-inventory-demo` 会被拒绝；库里已有任何非演示的物料、供应商或单据时也会拒绝。需要给员工培训时，另起一个演示项目：
+
+```bash
+cp .env .env.demo                # 修改 APP_ENV=development、APP_PORT=8082、BACKUP_DIR 指向另一个目录
+docker compose --env-file .env.demo -p yuzu-demo up -d
+docker compose -p yuzu-demo exec app node dist/server/cli.js seed-demo
+docker compose -p yuzu-demo exec app node dist/server/cli.js seed-inventory-demo
+```
+
+## 8. 备份策略建议
 
 - 自动：每天凌晨备份到外置盘，保留 30 天。
 - 每周：把外置盘中最新的备份复制到店外（加密 U 盘或可信网盘）。

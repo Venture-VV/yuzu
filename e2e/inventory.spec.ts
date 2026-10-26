@@ -1,0 +1,166 @@
+// 库存与采购浏览器验收：依赖两套合成数据（npm run seed 与 npm run cli seed-inventory-demo，仅独立演示库）。
+// 账号：店主 linlan / 物资经办 lixiao / 采购对账 zhouyi，密码 yuzu2026。
+// 业务流程只在门店电脑尺寸跑一遍（会改变演示数据，断言都用相对变化）；平板尺寸检查主要页面布局。
+import { expect, test, type Page } from '@playwright/test';
+
+const PASSWORD = 'yuzu2026';
+
+async function login(page: Page, username: string, landing: RegExp | string) {
+  await page.goto('/login');
+  await page.fill('#username', username);
+  await page.fill('#password', PASSWORD);
+  await page.getByRole('button', { name: '登录' }).click();
+  await expect(page.getByRole('heading', { name: landing })).toBeVisible();
+}
+
+const nav = (page: Page, name: string) => page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name, exact: true });
+
+async function stockOf(page: Page, code: string): Promise<number> {
+  const res = await page.request.get('/api/inventory/materials');
+  const m = ((await res.json()) as { code: string; stockMilli: number }[]).find((x) => x.code === code)!;
+  return m.stockMilli / 1000;
+}
+
+async function topUp(page: Page, materialCode: string, supplierCode: string, qty: number) {
+  const materials = (await (await page.request.get('/api/inventory/materials')).json()) as { id: number; code: string; refPriceCents: number }[];
+  const suppliers = (await (await page.request.get('/api/inventory/suppliers')).json()) as { id: number; code: string }[];
+  const m = materials.find((x) => x.code === materialCode)!;
+  const me = await (await page.request.get('/api/auth/me')).json();
+  const res = await page.request.post('/api/inventory/docs', {
+    data: {
+      clientKey: crypto.randomUUID(),
+      docType: 'receipt',
+      docDate: me.calendarToday,
+      supplierId: suppliers.find((x) => x.code === supplierCode)!.id,
+      note: 'E2E 补货（合成数据）',
+      lines: [{ materialId: m.id, deliveredMilli: qty * 1000, acceptedMilli: qty * 1000, priceCents: m.refPriceCents }],
+    },
+  });
+  expect(res.status()).toBe(201);
+}
+
+async function logout(page: Page) {
+  await page.request.post('/api/auth/logout');
+}
+
+test.describe('库存与采购流程', () => {
+  test.skip(({ viewport }) => (viewport?.width ?? 0) < 1280, '流程只在门店电脑尺寸执行一次');
+
+  test('物资经办：登录直接进入库存，没有会员与日结入口；按箱领用、领用退回', async ({ page }) => {
+    await login(page, 'lixiao', '库存');
+    await expect(nav(page, '库存')).toBeVisible();
+    await expect(nav(page, '会员')).toHaveCount(0);
+    await expect(nav(page, '日结')).toHaveCount(0);
+    await expect(nav(page, '货款')).toHaveCount(0);
+
+    // 反复执行会消耗演示库存：不够一箱时先按正式流程补一张直接收货
+    if ((await stockOf(page, 'M018')) < 24) await topUp(page, 'M018', 'S005', 48);
+    const before = await stockOf(page, 'M018');
+    await page.getByRole('link', { name: '部门领用' }).first().click();
+    await page.getByRole('radio', { name: '水吧' }).click();
+    await page.fill('#handler', '水吧小吴');
+    await page.getByLabel('添加物料').fill('饮用水');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('1');
+    // 「10 箱」与「10 瓶」一眼可辨：切到箱后按换算显示瓶数
+    await page.getByRole('radio', { name: '箱' }).first().click();
+    await expect(page.getByText('= 24 瓶')).toBeVisible();
+    await page.getByRole('button', { name: /确认领用/ }).click();
+    await expect(page.getByText('部门领用已生效')).toBeVisible();
+    expect(await stockOf(page, 'M018')).toBe(before - 24);
+
+    // 从单据详情发起领用退回，最多退回原领用数量
+    await page.getByRole('button', { name: '查看单据' }).click();
+    await page.getByRole('dialog', { name: '库存单据详情' }).getByRole('button', { name: '领用退回' }).click();
+    await expect(page.getByText('原领 24')).toBeVisible();
+    await page.getByLabel('退回数量（瓶）').fill('30');
+    await expect(page.getByText('最多 24 瓶')).toBeVisible();
+    await expect(page.getByRole('button', { name: /确认退回/ })).toBeDisabled();
+    await page.getByLabel('退回数量（瓶）').fill('4');
+    await page.getByRole('button', { name: /确认退回/ }).click();
+    await expect(page.getByText('领用退回已生效')).toBeVisible();
+    expect(await stockOf(page, 'M018')).toBe(before - 20);
+  });
+
+  test('盘点差异先是待核差异，负责人在待办确认后才调整库存', async ({ page }) => {
+    await login(page, 'lixiao', '库存');
+    const book = await stockOf(page, 'M013');
+    await page.goto('/inventory/new/count');
+    await page.getByLabel('添加物料').fill('抽纸');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type(String(book - 2));
+    await expect(page.getByText('待核差异').first()).toBeVisible();
+    await page.getByRole('button', { name: /提交确认/ }).click();
+    await expect(page.getByText('已提交，等待负责人确认')).toBeVisible();
+    expect(await stockOf(page, 'M013')).toBe(book);
+    await logout(page);
+
+    await login(page, 'linlan', '会员工作台');
+    await nav(page, '待办').click();
+    await page.getByRole('button', { name: /盘点/ }).filter({ hasText: '抽纸' }).first().click();
+    await page.getByLabel('抽纸差异原因').selectOption('measurement');
+    await page.getByRole('button', { name: '确认盘点调整' }).click();
+    await expect(page.getByText('盘点调整已确认').first()).toBeVisible();
+    expect(await stockOf(page, 'M013')).toBe(book - 2);
+  });
+
+  test('采购 → 负责人确认 → 按单收货（拒收不入库）→ 登记付款', async ({ page }) => {
+    await login(page, 'zhouyi', '库存');
+    await nav(page, '采购').click();
+    await page.getByRole('link', { name: '新建采购单' }).click();
+    await page.selectOption('#po-sup', { label: 'S004 · 栖谷护理用品（模拟）' });
+    await page.getByLabel('添加物料').fill('护理床单');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('2');
+    await expect(page.getByText('= 1,000 张')).toBeVisible();
+    await expect(page.getByText('持平')).toBeVisible();
+    await page.getByRole('button', { name: /提交确认/ }).click();
+    await expect(page.getByText('已提交，等待负责人确认')).toBeVisible();
+    const poNo = (await page.getByRole('dialog', { name: '采购单详情' }).locator('p.num').first().innerText()).trim();
+    await logout(page);
+
+    await login(page, 'linlan', '会员工作台');
+    await page.goto('/todo');
+    await page.getByRole('button', { name: new RegExp(poNo) }).click();
+    await page.getByRole('button', { name: '确认采购' }).click();
+    await expect(page.getByText('采购单已确认').first()).toBeVisible();
+    await logout(page);
+
+    await login(page, 'lixiao', '库存');
+    const before = await stockOf(page, 'M016');
+    await page.goto('/purchasing');
+    await page.getByRole('button', { name: new RegExp(poNo) }).click();
+    await page.getByRole('button', { name: '按单收货' }).click();
+    await expect(page.getByText(`按采购单 ${poNo} 收货`)).toBeVisible();
+    // 送达 2 箱，只验收 1 箱
+    await page.getByLabel('合格实收（箱）').fill('1');
+    await page.getByLabel('拒收原因').fill('一箱受潮');
+    await page.getByRole('button', { name: /确认收货/ }).click();
+    await expect(page.getByText('收货入库已生效')).toBeVisible();
+    expect(await stockOf(page, 'M016')).toBe(before + 500);
+    await logout(page);
+
+    await login(page, 'zhouyi', '库存');
+    await page.goto('/payables');
+    const balanceRow = page.getByRole('row').filter({ hasText: '栖谷护理用品' });
+    await expect(balanceRow).toBeVisible();
+    await balanceRow.getByRole('link', { name: '付款' }).click();
+    const target = page.getByRole('checkbox').last();
+    await target.check();
+    await page.fill('#pay-ev', '流水尾号 1026');
+    await page.getByRole('button', { name: '登记付款' }).click();
+    await expect(page.getByText('已提交，等待负责人确认')).toBeVisible();
+  });
+});
+
+test.describe('平板布局', () => {
+  test('库存、单据录入、采购与货款页面无横向溢出', async ({ page }) => {
+    await login(page, 'linlan', '会员工作台');
+    for (const url of ['/inventory', '/inventory/new/receipt', '/inventory/new/count', '/purchasing', '/payables', '/payables?view=statement&supplier=1', '/todo']) {
+      await page.goto(url);
+      await page.waitForLoadState('networkidle');
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow, url).toBeLessThanOrEqual(1);
+    }
+  });
+});

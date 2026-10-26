@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Plus, Search } from 'lucide-react';
 import type { Material } from '@shared/inventory';
-import { formatQty, parseQty, toBaseQty, toPurchaseQty } from '@shared/quantity';
+import { formatQty, packText, parseQty, toBaseQty, toPurchaseQty } from '@shared/quantity';
 import { cn } from '../../lib/utils';
 import { Qty } from './parts';
 
@@ -236,9 +236,8 @@ export function QtyInput({
                 aria-checked={value.unit === u}
                 onClick={() => {
                   if (value.unit === u) return;
-                  // 切换单位时按换算保留数量，避免「10 箱」悄悄变成「10 瓶」
-                  const cur = resolveQty(value, material);
-                  onChange(cur.milli !== null ? qtyEntryFromMilli(cur.milli, material, u) : { ...value, unit: u });
+                  // 切换单位时按新单位理解所填数字（2 → 2 箱），下方的「= 200 双」提示随之变化，一眼可辨
+                  onChange({ ...value, unit: u });
                 }}
                 className={cn(
                   'h-full min-w-8 rounded-[6px] px-1.5 text-[12.5px] font-bold transition-colors',
@@ -258,8 +257,11 @@ export function QtyInput({
           ? r.error
           : r.milli !== null && value.unit === 'pack' && pack
             ? `= ${formatQty(r.milli)} ${material.inventoryUnit}`
-            : r.milli !== null && pack && toPurchaseQty(r.milli, material.purchaseFactorMilli) !== null && r.milli > 0
-              ? `= ${formatQty(toPurchaseQty(r.milli, material.purchaseFactorMilli)!)} ${material.purchaseUnit}`
+            : r.milli !== null && pack
+              ? (() => {
+                  const t = packText(r.milli, material.purchaseFactorMilli, material.purchaseUnit, material.inventoryUnit);
+                  return t ? `= ${t}` : '';
+                })()
               : ''}
       </p>
     </div>

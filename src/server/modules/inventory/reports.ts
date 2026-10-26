@@ -159,6 +159,13 @@ export function registerReportRoutes(app: FastifyInstance, deps: Deps) {
   const { sql, config } = deps;
 
   app.get('/api/inventory/overview', { preHandler: guard('inventory.read') }, async () => inventoryOverview(sql, config.timezone));
+  // 导航「待办」上的数字：所有等待负责人确认的单据
+  app.get('/api/inventory/todo-count', { preHandler: guard('inventory.approve') }, async () => {
+    const [row] = await sql<{ count: number }[]>`
+      SELECT (SELECT count(*) FROM inv_docs WHERE status = 'submitted') + (SELECT count(*) FROM purchase_orders WHERE status = 'submitted')
+           + (SELECT count(*) FROM payments WHERE status = 'submitted') + (SELECT count(*) FROM opening_payables WHERE status = 'submitted') AS count`;
+    return { count: row!.count };
+  });
 
   app.get('/api/inventory/materials/:id/card', { preHandler: guard('inventory.read') }, async (req) => {
     const { id } = parse(idParam, req.params);
