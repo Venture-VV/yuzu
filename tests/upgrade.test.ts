@@ -44,9 +44,9 @@ beforeAll(async () => {
   await recharge(deps, { idempotencyKey: rechargeKey, memberId, planId: null, paidAmount: 50000, bonusAmount: 5000, paymentMethod: 'cash', paymentConfirmed: true }, { actor: ownerActor });
   await consume(deps, { idempotencyKey: randomUUID(), memberId, customLines: [{ name: '升级前消费', amount: 12800 }], expectedTotal: 12800 }, { actor: clerkActor });
 
-  // 升级：增量执行 002、003
+  // 升级：增量执行 002 之后的全部迁移
   const applied = await migrate(sql);
-  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql']);
+  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql']);
   app = await buildApp(sql, config);
 }, 60_000);
 
@@ -112,6 +112,24 @@ describe('升级后', () => {
     // 店员仍看不到库存
     const clerk = await login(app, 'clerk');
     expect((await api(app, clerk, 'GET', '/api/inventory/materials')).status).toBe(403);
+  });
+
+  it('前台模块可用：手牌池为空（升级不预置样例），自检通过，店员可开牌挂账', async () => {
+    const owner = await login(app, 'owner');
+    const clerk = await login(app, 'clerk');
+    const board = await api(app, clerk, 'GET', '/api/frontdesk/board');
+    expect(board.status).toBe(200);
+    expect(board.body.tags).toEqual([]);
+    const { n } = (await sql<{ n: number }[]>`SELECT (SELECT count(*) FROM hand_tags) + (SELECT count(*) FROM visits) + (SELECT count(*) FROM bills) AS n`)[0]!;
+    expect(n).toBe(0);
+    for (const c of (await api(app, owner, 'GET', '/api/frontdesk/checks')).body) expect(c, c.label).toMatchObject({ ok: true });
+    expect((await api(app, owner, 'POST', '/api/frontdesk/tags/batch', { prefix: '', from: 1, to: 5, width: 3, zone: 'female' })).body.created).toBe(5);
+    const v = await api(app, clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: '003', zone: 'female', memberId }] });
+    expect(v.status).toBe(201);
+    const p = await api(app, clerk, 'POST', `/api/frontdesk/visits/${v.body.visits[0].id}/charges`, { clientKey: randomUUID(), lines: [], customLines: [{ name: '升级后挂账', amount: 3000 }], expectedTotal: 3000 });
+    expect(p.body.bill.amountCents).toBe(3000);
+    // 挂账不扣会员余额
+    expect((await api(app, clerk, 'GET', `/api/members/${memberId}`)).body).toMatchObject({ principalBalance: 35200, bonusBalance: 5000 });
   });
 
   it('再次执行迁移不会重复应用', async () => {

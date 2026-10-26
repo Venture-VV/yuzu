@@ -26,11 +26,25 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   plan_saved: { label: '保存套餐', tone: 'neutral' },
   item_saved: { label: '保存项目', tone: 'neutral' },
   export: { label: '导出', tone: 'neutral' },
+  frontdesk_checkin: { label: '接待发牌', tone: 'pine' },
+  frontdesk_swap: { label: '换牌', tone: 'lake' },
+  frontdesk_group: { label: '同行绑牌', tone: 'lake' },
+  frontdesk_cancel: { label: '撤销来访', tone: 'clay' },
+  frontdesk_post: { label: '手牌挂账', tone: 'yuzu' },
+  frontdesk_void: { label: '作废明细', tone: 'clay' },
+  hand_tags_created: { label: '建手牌', tone: 'neutral' },
+  hand_tag_locked: { label: '锁定手牌', tone: 'ember' },
+  hand_tag_unlocked: { label: '解锁手牌', tone: 'neutral' },
+  hand_tag_updated: { label: '修改手牌', tone: 'neutral' },
 };
 
 function describe(detail: Record<string, unknown>): string {
   const parts: string[] = [];
   if (typeof detail.docNo === 'string') parts.push(detail.docNo);
+  if (typeof detail.visitNo === 'string') parts.push(detail.visitNo);
+  if (Array.isArray(detail.tags)) parts.push(`手牌 ${detail.tags.join('、')}`);
+  if (typeof detail.from === 'string' && typeof detail.to === 'string') parts.push(`${detail.from} → ${detail.to}`);
+  if (typeof detail.code === 'string') parts.push(`手牌 ${detail.code}`);
   if (typeof detail.username === 'string') parts.push(`账号 ${detail.username}`);
   if (typeof detail.name === 'string') parts.push(detail.name);
   if (typeof detail.reason === 'string') parts.push(detail.reason);

@@ -1,0 +1,192 @@
+// 前台模块的公共能力：规则、营业日、单号、按固定顺序加锁、幂等键。
+//
+// 并发规则：
+//   · 加锁顺序固定为「手牌（id 升序）→ 同行组（id 升序）→ 来访（id 升序）→ 账单」，任何操作都不反向加锁；
+//   · 「一牌一人」「一位会员只持一张在店手牌」由部分唯一索引兜底，即使漏锁也不会出现双占；
+//   · 账单合计与明细在同一事务内更新，自检核对二者一致。
+
+import { createHash } from 'node:crypto';
+import { businessDateOf } from '@shared/business-date';
+import { DEFAULT_FRONTDESK_RULES, type FrontdeskRules, type Zone, ZONE_LABELS } from '@shared/frontdesk';
+import { can } from '@shared/permissions';
+import { isUniqueViolation, type Db, type Tx } from '../../db';
+import type { Actor, Deps } from '../../lib/context';
+import { conflict, forbidden, unprocessable } from '../../lib/errors';
+import { nextDocNo, setTxTimeouts } from '../inventory/common';
+import { loadSettings } from '../settings';
+
+export { nextDocNo, setTxTimeouts };
+
+export async function loadFrontdeskRules(db: Db): Promise<FrontdeskRules> {
+  const [row] = await db<{ value: Partial<FrontdeskRules> }[]>`SELECT value FROM settings WHERE key = 'frontdesk_rules'`;
+  return { ...DEFAULT_FRONTDESK_RULES, ...(row?.value ?? {}) };
+}
+
+/** 前台按会员业务同一套营业日（例如凌晨 6 点切换），跨夜在店的客人归入入场时的营业日 */
+export async function businessDate(db: Db, deps: Deps, at: Date): Promise<string> {
+  const settings = await loadSettings(db);
+  return businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
+}
+
+export const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+
+export type FrontdeskOp = 'checkin' | 'bill_post' | 'tag_swap';
+
+interface KeyRow {
+  opType: string;
+  requestHash: string;
+  refId: number;
+}
+
+/** 查找操作编号；同一编号用于不同的请求时拒绝，避免把两笔业务混成一笔 */
+export async function findKey(db: Db, key: string, opType: FrontdeskOp, requestHash: string): Promise<number | null> {
+  const [row] = await db<KeyRow[]>`SELECT op_type, request_hash, ref_id FROM idempotency_keys WHERE key = ${key}`;
+  if (!row) return null;
+  if (row.opType !== opType || row.requestHash !== requestHash) {
+    throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一笔不同的业务，请刷新页面后重新发起');
+  }
+  return row.refId;
+}
+
+export async function saveKey(tx: Tx, key: string, opType: FrontdeskOp, requestHash: string, refId: number, staffId: number) {
+  await tx`
+    INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id)
+    VALUES (${key}, ${opType}, ${requestHash}, ${refId}, ${staffId})`;
+}
+
+/**
+ * 执行一笔幂等写操作：同一编号重复提交时返回第一次的结果编号。
+ * 并发的同编号请求由主键冲突兜底，再查回第一次的结果。
+ */
+export async function runIdempotent(
+  deps: Deps,
+  opts: { key: string; opType: FrontdeskOp; requestHash: string },
+  body: (tx: Tx) => Promise<number>,
+): Promise<{ refId: number; replayed: boolean }> {
+  try {
+    return await deps.sql.begin(async (tx) => {
+      await setTxTimeouts(tx);
+      const existing = await findKey(tx, opts.key, opts.opType, opts.requestHash);
+      if (existing !== null) return { refId: existing, replayed: true };
+      return { refId: await body(tx), replayed: false };
+    });
+  } catch (error) {
+    if (isUniqueViolation(error, 'idempotency_keys_pkey')) {
+      const existing = await findKey(deps.sql, opts.key, opts.opType, opts.requestHash);
+      if (existing !== null) return { refId: existing, replayed: true };
+    }
+    throw mapUniqueViolation(error);
+  }
+}
+
+/** 部分唯一索引兜底时，翻译成店员看得懂的提示 */
+export function mapUniqueViolation(error: unknown): unknown {
+  if (isUniqueViolation(error, 'visits_tag_open_uq')) {
+    return conflict('TAG_OCCUPIED', '这张手牌刚刚被其他终端发出，请换一张空闲手牌');
+  }
+  if (isUniqueViolation(error, 'visits_member_open_uq')) {
+    return conflict('MEMBER_IN_STORE', '这位会员已持有一张在店手牌，请先在状态板上找到原手牌');
+  }
+  return error;
+}
+
+export interface LockedTag {
+  id: number;
+  code: string;
+  zone: Zone;
+  locked: boolean;
+  lockReason: string | null;
+  active: boolean;
+}
+
+/** 按 id 升序锁定手牌；牌号不存在时提示具体牌号 */
+export async function lockTagsByCode(tx: Tx, codes: string[]): Promise<Map<string, LockedTag>> {
+  const unique = [...new Set(codes)];
+  if (unique.length === 0) return new Map();
+  const rows = await tx<LockedTag[]>`
+    SELECT id, code, zone, locked, lock_reason, active FROM hand_tags
+    WHERE code IN ${tx(unique)} ORDER BY id FOR UPDATE`;
+  const byCode = new Map(rows.map((r) => [r.code, r]));
+  const missing = unique.filter((c) => !byCode.has(c));
+  if (missing.length) throw unprocessable('TAG_NOT_FOUND', `手牌池里没有牌号 ${missing.join('、')}，请核对牌号`, { codes: missing });
+  return byCode;
+}
+
+/** 手牌可以发给这位宾客吗：启用、未锁定、分区一致 */
+export function assertTagIssuable(tag: LockedTag, zone: Zone) {
+  if (!tag.active) throw unprocessable('TAG_INACTIVE', `手牌 ${tag.code} 已停用，请换一张`);
+  if (tag.locked) throw unprocessable('TAG_LOCKED', `手牌 ${tag.code} 已锁定（${tag.lockReason}），请换一张`);
+  if (tag.zone !== zone) {
+    throw unprocessable(
+      'ZONE_MISMATCH',
+      `手牌 ${tag.code} 是${ZONE_LABELS[tag.zone].title}牌，不能发给${ZONE_LABELS[zone].title}，请换一张${ZONE_LABELS[zone].title}牌`,
+      { tagZone: tag.zone, guestZone: zone },
+    );
+  }
+}
+
+/** 已锁定手牌上的在店来访（用来提示「已在店」） */
+export async function openVisitsOnTags(tx: Tx, tagIds: number[]) {
+  if (tagIds.length === 0) return [];
+  return tx<{ tagId: number; visitNo: string; checkedInAt: string }[]>`
+    SELECT tag_id, visit_no, checked_in_at FROM visits WHERE status = 'open' AND tag_id IN ${tx(tagIds)}`;
+}
+
+export interface LockedVisit {
+  id: number;
+  visitNo: string;
+  billId: number;
+  tagId: number;
+  zone: Zone;
+  memberId: number | null;
+  groupId: number | null;
+  status: 'open' | 'settled' | 'cancelled';
+  checkedInAt: string;
+  checkedInBy: number;
+}
+
+export async function lockVisits(tx: Tx, ids: number[]): Promise<Map<number, LockedVisit>> {
+  const unique = [...new Set(ids)].sort((a, b) => a - b);
+  if (unique.length === 0) return new Map();
+  const rows = await tx<LockedVisit[]>`
+    SELECT id, visit_no, bill_id, tag_id, zone, member_id, group_id, status, checked_in_at, checked_in_by
+    FROM visits WHERE id IN ${tx(unique)} ORDER BY id FOR UPDATE`;
+  if (rows.length !== unique.length) throw unprocessable('VISIT_NOT_FOUND', '来访记录不存在，请刷新后重试');
+  return new Map(rows.map((r) => [r.id, r]));
+}
+
+export function assertOpen(v: LockedVisit) {
+  if (v.status !== 'open') {
+    throw conflict('VISIT_CLOSED', `来访 ${v.visitNo} 已${v.status === 'settled' ? '结账离店' : '撤销'}，不能再操作`);
+  }
+}
+
+export async function lockGroups(tx: Tx, ids: (number | null)[]) {
+  const unique = [...new Set(ids.filter((x): x is number => x !== null))].sort((a, b) => a - b);
+  if (unique.length === 0) return;
+  await tx`SELECT id FROM visit_groups WHERE id IN ${tx(unique)} ORDER BY id FOR UPDATE`;
+}
+
+/** 同行组没有在店客人时关闭 */
+export async function closeGroupIfEmpty(tx: Tx, groupId: number | null, at: Date) {
+  if (!groupId) return;
+  const [row] = await tx<{ open: number }[]>`SELECT count(*) AS open FROM visits WHERE group_id = ${groupId} AND status = 'open'`;
+  if (row!.open === 0) {
+    await tx`UPDATE visit_groups SET status = 'closed', closed_at = ${at} WHERE id = ${groupId} AND status = 'open'`;
+  }
+}
+
+/**
+ * 更正权限：有「作废与撤销」权限的岗位随时可以；
+ * 其他人只能处理自己在规定分钟内登记的内容。
+ */
+export function assertCanFix(actor: Actor, ownerId: number, createdAt: string, rules: FrontdeskRules, now: Date, what: string) {
+  if (can(actor, 'frontdesk.correct')) return;
+  const minutes = (now.getTime() - new Date(createdAt).getTime()) / 60_000;
+  if (ownerId === actor.id && minutes <= rules.selfVoidMinutes) return;
+  throw forbidden(
+    ownerId === actor.id
+      ? `${what}已超过 ${rules.selfVoidMinutes} 分钟，请由店主处理`
+      : `${what}不是你登记的，请由店主或登记人处理`,
+  );
+}

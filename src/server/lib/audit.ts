@@ -24,7 +24,17 @@ export type AuditAction =
   | 'inventory_doc'
   | 'purchase_order'
   | 'payable_doc'
-  | 'inventory_settings_updated';
+  | 'inventory_settings_updated'
+  | 'frontdesk_checkin'
+  | 'frontdesk_swap'
+  | 'frontdesk_group'
+  | 'frontdesk_cancel'
+  | 'frontdesk_post'
+  | 'frontdesk_void'
+  | 'hand_tags_created'
+  | 'hand_tag_locked'
+  | 'hand_tag_unlocked'
+  | 'hand_tag_updated';
 
 export interface AuditEntry {
   staffId: number | null;

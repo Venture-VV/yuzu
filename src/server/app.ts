@@ -11,6 +11,7 @@ import { AppError } from './lib/errors';
 import type { Deps } from './lib/context';
 import { registerAuditRoutes } from './modules/audit';
 import { registerCatalogRoutes } from './modules/catalog';
+import { registerFrontdeskRoutes } from './modules/frontdesk/routes';
 import { registerDocRoutes } from './modules/inventory/docs';
 import { registerMasterRoutes } from './modules/inventory/master';
 import { registerPayableRoutes } from './modules/inventory/payables';
@@ -77,7 +78,9 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
       req.log.warn({ err: error }, '记账等待超时');
       const what = req.url.startsWith('/api/inventory') || req.url.startsWith('/api/purchase') || req.url.startsWith('/api/payables')
         ? '相关物料或单据'
-        : '该会员';
+        : req.url.startsWith('/api/frontdesk')
+          ? '这张手牌或账单'
+          : '该会员';
       reply.status(409).send({ error: { code: 'BUSY', message: `${what}正在被其他终端操作，本次未生效，请稍后重试` } });
       return;
     }
@@ -113,6 +116,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerReportRoutes(app, deps);
   registerPurchasingRoutes(app, deps);
   registerPayableRoutes(app, deps);
+  registerFrontdeskRoutes(app, deps);
 
   // 前端静态资源（构建产物），全部从本机提供，外网中断不影响使用。
   const staticDir = resolve(process.env.STATIC_DIR ?? 'dist/client');
