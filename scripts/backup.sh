@@ -12,4 +12,4 @@ docker compose exec -T db pg_dump -U yuzu -d yuzu -Fc > "$file.partial"
 # 校验备份文件可以被读取
 docker compose exec -T db pg_restore -l < "$file.partial" > /dev/null
 mv "$file.partial" "$file"
-echo "✓ 已备份：$file（$(du -h "$file" | cut -f1)）"
+echo "✓ 已备份：${file}（$(du -h "$file" | cut -f1)）"
