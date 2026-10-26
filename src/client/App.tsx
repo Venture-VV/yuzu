@@ -18,6 +18,10 @@ import { AdminPage } from './features/admin/AdminPage';
 import { DocFormPage } from './features/inventory/DocFormPage';
 import { InventoryPage } from './features/inventory/InventoryPage';
 import { TodoPage } from './features/inventory/TodoPage';
+import { PayablesPage } from './features/payables/PayablesPage';
+import { PaymentFormPage } from './features/payables/PaymentFormPage';
+import { PoFormPage } from './features/purchasing/PoFormPage';
+import { PurchasingPage } from './features/purchasing/PurchasingPage';
 import { useCan } from './lib/session';
 
 const queryClient = new QueryClient({
@@ -102,6 +106,12 @@ const router = createBrowserRouter([
       { path: 'inventory/docs/:id/edit', element: <DocFormPage /> },
       { path: 'inventory/:tab?', element: <InventoryPage /> },
       { path: 'todo', element: <TodoPage /> },
+      { path: 'purchasing', element: <PurchasingPage /> },
+      { path: 'purchasing/new', element: <PoFormPage mode="new" /> },
+      { path: 'purchasing/:id/edit', element: <PoFormPage mode="edit" /> },
+      { path: 'purchasing/:id/revise', element: <PoFormPage mode="revise" /> },
+      { path: 'payables', element: <PayablesPage /> },
+      { path: 'payables/pay', element: <PaymentFormPage /> },
       { path: 'password', element: <ChangePasswordPage /> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],

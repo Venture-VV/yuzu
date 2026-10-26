@@ -14,6 +14,8 @@ import { useToast } from '../../components/Toast';
 import { Button, Field, IconButton, Input, MoneyInput, Notice, Select, Skeleton, Spinner } from '../../components/ui';
 import { emptyQty, MaterialPicker, qtyEntryFromMilli, QtyInput, resolveQty, type QtyEntry } from './inputs';
 import { DOC_VISUAL, Qty, SimRule, StatusChip } from './parts';
+import type { PoLine } from '@shared/purchasing';
+import { usePo, usePos } from '../purchasing/queries';
 import { useDepartments, useInvDoc, useInvDocs, useInvSettings, useInvalidateInventory, useMaterials, useSuppliers, useUsual } from './queries';
 
 // ───────────────────────── 表单状态 ─────────────────────────
@@ -31,6 +33,8 @@ interface LineDraft {
   /** 每采购单位价格（元） */
   price: string;
   sourceLineId: number | null;
+  /** 按采购单收货：对应的采购单行 */
+  poLineId: number | null;
   /** 盘点：已记下的账面数（编辑草稿时） */
   bookMilli: number | null;
   stale: boolean;
@@ -43,6 +47,7 @@ interface FormState {
   supplierId: number | null;
   departmentId: number | null;
   sourceDocId: number | null;
+  purchaseOrderId: number | null;
   handler: string;
   note: string;
   lines: LineDraft[];
@@ -58,6 +63,7 @@ const blankLine = (materialId: number, over: Partial<LineDraft> = {}): LineDraft
   rejectReason: '',
   price: '',
   sourceLineId: null,
+  poLineId: null,
   bookMilli: null,
   stale: false,
   note: '',
@@ -70,6 +76,7 @@ const blankForm = (date: string): FormState => ({
   supplierId: null,
   departmentId: null,
   sourceDocId: null,
+  purchaseOrderId: null,
   handler: '',
   note: '',
   lines: [],
@@ -100,6 +107,7 @@ function formFromDoc(doc: InvDoc, materials: Map<number, Material>): FormState {
     supplierId: doc.supplier?.id ?? null,
     departmentId: doc.department?.id ?? null,
     sourceDocId: doc.sourceDoc?.id ?? null,
+    purchaseOrderId: doc.purchaseOrder?.id ?? null,
     handler: doc.handler,
     note: doc.note,
     lines: doc.lines.map((l) => {
@@ -113,6 +121,7 @@ function formFromDoc(doc: InvDoc, materials: Map<number, Material>): FormState {
         rejectReason: l.rejectReason,
         price: l.priceCents === null ? '' : centsToInput(l.priceCents),
         sourceLineId: l.sourceLineId,
+        poLineId: l.poLineId,
         bookMilli: l.bookMilli,
         stale: l.stale,
         note: l.note,
@@ -151,7 +160,7 @@ const NOTE_SPAN: Record<InvDocType, string> = {
   count: 'lg:col-span-3',
   direct_use: 'lg:col-span-3',
   damage: 'lg:col-span-3',
-  receipt: '',
+  receipt: 'sm:col-span-2 lg:col-span-4',
   issue: 'sm:col-span-2 lg:col-span-4',
   issue_return: 'sm:col-span-2 lg:col-span-4',
   supplier_return: 'sm:col-span-2 lg:col-span-1',
@@ -186,13 +195,17 @@ function NewDoc({ type }: { type: InvDocType }) {
   // 从库存卡或原单进入时带上物料 / 原单
   const prefillMaterial = Number(params.get('m')) || null;
   const prefillSource = Number(params.get('src')) || null;
+  const prefillPo = type === 'receipt' ? Number(params.get('po')) || null : null;
   // 「再录一张」时换一轮：清空表单、生成新的操作编号
   const [round, setRound] = useState(0);
   const initial = useMemo(() => {
-    const draft = round === 0 && !prefillSource ? readDraft(type) : null;
-    if (draft) return { form: draft, restored: true };
-    return { form: { ...blankForm(session.calendarToday), sourceDocId: round === 0 ? prefillSource : null }, restored: false };
-  }, [round, type, session.calendarToday, prefillSource]);
+    const draft = round === 0 && !prefillSource && !prefillPo ? readDraft(type) : null;
+    if (draft) return { form: { ...draft, purchaseOrderId: draft.purchaseOrderId ?? null }, restored: true };
+    return {
+      form: { ...blankForm(session.calendarToday), sourceDocId: round === 0 ? prefillSource : null, purchaseOrderId: round === 0 ? prefillPo : null },
+      restored: false,
+    };
+  }, [round, type, session.calendarToday, prefillSource, prefillPo]);
   return (
     <DocForm
       key={round}
@@ -333,6 +346,27 @@ function DocForm({
     }));
   }, [source.data, sourceType, form.lines.length, form.sourceDocId]);
 
+  // ── 按采购单收货 ──
+  const openPos = usePos({ open: '1', supplierId: form.supplierId ? String(form.supplierId) : undefined }, type === 'receipt' && !!form.supplierId);
+  const po = usePo(type === 'receipt' ? form.purchaseOrderId : null);
+  const poLines = useMemo(() => new Map((po.data?.lines ?? []).map((l) => [l.id, l])), [po.data]);
+  const choosePo = (poId: number | null) => patch({ purchaseOrderId: poId, lines: [] });
+  useEffect(() => {
+    if (!po.data || po.data.id !== form.purchaseOrderId) return;
+    if (!form.supplierId) patch({ supplierId: po.data.supplier.id });
+    if (form.lines.length > 0) return;
+    // 带出未到齐的行：送达默认按剩余数量（能整箱时按箱），单价取采购单
+    const lines = po.data.lines
+      .filter((l) => l.baseQtyMilli > l.receivedMilli)
+      .map((l) => {
+        const m = materials.get(l.materialId) ?? { purchaseFactorMilli: l.factorMilli };
+        const remaining = qtyEntryFromMilli(l.baseQtyMilli - l.receivedMilli, m, 'pack');
+        return blankLine(l.materialId, { poLineId: l.id, delivered: remaining, accepted: remaining, price: centsToInput(l.priceCents) });
+      });
+    if (lines.length) patch({ lines });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [po.data, form.purchaseOrderId]);
+
   // ── 逐行计算 ──
   const rows: Row[] = form.lines.map((l): Row => {
     const m = materials.get(l.materialId);
@@ -388,24 +422,46 @@ function DocForm({
         if (l.stale) errorText = '盘点后又有收发，需重新核对账面';
         break;
       case 'receipt': {
+        const pl = l.poLineId ? poLines.get(l.poLineId) : undefined;
         delivered = resolveQty(l.delivered, m);
         accepted = l.acceptedTouched ? resolveQty(l.accepted, m) : delivered;
-        price = parseYuan(l.price);
+        price = pl ? pl.priceCents : parseYuan(l.price);
         errorText = delivered.error ?? accepted.error;
+        if (pl) {
+          maxReturn = pl.baseQtyMilli - pl.receivedMilli;
+          if (accepted.milli !== null && accepted.milli > maxReturn) errorText = `超出采购单未到数量（还差 ${formatQty(Math.max(0, maxReturn))} ${m.inventoryUnit}）`;
+        }
         if (delivered.milli !== null && accepted.milli !== null) {
           rejected = delivered.milli - accepted.milli;
           if (rejected < 0) errorText = '合格实收不能多于送达';
           else if (rejected > 0 && !l.rejectReason.trim()) errorText = errorText ?? '请填写拒收原因';
           after = m.stockMilli + accepted.milli;
         }
-        if (l.price.trim() && price === null) errorText = errorText ?? '单价格式不正确';
-        if (!l.price.trim()) errorText = errorText ?? `请填写单价（元/${m.purchaseUnit}）`;
-        if (accepted.milli !== null && price !== null) amount = lineAmountCents(accepted.milli, price, m.purchaseFactorMilli);
+        if (!pl && l.price.trim() && price === null) errorText = errorText ?? '单价格式不正确';
+        if (!pl && !l.price.trim()) errorText = errorText ?? `请填写单价（元/${m.purchaseUnit}）`;
+        if (accepted.milli !== null && price !== null) amount = lineAmountCents(accepted.milli, price, pl ? pl.factorMilli : m.purchaseFactorMilli);
         ready = delivered.milli !== null && delivered.milli > 0 && accepted.milli !== null && price !== null && !errorText;
         break;
       }
     }
-    return { line: l, m, qty, error: errorText, ready: ready && !errorText, after, amount, rejected, maxReturn, book, diff, accepted, delivered, price, srcLine };
+    return {
+      line: l,
+      m,
+      qty,
+      error: errorText,
+      ready: ready && !errorText,
+      after,
+      amount,
+      rejected,
+      maxReturn,
+      book,
+      diff,
+      accepted,
+      delivered,
+      price,
+      srcLine,
+      poLine: l.poLineId ? poLines.get(l.poLineId) : undefined,
+    };
   });
 
   const isReturn = type === 'issue_return' || type === 'supplier_return';
@@ -499,10 +555,11 @@ function DocForm({
         return {
           ...base,
           supplierId: form.supplierId,
-          purchaseOrderId: null,
+          purchaseOrderId: form.purchaseOrderId,
           handler: form.handler.trim(),
           lines: lines.map((r) => ({
             materialId: r.line.materialId,
+            poLineId: form.purchaseOrderId ? r.line.poLineId : null,
             deliveredMilli: r.delivered!.milli,
             acceptedMilli: r.accepted!.milli,
             rejectReason: r.rejected && r.rejected > 0 ? r.line.rejectReason.trim() : '',
@@ -647,13 +704,31 @@ function DocForm({
             {type === 'receipt' && (
               <>
                 <Field label="供应商" htmlFor="supplier">
-                  <Select id="supplier" value={form.supplierId ?? ''} disabled={locked} onChange={(e) => patch({ supplierId: Number(e.target.value) || null })}>
+                  <Select
+                  id="supplier"
+                  value={form.supplierId ?? ''}
+                  disabled={locked}
+                  onChange={(e) => patch({ supplierId: Number(e.target.value) || null, ...(form.purchaseOrderId ? { purchaseOrderId: null, lines: [] } : {}) })}
+                >
                     <option value="">选择供应商</option>
                     {suppliers.data?.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.code} · {s.name}
                       </option>
                     ))}
+                  </Select>
+                </Field>
+                <Field label="采购单" htmlFor="po" hint={form.supplierId ? undefined : '先选供应商'}>
+                  <Select id="po" value={form.purchaseOrderId ?? ''} disabled={locked || !form.supplierId || !!editing} onChange={(e) => choosePo(Number(e.target.value) || null)}>
+                    <option value="">{settings.data?.allowDirectReceipt === false ? '请选择采购单' : '无采购单（直接收货）'}</option>
+                    {form.purchaseOrderId && !openPos.data?.some((p) => p.id === form.purchaseOrderId) && po.data && <option value={po.data.id}>{po.data.docNo}</option>}
+                    {openPos.data
+                      ?.filter((p) => p.receiving !== 'full')
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.docNo} · {p.summary}
+                        </option>
+                      ))}
                   </Select>
                 </Field>
                 <Field label="收货人" htmlFor="handler">
@@ -724,9 +799,14 @@ function DocForm({
             </Field>
           </section>
 
-          {type === 'receipt' && (
+          {type === 'receipt' && !form.purchaseOrderId && form.supplierId && (
             <Notice tone="warning" title="无采购单直接收货" icon={<CircleAlert className="size-5" />}>
               这张收货单会标记「缺少采购依据」。后续补采购单时关联本单，不会重复入库或计款。是否允许先收货后补单 <SimRule className="align-middle" />
+            </Notice>
+          )}
+          {type === 'receipt' && po.data && form.purchaseOrderId === po.data.id && (
+            <Notice tone="info" title={`按采购单 ${po.data.docNo} 收货`}>
+              单价与包装换算以采购单为准；本次合格实收不能超过未到数量，拒收部分不入库、不计货款。
             </Notice>
           )}
 
@@ -781,7 +861,7 @@ function DocForm({
               ))}
             </ul>
 
-            {!isReturn && !locked && (
+            {!isReturn && !locked && !form.purchaseOrderId && (
               <div className="border-t border-line px-5 py-3.5">
                 <MaterialPicker
                   ref={pickerRef}
@@ -907,6 +987,7 @@ interface Row {
   delivered?: Resolved | null;
   price?: number | null;
   srcLine?: InvDoc['lines'][number];
+  poLine?: PoLine;
 }
 
 /** 各类单据的列布局（容器足够宽时一行展示，平板上自动折行） */
@@ -1124,6 +1205,12 @@ function ReceiptCells({
           m={m}
           sub={
             <>
+              {row.poLine && (
+                <span className="block font-semibold text-lake">
+                  订 <Qty milli={row.poLine.baseQtyMilli} unit={row.poLine.inventoryUnit} /> · 已收 <Qty milli={row.poLine.receivedMilli} unit={row.poLine.inventoryUnit} /> · 未到{' '}
+                  <Qty milli={Math.max(0, row.poLine.baseQtyMilli - row.poLine.receivedMilli)} unit={row.poLine.inventoryUnit} />
+                </span>
+              )}
               现库存 <Qty milli={m.stockMilli} unit={m.inventoryUnit} />
               {row.after != null && (
                 <>
@@ -1171,9 +1258,15 @@ function ReceiptCells({
         )}
       </div>
       <div className="min-w-0">
-        {caption(`单价（元/${m.purchaseUnit}）`)}
-        <MoneyInput value={line.price} disabled={locked} onChange={(e) => onPatch({ price: e.target.value })} aria-label={`单价（元/${m.purchaseUnit}）`} className="h-10 text-right" />
-        <p className="mt-1 hidden text-right text-[11.5px] text-ink-3 @5xl:block">元 / {m.purchaseUnit}</p>
+        {caption(`单价（元/${row.poLine?.purchaseUnit ?? m.purchaseUnit}）`)}
+        <MoneyInput
+          value={row.poLine ? centsToInput(row.poLine.priceCents) : line.price}
+          disabled={locked || !!row.poLine}
+          onChange={(e) => onPatch({ price: e.target.value })}
+          aria-label={`单价（元/${row.poLine?.purchaseUnit ?? m.purchaseUnit}）`}
+          className="h-10 text-right"
+        />
+        <p className="mt-1 hidden text-right text-[11.5px] text-ink-3 @5xl:block">{row.poLine ? '采购单价' : `元 / ${m.purchaseUnit}`}</p>
       </div>
       <div className="min-w-0 @5xl:text-right">
         {caption('金额')}

@@ -16,7 +16,7 @@ import { writeAudit } from '../../lib/audit';
 import type { Actor, Deps } from '../../lib/context';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
-import { assertNotFuture, docDateSchema, loadInventorySettings, logApproval, nextDocNo, priceBaseline, setTxTimeouts } from './common';
+import { assertNotFuture, docDateSchema, loadInventorySettings, logApproval, nextDocNo, priceBaseline, setTxTimeouts, todayIn } from './common';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -552,6 +552,19 @@ export function registerPurchasingRoutes(app: FastifyInstance, deps: Deps) {
     return row ? { found: true, po: await getPo(sql, row.id) } : { found: false };
   });
   app.get('/api/purchase-orders/:id', { preHandler: guard('inventory.read') }, async (req) => getPo(sql, poId(req)));
+  // 编制采购单时实时比价：按物料当前包装与当前价格口径
+  app.get('/api/purchase-baseline', { preHandler: guard('inventory.read') }, async (req) => {
+    const { materialId } = parse(z.object({ materialId: z.coerce.number().int().positive() }), req.query);
+    const [m] = await sql<{ purchaseUnit: string; purchaseFactorMilli: number }[]>`SELECT purchase_unit, purchase_factor_milli FROM materials WHERE id = ${materialId}`;
+    if (!m) throw notFound('物料不存在');
+    const basis = (await loadInventorySettings(sql)).priceBasis;
+    const baseline = await priceBaseline(
+      sql,
+      { materialId, purchaseUnit: m.purchaseUnit, factorMilli: m.purchaseFactorMilli, priceBasis: basis },
+      { onOrBefore: todayIn(deps.config.timezone) },
+    );
+    return { baseline, priceBasis: basis };
+  });
 
   app.post('/api/purchase-orders', { preHandler: guard('purchase.manage') }, async (req, reply) => {
     const r = await createPo(deps, req.body, req.actor, { ip: req.ip });

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Boxes, CalendarCheck2, Inbox, KeyRound, LogOut, ReceiptText, Settings2, UsersRound } from 'lucide-react';
+import { Boxes, CalendarCheck2, HandCoins, Inbox, KeyRound, LogOut, ReceiptText, Settings2, ShoppingCart, UsersRound } from 'lucide-react';
 import { describeDate, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
 import type { Permission } from '@shared/permissions';
 import { api } from '../lib/api';
@@ -15,7 +15,8 @@ interface NavItem {
   to: string;
   label: string;
   icon: typeof UsersRound;
-  perm: Permission;
+  /** 拥有其中任一权限即显示 */
+  perm: Permission | Permission[];
   end?: boolean;
 }
 
@@ -28,6 +29,8 @@ const NAV: NavItem[][] = [
   ],
   [
     { to: '/inventory', label: '库存', icon: Boxes, perm: 'inventory.read' },
+    { to: '/purchasing', label: '采购', icon: ShoppingCart, perm: ['purchase.manage', 'inventory.approve', 'payable.read'] },
+    { to: '/payables', label: '货款', icon: HandCoins, perm: 'payable.read' },
     { to: '/todo', label: '待办', icon: Inbox, perm: 'inventory.approve' },
   ],
   [{ to: '/admin', label: '管理', icon: Settings2, perm: 'staff.manage' }],
@@ -45,7 +48,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <LogoMark className="size-10" />
         </NavLink>
         <div className="scroll-thin flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto">
-          {NAV.map((group) => group.filter((n) => can(n.perm)))
+          {NAV.map((group) => group.filter((n) => (Array.isArray(n.perm) ? n.perm : [n.perm]).some((p) => can(p))))
             .filter((group) => group.length > 0)
             .map((group, gi) => (
               <div key={group[0]!.to} className="flex flex-col items-center gap-1">

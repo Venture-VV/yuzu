@@ -1,16 +1,18 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Ban, CircleCheck, CornerUpLeft, Pencil, RotateCcw, Send, Truck, Undo2, X } from 'lucide-react';
+import { Ban, CircleCheck, CornerUpLeft, FilePlus2, Pencil, RotateCcw, Send, Truck, Undo2, X } from 'lucide-react';
 import { COUNT_REASON_LABELS, COUNT_REASONS, INV_DOC_META, type CountReason, type InvDoc } from '@shared/inventory';
 import { formatQty } from '@shared/quantity';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
-import { cn, formatDateTime } from '../../lib/utils';
-import { Dialog, Sheet } from '../../components/Overlay';
+import { cn, formatDateTime, uuid } from '../../lib/utils';
+import { Sheet } from '../../components/Overlay';
+import { ReasonDialog } from '../../components/ReasonDialog';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, Field, IconButton, Notice, Select, Spinner, Textarea } from '../../components/ui';
+import { Badge, Button, IconButton, Notice, Select, Spinner } from '../../components/ui';
 import { DOC_VISUAL, DocTypeChip, PackHint, Qty, SimRule, StatusChip } from './parts';
+import { CompareChip } from '../purchasing/parts';
 import { useInvDoc, useInvalidateInventory } from './queries';
 
 const ACTION_LABELS: Record<InvDoc['approvals'][number]['action'], string> = {
@@ -83,6 +85,21 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
 
   const diffLines = doc.docType === 'count' ? doc.lines.filter((l) => l.qtyMilli !== 0) : [];
 
+  /** 先收货后补单：按本收货单生成补单采购单，确认后只关联、不再入库或计款 */
+  const backfill = async () => {
+    setBusy('backfill');
+    try {
+      const r = await api.post<{ po: { id: number; docNo: string } }>('/api/purchase-orders/backfill', { clientKey: uuid(), receiptDocId: doc.id });
+      await invalidate();
+      toast({ tone: 'success', title: `已生成补单 ${r.po.docNo}`, body: '负责人确认后关联本收货单，不会重复入库或计款。' });
+      navigate(`/purchasing?po=${r.po.id}`);
+    } catch (e) {
+      toast({ tone: 'error', title: errorMessage(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <>
       <header className="flex items-start gap-3 border-b border-line bg-card px-5 py-4">
@@ -135,7 +152,14 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
               </Link>
             </Info>
           )}
-          {doc.purchaseOrder && <Info label="采购单">{doc.purchaseOrder.docNo}</Info>}
+          {doc.purchaseOrder && (
+            <Info label="采购单">
+              <Link to={`/purchasing?po=${doc.purchaseOrder.id}`} className="num font-semibold text-pine hover:underline">
+                {doc.purchaseOrder.docNo}
+              </Link>
+              {doc.noPo && <span className="ml-1 text-[12px] text-ink-3">（补单）</span>}
+            </Info>
+          )}
           {doc.note && (
             <Info label={doc.docType === 'direct_use' ? '用途' : doc.docType === 'damage' || doc.docType === 'supplier_return' ? '原因' : '备注'} wide>
               {doc.note}
@@ -197,6 +221,11 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
                     </Mini>
                     <Mini label={`单价/${l.purchaseUnit}`}>{l.priceCents !== null ? <Money cents={l.priceCents} /> : '—'}</Mini>
                     {l.rejectReason && <p className="col-span-full text-clay">拒收原因：{l.rejectReason}（不入库、不计货款）</p>}
+                    {l.compare && (
+                      <p className="col-span-full">
+                        <CompareChip compare={l.compare} unit={l.purchaseUnit} />
+                      </p>
+                    )}
                     <p className="col-span-full text-ink-3">
                       1 {l.purchaseUnit} = {formatQty(l.factorMilli)} {l.inventoryUnit} · 金额 <Money cents={l.amountCents ?? 0} className="font-bold text-ink" />
                       {l.returnedMilli > 0 && (
@@ -313,6 +342,11 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             领用退回
           </Button>
         )}
+        {doc.status === 'confirmed' && doc.docType === 'receipt' && doc.noPo && !doc.purchaseOrder && can('purchase.manage') && (
+          <Button variant="secondary" size="sm" loading={busy === 'backfill'} icon={<FilePlus2 className="size-4" />} onClick={backfill}>
+            补采购单
+          </Button>
+        )}
         {doc.status === 'confirmed' && doc.docType === 'receipt' && can('supplierReturn.create') && (
           <Button variant="secondary" size="sm" icon={<Truck className="size-4" />} onClick={() => navigate(`/inventory/new/supplier_return?src=${doc.id}`)}>
             退供应商
@@ -364,9 +398,25 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
 
       <ReasonDialog
         open={!!dialog}
-        kind={dialog?.kind ?? 'cancel'}
-        doc={doc}
         busy={!!busy}
+        title={`${dialog?.kind === 'void' ? '冲销' : dialog?.kind === 'return' ? '退回修改' : '撤回'} ${doc.docNo}`}
+        description={
+          dialog?.kind === 'void'
+            ? '冲销会按原流水反向记账：原单保留并标记「已冲销」，库存与货款恢复到这张单之前。'
+            : dialog?.kind === 'return'
+              ? '退回后经办人可以修改再提交；退回不影响库存。'
+              : '撤回未生效的单据，不影响库存。'
+        }
+        label={dialog?.kind === 'return' ? '需要修改什么' : '原因'}
+        confirmLabel={dialog?.kind === 'void' ? '确认冲销' : dialog?.kind === 'return' ? '退回修改' : '确认撤回'}
+        danger={dialog?.kind === 'void'}
+        extra={
+          dialog?.kind === 'void' && (
+            <p className="mt-3 flex items-center gap-2 text-[12.5px] text-ink-3">
+              冲销权限与范围 <SimRule />
+            </p>
+          )
+        }
         onClose={() => setDialog(null)}
         onConfirm={(reason) => {
           const kind = dialog!.kind;
@@ -374,62 +424,6 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
         }}
       />
     </>
-  );
-}
-
-function ReasonDialog({
-  open,
-  kind,
-  doc,
-  busy,
-  onClose,
-  onConfirm,
-}: {
-  open: boolean;
-  kind: 'return' | 'cancel' | 'void';
-  doc: InvDoc;
-  busy: boolean;
-  onClose: () => void;
-  onConfirm: (reason: string) => void;
-}) {
-  const [reason, setReason] = useState('');
-  useEffect(() => {
-    if (open) setReason('');
-  }, [open]);
-  const title = kind === 'void' ? `冲销 ${doc.docNo}` : kind === 'return' ? `退回修改 ${doc.docNo}` : `撤回 ${doc.docNo}`;
-  const description =
-    kind === 'void'
-      ? '冲销会按原流水反向记账：原单保留并标记「已冲销」，库存与货款恢复到这张单之前。'
-      : kind === 'return'
-        ? '退回后经办人可以修改再提交；退回不影响库存。'
-        : '撤回未生效的单据，不影响库存。';
-  const ok = reason.trim().length >= 2;
-  return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      title={title}
-      description={description}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            取消
-          </Button>
-          <Button variant={kind === 'void' ? 'danger' : 'primary'} disabled={!ok} loading={busy} onClick={() => onConfirm(reason.trim())}>
-            {kind === 'void' ? '确认冲销' : kind === 'return' ? '退回修改' : '确认撤回'}
-          </Button>
-        </>
-      }
-    >
-      <Field label={kind === 'return' ? '需要修改什么' : '原因'} htmlFor="reason" hint="至少 2 个字，会记在单据的经办记录里">
-        <Textarea id="reason" data-autofocus value={reason} onChange={(e) => setReason(e.target.value)} maxLength={200} />
-      </Field>
-      {kind === 'void' && (
-        <p className="mt-3 flex items-center gap-2 text-[12.5px] text-ink-3">
-          冲销权限与范围 <SimRule />
-        </p>
-      )}
-    </Dialog>
   );
 }
 
