@@ -5,7 +5,8 @@
 //                                         创建店主账号（不填密码则生成临时密码，首次登录需修改）
 //   reset-password <账号>                 重置密码为临时密码
 //   seed-demo [--force]                   写入合成演示数据（正式环境默认禁止）
-//   check                                 核对全部会员余额与流水是否一致
+//   seed-inventory-demo                   写入库存与采购合成演示数据（仅独立演示库；试用 / 正式环境与已有真实库存数据时拒绝）
+//   check                                 核对全部会员余额与流水、库存结存与库存流水是否一致
 
 import { businessDateOf } from '@shared/business-date';
 import { checkPasswordStrength, generateTempPassword, hashPassword } from './auth/password';
@@ -15,6 +16,8 @@ import { createSql, readSnapshot } from './db';
 import { writeAudit } from './lib/audit';
 import { migrate } from './migrate';
 import { seedDemo, DEMO_PASSWORD } from './seed';
+import { seedInventoryDemo } from './seed-inventory';
+import { inventoryChecks } from './modules/inventory/reports';
 import { computeSettlement } from './modules/settlement';
 import { loadSettings } from './modules/settings';
 import { createStaff } from './modules/staff';
@@ -77,16 +80,28 @@ async function main() {
         }
         break;
       }
+      case 'seed-inventory-demo': {
+        await migrate(sql);
+        const result = await seedInventoryDemo(sql, config);
+        if (result.skipped) {
+          console.log('已存在库存演示数据，跳过。');
+        } else {
+          console.log(`已写入库存演示数据：${result.materials} 项物料、${result.suppliers} 家供应商、${result.purchaseOrders} 张采购单、${result.docs} 张单据。`);
+          console.log(`演示账号：店主 linlan / 物资经办 lixiao / 采购对账 zhouyi，密码均为 ${DEMO_PASSWORD}`);
+        }
+        break;
+      }
       case 'check': {
         const settings = await loadSettings(sql);
         const today = businessDateOf(new Date(), config.timezone, settings.businessDayStartHour);
         const summary = await readSnapshot(sql, (tx) => computeSettlement(tx, today, today));
-        for (const c of summary.checks) console.log(`${c.ok ? '✓' : '✗'} ${c.label}：${c.detail}`);
-        if (summary.checks.some((c) => !c.ok)) process.exitCode = 1;
+        const inventory = await readSnapshot(sql, inventoryChecks);
+        for (const c of [...summary.checks, ...inventory]) console.log(`${c.ok ? '✓' : '✗'} ${c.label}：${c.detail}`);
+        if ([...summary.checks, ...inventory].some((c) => !c.ok)) process.exitCode = 1;
         break;
       }
       default:
-        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | check');
+        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | check');
         process.exitCode = command ? 1 : 0;
     }
   } finally {

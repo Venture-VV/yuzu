@@ -132,3 +132,26 @@ export async function logApproval(
 export async function setTxTimeouts(tx: Tx) {
   await tx.unsafe("SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '10s'");
 }
+
+/**
+ * 同口径的最近一次成交价：同一物料（即同规格）、同采购单位与换算、同价格口径的已生效收货。
+ * 没有可比历史时返回 null，页面显示「暂无可比成交价」，不计算涨跌。
+ */
+export async function priceBaseline(
+  db: Db,
+  key: { materialId: number; purchaseUnit: string; factorMilli: number; priceBasis: string },
+  scope: { onOrBefore: string; excludePoId?: number | null; beforeDoc?: { date: string; id: number } | null },
+) {
+  const [row] = await db<{ priceCents: number; docId: number; docNo: string; docDate: string; supplierName: string }[]>`
+    SELECT l.price_cents, d.id AS doc_id, d.doc_no, d.doc_date, s.name AS supplier_name
+    FROM inv_doc_lines l JOIN inv_docs d ON d.id = l.doc_id JOIN suppliers s ON s.id = d.supplier_id
+    WHERE d.doc_type = 'receipt' AND d.status = 'confirmed' AND l.material_id = ${key.materialId}
+      AND l.purchase_unit = ${key.purchaseUnit} AND l.factor_milli = ${key.factorMilli} AND d.price_basis = ${key.priceBasis}
+      AND l.price_cents IS NOT NULL AND l.qty_milli > 0
+      AND d.doc_date <= ${scope.onOrBefore}
+      ${scope.excludePoId ? db`AND d.purchase_order_id IS DISTINCT FROM ${scope.excludePoId}` : db``}
+      ${scope.beforeDoc ? db`AND (d.doc_date, d.id) < (${scope.beforeDoc.date}::date, ${scope.beforeDoc.id}::bigint)` : db``}
+    ORDER BY d.doc_date DESC, d.id DESC
+    LIMIT 1`;
+  return row ?? null;
+}

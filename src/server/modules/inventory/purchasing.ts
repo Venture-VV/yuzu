@@ -1,0 +1,581 @@
+// 采购单：表达「准备买什么」。确认后才能按单收货；关键内容变化走改版（保留旧版本并重新确认）。
+//
+// 状态：草稿 → 待确认 →（负责人）已确认 → 已关闭；待确认可退回修改；未确认前可撤回。
+// 已确认的采购单改供应商、数量或价格时，先存一份旧版本，再回到待确认。
+// 先收货后补单：补单采购单确认后只关联原收货单，不再入库、不再形成应付。
+
+import { createHash } from 'node:crypto';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+import { can } from '@shared/permissions';
+import type { PoLine, PoRevision, PoStatus, PoSummary, PurchaseOrder, ReceivingState } from '@shared/purchasing';
+import { fitsDecimals, formatQty, lineAmountCents, priceChangePercent, toBaseQty, toPurchaseQty } from '@shared/quantity';
+import { isUniqueViolation, type Db, type Tx } from '../../db';
+import { guard } from '../../auth/guard';
+import { writeAudit } from '../../lib/audit';
+import type { Actor, Deps } from '../../lib/context';
+import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
+import { idParam, parse } from '../../lib/validate';
+import { assertNotFuture, docDateSchema, loadInventorySettings, logApproval, nextDocNo, priceBaseline, setTxTimeouts } from './common';
+
+// ───────────────────────── 输入 ─────────────────────────
+
+const id = z.number().int().positive();
+
+const LineInput = z.object({
+  /** 已有明细行（修改 / 改版时） */
+  id: id.nullable().default(null),
+  materialId: id,
+  purchaseQtyMilli: z.number('请填写数量').int().positive('数量必须大于 0').max(1_000_000_000_000),
+  priceCents: z.number('请填写单价').int().nonnegative('单价不能为负数').max(100_000_000),
+  note: z.string().trim().max(100).default(''),
+});
+
+const PoBody = z.object({
+  supplierId: id,
+  orderDate: docDateSchema,
+  expectedDate: docDateSchema.nullable().default(null),
+  note: z.string().trim().max(200).default(''),
+  lines: z.array(LineInput).min(1, '请至少添加一项物料').max(100, '采购单最多 100 行'),
+});
+type PoBodyInput = z.input<typeof PoBody>;
+
+const Meta = z.object({
+  action: z.enum(['save', 'submit']).default('submit'),
+  approveNow: z.boolean().default(false),
+});
+const CreateInput = Meta.extend({ clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试') });
+const ReasonInput = z.object({ reason: z.string().trim().min(2, '请填写原因（至少 2 个字）').max(200) });
+
+// ───────────────────────── 读取 ─────────────────────────
+
+function receivingOf(lines: { baseQtyMilli: number; receivedMilli: number }[]): ReceivingState {
+  const received = lines.reduce((s, l) => s + l.receivedMilli, 0);
+  if (received === 0) return 'none';
+  return lines.every((l) => l.receivedMilli >= l.baseQtyMilli) ? 'full' : 'partial';
+}
+
+export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
+  const [po] = await db<(PurchaseOrder & { supplierId: number; supplierName: string; backfillReceiptId: number | null })[]>`
+    SELECT po.id, po.doc_no, po.status, po.order_date, po.expected_date, po.note, po.price_basis, po.revision, po.backfill,
+           po.backfill_receipt_id, po.created_by, cb.display_name AS created_by_name, po.created_at,
+           ab.display_name AS approved_by_name, po.approved_at, po.returned_reason,
+           clb.display_name AS closed_by_name, po.closed_at, po.close_reason, po.is_synthetic, po.total_cents,
+           s.id AS supplier_id, s.name AS supplier_name
+    FROM purchase_orders po
+    JOIN suppliers s ON s.id = po.supplier_id
+    JOIN staff cb ON cb.id = po.created_by
+    LEFT JOIN staff ab ON ab.id = po.approved_by
+    LEFT JOIN staff clb ON clb.id = po.closed_by
+    WHERE po.id = ${poId}`;
+  if (!po) throw notFound('采购单不存在');
+
+  const rawLines = await db<Omit<PoLine, 'compare'>[]>`
+    SELECT pl.id, pl.line_no, pl.material_id, m.code AS material_code, m.name AS material_name, m.specification, m.decimals,
+           pl.purchase_qty_milli, pl.purchase_unit, pl.inventory_unit, pl.factor_milli, pl.base_qty_milli,
+           pl.price_cents, pl.amount_cents, pl.note,
+           coalesce((SELECT sum(l.qty_milli) FROM inv_doc_lines l JOIN inv_docs d ON d.id = l.doc_id
+                     WHERE l.po_line_id = pl.id AND d.status = 'confirmed'), 0) AS received_milli
+    FROM purchase_order_lines pl JOIN materials m ON m.id = pl.material_id
+    WHERE pl.po_id = ${poId} ORDER BY pl.line_no`;
+  const lines: PoLine[] = [];
+  for (const l of rawLines) {
+    const base = await priceBaseline(
+      db,
+      { materialId: l.materialId, purchaseUnit: l.purchaseUnit, factorMilli: l.factorMilli, priceBasis: po.priceBasis },
+      { onOrBefore: po.orderDate, excludePoId: po.id },
+    );
+    lines.push({ ...l, compare: { baseline: base, changePercent: base ? priceChangePercent(base.priceCents, l.priceCents) : null } });
+  }
+
+  const receipts = await db<PurchaseOrder['receipts']>`
+    SELECT id, doc_no, doc_type, status, doc_date, amount_cents FROM inv_docs
+    WHERE purchase_order_id = ${poId} AND doc_type = 'receipt' ORDER BY doc_date, id`;
+  const [money] = await db<{ receivedCents: number; returnCreditCents: number; paidCents: number }[]>`
+    SELECT
+      coalesce((SELECT sum(amount_cents) FROM inv_docs WHERE purchase_order_id = ${poId} AND doc_type = 'receipt' AND status = 'confirmed'), 0) AS received_cents,
+      coalesce((SELECT sum(r.amount_cents) FROM inv_docs r JOIN inv_docs src ON src.id = r.source_doc_id
+                WHERE src.purchase_order_id = ${poId} AND r.doc_type = 'supplier_return' AND r.status = 'confirmed'), 0) AS return_credit_cents,
+      coalesce((SELECT sum(pa.amount_cents) FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
+                JOIN inv_docs d ON d.id = pa.receipt_doc_id
+                WHERE d.purchase_order_id = ${poId} AND p.status = 'confirmed'), 0) AS paid_cents`;
+  const revisions = await db<PoRevision[]>`
+    SELECT r.revision, s.display_name AS changed_by_name, r.changed_at, r.snapshot
+    FROM purchase_order_revisions r JOIN staff s ON s.id = r.changed_by
+    WHERE r.po_id = ${poId} ORDER BY r.revision DESC`;
+  const approvals = await db<PurchaseOrder['approvals']>`
+    SELECT a.id, a.action, s.display_name AS actor_name, a.reason, a.revision, a.created_at
+    FROM approval_logs a JOIN staff s ON s.id = a.actor_id
+    WHERE a.doc_kind = 'purchase_order' AND a.doc_id = ${poId} ORDER BY a.id`;
+  const [backfillReceipt] = po.backfillReceiptId
+    ? await db<PurchaseOrder['receipts']>`SELECT id, doc_no, doc_type, status, doc_date, amount_cents FROM inv_docs WHERE id = ${po.backfillReceiptId}`
+    : [];
+
+  const { supplierId, supplierName, backfillReceiptId: _b, ...rest } = po;
+  return {
+    ...rest,
+    supplier: { id: supplierId, name: supplierName },
+    backfillReceipt: backfillReceipt ?? null,
+    lines,
+    receiving: receivingOf(lines),
+    receivedCents: money!.receivedCents,
+    returnCreditCents: money!.returnCreditCents,
+    paidCents: money!.paidCents,
+    unpaidCents: money!.receivedCents - money!.returnCreditCents - money!.paidCents,
+    receipts,
+    revisions,
+    approvals,
+  };
+}
+
+export async function listPos(db: Db, f: { status?: string; supplierId?: number; q?: string; open?: boolean }): Promise<PoSummary[]> {
+  const like = f.q ? `%${f.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null;
+  const rows = await db<(Omit<PoSummary, 'receiving'> & { orderedMilli: number; receivedMilli: number; fullLines: number })[]>`
+    SELECT po.id, po.doc_no, po.status, s.name AS supplier_name, po.supplier_id, po.order_date, po.expected_date, po.total_cents,
+           po.revision, po.backfill, cb.display_name AS created_by_name, po.created_at,
+           (SELECT count(*) FROM purchase_order_lines WHERE po_id = po.id) AS line_count,
+           coalesce((SELECT string_agg(m.name, '、' ORDER BY pl.line_no) FROM purchase_order_lines pl JOIN materials m ON m.id = pl.material_id
+                     WHERE pl.po_id = po.id AND pl.line_no <= 3), '') AS summary,
+           coalesce((SELECT sum(amount_cents) FROM inv_docs WHERE purchase_order_id = po.id AND doc_type = 'receipt' AND status = 'confirmed'), 0) AS received_cents,
+           coalesce(rcv.received, 0) AS received_milli, coalesce(rcv.full_lines, 0) AS full_lines
+    FROM purchase_orders po
+    JOIN suppliers s ON s.id = po.supplier_id
+    JOIN staff cb ON cb.id = po.created_by
+    LEFT JOIN LATERAL (
+      SELECT sum(x.got) AS received, count(*) FILTER (WHERE x.got >= x.base_qty_milli) AS full_lines
+      FROM (SELECT pl.base_qty_milli,
+                   coalesce((SELECT sum(l.qty_milli) FROM inv_doc_lines l JOIN inv_docs d ON d.id = l.doc_id
+                             WHERE l.po_line_id = pl.id AND d.status = 'confirmed'), 0) AS got
+            FROM purchase_order_lines pl WHERE pl.po_id = po.id) x
+    ) rcv ON true
+    WHERE true
+      ${f.status ? db`AND po.status = ${f.status}` : db``}
+      ${f.supplierId ? db`AND po.supplier_id = ${f.supplierId}` : db``}
+      ${f.open ? db`AND po.status = 'approved' AND NOT po.backfill` : db``}
+      ${like ? db`AND (po.doc_no ILIKE ${like} OR s.name ILIKE ${like} OR po.note ILIKE ${like})` : db``}
+    ORDER BY po.order_date DESC, po.id DESC
+    LIMIT 300`;
+  return rows.map(({ receivedMilli, fullLines, orderedMilli: _o, ...r }) => ({
+    ...r,
+    receiving: receivedMilli === 0 ? 'none' : fullLines >= r.lineCount ? 'full' : 'partial',
+  }));
+}
+
+// ───────────────────────── 校验明细 ─────────────────────────
+
+interface ExistingLine {
+  id: number;
+  lineNo: number;
+  materialId: number;
+  purchaseUnit: string;
+  factorMilli: number;
+  priceCents: number;
+  /** 已生效或在途收货占用的数量：不能改价、不能减到它以下 */
+  receivedMilli: number;
+  /** 被任何收货明细引用过（含已撤回）：不能删除 */
+  referenced: boolean;
+}
+
+async function existingLines(db: Db, poId: number): Promise<Map<number, ExistingLine>> {
+  const rows = await db<ExistingLine[]>`
+    SELECT pl.id, pl.line_no, pl.material_id, pl.purchase_unit, pl.factor_milli, pl.price_cents,
+           coalesce((SELECT sum(l.qty_milli) FROM inv_doc_lines l JOIN inv_docs d ON d.id = l.doc_id
+                     WHERE l.po_line_id = pl.id AND d.status IN ('confirmed', 'submitted', 'draft', 'returned')), 0) AS received_milli,
+           EXISTS (SELECT 1 FROM inv_doc_lines WHERE po_line_id = pl.id) AS referenced
+    FROM purchase_order_lines pl WHERE pl.po_id = ${poId}`;
+  return new Map(rows.map((r) => [r.id, r]));
+}
+
+interface PreparedLine {
+  id: number | null;
+  materialId: number;
+  purchaseQtyMilli: number;
+  purchaseUnit: string;
+  inventoryUnit: string;
+  factorMilli: number;
+  baseQtyMilli: number;
+  priceCents: number;
+  amountCents: number;
+  note: string;
+}
+
+async function prepareLines(db: Db, body: z.infer<typeof PoBody>, existing: Map<number, ExistingLine>): Promise<PreparedLine[]> {
+  const ids = [...new Set(body.lines.map((l) => l.materialId))];
+  if (ids.length !== body.lines.length) throw badRequest('同一物料在一张采购单里只能出现一次');
+  const mats = new Map(
+    (
+      await db<{ id: number; name: string; inventoryUnit: string; purchaseUnit: string; purchaseFactorMilli: number; decimals: number; tracked: boolean; active: boolean }[]>`
+        SELECT id, name, inventory_unit, purchase_unit, purchase_factor_milli, decimals, tracked, active FROM materials WHERE id IN ${db(ids)}`
+    ).map((m) => [m.id, m]),
+  );
+  return body.lines.map((l) => {
+    const m = mats.get(l.materialId);
+    if (!m) throw unprocessable('MATERIAL_NOT_FOUND', '有物料不存在，请刷新后重试');
+    const prev = l.id ? existing.get(l.id) : undefined;
+    if (l.id && !prev) throw unprocessable('PO_LINE_INVALID', '采购单明细已变化，请刷新后重试');
+    if (!prev && (!m.tracked || !m.active)) throw unprocessable('MATERIAL_INACTIVE', `「${m.name}」已停用或不是受管物料`);
+    // 已有明细沿用当时的采购单位与换算；新明细取物料当前包装
+    const purchaseUnit = prev && prev.materialId === m.id ? prev.purchaseUnit : m.purchaseUnit;
+    const factorMilli = prev && prev.materialId === m.id ? prev.factorMilli : m.purchaseFactorMilli;
+    const base = toBaseQty(l.purchaseQtyMilli, factorMilli);
+    if (base === null || !fitsDecimals(base, m.decimals)) {
+      throw badRequest(`「${m.name}」的采购数量换算后不是整${m.inventoryUnit}，请调整数量`);
+    }
+    if (prev && prev.receivedMilli > 0) {
+      if (prev.materialId !== m.id) throw unprocessable('PO_LINE_RECEIVED', `「${m.name}」所在行已有收货，不能更换物料`);
+      if (base < prev.receivedMilli) {
+        throw unprocessable('PO_QTY_BELOW_RECEIVED', `「${m.name}」已收货 ${formatQty(prev.receivedMilli)} ${m.inventoryUnit}，数量不能少于已收货`);
+      }
+      if (l.priceCents !== prev.priceCents) {
+        throw unprocessable('PO_PRICE_LOCKED', `「${m.name}」已有收货，单价已随收货确认，不能再改`);
+      }
+    }
+    return {
+      id: l.id,
+      materialId: m.id,
+      purchaseQtyMilli: l.purchaseQtyMilli,
+      purchaseUnit,
+      inventoryUnit: m.inventoryUnit,
+      factorMilli,
+      baseQtyMilli: base,
+      priceCents: l.priceCents,
+      amountCents: lineAmountCents(base, l.priceCents, factorMilli),
+      note: l.note,
+    };
+  });
+}
+
+/** 明细就地同步：已有行按 id 更新，删掉的行（无收货）删除，新行追加，保持收货对采购单行的引用 */
+async function syncLines(tx: Tx, poId: number, lines: PreparedLine[], existing: Map<number, ExistingLine>) {
+  const keep = new Set(lines.filter((l) => l.id).map((l) => l.id!));
+  for (const prev of existing.values()) {
+    if (keep.has(prev.id)) continue;
+    if (prev.referenced) throw unprocessable('PO_LINE_RECEIVED', '已有收货记录的明细不能删除，可把数量改为已收货数量');
+    await tx`DELETE FROM purchase_order_lines WHERE id = ${prev.id}`;
+  }
+  let nextNo = Math.max(0, ...[...existing.values()].map((l) => l.lineNo)) + 1;
+  for (const l of lines) {
+    if (l.id) {
+      await tx`
+        UPDATE purchase_order_lines SET material_id = ${l.materialId}, purchase_qty_milli = ${l.purchaseQtyMilli}, purchase_unit = ${l.purchaseUnit},
+               inventory_unit = ${l.inventoryUnit}, factor_milli = ${l.factorMilli}, base_qty_milli = ${l.baseQtyMilli},
+               price_cents = ${l.priceCents}, amount_cents = ${l.amountCents}, note = ${l.note}
+        WHERE id = ${l.id} AND po_id = ${poId}`;
+    } else {
+      await tx`
+        INSERT INTO purchase_order_lines (po_id, line_no, material_id, purchase_qty_milli, purchase_unit, inventory_unit, factor_milli,
+                                          base_qty_milli, price_cents, amount_cents, note)
+        VALUES (${poId}, ${nextNo++}, ${l.materialId}, ${l.purchaseQtyMilli}, ${l.purchaseUnit}, ${l.inventoryUnit}, ${l.factorMilli},
+                ${l.baseQtyMilli}, ${l.priceCents}, ${l.amountCents}, ${l.note})`;
+    }
+  }
+  return lines.reduce((s, l) => s + l.amountCents, 0);
+}
+
+async function assertSupplier(db: Db, supplierId: number) {
+  const [s] = await db<{ active: boolean }[]>`SELECT active FROM suppliers WHERE id = ${supplierId}`;
+  if (!s || !s.active) throw unprocessable('SUPPLIER_INACTIVE', '供应商不存在或已停用');
+}
+
+// ───────────────────────── 状态流转 ─────────────────────────
+
+interface PoRow {
+  id: number;
+  docNo: string;
+  status: PoStatus;
+  supplierId: number;
+  revision: number;
+  backfill: boolean;
+  backfillReceiptId: number | null;
+  createdBy: number;
+}
+
+async function lockPo(tx: Tx, poId: number): Promise<PoRow> {
+  const [po] = await tx<PoRow[]>`
+    SELECT id, doc_no, status, supplier_id, revision, backfill, backfill_receipt_id, created_by
+    FROM purchase_orders WHERE id = ${poId} FOR UPDATE`;
+  if (!po) throw notFound('采购单不存在');
+  return po;
+}
+
+async function approveLocked(tx: Tx, po: PoRow, actor: Actor) {
+  if (po.backfill && po.backfillReceiptId) {
+    // 补单：把原收货单关联到这张采购单。只建立关联，不新增库存流水或应付
+    const [rc] = await tx<{ status: string; purchaseOrderId: number | null; supplierId: number }[]>`
+      SELECT status, purchase_order_id, supplier_id FROM inv_docs WHERE id = ${po.backfillReceiptId} FOR UPDATE`;
+    if (!rc || rc.status !== 'confirmed') throw conflict('BACKFILL_SOURCE_INVALID', '原收货单已冲销或未生效，不能补单');
+    if (rc.purchaseOrderId) throw conflict('BACKFILL_LINKED', '原收货单已关联其他采购单');
+    if (rc.supplierId !== po.supplierId) throw conflict('PO_SUPPLIER_MISMATCH', '补单供应商与原收货单不一致');
+    const poLines = await tx<{ id: number; materialId: number; baseQtyMilli: number }[]>`
+      SELECT id, material_id, base_qty_milli FROM purchase_order_lines WHERE po_id = ${po.id}`;
+    const rcLines = await tx<{ id: number; materialId: number; qtyMilli: number }[]>`
+      SELECT id, material_id, qty_milli FROM inv_doc_lines WHERE doc_id = ${po.backfillReceiptId}`;
+    for (const r of rcLines) {
+      const pl = poLines.find((p) => p.materialId === r.materialId);
+      if (!pl || pl.baseQtyMilli < r.qtyMilli) throw conflict('BACKFILL_MISMATCH', '补单明细与原收货单不一致，请退回修改');
+      await tx`UPDATE inv_doc_lines SET po_line_id = ${pl.id} WHERE id = ${r.id}`;
+    }
+    await tx`UPDATE inv_docs SET purchase_order_id = ${po.id}, updated_at = now() WHERE id = ${po.backfillReceiptId}`;
+  }
+  await tx`
+    UPDATE purchase_orders SET status = 'approved', approved_by = ${actor.id}, approved_at = now(), returned_reason = NULL, updated_at = now()
+    WHERE id = ${po.id}`;
+  await logApproval(tx, 'purchase_order', po.id, 'approve', actor.id, '', po.revision);
+}
+
+async function submitLocked(tx: Tx, po: PoRow, actor: Actor, approveNow: boolean) {
+  if (po.status === 'submitted' || po.status === 'approved') return;
+  if (po.status !== 'draft' && po.status !== 'returned') throw conflict('INVALID_STATE', '采购单当前状态不能提交');
+  await tx`UPDATE purchase_orders SET status = 'submitted', submitted_by = ${actor.id}, submitted_at = now(), updated_at = now() WHERE id = ${po.id}`;
+  await logApproval(tx, 'purchase_order', po.id, 'submit', actor.id, '', po.revision);
+  const rules = (await loadInventorySettings(tx)).approvalRules;
+  if (!rules.purchase_order) {
+    await approveLocked(tx, { ...po, status: 'submitted' }, actor);
+  } else if (approveNow) {
+    if (!can(actor, 'inventory.approve')) throw forbidden('当前账号不能确认采购单，请提交给负责人');
+    await approveLocked(tx, { ...po, status: 'submitted' }, actor);
+  }
+}
+
+const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+
+export async function createPo(deps: Deps, raw: unknown, actor: Actor, opts: { backfillReceiptId?: number; ip?: string } = {}) {
+  const meta = parse(CreateInput, raw);
+  const body = parse(PoBody, raw);
+  if (meta.approveNow && !can(actor, 'inventory.approve')) throw forbidden('当前账号不能确认采购单，请提交给负责人');
+  assertNotFuture(body.orderDate, deps.config.timezone);
+  if (body.expectedDate && body.expectedDate < body.orderDate) throw badRequest('预计到货日期不能早于下单日期');
+  const requestHash = hashRequest({ ...body, ...meta, clientKey: undefined, backfill: opts.backfillReceiptId ?? null });
+  const findExisting = async (db: Db) => {
+    const [row] = await db<{ opType: string; requestHash: string; refId: number }[]>`
+      SELECT op_type, request_hash, ref_id FROM idempotency_keys WHERE key = ${meta.clientKey}`;
+    if (!row) return null;
+    if (row.opType !== 'purchase_order' || row.requestHash !== requestHash) {
+      throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一张不同的单据，请刷新页面后重新填写');
+    }
+    return row.refId;
+  };
+  let poId: number;
+  let replayed = false;
+  try {
+    const r = await deps.sql.begin(async (tx) => {
+      await setTxTimeouts(tx);
+      const existing = await findExisting(tx);
+      if (existing) return { id: existing, replayed: true };
+      await assertSupplier(tx, body.supplierId);
+      const lines = await prepareLines(tx, body, new Map());
+      const settings = await loadInventorySettings(tx);
+      const docNo = await nextDocNo(tx, 'purchase_order', 'CG', body.orderDate);
+      const [row] = await tx<{ id: number }[]>`
+        INSERT INTO purchase_orders (doc_no, supplier_id, status, order_date, expected_date, note, price_basis, backfill,
+                                     backfill_receipt_id, client_key, created_by)
+        VALUES (${docNo}, ${body.supplierId}, 'draft', ${body.orderDate}, ${body.expectedDate}, ${body.note}, ${settings.priceBasis},
+                ${!!opts.backfillReceiptId}, ${opts.backfillReceiptId ?? null}, ${meta.clientKey}, ${actor.id})
+        RETURNING id`;
+      const newId = row!.id;
+      const total = await syncLines(tx, newId, lines, new Map());
+      await tx`UPDATE purchase_orders SET total_cents = ${total} WHERE id = ${newId}`;
+      await tx`
+        INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id)
+        VALUES (${meta.clientKey}, 'purchase_order', ${requestHash}, ${newId}, ${actor.id})`;
+      await logApproval(tx, 'purchase_order', newId, 'create', actor.id, '', 1);
+      if (meta.action === 'submit') await submitLocked(tx, await lockPo(tx, newId), actor, meta.approveNow);
+      await writeAudit(tx, { staffId: actor.id, action: 'purchase_order', targetType: 'purchase_order', targetId: newId, detail: { docNo, action: meta.action, backfill: !!opts.backfillReceiptId }, ip: opts.ip });
+      return { id: newId, replayed: false };
+    });
+    poId = r.id;
+    replayed = r.replayed;
+  } catch (error) {
+    if (isUniqueViolation(error, 'idempotency_keys_pkey') || isUniqueViolation(error, 'purchase_orders_client_key_key')) {
+      const existing = await findExisting(deps.sql);
+      if (!existing) throw error;
+      poId = existing;
+      replayed = true;
+    } else if (isUniqueViolation(error, 'purchase_orders_backfill_once')) {
+      throw conflict('BACKFILL_EXISTS', '这张收货单已经有补单采购单');
+    } else {
+      throw error;
+    }
+  }
+  return { po: await getPo(deps.sql, poId), replayed };
+}
+
+/** 修改草稿 / 退回的采购单；已确认的采购单改关键内容时走改版（revise = true） */
+export async function updatePo(deps: Deps, poId: number, raw: PoBodyInput & { action?: 'save' | 'submit'; approveNow?: boolean }, actor: Actor, revise = false) {
+  const body = parse(PoBody, raw);
+  const meta = parse(Meta, raw);
+  if (meta.approveNow && !can(actor, 'inventory.approve')) throw forbidden('当前账号不能确认采购单，请提交给负责人');
+  assertNotFuture(body.orderDate, deps.config.timezone);
+  await deps.sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
+    let po = await lockPo(tx, poId);
+    if (po.backfill) throw conflict('BACKFILL_LOCKED', '补单采购单按原收货单生成，不能修改；如有误请撤回后重新补单');
+    const existing = await existingLines(tx, poId);
+    const received = [...existing.values()].some((l) => l.receivedMilli > 0);
+    if (revise) {
+      if (po.status !== 'approved') throw conflict('INVALID_STATE', '只有已确认的采购单需要改版');
+      if (received && body.supplierId !== po.supplierId) throw unprocessable('PO_SUPPLIER_LOCKED', '已有收货的采购单不能更换供应商');
+      // 先保存当前版本，再回到待确认
+      const snapshot = await getPo(tx, poId);
+      await tx`
+        INSERT INTO purchase_order_revisions (po_id, revision, snapshot, changed_by)
+        VALUES (${poId}, ${po.revision}, ${tx.json({
+          supplierName: snapshot.supplier.name,
+          totalCents: snapshot.totalCents,
+          lines: snapshot.lines.map((l) => ({ materialName: l.materialName, purchaseQtyMilli: l.purchaseQtyMilli, purchaseUnit: l.purchaseUnit, priceCents: l.priceCents, amountCents: l.amountCents })),
+        } as never)}, ${actor.id})`;
+      await tx`UPDATE purchase_orders SET status = 'returned', revision = revision + 1, updated_at = now() WHERE id = ${poId}`;
+      po = { ...po, status: 'returned', revision: po.revision + 1 };
+      await logApproval(tx, 'purchase_order', poId, 'revise', actor.id, '', po.revision);
+    } else if (po.status !== 'draft' && po.status !== 'returned') {
+      throw conflict('INVALID_STATE', po.status === 'approved' ? '已确认的采购单请使用「改版」' : '采购单当前状态不能修改');
+    }
+    if (!revise && received && body.supplierId !== po.supplierId) throw unprocessable('PO_SUPPLIER_LOCKED', '已有收货的采购单不能更换供应商');
+    await assertSupplier(tx, body.supplierId);
+    const lines = await prepareLines(tx, body, existing);
+    const total = await syncLines(tx, poId, lines, existing);
+    await tx`
+      UPDATE purchase_orders SET supplier_id = ${body.supplierId}, order_date = ${body.orderDate}, expected_date = ${body.expectedDate},
+             note = ${body.note}, total_cents = ${total}, updated_at = now()
+      WHERE id = ${poId}`;
+    if (meta.action === 'submit' || revise) await submitLocked(tx, po, actor, meta.approveNow);
+  });
+  return getPo(deps.sql, poId);
+}
+
+export async function submitPo(deps: Deps, poId: number, actor: Actor, approveNow: boolean) {
+  await deps.sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
+    await submitLocked(tx, await lockPo(tx, poId), actor, approveNow);
+  });
+  return getPo(deps.sql, poId);
+}
+
+export async function approvePo(deps: Deps, poId: number, actor: Actor) {
+  await deps.sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
+    const po = await lockPo(tx, poId);
+    if (po.status === 'approved') return;
+    if (po.status !== 'submitted') throw conflict('INVALID_STATE', '只有待确认的采购单可以确认');
+    await approveLocked(tx, po, actor);
+  });
+  return getPo(deps.sql, poId);
+}
+
+export async function returnPo(deps: Deps, poId: number, raw: unknown, actor: Actor) {
+  const { reason } = parse(ReasonInput, raw);
+  await deps.sql.begin(async (tx) => {
+    const po = await lockPo(tx, poId);
+    if (po.status === 'returned') return;
+    if (po.status !== 'submitted') throw conflict('INVALID_STATE', '只有待确认的采购单可以退回');
+    await tx`UPDATE purchase_orders SET status = 'returned', returned_reason = ${reason}, updated_at = now() WHERE id = ${poId}`;
+    await logApproval(tx, 'purchase_order', poId, 'return', actor.id, reason, po.revision);
+  });
+  return getPo(deps.sql, poId);
+}
+
+export async function cancelPo(deps: Deps, poId: number, raw: unknown, actor: Actor) {
+  const { reason } = parse(ReasonInput, raw);
+  await deps.sql.begin(async (tx) => {
+    const po = await lockPo(tx, poId);
+    if (po.status === 'cancelled') return;
+    if (!['draft', 'submitted', 'returned'].includes(po.status)) throw conflict('INVALID_STATE', '已确认的采购单不能撤回；不再到货请关闭');
+    const [rc] = await tx<{ n: number }[]>`SELECT count(*) AS n FROM inv_docs WHERE purchase_order_id = ${poId} AND status <> 'cancelled'`;
+    if (rc!.n > 0) throw conflict('PO_HAS_RECEIPTS', '这张采购单已有收货，不能撤回；请负责人确认后关闭');
+    if (!can(actor, 'inventory.approve') && po.createdBy !== actor.id) throw forbidden('只能撤回自己创建的采购单');
+    await tx`UPDATE purchase_orders SET status = 'cancelled', returned_reason = ${reason}, updated_at = now() WHERE id = ${poId}`;
+    await logApproval(tx, 'purchase_order', poId, 'cancel', actor.id, reason, po.revision);
+  });
+  return getPo(deps.sql, poId);
+}
+
+/** 关闭：剩余未到的数量不再收货（例如供应商缺货），已收货与货款不受影响 */
+export async function closePo(deps: Deps, poId: number, raw: unknown, actor: Actor) {
+  const { reason } = parse(ReasonInput, raw);
+  await deps.sql.begin(async (tx) => {
+    const po = await lockPo(tx, poId);
+    if (po.status === 'closed') return;
+    if (po.status !== 'approved') throw conflict('INVALID_STATE', '只有已确认的采购单可以关闭');
+    const [pending] = await tx<{ n: number }[]>`
+      SELECT count(*) AS n FROM inv_docs WHERE purchase_order_id = ${poId} AND status IN ('draft', 'submitted', 'returned')`;
+    if (pending!.n > 0) throw conflict('PO_PENDING_RECEIPTS', '这张采购单还有未生效的收货单，请先处理');
+    await tx`UPDATE purchase_orders SET status = 'closed', closed_by = ${actor.id}, closed_at = now(), close_reason = ${reason}, updated_at = now() WHERE id = ${poId}`;
+    await logApproval(tx, 'purchase_order', poId, 'close', actor.id, reason, po.revision);
+  });
+  return getPo(deps.sql, poId);
+}
+
+/** 按直接收货单生成补单采购单（数量、价格取自收货单，不再入库或计款） */
+export async function backfillPo(deps: Deps, raw: unknown, actor: Actor, ip?: string) {
+  const input = parse(z.object({ receiptDocId: id, clientKey: z.uuid(), approveNow: z.boolean().default(false), note: z.string().trim().max(200).default('') }), raw);
+  const [rc] = await deps.sql<{ id: number; docType: string; status: string; supplierId: number; docDate: string; purchaseOrderId: number | null; docNo: string }[]>`
+    SELECT id, doc_type, status, supplier_id, doc_date, purchase_order_id, doc_no FROM inv_docs WHERE id = ${input.receiptDocId}`;
+  if (!rc || rc.docType !== 'receipt') throw notFound('收货单不存在');
+  if (rc.status !== 'confirmed') throw unprocessable('BACKFILL_SOURCE_INVALID', '只有已生效的收货单可以补采购单');
+  if (rc.purchaseOrderId) throw unprocessable('BACKFILL_LINKED', '这张收货单已关联采购单');
+  const lines = await deps.sql<{ materialId: number; qtyMilli: number; factorMilli: number; priceCents: number; purchaseUnit: string }[]>`
+    SELECT material_id, qty_milli, factor_milli, price_cents, purchase_unit FROM inv_doc_lines WHERE doc_id = ${rc.id} AND qty_milli > 0 ORDER BY line_no`;
+  if (lines.length === 0) throw unprocessable('BACKFILL_EMPTY', '这张收货单没有合格实收，不需要补单');
+  const poLines = lines.map((l) => {
+    const packs = toPurchaseQty(l.qtyMilli, l.factorMilli);
+    if (packs === null) throw unprocessable('BACKFILL_UNIT', '收货数量不是整包装，无法自动补单，请手工建采购单');
+    return { materialId: l.materialId, purchaseQtyMilli: packs, priceCents: l.priceCents, note: '' };
+  });
+  return createPo(
+    deps,
+    { clientKey: input.clientKey, supplierId: rc.supplierId, orderDate: rc.docDate, note: input.note || `补单：${rc.docNo}`, lines: poLines, action: 'submit', approveNow: input.approveNow },
+    actor,
+    { backfillReceiptId: rc.id, ip },
+  );
+}
+
+// ───────────────────────── 路由 ─────────────────────────
+
+const ListQuery = z.object({
+  status: z.string().max(16).optional(),
+  supplierId: z.coerce.number().int().positive().optional(),
+  q: z.string().trim().max(32).optional(),
+  open: z.enum(['1']).optional(),
+});
+
+export function registerPurchasingRoutes(app: FastifyInstance, deps: Deps) {
+  const { sql } = deps;
+  const poId = (req: FastifyRequest) => parse(idParam, req.params).id;
+
+  app.get('/api/purchase-orders', { preHandler: guard('inventory.read') }, async (req) => {
+    const q = parse(ListQuery, req.query);
+    return listPos(sql, { ...q, open: q.open === '1' });
+  });
+  app.get('/api/purchase-orders/by-key/:key', { preHandler: guard('inventory.read') }, async (req) => {
+    const { key } = parse(z.object({ key: z.uuid() }), req.params);
+    const [row] = await sql<{ id: number }[]>`SELECT id FROM purchase_orders WHERE client_key = ${key}`;
+    return row ? { found: true, po: await getPo(sql, row.id) } : { found: false };
+  });
+  app.get('/api/purchase-orders/:id', { preHandler: guard('inventory.read') }, async (req) => getPo(sql, poId(req)));
+
+  app.post('/api/purchase-orders', { preHandler: guard('purchase.manage') }, async (req, reply) => {
+    const r = await createPo(deps, req.body, req.actor, { ip: req.ip });
+    reply.code(r.replayed ? 200 : 201);
+    return r;
+  });
+  app.post('/api/purchase-orders/backfill', { preHandler: guard('purchase.manage') }, async (req, reply) => {
+    const r = await backfillPo(deps, req.body, req.actor, req.ip);
+    reply.code(r.replayed ? 200 : 201);
+    return r;
+  });
+  app.put('/api/purchase-orders/:id', { preHandler: guard('purchase.manage') }, async (req) => updatePo(deps, poId(req), req.body as PoBodyInput, req.actor));
+  app.post('/api/purchase-orders/:id/revise', { preHandler: guard('purchase.manage') }, async (req) =>
+    updatePo(deps, poId(req), req.body as PoBodyInput, req.actor, true),
+  );
+  app.post('/api/purchase-orders/:id/submit', { preHandler: guard('purchase.manage') }, async (req) => {
+    const { approveNow } = parse(z.object({ approveNow: z.boolean().default(false) }), req.body ?? {});
+    return submitPo(deps, poId(req), req.actor, approveNow);
+  });
+  app.post('/api/purchase-orders/:id/approve', { preHandler: guard('inventory.approve') }, async (req) => approvePo(deps, poId(req), req.actor));
+  app.post('/api/purchase-orders/:id/return', { preHandler: guard('inventory.approve') }, async (req) => returnPo(deps, poId(req), req.body, req.actor));
+  app.post('/api/purchase-orders/:id/cancel', { preHandler: guard('purchase.manage') }, async (req) => cancelPo(deps, poId(req), req.body, req.actor));
+  app.post('/api/purchase-orders/:id/close', { preHandler: guard('inventory.read') }, async (req) => {
+    if (!can(req.actor, 'purchase.manage') && !can(req.actor, 'inventory.approve')) throw forbidden();
+    return closePo(deps, poId(req), req.body, req.actor);
+  });
+}

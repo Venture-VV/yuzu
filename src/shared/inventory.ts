@@ -1,5 +1,7 @@
 // 库存与采购：前后端共用的类型与中文名称。数量为 milli（千分之一库存单位），金额为分。
 
+import type { PriceCompare } from './purchasing';
+
 export const INV_DOC_TYPES = ['opening', 'receipt', 'issue', 'issue_return', 'direct_use', 'damage', 'count', 'supplier_return'] as const;
 export type InvDocType = (typeof INV_DOC_TYPES)[number];
 
@@ -163,6 +165,8 @@ export interface InvDocLine {
   /** 当前库存（详情展示用） */
   stockMilli: number;
   note: string;
+  /** 收货行：与此前同口径成交价的比较 */
+  compare?: PriceCompare;
 }
 
 export interface ApprovalLog {

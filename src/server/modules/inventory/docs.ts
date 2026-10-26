@@ -16,7 +16,7 @@ import {
   type InvDocType,
 } from '@shared/inventory';
 import { can, type Permission } from '@shared/permissions';
-import { fitsDecimals, formatQty, lineAmountCents, toBaseQty } from '@shared/quantity';
+import { fitsDecimals, formatQty, lineAmountCents, priceChangePercent, toBaseQty } from '@shared/quantity';
 import { isUniqueViolation, type Db, type Tx } from '../../db';
 import { guard } from '../../auth/guard';
 import { writeAudit } from '../../lib/audit';
@@ -32,6 +32,7 @@ import {
   lockMaterials,
   logApproval,
   nextDocNo,
+  priceBaseline,
   setTxTimeouts,
   todayIn,
 } from './common';
@@ -173,6 +174,19 @@ export async function getDoc(db: Db, docId: number): Promise<InvDoc> {
                      WHERE rl.source_line_id = l.id AND rd.status IN ('confirmed', 'submitted')), 0) AS returned_milli
     FROM inv_doc_lines l JOIN materials m ON m.id = l.material_id
     WHERE l.doc_id = ${docId} ORDER BY l.line_no`;
+
+  if (d.docType === 'receipt') {
+    const [basis] = await db<{ priceBasis: string }[]>`SELECT price_basis FROM inv_docs WHERE id = ${docId}`;
+    for (const l of lines) {
+      if (l.priceCents === null || l.qtyMilli === 0) continue;
+      const base = await priceBaseline(
+        db,
+        { materialId: l.materialId, purchaseUnit: l.purchaseUnit, factorMilli: l.factorMilli, priceBasis: basis!.priceBasis },
+        { onOrBefore: d.docDate, beforeDoc: { date: d.docDate, id: docId } },
+      );
+      l.compare = { baseline: base, changePercent: base ? priceChangePercent(base.priceCents, l.priceCents) : null };
+    }
+  }
 
   const children = await db<InvDoc['children']>`
     SELECT id, doc_no, doc_type, status FROM inv_docs WHERE source_doc_id = ${docId} ORDER BY id`;
@@ -812,10 +826,10 @@ export async function createDoc(deps: Deps, raw: CreateDocInput, actor: Actor, i
       const docNo = await nextDocNo(tx, `inv_${body.docType}`, meta2.prefix, body.docDate);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO inv_docs (doc_no, doc_type, status, doc_date, supplier_id, purchase_order_id, department_id, handler,
-                              source_doc_id, note, amount_cents, no_po, client_key, created_by)
+                              source_doc_id, note, amount_cents, no_po, price_basis, client_key, created_by)
         VALUES (${docNo}, ${body.docType}, 'draft', ${body.docDate}, ${prepared.supplierId}, ${prepared.purchaseOrderId},
                 ${prepared.departmentId}, ${prepared.handler}, ${prepared.sourceDocId}, ${body.note}, ${prepared.amountCents},
-                ${prepared.noPo}, ${meta.clientKey}, ${actor.id})
+                ${prepared.noPo}, ${body.docType === 'receipt' ? (await loadInventorySettings(tx)).priceBasis : ''}, ${meta.clientKey}, ${actor.id})
         RETURNING id`;
       const newId = row!.id;
       await insertLines(tx, newId, prepared.lines);

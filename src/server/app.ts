@@ -13,6 +13,8 @@ import { registerAuditRoutes } from './modules/audit';
 import { registerCatalogRoutes } from './modules/catalog';
 import { registerDocRoutes } from './modules/inventory/docs';
 import { registerMasterRoutes } from './modules/inventory/master';
+import { registerPayableRoutes } from './modules/inventory/payables';
+import { registerPurchasingRoutes } from './modules/inventory/purchasing';
 import { registerReportRoutes } from './modules/inventory/reports';
 import { registerLedgerRoutes } from './modules/ledger';
 import { registerMemberRoutes } from './modules/members';
@@ -109,6 +111,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerMasterRoutes(app, deps);
   registerDocRoutes(app, deps);
   registerReportRoutes(app, deps);
+  registerPurchasingRoutes(app, deps);
+  registerPayableRoutes(app, deps);
 
   // 前端静态资源（构建产物），全部从本机提供，外网中断不影响使用。
   const staticDir = resolve(process.env.STATIC_DIR ?? 'dist/client');
