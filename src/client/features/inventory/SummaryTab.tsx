@@ -62,9 +62,9 @@ export function SummaryTab() {
         />
         {preset === 'custom' && (
           <span className="flex items-center gap-1.5 text-[13px] text-ink-3">
-            <Input type="date" value={custom.from} max={today} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} className="h-9 w-[150px] text-[13px]" aria-label="开始日期" />
+            <Input fullWidth={false} type="date" value={custom.from} max={today} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} className="h-9 w-[150px] text-[13px]" aria-label="开始日期" />
             至
-            <Input type="date" value={custom.to} max={today} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} className="h-9 w-[150px] text-[13px]" aria-label="结束日期" />
+            <Input fullWidth={false} type="date" value={custom.to} max={today} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} className="h-9 w-[150px] text-[13px]" aria-label="结束日期" />
           </span>
         )}
         <span className="num text-[12.5px] text-ink-3">

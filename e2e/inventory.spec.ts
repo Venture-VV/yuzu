@@ -73,6 +73,8 @@ test.describe('库存与采购流程', () => {
     await page.getByRole('button', { name: '查看单据' }).click();
     await page.getByRole('dialog', { name: '库存单据详情' }).getByRole('button', { name: '领用退回' }).click();
     await expect(page.getByText('原领 24')).toBeVisible();
+    // 原领用单下拉框完整可见（曾被并排的搜索框挤成一条细缝）
+    expect((await page.getByLabel('选择原单').boundingBox())!.width).toBeGreaterThan(200);
     await page.getByLabel('退回数量（瓶）').fill('30');
     await expect(page.getByText('最多 24 瓶')).toBeVisible();
     await expect(page.getByRole('button', { name: /确认退回/ })).toBeDisabled();
@@ -161,6 +163,12 @@ test.describe('平板布局', () => {
       await page.waitForLoadState('networkidle');
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       expect(overflow, url).toBeLessThanOrEqual(1);
+    }
+    // 并排的搜索框与下拉框：下拉框不能被挤没
+    for (const url of ['/inventory/new/issue_return', '/inventory/new/supplier_return']) {
+      await page.goto(url);
+      const box = await page.getByLabel('选择原单').boundingBox();
+      expect(box!.width, url).toBeGreaterThan(150);
     }
   });
 });

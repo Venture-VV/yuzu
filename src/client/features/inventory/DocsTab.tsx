@@ -61,9 +61,9 @@ export function DocsTab() {
           ))}
         </Select>
         <span className="flex items-center gap-1.5 text-[13px] text-ink-3">
-          <Input type="date" value={filter.from ?? ''} onChange={(e) => update({ from: e.target.value || null })} className="h-9 w-[150px] text-[13px]" aria-label="开始日期" />
+          <Input fullWidth={false} type="date" value={filter.from ?? ''} onChange={(e) => update({ from: e.target.value || null })} className="h-9 w-[150px] text-[13px]" aria-label="开始日期" />
           至
-          <Input type="date" value={filter.to ?? ''} onChange={(e) => update({ to: e.target.value || null })} className="h-9 w-[150px] text-[13px]" aria-label="结束日期" />
+          <Input fullWidth={false} type="date" value={filter.to ?? ''} onChange={(e) => update({ to: e.target.value || null })} className="h-9 w-[150px] text-[13px]" aria-label="结束日期" />
         </span>
         <div className="relative min-w-[200px] flex-1 md:max-w-xs">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-3" />

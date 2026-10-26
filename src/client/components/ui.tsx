@@ -134,9 +134,10 @@ export function Field({
 const inputBase =
   'rounded-md border border-line-strong bg-card px-3.5 text-ink outline-none transition-[border-color,box-shadow] placeholder:text-ink-4 hover:border-ink-4 focus:border-pine focus:shadow-[0_0_0_3px_rgb(36_73_58/0.12)] disabled:bg-paper-2 disabled:text-ink-3 aria-[invalid=true]:border-clay';
 
-export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }>(
-  function Input({ className, invalid, ...rest }, ref) {
-    return <input ref={ref} aria-invalid={invalid || undefined} className={cn(inputBase, 'h-11 w-full', className)} {...rest} />;
+/** 默认撑满容器；需要固定宽度（如日期、并排的搜索框）时传 fullWidth={false} 再给宽度，否则 w-full 会盖过传入的宽度 */
+export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean; fullWidth?: boolean }>(
+  function Input({ className, invalid, fullWidth = true, ...rest }, ref) {
+    return <input ref={ref} aria-invalid={invalid || undefined} className={cn(inputBase, 'h-11', fullWidth && 'w-full', className)} {...rest} />;
   },
 );
 

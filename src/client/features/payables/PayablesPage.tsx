@@ -206,9 +206,9 @@ function StatementView({
           ))}
         </Select>
         <span className="flex items-center gap-1.5 text-[13px] text-ink-3">
-          <Input type="date" value={range.from} max={range.to} onChange={(e) => setRange({ ...range, from: e.target.value })} className="h-9 w-[150px] text-[13px]" aria-label="开始日期" />
+          <Input fullWidth={false} type="date" value={range.from} max={range.to} onChange={(e) => setRange({ ...range, from: e.target.value })} className="h-9 w-[150px] text-[13px]" aria-label="开始日期" />
           至
-          <Input type="date" value={range.to} max={today} onChange={(e) => setRange({ ...range, to: e.target.value })} className="h-9 w-[150px] text-[13px]" aria-label="结束日期" />
+          <Input fullWidth={false} type="date" value={range.to} max={today} onChange={(e) => setRange({ ...range, to: e.target.value })} className="h-9 w-[150px] text-[13px]" aria-label="结束日期" />
         </span>
         <Button size="sm" variant="ghost" onClick={() => setRange({ from: shiftDate(today, -29), to: today })}>
           近 30 天

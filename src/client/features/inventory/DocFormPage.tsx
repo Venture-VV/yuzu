@@ -1287,8 +1287,16 @@ function SourcePicker({ type, value, onChange, disabled, className }: { type: 'i
   return (
     <Field label={type === 'issue' ? '原领用单' : '原收货单'} className={className} hint={value ? undefined : '只列出已生效的单据'}>
       <div className="flex gap-2">
-        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="单号 / 部门 / 供应商 / 物料" aria-label="搜索原单" disabled={disabled} className="h-10 w-44 shrink-0 text-[13px]" />
-        <Select value={value ?? ''} onChange={(e) => onChange(Number(e.target.value) || null)} disabled={disabled} aria-label="选择原单">
+        <Input
+          fullWidth={false}
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="单号 / 部门 / 物料"
+          aria-label="搜索原单"
+          disabled={disabled}
+          className="h-10 w-40 shrink-0 text-[13px]"
+        />
+        <Select value={value ?? ''} onChange={(e) => onChange(Number(e.target.value) || null)} disabled={disabled} aria-label="选择原单" className="min-w-0 flex-1">
           <option value="">{docs.isPending ? '加载中…' : `选择（${list.length}）`}</option>
           {list.map((d) => (
             <option key={d.id} value={d.id}>
