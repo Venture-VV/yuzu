@@ -34,7 +34,8 @@ const ReasonInput = z.object({ reason: z.string().trim().min(2, '请填写原因
 const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 
 async function lockSupplier(tx: Tx, supplierId: number) {
-  const [s] = await tx<{ id: number; name: string; active: boolean }[]>`SELECT id, name, active FROM suppliers WHERE id = ${supplierId} FOR UPDATE`;
+  // 不修改供应商主键；允许库存应付流水的外键校验取得 KEY SHARE，避免与收货冲销互相等待。
+  const [s] = await tx<{ id: number; name: string; active: boolean }[]>`SELECT id, name, active FROM suppliers WHERE id = ${supplierId} FOR NO KEY UPDATE`;
   if (!s) throw notFound('供应商不存在');
   return s;
 }
@@ -254,6 +255,9 @@ export async function getPayment(db: Db, paymentId: number): Promise<PaymentDoc>
 
 /** 核销校验：目标属于该供应商、仍有未结清金额，且不超过未结清金额 */
 async function checkAllocations(tx: Tx, supplierId: number, allocations: { kind: 'receipt' | 'opening'; targetId: number; amountCents: number }[], excludePaymentId: number | null) {
+  // 与收货冲销、退货确认使用同一原单行锁。先锁再读余额，避免核销检查后原单失效。
+  const receiptIds = [...new Set(allocations.filter((a) => a.kind === 'receipt').map((a) => a.targetId))].sort((a, b) => a - b);
+  if (receiptIds.length) await tx`SELECT id FROM inv_docs WHERE id IN ${tx(receiptIds)} ORDER BY id FOR UPDATE`;
   const items = await openItems(tx, supplierId, excludePaymentId);
   const seen = new Set<string>();
   for (const a of allocations) {

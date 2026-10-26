@@ -3,7 +3,7 @@
 # 备份文件写到 .env 中 BACKUP_DIR 指定的目录。
 set -euo pipefail
 cd "$(dirname "$0")/.."
-BACKUP_DIR=$(grep -E '^BACKUP_DIR=' .env 2>/dev/null | cut -d= -f2- || true)
+BACKUP_DIR=${BACKUP_DIR:-$(grep -E '^BACKUP_DIR=' .env 2>/dev/null | cut -d= -f2- || true)}
 BACKUP_DIR=${BACKUP_DIR:-./backups}
 mkdir -p "$BACKUP_DIR"
 label=${1:-manual}

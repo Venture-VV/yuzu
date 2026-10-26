@@ -10,7 +10,7 @@
 
 ![库存工作台](docs/screenshots/inv-desktop-stock.png)
 
-> 会员模块 v0.1.0 已在门店局域网试用；库存与采购模块在本分支完成三段开发，尚未合入、尚未更新门店环境。所有经营规则均为**模拟规则（待确认）**，演示数据为合成数据。正式启用前请先完成 [待确认经营事项](docs/PENDING_DECISIONS.md)。
+> 会员模块已有本机 Docker 合成数据试用环境；库存与采购模块在本分支完成三段开发，门店 Mac mini 部署与现场验收仍待完成。所有经营规则均为**模拟规则（待确认）**，演示数据为合成数据。正式启用前请先完成 [待确认经营事项](docs/PENDING_DECISIONS.md)。
 
 ---
 
@@ -148,7 +148,7 @@ docker compose ps                   # app / db 显示 healthy 即可
 
 门店电脑或平板浏览器访问 `http://<Mac mini 局域网 IP>:8080`。
 
-**开发、试用、正式三套环境互相隔离**：各自使用独立的 `.env` 与数据库卷。在同一台机器上并行时，用不同的项目名和端口：
+**开发、试用、正式三套环境互相隔离**：各自使用独立的 `.env`、数据库卷与备份目录。在同一台机器上并行时，用不同的项目名和端口；镜像标签默认包含 Compose 项目名，也可通过 `APP_IMAGE` 单独指定：
 
 ```bash
 docker compose --env-file .env.trial -p yuzu-trial up -d --build   # .env.trial 里设置 APP_PORT=8081

@@ -276,6 +276,7 @@ interface Prepared {
   handler: string;
   amountCents: number;
   noPo: boolean;
+  priceBasis: string;
   lines: PreparedLine[];
 }
 
@@ -379,7 +380,7 @@ export async function receivedByPoLine(db: Db, poId: number, excludeDocId: numbe
 
 async function prepare(db: Db, deps: Deps, body: z.infer<typeof DocBody>, existing: { id: number; lines: { materialId: number; bookMilli: number | null; bookMoveId: number | null }[] } | null): Promise<Prepared> {
   assertNotFuture(body.docDate, deps.config.timezone);
-  const empty: Prepared = { supplierId: null, purchaseOrderId: null, departmentId: null, sourceDocId: null, handler: '', amountCents: 0, noPo: false, lines: [] };
+  const empty: Prepared = { supplierId: null, purchaseOrderId: null, departmentId: null, sourceDocId: null, handler: '', amountCents: 0, noPo: false, priceBasis: '', lines: [] };
 
   switch (body.docType) {
     case 'opening': {
@@ -513,12 +514,14 @@ async function prepare(db: Db, deps: Deps, body: z.infer<typeof DocBody>, existi
       const mats = await loadMaterials(db, body.lines.map((l) => l.materialId));
       let poLines = new Map<number, { id: number; materialId: number; baseQtyMilli: number; priceCents: number; factorMilli: number; purchaseUnit: string; inventoryUnit: string }>();
       let received = new Map<number, number>();
+      let priceBasis = (await loadInventorySettings(db)).priceBasis;
       if (body.purchaseOrderId) {
-        const [po] = await db<{ supplierId: number; status: string; docNo: string }[]>`
-          SELECT supplier_id, status, doc_no FROM purchase_orders WHERE id = ${body.purchaseOrderId}`;
+        const [po] = await db<{ supplierId: number; status: string; docNo: string; priceBasis: string }[]>`
+          SELECT supplier_id, status, doc_no, price_basis FROM purchase_orders WHERE id = ${body.purchaseOrderId}`;
         if (!po) throw unprocessable('PO_NOT_FOUND', '采购单不存在');
         if (po.status !== 'approved') throw unprocessable('PO_NOT_APPROVED', `采购单 ${po.docNo} 尚未确认或已关闭，不能收货`);
         if (po.supplierId !== body.supplierId) throw unprocessable('PO_SUPPLIER_MISMATCH', '收货供应商与采购单不一致');
+        priceBasis = po.priceBasis;
         const rows = await db<{ id: number; materialId: number; baseQtyMilli: number; priceCents: number; factorMilli: number; purchaseUnit: string; inventoryUnit: string }[]>`
           SELECT id, material_id, base_qty_milli, price_cents, factor_milli, purchase_unit, inventory_unit
           FROM purchase_order_lines WHERE po_id = ${body.purchaseOrderId}`;
@@ -589,6 +592,7 @@ async function prepare(db: Db, deps: Deps, body: z.infer<typeof DocBody>, existi
         handler: body.handler,
         amountCents: amount,
         noPo: !body.purchaseOrderId,
+        priceBasis,
         lines: prepared,
       };
     }
@@ -653,6 +657,17 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
   if (doc.purchaseOrderId) {
     const [po] = await tx<{ status: string }[]>`SELECT status FROM purchase_orders WHERE id = ${doc.purchaseOrderId} FOR UPDATE`;
     if (po?.status !== 'approved') throw conflict('PO_NOT_APPROVED', '采购单已关闭或未确认，不能收货');
+    // prepare 读取后，采购可能已完成改版。取得采购单锁后复核完整快照，不能只检查余量。
+    const [stale] = await tx<{ changed: boolean }[]>`
+      SELECT (d.supplier_id IS DISTINCT FROM p.supplier_id OR d.price_basis IS DISTINCT FROM p.price_basis
+        OR EXISTS (
+          SELECT 1 FROM inv_doc_lines l LEFT JOIN purchase_order_lines pl ON pl.id = l.po_line_id AND pl.po_id = p.id
+          WHERE l.doc_id = d.id AND (pl.id IS NULL OR
+            (l.material_id, l.price_cents, l.factor_milli, l.purchase_unit, l.inventory_unit)
+            IS DISTINCT FROM (pl.material_id, pl.price_cents, pl.factor_milli, pl.purchase_unit, pl.inventory_unit))
+        )) AS changed
+      FROM inv_docs d JOIN purchase_orders p ON p.id = d.purchase_order_id WHERE d.id = ${doc.id}`;
+    if (stale?.changed) throw conflict('PO_RECEIPT_STALE', '采购单内容已变化，请重新打开收货单，按最新采购单核对后再提交');
   }
   const mats = await lockMaterials(tx, lines.map((l) => l.materialId));
   const ref = (l: LineRow, moveType: Parameters<typeof applyMove>[3]['moveType']) => ({
@@ -829,7 +844,7 @@ export async function createDoc(deps: Deps, raw: CreateDocInput, actor: Actor, i
                               source_doc_id, note, amount_cents, no_po, price_basis, client_key, created_by)
         VALUES (${docNo}, ${body.docType}, 'draft', ${body.docDate}, ${prepared.supplierId}, ${prepared.purchaseOrderId},
                 ${prepared.departmentId}, ${prepared.handler}, ${prepared.sourceDocId}, ${body.note}, ${prepared.amountCents},
-                ${prepared.noPo}, ${body.docType === 'receipt' ? (await loadInventorySettings(tx)).priceBasis : ''}, ${meta.clientKey}, ${actor.id})
+                ${prepared.noPo}, ${prepared.priceBasis}, ${meta.clientKey}, ${actor.id})
         RETURNING id`;
       const newId = row!.id;
       await insertLines(tx, newId, prepared.lines);
@@ -873,7 +888,7 @@ export async function updateDoc(deps: Deps, docId: number, raw: DocBodyInput & {
     await tx`
       UPDATE inv_docs SET doc_date = ${body.docDate}, supplier_id = ${prepared.supplierId}, purchase_order_id = ${prepared.purchaseOrderId},
              department_id = ${prepared.departmentId}, handler = ${prepared.handler}, source_doc_id = ${prepared.sourceDocId},
-             note = ${body.note}, amount_cents = ${prepared.amountCents}, no_po = ${prepared.noPo}, updated_at = now()
+             note = ${body.note}, amount_cents = ${prepared.amountCents}, no_po = ${prepared.noPo}, price_basis = ${prepared.priceBasis}, updated_at = now()
       WHERE id = ${docId}`;
     await insertLines(tx, docId, prepared.lines);
     if (meta.action === 'submit') await submitLocked(tx, await lockDoc(tx, docId), actor, meta.approveNow);
