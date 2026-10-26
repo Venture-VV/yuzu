@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import type { Role } from '@shared/permissions';
+import type { Duty, Role } from '@shared/permissions';
 import type { Db } from '../db';
 import type { Actor } from '../lib/context';
 
@@ -24,7 +24,7 @@ export async function createSession(
 /** 校验会话；有效时顺延过期时间（滑动过期，最多每分钟写一次）。 */
 export async function resolveSession(db: Db, token: string, ttlHours: number): Promise<Actor | null> {
   const rows = await db<(Actor & { active: boolean; tokenHash: string; stale: boolean })[]>`
-    SELECT s.token_hash, st.id, st.username, st.display_name, st.role, st.must_change_password, st.active,
+    SELECT s.token_hash, st.id, st.username, st.display_name, st.role, st.duties, st.must_change_password, st.active,
            s.last_seen_at < now() - interval '1 minute' AS stale
     FROM sessions s JOIN staff st ON st.id = s.staff_id
     WHERE s.token_hash = ${hashToken(token)} AND s.expires_at > now()`;
@@ -40,6 +40,7 @@ export async function resolveSession(db: Db, token: string, ttlHours: number): P
     username: row.username,
     displayName: row.displayName,
     role: row.role as Role,
+    duties: (row.duties ?? []) as Duty[],
     mustChangePassword: row.mustChangePassword,
   };
 }

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf } from '@shared/business-date';
-import { permissionsOf, type Role } from '@shared/permissions';
+import { permissionsOf, type Duty, type Role } from '@shared/permissions';
 import type { SessionInfo } from '@shared/types';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
@@ -51,7 +51,7 @@ export async function buildSessionInfo({ sql, config }: Deps, actor: Actor): Pro
   const { storeName, ...rules } = settings;
   return {
     staff: actor,
-    permissions: permissionsOf(actor.role),
+    permissions: permissionsOf(actor),
     storeName,
     rules,
     today: businessDateOf(new Date(), config.timezone, settings.businessDayStartHour),
@@ -90,7 +90,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: Deps) {
     const { username, password } = parse(LoginInput, req.body);
     checkLock(username);
     const rows = await sql<(Actor & { passwordHash: string; active: boolean })[]>`
-      SELECT id, username, display_name, role, must_change_password, password_hash, active
+      SELECT id, username, display_name, role, duties, must_change_password, password_hash, active
       FROM staff WHERE username = ${username}`;
     const staff = rows[0];
     const ok = staff ? await verifyPassword(password, staff.passwordHash) : false;
@@ -118,6 +118,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: Deps) {
       username: staff.username,
       displayName: staff.displayName,
       role: staff.role as Role,
+      duties: (staff.duties ?? []) as Duty[],
       mustChangePassword: staff.mustChangePassword,
     };
     return buildSessionInfo(deps, actor);

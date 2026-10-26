@@ -1,5 +1,5 @@
 import type { DeductionRule } from './deduction';
-import type { Role } from './permissions';
+import type { Duty, Role } from './permissions';
 
 export const PAYMENT_METHODS = ['wechat', 'alipay', 'cash', 'bank_card', 'other'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
@@ -14,7 +14,21 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
 
 export const ROLE_LABELS: Record<Role, string> = {
   owner: '店主',
-  clerk: '店员',
+  clerk: '前台店员',
+  backoffice: '后勤人员',
+};
+
+export const ROLE_HINTS: Record<Role, string> = {
+  owner: '全部权限',
+  clerk: '会员查找、充值、消费、当日流水',
+  backoffice: '没有会员与储值权限，只按职责处理库存与采购',
+};
+
+export const DUTY_LABELS: Record<Duty, { title: string; hint: string }> = {
+  stock: { title: '物资经办', hint: '期初、收货、领用、退回、耗用、报损申请、盘点录入' },
+  purchase: { title: '采购经办', hint: '维护档案、编制采购单、跟进价格与到货' },
+  payable: { title: '对账付款', hint: '核对货款、登记期初未付与实际付款' },
+  approve: { title: '库存采购负责人', hint: '确认采购、报损、盘点调整、退货、付款与冲销' },
 };
 
 export const DEDUCTION_RULE_LABELS: Record<DeductionRule, { title: string; description: string }> = {

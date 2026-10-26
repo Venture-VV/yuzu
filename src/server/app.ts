@@ -11,6 +11,9 @@ import { AppError } from './lib/errors';
 import type { Deps } from './lib/context';
 import { registerAuditRoutes } from './modules/audit';
 import { registerCatalogRoutes } from './modules/catalog';
+import { registerDocRoutes } from './modules/inventory/docs';
+import { registerMasterRoutes } from './modules/inventory/master';
+import { registerReportRoutes } from './modules/inventory/reports';
 import { registerLedgerRoutes } from './modules/ledger';
 import { registerMemberRoutes } from './modules/members';
 import { registerSettingsRoutes } from './modules/settings';
@@ -70,7 +73,10 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
     if (e.code === '55P03' || e.code === '57014') {
       // 等锁或执行超时：事务已回滚，操作没有生效
       req.log.warn({ err: error }, '记账等待超时');
-      reply.status(409).send({ error: { code: 'BUSY', message: '该会员正在被其他终端操作，本次未生效，请稍后重试' } });
+      const what = req.url.startsWith('/api/inventory') || req.url.startsWith('/api/purchase') || req.url.startsWith('/api/payables')
+        ? '相关物料或单据'
+        : '该会员';
+      reply.status(409).send({ error: { code: 'BUSY', message: `${what}正在被其他终端操作，本次未生效，请稍后重试` } });
       return;
     }
     if (e.code === 'P0001') {
@@ -100,6 +106,9 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerCatalogRoutes(app, deps);
   registerSettingsRoutes(app, deps);
   registerAuditRoutes(app, deps);
+  registerMasterRoutes(app, deps);
+  registerDocRoutes(app, deps);
+  registerReportRoutes(app, deps);
 
   // 前端静态资源（构建产物），全部从本机提供，外网中断不影响使用。
   const staticDir = resolve(process.env.STATIC_DIR ?? 'dist/client');

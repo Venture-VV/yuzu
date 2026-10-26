@@ -19,7 +19,12 @@ export type AuditAction =
   | 'settings_updated'
   | 'plan_saved'
   | 'item_saved'
-  | 'export';
+  | 'export'
+  | 'inventory_master_saved'
+  | 'inventory_doc'
+  | 'purchase_order'
+  | 'payable_doc'
+  | 'inventory_settings_updated';
 
 export interface AuditEntry {
   staffId: number | null;

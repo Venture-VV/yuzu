@@ -22,7 +22,7 @@ export function guard(...permissions: Permission[]): preHandlerAsyncHookHandler 
       throw new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '首次登录请先修改密码');
     }
     for (const p of permissions) {
-      if (!can(req.actor.role, p)) throw forbidden();
+      if (!can(req.actor, p)) throw forbidden();
     }
   };
 }

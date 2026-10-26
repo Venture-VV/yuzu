@@ -101,7 +101,7 @@ describe('日结', () => {
     const c = await consume(
       deps,
       { idempotencyKey: randomUUID(), memberId: member.id, customLines: [{ name: '昨日消费', amount: 5000 }], expectedTotal: 5000 },
-      { actor: { id: ctx.clerkId, username: 'clerk', displayName: '测试店员', role: 'clerk', mustChangePassword: false }, at: yesterdayNoon },
+      { actor: { id: ctx.clerkId, username: 'clerk', displayName: '测试店员', role: 'clerk', duties: [], mustChangePassword: false }, at: yesterdayNoon },
     );
     expect(c.type === 'consume' && c.consumption.businessDate).toBe(yesterday);
 

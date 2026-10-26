@@ -1,4 +1,4 @@
-import type { Role } from '@shared/permissions';
+import type { Duty, Role } from '@shared/permissions';
 import type { AppConfig } from '../config';
 import type { Sql } from '../db';
 
@@ -12,6 +12,8 @@ export interface Actor {
   username: string;
   displayName: string;
   role: Role;
+  /** 库存与采购职责，可叠加 */
+  duties: Duty[];
   mustChangePassword: boolean;
 }
 

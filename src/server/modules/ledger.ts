@@ -68,7 +68,7 @@ export async function resolveReadableDate(deps: Deps, req: FastifyRequest, date:
   const settings = await loadSettings(deps.sql);
   const today = businessDateOf(new Date(), deps.config.timezone, settings.businessDayStartHour);
   const target = date ?? today;
-  if (target !== today && !can(req.actor.role, 'ledger.readHistory')) {
+  if (target !== today && !can(req.actor, 'ledger.readHistory')) {
     throw forbidden('当前岗位只能查看本营业日的记录');
   }
   return target;

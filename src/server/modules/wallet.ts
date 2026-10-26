@@ -306,7 +306,7 @@ export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContex
           throw conflict('PLAN_CHANGED', '充值套餐金额刚刚有调整，请核对后重新确认');
         }
         planName = plan.name;
-      } else if (input.bonusAmount > 0 && !can(ctx.actor.role, 'recharge.customBonus')) {
+      } else if (input.bonusAmount > 0 && !can(ctx.actor, 'recharge.customBonus')) {
         throw forbidden('当前岗位不能自定义赠金，请选择充值套餐');
       }
       if (input.paidAmount > settings.maxRechargeCents) {
@@ -346,7 +346,7 @@ export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContex
 export async function consume(deps: Deps, raw: ConsumeInputData, ctx: OpContext): Promise<OperationResult> {
   const input = parse(ConsumeInput, raw);
   const { idempotencyKey: key, ...payload } = input;
-  if (input.customLines.length > 0 && !can(ctx.actor.role, 'consume.customAmount')) {
+  if (input.customLines.length > 0 && !can(ctx.actor, 'consume.customAmount')) {
     throw forbidden('当前岗位不能手动输入消费金额');
   }
   const run = await runIdempotent(
@@ -501,7 +501,8 @@ export async function reverse(deps: Deps, consumptionId: number, raw: ReverseInp
 
 export async function lookupOperation(sql: Sql, key: string): Promise<OperationLookup> {
   const row = await findKey(sql, key);
-  if (!row) return { found: false };
+  // 库存与采购单据有各自的查回接口（按 clientKey），这里只查会员记账
+  if (!row || !['recharge', 'consume', 'reversal'].includes(row.opType)) return { found: false };
   return { found: true, ...(await loadOperation(sql, row.opType, row.refId, true)) };
 }
 

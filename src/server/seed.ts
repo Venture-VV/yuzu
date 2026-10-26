@@ -67,7 +67,7 @@ export async function seedDemo(sql: Sql, config: AppConfig, options: { force?: b
   const ensureStaff = async (username: string, displayName: string, role: 'owner' | 'clerk') => {
     const [row] = await sql<{ id: number }[]>`SELECT id FROM staff WHERE username = ${username}`;
     const id = row?.id ?? (await createStaff(sql, { username, displayName, role, password: DEMO_PASSWORD, mustChangePassword: false }));
-    return { id, username, displayName, role, mustChangePassword: false } satisfies Actor;
+    return { id, username, displayName, role, duties: [], mustChangePassword: false } satisfies Actor;
   };
   const owner = await ensureStaff('linlan', '林岚', 'owner');
   const clerk = await ensureStaff('xiaozhou', '周小舟', 'clerk');

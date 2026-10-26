@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { ROLES } from '@shared/permissions';
+import { DUTIES, ROLES, type Duty, type Role } from '@shared/permissions';
 import type { StaffRecord } from '@shared/types';
 import { isUniqueViolation, type Db } from '../db';
 import { guard } from '../auth/guard';
@@ -21,6 +21,8 @@ const CreateInput = z.object({
   username,
   displayName: z.string().trim().min(1, '请填写姓名').max(32, '姓名最多 32 个字'),
   role: z.enum(ROLES, '请选择岗位'),
+  /** 库存与采购职责，可叠加；店主自动拥有全部 */
+  duties: z.array(z.enum(DUTIES)).max(DUTIES.length).default([]),
   /** 不填则自动生成临时密码；员工首次登录必须修改 */
   password: z.string().optional(),
 });
@@ -28,24 +30,28 @@ const CreateInput = z.object({
 const UpdateInput = z.object({
   displayName: z.string().trim().min(1, '请填写姓名').max(32, '姓名最多 32 个字'),
   role: z.enum(ROLES, '请选择岗位'),
+  duties: z.array(z.enum(DUTIES)).max(DUTIES.length).default([]),
   active: z.boolean(),
 });
 
 export async function listStaff(db: Db): Promise<StaffRecord[]> {
   return db<StaffRecord[]>`
-    SELECT id, username, display_name, role, active, must_change_password, last_login_at, created_at
-    FROM staff ORDER BY active DESC, role DESC, id`;
+    SELECT id, username, display_name, role, duties, active, must_change_password, last_login_at, created_at
+    FROM staff ORDER BY active DESC, (role = 'owner') DESC, id`;
 }
+
+const uniqueDuties = (duties: Duty[] = []) => [...new Set(duties)].sort();
 
 /** 创建员工账号（CLI 与接口共用）。 */
 export async function createStaff(
   db: Db,
-  input: { username: string; displayName: string; role: 'owner' | 'clerk'; password: string; mustChangePassword: boolean },
+  input: { username: string; displayName: string; role: Role; duties?: Duty[]; password: string; mustChangePassword: boolean },
 ): Promise<number> {
   try {
     const [row] = await db<{ id: number }[]>`
-      INSERT INTO staff (username, display_name, role, password_hash, must_change_password)
-      VALUES (${input.username}, ${input.displayName}, ${input.role}, ${await hashPassword(input.password)}, ${input.mustChangePassword})
+      INSERT INTO staff (username, display_name, role, duties, password_hash, must_change_password)
+      VALUES (${input.username}, ${input.displayName}, ${input.role}, ${uniqueDuties(input.duties)},
+              ${await hashPassword(input.password)}, ${input.mustChangePassword})
       RETURNING id`;
     return row!.id;
   } catch (error) {
@@ -68,7 +74,7 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
       action: 'staff_created',
       targetType: 'staff',
       targetId: id,
-      detail: { username: input.username, role: input.role },
+      detail: { username: input.username, role: input.role, duties: input.duties },
       ip: req.ip,
     });
     reply.code(201);
@@ -81,14 +87,15 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
     await sql.begin(async (tx) => {
       // 锁住全部店主行，保证并发修改时仍至少保留一位在职店主
       await tx`SELECT id FROM staff WHERE role = 'owner' FOR UPDATE`;
-      const [before] = await tx<{ role: string; active: boolean; displayName: string }[]>`
-        SELECT role, active, display_name FROM staff WHERE id = ${id}`;
+      const [before] = await tx<{ role: string; duties: string[]; active: boolean; displayName: string }[]>`
+        SELECT role, duties, active, display_name FROM staff WHERE id = ${id}`;
       if (!before) throw notFound('员工不存在');
       if (id === req.actor.id && (!input.active || input.role !== 'owner')) {
         throw unprocessable('SELF_LOCKOUT', '不能停用自己或取消自己的店主岗位');
       }
       await tx`
-        UPDATE staff SET display_name = ${input.displayName}, role = ${input.role}, active = ${input.active}, updated_at = now()
+        UPDATE staff SET display_name = ${input.displayName}, role = ${input.role}, duties = ${uniqueDuties(input.duties)},
+               active = ${input.active}, updated_at = now()
         WHERE id = ${id}`;
       const [owners] = await tx<{ count: number }[]>`SELECT count(*) AS count FROM staff WHERE role = 'owner' AND active`;
       if (!owners || owners.count < 1) throw unprocessable('LAST_OWNER', '至少需要保留一位在职店主');

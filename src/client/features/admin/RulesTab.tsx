@@ -157,7 +157,7 @@ export function RulesTab() {
                   <td className="px-4 py-2">{PERMISSION_LABELS[p]}</td>
                   {ROLES.map((r) => (
                     <td key={r} className="px-2 py-2 text-center">
-                      {(PERMISSIONS[p] as readonly string[]).includes(r) ? (
+                      {(PERMISSIONS[p].roles as readonly string[]).includes(r) ? (
                         <Check className="mx-auto size-4 text-pine" strokeWidth={3} />
                       ) : (
                         <Minus className="mx-auto size-4 text-ink-4" />

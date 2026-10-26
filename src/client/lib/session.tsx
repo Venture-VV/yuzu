@@ -1,5 +1,5 @@
 import { createContext, useContext, type ReactNode } from 'react';
-import { can as canRole, type Permission } from '@shared/permissions';
+import type { Permission } from '@shared/permissions';
 import type { SessionInfo } from '@shared/types';
 
 const SessionContext = createContext<SessionInfo | null>(null);
@@ -14,7 +14,8 @@ export function useSession(): SessionInfo {
   return s;
 }
 
+/** 权限以服务端计算的结果为准（岗位 + 职责） */
 export function useCan() {
   const s = useSession();
-  return (p: Permission) => canRole(s.staff.role, p);
+  return (p: Permission) => s.permissions.includes(p);
 }

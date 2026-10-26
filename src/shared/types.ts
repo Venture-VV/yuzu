@@ -2,7 +2,7 @@
 
 import type { DeductionRule, WalletBalance } from './deduction';
 import type { EntryType, PaymentMethod } from './labels';
-import type { Permission, Role } from './permissions';
+import type { Duty, Permission, Role } from './permissions';
 
 export type AppEnv = 'development' | 'trial' | 'production' | 'test';
 
@@ -15,6 +15,7 @@ export interface StaffBrief {
   username: string;
   displayName: string;
   role: Role;
+  duties: Duty[];
   mustChangePassword: boolean;
 }
 
@@ -257,6 +258,7 @@ export interface StaffRecord {
   username: string;
   displayName: string;
   role: Role;
+  duties: Duty[];
   active: boolean;
   mustChangePassword: boolean;
   lastLoginAt: string | null;
