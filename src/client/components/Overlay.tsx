@@ -1,21 +1,23 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { IconButton } from './ui';
 
-function useEscape(onClose: () => void, enabled: boolean) {
+/** Esc 只关闭最上层的弹窗（例如账单抽屉上又打开了确认框时，只关确认框） */
+function useEscape(onClose: () => void, enabled: boolean, panel: React.RefObject<HTMLElement | null>) {
   useEffect(() => {
     if (!enabled) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
+      if (e.key !== 'Escape') return;
+      const layers = document.querySelectorAll('[role="dialog"]');
+      if (panel.current && layers.length && layers[layers.length - 1] !== panel.current) return;
+      e.stopPropagation();
+      onClose();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [onClose, enabled]);
+  }, [onClose, enabled, panel]);
 }
 
 /** 打开时把焦点移入面板，关闭时还给原来的元素 */
@@ -56,7 +58,8 @@ export function Dialog({
   dismissible?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
-  useEscape(onClose, open && dismissible);
+  const titleId = useId();
+  useEscape(onClose, open && dismissible, panel);
   useFocusReturn(open, panel);
   if (!open) return null;
   return createPortal(
@@ -66,6 +69,7 @@ export function Dialog({
         ref={panel}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
         tabIndex={-1}
         className={cn(
           'relative flex max-h-[92vh] w-full animate-rise flex-col overflow-hidden rounded-t-xl border border-line bg-card shadow-pop outline-none sm:rounded-xl',
@@ -74,7 +78,9 @@ export function Dialog({
       >
         <header className="flex items-start gap-4 border-b border-line px-6 pt-5 pb-4">
           <div className="min-w-0 flex-1">
-            <h2 className="text-[17px] font-bold text-ink">{title}</h2>
+            <h2 id={titleId} className="text-[17px] font-bold text-ink">
+              {title}
+            </h2>
             {description && <p className="mt-1 text-[13px] text-ink-3">{description}</p>}
           </div>
           {dismissible && (
@@ -106,7 +112,7 @@ export function Sheet({
   width?: string;
 }) {
   const panel = useRef<HTMLDivElement>(null);
-  useEscape(onClose, open);
+  useEscape(onClose, open, panel);
   useFocusReturn(open, panel);
   if (!open) return null;
   return createPortal(

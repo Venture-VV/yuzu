@@ -1,5 +1,5 @@
 import { NavLink, Navigate, useParams } from 'react-router';
-import { ClipboardList, Gift, Scale, UsersRound } from 'lucide-react';
+import { ClipboardList, Gift, Scale, Tags, UsersRound } from 'lucide-react';
 import { useCan } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
@@ -7,10 +7,12 @@ import { AuditTab } from './AuditTab';
 import { CatalogTab } from './CatalogTab';
 import { RulesTab } from './RulesTab';
 import { StaffTab } from './StaffTab';
+import { TagsTab } from './TagsTab';
 
 const TABS = [
   { key: 'staff', label: '员工', icon: UsersRound },
   { key: 'catalog', label: '套餐与项目', icon: Gift },
+  { key: 'tags', label: '手牌', icon: Tags },
   { key: 'rules', label: '经营规则', icon: Scale },
   { key: 'audit', label: '操作审计', icon: ClipboardList },
 ] as const;
@@ -21,7 +23,7 @@ export function AdminPage() {
   if (!can('staff.manage')) return <Navigate to="/" replace />;
   return (
     <>
-      <PageHeader title="管理" subtitle="员工、套餐项目与经营规则（仅店主）" />
+      <PageHeader title="管理" subtitle="员工、套餐项目、手牌池与经营规则（仅店主）" />
       <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-line px-5 md:px-7">
         {TABS.map(({ key, label, icon: Icon }) => (
           <NavLink
@@ -42,6 +44,7 @@ export function AdminPage() {
         <div className="mx-auto max-w-[1080px] px-5 py-6 md:px-7">
           {tab === 'staff' && <StaffTab />}
           {tab === 'catalog' && <CatalogTab />}
+          {tab === 'tags' && <TagsTab />}
           {tab === 'rules' && <RulesTab />}
           {tab === 'audit' && <AuditTab />}
         </div>

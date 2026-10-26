@@ -1,0 +1,258 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Minus, Plus, Trash2 } from 'lucide-react';
+import type { VisitDetail } from '@shared/frontdesk';
+import { parseYuan } from '@shared/money';
+import { api } from '../../lib/api';
+import { useCatalog } from '../../lib/queries';
+import { useCan } from '../../lib/session';
+import { cn } from '../../lib/utils';
+import { Money } from '../../components/Money';
+import { Dialog } from '../../components/Overlay';
+import { Button, Input, MoneyInput, Notice, Skeleton } from '../../components/ui';
+import { useKeyedSubmit, ZoneChip } from './parts';
+
+/** 挂账：点选项目累加数量，确认后一次登记到手牌账单（只挂账，不收款） */
+export function AddItemsDialog({
+  open,
+  visit,
+  onClose,
+  onDone,
+}: {
+  open: boolean;
+  visit: VisitDetail;
+  onClose: () => void;
+  onDone: (v: VisitDetail) => void;
+}) {
+  const can = useCan();
+  const catalog = useCatalog();
+  const [cart, setCart] = useState<Map<number, number>>(new Map());
+  const [category, setCategory] = useState('全部');
+  const [custom, setCustom] = useState<{ name: string; amount: string }[]>([]);
+  const op = useKeyedSubmit<VisitDetail>((found) => (found as { visit?: VisitDetail }).visit ?? null);
+
+  useEffect(() => {
+    if (!open) return;
+    setCart(new Map());
+    setCustom([]);
+    setCategory('全部');
+    op.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const items = useMemo(() => (catalog.data?.items ?? []).filter((i) => i.active), [catalog.data]);
+  const categories = useMemo(() => ['全部', ...new Set(items.map((i) => i.category || '其他'))], [items]);
+  const shown = category === '全部' ? items : items.filter((i) => (i.category || '其他') === category);
+
+  // 结果待确认时锁定内容，先查回；被明确拒绝后再改内容，换一个新操作编号
+  const locked = op.state.phase === 'uncertain' || op.state.phase === 'busy';
+  const touch = () => {
+    if (op.state.phase === 'error') op.reset();
+  };
+  const add = (id: number, delta: number) => {
+    if (locked) return;
+    touch();
+    setCart((m) => {
+      const next = new Map(m);
+      const q = Math.min(99, Math.max(0, (next.get(id) ?? 0) + delta));
+      if (q === 0) next.delete(id);
+      else next.set(id, q);
+      return next;
+    });
+  };
+
+  const lines = [...cart].map(([id, quantity]) => {
+    const item = items.find((i) => i.id === id)!;
+    return { item, quantity, amount: item ? item.price * quantity : 0 };
+  }).filter((l) => l.item);
+  const customParsed = custom.map((c) => ({ name: c.name.trim(), amount: parseYuan(c.amount) }));
+  const customValid = customParsed.every((c) => c.name && c.amount && c.amount > 0);
+  const total = lines.reduce((s, l) => s + l.amount, 0) + customParsed.reduce((s, c) => s + (c.amount ?? 0), 0);
+  const ready = (lines.length > 0 || custom.length > 0) && customValid && total > 0;
+
+  const submit = async () => {
+    const result = await op.submit((key) =>
+      api.post<VisitDetail>(`/api/frontdesk/visits/${visit.id}/charges`, {
+        clientKey: key,
+        lines: lines.map((l) => ({ itemId: l.item.id, quantity: l.quantity })),
+        customLines: customParsed.map((c) => ({ name: c.name, amount: c.amount })),
+        expectedTotal: total,
+      }),
+    );
+    if (result) onDone(result);
+  };
+  const busy = op.state.phase === 'busy';
+
+  return (
+    <Dialog
+      open={open}
+      onClose={busy ? () => {} : onClose}
+      width="max-w-3xl"
+      title={
+        <span className="flex items-center gap-2">
+          加项目 · <span className="num">{visit.tag.code}</span> <ZoneChip zone={visit.zone} size="md" />
+        </span>
+      }
+      description="点项目累加数量；确认后挂到这张手牌的账单上，价格按当前价格留存。挂账不是收款。"
+      footer={
+        <>
+          <span className="mr-auto self-center text-[13px] text-ink-3">
+            本次 <b className="num text-ink">{lines.reduce((s, l) => s + l.quantity, 0) + custom.length}</b> 项，合计{' '}
+            <Money cents={total} className="text-[17px] font-bold text-ink" />
+          </span>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            取消
+          </Button>
+          <Button variant="primary" size="lg" disabled={!ready} loading={busy} onClick={submit} data-testid="add-items-submit">
+            挂到 {visit.tag.code}
+          </Button>
+        </>
+      }
+    >
+      <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="min-w-0">
+          <div className="scroll-thin -mx-1 mb-3 flex gap-1.5 overflow-x-auto px-1 pb-1">
+            {categories.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setCategory(c)}
+                className={cn(
+                  'h-8 shrink-0 rounded-full px-3.5 text-[13px] font-semibold transition-colors',
+                  category === c ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:bg-paper-3',
+                )}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+          {catalog.isPending ? (
+            <Skeleton className="h-40" />
+          ) : shown.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">还没有可挂账的项目，请店主在「管理 → 套餐与项目」中添加</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {shown.map((i) => {
+                const q = cart.get(i.id) ?? 0;
+                return (
+                  <button
+                    key={i.id}
+                    type="button"
+                    onClick={() => add(i.id, 1)}
+                    data-testid={`item-${i.name}`}
+                    className={cn(
+                      'relative flex min-h-[76px] flex-col justify-between rounded-lg border px-3.5 py-2.5 text-left transition-[background-color,border-color] active:scale-[0.98]',
+                      q ? 'border-pine bg-pine-tint' : 'border-line bg-card hover:border-line-strong',
+                    )}
+                  >
+                    <span className="line-clamp-2 text-[14px] font-bold leading-snug">{i.name}</span>
+                    <Money cents={i.price} className="text-[14px] font-semibold text-ink-2" />
+                    {q > 0 && (
+                      <span className="num absolute top-2 right-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-pine px-1.5 text-[12.5px] font-bold text-paper">
+                        ×{q}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {can('consume.customAmount') && (
+            <div className="mt-4">
+              {custom.map((c, i) => (
+                <div key={i} className="mb-2 flex items-center gap-2">
+                  <Input
+                    fullWidth={false}
+                    className="h-10 min-w-0 flex-1"
+                    placeholder="项目名称"
+                    value={c.name}
+                    maxLength={32}
+                    disabled={locked}
+                    onChange={(e) => {
+                      touch();
+                      setCustom((list) => list.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)));
+                    }}
+                    aria-label="手动项目名称"
+                  />
+                  <div className="w-32">
+                    <MoneyInput
+                      value={c.amount}
+                      disabled={locked}
+                      onChange={(e) => {
+                        touch();
+                        setCustom((list) => list.map((x, j) => (j === i ? { ...x, amount: e.target.value } : x)));
+                      }}
+                      placeholder="0.00"
+                      aria-label="手动项目金额"
+                      className="h-10"
+                    />
+                  </div>
+                  <button type="button" aria-label="移除" onClick={() => setCustom((list) => list.filter((_, j) => j !== i))} className="flex size-10 items-center justify-center rounded-md text-ink-3 hover:bg-clay-soft hover:text-clay">
+                    <Trash2 className="size-4" />
+                  </button>
+                </div>
+              ))}
+              {custom.length < 5 && (
+                <Button size="sm" variant="ghost" icon={<Plus className="size-4" />} onClick={() => setCustom((list) => [...list, { name: '', amount: '' }])}>
+                  手动输入项目与金额
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+
+        <aside className="rounded-lg border border-line bg-paper/70 p-3" aria-label="本次挂账">
+          <p className="text-[12.5px] font-bold text-ink-2">本次挂账</p>
+          {lines.length === 0 && custom.length === 0 ? (
+            <p className="py-6 text-center text-[13px] text-ink-3">点左侧项目添加</p>
+          ) : (
+            <ul className="mt-2 space-y-1.5">
+              {lines.map((l) => (
+                <li key={l.item.id} className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 text-[13px] leading-snug font-semibold">{l.item.name}</span>
+                  <span className="flex items-center rounded-md border border-line bg-card">
+                    <button type="button" aria-label={`减少 ${l.item.name}`} onClick={() => add(l.item.id, -1)} className="flex size-7 items-center justify-center text-ink-2 hover:text-ink">
+                      <Minus className="size-3.5" />
+                    </button>
+                    <span className="num w-6 text-center text-[13px] font-bold">{l.quantity}</span>
+                    <button type="button" aria-label={`增加 ${l.item.name}`} onClick={() => add(l.item.id, 1)} className="flex size-7 items-center justify-center text-ink-2 hover:text-ink">
+                      <Plus className="size-3.5" />
+                    </button>
+                  </span>
+                  <Money cents={l.amount} className="w-[72px] justify-end text-right text-[13px] font-semibold" />
+                </li>
+              ))}
+              {customParsed.map((c, i) => (
+                <li key={`c${i}`} className="flex items-center gap-2 text-[13px]">
+                  <span className="min-w-0 flex-1 truncate font-semibold">{c.name || '（未填名称）'}</span>
+                  {c.amount ? <Money cents={c.amount} className="font-semibold" /> : <span className="text-clay">金额未填</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </aside>
+      </div>
+      {op.state.phase === 'error' && <Notice tone="error" title={op.state.message} className="mt-4" />}
+      {op.state.phase === 'uncertain' && (
+        <Notice
+          tone="warning"
+          title="结果待确认"
+          className="mt-4"
+          action={
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={async () => {
+                const r = await op.check();
+                if (r) onDone(r);
+              }}
+            >
+              查回结果
+            </Button>
+          }
+        >
+          {op.state.message}。请先查回，确认没挂上再重新提交，避免重复挂账。
+        </Notice>
+      )}
+    </Dialog>
+  );
+}

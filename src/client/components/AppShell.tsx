@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Boxes, CalendarCheck2, HandCoins, Inbox, KeyRound, LogOut, ReceiptText, Settings2, ShoppingCart, UsersRound } from 'lucide-react';
+import { Boxes, CalendarCheck2, ConciergeBell, HandCoins, Inbox, KeyRound, LogOut, ReceiptText, Settings2, ShoppingCart, UsersRound } from 'lucide-react';
 import { describeDate, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
 import type { Permission } from '@shared/permissions';
 import { api } from '../lib/api';
@@ -20,9 +20,10 @@ interface NavItem {
   end?: boolean;
 }
 
-// 会员储值与库存采购是两组独立的业务，导航中用分隔线区分
+// 前台与会员储值、库存采购是独立的业务组，导航中用分隔线区分
 const NAV: NavItem[][] = [
   [
+    { to: '/frontdesk', label: '前台', icon: ConciergeBell, perm: 'frontdesk.read' },
     { to: '/', label: '会员', icon: UsersRound, end: true, perm: 'member.read' },
     { to: '/ledger', label: '流水', icon: ReceiptText, perm: 'ledger.readToday' },
     { to: '/settlement', label: '日结', icon: CalendarCheck2, perm: 'ledger.readToday' },

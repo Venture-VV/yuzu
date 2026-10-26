@@ -12,6 +12,7 @@ import { LogoMark } from './components/Brand';
 import { LoginPage } from './features/auth/LoginPage';
 import { ChangePasswordPage } from './features/auth/ChangePasswordPage';
 import { WorkbenchPage } from './features/workbench/WorkbenchPage';
+import { FrontdeskPage } from './features/frontdesk/FrontdeskPage';
 import { LedgerPage } from './features/ledger/LedgerPage';
 import { SettlementPage } from './features/settlement/SettlementPage';
 import { AdminPage } from './features/admin/AdminPage';
@@ -99,6 +100,7 @@ const router = createBrowserRouter([
     element: <AuthGate />,
     children: [
       { index: true, element: <Home /> },
+      { path: 'frontdesk', element: <FrontdeskPage /> },
       { path: 'ledger', element: <LedgerPage /> },
       { path: 'settlement/:date?', element: <SettlementPage /> },
       { path: 'admin/:tab?', element: <AdminPage /> },
