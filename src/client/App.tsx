@@ -15,6 +15,10 @@ import { WorkbenchPage } from './features/workbench/WorkbenchPage';
 import { LedgerPage } from './features/ledger/LedgerPage';
 import { SettlementPage } from './features/settlement/SettlementPage';
 import { AdminPage } from './features/admin/AdminPage';
+import { DocFormPage } from './features/inventory/DocFormPage';
+import { InventoryPage } from './features/inventory/InventoryPage';
+import { TodoPage } from './features/inventory/TodoPage';
+import { useCan } from './lib/session';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -77,15 +81,27 @@ function AuthGate() {
   );
 }
 
+/** 首页：前台进入会员工作台；只有库存职责的后勤人员直接进入库存 */
+function Home() {
+  const can = useCan();
+  if (can('member.read')) return <WorkbenchPage />;
+  if (can('inventory.read')) return <Navigate to="/inventory" replace />;
+  return <Navigate to="/password" replace />;
+}
+
 const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
   {
     element: <AuthGate />,
     children: [
-      { index: true, element: <WorkbenchPage /> },
+      { index: true, element: <Home /> },
       { path: 'ledger', element: <LedgerPage /> },
       { path: 'settlement/:date?', element: <SettlementPage /> },
       { path: 'admin/:tab?', element: <AdminPage /> },
+      { path: 'inventory/new/:type', element: <DocFormPage /> },
+      { path: 'inventory/docs/:id/edit', element: <DocFormPage /> },
+      { path: 'inventory/:tab?', element: <InventoryPage /> },
+      { path: 'todo', element: <TodoPage /> },
       { path: 'password', element: <ChangePasswordPage /> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],

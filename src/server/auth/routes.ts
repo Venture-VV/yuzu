@@ -47,7 +47,7 @@ function recordFailure(username: string) {
 
 export async function buildSessionInfo({ sql, config }: Deps, actor: Actor): Promise<SessionInfo> {
   const settings = await loadSettings(sql);
-  const [synthetic] = await sql<{ exists: boolean }[]>`SELECT EXISTS (SELECT 1 FROM members WHERE is_synthetic) AS exists`;
+  const [synthetic] = await sql<{ exists: boolean }[]>`SELECT (EXISTS (SELECT 1 FROM members WHERE is_synthetic) OR EXISTS (SELECT 1 FROM materials WHERE is_synthetic)) AS exists`;
   const { storeName, ...rules } = settings;
   return {
     staff: actor,
@@ -55,6 +55,7 @@ export async function buildSessionInfo({ sql, config }: Deps, actor: Actor): Pro
     storeName,
     rules,
     today: businessDateOf(new Date(), config.timezone, settings.businessDayStartHour),
+    calendarToday: businessDateOf(new Date(), config.timezone, 0),
     timezone: config.timezone,
     env: config.env,
     version: config.version,
@@ -77,7 +78,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: Deps) {
   // 登录页使用：门店名称；非正式环境且存在演示数据时提示演示账号
   app.get('/api/public/info', async () => {
     const settings = await loadSettings(sql);
-    const [synthetic] = await sql<{ exists: boolean }[]>`SELECT EXISTS (SELECT 1 FROM members WHERE is_synthetic) AS exists`;
+    const [synthetic] = await sql<{ exists: boolean }[]>`SELECT (EXISTS (SELECT 1 FROM members WHERE is_synthetic) OR EXISTS (SELECT 1 FROM materials WHERE is_synthetic)) AS exists`;
     return {
       storeName: settings.storeName,
       env: config.env,

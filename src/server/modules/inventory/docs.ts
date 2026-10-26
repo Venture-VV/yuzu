@@ -49,7 +49,13 @@ const Entered = {
 };
 const QtyLine = z.object({ materialId: id, qtyMilli: positiveQty('数量'), ...Entered, note: note() });
 const OpeningLine = z.object({ materialId: id, qtyMilli: qty('期初数量'), note: note() });
-const CountLine = z.object({ materialId: id, countedMilli: qty('实盘数量'), note: note() });
+const CountLine = z.object({
+  materialId: id,
+  countedMilli: qty('实盘数量'),
+  /** 员工填实盘时页面上显示的账面数；与服务端记下的账面不一致说明期间有收发 */
+  expectedBookMilli: z.number().int().nullable().default(null),
+  note: note(),
+});
 const SourceLine = z.object({ sourceLineId: id, qtyMilli: positiveQty('数量'), note: note() });
 const ReceiptLine = z.object({
   materialId: id,
@@ -137,7 +143,7 @@ interface DocRow {
 
 export async function getDoc(db: Db, docId: number): Promise<InvDoc> {
   const [d] = await db<(InvDoc & Record<string, unknown>)[]>`
-    SELECT d.id, d.doc_no, d.doc_type, d.status, d.doc_date, d.handler, d.note, d.amount_cents, d.no_po, d.is_synthetic,
+    SELECT d.id, d.doc_no, d.doc_type, d.status, d.doc_date, d.handler, d.note, d.amount_cents, d.no_po, d.is_synthetic, d.created_by,
            d.created_at, d.submitted_at, d.confirmed_at, d.returned_reason, d.voided_at, d.void_reason,
            CASE WHEN s.id IS NULL THEN NULL ELSE json_build_object('id', s.id, 'name', s.name) END AS supplier,
            CASE WHEN po.id IS NULL THEN NULL ELSE json_build_object('id', po.id, 'docNo', po.doc_no) END AS purchase_order,
@@ -400,6 +406,16 @@ async function prepare(db: Db, deps: Deps, body: z.infer<typeof DocBody>, existi
       const mats = await loadMaterials(db, body.lines.map((l) => l.materialId));
       // 账面数在开始盘点时记下；修改草稿时已有物料沿用原快照，新增物料取当前账面
       const previous = new Map(existing?.lines.map((l) => [l.materialId, l]) ?? []);
+      const changed = body.lines.filter((l) => {
+        const prev = previous.get(l.materialId);
+        const book = prev?.bookMilli ?? mats.get(l.materialId)!.stockMilli;
+        return l.expectedBookMilli !== null && l.expectedBookMilli !== book;
+      });
+      if (changed.length > 0) {
+        throw conflict('COUNT_STALE', `账面数已变化：${changed.map((l) => mats.get(l.materialId)!.name).join('、')}，请按最新账面核对实盘数后再提交`, {
+          materialIds: changed.map((l) => l.materialId),
+        });
+      }
       return {
         ...empty,
         lines: body.lines.map((l) => {
@@ -953,6 +969,17 @@ export async function refreshCountBook(deps: Deps, docId: number, actor: Actor) 
   return getDoc(deps.sql, docId);
 }
 
+/** 部门常用领用：近 60 天按次数排序，带上次领用数量，供领用单一键填入 */
+export async function usualIssues(db: Db, departmentId: number) {
+  return db<{ materialId: number; times: number; lastQtyMilli: number }[]>`
+    SELECT l.material_id, count(*) AS times,
+           (array_agg(l.qty_milli ORDER BY d.doc_date DESC, d.id DESC))[1] AS last_qty_milli
+    FROM inv_doc_lines l JOIN inv_docs d ON d.id = l.doc_id JOIN materials m ON m.id = l.material_id
+    WHERE d.doc_type = 'issue' AND d.status = 'confirmed' AND d.department_id = ${departmentId}
+      AND d.doc_date >= current_date - 60 AND m.active AND m.tracked
+    GROUP BY l.material_id ORDER BY count(*) DESC, max(d.id) DESC LIMIT 16`;
+}
+
 export async function findDocByKey(db: Db, key: string): Promise<InvDoc | null> {
   const [row] = await db<{ id: number }[]>`SELECT id FROM inv_docs WHERE client_key = ${key}`;
   return row ? getDoc(db, row.id) : null;
@@ -986,6 +1013,9 @@ export function registerDocRoutes(app: FastifyInstance, deps: Deps) {
     return doc ? { found: true, doc } : { found: false };
   });
   app.get('/api/inventory/docs/:id', { preHandler: guard('inventory.read') }, async (req) => getDoc(sql, docId(req)));
+  app.get('/api/inventory/departments/:id/usual', { preHandler: guard('inventory.read') }, async (req) =>
+    usualIssues(sql, parse(idParam, req.params).id),
+  );
 
   app.post('/api/inventory/docs', { preHandler: guard('inventory.read') }, async (req, reply) => {
     const result = await createDoc(deps, req.body as CreateDocInput, req.actor, req.ip);

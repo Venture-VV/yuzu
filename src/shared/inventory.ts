@@ -188,6 +188,7 @@ export interface InvDoc {
   note: string;
   amountCents: number;
   noPo: boolean;
+  createdBy: number;
   createdByName: string;
   createdAt: string;
   submittedByName: string | null;

@@ -310,6 +310,19 @@ describe('盘点期间有新收发', () => {
     expect(await stockOf(m.id)).toBe(q(79));
   });
 
+  it('页面上的账面数与服务端不一致时拒绝建单（填实盘期间有收发）', async () => {
+    const m = await material('M015', { name: '丁腈手套', inventoryUnit: '盒', purchaseUnit: '箱', purchaseFactorMilli: q(10) });
+    await opening(m.id, q(4));
+    // 员工看到账面 4 盒时开始数，期间别人领走 1 盒
+    await okDoc(keeper, { docType: 'issue', departmentId: deptId, handler: 'SPA', lines: [{ materialId: m.id, qtyMilli: q(1) }] });
+    const res = await doc(keeper, { docType: 'count', lines: [{ materialId: m.id, countedMilli: q(4), expectedBookMilli: q(4) }] });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('COUNT_STALE');
+    const ok = await doc(keeper, { docType: 'count', lines: [{ materialId: m.id, countedMilli: q(3), expectedBookMilli: q(3) }] });
+    expect(ok.status).toBe(201);
+    expect(ok.body.doc.status).toBe('confirmed');
+  });
+
   it('没有差异的盘点直接生效，不产生调整流水', async () => {
     const m = await material('M013', { name: '抽纸', inventoryUnit: '包', purchaseUnit: '箱', purchaseFactorMilli: q(30) });
     await opening(m.id, q(60));

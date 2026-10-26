@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { CalendarCheck2, KeyRound, LogOut, ReceiptText, Settings2, UsersRound } from 'lucide-react';
-import { describeDate, ROLE_LABELS } from '@shared/labels';
+import { Boxes, CalendarCheck2, Inbox, KeyRound, LogOut, ReceiptText, Settings2, UsersRound } from 'lucide-react';
+import { describeDate, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
+import type { Permission } from '@shared/permissions';
 import { api } from '../lib/api';
 import { useCan, useSession } from '../lib/session';
 import { cn } from '../lib/utils';
@@ -10,12 +11,27 @@ import { LogoMark } from './Brand';
 import { PendingOpsBanner } from './PendingOpsBanner';
 import { Badge } from './ui';
 
-const NAV = [
-  { to: '/', label: '会员', icon: UsersRound, end: true, perm: 'member.read' },
-  { to: '/ledger', label: '流水', icon: ReceiptText, perm: 'ledger.readToday' },
-  { to: '/settlement', label: '日结', icon: CalendarCheck2, perm: 'ledger.readToday' },
-  { to: '/admin', label: '管理', icon: Settings2, perm: 'staff.manage' },
-] as const;
+interface NavItem {
+  to: string;
+  label: string;
+  icon: typeof UsersRound;
+  perm: Permission;
+  end?: boolean;
+}
+
+// 会员储值与库存采购是两组独立的业务，导航中用分隔线区分
+const NAV: NavItem[][] = [
+  [
+    { to: '/', label: '会员', icon: UsersRound, end: true, perm: 'member.read' },
+    { to: '/ledger', label: '流水', icon: ReceiptText, perm: 'ledger.readToday' },
+    { to: '/settlement', label: '日结', icon: CalendarCheck2, perm: 'ledger.readToday' },
+  ],
+  [
+    { to: '/inventory', label: '库存', icon: Boxes, perm: 'inventory.read' },
+    { to: '/todo', label: '待办', icon: Inbox, perm: 'inventory.approve' },
+  ],
+  [{ to: '/admin', label: '管理', icon: Settings2, perm: 'staff.manage' }],
+];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const can = useCan();
@@ -28,28 +44,36 @@ export function AppShell({ children }: { children: ReactNode }) {
         <NavLink to="/" aria-label="浴族 yuzu 首页" className="mb-5 rounded-[14px] ring-1 ring-white/10">
           <LogoMark className="size-10" />
         </NavLink>
-        {NAV.filter((n) => can(n.perm)).map(({ to, label, icon: Icon, ...n }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={'end' in n}
-            className={({ isActive }) =>
-              cn(
-                'group relative flex w-[64px] flex-col items-center gap-1 rounded-[14px] py-2.5 text-[12px] font-semibold transition-colors',
-                isActive ? 'bg-white/12 text-paper' : 'text-paper/60 hover:bg-white/6 hover:text-paper',
-              )
-            }
-          >
-            {({ isActive }) => (
-              <>
-                {isActive && <span className="absolute top-1/2 -left-[10px] h-6 w-1 -translate-y-1/2 rounded-r-full bg-yuzu" />}
-                <Icon className="size-[21px]" strokeWidth={isActive ? 2.2 : 1.8} />
-                <span>{label}</span>
-              </>
-            )}
-          </NavLink>
-        ))}
-        <div className="flex-1" />
+        <div className="scroll-thin flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto">
+          {NAV.map((group) => group.filter((n) => can(n.perm)))
+            .filter((group) => group.length > 0)
+            .map((group, gi) => (
+              <div key={group[0]!.to} className="flex flex-col items-center gap-1">
+                {gi > 0 && <span className="my-1.5 h-px w-8 bg-white/12" aria-hidden />}
+                {group.map(({ to, label, icon: Icon, end }) => (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    end={end}
+                    className={({ isActive }) =>
+                      cn(
+                        'group relative flex w-[64px] flex-col items-center gap-0.5 rounded-[14px] py-2 text-[12px] font-semibold transition-colors',
+                        isActive ? 'bg-white/12 text-paper' : 'text-paper/60 hover:bg-white/6 hover:text-paper',
+                      )
+                    }
+                  >
+                    {({ isActive }) => (
+                      <>
+                        {isActive && <span className="absolute top-1/2 -left-[10px] h-6 w-1 -translate-y-1/2 rounded-r-full bg-yuzu" />}
+                        <Icon className="size-[21px]" strokeWidth={isActive ? 2.2 : 1.8} />
+                        <span>{label}</span>
+                      </>
+                    )}
+                  </NavLink>
+                ))}
+              </div>
+            ))}
+        </div>
         <UserMenu />
       </nav>
       <div className="flex min-w-0 flex-1 flex-col">
@@ -95,7 +119,7 @@ function UserMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         className="flex size-11 items-center justify-center rounded-full bg-yuzu text-[15px] font-bold text-ink ring-2 ring-white/15 transition hover:ring-white/35"
-        title={`${session.staff.displayName} · ${ROLE_LABELS[session.staff.role]}`}
+        title={`${session.staff.displayName} · ${roleText(session.staff)}`}
       >
         {session.staff.displayName.slice(0, 1)}
       </button>
@@ -104,7 +128,7 @@ function UserMenu() {
           <div className="px-3 pt-2 pb-2.5">
             <p className="text-[14px] font-bold">{session.staff.displayName}</p>
             <p className="text-[12px] text-ink-3">
-              {ROLE_LABELS[session.staff.role]} · {session.staff.username}
+              {roleText(session.staff)} · {session.staff.username}
             </p>
           </div>
           <div className="my-1 h-px bg-line" />
@@ -118,6 +142,10 @@ function UserMenu() {
       )}
     </div>
   );
+}
+
+function roleText(staff: { role: keyof typeof ROLE_LABELS; duties: (keyof typeof DUTY_LABELS)[] }) {
+  return [ROLE_LABELS[staff.role], ...staff.duties.map((d) => DUTY_LABELS[d].title)].join(' · ');
 }
 
 function MenuItem({ icon, children, onClick }: { icon: ReactNode; children: ReactNode; onClick: () => void }) {
@@ -134,10 +162,20 @@ function MenuItem({ icon, children, onClick }: { icon: ReactNode; children: Reac
   );
 }
 
-/** 页面顶栏：标题 + 营业日 + 演示数据标记 */
-export function PageHeader({ title, subtitle, actions }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
+/** 页面顶栏：标题 + 营业日（库存页为自然日）+ 演示数据标记 */
+export function PageHeader({
+  title,
+  subtitle,
+  actions,
+  dateMode = 'business',
+}: {
+  title: ReactNode;
+  subtitle?: ReactNode;
+  actions?: ReactNode;
+  dateMode?: 'business' | 'calendar';
+}) {
   const session = useSession();
-  const d = describeDate(session.today);
+  const d = describeDate(dateMode === 'business' ? session.today : session.calendarToday);
   return (
     <header className="flex min-h-[64px] shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-line bg-paper/90 px-5 py-3 backdrop-blur md:px-7">
       <div className="min-w-0 flex-1">
@@ -151,7 +189,7 @@ export function PageHeader({ title, subtitle, actions }: { title: ReactNode; sub
         </Badge>
       )}
       <div className="flex items-center gap-2 rounded-full border border-line bg-card py-1 pr-3.5 pl-1 shadow-card">
-        <span className="rounded-full bg-pine px-2.5 py-1 text-[11.5px] font-bold text-paper">营业日</span>
+        <span className="rounded-full bg-pine px-2.5 py-1 text-[11.5px] font-bold text-paper">{dateMode === 'business' ? '营业日' : '今天'}</span>
         <span className="num text-[13.5px] font-bold text-ink">{d.md}</span>
         <span className="text-[12.5px] text-ink-3">{d.weekday}</span>
       </div>

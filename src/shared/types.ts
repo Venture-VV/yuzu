@@ -31,8 +31,10 @@ export interface SessionInfo {
   permissions: Permission[];
   storeName: string;
   rules: StoreRules;
-  /** 当前营业日 YYYY-MM-DD */
+  /** 当前营业日 YYYY-MM-DD（会员业务，按营业日切换时间） */
   today: string;
+  /** 门店时区的自然日（库存与采购按自然日） */
+  calendarToday: string;
   timezone: string;
   env: AppEnv;
   version: string;

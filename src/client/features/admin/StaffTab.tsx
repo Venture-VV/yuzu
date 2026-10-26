@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { KeyRound, UserPlus } from 'lucide-react';
-import { ROLE_LABELS } from '@shared/labels';
-import type { Role } from '@shared/permissions';
+import { DUTY_LABELS, ROLE_HINTS, ROLE_LABELS } from '@shared/labels';
+import { DUTIES, type Duty, type Role } from '@shared/permissions';
 import type { StaffRecord } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
 import { qk, useStaff } from '../../lib/queries';
@@ -35,7 +35,7 @@ export function StaffTab() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-[13px] text-ink-3">每位员工使用自己的账号，所有余额操作都记录经办人。停用后立即退出登录。</p>
+        <p className="text-[13px] text-ink-3">每位员工使用自己的账号，所有余额与库存操作都记录经办人。停用后立即退出登录。</p>
         <Button variant="primary" size="sm" icon={<UserPlus className="size-4" />} onClick={() => setEditing('new')}>
           添加员工
         </Button>
@@ -57,7 +57,15 @@ export function StaffTab() {
                     {s.username} · 上次登录 {relativeTime(s.lastLoginAt)}
                   </p>
                 </div>
-                <Badge tone={s.role === 'owner' ? 'pine' : 'neutral'}>{ROLE_LABELS[s.role]}</Badge>
+                <span className="flex flex-wrap gap-1">
+                  <Badge tone={s.role === 'owner' ? 'pine' : s.role === 'backoffice' ? 'lake' : 'neutral'}>{ROLE_LABELS[s.role]}</Badge>
+                  {s.role !== 'owner' &&
+                    s.duties.map((d) => (
+                      <Badge key={d} tone="moss">
+                        {DUTY_LABELS[d].title}
+                      </Badge>
+                    ))}
+                </span>
                 {!s.active && <Badge tone="clay">已停用</Badge>}
                 {s.mustChangePassword && s.active && <Badge tone="yuzu">待首次改密</Badge>}
                 <div className="flex gap-1.5">
@@ -133,6 +141,7 @@ function StaffDialog({
   const [username, setUsername] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState<Role>('clerk');
+  const [duties, setDuties] = useState<Duty[]>([]);
   const [active, setActive] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -143,6 +152,7 @@ function StaffDialog({
     setUsername(existing?.username ?? '');
     setName(existing?.displayName ?? '');
     setRole(existing?.role ?? 'clerk');
+    setDuties(existing?.duties ?? []);
     setActive(existing?.active ?? true);
     setError(null);
   }
@@ -152,10 +162,10 @@ function StaffDialog({
     setError(null);
     try {
       if (isNew) {
-        const r = await api.post<{ temporaryPassword: string }>('/api/staff', { username, displayName: name, role });
+        const r = await api.post<{ temporaryPassword: string }>('/api/staff', { username, displayName: name, role, duties: role === 'owner' ? [] : duties });
         onCreated(name, r.temporaryPassword);
       } else if (existing) {
-        await api.put(`/api/staff/${existing.id}`, { displayName: name, role, active });
+        await api.put(`/api/staff/${existing.id}`, { displayName: name, role, duties: role === 'owner' ? [] : duties, active });
         toast({ tone: 'success', title: '已保存' });
       }
       void qc.invalidateQueries({ queryKey: qk.staff });
@@ -199,10 +209,44 @@ function StaffDialog({
             onChange={setRole}
             className="w-full"
             options={[
-              { value: 'clerk', label: '店员' },
+              { value: 'clerk', label: '前台店员' },
+              { value: 'backoffice', label: '后勤人员' },
               { value: 'owner', label: '店主' },
             ]}
           />
+          <p className="text-[12.5px] text-ink-3">{ROLE_HINTS[role]}</p>
+        </Field>
+        <Field label="库存与采购职责" aside={<span className="text-[12px] text-ink-3">可兼任多项</span>}>
+          {role === 'owner' ? (
+            <p className="rounded-md bg-paper-2/70 px-3 py-2.5 text-[13px] text-ink-2">店主默认拥有全部库存与采购权限。</p>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {DUTIES.map((d) => {
+                const on = duties.includes(d);
+                return (
+                  <label
+                    key={d}
+                    className={cn(
+                      'flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2.5 transition-colors',
+                      on ? 'border-pine bg-pine-tint' : 'border-line-strong bg-card hover:border-ink-4',
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={(e) => setDuties((list) => (e.target.checked ? [...list, d] : list.filter((x) => x !== d)))}
+                      className="mt-0.5 size-4 accent-[var(--color-pine)]"
+                    />
+                    <span>
+                      <span className="block text-[13.5px] font-bold">{DUTY_LABELS[d].title}</span>
+                      <span className="block text-[12px] leading-snug text-ink-3">{DUTY_LABELS[d].hint}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          {role !== 'owner' && <p className="text-[12px] text-ink-3">库存职责不会带来会员钱包、撤销或日结权限。</p>}
         </Field>
         {!isNew && (
           <Field label="状态">
