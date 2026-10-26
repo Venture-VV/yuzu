@@ -1,4 +1,4 @@
-# 自动测试：类型检查、后端集成测试（会员回归 + 库存 / 采购 / 应付核心校验）、构建，以及真实浏览器验收。
+# 自动测试：类型检查、后端集成测试（会员回归 + 库存 / 采购 / 应付 + 前台手牌核心校验）、构建，以及真实浏览器验收。
 # 只使用合成数据与一次性的 CI 数据库，不连接任何门店环境。
 name: CI
 
@@ -68,10 +68,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - name: 写入合成演示数据（会员 + 库存采购）
+      - name: 写入合成演示数据（会员 + 库存采购 + 前台手牌）
         run: |
           node dist/server/cli.js seed-demo
           node dist/server/cli.js seed-inventory-demo
+          node dist/server/cli.js seed-frontdesk-demo
+          node dist/server/cli.js check
       - name: 启动应用
         run: |
           node dist/server/index.js > app.log 2>&1 &

@@ -21,7 +21,7 @@ const PLANS = [
   { name: '四季 2000', pay: 200000, bonus: 40000, note: '' },
 ];
 
-const ITEMS = [
+export const DEMO_ITEMS = [
   { name: '汤泉入场 · 成人', category: '入场', price: 12800 },
   { name: '汤泉入场 · 儿童', category: '入场', price: 6800 },
   { name: '夜场入场', category: '入场', price: 9800 },
@@ -82,7 +82,7 @@ export async function seedDemo(sql: Sql, config: AppConfig, options: { force?: b
   }
   const [itemCount] = await sql<{ count: number }[]>`SELECT count(*) AS count FROM service_items`;
   if (!itemCount?.count) {
-    for (const [i, it] of ITEMS.entries()) {
+    for (const [i, it] of DEMO_ITEMS.entries()) {
       await sql`INSERT INTO service_items (name, category, price, sort_order) VALUES (${it.name}, ${it.category}, ${it.price}, ${i})`;
     }
   }
