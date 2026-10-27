@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { Hash, Keyboard, ShieldCheck, UserPlus, X } from 'lucide-react';
-import { matchTags, normalizeTagCode, uniqueTagMatch, ZONE_LABELS, ZONES, type BoardTag, type CheckinResult, type VisitDetail, type Zone } from '@shared/frontdesk';
+import { matchTags, normalizeTagCode, TAG_ZONES, uniqueTagMatch, ZONE_LABELS, type BoardTag, type CheckinResult, type TagZone, type VisitDetail } from '@shared/frontdesk';
 import { useCan, useSession } from '../../lib/session';
 import { cn, isTypingTarget } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
@@ -14,7 +14,7 @@ import { useMedia } from '../inventory/useMedia';
 import { AddItemsDialog } from './AddItemsDialog';
 import { BillPanel, type PanelAction } from './BillPanel';
 import { CheckinDialog, type CheckinPrefill } from './CheckinDialog';
-import { Stat, TagCard, ZoneChip } from './parts';
+import { groupTags, Stat, TagCard, TagChip, VipChip, ZoneChip } from './parts';
 import { useBoard, useFrontdeskChecks, useRefreshFrontdesk, useServerNow, useVisit } from './queries';
 import { JoinGroupDialog, PreviewDialog, SwapDialog } from './VisitDialogs';
 
@@ -37,7 +37,7 @@ export function FrontdeskPage() {
   /** 员工用方向键明确选中了某张候选；否则多张候选时回车不打开，避免打开错的牌 */
   const [picked, setPicked] = useState(false);
   const [ambiguous, setAmbiguous] = useState(false);
-  const [zone, setZone] = useState<'all' | Zone>('all');
+  const [zone, setZone] = useState<'all' | TagZone>('all');
   const [status, setStatus] = useState<StatusFilter>('all');
   const [dialog, setDialog] = useState<null | { kind: 'checkin'; prefill: CheckinPrefill } | { kind: PanelAction }>(null);
   const [checksOpen, setChecksOpen] = useState(false);
@@ -68,6 +68,8 @@ export function FrontdeskPage() {
         select(t.visit.id);
       } else if (t.locked) {
         toast({ tone: 'error', title: `手牌 ${t.code} 已锁定`, body: `${t.lockReason}。请换一张，或由店主在「管理 → 手牌」解锁。` });
+      } else if (t.zone === 'child') {
+        toast({ tone: 'error', title: `手牌 ${t.code} 属于已取消的儿童区`, body: '儿童跟同性别家长用男宾或女宾的牌；请店主在「管理 → 手牌」把这张牌改为男宾或女宾。' });
       } else if (can('frontdesk.operate')) {
         setDialog({ kind: 'checkin', prefill: { tagCode: t.code, zone: t.zone } });
       }
@@ -130,6 +132,8 @@ export function FrontdeskPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [can, visit.data, selectedId, select]);
 
+  /** 状态板上的分区：男宾、女宾；库里还有旧儿童区手牌时另列 */
+  const zonesInPool = TAG_ZONES.filter((z) => z !== 'child' || tags.some((t) => t.zone === 'child'));
   const visible = tags.filter(
     (t) =>
       (zone === 'all' || t.zone === zone) &&
@@ -162,7 +166,7 @@ export function FrontdeskPage() {
       rules={board.data?.rules}
       onAction={(a) => {
         if (a === 'companion' && visit.data) {
-          setDialog({ kind: 'checkin', prefill: { zone: visit.data.zone, join: { visitId: visit.data.id, tagCode: visit.data.tag.code, groupNo: visit.data.group?.groupNo ?? null } } });
+          setDialog({ kind: 'checkin', prefill: { zone: visit.data.zone === 'child' ? undefined : visit.data.zone, join: { visitId: visit.data.id, tagCode: visit.data.tag.code, groupNo: visit.data.group?.groupNo ?? null } } });
         } else setDialog({ kind: a });
       }}
       onSelectVisit={select}
@@ -182,7 +186,8 @@ export function FrontdeskPage() {
                 {stats.inStore}
               </Stat>
               <span className="text-ink-3">
-                男 {stats.inStoreByZone.male} · 女 {stats.inStoreByZone.female} · 童 {stats.inStoreByZone.child}
+                男 {stats.inStoreByZone.male} · 女 {stats.inStoreByZone.female}
+                {stats.inStoreByZone.child > 0 && ` · 童（旧）${stats.inStoreByZone.child}`}
               </span>
               <Stat label="空闲">{stats.free}</Stat>
               {stats.locked > 0 && <Stat label="锁定">{stats.locked}</Stat>}
@@ -277,7 +282,8 @@ export function FrontdeskPage() {
                       >
                         <span className="num">{t.code}</span>
                         <span className="text-[11.5px] font-semibold opacity-75">
-                          {ZONE_LABELS[t.zone].short} · {t.visit ? '在店' : t.locked ? '锁定' : '空闲'}
+                          {ZONE_LABELS[t.zone].short}
+                          {t.kind === 'vip' ? ` · VIP${t.vipLevel}` : ''} · {t.visit ? '在店' : t.locked ? '锁定' : '空闲'}
                         </span>
                         {t === primary && <Kbd className="ml-0.5 border-white/30 bg-white/15 text-paper">↵</Kbd>}
                       </button>
@@ -294,7 +300,7 @@ export function FrontdeskPage() {
                   ariaLabel="分区"
                   options={[
                     { value: 'all', label: '全部分区' },
-                    ...ZONES.map((z) => ({ value: z, label: `${ZONE_LABELS[z].title} ${stats ? stats.inStoreByZone[z] : ''}` })),
+                    ...zonesInPool.map((z) => ({ value: z, label: `${ZONE_LABELS[z].title} ${stats ? stats.inStoreByZone[z] : ''}` })),
                   ]}
                 />
                 <Segmented
@@ -330,39 +336,65 @@ export function FrontdeskPage() {
               <EmptyState
                 art="pool"
                 title="手牌池还是空的"
-                description={can('frontdesk.tags') ? '先在「管理 → 手牌」按男宾、女宾、儿童分区批量建牌。' : '请店主先在「管理 → 手牌」建立手牌池。'}
+                description={can('frontdesk.tags') ? '先在「管理 → 手牌」导入柜号清单，或按号段建牌。' : '请店主先在「管理 → 手牌」导入柜号清单。'}
               />
             ) : (
-              ZONES.filter((z) => zone === 'all' || z === zone).map((z) => {
-                const list = visible.filter((t) => t.zone === z);
-                if (list.length === 0) return null;
-                const inUse = tags.filter((t) => t.zone === z && t.visit).length;
-                const total = tags.filter((t) => t.zone === z).length;
-                return (
-                  <section key={z} className="mb-5" aria-label={`${ZONE_LABELS[z].title}区`}>
-                    <h3 className="sticky top-0 z-10 -mx-1 mb-2 flex items-center gap-2 bg-paper/95 px-1 py-1.5 backdrop-blur">
-                      <ZoneChip zone={z} size="md" />
-                      <span className="num text-[13px] font-semibold text-ink-3">
-                        在店 <b className="text-ink">{inUse}</b> / {total}
-                      </span>
-                    </h3>
-                    <div className="grid grid-cols-[repeat(auto-fill,minmax(118px,1fr))] gap-2.5">
-                      {list.map((t) => (
-                        <TagCard
-                          key={t.id}
-                          tag={t}
-                          now={now}
-                          selected={!!t.visit && t.visit.id === selectedId}
-                          matched={matchedIds.has(t.id)}
-                          primaryMatch={t === primary}
-                          companion={!!t.visit && companions.has(t.visit.id)}
-                          onClick={() => openTag(t)}
-                        />
-                      ))}
-                    </div>
-                  </section>
-                );
-              })
+              zonesInPool
+                .filter((z) => zone === 'all' || z === zone)
+                .map((z) => {
+                  const zoneTags = tags.filter((t) => t.zone === z);
+                  const list = visible.filter((t) => t.zone === z);
+                  if (list.length === 0) return null;
+                  const totals = new Map(groupTags(zoneTags).map((g) => [g.key, g.tags]));
+                  return (
+                    <section key={z} className="mb-6" aria-label={`${ZONE_LABELS[z].title}区`}>
+                      <h3 className="sticky top-0 z-10 -mx-1 mb-2 flex items-center gap-2 bg-paper/95 px-1 py-1.5 backdrop-blur">
+                        <ZoneChip zone={z} size="md" />
+                        <span className="num text-[13px] font-semibold text-ink-3">
+                          在店 <b className="text-ink">{zoneTags.filter((t) => t.visit).length}</b> / {zoneTags.length}
+                        </span>
+                      </h3>
+                      {groupTags(list).map((g) => {
+                        const all = totals.get(g.key) ?? g.tags;
+                        const cards = g.tags.filter((t) => t.visit);
+                        const chips = g.tags.filter((t) => !t.visit);
+                        return (
+                          <div key={g.key} className="mb-4" data-testid={`tag-group-${z}-${g.key}`}>
+                            <p className="mb-1.5 flex items-center gap-2 text-[12.5px] font-semibold text-ink-3">
+                              {g.kind === 'vip' ? <VipChip level={g.vipLevel!} size="md" /> : <span className="text-[13px] font-bold text-ink-2">{g.area ? `${g.area} 区` : '普通柜'}</span>}
+                              <span className="num">
+                                在店 {all.filter((t) => t.visit).length} · 空闲 {all.filter((t) => !t.visit && !t.locked).length} / {all.length}
+                              </span>
+                            </p>
+                            {cards.length > 0 && (
+                              <div className="mb-2 grid grid-cols-[repeat(auto-fill,minmax(118px,1fr))] gap-2.5">
+                                {cards.map((t) => (
+                                  <TagCard
+                                    key={t.id}
+                                    tag={t}
+                                    now={now}
+                                    selected={t.visit!.id === selectedId}
+                                    matched={matchedIds.has(t.id)}
+                                    primaryMatch={t === primary}
+                                    companion={companions.has(t.visit!.id)}
+                                    onClick={() => openTag(t)}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                            {chips.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5">
+                                {chips.map((t) => (
+                                  <TagChip key={t.id} tag={t} matched={matchedIds.has(t.id)} primaryMatch={t === primary} onClick={() => openTag(t)} />
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </section>
+                  );
+                })
             )}
           </div>
         </div>
@@ -391,13 +423,13 @@ export function FrontdeskPage() {
       </div>
 
       {dialog?.kind === 'checkin' && (
-        <CheckinDialog open tags={tags} prefill={dialog.prefill} onClose={() => setDialog(null)} onDone={afterCheckin} />
+        <CheckinDialog open tags={tags} rules={board.data?.rules} prefill={dialog.prefill} onClose={() => setDialog(null)} onDone={afterCheckin} />
       )}
       {visit.data && dialog?.kind === 'add' && (
         <AddItemsDialog open visit={visit.data} onClose={() => setDialog(null)} onDone={(v) => afterChange(v, `已挂到 ${v.tag.code}`)} />
       )}
       {visit.data && dialog?.kind === 'swap' && (
-        <SwapDialog open visit={visit.data} tags={tags} onClose={() => setDialog(null)} onDone={(v) => afterChange(v, `已换牌，现为 ${v.tag.code}`)} />
+        <SwapDialog open visit={visit.data} tags={tags} rules={board.data?.rules} onClose={() => setDialog(null)} onDone={(v) => afterChange(v, `已换牌，现为 ${v.tag.code}`)} />
       )}
       {visit.data && dialog?.kind === 'join' && (
         <JoinGroupDialog open visit={visit.data} tags={tags} onClose={() => setDialog(null)} onDone={(v) => afterChange(v, `${v.tag.code} 已加入同行组 ${v.group?.groupNo ?? ''}`)} />

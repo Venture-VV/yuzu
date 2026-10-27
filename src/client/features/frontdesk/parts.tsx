@@ -1,18 +1,18 @@
 import type { ReactNode } from 'react';
-import { Link2, Lock, UserRound } from 'lucide-react';
-import { ZONE_LABELS, type BoardTag, type Zone } from '@shared/frontdesk';
+import { Crown, Link2, Lock, UserRound } from 'lucide-react';
+import { tagArea, ZONE_LABELS, type BoardTag, type HandTag, type TagKind, type TagZone } from '@shared/frontdesk';
 import { cn } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { stayMinutes, stayText } from './queries';
 
-/** 分区配色：男宾湖水青、女宾杏橙、儿童苔绿；颜色始终配文字，不单靠颜色区分 */
-export const ZONE_STYLE: Record<Zone, { chip: string; strip: string; soft: string; text: string }> = {
+/** 分区配色：男宾湖水青、女宾杏橙（旧儿童区苔绿）；颜色始终配文字，不单靠颜色区分 */
+export const ZONE_STYLE: Record<TagZone, { chip: string; strip: string; soft: string; text: string }> = {
   male: { chip: 'bg-lake-soft text-lake', strip: 'bg-lake', soft: 'bg-lake-soft/50', text: 'text-lake' },
   female: { chip: 'bg-ember-soft text-ember', strip: 'bg-ember', soft: 'bg-ember-soft/50', text: 'text-ember' },
   child: { chip: 'bg-moss-soft text-moss', strip: 'bg-moss', soft: 'bg-moss-soft/60', text: 'text-moss' },
 };
 
-export function ZoneChip({ zone, size = 'sm', className }: { zone: Zone; size?: 'sm' | 'md'; className?: string }) {
+export function ZoneChip({ zone, size = 'sm', className }: { zone: TagZone; size?: 'sm' | 'md'; className?: string }) {
   return (
     <span
       className={cn(
@@ -25,6 +25,43 @@ export function ZoneChip({ zone, size = 'sm', className }: { zone: Zone; size?: 
       {size === 'sm' ? ZONE_LABELS[zone].short : ZONE_LABELS[zone].title}
     </span>
   );
+}
+
+/** VIP 柜等级标记：会员等级不低于柜子等级才能使用 */
+export function VipChip({ level, size = 'sm', className }: { level: number; size?: 'sm' | 'md'; className?: string }) {
+  return (
+    <span
+      title={`VIP 第 ${level} 级柜`}
+      className={cn(
+        'inline-flex shrink-0 items-center gap-0.5 rounded-full bg-ink font-bold leading-none text-yuzu',
+        size === 'sm' ? 'h-[18px] px-1.5 text-[11px]' : 'h-6 px-2.5 text-[12.5px]',
+        className,
+      )}
+    >
+      <Crown className={size === 'sm' ? 'size-3' : 'size-3.5'} strokeWidth={2.4} />
+      {size === 'sm' ? level : `VIP ${level} 级`}
+    </span>
+  );
+}
+
+/** 柜型说明：普通柜「A 区」，VIP 柜「VIP 3 级」 */
+export function tagKindText(tag: Pick<HandTag, 'code' | 'kind' | 'vipLevel'>) {
+  if (tag.kind === 'vip') return `VIP 第 ${tag.vipLevel} 级柜`;
+  const area = tagArea(tag.code);
+  return area ? `${area} 区普通柜` : '普通柜';
+}
+
+/** 按柜型分组：普通柜按区号（A、B、C、D…），VIP 柜按等级；保持服务端的排序 */
+export function groupTags<T extends HandTag>(tags: T[]) {
+  const groups = new Map<string, { key: string; kind: TagKind; area: string; vipLevel: number | null; tags: T[] }>();
+  for (const t of tags) {
+    const area = t.kind === 'vip' ? '' : tagArea(t.code);
+    const key = t.kind === 'vip' ? `vip-${t.vipLevel}` : `area-${area}`;
+    const g = groups.get(key) ?? { key, kind: t.kind, area, vipLevel: t.vipLevel, tags: [] };
+    g.tags.push(t);
+    groups.set(key, g);
+  }
+  return [...groups.values()];
 }
 
 /** 同行组短号：TX20261026-0003 → 03 */
@@ -73,7 +110,7 @@ export function TagCard({
       onClick={onClick}
       data-testid={`tag-${tag.code}`}
       data-state={v ? 'in_use' : tag.locked ? 'locked' : 'free'}
-      aria-label={`手牌 ${tag.code}，${ZONE_LABELS[tag.zone].title}，${state}${v ? `，未结 ${(v.amountCents / 100).toFixed(2)} 元` : ''}`}
+      aria-label={`手牌 ${tag.code}，${ZONE_LABELS[tag.zone].title}${tag.kind === 'vip' ? `，VIP ${tag.vipLevel} 级` : ''}，${state}${v ? `，未结 ${(v.amountCents / 100).toFixed(2)} 元` : ''}`}
       aria-pressed={selected}
       className={cn(
         'group relative flex h-[92px] min-w-0 flex-col overflow-hidden rounded-[14px] border text-left transition-[box-shadow,border-color,transform,background-color] duration-150 active:scale-[0.98]',
@@ -92,7 +129,8 @@ export function TagCard({
       <span className={cn('flex items-center gap-1.5 pt-2 pr-2', v ? 'pl-3.5' : 'pl-3')}>
         <span className={cn('num min-w-0 truncate text-[19px] leading-none font-bold tracking-tight', v ? 'text-ink' : 'text-ink-3')}>{tag.code}</span>
         <span className="flex-1" />
-        <ZoneChip zone={tag.zone} />
+        {/* VIP 柜卡片放不下两个标记：只显示等级，分区由所在分组与左侧色条表示 */}
+        {tag.kind === 'vip' ? <VipChip level={tag.vipLevel!} /> : <ZoneChip zone={tag.zone} />}
       </span>
       {v ? (
         <>
@@ -134,6 +172,35 @@ export function TagCard({
           )}
         </span>
       )}
+    </button>
+  );
+}
+
+/**
+ * 空闲 / 锁定手牌的紧凑标签：全店 747 个柜，空闲柜只需看牌号与柜型，在店客人才用完整卡片。
+ * 与完整卡片同样的 data-testid 与状态，点一下即可发牌。
+ */
+export function TagChip({ tag, matched, primaryMatch, onClick }: { tag: BoardTag; matched: boolean; primaryMatch: boolean; onClick: () => void }) {
+  const state = tag.locked ? '锁定' : '空闲';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={`tag-${tag.code}`}
+      data-state={tag.locked ? 'locked' : 'free'}
+      aria-label={`手牌 ${tag.code}，${ZONE_LABELS[tag.zone].title}${tag.kind === 'vip' ? `，VIP ${tag.vipLevel} 级` : ''}，${state}${tag.locked ? `（${tag.lockReason}）` : ''}`}
+      title={tag.locked ? `锁定：${tag.lockReason}` : '空闲，点此发牌'}
+      className={cn(
+        'num flex h-[34px] min-w-[74px] items-center justify-center gap-1 rounded-[10px] border px-2 text-[14px] font-bold transition-[box-shadow,border-color,background-color] duration-150 active:scale-[0.98]',
+        tag.locked
+          ? 'border-clay/30 bg-[repeating-linear-gradient(135deg,var(--color-paper-2)_0_6px,var(--color-paper-3)_6px_7px)] text-clay'
+          : 'border-dashed border-line-strong bg-paper/60 text-ink-2 hover:border-pine hover:bg-card hover:text-pine',
+        matched && 'ring-2 ring-yuzu ring-offset-1 ring-offset-paper',
+        primaryMatch && 'shadow-lift',
+      )}
+    >
+      {tag.locked && <Lock className="size-3" />}
+      {tag.code}
     </button>
   );
 }

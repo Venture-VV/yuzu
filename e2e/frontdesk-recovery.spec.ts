@@ -1,6 +1,7 @@
 // G2 复审回归（门店电脑尺寸）：前台操作响应丢失后的待确认处理，以及末位输入对上多张牌时必须明确选择。
 // 依赖 seed-demo 与 seed-frontdesk-demo（仅独立演示库）；每次自动挑空闲手牌，可重复执行。
 import { expect, test, type Page } from '@playwright/test';
+import { matchTags } from '../src/shared/frontdesk';
 
 const PASSWORD = 'yuzu2026';
 
@@ -15,11 +16,15 @@ async function login(page: Page) {
 interface BoardTag {
   id: number;
   code: string;
-  zone: 'male' | 'female' | 'child';
+  zone: 'male' | 'female';
+  kind: 'normal' | 'vip';
   locked: boolean;
   active: boolean;
   visit: { id: number } | null;
 }
+
+/** 散客可用的空闲普通柜（VIP 柜要按会员等级使用） */
+const freeNormal = (t: BoardTag, zone: BoardTag['zone']) => t.zone === zone && t.kind === 'normal' && t.active && !t.locked && !t.visit;
 
 async function board(page: Page) {
   return ((await (await page.request.get('/api/frontdesk/board')).json()) as { tags: BoardTag[] }).tags;
@@ -27,7 +32,7 @@ async function board(page: Page) {
 
 /** 开一张新牌并打开它的小票 */
 async function openFreshVisit(page: Page): Promise<string> {
-  const free = (await board(page)).filter((t) => t.zone === 'male' && t.active && !t.locked && !t.visit).reverse();
+  const free = (await board(page)).filter((t) => freeNormal(t, 'male')).reverse();
   const code = free[0]!.code;
   const res = await page.request.post('/api/frontdesk/checkins', { data: { clientKey: crypto.randomUUID(), guests: [{ tagCode: code, zone: 'male' }] } });
   expect(res.status()).toBe(201);
@@ -122,7 +127,7 @@ test.describe('前台待确认操作与明确选牌', () => {
   test('接待响应丢失后重新登录：提醒仍在，查回后只开了一张牌', async ({ page }) => {
     await login(page);
     await page.goto('/frontdesk');
-    const code = (await board(page)).filter((t) => t.zone === 'female' && t.active && !t.locked && !t.visit).reverse()[0]!.code;
+    const code = (await board(page)).filter((t) => freeNormal(t, 'female')).reverse()[0]!.code;
     await page.route('**/api/frontdesk/checkins', async (route) => {
       await route.fetch();
       await route.abort('connectionreset');
@@ -154,7 +159,7 @@ test.describe('前台待确认操作与明确选牌', () => {
   test('按原内容重提被明确拒绝（牌已被其他终端发出）：先作废原编号，原请求随后到达也不生效', async ({ page }) => {
     await login(page);
     await page.goto('/frontdesk');
-    const code = (await board(page)).filter((t) => t.zone === 'male' && t.active && !t.locked && !t.visit).reverse()[1]!.code;
+    const code = (await board(page)).filter((t) => freeNormal(t, 'male')).reverse()[1]!.code;
     // 截下原请求、让浏览器以为断网，留着稍后原样送到服务器
     let original: { clientKey: string } | null = null;
     await page.route(
@@ -191,14 +196,15 @@ test.describe('前台待确认操作与明确选牌', () => {
   test('末位对上多张空闲牌：不自动取第一张，必须点选', async ({ page }) => {
     await login(page);
     await page.goto('/frontdesk');
-    const free = (await board(page)).filter((t) => t.zone === 'male' && t.active && !t.locked && !t.visit).map((t) => t.code);
+    // 发牌框里的候选：同分区全部空闲牌（含 VIP 柜），排序与页面相同
+    const free = (await board(page)).filter((t) => t.zone === 'male' && t.active && !t.locked && !t.visit);
     // 找一个末位数字对上至少两张空闲男宾牌、且没有数字完全相同空闲牌的输入
     const digit = ['1', '2', '3', '4', '5', '6', '7', '8', '9'].find((d) => {
-      const hits = free.filter((c) => c.endsWith(d));
-      return hits.length >= 2 && !free.some((c) => Number(c.replace(/\D/g, '')) === Number(d));
+      const hits = matchTags(free, d);
+      return hits.length >= 2 && !free.some((t) => Number(t.code.replace(/\D/g, '')) === Number(d));
     });
     test.skip(!digit, '演示库中没有合适的多候选尾号');
-    const hits = free.filter((c) => c.endsWith(digit!));
+    const hits = matchTags(free, digit!).slice(0, 8).map((t) => t.code);
     await page.keyboard.press('F2');
     const dialog = page.getByRole('dialog', { name: '接待发牌' });
     await dialog.getByLabel('第 1 位牌号').fill(digit!);

@@ -5,10 +5,11 @@ import { permissionsOf, type Duty, type Role } from '@shared/permissions';
 import type { SessionInfo } from '@shared/types';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
-import { AppError, badRequest, unauthorized } from '../lib/errors';
+import { badRequest, unauthorized } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { loadSettings } from '../modules/settings';
 import { sessionOnly } from './guard';
+import { checkLock, clearFailures, recordFailure } from './lockout';
 import { checkPasswordStrength, hashPassword, verifyPassword } from './password';
 import { SESSION_COOKIE, createSession, destroySession, destroyStaffSessions } from './session';
 
@@ -21,29 +22,6 @@ const ChangePasswordInput = z.object({
   currentPassword: z.string().min(1, '请输入当前密码'),
   newPassword: z.string(),
 });
-
-// 简单的登录失败限流：同一账号 15 分钟内失败 5 次，锁定 5 分钟。
-const MAX_FAILURES = 5;
-const failures = new Map<string, { count: number; first: number; lockedUntil: number }>();
-
-function checkLock(username: string) {
-  const f = failures.get(username);
-  if (f && f.lockedUntil > Date.now()) {
-    const minutes = Math.ceil((f.lockedUntil - Date.now()) / 60_000);
-    throw new AppError(429, 'LOGIN_LOCKED', `密码错误次数过多，请 ${minutes} 分钟后再试或联系店主重置密码`);
-  }
-}
-
-function recordFailure(username: string) {
-  const now = Date.now();
-  const f = failures.get(username);
-  if (!f || now - f.first > 15 * 60_000) {
-    failures.set(username, { count: 1, first: now, lockedUntil: 0 });
-    return;
-  }
-  f.count += 1;
-  if (f.count >= MAX_FAILURES) f.lockedUntil = now + 5 * 60_000;
-}
 
 export async function buildSessionInfo({ sql, config }: Deps, actor: Actor): Promise<SessionInfo> {
   const settings = await loadSettings(sql);
@@ -106,7 +84,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: Deps) {
       if (staff && ok && !staff.active) throw unauthorized('该账号已停用，请联系店主');
       throw unauthorized('账号或密码不正确');
     }
-    failures.delete(username);
+    clearFailures(username);
     const token = await createSession(sql, staff.id, config.sessionTtlHours, {
       ip: req.ip,
       userAgent: req.headers['user-agent'],

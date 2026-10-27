@@ -1,7 +1,7 @@
 // S2 前台浏览器验收：依赖 seed-demo 与 seed-frontdesk-demo（仅独立演示库），预期结果见 src/server/demo/frontdesk-expected.json。
-// 账号：店主 linlan / 前台 xiaozhou，密码 yuzu2026。
+// 账号：店主 linlan / 前台 xiaozhou / 值班经理 zhangjl，密码 yuzu2026。手牌池为店主 2026-10-27 的真实柜号清单（747 个）。
 // 会改数据的业务流程只在门店电脑尺寸跑（每次自动挑空闲手牌，可重复执行）；三种尺寸都检查双栏布局与金额不截断。
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Browser, type Page } from '@playwright/test';
 
 const PASSWORD = 'yuzu2026';
 
@@ -18,16 +18,28 @@ const nav = (page: Page, name: string) => page.getByRole('navigation', { name: '
 interface BoardTag {
   id: number;
   code: string;
-  zone: 'male' | 'female' | 'child';
+  zone: 'male' | 'female';
+  kind: 'normal' | 'vip';
+  vipLevel: number | null;
   locked: boolean;
   active: boolean;
   visit: { id: number; amountCents: number } | null;
 }
 
+async function boardTags(page: Page) {
+  return ((await (await page.request.get('/api/frontdesk/board')).json()) as { tags: BoardTag[] }).tags;
+}
+
+/** 散客可用的空闲普通柜：从清单末尾挑，避开演示数据里的在店手牌 */
 async function freeTags(page: Page, zone: BoardTag['zone']): Promise<string[]> {
-  const board = (await (await page.request.get('/api/frontdesk/board')).json()) as { tags: BoardTag[] };
-  // 从号段末尾挑，避开演示数据里的在店手牌
-  return board.tags.filter((t) => t.zone === zone && t.active && !t.locked && !t.visit).map((t) => t.code).reverse();
+  return (await boardTags(page)).filter((t) => t.zone === zone && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse();
+}
+
+/** 以店主身份调规则（另开会话，不影响页面上的前台登录） */
+async function asOwner(playwright: { request: { newContext: (o: { baseURL?: string }) => Promise<APIRequestContext> } }, baseURL: string | undefined) {
+  const ctx = await playwright.request.newContext({ baseURL });
+  expect((await ctx.post('/api/auth/login', { data: { username: 'linlan', password: PASSWORD } })).ok()).toBe(true);
+  return ctx;
 }
 
 async function memberBalance(page: Page, q: string) {
@@ -46,7 +58,7 @@ test.describe('前台流程', () => {
     const [maleTag, maleTag2] = await freeTags(page, 'male');
     const [femaleTag] = await freeTags(page, 'female');
 
-    // F2 接待：第 1 位男宾只输末位数字，回车补全
+    // F2 接待：第 1 位男宾只输数字（不输区号字母），回车补全
     await page.keyboard.press('F2');
     const dialog = page.getByRole('dialog', { name: '接待发牌' });
     await expect(dialog).toBeVisible();
@@ -152,26 +164,94 @@ test.describe('前台流程', () => {
   });
 });
 
+test.describe('VIP 柜与丢牌', () => {
+  test.skip(({ viewport }) => (viewport?.width ?? 0) < 1280, '流程只在门店电脑尺寸执行一次');
+
+  test('散客不能用 VIP 柜；开启当场授权后由值班经理授权发牌；丢牌换牌挂赔偿 200 元', async ({ page, playwright, baseURL }) => {
+    const owner = await asOwner(playwright, baseURL);
+    try {
+      await login(page, 'xiaozhou');
+      await page.goto('/frontdesk');
+      const vip = (await boardTags(page)).find((t) => t.zone === 'male' && t.kind === 'vip' && t.vipLevel === 1 && t.active && !t.locked && !t.visit)!;
+      const [normal] = await freeTags(page, 'male');
+
+      // 默认关闭当场授权：散客选 VIP 柜被拦下，不能提交
+      await page.keyboard.press('F2');
+      const dialog = page.getByRole('dialog', { name: '接待发牌' });
+      await dialog.getByLabel('第 1 位牌号').fill(vip.code);
+      await expect(dialog.getByTestId('vip-short-0')).toContainText('散客不能使用；请换普通柜或等级相符的 VIP 柜');
+      await expect(dialog.getByTestId('checkin-submit')).toBeDisabled();
+      await dialog.getByRole('button', { name: '取消' }).click();
+
+      // 店主开启当场授权后：前台请值班经理在弹窗里输入账号密码授权
+      expect((await owner.put('/api/frontdesk/rules', { data: { vipOverrideEnabled: true } })).ok()).toBe(true);
+      await page.reload();
+      await page.keyboard.press('F2');
+      await dialog.getByLabel('第 1 位牌号').fill(vip.code);
+      await expect(dialog.getByTestId('vip-short-0')).toContainText('需值班经理或店总当场授权');
+      await expect(dialog.getByTestId('checkin-submit')).toBeDisabled();
+      await dialog.getByTestId('request-authorize').click();
+      const auth = page.getByRole('dialog').filter({ hasText: '当场授权 · 使用 VIP 柜' });
+      await expect(auth).toContainText(`VIP 柜 ${vip.code}（第 1 级）`);
+      await auth.getByLabel('授权人账号').fill('zhangjl');
+      await auth.getByLabel('授权人密码').fill('wrong-password');
+      await auth.getByTestId('authorize-submit').click();
+      await expect(auth).toContainText('授权人账号或密码不正确');
+      await auth.getByLabel('授权人密码').fill(PASSWORD);
+      await auth.getByTestId('authorize-submit').click();
+      await expect(auth).toHaveCount(0);
+      await expect(dialog).toContainText('已由张经理当场授权');
+      // 授权编号进入本机待确认记录，密码不进入
+      const stored = await page.evaluate(() => localStorage.getItem('yuzu.frontdeskPending.v1') ?? '');
+      expect(stored).not.toContain(PASSWORD);
+      await dialog.getByTestId('checkin-submit').click();
+      await expect(page.getByText(`已发牌 ${vip.code}`)).toBeVisible();
+      const panel = page.getByTestId('bill-panel');
+      await expect(panel.getByTestId('bill-tag')).toHaveText(vip.code);
+      await expect(panel.getByTestId('bill-vip-override')).toContainText('张经理');
+
+      // 丢牌：选「手牌丢失」自动勾选赔偿与锁定原牌，赔偿挂到账单
+      await panel.getByTestId('action-swap').click();
+      const swap = page.getByRole('dialog').filter({ hasText: '换牌 ·' });
+      await swap.locator('#swap-code').fill(normal!);
+      await swap.getByRole('button', { name: '手牌丢失' }).click();
+      await expect(swap.getByRole('checkbox', { name: /收取丢牌赔偿 ¥200\.00/ })).toBeChecked();
+      await expect(swap.getByRole('checkbox', { name: /同时锁定原手牌/ })).toBeChecked();
+      await swap.getByTestId('swap-submit').click();
+      await expect(panel.getByTestId('bill-tag')).toHaveText(normal!);
+      await expect(panel.getByTestId('bill-total')).toContainText('200.00');
+      await expect(panel).toContainText(`手牌丢失赔偿（${vip.code}）`);
+      await expect(page.getByTestId(`tag-${vip.code}`)).toHaveAttribute('data-state', 'locked');
+      const checks = (await (await page.request.get('/api/frontdesk/checks')).json()) as { ok: boolean; label: string }[];
+      for (const c of checks) expect(c.ok, c.label).toBe(true);
+    } finally {
+      await owner.put('/api/frontdesk/rules', { data: { vipOverrideEnabled: false } });
+      await owner.dispose();
+    }
+  });
+});
+
 test.describe('前台布局', () => {
   test('双栏工作台：手牌矩阵 + 小票，金额与按钮不截断、无横向滚动', async ({ page, viewport }) => {
     await login(page, 'linlan');
     await page.goto('/frontdesk');
     await expect(page.getByTestId('tag-board')).toBeVisible();
-    // 演示数据：A003 王先生未结 ¥172；B030 在店超过 6 小时
-    await expect(page.getByTestId('tag-A003')).toContainText('172');
-    await expect(page.getByTestId('tag-A003')).toHaveAttribute('data-state', 'in_use');
-    await expect(page.getByTestId('tag-A021')).toHaveAttribute('data-state', 'locked');
-    await page.getByTestId('tag-A015').click();
+    // 演示数据：A8062 王先生未结 ¥172；A8090 丢失已锁定；一家三口 A8075 / A6010 / A8076
+    await expect(page.getByTestId('tag-A8062')).toContainText('172');
+    await expect(page.getByTestId('tag-A8062')).toHaveAttribute('data-state', 'in_use');
+    await expect(page.getByTestId('tag-A8090')).toHaveAttribute('data-state', 'locked');
+    await expect(page.getByTestId('tag-9058')).toContainText('周董');
+    await page.getByTestId('tag-A8075').click();
     const panel = page.getByTestId('bill-panel');
-    await expect(panel.getByTestId('bill-tag')).toHaveText('A015');
-    await expect(panel.getByTestId('bill-group')).toContainText('C003');
+    await expect(panel.getByTestId('bill-tag')).toHaveText('A8075');
+    await expect(panel.getByTestId('bill-group')).toContainText('A8076');
     const total = await panel.getByTestId('bill-total').boundingBox();
     const addBtn = await panel.getByTestId('action-add').boundingBox();
     expect(total!.x + total!.width).toBeLessThanOrEqual(viewport!.width);
     expect(addBtn!.y + addBtn!.height).toBeLessThanOrEqual(viewport!.height);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
     // 每张在店卡片的金额完整显示（未被卡片裁掉）
-    for (const code of ['A003', 'A008', 'B015', 'C003']) {
+    for (const code of ['A8062', '8001', 'A6010', 'A8076', '9058']) {
       const card = page.getByTestId(`tag-${code}`);
       const overflow = await card.evaluate((el) => [...el.querySelectorAll('span')].some((s) => s.getBoundingClientRect().right > el.getBoundingClientRect().right + 0.5));
       expect(overflow, code).toBe(false);

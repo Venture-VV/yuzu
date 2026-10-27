@@ -5,6 +5,7 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { AppConfig } from './config';
 import type { Sql } from './db';
+import { registerGrantRoutes } from './auth/grants';
 import { registerAuthRoutes } from './auth/routes';
 import { SESSION_COOKIE, resolveSession } from './auth/session';
 import { AppError } from './lib/errors';
@@ -103,6 +104,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   });
 
   registerAuthRoutes(app, deps);
+  registerGrantRoutes(app, deps);
   registerMemberRoutes(app, deps);
   registerWalletRoutes(app, deps);
   registerLedgerRoutes(app, deps);

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, CircleAlert, CircleCheck, ReceiptText } from 'lucide-react';
+import { ArrowRight, CircleAlert, CircleCheck, ReceiptText, ShieldCheck } from 'lucide-react';
 import {
   BILL_SOURCE_LABELS,
   matchTags,
@@ -8,8 +8,11 @@ import {
   uniqueTagMatch,
   ZONE_LABELS,
   type BoardTag,
+  type FrontdeskRules,
   type VisitDetail,
 } from '@shared/frontdesk';
+import { grantCovers, type IssuedGrant } from '@shared/grants';
+import { formatYuan } from '@shared/money';
 import { api } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
@@ -17,27 +20,38 @@ import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Button, ConfirmCheck, Field, Input, Notice, Skeleton } from '../../components/ui';
 import { usePreview, useServerNow, stayText } from './queries';
-import { GroupMark, ZoneChip } from './parts';
+import { AuthorizeDialog } from './AuthorizeDialog';
+import { GroupMark, VipChip, ZoneChip } from './parts';
 import { PendingPanel, useFrontdeskOp } from './pending';
 
 // ───────────────────────── 换牌 ─────────────────────────
+
+const LOST_REASON = '手牌丢失';
+const GRANT_ERRORS = ['VIP_AUTH_REQUIRED', 'GRANT_INVALID', 'GRANT_USED', 'GRANT_EXPIRED', 'GRANT_SCOPE'];
 
 export function SwapDialog({
   open,
   visit,
   tags,
+  rules,
   onClose,
   onDone,
 }: {
   open: boolean;
   visit: VisitDetail;
   tags: BoardTag[];
+  rules: FrontdeskRules | undefined;
   onClose: () => void;
   onDone: (v: VisitDetail) => void;
 }) {
   const [code, setCode] = useState('');
   const [reason, setReason] = useState('');
   const [lockOld, setLockOld] = useState(false);
+  /** 丢牌赔偿（店主 #30：固定 200 元，挂到客人账单）；勾选时原手牌必须同时锁定 */
+  const [chargeFee, setChargeFee] = useState(false);
+  const [grant, setGrant] = useState<IssuedGrant | null>(null);
+  const [authOpen, setAuthOpen] = useState(false);
+  const fee = rules?.lostTagFeeCents ?? 0;
   const session = useSession();
   // 这位客人上一笔换牌结果待确认时，先处理那一笔
   const op = useFrontdeskOp<VisitDetail>({
@@ -51,9 +65,14 @@ export function SwapDialog({
     setCode('');
     setReason('');
     setLockOld(false);
+    setChargeFee(false);
+    setGrant(null);
     op.clearError();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+  useEffect(() => {
+    if (op.state.phase === 'error' && op.state.code && GRANT_ERRORS.includes(op.state.code)) setGrant(null);
+  }, [op.state]);
 
   const free = tags.filter((t) => t.zone === visit.zone && t.active && !t.locked && !t.visit);
   const c = normalizeTagCode(code);
@@ -75,7 +94,14 @@ export function SwapDialog({
                 : null;
   // 只输了末位且对上多张空闲牌时，列出候选让员工点选，不自动取第一张
   const candidates = c && !target ? matchTags(free, c).slice(0, 8) : [];
-  const ready = !!target && !problem && reason.trim().length >= 2;
+  // VIP 柜：按这位客人的会员等级（散客为 0 级）
+  const guestLevel = visit.memberLevel?.level ?? 0;
+  const vipShort = !!target && !problem && target.kind === 'vip' && guestLevel < target.vipLevel!;
+  const overrideOn = !!rules?.vipOverrideEnabled;
+  const needs = vipShort ? [{ code: target!.code, memberId: visit.member?.id ?? null }] : [];
+  const grantOk = needs.length === 0 || (!!grant && grantCovers(grant.scope, needs) && new Date(grant.expiresAt).getTime() > Date.now());
+  const ready = !!target && !problem && reason.trim().length >= 2 && (!vipShort || (overrideOn && grantOk)) && (!chargeFee || lockOld);
+  const guestText = visit.member ? `会员「${visit.member.name}」（第 ${guestLevel} 级）` : '散客';
   const locked = op.locked;
   const edit = (fn: () => void) => {
     if (locked) return;
@@ -86,10 +112,17 @@ export function SwapDialog({
   const submit = async () => {
     const r = await op.submit((key) => ({
       url: `/api/frontdesk/visits/${visit.id}/swap`,
-      body: { clientKey: key, toTagCode: c, reason: reason.trim(), lockOld },
+      body: {
+        clientKey: key,
+        toTagCode: c,
+        reason: reason.trim(),
+        lockOld,
+        lostFee: chargeFee ? fee : null,
+        vipGrantId: needs.length && grant ? grant.grantId : null,
+      },
       tagCodes: [visit.tag.code, c],
-      summary: `换牌 ${visit.tag.code} → ${c}（${reason.trim()}）`,
-      amount: null,
+      summary: `换牌 ${visit.tag.code} → ${c}（${reason.trim()}${chargeFee ? `，丢牌赔偿 ${formatYuan(fee)}` : ''}）`,
+      amount: chargeFee ? fee : null,
     }));
     if (r) onDone(r);
   };
@@ -170,6 +203,7 @@ export function SwapDialog({
                   edit(() => {
                     setReason(r);
                     setLockOld(r !== '顾客要求换柜');
+                    setChargeFee(r === LOST_REASON && fee > 0);
                   })
                 }
                 className={cn('h-9 rounded-full border px-3.5 text-[13px] font-semibold', reason === r ? 'border-pine bg-pine-tint text-pine' : 'border-line bg-card text-ink-2 hover:border-line-strong')}
@@ -180,12 +214,63 @@ export function SwapDialog({
           </div>
           <Input value={reason} disabled={locked} onChange={(e) => edit(() => setReason(e.target.value))} placeholder="或填写其他原因" maxLength={100} className="mt-2" />
         </Field>
-        <ConfirmCheck checked={lockOld} onChange={(v) => edit(() => setLockOld(v))}>
+        {fee > 0 && (
+          <ConfirmCheck
+            checked={chargeFee}
+            onChange={(v) =>
+              edit(() => {
+                setChargeFee(v);
+                if (v) setLockOld(true);
+              })
+            }
+          >
+            收取丢牌赔偿 <span className="num">{formatYuan(fee)}</span>
+            <span className="block text-[12.5px] font-normal text-ink-3">挂到这位客人的账单（来源「其他」），原手牌同时锁定</span>
+          </ConfirmCheck>
+        )}
+        <ConfirmCheck checked={lockOld} onChange={(v) => edit(() => setLockOld(v || chargeFee))}>
           同时锁定原手牌 {visit.tag.code}
-          <span className="block text-[12.5px] font-normal text-ink-3">丢失、损坏、柜锁故障时勾选，避免再次发出；找回或修好后由店主解锁</span>
+          <span className="block text-[12.5px] font-normal text-ink-3">
+            {chargeFee ? '收取丢牌赔偿时原手牌必须锁定，找回后由店主解锁' : '丢失、损坏、柜锁故障时勾选，避免再次发出；找回或修好后由店主解锁'}
+          </span>
         </ConfirmCheck>
+        {vipShort && (
+          <Notice
+            tone={!overrideOn ? 'error' : grantOk ? 'success' : 'warning'}
+            icon={<ShieldCheck className="size-4" />}
+            title={
+              <span className="flex items-center gap-1.5">
+                <VipChip level={target!.vipLevel!} /> {target!.code} 是第 {target!.vipLevel} 级 VIP 柜，{guestText}不够
+              </span>
+            }
+          >
+            {!overrideOn ? (
+              '请换普通柜或等级相符的 VIP 柜。'
+            ) : grantOk && grant ? (
+              `已由${grant.approverName}当场授权，${formatTime(grant.expiresAt)} 前有效。`
+            ) : (
+              <span className="flex flex-wrap items-center gap-3">
+                需值班经理、店总或店主当场授权。
+                <Button size="sm" variant="secondary" icon={<ShieldCheck className="size-4" />} disabled={locked} onClick={() => setAuthOpen(true)} data-testid="request-authorize">
+                  请经理授权
+                </Button>
+              </span>
+            )}
+          </Notice>
+        )}
         {op.state.phase === 'error' && <Notice tone="error" title={op.state.message} />}
       </div>
+      <AuthorizeDialog
+        open={authOpen}
+        tags={needs}
+        lines={target ? [`${guestText} · 换到 VIP 柜 ${target.code}（第 ${target.vipLevel} 级）`] : []}
+        onClose={() => setAuthOpen(false)}
+        onGranted={(g) => {
+          setGrant(g);
+          setAuthOpen(false);
+          op.clearError();
+        }}
+      />
     </Dialog>
   );
 }

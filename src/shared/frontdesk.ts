@@ -2,14 +2,27 @@
 //
 // 手牌账单只汇总消费明细，不是第二套会员钱包：本阶段（S2）挂账不收款、不扣会员余额。
 
-export const ZONES = ['male', 'female', 'child'] as const;
+/** 宾客与手牌的分区：只分男宾、女宾（店主 2026-10-27 #27：儿童跟同性别家长用男宾或女宾的牌） */
+export const ZONES = ['male', 'female'] as const;
 export type Zone = (typeof ZONES)[number];
+/** 库里可能出现的分区：child 只存在于 Batch 2.2 之前建的旧手牌与来访（见迁移 008），不能再登记 */
+export type TagZone = Zone | 'child';
+export const TAG_ZONES: readonly TagZone[] = ['male', 'female', 'child'];
 
-export const ZONE_LABELS: Record<Zone, { title: string; short: string }> = {
+export const ZONE_LABELS: Record<TagZone, { title: string; short: string }> = {
   male: { title: '男宾', short: '男' },
   female: { title: '女宾', short: '女' },
-  child: { title: '儿童', short: '童' },
+  child: { title: '儿童（旧分区）', short: '童' },
 };
+
+/** 柜型：普通柜（区号字母 + 数字，如 A8060）与 VIP 柜（纯数字，按等级使用） */
+export const TAG_KINDS = ['normal', 'vip'] as const;
+export type TagKind = (typeof TAG_KINDS)[number];
+export const TAG_KIND_LABELS: Record<TagKind, string> = { normal: '普通柜', vip: 'VIP 柜' };
+export const MAX_VIP_LEVEL = 9;
+
+/** 区号：牌号的字母前缀（A8060 → A）；VIP 柜是纯数字，没有区号 */
+export const tagArea = (code: string) => code.replace(/[0-9]/g, '');
 
 export const BILL_SOURCES = ['bath', 'dining', 'therapist', 'room', 'other'] as const;
 export type BillSource = (typeof BILL_SOURCES)[number];
@@ -36,13 +49,52 @@ export const SWAP_REASONS = ['手牌丢失', '手牌损坏', '柜锁故障', '�
 export const CANCEL_REASONS = ['开错手牌', '顾客未入场', '重复开牌'] as const;
 export const LOCK_REASONS = ['手牌丢失', '手牌损坏', '柜锁故障', '暂停使用'] as const;
 
-/** 前台规则（模拟默认值，待店主确认） */
+/** VIP 柜的会员等级口径（店主 ❓1：后台可切换，默认累计充值） */
+export const VIP_LEVEL_BASES = ['recharge', 'balance'] as const;
+export type VipLevelBasis = (typeof VIP_LEVEL_BASES)[number];
+export const VIP_LEVEL_BASIS_LABELS: Record<VipLevelBasis, string> = {
+  recharge: '累计充值实收',
+  balance: '当前余额（本金 + 赠金）',
+};
+
+/** 前台规则（店主 2026-10-27 已确认 15 分钟与丢牌 200 元；VIP 等级口径、门槛与当场授权开关为默认值，待确认） */
 export interface FrontdeskRules {
   /** 店员可在多少分钟内自行作废本人刚登记的明细、撤销本人刚开的牌 */
   selfVoidMinutes: number;
+  /** 丢牌赔偿（分），换牌时挂到客人账单；0 表示不收 */
+  lostTagFeeCents: number;
+  vipLevelBasis: VipLevelBasis;
+  /** 第 1、2、3… 级会员的门槛（分），严格递增；第 1 级门槛为 0 时所有会员至少第 1 级，散客为 0 级 */
+  vipLevelThresholds: number[];
+  /** 允许值班经理 / 店总当场授权散客或等级不够的会员使用 VIP 柜（店主 ❓2：默认关闭） */
+  vipOverrideEnabled: boolean;
 }
 
-export const DEFAULT_FRONTDESK_RULES: FrontdeskRules = { selfVoidMinutes: 10 };
+export const DEFAULT_FRONTDESK_RULES: FrontdeskRules = {
+  selfVoidMinutes: 15,
+  lostTagFeeCents: 20000,
+  vipLevelBasis: 'recharge',
+  vipLevelThresholds: [0, 5_000_000, 10_000_000, 20_000_000, 30_000_000],
+  vipOverrideEnabled: false,
+};
+
+/** 会员等级：达到第 i 档门槛即为第 i + 1 级；一档都没达到为 0 级（与散客相同） */
+export function levelOf(amountCents: number, thresholds: readonly number[]): number {
+  let level = 0;
+  thresholds.forEach((t, i) => {
+    if (amountCents >= t) level = i + 1;
+  });
+  return level;
+}
+
+/** 会员当前等级（按规则口径计算） */
+export interface MemberLevel {
+  memberId: number;
+  level: number;
+  basis: VipLevelBasis;
+  /** 口径金额：累计充值实收或当前余额（分） */
+  amountCents: number;
+}
 
 /** 牌号：0–2 位大写字母前缀 + 1–5 位数字 */
 export const TAG_CODE_PATTERN = /^[A-Z]{0,2}[0-9]{1,5}$/;
@@ -82,13 +134,15 @@ export function tagMatchRank(code: string, input: string): number {
 
 /**
  * 按输入匹配手牌：完全相同的牌号优先；否则按数字结尾匹配（输入 23 可找到 A023、B123）。
- * 结果按「完全匹配 → 数字完全相同 → 末位匹配」排序。
+ * 结果按「完全匹配 → 数字完全相同 → 末位匹配」排序；同一档里普通柜在前、VIP 柜在后
+ * （VIP 柜按等级使用，散客最常用的是普通柜）。
  */
-export function matchTags<T extends { code: string }>(tags: T[], input: string): T[] {
+export function matchTags<T extends { code: string; kind?: TagKind }>(tags: T[], input: string): T[] {
+  const vipLast = (t: T) => (t.kind === 'vip' ? 1 : 0);
   return tags
     .map((t) => ({ t, r: tagMatchRank(t.code, input) }))
     .filter((x) => x.r >= 0)
-    .sort((a, b) => a.r - b.r || a.t.code.length - b.t.code.length || a.t.code.localeCompare(b.t.code))
+    .sort((a, b) => a.r - b.r || vipLast(a.t) - vipLast(b.t) || a.t.code.length - b.t.code.length || a.t.code.localeCompare(b.t.code))
     .map((x) => x.t);
 }
 
@@ -111,7 +165,10 @@ export function uniqueTagMatch<T extends { code: string }>(tags: T[], input: str
 export interface HandTag {
   id: number;
   code: string;
-  zone: Zone;
+  zone: TagZone;
+  kind: TagKind;
+  /** VIP 柜等级；普通柜为 null */
+  vipLevel: number | null;
   locked: boolean;
   lockReason: string | null;
   active: boolean;
@@ -143,7 +200,7 @@ export interface FrontdeskBoard {
   tags: BoardTag[];
   stats: {
     inStore: number;
-    inStoreByZone: Record<Zone, number>;
+    inStoreByZone: Record<TagZone, number>;
     free: number;
     locked: number;
     unsettledCents: number;
@@ -189,7 +246,7 @@ export interface GroupMate {
   visitId: number;
   visitNo: string;
   tagCode: string;
-  zone: Zone;
+  zone: TagZone;
   status: VisitStatus;
   memberName: string | null;
   guestLabel: string;
@@ -209,7 +266,7 @@ export interface VisitDetail {
   id: number;
   visitNo: string;
   status: VisitStatus;
-  zone: Zone;
+  zone: TagZone;
   guestLabel: string;
   businessDate: string;
   checkedInAt: string;
@@ -219,6 +276,10 @@ export interface VisitDetail {
   closeReason: string | null;
   tag: HandTag;
   member: VisitMember | null;
+  /** 会员按当前规则口径的等级（散客为 null），用于换牌到 VIP 柜时核对 */
+  memberLevel: MemberLevel | null;
+  /** 开牌时等级不够、经当场授权使用 VIP 柜的授权人 */
+  vipOverrideByName: string | null;
   bill: { id: number; billNo: string; status: VisitStatus; amountCents: number; lineCount: number };
   lines: BillLine[];
   group: { id: number; groupNo: string; status: 'open' | 'closed'; mates: GroupMate[]; openAmountCents: number } | null;
@@ -234,7 +295,7 @@ export type FrontdeskOpLookup =
 
 export interface CheckinResult {
   replayed: boolean;
-  visits: { id: number; visitNo: string; tagCode: string; zone: Zone }[];
+  visits: { id: number; visitNo: string; tagCode: string; zone: TagZone }[];
   groupNo: string | null;
 }
 
@@ -244,7 +305,7 @@ export interface PreviewBill {
     visitId: number;
     visitNo: string;
     tagCode: string;
-    zone: Zone;
+    zone: TagZone;
     memberName: string | null;
     guestLabel: string;
     checkedInAt: string;

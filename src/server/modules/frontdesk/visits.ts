@@ -11,9 +11,9 @@ import {
   type CheckinResult,
   type FrontdeskBoard,
   type PreviewBill,
+  type TagZone,
   type VisitDetail,
   type VisitHistoryEvent,
-  type Zone,
   ZONE_LABELS,
 } from '@shared/frontdesk';
 import { formatYuan } from '@shared/money';
@@ -42,6 +42,7 @@ import {
   saveKey,
   setTxTimeouts,
 } from './common';
+import { assertVipAllowed, consumeVipShortfalls, memberLevels, vipShortfalls } from './vip';
 
 const clientKey = z.uuid('缺少有效的操作编号，请刷新页面后重试');
 const tagCode = z
@@ -53,7 +54,7 @@ const tagCode = z
 
 const GuestInput = z.object({
   tagCode,
-  zone: z.enum(ZONES, '请选择男宾 / 女宾 / 儿童'),
+  zone: z.enum(ZONES, '请选择男宾或女宾（儿童跟同性别家长用男宾或女宾的牌）'),
   memberId: z.number().int().positive().nullable().default(null),
   guestLabel: z.string().trim().max(16, '称呼最多 16 个字').default(''),
 });
@@ -63,11 +64,20 @@ export const CheckinInput = z.object({
   guests: z.array(GuestInput).min(1, '请至少登记一位客人').max(12, '一次最多接待 12 位客人'),
   /** 加入一位已在店客人的同行组（没有组时自动新建） */
   joinVisitId: z.number().int().positive().nullable().default(null),
+  /** 当场授权编号：有客人等级不够、要用 VIP 柜时，由值班经理 / 店总在弹窗里签发 */
+  vipGrantId: z.uuid('授权编号格式不正确').nullable().default(null),
 });
 export type CheckinInputData = z.input<typeof CheckinInput>;
 
+/** 参与核对的请求内容：未使用的新字段不计入，升级前留下的待确认请求重提时仍能对上 */
+function hashedPayload<T extends Record<string, unknown>>(payload: T, optional: (keyof T)[]) {
+  const out: Record<string, unknown> = { ...payload };
+  for (const k of optional) if (out[k as string] === null) delete out[k as string];
+  return out;
+}
+
 async function loadCheckin(db: Db, key: string, replayed: boolean): Promise<CheckinResult> {
-  const rows = await db<{ id: number; visitNo: string; tagCode: string; zone: Zone; groupNo: string | null }[]>`
+  const rows = await db<{ id: number; visitNo: string; tagCode: string; zone: TagZone; groupNo: string | null }[]>`
     SELECT v.id, v.visit_no, t.code AS tag_code, v.zone, g.group_no
     FROM visits v JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN visit_groups g ON g.id = v.group_id
     WHERE v.checkin_key = ${key} ORDER BY v.id`;
@@ -86,8 +96,10 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
   if (new Set(memberIds).size !== memberIds.length) throw badRequest('同一位会员只能持一张手牌');
 
   const { clientKey: key, ...payload } = input;
-  const run = await runIdempotent(deps, { key, opType: 'checkin', requestHash: hashRequest(payload) }, async (tx) => {
+  const requestHash = hashRequest(hashedPayload(payload, ['vipGrantId']));
+  const run = await runIdempotent(deps, { key, opType: 'checkin', requestHash }, async (tx) => {
     const at = ctx.at ?? new Date();
+    const rules = await loadFrontdeskRules(tx);
     // ① 手牌（id 升序）
     const tags = await lockTagsByCode(tx, codes);
     for (const g of input.guests) assertTagIssuable(tags.get(g.tagCode)!, g.zone);
@@ -99,9 +111,11 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
     }
 
     // 会员只读：确认存在、没有其他在店手牌
+    const names = new Map<number, string>();
     if (memberIds.length) {
       const found = await tx<{ id: number; name: string }[]>`SELECT id, name FROM members WHERE id IN ${tx(memberIds)}`;
       if (found.length !== memberIds.length) throw notFound('会员不存在，请重新查找');
+      for (const m of found) names.set(m.id, m.name);
       const inStore = await tx<{ name: string; code: string }[]>`
         SELECT m.name, t.code FROM visits v JOIN members m ON m.id = v.member_id JOIN hand_tags t ON t.id = v.tag_id
         WHERE v.status = 'open' AND v.member_id IN ${tx(memberIds)}`;
@@ -109,6 +123,15 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
         throw conflict('MEMBER_IN_STORE', `会员「${inStore[0]!.name}」已持有在店手牌 ${inStore[0]!.code}，不能重复开牌`);
       }
     }
+
+    // VIP 柜：会员等级不低于柜子等级；不够时需当场授权（规则开启时）
+    const levels = await memberLevels(tx, memberIds, rules);
+    const shortfalls = vipShortfalls(
+      input.guests.map((g) => ({ tag: tags.get(g.tagCode)!, memberId: g.memberId, memberName: g.memberId ? (names.get(g.memberId) ?? null) : null })),
+      levels,
+    );
+    assertVipAllowed(shortfalls, levels, rules, input.vipGrantId);
+    const overrideCodes = new Set(shortfalls.map((x) => x.code));
 
     // ② 同行组 → ③ 来访
     let groupId: number | null = null;
@@ -139,6 +162,9 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
       }
     }
 
+    // 授权凭据最后加锁并核销（业务回滚时一起回滚）
+    const override = await consumeVipShortfalls(tx, shortfalls, input.vipGrantId, ctx.actor, `checkin:${key}`);
+
     let firstId = 0;
     for (const g of input.guests) {
       const tag = tags.get(g.tagCode)!;
@@ -148,9 +174,9 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
       const visitNo = await nextDocNo(tx, 'visit', 'LF', date);
       const [visit] = await tx<{ id: number }[]>`
         INSERT INTO visits (visit_no, bill_id, tag_id, zone, member_id, guest_label, group_id, business_date,
-                            checked_in_at, checked_in_by, checkin_key)
+                            checked_in_at, checked_in_by, checkin_key, vip_override_by)
         VALUES (${visitNo}, ${bill!.id}, ${tag.id}, ${g.zone}, ${g.memberId}, ${g.guestLabel}, ${groupId}, ${date},
-                ${at}, ${ctx.actor.id}, ${key})
+                ${at}, ${ctx.actor.id}, ${key}, ${override && overrideCodes.has(tag.code) ? override.approverId : null})
         RETURNING id`;
       if (!firstId) firstId = visit!.id;
       if (groupId) {
@@ -159,13 +185,19 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
           VALUES (${groupId}, ${visit!.id}, 'join', ${ctx.actor.id}, ${at})`;
       }
     }
-    await saveKey(tx, key, 'checkin', hashRequest(payload), firstId, ctx.actor.id);
+    await saveKey(tx, key, 'checkin', requestHash, firstId, ctx.actor.id);
     await writeAudit(tx, {
       staffId: ctx.actor.id,
       action: 'frontdesk_checkin',
       targetType: 'visit',
       targetId: firstId,
-      detail: { tags: codes, members: memberIds, joinVisitId: input.joinVisitId, groupId },
+      detail: {
+        tags: codes,
+        members: memberIds,
+        joinVisitId: input.joinVisitId,
+        groupId,
+        ...(override ? { vipOverride: { tags: [...overrideCodes], approverId: override.approverId, approverName: override.approverName, grantId: input.vipGrantId } } : {}),
+      },
       ip: ctx.ip,
       businessDate: date,
     });
@@ -176,25 +208,33 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
 
 // ───────────────────────── 换牌 ─────────────────────────
 
-export const SwapInput = z.object({
-  clientKey,
-  toTagCode: tagCode,
-  reason: z.string().trim().min(2, '请填写换牌原因（至少 2 个字）').max(100, '原因最多 100 字'),
-  /** 换下的手牌是否同时锁定（丢失、损坏时应锁定，避免再次发出） */
-  lockOld: z.boolean().default(false),
-});
+export const SwapInput = z
+  .object({
+    clientKey,
+    toTagCode: tagCode,
+    reason: z.string().trim().min(2, '请填写换牌原因（至少 2 个字）').max(100, '原因最多 100 字'),
+    /** 换下的手牌是否同时锁定（丢失、损坏时应锁定，避免再次发出） */
+    lockOld: z.boolean().default(false),
+    /** 丢牌赔偿（分）：挂到客人账单；与当前规则的金额不一致时拒绝，避免改价后挂错。不收时为 null */
+    lostFee: z.number().int().positive('赔偿金额不正确').nullable().default(null),
+    /** 当场授权编号：换到等级不够的 VIP 柜时，由值班经理 / 店总签发 */
+    vipGrantId: z.uuid('授权编号格式不正确').nullable().default(null),
+  })
+  .refine((v) => v.lostFee === null || v.lockOld, { message: '丢失的手牌需要同时锁定，避免再次发出', path: ['lockOld'] });
 export type SwapInputData = z.input<typeof SwapInput>;
 
 export async function swapTag(deps: Deps, visitId: number, raw: SwapInputData, ctx: OpContext) {
   const input = parse(SwapInput, raw);
   const { clientKey: key, ...payload } = input;
-  await runIdempotent(deps, { key, opType: 'tag_swap', requestHash: hashRequest({ visitId, ...payload }) }, async (tx) => {
+  const requestHash = hashRequest({ visitId, ...hashedPayload(payload, ['lostFee', 'vipGrantId']) });
+  await runIdempotent(deps, { key, opType: 'tag_swap', requestHash }, async (tx) => {
     const at = ctx.at ?? new Date();
+    const rules = await loadFrontdeskRules(tx);
     const [peek] = await tx<{ tagId: number; code: string }[]>`
       SELECT v.tag_id, t.code FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE v.id = ${visitId}`;
     if (!peek) throw notFound('来访记录不存在');
     if (peek.code === input.toTagCode) throw badRequest('新手牌与原手牌相同');
-    // ① 手牌（新旧两张，id 升序）→ ③ 来访
+    // ① 手牌（新旧两张，id 升序）→ ③ 来访 → 账单（收丢牌赔偿时）→ 授权凭据
     const tags = await lockTagsByCode(tx, [peek.code, input.toTagCode]);
     const visit = (await lockVisits(tx, [visitId])).get(visitId)!;
     assertOpen(visit);
@@ -205,25 +245,59 @@ export async function swapTag(deps: Deps, visitId: number, raw: SwapInputData, c
     const busy = await openVisitsOnTags(tx, [to.id]);
     if (busy.length) throw conflict('TAG_OCCUPIED', `手牌 ${to.code} 已在店（来访 ${busy[0]!.visitNo}），请换一张空闲手牌`);
 
+    // VIP 柜：按这位客人的会员等级核对
+    let shortfalls: ReturnType<typeof vipShortfalls> = [];
+    if (to.kind === 'vip') {
+      const levels = await memberLevels(tx, visit.memberId ? [visit.memberId] : [], rules);
+      const [m] = visit.memberId ? await tx<{ name: string }[]>`SELECT name FROM members WHERE id = ${visit.memberId}` : [];
+      shortfalls = vipShortfalls([{ tag: to, memberId: visit.memberId, memberName: m?.name ?? null }], levels);
+      assertVipAllowed(shortfalls, levels, rules, input.vipGrantId);
+    }
+    if (input.lostFee !== null) {
+      if (rules.lostTagFeeCents <= 0) throw unprocessable('LOST_FEE_DISABLED', '当前规则不收丢牌赔偿，请取消「收取丢牌赔偿」后重试');
+      if (input.lostFee !== rules.lostTagFeeCents) {
+        throw conflict('PRICE_CHANGED', `丢牌赔偿刚刚调整为 ${formatYuan(rules.lostTagFeeCents)}，请核对后重新确认`, { fee: rules.lostTagFeeCents });
+      }
+    }
+    const date = await businessDate(tx, deps, at);
+
     await tx`UPDATE visits SET tag_id = ${to.id} WHERE id = ${visit.id}`;
+    if (input.lostFee !== null) {
+      // 丢牌赔偿作为挂账明细（来源「其他」），与本次换牌共用操作编号
+      const name = `手牌丢失赔偿（${from.code}）`;
+      await tx`SELECT id FROM bills WHERE id = ${visit.billId} FOR UPDATE`;
+      await tx`
+        INSERT INTO bill_lines (bill_id, source, item_id, name, unit_price, quantity, amount, post_key, business_date, posted_by, posted_at)
+        VALUES (${visit.billId}, 'other', NULL, ${name}, ${input.lostFee}, 1, ${input.lostFee}, ${key}, ${date}, ${ctx.actor.id}, ${at})`;
+      await tx`UPDATE bills SET amount_cents = amount_cents + ${input.lostFee}, line_count = line_count + 1 WHERE id = ${visit.billId}`;
+    }
+    const override = await consumeVipShortfalls(tx, shortfalls, input.vipGrantId, ctx.actor, `tag_swap:${key}`);
     const [change] = await tx<{ id: number }[]>`
-      INSERT INTO visit_tag_changes (visit_id, from_tag_id, to_tag_id, reason, old_tag_locked, operator_id, created_at)
-      VALUES (${visit.id}, ${from.id}, ${to.id}, ${input.reason}, ${input.lockOld}, ${ctx.actor.id}, ${at})
+      INSERT INTO visit_tag_changes (visit_id, from_tag_id, to_tag_id, reason, old_tag_locked, operator_id, created_at, vip_override_by)
+      VALUES (${visit.id}, ${from.id}, ${to.id}, ${input.reason}, ${input.lockOld}, ${ctx.actor.id}, ${at}, ${override?.approverId ?? null})
       RETURNING id`;
     if (input.lockOld) {
       await tx`
         UPDATE hand_tags SET locked = true, lock_reason = ${input.reason}, locked_by = ${ctx.actor.id}, locked_at = ${at}, updated_at = now()
         WHERE id = ${from.id}`;
     }
-    await saveKey(tx, key, 'tag_swap', hashRequest({ visitId, ...payload }), change!.id, ctx.actor.id);
+    await saveKey(tx, key, 'tag_swap', requestHash, change!.id, ctx.actor.id);
     await writeAudit(tx, {
       staffId: ctx.actor.id,
       action: 'frontdesk_swap',
       targetType: 'visit',
       targetId: visit.id,
-      detail: { visitNo: visit.visitNo, from: from.code, to: to.code, reason: input.reason, lockOld: input.lockOld },
+      detail: {
+        visitNo: visit.visitNo,
+        from: from.code,
+        to: to.code,
+        reason: input.reason,
+        lockOld: input.lockOld,
+        ...(input.lostFee !== null ? { lostFee: input.lostFee } : {}),
+        ...(override ? { vipOverride: { approverId: override.approverId, approverName: override.approverName, grantId: input.vipGrantId } } : {}),
+      },
       ip: ctx.ip,
-      businessDate: await businessDate(tx, deps, at),
+      businessDate: date,
     });
     return change!.id;
   });
@@ -366,7 +440,7 @@ export async function getBoard(db: Db): Promise<FrontdeskBoard> {
     memberId: number | null; memberName: string | null; guestLabel: string | null; groupId: number | null;
     groupNo: string | null; groupOpenCount: number; amountCents: number | null; lineCount: number | null;
   })[]>`
-    SELECT t.id, t.code, t.zone, t.locked, t.lock_reason, t.active, t.is_synthetic,
+    SELECT t.id, t.code, t.zone, t.kind, t.vip_level, t.locked, t.lock_reason, t.active, t.is_synthetic,
            v.id AS visit_id, v.visit_no, v.bill_id, v.checked_in_at, v.member_id, m.name AS member_name, v.guest_label,
            v.group_id, g.group_no,
            CASE WHEN v.group_id IS NULL THEN 0 ELSE count(v.id) OVER (PARTITION BY v.group_id) END AS group_open_count,
@@ -377,11 +451,14 @@ export async function getBoard(db: Db): Promise<FrontdeskBoard> {
     LEFT JOIN visit_groups g ON g.id = v.group_id
     LEFT JOIN bills b ON b.id = v.bill_id
     WHERE t.active OR v.id IS NOT NULL
-    ORDER BY CASE t.zone WHEN 'male' THEN 0 WHEN 'female' THEN 1 ELSE 2 END, length(t.code), t.code`;
+    ORDER BY CASE t.zone WHEN 'male' THEN 0 WHEN 'female' THEN 1 ELSE 2 END, t.kind = 'vip', t.vip_level,
+             regexp_replace(t.code, '[0-9]', '', 'g'), length(t.code), t.code`;
   const tags = rows.map((r) => ({
     id: r.id,
     code: r.code,
     zone: r.zone,
+    kind: r.kind,
+    vipLevel: r.vipLevel,
     locked: r.locked,
     lockReason: r.lockReason,
     active: r.active,
@@ -404,7 +481,7 @@ export async function getBoard(db: Db): Promise<FrontdeskBoard> {
       : null,
   }));
   const inStore = tags.filter((t) => t.visit);
-  const inStoreByZone = { male: 0, female: 0, child: 0 } as Record<Zone, number>;
+  const inStoreByZone: Record<TagZone, number> = { male: 0, female: 0, child: 0 };
   for (const t of inStore) inStoreByZone[t.zone] += 1;
   const [now] = await db<{ now: string }[]>`SELECT now() AS now`;
   return {
@@ -424,20 +501,22 @@ export async function getBoard(db: Db): Promise<FrontdeskBoard> {
 
 export async function getVisit(db: Db, id: number): Promise<VisitDetail> {
   const [v] = await db<{
-    id: number; visitNo: string; status: VisitDetail['status']; zone: Zone; guestLabel: string; businessDate: string;
+    id: number; visitNo: string; status: VisitDetail['status']; zone: TagZone; guestLabel: string; businessDate: string;
     checkedInAt: string; checkedInById: number; checkedInByName: string; closedAt: string | null; closeReason: string | null;
     closedByName: string | null; memberId: number | null; groupId: number | null; billId: number; billNo: string;
     billStatus: VisitDetail['status']; amountCents: number; lineCount: number;
-    tagId: number; tagCode: string; tagZone: Zone; tagLocked: boolean; tagLockReason: string | null; tagActive: boolean; tagSynthetic: boolean;
+    tagId: number; tagCode: string; tagZone: TagZone; tagKind: VisitDetail['tag']['kind']; tagVipLevel: number | null;
+    tagLocked: boolean; tagLockReason: string | null; tagActive: boolean; tagSynthetic: boolean; vipOverrideByName: string | null;
   }[]>`
     SELECT v.id, v.visit_no, v.status, v.zone, v.guest_label, v.business_date, v.checked_in_at,
            v.checked_in_by AS checked_in_by_id, s.display_name AS checked_in_by_name, v.closed_at, v.close_reason,
            cs.display_name AS closed_by_name, v.member_id, v.group_id,
            b.id AS bill_id, b.bill_no, b.status AS bill_status, b.amount_cents, b.line_count,
-           t.id AS tag_id, t.code AS tag_code, t.zone AS tag_zone, t.locked AS tag_locked, t.lock_reason AS tag_lock_reason,
-           t.active AS tag_active, t.is_synthetic AS tag_synthetic
+           t.id AS tag_id, t.code AS tag_code, t.zone AS tag_zone, t.kind AS tag_kind, t.vip_level AS tag_vip_level,
+           t.locked AS tag_locked, t.lock_reason AS tag_lock_reason, t.active AS tag_active, t.is_synthetic AS tag_synthetic,
+           os.display_name AS vip_override_by_name
     FROM visits v JOIN bills b ON b.id = v.bill_id JOIN hand_tags t ON t.id = v.tag_id
-    JOIN staff s ON s.id = v.checked_in_by LEFT JOIN staff cs ON cs.id = v.closed_by
+    JOIN staff s ON s.id = v.checked_in_by LEFT JOIN staff cs ON cs.id = v.closed_by LEFT JOIN staff os ON os.id = v.vip_override_by
     WHERE v.id = ${id}`;
   if (!v) throw notFound('来访记录不存在');
 
@@ -445,6 +524,7 @@ export async function getVisit(db: Db, id: number): Promise<VisitDetail> {
     ? await db<NonNullable<VisitDetail['member']>[]>`
         SELECT id, member_no, name, phone, gender, status, principal_balance, bonus_balance FROM members WHERE id = ${v.memberId}`
     : [];
+  const memberLevel = v.memberId ? ((await memberLevels(db, [v.memberId], await loadFrontdeskRules(db))).get(v.memberId) ?? null) : null;
 
   const lines = await db<VisitDetail['lines']>`
     SELECT l.id, l.source, l.item_id, l.name, l.unit_price, l.quantity, l.amount, l.status, l.post_key, l.business_date,
@@ -470,17 +550,24 @@ export async function getVisit(db: Db, id: number): Promise<VisitDetail> {
   }
 
   const history: VisitHistoryEvent[] = [
-    { at: v.checkedInAt, kind: 'checkin', text: `开牌 · ${ZONE_LABELS[v.zone].title}`, operatorName: v.checkedInByName },
+    {
+      at: v.checkedInAt,
+      kind: 'checkin',
+      text: `开牌 · ${ZONE_LABELS[v.zone].title}${v.vipOverrideByName ? `（VIP 柜由${v.vipOverrideByName}当场授权）` : ''}`,
+      operatorName: v.checkedInByName,
+    },
   ];
-  const swaps = await db<{ createdAt: string; fromCode: string; toCode: string; reason: string; oldTagLocked: boolean; operatorName: string }[]>`
-    SELECT c.created_at, f.code AS from_code, t.code AS to_code, c.reason, c.old_tag_locked, s.display_name AS operator_name
+  const swaps = await db<{ createdAt: string; fromCode: string; toCode: string; reason: string; oldTagLocked: boolean; operatorName: string; overrideByName: string | null }[]>`
+    SELECT c.created_at, f.code AS from_code, t.code AS to_code, c.reason, c.old_tag_locked, s.display_name AS operator_name,
+           os.display_name AS override_by_name
     FROM visit_tag_changes c JOIN hand_tags f ON f.id = c.from_tag_id JOIN hand_tags t ON t.id = c.to_tag_id
-    JOIN staff s ON s.id = c.operator_id WHERE c.visit_id = ${id} ORDER BY c.id`;
+    JOIN staff s ON s.id = c.operator_id LEFT JOIN staff os ON os.id = c.vip_override_by
+    WHERE c.visit_id = ${id} ORDER BY c.id`;
   for (const s of swaps) {
     history.push({
       at: s.createdAt,
       kind: 'swap',
-      text: `换牌 ${s.fromCode} → ${s.toCode}（${s.reason}${s.oldTagLocked ? `，${s.fromCode} 已锁定` : ''}）`,
+      text: `换牌 ${s.fromCode} → ${s.toCode}（${s.reason}${s.oldTagLocked ? `，${s.fromCode} 已锁定` : ''}${s.overrideByName ? `，VIP 柜由${s.overrideByName}当场授权` : ''}）`,
       operatorName: s.operatorName,
     });
   }
@@ -520,8 +607,20 @@ export async function getVisit(db: Db, id: number): Promise<VisitDetail> {
     checkedInByName: v.checkedInByName,
     closedAt: v.closedAt,
     closeReason: v.closeReason,
-    tag: { id: v.tagId, code: v.tagCode, zone: v.tagZone, locked: v.tagLocked, lockReason: v.tagLockReason, active: v.tagActive, isSynthetic: v.tagSynthetic },
+    tag: {
+      id: v.tagId,
+      code: v.tagCode,
+      zone: v.tagZone,
+      kind: v.tagKind,
+      vipLevel: v.tagVipLevel,
+      locked: v.tagLocked,
+      lockReason: v.tagLockReason,
+      active: v.tagActive,
+      isSynthetic: v.tagSynthetic,
+    },
     member: member ?? null,
+    memberLevel,
+    vipOverrideByName: v.vipOverrideByName,
     bill: { id: v.billId, billNo: v.billNo, status: v.billStatus, amountCents: v.amountCents, lineCount: v.lineCount },
     lines,
     group,
@@ -534,7 +633,7 @@ export async function getVisit(db: Db, id: number): Promise<VisitDetail> {
 export async function previewBills(db: Db, visitIds: number[]): Promise<PreviewBill> {
   const ids = [...new Set(visitIds)];
   if (ids.length === 0) throw badRequest('请至少选择一张手牌');
-  const visits = await db<{ visitId: number; visitNo: string; tagCode: string; zone: Zone; memberName: string | null; guestLabel: string; checkedInAt: string; amountCents: number; status: string; billId: number }[]>`
+  const visits = await db<{ visitId: number; visitNo: string; tagCode: string; zone: TagZone; memberName: string | null; guestLabel: string; checkedInAt: string; amountCents: number; status: string; billId: number }[]>`
     SELECT v.id AS visit_id, v.visit_no, t.code AS tag_code, v.zone, m.name AS member_name, v.guest_label, v.checked_in_at,
            b.amount_cents, v.status, v.bill_id
     FROM visits v JOIN hand_tags t ON t.id = v.tag_id JOIN bills b ON b.id = v.bill_id LEFT JOIN members m ON m.id = v.member_id

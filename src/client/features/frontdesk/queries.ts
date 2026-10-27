@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { FrontdeskBoard, FrontdeskCheck, PreviewBill, VisitDetail } from '@shared/frontdesk';
+import type { FrontdeskBoard, FrontdeskCheck, MemberLevel, PreviewBill, VisitDetail } from '@shared/frontdesk';
 import { api } from '../../lib/api';
 
 export const fk = {
@@ -34,6 +34,14 @@ export const usePreview = (ids: number[], enabled: boolean) =>
     queryFn: () => api.get<PreviewBill>(`/api/frontdesk/preview?ids=${ids.join(',')}`),
     enabled: enabled && ids.length > 0,
     placeholderData: keepPreviousData,
+  });
+
+/** 会员按当前规则口径的等级（发牌、换牌到 VIP 柜时核对） */
+export const useMemberLevel = (memberId: number | null) =>
+  useQuery({
+    queryKey: ['frontdesk', 'member-level', memberId ?? 0],
+    queryFn: () => api.get<MemberLevel>(`/api/frontdesk/members/${memberId}/level`),
+    enabled: !!memberId,
   });
 
 export const useFrontdeskChecks = (enabled: boolean) =>

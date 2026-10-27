@@ -7,7 +7,7 @@
 
 import { createHash } from 'node:crypto';
 import { businessDateOf } from '@shared/business-date';
-import { DEFAULT_FRONTDESK_RULES, type FrontdeskRules, type Zone, ZONE_LABELS } from '@shared/frontdesk';
+import { DEFAULT_FRONTDESK_RULES, type FrontdeskRules, type TagKind, type TagZone, ZONE_LABELS } from '@shared/frontdesk';
 import { can } from '@shared/permissions';
 import { isUniqueViolation, type Db, type Tx } from '../../db';
 import type { Actor, Deps } from '../../lib/context';
@@ -105,7 +105,9 @@ export function mapUniqueViolation(error: unknown): unknown {
 export interface LockedTag {
   id: number;
   code: string;
-  zone: Zone;
+  zone: TagZone;
+  kind: TagKind;
+  vipLevel: number | null;
   locked: boolean;
   lockReason: string | null;
   active: boolean;
@@ -116,7 +118,7 @@ export async function lockTagsByCode(tx: Tx, codes: string[]): Promise<Map<strin
   const unique = [...new Set(codes)];
   if (unique.length === 0) return new Map();
   const rows = await tx<LockedTag[]>`
-    SELECT id, code, zone, locked, lock_reason, active FROM hand_tags
+    SELECT id, code, zone, kind, vip_level, locked, lock_reason, active FROM hand_tags
     WHERE code IN ${tx(unique)} ORDER BY id FOR UPDATE`;
   const byCode = new Map(rows.map((r) => [r.code, r]));
   const missing = unique.filter((c) => !byCode.has(c));
@@ -125,7 +127,8 @@ export async function lockTagsByCode(tx: Tx, codes: string[]): Promise<Map<strin
 }
 
 /** 手牌可以发给这位宾客吗：启用、未锁定、分区一致 */
-export function assertTagIssuable(tag: LockedTag, zone: Zone) {
+/** zone 为宾客分区；旧的儿童区来访（迁移 008 之前）换牌时仍按原分区核对 */
+export function assertTagIssuable(tag: LockedTag, zone: TagZone) {
   if (!tag.active) throw unprocessable('TAG_INACTIVE', `手牌 ${tag.code} 已停用，请换一张`);
   if (tag.locked) throw unprocessable('TAG_LOCKED', `手牌 ${tag.code} 已锁定（${tag.lockReason}），请换一张`);
   if (tag.zone !== zone) {
@@ -149,7 +152,7 @@ export interface LockedVisit {
   visitNo: string;
   billId: number;
   tagId: number;
-  zone: Zone;
+  zone: TagZone;
   memberId: number | null;
   groupId: number | null;
   status: 'open' | 'settled' | 'cancelled';

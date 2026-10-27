@@ -1,40 +1,59 @@
 {
-  "description": "seed-frontdesk-demo 的固定预期结果（S2 / G2 验收用）。金额单位为分；时间相对执行时刻生成，单号随营业日变化，不作为核对项。",
+  "description": "seed-frontdesk-demo 的固定预期结果（Batch 2.2 起建在店主 2026-10-27 的真实柜号清单上）。金额单位为分；时间相对执行时刻生成，单号随营业日变化，不作为核对项。",
   "tags": {
-    "male": { "total": 40, "range": "A001–A040" },
-    "female": { "total": 40, "range": "B001–B040" },
-    "child": { "total": 12, "range": "C001–C012" },
-    "locked": { "A021": "手牌丢失", "A039": "手牌丢失", "B040": "柜锁故障" }
+    "total": 747,
+    "source": "店主《男女宾衣柜编码》（2026-10-27），与 docs/data/hand-tags-2026-10-27.csv 逐行一致；演示库里标记为合成",
+    "male": { "total": 369, "normal": { "A": 84, "B": 84, "C": 64, "D": 58 }, "vip": { "1": 35, "2": 13, "3": 10, "4": 14, "5": 7 } },
+    "female": { "total": 378, "normal": { "A": 136, "B": 40, "C": 64, "D": 104 }, "vip": { "2": 19, "3": 10, "4": 5 } },
+    "locked": { "A8090": "手牌丢失", "A8185": "手牌丢失", "D6750": "柜锁故障" }
   },
   "inStore": {
-    "count": 11,
-    "byZone": { "male": 5, "female": 4, "child": 2 },
-    "unsettledCents": 129600,
+    "count": 13,
+    "byZone": { "male": 7, "female": 6, "child": 0 },
+    "unsettledCents": 202000,
+    "lineCount": 17,
     "groups": 2
   },
   "visits": [
-    { "tag": "A003", "zone": "male", "guest": "王先生", "member": null, "amountCents": 17200, "lines": ["汤泉入场 · 成人 ×1", "柚子气泡水 ×2"], "scenario": "散客单人挂账" },
-    { "tag": "A008", "zone": "male", "guest": "", "member": "韩松（演示）", "amountCents": 34600, "lines": ["精油按摩 60 分钟 ×1", "山野简餐 ×1"], "scenario": "会员挂账：只显示余额，不扣款" },
-    { "tag": "A015", "zone": "male", "guest": "爸爸", "member": null, "group": "family", "amountCents": 12800, "lines": ["汤泉入场 · 成人 ×1"], "scenario": "一家三口一次接待，自动建同行组" },
-    { "tag": "B015", "zone": "female", "guest": "妈妈", "member": null, "group": "family", "amountCents": 18600, "lines": ["汤泉入场 · 成人 ×1", "搓背 ×1"] },
-    { "tag": "C003", "zone": "child", "guest": "孩子", "member": null, "group": "family", "amountCents": 6800, "lines": ["汤泉入场 · 儿童 ×1"] },
-    { "tag": "B021", "zone": "female", "guest": "", "member": "乔木（演示）", "group": "friends", "amountCents": 16800, "lines": ["足疗 45 分钟 ×1"], "scenario": "朋友后到：B022 在店内加入 B021 的同行" },
-    { "tag": "B022", "zone": "female", "guest": "闺蜜", "member": null, "group": "friends", "amountCents": 1000, "lines": ["浴服加购 ×1"] },
-    { "tag": "A022", "zone": "male", "guest": "李先生", "member": null, "amountCents": 9800, "lines": ["夜场入场 ×1"], "scenario": "原手牌 A021 丢失，换牌到 A022 并锁定 A021，账单跟人走" },
-    { "tag": "A030", "zone": "male", "guest": "赵先生", "member": null, "amountCents": 2200, "lines": ["柚子气泡水 ×1"], "voided": ["搓背 ×1（项目选错）"], "scenario": "店员在时限内作废自己登记错的明细" },
-    { "tag": "B030", "zone": "female", "guest": "夜场客", "member": null, "amountCents": 9800, "lines": ["夜场入场 ×1"], "scenario": "在店超过 6 小时，状态板柚黄提示" },
-    { "tag": "C010", "zone": "child", "guest": "小朋友", "member": null, "amountCents": 0, "lines": [], "scenario": "刚开牌、未挂账" }
+    { "tag": "8001", "zone": "male", "guest": "", "member": "韩松（演示）", "amountCents": 34600, "lines": ["精油按摩 60 分钟 ×1", "山野简餐 ×1"], "scenario": "第 1 级会员用第 1 级 VIP 柜；会员挂账只显示余额，不扣款" },
+    { "tag": "A8062", "zone": "male", "guest": "王先生", "member": null, "amountCents": 17200, "lines": ["汤泉入场 · 成人 ×1", "柚子气泡水 ×2"], "scenario": "散客单人挂账" },
+    { "tag": "A8075", "zone": "male", "guest": "爸爸", "member": null, "group": "family", "amountCents": 12800, "lines": ["汤泉入场 · 成人 ×1"], "scenario": "一家三口一次接待，自动建同行组" },
+    { "tag": "A6010", "zone": "female", "guest": "妈妈", "member": null, "group": "family", "amountCents": 18600, "lines": ["汤泉入场 · 成人 ×1", "搓背 ×1"] },
+    { "tag": "A8076", "zone": "male", "guest": "孩子", "member": null, "group": "family", "amountCents": 6800, "lines": ["汤泉入场 · 儿童 ×1"], "scenario": "不设儿童区：孩子跟爸爸进男宾区、用男宾牌，挂儿童票" },
+    { "tag": "A8091", "zone": "male", "guest": "李先生", "member": null, "amountCents": 29800, "lines": ["夜场入场 ×1", "手牌丢失赔偿（A8090） ×1"], "scenario": "A8090 丢失：换到 A8091 并锁定 A8090，挂丢牌赔偿 200 元，账单跟人走" },
+    { "tag": "A6020", "zone": "female", "guest": "", "member": "乔木（演示）", "group": "friends", "amountCents": 16800, "lines": ["足疗 45 分钟 ×1"], "scenario": "朋友后到：A6021 在店内加入 A6020 的同行" },
+    { "tag": "A6021", "zone": "female", "guest": "闺蜜", "member": null, "group": "friends", "amountCents": 1000, "lines": ["浴服加购 ×1"] },
+    { "tag": "A8100", "zone": "male", "guest": "赵先生", "member": null, "amountCents": 2200, "lines": ["柚子气泡水 ×1"], "voided": ["搓背 ×1（项目选错）"], "scenario": "店员在 15 分钟时限内作废自己登记错的明细" },
+    { "tag": "B6215", "zone": "female", "guest": "夜场客", "member": null, "amountCents": 9800, "lines": ["夜场入场 ×1"], "scenario": "在店超过 6 小时，状态板柚黄提示" },
+    { "tag": "B6216", "zone": "female", "guest": "刚到的客人", "member": null, "amountCents": 0, "lines": [], "scenario": "刚开牌、未挂账" },
+    { "tag": "9058", "zone": "male", "guest": "", "member": "周董（演示）", "amountCents": 35600, "lines": ["精油按摩 60 分钟 ×1", "搓背 ×1"], "scenario": "累计充值 12 万的第 3 级会员用第 3 级 VIP 柜" },
+    { "tag": "9001", "zone": "female", "guest": "", "member": "林女士（演示）", "amountCents": 16800, "lines": ["足疗 45 分钟 ×1"], "scenario": "累计充值正好 5 万（第 2 级门槛）的会员用女宾第 2 级 VIP 柜" }
   ],
   "groups": {
-    "family": { "tags": ["A015", "B015", "C003"], "openAmountCents": 38200 },
-    "friends": { "tags": ["B021", "B022"], "openAmountCents": 17800 }
+    "family": { "tags": ["A8075", "A6010", "A8076"], "openAmountCents": 38200 },
+    "friends": { "tags": ["A6020", "A6021"], "openAmountCents": 17800 }
   },
-  "cancelled": [{ "tag": "A025", "reason": "开错手牌", "note": "撤销后 A025 恢复空闲，来访记录保留" }],
+  "swap": { "from": "A8090", "to": "A8091", "reason": "手牌丢失", "lostFeeCents": 20000, "oldTagLocked": true },
+  "cancelled": [{ "tag": "A8095", "reason": "开错手牌", "note": "撤销后 A8095 恢复空闲，来访记录保留" }],
   "members": {
-    "韩松（演示）": { "phone": "19900008801", "principalBalance": 100000, "bonusBalance": 15000 },
-    "乔木（演示）": { "phone": "19900008802", "principalBalance": 50000, "bonusBalance": 5000 }
+    "韩松（演示）": { "phone": "19900008801", "principalBalance": 100000, "bonusBalance": 15000, "cumulativeRechargeCents": 100000, "level": 1 },
+    "乔木（演示）": { "phone": "19900008802", "principalBalance": 50000, "bonusBalance": 5000, "cumulativeRechargeCents": 50000, "level": 1 },
+    "周董（演示）": { "phone": "19900008803", "principalBalance": 12000000, "bonusBalance": 0, "cumulativeRechargeCents": 12000000, "level": 3 },
+    "林女士（演示）": { "phone": "19900008804", "principalBalance": 5000000, "bonusBalance": 0, "cumulativeRechargeCents": 5000000, "level": 2 }
   },
-  "walletRule": "S2 全部前台操作后，以上两位会员余额与充值后一致；consumptions / reversals 中没有任何前台产生的记录",
+  "vip": [
+    { "tag": "8001", "zone": "male", "tagLevel": 1, "member": "韩松（演示）", "memberLevel": 1 },
+    { "tag": "9058", "zone": "male", "tagLevel": 3, "member": "周董（演示）", "memberLevel": 3 },
+    { "tag": "9001", "zone": "female", "tagLevel": 2, "member": "林女士（演示）", "memberLevel": 2 }
+  ],
+  "rules": {
+    "selfVoidMinutes": 15,
+    "lostTagFeeCents": 20000,
+    "vipLevelBasis": "recharge",
+    "vipLevelThresholds": [0, 5000000, 10000000, 20000000, 30000000],
+    "vipOverrideEnabled": false
+  },
+  "walletRule": "全部前台操作后，以上四位会员余额与充值后一致；consumptions / reversals 中没有任何前台产生的记录",
   "checks": ["bill_amount_vs_lines", "visit_vs_bill_status", "open_visit_tags", "group_status"],
-  "accounts": { "owner": "linlan", "clerk": "xiaozhou", "password": "yuzu2026" }
+  "accounts": { "owner": "linlan", "clerk": "xiaozhou", "dutyManager": "zhangjl", "password": "yuzu2026" }
 }

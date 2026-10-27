@@ -9,6 +9,8 @@ import { Badge, Card, Skeleton } from '../../components/ui';
 const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 'clay' | 'lake' | 'yuzu' | 'ember' }> = {
   login: { label: '登录', tone: 'neutral' },
   login_failed: { label: '登录失败', tone: 'clay' },
+  auth_granted: { label: '当场授权', tone: 'ember' },
+  auth_failed: { label: '授权失败', tone: 'clay' },
   logout: { label: '退出', tone: 'neutral' },
   password_changed: { label: '修改密码', tone: 'neutral' },
   staff_created: { label: '添加员工', tone: 'pine' },
@@ -35,6 +37,7 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   frontdesk_void: { label: '作废明细', tone: 'clay' },
   frontdesk_abandon: { label: '作废待确认操作', tone: 'ember' },
   hand_tags_created: { label: '建手牌', tone: 'neutral' },
+  hand_tags_imported: { label: '导入柜号清单', tone: 'ember' },
   hand_tag_locked: { label: '锁定手牌', tone: 'ember' },
   hand_tag_unlocked: { label: '解锁手牌', tone: 'neutral' },
   hand_tag_updated: { label: '修改手牌', tone: 'neutral' },
@@ -48,6 +51,16 @@ function describe(detail: Record<string, unknown>): string {
   if (typeof detail.from === 'string' && typeof detail.to === 'string') parts.push(`${detail.from} → ${detail.to}`);
   if (typeof detail.code === 'string') parts.push(`手牌 ${detail.code}`);
   if (typeof detail.username === 'string') parts.push(`账号 ${detail.username}`);
+  // 当场授权：授权人与授权的柜
+  if (typeof detail.approverName === 'string') parts.push(`授权人 ${detail.approverName}`);
+  const scope = detail.scope as { tags?: { code: string }[] } | undefined;
+  if (Array.isArray(scope?.tags)) parts.push(`VIP 柜 ${scope.tags.map((t) => t.code).join('、')}`);
+  const vip = detail.vipOverride as { approverName?: string } | undefined;
+  if (vip?.approverName) parts.push(`VIP 柜由${vip.approverName}当场授权`);
+  if (typeof detail.lostFee === 'number') parts.push(`丢牌赔偿 ¥${(detail.lostFee / 100).toFixed(2)}`);
+  if (typeof detail.total === 'number' && typeof detail.created === 'number') {
+    parts.push(`清单 ${detail.total} 个：新建 ${detail.created} · 更新 ${detail.updated ?? 0} · 停用 ${detail.deactivated ?? 0}`);
+  }
   if (typeof detail.name === 'string') parts.push(detail.name);
   if (typeof detail.reason === 'string') parts.push(detail.reason);
   if (typeof detail.note === 'string' && detail.note) parts.push(detail.note);

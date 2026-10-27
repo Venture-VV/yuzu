@@ -3,6 +3,8 @@ import type { Db } from '../db';
 export type AuditAction =
   | 'login'
   | 'login_failed'
+  | 'auth_granted'
+  | 'auth_failed'
   | 'logout'
   | 'password_changed'
   | 'staff_created'
@@ -34,6 +36,7 @@ export type AuditAction =
   | 'frontdesk_void'
   | 'frontdesk_abandon'
   | 'hand_tags_created'
+  | 'hand_tags_imported'
   | 'hand_tag_locked'
   | 'hand_tag_unlocked'
   | 'hand_tag_updated';

@@ -1,25 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CircleAlert, CircleCheck, Link2, Plus, Search, Trash2, UserRound, Users } from 'lucide-react';
+import { CircleAlert, CircleCheck, Crown, Link2, Plus, Search, ShieldCheck, Trash2, UserRound, Users } from 'lucide-react';
 import {
   matchTags,
   normalizeTagCode,
   uniqueTagMatch,
+  VIP_LEVEL_BASIS_LABELS,
   ZONE_LABELS,
   ZONES,
   type BoardTag,
   type CheckinResult,
+  type FrontdeskRules,
   type Zone,
 } from '@shared/frontdesk';
+import { grantCovers, type IssuedGrant, type VipGrantTag } from '@shared/grants';
 import { maskPhone } from '@shared/labels';
 import type { MemberSummary } from '@shared/types';
 import { useMembers } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
-import { cn } from '../../lib/utils';
+import { cn, formatTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Badge, Button, Input, Notice, Segmented } from '../../components/ui';
-import { GroupMark, ZONE_STYLE } from './parts';
+import { AuthorizeDialog } from './AuthorizeDialog';
+import { GroupMark, VipChip, ZONE_STYLE } from './parts';
 import { PendingPanel, useFrontdeskOp } from './pending';
+import { useMemberLevel } from './queries';
 
 export interface CheckinPrefill {
   tagCode?: string;
@@ -35,6 +40,9 @@ interface Row {
 }
 
 type TagStatus = { ok: true; tag: BoardTag } | { ok: false; message: string; choices?: BoardTag[] } | null;
+
+/** 授权或等级相关的错误：清掉已有授权，请经理按当前内容重新授权 */
+const GRANT_ERRORS = ['VIP_AUTH_REQUIRED', 'GRANT_INVALID', 'GRANT_USED', 'GRANT_EXPIRED', 'GRANT_SCOPE'];
 
 const issuable = (t: BoardTag) => t.active && !t.locked && !t.visit;
 
@@ -70,12 +78,14 @@ let rowSeq = 1;
 export function CheckinDialog({
   open,
   tags,
+  rules,
   prefill,
   onClose,
   onDone,
 }: {
   open: boolean;
   tags: BoardTag[];
+  rules: FrontdeskRules | undefined;
   prefill: CheckinPrefill;
   onClose: () => void;
   onDone: (result: CheckinResult) => void;
@@ -86,6 +96,9 @@ export function CheckinDialog({
   const [memberQ, setMemberQ] = useState('');
   const [member, setMember] = useState<MemberSummary | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
+  /** 当场授权（值班经理 / 店总签发，5 分钟内一次有效）；只在有客人等级不够、要用 VIP 柜时使用 */
+  const [grant, setGrant] = useState<IssuedGrant | null>(null);
+  const [authOpen, setAuthOpen] = useState(false);
   const firstInput = useRef<HTMLInputElement>(null);
   const members = useMembers(guestType === 'member' && !member ? memberQ.trim() : '');
   // 上一笔接待结果待确认时，先处理那一笔再发新牌（避免同一批客人被开两次牌）
@@ -102,6 +115,7 @@ export function CheckinDialog({
     setMemberQ('');
     setMember(null);
     setRows([{ id: rowSeq++, zone: prefill.zone ?? 'male', code: prefill.tagCode ?? '', label: '' }]);
+    setGrant(null);
     op.clearError();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -112,7 +126,32 @@ export function CheckinDialog({
     const others = new Set(rows.filter((x) => x.id !== r.id).map((x) => normalizeTagCode(x.code)).filter(Boolean));
     return statusOf(tags, r.code, r.zone, others);
   });
-  const ready = rows.length > 0 && statuses.every((s) => s?.ok) && (guestType === 'walkin' || !!member);
+  // VIP 柜：会员本人（第 1 位）按会员等级，其他同行与散客为 0 级
+  const level = useMemberLevel(guestType === 'member' && member ? member.id : null);
+  const guestLevelOf = (i: number): number | null => (i === 0 && guestType === 'member' && member ? (level.data?.level ?? null) : 0);
+  const vipRows = rows.map((r, i) => {
+    const s = statuses[i];
+    if (!s?.ok || s.tag.kind !== 'vip') return null;
+    return { code: s.tag.code, memberId: i === 0 && guestType === 'member' && member ? member.id : null, tagLevel: s.tag.vipLevel!, guestLevel: guestLevelOf(i) };
+  });
+  const levelPending = vipRows.some((v) => v && v.guestLevel === null);
+  const short = vipRows.filter((v): v is NonNullable<typeof v> => !!v && v.guestLevel !== null && v.guestLevel < v.tagLevel);
+  const needs: VipGrantTag[] = short.map(({ code, memberId }) => ({ code, memberId }));
+  const overrideOn = !!rules?.vipOverrideEnabled;
+  const grantOk = needs.length === 0 || (!!grant && grantCovers(grant.scope, needs) && new Date(grant.expiresAt).getTime() > Date.now());
+  const ready =
+    rows.length > 0 &&
+    statuses.every((s) => s?.ok) &&
+    (guestType === 'walkin' || !!member) &&
+    !levelPending &&
+    (needs.length === 0 || (overrideOn && grantOk));
+  const guestText = (v: { memberId: number | null; guestLevel: number | null }) =>
+    v.memberId && member ? `会员「${member.name}」（第 ${v.guestLevel} 级）` : '散客 / 同行客人';
+  const authLines = short.map((v) => `${guestText(v)} · VIP 柜 ${v.code}（第 ${v.tagLevel} 级）`);
+
+  useEffect(() => {
+    if (op.state.phase === 'error' && op.state.code && GRANT_ERRORS.includes(op.state.code)) setGrant(null);
+  }, [op.state]);
 
   // 有待确认的接待时锁定内容；每次新提交都使用新的操作编号
   const locked = op.locked;
@@ -154,9 +193,10 @@ export function CheckinDialog({
           memberId: i === 0 && member ? member.id : null,
           guestLabel: r.label.trim(),
         })),
+        vipGrantId: needs.length && grant ? grant.grantId : null,
       },
       tagCodes: codes,
-      summary: `接待 ${rows.length} 位${member ? `（会员 ${member.name}）` : ''}`,
+      summary: `接待 ${rows.length} 位${member ? `（会员 ${member.name}）` : ''}${needs.length && grant ? `，VIP 柜 ${needs.map((n) => n.code).join('、')} 由${grant.approverName}授权` : ''}`,
       amount: null,
     }));
     if (result) onDone(result);
@@ -220,6 +260,11 @@ export function CheckinDialog({
                 <p className="num text-[12px] text-ink-3">
                   {maskPhone(member.phone)} · 余额 <Money cents={member.principalBalance + member.bonusBalance} /> <span className="text-ink-4">（仅显示）</span>
                 </p>
+                {level.data && (
+                  <p className="num flex items-center gap-1 text-[12px] font-semibold text-ink-2" data-testid="checkin-member-level">
+                    <Crown className="size-3.5 text-yuzu-deep" /> 会员第 {level.data.level} 级 · {VIP_LEVEL_BASIS_LABELS[level.data.basis]} <Money cents={level.data.amountCents} />
+                  </p>
+                )}
               </div>
               {member.status === 'frozen' && <Badge tone="clay">已停用</Badge>}
               <Button size="sm" variant="ghost" onClick={() => edit(() => setMember(null))}>
@@ -259,7 +304,10 @@ export function CheckinDialog({
           {rows.map((r, i) => {
             const s = statuses[i];
             const used = new Set(rows.filter((x) => x.id !== r.id).map((x) => normalizeTagCode(x.code)));
-            const next = freeOf(r.zone, used)[0];
+            // 快捷建议只给普通柜；VIP 柜请按清单原样输入
+            const next = freeOf(r.zone, used).find((t) => t.kind === 'normal');
+            const v = vipRows[i];
+            const vipShort = !!v && v.guestLevel !== null && v.guestLevel < v.tagLevel;
             return (
               <li key={r.id} className={cn('rounded-lg border bg-card p-3', s && !s.ok ? 'border-clay/40' : 'border-line')} data-testid={`guest-row-${i}`}>
                 <div className="flex flex-wrap items-center gap-2.5">
@@ -323,9 +371,24 @@ export function CheckinDialog({
                   )}
                 </div>
                 <div className="mt-2 flex min-h-5 flex-wrap items-center gap-2 pl-[38px] text-[12.5px]">
-                  {s?.ok ? (
+                  {s?.ok && vipShort ? (
+                    <span
+                      className={cn('flex items-center gap-1 font-semibold', overrideOn ? 'text-yuzu-deep' : 'text-clay')}
+                      role={overrideOn ? undefined : 'alert'}
+                      data-testid={`vip-short-${i}`}
+                    >
+                      <VipChip level={v!.tagLevel} />
+                      {s.tag.code} 是第 {v!.tagLevel} 级 VIP 柜，{v!.memberId ? `会员第 ${v!.guestLevel} 级不够` : '散客不能使用'}
+                      {overrideOn
+                        ? grant && grantCovers(grant.scope, [{ code: v!.code, memberId: v!.memberId }])
+                          ? `；已由${grant.approverName}当场授权`
+                          : '；需值班经理或店总当场授权'
+                        : '；请换普通柜或等级相符的 VIP 柜'}
+                    </span>
+                  ) : s?.ok ? (
                     <span className="flex items-center gap-1 font-semibold text-pine">
-                      <CircleCheck className="size-3.5" /> {s.tag.code} · {ZONE_LABELS[s.tag.zone].title}牌 · 空闲可发
+                      <CircleCheck className="size-3.5" /> {s.tag.code} · {ZONE_LABELS[s.tag.zone].title}
+                      {s.tag.kind === 'vip' ? ` VIP ${s.tag.vipLevel} 级柜` : '牌'} · {v?.guestLevel === null ? '核对会员等级…' : '空闲可发'}
                     </span>
                   ) : s ? (
                     <span className="flex items-center gap-1 font-semibold text-clay" role="alert">
@@ -349,7 +412,7 @@ export function CheckinDialog({
                       用 {next.code}
                     </button>
                   )}
-                  {!next && !s?.ok && <span className="text-clay">{ZONE_LABELS[r.zone].title}区没有空闲手牌</span>}
+                  {!next && !s?.ok && <span className="text-clay">{ZONE_LABELS[r.zone].title}区没有空闲普通柜</span>}
                   {i === 0 && member && <Badge tone="pine">会员本人</Badge>}
                 </div>
               </li>
@@ -374,8 +437,36 @@ export function CheckinDialog({
           )}
         </div>
 
+        {needs.length > 0 && overrideOn && (
+          <Notice tone={grantOk ? 'success' : 'warning'} icon={<ShieldCheck className="size-4" />} title={grantOk && grant ? `已由${grant.approverName}当场授权` : 'VIP 柜需要当场授权'}>
+            <div className="flex flex-wrap items-center gap-3">
+              <span>
+                {grantOk && grant
+                  ? `授权 ${formatTime(grant.expiresAt)} 前有效，只能用于这一次发牌。`
+                  : `${authLines.join('；')}。请值班经理、店总或店主输入账号密码授权。`}
+              </span>
+              {!grantOk && (
+                <Button size="sm" variant="secondary" icon={<ShieldCheck className="size-4" />} disabled={locked} onClick={() => setAuthOpen(true)} data-testid="request-authorize">
+                  请经理授权
+                </Button>
+              )}
+            </div>
+          </Notice>
+        )}
+
         {op.state.phase === 'error' && <Notice tone="error" title={op.state.message} />}
       </div>
+      <AuthorizeDialog
+        open={authOpen}
+        tags={needs}
+        lines={authLines}
+        onClose={() => setAuthOpen(false)}
+        onGranted={(g) => {
+          setGrant(g);
+          setAuthOpen(false);
+          op.clearError();
+        }}
+      />
     </Dialog>
   );
 }

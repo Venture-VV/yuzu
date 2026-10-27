@@ -11,7 +11,7 @@ let items: { bath: number; scrub: number; tea: number; old: number };
 
 beforeAll(async () => {
   ctx = await setup();
-  for (const [zone, prefix] of [['male', 'A'], ['female', 'B'], ['child', 'C']] as const) {
+  for (const [zone, prefix] of [['male', 'A'], ['female', 'B']] as const) {
     const res = await api(ctx.app, ctx.owner, 'POST', '/api/frontdesk/tags/batch', { prefix, from: 1, to: 30, width: 3, zone });
     if (res.status !== 200) throw new Error(JSON.stringify(res.body));
   }
@@ -47,14 +47,25 @@ describe('手牌池与男女分区防呆', () => {
     expect((await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/tags/batch', { prefix: 'Z', from: 1, to: 2, width: 1, zone: 'male' })).status).toBe(403);
   });
 
-  it('男宾牌不能发给女宾；儿童牌只发儿童', async () => {
+  it('男宾牌不能发给女宾；女宾牌不能发给男宾', async () => {
     const r1 = await checkin(ctx.clerk, [{ tagCode: 'A001', zone: 'female' }]);
     expect(r1.status).toBe(422);
     expect(r1.body.error.code).toBe('ZONE_MISMATCH');
     expect(r1.body.error.message).toContain('男宾牌');
-    const r2 = await checkin(ctx.clerk, [{ tagCode: 'C001', zone: 'male' }]);
+    const r2 = await checkin(ctx.clerk, [{ tagCode: 'B001', zone: 'male' }]);
     expect(r2.body.error.code).toBe('ZONE_MISMATCH');
     expect(await openOnTag('A001')).toBe(0);
+  });
+
+  it('儿童区已取消（店主 #27）：不能再建儿童牌、不能按儿童分区接待', async () => {
+    const batch = await api(ctx.app, ctx.owner, 'POST', '/api/frontdesk/tags/batch', { prefix: 'C', from: 1, to: 2, width: 3, zone: 'child' });
+    expect(batch.status).toBe(400);
+    const r = await checkin(ctx.clerk, [{ tagCode: 'A007', zone: 'child' }]);
+    expect(r.status).toBe(400);
+    expect(r.body.error.message).toContain('男宾或女宾');
+    expect(await openOnTag('A007')).toBe(0);
+    // 数据库约束兜底（全新库没有旧儿童数据，迁移 008 已收紧）
+    await expect(ctx.sql`INSERT INTO hand_tags (code, zone) VALUES ('C999', 'child')`).rejects.toThrow(/hand_tags_zone_check/);
   });
 
   it('牌号不存在、已锁定、已停用都不能发出；牌号大小写与空格自动规范', async () => {
@@ -134,14 +145,15 @@ describe('同行绑牌', () => {
     const r = await checkin(ctx.clerk, [
       { tagCode: 'A010', zone: 'male', guestLabel: '爸爸' },
       { tagCode: 'B010', zone: 'female', guestLabel: '妈妈' },
-      { tagCode: 'C010', zone: 'child', guestLabel: '孩子' },
+      // 孩子跟爸爸进男宾区，用男宾牌
+      { tagCode: 'A009', zone: 'male', guestLabel: '孩子' },
     ]);
     expect(r.status).toBe(201);
     expect(r.body.groupNo).toMatch(/^TX\d{8}-\d{4}$/);
     const v = await visit(r.body.visits[1].id);
-    expect(v.group.mates.map((m: { tagCode: string }) => m.tagCode)).toEqual(['A010', 'B010', 'C010']);
+    expect(v.group.mates.map((m: { tagCode: string }) => m.tagCode)).toEqual(['A010', 'B010', 'A009']);
     const board = (await api(ctx.app, ctx.clerk, 'GET', '/api/frontdesk/board')).body;
-    const card = board.tags.find((t: { code: string }) => t.code === 'C010');
+    const card = board.tags.find((t: { code: string }) => t.code === 'A009');
     expect(card.visit).toMatchObject({ groupNo: r.body.groupNo, groupOpenCount: 3, guestLabel: '孩子' });
   });
 
@@ -237,7 +249,7 @@ describe('共同账单：挂账、价格快照与更正', () => {
     expect(denied.status).toBe(403);
     expect(denied.body.error.message).toContain('0 分钟');
     expect((await api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/lines/${line.id}/void`, { reason: '项目选错' })).status).toBe(200);
-    await api(ctx.app, ctx.owner, 'PUT', '/api/frontdesk/rules', { selfVoidMinutes: 10 });
+    await api(ctx.app, ctx.owner, 'PUT', '/api/frontdesk/rules', { selfVoidMinutes: 15 });
   });
 
   it('数据库层：明细不能改金额、不能删除', async () => {

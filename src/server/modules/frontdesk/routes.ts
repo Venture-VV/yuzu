@@ -1,14 +1,17 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { MAX_VIP_LEVEL, VIP_LEVEL_BASES } from '@shared/frontdesk';
 import { guard } from '../../auth/guard';
 import { readSnapshot } from '../../db';
 import { writeAudit } from '../../lib/audit';
 import type { Deps, OpContext } from '../../lib/context';
+import { notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { postCharges, voidLine, type PostInputData } from './bills';
 import { frontdeskChecks } from './checks';
 import { FRONTDESK_OPS, loadFrontdeskRules } from './common';
-import { batchCreate, listTags, lockHandTag, unlockHandTag, updateHandTag } from './tags';
+import { batchCreate, importHandTags, listTags, lockHandTag, unlockHandTag, updateHandTag, type ImportInputData } from './tags';
+import { memberLevels } from './vip';
 import {
   abandonFrontdeskOp,
   cancelVisit,
@@ -28,6 +31,14 @@ const ctxOf = (req: FastifyRequest): OpContext => ({ actor: req.actor, ip: req.i
 
 const RulesInput = z.object({
   selfVoidMinutes: z.number().int().min(0, '分钟数不能为负').max(120, '最多 120 分钟'),
+  lostTagFeeCents: z.number().int().min(0, '赔偿金额不能为负').max(10_000_00, '赔偿金额最多 10,000 元'),
+  vipLevelBasis: z.enum(VIP_LEVEL_BASES, '请选择等级口径'),
+  vipLevelThresholds: z
+    .array(z.number().int().min(0, '门槛不能为负').max(1_000_000_000_00, '门槛过大'))
+    .min(1, '至少设置第 1 级')
+    .max(MAX_VIP_LEVEL, `最多 ${MAX_VIP_LEVEL} 级`)
+    .refine((t) => t.every((v, i) => i === 0 || v > t[i - 1]!), '各级门槛必须逐级递增'),
+  vipOverrideEnabled: z.boolean(),
 });
 
 export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
@@ -101,8 +112,20 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
     return voidLine(deps, id, req.body, ctxOf(req));
   });
 
+  // 会员按当前规则口径的等级（发牌时核对 VIP 柜）
+  app.get('/api/frontdesk/members/:id/level', { preHandler: guard('frontdesk.read') }, async (req) => {
+    const { id } = parse(idParam, req.params);
+    const level = (await memberLevels(sql, [id], await loadFrontdeskRules(sql))).get(id);
+    if (!level) throw notFound('会员不存在');
+    return level;
+  });
+
   // ── 手牌池 ──
   app.get('/api/frontdesk/tags', { preHandler: guard('frontdesk.read') }, async () => listTags(sql));
+
+  app.post('/api/frontdesk/tags/import', { preHandler: guard('frontdesk.tags') }, async (req) =>
+    importHandTags(sql, req.body as ImportInputData, { staffId: req.actor.id, ip: req.ip, via: 'web' }),
+  );
 
   app.post('/api/frontdesk/tags/batch', { preHandler: guard('frontdesk.tags') }, async (req) => batchCreate(deps, req.body, ctxOf(req)));
 
@@ -127,9 +150,10 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
   // ── 规则与自检 ──
   app.get('/api/frontdesk/rules', { preHandler: guard('frontdesk.read') }, async () => loadFrontdeskRules(sql));
 
+  // 只改提交的字段，其余沿用当前规则；合并后整体校验
   app.put('/api/frontdesk/rules', { preHandler: guard('settings.manage') }, async (req) => {
-    const input = parse(RulesInput, req.body);
     const before = await loadFrontdeskRules(sql);
+    const input = parse(RulesInput, { ...before, ...parse(RulesInput.partial(), req.body) });
     await sql.begin(async (tx) => {
       await tx`
         INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('frontdesk_rules', ${tx.json(input)}, now(), ${req.actor.id})

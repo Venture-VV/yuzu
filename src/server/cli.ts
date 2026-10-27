@@ -7,9 +7,15 @@
 //   seed-demo [--force]                   写入合成演示数据（正式环境默认禁止）
 //   seed-inventory-demo                   写入库存与采购合成演示数据（仅独立演示库；试用 / 正式环境与已有真实库存数据时拒绝）
 //   seed-frontdesk-demo                   写入前台手牌与在店账单合成演示数据（仅独立演示库；试用 / 正式环境与已有真实手牌时拒绝）
+//   import-hand-tags <清单.csv> | --store-list [--apply] [--deactivate-missing]
+//                                         按清单导入手牌池（真实业务数据，默认只预览，加 --apply 才写入）；
+//                                         --store-list 使用店主 2026-10-27 的 747 个真实柜号；--deactivate-missing 同时停用清单外的空闲手牌
 //   check                                 核对会员余额与流水、库存结存与库存流水、手牌账单与明细是否一致
 
+import { readFile } from 'node:fs/promises';
 import { businessDateOf } from '@shared/business-date';
+import { ZONE_LABELS } from '@shared/frontdesk';
+import { parseHandTagCsv } from '@shared/hand-tag-import';
 import { checkPasswordStrength, generateTempPassword, hashPassword } from './auth/password';
 import { destroyStaffSessions } from './auth/session';
 import { loadConfig } from './config';
@@ -19,6 +25,8 @@ import { migrate } from './migrate';
 import { seedDemo, DEMO_PASSWORD } from './seed';
 import { seedInventoryDemo } from './seed-inventory';
 import { seedFrontdeskDemo } from './seed-frontdesk';
+import { STORE_HAND_TAGS_CSV } from './demo/hand-tags-2026-10-27';
+import { importHandTags } from './modules/frontdesk/tags';
 import { frontdeskChecks } from './modules/frontdesk/checks';
 import { inventoryChecks } from './modules/inventory/reports';
 import { computeSettlement } from './modules/settlement';
@@ -101,8 +109,33 @@ async function main() {
           console.log('已存在前台演示数据，跳过。');
         } else {
           console.log(`已写入前台演示数据：${result.tags} 张手牌、${result.inStore} 位在店客人。预期结果见 src/server/demo/frontdesk-expected.json`);
-          console.log(`演示账号：店主 linlan / 前台 xiaozhou，密码均为 ${DEMO_PASSWORD}`);
+          console.log(`演示账号：店主 linlan / 前台 xiaozhou / 值班经理 zhangjl，密码均为 ${DEMO_PASSWORD}`);
         }
+        break;
+      }
+      case 'import-hand-tags': {
+        const storeList = args.includes('--store-list');
+        const file = args.find((a) => !a.startsWith('--'));
+        if (!storeList && !file) throw new Error('用法：import-hand-tags <清单.csv> | --store-list [--apply] [--deactivate-missing]');
+        await migrate(sql);
+        const parsed = parseHandTagCsv(storeList ? STORE_HAND_TAGS_CSV : await readFile(file!, 'utf8'));
+        if (parsed.errors.length) {
+          for (const e of parsed.errors.slice(0, 20)) console.log(`✗ 第 ${e.line} 行：${e.message}`);
+          throw new Error(`清单有 ${parsed.errors.length} 处需要修改，未导入`);
+        }
+        const apply = args.includes('--apply');
+        const report = await importHandTags(
+          sql,
+          { rows: parsed.rows, deactivateMissing: args.includes('--deactivate-missing'), dryRun: !apply },
+          { staffId: null, via: 'cli' },
+        );
+        console.log(`清单共 ${report.total} 个柜号：`);
+        for (const g of report.groups) {
+          console.log(`  ${ZONE_LABELS[g.zone].title} ${g.kind === 'vip' ? `VIP 第 ${g.vipLevel} 级` : `普通柜 ${g.area || ''} 区`}：${g.count}`);
+        }
+        console.log(`新建 ${report.created} · 更新 ${report.updated} · 未变 ${report.unchanged} · 停用清单外 ${report.deactivated}`);
+        for (const b of report.blocked) console.log(`  未改动 ${b.code}：${b.reason}`);
+        console.log(apply ? '✓ 已导入。' : '以上为预览，没有写入。确认无误后加 --apply 执行导入。');
         break;
       }
       case 'check': {
@@ -117,7 +150,7 @@ async function main() {
         break;
       }
       default:
-        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo | check');
+        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo | import-hand-tags | check');
         process.exitCode = command ? 1 : 0;
     }
   } finally {

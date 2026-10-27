@@ -13,6 +13,7 @@ import {
   UserPlus,
   UserRound,
   X,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   BILL_SOURCE_LABELS,
@@ -33,7 +34,7 @@ import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, IconButton, Notice, PendingBadge, Skeleton, Textarea } from '../../components/ui';
-import { GroupMark, LONG_STAY_MINUTES, ZoneChip, ZONE_STYLE } from './parts';
+import { GroupMark, LONG_STAY_MINUTES, VipChip, ZoneChip, ZONE_STYLE } from './parts';
 import { FRONTDESK_OP_LABELS, useFrontdeskPending } from './pending';
 import { stayMinutes, stayText, useServerNow } from './queries';
 
@@ -113,6 +114,7 @@ export function BillPanel({
               <h2 className="num text-[30px] leading-none font-bold tracking-tight" data-testid="bill-tag">
                 {visit.tag.code}
               </h2>
+              {visit.tag.kind === 'vip' && <VipChip level={visit.tag.vipLevel!} size="md" />}
               {visit.group && <GroupMark groupNo={visit.group.groupNo} count={visit.group.mates.filter((m) => m.status === 'open').length} />}
               {!open && <Badge tone={visit.status === 'cancelled' ? 'clay' : 'neutral'}>{VISIT_STATUS_LABELS[visit.status]}</Badge>}
             </div>
@@ -141,7 +143,9 @@ export function BillPanel({
           {visit.member ? (
             <div className="min-w-0 flex-1">
               <p className="truncate text-[13.5px] font-bold">
-                会员 {visit.member.name} <span className="num text-[12px] font-semibold text-ink-3">{visit.member.memberNo} · {maskPhone(visit.member.phone)}</span>
+                会员 {visit.member.name}
+                {visit.memberLevel && <span className="ml-1 text-[12px] font-semibold text-yuzu-deep">第 {visit.memberLevel.level} 级</span>}{' '}
+                <span className="num text-[12px] font-semibold text-ink-3">{visit.member.memberNo} · {maskPhone(visit.member.phone)}</span>
               </p>
               <p className="num text-[12px] text-ink-3">
                 本金 <Money cents={visit.member.principalBalance} /> · 赠金 <Money cents={visit.member.bonusBalance} />
@@ -154,6 +158,11 @@ export function BillPanel({
             </p>
           )}
         </div>
+        {visit.vipOverrideByName && (
+          <p className="mt-1.5 flex items-center gap-1 px-1 text-[12px] font-semibold text-yuzu-deep" data-testid="bill-vip-override">
+            <ShieldCheck className="size-3.5" /> VIP 柜由{visit.vipOverrideByName}当场授权
+          </p>
+        )}
         {/* 同行 */}
         {visit.group && (
           <div className="mt-2.5" data-testid="bill-group">

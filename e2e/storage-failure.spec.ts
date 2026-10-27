@@ -93,8 +93,8 @@ test.describe('本机存储写入失败时不提交', () => {
     await failPendingWrites(page);
     await login(page);
     // 先开一张新牌（直接调接口，不经过本机待确认记录）
-    const tags = ((await (await page.request.get('/api/frontdesk/board')).json()) as { tags: { code: string; zone: string; active: boolean; locked: boolean; visit: unknown }[] }).tags;
-    const code = tags.filter((t) => t.zone === 'male' && t.active && !t.locked && !t.visit).reverse()[2]!.code;
+    const tags = ((await (await page.request.get('/api/frontdesk/board')).json()) as { tags: { code: string; zone: string; kind: string; active: boolean; locked: boolean; visit: unknown }[] }).tags;
+    const code = tags.filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit).reverse()[2]!.code;
     expect((await page.request.post('/api/frontdesk/checkins', { data: { clientKey: crypto.randomUUID(), guests: [{ tagCode: code, zone: 'male' }] } })).status()).toBe(201);
     const bill = async () => {
       const t = ((await (await page.request.get('/api/frontdesk/board')).json()) as { tags: { code: string; visit: { id: number } | null }[] }).tags.find((x) => x.code === code)!;
