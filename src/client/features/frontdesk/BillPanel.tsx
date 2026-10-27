@@ -34,6 +34,7 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, IconButton, Notice, PendingBadge, Skeleton, Textarea } from '../../components/ui';
 import { GroupMark, LONG_STAY_MINUTES, ZoneChip, ZONE_STYLE } from './parts';
+import { FRONTDESK_OP_LABELS, useFrontdeskPending } from './pending';
 import { stayMinutes, stayText, useServerNow } from './queries';
 
 export type PanelAction = 'add' | 'swap' | 'join' | 'companion' | 'preview';
@@ -66,6 +67,7 @@ export function BillPanel({
   const can = useCan();
   const session = useSession();
   const toast = useToast();
+  const pendingOps = useFrontdeskPending();
 
   if (loading && !visit) {
     return (
@@ -78,6 +80,7 @@ export function BillPanel({
   }
   if (error && !visit) return <Notice tone="error" title={errorMessage(error)} className="m-5" />;
   if (!visit) return null;
+  const pendingHere = pendingOps.filter((p) => p.visitId === visit.id);
 
   const open = visit.status === 'open';
   const active = visit.lines.filter((l) => l.status === 'active');
@@ -188,6 +191,21 @@ export function BillPanel({
 
       {/* 小票正文 */}
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto bg-paper-2/40 px-4 py-4">
+        {pendingHere.map((p) => (
+          <Notice
+            key={p.key}
+            tone="warning"
+            title={`${FRONTDESK_OP_LABELS[p.type]}结果待确认`}
+            className="mb-3"
+            action={
+              <Button size="sm" variant="primary" onClick={() => onAction(p.type === 'bill_post' ? 'add' : 'swap')} data-testid="bill-pending-resolve">
+                去处理
+              </Button>
+            }
+          >
+            {p.summary}。确认前请勿重复登记，以免多记一笔。
+          </Notice>
+        ))}
         <div className="relative rounded-[14px] border border-line bg-card px-4 pt-3 pb-4 shadow-card" data-testid="receipt">
           <div className="flex items-center justify-between border-b border-dashed border-line-strong pb-2 text-[12px] text-ink-3">
             <span className="flex items-center gap-1 font-semibold">

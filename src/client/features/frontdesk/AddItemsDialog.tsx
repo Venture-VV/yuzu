@@ -2,14 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { Minus, Plus, Trash2 } from 'lucide-react';
 import type { VisitDetail } from '@shared/frontdesk';
 import { parseYuan } from '@shared/money';
-import { api } from '../../lib/api';
 import { useCatalog } from '../../lib/queries';
-import { useCan } from '../../lib/session';
+import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Button, Input, MoneyInput, Notice, Skeleton } from '../../components/ui';
-import { useKeyedSubmit, ZoneChip } from './parts';
+import { ZoneChip } from './parts';
+import { PendingPanel, useFrontdeskOp } from './pending';
 
 /** 挂账：点选项目累加数量，确认后一次登记到手牌账单（只挂账，不收款） */
 export function AddItemsDialog({
@@ -24,18 +24,25 @@ export function AddItemsDialog({
   onDone: (v: VisitDetail) => void;
 }) {
   const can = useCan();
+  const session = useSession();
   const catalog = useCatalog();
   const [cart, setCart] = useState<Map<number, number>>(new Map());
   const [category, setCategory] = useState('全部');
   const [custom, setCustom] = useState<{ name: string; amount: string }[]>([]);
-  const op = useKeyedSubmit<VisitDetail>((found) => (found as { visit?: VisitDetail }).visit ?? null);
+  // 同一位客人上一笔挂账结果待确认时，先处理那一笔，不能另起一笔（避免重复挂账）
+  const op = useFrontdeskOp<VisitDetail>({
+    type: 'bill_post',
+    visitId: visit.id,
+    staffName: session.staff.displayName,
+    pick: (found) => ('visit' in found ? found.visit : null),
+  });
 
   useEffect(() => {
     if (!open) return;
     setCart(new Map());
     setCustom([]);
     setCategory('全部');
-    op.reset();
+    op.clearError();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -43,11 +50,8 @@ export function AddItemsDialog({
   const categories = useMemo(() => ['全部', ...new Set(items.map((i) => i.category || '其他'))], [items]);
   const shown = category === '全部' ? items : items.filter((i) => (i.category || '其他') === category);
 
-  // 结果待确认时锁定内容，先查回；被明确拒绝后再改内容，换一个新操作编号
-  const locked = op.state.phase === 'uncertain' || op.state.phase === 'busy';
-  const touch = () => {
-    if (op.state.phase === 'error') op.reset();
-  };
+  const locked = op.locked;
+  const touch = op.clearError;
   const add = (id: number, delta: number) => {
     if (locked) return;
     touch();
@@ -70,17 +74,21 @@ export function AddItemsDialog({
   const ready = (lines.length > 0 || custom.length > 0) && customValid && total > 0;
 
   const submit = async () => {
-    const result = await op.submit((key) =>
-      api.post<VisitDetail>(`/api/frontdesk/visits/${visit.id}/charges`, {
+    const result = await op.submit((key) => ({
+      url: `/api/frontdesk/visits/${visit.id}/charges`,
+      body: {
         clientKey: key,
         lines: lines.map((l) => ({ itemId: l.item.id, quantity: l.quantity })),
         customLines: customParsed.map((c) => ({ name: c.name, amount: c.amount })),
         expectedTotal: total,
-      }),
-    );
+      },
+      tagCodes: [visit.tag.code],
+      summary: [...lines.map((l) => `${l.item.name} ×${l.quantity}`), ...customParsed.map((c) => c.name)].join('、'),
+      amount: total,
+    }));
     if (result) onDone(result);
   };
-  const busy = op.state.phase === 'busy';
+  const busy = op.busy;
 
   return (
     <Dialog
@@ -102,12 +110,13 @@ export function AddItemsDialog({
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             取消
           </Button>
-          <Button variant="primary" size="lg" disabled={!ready} loading={busy} onClick={submit} data-testid="add-items-submit">
+          <Button variant="primary" size="lg" disabled={!ready || op.locked} loading={busy} onClick={submit} data-testid="add-items-submit">
             挂到 {visit.tag.code}
           </Button>
         </>
       }
     >
+      <PendingPanel op={op} onResolved={onDone} />
       <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_280px]">
         <div className="min-w-0">
           <div className="scroll-thin -mx-1 mb-3 flex gap-1.5 overflow-x-auto px-1 pb-1">
@@ -138,6 +147,7 @@ export function AddItemsDialog({
                     key={i.id}
                     type="button"
                     onClick={() => add(i.id, 1)}
+                    disabled={locked}
                     data-testid={`item-${i.name}`}
                     className={cn(
                       'relative flex min-h-[76px] flex-col justify-between rounded-lg border px-3.5 py-2.5 text-left transition-[background-color,border-color] active:scale-[0.98]',
@@ -232,27 +242,6 @@ export function AddItemsDialog({
         </aside>
       </div>
       {op.state.phase === 'error' && <Notice tone="error" title={op.state.message} className="mt-4" />}
-      {op.state.phase === 'uncertain' && (
-        <Notice
-          tone="warning"
-          title="结果待确认"
-          className="mt-4"
-          action={
-            <Button
-              size="sm"
-              variant="primary"
-              onClick={async () => {
-                const r = await op.check();
-                if (r) onDone(r);
-              }}
-            >
-              查回结果
-            </Button>
-          }
-        >
-          {op.state.message}。请先查回，确认没挂上再重新提交，避免重复挂账。
-        </Notice>
-      )}
     </Dialog>
   );
 }

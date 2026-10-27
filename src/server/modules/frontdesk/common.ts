@@ -42,6 +42,9 @@ interface KeyRow {
 export async function findKey(db: Db, key: string, opType: FrontdeskOp, requestHash: string): Promise<number | null> {
   const [row] = await db<KeyRow[]>`SELECT op_type, request_hash, ref_id FROM idempotency_keys WHERE key = ${key}`;
   if (!row) return null;
+  if (row.opType === 'abandoned') {
+    throw conflict('OP_ABANDONED', '这笔操作已在「结果待确认」时由员工作废，不会再生效；如仍需要，请重新填写一笔');
+  }
   if (row.opType !== opType || row.requestHash !== requestHash) {
     throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一笔不同的业务，请刷新页面后重新发起');
   }

@@ -10,6 +10,7 @@ import { frontdeskChecks } from './checks';
 import { loadFrontdeskRules } from './common';
 import { batchCreate, listTags, lockHandTag, unlockHandTag, updateHandTag } from './tags';
 import {
+  abandonFrontdeskOp,
   cancelVisit,
   changeGroup,
   checkin,
@@ -53,9 +54,15 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
     return readSnapshot(sql, (tx) => previewBills(tx, ids));
   });
 
+  // 结果待确认时：GET 只查回；POST abandon 作废这笔（之后原请求即使到达也不会生效）
   app.get('/api/frontdesk/ops/:key', { preHandler: guard('frontdesk.read') }, async (req) => {
     const { key } = parse(z.object({ key: z.uuid('操作编号格式不正确') }), req.params);
     return lookupFrontdeskOp(sql, key);
+  });
+
+  app.post('/api/frontdesk/ops/:key/abandon', { preHandler: guard('frontdesk.operate') }, async (req) => {
+    const { key } = parse(z.object({ key: z.uuid('操作编号格式不正确') }), req.params);
+    return abandonFrontdeskOp(deps, key, ctxOf(req));
   });
 
   // ── 接待、换牌、同行、撤销 ──

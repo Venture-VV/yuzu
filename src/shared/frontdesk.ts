@@ -57,27 +57,53 @@ export function tagDigits(code: string): string {
 }
 
 /**
+ * 输入与牌号的匹配程度：0 = 完全相同；1 = 数字完全相同（输入 23 对 A023）或字母前缀开头；
+ * 2 = 数字结尾相同（输入 23 对 B123）；-1 = 不匹配。
+ */
+export function tagMatchRank(code: string, input: string): number {
+  const q = normalizeTagCode(input);
+  if (!q) return -1;
+  if (code === q) return 0;
+  const qDigits = tagDigits(q);
+  const qLetters = q.replace(/[0-9]/g, '');
+  if (qLetters) {
+    // 带字母：前缀相同，数字部分相同或结尾相同（A16 → A016）
+    const letters = code.replace(/[0-9]/g, '');
+    if (letters !== qLetters) return code.startsWith(q) ? 1 : -1;
+    if (!qDigits) return 1;
+    const d = tagDigits(code);
+    if (Number(d) === Number(qDigits)) return 1;
+    return d.endsWith(qDigits) ? 2 : -1;
+  }
+  const d = tagDigits(code);
+  if (Number(d) === Number(qDigits)) return 1;
+  return d.endsWith(qDigits) ? 2 : -1;
+}
+
+/**
  * 按输入匹配手牌：完全相同的牌号优先；否则按数字结尾匹配（输入 23 可找到 A023、B123）。
  * 结果按「完全匹配 → 数字完全相同 → 末位匹配」排序。
  */
 export function matchTags<T extends { code: string }>(tags: T[], input: string): T[] {
-  const q = normalizeTagCode(input);
-  if (!q) return [];
-  const qDigits = tagDigits(q);
-  const hasLetters = /[A-Z]/.test(q);
-  const rank = (t: T): number => {
-    if (t.code === q) return 0;
-    if (hasLetters) return t.code.startsWith(q) ? 1 : t.code.endsWith(q) ? 2 : -1;
-    const d = tagDigits(t.code);
-    if (!qDigits) return -1;
-    if (Number(d) === Number(qDigits)) return 1;
-    return d.endsWith(qDigits) ? 2 : -1;
-  };
   return tags
-    .map((t) => ({ t, r: rank(t) }))
+    .map((t) => ({ t, r: tagMatchRank(t.code, input) }))
     .filter((x) => x.r >= 0)
     .sort((a, b) => a.r - b.r || a.t.code.length - b.t.code.length || a.t.code.localeCompare(b.t.code))
     .map((x) => x.t);
+}
+
+/**
+ * 只有能唯一确定时才返回手牌：完全相同的牌号、唯一的数字完全相同、或唯一的候选。
+ * 多张候选时返回 null，由员工明确选择，避免把实际拿到的 A026 记成 A016。
+ */
+export function uniqueTagMatch<T extends { code: string }>(tags: T[], input: string): T | null {
+  const ranked = tags.map((t) => ({ t, r: tagMatchRank(t.code, input) })).filter((x) => x.r >= 0);
+  const exact = ranked.filter((x) => x.r === 0);
+  if (exact.length === 1) return exact[0]!.t;
+  const numeric = ranked.filter((x) => x.r === 1);
+  if (numeric.length === 1) return numeric[0]!.t;
+  if (numeric.length === 0 && ranked.length === 1) return ranked[0]!.t;
+  return null;
 }
 
 // ───────────── 接口返回 ─────────────
@@ -199,6 +225,12 @@ export interface VisitDetail {
   history: VisitHistoryEvent[];
   serverTime: string;
 }
+
+/** 按操作编号查回 / 作废的结果 */
+export type FrontdeskOpLookup =
+  | { found: false; abandoned: boolean }
+  | { found: true; type: 'checkin'; checkin: CheckinResult }
+  | { found: true; type: 'bill_post' | 'tag_swap'; visit: VisitDetail };
 
 export interface CheckinResult {
   replayed: boolean;

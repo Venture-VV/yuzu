@@ -5,6 +5,8 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: 'e2e',
   timeout: 60_000,
+  // 与后端测试同时运行或机器较慢时，登录与提交结果可能超过默认 5 秒
+  expect: { timeout: 10_000 },
   fullyParallel: false,
   workers: 1,
   reporter: [['list']],

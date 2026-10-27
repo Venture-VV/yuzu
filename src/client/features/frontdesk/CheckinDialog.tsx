@@ -3,6 +3,7 @@ import { CircleAlert, CircleCheck, Link2, Plus, Search, Trash2, UserRound, Users
 import {
   matchTags,
   normalizeTagCode,
+  uniqueTagMatch,
   ZONE_LABELS,
   ZONES,
   type BoardTag,
@@ -11,14 +12,14 @@ import {
 } from '@shared/frontdesk';
 import { maskPhone } from '@shared/labels';
 import type { MemberSummary } from '@shared/types';
-import { api } from '../../lib/api';
 import { useMembers } from '../../lib/queries';
-import { useCan } from '../../lib/session';
+import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Badge, Button, Input, Notice, Segmented } from '../../components/ui';
-import { GroupMark, useKeyedSubmit, ZONE_STYLE } from './parts';
+import { GroupMark, ZONE_STYLE } from './parts';
+import { PendingPanel, useFrontdeskOp } from './pending';
 
 export interface CheckinPrefill {
   tagCode?: string;
@@ -33,7 +34,7 @@ interface Row {
   label: string;
 }
 
-type TagStatus = { ok: true; tag: BoardTag } | { ok: false; message: string } | null;
+type TagStatus = { ok: true; tag: BoardTag } | { ok: false; message: string; choices?: BoardTag[] } | null;
 
 const issuable = (t: BoardTag) => t.active && !t.locked && !t.visit;
 
@@ -42,10 +43,13 @@ function statusOf(tags: BoardTag[], code: string, zone: Zone, usedElsewhere: Set
   if (!c) return null;
   let tag = tags.find((t) => t.code === c);
   if (!tag) {
-    // 只输了末位：同分区有空闲牌就提示回车补全；只匹配到在店 / 锁定的牌时直接说明原因
+    // 只输了末位：能唯一确定一张同分区空闲牌时提示回车补全；对上多张时要求点选，不自动取第一张；
+    // 只匹配到在店 / 锁定的牌时直接说明原因
     const sameZone = matchTags(tags.filter((t) => t.zone === zone && !usedElsewhere.has(t.code)), c);
-    const free = sameZone.find(issuable);
-    if (free) return { ok: false, message: `按回车补全为 ${free.code}` };
+    const freeMatches = sameZone.filter(issuable);
+    const unique = uniqueTagMatch(freeMatches, c);
+    if (unique) return { ok: false, message: `按回车补全为 ${unique.code}` };
+    if (freeMatches.length > 1) return { ok: false, message: `「${c}」对上 ${freeMatches.length} 张空闲牌，请点选实际拿到的`, choices: freeMatches.slice(0, 8) };
     if (sameZone[0]) {
       tag = sameZone[0];
     } else {
@@ -77,13 +81,20 @@ export function CheckinDialog({
   onDone: (result: CheckinResult) => void;
 }) {
   const can = useCan();
+  const session = useSession();
   const [guestType, setGuestType] = useState<'walkin' | 'member'>('walkin');
   const [memberQ, setMemberQ] = useState('');
   const [member, setMember] = useState<MemberSummary | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const firstInput = useRef<HTMLInputElement>(null);
   const members = useMembers(guestType === 'member' && !member ? memberQ.trim() : '');
-  const op = useKeyedSubmit<CheckinResult>((found) => (found as { checkin: CheckinResult }).checkin ?? null);
+  // 上一笔接待结果待确认时，先处理那一笔再发新牌（避免同一批客人被开两次牌）
+  const op = useFrontdeskOp<CheckinResult>({
+    type: 'checkin',
+    visitId: null,
+    staffName: session.staff.displayName,
+    pick: (found) => ('checkin' in found ? found.checkin : null),
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -91,7 +102,7 @@ export function CheckinDialog({
     setMemberQ('');
     setMember(null);
     setRows([{ id: rowSeq++, zone: prefill.zone ?? 'male', code: prefill.tagCode ?? '', label: '' }]);
-    op.reset();
+    op.clearError();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -103,26 +114,27 @@ export function CheckinDialog({
   });
   const ready = rows.length > 0 && statuses.every((s) => s?.ok) && (guestType === 'walkin' || !!member);
 
-  // 结果待确认时锁定内容（先查回）；被明确拒绝后改了内容，换一个新的操作编号再提交
-  const locked = op.state.phase === 'uncertain' || op.state.phase === 'busy';
+  // 有待确认的接待时锁定内容；每次新提交都使用新的操作编号
+  const locked = op.locked;
   const edit = (fn: () => void) => {
     if (locked) return;
-    if (op.state.phase === 'error') op.reset();
+    op.clearError();
     fn();
   };
   const update = (id: number, patch: Partial<Row>) => edit(() => setRows((list) => list.map((r) => (r.id === id ? { ...r, ...patch } : r))));
 
-  /** 输入末位后回车 / 离开输入框：只有一张同分区空闲牌匹配时自动补全牌号 */
+  /** 输入末位后回车 / 离开输入框：只有能唯一确定一张同分区空闲牌时才自动补全 */
   const complete = (r: Row) => {
     const c = normalizeTagCode(r.code);
     if (!c || tags.some((t) => t.code === c)) return;
     const used = new Set(rows.filter((x) => x.id !== r.id).map((x) => normalizeTagCode(x.code)));
-    const candidates = matchTags(freeOf(r.zone, used), c);
-    if (candidates[0]) update(r.id, { code: candidates[0].code });
+    const unique = uniqueTagMatch(freeOf(r.zone, used), c);
+    if (unique) update(r.id, { code: unique.code });
   };
 
   const pickMember = (m: MemberSummary) => {
-    if (op.state.phase === 'error') op.reset();
+    if (locked) return;
+    op.clearError();
     setMember(m);
     if (m.gender) setRows((list) => list.map((r, i) => (i === 0 && !normalizeTagCode(r.code) ? { ...r, zone: m.gender! } : r)));
     setTimeout(() => firstInput.current?.focus(), 30);
@@ -130,8 +142,10 @@ export function CheckinDialog({
 
   const submit = async () => {
     if (!ready) return;
-    const result = await op.submit((key) =>
-      api.post<CheckinResult>('/api/frontdesk/checkins', {
+    const codes = rows.map((r) => normalizeTagCode(r.code));
+    const result = await op.submit((key) => ({
+      url: '/api/frontdesk/checkins',
+      body: {
         clientKey: key,
         joinVisitId: prefill.join?.visitId ?? null,
         guests: rows.map((r, i) => ({
@@ -140,12 +154,15 @@ export function CheckinDialog({
           memberId: i === 0 && member ? member.id : null,
           guestLabel: r.label.trim(),
         })),
-      }),
-    );
+      },
+      tagCodes: codes,
+      summary: `接待 ${rows.length} 位${member ? `（会员 ${member.name}）` : ''}`,
+      amount: null,
+    }));
     if (result) onDone(result);
   };
 
-  const busy = op.state.phase === 'busy';
+  const busy = op.busy;
   const groupHint = prefill.join ? '加入已在店客人的同行组' : rows.length > 1 ? `${rows.length} 位同行，自动建立同行组，离店时可合并结账` : null;
 
   return (
@@ -163,12 +180,13 @@ export function CheckinDialog({
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             取消
           </Button>
-          <Button variant="primary" size="lg" disabled={!ready} loading={busy} onClick={submit} data-testid="checkin-submit">
+          <Button variant="primary" size="lg" disabled={!ready || op.locked} loading={busy} onClick={submit} data-testid="checkin-submit">
             确认发牌{rows.length > 1 ? `（${rows.length} 张）` : ''}
           </Button>
         </>
       }
     >
+      <PendingPanel op={op} onResolved={onDone} />
       <div className="space-y-4">
         {prefill.join && (
           <Notice tone="info" icon={<Link2 className="size-4" />} title={`与 ${prefill.join.tagCode} 同行`}>
@@ -316,7 +334,17 @@ export function CheckinDialog({
                   ) : (
                     <span className="text-ink-3">输入牌号，或</span>
                   )}
-                  {!s?.ok && next && (
+                  {s && !s.ok && s.choices?.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => update(r.id, { code: t.code })}
+                      className="num rounded-full border border-yuzu-deep/40 bg-yuzu-tint px-2.5 py-0.5 font-bold text-ink hover:border-pine hover:text-pine"
+                    >
+                      {t.code}
+                    </button>
+                  ))}
+                  {!s?.ok && !(s && 'choices' in s && s.choices) && next && (
                     <button type="button" onClick={() => update(r.id, { code: next.code })} className="rounded-full bg-paper-2 px-2 py-0.5 font-semibold text-ink-2 hover:bg-pine-soft hover:text-pine">
                       用 {next.code}
                     </button>
@@ -347,26 +375,6 @@ export function CheckinDialog({
         </div>
 
         {op.state.phase === 'error' && <Notice tone="error" title={op.state.message} />}
-        {op.state.phase === 'uncertain' && (
-          <Notice
-            tone="warning"
-            title="结果待确认"
-            action={
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={async () => {
-                  const r = await op.check();
-                  if (r) onDone(r);
-                }}
-              >
-                查回结果
-              </Button>
-            }
-          >
-            {op.state.message}。请先查回结果，不要换一张牌重新发。
-          </Notice>
-        )}
       </div>
     </Dialog>
   );

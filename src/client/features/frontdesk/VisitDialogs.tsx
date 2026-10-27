@@ -5,17 +5,20 @@ import {
   matchTags,
   normalizeTagCode,
   SWAP_REASONS,
+  uniqueTagMatch,
   ZONE_LABELS,
   type BoardTag,
   type VisitDetail,
 } from '@shared/frontdesk';
 import { api } from '../../lib/api';
+import { useSession } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Button, ConfirmCheck, Field, Input, Notice, Skeleton } from '../../components/ui';
 import { usePreview, useServerNow, stayText } from './queries';
-import { GroupMark, useKeyedSubmit, ZoneChip } from './parts';
+import { GroupMark, ZoneChip } from './parts';
+import { PendingPanel, useFrontdeskOp } from './pending';
 
 // ───────────────────────── 换牌 ─────────────────────────
 
@@ -35,13 +38,20 @@ export function SwapDialog({
   const [code, setCode] = useState('');
   const [reason, setReason] = useState('');
   const [lockOld, setLockOld] = useState(false);
-  const op = useKeyedSubmit<VisitDetail>((found) => (found as { visit?: VisitDetail }).visit ?? null);
+  const session = useSession();
+  // 这位客人上一笔换牌结果待确认时，先处理那一笔
+  const op = useFrontdeskOp<VisitDetail>({
+    type: 'tag_swap',
+    visitId: visit.id,
+    staffName: session.staff.displayName,
+    pick: (found) => ('visit' in found ? found.visit : null),
+  });
   useEffect(() => {
     if (!open) return;
     setCode('');
     setReason('');
     setLockOld(false);
-    op.reset();
+    op.clearError();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -63,25 +73,31 @@ export function SwapDialog({
               : !target.active
                 ? `${c} 已停用`
                 : null;
+  // 只输了末位且对上多张空闲牌时，列出候选让员工点选，不自动取第一张
+  const candidates = c && !target ? matchTags(free, c).slice(0, 8) : [];
   const ready = !!target && !problem && reason.trim().length >= 2;
-  const locked = op.state.phase === 'uncertain' || op.state.phase === 'busy';
+  const locked = op.locked;
   const edit = (fn: () => void) => {
     if (locked) return;
-    if (op.state.phase === 'error') op.reset();
+    op.clearError();
     fn();
   };
 
   const submit = async () => {
-    const r = await op.submit((key) =>
-      api.post<VisitDetail>(`/api/frontdesk/visits/${visit.id}/swap`, { clientKey: key, toTagCode: c, reason: reason.trim(), lockOld }),
-    );
+    const r = await op.submit((key) => ({
+      url: `/api/frontdesk/visits/${visit.id}/swap`,
+      body: { clientKey: key, toTagCode: c, reason: reason.trim(), lockOld },
+      tagCodes: [visit.tag.code, c],
+      summary: `换牌 ${visit.tag.code} → ${c}（${reason.trim()}）`,
+      amount: null,
+    }));
     if (r) onDone(r);
   };
 
   return (
     <Dialog
       open={open}
-      onClose={op.state.phase === 'busy' ? () => {} : onClose}
+      onClose={op.busy ? () => {} : onClose}
       title={`换牌 · ${visit.tag.code}`}
       description="账单跟着客人走：换牌后原有消费明细全部保留在新手牌上"
       footer={
@@ -89,12 +105,13 @@ export function SwapDialog({
           <Button variant="ghost" onClick={onClose}>
             取消
           </Button>
-          <Button variant="primary" disabled={!ready} loading={op.state.phase === 'busy'} onClick={submit} data-testid="swap-submit">
+          <Button variant="primary" disabled={!ready || op.locked} loading={op.busy} onClick={submit} data-testid="swap-submit">
             确认换牌
           </Button>
         </>
       }
     >
+      <PendingPanel op={op} onResolved={onDone} />
       <div className="space-y-4">
         <div className="flex items-center gap-3">
           <div className="rounded-lg border border-line bg-paper px-4 py-2.5 text-center">
@@ -103,7 +120,12 @@ export function SwapDialog({
           </div>
           <ArrowRight className="size-5 text-ink-3" />
           <div className="flex-1">
-            <Field label="新手牌" htmlFor="swap-code" error={problem} hint={!c && free[0] ? `同分区空闲牌如 ${free.slice(0, 4).map((t) => t.code).join('、')}` : undefined}>
+            <Field
+              label="新手牌"
+              htmlFor="swap-code"
+              error={candidates.length ? null : problem}
+              hint={!c && free[0] ? `同分区空闲牌如 ${free.slice(0, 4).map((t) => t.code).join('、')}` : undefined}
+            >
               <Input
                 id="swap-code"
                 data-autofocus
@@ -112,7 +134,7 @@ export function SwapDialog({
                 onChange={(e) => edit(() => setCode(e.target.value.toUpperCase()))}
                 onBlur={() => {
                   if (c && !target) {
-                    const m = matchTags(free, c)[0];
+                    const m = uniqueTagMatch(free, c);
                     if (m) setCode(m.code);
                   }
                 }}
@@ -120,6 +142,21 @@ export function SwapDialog({
                 placeholder={`${ZONE_LABELS[visit.zone].title}牌号`}
                 className="num text-[18px] font-bold"
               />
+              {candidates.length > 1 && (
+                <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]" data-testid="swap-candidates">
+                  <span className="font-semibold text-yuzu-deep">匹配多张，请点选实际拿到的：</span>
+                  {candidates.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => edit(() => setCode(t.code))}
+                      className="num h-8 rounded-full border border-line bg-card px-3 font-bold text-ink-2 hover:border-pine hover:text-pine"
+                    >
+                      {t.code}
+                    </button>
+                  ))}
+                </div>
+              )}
             </Field>
           </div>
         </div>
@@ -148,19 +185,6 @@ export function SwapDialog({
           <span className="block text-[12.5px] font-normal text-ink-3">丢失、损坏、柜锁故障时勾选，避免再次发出；找回或修好后由店主解锁</span>
         </ConfirmCheck>
         {op.state.phase === 'error' && <Notice tone="error" title={op.state.message} />}
-        {op.state.phase === 'uncertain' && (
-          <Notice
-            tone="warning"
-            title="结果待确认"
-            action={
-              <Button size="sm" variant="primary" onClick={async () => { const r = await op.check(); if (r) onDone(r); }}>
-                查回结果
-              </Button>
-            }
-          >
-            {op.state.message}
-          </Notice>
-        )}
       </div>
     </Dialog>
   );

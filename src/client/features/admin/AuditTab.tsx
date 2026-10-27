@@ -32,6 +32,7 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   frontdesk_cancel: { label: '撤销来访', tone: 'clay' },
   frontdesk_post: { label: '手牌挂账', tone: 'yuzu' },
   frontdesk_void: { label: '作废明细', tone: 'clay' },
+  frontdesk_abandon: { label: '作废待确认操作', tone: 'ember' },
   hand_tags_created: { label: '建手牌', tone: 'neutral' },
   hand_tag_locked: { label: '锁定手牌', tone: 'ember' },
   hand_tag_unlocked: { label: '解锁手牌', tone: 'neutral' },

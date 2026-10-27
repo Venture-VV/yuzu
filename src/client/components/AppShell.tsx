@@ -9,6 +9,7 @@ import { useCan, useSession } from '../lib/session';
 import { cn } from '../lib/utils';
 import { LogoMark } from './Brand';
 import { PendingOpsBanner } from './PendingOpsBanner';
+import { FrontdeskPendingBanner } from '../features/frontdesk/PendingBanner';
 import { Badge } from './ui';
 
 interface NavItem {
@@ -98,6 +99,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </nav>
       <div className="flex min-w-0 flex-1 flex-col">
         <PendingOpsBanner />
+        {can('frontdesk.operate') && <FrontdeskPendingBanner />}
         {children}
       </div>
     </div>

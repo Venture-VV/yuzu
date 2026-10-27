@@ -1,0 +1,324 @@
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Hourglass } from 'lucide-react';
+import type { FrontdeskOpLookup } from '@shared/frontdesk';
+import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { formatDateTime, uuid } from '../../lib/utils';
+import { Money } from '../../components/Money';
+import { Button, Notice } from '../../components/ui';
+
+// 前台「结果待确认」的操作（接待发牌、挂账、换牌），保存在本机浏览器里。
+//
+// 提交前先记下操作编号、对象和原请求；只有确认了结果（成功、服务端明确拒绝、员工作废且服务端确认作废）才删除。
+// 关闭对话框、刷新、切换手牌或重新登录后，同一对象上仍提示待确认，原操作确认前不能另起一笔。
+// 处理方式：
+//   · 查回：只读查询，查不到只代表此刻还没有已提交的结果，不能据此断定没有生效；
+//   · 按原内容重新提交：沿用原编号与原请求，服务端保证只生效一次；
+//   · 确认作废：服务端先把编号登记为作废，原请求之后即使到达也整笔回滚，然后才允许重新填写。
+
+export type FrontdeskOpType = 'checkin' | 'bill_post' | 'tag_swap';
+
+export interface FrontdeskPendingOp {
+  key: string;
+  type: FrontdeskOpType;
+  url: string;
+  body: unknown;
+  /** 挂账、换牌对应的来访；接待为 null */
+  visitId: number | null;
+  /** 展示用：涉及的手牌、内容摘要、金额 */
+  tagCodes: string[];
+  summary: string;
+  amount: number | null;
+  staffName: string;
+  createdAt: string;
+}
+
+export const FRONTDESK_OP_LABELS: Record<FrontdeskOpType, string> = { checkin: '接待发牌', bill_post: '挂账', tag_swap: '换牌' };
+
+const STORAGE_KEY = 'yuzu.frontdeskPending.v1';
+const listeners = new Set<() => void>();
+const inFlight = new Set<string>();
+/** 正由打开的对话框处理的编号：顶部提醒不显示、不抢先自动查回，避免对话框里的内容被悄悄解锁 */
+const claimed = new Set<string>();
+let memoryFallback: FrontdeskPendingOp[] = [];
+let cachedRaw: string | null | undefined;
+let cachedList: FrontdeskPendingOp[] = [];
+
+function readAll(): FrontdeskPendingOp[] {
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return memoryFallback;
+  }
+  if (raw === cachedRaw) return cachedList;
+  cachedRaw = raw;
+  try {
+    const parsed = raw ? (JSON.parse(raw) as FrontdeskPendingOp[]) : [];
+    cachedList = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    cachedList = [];
+  }
+  return cachedList;
+}
+
+function writeAll(list: FrontdeskPendingOp[]) {
+  memoryFallback = list;
+  try {
+    if (list.length) localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    else localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* 不可写时退回内存（至少关闭对话框后仍可处理） */
+  }
+  snapshotCache = null;
+  listeners.forEach((fn) => fn());
+}
+
+function save(op: FrontdeskPendingOp) {
+  writeAll([...readAll().filter((p) => p.key !== op.key), op]);
+}
+
+
+export function removeFrontdeskPending(key: string) {
+  if (readAll().some((p) => p.key === key)) writeAll(readAll().filter((p) => p.key !== key));
+}
+
+function setInFlight(key: string, active: boolean) {
+  if (active) inFlight.add(key);
+  else inFlight.delete(key);
+  snapshotCache = null;
+  bannerCache = null;
+  listeners.forEach((fn) => fn());
+}
+
+function setClaimed(key: string, active: boolean) {
+  if (active) claimed.add(key);
+  else claimed.delete(key);
+  bannerCache = null;
+  listeners.forEach((fn) => fn());
+}
+
+let snapshotCache: { source: FrontdeskPendingOp[]; result: FrontdeskPendingOp[] } | null = null;
+function snapshot(): FrontdeskPendingOp[] {
+  const all = readAll();
+  if (snapshotCache && snapshotCache.source === all) return snapshotCache.result;
+  snapshotCache = { source: all, result: all.filter((p) => !inFlight.has(p.key)) };
+  return snapshotCache.result;
+}
+
+let bannerCache: { source: FrontdeskPendingOp[]; result: FrontdeskPendingOp[] } | null = null;
+function bannerSnapshot(): FrontdeskPendingOp[] {
+  const all = readAll();
+  if (bannerCache && bannerCache.source === all) return bannerCache.result;
+  bannerCache = { source: all, result: all.filter((p) => !inFlight.has(p.key) && !claimed.has(p.key)) };
+  return bannerCache.result;
+}
+
+function subscribe(fn: () => void) {
+  listeners.add(fn);
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === STORAGE_KEY) {
+      snapshotCache = null;
+      fn();
+    }
+  };
+  window.addEventListener('storage', onStorage);
+  return () => {
+    listeners.delete(fn);
+    window.removeEventListener('storage', onStorage);
+  };
+}
+
+/** 全部待确认的前台操作（不含本页正在提交中的） */
+export function useFrontdeskPending(): FrontdeskPendingOp[] {
+  return useSyncExternalStore(subscribe, snapshot);
+}
+
+/** 顶部提醒用：另外排除正由打开的对话框处理的 */
+export function useFrontdeskPendingForBanner(): FrontdeskPendingOp[] {
+  return useSyncExternalStore(subscribe, bannerSnapshot);
+}
+
+/** 某个对象上的待确认操作：接待看全部接待；挂账、换牌看同一位客人 */
+export function pendingFor(list: FrontdeskPendingOp[], type: FrontdeskOpType, visitId: number | null) {
+  return list.find((p) => p.type === type && (type === 'checkin' || p.visitId === visitId));
+}
+
+export type OpState =
+  | { phase: 'idle' }
+  | { phase: 'busy' }
+  | { phase: 'error'; message: string; code?: string }
+  | { phase: 'uncertain'; message: string }
+  | { phase: 'not_found' };
+
+type Pick<T> = (found: Extract<FrontdeskOpLookup, { found: true }>) => T | null;
+
+/**
+ * 前台写操作的提交状态机（与会员记账的待确认流程同一思路）。
+ * 有待确认记录时，表单锁定、只能查回 / 原样重提 / 确认作废；没有时每次提交使用新的操作编号。
+ */
+export function useFrontdeskOp<T>(opts: { type: FrontdeskOpType; visitId: number | null; staffName: string; pick: Pick<T> }) {
+  const all = useFrontdeskPending();
+  const pending = pendingFor(all, opts.type, opts.visitId) ?? null;
+  const [state, setState] = useState<OpState>({ phase: 'idle' });
+  const { pick } = opts;
+  const pendingKey = pending?.key;
+  useEffect(() => {
+    if (!pendingKey) return;
+    setClaimed(pendingKey, true);
+    return () => setClaimed(pendingKey, false);
+  }, [pendingKey]);
+
+  const send = useCallback(
+    async (op: FrontdeskPendingOp): Promise<T | null> => {
+      setState({ phase: 'busy' });
+      save(op);
+      setInFlight(op.key, true);
+      try {
+        const result = await api.post<T>(op.url, op.body);
+        removeFrontdeskPending(op.key);
+        setState({ phase: 'idle' });
+        return result;
+      } catch (error) {
+        if (error instanceof ApiError && error.status < 500) {
+          // 服务端明确拒绝（含该编号已作废）：没有生效
+          removeFrontdeskPending(op.key);
+          setState({ phase: 'error', message: error.message, code: error.code });
+        } else {
+          const reason = error instanceof UncertainError ? error.message : '服务器出了点问题';
+          setState({ phase: 'uncertain', message: `${reason}，这次${FRONTDESK_OP_LABELS[op.type]}是否已生效暂不确定` });
+        }
+        return null;
+      } finally {
+        setInFlight(op.key, false);
+      }
+    },
+    [],
+  );
+
+  /** 提交一笔新的操作（有待确认记录时不允许） */
+  const submit = useCallback(
+    async (build: (key: string) => { url: string; body: unknown; tagCodes: string[]; summary: string; amount: number | null }) => {
+      if (pending) return null;
+      const key = uuid();
+      const b = build(key);
+      return send({ key, type: opts.type, visitId: opts.visitId, staffName: opts.staffName, createdAt: new Date().toISOString(), ...b });
+    },
+    [pending, send, opts.type, opts.visitId, opts.staffName],
+  );
+
+  /** 按原内容、原编号重新提交 */
+  const retry = useCallback(async () => (pending ? send(pending) : null), [pending, send]);
+
+  const settle = useCallback(
+    (key: string, found: FrontdeskOpLookup): T | null => {
+      if (found.found) {
+        removeFrontdeskPending(key);
+        setState({ phase: 'idle' });
+        return pick(found);
+      }
+      if (found.abandoned) {
+        // 服务端确认已作废：原操作永远不会生效，可以重新填写
+        removeFrontdeskPending(key);
+        setState({ phase: 'idle' });
+        return null;
+      }
+      setState({ phase: 'not_found' });
+      return null;
+    },
+    [pick],
+  );
+
+  /** 只读查回 */
+  const check = useCallback(async () => {
+    if (!pending) return null;
+    setState({ phase: 'busy' });
+    try {
+      return settle(pending.key, await api.get<FrontdeskOpLookup>(`/api/frontdesk/ops/${pending.key}`));
+    } catch (error) {
+      setState({ phase: 'uncertain', message: `仍然无法确认：${errorMessage(error)}` });
+      return null;
+    }
+  }, [pending, settle]);
+
+  /** 确认作废：原操作已生效时返回其结果，否则服务端登记作废后才删除本机记录 */
+  const abandon = useCallback(async () => {
+    if (!pending) return null;
+    setState({ phase: 'busy' });
+    try {
+      return settle(pending.key, await api.post<FrontdeskOpLookup>(`/api/frontdesk/ops/${pending.key}/abandon`));
+    } catch (error) {
+      setState({ phase: 'uncertain', message: `作废未完成，原操作仍待确认：${errorMessage(error)}` });
+      return null;
+    }
+  }, [pending, settle]);
+
+  const clearError = useCallback(() => setState((s) => (s.phase === 'error' ? { phase: 'idle' } : s)), []);
+
+  return { pending, state, submit, retry, check, abandon, clearError, busy: state.phase === 'busy', locked: !!pending || state.phase === 'busy' };
+}
+
+/** 对话框里的待确认处理区：查回 / 按原内容重新提交 / 确认作废 */
+export function PendingPanel<T>({
+  op,
+  onResolved,
+}: {
+  op: ReturnType<typeof useFrontdeskOp<T>>;
+  onResolved: (result: T) => void;
+}) {
+  const p = op.pending;
+  const run = async (fn: () => Promise<T | null>) => {
+    const r = await fn();
+    if (r) onResolved(r);
+  };
+  // 出现待确认记录（刚提交失败、或重新打开对话框）时自动只读查回一次：已生效的直接完成，查不到的继续待确认
+  const autoChecked = useRef<string | null>(null);
+  useEffect(() => {
+    if (!p || autoChecked.current === p.key) return;
+    autoChecked.current = p.key;
+    void run(op.check);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p?.key]);
+  if (!p) return null;
+  return (
+    <Notice
+      tone="warning"
+      icon={<Hourglass className="size-4" />}
+      title={`上一笔${FRONTDESK_OP_LABELS[p.type]}结果待确认`}
+      className="mb-4"
+      action={
+        <>
+          <Button size="sm" variant="primary" loading={op.busy} onClick={() => run(op.check)} data-testid="pending-check">
+            查回结果
+          </Button>
+          <Button size="sm" variant="secondary" disabled={op.busy} onClick={() => run(op.retry)} data-testid="pending-retry">
+            按原内容重新提交
+          </Button>
+          <Button size="sm" variant="ghost" disabled={op.busy} onClick={() => run(op.abandon)} data-testid="pending-abandon">
+            确认作废，重新填写
+          </Button>
+        </>
+      }
+    >
+      <span data-testid="pending-op">
+        {p.tagCodes.join('、')} · {p.summary}
+        {p.amount !== null && (
+          <>
+            {' '}
+            · <Money cents={p.amount} className="font-bold" />
+          </>
+        )}
+        <span className="text-ink-3">
+          {' '}
+          · {formatDateTime(p.createdAt)} {p.staffName}
+        </span>
+      </span>
+      <span className="mt-1 block">
+        {op.state.phase === 'uncertain'
+          ? `${op.state.message}。`
+          : op.state.phase === 'not_found'
+            ? '暂未查到已生效的结果，原请求可能仍在处理。可按原内容重新提交（沿用原编号，不会重复），或确认作废后重新填写（作废后原请求即使到达也不会生效）。'
+            : '处理前不能对这张手牌另起一笔，避免重复。'}
+      </span>
+    </Notice>
+  );
+}

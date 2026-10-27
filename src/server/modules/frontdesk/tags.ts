@@ -52,13 +52,18 @@ export async function batchCreate(deps: Deps, raw: unknown, ctx: OpContext) {
   });
 }
 
+/**
+ * 先锁定手牌行，再用单独的查询判断是否在店。
+ * 不能把占用判断写进同一条 FOR UPDATE 语句：等锁期间发牌事务提交的来访，对那条语句的快照不可见，
+ * 会把刚发出的手牌误判为空闲，于是锁定 / 停用 / 改分区与发牌同时成功。
+ */
 async function lockTag(tx: Db, id: number) {
-  const [tag] = await tx<{ id: number; code: string; zone: string; locked: boolean; active: boolean; inUse: boolean }[]>`
-    SELECT id, code, zone, locked, active,
-           EXISTS (SELECT 1 FROM visits v WHERE v.tag_id = hand_tags.id AND v.status = 'open') AS in_use
-    FROM hand_tags WHERE id = ${id} FOR UPDATE`;
+  const [tag] = await tx<{ id: number; code: string; zone: string; locked: boolean; active: boolean }[]>`
+    SELECT id, code, zone, locked, active FROM hand_tags WHERE id = ${id} FOR UPDATE`;
   if (!tag) throw notFound('手牌不存在');
-  return tag;
+  const [use] = await tx<{ inUse: boolean }[]>`
+    SELECT EXISTS (SELECT 1 FROM visits WHERE tag_id = ${id} AND status = 'open') AS in_use`;
+  return { ...tag, inUse: use!.inUse };
 }
 
 export const LockInput = z.object({ reason: z.string().trim().min(2, '请填写锁定原因（至少 2 个字）').max(100, '原因最多 100 字') });

@@ -1,8 +1,7 @@
-import { useCallback, useRef, useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { Link2, Lock, UserRound } from 'lucide-react';
 import { ZONE_LABELS, type BoardTag, type Zone } from '@shared/frontdesk';
-import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
-import { cn, uuid } from '../../lib/utils';
+import { cn } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { stayMinutes, stayText } from './queries';
 
@@ -157,54 +156,4 @@ export function Stat({ label, children, tone }: { label: string; children: React
       <span className={cn('num text-[14px] font-bold', tone === 'pine' ? 'text-pine' : tone === 'yuzu' ? 'text-yuzu-deep' : 'text-ink')}>{children}</span>
     </span>
   );
-}
-
-export type SubmitState = { phase: 'idle' } | { phase: 'busy' } | { phase: 'error'; message: string; code?: string } | { phase: 'uncertain'; message: string };
-
-/**
- * 带操作编号的提交：同一张表单始终用同一个编号重试；
- * 超时或断网时进入「结果待确认」，可按编号查回，确认没有生效再原样重提，不会重复发牌或挂账。
- */
-export function useKeyedSubmit<T>(lookup: (found: unknown) => T | null) {
-  const key = useRef(uuid());
-  const [state, setState] = useState<SubmitState>({ phase: 'idle' });
-
-  const reset = useCallback(() => {
-    key.current = uuid();
-    setState({ phase: 'idle' });
-  }, []);
-
-  const submit = useCallback(async (send: (key: string) => Promise<T>): Promise<T | null> => {
-    setState({ phase: 'busy' });
-    try {
-      const result = await send(key.current);
-      setState({ phase: 'idle' });
-      return result;
-    } catch (error) {
-      if (error instanceof UncertainError) {
-        setState({ phase: 'uncertain', message: `${error.message}，这次操作是否已生效暂不确定` });
-      } else {
-        setState({ phase: 'error', message: errorMessage(error), code: error instanceof ApiError ? error.code : undefined });
-      }
-      return null;
-    }
-  }, []);
-
-  const check = useCallback(async (): Promise<T | null> => {
-    setState({ phase: 'busy' });
-    try {
-      const found = await api.get<{ found: boolean }>(`/api/frontdesk/ops/${key.current}`);
-      const result = found.found ? lookup(found) : null;
-      if (result) {
-        setState({ phase: 'idle' });
-        return result;
-      }
-      setState({ phase: 'error', message: '查询结果：这次操作没有生效，可以放心重新提交（会沿用原操作编号，不会重复）' });
-    } catch (error) {
-      setState({ phase: 'uncertain', message: `仍然无法连接服务器：${errorMessage(error)}` });
-    }
-    return null;
-  }, [lookup]);
-
-  return { key, state, setState, submit, check, reset };
 }

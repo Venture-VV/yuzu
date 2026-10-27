@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { Hash, Keyboard, ShieldCheck, UserPlus, X } from 'lucide-react';
-import { matchTags, normalizeTagCode, ZONE_LABELS, ZONES, type BoardTag, type CheckinResult, type VisitDetail, type Zone } from '@shared/frontdesk';
+import { matchTags, normalizeTagCode, uniqueTagMatch, ZONE_LABELS, ZONES, type BoardTag, type CheckinResult, type VisitDetail, type Zone } from '@shared/frontdesk';
 import { useCan, useSession } from '../../lib/session';
 import { cn, isTypingTarget } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
@@ -34,6 +34,9 @@ export function FrontdeskPage() {
 
   const [q, setQ] = useState('');
   const [cursor, setCursor] = useState(0);
+  /** 员工用方向键明确选中了某张候选；否则多张候选时回车不打开，避免打开错的牌 */
+  const [picked, setPicked] = useState(false);
+  const [ambiguous, setAmbiguous] = useState(false);
   const [zone, setZone] = useState<'all' | Zone>('all');
   const [status, setStatus] = useState<StatusFilter>('all');
   const [dialog, setDialog] = useState<null | { kind: 'checkin'; prefill: CheckinPrefill } | { kind: PanelAction }>(null);
@@ -42,7 +45,8 @@ export function FrontdeskPage() {
 
   const tags = board.data?.tags ?? [];
   const matches = useMemo(() => (q ? matchTags(tags, q) : []), [tags, q]);
-  const primary = matches[Math.min(cursor, matches.length - 1)];
+  const unique = useMemo(() => (q ? uniqueTagMatch(tags, q) : null), [tags, q]);
+  const primary = picked ? matches[Math.min(cursor, matches.length - 1)] : (unique ?? undefined);
   const matchedIds = new Set(matches.map((t) => t.id));
 
   const select = useCallback(
@@ -70,6 +74,19 @@ export function FrontdeskPage() {
     },
     [select, toast, can],
   );
+
+  // 从顶部「结果待确认」进入：打开对应对话框，由对话框显示原操作并处理
+  const resume = params.get('resume');
+  useEffect(() => {
+    if (!resume || !board.data) return;
+    if (resume !== 'checkin' && (!visit.data || visit.data.id !== selectedId)) return;
+    if (resume === 'checkin') setDialog({ kind: 'checkin', prefill: {} });
+    else if (resume === 'bill_post') setDialog({ kind: 'add' });
+    else if (resume === 'tag_swap') setDialog({ kind: 'swap' });
+    const next = new URLSearchParams(params);
+    next.delete('resume');
+    setParams(next, { replace: true });
+  }, [resume, board.data, visit.data, selectedId, params, setParams]);
 
   const companions = useMemo(() => {
     const g = visit.data?.group;
@@ -196,18 +213,26 @@ export function FrontdeskPage() {
                   onChange={(e) => {
                     setQ(normalizeTagCode(e.target.value));
                     setCursor(0);
+                    setPicked(false);
+                    setAmbiguous(false);
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && primary) {
+                    if (e.key === 'Enter') {
                       e.preventDefault();
-                      openTag(primary);
-                      searchRef.current?.blur();
+                      if (primary) {
+                        openTag(primary);
+                        searchRef.current?.blur();
+                      } else if (matches.length > 1) {
+                        setAmbiguous(true);
+                      }
                     } else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
                       e.preventDefault();
-                      setCursor((c) => Math.min(c + 1, Math.max(0, matches.length - 1)));
+                      setCursor((c) => (picked ? Math.min(c + 1, Math.max(0, matches.length - 1)) : Math.max(0, matches.indexOf(unique ?? matches[0]!))));
+                      setPicked(true);
                     } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
                       e.preventDefault();
-                      setCursor((c) => Math.max(0, c - 1));
+                      setCursor((c) => (picked ? Math.max(0, c - 1) : Math.max(0, matches.indexOf(unique ?? matches[0]!))));
+                      setPicked(true);
                     } else if (e.key === 'Escape') {
                       setQ('');
                       searchRef.current?.blur();
@@ -237,8 +262,10 @@ export function FrontdeskPage() {
                   <span className="font-semibold text-clay">没有匹配「{q}」的手牌</span>
                 ) : (
                   <>
-                    <span className="text-ink-3">匹配 {matches.length} 张：</span>
-                    {matches.slice(0, 8).map((t, i) => (
+                    <span className={cn(ambiguous && !primary ? 'font-semibold text-yuzu-deep' : 'text-ink-3')} data-testid="search-hint">
+                      {primary || matches.length === 1 ? `匹配 ${matches.length} 张：` : `对上 ${matches.length} 张，请用方向键选中后回车，或直接点选：`}
+                    </span>
+                    {matches.slice(0, 8).map((t) => (
                       <button
                         key={t.id}
                         type="button"
@@ -252,7 +279,7 @@ export function FrontdeskPage() {
                         <span className="text-[11.5px] font-semibold opacity-75">
                           {ZONE_LABELS[t.zone].short} · {t.visit ? '在店' : t.locked ? '锁定' : '空闲'}
                         </span>
-                        {i === Math.min(cursor, matches.length - 1) && <Kbd className="ml-0.5 border-white/30 bg-white/15 text-paper">↵</Kbd>}
+                        {t === primary && <Kbd className="ml-0.5 border-white/30 bg-white/15 text-paper">↵</Kbd>}
                       </button>
                     ))}
                   </>

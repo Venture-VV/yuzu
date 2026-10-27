@@ -31,6 +31,7 @@ export type AuditAction =
   | 'frontdesk_cancel'
   | 'frontdesk_post'
   | 'frontdesk_void'
+  | 'frontdesk_abandon'
   | 'hand_tags_created'
   | 'hand_tag_locked'
   | 'hand_tag_unlocked'
