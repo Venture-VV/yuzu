@@ -3,8 +3,10 @@
 //
 // 岗位决定会员业务权限；库存与采购权限来自可叠加的「职责」，一人可兼任多项。
 // 增加库存职责不会带来会员钱包、充值撤销或全店财务查看权限。
+// 「值班经理」「店总」为 2026-10-27 店主答复新增的内置岗位（#29），默认权限待确认；
+// Batch 4 改为后台可配置的「岗位 × 权限」矩阵。
 
-export const ROLES = ['owner', 'clerk', 'backoffice'] as const;
+export const ROLES = ['owner', 'store_manager', 'duty_manager', 'clerk', 'backoffice'] as const;
 export type Role = (typeof ROLES)[number];
 
 export const DUTIES = ['stock', 'purchase', 'payable', 'approve'] as const;
@@ -22,30 +24,30 @@ interface Rule {
 
 export const PERMISSIONS = {
   // ── 会员与储值 ──
-  'member.read': { roles: ['owner', 'clerk'] },
-  'member.write': { roles: ['owner', 'clerk'] },
-  'recharge.create': { roles: ['owner', 'clerk'] },
+  'member.read': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
+  'member.write': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
+  'recharge.create': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 不按套餐、手动填写赠金 */
-  'recharge.customBonus': { roles: ['owner'] },
-  'consume.create': { roles: ['owner', 'clerk'] },
+  'recharge.customBonus': { roles: ['owner', 'store_manager'] },
+  'consume.create': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 不在项目列表里的手动金额 */
-  'consume.customAmount': { roles: ['owner', 'clerk'] },
-  'consume.reverse': { roles: ['owner'] },
+  'consume.customAmount': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
+  'consume.reverse': { roles: ['owner', 'store_manager', 'duty_manager'] },
   /** 当前营业日的流水与日结汇总 */
-  'ledger.readToday': { roles: ['owner', 'clerk'] },
+  'ledger.readToday': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 历史营业日的流水与日结 */
-  'ledger.readHistory': { roles: ['owner'] },
-  'ledger.export': { roles: ['owner'] },
-  'settlement.close': { roles: ['owner'] },
+  'ledger.readHistory': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  'ledger.export': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  'settlement.close': { roles: ['owner', 'store_manager', 'duty_manager'] },
   // ── 前台手牌与共同账单 ──
   /** 查看在店手牌状态板与手牌账单 */
-  'frontdesk.read': { roles: ['owner', 'clerk'] },
+  'frontdesk.read': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 接待发牌、同行绑牌、挂账、换牌、锁定异常手牌；本人刚登记的明细可在规定时间内自行作废 */
-  'frontdesk.operate': { roles: ['owner', 'clerk'] },
+  'frontdesk.operate': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 作废他人或超时的明细、撤销他人或超时开的牌 */
-  'frontdesk.correct': { roles: ['owner'] },
+  'frontdesk.correct': { roles: ['owner', 'store_manager', 'duty_manager'] },
   /** 维护手牌池：批量建牌、改分区、解锁、停用 */
-  'frontdesk.tags': { roles: ['owner'] },
+  'frontdesk.tags': { roles: ['owner', 'store_manager', 'duty_manager'] },
   // ── 库存与采购 ──
   /** 查看库存数量、物料档案与库存单据 */
   'inventory.read': { roles: ['owner'], duties: ['stock', 'purchase', 'payable', 'approve'] },
@@ -65,10 +67,15 @@ export const PERMISSIONS = {
   'inventory.approve': { roles: ['owner'], duties: ['approve'] },
   'inventory.export': { roles: ['owner'], duties: ['payable', 'approve'] },
   // ── 管理 ──
+  // ── 当场授权（主管在弹窗里输入自己的账号密码确认）──
+  /** 授权超过单笔上限的充值 / 消费 */
+  'auth.overLimit': { roles: ['owner', 'store_manager'] },
+  /** 授权散客或等级不够的会员使用 VIP 柜（经营规则开启后才可用） */
+  'auth.vipOverride': { roles: ['owner', 'store_manager', 'duty_manager'] },
   'staff.manage': { roles: ['owner'] },
-  'catalog.manage': { roles: ['owner'] },
+  'catalog.manage': { roles: ['owner', 'store_manager'] },
   'settings.manage': { roles: ['owner'] },
-  'audit.read': { roles: ['owner'] },
+  'audit.read': { roles: ['owner', 'store_manager'] },
 } as const satisfies Record<string, Rule>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -108,6 +115,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'payable.manage': '登记期初未付与付款',
   'inventory.approve': '负责人确认（采购、报损、盘点调整、退货、付款、冲销）',
   'inventory.export': '导出库存与对账',
+  'auth.overLimit': '当场授权超过单笔上限的充值 / 消费',
+  'auth.vipOverride': '当场授权散客或低等级会员使用 VIP 柜',
   'staff.manage': '管理员工账号',
   'catalog.manage': '管理充值套餐与消费项目',
   'settings.manage': '修改经营规则设置',
@@ -127,5 +136,6 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
     title: '库存与采购',
     items: ['inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'supplierReturn.create', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.export'],
   },
+  { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride'] },
   { title: '管理', items: ['staff.manage', 'catalog.manage', 'settings.manage', 'audit.read'] },
 ];

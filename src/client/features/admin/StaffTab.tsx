@@ -58,7 +58,7 @@ export function StaffTab() {
                   </p>
                 </div>
                 <span className="flex flex-wrap gap-1">
-                  <Badge tone={s.role === 'owner' ? 'pine' : s.role === 'backoffice' ? 'lake' : 'neutral'}>{ROLE_LABELS[s.role]}</Badge>
+                  <Badge tone={s.role === 'owner' ? 'pine' : s.role === 'backoffice' ? 'lake' : s.role === 'clerk' ? 'neutral' : 'yuzu'}>{ROLE_LABELS[s.role]}</Badge>
                   {s.role !== 'owner' &&
                     s.duties.map((d) => (
                       <Badge key={d} tone="moss">
@@ -210,6 +210,8 @@ function StaffDialog({
             className="w-full"
             options={[
               { value: 'clerk', label: '前台店员' },
+              { value: 'duty_manager', label: '值班经理' },
+              { value: 'store_manager', label: '店总' },
               { value: 'backoffice', label: '后勤人员' },
               { value: 'owner', label: '店主' },
             ]}

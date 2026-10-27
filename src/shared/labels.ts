@@ -14,13 +14,17 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
 
 export const ROLE_LABELS: Record<Role, string> = {
   owner: '店主',
+  store_manager: '店总',
+  duty_manager: '值班经理',
   clerk: '前台店员',
   backoffice: '后勤人员',
 };
 
 export const ROLE_HINTS: Record<Role, string> = {
   owner: '全部权限',
-  clerk: '会员查找、充值、消费、当日流水',
+  store_manager: '值班经理的全部权限，另可自定赠金、管理套餐与项目、查看审计、当场授权超过单笔上限（待确认）',
+  duty_manager: '店员权限，另可撤销消费、更正他人或超时的前台录入、维护手牌、看历史与导出、确认日结（待确认）',
+  clerk: '会员查找、充值、消费、当日流水、前台接待与挂账',
   backoffice: '没有会员与储值权限，只按职责处理库存与采购',
 };
 
