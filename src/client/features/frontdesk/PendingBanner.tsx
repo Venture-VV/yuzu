@@ -26,7 +26,7 @@ export function FrontdeskPendingBanner() {
         if (checked.current.has(op.key)) continue;
         checked.current.add(op.key);
         api
-          .get<FrontdeskOpLookup>(`/api/frontdesk/ops/${op.key}`)
+          .get<FrontdeskOpLookup>(`/api/frontdesk/ops/${op.key}?type=${op.type}`)
           .then((found) => {
             if (!found.found && !found.abandoned) return;
             removeFrontdeskPending(op.key);

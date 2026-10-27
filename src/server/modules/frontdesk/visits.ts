@@ -20,6 +20,7 @@ import { formatYuan } from '@shared/money';
 import type { Db } from '../../db';
 import { writeAudit } from '../../lib/audit';
 import type { Deps, OpContext } from '../../lib/context';
+import { fenceKey, isFenced } from '../../lib/fences';
 import { badRequest, conflict, notFound, unprocessable } from '../../lib/errors';
 import { parse } from '../../lib/validate';
 import {
@@ -36,6 +37,8 @@ import {
   nextDocNo,
   openVisitsOnTags,
   runIdempotent,
+  FRONTDESK_OPS,
+  type FrontdeskOp,
   saveKey,
   setTxTimeouts,
 } from './common';
@@ -561,11 +564,13 @@ export async function previewBills(db: Db, visitIds: number[]): Promise<PreviewB
  * 按操作编号查回结果（只读）。
  * 查不到只说明「此刻还没有已提交的结果」，原请求可能仍在路上或在等锁，页面不能据此断定没有生效；
  * 要放弃这笔，必须调用 abandonFrontdeskOp。
+ * expected 是页面记录的原业务类型：只有同一类型的作废登记才算「已作废」。
  */
-export async function lookupFrontdeskOp(db: Db, key: string) {
+export async function lookupFrontdeskOp(db: Db, key: string, expected?: FrontdeskOp) {
   const [row] = await db<{ opType: string; refId: number }[]>`SELECT op_type, ref_id FROM idempotency_keys WHERE key = ${key}`;
-  if (row?.opType === 'abandoned') return { found: false as const, abandoned: true as const };
-  if (!row || !['checkin', 'bill_post', 'tag_swap'].includes(row.opType)) return { found: false as const, abandoned: false as const };
+  if (row?.opType === 'abandoned') return { found: false as const, abandoned: true };
+  if (!row) return { found: false as const, abandoned: await isFenced(db, key, expected ? [expected] : FRONTDESK_OPS) };
+  if (!(FRONTDESK_OPS as readonly string[]).includes(row.opType)) return { found: false as const, abandoned: false };
   if (row.opType === 'checkin') return { found: true as const, type: 'checkin' as const, checkin: await loadCheckin(db, key, true) };
   if (row.opType === 'bill_post') return { found: true as const, type: 'bill_post' as const, visit: await getVisit(db, row.refId) };
   const [c] = await db<{ visitId: number }[]>`SELECT visit_id FROM visit_tag_changes WHERE id = ${row.refId}`;
@@ -573,33 +578,32 @@ export async function lookupFrontdeskOp(db: Db, key: string) {
 }
 
 /**
- * 作废一笔结果待确认的前台操作：先把操作编号登记为 abandoned（单独提交）。
- * - 登记成功：原请求无论还在路上、在等锁还是正在执行，最终写操作编号时都会冲突并整笔回滚，永远不会生效；
+ * 作废一笔结果待确认的前台操作：登记「编号 + 原业务类型」的作废（单独提交，见 lib/fences.ts）。
+ * - 登记成功：原请求无论还在路上、在等锁还是正在执行，写编号前都会看到作废并整笔回滚，永远不会生效；
  * - 编号已有结果：说明原操作已经生效，返回查回的结果，不作废；
- * - 原请求恰好已写下编号但还没提交：这里等它结束（最多 5 秒）再给出确定答复，超时则仍为待确认。
+ * - 原请求恰好正在写编号：这里等它提交（最多 5 秒）再给出确定答复，超时则仍为待确认。
+ * 只能登记前台的业务类型，所以从这里作废会员记账的编号不会拦下会员记账。
  */
-export async function abandonFrontdeskOp(deps: Deps, key: string, ctx: OpContext) {
-  const inserted = await deps.sql.begin(async (tx) => {
+export async function abandonFrontdeskOp(deps: Deps, key: string, opType: FrontdeskOp, ctx: OpContext) {
+  const outcome = await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
-    const rows = await tx<{ key: string }[]>`
-      INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id)
-      VALUES (${key}, 'abandoned', '', 0, ${ctx.actor.id})
-      ON CONFLICT (key) DO NOTHING RETURNING key`;
-    if (rows.length) {
+    const result = await fenceKey(tx, key, opType, ctx.actor.id);
+    if ('inserted' in result && result.inserted) {
       await writeAudit(tx, {
         staffId: ctx.actor.id,
         action: 'frontdesk_abandon',
         targetType: 'operation',
         targetId: key,
-        detail: { key },
+        detail: { key, type: opType },
         ip: ctx.ip,
         businessDate: await businessDate(tx, deps, ctx.at ?? new Date()),
       });
     }
-    return rows.length > 0;
+    return result;
   });
-  if (inserted) return { found: false as const, abandoned: true as const };
-  const result = await lookupFrontdeskOp(deps.sql, key);
-  if (!result.found && !result.abandoned) throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号属于其他业务，不能在前台作废');
-  return result;
+  if (!('existingOpType' in outcome) || outcome.existingOpType === 'abandoned') return { found: false as const, abandoned: true };
+  if (!(FRONTDESK_OPS as readonly string[]).includes(outcome.existingOpType)) {
+    throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号属于其他业务，不能在前台作废');
+  }
+  return lookupFrontdeskOp(deps.sql, key, opType);
 }

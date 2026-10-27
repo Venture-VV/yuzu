@@ -108,7 +108,7 @@ describe('结果待确认：查回与作废', () => {
     await waitForLockWaiters(1);
     const look = await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/ops/${key}`);
     expect(look.body).toEqual({ found: false, abandoned: false });
-    const abandon = await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/ops/${key}/abandon`);
+    const abandon = await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/ops/${key}/abandon`, { type: 'bill_post' });
     expect(abandon.body).toEqual({ found: false, abandoned: true });
     await release();
     const r = await original;
@@ -127,7 +127,7 @@ describe('结果待确认：查回与作废', () => {
     const visitId = (await checkin('A011')).body.visits[0].id as number;
     const key = randomUUID();
     expect((await post(visitId, key)).status).toBe(200);
-    const abandon = await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/ops/${key}/abandon`);
+    const abandon = await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/ops/${key}/abandon`, { type: 'bill_post' });
     expect(abandon.body).toMatchObject({ found: true, type: 'bill_post' });
     expect(abandon.body.visit.bill.amountCents).toBe(5800);
     // 重复点击「按原内容重新提交」仍只有一笔
@@ -141,7 +141,7 @@ describe('结果待确认：查回与作废', () => {
       ON CONFLICT (doc_type, business_date) DO UPDATE SET last_no = doc_counters.last_no`);
     const original = checkin('A012', key);
     await waitForLockWaiters(1);
-    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/ops/${key}/abandon`)).body).toEqual({ found: false, abandoned: true });
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/ops/${key}/abandon`, { type: 'checkin' })).body).toEqual({ found: false, abandoned: true });
     await release();
     expect((await original).body.error.code).toBe('OP_ABANDONED');
     const { n } = (await ctx.sql<{ n: number }[]>`SELECT count(*) AS n FROM visits WHERE checkin_key = ${key}`)[0]!;
@@ -153,14 +153,14 @@ describe('结果待确认：查回与作废', () => {
     const m = await createMember(ctx, '编号隔离', '19900007701');
     const body = rechargeBody(m.id, 10000);
     await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', body);
-    const r = await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/ops/${body.idempotencyKey}/abandon`);
+    const r = await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/ops/${body.idempotencyKey}/abandon`, { type: 'bill_post' });
     expect(r.status).toBe(409);
     const [k] = await ctx.sql<{ opType: string }[]>`SELECT op_type FROM idempotency_keys WHERE key = ${body.idempotencyKey}`;
     expect(k!.opType).toBe('recharge');
     await createStaff(ctx.sql, { username: 'backoffice9', displayName: '后勤', role: 'backoffice', duties: ['stock'], password: PASSWORD, mustChangePassword: false });
     const backoffice = await login(ctx.app, 'backoffice9');
     const key = randomUUID();
-    expect((await api(ctx.app, backoffice, 'POST', `/api/frontdesk/ops/${key}/abandon`)).status).toBe(403);
+    expect((await api(ctx.app, backoffice, 'POST', `/api/frontdesk/ops/${key}/abandon`, { type: 'checkin' })).status).toBe(403);
     expect((await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/ops/${key}`)).body).toEqual({ found: false, abandoned: false });
   });
 });

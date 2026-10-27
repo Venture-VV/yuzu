@@ -7,7 +7,7 @@ import type { Deps, OpContext } from '../../lib/context';
 import { idParam, parse } from '../../lib/validate';
 import { postCharges, voidLine, type PostInputData } from './bills';
 import { frontdeskChecks } from './checks';
-import { loadFrontdeskRules } from './common';
+import { FRONTDESK_OPS, loadFrontdeskRules } from './common';
 import { batchCreate, listTags, lockHandTag, unlockHandTag, updateHandTag } from './tags';
 import {
   abandonFrontdeskOp,
@@ -54,15 +54,18 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
     return readSnapshot(sql, (tx) => previewBills(tx, ids));
   });
 
-  // 结果待确认时：GET 只查回；POST abandon 作废这笔（之后原请求即使到达也不会生效）
+  // 结果待确认时：GET 只查回；POST abandon 作废这笔（之后原请求即使到达也不会生效）。type 为页面记录的原业务类型
+  const OpKey = z.object({ key: z.uuid('操作编号格式不正确') });
   app.get('/api/frontdesk/ops/:key', { preHandler: guard('frontdesk.read') }, async (req) => {
-    const { key } = parse(z.object({ key: z.uuid('操作编号格式不正确') }), req.params);
-    return lookupFrontdeskOp(sql, key);
+    const { key } = parse(OpKey, req.params);
+    const { type } = parse(z.object({ type: z.enum(FRONTDESK_OPS).optional() }), req.query ?? {});
+    return lookupFrontdeskOp(sql, key, type);
   });
 
   app.post('/api/frontdesk/ops/:key/abandon', { preHandler: guard('frontdesk.operate') }, async (req) => {
-    const { key } = parse(z.object({ key: z.uuid('操作编号格式不正确') }), req.params);
-    return abandonFrontdeskOp(deps, key, ctxOf(req));
+    const { key } = parse(OpKey, req.params);
+    const { type } = parse(z.object({ type: z.enum(FRONTDESK_OPS, '缺少原操作的业务类型') }), req.body ?? {});
+    return abandonFrontdeskOp(deps, key, type, ctxOf(req));
   });
 
   // ── 接待、换牌、同行、撤销 ──

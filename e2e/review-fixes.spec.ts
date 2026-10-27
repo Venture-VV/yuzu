@@ -69,8 +69,8 @@ async function lateRequest(page: Page, pattern: string) {
   };
 }
 
-async function lookupOp(page: Page, key: string) {
-  return (await page.request.get(`/api/operations/${key}`)).json();
+async function lookupOp(page: Page, key: string, type: 'recharge' | 'consume' | 'reversal') {
+  return (await page.request.get(`/api/operations/${key}?type=${type}`)).json();
 }
 
 test.describe('待确认操作在关闭、刷新、重新登录后仍可处理', () => {
@@ -160,7 +160,7 @@ test.describe('待确认操作在关闭、刷新、重新登录后仍可处理',
     expect(arrived.status).toBe(409);
     expect(arrived.code).toBe('OP_ABANDONED');
     expect(await balance(page, '姜禾')).toEqual(before);
-    expect(await lookupOp(page, late.key())).toEqual({ found: false, abandoned: true });
+    expect(await lookupOp(page, late.key(), 'recharge')).toEqual({ found: false, abandoned: true });
 
     // 在已打开的面板里重新填写：新的一笔正常入账，只有这一笔
     await fillRecharge(page, /轻享 300/, '支付宝');
@@ -204,7 +204,7 @@ test.describe('待确认操作在关闭、刷新、重新登录后仍可处理',
     await page.getByRole('button', { name: '查询这笔操作的结果' }).click();
     await page.getByRole('button', { name: '按原内容重新提交' }).click();
     await expect(page.getByText('会员余额刚刚有变化')).toBeVisible();
-    expect(await lookupOp(page, late2.key())).toEqual({ found: false, abandoned: true });
+    expect(await lookupOp(page, late2.key(), 'consume')).toEqual({ found: false, abandoned: true });
     expect((await late2.deliver()).code).toBe('OP_ABANDONED');
     expect(await balance(page, '黎明月')).toEqual({ principal: before.principal + 100, bonus: before.bonus });
     await expect(pendingBanner(page)).toHaveCount(0);

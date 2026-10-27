@@ -5,7 +5,8 @@
 //   1. 先对会员行加锁（SELECT … FOR UPDATE），同一会员的操作严格串行；
 //   2. 加锁后检查幂等键：同一个键再次提交时直接返回第一次的结果，不会重复记账；
 //   3. 余额字段有 CHECK (>= 0) 约束兜底，任何情况下都不会透支；
-//   4. 员工确认作废一笔结果待确认的操作时，先把操作编号登记为 abandoned，原请求之后才到达也会整笔回滚。
+//   4. 员工确认作废一笔结果待确认的操作时，先登记「编号 + 业务类型」的作废（lib/fences.ts）；
+//      原请求写编号前与作废串行检查，同一类型已作废则整笔回滚。
 
 import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
@@ -18,6 +19,7 @@ import type { ConsumptionDoc, OperationLookup, OperationResult, RechargeDoc, Rev
 import { isUniqueViolation, type Db, type Sql, type Tx } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
+import { assertNotFenced, fenceKey, isFenced } from '../lib/fences';
 import type { Deps, OpContext } from '../lib/context';
 import { AppError, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse, positiveCents, cents } from '../lib/validate';
@@ -78,14 +80,18 @@ export const ReverseInput = z.object({
 });
 export type ReverseInputData = z.input<typeof ReverseInput>;
 
-/** 作废时页面带上的原操作摘要：只用于审计与日结提醒，不参与记账 */
+/**
+ * 作废：type 是页面记录的原业务类型，服务端按它检查权限，并且只有与原请求真实类型一致时作废才生效；
+ * 其余是原操作摘要，只用于审计与日结提醒，不参与记账。
+ */
 export const AbandonInput = z.object({
-  type: z.enum(OP_TYPES).optional(),
+  type: z.enum(OP_TYPES, '缺少原操作的业务类型'),
   memberId: z.number().int().positive().optional(),
   amount: z.number().int().min(0).optional(),
   summary: z.string().trim().max(200, '摘要最多 200 字').default(''),
 });
 export type AbandonInputData = z.input<typeof AbandonInput>;
+type AbandonInputParsed = z.output<typeof AbandonInput>;
 
 // ───────────────────────── 基础工具 ─────────────────────────
 
@@ -126,10 +132,11 @@ async function findKey(db: Db, key: string): Promise<KeyRow | undefined> {
   return row;
 }
 
+const abandonedError = () => conflict('OP_ABANDONED', '这笔操作已确认作废，没有入账；如仍需办理，请重新填写后提交');
+
 function assertSameRequest(row: KeyRow, opType: OpType, requestHash: string) {
-  if (row.opType === 'abandoned') {
-    throw conflict('OP_ABANDONED', '这笔操作已确认作废，没有入账；如仍需办理，请重新填写后提交');
-  }
+  // 005 版本的作废登记直接占用了编号，仍按已作废处理
+  if (row.opType === 'abandoned') throw abandonedError();
   if (row.opType !== opType || row.requestHash !== requestHash) {
     throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一笔不同的业务，请刷新页面后重新发起');
   }
@@ -153,7 +160,10 @@ async function runIdempotent(
         assertSameRequest(existing, opts.opType, opts.requestHash);
         return { refId: existing.refId, replayed: true };
       }
+      if (await isFenced(tx, opts.key, [opts.opType])) throw abandonedError();
       const refId = await body(tx, member);
+      // 写编号前与「确认作废」串行：处理期间被作废（同一业务类型）则整笔回滚
+      await assertNotFenced(tx, opts.key, opts.opType, abandonedError);
       await tx`
         INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id)
         VALUES (${opts.key}, ${opts.opType}, ${opts.requestHash}, ${refId}, ${opts.staffId})`;
@@ -520,30 +530,31 @@ export async function reverse(deps: Deps, consumptionId: number, raw: ReverseInp
  * 按操作编号查回结果（只读）。
  * 查不到只说明「此刻还没有已提交的结果」，原请求可能仍在路上或在等锁，页面不能据此断定没有入账；
  * 要放弃这笔，必须调用 abandonOperation。
+ * expected 是页面记录的原业务类型：只有同一类型的作废登记才算「已作废」（别人伪报类型登记的不算）。
  */
-export async function lookupOperation(sql: Sql, key: string): Promise<OperationLookup> {
+export async function lookupOperation(sql: Sql, key: string, expected?: OpType): Promise<OperationLookup> {
   const row = await findKey(sql, key);
   if (row?.opType === 'abandoned') return { found: false, abandoned: true };
   // 库存、采购与前台有各自的查回接口，这里只查会员记账
-  if (!row || !isWalletOp(row.opType)) return { found: false, abandoned: false };
-  return { found: true, ...(await loadOperation(sql, row.opType, row.refId, true)) };
+  if (row) {
+    if (!isWalletOp(row.opType)) return { found: false, abandoned: false };
+    return { found: true, ...(await loadOperation(sql, row.opType, row.refId, true)) };
+  }
+  return { found: false, abandoned: await isFenced(sql, key, expected ? [expected] : OP_TYPES) };
 }
 
 /**
- * 作废一笔结果待确认的记账：先把操作编号登记为 abandoned（单独提交）。
- * - 登记成功：原请求无论还在路上、在等锁还是正在执行，最终写操作编号时都会冲突并整笔回滚，永远不会入账；
+ * 作废一笔结果待确认的记账：登记「编号 + 原业务类型」的作废（单独提交，见 lib/fences.ts）。
+ * - 登记成功：原请求无论还在路上、在等锁还是正在执行，写编号前都会看到作废并整笔回滚，永远不会入账；
  * - 编号已有结果：说明原操作已经入账，返回查回的结果，不作废；
- * - 原请求恰好已写下编号但还没提交：这里等它结束（最多 5 秒）再给出确定答复，超时则仍为待确认。
+ * - 原请求恰好正在写编号：这里等它提交（最多 5 秒）再给出确定答复，超时则仍为待确认。
+ * 权限按 input.type 检查（路由），伪报类型的登记拦不下原请求。
  */
-export async function abandonOperation(deps: Deps, key: string, raw: AbandonInputData, ctx: OpContext): Promise<OperationLookup> {
-  const input = parse(AbandonInput, raw);
-  const inserted = await deps.sql.begin(async (tx) => {
+export async function abandonOperation(deps: Deps, key: string, input: AbandonInputParsed, ctx: OpContext): Promise<OperationLookup> {
+  const outcome = await deps.sql.begin(async (tx) => {
     await tx.unsafe("SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '10s'");
-    const rows = await tx<{ key: string }[]>`
-      INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id)
-      VALUES (${key}, 'abandoned', '', 0, ${ctx.actor.id})
-      ON CONFLICT (key) DO NOTHING RETURNING key`;
-    if (rows.length) {
+    const result = await fenceKey(tx, key, input.type, ctx.actor.id);
+    if ('inserted' in result && result.inserted) {
       const settings = await loadSettings(tx);
       await writeAudit(tx, {
         staffId: ctx.actor.id,
@@ -552,20 +563,20 @@ export async function abandonOperation(deps: Deps, key: string, raw: AbandonInpu
         targetId: input.memberId ?? key,
         detail: {
           idempotencyKey: key,
-          type: input.type ?? null,
+          type: input.type,
           amount: input.amount ?? null,
-          summary: [input.type ? OP_LABELS[input.type] : '', input.summary].filter(Boolean).join(' · '),
+          summary: [OP_LABELS[input.type], input.summary].filter(Boolean).join(' · '),
         },
         ip: ctx.ip,
         businessDate: businessDateOf(ctx.at ?? new Date(), deps.config.timezone, settings.businessDayStartHour),
       });
     }
-    return rows.length > 0;
+    return result;
   });
-  if (inserted) return { found: false, abandoned: true };
-  const result = await lookupOperation(deps.sql, key);
-  if (!result.found && !result.abandoned) throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号属于其他业务，不能在这里作废');
-  return result;
+  if (!('existingOpType' in outcome)) return { found: false, abandoned: true };
+  if (outcome.existingOpType === 'abandoned') return { found: false, abandoned: true };
+  if (!isWalletOp(outcome.existingOpType)) throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号属于其他业务，不能在这里作废');
+  return lookupOperation(deps.sql, key, input.type);
 }
 
 // ───────────────────────── 路由 ─────────────────────────
@@ -622,18 +633,20 @@ export function registerWalletRoutes(app: FastifyInstance, deps: Deps) {
     return getReversal(sql, id);
   });
 
-  // 页面超时或断网后，用提交时的操作编号查回结果
+  const KeyParam = z.object({ key: z.uuid('操作编号格式不正确') });
+
+  // 页面超时或断网后，用提交时的操作编号查回结果；type 为页面记录的原业务类型
   app.get('/api/operations/:key', { preHandler: guard() }, async (req) => {
-    const { key } = parse(z.object({ key: z.uuid('操作编号格式不正确') }), req.params);
-    return lookupOperation(sql, key);
+    const { key } = parse(KeyParam, req.params);
+    const { type } = parse(z.object({ type: z.enum(OP_TYPES).optional() }), req.query ?? {});
+    return lookupOperation(sql, key, type);
   });
 
-  // 员工确认作废一笔结果待确认的记账；需要对应业务的权限（页面没带类型时，具备任一记账权限即可）
+  // 员工确认作废一笔结果待确认的记账：需要这项业务本身的权限（例如作废撤销需要撤销权限）
   app.post('/api/operations/:key/abandon', { preHandler: guard() }, async (req) => {
-    const { key } = parse(z.object({ key: z.uuid('操作编号格式不正确') }), req.params);
-    const body = (req.body ?? {}) as AbandonInputData;
-    const needed = body.type && isWalletOp(body.type) ? [OP_PERMISSION[body.type]] : Object.values(OP_PERMISSION);
-    if (!needed.some((p) => can(req.actor, p))) throw forbidden();
-    return abandonOperation(deps, key, body, ctxOf(req));
+    const { key } = parse(KeyParam, req.params);
+    const input = parse(AbandonInput, req.body ?? {});
+    if (!can(req.actor, OP_PERMISSION[input.type])) throw forbidden();
+    return abandonOperation(deps, key, input, ctxOf(req));
   });
 }

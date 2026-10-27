@@ -2,7 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { OperationLookup, OperationResult } from '@shared/types';
 import { api, ApiError, UncertainError } from '../../lib/api';
-import { PENDING_LABELS, removePending, savePending, setClaimed, setInFlight, type PendingOp, type PendingType } from '../../lib/pendingOps';
+import {
+  PENDING_LABELS,
+  PendingStoreError,
+  removePending,
+  savePending,
+  setClaimed,
+  setInFlight,
+  type PendingOp,
+  type PendingType,
+} from '../../lib/pendingOps';
 import { uuid } from '../../lib/utils';
 import { useToast } from '../../components/Toast';
 
@@ -38,7 +47,8 @@ const uncertainReason = (error: unknown) => (error instanceof UncertainError ? e
 /**
  * 记账操作的提交状态机。
  * - 每次进入「核对」步骤生成新的操作编号；重试与查询都沿用同一个编号，服务端保证不会重复记账。
- * - 提交前把编号和原请求存到本机（pendingOps）；超时 / 断网 / 服务器异常时保留，面板关闭或刷新后仍可查回。
+ * - 提交前把编号和原请求存到本机（pendingOps）并读回核对；存不进去就不发请求。超时 / 断网 / 服务器异常时保留，
+ *   面板关闭或刷新后仍可查回。
  * - 查不到不能断定没有入账（原请求可能还在路上或在等锁）。员工只能按原内容重新提交（同一编号，安全），
  *   或确认作废：服务端先登记作废，原请求之后即使到达也会整笔回滚，然后才开始新的一笔。
  */
@@ -132,8 +142,15 @@ export function useOperation(spec: OperationSpec) {
 
   const send = useCallback(
     async (op: PendingOp) => {
+      try {
+        savePending(op);
+      } catch (error) {
+        // 记录存不进本机：一旦响应丢失就无法查回原编号，所以这笔不提交
+        if (!(error instanceof PendingStoreError)) throw error;
+        setState({ status: 'error', error: new ApiError(0, error.code, error.message) });
+        return;
+      }
       setState({ status: 'submitting' });
-      savePending(op);
       setInFlight(op.key, true);
       try {
         const result = await api.post<OperationResult>(op.url, op.body);
@@ -174,7 +191,7 @@ export function useOperation(spec: OperationSpec) {
     const key = op?.key ?? keyRef.current;
     setState({ status: 'checking' });
     try {
-      const found = await api.get<OperationLookup>(`/api/operations/${key}`);
+      const found = await api.get<OperationLookup>(`/api/operations/${key}?type=${op?.type ?? spec.type}`);
       if (found.found) {
         const { found: _found, ...result } = found;
         succeed(key, result, true);
@@ -188,7 +205,7 @@ export function useOperation(spec: OperationSpec) {
       // 查询失败不说明原操作的结果，仍按待确认处理
       setState({ status: 'uncertain', reason: uncertainReason(error) });
     }
-  }, [succeed, voided]);
+  }, [succeed, voided, spec.type]);
 
   /** 接手一笔之前留下的待确认操作，并立即查询结果 */
   const adopt = useCallback(

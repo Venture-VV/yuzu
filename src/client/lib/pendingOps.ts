@@ -2,9 +2,10 @@ import { useSyncExternalStore } from 'react';
 
 // 「结果待确认」的记账操作，保存在本机浏览器里。
 //
-// 提交前先记下操作编号和原请求；只有确认了结果（成功、服务端明确拒绝、员工明确放弃）才删除。
-// 这样即使关闭面板、切换会员、刷新页面或重新登录，也能用原编号查回结果或原样重提，
-// 不会因为换了新编号而重复入账。
+// 提交前先记下操作编号和原请求，并读回核对确实已保存；保存不了（存储已满或被禁用）就不发请求，
+// 否则响应一旦丢失，关闭或刷新后就再也找不到原编号。只有确认了结果（成功、服务端明确拒绝、
+// 服务端确认作废）才删除。这样即使关闭面板、切换会员、刷新页面或重新登录，也能用原编号查回结果
+// 或原样重提，不会因为换了新编号而重复入账。
 
 export type PendingType = 'recharge' | 'consume' | 'reversal';
 
@@ -33,45 +34,68 @@ const listeners = new Set<() => void>();
 const inFlight = new Set<string>();
 /** 正由屏幕上打开的流程处理的编号：顶部提醒不重复显示、不抢先查询 */
 const claimed = new Set<string>();
-let memoryFallback: PendingOp[] = [];
-let cachedRaw: string | null = null;
+/** 已有结论、但本机删不掉记录的编号：本页先隐藏，下次进入页面自动查回后再删 */
+const settled = new Set<string>();
+let cachedRaw: string | null | undefined;
 let cachedList: PendingOp[] = [];
+
+/** 待确认记录无法可靠保存到本机：为防止断网后重复记账，这笔不能提交 */
+export class PendingStoreError extends Error {
+  readonly code = 'PENDING_STORE_FAILED';
+  constructor() {
+    super('本机浏览器无法保存「结果待确认」记录（存储空间已满或被禁用），为防止断网后重复记账，这笔没有提交。请联系店主清理浏览器数据，或换一台终端办理。');
+  }
+}
 
 function readAll(): PendingOp[] {
   let raw: string | null;
   try {
     raw = localStorage.getItem(STORAGE_KEY);
   } catch {
-    return memoryFallback;
+    raw = null; // 存储不可用：写入同样会失败，提交前就会被拦下，这里不会有记录
   }
   if (raw === cachedRaw) return cachedList;
   cachedRaw = raw;
   try {
     const parsed = raw ? (JSON.parse(raw) as PendingOp[]) : [];
-    cachedList = Array.isArray(parsed) ? parsed : [];
+    cachedList = (Array.isArray(parsed) ? parsed : []).filter((p) => !settled.has(p.key));
   } catch {
     cachedList = [];
   }
   return cachedList;
 }
 
-function writeAll(list: PendingOp[]) {
-  memoryFallback = list;
+/** 写入并读回核对：写入被拒绝（例如存储已满）或被静默丢弃时返回 false */
+function persist(list: PendingOp[]): boolean {
+  const raw = list.length ? JSON.stringify(list) : null;
   try {
-    if (list.length) localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-    else localStorage.removeItem(STORAGE_KEY);
+    if (raw === null) localStorage.removeItem(STORAGE_KEY);
+    else localStorage.setItem(STORAGE_KEY, raw);
+    return localStorage.getItem(STORAGE_KEY) === raw;
   } catch {
-    /* 隐私模式等不可写时，退回内存保存（至少在关闭面板后仍可处理） */
+    return false;
   }
+}
+
+function notify() {
+  cachedRaw = undefined;
+  snapshotCache = null;
   listeners.forEach((fn) => fn());
 }
 
+/** 提交前保存待确认记录；保存不了时抛出 PendingStoreError，调用方不得发出请求 */
 export function savePending(op: PendingOp) {
-  writeAll([...readAll().filter((p) => p.key !== op.key), op]);
+  const list = readAll();
+  if (list.some((p) => p.key === op.key)) return; // 原样重提：记录已在本机
+  if (!persist([...list, op])) throw new PendingStoreError();
+  notify();
 }
 
 export function removePending(key: string) {
-  if (readAll().some((p) => p.key === key)) writeAll(readAll().filter((p) => p.key !== key));
+  const list = readAll();
+  if (!list.some((p) => p.key === key)) return;
+  if (!persist(list.filter((p) => p.key !== key))) settled.add(key);
+  notify();
 }
 
 export function setInFlight(key: string, active: boolean) {

@@ -42,7 +42,7 @@ export function PendingOpsBanner() {
         if (checked.current.has(op.key)) continue;
         checked.current.add(op.key);
         api
-          .get<OperationLookup>(`/api/operations/${op.key}`)
+          .get<OperationLookup>(`/api/operations/${op.key}?type=${op.type}`)
           .then((found) => {
             if (!found.found) {
               // 已确认作废的（例如作废答复在网络中丢失）直接移除；查不到的保留，不能断定没有入账

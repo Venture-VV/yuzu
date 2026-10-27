@@ -128,21 +128,23 @@ describe('结果待确认的会员记账：查回与作废', () => {
     const done = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, 8800));
     const rechargeId = done.body.recharge.id as number;
 
-    // 用单独连接模拟「原请求刚写下编号、还没提交」
+    // 用单独连接模拟「原请求刚写下编号、还没提交」：与正式流程一样，先取编号的咨询锁再写编号
+    const writeKey = (key: string) => async (tx: typeof ctx.sql) => {
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+      await tx`
+        INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id)
+        VALUES (${key}, 'recharge', 'h', ${rechargeId}, ${ctx.clerkId})`;
+    };
     const committedKey = randomUUID();
-    const inflight = await hold((tx) => tx`
-      INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id)
-      VALUES (${committedKey}, 'recharge', 'h', ${rechargeId}, ${ctx.clerkId})`);
-    const waiting = abandon(committedKey);
+    const inflight = await hold(writeKey(committedKey));
+    const waiting = abandon(committedKey, { type: 'recharge' });
     await waitForLockWaiters(1);
     await inflight.commit();
     expect((await waiting).body).toMatchObject({ found: true, type: 'recharge' });
 
     const rolledBackKey = randomUUID();
-    const aborted = await hold((tx) => tx`
-      INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id)
-      VALUES (${rolledBackKey}, 'recharge', 'h', ${rechargeId}, ${ctx.clerkId})`);
-    const waiting2 = abandon(rolledBackKey);
+    const aborted = await hold(writeKey(rolledBackKey));
+    const waiting2 = abandon(rolledBackKey, { type: 'recharge' });
     await waitForLockWaiters(1);
     await aborted.release();
     expect((await waiting2).body).toEqual({ found: false, abandoned: true });
@@ -186,23 +188,108 @@ describe('结果待确认的会员记账：查回与作废', () => {
     expect(anomaly!.description).toContain('常泡 500 · 微信');
   });
 
-  it('权限与编号隔离：店员不能作废撤销；后勤岗位不能作废；不能作废前台的操作编号', async () => {
+  it('权限与编号隔离：必须写明原业务类型；店员不能作废撤销；后勤岗位不能作废；不能作废前台已生效的编号', async () => {
     const key = randomUUID();
+    expect((await abandon(key, {})).status).toBe(400);
     const clerkReversal = await abandon(key, { type: 'reversal' });
     expect(clerkReversal.status).toBe(403);
     await createStaff(ctx.sql, { username: 'backoffice1', displayName: '后勤', role: 'backoffice', duties: ['stock'], password: PASSWORD, mustChangePassword: false });
     const backoffice = await login(ctx.app, 'backoffice1');
-    expect((await abandon(key, {}, backoffice)).status).toBe(403);
+    expect((await abandon(key, { type: 'recharge' }, backoffice)).status).toBe(403);
     expect((await lookup(key)).body).toEqual({ found: false, abandoned: false });
 
-    await api(ctx.app, ctx.owner, 'POST', '/api/frontdesk/tags/batch', { prefix: 'A', from: 1, to: 3, width: 3, zone: 'male' });
+    await api(ctx.app, ctx.owner, 'POST', '/api/frontdesk/tags/batch', { prefix: 'A', from: 1, to: 6, width: 3, zone: 'male' });
     const checkinKey = randomUUID();
     const checkin = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: checkinKey, guests: [{ tagCode: 'A001', zone: 'male' }] });
     expect(checkin.status).toBe(201);
-    const cross = await abandon(checkinKey);
+    const cross = await abandon(checkinKey, { type: 'consume' });
     expect(cross.status).toBe(409);
     expect(cross.body.error.code).toBe('IDEMPOTENCY_CONFLICT');
     const [k] = await ctx.sql<{ opType: string }[]>`SELECT op_type FROM idempotency_keys WHERE key = ${checkinKey}`;
     expect(k!.opType).toBe('checkin');
+  });
+});
+
+describe('作废只对原业务类型生效（G2 第 2 轮复测意见 2）', () => {
+  /** 店主有一张待撤销的消费；撤销请求卡在会员锁上（已到服务器、还没写编号） */
+  async function pendingReversal(name: string, phone: string) {
+    const m = await createMember(ctx, name, phone);
+    await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, 10000));
+    const c = await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', consumeBody(m.id, 3000));
+    const consumptionId = c.body.consumption.id as number;
+    const key = randomUUID();
+    const lock = await hold((tx) => tx`SELECT id FROM members WHERE id = ${m.id} FOR UPDATE`);
+    const original = api(ctx.app, ctx.owner, 'POST', `/api/consumptions/${consumptionId}/reverse`, { idempotencyKey: key, reason: '项目选错' });
+    await waitForLockWaiters(1);
+    return { m, key, consumptionId, lock, original };
+  }
+
+  async function expectReversed(p: Awaited<ReturnType<typeof pendingReversal>>) {
+    await p.lock.release();
+    const r = await p.original;
+    expect(r.status).toBe(200);
+    const [doc] = await ctx.sql<{ status: string }[]>`SELECT status FROM consumptions WHERE id = ${p.consumptionId}`;
+    expect(doc!.status).toBe('reversed');
+    expect(await balanceOf(ctx, p.m.id)).toEqual({ principal: 10000, bonus: 0 });
+    expect((await lookup(`${p.key}?type=reversal`)).body).toMatchObject({ found: true, type: 'reversal' });
+  }
+
+  it('店员把店主待处理的撤销伪报成「消费」作废：登记不生效，撤销照常完成；按原类型查回不显示已作废', async () => {
+    const p = await pendingReversal('伪报类型', '19900009201');
+    const forged = await abandon(p.key, { type: 'consume', memberId: p.m.id });
+    expect(forged.status).toBe(200);
+    // 店主那边按原类型查回：不会被误导成「已作废」而另起一笔
+    expect((await lookup(`${p.key}?type=reversal`)).body).toEqual({ found: false, abandoned: false });
+    await expectReversed(p);
+  });
+
+  it('从前台接口作废会员撤销的编号（在途）：只能登记前台类型，拦不下撤销', async () => {
+    const p = await pendingReversal('跨模块在途', '19900009202');
+    const cross = await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/ops/${p.key}/abandon`, { type: 'bill_post' });
+    expect(cross.status).toBe(200);
+    expect((await lookup(`${p.key}?type=reversal`)).body).toEqual({ found: false, abandoned: false });
+    await expectReversed(p);
+  });
+
+  it('同一终端切换为店员后：按真实类型作废店主的撤销被拒绝（403）；店主本人可以作废，撤销随后整笔回滚', async () => {
+    const p = await pendingReversal('切换店员', '19900009203');
+    expect((await abandon(p.key, { type: 'reversal' })).status).toBe(403);
+    expect((await abandon(p.key, { type: 'reversal' }, ctx.owner)).body).toEqual({ found: false, abandoned: true });
+    await p.lock.release();
+    expect((await p.original).body.error.code).toBe('OP_ABANDONED');
+    const [doc] = await ctx.sql<{ status: string }[]>`SELECT status FROM consumptions WHERE id = ${p.consumptionId}`;
+    expect(doc!.status).toBe('completed');
+    expect(await balanceOf(ctx, p.m.id)).toEqual({ principal: 7000, bonus: 0 });
+  });
+
+  it('反方向：用会员接口作废前台在途的挂账，挂账照常生效；前台按原类型作废才会拦下', async () => {
+    await api(ctx.app, ctx.owner, 'POST', '/api/frontdesk/tags/batch', { prefix: 'F', from: 1, to: 3, width: 3, zone: 'male' });
+    const items = (await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '跨模块搓背', category: '护理', price: 5800 })).body.items;
+    const itemId = items.find((i: { name: string }) => i.name === '跨模块搓背').id as number;
+    const visitId = (await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: 'F001', zone: 'male' }] })).body.visits[0].id as number;
+    const post = (key: string) =>
+      api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${visitId}/charges`, { clientKey: key, lines: [{ itemId, quantity: 1 }], expectedTotal: 5800 });
+    const amount = async () =>
+      (await ctx.sql<{ amountCents: number }[]>`SELECT b.amount_cents FROM bills b JOIN visits v ON v.bill_id = b.id WHERE v.id = ${visitId}`)[0]!.amountCents;
+
+    // ① 会员接口伪报类型：登记不生效
+    const key1 = randomUUID();
+    let lock = await hold((tx) => tx`SELECT id FROM visits WHERE id = ${visitId} FOR UPDATE`);
+    let original = post(key1);
+    await waitForLockWaiters(1);
+    expect((await abandon(key1, { type: 'consume' })).status).toBe(200);
+    await lock.release();
+    expect((await original).status).toBe(200);
+    expect(await amount()).toBe(5800);
+
+    // ② 前台接口、原类型：拦下
+    const key2 = randomUUID();
+    lock = await hold((tx) => tx`SELECT id FROM visits WHERE id = ${visitId} FOR UPDATE`);
+    original = post(key2);
+    await waitForLockWaiters(1);
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/ops/${key2}/abandon`, { type: 'bill_post' })).body).toEqual({ found: false, abandoned: true });
+    await lock.release();
+    expect((await original).body.error.code).toBe('OP_ABANDONED');
+    expect(await amount()).toBe(5800);
   });
 });

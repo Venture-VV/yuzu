@@ -8,7 +8,8 @@ import { Button, Notice } from '../../components/ui';
 
 // 前台「结果待确认」的操作（接待发牌、挂账、换牌），保存在本机浏览器里。
 //
-// 提交前先记下操作编号、对象和原请求；只有确认了结果（成功、服务端明确拒绝、员工作废且服务端确认作废）才删除。
+// 提交前先记下操作编号、对象和原请求，并读回核对确实已保存；保存不了（存储已满或被禁用）就不发请求。
+// 只有确认了结果（成功、服务端明确拒绝、员工作废且服务端确认作废）才删除。
 // 关闭对话框、刷新、切换手牌或重新登录后，同一对象上仍提示待确认，原操作确认前不能另起一笔。
 // 处理方式：
 //   · 查回：只读查询，查不到只代表此刻还没有已提交的结果，不能据此断定没有生效；
@@ -39,46 +40,66 @@ const listeners = new Set<() => void>();
 const inFlight = new Set<string>();
 /** 正由打开的对话框处理的编号：顶部提醒不显示、不抢先自动查回，避免对话框里的内容被悄悄解锁 */
 const claimed = new Set<string>();
-let memoryFallback: FrontdeskPendingOp[] = [];
+/** 已有结论、但本机删不掉记录的编号：本页先隐藏，下次进入页面自动查回后再删 */
+const settled = new Set<string>();
 let cachedRaw: string | null | undefined;
 let cachedList: FrontdeskPendingOp[] = [];
+
+/** 待确认记录无法可靠保存到本机：为防止断网后重复登记，这笔不能提交 */
+export const PENDING_STORE_FAILED =
+  '本机浏览器无法保存「结果待确认」记录（存储空间已满或被禁用），为防止断网后重复发牌或挂账，这笔没有提交。请联系店主清理浏览器数据，或换一台终端办理。';
 
 function readAll(): FrontdeskPendingOp[] {
   let raw: string | null;
   try {
     raw = localStorage.getItem(STORAGE_KEY);
   } catch {
-    return memoryFallback;
+    raw = null; // 存储不可用：写入同样会失败，提交前就会被拦下，这里不会有记录
   }
   if (raw === cachedRaw) return cachedList;
   cachedRaw = raw;
   try {
     const parsed = raw ? (JSON.parse(raw) as FrontdeskPendingOp[]) : [];
-    cachedList = Array.isArray(parsed) ? parsed : [];
+    cachedList = (Array.isArray(parsed) ? parsed : []).filter((p) => !settled.has(p.key));
   } catch {
     cachedList = [];
   }
   return cachedList;
 }
 
-function writeAll(list: FrontdeskPendingOp[]) {
-  memoryFallback = list;
+/** 写入并读回核对：写入被拒绝（例如存储已满）或被静默丢弃时返回 false */
+function persist(list: FrontdeskPendingOp[]): boolean {
+  const raw = list.length ? JSON.stringify(list) : null;
   try {
-    if (list.length) localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-    else localStorage.removeItem(STORAGE_KEY);
+    if (raw === null) localStorage.removeItem(STORAGE_KEY);
+    else localStorage.setItem(STORAGE_KEY, raw);
+    return localStorage.getItem(STORAGE_KEY) === raw;
   } catch {
-    /* 不可写时退回内存（至少关闭对话框后仍可处理） */
+    return false;
   }
+}
+
+function notify() {
+  cachedRaw = undefined;
   snapshotCache = null;
+  bannerCache = null;
   listeners.forEach((fn) => fn());
 }
 
-function save(op: FrontdeskPendingOp) {
-  writeAll([...readAll().filter((p) => p.key !== op.key), op]);
+/** 提交前保存；保存不了时返回 false，调用方不得发出请求 */
+function save(op: FrontdeskPendingOp): boolean {
+  const list = readAll();
+  if (list.some((p) => p.key === op.key)) return true; // 原样重提：记录已在本机
+  if (!persist([...list, op])) return false;
+  notify();
+  return true;
 }
 
 export function removeFrontdeskPending(key: string) {
-  if (readAll().some((p) => p.key === key)) writeAll(readAll().filter((p) => p.key !== key));
+  const list = readAll();
+  if (!list.some((p) => p.key === key)) return;
+  if (!persist(list.filter((p) => p.key !== key))) settled.add(key);
+  notify();
 }
 
 function setInFlight(key: string, active: boolean) {
@@ -169,8 +190,12 @@ export function useFrontdeskOp<T>(opts: { type: FrontdeskOpType; visitId: number
 
   const send = useCallback(
     async (op: FrontdeskPendingOp, isRetry = false): Promise<T | null> => {
+      // 记录存不进本机：一旦响应丢失就无法查回原编号，所以这笔不提交
+      if (!save(op)) {
+        setState({ phase: 'error', message: PENDING_STORE_FAILED, code: 'PENDING_STORE_FAILED' });
+        return null;
+      }
       setState({ phase: 'busy' });
-      save(op);
       setInFlight(op.key, true);
       try {
         const result = await api.post<T>(op.url, op.body);
@@ -183,7 +208,7 @@ export function useFrontdeskOp<T>(opts: { type: FrontdeskOpType; visitId: number
             // 重提被明确拒绝，不代表之前那次结果不明的请求不会随后生效：先在服务端作废编号，再下结论
             let fenced: FrontdeskOpLookup | null = null;
             try {
-              fenced = await api.post<FrontdeskOpLookup>(`/api/frontdesk/ops/${op.key}/abandon`);
+              fenced = await api.post<FrontdeskOpLookup>(`/api/frontdesk/ops/${op.key}/abandon`, { type: op.type });
             } catch {
               /* 作废没有完成，下面按待确认处理 */
             }
@@ -250,7 +275,7 @@ export function useFrontdeskOp<T>(opts: { type: FrontdeskOpType; visitId: number
     if (!pending) return null;
     setState({ phase: 'busy' });
     try {
-      return settle(pending.key, await api.get<FrontdeskOpLookup>(`/api/frontdesk/ops/${pending.key}`));
+      return settle(pending.key, await api.get<FrontdeskOpLookup>(`/api/frontdesk/ops/${pending.key}?type=${pending.type}`));
     } catch (error) {
       setState({ phase: 'uncertain', message: `仍然无法确认：${errorMessage(error)}` });
       return null;
@@ -262,7 +287,7 @@ export function useFrontdeskOp<T>(opts: { type: FrontdeskOpType; visitId: number
     if (!pending) return null;
     setState({ phase: 'busy' });
     try {
-      return settle(pending.key, await api.post<FrontdeskOpLookup>(`/api/frontdesk/ops/${pending.key}/abandon`));
+      return settle(pending.key, await api.post<FrontdeskOpLookup>(`/api/frontdesk/ops/${pending.key}/abandon`, { type: pending.type }));
     } catch (error) {
       setState({ phase: 'uncertain', message: `作废未完成，原操作仍待确认：${errorMessage(error)}` });
       return null;

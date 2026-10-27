@@ -179,7 +179,7 @@ test.describe('前台待确认操作与明确选牌', () => {
     // 拒绝原因照常显示；页面先在服务端作废原编号，确认后才移除待确认记录
     await expect(dialog).toContainText(`手牌 ${code} 已在店`);
     await expect(dialog.getByTestId('pending-op')).toHaveCount(0);
-    expect(await (await page.request.get(`/api/frontdesk/ops/${original!.clientKey}`)).json()).toEqual({ found: false, abandoned: true });
+    expect(await (await page.request.get(`/api/frontdesk/ops/${original!.clientKey}?type=checkin`)).json()).toEqual({ found: false, abandoned: true });
     // 原请求这时才到达：不会再开一张牌
     const late = await page.request.post('/api/frontdesk/checkins', { data: original });
     expect(late.status()).toBe(409);

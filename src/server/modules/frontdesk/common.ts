@@ -12,6 +12,7 @@ import { can } from '@shared/permissions';
 import { isUniqueViolation, type Db, type Tx } from '../../db';
 import type { Actor, Deps } from '../../lib/context';
 import { conflict, forbidden, unprocessable } from '../../lib/errors';
+import { assertNotFenced, isFenced } from '../../lib/fences';
 import { nextDocNo, setTxTimeouts } from '../inventory/common';
 import { loadSettings } from '../settings';
 
@@ -30,7 +31,11 @@ export async function businessDate(db: Db, deps: Deps, at: Date): Promise<string
 
 export const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 
-export type FrontdeskOp = 'checkin' | 'bill_post' | 'tag_swap';
+export const FRONTDESK_OPS = ['checkin', 'bill_post', 'tag_swap'] as const;
+export type FrontdeskOp = (typeof FRONTDESK_OPS)[number];
+
+export const abandonedError = () =>
+  conflict('OP_ABANDONED', '这笔操作已在「结果待确认」时由员工作废，不会再生效；如仍需要，请重新填写一笔');
 
 interface KeyRow {
   opType: string;
@@ -38,20 +43,24 @@ interface KeyRow {
   refId: number;
 }
 
-/** 查找操作编号；同一编号用于不同的请求时拒绝，避免把两笔业务混成一笔 */
+/** 查找操作编号；同一编号用于不同的请求时拒绝，避免把两笔业务混成一笔；已作废（同一类型）时拒绝 */
 export async function findKey(db: Db, key: string, opType: FrontdeskOp, requestHash: string): Promise<number | null> {
   const [row] = await db<KeyRow[]>`SELECT op_type, request_hash, ref_id FROM idempotency_keys WHERE key = ${key}`;
-  if (!row) return null;
-  if (row.opType === 'abandoned') {
-    throw conflict('OP_ABANDONED', '这笔操作已在「结果待确认」时由员工作废，不会再生效；如仍需要，请重新填写一笔');
+  if (!row) {
+    if (await isFenced(db, key, [opType])) throw abandonedError();
+    return null;
   }
+  // 005 版本的作废登记直接占用了编号，仍按已作废处理
+  if (row.opType === 'abandoned') throw abandonedError();
   if (row.opType !== opType || row.requestHash !== requestHash) {
     throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一笔不同的业务，请刷新页面后重新发起');
   }
   return row.refId;
 }
 
+/** 写下操作编号（事务最后一步）：先与「确认作废」串行检查，处理期间被作废（同一类型）则整笔回滚 */
 export async function saveKey(tx: Tx, key: string, opType: FrontdeskOp, requestHash: string, refId: number, staffId: number) {
+  await assertNotFenced(tx, key, opType, abandonedError);
   await tx`
     INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id)
     VALUES (${key}, ${opType}, ${requestHash}, ${refId}, ${staffId})`;

@@ -36,17 +36,20 @@ beforeAll(async () => {
     INSERT INTO members (member_no, name, phone, created_by) VALUES ('V0001', '升级前会员', '19900001111', ${owner!.id}) RETURNING id`;
   memberId = member!.id;
 
-  // 用第一版就有的记账流程写入真实流水（只依赖 001 的表）
+  // 用第一版就有的记账流程写入真实流水。现版本记账还会查作废登记表（006 才有），
+  // 写入期间临时放一张空表，迁移前删掉，升级仍从「只有 001」的结构开始
+  await sql`CREATE TABLE op_fences (key uuid, op_type text, staff_id bigint, created_at timestamptz)`;
   const ownerActor: Actor = { id: owner!.id, username: 'owner', displayName: '老店主', role: 'owner', duties: [], mustChangePassword: false };
   const clerkActor: Actor = { id: clerk!.id, username: 'clerk', displayName: '老店员', role: 'clerk', duties: [], mustChangePassword: false };
   const deps = { sql, config };
   rechargeKey = randomUUID();
   await recharge(deps, { idempotencyKey: rechargeKey, memberId, planId: null, paidAmount: 50000, bonusAmount: 5000, paymentMethod: 'cash', paymentConfirmed: true }, { actor: ownerActor });
   await consume(deps, { idempotencyKey: randomUUID(), memberId, customLines: [{ name: '升级前消费', amount: 12800 }], expectedTotal: 12800 }, { actor: clerkActor });
+  await sql`DROP TABLE op_fences`;
 
   // 升级：增量执行 002 之后的全部迁移
   const applied = await migrate(sql);
-  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql', '005_frontdesk_g2.sql']);
+  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql', '005_frontdesk_g2.sql', '006_op_fences.sql']);
   app = await buildApp(sql, config);
 }, 60_000);
 
