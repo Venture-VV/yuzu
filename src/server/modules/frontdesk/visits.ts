@@ -557,7 +557,6 @@ export async function previewBills(db: Db, visitIds: number[]): Promise<PreviewB
   };
 }
 
-/** 页面超时后，用操作编号查回结果 */
 /**
  * 按操作编号查回结果（只读）。
  * 查不到只说明「此刻还没有已提交的结果」，原请求可能仍在路上或在等锁，页面不能据此断定没有生效；

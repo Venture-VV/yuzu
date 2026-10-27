@@ -185,11 +185,17 @@ export function OperationStatus({
   state,
   onCheck,
   onRetry,
+  onDiscard,
 }: {
   state: OperationState;
   onCheck: () => void;
   onRetry: () => void;
+  /** 确认作废：服务端登记作废后，原请求即使稍后到达也不会入账 */
+  onDiscard?: () => void;
 }) {
+  if (state.status === 'abandoning') {
+    return <Notice tone="info" icon={<Spinner className="size-5 text-lake" />} title="正在作废这笔操作…" />;
+  }
   if (state.status === 'uncertain' || state.status === 'checking') {
     return (
       <Notice
@@ -212,14 +218,21 @@ export function OperationStatus({
     return (
       <Notice
         tone="info"
-        title="系统中没有这笔记录"
+        title="暂未查到这笔记录"
         action={
-          <Button variant="primary" size="sm" icon={<RotateCw className="size-4" />} onClick={onRetry}>
-            按原内容重新提交
-          </Button>
+          <>
+            <Button variant="primary" size="sm" icon={<RotateCw className="size-4" />} onClick={onRetry}>
+              按原内容重新提交
+            </Button>
+            {onDiscard && (
+              <Button variant="secondary" size="sm" icon={<Undo2 className="size-4" />} onClick={onDiscard}>
+                确认作废
+              </Button>
+            )}
+          </>
         }
       >
-        刚才的操作没有入账，余额未发生变化。重新提交会沿用原操作编号，不会重复入账。
+        原请求可能还在处理中，暂时不能断定没有入账。重新提交会沿用原操作编号，不会重复入账；不再办理时可确认作废，作废后原请求即使稍后到达也不会入账。
       </Notice>
     );
   }
@@ -230,14 +243,14 @@ export function OperationStatus({
 }
 
 const RECOVERY_TEXT = {
-  recharge: { amount: '实收金额', retry: '按原内容重新提交充值', hint: '顾客的款项确已到账时，按原内容重新提交；没有收款或顾客不再办理时，放弃这笔即可。' },
-  consume: { amount: '应扣金额', retry: '按原内容重新提交消费', hint: '顾客确实消费了这些项目时，按原内容重新提交；登记有误或不再办理时，放弃这笔后重新填写。' },
-  reversal: { amount: '恢复金额', retry: '重新提交撤销', hint: '仍需撤销这张消费单时重新提交；不再撤销时放弃即可。' },
+  recharge: { amount: '实收金额', retry: '按原内容重新提交充值', hint: '顾客的款项确已到账时，按原内容重新提交；没有收款或顾客不再办理时，确认作废。' },
+  consume: { amount: '应扣金额', retry: '按原内容重新提交消费', hint: '顾客确实消费了这些项目时，按原内容重新提交；登记有误或不再办理时，确认作废后重新填写。' },
+  reversal: { amount: '恢复金额', retry: '重新提交撤销', hint: '仍需撤销这张消费单时重新提交；不再撤销时确认作废。' },
 } as const;
 
 /**
  * 处理一笔之前留下的「结果待确认」操作：先按原编号查询；
- * 查不到时由员工选择「按原内容重新提交」（同一编号，安全）或「放弃，重新填写」。
+ * 查不到时由员工选择「按原内容重新提交」（同一编号，安全）或「确认作废，重新填写」（服务端先作废原编号）。
  */
 export function PendingRecovery({
   op,
@@ -278,6 +291,7 @@ export function PendingRecovery({
         <Notice tone="info" icon={<Spinner className="size-5 text-lake" />} title="正在按操作编号查询结果…" />
       )}
       {state.status === 'submitting' && <Notice tone="info" icon={<Spinner className="size-5 text-lake" />} title="正在按原内容重新提交…" />}
+      {state.status === 'abandoning' && <Notice tone="info" icon={<Spinner className="size-5 text-lake" />} title="正在作废这笔操作…" />}
       {state.status === 'uncertain' && (
         <Notice
           tone="warning"
@@ -295,19 +309,19 @@ export function PendingRecovery({
       {state.status === 'not_found' && (
         <Notice
           tone="info"
-          title="系统中没有这笔记录，余额没有变化"
+          title="暂未查到这笔记录"
           action={
             <>
               <Button variant="primary" size="sm" icon={<RotateCw className="size-4" />} onClick={onRetry}>
                 {text.retry}
               </Button>
               <Button variant="secondary" size="sm" icon={<Undo2 className="size-4" />} onClick={onDiscard}>
-                放弃这笔，重新填写
+                确认作废，重新填写
               </Button>
             </>
           }
         >
-          {text.hint}重新提交会沿用原操作编号，不会重复入账。
+          原请求可能还在处理中，暂时不能断定没有入账。{text.hint}重新提交会沿用原操作编号，不会重复入账；确认作废后，原请求即使稍后到达也不会入账。
         </Notice>
       )}
       {state.status === 'error' && (
@@ -316,11 +330,11 @@ export function PendingRecovery({
           title={state.error.message}
           action={
             <Button variant="secondary" size="sm" onClick={onDiscard}>
-              放弃这笔，重新填写
+              重新填写
             </Button>
           }
         >
-          系统已明确拒绝这笔操作，没有入账。
+          系统已明确拒绝，这笔没有入账，原操作编号已作废。
         </Notice>
       )}
     </div>

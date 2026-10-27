@@ -21,6 +21,7 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   consumption_reversed: { label: '撤销', tone: 'clay' },
   consume_rejected: { label: '余额不足', tone: 'yuzu' },
   duplicate_blocked: { label: '重复提交', tone: 'ember' },
+  operation_abandoned: { label: '作废待确认记账', tone: 'ember' },
   settlement_closed: { label: '确认日结', tone: 'pine' },
   settings_updated: { label: '修改规则', tone: 'ember' },
   plan_saved: { label: '保存套餐', tone: 'neutral' },
@@ -50,6 +51,7 @@ function describe(detail: Record<string, unknown>): string {
   if (typeof detail.name === 'string') parts.push(detail.name);
   if (typeof detail.reason === 'string') parts.push(detail.reason);
   if (typeof detail.note === 'string' && detail.note) parts.push(detail.note);
+  if (typeof detail.summary === 'string' && detail.summary) parts.push(detail.summary);
   if (detail.via === 'cli') parts.push('命令行');
   return parts.join(' · ');
 }

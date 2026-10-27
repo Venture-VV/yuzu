@@ -172,7 +172,8 @@ export type OperationResult =
   | (OperationBase & { type: 'consume'; consumption: ConsumptionDoc })
   | (OperationBase & { type: 'reversal'; reversal: ReversalDoc; consumption: ConsumptionDoc });
 
-export type OperationLookup = { found: false } | ({ found: true } & OperationResult);
+/** 查回结果：abandoned 表示该编号已确认作废，原操作永远不会入账 */
+export type OperationLookup = { found: false; abandoned: boolean } | ({ found: true } & OperationResult);
 
 export interface LedgerRow {
   id: number;
@@ -213,7 +214,7 @@ export interface SettlementCheck {
 }
 
 export interface SettlementAnomaly {
-  kind: 'reversal' | 'cross_day_reversal' | 'duplicate_blocked' | 'rejected' | 'balance_mismatch' | 'chain_break';
+  kind: 'reversal' | 'cross_day_reversal' | 'duplicate_blocked' | 'rejected' | 'abandoned' | 'balance_mismatch' | 'chain_break';
   at: string | null;
   docNo: string | null;
   memberName: string | null;

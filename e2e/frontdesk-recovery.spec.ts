@@ -151,6 +151,43 @@ test.describe('前台待确认操作与明确选牌', () => {
     expect(tag.visit).toBeTruthy();
   });
 
+  test('按原内容重提被明确拒绝（牌已被其他终端发出）：先作废原编号，原请求随后到达也不生效', async ({ page }) => {
+    await login(page);
+    await page.goto('/frontdesk');
+    const code = (await board(page)).filter((t) => t.zone === 'male' && t.active && !t.locked && !t.visit).reverse()[1]!.code;
+    // 截下原请求、让浏览器以为断网，留着稍后原样送到服务器
+    let original: { clientKey: string } | null = null;
+    await page.route(
+      '**/api/frontdesk/checkins',
+      async (route) => {
+        original = route.request().postDataJSON();
+        await route.abort('connectionreset');
+      },
+      { times: 1 },
+    );
+    await page.keyboard.press('F2');
+    const dialog = page.getByRole('dialog', { name: '接待发牌' });
+    await dialog.getByLabel('第 1 位牌号').fill(code);
+    await dialog.getByTestId('checkin-submit').click();
+    await expect(dialog.getByTestId('pending-op')).toContainText(code);
+    await expect(dialog.getByTestId('pending-op').locator('..')).toContainText('暂未查到已生效的结果');
+
+    // 另一台终端把这张牌发给了别的客人；按原内容重提被拒绝
+    const other = await page.request.post('/api/frontdesk/checkins', { data: { clientKey: crypto.randomUUID(), guests: [{ tagCode: code, zone: 'male' }] } });
+    expect(other.status()).toBe(201);
+    await dialog.getByTestId('pending-retry').click();
+    // 拒绝原因照常显示；页面先在服务端作废原编号，确认后才移除待确认记录
+    await expect(dialog).toContainText(`手牌 ${code} 已在店`);
+    await expect(dialog.getByTestId('pending-op')).toHaveCount(0);
+    expect(await (await page.request.get(`/api/frontdesk/ops/${original!.clientKey}`)).json()).toEqual({ found: false, abandoned: true });
+    // 原请求这时才到达：不会再开一张牌
+    const late = await page.request.post('/api/frontdesk/checkins', { data: original });
+    expect(late.status()).toBe(409);
+    expect(((await late.json()) as { error: { code: string } }).error.code).toBe('OP_ABANDONED');
+    const visits = (await board(page)).filter((t) => t.code === code && t.visit);
+    expect(visits).toHaveLength(1);
+  });
+
   test('末位对上多张空闲牌：不自动取第一张，必须点选', async ({ page }) => {
     await login(page);
     await page.goto('/frontdesk');

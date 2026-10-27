@@ -6,6 +6,7 @@ import {
   BadgeCheck,
   CircleAlert,
   CircleCheck,
+  CircleSlash,
   CircleX,
   Copy,
   Download,
@@ -370,6 +371,7 @@ const ANOMALY_META: Record<
   cross_day_reversal: { label: '跨日撤销', tone: 'ember', icon: Undo2, iconClass: 'bg-ember-soft text-ember' },
   duplicate_blocked: { label: '重复提交', tone: 'lake', icon: Copy, iconClass: 'bg-lake-soft text-lake' },
   rejected: { label: '余额不足', tone: 'yuzu', icon: WalletMinimal, iconClass: 'bg-yuzu-soft text-yuzu-deep' },
+  abandoned: { label: '作废待确认', tone: 'ember', icon: CircleSlash, iconClass: 'bg-ember-soft text-ember' },
   balance_mismatch: { label: '余额不符', tone: 'clay', icon: CircleX, iconClass: 'bg-clay-soft text-clay' },
   chain_break: { label: '流水不连续', tone: 'clay', icon: CircleX, iconClass: 'bg-clay-soft text-clay' },
 };

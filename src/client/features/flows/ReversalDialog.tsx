@@ -180,7 +180,7 @@ export function ReversalDialog({ target, onClose }: { target: ReversalTarget | n
               <Field label="补充说明" htmlFor="rdetail" hint={preset ? '选填' : '未选择常用原因时必填，至少 2 个字'}>
                 <Textarea id="rdetail" value={detail} maxLength={150} onChange={(e) => setDetail(e.target.value)} placeholder="例如：应为儿童票，登记成了成人票" />
               </Field>
-              <OperationStatus state={op.state} onCheck={op.check} onRetry={op.retry} />
+              <OperationStatus state={op.state} onCheck={op.check} onRetry={op.retry} onDiscard={op.discard} />
             </>
           )}
         </div>

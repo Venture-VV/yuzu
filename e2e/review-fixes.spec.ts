@@ -33,6 +33,11 @@ async function rechargeCount(page: Page, name: string) {
 /** 走到充值核对页并确认收款，但先不点「确认入账」 */
 async function prepareRecharge(page: Page, plan: RegExp, method: string) {
   await page.getByRole('button', { name: /^充值/ }).first().click();
+  await fillRecharge(page, plan, method);
+}
+
+/** 在已打开的充值面板里填写到核对页 */
+async function fillRecharge(page: Page, plan: RegExp, method: string) {
   await page.getByRole('button', { name: plan }).click();
   await page.getByRole('button', { name: method }).click();
   await page.getByRole('button', { name: '下一步：核对收款' }).click();
@@ -40,6 +45,33 @@ async function prepareRecharge(page: Page, plan: RegExp, method: string) {
 }
 
 const pendingBanner = (page: Page) => page.getByRole('status').filter({ hasText: '笔操作结果待确认' });
+
+/** 下一次提交被截下：浏览器以为断网，原请求留待 deliver() 时才原样送到服务器（模拟迟到的原请求） */
+async function lateRequest(page: Page, pattern: string) {
+  let body: { idempotencyKey: string; memberId: number } | null = null;
+  let url = '';
+  await page.route(
+    pattern,
+    async (route) => {
+      url = route.request().url();
+      body = route.request().postDataJSON();
+      await route.abort('connectionreset');
+    },
+    { times: 1 },
+  );
+  return {
+    key: () => body!.idempotencyKey,
+    memberId: () => body!.memberId,
+    deliver: async () => {
+      const res = await page.request.post(url, { data: body });
+      return { status: res.status(), code: ((await res.json()) as { error?: { code: string } }).error?.code };
+    },
+  };
+}
+
+async function lookupOp(page: Page, key: string) {
+  return (await page.request.get(`/api/operations/${key}`)).json();
+}
 
 test.describe('待确认操作在关闭、刷新、重新登录后仍可处理', () => {
   test('入账后响应丢失：关闭面板后自动查回原单，只入账一次', async ({ page }) => {
@@ -91,7 +123,7 @@ test.describe('待确认操作在关闭、刷新、重新登录后仍可处理',
     await banner.getByRole('button', { name: '去处理' }).click();
 
     await expect(page.getByText('上一笔充值结果待确认')).toBeVisible();
-    await expect(page.getByText('系统中没有这笔记录，余额没有变化')).toBeVisible();
+    await expect(page.getByText('暂未查到这笔记录')).toBeVisible();
     await page.getByRole('button', { name: '按原内容重新提交充值' }).click();
     await expect(page.getByText('充值已入账')).toBeVisible();
     await expect(pendingBanner(page)).toHaveCount(0);
@@ -99,12 +131,14 @@ test.describe('待确认操作在关闭、刷新、重新登录后仍可处理',
     expect(await rechargeCount(page, '秦朗')).toBe(countBefore + 1);
   });
 
-  test('确认没有入账后，可以明确放弃并重新填写', async ({ page }) => {
+  test('查不到时确认作废：原请求随后才到达也不入账，重新填写只入账一次', async ({ page }) => {
     await login(page, 'xiaozhou');
     await openMember(page, '姜禾');
     const before = await balance(page, '姜禾');
+    const countBefore = await rechargeCount(page, '姜禾');
 
-    await page.route('**/api/recharges', (route) => route.abort('connectionreset'));
+    // 截下原请求、让浏览器以为断网：稍后再把它原样送到服务器，模拟「迟到的原请求」
+    const late = await lateRequest(page, '**/api/recharges');
     await prepareRecharge(page, /轻享 300/, '支付宝');
     await page.getByRole('button', { name: /确认入账/ }).click();
     await expect(page.getByText('结果待确认').first()).toBeVisible();
@@ -112,13 +146,68 @@ test.describe('待确认操作在关闭、刷新、重新登录后仍可处理',
     await page.getByRole('button', { name: '关闭' }).first().click();
     await expect(pendingBanner(page)).toBeVisible();
 
-    // 重新打开充值：先进入待确认处理，而不是直接开新单
+    // 重新打开充值：先进入待确认处理，而不是直接开新单；查不到不等于没有入账
     await page.getByRole('button', { name: /^充值/ }).first().click();
-    await expect(page.getByText('系统中没有这笔记录，余额没有变化')).toBeVisible();
-    await page.getByRole('button', { name: '放弃这笔，重新填写' }).click();
+    await expect(page.getByText('暂未查到这笔记录')).toBeVisible();
+    await expect(page.getByText('暂时不能断定没有入账')).toBeVisible();
+    await page.getByRole('button', { name: '确认作废，重新填写' }).click();
+    await expect(page.getByText('已作废这笔充值，没有入账')).toBeVisible();
     await expect(page.getByRole('button', { name: '下一步：核对收款' })).toBeVisible();
     await expect(pendingBanner(page)).toHaveCount(0);
+
+    // 原请求这时才到达：整笔拒绝，余额不变
+    const arrived = await late.deliver();
+    expect(arrived.status).toBe(409);
+    expect(arrived.code).toBe('OP_ABANDONED');
     expect(await balance(page, '姜禾')).toEqual(before);
+    expect(await lookupOp(page, late.key())).toEqual({ found: false, abandoned: true });
+
+    // 在已打开的面板里重新填写：新的一笔正常入账，只有这一笔
+    await fillRecharge(page, /轻享 300/, '支付宝');
+    await page.getByRole('button', { name: /确认入账/ }).click();
+    await expect(page.getByText('充值已入账')).toBeVisible();
+    expect(await rechargeCount(page, '姜禾')).toBe(countBefore + 1);
+    expect(await balance(page, '姜禾')).toEqual({ principal: before.principal + 30000, bonus: before.bonus });
+  });
+
+  test('核对页里直接确认作废；重提被拒绝时也先作废原编号', async ({ page }) => {
+    await login(page, 'xiaozhou');
+    await openMember(page, '黎明月');
+    const before = await balance(page, '黎明月');
+
+    // ① 消费请求没送达：在核对页查询 → 查不到 → 确认作废，原请求随后到达被拒绝
+    const late = await lateRequest(page, '**/api/consumptions');
+    await page.getByRole('button', { name: /^消费/ }).first().click();
+    await page.getByRole('button', { name: /^搓背/ }).click();
+    await page.getByRole('button', { name: '下一步：核对扣款' }).click();
+    await page.getByRole('button', { name: /确认扣款/ }).click();
+    await expect(page.getByText('结果待确认').first()).toBeVisible();
+    await page.unroute('**/api/consumptions');
+    await page.getByRole('button', { name: '查询这笔操作的结果' }).click();
+    await expect(page.getByText('暂未查到这笔记录')).toBeVisible();
+    await page.getByRole('button', { name: '确认作废', exact: true }).click();
+    await expect(page.getByText('已作废这笔消费，没有入账')).toBeVisible();
+    await expect(page.getByRole('button', { name: '返回修改' })).toBeEnabled();
+    expect((await late.deliver()).code).toBe('OP_ABANDONED');
+    expect(await balance(page, '黎明月')).toEqual(before);
+
+    // ② 再提交一次又断网；其间另一台终端改动了余额，按原内容重提被明确拒绝（余额已变化）。
+    //    之前那次请求仍可能随后到达，所以页面先在服务端作废原编号，再回到填写页
+    const late2 = await lateRequest(page, '**/api/consumptions');
+    await page.getByRole('button', { name: /确认扣款/ }).click();
+    await expect(page.getByText('结果待确认').first()).toBeVisible();
+    await page.unroute('**/api/consumptions');
+    const other = await page.request.post('/api/recharges', {
+      data: { idempotencyKey: crypto.randomUUID(), memberId: late2.memberId(), planId: null, paidAmount: 100, bonusAmount: 0, paymentMethod: 'cash', paymentConfirmed: true },
+    });
+    expect(other.ok()).toBe(true);
+    await page.getByRole('button', { name: '查询这笔操作的结果' }).click();
+    await page.getByRole('button', { name: '按原内容重新提交' }).click();
+    await expect(page.getByText('会员余额刚刚有变化')).toBeVisible();
+    expect(await lookupOp(page, late2.key())).toEqual({ found: false, abandoned: true });
+    expect((await late2.deliver()).code).toBe('OP_ABANDONED');
+    expect(await balance(page, '黎明月')).toEqual({ principal: before.principal + 100, bonus: before.bonus });
+    await expect(pendingBanner(page)).toHaveCount(0);
   });
 
   test('消费响应丢失：退出并重新登录后自动查回，只扣一次', async ({ page }) => {

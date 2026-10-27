@@ -15,6 +15,7 @@ export type AuditAction =
   | 'consumption_reversed'
   | 'consume_rejected'
   | 'duplicate_blocked'
+  | 'operation_abandoned'
   | 'settlement_closed'
   | 'settings_updated'
   | 'plan_saved'

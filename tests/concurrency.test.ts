@@ -61,7 +61,7 @@ describe('幂等：重复点击与超时重试', () => {
     expect(found.body.type).toBe('recharge');
     expect(found.body.recharge.paidAmount).toBe(8800);
     const missing = await api(ctx.app, ctx.clerk, 'GET', `/api/operations/${randomUUID()}`);
-    expect(missing.body).toEqual({ found: false });
+    expect(missing.body).toEqual({ found: false, abandoned: false });
   });
 
   it('重复提交会记入日结异常', async () => {

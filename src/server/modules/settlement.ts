@@ -61,6 +61,7 @@ const ANOMALY_LABELS: Record<SettlementAnomaly['kind'], string> = {
   cross_day_reversal: '跨日撤销',
   duplicate_blocked: '重复提交拦截',
   rejected: '余额不足拦截',
+  abandoned: '作废待确认',
   balance_mismatch: '余额不符',
   chain_break: '流水不连续',
 };
@@ -160,10 +161,20 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
     SELECT a.action, a.created_at, a.detail, s.display_name AS staff_name,
            CASE WHEN a.target_type = 'member' THEN (SELECT name FROM members WHERE id::text = a.target_id) END AS member_name
     FROM audit_logs a LEFT JOIN staff s ON s.id = a.staff_id
-    WHERE a.business_date = ${date} AND a.action IN ('duplicate_blocked', 'consume_rejected')
+    WHERE a.business_date = ${date} AND a.action IN ('duplicate_blocked', 'consume_rejected', 'operation_abandoned')
     ORDER BY a.id`;
   for (const e of events) {
-    if (e.action === 'duplicate_blocked') {
+    if (e.action === 'operation_abandoned') {
+      // 结果待确认的操作被确认作废：没有入账。充值作废时请核对这笔款项是否确实未收或已退回
+      anomalies.push({
+        kind: 'abandoned',
+        at: e.createdAt,
+        docNo: null,
+        memberName: e.memberName,
+        amount: (e.detail.amount as number | null) ?? null,
+        description: `结果待确认的操作已确认作废，没有入账${e.detail.summary ? ` · ${e.detail.summary as string}` : ''} · ${e.staffName ?? ''}`,
+      });
+    } else if (e.action === 'duplicate_blocked') {
       anomalies.push({
         kind: 'duplicate_blocked',
         at: e.createdAt,

@@ -284,7 +284,7 @@ export function ConsumeFlow({
         <p className="mt-5 mb-2 text-[13px] font-bold text-ink-2">扣款后余额</p>
         <BalanceChange before={seenBalance} after={after} />
         <div className="mt-4">
-          <OperationStatus state={op.state} onCheck={op.check} onRetry={op.retry} />
+          <OperationStatus state={op.state} onCheck={op.check} onRetry={op.retry} onDiscard={op.discard} />
         </div>
       </FlowFrame>
     );

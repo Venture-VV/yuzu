@@ -226,7 +226,7 @@ export function RechargeFlow({
           </ConfirmCheck>
         </div>
         <div className="mt-4">
-          <OperationStatus state={op.state} onCheck={op.check} onRetry={op.retry} />
+          <OperationStatus state={op.state} onCheck={op.check} onRetry={op.retry} onDiscard={op.discard} />
         </div>
       </FlowFrame>
     );

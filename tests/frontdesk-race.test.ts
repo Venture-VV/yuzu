@@ -4,7 +4,8 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { api, rechargeBody, createMember, setup, type TestContext } from './helpers';
+import { createStaff } from '../src/server/modules/staff';
+import { api, rechargeBody, createMember, login, PASSWORD, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let today: string;
@@ -156,5 +157,10 @@ describe('结果待确认：查回与作废', () => {
     expect(r.status).toBe(409);
     const [k] = await ctx.sql<{ opType: string }[]>`SELECT op_type FROM idempotency_keys WHERE key = ${body.idempotencyKey}`;
     expect(k!.opType).toBe('recharge');
+    await createStaff(ctx.sql, { username: 'backoffice9', displayName: '后勤', role: 'backoffice', duties: ['stock'], password: PASSWORD, mustChangePassword: false });
+    const backoffice = await login(ctx.app, 'backoffice9');
+    const key = randomUUID();
+    expect((await api(ctx.app, backoffice, 'POST', `/api/frontdesk/ops/${key}/abandon`)).status).toBe(403);
+    expect((await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/ops/${key}`)).body).toEqual({ found: false, abandoned: false });
   });
 });

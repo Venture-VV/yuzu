@@ -4,7 +4,8 @@
 // 并发与重复提交的处理：
 //   1. 先对会员行加锁（SELECT … FOR UPDATE），同一会员的操作严格串行；
 //   2. 加锁后检查幂等键：同一个键再次提交时直接返回第一次的结果，不会重复记账；
-//   3. 余额字段有 CHECK (>= 0) 约束兜底，任何情况下都不会透支。
+//   3. 余额字段有 CHECK (>= 0) 约束兜底，任何情况下都不会透支；
+//   4. 员工确认作废一笔结果待确认的操作时，先把操作编号登记为 abandoned，原请求之后才到达也会整笔回滚。
 
 import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
@@ -12,7 +13,7 @@ import { z } from 'zod';
 import { businessDateOf } from '@shared/business-date';
 import { splitDeduction, type WalletBalance } from '@shared/deduction';
 import { PAYMENT_METHODS } from '@shared/labels';
-import { can } from '@shared/permissions';
+import { can, type Permission } from '@shared/permissions';
 import type { ConsumptionDoc, OperationLookup, OperationResult, RechargeDoc, ReversalDoc } from '@shared/types';
 import { isUniqueViolation, type Db, type Sql, type Tx } from '../db';
 import { guard } from '../auth/guard';
@@ -24,7 +25,10 @@ import { getMember } from './members';
 import { loadSettings } from './settings';
 
 type OpType = 'recharge' | 'consume' | 'reversal';
+const OP_TYPES = ['recharge', 'consume', 'reversal'] as const satisfies readonly OpType[];
 const DOC_PREFIX: Record<OpType, string> = { recharge: 'CZ', consume: 'XF', reversal: 'CX' };
+const OP_LABELS: Record<OpType, string> = { recharge: '充值', consume: '消费', reversal: '撤销' };
+const isWalletOp = (t: string): t is OpType => (OP_TYPES as readonly string[]).includes(t);
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -74,6 +78,15 @@ export const ReverseInput = z.object({
 });
 export type ReverseInputData = z.input<typeof ReverseInput>;
 
+/** 作废时页面带上的原操作摘要：只用于审计与日结提醒，不参与记账 */
+export const AbandonInput = z.object({
+  type: z.enum(OP_TYPES).optional(),
+  memberId: z.number().int().positive().optional(),
+  amount: z.number().int().min(0).optional(),
+  summary: z.string().trim().max(200, '摘要最多 200 字').default(''),
+});
+export type AbandonInputData = z.input<typeof AbandonInput>;
+
 // ───────────────────────── 基础工具 ─────────────────────────
 
 interface LockedMember {
@@ -102,7 +115,8 @@ async function nextDocNo(tx: Tx, type: OpType, businessDate: string): Promise<st
 const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 
 interface KeyRow {
-  opType: OpType;
+  /** 会员记账之外，还可能是作废登记（abandoned）或其他模块的编号 */
+  opType: string;
   requestHash: string;
   refId: number;
 }
@@ -113,6 +127,9 @@ async function findKey(db: Db, key: string): Promise<KeyRow | undefined> {
 }
 
 function assertSameRequest(row: KeyRow, opType: OpType, requestHash: string) {
+  if (row.opType === 'abandoned') {
+    throw conflict('OP_ABANDONED', '这笔操作已确认作废，没有入账；如仍需办理，请重新填写后提交');
+  }
   if (row.opType !== opType || row.requestHash !== requestHash) {
     throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一笔不同的业务，请刷新页面后重新发起');
   }
@@ -499,14 +516,61 @@ export async function reverse(deps: Deps, consumptionId: number, raw: ReverseInp
   return finish(deps, ctx, 'reversal', input.idempotencyKey, run);
 }
 
+/**
+ * 按操作编号查回结果（只读）。
+ * 查不到只说明「此刻还没有已提交的结果」，原请求可能仍在路上或在等锁，页面不能据此断定没有入账；
+ * 要放弃这笔，必须调用 abandonOperation。
+ */
 export async function lookupOperation(sql: Sql, key: string): Promise<OperationLookup> {
   const row = await findKey(sql, key);
-  // 库存与采购单据有各自的查回接口（按 clientKey），这里只查会员记账
-  if (!row || !['recharge', 'consume', 'reversal'].includes(row.opType)) return { found: false };
+  if (row?.opType === 'abandoned') return { found: false, abandoned: true };
+  // 库存、采购与前台有各自的查回接口，这里只查会员记账
+  if (!row || !isWalletOp(row.opType)) return { found: false, abandoned: false };
   return { found: true, ...(await loadOperation(sql, row.opType, row.refId, true)) };
 }
 
+/**
+ * 作废一笔结果待确认的记账：先把操作编号登记为 abandoned（单独提交）。
+ * - 登记成功：原请求无论还在路上、在等锁还是正在执行，最终写操作编号时都会冲突并整笔回滚，永远不会入账；
+ * - 编号已有结果：说明原操作已经入账，返回查回的结果，不作废；
+ * - 原请求恰好已写下编号但还没提交：这里等它结束（最多 5 秒）再给出确定答复，超时则仍为待确认。
+ */
+export async function abandonOperation(deps: Deps, key: string, raw: AbandonInputData, ctx: OpContext): Promise<OperationLookup> {
+  const input = parse(AbandonInput, raw);
+  const inserted = await deps.sql.begin(async (tx) => {
+    await tx.unsafe("SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '10s'");
+    const rows = await tx<{ key: string }[]>`
+      INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id)
+      VALUES (${key}, 'abandoned', '', 0, ${ctx.actor.id})
+      ON CONFLICT (key) DO NOTHING RETURNING key`;
+    if (rows.length) {
+      const settings = await loadSettings(tx);
+      await writeAudit(tx, {
+        staffId: ctx.actor.id,
+        action: 'operation_abandoned',
+        targetType: input.memberId ? 'member' : 'operation',
+        targetId: input.memberId ?? key,
+        detail: {
+          idempotencyKey: key,
+          type: input.type ?? null,
+          amount: input.amount ?? null,
+          summary: [input.type ? OP_LABELS[input.type] : '', input.summary].filter(Boolean).join(' · '),
+        },
+        ip: ctx.ip,
+        businessDate: businessDateOf(ctx.at ?? new Date(), deps.config.timezone, settings.businessDayStartHour),
+      });
+    }
+    return rows.length > 0;
+  });
+  if (inserted) return { found: false, abandoned: true };
+  const result = await lookupOperation(deps.sql, key);
+  if (!result.found && !result.abandoned) throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号属于其他业务，不能在这里作废');
+  return result;
+}
+
 // ───────────────────────── 路由 ─────────────────────────
+
+const OP_PERMISSION: Record<OpType, Permission> = { recharge: 'recharge.create', consume: 'consume.create', reversal: 'consume.reverse' };
 
 export function registerWalletRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
@@ -562,5 +626,14 @@ export function registerWalletRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/operations/:key', { preHandler: guard() }, async (req) => {
     const { key } = parse(z.object({ key: z.uuid('操作编号格式不正确') }), req.params);
     return lookupOperation(sql, key);
+  });
+
+  // 员工确认作废一笔结果待确认的记账；需要对应业务的权限（页面没带类型时，具备任一记账权限即可）
+  app.post('/api/operations/:key/abandon', { preHandler: guard() }, async (req) => {
+    const { key } = parse(z.object({ key: z.uuid('操作编号格式不正确') }), req.params);
+    const body = (req.body ?? {}) as AbandonInputData;
+    const needed = body.type && isWalletOp(body.type) ? [OP_PERMISSION[body.type]] : Object.values(OP_PERMISSION);
+    if (!needed.some((p) => can(req.actor, p))) throw forbidden();
+    return abandonOperation(deps, key, body, ctxOf(req));
   });
 }

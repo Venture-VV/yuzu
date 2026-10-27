@@ -12,7 +12,7 @@ import { Button, Notice } from '../../components/ui';
 // 关闭对话框、刷新、切换手牌或重新登录后，同一对象上仍提示待确认，原操作确认前不能另起一笔。
 // 处理方式：
 //   · 查回：只读查询，查不到只代表此刻还没有已提交的结果，不能据此断定没有生效；
-//   · 按原内容重新提交：沿用原编号与原请求，服务端保证只生效一次；
+//   · 按原内容重新提交：沿用原编号与原请求，服务端保证只生效一次；重提被明确拒绝时，先在服务端作废编号再下结论；
 //   · 确认作废：服务端先把编号登记为作废，原请求之后即使到达也整笔回滚，然后才允许重新填写。
 
 export type FrontdeskOpType = 'checkin' | 'bill_post' | 'tag_swap';
@@ -76,7 +76,6 @@ function writeAll(list: FrontdeskPendingOp[]) {
 function save(op: FrontdeskPendingOp) {
   writeAll([...readAll().filter((p) => p.key !== op.key), op]);
 }
-
 
 export function removeFrontdeskPending(key: string) {
   if (readAll().some((p) => p.key === key)) writeAll(readAll().filter((p) => p.key !== key));
@@ -169,7 +168,7 @@ export function useFrontdeskOp<T>(opts: { type: FrontdeskOpType; visitId: number
   }, [pendingKey]);
 
   const send = useCallback(
-    async (op: FrontdeskPendingOp): Promise<T | null> => {
+    async (op: FrontdeskPendingOp, isRetry = false): Promise<T | null> => {
       setState({ phase: 'busy' });
       save(op);
       setInFlight(op.key, true);
@@ -180,6 +179,24 @@ export function useFrontdeskOp<T>(opts: { type: FrontdeskOpType; visitId: number
         return result;
       } catch (error) {
         if (error instanceof ApiError && error.status < 500) {
+          if (isRetry && error.code !== 'OP_ABANDONED') {
+            // 重提被明确拒绝，不代表之前那次结果不明的请求不会随后生效：先在服务端作废编号，再下结论
+            let fenced: FrontdeskOpLookup | null = null;
+            try {
+              fenced = await api.post<FrontdeskOpLookup>(`/api/frontdesk/ops/${op.key}/abandon`);
+            } catch {
+              /* 作废没有完成，下面按待确认处理 */
+            }
+            if (fenced?.found) {
+              removeFrontdeskPending(op.key);
+              setState({ phase: 'idle' });
+              return pick(fenced);
+            }
+            if (!fenced?.abandoned) {
+              setState({ phase: 'uncertain', message: `重新提交被拒绝（${error.message}），但原请求是否会生效仍不确定` });
+              return null;
+            }
+          }
           // 服务端明确拒绝（含该编号已作废）：没有生效
           removeFrontdeskPending(op.key);
           setState({ phase: 'error', message: error.message, code: error.code });
@@ -192,7 +209,7 @@ export function useFrontdeskOp<T>(opts: { type: FrontdeskOpType; visitId: number
         setInFlight(op.key, false);
       }
     },
-    [],
+    [pick],
   );
 
   /** 提交一笔新的操作（有待确认记录时不允许） */
@@ -207,7 +224,7 @@ export function useFrontdeskOp<T>(opts: { type: FrontdeskOpType; visitId: number
   );
 
   /** 按原内容、原编号重新提交 */
-  const retry = useCallback(async () => (pending ? send(pending) : null), [pending, send]);
+  const retry = useCallback(async () => (pending ? send(pending, true) : null), [pending, send]);
 
   const settle = useCallback(
     (key: string, found: FrontdeskOpLookup): T | null => {

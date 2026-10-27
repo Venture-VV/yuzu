@@ -25,8 +25,8 @@ function docNoOf(found: Extract<OperationLookup, { found: true }>): string {
 
 /**
  * 页面顶部的「结果待确认」提醒。
- * 进入页面（包括刷新、重新登录）时自动按原操作编号查询：已入账的直接确认并移除；
- * 查不到的保留，由员工进入对应流程选择「按原内容重新提交」或「放弃」。
+ * 进入页面（包括刷新、重新登录）时自动按原操作编号查询：已入账或已作废的直接移除；
+ * 查不到的保留，由员工进入对应流程选择「按原内容重新提交」或「确认作废」。
  */
 export function PendingOpsBanner() {
   const ops = usePendingOps();
@@ -44,7 +44,11 @@ export function PendingOpsBanner() {
         api
           .get<OperationLookup>(`/api/operations/${op.key}`)
           .then((found) => {
-            if (!found.found) return;
+            if (!found.found) {
+              // 已确认作废的（例如作废答复在网络中丢失）直接移除；查不到的保留，不能断定没有入账
+              if (found.abandoned) removePending(op.key);
+              return;
+            }
             removePending(op.key);
             void qc.invalidateQueries({ queryKey: ['member', op.memberId] });
             void qc.invalidateQueries({ queryKey: ['activity', op.memberId] });
