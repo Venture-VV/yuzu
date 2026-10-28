@@ -117,6 +117,7 @@ export async function seedDemo(sql: Sql, config: AppConfig, options: { force?: b
         note: i === 0 ? '喜欢靠窗的位置，常点柚子气泡水' : i === 24 ? '长姓名样例，用于检查界面排版' : '',
       },
       { actor: pick(staffPool) },
+      { enforceRequired: false },
     );
     await sql`UPDATE members SET is_synthetic = true WHERE id = ${m.id}`;
     members.push({ id: m.id });

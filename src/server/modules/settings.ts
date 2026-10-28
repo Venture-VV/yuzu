@@ -2,9 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { HHMM } from '@shared/business-date';
 import { DEDUCTION_RULES, type DeductionRule } from '@shared/deduction';
+import { MAX_MEMBER_FIELDS, MEMBER_FIELD_KEY, MEMBER_FIELD_TYPES, type MemberFieldDef } from '@shared/member-fields';
 import type { StoreRules } from '@shared/types';
 import type { Db } from '../db';
 import { writeAudit } from '../lib/audit';
+import { badRequest } from '../lib/errors';
 import type { Deps } from '../lib/context';
 import { parse } from '../lib/validate';
 import { guard } from '../auth/guard';
@@ -21,6 +23,7 @@ const KEY_MAP = {
   max_consume_cents: 'maxConsumeCents',
   reversal_window_hours: 'reversalWindowHours',
   business_hours: 'businessHours',
+  member_fields: 'memberFields',
 } as const satisfies Record<string, keyof StoreSettings>;
 
 // 单笔上限按店主 2026-10-27 答复（#9）默认 50 万元；撤销时限、营业时间默认与之前一致（不限、全天），待确认
@@ -32,6 +35,7 @@ const DEFAULTS: StoreSettings = {
   maxConsumeCents: 50_000_000,
   reversalWindowHours: null,
   businessHours: null,
+  memberFields: [],
 };
 
 export async function loadSettings(db: Db): Promise<StoreSettings> {
@@ -56,17 +60,69 @@ const SettingsInput = z
       .object({ open: z.string().regex(HHMM, '开门时间格式应为 HH:MM'), close: z.string().regex(HHMM, '打烊时间格式应为 HH:MM') })
       .refine((h) => h.open !== h.close, '开门与打烊时间不能相同；全天营业请选「全天 24 小时」')
       .nullable(),
+    memberFields: z
+      .array(
+        z.object({
+          /** 已有字段的编号；新字段不带，由服务端分配 */
+          key: z.string().regex(MEMBER_FIELD_KEY, '字段编号不正确').nullable().optional(),
+          label: z.string().trim().min(1, '请填写字段名称').max(16, '字段名称最多 16 个字'),
+          type: z.enum(MEMBER_FIELD_TYPES, '字段类型不正确'),
+          options: z.array(z.string().trim().min(1, '可选值不能为空').max(16, '可选值最多 16 个字')).max(20, '可选值最多 20 个').default([]),
+          required: z.boolean().default(false),
+          active: z.boolean().default(true),
+        }),
+      )
+      .max(MAX_MEMBER_FIELDS, `会员自定义字段最多 ${MAX_MEMBER_FIELDS} 个`),
   })
   // 只提交要修改的项（各设置卡片分别保存）；没有提交的项保持原值
   .partial();
+
+type MemberFieldInput = NonNullable<z.infer<typeof SettingsInput>['memberFields']>[number];
+const FIXED_MEMBER_FIELDS = ['姓名', '手机号', '手机', '性别', '生日', '备注', '会员号'];
+
+/**
+ * 会员自定义字段的保存规则：已有字段不能删除（只能停用）、不能改类型；名称不重复、不与固定字段重名；
+ * 单选至少一个可选值；新字段由服务端按顺序分配编号（f1、f2…），编号保存后不变。
+ */
+function normalizeMemberFields(current: readonly MemberFieldDef[], input: MemberFieldInput[]): MemberFieldDef[] {
+  const byKey = new Map(current.map((d) => [d.key, d]));
+  const kept = new Set(input.map((f) => f.key).filter(Boolean));
+  for (const d of current) {
+    if (!kept.has(d.key)) throw badRequest(`会员字段「${d.label}」不能删除，只能停用（如果是其他人刚刚改过字段，请刷新后再改）`);
+  }
+  let next = Math.max(0, ...current.map((d) => Number(d.key.slice(1))));
+  const labels = new Set<string>();
+  return input.map((f) => {
+    const label = f.label.trim();
+    if (FIXED_MEMBER_FIELDS.includes(label)) throw badRequest(`「${label}」是固定字段，不能再建同名字段`);
+    if (labels.has(label)) throw badRequest(`会员字段「${label}」重复`);
+    labels.add(label);
+    const options = f.type === 'select' ? [...new Set(f.options)] : [];
+    if (f.type === 'select' && options.length === 0) throw badRequest(`单选字段「${label}」至少要有一个可选值`);
+    if (f.key) {
+      const old = byKey.get(f.key);
+      if (!old) throw badRequest('有未知的会员字段，请刷新页面后重试');
+      if (old.type !== f.type) throw badRequest(`会员字段「${old.label}」保存后不能改类型；需要时请停用后新建一个字段`);
+      return { key: f.key, label, type: f.type, options, required: f.required, active: f.active };
+    }
+    next += 1;
+    return { key: `f${next}`, label, type: f.type, options, required: f.required, active: f.active };
+  });
+}
 
 export function registerSettingsRoutes(app: FastifyInstance, { sql }: Deps) {
   app.get('/api/settings', { preHandler: guard('settings.manage') }, async () => loadSettings(sql));
 
   app.put('/api/settings', { preHandler: guard('settings.manage') }, async (req) => {
-    const input = parse(SettingsInput, req.body);
-    const before = await loadSettings(sql);
+    const parsed = parse(SettingsInput, req.body);
     await sql.begin(async (tx) => {
+      // 同时保存规则时串行执行，避免新字段编号冲突或互相覆盖
+      await tx`SELECT pg_advisory_xact_lock(hashtext('settings'))`;
+      const before = await loadSettings(tx);
+      const input: Partial<StoreSettings> = {
+        ...parsed,
+        ...(parsed.memberFields ? { memberFields: normalizeMemberFields(before.memberFields, parsed.memberFields) } : {}),
+      } as Partial<StoreSettings>;
       for (const [key, prop] of Object.entries(KEY_MAP)) {
         if (!(prop in input)) continue;
         const value = input[prop as keyof typeof input];

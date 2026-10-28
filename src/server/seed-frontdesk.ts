@@ -81,7 +81,7 @@ export async function seedFrontdeskDemo(sql: Sql, config: AppConfig, options: { 
     if (found && !found.isSynthetic) throw new Error(`手机号 ${m.phone} 属于真实会员，已停止`);
     let id = found?.id;
     if (!id) {
-      id = (await createMember(sql, { name: m.name, phone: m.phone, gender: m.gender, birthday: null, note: '前台演示会员' }, { actor: owner })).id;
+      id = (await createMember(sql, { name: m.name, phone: m.phone, gender: m.gender, birthday: null, note: '前台演示会员' }, { actor: owner }, { enforceRequired: false })).id;
       await sql`UPDATE members SET is_synthetic = true WHERE id = ${id}`;
       for (const r of m.recharges) {
         await recharge(deps, { idempotencyKey: randomUUID(), memberId: id, planId: null, paidAmount: r.paid, bonusAmount: r.bonus, paymentMethod: 'wechat', paymentConfirmed: true }, { actor: owner });

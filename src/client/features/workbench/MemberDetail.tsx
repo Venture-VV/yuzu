@@ -1,8 +1,9 @@
 import { ArrowLeft, Bath, CirclePlus, PencilLine, StickyNote } from 'lucide-react';
 import { formatPhone } from '@shared/labels';
+import { displayFieldValue } from '@shared/member-fields';
 import type { MemberDetail as Member } from '@shared/types';
 import { useActivity } from '../../lib/queries';
-import { useCan } from '../../lib/session';
+import { useCan, useSession } from '../../lib/session';
 import { avatarTone, cn, relativeTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
@@ -27,8 +28,14 @@ export function MemberDetail({
   activeFlow: 'recharge' | 'consume' | null;
 }) {
   const can = useCan();
+  const session = useSession();
   const activity = useActivity(member.id);
   const total = member.principalBalance + member.bonusBalance;
+  // 自定义字段：只显示启用且已填写的
+  const fieldRows = session.rules.memberFields
+    .filter((d) => d.active)
+    .map((d) => ({ key: d.key, label: d.label, value: displayFieldValue(member.customFields?.[d.key]) }))
+    .filter((r) => r.value !== null);
 
   return (
     <div className="mx-auto flex w-full max-w-[880px] flex-col gap-4 p-4 md:p-6">
@@ -71,6 +78,16 @@ export function MemberDetail({
             <StickyNote className="mt-0.5 size-4 shrink-0 text-yuzu-deep" />
             <span className="break-all">{member.note}</span>
           </div>
+        )}
+        {fieldRows.length > 0 && (
+          <dl className="mx-5 mb-5 grid gap-x-5 gap-y-1.5 rounded-md bg-card/80 px-3 py-2.5 text-[13px] ring-1 ring-line sm:grid-cols-2" data-testid="member-custom-fields">
+            {fieldRows.map((r) => (
+              <div key={r.key} className="flex min-w-0 gap-2">
+                <dt className="shrink-0 text-ink-3">{r.label}</dt>
+                <dd className="min-w-0 font-semibold break-all text-ink-2">{r.value}</dd>
+              </div>
+            ))}
+          </dl>
         )}
 
         {/* 余额：合计 / 本金 / 赠金 分层展示。按卡片实际宽度（容器查询）决定是否三栏并排，金额始终完整显示 */}

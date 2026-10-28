@@ -1,10 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { normalizeFieldValue, type MemberFieldDef } from '@shared/member-fields';
 import type { MemberDetail, MemberSummary } from '@shared/types';
 import { api, ApiError, errorMessage } from '../../lib/api';
+import { useSession } from '../../lib/session';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
-import { Button, Field, Input, Notice, Segmented, Textarea } from '../../components/ui';
+import { Button, Field, Input, Notice, Segmented, Select, Textarea } from '../../components/ui';
 
 type Gender = 'female' | 'male' | 'unknown';
 
@@ -26,6 +28,10 @@ export function MemberFormDialog({
 }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const session = useSession();
+  /** 启用的自定义字段（#12） */
+  const fields = session.rules.memberFields.filter((d) => d.active);
+  const [custom, setCustom] = useState<Record<string, string>>({});
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [gender, setGender] = useState<Gender>('unknown');
@@ -43,6 +49,7 @@ export function MemberFormDialog({
     setGender(member?.gender ?? 'unknown');
     setBirthday(member?.birthday ?? '');
     setNote(member?.note ?? '');
+    setCustom(Object.fromEntries(Object.entries(member?.customFields ?? {}).map(([k, v]) => [k, String(v)])));
     setErrors({});
     setExisting(null);
   }, [open, member, prefill]);
@@ -53,11 +60,17 @@ export function MemberFormDialog({
     const cleanPhone = phone.replace(/[\s-]/g, '');
     if (!name.trim()) errs.name = '请填写会员姓名';
     if (!/^1\d{10}$/.test(cleanPhone)) errs.phone = '请输入 11 位手机号';
+    for (const f of fields) {
+      const { value, error } = normalizeFieldValue(f, custom[f.key]);
+      if (error) errs[`customFields.${f.key}`] = error;
+      else if (value === undefined && f.required) errs[`customFields.${f.key}`] = `请填写「${f.label}」`;
+    }
     setErrors(errs);
     if (Object.keys(errs).length) return;
     setSaving(true);
     setExisting(null);
-    const body = { name, phone: cleanPhone, gender: gender === 'unknown' ? null : gender, birthday: birthday || null, note };
+    const customFields = Object.fromEntries(fields.map((f) => [f.key, custom[f.key] ?? '']));
+    const body = { name, phone: cleanPhone, gender: gender === 'unknown' ? null : gender, birthday: birthday || null, note, customFields };
     try {
       const saved = member
         ? await api.put<MemberDetail>(`/api/members/${member.id}`, body)
@@ -123,6 +136,19 @@ export function MemberFormDialog({
             <Input id="m-birthday" type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} />
           </Field>
         </div>
+        {fields.length > 0 && (
+          <div className="grid gap-4 sm:grid-cols-2" data-testid="member-custom-form">
+            {fields.map((f) => (
+              <CustomFieldInput
+                key={f.key}
+                def={f}
+                value={custom[f.key] ?? ''}
+                error={errors[`customFields.${f.key}`]}
+                onChange={(v) => setCustom((c) => ({ ...c, [f.key]: v }))}
+              />
+            ))}
+          </div>
+        )}
         <Field label="备注" htmlFor="m-note" hint="选填，如偏好、过敏或注意事项">
           <Textarea id="m-note" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} />
         </Field>
@@ -140,5 +166,35 @@ export function MemberFormDialog({
         {errors.form && <Notice tone="error" title={errors.form} />}
       </form>
     </Dialog>
+  );
+}
+
+/** 一个自定义字段的输入：文字、数字、日期、单选 */
+function CustomFieldInput({ def, value, error, onChange }: { def: MemberFieldDef; value: string; error?: string; onChange: (v: string) => void }) {
+  const id = `m-field-${def.key}`;
+  return (
+    <Field label={def.label} htmlFor={id} hint={def.required ? '必填' : '选填'} error={error}>
+      {def.type === 'select' ? (
+        <Select id={id} value={value} onChange={(e) => onChange(e.target.value)} aria-invalid={!!error || undefined}>
+          <option value="">{def.required ? '请选择' : '不填'}</option>
+          {def.options.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </Select>
+      ) : (
+        <Input
+          id={id}
+          type={def.type === 'date' ? 'date' : 'text'}
+          inputMode={def.type === 'number' ? 'decimal' : undefined}
+          maxLength={def.type === 'text' ? 100 : undefined}
+          value={value}
+          invalid={!!error}
+          className={def.type === 'number' ? 'num' : undefined}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+    </Field>
   );
 }

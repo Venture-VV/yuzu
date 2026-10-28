@@ -38,11 +38,12 @@ beforeAll(async () => {
   memberId = member!.id;
 
   // 用第一版就有的记账流程写入真实流水。现版本记账还会查作废登记表（006 才有）、写消费明细的价格档（009 才有）
-  // 与超限授权人（010 才有），写入期间临时放一张空表、加几列，迁移前删掉，升级仍从「只有 001」的结构开始
+  // 与超限授权人（010）、会员自定义字段（011），写入期间临时放一张空表、加几列，迁移前删掉，升级仍从「只有 001」的结构开始
   await sql`CREATE TABLE op_fences (key uuid, op_type text, staff_id bigint, created_at timestamptz)`;
   await sql`ALTER TABLE consumption_lines ADD COLUMN tier text`;
   await sql`ALTER TABLE recharges ADD COLUMN over_limit_approved_by bigint`;
   await sql`ALTER TABLE consumptions ADD COLUMN over_limit_approved_by bigint`;
+  await sql`ALTER TABLE members ADD COLUMN custom_fields jsonb NOT NULL DEFAULT '{}'`;
   // 升级前已有的消费项目（只有一个价格）
   const [item] = await sql<{ id: number }[]>`INSERT INTO service_items (name, category, price) VALUES ('升级前项目', '护理', 6800) RETURNING id`;
   itemId = item!.id;
@@ -56,10 +57,11 @@ beforeAll(async () => {
   await sql`ALTER TABLE consumption_lines DROP COLUMN tier`;
   await sql`ALTER TABLE recharges DROP COLUMN over_limit_approved_by`;
   await sql`ALTER TABLE consumptions DROP COLUMN over_limit_approved_by`;
+  await sql`ALTER TABLE members DROP COLUMN custom_fields`;
 
   // 升级：增量执行 002 之后的全部迁移
   const applied = await migrate(sql);
-  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql', '005_frontdesk_g2.sql', '006_op_fences.sql', '007_manager_roles.sql', '008_locker_pool.sql', '009_price_tiers.sql', '010_wallet_limits.sql']);
+  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql', '005_frontdesk_g2.sql', '006_op_fences.sql', '007_manager_roles.sql', '008_locker_pool.sql', '009_price_tiers.sql', '010_wallet_limits.sql', '011_member_fields.sql']);
   app = await buildApp(sql, config);
 }, 60_000);
 
@@ -169,6 +171,14 @@ describe('升级后', () => {
   it('首版默认的单笔上限（充值 5 万、消费 2 万）升级后改为店主确认的 50 万', async () => {
     const owner = await login(app, 'owner');
     expect((await api(app, owner, 'GET', '/api/settings')).body).toMatchObject({ maxRechargeCents: 50_000_000, maxConsumeCents: 50_000_000 });
+  });
+
+  it('已有会员的自定义字段为空，可以照常编辑；没有预置任何自定义字段', async () => {
+    const owner = await login(app, 'owner');
+    expect((await api(app, owner, 'GET', `/api/members/${memberId}`)).body.customFields).toEqual({});
+    expect((await api(app, owner, 'GET', '/api/settings')).body.memberFields).toEqual([]);
+    const edit = await api(app, owner, 'PUT', `/api/members/${memberId}`, { name: '升级前会员', phone: '19900001111', note: '升级后编辑' });
+    expect(edit.status).toBe(200);
   });
 
   it('再次执行迁移不会重复应用', async () => {

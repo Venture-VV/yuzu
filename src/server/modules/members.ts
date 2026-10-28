@@ -1,17 +1,19 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { checkCustomValues, type MemberCustomValues } from '@shared/member-fields';
 import type { LedgerRow, MemberDetail, MemberSummary } from '@shared/types';
 import { isUniqueViolation, type Db, type Sql } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps, OpContext } from '../lib/context';
-import { conflict, notFound } from '../lib/errors';
+import { badRequest, conflict, notFound } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
 import { listLedger } from './ledger';
+import { loadSettings } from './settings';
 
 const MEMBER_COLUMNS = (db: Db) => db`
   m.id, m.member_no, m.name, m.phone, m.gender, m.birthday::text AS birthday, m.note,
-  m.principal_balance, m.bonus_balance, m.status, m.is_synthetic, m.created_at,
+  m.principal_balance, m.bonus_balance, m.status, m.is_synthetic, m.created_at, m.custom_fields,
   (SELECT max(le.created_at) FROM ledger_entries le WHERE le.member_id = m.id) AS last_activity_at`;
 
 const MemberInput = z.object({
@@ -23,8 +25,10 @@ const MemberInput = z.object({
   gender: z.enum(['female', 'male']).nullable().default(null),
   birthday: z.iso.date('生日格式应为 YYYY-MM-DD').nullable().default(null),
   note: z.string().trim().max(200, '备注最多 200 字').default(''),
+  /** 自定义字段的值（键为字段编号）；编辑时不带则保持原值 */
+  customFields: z.record(z.string(), z.unknown(), '自定义字段格式不正确').optional(),
 });
-export type MemberInputData = z.infer<typeof MemberInput>;
+export type MemberInputData = z.input<typeof MemberInput>;
 
 const SearchQuery = z.object({
   q: z.string().trim().max(32).default(''),
@@ -75,13 +79,36 @@ export async function getMemberDetail(db: Db, id: number): Promise<MemberDetail>
   return { ...member, createdByName: extra?.createdByName ?? null, stats: extra!.stats };
 }
 
-export async function createMember(sql: Sql, input: MemberInputData, ctx: OpContext): Promise<MemberSummary> {
+/** 按当前字段定义核对自定义字段；不合格时 400 并指出字段 */
+async function customValuesFor(
+  db: Db,
+  input: Record<string, unknown>,
+  previous: MemberCustomValues,
+  enforceRequired: boolean,
+): Promise<MemberCustomValues> {
+  const { memberFields } = await loadSettings(db);
+  const result = checkCustomValues(memberFields, input, previous, { enforceRequired });
+  if (!result.ok) throw badRequest(result.message, result.field ? { field: `customFields.${result.field}` } : undefined);
+  return result.values;
+}
+
+/**
+ * 建档。enforceRequired=false 用于期初导入等批量来源：必填的自定义字段可以先空着，之后编辑会员时再补。
+ */
+export async function createMember(
+  sql: Sql,
+  raw: MemberInputData,
+  ctx: OpContext,
+  options: { enforceRequired?: boolean } = {},
+): Promise<MemberSummary> {
+  const input = parse(MemberInput, raw);
   try {
     const id = await sql.begin(async (tx) => {
+      const customFields = await customValuesFor(tx, input.customFields ?? {}, {}, options.enforceRequired ?? true);
       const [row] = await tx<{ id: number }[]>`
-        INSERT INTO members (member_no, name, phone, gender, birthday, note, created_by)
+        INSERT INTO members (member_no, name, phone, gender, birthday, note, custom_fields, created_by)
         VALUES ('YZ' || lpad(nextval('member_no_seq')::text, 5, '0'),
-                ${input.name}, ${input.phone}, ${input.gender}, ${input.birthday}, ${input.note}, ${ctx.actor.id})
+                ${input.name}, ${input.phone}, ${input.gender}, ${input.birthday}, ${input.note}, ${tx.json(customFields)}, ${ctx.actor.id})
         RETURNING id`;
       await writeAudit(tx, {
         staffId: ctx.actor.id,
@@ -121,8 +148,7 @@ export function registerMemberRoutes(app: FastifyInstance, { sql }: Deps) {
   });
 
   app.post('/api/members', { preHandler: guard('member.write') }, async (req, reply) => {
-    const input = parse(MemberInput, req.body);
-    const member = await createMember(sql, input, { actor: req.actor, ip: req.ip });
+    const member = await createMember(sql, req.body as MemberInputData, { actor: req.actor, ip: req.ip });
     reply.code(201);
     return member;
   });
@@ -133,18 +159,23 @@ export function registerMemberRoutes(app: FastifyInstance, { sql }: Deps) {
     const before = await getMember(sql, id);
     try {
       await sql.begin(async (tx) => {
+        // 自定义字段在会员行锁内按最新的字段定义核对；没带时保持原值（停用字段的值始终保留）
+        const [locked] = await tx<{ customFields: MemberCustomValues }[]>`SELECT custom_fields FROM members WHERE id = ${id} FOR UPDATE`;
+        const customFields = input.customFields === undefined ? locked!.customFields : await customValuesFor(tx, input.customFields, locked!.customFields, true);
         await tx`
           UPDATE members SET name = ${input.name}, phone = ${input.phone}, gender = ${input.gender},
-                 birthday = ${input.birthday}, note = ${input.note}, updated_at = now()
+                 birthday = ${input.birthday}, note = ${input.note}, custom_fields = ${tx.json(customFields)}, updated_at = now()
           WHERE id = ${id}`;
+        const keys = new Set([...Object.keys(customFields), ...Object.keys(locked!.customFields)]);
+        const fieldsChanged = [...keys].some((k) => customFields[k] !== locked!.customFields[k]);
         await writeAudit(tx, {
           staffId: req.actor.id,
           action: 'member_updated',
           targetType: 'member',
           targetId: id,
           detail: {
-            before: { name: before.name, phone: before.phone, note: before.note },
-            after: { name: input.name, phone: input.phone, note: input.note },
+            before: { name: before.name, phone: before.phone, note: before.note, ...(fieldsChanged ? { customFields: locked!.customFields } : {}) },
+            after: { name: input.name, phone: input.phone, note: input.note, ...(fieldsChanged ? { customFields } : {}) },
           },
           ip: req.ip,
         });

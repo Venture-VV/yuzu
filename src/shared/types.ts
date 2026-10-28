@@ -4,6 +4,7 @@ import type { BusinessHours } from './business-date';
 import type { PriceTier, Strength, TierPrice } from './catalog';
 import type { DeductionRule, WalletBalance } from './deduction';
 import type { EntryType, PaymentMethod } from './labels';
+import type { MemberCustomValues, MemberFieldDef } from './member-fields';
 import type { Duty, Permission, Role } from './permissions';
 
 export type AppEnv = 'development' | 'trial' | 'production' | 'test';
@@ -32,6 +33,8 @@ export interface StoreRules {
   reversalWindowHours: number | null;
   /** 营业时间（#4，待确认）；null 为全天 24 小时营业。只用于显示与提醒 */
   businessHours: BusinessHours | null;
+  /** 会员自定义字段（#12）；固定字段之外由店主配置 */
+  memberFields: MemberFieldDef[];
 }
 
 export interface SessionInfo {
@@ -64,6 +67,8 @@ export interface MemberSummary {
   isSynthetic: boolean;
   createdAt: string;
   lastActivityAt: string | null;
+  /** 自定义字段的值，键为字段编号（见 StoreRules.memberFields） */
+  customFields: MemberCustomValues;
 }
 
 export interface MemberDetail extends MemberSummary {
