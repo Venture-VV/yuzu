@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Undo2 } from 'lucide-react';
-import { DEDUCTION_RULE_LABELS, REVERSAL_REASONS } from '@shared/labels';
+import { DEDUCTION_RULE_LABELS, describeHours, REVERSAL_REASONS } from '@shared/labels';
 import type { ConsumptionDoc } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
 import { findPending } from '../../lib/pendingOps';
@@ -68,6 +68,10 @@ export function ReversalDialog({ target, onClose }: { target: ReversalTarget | n
   const recovering = !!op.adopted && op.state.status !== 'success';
   const done = op.state.status === 'success';
   const c = doc.data;
+  // 撤销时限（#10，待确认）：超过时限只有店主可以撤销（服务端同样核对）
+  const windowHours = session.rules.reversalWindowHours;
+  const pastWindow = !!c && windowHours !== null && Date.now() - new Date(c.createdAt).getTime() > windowHours * 3_600_000;
+  const blockedByWindow = pastWindow && session.staff.role !== 'owner';
 
   return (
     <Dialog
@@ -94,7 +98,7 @@ export function ReversalDialog({ target, onClose }: { target: ReversalTarget | n
               variant="danger"
               icon={<Undo2 className="size-4" />}
               loading={op.state.status === 'submitting'}
-              disabled={!c || c.status !== 'completed' || reason.length < 2 || locked}
+              disabled={!c || c.status !== 'completed' || blockedByWindow || reason.length < 2 || locked}
               onClick={op.submit}
             >
               确认撤销并恢复余额
@@ -156,8 +160,17 @@ export function ReversalDialog({ target, onClose }: { target: ReversalTarget | n
             <Notice tone="info" title="这张消费单已经撤销过了">
               {c.reversal ? `撤销单 ${c.reversal.docNo} · ${c.reversal.operatorName} · ${c.reversal.reason}` : null}
             </Notice>
+          ) : blockedByWindow ? (
+            <Notice tone="warning" title={`这笔消费已超过撤销时限（消费后 ${describeHours(windowHours!)}内）`}>
+              超过时限的撤销只有店主可以办理，请联系店主。
+            </Notice>
           ) : (
             <>
+              {pastWindow && (
+                <Notice tone="info" title={`这笔消费已超过撤销时限（消费后 ${describeHours(windowHours!)}内）`}>
+                  店主可以继续撤销，撤销会记入审计与当日日结。
+                </Notice>
+              )}
               <div>
                 <p className="mb-2 text-[13px] font-semibold text-ink-2">撤销原因</p>
                 <div className="flex flex-wrap gap-2">

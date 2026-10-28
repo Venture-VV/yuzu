@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Banknote, CreditCard, Ellipsis, Gift, Smartphone, WalletCards } from 'lucide-react';
+import { overLimitGrantFits, type OverLimitGrant } from '@shared/grants';
 import { PAYMENT_METHOD_LABELS, PAYMENT_METHODS, type PaymentMethod } from '@shared/labels';
 import { formatYuan, parseYuan } from '@shared/money';
 import type { MemberDetail, OperationResult } from '@shared/types';
 import { findPending } from '../../lib/pendingOps';
-import { useCatalog } from '../../lib/queries';
+import { qk, useCatalog } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Button, ConfirmCheck, Field, Input, MoneyInput, Notice, PendingBadge, Skeleton } from '../../components/ui';
-import { BalanceChange, FlowFrame, OperationStatus, PendingRecovery, SuccessHeader, SummaryRow, type Step } from './parts';
+import { BalanceChange, FlowFrame, OperationStatus, OverLimitCard, PendingRecovery, SuccessHeader, SummaryRow, type Step } from './parts';
 import { isBusy, isLocked, useOperation } from './useOperation';
 
 const METHOD_ICONS: Record<PaymentMethod, typeof Smartphone> = {
@@ -46,6 +47,8 @@ export function RechargeFlow({
   const [note, setNote] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  /** 超过单笔上限时店主或店总的当场授权 */
+  const [grant, setGrant] = useState<OverLimitGrant | null>(null);
 
   const plan = typeof planId === 'number' ? plans.find((p) => p.id === planId) : undefined;
   const paid = plan ? plan.payAmount : parseYuan(paidText);
@@ -53,6 +56,10 @@ export function RechargeFlow({
 
   const before = { principal: member.principalBalance, bonus: member.bonusBalance };
   const after = { principal: before.principal + (paid ?? 0), bonus: before.bonus + (bonus ?? 0) };
+  const limit = session.rules.maxRechargeCents;
+  const overLimit = paid != null && paid > limit;
+  const grantScope = { kind: 'recharge' as const, memberId: member.id, amount: paid ?? 0 };
+  const grantOk = !overLimit || overLimitGrantFits(grant, grantScope);
 
   const op = useOperation({
     type: 'recharge',
@@ -68,6 +75,7 @@ export function RechargeFlow({
         paymentRef,
         note,
         paymentConfirmed: confirmed,
+        overLimitGrantId: overLimit ? grant?.grantId : undefined,
       },
       meta: {
         memberId: member.id,
@@ -95,13 +103,17 @@ export function RechargeFlow({
       setStep('form');
       setFormError(op.state.error.message);
     }
+    // 授权过期、已用过或与金额不符：作废这次授权，重新请店主或店总授权；上限刚被调整时刷新规则
+    if (op.state.status === 'error' && /^(GRANT_|OVER_LIMIT_)/.test(op.state.error.code)) {
+      setGrant(null);
+      if (op.state.error.code === 'OVER_LIMIT_AUTH_REQUIRED') void qc.invalidateQueries({ queryKey: qk.session });
+    }
   }, [op.state, qc]);
 
   const toConfirm = () => {
     if (planId === null) return setFormError('请选择充值套餐或自定义金额');
     if (!paid || paid <= 0) return setFormError('请填写正确的实收金额（最多两位小数）');
     if (bonus === null) return setFormError('赠金格式不正确');
-    if (paid > session.rules.maxRechargeCents) return setFormError(`超过单笔充值上限 ${formatYuan(session.rules.maxRechargeCents)}`);
     if (!method) return setFormError('请选择收款方式');
     setFormError(null);
     setConfirmed(false);
@@ -152,6 +164,7 @@ export function RechargeFlow({
             </SummaryRow>
           )}
           <SummaryRow label="经办">{r.recharge.operatorName}</SummaryRow>
+          {r.recharge.overLimitApproverName && <SummaryRow label="超限授权">{r.recharge.overLimitApproverName}</SummaryRow>}
         </div>
         <p className="mt-5 mb-2 text-[13px] font-bold text-ink-2">余额变化</p>
         <BalanceChange before={r.balanceBefore} after={r.balanceAfter} animate />
@@ -186,7 +199,7 @@ export function RechargeFlow({
               variant="primary"
               size="lg"
               className="flex-1"
-              disabled={!confirmed || locked}
+              disabled={!confirmed || !grantOk || locked}
               loading={op.state.status === 'submitting'}
               onClick={op.submit}
             >
@@ -215,6 +228,21 @@ export function RechargeFlow({
             {note && <SummaryRow label="备注">{note}</SummaryRow>}
           </div>
         </div>
+
+        {overLimit && (
+          <OverLimitCard
+            kind="recharge"
+            limit={limit}
+            scope={grantScope}
+            memberName={member.name}
+            grant={grantOk ? grant : null}
+            disabled={busy || locked}
+            onGranted={(g) => {
+              setGrant(g);
+              if (op.state.status === 'error') op.reset();
+            }}
+          />
+        )}
 
         <p className="mt-5 mb-2 text-[13px] font-bold text-ink-2">入账后余额</p>
         <BalanceChange before={before} after={after} />

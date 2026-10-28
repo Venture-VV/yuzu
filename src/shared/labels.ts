@@ -49,6 +49,11 @@ export const ENTRY_TYPE_LABELS: Record<EntryType, string> = {
   reversal: '撤销',
 };
 
+/** 时长：整天按「N 天」，其余按「N 小时」 */
+export function describeHours(hours: number): string {
+  return hours % 24 === 0 ? `${hours / 24} 天` : `${hours} 小时`;
+}
+
 export const REVERSAL_REASONS = ['项目选错', '金额录入错误', '会员选错', '重复登记', '顾客取消消费'] as const;
 
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];

@@ -1,5 +1,6 @@
 // 前后端共用的接口数据结构。金额字段均为整数「分」。
 
+import type { BusinessHours } from './business-date';
 import type { PriceTier, Strength, TierPrice } from './catalog';
 import type { DeductionRule, WalletBalance } from './deduction';
 import type { EntryType, PaymentMethod } from './labels';
@@ -23,8 +24,14 @@ export interface StaffBrief {
 export interface StoreRules {
   deductionRule: DeductionRule;
   businessDayStartHour: number;
+  /** 单笔充值上限（店主 #9 默认 50 万元）；超过需要店主或店总当场授权 */
   maxRechargeCents: number;
+  /** 单笔消费上限（默认 50 万元）；超过需要店主或店总当场授权 */
   maxConsumeCents: number;
+  /** 撤销时限（#10，待确认）：消费后多少小时内可以撤销，超过后只有店主可以撤销；null 为不限 */
+  reversalWindowHours: number | null;
+  /** 营业时间（#4，待确认）；null 为全天 24 小时营业。只用于显示与提醒 */
+  businessHours: BusinessHours | null;
 }
 
 export interface SessionInfo {
@@ -120,6 +127,8 @@ export interface RechargeDoc {
   businessDate: string;
   operatorName: string;
   createdAt: string;
+  /** 超过单笔上限时当场授权的店主或店总 */
+  overLimitApproverName: string | null;
 }
 
 export interface ConsumptionLine {
@@ -155,6 +164,8 @@ export interface ConsumptionDoc {
   businessDate: string;
   operatorName: string;
   createdAt: string;
+  /** 超过单笔上限时当场授权的店主或店总 */
+  overLimitApproverName: string | null;
   lines: ConsumptionLine[];
   reversal: ReversalBrief | null;
 }

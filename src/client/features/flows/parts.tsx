@@ -1,10 +1,13 @@
-import type { ReactNode } from 'react';
-import { ArrowRight, CloudOff, Hourglass, RotateCw, Search, Undo2, X } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { ArrowRight, CloudOff, Hourglass, RotateCw, Search, ShieldAlert, ShieldCheck, Undo2, X } from 'lucide-react';
 import type { WalletBalance } from '@shared/deduction';
+import { GRANT_TTL_MINUTES, type OverLimitGrant, type OverLimitScope } from '@shared/grants';
 import { maskPhone } from '@shared/labels';
+import { formatYuan } from '@shared/money';
 import type { MemberSummary } from '@shared/types';
 import { PENDING_LABELS, type PendingOp } from '../../lib/pendingOps';
 import { cn, avatarTone, formatDateTime } from '../../lib/utils';
+import { AuthorizeDialog } from '../../components/AuthorizeDialog';
 import { AnimatedMoney, Money } from '../../components/Money';
 import { Badge, Button, IconButton, Notice, Spinner } from '../../components/ui';
 import type { OperationState } from './useOperation';
@@ -121,7 +124,7 @@ export function BalanceChange({
         return (
           <div key={r.key} className="flex items-center gap-3 border-b border-line px-4 py-3 last:border-0">
             <span className={cn('size-2 rounded-full', r.dot)} />
-            <span className="w-10 text-[13px] font-semibold text-ink-2">{r.label}</span>
+            <span className="w-10 shrink-0 text-[13px] font-semibold whitespace-nowrap text-ink-2">{r.label}</span>
             <Money cents={before[r.key]} className="text-[14px] text-ink-3" />
             <ArrowRight className="size-3.5 text-ink-4" />
             {animate ? (
@@ -140,7 +143,7 @@ export function BalanceChange({
       })}
       <div className="flex items-center gap-3 bg-paper-2/60 px-4 py-2.5">
         <span className="size-2" />
-        <span className="w-10 text-[13px] font-semibold text-ink-2">合计</span>
+        <span className="w-10 shrink-0 text-[13px] font-semibold whitespace-nowrap text-ink-2">合计</span>
         <Money cents={totalBefore} className="text-[13px] text-ink-3" />
         <ArrowRight className="size-3.5 text-ink-4" />
         {animate ? (
@@ -346,6 +349,67 @@ export function SummaryRow({ label, children, className }: { label: ReactNode; c
     <div className={cn('flex items-center justify-between gap-4 py-2', className)}>
       <span className="text-[13px] text-ink-3">{label}</span>
       <span className="text-right text-[14px] font-semibold text-ink">{children}</span>
+    </div>
+  );
+}
+
+/**
+ * 超过单笔上限（店主 #9、❓4）：需要店主或店总在当前弹窗输入账号密码当场授权。
+ * 授权绑定这位会员、这类业务和这个金额，改金额要重新授权；授权编号随请求提交，在入账的同一事务里核销。
+ */
+export function OverLimitCard({
+  kind,
+  limit,
+  scope,
+  memberName,
+  grant,
+  disabled,
+  onGranted,
+}: {
+  kind: OverLimitScope['kind'];
+  limit: number;
+  scope: OverLimitScope;
+  memberName: string;
+  /** 仍然适用于当前金额的授权；没有时显示「请授权」 */
+  grant: OverLimitGrant | null;
+  disabled?: boolean;
+  onGranted: (grant: OverLimitGrant) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const label = kind === 'recharge' ? '充值' : '消费';
+  return (
+    <div
+      className={cn('mt-4 rounded-lg border px-4 py-3', grant ? 'border-pine/30 bg-pine-tint' : 'border-yuzu-deep/30 bg-yuzu-tint')}
+      data-testid="over-limit-card"
+    >
+      <div className="flex items-start gap-3">
+        {grant ? <ShieldCheck className="mt-0.5 size-5 shrink-0 text-pine" /> : <ShieldAlert className="mt-0.5 size-5 shrink-0 text-yuzu-deep" />}
+        <div className="min-w-0 flex-1">
+          <p className="text-[13.5px] font-bold text-ink">
+            超过单笔{label}上限 <Money cents={limit} className="whitespace-nowrap" />
+          </p>
+          <p className={cn('mt-0.5 text-[12.5px]', grant ? 'font-semibold text-pine' : 'text-ink-2')}>
+            {grant
+              ? `已由 ${grant.approverName} 当场授权，${GRANT_TTL_MINUTES} 分钟内有效，只能用于这一笔`
+              : `需要店主或店总当场授权后才能确认${kind === 'recharge' ? '入账' : '扣款'}`}
+          </p>
+          {!grant && (
+            <Button size="sm" variant="secondary" className="mt-2.5" icon={<ShieldCheck className="size-4" />} disabled={disabled} onClick={() => setOpen(true)} data-testid="over-limit-authorize">
+              请店主 / 店总授权
+            </Button>
+          )}
+        </div>
+      </div>
+      <AuthorizeDialog
+        open={open}
+        request={{ purpose: 'over_limit', scope }}
+        lines={[`会员 ${memberName} · ${label}${kind === 'recharge' ? '实收' : '金额'} ${formatYuan(scope.amount)}`, `单笔${label}上限 ${formatYuan(limit)}`]}
+        onClose={() => setOpen(false)}
+        onGranted={(g) => {
+          setOpen(false);
+          onGranted(g);
+        }}
+      />
     </div>
   );
 }

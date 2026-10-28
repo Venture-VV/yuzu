@@ -14,11 +14,13 @@ import { z } from 'zod';
 import { businessDateOf } from '@shared/business-date';
 import { PRICE_TIERS, type PriceTier } from '@shared/catalog';
 import { splitDeduction, type WalletBalance } from '@shared/deduction';
-import { PAYMENT_METHODS } from '@shared/labels';
+import { describeHours, PAYMENT_METHODS } from '@shared/labels';
+import { formatYuan } from '@shared/money';
 import { can, type Permission } from '@shared/permissions';
 import type { ConsumptionDoc, OperationLookup, OperationResult, RechargeDoc, ReversalDoc } from '@shared/types';
 import { isUniqueViolation, type Db, type Sql, type Tx } from '../db';
 import { guard } from '../auth/guard';
+import { consumeOverLimitGrant } from '../auth/grants';
 import { writeAudit } from '../lib/audit';
 import { assertNotFenced, fenceKey, isFenced } from '../lib/fences';
 import type { Deps, OpContext } from '../lib/context';
@@ -37,6 +39,8 @@ const isWalletOp = (t: string): t is OpType => (OP_TYPES as readonly string[]).i
 // ───────────────────────── 输入 ─────────────────────────
 
 const idempotencyKey = z.uuid('缺少有效的操作编号，请刷新页面后重试');
+/** 超过单笔上限时，店主或店总当场授权的授权编号；不超过上限时不用带（不带时不进入请求摘要，旧请求重提不受影响） */
+const overLimitGrantId = z.uuid('授权编号格式不正确').optional();
 
 export const RechargeInput = z.object({
   idempotencyKey,
@@ -48,6 +52,7 @@ export const RechargeInput = z.object({
   paymentRef: z.string().trim().max(64, '收款备注最多 64 字').default(''),
   note: z.string().trim().max(200, '备注最多 200 字').default(''),
   paymentConfirmed: z.literal(true, '请先核实收款到账，再确认入账'),
+  overLimitGrantId,
 });
 export type RechargeInputData = z.input<typeof RechargeInput>;
 
@@ -79,6 +84,7 @@ export const ConsumeInput = z
     expectedBalance: z.object({ principal: cents('本金'), bonus: cents('赠金') }).optional(),
     /** 员工确认时看到的扣款构成；扣款规则或余额变化导致构成不同时拒绝，实际入账必须与确认内容一致 */
     expectedSplit: ExpectedSplit.optional(),
+    overLimitGrantId,
   })
   .refine((v) => v.lines.length + v.customLines.length > 0, '请至少选择一个消费项目');
 export type ConsumeInputData = z.input<typeof ConsumeInput>;
@@ -227,8 +233,10 @@ async function applyBalance(
 export async function getRecharge(db: Db, id: number): Promise<RechargeDoc> {
   const [row] = await db<RechargeDoc[]>`
     SELECT r.id, r.doc_no, r.member_id, r.plan_id, r.plan_name, r.paid_amount, r.bonus_amount, r.payment_method,
-           r.payment_ref, r.note, r.business_date, s.display_name AS operator_name, r.created_at
-    FROM recharges r JOIN staff s ON s.id = r.operator_id WHERE r.id = ${id}`;
+           r.payment_ref, r.note, r.business_date, s.display_name AS operator_name, r.created_at,
+           a.display_name AS over_limit_approver_name
+    FROM recharges r JOIN staff s ON s.id = r.operator_id LEFT JOIN staff a ON a.id = r.over_limit_approved_by
+    WHERE r.id = ${id}`;
   if (!row) throw notFound('充值单不存在');
   return row;
 }
@@ -237,6 +245,7 @@ export async function getConsumption(db: Db, id: number): Promise<ConsumptionDoc
   const [row] = await db<ConsumptionDoc[]>`
     SELECT c.id, c.doc_no, c.member_id, c.total_amount, c.principal_amount, c.bonus_amount, c.deduction_rule,
            c.note, c.status, c.business_date, s.display_name AS operator_name, c.created_at,
+           a.display_name AS over_limit_approver_name,
            coalesce((
              SELECT json_agg(json_build_object('id', l.id, 'itemId', l.item_id, 'tier', l.tier, 'name', l.name, 'unitPrice', l.unit_price,
                                                'quantity', l.quantity, 'amount', l.amount) ORDER BY l.id)
@@ -244,7 +253,8 @@ export async function getConsumption(db: Db, id: number): Promise<ConsumptionDoc
            (SELECT json_build_object('id', r.id, 'docNo', r.doc_no, 'reason', r.reason, 'businessDate', r.business_date,
                                      'operatorName', rs.display_name, 'createdAt', r.created_at)
             FROM reversals r JOIN staff rs ON rs.id = r.operator_id WHERE r.consumption_id = c.id) AS reversal
-    FROM consumptions c JOIN staff s ON s.id = c.operator_id WHERE c.id = ${id}`;
+    FROM consumptions c JOIN staff s ON s.id = c.operator_id LEFT JOIN staff a ON a.id = c.over_limit_approved_by
+    WHERE c.id = ${id}`;
   if (!row) throw notFound('消费单不存在');
   return row;
 }
@@ -321,6 +331,28 @@ async function finish(deps: Deps, ctx: OpContext, opType: OpType, key: string, r
   return result;
 }
 
+/**
+ * 金额超过单笔上限：请求必须带店主或店总的当场授权，授权覆盖这位会员、这类业务、这个金额，在当前事务里核销。
+ * 授权编号用操作编号标记用途（同一编号重提时直接返回第一次的结果，不会再核销一次）。
+ */
+async function approveOverLimit(
+  tx: Tx,
+  grantId: string | undefined,
+  ctx: OpContext,
+  o: { kind: 'recharge' | 'consume'; memberId: number; amount: number; limit: number; key: string },
+): Promise<{ approverId: number; approverName: string }> {
+  const label = o.kind === 'recharge' ? '充值' : '消费';
+  if (!grantId) {
+    throw unprocessable('OVER_LIMIT_AUTH_REQUIRED', `超过单笔${label}上限 ${formatYuan(o.limit)}，需要店主或店总当场授权`, { limit: o.limit, amount: o.amount });
+  }
+  return consumeOverLimitGrant(tx, {
+    grantId,
+    actor: ctx.actor,
+    scope: { kind: o.kind, memberId: o.memberId, amount: o.amount },
+    usedRef: `${o.kind}:${o.key}`,
+  });
+}
+
 // ───────────────────────── 充值 ─────────────────────────
 
 export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContext): Promise<OperationResult> {
@@ -345,18 +377,20 @@ export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContex
       } else if (input.bonusAmount > 0 && !can(ctx.actor, 'recharge.customBonus')) {
         throw forbidden('当前岗位不能自定义赠金，请选择充值套餐');
       }
-      if (input.paidAmount > settings.maxRechargeCents) {
-        throw unprocessable('AMOUNT_TOO_LARGE', '超过单笔充值上限，请核对金额或联系店主', { limit: settings.maxRechargeCents });
-      }
+      // 超过单笔上限：需要店主或店总当场授权，授权在这个事务里核销（业务回滚时一起回滚）
+      const overLimit = input.paidAmount > settings.maxRechargeCents
+        ? await approveOverLimit(tx, input.overLimitGrantId, ctx, { kind: 'recharge', memberId: member.id, amount: input.paidAmount, limit: settings.maxRechargeCents, key })
+        : null;
 
       const at = ctx.at ?? new Date();
       const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
       const docNo = await nextDocNo(tx, 'recharge', businessDate);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO recharges (doc_no, member_id, plan_id, plan_name, paid_amount, bonus_amount, payment_method,
-                               payment_ref, note, business_date, operator_id, created_at)
+                               payment_ref, note, business_date, operator_id, created_at, over_limit_approved_by)
         VALUES (${docNo}, ${member.id}, ${input.planId}, ${planName}, ${input.paidAmount}, ${input.bonusAmount},
-                ${input.paymentMethod}, ${input.paymentRef}, ${input.note}, ${businessDate}, ${ctx.actor.id}, ${at})
+                ${input.paymentMethod}, ${input.paymentRef}, ${input.note}, ${businessDate}, ${ctx.actor.id}, ${at},
+                ${overLimit?.approverId ?? null})
         RETURNING id`;
       const id = row!.id;
       await applyBalance(tx, member, { principal: input.paidAmount, bonus: input.bonusAmount }, {
@@ -367,7 +401,10 @@ export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContex
         action: 'recharge_created',
         targetType: 'recharge',
         targetId: id,
-        detail: { docNo, memberId: member.id, paid: input.paidAmount, bonus: input.bonusAmount, method: input.paymentMethod },
+        detail: {
+          docNo, memberId: member.id, paid: input.paidAmount, bonus: input.bonusAmount, method: input.paymentMethod,
+          ...(overLimit ? { overLimitApprovedBy: overLimit.approverId, overLimitApproverName: overLimit.approverName } : {}),
+        },
         ip: ctx.ip,
         businessDate,
       });
@@ -402,9 +439,6 @@ export async function consume(deps: Deps, raw: ConsumeInputData, ctx: OpContext)
       if (total !== input.expectedTotal) {
         throw conflict('PRICE_CHANGED', '消费金额与当前项目价格不一致，请核对后重新确认', { total });
       }
-      if (total > settings.maxConsumeCents) {
-        throw unprocessable('AMOUNT_TOO_LARGE', '超过单笔消费上限，请核对金额或联系店主', { limit: settings.maxConsumeCents });
-      }
       const balance = { principal: member.principalBalance, bonus: member.bonusBalance };
       if (
         input.expectedBalance &&
@@ -427,15 +461,19 @@ export async function consume(deps: Deps, raw: ConsumeInputData, ctx: OpContext)
           balance,
         });
       }
+      // 超过单笔上限：其余核对都通过后再核销授权
+      const overLimit = total > settings.maxConsumeCents
+        ? await approveOverLimit(tx, input.overLimitGrantId, ctx, { kind: 'consume', memberId: member.id, amount: total, limit: settings.maxConsumeCents, key })
+        : null;
 
       const at = ctx.at ?? new Date();
       const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
       const docNo = await nextDocNo(tx, 'consume', businessDate);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO consumptions (doc_no, member_id, total_amount, principal_amount, bonus_amount, deduction_rule,
-                                  note, business_date, operator_id, created_at)
+                                  note, business_date, operator_id, created_at, over_limit_approved_by)
         VALUES (${docNo}, ${member.id}, ${total}, ${split.principal}, ${split.bonus}, ${settings.deductionRule},
-                ${input.note}, ${businessDate}, ${ctx.actor.id}, ${at})
+                ${input.note}, ${businessDate}, ${ctx.actor.id}, ${at}, ${overLimit?.approverId ?? null})
         RETURNING id`;
       const id = row!.id;
       for (const l of lines) {
@@ -451,7 +489,10 @@ export async function consume(deps: Deps, raw: ConsumeInputData, ctx: OpContext)
         action: 'consumption_created',
         targetType: 'consumption',
         targetId: id,
-        detail: { docNo, memberId: member.id, total, principal: split.principal, bonus: split.bonus, rule: settings.deductionRule },
+        detail: {
+          docNo, memberId: member.id, total, principal: split.principal, bonus: split.bonus, rule: settings.deductionRule,
+          ...(overLimit ? { overLimitApprovedBy: overLimit.approverId, overLimitApproverName: overLimit.approverName } : {}),
+        },
         ip: ctx.ip,
         businessDate,
       });
@@ -479,16 +520,24 @@ export async function reverse(deps: Deps, consumptionId: number, raw: ReverseInp
     async (tx, member) => {
       const settings = await loadSettings(tx);
       // 锁顺序始终是「会员 → 消费单」，避免死锁
-      const [c] = await tx<{ id: number; docNo: string; status: string; principalAmount: number; bonusAmount: number; businessDate: string }[]>`
-        SELECT id, doc_no, status, principal_amount, bonus_amount, business_date FROM consumptions
+      const [c] = await tx<{ id: number; docNo: string; status: string; principalAmount: number; bonusAmount: number; businessDate: string; createdAt: Date }[]>`
+        SELECT id, doc_no, status, principal_amount, bonus_amount, business_date, created_at FROM consumptions
         WHERE id = ${consumptionId} FOR UPDATE`;
       if (!c) throw notFound('消费单不存在');
       if (c.status !== 'completed') {
         const [r] = await tx<{ docNo: string }[]>`SELECT doc_no FROM reversals WHERE consumption_id = ${c.id}`;
         throw conflict('ALREADY_REVERSED', `该消费单已撤销${r ? `（撤销单 ${r.docNo}）` : ''}，不会重复恢复余额`);
       }
-
       const at = ctx.at ?? new Date();
+      // 撤销时限（#10，待确认）：超过时限只有店主可以撤销
+      const windowHours = settings.reversalWindowHours;
+      if (windowHours !== null && ctx.actor.role !== 'owner' && at.getTime() - new Date(c.createdAt).getTime() > windowHours * 3_600_000) {
+        throw unprocessable('REVERSAL_WINDOW', `这笔消费已超过撤销时限（消费后 ${describeHours(windowHours)}内），只有店主可以撤销`, {
+          windowHours,
+          consumedAt: c.createdAt,
+        });
+      }
+
       const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
       const docNo = await nextDocNo(tx, 'reversal', businessDate);
       const [row] = await tx<{ id: number }[]>`

@@ -2,18 +2,19 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Minus, Plus, Trash2, Wallet } from 'lucide-react';
 import { splitDeduction, type DeductionRule, type WalletBalance } from '@shared/deduction';
+import { overLimitGrantFits, type OverLimitGrant } from '@shared/grants';
 import { DEDUCTION_RULE_LABELS } from '@shared/labels';
 import { formatYuan, parseYuan } from '@shared/money';
 import type { MemberDetail, OperationResult, ServiceItem } from '@shared/types';
 import { findPending } from '../../lib/pendingOps';
 import { CartLineName, cartKey, cartLines as toCartLines, ItemCard } from '../catalog/ItemCard';
-import { useCatalog } from '../../lib/queries';
+import { qk, useCatalog } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
 import { Button, Field, Input, MoneyInput, Notice, PendingBadge, Skeleton } from '../../components/ui';
-import { BalanceChange, FlowFrame, OperationStatus, PendingRecovery, SuccessHeader, SummaryRow, type Step } from './parts';
+import { BalanceChange, FlowFrame, OperationStatus, OverLimitCard, PendingRecovery, SuccessHeader, SummaryRow, type Step } from './parts';
 import { isBusy, isLocked, useOperation } from './useOperation';
 
 interface CustomLine {
@@ -48,6 +49,8 @@ export function ConsumeFlow({
   // 服务端告知扣款规则已调整时，核对页按新规则重新计算，等员工再次确认
   const [ruleOverride, setRuleOverride] = useState<DeductionRule | null>(null);
   const activeRule = ruleOverride ?? session.rules.deductionRule;
+  /** 超过单笔上限时店主或店总的当场授权 */
+  const [grant, setGrant] = useState<OverLimitGrant | null>(null);
 
   const groups = useMemo(() => {
     const map = new Map<string, ServiceItem[]>();
@@ -65,6 +68,10 @@ export function ConsumeFlow({
   const available = balance.principal + balance.bonus;
   const split = total > 0 ? splitDeduction(total, balance, activeRule) : null;
   const confirmSplit = total > 0 ? splitDeduction(total, seenBalance, activeRule) : null;
+  const limit = session.rules.maxConsumeCents;
+  const overLimit = total > limit;
+  const grantScope = { kind: 'consume' as const, memberId: member.id, amount: total };
+  const grantOk = !overLimit || overLimitGrantFits(grant, grantScope);
 
   const add = (key: string, delta: number) =>
     setCart((prev) => {
@@ -89,6 +96,7 @@ export function ConsumeFlow({
         expectedBalance: seenBalance,
         // 员工在核对页确认的本金 / 赠金扣款构成，服务端必须按此入账
         expectedSplit: confirmSplit?.ok ? { principal: confirmSplit.principal, bonus: confirmSplit.bonus } : undefined,
+        overLimitGrantId: overLimit ? grant?.grantId : undefined,
       },
       meta: {
         memberId: member.id,
@@ -131,13 +139,16 @@ export function ConsumeFlow({
       setNotice(s.error.message);
       setStep('form');
       op.reset();
+    } else if (/^(GRANT_|OVER_LIMIT_)/.test(s.error.code)) {
+      // 授权过期、已用过或与金额不符：作废这次授权，重新请店主或店总授权；上限刚被调整时刷新规则
+      setGrant(null);
+      if (s.error.code === 'OVER_LIMIT_AUTH_REQUIRED') void qc.invalidateQueries({ queryKey: qk.session });
     }
   }, [op.state, op.adopted, qc, member.id, op.reset, activeRule]);
 
   const toConfirm = () => {
     if (total <= 0) return setFormError('请至少选择一个消费项目');
     if (custom && (customAmount === null || customAmount <= 0)) return setFormError('请填写正确的其他消费金额');
-    if (total > session.rules.maxConsumeCents) return setFormError(`超过单笔消费上限 ${formatYuan(session.rules.maxConsumeCents)}`);
     if (split && !split.ok) return setFormError(`余额不足，还差 ${formatYuan(split.shortfall)}`);
     setFormError(null);
     setNotice(null);
@@ -204,6 +215,7 @@ export function ConsumeFlow({
             <Money cents={r.consumption.principalAmount} className="text-pine" /> <span className="text-ink-4">/</span>{' '}
             <Money cents={r.consumption.bonusAmount} className="text-yuzu-deep" />
           </SummaryRow>
+          {r.consumption.overLimitApproverName && <SummaryRow label="超限授权">{r.consumption.overLimitApproverName}</SummaryRow>}
         </div>
         <p className="mt-5 mb-2 text-[13px] font-bold text-ink-2">余额变化</p>
         <BalanceChange before={r.balanceBefore} after={r.balanceAfter} animate />
@@ -235,7 +247,7 @@ export function ConsumeFlow({
             >
               返回修改
             </Button>
-            <Button variant="primary" size="lg" className="flex-1" disabled={locked} loading={op.state.status === 'submitting'} onClick={op.submit} data-autofocus>
+            <Button variant="primary" size="lg" className="flex-1" disabled={locked || !grantOk} loading={op.state.status === 'submitting'} onClick={op.submit} data-autofocus>
               确认扣款 {formatYuan(total)}
             </Button>
           </div>
@@ -279,6 +291,21 @@ export function ConsumeFlow({
             </div>
           </div>
         </div>
+
+        {overLimit && (
+          <OverLimitCard
+            kind="consume"
+            limit={limit}
+            scope={grantScope}
+            memberName={member.name}
+            grant={grantOk ? grant : null}
+            disabled={busy || locked}
+            onGranted={(g) => {
+              setGrant(g);
+              if (op.state.status === 'error') op.reset();
+            }}
+          />
+        )}
 
         <p className="mt-5 mb-2 text-[13px] font-bold text-ink-2">扣款后余额</p>
         <BalanceChange before={seenBalance} after={after} />

@@ -11,7 +11,7 @@ import {
   type FrontdeskRules,
   type VisitDetail,
 } from '@shared/frontdesk';
-import { grantCovers, type IssuedGrant } from '@shared/grants';
+import { grantCovers, type VipGrant } from '@shared/grants';
 import { formatYuan } from '@shared/money';
 import { api } from '../../lib/api';
 import { useSession } from '../../lib/session';
@@ -20,7 +20,7 @@ import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Button, ConfirmCheck, Field, Input, Notice, Skeleton } from '../../components/ui';
 import { usePreview, useServerNow, stayText } from './queries';
-import { AuthorizeDialog } from './AuthorizeDialog';
+import { AuthorizeDialog } from '../../components/AuthorizeDialog';
 import { GroupMark, VipChip, ZoneChip } from './parts';
 import { PendingPanel, useFrontdeskOp } from './pending';
 
@@ -49,7 +49,7 @@ export function SwapDialog({
   const [lockOld, setLockOld] = useState(false);
   /** 丢牌赔偿（店主 #30：固定 200 元，挂到客人账单）；勾选时原手牌必须同时锁定 */
   const [chargeFee, setChargeFee] = useState(false);
-  const [grant, setGrant] = useState<IssuedGrant | null>(null);
+  const [grant, setGrant] = useState<VipGrant | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const fee = rules?.lostTagFeeCents ?? 0;
   const session = useSession();
@@ -262,7 +262,7 @@ export function SwapDialog({
       </div>
       <AuthorizeDialog
         open={authOpen}
-        tags={needs}
+        request={{ purpose: 'vip_tag', scope: { tags: needs } }}
         lines={target ? [`${guestText} · 换到 VIP 柜 ${target.code}（第 ${target.vipLevel} 级）`] : []}
         onClose={() => setAuthOpen(false)}
         onGranted={(g) => {

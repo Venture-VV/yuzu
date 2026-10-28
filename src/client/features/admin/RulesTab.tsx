@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Check, Minus } from 'lucide-react';
+import { describeBusinessHours, HHMM } from '@shared/business-date';
 import { DEDUCTION_RULES, splitDeduction, type DeductionRule } from '@shared/deduction';
 import { APPROVAL_RULE_LABELS, type ApprovalRules, type InventorySettings } from '@shared/inventory';
-import { DEDUCTION_RULE_LABELS, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
+import { DEDUCTION_RULE_LABELS, describeHours, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
 import { centsToInput, parseYuan } from '@shared/money';
 import { DUTIES, PERMISSION_GROUPS, PERMISSION_LABELS, PERMISSIONS, ROLES, type Permission } from '@shared/permissions';
 import { api, errorMessage } from '../../lib/api';
@@ -15,12 +16,25 @@ import { Button, Card, Field, Input, MoneyInput, Notice, PendingBadge, SectionTi
 import { useInvSettings } from '../inventory/queries';
 
 const EXAMPLE = { balance: { principal: 50000, bonus: 5000 }, amount: 11000 };
+/** 撤销时限的常用选项（小时）；null 为不限 */
+const REVERSAL_WINDOWS: (number | null)[] = [null, 2, 24, 48, 72, 168, 720];
+
+interface Draft {
+  storeName: string;
+  deductionRule: DeductionRule;
+  businessDayStartHour: number;
+  maxRecharge: string;
+  maxConsume: string;
+  reversalWindowHours: number | null;
+  /** 全天营业时为 null */
+  businessHours: { open: string; close: string } | null;
+}
 
 export function RulesTab() {
   const settings = useSettings();
   const qc = useQueryClient();
   const toast = useToast();
-  const [draft, setDraft] = useState<null | { storeName: string; deductionRule: DeductionRule; businessDayStartHour: number; maxRecharge: string; maxConsume: string }>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -31,14 +45,20 @@ export function RulesTab() {
       businessDayStartHour: settings.data.businessDayStartHour,
       maxRecharge: centsToInput(settings.data.maxRechargeCents),
       maxConsume: centsToInput(settings.data.maxConsumeCents),
+      reversalWindowHours: settings.data.reversalWindowHours,
+      businessHours: settings.data.businessHours,
     });
   }
   if (!draft) return <Skeleton className="h-96" />;
+  const windowOptions = REVERSAL_WINDOWS.includes(draft.reversalWindowHours) ? REVERSAL_WINDOWS : [...REVERSAL_WINDOWS, draft.reversalWindowHours];
 
   const save = async () => {
     const maxRechargeCents = parseYuan(draft.maxRecharge);
     const maxConsumeCents = parseYuan(draft.maxConsume);
     if (!maxRechargeCents || !maxConsumeCents) return setError('请填写正确的单笔上限');
+    const hours = draft.businessHours;
+    if (hours && (!HHMM.test(hours.open) || !HHMM.test(hours.close))) return setError('请填写营业时间（开门与打烊时间）');
+    if (hours && hours.open === hours.close) return setError('开门与打烊时间不能相同；全天营业请选「全天 24 小时」');
     setSaving(true);
     setError(null);
     try {
@@ -48,6 +68,8 @@ export function RulesTab() {
         businessDayStartHour: draft.businessDayStartHour,
         maxRechargeCents,
         maxConsumeCents,
+        reversalWindowHours: draft.reversalWindowHours,
+        businessHours: draft.businessHours,
       });
       await qc.invalidateQueries({ queryKey: qk.settings });
       await qc.invalidateQueries({ queryKey: qk.session });
@@ -123,11 +145,65 @@ export function RulesTab() {
             ))}
           </Select>
         </Field>
-        <Field label="单笔充值上限" htmlFor="r-maxr" hint="防止多输一个 0">
+        <Field label="单笔充值上限" htmlFor="r-maxr" hint="超过时需店主或店总在弹窗里输入账号密码当场授权（店主确认默认 50 万元）">
           <MoneyInput id="r-maxr" value={draft.maxRecharge} onChange={(e) => setDraft({ ...draft, maxRecharge: e.target.value })} />
         </Field>
-        <Field label="单笔消费上限" htmlFor="r-maxc">
+        <Field label="单笔消费上限" htmlFor="r-maxc" hint="同上，超过需当场授权">
           <MoneyInput id="r-maxc" value={draft.maxConsume} onChange={(e) => setDraft({ ...draft, maxConsume: e.target.value })} />
+        </Field>
+        <Field
+          label={<span className="inline-flex items-center gap-2">撤销时限 <PendingBadge /></span>}
+          htmlFor="r-window"
+          hint="消费后多长时间内可以撤销；超过后只有店主可以撤销"
+        >
+          <Select
+            id="r-window"
+            value={draft.reversalWindowHours ?? ''}
+            onChange={(e) => setDraft({ ...draft, reversalWindowHours: e.target.value ? Number(e.target.value) : null })}
+          >
+            {windowOptions.map((h) => (
+              <option key={h ?? 'none'} value={h ?? ''}>
+                {h === null ? '不限' : `消费后 ${describeHours(h)}内`}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field
+          label={<span className="inline-flex items-center gap-2">营业时间 <PendingBadge /></span>}
+          hint={`${describeBusinessHours(draft.businessHours)}；只用于显示与提醒，不影响营业日切换与记账`}
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Segmented
+              ariaLabel="营业时间"
+              value={draft.businessHours ? 'hours' : 'all_day'}
+              onChange={(v) => setDraft({ ...draft, businessHours: v === 'all_day' ? null : (draft.businessHours ?? { open: '10:00', close: '02:00' }) })}
+              options={[
+                { value: 'all_day', label: '全天 24 小时' },
+                { value: 'hours', label: '指定时间' },
+              ]}
+            />
+            {draft.businessHours && (
+              <span className="flex items-center gap-1.5">
+                <Input
+                  type="time"
+                  aria-label="开门时间"
+                  fullWidth={false}
+                  className="w-[140px]"
+                  value={draft.businessHours.open}
+                  onChange={(e) => setDraft({ ...draft, businessHours: { ...draft.businessHours!, open: e.target.value } })}
+                />
+                <span className="text-ink-3">至</span>
+                <Input
+                  type="time"
+                  aria-label="打烊时间"
+                  fullWidth={false}
+                  className="w-[140px]"
+                  value={draft.businessHours.close}
+                  onChange={(e) => setDraft({ ...draft, businessHours: { ...draft.businessHours!, close: e.target.value } })}
+                />
+              </span>
+            )}
+          </div>
         </Field>
       </Card>
 

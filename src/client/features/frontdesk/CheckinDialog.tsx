@@ -12,7 +12,7 @@ import {
   type FrontdeskRules,
   type Zone,
 } from '@shared/frontdesk';
-import { grantCovers, type IssuedGrant, type VipGrantTag } from '@shared/grants';
+import { grantCovers, type VipGrant, type VipGrantTag } from '@shared/grants';
 import { maskPhone } from '@shared/labels';
 import type { MemberSummary } from '@shared/types';
 import { useMembers } from '../../lib/queries';
@@ -21,7 +21,7 @@ import { cn, formatTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Badge, Button, Input, Notice, Segmented } from '../../components/ui';
-import { AuthorizeDialog } from './AuthorizeDialog';
+import { AuthorizeDialog } from '../../components/AuthorizeDialog';
 import { GroupMark, VipChip, ZONE_STYLE } from './parts';
 import { PendingPanel, useFrontdeskOp } from './pending';
 import { useMemberLevel } from './queries';
@@ -97,7 +97,7 @@ export function CheckinDialog({
   const [member, setMember] = useState<MemberSummary | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   /** 当场授权（值班经理 / 店总签发，5 分钟内一次有效）；只在有客人等级不够、要用 VIP 柜时使用 */
-  const [grant, setGrant] = useState<IssuedGrant | null>(null);
+  const [grant, setGrant] = useState<VipGrant | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const firstInput = useRef<HTMLInputElement>(null);
   const members = useMembers(guestType === 'member' && !member ? memberQ.trim() : '');
@@ -458,7 +458,7 @@ export function CheckinDialog({
       </div>
       <AuthorizeDialog
         open={authOpen}
-        tags={needs}
+        request={{ purpose: 'vip_tag', scope: { tags: needs } }}
         lines={authLines}
         onClose={() => setAuthOpen(false)}
         onGranted={(g) => {

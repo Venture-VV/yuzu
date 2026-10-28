@@ -1,4 +1,4 @@
-// Batch 2.2 升级兼容：已在用 S2 前台（迁移到 007）的库升级到真实柜池（008）。
+// Batch 2.2 升级兼容：已在用 S2 前台（迁移到 007）的库升级到真实柜池（008）及之后的版本。
 //   · 库里有旧儿童区手牌与在店儿童来访时，迁移不改不删这些数据，保留原分区约束；
 //     旧来访照常挂账、换牌（换到同为旧儿童区的牌），旧的空闲儿童牌可由店主改为男宾 / 女宾；
 //   · 应用拒绝新的儿童区登记；
@@ -30,6 +30,9 @@ async function migrateThrough007(sql: Sql) {
   }
 }
 
+/** 008 及之后的全部迁移（都应在升级时依次执行） */
+const migrationsAfter007 = async () => (await readdir(MIGRATIONS)).filter((f) => f.endsWith('.sql') && f >= '008').sort();
+
 async function seedStaff(sql: Sql) {
   const hash = await hashPassword(PASSWORD);
   const [owner] = await sql<{ id: number }[]>`
@@ -55,7 +58,7 @@ describe('库里有旧儿童区数据时升级', () => {
       SELECT 'LF-OLD-1', ${bill!.id}, id, 'child', '2026-10-26', now(), ${ownerId}, ${randomUUID()} FROM hand_tags WHERE code = 'C001'
       RETURNING id`;
     childVisitId = visit!.id;
-    expect(await migrate(sql)).toEqual(['008_locker_pool.sql', '009_price_tiers.sql']);
+    expect(await migrate(sql)).toEqual(await migrationsAfter007());
     app = await buildApp(sql, config);
   }, 60_000);
 
@@ -133,10 +136,11 @@ describe('没有旧儿童区数据时升级', () => {
     sql = createSql(TEST_DB, { max: 5 });
     await migrateThrough007(sql);
     await seedStaff(sql);
-    // 店主手动调过的更正时限（不是旧默认 10）
+    // 店主手动调过的更正时限（不是旧默认 10）与单笔消费上限（不是旧默认 2 万）
     await sql`UPDATE settings SET value = '{"selfVoidMinutes": 12}' WHERE key = 'frontdesk_rules'`;
+    await sql`UPDATE settings SET value = '3000000' WHERE key = 'max_consume_cents'`;
     await sql`INSERT INTO hand_tags (code, zone) VALUES ('A001', 'male'), ('B001', 'female')`;
-    expect(await migrate(sql)).toEqual(['008_locker_pool.sql', '009_price_tiers.sql']);
+    expect(await migrate(sql)).toEqual(await migrationsAfter007());
   }, 60_000);
 
   afterAll(async () => {
@@ -147,6 +151,14 @@ describe('没有旧儿童区数据时升级', () => {
     await expect(sql`INSERT INTO hand_tags (code, zone) VALUES ('C001', 'child')`).rejects.toThrow(/hand_tags_zone_check/);
     const [rules] = await sql<{ value: { selfVoidMinutes: number } }[]>`SELECT value FROM settings WHERE key = 'frontdesk_rules'`;
     expect(rules!.value.selfVoidMinutes).toBe(12);
+  });
+
+  it('单笔上限（010）：仍是旧默认 5 万的充值上限改为 50 万；店主调过的消费上限（3 万）保持不变', async () => {
+    const rows = await sql<{ key: string; value: number }[]>`SELECT key, value FROM settings WHERE key IN ('max_recharge_cents', 'max_consume_cents') ORDER BY key`;
+    expect(rows).toEqual([
+      { key: 'max_consume_cents', value: 3_000_000 },
+      { key: 'max_recharge_cents', value: 50_000_000 },
+    ]);
   });
 
   it('VIP 柜必须有等级、普通柜不能有等级（数据库约束兜底）', async () => {

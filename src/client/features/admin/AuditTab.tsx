@@ -53,8 +53,10 @@ function describe(detail: Record<string, unknown>): string {
   if (typeof detail.username === 'string') parts.push(`账号 ${detail.username}`);
   // 当场授权：授权人与授权的柜
   if (typeof detail.approverName === 'string') parts.push(`授权人 ${detail.approverName}`);
-  const scope = detail.scope as { tags?: { code: string }[] } | undefined;
+  const scope = detail.scope as { tags?: { code: string }[]; kind?: 'recharge' | 'consume'; amount?: number } | undefined;
   if (Array.isArray(scope?.tags)) parts.push(`VIP 柜 ${scope.tags.map((t) => t.code).join('、')}`);
+  if (scope?.kind && typeof scope.amount === 'number') parts.push(`超过单笔上限的${scope.kind === 'recharge' ? '充值' : '消费'} ¥${(scope.amount / 100).toFixed(2)}`);
+  if (typeof detail.overLimitApproverName === 'string') parts.push(`超限由${detail.overLimitApproverName}当场授权`);
   const vip = detail.vipOverride as { approverName?: string } | undefined;
   if (vip?.approverName) parts.push(`VIP 柜由${vip.approverName}当场授权`);
   if (typeof detail.lostFee === 'number') parts.push(`丢牌赔偿 ¥${(detail.lostFee / 100).toFixed(2)}`);

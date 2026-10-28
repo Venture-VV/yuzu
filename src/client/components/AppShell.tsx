@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Boxes, CalendarCheck2, ConciergeBell, HandCoins, Inbox, KeyRound, LogOut, ReceiptText, Settings2, ShoppingCart, UsersRound } from 'lucide-react';
+import { describeBusinessHours, isOpenAt, minuteOfDay } from '@shared/business-date';
 import { describeDate, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
 import type { Permission } from '@shared/permissions';
 import { api } from '../lib/api';
@@ -198,6 +199,9 @@ export function PageHeader({
 }) {
   const session = useSession();
   const d = describeDate(dateMode === 'business' ? session.today : session.calendarToday);
+  const hours = session.rules.businessHours;
+  const now = useMinuteClock(!!hours);
+  const closed = !!hours && !isOpenAt(minuteOfDay(new Date(now), session.timezone), hours);
   return (
     <header className="flex min-h-[64px] shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-line bg-paper/90 px-5 py-3 backdrop-blur md:px-7">
       <div className="min-w-0 flex-1">
@@ -210,11 +214,30 @@ export function PageHeader({
           合成演示数据
         </Badge>
       )}
-      <div className="flex items-center gap-2 rounded-full border border-line bg-card py-1 pr-3.5 pl-1 shadow-card">
+      <div
+        className="flex items-center gap-2 rounded-full border border-line bg-card py-1 pr-3.5 pl-1 shadow-card"
+        title={`营业时间 ${describeBusinessHours(hours)}；营业日每天 ${String(session.rules.businessDayStartHour).padStart(2, '0')}:00 切换`}
+      >
         <span className="rounded-full bg-pine px-2.5 py-1 text-[11.5px] font-bold text-paper">{dateMode === 'business' ? '营业日' : '今天'}</span>
         <span className="num text-[13.5px] font-bold text-ink">{d.md}</span>
         <span className="text-[12.5px] text-ink-3">{d.weekday}</span>
+        {closed && (
+          <span className="rounded-full bg-clay-soft px-2 py-0.5 text-[11.5px] font-bold text-clay" data-testid="outside-hours">
+            非营业时间
+          </span>
+        )}
       </div>
     </header>
   );
+}
+
+/** 每分钟更新一次的当前时间（只在需要时启用） */
+function useMinuteClock(enabled: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, [enabled]);
+  return now;
 }
