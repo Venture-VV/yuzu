@@ -6,6 +6,7 @@ import { DEDUCTION_RULE_LABELS } from '@shared/labels';
 import { formatYuan, parseYuan } from '@shared/money';
 import type { MemberDetail, OperationResult, ServiceItem } from '@shared/types';
 import { findPending } from '../../lib/pendingOps';
+import { CartLineName, cartKey, cartLines as toCartLines, ItemCard } from '../catalog/ItemCard';
 import { useCatalog } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
@@ -36,7 +37,8 @@ export function ConsumeFlow({
   const items = catalog.data?.items ?? [];
 
   const [step, setStep] = useState<Step>('form');
-  const [cart, setCart] = useState<Map<number, number>>(new Map());
+  /** 键为「项目:价格档」，值为数量 */
+  const [cart, setCart] = useState<Map<string, number>>(new Map());
   const [custom, setCustom] = useState<CustomLine | null>(null);
   const [note, setNote] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
@@ -56,10 +58,7 @@ export function ConsumeFlow({
     return [...map];
   }, [items]);
 
-  const cartLines = [...cart].flatMap(([id, qty]) => {
-    const item = items.find((i) => i.id === id);
-    return item ? [{ item, qty, amount: item.price * qty }] : [];
-  });
+  const cartLines = toCartLines(cart, items);
   const customAmount = custom ? parseYuan(custom.amountText) : null;
   const total = cartLines.reduce((s, l) => s + l.amount, 0) + (customAmount ?? 0);
   const balance = { principal: member.principalBalance, bonus: member.bonusBalance };
@@ -67,12 +66,12 @@ export function ConsumeFlow({
   const split = total > 0 ? splitDeduction(total, balance, activeRule) : null;
   const confirmSplit = total > 0 ? splitDeduction(total, seenBalance, activeRule) : null;
 
-  const add = (id: number, delta: number) =>
+  const add = (key: string, delta: number) =>
     setCart((prev) => {
       const next = new Map(prev);
-      const qty = Math.max(0, Math.min(99, (next.get(id) ?? 0) + delta));
-      if (qty === 0) next.delete(id);
-      else next.set(id, qty);
+      const qty = Math.max(0, Math.min(99, (next.get(key) ?? 0) + delta));
+      if (qty === 0) next.delete(key);
+      else next.set(key, qty);
       return next;
     });
 
@@ -83,7 +82,7 @@ export function ConsumeFlow({
       body: {
         idempotencyKey,
         memberId: member.id,
-        lines: [...cart].map(([itemId, quantity]) => ({ itemId, quantity })),
+        lines: cartLines.map((l) => ({ itemId: l.item.id, quantity: l.qty, tier: l.tier })),
         customLines: custom && customAmount ? [{ name: custom.name.trim() || '其他消费', amount: customAmount }] : [],
         note,
         expectedTotal: total,
@@ -96,7 +95,7 @@ export function ConsumeFlow({
         memberName: member.name,
         amount: total,
         summary: [
-          ...cartLines.map((l) => `${l.item.name}${l.qty > 1 ? ` ×${l.qty}` : ''}`),
+          ...cartLines.map((l) => `${l.name}${l.qty > 1 ? ` ×${l.qty}` : ''}`),
           ...(custom && customAmount ? [custom.name.trim() || '其他消费'] : []),
         ].join('、'),
         staffName: session.staff.displayName,
@@ -248,7 +247,7 @@ export function ConsumeFlow({
           <Money cents={total} className="mt-1 text-[34px] leading-none font-bold text-ink" />
           <div className="mt-4 border-t border-dashed border-line pt-1">
             {cartLines.map((l) => (
-              <SummaryRow key={l.item.id} label={`${l.item.name}${l.qty > 1 ? ` ×${l.qty}` : ''}`}>
+              <SummaryRow key={l.key} label={`${l.name}${l.qty > 1 ? ` ×${l.qty}` : ''}`}>
                 <Money cents={l.amount} />
               </SummaryRow>
             ))}
@@ -324,28 +323,9 @@ export function ConsumeFlow({
           <section key={category} className="mb-4">
             <p className="mb-2 text-[12px] font-bold tracking-wide text-ink-3">{category}</p>
             <div className="grid grid-cols-2 gap-2">
-              {list.map((item) => {
-                const qty = cart.get(item.id) ?? 0;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => add(item.id, 1)}
-                    className={cn(
-                      'relative flex min-h-[64px] flex-col justify-between rounded-lg border bg-card px-3 py-2.5 text-left transition-all active:scale-[0.98]',
-                      qty ? 'border-yuzu-deep/60 bg-yuzu-tint shadow-[0_0_0_3px_rgb(242_194_48/0.25)]' : 'border-line hover:border-line-strong',
-                    )}
-                  >
-                    <span className="pr-6 text-[13.5px] leading-snug font-semibold text-ink">{item.name}</span>
-                    <Money cents={item.price} className="mt-1 text-[14px] font-bold text-ink-2" />
-                    {qty > 0 && (
-                      <span className="num absolute top-2 right-2 flex size-6 animate-pop items-center justify-center rounded-full bg-ink text-[12px] font-bold text-yuzu">
-                        {qty}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
+              {list.map((item) => (
+                <ItemCard key={item.id} item={item} cart={cart} tone="yuzu" onAdd={(tier) => add(cartKey(item.id, tier), 1)} />
+              ))}
             </div>
           </section>
         ))
@@ -377,14 +357,14 @@ export function ConsumeFlow({
       {cartLines.length > 0 && (
         <div className="mb-4 overflow-hidden rounded-lg border border-line bg-card">
           {cartLines.map((l) => (
-            <div key={l.item.id} className="flex items-center gap-3 border-b border-line px-3.5 py-2 last:border-0">
-              <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold">{l.item.name}</span>
+            <div key={l.key} className="flex items-center gap-3 border-b border-line px-3.5 py-2 last:border-0">
+              <CartLineName line={l} className="text-[13.5px]" />
               <div className="flex items-center rounded-md border border-line">
-                <button type="button" aria-label={`减少 ${l.item.name}`} onClick={() => add(l.item.id, -1)} className="flex size-9 items-center justify-center text-ink-2 hover:bg-paper-2">
+                <button type="button" aria-label={`减少 ${l.name}`} onClick={() => add(l.key, -1)} className="flex size-9 items-center justify-center text-ink-2 hover:bg-paper-2">
                   <Minus className="size-3.5" />
                 </button>
                 <span className="num w-7 text-center text-[14px] font-bold">{l.qty}</span>
-                <button type="button" aria-label={`增加 ${l.item.name}`} onClick={() => add(l.item.id, 1)} className="flex size-9 items-center justify-center text-ink-2 hover:bg-paper-2">
+                <button type="button" aria-label={`增加 ${l.name}`} onClick={() => add(l.key, 1)} className="flex size-9 items-center justify-center text-ink-2 hover:bg-paper-2">
                   <Plus className="size-3.5" />
                 </button>
               </div>

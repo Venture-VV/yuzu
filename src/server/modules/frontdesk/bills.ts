@@ -3,20 +3,29 @@
 // 挂账不等于收款：本阶段只写账单明细与账单合计，不写 consumptions / ledger_entries，不改会员余额。
 
 import { z } from 'zod';
+import { PRICE_TIERS, type PriceTier } from '@shared/catalog';
 import { can } from '@shared/permissions';
-import type { BillSource } from '@shared/frontdesk';
+import { ZONE_LABELS, type BillSource } from '@shared/frontdesk';
 import { writeAudit } from '../../lib/audit';
 import type { Deps, OpContext } from '../../lib/context';
-import { conflict, forbidden, notFound } from '../../lib/errors';
+import { conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
 import { parse, positiveCents } from '../../lib/validate';
 import { assertCanFix, assertOpen, businessDate, hashRequest, loadFrontdeskRules, lockVisits, runIdempotent, saveKey, setTxTimeouts } from './common';
+import { loadPricedItems, priceLine } from '../pricing';
 import { getVisit } from './visits';
 
 export const PostInput = z
   .object({
     clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
     lines: z
-      .array(z.object({ itemId: z.number().int().positive(), quantity: z.number().int().min(1, '数量至少为 1').max(99, '单项数量最多 99') }))
+      .array(
+        z.object({
+          itemId: z.number().int().positive(),
+          quantity: z.number().int().min(1, '数量至少为 1').max(99, '单项数量最多 99'),
+          /** 价格档；不带时按项目的默认档计价（升级前留下的待确认请求不带这一项） */
+          tier: z.enum(PRICE_TIERS, '价格档不正确').optional(),
+        }),
+      )
       .max(30, '一次最多登记 30 项')
       .default([]),
     customLines: z
@@ -45,19 +54,17 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
       SELECT id, status, amount_cents, line_count FROM bills WHERE id = ${visit.billId} FOR UPDATE`;
     if (bill!.status !== 'open') throw conflict('BILL_CLOSED', '账单已结束，不能再挂账');
 
-    const itemIds = [...new Set(input.lines.map((l) => l.itemId))];
-    const items = itemIds.length
-      ? await tx<{ id: number; name: string; price: number; active: boolean }[]>`
-          SELECT id, name, price, active FROM service_items WHERE id IN ${tx(itemIds)}`
-      : [];
-    const byId = new Map(items.map((i) => [i.id, i]));
-    const lines = [
-      ...input.lines.map((l) => {
-        const item = byId.get(l.itemId);
-        if (!item || !item.active) throw conflict('ITEM_UNAVAILABLE', '有项目已停用，请刷新后重新选择');
-        return { itemId: item.id as number | null, name: item.name, unitPrice: item.price, quantity: l.quantity, amount: item.price * l.quantity };
-      }),
-      ...input.customLines.map((l) => ({ itemId: null, name: l.name, unitPrice: l.amount, quantity: 1, amount: l.amount })),
+    // 项目价格以服务端为准，按所选价格档计价；只限某一性别的项目（如私汤木桶浴仅女宾）按客人分区核对
+    const items = await loadPricedItems(tx, input.lines.map((l) => l.itemId));
+    for (const l of input.lines) {
+      const item = items.get(l.itemId);
+      if (item?.gender && item.gender !== visit.zone) {
+        throw unprocessable('ITEM_GENDER', `「${item.name}」仅限${ZONE_LABELS[item.gender].title}，这位客人是${ZONE_LABELS[visit.zone].title}`);
+      }
+    }
+    const lines: { itemId: number | null; name: string; tier: PriceTier | null; unitPrice: number; quantity: number; amount: number }[] = [
+      ...input.lines.map((l) => priceLine(items.get(l.itemId), l.tier, l.quantity, '有项目已停用，请刷新后重新选择')),
+      ...input.customLines.map((l) => ({ itemId: null, name: l.name, tier: null, unitPrice: l.amount, quantity: 1, amount: l.amount })),
     ];
     const total = lines.reduce((s, l) => s + l.amount, 0);
     if (total !== input.expectedTotal) {
@@ -68,8 +75,8 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
     const source: BillSource = 'bath';
     for (const l of lines) {
       await tx`
-        INSERT INTO bill_lines (bill_id, source, item_id, name, unit_price, quantity, amount, post_key, business_date, posted_by, posted_at)
-        VALUES (${bill!.id}, ${source}, ${l.itemId}, ${l.name}, ${l.unitPrice}, ${l.quantity}, ${l.amount}, ${key}, ${date},
+        INSERT INTO bill_lines (bill_id, source, item_id, tier, name, unit_price, quantity, amount, post_key, business_date, posted_by, posted_at)
+        VALUES (${bill!.id}, ${source}, ${l.itemId}, ${l.tier}, ${l.name}, ${l.unitPrice}, ${l.quantity}, ${l.amount}, ${key}, ${date},
                 ${ctx.actor.id}, ${at})`;
     }
     await tx`

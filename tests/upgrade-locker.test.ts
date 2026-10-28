@@ -55,7 +55,7 @@ describe('库里有旧儿童区数据时升级', () => {
       SELECT 'LF-OLD-1', ${bill!.id}, id, 'child', '2026-10-26', now(), ${ownerId}, ${randomUUID()} FROM hand_tags WHERE code = 'C001'
       RETURNING id`;
     childVisitId = visit!.id;
-    expect(await migrate(sql)).toEqual(['008_locker_pool.sql']);
+    expect(await migrate(sql)).toEqual(['008_locker_pool.sql', '009_price_tiers.sql']);
     app = await buildApp(sql, config);
   }, 60_000);
 
@@ -136,7 +136,7 @@ describe('没有旧儿童区数据时升级', () => {
     // 店主手动调过的更正时限（不是旧默认 10）
     await sql`UPDATE settings SET value = '{"selfVoidMinutes": 12}' WHERE key = 'frontdesk_rules'`;
     await sql`INSERT INTO hand_tags (code, zone) VALUES ('A001', 'male'), ('B001', 'female')`;
-    expect(await migrate(sql)).toEqual(['008_locker_pool.sql']);
+    expect(await migrate(sql)).toEqual(['008_locker_pool.sql', '009_price_tiers.sql']);
   }, 60_000);
 
   afterAll(async () => {

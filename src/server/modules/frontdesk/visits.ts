@@ -527,7 +527,7 @@ export async function getVisit(db: Db, id: number): Promise<VisitDetail> {
   const memberLevel = v.memberId ? ((await memberLevels(db, [v.memberId], await loadFrontdeskRules(db))).get(v.memberId) ?? null) : null;
 
   const lines = await db<VisitDetail['lines']>`
-    SELECT l.id, l.source, l.item_id, l.name, l.unit_price, l.quantity, l.amount, l.status, l.post_key, l.business_date,
+    SELECT l.id, l.source, l.item_id, l.tier, l.name, l.unit_price, l.quantity, l.amount, l.status, l.post_key, l.business_date,
            l.posted_by AS posted_by_id, p.display_name AS posted_by_name, l.posted_at, l.void_reason,
            vs.display_name AS voided_by_name, l.voided_at
     FROM bill_lines l JOIN staff p ON p.id = l.posted_by LEFT JOIN staff vs ON vs.id = l.voided_by

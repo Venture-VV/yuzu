@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Minus, Plus, Trash2 } from 'lucide-react';
-import type { VisitDetail } from '@shared/frontdesk';
+import { ZONE_LABELS, type VisitDetail } from '@shared/frontdesk';
 import { parseYuan } from '@shared/money';
 import { useCatalog } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
@@ -8,10 +8,11 @@ import { cn } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Button, Input, MoneyInput, Notice, Skeleton } from '../../components/ui';
+import { CartLineName, cartKey, cartLines, ItemCard } from '../catalog/ItemCard';
 import { ZoneChip } from './parts';
 import { PendingPanel, useFrontdeskOp } from './pending';
 
-/** 挂账：点选项目累加数量，确认后一次登记到手牌账单（只挂账，不收款） */
+/** 挂账：点选项目（多档项目按档位点选）累加数量，确认后一次登记到手牌账单（只挂账，不收款） */
 export function AddItemsDialog({
   open,
   visit,
@@ -26,7 +27,8 @@ export function AddItemsDialog({
   const can = useCan();
   const session = useSession();
   const catalog = useCatalog();
-  const [cart, setCart] = useState<Map<number, number>>(new Map());
+  /** 键为「项目:价格档」，值为数量 */
+  const [cart, setCart] = useState<Map<string, number>>(new Map());
   const [category, setCategory] = useState('全部');
   const [custom, setCustom] = useState<{ name: string; amount: string }[]>([]);
   // 同一位客人上一笔挂账结果待确认时，先处理那一笔，不能另起一笔（避免重复挂账）
@@ -52,22 +54,22 @@ export function AddItemsDialog({
 
   const locked = op.locked;
   const touch = op.clearError;
-  const add = (id: number, delta: number) => {
+  const add = (key: string, delta: number) => {
     if (locked) return;
     touch();
     setCart((m) => {
       const next = new Map(m);
-      const q = Math.min(99, Math.max(0, (next.get(id) ?? 0) + delta));
-      if (q === 0) next.delete(id);
-      else next.set(id, q);
+      const q = Math.min(99, Math.max(0, (next.get(key) ?? 0) + delta));
+      if (q === 0) next.delete(key);
+      else next.set(key, q);
       return next;
     });
   };
 
-  const lines = [...cart].map(([id, quantity]) => {
-    const item = items.find((i) => i.id === id)!;
-    return { item, quantity, amount: item ? item.price * quantity : 0 };
-  }).filter((l) => l.item);
+  const lines = cartLines(cart, items).map((l) => ({ ...l, quantity: l.qty }));
+  /** 只限某一性别的项目（如私汤木桶浴仅女宾）：这位客人不能用时不可选 */
+  const unavailableFor = (gender: 'male' | 'female' | null) =>
+    gender && gender !== visit.zone ? `仅限${ZONE_LABELS[gender].title}` : null;
   const customParsed = custom.map((c) => ({ name: c.name.trim(), amount: parseYuan(c.amount) }));
   const customValid = customParsed.every((c) => c.name && c.amount && c.amount > 0);
   const total = lines.reduce((s, l) => s + l.amount, 0) + customParsed.reduce((s, c) => s + (c.amount ?? 0), 0);
@@ -78,12 +80,12 @@ export function AddItemsDialog({
       url: `/api/frontdesk/visits/${visit.id}/charges`,
       body: {
         clientKey: key,
-        lines: lines.map((l) => ({ itemId: l.item.id, quantity: l.quantity })),
+        lines: lines.map((l) => ({ itemId: l.item.id, quantity: l.quantity, tier: l.tier })),
         customLines: customParsed.map((c) => ({ name: c.name, amount: c.amount })),
         expectedTotal: total,
       },
       tagCodes: [visit.tag.code],
-      summary: [...lines.map((l) => `${l.item.name} ×${l.quantity}`), ...customParsed.map((c) => c.name)].join('、'),
+      summary: [...lines.map((l) => `${l.name} ×${l.quantity}`), ...customParsed.map((c) => c.name)].join('、'),
       amount: total,
     }));
     if (result) onDone(result);
@@ -140,30 +142,16 @@ export function AddItemsDialog({
             <p className="rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">还没有可挂账的项目，请店主在「管理 → 套餐与项目」中添加</p>
           ) : (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {shown.map((i) => {
-                const q = cart.get(i.id) ?? 0;
-                return (
-                  <button
-                    key={i.id}
-                    type="button"
-                    onClick={() => add(i.id, 1)}
-                    disabled={locked}
-                    data-testid={`item-${i.name}`}
-                    className={cn(
-                      'relative flex min-h-[76px] flex-col justify-between rounded-lg border px-3.5 py-2.5 text-left transition-[background-color,border-color] active:scale-[0.98]',
-                      q ? 'border-pine bg-pine-tint' : 'border-line bg-card hover:border-line-strong',
-                    )}
-                  >
-                    <span className="line-clamp-2 text-[14px] font-bold leading-snug">{i.name}</span>
-                    <Money cents={i.price} className="text-[14px] font-semibold text-ink-2" />
-                    {q > 0 && (
-                      <span className="num absolute top-2 right-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-pine px-1.5 text-[12.5px] font-bold text-paper">
-                        ×{q}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
+              {shown.map((i) => (
+                <ItemCard
+                  key={i.id}
+                  item={i}
+                  cart={cart}
+                  disabled={locked}
+                  unavailable={unavailableFor(i.gender)}
+                  onAdd={(tier) => add(cartKey(i.id, tier), 1)}
+                />
+              ))}
             </div>
           )}
           {can('consume.customAmount') && (
@@ -217,14 +205,14 @@ export function AddItemsDialog({
           ) : (
             <ul className="mt-2 space-y-1.5">
               {lines.map((l) => (
-                <li key={l.item.id} className="flex items-center gap-2">
-                  <span className="min-w-0 flex-1 text-[13px] leading-snug font-semibold">{l.item.name}</span>
+                <li key={l.key} className="flex items-center gap-2">
+                  <CartLineName line={l} className="text-[13px]" />
                   <span className="flex items-center rounded-md border border-line bg-card">
-                    <button type="button" aria-label={`减少 ${l.item.name}`} onClick={() => add(l.item.id, -1)} className="flex size-7 items-center justify-center text-ink-2 hover:text-ink">
+                    <button type="button" aria-label={`减少 ${l.name}`} onClick={() => add(l.key, -1)} className="flex size-7 items-center justify-center text-ink-2 hover:text-ink">
                       <Minus className="size-3.5" />
                     </button>
                     <span className="num w-6 text-center text-[13px] font-bold">{l.quantity}</span>
-                    <button type="button" aria-label={`增加 ${l.item.name}`} onClick={() => add(l.item.id, 1)} className="flex size-7 items-center justify-center text-ink-2 hover:text-ink">
+                    <button type="button" aria-label={`增加 ${l.name}`} onClick={() => add(l.key, 1)} className="flex size-7 items-center justify-center text-ink-2 hover:text-ink">
                       <Plus className="size-3.5" />
                     </button>
                   </span>

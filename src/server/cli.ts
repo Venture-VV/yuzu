@@ -10,12 +10,16 @@
 //   import-hand-tags <清单.csv> | --store-list [--apply] [--deactivate-missing]
 //                                         按清单导入手牌池（真实业务数据，默认只预览，加 --apply 才写入）；
 //                                         --store-list 使用店主 2026-10-27 的 747 个真实柜号；--deactivate-missing 同时停用清单外的空闲手牌
+//   import-price-list <价目表.csv> | --tangqi [--apply] [--deactivate-missing]
+//                                         按价目表导入消费项目与多档价格（真实业务数据，默认只预览，加 --apply 才写入）；
+//                                         --tangqi 使用店主 2026-10-27 的汤崎价目表；--deactivate-missing 同时停用清单外的项目
 //   check                                 核对会员余额与流水、库存结存与库存流水、手牌账单与明细是否一致
 
 import { readFile } from 'node:fs/promises';
 import { businessDateOf } from '@shared/business-date';
 import { ZONE_LABELS } from '@shared/frontdesk';
 import { parseHandTagCsv } from '@shared/hand-tag-import';
+import { parsePriceListCsv } from '@shared/price-list-import';
 import { checkPasswordStrength, generateTempPassword, hashPassword } from './auth/password';
 import { destroyStaffSessions } from './auth/session';
 import { loadConfig } from './config';
@@ -26,6 +30,8 @@ import { seedDemo, DEMO_PASSWORD } from './seed';
 import { seedInventoryDemo } from './seed-inventory';
 import { seedFrontdeskDemo } from './seed-frontdesk';
 import { STORE_HAND_TAGS_CSV } from './demo/hand-tags-2026-10-27';
+import { TANGQI_PRICE_LIST_CSV } from './demo/price-list-tangqi-2026-10-27';
+import { importPriceList } from './modules/catalog';
 import { importHandTags } from './modules/frontdesk/tags';
 import { frontdeskChecks } from './modules/frontdesk/checks';
 import { inventoryChecks } from './modules/inventory/reports';
@@ -138,6 +144,28 @@ async function main() {
         console.log(apply ? '✓ 已导入。' : '以上为预览，没有写入。确认无误后加 --apply 执行导入。');
         break;
       }
+      case 'import-price-list': {
+        const tangqi = args.includes('--tangqi');
+        const file = args.find((a) => !a.startsWith('--'));
+        if (!tangqi && !file) throw new Error('用法：import-price-list <价目表.csv> | --tangqi [--apply] [--deactivate-missing]');
+        await migrate(sql);
+        const parsed = parsePriceListCsv(tangqi ? TANGQI_PRICE_LIST_CSV : await readFile(file!, 'utf8'));
+        if (parsed.errors.length) {
+          for (const e of parsed.errors.slice(0, 20)) console.log(`✗ 第 ${e.line} 行：${e.message}`);
+          throw new Error(`价目表有 ${parsed.errors.length} 处需要修改，未导入`);
+        }
+        const apply = args.includes('--apply');
+        const report = await importPriceList(
+          sql,
+          { rows: parsed.rows, deactivateMissing: args.includes('--deactivate-missing'), dryRun: !apply },
+          { staffId: null, via: 'cli' },
+        );
+        console.log(`价目表共 ${report.total} 个项目：`);
+        for (const g of report.groups) console.log(`  ${g.category}：${g.count}`);
+        console.log(`新建 ${report.created} · 更新 ${report.updated} · 未变 ${report.unchanged} · 停用清单外 ${report.deactivated}`);
+        console.log(apply ? '✓ 已导入。' : '以上为预览，没有写入。确认无误后加 --apply 执行导入。');
+        break;
+      }
       case 'check': {
         const settings = await loadSettings(sql);
         const today = businessDateOf(new Date(), config.timezone, settings.businessDayStartHour);
@@ -150,7 +178,7 @@ async function main() {
         break;
       }
       default:
-        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo | import-hand-tags | check');
+        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo | import-hand-tags | import-price-list | check');
         process.exitCode = command ? 1 : 0;
     }
   } finally {

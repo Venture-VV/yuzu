@@ -22,6 +22,7 @@ export type AuditAction =
   | 'settings_updated'
   | 'plan_saved'
   | 'item_saved'
+  | 'price_list_imported'
   | 'export'
   | 'inventory_master_saved'
   | 'inventory_doc'

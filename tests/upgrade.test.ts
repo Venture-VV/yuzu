@@ -19,6 +19,7 @@ let app: FastifyInstance;
 const config = loadConfig({ databaseUrl: TEST_DB, env: 'test', logLevel: 'silent' });
 let memberId: number;
 let rechargeKey: string;
+let itemId: number;
 
 beforeAll(async () => {
   sql = createSql(TEST_DB, { max: 10 });
@@ -36,9 +37,13 @@ beforeAll(async () => {
     INSERT INTO members (member_no, name, phone, created_by) VALUES ('V0001', '升级前会员', '19900001111', ${owner!.id}) RETURNING id`;
   memberId = member!.id;
 
-  // 用第一版就有的记账流程写入真实流水。现版本记账还会查作废登记表（006 才有），
-  // 写入期间临时放一张空表，迁移前删掉，升级仍从「只有 001」的结构开始
+  // 用第一版就有的记账流程写入真实流水。现版本记账还会查作废登记表（006 才有）、写消费明细的价格档（009 才有），
+  // 写入期间临时放一张空表、加一列，迁移前删掉，升级仍从「只有 001」的结构开始
   await sql`CREATE TABLE op_fences (key uuid, op_type text, staff_id bigint, created_at timestamptz)`;
+  await sql`ALTER TABLE consumption_lines ADD COLUMN tier text`;
+  // 升级前已有的消费项目（只有一个价格）
+  const [item] = await sql<{ id: number }[]>`INSERT INTO service_items (name, category, price) VALUES ('升级前项目', '护理', 6800) RETURNING id`;
+  itemId = item!.id;
   const ownerActor: Actor = { id: owner!.id, username: 'owner', displayName: '老店主', role: 'owner', duties: [], mustChangePassword: false };
   const clerkActor: Actor = { id: clerk!.id, username: 'clerk', displayName: '老店员', role: 'clerk', duties: [], mustChangePassword: false };
   const deps = { sql, config };
@@ -46,10 +51,11 @@ beforeAll(async () => {
   await recharge(deps, { idempotencyKey: rechargeKey, memberId, planId: null, paidAmount: 50000, bonusAmount: 5000, paymentMethod: 'cash', paymentConfirmed: true }, { actor: ownerActor });
   await consume(deps, { idempotencyKey: randomUUID(), memberId, customLines: [{ name: '升级前消费', amount: 12800 }], expectedTotal: 12800 }, { actor: clerkActor });
   await sql`DROP TABLE op_fences`;
+  await sql`ALTER TABLE consumption_lines DROP COLUMN tier`;
 
   // 升级：增量执行 002 之后的全部迁移
   const applied = await migrate(sql);
-  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql', '005_frontdesk_g2.sql', '006_op_fences.sql', '007_manager_roles.sql', '008_locker_pool.sql']);
+  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql', '005_frontdesk_g2.sql', '006_op_fences.sql', '007_manager_roles.sql', '008_locker_pool.sql', '009_price_tiers.sql']);
   app = await buildApp(sql, config);
 }, 60_000);
 
@@ -133,6 +139,27 @@ describe('升级后', () => {
     expect(p.body.bill.amountCents).toBe(3000);
     // 挂账不扣会员余额
     expect((await api(app, clerk, 'GET', `/api/members/${memberId}`)).body).toMatchObject({ principalBalance: 35200, bonusBalance: 5000 });
+  });
+
+  it('升级前的项目记为「标准」档，价格不变；照常可消费，不带档位的旧请求按原价', async () => {
+    const owner = await login(app, 'owner');
+    const clerk = await login(app, 'clerk');
+    const [tier] = await sql<{ tier: string; price: number }[]>`SELECT tier, price FROM service_item_prices WHERE item_id = ${itemId}`;
+    expect(tier).toEqual({ tier: 'standard', price: 6800 });
+    const item = (await api(app, owner, 'GET', '/api/catalog?all=1')).body.items.find((i: { id: number }) => i.id === itemId);
+    expect(item).toMatchObject({ price: 6800, prices: [{ tier: 'standard', price: 6800 }], durationMinutes: null, gender: null, strength: null });
+    const c = await api(app, clerk, 'POST', '/api/consumptions', {
+      idempotencyKey: randomUUID(),
+      memberId,
+      lines: [{ itemId, quantity: 1 }],
+      expectedTotal: 6800,
+      expectedSplit: { principal: 6800, bonus: 0 },
+    });
+    expect(c.status).toBe(200);
+    expect(c.body.consumption.lines[0]).toMatchObject({ name: '升级前项目', tier: 'standard', unitPrice: 6800 });
+    // 升级前的消费明细没有价格档
+    const [old] = await sql<{ tier: string | null }[]>`SELECT tier FROM consumption_lines WHERE name = '升级前消费'`;
+    expect(old!.tier).toBeNull();
   });
 
   it('再次执行迁移不会重复应用', async () => {

@@ -2,6 +2,8 @@
 //
 // 手牌账单只汇总消费明细，不是第二套会员钱包：本阶段（S2）挂账不收款、不扣会员余额。
 
+import type { PriceTier } from './catalog';
+
 /** 宾客与手牌的分区：只分男宾、女宾（店主 2026-10-27 #27：儿童跟同性别家长用男宾或女宾的牌） */
 export const ZONES = ['male', 'female'] as const;
 export type Zone = (typeof ZONES)[number];
@@ -215,6 +217,8 @@ export interface BillLine {
   id: number;
   source: BillSource;
   itemId: number | null;
+  /** 所选价格档；手动输入金额、丢牌赔偿等明细为 null */
+  tier: PriceTier | null;
   name: string;
   unitPrice: number;
   quantity: number;

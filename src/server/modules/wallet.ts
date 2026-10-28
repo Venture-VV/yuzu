@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf } from '@shared/business-date';
+import { PRICE_TIERS, type PriceTier } from '@shared/catalog';
 import { splitDeduction, type WalletBalance } from '@shared/deduction';
 import { PAYMENT_METHODS } from '@shared/labels';
 import { can, type Permission } from '@shared/permissions';
@@ -24,6 +25,7 @@ import type { Deps, OpContext } from '../lib/context';
 import { AppError, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse, positiveCents, cents } from '../lib/validate';
 import { getMember } from './members';
+import { loadPricedItems, priceLine } from './pricing';
 import { loadSettings } from './settings';
 
 type OpType = 'recharge' | 'consume' | 'reversal';
@@ -56,7 +58,14 @@ export const ConsumeInput = z
     idempotencyKey,
     memberId: z.number().int().positive(),
     lines: z
-      .array(z.object({ itemId: z.number().int().positive(), quantity: z.number().int().min(1).max(99, '单项数量最多 99') }))
+      .array(
+        z.object({
+          itemId: z.number().int().positive(),
+          quantity: z.number().int().min(1).max(99, '单项数量最多 99'),
+          /** 价格档；不带时按项目的默认档计价（升级前留下的待确认请求不带这一项） */
+          tier: z.enum(PRICE_TIERS, '价格档不正确').optional(),
+        }),
+      )
       .max(30)
       .default([]),
     customLines: z
@@ -229,7 +238,7 @@ export async function getConsumption(db: Db, id: number): Promise<ConsumptionDoc
     SELECT c.id, c.doc_no, c.member_id, c.total_amount, c.principal_amount, c.bonus_amount, c.deduction_rule,
            c.note, c.status, c.business_date, s.display_name AS operator_name, c.created_at,
            coalesce((
-             SELECT json_agg(json_build_object('id', l.id, 'itemId', l.item_id, 'name', l.name, 'unitPrice', l.unit_price,
+             SELECT json_agg(json_build_object('id', l.id, 'itemId', l.item_id, 'tier', l.tier, 'name', l.name, 'unitPrice', l.unit_price,
                                                'quantity', l.quantity, 'amount', l.amount) ORDER BY l.id)
              FROM consumption_lines l WHERE l.consumption_id = c.id), '[]'::json) AS lines,
            (SELECT json_build_object('id', r.id, 'docNo', r.doc_no, 'reason', r.reason, 'businessDate', r.business_date,
@@ -383,20 +392,11 @@ export async function consume(deps: Deps, raw: ConsumeInputData, ctx: OpContext)
       const settings = await loadSettings(tx);
       if (member.status !== 'active') throw unprocessable('MEMBER_FROZEN', '该会员已停用，不能消费');
 
-      // 项目价格以服务端为准
-      const itemIds = [...new Set(input.lines.map((l) => l.itemId))];
-      const items = itemIds.length
-        ? await tx<{ id: number; name: string; price: number; active: boolean }[]>`
-            SELECT id, name, price, active FROM service_items WHERE id IN ${tx(itemIds)}`
-        : [];
-      const byId = new Map(items.map((i) => [i.id, i]));
-      const lines = [
-        ...input.lines.map((l) => {
-          const item = byId.get(l.itemId);
-          if (!item || !item.active) throw conflict('ITEM_UNAVAILABLE', '有消费项目已停用，请重新选择');
-          return { itemId: item.id, name: item.name, unitPrice: item.price, quantity: l.quantity, amount: item.price * l.quantity };
-        }),
-        ...input.customLines.map((l) => ({ itemId: null, name: l.name, unitPrice: l.amount, quantity: 1, amount: l.amount })),
+      // 项目价格以服务端为准，按所选价格档计价
+      const items = await loadPricedItems(tx, input.lines.map((l) => l.itemId));
+      const lines: { itemId: number | null; name: string; tier: PriceTier | null; unitPrice: number; quantity: number; amount: number }[] = [
+        ...input.lines.map((l) => priceLine(items.get(l.itemId), l.tier, l.quantity, '有消费项目已停用，请重新选择')),
+        ...input.customLines.map((l) => ({ itemId: null, name: l.name, tier: null, unitPrice: l.amount, quantity: 1, amount: l.amount })),
       ];
       const total = lines.reduce((sum, l) => sum + l.amount, 0);
       if (total !== input.expectedTotal) {
@@ -440,8 +440,8 @@ export async function consume(deps: Deps, raw: ConsumeInputData, ctx: OpContext)
       const id = row!.id;
       for (const l of lines) {
         await tx`
-          INSERT INTO consumption_lines (consumption_id, item_id, name, unit_price, quantity, amount)
-          VALUES (${id}, ${l.itemId}, ${l.name}, ${l.unitPrice}, ${l.quantity}, ${l.amount})`;
+          INSERT INTO consumption_lines (consumption_id, item_id, tier, name, unit_price, quantity, amount)
+          VALUES (${id}, ${l.itemId}, ${l.tier}, ${l.name}, ${l.unitPrice}, ${l.quantity}, ${l.amount})`;
       }
       await applyBalance(tx, member, { principal: -split.principal, bonus: -split.bonus }, {
         entryType: 'consume', docNo, consumptionId: id, businessDate, operatorId: ctx.actor.id, at,

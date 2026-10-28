@@ -1,5 +1,6 @@
 // 前后端共用的接口数据结构。金额字段均为整数「分」。
 
+import type { PriceTier, Strength, TierPrice } from './catalog';
 import type { DeductionRule, WalletBalance } from './deduction';
 import type { EntryType, PaymentMethod } from './labels';
 import type { Duty, Permission, Role } from './permissions';
@@ -84,7 +85,18 @@ export interface ServiceItem {
   id: number;
   name: string;
   category: string;
+  /** 默认档价格（标准 → 专业 → 优选中第一个提供的）；不带档位的请求按它计价 */
   price: number;
+  /** 各档价格，按标准、专业、优选排序；只提供一档时只有一项 */
+  prices: TierPrice[];
+  durationMinutes: number | null;
+  /** 只限某一性别（如私汤木桶浴仅女宾）；null 为不限 */
+  gender: 'male' | 'female' | null;
+  strength: Strength | null;
+  essentialOil: boolean;
+  heatTherapy: boolean;
+  popular: boolean;
+  note: string;
   active: boolean;
   sortOrder: number;
 }
@@ -113,6 +125,8 @@ export interface RechargeDoc {
 export interface ConsumptionLine {
   id: number;
   itemId: number | null;
+  /** 所选价格档；手动输入金额的明细为 null */
+  tier: PriceTier | null;
   name: string;
   unitPrice: number;
   quantity: number;
