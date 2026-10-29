@@ -233,7 +233,7 @@ docker compose exec app node dist/server/cli.js reset-password boss
 ./scripts/update.sh v0.3.1             # 换成要更新到的版本标签（git fetch --tags && git tag 查看）
 ```
 
-应用启动时自动执行数据库迁移；更新失败时 `git checkout <上个版本>` 后再执行一次即可回退。
+脚本只接受已合并进 main 的版本标签或完整 SHA，开发分支（`claude/*` 等）、未合并的 PR 与缩写 SHA 会被拒绝、不做任何改动。应用启动时自动执行数据库迁移；更新失败时执行 `./scripts/update.sh <上个版本标签>` 即可回退。
 
 版本标签：合并到 main、CI 通过后，GitHub Actions「版本标签」按 `package.json` 的版本号自动创建 `vX.Y.Z`（已有同名标签时跳过；也可在 Actions 页面手动运行补打）。
 
