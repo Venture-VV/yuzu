@@ -106,6 +106,11 @@ export function bonusExpiryAt(at: Date, validDays: number, timeZone: string, sta
   return businessDayStart(plusDays(businessDateOf(at, timeZone, startHour), validDays), timeZone, startHour);
 }
 
+/** 最后一个可用的营业日 → 到期时刻（下一个营业日开始时）；期初导入旧系统的赠金到期日时用，与 lastUsableDate 互逆 */
+export function expiryAfterLastUsableDate(date: string, timeZone: string, startHour: number): Date {
+  return businessDayStart(plusDays(date, 1), timeZone, startHour);
+}
+
 /** 到期时刻 → 最后一个可用的营业日 */
 export function lastUsableDate(expiresAt: Date | string, timeZone: string, startHour: number): string {
   return businessDateOf(new Date(new Date(expiresAt).getTime() - 1), timeZone, startHour);

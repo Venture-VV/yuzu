@@ -39,6 +39,8 @@ export const PERMISSIONS = {
   'ledger.readHistory': { roles: ['owner', 'store_manager', 'duty_manager'] },
   'ledger.export': { roles: ['owner', 'store_manager', 'duty_manager'] },
   'settlement.close': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  /** 导入旧系统（EBC）的会员余额作为期初，作废导入错误的期初 */
+  'wallet.opening': { roles: ['owner'] },
   // ── 前台手牌与共同账单 ──
   /** 查看在店手牌状态板与手牌账单 */
   'frontdesk.read': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
@@ -102,6 +104,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'ledger.readHistory': '查看历史营业日',
   'ledger.export': '导出流水与日结',
   'settlement.close': '确认日结',
+  'wallet.opening': '导入旧系统会员余额（期初）与作废期初',
   'frontdesk.read': '查看在店手牌与手牌账单',
   'frontdesk.operate': '接待发牌、同行绑牌、挂账、换牌',
   'frontdesk.correct': '作废他人或超时明细、撤销来访',
@@ -126,7 +129,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
 export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   {
     title: '会员与储值',
-    items: ['member.read', 'member.write', 'recharge.create', 'recharge.customBonus', 'consume.create', 'consume.customAmount', 'consume.reverse', 'ledger.readToday', 'ledger.readHistory', 'ledger.export', 'settlement.close'],
+    items: ['member.read', 'member.write', 'recharge.create', 'recharge.customBonus', 'consume.create', 'consume.customAmount', 'consume.reverse', 'ledger.readToday', 'ledger.readHistory', 'ledger.export', 'settlement.close', 'wallet.opening'],
   },
   {
     title: '前台手牌与账单',

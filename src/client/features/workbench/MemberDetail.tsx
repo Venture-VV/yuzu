@@ -174,6 +174,18 @@ export function MemberDetail({
         {member.stats.reversedCount > 0 && (
           <span className="rounded-full bg-clay-soft/70 px-3 py-1 font-semibold text-clay">已撤销 {member.stats.reversedCount} 笔</span>
         )}
+        {member.opening && (
+          <span className="rounded-full bg-pine-tint px-3 py-1 font-semibold text-pine" data-testid="member-opening" title={`期初 ${member.opening.docNo}`}>
+            {member.opening.source} 期初{member.opening.legacyNo ? `（旧卡号 ${member.opening.legacyNo}）` : ''} · 本金 <Money cents={member.opening.principal} /> · 赠金{' '}
+            <Money cents={member.opening.bonus} />
+            {member.opening.legacyRecharged > 0 && (
+              <>
+                {' '}
+                · 旧系统累计充值 <Money cents={member.opening.legacyRecharged} />
+              </>
+            )}
+          </span>
+        )}
       </div>
 
       {/* 余额记录 */}

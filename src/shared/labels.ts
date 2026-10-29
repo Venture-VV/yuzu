@@ -41,15 +41,17 @@ export const DEDUCTION_RULE_LABELS: Record<DeductionRule, { title: string; descr
   proportional: { title: '按比例扣除', description: '按当前本金与赠金的比例同时扣除，零头计入本金。' },
 };
 
-export type EntryType = 'recharge' | 'consume' | 'reversal' | 'expire';
+export type EntryType = 'recharge' | 'consume' | 'reversal' | 'expire' | 'opening' | 'opening_void';
 
-export const ENTRY_TYPES = ['recharge', 'consume', 'reversal', 'expire'] as const satisfies readonly EntryType[];
+export const ENTRY_TYPES = ['recharge', 'consume', 'reversal', 'expire', 'opening', 'opening_void'] as const satisfies readonly EntryType[];
 
 export const ENTRY_TYPE_LABELS: Record<EntryType, string> = {
   recharge: '充值',
   consume: '消费',
   reversal: '撤销',
   expire: '赠金过期',
+  opening: '期初导入',
+  opening_void: '期初作废',
 };
 
 /** 时长：整天按「N 天」，其余按「N 小时」 */

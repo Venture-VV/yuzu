@@ -1,6 +1,6 @@
 // VIP 柜等级校验（店主 2026-10-27 #26：会员等级不低于柜子等级才能使用该柜）。
 //
-// 会员等级按前台规则的口径计算：累计充值实收（默认）或当前余额（本金 + 赠金）；散客为 0 级。
+// 会员等级按前台规则的口径计算：累计充值实收（默认，含期初导入的旧系统累计充值）或当前余额（本金 + 赠金）；散客为 0 级。
 // 只读会员与充值记录，不加锁：等级是开牌那一刻的经营规则判断，不影响任何账务。
 // 等级不够时：规则未开启当场授权 → 拒绝；已开启 → 必须带值班经理 / 店总签发的授权，在同一事务里核销。
 
@@ -21,9 +21,11 @@ export async function memberLevels(db: Db, memberIds: number[], rules: Frontdesk
       ? await db<{ id: number; amountCents: number }[]>`
           SELECT id, principal_balance + bonus_balance AS amount_cents FROM members WHERE id IN ${db(ids)}`
       : await db<{ id: number; amountCents: number }[]>`
-          SELECT m.id, coalesce(sum(r.paid_amount), 0) AS amount_cents
-          FROM members m LEFT JOIN recharges r ON r.member_id = m.id
-          WHERE m.id IN ${db(ids)} GROUP BY m.id`;
+          SELECT m.id,
+                 coalesce((SELECT sum(r.paid_amount) FROM recharges r WHERE r.member_id = m.id), 0)
+                 + coalesce((SELECT sum(o.legacy_recharged) FROM opening_balances o WHERE o.member_id = m.id AND o.status = 'active'), 0)
+                   AS amount_cents
+          FROM members m WHERE m.id IN ${db(ids)}`;
   return new Map(
     rows.map((r) => [
       r.id,

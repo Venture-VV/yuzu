@@ -13,12 +13,18 @@
 //   import-price-list <价目表.csv> | --tangqi [--apply] [--deactivate-missing]
 //                                         按价目表导入消费项目与多档价格（真实业务数据，默认只预览，加 --apply 才写入）；
 //                                         --tangqi 使用店主 2026-10-27 的汤崎价目表；--deactivate-missing 同时停用清单外的项目
+//   import-opening <余额.csv> --operator <店主账号> [--source EBC] [--note 备注] [--apply]
+//                                         导入旧系统（EBC）会员余额作为期初（真实业务数据，默认只预览，加 --apply 才写入）；
+//                                         本金、赠金分开记「期初导入」流水，不计入充值实收；同一位会员只能有一笔有效的期初
 //   check                                 核对会员余额与流水、库存结存与库存流水、手牌账单与明细是否一致
 
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { basename } from 'node:path';
 import { businessDateOf } from '@shared/business-date';
 import { ZONE_LABELS } from '@shared/frontdesk';
 import { parseHandTagCsv } from '@shared/hand-tag-import';
+import { formatYuan } from '@shared/money';
 import { parsePriceListCsv } from '@shared/price-list-import';
 import { checkPasswordStrength, generateTempPassword, hashPassword } from './auth/password';
 import { destroyStaffSessions } from './auth/session';
@@ -35,6 +41,7 @@ import { importPriceList } from './modules/catalog';
 import { importHandTags } from './modules/frontdesk/tags';
 import { frontdeskChecks } from './modules/frontdesk/checks';
 import { inventoryChecks } from './modules/inventory/reports';
+import { applyOpeningImport, previewOpeningImport } from './modules/opening';
 import { computeSettlement } from './modules/settlement';
 import { loadSettings } from './modules/settings';
 import { createStaff } from './modules/staff';
@@ -166,6 +173,39 @@ async function main() {
         console.log(apply ? '✓ 已导入。' : '以上为预览，没有写入。确认无误后加 --apply 执行导入。');
         break;
       }
+      case 'import-opening': {
+        const file = args.find((a, i) => !a.startsWith('--') && !args[i - 1]?.startsWith('--'));
+        const username = flag(args, 'operator')?.toLowerCase();
+        if (!file || !username) throw new Error('用法：import-opening <余额.csv> --operator <店主账号> [--source EBC] [--note 备注] [--apply]');
+        await migrate(sql);
+        const [actor] = await sql<{ id: number; username: string; displayName: string; role: string; active: boolean }[]>`
+          SELECT id, username, display_name, role, active FROM staff WHERE username = ${username}`;
+        if (!actor || !actor.active) throw new Error(`账号「${username}」不存在或已停用`);
+        if (actor.role !== 'owner') throw new Error('期初导入只能由店主账号经办');
+        const csv = await readFile(file, 'utf8');
+        const body = { source: flag(args, 'source') ?? 'EBC', fileName: basename(file), note: flag(args, 'note') ?? '', csv };
+        const deps = { sql, config };
+        const preview = await previewOpeningImport(deps, body);
+        console.log(`文件共 ${preview.total} 位会员：新建档案 ${preview.createCount} · 匹配已有会员 ${preview.matchCount} · 余额为 0 只建档 ${preview.zeroCount}`);
+        console.log(`期初本金 ${formatYuan(preview.principalTotal)} · 期初赠金 ${formatYuan(preview.bonusTotal)} · 旧系统累计充值 ${formatYuan(preview.legacyRechargedTotal)}`);
+        if (preview.errors.length) {
+          for (const e of preview.errors.slice(0, 30)) console.log(`✗ 第 ${e.line} 行：${e.message}`);
+          throw new Error(`有 ${preview.errors.length} 处需要修改，未导入`);
+        }
+        if (!args.includes('--apply')) {
+          console.log('以上为预览，没有写入。确认无误后加 --apply 执行导入。');
+          break;
+        }
+        const report = await applyOpeningImport(
+          deps,
+          { ...body, clientKey: randomUUID() },
+          { actor: { id: actor.id, username: actor.username, displayName: actor.displayName, role: 'owner', duties: [], mustChangePassword: false } },
+          { via: 'cli' },
+        );
+        console.log(`✓ 已导入，批次 ${report.importNo}：${report.total} 位会员，本金 ${formatYuan(report.principalTotal)}，赠金 ${formatYuan(report.bonusTotal)}。`);
+        console.log('请运行 check 核对：期初 + 本日变动 = 期末。');
+        break;
+      }
       case 'check': {
         const settings = await loadSettings(sql);
         const today = businessDateOf(new Date(), config.timezone, settings.businessDayStartHour);
@@ -178,7 +218,7 @@ async function main() {
         break;
       }
       default:
-        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo | import-hand-tags | import-price-list | check');
+        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo | import-hand-tags | import-price-list | import-opening | check');
         process.exitCode = command ? 1 : 0;
     }
   } finally {

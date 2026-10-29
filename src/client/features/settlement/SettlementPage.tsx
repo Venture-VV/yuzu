@@ -114,7 +114,7 @@ function CloseStatus({ s }: { s: SettlementSummary }) {
 
 function Summary({ s, dayLabel }: { s: SettlementSummary; dayLabel: string }) {
   const allOk = s.checks.every((c) => c.ok);
-  const empty = s.recharge.count + s.consume.count + s.reversal.count + s.expiry.count === 0;
+  const empty = s.recharge.count + s.consume.count + s.reversal.count + s.expiry.count + s.opening.count + s.opening.voidCount === 0;
 
   return (
     <div className="space-y-5">
@@ -229,6 +229,16 @@ function Summary({ s, dayLabel }: { s: SettlementSummary; dayLabel: string }) {
             <Row label="本日发放赠金" cents={s.recharge.bonus} className="text-yuzu-deep" />
             <Row label="本日使用赠金" cents={s.consume.bonus} className="text-ink-2" />
             <Row label={`赠金过期作废${s.expiry.count ? `（${s.expiry.count} 笔）` : ''}`} cents={s.expiry.bonus} className="text-ink-3" />
+            {(s.opening.count > 0 || s.opening.voidCount > 0) && (
+              <div data-testid="settlement-opening">
+                <div className="my-1 border-t border-dashed border-line" />
+                <p className="mb-1.5 text-[12px] text-ink-3">
+                  旧系统期初余额迁入 {s.opening.count} 位{s.opening.voidCount ? ` · 作废 ${s.opening.voidCount} 位` : ''}（不是收款，不计入充值实收）
+                </p>
+                <Row label="期初本金（净额）" cents={s.opening.principal} className="text-pine" />
+                <Row label="期初赠金（净额）" cents={s.opening.bonus} className="text-yuzu-deep" />
+              </div>
+            )}
           </div>
         </Card>
       </div>

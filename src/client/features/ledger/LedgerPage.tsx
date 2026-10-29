@@ -16,7 +16,7 @@ import { ReversalDialog, type ReversalTarget } from '../flows/ReversalDialog';
 import { ActivityRow, ENTRY_META } from '../workbench/ActivityList';
 import { DocDrawer } from './DocDrawer';
 
-type TypeFilter = 'all' | 'recharge' | 'consume' | 'reversal' | 'expire';
+type TypeFilter = 'all' | 'recharge' | 'consume' | 'reversal' | 'expire' | 'opening';
 
 export function LedgerPage() {
   const session = useSession();
@@ -72,7 +72,7 @@ export function LedgerPage() {
       } else if (r.entryType === 'reversal') {
         t.restore += r.principalDelta + r.bonusDelta;
         t.reversals++;
-      } else {
+      } else if (r.entryType === 'expire') {
         t.expired -= r.bonusDelta;
         t.expiries++;
       }
@@ -106,6 +106,7 @@ export function LedgerPage() {
             { value: 'consume', label: '消费' },
             { value: 'reversal', label: '撤销' },
             { value: 'expire', label: '赠金过期' },
+            { value: 'opening', label: '期初' },
           ]}
         />
         <Select fullWidth={false} value={operator} onChange={(e) => setOperator(e.target.value)} className="h-9 min-w-[128px] text-[13px]" aria-label="操作人">

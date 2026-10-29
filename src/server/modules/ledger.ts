@@ -28,7 +28,7 @@ export async function listLedger(db: Db, f: LedgerFilter): Promise<LedgerRow[]> 
   return db<LedgerRow[]>`
     SELECT le.id, le.entry_type, le.doc_no, le.member_id, m.member_no, m.name AS member_name, m.phone AS member_phone,
            le.principal_delta, le.bonus_delta, le.principal_after, le.bonus_after, le.business_date, le.created_at,
-           coalesce(s.display_name, '系统') AS operator_name, le.recharge_id, le.consumption_id, le.reversal_id, le.expiry_id,
+           coalesce(s.display_name, '系统') AS operator_name, le.recharge_id, le.consumption_id, le.reversal_id, le.expiry_id, le.opening_id,
            r.paid_amount, r.payment_method,
            CASE WHEN le.entry_type = 'consume' THEN c.status END AS consumption_status,
            CASE le.entry_type WHEN 'consume' THEN rv.doc_no WHEN 'reversal' THEN c.doc_no END AS related_doc_no,
@@ -40,12 +40,16 @@ export async function listLedger(db: Db, f: LedgerFilter): Promise<LedgerRow[]> 
                FROM consumption_lines l WHERE l.consumption_id = c.id)
              WHEN 'reversal' THEN rv.reason
              WHEN 'expire' THEN '赠金到期作废' || CASE WHEN ex.reversal_id IS NOT NULL THEN '（撤销恢复时已过期）' ELSE '' END
+             WHEN 'opening' THEN oi.source || ' 期初余额' || CASE WHEN ob.legacy_no <> '' THEN ' · 旧卡号 ' || ob.legacy_no ELSE '' END
+             WHEN 'opening_void' THEN '作废期初：' || ob.void_reason
            END, '') AS summary
     FROM ledger_entries le
     JOIN members m ON m.id = le.member_id
     LEFT JOIN staff s ON s.id = le.operator_id
     LEFT JOIN recharges r ON r.id = le.recharge_id
     LEFT JOIN bonus_expiries ex ON ex.id = le.expiry_id
+    LEFT JOIN opening_balances ob ON ob.id = le.opening_id
+    LEFT JOIN opening_imports oi ON oi.id = ob.import_id
     LEFT JOIN consumptions c ON c.id = le.consumption_id
     LEFT JOIN reversals rv ON rv.consumption_id = le.consumption_id
     WHERE true

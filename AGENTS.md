@@ -26,6 +26,7 @@ node dist/server/cli.js seed-frontdesk-demo
 node dist/server/cli.js check              # 会员、库存、前台自检，全部 ✓ 才算一致
 node dist/server/cli.js import-hand-tags --store-list   # 预览导入店主 747 个真实柜号；--apply 才写入（真实业务数据，门店环境须店主同意）
 node dist/server/cli.js import-price-list --tangqi      # 预览导入汤崎价目表（29 个项目、多档价格）；--apply 才写入（同上）
+node dist/server/cli.js import-opening <余额.csv> --operator <店主账号>   # 预览导入旧系统会员余额期初；--apply 才写入（同上）
 E2E_BASE_URL=http://127.0.0.1:<端口> npm run e2e   # 1440×900 / 1024×768 / 820×1180
 ```
 

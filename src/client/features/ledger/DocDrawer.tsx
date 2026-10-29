@@ -82,7 +82,11 @@ export function DocDrawer({
           <SummaryRow label="经办">{row.operatorName}</SummaryRow>
         </div>
 
-        {row.entryType === 'expire' ? (
+        {row.entryType === 'opening' || row.entryType === 'opening_void' ? (
+          <Notice tone={row.entryType === 'opening' ? 'info' : 'warning'} title={row.entryType === 'opening' ? '旧系统余额期初导入' : '期初作废'}>
+            {row.summary}。期初是从旧系统迁入的余额，不是收款，也不计入充值实收。
+          </Notice>
+        ) : row.entryType === 'expire' ? (
           <Notice tone="info" title="赠金到期作废">
             到期未用完的赠金由系统作废，只减赠金、不动本金，不是收款或退款。{row.summary.includes('撤销') ? '这笔是撤销消费时恢复到了已到期的赠金批次，随即作废。' : ''}
           </Notice>

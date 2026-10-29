@@ -38,7 +38,7 @@ beforeAll(async () => {
   memberId = member!.id;
 
   // 用第一版就有的记账流程写入真实流水。现版本记账还会查作废登记表（006 才有）、写消费明细的价格档（009 才有）
-  // 与超限授权人（010）、会员自定义字段（011）、赠金批次（012），写入期间临时放几张表、加几列，迁移前删掉，
+  // 与超限授权人（010）、会员自定义字段（011）、赠金批次（012）、期初明细（013），写入期间临时放几张表、加几列，迁移前删掉，
   // 升级仍从「只有 001」的结构开始
   await sql`CREATE TABLE op_fences (key uuid, op_type text, staff_id bigint, created_at timestamptz)`;
   await sql`ALTER TABLE consumption_lines ADD COLUMN tier text`;
@@ -47,6 +47,7 @@ beforeAll(async () => {
   await sql`ALTER TABLE members ADD COLUMN custom_fields jsonb NOT NULL DEFAULT '{}'`;
   await sql`ALTER TABLE recharges ADD COLUMN bonus_expires_at timestamptz`;
   await sql`ALTER TABLE ledger_entries ADD COLUMN expiry_id bigint`;
+  await sql`ALTER TABLE ledger_entries ADD COLUMN opening_id bigint`;
   await sql`CREATE TABLE bonus_lots (id bigserial PRIMARY KEY, member_id bigint, source text, recharge_id bigint, amount bigint, remaining bigint, expires_at timestamptz, created_at timestamptz)`;
   // 升级前已有的消费项目（只有一个价格）
   const [item] = await sql<{ id: number }[]>`INSERT INTO service_items (name, category, price) VALUES ('升级前项目', '护理', 6800) RETURNING id`;
@@ -64,11 +65,12 @@ beforeAll(async () => {
   await sql`ALTER TABLE members DROP COLUMN custom_fields`;
   await sql`ALTER TABLE recharges DROP COLUMN bonus_expires_at`;
   await sql`ALTER TABLE ledger_entries DROP COLUMN expiry_id`;
+  await sql`ALTER TABLE ledger_entries DROP COLUMN opening_id`;
   await sql`DROP TABLE bonus_lots`;
 
   // 升级：增量执行 002 之后的全部迁移
   const applied = await migrate(sql);
-  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql', '005_frontdesk_g2.sql', '006_op_fences.sql', '007_manager_roles.sql', '008_locker_pool.sql', '009_price_tiers.sql', '010_wallet_limits.sql', '011_member_fields.sql', '012_bonus_expiry.sql']);
+  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql', '005_frontdesk_g2.sql', '006_op_fences.sql', '007_manager_roles.sql', '008_locker_pool.sql', '009_price_tiers.sql', '010_wallet_limits.sql', '011_member_fields.sql', '012_bonus_expiry.sql', '013_opening_balances.sql']);
   app = await buildApp(sql, config);
 }, 60_000);
 

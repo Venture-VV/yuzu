@@ -77,6 +77,8 @@ export interface MemberDetail extends MemberSummary {
   createdByName: string | null;
   /** 有剩余的赠金批次，先到期的在前（expiresAt 为 null 表示长期有效） */
   bonusLots: { remaining: number; expiresAt: string | null }[];
+  /** 从旧系统导入的期初（有效的那一笔） */
+  opening: { importNo: string; docNo: string; source: string; legacyNo: string; principal: number; bonus: number; legacyRecharged: number; importedAt: string } | null;
   stats: {
     totalPaid: number;
     totalBonusGranted: number;
@@ -235,6 +237,8 @@ export interface LedgerRow {
   reversalId: number | null;
   /** 赠金过期单 */
   expiryId: number | null;
+  /** 期初明细（期初导入 / 期初作废） */
+  openingId: number | null;
   /** 充值实收 */
   paidAmount: number | null;
   paymentMethod: PaymentMethod | null;
@@ -270,6 +274,8 @@ export interface SettlementTotals {
   reversal: { count: number; principal: number; bonus: number; crossDayCount: number };
   /** 赠金到期作废（Batch 2.4c）：不是收款，也不是退款 */
   expiry: { count: number; bonus: number };
+  /** 旧系统余额期初导入（Batch 2.4d，扣除当天作废的）：不是收款 */
+  opening: { count: number; voidCount: number; principal: number; bonus: number };
   /** 本营业日流水的余额净变动 */
   net: WalletBalance;
 }

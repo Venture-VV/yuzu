@@ -36,6 +36,17 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
     FROM reversals r JOIN consumptions c ON c.id = r.consumption_id WHERE r.business_date = ${date}`;
   const [ex] = await db<SettlementTotals['expiry'][]>`
     SELECT count(*) AS count, coalesce(sum(amount), 0) AS bonus FROM bonus_expiries WHERE business_date = ${date}`;
+  // 期初导入（只算有余额的行）与当天作废的期初
+  const [op] = await db<SettlementTotals['opening'][]>`
+    SELECT
+      count(*) FILTER (WHERE i.business_date = ${date}) AS count,
+      count(*) FILTER (WHERE b.void_business_date = ${date}) AS void_count,
+      coalesce(sum(b.principal) FILTER (WHERE i.business_date = ${date}), 0)
+        - coalesce(sum(b.principal) FILTER (WHERE b.void_business_date = ${date}), 0) AS principal,
+      coalesce(sum(b.bonus) FILTER (WHERE i.business_date = ${date}), 0)
+        - coalesce(sum(b.bonus) FILTER (WHERE b.void_business_date = ${date}), 0) AS bonus
+    FROM opening_balances b JOIN opening_imports i ON i.id = b.import_id
+    WHERE b.principal + b.bonus > 0 AND (i.business_date = ${date} OR b.void_business_date = ${date})`;
   const [net] = await db<Pair[]>`
     SELECT coalesce(sum(principal_delta), 0) AS principal, coalesce(sum(bonus_delta), 0) AS bonus
     FROM ledger_entries WHERE business_date = ${date}`;
@@ -44,6 +55,7 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
     consume: cs!,
     reversal: rv!,
     expiry: ex!,
+    opening: op!,
     net: net!,
   };
 }
@@ -58,7 +70,11 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 /** 确认日结时保存的快照可能早于新的口径（例如赠金过期，Batch 2.4c）：缺少的口径按 0 补齐再比较，不误报「日结后有变动」 */
-const withNewSections = (t: SettlementTotals): SettlementTotals => ({ ...t, expiry: t.expiry ?? { count: 0, bonus: 0 } });
+const withNewSections = (t: SettlementTotals): SettlementTotals => ({
+  ...t,
+  expiry: t.expiry ?? { count: 0, bonus: 0 },
+  opening: t.opening ?? { count: 0, voidCount: 0, principal: 0, bonus: 0 },
+});
 const sameTotals = (snapshot: SettlementTotals, now: SettlementTotals) => canonical(withNewSections(snapshot)) === canonical(now);
 
 const ANOMALY_LABELS: Record<SettlementAnomaly['kind'], string> = {
@@ -117,8 +133,8 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
        WHERE b.amount + coalesce(mv.a, 0) <> b.remaining) AS lots`;
 
   const docDelta = {
-    principal: totals.recharge.paid - totals.consume.principal + totals.reversal.principal,
-    bonus: totals.recharge.bonus - totals.consume.bonus + totals.reversal.bonus - totals.expiry.bonus,
+    principal: totals.recharge.paid - totals.consume.principal + totals.reversal.principal + totals.opening.principal,
+    bonus: totals.recharge.bonus - totals.consume.bonus + totals.reversal.bonus - totals.expiry.bonus + totals.opening.bonus,
   };
   const checks: SettlementCheck[] = [
     {
@@ -285,6 +301,9 @@ export function settlementCsv(s: SettlementSummary): string {
     ['  · 恢复本金', '', y(s.reversal.principal), ''],
     ['  · 恢复赠金', '', y(s.reversal.bonus), ''],
     ['赠金过期', s.expiry.count, y(s.expiry.bonus), '到期未用完的赠金作废，不是收款或退款'],
+    ['期初导入（净额）', s.opening.count, y(s.opening.principal + s.opening.bonus), `旧系统余额迁入，不是收款；作废 ${s.opening.voidCount} 笔`],
+    ['  · 期初本金', '', y(s.opening.principal), ''],
+    ['  · 期初赠金', '', y(s.opening.bonus), ''],
     [],
     ['余额核对', '本金（元）', '赠金（元）'],
     ['期初余额', y(s.balances.opening.principal), y(s.balances.opening.bonus)],

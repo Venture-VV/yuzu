@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { checkCustomValues, type MemberCustomValues } from '@shared/member-fields';
 import type { LedgerRow, MemberDetail, MemberSummary } from '@shared/types';
-import { isUniqueViolation, type Db, type Sql } from '../db';
+import { isUniqueViolation, type Db, type Sql, type Tx } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps, OpContext } from '../lib/context';
@@ -78,11 +78,17 @@ export async function getMemberDetail(db: Db, id: number): Promise<MemberDetail>
       ) AS stats
     FROM members m WHERE m.id = ${id}`;
   const lots = await openLots(db, id);
+  // 期初导入（旧系统余额）：一位会员最多一笔有效的期初
+  const [opening] = await db<NonNullable<MemberDetail['opening']>[]>`
+    SELECT i.import_no, b.doc_no, i.source, b.legacy_no, b.principal, b.bonus, b.legacy_recharged, i.created_at AS imported_at
+    FROM opening_balances b JOIN opening_imports i ON i.id = b.import_id
+    WHERE b.member_id = ${id} AND b.status = 'active'`;
   return {
     ...member,
     createdByName: extra?.createdByName ?? null,
     stats: extra!.stats,
     bonusLots: lots.map((l) => ({ remaining: l.remaining, expiresAt: l.expiresAt ? new Date(l.expiresAt).toISOString() : null })),
+    opening: opening ?? null,
   };
 }
 
@@ -99,34 +105,40 @@ async function customValuesFor(
   return result.values;
 }
 
-/**
- * 建档。enforceRequired=false 用于期初导入等批量来源：必填的自定义字段可以先空着，之后编辑会员时再补。
- */
-export async function createMember(
-  sql: Sql,
-  raw: MemberInputData,
-  ctx: OpContext,
-  options: { enforceRequired?: boolean } = {},
-): Promise<MemberSummary> {
+interface InsertMemberOptions {
+  /** false 用于期初导入等批量来源：必填的自定义字段可以先空着，之后编辑会员时再补 */
+  enforceRequired?: boolean;
+  /** false 时不逐位写审计（期初导入整批记一条审计） */
+  audit?: boolean;
+}
+
+/** 在调用方的事务里建档，返回会员 id。手机号重复时抛出唯一约束错误（members_phone_key），由调用方处理 */
+export async function insertMember(tx: Tx, raw: MemberInputData, ctx: OpContext, options: InsertMemberOptions = {}): Promise<number> {
+  const input = parse(MemberInput, raw);
+  const customFields = await customValuesFor(tx, input.customFields ?? {}, {}, options.enforceRequired ?? true);
+  const [row] = await tx<{ id: number }[]>`
+    INSERT INTO members (member_no, name, phone, gender, birthday, note, custom_fields, created_by)
+    VALUES ('YZ' || lpad(nextval('member_no_seq')::text, 5, '0'),
+            ${input.name}, ${input.phone}, ${input.gender}, ${input.birthday}, ${input.note}, ${tx.json(customFields)}, ${ctx.actor.id})
+    RETURNING id`;
+  if (options.audit ?? true) {
+    await writeAudit(tx, {
+      staffId: ctx.actor.id,
+      action: 'member_created',
+      targetType: 'member',
+      targetId: row!.id,
+      detail: { name: input.name, phone: input.phone },
+      ip: ctx.ip,
+    });
+  }
+  return row!.id;
+}
+
+/** 建档 */
+export async function createMember(sql: Sql, raw: MemberInputData, ctx: OpContext, options: InsertMemberOptions = {}): Promise<MemberSummary> {
   const input = parse(MemberInput, raw);
   try {
-    const id = await sql.begin(async (tx) => {
-      const customFields = await customValuesFor(tx, input.customFields ?? {}, {}, options.enforceRequired ?? true);
-      const [row] = await tx<{ id: number }[]>`
-        INSERT INTO members (member_no, name, phone, gender, birthday, note, custom_fields, created_by)
-        VALUES ('YZ' || lpad(nextval('member_no_seq')::text, 5, '0'),
-                ${input.name}, ${input.phone}, ${input.gender}, ${input.birthday}, ${input.note}, ${tx.json(customFields)}, ${ctx.actor.id})
-        RETURNING id`;
-      await writeAudit(tx, {
-        staffId: ctx.actor.id,
-        action: 'member_created',
-        targetType: 'member',
-        targetId: row!.id,
-        detail: { name: input.name, phone: input.phone },
-        ip: ctx.ip,
-      });
-      return row!.id;
-    });
+    const id = await sql.begin((tx) => insertMember(tx, raw, ctx, options));
     return getMember(sql, id);
   } catch (error) {
     if (isUniqueViolation(error, 'members_phone_key')) {

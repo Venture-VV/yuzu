@@ -169,6 +169,7 @@ npm run cli -- seed-frontdesk-demo   # 试用 / 正式环境、或库里已有�
 | `npm run cli -- seed-inventory-demo` | 写入库存与采购演示数据（仅独立演示库） |
 | `npm run cli -- seed-frontdesk-demo` | 写入前台手牌演示数据（仅独立演示库） |
 | `npm run cli -- import-hand-tags --store-list` | 预览按店主 747 个真实柜号导入手牌池（加 `--apply` 才写入；也可传自己的 CSV；`--deactivate-missing` 同时停用清单外的空闲手牌）。这是真实业务数据，门店环境需店主同意后执行 |
+| `npm run cli -- import-opening <余额.csv> --operator <店主账号>` | 预览导入旧系统（EBC）会员余额作为期初（本金、赠金分开，不计入充值实收；加 `--apply` 才写入；`--source` 默认 EBC）。真实业务数据，门店环境需店主同意后执行；余额文件不要放进仓库 |
 | `npm run cli -- import-price-list --tangqi` | 预览按店主的汤崎价目表（29 个项目、多档价格）导入消费项目（加 `--apply` 才写入；也可传自己的 CSV；`--deactivate-missing` 同时停用价目表外的项目）。同为真实业务数据，门店环境需店主同意后执行 |
 
 ## 试用 / 正式部署
@@ -283,7 +284,7 @@ src/
       inventory/   master 档案 · docs 库存单据 · reports 库存卡/汇总/自检
                    purchasing 采购单与比价 · payables 期初未付/付款/对账
       frontdesk/   visits 接待/换牌/同行/状态板 · bills 挂账与作废 · tags 手牌池 · checks 自检
-    cli.ts         运维命令：migrate / create-owner / reset-password / seed-demo / seed-inventory-demo / seed-frontdesk-demo / import-hand-tags / import-price-list / check
+    cli.ts         运维命令：migrate / create-owner / reset-password / seed-demo / seed-inventory-demo / seed-frontdesk-demo / import-hand-tags / import-price-list / import-opening / check
     seed.ts        会员合成演示数据
     seed-inventory.ts  库存与采购合成演示数据（demo/inventory-demo.json，仅独立演示库）
     seed-frontdesk.ts  前台手牌合成演示数据（预期结果 demo/frontdesk-expected.json，仅独立演示库）

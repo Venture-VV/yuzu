@@ -29,6 +29,8 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   plan_saved: { label: '保存套餐', tone: 'neutral' },
   item_saved: { label: '保存项目', tone: 'neutral' },
   export: { label: '导出', tone: 'neutral' },
+  opening_imported: { label: '导入期初余额', tone: 'ember' },
+  opening_voided: { label: '作废期初', tone: 'clay' },
   frontdesk_checkin: { label: '接待发牌', tone: 'pine' },
   frontdesk_swap: { label: '换牌', tone: 'lake' },
   frontdesk_group: { label: '同行绑牌', tone: 'lake' },
