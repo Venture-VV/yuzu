@@ -114,7 +114,7 @@ function CloseStatus({ s }: { s: SettlementSummary }) {
 
 function Summary({ s, dayLabel }: { s: SettlementSummary; dayLabel: string }) {
   const allOk = s.checks.every((c) => c.ok);
-  const empty = s.recharge.count + s.consume.count + s.reversal.count === 0;
+  const empty = s.recharge.count + s.consume.count + s.reversal.count + s.expiry.count === 0;
 
   return (
     <div className="space-y-5">
@@ -228,6 +228,7 @@ function Summary({ s, dayLabel }: { s: SettlementSummary; dayLabel: string }) {
             <div className="my-1 border-t border-dashed border-line" />
             <Row label="本日发放赠金" cents={s.recharge.bonus} className="text-yuzu-deep" />
             <Row label="本日使用赠金" cents={s.consume.bonus} className="text-ink-2" />
+            <Row label={`赠金过期作废${s.expiry.count ? `（${s.expiry.count} 笔）` : ''}`} cents={s.expiry.bonus} className="text-ink-3" />
           </div>
         </Card>
       </div>

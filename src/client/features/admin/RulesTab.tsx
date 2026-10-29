@@ -29,6 +29,8 @@ interface Draft {
   reversalWindowHours: number | null;
   /** 全天营业时为 null */
   businessHours: { open: string; close: string } | null;
+  /** 自定义赠金的有效期（天），空为长期有效 */
+  customBonusValidDays: string;
 }
 
 export function RulesTab() {
@@ -48,6 +50,7 @@ export function RulesTab() {
       maxConsume: centsToInput(settings.data.maxConsumeCents),
       reversalWindowHours: settings.data.reversalWindowHours,
       businessHours: settings.data.businessHours,
+      customBonusValidDays: settings.data.customBonusValidDays ? String(settings.data.customBonusValidDays) : '',
     });
   }
   if (!draft) return <Skeleton className="h-96" />;
@@ -60,6 +63,10 @@ export function RulesTab() {
     const hours = draft.businessHours;
     if (hours && (!HHMM.test(hours.open) || !HHMM.test(hours.close))) return setError('请填写营业时间（开门与打烊时间）');
     if (hours && hours.open === hours.close) return setError('开门与打烊时间不能相同；全天营业请选「全天 24 小时」');
+    const customDays = draft.customBonusValidDays.trim() ? Number(draft.customBonusValidDays) : null;
+    if (customDays !== null && (!Number.isInteger(customDays) || customDays < 1 || customDays > 3650)) {
+      return setError('自定义赠金有效期请填 1–3650 天，长期有效请留空');
+    }
     setSaving(true);
     setError(null);
     try {
@@ -71,6 +78,7 @@ export function RulesTab() {
         maxConsumeCents,
         reversalWindowHours: draft.reversalWindowHours,
         businessHours: draft.businessHours,
+        customBonusValidDays: customDays,
       });
       await qc.invalidateQueries({ queryKey: qk.settings });
       await qc.invalidateQueries({ queryKey: qk.session });
@@ -168,6 +176,21 @@ export function RulesTab() {
               </option>
             ))}
           </Select>
+        </Field>
+        <Field
+          label={<span className="inline-flex items-center gap-2">自定义赠金有效期（天） <PendingBadge /></span>}
+          htmlFor="r-bonus-days"
+          hint="不按套餐、手动填写赠金时使用；留空为长期有效。套餐的赠金有效期在「套餐与项目」里设置"
+        >
+          <Input
+            id="r-bonus-days"
+            inputMode="numeric"
+            className="num"
+            maxLength={4}
+            placeholder="长期有效"
+            value={draft.customBonusValidDays}
+            onChange={(e) => setDraft({ ...draft, customBonusValidDays: e.target.value.replace(/\D/g, '') })}
+          />
         </Field>
         <Field
           label={<span className="inline-flex items-center gap-2">营业时间 <PendingBadge /></span>}

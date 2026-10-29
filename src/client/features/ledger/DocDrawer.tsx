@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
+import { lastUsableDate } from '@shared/business-date';
 import { Link } from 'react-router';
 import { ArrowUpRight, Undo2, X } from 'lucide-react';
 import { DEDUCTION_RULE_LABELS, ENTRY_TYPE_LABELS, formatPhone, PAYMENT_METHOD_LABELS } from '@shared/labels';
 import type { ConsumptionDoc, LedgerRow, RechargeDoc, ReversalDoc } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
-import { useCan } from '../../lib/session';
+import { useCan, useSession } from '../../lib/session';
 import { formatDateTime } from '../../lib/utils';
 import { Sheet } from '../../components/Overlay';
 import { Money } from '../../components/Money';
@@ -81,7 +82,11 @@ export function DocDrawer({
           <SummaryRow label="经办">{row.operatorName}</SummaryRow>
         </div>
 
-        {doc.isPending ? (
+        {row.entryType === 'expire' ? (
+          <Notice tone="info" title="赠金到期作废">
+            到期未用完的赠金由系统作废，只减赠金、不动本金，不是收款或退款。{row.summary.includes('撤销') ? '这笔是撤销消费时恢复到了已到期的赠金批次，随即作废。' : ''}
+          </Notice>
+        ) : doc.isPending ? (
           <Skeleton className="h-32" />
         ) : doc.error ? (
           <Notice tone="error" title={errorMessage(doc.error)} />
@@ -111,6 +116,7 @@ export function DocDrawer({
 }
 
 function RechargeBody({ d }: { d: RechargeDoc }) {
+  const session = useSession();
   return (
     <div className="rounded-lg border border-line bg-card px-4 py-1">
       <SummaryRow label="实收金额">
@@ -121,6 +127,12 @@ function RechargeBody({ d }: { d: RechargeDoc }) {
       <SummaryRow label="赠金">
         <Money cents={d.bonusAmount} className="text-yuzu-deep" signed />
       </SummaryRow>
+      {d.bonusAmount > 0 && (
+        <SummaryRow label="赠金有效期">
+          {d.bonusExpiresAt ? `至 ${lastUsableDate(d.bonusExpiresAt, session.timezone, session.rules.businessDayStartHour)}` : '长期有效'}
+        </SummaryRow>
+      )}
+      {d.overLimitApproverName && <SummaryRow label="超限授权">{d.overLimitApproverName}</SummaryRow>}
       {d.paymentRef && <SummaryRow label="收款备注">{d.paymentRef}</SummaryRow>}
       {d.note && <SummaryRow label="备注">{d.note}</SummaryRow>}
     </div>
@@ -177,6 +189,13 @@ function ReversalBody({ d, original }: { d: ReversalDoc; original?: ConsumptionD
           <Money cents={d.bonusAmount} className="text-yuzu-deep" signed />
         </SummaryRow>
         <SummaryRow label="撤销原因">{d.reason}</SummaryRow>
+        {d.expiredBonus && (
+          <SummaryRow label="恢复后随即作废">
+            <span className="text-clay">
+              <Money cents={d.expiredBonus.amount} /> 赠金已过期 · <span className="num">{d.expiredBonus.docNo}</span>
+            </span>
+          </SummaryRow>
+        )}
       </div>
       {original && (
         <p className="text-[12.5px] text-ink-3">

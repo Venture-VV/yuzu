@@ -35,6 +35,8 @@ export interface StoreRules {
   businessHours: BusinessHours | null;
   /** 会员自定义字段（#12）；固定字段之外由店主配置 */
   memberFields: MemberFieldDef[];
+  /** 自定义赠金（不按套餐）的有效期天数（#2）；null 为长期有效。套餐的有效期在套餐上设置 */
+  customBonusValidDays: number | null;
 }
 
 export interface SessionInfo {
@@ -73,6 +75,8 @@ export interface MemberSummary {
 
 export interface MemberDetail extends MemberSummary {
   createdByName: string | null;
+  /** 有剩余的赠金批次，先到期的在前（expiresAt 为 null 表示长期有效） */
+  bonusLots: { remaining: number; expiresAt: string | null }[];
   stats: {
     totalPaid: number;
     totalBonusGranted: number;
@@ -88,6 +92,8 @@ export interface RechargePlan {
   name: string;
   payAmount: number;
   bonusAmount: number;
+  /** 赠金有效期（天）；null 为长期有效 */
+  bonusValidDays: number | null;
   note: string;
   active: boolean;
   sortOrder: number;
@@ -134,6 +140,8 @@ export interface RechargeDoc {
   createdAt: string;
   /** 超过单笔上限时当场授权的店主或店总 */
   overLimitApproverName: string | null;
+  /** 赠金到期时刻（那个营业日开始时作废）；没有赠金或长期有效时为 null */
+  bonusExpiresAt: string | null;
 }
 
 export interface ConsumptionLine {
@@ -187,6 +195,8 @@ export interface ReversalDoc {
   businessDate: string;
   operatorName: string;
   createdAt: string;
+  /** 恢复的赠金回到了已到期的批次、随即作废时的赠金过期单 */
+  expiredBonus: { docNo: string; amount: number } | null;
 }
 
 interface OperationBase {
@@ -223,6 +233,8 @@ export interface LedgerRow {
   rechargeId: number | null;
   consumptionId: number | null;
   reversalId: number | null;
+  /** 赠金过期单 */
+  expiryId: number | null;
   /** 充值实收 */
   paidAmount: number | null;
   paymentMethod: PaymentMethod | null;
@@ -256,6 +268,8 @@ export interface SettlementTotals {
   recharge: { count: number; paid: number; bonus: number; byMethod: { method: PaymentMethod; count: number; amount: number }[] };
   consume: { count: number; total: number; principal: number; bonus: number; reversedCount: number };
   reversal: { count: number; principal: number; bonus: number; crossDayCount: number };
+  /** 赠金到期作废（Batch 2.4c）：不是收款，也不是退款 */
+  expiry: { count: number; bonus: number };
   /** 本营业日流水的余额净变动 */
   net: WalletBalance;
 }

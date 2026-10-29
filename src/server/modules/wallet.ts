@@ -6,14 +6,15 @@
 //   2. 加锁后检查幂等键：同一个键再次提交时直接返回第一次的结果，不会重复记账；
 //   3. 余额字段有 CHECK (>= 0) 约束兜底，任何情况下都不会透支；
 //   4. 员工确认作废一笔结果待确认的操作时，先登记「编号 + 业务类型」的作废（lib/fences.ts）；
-//      原请求写编号前与作废串行检查，同一类型已作废则整笔回滚。
+//      原请求写编号前与作废串行检查，同一类型已作废则整笔回滚；
+//   5. 赠金按批次记账（bonus.ts）：记账前先作废这位会员到期的赠金，消费先用最早到期的批次，撤销回到原批次。
 
 import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { businessDateOf } from '@shared/business-date';
+import { bonusExpiryAt, businessDateOf } from '@shared/business-date';
 import { PRICE_TIERS, type PriceTier } from '@shared/catalog';
-import { splitDeduction, type WalletBalance } from '@shared/deduction';
+import { splitDeduction } from '@shared/deduction';
 import { describeHours, PAYMENT_METHODS } from '@shared/labels';
 import { formatYuan } from '@shared/money';
 import { can, type Permission } from '@shared/permissions';
@@ -26,13 +27,14 @@ import { assertNotFenced, fenceKey, isFenced } from '../lib/fences';
 import type { Deps, OpContext } from '../lib/context';
 import { AppError, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse, positiveCents, cents } from '../lib/validate';
+import { addRechargeLot, expireDueLots, expireMemberBonus, restoreToLots, takeFromLots } from './bonus';
 import { getMember } from './members';
 import { loadPricedItems, priceLine } from './pricing';
 import { loadSettings } from './settings';
+import { applyBalance, lockMember, nextDocNo, type LockedMember } from './wallet-core';
 
 type OpType = 'recharge' | 'consume' | 'reversal';
 const OP_TYPES = ['recharge', 'consume', 'reversal'] as const satisfies readonly OpType[];
-const DOC_PREFIX: Record<OpType, string> = { recharge: 'CZ', consume: 'XF', reversal: 'CX' };
 const OP_LABELS: Record<OpType, string> = { recharge: '充值', consume: '消费', reversal: '撤销' };
 const isWalletOp = (t: string): t is OpType => (OP_TYPES as readonly string[]).includes(t);
 
@@ -53,6 +55,8 @@ export const RechargeInput = z.object({
   note: z.string().trim().max(200, '备注最多 200 字').default(''),
   paymentConfirmed: z.literal(true, '请先核实收款到账，再确认入账'),
   overLimitGrantId,
+  /** 页面确认时看到的赠金有效期（天，null 为长期有效）；与当前规则不一致时拒绝。不带时不核对 */
+  bonusValidDays: z.number().int().positive().nullable().optional(),
 });
 export type RechargeInputData = z.input<typeof RechargeInput>;
 
@@ -109,29 +113,6 @@ export type AbandonInputData = z.input<typeof AbandonInput>;
 type AbandonInputParsed = z.output<typeof AbandonInput>;
 
 // ───────────────────────── 基础工具 ─────────────────────────
-
-interface LockedMember {
-  id: number;
-  name: string;
-  principalBalance: number;
-  bonusBalance: number;
-  status: 'active' | 'frozen';
-}
-
-async function lockMember(tx: Tx, id: number): Promise<LockedMember> {
-  const [m] = await tx<LockedMember[]>`
-    SELECT id, name, principal_balance, bonus_balance, status FROM members WHERE id = ${id} FOR UPDATE`;
-  if (!m) throw notFound('会员不存在');
-  return m;
-}
-
-async function nextDocNo(tx: Tx, type: OpType, businessDate: string): Promise<string> {
-  const [row] = await tx<{ lastNo: number }[]>`
-    INSERT INTO doc_counters (doc_type, business_date, last_no) VALUES (${type}, ${businessDate}, 1)
-    ON CONFLICT (doc_type, business_date) DO UPDATE SET last_no = doc_counters.last_no + 1
-    RETURNING last_no`;
-  return `${DOC_PREFIX[type]}${businessDate.replaceAll('-', '')}-${String(row!.lastNo).padStart(4, '0')}`;
-}
 
 const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 
@@ -197,44 +178,13 @@ async function runIdempotent(
   }
 }
 
-async function applyBalance(
-  tx: Tx,
-  member: LockedMember,
-  delta: WalletBalance,
-  entry: {
-    entryType: OpType;
-    docNo: string;
-    rechargeId?: number;
-    consumptionId?: number;
-    reversalId?: number;
-    businessDate: string;
-    operatorId: number;
-    at: Date;
-  },
-) {
-  const after = { principal: member.principalBalance + delta.principal, bonus: member.bonusBalance + delta.bonus };
-  if (after.principal < 0 || after.bonus < 0) {
-    throw new AppError(500, 'BALANCE_INVARIANT', '余额计算异常，已阻止本次记账');
-  }
-  await tx`
-    UPDATE members SET principal_balance = ${after.principal}, bonus_balance = ${after.bonus}, updated_at = now()
-    WHERE id = ${member.id}`;
-  await tx`
-    INSERT INTO ledger_entries (member_id, entry_type, recharge_id, consumption_id, reversal_id, doc_no,
-                                principal_delta, bonus_delta, principal_after, bonus_after,
-                                business_date, operator_id, created_at)
-    VALUES (${member.id}, ${entry.entryType}, ${entry.rechargeId ?? null}, ${entry.consumptionId ?? null},
-            ${entry.reversalId ?? null}, ${entry.docNo}, ${delta.principal}, ${delta.bonus},
-            ${after.principal}, ${after.bonus}, ${entry.businessDate}, ${entry.operatorId}, ${entry.at})`;
-}
-
 // ───────────────────────── 读取单据 ─────────────────────────
 
 export async function getRecharge(db: Db, id: number): Promise<RechargeDoc> {
   const [row] = await db<RechargeDoc[]>`
     SELECT r.id, r.doc_no, r.member_id, r.plan_id, r.plan_name, r.paid_amount, r.bonus_amount, r.payment_method,
            r.payment_ref, r.note, r.business_date, s.display_name AS operator_name, r.created_at,
-           a.display_name AS over_limit_approver_name
+           a.display_name AS over_limit_approver_name, r.bonus_expires_at
     FROM recharges r JOIN staff s ON s.id = r.operator_id LEFT JOIN staff a ON a.id = r.over_limit_approved_by
     WHERE r.id = ${id}`;
   if (!row) throw notFound('充值单不存在');
@@ -262,7 +212,8 @@ export async function getConsumption(db: Db, id: number): Promise<ConsumptionDoc
 export async function getReversal(db: Db, id: number): Promise<ReversalDoc> {
   const [row] = await db<ReversalDoc[]>`
     SELECT r.id, r.doc_no, r.consumption_id, c.doc_no AS consumption_doc_no, r.member_id, r.principal_amount,
-           r.bonus_amount, r.reason, r.business_date, s.display_name AS operator_name, r.created_at
+           r.bonus_amount, r.reason, r.business_date, s.display_name AS operator_name, r.created_at,
+           (SELECT json_build_object('docNo', e.doc_no, 'amount', e.amount) FROM bonus_expiries e WHERE e.reversal_id = r.id) AS expired_bonus
     FROM reversals r JOIN consumptions c ON c.id = r.consumption_id JOIN staff s ON s.id = r.operator_id
     WHERE r.id = ${id}`;
   if (!row) throw notFound('撤销单不存在');
@@ -292,12 +243,16 @@ export async function loadOperation(db: Db, opType: OpType, refId: number, repla
     }
     case 'reversal': {
       const reversal = await getReversal(db, refId);
+      const balances = await balancesOf(db, 'reversal_id', refId);
+      // 恢复的赠金随即到期作废时，撤销后的余额按作废之后的显示
+      const expired = reversal.expiredBonus?.amount ?? 0;
       return {
         type: 'reversal',
         replayed,
         reversal,
         consumption: await getConsumption(db, reversal.consumptionId),
-        ...(await balancesOf(db, 'reversal_id', refId)),
+        balanceBefore: balances.balanceBefore,
+        balanceAfter: { principal: balances.balanceAfter.principal, bonus: balances.balanceAfter.bonus - expired },
         member: await getMember(db, reversal.memberId),
       };
     }
@@ -358,44 +313,58 @@ async function approveOverLimit(
 export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContext): Promise<OperationResult> {
   const input = parse(RechargeInput, raw);
   const { idempotencyKey: key, ...payload } = input;
+  await expireMemberBonus(deps, input.memberId, ctx.at ?? new Date());
   const run = await runIdempotent(
     deps.sql,
     { key, opType: 'recharge', requestHash: hashRequest(payload), memberId: input.memberId, staffId: ctx.actor.id },
-    async (tx, member) => {
+    async (tx, locked) => {
       const settings = await loadSettings(tx);
+      const at = ctx.at ?? new Date();
+      // 先作废到期的赠金（通常已由记账前的单独事务处理），入账后余额从最新余额算起
+      const member = await expireDueLots(tx, deps, locked, at);
       if (member.status !== 'active') throw unprocessable('MEMBER_FROZEN', '该会员已停用，不能充值');
 
       let planName: string | null = null;
+      let bonusValidDays = settings.customBonusValidDays;
       if (input.planId) {
-        const [plan] = await tx<{ name: string; payAmount: number; bonusAmount: number; active: boolean }[]>`
-          SELECT name, pay_amount, bonus_amount, active FROM recharge_plans WHERE id = ${input.planId}`;
+        const [plan] = await tx<{ name: string; payAmount: number; bonusAmount: number; active: boolean; bonusValidDays: number | null }[]>`
+          SELECT name, pay_amount, bonus_amount, active, bonus_valid_days FROM recharge_plans WHERE id = ${input.planId}`;
         if (!plan || !plan.active) throw conflict('PLAN_UNAVAILABLE', '该充值套餐已停用，请重新选择');
         if (plan.payAmount !== input.paidAmount || plan.bonusAmount !== input.bonusAmount) {
           throw conflict('PLAN_CHANGED', '充值套餐金额刚刚有调整，请核对后重新确认');
         }
         planName = plan.name;
+        bonusValidDays = plan.bonusValidDays;
       } else if (input.bonusAmount > 0 && !can(ctx.actor, 'recharge.customBonus')) {
         throw forbidden('当前岗位不能自定义赠金，请选择充值套餐');
       }
+      // 赠金有效期以员工确认时看到的为准：期间店主调整了有效期时拒绝，按新的有效期重新确认
+      if (input.bonusAmount > 0 && input.bonusValidDays !== undefined && input.bonusValidDays !== bonusValidDays) {
+        throw conflict('PLAN_CHANGED', '赠金有效期刚刚有调整，请核对后重新确认', { bonusValidDays });
+      }
+      const bonusExpiresAt =
+        input.bonusAmount > 0 && bonusValidDays !== null
+          ? bonusExpiryAt(at, bonusValidDays, deps.config.timezone, settings.businessDayStartHour)
+          : null;
       // 超过单笔上限：需要店主或店总当场授权，授权在这个事务里核销（业务回滚时一起回滚）
       const overLimit = input.paidAmount > settings.maxRechargeCents
         ? await approveOverLimit(tx, input.overLimitGrantId, ctx, { kind: 'recharge', memberId: member.id, amount: input.paidAmount, limit: settings.maxRechargeCents, key })
         : null;
 
-      const at = ctx.at ?? new Date();
       const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
       const docNo = await nextDocNo(tx, 'recharge', businessDate);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO recharges (doc_no, member_id, plan_id, plan_name, paid_amount, bonus_amount, payment_method,
-                               payment_ref, note, business_date, operator_id, created_at, over_limit_approved_by)
+                               payment_ref, note, business_date, operator_id, created_at, over_limit_approved_by, bonus_expires_at)
         VALUES (${docNo}, ${member.id}, ${input.planId}, ${planName}, ${input.paidAmount}, ${input.bonusAmount},
                 ${input.paymentMethod}, ${input.paymentRef}, ${input.note}, ${businessDate}, ${ctx.actor.id}, ${at},
-                ${overLimit?.approverId ?? null})
+                ${overLimit?.approverId ?? null}, ${bonusExpiresAt})
         RETURNING id`;
       const id = row!.id;
       await applyBalance(tx, member, { principal: input.paidAmount, bonus: input.bonusAmount }, {
         entryType: 'recharge', docNo, rechargeId: id, businessDate, operatorId: ctx.actor.id, at,
       });
+      await addRechargeLot(tx, { memberId: member.id, rechargeId: id, amount: input.bonusAmount, expiresAt: bonusExpiresAt, at });
       await writeAudit(tx, {
         staffId: ctx.actor.id,
         action: 'recharge_created',
@@ -422,11 +391,15 @@ export async function consume(deps: Deps, raw: ConsumeInputData, ctx: OpContext)
   if (input.customLines.length > 0 && !can(ctx.actor, 'consume.customAmount')) {
     throw forbidden('当前岗位不能手动输入消费金额');
   }
+  await expireMemberBonus(deps, input.memberId, ctx.at ?? new Date());
   const run = await runIdempotent(
     deps.sql,
     { key, opType: 'consume', requestHash: hashRequest(payload), memberId: input.memberId, staffId: ctx.actor.id },
-    async (tx, member) => {
+    async (tx, locked) => {
       const settings = await loadSettings(tx);
+      const at = ctx.at ?? new Date();
+      // 先作废到期的赠金：到期赠金不能再用，员工确认的余额若含到期赠金，下面的余额核对会要求重新确认
+      const member = await expireDueLots(tx, deps, locked, at);
       if (member.status !== 'active') throw unprocessable('MEMBER_FROZEN', '该会员已停用，不能消费');
 
       // 项目价格以服务端为准，按所选价格档计价
@@ -466,7 +439,6 @@ export async function consume(deps: Deps, raw: ConsumeInputData, ctx: OpContext)
         ? await approveOverLimit(tx, input.overLimitGrantId, ctx, { kind: 'consume', memberId: member.id, amount: total, limit: settings.maxConsumeCents, key })
         : null;
 
-      const at = ctx.at ?? new Date();
       const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
       const docNo = await nextDocNo(tx, 'consume', businessDate);
       const [row] = await tx<{ id: number }[]>`
@@ -484,6 +456,8 @@ export async function consume(deps: Deps, raw: ConsumeInputData, ctx: OpContext)
       await applyBalance(tx, member, { principal: -split.principal, bonus: -split.bonus }, {
         entryType: 'consume', docNo, consumptionId: id, businessDate, operatorId: ctx.actor.id, at,
       });
+      // 扣用的赠金先用最早到期的批次
+      await takeFromLots(tx, { memberId: member.id, consumptionId: id, amount: split.bonus, at });
       await writeAudit(tx, {
         staffId: ctx.actor.id,
         action: 'consumption_created',
@@ -508,6 +482,7 @@ export async function reverse(deps: Deps, consumptionId: number, raw: ReverseInp
   const input = parse(ReverseInput, raw);
   const [target] = await deps.sql<{ memberId: number }[]>`SELECT member_id FROM consumptions WHERE id = ${consumptionId}`;
   if (!target) throw notFound('消费单不存在');
+  await expireMemberBonus(deps, target.memberId, ctx.at ?? new Date());
   const run = await runIdempotent(
     deps.sql,
     {
@@ -517,9 +492,11 @@ export async function reverse(deps: Deps, consumptionId: number, raw: ReverseInp
       memberId: target.memberId,
       staffId: ctx.actor.id,
     },
-    async (tx, member) => {
+    async (tx, locked) => {
       const settings = await loadSettings(tx);
-      // 锁顺序始终是「会员 → 消费单」，避免死锁
+      const at = ctx.at ?? new Date();
+      const member = await expireDueLots(tx, deps, locked, at);
+      // 锁顺序始终是「会员 → 消费单 → 赠金批次」，避免死锁
       const [c] = await tx<{ id: number; docNo: string; status: string; principalAmount: number; bonusAmount: number; businessDate: string; createdAt: Date }[]>`
         SELECT id, doc_no, status, principal_amount, bonus_amount, business_date, created_at FROM consumptions
         WHERE id = ${consumptionId} FOR UPDATE`;
@@ -528,7 +505,6 @@ export async function reverse(deps: Deps, consumptionId: number, raw: ReverseInp
         const [r] = await tx<{ docNo: string }[]>`SELECT doc_no FROM reversals WHERE consumption_id = ${c.id}`;
         throw conflict('ALREADY_REVERSED', `该消费单已撤销${r ? `（撤销单 ${r.docNo}）` : ''}，不会重复恢复余额`);
       }
-      const at = ctx.at ?? new Date();
       // 撤销时限（#10，待确认）：超过时限只有店主可以撤销
       const windowHours = settings.reversalWindowHours;
       if (windowHours !== null && ctx.actor.role !== 'owner' && at.getTime() - new Date(c.createdAt).getTime() > windowHours * 3_600_000) {
@@ -548,10 +524,12 @@ export async function reverse(deps: Deps, consumptionId: number, raw: ReverseInp
         RETURNING id`;
       const id = row!.id;
       await tx`UPDATE consumptions SET status = 'reversed' WHERE id = ${c.id}`;
-      // 按原单扣款构成恢复，本金归本金、赠金归赠金
-      await applyBalance(tx, member, { principal: c.principalAmount, bonus: c.bonusAmount }, {
+      // 按原单扣款构成恢复，本金归本金、赠金归赠金；赠金回到原来的批次，原批次已到期的随即作废
+      const restored = await applyBalance(tx, member, { principal: c.principalAmount, bonus: c.bonusAmount }, {
         entryType: 'reversal', docNo, consumptionId: c.id, reversalId: id, businessDate, operatorId: ctx.actor.id, at,
       });
+      await restoreToLots(tx, { memberId: member.id, consumptionId: c.id, reversalId: id, amount: c.bonusAmount, at });
+      await expireDueLots(tx, deps, restored, at, id);
       await writeAudit(tx, {
         staffId: ctx.actor.id,
         action: 'consumption_reversed',

@@ -23,6 +23,7 @@ export type AuditAction =
   | 'plan_saved'
   | 'item_saved'
   | 'price_list_imported'
+  | 'bonus_expired'
   | 'export'
   | 'inventory_master_saved'
   | 'inventory_doc'

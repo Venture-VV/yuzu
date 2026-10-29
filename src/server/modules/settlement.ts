@@ -34,6 +34,8 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
     SELECT count(*) AS count, coalesce(sum(r.principal_amount), 0) AS principal, coalesce(sum(r.bonus_amount), 0) AS bonus,
            count(*) FILTER (WHERE c.business_date <> r.business_date) AS cross_day_count
     FROM reversals r JOIN consumptions c ON c.id = r.consumption_id WHERE r.business_date = ${date}`;
+  const [ex] = await db<SettlementTotals['expiry'][]>`
+    SELECT count(*) AS count, coalesce(sum(amount), 0) AS bonus FROM bonus_expiries WHERE business_date = ${date}`;
   const [net] = await db<Pair[]>`
     SELECT coalesce(sum(principal_delta), 0) AS principal, coalesce(sum(bonus_delta), 0) AS bonus
     FROM ledger_entries WHERE business_date = ${date}`;
@@ -41,6 +43,7 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
     recharge: { count: rc!.count, paid: rc!.paid, bonus: rc!.bonus, byMethod },
     consume: cs!,
     reversal: rv!,
+    expiry: ex!,
     net: net!,
   };
 }
@@ -54,7 +57,9 @@ function canonical(value: unknown): string {
   }
   return JSON.stringify(value);
 }
-const sameTotals = (a: SettlementTotals, b: SettlementTotals) => canonical(a) === canonical(b);
+/** 确认日结时保存的快照可能早于新的口径（例如赠金过期，Batch 2.4c）：缺少的口径按 0 补齐再比较，不误报「日结后有变动」 */
+const withNewSections = (t: SettlementTotals): SettlementTotals => ({ ...t, expiry: t.expiry ?? { count: 0, bonus: 0 } });
+const sameTotals = (snapshot: SettlementTotals, now: SettlementTotals) => canonical(withNewSections(snapshot)) === canonical(now);
 
 const ANOMALY_LABELS: Record<SettlementAnomaly['kind'], string> = {
   reversal: '撤销',
@@ -101,9 +106,19 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
       ON l.member_id = m.id
     WHERE m.principal_balance <> coalesce(l.p, 0) OR m.bonus_balance <> coalesce(l.b, 0)`;
 
+  // 赠金批次：会员赠金余额 = 全部批次剩余之和；每个批次「金额 + 变动 = 剩余」
+  const [lots] = await db<{ members: number; lots: number }[]>`
+    SELECT
+      (SELECT count(*) FROM members m
+       LEFT JOIN (SELECT member_id, sum(remaining) AS r FROM bonus_lots GROUP BY member_id) l ON l.member_id = m.id
+       WHERE m.bonus_balance <> coalesce(l.r, 0)) AS members,
+      (SELECT count(*) FROM bonus_lots b
+       LEFT JOIN (SELECT lot_id, sum(amount) AS a FROM bonus_lot_moves GROUP BY lot_id) mv ON mv.lot_id = b.id
+       WHERE b.amount + coalesce(mv.a, 0) <> b.remaining) AS lots`;
+
   const docDelta = {
     principal: totals.recharge.paid - totals.consume.principal + totals.reversal.principal,
-    bonus: totals.recharge.bonus - totals.consume.bonus + totals.reversal.bonus,
+    bonus: totals.recharge.bonus - totals.consume.bonus + totals.reversal.bonus - totals.expiry.bonus,
   };
   const checks: SettlementCheck[] = [
     {
@@ -133,6 +148,15 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
       detail: mismatches.length
         ? `${mismatches.length} 位会员余额与流水不符`
         : `会员余额合计 ${pairText(balances.membersNow)}`,
+    },
+    {
+      key: 'bonus_lots',
+      label: '赠金批次与赠金余额一致',
+      ok: lots!.members === 0 && lots!.lots === 0,
+      detail:
+        lots!.members || lots!.lots
+          ? `${lots!.members} 位会员的赠金余额与批次不符，${lots!.lots} 个批次的剩余与变动不符`
+          : '每位会员的赠金余额 = 未到期批次剩余之和，批次变动逐笔可推出',
     },
   ];
 
@@ -260,6 +284,7 @@ export function settlementCsv(s: SettlementSummary): string {
     ['撤销恢复', s.reversal.count, y(s.reversal.principal + s.reversal.bonus), `跨营业日 ${s.reversal.crossDayCount} 笔`],
     ['  · 恢复本金', '', y(s.reversal.principal), ''],
     ['  · 恢复赠金', '', y(s.reversal.bonus), ''],
+    ['赠金过期', s.expiry.count, y(s.expiry.bonus), '到期未用完的赠金作废，不是收款或退款'],
     [],
     ['余额核对', '本金（元）', '赠金（元）'],
     ['期初余额', y(s.balances.opening.principal), y(s.balances.opening.bonus)],

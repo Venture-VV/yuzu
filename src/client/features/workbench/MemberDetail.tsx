@@ -1,5 +1,6 @@
 import { ArrowLeft, Bath, CirclePlus, PencilLine, StickyNote } from 'lucide-react';
 import { formatPhone } from '@shared/labels';
+import { lastUsableDate } from '@shared/business-date';
 import { displayFieldValue } from '@shared/member-fields';
 import type { MemberDetail as Member } from '@shared/types';
 import { useActivity } from '../../lib/queries';
@@ -31,6 +32,8 @@ export function MemberDetail({
   const session = useSession();
   const activity = useActivity(member.id);
   const total = member.principalBalance + member.bonusBalance;
+  // 有到期时间的赠金（先到期的在前）；长期有效的不提示
+  const expiring = (member.bonusLots ?? []).filter((l) => l.expiresAt !== null);
   // 自定义字段：只显示启用且已填写的
   const fieldRows = session.rules.memberFields
     .filter((d) => d.active)
@@ -116,6 +119,16 @@ export function MemberDetail({
               <p className="mt-1.5 text-[12px] text-ink-3">
                 累计赠送 <Money cents={member.stats.totalBonusGranted} />
               </p>
+              {expiring.length > 0 && (
+                <ul className="mt-1.5 space-y-0.5 text-[12px] font-semibold text-ember" data-testid="bonus-expiring">
+                  {expiring.slice(0, 2).map((l, i) => (
+                    <li key={i}>
+                      <Money cents={l.remaining} /> 有效至 {lastUsableDate(l.expiresAt!, session.timezone, session.rules.businessDayStartHour).slice(5)}
+                    </li>
+                  ))}
+                  {expiring.length > 2 && <li className="text-ink-3">另有 {expiring.length - 2} 笔将陆续到期</li>}
+                </ul>
+              )}
             </div>
           </div>
         </div>

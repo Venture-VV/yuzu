@@ -8,6 +8,7 @@ import { writeAudit } from '../lib/audit';
 import type { Deps, OpContext } from '../lib/context';
 import { badRequest, conflict, notFound } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
+import { expireMemberBonus, openLots } from './bonus';
 import { listLedger } from './ledger';
 import { loadSettings } from './settings';
 
@@ -76,7 +77,13 @@ export async function getMemberDetail(db: Db, id: number): Promise<MemberDetail>
         'reversedCount', (SELECT count(*) FROM consumptions WHERE member_id = m.id AND status = 'reversed')
       ) AS stats
     FROM members m WHERE m.id = ${id}`;
-  return { ...member, createdByName: extra?.createdByName ?? null, stats: extra!.stats };
+  const lots = await openLots(db, id);
+  return {
+    ...member,
+    createdByName: extra?.createdByName ?? null,
+    stats: extra!.stats,
+    bonusLots: lots.map((l) => ({ remaining: l.remaining, expiresAt: l.expiresAt ? new Date(l.expiresAt).toISOString() : null })),
+  };
 }
 
 /** 按当前字段定义核对自定义字段；不合格时 400 并指出字段 */
@@ -130,7 +137,8 @@ export async function createMember(
   }
 }
 
-export function registerMemberRoutes(app: FastifyInstance, { sql }: Deps) {
+export function registerMemberRoutes(app: FastifyInstance, deps: Deps) {
+  const { sql } = deps;
   app.get('/api/members', { preHandler: guard('member.read') }, async (req) => {
     const { q, limit } = parse(SearchQuery, req.query);
     return searchMembers(sql, q, limit);
@@ -138,6 +146,8 @@ export function registerMemberRoutes(app: FastifyInstance, { sql }: Deps) {
 
   app.get('/api/members/:id', { preHandler: guard('member.read') }, async (req) => {
     const { id } = parse(idParam, req.params);
+    // 先作废这位会员到期的赠金，员工看到的余额才是可用余额
+    await expireMemberBonus(deps, id);
     return getMemberDetail(sql, id);
   });
 

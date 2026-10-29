@@ -4,6 +4,7 @@ import { ensureInitialOwner } from './bootstrap';
 import { loadConfig } from './config';
 import { createSql } from './db';
 import { migrate } from './migrate';
+import { sweepExpiredBonus } from './modules/bonus';
 
 const config = loadConfig();
 const sql = createSql(config.databaseUrl);
@@ -31,8 +32,21 @@ async function main() {
   await app.listen({ host: config.host, port: config.port });
   app.log.info(`浴族 yuzu 已启动：http://${config.host}:${config.port}（${config.env}）`);
 
+  // 赠金到期作废：启动时先扫描一次，之后每分钟一次（会员记账、打开会员详情时也会先处理这位会员）
+  const sweep = async () => {
+    try {
+      const n = await sweepExpiredBonus({ sql, config });
+      if (n > 0) app.log.info(`赠金到期作废：${n} 位会员`);
+    } catch (error) {
+      app.log.error({ err: error }, '赠金到期作废扫描失败，下一分钟重试');
+    }
+  };
+  await sweep();
+  const sweeper = setInterval(() => void sweep(), 60_000);
+
   const shutdown = async (signal: string) => {
     app.log.info(`收到 ${signal}，正在关闭…`);
+    clearInterval(sweeper);
     await app.close();
     await sql.end({ timeout: 5 });
     process.exit(0);

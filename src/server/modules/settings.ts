@@ -24,6 +24,7 @@ const KEY_MAP = {
   reversal_window_hours: 'reversalWindowHours',
   business_hours: 'businessHours',
   member_fields: 'memberFields',
+  custom_bonus_valid_days: 'customBonusValidDays',
 } as const satisfies Record<string, keyof StoreSettings>;
 
 // 单笔上限按店主 2026-10-27 答复（#9）默认 50 万元；撤销时限、营业时间默认与之前一致（不限、全天），待确认
@@ -36,6 +37,7 @@ const DEFAULTS: StoreSettings = {
   reversalWindowHours: null,
   businessHours: null,
   memberFields: [],
+  customBonusValidDays: null,
 };
 
 export async function loadSettings(db: Db): Promise<StoreSettings> {
@@ -73,6 +75,7 @@ const SettingsInput = z
         }),
       )
       .max(MAX_MEMBER_FIELDS, `会员自定义字段最多 ${MAX_MEMBER_FIELDS} 个`),
+    customBonusValidDays: z.number().int('赠金有效期按整天填写').min(1, '赠金有效期至少 1 天').max(3650, '赠金有效期最多 3650 天').nullable(),
   })
   // 只提交要修改的项（各设置卡片分别保存）；没有提交的项保持原值
   .partial();

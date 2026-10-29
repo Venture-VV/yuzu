@@ -38,12 +38,16 @@ beforeAll(async () => {
   memberId = member!.id;
 
   // 用第一版就有的记账流程写入真实流水。现版本记账还会查作废登记表（006 才有）、写消费明细的价格档（009 才有）
-  // 与超限授权人（010）、会员自定义字段（011），写入期间临时放一张空表、加几列，迁移前删掉，升级仍从「只有 001」的结构开始
+  // 与超限授权人（010）、会员自定义字段（011）、赠金批次（012），写入期间临时放几张表、加几列，迁移前删掉，
+  // 升级仍从「只有 001」的结构开始
   await sql`CREATE TABLE op_fences (key uuid, op_type text, staff_id bigint, created_at timestamptz)`;
   await sql`ALTER TABLE consumption_lines ADD COLUMN tier text`;
   await sql`ALTER TABLE recharges ADD COLUMN over_limit_approved_by bigint`;
   await sql`ALTER TABLE consumptions ADD COLUMN over_limit_approved_by bigint`;
   await sql`ALTER TABLE members ADD COLUMN custom_fields jsonb NOT NULL DEFAULT '{}'`;
+  await sql`ALTER TABLE recharges ADD COLUMN bonus_expires_at timestamptz`;
+  await sql`ALTER TABLE ledger_entries ADD COLUMN expiry_id bigint`;
+  await sql`CREATE TABLE bonus_lots (id bigserial PRIMARY KEY, member_id bigint, source text, recharge_id bigint, amount bigint, remaining bigint, expires_at timestamptz, created_at timestamptz)`;
   // 升级前已有的消费项目（只有一个价格）
   const [item] = await sql<{ id: number }[]>`INSERT INTO service_items (name, category, price) VALUES ('升级前项目', '护理', 6800) RETURNING id`;
   itemId = item!.id;
@@ -58,10 +62,13 @@ beforeAll(async () => {
   await sql`ALTER TABLE recharges DROP COLUMN over_limit_approved_by`;
   await sql`ALTER TABLE consumptions DROP COLUMN over_limit_approved_by`;
   await sql`ALTER TABLE members DROP COLUMN custom_fields`;
+  await sql`ALTER TABLE recharges DROP COLUMN bonus_expires_at`;
+  await sql`ALTER TABLE ledger_entries DROP COLUMN expiry_id`;
+  await sql`DROP TABLE bonus_lots`;
 
   // 升级：增量执行 002 之后的全部迁移
   const applied = await migrate(sql);
-  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql', '005_frontdesk_g2.sql', '006_op_fences.sql', '007_manager_roles.sql', '008_locker_pool.sql', '009_price_tiers.sql', '010_wallet_limits.sql', '011_member_fields.sql']);
+  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql', '005_frontdesk_g2.sql', '006_op_fences.sql', '007_manager_roles.sql', '008_locker_pool.sql', '009_price_tiers.sql', '010_wallet_limits.sql', '011_member_fields.sql', '012_bonus_expiry.sql']);
   app = await buildApp(sql, config);
 }, 60_000);
 
@@ -179,6 +186,17 @@ describe('升级后', () => {
     expect((await api(app, owner, 'GET', '/api/settings')).body.memberFields).toEqual([]);
     const edit = await api(app, owner, 'PUT', `/api/members/${memberId}`, { name: '升级前会员', phone: '19900001111', note: '升级后编辑' });
     expect(edit.status).toBe(200);
+  });
+
+  it('升级前的赠金记为长期有效的批次：照常可用，日结的赠金批次核对通过', async () => {
+    const lots = await sql<{ source: string; amount: number; remaining: number; expiresAt: Date | null }[]>`
+      SELECT source, amount, remaining, expires_at FROM bonus_lots WHERE member_id = ${memberId} AND source = 'legacy'`;
+    expect(lots).toEqual([{ source: 'legacy', amount: 5000, remaining: 5000, expiresAt: null }]);
+    const owner = await login(app, 'owner');
+    expect((await api(app, owner, 'GET', `/api/members/${memberId}`)).body.bonusLots).toEqual([{ remaining: 5000, expiresAt: null }]);
+    const today = (await api(app, owner, 'GET', '/api/auth/me')).body.today;
+    const st = await api(app, owner, 'GET', `/api/settlements/${today}`);
+    expect(st.body.checks.find((c: { key: string }) => c.key === 'bonus_lots')).toMatchObject({ ok: true });
   });
 
   it('再次执行迁移不会重复应用', async () => {

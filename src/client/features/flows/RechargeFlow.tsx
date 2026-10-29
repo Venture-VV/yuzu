@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Banknote, CreditCard, Ellipsis, Gift, Smartphone, WalletCards } from 'lucide-react';
 import { overLimitGrantFits, type OverLimitGrant } from '@shared/grants';
-import { PAYMENT_METHOD_LABELS, PAYMENT_METHODS, type PaymentMethod } from '@shared/labels';
+import { lastUsableDate } from '@shared/business-date';
+import { PAYMENT_METHOD_LABELS, PAYMENT_METHODS, shiftDate, type PaymentMethod } from '@shared/labels';
 import { formatYuan, parseYuan } from '@shared/money';
 import type { MemberDetail, OperationResult } from '@shared/types';
 import { findPending } from '../../lib/pendingOps';
@@ -56,6 +57,9 @@ export function RechargeFlow({
 
   const before = { principal: member.principalBalance, bonus: member.bonusBalance };
   const after = { principal: before.principal + (paid ?? 0), bonus: before.bonus + (bonus ?? 0) };
+  /** 赠金有效期（天）：套餐上设置；自定义赠金按经营规则的默认值；null 为长期有效 */
+  const bonusValidDays = plan ? plan.bonusValidDays : session.rules.customBonusValidDays;
+  const bonusValidText = bonusValidDays ? `至 ${shiftDate(session.today, bonusValidDays - 1)}（${bonusValidDays} 天）` : '长期有效';
   const limit = session.rules.maxRechargeCents;
   const overLimit = paid != null && paid > limit;
   const grantScope = { kind: 'recharge' as const, memberId: member.id, amount: paid ?? 0 };
@@ -76,6 +80,8 @@ export function RechargeFlow({
         note,
         paymentConfirmed: confirmed,
         overLimitGrantId: overLimit ? grant?.grantId : undefined,
+        // 员工确认时看到的赠金有效期；期间店主调整了有效期时服务端拒绝，按新的重新确认
+        bonusValidDays: bonus ? bonusValidDays : undefined,
       },
       meta: {
         memberId: member.id,
@@ -99,6 +105,7 @@ export function RechargeFlow({
     if (op.state.status === 'success') setStep('result');
     if (op.state.status === 'error' && ['PLAN_CHANGED', 'PLAN_UNAVAILABLE'].includes(op.state.error.code)) {
       void qc.invalidateQueries({ queryKey: ['catalog'] });
+      void qc.invalidateQueries({ queryKey: qk.session });
       setPlanId(null);
       setStep('form');
       setFormError(op.state.error.message);
@@ -163,6 +170,11 @@ export function RechargeFlow({
               <Money cents={r.recharge.bonusAmount} className="text-yuzu-deep" signed />
             </SummaryRow>
           )}
+          {r.recharge.bonusAmount > 0 && (
+            <SummaryRow label="赠金有效期">
+              {r.recharge.bonusExpiresAt ? `至 ${lastUsableDate(r.recharge.bonusExpiresAt, session.timezone, session.rules.businessDayStartHour)}` : '长期有效'}
+            </SummaryRow>
+          )}
           <SummaryRow label="经办">{r.recharge.operatorName}</SummaryRow>
           {r.recharge.overLimitApproverName && <SummaryRow label="超限授权">{r.recharge.overLimitApproverName}</SummaryRow>}
         </div>
@@ -224,6 +236,7 @@ export function RechargeFlow({
             <SummaryRow label="赠金">
               <Money cents={bonus ?? 0} className={bonus ? 'text-yuzu-deep' : 'text-ink-4'} signed />
             </SummaryRow>
+            {bonus ? <SummaryRow label="赠金有效期">{bonusValidText}</SummaryRow> : null}
             {paymentRef && <SummaryRow label="收款备注">{paymentRef}</SummaryRow>}
             {note && <SummaryRow label="备注">{note}</SummaryRow>}
           </div>
@@ -299,8 +312,11 @@ export function RechargeFlow({
               <span className="text-[13px] font-semibold text-ink-2">{p.name}</span>
               <Money cents={p.payAmount} className="mt-1 text-[20px] font-bold text-ink" />
               {p.bonusAmount > 0 ? (
-                <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-yuzu-soft px-2 py-0.5 text-[12px] font-bold text-yuzu-deep">
-                  <Gift className="size-3" />送 <Money cents={p.bonusAmount} />
+                <span className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-yuzu-soft px-2 py-0.5 text-[12px] font-bold text-yuzu-deep">
+                    <Gift className="size-3" />送 <Money cents={p.bonusAmount} />
+                  </span>
+                  {p.bonusValidDays && <span className="text-[11.5px] font-semibold text-ink-3">{p.bonusValidDays} 天有效</span>}
                 </span>
               ) : (
                 <span className="mt-1 text-[12px] text-ink-3">无赠送</span>

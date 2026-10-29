@@ -111,6 +111,11 @@ export function ReversalDialog({ target, onClose }: { target: ReversalTarget | n
         <div>
           <SuccessHeader title="余额已恢复" docNo={op.state.result.reversal.docNo} recovered={op.state.recovered} />
           <BalanceChange before={op.state.result.balanceBefore} after={op.state.result.balanceAfter} animate />
+          {op.state.result.reversal.expiredBonus && (
+            <Notice tone="info" className="mt-3" title={`恢复的赠金 ¥${(op.state.result.reversal.expiredBonus.amount / 100).toFixed(2)} 已过有效期，随即作废`}>
+              赠金回到了原来的批次，该批次已到期；作废记为赠金过期单 {op.state.result.reversal.expiredBonus.docNo}。本金照常恢复。
+            </Notice>
+          )}
           <p className="mt-3 text-center text-[12.5px] text-ink-3">
             原单 {op.state.result.consumption.docNo} 已标记为已撤销 · 原因：{op.state.result.reversal.reason}
           </p>

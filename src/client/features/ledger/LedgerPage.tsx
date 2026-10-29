@@ -16,7 +16,7 @@ import { ReversalDialog, type ReversalTarget } from '../flows/ReversalDialog';
 import { ActivityRow, ENTRY_META } from '../workbench/ActivityList';
 import { DocDrawer } from './DocDrawer';
 
-type TypeFilter = 'all' | 'recharge' | 'consume' | 'reversal';
+type TypeFilter = 'all' | 'recharge' | 'consume' | 'reversal' | 'expire';
 
 export function LedgerPage() {
   const session = useSession();
@@ -61,7 +61,7 @@ export function LedgerPage() {
   const operators = useMemo(() => [...new Set((ledger.data ?? []).map((r) => r.operatorName))], [ledger.data]);
 
   const totals = useMemo(() => {
-    const t = { paid: 0, consume: 0, restore: 0, recharges: 0, consumes: 0, reversals: 0 };
+    const t = { paid: 0, consume: 0, restore: 0, expired: 0, recharges: 0, consumes: 0, reversals: 0, expiries: 0 };
     for (const r of rows) {
       if (r.entryType === 'recharge') {
         t.paid += r.paidAmount ?? 0;
@@ -69,9 +69,12 @@ export function LedgerPage() {
       } else if (r.entryType === 'consume') {
         t.consume -= r.principalDelta + r.bonusDelta;
         t.consumes++;
-      } else {
+      } else if (r.entryType === 'reversal') {
         t.restore += r.principalDelta + r.bonusDelta;
         t.reversals++;
+      } else {
+        t.expired -= r.bonusDelta;
+        t.expiries++;
       }
     }
     return t;
@@ -102,6 +105,7 @@ export function LedgerPage() {
             { value: 'recharge', label: '充值' },
             { value: 'consume', label: '消费' },
             { value: 'reversal', label: '撤销' },
+            { value: 'expire', label: '赠金过期' },
           ]}
         />
         <Select fullWidth={false} value={operator} onChange={(e) => setOperator(e.target.value)} className="h-9 min-w-[128px] text-[13px]" aria-label="操作人">
@@ -129,7 +133,7 @@ export function LedgerPage() {
         <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile label="充值实收" tone="lake" cents={totals.paid} sub={`${totals.recharges} 笔`} />
           <StatTile label="储值消费" tone="ink" cents={totals.consume} sub={`${totals.consumes} 笔（含已撤销）`} />
-          <StatTile label="撤销恢复" tone="clay" cents={totals.restore} sub={`${totals.reversals} 笔`} />
+          <StatTile label="撤销恢复" tone="clay" cents={totals.restore} sub={`${totals.reversals} 笔${totals.expiries ? ` · 赠金过期 ${(totals.expired / 100).toFixed(2)}` : ''}`} />
           <StatTile label="记录条数" tone="neutral" count={rows.length} sub={operator ? `仅 ${operator}` : '全部操作人'} />
         </div>
 

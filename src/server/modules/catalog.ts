@@ -22,6 +22,8 @@ const PlanInput = z.object({
   name: z.string().trim().min(1, '请填写套餐名称').max(32, '名称最多 32 个字'),
   payAmount: positiveCents('实收金额'),
   bonusAmount: cents('赠金'),
+  /** 赠金有效期（天，店主 #2）；null 为长期有效；编辑时不带则保持原值 */
+  bonusValidDays: z.number().int('赠金有效期按整天填写').min(1, '赠金有效期至少 1 天').max(3650, '赠金有效期最多 3650 天').nullable().optional(),
   note: z.string().trim().max(100).default(''),
   active: z.boolean().default(true),
   sortOrder: z.number().int().default(0),
@@ -73,7 +75,7 @@ export async function loadItems(db: Db, includeInactive = false): Promise<Servic
 
 export async function loadCatalog(db: Db, includeInactive = false): Promise<Catalog> {
   const plans = await db<RechargePlan[]>`
-    SELECT id, name, pay_amount, bonus_amount, note, active, sort_order FROM recharge_plans
+    SELECT id, name, pay_amount, bonus_amount, bonus_valid_days, note, active, sort_order FROM recharge_plans
     ${includeInactive ? db`` : db`WHERE active`} ORDER BY active DESC, sort_order, pay_amount, id`;
   return { plans, items: await loadItems(db, includeInactive) };
 }
@@ -280,8 +282,8 @@ export function registerCatalogRoutes(app: FastifyInstance, { sql }: Deps) {
   app.post('/api/plans', { preHandler: guard('catalog.manage') }, async (req) => {
     const p = parse(PlanInput, req.body);
     const [row] = await sql<{ id: number }[]>`
-      INSERT INTO recharge_plans (name, pay_amount, bonus_amount, note, active, sort_order)
-      VALUES (${p.name}, ${p.payAmount}, ${p.bonusAmount}, ${p.note}, ${p.active}, ${p.sortOrder}) RETURNING id`;
+      INSERT INTO recharge_plans (name, pay_amount, bonus_amount, bonus_valid_days, note, active, sort_order)
+      VALUES (${p.name}, ${p.payAmount}, ${p.bonusAmount}, ${p.bonusValidDays ?? null}, ${p.note}, ${p.active}, ${p.sortOrder}) RETURNING id`;
     await writeAudit(sql, { staffId: req.actor.id, action: 'plan_saved', targetType: 'plan', targetId: row!.id, detail: p, ip: req.ip });
     return loadCatalog(sql, true);
   });
@@ -291,6 +293,7 @@ export function registerCatalogRoutes(app: FastifyInstance, { sql }: Deps) {
     const p = parse(PlanInput, req.body);
     const rows = await sql`
       UPDATE recharge_plans SET name = ${p.name}, pay_amount = ${p.payAmount}, bonus_amount = ${p.bonusAmount},
+             ${p.bonusValidDays === undefined ? sql`` : sql`bonus_valid_days = ${p.bonusValidDays},`}
              note = ${p.note}, active = ${p.active}, sort_order = ${p.sortOrder}, updated_at = now()
       WHERE id = ${id} RETURNING id`;
     if (rows.length === 0) throw notFound('套餐不存在');

@@ -1,5 +1,5 @@
-import { Bath, CirclePlus, Undo2 } from 'lucide-react';
-import { PAYMENT_METHOD_LABELS } from '@shared/labels';
+import { Bath, CirclePlus, Hourglass, Undo2 } from 'lucide-react';
+import { PAYMENT_METHOD_LABELS, type EntryType } from '@shared/labels';
 import type { LedgerRow } from '@shared/types';
 import { cn, formatDateTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
@@ -9,9 +9,10 @@ export const ENTRY_META = {
   recharge: { label: '充值', icon: CirclePlus, tone: 'bg-lake-soft text-lake' },
   consume: { label: '消费', icon: Bath, tone: 'bg-yuzu-soft text-yuzu-deep' },
   reversal: { label: '撤销', icon: Undo2, tone: 'bg-clay-soft text-clay' },
-} as const;
+  expire: { label: '赠金过期', icon: Hourglass, tone: 'bg-paper-2 text-ink-3' },
+} as const satisfies Record<EntryType, { label: string; icon: unknown; tone: string }>;
 
-/** 会员的余额变化时间线：充值 / 消费 / 撤销 */
+/** 会员的余额变化时间线：充值 / 消费 / 撤销 / 赠金过期 */
 export function ActivityRow({
   row,
   onReverse,
@@ -41,7 +42,13 @@ export function ActivityRow({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className={cn('text-[14px] font-bold text-ink', reversed && 'text-ink-3')}>
-            {row.entryType === 'recharge' ? `充值 · ${row.summary}` : row.entryType === 'reversal' ? '撤销消费' : row.summary || '消费'}
+            {row.entryType === 'recharge'
+              ? `充值 · ${row.summary}`
+              : row.entryType === 'reversal'
+                ? '撤销消费'
+                : row.entryType === 'expire'
+                  ? row.summary || '赠金到期作废'
+                  : row.summary || '消费'}
           </span>
           {reversed && <Badge tone="clay">已撤销</Badge>}
           {crossDay && <Badge tone="ember">跨日撤销</Badge>}

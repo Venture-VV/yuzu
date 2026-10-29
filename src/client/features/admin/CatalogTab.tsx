@@ -59,6 +59,7 @@ export function CatalogTab() {
                     {p.bonusAmount ? (
                       <>
                         送 <Money cents={p.bonusAmount} />
+                        <span className="ml-1 font-normal text-ink-3">{p.bonusValidDays ? `${p.bonusValidDays} 天有效` : '长期有效'}</span>
                       </>
                     ) : (
                       <span className="text-ink-4">无赠送</span>
@@ -140,6 +141,8 @@ function PlanDialog({ editing, onClose }: { editing: Extract<Editing, { kind: 'p
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [bonus, setBonus] = useState('');
+  /** 赠金有效期（天）；空为长期有效 */
+  const [validDays, setValidDays] = useState('');
   const [note, setNote] = useState('');
   const [active, setActive] = useState(true);
   const [sort, setSort] = useState('0');
@@ -153,6 +156,7 @@ function PlanDialog({ editing, onClose }: { editing: Extract<Editing, { kind: 'p
     setName(p?.name ?? '');
     setAmount(p ? centsToInput(p.payAmount) : '');
     setBonus(p ? centsToInput(p.bonusAmount) : '');
+    setValidDays(p?.bonusValidDays ? String(p.bonusValidDays) : '');
     setNote(p?.note ?? '');
     setActive(p?.active ?? true);
     setSort(String(p?.sortOrder ?? 0));
@@ -165,10 +169,12 @@ function PlanDialog({ editing, onClose }: { editing: Extract<Editing, { kind: 'p
     if (!name.trim()) return setError('请填写名称');
     if (!cents) return setError('请填写正确的金额');
     if (bonusCents === null) return setError('赠金格式不正确');
+    const days = validDays.trim() ? Number(validDays.trim()) : null;
+    if (days !== null && (!Number.isInteger(days) || days < 1 || days > 3650)) return setError('赠金有效期请填 1–3650 天，长期有效请留空');
     setSaving(true);
     setError(null);
     try {
-      const body = { name, payAmount: cents, bonusAmount: bonusCents, note, active, sortOrder: Number(sort) || 0 };
+      const body = { name, payAmount: cents, bonusAmount: bonusCents, bonusValidDays: days, note, active, sortOrder: Number(sort) || 0 };
       const result: Catalog = editing?.data ? await api.put(`/api/plans/${editing.data.id}`, body) : await api.post('/api/plans', body);
       qc.setQueryData(['catalog', true], result);
       void qc.invalidateQueries({ queryKey: ['catalog', false] });
@@ -209,6 +215,13 @@ function PlanDialog({ editing, onClose }: { editing: Extract<Editing, { kind: 'p
             <MoneyInput id="c-bonus" value={bonus} onChange={(e) => setBonus(e.target.value)} />
           </Field>
         </div>
+        <Field
+          label={<span className="inline-flex items-center gap-2">赠金有效期（天） <PendingBadge /></span>}
+          htmlFor="c-valid"
+          hint="留空为长期有效；填 30 表示从充值当天的营业日算起共 30 个营业日可用，第 31 天营业日开始时未用完的赠金作废"
+        >
+          <Input id="c-valid" inputMode="numeric" className="num" value={validDays} maxLength={4} placeholder="长期有效" onChange={(e) => setValidDays(e.target.value.replace(/\D/g, ''))} />
+        </Field>
         <Field label="说明" htmlFor="c-note" hint="选填">
           <Input id="c-note" value={note} maxLength={100} onChange={(e) => setNote(e.target.value)} />
         </Field>

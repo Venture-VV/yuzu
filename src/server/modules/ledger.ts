@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf, ISO_DATE } from '@shared/business-date';
-import { ENTRY_TYPE_LABELS, PAYMENT_METHOD_LABELS, type EntryType } from '@shared/labels';
+import { ENTRY_TYPE_LABELS, ENTRY_TYPES, PAYMENT_METHOD_LABELS, type EntryType } from '@shared/labels';
 import { formatAmount } from '@shared/money';
 import { can } from '@shared/permissions';
 import type { LedgerRow } from '@shared/types';
@@ -28,7 +28,7 @@ export async function listLedger(db: Db, f: LedgerFilter): Promise<LedgerRow[]> 
   return db<LedgerRow[]>`
     SELECT le.id, le.entry_type, le.doc_no, le.member_id, m.member_no, m.name AS member_name, m.phone AS member_phone,
            le.principal_delta, le.bonus_delta, le.principal_after, le.bonus_after, le.business_date, le.created_at,
-           s.display_name AS operator_name, le.recharge_id, le.consumption_id, le.reversal_id,
+           coalesce(s.display_name, '系统') AS operator_name, le.recharge_id, le.consumption_id, le.reversal_id, le.expiry_id,
            r.paid_amount, r.payment_method,
            CASE WHEN le.entry_type = 'consume' THEN c.status END AS consumption_status,
            CASE le.entry_type WHEN 'consume' THEN rv.doc_no WHEN 'reversal' THEN c.doc_no END AS related_doc_no,
@@ -39,11 +39,13 @@ export async function listLedger(db: Db, f: LedgerFilter): Promise<LedgerRow[]> 
                SELECT string_agg(l.name || CASE WHEN l.quantity > 1 THEN ' ×' || l.quantity ELSE '' END, '、' ORDER BY l.id)
                FROM consumption_lines l WHERE l.consumption_id = c.id)
              WHEN 'reversal' THEN rv.reason
+             WHEN 'expire' THEN '赠金到期作废' || CASE WHEN ex.reversal_id IS NOT NULL THEN '（撤销恢复时已过期）' ELSE '' END
            END, '') AS summary
     FROM ledger_entries le
     JOIN members m ON m.id = le.member_id
-    JOIN staff s ON s.id = le.operator_id
+    LEFT JOIN staff s ON s.id = le.operator_id
     LEFT JOIN recharges r ON r.id = le.recharge_id
+    LEFT JOIN bonus_expiries ex ON ex.id = le.expiry_id
     LEFT JOIN consumptions c ON c.id = le.consumption_id
     LEFT JOIN reversals rv ON rv.consumption_id = le.consumption_id
     WHERE true
@@ -58,7 +60,7 @@ export async function listLedger(db: Db, f: LedgerFilter): Promise<LedgerRow[]> 
 
 const LedgerQuery = z.object({
   date: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD').optional(),
-  type: z.enum(['recharge', 'consume', 'reversal']).optional(),
+  type: z.enum(ENTRY_TYPES).optional(),
   staffId: z.coerce.number().int().positive().optional(),
   q: z.string().trim().max(32).optional(),
 });

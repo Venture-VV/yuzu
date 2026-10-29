@@ -60,3 +60,53 @@ export function describeBusinessHours(hours: BusinessHours | null): string {
   const overnight = toMinutes(hours.close) <= toMinutes(hours.open);
   return `${hours.open}–${overnight ? '次日 ' : ''}${hours.close}`;
 }
+
+const offsetFormatters = new Map<string, Intl.DateTimeFormat>();
+
+/** 门店时区在某一刻相对 UTC 的偏移（毫秒） */
+function zoneOffsetMs(at: Date, timeZone: string): number {
+  let f = offsetFormatters.get(timeZone);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    offsetFormatters.set(timeZone, f);
+  }
+  const p = Object.fromEntries(f.formatToParts(at).map((x) => [x.type, x.value]));
+  const wall = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second));
+  return wall - Math.floor(at.getTime() / 1000) * 1000;
+}
+
+/** 某个营业日开始的时刻（门店时区当天 startHour 点），例如 2026-11-27 → 2026-11-27 06:00（北京时间） */
+export function businessDayStart(date: string, timeZone: string, startHour: number): Date {
+  const [y, m, d] = date.split('-').map(Number) as [number, number, number];
+  const wall = Date.UTC(y, m - 1, d, startHour);
+  const first = wall - zoneOffsetMs(new Date(wall), timeZone);
+  // 夏令时切换附近按换算后的时刻再校正一次（中国无夏令时，这里只为通用）
+  return new Date(wall - zoneOffsetMs(new Date(first), timeZone));
+}
+
+const plusDays = (isoDate: string, days: number) => {
+  const [y, m, d] = isoDate.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+};
+
+/**
+ * 赠金到期时刻（店主 #2，口径待确认）：有效期 N 天 = 从充值的营业日算起共 N 个营业日可用，
+ * 第 N + 1 个营业日开始时作废。例如营业日 10-28 充值、有效 30 天：可用到 11-26，11-27 营业日开始（06:00）作废。
+ */
+export function bonusExpiryAt(at: Date, validDays: number, timeZone: string, startHour: number): Date {
+  return businessDayStart(plusDays(businessDateOf(at, timeZone, startHour), validDays), timeZone, startHour);
+}
+
+/** 到期时刻 → 最后一个可用的营业日 */
+export function lastUsableDate(expiresAt: Date | string, timeZone: string, startHour: number): string {
+  return businessDateOf(new Date(new Date(expiresAt).getTime() - 1), timeZone, startHour);
+}
