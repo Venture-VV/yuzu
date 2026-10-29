@@ -3,8 +3,17 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArchiveRestore, FileUp, RotateCcw, Search } from 'lucide-react';
 import { formatPhone } from '@shared/labels';
 import { lastUsableDate } from '@shared/business-date';
-import type { OpeningBalanceRow, OpeningImportDetail, OpeningImportReport, OpeningImportSummary } from '@shared/opening-import';
+import { parseYuan } from '@shared/money';
+import type {
+  OpeningBalanceRow,
+  OpeningControlCheck,
+  OpeningImportDetail,
+  OpeningImportReport,
+  OpeningImportSummary,
+  OpeningTotals,
+} from '@shared/opening-import';
 import { api, errorMessage, UncertainError } from '../../lib/api';
+import { readImportFile } from '../../lib/import-file';
 import { useSession } from '../../lib/session';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
@@ -27,7 +36,29 @@ export function OpeningTab() {
   );
 }
 
-type Uncertain = { clientKey: string; body: Record<string, string> };
+type Uncertain = { clientKey: string; body: Record<string, unknown> };
+
+// EBC 控制总数（R1.5）：旧系统报表上的会员人数与本金、赠金、累计充值合计。导入 + 排除清单 = 控制总数才能导入
+type ControlForm = Record<keyof OpeningTotals, string>;
+const EMPTY_CONTROL: ControlForm = { count: '', principal: '', bonus: '', legacyRecharged: '' };
+const CONTROL_FIELDS: [keyof OpeningTotals, string][] = [
+  ['count', '会员人数'],
+  ['principal', '本金合计（元）'],
+  ['bonus', '赠金合计（元）'],
+  ['legacyRecharged', '累计充值合计（元）'],
+];
+
+/** 四项都空 = 没填（不比对）；只填了一部分或格式不对时报错 */
+function parseControlForm(f: ControlForm): { totals: OpeningTotals | null; error: string | null } {
+  const values = Object.values(f).map((v) => v.trim());
+  if (values.every((v) => v === '')) return { totals: null, error: null };
+  if (values.some((v) => v === '')) return { totals: null, error: 'EBC 控制总数四项都要填（没有的填 0）' };
+  const count = Number(f.count.trim());
+  if (!Number.isInteger(count) || count < 0) return { totals: null, error: '会员人数应为不小于 0 的整数' };
+  const [principal, bonus, legacyRecharged] = [f.principal, f.bonus, f.legacyRecharged].map((v) => parseYuan(v.trim().replace(/[¥￥,，\s]/g, '')));
+  if ([principal, bonus, legacyRecharged].some((a) => a == null || a < 0)) return { totals: null, error: '控制总数的金额格式不正确（单位元，最多两位小数）' };
+  return { totals: { count, principal: principal!, bonus: bonus!, legacyRecharged: legacyRecharged! }, error: null };
+}
 
 function ImportCard() {
   const qc = useQueryClient();
@@ -35,7 +66,7 @@ function ImportCard() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [source, setSource] = useState('EBC');
   const [note, setNote] = useState('');
-  const [file, setFile] = useState<{ name: string; csv: string } | null>(null);
+  const [file, setFile] = useState<{ name: string; label: string; csv: string } | null>(null);
   const [preview, setPreview] = useState<OpeningImportReport | null>(null);
   const [clientKey, setClientKey] = useState<string | null>(null);
   const [checked, setChecked] = useState(false);
@@ -44,6 +75,14 @@ function ImportCard() {
   const [lineErrors, setLineErrors] = useState<{ line: number; message: string }[]>([]);
   const [uncertain, setUncertain] = useState<Uncertain | null>(null);
   const [done, setDone] = useState<OpeningImportReport | null>(null);
+  const session = useSession();
+  const [control, setControl] = useState<ControlForm>(EMPTY_CONTROL);
+  const [excluded, setExcluded] = useState<{ label: string; csv: string } | null>(null);
+  const excludedRef = useRef<HTMLInputElement>(null);
+  const controlParsed = parseControlForm(control);
+  const production = session.env === 'production';
+  // 上一次预览用的控制总数：输入框失焦时只有数字真的变了才重新预览（重新预览会清掉「我已核对」）
+  const [previewedControl, setPreviewedControl] = useState<string | null>(null);
 
   const reset = () => {
     setFile(null);
@@ -53,14 +92,24 @@ function ImportCard() {
     setLineErrors([]);
   };
 
-  const runPreview = async (f: { name: string; csv: string }, src = source) => {
-    setBusy(true);
-    setError(null);
+  const runPreview = async (f: { name: string; csv: string }, src = source, ctl = controlParsed, ex = excluded) => {
     setDone(null);
     setLineErrors([]);
+    if (ctl.error) {
+      setPreview(null);
+      setError(ctl.error);
+      return;
+    }
+    setBusy(true);
+    setError(null);
     try {
-      const report = await api.post<OpeningImportReport>('/api/opening-imports/preview', { source: src, fileName: f.name, csv: f.csv }, { timeoutMs: 60_000 });
+      const report = await api.post<OpeningImportReport>(
+        '/api/opening-imports/preview',
+        { source: src, fileName: f.name, csv: f.csv, control: ctl.totals, excludedCsv: ex?.csv ?? '' },
+        { timeoutMs: 60_000 },
+      );
       setPreview(report);
+      setPreviewedControl(JSON.stringify(ctl.totals));
       setLineErrors(report.errors);
       // 每次预览生成新的操作编号：确认导入时带上，超时后用同一编号查回或重提，不会重复导入
       setClientKey(uuid());
@@ -122,7 +171,9 @@ function ImportCard() {
     }
   };
 
-  const canImport = !!preview && preview.errors.length === 0 && preview.total > 0 && checked && !!clientKey && !!file;
+  // 填了控制总数就必须一致；正式环境必须填
+  const controlOk = preview?.control ? preview.control.ok : !production;
+  const canImport = !!preview && preview.errors.length === 0 && preview.total > 0 && controlOk && checked && !!clientKey && !!file;
 
   return (
     <Card className="p-5" data-testid="opening-import">
@@ -134,7 +185,7 @@ function ImportCard() {
       </SectionTitle>
       <div className="mt-1 space-y-1 text-[12.5px] leading-relaxed text-ink-3">
         <p>
-          CSV 列为 <code className="num">name,phone,legacy_no,principal,bonus,bonus_expires_on,total_recharged,gender,birthday,note</code>
+          CSV 列为 <code className="num break-all">name,phone,legacy_no,principal,bonus,bonus_expires_on,total_recharged,gender,birthday,note</code>
           （也可用中文表头：姓名、手机号、旧卡号、本金、赠金、赠金到期日、累计充值、性别、生日、备注）。金额单位为元；赠金到期日是最后一天可用的日期，留空为长期有效。
         </p>
         <p>
@@ -162,6 +213,81 @@ function ImportCard() {
           <Input id="opening-note" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} placeholder="例如：EBC 2026-10-31 打烊后导出" />
         </Field>
       </div>
+
+      <fieldset className="mt-3 rounded-lg border border-line p-3" data-testid="opening-control-form">
+        <legend className="px-1 text-[12.5px] font-semibold text-ink-2">
+          EBC 控制总数（旧系统报表上的数字；{production ? '正式环境必填' : '填了才比对'}）
+        </legend>
+        <div className="grid gap-3 sm:grid-cols-4">
+          {CONTROL_FIELDS.map(([key, label]) => (
+            <Field key={key} label={label} htmlFor={`opening-control-${key}`}>
+              <Input
+                id={`opening-control-${key}`}
+                inputMode={key === 'count' ? 'numeric' : 'decimal'}
+                value={control[key]}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setControl((c) => ({ ...c, [key]: value }));
+                  setPreview(null);
+                  setClientKey(null);
+                }}
+                onBlur={() => {
+                  if (!file) return;
+                  if (controlParsed.error) {
+                    setPreview(null);
+                    setError(controlParsed.error);
+                  } else if (!preview || JSON.stringify(controlParsed.totals) !== previewedControl) void runPreview(file);
+                }}
+                data-testid={`opening-control-${key}`}
+              />
+            </Field>
+          ))}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px] text-ink-3">
+          <input
+            ref={excludedRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              e.target.value = '';
+              if (!f) return;
+              let loaded: { label: string; csv: string };
+              try {
+                const decoded = await readImportFile(f);
+                loaded = { label: decoded.label, csv: decoded.text };
+              } catch (err) {
+                setError(errorMessage(err));
+                return;
+              }
+              setExcluded(loaded);
+              if (file) await runPreview(file, source, controlParsed, loaded);
+            }}
+            data-testid="opening-excluded-file"
+          />
+          <Button size="sm" variant="ghost" icon={<FileUp className="size-3.5" />} onClick={() => excludedRef.current?.click()}>
+            选择排除清单（可选）
+          </Button>
+          {excluded ? (
+            <>
+              <span className="text-ink-2">{excluded.label}</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setExcluded(null);
+                  if (file) void runPreview(file, source, controlParsed, null);
+                }}
+              >
+                移除
+              </Button>
+            </>
+          ) : (
+            <span>这次不导入、之后到店补导的会员（没有合格手机号、一号多卡等），表头与导入文件相同，只用来对总数</span>
+          )}
+        </div>
+      </fieldset>
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <input
           ref={fileRef}
@@ -172,7 +298,15 @@ function ImportCard() {
             const f = e.target.files?.[0];
             e.target.value = '';
             if (!f) return;
-            const loaded = { name: f.name, csv: await f.text() };
+            let decoded: Awaited<ReturnType<typeof readImportFile>>;
+            try {
+              decoded = await readImportFile(f);
+            } catch (err) {
+              reset();
+              setError(errorMessage(err));
+              return;
+            }
+            const loaded = { name: f.name, label: decoded.label, csv: decoded.text };
             setFile(loaded);
             await runPreview(loaded);
           }}
@@ -181,7 +315,7 @@ function ImportCard() {
         <Button variant="secondary" icon={<FileUp className="size-4" />} onClick={() => fileRef.current?.click()} loading={busy && !preview}>
           选择 CSV 文件
         </Button>
-        {file && <span className="text-[13px] text-ink-2">{file.name}</span>}
+        {file && <span className="text-[13px] text-ink-2">{file.label}</span>}
       </div>
 
       {preview && (
@@ -192,6 +326,13 @@ function ImportCard() {
             <Stat label="期初赠金" value={<Money cents={preview.bonusTotal} className="text-yuzu-deep" />} />
             <Stat label="旧系统累计充值" value={<Money cents={preview.legacyRechargedTotal} />} hint={preview.zeroCount ? `${preview.zeroCount} 位余额为 0，只建档` : undefined} />
           </div>
+          {preview.control ? (
+            <ControlCompare check={preview.control} />
+          ) : (
+            <Notice tone={production ? 'error' : 'info'} title={production ? '正式环境导入期初必须填写 EBC 控制总数' : '没有填写 EBC 控制总数，这次没有比对'}>
+              填上旧系统报表上的会员人数与本金、赠金、累计充值合计后，系统核对「导入 + 排除清单 = 控制总数」，四项一致才能导入。
+            </Notice>
+          )}
           {preview.samples.length > 0 && (
             <div className="scroll-thin max-h-72 overflow-auto rounded-lg border border-line">
               <table className="w-full text-[13px]">
@@ -240,7 +381,12 @@ function ImportCard() {
                 disabled={!canImport}
                 loading={busy}
                 onClick={() =>
-                  file && clientKey && void submit({ clientKey, body: { source: source.trim(), fileName: file.name, note: note.trim(), csv: file.csv } })
+                  file &&
+                  clientKey &&
+                  void submit({
+                    clientKey,
+                    body: { source: source.trim(), fileName: file.name, note: note.trim(), csv: file.csv, control: controlParsed.totals, excludedCsv: excluded?.csv ?? '' },
+                  })
                 }
                 data-testid="opening-confirm"
               >
@@ -291,6 +437,52 @@ function ImportCard() {
         </Notice>
       )}
     </Card>
+  );
+}
+
+/** 与 EBC 控制总数的逐项比对 */
+function ControlCompare({ check }: { check: OpeningControlCheck }) {
+  const show = (key: keyof OpeningTotals, v: number) => (key === 'count' ? <span className="num">{v}</span> : <Money cents={v} />);
+  return (
+    <div className={cn('rounded-lg border p-3', check.ok ? 'border-pine/30 bg-pine-soft/30' : 'border-clay/40 bg-clay-soft/40')} data-testid="opening-control">
+      <p className={cn('text-[13.5px] font-bold', check.ok ? 'text-pine' : 'text-clay')}>
+        {check.ok ? '导入 + 排除清单 = EBC 控制总数，四项一致' : '与 EBC 控制总数不一致，不能导入'}
+      </p>
+      <div className="scroll-thin overflow-x-auto">
+        <table className="mt-2 w-full min-w-[420px] text-[13px]">
+          <thead className="text-[12px] text-ink-3">
+            <tr>
+              <th className="py-1 text-left font-semibold">项目</th>
+              <th className="py-1 text-right font-semibold">本次导入</th>
+              <th className="py-1 text-right font-semibold">排除清单</th>
+              <th className="py-1 text-right font-semibold">控制总数</th>
+              <th className="py-1 text-right font-semibold">结果</th>
+            </tr>
+          </thead>
+          <tbody>
+            {CONTROL_FIELDS.map(([key, label]) => {
+              const ok = check.imported[key] + check.excluded[key] === check.expected[key];
+              return (
+                <tr key={key}>
+                  <td className="py-1">{label.replace(/合计|（元）/g, '')}</td>
+                  <td className="py-1 text-right">{show(key, check.imported[key])}</td>
+                  <td className="py-1 text-right">{show(key, check.excluded[key])}</td>
+                  <td className="py-1 text-right">{show(key, check.expected[key])}</td>
+                  <td className={cn('py-1 text-right font-bold', ok ? 'text-pine' : 'text-clay')}>{ok ? '一致' : '不一致'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {!check.ok && (
+        <ul className="mt-2 space-y-0.5 text-[12.5px] text-clay">
+          {check.mismatches.map((m) => (
+            <li key={m}>{m}</li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

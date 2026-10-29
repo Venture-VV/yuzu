@@ -15,12 +15,15 @@ import { z } from 'zod';
 import { businessDateOf, expiryAfterLastUsableDate } from '@shared/business-date';
 import { formatYuan } from '@shared/money';
 import {
+  compareOpeningControl,
   parseOpeningCsv,
+  sumOpeningCsv,
   type OpeningBalanceRow,
   type OpeningImportDetail,
   type OpeningImportReport,
   type OpeningImportSummary,
   type OpeningRow,
+  type OpeningTotals,
 } from '@shared/opening-import';
 import { isUniqueViolation, type Db, type Tx } from '../db';
 import { guard } from '../auth/guard';
@@ -35,11 +38,23 @@ import { applyBalance, lockMember, nextDocNo } from './wallet-core';
 
 // ───────────────────────── 输入 ─────────────────────────
 
+const amount = (label: string) => z.number(`${label}格式不正确`).int(`${label}格式不正确`).min(0, `${label}不能为负`).max(1_000_000_000_00, `${label}太大`);
+/** EBC 控制总数（R1.5）：旧系统报表上的人数与合计；金额为分 */
+const ControlInput = z.object({
+  count: z.number('人数格式不正确').int('人数应为整数').min(0, '人数不能为负').max(1_000_000, '人数太大'),
+  principal: amount('本金合计'),
+  bonus: amount('赠金合计'),
+  legacyRecharged: amount('累计充值合计'),
+});
+
 const FileInput = z.object({
   source: z.string().trim().min(1, '请填写来源系统（例如 EBC）').max(32, '来源最多 32 字'),
   fileName: z.string().trim().max(200).default(''),
   note: z.string().trim().max(200, '备注最多 200 字').default(''),
   csv: z.string().min(1, '请选择要导入的文件').max(2_000_000, '文件太大，请分批导入'),
+  control: ControlInput.nullable().default(null),
+  /** 排除清单（这次不导入、之后补导的会员）：只用来对控制总数 */
+  excludedCsv: z.string().max(500_000, '排除清单太大').default(''),
 });
 export type OpeningPreviewInputData = z.input<typeof FileInput>;
 
@@ -103,6 +118,17 @@ function sumOf(rows: { principal: number; bonus: number; totalRecharged?: number
   };
 }
 
+/** 与 EBC 控制总数比对：文件里的会员（解析通过的行）+ 排除清单 = 控制总数；没填控制总数时不比对 */
+function controlOf(input: { control: OpeningTotals | null; excludedCsv: string }, rows: OpeningRow[]) {
+  if (!input.control) return { check: null, errors: [] as LineError[] };
+  const excluded = input.excludedCsv.trim() ? sumOpeningCsv(input.excludedCsv) : { totals: { count: 0, principal: 0, bonus: 0, legacyRecharged: 0 }, errors: [] };
+  const sums = sumOf(rows);
+  return {
+    check: compareOpeningControl(input.control, { count: rows.length, ...sums }, excluded.totals),
+    errors: excluded.errors.map((e) => ({ line: 0, message: `排除清单第 ${e.line} 行：${e.message}` })),
+  };
+}
+
 /** 预览：只读，不写任何数据 */
 export async function previewOpeningImport(deps: Deps, raw: OpeningPreviewInputData, at = new Date()): Promise<OpeningImportReport> {
   const input = parse(FileInput, raw);
@@ -111,6 +137,7 @@ export async function previewOpeningImport(deps: Deps, raw: OpeningPreviewInputD
   const today = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
   const { planned, errors } = await planRows(deps.sql, parsed.rows, today, deps.config.timezone, settings.businessDayStartHour);
   const totals = sumOf(planned);
+  const control = controlOf(input, parsed.rows);
   return {
     dryRun: true,
     importNo: null,
@@ -122,7 +149,8 @@ export async function previewOpeningImport(deps: Deps, raw: OpeningPreviewInputD
     principalTotal: totals.principal,
     bonusTotal: totals.bonus,
     legacyRechargedTotal: totals.legacyRecharged,
-    errors: [...parsed.errors, ...errors].sort((a, b) => a.line - b.line),
+    control: control.check,
+    errors: [...parsed.errors, ...errors, ...control.errors].sort((a, b) => a.line - b.line),
     samples: planned.slice(0, 30).map((r) => ({
       line: r.line,
       name: r.name,
@@ -156,6 +184,7 @@ async function reportOfImport(db: Db, importId: number, replayed: boolean): Prom
     principalTotal: rows.reduce((s, r) => s + r.principal, 0),
     bonusTotal: rows.reduce((s, r) => s + r.bonus, 0),
     legacyRechargedTotal: rows.reduce((s, r) => s + r.legacyRecharged, 0),
+    control: null,
     errors: [],
     samples: rows.slice(0, 30).map((r) => ({
       line: r.line,
@@ -203,6 +232,14 @@ export async function applyOpeningImport(
       const prevId = await replayOf(tx);
       if (prevId) return { id: prevId, replayed: true };
       if (parsed.errors.length) throw invalid(parsed.errors);
+      const control = controlOf(input, parsed.rows);
+      if (control.errors.length) throw invalid(control.errors);
+      if (control.check && !control.check.ok) {
+        throw unprocessable('OPENING_CONTROL_MISMATCH', `与 EBC 控制总数不一致，整批未导入：${control.check.mismatches.join('；')}`, { control: control.check });
+      }
+      if (!control.check && deps.config.env === 'production') {
+        throw unprocessable('OPENING_CONTROL_REQUIRED', '正式环境导入期初必须填写 EBC 控制总数（人数、本金、赠金、累计充值），核对一致后才能导入');
+      }
 
       const settings = await loadSettings(tx);
       const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
@@ -276,6 +313,7 @@ export async function applyOpeningImport(
           principal: totals.principal,
           bonus: totals.bonus,
           summary: `${input.source} 期初 ${planned.length} 位会员（新建 ${createdCount}），本金 ${formatYuan(totals.principal)}，赠金 ${formatYuan(totals.bonus)}`,
+          ...(control.check ? { control: control.check.expected, excluded: control.check.excluded } : {}),
           ...(options.via ? { via: options.via } : {}),
         },
         ip: ctx.ip,

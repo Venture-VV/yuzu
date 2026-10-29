@@ -249,12 +249,12 @@ function Summary({ s, dayLabel }: { s: SettlementSummary; dayLabel: string }) {
 
       <BusinessCard s={s} />
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-        {/* 余额核对 */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+        {/* 余额核对（手机上表格放不下时在框内横向滑动） */}
         <Card className="p-5">
           <SectionTitle>余额核对</SectionTitle>
-          <div className="mt-3 overflow-hidden rounded-lg border border-line">
-            <table className="w-full text-[13px]">
+          <div className="mt-3 overflow-x-auto rounded-lg border border-line">
+            <table className="w-full min-w-max text-[13px]">
               <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
                 <tr>
                   <th className="px-3 py-2 text-left">会员储值</th>

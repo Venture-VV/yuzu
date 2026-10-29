@@ -2,16 +2,20 @@ import { useState, type FormEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowRight, Eye, EyeOff, Lock, User } from 'lucide-react';
+import { versionText, type InstanceKind } from '@shared/instance';
 import type { SessionInfo } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
 import { qk } from '../../lib/queries';
 import { LandscapeIllustration, LogoMark } from '../../components/Brand';
+import { InstanceBadge } from '../../components/InstanceTag';
 import { Button, Field, Input, Notice } from '../../components/ui';
 
 interface PublicInfo {
   storeName: string;
   env: string;
   version: string;
+  commit: string;
+  instance: InstanceKind;
   demoHint: boolean;
 }
 
@@ -69,7 +73,10 @@ export function LoginPage() {
       {/* 登录表单 */}
       <section className="flex items-center justify-center px-6 py-10 sm:px-10">
         <div className="w-full max-w-[380px] animate-rise">
-          <p className="text-[13px] font-semibold text-ink-3">{info.data?.storeName ?? '浴族 · 城市汤泉'}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[13px] font-semibold text-ink-3">{info.data?.storeName ?? '浴族 · 城市汤泉'}</p>
+            {info.data && <InstanceBadge instance={info.data.instance} />}
+          </div>
           <h1 className="mt-1.5 text-[28px] font-bold tracking-tight text-ink">欢迎回来</h1>
           <p className="mt-1.5 text-[14px] text-ink-3">登录门店工作台，开始今天的接待。</p>
 
@@ -139,9 +146,11 @@ export function LoginPage() {
               </p>
             </div>
           )}
-          <p className="mt-10 text-[12px] text-ink-4">
-            浴族门店经营系统 · v{info.data?.version ?? '0.1.0'}
-          </p>
+          {info.data && (
+            <p className="num mt-10 text-[12px] text-ink-4" data-testid="login-version">
+              浴族门店经营系统 · {versionText(info.data.version, info.data.commit)}
+            </p>
+          )}
         </div>
       </section>
     </div>

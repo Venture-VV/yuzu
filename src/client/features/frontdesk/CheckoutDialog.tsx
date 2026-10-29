@@ -30,6 +30,7 @@ import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Input, MoneyInput, Notice, Select, Skeleton, Textarea } from '../../components/ui';
+import { PrintButton } from '../print/PrintButton';
 import { SHIFT_ERRORS, shiftKeys, ShiftGate, useShiftReady } from '../shift/ShiftGate';
 import { ZoneChip } from './parts';
 import { PendingPanel, useFrontdeskOp } from './pending';
@@ -253,9 +254,14 @@ export function CheckoutDialog({
           </span>
         }
         footer={
-          <Button variant="primary" size="lg" onClick={() => onDone(result)} data-testid="checkout-finish">
-            完成
-          </Button>
+          <>
+            <PrintButton path={`/print/checkout/${result.id}`} size="lg" testId="checkout-print">
+              打印结账单
+            </PrintButton>
+            <Button variant="primary" size="lg" onClick={() => onDone(result)} data-testid="checkout-finish">
+              完成
+            </Button>
+          </>
         }
       >
         <CheckoutReceipt detail={result} />
@@ -886,6 +892,9 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
       ) : (
         <>
           <CheckoutReceipt detail={d} />
+          <PrintButton path={`/print/checkout/${d.id}`} testId="checkout-reprint">
+            打印结账单
+          </PrintButton>
           {d.status === 'completed' && can('frontdesk.checkoutVoid') && blockedByWindow && (
             <Notice tone="warning" icon={<Undo2 className="size-4" />} title={`已超过反结账时限（结账后 ${describeHours(windowHours!)}内）`}>
               这张单只能由店主反结账；需要退款或更正时请联系店主。

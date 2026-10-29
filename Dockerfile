@@ -23,11 +23,18 @@ RUN npm ci --omit=dev --no-audit --no-fund --registry=${NPM_REGISTRY}
 # ── 运行 ──
 FROM ${NODE_IMAGE}
 WORKDIR /app
+# 备份服务与恢复核验要用 pg_dump / pg_restore（与数据库同为 16 版）；国内构建时可用 ALPINE_MIRROR 换成国内源
+ARG ALPINE_MIRROR=
+RUN if [ -n "$ALPINE_MIRROR" ]; then sed -i "s#https\?://dl-cdn.alpinelinux.org/alpine#${ALPINE_MIRROR}#g" /etc/apk/repositories; fi \
+  && apk add --no-cache postgresql16-client
 ARG APP_VERSION=0.4.0
+# 提交 SHA 由 update.sh 传入（YUZU_COMMIT），页面常显；直接构建时为空
+ARG APP_COMMIT=
 ENV NODE_ENV=production \
     PORT=8080 \
     STATIC_DIR=/app/dist/client \
-    APP_VERSION=${APP_VERSION}
+    APP_VERSION=${APP_VERSION} \
+    APP_COMMIT=${APP_COMMIT}
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./

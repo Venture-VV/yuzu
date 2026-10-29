@@ -189,3 +189,13 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* 80mm 热敏打印（结账单、交班表）：页边距交给打印页自己排，打印对话框里选「边距：无」；纸长由打印机驱动按内容走纸 */
+@media print {
+  @page {
+    margin: 0;
+  }
+  body {
+    background: #fff;
+  }
+}

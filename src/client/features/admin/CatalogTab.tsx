@@ -7,6 +7,7 @@ import { parsePriceListCsv, type BuiltinPriceList, type PriceListCsvResult, type
 import type { TicketType } from '@shared/checkout';
 import type { Catalog, RechargePlan, ServiceItem } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
+import { readImportFile } from '../../lib/import-file';
 import { useCatalog } from '../../lib/queries';
 import { useTicketTypes } from '../frontdesk/queries';
 import { cn } from '../../lib/utils';
@@ -513,7 +514,14 @@ function PriceListCard() {
           className="hidden"
           onChange={async (e) => {
             const f = e.target.files?.[0];
-            if (f) await load(f.name, await f.text());
+            if (f) {
+              try {
+                const loaded = await readImportFile(f);
+                await load(loaded.label, loaded.text);
+              } catch (err) {
+                setError(errorMessage(err));
+              }
+            }
             e.target.value = '';
           }}
           data-testid="price-list-file"
