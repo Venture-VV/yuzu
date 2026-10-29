@@ -192,7 +192,7 @@ npm run cli -- seed-billing-demo     # 在前台演示数据上写入结账、�
 
 ```bash
 git clone https://github.com/Venture-VV/yuzu.git && cd yuzu
-git checkout v0.1.0                 # 正式环境只部署经过验证的版本标签
+git checkout v0.3.0                 # 只部署 main 上的版本标签（git tag 查看最新），不部署开发分支
 cp .env.example .env                # 修改数据库密码、初始店主、备份目录
 docker compose up -d --build
 docker compose ps                   # app / db 显示 healthy 即可
@@ -230,7 +230,7 @@ docker compose exec app node dist/server/cli.js reset-password boss
 **更新到新版本**（会先自动备份）：
 
 ```bash
-./scripts/update.sh v0.2.0
+./scripts/update.sh v0.3.1             # 换成要更新到的版本标签（git fetch --tags && git tag 查看）
 ```
 
 应用启动时自动执行数据库迁移；更新失败时 `git checkout <上个版本>` 后再执行一次即可回退。
