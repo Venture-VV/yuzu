@@ -25,19 +25,22 @@ const KEY_MAP = {
   business_hours: 'businessHours',
   member_fields: 'memberFields',
   custom_bonus_valid_days: 'customBonusValidDays',
+  require_open_shift: 'requireOpenShift',
 } as const satisfies Record<string, keyof StoreSettings>;
 
-// 单笔上限按店主 2026-10-27 答复（#9）默认 50 万元；撤销时限、营业时间默认与之前一致（不限、全天），待确认
+// 单笔上限按店主 2026-10-27 答复（#9）默认 50 万元；营业时间默认全天；
+// 撤销与反结账时限默认 48 小时、收款前必须先开班（店主 2026-10-29 签认，迁移 017 把仍是「不限」的时限改为 48 小时）
 const DEFAULTS: StoreSettings = {
   storeName: '浴族 · 城市汤泉',
   deductionRule: 'principal_first',
   businessDayStartHour: 6,
   maxRechargeCents: 50_000_000,
   maxConsumeCents: 50_000_000,
-  reversalWindowHours: null,
+  reversalWindowHours: 48,
   businessHours: null,
   memberFields: [],
   customBonusValidDays: null,
+  requireOpenShift: true,
 };
 
 export async function loadSettings(db: Db): Promise<StoreSettings> {
@@ -76,6 +79,7 @@ const SettingsInput = z
       )
       .max(MAX_MEMBER_FIELDS, `会员自定义字段最多 ${MAX_MEMBER_FIELDS} 个`),
     customBonusValidDays: z.number().int('赠金有效期按整天填写').min(1, '赠金有效期至少 1 天').max(3650, '赠金有效期最多 3650 天').nullable(),
+    requireOpenShift: z.boolean('请选择是否要求先开班'),
   })
   // 只提交要修改的项（各设置卡片分别保存）；没有提交的项保持原值
   .partial();

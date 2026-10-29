@@ -43,11 +43,11 @@ const grantRow = async (id: string) =>
   (await ctx.sql<{ usedAt: string | null; usedRef: string | null }[]>`SELECT used_at, used_ref FROM auth_grants WHERE id = ${id}`)[0]!;
 
 describe('单笔上限默认 50 万元', () => {
-  it('新库默认值：充值、消费上限都是 50 万；撤销时限不限、全天营业', async () => {
+  it('新库默认值：充值、消费上限都是 50 万；撤销时限 48 小时（2026-10-29 签认）、全天营业', async () => {
     const s = (await api(ctx.app, ctx.owner, 'GET', '/api/settings')).body;
-    expect(s).toMatchObject({ maxRechargeCents: 50 * WAN, maxConsumeCents: 50 * WAN, reversalWindowHours: null, businessHours: null });
+    expect(s).toMatchObject({ maxRechargeCents: 50 * WAN, maxConsumeCents: 50 * WAN, reversalWindowHours: 48, businessHours: null });
     const me = (await api(ctx.app, ctx.clerk, 'GET', '/api/auth/me')).body;
-    expect(me.rules).toMatchObject({ maxRechargeCents: 50 * WAN, maxConsumeCents: 50 * WAN, reversalWindowHours: null, businessHours: null });
+    expect(me.rules).toMatchObject({ maxRechargeCents: 50 * WAN, maxConsumeCents: 50 * WAN, reversalWindowHours: 48, businessHours: null });
   });
 
   it('正好 50 万不需要授权；多 1 分就要授权，没有授权时整笔不入账', async () => {
@@ -208,15 +208,22 @@ describe('撤销时限（待确认：超过后只有店主可以撤销）', () =
     return s!;
   };
 
-  it('默认不限：值班经理可以撤销很久以前的消费', async () => {
+  it('默认 48 小时：值班经理不能撤销 30 天前的消费；改为「不限」后可以', async () => {
     const m = await createMember(ctx, '不限时限', '19900005101');
     const deps = { sql: ctx.sql, config: ctx.config };
     const clerk = await actorOf('clerk');
     await recharge(deps, rechargeBody(m.id, 10000) as RechargeInputData, { actor: clerk, at: new Date(Date.now() - 30 * 86_400_000) });
     const old = await consume(deps, consumeBody(m.id, 3000), { actor: clerk, at: new Date(Date.now() - 30 * 86_400_000) });
     if (old.type !== 'consume') throw new Error('unexpected');
-    const r = await api(ctx.app, duty, 'POST', `/api/consumptions/${old.consumption.id}/reverse`, { idempotencyKey: randomUUID(), reason: '项目选错' });
-    expect(r.status).toBe(200);
+    const late = await api(ctx.app, duty, 'POST', `/api/consumptions/${old.consumption.id}/reverse`, { idempotencyKey: randomUUID(), reason: '项目选错' });
+    expect(late.body.error).toMatchObject({ code: 'REVERSAL_WINDOW', details: { windowHours: 48 } });
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { reversalWindowHours: null })).status).toBe(200);
+    try {
+      const r = await api(ctx.app, duty, 'POST', `/api/consumptions/${old.consumption.id}/reverse`, { idempotencyKey: randomUUID(), reason: '项目选错' });
+      expect(r.status).toBe(200);
+    } finally {
+      await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { reversalWindowHours: 48 });
+    }
   });
 
   it('设为 24 小时：超过时限值班经理被拒绝，店主可以；时限内照常撤销', async () => {
@@ -240,7 +247,7 @@ describe('撤销时限（待确认：超过后只有店主可以撤销）', () =
       expect((await api(ctx.app, duty, 'POST', `/api/consumptions/${recent.consumption.id}/reverse`, { idempotencyKey: randomUUID(), reason: '金额录入错误' })).status).toBe(200);
       expect(await balanceOf(ctx, m.id)).toEqual({ principal: 10000, bonus: 0 });
     } finally {
-      await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { reversalWindowHours: null });
+      await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { reversalWindowHours: 48 });
     }
   });
 
@@ -250,6 +257,7 @@ describe('撤销时限（待确认：超过后只有店主可以撤销）', () =
     expect((await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { reversalWindowHours: 1.5 })).status).toBe(400);
     expect((await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { reversalWindowHours: null })).status).toBe(200);
     expect((await api(ctx.app, ctx.owner, 'GET', '/api/settings')).body.reversalWindowHours).toBeNull();
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { reversalWindowHours: 48 })).status).toBe(200);
   });
 });
 

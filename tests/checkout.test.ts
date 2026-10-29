@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { splitDeduction } from '../src/shared/deduction';
 import { ticketPrice, ticketSegments, ticketTierLabel } from '../src/shared/checkout';
 import type { Actor } from '../src/server/lib/context';
+import { insertGrant } from '../src/server/auth/grants';
 import { checkout, type CheckoutInputData } from '../src/server/modules/frontdesk/checkout';
 import { checkin } from '../src/server/modules/frontdesk/visits';
 import { api, consumeBody, createMember, rechargeBody, setup, type TestContext } from './helpers';
@@ -124,7 +125,15 @@ describe('结账', () => {
   });
 
   it('儿童免票：门票 0 元不挂明细，应收 0 也能结账', async () => {
-    const id = await enter('A012', new Date(Date.now() - 2 * H), { ticketTypeId: tickets['儿童免票（1 米以下）'] });
+    // 接待时选免票需要值班经理及以上当场授权（R1.2，见 r1-funds.test.ts）
+    const childTicket = tickets['儿童免票（1 米以下）']!;
+    const grant = await insertGrant(ctx.sql, { purpose: 'ticket_discount', requestedBy: clerk.id, approvedBy: ctx.ownerId, scope: { items: [{ tagCode: 'A012', ticketTypeId: childTicket }], reason: '1 米以下儿童' } });
+    const r = await checkin(
+      deps,
+      { clientKey: randomUUID(), guests: [{ tagCode: 'A012', zone: 'male', ticketTypeId: childTicket }], ticketGrantId: grant.id },
+      { actor: clerk, at: new Date(Date.now() - 2 * H) },
+    );
+    const id = r.visits[0]!.id;
     const done = await pay([id], 0, []);
     expect(done.bills[0]).toMatchObject({ ticketAmount: 0, amount: 0 });
     expect(done.payments).toEqual([]);

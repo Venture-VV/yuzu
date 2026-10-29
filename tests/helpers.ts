@@ -28,6 +28,9 @@ export async function setup(): Promise<TestContext> {
   const sql = createSql(TEST_DB, { max: 20 });
   await sql.unsafe('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
   await migrate(sql);
+  // 「收款前必须先开班」（R1.2）默认开启；之前的用例按开班可选的口径编写，这里关闭，
+  // 开启时的行为由 tests/r1-funds.test.ts 单独验证（openShiftRequired(ctx) 重新开启）
+  await sql`INSERT INTO settings (key, value) VALUES ('require_open_shift', 'false'::jsonb)`;
   const ownerId = await createStaff(sql, { username: 'owner', displayName: '测试店主', role: 'owner', password: PASSWORD, mustChangePassword: false });
   const clerkId = await createStaff(sql, { username: 'clerk', displayName: '测试店员', role: 'clerk', password: PASSWORD, mustChangePassword: false });
   const app = await buildApp(sql, config);

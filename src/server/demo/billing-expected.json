@@ -61,36 +61,46 @@
       "payments": [{ "method": "cash", "amount": 55700 }]
     },
     {
-      "scenario": "⑤ 反结账后改为微信重新结账（门票按重新结账时的在店时长计算，仍是 12 小时档）",
+      "scenario": "⑤ 反结账后改为微信重新结账（门票按第一次结账的时刻计算，仍是 12 小时档）",
       "tags": ["A8071"],
       "status": "completed",
       "total": 55700,
       "tickets": [{ "tag": "A8071", "ticket": "不含餐", "segments": 1, "amount": 49900 }],
       "payments": [{ "method": "wechat", "amount": 55700 }]
+    },
+    {
+      "scenario": "⑥ 抹零：值班经理当场授权优惠 21 元，其余现金",
+      "tags": ["A8072"],
+      "status": "completed",
+      "total": 52100,
+      "tickets": [{ "tag": "A8072", "ticket": "不含餐", "segments": 1, "amount": 49900 }],
+      "payments": [{ "method": "cash", "amount": 50000 }, { "method": "discount", "amount": 2100, "reason": "抹零", "approvedBy": "张经理" }]
     }
   ],
   "business": {
-    "checkouts": { "count": 6, "total": 572400 },
+    "checkouts": { "count": 7, "total": 624500 },
     "voids": { "count": 1, "total": 55700 },
-    "net": 516700,
-    "ticket": 469300,
-    "items": 47400,
-    "byMethod": { "alipay": 49900, "bank_card": 119400, "cash": 52100, "coupon": 89900, "wallet": 120000, "wechat": 85400 },
-    "coupons": { "meituan": 89900 }
+    "net": 568800,
+    "ticket": 519200,
+    "items": 49600,
+    "byMethod": { "alipay": 49900, "bank_card": 119400, "cash": 102100, "coupon": 89900, "discount": 2100, "wallet": 120000, "wechat": 85400 },
+    "coupons": { "meituan": 89900 },
+    "breakdown": { "receivable": 568800, "discount": 2100, "netRevenue": 566700, "received": 356800 }
   },
   "shift": {
     "staff": "chenyin",
     "status": "closed",
     "openingCash": 50000,
-    "expectedCash": 102100,
-    "countedCash": 101100,
+    "expectedCash": 207800,
+    "countedCash": 206800,
     "diff": -1000,
-    "checkouts": { "count": 5, "total": 516700 },
-    "byMethod": { "alipay": 49900, "bank_card": 119400, "cash": 52100, "coupon": 89900, "wallet": 120000, "wechat": 85400 },
-    "voidsByOthers": "反结账由张经理（zhangjl）操作，记在他的班次里"
+    "checkouts": { "count": 7, "total": 624500 },
+    "byMethod": { "alipay": 49900, "bank_card": 119400, "cash": 157800, "coupon": 89900, "discount": 2100, "wallet": 120000, "wechat": 85400 },
+    "voidsByOthers": "⑤ 的原现金单仍算在陈茵的班次（收款算在收款时的班次）；反结账由张经理（zhangjl）操作，退的 557 元现金记在他的班次里，两人同一钱箱合并核对时相抵"
   },
-  "openShift": { "staff": "zhangjl", "voids": 1 },
-  "frontdeskChecks": ["bill_amount_vs_lines", "visit_vs_bill_status", "open_visit_tags", "group_status", "checkout_vs_bills", "checkout_wallet", "checkout_coupons"],
+  "openShift": { "staff": "zhangjl", "voids": 1, "cashRefund": 55700, "expectedCash": -55700 },
+  "anomalies": ["checkout_void", "discount", "ticket_override"],
+  "frontdeskChecks": ["bill_amount_vs_lines", "visit_vs_bill_status", "open_visit_tags", "group_status", "checkout_vs_bills", "checkout_wallet", "checkout_coupons", "checkout_discounts"],
   "settlementChecks": ["documents_vs_ledger", "opening_plus_net", "ledger_chain", "members_vs_ledger", "business_vs_receipts", "wallet_bridge", "bonus_lots"],
   "inStoreAfter": "前台演示的 13 位在店客人不受影响（结账演示的手牌都已结清释放）"
 }

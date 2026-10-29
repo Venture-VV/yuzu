@@ -10,6 +10,7 @@ import type { Deps, OpContext } from '../../lib/context';
 import { notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { postCharges, voidLine, type PostInputData } from './bills';
+import { resolveReadableDate } from '../ledger';
 import { checkout, findCoupon, getCheckout, listCheckouts, previewCheckout, voidCheckout, type CheckoutInputData } from './checkout';
 import { listTicketTypes, saveTicketType, setVisitTicket, type TicketTypeInputData } from './tickets';
 import { frontdeskChecks } from './checks';
@@ -154,9 +155,10 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
     checkout(deps, req.body as CheckoutInputData, ctxOf(req)),
   );
 
+  // 结账记录可以切换营业日（过了营业日切换点仍能找到前一晚的单来反结账）；查看之前的营业日需要历史营业日权限
   app.get('/api/frontdesk/checkouts', { preHandler: guard('frontdesk.read') }, async (req) => {
     const { date } = parse(z.object({ date: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD').optional() }), req.query ?? {});
-    return listCheckouts(sql, date ?? (await businessDate(sql, deps, new Date())));
+    return listCheckouts(sql, await resolveReadableDate(deps, req, date));
   });
 
   app.get('/api/frontdesk/checkouts/:id', { preHandler: guard('frontdesk.read') }, async (req) => {

@@ -1,8 +1,11 @@
 // 交班（S3.4；店主 2026-10-27 #11：店员交班时需要做交班表或日结）。
 //
 //   · 开班：登记备用金；一位员工同时只能有一个未交班的班次；
-//   · 交班表：本班次本人经办、仍有效的结账与充值，按收款方式汇总；会员储值、团购券单列（不是现金）；
-//     应有现金 = 备用金 + 结账现金 + 充值现金；本班次内本人做的反结账单列提醒（原单的现金是否已退还要人工核对）；
+//   · 交班表：本班次本人经办的结账与充值，按收款方式汇总；会员储值、团购券、优惠 / 免单单列（不是现金）；
+//     结账收款算在收款时的班次，之后被反结账也不减；本班次内本人做的反结账按原收款方式列出退款：
+//     现金从本班钱箱退，扣减应有现金（原单与反结账在同一班次时两者相抵），扫码、银行卡、团购在商户后台原路退回、只列提醒
+//     （R1.2，店主 2026-10-29 签认）；应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金；
+//   · 收款前必须先开班（经营规则开关，默认开）：没有开班时充值、结账、反结账整笔拒绝（SHIFT_REQUIRED）；
 //   · 交班：员工实点现金，系统记下应有现金、差额与汇总快照；员工确认时看到的应有现金与此刻不一致（期间又有收款）时拒绝；
 //   · 本人交本人的班；值班经理及以上可以替别人交班（例如员工忘了交班就下班）。
 //
@@ -37,11 +40,12 @@ export async function openShiftOf(db: Db, staffId: number): Promise<number | nul
 
 /**
  * 收款事务（充值、结账、反结账）在锁业务行之前调用（重复提交查回原单时不调用）：对经办人此刻未交班的班次加共享锁
- * 直到事务结束，返回这笔要记入的班次（没有开班时为 null）。
+ * 直到事务结束，返回这笔要记入的班次（没有开班且规则允许时为 null）。
  *   · 交班对班次加排他锁：已拿到共享锁、正在入账的收款提交后才能交班，计入本班次（员工看到的应有现金过期时 SHIFT_CHANGED）；
  *   · 收款开始处理时（seen）经办人在班上，拿到锁时这个班次已经交班：整笔拒绝（SHIFT_CLOSED），不入账——
  *     否则这笔收款既不在已交班次的快照里，也不属于之后的班次。员工开新班后重新办理，记到新班次；
- *   · 收款开始时没有开班的照常收款（开班是可选的），期间开了班的记到新开的班次。
+ *   · 收款前必须先开班（经营规则，默认开）：此刻没有未交班的班次就整笔拒绝（SHIFT_REQUIRED），员工开班后原样重提；
+ *     规则关闭时没有开班的照常收款、不记班次，期间开了班的记到新开的班次。
  */
 export async function lockPaymentShift(tx: Tx, staffId: number, seen: number | null): Promise<number | null> {
   const [row] = await tx<{ id: number }[]>`SELECT id FROM shifts WHERE staff_id = ${staffId} AND status = 'open' FOR SHARE`;
@@ -51,6 +55,9 @@ export async function lockPaymentShift(tx: Tx, staffId: number, seen: number | n
     throw conflict('SHIFT_CLOSED', `班次 ${s!.shiftNo} 在这笔收款入账之前已经交班，这笔没有入账，也不会记入任何班次；请开新班后重新办理`, {
       shiftNo: s!.shiftNo,
     });
+  }
+  if (id === null && (await loadSettings(tx)).requireOpenShift) {
+    throw conflict('SHIFT_REQUIRED', '还没有开班：充值、结账、反结账前请先开班（登记备用金），开班后再办理这一笔');
   }
   return id;
 }
@@ -78,18 +85,21 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
     s.legacyWindow
       ? db`(${db(shiftCol)} = ${s.id} OR (${db(shiftCol)} IS NULL AND ${db(staffCol)} = ${s.staffId} AND ${db(timeCol)} >= ${from} AND ${db(timeCol)} < ${to}))`
       : db`${db(shiftCol)} = ${s.id}`;
-  // co 本班次有效的结账单；rc 本班次的充值；团购券随结账单登记（同一事务、同一经办人），按结账单的班次；
-  // 反结账提醒按反结账时记下的班次（反结账人当时未交班的班次）；会员工作台的储值消费不是收款，只作参考，
+  // co 本班次收款的结账单（含之后被反结账的：收款算在收款时的班次）；rc 本班次的充值；团购券随结账单登记
+  // （同一事务、同一经办人），按结账单的班次；vd 本班次做的反结账（反结账人当时未交班的班次），rf 按原收款方式的退款：
+  // 现金扣减应有现金，原单与反结账在同一班次时两者相抵；会员工作台的储值消费不是收款，只作参考，
   // 仍按开班到此刻的时间窗口统计（消费单不记班次）
   const [row] = await db<
     (Omit<ShiftSummary, 'from' | 'to' | 'recharges' | 'cash'> & {
       recharges: Omit<ShiftSummary['recharges'], 'byMethod'>;
       rechargeByMethod: ShiftSummary['recharges']['byMethod'];
+      refunds: Omit<NonNullable<ShiftSummary['refunds']>, 'byMethod'>;
+      refundByMethod: NonNullable<ShiftSummary['refunds']>['byMethod'];
     })[]
   >`
     WITH co AS (
       SELECT c.id, c.total_amount FROM checkouts c
-      WHERE c.status = 'completed' AND ${ofShift('c.shift_id', 'c.operator_id', 'c.created_at')}
+      WHERE ${ofShift('c.shift_id', 'c.operator_id', 'c.created_at')}
     ), rc AS (
       SELECT r.payment_method, r.paid_amount, r.bonus_amount FROM recharges r
       WHERE ${ofShift('r.shift_id', 'r.operator_id', 'r.created_at')}
@@ -100,10 +110,14 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
       SELECT payment_method AS method, count(*) AS count, sum(paid_amount) AS amount FROM rc GROUP BY payment_method
     ), cp AS (
       SELECT g.platform, count(*) AS count, sum(g.amount) AS amount FROM group_buy_coupons g JOIN co ON co.id = g.checkout_id
-      WHERE g.status = 'active' GROUP BY g.platform
+      GROUP BY g.platform
     ), vd AS (
-      SELECT c.checkout_no, c.total_amount, c.void_reason, c.voided_at FROM checkouts c
+      SELECT c.id, c.checkout_no, c.total_amount, c.void_reason, c.voided_at,
+             (SELECT coalesce(sum(p.amount), 0) FROM checkout_payments p WHERE p.checkout_id = c.id AND p.method = 'cash') AS cash_refund
+      FROM checkouts c
       WHERE ${ofShift('c.void_shift_id', 'c.voided_by', 'c.voided_at')}
+    ), rf AS (
+      SELECT p.method, sum(p.amount) AS amount FROM checkout_payments p JOIN vd ON vd.id = p.checkout_id GROUP BY p.method
     ), wc AS (
       SELECT total_amount FROM consumptions
       WHERE operator_id = ${s.staffId} AND checkout_id IS NULL AND status = 'completed' AND created_at >= ${from} AND created_at < ${to}
@@ -119,11 +133,15 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
       (SELECT json_build_object('count', count(*), 'total', coalesce(sum(total_amount), 0)) FROM wc) AS wallet_consumes,
       (SELECT coalesce(json_agg(json_build_object('platform', platform, 'count', count, 'amount', amount) ORDER BY platform), '[]'::json) FROM cp)
         AS coupons,
-      (SELECT coalesce(json_agg(json_build_object('checkoutNo', checkout_no, 'amount', total_amount, 'reason', void_reason, 'voidedAt', voided_at)
-                                ORDER BY voided_at), '[]'::json) FROM vd) AS voids`;
-  const { checkouts, checkoutByMethod, recharges, rechargeByMethod, walletConsumes, coupons } = row!;
+      (SELECT coalesce(json_agg(json_build_object('checkoutNo', checkout_no, 'amount', total_amount, 'reason', void_reason, 'voidedAt', voided_at,
+                                                  'cashRefund', cash_refund)
+                                ORDER BY voided_at), '[]'::json) FROM vd) AS voids,
+      (SELECT json_build_object('count', count(*), 'total', coalesce(sum(total_amount), 0)) FROM vd) AS refunds,
+      (SELECT coalesce(json_agg(json_build_object('method', method, 'amount', amount) ORDER BY method), '[]'::json) FROM rf) AS refund_by_method`;
+  const { checkouts, checkoutByMethod, recharges, rechargeByMethod, walletConsumes, coupons, refunds, refundByMethod } = row!;
   const cashCheckout = checkoutByMethod.find((m) => m.method === 'cash')?.amount ?? 0;
   const cashRecharge = rechargeByMethod.find((m) => m.method === 'cash')?.amount ?? 0;
+  const cashRefund = refundByMethod.find((m) => m.method === 'cash')?.amount ?? 0;
   return {
     from: new Date(from).toISOString(),
     to: new Date(to).toISOString(),
@@ -134,7 +152,14 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
     coupons,
     // JSON 里的时间是 PostgreSQL 的格式，与单独查询时一样换成 ISO 字符串
     voids: row!.voids.map((v) => ({ ...v, voidedAt: new Date(v.voidedAt).toISOString() })),
-    cash: { opening: s.openingCash, checkout: cashCheckout, recharge: cashRecharge, expected: s.openingCash + cashCheckout + cashRecharge },
+    refunds: { ...refunds, byMethod: refundByMethod },
+    cash: {
+      opening: s.openingCash,
+      checkout: cashCheckout,
+      recharge: cashRecharge,
+      refund: cashRefund,
+      expected: s.openingCash + cashCheckout + cashRecharge - cashRefund,
+    },
   };
 }
 
@@ -170,8 +195,12 @@ export async function listShifts(db: Db, date: string): Promise<ShiftRecord[]> {
 const StartInput = z.object({ openingCash: cents('备用金') });
 const CloseInput = z.object({
   countedCash: cents('实点现金'),
-  /** 员工交班时看到的应有现金；与此刻计算的不一致说明期间又有收款，需要刷新后重新核对 */
-  expectedCash: cents('应有现金'),
+  /**
+   * 员工交班时看到的应有现金；与此刻计算的不一致说明期间又有收款，需要刷新后重新核对。
+   * 可以是负数：反结账退的现金算在执行人的班次（R1.2），备用金为 0 的值班经理反结账别人的现金单后应有现金为负，
+   * 同一钱箱的人合并核对时与原收款班次相抵
+   */
+  expectedCash: z.number('应有现金必须是数字').int('应有现金必须精确到分').min(-1_000_000_000, '应有现金过大').max(1_000_000_000, '应有现金过大'),
   note: z.string().trim().max(200, '备注最多 200 字').default(''),
   handedTo: z.number().int().positive().nullable().default(null),
 });

@@ -1,8 +1,11 @@
 // 结账与交班（S3 / Batch 3）合成演示数据，建在前台演示数据（seed-frontdesk-demo）之上：
 //   ① 散客现金结账（12 小时档）；② 会员与朋友同行合并结账（24 小时档）：会员储值 + 美团券 + 微信；
-//   ③ 亲子：成人 + 1 米以下儿童免票，支付宝；④ 过夜 26 小时（24 小时档 + 12 小时档），银行卡；
-//   ⑤ 现金结账后发现收款方式记错：值班经理反结账，改为微信重新结账；
-//   ⑥ 收银员陈茵开班（备用金 500 元）并交班（实点短款 10 元）；值班经理张经理当班中。
+//   ③ 亲子：成人 + 1 米以下儿童免票（值班经理当场授权），支付宝；④ 过夜 26 小时（24 小时档 + 12 小时档），银行卡；
+//   ⑤ 现金结账后发现收款方式记错：值班经理反结账，改为微信重新结账（门票按第一次结账的时刻计算）；
+//   ⑥ 抹零：值班经理当场授权优惠 21 元，其余现金（R1.2「优惠 / 免单」）；
+//   ⑦ 收银员陈茵开班（备用金 500 元）并交班（实点短款 10 元）；值班经理张经理当班中。
+// 交班口径（R1.2）：结账收款算在收款时的班次，之后被反结账也不减；反结账退的现金算在执行反结账的人当时的班次。
+// 所以 ⑤ 的原现金单仍在陈茵的班次里，张经理的班次扣减 557 元退款，两人同一钱箱合并核对时相抵。
 // 固定预期结果见 demo/billing-expected.json。
 //
 // 只用于独立的演示 / 开发库：试用与正式环境一律拒绝；需要先执行 seed-frontdesk-demo；已经灌过则跳过。
@@ -18,6 +21,8 @@ import type { Actor, Deps, OpContext } from './lib/context';
 import { postCharges } from './modules/frontdesk/bills';
 import { checkout, previewCheckout, voidCheckout, type CheckoutInputData } from './modules/frontdesk/checkout';
 import { checkin } from './modules/frontdesk/visits';
+import { insertGrant } from './auth/grants';
+import { withShiftOptional } from './demo/shift-rule';
 import { createMember } from './modules/members';
 import { loadSettings } from './modules/settings';
 import { closeShift, getShift, startShift } from './modules/shifts';
@@ -36,6 +41,11 @@ const TICKETS: Record<string, [number, number]> = {
 };
 
 export async function seedBillingDemo(sql: Sql, config: AppConfig, options: { now?: Date } = {}) {
+  // 演示会员的充值按「开班可选」入账（R1.2 起默认收款前必须先开班）；结账演示的收银员、值班经理各自开了班
+  return withShiftOptional(sql, config, () => seedBilling(sql, config, options));
+}
+
+async function seedBilling(sql: Sql, config: AppConfig, options: { now?: Date }) {
   if (config.env === 'production' || config.env === 'trial') {
     throw new Error(`当前是${config.env === 'trial' ? '试用' : '正式'}环境，禁止写入结账演示数据。请另建独立的演示库（APP_ENV=development）再执行。`);
   }
@@ -83,8 +93,17 @@ export async function seedBillingDemo(sql: Sql, config: AppConfig, options: { no
   const price = (name: string) => DEMO_ITEMS.find((i) => i.name === name)!.price;
   const charge = (visitId: number, lines: [string, number][], ctx: OpContext) =>
     postCharges(deps, visitId, { clientKey: randomUUID(), lines: lines.map(([n, q]) => ({ itemId: items.get(n)!, quantity: q })), expectedTotal: lines.reduce((s, [n, q]) => s + price(n) * q, 0) }, ctx);
-  const open = async (guests: { tagCode: string; zone: Zone; ticket: string; guestLabel?: string; memberId?: number }[], ctx: OpContext) =>
-    (await checkin(deps, { clientKey: randomUUID(), guests: guests.map(({ ticket: t, ...g }) => ({ memberId: null, guestLabel: '', ticketTypeId: ticket.get(t)!, ...g })) }, ctx)).visits.map((v) => v.id);
+  const open = async (guests: { tagCode: string; zone: Zone; ticket: string; guestLabel?: string; memberId?: number }[], ctx: OpContext, ticketGrantId: string | null = null) =>
+    (
+      await checkin(
+        deps,
+        { clientKey: randomUUID(), guests: guests.map(({ ticket: t, ...g }) => ({ memberId: null, guestLabel: '', ticketTypeId: ticket.get(t)!, ...g })), ticketGrantId },
+        ctx,
+      )
+    ).visits.map((v) => v.id);
+  /** 值班经理张经理当场授权（演示数据直接签发，不经密码弹窗） */
+  const grant = async (purpose: 'checkout_discount' | 'ticket_discount', requestedBy: Actor, scope: unknown) =>
+    (await insertGrant(sql, { purpose, requestedBy: requestedBy.id, approvedBy: duty.id, scope })).id;
   /** 按结账那一刻的门票核对应收，再结账 */
   const pay = async (visitIds: number[], payments: CheckoutInputData['payments'], ctx: OpContext) => {
     const preview = await previewCheckout(deps, visitIds, ctx.at);
@@ -124,13 +143,14 @@ export async function seedBillingDemo(sql: Sql, config: AppConfig, options: { no
     as(cashier, 15),
   );
 
-  // ③ 亲子：爸爸不含餐 499 + 孩子（1 米以下）免票，支付宝
+  // ③ 亲子：爸爸不含餐 499 + 孩子（1 米以下）免票（接待时选免票，值班经理当场授权），支付宝
   const family = await open(
     [
       { tagCode: 'A8068', zone: 'male', ticket: '不含餐', guestLabel: '爸爸' },
       { tagCode: 'A8069', zone: 'male', ticket: '儿童免票（1 米以下）', guestLabel: '孩子' },
     ],
     as(clerk, 150),
+    await grant('ticket_discount', clerk, { items: [{ tagCode: 'A8069', ticketTypeId: ticket.get('儿童免票（1 米以下）')! }], reason: '1 米以下儿童，与爸爸同行' }),
   );
   await pay(family, [{ method: 'alipay', amount: 0 }], as(cashier, 10));
 
@@ -139,14 +159,19 @@ export async function seedBillingDemo(sql: Sql, config: AppConfig, options: { no
   await charge(s4!, [['山野简餐', 2]], as(clerk, 900));
   await pay([s4!], [{ method: 'bank_card', amount: 0 }], as(cashier, 8));
 
-  // ⑤ 现金结账后发现客人实际用微信付的：值班经理反结账，改为微信重新结账（不含餐 499 + 搓背 58 = 557）
+  // ⑤ 现金结账后发现客人实际用微信付的：值班经理反结账，改为微信重新结账（不含餐 499 + 搓背 58 = 557；门票按第一次结账的时刻计算）
   const [s5] = await open([{ tagCode: 'A8071', zone: 'male', ticket: '不含餐', guestLabel: '散客乙' }], as(clerk, 100));
   await charge(s5!, [['搓背', 1]], as(clerk, 90));
   const wrong = await pay([s5!], [{ method: 'cash', amount: 0 }], as(cashier, 30));
   await voidCheckout(deps, wrong.id, { reason: '收款方式记错，客人实际用微信支付' }, as(duty, 25));
   await pay([s5!], [{ method: 'wechat', amount: 0 }], as(cashier, 24));
 
-  // ⑥ 陈茵交班：应有现金 = 备用金 500 + 现金结账 521 = 1021；实点 1011（短款 10 元）
+  // ⑥ 抹零：不含餐 499 + 柚子气泡水 22 = 521，值班经理授权优惠 21 元，现金 500
+  const [s6] = await open([{ tagCode: 'A8072', zone: 'male', ticket: '不含餐', guestLabel: '散客丙' }], as(clerk, 60));
+  await charge(s6!, [['柚子气泡水', 1]], as(clerk, 50));
+  await pay([s6!], [{ method: 'discount', amount: 2100, grantId: await grant('checkout_discount', cashier, { visitIds: [s6!], amount: 2100, reason: '抹零' }) }, { method: 'cash', amount: 0 }], as(cashier, 5));
+
+  // ⑦ 陈茵交班：应有现金 = 备用金 500 + 现金结账 521 + 557（⑤ 原单，之后由张经理反结账）+ 500（⑥）= 2078；实点 2068（短款 10 元）
   const { summary } = await getShift(sql, cashierShift.id, ago(2));
   await closeShift(deps, cashierShift.id, { countedCash: summary.cash.expected - 1000, expectedCash: summary.cash.expected, note: '演示：短款 10 元，找零时多找' }, as(cashier, 2));
 

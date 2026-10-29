@@ -54,6 +54,7 @@ export async function dashboard(db: Db, today: string, days: number): Promise<Da
       net: t.net,
       ticket: guests!.ticket,
       byMethod,
+      discount: byMethod.filter((m) => m.method === 'discount').reduce((sum, m) => sum + m.amount, 0),
       rechargePaid: t.rechargePaid,
       rechargeCount: rc!.n,
     },

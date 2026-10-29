@@ -30,8 +30,10 @@ export interface StoreRules {
   maxRechargeCents: number;
   /** 单笔消费上限（默认 50 万元）；超过需要店主或店总当场授权 */
   maxConsumeCents: number;
-  /** 撤销时限（#10，待确认）：消费后多少小时内可以撤销，超过后只有店主可以撤销；null 为不限 */
+  /** 撤销与反结账时限（#10，2026-10-29 签认默认 48 小时）：消费 / 结账后多少小时内可以撤销、反结账，超过后只有店主可以；null 为不限 */
   reversalWindowHours: number | null;
+  /** 充值、结账、反结账前必须先开班（2026-10-29 签认，默认开）；关闭后没开班的收款不属于任何班次 */
+  requireOpenShift: boolean;
   /** 营业时间（#4，待确认）；null 为全天 24 小时营业。只用于显示与提醒 */
   businessHours: BusinessHours | null;
   /** 会员自定义字段（#12）；固定字段之外由店主配置 */
@@ -265,7 +267,20 @@ export interface SettlementCheck {
 }
 
 export interface SettlementAnomaly {
-  kind: 'reversal' | 'cross_day_reversal' | 'duplicate_blocked' | 'rejected' | 'abandoned' | 'balance_mismatch' | 'chain_break' | 'checkout_void';
+  kind:
+    | 'reversal'
+    | 'cross_day_reversal'
+    | 'duplicate_blocked'
+    | 'rejected'
+    | 'abandoned'
+    | 'balance_mismatch'
+    | 'chain_break'
+    | 'checkout_void'
+    // R1.2：前台少收与更正（优惠 / 免单、降低票种或免票、撤销误开的牌、作废明细）
+    | 'discount'
+    | 'ticket_override'
+    | 'visit_cancel'
+    | 'line_void';
   at: string | null;
   docNo: string | null;
   memberName: string | null;

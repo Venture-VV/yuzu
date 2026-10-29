@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { businessDateOf } from '@shared/business-date';
 import { shiftDate } from '@shared/labels';
 import type { AppConfig } from './config';
+import { withShiftOptional } from './demo/shift-rule';
 import type { Sql } from './db';
 import type { Actor, Deps } from './lib/context';
 import { createMember } from './modules/members';
@@ -55,6 +56,11 @@ function localTime(date: string, hour: number, minute: number): Date {
 }
 
 export async function seedDemo(sql: Sql, config: AppConfig, options: { force?: boolean; days?: number } = {}) {
+  // 演示充值按「开班可选」入账（R1.2 起默认收款前必须先开班）
+  return withShiftOptional(sql, config, () => seedMemberDemo(sql, config, options));
+}
+
+async function seedMemberDemo(sql: Sql, config: AppConfig, options: { force?: boolean; days?: number }) {
   if (config.env === 'production' && !options.force) {
     throw new Error('正式环境禁止写入演示数据（如确需写入，请加 --force）');
   }

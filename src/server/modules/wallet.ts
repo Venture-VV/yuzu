@@ -582,6 +582,14 @@ export async function consume(deps: Deps, raw: ConsumeInputData, ctx: OpContext)
       // 先作废到期的赠金：到期赠金不能再用，员工确认的余额若含到期赠金，下面的余额核对会要求重新确认
       const member = await expireDueLots(tx, deps, locked, at);
       if (member.status !== 'active') throw unprocessable('MEMBER_FROZEN', '该会员已停用，不能消费');
+      // 会员持有在店手牌时，储值统一在前台结账时扣（店主 2026-10-29 签认），防止同一笔在两处各扣一次
+      const [inStore] = await tx<{ code: string }[]>`
+        SELECT t.code FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE v.member_id = ${member.id} AND v.status = 'open' LIMIT 1`;
+      if (inStore) {
+        throw conflict('MEMBER_IN_STORE', `会员持有在店手牌 ${inStore.code}：请把消费挂到手牌账单，结账时用会员储值支付，不在会员工作台直接扣款`, {
+          tagCode: inStore.code,
+        });
+      }
 
       // 项目价格以服务端为准，按所选价格档计价
       const items = await loadPricedItems(tx, input.lines.map((l) => l.itemId));

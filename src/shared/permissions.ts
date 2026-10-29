@@ -78,6 +78,8 @@ export const PERMISSIONS = {
   'auth.overLimit': { roles: ['owner', 'store_manager'] },
   /** 授权散客或等级不够的会员使用 VIP 柜（经营规则开启后才可用） */
   'auth.vipOverride': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  /** 授权结账的「优惠 / 免单」、降低票种与免票（R1.2，店主 2026-10-29 签认） */
+  'auth.discount': { roles: ['owner', 'store_manager', 'duty_manager'] },
   'staff.manage': { roles: ['owner'] },
   'catalog.manage': { roles: ['owner', 'store_manager'] },
   'settings.manage': { roles: ['owner'] },
@@ -126,6 +128,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'inventory.export': '导出库存与对账',
   'auth.overLimit': '当场授权超过单笔上限的充值 / 消费',
   'auth.vipOverride': '当场授权散客或低等级会员使用 VIP 柜',
+  'auth.discount': '当场授权优惠 / 免单、降低票种与免票',
   'staff.manage': '管理员工账号',
   'catalog.manage': '管理充值套餐与消费项目',
   'settings.manage': '修改经营规则设置',
@@ -145,6 +148,6 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
     title: '库存与采购',
     items: ['inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'supplierReturn.create', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.export'],
   },
-  { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride'] },
+  { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount'] },
   { title: '管理', items: ['staff.manage', 'catalog.manage', 'settings.manage', 'audit.read'] },
 ];

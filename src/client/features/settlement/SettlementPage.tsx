@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowRight,
   BadgeCheck,
+  BadgePercent,
   CircleAlert,
   CircleCheck,
   CircleSlash,
@@ -12,6 +13,7 @@ import {
   Download,
   Hourglass,
   Lock,
+  Ticket,
   Undo2,
   WalletMinimal,
 } from 'lucide-react';
@@ -390,6 +392,10 @@ const ANOMALY_META: Record<
   balance_mismatch: { label: '余额不符', tone: 'clay', icon: CircleX, iconClass: 'bg-clay-soft text-clay' },
   chain_break: { label: '流水不连续', tone: 'clay', icon: CircleX, iconClass: 'bg-clay-soft text-clay' },
   checkout_void: { label: '反结账', tone: 'ember', icon: Undo2, iconClass: 'bg-ember-soft text-ember' },
+  discount: { label: '优惠 / 免单', tone: 'yuzu', icon: BadgePercent, iconClass: 'bg-yuzu-soft text-yuzu-deep' },
+  ticket_override: { label: '降档 / 免票', tone: 'yuzu', icon: Ticket, iconClass: 'bg-yuzu-soft text-yuzu-deep' },
+  visit_cancel: { label: '撤销误开的牌', tone: 'lake', icon: CircleSlash, iconClass: 'bg-lake-soft text-lake' },
+  line_void: { label: '作废明细', tone: 'lake', icon: CircleSlash, iconClass: 'bg-lake-soft text-lake' },
 };
 
 function AnomalyItem({ a }: { a: SettlementAnomaly }) {
