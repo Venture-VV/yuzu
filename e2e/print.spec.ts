@@ -20,10 +20,16 @@ interface Summary {
   methods: string[] | null;
 }
 
+const dayBefore = (date: string) => new Date(Date.parse(`${date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+
+/** 演示单据所在的营业日：演示数据按执行时刻生成，在营业日切换（06:00）后一小时内执行时会落在前一个营业日 */
 async function checkouts(page: Page) {
   const me = (await (await page.request.get('/api/auth/me')).json()) as { today: string; storeName: string };
-  const list = (await (await page.request.get(`/api/frontdesk/checkouts?date=${me.today}`)).json()) as Summary[];
-  return { me, list };
+  for (const date of [me.today, dayBefore(me.today)]) {
+    const list = (await (await page.request.get(`/api/frontdesk/checkouts?date=${date}`)).json()) as Summary[];
+    if (list.length) return { me, date, list };
+  }
+  throw new Error('找不到结账演示数据（seed-billing-demo）');
 }
 
 /** 打印样式下：工具栏隐藏，纸宽 72mm（272px），内容不横向溢出 */
@@ -40,7 +46,7 @@ test.describe('打印', () => {
   test.skip(({ viewport }) => (viewport?.width ?? 0) < 1280, '打印在门店电脑尺寸执行一次');
 
   test('结账单：明细、各收款方式、储值扣前扣后余额、签字栏；反结账的单标明作废', async ({ page }) => {
-    await login(page, 'chenyin');
+    await login(page, 'linlan');
     const { me, list } = await checkouts(page);
     const wallet = list.find((c) => c.status === 'completed' && (c.methods ?? []).includes('wallet'))!;
     expect(wallet).toBeTruthy();
@@ -68,9 +74,9 @@ test.describe('打印', () => {
   });
 
   test('交班表：备用金、各收款方式、应有与实点现金、短款、交接签字', async ({ page }) => {
-    await login(page, 'chenyin');
-    const me = (await (await page.request.get('/api/auth/me')).json()) as { today: string };
-    const shifts = (await (await page.request.get(`/api/shifts?date=${me.today}`)).json()) as { id: number; shiftNo: string; status: string; staffName: string }[];
+    await login(page, 'linlan');
+    const { date } = await checkouts(page);
+    const shifts = (await (await page.request.get(`/api/shifts?date=${date}`)).json()) as { id: number; shiftNo: string; status: string; staffName: string }[];
     const closed = shifts.find((s) => s.status === 'closed' && s.staffName === '陈茵')!;
     await page.goto(`/print/shift/${closed.id}`);
     const slip = page.getByTestId('print-shift');
@@ -86,7 +92,8 @@ test.describe('打印', () => {
 
   test('入口：结账记录与交班页的「打印」在新窗口打开打印页', async ({ page }) => {
     await login(page, 'chenyin');
-    const { list } = await checkouts(page);
+    const { me, date, list } = await checkouts(page);
+    test.skip(date !== me.today, '演示单据落在前一个营业日，结账记录与交班页只列今天的');
     const wallet = list.find((c) => c.status === 'completed' && (c.methods ?? []).includes('wallet'))!;
 
     await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '前台', exact: true }).click();
