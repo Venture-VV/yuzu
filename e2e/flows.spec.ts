@@ -78,6 +78,24 @@ test('店主：整单撤销后按原构成恢复余额，日结核对一致', as
   await expect(page.getByText('异常与提醒')).toBeVisible();
 });
 
+test('店主：前台结账的储值消费不能在会员这里单独撤销，提示到结账记录反结账', async ({ page }) => {
+  // 结账演示（seed-billing-demo）：沈先生用储值支付了结账单的一部分
+  await login(page, 'linlan');
+  await openMember(page, '沈先生');
+  const main = page.locator('main');
+  await expect(main.getByText(/^手牌结账 JZ/).first()).toBeVisible();
+  await expect(main.getByText('需反结账更正')).toBeVisible();
+  await expect(main.getByRole('button', { name: '撤销' })).toHaveCount(0);
+  // 流水的单据详情：不提供「撤销这张消费单」，写明对哪张结账单反结账
+  await nav(page, '流水').click();
+  await expect(page.getByRole('heading', { name: '流水' })).toBeVisible();
+  await page.getByText(/^手牌结账 JZ/).filter({ visible: true }).first().click();
+  const drawer = page.getByRole('dialog', { name: '单据详情' });
+  await expect(drawer.getByText(/^结账单 JZ\d{8}-\d{4} 的储值支付$/)).toBeVisible();
+  await expect(drawer.getByText(/前台 → 结账记录/)).toBeVisible();
+  await expect(drawer.getByRole('button', { name: '撤销这张消费单' })).toHaveCount(0);
+});
+
 test('请求超时：显示结果待确认，可查回原单且不重复记账', async ({ page }) => {
   await login(page, 'xiaozhou');
   await openMember(page, '陈一禾');

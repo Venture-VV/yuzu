@@ -110,9 +110,16 @@ export function DocDrawer({
 
       {row.entryType === 'consume' && row.consumptionStatus === 'completed' && can('consume.reverse') && row.consumptionId && (
         <footer className="border-t border-line bg-card px-5 py-4">
-          <Button variant="danger" className="w-full" icon={<Undo2 className="size-4" />} onClick={() => onReverse({ consumptionId: row.consumptionId!, memberId: row.memberId, memberName: row.memberName })}>
-            撤销这张消费单
-          </Button>
+          {row.checkoutNo ? (
+            // 前台结账的储值支付只能随结账单一起反结账（服务端同样拒绝单独撤销）
+            <Notice tone="info" title={`结账单 ${row.checkoutNo} 的储值支付`}>
+              不能在这里单独撤销。如需更正，请到「前台 → 结账记录」对结账单 {row.checkoutNo} 反结账，储值随之按原单恢复。
+            </Notice>
+          ) : (
+            <Button variant="danger" className="w-full" icon={<Undo2 className="size-4" />} onClick={() => onReverse({ consumptionId: row.consumptionId!, memberId: row.memberId, memberName: row.memberName })}>
+              撤销这张消费单
+            </Button>
+          )}
         </footer>
       )}
     </Sheet>

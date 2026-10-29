@@ -6,6 +6,18 @@
 >
 > 按店主要求，云端只做了类型检查、构建、后端集成测试、演示数据与自检、以及一次脚本化的页面冒烟；**正式的浏览器 E2E 与截图交给本地测试 AI**（第 6 节）。环境不具备的项记「受阻未测」，不记通过。
 
+## 0. G3 复测意见修复（提测 SHA 见 PR 评论）
+
+| # | 问题 | 修复 | 回归测试 |
+| --- | --- | --- | --- |
+| 1 | P1 结账生成的储值消费可在会员处单独撤销，结账单仍「已结」，之后反结账 409、自检变红 | 会员撤销接口对 `checkout_id` 不为空的消费单拒绝（409 `CHECKOUT_LINKED`，提示对结账单 JZ… 反结账，details 带 `checkoutId` / `checkoutNo`），整笔不改动；重提同样拒绝、查回未找到、可确认作废。会员时间线、流水单据详情、撤销对话框不再提供单独撤销 | `tests/checkout.test.ts`「会员撤销接口拒绝单独撤销…」「会员工作台直接登记的消费照常可以撤销」；E2E `flows.spec.ts`「前台结账的储值消费不能在会员这里单独撤销」 |
+| 2 | P1 交班按单据时间窗口汇总，交班之后才提交的收款时间落在已交班次内、又不在快照里 | 迁移 `016_shift_boundary.sql`：`recharges.shift_id`、`checkouts.shift_id / void_shift_id`（入账时写入）、`shifts.legacy_window`。收款锁完业务行后 `FOR SHARE` 经办人未交班的班次，交班 `FOR UPDATE`；交班表按班次汇总（工作台储值消费非收款，仍按时间统计）。升级时仍未交班的班次对升级前的单据按原时间窗口补算 | `tests/shift-boundary.test.ts`（6 项，含锁交错）、`tests/upgrade-shift.test.ts`（3 项）、`tests/billing-seed.test.ts` 交班预期不变 |
+| 3 | P1 期初导入先按手机号匹配、后加锁，期间会员改名改号时期初记到身份已变的会员 | 锁住已有会员后按最新资料重新核对姓名、手机号、有效期初，匹配有变化整批拒绝（409 `OPENING_STALE`） | `tests/opening-import.test.ts`「导入期间会员资料变动」3 项（锁交错） |
+| 4 | P2 1024×768 账单底栏横向溢出 41px，结账按钮被挤出 | 底栏按小票栏宽度排版（容器查询）：窄栏时预结账、结账排到合计下方；宽栏仍并排，金额放不下时按钮换行。结账对话框在 1024 下没有单独溢出（此前的几像素是背后底栏的溢出） | E2E `frontdesk.spec.ts`「双栏工作台…」与「结账对话框：储值只能用本次结账客人里的会员…」，三个视口 |
+| 5 | 串单：结账储值不核对会员是否在本次结账里 | 储值会员不在本次结账手牌上时 422 `WALLET_MEMBER_NOT_IN_CHECKOUT`；同行朋友合并到同一张结账单即可由会员代付；结账对话框不再搜索其他会员 | `tests/checkout.test.ts`「储值只能用本次结账客人里的会员…」 |
+
+复测要点：A9 储值结账后在会员详情 / 流水找到「手牌结账 JZ…」——没有「撤销」，接口 409 `CHECKOUT_LINKED`，反结账后余额完整恢复；B1–B5 之外，收款与交班并发（例如一台终端充值时另一台立刻交班）交班表不漏记、交班之后的收款不记到已交的班次；期初导入期间改会员姓名或手机号整批拒绝；三个视口账单底栏与结账对话框无横向滚动；升级路径：在首次提测的 `e425a9a` 建库、开班并收几笔款，切到新 SHA 启动，迁移 016 执行，当班中的班次交班表仍包含升级前的单据。`npm test` 预期 **260 passed**（25 个文件），迁移 16 个，`check` 仍为 19 项。
+
 ## 1. 范围与提交
 
 | 门禁 | 提交 | 内容 |
@@ -20,10 +32,11 @@
 | --- | --- |
 | `014_checkout.sql` | `ticket_types`（内置店主确认的票价，可维护）；`visits.ticket_type_id / ticket_price_12h / ticket_price_24h`（选定票种时留存票价）与 `visit_ticket_changes`；`bill_lines.ticket_type_id / ticket_segments`；`checkouts`、`checkout_bills`、`checkout_payments`、`group_buy_coupons`（同平台同券码一笔有效）；`consumptions.checkout_id`；替换 `yuzu_bill_guard` / `yuzu_visit_guard`：只在反结账事务（`SET LOCAL yuzu.reopen = 'on'`）里允许「已结 → 未结」；幂等与作废登记增加 `checkout` |
 | `015_shifts.sql` | `shifts`（一人一个未交班班次，交班后不可改、不可删） |
+| `016_shift_boundary.sql`（复测修复） | `recharges.shift_id`、`checkouts.shift_id / void_shift_id`（入账、反结账时写入经办人未交班的班次）；`shifts.legacy_window`（升级时已有的班次为 true）；替换 `yuzu_checkout_guard`：反结账时可写 `void_shift_id` |
 
 不变量（数据库约束 + 自检）：结账单合计 = 所结账单合计 = 收款合计；每张已结账单恰好属于一张有效结账单；结账储值支付 = 指向结账单的消费单（反结账后为已撤销）；有效团购券对应有效结账单的收款；营业额净额 = 所结账单净额 = 结账收款净额；结账储值支付净额 = 结账消费 − 当天撤销。`cli.js check` 共 **19 项**：会员 7（新增「营业额 = 所结账单 = 结账收款」「结账储值支付 = 储值消费」）+ 库存 5 + 前台 7（新增结账单、储值支付、团购券三项）。
 
-加锁顺序：手牌（反结账）→ 同行组 → 来访 → 账单 → 会员（id 升序）→ 赠金批次。
+加锁顺序：手牌（反结账）→ 同行组 → 来访 → 账单 → 会员（id 升序）→ 赠金批次；收款与反结账对经办人未交班的班次只加共享锁，交班只锁班次一行（排他）。
 
 ## 3. 独立演示环境（严禁指向 8080 试用库）
 
@@ -31,7 +44,7 @@
 git checkout <测试 SHA>
 npm ci && npm run build
 export DATABASE_URL=postgres://<用户>:<密码>@127.0.0.1:5432/<新建的独立演示库> APP_ENV=development
-node dist/server/cli.js migrate                 # 15 个迁移
+node dist/server/cli.js migrate                 # 16 个迁移
 node dist/server/cli.js seed-demo
 node dist/server/cli.js seed-inventory-demo
 node dist/server/cli.js seed-frontdesk-demo
@@ -74,10 +87,10 @@ PORT=8899 node dist/server/index.js
 
 ### 6.1 全量回归
 
-1. `npm run typecheck && npm run build`；`npm test`（独立测试库）预期 245 passed。
+1. `npm run typecheck && npm run build`；`npm test`（独立测试库）预期 260 passed（复测修复后；首次提测时为 245）。
 2. 第 3 节新演示库 `check` 19 / 19 ✓；与第 4 节固定预期逐项核对（页面上看结账记录、日结、交班）。
 3. 已有 E2E 全部 spec，三个视口；跑完后 `check` 仍全部 ✓。
-4. 升级路径：在 `1317f9c`（Batch 2 收口）建库，开几张牌并挂账、做几笔充值 / 消费、确认一次日结；切到测试 SHA 启动。预期：迁移 014、015 依次执行，`check` 19 / 19 ✓；**升级前开的牌没有票种**，结账时要求补选（`TICKET_REQUIRED`，页面在核对表里补选）；已确认的日结不显示「日结后有变动」。
+4. 升级路径：在 `1317f9c`（Batch 2 收口）建库，开几张牌并挂账、做几笔充值 / 消费、确认一次日结；切到测试 SHA 启动。预期：迁移 014、015、016 依次执行，`check` 19 / 19 ✓；**升级前开的牌没有票种**，结账时要求补选（`TICKET_REQUIRED`，页面在核对表里补选）；已确认的日结不显示「日结后有变动」。
 
 ### 6.2 G3A · 门票、结账、储值、团购券、反结账
 
@@ -118,7 +131,7 @@ PORT=8899 node dist/server/index.js
 
 ### 6.4 建议补充的浏览器 E2E（三个视口）
 
-页面已加 `data-testid`：`action-checkout`、`checkout`、`checkout-review`、`checkout-ticket-<牌号>`、`checkout-total`、`pay-add-<方式>`、`pay-row-<方式>`、`coupon-code`、`wallet-split`、`checkout-submit`、`checkout-receipt`、`checkout-finish`、`open-checkouts`、`checkout-records`、`checkout-void`、`checkout-void-confirm`、`bill-ticket`、`bill-ticket-change`、`bill-due`、`bill-checkout`、`ticket-confirm`、`guest-ticket-<序号>`、`preview-checkout`、`ticket-types`、`ticket-type-save`、`rules-grace`、`shift-start`、`shift-opening-cash`、`shift-start-submit`、`shift-open`、`shift-summary`、`shift-counted-cash`、`shift-diff`、`shift-close`、`shift-list`、`settlement-business`、`dashboard`。
+页面已加 `data-testid`：`action-checkout`、`checkout`、`checkout-review`、`checkout-ticket-<牌号>`、`checkout-total`、`pay-add-<方式>`、`pay-row-<方式>`、`coupon-code`、`wallet-split`、`wallet-members`、`checkout-submit`、`checkout-receipt`、`checkout-finish`、`open-checkouts`、`checkout-records`、`checkout-void`、`checkout-void-confirm`、`bill-ticket`、`bill-ticket-change`、`bill-due`、`bill-checkout`、`ticket-confirm`、`guest-ticket-<序号>`、`preview-checkout`、`ticket-types`、`ticket-type-save`、`rules-grace`、`shift-start`、`shift-opening-cash`、`shift-start-submit`、`shift-open`、`shift-summary`、`shift-counted-cash`、`shift-diff`、`shift-close`、`shift-list`、`settlement-business`、`dashboard`。
 
 1. 收银员：开班 → 接待散客（选「全日自助餐」）→ 挂项目 → 结账（现金 + 微信）→ 结账单 → 交班（短款）→ 日结营业口径与实收合计。
 2. 会员同行：接待会员与朋友 → 合并结账（储值 + 美团券）→ 会员详情流水出现「手牌结账」→ 再用同一券码结另一张牌被拒。
@@ -139,7 +152,7 @@ PORT=8899 node dist/server/index.js
 ```text
 请对 Venture-VV/yuzu PR #1 的完整 SHA <测试 SHA> 做 Batch 3 验收（G3A：门票跳档、结账收款、会员储值、团购券、反结账；G3B：交班、双口径日结、经营看板、结账演示数据），按 docs/HANDOFF_G3.md 执行：
 1. 新建独立演示库（严禁指向 8080 试用库或任何门店库），按第 3 节初始化，check 19 项全部 ✓，与第 4 节固定预期逐项核对；
-2. 第 6.1 节全量回归：typecheck、build、npm test（独立测试库，预期 245 passed）、已有 E2E 三个视口、从 1317f9c 升级；
+2. 第 6.1 节全量回归：typecheck、build、npm test（独立测试库，预期 260 passed）、已有 E2E 三个视口、从 1317f9c 升级；
 3. 第 6.2（G3A）、6.3（G3B）逐条执行；第 6.4 节的 E2E 请编写后运行；
 4. G3A、G3B 分别给出结论，评论发在 PR #1：测试 SHA、环境、实际验证范围、未测项（环境缺失记「受阻未测」）、问题清单（P1 / P2，附复现步骤与位置），末尾附来源署名。账错、重复扣款 / 重复结账、挂单离店、越权、数据丢失、破坏旧模块自检为阻断项。
 ```

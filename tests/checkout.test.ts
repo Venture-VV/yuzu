@@ -1,4 +1,5 @@
 // Batch 3 · S3.1–S3.3：门票 12 小时跳档、单牌与同行合并结账、结清才能离店、会员储值同事务扣款、团购券防重、反结账。
+// G3 复测：结账生成的储值消费不能在会员这里单独撤销；储值只能用本次结账客人里的会员支付。
 // 用 ctx.at 指定业务发生时间来模拟「在店 N 小时」。
 
 import { randomUUID } from 'node:crypto';
@@ -8,7 +9,7 @@ import { ticketPrice, ticketSegments, ticketTierLabel } from '../src/shared/chec
 import type { Actor } from '../src/server/lib/context';
 import { checkout, type CheckoutInputData } from '../src/server/modules/frontdesk/checkout';
 import { checkin } from '../src/server/modules/frontdesk/visits';
-import { api, createMember, rechargeBody, setup, type TestContext } from './helpers';
+import { api, consumeBody, createMember, rechargeBody, setup, type TestContext } from './helpers';
 
 const H = 3_600_000;
 let ctx: TestContext;
@@ -226,5 +227,108 @@ describe('反结账', () => {
     await expect(ctx.sql`UPDATE checkouts SET total_amount = total_amount + 1 WHERE id = ${c!.id}`).rejects.toThrow(/只能反结账/);
     await expect(ctx.sql`DELETE FROM checkouts WHERE id = ${c!.id}`).rejects.toThrow(/禁止删除/);
     await expect(ctx.sql`UPDATE bills SET status = 'open', closed_at = NULL WHERE status = 'settled'`).rejects.toThrow(/已结束的账单/);
+  });
+});
+
+describe('G3 复测：结账储值不能单独撤销、只能用本单客人里的会员', () => {
+  const walletState = async (memberId: number) =>
+    (await ctx.sql<{ principal: number; bonus: number; ledger: number; reversals: number }[]>`
+      SELECT m.principal_balance AS principal, m.bonus_balance AS bonus,
+             (SELECT count(*)::int FROM ledger_entries WHERE member_id = m.id) AS ledger,
+             (SELECT count(*)::int FROM reversals WHERE member_id = m.id) AS reversals
+      FROM members m WHERE m.id = ${memberId}`)[0]!;
+  const statusOf = async (consumptionId: number, checkoutId: number) =>
+    (await ctx.sql<{ consumption: string; checkout: string }[]>`
+      SELECT (SELECT status FROM consumptions WHERE id = ${consumptionId}) AS consumption,
+             (SELECT status FROM checkouts WHERE id = ${checkoutId}) AS checkout`)[0]!;
+  const wallet = (memberId: number, amount: number) => ({ method: 'wallet' as const, memberId, amount, expectedSplit: { principal: amount, bonus: 0 } });
+
+  it('会员撤销接口拒绝单独撤销结账生成的储值消费，什么都不改；正式反结账照常并完整恢复', async () => {
+    const m = await createMember(ctx, '结账储值', '19900003201');
+    await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, 200000, 0));
+    const id = await enter('A032', new Date(Date.now() - 2 * H), { memberId: m.id });
+    const done = await pay([id], 49900, [wallet(m.id, 49900)]);
+    const consumptionId = done.payments[0]!.consumption!.id;
+    const before = await walletState(m.id);
+    expect(before).toMatchObject({ principal: 150100, bonus: 0, reversals: 0 });
+
+    // 店主有撤销权限，走会员撤销接口：拒绝并指向结账单
+    const body = { idempotencyKey: randomUUID(), reason: '想单独撤销储值' };
+    const r = await api(ctx.app, ctx.owner, 'POST', `/api/consumptions/${consumptionId}/reverse`, body);
+    expect(r.status).toBe(409);
+    expect(r.body.error.code).toBe('CHECKOUT_LINKED');
+    expect(r.body.error.details).toEqual({ checkoutId: done.id, checkoutNo: done.checkoutNo });
+    expect(r.body.error.message).toContain(`对结账单 ${done.checkoutNo} 反结账`);
+    expect(await walletState(m.id)).toEqual(before);
+    expect(await statusOf(consumptionId, done.id)).toEqual({ consumption: 'completed', checkout: 'completed' });
+    // 同一编号重提仍拒绝；查回为未找到，可以确认作废（之后重提为已作废）
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/consumptions/${consumptionId}/reverse`, body)).body.error.code).toBe('CHECKOUT_LINKED');
+    expect((await api(ctx.app, ctx.owner, 'GET', `/api/operations/${body.idempotencyKey}?type=reversal`)).body).toEqual({ found: false, abandoned: false });
+    const ab = await api(ctx.app, ctx.owner, 'POST', `/api/operations/${body.idempotencyKey}/abandon`, { type: 'reversal', memberId: m.id, amount: 49900 });
+    expect(ab.body).toEqual({ found: false, abandoned: true });
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/consumptions/${consumptionId}/reverse`, body)).body.error.code).toBe('OP_ABANDONED');
+    expect(await walletState(m.id)).toEqual(before);
+    // 消费单与会员流水标明所属结账单（页面据此不提供单独撤销）
+    expect((await api(ctx.app, ctx.owner, 'GET', `/api/consumptions/${consumptionId}`)).body.checkout).toEqual({ id: done.id, checkoutNo: done.checkoutNo, status: 'completed' });
+    const activity = (await api(ctx.app, ctx.owner, 'GET', `/api/members/${m.id}/activity`)).body as { consumptionId: number | null; entryType: string; checkoutNo: string | null }[];
+    expect(activity.find((l) => l.entryType === 'consume' && l.consumptionId === consumptionId)!.checkoutNo).toBe(done.checkoutNo);
+    await checks();
+
+    // 正式反结账：储值按原单恢复，结账单作废，客人恢复在店
+    const v = await api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/checkouts/${done.id}/void`, { reason: '储值记错，改用微信' });
+    expect(v.status).toBe(200);
+    expect(await statusOf(consumptionId, done.id)).toEqual({ consumption: 'reversed', checkout: 'voided' });
+    expect(await walletState(m.id)).toMatchObject({ principal: 200000, bonus: 0, reversals: 1 });
+    expect(await tagState('A032')).toBe(1);
+    // 反结账之后会员接口提示已撤销，不会重复恢复
+    const again = await api(ctx.app, ctx.owner, 'POST', `/api/consumptions/${consumptionId}/reverse`, { idempotencyKey: randomUUID(), reason: '再撤一次' });
+    expect(again.status).toBe(409);
+    expect(again.body.error.code).toBe('ALREADY_REVERSED');
+    expect(await walletState(m.id)).toMatchObject({ principal: 200000, reversals: 1 });
+    await checks();
+  });
+
+  it('会员工作台直接登记的消费照常可以撤销', async () => {
+    const m = await createMember(ctx, '普通消费', '19900003204');
+    await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, 10000, 0));
+    const c = await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', consumeBody(m.id, 3000));
+    expect(c.body.consumption.checkout).toBeNull();
+    const r = await api(ctx.app, ctx.owner, 'POST', `/api/consumptions/${c.body.consumption.id}/reverse`, { idempotencyKey: randomUUID(), reason: '项目选错' });
+    expect(r.status).toBe(200);
+    expect(r.body.balanceAfter).toEqual({ principal: 10000, bonus: 0 });
+  });
+
+  it('储值只能用本次结账客人里的会员：只结朋友那张、或用不相干的会员都拒绝；合并进同一张结账单后会员可以替朋友付', async () => {
+    const payer = await createMember(ctx, '替朋友付', '19900003202');
+    const stranger = await createMember(ctx, '不相干会员', '19900003203');
+    await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(payer.id, 200000, 0));
+    await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(stranger.id, 200000, 0));
+    const r = await checkin(
+      deps,
+      { clientKey: randomUUID(), guests: [{ tagCode: 'A033', zone: 'male', memberId: payer.id }, { tagCode: 'A034', zone: 'male' }] },
+      { actor: clerk, at: new Date(Date.now() - H) },
+    );
+    const [mine, friend] = r.visits.map((v) => v.id) as [number, number];
+
+    // 只结朋友那张却扣会员储值（会员不在这张结账单上）：拒绝
+    const res = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', { clientKey: randomUUID(), visitIds: [friend], expectedTotal: 49900, payments: [wallet(payer.id, 49900)] });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatchObject({
+      code: 'WALLET_MEMBER_NOT_IN_CHECKOUT',
+      message: '只能用本次结账客人里的会员储值支付；同行朋友请合并到同一张结账单',
+      details: { memberId: payer.id },
+    });
+    // 不在店的会员同样拒绝（组合支付也一样）
+    await expect(pay([friend], 49900, [wallet(stranger.id, 49900)])).rejects.toMatchObject({ status: 422, code: 'WALLET_MEMBER_NOT_IN_CHECKOUT' });
+    await expect(pay([mine], 49900, [wallet(stranger.id, 20000), { method: 'cash', amount: 29900 }])).rejects.toMatchObject({ code: 'WALLET_MEMBER_NOT_IN_CHECKOUT' });
+    // 没有扣任何人的钱，两位客人仍在店
+    for (const id of [payer.id, stranger.id]) expect(await walletState(id)).toMatchObject({ principal: 200000, ledger: 1 });
+    expect([await tagState('A033'), await tagState('A034')]).toEqual([1, 1]);
+
+    // 合并到同一张结账单：会员替朋友付
+    const done = await pay([mine, friend], 99800, [wallet(payer.id, 99800)]);
+    expect(done.status).toBe('completed');
+    expect(await walletState(payer.id)).toMatchObject({ principal: 100200, ledger: 2 });
+    await checks();
   });
 });

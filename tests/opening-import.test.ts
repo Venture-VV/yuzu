@@ -223,6 +223,75 @@ describe('作废', () => {
   });
 });
 
+describe('导入期间会员资料变动（G3 复测）', () => {
+  /** 等到有 n 个会话在等锁，证明导入确实卡在给已有会员加锁的一步 */
+  async function waitForLockWaiters(n: number) {
+    for (let i = 0; i < 100; i++) {
+      const [row] = await ctx.sql<{ n: number }[]>`
+        SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+      if (row!.n >= n) return;
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    throw new Error(`等待 ${n} 个锁等待者超时`);
+  }
+  /** 另一个终端：先锁住会员行（导入核对完、加锁时等在这里），再改资料并提交 */
+  async function editWhileImporting(memberId: number, csv: string, edit: (tx: typeof ctx.sql) => Promise<unknown>) {
+    const conn = await ctx.sql.reserve();
+    const tx = conn as unknown as typeof ctx.sql;
+    await conn.unsafe('BEGIN');
+    await tx`SELECT id FROM members WHERE id = ${memberId} FOR UPDATE`;
+    const importing = apply(csv);
+    await waitForLockWaiters(1);
+    await edit(tx);
+    await conn.unsafe('COMMIT');
+    conn.release();
+    return importing;
+  }
+  const counts = async () =>
+    (await ctx.sql<{ imports: number; balances: number; ledger: number; members: number }[]>`
+      SELECT (SELECT count(*)::int FROM opening_imports) AS imports, (SELECT count(*)::int FROM opening_balances) AS balances,
+             (SELECT count(*)::int FROM ledger_entries) AS ledger, (SELECT count(*)::int FROM members) AS members`)[0]!;
+
+  it('核对后、加锁前会员改了姓名和手机号：整批拒绝，期初不会记到身份已变的会员上', async () => {
+    const m = await createMember(ctx, '并发期初原身份', '19900009701');
+    const before = await counts();
+    const csv = csvOf('并发期初原身份,19900009701,E91,100,0,,,,,', '并发期初新客,19900009703,E92,50,0,,,,,');
+    const r = await editWhileImporting(m.id, csv, (tx) => tx`UPDATE members SET name = '并发期初新身份', phone = '19900009702' WHERE id = ${m.id}`);
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatchObject({ code: 'OPENING_STALE', message: '导入期间会员资料有变动，整批未导入；请重新预览后再导入' });
+    expect(r.body.error.details.errors.map((e: { line: number }) => e.line)).toEqual([2]);
+    // 整批没有写入：没有批次、期初、流水，新客也没有建档；改了资料的会员余额仍为 0
+    expect(await counts()).toEqual(before);
+    expect(await balanceOf(ctx, m.id)).toEqual({ principal: 0, bonus: 0 });
+    expect(await memberByPhone('19900009703')).toBeUndefined();
+    await checksOk(today);
+  });
+
+  it('核对后、加锁前手机号换到另一位同名会员名下：整批拒绝，不会记到原来那位会员上', async () => {
+    const a = await createMember(ctx, '同名期初', '19900009711');
+    const b = await createMember(ctx, '同名期初', '19900009712');
+    const before = await counts();
+    const r = await editWhileImporting(a.id, csvOf('同名期初,19900009711,E93,100,0,,,,,'), async (tx) => {
+      await tx`UPDATE members SET phone = '19900009713' WHERE id = ${a.id}`;
+      await tx`UPDATE members SET phone = '19900009711' WHERE id = ${b.id}`;
+    });
+    expect(r.status).toBe(409);
+    expect(r.body.error.code).toBe('OPENING_STALE');
+    expect(r.body.error.details.errors).toEqual([{ line: 2, message: '手机号 19900009711 对应的会员刚刚有变动' }]);
+    expect(await counts()).toEqual(before);
+    expect([await balanceOf(ctx, a.id), await balanceOf(ctx, b.id)]).toEqual([{ principal: 0, bonus: 0 }, { principal: 0, bonus: 0 }]);
+  });
+
+  it('期间只改了不影响身份的资料（备注）：照常导入', async () => {
+    const m = await createMember(ctx, '改备注期初', '19900009721');
+    const r = await editWhileImporting(m.id, csvOf('改备注期初,19900009721,E94,100,0,,,,,'), (tx) => tx`UPDATE members SET note = '导入时改了备注' WHERE id = ${m.id}`);
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ total: 1, matchCount: 1 });
+    expect(await balanceOf(ctx, m.id)).toEqual({ principal: 10000, bonus: 0 });
+    await checksOk(today);
+  });
+});
+
 describe('期初赠金到期', () => {
   it('带到期日的期初赠金到期后作废，日结一致', async () => {
     const lastDay = today;

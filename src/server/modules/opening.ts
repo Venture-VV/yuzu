@@ -4,6 +4,7 @@
 //   · 导入：一个事务里整批写入 —— 没有的会员新建档案；每位会员一条期初明细（保留原始行与旧卡号）；
 //     有余额的记一条「期初导入」流水（本金、赠金分开，不计入充值实收），期初赠金进入赠金批次（可带到期日）；
 //     任一行有问题整批不导入；同一操作编号重提返回第一次的结果，重复导入同一位会员会被拒绝；
+//     锁住已有会员后按最新资料重新核对，导入期间会员改了姓名或手机号时整批不导入（OPENING_STALE）；
 //   · 作废：逐位或整批。这位会员在期初之后还没有其他余额变动时才能作废，记一条「期初作废」流水把期初余额减回去，
 //     期初赠金批次清零；原明细保留并标记已作废，会员档案保留。
 // 加锁顺序：期初导入咨询锁 → 会员（按 id 升序）→ 赠金批次。
@@ -60,7 +61,7 @@ interface PlannedRow extends OpeningRow {
   expiresAt: Date | null;
 }
 
-/** 按手机号匹配已有会员并逐行核对（预览与导入共用；导入时在咨询锁内重新核对一次） */
+/** 按手机号匹配已有会员并逐行核对（预览与导入共用；导入时在咨询锁内核对，锁住已有会员后再核对一次） */
 async function planRows(db: Db, rows: OpeningRow[], today: string, timeZone: string, startHour: number) {
   const existing = rows.length
     ? await db<{ id: number; memberNo: string; name: string; phone: string; openingDocNo: string | null }[]>`
@@ -211,6 +212,15 @@ export async function applyOpeningImport(
       // 已有会员按 id 升序加锁（其他记账每次只锁一位会员，不会与这里形成死锁）
       const existingIds = planned.flatMap((r) => (r.member ? [r.member.id] : [])).sort((a, b) => a - b);
       if (existingIds.length) await tx`SELECT id FROM members WHERE id IN ${tx(existingIds)} ORDER BY id FOR UPDATE`;
+      // 上面的核对是加锁前读的：期间提交的会员改名、改手机号（或别的会员改用了文件里的手机号）会让期初记到身份已变的会员上。
+      // 锁住之后按最新资料再核对一次（姓名、手机号、有效期初），匹配结果有任何变化整批不导入
+      const again = await planRows(tx, parsed.rows, businessDate, deps.config.timezone, settings.businessDayStartHour);
+      const stale = again.errors.length
+        ? again.errors
+        : planned.flatMap((r, i) => (r.member?.id === again.planned[i]!.member?.id ? [] : [{ line: r.line, message: `手机号 ${r.phone} 对应的会员刚刚有变动` }]));
+      if (stale.length) {
+        throw conflict('OPENING_STALE', '导入期间会员资料有变动，整批未导入；请重新预览后再导入', { errors: stale.slice(0, 100) });
+      }
 
       const totals = sumOf(planned);
       const importNo = await nextDocNo(tx, 'opening', businessDate);

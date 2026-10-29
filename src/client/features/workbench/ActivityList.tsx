@@ -75,7 +75,7 @@ export function ActivityRow({
         )}
         <DeltaLine label="本金" cents={row.principalDelta} struck={reversed} emphasize={row.entryType !== 'recharge'} />
         {row.bonusDelta !== 0 && <DeltaLine label="赠金" cents={row.bonusDelta} struck={reversed} bonus />}
-        {onReverse && row.entryType === 'consume' && !reversed && row.consumptionId && (
+        {onReverse && row.entryType === 'consume' && !reversed && row.consumptionId && !row.checkoutNo && (
           <Button
             size="sm"
             variant="ghost"
@@ -88,6 +88,12 @@ export function ActivityRow({
           >
             撤销
           </Button>
+        )}
+        {/* 前台结账的储值支付只能随结账单一起反结账，不提供单独撤销 */}
+        {onReverse && row.entryType === 'consume' && !reversed && row.checkoutNo && (
+          <span className="mt-1 text-[12px] text-ink-3" title={`结账单 ${row.checkoutNo} 的储值支付：如需更正，请到「前台 → 结账记录」反结账`}>
+            需反结账更正
+          </span>
         )}
       </div>
     </div>

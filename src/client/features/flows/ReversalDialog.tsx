@@ -98,7 +98,7 @@ export function ReversalDialog({ target, onClose }: { target: ReversalTarget | n
               variant="danger"
               icon={<Undo2 className="size-4" />}
               loading={op.state.status === 'submitting'}
-              disabled={!c || c.status !== 'completed' || blockedByWindow || reason.length < 2 || locked}
+              disabled={!c || c.status !== 'completed' || !!c.checkout || blockedByWindow || reason.length < 2 || locked}
               onClick={op.submit}
             >
               确认撤销并恢复余额
@@ -164,6 +164,10 @@ export function ReversalDialog({ target, onClose }: { target: ReversalTarget | n
           {c.status === 'reversed' ? (
             <Notice tone="info" title="这张消费单已经撤销过了">
               {c.reversal ? `撤销单 ${c.reversal.docNo} · ${c.reversal.operatorName} · ${c.reversal.reason}` : null}
+            </Notice>
+          ) : c.checkout ? (
+            <Notice tone="warning" title={`这是结账单 ${c.checkout.checkoutNo} 的储值支付，不能单独撤销`}>
+              如需更正，请到「前台 → 结账记录」对结账单 {c.checkout.checkoutNo} 反结账，储值随之按原单恢复。
             </Notice>
           ) : blockedByWindow ? (
             <Notice tone="warning" title={`这笔消费已超过撤销时限（消费后 ${describeHours(windowHours!)}内）`}>

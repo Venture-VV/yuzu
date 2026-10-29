@@ -184,6 +184,8 @@ export interface ConsumptionDoc {
   overLimitApproverName: string | null;
   lines: ConsumptionLine[];
   reversal: ReversalBrief | null;
+  /** 前台结账用储值支付生成的消费单：只能随结账单一起反结账，不能在会员这里单独撤销 */
+  checkout: { id: number; checkoutNo: string; status: 'completed' | 'voided' } | null;
 }
 
 export interface ReversalDoc {
@@ -245,6 +247,8 @@ export interface LedgerRow {
   paymentMethod: PaymentMethod | null;
   /** 消费单当前状态 */
   consumptionStatus: 'completed' | 'reversed' | null;
+  /** 前台结账储值支付的消费单所属结账单号（只能反结账，不能单独撤销） */
+  checkoutNo: string | null;
   /** 消费单对应的撤销单号 / 撤销单对应的原消费单号 */
   relatedDocNo: string | null;
   /** 撤销单的原消费营业日，跨日撤销时与本行营业日不同 */
