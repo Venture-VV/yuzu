@@ -26,6 +26,7 @@ const KEY_MAP = {
   member_fields: 'memberFields',
   custom_bonus_valid_days: 'customBonusValidDays',
   require_open_shift: 'requireOpenShift',
+  hide_pending_marks: 'hidePendingMarks',
 } as const satisfies Record<string, keyof StoreSettings>;
 
 // 单笔上限按店主 2026-10-27 答复（#9）默认 50 万元；营业时间默认全天；
@@ -41,6 +42,7 @@ const DEFAULTS: StoreSettings = {
   memberFields: [],
   customBonusValidDays: null,
   requireOpenShift: true,
+  hidePendingMarks: false,
 };
 
 export async function loadSettings(db: Db): Promise<StoreSettings> {
@@ -80,6 +82,7 @@ const SettingsInput = z
       .max(MAX_MEMBER_FIELDS, `会员自定义字段最多 ${MAX_MEMBER_FIELDS} 个`),
     customBonusValidDays: z.number().int('赠金有效期按整天填写').min(1, '赠金有效期至少 1 天').max(3650, '赠金有效期最多 3650 天').nullable(),
     requireOpenShift: z.boolean('请选择是否要求先开班'),
+    hidePendingMarks: z.boolean('请选择是否隐藏「待确认」标记'),
   })
   // 只提交要修改的项（各设置卡片分别保存）；没有提交的项保持原值
   .partial();

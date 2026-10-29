@@ -26,6 +26,7 @@ import { PaymentFormPage } from './features/payables/PaymentFormPage';
 import { PoFormPage } from './features/purchasing/PoFormPage';
 import { PurchasingPage } from './features/purchasing/PurchasingPage';
 import { CheckoutPrintPage } from './features/print/CheckoutPrintPage';
+import { SettlementPrintPage } from './features/print/SettlementPrintPage';
 import { ShiftPrintPage } from './features/print/ShiftPrintPage';
 import { useCan } from './lib/session';
 
@@ -110,6 +111,7 @@ const router = createBrowserRouter([
     children: [
       { path: 'checkout/:id', element: <CheckoutPrintPage /> },
       { path: 'shift/:id', element: <ShiftPrintPage /> },
+      { path: 'settlement/:date', element: <SettlementPrintPage /> },
     ],
   },
   {

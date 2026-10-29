@@ -8,6 +8,7 @@ import {
   type TextareaHTMLAttributes,
 } from 'react';
 import { Check, LoaderCircle } from 'lucide-react';
+import { useOptionalSession } from '../lib/session';
 import { cn } from '../lib/utils';
 
 // ───────────────────────── Button ─────────────────────────
@@ -307,7 +308,10 @@ export function Badge({ tone = 'neutral', className, children, icon }: { tone?: 
 }
 
 /** 「待确认」标记：模拟规则统一使用 */
+/** 经营规则还没签认时的「待确认」标记；店主在「经营规则」里选择隐藏后不再显示 */
 export function PendingBadge({ className, title }: { className?: string; title?: string }) {
+  const session = useOptionalSession();
+  if (session?.rules.hidePendingMarks) return null;
   return (
     <span
       title={title ?? '经营规则尚待店主确认，当前为模拟规则'}

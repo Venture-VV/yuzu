@@ -107,6 +107,35 @@ test.describe('打印', () => {
     await expectPrintLayout(page);
   });
 
+  test('日结单（A4）：营业口径分列应收、优惠、净营业额、实收，核对一致，签字栏；打印样式下不横向溢出', async ({ page }) => {
+    await login(page, 'linlan');
+    const { date } = await checkouts(page);
+    await page.goto(`/print/settlement/${date}`);
+    const sheet = page.getByTestId('print-settlement');
+    await expect(sheet).toContainText('日结单');
+    await expect(sheet).toContainText(`营业日 ${date}`);
+    const business = page.getByTestId('print-settlement-business');
+    for (const label of ['应收（结账 − 反结账）', '优惠 / 免单（当场授权，不是收款）', '净营业额（应收 − 优惠）', '实收（现金、扫码、银行卡、其他）']) {
+      await expect(business).toContainText(label);
+    }
+    await expect(page.getByTestId('print-settlement-received')).toContainText('合计');
+    await expect(page.getByTestId('print-settlement-checks')).toContainText('项核对全部一致');
+    await expect(page.getByTestId('print-settlement-anomalies')).toContainText('反结账');
+    for (const label of ['日结人', '值班经理', '店主']) await expect(sheet).toContainText(`${label}：`);
+    await expect(page.getByTestId('print-instance')).toBeVisible();
+    await page.emulateMedia({ media: 'print' });
+    await expect(page.getByTestId('print-now')).toBeHidden();
+    const box = await page.getByTestId('print-paper').evaluate((el) => ({ width: el.clientWidth, scroll: el.scrollWidth }));
+    expect(box.scroll).toBeLessThanOrEqual(box.width);
+    await page.emulateMedia({ media: 'screen' });
+
+    // 入口：日结页的「打印」在新窗口打开 A4 日结单
+    await page.goto('/settlement');
+    const [popup] = await Promise.all([page.waitForEvent('popup'), page.getByTestId('settlement-print').click()]);
+    expect(popup.url()).toMatch(/\/print\/settlement\/\d{4}-\d{2}-\d{2}\?auto=1$/);
+    await popup.close().catch(() => {});
+  });
+
   test('入口：结账记录与交班页的「打印」在新窗口打开打印页', async ({ page }) => {
     await login(page, 'chenyin');
     const { me, date, list } = await checkouts(page);

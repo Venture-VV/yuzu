@@ -33,6 +33,8 @@ interface Draft {
   customBonusValidDays: string;
   /** 充值、结账、反结账前必须先开班（R1.2） */
   requireOpenShift: boolean;
+  /** 店主签认后隐藏页面上的「待确认」标记 */
+  hidePendingMarks: boolean;
 }
 
 export function RulesTab() {
@@ -54,6 +56,7 @@ export function RulesTab() {
       businessHours: settings.data.businessHours,
       customBonusValidDays: settings.data.customBonusValidDays ? String(settings.data.customBonusValidDays) : '',
       requireOpenShift: settings.data.requireOpenShift,
+      hidePendingMarks: settings.data.hidePendingMarks,
     });
   }
   if (!draft) return <Skeleton className="h-96" />;
@@ -83,6 +86,7 @@ export function RulesTab() {
         businessHours: draft.businessHours,
         customBonusValidDays: customDays,
         requireOpenShift: draft.requireOpenShift,
+        hidePendingMarks: draft.hidePendingMarks,
       });
       await qc.invalidateQueries({ queryKey: qk.settings });
       await qc.invalidateQueries({ queryKey: qk.session });
@@ -96,9 +100,15 @@ export function RulesTab() {
 
   return (
     <div className="space-y-5">
-      <Notice tone="warning" title="以下均为模拟规则，正式试用前需店主确认">
-        扣款顺序、营业日口径、岗位权限都标为「待确认」。修改只影响之后的业务；已入账单据按当时的规则记录，撤销按原单构成恢复。
-      </Notice>
+      {settings.data?.hidePendingMarks ? (
+        <Notice tone="info" title="店主已签认经营规则，「待确认」标记已隐藏">
+          修改只影响之后的业务；已入账单据按当时的规则记录，撤销按原单构成恢复。
+        </Notice>
+      ) : (
+        <Notice tone="warning" title="标着「待确认」的是模拟规则，正式试用前需店主确认">
+          扣款顺序、营业日口径、岗位权限都标为「待确认」。修改只影响之后的业务；已入账单据按当时的规则记录，撤销按原单构成恢复。店主签认后，可以在下面把「待确认」标记设为隐藏。
+        </Notice>
+      )}
 
       <Card className="p-5">
         <SectionTitle aside={<PendingBadge />}>本金与赠金的扣款顺序</SectionTitle>
@@ -180,6 +190,20 @@ export function RulesTab() {
               </option>
             ))}
           </Select>
+        </Field>
+        <Field
+          label="「待确认」标记"
+          hint="页面上标着「待确认」的是还没签认、先按推荐做的模拟规则；店主签认后可以隐藏这些标记（只影响显示，不改任何规则，随时可以再显示）"
+        >
+          <Segmented
+            ariaLabel="「待确认」标记"
+            value={draft.hidePendingMarks ? 'hide' : 'show'}
+            onChange={(v) => setDraft({ ...draft, hidePendingMarks: v === 'hide' })}
+            options={[
+              { value: 'show', label: '显示' },
+              { value: 'hide', label: '隐藏（店主已签认）' },
+            ]}
+          />
         </Field>
         <Field label="收款前必须先开班" hint="开启时充值、结账、反结账前都要先开班（页面上可以就地开班），每笔收款都记到当班的交班表（店主 2026-10-29 签认默认开启）">
           <Segmented

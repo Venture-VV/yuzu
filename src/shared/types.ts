@@ -35,6 +35,8 @@ export interface StoreRules {
   reversalWindowHours: number | null;
   /** 充值、结账、反结账前必须先开班（2026-10-29 签认，默认开）；关闭后没开班的收款不属于任何班次 */
   requireOpenShift: boolean;
+  /** 隐藏页面上的「待确认」标记（店主签认经营规则后打开，R1.3）；只影响显示，不改任何规则 */
+  hidePendingMarks: boolean;
   /** 营业时间（#4，待确认）；null 为全天 24 小时营业。只用于显示与提醒 */
   businessHours: BusinessHours | null;
   /** 会员自定义字段（#12）；固定字段之外由店主配置 */

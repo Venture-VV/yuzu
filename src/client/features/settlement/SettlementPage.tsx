@@ -18,7 +18,7 @@ import {
   WalletMinimal,
 } from 'lucide-react';
 import { businessBreakdown, CHECKOUT_METHOD_LABELS, COUPON_PLATFORM_LABELS } from '@shared/checkout';
-import { describeDate, PAYMENT_METHOD_LABELS, PAYMENT_METHODS } from '@shared/labels';
+import { describeDate, PAYMENT_METHOD_LABELS } from '@shared/labels';
 import type { SettlementAnomaly, SettlementSummary } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
 import { qk, useSettlement } from '../../lib/queries';
@@ -31,6 +31,8 @@ import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, ConfirmCheck, Field, Notice, PendingBadge, SectionTitle, Skeleton, Textarea } from '../../components/ui';
+import { PrintButton } from '../print/PrintButton';
+import { ANOMALY_LABELS, receivedByMethod } from './summary';
 
 export function SettlementPage() {
   const session = useSession();
@@ -50,6 +52,11 @@ export function SettlementPage() {
         subtitle="先看清当天，再定位明细与异常"
         actions={
           <div className="flex gap-2">
+            {s.data && (
+              <PrintButton path={`/print/settlement/${date}`} size="sm" paper="a4" testId="settlement-print">
+                打印
+              </PrintButton>
+            )}
             {can('ledger.export') && (
               <Button size="sm" variant="secondary" icon={<Download className="size-4" />} onClick={() => downloadUrl(`/api/settlements/${date}/export`)}>
                 导出
@@ -384,18 +391,18 @@ const ANOMALY_META: Record<
   SettlementAnomaly['kind'],
   { label: string; tone: 'clay' | 'ember' | 'lake' | 'yuzu'; icon: typeof Undo2; iconClass: string }
 > = {
-  reversal: { label: '撤销', tone: 'clay', icon: Undo2, iconClass: 'bg-clay-soft text-clay' },
-  cross_day_reversal: { label: '跨日撤销', tone: 'ember', icon: Undo2, iconClass: 'bg-ember-soft text-ember' },
-  duplicate_blocked: { label: '重复提交', tone: 'lake', icon: Copy, iconClass: 'bg-lake-soft text-lake' },
-  rejected: { label: '余额不足', tone: 'yuzu', icon: WalletMinimal, iconClass: 'bg-yuzu-soft text-yuzu-deep' },
-  abandoned: { label: '作废待确认', tone: 'ember', icon: CircleSlash, iconClass: 'bg-ember-soft text-ember' },
-  balance_mismatch: { label: '余额不符', tone: 'clay', icon: CircleX, iconClass: 'bg-clay-soft text-clay' },
-  chain_break: { label: '流水不连续', tone: 'clay', icon: CircleX, iconClass: 'bg-clay-soft text-clay' },
-  checkout_void: { label: '反结账', tone: 'ember', icon: Undo2, iconClass: 'bg-ember-soft text-ember' },
-  discount: { label: '优惠 / 免单', tone: 'yuzu', icon: BadgePercent, iconClass: 'bg-yuzu-soft text-yuzu-deep' },
-  ticket_override: { label: '降档 / 免票', tone: 'yuzu', icon: Ticket, iconClass: 'bg-yuzu-soft text-yuzu-deep' },
-  visit_cancel: { label: '撤销误开的牌', tone: 'lake', icon: CircleSlash, iconClass: 'bg-lake-soft text-lake' },
-  line_void: { label: '作废明细', tone: 'lake', icon: CircleSlash, iconClass: 'bg-lake-soft text-lake' },
+  reversal: { label: ANOMALY_LABELS.reversal, tone: 'clay', icon: Undo2, iconClass: 'bg-clay-soft text-clay' },
+  cross_day_reversal: { label: ANOMALY_LABELS.cross_day_reversal, tone: 'ember', icon: Undo2, iconClass: 'bg-ember-soft text-ember' },
+  duplicate_blocked: { label: ANOMALY_LABELS.duplicate_blocked, tone: 'lake', icon: Copy, iconClass: 'bg-lake-soft text-lake' },
+  rejected: { label: ANOMALY_LABELS.rejected, tone: 'yuzu', icon: WalletMinimal, iconClass: 'bg-yuzu-soft text-yuzu-deep' },
+  abandoned: { label: ANOMALY_LABELS.abandoned, tone: 'ember', icon: CircleSlash, iconClass: 'bg-ember-soft text-ember' },
+  balance_mismatch: { label: ANOMALY_LABELS.balance_mismatch, tone: 'clay', icon: CircleX, iconClass: 'bg-clay-soft text-clay' },
+  chain_break: { label: ANOMALY_LABELS.chain_break, tone: 'clay', icon: CircleX, iconClass: 'bg-clay-soft text-clay' },
+  checkout_void: { label: ANOMALY_LABELS.checkout_void, tone: 'ember', icon: Undo2, iconClass: 'bg-ember-soft text-ember' },
+  discount: { label: ANOMALY_LABELS.discount, tone: 'yuzu', icon: BadgePercent, iconClass: 'bg-yuzu-soft text-yuzu-deep' },
+  ticket_override: { label: ANOMALY_LABELS.ticket_override, tone: 'yuzu', icon: Ticket, iconClass: 'bg-yuzu-soft text-yuzu-deep' },
+  visit_cancel: { label: ANOMALY_LABELS.visit_cancel, tone: 'lake', icon: CircleSlash, iconClass: 'bg-lake-soft text-lake' },
+  line_void: { label: ANOMALY_LABELS.line_void, tone: 'lake', icon: CircleSlash, iconClass: 'bg-lake-soft text-lake' },
 };
 
 function AnomalyItem({ a }: { a: SettlementAnomaly }) {
@@ -504,13 +511,7 @@ function BusinessCard({ s }: { s: SettlementSummary }) {
   const b = s.business;
   const biz = businessBreakdown(b);
   if (b.checkouts.count === 0 && b.voids.count === 0 && s.recharge.count === 0) return null;
-  // 实收合计：充值实收 + 结账里的现金类收款（会员储值、团购券不是本次实收）
-  const cashMethods = PAYMENT_METHODS.map((m) => {
-    const recharge = s.recharge.byMethod.find((x) => x.method === m)?.amount ?? 0;
-    const checkout = b.byMethod.find((x) => x.method === m)?.amount ?? 0;
-    return { method: m, recharge, checkout, total: recharge + checkout };
-  }).filter((r) => r.recharge || r.checkout);
-  const cashTotal = cashMethods.reduce((sum, r) => sum + r.total, 0);
+  const { rows: cashMethods, total: cashTotal } = receivedByMethod(s);
   return (
     <div className="grid gap-4 lg:grid-cols-2" data-testid="settlement-business">
       <Card className="overflow-hidden">
