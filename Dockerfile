@@ -23,7 +23,7 @@ RUN npm ci --omit=dev --no-audit --no-fund --registry=${NPM_REGISTRY}
 # ── 运行 ──
 FROM ${NODE_IMAGE}
 WORKDIR /app
-ARG APP_VERSION=0.1.0
+ARG APP_VERSION=0.3.0
 ENV NODE_ENV=production \
     PORT=8080 \
     STATIC_DIR=/app/dist/client \
