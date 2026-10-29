@@ -23,11 +23,14 @@ RUN npm ci --omit=dev --no-audit --no-fund --registry=${NPM_REGISTRY}
 # ── 运行 ──
 FROM ${NODE_IMAGE}
 WORKDIR /app
-ARG APP_VERSION=0.3.1
+ARG APP_VERSION=0.3.2
+# 提交 SHA 由 update.sh 传入（YUZU_COMMIT），页面常显；直接构建时为空
+ARG APP_COMMIT=
 ENV NODE_ENV=production \
     PORT=8080 \
     STATIC_DIR=/app/dist/client \
-    APP_VERSION=${APP_VERSION}
+    APP_VERSION=${APP_VERSION} \
+    APP_COMMIT=${APP_COMMIT}
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./

@@ -33,7 +33,7 @@
 11. [目录结构](#目录结构)
 12. [后续清单](#后续清单)
 
-相关文档：[Mac mini 部署手册](docs/DEPLOY_MAC_MINI.md) · [待确认经营事项](docs/PENDING_DECISIONS.md) · [G2 提测交接](docs/HANDOFF_G2.md) · [设计语言](docs/DESIGN.md) · [变更记录](CHANGELOG.md)
+相关文档：[推进路线](docs/ROADMAP.md) · [Mac mini 部署手册](docs/DEPLOY_MAC_MINI.md) · [测试服部署手册](docs/DEPLOY_TEST_SERVER.md) · [待确认经营事项](docs/PENDING_DECISIONS.md) · [G2 提测交接](docs/HANDOFF_G2.md) · [设计语言](docs/DESIGN.md) · [变更记录](CHANGELOG.md)
 
 ---
 
@@ -188,12 +188,13 @@ npm run cli -- seed-billing-demo     # 在前台演示数据上写入结账、�
 
 ## 试用 / 正式部署
 
-详细步骤见 **[Mac mini 部署手册](docs/DEPLOY_MAC_MINI.md)**，简要流程：
+详细步骤见 **[Mac mini 部署手册](docs/DEPLOY_MAC_MINI.md)**（云服务器测试服见 [测试服部署手册](docs/DEPLOY_TEST_SERVER.md)），简要流程：
 
 ```bash
 git clone https://github.com/Venture-VV/yuzu.git && cd yuzu
 git checkout v0.3.0                 # 只部署 main 上的版本标签（git tag 查看最新），不部署开发分支
-cp .env.example .env                # 修改数据库密码、初始店主、备份目录
+cp .env.example .env                # 修改数据库密码、初始店主、备份目录、实例标识 YUZU_INSTANCE
+export YUZU_VERSION=$(git describe --tags --always) YUZU_COMMIT=$(git rev-parse HEAD)   # 页面显示版本与 SHA
 docker compose up -d --build
 docker compose ps                   # app / db 显示 healthy 即可
 ```

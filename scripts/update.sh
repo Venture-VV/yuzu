@@ -30,6 +30,7 @@ fi
 ./scripts/backup.sh before-update
 git checkout -q --detach "$commit"
 export YUZU_VERSION="$(git describe --tags --always)"
+export YUZU_COMMIT="$commit"
 docker compose build app
 docker compose up -d
 for _ in $(seq 1 30); do

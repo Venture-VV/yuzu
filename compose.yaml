@@ -28,7 +28,8 @@ services:
       args:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
-        APP_VERSION: ${YUZU_VERSION:-0.3.1}
+        APP_VERSION: ${YUZU_VERSION:-0.3.2}
+        APP_COMMIT: ${YUZU_COMMIT:-}
     # 不同 Compose 项目使用独立标签，演示构建不会覆盖试用 / 正式镜像。
     image: ${APP_IMAGE:-yuzu-app:${COMPOSE_PROJECT_NAME:-local}}
     restart: unless-stopped
@@ -37,6 +38,8 @@ services:
         condition: service_healthy
     environment:
       APP_ENV: ${APP_ENV:-trial}
+      # 实例标识：prod 正式服 / shadow 影子运行 / test 测试服 / demo 演示库，页面常显
+      YUZU_INSTANCE: ${YUZU_INSTANCE:-}
       DATABASE_URL: postgres://yuzu:${POSTGRES_PASSWORD}@db:5432/yuzu
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}

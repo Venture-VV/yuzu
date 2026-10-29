@@ -31,7 +31,8 @@ open -e .env                 # 用文本编辑器修改
 
 | 变量 | 说明 |
 | --- | --- |
-| `APP_ENV` | 试用填 `trial`，正式填 `production`（正式环境禁止写入演示数据） |
+| `APP_ENV` | 试用填 `trial`，正式填 `production`（试用、正式环境都禁止写入演示数据） |
+| `YUZU_INSTANCE` | 页面常显的实例标识：正式服填 `prod`，影子运行填 `shadow` |
 | `POSTGRES_PASSWORD` | 数据库密码，建议用 `openssl rand -hex 24` 生成（只含字母数字，避免连接串转义问题） |
 | `INIT_OWNER_USERNAME` / `INIT_OWNER_PASSWORD` | 第一位店主账号，首次登录后必须改密 |
 | `BACKUP_DIR` | `/Volumes/YuzuBackup/yuzu` |
@@ -42,6 +43,7 @@ open -e .env                 # 用文本编辑器修改
 ## 3. 启动
 
 ```bash
+export YUZU_VERSION=$(git describe --tags --always) YUZU_COMMIT=$(git rev-parse HEAD)   # 页面显示版本与 SHA
 docker compose up -d --build
 docker compose ps            # app、db 显示 (healthy)，backup 显示 Up
 docker compose logs app      # 应看到「已应用迁移」「已创建初始店主账号」「浴族 yuzu 已启动」
@@ -53,7 +55,7 @@ docker compose logs app      # 应看到「已应用迁移」「已创建初始�
 2. 录入实际的充值套餐与消费项目；
 3. 按确认结果设置扣款顺序和营业日切换时间。
 
-试用阶段如需演示数据：`docker compose exec app node dist/server/cli.js seed-demo`（正式环境会拒绝）。
+演示数据只写入独立的演示库（`APP_ENV=development`，见第 7 节末尾），试用、正式环境都会拒绝。
 
 ## 4. 上线前验证清单
 
