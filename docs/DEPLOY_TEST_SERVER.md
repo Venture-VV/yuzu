@@ -41,7 +41,7 @@ sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plu
 sudo usermod -aG docker yuzu      # 重新登录后生效
 ```
 
-基础镜像和 npm 包从国内源拉，写在第 5 节的 `.env` 里（`NODE_IMAGE`、`POSTGRES_IMAGE`、`NPM_REGISTRY`）。某个源拉不下来时换成能用的国内镜像地址；也可以在阿里云「容器镜像服务 → 镜像加速器」取得地址，写进 `/etc/docker/daemon.json` 的 `registry-mirrors` 后执行 `sudo systemctl restart docker`。
+基础镜像和 npm 包从国内源拉，写在第 5 节的 `.env` 里（`NODE_IMAGE`、`POSTGRES_IMAGE`、`NPM_REGISTRY`、`ALPINE_MIRROR`）。某个源拉不下来时换成能用的国内镜像地址；也可以在阿里云「容器镜像服务 → 镜像加速器」取得地址，写进 `/etc/docker/daemon.json` 的 `registry-mirrors` 后执行 `sudo systemctl restart docker`。
 
 ## 3. 拉取代码（私有仓库，用只读部署密钥）
 
@@ -124,17 +124,20 @@ BACKUP_DIR=/home/yuzu/yuzu-backups/test
 NODE_IMAGE=docker.m.daocloud.io/library/node:22-alpine
 POSTGRES_IMAGE=docker.m.daocloud.io/library/postgres:16-alpine
 NPM_REGISTRY=https://registry.npmmirror.com
+ALPINE_MIRROR=https://mirrors.aliyun.com/alpine
 ```
+
+备份写在本机硬盘（`BACKUP_DIR`），不需要外置盘的哨兵文件。v0.3.3 起备份服务每小时备份一次，每份都在临时库里试恢复、自检并记下数据指纹；hourly 保留 48 小时，daily 等保留 30 天。
 
 `~/yuzu-demo/.env`（演示库）：在上面的基础上改 `COMPOSE_PROJECT_NAME=yuzu-demo`、`APP_ENV=development`、`YUZU_INSTANCE=demo`、`APP_PORT=8082`、`POSTGRES_PASSWORD` 换一个，`BACKUP_DIR=/home/yuzu/yuzu-backups/demo`。`INIT_OWNER_*` 可以不填，演示数据会建好演示账号。
 
 ## 6. 首次启动
 
-用 `main` 上最新的版本标签，至少 `v0.3.2`（从这一版起页面显示实例标识与 SHA）。`git tag --sort=-creatordate | head -3` 查看。
+用 `main` 上最新的版本标签，至少 `v0.3.2`（从这一版起页面显示实例标识与 SHA；`v0.3.3` 起每小时备份并核验）。`git tag --sort=-creatordate | head -3` 查看。
 
 ```bash
 cd ~/yuzu-test
-git checkout v0.3.2
+git checkout v0.3.3          # 换成 main 上最新的版本标签
 export YUZU_VERSION=$(git describe --tags --always) YUZU_COMMIT=$(git rev-parse HEAD)
 docker compose up -d --build
 docker compose ps            # app、db 显示 (healthy)，backup 显示 Up
@@ -176,6 +179,7 @@ docker compose exec app node dist/server/cli.js check
 - [ ] 演练库登录页不显示演示账号；演示库登录页显示。
 - [ ] 演练库：`check` 全部 ✓；前台状态板有 747 个柜号，价目表 29 个项目。
 - [ ] 演示库：`check` 全部 ✓。
+- [ ] 演练库（v0.3.3 起）：`docker compose logs backup` 里有「✓ yuzu-…-daily.dump（…自检 N/N）」；`./scripts/verify-backup.sh <最新的备份文件>` 最后一行是「✓ 备份可以恢复，内容与备份时一致」。
 - [ ] 手机断开 Tailscale、只用蜂窝网络时，`http://<公网 IP>:8080`、`:8082` 都打不开，`ssh` 到公网 IP 也连不上。
 
 ## 8. 日常更新
@@ -186,6 +190,7 @@ docker compose exec app node dist/server/cli.js check
 | 更新演练库（只在店主约定的窗口） | `cd ~/yuzu-test && ./scripts/update.sh <版本标签>` |
 | 查看状态 / 日志 | `docker compose ps`、`docker compose logs -f app` |
 | 自检 | `docker compose exec app node dist/server/cli.js check` |
+| 立即备份 / 核验最新备份 | `./scripts/backup.sh`；`./scripts/verify-backup.sh "$(ls -t ~/yuzu-backups/test/yuzu-*.dump \| head -n 1)"` |
 | 重置某个员工的密码 | `docker compose exec app node dist/server/cli.js reset-password <账号>` |
 
 `update.sh` 只接受 `main` 上的版本标签或完整 SHA，会先备份、再切换版本，并把版本号与 SHA 写进镜像，启动后自动跑 `check`。发布后，Codex 在对应 PR 留发布记录（SHA、迁移、check 结果）。

@@ -192,11 +192,11 @@ npm run cli -- seed-billing-demo     # 在前台演示数据上写入结账、�
 
 ```bash
 git clone https://github.com/Venture-VV/yuzu.git && cd yuzu
-git checkout v0.3.0                 # 只部署 main 上的版本标签（git tag 查看最新），不部署开发分支
+git checkout v0.3.3                 # 换成 main 上最新的版本标签（git tag --sort=-creatordate | head -3），不部署开发分支
 cp .env.example .env                # 修改数据库密码、初始店主、备份目录、实例标识 YUZU_INSTANCE
 export YUZU_VERSION=$(git describe --tags --always) YUZU_COMMIT=$(git rev-parse HEAD)   # 页面显示版本与 SHA
 docker compose up -d --build
-docker compose ps                   # app / db 显示 healthy 即可
+docker compose ps                   # app / db 显示 healthy，backup 显示 Up
 ```
 
 门店电脑或平板浏览器访问 `http://<Mac mini 局域网 IP>:8080`。
@@ -238,21 +238,27 @@ docker compose exec app node dist/server/cli.js reset-password boss
 
 版本标签：合并到 main、CI 通过后，GitHub Actions「版本标签」按 `package.json` 的版本号自动创建 `vX.Y.Z`（已有同名标签时跳过；也可在 Actions 页面手动运行补打）。
 
-**自动备份**：`backup` 容器每天 `BACKUP_HOUR` 点做一次完整备份（`pg_dump` 自定义格式），写入 `BACKUP_DIR`，保留 `BACKUP_KEEP_DAYS` 天。请把 `BACKUP_DIR` 指向外置硬盘或另一块磁盘，并定期复制一份到店外。
+**自动备份**：`backup` 服务（与应用同一个镜像）每 `BACKUP_INTERVAL_MINUTES` 分钟（默认 60）做一次完整备份（`pg_dump` 自定义格式），写入 `BACKUP_DIR`。每份导出后都在临时库里完整恢复一遍、跑自检并算数据指纹，结果写在备份旁同名的 `.json` 里，然后删掉临时库。每天 `BACKUP_HOUR` 点之后的第一份记为 daily。hourly 保留 `BACKUP_HOURLY_KEEP_HOURS` 小时（默认 48），daily、升级前、恢复前与手动备份保留 `BACKUP_KEEP_DAYS` 天（默认 30）。请把 `BACKUP_DIR` 指向外置硬盘或另一块磁盘，设 `BACKUP_REQUIRE_SENTINEL=true` 并在目录里放空文件 `.yuzu-backup-target`：外置盘没挂载时不备份、不往内置盘写；店外副本见部署手册第 9 节。
 
 **手动备份**：
 
 ```bash
-./scripts/backup.sh            # 生成 BACKUP_DIR/yuzu-日期时间-manual.dump 并校验可读
+./scripts/backup.sh            # 生成 BACKUP_DIR/yuzu-日期-时间-manual.dump 与 .json，在临时库恢复核验
+```
+
+**核验一份备份**（不碰当前数据库；会员、营业口径、库存、前台自检与数据指纹）：
+
+```bash
+./scripts/verify-backup.sh /Volumes/YuzuBackup/yuzu/yuzu-20261126-041200-daily.dump
 ```
 
 **恢复**：
 
 ```bash
-./scripts/restore.sh /Volumes/YuzuBackup/yuzu/yuzu-20261025-040000.dump
+./scripts/restore.sh /Volumes/YuzuBackup/yuzu/yuzu-20261126-041200-daily.dump
 ```
 
-脚本会先备份当前数据，再停止应用、重建数据库、导入备份、启动应用，最后自动核对余额与流水。建议每月做一次恢复演练（可在另一台电脑上进行）。
+脚本先核对文件摘要，再备份当前数据、停止应用、重建数据库、导入备份；启动应用前比对数据指纹（与备份旁 `.json` 记下的一致才启动，不一致时应用保持停止），最后跑自检。正式环境要当面输入 `RESTORE-PRODUCTION`。建议每月做一次恢复演练（可在另一台电脑上进行）。
 
 ## 账务设计要点
 
@@ -301,7 +307,8 @@ src/
       inventory/   master 档案 · docs 库存单据 · reports 库存卡/汇总/自检
                    purchasing 采购单与比价 · payables 期初未付/付款/对账
       frontdesk/   visits 接待/换牌/同行/状态板 · bills 挂账与作废 · tags 手牌池 · checks 自检
-    cli.ts         运维命令：migrate / create-owner / reset-password / seed-demo / seed-inventory-demo / seed-frontdesk-demo / seed-billing-demo / import-hand-tags / import-price-list / import-opening / check
+    cli.ts         运维命令：migrate / create-owner / reset-password / seed-demo / seed-inventory-demo / seed-frontdesk-demo / seed-billing-demo / import-hand-tags / import-price-list / import-opening / check / fingerprint / backup / backup-loop / verify-backup
+    ops/           自检汇总、数据指纹、备份与核验
     seed.ts        会员合成演示数据
     seed-inventory.ts  库存与采购合成演示数据（demo/inventory-demo.json，仅独立演示库）
     seed-frontdesk.ts  前台手牌合成演示数据（预期结果 demo/frontdesk-expected.json，仅独立演示库）
@@ -312,7 +319,7 @@ src/
                    frontdesk 前台手牌矩阵、小票抽屉、接待/挂账/换牌/预结账
 tests/             后端集成测试
 e2e/               浏览器验收
-scripts/           backup / restore / update / 备份循环
+scripts/           backup / verify-backup / restore / update
 docs/              部署手册、待确认事项、设计语言、截图
 ```
 

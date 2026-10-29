@@ -1,5 +1,19 @@
 # 变更记录
 
+## v0.3.3 · 每小时备份，每份在临时库恢复核验并记下数据指纹（R1.4 第一部分）
+
+- **每小时备份**：`backup` 服务改用应用镜像（内含 `pg_dump` / `pg_restore` 16），默认每 60 分钟备份一次（`BACKUP_INTERVAL_MINUTES`）；每天 `BACKUP_HOUR` 点之后的第一份记为 daily。hourly 保留 48 小时（`BACKUP_HOURLY_KEEP_HOURS`），daily、升级前、恢复前与手动备份保留 30 天。此前每天只备份一次，当天已有任何备份（包括升级前、手动备份）就跳过，丢数据的窗口最长约 24 小时。
+- **每份备份都在临时库里真正恢复一遍**：导出后恢复到一个临时库，算数据指纹、跑全部自检，然后删掉临时库。备份旁写同名 `.json` 说明：文件摘要（sha256）、版本与 SHA、实例标识、指纹（逐表行数与内容摘要）、自检结果。恢复失败的备份照样保留，说明里记 `verified: false`，日志报错。此前只用 `pg_restore -l` 检查能否列出目录。
+- **数据指纹**（`cli fingerprint`）：逐表的行数与内容摘要（每行一个摘要，按字节序排序后合成），再合成一个总摘要；在只读的可重复读事务里计算，固定时区与输出格式，排序不依赖主键与数据库的排序规则，不同机器、Alpine 与 Debian 的 PostgreSQL 镜像算出的结果相同。`--expect <摘要>` 不一致时退出码为 1。
+- **核验一份备份**（`./scripts/verify-backup.sh <备份文件>`，即 `cli verify-backup`）：在临时库恢复，核对文件摘要、数据指纹与自检，不碰当前数据库；文件可以在外置盘或从 OSS 取回的目录。旧版本的备份先比对指纹，再补跑本版本的迁移后自检。
+- **外置盘哨兵**：`BACKUP_REQUIRE_SENTINEL=true` 时，备份目录里没有空文件 `.yuzu-backup-target` 就不备份、不往内置盘写（外置盘没挂载时 Docker 会在内置盘上建出同名目录）；定时备份每小时报一次错，手动、升级前、恢复前备份直接拒绝，`update.sh` 因此停下，不在没有备份的情况下升级。
+- **恢复**（`restore.sh`）：先核对文件摘要，不一致不动数据库；导入后、启动应用前比对数据指纹，不一致时应用保持停止；相对路径按执行命令时所在的目录理解。正式环境（`APP_ENV=production`）改为必须当面输入 `RESTORE-PRODUCTION`，不再接受 `YUZU_RESTORE_CONFIRM=yes` 跳过；其他环境照旧输入 `RESTORE`。
+- **其他**：数据库还没完成首次迁移时备份服务等待，不备份空库；容器停止或升级时备份服务立即退出，中途留下的临时库与半截文件之后清理；`docker compose` 的 db、app、backup 日志轮转（每个服务最多 5 个 10 MB 文件）；`check` 与备份核验共用同一套自检（`src/server/ops/consistency.ts`）。手动备份的自检有不一致项时照样算备份成功（备份本身完好），只提示告知店主与 Codex，不拦升级与恢复。
+- **构建**：运行镜像安装 `postgresql16-client`；国内构建可设 `ALPINE_MIRROR=https://mirrors.aliyun.com/alpine`。CI 的集成测试固定使用 16 版 `pg_dump`。
+- **文档**：Mac mini 部署手册（哨兵文件、验证清单、备份策略、OSS 上传跳过 hourly 并上传 `.json`、从 OSS 恢复演练改用 `verify-backup.sh`）、测试服部署手册、README、`.env.example`。
+- **升级注意**：从 v0.3.2 及更早版本用 `update.sh` 升级时，升级前备份仍按旧方式做（旧脚本，没有 `.json`）；新版本启动后备份服务换成新方式，旧的 `backup-loop.sh` 已删除。门店外置盘要先放哨兵文件，再在 `.env` 设 `BACKUP_REQUIRE_SENTINEL=true`。
+- 测试 274 → 287（新增 `tests/backup.test.ts`）。版本号 0.3.3。
+
 ## v0.3.2 · 测试服部署手册；页面常显实例标识与「版本 + SHA」
 
 - **测试服部署手册**（`docs/DEPLOY_TEST_SERVER.md`）：阿里云深圳 ECS，演练库（`APP_ENV=production`，真实柜号与价目表）与演示库（`APP_ENV=development`，四套演示数据）各一个 Compose 项目；只经 Tailscale 访问，安全组只留 UDP 41641；私有仓库用只读部署密钥；国内镜像源；首次启动、导入、验证与更新步骤。

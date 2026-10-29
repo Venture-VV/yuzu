@@ -4,6 +4,13 @@
 # 同一台机器上要同时跑试用和正式环境时，用不同的 .env 与项目名区分，数据卷互不影响：
 #   docker compose --env-file .env.trial -p yuzu-trial up -d
 
+# 每个服务的日志最多保留 5 个 10 MB 文件，不会把磁盘写满
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   db:
     image: ${POSTGRES_IMAGE:-postgres:16-alpine}
@@ -21,6 +28,7 @@ services:
       timeout: 5s
       retries: 30
     # 数据库不对局域网开放端口，只供 app 与 backup 容器访问
+    logging: *logging
 
   app:
     build:
@@ -28,7 +36,8 @@ services:
       args:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
-        APP_VERSION: ${YUZU_VERSION:-0.3.2}
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-}
+        APP_VERSION: ${YUZU_VERSION:-0.3.3}
         APP_COMMIT: ${YUZU_COMMIT:-}
     # 不同 Compose 项目使用独立标签，演示构建不会覆盖试用 / 正式镜像。
     image: ${APP_IMAGE:-yuzu-app:${COMPOSE_PROJECT_NAME:-local}}
@@ -49,25 +58,38 @@ services:
       TZ: ${APP_TIMEZONE:-Asia/Shanghai}
     ports:
       - "${APP_PORT:-8080}:8080"
+    logging: *logging
 
+  # 备份服务：与 app 同一个镜像（含 pg_dump / pg_restore），由 app 构建、不从网上拉。
+  # 每小时备份一次，每份都在临时库里试恢复、跑自检并记下数据指纹（写在备份旁的 .json 里）。
   backup:
-    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    image: ${APP_IMAGE:-yuzu-app:${COMPOSE_PROJECT_NAME:-local}}
+    pull_policy: never
     restart: unless-stopped
+    # 写宿主机的备份目录（外置盘），与旧版备份容器一样用 root
+    user: root
+    command: ["node", "dist/server/cli.js", "backup-loop"]
     depends_on:
       db:
         condition: service_healthy
     environment:
-      PGHOST: db
-      PGUSER: yuzu
-      PGPASSWORD: ${POSTGRES_PASSWORD}
-      PGDATABASE: yuzu
-      BACKUP_HOUR: ${BACKUP_HOUR:-4}
-      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-30}
+      APP_ENV: ${APP_ENV:-trial}
+      YUZU_INSTANCE: ${YUZU_INSTANCE:-}
+      DATABASE_URL: postgres://yuzu:${POSTGRES_PASSWORD}@db:5432/yuzu
+      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
       TZ: ${APP_TIMEZONE:-Asia/Shanghai}
+      BACKUP_PATH: /backups
+      BACKUP_INTERVAL_MINUTES: ${BACKUP_INTERVAL_MINUTES:-60}
+      BACKUP_HOUR: ${BACKUP_HOUR:-4}
+      BACKUP_HOURLY_KEEP_HOURS: ${BACKUP_HOURLY_KEEP_HOURS:-48}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-30}
+      BACKUP_REQUIRE_SENTINEL: ${BACKUP_REQUIRE_SENTINEL:-false}
     volumes:
       - ${BACKUP_DIR:-./backups}:/backups
-      - ./scripts/backup-loop.sh:/usr/local/bin/backup-loop.sh:ro
-    entrypoint: ["/bin/sh", "/usr/local/bin/backup-loop.sh"]
+    # 镜像自带的健康检查是查网页服务，这个容器不提供网页
+    healthcheck:
+      disable: true
+    logging: *logging
 
 volumes:
   pgdata:

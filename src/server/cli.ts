@@ -18,11 +18,14 @@
 //                                         导入旧系统（EBC）会员余额作为期初（真实业务数据，默认只预览，加 --apply 才写入）；
 //                                         本金、赠金分开记「期初导入」流水，不计入充值实收；同一位会员只能有一笔有效的期初
 //   check                                 核对会员余额与流水、库存结存与库存流水、手牌账单与明细是否一致
+//   fingerprint [--json] [--expect 摘要]  当前数据库的数据指纹（逐表行数与内容摘要）；--expect 不一致时退出码为 1
+//   backup [--label 备注]                 立即备份一次：导出 → 临时库试恢复 → 自检与数据指纹，文件与 .json 说明写到 BACKUP_PATH
+//   backup-loop                           备份服务：按 BACKUP_INTERVAL_MINUTES 定时备份并清理过期文件（compose 的 backup 服务）
+//   verify-backup <备份文件.dump>         演练：在临时库恢复这份备份，核对文件摘要、数据指纹与自检（不碰当前数据库）
 
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
-import { businessDateOf } from '@shared/business-date';
 import { ZONE_LABELS } from '@shared/frontdesk';
 import { parseHandTagCsv } from '@shared/hand-tag-import';
 import { formatYuan } from '@shared/money';
@@ -30,7 +33,7 @@ import { parsePriceListCsv } from '@shared/price-list-import';
 import { checkPasswordStrength, generateTempPassword, hashPassword } from './auth/password';
 import { destroyStaffSessions } from './auth/session';
 import { loadConfig } from './config';
-import { createSql, readSnapshot } from './db';
+import { createSql } from './db';
 import { writeAudit } from './lib/audit';
 import { migrate } from './migrate';
 import { seedDemo, DEMO_PASSWORD } from './seed';
@@ -41,12 +44,11 @@ import { STORE_HAND_TAGS_CSV } from './demo/hand-tags-2026-10-27';
 import { TANGQI_PRICE_LIST_CSV } from './demo/price-list-tangqi-2026-10-27';
 import { importPriceList } from './modules/catalog';
 import { importHandTags } from './modules/frontdesk/tags';
-import { frontdeskChecks } from './modules/frontdesk/checks';
-import { inventoryChecks } from './modules/inventory/reports';
 import { applyOpeningImport, previewOpeningImport } from './modules/opening';
-import { computeSettlement } from './modules/settlement';
-import { loadSettings } from './modules/settings';
 import { createStaff } from './modules/staff';
+import { assertBackupTarget, backupDirFromEnv, backupLoop, backupPolicyFromEnv, createBackup, verifyBackup } from './ops/backup';
+import { consistencyChecks } from './ops/consistency';
+import { computeFingerprint } from './ops/fingerprint';
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(`--${name}`);
@@ -220,18 +222,58 @@ async function main() {
         break;
       }
       case 'check': {
-        const settings = await loadSettings(sql);
-        const today = businessDateOf(new Date(), config.timezone, settings.businessDayStartHour);
-        const summary = await readSnapshot(sql, (tx) => computeSettlement(tx, today, today));
-        const inventory = await readSnapshot(sql, inventoryChecks);
-        const frontdesk = await readSnapshot(sql, frontdeskChecks);
-        const all = [...summary.checks, ...inventory, ...frontdesk];
+        const all = await consistencyChecks(sql, config.timezone);
         for (const c of all) console.log(`${c.ok ? '✓' : '✗'} ${c.label}：${c.detail}`);
         if (all.some((c) => !c.ok)) process.exitCode = 1;
         break;
       }
+      case 'fingerprint': {
+        const fp = await computeFingerprint(sql);
+        const expect = flag(args, 'expect');
+        if (args.includes('--json')) console.log(JSON.stringify(fp, null, 2));
+        else {
+          // 比对时只打印结论，不逐表列出
+          if (expect === undefined) for (const t of fp.tables) console.log(`${t.name}\t${t.rows}\t${t.digest}`);
+          console.log(`数据指纹：${fp.digest}`);
+        }
+        if (expect !== undefined) {
+          const same = expect === fp.digest;
+          console.log(same ? '✓ 与备份时记下的指纹一致' : `✗ 与备份时记下的指纹不同（备份时 ${expect}）`);
+          if (!same) process.exitCode = 1;
+        }
+        break;
+      }
+      case 'backup': {
+        const dir = backupDirFromEnv();
+        await assertBackupTarget(dir, backupPolicyFromEnv());
+        const m = await createBackup(config, dir, flag(args, 'label') ?? 'manual');
+        if (!m.verified) {
+          console.error(`✗ 已导出 ${m.file}，但在临时库恢复失败：${m.verifyError}`);
+          process.exitCode = 1;
+          break;
+        }
+        console.log(`✓ 已备份：${m.file}（${(m.bytes / 1024 / 1024).toFixed(1)} MB）；已在临时库恢复核验，指纹 ${m.fingerprintDigest}`);
+        // 自检不一致说明的是当前数据，备份本身完好：照样算备份成功，升级、恢复（往往正是为了修它）不被拦住
+        const failed = m.checks!.failed;
+        for (const c of failed) console.log(`✗ ${c.label}：${c.detail}`);
+        if (failed.length) console.log(`· 当前数据自检有 ${failed.length} 项不一致（备份本身完好），请告知店主与 Codex`);
+        break;
+      }
+      case 'backup-loop': {
+        await backupLoop(config, backupDirFromEnv(), backupPolicyFromEnv());
+        break;
+      }
+      case 'verify-backup': {
+        const file = args[0];
+        if (!file) throw new Error('用法：verify-backup <备份文件.dump>');
+        const result = await verifyBackup(config, file);
+        for (const line of result.lines) console.log(line);
+        console.log(result.ok ? '✓ 备份可以恢复，内容与备份时一致' : '✗ 备份核验没有通过');
+        if (!result.ok) process.exitCode = 1;
+        break;
+      }
       default:
-        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo | seed-billing-demo | import-hand-tags | import-price-list | import-opening | check');
+        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo | seed-billing-demo | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup');
         process.exitCode = command ? 1 : 0;
     }
   } finally {
