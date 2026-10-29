@@ -1,5 +1,6 @@
 // 首版审查问题的回归验证（依赖演示数据：店主 linlan / 店员 xiaozhou，密码 yuzu2026）。
 import { expect, test, type Page } from '@playwright/test';
+import { ensureShift } from './shift';
 
 const PASSWORD = 'yuzu2026';
 
@@ -9,6 +10,7 @@ async function login(page: Page, username: string) {
   await page.fill('#password', PASSWORD);
   await page.getByRole('button', { name: '登录' }).click();
   await expect(page.getByRole('heading', { name: '会员工作台' })).toBeVisible({ timeout: 30_000 }); // 刚启动的服务第一次登录可能较慢
+  await ensureShift(page); // 收款前必须先开班（R1.2）
 }
 
 async function openMember(page: Page, name: string) {

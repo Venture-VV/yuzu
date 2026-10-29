@@ -1,6 +1,7 @@
 // Batch 2.4a 浏览器验收（门店电脑尺寸）：单笔超过 50 万的充值需店主或店总当场授权；撤销时限超过后值班经理不能撤销、店主可以。
 // 依赖 seed-demo 与 seed-frontdesk-demo（值班经理 zhangjl）；只在独立演示库执行，可重复执行（规则改动在结束时恢复）。
 import { expect, test, type Page } from '@playwright/test';
+import { ensureShift } from './shift';
 
 const PASSWORD = 'yuzu2026';
 
@@ -10,6 +11,7 @@ async function login(page: Page, username: string) {
   await page.fill('#password', PASSWORD);
   await page.getByRole('button', { name: '登录' }).click();
   await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible({ timeout: 30_000 }); // 刚启动的服务第一次登录可能较慢
+  await ensureShift(page); // 收款前必须先开班（R1.2）
 }
 
 async function openMember(page: Page, query: string) {

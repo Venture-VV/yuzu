@@ -82,6 +82,7 @@ export function useOperation(spec: OperationSpec) {
       void qc.invalidateQueries({ queryKey: ['ledger'] });
       void qc.invalidateQueries({ queryKey: ['settlement'] });
       void qc.invalidateQueries({ queryKey: ['consumption'] });
+      void qc.invalidateQueries({ queryKey: ['shift'] }); // 交班表的充值、储值消费汇总
     },
     [qc],
   );

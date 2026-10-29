@@ -4,7 +4,8 @@
 //   · 交班先拿到班次（排他锁）：收款开始处理时在这个班次上的，等交班提交后整笔拒绝（SHIFT_CLOSED），不入账——
 //     不会出现「开班期间发起、交班之后完成、哪个班次都不算」的收款；开新班后原样重提记到新班次；
 //   · 升级时仍未交班的旧班次（迁移 016 前开班）同样适用；
-//   · 反结账提醒记到反结账人的班次，原收银员的班次不再计入被反结账的单。
+//   · 反结账退款记到反结账人的班次、现金扣减应有现金；原收银员的班次仍算这笔收款（R1.2，店主 2026-10-29 签认）；
+//     规则关闭、反结账的人没有开班时退款没有记到任何班次，原单也不再计入收款时的班次。
 // 注意：收款持有班次共享锁时被测试卡住，交班会等这笔收款——测试先发出交班请求、确认在等锁，再放开，不能同步等交班返回。
 
 import { randomUUID } from 'node:crypto';
@@ -66,8 +67,9 @@ const cashCheckout = (visitId: number, key = randomUUID(), cookie = ctx.clerk) =
   api(ctx.app, cookie, 'POST', '/api/frontdesk/checkouts', { clientKey: key, visitIds: [visitId], expectedTotal: 49900, payments: [{ method: 'cash', amount: 49900 }] });
 const open = async (cookie: string, openingCash = 0) => (await api(ctx.app, cookie, 'POST', '/api/shifts', { openingCash })).body as { id: number };
 const current = async (cookie: string) => (await api(ctx.app, cookie, 'GET', '/api/shifts/current')).body.shift;
+/** 交班：实点等于应有现金（应有现金为负时实点 0，例如备用金为 0 的值班经理反结账了别人的现金单） */
 const close = (cookie: string, id: number, expectedCash: number) =>
-  api(ctx.app, cookie, 'POST', `/api/shifts/${id}/close`, { countedCash: expectedCash, expectedCash });
+  api(ctx.app, cookie, 'POST', `/api/shifts/${id}/close`, { countedCash: Math.max(0, expectedCash), expectedCash });
 const shiftOfRecharge = async (id: number) =>
   (await ctx.sql<{ shiftId: number | null; createdAt: string }[]>`SELECT shift_id, created_at FROM recharges WHERE id = ${id}`)[0]!;
 /** ¥499 结账：现金 100 + 美团券 399 */
@@ -81,20 +83,26 @@ const couponCheckout = (visitId: number, code: string) =>
       { method: 'coupon', platform: 'meituan', code, dealName: '不含餐门票', amount: 39900 },
     ],
   });
-/** 交班表各项互相一致：收款方式合计 = 结账合计，团购平台合计 = 团购券收款，现金 = 现金收款，充值方式合计 = 充值实收 */
+/**
+ * 交班表各项互相一致：收款方式合计 = 结账合计，团购平台合计 = 团购券收款，现金 = 现金收款，充值方式合计 = 充值实收，
+ * 退款方式合计 = 反结账合计，应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金
+ */
 function expectConsistent(s: {
   checkouts: { total: number };
   checkoutByMethod: { method: string; amount: number }[];
   coupons: { amount: number }[];
   recharges: { paid: number; byMethod: { amount: number }[] };
-  cash: { opening: number; checkout: number; recharge: number; expected: number };
+  refunds: { total: number; byMethod: { method: string; amount: number }[] };
+  cash: { opening: number; checkout: number; recharge: number; refund: number; expected: number };
 }) {
   const by = (method: string) => s.checkoutByMethod.find((m) => m.method === method)?.amount ?? 0;
   expect(s.checkoutByMethod.reduce((n, m) => n + m.amount, 0)).toBe(s.checkouts.total);
   expect(s.coupons.reduce((n, c) => n + c.amount, 0)).toBe(by('coupon'));
   expect(s.cash.checkout).toBe(by('cash'));
   expect(s.recharges.byMethod.reduce((n, m) => n + m.amount, 0)).toBe(s.recharges.paid);
-  expect(s.cash.expected).toBe(s.cash.opening + s.cash.checkout + s.cash.recharge);
+  expect(s.refunds.byMethod.reduce((n, m) => n + m.amount, 0)).toBe(s.refunds.total);
+  expect(s.cash.refund).toBe(s.refunds.byMethod.find((m) => m.method === 'cash')?.amount ?? 0);
+  expect(s.cash.expected).toBe(s.cash.opening + s.cash.checkout + s.cash.recharge - s.cash.refund);
 }
 const wallet = async () => {
   const [m] = await ctx.sql<{ principalBalance: number; bonusBalance: number }[]>`SELECT principal_balance, bonus_balance FROM members WHERE id = ${memberId}`;
@@ -119,7 +127,7 @@ describe('交班与收款以班次为界', () => {
     const cur = await current(ctx.clerk);
     expect(cur.summary.recharges).toMatchObject({ count: 1, paid: 30000 });
     expect(cur.summary.checkouts).toEqual({ count: 1, total: 49900 });
-    expect(cur.summary.cash).toEqual({ opening: 10000, checkout: 49900, recharge: 30000, expected: 89900 });
+    expect(cur.summary.cash).toEqual({ opening: 10000, checkout: 49900, recharge: 30000, refund: 0, expected: 89900 });
     const closed = await close(ctx.clerk, shift.id, 89900);
     expect(closed.body).toMatchObject({ status: 'closed', expectedCash: 89900 });
 
@@ -274,7 +282,7 @@ describe('交班与收款以班次为界', () => {
     expect((await api(ctx.app, ctx.clerk, 'GET', `/api/shifts/${shift.id}`)).body.summary.recharges.count).toBe(0);
   });
 
-  it('反结账提醒记到反结账人的班次；原收银员的班次不再计入被反结账的单', async () => {
+  it('反结账退款记到反结账人的班次、现金扣减应有现金；原收银员的班次仍算这笔收款（R1.2）', async () => {
     const clerkShift = await open(ctx.clerk);
     const ownerShift = await open(ctx.owner);
     const c = await cashCheckout(await enter('A003'));
@@ -283,13 +291,22 @@ describe('交班与收款以班次为界', () => {
     expect(v.status).toBe(200);
     const [k] = await ctx.sql<{ shiftId: number; voidShiftId: number }[]>`SELECT shift_id, void_shift_id FROM checkouts WHERE id = ${c.body.id}`;
     expect(k).toEqual({ shiftId: clerkShift.id, voidShiftId: ownerShift.id });
+    // 收款算在收款时的班次：之后被反结账也不减
     const mine = await current(ctx.clerk);
-    expect(mine.summary.checkouts).toEqual({ count: 0, total: 0 });
+    expect(mine.summary.checkouts).toEqual({ count: 1, total: 49900 });
+    expect(mine.summary.cash).toMatchObject({ checkout: 49900, refund: 0, expected: 49900 });
     expect(mine.summary.voids).toEqual([]);
+    expectConsistent(mine.summary);
+    // 反结账人的班次：退的现金扣减应有现金（备用金 0 → 应有现金为负，同一钱箱的人合并核对时与收银员的班次相抵）
     const boss = await current(ctx.owner);
-    expect(boss.summary.voids).toEqual([{ checkoutNo: c.body.checkoutNo, amount: 49900, reason: '收款方式记错', voidedAt: expect.any(String) }]);
-    expect((await close(ctx.owner, ownerShift.id, 0)).body.summary.voids).toHaveLength(1);
-    expect((await close(ctx.clerk, clerkShift.id, 0)).status).toBe(200);
+    expect(boss.summary.voids).toEqual([{ checkoutNo: c.body.checkoutNo, amount: 49900, reason: '收款方式记错', voidedAt: expect.any(String), cashRefund: 49900 }]);
+    expect(boss.summary.refunds).toEqual({ count: 1, total: 49900, byMethod: [{ method: 'cash', amount: 49900 }] });
+    expect(boss.summary.cash).toMatchObject({ checkout: 0, refund: 49900, expected: -49900 });
+    expectConsistent(boss.summary);
+    const bossClosed = await close(ctx.owner, ownerShift.id, -49900);
+    expect(bossClosed.body).toMatchObject({ status: 'closed', expectedCash: -49900, countedCash: 0 });
+    expect(bossClosed.body.summary.voids).toHaveLength(1);
+    expect((await close(ctx.clerk, clerkShift.id, 49900)).status).toBe(200);
     // 反结账字段之外，结账单记下的班次不能改
     await expect(ctx.sql`UPDATE checkouts SET shift_id = NULL WHERE id = ${c.body.id}`).rejects.toThrow(/只能反结账/);
   });
@@ -315,11 +332,13 @@ describe('交班与收款以班次为界', () => {
     expect((await api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/checkouts/${c.body.id}/void`, { reason: '收款方式记错' })).status).toBe(200);
     const [k2] = await ctx.sql<{ voidShiftId: number }[]>`SELECT void_shift_id FROM checkouts WHERE id = ${c.body.id}`;
     expect(k2!.voidShiftId).toBe(next.id);
-    expect((await close(ctx.owner, next.id, 0)).body.summary.voids).toHaveLength(1);
+    // 退的 499 元现金扣减新班次的应有现金
+    expect((await close(ctx.owner, next.id, -49900)).body.summary.voids).toHaveLength(1);
   });
 
-  it('复测复现：交班汇总到一半时另一位员工反结账本班次的单——保存的交班表取自同一时刻，结账合计、收款方式、团购券互相一致', async () => {
+  it('复测复现：交班汇总到一半时另一位员工（在班上）反结账本班次的单——收款仍算在本班次（R1.2），退款记到反结账人的班次，保存的交班表各项互相一致', async () => {
     const shift = await open(ctx.clerk);
+    const ownerShift = await open(ctx.owner);
     const c = await couponCheckout(await enter('A008'), 'MT2026SHIFT0001');
     expect(c.status).toBe(200);
     expectConsistent((await current(ctx.clerk)).summary);
@@ -327,19 +346,44 @@ describe('交班与收款以班次为界', () => {
     const release = await hold((tx) => tx`LOCK TABLE recharges IN ACCESS EXCLUSIVE MODE`);
     const closing = close(ctx.clerk, shift.id, 10000);
     await waitForLockWaiters(1);
-    // 店主（另一位员工，不在这个班次上）此时反结账这张单
+    // 店主（另一位员工，在自己的班上）此时反结账这张单
     const v = await api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/checkouts/${c.body.id}/void`, { reason: '收款方式记错' });
     expect(v.status).toBe(200);
     await release();
-    // 汇总整体取自反结账之后：应有现金已变，拒绝交班；按新的应有现金交班后快照里既没有这张单，也没有它的券
+    // 收款算在收款时的班次：反结账不改本班次的汇总（退款记在反结账人的班次），交班照常完成，快照里仍有这张单和它的券
     const cl = await closing;
-    expect(cl.body.error).toMatchObject({ code: 'SHIFT_CHANGED', details: { expectedCash: 0 } });
-    const done = await close(ctx.clerk, shift.id, 0);
-    expect(done.status).toBe(200);
-    expect(done.body.summary.checkouts).toEqual({ count: 0, total: 0 });
-    expect(done.body.summary.checkoutByMethod).toEqual([]);
-    expect(done.body.summary.coupons).toEqual([]);
+    expect(cl.status).toBe(200);
+    expect(cl.body.summary.checkouts).toEqual({ count: 1, total: 49900 });
+    expect(cl.body.summary.coupons).toEqual([{ platform: 'meituan', count: 1, amount: 39900 }]);
+    expect(cl.body.summary.refunds).toEqual({ count: 0, total: 0, byMethod: [] });
+    expectConsistent(cl.body.summary);
     expectConsistent((await api(ctx.app, ctx.clerk, 'GET', `/api/shifts/${shift.id}`)).body.summary);
+    // 退的 100 元现金扣减店主班次的应有现金，两张交班表合起来相抵
+    const boss = await close(ctx.owner, ownerShift.id, -10000);
+    expect(boss.status).toBe(200);
+    expect(boss.body.summary.refunds).toEqual({ count: 1, total: 49900, byMethod: [{ method: 'cash', amount: 10000 }, { method: 'coupon', amount: 39900 }] });
+    expectConsistent(boss.body.summary);
+  });
+
+  it('同上，但规则关闭、反结账的人没有开班：退款没有记到任何班次，原单不再计入本班次——交班看到应有现金变了（SHIFT_CHANGED），按新的应有现金交班后各项一致', async () => {
+    expect(await current(ctx.owner)).toBeNull();
+    const shift = await open(ctx.clerk);
+    const c = await couponCheckout(await enter('A010'), 'MT2026SHIFT0003');
+    expect(c.status).toBe(200);
+    const release = await hold((tx) => tx`LOCK TABLE recharges IN ACCESS EXCLUSIVE MODE`);
+    const closing = close(ctx.clerk, shift.id, 10000);
+    await waitForLockWaiters(1);
+    const v = await api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/checkouts/${c.body.id}/void`, { reason: '收款方式记错' });
+    expect(v.status).toBe(200);
+    await release();
+    const cl = await closing;
+    expect(cl.status).toBe(409);
+    expect(cl.body.error).toMatchObject({ code: 'SHIFT_CHANGED', details: { expectedCash: 0 } });
+    const again = await close(ctx.clerk, shift.id, 0);
+    expect(again.status).toBe(200);
+    expect(again.body.summary.checkouts).toEqual({ count: 0, total: 0 });
+    expect(again.body.summary.coupons).toEqual([]);
+    expectConsistent(again.body.summary);
   });
 
   it('反结账在交班汇总之后、交班提交之前完成：交班表是反结账之前的同一时刻，各项一致', async () => {

@@ -114,7 +114,7 @@ describe('会员等级', () => {
       vipLevelBasis: 'recharge',
       vipLevelThresholds: [0, 5_000_000, 10_000_000, 20_000_000, 30_000_000],
       vipOverrideEnabled: false,
-      overtimeGraceMinutes: 0,
+      overtimeGraceMinutes: 15,
     });
     expect(await setRules({ selfVoidMinutes: 20 })).toEqual({ ...before, selfVoidMinutes: 20 });
     await setRules({ selfVoidMinutes: 15 });

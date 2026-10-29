@@ -2,11 +2,14 @@
 //
 // 票种在后台维护（12 小时档 / 24 小时档两个价）；接待时为每位客人选定票种并留存当时的票价，
 // 在店期间可以改票种（留痕）；门票金额在结账时按在店时长计算（见 @shared/checkout 的 priceTicket）。
+// 改成更便宜的票种或免票（接待时直接选免票也算）要值班经理及以上当场授权并填原因（R1.2，店主 2026-10-29 签认），
+// 授权人与原因记在改票种记录上。
 
 import { z } from 'zod';
-import { priceTicket, ticketTierLabel, type TicketType } from '@shared/checkout';
+import { isFreeTicket, priceTicket, ticketChangeNeedsGrant, ticketTierLabel, type TicketType } from '@shared/checkout';
 import type { VisitDetail } from '@shared/frontdesk';
 import type { Db, Sql, Tx } from '../../db';
+import { consumeTicketGrant } from '../../auth/grants';
 import { writeAudit } from '../../lib/audit';
 import type { Deps, OpContext } from '../../lib/context';
 import { badRequest, conflict, notFound, unprocessable } from '../../lib/errors';
@@ -78,9 +81,30 @@ export async function saveTicketType(sql: Sql, id: number | null, raw: TicketTyp
   return listTicketTypes(sql, true);
 }
 
-export const VisitTicketInput = z.object({ ticketTypeId: z.number('请选择票种').int().positive('请选择票种') });
+export const VisitTicketInput = z.object({
+  ticketTypeId: z.number('请选择票种').int().positive('请选择票种'),
+  /** 改成更便宜的票种或免票时，值班经理及以上当场签发的授权编号（原因随授权填写） */
+  grantId: z.uuid('授权编号格式不正确').nullable().default(null),
+});
 
-/** 改票种（在店期间）：留存新票种当前的票价，记一条改票种记录 */
+/** 降档 / 免票的授权人与原因（记在改票种记录上） */
+export interface TicketApproval {
+  approverId: number;
+  approverName: string;
+  reason: string;
+}
+
+/** 需要授权却没有带授权时的提示（接待、改票种共用） */
+export function ticketAuthRequired(items: { tagCode: string; ticketTypeId: number; name: string; free: boolean }[]) {
+  const first = items[0]!;
+  return unprocessable(
+    'TICKET_AUTH_REQUIRED',
+    `手牌 ${items.map((i) => i.tagCode).join('、')} 选「${first.name}」${first.free ? '是免票' : '比原来的票种便宜'}，需要值班经理、店总或店主当场授权并填写原因`,
+    { items: items.map(({ tagCode, ticketTypeId }) => ({ tagCode, ticketTypeId })) },
+  );
+}
+
+/** 改票种（在店期间）：留存新票种当前的票价，记一条改票种记录；改成更便宜的票种或免票要当场授权 */
 export async function setVisitTicket(deps: Deps, visitId: number, raw: unknown, ctx: OpContext) {
   const input = parse(VisitTicketInput, raw);
   await deps.sql.begin(async (tx) => {
@@ -88,41 +112,71 @@ export async function setVisitTicket(deps: Deps, visitId: number, raw: unknown, 
     const at = ctx.at ?? new Date();
     const visit = (await lockVisits(tx, [visitId])).get(visitId)!;
     assertOpen(visit);
-    const [cur] = await tx<{ ticketTypeId: number | null }[]>`SELECT ticket_type_id FROM visits WHERE id = ${visitId}`;
+    const [cur] = await tx<{ ticketTypeId: number | null; price12h: number | null; price24h: number | null; tagCode: string }[]>`
+      SELECT v.ticket_type_id, v.ticket_price_12h AS price12h, v.ticket_price_24h AS price24h, t.code AS tag_code
+      FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE v.id = ${visitId}`;
     if (cur!.ticketTypeId === input.ticketTypeId) throw badRequest('票种没有变化');
     const type = (await resolveTicketType(tx, input.ticketTypeId))!;
-    await applyVisitTicket(tx, visitId, cur!.ticketTypeId, type, ctx.actor.id, at);
+    const current = cur!.ticketTypeId === null ? null : { price12h: cur!.price12h!, price24h: cur!.price24h! };
+    let approval: TicketApproval | null = null;
+    if (ticketChangeNeedsGrant(type, current)) {
+      if (!input.grantId) throw ticketAuthRequired([{ tagCode: cur!.tagCode, ticketTypeId: type.id, name: type.name, free: isFreeTicket(type) }]);
+      // 授权最后加锁并核销（业务回滚时一起回滚）
+      approval = await consumeTicketGrant(tx, {
+        grantId: input.grantId,
+        actor: ctx.actor,
+        needed: [{ tagCode: cur!.tagCode, ticketTypeId: type.id }],
+        usedRef: `ticket:${visitId}:${type.id}`,
+      });
+    }
+    await applyVisitTicket(tx, visitId, cur!.ticketTypeId, type, ctx.actor.id, at, approval);
     await writeAudit(tx, {
       staffId: ctx.actor.id,
       action: 'frontdesk_ticket',
       targetType: 'visit',
       targetId: visitId,
-      detail: { visitNo: visit.visitNo, from: cur!.ticketTypeId, to: type.id, name: type.name },
+      detail: {
+        visitNo: visit.visitNo,
+        from: cur!.ticketTypeId,
+        to: type.id,
+        name: type.name,
+        ...(approval ? { approval: { approverId: approval.approverId, approverName: approval.approverName, reason: approval.reason, grantId: input.grantId } } : {}),
+      },
       ip: ctx.ip,
       businessDate: await businessDate(tx, deps, at),
     });
   });
 }
 
-/** 写入来访的票种与票价快照，并记一条改票种记录（调用方已锁来访） */
-export async function applyVisitTicket(tx: Tx, visitId: number, fromTypeId: number | null, type: TicketType, operatorId: number, at: Date) {
+/** 写入来访的票种与票价快照，并记一条改票种记录（调用方已锁来访）；降档 / 免票时记下授权人与原因 */
+export async function applyVisitTicket(
+  tx: Tx,
+  visitId: number,
+  fromTypeId: number | null,
+  type: TicketType,
+  operatorId: number,
+  at: Date,
+  approval: TicketApproval | null = null,
+) {
   await tx`
     UPDATE visits SET ticket_type_id = ${type.id}, ticket_price_12h = ${type.price12h}, ticket_price_24h = ${type.price24h}
     WHERE id = ${visitId}`;
   await tx`
-    INSERT INTO visit_ticket_changes (visit_id, from_type_id, to_type_id, price_12h, price_24h, operator_id, created_at)
-    VALUES (${visitId}, ${fromTypeId}, ${type.id}, ${type.price12h}, ${type.price24h}, ${operatorId}, ${at})`;
+    INSERT INTO visit_ticket_changes (visit_id, from_type_id, to_type_id, price_12h, price_24h, operator_id, created_at, approved_by, reason)
+    VALUES (${visitId}, ${fromTypeId}, ${type.id}, ${type.price12h}, ${type.price24h}, ${operatorId}, ${at},
+            ${approval?.approverId ?? null}, ${approval?.reason ?? null})`;
 }
 
 /** 来访详情里的门票：按留存的票价与当前时刻计算 */
 export async function visitTicket(db: Db, visitId: number, at: Date): Promise<VisitDetail['ticket']> {
-  const [v] = await db<{ typeId: number | null; name: string | null; price12h: number | null; price24h: number | null; checkedInAt: string }[]>`
-    SELECT v.ticket_type_id AS type_id, t.name, v.ticket_price_12h AS price12h, v.ticket_price_24h AS price24h, v.checked_in_at
+  const [v] = await db<{ typeId: number | null; name: string | null; price12h: number | null; price24h: number | null; checkedInAt: string; ticketEndAt: string | null }[]>`
+    SELECT v.ticket_type_id AS type_id, t.name, v.ticket_price_12h AS price12h, v.ticket_price_24h AS price24h, v.checked_in_at, v.ticket_end_at
     FROM visits v LEFT JOIN ticket_types t ON t.id = v.ticket_type_id WHERE v.id = ${visitId}`;
   if (!v || v.typeId === null) return null;
   const rules = await loadFrontdeskRules(db);
   const prices = { price12h: v.price12h!, price24h: v.price24h! };
-  const p = priceTicket(prices, v.checkedInAt, at, rules.overtimeGraceMinutes);
+  // 反结账后重结：门票计到第一次结账的时刻
+  const p = priceTicket(prices, v.checkedInAt, v.ticketEndAt ? new Date(v.ticketEndAt) : at, rules.overtimeGraceMinutes);
   return {
     typeId: v.typeId,
     name: v.name!,
@@ -132,5 +186,6 @@ export async function visitTicket(db: Db, visitId: number, at: Date): Promise<Vi
     amount: p.amount,
     nextJumpAt: p.nextJumpAt,
     nextAmount: p.nextAmount,
+    endAt: v.ticketEndAt ? new Date(v.ticketEndAt).toISOString() : null,
   };
 }

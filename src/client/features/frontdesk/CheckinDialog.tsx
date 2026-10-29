@@ -12,7 +12,8 @@ import {
   type FrontdeskRules,
   type Zone,
 } from '@shared/frontdesk';
-import { grantCovers, type VipGrant, type VipGrantTag } from '@shared/grants';
+import { grantCovers, ticketGrantCovers, type TicketGrant, type TicketGrantItem, type TicketGrantRequest, type VipGrant, type VipGrantTag } from '@shared/grants';
+import { isFreeTicket } from '@shared/checkout';
 import { maskPhone } from '@shared/labels';
 import type { MemberSummary } from '@shared/types';
 import { useMembers } from '../../lib/queries';
@@ -44,7 +45,7 @@ interface Row {
 type TagStatus = { ok: true; tag: BoardTag } | { ok: false; message: string; choices?: BoardTag[] } | null;
 
 /** 授权或等级相关的错误：清掉已有授权，请经理按当前内容重新授权 */
-const GRANT_ERRORS = ['VIP_AUTH_REQUIRED', 'GRANT_INVALID', 'GRANT_USED', 'GRANT_EXPIRED', 'GRANT_SCOPE'];
+const GRANT_ERRORS = ['VIP_AUTH_REQUIRED', 'TICKET_AUTH_REQUIRED', 'GRANT_INVALID', 'GRANT_USED', 'GRANT_EXPIRED', 'GRANT_SCOPE'];
 
 const issuable = (t: BoardTag) => t.active && !t.locked && !t.visit;
 
@@ -101,6 +102,10 @@ export function CheckinDialog({
   /** 当场授权（值班经理 / 店总签发，5 分钟内一次有效）；只在有客人等级不够、要用 VIP 柜时使用 */
   const [grant, setGrant] = useState<VipGrant | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
+  /** 免票（例如 1 米以下儿童）的当场授权：同一次接待只授权一次（R1.2，店主 2026-10-29 签认） */
+  const [ticketGrant, setTicketGrant] = useState<TicketGrant | null>(null);
+  const [ticketReason, setTicketReason] = useState('1 米以下儿童');
+  const [ticketAuthOpen, setTicketAuthOpen] = useState(false);
   const firstInput = useRef<HTMLInputElement>(null);
   const members = useMembers(guestType === 'member' && !member ? memberQ.trim() : '');
   const ticketTypes = useTicketTypes();
@@ -120,6 +125,8 @@ export function CheckinDialog({
     setMember(null);
     setRows([{ id: rowSeq++, zone: prefill.zone ?? 'male', code: prefill.tagCode ?? '', label: '', ticketTypeId: null }]);
     setGrant(null);
+    setTicketGrant(null);
+    setTicketReason('1 米以下儿童');
     op.clearError();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -143,18 +150,31 @@ export function CheckinDialog({
   const needs: VipGrantTag[] = short.map(({ code, memberId }) => ({ code, memberId }));
   const overrideOn = !!rules?.vipOverrideEnabled;
   const grantOk = needs.length === 0 || (!!grant && grantCovers(grant.scope, needs) && new Date(grant.expiresAt).getTime() > Date.now());
+  // 选了免票的客人：要值班经理及以上当场授权（这几张牌、这个票种），同一次接待授权一次
+  const freeItems: TicketGrantItem[] = rows.flatMap((r) => {
+    const t = ticketTypes.data?.find((x) => x.id === (r.ticketTypeId ?? defaultTicket));
+    const code = normalizeTagCode(r.code);
+    return t && isFreeTicket(t) && code ? [{ tagCode: code, ticketTypeId: t.id }] : [];
+  });
+  const freeNames = [...new Set(freeItems.map((f) => ticketTypes.data?.find((t) => t.id === f.ticketTypeId)?.name ?? '免票'))].join('、');
+  const ticketGrantOk =
+    freeItems.length === 0 || (!!ticketGrant && ticketGrantCovers(ticketGrant.scope, freeItems) && new Date(ticketGrant.expiresAt).getTime() > Date.now());
   const ready =
     rows.length > 0 &&
     statuses.every((s) => s?.ok) &&
     (guestType === 'walkin' || !!member) &&
     !levelPending &&
-    (needs.length === 0 || (overrideOn && grantOk));
+    (needs.length === 0 || (overrideOn && grantOk)) &&
+    ticketGrantOk;
   const guestText = (v: { memberId: number | null; guestLevel: number | null }) =>
     v.memberId && member ? `会员「${member.name}」（第 ${v.guestLevel} 级）` : '散客 / 同行客人';
   const authLines = short.map((v) => `${guestText(v)} · VIP 柜 ${v.code}（第 ${v.tagLevel} 级）`);
 
   useEffect(() => {
-    if (op.state.phase === 'error' && op.state.code && GRANT_ERRORS.includes(op.state.code)) setGrant(null);
+    if (op.state.phase === 'error' && op.state.code && GRANT_ERRORS.includes(op.state.code)) {
+      setGrant(null);
+      setTicketGrant(null);
+    }
   }, [op.state]);
 
   // 有待确认的接待时锁定内容；每次新提交都使用新的操作编号
@@ -199,9 +219,10 @@ export function CheckinDialog({
           ...((r.ticketTypeId ?? defaultTicket) ? { ticketTypeId: r.ticketTypeId ?? defaultTicket } : {}),
         })),
         vipGrantId: needs.length && grant ? grant.grantId : null,
+        ticketGrantId: freeItems.length && ticketGrant ? ticketGrant.grantId : null,
       },
       tagCodes: codes,
-      summary: `接待 ${rows.length} 位${member ? `（会员 ${member.name}）` : ''}${needs.length && grant ? `，VIP 柜 ${needs.map((n) => n.code).join('、')} 由${grant.approverName}授权` : ''}`,
+      summary: `接待 ${rows.length} 位${member ? `（会员 ${member.name}）` : ''}${needs.length && grant ? `，VIP 柜 ${needs.map((n) => n.code).join('、')} 由${grant.approverName}授权` : ''}${freeItems.length && ticketGrant ? `，${freeItems.map((f) => f.tagCode).join('、')} 免票由${ticketGrant.approverName}授权` : ''}`,
       amount: null,
     }));
     if (result) onDone(result);
@@ -475,8 +496,63 @@ export function CheckinDialog({
           </Notice>
         )}
 
+        {freeItems.length > 0 && (
+          <Notice
+            tone={ticketGrantOk ? 'success' : 'warning'}
+            icon={<ShieldCheck className="size-4" />}
+            title={ticketGrantOk && ticketGrant ? `免票已由${ticketGrant.approverName}当场授权` : `${freeNames}需要当场授权`}
+          >
+            <div className="flex flex-wrap items-center gap-2" data-testid="free-ticket-grant">
+              {ticketGrantOk && ticketGrant ? (
+                <span>
+                  手牌 {freeItems.map((f) => f.tagCode).join('、')} 免票 · 原因：{ticketGrant.scope.reason}；{formatTime(ticketGrant.expiresAt)} 前有效，只能用于这一次接待。
+                </span>
+              ) : (
+                <>
+                  <span>手牌 {freeItems.map((f) => f.tagCode).join('、')} 选了免票，同一次接待请值班经理、店总或店主授权一次。</span>
+                  <Input
+                    fullWidth={false}
+                    value={ticketReason}
+                    onChange={(e) => {
+                      setTicketReason(e.target.value);
+                      setTicketGrant(null);
+                    }}
+                    maxLength={100}
+                    disabled={locked}
+                    className="h-9 min-w-0 flex-1 basis-40 text-[13px]"
+                    aria-label="免票原因"
+                  />
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={<ShieldCheck className="size-4" />}
+                    disabled={locked || ticketReason.trim().length < 2}
+                    onClick={() => setTicketAuthOpen(true)}
+                    data-testid="request-ticket-authorize"
+                  >
+                    请经理授权
+                  </Button>
+                </>
+              )}
+            </div>
+          </Notice>
+        )}
+
         {op.state.phase === 'error' && <Notice tone="error" title={op.state.message} />}
       </div>
+      {ticketAuthOpen && (
+        <AuthorizeDialog<TicketGrantRequest>
+          open
+          request={{ purpose: 'ticket_discount', scope: { items: freeItems, reason: ticketReason.trim() } }}
+          lines={[`手牌 ${freeItems.map((f) => f.tagCode).join('、')} · ${freeNames}`, `原因：${ticketReason.trim()}`]}
+          onClose={() => setTicketAuthOpen(false)}
+          onGranted={(g) => {
+            setTicketGrant(g);
+            setTicketAuthOpen(false);
+            op.clearError();
+          }}
+        />
+      )}
       <AuthorizeDialog
         open={authOpen}
         request={{ purpose: 'vip_tag', scope: { tags: needs } }}

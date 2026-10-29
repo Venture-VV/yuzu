@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { businessDateOf, ISO_DATE } from '@shared/business-date';
 import { PAYMENT_METHOD_LABELS, type PaymentMethod } from '@shared/labels';
 import { formatAmount, formatYuan } from '@shared/money';
-import { CHECKOUT_METHOD_LABELS, COUPON_PLATFORM_LABELS } from '@shared/checkout';
+import { businessBreakdown, CHECKOUT_METHOD_LABELS, COUPON_PLATFORM_LABELS } from '@shared/checkout';
 import type { BusinessTotals, SettlementAnomaly, SettlementCheck, SettlementSummary, SettlementTotals } from '@shared/types';
 import { readSnapshot, type Db } from '../db';
 import { guard } from '../auth/guard';
@@ -15,6 +15,7 @@ import { unprocessable } from '../lib/errors';
 import { toCsv } from '../lib/csv';
 import { parse } from '../lib/validate';
 import { resolveReadableDate } from './ledger';
+import { loadFrontdeskRules } from './frontdesk/common';
 import { loadSettings } from './settings';
 
 type Pair = { principal: number; bonus: number };
@@ -134,6 +135,10 @@ const ANOMALY_LABELS: Record<SettlementAnomaly['kind'], string> = {
   balance_mismatch: '余额不符',
   chain_break: '流水不连续',
   checkout_void: '反结账',
+  discount: '优惠 / 免单',
+  ticket_override: '降档 / 免票',
+  visit_cancel: '撤销误开的牌',
+  line_void: '作废明细',
 };
 const pairText = (p: Pair) => `本金 ${formatYuan(p.principal)} / 赠金 ${formatYuan(p.bonus)}`;
 
@@ -325,6 +330,77 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
       description: `反结账${v.createdDate !== date ? `（原单营业日 ${v.createdDate}）` : ''} · ${v.reason} · ${v.staffName}；储值已按原单撤销，现金等请核对是否已退还或重新收取`,
     });
   }
+  // 前台少收与更正（R1.2，店主 2026-10-29 签认）：优惠 / 免单、降低票种或免票、接待超过时限后撤销误开的牌、作废明细
+  const discounts = await db<{ checkoutNo: string; createdAt: string; amount: number; reason: string; operatorName: string; approverName: string; status: string }[]>`
+    SELECT c.checkout_no, c.created_at, p.amount, p.ref AS reason, s.display_name AS operator_name, ap.display_name AS approver_name, c.status
+    FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id JOIN staff s ON s.id = c.operator_id JOIN staff ap ON ap.id = p.approved_by
+    WHERE p.method = 'discount' AND c.business_date = ${date} ORDER BY c.created_at, p.id`;
+  for (const d of discounts) {
+    anomalies.push({
+      kind: 'discount',
+      at: d.createdAt,
+      docNo: d.checkoutNo,
+      memberName: null,
+      amount: d.amount,
+      description: `优惠 / 免单 · ${d.reason} · 经办 ${d.operatorName}，${d.approverName}当场授权${d.status === 'voided' ? '（结账单已反结账）' : ''}`,
+    });
+  }
+  const { selfVoidMinutes } = await loadFrontdeskRules(db);
+  const frontEvents = await db<{ action: string; createdAt: string; detail: Record<string, unknown>; staffName: string | null; late: boolean | null }[]>`
+    SELECT a.action, a.created_at, a.detail, s.display_name AS staff_name,
+           CASE WHEN a.action = 'frontdesk_cancel'
+                THEN (SELECT v.closed_at - v.checked_in_at > make_interval(mins => ${selfVoidMinutes}) FROM visits v WHERE v.id::text = a.target_id) END AS late
+    FROM audit_logs a LEFT JOIN staff s ON s.id = a.staff_id
+    WHERE a.business_date = ${date}
+      AND (a.action IN ('frontdesk_cancel', 'frontdesk_void')
+           OR (a.action = 'frontdesk_ticket' AND a.detail ? 'approval')
+           OR (a.action = 'frontdesk_checkin' AND a.detail ? 'freeTickets'))
+    ORDER BY a.id`;
+  for (const e of frontEvents) {
+    const d = e.detail;
+    const text = (key: string) => (d[key] as string | undefined) ?? '';
+    const staff = e.staffName ?? '';
+    if (e.action === 'frontdesk_cancel') {
+      if (!e.late) continue;
+      anomalies.push({
+        kind: 'visit_cancel',
+        at: e.createdAt,
+        docNo: text('visitNo') || null,
+        memberName: null,
+        amount: null,
+        description: `接待超过 ${selfVoidMinutes} 分钟后撤销误开的牌 · ${text('reason')} · ${staff}`,
+      });
+    } else if (e.action === 'frontdesk_void') {
+      anomalies.push({
+        kind: 'line_void',
+        at: e.createdAt,
+        docNo: text('visitNo') || null,
+        memberName: null,
+        amount: (d.amount as number | undefined) ?? null,
+        description: `作废明细 ${text('name')} × ${(d.quantity as number | undefined) ?? ''} · ${text('reason')} · ${staff}`,
+      });
+    } else if (e.action === 'frontdesk_ticket') {
+      const a = d.approval as { approverName: string; reason: string };
+      anomalies.push({
+        kind: 'ticket_override',
+        at: e.createdAt,
+        docNo: text('visitNo') || null,
+        memberName: null,
+        amount: null,
+        description: `改票种为「${text('name')}」· ${a.reason} · 经办 ${staff}，${a.approverName}当场授权`,
+      });
+    } else {
+      const f = d.freeTickets as { tags: string[]; approverName: string; reason: string };
+      anomalies.push({
+        kind: 'ticket_override',
+        at: e.createdAt,
+        docNo: null,
+        memberName: null,
+        amount: null,
+        description: `接待时选免票（手牌 ${f.tags.join('、')}）· ${f.reason} · 经办 ${staff}，${f.approverName}当场授权`,
+      });
+    }
+  }
   for (const c of chainBreaks) {
     anomalies.push({ kind: 'chain_break', at: c.createdAt, docNo: c.docNo, memberName: c.memberName, amount: null, description: '流水变动后余额不连续，请联系维护人员' });
   }
@@ -378,6 +454,8 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
 
 export function settlementCsv(s: SettlementSummary): string {
   const y = formatAmount;
+  const signed = (cents: number) => (cents < 0 ? '-' : '') + y(cents);
+  const biz = businessBreakdown(s.business);
   const rows: (string | number)[][] = [
     ['浴族日结汇总', s.businessDate],
     [],
@@ -399,8 +477,16 @@ export function settlementCsv(s: SettlementSummary): string {
     ['营业口径（前台结账）', '笔数', '金额（元）', '说明'],
     ['结账', s.business.checkouts.count, y(s.business.checkouts.total), '当天结账的账单合计（含门票）'],
     ['反结账', s.business.voids.count, (s.business.voids.total ? '-' : '') + y(s.business.voids.total), '当天反结账的结账单（原单可能在之前的营业日）'],
-    ['营业额（净额）', '', (s.business.net < 0 ? '-' : '') + y(s.business.net), `门票 ${y(s.business.ticket)}，项目与其他 ${y(s.business.items)}`],
-    ...s.business.byMethod.map((m) => [`  · ${CHECKOUT_METHOD_LABELS[m.method]}`, m.count, (m.amount < 0 ? '-' : '') + y(m.amount), m.method === 'wallet' ? '会员余额抵扣，同时计入储值消费' : m.method === 'coupon' ? '平台团购核销，由平台结算' : '']),
+    ['应收（结账 − 反结账）', '', signed(biz.receivable), `门票 ${y(s.business.ticket)}，项目与其他 ${y(s.business.items)}`],
+    ['优惠 / 免单', '', signed(biz.discount), '值班经理及以上当场授权，不是收款'],
+    ['净营业额', '', signed(biz.netRevenue), '应收 − 优惠'],
+    ['实收（现金类）', '', signed(biz.received), '现金、微信、支付宝、银行卡、其他；不含会员储值、团购券、优惠'],
+    ...s.business.byMethod.map((m) => [
+      `  · ${CHECKOUT_METHOD_LABELS[m.method]}`,
+      m.count,
+      signed(m.amount),
+      m.method === 'wallet' ? '会员余额抵扣，同时计入储值消费' : m.method === 'coupon' ? '平台团购核销，由平台结算' : m.method === 'discount' ? '优惠，不是收款' : '',
+    ]),
     ...s.business.coupons.map((c) => [`  · 团购 ${COUPON_PLATFORM_LABELS[c.platform]}`, c.count, (c.amount < 0 ? '-' : '') + y(c.amount), c.voidCount ? `作废 ${c.voidCount} 张` : '']),
     [],
     ['余额核对', '本金（元）', '赠金（元）'],

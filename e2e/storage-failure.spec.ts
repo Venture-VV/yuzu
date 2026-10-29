@@ -2,6 +2,7 @@
 // 页面必须拦下这笔、不发请求；否则响应一旦丢失，关闭或刷新后找不到原编号，就会重复充值 / 重复挂账。
 // 依赖 seed-demo 与 seed-frontdesk-demo（仅独立演示库）；可重复执行。
 import { expect, test, type Page } from '@playwright/test';
+import { ensureShift } from './shift';
 
 const PASSWORD = 'yuzu2026';
 const WALLET_KEY = 'yuzu.pendingOps.v1';
@@ -38,6 +39,7 @@ async function login(page: Page) {
   await page.fill('#password', PASSWORD);
   await page.getByRole('button', { name: '登录' }).click();
   await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible({ timeout: 30_000 }); // 刚启动的服务第一次登录可能较慢
+  await ensureShift(page); // 收款前必须先开班（R1.2）
 }
 
 test.describe('本机存储写入失败时不提交', () => {
