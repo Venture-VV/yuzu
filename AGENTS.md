@@ -10,8 +10,9 @@
 
 ## 环境隔离（红线）
 
-- 门店试用库（`APP_ENV=trial`）与正式库：**禁止**写入任何演示数据、验收数据，**禁止**在其上跑会改数据的测试，未经店主同意不更新运行实例。各 `seed-*-demo` 命令在 trial / production 下会拒绝执行。
+- 门店试用库（`APP_ENV=trial`）与正式库：**禁止**写入任何演示数据、验收数据，**禁止**在其上跑会改数据的测试，未经店主同意不更新运行实例。`seed-inventory-demo`、`seed-frontdesk-demo`、`seed-billing-demo` 在 trial / production 下会拒绝执行；`seed-demo` 现在只在 production 拒绝（加 `--force` 可绕过），R1.3 改为与其他三个一致。
 - 验收一律使用**新建的独立演示库**；`npm test` 使用独立测试库（会清空该库）。
+- 云服务器上的测试服不记真实业务：演练库用 `APP_ENV=production`（拒绝演示数据）但**不是正式库**，不得导入真实会员余额，只在店主约定的窗口更新；演示库用 `APP_ENV=development`。两者都只经 Tailscale 访问，见 `docs/ROADMAP.md` 第 6 节。
 - 密钥、`.env`、业务数据与备份文件不进入 Git。
 
 ## 常用命令
