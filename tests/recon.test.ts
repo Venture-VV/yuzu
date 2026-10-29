@@ -87,7 +87,10 @@ describe('每日对账包', () => {
     expect(voidRow[3]).toBe('A8071');
     expect(voidRow[6]).toBe('-557.00');
     expect(voidRow[7]).toContain('收款方式记错');
-    expect(rows.find((r) => r[0] === '撤销误开的牌')![3]).toBe('A8095');
+    // 撤销误开的牌：每一次都列，写明是否超过更正时限（演示里 A8095 开牌 1 分钟后撤销，在时限内，日结异常清单不列）
+    const cancel = rows.find((r) => r[0] === '撤销误开的牌')!;
+    expect(cancel[3]).toBe('A8095');
+    expect(cancel[7]).toContain('在更正时限 15 分钟内');
     // 接待时直接选免票：写明当场授权的人与原因（R1.2）
     const free = rows.find((r) => r[0] === '免票入场' && r[3] === 'A8069')!;
     expect(free[7]).toContain('儿童免票');

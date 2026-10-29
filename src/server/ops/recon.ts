@@ -17,6 +17,7 @@ import type { AppConfig } from '../config';
 import { readSnapshot, type Sql, type Tx } from '../db';
 import { toCsv } from '../lib/csv';
 import { computeSettlement, settlementCsv } from '../modules/settlement';
+import { loadFrontdeskRules } from '../modules/frontdesk/common';
 import { loadSettings } from '../modules/settings';
 import { listShifts } from '../modules/shifts';
 import { consistencyChecks, type CheckLine } from './consistency';
@@ -181,6 +182,8 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
   const from = businessDayStart(date, config.timezone, startHour);
   const to = businessDayStart(plusDays(date, 1), config.timezone, startHour);
   const day = await readSnapshot(sql, (tx) => readDay(tx, date, today, from, to));
+  // 撤销误开的牌：本包列出每一次，写明是否超过更正时限；日结异常清单只列超过时限的（与日结同一时限）
+  const { selfVoidMinutes } = await loadFrontdeskRules(sql);
   const checks = await consistencyChecks(sql, config.timezone);
   const fingerprint = await computeFingerprint(sql);
 
@@ -277,16 +280,20 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
       amount: -l.amount,
       description: `${l.name} ×${l.quantity}（${l.postedByName} 挂）：${l.reason}`,
     })),
-    ...day.cancelled.map((v) => ({
-      kind: '撤销误开的牌',
-      at: v.at,
-      docNo: v.visitNo,
-      tag: v.tag,
-      guest: v.guest,
-      staff: v.staff,
-      amount: null,
-      description: `${v.reason ?? ''}（${stampOf(v.checkedInAt)} 开牌）`,
-    })),
+    ...day.cancelled.map((v) => {
+      const ms = new Date(v.at).getTime() - new Date(v.checkedInAt).getTime();
+      const late = ms > selfVoidMinutes * 60_000;
+      return {
+        kind: '撤销误开的牌',
+        at: v.at,
+        docNo: v.visitNo,
+        tag: v.tag,
+        guest: v.guest,
+        staff: v.staff,
+        amount: null,
+        description: `${v.reason ?? ''}（${stampOf(v.checkedInAt)} 开牌，${Math.floor(ms / 60_000)} 分钟后撤销，${late ? `超过更正时限 ${selfVoidMinutes} 分钟，日结异常清单同样列出` : `在更正时限 ${selfVoidMinutes} 分钟内`}）`,
+      };
+    }),
     ...day.ticketChanges.map((c) => ({
       // 降低票种、改成免票要当场授权（R1.2 起），改贵的不用
       kind: c.price12h === 0 && c.price24h === 0 ? '改票种（改为免票）' : c.approverName ? '改票种（降档）' : '改票种',
@@ -396,7 +403,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
       '  01-日结汇总.csv     与「日结」页导出的相同',
       '  02-结账单.csv       当天结账与当天反结账的结账单，按收款方式分列；「计入本日」两列分别合计 = 结账合计、反结账合计',
       '  03-部门参考表.csv   结账明细按项目分类（部门）汇总，合计 = 应收；后面单列优惠 / 免单与净营业额',
-      '  04-异常清单.csv     反结账、优惠 / 免单、作废明细、撤销误开的牌、改票种（降档、改为免票写明授权人与原因）、免票入场、会员撤销与其他异常',
+      '  04-异常清单.csv     反结账、优惠 / 免单、作废明细、撤销误开的牌（每一次都列，写明是否超过更正时限；日结异常清单只列超过时限的）、改票种（降档、改为免票写明授权人与原因）、免票入场、补录纸质单、会员撤销与其他异常',
       '  05-交班.csv         当天的班次、反结账退现金与长短款',
       '',
     ].join('\n'),
