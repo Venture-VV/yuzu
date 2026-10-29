@@ -235,6 +235,8 @@ docker compose exec app node dist/server/cli.js reset-password boss
 
 应用启动时自动执行数据库迁移；更新失败时 `git checkout <上个版本>` 后再执行一次即可回退。
 
+版本标签：合并到 main、CI 通过后，GitHub Actions「版本标签」按 `package.json` 的版本号自动创建 `vX.Y.Z`（已有同名标签时跳过；也可在 Actions 页面手动运行补打）。
+
 **自动备份**：`backup` 容器每天 `BACKUP_HOUR` 点做一次完整备份（`pg_dump` 自定义格式），写入 `BACKUP_DIR`，保留 `BACKUP_KEEP_DAYS` 天。请把 `BACKUP_DIR` 指向外置硬盘或另一块磁盘，并定期复制一份到店外。
 
 **手动备份**：
