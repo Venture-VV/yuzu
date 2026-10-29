@@ -87,10 +87,13 @@ sudo tailscale up --hostname=yuzu-test
   },
   "grants": [
     { "src": ["owner@example.com"], "dst": ["tag:yuzu-test"], "ip": ["tcp:8080", "tcp:8082", "tcp:22"] },
-    { "src": ["owner@example.com"], "dst": ["tag:yuzu-mini"], "ip": ["tcp:8080"] }
+    { "src": ["owner@example.com"], "dst": ["tag:yuzu-mini"], "ip": ["tcp:8080"] },
+    { "src": ["tag:yuzu-mini"], "dst": ["tag:yuzu-test"], "ip": ["tcp:22"] }
   ]
 }
 ```
+
+最后一条让门店 Mac mini 把备份的异地副本传到这台服务器（第 9 节）；那把钥匙只能登录只能 SFTP 的 `yuzubackup` 账号。
 
 要接入测试服的设备：店主的手机和电脑、Codex 所在的 Mac、门店那 1 台前台电脑和 1 台 iPad。它们都装 Tailscale，并用店主的账号登录。
 
@@ -202,7 +205,67 @@ docker compose exec app node dist/server/cli.js check
 | 新版本有问题，回到上一版 | `./scripts/rollback.sh`（v0.3.3 起；加了迁移时同时恢复升级前的备份，见 Mac mini 手册第 5 节「回退」） |
 | 立即备份 / 核验最新备份 | `./scripts/backup.sh`；`./scripts/verify-backup.sh "$(ls -t ~/yuzu-backups/test/yuzu-*.dump \| head -n 1)"` |
 | 重置某个员工的密码 | `docker compose exec app node dist/server/cli.js reset-password <账号>` |
+| 门店备份的异地副本（v0.3.5 起，第 9 节） | `sudo ls -lt /srv/yuzu-offsite/backups \| head`；`df -h /srv` |
 
 `update.sh` 只接受 `main` 上的版本标签或完整 SHA，会先备份、再切换版本，并把版本号与 SHA 写进镜像，启动后自动跑 `check`。发布后，Codex 在对应 PR 留发布记录（SHA、迁移、check 结果）。
 
 **不要**执行 `docker compose down -v`：`-v` 会删除数据库卷。演练库需要清空重来时，经店主同意再操作。
+
+## 9. 门店备份的异地副本（v0.3.5 起）
+
+门店 Mac mini 每 15 分钟把新的备份用 age 公钥加密，经 Tailscale 用 SFTP 传到这台服务器（[Mac mini 部署手册](DEPLOY_MAC_MINI.md) 第 9.8 节），这里保留 7 天。服务器上只有密文，解密用的私钥在店主手里，不放到这台服务器上。
+
+给它单独建一个只能 SFTP 的账号 `yuzubackup`：关在 `/srv/yuzu-offsite` 里，只能往 `backups/` 写；不能删文件、不能改权限、不能开 shell。Mac mini 被人拿走或中了勒索软件，也删不掉这里的副本。过期清理由本机的定时任务做。
+
+1. 账号与目录：
+
+```bash
+sudo useradd --system --no-create-home --home-dir /srv/yuzu-offsite --shell /usr/sbin/nologin yuzubackup
+sudo usermod -p '*' yuzubackup   # 没有密码，但不是「锁定」：被锁定（!）的账号 OpenSSH 连钥匙登录也拒绝
+sudo mkdir -p /srv/yuzu-offsite/backups
+sudo chown root:root /srv/yuzu-offsite && sudo chmod 755 /srv/yuzu-offsite   # chroot 目录必须属于 root
+sudo chown yuzubackup:yuzubackup /srv/yuzu-offsite/backups && sudo chmod 700 /srv/yuzu-offsite/backups
+```
+
+2. 只能 SFTP、不能删：
+
+```bash
+sudo tee /etc/ssh/sshd_config.d/yuzu-offsite.conf > /dev/null <<'EOF'
+# 浴族异地备份：yuzubackup 只能用 SFTP 往 /srv/yuzu-offsite/backups 写，不能删文件、不能改权限、不能开 shell
+Match User yuzubackup
+    AuthorizedKeysFile /etc/ssh/yuzu-offsite.keys
+    ChrootDirectory /srv/yuzu-offsite
+    ForceCommand internal-sftp -d /backups -u 077 -P remove,rmdir,setstat,fsetstat,lsetstat,symlink,hardlink
+    PasswordAuthentication no
+    AllowTcpForwarding no
+    AllowAgentForwarding no
+    X11Forwarding no
+    PermitTTY no
+Match all
+EOF
+sudo sshd -t && sudo systemctl restart ssh
+```
+
+文件最后的 `Match all` 不能省：这个文件由主配置开头的 `Include` 引入，省掉的话主配置里后面的设置都只对 `yuzubackup` 生效。重启 ssh 前保持当前会话不关，重启后另开一个终端确认自己还能登录。
+
+3. 加上 Mac mini 的公钥（Mac mini 手册第 9.8 节第 2 步打印的那一行），前面加 `restrict`：
+
+```bash
+echo 'restrict ssh-ed25519 AAAA…换成 Mac mini 打印的整行… yuzu-mac-mini-offsite' | sudo tee /etc/ssh/yuzu-offsite.keys
+sudo chmod 644 /etc/ssh/yuzu-offsite.keys
+```
+
+4. 保留 7 天（Mac mini 的钥匙删不了文件，清理在这里做）：
+
+```bash
+sudo tee /etc/cron.d/yuzu-offsite > /dev/null <<'EOF'
+# 浴族异地副本：备份密文保留 7 天；没传完的 .part 与连通测试文件 1 天后删掉
+17 * * * * root find /srv/yuzu-offsite/backups -type f \( -name 'yuzu-*.age' -mmin +10080 -o ! -name '*.age' -mmin +1440 \) -delete
+EOF
+```
+
+5. Tailscale 策略放行 Mac mini 到这台服务器的 22 端口：第 4 节的策略里已有 `tag:yuzu-mini → tag:yuzu-test` 的 `tcp:22` 一条。
+
+6. 验证：Mac mini 上 `./scripts/offsite-copy.sh --check` 显示「✓ 能连上」；15 分钟内这里 `sudo ls -lt /srv/yuzu-offsite/backups | head` 能看到最新一份的 `.dump.age` 与 `.dump.json.age`。每份加密后与原备份差不多大，7 天约 170 份，用 `df -h /srv` 留意磁盘。
+
+从这里取回、解密与恢复的步骤见 Mac mini 手册第 9.8 节最后一段。
