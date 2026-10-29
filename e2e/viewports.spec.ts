@@ -56,7 +56,8 @@ test.describe('视口冒烟', () => {
     await page.goto('/dashboard');
     await expect(page.getByRole('heading', { name: '经营看板' })).toBeVisible();
     const board = page.getByTestId('dashboard');
-    await expect(board).toContainText('今日营业额');
+    // R1.2 起指标卡是「今日净营业额（应收 − 优惠）」
+    await expect(board).toContainText('今日净营业额');
     await expect(board).toContainText('今日收款构成');
     await expect(board).toContainText('当班中');
     await expectFits(page);
@@ -90,7 +91,8 @@ test.describe('视口冒烟', () => {
     await expectFits(page);
 
     await page.goto('/shift');
-    await expect(page.getByRole('heading', { name: '交班' })).toBeVisible();
+    // 精确匹配页面标题：本人有未交班的班次时还有「交班表 · BC…」小标题
+    await expect(page.getByRole('heading', { name: '交班', exact: true })).toBeVisible();
     await expectFits(page);
   });
 });

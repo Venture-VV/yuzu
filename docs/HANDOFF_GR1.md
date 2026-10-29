@@ -79,7 +79,7 @@ PORT=8899 node dist/server/index.js
 | `npm run typecheck`、`npm run build` | 通过（仓库未配置 lint） |
 | `npm test` | **332 / 332**（合并 main 的 v0.3.2–v0.3.5 之后，33 个文件。本次新增 `tests/r1-funds.test.ts` 17 项、`tests/upgrade-r1.test.ts` 4 项；按新口径更新 shift-boundary（R7 拆成「反结账人在班上」与「规则关闭、没有开班」两项）、billing-seed、checkout、wallet-limits、frontdesk-vip、upgrade、upgrade-shift） |
 | 新建演示库 + 四套演示数据 | `check` **20 / 20 ✓**；第 4 节的数字逐项一致 |
-| 浏览器 E2E（云端 Chromium，三个视口，114 项） | 首轮 68 passed、2 failed、44 skipped（44 项是会改数据、只在门店电脑尺寸执行的用例）。两项失败：优惠授权徽标的 testid 没有挂上（组件不转发属性）；预结账合计按新口径含门票，用例预期更新。随后又修了一处：结账、充值成功后没有刷新交班表缓存，5 秒内打开交班页会看到旧汇总。修复后全套通过（数字见提测评论），跑完后 `check` 仍 20 / 20 ✓ |
+| 浏览器 E2E（云端 Chromium） | 合并 main 之前（三个视口，117 项）：71 passed、0 failed、46 skipped（46 项是会改数据、只在门店电脑尺寸执行的用例）。过程中修了三处：优惠授权徽标的 testid 没有挂上；预结账合计按新口径含门票（用例预期更新）；结账、充值成功后刷新交班表缓存。合并 main 之后（加上小屏电脑、手机视口，147 项）：82 passed、8 failed、57 skipped，8 项全在 main 新增的 `e2e/viewports.spec.ts`：看板指标名改成了「今日净营业额」、本人有未交班的班次时交班页多一个「交班表 · BC…」小标题导致标题匹配到两个；用例改为新指标名与精确匹配后该文件 14 passed、1 skipped。跑完后 `check` 仍 20 / 20 ✓ |
 
 ## 6. 测试需求（交给本地测试 AI）
 
