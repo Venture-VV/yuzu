@@ -78,6 +78,8 @@ test.describe('单笔上限与撤销时限', () => {
     }[];
     const target = rows.find((r) => r.consumptionStatus === 'completed');
     expect(target, '演示数据昨天应有未撤销的消费').toBeTruthy();
+    // 记下原来的撤销时限，结束后恢复（R1.2 起默认 48 小时，不是「不限」）
+    const previous = ((await (await page.request.get('/api/settings')).json()) as { reversalWindowHours: number | null }).reversalWindowHours;
     expect((await page.request.put('/api/settings', { data: { reversalWindowHours: 2 } })).status()).toBe(200);
     try {
       const openReversal = async () => {
@@ -104,7 +106,8 @@ test.describe('单笔上限与撤销时限', () => {
       await expect(dialog.getByRole('button', { name: '确认撤销并恢复余额' })).toBeEnabled();
       await dialog.getByRole('button', { name: '取消', exact: true }).click();
     } finally {
-      await page.request.put('/api/settings', { data: { reversalWindowHours: null } });
+      // 最后登录的是店主，可以改回经营规则
+      await page.request.put('/api/settings', { data: { reversalWindowHours: previous } });
     }
   });
 });
