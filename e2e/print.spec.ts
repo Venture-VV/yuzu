@@ -37,7 +37,10 @@ const dayBefore = (date: string) => new Date(Date.parse(`${date}T00:00:00Z`) - 8
 async function checkouts(page: Page) {
   const me = (await (await page.request.get('/api/auth/me')).json()) as { today: string; storeName: string };
   for (const date of [me.today, dayBefore(me.today)]) {
-    const list = (await (await page.request.get(`/api/frontdesk/checkouts?date=${date}`)).json()) as Summary[];
+    // 店员只能看本营业日的结账记录（R1.2）：前一个营业日对店员是 403，跳过
+    const res = await page.request.get(`/api/frontdesk/checkouts?date=${date}`);
+    if (!res.ok()) continue;
+    const list = (await res.json()) as Summary[];
     if (list.some((c) => c.tagCodes.includes('A8066'))) return { me, date, list };
   }
   throw new Error('找不到结账演示数据（seed-billing-demo）');
@@ -138,8 +141,9 @@ test.describe('打印', () => {
 
   test('入口：结账记录与交班页的「打印」在新窗口打开打印页', async ({ page }) => {
     await login(page, 'chenyin');
-    const { me, date, list } = await checkouts(page);
-    test.skip(date !== me.today, '演示单据落在前一个营业日，结账记录与交班页只列今天的');
+    const found = await checkouts(page).catch(() => null);
+    test.skip(!found || found.date !== found.me.today, '演示单据落在前一个营业日，结账记录与交班页只列今天的');
+    const { list } = found!;
     const wallet = demoCheckout(list, 'A8066', 'completed');
 
     await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '前台', exact: true }).click();

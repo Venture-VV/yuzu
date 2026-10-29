@@ -19,7 +19,10 @@ const byTags = (tags: string[], status: 'completed' | 'voided') =>
 
 async function printAll() {
   const [row] = await ctx.sql<{ date: string }[]>`SELECT DISTINCT business_date::text AS date FROM checkouts WHERE note = '结账演示'`;
-  const list = (await api(ctx.app, cashier, 'GET', `/api/frontdesk/checkouts?date=${row!.date}`)).body as { id: number }[];
+  // 结账记录用店主查：营业日切换（06:00）附近演示数据落在前一个营业日，店员只能看本营业日的（R1.2）
+  const res = await api(ctx.app, ctx.owner, 'GET', `/api/frontdesk/checkouts?date=${row!.date}`);
+  expect(res.status, JSON.stringify(res.body)).toBe(200);
+  const list = res.body as { id: number }[];
   return Promise.all(list.map(async (c) => (await api<CheckoutPrint>(ctx.app, cashier, 'GET', `/api/print/checkouts/${c.id}`)).body));
 }
 
