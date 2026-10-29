@@ -96,11 +96,18 @@ test.describe('打印', () => {
   test('交班表：备用金、各收款方式、应有与实点现金、短款、交接签字', async ({ page }) => {
     await login(page, 'linlan');
     const { date } = await checkouts(page);
-    const shifts = (await (await page.request.get(`/api/shifts?date=${date}`)).json()) as { id: number; shiftNo: string; status: string; staffName: string }[];
-    const closed = shifts.find((s) => s.status === 'closed' && s.staffName === '陈茵')!;
-    await page.goto(`/print/shift/${closed.id}`);
+    // 演示里陈茵的班次在灌数据前 5 小时开班：06:00–11:00 之间灌数据时，班次落在结账单的前一个营业日
+    let closed: { id: number; shiftNo: string } | undefined;
+    for (const d of [date, dayBefore(date)]) {
+      const shifts = (await (await page.request.get(`/api/shifts?date=${d}`)).json()) as { id: number; shiftNo: string; status: string; staffName: string }[];
+      closed = shifts.find((s) => s.status === 'closed' && s.staffName === '陈茵');
+      if (closed) break;
+    }
+    expect(closed, '演示交班（陈茵，seed-billing-demo）').toBeTruthy();
+    const shift = closed!;
+    await page.goto(`/print/shift/${shift.id}`);
     const slip = page.getByTestId('print-shift');
-    await expect(slip).toContainText(closed.shiftNo);
+    await expect(slip).toContainText(shift.shiftNo);
     await expect(slip).toContainText(`备用金${yuan(expectedShift.openingCash)}`);
     await expect(slip).toContainText(`= 应有现金${yuan(expectedShift.expectedCash)}`);
     await expect(slip).toContainText(`实点现金${yuan(expectedShift.countedCash)}`);
@@ -156,7 +163,10 @@ test.describe('打印', () => {
 
     await page.keyboard.press('Escape');
     await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '交班', exact: true }).click();
-    const row = page.getByTestId('shift-list').locator('li').filter({ hasText: '陈茵' });
+    // 交班页只列本营业日的班次与仍未交班的班次：陈茵的演示班次落在前一个营业日时，用列表里的第一个班次
+    const rows = page.getByTestId('shift-list').locator('li');
+    await expect(rows.first()).toBeVisible();
+    const row = (await rows.filter({ hasText: '陈茵' }).count()) ? rows.filter({ hasText: '陈茵' }).first() : rows.first();
     await row.getByRole('button').first().click();
     const [shiftPopup] = await Promise.all([page.waitForEvent('popup'), row.getByTestId('shift-print').click()]);
     expect(shiftPopup.url()).toMatch(/\/print\/shift\/\d+\?auto=1$/);
