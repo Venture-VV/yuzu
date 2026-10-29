@@ -290,11 +290,15 @@ export function BillPanel({
                   门票 · {visit.ticket.name}（{visit.ticket.tierLabel}）
                 </span>
                 <Money cents={visit.ticket.amount} className="font-bold" />
-                {open && (
-                  <span className="text-[12px] text-ink-3">
-                    {formatTime(visit.ticket.nextJumpAt)} 后 <Money cents={visit.ticket.nextAmount} />
-                  </span>
-                )}
+                {open &&
+                  (visit.ticket.endAt ? (
+                    // 反结账后重结：门票按第一次结账的时刻计算，不再跳档
+                    <span className="text-[12px] text-ink-3">按第一次结账 {formatTime(visit.ticket.endAt)} 计算</span>
+                  ) : (
+                    <span className="text-[12px] text-ink-3">
+                      {formatTime(visit.ticket.nextJumpAt)} 后 <Money cents={visit.ticket.nextAmount} />
+                    </span>
+                  ))}
                 <span className="flex-1" />
                 {open && can('frontdesk.operate') && (
                   <button type="button" onClick={() => onAction('ticket')} className="text-[12.5px] font-semibold text-pine hover:underline" data-testid="bill-ticket-change">

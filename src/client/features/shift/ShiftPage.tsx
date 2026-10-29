@@ -11,20 +11,16 @@ import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, Card, Field, Input, MoneyInput, Notice, PendingBadge, SectionTitle, Skeleton } from '../../components/ui';
+import { Badge, Button, Card, Field, Input, MoneyInput, Notice, SectionTitle, Skeleton } from '../../components/ui';
+import { shiftKeys, StartShiftForm, useCurrentShift } from './ShiftGate';
 
-// 交班（店主 #11）：开班登记备用金 → 当班期间系统按本人经办的结账与充值汇总 → 交班时实点现金，记下长款 / 短款。
-
-const sk = { current: ['shift', 'current'] as const, list: (date: string) => ['shift', 'list', date] as const };
+// 交班（店主 #11，2026-10-29 签认）：开班登记备用金 → 当班期间系统按本人经办的结账与充值汇总 → 交班时实点现金，记下长款 / 短款。
+// 结账收款算在收款时的班次；反结账退的现金算在执行反结账的人当时的班次、扣减应有现金（同一钱箱的人合并核对时相抵）。
 
 export function ShiftPage() {
   const session = useSession();
-  const current = useQuery({
-    queryKey: sk.current,
-    queryFn: () => api.get<{ shift: ShiftRecord | null }>('/api/shifts/current'),
-    refetchInterval: 30_000,
-  });
-  const list = useQuery({ queryKey: sk.list(session.today), queryFn: () => api.get<ShiftRecord[]>(`/api/shifts?date=${session.today}`) });
+  const current = useCurrentShift();
+  const list = useQuery({ queryKey: shiftKeys.list(session.today), queryFn: () => api.get<ShiftRecord[]>(`/api/shifts?date=${session.today}`) });
   const shift = current.data?.shift ?? null;
   return (
     <>
@@ -53,42 +49,15 @@ export function ShiftPage() {
 }
 
 function StartShift() {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const [cash, setCash] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const cents = parseYuan(cash || '0');
-  const start = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const s = await api.post<ShiftRecord>('/api/shifts', { openingCash: cents });
-      toast({ tone: 'success', title: `已开班 ${s.shiftNo}` });
-      void qc.invalidateQueries({ queryKey: ['shift'] });
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const session = useSession();
   return (
     <Card className="p-5" data-testid="shift-start">
-      <SectionTitle>
-        <span className="flex items-center gap-2">
-          开班 <PendingBadge title="交班表口径（按本人经办的结账与充值汇总、应有现金 = 备用金 + 现金收款）为默认做法，待店主确认" />
-        </span>
-      </SectionTitle>
-      <p className="mt-1 text-[13px] text-ink-3">登记抽屉里的备用金后开始当班；交班时系统按你经办的结账与充值汇总各收款方式，算出应有现金。</p>
-      <div className="mt-4 flex flex-wrap items-end gap-3">
-        <Field label="备用金（元）" className="w-[200px]">
-          <MoneyInput value={cash} onChange={(e) => setCash(e.target.value)} aria-label="备用金" data-testid="shift-opening-cash" />
-        </Field>
-        <Button variant="primary" size="lg" disabled={cents === null} loading={busy} onClick={() => void start()} data-testid="shift-start-submit">
-          开班
-        </Button>
-      </div>
-      {error && <Notice tone="error" title={error} className="mt-3" />}
+      <SectionTitle>开班</SectionTitle>
+      <p className="mt-1 text-[13px] text-ink-3">
+        登记抽屉里的备用金后开始当班；交班时系统按你经办的结账与充值汇总各收款方式，算出应有现金。
+        {session.rules.requireOpenShift ? '充值、结账、反结账前都要先开班。' : ''}
+      </p>
+      <StartShiftForm />
     </Card>
   );
 }
@@ -113,10 +82,10 @@ function OpenShift({ shift }: { shift: ShiftRecord }) {
         note: note.trim(),
       });
       toast({ tone: 'success', title: `已交班 ${s.shiftNo}`, body: diff ? `${diff > 0 ? '长款' : '短款'} ¥${(Math.abs(diff) / 100).toFixed(2)}，已记入交班表` : '现金与应有一致' });
-      void qc.invalidateQueries({ queryKey: ['shift'] });
+      void qc.invalidateQueries({ queryKey: shiftKeys.all });
     } catch (e) {
       setError(errorMessage(e));
-      void qc.invalidateQueries({ queryKey: ['shift'] });
+      void qc.invalidateQueries({ queryKey: shiftKeys.all });
     } finally {
       setBusy(false);
     }
@@ -137,10 +106,7 @@ function OpenShift({ shift }: { shift: ShiftRecord }) {
           <div>
             <p className="text-[12.5px] font-semibold text-ink-3">应有现金</p>
             <Money cents={shift.summary.cash.expected} className="text-[28px] font-bold text-pine" />
-            <p className="text-[12px] text-ink-3">
-              备用金 <Money cents={shift.summary.cash.opening} /> + 结账现金 <Money cents={shift.summary.cash.checkout} /> + 充值现金{' '}
-              <Money cents={shift.summary.cash.recharge} />
-            </p>
+            <CashFormula cash={shift.summary.cash} />
           </div>
           <Field label="实点现金（元）" className="w-[200px]">
             <MoneyInput value={counted} onChange={(e) => setCounted(e.target.value)} aria-label="实点现金" data-testid="shift-counted-cash" />
@@ -161,7 +127,23 @@ function OpenShift({ shift }: { shift: ShiftRecord }) {
   );
 }
 
+/** 应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金（R1.2 之前交班的快照没有退款一项） */
+function CashFormula({ cash }: { cash: ShiftSummary['cash'] }) {
+  return (
+    <p className="text-[12px] text-ink-3" data-testid="shift-cash-formula">
+      备用金 <Money cents={cash.opening} /> + 结账现金 <Money cents={cash.checkout} /> + 充值现金 <Money cents={cash.recharge} />
+      {cash.refund ? (
+        <>
+          {' '}
+          − 反结账退现金 <Money cents={cash.refund} />
+        </>
+      ) : null}
+    </p>
+  );
+}
+
 function SummaryView({ summary }: { summary: ShiftSummary }) {
+  const refunds = summary.refunds;
   return (
     <div className="mt-4 grid gap-4 md:grid-cols-2" data-testid="shift-summary">
       <div className="rounded-lg border border-line p-4">
@@ -204,11 +186,20 @@ function SummaryView({ summary }: { summary: ShiftSummary }) {
           赠金 <Money cents={summary.recharges.bonus} /> · 会员工作台储值消费 {summary.walletConsumes.count} 笔 <Money cents={summary.walletConsumes.total} />（不是现金）
         </p>
       </div>
-      {summary.voids.length > 0 && (
-        <Notice tone="warning" icon={<Undo2 className="size-4" />} title={`本班次反结账 ${summary.voids.length} 张`} className="md:col-span-2">
-          {summary.voids.map((v) => `${v.checkoutNo}（¥${(v.amount / 100).toFixed(2)}，${v.reason}）`).join('；')}。原单收过的现金不计入应有现金，请核对是否已退还或已重新收取。
-        </Notice>
-      )}
+      {summary.voids.length > 0 &&
+        (refunds ? (
+          <Notice tone="warning" icon={<Undo2 className="size-4" />} title={`本班次反结账 ${summary.voids.length} 张 · 退款 ¥${(refunds.total / 100).toFixed(2)}`} className="md:col-span-2">
+            <span data-testid="shift-refunds">
+              {summary.voids.map((v) => `${v.checkoutNo}（¥${(v.amount / 100).toFixed(2)}，${v.reason}）`).join('；')}。
+              退款按原收款方式：{refunds.byMethod.map((m) => `${CHECKOUT_METHOD_LABELS[m.method]} ¥${(m.amount / 100).toFixed(2)}`).join('、')}。
+              现金从你的钱箱退给客人，已从应有现金里扣掉；扫码、银行卡、团购请在商户后台原路退回并登记退款单号。原单若是别人收的款，仍算在原收款人的班次，同一钱箱合并核对时相抵。
+            </span>
+          </Notice>
+        ) : (
+          <Notice tone="warning" icon={<Undo2 className="size-4" />} title={`本班次反结账 ${summary.voids.length} 张`} className="md:col-span-2">
+            {summary.voids.map((v) => `${v.checkoutNo}（¥${(v.amount / 100).toFixed(2)}，${v.reason}）`).join('；')}。原单收过的现金不计入应有现金，请核对是否已退还或已重新收取。
+          </Notice>
+        ))}
     </div>
   );
 }

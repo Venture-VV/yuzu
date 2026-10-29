@@ -26,8 +26,13 @@ export function DashboardPage() {
             d && (
               <>
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                  <Kpi icon={<TrendingUp className="size-4" />} label="今日营业额（净额）" tone="pine">
-                    <Money cents={d.todayStats.net} />
+                  <Kpi icon={<TrendingUp className="size-4" />} label="今日净营业额（应收 − 优惠）" tone="pine">
+                    <Money cents={d.todayStats.net - d.todayStats.discount} />
+                    {d.todayStats.discount > 0 && (
+                      <span className="block text-[12px] font-semibold text-ink-3" data-testid="dashboard-discount">
+                        应收 <Money cents={d.todayStats.net} /> · 优惠 −<Money cents={d.todayStats.discount} />
+                      </span>
+                    )}
                   </Kpi>
                   <Kpi icon={<UsersRound className="size-4" />} label="已结账客人">
                     {d.todayStats.guests} 位 · {d.todayStats.checkouts} 张

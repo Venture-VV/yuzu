@@ -4,7 +4,9 @@
 //   · 交班表：本班次本人经办的结账与充值，按收款方式汇总；会员储值、团购券、优惠 / 免单单列（不是现金）；
 //     结账收款算在收款时的班次，之后被反结账也不减；本班次内本人做的反结账按原收款方式列出退款：
 //     现金从本班钱箱退，扣减应有现金（原单与反结账在同一班次时两者相抵），扫码、银行卡、团购在商户后台原路退回、只列提醒
-//     （R1.2，店主 2026-10-29 签认）；应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金；
+//     （R1.2，店主 2026-10-29 签认）；应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金。
+//     这个口径只用于升级（迁移 017）之后开的班次：升级时已有的班次里做的反结账仍只列提醒、不扣现金，
+//     原单也不计入收款时的班次；反结账时没有开班的（规则关闭时）同样不计入原单的班次——退款没有记到任何班次；
 //   · 收款前必须先开班（经营规则开关，默认开）：没有开班时充值、结账、反结账整笔拒绝（SHIFT_REQUIRED）；
 //   · 交班：员工实点现金，系统记下应有现金、差额与汇总快照；员工确认时看到的应有现金与此刻不一致（期间又有收款）时拒绝；
 //   · 本人交本人的班；值班经理及以上可以替别人交班（例如员工忘了交班就下班）。
@@ -69,6 +71,8 @@ interface ShiftScope {
   openingCash: number;
   /** 升级（迁移 016）时仍未交班的班次：升级前的单据没有记班次 */
   legacyWindow: boolean;
+  /** 升级（迁移 017）时已有的班次：本班次做的反结账按原口径，只列提醒、不扣现金 */
+  legacyRefund: boolean;
 }
 
 /**
@@ -85,7 +89,7 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
     s.legacyWindow
       ? db`(${db(shiftCol)} = ${s.id} OR (${db(shiftCol)} IS NULL AND ${db(staffCol)} = ${s.staffId} AND ${db(timeCol)} >= ${from} AND ${db(timeCol)} < ${to}))`
       : db`${db(shiftCol)} = ${s.id}`;
-  // co 本班次收款的结账单（含之后被反结账的：收款算在收款时的班次）；rc 本班次的充值；团购券随结账单登记
+  // co 本班次收款的结账单（含之后被反结账的：收款算在收款时的班次；退款没有按新口径记到班次的反结账除外）；rc 本班次的充值；团购券随结账单登记
   // （同一事务、同一经办人），按结账单的班次；vd 本班次做的反结账（反结账人当时未交班的班次），rf 按原收款方式的退款：
   // 现金扣减应有现金，原单与反结账在同一班次时两者相抵；会员工作台的储值消费不是收款，只作参考，
   // 仍按开班到此刻的时间窗口统计（消费单不记班次）
@@ -98,8 +102,9 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
     })[]
   >`
     WITH co AS (
-      SELECT c.id, c.total_amount FROM checkouts c
+      SELECT c.id, c.total_amount FROM checkouts c LEFT JOIN shifts vs ON vs.id = c.void_shift_id
       WHERE ${ofShift('c.shift_id', 'c.operator_id', 'c.created_at')}
+        AND (c.status = 'completed' OR (vs.id IS NOT NULL AND NOT vs.legacy_refund))
     ), rc AS (
       SELECT r.payment_method, r.paid_amount, r.bonus_amount FROM recharges r
       WHERE ${ofShift('r.shift_id', 'r.operator_id', 'r.created_at')}
@@ -141,7 +146,8 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
   const { checkouts, checkoutByMethod, recharges, rechargeByMethod, walletConsumes, coupons, refunds, refundByMethod } = row!;
   const cashCheckout = checkoutByMethod.find((m) => m.method === 'cash')?.amount ?? 0;
   const cashRecharge = rechargeByMethod.find((m) => m.method === 'cash')?.amount ?? 0;
-  const cashRefund = refundByMethod.find((m) => m.method === 'cash')?.amount ?? 0;
+  // 升级时已有的班次：反结账按原口径只列提醒（与 v0.3 的交班表相同），不列退款、不扣现金
+  const cashRefund = s.legacyRefund ? 0 : (refundByMethod.find((m) => m.method === 'cash')?.amount ?? 0);
   return {
     from: new Date(from).toISOString(),
     to: new Date(to).toISOString(),
@@ -151,13 +157,17 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
     walletConsumes,
     coupons,
     // JSON 里的时间是 PostgreSQL 的格式，与单独查询时一样换成 ISO 字符串
-    voids: row!.voids.map((v) => ({ ...v, voidedAt: new Date(v.voidedAt).toISOString() })),
-    refunds: { ...refunds, byMethod: refundByMethod },
+    voids: row!.voids.map(({ cashRefund: refund, ...v }) => ({
+      ...v,
+      voidedAt: new Date(v.voidedAt).toISOString(),
+      ...(s.legacyRefund ? {} : { cashRefund: refund }),
+    })),
+    ...(s.legacyRefund ? {} : { refunds: { ...refunds, byMethod: refundByMethod } }),
     cash: {
       opening: s.openingCash,
       checkout: cashCheckout,
       recharge: cashRecharge,
-      refund: cashRefund,
+      ...(s.legacyRefund ? {} : { refund: cashRefund }),
       expected: s.openingCash + cashCheckout + cashRecharge - cashRefund,
     },
   };
@@ -166,6 +176,7 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
 interface ShiftRow extends Omit<ShiftRecord, 'summary'> {
   summary: ShiftSummary | null;
   legacyWindow: boolean;
+  legacyRefund: boolean;
 }
 
 /** 已交班的返回交班时的快照；当班中的按此刻汇总 */
@@ -173,11 +184,11 @@ export async function getShift(db: Db, id: number, now = new Date()): Promise<Sh
   const [row] = await db<ShiftRow[]>`
     SELECT s.id, s.shift_no, s.staff_id, st.display_name AS staff_name, s.status, s.business_date, s.started_at, s.opening_cash,
            s.ended_at, s.expected_cash, s.counted_cash, s.note, h.display_name AS handed_to_name, c.display_name AS closed_by_name, s.summary,
-           s.legacy_window
+           s.legacy_window, s.legacy_refund
     FROM shifts s JOIN staff st ON st.id = s.staff_id LEFT JOIN staff h ON h.id = s.handed_to LEFT JOIN staff c ON c.id = s.closed_by
     WHERE s.id = ${id}`;
   if (!row) throw notFound('班次不存在');
-  const { legacyWindow: _legacy, ...shift } = row;
+  const { legacyWindow: _legacy, legacyRefund: _legacyRefund, ...shift } = row;
   return { ...shift, summary: row.summary ?? (await shiftSummary(db, row, now)) };
 }
 
@@ -237,7 +248,7 @@ export async function closeShift(deps: Deps, id: number, raw: unknown, ctx: OpCo
     // 排他锁：等已对本班次加了共享锁、正在入账的收款提交后再汇总（它们计入本班次）；
     // 之后才拿锁的收款看到本班次已交，不会记进来，所以汇总快照不会漏掉记在本班次的单据
     const [s] = await tx<(ShiftScope & { shiftNo: string; status: string })[]>`
-      SELECT id, shift_no, staff_id, status, started_at, opening_cash, legacy_window FROM shifts WHERE id = ${id} FOR UPDATE`;
+      SELECT id, shift_no, staff_id, status, started_at, opening_cash, legacy_window, legacy_refund FROM shifts WHERE id = ${id} FOR UPDATE`;
     // 交班时刻取在拿到锁之后：快照里的单据都不晚于交班时刻
     const at = ctx.at ?? new Date();
     if (!s) throw notFound('班次不存在');

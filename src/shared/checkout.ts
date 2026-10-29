@@ -234,7 +234,10 @@ export interface ShiftSummary {
   coupons: { platform: CouponPlatform; count: number; amount: number }[];
   /** 本班次内本人做的反结账（原单可能在别的班次）；cashRefund 为退给客人的现金（R1.2 起） */
   voids: { checkoutNo: string; amount: number; reason: string; voidedAt: string; cashRefund?: number }[];
-  /** 反结账退款按原收款方式（R1.2 起）：现金从本班钱箱退，扣减应有现金；扫码、银行卡、团购在商户后台原路退回并登记退款单号 */
+  /**
+   * 反结账退款按原收款方式（R1.2 起）：现金从本班钱箱退，扣减应有现金；扫码、银行卡、团购在商户后台原路退回并登记退款单号。
+   * 升级（迁移 017）时已有的班次与之前的快照没有这一项：反结账只列提醒、不扣现金（cashRefund、cash.refund 同样没有）
+   */
   refunds?: { count: number; total: number; byMethod: { method: CheckoutMethod; amount: number }[] };
   /** 应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金 */
   cash: { opening: number; checkout: number; recharge: number; refund?: number; expected: number };

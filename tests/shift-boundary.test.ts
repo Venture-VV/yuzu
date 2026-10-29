@@ -4,7 +4,8 @@
 //   · 交班先拿到班次（排他锁）：收款开始处理时在这个班次上的，等交班提交后整笔拒绝（SHIFT_CLOSED），不入账——
 //     不会出现「开班期间发起、交班之后完成、哪个班次都不算」的收款；开新班后原样重提记到新班次；
 //   · 升级时仍未交班的旧班次（迁移 016 前开班）同样适用；
-//   · 反结账退款记到反结账人的班次、现金扣减应有现金；原收银员的班次仍算这笔收款（R1.2，店主 2026-10-29 签认）。
+//   · 反结账退款记到反结账人的班次、现金扣减应有现金；原收银员的班次仍算这笔收款（R1.2，店主 2026-10-29 签认）；
+//     规则关闭、反结账的人没有开班时退款没有记到任何班次，原单也不再计入收款时的班次。
 // 注意：收款持有班次共享锁时被测试卡住，交班会等这笔收款——测试先发出交班请求、确认在等锁，再放开，不能同步等交班返回。
 
 import { randomUUID } from 'node:crypto';
@@ -335,8 +336,9 @@ describe('交班与收款以班次为界', () => {
     expect((await close(ctx.owner, next.id, -49900)).body.summary.voids).toHaveLength(1);
   });
 
-  it('复测复现：交班汇总到一半时另一位员工反结账本班次的单——收款仍算在本班次（R1.2），保存的交班表各项互相一致', async () => {
+  it('复测复现：交班汇总到一半时另一位员工（在班上）反结账本班次的单——收款仍算在本班次（R1.2），退款记到反结账人的班次，保存的交班表各项互相一致', async () => {
     const shift = await open(ctx.clerk);
+    const ownerShift = await open(ctx.owner);
     const c = await couponCheckout(await enter('A008'), 'MT2026SHIFT0001');
     expect(c.status).toBe(200);
     expectConsistent((await current(ctx.clerk)).summary);
@@ -344,7 +346,7 @@ describe('交班与收款以班次为界', () => {
     const release = await hold((tx) => tx`LOCK TABLE recharges IN ACCESS EXCLUSIVE MODE`);
     const closing = close(ctx.clerk, shift.id, 10000);
     await waitForLockWaiters(1);
-    // 店主（另一位员工，不在这个班次上）此时反结账这张单
+    // 店主（另一位员工，在自己的班上）此时反结账这张单
     const v = await api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/checkouts/${c.body.id}/void`, { reason: '收款方式记错' });
     expect(v.status).toBe(200);
     await release();
@@ -356,6 +358,32 @@ describe('交班与收款以班次为界', () => {
     expect(cl.body.summary.refunds).toEqual({ count: 0, total: 0, byMethod: [] });
     expectConsistent(cl.body.summary);
     expectConsistent((await api(ctx.app, ctx.clerk, 'GET', `/api/shifts/${shift.id}`)).body.summary);
+    // 退的 100 元现金扣减店主班次的应有现金，两张交班表合起来相抵
+    const boss = await close(ctx.owner, ownerShift.id, -10000);
+    expect(boss.status).toBe(200);
+    expect(boss.body.summary.refunds).toEqual({ count: 1, total: 49900, byMethod: [{ method: 'cash', amount: 10000 }, { method: 'coupon', amount: 39900 }] });
+    expectConsistent(boss.body.summary);
+  });
+
+  it('同上，但规则关闭、反结账的人没有开班：退款没有记到任何班次，原单不再计入本班次——交班看到应有现金变了（SHIFT_CHANGED），按新的应有现金交班后各项一致', async () => {
+    expect(await current(ctx.owner)).toBeNull();
+    const shift = await open(ctx.clerk);
+    const c = await couponCheckout(await enter('A010'), 'MT2026SHIFT0003');
+    expect(c.status).toBe(200);
+    const release = await hold((tx) => tx`LOCK TABLE recharges IN ACCESS EXCLUSIVE MODE`);
+    const closing = close(ctx.clerk, shift.id, 10000);
+    await waitForLockWaiters(1);
+    const v = await api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/checkouts/${c.body.id}/void`, { reason: '收款方式记错' });
+    expect(v.status).toBe(200);
+    await release();
+    const cl = await closing;
+    expect(cl.status).toBe(409);
+    expect(cl.body.error).toMatchObject({ code: 'SHIFT_CHANGED', details: { expectedCash: 0 } });
+    const again = await close(ctx.clerk, shift.id, 0);
+    expect(again.status).toBe(200);
+    expect(again.body.summary.checkouts).toEqual({ count: 0, total: 0 });
+    expect(again.body.summary.coupons).toEqual([]);
+    expectConsistent(again.body.summary);
   });
 
   it('反结账在交班汇总之后、交班提交之前完成：交班表是反结账之前的同一时刻，各项一致', async () => {

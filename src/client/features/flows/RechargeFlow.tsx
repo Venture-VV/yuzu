@@ -14,6 +14,7 @@ import { Money } from '../../components/Money';
 import { Button, ConfirmCheck, Field, Input, MoneyInput, Notice, PendingBadge, Skeleton } from '../../components/ui';
 import { BalanceChange, FlowFrame, OperationStatus, OverLimitCard, PendingRecovery, SuccessHeader, SummaryRow, type Step } from './parts';
 import { isBusy, isLocked, useOperation } from './useOperation';
+import { SHIFT_ERRORS, shiftKeys, ShiftGate, useShiftReady } from '../shift/ShiftGate';
 
 const METHOD_ICONS: Record<PaymentMethod, typeof Smartphone> = {
   wechat: Smartphone,
@@ -110,6 +111,8 @@ export function RechargeFlow({
       setStep('form');
       setFormError(op.state.error.message);
     }
+    // 没有开班或班次刚交班（R1.2 收款前必须先开班）：刷新当前班次，页面上出现开班提示
+    if (op.state.status === 'error' && SHIFT_ERRORS.includes(op.state.error.code)) void qc.invalidateQueries({ queryKey: shiftKeys.all });
     // 授权过期、已用过或与金额不符：作废这次授权，重新请店主或店总授权；上限刚被调整时刷新规则
     if (op.state.status === 'error' && /^(GRANT_|OVER_LIMIT_)/.test(op.state.error.code)) {
       setGrant(null);
@@ -130,6 +133,7 @@ export function RechargeFlow({
 
   const busy = isBusy(op.state);
   const locked = isLocked(op.state);
+  const shiftReady = useShiftReady();
 
   if (op.adopted && op.state.status !== 'success') {
     return (
@@ -211,7 +215,7 @@ export function RechargeFlow({
               variant="primary"
               size="lg"
               className="flex-1"
-              disabled={!confirmed || !grantOk || locked}
+              disabled={!confirmed || !grantOk || locked || !shiftReady.ready}
               loading={op.state.status === 'submitting'}
               onClick={op.submit}
             >
@@ -220,6 +224,9 @@ export function RechargeFlow({
           </div>
         }
       >
+        <div className="mb-4 empty:hidden">
+          <ShiftGate action="充值" />
+        </div>
         <div className="rounded-lg border border-line bg-card p-4">
           <p className="text-[12.5px] font-semibold text-ink-3">本次实收</p>
           <div className="mt-1 flex items-end justify-between gap-3">
@@ -286,6 +293,9 @@ export function RechargeFlow({
         </Button>
       }
     >
+      <div className="mb-4 empty:hidden">
+        <ShiftGate action="充值" />
+      </div>
       <div className="flex items-center justify-between">
         <p className="text-[13px] font-bold text-ink-2">充值方案</p>
         <PendingBadge title="实际充值与赠送方案待店主确认，当前为模拟方案" />

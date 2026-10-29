@@ -31,6 +31,8 @@ interface Draft {
   businessHours: { open: string; close: string } | null;
   /** 自定义赠金的有效期（天），空为长期有效 */
   customBonusValidDays: string;
+  /** 充值、结账、反结账前必须先开班（R1.2） */
+  requireOpenShift: boolean;
 }
 
 export function RulesTab() {
@@ -51,6 +53,7 @@ export function RulesTab() {
       reversalWindowHours: settings.data.reversalWindowHours,
       businessHours: settings.data.businessHours,
       customBonusValidDays: settings.data.customBonusValidDays ? String(settings.data.customBonusValidDays) : '',
+      requireOpenShift: settings.data.requireOpenShift,
     });
   }
   if (!draft) return <Skeleton className="h-96" />;
@@ -79,6 +82,7 @@ export function RulesTab() {
         reversalWindowHours: draft.reversalWindowHours,
         businessHours: draft.businessHours,
         customBonusValidDays: customDays,
+        requireOpenShift: draft.requireOpenShift,
       });
       await qc.invalidateQueries({ queryKey: qk.settings });
       await qc.invalidateQueries({ queryKey: qk.session });
@@ -161,9 +165,9 @@ export function RulesTab() {
           <MoneyInput id="r-maxc" value={draft.maxConsume} onChange={(e) => setDraft({ ...draft, maxConsume: e.target.value })} />
         </Field>
         <Field
-          label={<span className="inline-flex items-center gap-2">撤销时限 <PendingBadge /></span>}
+          label="撤销与反结账时限"
           htmlFor="r-window"
-          hint="消费后多长时间内可以撤销；超过后只有店主可以撤销"
+          hint="消费或结账后多长时间内，值班经理及以上可以撤销消费、反结账；超过后只有店主可以（店主 2026-10-29 签认默认 48 小时）"
         >
           <Select
             id="r-window"
@@ -172,10 +176,21 @@ export function RulesTab() {
           >
             {windowOptions.map((h) => (
               <option key={h ?? 'none'} value={h ?? ''}>
-                {h === null ? '不限' : `消费后 ${describeHours(h)}内`}
+                {h === null ? '不限' : `消费 / 结账后 ${describeHours(h)}内`}
               </option>
             ))}
           </Select>
+        </Field>
+        <Field label="收款前必须先开班" hint="开启时充值、结账、反结账前都要先开班（页面上可以就地开班），每笔收款都记到当班的交班表（店主 2026-10-29 签认默认开启）">
+          <Segmented
+            ariaLabel="收款前必须先开班"
+            value={draft.requireOpenShift ? 'on' : 'off'}
+            onChange={(v) => setDraft({ ...draft, requireOpenShift: v === 'on' })}
+            options={[
+              { value: 'on', label: '必须先开班' },
+              { value: 'off', label: '不要求（不记班次）' },
+            ]}
+          />
         </Field>
         <Field
           label={<span className="inline-flex items-center gap-2">自定义赠金有效期（天） <PendingBadge /></span>}

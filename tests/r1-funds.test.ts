@@ -311,6 +311,27 @@ describe('反结账退款的交班口径与结账记录', () => {
     expect(mine.checkouts).toEqual(mineBefore.checkouts);
   });
 
+  it('规则关闭时没有开班的人反结账：退款没有记到任何班次，原单也不再计入收款时的班次（不会多算应有现金）', async () => {
+    await createStaff(ctx.sql, { username: 'duty2', displayName: '没开班的经理', role: 'duty_manager', password: PASSWORD, mustChangePassword: false });
+    const duty2 = await login(ctx.app, 'duty2');
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { requireOpenShift: false })).status).toBe(200);
+    try {
+      const v = await visitOf('R078');
+      const c = await pay(ctx.clerk, [v], 49900, [{ method: 'cash', amount: 49900 }]);
+      expect(c.status).toBe(200);
+      const before = (await currentShift(ctx.clerk)).summary;
+      expect(await currentShift(duty2)).toBeNull();
+      expect((await voidCheckout(duty2, c.body.id, '收款方式记错')).status).toBe(200);
+      const [row] = await ctx.sql<{ voidShiftId: number | null }[]>`SELECT void_shift_id FROM checkouts WHERE id = ${c.body.id}`;
+      expect(row!.voidShiftId).toBeNull();
+      const after = (await currentShift(ctx.clerk)).summary;
+      expect(after.checkouts).toEqual({ count: before.checkouts.count - 1, total: before.checkouts.total - 49900 });
+      expect(after.cash.expected).toBe(before.cash.expected - 49900);
+    } finally {
+      expect((await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { requireOpenShift: true })).status).toBe(200);
+    }
+  });
+
   it('结账记录可以切换营业日：店员只看本营业日，值班经理可以看之前的营业日', async () => {
     const yesterday = shiftDate(today, -1);
     expect((await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkouts?date=${yesterday}`)).status).toBe(403);

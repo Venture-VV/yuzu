@@ -4,7 +4,8 @@
 --   · 「其他」收款必须填备注（只约束之后的记录）；
 --   · 反结账后重结的门票按第一次结账的时间计算：反结账时把结账时刻记到来访上，之后结账按它计价，写入后不再改；
 --   · 撤销与反结账时限（#10）默认 48 小时：仍是「不限」的改为 48 小时；跳档宽限（❓6）仍是 0 的改为 15 分钟；
---   · 「收款前必须先开班」是经营规则开关（代码默认开），反结账退款的交班口径只改汇总，都不需要改表。
+--   · 「收款前必须先开班」是经营规则开关（代码默认开），不需要改表；
+--   · 反结账退款的交班口径只用于升级之后开的班次（⑥）。
 
 -- ① 当场授权增加用途：优惠 / 免单（checkout_discount）、降低票种与免票（ticket_discount）
 ALTER TABLE auth_grants DROP CONSTRAINT auth_grants_purpose_check;
@@ -67,3 +68,10 @@ END $$;
 UPDATE settings SET value = '48'::jsonb, updated_at = now() WHERE key = 'reversal_window_hours' AND value = 'null'::jsonb;
 UPDATE settings SET value = jsonb_set(value, '{overtimeGraceMinutes}', '15'), updated_at = now()
 WHERE key = 'frontdesk_rules' AND value->>'overtimeGraceMinutes' = '0';
+
+-- ⑥ 反结账退款的交班口径（店主 2.5：现金退款扣减反结账人班次的应有现金，原单仍算在收款时的班次）只用于升级之后开的班次。
+--    升级时已有的班次（含仍未交班的）里做的反结账仍按原口径：反结账人的班次只列提醒、不扣现金，原单也不计入收款时的班次。
+--    同一张单在两个班次里按同一口径计算：升级前已交班的快照、升级时仍未交班的班次与之后开的班次合起来对得上。
+--    已有班次记为 true，之后开的班次默认 false；只加列、不改已有行（交班记录的保护触发器不受影响）
+ALTER TABLE shifts ADD COLUMN legacy_refund boolean NOT NULL DEFAULT true;
+ALTER TABLE shifts ALTER COLUMN legacy_refund SET DEFAULT false;
