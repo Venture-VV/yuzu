@@ -74,7 +74,7 @@ docker compose logs backup   # 一两分钟内应看到「✓ yuzu-…-daily.dum
 
 ### 3.2 看门狗与企业微信告警
 
-`scripts/watchdog.sh` 在 Mac mini 上每 5 分钟检查一次：Docker 是否在运行（没运行时尝试打开 Docker Desktop）；应用健康检查连续 3 次失败时自动重启应用；备份服务在运行（没运行就启动）、最新的定时备份不超过两个备份间隔、在临时库核验通过、自检一致；外置盘已挂载；磁盘剩余不少于 10% 且不少于 5 GB。有问题推到企业微信群，同一项每小时最多推一次，恢复时推「已恢复」；每天 9 点后推一条「每日巡检」，哪天没收到就说明这台机器或看门狗本身出了问题。升级、恢复、回退期间不会自动重启应用。
+`scripts/watchdog.sh` 在 Mac mini 上每 5 分钟检查一次：Docker 是否在运行（没运行时尝试打开 Docker Desktop）；应用健康检查连续 3 次失败时自动重启应用；备份服务在运行（没运行就启动）、最新的定时备份不超过两个备份间隔、在临时库核验通过、自检一致；外置盘已挂载；磁盘剩余不少于 10% 且不少于 5 GB；配置了异地副本（第 9.8 节）时，服务器 A 上最新的副本不超过两个备份间隔再加 1 小时。有问题推到企业微信群，同一项每小时最多推一次，恢复时推「已恢复」；每天 9 点后推一条「每日巡检」，哪天没收到就说明这台机器或看门狗本身出了问题。升级、恢复、回退期间不会自动重启应用。
 
 1. 企业微信里建一个告警群（店主、值班经理），群设置 →「群机器人」→ 添加机器人，复制 Webhook 地址（`https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…`），写进 `.env` 的 `WECOM_WEBHOOK_URL`。这个地址相当于密码，只放在 `.env`。
 2. 先手动试一次：`./scripts/watchdog.sh --test`，群里应收到测试消息。
@@ -123,6 +123,7 @@ launchctl enable "gui/$(id -u)/com.yuzu.watchdog"
 - [ ] 拔掉外置盘：`docker compose logs backup` 报「没有哨兵文件」，内置盘上没有出现备份；接回后执行 `docker compose restart backup`，下一份照常写到外置盘
 - [ ] 手动跑一次第 9 节的上传脚本，私有 OSS Bucket 的 `yuzu/` 前缀下出现对应的 `.age` 文件；`git status` 不列出 `.env`
 - [ ] 按第 9.7 节从 OSS 取回这份备份，用店外保管的 age 私钥解密，`./scripts/verify-backup.sh` 全部 ✓；在独立演练目录里 `./scripts/restore.sh`，指纹一致，结束时自检全部 ✓
+- [ ] 异地副本（第 9.8 节）：`./scripts/offsite-copy.sh --check` 显示「✓ 能连上」；15 分钟内服务器 A 的 `/srv/yuzu-offsite/backups` 出现最新一份的 `.dump.age`；在 Mac mini 上 `sftp -i ~/.ssh/yuzu_offsite yuzubackup@yuzu-test` 进去执行 `rm` 任一文件，被拒绝（Permission denied）；按第 9.8 节取回一份，解密后 `./scripts/verify-backup.sh` 全部 ✓
 - [ ] 上线前（库里还没有真实业务时）用外置盘上的备份在正式环境做一次恢复演练：`./scripts/restore.sh <备份文件>`，指纹一致，结束时自检全部 ✓
 - [ ] 看门狗：`./scripts/watchdog.sh --test` 群里收到测试消息；`docker compose stop app` 后约 15 分钟内群里收到「已自动重启」，前台恢复可用，再过 5 分钟收到「已恢复」
 - [ ] 一键回退演练（库里还没有真实业务时）：用 `update.sh` 升到新版本后执行 `./scripts/rollback.sh`，回到原版本，`check` 全部 ✓
@@ -141,6 +142,7 @@ launchctl enable "gui/$(id -u)/com.yuzu.watchdog"
 | 外置盘拔下又接回 | `docker compose restart backup` |
 | 立即加密并上传到 OSS | `bash "$HOME/Library/Application Support/yuzu/oss-upload.sh"` |
 | 查看 OSS 上传日志 | `tail -n 50 "$HOME/Library/Logs/yuzu-oss-upload.log"` |
+| 立即传一次异地副本 / 测连通 | `./scripts/offsite-copy.sh`；`./scripts/offsite-copy.sh --check`；记录在 `.offsite/offsite.log` |
 | 查看 Tailscale 地址 | `tailscale ip -4`（未装命令行入口时见第 10 节） |
 | 自检（会员、营业口径、库存、前台） | `docker compose exec app node dist/server/cli.js check` |
 | 每日对账包（只读） | `./scripts/daily-recon.sh [营业日]`：写到项目目录的 `recon/<营业日>/`，含日结汇总、结账单、部门参考表、异常清单、交班 |
@@ -198,7 +200,7 @@ docker compose -p yuzu-demo exec app node dist/server/cli.js seed-inventory-demo
 - 店内：`backup` 服务每小时把数据库备份到外置盘（`BACKUP_INTERVAL_MINUTES` 默认 60）。每份导出后先在临时库里完整恢复一遍，跑自检、算数据指纹，结果写在备份旁同名的 `.json` 里，然后删掉临时库。每天 4:00 之后的第一份记为 daily（`BACKUP_HOUR` 默认 4）。hourly 保留 48 小时，daily、升级前、恢复前与手动备份保留 30 天。外置盘是最快的恢复来源。
 - 外置盘没挂载（备份目录里看不到哨兵文件 `.yuzu-backup-target`）时，备份服务不写备份，日志里每小时报一次错；手动备份、升级前备份也会拒绝，`update.sh` 因此停下，不在没有备份的情况下升级。
 - 恢复：`restore.sh` 先核对文件摘要，导入后、启动应用前比对数据指纹，不一致就让应用保持停止。
-- 店外：daily、升级前等非 hourly 的备份连同 `.json` 每天加密上传到阿里云 OSS 私有 Bucket，代替每周手工拷到网盘。步骤见第 9 节。每小时备份的异地副本随 R1.4 后续版本加上。
+- 店外：daily、升级前等非 hourly 的备份连同 `.json` 每天加密上传到阿里云 OSS 私有 Bucket（保留 180 天），代替每周手工拷到网盘，步骤见第 9 节；每一份备份（含每小时的）在 15 分钟内加密复制到云服务器 A（保留 7 天），步骤见第 9.8 节。
 - 每月：按第 9.7 节从 OSS 取回一份，解密后核验并在独立环境做恢复演练。
 - 更新版本前：`update.sh` 会先在外置盘写一份备份；下一次上传任务会把它一并加密上传。
 
@@ -516,7 +518,93 @@ docker compose up -d --build
 rm -f "$HOME/yuzu-restore/restore.dump" "$HOME/yuzu-restore/restore.dump.json" "$HOME/yuzu-restore/restore.age" "$HOME/yuzu-restore/restore.json.age" "$HOME/yuzu-restore/age.txt"
 ```
 
-外置盘还在时，日常恢复仍优先用盘上的未加密 `.dump` 和 `./scripts/restore.sh`。OSS 这一路用于外置盘和 Mac mini 一起不可用的时候（失窃、火灾、磁盘损坏）。
+外置盘还在时，日常恢复仍优先用盘上的未加密 `.dump` 和 `./scripts/restore.sh`。OSS 这一路用于外置盘和 Mac mini 一起不可用的时候（失窃、火灾、磁盘损坏）；要最近一小时的数据时用第 9.8 节服务器 A 上的副本。
+
+### 9.8 每份备份的异地副本：云服务器 A（v0.3.5 起）
+
+OSS 每天一份、保留 180 天，防的是「很久之后才发现数据坏了」；它补不上当天的数据。外置盘和 Mac mini 一起没了（失窃、火灾、进水）时，要靠这一节：`scripts/offsite-copy.sh` 每 15 分钟把外置盘上新的备份（每小时一份，以及 daily、升级前、手动的）用第 9.1 节的 age 公钥加密，经 Tailscale 用 SFTP 传到云服务器 A（即测试服 `yuzu-test`），那边保留 7 天。最坏丢一个多小时的数据，而不是一整天。
+
+- 服务器 A 上只有密文，私钥仍只在店主手里；Mac mini 用一把专用钥匙登录一个只能 SFTP 的账号，只能往备份目录里写，**不能删文件**、不能改权限、不能开 shell。过期清理由服务器 A 自己的定时任务做。
+- 先传 `.json` 再传备份，都先传成 `.part`、传完再改名，服务器上看到的 `.dump.age` 都是完整的；传成功的记在项目目录的 `.offsite/`，失败的下次重试；服务器上已经有的不重传。
+- 看门狗（第 3.2 节）看着它：服务器上最新的副本比两个备份间隔再加 1 小时还旧（默认 3 小时）就告警；每日巡检里写着「异地副本 N 分钟前」。
+
+**1. 服务器 A**：按 [测试服部署手册](DEPLOY_TEST_SERVER.md) 第 9 节建只能 SFTP 的 `yuzubackup` 账号、备份目录与 7 天清理，并在 Tailscale 策略里放行 Mac mini 到服务器 A 的 22 端口。
+
+**2. Mac mini 上生成专用钥匙**（没有口令：定时任务无人值守；这把钥匙在服务器上只能写备份目录）：
+
+```bash
+ssh-keygen -t ed25519 -N '' -f ~/.ssh/yuzu_offsite -C yuzu-mac-mini-offsite
+cat ~/.ssh/yuzu_offsite.pub
+```
+
+把打印的一行（`ssh-ed25519 AAAA… yuzu-mac-mini-offsite`）交给管理服务器 A 的人（Codex），按测试服手册第 9 节加到服务器上。这是公钥，可以经聊天发送；`~/.ssh/yuzu_offsite`（不带 `.pub`）是私钥，留在 Mac mini 上。
+
+**3. 写进 `.env`**（`AGE_RECIPIENT` 与第 9.3 节是同一个公钥；没开 OSS 也要填）：
+
+```bash
+OFFSITE_TARGET=yuzubackup@yuzu-test
+AGE_RECIPIENT=age1此处换成店外生成的公钥
+# 钥匙不在 ~/.ssh/yuzu_offsite 时：OFFSITE_SSH_KEY=/Users/…/.ssh/…
+```
+
+`yuzu-test` 是服务器 A 的 Tailscale 名字，MagicDNS 短名不通时换成 `100.` 开头的地址。
+
+**4. 试一次**：
+
+```bash
+cd ~/yuzu
+./scripts/offsite-copy.sh --check   # 应显示「✓ 能连上 …，备份目录可写」；第一次连接会记下服务器 A 的主机密钥
+./scripts/offsite-copy.sh           # 第一次会把最近 7 天的备份都传一遍，新的在前
+tail -n 20 .offsite/offsite.log
+```
+
+**5. 每 15 分钟自动运行**（登录用户的 launchd；代码不在 `~/yuzu` 时把路径换成实际目录）：
+
+```bash
+mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
+cat > "$HOME/Library/LaunchAgents/com.yuzu.offsite.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.yuzu.offsite</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>${HOME}/yuzu/scripts/offsite-copy.sh</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>900</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardErrorPath</key>
+  <string>${HOME}/Library/Logs/yuzu-offsite.err.log</string>
+</dict>
+</plist>
+PLIST
+launchctl bootout "gui/$(id -u)/com.yuzu.offsite" 2>/dev/null || true
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.yuzu.offsite.plist"
+launchctl enable "gui/$(id -u)/com.yuzu.offsite"
+```
+
+运行记录在项目目录的 `.offsite/offsite.log`（没有新备份时不写）。和看门狗一样，后台的 bash 第一次读外置盘时 macOS 可能弹窗询问，点「允许」（这一步尚未在门店 Mac mini 上实测）。
+
+**从服务器 A 取回**（外置盘和 Mac mini 都不可用时）：在服务器 A 上把要用的那一对文件复制出来，拿到演练电脑上用店主的私钥解密，之后与第 9.7 节第 3 步相同。私钥不要带到服务器 A 上。
+
+```bash
+# 在服务器 A 上（文件名换成 ls 的结果，一般取最新的一份）
+ls -lt /srv/yuzu-offsite/backups | head
+sudo cp /srv/yuzu-offsite/backups/yuzu-20261126-150000-hourly.dump.age /srv/yuzu-offsite/backups/yuzu-20261126-150000-hourly.dump.json.age /tmp/
+sudo chown "$USER" /tmp/yuzu-20261126-150000-hourly.dump*.age
+# 在演练电脑上
+scp 'yuzu@yuzu-test:/tmp/yuzu-20261126-150000-hourly.dump*.age' ~/yuzu-restore/
+cd ~/yuzu-restore
+age -d -i ./age.txt -o ./restore.dump ./yuzu-20261126-150000-hourly.dump.age
+age -d -i ./age.txt -o ./restore.dump.json ./yuzu-20261126-150000-hourly.dump.json.age
+```
+
+用完删掉服务器 A 的 `/tmp` 里那两份和演练电脑上的明文、私钥副本（同第 9.7 节第 4 步）。
 
 ## 10. 远程访问（Tailscale）
 
@@ -575,6 +663,8 @@ TAILSCALE_BE_CLI=1 /Applications/Tailscale.app/Contents/MacOS/Tailscale status
   ]
 }
 ```
+
+已经建了测试服（云服务器 A）或要做第 9.8 节的异地副本时，改用 [测试服部署手册](DEPLOY_TEST_SERVER.md) 第 4 节的策略，它包含这一条，并放行 Mac mini 往服务器 A 传异地副本。
 
 保存后，到 **Machines** 页面给 Mac mini 加上标签 `tag:yuzu-mini`。策略刚保存、标签还没打上的那一小段时间，Tailscale 上会暂时谁都连不上这台 Mac mini；店内局域网不受影响。加上标签之后，只允许上面这个账号的设备访问 TCP 8080。其他端口、其他人的设备都不通。语法说明见 [Grants](https://tailscale.com/docs/reference/syntax/grants)。
 
