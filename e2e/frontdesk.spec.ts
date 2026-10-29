@@ -119,11 +119,13 @@ test.describe('前台流程', () => {
     await expect(panel.getByTestId('bill-total')).toContainText('58.00');
     await expect(page.getByTestId(`tag-${maleTag}`)).toHaveAttribute('data-state', 'locked');
 
-    // 预结账：同行两张手牌合并汇总，不收款
+    // 预结账：同行两张手牌合并汇总，含门票（R1.2），不收款
     await page.keyboard.press('F8');
     const preview = page.getByTestId('preview');
     await expect(preview).toContainText(femaleTag!);
-    await expect(preview.getByTestId('preview-total')).toContainText('58.00');
+    await expect(preview).toContainText('明细 ¥58.00 + 门票 ¥499.00');
+    // 明细 58 + 两张默认票种「不含餐」12 小时档 499 × 2（迁移 014 内置的票种）
+    await expect(preview.getByTestId('preview-total')).toContainText('1,056.00');
     await expect(preview).toContainText('这还不是结账单');
     await page.keyboard.press('Escape');
     await expect(panel).toBeVisible();

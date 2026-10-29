@@ -62,6 +62,10 @@ beforeAll(async () => {
   // 用现版本的记账流程写入升级前的单据。现版本会写充值单、结账单的班次（016 才有），写入期间临时加这两列，迁移前删掉
   await sql`ALTER TABLE recharges ADD COLUMN shift_id bigint`;
   await sql`ALTER TABLE checkouts ADD COLUMN shift_id bigint`;
+  // 现版本结账按来访的「门票计到的时间」计价（017 才有）；收款前必须先开班的规则（R1.2）在升级前不存在
+  await sql`ALTER TABLE visits ADD COLUMN ticket_end_at timestamptz`;
+  await sql`ALTER TABLE checkout_payments ADD COLUMN approved_by bigint`;
+  await sql`INSERT INTO settings (key, value) VALUES ('require_open_shift', 'false'::jsonb)`;
   const deps = { sql, config };
   const as = (id: number, username: string): Actor => ({ id, username, displayName: username, role: username === 'owner' ? 'owner' : 'clerk', duties: [], mustChangePassword: false });
   const cash = (amount: number) => ({ idempotencyKey: randomUUID(), memberId, planId: null, paidAmount: amount, bonusAmount: 0, paymentMethod: 'cash' as const, paymentConfirmed: true as const });
@@ -74,8 +78,11 @@ beforeAll(async () => {
   await checkout(deps, { clientKey: randomUUID(), visitIds: [v.visits[0]!.id], expectedTotal: 49900, payments: [{ method: 'cash', amount: 49900 }] }, { actor: as(clerk!.id, 'clerk') });
   await sql`ALTER TABLE recharges DROP COLUMN shift_id`;
   await sql`ALTER TABLE checkouts DROP COLUMN shift_id`;
+  await sql`ALTER TABLE visits DROP COLUMN ticket_end_at`;
+  await sql`ALTER TABLE checkout_payments DROP COLUMN approved_by`;
+  await sql`DELETE FROM settings WHERE key = 'require_open_shift'`;
 
-  expect(await migrate(sql)).toEqual(['016_shift_boundary.sql']);
+  expect(await migrate(sql)).toEqual(['016_shift_boundary.sql', '017_r1_funds.sql']);
   app = await buildApp(sql, config);
 }, 60_000);
 

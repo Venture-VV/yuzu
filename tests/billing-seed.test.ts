@@ -3,6 +3,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { minuteOfDay } from '../src/shared/business-date';
+import { businessBreakdown } from '../src/shared/checkout';
 import expected from '../src/server/demo/billing-expected.json';
 import { seedBillingDemo } from '../src/server/seed-billing';
 import { seedFrontdeskDemo } from '../src/server/seed-frontdesk';
@@ -20,7 +21,7 @@ beforeAll(async () => {
   if (m >= 360 && m < 450) now = new Date(now.getTime() - 2 * 3_600_000);
   await seedFrontdeskDemo(ctx.sql, ctx.config, { now });
   const r = await seedBillingDemo(ctx.sql, ctx.config, { now });
-  expect(r).toEqual({ skipped: false, checkouts: 5, voided: 1 });
+  expect(r).toEqual({ skipped: false, checkouts: 6, voided: 1 });
   owner = await login(ctx.app, 'linlan', 'yuzu2026');
   const dates = await ctx.sql<{ date: string }[]>`SELECT DISTINCT business_date::text AS date FROM checkouts WHERE note = '结账演示'`;
   expect(dates).toHaveLength(1);
@@ -43,6 +44,8 @@ describe('结账演示数据', () => {
         const got = d.payments.find((x: { method: string }) => x.method === p.method);
         if ('principal' in p) expect(got.consumption).toMatchObject({ principal: p.principal, bonus: p.bonus, status: e.status === 'voided' ? 'reversed' : 'completed' });
         if ('code' in p) expect(got.coupon).toMatchObject({ platform: p.platform, code: p.code, status: e.status === 'voided' ? 'voided' : 'active' });
+        // 优惠 / 免单：原因记在收款备注，授权人是值班经理
+        if ('reason' in p) expect(got).toMatchObject({ ref: p.reason, approvedByName: p.approvedBy });
       }
       if ('voidReason' in e) expect(d.voidReason).toBe(e.voidReason);
     }
@@ -65,9 +68,11 @@ describe('结账演示数据', () => {
     });
     expect(Object.fromEntries(b.byMethod.map((m: { method: string; amount: number }) => [m.method, m.amount]))).toEqual(expected.business.byMethod);
     expect(Object.fromEntries(b.coupons.map((c: { platform: string; amount: number }) => [c.platform, c.amount]))).toEqual(expected.business.coupons);
+    // 应收、优惠、净营业额、实收分列（R1.2）
+    expect(businessBreakdown(b)).toEqual(expected.business.breakdown);
     expect(s.checks.map((c: { key: string }) => c.key)).toEqual(expected.settlementChecks);
     for (const c of s.checks) expect(c.ok, `${c.label}：${c.detail}`).toBe(true);
-    expect(s.anomalies.some((a: { kind: string }) => a.kind === 'checkout_void')).toBe(true);
+    for (const kind of expected.anomalies) expect(s.anomalies.some((a: { kind: string }) => a.kind === kind), kind).toBe(true);
     const fd = (await api(ctx.app, owner, 'GET', '/api/frontdesk/checks')).body;
     expect(fd.map((c: { key: string }) => c.key)).toEqual(expected.frontdeskChecks);
     for (const c of fd) expect(c.ok, `${c.label}：${c.detail}`).toBe(true);
@@ -79,7 +84,12 @@ describe('结账演示数据', () => {
   it('交班：陈茵已交班（短款 10 元）；张经理当班中，记有他做的反结账', async () => {
     const shifts = (await api(ctx.app, owner, 'GET', `/api/shifts?date=${date}`)).body as {
       staffName: string; status: string; openingCash: number; expectedCash: number; countedCash: number;
-      summary: { checkouts: { count: number; total: number }; checkoutByMethod: { method: string; amount: number }[]; voids: unknown[] };
+      summary: {
+        checkouts: { count: number; total: number };
+        checkoutByMethod: { method: string; amount: number }[];
+        voids: unknown[];
+        cash: { refund: number; expected: number };
+      };
     }[];
     const closed = shifts.find((s) => s.status === 'closed')!;
     expect(closed).toMatchObject({ staffName: '陈茵', openingCash: expected.shift.openingCash, expectedCash: expected.shift.expectedCash, countedCash: expected.shift.countedCash });
@@ -89,6 +99,8 @@ describe('结账演示数据', () => {
     const open = shifts.find((s) => s.status === 'open')!;
     expect(open.staffName).toBe('张经理');
     expect(open.summary.voids).toHaveLength(expected.openShift.voids);
+    // 反结账退的现金算在张经理的班次（R1.2），与陈茵班次里的原现金单在同一钱箱合并核对时相抵
+    expect(open.summary.cash).toMatchObject({ refund: expected.openShift.cashRefund, expected: expected.openShift.expectedCash });
   });
 
   it('重复执行跳过；试用环境拒绝', async () => {

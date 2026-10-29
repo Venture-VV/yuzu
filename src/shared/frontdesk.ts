@@ -71,7 +71,7 @@ export interface FrontdeskRules {
   vipLevelThresholds: number[];
   /** 允许值班经理 / 店总当场授权散客或等级不够的会员使用 VIP 柜（店主 ❓2：默认关闭） */
   vipOverrideEnabled: boolean;
-  /** 门票跳档宽限分钟数（店主 ❓6：默认 0，超过 12 小时分界点即跳档） */
+  /** 门票跳档宽限分钟数（店主 ❓6，2026-10-29 签认 15 分钟：12 小时分界点之后 15 分钟内不跳档） */
   overtimeGraceMinutes: number;
 }
 
@@ -81,7 +81,7 @@ export const DEFAULT_FRONTDESK_RULES: FrontdeskRules = {
   vipLevelBasis: 'recharge',
   vipLevelThresholds: [0, 5_000_000, 10_000_000, 20_000_000, 30_000_000],
   vipOverrideEnabled: false,
-  overtimeGraceMinutes: 0,
+  overtimeGraceMinutes: 15,
 };
 
 /** 会员等级：达到第 i 档门槛即为第 i + 1 级；一档都没达到为 0 级（与散客相同） */
@@ -299,6 +299,8 @@ export interface VisitDetail {
     amount: number;
     nextJumpAt: string;
     nextAmount: number;
+    /** 反结账后重结：门票计到第一次结账的时刻，不再随时间跳档；平时为 null */
+    endAt: string | null;
   } | null;
   /** 已结账离店时的结账单 */
   checkout: { id: number; checkoutNo: string; status: 'completed' | 'voided' } | null;

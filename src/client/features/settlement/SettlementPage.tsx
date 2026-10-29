@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowRight,
   BadgeCheck,
+  BadgePercent,
   CircleAlert,
   CircleCheck,
   CircleSlash,
@@ -12,10 +13,11 @@ import {
   Download,
   Hourglass,
   Lock,
+  Ticket,
   Undo2,
   WalletMinimal,
 } from 'lucide-react';
-import { CHECKOUT_METHOD_LABELS, COUPON_PLATFORM_LABELS } from '@shared/checkout';
+import { businessBreakdown, CHECKOUT_METHOD_LABELS, COUPON_PLATFORM_LABELS } from '@shared/checkout';
 import { describeDate, PAYMENT_METHOD_LABELS, PAYMENT_METHODS } from '@shared/labels';
 import type { SettlementAnomaly, SettlementSummary } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
@@ -390,6 +392,10 @@ const ANOMALY_META: Record<
   balance_mismatch: { label: '余额不符', tone: 'clay', icon: CircleX, iconClass: 'bg-clay-soft text-clay' },
   chain_break: { label: '流水不连续', tone: 'clay', icon: CircleX, iconClass: 'bg-clay-soft text-clay' },
   checkout_void: { label: '反结账', tone: 'ember', icon: Undo2, iconClass: 'bg-ember-soft text-ember' },
+  discount: { label: '优惠 / 免单', tone: 'yuzu', icon: BadgePercent, iconClass: 'bg-yuzu-soft text-yuzu-deep' },
+  ticket_override: { label: '降档 / 免票', tone: 'yuzu', icon: Ticket, iconClass: 'bg-yuzu-soft text-yuzu-deep' },
+  visit_cancel: { label: '撤销误开的牌', tone: 'lake', icon: CircleSlash, iconClass: 'bg-lake-soft text-lake' },
+  line_void: { label: '作废明细', tone: 'lake', icon: CircleSlash, iconClass: 'bg-lake-soft text-lake' },
 };
 
 function AnomalyItem({ a }: { a: SettlementAnomaly }) {
@@ -490,9 +496,13 @@ function CloseDialog({ open, onClose, s }: { open: boolean; onClose: () => void;
   );
 }
 
-/** 营业口径（Batch 3）：前台结账的营业额与收款；会员储值支付同时是会员口径的储值消费 */
+/**
+ * 营业口径（Batch 3）：前台结账的营业额与收款；会员储值支付同时是会员口径的储值消费。
+ * R1.2（店主 2026-10-29 签认）分列应收、优惠、净营业额、实收：应收 = 结账 − 反结账，净营业额 = 应收 − 优惠。
+ */
 function BusinessCard({ s }: { s: SettlementSummary }) {
   const b = s.business;
+  const biz = businessBreakdown(b);
   if (b.checkouts.count === 0 && b.voids.count === 0 && s.recharge.count === 0) return null;
   // 实收合计：充值实收 + 结账里的现金类收款（会员储值、团购券不是本次实收）
   const cashMethods = PAYMENT_METHODS.map((m) => {
@@ -507,9 +517,9 @@ function BusinessCard({ s }: { s: SettlementSummary }) {
         <div className="border-b border-line px-5 pt-4 pb-3">
           <p className="flex items-center gap-2 text-[13px] font-bold text-ink-2">
             <span className="size-2 rounded-full bg-pine" />
-            营业口径 · 前台结账
+            营业口径 · 前台结账 · 净营业额
           </p>
-          <Money cents={b.net} className="mt-1.5 text-[32px] leading-none font-bold text-pine" />
+          <Money cents={biz.netRevenue} className="mt-1.5 text-[32px] leading-none font-bold text-pine" />
           <p className="mt-1.5 text-[12.5px] text-ink-3">
             结账 {b.checkouts.count} 张 <Money cents={b.checkouts.total} />
             {b.voids.count > 0 && (
@@ -518,11 +528,21 @@ function BusinessCard({ s }: { s: SettlementSummary }) {
                 · 反结账 {b.voids.count} 张 −<Money cents={b.voids.total} />
               </>
             )}
+            {biz.discount !== 0 && (
+              <>
+                {' '}
+                · 优惠 <Money cents={-biz.discount} signed />
+              </>
+            )}
           </p>
         </div>
-        <div className="space-y-2 px-5 py-4 text-[13px]">
+        <div className="space-y-2 px-5 py-4 text-[13px]" data-testid="settlement-breakdown">
           <Row label="门票" cents={b.ticket} className="text-ink" />
           <Row label="项目与其他" cents={b.items} className="text-ink" />
+          <Row label="应收（结账 − 反结账）" cents={biz.receivable} className="font-bold text-ink" />
+          <Row label="优惠 / 免单（当场授权）" cents={-biz.discount} className="text-yuzu-deep" />
+          <Row label="净营业额（应收 − 优惠）" cents={biz.netRevenue} className="font-bold text-pine" />
+          <Row label="实收（现金、扫码、银行卡、其他）" cents={biz.received} className="text-lake" />
           <div className="my-1 border-t border-dashed border-line" />
           {b.byMethod.map((m) => (
             <div key={m.method} className="flex items-center justify-between">
@@ -531,6 +551,7 @@ function BusinessCard({ s }: { s: SettlementSummary }) {
                 <span className="ml-1 text-[12px]">· {m.count} 笔{m.voidCount ? `，反结账 ${m.voidCount}` : ''}</span>
                 {m.method === 'wallet' && <span className="ml-1 text-[11.5px] text-ink-4">（会员余额抵扣，同时计入储值消费）</span>}
                 {m.method === 'coupon' && <span className="ml-1 text-[11.5px] text-ink-4">（平台团购核销）</span>}
+                {m.method === 'discount' && <span className="ml-1 text-[11.5px] text-ink-4">（不是收款）</span>}
               </span>
               <Money cents={m.amount} className="font-bold" />
             </div>
@@ -550,7 +571,7 @@ function BusinessCard({ s }: { s: SettlementSummary }) {
             实收合计 · 充值 + 结账
           </p>
           <Money cents={cashTotal} className="mt-1.5 text-[32px] leading-none font-bold text-lake" />
-          <p className="mt-1.5 text-[12.5px] text-ink-3">按收款方式核对抽屉现金与各收款账户；会员储值、团购券不计入</p>
+          <p className="mt-1.5 text-[12.5px] text-ink-3">按收款方式核对抽屉现金与各收款账户；会员储值、团购券、优惠 / 免单不计入</p>
         </div>
         <div className="px-5 py-4">
           <table className="w-full text-[13px]">

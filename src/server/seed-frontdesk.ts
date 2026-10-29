@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import type { Zone } from '@shared/frontdesk';
 import { parseHandTagCsv } from '@shared/hand-tag-import';
 import type { AppConfig } from './config';
+import { withShiftOptional } from './demo/shift-rule';
 import type { Sql } from './db';
 import { STORE_HAND_TAGS_CSV } from './demo/hand-tags-2026-10-27';
 import type { Actor, Deps, OpContext } from './lib/context';
@@ -34,6 +35,11 @@ const MEMBERS = [
 ];
 
 export async function seedFrontdeskDemo(sql: Sql, config: AppConfig, options: { now?: Date } = {}) {
+  // 演示会员的充值按「开班可选」入账（R1.2 起默认收款前必须先开班）
+  return withShiftOptional(sql, config, () => seedFrontdesk(sql, config, options));
+}
+
+async function seedFrontdesk(sql: Sql, config: AppConfig, options: { now?: Date }) {
   if (config.env === 'production' || config.env === 'trial') {
     throw new Error(`当前是${config.env === 'trial' ? '试用' : '正式'}环境，禁止写入前台演示数据。请另建独立的演示库（APP_ENV=development）再执行。`);
   }

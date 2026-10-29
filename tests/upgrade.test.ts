@@ -53,6 +53,10 @@ beforeAll(async () => {
   await sql`CREATE TABLE checkouts (id bigserial PRIMARY KEY, checkout_no text, status text)`;
   await sql`CREATE TABLE shifts (id bigserial PRIMARY KEY, staff_id bigint, status text)`;
   await sql`ALTER TABLE recharges ADD COLUMN shift_id bigint`;
+  // 现版本的会员消费会查会员有没有在店手牌（R1.2，004 才有手牌与来访）；收款前必须先开班的规则（R1.2）在升级前不存在
+  await sql`CREATE TABLE hand_tags (id bigserial PRIMARY KEY, code text)`;
+  await sql`CREATE TABLE visits (id bigserial PRIMARY KEY, member_id bigint, tag_id bigint, status text)`;
+  await sql`INSERT INTO settings (key, value) VALUES ('require_open_shift', 'false'::jsonb)`;
   // 升级前已有的消费项目（只有一个价格）
   const [item] = await sql<{ id: number }[]>`INSERT INTO service_items (name, category, price) VALUES ('升级前项目', '护理', 6800) RETURNING id`;
   itemId = item!.id;
@@ -73,12 +77,15 @@ beforeAll(async () => {
   await sql`ALTER TABLE consumptions DROP COLUMN checkout_id`;
   await sql`DROP TABLE bonus_lots`;
   await sql`DROP TABLE checkouts`;
+  await sql`DROP TABLE visits`;
+  await sql`DROP TABLE hand_tags`;
+  await sql`DELETE FROM settings WHERE key = 'require_open_shift'`;
   await sql`DROP TABLE shifts`;
   await sql`ALTER TABLE recharges DROP COLUMN shift_id`;
 
   // 升级：增量执行 002 之后的全部迁移
   const applied = await migrate(sql);
-  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql', '005_frontdesk_g2.sql', '006_op_fences.sql', '007_manager_roles.sql', '008_locker_pool.sql', '009_price_tiers.sql', '010_wallet_limits.sql', '011_member_fields.sql', '012_bonus_expiry.sql', '013_opening_balances.sql', '014_checkout.sql', '015_shifts.sql', '016_shift_boundary.sql']);
+  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql', '005_frontdesk_g2.sql', '006_op_fences.sql', '007_manager_roles.sql', '008_locker_pool.sql', '009_price_tiers.sql', '010_wallet_limits.sql', '011_member_fields.sql', '012_bonus_expiry.sql', '013_opening_balances.sql', '014_checkout.sql', '015_shifts.sql', '016_shift_boundary.sql', '017_r1_funds.sql']);
   app = await buildApp(sql, config);
 }, 60_000);
 
@@ -171,6 +178,14 @@ describe('升级后', () => {
     expect(tier).toEqual({ tier: 'standard', price: 6800 });
     const item = (await api(app, owner, 'GET', '/api/catalog?all=1')).body.items.find((i: { id: number }) => i.id === itemId);
     expect(item).toMatchObject({ price: 6800, prices: [{ tier: 'standard', price: 6800 }], durationMinutes: null, gender: null, strength: null });
+    // R1.2：会员持有在店手牌（上一个用例开的牌）时不在会员工作台扣储值；作废挂账、撤销这张牌后再消费
+    const consumeBody = { lines: [{ itemId, quantity: 1 }], expectedTotal: 6800, expectedSplit: { principal: 6800, bonus: 0 } };
+    const blocked = await api(app, clerk, 'POST', '/api/consumptions', { idempotencyKey: randomUUID(), memberId, ...consumeBody });
+    expect(blocked.body.error.code).toBe('MEMBER_IN_STORE');
+    const [visit] = await sql<{ id: number; lineId: number }[]>`
+      SELECT v.id, l.id AS line_id FROM visits v JOIN bill_lines l ON l.bill_id = v.bill_id WHERE v.member_id = ${memberId} AND v.status = 'open'`;
+    expect((await api(app, owner, 'POST', `/api/frontdesk/lines/${visit!.lineId}/void`, { reason: '升级测试' })).status).toBe(200);
+    expect((await api(app, owner, 'POST', `/api/frontdesk/visits/${visit!.id}/cancel`, { reason: '升级测试' })).status).toBe(200);
     const c = await api(app, clerk, 'POST', '/api/consumptions', {
       idempotencyKey: randomUUID(),
       memberId,
@@ -178,7 +193,7 @@ describe('升级后', () => {
       expectedTotal: 6800,
       expectedSplit: { principal: 6800, bonus: 0 },
     });
-    expect(c.status).toBe(200);
+    expect(c.status, JSON.stringify(c.body)).toBe(200);
     expect(c.body.consumption.lines[0]).toMatchObject({ name: '升级前项目', tier: 'standard', unitPrice: 6800 });
     // 升级前的消费明细没有价格档
     const [old] = await sql<{ tier: string | null }[]>`SELECT tier FROM consumption_lines WHERE name = '升级前消费'`;

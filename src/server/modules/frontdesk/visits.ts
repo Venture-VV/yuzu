@@ -16,7 +16,9 @@ import {
   type VisitHistoryEvent,
   ZONE_LABELS,
 } from '@shared/frontdesk';
+import { isFreeTicket } from '@shared/checkout';
 import { formatYuan } from '@shared/money';
+import { consumeTicketGrant } from '../../auth/grants';
 import type { Db } from '../../db';
 import { writeAudit } from '../../lib/audit';
 import type { Deps, OpContext } from '../../lib/context';
@@ -43,7 +45,7 @@ import {
   setTxTimeouts,
 } from './common';
 import { getCheckout } from './checkout';
-import { resolveTicketType, visitTicket } from './tickets';
+import { resolveTicketType, ticketAuthRequired, visitTicket } from './tickets';
 import { assertVipAllowed, consumeVipShortfalls, memberLevels, vipShortfalls } from './vip';
 
 const clientKey = z.uuid('缺少有效的操作编号，请刷新页面后重试');
@@ -70,6 +72,8 @@ export const CheckinInput = z.object({
   joinVisitId: z.number().int().positive().nullable().default(null),
   /** 当场授权编号：有客人等级不够、要用 VIP 柜时，由值班经理 / 店总在弹窗里签发 */
   vipGrantId: z.uuid('授权编号格式不正确').nullable().default(null),
+  /** 当场授权编号：有客人选免票（例如 1 米以下儿童）时，由值班经理及以上签发，同一次接待只授权一次（R1.2） */
+  ticketGrantId: z.uuid('授权编号格式不正确').nullable().default(null),
 });
 export type CheckinInputData = z.input<typeof CheckinInput>;
 
@@ -100,7 +104,7 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
   if (new Set(memberIds).size !== memberIds.length) throw badRequest('同一位会员只能持一张手牌');
 
   const { clientKey: key, ...payload } = input;
-  const requestHash = hashRequest(hashedPayload(payload, ['vipGrantId']));
+  const requestHash = hashRequest(hashedPayload(payload, ['vipGrantId', 'ticketGrantId']));
   const run = await runIdempotent(deps, { key, opType: 'checkin', requestHash }, async (tx) => {
     const at = ctx.at ?? new Date();
     const rules = await loadFrontdeskRules(tx);
@@ -137,6 +141,14 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
     assertVipAllowed(shortfalls, levels, rules, input.vipGrantId);
     const overrideCodes = new Set(shortfalls.map((x) => x.code));
 
+    // 票种：留存选定时的票价，结账时按在店时长计算门票；选免票的客人要当场授权（同一次接待一次授权）
+    const tickets = await Promise.all(input.guests.map((g) => resolveTicketType(tx, g.ticketTypeId)));
+    const freeGuests = input.guests.flatMap((g, i) => {
+      const t = tickets[i];
+      return t && isFreeTicket(t) ? [{ tagCode: g.tagCode, ticketTypeId: t.id, name: t.name, free: true }] : [];
+    });
+    if (freeGuests.length && !input.ticketGrantId) throw ticketAuthRequired(freeGuests);
+
     // ② 同行组 → ③ 来访
     let groupId: number | null = null;
     let target: { id: number; groupId: number | null } | null = null;
@@ -166,11 +178,16 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
       }
     }
 
-    // 票种：留存选定时的票价，结账时按在店时长计算门票
-    const tickets = await Promise.all(input.guests.map((g) => resolveTicketType(tx, g.ticketTypeId)));
-
     // 授权凭据最后加锁并核销（业务回滚时一起回滚）
     const override = await consumeVipShortfalls(tx, shortfalls, input.vipGrantId, ctx.actor, `checkin:${key}`);
+    const ticketApproval = freeGuests.length
+      ? await consumeTicketGrant(tx, {
+          grantId: input.ticketGrantId!,
+          actor: ctx.actor,
+          needed: freeGuests.map(({ tagCode, ticketTypeId }) => ({ tagCode, ticketTypeId })),
+          usedRef: `checkin:${key}`,
+        })
+      : null;
 
     let firstId = 0;
     for (const [i, g] of input.guests.entries()) {
@@ -188,6 +205,13 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
                 ${ticket?.id ?? null}, ${ticket?.price12h ?? null}, ${ticket?.price24h ?? null})
         RETURNING id`;
       if (!firstId) firstId = visit!.id;
+      // 免票：记一条改票种记录，留下授权人与原因
+      if (ticket && ticketApproval && isFreeTicket(ticket)) {
+        await tx`
+          INSERT INTO visit_ticket_changes (visit_id, from_type_id, to_type_id, price_12h, price_24h, operator_id, created_at, approved_by, reason)
+          VALUES (${visit!.id}, NULL, ${ticket.id}, ${ticket.price12h}, ${ticket.price24h}, ${ctx.actor.id}, ${at},
+                  ${ticketApproval.approverId}, ${ticketApproval.reason})`;
+      }
       if (groupId) {
         await tx`
           INSERT INTO visit_group_events (group_id, visit_id, action, operator_id, created_at)
@@ -206,6 +230,17 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
         joinVisitId: input.joinVisitId,
         groupId,
         ...(override ? { vipOverride: { tags: [...overrideCodes], approverId: override.approverId, approverName: override.approverName, grantId: input.vipGrantId } } : {}),
+        ...(ticketApproval
+          ? {
+              freeTickets: {
+                tags: freeGuests.map((g) => g.tagCode),
+                approverId: ticketApproval.approverId,
+                approverName: ticketApproval.approverName,
+                reason: ticketApproval.reason,
+                grantId: input.ticketGrantId,
+              },
+            }
+          : {}),
       },
       ip: ctx.ip,
       businessDate: date,

@@ -2,6 +2,9 @@
 //
 //   · 用途 vip_tag：散客或等级不够的会员使用 VIP 柜（值班经理及以上，经营规则开启后才可用）；
 //     用途 over_limit：超过单笔上限的充值 / 消费（店总、店主）；
+//     用途 checkout_discount：结账时的「优惠 / 免单」，绑定一起结账的来访与金额（值班经理及以上，R1.2）；
+//     用途 ticket_discount：改成更便宜的票种或免票（接待时直接选免票也算），绑定手牌与票种（值班经理及以上，R1.2）；
+//     优惠与降档的原因由申请的员工在弹窗里填写，随授权签发，核销后记到单据上；
 //   · 授权绑定用途、申请的员工和授权对象（哪位客人用哪张柜 / 哪位会员的哪类业务、多少金额），5 分钟内有效，只能用一次；
 //   · 业务请求只带授权编号，在同一事务里核销：业务回滚时核销一起回滚，授权仍可在有效期内再用；
 //   · 授权人的密码错误与登录共用限流计数；失败返回 403 而不是 401，不会把前台员工自己登出；
@@ -10,10 +13,24 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { normalizeTagCode, TAG_CODE_PATTERN } from '@shared/frontdesk';
-import { GRANT_PURPOSES, grantCovers, GRANT_TTL_MINUTES, type GrantPurpose, type IssuedGrant, type OverLimitScope, type VipGrantTag, type VipTagScope } from '@shared/grants';
+import {
+  GRANT_PURPOSES,
+  grantCovers,
+  GRANT_TTL_MINUTES,
+  sortedVisitIds,
+  ticketGrantCovers,
+  type DiscountScope,
+  type GrantPurpose,
+  type IssuedGrant,
+  type OverLimitScope,
+  type TicketDiscountScope,
+  type TicketGrantItem,
+  type VipGrantTag,
+  type VipTagScope,
+} from '@shared/grants';
 import { formatYuan } from '@shared/money';
 import { can, type Duty, type Permission, type Role } from '@shared/permissions';
-import type { Tx } from '../db';
+import type { Db, Tx } from '../db';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
 import { AppError, conflict, forbidden, unprocessable } from '../lib/errors';
@@ -48,10 +65,26 @@ const OverLimitScopeInput = z.object({
   amount: positiveCents('授权金额'),
 });
 
+const DiscountScopeInput = z.object({
+  visitIds: z.array(z.number().int().positive(), '请说明授权哪次结账').min(1, '请说明授权哪次结账').max(30, '一次最多合并 30 张手牌'),
+  amount: positiveCents('优惠金额'),
+  reason: z.string('请填写优惠原因').trim().min(2, '请填写优惠原因（至少 2 个字）').max(64, '优惠原因最多 64 字'),
+});
+
+const TicketScopeInput = z.object({
+  items: z
+    .array(z.object({ tagCode, ticketTypeId: z.number().int().positive('请选择票种') }), '请说明授权哪张手牌改哪个票种')
+    .min(1, '请说明授权哪张手牌改哪个票种')
+    .max(12, '一次最多授权 12 张手牌'),
+  reason: z.string('请填写原因').trim().min(2, '请填写原因（至少 2 个字）').max(100, '原因最多 100 字'),
+});
+
 /** 各用途：申请人需要的权限、授权人需要的权限，以及授权人岗位不够时的提示 */
 const PURPOSE_RULES: Record<GrantPurpose, { approver: Permission; approverText: string }> = {
   vip_tag: { approver: 'auth.vipOverride', approverText: '使用 VIP 柜，请值班经理、店总或店主授权' },
   over_limit: { approver: 'auth.overLimit', approverText: '超过单笔上限，请店总或店主授权' },
+  checkout_discount: { approver: 'auth.discount', approverText: '优惠 / 免单，请值班经理、店总或店主授权' },
+  ticket_discount: { approver: 'auth.discount', approverText: '降低票种或免票，请值班经理、店总或店主授权' },
 };
 const KIND_PERMISSION: Record<OverLimitScope['kind'], Permission> = { recharge: 'recharge.create', consume: 'consume.create' };
 const KIND_LABEL: Record<OverLimitScope['kind'], string> = { recharge: '充值', consume: '消费' };
@@ -64,16 +97,24 @@ export function registerGrantRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/auth/authorize', { preHandler: guard() }, async (req): Promise<IssuedGrant> => {
     const input = parse(Credentials, req.body);
     // 先核对申请人能不能办这项业务、这项授权现在需不需要，再核对授权人的密码
-    let scope: VipTagScope | OverLimitScope;
+    let scope: VipTagScope | OverLimitScope | DiscountScope | TicketDiscountScope;
+    const rawScope = (req.body as { scope?: unknown }).scope;
     if (input.purpose === 'vip_tag') {
       if (!can(req.actor, 'frontdesk.operate')) throw forbidden();
-      scope = { tags: parse(VipScope, (req.body as { scope?: unknown }).scope).tags };
+      scope = { tags: parse(VipScope, rawScope).tags };
       const rules = await loadFrontdeskRules(sql);
       if (!rules.vipOverrideEnabled) {
         throw conflict('VIP_OVERRIDE_DISABLED', '未开启「VIP 柜当场授权」，请店主在「管理 → 手牌」开启后再授权');
       }
+    } else if (input.purpose === 'checkout_discount') {
+      if (!can(req.actor, 'frontdesk.checkout')) throw forbidden();
+      const d = parse(DiscountScopeInput, rawScope);
+      scope = { visitIds: sortedVisitIds(d.visitIds), amount: d.amount, reason: d.reason };
+    } else if (input.purpose === 'ticket_discount') {
+      if (!can(req.actor, 'frontdesk.operate')) throw forbidden();
+      scope = parse(TicketScopeInput, rawScope);
     } else {
-      const s = parse(OverLimitScopeInput, (req.body as { scope?: unknown }).scope);
+      const s = parse(OverLimitScopeInput, rawScope);
       if (!can(req.actor, KIND_PERMISSION[s.kind])) throw forbidden();
       const settings = await loadSettings(sql);
       const limit = s.kind === 'recharge' ? settings.maxRechargeCents : settings.maxConsumeCents;
@@ -100,23 +141,32 @@ export function registerGrantRoutes(app: FastifyInstance, deps: Deps) {
     if (!can({ role: approver.role, duties: approver.duties ?? [] }, rule.approver)) {
       throw new AppError(403, 'AUTH_NOT_ALLOWED', `「${approver.displayName}」的岗位不能授权${rule.approverText}`);
     }
-    const [grant] = await sql.begin(async (tx) => {
-      const rows = await tx<{ id: string; expiresAt: string }[]>`
-        INSERT INTO auth_grants (purpose, requested_by, approved_by, scope, expires_at)
-        VALUES (${input.purpose}, ${req.actor.id}, ${approver.id}, ${tx.json(scope as never)}, now() + make_interval(mins => ${GRANT_TTL_MINUTES}))
-        RETURNING id, expires_at`;
+    const grant = await sql.begin(async (tx) => {
+      const row = await insertGrant(tx, { purpose: input.purpose, requestedBy: req.actor.id, approvedBy: approver.id, scope });
       await writeAudit(tx, {
         staffId: req.actor.id,
         action: 'auth_granted',
         targetType: 'auth_grant',
-        targetId: rows[0]!.id,
+        targetId: row.id,
         detail: { purpose: input.purpose, approverId: approver.id, approverName: approver.displayName, scope },
         ip: req.ip,
       });
-      return rows;
+      return row;
     });
-    return { grantId: grant!.id, purpose: input.purpose, approverName: approver.displayName, expiresAt: grant!.expiresAt, scope } as IssuedGrant;
+    return { grantId: grant.id, purpose: input.purpose, approverName: approver.displayName, expiresAt: grant.expiresAt, scope } as IssuedGrant;
   });
+}
+
+/** 写入一条当场授权（授权人已核对；合成演示数据也用它为演示单据签发授权），有效期 GRANT_TTL_MINUTES 分钟 */
+export async function insertGrant(
+  db: Db,
+  g: { purpose: GrantPurpose; requestedBy: number; approvedBy: number; scope: unknown },
+): Promise<{ id: string; expiresAt: string }> {
+  const [row] = await db<{ id: string; expiresAt: string }[]>`
+    INSERT INTO auth_grants (purpose, requested_by, approved_by, scope, expires_at)
+    VALUES (${g.purpose}, ${g.requestedBy}, ${g.approvedBy}, ${db.json(g.scope as never)}, now() + make_interval(mins => ${GRANT_TTL_MINUTES}))
+    RETURNING id, expires_at`;
+  return row!;
 }
 
 interface LockedGrant {
@@ -183,4 +233,43 @@ export async function consumeVipGrant(
   }
   await tx`UPDATE auth_grants SET used_at = now(), used_ref = ${opts.usedRef} WHERE id = ${opts.grantId}`;
   return { approverId: g.approvedBy, approverName: g.approverName };
+}
+
+/**
+ * 在结账事务里核销一次优惠 / 免单授权（来访、账单锁之后加锁）。
+ * 授权必须覆盖同一组来访与同一个优惠金额（客人或金额改了要重新授权）；返回授权人与原因，原因记到收款明细上。
+ */
+export async function consumeDiscountGrant(
+  tx: Tx,
+  opts: { grantId: string; actor: Actor; visitIds: number[]; amount: number; usedRef: string },
+): Promise<{ approverId: number; approverName: string; reason: string }> {
+  const g = await lockGrant(tx, opts.grantId, 'checkout_discount', opts.actor);
+  const s = g.scope as DiscountScope;
+  const granted = sortedVisitIds(s.visitIds);
+  const wanted = sortedVisitIds(opts.visitIds);
+  if (s.amount !== opts.amount || granted.length !== wanted.length || granted.some((id, i) => id !== wanted[i])) {
+    throw unprocessable(
+      'GRANT_SCOPE',
+      `授权的是优惠 ${formatYuan(s.amount)}，与这次结账的优惠 ${formatYuan(opts.amount)}（或结账的手牌）不一致，请按当前内容重新授权`,
+    );
+  }
+  await tx`UPDATE auth_grants SET used_at = now(), used_ref = ${opts.usedRef} WHERE id = ${opts.grantId}`;
+  return { approverId: g.approvedBy, approverName: g.approverName, reason: s.reason };
+}
+
+/**
+ * 在业务事务里核销一次降档 / 免票授权（来访或手牌锁之后加锁）。
+ * 授权必须覆盖所有需要授权的手牌与票种；返回授权人与原因，记到改票种记录上。
+ */
+export async function consumeTicketGrant(
+  tx: Tx,
+  opts: { grantId: string; actor: Actor; needed: TicketGrantItem[]; usedRef: string },
+): Promise<{ approverId: number; approverName: string; reason: string }> {
+  const g = await lockGrant(tx, opts.grantId, 'ticket_discount', opts.actor);
+  const s = g.scope as TicketDiscountScope;
+  if (!ticketGrantCovers(s, opts.needed)) {
+    throw unprocessable('GRANT_SCOPE', `授权不包含手牌 ${opts.needed.map((n) => n.tagCode).join('、')} 改成的票种（或票种已变更），请按当前内容重新授权`);
+  }
+  await tx`UPDATE auth_grants SET used_at = now(), used_ref = ${opts.usedRef} WHERE id = ${opts.grantId}`;
+  return { approverId: g.approvedBy, approverName: g.approverName, reason: s.reason };
 }

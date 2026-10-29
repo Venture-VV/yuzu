@@ -8,12 +8,14 @@ import { Button, Field, Input, Notice } from './ui';
 const TEXT: Record<GrantPurpose, { title: string; who: string }> = {
   vip_tag: { title: '使用 VIP 柜', who: '请值班经理、店总或店主输入自己的账号密码' },
   over_limit: { title: '超过单笔上限', who: '请店总或店主输入自己的账号密码' },
+  checkout_discount: { title: '优惠 / 免单', who: '请值班经理、店总或店主输入自己的账号密码' },
+  ticket_discount: { title: '降低票种 / 免票', who: '请值班经理、店总或店主输入自己的账号密码' },
 };
 
 /**
  * 当场授权：授权人在这里输入自己的账号密码，服务端签发 5 分钟内一次有效的授权。
  * 密码只随这一次授权请求发出，不保存、不进入「结果待确认」记录；业务请求只带授权编号。
- * 用于 VIP 柜（散客或等级不够的会员）与超过单笔上限的充值 / 消费。
+ * 用于 VIP 柜（散客或等级不够的会员）、超过单笔上限的充值 / 消费、结账的优惠 / 免单与降低票种 / 免票（R1.2）。
  */
 export function AuthorizeDialog<R extends GrantRequest>({
   open,

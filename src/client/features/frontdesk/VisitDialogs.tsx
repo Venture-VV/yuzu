@@ -19,7 +19,7 @@ import { cn, formatTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Button, ConfirmCheck, Field, Input, Notice, Skeleton } from '../../components/ui';
-import { usePreview, useServerNow, stayText } from './queries';
+import { useCheckoutPreview, usePreview, useServerNow, stayText } from './queries';
 import { AuthorizeDialog } from '../../components/AuthorizeDialog';
 import { GroupMark, VipChip, ZoneChip } from './parts';
 import { PendingPanel, useFrontdeskOp } from './pending';
@@ -343,7 +343,7 @@ export function JoinGroupDialog({
   );
 }
 
-// ───────────────────────── 预结账（S2：只汇总，不收款） ─────────────────────────
+// ───────────────────────── 预结账（只汇总，不收款；门票按此刻的在店时长估算，结账时按结账时刻重新计算） ─────────────────────────
 
 export function PreviewDialog({
   open,
@@ -366,7 +366,10 @@ export function PreviewDialog({
     setSelected(mates.length ? mates : [visit.id]);
   }, [open, visit]);
   const preview = usePreview(selected, open);
+  // 门票（与结账共用计价）：按此刻的在店时长估算，结账时按结账时刻重新计算
+  const priced = useCheckoutPreview(selected, open);
   const now = useServerNow(preview.data?.serverTime);
+  const pricedOf = (visitId: number) => priced.data?.visits.find((v) => v.visitId === visitId);
   const inStore = tags.filter((t) => t.visit);
   const toggle = (id: number) => setSelected((s) => (s.includes(id) ? (s.length > 1 ? s.filter((x) => x !== id) : s) : [...s, id]));
   // 可勾选：同组 + 当前 + 任意其他在店手牌（「任意指定多张未结手牌合并」）
@@ -384,10 +387,10 @@ export function PreviewDialog({
           <ReceiptText className="size-5 text-pine" /> 预结账
         </span>
       }
-      description="勾选要一起结的手牌，查看合并后的未结金额"
+      description="勾选要一起结的手牌，查看合并后的应收（含门票）"
       footer={
         <>
-          <span className="mr-auto self-center text-[12.5px] text-ink-3">金额为已挂明细，门票在结账时按在店时长计算</span>
+          <span className="mr-auto self-center text-[12.5px] text-ink-3">门票按此刻的在店时长估算，结账时按结账时刻重新计算</span>
           <Button variant={onCheckout ? 'ghost' : 'primary'} onClick={onClose}>
             关闭
           </Button>
@@ -442,7 +445,7 @@ export function PreviewDialog({
                     <th className="px-4 py-2 text-left font-semibold">手牌</th>
                     <th className="px-2 py-2 text-left font-semibold">客人</th>
                     <th className="px-2 py-2 text-right font-semibold">在店</th>
-                    <th className="px-4 py-2 text-right font-semibold">未结</th>
+                    <th className="px-4 py-2 text-right font-semibold">应收（含门票）</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line/70">
@@ -456,7 +459,24 @@ export function PreviewDialog({
                         {formatTime(v.checkedInAt)} · {stayText(v.checkedInAt, now)}
                       </td>
                       <td className="px-4 py-2.5 text-right">
-                        <Money cents={v.amountCents} className="font-bold" />
+                        {(() => {
+                          const pv = pricedOf(v.visitId);
+                          if (!pv) return <Money cents={v.amountCents} className="font-bold" />;
+                          return (
+                            <>
+                              <Money cents={pv.amount} className="font-bold" />
+                              <span className="block text-[11.5px] text-ink-3">
+                                {pv.ticket ? (
+                                  <>
+                                    明细 <Money cents={pv.linesAmount} /> + 门票 <Money cents={pv.ticket.amount} />（{pv.ticket.tierLabel}）
+                                  </>
+                                ) : (
+                                  '还没有选票种，结账时补选'
+                                )}
+                              </span>
+                            </>
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))}
@@ -471,9 +491,12 @@ export function PreviewDialog({
                   ))}
                 </div>
                 <div className="text-right">
-                  <p className="text-[12px] text-ink-3">{preview.data.visits.length} 张手牌合计（已挂明细）</p>
+                  <p className="text-[12px] text-ink-3">
+                    {preview.data.visits.length} 张手牌应收（含门票）
+                    {priced.data ? ` · 门票 ¥${(priced.data.visits.reduce((n, v) => n + (v.ticket?.amount ?? 0), 0) / 100).toFixed(2)}` : ''}
+                  </p>
                   <span data-testid="preview-total">
-                    <Money cents={preview.data.totalCents} className="text-[26px] font-bold text-pine" />
+                    <Money cents={priced.data?.totalAmount ?? preview.data.totalCents} className="text-[26px] font-bold text-pine" />
                   </span>
                 </div>
               </div>
@@ -481,7 +504,7 @@ export function PreviewDialog({
           )
         )}
         <Notice tone="info" icon={<CircleAlert className="size-4" />} title="这还不是结账单">
-          门票与时长 / 大厅过夜费将在结账时按入场时间动态计算；本阶段不收款、不扣会员余额，手牌不会释放。
+          预结账只汇总，不收款、不扣会员余额，手牌不会释放；门票每 12 小时跳一档（跳档宽限见前台规则），结账时按结账那一刻重新计算。
         </Notice>
       </div>
     </Dialog>

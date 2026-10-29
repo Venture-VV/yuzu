@@ -71,6 +71,17 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
     WHERE (g.status = 'active') <> (c.status = 'completed')
        OR NOT EXISTS (SELECT 1 FROM checkout_payments p WHERE p.coupon_id = g.id AND p.amount = g.amount AND p.checkout_id = c.id)`;
 
+  // ⑧ 优惠 / 免单（R1.2）：每笔都对应一次本人申请、已在这次结账核销的当场授权，授权人、金额与授权一致，填了原因
+  const discountDiff = await db<{ checkoutNo: string }[]>`
+    SELECT c.checkout_no FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
+    LEFT JOIN auth_grants g ON g.id = p.grant_id
+    WHERE p.method = 'discount'
+      AND (g.id IS NULL OR g.purpose <> 'checkout_discount' OR g.used_ref IS DISTINCT FROM 'checkout:' || c.client_key
+           OR g.approved_by <> p.approved_by OR g.requested_by <> c.operator_id OR (g.scope->>'amount')::bigint <> p.amount
+           OR char_length(btrim(p.ref)) < 2)`;
+  const [discounts] = await db<{ n: number; amount: number }[]>`
+    SELECT count(*)::int AS n, coalesce(sum(amount), 0) AS amount FROM checkout_payments WHERE method = 'discount'`;
+
   return [
     {
       key: 'bill_amount_vs_lines',
@@ -118,6 +129,14 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
       label: '团购券登记与结账收款一致',
       ok: couponDiff.length === 0,
       detail: couponDiff.length ? `${couponDiff.length} 张团购券登记与结账单不符（如券码 ${couponDiff[0]!.code}）` : '有效券码都对应有效结账单的收款，反结账的已作废',
+    },
+    {
+      key: 'checkout_discounts',
+      label: '优惠 / 免单都有当场授权',
+      ok: discountDiff.length === 0,
+      detail: discountDiff.length
+        ? `${discountDiff.length} 笔优惠没有对应的当场授权或与授权不符（如结账单 ${discountDiff[0]!.checkoutNo}）`
+        : `优惠 ${discounts!.n} 笔共 ${formatYuan(discounts!.amount)}，每笔都有经办人申请、值班经理及以上在这次结账核销的授权`,
     },
   ];
 }

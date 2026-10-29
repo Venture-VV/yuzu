@@ -32,6 +32,13 @@ export async function dashboard(db: Db, today: string, days: number): Promise<Da
   const byMethod = await db<{ method: CheckoutMethod; amount: number }[]>`
     SELECT p.method, sum(p.amount) AS amount FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
     WHERE c.business_date = ${today} AND c.status = 'completed' GROUP BY p.method ORDER BY amount DESC`;
+  // 优惠 / 免单与营业额同一口径（与日结 businessTotals 一致）：当日结账的加上、当日反结账的减去，
+  // 前一营业日带优惠的单今天反结账时冲回优惠，净营业额只减「应收 − 优惠」
+  const [discount] = await db<{ amount: number }[]>`
+    SELECT coalesce(sum(p.amount) FILTER (WHERE c.business_date = ${today}), 0)
+             - coalesce(sum(p.amount) FILTER (WHERE c.void_business_date = ${today}), 0) AS amount
+    FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
+    WHERE p.method = 'discount' AND (c.business_date = ${today} OR c.void_business_date = ${today})`;
   const [rc] = await db<{ n: number }[]>`SELECT count(*)::int AS n FROM recharges WHERE business_date = ${today}`;
   const tickets = await db<DashboardData['tickets']>`
     SELECT cb.ticket_name AS name, count(*)::int AS count, sum(cb.ticket_amount) AS amount
@@ -54,6 +61,7 @@ export async function dashboard(db: Db, today: string, days: number): Promise<Da
       net: t.net,
       ticket: guests!.ticket,
       byMethod,
+      discount: discount!.amount,
       rechargePaid: t.rechargePaid,
       rechargeCount: rc!.n,
     },
