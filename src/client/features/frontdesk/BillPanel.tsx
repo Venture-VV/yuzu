@@ -334,34 +334,43 @@ export function BillPanel({
         )}
       </div>
 
-      {/* 合计与操作 */}
-      <footer className="shrink-0 border-t border-line bg-card px-5 pt-3 pb-4 shadow-[0_-8px_24px_-18px_rgb(28_35_31/0.3)]">
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <p className="text-[12px] font-semibold text-ink-3">{open ? '本牌未结（已挂明细）' : '账单金额'}</p>
+      {/* 合计与操作：按小票栏实际宽度（容器查询）排版，金额与按钮都完整显示。
+          较窄时（平板横屏右栏 360px）预结账、结账排到合计下方各占一半；够宽时与合计并排，
+          金额位数多、一行放不下时按钮换到下一行靠右（合计上下的说明文字不撑宽这一行，随金额宽度折行） */}
+      <footer className="@container shrink-0 border-t border-line bg-card px-5 pt-3 pb-4 shadow-[0_-8px_24px_-18px_rgb(28_35_31/0.3)]">
+        <div className="flex flex-col gap-2.5 @min-[22rem]:flex-row @min-[22rem]:flex-wrap @min-[22rem]:items-end @min-[22rem]:gap-x-2">
+          <div className="@min-[22rem]:grow">
+            <p className="w-0 min-w-full text-[12px] font-semibold text-ink-3">{open ? '本牌未结（已挂明细）' : '账单金额'}</p>
             <span data-testid="bill-total">
               <Money cents={visit.bill.amountCents} className="text-[30px] leading-tight font-bold text-ink" />
             </span>
             {open && visit.ticket && (
-              <p className="text-[12px] text-ink-3" data-testid="bill-due">
+              <p className="w-0 min-w-full text-[12px] text-ink-3" data-testid="bill-due">
                 含门票此刻应收 <Money cents={visit.bill.amountCents + visit.ticket.amount} className="font-bold text-pine" />
               </p>
             )}
           </div>
           {open ? (
-            <div className="flex gap-2">
-              <Button variant="secondary" icon={<ReceiptText className="size-4" />} onClick={() => onAction('preview')} kbd="F8">
+            <div className="flex gap-2 @min-[22rem]:ml-auto">
+              <Button variant="secondary" className="flex-1 @min-[22rem]:flex-none" icon={<ReceiptText className="size-4" />} onClick={() => onAction('preview')} kbd="F8">
                 预结账
               </Button>
               {can('frontdesk.checkout') && (
-                <Button variant="accent" icon={<Banknote className="size-4" />} onClick={() => onAction('checkout')} kbd="F9" data-testid="action-checkout">
+                <Button
+                  variant="accent"
+                  className="flex-1 @min-[22rem]:flex-none"
+                  icon={<Banknote className="size-4" />}
+                  onClick={() => onAction('checkout')}
+                  kbd="F9"
+                  data-testid="action-checkout"
+                >
                   结账
                 </Button>
               )}
             </div>
           ) : (
             visit.checkout && (
-              <Button variant="secondary" icon={<ReceiptText className="size-4" />} onClick={() => onAction('records')} data-testid="bill-checkout">
+              <Button variant="secondary" className="@min-[22rem]:ml-auto" icon={<ReceiptText className="size-4" />} onClick={() => onAction('records')} data-testid="bill-checkout">
                 结账单 {visit.checkout.checkoutNo.slice(-4)}
               </Button>
             )

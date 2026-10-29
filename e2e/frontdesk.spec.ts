@@ -257,4 +257,22 @@ test.describe('前台布局', () => {
       expect(overflow, code).toBe(false);
     }
   });
+
+  test('结账对话框：储值只能用本次结账客人里的会员（不再搜索其他会员）；登记现金后无横向滚动', async ({ page }) => {
+    await login(page, 'linlan');
+    await page.goto('/frontdesk');
+    await expect(page.getByTestId('tag-board')).toBeVisible();
+    // A8062 是散客：没有可用的会员储值，提示把同行朋友合并到同一张结账单（只看不提交）
+    await page.getByTestId('tag-A8062').click();
+    await page.getByTestId('bill-panel').getByTestId('action-checkout').click();
+    await expect(page.getByTestId('checkout-review')).toBeVisible();
+    await page.getByTestId('pay-add-wallet').click();
+    await expect(page.getByTestId('pay-row-wallet')).toContainText('本次结账的客人里没有会员');
+    await expect(page.getByTestId('pay-row-wallet')).toContainText('同行朋友请合并到同一张结账单');
+    await expect(page.getByLabel('查找付款会员')).toHaveCount(0);
+    await page.getByTestId('pay-add-cash').click();
+    await page.getByLabel('客人实给现金').fill('1000');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+    await expect(page.getByTestId('checkout-submit')).toBeDisabled();
+  });
 });
