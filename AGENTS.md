@@ -1,6 +1,6 @@
 # AGENTS.md · 协作约定（开发 AI 与独立验收 AI 共用）
 
-浴族 yuzu 由多个 AI 协作：Claude 在云端按阶段开发并推送到 PR，Codex 在门店 Mac 上做独立验收、部署与复审，店主做经营决策与最终合并。本文件只写所有环境通用的约定；本机绝对路径、端口映射、账号密码等放在各自的本地配置里，不进仓库。
+浴族 yuzu 由多个 AI 协作（分工以 `docs/ROADMAP.md` 第 7 节为准）：Claude 开发会话在云端开发并推送到 PR；Claude 测试会话在独立演示库预检每个 PR、维护自动化回归与演示数据，问题评论在 PR 上；店主安排的其他 AI 在门店本机与测试服上做真机测试；Codex 负责部署、每日巡检，以及影子运行、切换两个关口的真机验收；店主做经营决策与最终合并。本文件只写所有环境通用的约定；本机绝对路径、端口映射、账号密码等放在各自的本地配置里，不进仓库。
 
 ## 阶段与门禁
 
@@ -56,6 +56,7 @@ E2E_BASE_URL=http://127.0.0.1:<端口> npm run e2e   # 1440×900 / 1024×768 / 8
 ## 提交、PR 与评论
 
 - Claude 只在指定的 `claude/*` 分支开发并推送；PR 由店主决定是否合并，AI 不合并、不打标签。
+- 业务代码只由开发会话改；测试会话只改 `tests/`、`e2e/`、CI 的测试步骤、演示数据（`src/server/seed*.ts`、`src/server/demo/`）与测试文档，评论开头写「测试会话」。
 - 版本标签由 CI 自动创建：main 上的 CI 通过后，`.github/workflows/release-tag.yml` 按 `package.json` 的版本号打 `vX.Y.Z`（已有则跳过）。发版时在 PR 里同时改 `package.json`、`package-lock.json`、`Dockerfile`、`compose.yaml` 与 `src/server/config.ts` 里的版本号。
 - 部署（测试服、门店实例、正式服）只用 `main` 上的版本标签或完整 SHA（`./scripts/update.sh <标签或 SHA>`），不部署 `claude/*` 等开发分支或未合并的 PR。PR 合并后开发分支可以删除，后续开发从最新 `main` 重新拉分支。
 - 提交信息写清阶段与内容；生成内容不写具体模型版本号。
