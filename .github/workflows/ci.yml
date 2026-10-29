@@ -1,0 +1,93 @@
+# 自动测试：类型检查、后端集成测试（会员回归 + 库存 / 采购 / 应付 + 前台手牌核心校验）、构建，以及真实浏览器验收。
+# 只使用合成数据与一次性的 CI 数据库，不连接任何门店环境。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 类型检查 · 集成测试 · 构建
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: yuzu
+          POSTGRES_PASSWORD: yuzu_ci_only
+          POSTGRES_DB: yuzu_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U yuzu -d yuzu_test"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://yuzu:yuzu_ci_only@127.0.0.1:5432/yuzu_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  e2e:
+    name: 浏览器验收（合成演示库）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: test
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: yuzu
+          POSTGRES_PASSWORD: yuzu_ci_only
+          POSTGRES_DB: yuzu_e2e
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U yuzu -d yuzu_e2e"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://yuzu:yuzu_ci_only@127.0.0.1:5432/yuzu_e2e
+      APP_ENV: development
+      PORT: 8080
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: 写入合成演示数据（会员 + 库存采购 + 前台手牌 + 结账交班）
+        run: |
+          node dist/server/cli.js seed-demo
+          node dist/server/cli.js seed-inventory-demo
+          node dist/server/cli.js seed-frontdesk-demo
+          node dist/server/cli.js seed-billing-demo
+          node dist/server/cli.js check
+      - name: 启动应用
+        run: |
+          node dist/server/index.js > app.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/api/health && exit 0; sleep 1; done
+          cat app.log; exit 1
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+      - name: 保留失败截图与日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: |
+            test-results
+            app.log
+          retention-days: 7

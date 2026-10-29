@@ -1,0 +1,96 @@
+{
+  "description": "seed-billing-demo 的固定预期结果（建在 seed-frontdesk-demo 之上）。金额单位为分；时间相对执行时刻生成，单号随营业日变化，不作为核对项。请在营业日切换时刻（默认 06:00）之后 1 小时以上执行，演示单据才都落在同一个营业日。",
+  "accounts": { "cashier": "chenyin", "dutyManager": "zhangjl", "owner": "linlan", "password": "yuzu2026" },
+  "ticketTypes": {
+    "不含餐": [49900, 59900],
+    "含餐门票": [69900, 89900],
+    "全日自助餐": [99900, 119900],
+    "儿童免票（1 米以下）": [0, 0]
+  },
+  "member": { "name": "沈先生（演示）", "phone": "19900008811", "recharge": { "paid": 200000, "bonus": 30000 }, "principalBalance": 80000, "bonusBalance": 30000 },
+  "checkouts": [
+    {
+      "scenario": "① 散客现金：在店 2 小时 40 分，不含餐 12 小时档",
+      "tags": ["A8065"],
+      "status": "completed",
+      "total": 52100,
+      "tickets": [{ "tag": "A8065", "ticket": "不含餐", "segments": 1, "amount": 49900 }],
+      "payments": [{ "method": "cash", "amount": 52100 }]
+    },
+    {
+      "scenario": "② 会员与朋友同行合并结账，在店 12 小时 45 分（24 小时档）：会员储值 + 美团券 + 微信",
+      "tags": ["A8066", "A8067"],
+      "status": "completed",
+      "total": 239600,
+      "tickets": [
+        { "tag": "A8066", "ticket": "全日自助餐", "segments": 2, "amount": 119900 },
+        { "tag": "A8067", "ticket": "含餐门票", "segments": 2, "amount": 89900 }
+      ],
+      "payments": [
+        { "method": "wallet", "amount": 120000, "member": "沈先生（演示）", "principal": 120000, "bonus": 0 },
+        { "method": "coupon", "amount": 89900, "platform": "meituan", "code": "MT2026102900001" },
+        { "method": "wechat", "amount": 29700 }
+      ]
+    },
+    {
+      "scenario": "③ 亲子：成人不含餐 + 1 米以下儿童免票（免票不挂明细）",
+      "tags": ["A8068", "A8069"],
+      "status": "completed",
+      "total": 49900,
+      "tickets": [
+        { "tag": "A8068", "ticket": "不含餐", "segments": 1, "amount": 49900 },
+        { "tag": "A8069", "ticket": "儿童免票（1 米以下）", "segments": 1, "amount": 0 }
+      ],
+      "payments": [{ "method": "alipay", "amount": 49900 }]
+    },
+    {
+      "scenario": "④ 过夜客：在店 25 小时 52 分（24 小时档 + 12 小时档 = 599 + 499）+ 山野简餐 ×2",
+      "tags": ["A8070"],
+      "status": "completed",
+      "total": 119400,
+      "tickets": [{ "tag": "A8070", "ticket": "不含餐", "segments": 3, "amount": 109800 }],
+      "payments": [{ "method": "bank_card", "amount": 119400 }]
+    },
+    {
+      "scenario": "⑤ 现金结账后收款方式记错：值班经理反结账",
+      "tags": ["A8071"],
+      "status": "voided",
+      "voidReason": "收款方式记错，客人实际用微信支付",
+      "total": 55700,
+      "tickets": [{ "tag": "A8071", "ticket": "不含餐", "segments": 1, "amount": 49900 }],
+      "payments": [{ "method": "cash", "amount": 55700 }]
+    },
+    {
+      "scenario": "⑤ 反结账后改为微信重新结账（门票按重新结账时的在店时长计算，仍是 12 小时档）",
+      "tags": ["A8071"],
+      "status": "completed",
+      "total": 55700,
+      "tickets": [{ "tag": "A8071", "ticket": "不含餐", "segments": 1, "amount": 49900 }],
+      "payments": [{ "method": "wechat", "amount": 55700 }]
+    }
+  ],
+  "business": {
+    "checkouts": { "count": 6, "total": 572400 },
+    "voids": { "count": 1, "total": 55700 },
+    "net": 516700,
+    "ticket": 469300,
+    "items": 47400,
+    "byMethod": { "alipay": 49900, "bank_card": 119400, "cash": 52100, "coupon": 89900, "wallet": 120000, "wechat": 85400 },
+    "coupons": { "meituan": 89900 }
+  },
+  "shift": {
+    "staff": "chenyin",
+    "status": "closed",
+    "openingCash": 50000,
+    "expectedCash": 102100,
+    "countedCash": 101100,
+    "diff": -1000,
+    "checkouts": { "count": 5, "total": 516700 },
+    "byMethod": { "alipay": 49900, "bank_card": 119400, "cash": 52100, "coupon": 89900, "wallet": 120000, "wechat": 85400 },
+    "voidsByOthers": "反结账由张经理（zhangjl）操作，记在他的班次里"
+  },
+  "openShift": { "staff": "zhangjl", "voids": 1 },
+  "frontdeskChecks": ["bill_amount_vs_lines", "visit_vs_bill_status", "open_visit_tags", "group_status", "checkout_vs_bills", "checkout_wallet", "checkout_coupons"],
+  "settlementChecks": ["documents_vs_ledger", "opening_plus_net", "ledger_chain", "members_vs_ledger", "business_vs_receipts", "wallet_bridge", "bonus_lots"],
+  "inStoreAfter": "前台演示的 13 位在店客人不受影响（结账演示的手牌都已结清释放）"
+}

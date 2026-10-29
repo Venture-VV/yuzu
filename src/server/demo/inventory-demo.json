@@ -1,0 +1,1935 @@
+{
+  "metadata": {
+    "title": "浴族库存与采购合成开发数据",
+    "isSynthetic": true,
+    "currency": "CNY",
+    "period": {
+      "from": "2026-10-19",
+      "to": "2026-10-25"
+    },
+    "businessTimezone": "Asia/Shanghai",
+    "notice": "全部为虚构开发样例，不是浴族或有马真实业务，也不是市场行情。",
+    "priceBasis": "模拟含税到货价，不拆税或单独分摊运费；真实口径待确认",
+    "inventoryBoundary": "单店试点总库；部门只记录领用去向，未建部门子库存",
+    "usage": "用于适配演示 seed 和验收，字段不约束数据库/API；仅独立演示库；不要自动写入现有试用库",
+    "quantityEncoding": "数量以十进制字符串表达，示例金额为整数分；按明确换算与行舍入规则计算",
+    "simulationOnly": true
+  },
+  "suppliers": [
+    {
+      "code": "S001",
+      "name": "云泉日用（模拟）",
+      "scope": "pilot",
+      "openingPayableCents": 0,
+      "isSynthetic": true
+    },
+    {
+      "code": "S002",
+      "name": "林间洗护（模拟）",
+      "scope": "pilot",
+      "openingPayableCents": 0,
+      "isSynthetic": true
+    },
+    {
+      "code": "S003",
+      "name": "净序纸品清洁（模拟）",
+      "scope": "pilot",
+      "openingPayableCents": 20000,
+      "isSynthetic": true
+    },
+    {
+      "code": "S004",
+      "name": "栖谷护理用品（模拟）",
+      "scope": "pilot",
+      "openingPayableCents": 0,
+      "isSynthetic": true
+    },
+    {
+      "code": "S005",
+      "name": "清野饮品（模拟）",
+      "scope": "pilot",
+      "openingPayableCents": 0,
+      "isSynthetic": true
+    },
+    {
+      "code": "S006",
+      "name": "晨集生鲜（模拟）",
+      "scope": "candidate",
+      "openingPayableCents": 0,
+      "isSynthetic": true
+    },
+    {
+      "code": "S007",
+      "name": "棉屿布草（模拟）",
+      "scope": "candidate",
+      "openingPayableCents": 0,
+      "isSynthetic": true
+    },
+    {
+      "code": "S008",
+      "name": "洁流洗涤（模拟）",
+      "scope": "candidate",
+      "openingPayableCents": 0,
+      "isSynthetic": true
+    }
+  ],
+  "materials": [
+    {
+      "code": "M001",
+      "name": "宾客一次性拖鞋",
+      "category": "宾客耗材",
+      "specification": "成人均码，单独包装",
+      "inventoryUnit": "双",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "100",
+      "simulatedPurchaseUnitPriceCents": 18000,
+      "openingQuantity": "100",
+      "simulatedLowStockThreshold": "100",
+      "supplierCode": "S001",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M002",
+      "name": "牙具套装",
+      "category": "宾客耗材",
+      "specification": "牙刷和小支牙膏，独立套装",
+      "inventoryUnit": "套",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "200",
+      "simulatedPurchaseUnitPriceCents": 22000,
+      "openingQuantity": "200",
+      "simulatedLowStockThreshold": "100",
+      "supplierCode": "S001",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M003",
+      "name": "一次性梳子",
+      "category": "宾客耗材",
+      "specification": "独立包装",
+      "inventoryUnit": "把",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "300",
+      "simulatedPurchaseUnitPriceCents": 15000,
+      "openingQuantity": "80",
+      "simulatedLowStockThreshold": "80",
+      "supplierCode": "S001",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M004",
+      "name": "一次性浴帽",
+      "category": "宾客耗材",
+      "specification": "独立包装",
+      "inventoryUnit": "只",
+      "purchaseUnit": "袋",
+      "baseUnitsPerPurchaseUnit": "500",
+      "simulatedPurchaseUnitPriceCents": 10000,
+      "openingQuantity": "100",
+      "simulatedLowStockThreshold": "100",
+      "supplierCode": "S001",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M005",
+      "name": "剃须套装",
+      "category": "宾客耗材",
+      "specification": "剃须刀与小包剃须膏",
+      "inventoryUnit": "套",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "100",
+      "simulatedPurchaseUnitPriceCents": 26000,
+      "openingQuantity": "50",
+      "simulatedLowStockThreshold": "40",
+      "supplierCode": "S001",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M006",
+      "name": "棉签小包",
+      "category": "宾客耗材",
+      "specification": "每小包5支，按小包盘点",
+      "inventoryUnit": "小包",
+      "purchaseUnit": "盒",
+      "baseUnitsPerPurchaseUnit": "100",
+      "simulatedPurchaseUnitPriceCents": 2000,
+      "openingQuantity": "30",
+      "simulatedLowStockThreshold": "50",
+      "supplierCode": "S001",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M007",
+      "name": "一次性内裤",
+      "category": "宾客耗材",
+      "specification": "均码，独立包装",
+      "inventoryUnit": "条",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "100",
+      "simulatedPurchaseUnitPriceCents": 13000,
+      "openingQuantity": "50",
+      "simulatedLowStockThreshold": "50",
+      "supplierCode": "S001",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M008",
+      "name": "沐浴露补充装",
+      "category": "洗护",
+      "specification": "5L/桶，按整桶管理",
+      "inventoryUnit": "桶",
+      "purchaseUnit": "桶",
+      "baseUnitsPerPurchaseUnit": "1",
+      "simulatedPurchaseUnitPriceCents": 9500,
+      "openingQuantity": "2",
+      "simulatedLowStockThreshold": "2",
+      "supplierCode": "S002",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M009",
+      "name": "洗发水补充装",
+      "category": "洗护",
+      "specification": "5L/桶，按整桶管理",
+      "inventoryUnit": "桶",
+      "purchaseUnit": "桶",
+      "baseUnitsPerPurchaseUnit": "1",
+      "simulatedPurchaseUnitPriceCents": 11000,
+      "openingQuantity": "2",
+      "simulatedLowStockThreshold": "2",
+      "supplierCode": "S002",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M010",
+      "name": "润肤乳",
+      "category": "洗护",
+      "specification": "500mL/瓶",
+      "inventoryUnit": "瓶",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "6",
+      "simulatedPurchaseUnitPriceCents": 25200,
+      "openingQuantity": "6",
+      "simulatedLowStockThreshold": "4",
+      "supplierCode": "S002",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M011",
+      "name": "洗手液补充装",
+      "category": "清洁纸品",
+      "specification": "5L/桶，按整桶管理",
+      "inventoryUnit": "桶",
+      "purchaseUnit": "桶",
+      "baseUnitsPerPurchaseUnit": "1",
+      "simulatedPurchaseUnitPriceCents": 5500,
+      "openingQuantity": "2",
+      "simulatedLowStockThreshold": "2",
+      "supplierCode": "S003",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M012",
+      "name": "卷纸",
+      "category": "清洁纸品",
+      "specification": "统一规格，按卷盘点",
+      "inventoryUnit": "卷",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "100",
+      "simulatedPurchaseUnitPriceCents": 16500,
+      "openingQuantity": "50",
+      "simulatedLowStockThreshold": "100",
+      "supplierCode": "S003",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M013",
+      "name": "抽纸",
+      "category": "清洁纸品",
+      "specification": "统一规格，按包盘点",
+      "inventoryUnit": "包",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "100",
+      "simulatedPurchaseUnitPriceCents": 16000,
+      "openingQuantity": "60",
+      "simulatedLowStockThreshold": "100",
+      "supplierCode": "S003",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M014",
+      "name": "垃圾袋卷",
+      "category": "清洁纸品",
+      "specification": "50只/卷，按卷盘点",
+      "inventoryUnit": "卷",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "20",
+      "simulatedPurchaseUnitPriceCents": 16000,
+      "openingQuantity": "10",
+      "simulatedLowStockThreshold": "10",
+      "supplierCode": "S003",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M015",
+      "name": "丁腈手套",
+      "category": "清洁纸品",
+      "specification": "100只/盒，按盒盘点",
+      "inventoryUnit": "盒",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "10",
+      "simulatedPurchaseUnitPriceCents": 24000,
+      "openingQuantity": "4",
+      "simulatedLowStockThreshold": "4",
+      "supplierCode": "S003",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M016",
+      "name": "一次性护理床单",
+      "category": "SPA耗材",
+      "specification": "100张/包，5包/箱",
+      "inventoryUnit": "张",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "500",
+      "simulatedPurchaseUnitPriceCents": 45000,
+      "openingQuantity": "100",
+      "simulatedLowStockThreshold": "200",
+      "supplierCode": "S004",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M017",
+      "name": "按摩介质",
+      "category": "SPA耗材",
+      "specification": "1L/瓶，示例品名不代表功效",
+      "inventoryUnit": "瓶",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "6",
+      "simulatedPurchaseUnitPriceCents": 36000,
+      "openingQuantity": "2",
+      "simulatedLowStockThreshold": "4",
+      "supplierCode": "S004",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M018",
+      "name": "瓶装饮用水",
+      "category": "包装饮品",
+      "specification": "550mL/瓶",
+      "inventoryUnit": "瓶",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "24",
+      "simulatedPurchaseUnitPriceCents": 2400,
+      "openingQuantity": "48",
+      "simulatedLowStockThreshold": "48",
+      "supplierCode": "S005",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M019",
+      "name": "无糖茶饮",
+      "category": "包装饮品",
+      "specification": "500mL/瓶",
+      "inventoryUnit": "瓶",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "15",
+      "simulatedPurchaseUnitPriceCents": 6000,
+      "openingQuantity": "30",
+      "simulatedLowStockThreshold": "30",
+      "supplierCode": "S005",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M020",
+      "name": "常温纯牛奶",
+      "category": "包装饮品",
+      "specification": "250mL/盒",
+      "inventoryUnit": "盒",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "24",
+      "simulatedPurchaseUnitPriceCents": 5400,
+      "openingQuantity": "24",
+      "simulatedLowStockThreshold": "24",
+      "supplierCode": "S005",
+      "scope": "pilot",
+      "inventoryTracked": true,
+      "isSynthetic": true
+    },
+    {
+      "code": "M021",
+      "name": "咖啡豆",
+      "category": "饮品原料候选",
+      "specification": "1kg/袋；开封后需另定计量规则",
+      "inventoryUnit": "kg",
+      "purchaseUnit": "袋",
+      "baseUnitsPerPurchaseUnit": "1",
+      "simulatedPurchaseUnitPriceCents": 8000,
+      "openingQuantity": "0",
+      "simulatedLowStockThreshold": "0",
+      "supplierCode": "S005",
+      "scope": "candidate",
+      "inventoryTracked": false,
+      "isSynthetic": true
+    },
+    {
+      "code": "M022",
+      "name": "冷藏鲜奶",
+      "category": "冷藏原料候选",
+      "specification": "1L/盒；需效期与冷藏管理",
+      "inventoryUnit": "盒",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "12",
+      "simulatedPurchaseUnitPriceCents": 10800,
+      "openingQuantity": "0",
+      "simulatedLowStockThreshold": "0",
+      "supplierCode": "S006",
+      "scope": "candidate",
+      "inventoryTracked": false,
+      "isSynthetic": true
+    },
+    {
+      "code": "M023",
+      "name": "当季苹果",
+      "category": "生鲜候选",
+      "specification": "模拟净重10kg/箱，按实收重量验收",
+      "inventoryUnit": "kg",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "10",
+      "simulatedPurchaseUnitPriceCents": 8000,
+      "openingQuantity": "0",
+      "simulatedLowStockThreshold": "0",
+      "supplierCode": "S006",
+      "scope": "candidate",
+      "inventoryTracked": false,
+      "isSynthetic": true
+    },
+    {
+      "code": "M024",
+      "name": "冷冻牛肉片",
+      "category": "生鲜候选",
+      "specification": "2.5kg/袋，4袋/箱；需批次与冷链管理",
+      "inventoryUnit": "kg",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "10",
+      "simulatedPurchaseUnitPriceCents": 70000,
+      "openingQuantity": "0",
+      "simulatedLowStockThreshold": "0",
+      "supplierCode": "S006",
+      "scope": "candidate",
+      "inventoryTracked": false,
+      "isSynthetic": true
+    },
+    {
+      "code": "M025",
+      "name": "冷冻虾仁",
+      "category": "生鲜候选",
+      "specification": "1kg/袋，10袋/箱；需批次与冷链管理",
+      "inventoryUnit": "kg",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "10",
+      "simulatedPurchaseUnitPriceCents": 58000,
+      "openingQuantity": "0",
+      "simulatedLowStockThreshold": "0",
+      "supplierCode": "S006",
+      "scope": "candidate",
+      "inventoryTracked": false,
+      "isSynthetic": true
+    },
+    {
+      "code": "M026",
+      "name": "循环使用浴巾",
+      "category": "布草候选",
+      "specification": "纯棉70×140cm，循环周转品",
+      "inventoryUnit": "条",
+      "purchaseUnit": "包",
+      "baseUnitsPerPurchaseUnit": "20",
+      "simulatedPurchaseUnitPriceCents": 76000,
+      "openingQuantity": "0",
+      "simulatedLowStockThreshold": "0",
+      "supplierCode": "S007",
+      "scope": "candidate",
+      "inventoryTracked": false,
+      "isSynthetic": true
+    },
+    {
+      "code": "M027",
+      "name": "循环使用浴服",
+      "category": "布草候选",
+      "specification": "上下装一套，循环周转品",
+      "inventoryUnit": "套",
+      "purchaseUnit": "包",
+      "baseUnitsPerPurchaseUnit": "20",
+      "simulatedPurchaseUnitPriceCents": 130000,
+      "openingQuantity": "0",
+      "simulatedLowStockThreshold": "0",
+      "supplierCode": "S007",
+      "scope": "candidate",
+      "inventoryTracked": false,
+      "isSynthetic": true
+    },
+    {
+      "code": "M028",
+      "name": "可重复使用拖鞋",
+      "category": "周转品候选",
+      "specification": "可清洁周转款",
+      "inventoryUnit": "双",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "20",
+      "simulatedPurchaseUnitPriceCents": 30000,
+      "openingQuantity": "0",
+      "simulatedLowStockThreshold": "0",
+      "supplierCode": "S007",
+      "scope": "candidate",
+      "inventoryTracked": false,
+      "isSynthetic": true
+    },
+    {
+      "code": "M029",
+      "name": "浴巾洗涤服务",
+      "category": "服务候选",
+      "specification": "按完成洗涤的条次计费，不是库存物料",
+      "inventoryUnit": "条次",
+      "purchaseUnit": "条次",
+      "baseUnitsPerPurchaseUnit": "1",
+      "simulatedPurchaseUnitPriceCents": 220,
+      "openingQuantity": "0",
+      "simulatedLowStockThreshold": "0",
+      "supplierCode": "S008",
+      "scope": "candidate",
+      "inventoryTracked": false,
+      "isSynthetic": true
+    },
+    {
+      "code": "M030",
+      "name": "足浴泡袋",
+      "category": "耗材候选",
+      "specification": "20g独立袋，普通非药品示例",
+      "inventoryUnit": "包",
+      "purchaseUnit": "箱",
+      "baseUnitsPerPurchaseUnit": "100",
+      "simulatedPurchaseUnitPriceCents": 18000,
+      "openingQuantity": "0",
+      "simulatedLowStockThreshold": "0",
+      "supplierCode": "S004",
+      "scope": "candidate",
+      "inventoryTracked": false,
+      "isSynthetic": true
+    }
+  ],
+  "openingInventory": {
+    "id": "OPEN-INV-001",
+    "date": "2026-10-19",
+    "status": "confirmed",
+    "actor": "店主（模拟）",
+    "lines": [
+      {
+        "materialCode": "M001",
+        "quantity": "100"
+      },
+      {
+        "materialCode": "M002",
+        "quantity": "200"
+      },
+      {
+        "materialCode": "M003",
+        "quantity": "80"
+      },
+      {
+        "materialCode": "M004",
+        "quantity": "100"
+      },
+      {
+        "materialCode": "M005",
+        "quantity": "50"
+      },
+      {
+        "materialCode": "M006",
+        "quantity": "30"
+      },
+      {
+        "materialCode": "M007",
+        "quantity": "50"
+      },
+      {
+        "materialCode": "M008",
+        "quantity": "2"
+      },
+      {
+        "materialCode": "M009",
+        "quantity": "2"
+      },
+      {
+        "materialCode": "M010",
+        "quantity": "6"
+      },
+      {
+        "materialCode": "M011",
+        "quantity": "2"
+      },
+      {
+        "materialCode": "M012",
+        "quantity": "50"
+      },
+      {
+        "materialCode": "M013",
+        "quantity": "60"
+      },
+      {
+        "materialCode": "M014",
+        "quantity": "10"
+      },
+      {
+        "materialCode": "M015",
+        "quantity": "4"
+      },
+      {
+        "materialCode": "M016",
+        "quantity": "100"
+      },
+      {
+        "materialCode": "M017",
+        "quantity": "2"
+      },
+      {
+        "materialCode": "M018",
+        "quantity": "48"
+      },
+      {
+        "materialCode": "M019",
+        "quantity": "30"
+      },
+      {
+        "materialCode": "M020",
+        "quantity": "24"
+      }
+    ]
+  },
+  "openingPayables": [
+    {
+      "id": "OPEN-AP-S003",
+      "date": "2026-10-19",
+      "supplierCode": "S003",
+      "amountCents": 20000,
+      "note": "模拟上期已收货未付货款，已对账开账；不计入本期采购"
+    }
+  ],
+  "purchaseOrders": [
+    {
+      "id": "PO-001",
+      "supplierCode": "S001",
+      "date": "2026-10-19",
+      "status": "approved",
+      "approval": {
+        "state": "approved",
+        "actor": "店主（模拟）"
+      },
+      "lines": [
+        {
+          "materialCode": "M001",
+          "purchaseQuantity": "10",
+          "purchaseUnit": "箱",
+          "conversionSnapshot": "100",
+          "baseQuantity": "1000",
+          "inventoryUnit": "双",
+          "purchaseUnitPriceCents": 18000,
+          "inventoryUnitPriceCents": "180",
+          "amountCents": 180000
+        }
+      ],
+      "totalCents": 180000,
+      "isSynthetic": true
+    },
+    {
+      "id": "PO-002",
+      "supplierCode": "S001",
+      "date": "2026-10-19",
+      "status": "approved",
+      "approval": {
+        "state": "approved",
+        "actor": "店主（模拟）"
+      },
+      "lines": [
+        {
+          "materialCode": "M002",
+          "purchaseQuantity": "5",
+          "purchaseUnit": "箱",
+          "conversionSnapshot": "200",
+          "baseQuantity": "1000",
+          "inventoryUnit": "套",
+          "purchaseUnitPriceCents": 22000,
+          "inventoryUnitPriceCents": "110",
+          "amountCents": 110000
+        },
+        {
+          "materialCode": "M003",
+          "purchaseQuantity": "2",
+          "purchaseUnit": "箱",
+          "conversionSnapshot": "300",
+          "baseQuantity": "600",
+          "inventoryUnit": "把",
+          "purchaseUnitPriceCents": 15000,
+          "inventoryUnitPriceCents": "50",
+          "amountCents": 30000
+        },
+        {
+          "materialCode": "M004",
+          "purchaseQuantity": "2",
+          "purchaseUnit": "袋",
+          "conversionSnapshot": "500",
+          "baseQuantity": "1000",
+          "inventoryUnit": "只",
+          "purchaseUnitPriceCents": 10000,
+          "inventoryUnitPriceCents": "20",
+          "amountCents": 20000
+        },
+        {
+          "materialCode": "M005",
+          "purchaseQuantity": "1",
+          "purchaseUnit": "箱",
+          "conversionSnapshot": "100",
+          "baseQuantity": "100",
+          "inventoryUnit": "套",
+          "purchaseUnitPriceCents": 26000,
+          "inventoryUnitPriceCents": "260",
+          "amountCents": 26000
+        },
+        {
+          "materialCode": "M006",
+          "purchaseQuantity": "10",
+          "purchaseUnit": "盒",
+          "conversionSnapshot": "100",
+          "baseQuantity": "1000",
+          "inventoryUnit": "小包",
+          "purchaseUnitPriceCents": 2000,
+          "inventoryUnitPriceCents": "20",
+          "amountCents": 20000
+        },
+        {
+          "materialCode": "M007",
+          "purchaseQuantity": "2",
+          "purchaseUnit": "箱",
+          "conversionSnapshot": "100",
+          "baseQuantity": "200",
+          "inventoryUnit": "条",
+          "purchaseUnitPriceCents": 13000,
+          "inventoryUnitPriceCents": "130",
+          "amountCents": 26000
+        }
+      ],
+      "totalCents": 232000,
+      "isSynthetic": true
+    },
+    {
+      "id": "PO-003",
+      "supplierCode": "S002",
+      "date": "2026-10-19",
+      "status": "approved",
+      "approval": {
+        "state": "approved",
+        "actor": "店主（模拟）"
+      },
+      "lines": [
+        {
+          "materialCode": "M008",
+          "purchaseQuantity": "4",
+          "purchaseUnit": "桶",
+          "conversionSnapshot": "1",
+          "baseQuantity": "4",
+          "inventoryUnit": "桶",
+          "purchaseUnitPriceCents": 9500,
+          "inventoryUnitPriceCents": "9500",
+          "amountCents": 38000
+        },
+        {
+          "materialCode": "M009",
+          "purchaseQuantity": "3",
+          "purchaseUnit": "桶",
+          "conversionSnapshot": "1",
+          "baseQuantity": "3",
+          "inventoryUnit": "桶",
+          "purchaseUnitPriceCents": 11000,
+          "inventoryUnitPriceCents": "11000",
+          "amountCents": 33000
+        },
+        {
+          "materialCode": "M010",
+          "purchaseQuantity": "2",
+          "purchaseUnit": "箱",
+          "conversionSnapshot": "6",
+          "baseQuantity": "12",
+          "inventoryUnit": "瓶",
+          "purchaseUnitPriceCents": 25200,
+          "inventoryUnitPriceCents": "4200",
+          "amountCents": 50400
+        }
+      ],
+      "totalCents": 121400,
+      "isSynthetic": true
+    },
+    {
+      "id": "PO-004",
+      "supplierCode": "S003",
+      "date": "2026-10-19",
+      "status": "approved",
+      "approval": {
+        "state": "approved",
+        "actor": "店主（模拟）"
+      },
+      "lines": [
+        {
+          "materialCode": "M011",
+          "purchaseQuantity": "2",
+          "purchaseUnit": "桶",
+          "conversionSnapshot": "1",
+          "baseQuantity": "2",
+          "inventoryUnit": "桶",
+          "purchaseUnitPriceCents": 5500,
+          "inventoryUnitPriceCents": "5500",
+          "amountCents": 11000
+        },
+        {
+          "materialCode": "M012",
+          "purchaseQuantity": "3",
+          "purchaseUnit": "箱",
+          "conversionSnapshot": "100",
+          "baseQuantity": "300",
+          "inventoryUnit": "卷",
+          "purchaseUnitPriceCents": 16500,
+          "inventoryUnitPriceCents": "165",
+          "amountCents": 49500
+        },
+        {
+          "materialCode": "M013",
+          "purchaseQuantity": "2",
+          "purchaseUnit": "箱",
+          "conversionSnapshot": "100",
+          "baseQuantity": "200",
+          "inventoryUnit": "包",
+          "purchaseUnitPriceCents": 16000,
+          "inventoryUnitPriceCents": "160",
+          "amountCents": 32000
+        },
+        {
+          "materialCode": "M014",
+          "purchaseQuantity": "2",
+          "purchaseUnit": "箱",
+          "conversionSnapshot": "20",
+          "baseQuantity": "40",
+          "inventoryUnit": "卷",
+          "purchaseUnitPriceCents": 16000,
+          "inventoryUnitPriceCents": "800",
+          "amountCents": 32000
+        },
+        {
+          "materialCode": "M015",
+          "purchaseQuantity": "1",
+          "purchaseUnit": "箱",
+          "conversionSnapshot": "10",
+          "baseQuantity": "10",
+          "inventoryUnit": "盒",
+          "purchaseUnitPriceCents": 24000,
+          "inventoryUnitPriceCents": "2400",
+          "amountCents": 24000
+        }
+      ],
+      "totalCents": 148500,
+      "isSynthetic": true
+    },
+    {
+      "id": "PO-005",
+      "supplierCode": "S004",
+      "date": "2026-10-19",
+      "status": "approved",
+      "approval": {
+        "state": "approved",
+        "actor": "店主（模拟）"
+      },
+      "lines": [
+        {
+          "materialCode": "M016",
+          "purchaseQuantity": "2",
+          "purchaseUnit": "箱",
+          "conversionSnapshot": "500",
+          "baseQuantity": "1000",
+          "inventoryUnit": "张",
+          "purchaseUnitPriceCents": 45000,
+          "inventoryUnitPriceCents": "90",
+          "amountCents": 90000
+        },
+        {
+          "materialCode": "M017",
+          "purchaseQuantity": "1",
+          "purchaseUnit": "箱",
+          "conversionSnapshot": "6",
+          "baseQuantity": "6",
+          "inventoryUnit": "瓶",
+          "purchaseUnitPriceCents": 36000,
+          "inventoryUnitPriceCents": "6000",
+          "amountCents": 36000
+        }
+      ],
+      "totalCents": 126000,
+      "isSynthetic": true
+    },
+    {
+      "id": "PO-006",
+      "supplierCode": "S005",
+      "date": "2026-10-19",
+      "status": "approved",
+      "approval": {
+        "state": "approved",
+        "actor": "店主（模拟）"
+      },
+      "lines": [
+        {
+          "materialCode": "M018",
+          "purchaseQuantity": "10",
+          "purchaseUnit": "箱",
+          "conversionSnapshot": "24",
+          "baseQuantity": "240",
+          "inventoryUnit": "瓶",
+          "purchaseUnitPriceCents": 2400,
+          "inventoryUnitPriceCents": "100",
+          "amountCents": 24000
+        },
+        {
+          "materialCode": "M019",
+          "purchaseQuantity": "8",
+          "purchaseUnit": "箱",
+          "conversionSnapshot": "15",
+          "baseQuantity": "120",
+          "inventoryUnit": "瓶",
+          "purchaseUnitPriceCents": 6000,
+          "inventoryUnitPriceCents": "400",
+          "amountCents": 48000
+        },
+        {
+          "materialCode": "M020",
+          "purchaseQuantity": "5",
+          "purchaseUnit": "箱",
+          "conversionSnapshot": "24",
+          "baseQuantity": "120",
+          "inventoryUnit": "盒",
+          "purchaseUnitPriceCents": 5400,
+          "inventoryUnitPriceCents": "225",
+          "amountCents": 27000
+        }
+      ],
+      "totalCents": 99000,
+      "isSynthetic": true
+    },
+    {
+      "id": "PO-007",
+      "supplierCode": "S002",
+      "date": "2026-10-23",
+      "status": "approved",
+      "approval": {
+        "state": "approved",
+        "actor": "店主（模拟）",
+        "note": "同规格最近成交价110元/桶，本次115元/桶，已由负责人确认；纯模拟场景。"
+      },
+      "lines": [
+        {
+          "materialCode": "M009",
+          "purchaseQuantity": "2",
+          "purchaseUnit": "桶",
+          "conversionSnapshot": "1",
+          "baseQuantity": "2",
+          "inventoryUnit": "桶",
+          "purchaseUnitPriceCents": 11500,
+          "inventoryUnitPriceCents": "11500",
+          "amountCents": 23000
+        }
+      ],
+      "totalCents": 23000,
+      "isSynthetic": true
+    },
+    {
+      "id": "PO-008",
+      "supplierCode": "S005",
+      "date": "2026-10-25",
+      "status": "submitted",
+      "approval": {
+        "state": "pending",
+        "actor": null
+      },
+      "lines": [
+        {
+          "materialCode": "M018",
+          "purchaseQuantity": "20",
+          "purchaseUnit": "箱",
+          "conversionSnapshot": "24",
+          "baseQuantity": "480",
+          "inventoryUnit": "瓶",
+          "purchaseUnitPriceCents": 2400,
+          "inventoryUnitPriceCents": "100",
+          "amountCents": 48000
+        }
+      ],
+      "totalCents": 48000,
+      "isSynthetic": true
+    }
+  ],
+  "receipts": [
+    {
+      "id": "RC-001",
+      "orderId": "PO-001",
+      "supplierCode": "S001",
+      "date": "2026-10-20",
+      "status": "confirmed",
+      "receiver": "收货经办（模拟）",
+      "lines": [
+        {
+          "materialCode": "M001",
+          "deliveredQuantity": "1000",
+          "acceptedQuantity": "800",
+          "rejectedQuantity": "200",
+          "inventoryUnit": "双",
+          "inventoryUnitPriceCents": "180",
+          "amountCents": 144000
+        }
+      ],
+      "totalCents": 144000,
+      "isSynthetic": true,
+      "note": "送达10箱，其中2箱包装破损，拒收未入库；只确认8箱货款。"
+    },
+    {
+      "id": "RC-002",
+      "orderId": "PO-002",
+      "supplierCode": "S001",
+      "date": "2026-10-20",
+      "status": "confirmed",
+      "receiver": "收货经办（模拟）",
+      "lines": [
+        {
+          "materialCode": "M002",
+          "deliveredQuantity": "1000",
+          "acceptedQuantity": "1000",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "套",
+          "inventoryUnitPriceCents": "110",
+          "amountCents": 110000
+        },
+        {
+          "materialCode": "M003",
+          "deliveredQuantity": "600",
+          "acceptedQuantity": "600",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "把",
+          "inventoryUnitPriceCents": "50",
+          "amountCents": 30000
+        },
+        {
+          "materialCode": "M004",
+          "deliveredQuantity": "1000",
+          "acceptedQuantity": "1000",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "只",
+          "inventoryUnitPriceCents": "20",
+          "amountCents": 20000
+        },
+        {
+          "materialCode": "M005",
+          "deliveredQuantity": "100",
+          "acceptedQuantity": "100",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "套",
+          "inventoryUnitPriceCents": "260",
+          "amountCents": 26000
+        },
+        {
+          "materialCode": "M006",
+          "deliveredQuantity": "1000",
+          "acceptedQuantity": "1000",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "小包",
+          "inventoryUnitPriceCents": "20",
+          "amountCents": 20000
+        },
+        {
+          "materialCode": "M007",
+          "deliveredQuantity": "200",
+          "acceptedQuantity": "200",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "条",
+          "inventoryUnitPriceCents": "130",
+          "amountCents": 26000
+        }
+      ],
+      "totalCents": 232000,
+      "isSynthetic": true
+    },
+    {
+      "id": "RC-003",
+      "orderId": "PO-003",
+      "supplierCode": "S002",
+      "date": "2026-10-20",
+      "status": "confirmed",
+      "receiver": "收货经办（模拟）",
+      "lines": [
+        {
+          "materialCode": "M008",
+          "deliveredQuantity": "4",
+          "acceptedQuantity": "4",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "桶",
+          "inventoryUnitPriceCents": "9500",
+          "amountCents": 38000
+        },
+        {
+          "materialCode": "M009",
+          "deliveredQuantity": "3",
+          "acceptedQuantity": "3",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "桶",
+          "inventoryUnitPriceCents": "11000",
+          "amountCents": 33000
+        },
+        {
+          "materialCode": "M010",
+          "deliveredQuantity": "12",
+          "acceptedQuantity": "12",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "瓶",
+          "inventoryUnitPriceCents": "4200",
+          "amountCents": 50400
+        }
+      ],
+      "totalCents": 121400,
+      "isSynthetic": true
+    },
+    {
+      "id": "RC-004",
+      "orderId": "PO-004",
+      "supplierCode": "S003",
+      "date": "2026-10-20",
+      "status": "confirmed",
+      "receiver": "收货经办（模拟）",
+      "lines": [
+        {
+          "materialCode": "M011",
+          "deliveredQuantity": "2",
+          "acceptedQuantity": "2",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "桶",
+          "inventoryUnitPriceCents": "5500",
+          "amountCents": 11000
+        },
+        {
+          "materialCode": "M012",
+          "deliveredQuantity": "300",
+          "acceptedQuantity": "300",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "卷",
+          "inventoryUnitPriceCents": "165",
+          "amountCents": 49500
+        },
+        {
+          "materialCode": "M013",
+          "deliveredQuantity": "200",
+          "acceptedQuantity": "200",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "包",
+          "inventoryUnitPriceCents": "160",
+          "amountCents": 32000
+        },
+        {
+          "materialCode": "M014",
+          "deliveredQuantity": "40",
+          "acceptedQuantity": "40",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "卷",
+          "inventoryUnitPriceCents": "800",
+          "amountCents": 32000
+        },
+        {
+          "materialCode": "M015",
+          "deliveredQuantity": "10",
+          "acceptedQuantity": "10",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "盒",
+          "inventoryUnitPriceCents": "2400",
+          "amountCents": 24000
+        }
+      ],
+      "totalCents": 148500,
+      "isSynthetic": true
+    },
+    {
+      "id": "RC-005",
+      "orderId": "PO-005",
+      "supplierCode": "S004",
+      "date": "2026-10-20",
+      "status": "confirmed",
+      "receiver": "收货经办（模拟）",
+      "lines": [
+        {
+          "materialCode": "M016",
+          "deliveredQuantity": "1000",
+          "acceptedQuantity": "1000",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "张",
+          "inventoryUnitPriceCents": "90",
+          "amountCents": 90000
+        },
+        {
+          "materialCode": "M017",
+          "deliveredQuantity": "6",
+          "acceptedQuantity": "6",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "瓶",
+          "inventoryUnitPriceCents": "6000",
+          "amountCents": 36000
+        }
+      ],
+      "totalCents": 126000,
+      "isSynthetic": true
+    },
+    {
+      "id": "RC-006",
+      "orderId": "PO-006",
+      "supplierCode": "S005",
+      "date": "2026-10-20",
+      "status": "confirmed",
+      "receiver": "收货经办（模拟）",
+      "lines": [
+        {
+          "materialCode": "M018",
+          "deliveredQuantity": "240",
+          "acceptedQuantity": "240",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "瓶",
+          "inventoryUnitPriceCents": "100",
+          "amountCents": 24000
+        },
+        {
+          "materialCode": "M019",
+          "deliveredQuantity": "120",
+          "acceptedQuantity": "120",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "瓶",
+          "inventoryUnitPriceCents": "400",
+          "amountCents": 48000
+        },
+        {
+          "materialCode": "M020",
+          "deliveredQuantity": "120",
+          "acceptedQuantity": "120",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "盒",
+          "inventoryUnitPriceCents": "225",
+          "amountCents": 27000
+        }
+      ],
+      "totalCents": 99000,
+      "isSynthetic": true
+    },
+    {
+      "id": "RC-007",
+      "orderId": "PO-001",
+      "supplierCode": "S001",
+      "date": "2026-10-22",
+      "status": "confirmed",
+      "receiver": "收货经办（模拟）",
+      "lines": [
+        {
+          "materialCode": "M001",
+          "deliveredQuantity": "200",
+          "acceptedQuantity": "200",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "双",
+          "inventoryUnitPriceCents": "180",
+          "amountCents": 36000
+        }
+      ],
+      "totalCents": 36000,
+      "isSynthetic": true,
+      "note": "供应商补交2箱，验收后补足原订单；不是新增采购订单。"
+    },
+    {
+      "id": "RC-008",
+      "orderId": "PO-007",
+      "supplierCode": "S002",
+      "date": "2026-10-24",
+      "status": "confirmed",
+      "receiver": "收货经办（模拟）",
+      "lines": [
+        {
+          "materialCode": "M009",
+          "deliveredQuantity": "2",
+          "acceptedQuantity": "2",
+          "rejectedQuantity": "0",
+          "inventoryUnit": "桶",
+          "inventoryUnitPriceCents": "11500",
+          "amountCents": 23000
+        }
+      ],
+      "totalCents": 23000,
+      "isSynthetic": true
+    }
+  ],
+  "issues": [
+    {
+      "id": "IS-001",
+      "date": "2026-10-24",
+      "department": "浴区",
+      "status": "confirmed",
+      "actor": "浴区领用经办（模拟）",
+      "lines": [
+        {
+          "materialCode": "M001",
+          "quantity": "120",
+          "inventoryUnit": "双"
+        },
+        {
+          "materialCode": "M002",
+          "quantity": "260",
+          "inventoryUnit": "套"
+        },
+        {
+          "materialCode": "M003",
+          "quantity": "100",
+          "inventoryUnit": "把"
+        },
+        {
+          "materialCode": "M004",
+          "quantity": "150",
+          "inventoryUnit": "只"
+        },
+        {
+          "materialCode": "M005",
+          "quantity": "80",
+          "inventoryUnit": "套"
+        },
+        {
+          "materialCode": "M006",
+          "quantity": "60",
+          "inventoryUnit": "小包"
+        },
+        {
+          "materialCode": "M007",
+          "quantity": "80",
+          "inventoryUnit": "条"
+        },
+        {
+          "materialCode": "M008",
+          "quantity": "4",
+          "inventoryUnit": "桶"
+        },
+        {
+          "materialCode": "M009",
+          "quantity": "3",
+          "inventoryUnit": "桶"
+        },
+        {
+          "materialCode": "M010",
+          "quantity": "10",
+          "inventoryUnit": "瓶"
+        }
+      ],
+      "isSynthetic": true
+    },
+    {
+      "id": "IS-002",
+      "date": "2026-10-24",
+      "department": "保洁",
+      "status": "confirmed",
+      "actor": "保洁领用经办（模拟）",
+      "lines": [
+        {
+          "materialCode": "M011",
+          "quantity": "2",
+          "inventoryUnit": "桶"
+        },
+        {
+          "materialCode": "M012",
+          "quantity": "260",
+          "inventoryUnit": "卷"
+        },
+        {
+          "materialCode": "M013",
+          "quantity": "120",
+          "inventoryUnit": "包"
+        },
+        {
+          "materialCode": "M014",
+          "quantity": "35",
+          "inventoryUnit": "卷"
+        },
+        {
+          "materialCode": "M015",
+          "quantity": "12",
+          "inventoryUnit": "盒"
+        }
+      ],
+      "isSynthetic": true
+    },
+    {
+      "id": "IS-003",
+      "date": "2026-10-24",
+      "department": "SPA",
+      "status": "confirmed",
+      "actor": "SPA领用经办（模拟）",
+      "lines": [
+        {
+          "materialCode": "M016",
+          "quantity": "700",
+          "inventoryUnit": "张"
+        },
+        {
+          "materialCode": "M017",
+          "quantity": "5",
+          "inventoryUnit": "瓶"
+        }
+      ],
+      "isSynthetic": true
+    },
+    {
+      "id": "IS-004",
+      "date": "2026-10-24",
+      "department": "水吧",
+      "status": "confirmed",
+      "actor": "水吧领用经办（模拟）",
+      "lines": [
+        {
+          "materialCode": "M018",
+          "quantity": "220",
+          "inventoryUnit": "瓶"
+        },
+        {
+          "materialCode": "M019",
+          "quantity": "120",
+          "inventoryUnit": "瓶"
+        },
+        {
+          "materialCode": "M020",
+          "quantity": "100",
+          "inventoryUnit": "盒"
+        }
+      ],
+      "isSynthetic": true
+    }
+  ],
+  "issueReturns": [
+    {
+      "id": "IR-001",
+      "date": "2026-10-24",
+      "sourceIssueId": "IS-004",
+      "materialCode": "M018",
+      "quantity": "12",
+      "status": "confirmed",
+      "reason": "水吧将未开封多领的12瓶退回总库（模拟）",
+      "isSynthetic": true
+    }
+  ],
+  "directUses": [
+    {
+      "id": "DU-001",
+      "date": "2026-10-25",
+      "materialCode": "M014",
+      "quantity": "1",
+      "status": "confirmed",
+      "reason": "总库区域清洁直接耗用1卷，未先领给部门；只扣一次总库库存（模拟）",
+      "isSynthetic": true
+    }
+  ],
+  "damages": [
+    {
+      "id": "DM-001",
+      "date": "2026-10-25",
+      "materialCode": "M018",
+      "quantity": "4",
+      "status": "approved",
+      "reason": "总库搬运破瓶，4瓶报损（模拟）",
+      "approvedBy": "店主（模拟）",
+      "isSynthetic": true
+    }
+  ],
+  "counts": [
+    {
+      "id": "CT-001",
+      "date": "2026-10-25",
+      "materialCode": "M001",
+      "bookQuantity": "980",
+      "countedQuantity": "977",
+      "adjustmentQuantity": "-3",
+      "status": "approved",
+      "reason": "已复核，3双盘亏原因尚未查明，不标成已认定损耗",
+      "isSynthetic": true
+    },
+    {
+      "id": "CT-002",
+      "date": "2026-10-25",
+      "materialCode": "M012",
+      "bookQuantity": "90",
+      "countedQuantity": "89",
+      "adjustmentQuantity": "-1",
+      "status": "pending",
+      "reason": "待复核，未批准前不改变库存",
+      "isSynthetic": true
+    }
+  ],
+  "supplierReturns": [
+    {
+      "id": "SR-001",
+      "date": "2026-10-25",
+      "sourceReceiptId": "RC-001",
+      "supplierCode": "S001",
+      "materialCode": "M001",
+      "quantity": "10",
+      "inventoryUnitPriceCents": "180",
+      "creditCents": 1800,
+      "status": "confirmed",
+      "reason": "验收入库后发现10双瑕疵，退货并经供应商确认扣款（模拟）",
+      "isSynthetic": true
+    }
+  ],
+  "payments": [
+    {
+      "id": "PAY-001",
+      "date": "2026-10-25",
+      "supplierCode": "S001",
+      "amountCents": 100000,
+      "allocations": [
+        {
+          "sourceId": "RC-001",
+          "amountCents": 100000
+        }
+      ],
+      "status": "confirmed",
+      "method": "模拟线下转账",
+      "evidence": "仅为开发验收记录，没有真实付款",
+      "isSynthetic": true
+    },
+    {
+      "id": "PAY-002",
+      "date": "2026-10-25",
+      "supplierCode": "S002",
+      "amountCents": 100000,
+      "allocations": [
+        {
+          "sourceId": "RC-003",
+          "amountCents": 100000
+        }
+      ],
+      "status": "confirmed",
+      "method": "模拟线下转账",
+      "evidence": "仅为开发验收记录，没有真实付款",
+      "isSynthetic": true
+    },
+    {
+      "id": "PAY-003",
+      "date": "2026-10-25",
+      "supplierCode": "S003",
+      "amountCents": 50000,
+      "allocations": [
+        {
+          "sourceId": "OPEN-AP-S003",
+          "amountCents": 20000
+        },
+        {
+          "sourceId": "RC-004",
+          "amountCents": 30000
+        }
+      ],
+      "status": "confirmed",
+      "method": "模拟线下转账",
+      "evidence": "仅为开发验收记录，没有真实付款",
+      "isSynthetic": true
+    },
+    {
+      "id": "PAY-004",
+      "date": "2026-10-25",
+      "supplierCode": "S005",
+      "amountCents": 99000,
+      "allocations": [
+        {
+          "sourceId": "RC-006",
+          "amountCents": 99000
+        }
+      ],
+      "status": "confirmed",
+      "method": "模拟线下转账",
+      "evidence": "仅为开发验收记录，没有真实付款",
+      "isSynthetic": true
+    }
+  ],
+  "expected": {
+    "inventory": [
+      {
+        "materialCode": "M001",
+        "opening": "100",
+        "received": "1000",
+        "issued": "120",
+        "issueReturns": "0",
+        "directUsed": "0",
+        "damaged": "0",
+        "approvedCountAdjustment": "-3",
+        "supplierReturns": "10",
+        "closing": "967",
+        "inventoryUnit": "双"
+      },
+      {
+        "materialCode": "M002",
+        "opening": "200",
+        "received": "1000",
+        "issued": "260",
+        "issueReturns": "0",
+        "directUsed": "0",
+        "damaged": "0",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "940",
+        "inventoryUnit": "套"
+      },
+      {
+        "materialCode": "M003",
+        "opening": "80",
+        "received": "600",
+        "issued": "100",
+        "issueReturns": "0",
+        "directUsed": "0",
+        "damaged": "0",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "580",
+        "inventoryUnit": "把"
+      },
+      {
+        "materialCode": "M004",
+        "opening": "100",
+        "received": "1000",
+        "issued": "150",
+        "issueReturns": "0",
+        "directUsed": "0",
+        "damaged": "0",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "950",
+        "inventoryUnit": "只"
+      },
+      {
+        "materialCode": "M005",
+        "opening": "50",
+        "received": "100",
+        "issued": "80",
+        "issueReturns": "0",
+        "directUsed": "0",
+        "damaged": "0",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "70",
+        "inventoryUnit": "套"
+      },
+      {
+        "materialCode": "M006",
+        "opening": "30",
+        "received": "1000",
+        "issued": "60",
+        "issueReturns": "0",
+        "directUsed": "0",
+        "damaged": "0",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "970",
+        "inventoryUnit": "小包"
+      },
+      {
+        "materialCode": "M007",
+        "opening": "50",
+        "received": "200",
+        "issued": "80",
+        "issueReturns": "0",
+        "directUsed": "0",
+        "damaged": "0",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "170",
+        "inventoryUnit": "条"
+      },
+      {
+        "materialCode": "M008",
+        "opening": "2",
+        "received": "4",
+        "issued": "4",
+        "issueReturns": "0",
+        "directUsed": "0",
+        "damaged": "0",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "2",
+        "inventoryUnit": "桶"
+      },
+      {
+        "materialCode": "M009",
+        "opening": "2",
+        "received": "5",
+        "issued": "3",
+        "issueReturns": "0",
+        "directUsed": "0",
+        "damaged": "0",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "4",
+        "inventoryUnit": "桶"
+      },
+      {
+        "materialCode": "M010",
+        "opening": "6",
+        "received": "12",
+        "issued": "10",
+        "issueReturns": "0",
+        "directUsed": "0",
+        "damaged": "0",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "8",
+        "inventoryUnit": "瓶"
+      },
+      {
+        "materialCode": "M011",
+        "opening": "2",
+        "received": "2",
+        "issued": "2",
+        "issueReturns": "0",
+        "directUsed": "0",
+        "damaged": "0",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "2",
+        "inventoryUnit": "桶"
+      },
+      {
+        "materialCode": "M012",
+        "opening": "50",
+        "received": "300",
+        "issued": "260",
+        "issueReturns": "0",
+        "directUsed": "0",
+        "damaged": "0",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "90",
+        "inventoryUnit": "卷"
+      },
+      {
+        "materialCode": "M013",
+        "opening": "60",
+        "received": "200",
+        "issued": "120",
+        "issueReturns": "0",
+        "directUsed": "0",
+        "damaged": "0",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "140",
+        "inventoryUnit": "包"
+      },
+      {
+        "materialCode": "M014",
+        "opening": "10",
+        "received": "40",
+        "issued": "35",
+        "issueReturns": "0",
+        "directUsed": "1",
+        "damaged": "0",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "14",
+        "inventoryUnit": "卷"
+      },
+      {
+        "materialCode": "M015",
+        "opening": "4",
+        "received": "10",
+        "issued": "12",
+        "issueReturns": "0",
+        "directUsed": "0",
+        "damaged": "0",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "2",
+        "inventoryUnit": "盒"
+      },
+      {
+        "materialCode": "M016",
+        "opening": "100",
+        "received": "1000",
+        "issued": "700",
+        "issueReturns": "0",
+        "directUsed": "0",
+        "damaged": "0",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "400",
+        "inventoryUnit": "张"
+      },
+      {
+        "materialCode": "M017",
+        "opening": "2",
+        "received": "6",
+        "issued": "5",
+        "issueReturns": "0",
+        "directUsed": "0",
+        "damaged": "0",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "3",
+        "inventoryUnit": "瓶"
+      },
+      {
+        "materialCode": "M018",
+        "opening": "48",
+        "received": "240",
+        "issued": "220",
+        "issueReturns": "12",
+        "directUsed": "0",
+        "damaged": "4",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "76",
+        "inventoryUnit": "瓶"
+      },
+      {
+        "materialCode": "M019",
+        "opening": "30",
+        "received": "120",
+        "issued": "120",
+        "issueReturns": "0",
+        "directUsed": "0",
+        "damaged": "0",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "30",
+        "inventoryUnit": "瓶"
+      },
+      {
+        "materialCode": "M020",
+        "opening": "24",
+        "received": "120",
+        "issued": "100",
+        "issueReturns": "0",
+        "directUsed": "0",
+        "damaged": "0",
+        "approvedCountAdjustment": "0",
+        "supplierReturns": "0",
+        "closing": "44",
+        "inventoryUnit": "盒"
+      }
+    ],
+    "suppliers": [
+      {
+        "supplierCode": "S001",
+        "openingPayableCents": 0,
+        "receivedCents": 412000,
+        "returnCreditCents": 1800,
+        "paidCents": 100000,
+        "closingPayableCents": 310200
+      },
+      {
+        "supplierCode": "S002",
+        "openingPayableCents": 0,
+        "receivedCents": 144400,
+        "returnCreditCents": 0,
+        "paidCents": 100000,
+        "closingPayableCents": 44400
+      },
+      {
+        "supplierCode": "S003",
+        "openingPayableCents": 20000,
+        "receivedCents": 148500,
+        "returnCreditCents": 0,
+        "paidCents": 50000,
+        "closingPayableCents": 118500
+      },
+      {
+        "supplierCode": "S004",
+        "openingPayableCents": 0,
+        "receivedCents": 126000,
+        "returnCreditCents": 0,
+        "paidCents": 0,
+        "closingPayableCents": 126000
+      },
+      {
+        "supplierCode": "S005",
+        "openingPayableCents": 0,
+        "receivedCents": 99000,
+        "returnCreditCents": 0,
+        "paidCents": 99000,
+        "closingPayableCents": 0
+      }
+    ],
+    "totals": {
+      "openingPayableCents": 20000,
+      "receivedCents": 929900,
+      "returnCreditCents": 1800,
+      "paidCents": 349000,
+      "closingPayableCents": 599100
+    },
+    "canonicalOrder": {
+      "orderId": "PO-001",
+      "materialCode": "M001",
+      "closingStockQuantity": "967",
+      "acceptedAmountCents": 180000,
+      "returnCreditCents": 1800,
+      "paidCents": 100000,
+      "unpaidCents": 78200
+    },
+    "pendingExceptions": [
+      "PO-008尚未批准，没有收货、入库或应付",
+      "CT-002差异-1卷尚未批准，M012库存仍为90卷"
+    ],
+    "priceComparison": {
+      "materialCode": "M009",
+      "oldReceiptId": "RC-003",
+      "newReceiptId": "RC-008",
+      "oldUnitPriceCents": 11000,
+      "newUnitPriceCents": 11500,
+      "changePercent": "4.55"
+    },
+    "lowStockCodes": [
+      "M012",
+      "M015",
+      "M017"
+    ]
+  }
+}
