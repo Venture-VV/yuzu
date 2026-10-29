@@ -143,6 +143,8 @@ launchctl enable "gui/$(id -u)/com.yuzu.watchdog"
 | 查看 OSS 上传日志 | `tail -n 50 "$HOME/Library/Logs/yuzu-oss-upload.log"` |
 | 查看 Tailscale 地址 | `tailscale ip -4`（未装命令行入口时见第 10 节） |
 | 自检（会员、营业口径、库存、前台） | `docker compose exec app node dist/server/cli.js check` |
+| 每日对账包（只读） | `./scripts/daily-recon.sh [营业日]`：写到项目目录的 `recon/<营业日>/`，含日结汇总、结账单、部门参考表、异常清单、交班 |
+| 某时刻之后有余额变动的会员（退回旧系统时回写 EBC，只读） | `docker compose exec -T app node dist/server/cli.js balance-changes --since "2026-11-05 06:00" > 余额变动.csv` |
 | 店主忘记密码 | `docker compose exec app node dist/server/cli.js reset-password <账号>` |
 | 更新版本 | `./scripts/update.sh <版本标签>`（例如 `v0.3.3`；`git fetch --tags && git tag` 查看） |
 | 新版本有问题，回到上一版 | `./scripts/rollback.sh`（见下） |

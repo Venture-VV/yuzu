@@ -20,6 +20,7 @@ import {
 import { parseHandTagCsv, type HandTagCsvResult, type HandTagImportReport } from '@shared/hand-tag-import';
 import { formatYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
+import { readImportFile } from '../../lib/import-file';
 import { cn } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
@@ -169,8 +170,17 @@ function ImportCard({ onImported }: { onImported: () => void }) {
     setPreview(null);
     setError(null);
     if (!file) return;
-    setFileName(file.name);
-    const result = parseHandTagCsv(await file.text());
+    let loaded: Awaited<ReturnType<typeof readImportFile>>;
+    try {
+      loaded = await readImportFile(file);
+    } catch (e) {
+      setFileName(file.name);
+      setParsed(null);
+      setError(errorMessage(e));
+      return;
+    }
+    setFileName(loaded.label);
+    const result = parseHandTagCsv(loaded.text);
     setParsed(result);
     if (result.errors.length === 0) await run(true, result.rows, deactivateMissing);
   };

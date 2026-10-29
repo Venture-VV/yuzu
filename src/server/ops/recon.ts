@@ -1,0 +1,368 @@
+// 每日对账包（R1.5，只读）：影子运行期间每晚与旧系统对账；切换后每天日结时与微信、支付宝、银行卡、团购后台和现金实点核对。
+// 一个营业日一个目录，结账、明细、交班与异常在同一个只读快照里读出：
+//   00-说明.txt        门店、实例、版本与 SHA、营业日与时段、生成时刻、数据指纹、主要数字与交叉核对
+//   01-日结汇总.csv    与「日结」页导出的相同
+//   02-结账单.csv      当天结账与当天反结账的结账单，按收款方式分列
+//   03-部门参考表.csv  结账明细按项目分类（部门）汇总：当天结的计正数、当天反结账的计负数，合计 = 营业额（净额）
+//   04-异常清单.csv    反结账、作废明细、撤销误开的牌、改票种、免票入场、会员撤销与其他日结异常
+//   05-交班.csv        当天的班次：备用金、各收款方式、应有现金、实点、长短款
+// 优惠 / 免单与降档 / 免票授权在资金轨 R1.2 合并后加入异常清单。
+
+import { businessDateOf, businessDayStart } from '@shared/business-date';
+import { CHECKOUT_METHOD_LABELS, CHECKOUT_METHODS, COUPON_PLATFORM_LABELS, type CheckoutMethod, type CouponPlatform, type ShiftRecord } from '@shared/checkout';
+import { INSTANCE_LABELS } from '@shared/instance';
+import { formatYuan } from '@shared/money';
+import type { SettlementAnomaly, SettlementSummary } from '@shared/types';
+import type { AppConfig } from '../config';
+import { readSnapshot, type Sql, type Tx } from '../db';
+import { toCsv } from '../lib/csv';
+import { computeSettlement, settlementCsv } from '../modules/settlement';
+import { loadSettings } from '../modules/settings';
+import { listShifts } from '../modules/shifts';
+import { consistencyChecks, type CheckLine } from './consistency';
+import { computeFingerprint } from './fingerprint';
+
+export interface ReconFile {
+  name: string;
+  content: string;
+}
+
+export interface DailyRecon {
+  date: string;
+  files: ReconFile[];
+  /** 自检全部通过，且部门参考表合计 = 营业额（净额） */
+  ok: boolean;
+  /** 说明文件里的主要内容，命令行同时打印 */
+  summary: string[];
+}
+
+/** 对账表里的金额：元，两位小数，不加千分位，便于表格软件直接求和 */
+const yuan = (cents: number) => `${cents < 0 ? '-' : ''}${Math.trunc(Math.abs(cents) / 100)}.${String(Math.abs(cents) % 100).padStart(2, '0')}`;
+
+const plusDays = (date: string, days: number) => {
+  const [y, m, d] = date.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+};
+
+const ANOMALY_LABELS: Record<SettlementAnomaly['kind'], string> = {
+  reversal: '会员撤销',
+  cross_day_reversal: '跨营业日撤销',
+  duplicate_blocked: '重复提交已拦截',
+  rejected: '拒绝的操作',
+  abandoned: '作废的待确认操作',
+  balance_mismatch: '余额不一致',
+  chain_break: '流水不连续',
+  checkout_void: '反结账',
+};
+
+interface CheckoutRow {
+  id: number;
+  checkoutNo: string;
+  status: 'completed' | 'voided';
+  businessDate: string;
+  createdAt: string;
+  operatorName: string;
+  totalAmount: number;
+  voidBusinessDate: string | null;
+  voidedAt: string | null;
+  voidedByName: string | null;
+  voidReason: string | null;
+  note: string;
+  tags: string | null;
+  payments: { method: CheckoutMethod; amount: number; ref: string; member: string | null; coupon: string | null; platform: CouponPlatform | null }[] | null;
+}
+
+interface ExceptionRow {
+  kind: string;
+  at: string;
+  docNo: string;
+  tag: string;
+  guest: string;
+  staff: string;
+  amount: number | null;
+  description: string;
+}
+
+async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date) {
+  const summary = await computeSettlement(tx, date, today);
+  const checkouts = await tx<CheckoutRow[]>`
+    SELECT c.id, c.checkout_no, c.status, c.business_date, c.created_at, s.display_name AS operator_name, c.total_amount,
+           c.void_business_date, c.voided_at, vs.display_name AS voided_by_name, c.void_reason, c.note,
+           (SELECT string_agg(t.code, '、' ORDER BY t.code) FROM checkout_bills cb JOIN visits v ON v.id = cb.visit_id
+            JOIN hand_tags t ON t.id = v.tag_id WHERE cb.checkout_id = c.id) AS tags,
+           (SELECT json_agg(json_build_object('method', p.method, 'amount', p.amount, 'ref', p.ref, 'member', m.name,
+                                              'coupon', g.code, 'platform', g.platform) ORDER BY p.id)
+            FROM checkout_payments p LEFT JOIN members m ON m.id = p.member_id LEFT JOIN group_buy_coupons g ON g.id = p.coupon_id
+            WHERE p.checkout_id = c.id) AS payments
+    FROM checkouts c JOIN staff s ON s.id = c.operator_id LEFT JOIN staff vs ON vs.id = c.voided_by
+    WHERE c.business_date = ${date} OR c.void_business_date = ${date}
+    ORDER BY c.created_at, c.id`;
+  // 部门参考表：每张结账单结账那一刻的明细（与打印的结账单相同口径）；当天结的计正数、当天反结账的计负数
+  const departments = await tx<{ category: string; name: string; quantity: number; amount: number }[]>`
+    WITH k AS (
+      SELECT id, created_at, 1 AS sign FROM checkouts WHERE business_date = ${date}
+      UNION ALL
+      SELECT id, created_at, -1 FROM checkouts WHERE void_business_date = ${date}
+    )
+    SELECT CASE WHEN l.ticket_type_id IS NOT NULL THEN '门票'
+                WHEN l.item_id IS NULL THEN '其他（手动金额、赔偿等）'
+                ELSE coalesce(nullif(si.category, ''), '未分类') END AS category,
+           l.name, sum(k.sign * l.quantity)::int AS quantity, sum(k.sign * l.amount)::bigint AS amount
+    FROM k JOIN checkout_bills cb ON cb.checkout_id = k.id
+    JOIN bill_lines l ON l.bill_id = cb.bill_id AND l.posted_at <= k.created_at AND (l.voided_at IS NULL OR l.voided_at > k.created_at)
+    LEFT JOIN service_items si ON si.id = l.item_id
+    GROUP BY 1, 2
+    HAVING sum(k.sign * l.quantity) <> 0 OR sum(k.sign * l.amount) <> 0`;
+  // 按分类、项目名排序（逐字符比较，结果与数据库的排序规则无关）
+  departments.sort((a, b) => (a.category === b.category ? (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) : a.category < b.category ? -1 : 1));
+  const voidedLines = await tx<{ at: string; visitNo: string; tag: string; guest: string; staff: string; name: string; quantity: number; amount: number; reason: string; postedByName: string }[]>`
+    SELECT l.voided_at AS at, v.visit_no, t.code AS tag, coalesce(m.name, nullif(v.guest_label, ''), '散客') AS guest, vs.display_name AS staff,
+           l.name, l.quantity, l.amount, l.void_reason AS reason, ps.display_name AS posted_by_name
+    FROM bill_lines l JOIN visits v ON v.bill_id = l.bill_id JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id
+    JOIN staff vs ON vs.id = l.voided_by JOIN staff ps ON ps.id = l.posted_by
+    WHERE l.status = 'voided' AND l.voided_at >= ${from} AND l.voided_at < ${to}
+      AND NOT (l.ticket_type_id IS NOT NULL AND l.void_reason LIKE '反结账 %')
+    ORDER BY l.voided_at, l.id`;
+  const cancelled = await tx<{ at: string; visitNo: string; tag: string; guest: string; staff: string; reason: string | null; checkedInAt: string }[]>`
+    SELECT v.closed_at AS at, v.visit_no, t.code AS tag, coalesce(m.name, nullif(v.guest_label, ''), '散客') AS guest,
+           coalesce(s.display_name, '') AS staff, v.close_reason AS reason, v.checked_in_at
+    FROM visits v JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id LEFT JOIN staff s ON s.id = v.closed_by
+    WHERE v.status = 'cancelled' AND v.closed_at >= ${from} AND v.closed_at < ${to}
+    ORDER BY v.closed_at, v.id`;
+  const ticketChanges = await tx<{ at: string; visitNo: string; tag: string; guest: string; staff: string; fromName: string; toName: string; price12h: number; price24h: number }[]>`
+    SELECT c.created_at AS at, v.visit_no, t.code AS tag, coalesce(m.name, nullif(v.guest_label, ''), '散客') AS guest, s.display_name AS staff,
+           ft.name AS from_name, tt.name AS to_name, c.price_12h, c.price_24h
+    FROM visit_ticket_changes c JOIN visits v ON v.id = c.visit_id JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id
+    JOIN staff s ON s.id = c.operator_id JOIN ticket_types ft ON ft.id = c.from_type_id JOIN ticket_types tt ON tt.id = c.to_type_id
+    WHERE c.created_at >= ${from} AND c.created_at < ${to}
+    ORDER BY c.created_at, c.id`;
+  const freeEntries = await tx<{ at: string; visitNo: string; tag: string; guest: string; staff: string; ticketName: string }[]>`
+    SELECT v.checked_in_at AS at, v.visit_no, t.code AS tag, coalesce(m.name, nullif(v.guest_label, ''), '散客') AS guest,
+           s.display_name AS staff, tt.name AS ticket_name
+    FROM visits v JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id JOIN staff s ON s.id = v.checked_in_by
+    JOIN ticket_types tt ON tt.id = v.ticket_type_id
+    WHERE v.checked_in_at >= ${from} AND v.checked_in_at < ${to} AND v.ticket_price_12h = 0 AND v.status <> 'cancelled'
+    ORDER BY v.checked_in_at, v.id`;
+  const shifts = (await listShifts(tx, date)).filter((s) => s.businessDate === date);
+  return { summary, checkouts, departments, voidedLines, cancelled, ticketChanges, freeEntries, shifts };
+}
+
+export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string, now = new Date()): Promise<DailyRecon> {
+  const settings = await loadSettings(sql);
+  const startHour = settings.businessDayStartHour;
+  const today = businessDateOf(now, config.timezone, startHour);
+  const from = businessDayStart(date, config.timezone, startHour);
+  const to = businessDayStart(plusDays(date, 1), config.timezone, startHour);
+  const day = await readSnapshot(sql, (tx) => readDay(tx, date, today, from, to));
+  const checks = await consistencyChecks(sql, config.timezone);
+  const fingerprint = await computeFingerprint(sql);
+
+  const stampOf = (iso: string | null) => {
+    if (!iso) return '';
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat('en-CA', { timeZone: config.timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
+        .formatToParts(new Date(iso))
+        .map((p) => [p.type, p.value]),
+    );
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+  };
+
+  const s: SettlementSummary = day.summary;
+  const files: ReconFile[] = [];
+  files.push({ name: '01-日结汇总.csv', content: settlementCsv(s) });
+
+  // 02 结账单
+  const methods = CHECKOUT_METHODS as readonly CheckoutMethod[];
+  files.push({
+    name: '02-结账单.csv',
+    content: toCsv([
+      ['结账单号', '状态', '结账营业日', '结账时间', '收银', '手牌', '应收合计', ...methods.map((m) => CHECKOUT_METHOD_LABELS[m]), '储值会员', '团购券码', '收款备注',
+        '计入本日结账', '计入本日反结账', '反结账营业日', '反结账时间', '反结账人', '反结账原因', '备注'],
+      ...day.checkouts.map((c) => {
+        const pays = c.payments ?? [];
+        const sumOf = (m: CheckoutMethod) => pays.filter((p) => p.method === m).reduce((t, p) => t + p.amount, 0);
+        return [
+          c.checkoutNo,
+          c.status === 'voided' ? '已反结账' : '已结账',
+          c.businessDate,
+          stampOf(c.createdAt),
+          c.operatorName,
+          c.tags ?? '',
+          yuan(c.totalAmount),
+          ...methods.map((m) => yuan(sumOf(m))),
+          pays.flatMap((p) => (p.member ? [p.member] : [])).join('、'),
+          pays.flatMap((p) => (p.coupon ? [`${p.platform ? COUPON_PLATFORM_LABELS[p.platform] : ''} ${p.coupon}`.trim()] : [])).join('、'),
+          pays.flatMap((p) => (p.ref ? [`${CHECKOUT_METHOD_LABELS[p.method]} ${p.ref}`] : [])).join('、'),
+          yuan(c.businessDate === date ? c.totalAmount : 0),
+          yuan(c.voidBusinessDate === date ? -c.totalAmount : 0),
+          c.voidBusinessDate ?? '',
+          stampOf(c.voidedAt),
+          c.voidedByName ?? '',
+          c.voidReason ?? '',
+          c.note,
+        ];
+      }),
+    ]),
+  });
+
+  // 03 部门参考表
+  const deptTotal = day.departments.reduce((t, d) => t + d.amount, 0);
+  const categories = [...new Set(day.departments.map((d) => d.category))];
+  files.push({
+    name: '03-部门参考表.csv',
+    content: toCsv([
+      ['部门（项目分类）', '项目', '数量', '金额（元）'],
+      ...categories.flatMap((cat) => {
+        const items = day.departments.filter((d) => d.category === cat);
+        return [...items.map((d) => [cat, d.name, d.quantity, yuan(d.amount)]), [cat, '小计', '', yuan(items.reduce((t, d) => t + d.amount, 0))]];
+      }),
+      ['合计', '', '', yuan(deptTotal)],
+      ['营业额（净额）', '', '', yuan(s.business.net)],
+      ['核对', deptTotal === s.business.net ? '一致' : '不一致', '', ''],
+    ]),
+  });
+
+  // 04 异常清单
+  const exceptions: ExceptionRow[] = [
+    ...day.checkouts
+      .filter((c) => c.voidBusinessDate === date)
+      .map((c) => ({
+        kind: '反结账',
+        at: c.voidedAt!,
+        docNo: c.checkoutNo,
+        tag: c.tags ?? '',
+        guest: (c.payments ?? []).flatMap((p) => (p.member ? [p.member] : [])).join('、'),
+        staff: c.voidedByName ?? '',
+        amount: -c.totalAmount,
+        description: `${c.voidReason ?? ''}（原结账 ${c.businessDate} ${c.operatorName}）`,
+      })),
+    ...day.voidedLines.map((l) => ({
+      kind: '作废明细',
+      at: l.at,
+      docNo: l.visitNo,
+      tag: l.tag,
+      guest: l.guest,
+      staff: l.staff,
+      amount: -l.amount,
+      description: `${l.name} ×${l.quantity}（${l.postedByName} 挂）：${l.reason}`,
+    })),
+    ...day.cancelled.map((v) => ({
+      kind: '撤销误开的牌',
+      at: v.at,
+      docNo: v.visitNo,
+      tag: v.tag,
+      guest: v.guest,
+      staff: v.staff,
+      amount: null,
+      description: `${v.reason ?? ''}（${stampOf(v.checkedInAt)} 开牌）`,
+    })),
+    ...day.ticketChanges.map((c) => ({
+      kind: c.price12h === 0 && c.price24h === 0 ? '改票种（改为免票）' : '改票种',
+      at: c.at,
+      docNo: c.visitNo,
+      tag: c.tag,
+      guest: c.guest,
+      staff: c.staff,
+      amount: null,
+      description: `${c.fromName} → ${c.toName}（12 小时档 ${formatYuan(c.price12h)} / 24 小时档 ${formatYuan(c.price24h)}）`,
+    })),
+    ...day.freeEntries.map((v) => ({
+      kind: '免票入场',
+      at: v.at,
+      docNo: v.visitNo,
+      tag: v.tag,
+      guest: v.guest,
+      staff: v.staff,
+      amount: null,
+      description: `票种：${v.ticketName}`,
+    })),
+    ...s.anomalies
+      .filter((a) => a.kind !== 'checkout_void')
+      .map((a) => ({
+        kind: ANOMALY_LABELS[a.kind] ?? a.kind,
+        at: a.at ?? '',
+        docNo: a.docNo ?? '',
+        tag: '',
+        guest: a.memberName ?? '',
+        staff: '',
+        amount: a.amount,
+        description: a.description,
+      })),
+  ].sort((a, b) => a.at.localeCompare(b.at));
+  files.push({
+    name: '04-异常清单.csv',
+    content: toCsv([
+      ['类别', '时间', '单号', '手牌', '客人 / 会员', '经办人', '金额（元）', '说明'],
+      ...exceptions.map((e) => [e.kind, stampOf(e.at || null), e.docNo, e.tag, e.guest, e.staff, e.amount === null ? '' : yuan(e.amount), e.description]),
+    ]),
+  });
+
+  // 05 交班
+  const shiftMethods = (r: ShiftRecord, m: CheckoutMethod) => r.summary.checkoutByMethod.find((x) => x.method === m)?.amount ?? 0;
+  files.push({
+    name: '05-交班.csv',
+    content: toCsv([
+      ['班次', '员工', '营业日', '状态', '开班', '交班', '备用金', '结账张数', '结账合计', ...methods.map((m) => `结账·${CHECKOUT_METHOD_LABELS[m]}`),
+        '充值实收', '赠金', '工作台储值消费', '应有现金', '实点现金', '长短款', '反结账提醒', '接班人', '备注'],
+      ...day.shifts.map((r) => [
+        r.shiftNo,
+        r.staffName,
+        r.businessDate,
+        r.status === 'closed' ? '已交班' : '当班中',
+        stampOf(r.startedAt),
+        stampOf(r.endedAt),
+        yuan(r.openingCash),
+        r.summary.checkouts.count,
+        yuan(r.summary.checkouts.total),
+        ...methods.map((m) => yuan(shiftMethods(r, m))),
+        yuan(r.summary.recharges.paid),
+        yuan(r.summary.recharges.bonus),
+        yuan(r.summary.walletConsumes.total),
+        yuan(r.expectedCash ?? r.summary.cash.expected),
+        r.countedCash === null ? '' : yuan(r.countedCash),
+        r.countedCash === null || r.expectedCash === null ? '' : yuan(r.countedCash - r.expectedCash),
+        r.summary.voids.length,
+        r.handedToName ?? '',
+        r.note,
+      ]),
+    ]),
+  });
+
+  // 00 说明
+  const failed = checks.filter((c: CheckLine) => !c.ok);
+  const deptOk = deptTotal === s.business.net;
+  const byMethod = s.business.byMethod.map((m) => `${CHECKOUT_METHOD_LABELS[m.method]} ${formatYuan(m.amount)}`).join('、') || '无';
+  const count = (kind: string) => exceptions.filter((e) => e.kind.startsWith(kind)).length;
+  const summary = [
+    `营业日 ${date}（${stampOf(from.toISOString()).slice(0, 16)} 至 ${stampOf(to.toISOString()).slice(0, 16)}）${date === today ? '，营业日尚未结束' : ''}`,
+    `营业额（净额）${formatYuan(s.business.net)}：结账 ${s.business.checkouts.count} 张 ${formatYuan(s.business.checkouts.total)}，反结账 ${s.business.voids.count} 张 ${formatYuan(s.business.voids.total)}`,
+    `收款方式：${byMethod}`,
+    `储值：充值实收 ${formatYuan(s.recharge.paid)}（${s.recharge.count} 笔），储值消费 ${formatYuan(s.consume.total)}（${s.consume.count} 笔）`,
+    `部门参考表合计 ${formatYuan(deptTotal)}：${deptOk ? '✓ 与营业额（净额）一致' : '✗ 与营业额（净额）不一致'}`,
+    `异常：反结账 ${count('反结账')}、作废明细 ${count('作废明细')}、撤销误开的牌 ${count('撤销误开的牌')}、改票种 ${count('改票种')}、免票入场 ${count('免票入场')}、其他 ${exceptions.length - count('反结账') - count('作废明细') - count('撤销误开的牌') - count('改票种') - count('免票入场')}`,
+    `交班：${day.shifts.length} 个班次，已交班 ${day.shifts.filter((r) => r.status === 'closed').length} 个`,
+    failed.length ? `自检：✗ ${failed.length} 项不一致：${failed.map((c) => c.label).join('、')}` : `自检：✓ ${checks.length} 项全部一致`,
+  ];
+  files.unshift({
+    name: '00-说明.txt',
+    content: [
+      `浴族每日对账包 · ${settings.storeName}`,
+      `实例：${INSTANCE_LABELS[config.instance] ?? config.instance} · 版本 v${config.version}${config.commit ? ` · ${config.commit.slice(0, 7)}` : ''}`,
+      `生成时刻：${stampOf(now.toISOString())}（只读生成，没有改任何数据）`,
+      `数据指纹：${fingerprint.digest}`,
+      '',
+      ...summary,
+      '',
+      '文件：',
+      '  01-日结汇总.csv     与「日结」页导出的相同',
+      '  02-结账单.csv       当天结账与当天反结账的结账单，按收款方式分列；「计入本日」两列分别合计 = 结账合计、反结账合计',
+      '  03-部门参考表.csv   结账明细按项目分类（部门）汇总，合计 = 营业额（净额）',
+      '  04-异常清单.csv     反结账、作废明细、撤销误开的牌、改票种、免票入场、会员撤销与其他异常',
+      '  05-交班.csv         当天的班次与长短款',
+      '',
+      '优惠 / 免单、降档 / 免票授权在资金轨 R1.2 合并后加入异常清单。',
+      '',
+    ].join('\n'),
+  });
+  return { date, files, ok: failed.length === 0 && deptOk, summary };
+}

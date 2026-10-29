@@ -198,6 +198,7 @@ docker compose exec app node dist/server/cli.js check
 | 更新演练库（只在店主约定的窗口） | `cd ~/yuzu-test && ./scripts/update.sh <版本标签>` |
 | 查看状态 / 日志 | `docker compose ps`、`docker compose logs -f app` |
 | 自检 | `docker compose exec app node dist/server/cli.js check` |
+| 每日对账包（v0.3.3 起，只读） | `./scripts/daily-recon.sh [营业日]`，写到 `recon/<营业日>/` |
 | 新版本有问题，回到上一版 | `./scripts/rollback.sh`（v0.3.3 起；加了迁移时同时恢复升级前的备份，见 Mac mini 手册第 5 节「回退」） |
 | 立即备份 / 核验最新备份 | `./scripts/backup.sh`；`./scripts/verify-backup.sh "$(ls -t ~/yuzu-backups/test/yuzu-*.dump \| head -n 1)"` |
 | 重置某个员工的密码 | `docker compose exec app node dist/server/cli.js reset-password <账号>` |
