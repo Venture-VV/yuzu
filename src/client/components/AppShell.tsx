@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Boxes, CalendarCheck2, ConciergeBell, HandCoins, Inbox, KeyRound, LogOut, ReceiptText, Settings2, ShoppingCart, UsersRound } from 'lucide-react';
+import { Boxes, CalendarCheck2, ClipboardCheck, ConciergeBell, HandCoins, Inbox, KeyRound, LayoutDashboard, LogOut, ReceiptText, Settings2, ShoppingCart, UsersRound } from 'lucide-react';
 import { describeBusinessHours, isOpenAt, minuteOfDay } from '@shared/business-date';
 import { describeDate, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
 import type { Permission } from '@shared/permissions';
@@ -29,6 +29,8 @@ const NAV: NavItem[][] = [
     { to: '/', label: '会员', icon: UsersRound, end: true, perm: 'member.read' },
     { to: '/ledger', label: '流水', icon: ReceiptText, perm: 'ledger.readToday' },
     { to: '/settlement', label: '日结', icon: CalendarCheck2, perm: 'ledger.readToday' },
+    { to: '/shift', label: '交班', icon: ClipboardCheck, perm: 'ledger.readToday' },
+    { to: '/dashboard', label: '看板', icon: LayoutDashboard, perm: 'ledger.readToday' },
   ],
   [
     { to: '/inventory', label: '库存', icon: Boxes, perm: 'inventory.read' },

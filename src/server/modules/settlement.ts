@@ -5,7 +5,8 @@ import { z } from 'zod';
 import { businessDateOf, ISO_DATE } from '@shared/business-date';
 import { PAYMENT_METHOD_LABELS, type PaymentMethod } from '@shared/labels';
 import { formatAmount, formatYuan } from '@shared/money';
-import type { SettlementAnomaly, SettlementCheck, SettlementSummary, SettlementTotals } from '@shared/types';
+import { CHECKOUT_METHOD_LABELS, COUPON_PLATFORM_LABELS } from '@shared/checkout';
+import type { BusinessTotals, SettlementAnomaly, SettlementCheck, SettlementSummary, SettlementTotals } from '@shared/types';
 import { readSnapshot, type Db } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
@@ -57,8 +58,54 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
     expiry: ex!,
     opening: op!,
     net: net!,
+    business: await businessTotals(db, date),
   };
 }
+
+/** 营业口径：当天结账的计入当天，反结账计入反结账当天（负数） */
+async function businessTotals(db: Db, date: string): Promise<BusinessTotals> {
+  const [co] = await db<{ count: number; total: number; voidCount: number; voidTotal: number; ticket: number }[]>`
+    SELECT
+      count(*) FILTER (WHERE business_date = ${date}) AS count,
+      coalesce(sum(total_amount) FILTER (WHERE business_date = ${date}), 0) AS total,
+      count(*) FILTER (WHERE void_business_date = ${date}) AS void_count,
+      coalesce(sum(total_amount) FILTER (WHERE void_business_date = ${date}), 0) AS void_total,
+      coalesce(sum((SELECT sum(cb.ticket_amount) FROM checkout_bills cb WHERE cb.checkout_id = c.id))
+               FILTER (WHERE business_date = ${date}), 0)
+        - coalesce(sum((SELECT sum(cb.ticket_amount) FROM checkout_bills cb WHERE cb.checkout_id = c.id))
+                   FILTER (WHERE void_business_date = ${date}), 0) AS ticket
+    FROM checkouts c WHERE business_date = ${date} OR void_business_date = ${date}`;
+  const byMethod = await db<BusinessTotals['byMethod']>`
+    SELECT p.method,
+           coalesce(sum(p.amount) FILTER (WHERE c.business_date = ${date}), 0)
+             - coalesce(sum(p.amount) FILTER (WHERE c.void_business_date = ${date}), 0) AS amount,
+           count(*) FILTER (WHERE c.business_date = ${date}) AS count,
+           count(*) FILTER (WHERE c.void_business_date = ${date}) AS void_count
+    FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
+    WHERE c.business_date = ${date} OR c.void_business_date = ${date}
+    GROUP BY p.method ORDER BY p.method`;
+  const coupons = await db<BusinessTotals['coupons']>`
+    SELECT g.platform,
+           coalesce(sum(g.amount) FILTER (WHERE c.business_date = ${date}), 0)
+             - coalesce(sum(g.amount) FILTER (WHERE c.void_business_date = ${date}), 0) AS amount,
+           count(*) FILTER (WHERE c.business_date = ${date}) AS count,
+           count(*) FILTER (WHERE c.void_business_date = ${date}) AS void_count
+    FROM group_buy_coupons g JOIN checkouts c ON c.id = g.checkout_id
+    WHERE c.business_date = ${date} OR c.void_business_date = ${date}
+    GROUP BY g.platform ORDER BY g.platform`;
+  const net = co!.total - co!.voidTotal;
+  return {
+    checkouts: { count: co!.count, total: co!.total },
+    voids: { count: co!.voidCount, total: co!.voidTotal },
+    net,
+    ticket: co!.ticket,
+    items: net - co!.ticket,
+    byMethod,
+    coupons,
+  };
+}
+
+const EMPTY_BUSINESS: BusinessTotals = { checkouts: { count: 0, total: 0 }, voids: { count: 0, total: 0 }, net: 0, ticket: 0, items: 0, byMethod: [], coupons: [] };
 
 // jsonb 不保留键顺序，比较前先按键排序
 function canonical(value: unknown): string {
@@ -74,6 +121,7 @@ const withNewSections = (t: SettlementTotals): SettlementTotals => ({
   ...t,
   expiry: t.expiry ?? { count: 0, bonus: 0 },
   opening: t.opening ?? { count: 0, voidCount: 0, principal: 0, bonus: 0 },
+  business: t.business ?? EMPTY_BUSINESS,
 });
 const sameTotals = (snapshot: SettlementTotals, now: SettlementTotals) => canonical(withNewSections(snapshot)) === canonical(now);
 
@@ -85,6 +133,7 @@ const ANOMALY_LABELS: Record<SettlementAnomaly['kind'], string> = {
   abandoned: '作废待确认',
   balance_mismatch: '余额不符',
   chain_break: '流水不连续',
+  checkout_void: '反结账',
 };
 const pairText = (p: Pair) => `本金 ${formatYuan(p.principal)} / 赠金 ${formatYuan(p.bonus)}`;
 
@@ -132,6 +181,22 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
        LEFT JOIN (SELECT lot_id, sum(amount) AS a FROM bonus_lot_moves GROUP BY lot_id) mv ON mv.lot_id = b.id
        WHERE b.amount + coalesce(mv.a, 0) <> b.remaining) AS lots`;
 
+  // 营业口径与会员口径的桥：结账里的会员储值支付（净额）= 指向结账单的储值消费 − 其撤销
+  const [bridge] = await db<{ payments: number; consumed: number; reversed: number; bills: number }[]>`
+    SELECT
+      (SELECT coalesce(sum(p.amount) FILTER (WHERE c.business_date = ${date}), 0)
+              - coalesce(sum(p.amount) FILTER (WHERE c.void_business_date = ${date}), 0)
+       FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
+       WHERE p.method = 'wallet' AND (c.business_date = ${date} OR c.void_business_date = ${date})) AS payments,
+      (SELECT coalesce(sum(total_amount), 0) FROM consumptions WHERE checkout_id IS NOT NULL AND business_date = ${date}) AS consumed,
+      (SELECT coalesce(sum(r.principal_amount + r.bonus_amount), 0) FROM reversals r JOIN consumptions k ON k.id = r.consumption_id
+       WHERE k.checkout_id IS NOT NULL AND r.business_date = ${date}) AS reversed,
+      (SELECT coalesce(sum(cb.amount) FILTER (WHERE c.business_date = ${date}), 0)
+              - coalesce(sum(cb.amount) FILTER (WHERE c.void_business_date = ${date}), 0)
+       FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id
+       WHERE c.business_date = ${date} OR c.void_business_date = ${date}) AS bills`;
+  const receiptsNet = totals.business.byMethod.reduce((s, m) => s + m.amount, 0);
+
   const docDelta = {
     principal: totals.recharge.paid - totals.consume.principal + totals.reversal.principal + totals.opening.principal,
     bonus: totals.recharge.bonus - totals.consume.bonus + totals.reversal.bonus - totals.expiry.bonus + totals.opening.bonus,
@@ -164,6 +229,18 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
       detail: mismatches.length
         ? `${mismatches.length} 位会员余额与流水不符`
         : `会员余额合计 ${pairText(balances.membersNow)}`,
+    },
+    {
+      key: 'business_vs_receipts',
+      label: '营业额 = 所结账单 = 结账收款',
+      ok: totals.business.net === bridge!.bills && totals.business.net === receiptsNet,
+      detail: `营业额（净额）${formatYuan(totals.business.net)}；所结账单 ${formatYuan(bridge!.bills)}；结账收款 ${formatYuan(receiptsNet)}`,
+    },
+    {
+      key: 'wallet_bridge',
+      label: '结账储值支付 = 储值消费（营业口径与会员口径的桥）',
+      ok: bridge!.payments === bridge!.consumed - bridge!.reversed,
+      detail: `结账储值支付（净额）${formatYuan(bridge!.payments)}；结账产生的储值消费 ${formatYuan(bridge!.consumed)}，其中当天撤销 ${formatYuan(bridge!.reversed)}`,
     },
     {
       key: 'bonus_lots',
@@ -233,6 +310,20 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
         description: `余额不足，消费未入账（差 ${formatYuan((e.detail.shortfall as number) ?? 0)}）· ${e.staffName ?? ''}`,
       });
     }
+  }
+  // 反结账：原单若收过现金，需核对是否已退还或已在重新结账时收回
+  const checkoutVoids = await db<{ checkoutNo: string; voidedAt: string; total: number; reason: string; staffName: string; createdDate: string }[]>`
+    SELECT c.checkout_no, c.voided_at, c.total_amount AS total, c.void_reason AS reason, s.display_name AS staff_name, c.business_date AS created_date
+    FROM checkouts c JOIN staff s ON s.id = c.voided_by WHERE c.void_business_date = ${date} ORDER BY c.voided_at`;
+  for (const v of checkoutVoids) {
+    anomalies.push({
+      kind: 'checkout_void',
+      at: v.voidedAt,
+      docNo: v.checkoutNo,
+      memberName: null,
+      amount: v.total,
+      description: `反结账${v.createdDate !== date ? `（原单营业日 ${v.createdDate}）` : ''} · ${v.reason} · ${v.staffName}；储值已按原单撤销，现金等请核对是否已退还或重新收取`,
+    });
   }
   for (const c of chainBreaks) {
     anomalies.push({ kind: 'chain_break', at: c.createdAt, docNo: c.docNo, memberName: c.memberName, amount: null, description: '流水变动后余额不连续，请联系维护人员' });
@@ -304,6 +395,13 @@ export function settlementCsv(s: SettlementSummary): string {
     ['期初导入（净额）', s.opening.count, y(s.opening.principal + s.opening.bonus), `旧系统余额迁入，不是收款；作废 ${s.opening.voidCount} 笔`],
     ['  · 期初本金', '', y(s.opening.principal), ''],
     ['  · 期初赠金', '', y(s.opening.bonus), ''],
+    [],
+    ['营业口径（前台结账）', '笔数', '金额（元）', '说明'],
+    ['结账', s.business.checkouts.count, y(s.business.checkouts.total), '当天结账的账单合计（含门票）'],
+    ['反结账', s.business.voids.count, (s.business.voids.total ? '-' : '') + y(s.business.voids.total), '当天反结账的结账单（原单可能在之前的营业日）'],
+    ['营业额（净额）', '', (s.business.net < 0 ? '-' : '') + y(s.business.net), `门票 ${y(s.business.ticket)}，项目与其他 ${y(s.business.items)}`],
+    ...s.business.byMethod.map((m) => [`  · ${CHECKOUT_METHOD_LABELS[m.method]}`, m.count, (m.amount < 0 ? '-' : '') + y(m.amount), m.method === 'wallet' ? '会员余额抵扣，同时计入储值消费' : m.method === 'coupon' ? '平台团购核销，由平台结算' : '']),
+    ...s.business.coupons.map((c) => [`  · 团购 ${COUPON_PLATFORM_LABELS[c.platform]}`, c.count, (c.amount < 0 ? '-' : '') + y(c.amount), c.voidCount ? `作废 ${c.voidCount} 张` : '']),
     [],
     ['余额核对', '本金（元）', '赠金（元）'],
     ['期初余额', y(s.balances.opening.principal), y(s.balances.opening.bonus)],

@@ -42,6 +42,8 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   frontdesk_checkout: { label: '结账', tone: 'pine' },
   frontdesk_checkout_void: { label: '反结账', tone: 'clay' },
   ticket_type_saved: { label: '保存票种', tone: 'neutral' },
+  shift_started: { label: '开班', tone: 'lake' },
+  shift_closed: { label: '交班', tone: 'pine' },
   hand_tags_created: { label: '建手牌', tone: 'neutral' },
   hand_tags_imported: { label: '导入柜号清单', tone: 'ember' },
   hand_tag_locked: { label: '锁定手牌', tone: 'ember' },

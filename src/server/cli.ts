@@ -7,6 +7,7 @@
 //   seed-demo [--force]                   写入合成演示数据（正式环境默认禁止）
 //   seed-inventory-demo                   写入库存与采购合成演示数据（仅独立演示库；试用 / 正式环境与已有真实库存数据时拒绝）
 //   seed-frontdesk-demo                   写入前台手牌与在店账单合成演示数据（仅独立演示库；试用 / 正式环境与已有真实手牌时拒绝）
+//   seed-billing-demo                     在前台演示数据上写入结账、反结账与交班合成演示数据（仅独立演示库；试用 / 正式环境拒绝）
 //   import-hand-tags <清单.csv> | --store-list [--apply] [--deactivate-missing]
 //                                         按清单导入手牌池（真实业务数据，默认只预览，加 --apply 才写入）；
 //                                         --store-list 使用店主 2026-10-27 的 747 个真实柜号；--deactivate-missing 同时停用清单外的空闲手牌
@@ -35,6 +36,7 @@ import { migrate } from './migrate';
 import { seedDemo, DEMO_PASSWORD } from './seed';
 import { seedInventoryDemo } from './seed-inventory';
 import { seedFrontdeskDemo } from './seed-frontdesk';
+import { seedBillingDemo } from './seed-billing';
 import { STORE_HAND_TAGS_CSV } from './demo/hand-tags-2026-10-27';
 import { TANGQI_PRICE_LIST_CSV } from './demo/price-list-tangqi-2026-10-27';
 import { importPriceList } from './modules/catalog';
@@ -123,6 +125,17 @@ async function main() {
         } else {
           console.log(`已写入前台演示数据：${result.tags} 张手牌、${result.inStore} 位在店客人。预期结果见 src/server/demo/frontdesk-expected.json`);
           console.log(`演示账号：店主 linlan / 前台 xiaozhou / 值班经理 zhangjl，密码均为 ${DEMO_PASSWORD}`);
+        }
+        break;
+      }
+      case 'seed-billing-demo': {
+        await migrate(sql);
+        const result = await seedBillingDemo(sql, config);
+        if (result.skipped) {
+          console.log('已存在结账演示数据，跳过。');
+        } else {
+          console.log(`已写入结账演示数据：${result.checkouts} 张结账单、${result.voided} 张反结账，以及一个已交班的班次。预期结果见 src/server/demo/billing-expected.json`);
+          console.log(`演示账号：收银员 chenyin / 值班经理 zhangjl / 店主 linlan，密码均为 ${DEMO_PASSWORD}`);
         }
         break;
       }
@@ -218,7 +231,7 @@ async function main() {
         break;
       }
       default:
-        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo | import-hand-tags | import-price-list | import-opening | check');
+        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo | seed-billing-demo | import-hand-tags | import-price-list | import-opening | check');
         process.exitCode = command ? 1 : 0;
     }
   } finally {

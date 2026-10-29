@@ -2,6 +2,7 @@
 
 import type { BusinessHours } from './business-date';
 import type { PriceTier, Strength, TierPrice } from './catalog';
+import type { CheckoutMethod, CouponPlatform } from './checkout';
 import type { DeductionRule, WalletBalance } from './deduction';
 import type { EntryType, PaymentMethod } from './labels';
 import type { MemberCustomValues, MemberFieldDef } from './member-fields';
@@ -260,7 +261,7 @@ export interface SettlementCheck {
 }
 
 export interface SettlementAnomaly {
-  kind: 'reversal' | 'cross_day_reversal' | 'duplicate_blocked' | 'rejected' | 'abandoned' | 'balance_mismatch' | 'chain_break';
+  kind: 'reversal' | 'cross_day_reversal' | 'duplicate_blocked' | 'rejected' | 'abandoned' | 'balance_mismatch' | 'chain_break' | 'checkout_void';
   at: string | null;
   docNo: string | null;
   memberName: string | null;
@@ -278,6 +279,27 @@ export interface SettlementTotals {
   opening: { count: number; voidCount: number; principal: number; bonus: number };
   /** 本营业日流水的余额净变动 */
   net: WalletBalance;
+  /**
+   * 营业口径（Batch 3）：前台结账。当天结的计入当天，反结账计入反结账当天（负数），已确认的日结不受之后反结账影响。
+   * 会员储值支付在会员口径里同时是一笔储值消费，两边由「结账储值支付 = 储值消费」核对。
+   */
+  business: BusinessTotals;
+}
+
+export interface BusinessTotals {
+  /** 当天结账（含之后反结账的） */
+  checkouts: { count: number; total: number };
+  /** 当天反结账（原单可能在之前的营业日） */
+  voids: { count: number; total: number };
+  /** 营业额（净额）= 结账合计 − 反结账合计 */
+  net: number;
+  /** 消费构成（净额）：门票 / 项目与其他 */
+  ticket: number;
+  items: number;
+  /** 结账收款按方式（净额；会员储值、团购券不是本次实收） */
+  byMethod: { method: CheckoutMethod; amount: number; count: number; voidCount: number }[];
+  /** 平台团购核销（净额） */
+  coupons: { platform: CouponPlatform; amount: number; count: number; voidCount: number }[];
 }
 
 export interface SettlementSummary extends SettlementTotals {

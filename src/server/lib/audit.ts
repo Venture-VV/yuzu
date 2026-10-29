@@ -43,6 +43,8 @@ export type AuditAction =
   | 'frontdesk_checkout'
   | 'frontdesk_checkout_void'
   | 'ticket_type_saved'
+  | 'shift_started'
+  | 'shift_closed'
   | 'hand_tags_created'
   | 'hand_tags_imported'
   | 'hand_tag_locked'

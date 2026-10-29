@@ -15,6 +15,8 @@ import { WorkbenchPage } from './features/workbench/WorkbenchPage';
 import { FrontdeskPage } from './features/frontdesk/FrontdeskPage';
 import { LedgerPage } from './features/ledger/LedgerPage';
 import { SettlementPage } from './features/settlement/SettlementPage';
+import { ShiftPage } from './features/shift/ShiftPage';
+import { DashboardPage } from './features/dashboard/DashboardPage';
 import { AdminPage } from './features/admin/AdminPage';
 import { DocFormPage } from './features/inventory/DocFormPage';
 import { InventoryPage } from './features/inventory/InventoryPage';
@@ -103,6 +105,8 @@ const router = createBrowserRouter([
       { path: 'frontdesk', element: <FrontdeskPage /> },
       { path: 'ledger', element: <LedgerPage /> },
       { path: 'settlement/:date?', element: <SettlementPage /> },
+      { path: 'shift', element: <ShiftPage /> },
+      { path: 'dashboard', element: <DashboardPage /> },
       { path: 'admin/:tab?', element: <AdminPage /> },
       { path: 'inventory/new/:type', element: <DocFormPage /> },
       { path: 'inventory/docs/:id/edit', element: <DocFormPage /> },

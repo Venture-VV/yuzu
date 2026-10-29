@@ -178,3 +178,58 @@ export interface CheckoutSummary {
   createdAt: string;
   businessDate: string;
 }
+
+// ───────────── 交班（店主 #11） ─────────────
+
+/** 一个班次（开班到交班）内本人经办的收款汇总；未交班时为实时数据，交班后为快照 */
+export interface ShiftSummary {
+  from: string;
+  to: string;
+  checkouts: { count: number; total: number };
+  /** 结账收款按方式（含会员储值、团购券） */
+  checkoutByMethod: { method: CheckoutMethod; count: number; amount: number }[];
+  recharges: { count: number; paid: number; bonus: number; byMethod: { method: PaymentMethod; count: number; amount: number }[] };
+  /** 会员工作台直接登记的储值消费（不经前台结账） */
+  walletConsumes: { count: number; total: number };
+  coupons: { platform: CouponPlatform; count: number; amount: number }[];
+  /** 本班次内本人做的反结账：原单若收过现金，请核对是否已退还或已在重新结账时收回 */
+  voids: { checkoutNo: string; amount: number; reason: string; voidedAt: string }[];
+  /** 应有现金 = 备用金 + 结账现金 + 充值现金 */
+  cash: { opening: number; checkout: number; recharge: number; expected: number };
+}
+
+export interface ShiftRecord {
+  id: number;
+  shiftNo: string;
+  staffId: number;
+  staffName: string;
+  status: 'open' | 'closed';
+  businessDate: string;
+  startedAt: string;
+  openingCash: number;
+  endedAt: string | null;
+  expectedCash: number | null;
+  countedCash: number | null;
+  note: string;
+  handedToName: string | null;
+  closedByName: string | null;
+  summary: ShiftSummary;
+}
+
+/** 经营看板（S3.5） */
+export interface DashboardData {
+  today: string;
+  inStore: { count: number; unsettled: number };
+  todayStats: {
+    checkouts: number;
+    guests: number;
+    net: number;
+    ticket: number;
+    byMethod: { method: CheckoutMethod; amount: number }[];
+    rechargePaid: number;
+    rechargeCount: number;
+  };
+  tickets: { name: string; count: number; amount: number }[];
+  days: { date: string; net: number; checkouts: number; rechargePaid: number }[];
+  openShifts: { shiftNo: string; staffName: string; startedAt: string }[];
+}

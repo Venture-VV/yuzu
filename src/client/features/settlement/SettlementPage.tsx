@@ -15,7 +15,8 @@ import {
   Undo2,
   WalletMinimal,
 } from 'lucide-react';
-import { describeDate, PAYMENT_METHOD_LABELS } from '@shared/labels';
+import { CHECKOUT_METHOD_LABELS, COUPON_PLATFORM_LABELS } from '@shared/checkout';
+import { describeDate, PAYMENT_METHOD_LABELS, PAYMENT_METHODS } from '@shared/labels';
 import type { SettlementAnomaly, SettlementSummary } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
 import { qk, useSettlement } from '../../lib/queries';
@@ -114,7 +115,8 @@ function CloseStatus({ s }: { s: SettlementSummary }) {
 
 function Summary({ s, dayLabel }: { s: SettlementSummary; dayLabel: string }) {
   const allOk = s.checks.every((c) => c.ok);
-  const empty = s.recharge.count + s.consume.count + s.reversal.count + s.expiry.count + s.opening.count + s.opening.voidCount === 0;
+  const empty =
+    s.recharge.count + s.consume.count + s.reversal.count + s.expiry.count + s.opening.count + s.opening.voidCount + s.business.checkouts.count + s.business.voids.count === 0;
 
   return (
     <div className="space-y-5">
@@ -242,6 +244,8 @@ function Summary({ s, dayLabel }: { s: SettlementSummary; dayLabel: string }) {
           </div>
         </Card>
       </div>
+
+      <BusinessCard s={s} />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
         {/* 余额核对 */}
@@ -385,6 +389,7 @@ const ANOMALY_META: Record<
   abandoned: { label: '作废待确认', tone: 'ember', icon: CircleSlash, iconClass: 'bg-ember-soft text-ember' },
   balance_mismatch: { label: '余额不符', tone: 'clay', icon: CircleX, iconClass: 'bg-clay-soft text-clay' },
   chain_break: { label: '流水不连续', tone: 'clay', icon: CircleX, iconClass: 'bg-clay-soft text-clay' },
+  checkout_void: { label: '反结账', tone: 'ember', icon: Undo2, iconClass: 'bg-ember-soft text-ember' },
 };
 
 function AnomalyItem({ a }: { a: SettlementAnomaly }) {
@@ -482,5 +487,100 @@ function CloseDialog({ open, onClose, s }: { open: boolean; onClose: () => void;
         {error && <Notice tone="error" title={error} />}
       </div>
     </Dialog>
+  );
+}
+
+/** 营业口径（Batch 3）：前台结账的营业额与收款；会员储值支付同时是会员口径的储值消费 */
+function BusinessCard({ s }: { s: SettlementSummary }) {
+  const b = s.business;
+  if (b.checkouts.count === 0 && b.voids.count === 0 && s.recharge.count === 0) return null;
+  // 实收合计：充值实收 + 结账里的现金类收款（会员储值、团购券不是本次实收）
+  const cashMethods = PAYMENT_METHODS.map((m) => {
+    const recharge = s.recharge.byMethod.find((x) => x.method === m)?.amount ?? 0;
+    const checkout = b.byMethod.find((x) => x.method === m)?.amount ?? 0;
+    return { method: m, recharge, checkout, total: recharge + checkout };
+  }).filter((r) => r.recharge || r.checkout);
+  const cashTotal = cashMethods.reduce((sum, r) => sum + r.total, 0);
+  return (
+    <div className="grid gap-4 lg:grid-cols-2" data-testid="settlement-business">
+      <Card className="overflow-hidden">
+        <div className="border-b border-line px-5 pt-4 pb-3">
+          <p className="flex items-center gap-2 text-[13px] font-bold text-ink-2">
+            <span className="size-2 rounded-full bg-pine" />
+            营业口径 · 前台结账
+          </p>
+          <Money cents={b.net} className="mt-1.5 text-[32px] leading-none font-bold text-pine" />
+          <p className="mt-1.5 text-[12.5px] text-ink-3">
+            结账 {b.checkouts.count} 张 <Money cents={b.checkouts.total} />
+            {b.voids.count > 0 && (
+              <>
+                {' '}
+                · 反结账 {b.voids.count} 张 −<Money cents={b.voids.total} />
+              </>
+            )}
+          </p>
+        </div>
+        <div className="space-y-2 px-5 py-4 text-[13px]">
+          <Row label="门票" cents={b.ticket} className="text-ink" />
+          <Row label="项目与其他" cents={b.items} className="text-ink" />
+          <div className="my-1 border-t border-dashed border-line" />
+          {b.byMethod.map((m) => (
+            <div key={m.method} className="flex items-center justify-between">
+              <span className="text-ink-3">
+                {CHECKOUT_METHOD_LABELS[m.method]}
+                <span className="ml-1 text-[12px]">· {m.count} 笔{m.voidCount ? `，反结账 ${m.voidCount}` : ''}</span>
+                {m.method === 'wallet' && <span className="ml-1 text-[11.5px] text-ink-4">（会员余额抵扣，同时计入储值消费）</span>}
+                {m.method === 'coupon' && <span className="ml-1 text-[11.5px] text-ink-4">（平台团购核销）</span>}
+              </span>
+              <Money cents={m.amount} className="font-bold" />
+            </div>
+          ))}
+          {b.coupons.map((c) => (
+            <p key={c.platform} className="pl-3 text-[12px] text-ink-3">
+              {COUPON_PLATFORM_LABELS[c.platform]} {c.count} 张 <Money cents={c.amount} />
+              {c.voidCount ? `（作废 ${c.voidCount} 张）` : ''}
+            </p>
+          ))}
+        </div>
+      </Card>
+      <Card className="overflow-hidden">
+        <div className="border-b border-line px-5 pt-4 pb-3">
+          <p className="flex items-center gap-2 text-[13px] font-bold text-ink-2">
+            <span className="size-2 rounded-full bg-lake" />
+            实收合计 · 充值 + 结账
+          </p>
+          <Money cents={cashTotal} className="mt-1.5 text-[32px] leading-none font-bold text-lake" />
+          <p className="mt-1.5 text-[12.5px] text-ink-3">按收款方式核对抽屉现金与各收款账户；会员储值、团购券不计入</p>
+        </div>
+        <div className="px-5 py-4">
+          <table className="w-full text-[13px]">
+            <thead className="text-[12px] text-ink-3">
+              <tr>
+                <th className="pb-1.5 text-left font-semibold">方式</th>
+                <th className="pb-1.5 text-right font-semibold">充值</th>
+                <th className="pb-1.5 text-right font-semibold">结账</th>
+                <th className="pb-1.5 text-right font-semibold">合计</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line/70">
+              {cashMethods.map((r) => (
+                <tr key={r.method}>
+                  <td className="py-1.5 font-semibold text-ink-2">{PAYMENT_METHOD_LABELS[r.method]}</td>
+                  <td className="py-1.5 text-right">
+                    <Money cents={r.recharge} className="text-ink-3" />
+                  </td>
+                  <td className="py-1.5 text-right">
+                    <Money cents={r.checkout} className="text-ink-3" />
+                  </td>
+                  <td className="py-1.5 text-right">
+                    <Money cents={r.total} className="font-bold" />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
   );
 }
