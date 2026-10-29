@@ -212,9 +212,9 @@ PORT=8899 node dist/server/index.js
 | 项目 | 结果 |
 | --- | --- |
 | `npm run typecheck`、`npm run build` | 通过 |
-| `npm test` | 见 PR 描述（新增 `tests/backfill.test.ts` 8 项；升级用例 `upgrade`、`upgrade-r1`、`upgrade-shift` 加上迁移 018） |
-| 新建演示库 + 四套演示数据 | `check` 21 / 21 ✓ |
-| 浏览器 E2E | 见 PR 描述（新增 `e2e/backfill.spec.ts` 4 项，门店电脑尺寸；同一库重跑也通过） |
+| `npm test` | **350 / 350**（35 个文件；合并 main 上测试会话的 PR #13 之后）。新增 `tests/backfill.test.ts` 8 项；升级用例 `upgrade`、`upgrade-r1`、`upgrade-shift` 加上迁移 018；`tests/recon.test.ts` 核对「撤销误开的牌」写明在更正时限内；`tests/print.test.ts` 改用店主列结账单（营业日切换后一个半小时内执行时原来会失败） |
+| 新建演示库 + 四套演示数据 | `check` **21 / 21 ✓** |
+| 浏览器 E2E（五个尺寸，180 项） | **101 passed、0 failed、79 skipped**（上海 07:12 灌的演示数据）；跑完后 `check` 21 / 21 ✓，补录用例留下纸质单 1 张、3 步补录，自检一致。新增 `e2e/backfill.spec.ts` 4 项（门店电脑尺寸），同一库重跑也通过（自动换没用过的手牌）。在营业日切换后几分钟灌的库上，`flows` 的储值撤销、`wallet-limits` 的撤销时限两个已有用例找不到当天 / 前一天的演示单据而失败，在切换一小时之后灌的库上都通过；`print.spec.ts` 的交班表与入口用例在 06:00–11:00 之间灌数据时找不到演示班次（演示班次在灌数据前 5 小时开班），已改为兼顾前一个营业日 |
 
 ### 10.5 测试需求（交给测试会话与店主安排的测试 AI）
 
