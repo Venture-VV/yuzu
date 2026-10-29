@@ -10,7 +10,7 @@ async function login(page: Page, username: string, landing: RegExp | string) {
   await page.fill('#username', username);
   await page.fill('#password', PASSWORD);
   await page.getByRole('button', { name: '登录' }).click();
-  await expect(page.getByRole('heading', { name: landing })).toBeVisible();
+  await expect(page.getByRole('heading', { name: landing })).toBeVisible({ timeout: 30_000 }); // 刚启动的服务第一次登录可能较慢
 }
 
 const nav = (page: Page, name: string) => page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name, exact: true });

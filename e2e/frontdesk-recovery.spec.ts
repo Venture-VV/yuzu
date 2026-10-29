@@ -10,7 +10,13 @@ async function login(page: Page) {
   await page.fill('#username', 'xiaozhou');
   await page.fill('#password', PASSWORD);
   await page.getByRole('button', { name: '登录' }).click();
-  await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible({ timeout: 30_000 }); // 刚启动的服务第一次登录可能较慢
+}
+
+/** 等状态板显示（前台页面已挂载、快捷键已生效）再按 F2 接待：刚打开或刷新页面时直接按键可能落空 */
+async function pressF2(page: Page) {
+  await expect(page.getByTestId('tag-board')).toBeVisible();
+  await page.keyboard.press('F2');
 }
 
 interface BoardTag {
@@ -133,7 +139,7 @@ test.describe('前台待确认操作与明确选牌', () => {
       await route.abort('connectionreset');
     }, { times: 1 });
     await page.route('**/api/frontdesk/ops/*', (route) => route.abort('connectionreset'));
-    await page.keyboard.press('F2');
+    await pressF2(page);
     const dialog = page.getByRole('dialog', { name: '接待发牌' });
     await dialog.getByRole('radiogroup', { name: '第 1 位宾客分区' }).getByRole('radio', { name: '女宾' }).click();
     await dialog.getByLabel('第 1 位牌号').fill(code);
@@ -144,7 +150,7 @@ test.describe('前台待确认操作与明确选牌', () => {
     await login(page);
     await page.goto('/frontdesk');
     await expect(page.getByTestId('frontdesk-pending-banner')).toContainText(code);
-    await page.keyboard.press('F2');
+    await pressF2(page);
     await expect(dialog.getByTestId('pending-op')).toContainText(code);
     await expect(dialog.getByTestId('checkin-submit')).toBeDisabled();
     await page.unroute('**/api/frontdesk/ops/*');
@@ -170,7 +176,7 @@ test.describe('前台待确认操作与明确选牌', () => {
       },
       { times: 1 },
     );
-    await page.keyboard.press('F2');
+    await pressF2(page);
     const dialog = page.getByRole('dialog', { name: '接待发牌' });
     await dialog.getByLabel('第 1 位牌号').fill(code);
     await dialog.getByTestId('checkin-submit').click();
@@ -205,7 +211,7 @@ test.describe('前台待确认操作与明确选牌', () => {
     });
     test.skip(!digit, '演示库中没有合适的多候选尾号');
     const hits = matchTags(free, digit!).slice(0, 8).map((t) => t.code);
-    await page.keyboard.press('F2');
+    await pressF2(page);
     const dialog = page.getByRole('dialog', { name: '接待发牌' });
     await dialog.getByLabel('第 1 位牌号').fill(digit!);
     await dialog.getByLabel('第 1 位牌号').press('Tab');

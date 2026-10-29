@@ -10,7 +10,13 @@ async function login(page: Page, username: string) {
   await page.fill('#username', username);
   await page.fill('#password', PASSWORD);
   await page.getByRole('button', { name: '登录' }).click();
-  await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible({ timeout: 30_000 }); // 刚启动的服务第一次登录可能较慢
+}
+
+/** 等状态板显示（前台页面已挂载、快捷键已生效）再按 F2 接待：刚打开或刷新页面时直接按键可能落空 */
+async function pressF2(page: Page) {
+  await expect(page.getByTestId('tag-board')).toBeVisible();
+  await page.keyboard.press('F2');
 }
 
 const nav = (page: Page, name: string) => page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name, exact: true });
@@ -59,7 +65,7 @@ test.describe('前台流程', () => {
     const [femaleTag] = await freeTags(page, 'female');
 
     // F2 接待：第 1 位男宾只输数字（不输区号字母），回车补全
-    await page.keyboard.press('F2');
+    await pressF2(page);
     const dialog = page.getByRole('dialog', { name: '接待发牌' });
     await expect(dialog).toBeVisible();
     await dialog.getByLabel('第 1 位牌号').fill(maleTag!.replace(/^[A-Z]+0*/, ''));
@@ -146,7 +152,7 @@ test.describe('前台流程', () => {
     const [p1, p2] = [await open(browser), await open(browser)];
     const [tag] = await freeTags(p1, 'male');
     for (const p of [p1, p2]) {
-      await p.keyboard.press('F2');
+      await pressF2(p);
       await p.getByRole('dialog', { name: '接待发牌' }).getByLabel('第 1 位牌号').fill(tag!);
       await expect(p.getByTestId('guest-row-0')).toContainText('空闲可发');
     }
@@ -176,7 +182,7 @@ test.describe('VIP 柜与丢牌', () => {
       const [normal] = await freeTags(page, 'male');
 
       // 默认关闭当场授权：散客选 VIP 柜被拦下，不能提交
-      await page.keyboard.press('F2');
+      await pressF2(page);
       const dialog = page.getByRole('dialog', { name: '接待发牌' });
       await dialog.getByLabel('第 1 位牌号').fill(vip.code);
       await expect(dialog.getByTestId('vip-short-0')).toContainText('散客不能使用；请换普通柜或等级相符的 VIP 柜');
@@ -186,7 +192,7 @@ test.describe('VIP 柜与丢牌', () => {
       // 店主开启当场授权后：前台请值班经理在弹窗里输入账号密码授权
       expect((await owner.put('/api/frontdesk/rules', { data: { vipOverrideEnabled: true } })).ok()).toBe(true);
       await page.reload();
-      await page.keyboard.press('F2');
+      await pressF2(page);
       await dialog.getByLabel('第 1 位牌号').fill(vip.code);
       await expect(dialog.getByTestId('vip-short-0')).toContainText('需值班经理或店总当场授权');
       await expect(dialog.getByTestId('checkin-submit')).toBeDisabled();

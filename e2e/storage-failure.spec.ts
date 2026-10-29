@@ -37,7 +37,7 @@ async function login(page: Page) {
   await page.fill('#username', 'xiaozhou');
   await page.fill('#password', PASSWORD);
   await page.getByRole('button', { name: '登录' }).click();
-  await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible({ timeout: 30_000 }); // 刚启动的服务第一次登录可能较慢
 }
 
 test.describe('本机存储写入失败时不提交', () => {
