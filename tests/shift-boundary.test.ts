@@ -70,6 +70,32 @@ const close = (cookie: string, id: number, expectedCash: number) =>
   api(ctx.app, cookie, 'POST', `/api/shifts/${id}/close`, { countedCash: expectedCash, expectedCash });
 const shiftOfRecharge = async (id: number) =>
   (await ctx.sql<{ shiftId: number | null; createdAt: string }[]>`SELECT shift_id, created_at FROM recharges WHERE id = ${id}`)[0]!;
+/** ¥499 结账：现金 100 + 美团券 399 */
+const couponCheckout = (visitId: number, code: string) =>
+  api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', {
+    clientKey: randomUUID(),
+    visitIds: [visitId],
+    expectedTotal: 49900,
+    payments: [
+      { method: 'cash', amount: 10000 },
+      { method: 'coupon', platform: 'meituan', code, dealName: '不含餐门票', amount: 39900 },
+    ],
+  });
+/** 交班表各项互相一致：收款方式合计 = 结账合计，团购平台合计 = 团购券收款，现金 = 现金收款，充值方式合计 = 充值实收 */
+function expectConsistent(s: {
+  checkouts: { total: number };
+  checkoutByMethod: { method: string; amount: number }[];
+  coupons: { amount: number }[];
+  recharges: { paid: number; byMethod: { amount: number }[] };
+  cash: { opening: number; checkout: number; recharge: number; expected: number };
+}) {
+  const by = (method: string) => s.checkoutByMethod.find((m) => m.method === method)?.amount ?? 0;
+  expect(s.checkoutByMethod.reduce((n, m) => n + m.amount, 0)).toBe(s.checkouts.total);
+  expect(s.coupons.reduce((n, c) => n + c.amount, 0)).toBe(by('coupon'));
+  expect(s.cash.checkout).toBe(by('cash'));
+  expect(s.recharges.byMethod.reduce((n, m) => n + m.amount, 0)).toBe(s.recharges.paid);
+  expect(s.cash.expected).toBe(s.cash.opening + s.cash.checkout + s.cash.recharge);
+}
 const wallet = async () => {
   const [m] = await ctx.sql<{ principalBalance: number; bonusBalance: number }[]>`SELECT principal_balance, bonus_balance FROM members WHERE id = ${memberId}`;
   const [n] = await ctx.sql<{ recharges: number; entries: number }[]>`
@@ -290,6 +316,49 @@ describe('交班与收款以班次为界', () => {
     const [k2] = await ctx.sql<{ voidShiftId: number }[]>`SELECT void_shift_id FROM checkouts WHERE id = ${c.body.id}`;
     expect(k2!.voidShiftId).toBe(next.id);
     expect((await close(ctx.owner, next.id, 0)).body.summary.voids).toHaveLength(1);
+  });
+
+  it('复测复现：交班汇总到一半时另一位员工反结账本班次的单——保存的交班表取自同一时刻，结账合计、收款方式、团购券互相一致', async () => {
+    const shift = await open(ctx.clerk);
+    const c = await couponCheckout(await enter('A008'), 'MT2026SHIFT0001');
+    expect(c.status).toBe(200);
+    expectConsistent((await current(ctx.clerk)).summary);
+    // 充值表被占用：交班已拿到班次排他锁，汇总卡在读充值上
+    const release = await hold((tx) => tx`LOCK TABLE recharges IN ACCESS EXCLUSIVE MODE`);
+    const closing = close(ctx.clerk, shift.id, 10000);
+    await waitForLockWaiters(1);
+    // 店主（另一位员工，不在这个班次上）此时反结账这张单
+    const v = await api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/checkouts/${c.body.id}/void`, { reason: '收款方式记错' });
+    expect(v.status).toBe(200);
+    await release();
+    // 汇总整体取自反结账之后：应有现金已变，拒绝交班；按新的应有现金交班后快照里既没有这张单，也没有它的券
+    const cl = await closing;
+    expect(cl.body.error).toMatchObject({ code: 'SHIFT_CHANGED', details: { expectedCash: 0 } });
+    const done = await close(ctx.clerk, shift.id, 0);
+    expect(done.status).toBe(200);
+    expect(done.body.summary.checkouts).toEqual({ count: 0, total: 0 });
+    expect(done.body.summary.checkoutByMethod).toEqual([]);
+    expect(done.body.summary.coupons).toEqual([]);
+    expectConsistent((await api(ctx.app, ctx.clerk, 'GET', `/api/shifts/${shift.id}`)).body.summary);
+  });
+
+  it('反结账在交班汇总之后、交班提交之前完成：交班表是反结账之前的同一时刻，各项一致', async () => {
+    const shift = await open(ctx.clerk);
+    const c = await couponCheckout(await enter('A009'), 'MT2026SHIFT0002');
+    expect(c.status).toBe(200);
+    // 交班已汇总、改了状态，写交班审计时停住；反结账做完、也停在写审计上
+    const release = await holdAudit();
+    const closing = close(ctx.clerk, shift.id, 10000);
+    await waitForLockWaiters(1);
+    const voiding = api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/checkouts/${c.body.id}/void`, { reason: '收款方式记错' });
+    await waitForLockWaiters(2);
+    await release();
+    const [cl, v] = await Promise.all([closing, voiding]);
+    expect([cl.status, v.status]).toEqual([200, 200]);
+    expect(cl.body.summary.checkouts).toEqual({ count: 1, total: 49900 });
+    expect(cl.body.summary.coupons).toEqual([{ platform: 'meituan', count: 1, amount: 39900 }]);
+    expectConsistent(cl.body.summary);
+    expectConsistent((await api(ctx.app, ctx.clerk, 'GET', `/api/shifts/${shift.id}`)).body.summary);
   });
 
   it('升级时仍未交班的旧班次（迁移 016 前开班）：先拿到班次的收款计入，先交班时到达的收款整笔拒绝；升级前的单据仍按时间窗口补算', async () => {

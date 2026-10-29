@@ -17,8 +17,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf, ISO_DATE } from '@shared/business-date';
-import type { CheckoutMethod, CouponPlatform, ShiftRecord, ShiftSummary } from '@shared/checkout';
-import type { PaymentMethod } from '@shared/labels';
+import type { ShiftRecord, ShiftSummary } from '@shared/checkout';
 import { can } from '@shared/permissions';
 import type { Db, Tx } from '../db';
 import { guard } from '../auth/guard';
@@ -65,7 +64,12 @@ interface ShiftScope {
   legacyWindow: boolean;
 }
 
-/** 本班次的收款汇总；to 是汇总时刻（显示用，也是时间窗口补算的终点） */
+/**
+ * 本班次的收款汇总；to 是汇总时刻（显示用，也是时间窗口补算的终点）。
+ * 各项用一条语句汇总，取自同一个快照：交班汇总期间其他员工可能正好反结账本班次的单，分多条查询会各自看到
+ * 不同时刻的数据，保存的快照里结账合计、收款方式与团购券互相对不上。不用可重复读事务：交班要先等正在入账的
+ * 收款提交（班次排他锁），可重复读的快照取在第一条语句开始、早于等锁，会漏掉等到的收款。
+ */
 async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<ShiftSummary> {
   const from = s.startedAt;
   // 单据属于本班次：按单据记下的班次。升级时仍未交班的班次，再补上升级前没有记班次、开班之后本人经办的单据
@@ -74,44 +78,62 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
     s.legacyWindow
       ? db`(${db(shiftCol)} = ${s.id} OR (${db(shiftCol)} IS NULL AND ${db(staffCol)} = ${s.staffId} AND ${db(timeCol)} >= ${from} AND ${db(timeCol)} < ${to}))`
       : db`${db(shiftCol)} = ${s.id}`;
-  const [co] = await db<{ count: number; total: number }[]>`
-    SELECT count(*)::int AS count, coalesce(sum(c.total_amount), 0) AS total FROM checkouts c
-    WHERE c.status = 'completed' AND ${ofShift('c.shift_id', 'c.operator_id', 'c.created_at')}`;
-  const checkoutByMethod = await db<{ method: CheckoutMethod; count: number; amount: number }[]>`
-    SELECT p.method, count(*)::int AS count, sum(p.amount) AS amount FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
-    WHERE c.status = 'completed' AND ${ofShift('c.shift_id', 'c.operator_id', 'c.created_at')}
-    GROUP BY p.method ORDER BY p.method`;
-  const [rc] = await db<{ count: number; paid: number; bonus: number }[]>`
-    SELECT count(*)::int AS count, coalesce(sum(r.paid_amount), 0) AS paid, coalesce(sum(r.bonus_amount), 0) AS bonus FROM recharges r
-    WHERE ${ofShift('r.shift_id', 'r.operator_id', 'r.created_at')}`;
-  const rechargeByMethod = await db<{ method: PaymentMethod; count: number; amount: number }[]>`
-    SELECT r.payment_method AS method, count(*)::int AS count, sum(r.paid_amount) AS amount FROM recharges r
-    WHERE ${ofShift('r.shift_id', 'r.operator_id', 'r.created_at')}
-    GROUP BY r.payment_method ORDER BY r.payment_method`;
-  // 会员工作台的储值消费不是收款，只作参考，仍按开班到此刻的时间窗口统计（消费单不记班次）
-  const [wc] = await db<{ count: number; total: number }[]>`
-    SELECT count(*)::int AS count, coalesce(sum(total_amount), 0) AS total FROM consumptions
-    WHERE operator_id = ${s.staffId} AND checkout_id IS NULL AND status = 'completed' AND created_at >= ${from} AND created_at < ${to}`;
-  // 团购券随结账单登记（同一事务、同一经办人），按结账单的班次
-  const coupons = await db<{ platform: CouponPlatform; count: number; amount: number }[]>`
-    SELECT g.platform, count(*)::int AS count, sum(g.amount) AS amount FROM group_buy_coupons g JOIN checkouts c ON c.id = g.checkout_id
-    WHERE g.status = 'active' AND ${ofShift('c.shift_id', 'c.operator_id', 'c.created_at')}
-    GROUP BY g.platform ORDER BY g.platform`;
-  // 反结账提醒：按反结账时记下的班次（反结账人当时未交班的班次）
-  const voids = await db<ShiftSummary['voids']>`
-    SELECT c.checkout_no, c.total_amount AS amount, c.void_reason AS reason, c.voided_at FROM checkouts c
-    WHERE ${ofShift('c.void_shift_id', 'c.voided_by', 'c.voided_at')} ORDER BY c.voided_at`;
+  // co 本班次有效的结账单；rc 本班次的充值；团购券随结账单登记（同一事务、同一经办人），按结账单的班次；
+  // 反结账提醒按反结账时记下的班次（反结账人当时未交班的班次）；会员工作台的储值消费不是收款，只作参考，
+  // 仍按开班到此刻的时间窗口统计（消费单不记班次）
+  const [row] = await db<
+    (Omit<ShiftSummary, 'from' | 'to' | 'recharges' | 'cash'> & {
+      recharges: Omit<ShiftSummary['recharges'], 'byMethod'>;
+      rechargeByMethod: ShiftSummary['recharges']['byMethod'];
+    })[]
+  >`
+    WITH co AS (
+      SELECT c.id, c.total_amount FROM checkouts c
+      WHERE c.status = 'completed' AND ${ofShift('c.shift_id', 'c.operator_id', 'c.created_at')}
+    ), rc AS (
+      SELECT r.payment_method, r.paid_amount, r.bonus_amount FROM recharges r
+      WHERE ${ofShift('r.shift_id', 'r.operator_id', 'r.created_at')}
+    ), pay AS (
+      SELECT p.method, count(*) AS count, sum(p.amount) AS amount FROM checkout_payments p JOIN co ON co.id = p.checkout_id
+      GROUP BY p.method
+    ), rcm AS (
+      SELECT payment_method AS method, count(*) AS count, sum(paid_amount) AS amount FROM rc GROUP BY payment_method
+    ), cp AS (
+      SELECT g.platform, count(*) AS count, sum(g.amount) AS amount FROM group_buy_coupons g JOIN co ON co.id = g.checkout_id
+      WHERE g.status = 'active' GROUP BY g.platform
+    ), vd AS (
+      SELECT c.checkout_no, c.total_amount, c.void_reason, c.voided_at FROM checkouts c
+      WHERE ${ofShift('c.void_shift_id', 'c.voided_by', 'c.voided_at')}
+    ), wc AS (
+      SELECT total_amount FROM consumptions
+      WHERE operator_id = ${s.staffId} AND checkout_id IS NULL AND status = 'completed' AND created_at >= ${from} AND created_at < ${to}
+    )
+    SELECT
+      (SELECT json_build_object('count', count(*), 'total', coalesce(sum(total_amount), 0)) FROM co) AS checkouts,
+      (SELECT coalesce(json_agg(json_build_object('method', method, 'count', count, 'amount', amount) ORDER BY method), '[]'::json) FROM pay)
+        AS checkout_by_method,
+      (SELECT json_build_object('count', count(*), 'paid', coalesce(sum(paid_amount), 0), 'bonus', coalesce(sum(bonus_amount), 0)) FROM rc)
+        AS recharges,
+      (SELECT coalesce(json_agg(json_build_object('method', method, 'count', count, 'amount', amount) ORDER BY method), '[]'::json) FROM rcm)
+        AS recharge_by_method,
+      (SELECT json_build_object('count', count(*), 'total', coalesce(sum(total_amount), 0)) FROM wc) AS wallet_consumes,
+      (SELECT coalesce(json_agg(json_build_object('platform', platform, 'count', count, 'amount', amount) ORDER BY platform), '[]'::json) FROM cp)
+        AS coupons,
+      (SELECT coalesce(json_agg(json_build_object('checkoutNo', checkout_no, 'amount', total_amount, 'reason', void_reason, 'voidedAt', voided_at)
+                                ORDER BY voided_at), '[]'::json) FROM vd) AS voids`;
+  const { checkouts, checkoutByMethod, recharges, rechargeByMethod, walletConsumes, coupons } = row!;
   const cashCheckout = checkoutByMethod.find((m) => m.method === 'cash')?.amount ?? 0;
   const cashRecharge = rechargeByMethod.find((m) => m.method === 'cash')?.amount ?? 0;
   return {
     from: new Date(from).toISOString(),
     to: new Date(to).toISOString(),
-    checkouts: co!,
+    checkouts,
     checkoutByMethod,
-    recharges: { ...rc!, byMethod: rechargeByMethod },
-    walletConsumes: wc!,
+    recharges: { ...recharges, byMethod: rechargeByMethod },
+    walletConsumes,
     coupons,
-    voids,
+    // JSON 里的时间是 PostgreSQL 的格式，与单独查询时一样换成 ISO 字符串
+    voids: row!.voids.map((v) => ({ ...v, voidedAt: new Date(v.voidedAt).toISOString() })),
     cash: { opening: s.openingCash, checkout: cashCheckout, recharge: cashRecharge, expected: s.openingCash + cashCheckout + cashRecharge },
   };
 }
