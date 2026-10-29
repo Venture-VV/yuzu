@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { CheckoutDetail, CheckoutPreview, CheckoutSummary, TicketType } from '@shared/checkout';
 import type { FrontdeskBoard, FrontdeskCheck, MemberLevel, PreviewBill, VisitDetail } from '@shared/frontdesk';
 import { api } from '../../lib/api';
 
@@ -9,7 +10,31 @@ export const fk = {
   preview: (ids: number[]) => ['frontdesk', 'preview', ids.join(',')] as const,
   tags: ['frontdesk', 'tags'] as const,
   checks: ['frontdesk', 'checks'] as const,
+  ticketTypes: (all: boolean) => ['frontdesk', 'ticket-types', all] as const,
+  checkoutPreview: (ids: number[]) => ['frontdesk', 'checkout-preview', ids.join(',')] as const,
+  checkouts: (date: string) => ['frontdesk', 'checkouts', date] as const,
+  checkout: (id: number) => ['frontdesk', 'checkout', id] as const,
 };
+
+/** 票种（接待时选择；管理页看全部） */
+export const useTicketTypes = (all = false) =>
+  useQuery({ queryKey: fk.ticketTypes(all), queryFn: () => api.get<TicketType[]>(`/api/frontdesk/ticket-types${all ? '?all=1' : ''}`), staleTime: 60_000 });
+
+/** 结账前核对：按此刻计算门票；每 30 秒刷新一次，跳档时员工能看到新金额 */
+export const useCheckoutPreview = (ids: number[], enabled: boolean) =>
+  useQuery({
+    queryKey: fk.checkoutPreview(ids),
+    queryFn: () => api.get<CheckoutPreview>(`/api/frontdesk/checkout-preview?ids=${ids.join(',')}`),
+    enabled: enabled && ids.length > 0,
+    placeholderData: keepPreviousData,
+    refetchInterval: 30_000,
+  });
+
+export const useCheckouts = (date: string, enabled = true) =>
+  useQuery({ queryKey: fk.checkouts(date), queryFn: () => api.get<CheckoutSummary[]>(`/api/frontdesk/checkouts?date=${date}`), enabled });
+
+export const useCheckout = (id: number | null) =>
+  useQuery({ queryKey: fk.checkout(id ?? 0), queryFn: () => api.get<CheckoutDetail>(`/api/frontdesk/checkouts/${id}`), enabled: !!id });
 
 /** 状态板每 10 秒刷新一次；多台前台终端同时使用时能看到彼此的发牌与挂账 */
 export const useBoard = () =>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { Hash, Keyboard, ShieldCheck, UserPlus, X } from 'lucide-react';
+import { Hash, Keyboard, ReceiptText, ShieldCheck, UserPlus, X } from 'lucide-react';
 import { matchTags, normalizeTagCode, TAG_ZONES, uniqueTagMatch, ZONE_LABELS, type BoardTag, type CheckinResult, type TagZone, type VisitDetail } from '@shared/frontdesk';
 import { useCan, useSession } from '../../lib/session';
 import { cn, isTypingTarget } from '../../lib/utils';
@@ -14,6 +14,7 @@ import { useMedia } from '../inventory/useMedia';
 import { AddItemsDialog } from './AddItemsDialog';
 import { BillPanel, type PanelAction } from './BillPanel';
 import { CheckinDialog, type CheckinPrefill } from './CheckinDialog';
+import { CheckoutDialog, CheckoutRecordsDialog, TicketDialog } from './CheckoutDialog';
 import { groupTags, Stat, TagCard, TagChip, VipChip, ZoneChip } from './parts';
 import { useBoard, useFrontdeskChecks, useRefreshFrontdesk, useServerNow, useVisit } from './queries';
 import { JoinGroupDialog, PreviewDialog, SwapDialog } from './VisitDialogs';
@@ -39,7 +40,7 @@ export function FrontdeskPage() {
   const [ambiguous, setAmbiguous] = useState(false);
   const [zone, setZone] = useState<'all' | TagZone>('all');
   const [status, setStatus] = useState<StatusFilter>('all');
-  const [dialog, setDialog] = useState<null | { kind: 'checkin'; prefill: CheckinPrefill } | { kind: PanelAction }>(null);
+  const [dialog, setDialog] = useState<null | { kind: 'checkin'; prefill: CheckinPrefill } | { kind: PanelAction; ids?: number[] }>(null);
   const [checksOpen, setChecksOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -85,6 +86,7 @@ export function FrontdeskPage() {
     if (resume === 'checkin') setDialog({ kind: 'checkin', prefill: {} });
     else if (resume === 'bill_post') setDialog({ kind: 'add' });
     else if (resume === 'tag_swap') setDialog({ kind: 'swap' });
+    else if (resume === 'checkout') setDialog({ kind: 'checkout' });
     const next = new URLSearchParams(params);
     next.delete('resume');
     setParams(next, { replace: true });
@@ -115,6 +117,11 @@ export function FrontdeskPage() {
       if (e.key === 'F8' && visit.data?.status === 'open') {
         e.preventDefault();
         setDialog({ kind: 'preview' });
+        return;
+      }
+      if (e.key === 'F9' && visit.data?.status === 'open' && can('frontdesk.checkout')) {
+        e.preventDefault();
+        setDialog({ kind: 'checkout' });
         return;
       }
       if (isTypingTarget(e.target)) return;
@@ -199,9 +206,14 @@ export function FrontdeskPage() {
         }
         actions={
           can('frontdesk.read') ? (
-            <Button size="sm" variant="ghost" icon={<ShieldCheck className="size-4" />} onClick={() => setChecksOpen(true)}>
-              自检
-            </Button>
+            <>
+              <Button size="sm" variant="ghost" icon={<ReceiptText className="size-4" />} onClick={() => setDialog({ kind: 'records' })} data-testid="open-checkouts">
+                结账记录
+              </Button>
+              <Button size="sm" variant="ghost" icon={<ShieldCheck className="size-4" />} onClick={() => setChecksOpen(true)}>
+                自检
+              </Button>
+            </>
           ) : null
         }
       />
@@ -409,7 +421,7 @@ export function FrontdeskPage() {
                 <EmptyState art="calm" title="选一张手牌看账单" description="直接敲牌号（如 23）回车，或点左侧手牌。空闲手牌点一下即可发牌。" />
                 <div className="mt-2 space-y-1.5 text-[12.5px] text-ink-3">
                   <p className="flex items-center justify-center gap-1.5">
-                    <Keyboard className="size-4" /> <Kbd>F2</Kbd> 接待发牌 · <Kbd>F4</Kbd> 加项目 · <Kbd>F8</Kbd> 预结账
+                    <Keyboard className="size-4" /> <Kbd>F2</Kbd> 接待发牌 · <Kbd>F4</Kbd> 加项目 · <Kbd>F8</Kbd> 预结账 · <Kbd>F9</Kbd> 结账
                   </p>
                 </div>
               </div>
@@ -434,7 +446,34 @@ export function FrontdeskPage() {
       {visit.data && dialog?.kind === 'join' && (
         <JoinGroupDialog open visit={visit.data} tags={tags} onClose={() => setDialog(null)} onDone={(v) => afterChange(v, `${v.tag.code} 已加入同行组 ${v.group?.groupNo ?? ''}`)} />
       )}
-      {visit.data && dialog?.kind === 'preview' && <PreviewDialog open visit={visit.data} tags={tags} onClose={() => setDialog(null)} />}
+      {visit.data && dialog?.kind === 'preview' && (
+        <PreviewDialog
+          open
+          visit={visit.data}
+          tags={tags}
+          onClose={() => setDialog(null)}
+          onCheckout={can('frontdesk.checkout') ? (ids) => setDialog({ kind: 'checkout', ids }) : undefined}
+        />
+      )}
+      {visit.data && dialog?.kind === 'checkout' && (
+        <CheckoutDialog
+          open
+          visit={visit.data}
+          tags={tags}
+          initialIds={dialog.ids}
+          onClose={() => setDialog(null)}
+          onDone={(d) => {
+            setDialog(null);
+            refresh(d.bills.map((b) => b.visitId));
+            toast({ tone: 'success', title: `已结清 ${d.bills.map((b) => b.tagCode).join('、')}`, body: `结账单 ${d.checkoutNo}，手牌已释放` });
+            select(null);
+          }}
+        />
+      )}
+      {visit.data && dialog?.kind === 'ticket' && (
+        <TicketDialog open visit={visit.data} onClose={() => setDialog(null)} onDone={(v) => afterChange(v, `${v.tag.code} 票种改为 ${v.ticket?.name ?? ''}`)} />
+      )}
+      <CheckoutRecordsDialog open={dialog?.kind === 'records'} focusId={dialog?.kind === 'records' ? (visit.data?.checkout?.id ?? null) : null} onClose={() => setDialog(null)} />
       <ChecksDialog open={checksOpen} onClose={() => setChecksOpen(false)} />
     </>
   );

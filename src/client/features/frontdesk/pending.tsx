@@ -16,15 +16,17 @@ import { Button, Notice } from '../../components/ui';
 //   · 按原内容重新提交：沿用原编号与原请求，服务端保证只生效一次；重提被明确拒绝时，先在服务端作废编号再下结论；
 //   · 确认作废：服务端先把编号登记为作废，原请求之后即使到达也整笔回滚，然后才允许重新填写。
 
-export type FrontdeskOpType = 'checkin' | 'bill_post' | 'tag_swap';
+export type FrontdeskOpType = 'checkin' | 'bill_post' | 'tag_swap' | 'checkout';
 
 export interface FrontdeskPendingOp {
   key: string;
   type: FrontdeskOpType;
   url: string;
   body: unknown;
-  /** 挂账、换牌对应的来访；接待为 null */
+  /** 挂账、换牌对应的来访；接待为 null；结账为发起结账的那张手牌 */
   visitId: number | null;
+  /** 结账涉及的全部来访（同行合并结账），这些手牌上都不能另起一笔结账 */
+  visitIds?: number[];
   /** 展示用：涉及的手牌、内容摘要、金额 */
   tagCodes: string[];
   summary: string;
@@ -33,7 +35,7 @@ export interface FrontdeskPendingOp {
   createdAt: string;
 }
 
-export const FRONTDESK_OP_LABELS: Record<FrontdeskOpType, string> = { checkin: '接待发牌', bill_post: '挂账', tag_swap: '换牌' };
+export const FRONTDESK_OP_LABELS: Record<FrontdeskOpType, string> = { checkin: '接待发牌', bill_post: '挂账', tag_swap: '换牌', checkout: '结账' };
 
 const STORAGE_KEY = 'yuzu.frontdeskPending.v1';
 const listeners = new Set<() => void>();
@@ -158,9 +160,11 @@ export function useFrontdeskPendingForBanner(): FrontdeskPendingOp[] {
   return useSyncExternalStore(subscribe, bannerSnapshot);
 }
 
-/** 某个对象上的待确认操作：接待看全部接待；挂账、换牌看同一位客人 */
+/** 某个对象上的待确认操作：接待看全部接待；挂账、换牌看同一位客人；结账看涉及这位客人的结账 */
 export function pendingFor(list: FrontdeskPendingOp[], type: FrontdeskOpType, visitId: number | null) {
-  return list.find((p) => p.type === type && (type === 'checkin' || p.visitId === visitId));
+  return list.find(
+    (p) => p.type === type && (type === 'checkin' || p.visitId === visitId || (visitId !== null && !!p.visitIds?.includes(visitId))),
+  );
 }
 
 export type OpState =
@@ -239,7 +243,7 @@ export function useFrontdeskOp<T>(opts: { type: FrontdeskOpType; visitId: number
 
   /** 提交一笔新的操作（有待确认记录时不允许） */
   const submit = useCallback(
-    async (build: (key: string) => { url: string; body: unknown; tagCodes: string[]; summary: string; amount: number | null }) => {
+    async (build: (key: string) => { url: string; body: unknown; tagCodes: string[]; summary: string; amount: number | null; visitIds?: number[] }) => {
       if (pending) return null;
       const key = uuid();
       const b = build(key);

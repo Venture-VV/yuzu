@@ -4,9 +4,11 @@ import { FileUp, ListChecks, Plus } from 'lucide-react';
 import { itemTags, PRICE_TIER_LABELS, PRICE_TIERS, STRENGTH_LABELS, STRENGTHS, tierPrice, type PriceTier, type Strength } from '@shared/catalog';
 import { centsToInput, parseYuan } from '@shared/money';
 import { parsePriceListCsv, type BuiltinPriceList, type PriceListCsvResult, type PriceListImportReport } from '@shared/price-list-import';
+import type { TicketType } from '@shared/checkout';
 import type { Catalog, RechargePlan, ServiceItem } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
 import { useCatalog } from '../../lib/queries';
+import { useTicketTypes } from '../frontdesk/queries';
 import { cn } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
@@ -127,6 +129,7 @@ export function CatalogTab() {
         </div>
       </Card>
 
+      <TicketTypesCard />
       <PriceListCard />
 
       <PlanDialog editing={editing?.kind === 'plan' ? editing : null} onClose={() => setEditing(null)} />
@@ -570,5 +573,135 @@ function PriceListCard() {
       )}
       {error && <Notice tone="error" title={error} className="mt-3" />}
     </Card>
+  );
+}
+
+/** 门票票种（店主 #31：男女宾、普通柜与 VIP 柜统一一套票价，每 12 小时跳一档） */
+function TicketTypesCard() {
+  const types = useTicketTypes(true);
+  const [editing, setEditing] = useState<TicketType | 'new' | null>(null);
+  return (
+    <Card className="p-5 lg:col-span-2" data-testid="ticket-types">
+      <SectionTitle
+        aside={
+          <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => setEditing('new')}>
+            新增票种
+          </Button>
+        }
+      >
+        <span className="flex items-center gap-2">
+          门票 <PendingBadge title="票价为店主 2026-10-27 #31 确认；1 米以下儿童免票、跳档宽限为默认做法，待确认" />
+        </span>
+      </SectionTitle>
+      <p className="mt-1 text-[12.5px] text-ink-3">
+        接待时为每位客人选票种，留存当时的票价；离店结账按在店时长计算：每 12 小时一段，票价 = 24 小时档 × 整天数 + 剩余半天时再加一个 12 小时档（例：499 → 599 → 1098 → 1198）。跳档宽限在「手牌 → 前台规则」设置。
+      </p>
+      {types.isPending ? (
+        <Skeleton className="mt-3 h-24" />
+      ) : (
+        <ul className="mt-3 divide-y divide-line rounded-lg border border-line">
+          {types.data?.map((t) => (
+            <li key={t.id}>
+              <button type="button" onClick={() => setEditing(t)} className={cn('flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-left hover:bg-paper-2/60', !t.active && 'opacity-55')}>
+                <span className="text-[14px] font-bold">{t.name}</span>
+                {t.isDefault && <Badge tone="pine">接待默认</Badge>}
+                {!t.active && <Badge tone="neutral">已停用</Badge>}
+                <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink-3">{t.note}</span>
+                <span className="num text-[13px] text-ink-2">
+                  {t.price12h || t.price24h ? (
+                    <>
+                      12 小时 <Money cents={t.price12h} className="font-bold" /> · 24 小时 <Money cents={t.price24h} className="font-bold" />
+                    </>
+                  ) : (
+                    '免票'
+                  )}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {editing && <TicketTypeDialog editing={editing} onClose={() => setEditing(null)} />}
+    </Card>
+  );
+}
+
+function TicketTypeDialog({ editing, onClose }: { editing: TicketType | 'new'; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const t = editing === 'new' ? null : editing;
+  const [name, setName] = useState(t?.name ?? '');
+  const [p12, setP12] = useState(t ? centsToInput(t.price12h) : '');
+  const [p24, setP24] = useState(t ? centsToInput(t.price24h) : '');
+  const [note, setNote] = useState(t?.note ?? '');
+  const [active, setActive] = useState(t?.active ?? true);
+  const [isDefault, setIsDefault] = useState(t?.isDefault ?? false);
+  const [sort, setSort] = useState(String(t?.sortOrder ?? 50));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const c12 = parseYuan(p12 || '0');
+  const c24 = parseYuan(p24 || '0');
+  const problem = !name.trim() ? '请填写名称' : c12 === null || c24 === null ? '价格格式不正确' : c24 < c12 ? '24 小时档不能低于 12 小时档' : null;
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const body = { name: name.trim(), price12h: c12, price24h: c24, note: note.trim(), active, isDefault: active && isDefault, sortOrder: Number(sort) || 0 };
+      if (t) await api.put(`/api/frontdesk/ticket-types/${t.id}`, body);
+      else await api.post('/api/frontdesk/ticket-types', body);
+      void qc.invalidateQueries({ queryKey: ['frontdesk', 'ticket-types'] });
+      toast({ tone: 'success', title: `已保存票种「${body.name}」`, body: '改价只影响之后选定这一票种的客人' });
+      onClose();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog
+      open
+      onClose={busy ? () => {} : onClose}
+      title={t ? `修改票种「${t.name}」` : '新增票种'}
+      description="已在店的客人按接待时留存的票价结账，改价不影响他们"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            取消
+          </Button>
+          <Button variant="primary" disabled={!!problem} loading={busy} onClick={() => void save()} data-testid="ticket-type-save">
+            保存
+          </Button>
+        </>
+      }
+    >
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="名称" className="sm:col-span-2">
+          <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={32} aria-label="票种名称" />
+        </Field>
+        <Field label="12 小时档（元）" hint="免票填 0">
+          <MoneyInput value={p12} onChange={(e) => setP12(e.target.value)} aria-label="12 小时档价格" />
+        </Field>
+        <Field label="24 小时档（元）">
+          <MoneyInput value={p24} onChange={(e) => setP24(e.target.value)} aria-label="24 小时档价格" />
+        </Field>
+        <Field label="说明（选填）" className="sm:col-span-2">
+          <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={100} aria-label="说明" />
+        </Field>
+        <Field label="排序">
+          <Input value={sort} onChange={(e) => setSort(e.target.value.replace(/\D/g, ''))} inputMode="numeric" className="num" aria-label="排序" />
+        </Field>
+      </div>
+      <div className="mt-3 space-y-2">
+        <ConfirmCheck checked={active} onChange={setActive}>
+          启用
+        </ConfirmCheck>
+        <ConfirmCheck checked={isDefault && active} onChange={(v) => setIsDefault(v)}>
+          接待时默认选中
+        </ConfirmCheck>
+      </div>
+      {problem && <p className="mt-2 text-[13px] text-clay">{problem}</p>}
+      {error && <Notice tone="error" title={error} className="mt-3" />}
+    </Dialog>
   );
 }

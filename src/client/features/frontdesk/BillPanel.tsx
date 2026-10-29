@@ -14,6 +14,8 @@ import {
   UserRound,
   X,
   ShieldCheck,
+  Banknote,
+  Ticket,
 } from 'lucide-react';
 import {
   BILL_SOURCE_LABELS,
@@ -38,7 +40,7 @@ import { GroupMark, LONG_STAY_MINUTES, VipChip, ZoneChip, ZONE_STYLE } from './p
 import { FRONTDESK_OP_LABELS, useFrontdeskPending } from './pending';
 import { stayMinutes, stayText, useServerNow } from './queries';
 
-export type PanelAction = 'add' | 'swap' | 'join' | 'companion' | 'preview';
+export type PanelAction = 'add' | 'swap' | 'join' | 'companion' | 'preview' | 'checkout' | 'ticket' | 'records';
 
 /** 右侧「小票」：当前手牌的共同账单，按消费来源分组；挂账、换牌、同行、预结账都从这里发起 */
 export function BillPanel({
@@ -149,7 +151,7 @@ export function BillPanel({
               </p>
               <p className="num text-[12px] text-ink-3">
                 本金 <Money cents={visit.member.principalBalance} /> · 赠金 <Money cents={visit.member.bonusBalance} />
-                <span className="ml-1 text-ink-4">仅显示，挂账不扣余额</span>
+                <span className="ml-1 text-ink-4">结账时可用储值支付</span>
               </p>
             </div>
           ) : (
@@ -207,7 +209,12 @@ export function BillPanel({
             title={`${FRONTDESK_OP_LABELS[p.type]}结果待确认`}
             className="mb-3"
             action={
-              <Button size="sm" variant="primary" onClick={() => onAction(p.type === 'bill_post' ? 'add' : 'swap')} data-testid="bill-pending-resolve">
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => onAction(p.type === 'bill_post' ? 'add' : p.type === 'checkout' ? 'checkout' : 'swap')}
+                data-testid="bill-pending-resolve"
+              >
                 去处理
               </Button>
             }
@@ -225,7 +232,7 @@ export function BillPanel({
           {active.length === 0 ? (
             <div className="py-8 text-center">
               <p className="text-[14px] font-bold text-ink-2">还没有挂账</p>
-              <p className="mt-1 text-[12.5px] text-ink-3">门票与时长费结账时按规则计算；项目、饮品等可随时挂到这张手牌</p>
+              <p className="mt-1 text-[12.5px] text-ink-3">门票结账时按在店时长计算；项目、饮品等可随时挂到这张手牌</p>
               {open && can('frontdesk.operate') && (
                 <Button className="mt-3" variant="secondary" icon={<Plus className="size-4" />} onClick={() => onAction('add')}>
                   加项目
@@ -275,9 +282,40 @@ export function BillPanel({
               )}
             </div>
           )}
-          <div className="mt-3 flex items-center gap-1.5 border-t border-dashed border-line-strong pt-2.5 text-[11.5px] text-ink-3">
-            <PendingBadge title="门票、超时与大厅过夜计费规则待店主确认，S3 起在结账时按入场时间动态计算" />
-            门票 / 时长 / 大厅过夜费结账时计算，不在此预先挂账
+          <div className="mt-3 border-t border-dashed border-line-strong pt-2.5" data-testid="bill-ticket">
+            {visit.ticket ? (
+              <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[13px]">
+                <Ticket className="size-3.5 self-center text-pine" />
+                <span className="font-semibold">
+                  门票 · {visit.ticket.name}（{visit.ticket.tierLabel}）
+                </span>
+                <Money cents={visit.ticket.amount} className="font-bold" />
+                {open && (
+                  <span className="text-[12px] text-ink-3">
+                    {formatTime(visit.ticket.nextJumpAt)} 后 <Money cents={visit.ticket.nextAmount} />
+                  </span>
+                )}
+                <span className="flex-1" />
+                {open && can('frontdesk.operate') && (
+                  <button type="button" onClick={() => onAction('ticket')} className="text-[12.5px] font-semibold text-pine hover:underline" data-testid="bill-ticket-change">
+                    改票种
+                  </button>
+                )}
+              </p>
+            ) : open ? (
+              <p className="flex flex-wrap items-center gap-2 text-[13px] text-clay">
+                <Ticket className="size-3.5" /> 还没有选票种（结账前需要选择）
+                {can('frontdesk.operate') && (
+                  <button type="button" onClick={() => onAction('ticket')} className="font-semibold text-pine hover:underline" data-testid="bill-ticket-change">
+                    选择票种
+                  </button>
+                )}
+              </p>
+            ) : null}
+            <p className="mt-1 flex items-center gap-1.5 text-[11.5px] text-ink-3">
+              <PendingBadge title="门票按每 12 小时跳一档计算（店主 #31）；跳档宽限默认 0 分钟、1 米以下儿童免票为默认做法，待确认" />
+              门票离店结账时按在店时长计算（每 12 小时跳一档），不预先挂账
+            </p>
           </div>
         </div>
 
@@ -304,11 +342,29 @@ export function BillPanel({
             <span data-testid="bill-total">
               <Money cents={visit.bill.amountCents} className="text-[30px] leading-tight font-bold text-ink" />
             </span>
+            {open && visit.ticket && (
+              <p className="text-[12px] text-ink-3" data-testid="bill-due">
+                含门票此刻应收 <Money cents={visit.bill.amountCents + visit.ticket.amount} className="font-bold text-pine" />
+              </p>
+            )}
           </div>
-          {open && (
-            <Button variant="secondary" icon={<ReceiptText className="size-4" />} onClick={() => onAction('preview')} kbd="F8">
-              预结账
-            </Button>
+          {open ? (
+            <div className="flex gap-2">
+              <Button variant="secondary" icon={<ReceiptText className="size-4" />} onClick={() => onAction('preview')} kbd="F8">
+                预结账
+              </Button>
+              {can('frontdesk.checkout') && (
+                <Button variant="accent" icon={<Banknote className="size-4" />} onClick={() => onAction('checkout')} kbd="F9" data-testid="action-checkout">
+                  结账
+                </Button>
+              )}
+            </div>
+          ) : (
+            visit.checkout && (
+              <Button variant="secondary" icon={<ReceiptText className="size-4" />} onClick={() => onAction('records')} data-testid="bill-checkout">
+                结账单 {visit.checkout.checkoutNo.slice(-4)}
+              </Button>
+            )
           )}
         </div>
         {open && can('frontdesk.operate') && (

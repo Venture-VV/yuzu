@@ -371,6 +371,7 @@ function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSa
   const [basis, setBasis] = useState<VipLevelBasis>(DEFAULT_FRONTDESK_RULES.vipLevelBasis);
   const [thresholds, setThresholds] = useState<string[]>([]);
   const [override, setOverride] = useState(false);
+  const [grace, setGrace] = useState('0');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -380,13 +381,17 @@ function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSa
     setBasis(rules.vipLevelBasis);
     setThresholds(rules.vipLevelThresholds.map(yuan));
     setOverride(rules.vipOverrideEnabled);
+    setGrace(String(rules.overtimeGraceMinutes ?? 0));
   }, [rules]);
 
   const n = Number(minutes);
+  const g = Number(grace);
   const feeCents = centsOf(fee);
   const levelCents = thresholds.map(centsOf);
   const problem = !Number.isInteger(n) || n < 0 || n > 120
     ? '更正时限应为 0–120 分钟'
+    : !Number.isInteger(g) || g < 0 || g > 120
+      ? '跳档宽限应为 0–120 分钟'
     : !Number.isInteger(feeCents) || feeCents < 0 || !/^\d+(\.\d{1,2})?$/.test(fee)
       ? '丢牌赔偿金额不正确'
       : levelCents.some((c, i) => !/^\d+(\.\d{1,2})?$/.test(thresholds[i]!) || (i > 0 && c <= levelCents[i - 1]!))
@@ -403,6 +408,7 @@ function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSa
         vipLevelBasis: basis,
         vipLevelThresholds: levelCents,
         vipOverrideEnabled: override,
+        overtimeGraceMinutes: g,
       });
       onSaved();
     } catch (e) {
@@ -421,6 +427,16 @@ function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSa
         </Field>
         <Field label="丢牌赔偿（元）" hint="换牌原因为手牌丢失时挂到客人账单；填 0 表示不收">
           <Input value={fee} onChange={(e) => setFee(e.target.value)} inputMode="decimal" className="num" aria-label="丢牌赔偿" />
+        </Field>
+        <Field
+          label={
+            <span className="flex items-center gap-1.5">
+              门票跳档宽限（分钟） <PendingBadge title="店主 ❓6：默认 0（超过 12 小时分界点即跳档），待确认" />
+            </span>
+          }
+          hint="每个 12 小时分界点之后多少分钟内不跳档；0 表示超过即跳档"
+        >
+          <Input value={grace} onChange={(e) => setGrace(e.target.value)} inputMode="numeric" className="num" aria-label="门票跳档宽限" data-testid="rules-grace" />
         </Field>
       </div>
 

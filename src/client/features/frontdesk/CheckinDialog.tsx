@@ -20,11 +20,11 @@ import { useCan, useSession } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
-import { Badge, Button, Input, Notice, Segmented } from '../../components/ui';
+import { Badge, Button, Input, Notice, Segmented, Select } from '../../components/ui';
 import { AuthorizeDialog } from '../../components/AuthorizeDialog';
 import { GroupMark, VipChip, ZONE_STYLE } from './parts';
 import { PendingPanel, useFrontdeskOp } from './pending';
-import { useMemberLevel } from './queries';
+import { useMemberLevel, useTicketTypes } from './queries';
 
 export interface CheckinPrefill {
   tagCode?: string;
@@ -37,6 +37,8 @@ interface Row {
   zone: Zone;
   code: string;
   label: string;
+  /** 票种；null 表示沿用默认票种（票种列表还没加载时） */
+  ticketTypeId: number | null;
 }
 
 type TagStatus = { ok: true; tag: BoardTag } | { ok: false; message: string; choices?: BoardTag[] } | null;
@@ -101,6 +103,8 @@ export function CheckinDialog({
   const [authOpen, setAuthOpen] = useState(false);
   const firstInput = useRef<HTMLInputElement>(null);
   const members = useMembers(guestType === 'member' && !member ? memberQ.trim() : '');
+  const ticketTypes = useTicketTypes();
+  const defaultTicket = ticketTypes.data?.find((t) => t.isDefault)?.id ?? ticketTypes.data?.[0]?.id ?? null;
   // 上一笔接待结果待确认时，先处理那一笔再发新牌（避免同一批客人被开两次牌）
   const op = useFrontdeskOp<CheckinResult>({
     type: 'checkin',
@@ -114,7 +118,7 @@ export function CheckinDialog({
     setGuestType('walkin');
     setMemberQ('');
     setMember(null);
-    setRows([{ id: rowSeq++, zone: prefill.zone ?? 'male', code: prefill.tagCode ?? '', label: '' }]);
+    setRows([{ id: rowSeq++, zone: prefill.zone ?? 'male', code: prefill.tagCode ?? '', label: '', ticketTypeId: null }]);
     setGrant(null);
     op.clearError();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -192,6 +196,7 @@ export function CheckinDialog({
           zone: r.zone,
           memberId: i === 0 && member ? member.id : null,
           guestLabel: r.label.trim(),
+          ...((r.ticketTypeId ?? defaultTicket) ? { ticketTypeId: r.ticketTypeId ?? defaultTicket } : {}),
         })),
         vipGrantId: needs.length && grant ? grant.grantId : null,
       },
@@ -215,7 +220,7 @@ export function CheckinDialog({
       footer={
         <>
           <span className="mr-auto self-center text-[13px] text-ink-3">
-            共 <b className="num text-ink">{rows.length}</b> 位 · 本阶段只发牌挂账，不收款、不扣会员余额
+            共 <b className="num text-ink">{rows.length}</b> 位 · 门票离店结账时按在店时长计算（每 12 小时跳一档）
           </span>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             取消
@@ -359,6 +364,22 @@ export function CheckinDialog({
                     aria-label={`第 ${i + 1} 位称呼`}
                     className="h-10 min-w-0 flex-1 basis-28"
                   />
+                  {(ticketTypes.data?.length ?? 0) > 0 && (
+                    <Select
+                      fullWidth={false}
+                      value={String(r.ticketTypeId ?? defaultTicket ?? '')}
+                      onChange={(e) => update(r.id, { ticketTypeId: Number(e.target.value) })}
+                      aria-label={`第 ${i + 1} 位票种`}
+                      className="h-10 w-[150px] text-[13.5px]"
+                      data-testid={`guest-ticket-${i}`}
+                    >
+                      {ticketTypes.data!.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} {t.price12h ? `¥${t.price12h / 100}` : '免票'}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
                   {rows.length > 1 && (
                     <button
                       type="button"
@@ -425,7 +446,7 @@ export function CheckinDialog({
             variant="secondary"
             icon={<Plus className="size-4" />}
             disabled={rows.length >= 12}
-            onClick={() => edit(() => setRows((list) => [...list, { id: rowSeq++, zone: list.at(-1)?.zone ?? 'male', code: '', label: '' }]))}
+            onClick={() => edit(() => setRows((list) => [...list, { id: rowSeq++, zone: list.at(-1)?.zone ?? 'male', code: '', label: '', ticketTypeId: list.at(-1)?.ticketTypeId ?? null }]))}
           >
             添加同行客人
           </Button>

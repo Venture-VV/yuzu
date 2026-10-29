@@ -350,11 +350,14 @@ export function PreviewDialog({
   visit,
   tags,
   onClose,
+  onCheckout,
 }: {
   open: boolean;
   visit: VisitDetail;
   tags: BoardTag[];
   onClose: () => void;
+  /** 去结账：带上已勾选的手牌 */
+  onCheckout?: (visitIds: number[]) => void;
 }) {
   const [selected, setSelected] = useState<number[]>([]);
   useEffect(() => {
@@ -384,10 +387,15 @@ export function PreviewDialog({
       description="勾选要一起结的手牌，查看合并后的未结金额"
       footer={
         <>
-          <span className="mr-auto self-center text-[12.5px] text-ink-3">收款、团购核销与会员卡扣款将在 S3 开放</span>
-          <Button variant="primary" onClick={onClose}>
-            知道了
+          <span className="mr-auto self-center text-[12.5px] text-ink-3">金额为已挂明细，门票在结账时按在店时长计算</span>
+          <Button variant={onCheckout ? 'ghost' : 'primary'} onClick={onClose}>
+            关闭
           </Button>
+          {onCheckout && (
+            <Button variant="primary" onClick={() => onCheckout(selected)} data-testid="preview-checkout">
+              去结账
+            </Button>
+          )}
         </>
       }
     >
