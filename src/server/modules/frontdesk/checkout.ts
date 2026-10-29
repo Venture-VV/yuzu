@@ -9,8 +9,10 @@
 //   · 员工确认时看到的应收合计与储值扣款构成，和服务端此刻计算的不一致时拒绝（门票跳档、改价、余额变化）；
 //   · 同一操作编号只结一次；结果待确认时可查回或作废（与接待、挂账同一机制）；
 //   · 反结账：作废结账单——储值消费按原单撤销、团购券登记作废、门票明细作废，账单与来访恢复为在店未结；
-//     储值消费只能这样随结账单一起撤销，会员撤销接口拒绝单独撤销（CHECKOUT_LINKED）。
-// 加锁顺序：手牌（反结账）→ 同行组 → 来访 → 账单 → 会员（id 升序）→ 赠金批次。
+//     储值消费只能这样随结账单一起撤销，会员撤销接口拒绝单独撤销（CHECKOUT_LINKED）；
+//   · 结账单、反结账记下经办人当时未交班的班次（交班表按班次汇总，见 shifts.ts）。
+// 加锁顺序：手牌（反结账）→ 同行组 → 来访 → 账单 → 会员（id 升序）→ 赠金批次；
+// 班次只加共享锁（结账在写结账单前、反结账在最后），交班只锁班次一行，不会与这里成环。
 
 import { z } from 'zod';
 import {
@@ -34,6 +36,7 @@ import type { Deps, OpContext } from '../../lib/context';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
 import { cents, parse, positiveCents } from '../../lib/validate';
 import { expireMemberBonus } from '../bonus';
+import { lockOpenShift } from '../shifts';
 import { consumeForCheckout, reverseForCheckout } from '../wallet';
 import {
   assertOpen,
@@ -268,9 +271,11 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
 
     const date = await businessDate(tx, deps, at);
     const checkoutNo = await nextDocNo(tx, 'checkout', 'JZ', date);
+    // 记到经办人此刻未交班的班次（结账单除反结账外不可改，班次在入账时写入；见 shifts.ts）
+    const shiftId = await lockOpenShift(tx, ctx.actor.id);
     const [c] = await tx<{ id: number }[]>`
-      INSERT INTO checkouts (checkout_no, client_key, total_amount, paid_amount, note, business_date, operator_id, created_at)
-      VALUES (${checkoutNo}, ${key}, ${total}, ${paid}, ${input.note}, ${date}, ${ctx.actor.id}, ${at})
+      INSERT INTO checkouts (checkout_no, client_key, total_amount, paid_amount, note, business_date, operator_id, created_at, shift_id)
+      VALUES (${checkoutNo}, ${key}, ${total}, ${paid}, ${input.note}, ${date}, ${ctx.actor.id}, ${at}, ${shiftId})
       RETURNING id`;
     const checkoutId = c!.id;
 
@@ -432,8 +437,11 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
     await tx`
       UPDATE group_buy_coupons SET status = 'voided', voided_at = ${at}, voided_by = ${ctx.actor.id}, void_reason = ${voidText}
       WHERE checkout_id = ${c.id} AND status = 'active'`;
+    // 反结账提醒记到反结账人此刻未交班的班次（见 shifts.ts）
+    const voidShiftId = await lockOpenShift(tx, ctx.actor.id);
     await tx`
-      UPDATE checkouts SET status = 'voided', voided_at = ${at}, voided_by = ${ctx.actor.id}, void_reason = ${reason}, void_business_date = ${date}
+      UPDATE checkouts SET status = 'voided', voided_at = ${at}, voided_by = ${ctx.actor.id}, void_reason = ${reason}, void_business_date = ${date},
+                           void_shift_id = ${voidShiftId}
       WHERE id = ${c.id}`;
     await writeAudit(tx, {
       staffId: ctx.actor.id,

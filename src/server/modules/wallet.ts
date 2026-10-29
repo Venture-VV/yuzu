@@ -31,6 +31,7 @@ import { addRechargeLot, expireDueLots, expireMemberBonus, restoreToLots, takeFr
 import { getMember } from './members';
 import { loadPricedItems, priceLine } from './pricing';
 import { loadSettings } from './settings';
+import { lockOpenShift } from './shifts';
 import { applyBalance, lockMember, nextDocNo, type LockedMember } from './wallet-core';
 
 type OpType = 'recharge' | 'consume' | 'reversal';
@@ -529,12 +530,14 @@ export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContex
 
       const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
       const docNo = await nextDocNo(tx, 'recharge', businessDate);
+      // 记到经办人此刻未交班的班次（充值单只追加，班次在入账时写入；见 shifts.ts）
+      const shiftId = await lockOpenShift(tx, ctx.actor.id);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO recharges (doc_no, member_id, plan_id, plan_name, paid_amount, bonus_amount, payment_method,
-                               payment_ref, note, business_date, operator_id, created_at, over_limit_approved_by, bonus_expires_at)
+                               payment_ref, note, business_date, operator_id, created_at, over_limit_approved_by, bonus_expires_at, shift_id)
         VALUES (${docNo}, ${member.id}, ${input.planId}, ${planName}, ${input.paidAmount}, ${input.bonusAmount},
                 ${input.paymentMethod}, ${input.paymentRef}, ${input.note}, ${businessDate}, ${ctx.actor.id}, ${at},
-                ${overLimit?.approverId ?? null}, ${bonusExpiresAt})
+                ${overLimit?.approverId ?? null}, ${bonusExpiresAt}, ${shiftId})
         RETURNING id`;
       const id = row!.id;
       await applyBalance(tx, member, { principal: input.paidAmount, bonus: input.bonusAmount }, {

@@ -20,7 +20,7 @@ import { checkout, previewCheckout, voidCheckout, type CheckoutInputData } from 
 import { checkin } from './modules/frontdesk/visits';
 import { createMember } from './modules/members';
 import { loadSettings } from './modules/settings';
-import { closeShift, shiftSummary, startShift } from './modules/shifts';
+import { closeShift, getShift, startShift } from './modules/shifts';
 import { createStaff } from './modules/staff';
 import { recharge } from './modules/wallet';
 import { DEMO_ITEMS, DEMO_PASSWORD } from './seed';
@@ -147,7 +147,7 @@ export async function seedBillingDemo(sql: Sql, config: AppConfig, options: { no
   await pay([s5!], [{ method: 'wechat', amount: 0 }], as(cashier, 24));
 
   // ⑥ 陈茵交班：应有现金 = 备用金 500 + 现金结账 521 = 1021；实点 1011（短款 10 元）
-  const summary = await shiftSummary(sql, cashier.id, cashierShift.startedAt, ago(2), cashierShift.openingCash);
+  const { summary } = await getShift(sql, cashierShift.id, ago(2));
   await closeShift(deps, cashierShift.id, { countedCash: summary.cash.expected - 1000, expectedCash: summary.cash.expected, note: '演示：短款 10 元，找零时多找' }, as(cashier, 2));
 
   const [stats] = await sql<{ checkouts: number; voided: number }[]>`

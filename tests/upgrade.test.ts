@@ -38,8 +38,8 @@ beforeAll(async () => {
   memberId = member!.id;
 
   // 用第一版就有的记账流程写入真实流水。现版本记账还会查作废登记表（006 才有）、写消费明细的价格档（009 才有）
-  // 与超限授权人（010）、会员自定义字段（011）、赠金批次（012）、期初明细（013）、结账单（014），写入期间临时放几张表、加几列，迁移前删掉，
-  // 升级仍从「只有 001」的结构开始
+  // 与超限授权人（010）、会员自定义字段（011）、赠金批次（012）、期初明细（013）、结账单（014）、班次（015、016），
+  // 写入期间临时放几张表、加几列，迁移前删掉，升级仍从「只有 001」的结构开始
   await sql`CREATE TABLE op_fences (key uuid, op_type text, staff_id bigint, created_at timestamptz)`;
   await sql`ALTER TABLE consumption_lines ADD COLUMN tier text`;
   await sql`ALTER TABLE recharges ADD COLUMN over_limit_approved_by bigint`;
@@ -51,6 +51,8 @@ beforeAll(async () => {
   await sql`ALTER TABLE consumptions ADD COLUMN checkout_id bigint`;
   await sql`CREATE TABLE bonus_lots (id bigserial PRIMARY KEY, member_id bigint, source text, recharge_id bigint, amount bigint, remaining bigint, expires_at timestamptz, created_at timestamptz)`;
   await sql`CREATE TABLE checkouts (id bigserial PRIMARY KEY, checkout_no text, status text)`;
+  await sql`CREATE TABLE shifts (id bigserial PRIMARY KEY, staff_id bigint, status text)`;
+  await sql`ALTER TABLE recharges ADD COLUMN shift_id bigint`;
   // 升级前已有的消费项目（只有一个价格）
   const [item] = await sql<{ id: number }[]>`INSERT INTO service_items (name, category, price) VALUES ('升级前项目', '护理', 6800) RETURNING id`;
   itemId = item!.id;
@@ -71,10 +73,12 @@ beforeAll(async () => {
   await sql`ALTER TABLE consumptions DROP COLUMN checkout_id`;
   await sql`DROP TABLE bonus_lots`;
   await sql`DROP TABLE checkouts`;
+  await sql`DROP TABLE shifts`;
+  await sql`ALTER TABLE recharges DROP COLUMN shift_id`;
 
   // 升级：增量执行 002 之后的全部迁移
   const applied = await migrate(sql);
-  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql', '005_frontdesk_g2.sql', '006_op_fences.sql', '007_manager_roles.sql', '008_locker_pool.sql', '009_price_tiers.sql', '010_wallet_limits.sql', '011_member_fields.sql', '012_bonus_expiry.sql', '013_opening_balances.sql', '014_checkout.sql', '015_shifts.sql']);
+  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql', '005_frontdesk_g2.sql', '006_op_fences.sql', '007_manager_roles.sql', '008_locker_pool.sql', '009_price_tiers.sql', '010_wallet_limits.sql', '011_member_fields.sql', '012_bonus_expiry.sql', '013_opening_balances.sql', '014_checkout.sql', '015_shifts.sql', '016_shift_boundary.sql']);
   app = await buildApp(sql, config);
 }, 60_000);
 
