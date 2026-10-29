@@ -180,6 +180,7 @@ docker compose exec app node dist/server/cli.js check
 - [ ] 演练库：`check` 全部 ✓；前台状态板有 747 个柜号，价目表 29 个项目。
 - [ ] 演示库：`check` 全部 ✓。
 - [ ] 演练库（v0.3.3 起）：`docker compose logs backup` 里有「✓ yuzu-…-daily.dump（…自检 N/N）」；`./scripts/verify-backup.sh <最新的备份文件>` 最后一行是「✓ 备份可以恢复，内容与备份时一致」。
+- [ ] 线下演练前（v0.3.3 起）：前台电脑按 [Mac mini 部署手册](DEPLOY_MAC_MINI.md) 第 3.1 节设好 80mm 热敏机，在演示库打一张结账单和一张交班表，小票顶部印着「演示·不作数」。
 - [ ] 手机断开 Tailscale、只用蜂窝网络时，`http://<公网 IP>:8080`、`:8082` 都打不开，`ssh` 到公网 IP 也连不上。
 
 ## 8. 日常更新

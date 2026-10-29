@@ -21,6 +21,7 @@ import { registerReportRoutes } from './modules/inventory/reports';
 import { registerLedgerRoutes } from './modules/ledger';
 import { registerMemberRoutes } from './modules/members';
 import { registerOpeningRoutes } from './modules/opening';
+import { registerPrintRoutes } from './modules/print';
 import { registerShiftRoutes } from './modules/shifts';
 import { registerDashboardRoutes } from './modules/dashboard';
 import { registerSettingsRoutes } from './modules/settings';
@@ -112,6 +113,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerWalletRoutes(app, deps);
   registerOpeningRoutes(app, deps);
   registerShiftRoutes(app, deps);
+  registerPrintRoutes(app, deps);
   registerDashboardRoutes(app, deps);
   registerLedgerRoutes(app, deps);
   registerSettlementRoutes(app, deps);
