@@ -9,6 +9,7 @@ import { api } from '../lib/api';
 import { useCan, useSession } from '../lib/session';
 import { cn } from '../lib/utils';
 import { LogoMark } from './Brand';
+import { InstanceTag } from './InstanceTag';
 import { PendingOpsBanner } from './PendingOpsBanner';
 import { FrontdeskPendingBanner } from '../features/frontdesk/PendingBanner';
 import { Badge } from './ui';
@@ -43,6 +44,7 @@ const NAV: NavItem[][] = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const can = useCan();
+  const session = useSession();
   const todo = useQuery({
     queryKey: ['inv', 'todo-count'],
     queryFn: () => api.get<{ count: number }>('/api/inventory/todo-count'),
@@ -98,6 +100,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
             ))}
         </div>
+        <InstanceTag instance={session.instance} version={session.version} commit={session.commit} />
         <UserMenu />
       </nav>
       <div className="flex min-w-0 flex-1 flex-col">

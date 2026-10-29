@@ -1,6 +1,6 @@
 # Mac mini 部署手册
 
-目标：办公室 Mac mini 运行浴族服务，门店电脑和平板在同一局域网内用浏览器访问；断电重启后自动恢复；每天自动备份到外置盘，并加密后上传到阿里云 OSS。管理后台只在局域网和 Tailscale 内打开，不对公网做端口转发。
+目标：办公室 Mac mini 运行浴族服务，门店电脑和平板在同一局域网内用浏览器访问；断电重启后自动恢复；每小时自动备份到外置盘（每份都在临时库里试恢复核验），每天加密后上传到阿里云 OSS。管理后台只在局域网和 Tailscale 内打开，不对公网做端口转发。
 
 ## 1. 准备 Mac mini
 
@@ -10,11 +10,11 @@
 4. **系统设置 → 用户与群组**：为运行服务的账户开启**自动登录**（Docker Desktop 需要登录后才启动）。
 5. 安装 **Docker Desktop for Mac（Apple 芯片版）** 或 **OrbStack**，并在设置中勾选「登录时启动」。
 6. 安装 Git（首次执行 `git` 时系统会提示安装命令行工具）。
-7. 接上备份用的外置硬盘，例如挂载在 `/Volumes/YuzuBackup`，新建目录 `/Volumes/YuzuBackup/yuzu`。外置盘在登录后应自动挂载，不要每次都弹出密码框。
+7. 接上备份用的外置硬盘，例如挂载在 `/Volumes/YuzuBackup`，新建目录 `/Volumes/YuzuBackup/yuzu`，并在里面放一个哨兵文件：`touch /Volumes/YuzuBackup/yuzu/.yuzu-backup-target`。备份服务只在看到这个文件时才写备份，外置盘没挂载时不会误写到内置盘。外置盘在登录后应自动挂载，不要每次都弹出密码框。
 8. **路由器不要做端口转发**，不要把 8080 或其他浴族端口映射到公网。店外访问走第 10 节的 Tailscale。
-9. **系统设置 → 通用 → 日期与时间**：时区设为上海。备份容器按 `.env` 里的 `APP_TIMEZONE` 在凌晨 4:00 备份，上传任务按 Mac 的系统时区在 05:10 运行，两边需要一致。
+9. **系统设置 → 通用 → 日期与时间**：时区设为上海。备份服务按 `.env` 里的 `APP_TIMEZONE` 给备份命名，并把每天 4:00 之后的第一份记为 daily；上传任务按 Mac 的系统时区在 05:10 运行，两边需要一致。
 
-> 国内网络拉取 Docker 镜像较慢时：在 Docker Desktop → Settings → Docker Engine 配置镜像加速，或在 `.env` 中设置 `NODE_IMAGE` / `POSTGRES_IMAGE` / `NPM_REGISTRY` 使用国内镜像源（见 `.env.example`）。
+> 国内网络拉取 Docker 镜像较慢时：在 Docker Desktop → Settings → Docker Engine 配置镜像加速，或在 `.env` 中设置 `NODE_IMAGE` / `POSTGRES_IMAGE` / `NPM_REGISTRY` / `ALPINE_MIRROR` 使用国内镜像源（见 `.env.example`）。
 
 ## 2. 获取代码并配置
 
@@ -22,7 +22,7 @@
 cd ~
 git clone https://github.com/Venture-VV/yuzu.git
 cd yuzu
-git checkout v0.3.0          # 只部署 main 上的版本标签（git tag 查看最新），不部署开发分支
+git checkout v0.3.3          # 换成 main 上最新的版本标签（git tag --sort=-creatordate | head -3），不部署开发分支
 cp .env.example .env
 open -e .env                 # 用文本编辑器修改
 ```
@@ -31,10 +31,13 @@ open -e .env                 # 用文本编辑器修改
 
 | 变量 | 说明 |
 | --- | --- |
-| `APP_ENV` | 试用填 `trial`，正式填 `production`（正式环境禁止写入演示数据） |
+| `APP_ENV` | 试用填 `trial`，正式填 `production`（试用、正式环境都禁止写入演示数据） |
+| `YUZU_INSTANCE` | 页面常显的实例标识：正式服填 `prod`，影子运行填 `shadow` |
 | `POSTGRES_PASSWORD` | 数据库密码，建议用 `openssl rand -hex 24` 生成（只含字母数字，避免连接串转义问题） |
 | `INIT_OWNER_USERNAME` / `INIT_OWNER_PASSWORD` | 第一位店主账号，首次登录后必须改密 |
 | `BACKUP_DIR` | `/Volumes/YuzuBackup/yuzu` |
+| `BACKUP_REQUIRE_SENTINEL` | `true`（配合第 1 节的哨兵文件） |
+| `WECOM_WEBHOOK_URL` | 企业微信群机器人的 Webhook 地址，看门狗告警用（第 3.2 节） |
 | `APP_PORT` | 默认 8080 |
 
 `.env` 含密码，不会也不应提交到 GitHub。OSS 密钥和 age 公钥在做第 9 节时再写入这个文件，启动服务本身不依赖它们。
@@ -42,9 +45,11 @@ open -e .env                 # 用文本编辑器修改
 ## 3. 启动
 
 ```bash
+export YUZU_VERSION=$(git describe --tags --always) YUZU_COMMIT=$(git rev-parse HEAD)   # 页面显示版本与 SHA
 docker compose up -d --build
 docker compose ps            # app、db 显示 (healthy)，backup 显示 Up
 docker compose logs app      # 应看到「已应用迁移」「已创建初始店主账号」「浴族 yuzu 已启动」
+docker compose logs backup   # 一两分钟内应看到「✓ yuzu-…-daily.dump（…自检 N/N）」
 ```
 
 在门店电脑浏览器访问 `http://192.168.1.20:8080`（换成 Mac mini 的 IP），用初始店主登录并修改密码，然后在「管理」中：
@@ -53,7 +58,57 @@ docker compose logs app      # 应看到「已应用迁移」「已创建初始�
 2. 录入实际的充值套餐与消费项目；
 3. 按确认结果设置扣款顺序和营业日切换时间。
 
-试用阶段如需演示数据：`docker compose exec app node dist/server/cli.js seed-demo`（正式环境会拒绝）。
+演示数据只写入独立的演示库（`APP_ENV=development`，见第 7 节末尾），试用、正式环境都会拒绝。
+
+### 3.1 前台打印（80mm 热敏机）
+
+结账完成的对话框、前台「结账记录」里的结账单、「交班」里的班次都有「打印」按钮：在新窗口打开 80mm 的打印页，读到数据后自动调出打印，打完关闭窗口。结账单含项目明细、门票档位、各收款方式、储值扣前扣后余额和客人签字栏；交班表含备用金、各收款方式、应有与实点现金、长短款和交接签字。
+
+1. 前台电脑（Windows）装热敏机厂家的驱动，纸张选 80mm 卷纸（驱动里一般叫「80 × 297mm」或「Roll Paper 80mm」），设为默认打印机。
+2. 第一次在 Chrome 里打印时，「更多设置」里边距选「无」、缩放 100%、不勾「页眉和页脚」。Chrome 会记住这台打印机的设置。
+3. 想点「打印」直接出纸、不弹打印预览：给前台专用的 Chrome 快捷方式加启动参数 `--kiosk-printing`（快捷方式属性 →「目标」末尾加一个空格和 `--kiosk-printing`，先关掉所有 Chrome 窗口再用这个快捷方式打开）。之后打印直接发到默认打印机。
+4. 浏览器拦下弹出窗口时，地址栏右侧会提示，选「始终允许」。
+5. iPad 暂不接打印机。
+
+不是正式服时，小票顶部印着实例标识（「测试服·不作数」「影子运行·不作数」等），这些单不能交给客人当凭证。
+
+### 3.2 看门狗与企业微信告警
+
+`scripts/watchdog.sh` 在 Mac mini 上每 5 分钟检查一次：Docker 是否在运行（没运行时尝试打开 Docker Desktop）；应用健康检查连续 3 次失败时自动重启应用；备份服务在运行（没运行就启动）、最新的定时备份不超过两个备份间隔、在临时库核验通过、自检一致；外置盘已挂载；磁盘剩余不少于 10% 且不少于 5 GB。有问题推到企业微信群，同一项每小时最多推一次，恢复时推「已恢复」；每天 9 点后推一条「每日巡检」，哪天没收到就说明这台机器或看门狗本身出了问题。升级、恢复、回退期间不会自动重启应用。
+
+1. 企业微信里建一个告警群（店主、值班经理），群设置 →「群机器人」→ 添加机器人，复制 Webhook 地址（`https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…`），写进 `.env` 的 `WECOM_WEBHOOK_URL`。这个地址相当于密码，只放在 `.env`。
+2. 先手动试一次：`./scripts/watchdog.sh --test`，群里应收到测试消息。
+3. 每 5 分钟自动运行（登录用户的 launchd；代码不在 `~/yuzu` 时把路径换成实际目录；影子库和正式服各装一份，`Label` 与文件名分开）：
+
+```bash
+mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
+cat > "$HOME/Library/LaunchAgents/com.yuzu.watchdog.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.yuzu.watchdog</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>${HOME}/yuzu/scripts/watchdog.sh</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>300</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardErrorPath</key>
+  <string>${HOME}/Library/Logs/yuzu-watchdog.err.log</string>
+</dict>
+</plist>
+PLIST
+launchctl bootout "gui/$(id -u)/com.yuzu.watchdog" 2>/dev/null || true
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.yuzu.watchdog.plist"
+launchctl enable "gui/$(id -u)/com.yuzu.watchdog"
+```
+
+运行记录在项目目录的 `.watchdog/watchdog.log`（平时没有问题就不写）。macOS 第一次让后台的 bash 读外置盘时可能弹窗询问，点「允许」；如果日志里出现 `Operation not permitted`，到「系统设置 → 隐私与安全性 → 文件与文件夹」给 bash 打开「可移除的宗卷」（这一步尚未在门店 Mac mini 上实测）。
 
 ## 4. 上线前验证清单
 
@@ -63,10 +118,15 @@ docker compose logs app      # 应看到「已应用迁移」「已创建初始�
 - [ ] 断开门店外网（拔掉光猫上行），局域网内仍可正常登录、充值、消费
 - [ ] 路由器没有端口转发。手机改用蜂窝网络、不连店内 Wi-Fi，访问 `http://<局域网 IP>:8080` 打不开
 - [ ] 店主的手机或家里的电脑登录同一个 Tailscale 账号后，用 Tailscale IP 或 MagicDNS 打开 `:8080` 能登录。未加入该网络的设备打不开。没有开启 Tailscale Funnel，也没有公网域名指向管理后台
-- [ ] `./scripts/backup.sh` 成功，备份文件出现在外置盘
+- [ ] `./scripts/backup.sh` 成功，外置盘出现 `.dump` 与同名的 `.json` 说明；`docker compose logs backup` 每小时有一行 ✓
+- [ ] `./scripts/verify-backup.sh <外置盘上最新的备份>` 最后一行是「✓ 备份可以恢复，内容与备份时一致」
+- [ ] 拔掉外置盘：`docker compose logs backup` 报「没有哨兵文件」，内置盘上没有出现备份；接回后执行 `docker compose restart backup`，下一份照常写到外置盘
 - [ ] 手动跑一次第 9 节的上传脚本，私有 OSS Bucket 的 `yuzu/` 前缀下出现对应的 `.age` 文件；`git status` 不列出 `.env`
-- [ ] 从 OSS 下载这份备份，用店外保管的 age 私钥解密，`pg_restore -l` 能列出内容；在独立演练目录里 `./scripts/restore.sh`，结束时会员 4 项、库存 5 项核对全部 ✓
-- [ ] 再用外置盘上的备份在正式环境做一次恢复演练：`./scripts/restore.sh <备份文件>`，结束时核对全部 ✓
+- [ ] 按第 9.7 节从 OSS 取回这份备份，用店外保管的 age 私钥解密，`./scripts/verify-backup.sh` 全部 ✓；在独立演练目录里 `./scripts/restore.sh`，指纹一致，结束时自检全部 ✓
+- [ ] 上线前（库里还没有真实业务时）用外置盘上的备份在正式环境做一次恢复演练：`./scripts/restore.sh <备份文件>`，指纹一致，结束时自检全部 ✓
+- [ ] 看门狗：`./scripts/watchdog.sh --test` 群里收到测试消息；`docker compose stop app` 后约 15 分钟内群里收到「已自动重启」，前台恢复可用，再过 5 分钟收到「已恢复」
+- [ ] 一键回退演练（库里还没有真实业务时）：用 `update.sh` 升到新版本后执行 `./scripts/rollback.sh`，回到原版本，`check` 全部 ✓
+- [ ] 前台电脑按第 3.1 节设好热敏机，打一张结账单和一张交班表：内容完整、左右不缺字；正式服的小票顶部没有实例标识
 - [ ] 清理演示数据：试用结束转正式时，建议使用全新的数据库卷（见下文「环境隔离」）
 
 ## 5. 日常运维
@@ -77,13 +137,27 @@ docker compose logs app      # 应看到「已应用迁移」「已创建初始�
 | 查看日志 | `docker compose logs -f app`、`docker compose logs backup` |
 | 重启服务 | `docker compose restart app` |
 | 立即备份 | `./scripts/backup.sh` |
+| 核验一份备份（不碰当前数据） | `./scripts/verify-backup.sh <备份文件>` |
+| 外置盘拔下又接回 | `docker compose restart backup` |
 | 立即加密并上传到 OSS | `bash "$HOME/Library/Application Support/yuzu/oss-upload.sh"` |
 | 查看 OSS 上传日志 | `tail -n 50 "$HOME/Library/Logs/yuzu-oss-upload.log"` |
 | 查看 Tailscale 地址 | `tailscale ip -4`（未装命令行入口时见第 10 节） |
-| 核对余额与流水、库存结存与库存流水 | `docker compose exec app node dist/server/cli.js check` |
+| 自检（会员、营业口径、库存、前台） | `docker compose exec app node dist/server/cli.js check` |
+| 每日对账包（只读） | `./scripts/daily-recon.sh [营业日]`：写到项目目录的 `recon/<营业日>/`，含日结汇总、结账单、部门参考表、异常清单、交班 |
+| 某时刻之后有余额变动的会员（退回旧系统时回写 EBC，只读） | `docker compose exec -T app node dist/server/cli.js balance-changes --since "2026-11-05 06:00" > 余额变动.csv` |
 | 店主忘记密码 | `docker compose exec app node dist/server/cli.js reset-password <账号>` |
-| 更新版本 | `./scripts/update.sh <版本标签>`（例如 `v0.3.1`；`git fetch --tags && git tag` 查看） |
+| 更新版本 | `./scripts/update.sh <版本标签>`（例如 `v0.3.3`；`git fetch --tags && git tag` 查看） |
+| 新版本有问题，回到上一版 | `./scripts/rollback.sh`（见下） |
+| 测试告警 / 看门狗记录 | `./scripts/watchdog.sh --test`；`tail -n 50 .watchdog/watchdog.log` |
 | 恢复备份 | `./scripts/restore.sh <备份文件>` |
+
+**回退**：`update.sh` 升级时把正在运行的镜像按完整 SHA 另打一个标签留着，并在 `.deploy/last-update` 记下上一版的提交、镜像、升级前的备份和这次新加的迁移。`./scripts/rollback.sh` 据此回到上一版，不用重新构建：
+
+- 新版本没有加数据库迁移：只切回上一版的程序，数据保留；
+- 新版本加了迁移（迁移只进不退）：同时恢复升级前的备份，先核对文件摘要，导入后比对指纹，一致才启动。升级之后录入的数据会丢失，要按纸质单补录；回退前会先备份当前数据，以便核对。没加迁移也想恢复数据时加 `--restore-data`；
+- 正式环境要当面输入 `ROLLBACK-PRODUCTION`。回退中途出错时会留下维护标记 `.deploy/maintenance`，看门狗不会把应用拉起来，处理完后删掉这个文件。
+
+只有用 v0.3.3 及之后的 `update.sh` 升级过，才有回退记录（升级到 v0.3.3 这一次还是旧脚本在执行，没有记录）。
 
 ## 6. 环境隔离
 
@@ -121,16 +195,18 @@ docker compose -p yuzu-demo exec app node dist/server/cli.js seed-inventory-demo
 
 ## 8. 备份策略
 
-- 店内：`backup` 容器每天 4:00 之后把数据库备份到外置盘（`BACKUP_HOUR` 默认 4，每 5 分钟检查一次，一般在 4:00–4:05 开始），保留 30 天。外置盘是最快的恢复来源，继续用。
-- 店外：同一批 `yuzu-*.dump` 加密后自动上传到阿里云 OSS 私有 Bucket，代替每周手工拷到网盘。步骤见第 9 节。
-- 每月：按第 9 节从 OSS 取回一份，解密后在独立环境做恢复演练。
+- 店内：`backup` 服务每小时把数据库备份到外置盘（`BACKUP_INTERVAL_MINUTES` 默认 60）。每份导出后先在临时库里完整恢复一遍，跑自检、算数据指纹，结果写在备份旁同名的 `.json` 里，然后删掉临时库。每天 4:00 之后的第一份记为 daily（`BACKUP_HOUR` 默认 4）。hourly 保留 48 小时，daily、升级前、恢复前与手动备份保留 30 天。外置盘是最快的恢复来源。
+- 外置盘没挂载（备份目录里看不到哨兵文件 `.yuzu-backup-target`）时，备份服务不写备份，日志里每小时报一次错；手动备份、升级前备份也会拒绝，`update.sh` 因此停下，不在没有备份的情况下升级。
+- 恢复：`restore.sh` 先核对文件摘要，导入后、启动应用前比对数据指纹，不一致就让应用保持停止。
+- 店外：daily、升级前等非 hourly 的备份连同 `.json` 每天加密上传到阿里云 OSS 私有 Bucket，代替每周手工拷到网盘。步骤见第 9 节。每小时备份的异地副本随 R1.4 后续版本加上。
+- 每月：按第 9.7 节从 OSS 取回一份，解密后核验并在独立环境做恢复演练。
 - 更新版本前：`update.sh` 会先在外置盘写一份备份；下一次上传任务会把它一并加密上传。
 
 ## 9. 异地备份：加密后上传阿里云 OSS
 
 「本节由 Grok Bot 补充」
 
-`backup` 容器用的是 `postgres:16-alpine`，只负责 `pg_dump`，备份写到宿主机的 `BACKUP_DIR`。这个容器里没有上传工具，也不放入云账号密钥。上传放在 Mac mini 已登录用户的定时任务里：凌晨备份落盘之后，用 [age](https://github.com/FiloSottile/age) 加密，再用阿里云官方的 [ossutil 2.0](https://help.aliyun.com/zh/oss/developer-reference/ossutil-overview) 传到私有 Bucket。登录用户和 Docker Desktop 是同一套（第 1 节已开自动登录），外置盘也在这个会话里挂载。
+`backup` 服务与应用用同一个镜像，只负责导出、核验和清理，备份写到宿主机的 `BACKUP_DIR`。这个容器里没有上传工具，也不放入云账号密钥。上传放在 Mac mini 已登录用户的定时任务里：凌晨 daily 备份落盘之后，用 [age](https://github.com/FiloSottile/age) 加密，再用阿里云官方的 [ossutil 2.0](https://help.aliyun.com/zh/oss/developer-reference/ossutil-overview) 传到私有 Bucket。登录用户和 Docker Desktop 是同一套（第 1 节已开自动登录），外置盘也在这个会话里挂载。
 
 age 把公钥留在店里、私钥留在店外。Mac mini 只能加密，不能解密。定时任务无法交互输入口令，所以不用 gpg 对称加密。
 
@@ -247,7 +323,7 @@ age --version
 
 ### 9.5 上传脚本
 
-脚本放在仓库外面，避免和业务代码混在一起，也避免被人误提交。它只处理外置盘上已经写完的 `yuzu-*.dump`（容器先写临时文件再改名，看到 `.dump` 就是完整备份），加密到临时目录，上传成功后记下标记，下次跳过。上传失败不会写标记，下次会重试。
+脚本放在仓库外面，避免和业务代码混在一起，也避免被人误提交。它只处理外置盘上已经写完的 `yuzu-*.dump`（备份服务先写临时文件和 `.json` 说明，最后改名，看到 `.dump` 就是完整备份），跳过每小时一份的 `*-hourly.dump`，把备份和旁边的 `.json` 分别加密到临时目录，上传成功后记下标记，下次跳过。上传失败不会写标记，下次会重试。
 
 ```bash
 mkdir -p "$HOME/Library/Application Support/yuzu"
@@ -311,11 +387,19 @@ uploaded=0
 shopt -s nullglob
 for dump in "$BACKUP_DIR"/yuzu-*.dump; do
   base=$(basename "$dump")
+  case "$base" in
+    *-hourly.dump) continue ;;   # 每小时的备份只留在外置盘
+  esac
   if [ -f "$STATE_DIR/$base.ok" ]; then
     continue
   fi
   "$AGE" -r "$AGE_RECIPIENT" -o "$workdir/$base.age" "$dump"
   "$OSSUTIL" cp "$workdir/$base.age" "oss://${OSS_BUCKET}/yuzu/${base}.age" --region "$OSS_REGION"
+  # 备份旁的 .json 记着文件摘要与数据指纹，恢复时用来核对（旧版本的备份没有）
+  if [ -f "$dump.json" ]; then
+    "$AGE" -r "$AGE_RECIPIENT" -o "$workdir/$base.json.age" "$dump.json"
+    "$OSSUTIL" cp "$workdir/$base.json.age" "oss://${OSS_BUCKET}/yuzu/${base}.json.age" --region "$OSS_REGION"
+  fi
   date '+%Y-%m-%d %H:%M:%S' > "$STATE_DIR/$base.ok"
   echo "$LOG_PREFIX 已上传 yuzu/${base}.age"
   uploaded=$((uploaded + 1))
@@ -340,11 +424,11 @@ ossutil ls "oss://${OSS_BUCKET}/yuzu/" --region "$OSS_REGION"
 unset OSS_ACCESS_KEY_ID OSS_ACCESS_KEY_SECRET
 ```
 
-`.env` 里这四行不要有空格或引号。列举结果里应有 `yuzu-日期时间.dump.age`。
+`.env` 里这四行不要有空格或引号。列举结果里应有 `yuzu-日期-时间-备注.dump.age` 与同名的 `.dump.json.age`（v0.3.3 之前的备份没有 `.json`）。
 
 ### 9.6 每天 05:10 自动上传
 
-备份在 4:00 之后几分钟内落盘。上传定在 **05:10**（系统时区）。Mac 若当时关机，这次不会补跑；下次登录时会再跑一遍（脚本会补传还没上传的文件），所以第 1 节的自动登录要保持开启。
+daily 备份在 4:00–5:00 之间落盘（每小时一份，4:00 之后的第一份记为 daily）。上传定在 **05:10**（系统时区）。Mac 若当时关机，这次不会补跑；下次登录时会再跑一遍（脚本会补传还没上传的文件），所以第 1 节的自动登录要保持开启。
 
 ```bash
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
@@ -400,30 +484,36 @@ set -a
 source ./oss.env
 set +a
 ossutil ls "oss://${OSS_BUCKET}/yuzu/" --region "$OSS_REGION"
-ossutil cp "oss://${OSS_BUCKET}/yuzu/yuzu-20261026-040512.dump.age" ./restore.age --region "$OSS_REGION"
+name=yuzu-20261126-041200-daily.dump    # 换成列举结果里的文件名（不带 .age）
+ossutil cp "oss://${OSS_BUCKET}/yuzu/${name}.age" ./restore.age --region "$OSS_REGION"
+ossutil cp "oss://${OSS_BUCKET}/yuzu/${name}.json.age" ./restore.json.age --region "$OSS_REGION"
 age -d -i ./age.txt -o ./restore.dump ./restore.age
+age -d -i ./age.txt -o ./restore.dump.json ./restore.json.age
 unset OSS_ACCESS_KEY_ID OSS_ACCESS_KEY_SECRET
 ```
 
-3. 完整恢复用另一个检出目录，让数据卷和正式环境分开。同一台 Mac 上时端口和备份目录也要错开。先确认备份可读（只列出内容，不改数据库），再执行恢复：
+`.json` 解密后要和备份同名加 `.json`（`restore.dump.json`），核验与恢复时才会读到它。v0.3.3 之前的备份没有 `.json`，跳过第二个 `cp` 与 `age -d`，核验时只做恢复与自检。
+
+3. 完整恢复用另一个检出目录，让数据卷和正式环境分开。同一台 Mac 上时端口和备份目录也要错开。先核验（只在临时库里恢复，不改演练库），再执行恢复：
 
 ```bash
 git clone https://github.com/Venture-VV/yuzu.git ~/yuzu-drill
 cd ~/yuzu-drill
-git checkout v0.3.0          # 与备份来源环境相同的版本标签
+git checkout v0.3.3          # main 上的版本标签，不低于备份来源（.json 里的 app.version）
 cp .env.example .env
 # 编辑 .env：另一组 POSTGRES_PASSWORD，APP_PORT=8082，BACKUP_DIR 指向演练专用目录
+export YUZU_VERSION=$(git describe --tags --always) YUZU_COMMIT=$(git rev-parse HEAD)
 docker compose up -d --build
-docker compose exec -T db pg_restore -l < "$HOME/yuzu-restore/restore.dump" | head
+./scripts/verify-backup.sh "$HOME/yuzu-restore/restore.dump"
 ./scripts/restore.sh "$HOME/yuzu-restore/restore.dump"
 ```
 
-按提示输入 `RESTORE`。结束时应看到会员与库存核对全部 ✓。`docker compose ps` 的项目名应是 `yuzu-drill`。
+`verify-backup.sh` 最后一行应是「✓ 备份可以恢复，内容与备份时一致」。`restore.sh` 按提示输入 `RESTORE`，导入后显示「✓ 与备份时记下的指纹一致」，结束时自检全部 ✓。`docker compose ps` 的项目名应是 `yuzu-drill`。备份来自更旧的版本时，应用启动会补跑迁移，核验时也会先补跑迁移再自检。
 
 4. 演练结束，删掉这台电脑上的明文、密文和私钥副本。离线保管的那份私钥留下。
 
 ```bash
-rm -f "$HOME/yuzu-restore/restore.dump" "$HOME/yuzu-restore/restore.age" "$HOME/yuzu-restore/age.txt"
+rm -f "$HOME/yuzu-restore/restore.dump" "$HOME/yuzu-restore/restore.dump.json" "$HOME/yuzu-restore/restore.age" "$HOME/yuzu-restore/restore.json.age" "$HOME/yuzu-restore/age.txt"
 ```
 
 外置盘还在时，日常恢复仍优先用盘上的未加密 `.dump` 和 `./scripts/restore.sh`。OSS 这一路用于外置盘和 Mac mini 一起不可用的时候（失窃、火灾、磁盘损坏）。

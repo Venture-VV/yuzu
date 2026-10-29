@@ -25,6 +25,8 @@ import { PayablesPage } from './features/payables/PayablesPage';
 import { PaymentFormPage } from './features/payables/PaymentFormPage';
 import { PoFormPage } from './features/purchasing/PoFormPage';
 import { PurchasingPage } from './features/purchasing/PurchasingPage';
+import { CheckoutPrintPage } from './features/print/CheckoutPrintPage';
+import { ShiftPrintPage } from './features/print/ShiftPrintPage';
 import { useCan } from './lib/session';
 
 const queryClient = new QueryClient({
@@ -37,8 +39,8 @@ const queryClient = new QueryClient({
   },
 });
 
-/** 登录守卫：未登录跳转登录页；首次登录强制修改密码。 */
-function AuthGate() {
+/** 登录守卫：未登录跳转登录页；首次登录强制修改密码。bare 用于打印页：不带导航栏 */
+function AuthGate({ bare = false }: { bare?: boolean }) {
   const session = useSessionQuery();
   const navigate = useNavigate();
   const location = useLocation();
@@ -81,9 +83,13 @@ function AuthGate() {
   }
   return (
     <SessionProvider value={session.data}>
-      <AppShell>
+      {bare ? (
         <Outlet />
-      </AppShell>
+      ) : (
+        <AppShell>
+          <Outlet />
+        </AppShell>
+      )}
     </SessionProvider>
   );
 }
@@ -98,6 +104,14 @@ function Home() {
 
 const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
+  {
+    path: '/print',
+    element: <AuthGate bare />,
+    children: [
+      { path: 'checkout/:id', element: <CheckoutPrintPage /> },
+      { path: 'shift/:id', element: <ShiftPrintPage /> },
+    ],
+  },
   {
     element: <AuthGate />,
     children: [

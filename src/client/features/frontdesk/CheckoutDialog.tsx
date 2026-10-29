@@ -25,6 +25,7 @@ import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Input, MoneyInput, Notice, Select, Skeleton, Textarea } from '../../components/ui';
+import { PrintButton } from '../print/PrintButton';
 import { ZoneChip } from './parts';
 import { PendingPanel, useFrontdeskOp } from './pending';
 import { stayText, useCheckout, useCheckoutPreview, useCheckouts, useRefreshFrontdesk, useTicketTypes } from './queries';
@@ -218,9 +219,14 @@ export function CheckoutDialog({
           </span>
         }
         footer={
-          <Button variant="primary" size="lg" onClick={() => onDone(result)} data-testid="checkout-finish">
-            完成
-          </Button>
+          <>
+            <PrintButton path={`/print/checkout/${result.id}`} size="lg" testId="checkout-print">
+              打印结账单
+            </PrintButton>
+            <Button variant="primary" size="lg" onClick={() => onDone(result)} data-testid="checkout-finish">
+              完成
+            </Button>
+          </>
         }
       >
         <CheckoutReceipt detail={result} />
@@ -734,6 +740,9 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
       ) : (
         <>
           <CheckoutReceipt detail={d} />
+          <PrintButton path={`/print/checkout/${d.id}`} testId="checkout-reprint">
+            打印结账单
+          </PrintButton>
           {d.status === 'completed' && can('frontdesk.checkoutVoid') && !voiding && (
             <Button variant="secondary" icon={<Undo2 className="size-4" />} onClick={() => setVoiding(true)} data-testid="checkout-void">
               反结账

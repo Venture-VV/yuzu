@@ -4,6 +4,7 @@ import type { BusinessHours } from './business-date';
 import type { PriceTier, Strength, TierPrice } from './catalog';
 import type { CheckoutMethod, CouponPlatform } from './checkout';
 import type { DeductionRule, WalletBalance } from './deduction';
+import type { InstanceKind } from './instance';
 import type { EntryType, PaymentMethod } from './labels';
 import type { MemberCustomValues, MemberFieldDef } from './member-fields';
 import type { Duty, Permission, Role } from './permissions';
@@ -52,6 +53,9 @@ export interface SessionInfo {
   timezone: string;
   env: AppEnv;
   version: string;
+  /** 构建时写入的提交 SHA（可能为空） */
+  commit: string;
+  instance: InstanceKind;
   /** 库里存在合成演示数据 */
   hasSyntheticData: boolean;
 }

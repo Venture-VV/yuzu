@@ -54,9 +54,10 @@ function localTime(date: string, hour: number, minute: number): Date {
   return new Date(`${realDate}T${String(hour % 24).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+08:00`);
 }
 
+/** force：库里已有会员演示数据时仍再写一遍（只在开发环境可用）；试用、正式环境一律拒绝，与其他演示数据命令一致 */
 export async function seedDemo(sql: Sql, config: AppConfig, options: { force?: boolean; days?: number } = {}) {
-  if (config.env === 'production' && !options.force) {
-    throw new Error('正式环境禁止写入演示数据（如确需写入，请加 --force）');
+  if (config.env === 'production' || config.env === 'trial') {
+    throw new Error(`当前是${config.env === 'trial' ? '试用' : '正式'}环境，禁止写入会员演示数据。请另建独立的演示库（APP_ENV=development）再执行。`);
   }
   const [existing] = await sql<{ count: number }[]>`SELECT count(*) AS count FROM members WHERE is_synthetic`;
   if (existing && existing.count > 0 && !options.force) {

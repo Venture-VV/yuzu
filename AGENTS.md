@@ -10,9 +10,10 @@
 
 ## 环境隔离（红线）
 
-- 门店试用库（`APP_ENV=trial`）与正式库：**禁止**写入任何演示数据、验收数据，**禁止**在其上跑会改数据的测试，未经店主同意不更新运行实例。`seed-inventory-demo`、`seed-frontdesk-demo`、`seed-billing-demo` 在 trial / production 下会拒绝执行；`seed-demo` 现在只在 production 拒绝（加 `--force` 可绕过），R1.3 改为与其他三个一致。
+- 门店试用库（`APP_ENV=trial`）与正式库：**禁止**写入任何演示数据、验收数据，**禁止**在其上跑会改数据的测试，未经店主同意不更新运行实例。`seed-demo`、`seed-inventory-demo`、`seed-frontdesk-demo`、`seed-billing-demo` 在 trial / production 下都会拒绝执行，没有绕过开关。
 - 验收一律使用**新建的独立演示库**；`npm test` 使用独立测试库（会清空该库）。
-- 云服务器上的测试服不记真实业务：演练库用 `APP_ENV=production` 但**不是正式库**，不执行任何 seed 命令，不得导入真实会员余额，只在店主约定的窗口更新；演示库用 `APP_ENV=development`。两者都只经 Tailscale 访问，见 `docs/ROADMAP.md` 第 6 节。
+- 云服务器上的测试服不记真实业务：演练库用 `APP_ENV=production` 但**不是正式库**，不执行任何 seed 命令，不得导入真实会员余额，只在店主约定的窗口更新；演示库用 `APP_ENV=development`。两者都只经 Tailscale 访问，见 `docs/DEPLOY_TEST_SERVER.md` 与 `docs/ROADMAP.md` 第 6 节。
+- 每个实例在 `.env` 设置 `YUZU_INSTANCE`（`prod` 正式服 / `shadow` 影子运行 / `test` 测试服 / `demo` 演示库），登录页与导航栏常显实例标识与「版本 + SHA」；`APP_ENV=production` 没设置时显示「未设置实例标识」。标识或 SHA 显示错误是阻断项。
 - 密钥、`.env`、业务数据与备份文件不进入 Git。
 
 ## 常用命令
@@ -26,9 +27,16 @@ node dist/server/cli.js seed-inventory-demo
 node dist/server/cli.js seed-frontdesk-demo
 node dist/server/cli.js seed-billing-demo  # 结账、反结账与交班（建在前台演示数据上）
 node dist/server/cli.js check              # 会员（含营业口径）、库存、前台自检，全部 ✓ 才算一致
+node dist/server/cli.js fingerprint        # 数据指纹（只读）；--expect <摘要> 比对，不一致退出码为 1
+./scripts/backup.sh                        # 立即备份：临时库试恢复、自检并记下指纹（写 BACKUP_DIR，含 .json 说明）
+./scripts/verify-backup.sh <备份文件.dump>  # 核验一份备份，不碰当前数据库
+./scripts/rollback.sh                      # 回到上一次 update.sh 之前的版本（加了迁移时同时恢复升级前的备份）
+./scripts/daily-recon.sh [营业日]           # 每日对账包（只读）：日结汇总、结账单、部门参考表、异常清单、交班，写到 recon/<营业日>/
+node dist/server/cli.js balance-changes --since "YYYY-MM-DD HH:MM"   # 某时刻之后有余额变动的会员（只读，回写 EBC 用）
 node dist/server/cli.js import-hand-tags --store-list   # 预览导入店主 747 个真实柜号；--apply 才写入（真实业务数据，门店环境须店主同意）
 node dist/server/cli.js import-price-list --tangqi      # 预览导入汤崎价目表（29 个项目、多档价格）；--apply 才写入（同上）
-node dist/server/cli.js import-opening <余额.csv> --operator <店主账号>   # 预览导入旧系统会员余额期初；--apply 才写入（同上）
+node dist/server/cli.js import-opening <余额.csv> --operator <店主账号> --control 人数,本金,赠金,累计充值 [--exclude <排除清单.csv>]
+                                          # 预览导入旧系统会员余额期初并与 EBC 控制总数比对；--apply 才写入（同上；正式环境必须给控制总数）
 E2E_BASE_URL=http://127.0.0.1:<端口> npm run e2e   # 1440×900 / 1024×768 / 820×1180
 ```
 

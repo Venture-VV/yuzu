@@ -37,6 +37,8 @@ export async function buildSessionInfo({ sql, config }: Deps, actor: Actor): Pro
     timezone: config.timezone,
     env: config.env,
     version: config.version,
+    commit: config.commit,
+    instance: config.instance,
     hasSyntheticData: synthetic?.exists ?? false,
   };
 }
@@ -53,7 +55,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: Deps) {
       maxAge: config.sessionTtlHours * 3600 * 4,
     });
 
-  // 登录页使用：门店名称；非正式环境且存在演示数据时提示演示账号
+  // 登录页使用：门店名称、实例标识与版本；只有开发环境（演示库）且存在演示数据时才提示演示账号
   app.get('/api/public/info', async () => {
     const settings = await loadSettings(sql);
     const [synthetic] = await sql<{ exists: boolean }[]>`SELECT (EXISTS (SELECT 1 FROM members WHERE is_synthetic) OR EXISTS (SELECT 1 FROM materials WHERE is_synthetic) OR EXISTS (SELECT 1 FROM hand_tags WHERE is_synthetic)) AS exists`;
@@ -61,7 +63,9 @@ export function registerAuthRoutes(app: FastifyInstance, deps: Deps) {
       storeName: settings.storeName,
       env: config.env,
       version: config.version,
-      demoHint: config.env !== 'production' && (synthetic?.exists ?? false),
+      commit: config.commit,
+      instance: config.instance,
+      demoHint: config.env === 'development' && (synthetic?.exists ?? false),
     };
   });
 

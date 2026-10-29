@@ -7,7 +7,7 @@
 //   · 累计充值是旧系统里这位会员累计充值的实收金额，只用于 VIP 柜等级（口径待确认），不计入充值实收；
 //   · 本金和赠金都为 0 的行只建档、不记余额。
 
-import { parseYuan } from './money';
+import { formatYuan, parseYuan } from './money';
 
 export interface OpeningRow {
   /** 文件里的行号（含表头，从 1 开始） */
@@ -182,6 +182,72 @@ export function parseOpeningCsv(text: string): OpeningCsvResult {
   return { rows, errors };
 }
 
+/** EBC 控制总数：旧系统报表上的会员人数与本金、赠金、累计充值合计（金额为分） */
+export interface OpeningTotals {
+  count: number;
+  principal: number;
+  bonus: number;
+  legacyRecharged: number;
+}
+
+/** 与控制总数的比对（R1.5）：本次导入 + 排除清单 = 控制总数，四项分毫不差才能导入 */
+export interface OpeningControlCheck {
+  expected: OpeningTotals;
+  imported: OpeningTotals;
+  excluded: OpeningTotals;
+  ok: boolean;
+  /** 不一致的项，例如「本金：导入 + 排除 ¥1,200.00，控制总数 ¥1,212.00，差 ¥12.00」 */
+  mismatches: string[];
+}
+
+const ZERO: OpeningTotals = { count: 0, principal: 0, bonus: 0, legacyRecharged: 0 };
+
+/**
+ * 排除清单（这次不导入、之后到店补导的会员，例如没有合格手机号、一号多卡）只用来对总数：
+ * 表头与导入文件相同，逐行累计人数与本金、赠金、累计充值；不核对姓名与手机号，金额写错的行报错。
+ */
+export function sumOpeningCsv(text: string): { totals: OpeningTotals; errors: { line: number; message: string }[] } {
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
+  const errors: { line: number; message: string }[] = [];
+  const totals = { ...ZERO };
+  const headerIndex = lines.findIndex((l) => l.trim() !== '');
+  if (headerIndex < 0) return { totals, errors };
+  const header = splitLine(lines[headerIndex]!).map((h) => h.toLowerCase().replace(/\s+/g, ''));
+  const col = (key: string) => header.findIndex((h) => HEADER_ALIASES[key]!.includes(h));
+  const [principalCol, bonusCol, rechargedCol] = [col('principal'), col('bonus'), col('total_recharged')];
+  if (principalCol < 0) return { totals, errors: [{ line: headerIndex + 1, message: '表头缺少「本金」列' }] };
+  for (let i = headerIndex + 1; i < lines.length; i++) {
+    if (lines[i]!.trim() === '') continue;
+    const cells = splitLine(lines[i]!);
+    const amounts = [principalCol, bonusCol, rechargedCol].map((c) => (c < 0 ? 0 : money(cells[c] ?? '')));
+    if (amounts.some((v) => v === null)) {
+      errors.push({ line: i + 1, message: '本金、赠金或累计充值不正确（单位元，最多两位小数，不能为负）' });
+      continue;
+    }
+    totals.count += 1;
+    totals.principal += amounts[0]!;
+    totals.bonus += amounts[1]!;
+    totals.legacyRecharged += amounts[2]!;
+  }
+  return { totals, errors };
+}
+
+export function compareOpeningControl(expected: OpeningTotals, imported: OpeningTotals, excluded: OpeningTotals = ZERO): OpeningControlCheck {
+  const items: [keyof OpeningTotals, string, (v: number) => string][] = [
+    ['count', '人数', (v) => `${v} 位`],
+    ['principal', '本金', formatYuan],
+    ['bonus', '赠金', formatYuan],
+    ['legacyRecharged', '累计充值', formatYuan],
+  ];
+  const mismatches = items.flatMap(([key, label, show]) => {
+    const got = imported[key] + excluded[key];
+    if (got === expected[key]) return [];
+    const diff = got - expected[key];
+    return [`${label}：导入${excluded.count ? ' + 排除' : ''} ${show(got)}，控制总数 ${show(expected[key])}，${diff > 0 ? '多' : '少'} ${show(Math.abs(diff))}`];
+  });
+  return { expected, imported, excluded, ok: mismatches.length === 0, mismatches };
+}
+
 /** 管理页预览与导入的结果 */
 export interface OpeningImportReport {
   dryRun: boolean;
@@ -197,6 +263,8 @@ export interface OpeningImportReport {
   principalTotal: number;
   bonusTotal: number;
   legacyRechargedTotal: number;
+  /** 填了 EBC 控制总数时的比对结果 */
+  control: OpeningControlCheck | null;
   errors: { line: number; message: string }[];
   /** 前 30 行的处理方式，供核对 */
   samples: { line: number; name: string; phone: string; principal: number; bonus: number; action: 'create' | 'match'; memberNo: string | null }[];

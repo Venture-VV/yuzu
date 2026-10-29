@@ -33,7 +33,7 @@
 11. [目录结构](#目录结构)
 12. [后续清单](#后续清单)
 
-相关文档：[Mac mini 部署手册](docs/DEPLOY_MAC_MINI.md) · [待确认经营事项](docs/PENDING_DECISIONS.md) · [G2 提测交接](docs/HANDOFF_G2.md) · [设计语言](docs/DESIGN.md) · [变更记录](CHANGELOG.md)
+相关文档：[推进路线](docs/ROADMAP.md) · [Mac mini 部署手册](docs/DEPLOY_MAC_MINI.md) · [测试服部署手册](docs/DEPLOY_TEST_SERVER.md) · [待确认经营事项](docs/PENDING_DECISIONS.md) · [G2 提测交接](docs/HANDOFF_G2.md) · [设计语言](docs/DESIGN.md) · [变更记录](CHANGELOG.md)
 
 ---
 
@@ -49,9 +49,9 @@
 | 流水与日结 | 按营业日查看、筛选、导出 CSV；日结分开展示充值实收、储值消费、赠金与撤销；四项余额核对；撤销、跨日撤销、重复提交、余额不足等异常记录；店主确认日结并保存快照 |
 | 异常与恢复 | 重复点击、超时重试、多人同时操作不会重复记账或透支；超时后显示「结果待确认」，可按操作编号查回原单 |
 | 管理 | 员工账号、充值套餐、消费项目（多档价格与时长、适用宾客、力道、精油、热疗、超人气等属性；按价目表导入，内置店主的汤崎价目表）、经营规则（扣款顺序、营业日切换时间与营业时间、单笔上限 50 万与超限当场授权、撤销时限）、操作审计 |
-| 部署运维 | Docker Compose（应用 + PostgreSQL + 自动备份）；启动自动增量迁移；备份 / 恢复 / 更新脚本；前端资源全部本地打包，外网中断不影响局域网使用；GitHub Actions 自动测试 |
+| 部署运维 | Docker Compose（应用 + PostgreSQL + 每小时备份，每份在临时库恢复核验并记下数据指纹）；启动自动增量迁移；备份 / 核验 / 恢复 / 更新脚本；页面常显实例标识与版本 SHA；每日对账包与余额变动清单（只读命令）；前端资源全部本地打包，外网中断不影响局域网使用；GitHub Actions 自动测试 |
 | 前台手牌（S2） | 手牌池（男宾 / 女宾，普通柜与按会员等级使用的 VIP 柜，按清单导入 747 个真实柜号，锁定、停用）；散客 / 会员接待，一次发多张牌并自动建同行组，在店客人可后加入同行；手牌共同账单挂账（价格快照）、作废留痕、换牌账单跟人走、撤销误开的牌、按手牌或同行组预结账；「左手牌矩阵 + 右小票」双栏工作台，数字键盲打牌号。详见 [前台手牌与共同账单](#前台手牌与共同账单s2) |
-| 收银结账（S3） | 门票按票种（店主确认的 499 / 599、699 / 899、999 / 1199，1 米以下儿童免票）每 12 小时跳一档；单牌或同行合并结账，结清才能离店；现金、微信、支付宝、银行卡、其他、会员储值（同一事务生成标准消费单）、团购券（完整券码防重）组合收款；反结账；交班表（备用金、应有现金、长短款）；日结增加营业口径与「实收合计」；经营看板。详见 [收银结账与交班](#收银结账与交班s3) |
+| 收银结账（S3） | 门票按票种（店主确认的 499 / 599、699 / 899、999 / 1199，1 米以下儿童免票）每 12 小时跳一档；单牌或同行合并结账，结清才能离店；现金、微信、支付宝、银行卡、其他、会员储值（同一事务生成标准消费单）、团购券（完整券码防重）组合收款；反结账；交班表（备用金、应有现金、长短款）；80mm 结账单与交班表打印（浏览器打印，见部署手册 3.1）；日结增加营业口径与「实收合计」；经营看板。详见 [收银结账与交班](#收银结账与交班s3) |
 | 库存与采购 | 物料 / 供应商 / 部门档案；期初、收货（送达 / 合格实收 / 拒收）、部门领用与退回、直接耗用、报损、盘点（待核差异 → 负责人确认）、退供应商；采购单（版本、确认、分批收货、关闭、先收货后补单）；同口径比价；期初未付、付款核销、供应商余额与对账单；负责人待办；库存卡、收发汇总、导出与账实自检。详见 [库存与采购](#库存与采购) |
 
 **合成验收案例已通过**（集成测试 + 浏览器实操 + 已部署环境各跑一遍）：充值本金 100 → 消费 30 → 余额 70 → 撤销 → 恢复 100；本金 + 赠金场景按三种候选扣款规则分别验证。
@@ -188,14 +188,15 @@ npm run cli -- seed-billing-demo     # 在前台演示数据上写入结账、�
 
 ## 试用 / 正式部署
 
-详细步骤见 **[Mac mini 部署手册](docs/DEPLOY_MAC_MINI.md)**，简要流程：
+详细步骤见 **[Mac mini 部署手册](docs/DEPLOY_MAC_MINI.md)**（云服务器测试服见 [测试服部署手册](docs/DEPLOY_TEST_SERVER.md)），简要流程：
 
 ```bash
 git clone https://github.com/Venture-VV/yuzu.git && cd yuzu
-git checkout v0.3.0                 # 只部署 main 上的版本标签（git tag 查看最新），不部署开发分支
-cp .env.example .env                # 修改数据库密码、初始店主、备份目录
+git checkout v0.3.3                 # 换成 main 上最新的版本标签（git tag --sort=-creatordate | head -3），不部署开发分支
+cp .env.example .env                # 修改数据库密码、初始店主、备份目录、实例标识 YUZU_INSTANCE
+export YUZU_VERSION=$(git describe --tags --always) YUZU_COMMIT=$(git rev-parse HEAD)   # 页面显示版本与 SHA
 docker compose up -d --build
-docker compose ps                   # app / db 显示 healthy 即可
+docker compose ps                   # app / db 显示 healthy，backup 显示 Up
 ```
 
 门店电脑或平板浏览器访问 `http://<Mac mini 局域网 IP>:8080`。
@@ -233,25 +234,33 @@ docker compose exec app node dist/server/cli.js reset-password boss
 ./scripts/update.sh v0.3.1             # 换成要更新到的版本标签（git fetch --tags && git tag 查看）
 ```
 
-脚本只接受已合并进 main 的版本标签或完整 SHA，开发分支（`claude/*` 等）、未合并的 PR 与缩写 SHA 会被拒绝、不做任何改动。应用启动时自动执行数据库迁移；更新失败时执行 `./scripts/update.sh <上个版本标签>` 即可回退。
+脚本只接受已合并进 main 的版本标签或完整 SHA，开发分支（`claude/*` 等）、未合并的 PR 与缩写 SHA 会被拒绝、不做任何改动。应用启动时自动执行数据库迁移。升级前正在运行的镜像按完整 SHA 另打标签留着；新版本有问题时执行 `./scripts/rollback.sh` 回到上一版（新版本加了迁移时同时恢复升级前的备份，见部署手册第 5 节）。
+
+**看门狗**：`./scripts/watchdog.sh` 由宿主机每 5 分钟运行一次，检查应用健康（连续 3 次失败自动重启）、备份服务、备份新鲜度与核验结果、外置盘与磁盘空间，异常推到企业微信群（`.env` 的 `WECOM_WEBHOOK_URL`），见部署手册 3.2。
 
 版本标签：合并到 main、CI 通过后，GitHub Actions「版本标签」按 `package.json` 的版本号自动创建 `vX.Y.Z`（已有同名标签时跳过；也可在 Actions 页面手动运行补打）。
 
-**自动备份**：`backup` 容器每天 `BACKUP_HOUR` 点做一次完整备份（`pg_dump` 自定义格式），写入 `BACKUP_DIR`，保留 `BACKUP_KEEP_DAYS` 天。请把 `BACKUP_DIR` 指向外置硬盘或另一块磁盘，并定期复制一份到店外。
+**自动备份**：`backup` 服务（与应用同一个镜像）每 `BACKUP_INTERVAL_MINUTES` 分钟（默认 60）做一次完整备份（`pg_dump` 自定义格式），写入 `BACKUP_DIR`。每份导出后都在临时库里完整恢复一遍、跑自检并算数据指纹，结果写在备份旁同名的 `.json` 里，然后删掉临时库。每天 `BACKUP_HOUR` 点之后的第一份记为 daily。hourly 保留 `BACKUP_HOURLY_KEEP_HOURS` 小时（默认 48），daily、升级前、恢复前与手动备份保留 `BACKUP_KEEP_DAYS` 天（默认 30）。请把 `BACKUP_DIR` 指向外置硬盘或另一块磁盘，设 `BACKUP_REQUIRE_SENTINEL=true` 并在目录里放空文件 `.yuzu-backup-target`：外置盘没挂载时不备份、不往内置盘写；店外副本见部署手册第 9 节。
 
 **手动备份**：
 
 ```bash
-./scripts/backup.sh            # 生成 BACKUP_DIR/yuzu-日期时间-manual.dump 并校验可读
+./scripts/backup.sh            # 生成 BACKUP_DIR/yuzu-日期-时间-manual.dump 与 .json，在临时库恢复核验
+```
+
+**核验一份备份**（不碰当前数据库；会员、营业口径、库存、前台自检与数据指纹）：
+
+```bash
+./scripts/verify-backup.sh /Volumes/YuzuBackup/yuzu/yuzu-20261126-041200-daily.dump
 ```
 
 **恢复**：
 
 ```bash
-./scripts/restore.sh /Volumes/YuzuBackup/yuzu/yuzu-20261025-040000.dump
+./scripts/restore.sh /Volumes/YuzuBackup/yuzu/yuzu-20261126-041200-daily.dump
 ```
 
-脚本会先备份当前数据，再停止应用、重建数据库、导入备份、启动应用，最后自动核对余额与流水。建议每月做一次恢复演练（可在另一台电脑上进行）。
+脚本先核对文件摘要，再备份当前数据、停止应用、重建数据库、导入备份；启动应用前比对数据指纹（与备份旁 `.json` 记下的一致才启动，不一致时应用保持停止），最后跑自检。正式环境要当面输入 `RESTORE-PRODUCTION`。建议每月做一次恢复演练（可在另一台电脑上进行）。
 
 ## 账务设计要点
 
@@ -300,7 +309,8 @@ src/
       inventory/   master 档案 · docs 库存单据 · reports 库存卡/汇总/自检
                    purchasing 采购单与比价 · payables 期初未付/付款/对账
       frontdesk/   visits 接待/换牌/同行/状态板 · bills 挂账与作废 · tags 手牌池 · checks 自检
-    cli.ts         运维命令：migrate / create-owner / reset-password / seed-demo / seed-inventory-demo / seed-frontdesk-demo / seed-billing-demo / import-hand-tags / import-price-list / import-opening / check
+    cli.ts         运维命令：migrate / create-owner / reset-password / seed-demo / seed-inventory-demo / seed-frontdesk-demo / seed-billing-demo / import-hand-tags / import-price-list / import-opening / check / fingerprint / backup / backup-loop / verify-backup / daily-recon / balance-changes
+    ops/           自检汇总、数据指纹、备份与核验、每日对账包、余额变动清单
     seed.ts        会员合成演示数据
     seed-inventory.ts  库存与采购合成演示数据（demo/inventory-demo.json，仅独立演示库）
     seed-frontdesk.ts  前台手牌合成演示数据（预期结果 demo/frontdesk-expected.json，仅独立演示库）
@@ -311,7 +321,7 @@ src/
                    frontdesk 前台手牌矩阵、小票抽屉、接待/挂账/换牌/预结账
 tests/             后端集成测试
 e2e/               浏览器验收
-scripts/           backup / restore / update / 备份循环
+scripts/           backup / verify-backup / restore / update / rollback / watchdog / daily-recon
 docs/              部署手册、待确认事项、设计语言、截图
 ```
 
