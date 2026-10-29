@@ -10,6 +10,7 @@ import { Dialog } from '../../components/Overlay';
 import { Button, Input, MoneyInput, Notice, Skeleton } from '../../components/ui';
 import { CartLineName, cartKey, cartLines, ItemCard } from '../catalog/ItemCard';
 import { ZoneChip } from './parts';
+import { BackfillNotice, backfillBody, backfillSummary, useBackfill } from './backfill';
 import { PendingPanel, useFrontdeskOp } from './pending';
 
 /** 挂账：点选项目（多档项目按档位点选）累加数量，确认后一次登记到手牌账单（只挂账，不收款） */
@@ -75,7 +76,10 @@ export function AddItemsDialog({
   const total = lines.reduce((s, l) => s + l.amount, 0) + customParsed.reduce((s, c) => s + (c.amount ?? 0), 0);
   const ready = (lines.length > 0 || custom.length > 0) && customValid && total > 0;
 
+  const backfill = useBackfill();
+  const backfillBlocked = backfill.state.active && !backfill.request;
   const submit = async () => {
+    if (backfillBlocked) return;
     const result = await op.submit((key) => ({
       url: `/api/frontdesk/visits/${visit.id}/charges`,
       body: {
@@ -83,9 +87,10 @@ export function AddItemsDialog({
         lines: lines.map((l) => ({ itemId: l.item.id, quantity: l.quantity, tier: l.tier })),
         customLines: customParsed.map((c) => ({ name: c.name, amount: c.amount })),
         expectedTotal: total,
+        ...backfillBody(backfill),
       },
       tagCodes: [visit.tag.code],
-      summary: [...lines.map((l) => `${l.name} ×${l.quantity}`), ...customParsed.map((c) => c.name)].join('、'),
+      summary: [...lines.map((l) => `${l.name} ×${l.quantity}`), ...customParsed.map((c) => c.name)].join('、') + backfillSummary(backfill),
       amount: total,
     }));
     if (result) onDone(result);
@@ -112,14 +117,15 @@ export function AddItemsDialog({
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             取消
           </Button>
-          <Button variant="primary" size="lg" disabled={!ready || op.locked} loading={busy} onClick={submit} data-testid="add-items-submit">
+          <Button variant="primary" size="lg" disabled={!ready || op.locked || backfillBlocked} loading={busy} onClick={submit} data-testid="add-items-submit">
             挂到 {visit.tag.code}
           </Button>
         </>
       }
     >
       <PendingPanel op={op} onResolved={onDone} />
-      <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_280px]">
+      <BackfillNotice action="挂账" />
+      <div className={cn('grid gap-5 md:grid-cols-[minmax(0,1fr)_280px]', backfill.state.active && 'mt-4')}>
         <div className="min-w-0">
           <div className="scroll-thin -mx-1 mb-3 flex gap-1.5 overflow-x-auto px-1 pb-1">
             {categories.map((c) => (

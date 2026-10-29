@@ -82,6 +82,18 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
   const [discounts] = await db<{ n: number; amount: number }[]>`
     SELECT count(*)::int AS n, coalesce(sum(amount), 0) AS amount FROM checkout_payments WHERE method = 'discount'`;
 
+  // ⑨ 补录纸质单（R1.9）：每条补录记录都对应同一操作编号的单据，单据的时间与营业日就是补录的实际时间与营业日
+  const backfillDiff = await db<{ slipNo: string }[]>`
+    SELECT b.slip_no FROM backfill_entries b LEFT JOIN visits v ON v.id = b.visit_id LEFT JOIN checkouts c ON c.id = b.checkout_id
+    WHERE (b.kind = 'checkin' AND (v.id IS NULL OR v.checkin_key <> b.op_key OR v.checked_in_at <> b.actual_at OR v.business_date <> b.business_date))
+       OR (b.kind = 'charges' AND (v.id IS NULL
+           OR NOT EXISTS (SELECT 1 FROM bill_lines l WHERE l.bill_id = v.bill_id AND l.post_key = b.op_key)
+           OR EXISTS (SELECT 1 FROM bill_lines l WHERE l.post_key = b.op_key
+                      AND (l.bill_id <> v.bill_id OR l.posted_at <> b.actual_at OR l.business_date <> b.business_date))))
+       OR (b.kind = 'checkout' AND (c.id IS NULL OR c.client_key <> b.op_key OR c.created_at <> b.actual_at OR c.business_date <> b.business_date))`;
+  const [backfills] = await db<{ n: number; slips: number }[]>`
+    SELECT count(*)::int AS n, count(DISTINCT slip_no)::int AS slips FROM backfill_entries`;
+
   return [
     {
       key: 'bill_amount_vs_lines',
@@ -137,6 +149,14 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
       detail: discountDiff.length
         ? `${discountDiff.length} 笔优惠没有对应的当场授权或与授权不符（如结账单 ${discountDiff[0]!.checkoutNo}）`
         : `优惠 ${discounts!.n} 笔共 ${formatYuan(discounts!.amount)}，每笔都有经办人申请、值班经理及以上在这次结账核销的授权`,
+    },
+    {
+      key: 'backfill_entries',
+      label: '补录记录与单据一致',
+      ok: backfillDiff.length === 0,
+      detail: backfillDiff.length
+        ? `${backfillDiff.length} 条补录记录与单据的时间或营业日不符（如纸质单 ${backfillDiff[0]!.slipNo}）`
+        : `补录 ${backfills!.n} 步（纸质单 ${backfills!.slips} 张），单据时间与营业日都按纸质单上的实际时间`,
     },
   ];
 }

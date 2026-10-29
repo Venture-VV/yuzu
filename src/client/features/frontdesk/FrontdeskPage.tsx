@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { Hash, Keyboard, ReceiptText, ShieldCheck, UserPlus, X } from 'lucide-react';
+import { FilePenLine, Hash, Keyboard, Lock, ReceiptText, Search, ShieldCheck, UserPlus, X } from 'lucide-react';
 import { matchTags, normalizeTagCode, TAG_ZONES, uniqueTagMatch, ZONE_LABELS, type BoardTag, type CheckinResult, type TagZone, type VisitDetail } from '@shared/frontdesk';
 import { useCan, useSession } from '../../lib/session';
 import { cn, isTypingTarget } from '../../lib/utils';
@@ -12,16 +12,26 @@ import { useToast } from '../../components/Toast';
 import { Button, Kbd, Notice, Segmented, Skeleton } from '../../components/ui';
 import { useMedia } from '../inventory/useMedia';
 import { AddItemsDialog } from './AddItemsDialog';
+import { BackfillBar, BackfillProvider, useBackfill } from './backfill';
 import { BillPanel, type PanelAction } from './BillPanel';
 import { CheckinDialog, type CheckinPrefill } from './CheckinDialog';
 import { CheckoutDialog, CheckoutRecordsDialog, TicketDialog } from './CheckoutDialog';
 import { groupTags, Stat, TagCard, TagChip, VipChip, ZoneChip } from './parts';
 import { useBoard, useFrontdeskChecks, useRefreshFrontdesk, useServerNow, useVisit } from './queries';
+import { FindGuestDialog, TagLockDialog } from './ToolDialogs';
 import { JoinGroupDialog, PreviewDialog, SwapDialog } from './VisitDialogs';
 
 type StatusFilter = 'all' | 'in' | 'free' | 'locked';
 
 export function FrontdeskPage() {
+  return (
+    <BackfillProvider>
+      <FrontdeskBoard />
+    </BackfillProvider>
+  );
+}
+
+function FrontdeskBoard() {
   const session = useSession();
   const can = useCan();
   const toast = useToast();
@@ -42,6 +52,9 @@ export function FrontdeskPage() {
   const [status, setStatus] = useState<StatusFilter>('all');
   const [dialog, setDialog] = useState<null | { kind: 'checkin'; prefill: CheckinPrefill } | { kind: PanelAction; ids?: number[] }>(null);
   const [checksOpen, setChecksOpen] = useState(false);
+  /** 找在店客人、锁牌 / 解锁 */
+  const [tool, setTool] = useState<null | { kind: 'find' } | { kind: 'lock'; code?: string }>(null);
+  const backfill = useBackfill();
   const searchRef = useRef<HTMLInputElement>(null);
 
   const tags = board.data?.tags ?? [];
@@ -68,7 +81,8 @@ export function FrontdeskPage() {
       if (t.visit) {
         select(t.visit.id);
       } else if (t.locked) {
-        toast({ tone: 'error', title: `手牌 ${t.code} 已锁定`, body: `${t.lockReason}。请换一张，或由店主在「管理 → 手牌」解锁。` });
+        if (can('frontdesk.tags')) setTool({ kind: 'lock', code: t.code });
+        else toast({ tone: 'error', title: `手牌 ${t.code} 已锁定`, body: `${t.lockReason}。请换一张，或请值班经理在前台「锁牌 / 解锁」解锁。` });
       } else if (t.zone === 'child') {
         toast({ tone: 'error', title: `手牌 ${t.code} 属于已取消的儿童区`, body: '儿童跟同性别家长用男宾或女宾的牌；请店主在「管理 → 手牌」把这张牌改为男宾或女宾。' });
       } else if (can('frontdesk.operate')) {
@@ -207,6 +221,26 @@ export function FrontdeskPage() {
         actions={
           can('frontdesk.read') ? (
             <>
+              <Button size="sm" variant="ghost" icon={<Search className="size-4" />} onClick={() => setTool({ kind: 'find' })} data-testid="open-find-guest">
+                找客人
+              </Button>
+              {can('frontdesk.tags') && (
+                <Button size="sm" variant="ghost" icon={<Lock className="size-4" />} onClick={() => setTool({ kind: 'lock' })} data-testid="open-tag-lock">
+                  锁牌 / 解锁
+                </Button>
+              )}
+              {can('frontdesk.backfill') && (
+                <Button
+                  size="sm"
+                  variant={backfill.state.active ? 'accent' : 'ghost'}
+                  icon={<FilePenLine className="size-4" />}
+                  aria-pressed={backfill.state.active}
+                  onClick={() => backfill.setState({ active: !backfill.state.active, slipNo: '', at: '' })}
+                  data-testid="backfill-toggle"
+                >
+                  补录纸质单
+                </Button>
+              )}
               <Button size="sm" variant="ghost" icon={<ReceiptText className="size-4" />} onClick={() => setDialog({ kind: 'records' })} data-testid="open-checkouts">
                 结账记录
               </Button>
@@ -273,6 +307,7 @@ export function FrontdeskPage() {
                 </Button>
               )}
             </div>
+            <BackfillBar />
             {q ? (
               <div className="flex min-h-8 flex-wrap items-center gap-1.5 text-[13px]" aria-live="polite">
                 {matches.length === 0 ? (
@@ -475,6 +510,18 @@ export function FrontdeskPage() {
       )}
       <CheckoutRecordsDialog open={dialog?.kind === 'records'} focusId={dialog?.kind === 'records' ? (visit.data?.checkout?.id ?? null) : null} onClose={() => setDialog(null)} />
       <ChecksDialog open={checksOpen} onClose={() => setChecksOpen(false)} />
+      <FindGuestDialog open={tool?.kind === 'find'} tags={tags} onClose={() => setTool(null)} onPick={select} />
+      <TagLockDialog
+        open={tool?.kind === 'lock'}
+        tags={tags}
+        initialCode={tool?.kind === 'lock' ? tool.code : undefined}
+        onClose={() => setTool(null)}
+        onDone={(message) => {
+          setTool(null);
+          refresh();
+          toast({ tone: 'success', title: message });
+        }}
+      />
     </>
   );
 }

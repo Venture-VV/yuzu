@@ -54,6 +54,8 @@ export const PERMISSIONS = {
   'frontdesk.checkout': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 反结账：撤销一张结账单，账单恢复为在店未结（待确认：默认值班经理及以上） */
   'frontdesk.checkoutVoid': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  /** 按纸质应急单上的实际时间补录接待、挂账与结账（R1.9，待确认：默认值班经理及以上；收银员不能，避免把时间往前填少收门票） */
+  'frontdesk.backfill': { roles: ['owner', 'store_manager', 'duty_manager'] },
   // ── 库存与采购 ──
   /** 查看库存数量、物料档案与库存单据 */
   'inventory.read': { roles: ['owner'], duties: ['stock', 'purchase', 'payable', 'approve'] },
@@ -117,6 +119,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'frontdesk.tags': '维护手牌池（建牌、解锁、停用）',
   'frontdesk.checkout': '结账收款、登记团购券',
   'frontdesk.checkoutVoid': '反结账（撤销结账单）',
+  'frontdesk.backfill': '按实际时间补录纸质单',
   'inventory.read': '查看库存与物资单据',
   'inventory.operate': '期初、收货、领用、退回、耗用、报损、盘点录入',
   'inventory.master': '维护物料、供应商、部门档案',
@@ -142,7 +145,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   },
   {
     title: '前台手牌与账单',
-    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid'],
+    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.backfill'],
   },
   {
     title: '库存与采购',

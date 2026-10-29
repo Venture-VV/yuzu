@@ -6,6 +6,7 @@
 // 跳档宽限（❓6，默认 0）：每个 12 小时的分界点之后多少分钟内不跳档。
 
 import { PAYMENT_METHOD_LABELS, PAYMENT_METHODS, type PaymentMethod } from './labels';
+import type { BackfillMark } from './backfill';
 import type { TagZone } from './frontdesk';
 
 export const TICKET_SEGMENT_MS = 12 * 3_600_000;
@@ -183,6 +184,8 @@ export interface CheckoutDetail {
   voidedAt: string | null;
   voidedByName: string | null;
   voidReason: string | null;
+  /** 按实际时间补录的结账（R1.9）：纸质单号、实际时间与补录人；平时为 null */
+  backfill: BackfillMark | null;
   bills: {
     billId: number;
     billNo: string;
@@ -212,6 +215,8 @@ export interface CheckoutSummary {
   operatorName: string;
   createdAt: string;
   businessDate: string;
+  /** 补录的结账单的纸质单号（R1.9）；平时为 null */
+  backfillSlipNo: string | null;
 }
 
 // ───────────── 交班（店主 #11） ─────────────
@@ -264,7 +269,11 @@ export interface ShiftRecord {
 /** 经营看板（S3.5） */
 export interface DashboardData {
   today: string;
-  inStore: { count: number; unsettled: number };
+  /**
+   * 在店未结：unsettled 是已挂明细；ticketEstimate 是按此刻在店时长估算的门票（结账时才挂到账单），
+   * noTicket 是还没选票种、没有计入估算的人数
+   */
+  inStore: { count: number; unsettled: number; ticketEstimate: number; noTicket: number };
   todayStats: {
     checkouts: number;
     guests: number;

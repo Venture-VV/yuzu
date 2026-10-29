@@ -58,6 +58,7 @@ import {
   saveKey,
   setTxTimeouts,
 } from './common';
+import { assertAfterVisits, assertNotReused, backfillDetail, BackfillInput, backfillMarkSql, normalizeMark, recordBackfill, resolveBackfill } from './backfill';
 import { applyVisitTicket, resolveTicketType } from './tickets';
 
 // ───────────────────────── 输入 ─────────────────────────
@@ -102,6 +103,8 @@ export const CheckoutInput = z.object({
   expectedTotal: cents('应收合计'),
   payments: z.array(Payment).max(10, '收款最多 10 笔').default([]),
   note: z.string().trim().max(200, '备注最多 200 字').default(''),
+  /** 按实际时间补录纸质单（R1.9）：纸质单号与实际时间，门票按实际离店时间计算；平时不带 */
+  backfill: BackfillInput,
 });
 export type CheckoutInputData = z.input<typeof CheckoutInput>;
 
@@ -157,6 +160,8 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
     if (rows.length !== ids.length) throw notFound('有手牌的来访记录不存在，请刷新后重试');
     const closed = rows.find((v) => v.status !== 'open');
     if (closed) throw conflict('VISIT_CLOSED', `手牌 ${closed.tagCode} 已不在店，请刷新后重新选择`);
+    // 补录接待的客人：手牌之后又发给了别人时，先提示按纸质单补录结账时间（与结账时同一核对）
+    await assertNotReused(tx, at, ids, deps.config.timezone);
     const lines = await tx<{ id: number; billId: number; name: string; quantity: number; amount: number }[]>`
       SELECT id, bill_id, name, quantity, amount FROM bill_lines
       WHERE status = 'active' AND bill_id IN ${tx(rows.map((r) => r.billId))} ORDER BY id`;
@@ -225,6 +230,11 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
   if (new Set(wallets.map((w) => w.memberId)).size !== wallets.length) throw badRequest('同一位会员的储值支付请合并为一笔');
   if (new Set(coupons.map((c) => `${c.platform}:${c.code}`)).size !== coupons.length) throw badRequest('同一张团购券不能登记两次');
   for (const t of input.tickets) if (!ids.includes(t.visitId)) throw badRequest('补选票种的客人不在本次结账里');
+  // 补录纸质单：按纸质单上的实际离店时间结账；储值流水按发生顺序连续记账，不能插到过去，补录的结账不能用储值
+  const backfill = resolveBackfill(input.backfill, ctx.actor);
+  if (backfill && wallets.length) {
+    throw unprocessable('BACKFILL_NO_WALLET', '补录的结账不能用会员储值（储值流水不能补记到过去）；请按纸质单上的实际收款方式登记，储值支付的单请联系店主处理');
+  }
 
   const { clientKey: key, ...payload } = input;
   const requestHash = hashRequest(payload);
@@ -236,7 +246,7 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
   const run = await runIdempotent(deps, { key, opType: 'checkout', requestHash }, async (tx) => {
     // ① 先对班次加共享锁，再锁手牌、来访、账单：交班等这笔提交后再汇总，这笔记入本班次（结账单除反结账外不可改）
     const shiftId = await lockPaymentShift(tx, ctx.actor.id, seenShift);
-    const at = ctx.at ?? new Date();
+    const at = backfill?.at ?? ctx.at ?? new Date();
     const rules = await loadFrontdeskRules(tx);
     // ② 同行组 → ③ 来访 → 账单；加锁后核对同行组没有被其他终端改过
     const peek = await tx<{ id: number; groupId: number | null }[]>`SELECT id, group_id FROM visits WHERE id IN ${tx(ids)}`;
@@ -258,6 +268,9 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
     }
     const billIds = [...locked.values()].map((v) => v.billId).sort((a, b) => a - b);
     await tx`SELECT id FROM bills WHERE id IN ${tx(billIds)} ORDER BY id FOR UPDATE`;
+    // 补录：实际离店时间不能早于这几位客人的接待和已挂的明细；补录接待的客人，在店时段里手牌、会员不能已有别的来访
+    if (backfill) await assertAfterVisits(tx, at, ids, 'checkout', deps.config.timezone);
+    await assertNotReused(tx, at, ids, deps.config.timezone);
 
     // 补选票种（来访已锁）；免票要当场授权，请先在手牌详情里改票种并授权
     for (const t of input.tickets) {
@@ -378,6 +391,7 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
     await tx`UPDATE visits SET status = 'settled', closed_at = ${at}, closed_by = ${ctx.actor.id} WHERE id IN ${tx(ids)}`;
     for (const g of new Set(priced.map((r) => r.groupId))) await closeGroupIfEmpty(tx, g, at);
 
+    if (backfill) await recordBackfill(tx, backfill, { kind: 'checkout', opKey: key, checkoutId, businessDate: date, actor: ctx.actor });
     await saveKey(tx, key, 'checkout', requestHash, checkoutId, ctx.actor.id);
     await writeAudit(tx, {
       staffId: ctx.actor.id,
@@ -391,6 +405,7 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
         payments: input.payments.map((p) => ({ method: p.method, amount: p.amount })),
         tickets: priced.map((r) => ({ tagCode: r.tagCode, ticket: r.ticketName, segments: r.ticket.segments, amount: r.ticket.amount })),
         ...(discount ? { discount: { amount: discounts[0]!.amount, reason: discount.reason, approverId: discount.approverId, approverName: discount.approverName } } : {}),
+        ...backfillDetail(backfill),
       },
       ip: ctx.ip,
       businessDate: date,
@@ -514,7 +529,7 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
 export async function getCheckout(db: Db, id: number): Promise<CheckoutDetail> {
   const [c] = await db<Omit<CheckoutDetail, 'bills' | 'payments' | 'remainingMates'>[]>`
     SELECT c.id, c.checkout_no, c.status, c.total_amount, c.note, c.business_date, s.display_name AS operator_name, c.created_at,
-           c.voided_at, vs.display_name AS voided_by_name, c.void_reason
+           c.voided_at, vs.display_name AS voided_by_name, c.void_reason, ${backfillMarkSql(db, 'c.client_key')} AS backfill
     FROM checkouts c JOIN staff s ON s.id = c.operator_id LEFT JOIN staff vs ON vs.id = c.voided_by WHERE c.id = ${id}`;
   if (!c) throw notFound('结账单不存在');
   const bills = await db<CheckoutDetail['bills']>`
@@ -538,7 +553,7 @@ export async function getCheckout(db: Db, id: number): Promise<CheckoutDetail> {
       SELECT v2.group_id FROM checkout_bills cb JOIN visits v2 ON v2.id = cb.visit_id WHERE cb.checkout_id = ${id} AND v2.group_id IS NOT NULL)
       AND v.id NOT IN (SELECT visit_id FROM checkout_bills WHERE checkout_id = ${id})
     ORDER BY t.code`;
-  return { ...c, bills, payments, remainingMates: mates.map((m) => m.code) };
+  return { ...c, backfill: normalizeMark(c.backfill), bills, payments, remainingMates: mates.map((m) => m.code) };
 }
 
 export async function listCheckouts(db: Db, date: string): Promise<CheckoutSummary[]> {
@@ -546,7 +561,8 @@ export async function listCheckouts(db: Db, date: string): Promise<CheckoutSumma
     SELECT c.id, c.checkout_no, c.status, c.total_amount, c.business_date, s.display_name AS operator_name, c.created_at,
            (SELECT array_agg(t.code ORDER BY t.code) FROM checkout_bills cb JOIN visits v ON v.id = cb.visit_id
             JOIN hand_tags t ON t.id = v.tag_id WHERE cb.checkout_id = c.id) AS tag_codes,
-           (SELECT array_agg(DISTINCT p.method) FROM checkout_payments p WHERE p.checkout_id = c.id) AS methods
+           (SELECT array_agg(DISTINCT p.method) FROM checkout_payments p WHERE p.checkout_id = c.id) AS methods,
+           (SELECT bf.slip_no FROM backfill_entries bf WHERE bf.op_key = c.client_key ORDER BY bf.id LIMIT 1) AS backfill_slip_no
     FROM checkouts c JOIN staff s ON s.id = c.operator_id
     WHERE c.business_date = ${date} OR c.void_business_date = ${date}
     ORDER BY c.id DESC`;

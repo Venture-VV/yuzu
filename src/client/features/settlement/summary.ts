@@ -15,6 +15,7 @@ export const ANOMALY_LABELS: Record<SettlementAnomaly['kind'], string> = {
   ticket_override: '降档 / 免票',
   visit_cancel: '撤销误开的牌',
   line_void: '作废明细',
+  backfill: '补录',
 };
 
 /** 实收合计：充值实收 + 结账里的现金类收款（会员储值、团购券、优惠 / 免单不是本次实收），按收款方式核对抽屉与各收款账户 */

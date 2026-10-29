@@ -9,6 +9,7 @@ import { writeAudit } from '../../lib/audit';
 import type { Deps, OpContext } from '../../lib/context';
 import { notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
+import { checkBackfillAt } from './backfill';
 import { postCharges, voidLine, type PostInputData } from './bills';
 import { resolveReadableDate } from '../ledger';
 import { checkout, findCoupon, getCheckout, listCheckouts, previewCheckout, voidCheckout, type CheckoutInputData } from './checkout';
@@ -146,9 +147,10 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
       .transform((s) => s.split(',').map(Number))
       .pipe(z.array(z.number().int().positive('手牌编号不正确')).min(1).max(30, '一次最多合并 30 张手牌')),
   });
+  // at：补录纸质单时按实际离店时间计价（需要补录权限，时间范围与补录相同）
   app.get('/api/frontdesk/checkout-preview', { preHandler: guard('frontdesk.read') }, async (req) => {
-    const { ids } = parse(VisitIds, req.query);
-    return previewCheckout(deps, ids);
+    const { ids, at } = parse(VisitIds.extend({ at: z.iso.datetime({ offset: true, message: '实际时间格式不正确' }).optional() }), req.query);
+    return previewCheckout(deps, ids, at ? checkBackfillAt(new Date(at), req.actor) : undefined);
   });
 
   app.post('/api/frontdesk/checkouts', { preHandler: guard('frontdesk.checkout') }, async (req) =>

@@ -36,6 +36,11 @@ function CheckoutSlip({ d }: { d: CheckoutPrint }) {
       <Row left="营业日" right={d.businessDate} />
       <Row left="结账时间" right={stamp(d.createdAt, tz)} />
       <Row left="收银" right={d.operatorName} />
+      {d.backfill && (
+        <p className="mt-1 border border-black px-1.5 py-0.5 text-center" data-testid="print-backfill">
+          补录 · 纸质单 {d.backfill.slipNo}（{d.backfill.enteredByName} {stamp(d.backfill.enteredAt, tz)} 补录）
+        </p>
+      )}
       {d.status === 'voided' && (
         <div className="mt-1.5 border-2 border-black px-1.5 py-1 text-center" data-testid="print-voided">
           <p className="text-[14px] font-bold">已反结账（本单作废）</p>

@@ -38,7 +38,13 @@ export function DashboardPage() {
                     {d.todayStats.guests} 位 · {d.todayStats.checkouts} 张
                   </Kpi>
                   <Kpi icon={<BedDouble className="size-4" />} label="在店（未结）">
-                    {d.inStore.count} 位 · <Money cents={d.inStore.unsettled} />
+                    {d.inStore.count} 位 · <Money cents={d.inStore.unsettled + d.inStore.ticketEstimate} />
+                    {d.inStore.count > 0 && (
+                      <span className="block text-[12px] font-semibold text-ink-3" data-testid="dashboard-instore-estimate">
+                        已挂 <Money cents={d.inStore.unsettled} /> + 门票估算 <Money cents={d.inStore.ticketEstimate} />
+                        {d.inStore.noTicket > 0 && `（${d.inStore.noTicket} 位未选票种，未计入）`}
+                      </span>
+                    )}
                   </Kpi>
                   <Kpi icon={<Banknote className="size-4" />} label="会员充值实收" tone="lake">
                     <Money cents={d.todayStats.rechargePaid} /> <span className="text-[13px] font-semibold text-ink-3">· {d.todayStats.rechargeCount} 笔</span>

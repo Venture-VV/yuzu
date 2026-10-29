@@ -58,10 +58,11 @@ const ANOMALY_LABELS: Record<string, string> = {
   balance_mismatch: '余额不一致',
   chain_break: '流水不连续',
   discount: '优惠 / 免单',
+  backfill: '补录纸质单',
 };
 const COVERED = new Set(['checkout_void', 'line_void', 'visit_cancel', 'ticket_override']);
 /** 说明文件里分别计数的异常类别（按类别名开头匹配，「改票种」含降档与改为免票） */
-const EXCEPTION_KINDS = ['反结账', '优惠 / 免单', '作废明细', '撤销误开的牌', '改票种', '免票入场'];
+const EXCEPTION_KINDS = ['反结账', '优惠 / 免单', '作废明细', '撤销误开的牌', '改票种', '免票入场', '补录纸质单'];
 
 interface CheckoutRow {
   id: number;
@@ -310,8 +311,8 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     ...s.anomalies
       .filter((a) => !COVERED.has(a.kind))
       .map((a) => {
-        // 优惠 / 免单：按结账单补上手牌、客人与收银，金额记负数（少收的营业额，与反结账、作废明细同向）
-        const c = a.kind === 'discount' ? day.checkouts.find((x) => x.checkoutNo === a.docNo) : undefined;
+        // 优惠 / 免单、补录的结账：按结账单补上手牌、客人与收银；优惠金额记负数（少收的营业额，与反结账、作废明细同向）
+        const c = a.kind === 'discount' || a.kind === 'backfill' ? day.checkouts.find((x) => x.checkoutNo === a.docNo) : undefined;
         return {
           kind: ANOMALY_LABELS[a.kind] ?? a.kind,
           at: a.at ?? '',

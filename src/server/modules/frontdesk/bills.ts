@@ -12,6 +12,7 @@ import { conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
 import { parse, positiveCents } from '../../lib/validate';
 import { assertCanFix, assertOpen, businessDate, hashRequest, loadFrontdeskRules, lockVisits, runIdempotent, saveKey, setTxTimeouts } from './common';
 import { loadPricedItems, priceLine } from '../pricing';
+import { assertAfterVisits, backfillDetail, BackfillInput, recordBackfill, resolveBackfill } from './backfill';
 import { getVisit } from './visits';
 
 export const PostInput = z
@@ -34,6 +35,8 @@ export const PostInput = z
       .default([]),
     /** 店员确认时看到的本次合计；与服务端按当前价格计算的不一致时拒绝，避免改价后挂错金额 */
     expectedTotal: positiveCents('本次合计'),
+    /** 按实际时间补录纸质单（R1.9）：纸质单号与实际时间；平时不带 */
+    backfill: BackfillInput,
   })
   .refine((v) => v.lines.length + v.customLines.length > 0, '请至少选择一个项目');
 export type PostInputData = z.input<typeof PostInput>;
@@ -45,11 +48,14 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
   }
   const { clientKey: key, ...payload } = input;
   const requestHash = hashRequest({ visitId, ...payload });
+  // 补录纸质单：明细按纸质单上的实际时间登记（营业日按实际时间归属）
+  const backfill = resolveBackfill(input.backfill, ctx.actor);
   await runIdempotent(deps, { key, opType: 'bill_post', requestHash }, async (tx) => {
-    const at = ctx.at ?? new Date();
+    const at = backfill?.at ?? ctx.at ?? new Date();
     // ③ 来访 → 账单
     const visit = (await lockVisits(tx, [visitId])).get(visitId)!;
     assertOpen(visit);
+    if (backfill) await assertAfterVisits(tx, at, [visit.id], 'charges', deps.config.timezone);
     const [bill] = await tx<{ id: number; status: string; amountCents: number; lineCount: number }[]>`
       SELECT id, status, amount_cents, line_count FROM bills WHERE id = ${visit.billId} FOR UPDATE`;
     if (bill!.status !== 'open') throw conflict('BILL_CLOSED', '账单已结束，不能再挂账');
@@ -81,13 +87,14 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
     }
     await tx`
       UPDATE bills SET amount_cents = amount_cents + ${total}, line_count = line_count + ${lines.length} WHERE id = ${bill!.id}`;
+    if (backfill) await recordBackfill(tx, backfill, { kind: 'charges', opKey: key, visitId: visit.id, businessDate: date, actor: ctx.actor });
     await saveKey(tx, key, 'bill_post', requestHash, visit.id, ctx.actor.id);
     await writeAudit(tx, {
       staffId: ctx.actor.id,
       action: 'frontdesk_post',
       targetType: 'visit',
       targetId: visit.id,
-      detail: { visitNo: visit.visitNo, total, lines: lines.map((l) => `${l.name}×${l.quantity}`) },
+      detail: { visitNo: visit.visitNo, total, lines: lines.map((l) => `${l.name}×${l.quantity}`), ...backfillDetail(backfill) },
       ip: ctx.ip,
       businessDate: date,
     });

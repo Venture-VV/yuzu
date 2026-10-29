@@ -286,7 +286,9 @@ export interface SettlementAnomaly {
     | 'discount'
     | 'ticket_override'
     | 'visit_cancel'
-    | 'line_void';
+    | 'line_void'
+    // R1.9：按实际时间补录纸质单
+    | 'backfill';
   at: string | null;
   docNo: string | null;
   memberName: string | null;
