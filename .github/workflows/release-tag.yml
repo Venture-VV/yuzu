@@ -1,0 +1,44 @@
+# 版本标签：main 上的 CI 通过后，按 package.json 的版本号创建 vX.Y.Z 标签（已有同名标签时跳过）。
+# 发版只需在 PR 里改版本号；合并到 main、CI 通过后自动打标签，部署脚本 scripts/update.sh 按标签更新。
+# 也可以在 Actions 页面手动运行，给当前 main 补打标签。
+name: 版本标签
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: 按 package.json 版本号打标签
+    # 只给 main 上推送后 CI 通过的提交打标签（PR 上的 CI 不触发）
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+      - name: 创建缺少的版本标签
+        run: |
+          tag="v$(node -p "require('./package.json').version")"
+          if [ -n "$(git ls-remote --tags origin "refs/tags/${tag}")" ]; then
+            echo "标签 ${tag} 已存在，跳过"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${tag}" -m "浴族 yuzu ${tag}" "${SHA}"
+          git push origin "refs/tags/${tag}"
+          echo "已创建标签 ${tag} → ${SHA}"

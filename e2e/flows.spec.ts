@@ -56,6 +56,37 @@ test('店员：查找会员 → 套餐充值 → 消费扣款，余额变化清�
   await expect(page.locator('main').getByRole('button', { name: '撤销' })).toHaveCount(0);
 });
 
+test('充值后马上接着消费：会员资料的重新读取还没回来时，核对页也按最新余额，不会被「余额刚刚有变化」拦下', async ({ page }) => {
+  await login(page, 'xiaozhou');
+  await openMember(page, '顾青山');
+  const before = await availableCents(page);
+  // 门店电脑或网络较慢：之后会员资料的重新读取 3 秒才返回
+  const memberUrl = /\/api\/members\/\d+$/;
+  await page.route(memberUrl, async (route) => {
+    await new Promise((r) => setTimeout(r, 3000));
+    await route.continue();
+  });
+
+  await page.getByRole('button', { name: /^充值/ }).click();
+  await page.getByRole('button', { name: /常泡 500/ }).click();
+  await page.getByRole('button', { name: '支付宝' }).click();
+  await page.getByRole('button', { name: '下一步：核对收款' }).click();
+  await page.getByText('我已核实').click();
+  await page.getByRole('button', { name: /确认入账/ }).click();
+  await expect(page.getByText('充值已入账')).toBeVisible();
+
+  // 不等重新读取，马上接着登记消费
+  await page.getByRole('button', { name: '接着登记消费' }).click();
+  await page.getByRole('button', { name: /^柚子气泡水/ }).click();
+  await page.getByRole('button', { name: '下一步：核对扣款' }).click();
+  await page.getByRole('button', { name: /确认扣款 ¥22\.00/ }).click();
+  await expect(page.getByText('扣款完成')).toBeVisible();
+  await expect(page.getByText('会员余额刚刚有变化')).toHaveCount(0);
+  await page.getByRole('button', { name: '完成' }).click();
+  await page.unroute(memberUrl);
+  await expect.poll(() => availableCents(page)).toBe(before + 50000 + 5000 - 2200);
+});
+
 test('店主：整单撤销后按原构成恢复余额，日结核对一致', async ({ page }) => {
   await login(page, 'linlan');
   await openMember(page, '周以安');

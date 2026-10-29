@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { OperationLookup, OperationResult } from '@shared/types';
+import type { MemberDetail, OperationLookup, OperationResult } from '@shared/types';
 import { api, ApiError, UncertainError } from '../../lib/api';
 import {
   PENDING_LABELS,
@@ -12,6 +12,7 @@ import {
   type PendingOp,
   type PendingType,
 } from '../../lib/pendingOps';
+import { qk } from '../../lib/queries';
 import { uuid } from '../../lib/utils';
 import { useToast } from '../../components/Toast';
 
@@ -72,6 +73,9 @@ export function useOperation(spec: OperationSpec) {
 
   const refreshAfter = useCallback(
     (result: OperationResult) => {
+      // 先把这笔之后的会员余额写进缓存再重新读取：充值后紧接着登记消费时，核对页按最新余额计算，
+      // 不会因为重新读取还没回来而按旧余额提交、被服务端以「余额刚刚有变化」拒绝
+      qc.setQueryData<MemberDetail>(qk.member(result.member.id), (old) => (old ? { ...old, ...result.member } : old));
       void qc.invalidateQueries({ queryKey: ['member', result.member.id] });
       void qc.invalidateQueries({ queryKey: ['activity', result.member.id] });
       void qc.invalidateQueries({ queryKey: ['members'] });
