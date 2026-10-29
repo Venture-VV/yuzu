@@ -4,7 +4,8 @@
 #   2. 应用健康检查：连续 3 次失败时重启 app 并告警（Docker 不会自动重启 unhealthy 的容器）；
 #      升级、恢复、回退期间（.deploy/maintenance）不重启，维护标记留了 30 分钟以上时告警；
 #   3. 备份服务在运行（没在运行就启动它）、最新的定时备份不过期（不超过两个备份间隔）、核验通过、自检一致；要求哨兵时外置盘已挂载；
-#   4. 备份目录与项目目录所在磁盘剩余空间不少于 10% 且不少于 5 GB。
+#   4. 备份目录与项目目录所在磁盘剩余空间不少于 10% 且不少于 5 GB；
+#   5. 配置了异地副本（OFFSITE_TARGET，见 scripts/offsite-copy.sh）时，已传到云服务器的最新一份备份不早于两个备份间隔加 1 小时。
 # 告警推到 .env 的 WECOM_WEBHOOK_URL（企业微信群机器人）；没配置时只写日志。同一项告警每小时最多推一次，恢复时推一次「已恢复」。
 # 每天 9 点后推一条「每日巡检」，收不到就说明看门狗或这台机器本身出了问题。
 # 日志在 .watchdog/watchdog.log；--test 只推一条测试消息。
@@ -171,6 +172,32 @@ else
   resolve disk "磁盘空间恢复正常"
 fi
 
+# 5. 异地副本：.offsite/last-sent 是已传到服务器的最新一份备份（备份时刻与文件名）
+offsite=""
+if [[ -n "$(env_of OFFSITE_TARGET)" ]]; then
+  sent=$(cat .offsite/last-sent 2>/dev/null || true)
+  [[ "${sent%% *}" =~ ^[0-9]+$ ]] || sent=""
+  limit=$((interval * 2 + 60))
+  if [[ -z "$sent" ]]; then
+    # 刚配置：等一个期限再告警
+    [[ -f "$state/nooffsite.since" ]] || echo "$now" > "$state/nooffsite.since"
+    if [[ $((now - $(cat "$state/nooffsite.since"))) -gt $((limit * 60)) ]]; then
+      alert offsite "已配置异地副本，但 $((limit / 60)) 小时内一份备份也没传到 $(env_of OFFSITE_TARGET)，原因见 .offsite/offsite.log。"
+    fi
+  else
+    rm -f "$state/nooffsite.since"
+    offsite_age=$(( (now - ${sent%% *}) / 60 ))
+    offsite="异地副本 $offsite_age 分钟前"
+    if [[ $offsite_age -gt $limit ]]; then
+      alert offsite "云服务器上最新的备份副本是 $((offsite_age / 60)) 小时前的 ${sent#* }，异地副本可能传不上去，原因见 .offsite/offsite.log。"
+    else
+      resolve offsite "异地副本恢复正常（最新 ${sent#* }）"
+    fi
+  fi
+else
+  rm -f "$state/nooffsite.since" "$state/offsite.alert"
+fi
+
 # 每日巡检：9 点后推一条（每天一次）
 today=$(date +%Y-%m-%d)
 hour=$(date +%H)
@@ -181,6 +208,6 @@ if [[ ${hour#0} -ge 9 && "$(cat "$state/daily" 2>/dev/null)" != "$today" ]]; the
   status="应用$([[ "$health" == *'"ok":true'* ]] && echo 正常 || echo 异常)"
   [[ -n "${latest:-}" ]] && status="$status · 最新备份 $(( (now - $(mtime_of "$latest")) / 60 )) 分钟前"
   free_gb=$(df -Pk "$dir" 2>/dev/null | awk 'NR==2 {printf "%d", $4 / 1048576}')
-  send "每日巡检：$status · 备份盘剩 ${free_gb:-?} GB · 版本 ${version:-未知}" && echo "$today" > "$state/daily"
+  send "每日巡检：$status${offsite:+ · $offsite} · 备份盘剩 ${free_gb:-?} GB · 版本 ${version:-未知}" && echo "$today" > "$state/daily"
 fi
 exit 0

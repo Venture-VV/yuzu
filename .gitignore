@@ -13,4 +13,5 @@ coverage/
 .vite/
 .deploy/
 .watchdog/
+.offsite/
 recon/

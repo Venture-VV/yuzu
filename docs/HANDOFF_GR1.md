@@ -77,7 +77,7 @@ PORT=8899 node dist/server/index.js
 | 项目 | 结果 |
 | --- | --- |
 | `npm run typecheck`、`npm run build` | 通过（仓库未配置 lint） |
-| `npm test` | **289 / 289**（27 个文件。新增 `tests/r1-funds.test.ts` 17 项、`tests/upgrade-r1.test.ts` 4 项；按新口径更新 shift-boundary（R7 拆成「反结账人在班上」与「规则关闭、没有开班」两项）、billing-seed、checkout、wallet-limits、frontdesk-vip、upgrade、upgrade-shift） |
+| `npm test` | **332 / 332**（合并 main 的 v0.3.2–v0.3.5 之后，33 个文件。本次新增 `tests/r1-funds.test.ts` 17 项、`tests/upgrade-r1.test.ts` 4 项；按新口径更新 shift-boundary（R7 拆成「反结账人在班上」与「规则关闭、没有开班」两项）、billing-seed、checkout、wallet-limits、frontdesk-vip、upgrade、upgrade-shift） |
 | 新建演示库 + 四套演示数据 | `check` **20 / 20 ✓**；第 4 节的数字逐项一致 |
 | 浏览器 E2E（云端 Chromium，三个视口，114 项） | 首轮 68 passed、2 failed、44 skipped（44 项是会改数据、只在门店电脑尺寸执行的用例）。两项失败：优惠授权徽标的 testid 没有挂上（组件不转发属性）；预结账合计按新口径含门票，用例预期更新。随后又修了一处：结账、充值成功后没有刷新交班表缓存，5 秒内打开交班页会看到旧汇总。修复后全套通过（数字见提测评论），跑完后 `check` 仍 20 / 20 ✓ |
 
@@ -85,10 +85,10 @@ PORT=8899 node dist/server/index.js
 
 ### 6.1 全量回归
 
-1. `npm run typecheck && npm run build`；`npm test`（独立测试库）预期 **289 passed**。
+1. `npm run typecheck && npm run build`；`npm test`（独立测试库）预期 **332 passed**。
 2. 第 3 节新演示库 `check` 20 / 20 ✓，与第 4 节固定预期逐项核对（页面上看结账记录、交班、日结、看板）。
 3. 已有 E2E 全部 spec，三个视口（`E2E_BASE_URL=http://127.0.0.1:<端口> npm run e2e`）；跑完后 `check` 仍全部 ✓。E2E 登录后会给该账号开班（备用金 0），演示库里多出几个未交班的班次，属预期。
-4. 升级路径：在 `4de03bc`（v0.3.1）新建库、执行四套演示数据，再开一张牌挂账、让收银员开班收一笔现金并留着不交班；切到测试 SHA 启动（迁移 017 自动执行）。预期：只执行 017；撤销时限 48 小时、跳档宽限 15 分钟；`check` 20 / 20 ✓；升级前已交班的快照不变；张经理升级前开的班次里 ⑤ 的反结账仍只列提醒、应有现金与升级前相同；升级后新开的班次里反结账按新口径扣减现金；收款需要先开班。
+4. 升级路径：在上一发布版本（`main` 上最新的版本标签，CI 的「从上一发布版本的演示库升级」同样做）新建库、执行四套演示数据，再开一张牌挂账、让收银员开班收一笔现金并留着不交班；切到测试 SHA 启动（迁移 017 自动执行）。预期：只执行 017；撤销时限 48 小时、跳档宽限 15 分钟；`check` 20 / 20 ✓；升级前已交班的快照不变；张经理升级前开的班次里 ⑤ 的反结账仍只列提醒、应有现金与升级前相同；升级后新开的班次里反结账按新口径扣减现金；收款需要先开班。
 5. G3 的 R1–R8 交错脚本（`docs/HANDOFF_G3.md` 第 0.1、0.2 节）在测试 SHA 上重跑。规则开启（默认）时，R5「不开新班重提」改为 409 `SHIFT_REQUIRED`；规则关闭时与原预期相同。R7、R8 若反结账的店主在班上，交班不再因反结账 409（原单仍算在收银员的班次），退款记到店主的班次；店主没有开班（规则关闭）时与原预期相同。
 
 ### 6.2 先开班（S）
@@ -169,7 +169,7 @@ PORT=8899 node dist/server/index.js
 ```text
 请对 Venture-VV/yuzu 分支 claude/festive-edison-bxooh9 的 PR（v0.4.0 · R1.2 资金轨）的完整 SHA <测试 SHA> 做 G-R1 验收，按 docs/HANDOFF_GR1.md 执行：
 1. 新建独立演示库（严禁指向 8080 试用库或任何门店库），按第 3 节初始化，check 20 项全部 ✓，与第 4 节固定预期逐项核对；
-2. 第 6.1 节全量回归：typecheck、build、npm test（独立测试库，预期 289 passed）、已有 E2E 三个视口、从 4de03bc（v0.3.1）升级、G3 的 R1–R8 交错脚本；
+2. 第 6.1 节全量回归：typecheck、build、npm test（独立测试库，预期 332 passed）、已有 E2E（三个视口与小屏电脑、手机冒烟）、从上一发布版本升级、G3 的 R1–R8 交错脚本；
 3. 第 6.2–6.6 节逐条执行（先开班、优惠 / 免单、降档与免票、反结账口径与时限、其他）；第 6.7 节可补充 E2E；
 4. 评论发在该 PR：测试 SHA、环境、实际验证范围、未测项（环境缺失记「受阻未测」）、问题清单（P1 / P2，附复现步骤与位置），末尾附来源署名。账错、越权、规则开启时有收款不属于任何班次、重复扣款、串单、数据丢失、破坏旧模块自检为阻断项。
 ```
