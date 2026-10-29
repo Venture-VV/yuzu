@@ -1,4 +1,5 @@
-# 自动测试：类型检查、后端集成测试（会员回归 + 库存 / 采购 / 应付 + 前台手牌核心校验 + 备份与恢复核验）、构建，以及真实浏览器验收。
+# 自动测试：类型检查、后端集成测试（会员回归 + 库存 / 采购 / 应付 + 前台手牌核心校验 + 备份与恢复核验）、构建、
+# 从上一发布版本的演示库升级后自检，以及真实浏览器验收（含完整收银流程与五种视口）。
 # 只使用合成数据与一次性的 CI 数据库，不连接任何门店环境。
 name: CI
 
@@ -92,6 +93,8 @@ jobs:
           cat app.log; exit 1
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test
+      - name: 浏览器验收改过数据之后再自检（会员、营业口径、库存、前台全部 ✓）
+        run: node dist/server/cli.js check
       - name: 保留失败截图与日志
         if: failure()
         uses: actions/upload-artifact@v4
@@ -100,4 +103,90 @@ jobs:
           path: |
             test-results
             app.log
+          retention-days: 7
+
+  upgrade:
+    name: 从上一发布版本的演示库升级
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: yuzu
+          POSTGRES_PASSWORD: yuzu_ci_only
+          POSTGRES_DB: yuzu_upgrade
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U yuzu -d yuzu_upgrade"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://yuzu:yuzu_ci_only@127.0.0.1:5432/yuzu_upgrade
+      APP_ENV: development
+      PORT: 8080
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 要用到版本标签与它们的提交
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: 找上一发布版本（目标分支上最新的版本标签）
+        id: prev
+        run: |
+          # PR 上 HEAD 是合并提交、main 上是刚合并的提交：第一父提交就是合并前的目标分支；本次提交自己的标签（重跑时）不算
+          tag=$(git tag --merged HEAD^1 --sort=-v:refname --list 'v[0-9]*' | head -n 1)
+          if [ -z "$tag" ]; then echo "::notice::目标分支上还没有版本标签，跳过升级检查"; fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: 构建上一发布版本
+        if: steps.prev.outputs.tag != ''
+        run: |
+          git worktree add --detach ../yuzu-prev "${{ steps.prev.outputs.tag }}"
+          cd ../yuzu-prev
+          npm ci
+          npm run build
+      - name: 上一发布版本：写入四套演示数据并自检
+        if: steps.prev.outputs.tag != ''
+        working-directory: ../yuzu-prev
+        run: |
+          node dist/server/cli.js seed-demo
+          node dist/server/cli.js seed-inventory-demo
+          node dist/server/cli.js seed-frontdesk-demo
+          node dist/server/cli.js seed-billing-demo
+          node dist/server/cli.js check
+      - run: npm ci
+        if: steps.prev.outputs.tag != ''
+      - run: npm run build
+        if: steps.prev.outputs.tag != ''
+      - name: 本版本在升级后的库上启动（启动时自动迁移）并自检
+        if: steps.prev.outputs.tag != ''
+        run: |
+          node dist/server/index.js > app.log 2>&1 &
+          pid=$!
+          ok=
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/api/health && ok=1 && break; sleep 1; done
+          echo
+          if [ -z "$ok" ]; then cat app.log; exit 1; fi
+          # 停掉应用再核对：应用每分钟扫描一次到期赠金，会改数据
+          kill "$pid"; wait "$pid" || true
+          node dist/server/cli.js migrate
+          node dist/server/cli.js check
+      - name: 只读命令在升级后的库上可用（数据指纹、每日对账包、余额变动清单）
+        if: steps.prev.outputs.tag != ''
+        run: |
+          before=$(node dist/server/cli.js fingerprint | tail -n 1)
+          node dist/server/cli.js daily-recon --out recon
+          node dist/server/cli.js balance-changes --since "$(date -u -d '-3 days' '+%Y-%m-%d %H:%M')" > balance-changes.csv
+          after=$(node dist/server/cli.js fingerprint | tail -n 1)
+          echo "$before"
+          [ "$before" = "$after" ] || { echo "::error::只读命令改动了数据：$before → $after"; exit 1; }
+      - name: 保留日志与对账包
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upgrade-results
+          path: |
+            app.log
+            recon
           retention-days: 7

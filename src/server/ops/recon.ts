@@ -12,7 +12,7 @@ import { businessDateOf, businessDayStart } from '@shared/business-date';
 import { CHECKOUT_METHOD_LABELS, CHECKOUT_METHODS, COUPON_PLATFORM_LABELS, type CheckoutMethod, type CouponPlatform, type ShiftRecord } from '@shared/checkout';
 import { INSTANCE_LABELS } from '@shared/instance';
 import { formatYuan } from '@shared/money';
-import type { SettlementAnomaly, SettlementSummary } from '@shared/types';
+import type { SettlementSummary } from '@shared/types';
 import type { AppConfig } from '../config';
 import { readSnapshot, type Sql, type Tx } from '../db';
 import { toCsv } from '../lib/csv';
@@ -44,7 +44,11 @@ const plusDays = (date: string, days: number) => {
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 };
 
-const ANOMALY_LABELS: Record<SettlementAnomaly['kind'], string> = {
+/**
+ * 日结异常的类别名。按字符串取：资金轨 R1.2 会新增类别（优惠 / 免单等），没列到的照原样输出类别代码，不因此漏行。
+ * COVERED 是本包自己从单据逐条列出的类别（反结账、作废明细、撤销误开的牌、改票种 / 免票），日结异常里的同类不再重复列。
+ */
+const ANOMALY_LABELS: Record<string, string> = {
   reversal: '会员撤销',
   cross_day_reversal: '跨营业日撤销',
   duplicate_blocked: '重复提交已拦截',
@@ -52,8 +56,9 @@ const ANOMALY_LABELS: Record<SettlementAnomaly['kind'], string> = {
   abandoned: '作废的待确认操作',
   balance_mismatch: '余额不一致',
   chain_break: '流水不连续',
-  checkout_void: '反结账',
+  discount: '优惠 / 免单',
 };
+const COVERED = new Set(['checkout_void', 'line_void', 'visit_cancel', 'ticket_override']);
 
 interface CheckoutRow {
   id: number;
@@ -277,7 +282,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
       description: `票种：${v.ticketName}`,
     })),
     ...s.anomalies
-      .filter((a) => a.kind !== 'checkout_void')
+      .filter((a) => !COVERED.has(a.kind))
       .map((a) => ({
         kind: ANOMALY_LABELS[a.kind] ?? a.kind,
         at: a.at ?? '',
@@ -297,13 +302,14 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     ]),
   });
 
-  // 05 交班
+  // 05 交班。反结账退现金：资金轨 R1.2 起扣减反结账人当班的应有现金（cash.refund），之前的版本与升级前的快照没有，记 0
   const shiftMethods = (r: ShiftRecord, m: CheckoutMethod) => r.summary.checkoutByMethod.find((x) => x.method === m)?.amount ?? 0;
+  const cashRefund = (r: ShiftRecord) => (r.summary.cash as { refund?: number }).refund ?? 0;
   files.push({
     name: '05-交班.csv',
     content: toCsv([
       ['班次', '员工', '营业日', '状态', '开班', '交班', '备用金', '结账张数', '结账合计', ...methods.map((m) => `结账·${CHECKOUT_METHOD_LABELS[m]}`),
-        '充值实收', '赠金', '工作台储值消费', '应有现金', '实点现金', '长短款', '反结账提醒', '接班人', '备注'],
+        '充值实收', '赠金', '工作台储值消费', '反结账退现金', '应有现金', '实点现金', '长短款', '反结账张数', '接班人', '备注'],
       ...day.shifts.map((r) => [
         r.shiftNo,
         r.staffName,
@@ -318,6 +324,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
         yuan(r.summary.recharges.paid),
         yuan(r.summary.recharges.bonus),
         yuan(r.summary.walletConsumes.total),
+        yuan(cashRefund(r)),
         yuan(r.expectedCash ?? r.summary.cash.expected),
         r.countedCash === null ? '' : yuan(r.countedCash),
         r.countedCash === null || r.expectedCash === null ? '' : yuan(r.countedCash - r.expectedCash),

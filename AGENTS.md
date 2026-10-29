@@ -37,7 +37,7 @@ node dist/server/cli.js import-hand-tags --store-list   # 预览导入店主 747
 node dist/server/cli.js import-price-list --tangqi      # 预览导入汤崎价目表（29 个项目、多档价格）；--apply 才写入（同上）
 node dist/server/cli.js import-opening <余额.csv> --operator <店主账号> --control 人数,本金,赠金,累计充值 [--exclude <排除清单.csv>]
                                           # 预览导入旧系统会员余额期初并与 EBC 控制总数比对；--apply 才写入（同上；正式环境必须给控制总数）
-E2E_BASE_URL=http://127.0.0.1:<端口> npm run e2e   # 1440×900 / 1024×768 / 820×1180
+E2E_BASE_URL=http://127.0.0.1:<端口> npm run e2e   # 1440×900 / 1024×768 / 820×1180，另有 1280×720 与手机只跑视口冒烟
 ```
 
 演示数据的固定预期结果在 `src/server/demo/*-expected.json`。
