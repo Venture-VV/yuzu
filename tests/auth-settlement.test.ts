@@ -32,6 +32,19 @@ describe('登录与权限', () => {
     expect((await api(ctx.app, ctx.owner, 'GET', '/api/ledger?date=2020-01-01')).status).toBe(200);
   });
 
+  it('「待确认」标记：默认显示；只有店主能改为隐藏，所有人的会话规则随之变化（只影响显示）', async () => {
+    expect((await api(ctx.app, ctx.clerk, 'GET', '/api/auth/me')).body.rules.hidePendingMarks).toBe(false);
+    const before = (await api(ctx.app, ctx.owner, 'GET', '/api/settings')).body;
+    expect((await api(ctx.app, ctx.clerk, 'PUT', '/api/settings', { hidePendingMarks: true })).status).toBe(403);
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { hidePendingMarks: true })).status).toBe(200);
+    expect((await api(ctx.app, ctx.clerk, 'GET', '/api/auth/me')).body.rules.hidePendingMarks).toBe(true);
+    // 其他规则不受影响
+    const after = (await api(ctx.app, ctx.owner, 'GET', '/api/settings')).body;
+    expect({ ...after, hidePendingMarks: false }).toEqual(before);
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { hidePendingMarks: false })).status).toBe(200);
+    expect((await api(ctx.app, ctx.clerk, 'GET', '/api/auth/me')).body.rules.hidePendingMarks).toBe(false);
+  });
+
   it('新员工首次登录必须修改密码', async () => {
     const created = await api(ctx.app, ctx.owner, 'POST', '/api/staff', { username: 'newbie', displayName: '新同事', role: 'clerk' });
     expect(created.status).toBe(201);

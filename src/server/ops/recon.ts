@@ -9,7 +9,7 @@
 // 优惠 / 免单与降档 / 免票授权在资金轨 R1.2 合并后加入异常清单。
 
 import { businessDateOf, businessDayStart } from '@shared/business-date';
-import { CHECKOUT_METHOD_LABELS, CHECKOUT_METHODS, COUPON_PLATFORM_LABELS, type CheckoutMethod, type CouponPlatform, type ShiftRecord } from '@shared/checkout';
+import { businessBreakdown, CHECKOUT_METHOD_LABELS, CHECKOUT_METHODS, COUPON_PLATFORM_LABELS, type CheckoutMethod, type CouponPlatform, type ShiftRecord } from '@shared/checkout';
 import { INSTANCE_LABELS } from '@shared/instance';
 import { formatYuan } from '@shared/money';
 import type { SettlementSummary } from '@shared/types';
@@ -45,8 +45,9 @@ const plusDays = (date: string, days: number) => {
 };
 
 /**
- * 日结异常的类别名。按字符串取：资金轨 R1.2 会新增类别（优惠 / 免单等），没列到的照原样输出类别代码，不因此漏行。
- * COVERED 是本包自己从单据逐条列出的类别（反结账、作废明细、撤销误开的牌、改票种 / 免票），日结异常里的同类不再重复列。
+ * 日结异常的类别名。按字符串取：以后新增的类别没列到时照原样输出类别代码，不因此漏行。
+ * COVERED 是本包自己从单据逐条列出的类别（反结账、作废明细、撤销误开的牌、改票种 / 免票），日结异常里的同类不再重复列；
+ * 本包的行比日结多手牌、客人与当场授权的人和原因。
  */
 const ANOMALY_LABELS: Record<string, string> = {
   reversal: '会员撤销',
@@ -59,6 +60,8 @@ const ANOMALY_LABELS: Record<string, string> = {
   discount: '优惠 / 免单',
 };
 const COVERED = new Set(['checkout_void', 'line_void', 'visit_cancel', 'ticket_override']);
+/** 说明文件里分别计数的异常类别（按类别名开头匹配，「改票种」含降档与改为免票） */
+const EXCEPTION_KINDS = ['反结账', '优惠 / 免单', '作废明细', '撤销误开的牌', '改票种', '免票入场'];
 
 interface CheckoutRow {
   id: number;
@@ -74,7 +77,7 @@ interface CheckoutRow {
   voidReason: string | null;
   note: string;
   tags: string | null;
-  payments: { method: CheckoutMethod; amount: number; ref: string; member: string | null; coupon: string | null; platform: CouponPlatform | null }[] | null;
+  payments: { method: CheckoutMethod; amount: number; ref: string; member: string | null; coupon: string | null; platform: CouponPlatform | null; approver: string | null }[] | null;
 }
 
 interface ExceptionRow {
@@ -96,8 +99,9 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
            (SELECT string_agg(t.code, '、' ORDER BY t.code) FROM checkout_bills cb JOIN visits v ON v.id = cb.visit_id
             JOIN hand_tags t ON t.id = v.tag_id WHERE cb.checkout_id = c.id) AS tags,
            (SELECT json_agg(json_build_object('method', p.method, 'amount', p.amount, 'ref', p.ref, 'member', m.name,
-                                              'coupon', g.code, 'platform', g.platform) ORDER BY p.id)
+                                              'coupon', g.code, 'platform', g.platform, 'approver', ap.display_name) ORDER BY p.id)
             FROM checkout_payments p LEFT JOIN members m ON m.id = p.member_id LEFT JOIN group_buy_coupons g ON g.id = p.coupon_id
+            LEFT JOIN staff ap ON ap.id = p.approved_by
             WHERE p.checkout_id = c.id) AS payments
     FROM checkouts c JOIN staff s ON s.id = c.operator_id LEFT JOIN staff vs ON vs.id = c.voided_by
     WHERE c.business_date = ${date} OR c.void_business_date = ${date}
@@ -134,19 +138,36 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     FROM visits v JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id LEFT JOIN staff s ON s.id = v.closed_by
     WHERE v.status = 'cancelled' AND v.closed_at >= ${from} AND v.closed_at < ${to}
     ORDER BY v.closed_at, v.id`;
-  const ticketChanges = await tx<{ at: string; visitNo: string; tag: string; guest: string; staff: string; fromName: string; toName: string; price12h: number; price24h: number }[]>`
+  // 改票种：降低票种或改成免票时记下当场授权的人与原因（R1.2 起；之前的记录与改贵的没有）
+  const ticketChanges = await tx<{ at: string; visitNo: string; tag: string; guest: string; staff: string; fromName: string; toName: string; price12h: number; price24h: number; approverName: string | null; reason: string | null }[]>`
     SELECT c.created_at AS at, v.visit_no, t.code AS tag, coalesce(m.name, nullif(v.guest_label, ''), '散客') AS guest, s.display_name AS staff,
-           ft.name AS from_name, tt.name AS to_name, c.price_12h, c.price_24h
+           ft.name AS from_name, tt.name AS to_name, c.price_12h, c.price_24h, ap.display_name AS approver_name, c.reason
     FROM visit_ticket_changes c JOIN visits v ON v.id = c.visit_id JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id
     JOIN staff s ON s.id = c.operator_id JOIN ticket_types ft ON ft.id = c.from_type_id JOIN ticket_types tt ON tt.id = c.to_type_id
+    LEFT JOIN staff ap ON ap.id = c.approved_by
     WHERE c.created_at >= ${from} AND c.created_at < ${to}
     ORDER BY c.created_at, c.id`;
-  const freeEntries = await tx<{ at: string; visitNo: string; tag: string; guest: string; staff: string; ticketName: string }[]>`
+  // 免票入场：接待时就是免票（之后改过票种的，按第一次改票种之前的票种算；在店期间改成免票的列在「改票种」）。
+  // 接待时直接选免票的授权记在这次接待的审计记录里（R1.2 起），按手牌对上这次接待（接待的第一位来访编号不大于本来访）
+  const freeEntries = await tx<{ at: string; visitNo: string; tag: string; guest: string; staff: string; ticketName: string; approverName: string | null; reason: string | null }[]>`
     SELECT v.checked_in_at AS at, v.visit_no, t.code AS tag, coalesce(m.name, nullif(v.guest_label, ''), '散客') AS guest,
-           s.display_name AS staff, tt.name AS ticket_name
+           s.display_name AS staff, tt.name AS ticket_name, fa.approver_name, fa.reason
     FROM visits v JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id JOIN staff s ON s.id = v.checked_in_by
     JOIN ticket_types tt ON tt.id = v.ticket_type_id
-    WHERE v.checked_in_at >= ${from} AND v.checked_in_at < ${to} AND v.ticket_price_12h = 0 AND v.status <> 'cancelled'
+    LEFT JOIN LATERAL (
+      SELECT a.detail -> 'freeTickets' ->> 'approverName' AS approver_name, a.detail -> 'freeTickets' ->> 'reason' AS reason
+      FROM audit_logs a
+      WHERE a.business_date = ${date} AND a.action = 'frontdesk_checkin' AND a.detail ? 'freeTickets'
+        AND a.detail -> 'freeTickets' -> 'tags' ? t.code
+        AND (CASE WHEN a.target_id ~ '^[0-9]+$' THEN a.target_id::bigint END) <= v.id
+      ORDER BY (CASE WHEN a.target_id ~ '^[0-9]+$' THEN a.target_id::bigint END) DESC
+      LIMIT 1
+    ) fa ON true
+    WHERE v.checked_in_at >= ${from} AND v.checked_in_at < ${to} AND v.status <> 'cancelled'
+      AND coalesce(
+        (SELECT ft.price_12h = 0 AND ft.price_24h = 0 FROM visit_ticket_changes c JOIN ticket_types ft ON ft.id = c.from_type_id
+         WHERE c.visit_id = v.id ORDER BY c.created_at, c.id LIMIT 1),
+        v.ticket_price_12h = 0)
     ORDER BY v.checked_in_at, v.id`;
   const shifts = (await listShifts(tx, date)).filter((s) => s.businessDate === date);
   return { summary, checkouts, departments, voidedLines, cancelled, ticketChanges, freeEntries, shifts };
@@ -197,7 +218,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
           ...methods.map((m) => yuan(sumOf(m))),
           pays.flatMap((p) => (p.member ? [p.member] : [])).join('、'),
           pays.flatMap((p) => (p.coupon ? [`${p.platform ? COUPON_PLATFORM_LABELS[p.platform] : ''} ${p.coupon}`.trim()] : [])).join('、'),
-          pays.flatMap((p) => (p.ref ? [`${CHECKOUT_METHOD_LABELS[p.method]} ${p.ref}`] : [])).join('、'),
+          pays.flatMap((p) => (p.ref ? [`${CHECKOUT_METHOD_LABELS[p.method]} ${p.ref}${p.approver ? `（${p.approver}授权）` : ''}`] : [])).join('、'),
           yuan(c.businessDate === date ? c.totalAmount : 0),
           yuan(c.voidBusinessDate === date ? -c.totalAmount : 0),
           c.voidBusinessDate ?? '',
@@ -210,7 +231,8 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     ]),
   });
 
-  // 03 部门参考表
+  // 03 部门参考表：明细按结账那一刻计，合计应等于应收；优惠 / 免单是结账时少收的部分，单列在后面（与日结同一口径）
+  const biz = businessBreakdown(s.business);
   const deptTotal = day.departments.reduce((t, d) => t + d.amount, 0);
   const categories = [...new Set(day.departments.map((d) => d.category))];
   files.push({
@@ -222,12 +244,15 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
         return [...items.map((d) => [cat, d.name, d.quantity, yuan(d.amount)]), [cat, '小计', '', yuan(items.reduce((t, d) => t + d.amount, 0))]];
       }),
       ['合计', '', '', yuan(deptTotal)],
-      ['营业额（净额）', '', '', yuan(s.business.net)],
-      ['核对', deptTotal === s.business.net ? '一致' : '不一致', '', ''],
+      ['应收（结账 − 反结账）', '', '', yuan(biz.receivable)],
+      ['核对', deptTotal === biz.receivable ? '一致' : '不一致', '', ''],
+      ['优惠 / 免单（不是收款）', '', '', yuan(-biz.discount)],
+      ['净营业额（应收 − 优惠）', '', '', yuan(biz.netRevenue)],
     ]),
   });
 
   // 04 异常清单
+  const authText = (approver: string | null, reason: string | null) => (approver ? `；${reason ?? ''}，${approver}当场授权` : '');
   const exceptions: ExceptionRow[] = [
     ...day.checkouts
       .filter((c) => c.voidBusinessDate === date)
@@ -262,14 +287,15 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
       description: `${v.reason ?? ''}（${stampOf(v.checkedInAt)} 开牌）`,
     })),
     ...day.ticketChanges.map((c) => ({
-      kind: c.price12h === 0 && c.price24h === 0 ? '改票种（改为免票）' : '改票种',
+      // 降低票种、改成免票要当场授权（R1.2 起），改贵的不用
+      kind: c.price12h === 0 && c.price24h === 0 ? '改票种（改为免票）' : c.approverName ? '改票种（降档）' : '改票种',
       at: c.at,
       docNo: c.visitNo,
       tag: c.tag,
       guest: c.guest,
       staff: c.staff,
       amount: null,
-      description: `${c.fromName} → ${c.toName}（12 小时档 ${formatYuan(c.price12h)} / 24 小时档 ${formatYuan(c.price24h)}）`,
+      description: `${c.fromName} → ${c.toName}（12 小时档 ${formatYuan(c.price12h)} / 24 小时档 ${formatYuan(c.price24h)}）${authText(c.approverName, c.reason)}`,
     })),
     ...day.freeEntries.map((v) => ({
       kind: '免票入场',
@@ -279,20 +305,24 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
       guest: v.guest,
       staff: v.staff,
       amount: null,
-      description: `票种：${v.ticketName}`,
+      description: `票种：${v.ticketName}${authText(v.approverName, v.reason)}`,
     })),
     ...s.anomalies
       .filter((a) => !COVERED.has(a.kind))
-      .map((a) => ({
-        kind: ANOMALY_LABELS[a.kind] ?? a.kind,
-        at: a.at ?? '',
-        docNo: a.docNo ?? '',
-        tag: '',
-        guest: a.memberName ?? '',
-        staff: '',
-        amount: a.amount,
-        description: a.description,
-      })),
+      .map((a) => {
+        // 优惠 / 免单：按结账单补上手牌、客人与收银，金额记负数（少收的营业额，与反结账、作废明细同向）
+        const c = a.kind === 'discount' ? day.checkouts.find((x) => x.checkoutNo === a.docNo) : undefined;
+        return {
+          kind: ANOMALY_LABELS[a.kind] ?? a.kind,
+          at: a.at ?? '',
+          docNo: a.docNo ?? '',
+          tag: c?.tags ?? '',
+          guest: c ? (c.payments ?? []).flatMap((p) => (p.member ? [p.member] : [])).join('、') : (a.memberName ?? ''),
+          staff: c?.operatorName ?? '',
+          amount: a.kind === 'discount' && a.amount !== null ? -a.amount : a.amount,
+          description: a.description,
+        };
+      }),
   ].sort((a, b) => a.at.localeCompare(b.at));
   files.push({
     name: '04-异常清单.csv',
@@ -337,16 +367,17 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
 
   // 00 说明
   const failed = checks.filter((c: CheckLine) => !c.ok);
-  const deptOk = deptTotal === s.business.net;
+  const deptOk = deptTotal === biz.receivable;
   const byMethod = s.business.byMethod.map((m) => `${CHECKOUT_METHOD_LABELS[m.method]} ${formatYuan(m.amount)}`).join('、') || '无';
   const count = (kind: string) => exceptions.filter((e) => e.kind.startsWith(kind)).length;
   const summary = [
     `营业日 ${date}（${stampOf(from.toISOString()).slice(0, 16)} 至 ${stampOf(to.toISOString()).slice(0, 16)}）${date === today ? '，营业日尚未结束' : ''}`,
-    `营业额（净额）${formatYuan(s.business.net)}：结账 ${s.business.checkouts.count} 张 ${formatYuan(s.business.checkouts.total)}，反结账 ${s.business.voids.count} 张 ${formatYuan(s.business.voids.total)}`,
+    `应收 ${formatYuan(biz.receivable)}：结账 ${s.business.checkouts.count} 张 ${formatYuan(s.business.checkouts.total)}，反结账 ${s.business.voids.count} 张 ${formatYuan(s.business.voids.total)}`,
+    `优惠 / 免单 ${formatYuan(biz.discount)}；净营业额 ${formatYuan(biz.netRevenue)}；实收（现金类）${formatYuan(biz.received)}`,
     `收款方式：${byMethod}`,
     `储值：充值实收 ${formatYuan(s.recharge.paid)}（${s.recharge.count} 笔），储值消费 ${formatYuan(s.consume.total)}（${s.consume.count} 笔）`,
-    `部门参考表合计 ${formatYuan(deptTotal)}：${deptOk ? '✓ 与营业额（净额）一致' : '✗ 与营业额（净额）不一致'}`,
-    `异常：反结账 ${count('反结账')}、作废明细 ${count('作废明细')}、撤销误开的牌 ${count('撤销误开的牌')}、改票种 ${count('改票种')}、免票入场 ${count('免票入场')}、其他 ${exceptions.length - count('反结账') - count('作废明细') - count('撤销误开的牌') - count('改票种') - count('免票入场')}`,
+    `部门参考表合计 ${formatYuan(deptTotal)}：${deptOk ? '✓ 与应收一致' : '✗ 与应收不一致'}`,
+    `异常：${EXCEPTION_KINDS.map((k) => `${k} ${count(k)}`).join('、')}、其他 ${exceptions.length - EXCEPTION_KINDS.reduce((t, k) => t + count(k), 0)}`,
     `交班：${day.shifts.length} 个班次，已交班 ${day.shifts.filter((r) => r.status === 'closed').length} 个`,
     failed.length ? `自检：✗ ${failed.length} 项不一致：${failed.map((c) => c.label).join('、')}` : `自检：✓ ${checks.length} 项全部一致`,
   ];
@@ -363,11 +394,9 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
       '文件：',
       '  01-日结汇总.csv     与「日结」页导出的相同',
       '  02-结账单.csv       当天结账与当天反结账的结账单，按收款方式分列；「计入本日」两列分别合计 = 结账合计、反结账合计',
-      '  03-部门参考表.csv   结账明细按项目分类（部门）汇总，合计 = 营业额（净额）',
-      '  04-异常清单.csv     反结账、作废明细、撤销误开的牌、改票种、免票入场、会员撤销与其他异常',
-      '  05-交班.csv         当天的班次与长短款',
-      '',
-      '优惠 / 免单、降档 / 免票授权在资金轨 R1.2 合并后加入异常清单。',
+      '  03-部门参考表.csv   结账明细按项目分类（部门）汇总，合计 = 应收；后面单列优惠 / 免单与净营业额',
+      '  04-异常清单.csv     反结账、优惠 / 免单、作废明细、撤销误开的牌、改票种（降档、改为免票写明授权人与原因）、免票入场、会员撤销与其他异常',
+      '  05-交班.csv         当天的班次、反结账退现金与长短款',
       '',
     ].join('\n'),
   });

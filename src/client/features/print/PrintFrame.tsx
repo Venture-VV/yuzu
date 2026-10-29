@@ -23,7 +23,24 @@ export function stamp(iso: string, timeZone: string): string {
 
 export const yuan = formatYuan;
 
-export function PrintFrame({ title, ready, error, children }: { title: string; ready: boolean; error: string | null; children: ReactNode }) {
+/**
+ * 打印页外框。paper 默认 80mm 热敏小票；a4 用于日结单（办公打印机或存成 PDF，页边距 12mm）。
+ * 全局样式把打印页边距设为 0（热敏机），A4 的页边距在这里另外声明，后声明的生效。
+ */
+export function PrintFrame({
+  title,
+  ready,
+  error,
+  children,
+  paper = '80mm',
+}: {
+  title: string;
+  ready: boolean;
+  error: string | null;
+  children: ReactNode;
+  paper?: '80mm' | 'a4';
+}) {
+  const a4 = paper === 'a4';
   const [params] = useSearchParams();
   const auto = params.has('auto');
   const popup = typeof window !== 'undefined' && window.opener !== null;
@@ -51,18 +68,26 @@ export function PrintFrame({ title, ready, error, children }: { title: string; r
 
   return (
     <div className="min-h-dvh bg-paper-2 py-6 print:min-h-0 print:bg-white print:py-0">
-      <div className="mx-auto mb-4 flex w-[80mm] max-w-full flex-wrap items-center gap-2 px-2 print:hidden">
+      {a4 && <style>{'@media print { @page { size: A4 portrait; margin: 12mm; } }'}</style>}
+      <div className={cn('mx-auto mb-4 flex max-w-full flex-wrap items-center gap-2 px-2 print:hidden', a4 ? 'w-[210mm]' : 'w-[80mm]')}>
         <Button variant="primary" icon={<Printer className="size-4" />} disabled={!ready} onClick={() => window.print()} data-testid="print-now">
           打印
         </Button>
         <Button variant="ghost" onClick={() => (popup ? window.close() : window.history.back())}>
           {popup ? '关闭' : '返回'}
         </Button>
-        <p className="w-full text-[12px] text-ink-3">打印机选前台的 80mm 热敏机，边距选「无」，缩放 100%。</p>
+        <p className="w-full text-[12px] text-ink-3">
+          {a4 ? '打印机选 A4 纸的办公打印机（或「存储为 PDF」），边距用默认，缩放 100%。' : '打印机选前台的 80mm 热敏机，边距选「无」，缩放 100%。'}
+        </p>
       </div>
       <div
         data-testid="print-paper"
-        className="mx-auto w-[80mm] bg-white px-[4mm] py-[5mm] text-[12px] leading-[1.45] text-black shadow-[0_1px_3px_rgba(0,0,0,0.15)] print:my-0 print:w-[72mm] print:px-0 print:py-0 print:shadow-none"
+        className={cn(
+          'mx-auto bg-white text-black shadow-[0_1px_3px_rgba(0,0,0,0.15)] print:my-0 print:px-0 print:py-0 print:shadow-none',
+          a4
+            ? 'w-[210mm] max-w-full px-[12mm] py-[12mm] text-[12px] leading-[1.5] print:w-auto print:max-w-none'
+            : 'w-[80mm] px-[4mm] py-[5mm] text-[12px] leading-[1.45] print:w-[72mm]',
+        )}
       >
         {error ? <p className="font-bold">{error}</p> : ready ? children : <p>正在读取…</p>}
       </div>
