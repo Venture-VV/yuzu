@@ -6,9 +6,13 @@
 //   · 交班：员工实点现金，系统记下应有现金、差额与汇总快照；员工确认时看到的应有现金与此刻不一致（期间又有收款）时拒绝；
 //   · 本人交本人的班；值班经理及以上可以替别人交班（例如员工忘了交班就下班）。
 //
-// 班次边界（迁移 016）：充值、结账、反结账在入账事务里记下经办人当时未交班的班次（lockOpenShift），交班表按班次汇总，
+// 班次边界（迁移 016）：充值、结账、反结账在入账事务里记下经办人的班次（lockPaymentShift），交班表按班次汇总，
 // 不按单据时间：收款取时间在等锁之前，按时间窗口会把交班之后才提交的收款算进已交的班次之内、又不在快照里。
-// 加锁顺序：收款先锁自己的业务行，再对班次加共享锁；交班只锁班次一行（排他），二者不会互相等待成环。
+// 收款与交班的共同协议（G3 复测第 2 轮）：收款开始处理时记下经办人所在的班次（openShiftOf），入账事务在锁业务行之前
+// 对班次加共享锁；交班加排他锁。先拿到班次的收款提交后才能交班、计入本班次；先交班的，之后拿到锁的收款若开始时
+// 在这个班次上就整笔拒绝（SHIFT_CLOSED），不会出现「开班期间发起、交班之后完成、哪个班次都不算」的收款。
+// 加锁顺序：收款先对班次加共享锁（会员记账在会员锁之后），再锁业务行；交班只锁班次一行（排他）、不锁业务行，
+// 二者不会互相等待成环。
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -26,14 +30,30 @@ import { resolveReadableDate } from './ledger';
 import { loadSettings } from './settings';
 import { nextDocNo } from './inventory/common';
 
-/**
- * 收款事务（充值、结账、反结账）锁完自己的业务行之后、写单据之前调用：返回经办人此刻未交班的班次（没有开班时为 null），
- * 并对它加共享锁直到事务结束。交班对班次加排他锁，所以已拿到班次的收款提交后才能交班、计入本班次；
- * 交班之后才拿到锁的收款看到班次已交，班次为空，不会记到已交的班次。
- */
-export async function lockOpenShift(tx: Tx, staffId: number): Promise<number | null> {
-  const [row] = await tx<{ id: number }[]>`SELECT id FROM shifts WHERE staff_id = ${staffId} AND status = 'open' FOR SHARE`;
+/** 收款开始处理时经办人未交班的班次（不加锁，没有开班时为 null）；入账事务里交给 lockPaymentShift 核对 */
+export async function openShiftOf(db: Db, staffId: number): Promise<number | null> {
+  const [row] = await db<{ id: number }[]>`SELECT id FROM shifts WHERE staff_id = ${staffId} AND status = 'open'`;
   return row?.id ?? null;
+}
+
+/**
+ * 收款事务（充值、结账、反结账）在锁业务行之前调用（重复提交查回原单时不调用）：对经办人此刻未交班的班次加共享锁
+ * 直到事务结束，返回这笔要记入的班次（没有开班时为 null）。
+ *   · 交班对班次加排他锁：已拿到共享锁、正在入账的收款提交后才能交班，计入本班次（员工看到的应有现金过期时 SHIFT_CHANGED）；
+ *   · 收款开始处理时（seen）经办人在班上，拿到锁时这个班次已经交班：整笔拒绝（SHIFT_CLOSED），不入账——
+ *     否则这笔收款既不在已交班次的快照里，也不属于之后的班次。员工开新班后重新办理，记到新班次；
+ *   · 收款开始时没有开班的照常收款（开班是可选的），期间开了班的记到新开的班次。
+ */
+export async function lockPaymentShift(tx: Tx, staffId: number, seen: number | null): Promise<number | null> {
+  const [row] = await tx<{ id: number }[]>`SELECT id FROM shifts WHERE staff_id = ${staffId} AND status = 'open' FOR SHARE`;
+  const id = row?.id ?? null;
+  if (seen !== null && id !== seen) {
+    const [s] = await tx<{ shiftNo: string }[]>`SELECT shift_no FROM shifts WHERE id = ${seen}`;
+    throw conflict('SHIFT_CLOSED', `班次 ${s!.shiftNo} 在这笔收款入账之前已经交班，这笔没有入账，也不会记入任何班次；请开新班后重新办理`, {
+      shiftNo: s!.shiftNo,
+    });
+  }
+  return id;
 }
 
 interface ShiftScope {

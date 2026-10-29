@@ -1,14 +1,18 @@
 // G3 复测：交班与收款以班次为界（迁移 016）。用可控的锁等待制造确定的交错顺序。
 //   · 充值、结账记到经办人当时未交班的班次，没开班的不记；交班表按班次汇总，不按单据时间；
-//   · 正在入账、已拿到班次（共享锁）的收款：交班等它提交后再汇总，计入本班次（员工看到的应有现金已过期时 SHIFT_CHANGED）；
-//   · 交班之后才拿到班次的收款，即使单据时间早于交班，也不记到已交的班次；
+//   · 收款先拿到班次（共享锁）：交班等它提交后再汇总，计入本班次（员工看到的应有现金已过期时 SHIFT_CHANGED）；
+//   · 交班先拿到班次（排他锁）：收款开始处理时在这个班次上的，等交班提交后整笔拒绝（SHIFT_CLOSED），不入账——
+//     不会出现「开班期间发起、交班之后完成、哪个班次都不算」的收款；开新班后原样重提记到新班次；
+//   · 升级时仍未交班的旧班次（迁移 016 前开班）同样适用；
 //   · 反结账提醒记到反结账人的班次，原收银员的班次不再计入被反结账的单。
+// 注意：收款持有班次共享锁时被测试卡住，交班会等这笔收款——测试先发出交班请求、确认在等锁，再放开，不能同步等交班返回。
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Actor } from '../src/server/lib/context';
 import { startShift } from '../src/server/modules/shifts';
-import { api, createMember, rechargeBody, setup, type TestContext } from './helpers';
+import { createStaff } from '../src/server/modules/staff';
+import { api, createMember, login, PASSWORD, rechargeBody, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let today: string;
@@ -45,20 +49,34 @@ async function hold(statement: (tx: typeof ctx.sql) => Promise<unknown>) {
 }
 /** 卡住同一操作编号的「写编号」一步：收款已拿到班次、写完单据，停在提交之前 */
 const holdKey = (key: string) => hold((tx) => tx`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
+/** 占住当日充值单号：充值已拿到班次，卡在取号上 */
+const holdRechargeNo = () =>
+  hold((tx) => tx`
+    INSERT INTO doc_counters (doc_type, business_date, last_no) VALUES ('recharge', ${today}, 0)
+    ON CONFLICT (doc_type, business_date) DO UPDATE SET last_no = doc_counters.last_no`);
+/** 卡住审计写入：交班已对班次加排他锁、算好快照、改了状态，写交班审计时停在提交之前 */
+const holdAudit = () => hold((tx) => tx`LOCK TABLE audit_logs IN SHARE MODE`);
 
 const cashRecharge = (cookie: string, amount: number, key = randomUUID()) =>
   api(ctx.app, cookie, 'POST', '/api/recharges', { ...rechargeBody(memberId, amount, 0, { paymentMethod: 'cash' }), idempotencyKey: key });
 const enter = async (code: string) =>
   (await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: code, zone: 'male' }] })).body.visits[0].id as number;
 /** 刚入场的散客：不含餐 12 小时档 ¥499，现金结清 */
-const cashCheckout = (visitId: number, key = randomUUID()) =>
-  api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', { clientKey: key, visitIds: [visitId], expectedTotal: 49900, payments: [{ method: 'cash', amount: 49900 }] });
+const cashCheckout = (visitId: number, key = randomUUID(), cookie = ctx.clerk) =>
+  api(ctx.app, cookie, 'POST', '/api/frontdesk/checkouts', { clientKey: key, visitIds: [visitId], expectedTotal: 49900, payments: [{ method: 'cash', amount: 49900 }] });
 const open = async (cookie: string, openingCash = 0) => (await api(ctx.app, cookie, 'POST', '/api/shifts', { openingCash })).body as { id: number };
 const current = async (cookie: string) => (await api(ctx.app, cookie, 'GET', '/api/shifts/current')).body.shift;
 const close = (cookie: string, id: number, expectedCash: number) =>
   api(ctx.app, cookie, 'POST', `/api/shifts/${id}/close`, { countedCash: expectedCash, expectedCash });
 const shiftOfRecharge = async (id: number) =>
   (await ctx.sql<{ shiftId: number | null; createdAt: string }[]>`SELECT shift_id, created_at FROM recharges WHERE id = ${id}`)[0]!;
+const wallet = async () => {
+  const [m] = await ctx.sql<{ principalBalance: number; bonusBalance: number }[]>`SELECT principal_balance, bonus_balance FROM members WHERE id = ${memberId}`;
+  const [n] = await ctx.sql<{ recharges: number; entries: number }[]>`
+    SELECT (SELECT count(*)::int FROM recharges WHERE member_id = ${memberId}) AS recharges,
+           (SELECT count(*)::int FROM ledger_entries WHERE member_id = ${memberId}) AS entries`;
+  return { ...m!, ...n! };
+};
 
 describe('交班与收款以班次为界', () => {
   it('充值、结账记到经办人未交班的班次；没开班的不记；交班后的收款不再记到已交的班次', async () => {
@@ -79,7 +97,7 @@ describe('交班与收款以班次为界', () => {
     const closed = await close(ctx.clerk, shift.id, 89900);
     expect(closed.body).toMatchObject({ status: 'closed', expectedCash: 89900 });
 
-    // 交班之后的收款：没有未交班的班次，不记班次；已交班的快照不变
+    // 交班之后才开始的收款：没有未交班的班次，按未开班收款（开班是可选的），不记班次；已交班的快照不变
     const after = await cashRecharge(ctx.clerk, 5000);
     expect((await shiftOfRecharge(after.body.recharge.id)).shiftId).toBeNull();
     expect((await api(ctx.app, ctx.clerk, 'GET', `/api/shifts/${shift.id}`)).body.summary.recharges).toMatchObject({ count: 1, paid: 30000 });
@@ -116,6 +134,23 @@ describe('交班与收款以班次为界', () => {
     expect(done.body.summary.cash.expected).toBe(79900);
   });
 
+  it('复测复现顺序：现金充值卡在取充值单号时交班到达——充值已先拿到班次，交班等它提交，计入本班次', async () => {
+    const shift = await open(ctx.clerk);
+    const release = await holdRechargeNo();
+    const paying = cashRecharge(ctx.clerk, 10000);
+    await waitForLockWaiters(1);
+    const closing = close(ctx.clerk, shift.id, 0);
+    await waitForLockWaiters(2);
+    await release();
+    const [r, cl] = await Promise.all([paying, closing]);
+    expect(r.status).toBe(200);
+    expect((await shiftOfRecharge(r.body.recharge.id)).shiftId).toBe(shift.id);
+    expect(cl.body.error).toMatchObject({ code: 'SHIFT_CHANGED', details: { expectedCash: 10000 } });
+    const done = await close(ctx.clerk, shift.id, 10000);
+    expect(done.status).toBe(200);
+    expect(done.body.summary.recharges).toMatchObject({ count: 1, paid: 10000 });
+  });
+
   it('结账刚查到班次、还没写结账单时交班到达（店主替交）：交班同样等它提交，不会漏记', async () => {
     const shift = await open(ctx.clerk);
     const visitId = await enter('A004');
@@ -137,24 +172,79 @@ describe('交班与收款以班次为界', () => {
     expect((await close(ctx.owner, shift.id, 49900)).body.summary.checkouts).toEqual({ count: 1, total: 49900 });
   });
 
-  it('交班之后才拿到班次的收款：单据时间早于交班，也不记到已交的班次', async () => {
+  it('交班先拿到班次（还没提交）时到达的现金充值：等交班提交后整笔拒绝（SHIFT_CLOSED），余额与流水不变；开新班后原样重提记到新班次', async () => {
     const shift = await open(ctx.clerk);
-    // 充值已取了时间、锁了会员，卡在当日充值单号上（还没查班次）
-    const release = await hold((tx) => tx`
-      INSERT INTO doc_counters (doc_type, business_date, last_no) VALUES ('recharge', ${today}, 0)
-      ON CONFLICT (doc_type, business_date) DO UPDATE SET last_no = doc_counters.last_no`);
-    const late = cashRecharge(ctx.clerk, 20000);
+    const before = await wallet();
+    const release = await holdAudit();
+    const closing = close(ctx.clerk, shift.id, 0);
     await waitForLockWaiters(1);
-    const closed = await close(ctx.clerk, shift.id, 0);
-    expect(closed.status).toBe(200);
+    const key = randomUUID();
+    const paying = cashRecharge(ctx.clerk, 20000, key);
+    await waitForLockWaiters(2);
     await release();
-    const r = await late;
-    expect(r.status).toBe(200);
-    const row = await shiftOfRecharge(r.body.recharge.id);
-    expect(row.shiftId).toBeNull();
-    // 单据时间落在已交班次的开班到交班之间：按原来的时间窗口会算进这个班次、却不在快照里
-    expect(new Date(row.createdAt).getTime()).toBeGreaterThanOrEqual(new Date(closed.body.startedAt).getTime());
-    expect(new Date(row.createdAt).getTime()).toBeLessThan(new Date(closed.body.endedAt).getTime());
+    const [cl, r] = await Promise.all([closing, paying]);
+    expect(cl.status).toBe(200);
+    expect(cl.body.summary.cash.expected).toBe(0);
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatchObject({ code: 'SHIFT_CLOSED', details: { shiftNo: cl.body.shiftNo } });
+    expect(await wallet()).toEqual(before);
+    expect(await ctx.sql`SELECT 1 FROM idempotency_keys WHERE key = ${key}`).toHaveLength(0);
+
+    // 开新班后按原内容重提（同一操作编号）：记到新班次，只入账一次
+    const next = await open(ctx.clerk);
+    const again = await cashRecharge(ctx.clerk, 20000, key);
+    expect(again.status).toBe(200);
+    expect((await shiftOfRecharge(again.body.recharge.id)).shiftId).toBe(next.id);
+    expect((await cashRecharge(ctx.clerk, 20000, key)).body.recharge.id).toBe(again.body.recharge.id);
+    expect((await wallet()).recharges).toBe(before.recharges + 1);
+    expect((await current(ctx.clerk)).summary.cash.expected).toBe(20000);
+    expect((await close(ctx.clerk, next.id, 20000)).status).toBe(200);
+  });
+
+  it('交班先拿到班次时到达的现金结账：同样整笔拒绝，客人仍在店、账单未结；开新班后原样重提记到新班次', async () => {
+    const shift = await open(ctx.clerk);
+    const visitId = await enter('A005');
+    const release = await holdAudit();
+    const closing = close(ctx.clerk, shift.id, 0);
+    await waitForLockWaiters(1);
+    const key = randomUUID();
+    const paying = cashCheckout(visitId, key);
+    await waitForLockWaiters(2);
+    await release();
+    const [cl, c] = await Promise.all([closing, paying]);
+    expect(cl.status).toBe(200);
+    expect(c.status).toBe(409);
+    expect(c.body.error).toMatchObject({ code: 'SHIFT_CLOSED', details: { shiftNo: cl.body.shiftNo } });
+    const [v] = await ctx.sql<{ status: string; billStatus: string }[]>`
+      SELECT v.status, b.status AS bill_status FROM visits v JOIN bills b ON b.id = v.bill_id WHERE v.id = ${visitId}`;
+    expect(v).toEqual({ status: 'open', billStatus: 'open' });
+    expect(await ctx.sql`SELECT 1 FROM checkouts WHERE client_key = ${key}`).toHaveLength(0);
+
+    const next = await open(ctx.clerk);
+    const again = await cashCheckout(visitId, key);
+    expect(again.status).toBe(200);
+    const [k] = await ctx.sql<{ shiftId: number }[]>`SELECT shift_id FROM checkouts WHERE id = ${again.body.id}`;
+    expect(k!.shiftId).toBe(next.id);
+    expect((await close(ctx.clerk, next.id, 49900)).body.summary.checkouts).toEqual({ count: 1, total: 49900 });
+  });
+
+  it('收款还在等会员锁时交班已经完成：拿到班次时整笔拒绝；员工交班后不开新班再收，按未开班收款（不记班次）', async () => {
+    const shift = await open(ctx.clerk);
+    // 会员行被其他事务占用：充值已记下开始时的班次，卡在会员锁上（还没拿班次）
+    const release = await hold((tx) => tx`SELECT id FROM members WHERE id = ${memberId} FOR UPDATE`);
+    const key = randomUUID();
+    const paying = cashRecharge(ctx.clerk, 3000, key);
+    await waitForLockWaiters(1);
+    const cl = await close(ctx.clerk, shift.id, 0);
+    expect(cl.status).toBe(200);
+    await release();
+    const r = await paying;
+    expect(r.status).toBe(409);
+    expect(r.body.error.code).toBe('SHIFT_CLOSED');
+
+    const again = await cashRecharge(ctx.clerk, 3000, key);
+    expect(again.status).toBe(200);
+    expect((await shiftOfRecharge(again.body.recharge.id)).shiftId).toBeNull();
     expect((await api(ctx.app, ctx.clerk, 'GET', `/api/shifts/${shift.id}`)).body.summary.recharges.count).toBe(0);
   });
 
@@ -176,6 +266,74 @@ describe('交班与收款以班次为界', () => {
     expect((await close(ctx.clerk, clerkShift.id, 0)).status).toBe(200);
     // 反结账字段之外，结账单记下的班次不能改
     await expect(ctx.sql`UPDATE checkouts SET shift_id = NULL WHERE id = ${c.body.id}`).rejects.toThrow(/只能反结账/);
+  });
+
+  it('交班先拿到班次时到达的反结账：整笔拒绝，结账单仍有效；开新班后反结账提醒记到新班次', async () => {
+    const c = await cashCheckout(await enter('A006'));
+    expect(c.status).toBe(200);
+    const ownerShift = await open(ctx.owner);
+    const release = await holdAudit();
+    const closing = close(ctx.owner, ownerShift.id, 0);
+    await waitForLockWaiters(1);
+    const voiding = api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/checkouts/${c.body.id}/void`, { reason: '收款方式记错' });
+    await waitForLockWaiters(2);
+    await release();
+    const [cl, v] = await Promise.all([closing, voiding]);
+    expect(cl.status).toBe(200);
+    expect(v.status).toBe(409);
+    expect(v.body.error.code).toBe('SHIFT_CLOSED');
+    const [k] = await ctx.sql<{ status: string }[]>`SELECT status FROM checkouts WHERE id = ${c.body.id}`;
+    expect(k!.status).toBe('completed');
+
+    const next = await open(ctx.owner);
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/checkouts/${c.body.id}/void`, { reason: '收款方式记错' })).status).toBe(200);
+    const [k2] = await ctx.sql<{ voidShiftId: number }[]>`SELECT void_shift_id FROM checkouts WHERE id = ${c.body.id}`;
+    expect(k2!.voidShiftId).toBe(next.id);
+    expect((await close(ctx.owner, next.id, 0)).body.summary.voids).toHaveLength(1);
+  });
+
+  it('升级时仍未交班的旧班次（迁移 016 前开班）：先拿到班次的收款计入，先交班时到达的收款整笔拒绝；升级前的单据仍按时间窗口补算', async () => {
+    // 单独的员工，避免其他用例没有记班次的单据落进时间窗口
+    const staffId = await createStaff(ctx.sql, { username: 'legacy', displayName: '旧班次店员', role: 'clerk', password: PASSWORD, mustChangePassword: false });
+    const cookie = await login(ctx.app, 'legacy');
+    // 升级前（单据没有记班次）开的班：开班之后本人经办的一笔充值
+    const pre = await cashRecharge(cookie, 1000);
+    expect(pre.status).toBe(200);
+    const startedAt = new Date(new Date((await shiftOfRecharge(pre.body.recharge.id)).createdAt).getTime() - 60_000);
+    const [legacy] = await ctx.sql<{ id: number }[]>`
+      INSERT INTO shifts (shift_no, staff_id, business_date, started_at, opening_cash, legacy_window)
+      VALUES ('BC-LEGACY', ${staffId}, ${today}, ${startedAt}, 0, true) RETURNING id`;
+    expect((await current(cookie)).summary.cash.expected).toBe(1000);
+
+    // ① 充值先拿到班次、卡在取号上：交班等它提交 → SHIFT_CHANGED，充值记到旧班次
+    const releaseNo = await holdRechargeNo();
+    const paying = cashRecharge(cookie, 2000);
+    await waitForLockWaiters(1);
+    const closing = close(cookie, legacy!.id, 1000);
+    await waitForLockWaiters(2);
+    await releaseNo();
+    const [r, cl] = await Promise.all([paying, closing]);
+    expect(r.status).toBe(200);
+    expect((await shiftOfRecharge(r.body.recharge.id)).shiftId).toBe(legacy!.id);
+    expect(cl.body.error).toMatchObject({ code: 'SHIFT_CHANGED', details: { expectedCash: 3000 } });
+
+    // ② 交班先拿到班次：之后拿到锁的结账整笔拒绝
+    const visitId = await enter('A007');
+    const releaseAudit = await holdAudit();
+    const closing2 = close(cookie, legacy!.id, 3000);
+    await waitForLockWaiters(1);
+    const late = cashCheckout(visitId, randomUUID(), cookie);
+    await waitForLockWaiters(2);
+    await releaseAudit();
+    const [cl2, c2] = await Promise.all([closing2, late]);
+    expect(cl2.status).toBe(200);
+    expect(c2.body.error.code).toBe('SHIFT_CLOSED');
+    // 快照：升级前的 10 元（时间窗口补算）+ 计入的 20 元；被拒绝的结账不在其中，客人仍在店
+    expect(cl2.body.summary.recharges).toMatchObject({ count: 2, paid: 3000 });
+    expect(cl2.body.summary.checkouts).toEqual({ count: 0, total: 0 });
+    expect(cl2.body.expectedCash).toBe(3000);
+    const [v] = await ctx.sql<{ status: string }[]>`SELECT status FROM visits WHERE id = ${visitId}`;
+    expect(v!.status).toBe('open');
   });
 
   it('升级后开的班次只按班次汇总：没有记班次的单据即使在开班之后，也不算进来', async () => {

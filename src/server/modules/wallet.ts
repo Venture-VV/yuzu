@@ -31,7 +31,7 @@ import { addRechargeLot, expireDueLots, expireMemberBonus, restoreToLots, takeFr
 import { getMember } from './members';
 import { loadPricedItems, priceLine } from './pricing';
 import { loadSettings } from './settings';
-import { lockOpenShift } from './shifts';
+import { lockPaymentShift, openShiftOf } from './shifts';
 import { applyBalance, lockMember, nextDocNo, type LockedMember } from './wallet-core';
 
 type OpType = 'recharge' | 'consume' | 'reversal';
@@ -490,11 +490,15 @@ export async function reverseForCheckout(
 export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContext): Promise<OperationResult> {
   const input = parse(RechargeInput, raw);
   const { idempotencyKey: key, ...payload } = input;
+  // 收款开始处理时经办人所在的班次：入账前这个班次已交班则整笔拒绝（见 shifts.ts lockPaymentShift）
+  const seenShift = await openShiftOf(deps.sql, ctx.actor.id);
   await expireMemberBonus(deps, input.memberId, ctx.at ?? new Date());
   const run = await runIdempotent(
     deps.sql,
     { key, opType: 'recharge', requestHash: hashRequest(payload), memberId: input.memberId, staffId: ctx.actor.id },
     async (tx, locked) => {
+      // 先对班次加共享锁，再核对、取号：交班等这笔提交后再汇总，这笔记入本班次（充值单只追加，班次在入账时写入）
+      const shiftId = await lockPaymentShift(tx, ctx.actor.id, seenShift);
       const settings = await loadSettings(tx);
       const at = ctx.at ?? new Date();
       // 先作废到期的赠金（通常已由记账前的单独事务处理），入账后余额从最新余额算起
@@ -530,8 +534,6 @@ export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContex
 
       const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
       const docNo = await nextDocNo(tx, 'recharge', businessDate);
-      // 记到经办人此刻未交班的班次（充值单只追加，班次在入账时写入；见 shifts.ts）
-      const shiftId = await lockOpenShift(tx, ctx.actor.id);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO recharges (doc_no, member_id, plan_id, plan_name, paid_amount, bonus_amount, payment_method,
                                payment_ref, note, business_date, operator_id, created_at, over_limit_approved_by, bonus_expires_at, shift_id)
