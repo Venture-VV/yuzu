@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Banknote, CircleCheck, Clock3, Plus, ReceiptText, Search, Ticket, Trash2, Undo2, UserRound, WalletCards } from 'lucide-react';
+import { Banknote, CircleCheck, Clock3, Plus, ReceiptText, Ticket, Trash2, Undo2, UserRound, WalletCards } from 'lucide-react';
 import {
   CHECKOUT_METHOD_LABELS,
   COUPON_CODE_PATTERN,
@@ -17,9 +17,7 @@ import { splitDeduction } from '@shared/deduction';
 import { ZONE_LABELS, type BoardTag, type VisitDetail } from '@shared/frontdesk';
 import { maskPhone, PAYMENT_METHODS } from '@shared/labels';
 import { centsToInput, parseYuan } from '@shared/money';
-import type { MemberSummary } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
-import { useMembers } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, formatTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
@@ -146,6 +144,8 @@ export function CheckoutDialog({
     if (c === null || c === undefined || c <= 0) return '请填写金额';
     if (r.method === 'wallet') {
       if (!r.member) return '请选择会员';
+      // 改了勾选的手牌后，原来选的会员可能已不在本次结账里
+      if (p && !p.members.some((m) => m.id === r.member!.id)) return '这位会员不在本次结账的客人里，请重新选择';
       if (r.member.status !== 'active') return '会员已停用';
       const s = splitOf(r, c);
       if (s && !s.ok) return `余额不足，还差 ¥${(s.shortfall / 100).toFixed(2)}`;
@@ -450,8 +450,6 @@ function PayRowEditor({
   onChange: (patch: Partial<PayRow>) => void;
   onRemove: () => void;
 }) {
-  const [q, setQ] = useState('');
-  const found = useMembers(row.method === 'wallet' && !row.member ? q.trim() : '');
   const tendered = parseYuan(row.tendered);
   return (
     <li className={cn('rounded-lg border bg-card p-3', problem ? 'border-clay/40' : 'border-line')} data-testid={`pay-row-${row.method}`}>
@@ -557,20 +555,18 @@ function PayRowEditor({
             </Button>
           </div>
         ) : (
-          <div className="mt-2">
-            <div className="relative">
-              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-3" />
-              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="查找付款会员：手机号 / 姓名 / 会员号" className="h-9 pl-9 text-[13px]" aria-label="查找付款会员" />
-            </div>
-            <ul className="mt-1 space-y-0.5">
-              {members.map((m) => (
-                <MemberPick key={m.id} m={m} onPick={() => onChange({ member: m })} />
-              ))}
-              {q.trim() &&
-                found.data?.slice(0, 5).map((m: MemberSummary) => (
-                  <MemberPick key={`s${m.id}`} m={m} onPick={() => onChange({ member: { id: m.id, name: m.name, memberNo: m.memberNo, principalBalance: m.principalBalance, bonusBalance: m.bonusBalance, status: m.status } })} />
+          // 只能用本次结账客人里的会员储值（服务端同样核对）；会员替朋友付，把朋友的手牌合并进本次结账
+          <div className="mt-2" data-testid="wallet-members">
+            <p className="text-[12.5px] text-ink-3">
+              {members.length ? '选择付款会员：' : '本次结账的客人里没有会员。'}只能用本次结账客人里的会员储值支付；同行朋友请合并到同一张结账单
+            </p>
+            {members.length > 0 && (
+              <ul className="mt-1 space-y-0.5">
+                {members.map((m) => (
+                  <MemberPick key={m.id} m={m} onPick={() => onChange({ member: m })} />
                 ))}
-            </ul>
+              </ul>
+            )}
           </div>
         ))}
       {problem && <p className="mt-1.5 text-[12.5px] font-semibold text-clay">{problem}</p>}

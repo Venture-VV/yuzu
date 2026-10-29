@@ -50,6 +50,7 @@ beforeAll(async () => {
   await sql`ALTER TABLE ledger_entries ADD COLUMN opening_id bigint`;
   await sql`ALTER TABLE consumptions ADD COLUMN checkout_id bigint`;
   await sql`CREATE TABLE bonus_lots (id bigserial PRIMARY KEY, member_id bigint, source text, recharge_id bigint, amount bigint, remaining bigint, expires_at timestamptz, created_at timestamptz)`;
+  await sql`CREATE TABLE checkouts (id bigserial PRIMARY KEY, checkout_no text, status text)`;
   // 升级前已有的消费项目（只有一个价格）
   const [item] = await sql<{ id: number }[]>`INSERT INTO service_items (name, category, price) VALUES ('升级前项目', '护理', 6800) RETURNING id`;
   itemId = item!.id;
@@ -69,6 +70,7 @@ beforeAll(async () => {
   await sql`ALTER TABLE ledger_entries DROP COLUMN opening_id`;
   await sql`ALTER TABLE consumptions DROP COLUMN checkout_id`;
   await sql`DROP TABLE bonus_lots`;
+  await sql`DROP TABLE checkouts`;
 
   // 升级：增量执行 002 之后的全部迁移
   const applied = await migrate(sql);

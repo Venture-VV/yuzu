@@ -202,7 +202,9 @@ export async function getConsumption(db: Db, id: number): Promise<ConsumptionDoc
              FROM consumption_lines l WHERE l.consumption_id = c.id), '[]'::json) AS lines,
            (SELECT json_build_object('id', r.id, 'docNo', r.doc_no, 'reason', r.reason, 'businessDate', r.business_date,
                                      'operatorName', rs.display_name, 'createdAt', r.created_at)
-            FROM reversals r JOIN staff rs ON rs.id = r.operator_id WHERE r.consumption_id = c.id) AS reversal
+            FROM reversals r JOIN staff rs ON rs.id = r.operator_id WHERE r.consumption_id = c.id) AS reversal,
+           (SELECT json_build_object('id', k.id, 'checkoutNo', k.checkout_no, 'status', k.status)
+            FROM checkouts k WHERE k.id = c.checkout_id) AS checkout
     FROM consumptions c JOIN staff s ON s.id = c.operator_id LEFT JOIN staff a ON a.id = c.over_limit_approved_by
     WHERE c.id = ${id}`;
   if (!row) throw notFound('消费单不存在');
@@ -656,14 +658,25 @@ export async function reverse(deps: Deps, consumptionId: number, raw: ReverseInp
       const settings = await loadSettings(tx);
       const at = ctx.at ?? new Date();
       const member = await expireDueLots(tx, deps, locked, at);
-      // 锁顺序始终是「会员 → 消费单 → 赠金批次」，避免死锁
-      const [c] = await tx<{ id: number; docNo: string; status: string; principalAmount: number; bonusAmount: number; businessDate: string; createdAt: Date }[]>`
-        SELECT id, doc_no, status, principal_amount, bonus_amount, business_date, created_at FROM consumptions
-        WHERE id = ${consumptionId} FOR UPDATE`;
+      // 锁顺序始终是「会员 → 消费单 → 赠金批次」，避免死锁（结账单只读、不加锁）
+      const [c] = await tx<{ id: number; docNo: string; status: string; principalAmount: number; bonusAmount: number; businessDate: string; createdAt: Date; checkoutId: number | null; checkoutNo: string | null }[]>`
+        SELECT c.id, c.doc_no, c.status, c.principal_amount, c.bonus_amount, c.business_date, c.created_at, c.checkout_id, k.checkout_no
+        FROM consumptions c LEFT JOIN checkouts k ON k.id = c.checkout_id
+        WHERE c.id = ${consumptionId} FOR UPDATE OF c`;
       if (!c) throw notFound('消费单不存在');
       if (c.status !== 'completed') {
         const [r] = await tx<{ docNo: string }[]>`SELECT doc_no FROM reversals WHERE consumption_id = ${c.id}`;
         throw conflict('ALREADY_REVERSED', `该消费单已撤销${r ? `（撤销单 ${r.docNo}）` : ''}，不会重复恢复余额`);
+      }
+      // 前台结账的储值支付只能随结账单一起反结账：单独撤销会让余额恢复而结账单仍算已收（账错）。
+      // 拒绝时整笔回滚、不写操作编号，重提同样拒绝、查回为未找到、可确认作废；
+      // 同一编号之前已成功的撤销，runIdempotent 在执行到这里之前就按原结果返回
+      if (c.checkoutId !== null) {
+        throw conflict(
+          'CHECKOUT_LINKED',
+          `这笔储值消费是前台结账单 ${c.checkoutNo} 的收款，不能单独撤销；如需更正，请在「前台 → 结账记录」对结账单 ${c.checkoutNo} 反结账`,
+          { checkoutId: c.checkoutId, checkoutNo: c.checkoutNo },
+        );
       }
       // 撤销时限（#10，待确认）：超过时限只有店主可以撤销
       const windowHours = settings.reversalWindowHours;

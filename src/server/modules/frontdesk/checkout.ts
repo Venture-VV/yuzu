@@ -8,7 +8,8 @@
 //   · 团购券：记平台与完整券码，同一平台同一券码只能有一笔有效登记（数据库唯一约束兜底）；
 //   · 员工确认时看到的应收合计与储值扣款构成，和服务端此刻计算的不一致时拒绝（门票跳档、改价、余额变化）；
 //   · 同一操作编号只结一次；结果待确认时可查回或作废（与接待、挂账同一机制）；
-//   · 反结账：作废结账单——储值消费按原单撤销、团购券登记作废、门票明细作废，账单与来访恢复为在店未结。
+//   · 反结账：作废结账单——储值消费按原单撤销、团购券登记作废、门票明细作废，账单与来访恢复为在店未结；
+//     储值消费只能这样随结账单一起撤销，会员撤销接口拒绝单独撤销（CHECKOUT_LINKED）。
 // 加锁顺序：手牌（反结账）→ 同行组 → 来访 → 账单 → 会员（id 升序）→ 赠金批次。
 
 import { z } from 'zod';
@@ -217,6 +218,14 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
       const v = locked.get(p.id)!;
       assertOpen(v);
       if (v.groupId !== p.groupId) throw conflict('VISIT_CHANGED', '同行组刚刚有变化，请刷新后重试');
+    }
+    // 储值只能由本次结账的客人里的会员支付，不能扣不在这张结账单上的会员（串单）；会员替朋友付，把朋友的手牌合并进来一起结
+    const guests = new Set([...locked.values()].map((v) => v.memberId));
+    const outsider = wallets.find((w) => !guests.has(w.memberId));
+    if (outsider) {
+      throw unprocessable('WALLET_MEMBER_NOT_IN_CHECKOUT', '只能用本次结账客人里的会员储值支付；同行朋友请合并到同一张结账单', {
+        memberId: outsider.memberId,
+      });
     }
     const billIds = [...locked.values()].map((v) => v.billId).sort((a, b) => a - b);
     await tx`SELECT id FROM bills WHERE id IN ${tx(billIds)} ORDER BY id FOR UPDATE`;

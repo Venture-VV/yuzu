@@ -31,6 +31,7 @@ export async function listLedger(db: Db, f: LedgerFilter): Promise<LedgerRow[]> 
            coalesce(s.display_name, '系统') AS operator_name, le.recharge_id, le.consumption_id, le.reversal_id, le.expiry_id, le.opening_id,
            r.paid_amount, r.payment_method,
            CASE WHEN le.entry_type = 'consume' THEN c.status END AS consumption_status,
+           CASE WHEN le.entry_type = 'consume' THEN k.checkout_no END AS checkout_no,
            CASE le.entry_type WHEN 'consume' THEN rv.doc_no WHEN 'reversal' THEN c.doc_no END AS related_doc_no,
            CASE WHEN le.entry_type = 'reversal' THEN c.business_date END AS related_business_date,
            coalesce(CASE le.entry_type
@@ -51,6 +52,7 @@ export async function listLedger(db: Db, f: LedgerFilter): Promise<LedgerRow[]> 
     LEFT JOIN opening_balances ob ON ob.id = le.opening_id
     LEFT JOIN opening_imports oi ON oi.id = ob.import_id
     LEFT JOIN consumptions c ON c.id = le.consumption_id
+    LEFT JOIN checkouts k ON k.id = c.checkout_id
     LEFT JOIN reversals rv ON rv.consumption_id = le.consumption_id
     WHERE true
       ${f.date ? db`AND le.business_date = ${f.date}` : db``}
