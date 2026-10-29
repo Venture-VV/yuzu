@@ -47,6 +47,7 @@ E2E_BASE_URL=http://127.0.0.1:<端口> npm run e2e   # 1440×900 / 1024×768 / 8
 
 - Claude 只在指定的 `claude/*` 分支开发并推送；PR 由店主决定是否合并，AI 不合并、不打标签。
 - 版本标签由 CI 自动创建：main 上的 CI 通过后，`.github/workflows/release-tag.yml` 按 `package.json` 的版本号打 `vX.Y.Z`（已有则跳过）。发版时在 PR 里同时改 `package.json`、`package-lock.json`、`Dockerfile`、`compose.yaml` 与 `src/server/config.ts` 里的版本号。
+- 部署（测试服、门店实例、正式服）只用 `main` 上的版本标签或完整 SHA（`./scripts/update.sh <标签或 SHA>`），不部署 `claude/*` 等开发分支或未合并的 PR。PR 合并后开发分支可以删除，后续开发从最新 `main` 重新拉分支。
 - 提交信息写清阶段与内容；生成内容不写具体模型版本号。
 - 验收 / 复审评论直接发在对应 PR 上，至少包含：测试 SHA、实际验证范围与环境、未测项（环境缺失记「受阻未测」，不记通过）、问题清单（标 P1 / P2，附复现步骤与位置）。账错、串单、越权、数据丢失、重复扣款或破坏旧模块自检为阻断项。
 - 评论末尾附来源署名：
