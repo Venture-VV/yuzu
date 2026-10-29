@@ -22,7 +22,7 @@
 cd ~
 git clone https://github.com/Venture-VV/yuzu.git
 cd yuzu
-git checkout v0.1.0          # 只部署经过验证的版本标签
+git checkout v0.3.0          # 只部署 main 上的版本标签（git tag 查看最新），不部署开发分支
 cp .env.example .env
 open -e .env                 # 用文本编辑器修改
 ```
@@ -82,7 +82,7 @@ docker compose logs app      # 应看到「已应用迁移」「已创建初始�
 | 查看 Tailscale 地址 | `tailscale ip -4`（未装命令行入口时见第 10 节） |
 | 核对余额与流水、库存结存与库存流水 | `docker compose exec app node dist/server/cli.js check` |
 | 店主忘记密码 | `docker compose exec app node dist/server/cli.js reset-password <账号>` |
-| 更新版本 | `./scripts/update.sh v0.2.0` |
+| 更新版本 | `./scripts/update.sh <版本标签>`（例如 `v0.3.1`；`git fetch --tags && git tag` 查看） |
 | 恢复备份 | `./scripts/restore.sh <备份文件>` |
 
 ## 6. 环境隔离
@@ -410,7 +410,7 @@ unset OSS_ACCESS_KEY_ID OSS_ACCESS_KEY_SECRET
 ```bash
 git clone https://github.com/Venture-VV/yuzu.git ~/yuzu-drill
 cd ~/yuzu-drill
-git checkout v0.1.0
+git checkout v0.3.0          # 与备份来源环境相同的版本标签
 cp .env.example .env
 # 编辑 .env：另一组 POSTGRES_PASSWORD，APP_PORT=8082，BACKUP_DIR 指向演练专用目录
 docker compose up -d --build

@@ -42,7 +42,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     sessionTtlHours: Number(process.env.SESSION_TTL_HOURS ?? 12),
     cookieSecure: process.env.COOKIE_SECURE === 'true',
     logLevel: process.env.LOG_LEVEL ?? (env === 'test' ? 'silent' : 'info'),
-    version: process.env.APP_VERSION ?? '0.3.0',
+    version: process.env.APP_VERSION ?? '0.3.1',
     initOwner:
       ownerUser && ownerPass
         ? { username: ownerUser, password: ownerPass, displayName: process.env.INIT_OWNER_NAME?.trim() || '店主' }

@@ -192,7 +192,7 @@ npm run cli -- seed-billing-demo     # 在前台演示数据上写入结账、�
 
 ```bash
 git clone https://github.com/Venture-VV/yuzu.git && cd yuzu
-git checkout v0.1.0                 # 正式环境只部署经过验证的版本标签
+git checkout v0.3.0                 # 只部署 main 上的版本标签（git tag 查看最新），不部署开发分支
 cp .env.example .env                # 修改数据库密码、初始店主、备份目录
 docker compose up -d --build
 docker compose ps                   # app / db 显示 healthy 即可
@@ -230,10 +230,12 @@ docker compose exec app node dist/server/cli.js reset-password boss
 **更新到新版本**（会先自动备份）：
 
 ```bash
-./scripts/update.sh v0.2.0
+./scripts/update.sh v0.3.1             # 换成要更新到的版本标签（git fetch --tags && git tag 查看）
 ```
 
-应用启动时自动执行数据库迁移；更新失败时 `git checkout <上个版本>` 后再执行一次即可回退。
+脚本只接受已合并进 main 的版本标签或完整 SHA，开发分支（`claude/*` 等）、未合并的 PR 与缩写 SHA 会被拒绝、不做任何改动。应用启动时自动执行数据库迁移；更新失败时执行 `./scripts/update.sh <上个版本标签>` 即可回退。
+
+版本标签：合并到 main、CI 通过后，GitHub Actions「版本标签」按 `package.json` 的版本号自动创建 `vX.Y.Z`（已有同名标签时跳过；也可在 Actions 页面手动运行补打）。
 
 **自动备份**：`backup` 容器每天 `BACKUP_HOUR` 点做一次完整备份（`pg_dump` 自定义格式），写入 `BACKUP_DIR`，保留 `BACKUP_KEEP_DAYS` 天。请把 `BACKUP_DIR` 指向外置硬盘或另一块磁盘，并定期复制一份到店外。
 
