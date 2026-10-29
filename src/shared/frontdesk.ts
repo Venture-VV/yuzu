@@ -3,6 +3,7 @@
 // 手牌账单只汇总消费明细，不是第二套会员钱包：本阶段（S2）挂账不收款、不扣会员余额。
 
 import type { PriceTier } from './catalog';
+import type { CheckoutDetail } from './checkout';
 
 /** 宾客与手牌的分区：只分男宾、女宾（店主 2026-10-27 #27：儿童跟同性别家长用男宾或女宾的牌） */
 export const ZONES = ['male', 'female'] as const;
@@ -70,6 +71,8 @@ export interface FrontdeskRules {
   vipLevelThresholds: number[];
   /** 允许值班经理 / 店总当场授权散客或等级不够的会员使用 VIP 柜（店主 ❓2：默认关闭） */
   vipOverrideEnabled: boolean;
+  /** 门票跳档宽限分钟数（店主 ❓6：默认 0，超过 12 小时分界点即跳档） */
+  overtimeGraceMinutes: number;
 }
 
 export const DEFAULT_FRONTDESK_RULES: FrontdeskRules = {
@@ -78,6 +81,7 @@ export const DEFAULT_FRONTDESK_RULES: FrontdeskRules = {
   vipLevelBasis: 'recharge',
   vipLevelThresholds: [0, 5_000_000, 10_000_000, 20_000_000, 30_000_000],
   vipOverrideEnabled: false,
+  overtimeGraceMinutes: 0,
 };
 
 /** 会员等级：达到第 i 档门槛即为第 i + 1 级；一档都没达到为 0 级（与散客相同） */
@@ -261,7 +265,7 @@ export interface GroupMate {
 
 export interface VisitHistoryEvent {
   at: string;
-  kind: 'checkin' | 'swap' | 'join' | 'leave' | 'post' | 'void' | 'close';
+  kind: 'checkin' | 'swap' | 'join' | 'leave' | 'post' | 'void' | 'close' | 'ticket' | 'reopen';
   text: string;
   operatorName: string;
 }
@@ -284,6 +288,20 @@ export interface VisitDetail {
   memberLevel: MemberLevel | null;
   /** 开牌时等级不够、经当场授权使用 VIP 柜的授权人 */
   vipOverrideByName: string | null;
+  /** 票种与按当前时刻计算的门票（Batch 3 之前开的牌没有票种，结账时补选） */
+  ticket: {
+    typeId: number;
+    name: string;
+    price12h: number;
+    price24h: number;
+    segments: number;
+    tierLabel: string;
+    amount: number;
+    nextJumpAt: string;
+    nextAmount: number;
+  } | null;
+  /** 已结账离店时的结账单 */
+  checkout: { id: number; checkoutNo: string; status: 'completed' | 'voided' } | null;
   bill: { id: number; billNo: string; status: VisitStatus; amountCents: number; lineCount: number };
   lines: BillLine[];
   group: { id: number; groupNo: string; status: 'open' | 'closed'; mates: GroupMate[]; openAmountCents: number } | null;
@@ -295,7 +313,8 @@ export interface VisitDetail {
 export type FrontdeskOpLookup =
   | { found: false; abandoned: boolean }
   | { found: true; type: 'checkin'; checkin: CheckinResult }
-  | { found: true; type: 'bill_post' | 'tag_swap'; visit: VisitDetail };
+  | { found: true; type: 'bill_post' | 'tag_swap'; visit: VisitDetail }
+  | { found: true; type: 'checkout'; checkout: CheckoutDetail };
 
 export interface CheckinResult {
   replayed: boolean;

@@ -14,7 +14,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { bonusExpiryAt, businessDateOf } from '@shared/business-date';
 import { PRICE_TIERS, type PriceTier } from '@shared/catalog';
-import { splitDeduction } from '@shared/deduction';
+import { splitDeduction, type DeductionRule } from '@shared/deduction';
 import { describeHours, PAYMENT_METHODS } from '@shared/labels';
 import { formatYuan } from '@shared/money';
 import { can, type Permission } from '@shared/permissions';
@@ -308,6 +308,180 @@ async function approveOverLimit(
   });
 }
 
+// ───────────────────────── 底层写入（会员消费、撤销与前台结账共用） ─────────────────────────
+
+interface ConsumptionLine {
+  itemId: number | null;
+  name: string;
+  tier: PriceTier | null;
+  unitPrice: number;
+  quantity: number;
+  amount: number;
+}
+
+/** 写一张消费单：单据、明细、余额流水与赠金批次扣用。调用方已锁会员，并核对过金额与扣款构成 */
+async function insertConsumption(
+  tx: Tx,
+  member: LockedMember,
+  o: {
+    total: number;
+    split: { principal: number; bonus: number };
+    rule: DeductionRule;
+    lines: ConsumptionLine[];
+    note: string;
+    businessDate: string;
+    operatorId: number;
+    at: Date;
+    overLimitApproverId: number | null;
+    /** 前台结账用储值支付时指向结账单 */
+    checkoutId: number | null;
+  },
+): Promise<{ id: number; docNo: string }> {
+  const docNo = await nextDocNo(tx, 'consume', o.businessDate);
+  const [row] = await tx<{ id: number }[]>`
+    INSERT INTO consumptions (doc_no, member_id, total_amount, principal_amount, bonus_amount, deduction_rule,
+                              note, business_date, operator_id, created_at, over_limit_approved_by, checkout_id)
+    VALUES (${docNo}, ${member.id}, ${o.total}, ${o.split.principal}, ${o.split.bonus}, ${o.rule},
+            ${o.note}, ${o.businessDate}, ${o.operatorId}, ${o.at}, ${o.overLimitApproverId}, ${o.checkoutId})
+    RETURNING id`;
+  const id = row!.id;
+  for (const l of o.lines) {
+    await tx`
+      INSERT INTO consumption_lines (consumption_id, item_id, tier, name, unit_price, quantity, amount)
+      VALUES (${id}, ${l.itemId}, ${l.tier}, ${l.name}, ${l.unitPrice}, ${l.quantity}, ${l.amount})`;
+  }
+  await applyBalance(tx, member, { principal: -o.split.principal, bonus: -o.split.bonus }, {
+    entryType: 'consume', docNo, consumptionId: id, businessDate: o.businessDate, operatorId: o.operatorId, at: o.at,
+  });
+  // 扣用的赠金先用最早到期的批次
+  await takeFromLots(tx, { memberId: member.id, consumptionId: id, amount: o.split.bonus, at: o.at });
+  return { id, docNo };
+}
+
+/** 写一张撤销单并把消费单标为已撤销。调用方已按「会员 → 消费单」加锁，并核对过消费单状态 */
+async function insertReversal(
+  tx: Tx,
+  deps: Deps,
+  member: LockedMember,
+  c: { id: number; principalAmount: number; bonusAmount: number },
+  o: { reason: string; businessDate: string; operatorId: number; at: Date },
+): Promise<{ id: number; docNo: string }> {
+  const docNo = await nextDocNo(tx, 'reversal', o.businessDate);
+  const [row] = await tx<{ id: number }[]>`
+    INSERT INTO reversals (doc_no, consumption_id, member_id, principal_amount, bonus_amount, reason,
+                           business_date, operator_id, created_at)
+    VALUES (${docNo}, ${c.id}, ${member.id}, ${c.principalAmount}, ${c.bonusAmount}, ${o.reason},
+            ${o.businessDate}, ${o.operatorId}, ${o.at})
+    RETURNING id`;
+  const id = row!.id;
+  await tx`UPDATE consumptions SET status = 'reversed' WHERE id = ${c.id}`;
+  // 按原单扣款构成恢复，本金归本金、赠金归赠金；赠金回到原来的批次，原批次已到期的随即作废
+  const restored = await applyBalance(tx, member, { principal: c.principalAmount, bonus: c.bonusAmount }, {
+    entryType: 'reversal', docNo, consumptionId: c.id, reversalId: id, businessDate: o.businessDate, operatorId: o.operatorId, at: o.at,
+  });
+  await restoreToLots(tx, { memberId: member.id, consumptionId: c.id, reversalId: id, amount: c.bonusAmount, at: o.at });
+  await expireDueLots(tx, deps, restored, o.at, id);
+  return { id, docNo };
+}
+
+// ───────────────────────── 前台结账用储值支付 ─────────────────────────
+
+/**
+ * 前台结账时用会员储值支付一部分或全部（在结账的事务里调用；调用方按会员 id 升序逐位调用，保证加锁顺序）。
+ * 生成一张标准消费单（明细为「手牌结账 JZ…」，指向结账单）与余额流水，会员日结与自检原样适用。
+ * 页面确认时看到的扣款构成与服务端按当前余额、扣款规则计算的不一致时拒绝。
+ */
+export async function consumeForCheckout(
+  tx: Tx,
+  deps: Deps,
+  o: {
+    memberId: number;
+    amount: number;
+    expectedSplit: { principal: number; bonus: number };
+    checkoutId: number;
+    checkoutNo: string;
+    tagCodes: string[];
+    businessDate: string;
+    ctx: OpContext;
+    at: Date;
+  },
+): Promise<{ consumptionId: number; docNo: string; split: { principal: number; bonus: number } }> {
+  const settings = await loadSettings(tx);
+  const member = await expireDueLots(tx, deps, await lockMember(tx, o.memberId), o.at);
+  if (member.status !== 'active') throw unprocessable('MEMBER_FROZEN', `会员「${member.name}」已停用，不能用储值支付`);
+  if (o.amount > settings.maxConsumeCents) {
+    throw unprocessable('OVER_LIMIT', `储值支付 ${formatYuan(o.amount)} 超过单笔消费上限 ${formatYuan(settings.maxConsumeCents)}，请改用其他方式`, {
+      limit: settings.maxConsumeCents,
+    });
+  }
+  const balance = { principal: member.principalBalance, bonus: member.bonusBalance };
+  const split = splitDeduction(o.amount, balance, settings.deductionRule);
+  if (!split.ok) {
+    throw unprocessable('INSUFFICIENT_BALANCE', `会员「${member.name}」余额不足，还差 ${formatYuan(split.shortfall)}`, {
+      memberId: member.id,
+      available: split.available,
+      shortfall: split.shortfall,
+    });
+  }
+  if (o.expectedSplit.principal !== split.principal || o.expectedSplit.bonus !== split.bonus) {
+    throw conflict('SPLIT_CHANGED', `会员「${member.name}」的余额或扣款规则刚刚有变化，本金 / 赠金的扣款构成与确认时不同，请重新核对`, {
+      memberId: member.id,
+      split: { principal: split.principal, bonus: split.bonus },
+      rule: settings.deductionRule,
+      balance,
+    });
+  }
+  const name = `手牌结账 ${o.checkoutNo}`;
+  const note = `结账 ${o.checkoutNo}（手牌 ${o.tagCodes.join('、')}）`.slice(0, 200);
+  const { id, docNo } = await insertConsumption(tx, member, {
+    total: o.amount,
+    split,
+    rule: settings.deductionRule,
+    lines: [{ itemId: null, name, tier: null, unitPrice: o.amount, quantity: 1, amount: o.amount }],
+    note,
+    businessDate: o.businessDate,
+    operatorId: o.ctx.actor.id,
+    at: o.at,
+    overLimitApproverId: null,
+    checkoutId: o.checkoutId,
+  });
+  await writeAudit(tx, {
+    staffId: o.ctx.actor.id,
+    action: 'consumption_created',
+    targetType: 'consumption',
+    targetId: id,
+    detail: { docNo, memberId: member.id, total: o.amount, principal: split.principal, bonus: split.bonus, rule: settings.deductionRule, checkoutNo: o.checkoutNo },
+    ip: o.ctx.ip,
+    businessDate: o.businessDate,
+  });
+  return { consumptionId: id, docNo, split: { principal: split.principal, bonus: split.bonus } };
+}
+
+/** 反结账：撤销结账时的储值消费，本金、赠金按原单恢复（在反结账的事务里调用，会员按 id 升序逐位调用） */
+export async function reverseForCheckout(
+  tx: Tx,
+  deps: Deps,
+  o: { consumptionId: number; reason: string; businessDate: string; ctx: OpContext; at: Date },
+): Promise<{ reversalId: number; docNo: string }> {
+  const [peek] = await tx<{ memberId: number }[]>`SELECT member_id FROM consumptions WHERE id = ${o.consumptionId}`;
+  if (!peek) throw notFound('消费单不存在');
+  const member = await expireDueLots(tx, deps, await lockMember(tx, peek.memberId), o.at);
+  const [c] = await tx<{ id: number; docNo: string; status: string; principalAmount: number; bonusAmount: number }[]>`
+    SELECT id, doc_no, status, principal_amount, bonus_amount FROM consumptions WHERE id = ${o.consumptionId} FOR UPDATE`;
+  if (c!.status !== 'completed') throw conflict('ALREADY_REVERSED', `储值消费 ${c!.docNo} 已撤销，不会重复恢复余额`);
+  const { id, docNo } = await insertReversal(tx, deps, member, c!, { reason: o.reason, businessDate: o.businessDate, operatorId: o.ctx.actor.id, at: o.at });
+  await writeAudit(tx, {
+    staffId: o.ctx.actor.id,
+    action: 'consumption_reversed',
+    targetType: 'reversal',
+    targetId: id,
+    detail: { docNo, consumptionDocNo: c!.docNo, memberId: member.id, principal: c!.principalAmount, bonus: c!.bonusAmount, reason: o.reason },
+    ip: o.ctx.ip,
+    businessDate: o.businessDate,
+  });
+  return { reversalId: id, docNo };
+}
+
 // ───────────────────────── 充值 ─────────────────────────
 
 export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContext): Promise<OperationResult> {
@@ -440,24 +614,10 @@ export async function consume(deps: Deps, raw: ConsumeInputData, ctx: OpContext)
         : null;
 
       const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
-      const docNo = await nextDocNo(tx, 'consume', businessDate);
-      const [row] = await tx<{ id: number }[]>`
-        INSERT INTO consumptions (doc_no, member_id, total_amount, principal_amount, bonus_amount, deduction_rule,
-                                  note, business_date, operator_id, created_at, over_limit_approved_by)
-        VALUES (${docNo}, ${member.id}, ${total}, ${split.principal}, ${split.bonus}, ${settings.deductionRule},
-                ${input.note}, ${businessDate}, ${ctx.actor.id}, ${at}, ${overLimit?.approverId ?? null})
-        RETURNING id`;
-      const id = row!.id;
-      for (const l of lines) {
-        await tx`
-          INSERT INTO consumption_lines (consumption_id, item_id, tier, name, unit_price, quantity, amount)
-          VALUES (${id}, ${l.itemId}, ${l.tier}, ${l.name}, ${l.unitPrice}, ${l.quantity}, ${l.amount})`;
-      }
-      await applyBalance(tx, member, { principal: -split.principal, bonus: -split.bonus }, {
-        entryType: 'consume', docNo, consumptionId: id, businessDate, operatorId: ctx.actor.id, at,
+      const { id, docNo } = await insertConsumption(tx, member, {
+        total, split, rule: settings.deductionRule, lines, note: input.note, businessDate, operatorId: ctx.actor.id, at,
+        overLimitApproverId: overLimit?.approverId ?? null, checkoutId: null,
       });
-      // 扣用的赠金先用最早到期的批次
-      await takeFromLots(tx, { memberId: member.id, consumptionId: id, amount: split.bonus, at });
       await writeAudit(tx, {
         staffId: ctx.actor.id,
         action: 'consumption_created',
@@ -515,21 +675,7 @@ export async function reverse(deps: Deps, consumptionId: number, raw: ReverseInp
       }
 
       const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
-      const docNo = await nextDocNo(tx, 'reversal', businessDate);
-      const [row] = await tx<{ id: number }[]>`
-        INSERT INTO reversals (doc_no, consumption_id, member_id, principal_amount, bonus_amount, reason,
-                               business_date, operator_id, created_at)
-        VALUES (${docNo}, ${c.id}, ${member.id}, ${c.principalAmount}, ${c.bonusAmount}, ${input.reason},
-                ${businessDate}, ${ctx.actor.id}, ${at})
-        RETURNING id`;
-      const id = row!.id;
-      await tx`UPDATE consumptions SET status = 'reversed' WHERE id = ${c.id}`;
-      // 按原单扣款构成恢复，本金归本金、赠金归赠金；赠金回到原来的批次，原批次已到期的随即作废
-      const restored = await applyBalance(tx, member, { principal: c.principalAmount, bonus: c.bonusAmount }, {
-        entryType: 'reversal', docNo, consumptionId: c.id, reversalId: id, businessDate, operatorId: ctx.actor.id, at,
-      });
-      await restoreToLots(tx, { memberId: member.id, consumptionId: c.id, reversalId: id, amount: c.bonusAmount, at });
-      await expireDueLots(tx, deps, restored, at, id);
+      const { id, docNo } = await insertReversal(tx, deps, member, c, { reason: input.reason, businessDate, operatorId: ctx.actor.id, at });
       await writeAudit(tx, {
         staffId: ctx.actor.id,
         action: 'consumption_reversed',

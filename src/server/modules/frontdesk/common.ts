@@ -31,7 +31,7 @@ export async function businessDate(db: Db, deps: Deps, at: Date): Promise<string
 
 export const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 
-export const FRONTDESK_OPS = ['checkin', 'bill_post', 'tag_swap'] as const;
+export const FRONTDESK_OPS = ['checkin', 'bill_post', 'tag_swap', 'checkout'] as const;
 export type FrontdeskOp = (typeof FRONTDESK_OPS)[number];
 
 export const abandonedError = () =>
@@ -98,6 +98,9 @@ export function mapUniqueViolation(error: unknown): unknown {
   }
   if (isUniqueViolation(error, 'visits_member_open_uq')) {
     return conflict('MEMBER_IN_STORE', '这位会员已持有一张在店手牌，请先在状态板上找到原手牌');
+  }
+  if (isUniqueViolation(error, 'group_buy_coupons_code_uq')) {
+    return conflict('COUPON_USED', '这张团购券刚刚已在其他终端登记，同一张券不能重复使用');
   }
   return error;
 }

@@ -50,6 +50,10 @@ export const PERMISSIONS = {
   'frontdesk.correct': { roles: ['owner', 'store_manager', 'duty_manager'] },
   /** 维护手牌池：批量建牌、改分区、解锁、停用 */
   'frontdesk.tags': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  /** 结账收款（单牌或同行合并）、登记团购券；用会员储值支付还需要「登记消费扣款」 */
+  'frontdesk.checkout': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
+  /** 反结账：撤销一张结账单，账单恢复为在店未结（待确认：默认值班经理及以上） */
+  'frontdesk.checkoutVoid': { roles: ['owner', 'store_manager', 'duty_manager'] },
   // ── 库存与采购 ──
   /** 查看库存数量、物料档案与库存单据 */
   'inventory.read': { roles: ['owner'], duties: ['stock', 'purchase', 'payable', 'approve'] },
@@ -109,6 +113,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'frontdesk.operate': '接待发牌、同行绑牌、挂账、换牌',
   'frontdesk.correct': '作废他人或超时明细、撤销来访',
   'frontdesk.tags': '维护手牌池（建牌、解锁、停用）',
+  'frontdesk.checkout': '结账收款、登记团购券',
+  'frontdesk.checkoutVoid': '反结账（撤销结账单）',
   'inventory.read': '查看库存与物资单据',
   'inventory.operate': '期初、收货、领用、退回、耗用、报损、盘点录入',
   'inventory.master': '维护物料、供应商、部门档案',
@@ -133,7 +139,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   },
   {
     title: '前台手牌与账单',
-    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags'],
+    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid'],
   },
   {
     title: '库存与采购',

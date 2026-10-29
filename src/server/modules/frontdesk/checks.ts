@@ -38,6 +38,39 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
     LEFT JOIN (SELECT group_id, count(*) AS n FROM visits WHERE status = 'open' GROUP BY group_id) o ON o.group_id = g.id
     WHERE (g.status = 'open' AND coalesce(o.n, 0) = 0) OR (g.status = 'closed' AND coalesce(o.n, 0) > 0)`;
 
+  // ⑤ 结账单：合计 = 所含账单合计 = 收款合计；每张已结账单恰好属于一张有效结账单且金额一致
+  const checkoutDiff = await db<{ checkoutNo: string }[]>`
+    SELECT c.checkout_no FROM checkouts c
+    LEFT JOIN (SELECT checkout_id, sum(amount) AS s FROM checkout_bills GROUP BY checkout_id) b ON b.checkout_id = c.id
+    LEFT JOIN (SELECT checkout_id, sum(amount) AS s FROM checkout_payments GROUP BY checkout_id) p ON p.checkout_id = c.id
+    WHERE coalesce(b.s, 0) <> c.total_amount OR coalesce(p.s, 0) <> c.total_amount`;
+  const settledDiff = await db<{ billNo: string }[]>`
+    SELECT b.bill_no FROM bills b
+    LEFT JOIN (
+      SELECT cb.bill_id, count(*) AS n, max(cb.amount) AS amount FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id
+      WHERE c.status = 'completed' GROUP BY cb.bill_id
+    ) k ON k.bill_id = b.id
+    WHERE (b.status = 'settled' AND (coalesce(k.n, 0) <> 1 OR k.amount <> b.amount_cents))
+       OR (b.status <> 'settled' AND coalesce(k.n, 0) > 0)`;
+  const [paid] = await db<{ checkouts: number; total: number }[]>`
+    SELECT count(*) AS checkouts, coalesce(sum(total_amount), 0) AS total FROM checkouts WHERE status = 'completed'`;
+
+  // ⑥ 会员储值支付 = 指向结账单的消费单（有效结账单对应未撤销的消费，反结账后对应已撤销的消费）
+  const walletDiff = await db<{ ref: string }[]>`
+    SELECT c.checkout_no AS ref FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
+    LEFT JOIN consumptions k ON k.id = p.consumption_id
+    WHERE p.method = 'wallet' AND (k.id IS NULL OR k.total_amount <> p.amount OR k.member_id <> p.member_id
+          OR k.checkout_id IS DISTINCT FROM c.id OR (c.status = 'completed') <> (k.status = 'completed'))
+    UNION ALL
+    SELECT k.doc_no FROM consumptions k
+    WHERE k.checkout_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM checkout_payments p WHERE p.consumption_id = k.id)`;
+
+  // ⑦ 团购券：有效登记对应有效结账单与金额一致的收款，反结账后登记作废
+  const couponDiff = await db<{ code: string }[]>`
+    SELECT g.code FROM group_buy_coupons g JOIN checkouts c ON c.id = g.checkout_id
+    WHERE (g.status = 'active') <> (c.status = 'completed')
+       OR NOT EXISTS (SELECT 1 FROM checkout_payments p WHERE p.coupon_id = g.id AND p.amount = g.amount AND p.checkout_id = c.id)`;
+
   return [
     {
       key: 'bill_amount_vs_lines',
@@ -64,6 +97,27 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
       label: '同行组状态与在店客人一致',
       ok: groupIssues.length === 0,
       detail: groupIssues.length ? `同行组 ${groupIssues.map((g) => g.groupNo).join('、')} 状态与在店客人不符` : '未关闭的同行组都有在店客人',
+    },
+    {
+      key: 'checkout_vs_bills',
+      label: '结账单 = 所结账单 = 收款合计',
+      ok: checkoutDiff.length === 0 && settledDiff.length === 0,
+      detail:
+        checkoutDiff.length || settledDiff.length
+          ? `${checkoutDiff.length} 张结账单合计不符，${settledDiff.length} 张账单的结账状态不符（如 ${checkoutDiff[0]?.checkoutNo ?? settledDiff[0]?.billNo}）`
+          : `有效结账单 ${paid!.checkouts} 张共 ${formatYuan(paid!.total)}，每张已结账单都对应一张结账单且金额一致`,
+    },
+    {
+      key: 'checkout_wallet',
+      label: '结账储值支付 = 会员消费单',
+      ok: walletDiff.length === 0,
+      detail: walletDiff.length ? `${walletDiff.length} 笔储值支付与会员消费单不符（如 ${walletDiff[0]!.ref}）` : '每笔储值支付都有金额、会员一致的消费单，反结账的已撤销',
+    },
+    {
+      key: 'checkout_coupons',
+      label: '团购券登记与结账收款一致',
+      ok: couponDiff.length === 0,
+      detail: couponDiff.length ? `${couponDiff.length} 张团购券登记与结账单不符（如券码 ${couponDiff[0]!.code}）` : '有效券码都对应有效结账单的收款，反结账的已作废',
     },
   ];
 }

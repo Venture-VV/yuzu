@@ -42,6 +42,8 @@ import {
   saveKey,
   setTxTimeouts,
 } from './common';
+import { getCheckout } from './checkout';
+import { resolveTicketType, visitTicket } from './tickets';
 import { assertVipAllowed, consumeVipShortfalls, memberLevels, vipShortfalls } from './vip';
 
 const clientKey = z.uuid('缺少有效的操作编号，请刷新页面后重试');
@@ -57,6 +59,8 @@ const GuestInput = z.object({
   zone: z.enum(ZONES, '请选择男宾或女宾（儿童跟同性别家长用男宾或女宾的牌）'),
   memberId: z.number().int().positive().nullable().default(null),
   guestLabel: z.string().trim().max(16, '称呼最多 16 个字').default(''),
+  /** 票种；不带时用默认票种（升级前留下的待确认请求不带这一项，不带时不进入请求摘要） */
+  ticketTypeId: z.number().int().positive().optional(),
 });
 
 export const CheckinInput = z.object({
@@ -162,21 +166,26 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
       }
     }
 
+    // 票种：留存选定时的票价，结账时按在店时长计算门票
+    const tickets = await Promise.all(input.guests.map((g) => resolveTicketType(tx, g.ticketTypeId)));
+
     // 授权凭据最后加锁并核销（业务回滚时一起回滚）
     const override = await consumeVipShortfalls(tx, shortfalls, input.vipGrantId, ctx.actor, `checkin:${key}`);
 
     let firstId = 0;
-    for (const g of input.guests) {
+    for (const [i, g] of input.guests.entries()) {
       const tag = tags.get(g.tagCode)!;
+      const ticket = tickets[i]!;
       const billNo = await nextDocNo(tx, 'bill', 'ZD', date);
       const [bill] = await tx<{ id: number }[]>`
         INSERT INTO bills (bill_no, kind, business_date, opened_at) VALUES (${billNo}, 'visit', ${date}, ${at}) RETURNING id`;
       const visitNo = await nextDocNo(tx, 'visit', 'LF', date);
       const [visit] = await tx<{ id: number }[]>`
         INSERT INTO visits (visit_no, bill_id, tag_id, zone, member_id, guest_label, group_id, business_date,
-                            checked_in_at, checked_in_by, checkin_key, vip_override_by)
+                            checked_in_at, checked_in_by, checkin_key, vip_override_by, ticket_type_id, ticket_price_12h, ticket_price_24h)
         VALUES (${visitNo}, ${bill!.id}, ${tag.id}, ${g.zone}, ${g.memberId}, ${g.guestLabel}, ${groupId}, ${date},
-                ${at}, ${ctx.actor.id}, ${key}, ${override && overrideCodes.has(tag.code) ? override.approverId : null})
+                ${at}, ${ctx.actor.id}, ${key}, ${override && overrideCodes.has(tag.code) ? override.approverId : null},
+                ${ticket?.id ?? null}, ${ticket?.price12h ?? null}, ${ticket?.price24h ?? null})
         RETURNING id`;
       if (!firstId) firstId = visit!.id;
       if (groupId) {
@@ -584,17 +593,31 @@ export async function getVisit(db: Db, id: number): Promise<VisitDetail> {
       history.push({ at: l.voidedAt!, kind: 'void', text: `作废 ${l.name} × ${l.quantity}（${l.voidReason}）`, operatorName: l.voidedByName ?? '' });
     }
   }
-  if (v.closedAt) {
-    history.push({
-      at: v.closedAt,
-      kind: 'close',
-      text: v.status === 'cancelled' ? `撤销来访（${v.closeReason}）` : '结账离店',
-      operatorName: v.closedByName ?? '',
-    });
+  const ticketChanges = await db<{ createdAt: string; fromName: string | null; toName: string; operatorName: string }[]>`
+    SELECT c.created_at, f.name AS from_name, t.name AS to_name, s.display_name AS operator_name
+    FROM visit_ticket_changes c LEFT JOIN ticket_types f ON f.id = c.from_type_id JOIN ticket_types t ON t.id = c.to_type_id
+    JOIN staff s ON s.id = c.operator_id WHERE c.visit_id = ${id} ORDER BY c.id`;
+  for (const c of ticketChanges) {
+    history.push({ at: c.createdAt, kind: 'ticket', text: c.fromName ? `改票种 ${c.fromName} → ${c.toName}` : `选定票种 ${c.toName}`, operatorName: c.operatorName });
+  }
+  // 结账与反结账（反结账后来访恢复在店，可能再次结账）
+  const checkouts = await db<{ id: number; checkoutNo: string; status: 'completed' | 'voided'; createdAt: string; operatorName: string; voidedAt: string | null; voidedByName: string | null; voidReason: string | null; amount: number }[]>`
+    SELECT c.id, c.checkout_no, c.status, c.created_at, s.display_name AS operator_name, c.voided_at, vs.display_name AS voided_by_name,
+           c.void_reason, cb.amount
+    FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id JOIN staff s ON s.id = c.operator_id
+    LEFT JOIN staff vs ON vs.id = c.voided_by
+    WHERE cb.bill_id = ${v.billId} ORDER BY c.id`;
+  for (const c of checkouts) {
+    history.push({ at: c.createdAt, kind: 'close', text: `结账 ${c.checkoutNo}（${formatYuan(c.amount)}）`, operatorName: c.operatorName });
+    if (c.voidedAt) history.push({ at: c.voidedAt, kind: 'reopen', text: `反结账 ${c.checkoutNo}（${c.voidReason}），恢复在店`, operatorName: c.voidedByName ?? '' });
+  }
+  if (v.closedAt && v.status === 'cancelled') {
+    history.push({ at: v.closedAt, kind: 'close', text: `撤销来访（${v.closeReason}）`, operatorName: v.closedByName ?? '' });
   }
   history.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
 
   const [now] = await db<{ now: string }[]>`SELECT now() AS now`;
+  const lastCheckout = checkouts.at(-1);
   return {
     id: v.id,
     visitNo: v.visitNo,
@@ -621,6 +644,8 @@ export async function getVisit(db: Db, id: number): Promise<VisitDetail> {
     member: member ?? null,
     memberLevel,
     vipOverrideByName: v.vipOverrideByName,
+    ticket: await visitTicket(db, v.id, v.closedAt ? new Date(v.closedAt) : new Date(now!.now)),
+    checkout: lastCheckout ? { id: lastCheckout.id, checkoutNo: lastCheckout.checkoutNo, status: lastCheckout.status } : null,
     bill: { id: v.billId, billNo: v.billNo, status: v.billStatus, amountCents: v.amountCents, lineCount: v.lineCount },
     lines,
     group,
@@ -672,6 +697,7 @@ export async function lookupFrontdeskOp(db: Db, key: string, expected?: Frontdes
   if (!(FRONTDESK_OPS as readonly string[]).includes(row.opType)) return { found: false as const, abandoned: false };
   if (row.opType === 'checkin') return { found: true as const, type: 'checkin' as const, checkin: await loadCheckin(db, key, true) };
   if (row.opType === 'bill_post') return { found: true as const, type: 'bill_post' as const, visit: await getVisit(db, row.refId) };
+  if (row.opType === 'checkout') return { found: true as const, type: 'checkout' as const, checkout: await getCheckout(db, row.refId) };
   const [c] = await db<{ visitId: number }[]>`SELECT visit_id FROM visit_tag_changes WHERE id = ${row.refId}`;
   return { found: true as const, type: 'tag_swap' as const, visit: await getVisit(db, c!.visitId) };
 }
