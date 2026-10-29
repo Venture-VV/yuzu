@@ -125,6 +125,7 @@ NODE_IMAGE=docker.m.daocloud.io/library/node:22-alpine
 POSTGRES_IMAGE=docker.m.daocloud.io/library/postgres:16-alpine
 NPM_REGISTRY=https://registry.npmmirror.com
 ALPINE_MIRROR=https://mirrors.aliyun.com/alpine
+WECOM_WEBHOOK_URL=<测试服告警群的机器人地址，不要和正式服用同一个群>
 ```
 
 备份写在本机硬盘（`BACKUP_DIR`），不需要外置盘的哨兵文件。v0.3.3 起备份服务每小时备份一次，每份都在临时库里试恢复、自检并记下数据指纹；hourly 保留 48 小时，daily 等保留 30 天。
@@ -133,7 +134,7 @@ ALPINE_MIRROR=https://mirrors.aliyun.com/alpine
 
 ## 6. 首次启动
 
-用 `main` 上最新的版本标签，至少 `v0.3.2`（从这一版起页面显示实例标识与 SHA；`v0.3.3` 起每小时备份并核验）。`git tag --sort=-creatordate | head -3` 查看。
+用 `main` 上最新的版本标签，至少 `v0.3.3`（从这一版起页面显示实例标识与 SHA、每小时备份并核验、可以打印、有看门狗）。`git tag --sort=-creatordate | head -3` 查看。
 
 ```bash
 cd ~/yuzu-test
@@ -172,6 +173,12 @@ done
 docker compose exec app node dist/server/cli.js check
 ```
 
+**看门狗**（v0.3.3 起，只给演练库装）：每 5 分钟检查应用健康（连续 3 次失败自动重启）、备份新鲜度与核验结果、磁盘空间，异常推到 `WECOM_WEBHOOK_URL` 的企业微信群，说明见 [Mac mini 部署手册](DEPLOY_MAC_MINI.md) 第 3.2 节。先 `./scripts/watchdog.sh --test` 确认群里收到测试消息，再加定时任务（`crontab -e`）：
+
+```bash
+*/5 * * * * cd /home/yuzu/yuzu-test && ./scripts/watchdog.sh >/dev/null 2>&1
+```
+
 ## 7. 验证清单
 
 - [ ] 在加入 tailnet 的设备上，`http://yuzu-test:8080`（演练库）和 `http://yuzu-test:8082`（演示库）都能登录。MagicDNS 短名不行时，用 `100.` 开头的 Tailscale 地址。
@@ -191,6 +198,7 @@ docker compose exec app node dist/server/cli.js check
 | 更新演练库（只在店主约定的窗口） | `cd ~/yuzu-test && ./scripts/update.sh <版本标签>` |
 | 查看状态 / 日志 | `docker compose ps`、`docker compose logs -f app` |
 | 自检 | `docker compose exec app node dist/server/cli.js check` |
+| 新版本有问题，回到上一版 | `./scripts/rollback.sh`（v0.3.3 起；加了迁移时同时恢复升级前的备份，见 Mac mini 手册第 5 节「回退」） |
 | 立即备份 / 核验最新备份 | `./scripts/backup.sh`；`./scripts/verify-backup.sh "$(ls -t ~/yuzu-backups/test/yuzu-*.dump \| head -n 1)"` |
 | 重置某个员工的密码 | `docker compose exec app node dist/server/cli.js reset-password <账号>` |
 

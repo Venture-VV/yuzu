@@ -234,7 +234,9 @@ docker compose exec app node dist/server/cli.js reset-password boss
 ./scripts/update.sh v0.3.1             # 换成要更新到的版本标签（git fetch --tags && git tag 查看）
 ```
 
-脚本只接受已合并进 main 的版本标签或完整 SHA，开发分支（`claude/*` 等）、未合并的 PR 与缩写 SHA 会被拒绝、不做任何改动。应用启动时自动执行数据库迁移；更新失败时执行 `./scripts/update.sh <上个版本标签>` 即可回退。
+脚本只接受已合并进 main 的版本标签或完整 SHA，开发分支（`claude/*` 等）、未合并的 PR 与缩写 SHA 会被拒绝、不做任何改动。应用启动时自动执行数据库迁移。升级前正在运行的镜像按完整 SHA 另打标签留着；新版本有问题时执行 `./scripts/rollback.sh` 回到上一版（新版本加了迁移时同时恢复升级前的备份，见部署手册第 5 节）。
+
+**看门狗**：`./scripts/watchdog.sh` 由宿主机每 5 分钟运行一次，检查应用健康（连续 3 次失败自动重启）、备份服务、备份新鲜度与核验结果、外置盘与磁盘空间，异常推到企业微信群（`.env` 的 `WECOM_WEBHOOK_URL`），见部署手册 3.2。
 
 版本标签：合并到 main、CI 通过后，GitHub Actions「版本标签」按 `package.json` 的版本号自动创建 `vX.Y.Z`（已有同名标签时跳过；也可在 Actions 页面手动运行补打）。
 
@@ -319,7 +321,7 @@ src/
                    frontdesk 前台手牌矩阵、小票抽屉、接待/挂账/换牌/预结账
 tests/             后端集成测试
 e2e/               浏览器验收
-scripts/           backup / verify-backup / restore / update
+scripts/           backup / verify-backup / restore / update / rollback / watchdog
 docs/              部署手册、待确认事项、设计语言、截图
 ```
 

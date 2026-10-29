@@ -104,7 +104,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
 
   app.get('/api/health', async () => {
     await sql`SELECT 1`;
-    return { ok: true, version: config.version, time: new Date().toISOString() };
+    return { ok: true, version: config.version, commit: config.commit, instance: config.instance, time: new Date().toISOString() };
   });
 
   registerAuthRoutes(app, deps);

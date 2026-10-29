@@ -37,6 +37,7 @@ open -e .env                 # 用文本编辑器修改
 | `INIT_OWNER_USERNAME` / `INIT_OWNER_PASSWORD` | 第一位店主账号，首次登录后必须改密 |
 | `BACKUP_DIR` | `/Volumes/YuzuBackup/yuzu` |
 | `BACKUP_REQUIRE_SENTINEL` | `true`（配合第 1 节的哨兵文件） |
+| `WECOM_WEBHOOK_URL` | 企业微信群机器人的 Webhook 地址，看门狗告警用（第 3.2 节） |
 | `APP_PORT` | 默认 8080 |
 
 `.env` 含密码，不会也不应提交到 GitHub。OSS 密钥和 age 公钥在做第 9 节时再写入这个文件，启动服务本身不依赖它们。
@@ -71,6 +72,44 @@ docker compose logs backup   # 一两分钟内应看到「✓ yuzu-…-daily.dum
 
 不是正式服时，小票顶部印着实例标识（「测试服·不作数」「影子运行·不作数」等），这些单不能交给客人当凭证。
 
+### 3.2 看门狗与企业微信告警
+
+`scripts/watchdog.sh` 在 Mac mini 上每 5 分钟检查一次：Docker 是否在运行（没运行时尝试打开 Docker Desktop）；应用健康检查连续 3 次失败时自动重启应用；备份服务在运行（没运行就启动）、最新的定时备份不超过两个备份间隔、在临时库核验通过、自检一致；外置盘已挂载；磁盘剩余不少于 10% 且不少于 5 GB。有问题推到企业微信群，同一项每小时最多推一次，恢复时推「已恢复」；每天 9 点后推一条「每日巡检」，哪天没收到就说明这台机器或看门狗本身出了问题。升级、恢复、回退期间不会自动重启应用。
+
+1. 企业微信里建一个告警群（店主、值班经理），群设置 →「群机器人」→ 添加机器人，复制 Webhook 地址（`https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…`），写进 `.env` 的 `WECOM_WEBHOOK_URL`。这个地址相当于密码，只放在 `.env`。
+2. 先手动试一次：`./scripts/watchdog.sh --test`，群里应收到测试消息。
+3. 每 5 分钟自动运行（登录用户的 launchd；代码不在 `~/yuzu` 时把路径换成实际目录；影子库和正式服各装一份，`Label` 与文件名分开）：
+
+```bash
+mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
+cat > "$HOME/Library/LaunchAgents/com.yuzu.watchdog.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.yuzu.watchdog</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>${HOME}/yuzu/scripts/watchdog.sh</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>300</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardErrorPath</key>
+  <string>${HOME}/Library/Logs/yuzu-watchdog.err.log</string>
+</dict>
+</plist>
+PLIST
+launchctl bootout "gui/$(id -u)/com.yuzu.watchdog" 2>/dev/null || true
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.yuzu.watchdog.plist"
+launchctl enable "gui/$(id -u)/com.yuzu.watchdog"
+```
+
+运行记录在项目目录的 `.watchdog/watchdog.log`（平时没有问题就不写）。macOS 第一次让后台的 bash 读外置盘时可能弹窗询问，点「允许」；如果日志里出现 `Operation not permitted`，到「系统设置 → 隐私与安全性 → 文件与文件夹」给 bash 打开「可移除的宗卷」（这一步尚未在门店 Mac mini 上实测）。
+
 ## 4. 上线前验证清单
 
 - [ ] 门店电脑、平板都能打开并登录；平板横竖屏布局正常
@@ -85,6 +124,8 @@ docker compose logs backup   # 一两分钟内应看到「✓ yuzu-…-daily.dum
 - [ ] 手动跑一次第 9 节的上传脚本，私有 OSS Bucket 的 `yuzu/` 前缀下出现对应的 `.age` 文件；`git status` 不列出 `.env`
 - [ ] 按第 9.7 节从 OSS 取回这份备份，用店外保管的 age 私钥解密，`./scripts/verify-backup.sh` 全部 ✓；在独立演练目录里 `./scripts/restore.sh`，指纹一致，结束时自检全部 ✓
 - [ ] 上线前（库里还没有真实业务时）用外置盘上的备份在正式环境做一次恢复演练：`./scripts/restore.sh <备份文件>`，指纹一致，结束时自检全部 ✓
+- [ ] 看门狗：`./scripts/watchdog.sh --test` 群里收到测试消息；`docker compose stop app` 后约 15 分钟内群里收到「已自动重启」，前台恢复可用，再过 5 分钟收到「已恢复」
+- [ ] 一键回退演练（库里还没有真实业务时）：用 `update.sh` 升到新版本后执行 `./scripts/rollback.sh`，回到原版本，`check` 全部 ✓
 - [ ] 前台电脑按第 3.1 节设好热敏机，打一张结账单和一张交班表：内容完整、左右不缺字；正式服的小票顶部没有实例标识
 - [ ] 清理演示数据：试用结束转正式时，建议使用全新的数据库卷（见下文「环境隔离」）
 
@@ -103,8 +144,18 @@ docker compose logs backup   # 一两分钟内应看到「✓ yuzu-…-daily.dum
 | 查看 Tailscale 地址 | `tailscale ip -4`（未装命令行入口时见第 10 节） |
 | 自检（会员、营业口径、库存、前台） | `docker compose exec app node dist/server/cli.js check` |
 | 店主忘记密码 | `docker compose exec app node dist/server/cli.js reset-password <账号>` |
-| 更新版本 | `./scripts/update.sh <版本标签>`（例如 `v0.3.1`；`git fetch --tags && git tag` 查看） |
+| 更新版本 | `./scripts/update.sh <版本标签>`（例如 `v0.3.3`；`git fetch --tags && git tag` 查看） |
+| 新版本有问题，回到上一版 | `./scripts/rollback.sh`（见下） |
+| 测试告警 / 看门狗记录 | `./scripts/watchdog.sh --test`；`tail -n 50 .watchdog/watchdog.log` |
 | 恢复备份 | `./scripts/restore.sh <备份文件>` |
+
+**回退**：`update.sh` 升级时把正在运行的镜像按完整 SHA 另打一个标签留着，并在 `.deploy/last-update` 记下上一版的提交、镜像、升级前的备份和这次新加的迁移。`./scripts/rollback.sh` 据此回到上一版，不用重新构建：
+
+- 新版本没有加数据库迁移：只切回上一版的程序，数据保留；
+- 新版本加了迁移（迁移只进不退）：同时恢复升级前的备份，先核对文件摘要，导入后比对指纹，一致才启动。升级之后录入的数据会丢失，要按纸质单补录；回退前会先备份当前数据，以便核对。没加迁移也想恢复数据时加 `--restore-data`；
+- 正式环境要当面输入 `ROLLBACK-PRODUCTION`。回退中途出错时会留下维护标记 `.deploy/maintenance`，看门狗不会把应用拉起来，处理完后删掉这个文件。
+
+只有用 v0.3.3 及之后的 `update.sh` 升级过，才有回退记录（升级到 v0.3.3 这一次还是旧脚本在执行，没有记录）。
 
 ## 6. 环境隔离
 

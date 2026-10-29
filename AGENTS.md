@@ -30,6 +30,7 @@ node dist/server/cli.js check              # 会员（含营业口径）、库�
 node dist/server/cli.js fingerprint        # 数据指纹（只读）；--expect <摘要> 比对，不一致退出码为 1
 ./scripts/backup.sh                        # 立即备份：临时库试恢复、自检并记下指纹（写 BACKUP_DIR，含 .json 说明）
 ./scripts/verify-backup.sh <备份文件.dump>  # 核验一份备份，不碰当前数据库
+./scripts/rollback.sh                      # 回到上一次 update.sh 之前的版本（加了迁移时同时恢复升级前的备份）
 node dist/server/cli.js import-hand-tags --store-list   # 预览导入店主 747 个真实柜号；--apply 才写入（真实业务数据，门店环境须店主同意）
 node dist/server/cli.js import-price-list --tangqi      # 预览导入汤崎价目表（29 个项目、多档价格）；--apply 才写入（同上）
 node dist/server/cli.js import-opening <余额.csv> --operator <店主账号>   # 预览导入旧系统会员余额期初；--apply 才写入（同上）
