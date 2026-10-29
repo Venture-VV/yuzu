@@ -271,7 +271,7 @@ export interface DashboardData {
     net: number;
     ticket: number;
     byMethod: { method: CheckoutMethod; amount: number }[];
-    /** 优惠 / 免单（已含在 net 里，单列） */
+    /** 优惠 / 免单（已含在 net 里，单列）；与日结同一口径：当日结账的减去当日反结账的，可为负 */
     discount: number;
     rechargePaid: number;
     rechargeCount: number;

@@ -167,6 +167,29 @@ describe('优惠 / 免单：值班经理及以上当场授权', () => {
     const csv = (await api(ctx.app, ctx.owner, 'GET', `/api/settlements/${today}/export`)).body as string;
     for (const label of ['应收（结账 − 反结账）', '优惠 / 免单', '净营业额', '实收（现金类）']) expect(csv).toContain(label);
   });
+
+  it('前一营业日带优惠的单今天反结账：看板的净营业额与日结一样冲回优惠，只减「应收 − 优惠」', async () => {
+    const dash = async () => {
+      const t = (await api(ctx.app, ctx.owner, 'GET', '/api/dashboard')).body.todayStats as { net: number; discount: number };
+      return t.net - t.discount;
+    };
+    const netRevenue = async () => businessBreakdown((await settlement()).business).netRevenue;
+    // 26 小时前在店 1 小时结账（12 小时档 499），优惠 20 元由值班经理授权
+    const at = new Date(Date.now() - 26 * H);
+    const v = await enterAt('R079', new Date(at.getTime() - H));
+    const g = await authorize(ctx.clerk, 'duty', 'checkout_discount', { visitIds: [v], amount: 2000, reason: '投诉补偿' });
+    expect(g.status).toBe(200);
+    const c = await checkout(
+      deps(),
+      { clientKey: randomUUID(), visitIds: [v], expectedTotal: 49900, payments: [{ method: 'discount', amount: 2000, grantId: g.body.grantId }, { method: 'cash', amount: 47900 }] },
+      { actor: clerkActor(), at },
+    );
+    expect(c.businessDate).not.toBe(today);
+    const [dashBefore, settleBefore] = [await dash(), await netRevenue()];
+    expect((await voidCheckout(duty, c.id, '客人投诉退款')).status).toBe(200);
+    expect((await dash()) - dashBefore).toBe(-(49900 - 2000));
+    expect((await netRevenue()) - settleBefore).toBe(-(49900 - 2000));
+  });
 });
 
 describe('降低票种与免票：值班经理及以上当场授权并填原因', () => {

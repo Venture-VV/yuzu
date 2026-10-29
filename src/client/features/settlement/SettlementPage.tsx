@@ -531,7 +531,7 @@ function BusinessCard({ s }: { s: SettlementSummary }) {
             {biz.discount !== 0 && (
               <>
                 {' '}
-                · 优惠 −<Money cents={biz.discount} />
+                · 优惠 <Money cents={-biz.discount} signed />
               </>
             )}
           </p>
