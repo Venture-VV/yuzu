@@ -86,6 +86,7 @@ describe('每日对账包', () => {
     expect(chen[header!.indexOf('状态')]).toBe('已交班');
     expect(chen[header!.indexOf('长短款')]).toBe('-10.00');
     expect(chen[header!.indexOf('备用金')]).toBe('500.00');
+    expect(chen[header!.indexOf('反结账退现金')]).toBe('0.00');
   });
 });
 

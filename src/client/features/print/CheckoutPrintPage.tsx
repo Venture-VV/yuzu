@@ -8,6 +8,9 @@ import { PrintedAt, PrintFrame, Row, Rule, SignLine, SlipHeader, stamp, yuan } f
 
 // 80mm 结账单：所结手牌的项目明细与门票段数、各收款方式、储值扣前扣后余额、客人签字栏。
 
+/** 资金轨 R1.2 起「优惠 / 免单」记下当场授权的人（原因记在收款备注）；之前的版本没有这一项 */
+const approverOf = (p: CheckoutPrint['payments'][number]) => (p as { approvedByName?: string | null }).approvedByName ?? null;
+
 export function CheckoutPrintPage() {
   const id = Number(useParams().id);
   const q = useQuery({
@@ -102,6 +105,7 @@ function CheckoutSlip({ d }: { d: CheckoutPrint }) {
               </p>
             )}
             {p.method !== 'wallet' && p.method !== 'coupon' && p.ref && <p className="pl-3 text-[11px] break-all">{p.ref}</p>}
+            {approverOf(p) && <p className="pl-3 text-[11px]">{approverOf(p)} 当场授权</p>}
           </div>
         ))}
       </div>
