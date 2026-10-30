@@ -13,7 +13,7 @@ import { cn, formatTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Input, Notice, SectionTitle, Skeleton } from '../../components/ui';
-import { kitchenKey, menuKey, useKitchenBoard, useServerNow } from './queries';
+import { kitchenKey, tablesKey, menuKey, useKitchenBoard, useServerNow } from './queries';
 
 type Action = 'start' | 'done' | 'serve' | 'undo';
 
@@ -64,6 +64,7 @@ export function KitchenTab() {
     try {
       qc.setQueryData(kitchenKey, await api.post<KitchenBoard>(`/api/kitchen/items/${k.id}/${action}`, { from: k.status }));
       void qc.invalidateQueries({ queryKey: ['dining', 'guest'] });
+      void qc.invalidateQueries({ queryKey: tablesKey });
     } catch (e) {
       toast({ tone: 'error', title: errorMessage(e) });
       void qc.invalidateQueries({ queryKey: kitchenKey });
@@ -191,7 +192,7 @@ export function KitchenTab() {
                   <span className="num w-12 text-[12px] text-ink-3">{formatTime(k.servedAt ?? k.createdAt)}</span>
                   <span className="min-w-0 flex-1 truncate font-semibold">
                     {k.name} × {k.quantity}
-                    <span className="num ml-2 font-bold text-ink-3">{k.tagCode}</span>
+                    <span className="num ml-2 font-bold text-ink-3">{whereOf(k)}</span>
                   </span>
                   <Badge tone={k.status === 'cancelled' ? 'clay' : 'lake'}>{KITCHEN_STATUS_LABELS[k.status]}</Badge>
                   {k.status === 'served' && d.rules.trackServed && btn(k, 'undo', '撤回上菜', 'ghost', <Undo2 className="size-3.5" />)}
@@ -203,6 +204,9 @@ export function KitchenTab() {
     </div>
   );
 }
+
+/** 菜送到哪里：手牌号，或「桌 A1」 */
+const whereOf = (k: KitchenItem) => (k.tableName !== null ? `桌 ${k.tableName}` : (k.tagCode ?? ''));
 
 function Ticket({ k, now, warnMinutes, showStation, children }: { k: KitchenItem; now: number; warnMinutes: number; showStation: boolean; children: React.ReactNode }) {
   const waited = kitchenElapsed(k.createdAt, now);
@@ -220,7 +224,8 @@ function Ticket({ k, now, warnMinutes, showStation, children }: { k: KitchenItem
       </div>
       {k.note && <p className="mt-1 rounded-md bg-yuzu-tint px-2 py-1 text-[13.5px] font-bold text-yuzu-deep">{k.note}</p>}
       <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12.5px] text-ink-3">
-        <span className={cn('num text-[14px] font-bold', k.zone === 'female' ? 'text-clay' : 'text-lake')}>{k.tagCode}</span>
+        {/* 手牌客人按男宾 / 女宾着色；桌台的菜显示桌号 */}
+        <span className={cn('num text-[14px] font-bold', k.tableName !== null ? 'text-pine' : k.zone === 'female' ? 'text-clay' : 'text-lake')}>{whereOf(k)}</span>
         <span className="min-w-0 truncate">{k.guest}</span>
         {showStation && <span>· {k.stationName}</span>}
         <span className="num text-ink-4">· {k.orderNo}</span>
@@ -234,7 +239,7 @@ function Ticket({ k, now, warnMinutes, showStation, children }: { k: KitchenItem
             催 {k.rushCount} 次
           </Badge>
         )}
-        {k.visitClosed && <Badge tone="ember">客人已结账</Badge>}
+        {k.visitClosed && <Badge tone="ember">{k.tableName !== null ? '这桌已结账' : '客人已结账'}</Badge>}
         <span className="flex flex-1 flex-wrap justify-end gap-1.5">{children}</span>
       </div>
     </div>

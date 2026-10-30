@@ -7,7 +7,7 @@ import { api } from '../../lib/api';
 import { formatDateTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
-import { FRONTDESK_OP_LABELS, removeFrontdeskPending, useFrontdeskPendingForBanner, type FrontdeskPendingOp } from './pending';
+import { FRONTDESK_OP_LABELS, isTableOp, removeFrontdeskPending, useFrontdeskPendingForBanner, type FrontdeskPendingOp } from './pending';
 
 /**
  * 页面顶部的前台「结果待确认」提醒（刷新、重新登录后仍在）。
@@ -31,6 +31,7 @@ export function FrontdeskPendingBanner() {
             if (!found.found && !found.abandoned) return;
             removeFrontdeskPending(op.key);
             void qc.invalidateQueries({ queryKey: ['frontdesk'] });
+            if (isTableOp(op.type)) void qc.invalidateQueries({ queryKey: ['dining'] });
             if (found.found) {
               toast({ tone: 'success', title: `已查回：${op.tagCodes.join('、')} 的${FRONTDESK_OP_LABELS[op.type]}已生效`, body: '只生效了一次，无需重新操作。' });
             }
@@ -50,16 +51,29 @@ export function FrontdeskPendingBanner() {
 
   const open = (op: FrontdeskPendingOp) => {
     const params = new URLSearchParams({ resume: op.type });
+    // 桌台的操作到餐饮页处理：桌台点单回到点单页的那一桌；开台、桌台结账回到「桌台」页（开台带桌台，结账带开台）
+    if (isTableOp(op.type)) {
+      const s = op.sessionIds?.[0];
+      if (op.type === 'table_post' && s) {
+        navigate(`/dining/order?table=${s}`);
+        return;
+      }
+      if (op.tableId) params.set('t', String(op.tableId));
+      if (s) params.set('s', String(s));
+      navigate(`/dining/tables?${params}`);
+      return;
+    }
     if (op.visitId) params.set('v', String(op.visitId));
     navigate(`/frontdesk?${params}`);
   };
+  const anyTable = ops.some((op) => isTableOp(op.type));
 
   return (
     <div role="status" data-testid="frontdesk-pending-banner" className="shrink-0 border-b border-yuzu-deep/25 bg-yuzu-tint px-5 py-2.5 md:px-7">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="flex items-center gap-2 text-[13.5px] font-bold text-yuzu-deep">
           <Hourglass className="size-4" />
-          {ops.length} 笔前台操作结果待确认，处理前请勿对同一手牌重复登记
+          {ops.length} 笔前台操作结果待确认，处理前请勿对同一{anyTable ? '手牌或桌台' : '手牌'}重复登记
         </span>
         {ops.slice(0, 3).map((op) => (
           <span key={op.key} className="flex items-center gap-2 rounded-full bg-card py-1 pr-1 pl-3 text-[13px] ring-1 ring-yuzu-deep/20">

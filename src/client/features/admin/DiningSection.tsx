@@ -1,10 +1,21 @@
-// 后台「餐饮」（S5 第一步）：餐饮规则（只有店主能改）、出品档口、菜品挂在哪个档口（能管理价目的岗位）。
+// 后台「餐饮」（S5）：餐饮规则（只有店主能改）、出品档口、菜品挂在哪个档口、桌台（能管理价目的岗位）。
 // 挂了档口的菜在餐饮功能开启后才进厨房；没挂档口的项目照常挂账、不进厨房。需要技师的项目不进厨房。
+// 桌台（第二步）：不洗浴的客人在桌台上用餐、单独结账；停用不删除，正在用餐的桌不能停用。
 
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
-import { DEFAULT_DINING_RULES, MAX_STATION_NAME, type DiningAdmin, type DiningRules, type KitchenStation } from '@shared/dining';
+import {
+  DEFAULT_DINING_RULES,
+  MAX_STATION_NAME,
+  MAX_TABLE_AREA,
+  MAX_TABLE_NAME,
+  type DiningAdmin,
+  type DiningRules,
+  type DiningTable,
+  type KitchenStation,
+  type TablesAdmin,
+} from '@shared/dining';
 import { api, errorMessage } from '../../lib/api';
 import { qk } from '../../lib/queries';
 import { useCan } from '../../lib/session';
@@ -17,14 +28,17 @@ import { AdminPage } from './AdminShell';
 
 const adminKey = ['admin', 'dining'] as const;
 const useDiningAdmin = () => useQuery({ queryKey: adminKey, queryFn: () => api.get<DiningAdmin>('/api/admin/dining') });
+const tablesAdminKey = ['admin', 'dining', 'tables'] as const;
+const useTablesAdmin = () => useQuery({ queryKey: tablesAdminKey, queryFn: () => api.get<TablesAdmin>('/api/admin/dining/tables') });
 
 export function DiningSection() {
   return (
-    <AdminPage section="dining" description="餐饮功能开关与出品规则、出品档口（热菜、凉菜、水吧……）、每道菜送到哪个档口的厨房屏。">
+    <AdminPage section="dining" description="餐饮功能开关与出品规则、出品档口（热菜、凉菜、水吧……）、每道菜送到哪个档口的厨房屏、桌台。">
       <div className="space-y-5">
         <RulesCard />
         <StationsCard />
         <ItemsCard />
+        <TablesCard />
       </div>
     </AdminPage>
   );
@@ -413,5 +427,163 @@ function ItemsCard() {
         </div>
       )}
     </Card>
+  );
+}
+
+/** 桌台：不洗浴的客人在桌台上用餐（开台、点单、单独结账）。按区域分组显示在餐饮「桌台」页 */
+function TablesCard() {
+  const can = useCan();
+  const tables = useTablesAdmin();
+  const [editing, setEditing] = useState<DiningTable | 'new' | null>(null);
+  if (!tables.data) return <Skeleton className="h-40" />;
+  const editable = can('catalog.manage');
+  const list = tables.data.tables;
+  return (
+    <Card className="p-5" data-testid="dining-tables">
+      <SectionTitle
+        aside={
+          editable && (
+            <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => setEditing('new')} data-testid="dining-table-new">
+              新建桌台
+            </Button>
+          )
+        }
+      >
+        桌台
+      </SectionTitle>
+      <p className="mt-1 text-[12.5px] text-ink-3">
+        不洗浴的客人（只来吃饭）在桌台上开台、点单，单独结账；洗浴客人的菜照常挂在手牌上。可按区域分组（大厅、包间……）。正在用餐的桌不能停用；桌台不删除，历史结账单照常显示桌号。
+      </p>
+      {list.length === 0 ? (
+        <p className="mt-4 rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">
+          还没有桌台。{editable ? '点「新建桌台」，例如「A1」「包间 1」。' : ''}
+        </p>
+      ) : (
+        <ul className="mt-3 divide-y divide-line/70 rounded-lg border border-line">
+          {list.map((t) => (
+            <li key={t.id} className={cn('flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5', !t.active && 'bg-paper-2/50 opacity-70')} data-testid={`dining-table-${t.name}`}>
+              <span className="num min-w-[72px] text-[14.5px] font-bold">{t.name}</span>
+              <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink-3">
+                {t.area || '不分区'} · {t.seats} 座
+              </span>
+              <span className="text-[12px] text-ink-4">开台 {t.sessionCount} 次</span>
+              <span className="num text-[12px] text-ink-4">排序 {t.sortOrder}</span>
+              {!t.active && <Badge tone="clay">已停用</Badge>}
+              {editable && (
+                <Button size="sm" variant="ghost" onClick={() => setEditing(t)}>
+                  编辑
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <TableDialog target={editing} areas={[...new Set(list.map((t) => t.area).filter(Boolean))]} onClose={() => setEditing(null)} />
+    </Card>
+  );
+}
+
+function TableDialog({ target, areas, onClose }: { target: DiningTable | 'new' | null; areas: string[]; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [name, setName] = useState('');
+  const [area, setArea] = useState('');
+  const [seats, setSeats] = useState('4');
+  const [sortOrder, setSortOrder] = useState('0');
+  const [active, setActive] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [opened, setOpened] = useState<typeof target>(null);
+  if (target !== opened) {
+    setOpened(target);
+    const t = target && target !== 'new' ? target : null;
+    setName(t?.name ?? '');
+    setArea(t?.area ?? '');
+    setSeats(String(t?.seats ?? 4));
+    setSortOrder(String(t?.sortOrder ?? 0));
+    setActive(t?.active ?? true);
+    setError(null);
+  }
+  const seatNum = Number(seats);
+  const order = Number(sortOrder);
+  const ok =
+    name.trim().length >= 1 &&
+    name.trim().length <= MAX_TABLE_NAME &&
+    area.trim().length <= MAX_TABLE_AREA &&
+    Number.isInteger(seatNum) &&
+    seatNum >= 1 &&
+    seatNum <= 99 &&
+    Number.isInteger(order) &&
+    order >= 0 &&
+    order <= 9999;
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const body = { name: name.trim(), area: area.trim(), seats: seatNum, sortOrder: order, active };
+      const next =
+        target === 'new' ? await api.post<TablesAdmin>('/api/admin/dining/tables', body) : await api.put<TablesAdmin>(`/api/admin/dining/tables/${target!.id}`, body);
+      qc.setQueryData(tablesAdminKey, next);
+      void qc.invalidateQueries({ queryKey: ['dining'] });
+      toast({ tone: 'success', title: target === 'new' ? `已新建桌台「${body.name}」` : '桌台已保存' });
+      onClose();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={!!target}
+      onClose={busy ? () => {} : onClose}
+      title={target === 'new' ? '新建桌台' : '编辑桌台'}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            取消
+          </Button>
+          <Button variant="primary" loading={busy} disabled={!ok} onClick={save} data-testid="dining-table-save">
+            保存
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <Field label="桌号" htmlFor="table-name" hint={`最多 ${MAX_TABLE_NAME} 字，例如 A1、包间 1`}>
+          <Input id="table-name" value={name} maxLength={MAX_TABLE_NAME} onChange={(e) => setName(e.target.value)} data-autofocus data-testid="dining-table-name" />
+        </Field>
+        <Field label="区域" htmlFor="table-area" hint="选填，例如 大厅、包间；同一区域的桌台在「桌台」页排在一起">
+          <Input id="table-area" value={area} maxLength={MAX_TABLE_AREA} onChange={(e) => setArea(e.target.value)} list="table-areas" data-testid="dining-table-area" />
+          <datalist id="table-areas">
+            {areas.map((a) => (
+              <option key={a} value={a} />
+            ))}
+          </datalist>
+        </Field>
+        <div className="flex flex-wrap gap-4">
+          <Field label="座位" htmlFor="table-seats" hint="1–99，开台时人数默认按座位数">
+            <Input id="table-seats" type="number" inputMode="numeric" min={1} max={99} value={seats} onChange={(e) => setSeats(e.target.value)} className="num w-28" data-testid="dining-table-seats" />
+          </Field>
+          <Field label="排序" htmlFor="table-order" hint="小的排前面">
+            <Input id="table-order" type="number" inputMode="numeric" min={0} max={9999} value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="num w-28" />
+          </Field>
+        </div>
+        {target !== 'new' && (
+          <Segmented
+            ariaLabel="桌台状态"
+            value={active ? 'on' : 'off'}
+            onChange={(v) => setActive(v === 'on')}
+            options={[
+              { value: 'on', label: '启用' },
+              { value: 'off', label: '停用' },
+            ]}
+          />
+        )}
+        {error && <Notice tone="error" title={error} />}
+      </div>
+    </Dialog>
   );
 }

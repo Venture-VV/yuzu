@@ -118,7 +118,19 @@ export interface DiningGuest {
   zone: 'male' | 'female';
   guest: string;
   /** 这位客人点过、还没上的菜（可以催单、上菜、退菜） */
-  pending: { id: number; billLineId: number; name: string; quantity: number; note: string; status: KitchenStatus; rushCount: number; createdAt: string }[];
+  pending: PendingDish[];
+}
+
+/** 点过、还没上的菜（出品单）：点单页、桌台详情上可以催单、上菜、退菜 */
+export interface PendingDish {
+  id: number;
+  billLineId: number;
+  name: string;
+  quantity: number;
+  note: string;
+  status: KitchenStatus;
+  rushCount: number;
+  createdAt: string;
 }
 
 export interface DiningAdmin {
@@ -195,6 +207,8 @@ export interface TableSessionDetail {
   billNo: string;
   amount: number;
   lines: import('./frontdesk').BillLine[];
+  /** 这桌点过、还没上的菜 */
+  pending: PendingDish[];
   moves: { fromTable: string; toTable: string; reason: string; operatorName: string; at: string }[];
 }
 

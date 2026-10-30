@@ -13,6 +13,7 @@ import {
   MAX_TABLE_AREA,
   MAX_TABLE_NAME,
   MAX_TABLES_PER_CHECKOUT,
+  type PendingDish,
   type TableCheckoutPreview,
   type TableSessionDetail,
   type TablesAdmin,
@@ -128,12 +129,16 @@ export async function getTableSession(db: Db, id: number): Promise<TableSessionD
            (SELECT json_build_object('status', k.status, 'note', k.note, 'orderNo', k.order_no) FROM kitchen_items k WHERE k.bill_line_id = l.id) AS kitchen
     FROM bill_lines l JOIN staff p ON p.id = l.posted_by LEFT JOIN staff vs ON vs.id = l.voided_by
     WHERE l.bill_id = ${s.billId} ORDER BY l.id`;
+  const pending = await db<PendingDish[]>`
+    SELECT k.id, k.bill_line_id, i.name, k.quantity, k.note, k.status, k.rush_count, k.created_at
+    FROM kitchen_items k JOIN service_items i ON i.id = k.item_id
+    WHERE k.table_session_id = ${id} AND k.status IN ('queued', 'cooking', 'done') ORDER BY k.id`;
   const moves = await db<TableSessionDetail['moves']>`
     SELECT ft.name AS from_table, tt.name AS to_table, mv.reason, st.display_name AS operator_name, mv.created_at AS at
     FROM table_session_moves mv JOIN dining_tables ft ON ft.id = mv.from_table_id JOIN dining_tables tt ON tt.id = mv.to_table_id
     JOIN staff st ON st.id = mv.operator_id WHERE mv.session_id = ${id} ORDER BY mv.id`;
   const { memberId, memberNo, memberName, ...rest } = s;
-  return { ...rest, member: memberId ? { id: memberId, memberNo: memberNo!, name: memberName! } : null, lines, moves };
+  return { ...rest, member: memberId ? { id: memberId, memberNo: memberNo!, name: memberName! } : null, lines, pending, moves };
 }
 
 // ───────────────────────── 开台、改人数、转台、撤台 ─────────────────────────

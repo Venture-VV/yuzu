@@ -1,11 +1,12 @@
-// 点单：按手牌找在店客人 → 点菜（份数、口味备注）→ 下单。下单就是给客人挂账（与前台挂账同一套「结果待确认」：
-// 提交前本机保存原编号与原请求，断网后查回、原样重提或确认作废），同时送到厨房。
-// 右边列出这位客人还没上的菜：可以催单、上菜（服务员送到后点）、退菜（作废这条明细，要写原因）。
+// 点单：按手牌找在店客人，或选一张用餐中的桌（第二步）→ 点菜（份数、口味备注）→ 下单。下单就是记到客人或这桌的账上
+// （与前台挂账同一套「结果待确认」：提交前本机保存原编号与原请求，断网后查回、原样重提或确认作废），同时送到厨房。
+// 右边列出这位客人（这桌）还没上的菜：可以催单、上菜（服务员送到后点）、退菜（作废这条明细，要写原因）。
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { NavLink, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BellRing, Minus, Plus, Search, Trash2, Undo2, UtensilsCrossed, X } from 'lucide-react';
-import { KITCHEN_STATUS_LABELS, MAX_DISH_NOTE, type DiningGuest, type KitchenStatus, type MenuDish } from '@shared/dining';
+import { BellRing, Minus, Plus, Search, Trash2, Undo2, Users, UtensilsCrossed, X } from 'lucide-react';
+import { KITCHEN_STATUS_LABELS, MAX_DISH_NOTE, type DiningGuest, type KitchenStatus, type MenuDish, type PendingDish, type TableSessionDetail } from '@shared/dining';
 import { ZONE_LABELS } from '@shared/frontdesk';
 import { api, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
@@ -13,9 +14,9 @@ import { cn, formatTime, uuid } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, Card, Field, Input, Notice, SectionTitle, Skeleton, Spinner } from '../../components/ui';
+import { Badge, Button, Card, Field, Input, Notice, SectionTitle, Segmented, Skeleton, Spinner } from '../../components/ui';
 import { PendingPanel, useFrontdeskOp } from '../frontdesk/pending';
-import { guestKey, useDiningMenu } from './queries';
+import { guestKey, useDiningMenu, useTableSession, useTablesBoard } from './queries';
 
 interface CartLine {
   key: string;
@@ -23,7 +24,6 @@ interface CartLine {
   quantity: number;
   note: string;
 }
-type PendingDish = DiningGuest['pending'][number];
 
 /** 常用口味备注，点一下加进备注 */
 const QUICK_NOTES = ['少辣', '不辣', '不要香菜', '不要葱', '少冰', '去冰', '热的'];
@@ -43,8 +43,12 @@ export function OrderTab() {
   const qc = useQueryClient();
   const toast = useToast();
   const menu = useDiningMenu();
+  const [params, setParams] = useSearchParams();
+  /** 点给谁：手牌客人，或用餐中的一桌（第二步） */
+  const [mode, setMode] = useState<'tag' | 'table'>('tag');
   const [tagText, setTagText] = useState('');
   const [tag, setTag] = useState<string | null>(null);
+  const [tableSession, setTableSession] = useState<number | null>(null);
   const guest = useQuery({
     queryKey: guestKey(tag),
     queryFn: () => api.get<DiningGuest>(`/api/dining/guest?tag=${encodeURIComponent(tag!)}`),
@@ -52,17 +56,39 @@ export function OrderTab() {
     retry: false,
     refetchInterval: 15_000,
   });
-  const g = tag ? (guest.data ?? null) : null;
+  const board = useTablesBoard(mode === 'table');
+  const table = useTableSession(mode === 'table' ? tableSession : null);
+  const g = mode === 'tag' && tag ? (guest.data ?? null) : null;
+  const t: TableSessionDetail | null = mode === 'table' && tableSession !== null ? (table.data ?? null) : null;
+  const target: { label: string; pending: PendingDish[]; open: boolean } | null = g
+    ? { label: g.tagCode, pending: g.pending, open: true }
+    : t
+      ? { label: `桌 ${t.tableName}`, pending: t.pending, open: t.status === 'open' }
+      : null;
   const [cart, setCart] = useState<CartLine[]>([]);
   const [category, setCategory] = useState('all');
   const [voiding, setVoiding] = useState<PendingDish | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const op = useFrontdeskOp<DiningGuest | true>({
-    type: 'bill_post',
+  const op = useFrontdeskOp<DiningGuest | TableSessionDetail | true>({
+    type: mode === 'table' ? 'table_post' : 'bill_post',
     visitId: g?.visitId ?? null,
+    sessionId: mode === 'table' ? tableSession : null,
     staffName: session.staff.displayName,
     pick: doneOnFound,
   });
+
+  // 从桌台详情点「点单」、或顶部「结果待确认」的「去处理」进来：直接选好那一桌
+  const fromTable = Number(params.get('table')) || null;
+  useEffect(() => {
+    if (!fromTable) return;
+    setMode('table');
+    setTableSession(fromTable);
+    op.clearError();
+    const next = new URLSearchParams(params);
+    next.delete('table');
+    setParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromTable]);
 
   const dishes = useMemo(() => menu.data?.dishes ?? [], [menu.data]);
   const byId = useMemo(() => new Map(dishes.map((d) => [d.id, d])), [dishes]);
@@ -72,9 +98,13 @@ export function OrderTab() {
   const lines = cart.map((l) => ({ ...l, dish: byId.get(l.dishId) ?? null }));
   const total = lines.reduce((s, l) => s + (l.dish ? l.dish.price * l.quantity : 0), 0);
   const short = dishes.find((d) => d.remaining !== null && countOf(d.id) > d.remaining) ?? null;
-  const problem = !g
-    ? '先输入手牌号找到客人'
-    : cart.length === 0
+  const problem = !target
+    ? mode === 'tag'
+      ? '先输入手牌号找到客人'
+      : '先选一张用餐中的桌'
+    : !target.open
+      ? '这桌已经结账或撤台，不能再点单'
+      : cart.length === 0
       ? '点了菜才能下单'
       : lines.some((l) => !l.dish)
         ? '有菜刚下架了，请从已点的菜里删掉'
@@ -116,38 +146,52 @@ export function OrderTab() {
   };
 
   const submit = async () => {
-    if (problem || !g) return;
+    if (problem || !target) return;
     const named = lines.map((l) => ({
       name: l.dish!.name,
       quantity: l.quantity,
       note: l.note.trim(),
     }));
-    const ok = await op.submit((key) => ({
-      url: '/api/dining/orders',
-      body: {
-        clientKey: key,
-        visitId: g.visitId,
-        lines: lines.map((l) => ({
-          itemId: l.dishId,
-          quantity: l.quantity,
-          ...(l.note.trim() ? { note: l.note.trim() } : {}),
-        })),
-        expectedTotal: total,
-      },
-      tagCodes: [g.tagCode],
-      summary: `点单 ${named.map((n) => `${n.name}×${n.quantity}${n.note ? `（${n.note}）` : ''}`).join('、')}`.slice(0, 120),
-      amount: total,
+    const orderLines = lines.map((l) => ({
+      itemId: l.dishId,
+      quantity: l.quantity,
+      ...(l.note.trim() ? { note: l.note.trim() } : {}),
     }));
+    const summary = `点单 ${named.map((n) => `${n.name}×${n.quantity}${n.note ? `（${n.note}）` : ''}`).join('、')}`.slice(0, 120);
+    const ok = await op.submit((key) =>
+      t
+        ? {
+            url: `/api/dining/tables/sessions/${t.id}/orders`,
+            body: { clientKey: key, lines: orderLines, expectedTotal: total },
+            tagCodes: [`桌 ${t.tableName}`],
+            summary,
+            amount: total,
+          }
+        : {
+            url: '/api/dining/orders',
+            body: { clientKey: key, visitId: g!.visitId, lines: orderLines, expectedTotal: total },
+            tagCodes: [g!.tagCode],
+            summary,
+            amount: total,
+          },
+    );
     if (ok) {
       setCart([]);
       toast({
         tone: 'success',
-        title: `${g.tagCode} 已下单`,
-        body: `${named.reduce((s, n) => s + n.quantity, 0)} 份菜已送到厨房，挂在客人账上，结账时一起结。`,
+        title: `${target.label} 已下单`,
+        body: `${named.reduce((s, n) => s + n.quantity, 0)} 份菜已送到厨房，${t ? '记在这桌的账上' : '挂在客人账上'}，结账时一起结。`,
       });
       refresh();
     }
   };
+
+  const switchMode = (m: 'tag' | 'table') => {
+    if (op.locked) return;
+    setMode(m);
+    op.clearError();
+  };
+  const openTables = (board.data?.tables ?? []).filter((x) => x.session);
 
   const run = async (key: string, fn: () => Promise<unknown>, ok: string) => {
     setBusy(key);
@@ -168,58 +212,84 @@ export function OrderTab() {
     <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-5 px-5 py-5 md:px-7 lg:grid-cols-[minmax(0,1fr)_360px]" data-testid="dining-order">
       <div className="min-w-0 space-y-4">
         <Card className="p-4">
-          <form
-            className="flex flex-wrap items-end gap-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              find();
-            }}
-          >
-            <Field label="手牌号" htmlFor="dining-tag">
-              <Input
-                id="dining-tag"
-                value={tagText}
-                onChange={(e) => setTagText(e.target.value.toUpperCase())}
-                placeholder="例如 A008"
-                autoComplete="off"
-                maxLength={16}
-                className="num w-40 text-[18px] font-bold"
-                data-testid="dining-tag"
-              />
-            </Field>
-            <Button type="submit" variant="secondary" icon={<Search className="size-4" />} disabled={!tagText.trim()} data-testid="dining-find">
-              找客人
-            </Button>
-            <div className="min-w-0 flex-1 self-center">
-              {!tag ? (
-                <p className="text-[13px] text-ink-3">输入客人手牌上的号码</p>
-              ) : guest.isPending ? (
-                <Spinner />
-              ) : guest.error ? (
-                <p className="text-[13.5px] font-semibold text-clay" data-testid="dining-guest-error">
-                  {errorMessage(guest.error)}
-                </p>
-              ) : (
-                g && (
-                  <div className="flex flex-wrap items-center gap-2" data-testid="dining-guest">
-                    <Badge tone={g.zone === 'female' ? 'clay' : 'lake'}>{ZONE_LABELS[g.zone].title}</Badge>
-                    <span className="num text-[18px] font-bold">{g.tagCode}</span>
-                    <span className="text-[15px] font-semibold">{g.guest}</span>
-                    <button
-                      type="button"
-                      className="ml-1 inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[12.5px] font-semibold text-ink-3 hover:bg-paper-2 hover:text-ink"
-                      onClick={() => {
-                        setTag(null);
-                        setTagText('');
-                      }}
-                    >
-                      <X className="size-3.5" /> 换一位
-                    </button>
-                  </div>
-                )
-              )}
-            </div>
-          </form>
+          <Segmented
+            ariaLabel="点给谁"
+            size="sm"
+            value={mode}
+            onChange={switchMode}
+            options={[
+              { value: 'tag', label: '手牌客人' },
+              { value: 'table', label: '桌台' },
+            ]}
+            className="mb-3"
+          />
+          {mode === 'tag' ? (
+            <form
+              className="flex flex-wrap items-end gap-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                find();
+              }}
+            >
+              <Field label="手牌号" htmlFor="dining-tag">
+                <Input
+                  id="dining-tag"
+                  value={tagText}
+                  onChange={(e) => setTagText(e.target.value.toUpperCase())}
+                  placeholder="例如 A008"
+                  autoComplete="off"
+                  maxLength={16}
+                  className="num w-40 text-[18px] font-bold"
+                  data-testid="dining-tag"
+                />
+              </Field>
+              <Button type="submit" variant="secondary" icon={<Search className="size-4" />} disabled={!tagText.trim()} data-testid="dining-find">
+                找客人
+              </Button>
+              <div className="min-w-0 flex-1 self-center">
+                {!tag ? (
+                  <p className="text-[13px] text-ink-3">输入客人手牌上的号码</p>
+                ) : guest.isPending ? (
+                  <Spinner />
+                ) : guest.error ? (
+                  <p className="text-[13.5px] font-semibold text-clay" data-testid="dining-guest-error">
+                    {errorMessage(guest.error)}
+                  </p>
+                ) : (
+                  g && (
+                    <div className="flex flex-wrap items-center gap-2" data-testid="dining-guest">
+                      <Badge tone={g.zone === 'female' ? 'clay' : 'lake'}>{ZONE_LABELS[g.zone].title}</Badge>
+                      <span className="num text-[18px] font-bold">{g.tagCode}</span>
+                      <span className="text-[15px] font-semibold">{g.guest}</span>
+                      <button
+                        type="button"
+                        className="ml-1 inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[12.5px] font-semibold text-ink-3 hover:bg-paper-2 hover:text-ink"
+                        onClick={() => {
+                          setTag(null);
+                          setTagText('');
+                        }}
+                      >
+                        <X className="size-3.5" /> 换一位
+                      </button>
+                    </div>
+                  )
+                )}
+              </div>
+            </form>
+          ) : (
+            <TablePicker
+              loading={board.isPending}
+              tables={openTables.map((x) => ({ sessionId: x.session!.id, name: x.name, guests: x.session!.guests, guest: x.session!.memberName ?? (x.session!.guestLabel || '散客') }))}
+              selected={tableSession}
+              detail={t}
+              error={table.error}
+              locked={op.locked}
+              onPick={(id) => {
+                setTableSession(id);
+                op.clearError();
+              }}
+            />
+          )}
         </Card>
 
         <Card className="p-4" data-testid="dining-menu">
@@ -382,20 +452,20 @@ export function OrderTab() {
               )}
             </span>
             <Button variant="primary" size="lg" disabled={!!problem || op.locked} loading={op.busy} onClick={() => void submit()} data-testid="dining-submit">
-              {g ? `下单 · ${g.tagCode}` : '下单'}
+              {target ? `下单 · ${target.label}` : '下单'}
             </Button>
           </div>
-          <p className="mt-2 text-[11.5px] leading-relaxed text-ink-4">下单就是挂到客人账上（不是收款），结账时一起结。点错了在下面「还没上的菜」里退菜。</p>
+          <p className="mt-2 text-[11.5px] leading-relaxed text-ink-4">下单就是记到客人或这桌的账上（不是收款），结账时一起结。点错了在下面「还没上的菜」里退菜。</p>
         </Card>
 
-        {g && (
+        {target && (
           <Card className="p-4" data-testid="dining-pending">
-            <SectionTitle>还没上的菜 {g.pending.length ? g.pending.length : ''}</SectionTitle>
-            {g.pending.length === 0 ? (
-              <p className="mt-2 text-[12.5px] text-ink-3">这位客人点的菜都上齐了</p>
+            <SectionTitle>还没上的菜 {target.pending.length ? target.pending.length : ''}</SectionTitle>
+            {target.pending.length === 0 ? (
+              <p className="mt-2 text-[12.5px] text-ink-3">{t ? '这桌点的菜都上齐了' : '这位客人点的菜都上齐了'}</p>
             ) : (
               <ul className="mt-2 divide-y divide-line/70">
-                {g.pending.map((p) => (
+                {target.pending.map((p) => (
                   <li key={p.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 py-2" data-testid={`dining-pending-${p.name}`}>
                     <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold">
                       {p.name} × {p.quantity}
@@ -462,9 +532,87 @@ export function OrderTab() {
         onClose={() => setVoiding(null)}
         onConfirm={(reason) => {
           const p = voiding!;
-          void run(`void-${p.id}`, () => api.post(`/api/frontdesk/lines/${p.billLineId}/void`, { reason }), `${p.name} 已退`).then((done) => done && setVoiding(null));
+          // 桌台的明细在桌台账单上，退菜走桌台的接口；手牌客人的照旧走前台作废
+          const url = t ? `/api/dining/tables/lines/${p.billLineId}/void` : `/api/frontdesk/lines/${p.billLineId}/void`;
+          void run(`void-${p.id}`, () => api.post(url, { reason }), `${p.name} 已退`).then((done) => done && setVoiding(null));
         }}
       />
+    </div>
+  );
+}
+
+/** 桌台点单：选一张用餐中的桌（开台在「桌台」页） */
+function TablePicker({
+  loading,
+  tables,
+  selected,
+  detail,
+  error,
+  locked,
+  onPick,
+}: {
+  loading: boolean;
+  tables: { sessionId: number; name: string; guests: number; guest: string }[];
+  selected: number | null;
+  detail: TableSessionDetail | null;
+  error: unknown;
+  locked: boolean;
+  onPick: (sessionId: number) => void;
+}) {
+  if (loading) return <Spinner />;
+  return (
+    <div data-testid="dining-table-picker">
+      {tables.length === 0 && !detail ? (
+        <p className="text-[13px] text-ink-3">
+          现在没有用餐中的桌。先到{' '}
+          <NavLink to="/dining/tables" className="font-semibold text-pine hover:underline">
+            桌台
+          </NavLink>{' '}
+          开台，再回来点单。
+        </p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {tables.map((x) => {
+            const on = x.sessionId === selected;
+            return (
+              <button
+                key={x.sessionId}
+                type="button"
+                aria-pressed={on}
+                disabled={locked && !on}
+                onClick={() => onPick(x.sessionId)}
+                title={`${x.guests} 人 · ${x.guest}`}
+                className={cn(
+                  'flex h-10 items-center gap-1.5 rounded-full border px-3 text-[14px] font-bold disabled:opacity-40',
+                  on ? 'border-pine bg-pine text-paper' : 'border-line bg-card text-ink-2 hover:border-line-strong',
+                )}
+                data-testid={`dining-table-${x.name}`}
+              >
+                <span className="num">桌 {x.name}</span>
+                <span className="flex items-center gap-0.5 text-[11.5px] font-semibold opacity-70">
+                  <Users className="size-3" />
+                  {x.guests}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {selected !== null &&
+        (error ? (
+          <p className="mt-2 text-[13.5px] font-semibold text-clay">{errorMessage(error)}</p>
+        ) : detail ? (
+          <p className="mt-2 flex flex-wrap items-center gap-2 text-[13px] text-ink-2" data-testid="dining-table-selected">
+            <span className="num text-[18px] font-bold text-ink">桌 {detail.tableName}</span>
+            <span>
+              {detail.guests} 人 · {detail.member?.name ?? (detail.guestLabel || '散客')}
+            </span>
+            <span className="text-ink-3">已点 <Money cents={detail.amount} className="font-bold" /></span>
+            {detail.status !== 'open' && <Badge tone="clay">{detail.status === 'settled' ? '已结账' : '已撤台'}</Badge>}
+          </p>
+        ) : (
+          <Spinner />
+        ))}
     </div>
   );
 }
