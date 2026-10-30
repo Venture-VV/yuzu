@@ -106,8 +106,8 @@ export function ErpShell() {
         <span className="hidden text-[12.5px] text-paper/75 md:inline">
           {session.staff.displayName} · {[ROLE_LABELS[session.staff.role], ...session.staff.duties.map((d) => DUTY_LABELS[d].title)].join(' · ')}
         </span>
-        {access.store ? (
-          <NavLink to="/" className="flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3.5 text-[13px] font-semibold text-paper hover:bg-white/18" data-testid="erp-exit">
+        {access.storeHome ? (
+          <NavLink to={access.storeHome} className="flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3.5 text-[13px] font-semibold text-paper hover:bg-white/18" data-testid="erp-exit">
             <ArrowLeft className="size-4" />
             返回门店
           </NavLink>

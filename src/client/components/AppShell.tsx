@@ -1,53 +1,25 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Building2, CalendarCheck2, ClipboardCheck, ConciergeBell, Hourglass, KeyRound, LayoutDashboard, LogOut, ReceiptText, Settings2, UsersRound, UtensilsCrossed } from 'lucide-react';
+import { Building2, KeyRound, LogOut } from 'lucide-react';
 import { describeBusinessHours, isOpenAt, minuteOfDay } from '@shared/business-date';
 import { describeDate, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
-import { ADMIN_PERMISSIONS } from '@shared/admin';
-import type { Permission } from '@shared/permissions';
 import { api } from '../lib/api';
 import { useCan, useSession } from '../lib/session';
 import { cn } from '../lib/utils';
 import { LogoMark } from './Brand';
 import { InstanceTag } from './InstanceTag';
+import { useStoreNav } from './storeNav';
 import { PendingOpsBanner } from './PendingOpsBanner';
 import { FrontdeskPendingBanner } from '../features/frontdesk/PendingBanner';
 import { useErpAccess } from '../features/erp/access';
 import { Badge } from './ui';
 
-interface NavItem {
-  to: string;
-  label: string;
-  icon: typeof UsersRound;
-  /** 拥有其中任一权限即显示 */
-  perm: Permission | Permission[];
-  end?: boolean;
-  /** 额外条件，例如「钟房」只在技师功能开启后显示、「餐饮」只在餐饮功能开启后显示 */
-  when?: (session: ReturnType<typeof useSession>) => boolean;
-}
-
-// 前台与会员储值、管理后台是独立的业务组，导航中用分隔线区分；库存、采购、货款、待办在 ERP 工作区（用户菜单「进入 ERP」）
-const NAV: NavItem[][] = [
-  [
-    { to: '/frontdesk', label: '前台', icon: ConciergeBell, perm: 'frontdesk.read' },
-    { to: '/clockroom', label: '钟房', icon: Hourglass, perm: 'technician.dispatch', when: (s) => s.technicians },
-    { to: '/dining', label: '餐饮', icon: UtensilsCrossed, perm: ['dining.order', 'dining.kitchen', 'frontdesk.checkout'], when: (s) => s.dining },
-    { to: '/', label: '会员', icon: UsersRound, end: true, perm: 'member.read' },
-    { to: '/ledger', label: '流水', icon: ReceiptText, perm: 'ledger.readToday' },
-    { to: '/settlement', label: '日结', icon: CalendarCheck2, perm: 'ledger.readToday' },
-    { to: '/shift', label: '交班', icon: ClipboardCheck, perm: 'ledger.readToday' },
-    { to: '/dashboard', label: '看板', icon: LayoutDashboard, perm: ['ledger.readToday', 'report.executive', 'report.members', 'report.technicians'] },
-  ],
-  // 管理后台是单独的一套页面（规则、价目、手牌池、员工与权限）
-  [{ to: '/admin', label: '后台', icon: Settings2, perm: [...ADMIN_PERMISSIONS] }],
-];
-
 export function AppShell({ children }: { children: ReactNode }) {
   const can = useCan();
   const session = useSession();
   // ERP（库存、采购、货款、待办）在单独的工作区，主导航里没有（v0.7.3）；待办的数字在 ERP 导航上
-  const badges: Record<string, number | undefined> = {};
+  const nav = useStoreNav();
   return (
     <div className="flex h-dvh min-h-0 bg-paper">
       <nav
@@ -58,43 +30,33 @@ export function AppShell({ children }: { children: ReactNode }) {
           <LogoMark className="size-10 short:size-8" />
         </NavLink>
         <div className="scroll-thin flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto short:gap-0.5">
-          {NAV.map((group) => group.filter((n) => (Array.isArray(n.perm) ? n.perm : [n.perm]).some((p) => can(p)) && (!n.when || n.when(session))))
-            .filter((group) => group.length > 0)
-            .map((group, gi) => (
-              <div key={group[0]!.to} className="flex flex-col items-center gap-1 short:gap-0.5">
-                {gi > 0 && <span className="my-1.5 h-px w-8 bg-white/12 short:my-1" aria-hidden />}
-                {group.map(({ to, label, icon: Icon, end }) => (
-                  <NavLink
-                    key={to}
-                    to={to}
-                    end={end}
-                    aria-label={label}
-                    title={badges[to] ? `${badges[to]} 项待确认` : undefined}
-                    className={({ isActive }) =>
-                      cn(
-                        'group relative flex w-[64px] flex-col items-center gap-0.5 rounded-[14px] py-2 text-[12px] font-semibold transition-colors short:gap-0 short:rounded-[12px] short:py-[3px] short:text-[11px] short:leading-[15px]',
-                        isActive ? 'bg-white/12 text-paper' : 'text-paper/60 hover:bg-white/6 hover:text-paper',
-                      )
-                    }
-                  >
-                    {({ isActive }) => (
-                      <>
-                        {isActive && <span className="absolute top-1/2 -left-[10px] h-6 w-1 -translate-y-1/2 rounded-r-full bg-yuzu" />}
-                        <span className="relative">
-                          <Icon className="size-[21px] short:size-[18px]" strokeWidth={isActive ? 2.2 : 1.8} />
-                          {!!badges[to] && (
-                            <span aria-hidden className="num absolute -top-1.5 -right-2.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-yuzu px-1 text-[10.5px] font-bold text-ink ring-2 ring-[#1d3f31]">
-                              {badges[to]! > 99 ? '99+' : badges[to]}
-                            </span>
-                          )}
-                        </span>
-                        <span>{label}</span>
-                      </>
-                    )}
-                  </NavLink>
-                ))}
-              </div>
-            ))}
+          {nav.map((group, gi) => (
+            <div key={group[0]!.to} className="flex flex-col items-center gap-1 short:gap-0.5">
+              {gi > 0 && <span className="my-1.5 h-px w-8 bg-white/12 short:my-1" aria-hidden />}
+              {group.map(({ to, label, icon: Icon, end }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={end}
+                  aria-label={label}
+                  className={({ isActive }) =>
+                    cn(
+                      'group relative flex w-[64px] flex-col items-center gap-0.5 rounded-[14px] py-2 text-[12px] font-semibold transition-colors short:gap-0 short:rounded-[12px] short:py-[3px] short:text-[11px] short:leading-[15px]',
+                      isActive ? 'bg-white/12 text-paper' : 'text-paper/60 hover:bg-white/6 hover:text-paper',
+                    )
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      {isActive && <span className="absolute top-1/2 -left-[10px] h-6 w-1 -translate-y-1/2 rounded-r-full bg-yuzu" />}
+                      <Icon className="size-[21px] short:size-[18px]" strokeWidth={isActive ? 2.2 : 1.8} />
+                      <span>{label}</span>
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
+          ))}
         </div>
         <InstanceTag instance={session.instance} version={session.version} commit={session.commit} />
         <UserMenu />

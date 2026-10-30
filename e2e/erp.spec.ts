@@ -1,7 +1,7 @@
 // v0.7.3 ERP 独立工作区浏览器验收（店主 2026-10-30 定，见 docs/ERP.md）：
 //   门店主导航没有库存、采购、货款、待办 → 店主从用户菜单「进入 ERP」→ ERP 首页的模块 → 营业数据（只读）
 //   → 模块设置关掉「采购」：导航不显示、页面提示没有开启、接口拒绝 → 重新开启恢复；
-//   物资经办登录直接进 ERP 的库存，没有营业数据与模块设置。
+//   物资经办登录直接进 ERP 的库存，没有营业数据与模块设置；开了餐饮时，物资经办的「返回门店」进餐饮的厨房出品屏。
 // 依赖四套演示数据（仅独立演示库）；账号：店主 linlan、物资经办 lixiao，密码 yuzu2026。结束时把模块开关恢复为全部开启。
 import { expect, test, type Page } from '@playwright/test';
 
@@ -89,5 +89,26 @@ test.describe('ERP 工作区', () => {
     expect((await page.request.get('/api/erp/revenue?from=2026-01-01&to=2026-01-01')).status()).toBe(403);
     await page.goto('/erp/modules');
     await expect(page).toHaveURL(/\/erp$/);
+  });
+
+  test('开了餐饮时，物资经办在 ERP 点「返回门店」进餐饮的厨房出品屏，不会被送回 ERP', async ({ page }) => {
+    await login(page, 'linlan');
+    const dining = (await (await page.request.get('/api/admin/dining')).json()) as { rules: { enabled: boolean } };
+    if (!dining.rules.enabled) expect((await page.request.put('/api/admin/dining/rules', { data: { enabled: true } })).ok()).toBe(true);
+    try {
+      await page.request.post('/api/auth/logout');
+      await login(page, 'lixiao');
+      await expect(page).toHaveURL(/\/inventory/);
+      await page.getByTestId('erp-exit').click();
+      await expect(page).toHaveURL(/\/dining/);
+      await expect(page.getByTestId('dining-tab-kitchen')).toBeVisible();
+      await expect(page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '餐饮', exact: true })).toBeVisible();
+    } finally {
+      if (!dining.rules.enabled) {
+        await page.request.post('/api/auth/logout');
+        await login(page, 'linlan');
+        expect((await page.request.put('/api/admin/dining/rules', { data: { enabled: false } })).ok()).toBe(true);
+      }
+    }
   });
 });
