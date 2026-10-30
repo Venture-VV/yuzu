@@ -6,7 +6,7 @@
 - ERP 包含 SCM：供应商、采购、库存、应付货款；
 - 财务、采购的同事之后会陆续提需求，所以模块按注册表配置，不写死。
 
-**第一步 v0.7.3 已完成**（单独的 PR，叠在 v0.7.2 的 [PR #18](https://github.com/Venture-VV/yuzu/pull/18) 之后）：ERP 工作区、模块注册表与模块开关、接口拦截、只读的营业数据。交接见 `docs/HANDOFF_V073.md`。
+**第一步 v0.7.3 已完成**（单独的 PR [PR #19](https://github.com/Venture-VV/yuzu/pull/19)，在 v0.7.2 之后）：ERP 工作区、模块注册表与模块开关、接口拦截、只读的营业数据。交接见 `docs/HANDOFF_V073.md`。
 
 ## 1. 边界
 
