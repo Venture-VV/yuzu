@@ -1,6 +1,7 @@
 // 对话框打开后马上输入（手快、扫码枪）：刚输入的内容不会被打开窗口时的清空盖掉
 // （Codex 复测 PR #18 的 P2 是派钟窗口；店主 2026-10-30 定所有对话框一起改，见 src/client/lib/useResetOnOpen.ts）。
 // 在同一段脚本里点开对话框、等这次点击渲染出来（微任务）后立即输入，不让出给之后的任务，再等 300ms 读回。只打开、不提交。
+// 另有结账收款按钮：应收合计取回之前是灰色（店主 2026-10-30 定）。
 // 依赖四套演示数据（仅独立演示库）；账号：店员 xiaozhou，密码 yuzu2026。
 import { expect, test, type Page } from '@playwright/test';
 
@@ -60,5 +61,35 @@ test.describe('对话框打开后马上输入', () => {
       await page.keyboard.press('Escape');
       await expect(page.getByRole('dialog')).toHaveCount(0);
     }
+  });
+
+  test('结账：应收合计取回之前收款方式按钮是灰色，取回后才能点（店主 2026-10-30 定；只打开、不收款）', async ({ page }) => {
+    await login(page, 'xiaozhou');
+    await page.goto('/frontdesk');
+    // 演示数据：一家三口 A8075 / A6010 / A8076 在店
+    await page.getByTestId('tag-A8075').click();
+    const panel = page.getByTestId('bill-panel');
+    await expect(panel.getByTestId('bill-tag')).toHaveText('A8075');
+    // 让应收合计晚一点回来（模拟网络慢）
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route('**/api/frontdesk/checkout-preview*', async (route) => {
+      await held;
+      await route.continue();
+    });
+    try {
+      await panel.getByTestId('action-checkout').click();
+      const dialog = page.getByRole('dialog');
+      await expect(dialog.getByTestId('pay-hint')).toContainText('正在取应收合计');
+      await expect(dialog.getByTestId('pay-add-cash')).toBeDisabled();
+      release();
+      await expect(dialog.getByTestId('pay-add-cash')).toBeEnabled();
+      await expect(dialog.getByTestId('pay-hint')).toContainText('点上面的收款方式添加一笔');
+    } finally {
+      release();
+      await page.unroute('**/api/frontdesk/checkout-preview*');
+    }
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 });
