@@ -2,6 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { diningGuest, diningGuestOf } from '../src/server/modules/dining';
 import { createStaff } from '../src/server/modules/staff';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
@@ -257,6 +258,9 @@ describe('结账与补录', () => {
     });
     expect(paid.status, JSON.stringify(paid.body)).toBe(200);
     expect((await itemsOf(v.id))[0]).toMatchObject({ status: 'queued', visitClosed: true });
+    // 下单的回复按来访取：客人在下单与回复之间结账离店，已生效的点单不会被说成「没有在店客人」（Codex 审查 PR #18）
+    expect(await diningGuestOf(ctx.sql, v.id)).toMatchObject({ visitId: v.id, tagCode: v.code, pending: [expect.objectContaining({ name: '柠檬茶', status: 'queued' })] });
+    await expect(diningGuest(ctx.sql, v.code)).rejects.toMatchObject({ status: 404 });
   });
 
   it('按纸质单补录的菜早已上过：出品单直接记为已上菜，不扣估清', async () => {
