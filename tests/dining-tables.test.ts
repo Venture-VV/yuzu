@@ -82,7 +82,7 @@ describe('后台桌台', () => {
 });
 
 describe('开台、点单、转台、退菜、撤台', () => {
-  it('开台：同一编号重提不重复；桌台在用、停用都拒绝；餐饮关闭时不能开台；后勤不能开台', async () => {
+  it('开台：同一编号重提不重复；桌台在用、停用都拒绝；用餐中的桌不能停用；餐饮关闭时不能开台；后勤不能开台', async () => {
     const key = randomUUID();
     const a = await open(table['A1']!, { guests: 3, guestLabel: '张总' }, ctx.clerk, key);
     expect(a.status, JSON.stringify(a.body)).toBe(200);
@@ -90,6 +90,9 @@ describe('开台、点单、转台、退菜、撤台', () => {
     expect((await open(table['A1']!, { guests: 3, guestLabel: '张总' }, ctx.clerk, key)).body.id).toBe(a.body.id);
     expect((await open(table['A1']!)).body.error.code).toBe('TABLE_TAKEN');
     expect((await open(table['停用桌']!)).body.error.code).toBe('TABLE_INACTIVE');
+    // 正在用餐的桌不能停用（结账或转台后才能停用）
+    const busy = await api(ctx.app, boss, 'PUT', `/api/admin/dining/tables/${table['A1']}`, { name: 'A1', area: '大厅', seats: 4, active: false });
+    expect(busy.body.error.code).toBe('TABLE_IN_USE');
     expect((await open(table['A2']!, {}, cook)).status).toBe(403);
     const look = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/ops/${key}?type=table_open`)).body;
     expect(look).toMatchObject({ found: true, type: 'table_open', session: { id: a.body.id, tableName: 'A1' } });
