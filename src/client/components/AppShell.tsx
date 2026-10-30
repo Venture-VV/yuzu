@@ -82,7 +82,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     title={badges[to] ? `${badges[to]} 项待确认` : undefined}
                     className={({ isActive }) =>
                       cn(
-                        'group relative flex w-[64px] flex-col items-center gap-0.5 rounded-[14px] py-2 text-[12px] font-semibold transition-colors short:gap-0 short:rounded-[12px] short:py-[3px] short:text-[11px] short:leading-[15px]',
+                        'group relative flex w-[64px] flex-col items-center gap-0.5 rounded-[14px] py-2 text-[12px] font-semibold transition-colors short:gap-0 short:rounded-[12px] short:py-[3px] short:text-[11px] short:leading-[15px] tiny:py-[2px] tiny:leading-[14px]',
                         isActive ? 'bg-white/12 text-paper' : 'text-paper/60 hover:bg-white/6 hover:text-paper',
                       )
                     }
@@ -91,7 +91,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                       <>
                         {isActive && <span className="absolute top-1/2 -left-[10px] h-6 w-1 -translate-y-1/2 rounded-r-full bg-yuzu" />}
                         <span className="relative">
-                          <Icon className="size-[21px] short:size-[18px]" strokeWidth={isActive ? 2.2 : 1.8} />
+                          <Icon className="size-[21px] short:size-[18px] tiny:size-4" strokeWidth={isActive ? 2.2 : 1.8} />
                           {!!badges[to] && (
                             <span aria-hidden className="num absolute -top-1.5 -right-2.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-yuzu px-1 text-[10.5px] font-bold text-ink ring-2 ring-[#1d3f31]">
                               {badges[to]! > 99 ? '99+' : badges[to]}

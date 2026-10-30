@@ -155,6 +155,9 @@ test.describe('视口冒烟', () => {
           expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
           expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
         }
+        // 演示库、测试服的实例标识是两行（例如「演示」「不作数」），比这里的开发环境多一行：最后一个入口与标识之间要留出这一行（Codex 复测 PR #18 P2）
+        const last = (await nav.getByRole('link', { name: '后台', exact: true }).boundingBox())!;
+        expect(last.y + last.height, '「后台」与实例标识之间放得下多一行标识').toBeLessThanOrEqual(tag.y - 16);
       }
       await page.getByTestId('dining-tab-kitchen').click();
       await expect(page.getByTestId('kitchen')).toBeVisible();
