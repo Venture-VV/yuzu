@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { HandHeart, Minus, Plus, Trash2 } from 'lucide-react';
 import type { PriceTier } from '@shared/catalog';
 import { ZONE_LABELS, type VisitDetail } from '@shared/frontdesk';
@@ -9,6 +9,7 @@ import { api } from '../../lib/api';
 import { useCatalog } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
+import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Button, Input, MoneyInput, Notice, Skeleton } from '../../components/ui';
@@ -61,20 +62,22 @@ export function AddItemsDialog({
     pick: (found) => ('visit' in found ? found.visit : null),
   });
 
-  useEffect(() => {
-    if (!open) return;
+  useResetOnOpen(open, () => {
     setCart(new Map());
     setCustom([]);
     setCategory('全部');
     setPicking(null);
     op.clearError();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  });
   // 每次打开按规则的默认上钟方式
   const defaultCallType = techRules?.defaultCallType;
-  useEffect(() => {
-    if (open && defaultCallType) setCallType(defaultCallType);
-  }, [open, defaultCallType]);
+  useResetOnOpen(
+    open,
+    () => {
+      if (defaultCallType) setCallType(defaultCallType);
+    },
+    [defaultCallType],
+  );
 
   const items = useMemo(() => (catalog.data?.items ?? []).filter((i) => i.active), [catalog.data]);
   const categories = useMemo(() => ['全部', ...new Set(items.map((i) => i.category || '其他'))], [items]);

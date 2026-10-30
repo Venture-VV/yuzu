@@ -16,6 +16,7 @@ import { formatYuan } from '@shared/money';
 import { api } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
+import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Button, ConfirmCheck, Field, Input, Notice, Skeleton } from '../../components/ui';
@@ -60,16 +61,14 @@ export function SwapDialog({
     staffName: session.staff.displayName,
     pick: (found) => ('visit' in found ? found.visit : null),
   });
-  useEffect(() => {
-    if (!open) return;
+  useResetOnOpen(open, () => {
     setCode('');
     setReason('');
     setLockOld(false);
     setChargeFee(false);
     setGrant(null);
     op.clearError();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  });
   useEffect(() => {
     if (op.state.phase === 'error' && op.state.code && GRANT_ERRORS.includes(op.state.code)) setGrant(null);
   }, [op.state]);
@@ -293,12 +292,10 @@ export function JoinGroupDialog({
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    if (open) {
-      setQ('');
-      setError(null);
-    }
-  }, [open]);
+  useResetOnOpen(open, () => {
+    setQ('');
+    setError(null);
+  });
   const candidates = useMemo(() => {
     const inStore = tags.filter((t) => t.visit && t.visit.id !== visit.id && (!visit.group || t.visit.groupId !== visit.group.id));
     return q.trim() ? matchTags(inStore, q) : inStore;
@@ -360,11 +357,14 @@ export function PreviewDialog({
   onCheckout?: (visitIds: number[]) => void;
 }) {
   const [selected, setSelected] = useState<number[]>([]);
-  useEffect(() => {
-    if (!open) return;
-    const mates = visit.group?.mates.filter((m) => m.status === 'open').map((m) => m.visitId) ?? [];
-    setSelected(mates.length ? mates : [visit.id]);
-  }, [open, visit]);
+  useResetOnOpen(
+    open,
+    () => {
+      const mates = visit.group?.mates.filter((m) => m.status === 'open').map((m) => m.visitId) ?? [];
+      setSelected(mates.length ? mates : [visit.id]);
+    },
+    [visit],
+  );
   const preview = usePreview(selected, open);
   // 门票（与结账共用计价）：按此刻的在店时长估算，结账时按结账时刻重新计算
   const priced = useCheckoutPreview(selected, open);

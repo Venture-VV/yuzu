@@ -19,6 +19,7 @@ import type { MemberSummary } from '@shared/types';
 import { useMembers } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
+import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Badge, Button, Input, Notice, Segmented, Select } from '../../components/ui';
@@ -120,8 +121,7 @@ export function CheckinDialog({
     pick: (found) => ('checkin' in found ? found.checkin : null),
   });
 
-  useEffect(() => {
-    if (!open) return;
+  useResetOnOpen(open, () => {
     setGuestType('walkin');
     setMemberQ('');
     setMember(null);
@@ -130,8 +130,7 @@ export function CheckinDialog({
     setTicketGrant(null);
     setTicketReason('1 米以下儿童');
     op.clearError();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  });
 
   const freeOf = (zone: Zone, except: Set<string>) => tags.filter((t) => t.zone === zone && t.active && !t.locked && !t.visit && !except.has(t.code));
 

@@ -7,6 +7,7 @@ import { api, errorMessage } from '../../lib/api';
 import { findPending } from '../../lib/pendingOps';
 import { useSession } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
+import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Dialog } from '../../components/Overlay';
 import { Money } from '../../components/Money';
 import { Badge, Button, Field, Notice, Skeleton, Textarea } from '../../components/ui';
@@ -49,14 +50,21 @@ export function ReversalDialog({ target, onClose }: { target: ReversalTarget | n
     }),
   });
 
+  // 换了撤销对象时，填写的原因在这一次渲染里就清空（下面的 effect 只处理待确认的撤销）
+  useResetOnOpen(
+    open,
+    () => {
+      setPreset(null);
+      setDetail('');
+    },
+    [consumptionId],
+  );
   useEffect(() => {
     if (!target) {
       // 对话框关闭：未确认的撤销交给页面顶部的提醒继续处理
       op.reset();
       return;
     }
-    setPreset(null);
-    setDetail('');
     op.reset();
     // 这张消费单有之前留下的待确认撤销：先查回结果
     const pending = findPending(target.memberId, 'reversal', target.consumptionId);

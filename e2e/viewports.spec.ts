@@ -84,8 +84,15 @@ test.describe('视口冒烟', () => {
     await expectFits(page);
   });
 
-  test('技师：后台「技师」与看板「技师业绩」（v0.7.0）', async ({ page }) => {
+  test('技师：后台「技师」与看板「技师业绩」（v0.7.0；技师功能关闭时看板不显示「技师业绩」，v0.7.3）', async ({ page }) => {
     await login(page, 'linlan');
+    const tech = (await (await page.request.get('/api/admin/technicians')).json()) as { rules: { enabled: boolean } };
+    if (!tech.rules.enabled) {
+      // 功能关闭：看板没有「技师业绩」，直接打开回到看板
+      await page.goto('/dashboard/technicians');
+      await expect(page).toHaveURL(/\/dashboard$/);
+      await expect(page.getByTestId('dashboard-tab-technicians')).toHaveCount(0);
+    }
     await page.goto('/admin/technicians');
     await expect(page.getByTestId('technician-rules-card')).toBeVisible();
     await expect(page.getByTestId('technician-items')).toBeVisible();
@@ -96,9 +103,15 @@ test.describe('视口冒烟', () => {
     await expectFits(page);
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog', { name: '新建技师' })).toBeHidden();
-    await page.goto('/dashboard/technicians');
-    await expect(page.getByTestId('technicians-clocks')).toBeVisible();
-    await expectFits(page);
+    // 只临时打开技师功能看「技师业绩」，结束时恢复原样
+    if (!tech.rules.enabled) expect((await page.request.put('/api/admin/technicians/rules', { data: { enabled: true } })).ok()).toBe(true);
+    try {
+      await page.goto('/dashboard/technicians');
+      await expect(page.getByTestId('technicians-clocks')).toBeVisible();
+      await expectFits(page);
+    } finally {
+      if (!tech.rules.enabled) expect((await page.request.put('/api/admin/technicians/rules', { data: { enabled: false } })).ok()).toBe(true);
+    }
   });
 
   test('钟房：看板、派钟对话框，开启技师后主导航 8 个入口都看得到（v0.7.1；v0.7.3 起库存等在 ERP）', async ({ page, isMobile }) => {

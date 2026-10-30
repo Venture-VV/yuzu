@@ -1,11 +1,12 @@
 // 前台小工具（v0.5.0）：按姓名、称呼或手机尾号找在店客人；值班经理在前台锁牌 / 解锁。
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Lock, LockOpen } from 'lucide-react';
 import { LOCK_REASONS, normalizeTagCode, uniqueTagMatch, ZONE_LABELS, type BoardTag } from '@shared/frontdesk';
 import { api, errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
+import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Button, Field, Input, Notice } from '../../components/ui';
@@ -14,9 +15,7 @@ import { ZoneChip } from './parts';
 /** 找在店客人：姓名、称呼按包含匹配；纯数字按会员手机尾号匹配 */
 export function FindGuestDialog({ open, tags, onClose, onPick }: { open: boolean; tags: BoardTag[]; onClose: () => void; onPick: (visitId: number) => void }) {
   const [q, setQ] = useState('');
-  useEffect(() => {
-    if (open) setQ('');
-  }, [open]);
+  useResetOnOpen(open, () => setQ(''));
   const query = q.trim();
   const results = useMemo(() => {
     if (!query) return [];
@@ -97,12 +96,15 @@ export function TagLockDialog({
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    setCode(initialCode ?? '');
-    setReason('');
-    setError(null);
-  }, [open, initialCode]);
+  useResetOnOpen(
+    open,
+    () => {
+      setCode(initialCode ?? '');
+      setReason('');
+      setError(null);
+    },
+    [initialCode],
+  );
 
   const c = normalizeTagCode(code);
   const tag = c ? (tags.find((t) => t.code === c) ?? uniqueTagMatch(tags, c)) : null;

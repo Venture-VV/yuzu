@@ -17,7 +17,7 @@ import { OverviewTab } from './OverviewTab';
 import { TechniciansTab } from './TechniciansTab';
 
 // 看板按岗位分页（v0.6.0）：今日（值班经理、收银）、经营总览（总经理）、会员总览（客户经理）；各页按权限显示
-// v0.7.0 加「技师业绩」（店主、店总、值班经理）
+// v0.7.0 加「技师业绩」（店主、店总、值班经理）；技师功能关闭时不显示（店主 2026-10-30 定，数据保留，重新开启后照常显示）
 const TABS = [
   { key: 'today', label: '今日', perm: 'ledger.readToday' },
   { key: 'overview', label: '经营总览', perm: 'report.executive' },
@@ -48,7 +48,7 @@ export function DashboardPage() {
   const can = useCan();
   const { tab } = useParams();
   const [pref, setPref] = useState(readPref);
-  const tabs = TABS.filter((t) => can(t.perm));
+  const tabs = TABS.filter((t) => can(t.perm) && (t.key !== 'technicians' || session.technicians));
   const current = tabs.find((t) => t.key === tab) ?? (tab ? undefined : (tabs.find((t) => t.key === pref) ?? tabs[0]));
   if (!current) return <Navigate to={tabs.length ? '/dashboard' : '/'} replace />;
   return (

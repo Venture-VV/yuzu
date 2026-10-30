@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { GRANT_TTL_MINUTES, type GrantPurpose, type GrantRequest, type Granted } from '@shared/grants';
 import { api, errorMessage } from '../lib/api';
+import { useResetOnOpen } from '../lib/useResetOnOpen';
 import { Dialog } from './Overlay';
 import { Button, Field, Input, Notice } from './ui';
 
@@ -36,12 +37,11 @@ export function AuthorizeDialog<R extends GrantRequest>({
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!open) return;
+  useResetOnOpen(open, () => {
     setUsername('');
     setPassword('');
     setError(null);
-  }, [open]);
+  });
 
   const submit = async () => {
     setBusy(true);

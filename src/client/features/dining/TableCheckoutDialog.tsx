@@ -13,6 +13,7 @@ import { formatYuan } from '@shared/money';
 import { errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
+import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Button, Notice, Skeleton, Textarea } from '../../components/ui';
@@ -64,15 +65,13 @@ export function TableCheckoutDialog({
     pick: (found) => (found.type === 'table_checkout' ? found.checkout : null),
   });
 
-  useEffect(() => {
-    if (!open) return;
+  useResetOnOpen(open, () => {
     setSelected([sessionId]);
     setShowAll(false);
     setNote('');
     setResult(null);
     op.clearError();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  });
 
   // 服务端拒绝（这几桌刚点了菜或退了菜、余额变化）后重新取一次核对数据；没有开班或班次刚交班时刷新当前班次
   useEffect(() => {
