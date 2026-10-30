@@ -9,6 +9,7 @@ import { CALL_TYPE_LABELS, gradeLabel } from '@shared/technicians';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
+import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { PageHeader } from '../../components/AppShell';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
@@ -428,9 +429,7 @@ function ReasonDialog({
 }) {
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
-  useEffect(() => {
-    if (open) setReason('');
-  }, [open]);
+  useResetOnOpen(open, () => setReason(''));
   return (
     <Dialog
       open={open}

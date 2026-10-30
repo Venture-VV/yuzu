@@ -32,6 +32,11 @@ import { CheckoutPrintPage } from './features/print/CheckoutPrintPage';
 import { SettlementPrintPage } from './features/print/SettlementPrintPage';
 import { ShiftPrintPage } from './features/print/ShiftPrintPage';
 import { useCan, useOptionalSession } from './lib/session';
+import { useErpAccess } from './features/erp/access';
+import { ErpHome } from './features/erp/ErpHome';
+import { ErpModulesPage } from './features/erp/ErpModulesPage';
+import { ErpShell } from './features/erp/ErpShell';
+import { RevenuePage } from './features/erp/RevenuePage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -43,8 +48,8 @@ const queryClient = new QueryClient({
   },
 });
 
-/** 登录守卫：未登录跳转登录页；首次登录强制修改密码。shell：app 为前台（带导航栏），admin 为管理后台，bare 用于打印页 */
-function AuthGate({ shell = 'app' }: { shell?: 'app' | 'admin' | 'bare' }) {
+/** 登录守卫：未登录跳转登录页；首次登录强制修改密码。shell：app 为门店（带导航栏），admin 为管理后台，erp 为 ERP 工作区，bare 用于打印页 */
+function AuthGate({ shell = 'app' }: { shell?: 'app' | 'admin' | 'erp' | 'bare' }) {
   const session = useSessionQuery();
   const navigate = useNavigate();
   const location = useLocation();
@@ -105,6 +110,8 @@ function AuthGate({ shell = 'app' }: { shell?: 'app' | 'admin' | 'bare' }) {
         <Outlet />
       ) : shell === 'admin' ? (
         <AdminShell />
+      ) : shell === 'erp' ? (
+        <ErpShell />
       ) : (
         <AppShell>
           <Outlet />
@@ -114,13 +121,15 @@ function AuthGate({ shell = 'app' }: { shell?: 'app' | 'admin' | 'bare' }) {
   );
 }
 
-/** 首页：前台进入会员工作台；只有库存职责的后勤人员直接进入库存；只管厨房的岗位进入餐饮 */
+/** 首页：前台进入会员工作台；只用 ERP 的人（库存、采购、货款职责）直接进 ERP 的第一个模块；只管厨房的岗位进入餐饮 */
 function Home() {
   const can = useCan();
+  const erp = useErpAccess();
   const dining = useOptionalSession()?.dining ?? false;
   if (can('member.read')) return <WorkbenchPage />;
-  if (can('inventory.read')) return <Navigate to="/inventory" replace />;
+  if (erp.landing) return <Navigate to={erp.landing} replace />;
   if (dining && (can('dining.kitchen') || can('dining.order'))) return <Navigate to="/dining" replace />;
+  if (erp.canEnter) return <Navigate to="/erp" replace />;
   return <Navigate to="/password" replace />;
 }
 
@@ -136,6 +145,33 @@ const router = createBrowserRouter([
     ],
   },
   { path: '/admin', element: <AuthGate shell="admin" />, children: adminRoutes },
+  // ERP 工作区（v0.7.3）：首页、模块设置、营业数据，以及库存、采购、货款、待办（原来的地址不变，门店主导航里不再有）。
+  // 页面属于哪个模块按注册表（@shared/erp）里的页面前缀认，模块关着时 ERP 外壳提示没有开启
+  {
+    path: '/erp',
+    element: <AuthGate shell="erp" />,
+    children: [
+      { index: true, element: <ErpHome /> },
+      { path: 'modules', element: <ErpModulesPage /> },
+      { path: 'revenue', element: <RevenuePage /> },
+      { path: '*', element: <Navigate to="/erp" replace /> },
+    ],
+  },
+  {
+    element: <AuthGate shell="erp" />,
+    children: [
+      { path: 'inventory/new/:type', element: <DocFormPage /> },
+      { path: 'inventory/docs/:id/edit', element: <DocFormPage /> },
+      { path: 'inventory/:tab?', element: <InventoryPage /> },
+      { path: 'todo', element: <TodoPage /> },
+      { path: 'purchasing', element: <PurchasingPage /> },
+      { path: 'purchasing/new', element: <PoFormPage mode="new" /> },
+      { path: 'purchasing/:id/edit', element: <PoFormPage mode="edit" /> },
+      { path: 'purchasing/:id/revise', element: <PoFormPage mode="revise" /> },
+      { path: 'payables', element: <PayablesPage /> },
+      { path: 'payables/pay', element: <PaymentFormPage /> },
+    ],
+  },
   {
     element: <AuthGate />,
     children: [
@@ -147,16 +183,6 @@ const router = createBrowserRouter([
       { path: 'settlement/:date?', element: <SettlementPage /> },
       { path: 'shift', element: <ShiftPage /> },
       { path: 'dashboard/:tab?', element: <DashboardPage /> },
-      { path: 'inventory/new/:type', element: <DocFormPage /> },
-      { path: 'inventory/docs/:id/edit', element: <DocFormPage /> },
-      { path: 'inventory/:tab?', element: <InventoryPage /> },
-      { path: 'todo', element: <TodoPage /> },
-      { path: 'purchasing', element: <PurchasingPage /> },
-      { path: 'purchasing/new', element: <PoFormPage mode="new" /> },
-      { path: 'purchasing/:id/edit', element: <PoFormPage mode="edit" /> },
-      { path: 'purchasing/:id/revise', element: <PoFormPage mode="revise" /> },
-      { path: 'payables', element: <PayablesPage /> },
-      { path: 'payables/pay', element: <PaymentFormPage /> },
       { path: 'password', element: <ChangePasswordPage /> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],

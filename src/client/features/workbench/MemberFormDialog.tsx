@@ -1,9 +1,10 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { normalizeFieldValue, type MemberFieldDef } from '@shared/member-fields';
 import type { MemberDetail, MemberSummary } from '@shared/types';
 import { api, ApiError, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
+import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Button, Field, Input, Notice, Segmented, Select, Textarea } from '../../components/ui';
@@ -44,19 +45,22 @@ export function MemberFormDialog({
   const [existing, setExisting] = useState<{ id: number; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (!open) return;
-    const digits = prefill?.replace(/\D/g, '') ?? '';
-    setName(member?.name ?? (prefill && !digits ? prefill : ''));
-    setPhone(member?.phone ?? (digits.length >= 3 ? digits : ''));
-    setGender(member?.gender ?? 'unknown');
-    setBirthday(member?.birthday ?? '');
-    setNote(member?.note ?? '');
-    setChannel(member?.channel ?? '');
-    setCustom(Object.fromEntries(Object.entries(member?.customFields ?? {}).map(([k, v]) => [k, String(v)])));
-    setErrors({});
-    setExisting(null);
-  }, [open, member, prefill]);
+  useResetOnOpen(
+    open,
+    () => {
+      const digits = prefill?.replace(/\D/g, '') ?? '';
+      setName(member?.name ?? (prefill && !digits ? prefill : ''));
+      setPhone(member?.phone ?? (digits.length >= 3 ? digits : ''));
+      setGender(member?.gender ?? 'unknown');
+      setBirthday(member?.birthday ?? '');
+      setNote(member?.note ?? '');
+      setChannel(member?.channel ?? '');
+      setCustom(Object.fromEntries(Object.entries(member?.customFields ?? {}).map(([k, v]) => [k, String(v)])));
+      setErrors({});
+      setExisting(null);
+    },
+    [member, prefill],
+  );
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();

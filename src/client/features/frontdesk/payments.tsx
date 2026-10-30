@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { BadgePercent, Plus, ShieldCheck, Ticket, Trash2, UserRound, WalletCards } from 'lucide-react';
 import {
   CHECKOUT_METHOD_LABELS,
@@ -15,6 +15,7 @@ import { maskPhone, PAYMENT_METHODS } from '@shared/labels';
 import { centsToInput, parseYuan } from '@shared/money';
 import { useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
+import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { AuthorizeDialog } from '../../components/AuthorizeDialog';
 import { Money } from '../../components/Money';
 import { Badge, Button, Input, MoneyInput, Select } from '../../components/ui';
@@ -100,9 +101,7 @@ export function usePayRows(opts: {
 }) {
   const session = useSession();
   const [rows, setRows] = useState<PayRow[]>([]);
-  useEffect(() => {
-    if (opts.open) setRows([]);
-  }, [opts.open]);
+  useResetOnOpen(opts.open, () => setRows([]));
 
   const rowCents = rows.map((r) => parseYuan(r.amount));
   const paid = rowCents.reduce<number>((s, c) => s + (c ?? 0), 0);
@@ -228,7 +227,8 @@ export function PaymentsSection({
             size="sm"
             variant="secondary"
             icon={m === 'discount' ? <BadgePercent className="size-3.5" /> : <Plus className="size-3.5" />}
-            disabled={pay.locked || (m === 'discount' && pay.hasDiscount)}
+            // 应收合计取回之前不能选（店主 2026-10-30 定）：网络慢时先点了，新加的一笔没有默认金额
+            disabled={pay.locked || total === null || (m === 'discount' && pay.hasDiscount)}
             onClick={() => pay.addRow(m)}
             data-testid={`pay-add-${m}`}
           >
@@ -237,7 +237,13 @@ export function PaymentsSection({
         ))}
       </div>
       {pay.rows.length === 0 ? (
-        <p className="mt-3 text-[13px] text-ink-3">{total === 0 ? '应收为 0（例如儿童免票），不用登记收款，直接确认结清。' : '点上面的收款方式添加一笔，金额默认为还差的部分；可组合多种方式。'}</p>
+        <p className="mt-3 text-[13px] text-ink-3" data-testid="pay-hint">
+          {total === null
+            ? '正在取应收合计，取到后才能选收款方式。'
+            : total === 0
+              ? '应收为 0（例如儿童免票），不用登记收款，直接确认结清。'
+              : '点上面的收款方式添加一笔，金额默认为还差的部分；可组合多种方式。'}
+        </p>
       ) : (
         <ul className="mt-3 space-y-2">
           {pay.rows.map((r, i) => (

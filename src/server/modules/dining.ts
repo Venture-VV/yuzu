@@ -201,11 +201,23 @@ export async function diningMenu(db: Db, deps: Deps): Promise<DiningMenu> {
 
 /** 点单页按手牌找在店客人：只给点单需要的信息（不含会员手机号、余额与账单） */
 export async function diningGuest(db: Db, tagCode: string): Promise<DiningGuest> {
+  const [v] = await db<{ visitId: number }[]>`
+    SELECT v.id AS visit_id FROM visits v JOIN hand_tags h ON h.id = v.tag_id
+    WHERE v.status = 'open' AND upper(h.code) = upper(${tagCode})`;
+  if (!v) throw notFound(`手牌 ${tagCode} 现在没有在店客人，请核对牌号`);
+  return diningGuestOf(db, v.visitId);
+}
+
+/**
+ * 按来访取点单页的客人信息。下单后的回复用它：点单已经生效，不再要求客人此刻仍在店
+ * （下单与回复之间客人刚好结账离店时，不能把已生效的点单说成失败；Codex 审查 PR #18）
+ */
+export async function diningGuestOf(db: Db, visitId: number): Promise<DiningGuest> {
   const [v] = await db<{ visitId: number; tagCode: string; zone: 'male' | 'female'; memberName: string | null; guestLabel: string }[]>`
     SELECT v.id AS visit_id, h.code AS tag_code, v.zone, m.name AS member_name, v.guest_label
     FROM visits v JOIN hand_tags h ON h.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id
-    WHERE v.status = 'open' AND upper(h.code) = upper(${tagCode})`;
-  if (!v) throw notFound(`手牌 ${tagCode} 现在没有在店客人，请核对牌号`);
+    WHERE v.id = ${visitId}`;
+  if (!v) throw notFound('来访不存在');
   const pending = await db<DiningGuest['pending']>`
     SELECT k.id, k.bill_line_id, i.name, k.quantity, k.note, k.status, k.rush_count, k.created_at
     FROM kitchen_items k JOIN service_items i ON i.id = k.item_id
@@ -438,8 +450,7 @@ export function registerDiningRoutes(app: FastifyInstance, deps: Deps) {
     const { postCharges } = await import('./frontdesk/bills');
     // 点单页只能点进厨房的菜（其他项目、手动金额请到前台登记）
     await postCharges(deps, body.visitId, { ...(req.body as object), customLines: [] } as never, ctxOf(req), { dining: { onlyKitchen: true } });
-    const [tag] = await sql<{ code: string }[]>`SELECT h.code FROM visits v JOIN hand_tags h ON h.id = v.tag_id WHERE v.id = ${body.visitId}`;
-    return diningGuest(sql, tag!.code);
+    return diningGuestOf(sql, body.visitId);
   });
 
   app.post('/api/dining/items/:id/rush', { preHandler: guard('dining.order') }, async (req) => {

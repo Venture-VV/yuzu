@@ -20,7 +20,7 @@ import { loadSettings } from './settings';
 import { loadTechnicians, technicianReport, withoutCommission } from './technicians';
 import { settledTechnicianLines, withCommission } from './commission';
 
-interface Clock {
+export interface Clock {
   tz: string;
   startHour: number;
 }
@@ -289,21 +289,28 @@ export async function dutyExtras(db: Db, today: string, c: Clock, opts: { inStor
 
 const PeriodQuery = z.object({ from: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD'), to: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD') });
 
+/** 门店时区与营业日切换时刻，以及此刻的营业日（看板、ERP 营业数据共用） */
+export async function reportClock(deps: Deps): Promise<{ c: Clock; today: string }> {
+  const s = await loadSettings(deps.sql);
+  const c: Clock = { tz: deps.config.timezone, startHour: s.businessDayStartHour };
+  return { c, today: businessDateOf(new Date(), c.tz, c.startHour) };
+}
+
+const realDate = (d: string) => !Number.isNaN(Date.parse(`${d}T00:00:00Z`)) && new Date(`${d}T00:00:00Z`).toISOString().slice(0, 10) === d;
+
+/** 任选时段的查询参数：日期真实存在、开始不晚于结束、结束不晚于今天的营业日、不超过 MAX_REPORT_DAYS 天 */
+export function reportPeriod(q: unknown, today: string) {
+  const { from, to } = parse(PeriodQuery, q);
+  if (!realDate(from) || !realDate(to)) throw badRequest('日期不正确');
+  if (from > to) throw badRequest('开始日期不能晚于结束日期');
+  if (to > today) throw badRequest('结束日期不能晚于今天的营业日');
+  if (daysBetween(from, to) > MAX_REPORT_DAYS) throw badRequest(`一次最多看 ${MAX_REPORT_DAYS} 天`);
+  return { from, to };
+}
+
 export function registerDashboardReportRoutes(app: FastifyInstance, deps: Deps) {
-  const clockAndToday = async () => {
-    const s = await loadSettings(deps.sql);
-    const c: Clock = { tz: deps.config.timezone, startHour: s.businessDayStartHour };
-    return { c, today: businessDateOf(new Date(), c.tz, c.startHour) };
-  };
-  const realDate = (d: string) => !Number.isNaN(Date.parse(`${d}T00:00:00Z`)) && new Date(`${d}T00:00:00Z`).toISOString().slice(0, 10) === d;
-  const period = (q: unknown, today: string) => {
-    const { from, to } = parse(PeriodQuery, q);
-    if (!realDate(from) || !realDate(to)) throw badRequest('日期不正确');
-    if (from > to) throw badRequest('开始日期不能晚于结束日期');
-    if (to > today) throw badRequest('结束日期不能晚于今天的营业日');
-    if (daysBetween(from, to) > MAX_REPORT_DAYS) throw badRequest(`一次最多看 ${MAX_REPORT_DAYS} 天`);
-    return { from, to };
-  };
+  const clockAndToday = () => reportClock(deps);
+  const period = reportPeriod;
 
   app.get('/api/reports/executive', { preHandler: guard('report.executive') }, async (req) => {
     const { c, today } = await clockAndToday();

@@ -35,6 +35,7 @@ import { registerDiningRoutes } from './modules/dining';
 import { registerTableRoutes } from './modules/tables';
 import { registerCommissionRoutes } from './modules/commission';
 import { registerWalletRoutes } from './modules/wallet';
+import { registerErpModuleGate, registerErpRoutes } from './modules/erp';
 
 function originHost(origin: string): string | null {
   try {
@@ -120,6 +121,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
     return { ok: true, version: config.version, commit: config.commit, instance: config.instance, time: new Date().toISOString() };
   });
 
+  // ERP 关闭的模块：按接口前缀统一拦截（先于各接口注册，所有接口都经过它）
+  registerErpModuleGate(app, deps);
   registerAuthRoutes(app, deps);
   registerGrantRoutes(app, deps);
   registerMemberRoutes(app, deps);
@@ -147,6 +150,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerDiningRoutes(app, deps);
   registerTableRoutes(app, deps);
   registerCommissionRoutes(app, deps);
+  registerErpRoutes(app, deps);
 
   // 前端静态资源（构建产物），全部从本机提供，外网中断不影响使用。
   const staticDir = resolve(process.env.STATIC_DIR ?? 'dist/client');
@@ -154,6 +158,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   if (hasClient) {
     await app.register(fastifyStatic, {
       root: staticDir,
+      // 构建时已压缩好（scripts/compress-assets.mjs）：浏览器支持时直接发 .br / .gz，首次打开下载量约为原来的四分之一
+      preCompressed: true,
       setHeaders(reply, path) {
         reply.header('cache-control', path.includes('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache');
       },

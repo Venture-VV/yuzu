@@ -19,6 +19,7 @@ import { formatYuan } from '@shared/money';
 import { api, ApiError, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, formatTime } from '../../lib/utils';
+import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { AuthorizeDialog } from '../../components/AuthorizeDialog';
 import { DateNav } from '../../components/DateNav';
 import { EmptyState } from '../../components/EmptyState';
@@ -76,8 +77,7 @@ export function CheckoutDialog({
     pick: (found) => (found.type === 'checkout' ? found.checkout : null),
   });
 
-  useEffect(() => {
-    if (!open) return;
+  useResetOnOpen(open, () => {
     const mates = visit.group?.mates.filter((m) => m.status === 'open').map((m) => m.visitId) ?? [];
     setSelected(initialIds?.length ? initialIds : mates.length ? mates : [visit.id]);
     setShowAll(false);
@@ -85,8 +85,7 @@ export function CheckoutDialog({
     setNote('');
     setResult(null);
     op.clearError();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  });
 
   // 服务端拒绝（门票跳档、余额变化）后重新取一次核对数据；没有开班或班次刚交班时刷新当前班次，出现开班提示
   useEffect(() => {
@@ -540,12 +539,14 @@ export function CheckoutRecordsDialog({ open, onClose, focusId }: { open: boolea
   const [date, setDate] = useState(session.today);
   const list = useCheckouts(date, open);
   const [openId, setOpenId] = useState<number | null>(focusId ?? null);
-  useEffect(() => {
-    if (open) {
+  useResetOnOpen(
+    open,
+    () => {
       setOpenId(focusId ?? null);
       setDate(session.today);
-    }
-  }, [open, focusId, session.today]);
+    },
+    [focusId, session.today],
+  );
   const isToday = date === session.today;
   return (
     <Dialog open={open} onClose={onClose} width="max-w-2xl" title="结账记录" description={`营业日 ${date} 的结账单（含当天反结账的）`}>
@@ -760,14 +761,16 @@ export function TicketDialog({ open, visit, onClose, onDone }: { open: boolean; 
   const [authorizing, setAuthorizing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    if (open) {
+  useResetOnOpen(
+    open,
+    () => {
       setPick(visit.ticket?.typeId ?? null);
       setReason('');
       setGrant(null);
       setError(null);
-    }
-  }, [open, visit]);
+    },
+    [visit],
+  );
   const options = useMemo(() => types.data ?? [], [types.data]);
   const type = options.find((t) => t.id === pick) ?? null;
   const current = visit.ticket ? { price12h: visit.ticket.price12h, price24h: visit.ticket.price24h } : null;

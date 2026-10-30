@@ -8,6 +8,7 @@ import { DEDUCTION_RULE_LABELS, describeHours } from '@shared/labels';
 import { centsToInput, parseYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
 import { qk, useSettings } from '../../lib/queries';
+import { useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
@@ -36,6 +37,7 @@ interface Draft {
 }
 
 export function RulesTab() {
+  const session = useSession();
   const settings = useSettings();
   const qc = useQueryClient();
   const toast = useToast();
@@ -275,7 +277,16 @@ export function RulesTab() {
         </Button>
       </div>
 
-      <InventoryRules />
+      {/* 库存与采购的规则属于 ERP 的库存模块：模块关着时不显示（接口也会拒绝） */}
+      {session.erpModules.includes('inventory') ? (
+        <InventoryRules />
+      ) : (
+        <div data-testid="inventory-rules-off">
+          <Notice tone="info" title="ERP 的「库存」模块已关闭">
+            库存与采购的规则在库存模块开启后才能修改；店主在 ERP「模块设置」里开启。
+          </Notice>
+        </div>
+      )}
 
       <Notice tone="info" title="会员资料字段、渠道来源与会员等级在「会员与渠道」设置；各岗位的权限在「岗位权限」设置" />
     </div>

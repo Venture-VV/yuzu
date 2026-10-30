@@ -38,6 +38,7 @@ import { maskPhone } from '@shared/labels';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, formatTime } from '../../lib/utils';
+import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
@@ -576,12 +577,10 @@ function QuickReasonDialog({
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    if (open) {
-      setReason('');
-      setError(null);
-    }
-  }, [open]);
+  useResetOnOpen(open, () => {
+    setReason('');
+    setError(null);
+  });
   const ok = reason.trim().length >= 2 && !disabled;
   return (
     <Dialog

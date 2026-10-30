@@ -1,4 +1,5 @@
 // 库存与采购浏览器验收：依赖两套合成数据（npm run seed 与 npm run cli seed-inventory-demo，仅独立演示库）。
+// v0.7.3 起库存、采购、货款、待办在 ERP 工作区（地址不变，导航在 ERP 里；门店主导航没有这几项）。
 // 账号：店主 linlan / 物资经办 lixiao / 采购对账 zhouyi，密码 yuzu2026。
 // 业务流程只在门店电脑尺寸跑一遍（会改变演示数据，断言都用相对变化）；平板尺寸检查主要页面布局。
 import { expect, test, type Page } from '@playwright/test';
@@ -13,7 +14,14 @@ async function login(page: Page, username: string, landing: RegExp | string) {
   await expect(page.getByRole('heading', { name: landing })).toBeVisible({ timeout: 30_000 }); // 刚启动的服务第一次登录可能较慢
 }
 
-const nav = (page: Page, name: string) => page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name, exact: true });
+const nav = (page: Page, name: string) => page.getByRole('navigation', { name: 'ERP 导航' }).getByRole('link', { name, exact: true });
+
+/** 门店那边的人（店主）从用户菜单进 ERP */
+async function enterErp(page: Page) {
+  await page.getByTestId('user-menu').click();
+  await page.getByTestId('user-menu-erp').click();
+  await expect(page.getByTestId('erp-shell')).toBeVisible();
+}
 
 async function stockOf(page: Page, code: string): Promise<number> {
   const res = await page.request.get('/api/inventory/materials');
@@ -46,12 +54,14 @@ async function logout(page: Page) {
 test.describe('库存与采购流程', () => {
   test.skip(({ viewport }) => (viewport?.width ?? 0) < 1280, '流程只在门店电脑尺寸执行一次');
 
-  test('物资经办：登录直接进入库存，没有会员与日结入口；按箱领用、领用退回', async ({ page }) => {
+  test('物资经办：登录直接进入 ERP 的库存，没有门店入口与货款；按箱领用、领用退回', async ({ page }) => {
     await login(page, 'lixiao', '库存');
+    await expect(page.getByTestId('erp-shell')).toBeVisible();
     await expect(nav(page, '库存')).toBeVisible();
-    await expect(nav(page, '会员')).toHaveCount(0);
-    await expect(nav(page, '日结')).toHaveCount(0);
-    await expect(nav(page, '货款')).toHaveCount(0);
+    // 门店主导航（会员、日结……）不出现，也没有「返回门店」；没有货款权限就没有「应付货款」
+    await expect(page.getByRole('navigation', { name: '主导航' })).toHaveCount(0);
+    await expect(page.getByTestId('erp-exit')).toHaveCount(0);
+    await expect(nav(page, '应付货款')).toHaveCount(0);
 
     // 反复执行会消耗演示库存：不够一箱时先按正式流程补一张直接收货
     if ((await stockOf(page, 'M018')) < 24) await topUp(page, 'M018', 'S005', 48);
@@ -98,7 +108,10 @@ test.describe('库存与采购流程', () => {
     await logout(page);
 
     await login(page, 'linlan', '会员工作台');
-    await nav(page, '待办').click();
+    // 门店主导航里没有库存、待办；从用户菜单进 ERP，再点「审批待办」
+    await expect(page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '待办', exact: true })).toHaveCount(0);
+    await enterErp(page);
+    await nav(page, '审批待办').click();
     await page.getByRole('button', { name: /盘点/ }).filter({ hasText: '抽纸' }).first().click();
     await page.getByLabel('抽纸差异原因').selectOption('measurement');
     await page.getByRole('button', { name: '确认盘点调整' }).click();

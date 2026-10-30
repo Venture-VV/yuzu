@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { useResetOnOpen } from '../lib/useResetOnOpen';
 import { Dialog } from './Overlay';
 import { Button, Field, Textarea } from './ui';
 
@@ -27,9 +28,7 @@ export function ReasonDialog({
   onConfirm: (reason: string) => void;
 }) {
   const [reason, setReason] = useState('');
-  useEffect(() => {
-    if (open) setReason('');
-  }, [open]);
+  useResetOnOpen(open, () => setReason(''));
   const ok = reason.trim().length >= 2;
   return (
     <Dialog

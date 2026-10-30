@@ -12,6 +12,7 @@ import { api } from '../../lib/api';
 import { useCatalog } from '../../lib/queries';
 import { useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
+import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Button, Field, Input, Notice, Segmented, Skeleton } from '../../components/ui';
@@ -34,23 +35,18 @@ export function DispatchDialog({ open, board, onClose, onDone }: { open: boolean
   const [startNow, setStartNow] = useState(true);
   const [gender, setGender] = useState<'all' | 'male' | 'female'>('all');
 
-  // 每次打开清空上一次的填写。在打开的这一次渲染里就清空，不放进 useEffect：effect 在窗口显示之后才执行，
-  // 手快时会把刚输入的手牌号又清掉（Codex 复测 PR #18 P2）
-  const [shown, setShown] = useState(open);
-  if (shown !== open) {
-    setShown(open);
-    if (open) {
-      setTagText('');
-      setItemId(null);
-      setTier(null);
-      setQuantity(1);
-      setCallType(board.techRules.defaultCallType);
-      setTechnicianId(null);
-      setSkipReason('');
-      setStartNow(true);
-      setGender('all');
-    }
-  }
+  // 每次打开清空上一次的填写（在打开的这一次渲染里就清空，手快时不会把刚输入的手牌号又清掉）
+  useResetOnOpen(open, () => {
+    setTagText('');
+    setItemId(null);
+    setTier(null);
+    setQuantity(1);
+    setCallType(board.techRules.defaultCallType);
+    setTechnicianId(null);
+    setSkipReason('');
+    setStartNow(true);
+    setGender('all');
+  });
 
   const inStore = (tags.data?.tags ?? []).filter((t) => t.visit);
   const tag = inStore.find((t) => t.code.toLowerCase() === tagText.trim().toLowerCase()) ?? null;
@@ -70,12 +66,7 @@ export function DispatchDialog({ open, board, onClose, onDone }: { open: boolean
   const designatedList = filtered(board.technicians.filter((t) => t.state !== 'off' && t.active)).sort((a, b) => Number(a.techNo) - Number(b.techNo) || a.techNo.localeCompare(b.techNo));
   const firstEligible = eligible[0] ?? null;
   // 切换项目、方式或筛选后，轮钟默认选队列里的第一位（同样在这一次渲染里定，不会盖掉随后点选的技师）
-  const pickFor = `${open}|${itemId}|${callType}|${gender}`;
-  const [pickedFor, setPickedFor] = useState(pickFor);
-  if (pickedFor !== pickFor) {
-    setPickedFor(pickFor);
-    setTechnicianId(callType === 'rotation' ? (rotationList[0]?.id ?? null) : null);
-  }
+  useResetOnOpen(open, () => setTechnicianId(callType === 'rotation' ? (rotationList[0]?.id ?? null) : null), [itemId, callType, gender]);
   const tech = board.technicians.find((t) => t.id === technicianId) ?? null;
   const skipping = callType === 'rotation' && !!tech && !!firstEligible && tech.id !== firstEligible.id;
   const why = tech && shape ? canServe(tech, shape, board.techRules.tierByGrade) : null;
