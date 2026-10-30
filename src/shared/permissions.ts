@@ -90,6 +90,8 @@ export const PERMISSIONS = {
   'catalog.manage': { roles: ['owner', 'store_manager'] },
   /** 技师名册：新建、编辑、停用技师（v0.7.0，待确认：默认店主与店总） */
   'technician.manage': { roles: ['owner', 'store_manager'] },
+  /** 钟房：上牌、派钟、上钟、下钟、加钟、退钟（v0.7.1，待确认：前台岗位都能做；派钟、加钟、退钟还要能挂账） */
+  'technician.dispatch': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   'settings.manage': { roles: ['owner'] },
   'audit.read': { roles: ['owner', 'store_manager'] },
   // ── 数据看板（v0.6.0；当日看板仍按「查看当日流水与日结」）──
@@ -99,6 +101,8 @@ export const PERMISSIONS = {
   'report.members': { roles: ['owner', 'store_manager', 'account_manager'] },
   /** 技师业绩：任选时段每位技师的钟数、点钟 / 轮钟与金额（v0.7.0，待确认：默认值班经理及以上） */
   'report.technicians': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  /** 技师提成：按提成规则算出的每位技师提成与明细导出（v0.7.1，待确认：默认店主与店总） */
+  'report.commission': { roles: ['owner', 'store_manager'] },
 } as const satisfies Record<string, Rule>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -191,11 +195,13 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'staff.manage': '管理员工账号',
   'catalog.manage': '管理充值套餐与消费项目',
   'technician.manage': '维护技师名册',
+  'technician.dispatch': '钟房派钟、上下钟、加钟、退钟、上牌',
   'settings.manage': '修改经营规则设置',
   'audit.read': '查看操作审计',
   'report.executive': '看经营总览（任选时段、环比）',
   'report.members': '看会员总览（储值、新增、活跃、等级）',
   'report.technicians': '看技师业绩（钟数、点钟 / 轮钟、金额）',
+  'report.commission': '看技师提成与导出提成明细',
 };
 
 export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
@@ -205,13 +211,13 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   },
   {
     title: '前台手牌与账单',
-    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.backfill'],
+    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.backfill', 'technician.dispatch'],
   },
   {
     title: '库存与采购',
     items: ['inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'supplierReturn.create', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.export'],
   },
   { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount'] },
-  { title: '数据看板', items: ['report.executive', 'report.members', 'report.technicians'] },
+  { title: '数据看板', items: ['report.executive', 'report.members', 'report.technicians', 'report.commission'] },
   { title: '管理后台', items: ['staff.manage', 'catalog.manage', 'technician.manage', 'settings.manage', 'audit.read'] },
 ];

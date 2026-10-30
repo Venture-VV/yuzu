@@ -237,6 +237,28 @@ describe('补录纸质单：接待、挂账、结账按实际时间', () => {
     expect((await periodsCheck()).ok).toBe(true);
   });
 
+  it('反结账后重结（只是更正收款）：会员的占用按第一次离店算，之后的来访可以补录，之前的仍拒绝（Codex v0.7.0 复测 P2）', async () => {
+    const m = await createMember(ctx, '重结会员', '19900009006');
+    const id = await pastVisit('B060', ago(10), ago(8), m.id);
+    const first = (await api(ctx.app, ctx.owner, 'GET', `/api/frontdesk/visits/${id}`)).body.checkout as { id: number };
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/checkouts/${first.id}/void`, { reason: '收款方式记错' })).status).toBe(200);
+    const total = (await preview(duty, [id])).body.totalAmount as number;
+    expect((await pay(duty, [id], total, [{ method: 'cash', amount: total }])).status).toBe(200);
+    const [v] = await ctx.sql<{ ticketEndAt: Date; closedAt: Date }[]>`SELECT ticket_end_at, closed_at FROM visits WHERE id = ${id}`;
+    expect(Date.now() - ms(v!.closedAt)).toBeLessThan(H);
+    expect(Math.abs(ms(v!.ticketEndAt) - ms(ago(8)))).toBeLessThan(60_000);
+
+    // 第一次离店之前：仍与那次来访重叠，提示的时段截到第一次离店
+    const busy = await enter(duty, 'B061', { backfill: slip(ago(8.2), 'P-0060') }, { memberId: m.id });
+    expect(busy.status).toBe(409);
+    expect(busy.body.error.code).toBe('BACKFILL_MEMBER_BUSY');
+    expect(busy.body.error.message).not.toContain('仍在店');
+    // 第一次离店之后：重结只是更正收款，不算还在店
+    const later = await enter(duty, 'B062', { backfill: slip(ago(7.8), 'P-0061') }, { memberId: m.id });
+    expect(later.status, JSON.stringify(later.body)).toBe(201);
+    expect((await periodsCheck()).ok).toBe(true);
+  });
+
   it('补录进已确认的营业日：只补录接待与挂账也提示「有变动」，重新确认后修订号 +1（Codex 复测 P2）', async () => {
     const at = ago(30);
     const date = dateOf(at);

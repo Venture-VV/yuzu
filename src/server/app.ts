@@ -30,6 +30,8 @@ import { registerSettingsRoutes } from './modules/settings';
 import { registerSettlementRoutes } from './modules/settlement';
 import { registerStaffRoutes } from './modules/staff';
 import { registerTechnicianRoutes } from './modules/technicians';
+import { registerClockroomRoutes } from './modules/clockroom';
+import { registerCommissionRoutes } from './modules/commission';
 import { registerWalletRoutes } from './modules/wallet';
 
 function originHost(origin: string): string | null {
@@ -139,6 +141,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerPayableRoutes(app, deps);
   registerFrontdeskRoutes(app, deps);
   registerTechnicianRoutes(app, deps);
+  registerClockroomRoutes(app, deps);
+  registerCommissionRoutes(app, deps);
 
   // 前端静态资源（构建产物），全部从本机提供，外网中断不影响使用。
   const staticDir = resolve(process.env.STATIC_DIR ?? 'dist/client');

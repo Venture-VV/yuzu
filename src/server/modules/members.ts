@@ -54,7 +54,8 @@ export async function searchMembers(db: Db, q: string, limit: number): Promise<M
       ORDER BY last_activity_at DESC NULLS LAST, m.id DESC LIMIT ${limit}`;
   }
   const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-  const digits = q.replace(/\D/g, '');
+  // 只有搜索词全是数字（可带空格、横线、+、括号）时才按手机号找；「张三-999」这类文字里的数字不当作手机号片段
+  const digits = /^[\d\s()+-]+$/.test(q) ? q.replace(/\D/g, '') : '';
   return db<MemberSummary[]>`
     SELECT ${MEMBER_COLUMNS(db)} FROM members m
     WHERE m.name ILIKE ${like}

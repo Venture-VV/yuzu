@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Boxes, CalendarCheck2, ClipboardCheck, ConciergeBell, HandCoins, Inbox, KeyRound, LayoutDashboard, LogOut, ReceiptText, Settings2, ShoppingCart, UsersRound } from 'lucide-react';
+import { Boxes, CalendarCheck2, ClipboardCheck, ConciergeBell, HandCoins, Hourglass, Inbox, KeyRound, LayoutDashboard, LogOut, ReceiptText, Settings2, ShoppingCart, UsersRound } from 'lucide-react';
 import { describeBusinessHours, isOpenAt, minuteOfDay } from '@shared/business-date';
 import { describeDate, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
 import { ADMIN_PERMISSIONS } from '@shared/admin';
@@ -22,12 +22,15 @@ interface NavItem {
   /** 拥有其中任一权限即显示 */
   perm: Permission | Permission[];
   end?: boolean;
+  /** 额外条件，例如「钟房」只在技师功能开启后显示 */
+  when?: (session: ReturnType<typeof useSession>) => boolean;
 }
 
 // 前台与会员储值、库存采购是独立的业务组，导航中用分隔线区分
 const NAV: NavItem[][] = [
   [
     { to: '/frontdesk', label: '前台', icon: ConciergeBell, perm: 'frontdesk.read' },
+    { to: '/clockroom', label: '钟房', icon: Hourglass, perm: 'technician.dispatch', when: (s) => s.technicians },
     { to: '/', label: '会员', icon: UsersRound, end: true, perm: 'member.read' },
     { to: '/ledger', label: '流水', icon: ReceiptText, perm: 'ledger.readToday' },
     { to: '/settlement', label: '日结', icon: CalendarCheck2, perm: 'ledger.readToday' },
@@ -64,7 +67,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <LogoMark className="size-10 short:size-8" />
         </NavLink>
         <div className="scroll-thin flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto short:gap-0.5">
-          {NAV.map((group) => group.filter((n) => (Array.isArray(n.perm) ? n.perm : [n.perm]).some((p) => can(p))))
+          {NAV.map((group) => group.filter((n) => (Array.isArray(n.perm) ? n.perm : [n.perm]).some((p) => can(p)) && (!n.when || n.when(session))))
             .filter((group) => group.length > 0)
             .map((group, gi) => (
               <div key={group[0]!.to} className="flex flex-col items-center gap-1 short:gap-0.5">
@@ -78,7 +81,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     title={badges[to] ? `${badges[to]} 项待确认` : undefined}
                     className={({ isActive }) =>
                       cn(
-                        'group relative flex w-[64px] flex-col items-center gap-0.5 rounded-[14px] py-2 text-[12px] font-semibold transition-colors short:rounded-[12px] short:py-1 short:text-[11px]',
+                        'group relative flex w-[64px] flex-col items-center gap-0.5 rounded-[14px] py-2 text-[12px] font-semibold transition-colors short:gap-0 short:rounded-[12px] short:py-[3px] short:text-[11px] short:leading-[15px]',
                         isActive ? 'bg-white/12 text-paper' : 'text-paper/60 hover:bg-white/6 hover:text-paper',
                       )
                     }

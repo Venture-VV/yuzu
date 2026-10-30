@@ -43,7 +43,7 @@ import { cents, parse, positiveCents } from '../../lib/validate';
 import { consumeDiscountGrant } from '../../auth/grants';
 import { expireMemberBonus } from '../bonus';
 import { loadSettings } from '../settings';
-import { lockPaymentShift, openShiftOf } from '../shifts';
+import { lockPaymentShift, lockRefundShift, openShiftOf } from '../shifts';
 import { consumeForCheckout, reverseForCheckout } from '../wallet';
 import {
   assertOpen,
@@ -59,6 +59,7 @@ import {
   setTxTimeouts,
 } from './common';
 import { assertAfterVisits, assertNotReused, backfillDetail, BackfillInput, backfillMarkSql, normalizeMark, recordBackfill, resolveBackfill } from './backfill';
+import { openSessionsOf, settleSessionsAtCheckout } from '../clockroom';
 import { applyVisitTicket, resolveTicketType } from './tickets';
 
 // ───────────────────────── 输入 ─────────────────────────
@@ -110,6 +111,8 @@ export type CheckoutInputData = z.input<typeof CheckoutInput>;
 
 export const VoidCheckoutInput = z.object({
   reason: z.string().trim().min(2, '请填写反结账原因（至少 2 个字）').max(200, '原因最多 200 字'),
+  /** 跨钱箱退款（v0.7.1）：退款记到这个班次（所选钱箱当班的班次）；不带时记到反结账人自己的班次（原来的做法） */
+  refundShiftId: z.number('钱箱班次不正确').int('钱箱班次不正确').positive('钱箱班次不正确').nullish().transform((v) => v ?? undefined),
 });
 
 // ───────────────────────── 结账前核对 ─────────────────────────
@@ -208,6 +211,7 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
       members,
       graceMinutes: rules.overtimeGraceMinutes,
       pricedAt: at.toISOString(),
+      sessions: await openSessionsOf(tx, ids),
     };
   });
 }
@@ -271,6 +275,8 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
     // 补录：实际离店时间不能早于这几位客人的接待和已挂的明细；补录接待的客人，在店时段里手牌、会员不能已有别的来访
     if (backfill) await assertAfterVisits(tx, at, ids, 'checkout', deps.config.timezone);
     await assertNotReused(tx, at, ids, deps.config.timezone);
+    // 钟房（v0.7.1，账单之后、会员之前加锁）：还没结束的钟单一起收尾，在钟上的按结账时刻下钟
+    await settleSessionsAtCheckout(tx, deps, ids, ctx.actor, at);
 
     // 补选票种（来访已锁）；免票要当场授权，请先在手牌详情里改票种并授权
     for (const t of input.tickets) {
@@ -430,15 +436,16 @@ const couponUsed = (platform: CouponPlatform, code: string, checkoutNo: string |
  * 储值消费按原单撤销（本金、赠金按原构成恢复），团购券登记作废（券码可重新登记），门票明细作废并留痕。
  */
 export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown, ctx: OpContext): Promise<CheckoutDetail> {
-  const { reason } = parse(VoidCheckoutInput, raw);
-  // 反结账开始处理时反结账人所在的班次：反结账提醒记到这个班次，入账前它已交班则拒绝（见 shifts.ts lockPaymentShift）
-  const seenShift = await openShiftOf(deps.sql, ctx.actor.id);
+  const { reason, refundShiftId } = parse(VoidCheckoutInput, raw);
+  // 反结账开始处理时反结账人所在的班次：退款记到这个班次，入账前它已交班则拒绝（见 shifts.ts lockPaymentShift）。
+  // 选了钱箱（跨钱箱退款）时记到所选的班次，不要求反结账人自己开班
+  const seenShift = refundShiftId === undefined ? await openShiftOf(deps.sql, ctx.actor.id) : null;
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     // 只有这个事务允许「已结 → 未结」（见迁移 014 的账单、来访保护）
     await tx.unsafe("SET LOCAL yuzu.reopen = 'on'");
     // 先对班次加共享锁，再锁结账单与手牌、来访、账单
-    const voidShiftId = await lockPaymentShift(tx, ctx.actor.id, seenShift);
+    const voidShiftId = refundShiftId === undefined ? await lockPaymentShift(tx, ctx.actor.id, seenShift) : await lockRefundShift(tx, refundShiftId);
     const at = ctx.at ?? new Date();
     const [c] = await tx<{ id: number; checkoutNo: string; clientKey: string; status: string; createdAt: string }[]>`
       SELECT id, checkout_no, client_key, status, created_at FROM checkouts WHERE id = ${checkoutId} FOR UPDATE`;
@@ -506,17 +513,27 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
     await tx`
       UPDATE group_buy_coupons SET status = 'voided', voided_at = ${at}, voided_by = ${ctx.actor.id}, void_reason = ${voidText}
       WHERE checkout_id = ${c.id} AND status = 'active'`;
-    // 反结账提醒记到反结账人的班次（事务开头已加锁核对）
+    // 退款记到反结账人的班次，或所选钱箱当班的班次（事务开头已加锁核对）
     await tx`
       UPDATE checkouts SET status = 'voided', voided_at = ${at}, voided_by = ${ctx.actor.id}, void_reason = ${reason}, void_business_date = ${date},
                            void_shift_id = ${voidShiftId}
       WHERE id = ${c.id}`;
+    // 从别人的钱箱退：审计写明记到了谁的哪个班次
+    const [drawer] = voidShiftId
+      ? await tx<{ shiftNo: string; staffId: number; staffName: string }[]>`
+          SELECT s.shift_no, s.staff_id, st.display_name AS staff_name FROM shifts s JOIN staff st ON st.id = s.staff_id WHERE s.id = ${voidShiftId}`
+      : [];
     await writeAudit(tx, {
       staffId: ctx.actor.id,
       action: 'frontdesk_checkout_void',
       targetType: 'checkout',
       targetId: c.id,
-      detail: { docNo: c.checkoutNo, tags: tags.map((t) => t.code), reason },
+      detail: {
+        docNo: c.checkoutNo,
+        tags: tags.map((t) => t.code),
+        reason,
+        ...(drawer && drawer.staffId !== ctx.actor.id ? { refundShift: drawer.shiftNo, refundDrawer: drawer.staffName } : {}),
+      },
       ip: ctx.ip,
       businessDate: date,
     });

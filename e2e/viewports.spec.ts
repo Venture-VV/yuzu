@@ -101,6 +101,39 @@ test.describe('视口冒烟', () => {
     await expectFits(page);
   });
 
+  test('钟房：看板、派钟对话框，开启技师后主导航 12 个入口都看得到（v0.7.1）', async ({ page, isMobile }) => {
+    await login(page, 'linlan');
+    // 只临时打开「技师功能」开关看页面（不派钟、不写业务数据），结束时恢复原样
+    const before = (await (await page.request.get('/api/admin/technicians')).json()) as { rules: { enabled: boolean } };
+    if (!before.rules.enabled) expect((await page.request.put('/api/admin/technicians/rules', { data: { enabled: true } })).ok()).toBe(true);
+    try {
+      await page.goto('/clockroom');
+      await expect(page.getByTestId('clock-queue')).toBeVisible();
+      await expectFits(page);
+      if (!isMobile) {
+        const nav = page.getByRole('navigation', { name: '主导航' });
+        const viewport = page.viewportSize()!;
+        const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
+        for (const name of ['前台', '钟房', '会员', '流水', '日结', '交班', '看板', '库存', '采购', '货款', '待办', '后台']) {
+          const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
+          expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
+          expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
+        }
+      }
+      await page.getByTestId('clock-dispatch').click();
+      await expect(page.getByRole('dialog', { name: '派钟' })).toBeVisible();
+      await expectFits(page);
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog', { name: '派钟' })).toBeHidden();
+      await page.goto('/admin/technicians');
+      await expect(page.getByTestId('clockroom-rules-card')).toBeVisible();
+      await expect(page.getByTestId('commission-card')).toBeVisible();
+      await expectFits(page);
+    } finally {
+      if (!before.rules.enabled) expect((await page.request.put('/api/admin/technicians/rules', { data: { enabled: false } })).ok()).toBe(true);
+    }
+  });
+
   test('流水：手机上不横向滚动（测试服 E2E 报告）', async ({ page }) => {
     await login(page, 'linlan');
     await page.goto('/ledger');

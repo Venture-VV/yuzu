@@ -65,6 +65,8 @@ export interface SessionInfo {
   instance: InstanceKind;
   /** 库里存在合成演示数据 */
   hasSyntheticData: boolean;
+  /** 技师功能已开启（v0.7.1：主导航的「钟房」只在开启后显示） */
+  technicians: boolean;
 }
 
 export interface MemberSummary {

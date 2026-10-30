@@ -100,7 +100,15 @@ describe('技师名册', () => {
 
     const rules = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/rules')).body as { key: string; group: string; isDefault: boolean; section: string }[];
     const techRules = rules.filter((x) => x.group === 'technicians');
-    expect(techRules.map((x) => x.key)).toEqual(['technician_rules.enabled', 'technician_rules.requireTechnician', 'technician_rules.tierByGrade', 'technician_rules.defaultCallType']);
+    expect(techRules.filter((x) => x.key.startsWith('technician_rules.')).map((x) => x.key)).toEqual([
+      'technician_rules.enabled',
+      'technician_rules.requireTechnician',
+      'technician_rules.tierByGrade',
+      'technician_rules.defaultCallType',
+    ]);
+    // v0.7.1 起同一组还有钟房与轮钟规则、技师提成
+    expect(techRules.some((x) => x.key === 'clockroom_rules.afterRotation')).toBe(true);
+    expect(techRules.some((x) => x.key === 'commission_rules')).toBe(true);
     expect(techRules.find((x) => x.key === 'technician_rules.enabled')).toMatchObject({ isDefault: false, section: 'technicians' });
     const home = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/overview')).body;
     expect(home.counts.technicians).toEqual({ active: 2, enabled: true });

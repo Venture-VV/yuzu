@@ -120,15 +120,21 @@ function TodayTab() {
                   <Kpi icon={<UsersRound className="size-4" />} label="已结账客人">
                     {d.todayStats.guests} 位 · {d.todayStats.checkouts} 张
                   </Kpi>
-                  <Kpi icon={<BedDouble className="size-4" />} label="在店（未结）">
-                    {d.inStore.count} 位 · <Money cents={d.inStore.unsettled + d.inStore.ticketEstimate} />
-                    {d.inStore.count > 0 && (
-                      <span className="block text-[12px] font-semibold text-ink-3" data-testid="dashboard-instore-estimate">
-                        已挂 <Money cents={d.inStore.unsettled} /> + 门票估算 <Money cents={d.inStore.ticketEstimate} />
-                        {d.inStore.noTicket > 0 && `（${d.inStore.noTicket} 位未选票种，未计入）`}
-                      </span>
-                    )}
-                  </Kpi>
+                  {d.inStore ? (
+                    <Kpi icon={<BedDouble className="size-4" />} label="在店（未结）">
+                      {d.inStore.count} 位 · <Money cents={d.inStore.unsettled + d.inStore.ticketEstimate} />
+                      {d.inStore.count > 0 && (
+                        <span className="block text-[12px] font-semibold text-ink-3" data-testid="dashboard-instore-estimate">
+                          已挂 <Money cents={d.inStore.unsettled} /> + 门票估算 <Money cents={d.inStore.ticketEstimate} />
+                          {d.inStore.noTicket > 0 && `（${d.inStore.noTicket} 位未选票种，未计入）`}
+                        </span>
+                      )}
+                    </Kpi>
+                  ) : (
+                    <Kpi icon={<BedDouble className="size-4" />} label="在店（未结）">
+                      <span className="text-[14px] font-semibold text-ink-3">前台岗位可见</span>
+                    </Kpi>
+                  )}
                   <Kpi icon={<Banknote className="size-4" />} label="会员充值实收" tone="lake">
                     <Money cents={d.todayStats.rechargePaid} /> <span className="text-[13px] font-semibold text-ink-3">· {d.todayStats.rechargeCount} 笔</span>
                   </Kpi>
@@ -222,7 +228,7 @@ function DutyCards({ duty, startHour }: { duty: DutyExtras; startHour: number })
           <HBars testId="dashboard-departments" format={yuan} empty="今天还没有结账" rows={duty.departments.map((x) => ({ key: x.category, label: x.category, value: x.amount, note: `${x.quantity} 项` }))} />
         </Card>
       </div>
-      {duty.longStays.length > 0 && (
+      {duty.longStays && duty.longStays.length > 0 && (
         <Card className="p-5" data-testid="dashboard-long-stays">
           <SectionTitle>
             <span className="flex items-center gap-2">

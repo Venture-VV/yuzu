@@ -7,6 +7,8 @@
 //     （R1.2，店主 2026-10-29 签认）；应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金。
 //     这个口径只用于升级（迁移 017）之后开的班次：升级时已有的班次里做的反结账仍只列提醒、不扣现金，
 //     原单也不计入收款时的班次；反结账时没有开班的（规则关闭时）同样不计入原单的班次——退款没有记到任何班次；
+//   · 跨钱箱退款（店主 2026-10-30 定，方案 A）：反结账退现金时可以选从哪个钱箱退——此刻当班的任一班次（默认原单收款的班次，
+//     已交班时是反结账人自己的班次）；退款（含其他方式的退款提醒）记到所选班次，扣减它的应有现金，各人交班不再出现负数；
 //   · 收款前必须先开班（经营规则开关，默认开）：没有开班时充值、结账、反结账整笔拒绝（SHIFT_REQUIRED）；
 //   · 交班：员工实点现金，系统记下应有现金、差额与汇总快照；员工确认时看到的应有现金与此刻不一致（期间又有收款）时拒绝；
 //   · 本人交本人的班；值班经理及以上可以替别人交班（例如员工忘了交班就下班）。
@@ -22,7 +24,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf, ISO_DATE } from '@shared/business-date';
-import type { ShiftRecord, ShiftSummary } from '@shared/checkout';
+import type { RefundShiftOptions, ShiftRecord, ShiftSummary } from '@shared/checkout';
 import { can } from '@shared/permissions';
 import type { Db, Tx } from '../db';
 import { guard } from '../auth/guard';
@@ -62,6 +64,47 @@ export async function lockPaymentShift(tx: Tx, staffId: number, seen: number | n
     throw conflict('SHIFT_REQUIRED', '还没有开班：充值、结账、反结账前请先开班（登记备用金），开班后再办理这一笔');
   }
   return id;
+}
+
+/**
+ * 跨钱箱退款：反结账的退款记到所选的班次（所选钱箱当班的班次）。与 lockPaymentShift 同一协议——在锁业务行之前
+ * 对所选班次加共享锁，交班要等这笔反结账提交后才能汇总（计入它）；所选班次此刻已交班则整笔拒绝，请重新选择。
+ * 升级（迁移 017）之前开的班次按原口径不扣现金，不能选。
+ */
+export async function lockRefundShift(tx: Tx, shiftId: number): Promise<number> {
+  const [row] = await tx<{ id: number; status: string; shiftNo: string; staffName: string; legacyRefund: boolean }[]>`
+    SELECT s.id, s.status, s.shift_no, st.display_name AS staff_name, s.legacy_refund
+    FROM shifts s JOIN staff st ON st.id = s.staff_id WHERE s.id = ${shiftId} FOR SHARE OF s`;
+  if (!row) throw notFound('所选钱箱的班次不存在，请刷新后重新选择');
+  if (row.status !== 'open') {
+    throw conflict('REFUND_SHIFT_CLOSED', `${row.staffName}的班次 ${row.shiftNo} 已经交班，不能再从这个钱箱退款；这笔反结账没有办理，请重新选择钱箱`, {
+      shiftNo: row.shiftNo,
+    });
+  }
+  if (row.legacyRefund) throw conflict('REFUND_SHIFT_LEGACY', `班次 ${row.shiftNo} 是升级前开的，退款不按钱箱记；请选别的钱箱或先交班后重新开班`);
+  return row.id;
+}
+
+/**
+ * 反结账退现金可以选的钱箱：此刻当班（未交班、不是升级前开的）的班次。建议的默认：原单收款的班次仍在班上时选它
+ * （钱是收进那个钱箱的）；否则是反结账人自己的班次；只有一个当班的班次时选它；都没有时不预选。
+ */
+export async function refundShiftOptions(db: Db, checkoutId: number, actorId: number): Promise<RefundShiftOptions> {
+  const [c] = await db<{ shiftId: number | null }[]>`SELECT shift_id FROM checkouts WHERE id = ${checkoutId}`;
+  if (!c) throw notFound('结账单不存在');
+  const rows = await db<{ id: number; shiftNo: string; staffId: number; staffName: string; startedAt: string }[]>`
+    SELECT s.id, s.shift_no, s.staff_id, st.display_name AS staff_name, s.started_at
+    FROM shifts s JOIN staff st ON st.id = s.staff_id WHERE s.status = 'open' AND NOT s.legacy_refund ORDER BY s.started_at, s.id`;
+  const shifts = rows.map((r) => ({
+    id: r.id,
+    shiftNo: r.shiftNo,
+    staffName: r.staffName,
+    startedAt: new Date(r.startedAt).toISOString(),
+    mine: r.staffId === actorId,
+    original: r.id === c.shiftId,
+  }));
+  const suggested = (shifts.find((x) => x.original) ?? shifts.find((x) => x.mine) ?? (shifts.length === 1 ? shifts[0] : undefined))?.id ?? null;
+  return { shifts, suggested };
 }
 
 interface ShiftScope {
@@ -117,9 +160,11 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
       SELECT g.platform, count(*) AS count, sum(g.amount) AS amount FROM group_buy_coupons g JOIN co ON co.id = g.checkout_id
       GROUP BY g.platform
     ), vd AS (
+      -- 跨钱箱退款时反结账的是别人（例如值班经理从收银员的钱箱退）：写明是谁做的反结账
       SELECT c.id, c.checkout_no, c.total_amount, c.void_reason, c.voided_at,
+             CASE WHEN c.voided_by <> ${s.staffId} THEN vb.display_name END AS voided_by_name,
              (SELECT coalesce(sum(p.amount), 0) FROM checkout_payments p WHERE p.checkout_id = c.id AND p.method = 'cash') AS cash_refund
-      FROM checkouts c
+      FROM checkouts c LEFT JOIN staff vb ON vb.id = c.voided_by
       WHERE ${ofShift('c.void_shift_id', 'c.voided_by', 'c.voided_at')}
     ), rf AS (
       SELECT p.method, sum(p.amount) AS amount FROM checkout_payments p JOIN vd ON vd.id = p.checkout_id GROUP BY p.method
@@ -139,7 +184,7 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
       (SELECT coalesce(json_agg(json_build_object('platform', platform, 'count', count, 'amount', amount) ORDER BY platform), '[]'::json) FROM cp)
         AS coupons,
       (SELECT coalesce(json_agg(json_build_object('checkoutNo', checkout_no, 'amount', total_amount, 'reason', void_reason, 'voidedAt', voided_at,
-                                                  'cashRefund', cash_refund)
+                                                  'cashRefund', cash_refund, 'voidedByName', voided_by_name)
                                 ORDER BY voided_at), '[]'::json) FROM vd) AS voids,
       (SELECT json_build_object('count', count(*), 'total', coalesce(sum(total_amount), 0)) FROM vd) AS refunds,
       (SELECT coalesce(json_agg(json_build_object('method', method, 'amount', amount) ORDER BY method), '[]'::json) FROM rf) AS refund_by_method`;
@@ -157,10 +202,11 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
     walletConsumes,
     coupons,
     // JSON 里的时间是 PostgreSQL 的格式，与单独查询时一样换成 ISO 字符串
-    voids: row!.voids.map(({ cashRefund: refund, ...v }) => ({
+    voids: row!.voids.map(({ cashRefund: refund, voidedByName, ...v }) => ({
       ...v,
       voidedAt: new Date(v.voidedAt).toISOString(),
       ...(s.legacyRefund ? {} : { cashRefund: refund }),
+      ...(voidedByName ? { voidedByName } : {}),
     })),
     ...(s.legacyRefund ? {} : { refunds: { ...refunds, byMethod: refundByMethod } }),
     cash: {
@@ -285,7 +331,9 @@ export function registerShiftRoutes(app: FastifyInstance, deps: Deps) {
 
   app.get('/api/shifts', { preHandler: guard('ledger.readToday') }, async (req) => {
     const { date } = parse(z.object({ date: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD').optional() }), req.query ?? {});
-    return listShifts(sql, await resolveReadableDate(deps, req, date));
+    const list = await listShifts(sql, await resolveReadableDate(deps, req, date));
+    // 别人的班次（备用金、实点现金、长短款）与单个班次同一规则：只给能看历史营业日的岗位（默认值班经理及以上）
+    return can(req.actor, 'ledger.readHistory') ? list : list.filter((s) => s.staffId === req.actor.id);
   });
 
   app.get('/api/shifts/:id', { preHandler: guard('ledger.readToday') }, async (req) => {

@@ -96,6 +96,10 @@ export interface TechnicianAdmin {
   rules: TechnicianRules;
   rulesUpdatedAt: string | null;
   rulesUpdatedBy: string | null;
+  /** 钟房与轮钟规则（v0.7.1） */
+  clockroomRules: import('./clockroom').ClockroomRules;
+  clockroomUpdatedAt: string | null;
+  clockroomUpdatedBy: string | null;
   technicians: (Technician & { createdAt: string; updatedAt: string; lineCount: number })[];
   /** 项目分类（技师可做的分类从这里选） */
   categories: string[];
@@ -116,8 +120,10 @@ export interface TechnicianReport {
     designated: number;
     rotation: number;
     amount: number;
+    /** 提成（v0.7.1；有「看技师提成」权限才返回）：基本提成、点钟奖励、合计 */
+    commission?: { base: number; bonus: number; total: number };
   }[];
-  totals: { clocks: number; designated: number; rotation: number; amount: number };
+  totals: { clocks: number; designated: number; rotation: number; amount: number; commission?: { base: number; bonus: number; total: number } };
   /** 需要技师、但挂账时没有指定技师的明细（规则不要求必须选技师时会有） */
   unassigned: { clocks: number; amount: number };
 }

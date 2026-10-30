@@ -241,7 +241,7 @@ export function CheckinDialog({
       open={open}
       onClose={busy ? () => {} : onClose}
       title="接待发牌"
-      description="选择宾客分区后输入牌号（输入末位即可，回车自动补全）；牌号与分区不一致时不能发出"
+      description="从状态板点了手牌进来的，分区跟着手牌；输入牌号时先选男宾 / 女宾（输入末位即可，回车自动补全），牌号与分区不一致时不能发出"
       width="max-w-2xl"
       footer={
         <>
@@ -340,27 +340,43 @@ export function CheckinDialog({
             const next = freeOf(r.zone, used).find((t) => t.kind === 'normal');
             const v = vipRows[i];
             const vipShort = !!v && v.guestLevel !== null && v.guestLevel < v.tagLevel;
+            // 分区跟着手牌走：牌号对上一张同分区的手牌（例如从状态板点了这张牌进来）就固定显示，不再给另一个分区选；
+            // 还没填牌号时先选男宾 / 女宾（用来补全末位、提示空闲牌），选了女宾却填男宾牌的照样拦下
+            const exact = tags.find((t) => t.code === normalizeTagCode(r.code));
+            const fixedZone = exact && exact.zone === r.zone ? exact.zone : null;
+            // 会员登记的性别与这张牌的分区不同：只提醒核对，不拦（性别是选填资料，可能登记错）
+            const otherZone = i === 0 && member?.gender && s?.ok && s.tag.zone !== member.gender ? s.tag.zone : null;
             return (
               <li key={r.id} className={cn('rounded-lg border bg-card p-3', s && !s.ok ? 'border-clay/40' : 'border-line')} data-testid={`guest-row-${i}`}>
                 <div className="flex flex-wrap items-center gap-2.5">
                   <span className="num flex size-7 shrink-0 items-center justify-center rounded-full bg-paper-2 text-[13px] font-bold text-ink-2">{i + 1}</span>
-                  <div role="radiogroup" aria-label={`第 ${i + 1} 位宾客分区`} className="flex gap-1">
-                    {ZONES.map((z) => (
-                      <button
-                        key={z}
-                        type="button"
-                        role="radio"
-                        aria-checked={r.zone === z}
-                        onClick={() => update(r.id, { zone: z })}
-                        className={cn(
-                          'h-10 min-w-[56px] rounded-md border px-3 text-[14px] font-bold transition-colors',
-                          r.zone === z ? cn(ZONE_STYLE[z].chip, 'border-transparent ring-2 ring-current/25') : 'border-line bg-card text-ink-3 hover:text-ink',
-                        )}
-                      >
-                        {ZONE_LABELS[z].title}
-                      </button>
-                    ))}
-                  </div>
+                  {fixedZone ? (
+                    <span
+                      className={cn('flex h-10 min-w-[56px] items-center justify-center rounded-md px-3 text-[14px] font-bold', ZONE_STYLE[fixedZone].chip)}
+                      title={`${exact!.code} 是${ZONE_LABELS[fixedZone].title}牌，分区跟着手牌；要换分区请先改牌号`}
+                      data-testid={`guest-zone-${i}`}
+                    >
+                      {ZONE_LABELS[fixedZone].title}
+                    </span>
+                  ) : (
+                    <div role="radiogroup" aria-label={`第 ${i + 1} 位宾客分区`} className="flex gap-1">
+                      {ZONES.map((z) => (
+                        <button
+                          key={z}
+                          type="button"
+                          role="radio"
+                          aria-checked={r.zone === z}
+                          onClick={() => update(r.id, { zone: z })}
+                          className={cn(
+                            'h-10 min-w-[56px] rounded-md border px-3 text-[14px] font-bold transition-colors',
+                            r.zone === z ? cn(ZONE_STYLE[z].chip, 'border-transparent ring-2 ring-current/25') : 'border-line bg-card text-ink-3 hover:text-ink',
+                          )}
+                        >
+                          {ZONE_LABELS[z].title}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div className="relative w-[132px]">
                     <Input
                       ref={i === 0 && (guestType === 'walkin' || member) ? firstInput : undefined}
@@ -462,6 +478,11 @@ export function CheckinDialog({
                   )}
                   {!next && !s?.ok && <span className="text-clay">{ZONE_LABELS[r.zone].title}区没有空闲普通柜</span>}
                   {i === 0 && member && <Badge tone="pine">会员本人</Badge>}
+                  {otherZone && (
+                    <span className="font-semibold text-clay" data-testid="guest-gender-mismatch">
+                      会员登记的是{ZONE_LABELS[member!.gender!].title}，这张是{ZONE_LABELS[otherZone].title}牌，请核对
+                    </span>
+                  )}
                 </div>
               </li>
             );

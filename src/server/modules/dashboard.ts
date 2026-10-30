@@ -17,12 +17,12 @@ async function dayNet(db: Db, date: string) {
       (SELECT coalesce(sum(total_amount) FILTER (WHERE business_date = ${date}), 0)
               - coalesce(sum(total_amount) FILTER (WHERE void_business_date = ${date}), 0)
        FROM checkouts WHERE business_date = ${date} OR void_business_date = ${date}) AS net,
-      (SELECT count(*) FROM checkouts WHERE business_date = ${date} AND status = 'completed')::int AS checkouts,
+      ((SELECT count(*) FROM checkouts WHERE business_date = ${date}) - (SELECT count(*) FROM checkouts WHERE void_business_date = ${date}))::int AS checkouts,
       (SELECT coalesce(sum(paid_amount), 0) FROM recharges WHERE business_date = ${date}) AS recharge_paid`;
   return row!;
 }
 
-export async function dashboard(db: Db, today: string, days: number): Promise<DashboardData> {
+export async function dashboard(db: Db, today: string, days: number, opts: { inStore: boolean } = { inStore: true }): Promise<DashboardData> {
   const [store] = await db<{ count: number; unsettled: number }[]>`
     SELECT count(*)::int AS count, coalesce(sum(b.amount_cents), 0) AS unsettled
     FROM visits v JOIN bills b ON b.id = v.bill_id WHERE v.status = 'open'`;
@@ -39,12 +39,20 @@ export async function dashboard(db: Db, today: string, days: number): Promise<Da
   }
   const noTicket = open.filter((v) => v.price12h === null).length;
   const t = await dayNet(db, today);
+  // 结账客人、门票、收款构成与日结同一营业口径（v0.7.1，测试会话 PR #15 问题 2）：当天结的计正数、当天反结账的计负数，
+  // 前一营业日的单今天反结账时，原营业日不变、今天冲回
   const [guests] = await db<{ n: number; ticket: number }[]>`
-    SELECT count(*)::int AS n, coalesce(sum(cb.ticket_amount), 0) AS ticket
-    FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id WHERE c.business_date = ${today} AND c.status = 'completed'`;
+    SELECT (count(*) FILTER (WHERE c.business_date = ${today}) - count(*) FILTER (WHERE c.void_business_date = ${today}))::int AS n,
+           coalesce(sum(cb.ticket_amount) FILTER (WHERE c.business_date = ${today}), 0)
+             - coalesce(sum(cb.ticket_amount) FILTER (WHERE c.void_business_date = ${today}), 0) AS ticket
+    FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id WHERE c.business_date = ${today} OR c.void_business_date = ${today}`;
   const byMethod = await db<{ method: CheckoutMethod; amount: number }[]>`
-    SELECT p.method, sum(p.amount) AS amount FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
-    WHERE c.business_date = ${today} AND c.status = 'completed' GROUP BY p.method ORDER BY amount DESC`;
+    SELECT p.method,
+           coalesce(sum(p.amount) FILTER (WHERE c.business_date = ${today}), 0) - coalesce(sum(p.amount) FILTER (WHERE c.void_business_date = ${today}), 0) AS amount
+    FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
+    WHERE c.business_date = ${today} OR c.void_business_date = ${today}
+    GROUP BY p.method HAVING coalesce(sum(p.amount) FILTER (WHERE c.business_date = ${today}), 0) - coalesce(sum(p.amount) FILTER (WHERE c.void_business_date = ${today}), 0) <> 0
+    ORDER BY amount DESC`;
   // 优惠 / 免单与营业额同一口径（与日结 businessTotals 一致）：当日结账的加上、当日反结账的减去，
   // 前一营业日带优惠的单今天反结账时冲回优惠，净营业额只减「应收 − 优惠」
   const [discount] = await db<{ amount: number }[]>`
@@ -54,9 +62,14 @@ export async function dashboard(db: Db, today: string, days: number): Promise<Da
     WHERE p.method = 'discount' AND (c.business_date = ${today} OR c.void_business_date = ${today})`;
   const [rc] = await db<{ n: number }[]>`SELECT count(*)::int AS n FROM recharges WHERE business_date = ${today}`;
   const tickets = await db<DashboardData['tickets']>`
-    SELECT cb.ticket_name AS name, count(*)::int AS count, sum(cb.ticket_amount) AS amount
-    FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id WHERE c.business_date = ${today} AND c.status = 'completed'
-    GROUP BY cb.ticket_name ORDER BY count DESC`;
+    SELECT cb.ticket_name AS name,
+           (count(*) FILTER (WHERE c.business_date = ${today}) - count(*) FILTER (WHERE c.void_business_date = ${today}))::int AS count,
+           coalesce(sum(cb.ticket_amount) FILTER (WHERE c.business_date = ${today}), 0) - coalesce(sum(cb.ticket_amount) FILTER (WHERE c.void_business_date = ${today}), 0) AS amount
+    FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id WHERE c.business_date = ${today} OR c.void_business_date = ${today}
+    GROUP BY cb.ticket_name
+    HAVING count(*) FILTER (WHERE c.business_date = ${today}) <> count(*) FILTER (WHERE c.void_business_date = ${today})
+        OR coalesce(sum(cb.ticket_amount) FILTER (WHERE c.business_date = ${today}), 0) <> coalesce(sum(cb.ticket_amount) FILTER (WHERE c.void_business_date = ${today}), 0)
+    ORDER BY count DESC`;
   const history: DashboardData['days'] = [];
   for (let i = days - 1; i >= 0; i--) {
     const date = shiftDate(today, -i);
@@ -67,7 +80,8 @@ export async function dashboard(db: Db, today: string, days: number): Promise<Da
     WHERE s.status = 'open' ORDER BY s.started_at`;
   return {
     today,
-    inStore: { ...store!, ticketEstimate, noTicket },
+    // 在店客人只给能看前台的岗位（v0.7.1）
+    inStore: opts.inStore ? { ...store!, ticketEstimate, noTicket } : null,
     todayStats: {
       checkouts: t.checkouts,
       guests: guests!.n,
@@ -90,6 +104,6 @@ export function registerDashboardRoutes(app: FastifyInstance, deps: Deps) {
     const today = businessDateOf(new Date(), deps.config.timezone, settings.businessDayStartHour);
     // 历史营业日需要对应权限；没有时只看今天
     const days = can(req.actor, 'ledger.readHistory') ? 7 : 1;
-    return readSnapshot(deps.sql, (tx) => dashboard(tx, today, days));
+    return readSnapshot(deps.sql, (tx) => dashboard(tx, today, days, { inStore: can(req.actor, 'frontdesk.read') }));
   });
 }

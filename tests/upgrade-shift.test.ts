@@ -70,6 +70,8 @@ beforeAll(async () => {
   await sql.unsafe(await readFile(new URL('018_backfill.sql', MIGRATIONS), 'utf8'));
   // 现版本读会员资料带渠道来源（019 才有）
   await sql`ALTER TABLE members ADD COLUMN channel text`;
+  // 现版本结账时收尾钟房的钟单（021 才有）：写入期间临时建一张最小的表，迁移前删掉
+  await sql`CREATE TABLE technician_sessions (id bigint, visit_id bigint, status text)`;
   const deps = { sql, config };
   const as = (id: number, username: string): Actor => ({ id, username, displayName: username, role: username === 'owner' ? 'owner' : 'clerk', duties: [], mustChangePassword: false });
   const cash = (amount: number) => ({ idempotencyKey: randomUUID(), memberId, planId: null, paidAmount: amount, bonusAmount: 0, paymentMethod: 'cash' as const, paymentConfirmed: true as const });
@@ -87,8 +89,9 @@ beforeAll(async () => {
   await sql`DELETE FROM settings WHERE key = 'require_open_shift'`;
   await sql`DROP TABLE backfill_entries`;
   await sql`ALTER TABLE members DROP COLUMN channel`;
+  await sql`DROP TABLE technician_sessions`;
 
-  expect(await migrate(sql)).toEqual(['016_shift_boundary.sql', '017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql', '020_technicians.sql']);
+  expect(await migrate(sql)).toEqual(['016_shift_boundary.sql', '017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql', '020_technicians.sql', '021_clockroom.sql']);
   app = await buildApp(sql, config);
 }, 60_000);
 

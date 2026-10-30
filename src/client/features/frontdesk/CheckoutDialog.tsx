@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { BadgePercent, Banknote, CircleCheck, Clock3, Plus, ReceiptText, ShieldCheck, Ticket, Trash2, Undo2, UserRound, WalletCards } from 'lucide-react';
 import {
   CHECKOUT_METHOD_LABELS,
@@ -14,6 +14,7 @@ import {
   type CheckoutMethod,
   type CheckoutPreview,
   type CouponPlatform,
+  type RefundShiftOptions,
 } from '@shared/checkout';
 import { splitDeduction } from '@shared/deduction';
 import { ZONE_LABELS, type BoardTag, type VisitDetail } from '@shared/frontdesk';
@@ -31,7 +32,7 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Input, MoneyInput, Notice, Select, Skeleton, Textarea } from '../../components/ui';
 import { PrintButton } from '../print/PrintButton';
-import { SHIFT_ERRORS, shiftKeys, ShiftGate, useShiftReady } from '../shift/ShiftGate';
+import { SHIFT_ERRORS, shiftKeys, ShiftGate, StartShiftForm, useShiftReady } from '../shift/ShiftGate';
 import { ZoneChip } from './parts';
 import { BackfillNotice, backfillBody, backfillSummary, useBackfill } from './backfill';
 import { PendingPanel, useFrontdeskOp } from './pending';
@@ -369,7 +370,12 @@ export function CheckoutDialog({
         ) : preview.error ? (
           <Notice tone="error" title={errorMessage(preview.error)} />
         ) : (
-          p && <ReviewTable preview={p} amounts={amounts} ticketPick={ticketPick} onPick={(id, t) => edit(() => setTicketPick((x) => ({ ...x, [id]: t })))} />
+          p && (
+            <>
+              {(p.sessions ?? []).length > 0 && <SessionsNotice sessions={p.sessions} />}
+              <ReviewTable preview={p} amounts={amounts} ticketPick={ticketPick} onPick={(id, t) => edit(() => setTicketPick((x) => ({ ...x, [id]: t })))} />
+            </>
+          )
         )}
 
         {/* 收款 */}
@@ -434,6 +440,25 @@ export function CheckoutDialog({
         {op.state.phase === 'error' && <Notice tone="error" title={op.state.message} />}
       </div>
     </Dialog>
+  );
+}
+
+/** 钟房里还没结束的钟（v0.7.1）：在钟上的结账时下钟；还没上钟的按已做完记，客人没做的先到钟房取消派钟 */
+function SessionsNotice({ sessions }: { sessions: CheckoutPreview['sessions'] }) {
+  const waiting = sessions.some((s) => s.status === 'waiting');
+  return (
+    <div data-testid="checkout-sessions">
+      <Notice tone="warning" title={waiting ? '有技师还没上钟：客人没做的项目，请先到钟房取消派钟再结账' : '有技师还在钟上：结账时自动下钟'}>
+        <ul className="mt-1 space-y-0.5">
+          {sessions.map((s) => (
+            <li key={s.sessionNo}>
+              <span className="num font-semibold">{s.tagCode}</span> · {s.techNo} 号 {s.techName} · {s.itemName} × {s.clocks} ·{' '}
+              {s.status === 'waiting' ? '还没上钟（结账后按已做完记）' : '在钟上（结账时下钟）'}
+            </li>
+          ))}
+        </ul>
+      </Notice>
+    </div>
   );
 }
 
@@ -895,15 +920,29 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
   const pastWindow = !!d && windowHours !== null && Date.now() - new Date(d.createdAt).getTime() > windowHours * 3_600_000;
   const blockedByWindow = pastWindow && session.staff.role !== 'owner';
   const cashRefund = d?.payments.filter((pm) => pm.method === 'cash').reduce((n, pm) => n + pm.amount, 0) ?? 0;
+  // 跨钱箱退款（店主 2026-10-30 定）：原单收了现金时选从哪个钱箱退，退款记到那个钱箱当班的班次
+  const drawers = useQuery({
+    queryKey: ['frontdesk', 'refund-shifts', id],
+    queryFn: () => api.get<RefundShiftOptions>(`/api/frontdesk/checkouts/${id}/refund-shifts`),
+    enabled: voiding && cashRefund > 0,
+  });
+  const [drawer, setDrawer] = useState<number | null>(null);
+  useEffect(() => {
+    const data = drawers.data;
+    if (data) setDrawer((cur) => (cur !== null && data.shifts.some((x) => x.id === cur) ? cur : data.suggested));
+  }, [drawers.data]);
+  const chosen = drawers.data?.shifts.find((x) => x.id === drawer) ?? null;
   const run = async () => {
     setBusy(true);
     setError(null);
     try {
-      await api.post<CheckoutDetail>(`/api/frontdesk/checkouts/${id}/void`, { reason: reason.trim() });
+      await api.post<CheckoutDetail>(`/api/frontdesk/checkouts/${id}/void`, { reason: reason.trim(), ...(cashRefund > 0 && drawer !== null ? { refundShiftId: drawer } : {}) });
       toast({
         tone: 'success',
         title: `已反结账 ${d?.checkoutNo ?? ''}`,
-        body: cashRefund ? `客人恢复为在店未结；退给客人的现金 ¥${(cashRefund / 100).toFixed(2)} 计入你当班的交班表` : '客人恢复为在店未结，可更正后重新结账',
+        body: cashRefund
+          ? `客人恢复为在店未结；退给客人的现金 ¥${(cashRefund / 100).toFixed(2)} 计入${chosen && !chosen.mine ? ` ${chosen.staffName} ` : '你'}当班的交班表`
+          : '客人恢复为在店未结，可更正后重新结账',
       });
       setVoiding(false);
       void qc.invalidateQueries({ queryKey: ['frontdesk'] });
@@ -913,6 +952,7 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
     } catch (e) {
       setError(errorMessage(e));
       if (e instanceof ApiError && SHIFT_ERRORS.includes(e.code)) void qc.invalidateQueries({ queryKey: shiftKeys.all });
+      if (e instanceof ApiError && e.code.startsWith('REFUND_SHIFT')) void drawers.refetch();
     } finally {
       setBusy(false);
     }
@@ -942,15 +982,22 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
           )}
           {voiding && (
             <div className="space-y-2 rounded-lg border border-clay/30 bg-clay-soft/40 p-3">
-              <ShiftGate action="反结账" />
+              {cashRefund === 0 && <ShiftGate action="反结账" />}
               <p className="text-[13px] text-ink-2">
                 反结账后：储值消费按原单撤销，团购券登记作废，门票明细作废，客人恢复为在店未结（手牌须仍空闲）；重新结账时门票按第一次结账的时刻计算。
-                {cashRefund ? ` 原单收了现金 ¥${(cashRefund / 100).toFixed(2)}：从你的钱箱退给客人，计入你当班的交班表（扣减应有现金）。` : ''}
+                {cashRefund ? ` 原单收了现金 ¥${(cashRefund / 100).toFixed(2)}：选从哪个钱箱退给客人，计入那个钱箱当班的交班表（扣减应有现金）。` : ''}
                 扫码、银行卡、团购请在商户后台原路退回并登记退款单号。
               </p>
+              {cashRefund > 0 && <RefundDrawerPicker query={drawers} value={drawer} onChange={setDrawer} />}
               <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="反结账原因（至少 2 个字），例如：收款方式记错" maxLength={200} aria-label="反结账原因" />
               <div className="flex gap-2">
-                <Button variant="danger" disabled={reason.trim().length < 2 || !shiftReady.ready} loading={busy} onClick={() => void run()} data-testid="checkout-void-confirm">
+                <Button
+                  variant="danger"
+                  disabled={reason.trim().length < 2 || (cashRefund > 0 ? drawer === null : !shiftReady.ready)}
+                  loading={busy}
+                  onClick={() => void run()}
+                  data-testid="checkout-void-confirm"
+                >
                   确认反结账
                 </Button>
                 <Button variant="ghost" onClick={() => setVoiding(false)} disabled={busy}>
@@ -962,6 +1009,49 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/** 跨钱箱退款：退给客人的现金从哪个钱箱出（此刻当班的班次）；默认原单收款的班次，已交班时是自己的班次 */
+function RefundDrawerPicker({ query, value, onChange }: { query: UseQueryResult<RefundShiftOptions>; value: number | null; onChange: (id: number) => void }) {
+  if (query.isPending) return <Skeleton className="h-16" />;
+  if (query.error) return <Notice tone="error" title={errorMessage(query.error)} />;
+  const list = query.data!.shifts;
+  if (list.length === 0) {
+    return (
+      <div data-testid="refund-drawer-none">
+        <Notice tone="warning" title="现在没有当班的钱箱">
+          退给客人的现金要记到当班的交班表里：先开班（登记钱箱里的备用金），再反结账。
+          <StartShiftForm compact onStarted={() => void query.refetch()} />
+        </Notice>
+      </div>
+    );
+  }
+  return (
+    <div role="radiogroup" aria-label="从哪个钱箱退现金" className="space-y-1.5" data-testid="refund-drawer">
+      <p className="text-[12.5px] font-bold text-ink-2">从哪个钱箱退现金</p>
+      {list.map((x) => (
+        <button
+          key={x.id}
+          type="button"
+          role="radio"
+          aria-checked={value === x.id}
+          onClick={() => onChange(x.id)}
+          className={cn(
+            'flex w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-3 py-2 text-left text-[13px]',
+            value === x.id ? 'border-pine bg-pine-tint' : 'border-line bg-card hover:border-line-strong',
+          )}
+          data-testid={`refund-drawer-${x.shiftNo}`}
+        >
+          <span className="font-bold">{x.staffName}的钱箱</span>
+          <span className="text-[12px] text-ink-3">
+            班次 {x.shiftNo} · {formatTime(x.startedAt)} 开班
+          </span>
+          {x.original && <Badge tone="pine">原单收款的班次</Badge>}
+          {x.mine && <Badge tone="lake">你的班次</Badge>}
+        </button>
+      ))}
     </div>
   );
 }

@@ -81,6 +81,11 @@ function ShiftSlip({ s }: { s: ShiftRecord }) {
           <div data-testid="print-shift-diff">
             <Row left={diff === 0 ? '长短款' : diff! > 0 ? '长款' : '短款'} right={diff === 0 ? '无' : yuan(Math.abs(diff!))} big />
           </div>
+          {(s.expectedCash ?? 0) < 0 && (
+            <p className="text-[11px]" data-testid="print-shift-cross-drawer">
+              应有现金为负：反结账退的现金比本班收的多 {yuan(-(s.expectedCash ?? 0))}，这部分从别的钱箱或保险柜拿出，记成长款，与出钱那个钱箱的短款相抵。
+            </p>
+          )}
         </>
       )}
       {sum.voids.length > 0 && (
@@ -92,11 +97,12 @@ function ShiftSlip({ s }: { s: ShiftRecord }) {
           {sum.voids.map((v) => (
             <p key={v.checkoutNo} className="break-all">
               {v.checkoutNo} {yuan(v.amount)} · {v.reason}
+              {v.voidedByName ? ` · ${v.voidedByName}反结账、从本班钱箱退` : ''}
             </p>
           ))}
           {sum.refunds ? (
             <p className="text-[11px]" data-testid="print-shift-refunds">
-              退款按原收款方式：{sum.refunds.byMethod.map((m) => `${methodLabel(m.method)} ${yuan(m.amount)}`).join('、')}。现金从本班钱箱退，已从应有现金里扣掉；扫码、银行卡、团购在商户后台原路退回。原单是别人收的款时仍算在原收款人的班次，同一钱箱合并核对时相抵。
+              退款按原收款方式：{sum.refunds.byMethod.map((m) => `${methodLabel(m.method)} ${yuan(m.amount)}`).join('、')}。现金从本班钱箱退，已从应有现金里扣掉；扫码、银行卡、团购在商户后台原路退回。原单是别人收的款时仍算在原收款人的班次，同一钱箱合并核对时相抵；反结账时选了别人的钱箱的，退款记在那个班次。
             </p>
           ) : (
             <p className="text-[11px]">原单收过的现金不计入应有现金，请核对是否已退还或已重新收取。</p>
