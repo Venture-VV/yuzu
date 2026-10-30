@@ -27,7 +27,7 @@ export interface PeriodKpis {
   discount: number;
   /** 净营业额 = 应收 − 优惠 */
   net: number;
-  /** 结账客人（手牌账单数） */
+  /** 结账客人（手牌每位 1 人，桌台按开台人数） */
   guests: number;
   checkouts: number;
   /** 客单价 = 净营业额 / 结账客人（分，四舍五入） */
