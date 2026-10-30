@@ -285,7 +285,9 @@ export function registerShiftRoutes(app: FastifyInstance, deps: Deps) {
 
   app.get('/api/shifts', { preHandler: guard('ledger.readToday') }, async (req) => {
     const { date } = parse(z.object({ date: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD').optional() }), req.query ?? {});
-    return listShifts(sql, await resolveReadableDate(deps, req, date));
+    const list = await listShifts(sql, await resolveReadableDate(deps, req, date));
+    // 别人的班次（备用金、实点现金、长短款）与单个班次同一规则：只给能看历史营业日的岗位（默认值班经理及以上）
+    return can(req.actor, 'ledger.readHistory') ? list : list.filter((s) => s.staffId === req.actor.id);
   });
 
   app.get('/api/shifts/:id', { preHandler: guard('ledger.readToday') }, async (req) => {

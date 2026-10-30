@@ -14,6 +14,7 @@ import { parse, positiveCents } from '../../lib/validate';
 import { assertCanFix, assertOpen, businessDate, hashRequest, loadFrontdeskRules, lockVisits, runIdempotent, saveKey, setTxTimeouts } from './common';
 import { loadPricedItems, priceLine } from '../pricing';
 import { loadTechnicianRules, loadTechnicians } from '../technicians';
+import { attachSessions, lockQueue, syncSessionAfterVoid, type SessionPostOptions } from '../clockroom';
 import { assertAfterVisits, backfillDetail, BackfillInput, recordBackfill, resolveBackfill } from './backfill';
 import { getVisit } from './visits';
 
@@ -48,7 +49,12 @@ export const PostInput = z
   .refine((v) => v.lines.length + v.customLines.length > 0, '请至少选择一个项目');
 export type PostInputData = z.input<typeof PostInput>;
 
-export async function postCharges(deps: Deps, visitId: number, raw: PostInputData, ctx: OpContext) {
+/** 钟房派钟、加钟时附带的钟单选项（前台挂账不带：需要技师的明细照样建钟单，等钟房上钟） */
+export interface PostOptions {
+  session?: Omit<SessionPostOptions, 'backfill'>;
+}
+
+export async function postCharges(deps: Deps, visitId: number, raw: PostInputData, ctx: OpContext, options: PostOptions = {}) {
   const input = parse(PostInput, raw);
   if (input.customLines.length > 0 && !can(ctx.actor, 'consume.customAmount')) {
     throw forbidden('当前岗位不能手动输入金额，请从项目中选择');
@@ -116,12 +122,30 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
     }
 
     const date = await businessDate(tx, deps, at);
+    // 钟单（v0.7.1）：每条技师明细建一张钟单（或加到正在上钟的钟单），排在来访、账单之后拿技师队列锁
+    const techLines = lines.filter((l) => l.technicianId !== null);
+    const sessionIds = new Map<Line, number>();
+    if (techLines.length > 0) {
+      const [tag] = await tx<{ code: string }[]>`SELECT code FROM hand_tags WHERE id = ${visit.tagId}`;
+      const ids = await attachSessions(tx, deps, {
+        visitId: visit.id,
+        tagCode: tag!.code,
+        lines: techLines.map((l) => ({ itemId: l.itemId!, quantity: l.quantity, technicianId: l.technicianId!, callType: l.callType! })),
+        date,
+        at,
+        actor: ctx.actor,
+        options: { ...options.session, backfill: !!backfill },
+      });
+      techLines.forEach((l, i) => sessionIds.set(l, ids[i]!));
+    } else if (options.session?.extendId !== undefined || options.session?.dispatch) {
+      throw unprocessable('TECHNICIAN_REQUIRED', '派钟、加钟要选技师');
+    }
     for (const l of lines) {
       await tx`
         INSERT INTO bill_lines (bill_id, source, item_id, tier, name, unit_price, quantity, amount, post_key, business_date, posted_by, posted_at,
-                                technician_id, call_type)
+                                technician_id, call_type, session_id)
         VALUES (${bill!.id}, ${l.source}, ${l.itemId}, ${l.tier}, ${l.name}, ${l.unitPrice}, ${l.quantity}, ${l.amount}, ${key}, ${date},
-                ${ctx.actor.id}, ${at}, ${l.technicianId}, ${l.callType})`;
+                ${ctx.actor.id}, ${at}, ${l.technicianId}, ${l.callType}, ${sessionIds.get(l) ?? null})`;
     }
     await tx`
       UPDATE bills SET amount_cents = amount_cents + ${total}, line_count = line_count + ${lines.length} WHERE id = ${bill!.id}`;
@@ -157,8 +181,8 @@ export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: Op
     const visit = (await lockVisits(tx, [peek.visitId])).get(peek.visitId)!;
     assertOpen(visit);
     await tx`SELECT id FROM bills WHERE id = ${visit.billId} FOR UPDATE`;
-    const [line] = await tx<{ id: number; name: string; quantity: number; amount: number; status: string; postedBy: number; postedAt: string; voidedByName: string | null }[]>`
-      SELECT l.id, l.name, l.quantity, l.amount, l.status, l.posted_by, l.posted_at, s.display_name AS voided_by_name
+    const [line] = await tx<{ id: number; name: string; quantity: number; amount: number; status: string; postedBy: number; postedAt: string; voidedByName: string | null; sessionId: number | null }[]>`
+      SELECT l.id, l.name, l.quantity, l.amount, l.status, l.posted_by, l.posted_at, s.display_name AS voided_by_name, l.session_id
       FROM bill_lines l LEFT JOIN staff s ON s.id = l.voided_by WHERE l.id = ${lineId} FOR UPDATE OF l`;
     if (line!.status === 'voided') {
       throw conflict('ALREADY_VOIDED', `这项明细已由${line!.voidedByName ?? '其他人'}作废，不会重复冲减`);
@@ -168,6 +192,11 @@ export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: Op
       UPDATE bill_lines SET status = 'voided', void_reason = ${input.reason}, voided_by = ${ctx.actor.id}, voided_at = ${at}
       WHERE id = ${line!.id}`;
     await tx`UPDATE bills SET amount_cents = amount_cents - ${line!.amount}, line_count = line_count - 1 WHERE id = ${visit.billId}`;
+    // 技师明细：钟单按剩下的钟数改，一条不剩时钟单作废、技师按规则回到原位（明细 → 技师队列 → 钟单）
+    if (line!.sessionId !== null) {
+      await lockQueue(tx);
+      await syncSessionAfterVoid(tx, deps, line!.sessionId, input.reason, ctx.actor, at);
+    }
     await writeAudit(tx, {
       staffId: ctx.actor.id,
       action: 'frontdesk_void',

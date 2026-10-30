@@ -26,6 +26,8 @@ import type { Deps } from '../lib/context';
 import { badRequest, conflict, notFound } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
 import { businessDate } from './frontdesk/common';
+import { settledTechnicianLines, withCommission } from './commission';
+import { loadClockroomRules } from './clockroom';
 
 export async function loadTechnicianRules(db: Db): Promise<TechnicianRules> {
   const [row] = await db<{ value: Partial<TechnicianRules> }[]>`SELECT value FROM settings WHERE key = 'technician_rules'`;
@@ -60,8 +62,13 @@ export async function frontdeskTechnicians(db: Db, deps: Deps): Promise<Frontdes
 
 export async function technicianAdmin(db: Db): Promise<TechnicianAdmin> {
   const rules = await loadTechnicianRules(db);
-  const [meta] = await db<{ updatedAt: string; updatedBy: string | null }[]>`
-    SELECT s.updated_at, st.display_name AS updated_by FROM settings s LEFT JOIN staff st ON st.id = s.updated_by WHERE s.key = 'technician_rules'`;
+  const metaOf = async (key: string) =>
+    (
+      await db<{ updatedAt: string; updatedBy: string | null }[]>`
+        SELECT s.updated_at, st.display_name AS updated_by FROM settings s LEFT JOIN staff st ON st.id = s.updated_by WHERE s.key = ${key}`
+    )[0];
+  const meta = await metaOf('technician_rules');
+  const crMeta = await metaOf('clockroom_rules');
   const technicians = await db<TechnicianAdmin['technicians']>`
     SELECT ${TECH_COLUMNS(db)}, t.created_at, t.updated_at,
            (SELECT count(*) FROM bill_lines l WHERE l.technician_id = t.id)::int AS line_count
@@ -73,6 +80,9 @@ export async function technicianAdmin(db: Db): Promise<TechnicianAdmin> {
     rules,
     rulesUpdatedAt: meta ? new Date(meta.updatedAt).toISOString() : null,
     rulesUpdatedBy: meta?.updatedBy ?? null,
+    clockroomRules: await loadClockroomRules(db),
+    clockroomUpdatedAt: crMeta ? new Date(crMeta.updatedAt).toISOString() : null,
+    clockroomUpdatedBy: crMeta?.updatedBy ?? null,
     technicians: technicians.map((t) => ({ ...t, createdAt: new Date(t.createdAt).toISOString(), updatedAt: new Date(t.updatedAt).toISOString() })),
     categories: categories.map((c) => c.category),
   };
@@ -105,6 +115,18 @@ const RulesInput = z.object({
   defaultCallType: z.enum(CALL_TYPES, '默认上钟方式应为点钟或轮钟'),
 });
 
+const ClockroomRulesInput = z.object({
+  afterRotation: z.enum(['dispatch', 'finish'], '轮钟排尾的时机不正确'),
+  afterDesignated: z.enum(['keep', 'passed', 'end'], '点钟后的排位规则不正确'),
+  rejectKeepsPlace: z.boolean(),
+  rejectEndAfter: z.number().int().min(0, '次数不能为负').max(20, '次数最多 20'),
+  backToEnd: z.boolean(),
+  skipNeedsReason: z.boolean(),
+  defaultMinutes: z.number().int().min(10, '一钟至少 10 分钟').max(240, '一钟最多 240 分钟'),
+  remindMinutes: z.number().int().min(0).max(60, '提前提醒最多 60 分钟'),
+  extensionAsDesignated: z.boolean(),
+});
+
 const ItemsInput = z.object({
   items: z
     .array(z.object({ id: z.number().int().positive(), required: z.boolean() }))
@@ -115,50 +137,69 @@ const ItemsInput = z.object({
 const describeTechnician = (t: { techNo: string; name: string; grade: PriceTier; active: boolean }) =>
   `${t.techNo} 号 ${t.name}（${gradeLabel(t.grade)}${t.active ? '' : '，已停用'}）`;
 
-/** 技师业绩：时段内结账的技师明细，结账那一刻的明细（与部门构成、对账包的部门参考表同一口径）；时段内反结账的冲回 */
+/** 技师业绩与提成：时段内结账的技师明细，结账那一刻的明细（与部门构成、对账包的部门参考表同一口径）；时段内反结账的冲回 */
 export async function technicianReport(db: Db, from: string, to: string): Promise<TechnicianReport> {
-  const rows = await db<{ technicianId: number | null; callType: string | null; clocks: number; amount: number }[]>`
+  const lines = await withCommission(db, await settledTechnicianLines(db, from, to));
+  // 需要技师、但挂账时没有指定技师的明细（规则不要求必须选技师时会有）
+  const [un] = await db<{ clocks: number; amount: number }[]>`
     WITH k AS (
       SELECT id, created_at, 1 AS sign FROM checkouts WHERE business_date BETWEEN ${from} AND ${to}
       UNION ALL
       SELECT id, created_at, -1 FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to}
     )
-    SELECT l.technician_id, l.call_type, sum(k.sign * l.quantity)::int AS clocks, sum(k.sign * l.amount)::bigint AS amount
+    SELECT coalesce(sum(k.sign * l.quantity), 0)::int AS clocks, coalesce(sum(k.sign * l.amount), 0)::bigint AS amount
     FROM k JOIN checkout_bills cb ON cb.checkout_id = k.id
     JOIN bill_lines l ON l.bill_id = cb.bill_id AND l.posted_at <= k.created_at AND (l.voided_at IS NULL OR l.voided_at > k.created_at)
-    WHERE l.technician_id IS NOT NULL OR l.source = 'therapist'
-    GROUP BY 1, 2`;
+    WHERE l.technician_id IS NULL AND l.source = 'therapist'`;
   const techs = await loadTechnicians(db);
+  const blank = (t: Technician): TechnicianReport['rows'][number] => ({
+    technicianId: t.id,
+    techNo: t.techNo,
+    name: t.name,
+    grade: t.grade,
+    active: t.active,
+    clocks: 0,
+    designated: 0,
+    rotation: 0,
+    amount: 0,
+    commission: { base: 0, bonus: 0, total: 0 },
+  });
   const byTech = new Map<number, TechnicianReport['rows'][number]>();
-  const unassigned = { clocks: 0, amount: 0 };
-  for (const r of rows) {
-    if (r.technicianId === null) {
-      unassigned.clocks += r.clocks;
-      unassigned.amount += r.amount;
-      continue;
-    }
-    const t = techs.get(r.technicianId)!;
-    const x = byTech.get(t.id) ?? { technicianId: t.id, techNo: t.techNo, name: t.name, grade: t.grade, active: t.active, clocks: 0, designated: 0, rotation: 0, amount: 0 };
-    x.clocks += r.clocks;
-    x.amount += r.amount;
-    if (r.callType === 'designated') x.designated += r.clocks;
-    else x.rotation += r.clocks;
-    byTech.set(t.id, x);
+  for (const l of lines) {
+    const x = byTech.get(l.technicianId) ?? blank(techs.get(l.technicianId)!);
+    const q = l.sign * l.quantity;
+    x.clocks += q;
+    x.amount += l.sign * l.amount;
+    if (l.callType === 'designated') x.designated += q;
+    else x.rotation += q;
+    x.commission!.base += l.base;
+    x.commission!.bonus += l.bonus;
+    x.commission!.total += l.base + l.bonus;
+    byTech.set(l.technicianId, x);
   }
   // 在职技师都列出（没有钟的也列，排轮钟时看得出谁少）；停用的只在有业绩时列出
-  for (const t of techs.values()) {
-    if (t.active && !byTech.has(t.id)) {
-      byTech.set(t.id, { technicianId: t.id, techNo: t.techNo, name: t.name, grade: t.grade, active: t.active, clocks: 0, designated: 0, rotation: 0, amount: 0 });
-    }
-  }
+  for (const t of techs.values()) if (t.active && !byTech.has(t.id)) byTech.set(t.id, blank(t));
   const order = [...techs.keys()];
   const list = [...byTech.values()].sort((a, b) => b.clocks - a.clocks || b.amount - a.amount || order.indexOf(a.technicianId) - order.indexOf(b.technicianId));
   const totals = list.reduce(
-    (s, r) => ({ clocks: s.clocks + r.clocks, designated: s.designated + r.designated, rotation: s.rotation + r.rotation, amount: s.amount + r.amount }),
-    { clocks: 0, designated: 0, rotation: 0, amount: 0 },
+    (s, r) => ({
+      clocks: s.clocks + r.clocks,
+      designated: s.designated + r.designated,
+      rotation: s.rotation + r.rotation,
+      amount: s.amount + r.amount,
+      commission: { base: s.commission.base + r.commission!.base, bonus: s.commission.bonus + r.commission!.bonus, total: s.commission.total + r.commission!.total },
+    }),
+    { clocks: 0, designated: 0, rotation: 0, amount: 0, commission: { base: 0, bonus: 0, total: 0 } },
   );
-  return { from, to, rows: list, totals, unassigned };
+  return { from, to, rows: list, totals, unassigned: { clocks: un!.clocks, amount: un!.amount } };
 }
+
+/** 没有「看技师提成」权限时去掉提成 */
+export const withoutCommission = (r: TechnicianReport): TechnicianReport => ({
+  ...r,
+  rows: r.rows.map(({ commission: _c, ...row }) => row),
+  totals: { clocks: r.totals.clocks, designated: r.totals.designated, rotation: r.totals.rotation, amount: r.totals.amount },
+});
 
 export function registerTechnicianRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
@@ -230,6 +271,20 @@ export function registerTechnicianRoutes(app: FastifyInstance, deps: Deps) {
         INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('technician_rules', ${tx.json(after as never)}, now(), ${req.actor.id})
         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`;
       await writeAudit(tx, { staffId: req.actor.id, action: 'settings_updated', targetType: 'settings', detail: { key: 'technician_rules', before, after }, ip: req.ip });
+    });
+    return technicianAdmin(sql);
+  });
+
+  // 钟房与轮钟规则：只改提交的字段（与技师规则相同的做法）
+  app.put('/api/admin/technicians/clockroom-rules', { preHandler: guard('settings.manage') }, async (req) => {
+    await sql.begin(async (tx) => {
+      await tx`SELECT pg_advisory_xact_lock(hashtext('settings'))`;
+      const before = await loadClockroomRules(tx);
+      const after = parse(ClockroomRulesInput, { ...before, ...parse(ClockroomRulesInput.partial(), req.body) });
+      await tx`
+        INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('clockroom_rules', ${tx.json(after as never)}, now(), ${req.actor.id})
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`;
+      await writeAudit(tx, { staffId: req.actor.id, action: 'settings_updated', targetType: 'settings', detail: { key: 'clockroom_rules', before, after }, ip: req.ip });
     });
     return technicianAdmin(sql);
   });

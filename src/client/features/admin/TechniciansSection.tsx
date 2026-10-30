@@ -16,6 +16,7 @@ import {
   type TechnicianRules,
 } from '@shared/technicians';
 import { api, errorMessage } from '../../lib/api';
+import { ClockroomRulesCard, CommissionCard } from './ClockroomCards';
 import { qk, useCatalog } from '../../lib/queries';
 import { useCan } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
@@ -29,11 +30,14 @@ const adminKey = ['admin', 'technicians'] as const;
 const useTechnicianAdmin = () => useQuery({ queryKey: adminKey, queryFn: () => api.get<TechnicianAdmin>('/api/admin/technicians') });
 
 export function TechniciansSection() {
+  const can = useCan();
   return (
-    <AdminPage section="technicians" description="技师名册、挂技师项目时的规则、哪些项目需要技师。钟房看板、轮钟排队、上下钟计时与提成在下一步。">
+    <AdminPage section="technicians" description="技师名册、挂技师项目时的规则、钟房与轮钟规则、提成规则、哪些项目需要技师。">
       <div className="space-y-5">
         <RulesCard />
         <RosterCard />
+        <ClockroomRulesCard />
+        {(can('settings.manage') || can('report.commission')) && <CommissionCard />}
         <ItemsCard />
       </div>
     </AdminPage>

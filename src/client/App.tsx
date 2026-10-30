@@ -13,6 +13,7 @@ import { LoginPage } from './features/auth/LoginPage';
 import { ChangePasswordPage } from './features/auth/ChangePasswordPage';
 import { WorkbenchPage } from './features/workbench/WorkbenchPage';
 import { FrontdeskPage } from './features/frontdesk/FrontdeskPage';
+import { ClockroomPage } from './features/clockroom/ClockroomPage';
 import { LedgerPage } from './features/ledger/LedgerPage';
 import { SettlementPage } from './features/settlement/SettlementPage';
 import { ShiftPage } from './features/shift/ShiftPage';
@@ -137,6 +138,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <Home /> },
       { path: 'frontdesk', element: <FrontdeskPage /> },
+      { path: 'clockroom', element: <ClockroomPage /> },
       { path: 'ledger', element: <LedgerPage /> },
       { path: 'settlement/:date?', element: <SettlementPage /> },
       { path: 'shift', element: <ShiftPage /> },

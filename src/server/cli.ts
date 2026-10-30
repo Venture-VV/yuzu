@@ -87,6 +87,13 @@ function flag(args: string[], name: string): string | undefined {
   return i >= 0 ? args[i + 1] : undefined;
 }
 
+/** 试用 / 正式环境先拒绝，再看营业日（测试会话 PR #15：红线提示放在最前，不先报 --previous-day 的问题） */
+function refuseLiveEnv(config: { env: string }, what: string) {
+  if (config.env === 'production' || config.env === 'trial') {
+    throw new Error(`当前是${config.env === 'trial' ? '试用' : '正式'}环境，禁止写入${what}演示数据。请另建独立的演示库（APP_ENV=development）再执行。`);
+  }
+}
+
 async function main() {
   const [command, ...args] = process.argv.slice(2);
   const config = loadConfig();
@@ -152,6 +159,7 @@ async function main() {
         break;
       }
       case 'seed-frontdesk-demo': {
+        refuseLiveEnv(config, '前台');
         await migrate(sql);
         // 营业日切换后不久灌数据会跨营业日（PR #13 复核 P2-3）：提示，或按 --previous-day 整体放到前一个营业日
         const t = await demoSeedTime(sql, { timeZone: config.timezone, kind: 'frontdesk', previousDay: args.includes('--previous-day') });
@@ -168,6 +176,7 @@ async function main() {
         break;
       }
       case 'seed-billing-demo': {
+        refuseLiveEnv(config, '结账');
         await migrate(sql);
         const t = await demoSeedTime(sql, { timeZone: config.timezone, kind: 'billing', previousDay: args.includes('--previous-day') });
         if (t.warning) console.warn(`⚠ ${t.warning}`);

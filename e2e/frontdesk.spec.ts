@@ -170,6 +170,23 @@ test.describe('前台流程', () => {
     const board = (await (await p1.request.get('/api/frontdesk/board')).json()) as { tags: BoardTag[] };
     expect(board.tags.find((t) => t.code === tag)!.visit).toBeTruthy();
   });
+
+  test('从状态板点空闲男宾牌：分区跟着手牌固定为男宾，不给女宾选；清掉牌号才能改分区（门店同事反馈）', async ({ page }) => {
+    await login(page, 'xiaozhou');
+    await page.goto('/frontdesk');
+    const [tag] = await freeTags(page, 'male');
+    await page.getByTestId(`tag-${tag}`).click();
+    const dialog = page.getByRole('dialog', { name: '接待发牌' });
+    await expect(dialog.getByLabel('第 1 位牌号')).toHaveValue(tag!);
+    await expect(dialog.getByTestId('guest-zone-0')).toHaveText('男宾');
+    await expect(dialog.getByRole('radiogroup', { name: '第 1 位宾客分区' })).toHaveCount(0);
+    await expect(dialog.getByTestId('guest-row-0')).toContainText('空闲可发');
+    await dialog.getByLabel('第 1 位牌号').fill('');
+    await expect(dialog.getByRole('radiogroup', { name: '第 1 位宾客分区' })).toBeVisible();
+    // 只看不发：关掉对话框
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+  });
 });
 
 test.describe('VIP 柜与丢牌', () => {

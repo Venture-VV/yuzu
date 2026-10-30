@@ -59,6 +59,7 @@ import {
   setTxTimeouts,
 } from './common';
 import { assertAfterVisits, assertNotReused, backfillDetail, BackfillInput, backfillMarkSql, normalizeMark, recordBackfill, resolveBackfill } from './backfill';
+import { openSessionsOf, settleSessionsAtCheckout } from '../clockroom';
 import { applyVisitTicket, resolveTicketType } from './tickets';
 
 // ───────────────────────── 输入 ─────────────────────────
@@ -208,6 +209,7 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
       members,
       graceMinutes: rules.overtimeGraceMinutes,
       pricedAt: at.toISOString(),
+      sessions: await openSessionsOf(tx, ids),
     };
   });
 }
@@ -271,6 +273,8 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
     // 补录：实际离店时间不能早于这几位客人的接待和已挂的明细；补录接待的客人，在店时段里手牌、会员不能已有别的来访
     if (backfill) await assertAfterVisits(tx, at, ids, 'checkout', deps.config.timezone);
     await assertNotReused(tx, at, ids, deps.config.timezone);
+    // 钟房（v0.7.1，账单之后、会员之前加锁）：还没结束的钟单一起收尾，在钟上的按结账时刻下钟
+    await settleSessionsAtCheckout(tx, deps, ids, ctx.actor, at);
 
     // 补选票种（来访已锁）；免票要当场授权，请先在手牌详情里改票种并授权
     for (const t of input.tickets) {

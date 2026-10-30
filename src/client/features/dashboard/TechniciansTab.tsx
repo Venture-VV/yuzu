@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { HandHeart, Hourglass, Star, UsersRound } from 'lucide-react';
+import { Download, HandHeart, Hourglass, Star, UsersRound } from 'lucide-react';
 import { CALL_TYPE_LABELS, gradeLabel, type TechnicianReport } from '@shared/technicians';
 import { api } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
@@ -30,6 +30,15 @@ export function TechniciansTab() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <PeriodPicker value={period} onChange={setPeriod} today={session.today} />
         <p className="text-[12.5px] text-ink-3">按结账计：时段内结账的计入，反结账的冲回；在店未结的不算</p>
+        {can('report.commission') && (
+          <a
+            href={`/api/reports/technicians/commission.csv?from=${period.from}&to=${period.to}`}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-line-strong px-3 text-[13px] font-semibold text-ink-2 hover:border-pine hover:text-pine"
+            data-testid="commission-export"
+          >
+            <Download className="size-4" /> 导出提成明细
+          </a>
+        )}
       </div>
       {q.isPending ? (
         <Skeleton className="h-72" />
@@ -57,10 +66,19 @@ export function TechniciansTab() {
                 {d.totals.clocks ? `${designatedRate}%` : '—'}
                 <span className="block text-[12px] font-semibold text-ink-3">客人点名的钟占比</span>
               </Kpi>
-              <Kpi icon={<UsersRound className="size-4" />} label="上钟技师" tone="lake">
-                {busy.length} 位
-                <span className="block text-[12px] font-semibold text-ink-3">在职 {d.rows.filter((r) => r.active).length} 位</span>
-              </Kpi>
+              {d.totals.commission ? (
+                <Kpi icon={<UsersRound className="size-4" />} label="技师提成合计" tone="lake" testId="technicians-commission">
+                  <Money cents={d.totals.commission.total} />
+                  <span className="block text-[12px] font-semibold text-ink-3">
+                    其中点钟奖励 <Money cents={d.totals.commission.bonus} /> · 上钟技师 {busy.length} 位
+                  </span>
+                </Kpi>
+              ) : (
+                <Kpi icon={<UsersRound className="size-4" />} label="上钟技师" tone="lake">
+                  {busy.length} 位
+                  <span className="block text-[12px] font-semibold text-ink-3">在职 {d.rows.filter((r) => r.active).length} 位</span>
+                </Kpi>
+              )}
             </div>
 
             {d.rows.length === 0 ? (
@@ -68,7 +86,7 @@ export function TechniciansTab() {
                 还没有技师。{can('technician.manage') && <Link to="/admin/technicians" className="font-semibold text-pine hover:underline">去后台添加技师</Link>}
               </Card>
             ) : (
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)]">
                 <Card className="p-5">
                   <SectionTitle>钟数排行</SectionTitle>
                   <HBars
@@ -80,21 +98,22 @@ export function TechniciansTab() {
                 </Card>
                 <Card className="overflow-hidden">
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[520px] text-[13px]" data-testid="technicians-table">
+                    <table className="w-full min-w-[560px] text-[13px]" data-testid="technicians-table">
                       <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
                         <tr>
-                          <th className="px-3 py-2 text-left">技师</th>
-                          <th className="px-3 py-2 text-left">等级</th>
-                          <th className="px-3 py-2 text-right">钟数</th>
-                          <th className="px-3 py-2 text-right">{CALL_TYPE_LABELS.designated}</th>
-                          <th className="px-3 py-2 text-right">{CALL_TYPE_LABELS.rotation}</th>
-                          <th className="px-3 py-2 text-right">金额</th>
+                          <th className="px-2.5 py-2 text-left">技师</th>
+                          <th className="px-2.5 py-2 text-left">等级</th>
+                          <th className="px-2.5 py-2 text-right">钟数</th>
+                          <th className="px-2.5 py-2 text-right">{CALL_TYPE_LABELS.designated}</th>
+                          <th className="px-2.5 py-2 text-right">{CALL_TYPE_LABELS.rotation}</th>
+                          <th className="px-2.5 py-2 text-right">金额</th>
+                          {d.totals.commission && <th className="px-2.5 py-2 text-right">提成</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-line/70">
                         {d.rows.map((r) => (
                           <tr key={r.technicianId} className={cn(!r.active && 'text-ink-3')} data-testid={`technicians-row-${r.techNo}`}>
-                            <td className="px-3 py-2">
+                            <td className="px-2.5 py-2">
                               <span className="num font-bold">{r.techNo}</span> <span className="font-semibold">{r.name}</span>
                               {!r.active && (
                                 <Badge className="ml-1.5" tone="clay">
@@ -102,27 +121,37 @@ export function TechniciansTab() {
                                 </Badge>
                               )}
                             </td>
-                            <td className="px-3 py-2 text-ink-3">{gradeLabel(r.grade)}</td>
-                            <td className="num px-3 py-2 text-right font-bold">{r.clocks}</td>
-                            <td className="num px-3 py-2 text-right">{r.designated}</td>
-                            <td className="num px-3 py-2 text-right">{r.rotation}</td>
-                            <td className="px-3 py-2 text-right">
+                            <td className="px-2.5 py-2 text-ink-3">{gradeLabel(r.grade)}</td>
+                            <td className="num px-2.5 py-2 text-right font-bold">{r.clocks}</td>
+                            <td className="num px-2.5 py-2 text-right">{r.designated}</td>
+                            <td className="num px-2.5 py-2 text-right">{r.rotation}</td>
+                            <td className="px-2.5 py-2 text-right">
                               <Money cents={r.amount} className="font-semibold" />
                             </td>
+                            {r.commission && (
+                              <td className="px-2.5 py-2 text-right" title={`基本 ¥${(r.commission.base / 100).toFixed(2)} + 点钟奖励 ¥${(r.commission.bonus / 100).toFixed(2)}`}>
+                                <Money cents={r.commission.total} className="font-semibold text-pine" />
+                              </td>
+                            )}
                           </tr>
                         ))}
                       </tbody>
                       <tfoot className="border-t border-line bg-paper-2/40 font-bold">
                         <tr>
-                          <td className="px-3 py-2" colSpan={2}>
+                          <td className="px-2.5 py-2" colSpan={2}>
                             合计
                           </td>
-                          <td className="num px-3 py-2 text-right">{d.totals.clocks}</td>
-                          <td className="num px-3 py-2 text-right">{d.totals.designated}</td>
-                          <td className="num px-3 py-2 text-right">{d.totals.rotation}</td>
-                          <td className="px-3 py-2 text-right">
+                          <td className="num px-2.5 py-2 text-right">{d.totals.clocks}</td>
+                          <td className="num px-2.5 py-2 text-right">{d.totals.designated}</td>
+                          <td className="num px-2.5 py-2 text-right">{d.totals.rotation}</td>
+                          <td className="px-2.5 py-2 text-right">
                             <Money cents={d.totals.amount} />
                           </td>
+                          {d.totals.commission && (
+                            <td className="px-2.5 py-2 text-right">
+                              <Money cents={d.totals.commission.total} />
+                            </td>
+                          )}
                         </tr>
                       </tfoot>
                     </table>

@@ -91,6 +91,6 @@ export interface DutyExtras {
   /** 各小时的结账张数与接待人数（营业日从切换时刻起算） */
   hourly: { hour: number; checkouts: number; arrivals: number }[];
   departments: { category: string; quantity: number; amount: number }[];
-  /** 在店最久的客人（前 8 位） */
-  longStays: { visitId: number; tagCode: string; guest: string; checkedInAt: string; amountCents: number }[];
+  /** 在店最久的客人（前 8 位）；没有「查看在店手牌」权限的岗位为 null（v0.7.1） */
+  longStays: { visitId: number; tagCode: string; guest: string; checkedInAt: string; amountCents: number }[] | null;
 }

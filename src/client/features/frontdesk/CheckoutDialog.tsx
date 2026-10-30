@@ -369,7 +369,12 @@ export function CheckoutDialog({
         ) : preview.error ? (
           <Notice tone="error" title={errorMessage(preview.error)} />
         ) : (
-          p && <ReviewTable preview={p} amounts={amounts} ticketPick={ticketPick} onPick={(id, t) => edit(() => setTicketPick((x) => ({ ...x, [id]: t })))} />
+          p && (
+            <>
+              {(p.sessions ?? []).length > 0 && <SessionsNotice sessions={p.sessions} />}
+              <ReviewTable preview={p} amounts={amounts} ticketPick={ticketPick} onPick={(id, t) => edit(() => setTicketPick((x) => ({ ...x, [id]: t })))} />
+            </>
+          )
         )}
 
         {/* 收款 */}
@@ -434,6 +439,25 @@ export function CheckoutDialog({
         {op.state.phase === 'error' && <Notice tone="error" title={op.state.message} />}
       </div>
     </Dialog>
+  );
+}
+
+/** 钟房里还没结束的钟（v0.7.1）：在钟上的结账时下钟；还没上钟的按已做完记，客人没做的先到钟房取消派钟 */
+function SessionsNotice({ sessions }: { sessions: CheckoutPreview['sessions'] }) {
+  const waiting = sessions.some((s) => s.status === 'waiting');
+  return (
+    <div data-testid="checkout-sessions">
+      <Notice tone="warning" title={waiting ? '有技师还没上钟：客人没做的项目，请先到钟房取消派钟再结账' : '有技师还在钟上：结账时自动下钟'}>
+        <ul className="mt-1 space-y-0.5">
+          {sessions.map((s) => (
+            <li key={s.sessionNo}>
+              <span className="num font-semibold">{s.tagCode}</span> · {s.techNo} 号 {s.techName} · {s.itemName} × {s.clocks} ·{' '}
+              {s.status === 'waiting' ? '还没上钟（结账后按已做完记）' : '在钟上（结账时下钟）'}
+            </li>
+          ))}
+        </ul>
+      </Notice>
+    </div>
   );
 }
 

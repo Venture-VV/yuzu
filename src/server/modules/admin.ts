@@ -11,6 +11,7 @@ import { APPROVAL_RULE_LABELS, type ApprovalRules } from '@shared/inventory';
 import { DEDUCTION_RULE_LABELS, describeHours, ROLE_LABELS } from '@shared/labels';
 import { levelName } from '@shared/members';
 import { CALL_TYPE_LABELS, DEFAULT_TECHNICIAN_RULES } from '@shared/technicians';
+import { AFTER_DESIGNATED_LABELS, AFTER_ROTATION_LABELS, DEFAULT_CLOCKROOM_RULES, DEFAULT_COMMISSION_RULES, describeCommissionBase } from '@shared/clockroom';
 import { formatYuan } from '@shared/money';
 import {
   ALL_PERMISSIONS,
@@ -37,6 +38,8 @@ import { loadFrontdeskRules } from './frontdesk/common';
 import { DEFAULT_APPROVAL_RULES, loadInventorySettings } from './inventory/common';
 import { DEFAULT_SETTINGS, loadSettings, SETTINGS_KEYS } from './settings';
 import { loadTechnicianRules } from './technicians';
+import { loadClockroomRules } from './clockroom';
+import { commissionSettings } from './commission';
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const onOff = (v: boolean, on: string, off: string) => (v ? on : off);
@@ -175,6 +178,32 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
     key: 'technician_rules.defaultCallType', group: 'technicians', label: '默认上钟方式', value: CALL_TYPE_LABELS[tech.defaultCallType], defaultValue: CALL_TYPE_LABELS[techd.defaultCallType],
     pending: true, section: 'technicians', hint: '客人点名的改成点钟', current: tech.defaultCallType, dflt: techd.defaultCallType, metaKey: 'technician_rules',
   });
+  // ── 钟房与提成（v0.7.1）──
+  const cr = await loadClockroomRules(db);
+  const crd = DEFAULT_CLOCKROOM_RULES;
+  const rejectText = (r: typeof cr) => `${r.rejectKeepsPlace ? '回到原位' : '不回原位'}${r.rejectEndAfter ? `，连续 ${r.rejectEndAfter} 次排到队尾` : ''}`;
+  add({ key: 'clockroom_rules.afterRotation', group: 'technicians', label: '轮钟排尾', value: AFTER_ROTATION_LABELS[cr.afterRotation], defaultValue: AFTER_ROTATION_LABELS[crd.afterRotation], pending: true, section: 'technicians', current: cr.afterRotation, dflt: crd.afterRotation, metaKey: 'clockroom_rules' });
+  add({ key: 'clockroom_rules.afterDesignated', group: 'technicians', label: '点钟后的排位', value: AFTER_DESIGNATED_LABELS[cr.afterDesignated], defaultValue: AFTER_DESIGNATED_LABELS[crd.afterDesignated], pending: true, section: 'technicians', current: cr.afterDesignated, dflt: crd.afterDesignated, metaKey: 'clockroom_rules' });
+  add({ key: 'clockroom_rules.reject', group: 'technicians', label: '被退钟、取消派钟', value: rejectText(cr), defaultValue: rejectText(crd), pending: true, section: 'technicians', current: [cr.rejectKeepsPlace, cr.rejectEndAfter], dflt: [crd.rejectKeepsPlace, crd.rejectEndAfter], metaKey: 'clockroom_rules' });
+  add({ key: 'clockroom_rules.backToEnd', group: 'technicians', label: '休息回牌', value: onOff(cr.backToEnd, '排到队尾', '回到原位'), defaultValue: '排到队尾', pending: true, section: 'technicians', current: cr.backToEnd, dflt: crd.backToEnd, metaKey: 'clockroom_rules' });
+  add({ key: 'clockroom_rules.skipNeedsReason', group: 'technicians', label: '轮钟跳过排第一的技师', value: onOff(cr.skipNeedsReason, '必须写原因（记钟房日志）', '不用写原因'), defaultValue: '必须写原因（记钟房日志）', pending: true, section: 'technicians', current: cr.skipNeedsReason, dflt: crd.skipNeedsReason, metaKey: 'clockroom_rules' });
+  add({ key: 'clockroom_rules.extensionAsDesignated', group: 'technicians', label: '加钟', value: onOff(cr.extensionAsDesignated, '原技师继续，记为点钟', '原技师继续，按原上钟方式'), defaultValue: '原技师继续，记为点钟', pending: true, section: 'technicians', current: cr.extensionAsDesignated, dflt: crd.extensionAsDesignated, metaKey: 'clockroom_rules' });
+  add({ key: 'clockroom_rules.minutes', group: 'technicians', label: '上钟计时', value: `没写时长的项目一钟 ${cr.defaultMinutes} 分钟；提前 ${cr.remindMinutes} 分钟提醒快到钟`, defaultValue: `没写时长的项目一钟 ${crd.defaultMinutes} 分钟；提前 ${crd.remindMinutes} 分钟提醒快到钟`, pending: true, section: 'technicians', current: [cr.defaultMinutes, cr.remindMinutes], dflt: [crd.defaultMinutes, crd.remindMinutes], metaKey: 'clockroom_rules' });
+  const cs = await commissionSettings(db);
+  const commissionText = (r: typeof cs.current.rules) => `${describeCommissionBase(r.base)}；点钟每钟另加 ${formatYuan(r.designatedBonus)}${Object.keys(r.items).length ? `；${Object.keys(r.items).length} 个项目单独设置` : ''}`;
+  entries.push({
+    key: 'commission_rules',
+    group: 'technicians',
+    label: '技师提成',
+    value: commissionText(cs.current.rules),
+    defaultValue: commissionText(DEFAULT_COMMISSION_RULES),
+    isDefault: same(cs.current.rules, DEFAULT_COMMISSION_RULES),
+    pending: true,
+    section: 'technicians',
+    hint: '按结账时刻的规则版本计算，改规则不影响已结的钟',
+    updatedAt: cs.current.effectiveAt,
+    updatedBy: cs.current.createdByName,
+  });
   // ── 库存与采购 ──
   add({ key: 'inventory_scope_name', group: 'inventory', label: '库存范围', value: inv.scopeName, defaultValue: '后勤总库', pending: true, section: 'rules', current: inv.scopeName, dflt: '后勤总库', metaKey: 'inventory_scope_name' });
   // 迁移 002 写入的初始口径
@@ -236,6 +265,8 @@ function describeChange(action: string, detail: Record<string, unknown>): string
       if (detail.key === 'frontdesk_rules') return '修改了前台规则与会员等级';
       if (detail.key === 'role_permissions') return '调整了岗位权限';
       if (detail.key === 'technician_rules') return '修改了技师规则';
+      if (detail.key === 'clockroom_rules') return '修改了钟房与轮钟规则';
+      if (detail.key === 'commission_rules') return '修改了技师提成规则';
       const after = (detail.after ?? {}) as Record<string, unknown>;
       const keys = Object.keys(after).map((x) => SETTING_LABELS[x] ?? x);
       return keys.length ? `修改了${keys.join('、')}` : '修改了经营规则';

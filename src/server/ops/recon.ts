@@ -6,7 +6,7 @@
 //   03-部门参考表.csv  结账明细按项目分类（部门）汇总：当天结的计正数、当天反结账的计负数，合计 = 营业额（净额）
 //   04-异常清单.csv    反结账、作废明细、撤销误开的牌、改票种、免票入场、会员撤销与其他日结异常
 //   05-交班.csv        当天的班次：备用金、各收款方式、应有现金、实点、长短款
-//   06-技师业绩.csv    每位技师的钟数、点钟 / 轮钟与金额（v0.7.0，与部门参考表同一口径），供与钟房的钟单核对
+//   06-技师业绩.csv    每位技师的钟数、点钟 / 轮钟、金额与提成（v0.7.0 / v0.7.1，与部门参考表同一口径），供与钟房的钟单核对
 // 优惠 / 免单与降档 / 免票授权在资金轨 R1.2 合并后加入异常清单。
 
 import { businessDateOf, businessDayStart } from '@shared/business-date';
@@ -382,10 +382,22 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
   files.push({
     name: '06-技师业绩.csv',
     content: toCsv([
-      ['工号', '技师', '等级', '状态', '钟数', `${CALL_TYPE_LABELS.designated}`, `${CALL_TYPE_LABELS.rotation}`, '金额（元）'],
-      ...tr.rows.map((r) => [r.techNo, r.name, gradeLabel(r.grade), r.active ? '在职' : '已停用', r.clocks, r.designated, r.rotation, yuan(r.amount)]),
-      ['合计', '', '', '', tr.totals.clocks, tr.totals.designated, tr.totals.rotation, yuan(tr.totals.amount)],
-      ['未指定技师的技师项目', '', '', '', tr.unassigned.clocks, '', '', yuan(tr.unassigned.amount)],
+      ['工号', '技师', '等级', '状态', '钟数', `${CALL_TYPE_LABELS.designated}`, `${CALL_TYPE_LABELS.rotation}`, '金额（元）', '基本提成（元）', '点钟奖励（元）', '提成合计（元）'],
+      ...tr.rows.map((r) => [
+        r.techNo,
+        r.name,
+        gradeLabel(r.grade),
+        r.active ? '在职' : '已停用',
+        r.clocks,
+        r.designated,
+        r.rotation,
+        yuan(r.amount),
+        yuan(r.commission?.base ?? 0),
+        yuan(r.commission?.bonus ?? 0),
+        yuan(r.commission?.total ?? 0),
+      ]),
+      ['合计', '', '', '', tr.totals.clocks, tr.totals.designated, tr.totals.rotation, yuan(tr.totals.amount), yuan(tr.totals.commission?.base ?? 0), yuan(tr.totals.commission?.bonus ?? 0), yuan(tr.totals.commission?.total ?? 0)],
+      ['未指定技师的技师项目', '', '', '', tr.unassigned.clocks, '', '', yuan(tr.unassigned.amount), '', '', ''],
     ]),
   });
 
@@ -422,7 +434,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
       '  03-部门参考表.csv   结账明细按项目分类（部门）汇总，合计 = 应收；后面单列优惠 / 免单与净营业额',
       '  04-异常清单.csv     反结账、优惠 / 免单、作废明细、撤销误开的牌（每一次都列，写明是否超过更正时限；日结异常清单只列超过时限的）、改票种（降档、改为免票写明授权人与原因）、免票入场、补录纸质单、会员撤销与其他异常',
       '  05-交班.csv         当天的班次、反结账退现金与长短款',
-      '  06-技师业绩.csv     每位技师的钟数、点钟 / 轮钟与金额（与部门参考表同一口径），与钟房的钟单核对',
+      '  06-技师业绩.csv     每位技师的钟数、点钟 / 轮钟、金额与提成（与部门参考表同一口径，提成按结账时刻的提成规则），与钟房的钟单核对',
       '',
     ].join('\n'),
   });

@@ -157,6 +157,8 @@ export interface CheckoutPreview {
   members: { id: number; name: string; memberNo: string; status: 'active' | 'frozen'; principalBalance: number; bonusBalance: number }[];
   graceMinutes: number;
   pricedAt: string;
+  /** 钟房里还没结束的钟单（v0.7.1）：结账时一起收尾，在钟上的下钟，还没上钟的按已做完记 */
+  sessions: { sessionNo: string; tagCode: string; techNo: string; techName: string; itemName: string; clocks: number; status: 'waiting' | 'serving' }[];
 }
 
 export interface CheckoutPayment {
@@ -273,7 +275,8 @@ export interface DashboardData {
    * 在店未结：unsettled 是已挂明细；ticketEstimate 是按此刻在店时长估算的门票（结账时才挂到账单），
    * noTicket 是还没选票种、没有计入估算的人数
    */
-  inStore: { count: number; unsettled: number; ticketEstimate: number; noTicket: number };
+  /** 在店客人：人数、已挂未结、门票估算；没有「查看在店手牌」权限的岗位为 null（v0.7.1，测试会话 PR #15 问题 1） */
+  inStore: { count: number; unsettled: number; ticketEstimate: number; noTicket: number } | null;
   todayStats: {
     checkouts: number;
     guests: number;

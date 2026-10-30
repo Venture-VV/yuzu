@@ -97,12 +97,15 @@ async function visitSegments(tx: Tx, visitId: number, end: Date) {
     SELECT tag_id, since, least(until, ${end}) AS until FROM raw WHERE since < least(until, ${end})`;
 }
 
-/** 会员的来访与 [from, to) 重叠的第一笔（不含 exclude 里的来访） */
+/**
+ * 会员的来访与 [from, to) 重叠的第一笔（不含 exclude 里的来访）。离店按第一次结账的时刻（与手牌时段、前台自检同一口径）：
+ * 反结账后重结只是更正收款，客人早已离店，不能把重结的时刻当离店（Codex v0.7.0 复测 P2）。
+ */
 async function memberOverlap(tx: Tx, memberIds: number[], from: Date, to: Date, exclude: number[]) {
   const [hit] = await tx<{ name: string; visitNo: string; since: string; until: string | null }[]>`
-    SELECT m.name, v.visit_no, v.checked_in_at AS since, v.closed_at AS until FROM visits v JOIN members m ON m.id = v.member_id
+    SELECT m.name, v.visit_no, v.checked_in_at AS since, coalesce(v.ticket_end_at, v.closed_at) AS until FROM visits v JOIN members m ON m.id = v.member_id
     WHERE v.member_id IN ${tx(memberIds)} AND v.status <> 'cancelled' AND v.id NOT IN ${tx(exclude.length ? exclude : [0])}
-      AND v.checked_in_at < ${to} AND (v.closed_at IS NULL OR v.closed_at > ${from})
+      AND v.checked_in_at < ${to} AND (coalesce(v.ticket_end_at, v.closed_at) IS NULL OR coalesce(v.ticket_end_at, v.closed_at) > ${from})
     ORDER BY v.checked_in_at LIMIT 1`;
   return hit;
 }
