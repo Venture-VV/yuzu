@@ -5,7 +5,7 @@ import { loadConfig, type AppConfig } from '../src/server/config';
 import { createSql, type Sql } from '../src/server/db';
 import { migrate } from '../src/server/migrate';
 import { createStaff } from '../src/server/modules/staff';
-import { minuteOfDay } from '../src/shared/business-date';
+import { demoSeedWindow } from '../src/server/ops/demo-time';
 
 export const TEST_DB =
   process.env.TEST_DATABASE_URL ?? 'postgres://yuzu:yuzu_dev_only@127.0.0.1:5432/yuzu_test';
@@ -127,6 +127,6 @@ export async function setRule(ctx: TestContext, deductionRule: string) {
  * 这段时间把灌数据的时刻挪到 05:30，演示数据整体落在前一个营业日、彼此一致。
  */
 export function demoSeedTime(now = new Date()): Date {
-  const m = minuteOfDay(now, 'Asia/Shanghai');
-  return m >= 360 && m < 690 ? new Date(now.getTime() - (m - 330) * 60_000) : now;
+  // 与命令行 --previous-day 同一规则（src/server/ops/demo-time.ts）
+  return demoSeedWindow(now, 'Asia/Shanghai', 6)?.anchor ?? now;
 }

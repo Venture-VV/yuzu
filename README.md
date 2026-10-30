@@ -170,6 +170,8 @@ npm run cli -- seed-frontdesk-demo   # 试用 / 正式环境、或库里已有�
 npm run cli -- seed-billing-demo     # 在前台演示数据上写入结账、反结账与交班（收银员演示账号 chenyin）
 ```
 
+演示单据的时间按执行时刻往前推（收银员的班次在 5 小时前开班）。在营业日切换（默认 06:00）后 5 个半小时内执行时，班次会落在前一个营业日、结账落在当天，日结与固定预期对不上，命令会提示；这时两条命令都加 `--previous-day`，把前台与结账演示整体放到前一个营业日（固定预期按那个营业日核对），或等到 11:30 之后再执行。
+
 结账与交班的固定预期结果见 [`src/server/demo/billing-expected.json`](src/server/demo/billing-expected.json)（请在营业日切换时刻之后 1 小时以上执行）。
 
 常用命令：

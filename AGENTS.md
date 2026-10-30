@@ -26,6 +26,7 @@ node dist/server/cli.js seed-demo          # 会员与项目
 node dist/server/cli.js seed-inventory-demo
 node dist/server/cli.js seed-frontdesk-demo
 node dist/server/cli.js seed-billing-demo  # 结账、反结账与交班（建在前台演示数据上）
+                                           # 营业日切换后 5 个半小时内执行会提示跨营业日；两条都加 --previous-day 整体放到前一个营业日
 node dist/server/cli.js check              # 会员（含营业口径）、库存、前台自检，全部 ✓ 才算一致
 node dist/server/cli.js fingerprint        # 数据指纹（只读）；--expect <摘要> 比对，不一致退出码为 1
 ./scripts/backup.sh                        # 立即备份：临时库试恢复、自检并记下指纹（写 BACKUP_DIR，含 .json 说明）
