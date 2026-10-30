@@ -101,7 +101,7 @@ test.describe('视口冒烟', () => {
     await expectFits(page);
   });
 
-  test('钟房：看板、派钟对话框，开启技师后主导航 12 个入口都看得到（v0.7.1）', async ({ page, isMobile }) => {
+  test('钟房：看板、派钟对话框，开启技师后主导航 8 个入口都看得到（v0.7.1；v0.7.3 起库存等在 ERP）', async ({ page, isMobile }) => {
     await login(page, 'linlan');
     // 只临时打开「技师功能」开关看页面（不派钟、不写业务数据），结束时恢复原样
     const before = (await (await page.request.get('/api/admin/technicians')).json()) as { rules: { enabled: boolean } };
@@ -114,7 +114,7 @@ test.describe('视口冒烟', () => {
         const nav = page.getByRole('navigation', { name: '主导航' });
         const viewport = page.viewportSize()!;
         const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
-        for (const name of ['前台', '钟房', '会员', '流水', '日结', '交班', '看板', '库存', '采购', '货款', '待办', '后台']) {
+        for (const name of ['前台', '钟房', '会员', '流水', '日结', '交班', '看板', '后台']) {
           const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
           expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
           expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
@@ -134,7 +134,7 @@ test.describe('视口冒烟', () => {
     }
   });
 
-  test('餐饮：点单、桌台、厨房出品、估清与后台「餐饮」，开启技师与餐饮后主导航 13 个入口都看得到（S5）', async ({ page, isMobile }) => {
+  test('餐饮：点单、桌台、厨房出品、估清与后台「餐饮」，开启技师与餐饮后主导航 9 个入口都看得到（S5）', async ({ page, isMobile }) => {
     await login(page, 'linlan');
     // 只临时打开两个功能开关看页面（不点单、不写业务数据），结束时恢复原样
     const tech = (await (await page.request.get('/api/admin/technicians')).json()) as { rules: { enabled: boolean } };
@@ -150,7 +150,7 @@ test.describe('视口冒烟', () => {
         const nav = page.getByRole('navigation', { name: '主导航' });
         const viewport = page.viewportSize()!;
         const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
-        for (const name of ['前台', '钟房', '餐饮', '会员', '流水', '日结', '交班', '看板', '库存', '采购', '货款', '待办', '后台']) {
+        for (const name of ['前台', '钟房', '餐饮', '会员', '流水', '日结', '交班', '看板', '后台']) {
           const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
           expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
           expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
@@ -190,10 +190,38 @@ test.describe('视口冒烟', () => {
     const nav = page.getByRole('navigation', { name: '主导航' });
     const viewport = page.viewportSize()!;
     const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
-    for (const name of ['前台', '会员', '流水', '日结', '交班', '看板', '库存', '采购', '货款', '待办', '后台']) {
+    for (const name of ['前台', '会员', '流水', '日结', '交班', '看板', '后台']) {
       const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
       expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
       expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
+    }
+    // v0.7.3：库存、采购、货款、待办在 ERP 工作区，不在主导航
+    for (const name of ['库存', '采购', '货款', '待办']) await expect(nav.getByRole('link', { name, exact: true })).toHaveCount(0);
+  });
+
+  test('ERP 工作区：首页、库存、采购、应付货款、审批待办、营业数据、模块设置都不横向滚动，实例标识常显（v0.7.3）', async ({ page, isMobile }) => {
+    await login(page, 'linlan');
+    await page.goto('/erp');
+    await expect(page.getByTestId('erp-shell')).toBeVisible();
+    await expect(page.getByTestId('erp-instance')).toBeVisible();
+    await expect(page.getByTestId('erp-modules')).toBeVisible();
+    await expectFits(page);
+    const navName = isMobile || (page.viewportSize()?.width ?? 0) < 1024 ? 'ERP 分区' : 'ERP 导航';
+    const erpNav = page.getByRole('navigation', { name: navName });
+    for (const name of ['ERP 首页', '库存', '采购', '应付货款', '审批待办', '营业数据', '模块设置']) await expect(erpNav.getByRole('link', { name, exact: true })).toHaveCount(1);
+    for (const [url, testId] of [
+      ['/inventory', null],
+      ['/purchasing', null],
+      ['/payables', null],
+      ['/todo', null],
+      ['/erp/revenue', 'erp-revenue'],
+      ['/erp/modules', 'erp-module-switches'],
+    ] as const) {
+      await page.goto(url);
+      await expect(page.getByTestId('erp-shell')).toBeVisible();
+      if (testId) await expect(page.getByTestId(testId)).toBeVisible();
+      await page.waitForLoadState('networkidle');
+      await expectFits(page);
     }
   });
 

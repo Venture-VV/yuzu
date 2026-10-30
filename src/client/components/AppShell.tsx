@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Boxes, CalendarCheck2, ClipboardCheck, ConciergeBell, HandCoins, Hourglass, Inbox, KeyRound, LayoutDashboard, LogOut, ReceiptText, Settings2, ShoppingCart, UsersRound, UtensilsCrossed } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Building2, CalendarCheck2, ClipboardCheck, ConciergeBell, Hourglass, KeyRound, LayoutDashboard, LogOut, ReceiptText, Settings2, UsersRound, UtensilsCrossed } from 'lucide-react';
 import { describeBusinessHours, isOpenAt, minuteOfDay } from '@shared/business-date';
 import { describeDate, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
 import { ADMIN_PERMISSIONS } from '@shared/admin';
@@ -13,6 +13,7 @@ import { LogoMark } from './Brand';
 import { InstanceTag } from './InstanceTag';
 import { PendingOpsBanner } from './PendingOpsBanner';
 import { FrontdeskPendingBanner } from '../features/frontdesk/PendingBanner';
+import { useErpAccess } from '../features/erp/access';
 import { Badge } from './ui';
 
 interface NavItem {
@@ -26,7 +27,7 @@ interface NavItem {
   when?: (session: ReturnType<typeof useSession>) => boolean;
 }
 
-// 前台与会员储值、库存采购是独立的业务组，导航中用分隔线区分
+// 前台与会员储值、管理后台是独立的业务组，导航中用分隔线区分；库存、采购、货款、待办在 ERP 工作区（用户菜单「进入 ERP」）
 const NAV: NavItem[][] = [
   [
     { to: '/frontdesk', label: '前台', icon: ConciergeBell, perm: 'frontdesk.read' },
@@ -38,12 +39,6 @@ const NAV: NavItem[][] = [
     { to: '/shift', label: '交班', icon: ClipboardCheck, perm: 'ledger.readToday' },
     { to: '/dashboard', label: '看板', icon: LayoutDashboard, perm: ['ledger.readToday', 'report.executive', 'report.members', 'report.technicians'] },
   ],
-  [
-    { to: '/inventory', label: '库存', icon: Boxes, perm: 'inventory.read' },
-    { to: '/purchasing', label: '采购', icon: ShoppingCart, perm: ['purchase.manage', 'inventory.approve', 'payable.read'] },
-    { to: '/payables', label: '货款', icon: HandCoins, perm: 'payable.read' },
-    { to: '/todo', label: '待办', icon: Inbox, perm: 'inventory.approve' },
-  ],
   // 管理后台是单独的一套页面（规则、价目、手牌池、员工与权限）
   [{ to: '/admin', label: '后台', icon: Settings2, perm: [...ADMIN_PERMISSIONS] }],
 ];
@@ -51,13 +46,8 @@ const NAV: NavItem[][] = [
 export function AppShell({ children }: { children: ReactNode }) {
   const can = useCan();
   const session = useSession();
-  const todo = useQuery({
-    queryKey: ['inv', 'todo-count'],
-    queryFn: () => api.get<{ count: number }>('/api/inventory/todo-count'),
-    enabled: can('inventory.approve'),
-    refetchInterval: 60_000,
-  });
-  const badges: Record<string, number | undefined> = { '/todo': todo.data?.count };
+  // ERP（库存、采购、货款、待办）在单独的工作区，主导航里没有（v0.7.3）；待办的数字在 ERP 导航上
+  const badges: Record<string, number | undefined> = {};
   return (
     <div className="flex h-dvh min-h-0 bg-paper">
       <nav
@@ -120,6 +110,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 function UserMenu() {
   const session = useSession();
+  const erp = useErpAccess();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -152,6 +143,7 @@ function UserMenu() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
+        data-testid="user-menu"
         className="flex size-11 items-center justify-center rounded-full bg-yuzu text-[15px] font-bold text-ink ring-2 ring-white/15 transition hover:ring-white/35 short:size-9 short:text-[14px]"
         title={`${session.staff.displayName} · ${roleText(session.staff)}`}
       >
@@ -166,6 +158,12 @@ function UserMenu() {
             </p>
           </div>
           <div className="my-1 h-px bg-line" />
+          {erp.canEnter && (
+            // ERP 不在主导航里显示（店主 2026-10-30 定）：有 ERP 权限的人从这里进
+            <MenuItem icon={<Building2 className="size-4" />} onClick={() => { setOpen(false); navigate('/erp'); }} testId="user-menu-erp">
+              进入 ERP
+            </MenuItem>
+          )}
           <MenuItem icon={<KeyRound className="size-4" />} onClick={() => { setOpen(false); navigate('/password'); }}>
             修改密码
           </MenuItem>
@@ -182,12 +180,13 @@ function roleText(staff: { role: keyof typeof ROLE_LABELS; duties: (keyof typeof
   return [ROLE_LABELS[staff.role], ...staff.duties.map((d) => DUTY_LABELS[d].title)].join(' · ');
 }
 
-function MenuItem({ icon, children, onClick }: { icon: ReactNode; children: ReactNode; onClick: () => void }) {
+function MenuItem({ icon, children, onClick, testId }: { icon: ReactNode; children: ReactNode; onClick: () => void; testId?: string }) {
   return (
     <button
       type="button"
       role="menuitem"
       onClick={onClick}
+      data-testid={testId}
       className="flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-[14px] font-medium text-ink-2 hover:bg-paper-2 hover:text-ink"
     >
       {icon}

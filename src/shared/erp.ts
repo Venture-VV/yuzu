@@ -45,7 +45,8 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     path: '/purchasing',
     pages: ['/purchasing'],
     apis: ['/api/purchase-orders', '/api/purchase-baseline'],
-    perms: ['purchase.manage', 'inventory.approve', 'payable.read'],
+    // 物资经办要看采购单、按单收货（采购单的读接口按「查看库存与物资单据」开放）
+    perms: ['inventory.read', 'purchase.manage', 'inventory.approve', 'payable.read'],
     defaultEnabled: true,
     requires: ['inventory'],
   },
