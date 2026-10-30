@@ -92,6 +92,10 @@ export const PERMISSIONS = {
   'technician.manage': { roles: ['owner', 'store_manager'] },
   /** 钟房：上牌、派钟、上钟、下钟、加钟、退钟（v0.7.1，待确认：前台岗位都能做；派钟、加钟、退钟还要能挂账） */
   'technician.dispatch': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
+  /** 餐饮点单：按手牌给在店客人点菜（挂账）、催单、上菜（S5 第一步，待确认：前台岗位都能做；下单还要能挂账） */
+  'dining.order': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
+  /** 厨房出品屏：开始做、出餐、估清（S5 第一步，待确认：前台岗位与后勤人员；厨房可以用后勤账号） */
+  'dining.kitchen': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk', 'backoffice'] },
   'settings.manage': { roles: ['owner'] },
   'audit.read': { roles: ['owner', 'store_manager'] },
   // ── 数据看板（v0.6.0；当日看板仍按「查看当日流水与日结」）──
@@ -196,6 +200,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'catalog.manage': '管理充值套餐与消费项目',
   'technician.manage': '维护技师名册',
   'technician.dispatch': '钟房派钟、上下钟、加钟、退钟、上牌',
+  'dining.order': '餐饮点单、催单、上菜',
+  'dining.kitchen': '厨房出品屏：开始做、出餐、估清',
   'settings.manage': '修改经营规则设置',
   'audit.read': '查看操作审计',
   'report.executive': '看经营总览（任选时段、环比）',
@@ -211,7 +217,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   },
   {
     title: '前台手牌与账单',
-    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.backfill', 'technician.dispatch'],
+    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen'],
   },
   {
     title: '库存与采购',

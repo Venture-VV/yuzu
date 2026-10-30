@@ -67,6 +67,8 @@ export interface SessionInfo {
   hasSyntheticData: boolean;
   /** 技师功能已开启（v0.7.1：主导航的「钟房」只在开启后显示） */
   technicians: boolean;
+  /** 餐饮功能已开启（主导航的「餐饮」只在开启后显示） */
+  dining: boolean;
 }
 
 export interface MemberSummary {

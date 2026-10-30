@@ -6,6 +6,7 @@ import { AdminHome } from './AdminHome';
 import { AdminPage } from './AdminShell';
 import { AuditTab } from './AuditTab';
 import { CatalogTab } from './CatalogTab';
+import { DiningSection } from './DiningSection';
 import { MembersSection } from './MembersSection';
 import { OpeningTab } from './OpeningTab';
 import { PermissionsSection } from './PermissionsSection';
@@ -44,6 +45,7 @@ export const adminRoutes: RouteObject[] = [
     ),
   },
   { path: 'technicians', element: <TechniciansSection /> },
+  { path: 'dining', element: <DiningSection /> },
   {
     path: 'staff',
     element: (

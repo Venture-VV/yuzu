@@ -60,6 +60,7 @@ import {
 } from './common';
 import { assertAfterVisits, assertNotReused, backfillDetail, BackfillInput, backfillMarkSql, normalizeMark, recordBackfill, resolveBackfill } from './backfill';
 import { openSessionsOf, settleSessionsAtCheckout } from '../clockroom';
+import { unservedDishesOf } from '../dining';
 import { applyVisitTicket, resolveTicketType } from './tickets';
 
 // ───────────────────────── 输入 ─────────────────────────
@@ -212,6 +213,7 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
       graceMinutes: rules.overtimeGraceMinutes,
       pricedAt: at.toISOString(),
       sessions: await openSessionsOf(tx, ids),
+      dishes: await unservedDishesOf(tx, ids),
     };
   });
 }

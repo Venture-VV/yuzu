@@ -20,6 +20,7 @@ const SECTION_HINTS: Partial<Record<AdminSection, string>> = {
   catalog: '充值套餐、消费项目与价目表、票种票价',
   tags: '手牌池、柜号导入、前台规则',
   technicians: '技师名册、选技师规则、需要技师的项目',
+  dining: '餐饮开关、出品档口、菜品送到哪个档口',
   staff: '账号、岗位、库存职责、重置密码',
   permissions: '各岗位能做什么，店主可以勾选调整',
   opening: '旧系统会员余额导入与作废',

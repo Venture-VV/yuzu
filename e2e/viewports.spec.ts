@@ -134,6 +134,44 @@ test.describe('视口冒烟', () => {
     }
   });
 
+  test('餐饮：点单、厨房出品、估清与后台「餐饮」，开启技师与餐饮后主导航 13 个入口都看得到（S5）', async ({ page, isMobile }) => {
+    await login(page, 'linlan');
+    // 只临时打开两个功能开关看页面（不点单、不写业务数据），结束时恢复原样
+    const tech = (await (await page.request.get('/api/admin/technicians')).json()) as { rules: { enabled: boolean } };
+    const dining = (await (await page.request.get('/api/admin/dining')).json()) as { rules: { enabled: boolean } };
+    if (!tech.rules.enabled) expect((await page.request.put('/api/admin/technicians/rules', { data: { enabled: true } })).ok()).toBe(true);
+    if (!dining.rules.enabled) expect((await page.request.put('/api/admin/dining/rules', { data: { enabled: true } })).ok()).toBe(true);
+    try {
+      await page.goto('/dining');
+      await expect(page.getByTestId('dining-order')).toBeVisible();
+      await expect(page.getByTestId('dining-cart')).toBeVisible();
+      await expectFits(page);
+      if (!isMobile) {
+        const nav = page.getByRole('navigation', { name: '主导航' });
+        const viewport = page.viewportSize()!;
+        const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
+        for (const name of ['前台', '钟房', '餐饮', '会员', '流水', '日结', '交班', '看板', '库存', '采购', '货款', '待办', '后台']) {
+          const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
+          expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
+          expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
+        }
+      }
+      await page.getByTestId('dining-tab-kitchen').click();
+      await expect(page.getByTestId('kitchen')).toBeVisible();
+      await expectFits(page);
+      await page.getByTestId('dining-tab-limits').click();
+      await expect(page.getByTestId('limits')).toBeVisible();
+      await expectFits(page);
+      await page.goto('/admin/dining');
+      await expect(page.getByTestId('dining-rules-card')).toBeVisible();
+      await expect(page.getByTestId('dining-items')).toBeVisible();
+      await expectFits(page);
+    } finally {
+      if (!dining.rules.enabled) expect((await page.request.put('/api/admin/dining/rules', { data: { enabled: false } })).ok()).toBe(true);
+      if (!tech.rules.enabled) expect((await page.request.put('/api/admin/technicians/rules', { data: { enabled: false } })).ok()).toBe(true);
+    }
+  });
+
   test('流水：手机上不横向滚动（测试服 E2E 报告）', async ({ page }) => {
     await login(page, 'linlan');
     await page.goto('/ledger');

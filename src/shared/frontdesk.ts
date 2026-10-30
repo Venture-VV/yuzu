@@ -247,6 +247,8 @@ export interface BillLine {
   backfill: BackfillMark | null;
   /** 做这项服务的技师与点钟 / 轮钟（v0.7.0）；没有指定技师时为 null */
   technician: LineTechnician | null;
+  /** 进厨房的菜（餐饮）：出品状态与口味备注；其他明细为 null */
+  kitchen: { status: 'queued' | 'cooking' | 'done' | 'served' | 'cancelled'; note: string; orderNo: string } | null;
 }
 
 export interface VisitMember {

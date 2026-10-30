@@ -17,6 +17,7 @@ import {
   type RefundShiftOptions,
 } from '@shared/checkout';
 import { splitDeduction } from '@shared/deduction';
+import { KITCHEN_STATUS_LABELS } from '@shared/dining';
 import { ZONE_LABELS, type BoardTag, type VisitDetail } from '@shared/frontdesk';
 import { discountGrantFits, sortedVisitIds, ticketGrantCovers, type DiscountGrant, type DiscountGrantRequest, type TicketGrant, type TicketGrantRequest } from '@shared/grants';
 import { describeHours, maskPhone, PAYMENT_METHODS, shiftDate } from '@shared/labels';
@@ -373,6 +374,7 @@ export function CheckoutDialog({
           p && (
             <>
               {(p.sessions ?? []).length > 0 && <SessionsNotice sessions={p.sessions} />}
+              {(p.dishes ?? []).length > 0 && <DishesNotice dishes={p.dishes} />}
               <ReviewTable preview={p} amounts={amounts} ticketPick={ticketPick} onPick={(id, t) => edit(() => setTicketPick((x) => ({ ...x, [id]: t })))} />
             </>
           )
@@ -454,6 +456,23 @@ function SessionsNotice({ sessions }: { sessions: CheckoutPreview['sessions'] })
             <li key={s.sessionNo}>
               <span className="num font-semibold">{s.tagCode}</span> · {s.techNo} 号 {s.techName} · {s.itemName} × {s.clocks} ·{' '}
               {s.status === 'waiting' ? '还没上钟（结账后按已做完记）' : '在钟上（结账时下钟）'}
+            </li>
+          ))}
+        </ul>
+      </Notice>
+    </div>
+  );
+}
+
+/** 餐饮（S5）：客人点的菜还没上齐时提醒（不拦结账；结账后厨房屏标出「客人已结账」） */
+function DishesNotice({ dishes }: { dishes: CheckoutPreview['dishes'] }) {
+  return (
+    <div data-testid="checkout-dishes">
+      <Notice tone="warning" title="客人点的菜还没上齐：请先问客人还要不要，不要的先退菜再结账">
+        <ul className="mt-1 space-y-0.5">
+          {dishes.map((d, i) => (
+            <li key={i}>
+              <span className="num font-semibold">{d.tagCode}</span> · {d.name} × {d.quantity} · {KITCHEN_STATUS_LABELS[d.status]}
             </li>
           ))}
         </ul>

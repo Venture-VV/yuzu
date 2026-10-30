@@ -159,6 +159,8 @@ export interface CheckoutPreview {
   pricedAt: string;
   /** 钟房里还没结束的钟单（v0.7.1）：结账时一起收尾，在钟上的下钟，还没上钟的按已做完记 */
   sessions: { sessionNo: string; tagCode: string; techNo: string; techName: string; itemName: string; clocks: number; status: 'waiting' | 'serving' }[];
+  /** 还没上的菜（餐饮）：结账时只提醒，不改出品状态；客人没吃到的请先退菜 */
+  dishes: { tagCode: string; name: string; quantity: number; status: 'queued' | 'cooking' | 'done' | 'served' | 'cancelled' }[];
 }
 
 /** 反结账退现金可以选的钱箱（v0.7.1，跨钱箱退款）：此刻当班的班次；original 原单收款的班次，mine 反结账人自己的班次 */

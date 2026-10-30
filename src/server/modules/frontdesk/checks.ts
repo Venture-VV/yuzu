@@ -126,6 +126,19 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
     SELECT 'member', m.name, r.visit_no FROM member_runs r JOIN members m ON m.id = r.member_id WHERE r.since < r.before_until
     LIMIT 5`;
 
+  // ⑪ 餐饮（S5）：每张出品单对应同一位客人的一条餐饮明细（菜品、份数一致），明细作废的出品单已退、没作废的没退；
+  //    每条餐饮明细都有出品单（钱只在明细里，出品单只记出品状态）
+  const kitchenDiff = await db<{ ref: string }[]>`
+    SELECT k.order_no AS ref FROM kitchen_items k JOIN bill_lines l ON l.id = k.bill_line_id JOIN visits v ON v.id = k.visit_id
+    WHERE l.bill_id <> v.bill_id OR l.source <> 'dining' OR l.item_id IS DISTINCT FROM k.item_id OR l.quantity <> k.quantity
+       OR (l.status = 'voided') <> (k.status = 'cancelled')
+    UNION ALL
+    SELECT '明细 ' || l.id FROM bill_lines l
+    WHERE l.source = 'dining' AND NOT EXISTS (SELECT 1 FROM kitchen_items k WHERE k.bill_line_id = l.id)
+    LIMIT 5`;
+  const [kitchen] = await db<{ n: number; open: number }[]>`
+    SELECT count(*)::int AS n, count(*) FILTER (WHERE status IN ('queued', 'cooking', 'done'))::int AS open FROM kitchen_items`;
+
   return [
     {
       key: 'bill_amount_vs_lines',
@@ -197,6 +210,14 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
       detail: backfillDiff.length
         ? `${backfillDiff.length} 条补录记录与单据的时间或营业日不符（如纸质单 ${backfillDiff[0]!.slipNo}）`
         : `补录 ${backfills!.n} 步（纸质单 ${backfills!.slips} 张），单据时间与营业日都按纸质单上的实际时间`,
+    },
+    {
+      key: 'kitchen_items',
+      label: '出品单与餐饮明细一致',
+      ok: kitchenDiff.length === 0,
+      detail: kitchenDiff.length
+        ? `${kitchenDiff.length} 张出品单与餐饮明细不符（如 ${kitchenDiff.map((d) => d.ref).join('、')}）`
+        : `出品单 ${kitchen!.n} 道（还没上的 ${kitchen!.open} 道），每道都对应一条餐饮明细，退菜的明细已作废`,
     },
   ];
 }

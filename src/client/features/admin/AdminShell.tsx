@@ -16,6 +16,7 @@ import {
   ShieldCheck,
   Tags,
   UsersRound,
+  UtensilsCrossed,
   type LucideIcon,
 } from 'lucide-react';
 import { ADMIN_SECTIONS, type AdminSection } from '@shared/admin';
@@ -34,6 +35,7 @@ const ICONS: Record<AdminSection, LucideIcon> = {
   catalog: Gift,
   tags: Tags,
   technicians: HandHeart,
+  dining: UtensilsCrossed,
   staff: UsersRound,
   permissions: ShieldCheck,
   opening: ArchiveRestore,
@@ -42,7 +44,7 @@ const ICONS: Record<AdminSection, LucideIcon> = {
 
 const GROUPS: { title: string; items: AdminSection[] }[] = [
   { title: '概览', items: ['home', 'settings'] },
-  { title: '经营设置', items: ['rules', 'members', 'catalog', 'tags', 'technicians'] },
+  { title: '经营设置', items: ['rules', 'members', 'catalog', 'tags', 'technicians', 'dining'] },
   { title: '人员与权限', items: ['staff', 'permissions'] },
   { title: '数据', items: ['opening', 'audit'] },
 ];

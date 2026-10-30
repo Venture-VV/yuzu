@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Boxes, CalendarCheck2, ClipboardCheck, ConciergeBell, HandCoins, Hourglass, Inbox, KeyRound, LayoutDashboard, LogOut, ReceiptText, Settings2, ShoppingCart, UsersRound } from 'lucide-react';
+import { Boxes, CalendarCheck2, ClipboardCheck, ConciergeBell, HandCoins, Hourglass, Inbox, KeyRound, LayoutDashboard, LogOut, ReceiptText, Settings2, ShoppingCart, UsersRound, UtensilsCrossed } from 'lucide-react';
 import { describeBusinessHours, isOpenAt, minuteOfDay } from '@shared/business-date';
 import { describeDate, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
 import { ADMIN_PERMISSIONS } from '@shared/admin';
@@ -22,7 +22,7 @@ interface NavItem {
   /** 拥有其中任一权限即显示 */
   perm: Permission | Permission[];
   end?: boolean;
-  /** 额外条件，例如「钟房」只在技师功能开启后显示 */
+  /** 额外条件，例如「钟房」只在技师功能开启后显示、「餐饮」只在餐饮功能开启后显示 */
   when?: (session: ReturnType<typeof useSession>) => boolean;
 }
 
@@ -31,6 +31,7 @@ const NAV: NavItem[][] = [
   [
     { to: '/frontdesk', label: '前台', icon: ConciergeBell, perm: 'frontdesk.read' },
     { to: '/clockroom', label: '钟房', icon: Hourglass, perm: 'technician.dispatch', when: (s) => s.technicians },
+    { to: '/dining', label: '餐饮', icon: UtensilsCrossed, perm: ['dining.order', 'dining.kitchen'], when: (s) => s.dining },
     { to: '/', label: '会员', icon: UsersRound, end: true, perm: 'member.read' },
     { to: '/ledger', label: '流水', icon: ReceiptText, perm: 'ledger.readToday' },
     { to: '/settlement', label: '日结', icon: CalendarCheck2, perm: 'ledger.readToday' },

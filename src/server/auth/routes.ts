@@ -10,6 +10,7 @@ import { badRequest, unauthorized } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { loadSettings } from '../modules/settings';
 import { loadTechnicianRules } from '../modules/technicians';
+import { loadDiningRules } from '../modules/dining';
 import { sessionOnly } from './guard';
 import { checkLock, clearFailures, recordFailure } from './lockout';
 import { checkPasswordStrength, hashPassword, verifyPassword } from './password';
@@ -43,6 +44,7 @@ export async function buildSessionInfo({ sql, config }: Deps, actor: Actor): Pro
     instance: config.instance,
     hasSyntheticData: synthetic?.exists ?? false,
     technicians: (await loadTechnicianRules(sql)).enabled,
+    dining: (await loadDiningRules(sql)).enabled,
   };
 }
 
