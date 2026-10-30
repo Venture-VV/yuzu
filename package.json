@@ -12,7 +12,7 @@
     "dev:server": "tsx watch --clear-screen=false src/server/index.ts",
     "dev:client": "vite",
     "build": "npm run build:client && npm run build:server",
-    "build:client": "vite build",
+    "build:client": "vite build && node scripts/compress-assets.mjs",
     "build:server": "node scripts/build-server.mjs",
     "start": "node dist/server/index.js",
     "migrate": "tsx src/server/cli.ts migrate",

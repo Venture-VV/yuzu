@@ -158,6 +158,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   if (hasClient) {
     await app.register(fastifyStatic, {
       root: staticDir,
+      // 构建时已压缩好（scripts/compress-assets.mjs）：浏览器支持时直接发 .br / .gz，首次打开下载量约为原来的四分之一
+      preCompressed: true,
       setHeaders(reply, path) {
         reply.header('cache-control', path.includes('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache');
       },
