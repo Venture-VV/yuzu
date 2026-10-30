@@ -5,12 +5,13 @@ import type { EditableRole, Permission, Role, RoleOverrides } from './permission
 
 /** 后台分区：路径、名称、所需权限（有其一即可） */
 export const ADMIN_SECTIONS = {
-  home: { path: '/admin', label: '后台首页', perms: ['settings.manage', 'catalog.manage', 'staff.manage', 'audit.read', 'wallet.opening', 'frontdesk.tags'] },
+  home: { path: '/admin', label: '后台首页', perms: ['settings.manage', 'catalog.manage', 'staff.manage', 'audit.read', 'wallet.opening', 'frontdesk.tags', 'technician.manage'] },
   settings: { path: '/admin/settings', label: '规则总表', perms: ['settings.manage', 'audit.read'] },
   rules: { path: '/admin/rules', label: '经营规则', perms: ['settings.manage'] },
   members: { path: '/admin/members', label: '会员与渠道', perms: ['settings.manage'] },
   catalog: { path: '/admin/catalog', label: '价目与套餐', perms: ['catalog.manage'] },
   tags: { path: '/admin/tags', label: '手牌与前台', perms: ['frontdesk.tags', 'settings.manage'] },
+  technicians: { path: '/admin/technicians', label: '技师', perms: ['technician.manage', 'settings.manage', 'catalog.manage', 'audit.read'] },
   staff: { path: '/admin/staff', label: '员工账号', perms: ['staff.manage'] },
   permissions: { path: '/admin/permissions', label: '岗位权限', perms: ['settings.manage', 'audit.read'] },
   opening: { path: '/admin/opening', label: '期初导入', perms: ['wallet.opening'] },
@@ -26,6 +27,7 @@ export const RULE_GROUPS = {
   wallet: '储值与收款',
   members: '会员与渠道',
   frontdesk: '前台与结账',
+  technicians: '技师',
   inventory: '库存与采购',
   staff: '岗位与权限',
 } as const;
@@ -59,6 +61,8 @@ export interface AdminOverview {
     plans: number;
     tickets: number;
     tags: { active: number; locked: number; inactive: number };
+    /** 在职技师人数（v0.7.0）与技师功能是否开启 */
+    technicians: { active: number; enabled: boolean };
   };
   rules: { total: number; changed: number; pending: number };
   /** 最近的规则、价目、员工变动（没有查看审计权限时为 null） */

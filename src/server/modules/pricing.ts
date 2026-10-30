@@ -8,8 +8,10 @@ import { conflict } from '../lib/errors';
 export interface PricedItem {
   id: number;
   name: string;
+  category: string;
   active: boolean;
   gender: 'male' | 'female' | null;
+  technicianRequired: boolean;
   prices: TierPrice[];
 }
 
@@ -26,7 +28,7 @@ export async function loadPricedItems(db: Db, ids: number[]): Promise<Map<number
   const unique = [...new Set(ids)];
   if (unique.length === 0) return new Map();
   const rows = await db<PricedItem[]>`
-    SELECT i.id, i.name, i.active, i.gender,
+    SELECT i.id, i.name, i.category, i.active, i.gender, i.technician_required,
            ${pricesColumn(db)} AS prices
     FROM service_items i WHERE i.id IN ${db(unique)}`;
   return new Map(rows.map((r) => [r.id, { ...r, prices: sortTiers(r.prices) }]));

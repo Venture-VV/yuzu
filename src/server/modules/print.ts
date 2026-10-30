@@ -8,6 +8,7 @@ import { readSnapshot, type Db } from '../db';
 import type { Deps } from '../lib/context';
 import { idParam, parse } from '../lib/validate';
 import { getCheckout } from './frontdesk/checkout';
+import { technicianTextSql } from './technicians';
 
 export async function checkoutForPrint(db: Db, id: number): Promise<CheckoutPrint> {
   const detail = await getCheckout(db, id);
@@ -15,7 +16,7 @@ export async function checkoutForPrint(db: Db, id: number): Promise<CheckoutPrin
   // 结账那一刻的明细：结账时已经挂上、当时还没作废的。反结账时作废的门票照样打出，之后新挂的明细不算这张单
   const lines = billIds.length
     ? await db<(CheckoutPrintLine & { billId: number })[]>`
-        SELECT l.bill_id, l.name, l.unit_price, l.quantity, l.amount
+        SELECT l.bill_id, l.name, l.unit_price, l.quantity, l.amount, ${technicianTextSql(db, 'l')} AS technician
         FROM bill_lines l JOIN checkouts c ON c.id = ${id}
         WHERE l.bill_id IN ${db(billIds)} AND l.posted_at <= c.created_at AND (l.voided_at IS NULL OR l.voided_at > c.created_at)
         ORDER BY l.bill_id, l.id`
@@ -29,7 +30,7 @@ export async function checkoutForPrint(db: Db, id: number): Promise<CheckoutPrin
   return {
     ...detail,
     bills: detail.bills.map((b) => {
-      const own = lines.filter((l) => l.billId === b.billId).map(({ name, unitPrice, quantity, amount }) => ({ name, unitPrice, quantity, amount }));
+      const own = lines.filter((l) => l.billId === b.billId).map(({ name, unitPrice, quantity, amount, technician }) => ({ name, unitPrice, quantity, amount, technician }));
       return { ...b, lines: own, linesTotal: own.reduce((s, l) => s + l.amount, 0) };
     }),
     payments: detail.payments.map((p) => {

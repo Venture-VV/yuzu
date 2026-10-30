@@ -6,12 +6,14 @@
 //   03-部门参考表.csv  结账明细按项目分类（部门）汇总：当天结的计正数、当天反结账的计负数，合计 = 营业额（净额）
 //   04-异常清单.csv    反结账、作废明细、撤销误开的牌、改票种、免票入场、会员撤销与其他日结异常
 //   05-交班.csv        当天的班次：备用金、各收款方式、应有现金、实点、长短款
+//   06-技师业绩.csv    每位技师的钟数、点钟 / 轮钟与金额（v0.7.0，与部门参考表同一口径），供与钟房的钟单核对
 // 优惠 / 免单与降档 / 免票授权在资金轨 R1.2 合并后加入异常清单。
 
 import { businessDateOf, businessDayStart } from '@shared/business-date';
 import { businessBreakdown, CHECKOUT_METHOD_LABELS, CHECKOUT_METHODS, COUPON_PLATFORM_LABELS, type CheckoutMethod, type CouponPlatform, type ShiftRecord } from '@shared/checkout';
 import { INSTANCE_LABELS } from '@shared/instance';
 import { formatYuan } from '@shared/money';
+import { CALL_TYPE_LABELS, gradeLabel } from '@shared/technicians';
 import type { SettlementSummary } from '@shared/types';
 import type { AppConfig } from '../config';
 import { readSnapshot, type Sql, type Tx } from '../db';
@@ -20,6 +22,7 @@ import { computeSettlement, settlementCsv } from '../modules/settlement';
 import { loadFrontdeskRules } from '../modules/frontdesk/common';
 import { loadSettings } from '../modules/settings';
 import { listShifts } from '../modules/shifts';
+import { technicianReport, technicianTextSql } from '../modules/technicians';
 import { consistencyChecks, type CheckLine } from './consistency';
 import { computeFingerprint } from './fingerprint';
 
@@ -126,9 +129,9 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     HAVING sum(k.sign * l.quantity) <> 0 OR sum(k.sign * l.amount) <> 0`;
   // 按分类、项目名排序（逐字符比较，结果与数据库的排序规则无关）
   departments.sort((a, b) => (a.category === b.category ? (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) : a.category < b.category ? -1 : 1));
-  const voidedLines = await tx<{ at: string; visitNo: string; tag: string; guest: string; staff: string; name: string; quantity: number; amount: number; reason: string; postedByName: string }[]>`
+  const voidedLines = await tx<{ at: string; visitNo: string; tag: string; guest: string; staff: string; name: string; quantity: number; amount: number; reason: string; postedByName: string; technician: string | null }[]>`
     SELECT l.voided_at AS at, v.visit_no, t.code AS tag, coalesce(m.name, nullif(v.guest_label, ''), '散客') AS guest, vs.display_name AS staff,
-           l.name, l.quantity, l.amount, l.void_reason AS reason, ps.display_name AS posted_by_name
+           l.name, l.quantity, l.amount, l.void_reason AS reason, ps.display_name AS posted_by_name, ${technicianTextSql(tx, 'l')} AS technician
     FROM bill_lines l JOIN visits v ON v.bill_id = l.bill_id JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id
     JOIN staff vs ON vs.id = l.voided_by JOIN staff ps ON ps.id = l.posted_by
     WHERE l.status = 'voided' AND l.voided_at >= ${from} AND l.voided_at < ${to}
@@ -172,7 +175,8 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
         v.ticket_price_12h = 0)
     ORDER BY v.checked_in_at, v.id`;
   const shifts = (await listShifts(tx, date)).filter((s) => s.businessDate === date);
-  return { summary, checkouts, departments, voidedLines, cancelled, ticketChanges, freeEntries, shifts };
+  const technicians = await technicianReport(tx, date, date);
+  return { summary, checkouts, departments, voidedLines, cancelled, ticketChanges, freeEntries, shifts, technicians };
 }
 
 export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string, now = new Date()): Promise<DailyRecon> {
@@ -278,7 +282,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
       guest: l.guest,
       staff: l.staff,
       amount: -l.amount,
-      description: `${l.name} ×${l.quantity}（${l.postedByName} 挂）：${l.reason}`,
+      description: `${l.name} ×${l.quantity}${l.technician ? `（${l.technician}）` : ''}（${l.postedByName} 挂）：${l.reason}`,
     })),
     ...day.cancelled.map((v) => {
       const ms = new Date(v.at).getTime() - new Date(v.checkedInAt).getTime();
@@ -373,6 +377,18 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     ]),
   });
 
+  // 06 技师业绩：与部门参考表同一口径（结账那一刻的明细，当天反结账的冲回）；在职技师没有钟的也列出
+  const tr = day.technicians;
+  files.push({
+    name: '06-技师业绩.csv',
+    content: toCsv([
+      ['工号', '技师', '等级', '状态', '钟数', `${CALL_TYPE_LABELS.designated}`, `${CALL_TYPE_LABELS.rotation}`, '金额（元）'],
+      ...tr.rows.map((r) => [r.techNo, r.name, gradeLabel(r.grade), r.active ? '在职' : '已停用', r.clocks, r.designated, r.rotation, yuan(r.amount)]),
+      ['合计', '', '', '', tr.totals.clocks, tr.totals.designated, tr.totals.rotation, yuan(tr.totals.amount)],
+      ['未指定技师的技师项目', '', '', '', tr.unassigned.clocks, '', '', yuan(tr.unassigned.amount)],
+    ]),
+  });
+
   // 00 说明
   const failed = checks.filter((c: CheckLine) => !c.ok);
   const deptOk = deptTotal === biz.receivable;
@@ -387,6 +403,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     `部门参考表合计 ${formatYuan(deptTotal)}：${deptOk ? '✓ 与应收一致' : '✗ 与应收不一致'}`,
     `异常：${EXCEPTION_KINDS.map((k) => `${k} ${count(k)}`).join('、')}、其他 ${exceptions.length - EXCEPTION_KINDS.reduce((t, k) => t + count(k), 0)}`,
     `交班：${day.shifts.length} 个班次，已交班 ${day.shifts.filter((r) => r.status === 'closed').length} 个`,
+    `技师：${tr.totals.clocks} 个钟（点钟 ${tr.totals.designated}、轮钟 ${tr.totals.rotation}），${formatYuan(tr.totals.amount)}${tr.unassigned.clocks ? `；未指定技师 ${tr.unassigned.clocks} 个钟` : ''}`,
     failed.length ? `自检：✗ ${failed.length} 项不一致：${failed.map((c) => c.label).join('、')}` : `自检：✓ ${checks.length} 项全部一致`,
   ];
   files.unshift({
@@ -405,6 +422,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
       '  03-部门参考表.csv   结账明细按项目分类（部门）汇总，合计 = 应收；后面单列优惠 / 免单与净营业额',
       '  04-异常清单.csv     反结账、优惠 / 免单、作废明细、撤销误开的牌（每一次都列，写明是否超过更正时限；日结异常清单只列超过时限的）、改票种（降档、改为免票写明授权人与原因）、免票入场、补录纸质单、会员撤销与其他异常',
       '  05-交班.csv         当天的班次、反结账退现金与长短款',
+      '  06-技师业绩.csv     每位技师的钟数、点钟 / 轮钟与金额（与部门参考表同一口径），与钟房的钟单核对',
       '',
     ].join('\n'),
   });

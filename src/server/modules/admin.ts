@@ -10,6 +10,7 @@ import { DEFAULT_FRONTDESK_RULES, VIP_LEVEL_BASIS_LABELS, type FrontdeskRules } 
 import { APPROVAL_RULE_LABELS, type ApprovalRules } from '@shared/inventory';
 import { DEDUCTION_RULE_LABELS, describeHours, ROLE_LABELS } from '@shared/labels';
 import { levelName } from '@shared/members';
+import { CALL_TYPE_LABELS, DEFAULT_TECHNICIAN_RULES } from '@shared/technicians';
 import { formatYuan } from '@shared/money';
 import {
   ALL_PERMISSIONS,
@@ -35,6 +36,7 @@ import { parse } from '../lib/validate';
 import { loadFrontdeskRules } from './frontdesk/common';
 import { DEFAULT_APPROVAL_RULES, loadInventorySettings } from './inventory/common';
 import { DEFAULT_SETTINGS, loadSettings, SETTINGS_KEYS } from './settings';
+import { loadTechnicianRules } from './technicians';
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const onOff = (v: boolean, on: string, off: string) => (v ? on : off);
@@ -64,6 +66,8 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   const fd = await loadFrontdeskRules(db);
   const fdd: FrontdeskRules = DEFAULT_FRONTDESK_RULES;
   const inv = await loadInventorySettings(db);
+  const tech = await loadTechnicianRules(db);
+  const techd = DEFAULT_TECHNICIAN_RULES;
   const overrides = await loadRoleOverrides(db);
   const meta = await settingsMeta(db);
   const none: Meta = { updatedAt: null, updatedBy: null };
@@ -154,6 +158,23 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
     key: 'frontdesk_rules.vipOverrideEnabled', group: 'frontdesk', label: '当场授权使用 VIP 柜', value: onOff(fd.vipOverrideEnabled, '允许（值班经理及以上授权）', '不允许'), defaultValue: '不允许',
     pending: true, section: 'tags', current: fd.vipOverrideEnabled, dflt: fdd.vipOverrideEnabled, metaKey: 'frontdesk_rules',
   });
+  // ── 技师（v0.7.0）──
+  add({
+    key: 'technician_rules.enabled', group: 'technicians', label: '技师功能', value: onOff(tech.enabled, '开启（挂需要技师的项目时选技师）', '关闭（与升级前一样）'),
+    defaultValue: '关闭（与升级前一样）', pending: false, section: 'technicians', current: tech.enabled, dflt: techd.enabled, metaKey: 'technician_rules',
+  });
+  add({
+    key: 'technician_rules.requireTechnician', group: 'technicians', label: '挂技师项目必须选技师', value: onOff(tech.requireTechnician, '必须选', '可以暂不指定'),
+    defaultValue: '必须选', pending: true, section: 'technicians', current: tech.requireTechnician, dflt: techd.requireTechnician, metaKey: 'technician_rules',
+  });
+  add({
+    key: 'technician_rules.tierByGrade', group: 'technicians', label: '价格跟技师等级', value: onOff(tech.tierByGrade, '按技师等级取价（标准 / 专业 / 优选）', '前台自选价格档'),
+    defaultValue: '按技师等级取价（标准 / 专业 / 优选）', pending: true, section: 'technicians', hint: '只有一档价格的项目不分等级', current: tech.tierByGrade, dflt: techd.tierByGrade, metaKey: 'technician_rules',
+  });
+  add({
+    key: 'technician_rules.defaultCallType', group: 'technicians', label: '默认上钟方式', value: CALL_TYPE_LABELS[tech.defaultCallType], defaultValue: CALL_TYPE_LABELS[techd.defaultCallType],
+    pending: true, section: 'technicians', hint: '客人点名的改成点钟', current: tech.defaultCallType, dflt: techd.defaultCallType, metaKey: 'technician_rules',
+  });
   // ── 库存与采购 ──
   add({ key: 'inventory_scope_name', group: 'inventory', label: '库存范围', value: inv.scopeName, defaultValue: '后勤总库', pending: true, section: 'rules', current: inv.scopeName, dflt: '后勤总库', metaKey: 'inventory_scope_name' });
   // 迁移 002 写入的初始口径
@@ -189,6 +210,8 @@ const CHANGE_ACTIONS = [
   'hand_tags_imported',
   'opening_imported',
   'opening_voided',
+  'technician_saved',
+  'items_technician_updated',
 ];
 
 const SETTING_LABELS: Record<string, string> = {
@@ -212,6 +235,7 @@ function describeChange(action: string, detail: Record<string, unknown>): string
     case 'settings_updated': {
       if (detail.key === 'frontdesk_rules') return '修改了前台规则与会员等级';
       if (detail.key === 'role_permissions') return '调整了岗位权限';
+      if (detail.key === 'technician_rules') return '修改了技师规则';
       const after = (detail.after ?? {}) as Record<string, unknown>;
       const keys = Object.keys(after).map((x) => SETTING_LABELS[x] ?? x);
       return keys.length ? `修改了${keys.join('、')}` : '修改了经营规则';
@@ -238,6 +262,10 @@ function describeChange(action: string, detail: Record<string, unknown>): string
       return '导入了期初余额';
     case 'opening_voided':
       return '作废了期初余额';
+    case 'technician_saved':
+      return typeof detail.summary === 'string' ? detail.summary : `保存了技师${name ? `「${name}」` : ''}`;
+    case 'items_technician_updated':
+      return '调整了需要技师的项目';
     default:
       return action;
   }
@@ -246,7 +274,7 @@ function describeChange(action: string, detail: Record<string, unknown>): string
 export async function adminOverview(db: Db, deps: Deps, actor: Actor): Promise<AdminOverview> {
   const s = await loadSettings(db);
   const [c] = await db<
-    { staffActive: number; members: number; membersNewToday: number; items: number; plans: number; tickets: number; tagsActive: number; tagsLocked: number; tagsInactive: number }[]
+    { staffActive: number; members: number; membersNewToday: number; items: number; plans: number; tickets: number; tagsActive: number; tagsLocked: number; tagsInactive: number; techniciansActive: number }[]
   >`
     SELECT (SELECT count(*) FROM staff WHERE active)::int AS staff_active,
            (SELECT count(*) FROM members)::int AS members,
@@ -256,7 +284,8 @@ export async function adminOverview(db: Db, deps: Deps, actor: Actor): Promise<A
            (SELECT count(*) FROM ticket_types WHERE active)::int AS tickets,
            (SELECT count(*) FROM hand_tags WHERE active)::int AS tags_active,
            (SELECT count(*) FROM hand_tags WHERE active AND locked)::int AS tags_locked,
-           (SELECT count(*) FROM hand_tags WHERE NOT active)::int AS tags_inactive`;
+           (SELECT count(*) FROM hand_tags WHERE NOT active)::int AS tags_inactive,
+           (SELECT count(*) FROM technicians WHERE active)::int AS technicians_active`;
   const byRole = await db<{ role: Role; n: number }[]>`SELECT role, count(*)::int AS n FROM staff WHERE active GROUP BY role`;
   const rules = await ruleCatalog(db);
   let recentChanges: AdminOverview['recentChanges'] = null;
@@ -286,6 +315,7 @@ export async function adminOverview(db: Db, deps: Deps, actor: Actor): Promise<A
       plans: c!.plans,
       tickets: c!.tickets,
       tags: { active: c!.tagsActive, locked: c!.tagsLocked, inactive: c!.tagsInactive },
+      technicians: { active: c!.techniciansActive, enabled: (await loadTechnicianRules(db)).enabled },
     },
     rules: { total: rules.length, changed: rules.filter((r) => !r.isDefault).length, pending: rules.filter((r) => r.pending && r.isDefault).length },
     recentChanges,

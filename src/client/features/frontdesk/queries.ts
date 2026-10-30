@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { CheckoutDetail, CheckoutPreview, CheckoutSummary, TicketType } from '@shared/checkout';
 import type { FrontdeskBoard, FrontdeskCheck, MemberLevel, PreviewBill, VisitDetail } from '@shared/frontdesk';
+import type { FrontdeskTechnicians } from '@shared/technicians';
 import { api } from '../../lib/api';
 
 export const fk = {
@@ -14,7 +15,12 @@ export const fk = {
   checkoutPreview: (ids: number[], at?: string) => ['frontdesk', 'checkout-preview', ids.join(','), at ?? 'now'] as const,
   checkouts: (date: string) => ['frontdesk', 'checkouts', date] as const,
   checkout: (id: number) => ['frontdesk', 'checkout', id] as const,
+  technicians: ['frontdesk', 'technicians'] as const,
 };
+
+/** 技师规则与在职技师（加项目时选技师；含今日已上的钟数） */
+export const useFrontdeskTechnicians = (enabled = true) =>
+  useQuery({ queryKey: fk.technicians, queryFn: () => api.get<FrontdeskTechnicians>('/api/frontdesk/technicians'), staleTime: 15_000, enabled });
 
 /** 票种（接待时选择；管理页看全部） */
 export const useTicketTypes = (all = false) =>

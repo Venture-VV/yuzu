@@ -63,6 +63,7 @@ export function ItemCard({
   onAdd,
   disabled,
   unavailable,
+  hint,
   tone = 'pine',
 }: {
   item: ServiceItem;
@@ -71,6 +72,8 @@ export function ItemCard({
   disabled?: boolean;
   /** 这位客人不能用的原因（例如「仅限女宾」）；有原因时整张卡片不可选 */
   unavailable?: string | null;
+  /** 补充说明（例如「选技师」） */
+  hint?: string | null;
   tone?: keyof typeof TONES;
 }) {
   const t = TONES[tone];
@@ -86,7 +89,7 @@ export function ItemCard({
           {item.name}
         </span>
       </span>
-      {(item.durationMinutes || tags.length > 0 || item.gender || unavailable) && (
+      {(item.durationMinutes || tags.length > 0 || item.gender || unavailable || hint) && (
         <span className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11.5px] font-semibold text-ink-3">
           {item.durationMinutes ? (
             <span className="num inline-flex items-center gap-0.5">
@@ -105,6 +108,8 @@ export function ItemCard({
             ),
           )}
           {item.gender && <span className={unavailable ? 'text-clay' : 'text-ink-2'}>{unavailable ?? `仅${item.gender === 'female' ? '女宾' : '男宾'}`}</span>}
+          {!item.gender && unavailable && <span className="text-clay">{unavailable}</span>}
+          {hint && <span className="text-pine">{hint}</span>}
         </span>
       )}
     </>

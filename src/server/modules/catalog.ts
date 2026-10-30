@@ -47,6 +47,8 @@ const ItemInput = z
     essentialOil: z.boolean().default(false),
     heatTherapy: z.boolean().default(false),
     popular: z.boolean().default(false),
+    /** 需要技师（v0.7.0）；不带时新建为否、编辑时保持原值（旧页面不带这一项） */
+    technicianRequired: z.boolean().optional(),
     note: z.string().trim().max(100, '说明最多 100 字').default(''),
     active: z.boolean().default(true),
     sortOrder: z.number().int().default(0),
@@ -64,7 +66,7 @@ type ItemData = z.output<typeof ItemInput>;
 
 const ITEM_COLUMNS = (db: Db) => db`
   i.id, i.name, i.category, i.price, i.duration_minutes, i.gender, i.strength, i.essential_oil, i.heat_therapy, i.popular,
-  i.note, i.active, i.sort_order, ${pricesColumn(db)} AS prices`;
+  i.technician_required, i.note, i.active, i.sort_order, ${pricesColumn(db)} AS prices`;
 
 export async function loadItems(db: Db, includeInactive = false): Promise<ServiceItem[]> {
   const rows = await db<ServiceItem[]>`
@@ -87,16 +89,17 @@ async function writeItem(tx: Tx, id: number | null, i: Omit<ItemData, 'tiers'> &
   if (itemId === null) {
     const [row] = await tx<{ id: number }[]>`
       INSERT INTO service_items (name, category, price, duration_minutes, gender, strength, essential_oil, heat_therapy, popular,
-                                 note, active, sort_order)
+                                 technician_required, note, active, sort_order)
       VALUES (${i.name}, ${i.category}, ${price}, ${i.durationMinutes}, ${i.gender}, ${i.strength}, ${i.essentialOil},
-              ${i.heatTherapy}, ${i.popular}, ${i.note}, ${i.active}, ${i.sortOrder})
+              ${i.heatTherapy}, ${i.popular}, ${i.technicianRequired ?? false}, ${i.note}, ${i.active}, ${i.sortOrder})
       RETURNING id`;
     itemId = row!.id;
   } else {
     const rows = await tx`
       UPDATE service_items SET name = ${i.name}, category = ${i.category}, price = ${price}, duration_minutes = ${i.durationMinutes},
              gender = ${i.gender}, strength = ${i.strength}, essential_oil = ${i.essentialOil}, heat_therapy = ${i.heatTherapy},
-             popular = ${i.popular}, note = ${i.note}, active = ${i.active}, sort_order = ${i.sortOrder}, updated_at = now()
+             popular = ${i.popular}, ${i.technicianRequired === undefined ? tx`` : tx`technician_required = ${i.technicianRequired},`}
+             note = ${i.note}, active = ${i.active}, sort_order = ${i.sortOrder}, updated_at = now()
       WHERE id = ${itemId} RETURNING id`;
     if (rows.length === 0) throw notFound('项目不存在');
     await tx`DELETE FROM service_item_prices WHERE item_id = ${itemId}`;

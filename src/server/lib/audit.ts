@@ -49,7 +49,9 @@ export type AuditAction =
   | 'hand_tags_imported'
   | 'hand_tag_locked'
   | 'hand_tag_unlocked'
-  | 'hand_tag_updated';
+  | 'hand_tag_updated'
+  | 'technician_saved'
+  | 'items_technician_updated';
 
 export interface AuditEntry {
   staffId: number | null;

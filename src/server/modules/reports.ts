@@ -14,6 +14,7 @@ import { badRequest } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { loadFrontdeskRules } from './frontdesk/common';
 import { loadSettings } from './settings';
+import { technicianReport } from './technicians';
 
 interface Clock {
   tz: string;
@@ -286,6 +287,12 @@ export function registerDashboardReportRoutes(app: FastifyInstance, deps: Deps) 
     const { c, today } = await clockAndToday();
     const { from, to } = period(req.query, today);
     return readSnapshot(deps.sql, (tx) => membersReport(tx, from, to, c));
+  });
+
+  app.get('/api/reports/technicians', { preHandler: guard('report.technicians') }, async (req) => {
+    const { today } = await clockAndToday();
+    const { from, to } = period(req.query, today);
+    return readSnapshot(deps.sql, (tx) => technicianReport(tx, from, to));
   });
 
   app.get('/api/reports/duty', { preHandler: guard('ledger.readToday') }, async () => {

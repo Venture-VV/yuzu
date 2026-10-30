@@ -49,6 +49,8 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   hand_tag_locked: { label: '锁定手牌', tone: 'ember' },
   hand_tag_unlocked: { label: '解锁手牌', tone: 'neutral' },
   hand_tag_updated: { label: '修改手牌', tone: 'neutral' },
+  technician_saved: { label: '保存技师', tone: 'neutral' },
+  items_technician_updated: { label: '调整需要技师的项目', tone: 'neutral' },
 };
 
 function describe(detail: Record<string, unknown>): string {

@@ -84,6 +84,23 @@ test.describe('视口冒烟', () => {
     await expectFits(page);
   });
 
+  test('技师：后台「技师」与看板「技师业绩」（v0.7.0）', async ({ page }) => {
+    await login(page, 'linlan');
+    await page.goto('/admin/technicians');
+    await expect(page.getByTestId('technician-rules-card')).toBeVisible();
+    await expect(page.getByTestId('technician-items')).toBeVisible();
+    await expectFits(page);
+    // 新建技师的对话框（只打开、不保存）
+    await page.getByTestId('technician-new').click();
+    await expect(page.getByRole('dialog', { name: '新建技师' })).toBeVisible();
+    await expectFits(page);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: '新建技师' })).toBeHidden();
+    await page.goto('/dashboard/technicians');
+    await expect(page.getByTestId('technicians-clocks')).toBeVisible();
+    await expectFits(page);
+  });
+
   test('流水：手机上不横向滚动（测试服 E2E 报告）', async ({ page }) => {
     await login(page, 'linlan');
     await page.goto('/ledger');

@@ -134,6 +134,8 @@ export interface ServiceItem {
   essentialOil: boolean;
   heatTherapy: boolean;
   popular: boolean;
+  /** 需要技师（v0.7.0）：技师功能开启时，挂这个项目要选技师与点钟 / 轮钟 */
+  technicianRequired: boolean;
   note: string;
   active: boolean;
   sortOrder: number;
