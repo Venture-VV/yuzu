@@ -177,6 +177,7 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
     }
     await createKitchenItems(tx, {
       visitId: visit.id,
+      tableSessionId: null,
       lines: dishLines.map((l) => ({ billLineId: lineIds.get(l)!, itemId: l.itemId!, stationId: l.stationId!, quantity: l.quantity, note: l.note, limitTaken: limited.has(l.itemId!) })),
       date,
       at,

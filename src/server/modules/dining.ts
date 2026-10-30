@@ -94,19 +94,19 @@ export interface KitchenLine {
   limitTaken: boolean;
 }
 
-/** 一次下单建一张出品单（同一个出品单号）；补录纸质单的菜早已上过，直接记为已上菜 */
+/** 一次下单建一张出品单（同一个出品单号）：手牌客人的（visitId）或桌台的（tableSessionId）；补录纸质单的菜早已上过，直接记为已上菜 */
 export async function createKitchenItems(
   tx: Tx,
-  args: { visitId: number; lines: KitchenLine[]; date: string; at: Date; actor: Actor; backfill: boolean },
+  args: { visitId: number | null; tableSessionId?: number | null; lines: KitchenLine[]; date: string; at: Date; actor: Actor; backfill: boolean },
 ): Promise<string | null> {
   if (args.lines.length === 0) return null;
   const orderNo = await nextDocNo(tx, 'kitchen_order', 'CD', args.date);
   const done = args.backfill ? args.at : null;
   for (const l of args.lines) {
     await tx`
-      INSERT INTO kitchen_items (order_no, bill_line_id, visit_id, item_id, station_id, quantity, note, status, business_date, limit_taken,
-                                 created_by, created_at, done_by, done_at, served_by, served_at)
-      VALUES (${orderNo}, ${l.billLineId}, ${args.visitId}, ${l.itemId}, ${l.stationId}, ${l.quantity}, ${l.note},
+      INSERT INTO kitchen_items (order_no, bill_line_id, visit_id, table_session_id, item_id, station_id, quantity, note, status, business_date,
+                                 limit_taken, created_by, created_at, done_by, done_at, served_by, served_at)
+      VALUES (${orderNo}, ${l.billLineId}, ${args.visitId}, ${args.tableSessionId ?? null}, ${l.itemId}, ${l.stationId}, ${l.quantity}, ${l.note},
               ${args.backfill ? 'served' : 'queued'}, ${args.date}, ${l.limitTaken}, ${args.actor.id}, ${args.at},
               ${done ? args.actor.id : null}, ${done}, ${done ? args.actor.id : null}, ${done})`;
   }
@@ -160,13 +160,17 @@ async function kitchenDishes(db: Db, today: string): Promise<MenuDish[]> {
   return rows.map(({ prices, ...r }) => ({ ...r, price: defaultPrice(prices) }));
 }
 
+// 手牌客人的菜显示牌号；桌台的菜（第二步）显示桌号
 const ITEM_COLUMNS = (db: Db) => db`
-  k.id, k.order_no, k.visit_id, h.code AS tag_code, v.zone, coalesce(m.name, nullif(v.guest_label, ''), '散客') AS guest, k.item_id, i.name,
+  k.id, k.order_no, k.visit_id, h.code AS tag_code, v.zone, k.table_session_id, dt.name AS table_name,
+  coalesce(m.name, nullif(v.guest_label, ''), tm.name, nullif(ts.guest_label, ''), '散客') AS guest, k.item_id, i.name,
   k.quantity, k.note, k.status, k.station_id, s.name AS station_name, k.rush_count, k.created_at, k.started_at, k.done_at, k.served_at,
-  p.display_name AS posted_by_name, v.status <> 'open' AS visit_closed`;
+  p.display_name AS posted_by_name, coalesce(v.status, ts.status) <> 'open' AS visit_closed`;
 const ITEM_FROM = (db: Db) => db`
   kitchen_items k JOIN service_items i ON i.id = k.item_id JOIN kitchen_stations s ON s.id = k.station_id
-  JOIN visits v ON v.id = k.visit_id JOIN hand_tags h ON h.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id
+  LEFT JOIN visits v ON v.id = k.visit_id LEFT JOIN hand_tags h ON h.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id
+  LEFT JOIN table_sessions ts ON ts.id = k.table_session_id LEFT JOIN dining_tables dt ON dt.id = ts.table_id
+  LEFT JOIN members tm ON tm.id = ts.member_id
   JOIN staff p ON p.id = k.created_by`;
 
 export async function kitchenBoard(db: Db, deps: Deps): Promise<KitchenBoard> {

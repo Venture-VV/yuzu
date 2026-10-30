@@ -499,8 +499,8 @@ function FrontdeskBoard() {
           onClose={() => setDialog(null)}
           onDone={(d) => {
             setDialog(null);
-            refresh(d.bills.map((b) => b.visitId));
-            toast({ tone: 'success', title: `已结清 ${d.bills.map((b) => b.tagCode).join('、')}`, body: `结账单 ${d.checkoutNo}，手牌已释放` });
+            refresh(d.bills.flatMap((b) => (b.visitId === null ? [] : [b.visitId])));
+            toast({ tone: 'success', title: `已结清 ${d.bills.map((b) => b.tagCode ?? `桌 ${b.tableName}`).join('、')}`, body: `结账单 ${d.checkoutNo}，手牌已释放` });
             select(null);
           }}
         />

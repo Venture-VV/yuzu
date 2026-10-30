@@ -331,7 +331,8 @@ export type FrontdeskOpLookup =
   | { found: false; abandoned: boolean }
   | { found: true; type: 'checkin'; checkin: CheckinResult }
   | { found: true; type: 'bill_post' | 'tag_swap'; visit: VisitDetail }
-  | { found: true; type: 'checkout'; checkout: CheckoutDetail };
+  | { found: true; type: 'checkout' | 'table_checkout'; checkout: CheckoutDetail }
+  | { found: true; type: 'table_open' | 'table_post'; session: import('./dining').TableSessionDetail };
 
 export interface CheckinResult {
   replayed: boolean;

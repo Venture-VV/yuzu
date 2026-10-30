@@ -200,16 +200,23 @@ export interface CheckoutDetail {
   bills: {
     billId: number;
     billNo: string;
-    visitId: number;
-    visitNo: string;
-    tagCode: string;
+    /** 手牌账单的来访与牌号；桌台账单（餐饮第二步）为 null */
+    visitId: number | null;
+    visitNo: string | null;
+    tagCode: string | null;
+    /** 桌台账单：开台与桌号；手牌账单为 null */
+    tableSessionId: number | null;
+    tableName: string | null;
+    /** 结账客人：手牌 1 人，桌台按开台人数 */
+    guests: number;
     memberName: string | null;
     guestLabel: string;
     amount: number;
     stayMinutes: number;
-    ticketName: string;
-    ticketSegments: number;
-    ticketAmount: number;
+    /** 门票（只有手牌账单有） */
+    ticketName: string | null;
+    ticketSegments: number | null;
+    ticketAmount: number | null;
   }[];
   payments: CheckoutPayment[];
   /** 本次结账后同行组里仍在店的手牌 */
@@ -222,6 +229,8 @@ export interface CheckoutSummary {
   status: 'completed' | 'voided';
   totalAmount: number;
   tagCodes: string[];
+  /** 桌台结账单（餐饮第二步）的桌号；手牌结账单为空 */
+  tableNames: string[];
   methods: CheckoutMethod[];
   operatorName: string;
   createdAt: string;

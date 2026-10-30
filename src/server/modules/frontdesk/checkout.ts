@@ -35,7 +35,7 @@ import {
 import { describeHours, PAYMENT_METHODS } from '@shared/labels';
 import { formatYuan } from '@shared/money';
 import { can } from '@shared/permissions';
-import type { Db } from '../../db';
+import type { Db, Tx } from '../../db';
 import { writeAudit } from '../../lib/audit';
 import type { Deps, OpContext } from '../../lib/context';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
@@ -223,18 +223,109 @@ const ticketEnd = (r: Pick<VisitRow, 'ticketEndAt'>, at: Date) => (r.ticketEndAt
 
 // ───────────────────────── 结账 ─────────────────────────
 
+export type CheckoutPaymentInput = z.infer<typeof Payment>;
+
+/** 收款的基本核对（手牌结账与桌台结账共用）：优惠最多一笔、「其他」要备注、储值要有权限、同一会员与同一张券不重复 */
+export function splitPayments(payments: CheckoutPaymentInput[], actor: OpContext['actor']) {
+  const wallets = payments.filter((p) => p.method === 'wallet');
+  const coupons = payments.filter((p) => p.method === 'coupon');
+  const discounts = payments.filter((p) => p.method === 'discount');
+  if (discounts.length > 1) throw badRequest('优惠 / 免单最多登记一笔，请合并金额后重新授权');
+  if (payments.some((p) => p.method === 'other' && !p.ref)) throw badRequest('「其他」收款请在备注里写明收的是什么');
+  if (wallets.length && !can(actor, 'consume.create')) throw forbidden('当前岗位不能用会员储值收款');
+  if (new Set(wallets.map((w) => w.memberId)).size !== wallets.length) throw badRequest('同一位会员的储值支付请合并为一笔');
+  if (new Set(coupons.map((c) => `${c.platform}:${c.code}`)).size !== coupons.length) throw badRequest('同一张团购券不能登记两次');
+  return { wallets, coupons, discounts };
+}
+
+/** 收款合计必须等于应收（手牌结账与桌台结账共用） */
+export function assertSettled(payments: CheckoutPaymentInput[], total: number) {
+  const paid = payments.reduce((s, p) => s + p.amount, 0);
+  if (paid !== total) {
+    throw unprocessable(
+      'NOT_SETTLED',
+      paid < total
+        ? `还差 ${formatYuan(total - paid)} 没有收，结清才能离店`
+        : `收款合计多了 ${formatYuan(paid - total)}，请核对（现金找零不用登记，按应收金额记）`,
+      { total, paid },
+    );
+  }
+  return paid;
+}
+
+/**
+ * 登记这张结账单的收款（手牌结账与桌台结账共用）：会员储值按会员 id 升序逐位记账（同一事务里生成消费单与余额流水），
+ * 团购券（同一平台同一券码只能有一笔有效登记）、现金类、优惠 / 免单（已核销的当场授权）。
+ */
+export async function recordCheckoutPayments(
+  tx: Tx,
+  deps: Deps,
+  a: {
+    checkoutId: number;
+    checkoutNo: string;
+    payments: CheckoutPaymentInput[];
+    discount: { reason: string; approverId: number } | null;
+    /** 储值消费单备注里的手牌号；桌台结账时为桌号（tables） */
+    tagCodes: string[];
+    tables?: string[];
+    date: string;
+    at: Date;
+    ctx: OpContext;
+  },
+) {
+  const wallets = a.payments.filter((p) => p.method === 'wallet');
+  const coupons = a.payments.filter((p) => p.method === 'coupon');
+  const discounts = a.payments.filter((p) => p.method === 'discount');
+  // 会员储值：按会员 id 升序逐位记账（锁顺序固定）
+  for (const w of [...wallets].sort((x, y) => x.memberId - y.memberId)) {
+    const r = await consumeForCheckout(tx, deps, {
+      memberId: w.memberId,
+      amount: w.amount,
+      expectedSplit: w.expectedSplit,
+      checkoutId: a.checkoutId,
+      checkoutNo: a.checkoutNo,
+      tagCodes: a.tagCodes,
+      tables: a.tables,
+      businessDate: a.date,
+      ctx: a.ctx,
+      at: a.at,
+    });
+    await tx`
+      INSERT INTO checkout_payments (checkout_id, method, amount, member_id, consumption_id)
+      VALUES (${a.checkoutId}, 'wallet', ${w.amount}, ${w.memberId}, ${r.consumptionId})`;
+  }
+  // 团购券：同一平台同一券码只能有一笔有效登记
+  for (const cp of coupons) {
+    const [used] = await tx<{ checkoutNo: string; registeredAt: string }[]>`
+      SELECT c.checkout_no, g.registered_at FROM group_buy_coupons g JOIN checkouts c ON c.id = g.checkout_id
+      WHERE g.platform = ${cp.platform} AND g.code = ${cp.code} AND g.status = 'active'`;
+    if (used) throw couponUsed(cp.platform, cp.code, used.checkoutNo);
+    const [g] = await tx<{ id: number }[]>`
+      INSERT INTO group_buy_coupons (platform, code, deal_name, amount, checkout_id, business_date, registered_by, registered_at)
+      VALUES (${cp.platform}, ${cp.code}, ${cp.dealName}, ${cp.amount}, ${a.checkoutId}, ${a.date}, ${a.ctx.actor.id}, ${a.at})
+      RETURNING id`;
+    await tx`
+      INSERT INTO checkout_payments (checkout_id, method, amount, ref, coupon_id)
+      VALUES (${a.checkoutId}, 'coupon', ${cp.amount}, ${cp.dealName}, ${g!.id})`;
+  }
+  for (const p of a.payments) {
+    if (p.method === 'wallet' || p.method === 'coupon' || p.method === 'discount') continue;
+    await tx`
+      INSERT INTO checkout_payments (checkout_id, method, amount, ref)
+      VALUES (${a.checkoutId}, ${p.method}, ${p.amount}, ${p.ref})`;
+  }
+  if (a.discount && discounts[0]) {
+    await tx`
+      INSERT INTO checkout_payments (checkout_id, method, amount, ref, approved_by, grant_id)
+      VALUES (${a.checkoutId}, 'discount', ${discounts[0].amount}, ${a.discount.reason}, ${a.discount.approverId}, ${discounts[0].grantId})`;
+  }
+}
+
 export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContext): Promise<CheckoutDetail> {
   const input = parse(CheckoutInput, raw);
   const ids = [...new Set(input.visitIds)];
   if (ids.length !== input.visitIds.length) throw badRequest('同一张手牌不能重复结账');
-  const wallets = input.payments.filter((p) => p.method === 'wallet');
-  const coupons = input.payments.filter((p) => p.method === 'coupon');
-  const discounts = input.payments.filter((p) => p.method === 'discount');
-  if (discounts.length > 1) throw badRequest('优惠 / 免单最多登记一笔，请合并金额后重新授权');
-  if (input.payments.some((p) => p.method === 'other' && !p.ref)) throw badRequest('「其他」收款请在备注里写明收的是什么');
-  if (wallets.length && !can(ctx.actor, 'consume.create')) throw forbidden('当前岗位不能用会员储值收款');
-  if (new Set(wallets.map((w) => w.memberId)).size !== wallets.length) throw badRequest('同一位会员的储值支付请合并为一笔');
-  if (new Set(coupons.map((c) => `${c.platform}:${c.code}`)).size !== coupons.length) throw badRequest('同一张团购券不能登记两次');
+  const { wallets, discounts } = splitPayments(input.payments, ctx.actor);
   for (const t of input.tickets) if (!ids.includes(t.visitId)) throw badRequest('补选票种的客人不在本次结账里');
   // 补录纸质单：按纸质单上的实际离店时间结账；储值流水按发生顺序连续记账，不能插到过去，补录的结账不能用储值
   const backfill = resolveBackfill(input.backfill, ctx.actor);
@@ -309,16 +400,7 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
         tickets: priced.map((r) => ({ tagCode: r.tagCode, segments: r.ticket.segments, amount: r.ticket.amount })),
       });
     }
-    const paid = input.payments.reduce((s, p) => s + p.amount, 0);
-    if (paid !== total) {
-      throw unprocessable(
-        'NOT_SETTLED',
-        paid < total
-          ? `还差 ${formatYuan(total - paid)} 没有收，结清才能离店`
-          : `收款合计多了 ${formatYuan(paid - total)}，请核对（现金找零不用登记，按应收金额记）`,
-        { total, paid },
-      );
-    }
+    const paid = assertSettled(input.payments, total);
 
     // 优惠 / 免单：核销值班经理及以上的当场授权（这几张手牌、这个金额；业务回滚时核销一起回滚）
     const discount = discounts[0]
@@ -351,48 +433,7 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
     }
 
     const tagCodes = priced.map((r) => r.tagCode);
-    // 会员储值：按会员 id 升序逐位记账（锁顺序固定）
-    for (const w of [...wallets].sort((a, b) => a.memberId - b.memberId)) {
-      const r = await consumeForCheckout(tx, deps, {
-        memberId: w.memberId,
-        amount: w.amount,
-        expectedSplit: w.expectedSplit,
-        checkoutId,
-        checkoutNo,
-        tagCodes,
-        businessDate: date,
-        ctx,
-        at,
-      });
-      await tx`
-        INSERT INTO checkout_payments (checkout_id, method, amount, member_id, consumption_id)
-        VALUES (${checkoutId}, 'wallet', ${w.amount}, ${w.memberId}, ${r.consumptionId})`;
-    }
-    // 团购券：同一平台同一券码只能有一笔有效登记
-    for (const cp of coupons) {
-      const [used] = await tx<{ checkoutNo: string; registeredAt: string }[]>`
-        SELECT c.checkout_no, g.registered_at FROM group_buy_coupons g JOIN checkouts c ON c.id = g.checkout_id
-        WHERE g.platform = ${cp.platform} AND g.code = ${cp.code} AND g.status = 'active'`;
-      if (used) throw couponUsed(cp.platform, cp.code, used.checkoutNo);
-      const [g] = await tx<{ id: number }[]>`
-        INSERT INTO group_buy_coupons (platform, code, deal_name, amount, checkout_id, business_date, registered_by, registered_at)
-        VALUES (${cp.platform}, ${cp.code}, ${cp.dealName}, ${cp.amount}, ${checkoutId}, ${date}, ${ctx.actor.id}, ${at})
-        RETURNING id`;
-      await tx`
-        INSERT INTO checkout_payments (checkout_id, method, amount, ref, coupon_id)
-        VALUES (${checkoutId}, 'coupon', ${cp.amount}, ${cp.dealName}, ${g!.id})`;
-    }
-    for (const p of input.payments) {
-      if (p.method === 'wallet' || p.method === 'coupon' || p.method === 'discount') continue;
-      await tx`
-        INSERT INTO checkout_payments (checkout_id, method, amount, ref)
-        VALUES (${checkoutId}, ${p.method}, ${p.amount}, ${p.ref})`;
-    }
-    if (discount && discounts[0]) {
-      await tx`
-        INSERT INTO checkout_payments (checkout_id, method, amount, ref, approved_by, grant_id)
-        VALUES (${checkoutId}, 'discount', ${discounts[0].amount}, ${discount.reason}, ${discount.approverId}, ${discounts[0].grantId})`;
-    }
+    await recordCheckoutPayments(tx, deps, { checkoutId, checkoutNo, payments: input.payments, discount, tagCodes, date, at, ctx });
 
     // 结清：账单与来访结束，手牌释放；同行组没有在店客人时关闭
     await tx`UPDATE bills SET status = 'settled', closed_at = ${at} WHERE id IN ${tx(billIds)}`;

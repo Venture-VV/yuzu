@@ -46,13 +46,16 @@ export interface KitchenStation {
   itemCount: number;
 }
 
-/** 厨房屏上的一道菜（一条餐饮明细） */
+/** 厨房屏上的一道菜（一条餐饮明细）：手牌客人的（牌号）或桌台的（桌号） */
 export interface KitchenItem {
   id: number;
   orderNo: string;
-  visitId: number;
-  tagCode: string;
-  zone: 'male' | 'female';
+  visitId: number | null;
+  tagCode: string | null;
+  zone: 'male' | 'female' | null;
+  /** 桌台的菜（第二步）：开台与桌号；手牌客人的菜为 null */
+  tableSessionId: number | null;
+  tableName: string | null;
   guest: string;
   itemId: number;
   name: string;
@@ -67,7 +70,7 @@ export interface KitchenItem {
   doneAt: string | null;
   servedAt: string | null;
   postedByName: string;
-  /** 客人已结账离店（还没上的菜请与前台确认后处理） */
+  /** 客人已结账离店 / 这桌已结账（还没上的菜请与前台确认后处理） */
   visitClosed: boolean;
 }
 
@@ -128,3 +131,96 @@ export interface DiningAdmin {
 }
 
 export const kitchenElapsed = (from: string, now: number) => Math.max(0, Math.floor((now - new Date(from).getTime()) / 60_000));
+
+// ───────────── 第二步：桌台、开台与桌台结账（不洗浴的客人） ─────────────
+//   · 桌台在后台「餐饮」里建（大厅 A1、包间 1……），停用不删除；
+//   · 开台：不洗浴的客人在一张桌台上用餐，一桌一张账单，可登记人数、称呼与会员（会员可用储值结账）；
+//   · 点单到桌台（只能点进厨房的菜），厨房屏显示桌号；转台要写原因；没有有效明细时可以撤台；
+//   · 结账：收银在餐饮页结账，收款方式、储值、团购券、优惠授权、班次与前台结账相同；反结账在前台「结账记录」里，与手牌相同。
+
+export const MAX_TABLE_NAME = 12;
+export const MAX_TABLE_AREA = 12;
+/** 一次最多合并结几桌 */
+export const MAX_TABLES_PER_CHECKOUT = 10;
+
+export interface DiningTable {
+  id: number;
+  name: string;
+  /** 区域：大厅、包间、露台……（空为不分区） */
+  area: string;
+  seats: number;
+  sortOrder: number;
+  active: boolean;
+}
+
+/** 桌台看板上的一桌（用餐中的开台） */
+export interface TableSessionBrief {
+  id: number;
+  sessionNo: string;
+  tableId: number;
+  guests: number;
+  guestLabel: string;
+  memberId: number | null;
+  memberName: string | null;
+  openedAt: string;
+  openedByName: string;
+  /** 有效明细合计（分） */
+  amount: number;
+  lineCount: number;
+  /** 还没上的菜（份） */
+  pendingDishes: number;
+}
+
+export interface TablesBoard {
+  serverTime: string;
+  businessDate: string;
+  tables: (DiningTable & { session: TableSessionBrief | null })[];
+}
+
+export interface TableSessionDetail {
+  id: number;
+  sessionNo: string;
+  status: 'open' | 'settled' | 'cancelled';
+  tableId: number;
+  tableName: string;
+  area: string;
+  guests: number;
+  guestLabel: string;
+  member: { id: number; memberNo: string; name: string } | null;
+  openedAt: string;
+  openedByName: string;
+  closedAt: string | null;
+  closeReason: string | null;
+  billId: number;
+  billNo: string;
+  amount: number;
+  lines: import('./frontdesk').BillLine[];
+  moves: { fromTable: string; toTable: string; reason: string; operatorName: string; at: string }[];
+}
+
+/** 桌台结账前核对（只读） */
+export interface TableCheckoutPreview {
+  sessions: {
+    sessionId: number;
+    sessionNo: string;
+    billId: number;
+    tableName: string;
+    guests: number;
+    guestLabel: string;
+    memberId: number | null;
+    memberName: string | null;
+    openedAt: string;
+    lines: { id: number; name: string; quantity: number; amount: number }[];
+    amount: number;
+  }[];
+  totalAmount: number;
+  /** 这几桌登记的会员（可用储值支付），附余额 */
+  members: { id: number; name: string; memberNo: string; status: 'active' | 'frozen'; principalBalance: number; bonusBalance: number }[];
+  pricedAt: string;
+  /** 还没上的菜：结账时只提醒 */
+  dishes: { tableName: string; name: string; quantity: number; status: KitchenStatus }[];
+}
+
+export interface TablesAdmin {
+  tables: (DiningTable & { sessionCount: number })[];
+}

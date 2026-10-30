@@ -821,11 +821,21 @@ export function CheckoutReceipt({ detail }: { detail: CheckoutDetail }) {
             {detail.bills.map((b) => (
               <tr key={b.billId}>
                 <td className="px-3 py-2">
-                  <span className="num font-bold">{b.tagCode}</span> <span className="text-ink-3">{b.memberName ?? (b.guestLabel || '散客')}</span>
+                  <span className="num font-bold">{b.tableName !== null ? `桌 ${b.tableName}` : b.tagCode}</span>{' '}
+                  <span className="text-ink-3">
+                    {b.memberName ?? (b.guestLabel || '散客')}
+                    {b.tableName !== null && ` · ${b.guests} 人`}
+                  </span>
                 </td>
                 <td className="px-3 py-2 text-ink-2">
-                  {b.ticketName} · {b.ticketSegments === 1 ? '12 小时档' : `${b.ticketSegments} 段`} <Money cents={b.ticketAmount} className="text-ink-3" />
-                  <span className="block text-[11.5px] text-ink-3">在店 {Math.floor(b.stayMinutes / 60)} 时 {b.stayMinutes % 60} 分</span>
+                  {b.ticketName !== null && (
+                    <>
+                      {b.ticketName} · {b.ticketSegments === 1 ? '12 小时档' : `${b.ticketSegments} 段`} <Money cents={b.ticketAmount ?? 0} className="text-ink-3" />
+                    </>
+                  )}
+                  <span className="block text-[11.5px] text-ink-3">
+                    {b.tableName !== null ? '用餐' : '在店'} {Math.floor(b.stayMinutes / 60)} 时 {b.stayMinutes % 60} 分
+                  </span>
                 </td>
                 <td className="px-3 py-2 text-right">
                   <Money cents={b.amount} className="font-bold" />
@@ -904,7 +914,7 @@ export function CheckoutRecordsDialog({ open, onClose, focusId }: { open: boolea
             <li key={c.id}>
               <button type="button" onClick={() => setOpenId(c.id)} className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-left hover:bg-paper-2/60">
                 <span className="num font-bold">{c.checkoutNo}</span>
-                <span className="num text-[13px] font-semibold text-ink-2">{c.tagCodes.join('、')}</span>
+                <span className="num text-[13px] font-semibold text-ink-2">{[...(c.tagCodes ?? []), ...(c.tableNames ?? []).map((n) => `桌 ${n}`)].join('、')}</span>
                 <span className="text-[12.5px] text-ink-3">
                   {formatTime(c.createdAt)} · {c.operatorName} · {(c.methods ?? []).map((m) => CHECKOUT_METHOD_LABELS[m]).join(' + ') || '免收'}
                 </span>
