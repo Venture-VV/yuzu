@@ -66,6 +66,8 @@ beforeAll(async () => {
   await sql`ALTER TABLE visits ADD COLUMN ticket_end_at timestamptz`;
   await sql`ALTER TABLE checkout_payments ADD COLUMN approved_by bigint`;
   await sql`INSERT INTO settings (key, value) VALUES ('require_open_shift', 'false'::jsonb)`;
+  // 现版本结账时核对补录记录（018 才有）：写入期间临时建表，迁移前删掉
+  await sql.unsafe(await readFile(new URL('018_backfill.sql', MIGRATIONS), 'utf8'));
   const deps = { sql, config };
   const as = (id: number, username: string): Actor => ({ id, username, displayName: username, role: username === 'owner' ? 'owner' : 'clerk', duties: [], mustChangePassword: false });
   const cash = (amount: number) => ({ idempotencyKey: randomUUID(), memberId, planId: null, paidAmount: amount, bonusAmount: 0, paymentMethod: 'cash' as const, paymentConfirmed: true as const });
@@ -81,8 +83,9 @@ beforeAll(async () => {
   await sql`ALTER TABLE visits DROP COLUMN ticket_end_at`;
   await sql`ALTER TABLE checkout_payments DROP COLUMN approved_by`;
   await sql`DELETE FROM settings WHERE key = 'require_open_shift'`;
+  await sql`DROP TABLE backfill_entries`;
 
-  expect(await migrate(sql)).toEqual(['016_shift_boundary.sql', '017_r1_funds.sql']);
+  expect(await migrate(sql)).toEqual(['016_shift_boundary.sql', '017_r1_funds.sql', '018_backfill.sql']);
   app = await buildApp(sql, config);
 }, 60_000);
 

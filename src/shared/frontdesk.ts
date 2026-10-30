@@ -2,6 +2,7 @@
 //
 // 手牌账单只汇总消费明细，不是第二套会员钱包：本阶段（S2）挂账不收款、不扣会员余额。
 
+import type { BackfillMark } from './backfill';
 import type { PriceTier } from './catalog';
 import type { CheckoutDetail } from './checkout';
 
@@ -193,6 +194,8 @@ export interface BoardVisit {
   checkedInAt: string;
   memberId: number | null;
   memberName: string | null;
+  /** 会员手机号后 4 位：前台按手机尾号找在店客人（不下发完整手机号） */
+  memberPhoneTail: string | null;
   guestLabel: string;
   groupId: number | null;
   groupNo: string | null;
@@ -236,6 +239,8 @@ export interface BillLine {
   voidReason: string | null;
   voidedByName: string | null;
   voidedAt: string | null;
+  /** 按实际时间补录的明细（R1.9）：纸质单号、实际时间与补录人；平时为 null */
+  backfill: BackfillMark | null;
 }
 
 export interface VisitMember {
@@ -288,6 +293,8 @@ export interface VisitDetail {
   memberLevel: MemberLevel | null;
   /** 开牌时等级不够、经当场授权使用 VIP 柜的授权人 */
   vipOverrideByName: string | null;
+  /** 按实际时间补录的接待（R1.9）：纸质单号、实际时间与补录人；平时为 null */
+  backfill: BackfillMark | null;
   /** 票种与按当前时刻计算的门票（Batch 3 之前开的牌没有票种，结账时补选） */
   ticket: {
     typeId: number;

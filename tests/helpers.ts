@@ -5,6 +5,7 @@ import { loadConfig, type AppConfig } from '../src/server/config';
 import { createSql, type Sql } from '../src/server/db';
 import { migrate } from '../src/server/migrate';
 import { createStaff } from '../src/server/modules/staff';
+import { minuteOfDay } from '../src/shared/business-date';
 
 export const TEST_DB =
   process.env.TEST_DATABASE_URL ?? 'postgres://yuzu:yuzu_dev_only@127.0.0.1:5432/yuzu_test';
@@ -118,4 +119,14 @@ export async function setRule(ctx: TestContext, deductionRule: string) {
   const current = await api(ctx.app, ctx.owner, 'GET', '/api/settings');
   const res = await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { ...current.body, deductionRule });
   if (res.status !== 200) throw new Error(JSON.stringify(res.body));
+}
+
+/**
+ * 灌演示数据（前台、结账）用的时刻：演示里收银员的班次在灌数据前 5 小时开班，结账在 1 小时之内。
+ * 在营业日切换（06:00，上海时间）之后 5 个半小时内灌数据时，班次会落在结账单的前一个营业日，按营业日核对的用例对不上；
+ * 这段时间把灌数据的时刻挪到 05:30，演示数据整体落在前一个营业日、彼此一致。
+ */
+export function demoSeedTime(now = new Date()): Date {
+  const m = minuteOfDay(now, 'Asia/Shanghai');
+  return m >= 360 && m < 690 ? new Date(now.getTime() - (m - 330) * 60_000) : now;
 }

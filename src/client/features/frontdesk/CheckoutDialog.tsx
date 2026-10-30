@@ -33,6 +33,7 @@ import { Badge, Button, Input, MoneyInput, Notice, Select, Skeleton, Textarea } 
 import { PrintButton } from '../print/PrintButton';
 import { SHIFT_ERRORS, shiftKeys, ShiftGate, useShiftReady } from '../shift/ShiftGate';
 import { ZoneChip } from './parts';
+import { BackfillNotice, backfillBody, backfillSummary, useBackfill } from './backfill';
 import { PendingPanel, useFrontdeskOp } from './pending';
 import { stayText, useCheckout, useCheckoutPreview, useCheckouts, useRefreshFrontdesk, useTicketTypes } from './queries';
 
@@ -103,7 +104,10 @@ export function CheckoutDialog({
   const [authorizing, setAuthorizing] = useState<number | null>(null);
   const shiftReady = useShiftReady(open);
   const qc = useQueryClient();
-  const preview = useCheckoutPreview(selected, open && !result);
+  // 补录纸质单：按纸质单上的实际离店时间计价；补录的结账不能用会员储值
+  const backfill = useBackfill();
+  const backfillBlocked = backfill.state.active && !backfill.request;
+  const preview = useCheckoutPreview(selected, open && !result && !backfillBlocked, backfill.request?.at);
   const ticketTypes = useTicketTypes();
   const op = useFrontdeskOp<CheckoutDetail>({
     type: 'checkout',
@@ -169,6 +173,7 @@ export function CheckoutDialog({
     const c = rowCents[i];
     if (c === null || c === undefined || c <= 0) return '请填写金额';
     if (r.method === 'wallet') {
+      if (backfill.state.active) return '补录的结账不能用会员储值，请按纸质单上的实际收款方式登记';
       if (!r.member) return '请选择会员';
       // 改了勾选的手牌后，原来选的会员可能已不在本次结账里
       if (p && !p.members.some((m) => m.id === r.member!.id)) return '这位会员不在本次结账的客人里，请重新选择';
@@ -189,7 +194,13 @@ export function CheckoutDialog({
   const dupWallet = new Set(walletMembers).size !== walletMembers.length;
   const hasDiscount = rows.some((r) => r.method === 'discount');
   const ready =
-    total !== null && remaining === 0 && problems.every((x) => x === null) && !dupWallet && !preview.isFetching && shiftReady.ready;
+    total !== null &&
+    remaining === 0 &&
+    problems.every((x) => x === null) &&
+    !dupWallet &&
+    !preview.isFetching &&
+    shiftReady.ready &&
+    !backfillBlocked;
 
   const addRow = (method: CheckoutMethod) =>
     edit(() => {
@@ -225,9 +236,10 @@ export function CheckoutDialog({
         expectedTotal: total!,
         payments,
         note: note.trim(),
+        ...backfillBody(backfill),
       },
       tagCodes,
-      summary: `结账 ${tagCodes.length} 张（${[...new Set(rows.map((r) => CHECKOUT_METHOD_LABELS[r.method]))].join(' + ') || '免收'}）`,
+      summary: `结账 ${tagCodes.length} 张（${[...new Set(rows.map((r) => CHECKOUT_METHOD_LABELS[r.method]))].join(' + ') || '免收'}）${backfillSummary(backfill)}`,
       amount: total!,
       visitIds,
     }));
@@ -308,6 +320,7 @@ export function CheckoutDialog({
     >
       <PendingPanel op={op} onResolved={(d) => setResult(d)} />
       <div className="space-y-4" data-testid="checkout">
+        <BackfillNotice action="结账" />
         <ShiftGate action="结账" />
         {/* 手牌 */}
         <div>
@@ -352,7 +365,7 @@ export function CheckoutDialog({
         <div className="rounded-lg border border-line bg-paper/50 p-3">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="mr-1 text-[13px] font-bold text-ink-2">收款</span>
-            {QUICK_METHODS.filter((m) => m !== 'wallet' || can('consume.create')).map((m) => (
+            {QUICK_METHODS.filter((m) => m !== 'wallet' || (can('consume.create') && !backfill.state.active)).map((m) => (
               <Button
                 key={m}
                 size="sm"
@@ -724,7 +737,17 @@ export function CheckoutReceipt({ detail }: { detail: CheckoutDetail }) {
           {formatDateTime(detail.createdAt)} · {detail.operatorName}
         </span>
         {detail.status === 'voided' && <Badge tone="clay">已反结账</Badge>}
+        {detail.backfill && (
+          <span data-testid="checkout-backfill">
+            <Badge tone="lake">补录 · 纸质单 {detail.backfill.slipNo}</Badge>
+          </span>
+        )}
       </div>
+      {detail.backfill && (
+        <p className="text-[12px] text-ink-3">
+          按纸质单上的实际时间结账：{detail.backfill.enteredByName}于 {formatDateTime(detail.backfill.enteredAt)} 补录。
+        </p>
+      )}
       {detail.status === 'voided' && (
         <Notice tone="warning" icon={<Undo2 className="size-4" />} title={`${detail.voidedByName ?? ''} 于 ${detail.voidedAt ? formatDateTime(detail.voidedAt) : ''} 反结账`}>
           {detail.voidReason}。储值消费已按原单撤销，团购券登记已作废，客人恢复为在店未结。
@@ -831,6 +854,7 @@ export function CheckoutRecordsDialog({ open, onClose, focusId }: { open: boolea
                   {formatTime(c.createdAt)} · {c.operatorName} · {(c.methods ?? []).map((m) => CHECKOUT_METHOD_LABELS[m]).join(' + ') || '免收'}
                 </span>
                 <span className="flex-1" />
+                {c.backfillSlipNo && <Badge tone="lake">补录 · {c.backfillSlipNo}</Badge>}
                 {c.status === 'voided' && <Badge tone="clay">已反结账</Badge>}
                 <Money cents={c.totalAmount} className={cn('font-bold', c.status === 'voided' && 'line-through opacity-60')} />
               </button>

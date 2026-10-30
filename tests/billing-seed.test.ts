@@ -2,12 +2,11 @@
 // 双口径日结与前台自检全部通过；交班规则（一人一个未交班班次、应有现金变化时拒绝交班、只能交自己的班）。
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { minuteOfDay } from '../src/shared/business-date';
 import { businessBreakdown } from '../src/shared/checkout';
 import expected from '../src/server/demo/billing-expected.json';
 import { seedBillingDemo } from '../src/server/seed-billing';
 import { seedFrontdeskDemo } from '../src/server/seed-frontdesk';
-import { api, login, setup, type TestContext } from './helpers';
+import { api, demoSeedTime, login, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let owner: string;
@@ -15,10 +14,8 @@ let date: string;
 
 beforeAll(async () => {
   ctx = await setup();
-  // 演示单据在执行前 30 分钟内结账：避开营业日切换（06:00）附近，保证都落在同一个营业日
-  let now = new Date();
-  const m = minuteOfDay(now, 'Asia/Shanghai');
-  if (m >= 360 && m < 450) now = new Date(now.getTime() - 2 * 3_600_000);
+  // 演示里的班次在 5 小时前开班、结账在 1 小时之内：营业日切换（06:00）后 5 个半小时内挪到 05:30（demoSeedTime），都落在同一个营业日
+  const now = demoSeedTime();
   await seedFrontdeskDemo(ctx.sql, ctx.config, { now });
   const r = await seedBillingDemo(ctx.sql, ctx.config, { now });
   expect(r).toEqual({ skipped: false, checkouts: 6, voided: 1 });

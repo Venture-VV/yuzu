@@ -2,6 +2,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { BACKFILL_KIND_LABELS, type BackfillKind } from '@shared/backfill';
 import { businessDateOf, ISO_DATE } from '@shared/business-date';
 import { PAYMENT_METHOD_LABELS, type PaymentMethod } from '@shared/labels';
 import { formatAmount, formatYuan } from '@shared/money';
@@ -60,6 +61,7 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
     opening: op!,
     net: net!,
     business: await businessTotals(db, date),
+    backfill: (await db<{ count: number }[]>`SELECT count(*)::int AS count FROM backfill_entries WHERE business_date = ${date}`)[0]!,
   };
 }
 
@@ -123,6 +125,7 @@ const withNewSections = (t: SettlementTotals): SettlementTotals => ({
   expiry: t.expiry ?? { count: 0, bonus: 0 },
   opening: t.opening ?? { count: 0, voidCount: 0, principal: 0, bonus: 0 },
   business: t.business ?? EMPTY_BUSINESS,
+  backfill: t.backfill ?? { count: 0 },
 });
 const sameTotals = (snapshot: SettlementTotals, now: SettlementTotals) => canonical(withNewSections(snapshot)) === canonical(now);
 
@@ -139,8 +142,11 @@ const ANOMALY_LABELS: Record<SettlementAnomaly['kind'], string> = {
   ticket_override: '降档 / 免票',
   visit_cancel: '撤销误开的牌',
   line_void: '作废明细',
+  backfill: '补录',
 };
 const pairText = (p: Pair) => `本金 ${formatYuan(p.principal)} / 赠金 ${formatYuan(p.bonus)}`;
+/** 补录隔了多久：90 → 1.5 小时 */
+const describeDelay = (minutes: number) => (minutes < 60 ? `${Math.max(minutes, 0)} 分钟` : `${Number((minutes / 60).toFixed(1))} 小时`);
 
 export async function computeSettlement(db: Db, date: string, today: string): Promise<SettlementSummary> {
   const totals = await computeTotals(db, date);
@@ -400,6 +406,28 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
         description: `接待时选免票（手牌 ${f.tags.join('、')}）· ${f.reason} · 经办 ${staff}，${f.approverName}当场授权`,
       });
     }
+  }
+  // 按实际时间补录的纸质单（R1.9）：每一步补录一行，时间为纸质单上的实际时间，写明补录人和隔了多久补录
+  const backfills = await db<{
+    kind: BackfillKind; slipNo: string; actualAt: string; delayMinutes: number; staffName: string;
+    docNo: string | null; tagCode: string | null; amount: number | null; checkoutStatus: string | null;
+  }[]>`
+    SELECT b.kind, b.slip_no, b.actual_at, round(extract(epoch FROM b.entered_at - b.actual_at) / 60)::int AS delay_minutes,
+           s.display_name AS staff_name, coalesce(c.checkout_no, v.visit_no) AS doc_no, t.code AS tag_code, c.status AS checkout_status,
+           CASE b.kind WHEN 'checkout' THEN c.total_amount
+                       WHEN 'charges' THEN (SELECT coalesce(sum(l.amount), 0) FROM bill_lines l WHERE l.post_key = b.op_key) END AS amount
+    FROM backfill_entries b JOIN staff s ON s.id = b.entered_by
+    LEFT JOIN checkouts c ON c.id = b.checkout_id LEFT JOIN visits v ON v.id = b.visit_id LEFT JOIN hand_tags t ON t.id = v.tag_id
+    WHERE b.business_date = ${date} ORDER BY b.actual_at, b.id`;
+  for (const b of backfills) {
+    anomalies.push({
+      kind: 'backfill',
+      at: b.actualAt,
+      docNo: b.docNo,
+      memberName: null,
+      amount: b.amount,
+      description: `补录${BACKFILL_KIND_LABELS[b.kind]}${b.tagCode ? `（手牌 ${b.tagCode}）` : ''} · 纸质单 ${b.slipNo} · ${b.staffName}在实际时间后 ${describeDelay(b.delayMinutes)}补录${b.checkoutStatus === 'voided' ? '（结账单已反结账）' : ''}`,
+    });
   }
   for (const c of chainBreaks) {
     anomalies.push({ kind: 'chain_break', at: c.createdAt, docNo: c.docNo, memberName: c.memberName, amount: null, description: '流水变动后余额不连续，请联系维护人员' });

@@ -8,7 +8,8 @@
 //   · 授权绑定用途、申请的员工和授权对象（哪位客人用哪张柜 / 哪位会员的哪类业务、多少金额），5 分钟内有效，只能用一次；
 //   · 业务请求只带授权编号，在同一事务里核销：业务回滚时核销一起回滚，授权仍可在有效期内再用；
 //   · 授权人的密码错误与登录共用限流计数；失败返回 403 而不是 401，不会把前台员工自己登出；
-//   · 授权人可以就是当班的值班经理本人（再输一次自己的密码确认）。
+//   · 授权人可以就是当班的值班经理本人（再输一次自己的密码确认）；但「优惠 / 免单」不能由收银的本人授权，
+//     值班经理、店总自己收银时要另一位值班经理、店总或店主授权，店主本人除外（R1.2-b，店主 2026-10-29 决定）。
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -141,6 +142,7 @@ export function registerGrantRoutes(app: FastifyInstance, deps: Deps) {
     if (!can({ role: approver.role, duties: approver.duties ?? [] }, rule.approver)) {
       throw new AppError(403, 'AUTH_NOT_ALLOWED', `「${approver.displayName}」的岗位不能授权${rule.approverText}`);
     }
+    if (selfDiscount(input.purpose, req.actor.id, approver)) throw selfDiscountError();
     const grant = await sql.begin(async (tx) => {
       const row = await insertGrant(tx, { purpose: input.purpose, requestedBy: req.actor.id, approvedBy: approver.id, scope });
       await writeAudit(tx, {
@@ -182,6 +184,12 @@ interface LockedGrant {
   active: boolean;
 }
 
+/** 优惠 / 免单由收银的本人授权（店主除外）：R1.2-b 不允许 */
+const selfDiscount = (purpose: GrantPurpose, requestedBy: number, approver: { id: number; role: Role }) =>
+  purpose === 'checkout_discount' && approver.id === requestedBy && approver.role !== 'owner';
+const selfDiscountError = () =>
+  new AppError(403, 'AUTH_SELF_NOT_ALLOWED', '优惠 / 免单不能由收银的本人授权，请另一位值班经理、店总或店主授权');
+
 /** 锁定授权并做通用核对：存在、用途一致、本人申请、未用过、未过期、授权人仍在职且仍有授权权限 */
 async function lockGrant(tx: Tx, grantId: string, purpose: GrantPurpose, actor: Actor): Promise<LockedGrant> {
   const [g] = await tx<LockedGrant[]>`
@@ -195,6 +203,10 @@ async function lockGrant(tx: Tx, grantId: string, purpose: GrantPurpose, actor: 
   if (g.expired) throw unprocessable('GRANT_EXPIRED', `授权已过期（${GRANT_TTL_MINUTES} 分钟内有效），请重新授权`);
   if (!g.active || !can({ role: g.role, duties: g.duties ?? [] }, PURPOSE_RULES[purpose].approver)) {
     throw unprocessable('GRANT_INVALID', `授权人「${g.approverName}」已停用或已不能授权${PURPOSE_RULES[purpose].approverText.split('，')[0]}，请重新授权`);
+  }
+  // 升级前签发、还在有效期内的本人授权同样不能用
+  if (selfDiscount(purpose, g.requestedBy, { id: g.approvedBy, role: g.role })) {
+    throw unprocessable('GRANT_INVALID', '优惠 / 免单不能由收银的本人授权，请另一位值班经理、店总或店主重新授权');
   }
   return g;
 }

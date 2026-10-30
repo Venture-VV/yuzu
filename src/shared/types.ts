@@ -286,7 +286,9 @@ export interface SettlementAnomaly {
     | 'discount'
     | 'ticket_override'
     | 'visit_cancel'
-    | 'line_void';
+    | 'line_void'
+    // R1.9：按实际时间补录纸质单
+    | 'backfill';
   at: string | null;
   docNo: string | null;
   memberName: string | null;
@@ -309,6 +311,11 @@ export interface SettlementTotals {
    * 会员储值支付在会员口径里同时是一笔储值消费，两边由「结账储值支付 = 储值消费」核对。
    */
   business: BusinessTotals;
+  /**
+   * 按实际时间补录进本营业日的步骤数（R1.9：接待、挂账、结账各算一步）。不是金额口径：只补录了接待、挂账时金额不变，
+   * 靠它让已确认的日结提示「有变动」
+   */
+  backfill: { count: number };
 }
 
 export interface BusinessTotals {

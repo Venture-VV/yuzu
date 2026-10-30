@@ -5,6 +5,7 @@ import {
   CircleSlash,
   Clock3,
   Ellipsis,
+  FilePenLine,
   Link2,
   LogOut,
   Plus,
@@ -28,10 +29,11 @@ import {
   type FrontdeskRules,
   type VisitDetail,
 } from '@shared/frontdesk';
+import { backfillText } from '@shared/backfill';
 import { maskPhone } from '@shared/labels';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
-import { cn, formatTime } from '../../lib/utils';
+import { cn, formatDateTime, formatTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
@@ -163,6 +165,11 @@ export function BillPanel({
         {visit.vipOverrideByName && (
           <p className="mt-1.5 flex items-center gap-1 px-1 text-[12px] font-semibold text-yuzu-deep" data-testid="bill-vip-override">
             <ShieldCheck className="size-3.5" /> VIP 柜由{visit.vipOverrideByName}当场授权
+          </p>
+        )}
+        {visit.backfill && (
+          <p className="mt-1.5 flex items-center gap-1 px-1 text-[12px] font-semibold text-lake" data-testid="bill-backfill">
+            <FilePenLine className="size-3.5" /> {backfillText(visit.backfill)}（{formatDateTime(visit.backfill.enteredAt)} 录入，按纸质单上的接待时间 {formatDateTime(visit.backfill.actualAt)}）
           </p>
         )}
         {/* 同行 */}
@@ -463,7 +470,8 @@ function LineRow({ line, canVoid, allowed, selfMinutes, onVoid }: { line: BillLi
           </span>
         </p>
         <p className="num text-[11.5px] text-ink-4">
-          {formatTime(line.postedAt)} · {line.postedByName}
+          {line.backfill ? formatDateTime(line.postedAt) : formatTime(line.postedAt)} · {line.postedByName}
+          {line.backfill && <span className="ml-1 font-semibold text-lake">· 补录 纸质单 {line.backfill.slipNo}</span>}
         </p>
       </div>
       <Money cents={line.amount} className="pt-px text-[14px] font-bold" />

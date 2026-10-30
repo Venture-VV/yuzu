@@ -2,13 +2,12 @@
 // 重新结账的单只含新的门票。建在 seed-frontdesk-demo + seed-billing-demo 上。
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { minuteOfDay } from '../src/shared/business-date';
 import type { CheckoutPrint } from '../src/shared/print';
 import expected from '../src/server/demo/billing-expected.json';
 import { createStaff } from '../src/server/modules/staff';
 import { seedBillingDemo } from '../src/server/seed-billing';
 import { seedFrontdeskDemo } from '../src/server/seed-frontdesk';
-import { api, login, setup, type TestContext } from './helpers';
+import { api, demoSeedTime, login, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let cashier: string;
@@ -19,16 +18,17 @@ const byTags = (tags: string[], status: 'completed' | 'voided') =>
 
 async function printAll() {
   const [row] = await ctx.sql<{ date: string }[]>`SELECT DISTINCT business_date::text AS date FROM checkouts WHERE note = '结账演示'`;
-  const list = (await api(ctx.app, cashier, 'GET', `/api/frontdesk/checkouts?date=${row!.date}`)).body as { id: number }[];
+  // 结账记录用店主查：营业日切换（06:00）附近演示数据落在前一个营业日，店员只能看本营业日的（R1.2）
+  const res = await api(ctx.app, ctx.owner, 'GET', `/api/frontdesk/checkouts?date=${row!.date}`);
+  expect(res.status, JSON.stringify(res.body)).toBe(200);
+  const list = res.body as { id: number }[];
   return Promise.all(list.map(async (c) => (await api<CheckoutPrint>(ctx.app, cashier, 'GET', `/api/print/checkouts/${c.id}`)).body));
 }
 
 beforeAll(async () => {
   ctx = await setup();
   // 与 billing-seed.test 相同：避开营业日切换（06:00）附近
-  let now = new Date();
-  const m = minuteOfDay(now, 'Asia/Shanghai');
-  if (m >= 360 && m < 450) now = new Date(now.getTime() - 2 * 3_600_000);
+  const now = demoSeedTime();
   await seedFrontdeskDemo(ctx.sql, ctx.config, { now });
   await seedBillingDemo(ctx.sql, ctx.config, { now });
   cashier = await login(ctx.app, expected.accounts.cashier, expected.accounts.password);

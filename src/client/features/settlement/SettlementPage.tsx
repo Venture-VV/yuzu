@@ -11,6 +11,7 @@ import {
   CircleX,
   Copy,
   Download,
+  FilePenLine,
   Hourglass,
   Lock,
   Ticket,
@@ -403,6 +404,7 @@ const ANOMALY_META: Record<
   ticket_override: { label: ANOMALY_LABELS.ticket_override, tone: 'yuzu', icon: Ticket, iconClass: 'bg-yuzu-soft text-yuzu-deep' },
   visit_cancel: { label: ANOMALY_LABELS.visit_cancel, tone: 'lake', icon: CircleSlash, iconClass: 'bg-lake-soft text-lake' },
   line_void: { label: ANOMALY_LABELS.line_void, tone: 'lake', icon: CircleSlash, iconClass: 'bg-lake-soft text-lake' },
+  backfill: { label: ANOMALY_LABELS.backfill, tone: 'lake', icon: FilePenLine, iconClass: 'bg-lake-soft text-lake' },
 };
 
 function AnomalyItem({ a }: { a: SettlementAnomaly }) {

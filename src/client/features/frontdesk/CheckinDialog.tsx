@@ -24,6 +24,7 @@ import { Dialog } from '../../components/Overlay';
 import { Badge, Button, Input, Notice, Segmented, Select } from '../../components/ui';
 import { AuthorizeDialog } from '../../components/AuthorizeDialog';
 import { GroupMark, VipChip, ZONE_STYLE } from './parts';
+import { BackfillNotice, backfillBody, backfillSummary, useBackfill } from './backfill';
 import { PendingPanel, useFrontdeskOp } from './pending';
 import { useMemberLevel, useTicketTypes } from './queries';
 
@@ -110,6 +111,7 @@ export function CheckinDialog({
   const members = useMembers(guestType === 'member' && !member ? memberQ.trim() : '');
   const ticketTypes = useTicketTypes();
   const defaultTicket = ticketTypes.data?.find((t) => t.isDefault)?.id ?? ticketTypes.data?.[0]?.id ?? null;
+  const backfill = useBackfill();
   // 上一笔接待结果待确认时，先处理那一笔再发新牌（避免同一批客人被开两次牌）
   const op = useFrontdeskOp<CheckinResult>({
     type: 'checkin',
@@ -204,7 +206,7 @@ export function CheckinDialog({
   };
 
   const submit = async () => {
-    if (!ready) return;
+    if (!ready || backfillBlocked) return;
     const codes = rows.map((r) => normalizeTagCode(r.code));
     const result = await op.submit((key) => ({
       url: '/api/frontdesk/checkins',
@@ -220,15 +222,18 @@ export function CheckinDialog({
         })),
         vipGrantId: needs.length && grant ? grant.grantId : null,
         ticketGrantId: freeItems.length && ticketGrant ? ticketGrant.grantId : null,
+        ...backfillBody(backfill),
       },
       tagCodes: codes,
-      summary: `接待 ${rows.length} 位${member ? `（会员 ${member.name}）` : ''}${needs.length && grant ? `，VIP 柜 ${needs.map((n) => n.code).join('、')} 由${grant.approverName}授权` : ''}${freeItems.length && ticketGrant ? `，${freeItems.map((f) => f.tagCode).join('、')} 免票由${ticketGrant.approverName}授权` : ''}`,
+      summary: `接待 ${rows.length} 位${member ? `（会员 ${member.name}）` : ''}${needs.length && grant ? `，VIP 柜 ${needs.map((n) => n.code).join('、')} 由${grant.approverName}授权` : ''}${freeItems.length && ticketGrant ? `，${freeItems.map((f) => f.tagCode).join('、')} 免票由${ticketGrant.approverName}授权` : ''}${backfillSummary(backfill)}`,
       amount: null,
     }));
     if (result) onDone(result);
   };
 
   const busy = op.busy;
+  /** 补录模式下纸质单号或时间没填好：不能提交 */
+  const backfillBlocked = backfill.state.active && !backfill.request;
   const groupHint = prefill.join ? '加入已在店客人的同行组' : rows.length > 1 ? `${rows.length} 位同行，自动建立同行组，离店时可合并结账` : null;
 
   return (
@@ -246,7 +251,7 @@ export function CheckinDialog({
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             取消
           </Button>
-          <Button variant="primary" size="lg" disabled={!ready || op.locked} loading={busy} onClick={submit} data-testid="checkin-submit">
+          <Button variant="primary" size="lg" disabled={!ready || op.locked || backfillBlocked} loading={busy} onClick={submit} data-testid="checkin-submit">
             确认发牌{rows.length > 1 ? `（${rows.length} 张）` : ''}
           </Button>
         </>
@@ -254,6 +259,7 @@ export function CheckinDialog({
     >
       <PendingPanel op={op} onResolved={onDone} />
       <div className="space-y-4">
+        <BackfillNotice action="接待" />
         {prefill.join && (
           <Notice tone="info" icon={<Link2 className="size-4" />} title={`与 ${prefill.join.tagCode} 同行`}>
             新发的手牌会加入 {prefill.join.tagCode} 的同行组

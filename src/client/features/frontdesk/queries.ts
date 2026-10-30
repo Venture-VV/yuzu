@@ -11,7 +11,7 @@ export const fk = {
   tags: ['frontdesk', 'tags'] as const,
   checks: ['frontdesk', 'checks'] as const,
   ticketTypes: (all: boolean) => ['frontdesk', 'ticket-types', all] as const,
-  checkoutPreview: (ids: number[]) => ['frontdesk', 'checkout-preview', ids.join(',')] as const,
+  checkoutPreview: (ids: number[], at?: string) => ['frontdesk', 'checkout-preview', ids.join(','), at ?? 'now'] as const,
   checkouts: (date: string) => ['frontdesk', 'checkouts', date] as const,
   checkout: (id: number) => ['frontdesk', 'checkout', id] as const,
 };
@@ -21,13 +21,15 @@ export const useTicketTypes = (all = false) =>
   useQuery({ queryKey: fk.ticketTypes(all), queryFn: () => api.get<TicketType[]>(`/api/frontdesk/ticket-types${all ? '?all=1' : ''}`), staleTime: 60_000 });
 
 /** 结账前核对：按此刻计算门票；每 30 秒刷新一次，跳档时员工能看到新金额 */
-export const useCheckoutPreview = (ids: number[], enabled: boolean) =>
+/** 结账前核对；at 为补录纸质单时的实际离店时间（按这个时间计价，不随时间刷新） */
+export const useCheckoutPreview = (ids: number[], enabled: boolean, at?: string) =>
   useQuery({
-    queryKey: fk.checkoutPreview(ids),
-    queryFn: () => api.get<CheckoutPreview>(`/api/frontdesk/checkout-preview?ids=${ids.join(',')}`),
+    queryKey: fk.checkoutPreview(ids, at),
+    queryFn: () =>
+      api.get<CheckoutPreview>(`/api/frontdesk/checkout-preview?ids=${ids.join(',')}${at ? `&at=${encodeURIComponent(at)}` : ''}`),
     enabled: enabled && ids.length > 0,
     placeholderData: keepPreviousData,
-    refetchInterval: 30_000,
+    refetchInterval: at ? false : 30_000,
   });
 
 export const useCheckouts = (date: string, enabled = true) =>

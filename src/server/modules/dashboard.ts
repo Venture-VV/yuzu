@@ -2,12 +2,13 @@
 
 import type { FastifyInstance } from 'fastify';
 import { businessDateOf } from '@shared/business-date';
-import type { CheckoutMethod, DashboardData } from '@shared/checkout';
+import { priceTicket, type CheckoutMethod, type DashboardData } from '@shared/checkout';
 import { shiftDate } from '@shared/labels';
 import { can } from '@shared/permissions';
 import { readSnapshot, type Db } from '../db';
 import { guard } from '../auth/guard';
 import type { Deps } from '../lib/context';
+import { loadFrontdeskRules } from './frontdesk/common';
 import { loadSettings } from './settings';
 
 async function dayNet(db: Db, date: string) {
@@ -25,6 +26,18 @@ export async function dashboard(db: Db, today: string, days: number): Promise<Da
   const [store] = await db<{ count: number; unsettled: number }[]>`
     SELECT count(*)::int AS count, coalesce(sum(b.amount_cents), 0) AS unsettled
     FROM visits v JOIN bills b ON b.id = v.bill_id WHERE v.status = 'open'`;
+  // 在店客人的门票按此刻（反结账后重结的按第一次结账的时刻）估算，与结账前核对同一算法；没选票种的不计入
+  const { overtimeGraceMinutes } = await loadFrontdeskRules(db);
+  const open = await db<{ checkedInAt: string; price12h: number | null; price24h: number | null; ticketEndAt: string | null; now: string }[]>`
+    SELECT checked_in_at, ticket_price_12h AS price12h, ticket_price_24h AS price24h, ticket_end_at, now() AS now
+    FROM visits WHERE status = 'open'`;
+  let ticketEstimate = 0;
+  for (const v of open) {
+    if (v.price12h === null || v.price24h === null) continue;
+    const end = new Date(v.ticketEndAt ?? v.now);
+    ticketEstimate += priceTicket({ price12h: v.price12h, price24h: v.price24h }, v.checkedInAt, end, overtimeGraceMinutes).amount;
+  }
+  const noTicket = open.filter((v) => v.price12h === null).length;
   const t = await dayNet(db, today);
   const [guests] = await db<{ n: number; ticket: number }[]>`
     SELECT count(*)::int AS n, coalesce(sum(cb.ticket_amount), 0) AS ticket
@@ -54,7 +67,7 @@ export async function dashboard(db: Db, today: string, days: number): Promise<Da
     WHERE s.status = 'open' ORDER BY s.started_at`;
   return {
     today,
-    inStore: store!,
+    inStore: { ...store!, ticketEstimate, noTicket },
     todayStats: {
       checkouts: t.checkouts,
       guests: guests!.n,
