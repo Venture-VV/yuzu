@@ -27,8 +27,8 @@ const openShift = async (cookie: string, openingCash = 0) => {
 const current = async (cookie: string) => (await api(ctx.app, cookie, 'GET', '/api/shifts/current')).body.shift as { id: number; summary: Summary } | null;
 const closeShift = (cookie: string, id: number, expectedCash: number) =>
   api(ctx.app, cookie, 'POST', `/api/shifts/${id}/close`, { countedCash: Math.max(0, expectedCash), expectedCash, note: '测试交班' });
-/** 店员接待一位客人并现金结账，返回结账单 */
-const cashCheckout = async (cookie: string) => {
+/** 店员接待一位客人并结账（默认现金），返回结账单 */
+const cashCheckout = async (cookie: string, method: 'cash' | 'wechat' = 'cash') => {
   tagNo += 1;
   const code = `D${String(tagNo).padStart(3, '0')}`;
   const v = await api(ctx.app, cookie, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: code, zone: 'male' }] });
@@ -39,7 +39,7 @@ const cashCheckout = async (cookie: string) => {
     clientKey: randomUUID(),
     visitIds: [id],
     expectedTotal: pre.totalAmount,
-    payments: [{ method: 'cash', amount: pre.totalAmount }],
+    payments: [{ method, amount: pre.totalAmount }],
   });
   expect(c.status, JSON.stringify(c.body)).toBe(200);
   return c.body as { id: number; checkoutNo: string; totalAmount: number };
@@ -152,6 +152,32 @@ describe('跨钱箱退款', () => {
     expect((await voidTo(duty, c.id, s.id)).status).toBe(200);
     expect((await current(ctx.clerk))!.summary.cash.expected).toBe(0);
     expect((await closeShift(ctx.clerk, s.id, 0)).status).toBe(200);
+  });
+
+  it('原单没收现金（只收了扫码）：不能选钱箱，整笔拒绝；反结账人要先开班，原路退回的提醒记到自己的班次（PR #17 复测 P2）', async () => {
+    const night = await openShift(clerk2, 0);
+    const c = await cashCheckout(clerk2, 'wechat');
+    expect(await current(duty2)).toBeNull();
+    const r = await voidTo(duty2, c.id, night.id);
+    expect(r.status).toBe(422);
+    expect(r.body.error.code).toBe('REFUND_SHIFT_NOT_CASH');
+    const [row] = await ctx.sql<{ status: string; voidShiftId: number | null }[]>`SELECT status, void_shift_id FROM checkouts WHERE id = ${c.id}`;
+    expect(row).toEqual({ status: 'completed', voidShiftId: null });
+    expect((await current(clerk2))!.summary.voids).toEqual([]);
+    // 不选钱箱：与页面一致要先开班；开班后记到反结账人自己的班次
+    expect((await voidTo(duty2, c.id)).body.error.code).toBe('SHIFT_REQUIRED');
+    const own = await openShift(duty2, 0);
+    expect((await voidTo(duty2, c.id)).status).toBe(200);
+    const [after] = await ctx.sql<{ voidShiftId: number | null }[]>`SELECT void_shift_id FROM checkouts WHERE id = ${c.id}`;
+    expect(after!.voidShiftId).toBe(own.id);
+    expect((await current(duty2))!.summary.voids.map((v) => v.checkoutNo)).toEqual([c.checkoutNo]);
+    expect((await current(clerk2))!.summary.voids).toEqual([]);
+    for (const [cookie, id] of [
+      [clerk2, night.id],
+      [duty2, own.id],
+    ] as const) {
+      expect((await closeShift(cookie, id, (await current(cookie))!.summary.cash.expected)).status).toBe(200);
+    }
   });
 
   it('只有能反结账的岗位能看可选的钱箱；前台自检与日结核对照常通过', async () => {

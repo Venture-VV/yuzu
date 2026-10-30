@@ -494,6 +494,15 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
       SELECT id, checkout_no, client_key, status, created_at FROM checkouts WHERE id = ${checkoutId} FOR UPDATE`;
     if (!c) throw notFound('结账单不存在');
     if (c.status !== 'completed') throw conflict('ALREADY_VOIDED', `结账单 ${c.checkoutNo} 已反结账`);
+    // 选钱箱只用于退现金（PR #17 复测 P2）：原单没收现金时，扫码等原路退回的提醒记到反结账人自己的班次，
+    // 与页面一致要求先开班（R1.2），不能借别人的班次绕过；收款明细只追加不修改，在这里核对即可
+    if (refundShiftId !== undefined) {
+      const [cash] = await tx<{ amount: number }[]>`
+        SELECT coalesce(sum(amount), 0)::int AS amount FROM checkout_payments WHERE checkout_id = ${c.id} AND method = 'cash'`;
+      if (cash!.amount === 0) {
+        throw unprocessable('REFUND_SHIFT_NOT_CASH', `结账单 ${c.checkoutNo} 没有收现金，不用选退款钱箱；请先开班，再反结账（原路退回的提醒记到你当班的交班表）`);
+      }
+    }
     // 撤销与反结账时限（#10，默认 48 小时）：超过时限只有店主可以反结账
     const windowHours = (await loadSettings(tx)).reversalWindowHours;
     if (windowHours !== null && ctx.actor.role !== 'owner' && at.getTime() - new Date(c.createdAt).getTime() > windowHours * 3_600_000) {
