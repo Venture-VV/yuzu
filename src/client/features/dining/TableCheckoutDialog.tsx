@@ -270,9 +270,10 @@ export function TableCheckoutDialog({
 
 /** 这几桌点的菜还没上齐时提醒（不拦结账；结账后厨房屏标出「这桌已结账」） */
 function TableDishesNotice({ dishes }: { dishes: TableCheckoutPreview['dishes'] }) {
+  const one = new Set(dishes.map((d) => d.tableName)).size === 1;
   return (
     <div data-testid="checkout-dishes">
-      <Notice tone="warning" title="这几桌点的菜还没上齐：请先问客人还要不要，不要的先退菜再结账">
+      <Notice tone="warning" title={`${one ? '这桌' : '这几桌'}点的菜还没上齐：请先问客人还要不要，不要的先退菜再结账`}>
         <ul className="mt-1 space-y-0.5">
           {dishes.map((d, i) => (
             <li key={i}>
