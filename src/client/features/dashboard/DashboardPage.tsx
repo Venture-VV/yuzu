@@ -14,12 +14,15 @@ import { Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { Columns, HBars, yuan } from './charts';
 import { MembersTab } from './MembersTab';
 import { OverviewTab } from './OverviewTab';
+import { TechniciansTab } from './TechniciansTab';
 
 // 看板按岗位分页（v0.6.0）：今日（值班经理、收银）、经营总览（总经理）、会员总览（客户经理）；各页按权限显示
+// v0.7.0 加「技师业绩」（店主、店总、值班经理）
 const TABS = [
   { key: 'today', label: '今日', perm: 'ledger.readToday' },
   { key: 'overview', label: '经营总览', perm: 'report.executive' },
   { key: 'members', label: '会员总览', perm: 'report.members' },
+  { key: 'technicians', label: '技师业绩', perm: 'report.technicians' },
 ] as const satisfies readonly { key: string; label: string; perm: Permission }[];
 type TabKey = (typeof TABS)[number]['key'];
 
@@ -83,7 +86,7 @@ export function DashboardPage() {
       )}
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[1080px] space-y-5 px-5 py-6 md:px-7" data-testid="dashboard">
-          {current.key === 'overview' ? <OverviewTab /> : current.key === 'members' ? <MembersTab /> : <TodayTab />}
+          {current.key === 'overview' ? <OverviewTab /> : current.key === 'members' ? <MembersTab /> : current.key === 'technicians' ? <TechniciansTab /> : <TodayTab />}
         </div>
       </div>
     </>

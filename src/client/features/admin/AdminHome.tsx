@@ -19,6 +19,7 @@ const SECTION_HINTS: Partial<Record<AdminSection, string>> = {
   members: '自定义字段、渠道来源、会员等级与名称',
   catalog: '充值套餐、消费项目与价目表、票种票价',
   tags: '手牌池、柜号导入、前台规则',
+  technicians: '技师名册、选技师规则、需要技师的项目',
   staff: '账号、岗位、库存职责、重置密码',
   permissions: '各岗位能做什么，店主可以勾选调整',
   opening: '旧系统会员余额导入与作废',
@@ -52,7 +53,11 @@ export function AdminHome() {
                 sub={ROLES.filter((r) => d.counts.staffByRole[r]).map((r) => `${ROLE_LABELS[r]} ${d.counts.staffByRole[r]}`).join(' · ')}
               />
               <Stat label="会员" value={`${d.counts.members} 位`} sub={`近 24 小时新建 ${d.counts.membersNewToday} 位`} />
-              <Stat label="价目" value={`${d.counts.items} 个项目 · ${d.counts.tickets} 个票种`} sub={`充值套餐 ${d.counts.plans} 个`} />
+              <Stat
+                label="价目与技师"
+                value={`${d.counts.items} 个项目 · ${d.counts.tickets} 个票种`}
+                sub={`充值套餐 ${d.counts.plans} 个 · 技师 ${d.counts.technicians.active} 人${d.counts.technicians.enabled ? '' : '（技师功能未开启）'}`}
+              />
               <Stat
                 label="手牌池"
                 value={`${d.counts.tags.active} 张在用`}

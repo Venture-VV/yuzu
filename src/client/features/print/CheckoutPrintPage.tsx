@@ -63,6 +63,7 @@ function CheckoutSlip({ d }: { d: CheckoutPrint }) {
             {b.lines.map((l, j) => (
               <div key={j}>
                 <Row left={l.name} right={yuan(l.amount)} />
+                {l.technician && <p className="pl-3 text-[11px]">技师 {l.technician}</p>}
                 {l.quantity > 1 && (
                   <p className="pl-3 text-[11px]">
                     {l.quantity} × {yuan(l.unitPrice)}

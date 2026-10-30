@@ -88,7 +88,7 @@ beforeAll(async () => {
   await sql`DROP TABLE backfill_entries`;
   await sql`ALTER TABLE members DROP COLUMN channel`;
 
-  expect(await migrate(sql)).toEqual(['016_shift_boundary.sql', '017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql']);
+  expect(await migrate(sql)).toEqual(['016_shift_boundary.sql', '017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql', '020_technicians.sql']);
   app = await buildApp(sql, config);
 }, 60_000);
 

@@ -8,6 +8,8 @@ export interface CheckoutPrintLine {
   unitPrice: number;
   quantity: number;
   amount: number;
+  /** 技师与点钟 / 轮钟，例如「08 号 小李 · 点钟」（v0.7.0）；没有技师时为 null */
+  technician: string | null;
 }
 
 export interface WalletBalance {

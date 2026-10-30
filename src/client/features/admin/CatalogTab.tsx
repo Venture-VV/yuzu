@@ -104,9 +104,11 @@ export function CatalogTab() {
                   <span className="w-20 shrink-0 truncate text-[12px] font-semibold text-ink-3">{i.category || '其他'}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[14px] font-semibold">{i.name}</span>
-                    {(i.durationMinutes || tags.length > 0 || i.gender) && (
+                    {(i.durationMinutes || tags.length > 0 || i.gender || i.technicianRequired) && (
                       <span className="block truncate text-[11.5px] text-ink-3">
-                        {[i.durationMinutes ? `${i.durationMinutes} 分钟` : '', i.gender ? `仅${i.gender === 'female' ? '女宾' : '男宾'}` : '', ...tags].filter(Boolean).join(' · ')}
+                        {[i.durationMinutes ? `${i.durationMinutes} 分钟` : '', i.gender ? `仅${i.gender === 'female' ? '女宾' : '男宾'}` : '', i.technicianRequired ? '需要技师' : '', ...tags]
+                          .filter(Boolean)
+                          .join(' · ')}
                       </span>
                     )}
                   </span>
@@ -270,6 +272,7 @@ function ItemDialog({ editing, onClose }: { editing: Extract<Editing, { kind: 'i
   const [essentialOil, setEssentialOil] = useState(false);
   const [heatTherapy, setHeatTherapy] = useState(false);
   const [popular, setPopular] = useState(false);
+  const [technicianRequired, setTechnicianRequired] = useState(false);
   const [note, setNote] = useState('');
   const [active, setActive] = useState(true);
   const [sort, setSort] = useState('0');
@@ -293,6 +296,7 @@ function ItemDialog({ editing, onClose }: { editing: Extract<Editing, { kind: 'i
     setEssentialOil(i?.essentialOil ?? false);
     setHeatTherapy(i?.heatTherapy ?? false);
     setPopular(i?.popular ?? false);
+    setTechnicianRequired(i?.technicianRequired ?? false);
     setNote(i?.note ?? '');
     setActive(i?.active ?? true);
     setSort(String(i?.sortOrder ?? 0));
@@ -328,6 +332,7 @@ function ItemDialog({ editing, onClose }: { editing: Extract<Editing, { kind: 'i
         essentialOil,
         heatTherapy,
         popular,
+        technicianRequired,
         note,
         active,
         sortOrder: Number(sort) || 0,
@@ -396,6 +401,17 @@ function ItemDialog({ editing, onClose }: { editing: Extract<Editing, { kind: 'i
             />
           </Field>
         </div>
+        <Field label="需要技师" hint="技师功能开启后，挂这个项目要选技师与点钟 / 轮钟；也可以在后台「技师」里按分类勾选">
+          <Segmented
+            value={technicianRequired ? 'on' : 'off'}
+            onChange={(v) => setTechnicianRequired(v === 'on')}
+            ariaLabel="需要技师"
+            options={[
+              { value: 'off', label: '不需要' },
+              { value: 'on', label: '需要技师' },
+            ]}
+          />
+        </Field>
         <Field label="项目属性" hint="只用于展示与筛选，不影响计价">
           <div className="space-y-2.5">
             <Segmented

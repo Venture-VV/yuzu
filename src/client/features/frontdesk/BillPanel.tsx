@@ -6,6 +6,7 @@ import {
   Clock3,
   Ellipsis,
   FilePenLine,
+  HandHeart,
   Link2,
   LogOut,
   Plus,
@@ -30,6 +31,7 @@ import {
   type VisitDetail,
 } from '@shared/frontdesk';
 import { backfillText } from '@shared/backfill';
+import { technicianText } from '@shared/technicians';
 import { maskPhone } from '@shared/labels';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
@@ -277,6 +279,7 @@ export function BillPanel({
                       <div className="flex items-baseline gap-2">
                         <span className="min-w-0 flex-1 truncate line-through">
                           {l.name} × {l.quantity}
+                          {l.technician && ` · ${technicianText(l.technician)}`}
                         </span>
                         <Money cents={l.amount} className="line-through" />
                       </div>
@@ -469,6 +472,12 @@ function LineRow({ line, canVoid, allowed, selfMinutes, onVoid }: { line: BillLi
             )}
           </span>
         </p>
+        {line.technician && (
+          <p className="flex items-center gap-1 text-[12px] font-semibold text-pine" data-testid={`line-${line.id}-technician`}>
+            <HandHeart className="size-3.5" />
+            {technicianText(line.technician)}
+          </p>
+        )}
         <p className="num text-[11.5px] text-ink-4">
           {line.backfill ? formatDateTime(line.postedAt) : formatTime(line.postedAt)} · {line.postedByName}
           {line.backfill && <span className="ml-1 font-semibold text-lake">· 补录 纸质单 {line.backfill.slipNo}</span>}

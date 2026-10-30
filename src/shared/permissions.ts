@@ -6,6 +6,7 @@
 // 「值班经理」「店总」为 2026-10-27 店主答复新增的内置岗位（#29）；「客户经理」为 v0.6.0 新增（储值会员的开发与维护），默认权限待确认。
 // v0.6.0 起店主可以在管理后台按岗位增减权限（存为相对默认的增减，settings.role_permissions）：
 // 店主一栏固定拥有全部权限；LOCKED_PERMISSIONS 只属于店主，不能授给其他岗位；库存职责的权限不在后台调整。
+// v0.7.0 新增「维护技师名册」「看技师业绩」，默认值待确认。
 
 export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice'] as const;
 export type Role = (typeof ROLES)[number];
@@ -87,6 +88,8 @@ export const PERMISSIONS = {
   'auth.discount': { roles: ['owner', 'store_manager', 'duty_manager'] },
   'staff.manage': { roles: ['owner'] },
   'catalog.manage': { roles: ['owner', 'store_manager'] },
+  /** 技师名册：新建、编辑、停用技师（v0.7.0，待确认：默认店主与店总） */
+  'technician.manage': { roles: ['owner', 'store_manager'] },
   'settings.manage': { roles: ['owner'] },
   'audit.read': { roles: ['owner', 'store_manager'] },
   // ── 数据看板（v0.6.0；当日看板仍按「查看当日流水与日结」）──
@@ -94,6 +97,8 @@ export const PERMISSIONS = {
   'report.executive': { roles: ['owner', 'store_manager'] },
   /** 会员总览：储值余额、新增与渠道、活跃与沉睡、等级分布、赠金到期（客户经理看） */
   'report.members': { roles: ['owner', 'store_manager', 'account_manager'] },
+  /** 技师业绩：任选时段每位技师的钟数、点钟 / 轮钟与金额（v0.7.0，待确认：默认值班经理及以上） */
+  'report.technicians': { roles: ['owner', 'store_manager', 'duty_manager'] },
 } as const satisfies Record<string, Rule>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -185,10 +190,12 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'auth.discount': '当场授权优惠 / 免单、降低票种与免票',
   'staff.manage': '管理员工账号',
   'catalog.manage': '管理充值套餐与消费项目',
+  'technician.manage': '维护技师名册',
   'settings.manage': '修改经营规则设置',
   'audit.read': '查看操作审计',
   'report.executive': '看经营总览（任选时段、环比）',
   'report.members': '看会员总览（储值、新增、活跃、等级）',
+  'report.technicians': '看技师业绩（钟数、点钟 / 轮钟、金额）',
 };
 
 export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
@@ -205,6 +212,6 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
     items: ['inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'supplierReturn.create', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.export'],
   },
   { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount'] },
-  { title: '数据看板', items: ['report.executive', 'report.members'] },
-  { title: '管理后台', items: ['staff.manage', 'catalog.manage', 'settings.manage', 'audit.read'] },
+  { title: '数据看板', items: ['report.executive', 'report.members', 'report.technicians'] },
+  { title: '管理后台', items: ['staff.manage', 'catalog.manage', 'technician.manage', 'settings.manage', 'audit.read'] },
 ];

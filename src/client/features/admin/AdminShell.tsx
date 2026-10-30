@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   ClipboardList,
   Gift,
+  HandHeart,
   IdCard,
   LayoutGrid,
   ListChecks,
@@ -32,6 +33,7 @@ const ICONS: Record<AdminSection, LucideIcon> = {
   members: IdCard,
   catalog: Gift,
   tags: Tags,
+  technicians: HandHeart,
   staff: UsersRound,
   permissions: ShieldCheck,
   opening: ArchiveRestore,
@@ -40,7 +42,7 @@ const ICONS: Record<AdminSection, LucideIcon> = {
 
 const GROUPS: { title: string; items: AdminSection[] }[] = [
   { title: '概览', items: ['home', 'settings'] },
-  { title: '经营设置', items: ['rules', 'members', 'catalog', 'tags'] },
+  { title: '经营设置', items: ['rules', 'members', 'catalog', 'tags', 'technicians'] },
   { title: '人员与权限', items: ['staff', 'permissions'] },
   { title: '数据', items: ['opening', 'audit'] },
 ];

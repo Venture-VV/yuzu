@@ -19,6 +19,7 @@ import {
 import { backfillText, type BackfillMark } from '@shared/backfill';
 import { isFreeTicket } from '@shared/checkout';
 import { formatYuan } from '@shared/money';
+import { technicianText } from '@shared/technicians';
 import { consumeTicketGrant } from '../../auth/grants';
 import type { Db } from '../../db';
 import { writeAudit } from '../../lib/audit';
@@ -58,6 +59,7 @@ import {
 } from './backfill';
 import { getCheckout } from './checkout';
 import { resolveTicketType, ticketAuthRequired, visitTicket } from './tickets';
+import { lineTechnicianSql } from '../technicians';
 import { assertVipAllowed, consumeVipShortfalls, memberLevels, vipShortfalls } from './vip';
 
 const clientKey = z.uuid('缺少有效的操作编号，请刷新页面后重试');
@@ -600,7 +602,8 @@ export async function getVisit(db: Db, id: number): Promise<VisitDetail> {
     await db<VisitDetail['lines']>`
       SELECT l.id, l.source, l.item_id, l.tier, l.name, l.unit_price, l.quantity, l.amount, l.status, l.post_key, l.business_date,
              l.posted_by AS posted_by_id, p.display_name AS posted_by_name, l.posted_at, l.void_reason,
-             vs.display_name AS voided_by_name, l.voided_at, ${backfillMarkSql(db, 'l.post_key')} AS backfill
+             vs.display_name AS voided_by_name, l.voided_at, ${backfillMarkSql(db, 'l.post_key')} AS backfill,
+             ${lineTechnicianSql(db, 'l')} AS technician
       FROM bill_lines l JOIN staff p ON p.id = l.posted_by LEFT JOIN staff vs ON vs.id = l.voided_by
       WHERE l.bill_id = ${v.billId} ORDER BY l.id`
   ).map((l) => ({ ...l, backfill: normalizeMark(l.backfill) }));
@@ -655,7 +658,7 @@ export async function getVisit(db: Db, id: number): Promise<VisitDetail> {
     history.push({
       at: l.postedAt,
       kind: 'post',
-      text: `挂账 ${l.name} × ${l.quantity}（${formatYuan(l.amount)}${l.backfill ? `，${backfillText(l.backfill)}` : ''}）`,
+      text: `挂账 ${l.name} × ${l.quantity}（${formatYuan(l.amount)}${l.technician ? `，${technicianText(l.technician)}` : ''}${l.backfill ? `，${backfillText(l.backfill)}` : ''}）`,
       operatorName: l.postedByName,
     });
     if (l.status === 'voided') {

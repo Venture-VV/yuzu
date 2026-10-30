@@ -13,6 +13,7 @@ import { RuleCatalog } from './RuleCatalog';
 import { RulesTab } from './RulesTab';
 import { StaffTab } from './StaffTab';
 import { TagsTab } from './TagsTab';
+import { TechniciansSection } from './TechniciansSection';
 
 export const adminRoutes: RouteObject[] = [
   { index: true, element: <AdminHome /> },
@@ -42,6 +43,7 @@ export const adminRoutes: RouteObject[] = [
       </AdminPage>
     ),
   },
+  { path: 'technicians', element: <TechniciansSection /> },
   {
     path: 'staff',
     element: (

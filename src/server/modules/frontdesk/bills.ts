@@ -3,15 +3,17 @@
 // 挂账不等于收款：本阶段只写账单明细与账单合计，不写 consumptions / ledger_entries，不改会员余额。
 
 import { z } from 'zod';
-import { PRICE_TIERS, type PriceTier } from '@shared/catalog';
+import { PRICE_TIER_LABELS, PRICE_TIERS, type PriceTier } from '@shared/catalog';
 import { can } from '@shared/permissions';
 import { ZONE_LABELS, type BillSource } from '@shared/frontdesk';
+import { CALL_TYPES, canServe, gradeLabel, technicianText, tierFor, type CallType } from '@shared/technicians';
 import { writeAudit } from '../../lib/audit';
 import type { Deps, OpContext } from '../../lib/context';
 import { conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
 import { parse, positiveCents } from '../../lib/validate';
 import { assertCanFix, assertOpen, businessDate, hashRequest, loadFrontdeskRules, lockVisits, runIdempotent, saveKey, setTxTimeouts } from './common';
 import { loadPricedItems, priceLine } from '../pricing';
+import { loadTechnicianRules, loadTechnicians } from '../technicians';
 import { assertAfterVisits, backfillDetail, BackfillInput, recordBackfill, resolveBackfill } from './backfill';
 import { getVisit } from './visits';
 
@@ -20,12 +22,17 @@ export const PostInput = z
     clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
     lines: z
       .array(
-        z.object({
-          itemId: z.number().int().positive(),
-          quantity: z.number().int().min(1, '数量至少为 1').max(99, '单项数量最多 99'),
-          /** 价格档；不带时按项目的默认档计价（升级前留下的待确认请求不带这一项） */
-          tier: z.enum(PRICE_TIERS, '价格档不正确').optional(),
-        }),
+        z
+          .object({
+            itemId: z.number().int().positive(),
+            quantity: z.number().int().min(1, '数量至少为 1').max(99, '单项数量最多 99'),
+            /** 价格档；不带时按项目的默认档计价（升级前留下的待确认请求不带这一项） */
+            tier: z.enum(PRICE_TIERS, '价格档不正确').optional(),
+            /** 技师与点钟 / 轮钟（v0.7.0，需要技师的项目）；不带时与升级前的请求完全相同（幂等摘要不变） */
+            technicianId: z.number().int().positive().nullish().transform((v) => v ?? undefined),
+            callType: z.enum(CALL_TYPES, '上钟方式应为点钟或轮钟').nullish().transform((v) => v ?? undefined),
+          })
+          .refine((l) => (l.technicianId === undefined) === (l.callType === undefined), '选了技师时请同时选择点钟或轮钟'),
       )
       .max(30, '一次最多登记 30 项')
       .default([]),
@@ -62,28 +69,59 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
 
     // 项目价格以服务端为准，按所选价格档计价；只限某一性别的项目（如私汤木桶浴仅女宾）按客人分区核对
     const items = await loadPricedItems(tx, input.lines.map((l) => l.itemId));
+    // 技师（v0.7.0）：功能开启时，需要技师的项目记下技师与点钟 / 轮钟；价格跟等级时按技师等级取价
+    const techRules = await loadTechnicianRules(tx);
+    const techs = await loadTechnicians(tx, input.lines.flatMap((l) => (l.technicianId === undefined ? [] : [l.technicianId])));
+    type Line = { itemId: number | null; name: string; tier: PriceTier | null; unitPrice: number; quantity: number; amount: number; source: BillSource; technicianId: number | null; callType: CallType | null; techText: string | null };
+    const lines: Line[] = [];
     for (const l of input.lines) {
       const item = items.get(l.itemId);
       if (item?.gender && item.gender !== visit.zone) {
         throw unprocessable('ITEM_GENDER', `「${item.name}」仅限${ZONE_LABELS[item.gender].title}，这位客人是${ZONE_LABELS[visit.zone].title}`);
       }
+      const withTech = !!item && techRules.enabled && item.technicianRequired;
+      let tier = l.tier;
+      let tech: { id: number; techNo: string; name: string } | null = null;
+      if (item && l.technicianId !== undefined) {
+        if (!techRules.enabled) throw unprocessable('TECHNICIAN_DISABLED', '技师功能已关闭，请刷新页面后重新登记');
+        if (!item.technicianRequired) throw unprocessable('TECHNICIAN_NOT_NEEDED', `「${item.name}」不需要技师，请刷新页面后重新登记`);
+        const t = techs.get(l.technicianId);
+        if (!t) throw notFound('技师不存在，请刷新后重新选择');
+        const why = canServe(t, item, techRules.tierByGrade);
+        if (why) throw unprocessable('TECHNICIAN_UNAVAILABLE', `${t.techNo} 号 ${t.name}：${why}，请换一位技师`);
+        const chosen = tierFor(t, item, l.tier ?? item.prices[0]!.tier, techRules.tierByGrade);
+        if (l.tier && l.tier !== chosen) {
+          throw conflict('TECHNICIAN_TIER', `${t.techNo} 号 ${t.name}是${gradeLabel(t.grade)}，「${item.name}」按${PRICE_TIER_LABELS[chosen]}档计价，请刷新后重新确认`);
+        }
+        tier = chosen;
+        tech = t;
+      } else if (withTech && techRules.requireTechnician) {
+        throw unprocessable('TECHNICIAN_REQUIRED', `「${item!.name}」需要选技师与点钟 / 轮钟`);
+      }
+      const priced = priceLine(item, tier, l.quantity, '有项目已停用，请刷新后重新选择');
+      lines.push({
+        ...priced,
+        source: withTech ? 'therapist' : 'bath',
+        technicianId: tech?.id ?? null,
+        callType: l.callType ?? null,
+        techText: tech ? technicianText({ ...tech, callType: l.callType }) : null,
+      });
     }
-    const lines: { itemId: number | null; name: string; tier: PriceTier | null; unitPrice: number; quantity: number; amount: number }[] = [
-      ...input.lines.map((l) => priceLine(items.get(l.itemId), l.tier, l.quantity, '有项目已停用，请刷新后重新选择')),
-      ...input.customLines.map((l) => ({ itemId: null, name: l.name, tier: null, unitPrice: l.amount, quantity: 1, amount: l.amount })),
-    ];
+    for (const l of input.customLines) {
+      lines.push({ itemId: null, name: l.name, tier: null, unitPrice: l.amount, quantity: 1, amount: l.amount, source: 'bath', technicianId: null, callType: null, techText: null });
+    }
     const total = lines.reduce((s, l) => s + l.amount, 0);
     if (total !== input.expectedTotal) {
       throw conflict('PRICE_CHANGED', '项目价格刚刚有调整，本次合计与确认时不同，请核对后重新确认', { total });
     }
 
     const date = await businessDate(tx, deps, at);
-    const source: BillSource = 'bath';
     for (const l of lines) {
       await tx`
-        INSERT INTO bill_lines (bill_id, source, item_id, tier, name, unit_price, quantity, amount, post_key, business_date, posted_by, posted_at)
-        VALUES (${bill!.id}, ${source}, ${l.itemId}, ${l.tier}, ${l.name}, ${l.unitPrice}, ${l.quantity}, ${l.amount}, ${key}, ${date},
-                ${ctx.actor.id}, ${at})`;
+        INSERT INTO bill_lines (bill_id, source, item_id, tier, name, unit_price, quantity, amount, post_key, business_date, posted_by, posted_at,
+                                technician_id, call_type)
+        VALUES (${bill!.id}, ${l.source}, ${l.itemId}, ${l.tier}, ${l.name}, ${l.unitPrice}, ${l.quantity}, ${l.amount}, ${key}, ${date},
+                ${ctx.actor.id}, ${at}, ${l.technicianId}, ${l.callType})`;
     }
     await tx`
       UPDATE bills SET amount_cents = amount_cents + ${total}, line_count = line_count + ${lines.length} WHERE id = ${bill!.id}`;
@@ -94,7 +132,7 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
       action: 'frontdesk_post',
       targetType: 'visit',
       targetId: visit.id,
-      detail: { visitNo: visit.visitNo, total, lines: lines.map((l) => `${l.name}×${l.quantity}`), ...backfillDetail(backfill) },
+      detail: { visitNo: visit.visitNo, total, lines: lines.map((l) => `${l.name}×${l.quantity}${l.techText ? `（${l.techText}）` : ''}`), ...backfillDetail(backfill) },
       ip: ctx.ip,
       businessDate: date,
     });

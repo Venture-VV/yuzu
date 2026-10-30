@@ -5,6 +5,7 @@
 import type { BackfillMark } from './backfill';
 import type { PriceTier } from './catalog';
 import type { CheckoutDetail } from './checkout';
+import type { LineTechnician } from './technicians';
 
 /** 宾客与手牌的分区：只分男宾、女宾（店主 2026-10-27 #27：儿童跟同性别家长用男宾或女宾的牌） */
 export const ZONES = ['male', 'female'] as const;
@@ -244,6 +245,8 @@ export interface BillLine {
   voidedAt: string | null;
   /** 按实际时间补录的明细（R1.9）：纸质单号、实际时间与补录人；平时为 null */
   backfill: BackfillMark | null;
+  /** 做这项服务的技师与点钟 / 轮钟（v0.7.0）；没有指定技师时为 null */
+  technician: LineTechnician | null;
 }
 
 export interface VisitMember {

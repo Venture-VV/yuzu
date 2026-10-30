@@ -33,7 +33,7 @@ node dist/server/cli.js fingerprint        # 数据指纹（只读）；--expect
 ./scripts/verify-backup.sh <备份文件.dump>  # 核验一份备份，不碰当前数据库
 ./scripts/rollback.sh                      # 回到上一次 update.sh 之前的版本（加了迁移时同时恢复升级前的备份）
 ./scripts/offsite-copy.sh [--check]        # 新备份用 age 公钥加密后经 Tailscale 传到云服务器 A（宿主机定时执行；--check 只测连通）
-./scripts/daily-recon.sh [营业日]           # 每日对账包（只读）：日结汇总、结账单、部门参考表、异常清单、交班，写到 recon/<营业日>/
+./scripts/daily-recon.sh [营业日]           # 每日对账包（只读）：日结汇总、结账单、部门参考表、异常清单、交班、技师业绩，写到 recon/<营业日>/
 node dist/server/cli.js balance-changes --since "YYYY-MM-DD HH:MM"   # 某时刻之后有余额变动的会员（只读，回写 EBC 用）
 node dist/server/cli.js import-hand-tags --store-list   # 预览导入店主 747 个真实柜号；--apply 才写入（真实业务数据，门店环境须店主同意）
 node dist/server/cli.js import-price-list --tangqi      # 预览导入汤崎价目表（29 个项目、多档价格）；--apply 才写入（同上）

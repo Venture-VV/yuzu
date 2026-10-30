@@ -32,7 +32,7 @@ const NAV: NavItem[][] = [
     { to: '/ledger', label: '流水', icon: ReceiptText, perm: 'ledger.readToday' },
     { to: '/settlement', label: '日结', icon: CalendarCheck2, perm: 'ledger.readToday' },
     { to: '/shift', label: '交班', icon: ClipboardCheck, perm: 'ledger.readToday' },
-    { to: '/dashboard', label: '看板', icon: LayoutDashboard, perm: ['ledger.readToday', 'report.executive', 'report.members'] },
+    { to: '/dashboard', label: '看板', icon: LayoutDashboard, perm: ['ledger.readToday', 'report.executive', 'report.members', 'report.technicians'] },
   ],
   [
     { to: '/inventory', label: '库存', icon: Boxes, perm: 'inventory.read' },
