@@ -134,6 +134,22 @@ test.describe('v0.7.1 钟房', () => {
       await expect(serving).toHaveCount(0);
       await expect(page.getByText('E8 号下钟')).toBeVisible();
 
+      // 手快：点开派钟后马上输入手牌号（同一段脚本里输入，不让出给之后的任务），手牌号不会被打开窗口时的清空盖掉（Codex 复测 PR #18 P2）
+      for (let i = 0; i < 5; i++) {
+        const kept = await page.evaluate(async (code) => {
+          (document.querySelector('[data-testid="clock-dispatch"]') as HTMLButtonElement).click();
+          for (let k = 0; k < 5 && !document.querySelector('[data-testid="dispatch-tag"]'); k++) await Promise.resolve();
+          const input = document.querySelector<HTMLInputElement>('[data-testid="dispatch-tag"]')!;
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, code);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          return document.querySelector<HTMLInputElement>('[data-testid="dispatch-tag"]')!.value;
+        }, tag);
+        expect(kept, `第 ${i + 1} 次`).toBe(tag);
+        await dispatch.getByRole('button', { name: '取消', exact: true }).click();
+        await expect(dispatch).toBeHidden();
+      }
+
       // ⑥ 派轮钟（技师还没到，不立即上钟）→ 待上钟 → 取消派钟，技师回到原位
       board = await getJson<ClockroomBoard>(page, '/api/clockroom');
       await page.getByTestId('clock-dispatch').click();

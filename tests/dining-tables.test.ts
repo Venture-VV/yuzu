@@ -292,3 +292,39 @@ describe('报表与自检', () => {
     for (const c of fd) expect(c.ok, `${c.key}：${c.detail}`).toBe(true);
   });
 });
+
+// 放在最后：这里结的账不计入上面「报表与自检」的人数
+describe('作废「结果待确认」要有原业务的权限（Codex 复测 PR #18 P1）', () => {
+  it('只有前台挂账权限的人不能作废结账、桌台结账、开台、桌台点单，也不登记作废；收银员的原收款照常生效', async () => {
+    const before = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/permissions')).body.effective.account_manager as string[];
+    const setAm = (list: string[]) => api(ctx.app, ctx.owner, 'PUT', '/api/admin/permissions', { roles: { account_manager: list } });
+    // 客户经理临时加上「前台挂账」，没有结账收款与餐饮点单
+    expect((await setAm([...before, 'frontdesk.operate'])).status).toBe(200);
+    try {
+      const s = (await open(table['A2']!, { guests: 2 })).body;
+      expect((await order(s.id, [{ itemId: item['柠檬茶']!, quantity: 1 }], 1500)).status).toBe(200);
+      const key = randomUUID();
+      expect((await pay([s.id], 1500, [{ method: 'cash', amount: 1500 }], am, key)).status).toBe(403);
+      expect((await open(table['包1']!, {}, am)).status).toBe(403);
+      expect((await order(s.id, [{ itemId: item['柠檬茶']!, quantity: 1 }], 1500, am)).status).toBe(403);
+      // 同类型的作废同样不行，也不留下作废登记（原来只看前台挂账权限，会拦下收银员正在进行的收款）
+      for (const type of ['table_checkout', 'checkout', 'table_open', 'table_post']) {
+        expect((await api(ctx.app, am, 'POST', `/api/frontdesk/ops/${key}/abandon`, { type })).status, type).toBe(403);
+      }
+      expect(await ctx.sql`SELECT 1 FROM op_fences WHERE key = ${key}`).toHaveLength(0);
+      const paid = await pay([s.id], 1500, [{ method: 'cash', amount: 1500 }], ctx.clerk, key);
+      expect(paid.status, JSON.stringify(paid.body)).toBe(200);
+      // 只要前台挂账权限的业务（接待、挂账、换牌）照常能作废
+      expect((await api(ctx.app, am, 'POST', `/api/frontdesk/ops/${randomUUID()}/abandon`, { type: 'bill_post' })).body).toEqual({ found: false, abandoned: true });
+    } finally {
+      expect((await setAm(before)).status).toBe(200);
+    }
+    // 有结账收款权限的员工作废桌台结账照常生效，原请求到达时拒绝
+    const s2 = (await open(table['A2']!, { guests: 1 })).body;
+    expect((await order(s2.id, [{ itemId: item['柠檬茶']!, quantity: 1 }], 1500)).status).toBe(200);
+    const key2 = randomUUID();
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/ops/${key2}/abandon`, { type: 'table_checkout' })).body).toEqual({ found: false, abandoned: true });
+    expect((await pay([s2.id], 1500, [{ method: 'cash', amount: 1500 }], ctx.clerk, key2)).body.error.code).toBe('OP_ABANDONED');
+    expect((await pay([s2.id], 1500, [{ method: 'cash', amount: 1500 }])).status).toBe(200);
+  });
+});
