@@ -5,7 +5,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ERP_MODULE_KEYS } from '../src/shared/erp';
+import { ERP_MODULE_KEYS, ERP_MODULES, erpModuleOfApi, erpModuleOfPage } from '../src/shared/erp';
 import { createStaff } from '../src/server/modules/staff';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
@@ -27,6 +27,26 @@ beforeAll(async () => {
   stock = await login(ctx.app, 'stock');
 });
 afterAll(async () => ctx.close());
+
+describe('模块注册表', () => {
+  it('接口与页面按登记的前缀归到模块（只认整段前缀）；依赖只指向排在前面的模块', () => {
+    expect(erpModuleOfApi('/api/inventory/materials?q=1')).toBe('inventory');
+    expect(erpModuleOfApi('/api/purchase-baseline')).toBe('purchasing');
+    expect(erpModuleOfApi('/api/payables/statement?supplier=1')).toBe('payables');
+    expect(erpModuleOfApi('/api/erp/revenue?from=2026-10-01')).toBe('revenue');
+    for (const url of ['/api/inventory-x', '/api/erp/modules', '/api/members', '/api/settings']) expect(erpModuleOfApi(url), url).toBeNull();
+    expect(erpModuleOfPage('/inventory/new/receipt')).toBe('inventory');
+    expect(erpModuleOfPage('/purchasing/3/revise')).toBe('purchasing');
+    expect(erpModuleOfPage('/payables/pay')).toBe('payables');
+    expect(erpModuleOfPage('/todo')).toBe('approvals');
+    for (const path of ['/erp', '/erp/modules', '/frontdesk']) expect(erpModuleOfPage(path), path).toBeNull();
+    // 入口页面归到模块自己；按注册顺序算依赖（effectiveErpModules）要求依赖排在前面
+    for (const [i, key] of ERP_MODULE_KEYS.entries()) {
+      expect(erpModuleOfPage(ERP_MODULES[key].path)).toBe(key);
+      for (const r of ERP_MODULES[key].requires) expect(ERP_MODULE_KEYS.indexOf(r), `${key} 依赖 ${r}`).toBeLessThan(i);
+    }
+  });
+});
 
 describe('ERP 模块开关', () => {
   it('升级后默认全部开启；会话带实际能用的模块；能进 ERP 的人都能看模块列表，前台岗位不能', async () => {

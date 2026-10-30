@@ -5,7 +5,7 @@ import { useEffect, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Boxes, HandCoins, Inbox, LayoutGrid, LineChart, ShoppingCart, SlidersHorizontal, type LucideIcon } from 'lucide-react';
-import { ERP_MODULES, type ErpModuleKey } from '@shared/erp';
+import { ERP_MODULES, erpModuleOfPage, type ErpModuleKey } from '@shared/erp';
 import { versionText } from '@shared/instance';
 import { DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
 import { api } from '../../lib/api';
@@ -37,7 +37,7 @@ export function ErpShell() {
   const session = useSession();
   const can = useCan();
   const access = useErpAccess();
-  const location = useLocation();
+  const { pathname } = useLocation();
   useEffect(() => {
     document.title = `ERP · ${session.storeName}`;
     return () => {
@@ -130,18 +130,22 @@ export function ErpShell() {
             </div>
           ))}
         </nav>
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto" key={location.pathname}>
-          <Outlet />
+        {/* 不按地址重新挂载：库存的各个页签之间切换时，页面里的状态与原来在门店里一样保留 */}
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+          <ErpModuleGate module={erpModuleOfPage(pathname)}>
+            <Outlet />
+          </ErpModuleGate>
         </main>
       </div>
     </div>
   );
 }
 
-/** 模块的页面：模块关着（或依赖的模块关着）时提示，不打开页面；没有权限时回到 ERP 首页 */
-export function ErpModuleGate({ module, children }: { module: ErpModuleKey; children: ReactNode }) {
+/** 模块的页面（按注册表里的页面前缀认出属于哪个模块）：模块关着（或依赖的模块关着）时提示，不打开页面；没有权限时回到 ERP 首页 */
+function ErpModuleGate({ module, children }: { module: ErpModuleKey | null; children: ReactNode }) {
   const session = useSession();
   const can = useCan();
+  if (!module) return <>{children}</>;
   const def = ERP_MODULES[module];
   if (!def.perms.some((p) => can(p))) return <Navigate to="/erp" replace />;
   if (!session.erpModules.includes(module)) {

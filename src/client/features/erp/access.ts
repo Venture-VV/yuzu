@@ -1,5 +1,5 @@
 import { ADMIN_PERMISSIONS } from '@shared/admin';
-import { ERP_MODULE_KEYS, ERP_MODULES, ERP_PERMISSIONS } from '@shared/erp';
+import { ERP_MODULE_KEYS, ERP_MODULES } from '@shared/erp';
 import { useCan, useSession } from '../../lib/session';
 
 /**
@@ -27,6 +27,5 @@ export function useErpAccess() {
     landing: modules.length ? ERP_MODULES[modules[0]!].path : null,
     /** 门店那边有能用的页面 */
     store,
-    hasAnyErpPermission: ERP_PERMISSIONS.some((p) => can(p)),
   };
 }

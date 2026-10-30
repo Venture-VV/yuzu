@@ -46,7 +46,8 @@ export function TodoPage() {
     <>
       <PageHeader dateMode="calendar" title="待办" subtitle="先处理需要确认的申请，再看需要关注的异常" />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto grid max-w-[1180px] gap-5 px-5 py-5 md:px-7 lg:grid-cols-[minmax(0,1fr)_340px]">
+        {/* 窄屏一列也要限定列宽（minmax(0,1fr)），不然一行写不下的单号、摘要会把整列撑出屏幕 */}
+        <div className="mx-auto grid max-w-[1180px] grid-cols-1 gap-5 px-5 py-5 md:px-7 lg:grid-cols-[minmax(0,1fr)_340px]">
           <section className="space-y-5">
             <div className="flex items-center gap-2">
               <h2 className="text-[15px] font-bold">待确认</h2>

@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect } from 'react';
 import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation, useNavigate } from 'react-router';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { ApiError, onAuthError } from './lib/api';
@@ -32,11 +32,10 @@ import { CheckoutPrintPage } from './features/print/CheckoutPrintPage';
 import { SettlementPrintPage } from './features/print/SettlementPrintPage';
 import { ShiftPrintPage } from './features/print/ShiftPrintPage';
 import { useCan, useOptionalSession } from './lib/session';
-import type { ErpModuleKey } from '@shared/erp';
 import { useErpAccess } from './features/erp/access';
 import { ErpHome } from './features/erp/ErpHome';
 import { ErpModulesPage } from './features/erp/ErpModulesPage';
-import { ErpModuleGate, ErpShell } from './features/erp/ErpShell';
+import { ErpShell } from './features/erp/ErpShell';
 import { RevenuePage } from './features/erp/RevenuePage';
 
 const queryClient = new QueryClient({
@@ -134,9 +133,6 @@ function Home() {
   return <Navigate to="/password" replace />;
 }
 
-/** ERP 模块的页面放在 ERP 工作区里（地址不变），模块关闭时提示 */
-const erpPage = (module: ErpModuleKey, element: ReactNode) => <ErpModuleGate module={module}>{element}</ErpModuleGate>;
-
 const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
   {
@@ -149,30 +145,31 @@ const router = createBrowserRouter([
     ],
   },
   { path: '/admin', element: <AuthGate shell="admin" />, children: adminRoutes },
-  // ERP 工作区（v0.7.3）：首页、模块设置、营业数据，以及库存、采购、货款、待办（原来的地址不变，门店主导航里不再有）
+  // ERP 工作区（v0.7.3）：首页、模块设置、营业数据，以及库存、采购、货款、待办（原来的地址不变，门店主导航里不再有）。
+  // 页面属于哪个模块按注册表（@shared/erp）里的页面前缀认，模块关着时 ERP 外壳提示没有开启
   {
     path: '/erp',
     element: <AuthGate shell="erp" />,
     children: [
       { index: true, element: <ErpHome /> },
       { path: 'modules', element: <ErpModulesPage /> },
-      { path: 'revenue', element: erpPage('revenue', <RevenuePage />) },
+      { path: 'revenue', element: <RevenuePage /> },
       { path: '*', element: <Navigate to="/erp" replace /> },
     ],
   },
   {
     element: <AuthGate shell="erp" />,
     children: [
-      { path: 'inventory/new/:type', element: erpPage('inventory', <DocFormPage />) },
-      { path: 'inventory/docs/:id/edit', element: erpPage('inventory', <DocFormPage />) },
-      { path: 'inventory/:tab?', element: erpPage('inventory', <InventoryPage />) },
-      { path: 'todo', element: erpPage('approvals', <TodoPage />) },
-      { path: 'purchasing', element: erpPage('purchasing', <PurchasingPage />) },
-      { path: 'purchasing/new', element: erpPage('purchasing', <PoFormPage mode="new" />) },
-      { path: 'purchasing/:id/edit', element: erpPage('purchasing', <PoFormPage mode="edit" />) },
-      { path: 'purchasing/:id/revise', element: erpPage('purchasing', <PoFormPage mode="revise" />) },
-      { path: 'payables', element: erpPage('payables', <PayablesPage />) },
-      { path: 'payables/pay', element: erpPage('payables', <PaymentFormPage />) },
+      { path: 'inventory/new/:type', element: <DocFormPage /> },
+      { path: 'inventory/docs/:id/edit', element: <DocFormPage /> },
+      { path: 'inventory/:tab?', element: <InventoryPage /> },
+      { path: 'todo', element: <TodoPage /> },
+      { path: 'purchasing', element: <PurchasingPage /> },
+      { path: 'purchasing/new', element: <PoFormPage mode="new" /> },
+      { path: 'purchasing/:id/edit', element: <PoFormPage mode="edit" /> },
+      { path: 'purchasing/:id/revise', element: <PoFormPage mode="revise" /> },
+      { path: 'payables', element: <PayablesPage /> },
+      { path: 'payables/pay', element: <PaymentFormPage /> },
     ],
   },
   {
