@@ -1,0 +1,145 @@
+// ERP 独立工作区（v0.7.3，店主 2026-10-30 定，见 docs/ERP.md）：财务、采购用的功能放在单独的 ERP 工作区，
+// 门店主导航看不到；ERP 包含 SCM（供应商、采购、库存、应付货款）。模块按这张注册表配置、不写死：
+// ERP 的导航与路由、服务端按接口前缀拦截关闭的模块、店主的模块开关都从这里来。以后同事提的新模块在这里加一条。
+
+import type { Permission } from './permissions';
+
+export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'payables', 'approvals', 'revenue'] as const;
+export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
+
+export interface ErpModuleDef {
+  label: string;
+  /** ERP 导航的分组 */
+  group: '供应链' | '财务';
+  description: string;
+  /** 模块的入口页面 */
+  path: string;
+  /** 属于这个模块的页面（路径前缀）：在 ERP 外壳里打开，模块关闭时不能打开 */
+  pages: readonly string[];
+  /** 属于这个模块的接口（路径前缀）：模块关闭时一律拒绝（`ERP_MODULE_DISABLED`） */
+  apis: readonly string[];
+  /** 看得到这个模块要有的权限（有其中一个即可） */
+  perms: readonly Permission[];
+  /** 新装的门店默认开不开 */
+  defaultEnabled: boolean;
+  /** 依赖的模块：被依赖的模块关着时，这个模块也用不了 */
+  requires: readonly ErpModuleKey[];
+}
+
+export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
+  inventory: {
+    label: '库存',
+    group: '供应链',
+    description: '物料、供应商、部门档案；期初、收货、领用、退回、报损、盘点；库存报表',
+    path: '/inventory',
+    pages: ['/inventory'],
+    apis: ['/api/inventory'],
+    perms: ['inventory.read'],
+    defaultEnabled: true,
+    requires: [],
+  },
+  purchasing: {
+    label: '采购',
+    group: '供应链',
+    description: '采购单的编制、确认、修订与按单收货',
+    path: '/purchasing',
+    pages: ['/purchasing'],
+    apis: ['/api/purchase-orders', '/api/purchase-baseline'],
+    perms: ['purchase.manage', 'inventory.approve', 'payable.read'],
+    defaultEnabled: true,
+    requires: ['inventory'],
+  },
+  payables: {
+    label: '应付货款',
+    group: '供应链',
+    description: '供应商应付、期初未付、付款登记与对账单',
+    path: '/payables',
+    pages: ['/payables'],
+    apis: ['/api/payables'],
+    perms: ['payable.read'],
+    defaultEnabled: true,
+    requires: ['inventory'],
+  },
+  approvals: {
+    label: '审批待办',
+    group: '供应链',
+    description: '负责人确认：采购、报损、盘点调整、退货、付款、期初',
+    path: '/todo',
+    pages: ['/todo'],
+    apis: [],
+    perms: ['inventory.approve'],
+    defaultEnabled: true,
+    requires: ['inventory'],
+  },
+  revenue: {
+    label: '营业数据',
+    group: '财务',
+    description: '只读：每天的营业收入、收款构成、部门构成与日结情况（门店的流水、日结、交班仍在门店办理）',
+    path: '/erp/revenue',
+    pages: ['/erp/revenue'],
+    apis: ['/api/erp/revenue'],
+    perms: ['erp.revenue'],
+    defaultEnabled: true,
+    requires: [],
+  },
+};
+
+/** 店主保存的模块开关（只存改过的；没存的按默认） */
+export type ErpModuleSwitches = Partial<Record<ErpModuleKey, boolean>>;
+
+export interface ErpModuleState {
+  key: ErpModuleKey;
+  label: string;
+  group: ErpModuleDef['group'];
+  description: string;
+  /** 店主的开关 */
+  switchedOn: boolean;
+  /** 实际能不能用：开关打开、依赖的模块也都能用 */
+  enabled: boolean;
+  requires: ErpModuleKey[];
+}
+
+export interface ErpModulesInfo {
+  modules: ErpModuleState[];
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+
+/** 按开关与依赖算出实际能用的模块（依赖只指向排在前面的模块，按注册顺序算一遍即可） */
+export function effectiveErpModules(switches: ErpModuleSwitches): Set<ErpModuleKey> {
+  const on = new Set<ErpModuleKey>();
+  for (const key of ERP_MODULE_KEYS) {
+    const def = ERP_MODULES[key];
+    if ((switches[key] ?? def.defaultEnabled) && def.requires.every((r) => on.has(r))) on.add(key);
+  }
+  return on;
+}
+
+const under = (path: string, prefix: string) => path === prefix || path.startsWith(`${prefix}/`) || path.startsWith(`${prefix}?`);
+
+/** 这个接口属于哪个 ERP 模块（不属于 ERP 的返回 null） */
+export function erpModuleOfApi(url: string): ErpModuleKey | null {
+  return ERP_MODULE_KEYS.find((k) => ERP_MODULES[k].apis.some((p) => under(url, p))) ?? null;
+}
+
+/** 这个页面属于哪个 ERP 模块 */
+export function erpModuleOfPage(path: string): ErpModuleKey | null {
+  return ERP_MODULE_KEYS.find((k) => ERP_MODULES[k].pages.some((p) => under(path, p))) ?? null;
+}
+
+/** 能进 ERP 的权限（有其一即可）：任一模块的权限，或店主的模块设置 */
+export const ERP_PERMISSIONS: readonly Permission[] = [...new Set<Permission>([...ERP_MODULE_KEYS.flatMap((k) => ERP_MODULES[k].perms), 'settings.manage'])];
+
+/** 营业数据（只读）：任选时段 */
+export interface ErpRevenue {
+  from: string;
+  to: string;
+  days: number;
+  /** 净营业额 = 应收 − 优惠；结账客人、客单价、充值收款（与经营总览同一口径） */
+  kpis: { receivable: number; discount: number; net: number; guests: number; checkouts: number; perGuest: number; rechargePaid: number };
+  trend: { date: string; net: number; guests: number; rechargePaid: number }[];
+  byMethod: { method: import('./checkout').CheckoutMethod; amount: number }[];
+  departments: { category: string; quantity: number; amount: number }[];
+  /** 已确认日结的营业日 */
+  settlements: { date: string; closedAt: string; closedByName: string }[];
+}

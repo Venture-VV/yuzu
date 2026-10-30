@@ -69,6 +69,8 @@ export interface SessionInfo {
   technicians: boolean;
   /** 餐饮功能已开启（主导航的「餐饮」只在开启后显示） */
   dining: boolean;
+  /** ERP 里能用的模块（v0.7.3：店主的模块开关与依赖算好的结果） */
+  erpModules: import('./erp').ErpModuleKey[];
 }
 
 export interface MemberSummary {
