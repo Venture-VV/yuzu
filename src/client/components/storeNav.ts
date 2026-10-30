@@ -33,6 +33,14 @@ const STORE_NAV: StoreNavItem[][] = [
   [{ to: '/admin', label: '后台', icon: Settings2, perm: [...ADMIN_PERMISSIONS] }],
 ];
 
+/**
+ * 地址属于门店主导航里的哪个页面（会员工作台 / 除外：它是门店首页）。
+ * 没有这个页面权限的人打开它，门店外壳把他送回首页（与看板、后台一致；测试服 E2E 报告）。
+ */
+export function storePageOf(pathname: string): StoreNavItem | null {
+  return STORE_NAV.flat().find((n) => n.to !== '/' && (pathname === n.to || pathname.startsWith(`${n.to}/`))) ?? null;
+}
+
 /** 当前账号在门店主导航里看得到的入口（按分组，去掉空的分组） */
 export function useStoreNav(): StoreNavItem[][] {
   const can = useCan();

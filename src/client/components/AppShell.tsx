@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { NavLink, useNavigate } from 'react-router';
+import { Navigate, NavLink, useLocation, useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Building2, KeyRound, LogOut } from 'lucide-react';
 import { describeBusinessHours, isOpenAt, minuteOfDay } from '@shared/business-date';
@@ -9,7 +9,7 @@ import { useCan, useSession } from '../lib/session';
 import { cn } from '../lib/utils';
 import { LogoMark } from './Brand';
 import { InstanceTag } from './InstanceTag';
-import { useStoreNav } from './storeNav';
+import { storePageOf, useStoreNav } from './storeNav';
 import { PendingOpsBanner } from './PendingOpsBanner';
 import { FrontdeskPendingBanner } from '../features/frontdesk/PendingBanner';
 import { useErpAccess } from '../features/erp/access';
@@ -20,6 +20,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const session = useSession();
   // ERP（库存、采购、货款、待办）在单独的工作区，主导航里没有（v0.7.3）；待办的数字在 ERP 导航上
   const nav = useStoreNav();
+  const { pathname } = useLocation();
+  // 没有权限的门店页面（流水、日结、交班、前台……）回到首页：只用 ERP 的人回到 ERP，客户经理回到会员工作台。
+  // 功能没开启（钟房、餐饮）不算没有权限，页面自己提示
+  const page = storePageOf(pathname);
+  if (page && !(Array.isArray(page.perm) ? page.perm : [page.perm]).some((p) => can(p))) return <Navigate to="/" replace />;
   return (
     <div className="flex h-dvh min-h-0 bg-paper">
       <nav

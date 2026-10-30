@@ -89,6 +89,12 @@ test.describe('ERP 工作区', () => {
     expect((await page.request.get('/api/erp/revenue?from=2026-01-01&to=2026-01-01')).status()).toBe(403);
     await page.goto('/erp/modules');
     await expect(page).toHaveURL(/\/erp$/);
+    // 门店那边没有权限的页面直接打开：回到首页，也就是 ERP 的库存（不停在只有外壳、提示没有权限的页面；测试服 E2E 报告）
+    for (const url of ['/ledger', '/settlement', '/shift', '/frontdesk']) {
+      await page.goto(url);
+      await expect(page, url).toHaveURL(/\/inventory/);
+      await expect(page.getByTestId('erp-shell')).toBeVisible();
+    }
   });
 
   test('开了餐饮时，物资经办在 ERP 点「返回门店」进餐饮的厨房出品屏，不会被送回 ERP', async ({ page }) => {
