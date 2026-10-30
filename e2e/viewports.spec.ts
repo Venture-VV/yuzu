@@ -84,6 +84,26 @@ test.describe('视口冒烟', () => {
     await expectFits(page);
   });
 
+  test('流水：手机上不横向滚动（测试服 E2E 报告）', async ({ page }) => {
+    await login(page, 'linlan');
+    await page.goto('/ledger');
+    await expect(page.getByRole('heading', { name: '流水' })).toBeVisible();
+    await expectFits(page);
+  });
+
+  test('主导航：小屏电脑上所有入口不用滚动就能看到（测试服 E2E 报告 BUG-1）', async ({ page, isMobile }) => {
+    test.skip(!!isMobile, '手机上用不到左侧导航');
+    await login(page, 'linlan');
+    const nav = page.getByRole('navigation', { name: '主导航' });
+    const viewport = page.viewportSize()!;
+    const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
+    for (const name of ['前台', '会员', '流水', '日结', '交班', '看板', '库存', '采购', '货款', '待办', '后台']) {
+      const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
+      expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
+      expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
+    }
+  });
+
   test('日结：营业口径、余额核对与异常', async ({ page }) => {
     await login(page, 'linlan');
     await page.goto('/settlement');

@@ -274,3 +274,12 @@ describe('后台首页与规则总表', () => {
     expect((await api(ctx.app, ctx.clerk, 'GET', '/api/admin/overview')).status).toBe(403);
   });
 });
+
+describe('响应头（测试服 E2E 报告）', () => {
+  it('接口、出错的响应都带 x-content-type-options: nosniff', async () => {
+    for (const url of ['/api/health', '/api/auth/me', '/api/no-such-api']) {
+      const res = await ctx.app.inject({ method: 'GET', url });
+      expect(res.headers['x-content-type-options'], url).toBe('nosniff');
+    }
+  });
+});

@@ -69,6 +69,12 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
     }
   });
 
+  // 浏览器按声明的类型解析响应，不猜测内容类型（测试服 E2E 报告）
+  app.addHook('onSend', async (_req, reply, payload) => {
+    reply.header('x-content-type-options', 'nosniff');
+    return payload;
+  });
+
   app.setErrorHandler((error, req, reply) => {
     if (error instanceof AppError) {
       reply.status(error.status).send({ error: { code: error.code, message: error.message, details: error.details } });
