@@ -124,7 +124,7 @@ function OpenShift({ shift }: { shift: ShiftRecord }) {
         {crossDrawer > 0 && (
           <Notice tone="warning" className="mt-3" title={`应有现金是负数：本班退给客人的现金比收进的多 ¥${(crossDrawer / 100).toFixed(2)}`}>
             <span data-testid="shift-cross-drawer">
-              多出的这部分不是从你的钱箱出的（例如从收银员的钱箱或保险柜拿的）。实点按你钱箱里实际的现金填，没有钱箱填 0；交班表会记成长款，与出钱那个钱箱的短款相抵（同一钱箱合并核对）。请在交班备注里写明这笔现金是从哪里拿的。
+              多出的这部分不是从你的钱箱出的（例如从收银员的钱箱或保险柜拿的）。实点按你钱箱里实际的现金填，没有钱箱填 0；交班表会记成长款，与出钱那个钱箱的短款相抵（同一钱箱合并核对）。请在交班备注里写明这笔现金是从哪里拿的。以后反结账时在「从哪个钱箱退现金」里选实际出钱的钱箱，退款就记到那个班次，不会再出现负数。
             </span>
           </Notice>
         )}
@@ -201,14 +201,14 @@ function SummaryView({ summary }: { summary: ShiftSummary }) {
         (refunds ? (
           <Notice tone="warning" icon={<Undo2 className="size-4" />} title={`本班次反结账 ${summary.voids.length} 张 · 退款 ¥${(refunds.total / 100).toFixed(2)}`} className="md:col-span-2">
             <span data-testid="shift-refunds">
-              {summary.voids.map((v) => `${v.checkoutNo}（¥${(v.amount / 100).toFixed(2)}，${v.reason}）`).join('；')}。
+              {summary.voids.map((v) => `${v.checkoutNo}（¥${(v.amount / 100).toFixed(2)}，${v.reason}${v.voidedByName ? `，${v.voidedByName}反结账、从本班钱箱退` : ''}）`).join('；')}。
               退款按原收款方式：{refunds.byMethod.map((m) => `${CHECKOUT_METHOD_LABELS[m.method]} ¥${(m.amount / 100).toFixed(2)}`).join('、')}。
               现金从你的钱箱退给客人，已从应有现金里扣掉；扫码、银行卡、团购请在商户后台原路退回并登记退款单号。原单若是别人收的款，仍算在原收款人的班次，同一钱箱合并核对时相抵。
             </span>
           </Notice>
         ) : (
           <Notice tone="warning" icon={<Undo2 className="size-4" />} title={`本班次反结账 ${summary.voids.length} 张`} className="md:col-span-2">
-            {summary.voids.map((v) => `${v.checkoutNo}（¥${(v.amount / 100).toFixed(2)}，${v.reason}）`).join('；')}。原单收过的现金不计入应有现金，请核对是否已退还或已重新收取。
+            {summary.voids.map((v) => `${v.checkoutNo}（¥${(v.amount / 100).toFixed(2)}，${v.reason}${v.voidedByName ? `，${v.voidedByName}反结账、从本班钱箱退` : ''}）`).join('；')}。原单收过的现金不计入应有现金，请核对是否已退还或已重新收取。
           </Notice>
         ))}
     </div>

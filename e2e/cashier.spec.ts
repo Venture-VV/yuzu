@@ -217,8 +217,12 @@ test.describe('完整收银', () => {
       await records.getByText(first.checkoutNo).click();
       await records.getByTestId('checkout-void').click();
       await records.getByLabel('反结账原因').fill('E2E：客人改用现金支付');
+      // 跨钱箱退款：原单收了现金，默认从原收款人（前台）的钱箱退
+      await expect(records.getByTestId('refund-drawer').getByRole('radio', { checked: true })).toContainText('原单收款的班次');
       await records.getByTestId('checkout-void-confirm').click();
       await expect(manager.getByText(`已反结账 ${first.checkoutNo}`)).toBeVisible();
+      // 退的现金记在前台的班次（与原单相抵），值班经理的班次不变
+      expect((await currentShift(manager))!.summary.cash.expected).toBe(managerBefore.summary.cash.expected);
 
       expect((await getJson<CheckoutSummary>(page, `/api/frontdesk/checkouts/${checkoutId}`)).status).toBe('voided');
       expect(await balance(page, member.id)).toEqual(before);

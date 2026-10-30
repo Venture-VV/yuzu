@@ -161,6 +161,13 @@ export interface CheckoutPreview {
   sessions: { sessionNo: string; tagCode: string; techNo: string; techName: string; itemName: string; clocks: number; status: 'waiting' | 'serving' }[];
 }
 
+/** 反结账退现金可以选的钱箱（v0.7.1，跨钱箱退款）：此刻当班的班次；original 原单收款的班次，mine 反结账人自己的班次 */
+export interface RefundShiftOptions {
+  shifts: { id: number; shiftNo: string; staffName: string; startedAt: string; mine: boolean; original: boolean }[];
+  /** 建议的默认：原单收款的班次仍在班上时选它，否则是自己的班次，只有一个当班的班次时选它；都没有时为 null */
+  suggested: number | null;
+}
+
 export interface CheckoutPayment {
   id: number;
   method: CheckoutMethod;
@@ -240,7 +247,8 @@ export interface ShiftSummary {
   walletConsumes: { count: number; total: number };
   coupons: { platform: CouponPlatform; count: number; amount: number }[];
   /** 本班次内本人做的反结账（原单可能在别的班次）；cashRefund 为退给客人的现金（R1.2 起） */
-  voids: { checkoutNo: string; amount: number; reason: string; voidedAt: string; cashRefund?: number }[];
+  /** voidedByName：跨钱箱退款时做反结账的是别人（v0.7.1），写明是谁；本人做的没有这一项 */
+  voids: { checkoutNo: string; amount: number; reason: string; voidedAt: string; cashRefund?: number; voidedByName?: string }[];
   /**
    * 反结账退款按原收款方式（R1.2 起）：现金从本班钱箱退，扣减应有现金；扫码、银行卡、团购在商户后台原路退回并登记退款单号。
    * 升级（迁移 017）时已有的班次与之前的快照没有这一项：反结账只列提醒、不扣现金（cashRefund、cash.refund 同样没有）

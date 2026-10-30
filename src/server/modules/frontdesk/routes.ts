@@ -13,6 +13,7 @@ import { idParam, parse } from '../../lib/validate';
 import { checkBackfillAt } from './backfill';
 import { postCharges, voidLine, type PostInputData } from './bills';
 import { resolveReadableDate } from '../ledger';
+import { refundShiftOptions } from '../shifts';
 import { checkout, findCoupon, getCheckout, listCheckouts, previewCheckout, voidCheckout, type CheckoutInputData } from './checkout';
 import { listTicketTypes, saveTicketType, setVisitTicket, type TicketTypeInputData } from './tickets';
 import { frontdeskChecks } from './checks';
@@ -174,6 +175,12 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/frontdesk/checkouts/:id', { preHandler: guard('frontdesk.read') }, async (req) => {
     const { id } = parse(idParam, req.params);
     return getCheckout(sql, id);
+  });
+
+  // 反结账退现金可以选的钱箱（跨钱箱退款，v0.7.1）：此刻当班的班次与建议的默认
+  app.get('/api/frontdesk/checkouts/:id/refund-shifts', { preHandler: guard('frontdesk.checkoutVoid') }, async (req) => {
+    const { id } = parse(idParam, req.params);
+    return refundShiftOptions(sql, id, req.actor.id);
   });
 
   app.post('/api/frontdesk/checkouts/:id/void', { preHandler: guard('frontdesk.checkoutVoid') }, async (req) => {
