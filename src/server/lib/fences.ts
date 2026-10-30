@@ -8,7 +8,7 @@
 
 import type { Db, Tx } from '../db';
 
-export const FENCED_OPS = ['recharge', 'consume', 'reversal', 'checkin', 'bill_post', 'tag_swap', 'checkout'] as const;
+export const FENCED_OPS = ['recharge', 'consume', 'reversal', 'checkin', 'bill_post', 'tag_swap', 'checkout', 'table_open', 'table_post', 'table_checkout'] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
 const lockKey = (tx: Tx, key: string) => tx`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;

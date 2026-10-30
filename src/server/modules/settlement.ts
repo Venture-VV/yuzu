@@ -358,7 +358,7 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
                 THEN (SELECT v.closed_at - v.checked_in_at > make_interval(mins => ${selfVoidMinutes}) FROM visits v WHERE v.id::text = a.target_id) END AS late
     FROM audit_logs a LEFT JOIN staff s ON s.id = a.staff_id
     WHERE a.business_date = ${date}
-      AND (a.action IN ('frontdesk_cancel', 'frontdesk_void')
+      AND (a.action IN ('frontdesk_cancel', 'frontdesk_void', 'table_void')
            OR (a.action = 'frontdesk_ticket' AND a.detail ? 'approval')
            OR (a.action = 'frontdesk_checkin' AND a.detail ? 'freeTickets'))
     ORDER BY a.id`;
@@ -376,11 +376,12 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
         amount: null,
         description: `接待超过 ${selfVoidMinutes} 分钟后撤销误开的牌 · ${text('reason')} · ${staff}`,
       });
-    } else if (e.action === 'frontdesk_void') {
+    } else if (e.action === 'frontdesk_void' || e.action === 'table_void') {
+      // 桌台退菜（餐饮第二步）与前台作废明细同列，单号是开台号
       anomalies.push({
         kind: 'line_void',
         at: e.createdAt,
-        docNo: text('visitNo') || null,
+        docNo: text('visitNo') || text('sessionNo') || null,
         memberName: null,
         amount: (d.amount as number | undefined) ?? null,
         description: `作废明细 ${text('name')} × ${(d.quantity as number | undefined) ?? ''} · ${text('reason')} · ${staff}`,

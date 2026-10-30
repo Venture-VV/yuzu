@@ -31,7 +31,8 @@ export async function businessDate(db: Db, deps: Deps, at: Date): Promise<string
 
 export const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 
-export const FRONTDESK_OPS = ['checkin', 'bill_post', 'tag_swap', 'checkout'] as const;
+/** 前台的幂等业务类型；table_open / table_post / table_checkout 是餐饮第二步的开台、桌台点单与桌台结账 */
+export const FRONTDESK_OPS = ['checkin', 'bill_post', 'tag_swap', 'checkout', 'table_open', 'table_post', 'table_checkout'] as const;
 export type FrontdeskOp = (typeof FRONTDESK_OPS)[number];
 
 export const abandonedError = () =>
@@ -95,6 +96,9 @@ export async function runIdempotent(
 export function mapUniqueViolation(error: unknown): unknown {
   if (isUniqueViolation(error, 'visits_tag_open_uq')) {
     return conflict('TAG_OCCUPIED', '这张手牌刚刚被其他终端发出，请换一张空闲手牌');
+  }
+  if (isUniqueViolation(error, 'table_sessions_table_open_uq')) {
+    return conflict('TABLE_TAKEN', '这张桌台刚刚被其他终端开台，请换一张空桌');
   }
   if (isUniqueViolation(error, 'visits_member_open_uq')) {
     return conflict('MEMBER_IN_STORE', '这位会员已持有一张在店手牌，请先在状态板上找到原手牌');

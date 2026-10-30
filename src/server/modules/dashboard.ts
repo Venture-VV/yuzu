@@ -42,7 +42,7 @@ export async function dashboard(db: Db, today: string, days: number, opts: { inS
   // 结账客人、门票、收款构成与日结同一营业口径（v0.7.1，测试会话 PR #15 问题 2）：当天结的计正数、当天反结账的计负数，
   // 前一营业日的单今天反结账时，原营业日不变、今天冲回
   const [guests] = await db<{ n: number; ticket: number }[]>`
-    SELECT (count(*) FILTER (WHERE c.business_date = ${today}) - count(*) FILTER (WHERE c.void_business_date = ${today}))::int AS n,
+    SELECT (coalesce(sum(cb.guests) FILTER (WHERE c.business_date = ${today}), 0) - coalesce(sum(cb.guests) FILTER (WHERE c.void_business_date = ${today}), 0))::int AS n,
            coalesce(sum(cb.ticket_amount) FILTER (WHERE c.business_date = ${today}), 0)
              - coalesce(sum(cb.ticket_amount) FILTER (WHERE c.void_business_date = ${today}), 0) AS ticket
     FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id WHERE c.business_date = ${today} OR c.void_business_date = ${today}`;
@@ -65,7 +65,8 @@ export async function dashboard(db: Db, today: string, days: number, opts: { inS
     SELECT cb.ticket_name AS name,
            (count(*) FILTER (WHERE c.business_date = ${today}) - count(*) FILTER (WHERE c.void_business_date = ${today}))::int AS count,
            coalesce(sum(cb.ticket_amount) FILTER (WHERE c.business_date = ${today}), 0) - coalesce(sum(cb.ticket_amount) FILTER (WHERE c.void_business_date = ${today}), 0) AS amount
-    FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id WHERE c.business_date = ${today} OR c.void_business_date = ${today}
+    FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id
+    WHERE (c.business_date = ${today} OR c.void_business_date = ${today}) AND cb.ticket_name IS NOT NULL
     GROUP BY cb.ticket_name
     HAVING count(*) FILTER (WHERE c.business_date = ${today}) <> count(*) FILTER (WHERE c.void_business_date = ${today})
         OR coalesce(sum(cb.ticket_amount) FILTER (WHERE c.business_date = ${today}), 0) <> coalesce(sum(cb.ticket_amount) FILTER (WHERE c.void_business_date = ${today}), 0)

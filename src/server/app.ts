@@ -32,6 +32,7 @@ import { registerStaffRoutes } from './modules/staff';
 import { registerTechnicianRoutes } from './modules/technicians';
 import { registerClockroomRoutes } from './modules/clockroom';
 import { registerDiningRoutes } from './modules/dining';
+import { registerTableRoutes } from './modules/tables';
 import { registerCommissionRoutes } from './modules/commission';
 import { registerWalletRoutes } from './modules/wallet';
 
@@ -144,6 +145,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerTechnicianRoutes(app, deps);
   registerClockroomRoutes(app, deps);
   registerDiningRoutes(app, deps);
+  registerTableRoutes(app, deps);
   registerCommissionRoutes(app, deps);
 
   // 前端静态资源（构建产物），全部从本机提供，外网中断不影响使用。

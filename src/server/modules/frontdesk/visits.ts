@@ -58,6 +58,7 @@ import {
   resolveBackfill,
 } from './backfill';
 import { getCheckout } from './checkout';
+import { getTableSession } from '../tables';
 import { resolveTicketType, ticketAuthRequired, visitTicket } from './tickets';
 import { lineTechnicianSql } from '../technicians';
 import { assertVipAllowed, consumeVipShortfalls, memberLevels, vipShortfalls } from './vip';
@@ -772,6 +773,11 @@ export async function lookupFrontdeskOp(db: Db, key: string, expected?: Frontdes
   if (row.opType === 'checkin') return { found: true as const, type: 'checkin' as const, checkin: await loadCheckin(db, key, true) };
   if (row.opType === 'bill_post') return { found: true as const, type: 'bill_post' as const, visit: await getVisit(db, row.refId) };
   if (row.opType === 'checkout') return { found: true as const, type: 'checkout' as const, checkout: await getCheckout(db, row.refId) };
+  // 餐饮第二步：开台、桌台点单查回这一桌；桌台结账查回结账单
+  if (row.opType === 'table_open' || row.opType === 'table_post') {
+    return { found: true as const, type: row.opType as 'table_open' | 'table_post', session: await getTableSession(db, row.refId) };
+  }
+  if (row.opType === 'table_checkout') return { found: true as const, type: 'table_checkout' as const, checkout: await getCheckout(db, row.refId) };
   const [c] = await db<{ visitId: number }[]>`SELECT visit_id FROM visit_tag_changes WHERE id = ${row.refId}`;
   return { found: true as const, type: 'tag_swap' as const, visit: await getVisit(db, c!.visitId) };
 }

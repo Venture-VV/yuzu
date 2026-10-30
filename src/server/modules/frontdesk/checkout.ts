@@ -94,7 +94,7 @@ const DiscountPayment = z.object({
   amount: positiveCents('优惠金额'),
   grantId: z.uuid('优惠 / 免单需要值班经理、店总或店主当场授权'),
 });
-const Payment = z.union([CashPayment, WalletPayment, CouponPayment, DiscountPayment], '收款方式不正确');
+export const Payment = z.union([CashPayment, WalletPayment, CouponPayment, DiscountPayment], '收款方式不正确');
 
 export const CheckoutInput = z.object({
   clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
@@ -502,18 +502,25 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
         checkedOutAt: new Date(c.createdAt).toISOString(),
       });
     }
-    const items = await tx<{ visitId: number; billId: number; tagId: number; groupId: number | null; memberId: number | null }[]>`
-      SELECT cb.visit_id, cb.bill_id, v.tag_id, v.group_id, v.member_id
-      FROM checkout_bills cb JOIN visits v ON v.id = cb.visit_id WHERE cb.checkout_id = ${c.id}`;
+    // 手牌结账单恢复来访；桌台结账单（餐饮第二步）恢复开台
+    const all = await tx<{ visitId: number | null; tableSessionId: number | null; billId: number; tagId: number | null; groupId: number | null; memberId: number | null }[]>`
+      SELECT cb.visit_id, cb.table_session_id, cb.bill_id, v.tag_id, v.group_id, v.member_id
+      FROM checkout_bills cb LEFT JOIN visits v ON v.id = cb.visit_id WHERE cb.checkout_id = ${c.id}`;
+    const items = all.filter((i): i is typeof i & { visitId: number; tagId: number } => i.visitId !== null);
+    const tableItems = all.filter((i) => i.tableSessionId !== null).map((i) => ({ sessionId: i.tableSessionId!, billId: i.billId }));
 
     // ① 手牌（id 升序）：必须启用、未锁定、没有其他在店客人
-    const tags = await tx<{ id: number; code: string; locked: boolean; active: boolean }[]>`
-      SELECT id, code, locked, active FROM hand_tags WHERE id IN ${tx(items.map((i) => i.tagId))} ORDER BY id FOR UPDATE`;
+    const tags = items.length
+      ? await tx<{ id: number; code: string; locked: boolean; active: boolean }[]>`
+          SELECT id, code, locked, active FROM hand_tags WHERE id IN ${tx(items.map((i) => i.tagId))} ORDER BY id FOR UPDATE`
+      : [];
     for (const t of tags) {
       if (!t.active || t.locked) throw conflict('TAG_UNAVAILABLE', `手牌 ${t.code} 已${t.active ? '锁定' : '停用'}，不能恢复在店；请先在手牌管理里处理`);
     }
-    const busy = await tx<{ code: string }[]>`
-      SELECT t.code FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE v.status = 'open' AND v.tag_id IN ${tx(tags.map((t) => t.id))}`;
+    const busy = tags.length
+      ? await tx<{ code: string }[]>`
+          SELECT t.code FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE v.status = 'open' AND v.tag_id IN ${tx(tags.map((t) => t.id))}`
+      : [];
     if (busy.length) throw conflict('TAG_REISSUED', `手牌 ${busy.map((b) => b.code).join('、')} 已发给其他客人，不能反结账`);
     const memberIds = items.flatMap((i) => (i.memberId ? [i.memberId] : []));
     if (memberIds.length) {
@@ -527,7 +534,21 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
     for (const v of visits.values()) {
       if (v.status !== 'settled') throw conflict('VISIT_CHANGED', `来访 ${v.visitNo} 状态已变化，请刷新后重试`);
     }
-    const billIds = items.map((i) => i.billId).sort((a, b) => a - b);
+    // 桌台结账单：桌台（id 升序）此刻不能已开给别的客人 → 开台（id 升序）
+    const tables = tableItems.length
+      ? await tx<{ id: number; name: string }[]>`
+          SELECT t.id, t.name FROM dining_tables t
+          WHERE t.id IN (SELECT table_id FROM table_sessions WHERE id IN ${tx(tableItems.map((i) => i.sessionId))}) ORDER BY t.id FOR UPDATE`
+      : [];
+    if (tables.length) {
+      const taken = await tx<{ name: string }[]>`
+        SELECT t.name FROM table_sessions s JOIN dining_tables t ON t.id = s.table_id WHERE s.status = 'open' AND s.table_id IN ${tx(tables.map((t) => t.id))}`;
+      if (taken.length) throw conflict('TABLE_TAKEN', `桌台「${taken.map((t) => t.name).join('、')}」已开给别的客人，不能反结账；请先把那一桌转到别的桌台`);
+      const sessions = await tx<{ id: number; sessionNo: string; status: string }[]>`
+        SELECT id, session_no, status FROM table_sessions WHERE id IN ${tx(tableItems.map((i) => i.sessionId))} ORDER BY id FOR UPDATE`;
+      for (const s of sessions) if (s.status !== 'settled') throw conflict('VISIT_CHANGED', `开台 ${s.sessionNo} 状态已变化，请刷新后重试`);
+    }
+    const billIds = all.map((i) => i.billId).sort((a, b) => a - b);
     await tx`SELECT id FROM bills WHERE id IN ${tx(billIds)} ORDER BY id FOR UPDATE`;
 
     const date = await businessDate(tx, deps, at);
@@ -537,9 +558,14 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
     if (groupIds.length) await tx`UPDATE visit_groups SET status = 'open', closed_at = NULL WHERE id IN ${tx(groupIds)} AND status = 'closed'`;
     await tx`UPDATE bills SET status = 'open', closed_at = NULL WHERE id IN ${tx(billIds)}`;
     // 门票计到第一次结账的时刻（客人已离店，只是更正）；多次反结账保留第一次的时刻
-    await tx`
-      UPDATE visits SET status = 'open', closed_at = NULL, closed_by = NULL, ticket_end_at = coalesce(ticket_end_at, closed_at)
-      WHERE id IN ${tx(items.map((i) => i.visitId))}`;
+    if (items.length) {
+      await tx`
+        UPDATE visits SET status = 'open', closed_at = NULL, closed_by = NULL, ticket_end_at = coalesce(ticket_end_at, closed_at)
+        WHERE id IN ${tx(items.map((i) => i.visitId))}`;
+    }
+    if (tableItems.length) {
+      await tx`UPDATE table_sessions SET status = 'open', closed_at = NULL, closed_by = NULL WHERE id IN ${tx(tableItems.map((i) => i.sessionId))}`;
+    }
     // 门票明细作废（下次结账按届时的在店时长重新计算）
     const ticketLines = await tx<{ id: number; billId: number; amount: number }[]>`
       SELECT id, bill_id, amount FROM bill_lines
@@ -574,6 +600,7 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
       detail: {
         docNo: c.checkoutNo,
         tags: tags.map((t) => t.code),
+        ...(tables.length ? { tables: tables.map((t) => t.name) } : {}),
         reason,
         ...(drawer && drawer.staffId !== ctx.actor.id ? { refundShift: drawer.shiftNo, refundDrawer: drawer.staffName } : {}),
       },
@@ -592,12 +619,16 @@ export async function getCheckout(db: Db, id: number): Promise<CheckoutDetail> {
            c.voided_at, vs.display_name AS voided_by_name, c.void_reason, ${backfillMarkSql(db, 'c.client_key')} AS backfill
     FROM checkouts c JOIN staff s ON s.id = c.operator_id LEFT JOIN staff vs ON vs.id = c.voided_by WHERE c.id = ${id}`;
   if (!c) throw notFound('结账单不存在');
+  // 手牌账单显示牌号；桌台账单（餐饮第二步）显示桌号与人数
   const bills = await db<CheckoutDetail['bills']>`
-    SELECT cb.bill_id, b.bill_no, cb.visit_id, v.visit_no, t.code AS tag_code, m.name AS member_name, v.guest_label, cb.amount,
+    SELECT cb.bill_id, b.bill_no, cb.visit_id, v.visit_no, t.code AS tag_code, cb.table_session_id, dt.name AS table_name, cb.guests,
+           coalesce(m.name, tm.name) AS member_name, coalesce(v.guest_label, ts.guest_label, '') AS guest_label, cb.amount,
            cb.stay_minutes, cb.ticket_name, cb.ticket_segments, cb.ticket_amount
-    FROM checkout_bills cb JOIN bills b ON b.id = cb.bill_id JOIN visits v ON v.id = cb.visit_id JOIN hand_tags t ON t.id = v.tag_id
-    LEFT JOIN members m ON m.id = v.member_id
-    WHERE cb.checkout_id = ${id} ORDER BY t.code`;
+    FROM checkout_bills cb JOIN bills b ON b.id = cb.bill_id
+    LEFT JOIN visits v ON v.id = cb.visit_id LEFT JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id
+    LEFT JOIN table_sessions ts ON ts.id = cb.table_session_id LEFT JOIN dining_tables dt ON dt.id = ts.table_id
+    LEFT JOIN members tm ON tm.id = ts.member_id
+    WHERE cb.checkout_id = ${id} ORDER BY coalesce(t.code, dt.name)`;
   const payments = await db<CheckoutDetail['payments']>`
     SELECT p.id, p.method, p.amount, p.ref, p.member_id, m.name AS member_name, ap.display_name AS approved_by_name,
            CASE WHEN k.id IS NULL THEN NULL ELSE json_build_object('id', k.id, 'docNo', k.doc_no, 'principal', k.principal_amount,
@@ -611,7 +642,7 @@ export async function getCheckout(db: Db, id: number): Promise<CheckoutDetail> {
     SELECT DISTINCT t.code FROM visits v JOIN hand_tags t ON t.id = v.tag_id
     WHERE v.status = 'open' AND v.group_id IN (
       SELECT v2.group_id FROM checkout_bills cb JOIN visits v2 ON v2.id = cb.visit_id WHERE cb.checkout_id = ${id} AND v2.group_id IS NOT NULL)
-      AND v.id NOT IN (SELECT visit_id FROM checkout_bills WHERE checkout_id = ${id})
+      AND v.id NOT IN (SELECT visit_id FROM checkout_bills WHERE checkout_id = ${id} AND visit_id IS NOT NULL)
     ORDER BY t.code`;
   return { ...c, backfill: normalizeMark(c.backfill), bills, payments, remainingMates: mates.map((m) => m.code) };
 }
@@ -619,8 +650,10 @@ export async function getCheckout(db: Db, id: number): Promise<CheckoutDetail> {
 export async function listCheckouts(db: Db, date: string): Promise<CheckoutSummary[]> {
   return db<CheckoutSummary[]>`
     SELECT c.id, c.checkout_no, c.status, c.total_amount, c.business_date, s.display_name AS operator_name, c.created_at,
-           (SELECT array_agg(t.code ORDER BY t.code) FROM checkout_bills cb JOIN visits v ON v.id = cb.visit_id
-            JOIN hand_tags t ON t.id = v.tag_id WHERE cb.checkout_id = c.id) AS tag_codes,
+           coalesce((SELECT array_agg(t.code ORDER BY t.code) FROM checkout_bills cb JOIN visits v ON v.id = cb.visit_id
+                     JOIN hand_tags t ON t.id = v.tag_id WHERE cb.checkout_id = c.id), '{}') AS tag_codes,
+           coalesce((SELECT array_agg(dt.name ORDER BY dt.name) FROM checkout_bills cb JOIN table_sessions ts ON ts.id = cb.table_session_id
+                     JOIN dining_tables dt ON dt.id = ts.table_id WHERE cb.checkout_id = c.id), '{}') AS table_names,
            (SELECT array_agg(DISTINCT p.method) FROM checkout_payments p WHERE p.checkout_id = c.id) AS methods,
            (SELECT bf.slip_no FROM backfill_entries bf WHERE bf.op_key = c.client_key ORDER BY bf.id LIMIT 1) AS backfill_slip_no
     FROM checkouts c JOIN staff s ON s.id = c.operator_id
