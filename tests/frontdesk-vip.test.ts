@@ -115,6 +115,7 @@ describe('会员等级', () => {
       vipLevelThresholds: [0, 5_000_000, 10_000_000, 20_000_000, 30_000_000],
       vipOverrideEnabled: false,
       overtimeGraceMinutes: 15,
+      vipLevelNames: ['普通会员', '银卡会员', '金卡会员', '铂金会员', '钻石会员'],
     });
     expect(await setRules({ selfVoidMinutes: 20 })).toEqual({ ...before, selfVoidMinutes: 20 });
     await setRules({ selfVoidMinutes: 15 });

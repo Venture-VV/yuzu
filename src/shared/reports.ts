@@ -1,0 +1,96 @@
+// 数据看板（v0.6.0，同事在测试服的反馈）：按岗位分三页——
+//   · 今日（值班经理、收银）：在店、今日营业额与收款、分时结账与到店、部门构成、在店最久的客人、当班中；
+//   · 经营总览（总经理：店主、店总）：任选时段的营业额、客流、客单价、收款与部门构成、热门项目、到店时段，与上一时段环比；
+//   · 会员总览（客户经理）：储值余额、新增与渠道、活跃与沉睡、等级分布、充值排行、赠金到期、待跟进的沉睡会员。
+// 口径与日结一致：营业额按营业日，当日结账的计入、当日反结账的冲回；净营业额 = 应收 − 优惠 / 免单。
+
+import type { CheckoutMethod } from './checkout';
+
+export const MAX_REPORT_DAYS = 366;
+
+/** 常用时段（营业日） */
+export const REPORT_PRESETS = ['today', 'yesterday', 'last7', 'last30', 'month', 'lastMonth'] as const;
+export type ReportPreset = (typeof REPORT_PRESETS)[number];
+export const REPORT_PRESET_LABELS: Record<ReportPreset, string> = {
+  today: '今天',
+  yesterday: '昨天',
+  last7: '近 7 天',
+  last30: '近 30 天',
+  month: '本月',
+  lastMonth: '上月',
+};
+
+export interface PeriodKpis {
+  /** 应收（结账 − 反结账） */
+  receivable: number;
+  /** 优惠 / 免单（当场授权） */
+  discount: number;
+  /** 净营业额 = 应收 − 优惠 */
+  net: number;
+  /** 结账客人（手牌账单数） */
+  guests: number;
+  checkouts: number;
+  /** 客单价 = 净营业额 / 结账客人（分，四舍五入） */
+  perGuest: number;
+  rechargePaid: number;
+  rechargeCount: number;
+  /** 储值消费（会员工作台与结账用储值，撤销的不计） */
+  walletConsumed: number;
+  newMembers: number;
+}
+
+export interface ExecutiveReport {
+  from: string;
+  to: string;
+  days: number;
+  /** 上一时段（同样天数，紧挨着之前） */
+  prevFrom: string;
+  prevTo: string;
+  kpis: PeriodKpis;
+  prev: PeriodKpis;
+  trend: { date: string; net: number; guests: number; rechargePaid: number }[];
+  byMethod: { method: CheckoutMethod; amount: number }[];
+  tickets: { name: string; count: number; amount: number }[];
+  /** 部门（项目分类）构成：结账那一刻的明细，反结账的冲回 */
+  departments: { category: string; quantity: number; amount: number }[];
+  topItems: { name: string; category: string; quantity: number; amount: number }[];
+  /** 到店时段：各小时接待的人数（撤销误开的不计） */
+  arrivals: { hour: number; count: number }[];
+}
+
+export interface MemberBrief {
+  id: number;
+  memberNo: string;
+  name: string;
+  phoneTail: string;
+  balance: number;
+  levelName: string;
+  lastActivityAt: string | null;
+}
+
+export interface MembersReport {
+  from: string;
+  to: string;
+  totals: { members: number; withBalance: number; principal: number; bonus: number; frozen: number };
+  /** 有余额的会员按最近一次余额变动分：30 天内、31–90 天、90 天以上没来（沉睡） */
+  activity: { active30: number; active90: number; dormant: number; dormantBalance: number };
+  period: { newMembers: number; rechargePaid: number; rechargeCount: number; rechargeMembers: number; walletConsumed: number; consumeMembers: number };
+  newByChannel: { channel: string | null; label: string; count: number }[];
+  allByChannel: { channel: string | null; label: string; count: number }[];
+  levels: { level: number; name: string; count: number; balance: number }[];
+  topBalance: MemberBrief[];
+  topRecharge: (MemberBrief & { paid: number })[];
+  /** 90 天以上没来、余额最高的会员（客户经理回访） */
+  dormantList: MemberBrief[];
+  /** 未来 30 天到期的赠金 */
+  bonusExpiring: { amount: number; members: number };
+}
+
+/** 今日看板追加的值班数据 */
+export interface DutyExtras {
+  /** 各小时的结账张数与接待人数（营业日从切换时刻起算） */
+  hourly: { hour: number; checkouts: number; arrivals: number }[];
+  departments: { category: string; quantity: number; amount: number }[];
+  /** 在店最久的客人（前 8 位） */
+  longStays: { visitId: number; tagCode: string; guest: string; checkedInAt: string; amountCents: number }[];
+}

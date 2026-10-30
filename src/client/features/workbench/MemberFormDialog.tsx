@@ -31,12 +31,15 @@ export function MemberFormDialog({
   const session = useSession();
   /** 启用的自定义字段（#12） */
   const fields = session.rules.memberFields.filter((d) => d.active);
+  // 启用的渠道；编辑时会员原来的渠道已停用也照常列出，不改就保留
+  const channels = (session.rules.memberChannels ?? []).filter((c) => c.active || c.key === member?.channel);
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [gender, setGender] = useState<Gender>('unknown');
   const [birthday, setBirthday] = useState('');
   const [note, setNote] = useState('');
+  const [channel, setChannel] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [existing, setExisting] = useState<{ id: number; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -49,6 +52,7 @@ export function MemberFormDialog({
     setGender(member?.gender ?? 'unknown');
     setBirthday(member?.birthday ?? '');
     setNote(member?.note ?? '');
+    setChannel(member?.channel ?? '');
     setCustom(Object.fromEntries(Object.entries(member?.customFields ?? {}).map(([k, v]) => [k, String(v)])));
     setErrors({});
     setExisting(null);
@@ -70,7 +74,7 @@ export function MemberFormDialog({
     setSaving(true);
     setExisting(null);
     const customFields = Object.fromEntries(fields.map((f) => [f.key, custom[f.key] ?? '']));
-    const body = { name, phone: cleanPhone, gender: gender === 'unknown' ? null : gender, birthday: birthday || null, note, customFields };
+    const body = { name, phone: cleanPhone, gender: gender === 'unknown' ? null : gender, birthday: birthday || null, note, customFields, channel: channel || null };
     try {
       const saved = member
         ? await api.put<MemberDetail>(`/api/members/${member.id}`, body)
@@ -136,6 +140,19 @@ export function MemberFormDialog({
             <Input id="m-birthday" type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} />
           </Field>
         </div>
+        {channels.length > 0 && (
+          <Field label="渠道来源" htmlFor="m-channel" hint="选填，顾客从哪里知道我们" error={errors.channel}>
+            <Select id="m-channel" value={channel} onChange={(e) => setChannel(e.target.value)} data-testid="member-channel">
+              <option value="">不填</option>
+              {channels.map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.label}
+                  {c.active ? '' : '（已停用）'}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
         {fields.length > 0 && (
           <div className="grid gap-4 sm:grid-cols-2" data-testid="member-custom-form">
             {fields.map((f) => (

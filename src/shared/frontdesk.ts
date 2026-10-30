@@ -74,6 +74,8 @@ export interface FrontdeskRules {
   vipOverrideEnabled: boolean;
   /** 门票跳档宽限分钟数（店主 ❓6，2026-10-29 签认 15 分钟：12 小时分界点之后 15 分钟内不跳档） */
   overtimeGraceMinutes: number;
+  /** 各级会员的名称（v0.6.0，第 1 级起；没填的显示「第 N 级」，待确认） */
+  vipLevelNames: string[];
 }
 
 export const DEFAULT_FRONTDESK_RULES: FrontdeskRules = {
@@ -83,6 +85,7 @@ export const DEFAULT_FRONTDESK_RULES: FrontdeskRules = {
   vipLevelThresholds: [0, 5_000_000, 10_000_000, 20_000_000, 30_000_000],
   vipOverrideEnabled: false,
   overtimeGraceMinutes: 15,
+  vipLevelNames: ['普通会员', '银卡会员', '金卡会员', '铂金会员', '钻石会员'],
 };
 
 /** 会员等级：达到第 i 档门槛即为第 i + 1 级；一档都没达到为 0 级（与散客相同） */

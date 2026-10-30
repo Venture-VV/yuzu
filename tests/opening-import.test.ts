@@ -157,6 +157,9 @@ describe('预览与导入', () => {
     const jia = (await memberByPhone('13900000001'))!;
     const levels = await memberLevels(ctx.sql, [jia.id], { ...DEFAULT_FRONTDESK_RULES, vipLevelBasis: 'recharge' });
     expect(levels.get(jia.id)!.amountCents).toBe(500000);
+    // 会员详情的等级（v0.6.0）同一口径：期初按导入时间计入累计充值
+    const detail = (await api(ctx.app, ctx.owner, 'GET', `/api/members/${jia.id}`)).body;
+    expect(detail.level).toMatchObject({ basis: 'recharge', amountCents: 500000, level: levels.get(jia.id)!.level });
   });
 });
 

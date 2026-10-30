@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Boxes, CalendarCheck2, ClipboardCheck, ConciergeBell, HandCoins, Inbox, KeyRound, LayoutDashboard, LogOut, ReceiptText, Settings2, ShoppingCart, UsersRound } from 'lucide-react';
 import { describeBusinessHours, isOpenAt, minuteOfDay } from '@shared/business-date';
 import { describeDate, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
+import { ADMIN_PERMISSIONS } from '@shared/admin';
 import type { Permission } from '@shared/permissions';
 import { api } from '../lib/api';
 import { useCan, useSession } from '../lib/session';
@@ -31,7 +32,7 @@ const NAV: NavItem[][] = [
     { to: '/ledger', label: '流水', icon: ReceiptText, perm: 'ledger.readToday' },
     { to: '/settlement', label: '日结', icon: CalendarCheck2, perm: 'ledger.readToday' },
     { to: '/shift', label: '交班', icon: ClipboardCheck, perm: 'ledger.readToday' },
-    { to: '/dashboard', label: '看板', icon: LayoutDashboard, perm: 'ledger.readToday' },
+    { to: '/dashboard', label: '看板', icon: LayoutDashboard, perm: ['ledger.readToday', 'report.executive', 'report.members'] },
   ],
   [
     { to: '/inventory', label: '库存', icon: Boxes, perm: 'inventory.read' },
@@ -39,7 +40,8 @@ const NAV: NavItem[][] = [
     { to: '/payables', label: '货款', icon: HandCoins, perm: 'payable.read' },
     { to: '/todo', label: '待办', icon: Inbox, perm: 'inventory.approve' },
   ],
-  [{ to: '/admin', label: '管理', icon: Settings2, perm: 'staff.manage' }],
+  // 管理后台是单独的一套页面（规则、价目、手牌池、员工与权限）
+  [{ to: '/admin', label: '后台', icon: Settings2, perm: [...ADMIN_PERMISSIONS] }],
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {

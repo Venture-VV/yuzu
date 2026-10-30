@@ -1,23 +1,103 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Banknote, BedDouble, ClipboardCheck, Ticket, TrendingUp, UsersRound } from 'lucide-react';
+import { Navigate, NavLink, useParams } from 'react-router';
+import { Banknote, BedDouble, ClipboardCheck, Clock3, Star, Ticket, TrendingUp, UsersRound } from 'lucide-react';
 import { CHECKOUT_METHOD_LABELS, type DashboardData } from '@shared/checkout';
+import type { Permission } from '@shared/permissions';
+import type { DutyExtras } from '@shared/reports';
 import { api } from '../../lib/api';
-import { useSession } from '../../lib/session';
+import { useCan, useSession } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { Money } from '../../components/Money';
 import { Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
+import { Columns, HBars, yuan } from './charts';
+import { MembersTab } from './MembersTab';
+import { OverviewTab } from './OverviewTab';
 
-/** 经营看板：今天的在店、营业额与收款，近 7 个营业日营业额（口径与日结一致） */
+// 看板按岗位分页（v0.6.0）：今日（值班经理、收银）、经营总览（总经理）、会员总览（客户经理）；各页按权限显示
+const TABS = [
+  { key: 'today', label: '今日', perm: 'ledger.readToday' },
+  { key: 'overview', label: '经营总览', perm: 'report.executive' },
+  { key: 'members', label: '会员总览', perm: 'report.members' },
+] as const satisfies readonly { key: string; label: string; perm: Permission }[];
+type TabKey = (typeof TABS)[number]['key'];
+
+/** 每人自己选的默认页（只存在这台设备的浏览器里） */
+const PREF_KEY = 'yuzu.dashboard.default';
+const readPref = (): string | null => {
+  try {
+    return localStorage.getItem(PREF_KEY);
+  } catch {
+    return null;
+  }
+};
+const writePref = (key: TabKey) => {
+  try {
+    localStorage.setItem(PREF_KEY, key);
+  } catch {
+    // 无痕模式等存不了时只是不记住，不影响使用
+  }
+};
+
 export function DashboardPage() {
   const session = useSession();
+  const can = useCan();
+  const { tab } = useParams();
+  const [pref, setPref] = useState(readPref);
+  const tabs = TABS.filter((t) => can(t.perm));
+  const current = tabs.find((t) => t.key === tab) ?? (tab ? undefined : (tabs.find((t) => t.key === pref) ?? tabs[0]));
+  if (!current) return <Navigate to={tabs.length ? '/dashboard' : '/'} replace />;
+  return (
+    <>
+      <PageHeader title="经营看板" subtitle={current.key === 'today' ? `营业日 ${session.today} · 每分钟刷新` : '口径与日结一致：按营业日，反结账冲回'} />
+      {tabs.length > 1 && (
+        <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-line px-5 md:px-7" role="tablist" aria-label="看板">
+          {tabs.map((t) => (
+            <NavLink
+              key={t.key}
+              to={`/dashboard/${t.key}`}
+              role="tab"
+              aria-selected={t.key === current.key}
+              className={cn('relative flex h-11 items-center px-3.5 text-[14px] font-semibold whitespace-nowrap', t.key === current.key ? 'text-ink' : 'text-ink-3 hover:text-ink')}
+              data-testid={`dashboard-tab-${t.key}`}
+            >
+              {t.label}
+              {t.key === current.key && <span className="absolute inset-x-2 bottom-0 h-[3px] rounded-t-full bg-pine" />}
+            </NavLink>
+          ))}
+          <span className="flex-1" />
+          <button
+            type="button"
+            className={cn('flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 text-[12.5px] font-semibold', pref === current.key ? 'text-yuzu-deep' : 'text-ink-3 hover:text-ink')}
+            onClick={() => {
+              writePref(current.key);
+              setPref(current.key);
+            }}
+            title="打开看板时先显示这一页（只记在这台设备上）"
+          >
+            <Star className={cn('size-4', pref === current.key && 'fill-yuzu')} />
+            {pref === current.key ? '我的默认页' : '设为默认页'}
+          </button>
+        </div>
+      )}
+      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-[1080px] space-y-5 px-5 py-6 md:px-7" data-testid="dashboard">
+          {current.key === 'overview' ? <OverviewTab /> : current.key === 'members' ? <MembersTab /> : <TodayTab />}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** 今日：在店、营业额与收款、近 7 个营业日、分时、部门、在店最久、当班中（口径与日结一致） */
+function TodayTab() {
+  const session = useSession();
   const q = useQuery({ queryKey: ['dashboard'], queryFn: () => api.get<DashboardData>('/api/dashboard'), refetchInterval: 60_000 });
+  const duty = useQuery({ queryKey: ['dashboard', 'duty'], queryFn: () => api.get<DutyExtras>('/api/reports/duty'), refetchInterval: 60_000 });
   const d = q.data;
   return (
     <>
-      <PageHeader title="经营看板" subtitle={`营业日 ${session.today} · 每分钟刷新`} />
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[1080px] space-y-5 px-5 py-6 md:px-7" data-testid="dashboard">
           {q.isPending ? (
             <Skeleton className="h-64" />
           ) : q.error ? (
@@ -51,7 +131,7 @@ export function DashboardPage() {
                   </Kpi>
                 </div>
 
-                <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
                   <Card className="p-5">
                     <SectionTitle>近 {d.days.length} 个营业日营业额</SectionTitle>
                     <Bars days={d.days} />
@@ -83,6 +163,8 @@ export function DashboardPage() {
                   </Card>
                 </div>
 
+                {duty.data && <DutyCards duty={duty.data} startHour={session.rules.businessDayStartHour} />}
+
                 <Card className="p-5">
                   <SectionTitle>
                     <span className="flex items-center gap-2">
@@ -104,8 +186,63 @@ export function DashboardPage() {
               </>
             )
           )}
-        </div>
+    </>
+  );
+}
+
+/** 值班数据：分时到店与结账、今日部门构成、在店最久的客人 */
+function DutyCards({ duty, startHour }: { duty: DutyExtras; startHour: number }) {
+  const hh = (h: number) => String(h).padStart(2, '0');
+  const now = Date.now();
+  return (
+    <>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card className="p-5" data-testid="dashboard-hourly">
+          <SectionTitle aside={<span className="text-[12px] text-ink-3">从 {hh(startHour)}:00 营业日切换起</span>}>今日分时</SectionTitle>
+          <p className="mt-2 text-[12.5px] font-semibold text-ink-3">到店（人）</p>
+          <Columns
+            label="今日各小时到店人数"
+            height="h-20"
+            format={String}
+            items={duty.hourly.map((h) => ({ key: `a${h.hour}`, label: hh(h.hour), value: h.arrivals, title: `${hh(h.hour)}:00 起到店 ${h.arrivals} 位` }))}
+          />
+          <p className="mt-3 text-[12.5px] font-semibold text-ink-3">结账（张）</p>
+          <Columns
+            label="今日各小时结账张数"
+            height="h-20"
+            format={String}
+            items={duty.hourly.map((h) => ({ key: `c${h.hour}`, label: hh(h.hour), value: h.checkouts, title: `${hh(h.hour)}:00 起结账 ${h.checkouts} 张` }))}
+          />
+        </Card>
+        <Card className="p-5">
+          <SectionTitle aside={<span className="text-[12px] text-ink-3">结账明细，反结账冲回</span>}>今日部门构成</SectionTitle>
+          <HBars testId="dashboard-departments" format={yuan} empty="今天还没有结账" rows={duty.departments.map((x) => ({ key: x.category, label: x.category, value: x.amount, note: `${x.quantity} 项` }))} />
+        </Card>
       </div>
+      {duty.longStays.length > 0 && (
+        <Card className="p-5" data-testid="dashboard-long-stays">
+          <SectionTitle>
+            <span className="flex items-center gap-2">
+              <Clock3 className="size-4 text-pine" /> 在店最久
+            </span>
+          </SectionTitle>
+          <ul className="mt-2 grid grid-cols-1 gap-x-6 text-[13px] sm:grid-cols-2">
+            {duty.longStays.map((v) => {
+              const minutes = Math.max(0, Math.round((now - new Date(v.checkedInAt).getTime()) / 60_000));
+              return (
+                <li key={v.visitId} className="flex items-center gap-2 border-b border-line/60 py-1.5">
+                  <span className="num w-14 font-bold text-ink">{v.tagCode}</span>
+                  <span className="min-w-0 flex-1 truncate text-ink-2">{v.guest}</span>
+                  <span className={cn('num text-[12px]', minutes >= 12 * 60 ? 'font-bold text-clay' : 'text-ink-3')}>
+                    {formatTime(v.checkedInAt)} 入场 · {Math.floor(minutes / 60)} 时 {minutes % 60} 分
+                  </span>
+                  <Money cents={v.amountCents} className="w-20 text-right font-semibold" />
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      )}
     </>
   );
 }

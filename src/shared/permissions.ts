@@ -1,12 +1,13 @@
-// 岗位与职责权限（模拟规则，待店主确认）。
-// 所有接口与页面都从这里判断权限，确认后只需修改此文件。
+// 岗位与职责权限（默认规则，待店主确认）。
+// 所有接口与页面都从这里判断权限。
 //
 // 岗位决定会员业务权限；库存与采购权限来自可叠加的「职责」，一人可兼任多项。
 // 增加库存职责不会带来会员钱包、充值撤销或全店财务查看权限。
-// 「值班经理」「店总」为 2026-10-27 店主答复新增的内置岗位（#29），默认权限待确认；
-// Batch 4 改为后台可配置的「岗位 × 权限」矩阵。
+// 「值班经理」「店总」为 2026-10-27 店主答复新增的内置岗位（#29）；「客户经理」为 v0.6.0 新增（储值会员的开发与维护），默认权限待确认。
+// v0.6.0 起店主可以在管理后台按岗位增减权限（存为相对默认的增减，settings.role_permissions）：
+// 店主一栏固定拥有全部权限；LOCKED_PERMISSIONS 只属于店主，不能授给其他岗位；库存职责的权限不在后台调整。
 
-export const ROLES = ['owner', 'store_manager', 'duty_manager', 'clerk', 'backoffice'] as const;
+export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice'] as const;
 export type Role = (typeof ROLES)[number];
 
 export const DUTIES = ['stock', 'purchase', 'payable', 'approve'] as const;
@@ -15,6 +16,8 @@ export type Duty = (typeof DUTIES)[number];
 export interface PermissionSubject {
   role: Role;
   duties?: readonly Duty[];
+  /** 已按后台的岗位权限算好的权限（登录会话、授权人都带）；没有时按默认规则判断 */
+  permissions?: readonly Permission[];
 }
 
 interface Rule {
@@ -24,9 +27,9 @@ interface Rule {
 
 export const PERMISSIONS = {
   // ── 会员与储值 ──
-  'member.read': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
-  'member.write': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
-  'recharge.create': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
+  'member.read': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk'] },
+  'member.write': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk'] },
+  'recharge.create': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk'] },
   /** 不按套餐、手动填写赠金 */
   'recharge.customBonus': { roles: ['owner', 'store_manager'] },
   'consume.create': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
@@ -34,7 +37,7 @@ export const PERMISSIONS = {
   'consume.customAmount': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   'consume.reverse': { roles: ['owner', 'store_manager', 'duty_manager'] },
   /** 当前营业日的流水与日结汇总 */
-  'ledger.readToday': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
+  'ledger.readToday': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk'] },
   /** 历史营业日的流水与日结 */
   'ledger.readHistory': { roles: ['owner', 'store_manager', 'duty_manager'] },
   'ledger.export': { roles: ['owner', 'store_manager', 'duty_manager'] },
@@ -86,18 +89,66 @@ export const PERMISSIONS = {
   'catalog.manage': { roles: ['owner', 'store_manager'] },
   'settings.manage': { roles: ['owner'] },
   'audit.read': { roles: ['owner', 'store_manager'] },
+  // ── 数据看板（v0.6.0；当日看板仍按「查看当日流水与日结」）──
+  /** 经营总览：任选时段的营业额、客流、客单价、收款与部门构成、环比（总经理看） */
+  'report.executive': { roles: ['owner', 'store_manager'] },
+  /** 会员总览：储值余额、新增与渠道、活跃与沉睡、等级分布、赠金到期（客户经理看） */
+  'report.members': { roles: ['owner', 'store_manager', 'account_manager'] },
 } as const satisfies Record<string, Rule>;
 
 export type Permission = keyof typeof PERMISSIONS;
+export const ALL_PERMISSIONS = Object.keys(PERMISSIONS) as Permission[];
+
+/** 只属于店主、不能在后台授给其他岗位的权限：管理员工账号、修改经营规则（含岗位权限本身）、导入期初余额 */
+export const LOCKED_PERMISSIONS: readonly Permission[] = ['staff.manage', 'settings.manage', 'wallet.opening'];
+
+/** 可以在后台调整权限的岗位（店主固定拥有全部权限） */
+export const EDITABLE_ROLES = ROLES.filter((r): r is Exclude<Role, 'owner'> => r !== 'owner');
+export type EditableRole = (typeof EDITABLE_ROLES)[number];
+
+/** 后台对岗位权限的调整：相对默认规则增加、去掉的权限（以后新增的权限仍按默认，不会被旧的调整挡住） */
+export type RoleOverrides = Partial<Record<EditableRole, { add: Permission[]; remove: Permission[] }>>;
+
+/** 默认规则下岗位本身（不含职责）是否有这项权限 */
+export function roleDefault(role: Role, permission: Permission): boolean {
+  return (PERMISSIONS[permission] as Rule).roles.includes(role);
+}
+
+/** 按后台调整后，岗位本身（不含职责）是否有这项权限 */
+export function roleHas(role: Role, permission: Permission, overrides?: RoleOverrides | null): boolean {
+  if (role === 'owner') return true;
+  if (LOCKED_PERMISSIONS.includes(permission)) return false;
+  const o = overrides?.[role];
+  if (o?.remove.includes(permission)) return false;
+  if (o?.add.includes(permission)) return true;
+  return roleDefault(role, permission);
+}
+
+/** 岗位权限（按后台调整）与职责权限（固定）的并集 */
+export function permissionsOf(subject: PermissionSubject, overrides?: RoleOverrides | null): Permission[] {
+  return ALL_PERMISSIONS.filter(
+    (p) => roleHas(subject.role, p, overrides) || !!(PERMISSIONS[p] as Rule).duties?.some((d) => subject.duties?.includes(d)),
+  );
+}
 
 export function can(subject: PermissionSubject, permission: Permission): boolean {
+  if (subject.permissions) return subject.permissions.includes(permission);
   const rule = PERMISSIONS[permission] as Rule;
   if (rule.roles.includes(subject.role)) return true;
   return !!rule.duties?.some((d) => subject.duties?.includes(d));
 }
 
-export function permissionsOf(subject: PermissionSubject): Permission[] {
-  return (Object.keys(PERMISSIONS) as Permission[]).filter((p) => can(subject, p));
+/** 把后台提交的「各岗位应有的权限」换算成相对默认的增减；店主专属的权限不能授出 */
+export function overridesFrom(target: Partial<Record<EditableRole, readonly Permission[]>>): RoleOverrides {
+  const out: RoleOverrides = {};
+  for (const role of EDITABLE_ROLES) {
+    const want = target[role];
+    if (!want) continue;
+    const add = ALL_PERMISSIONS.filter((p) => want.includes(p) && !roleDefault(role, p) && !LOCKED_PERMISSIONS.includes(p));
+    const remove = ALL_PERMISSIONS.filter((p) => !want.includes(p) && roleDefault(role, p));
+    if (add.length || remove.length) out[role] = { add, remove };
+  }
+  return out;
 }
 
 export const PERMISSION_LABELS: Record<Permission, string> = {
@@ -136,6 +187,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'catalog.manage': '管理充值套餐与消费项目',
   'settings.manage': '修改经营规则设置',
   'audit.read': '查看操作审计',
+  'report.executive': '看经营总览（任选时段、环比）',
+  'report.members': '看会员总览（储值、新增、活跃、等级）',
 };
 
 export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
@@ -152,5 +205,6 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
     items: ['inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'supplierReturn.create', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.export'],
   },
   { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount'] },
-  { title: '管理', items: ['staff.manage', 'catalog.manage', 'settings.manage', 'audit.read'] },
+  { title: '数据看板', items: ['report.executive', 'report.members'] },
+  { title: '管理后台', items: ['staff.manage', 'catalog.manage', 'settings.manage', 'audit.read'] },
 ];

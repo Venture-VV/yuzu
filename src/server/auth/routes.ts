@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf } from '@shared/business-date';
 import { permissionsOf, type Duty, type Role } from '@shared/permissions';
+import { loadRoleOverrides } from './role-permissions';
 import type { SessionInfo } from '@shared/types';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
@@ -28,8 +29,8 @@ export async function buildSessionInfo({ sql, config }: Deps, actor: Actor): Pro
   const [synthetic] = await sql<{ exists: boolean }[]>`SELECT (EXISTS (SELECT 1 FROM members WHERE is_synthetic) OR EXISTS (SELECT 1 FROM materials WHERE is_synthetic) OR EXISTS (SELECT 1 FROM hand_tags WHERE is_synthetic)) AS exists`;
   const { storeName, ...rules } = settings;
   return {
-    staff: actor,
-    permissions: permissionsOf(actor),
+    staff: { id: actor.id, username: actor.username, displayName: actor.displayName, role: actor.role, duties: actor.duties, mustChangePassword: actor.mustChangePassword },
+    permissions: actor.permissions ?? permissionsOf(actor, await loadRoleOverrides(sql)),
     storeName,
     rules,
     today: businessDateOf(new Date(), config.timezone, settings.businessDayStartHour),

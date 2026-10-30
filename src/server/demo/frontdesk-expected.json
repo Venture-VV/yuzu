@@ -51,6 +51,7 @@
     "lostTagFeeCents": 20000,
     "vipLevelBasis": "recharge",
     "vipLevelThresholds": [0, 5000000, 10000000, 20000000, 30000000],
+    "vipLevelNames": ["普通会员", "银卡会员", "金卡会员", "铂金会员", "钻石会员"],
     "vipOverrideEnabled": false,
     "overtimeGraceMinutes": 15
   },

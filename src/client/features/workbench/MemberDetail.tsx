@@ -1,15 +1,17 @@
-import { ArrowLeft, Bath, CirclePlus, PencilLine, StickyNote } from 'lucide-react';
+import { ArrowLeft, Award, Bath, CirclePlus, PencilLine, StickyNote } from 'lucide-react';
 import { formatPhone } from '@shared/labels';
 import { lastUsableDate } from '@shared/business-date';
 import { displayFieldValue } from '@shared/member-fields';
+import { channelLabel } from '@shared/members';
 import type { MemberDetail as Member } from '@shared/types';
 import { useActivity } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
-import { avatarTone, cn, relativeTime } from '../../lib/utils';
+import { avatarTone, cn, formatDate, formatTime, relativeTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
 import { Badge, Button, Card, IconButton, SectionTitle, Skeleton } from '../../components/ui';
 import { ActivityRow } from './ActivityList';
+import { BonusLotsCard, MemberLevelCard } from './MemberExtras';
 
 export function MemberDetail({
   member,
@@ -35,6 +37,7 @@ export function MemberDetail({
   // 有到期时间的赠金（先到期的在前）；长期有效的不提示
   const expiring = (member.bonusLots ?? []).filter((l) => l.expiresAt !== null);
   // 自定义字段：只显示启用且已填写的
+  const channel = channelLabel(session.rules.memberChannels ?? [], member.channel);
   const fieldRows = session.rules.memberFields
     .filter((d) => d.active)
     .map((d) => ({ key: d.key, label: d.label, value: displayFieldValue(member.customFields?.[d.key]) }))
@@ -56,18 +59,26 @@ export function MemberDetail({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-[22px] leading-tight font-bold tracking-tight break-all text-ink">{member.name}</h2>
+              {member.level && member.level.level > 0 && (
+                <Badge tone="yuzu" icon={<Award className="size-3.5" />}>
+                  {member.level.name}
+                </Badge>
+              )}
               {member.status === 'frozen' && <Badge tone="clay">已停用</Badge>}
               {member.isSynthetic && <Badge tone="ember">合成数据</Badge>}
             </div>
             <p className="num mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[13px] text-ink-2">
               <span className="font-semibold">{formatPhone(member.phone)}</span>
-              <span className="text-ink-3">{member.memberNo}</span>
+              <span className="text-ink-3" data-testid="member-no">
+                会员号 <b className="text-ink-2">{member.memberNo}</b>
+              </span>
               {member.gender && <span className="text-ink-3">{member.gender === 'female' ? '女' : '男'}</span>}
               {member.birthday && <span className="text-ink-3">生日 {member.birthday.slice(5)}</span>}
             </p>
-            <p className="mt-1 text-[12.5px] text-ink-3">
-              最近 {relativeTime(member.lastActivityAt)} · 建档 {member.createdAt.slice(0, 10)}
-              {member.createdByName ? ` · ${member.createdByName}` : ''}
+            <p className="mt-1 text-[12.5px] text-ink-3" data-testid="member-registered">
+              最近 {relativeTime(member.lastActivityAt)} · 注册于 {formatDate(member.createdAt)} {formatTime(member.createdAt)}
+              {member.createdByName ? `（${member.createdByName}）` : ''}
+              {channel && ` · 渠道 ${channel}`}
             </p>
           </div>
           {can('member.write') && (
@@ -186,6 +197,14 @@ export function MemberDetail({
             )}
           </span>
         )}
+      </div>
+
+      {/* 会员详情所在的栏宽随工作台布局变化，按卡片容器宽度决定是否并排 */}
+      <div className="@container">
+        <div className="grid gap-4 @3xl:grid-cols-2">
+          <MemberLevelCard member={member} />
+          <BonusLotsCard member={member} />
+        </div>
       </div>
 
       {/* 余额记录 */}

@@ -17,7 +17,8 @@ import { LedgerPage } from './features/ledger/LedgerPage';
 import { SettlementPage } from './features/settlement/SettlementPage';
 import { ShiftPage } from './features/shift/ShiftPage';
 import { DashboardPage } from './features/dashboard/DashboardPage';
-import { AdminPage } from './features/admin/AdminPage';
+import { adminRoutes } from './features/admin/AdminPage';
+import { AdminShell } from './features/admin/AdminShell';
 import { DocFormPage } from './features/inventory/DocFormPage';
 import { InventoryPage } from './features/inventory/InventoryPage';
 import { TodoPage } from './features/inventory/TodoPage';
@@ -40,8 +41,8 @@ const queryClient = new QueryClient({
   },
 });
 
-/** 登录守卫：未登录跳转登录页；首次登录强制修改密码。bare 用于打印页：不带导航栏 */
-function AuthGate({ bare = false }: { bare?: boolean }) {
+/** 登录守卫：未登录跳转登录页；首次登录强制修改密码。shell：app 为前台（带导航栏），admin 为管理后台，bare 用于打印页 */
+function AuthGate({ shell = 'app' }: { shell?: 'app' | 'admin' | 'bare' }) {
   const session = useSessionQuery();
   const navigate = useNavigate();
   const location = useLocation();
@@ -98,8 +99,10 @@ function AuthGate({ bare = false }: { bare?: boolean }) {
   }
   return (
     <SessionProvider value={session.data}>
-      {bare ? (
+      {shell === 'bare' ? (
         <Outlet />
+      ) : shell === 'admin' ? (
+        <AdminShell />
       ) : (
         <AppShell>
           <Outlet />
@@ -121,13 +124,14 @@ const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
   {
     path: '/print',
-    element: <AuthGate bare />,
+    element: <AuthGate shell="bare" />,
     children: [
       { path: 'checkout/:id', element: <CheckoutPrintPage /> },
       { path: 'shift/:id', element: <ShiftPrintPage /> },
       { path: 'settlement/:date', element: <SettlementPrintPage /> },
     ],
   },
+  { path: '/admin', element: <AuthGate shell="admin" />, children: adminRoutes },
   {
     element: <AuthGate />,
     children: [
@@ -136,8 +140,7 @@ const router = createBrowserRouter([
       { path: 'ledger', element: <LedgerPage /> },
       { path: 'settlement/:date?', element: <SettlementPage /> },
       { path: 'shift', element: <ShiftPage /> },
-      { path: 'dashboard', element: <DashboardPage /> },
-      { path: 'admin/:tab?', element: <AdminPage /> },
+      { path: 'dashboard/:tab?', element: <DashboardPage /> },
       { path: 'inventory/new/:type', element: <DocFormPage /> },
       { path: 'inventory/docs/:id/edit', element: <DocFormPage /> },
       { path: 'inventory/:tab?', element: <InventoryPage /> },

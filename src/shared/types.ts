@@ -7,6 +7,7 @@ import type { DeductionRule, WalletBalance } from './deduction';
 import type { InstanceKind } from './instance';
 import type { EntryType, PaymentMethod } from './labels';
 import type { MemberCustomValues, MemberFieldDef } from './member-fields';
+import type { BonusLotRow, MemberChannel, MemberLevelInfo } from './members';
 import type { Duty, Permission, Role } from './permissions';
 
 export type AppEnv = 'development' | 'trial' | 'production' | 'test';
@@ -43,6 +44,8 @@ export interface StoreRules {
   memberFields: MemberFieldDef[];
   /** 自定义赠金（不按套餐）的有效期天数（#2）；null 为长期有效。套餐的有效期在套餐上设置 */
   customBonusValidDays: number | null;
+  /** 会员渠道来源的可选项（v0.6.0，后台「会员与渠道」维护） */
+  memberChannels: MemberChannel[];
 }
 
 export interface SessionInfo {
@@ -80,10 +83,16 @@ export interface MemberSummary {
   lastActivityAt: string | null;
   /** 自定义字段的值，键为字段编号（见 StoreRules.memberFields） */
   customFields: MemberCustomValues;
+  /** 渠道来源的编号（见 StoreRules.memberChannels）；没登记为 null */
+  channel: string | null;
 }
 
 export interface MemberDetail extends MemberSummary {
   createdByName: string | null;
+  /** 当前等级、到下一级还差多少、升降级记录（v0.6.0） */
+  level: MemberLevelInfo;
+  /** 全部赠金批次（可用、已用完、已过期），最近的在前（v0.6.0） */
+  bonusLotHistory: BonusLotRow[];
   /** 有剩余的赠金批次，先到期的在前（expiresAt 为 null 表示长期有效） */
   bonusLots: { remaining: number; expiresAt: string | null }[];
   /** 从旧系统导入的期初（有效的那一笔） */

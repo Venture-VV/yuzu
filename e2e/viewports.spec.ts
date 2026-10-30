@@ -1,5 +1,5 @@
 // 视口冒烟（R1.6，只读）：除门店电脑 1440×900、平板 1024×768 / 820×1180 外，再看 1280×720 的小屏电脑与手机（393×727）。
-// 看板、日结在手机上也要能看（店主用手机查）；前台、交班、会员工作台只在电脑与平板上用。依赖四套演示数据，账号店主 linlan。
+// 看板、日结、管理后台在手机上也要能看（店主用手机查）；前台、交班、会员工作台只在电脑与平板上用。依赖四套演示数据，账号店主 linlan。
 // 核对：页面不横向滚动；除了有意横向滚动的区域（表格、标签栏，带 overflow-x-auto），没有横向滚动区，也没有内容超出屏幕右边。
 import { expect, test, type Page } from '@playwright/test';
 
@@ -60,6 +60,27 @@ test.describe('视口冒烟', () => {
     await expect(board).toContainText('今日净营业额');
     await expect(board).toContainText('今日收款构成');
     await expect(board).toContainText('当班中');
+    await expectFits(page);
+  });
+
+  test('看板：经营总览与会员总览（v0.6.0）', async ({ page }) => {
+    await login(page, 'linlan');
+    await page.goto('/dashboard/overview');
+    await expect(page.getByTestId('overview-net')).toBeVisible();
+    await expectFits(page);
+    await page.goto('/dashboard/members');
+    await expect(page.getByTestId('members-total')).toBeVisible();
+    await expectFits(page);
+  });
+
+  test('管理后台：后台首页与规则总表（v0.6.0，手机上分区横排）', async ({ page }) => {
+    await login(page, 'linlan');
+    await page.goto('/admin');
+    await expect(page.getByTestId('admin-home')).toBeVisible();
+    await expect(page.getByTestId('admin-instance')).toBeVisible();
+    await expectFits(page);
+    await page.goto('/admin/settings');
+    await expect(page.getByTestId('rule-catalog')).toBeVisible();
     await expectFits(page);
   });
 

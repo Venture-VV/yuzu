@@ -1,57 +1,71 @@
-import { NavLink, Navigate, useParams } from 'react-router';
-import { ArchiveRestore, ClipboardList, Gift, Scale, Tags, UsersRound } from 'lucide-react';
-import { useCan } from '../../lib/session';
-import { cn } from '../../lib/utils';
-import { PageHeader } from '../../components/AppShell';
+// 管理后台的路由（v0.6.0）：/admin 下各分区；旧的「管理」页的 /admin/<分区> 地址不变。
+
+import type { RouteObject } from 'react-router';
+import { Navigate } from 'react-router';
+import { AdminHome } from './AdminHome';
+import { AdminPage } from './AdminShell';
 import { AuditTab } from './AuditTab';
 import { CatalogTab } from './CatalogTab';
+import { MembersSection } from './MembersSection';
 import { OpeningTab } from './OpeningTab';
+import { PermissionsSection } from './PermissionsSection';
+import { RuleCatalog } from './RuleCatalog';
 import { RulesTab } from './RulesTab';
 import { StaffTab } from './StaffTab';
 import { TagsTab } from './TagsTab';
 
-const TABS = [
-  { key: 'staff', label: '员工', icon: UsersRound },
-  { key: 'catalog', label: '套餐与项目', icon: Gift },
-  { key: 'tags', label: '手牌', icon: Tags },
-  { key: 'rules', label: '经营规则', icon: Scale },
-  { key: 'opening', label: '期初导入', icon: ArchiveRestore },
-  { key: 'audit', label: '操作审计', icon: ClipboardList },
-] as const;
-
-export function AdminPage() {
-  const can = useCan();
-  const { tab = 'staff' } = useParams();
-  if (!can('staff.manage')) return <Navigate to="/" replace />;
-  return (
-    <>
-      <PageHeader title="管理" subtitle="员工、套餐项目、手牌池、经营规则与期初导入（仅店主）" />
-      <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-line px-5 md:px-7">
-        {TABS.map(({ key, label, icon: Icon }) => (
-          <NavLink
-            key={key}
-            to={`/admin/${key}`}
-            className={cn(
-              'relative flex h-12 items-center gap-2 px-3.5 text-[14px] font-semibold whitespace-nowrap transition-colors',
-              tab === key ? 'text-ink' : 'text-ink-3 hover:text-ink',
-            )}
-          >
-            <Icon className="size-4" />
-            {label}
-            {tab === key && <span className="absolute inset-x-2 bottom-0 h-[3px] rounded-t-full bg-pine" />}
-          </NavLink>
-        ))}
-      </div>
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[1080px] px-5 py-6 md:px-7">
-          {tab === 'staff' && <StaffTab />}
-          {tab === 'catalog' && <CatalogTab />}
-          {tab === 'tags' && <TagsTab />}
-          {tab === 'rules' && <RulesTab />}
-          {tab === 'opening' && <OpeningTab />}
-          {tab === 'audit' && <AuditTab />}
-        </div>
-      </div>
-    </>
-  );
-}
+export const adminRoutes: RouteObject[] = [
+  { index: true, element: <AdminHome /> },
+  { path: 'settings', element: <RuleCatalog /> },
+  {
+    path: 'rules',
+    element: (
+      <AdminPage section="rules" description="营业日与营业时间、扣款顺序、单笔上限、撤销时限、收款前开班、库存与采购。修改只影响之后的业务。">
+        <RulesTab />
+      </AdminPage>
+    ),
+  },
+  { path: 'members', element: <MembersSection /> },
+  {
+    path: 'catalog',
+    element: (
+      <AdminPage section="catalog" description="充值套餐、消费项目（多档价格）与价目表导入、门票票种与票价。">
+        <CatalogTab />
+      </AdminPage>
+    ),
+  },
+  {
+    path: 'tags',
+    element: (
+      <AdminPage section="tags" description="手牌池（分区、VIP 柜、锁定与停用）、柜号清单导入、前台规则。">
+        <TagsTab />
+      </AdminPage>
+    ),
+  },
+  {
+    path: 'staff',
+    element: (
+      <AdminPage section="staff" description="员工账号、岗位与库存职责、重置密码；岗位能做什么见「岗位权限」。">
+        <StaffTab />
+      </AdminPage>
+    ),
+  },
+  { path: 'permissions', element: <PermissionsSection /> },
+  {
+    path: 'opening',
+    element: (
+      <AdminPage section="opening" description="旧系统（EBC）会员余额导入为期初，与控制总数比对；导入错误时整批作废。">
+        <OpeningTab />
+      </AdminPage>
+    ),
+  },
+  {
+    path: 'audit',
+    element: (
+      <AdminPage section="audit" wide description="登录、授权、规则与价目变动、会员与收银操作的记录。">
+        <AuditTab />
+      </AdminPage>
+    ),
+  },
+  { path: '*', element: <Navigate to="/admin" replace /> },
+];

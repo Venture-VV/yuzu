@@ -35,7 +35,8 @@ test.describe('会员自定义字段', () => {
         const next = existing.map((f) => (LABELS.includes(f.label) ? { ...f, active: true } : f));
         expect((await page.request.put('/api/settings', { data: { memberFields: next } })).status()).toBe(200);
       } else {
-        await page.goto('/admin/rules');
+        // v0.6.0 起会员字段在管理后台「会员与渠道」
+        await page.goto('/admin/members');
         const card = page.getByTestId('member-fields-card');
         await card.getByRole('button', { name: '新增字段' }).click();
         let dialog = page.getByRole('dialog').filter({ hasText: '新增会员字段' });

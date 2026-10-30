@@ -1,12 +1,11 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Check, Minus } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { describeBusinessHours, HHMM } from '@shared/business-date';
 import { DEDUCTION_RULES, splitDeduction, type DeductionRule } from '@shared/deduction';
 import { APPROVAL_RULE_LABELS, type ApprovalRules, type InventorySettings } from '@shared/inventory';
-import { DEDUCTION_RULE_LABELS, describeHours, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
+import { DEDUCTION_RULE_LABELS, describeHours } from '@shared/labels';
 import { centsToInput, parseYuan } from '@shared/money';
-import { DUTIES, PERMISSION_GROUPS, PERMISSION_LABELS, PERMISSIONS, ROLES, type Permission } from '@shared/permissions';
 import { api, errorMessage } from '../../lib/api';
 import { qk, useSettings } from '../../lib/queries';
 import { cn } from '../../lib/utils';
@@ -14,7 +13,6 @@ import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Button, Card, Field, Input, MoneyInput, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton } from '../../components/ui';
 import { useInvSettings } from '../inventory/queries';
-import { MemberFieldsCard } from './MemberFieldsCard';
 
 const EXAMPLE = { balance: { principal: 50000, bonus: 5000 }, amount: 11000 };
 /** 撤销时限的常用选项（小时）；null 为不限 */
@@ -277,11 +275,9 @@ export function RulesTab() {
         </Button>
       </div>
 
-      <MemberFieldsCard />
-
       <InventoryRules />
 
-      <PermissionMatrix />
+      <Notice tone="info" title="会员资料字段、渠道来源与会员等级在「会员与渠道」设置；各岗位的权限在「岗位权限」设置" />
     </div>
   );
 }
@@ -353,68 +349,6 @@ function InventoryRules() {
         <Button variant="primary" loading={saving} onClick={save}>
           保存库存规则
         </Button>
-      </div>
-    </Card>
-  );
-}
-
-/** 岗位与职责权限表：岗位决定会员业务，职责叠加库存与采购权限 */
-function PermissionMatrix() {
-  const has = (p: Permission, col: { role?: (typeof ROLES)[number]; duty?: (typeof DUTIES)[number] }) => {
-    const rule = PERMISSIONS[p] as { roles: readonly string[]; duties?: readonly string[] };
-    return col.role ? rule.roles.includes(col.role) : !!rule.duties?.includes(col.duty!);
-  };
-  const columns = [
-    ...ROLES.map((r) => ({ key: r, label: ROLE_LABELS[r], role: r })),
-    ...DUTIES.map((d) => ({ key: d, label: DUTY_LABELS[d].title, duty: d })),
-  ];
-  return (
-    <Card className="p-5">
-      <SectionTitle aside={<PendingBadge />}>岗位与职责权限</SectionTitle>
-      <p className="mt-1 text-[12.5px] text-ink-3">
-        一个账号 = 一个岗位 + 若干库存职责，权限取并集；服务端逐项校验。确认后由维护人员在代码中调整（src/shared/permissions.ts）。
-      </p>
-      <div className="mt-3 overflow-x-auto rounded-lg border border-line">
-        <table className="w-full min-w-[760px] text-[13px]">
-          <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
-            <tr>
-              <th className="px-4 py-2 text-left">操作</th>
-              {columns.map((c, i) => (
-                <th key={c.key} className={cn('w-[76px] px-1.5 py-2 text-center leading-tight', i === ROLES.length && 'border-l border-line')}>
-                  {c.label}
-                </th>
-              ))}
-            </tr>
-            <tr className="text-[11px] font-semibold text-ink-4">
-              <th />
-              <th colSpan={ROLES.length} className="pb-1.5">
-                岗位
-              </th>
-              <th colSpan={DUTIES.length} className="border-l border-line pb-1.5">
-                库存与采购职责（可叠加）
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line/70">
-            {PERMISSION_GROUPS.map((g) => [
-              <tr key={g.title} className="bg-paper/60">
-                <td colSpan={columns.length + 1} className="px-4 py-1.5 text-[12px] font-bold text-ink-2">
-                  {g.title}
-                </td>
-              </tr>,
-              ...g.items.map((p) => (
-                <tr key={p}>
-                  <td className="px-4 py-2">{PERMISSION_LABELS[p]}</td>
-                  {columns.map((c, i) => (
-                    <td key={c.key} className={cn('px-1.5 py-2 text-center', i === ROLES.length && 'border-l border-line')}>
-                      {has(p, c) ? <Check className="mx-auto size-4 text-pine" strokeWidth={3} /> : <Minus className="mx-auto size-4 text-ink-4" />}
-                    </td>
-                  ))}
-                </tr>
-              )),
-            ])}
-          </tbody>
-        </table>
       </div>
     </Card>
   );
