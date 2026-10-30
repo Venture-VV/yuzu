@@ -41,7 +41,9 @@ async function periodKpis(db: Db, from: string, to: string, c: Clock): Promise<P
        FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
        WHERE p.method = 'discount' AND (c.business_date BETWEEN ${from} AND ${to} OR c.void_business_date BETWEEN ${from} AND ${to})) AS discount,
       -- 结账客人、结账单、储值消费与日结同一营业口径（v0.7.1）：时段内结的计正数、时段内反结账 / 撤销的计负数
-      (SELECT count(*) FILTER (WHERE c.business_date BETWEEN ${from} AND ${to}) - count(*) FILTER (WHERE c.void_business_date BETWEEN ${from} AND ${to})
+      -- 结账客人按人数：手牌每位 1 人，桌台按开台人数（餐饮第二步）
+      (SELECT coalesce(sum(cb.guests) FILTER (WHERE c.business_date BETWEEN ${from} AND ${to}), 0)
+              - coalesce(sum(cb.guests) FILTER (WHERE c.void_business_date BETWEEN ${from} AND ${to}), 0)
        FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id
        WHERE c.business_date BETWEEN ${from} AND ${to} OR c.void_business_date BETWEEN ${from} AND ${to})::int AS guests,
       (SELECT count(*) FILTER (WHERE business_date BETWEEN ${from} AND ${to}) - count(*) FILTER (WHERE void_business_date BETWEEN ${from} AND ${to})
@@ -106,10 +108,10 @@ export async function executiveReport(db: Db, from: string, to: string, c: Clock
       WHERE p.method = 'discount' AND c.void_business_date BETWEEN ${from} AND ${to} GROUP BY 1
     ),
     g AS (
-      SELECT c.business_date AS date, count(*) AS n FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id
+      SELECT c.business_date AS date, sum(cb.guests) AS n FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id
       WHERE c.business_date BETWEEN ${from} AND ${to} GROUP BY 1
       UNION ALL
-      SELECT c.void_business_date, -count(*) FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id
+      SELECT c.void_business_date, -sum(cb.guests) FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id
       WHERE c.void_business_date BETWEEN ${from} AND ${to} GROUP BY 1
     ),
     r AS (SELECT business_date AS date, sum(paid_amount) AS amount FROM recharges WHERE business_date BETWEEN ${from} AND ${to} GROUP BY 1)
@@ -134,7 +136,7 @@ export async function executiveReport(db: Db, from: string, to: string, c: Clock
            (coalesce(sum(cb.ticket_amount) FILTER (WHERE ${inRange('c.business_date')}), 0)
              - coalesce(sum(cb.ticket_amount) FILTER (WHERE ${inRange('c.void_business_date')}), 0))::bigint AS amount
     FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id
-    WHERE ${inRange('c.business_date')} OR ${inRange('c.void_business_date')}
+    WHERE (${inRange('c.business_date')} OR ${inRange('c.void_business_date')}) AND cb.ticket_name IS NOT NULL
     GROUP BY cb.ticket_name
     HAVING count(*) FILTER (WHERE ${inRange('c.business_date')}) <> count(*) FILTER (WHERE ${inRange('c.void_business_date')})
         OR coalesce(sum(cb.ticket_amount) FILTER (WHERE ${inRange('c.business_date')}), 0) <> coalesce(sum(cb.ticket_amount) FILTER (WHERE ${inRange('c.void_business_date')}), 0)

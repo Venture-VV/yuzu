@@ -4,11 +4,12 @@ import { COUPON_PLATFORMS } from '@shared/checkout';
 import { ISO_DATE } from '@shared/business-date';
 import { MAX_VIP_LEVEL, VIP_LEVEL_BASES } from '@shared/frontdesk';
 import { MAX_LEVEL_NAME_LENGTH } from '@shared/members';
+import { can } from '@shared/permissions';
 import { guard } from '../../auth/guard';
 import { readSnapshot } from '../../db';
 import { writeAudit } from '../../lib/audit';
 import type { Deps, OpContext } from '../../lib/context';
-import { notFound } from '../../lib/errors';
+import { forbidden, notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { checkBackfillAt } from './backfill';
 import { postCharges, voidLine, type PostInputData } from './bills';
@@ -17,7 +18,7 @@ import { refundShiftOptions } from '../shifts';
 import { checkout, findCoupon, getCheckout, listCheckouts, previewCheckout, voidCheckout, type CheckoutInputData } from './checkout';
 import { listTicketTypes, saveTicketType, setVisitTicket, type TicketTypeInputData } from './tickets';
 import { frontdeskChecks } from './checks';
-import { businessDate, FRONTDESK_OPS, loadFrontdeskRules } from './common';
+import { businessDate, FRONTDESK_OP_PERMISSIONS, FRONTDESK_OPS, loadFrontdeskRules } from './common';
 import { batchCreate, importHandTags, listTags, lockHandTag, unlockHandTag, updateHandTag, type ImportInputData } from './tags';
 import { memberLevels } from './vip';
 import {
@@ -89,9 +90,11 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
     return lookupFrontdeskOp(sql, key, type);
   });
 
-  app.post('/api/frontdesk/ops/:key/abandon', { preHandler: guard('frontdesk.operate') }, async (req) => {
+  // 作废要有原业务本身的权限（与原接口一致），例如没有结账收款权限的人不能作废别人正在进行的结账
+  app.post('/api/frontdesk/ops/:key/abandon', { preHandler: guard() }, async (req) => {
     const { key } = parse(OpKey, req.params);
     const { type } = parse(z.object({ type: z.enum(FRONTDESK_OPS, '缺少原操作的业务类型') }), req.body ?? {});
+    if (!FRONTDESK_OP_PERMISSIONS[type].every((p) => can(req.actor, p))) throw forbidden('作废这笔要有原业务的权限，请由有权限的员工处理');
     return abandonFrontdeskOp(deps, key, type, ctxOf(req));
   });
 

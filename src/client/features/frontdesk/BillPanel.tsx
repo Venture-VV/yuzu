@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   Banknote,
   Ticket,
+  UtensilsCrossed,
 } from 'lucide-react';
 import {
   BILL_SOURCE_LABELS,
@@ -31,6 +32,7 @@ import {
   type VisitDetail,
 } from '@shared/frontdesk';
 import { backfillText } from '@shared/backfill';
+import { KITCHEN_STATUS_LABELS } from '@shared/dining';
 import { technicianText } from '@shared/technicians';
 import { maskPhone } from '@shared/labels';
 import { api, errorMessage } from '../../lib/api';
@@ -476,6 +478,13 @@ function LineRow({ line, canVoid, allowed, selfMinutes, onVoid }: { line: BillLi
           <p className="flex items-center gap-1 text-[12px] font-semibold text-pine" data-testid={`line-${line.id}-technician`}>
             <HandHeart className="size-3.5" />
             {technicianText(line.technician)}
+          </p>
+        )}
+        {line.kitchen && (
+          <p className="flex items-center gap-1 text-[12px] font-semibold text-yuzu-deep" data-testid={`line-${line.id}-kitchen`}>
+            <UtensilsCrossed className="size-3.5" />
+            {KITCHEN_STATUS_LABELS[line.kitchen.status]}
+            {line.kitchen.note && <span className="min-w-0 truncate text-ink-3">· {line.kitchen.note}</span>}
           </p>
         )}
         <p className="num text-[11.5px] text-ink-4">

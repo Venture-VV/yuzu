@@ -51,7 +51,18 @@ export type AuditAction =
   | 'hand_tag_unlocked'
   | 'hand_tag_updated'
   | 'technician_saved'
-  | 'items_technician_updated';
+  | 'items_technician_updated'
+  // 餐饮（S5 第一步）：出品档口、菜品的出品档口、估清
+  | 'kitchen_station_saved'
+  | 'items_station_updated'
+  | 'dish_limit_set'
+  | 'dining_table_saved'
+  | 'table_open'
+  | 'table_update'
+  | 'table_move'
+  | 'table_cancel'
+  | 'table_post'
+  | 'table_void';
 
 export interface AuditEntry {
   staffId: number | null;

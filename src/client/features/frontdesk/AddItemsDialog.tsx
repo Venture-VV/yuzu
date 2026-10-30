@@ -5,6 +5,7 @@ import { ZONE_LABELS, type VisitDetail } from '@shared/frontdesk';
 import { parseYuan } from '@shared/money';
 import { technicianText, type CallType } from '@shared/technicians';
 import type { ServiceItem } from '@shared/types';
+import { api } from '../../lib/api';
 import { useCatalog } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
@@ -17,6 +18,8 @@ import { BackfillNotice, backfillBody, backfillSummary, useBackfill } from './ba
 import { PendingPanel, useFrontdeskOp } from './pending';
 import { useFrontdeskTechnicians } from './queries';
 import { TechnicianPicker } from './TechnicianPicker';
+
+const isVisitDetail = (r: unknown): r is VisitDetail => !!r && typeof r === 'object' && 'tag' in r && 'lines' in r;
 
 /** 购物车的键：「项目:价格档」，选了技师时再加「:技师:点钟 / 轮钟」（同一项目不同技师分开计数） */
 const lineKey = (itemId: number, tier: PriceTier, tech: { id: number; callType: CallType } | null) =>
@@ -176,7 +179,14 @@ export function AddItemsDialog({
         </>
       }
     >
-      <PendingPanel op={op} onResolved={onDone} />
+      <PendingPanel
+        op={op}
+        onResolved={(r) => {
+          // 待确认的那笔可能是钟房派钟、加钟或点单页下单发出的：按原内容重新提交时返回的不是账单，重新取一次
+          if (isVisitDetail(r)) onDone(r);
+          else void api.get<VisitDetail>(`/api/frontdesk/visits/${visit.id}`).then(onDone, () => onClose());
+        }}
+      />
       <BackfillNotice action="挂账" />
       <div className={cn('grid gap-5 md:grid-cols-[minmax(0,1fr)_280px]', backfill.state.active && 'mt-4')}>
         <div className="min-w-0">

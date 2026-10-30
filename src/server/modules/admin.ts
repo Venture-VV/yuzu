@@ -12,6 +12,7 @@ import { DEDUCTION_RULE_LABELS, describeHours, ROLE_LABELS } from '@shared/label
 import { levelName } from '@shared/members';
 import { CALL_TYPE_LABELS, DEFAULT_TECHNICIAN_RULES } from '@shared/technicians';
 import { AFTER_DESIGNATED_LABELS, AFTER_ROTATION_LABELS, DEFAULT_CLOCKROOM_RULES, DEFAULT_COMMISSION_RULES, describeCommissionBase } from '@shared/clockroom';
+import { DEFAULT_DINING_RULES } from '@shared/dining';
 import { formatYuan } from '@shared/money';
 import {
   ALL_PERMISSIONS,
@@ -40,6 +41,7 @@ import { DEFAULT_SETTINGS, loadSettings, SETTINGS_KEYS } from './settings';
 import { loadTechnicianRules } from './technicians';
 import { loadClockroomRules } from './clockroom';
 import { commissionSettings } from './commission';
+import { loadDiningRules } from './dining';
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const onOff = (v: boolean, on: string, off: string) => (v ? on : off);
@@ -204,6 +206,12 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
     updatedAt: cs.current.effectiveAt,
     updatedBy: cs.current.createdByName,
   });
+  // ── 餐饮（S5 第一步）──
+  const dn = await loadDiningRules(db);
+  const dnd = DEFAULT_DINING_RULES;
+  add({ key: 'dining_rules.enabled', group: 'dining', label: '餐饮功能', value: onOff(dn.enabled, '开启（点单、厨房出品屏、估清）', '关闭（与升级前一样）'), defaultValue: '关闭（与升级前一样）', pending: false, section: 'dining', current: dn.enabled, dflt: dnd.enabled, metaKey: 'dining_rules' });
+  add({ key: 'dining_rules.trackServed', group: 'dining', label: '上菜确认', value: onOff(dn.trackServed, '出餐后服务员点「上菜」', '出餐即算上菜'), defaultValue: '出餐后服务员点「上菜」', pending: true, section: 'dining', current: dn.trackServed, dflt: dnd.trackServed, metaKey: 'dining_rules' });
+  add({ key: 'dining_rules.warnMinutes', group: 'dining', label: '出品超时提醒', value: `下单 ${dn.warnMinutes} 分钟还没出餐标红`, defaultValue: `下单 ${dnd.warnMinutes} 分钟还没出餐标红`, pending: true, section: 'dining', current: dn.warnMinutes, dflt: dnd.warnMinutes, metaKey: 'dining_rules' });
   // ── 库存与采购 ──
   add({ key: 'inventory_scope_name', group: 'inventory', label: '库存范围', value: inv.scopeName, defaultValue: '后勤总库', pending: true, section: 'rules', current: inv.scopeName, dflt: '后勤总库', metaKey: 'inventory_scope_name' });
   // 迁移 002 写入的初始口径
@@ -241,6 +249,8 @@ const CHANGE_ACTIONS = [
   'opening_voided',
   'technician_saved',
   'items_technician_updated',
+  'kitchen_station_saved',
+  'items_station_updated',
 ];
 
 const SETTING_LABELS: Record<string, string> = {
@@ -267,6 +277,7 @@ function describeChange(action: string, detail: Record<string, unknown>): string
       if (detail.key === 'technician_rules') return '修改了技师规则';
       if (detail.key === 'clockroom_rules') return '修改了钟房与轮钟规则';
       if (detail.key === 'commission_rules') return '修改了技师提成规则';
+      if (detail.key === 'dining_rules') return '修改了餐饮规则';
       const after = (detail.after ?? {}) as Record<string, unknown>;
       const keys = Object.keys(after).map((x) => SETTING_LABELS[x] ?? x);
       return keys.length ? `修改了${keys.join('、')}` : '修改了经营规则';
@@ -297,6 +308,10 @@ function describeChange(action: string, detail: Record<string, unknown>): string
       return typeof detail.summary === 'string' ? detail.summary : `保存了技师${name ? `「${name}」` : ''}`;
     case 'items_technician_updated':
       return '调整了需要技师的项目';
+    case 'kitchen_station_saved':
+      return typeof detail.summary === 'string' ? detail.summary : '保存了出品档口';
+    case 'items_station_updated':
+      return '调整了菜品的出品档口';
     default:
       return action;
   }

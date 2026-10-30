@@ -19,9 +19,11 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
             WHERE ob.status = 'open' AND l.status = 'active') AS line_sum
     FROM bills b WHERE b.status = 'open'`;
 
-  // ② 来访与账单状态一致
+  // ② 来访与账单状态一致；桌台的开台（餐饮第二步）同样与账单一致
   const statusDiff = await db<{ visitNo: string }[]>`
-    SELECT v.visit_no FROM visits v JOIN bills b ON b.id = v.bill_id WHERE v.status <> b.status`;
+    SELECT v.visit_no FROM visits v JOIN bills b ON b.id = v.bill_id WHERE v.status <> b.status
+    UNION ALL
+    SELECT s.session_no FROM table_sessions s JOIN bills b ON b.id = s.bill_id WHERE s.status <> b.status`;
 
   // ③ 在店客人所持手牌：启用、未锁定、分区一致；同一张手牌不会有两位在店客人
   const tagIssues = await db<{ code: string; issue: string }[]>`
@@ -126,6 +128,20 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
     SELECT 'member', m.name, r.visit_no FROM member_runs r JOIN members m ON m.id = r.member_id WHERE r.since < r.before_until
     LIMIT 5`;
 
+  // ⑪ 餐饮（S5）：每张出品单对应同一位客人（或同一桌）的一条餐饮明细（菜品、份数一致），明细作废的出品单已退、没作废的没退；
+  //    每条餐饮明细都有出品单（钱只在明细里，出品单只记出品状态）
+  const kitchenDiff = await db<{ ref: string }[]>`
+    SELECT k.order_no AS ref FROM kitchen_items k JOIN bill_lines l ON l.id = k.bill_line_id
+    LEFT JOIN visits v ON v.id = k.visit_id LEFT JOIN table_sessions ts ON ts.id = k.table_session_id
+    WHERE l.bill_id IS DISTINCT FROM coalesce(v.bill_id, ts.bill_id) OR l.source <> 'dining' OR l.item_id IS DISTINCT FROM k.item_id
+       OR l.quantity <> k.quantity OR (l.status = 'voided') <> (k.status = 'cancelled')
+    UNION ALL
+    SELECT '明细 ' || l.id FROM bill_lines l
+    WHERE l.source = 'dining' AND NOT EXISTS (SELECT 1 FROM kitchen_items k WHERE k.bill_line_id = l.id)
+    LIMIT 5`;
+  const [kitchen] = await db<{ n: number; open: number }[]>`
+    SELECT count(*)::int AS n, count(*) FILTER (WHERE status IN ('queued', 'cooking', 'done'))::int AS open FROM kitchen_items`;
+
   return [
     {
       key: 'bill_amount_vs_lines',
@@ -139,7 +155,7 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
       key: 'visit_vs_bill_status',
       label: '来访与账单状态一致',
       ok: statusDiff.length === 0,
-      detail: statusDiff.length ? `${statusDiff.length} 笔来访与账单状态不一致（如 ${statusDiff[0]!.visitNo}）` : '每笔来访与其账单同为未结、已结或已撤销',
+      detail: statusDiff.length ? `${statusDiff.length} 笔来访（或开台）与账单状态不一致（如 ${statusDiff[0]!.visitNo}）` : '每笔来访、每次开台与其账单同为未结、已结或已撤销',
     },
     {
       key: 'open_visit_tags',
@@ -197,6 +213,14 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
       detail: backfillDiff.length
         ? `${backfillDiff.length} 条补录记录与单据的时间或营业日不符（如纸质单 ${backfillDiff[0]!.slipNo}）`
         : `补录 ${backfills!.n} 步（纸质单 ${backfills!.slips} 张），单据时间与营业日都按纸质单上的实际时间`,
+    },
+    {
+      key: 'kitchen_items',
+      label: '出品单与餐饮明细一致',
+      ok: kitchenDiff.length === 0,
+      detail: kitchenDiff.length
+        ? `${kitchenDiff.length} 张出品单与餐饮明细不符（如 ${kitchenDiff.map((d) => d.ref).join('、')}）`
+        : `出品单 ${kitchen!.n} 道（还没上的 ${kitchen!.open} 道），每道都对应一条餐饮明细，退菜的明细已作废`,
     },
   ];
 }

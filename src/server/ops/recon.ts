@@ -101,8 +101,13 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
   const checkouts = await tx<CheckoutRow[]>`
     SELECT c.id, c.checkout_no, c.status, c.business_date, c.created_at, s.display_name AS operator_name, c.total_amount,
            c.void_business_date, c.voided_at, vs.display_name AS voided_by_name, c.void_reason, c.note,
-           (SELECT string_agg(t.code, '、' ORDER BY t.code) FROM checkout_bills cb JOIN visits v ON v.id = cb.visit_id
-            JOIN hand_tags t ON t.id = v.tag_id WHERE cb.checkout_id = c.id) AS tags,
+           -- 手牌号；桌台结账单（餐饮第二步）写「桌 A1」
+           (SELECT string_agg(x.label, '、' ORDER BY x.label) FROM (
+              SELECT t.code AS label FROM checkout_bills cb JOIN visits v ON v.id = cb.visit_id JOIN hand_tags t ON t.id = v.tag_id
+              WHERE cb.checkout_id = c.id
+              UNION ALL
+              SELECT '桌 ' || dt.name FROM checkout_bills cb JOIN table_sessions ts ON ts.id = cb.table_session_id
+              JOIN dining_tables dt ON dt.id = ts.table_id WHERE cb.checkout_id = c.id) x) AS tags,
            (SELECT json_agg(json_build_object('method', p.method, 'amount', p.amount, 'ref', p.ref, 'member', m.name,
                                               'coupon', g.code, 'platform', g.platform, 'approver', ap.display_name) ORDER BY p.id)
             FROM checkout_payments p LEFT JOIN members m ON m.id = p.member_id LEFT JOIN group_buy_coupons g ON g.id = p.coupon_id
@@ -136,7 +141,14 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     JOIN staff vs ON vs.id = l.voided_by JOIN staff ps ON ps.id = l.posted_by
     WHERE l.status = 'voided' AND l.voided_at >= ${from} AND l.voided_at < ${to}
       AND NOT (l.ticket_type_id IS NOT NULL AND l.void_reason LIKE '反结账 %')
-    ORDER BY l.voided_at, l.id`;
+    UNION ALL
+    -- 桌台退菜（餐饮第二步）：单号是开台号，「手牌」一栏写桌号
+    SELECT l.voided_at, s.session_no, '桌 ' || dt.name, coalesce(m.name, nullif(s.guest_label, ''), '散客'), vs.display_name,
+           l.name, l.quantity, l.amount, l.void_reason, ps.display_name, NULL
+    FROM bill_lines l JOIN table_sessions s ON s.bill_id = l.bill_id JOIN dining_tables dt ON dt.id = s.table_id LEFT JOIN members m ON m.id = s.member_id
+    JOIN staff vs ON vs.id = l.voided_by JOIN staff ps ON ps.id = l.posted_by
+    WHERE l.status = 'voided' AND l.voided_at >= ${from} AND l.voided_at < ${to}
+    ORDER BY 1, 2`;
   const cancelled = await tx<{ at: string; visitNo: string; tag: string; guest: string; staff: string; reason: string | null; checkedInAt: string }[]>`
     SELECT v.closed_at AS at, v.visit_no, t.code AS tag, coalesce(m.name, nullif(v.guest_label, ''), '散客') AS guest,
            coalesce(s.display_name, '') AS staff, v.close_reason AS reason, v.checked_in_at

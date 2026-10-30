@@ -14,6 +14,7 @@ import { ChangePasswordPage } from './features/auth/ChangePasswordPage';
 import { WorkbenchPage } from './features/workbench/WorkbenchPage';
 import { FrontdeskPage } from './features/frontdesk/FrontdeskPage';
 import { ClockroomPage } from './features/clockroom/ClockroomPage';
+import { DiningPage } from './features/dining/DiningPage';
 import { LedgerPage } from './features/ledger/LedgerPage';
 import { SettlementPage } from './features/settlement/SettlementPage';
 import { ShiftPage } from './features/shift/ShiftPage';
@@ -30,7 +31,7 @@ import { PurchasingPage } from './features/purchasing/PurchasingPage';
 import { CheckoutPrintPage } from './features/print/CheckoutPrintPage';
 import { SettlementPrintPage } from './features/print/SettlementPrintPage';
 import { ShiftPrintPage } from './features/print/ShiftPrintPage';
-import { useCan } from './lib/session';
+import { useCan, useOptionalSession } from './lib/session';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -113,11 +114,13 @@ function AuthGate({ shell = 'app' }: { shell?: 'app' | 'admin' | 'bare' }) {
   );
 }
 
-/** 首页：前台进入会员工作台；只有库存职责的后勤人员直接进入库存 */
+/** 首页：前台进入会员工作台；只有库存职责的后勤人员直接进入库存；只管厨房的岗位进入餐饮 */
 function Home() {
   const can = useCan();
+  const dining = useOptionalSession()?.dining ?? false;
   if (can('member.read')) return <WorkbenchPage />;
   if (can('inventory.read')) return <Navigate to="/inventory" replace />;
+  if (dining && (can('dining.kitchen') || can('dining.order'))) return <Navigate to="/dining" replace />;
   return <Navigate to="/password" replace />;
 }
 
@@ -139,6 +142,7 @@ const router = createBrowserRouter([
       { index: true, element: <Home /> },
       { path: 'frontdesk', element: <FrontdeskPage /> },
       { path: 'clockroom', element: <ClockroomPage /> },
+      { path: 'dining/:tab?', element: <DiningPage /> },
       { path: 'ledger', element: <LedgerPage /> },
       { path: 'settlement/:date?', element: <SettlementPage /> },
       { path: 'shift', element: <ShiftPage /> },

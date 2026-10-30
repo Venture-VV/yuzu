@@ -35,9 +35,11 @@ export interface OverLimitScope {
   amount: number;
 }
 
-/** 优惠 / 免单的授权对象：一起结账的来访（升序）、优惠金额与原因（金额与客人必须与结账时完全一致） */
+/** 优惠 / 免单的授权对象：一起结账的来访（升序）、优惠金额与原因（金额与客人必须与结账时完全一致）；
+ *  桌台结账（餐饮第二步）时来访为空，对象是一起结账的开台（升序） */
 export interface DiscountScope {
   visitIds: number[];
+  tableSessionIds?: number[];
   amount: number;
   reason: string;
 }
@@ -74,11 +76,20 @@ export type TicketGrant = Granted<TicketGrantRequest>;
 export const sortedVisitIds = (ids: readonly number[]) => [...new Set(ids)].sort((a, b) => a - b);
 
 /** 优惠授权是否仍可用于这次结账（客人、金额一致且未过期；服务端核销时再核对一次） */
-export function discountGrantFits(grant: DiscountGrant | null, visitIds: readonly number[], amount: number, now = Date.now()): grant is DiscountGrant {
+export function discountGrantFits(
+  grant: DiscountGrant | null,
+  visitIds: readonly number[],
+  amount: number,
+  now = Date.now(),
+  tableSessionIds: readonly number[] = [],
+): grant is DiscountGrant {
   if (!grant || grant.scope.amount !== amount || new Date(grant.expiresAt).getTime() <= now) return false;
-  const a = sortedVisitIds(grant.scope.visitIds);
-  const b = sortedVisitIds(visitIds);
-  return a.length === b.length && a.every((id, i) => id === b[i]);
+  const same = (x: readonly number[], y: readonly number[]) => {
+    const a = sortedVisitIds(x);
+    const b = sortedVisitIds(y);
+    return a.length === b.length && a.every((id, i) => id === b[i]);
+  };
+  return same(grant.scope.visitIds, visitIds) && same(grant.scope.tableSessionIds ?? [], tableSessionIds);
 }
 
 /** 降档 / 免票授权是否覆盖这些手牌与票种 */

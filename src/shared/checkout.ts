@@ -159,6 +159,8 @@ export interface CheckoutPreview {
   pricedAt: string;
   /** 钟房里还没结束的钟单（v0.7.1）：结账时一起收尾，在钟上的下钟，还没上钟的按已做完记 */
   sessions: { sessionNo: string; tagCode: string; techNo: string; techName: string; itemName: string; clocks: number; status: 'waiting' | 'serving' }[];
+  /** 还没上的菜（餐饮）：结账时只提醒，不改出品状态；客人没吃到的请先退菜 */
+  dishes: { tagCode: string; name: string; quantity: number; status: 'queued' | 'cooking' | 'done' | 'served' | 'cancelled' }[];
 }
 
 /** 反结账退现金可以选的钱箱（v0.7.1，跨钱箱退款）：此刻当班的班次；original 原单收款的班次，mine 反结账人自己的班次 */
@@ -198,16 +200,23 @@ export interface CheckoutDetail {
   bills: {
     billId: number;
     billNo: string;
-    visitId: number;
-    visitNo: string;
-    tagCode: string;
+    /** 手牌账单的来访与牌号；桌台账单（餐饮第二步）为 null */
+    visitId: number | null;
+    visitNo: string | null;
+    tagCode: string | null;
+    /** 桌台账单：开台与桌号；手牌账单为 null */
+    tableSessionId: number | null;
+    tableName: string | null;
+    /** 结账客人：手牌 1 人，桌台按开台人数 */
+    guests: number;
     memberName: string | null;
     guestLabel: string;
     amount: number;
     stayMinutes: number;
-    ticketName: string;
-    ticketSegments: number;
-    ticketAmount: number;
+    /** 门票（只有手牌账单有） */
+    ticketName: string | null;
+    ticketSegments: number | null;
+    ticketAmount: number | null;
   }[];
   payments: CheckoutPayment[];
   /** 本次结账后同行组里仍在店的手牌 */
@@ -220,6 +229,8 @@ export interface CheckoutSummary {
   status: 'completed' | 'voided';
   totalAmount: number;
   tagCodes: string[];
+  /** 桌台结账单（餐饮第二步）的桌号；手牌结账单为空 */
+  tableNames: string[];
   methods: CheckoutMethod[];
   operatorName: string;
   createdAt: string;

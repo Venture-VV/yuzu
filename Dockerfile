@@ -27,7 +27,7 @@ WORKDIR /app
 ARG ALPINE_MIRROR=
 RUN if [ -n "$ALPINE_MIRROR" ]; then sed -i "s#https\?://dl-cdn.alpinelinux.org/alpine#${ALPINE_MIRROR}#g" /etc/apk/repositories; fi \
   && apk add --no-cache postgresql16-client
-ARG APP_VERSION=0.7.1
+ARG APP_VERSION=0.7.2
 # 提交 SHA 由 update.sh 传入（YUZU_COMMIT），页面常显；直接构建时为空
 ARG APP_COMMIT=
 ENV NODE_ENV=production \

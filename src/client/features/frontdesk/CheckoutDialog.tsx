@@ -1,26 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { BadgePercent, Banknote, CircleCheck, Clock3, Plus, ReceiptText, ShieldCheck, Ticket, Trash2, Undo2, UserRound, WalletCards } from 'lucide-react';
+import { Banknote, CircleCheck, Clock3, ReceiptText, ShieldCheck, Ticket, Undo2 } from 'lucide-react';
 import {
   CHECKOUT_METHOD_LABELS,
-  COUPON_CODE_PATTERN,
   COUPON_PLATFORM_LABELS,
-  COUPON_PLATFORMS,
   isFreeTicket,
-  normalizeCouponCode,
   priceTicket,
   ticketChangeNeedsGrant,
   type CheckoutDetail,
-  type CheckoutMethod,
   type CheckoutPreview,
-  type CouponPlatform,
   type RefundShiftOptions,
 } from '@shared/checkout';
-import { splitDeduction } from '@shared/deduction';
+import { KITCHEN_STATUS_LABELS } from '@shared/dining';
 import { ZONE_LABELS, type BoardTag, type VisitDetail } from '@shared/frontdesk';
-import { discountGrantFits, sortedVisitIds, ticketGrantCovers, type DiscountGrant, type DiscountGrantRequest, type TicketGrant, type TicketGrantRequest } from '@shared/grants';
-import { describeHours, maskPhone, PAYMENT_METHODS, shiftDate } from '@shared/labels';
-import { centsToInput, formatYuan, parseYuan } from '@shared/money';
+import { discountGrantFits, sortedVisitIds, ticketGrantCovers, type TicketGrant, type TicketGrantRequest } from '@shared/grants';
+import { describeHours, shiftDate } from '@shared/labels';
+import { formatYuan } from '@shared/money';
 import { api, ApiError, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, formatTime } from '../../lib/utils';
@@ -30,11 +25,12 @@ import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, Input, MoneyInput, Notice, Select, Skeleton, Textarea } from '../../components/ui';
+import { Badge, Button, Input, Notice, Select, Skeleton, Textarea } from '../../components/ui';
 import { PrintButton } from '../print/PrintButton';
 import { SHIFT_ERRORS, shiftKeys, ShiftGate, StartShiftForm, useShiftReady } from '../shift/ShiftGate';
 import { ZoneChip } from './parts';
 import { BackfillNotice, backfillBody, backfillSummary, useBackfill } from './backfill';
+import { PaymentsSection, usePayRows } from './payments';
 import { PendingPanel, useFrontdeskOp } from './pending';
 import { stayText, useCheckout, useCheckoutPreview, useCheckouts, useRefreshFrontdesk, useTicketTypes } from './queries';
 
@@ -42,40 +38,6 @@ import { stayText, useCheckout, useCheckoutPreview, useCheckouts, useRefreshFron
 // 应收合计、储值扣款构成以服务端为准：门票刚好跳档、余额或扣款规则变化时服务端拒绝，页面刷新后重新核对。
 // R1.2（店主 2026-10-29 签认）：收款前先开班；「优惠 / 免单」由值班经理及以上当场授权（这几张手牌、这个金额），
 // 原因随授权填写，店员不能自行抹零；「其他」收款必须填备注。
-
-interface PayRow {
-  id: number;
-  method: CheckoutMethod;
-  /** 金额（元，输入框原文） */
-  amount: string;
-  ref: string;
-  member: { id: number; name: string; memberNo: string; principalBalance: number; bonusBalance: number; status: 'active' | 'frozen' } | null;
-  platform: CouponPlatform;
-  code: string;
-  dealName: string;
-  /** 现金：客人实给的金额（只用于计算找零，不登记） */
-  tendered: string;
-  /** 优惠 / 免单：原因与当场授权（授权绑定这几张手牌与金额，改了要重新授权） */
-  reason: string;
-  grant: DiscountGrant | null;
-}
-
-let paySeq = 1;
-const newRow = (method: CheckoutMethod, amount: number): PayRow => ({
-  id: paySeq++,
-  method,
-  amount: amount > 0 ? centsToInput(amount) : '',
-  ref: '',
-  member: null,
-  platform: 'meituan',
-  code: '',
-  dealName: '',
-  tendered: '',
-  reason: '',
-  grant: null,
-});
-
-const QUICK_METHODS: CheckoutMethod[] = ['wechat', 'alipay', 'cash', 'bank_card', 'other', 'wallet', 'coupon', 'discount'];
 
 export function CheckoutDialog({
   open,
@@ -98,11 +60,8 @@ export function CheckoutDialog({
   const [selected, setSelected] = useState<number[]>([]);
   const [showAll, setShowAll] = useState(false);
   const [ticketPick, setTicketPick] = useState<Record<number, number>>({});
-  const [rows, setRows] = useState<PayRow[]>([]);
   const [note, setNote] = useState('');
   const [result, setResult] = useState<CheckoutDetail | null>(null);
-  /** 正在请值班经理授权优惠的那一笔 */
-  const [authorizing, setAuthorizing] = useState<number | null>(null);
   const shiftReady = useShiftReady(open);
   const qc = useQueryClient();
   // 补录纸质单：按纸质单上的实际离店时间计价；补录的结账不能用会员储值
@@ -123,10 +82,8 @@ export function CheckoutDialog({
     setSelected(initialIds?.length ? initialIds : mates.length ? mates : [visit.id]);
     setShowAll(false);
     setTicketPick({});
-    setRows([]);
     setNote('');
     setResult(null);
-    setAuthorizing(null);
     op.clearError();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -161,79 +118,26 @@ export function CheckoutDialog({
     return t ? v.linesAmount + priceTicket(t, v.checkedInAt, pricedAt, p!.graceMinutes).amount : null;
   });
   const total = p && amounts.every((a) => a !== null) ? amounts.reduce<number>((s, a) => s + a!, 0) : null;
-  const rowCents = rows.map((r) => parseYuan(r.amount));
-  const paid = rowCents.reduce<number>((s, c) => s + (c ?? 0), 0);
-  const remaining = total === null ? null : total - paid;
 
   const visitIds = p ? p.visits.map((v) => v.visitId) : selected;
-  const splitOf = (r: PayRow, cents: number | null) =>
-    r.member && cents && cents > 0
-      ? splitDeduction(cents, { principal: r.member.principalBalance, bonus: r.member.bonusBalance }, session.rules.deductionRule)
-      : null;
-  const rowProblem = (r: PayRow, i: number): string | null => {
-    const c = rowCents[i];
-    if (c === null || c === undefined || c <= 0) return '请填写金额';
-    if (r.method === 'wallet') {
-      if (backfill.state.active) return '补录的结账不能用会员储值，请按纸质单上的实际收款方式登记';
-      if (!r.member) return '请选择会员';
-      // 改了勾选的手牌后，原来选的会员可能已不在本次结账里
-      if (p && !p.members.some((m) => m.id === r.member!.id)) return '这位会员不在本次结账的客人里，请重新选择';
-      if (r.member.status !== 'active') return '会员已停用';
-      const s = splitOf(r, c);
-      if (s && !s.ok) return `余额不足，还差 ¥${(s.shortfall / 100).toFixed(2)}`;
-    }
-    if (r.method === 'coupon' && !COUPON_CODE_PATTERN.test(normalizeCouponCode(r.code))) return '请填写完整券码';
-    if (r.method === 'other' && !r.ref.trim()) return '「其他」收款请在备注里写明收的是什么';
-    if (r.method === 'cash' && r.tendered.trim()) {
-      // 「客人实给」只用来算找零，不登记；填了却少于这笔现金，说明现金没收够（测试服 E2E 报告 BUG-2）
-      const given = parseYuan(r.tendered);
-      if (given === null) return '客人实给的金额不正确';
-      if (given < c) return `客人实给少于这笔现金，还差 ¥${((c - given) / 100).toFixed(2)}；请核对现金或改收款方式`;
-    }
-    if (r.method === 'discount') {
-      if (r.reason.trim().length < 2) return '请填写优惠原因（至少 2 个字），例如：抹零、投诉补偿';
-      if (!discountGrantFits(r.grant, visitIds, c)) return r.grant ? '手牌或金额改了，请按当前内容重新授权' : '请值班经理、店总或店主当场授权';
-    }
-    return null;
-  };
-  const problems = rows.map(rowProblem);
-  const walletMembers = rows.filter((r) => r.method === 'wallet' && r.member).map((r) => r.member!.id);
-  const dupWallet = new Set(walletMembers).size !== walletMembers.length;
-  const hasDiscount = rows.some((r) => r.method === 'discount');
-  const ready =
-    total !== null &&
-    remaining === 0 &&
-    problems.every((x) => x === null) &&
-    !dupWallet &&
-    !preview.isFetching &&
-    shiftReady.ready &&
-    !backfillBlocked;
-
-  const addRow = (method: CheckoutMethod) =>
-    edit(() => {
-      const row = newRow(method, Math.max(0, remaining ?? 0));
-      if (method === 'wallet') {
-        const m = p?.members.find((x) => !rows.some((r) => r.member?.id === x.id));
-        if (m) row.member = m;
-      }
-      setRows((list) => [...list, row]);
-    });
-  const update = (id: number, patch: Partial<PayRow>) => edit(() => setRows((list) => list.map((r) => (r.id === id ? { ...r, ...patch } : r))));
+  const pay = usePayRows({
+    open,
+    total,
+    members: p?.members ?? null,
+    grantFits: (grant, cents) => discountGrantFits(grant, visitIds, cents),
+    backfill: backfill.state.active,
+    scopeName: '手牌',
+    locked,
+    onEdit: op.clearError,
+  });
+  const { remaining, problems } = pay;
+  const ready = total !== null && remaining === 0 && pay.ok && !preview.isFetching && shiftReady.ready && !backfillBlocked;
 
   const submit = async () => {
     if (!ready || !p) return;
     const visitIds = p.visits.map((v) => v.visitId);
     const tagCodes = p.visits.map((v) => v.tagCode);
-    const payments = rows.map((r, i) => {
-      const amount = rowCents[i]!;
-      if (r.method === 'wallet') {
-        const s = splitOf(r, amount);
-        return { method: 'wallet' as const, memberId: r.member!.id, amount, expectedSplit: s && s.ok ? { principal: s.principal, bonus: s.bonus } : { principal: amount, bonus: 0 } };
-      }
-      if (r.method === 'coupon') return { method: 'coupon' as const, platform: r.platform, code: normalizeCouponCode(r.code), dealName: r.dealName.trim(), amount };
-      if (r.method === 'discount') return { method: 'discount' as const, amount, grantId: r.grant!.grantId };
-      return { method: r.method, amount, ref: r.ref.trim() };
-    });
+    const payments = pay.payments();
     const detail = await op.submit((key) => ({
       url: '/api/frontdesk/checkouts',
       body: {
@@ -246,7 +150,7 @@ export function CheckoutDialog({
         ...backfillBody(backfill),
       },
       tagCodes,
-      summary: `结账 ${tagCodes.length} 张（${[...new Set(rows.map((r) => CHECKOUT_METHOD_LABELS[r.method]))].join(' + ') || '免收'}）${backfillSummary(backfill)}`,
+      summary: `结账 ${tagCodes.length} 张（${pay.methods.join(' + ') || '免收'}）${backfillSummary(backfill)}`,
       amount: total!,
       visitIds,
     }));
@@ -258,8 +162,6 @@ export function CheckoutDialog({
   const choices = inStore.filter((t) => showAll || groupIds.has(t.visit!.id) || selected.includes(t.visit!.id));
   const toggle = (id: number) => edit(() => setSelected((s) => (s.includes(id) ? (s.length > 1 ? s.filter((x) => x !== id) : s) : [...s, id])));
   const busy = op.busy;
-  const authRow = rows.find((r) => r.id === authorizing) ?? null;
-  const authCents = authRow ? rowCents[rows.indexOf(authRow)] : null;
 
   if (result) {
     return (
@@ -373,68 +275,27 @@ export function CheckoutDialog({
           p && (
             <>
               {(p.sessions ?? []).length > 0 && <SessionsNotice sessions={p.sessions} />}
+              {(p.dishes ?? []).length > 0 && <DishesNotice dishes={p.dishes} />}
               <ReviewTable preview={p} amounts={amounts} ticketPick={ticketPick} onPick={(id, t) => edit(() => setTicketPick((x) => ({ ...x, [id]: t })))} />
             </>
           )
         )}
 
         {/* 收款 */}
-        <div className="rounded-lg border border-line bg-paper/50 p-3">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-[13px] font-bold text-ink-2">收款</span>
-            {QUICK_METHODS.filter((m) => m !== 'wallet' || (can('consume.create') && !backfill.state.active)).map((m) => (
-              <Button
-                key={m}
-                size="sm"
-                variant="secondary"
-                icon={m === 'discount' ? <BadgePercent className="size-3.5" /> : <Plus className="size-3.5" />}
-                disabled={locked || (m === 'discount' && hasDiscount)}
-                onClick={() => addRow(m)}
-                data-testid={`pay-add-${m}`}
-              >
-                {CHECKOUT_METHOD_LABELS[m]}
-              </Button>
-            ))}
-          </div>
-          {rows.length === 0 ? (
-            <p className="mt-3 text-[13px] text-ink-3">{total === 0 ? '应收为 0（例如儿童免票），不用登记收款，直接确认结清。' : '点上面的收款方式添加一笔，金额默认为还差的部分；可组合多种方式。'}</p>
-          ) : (
-            <ul className="mt-3 space-y-2">
-              {rows.map((r, i) => (
-                <PayRowEditor
-                  key={r.id}
-                  row={r}
-                  cents={rowCents[i] ?? null}
-                  problem={problems[i] ?? null}
-                  members={p?.members ?? []}
-                  split={splitOf(r, rowCents[i] ?? null)}
-                  locked={locked}
-                  granted={r.method === 'discount' && discountGrantFits(r.grant, visitIds, rowCents[i] ?? 0)}
-                  onChange={(patch) => update(r.id, patch)}
-                  onAuthorize={() => setAuthorizing(r.id)}
-                  onRemove={() => edit(() => setRows((list) => list.filter((x) => x.id !== r.id)))}
-                />
-              ))}
-            </ul>
-          )}
-          {authRow && authCents ? (
-            <AuthorizeDialog<DiscountGrantRequest>
-              open
-              request={{ purpose: 'checkout_discount', scope: { visitIds: sortedVisitIds(visitIds), amount: authCents, reason: authRow.reason.trim() } }}
-              lines={[
-                `手牌 ${(p?.visits ?? []).map((v) => v.tagCode).join('、')} · 应收 ${total !== null ? formatYuan(total) : ''}`,
-                `${CHECKOUT_METHOD_LABELS.discount} ${formatYuan(authCents)}`,
-                `原因：${authRow.reason.trim()}`,
-              ]}
-              onClose={() => setAuthorizing(null)}
-              onGranted={(grant) => {
-                setRows((list) => list.map((r) => (r.id === authRow.id ? { ...r, grant } : r)));
-                setAuthorizing(null);
-              }}
-            />
-          ) : null}
-          {dupWallet && <p className="mt-2 text-[12.5px] font-semibold text-clay">同一位会员的储值支付请合并为一笔</p>}
-        </div>
+        <PaymentsSection
+          pay={pay}
+          total={total}
+          members={p?.members ?? []}
+          canWallet={can('consume.create') && !backfill.state.active}
+          authorize={(amount, reason) => ({
+            request: { purpose: 'checkout_discount', scope: { visitIds: sortedVisitIds(visitIds), amount, reason } },
+            lines: [
+              `手牌 ${(p?.visits ?? []).map((v) => v.tagCode).join('、')} · 应收 ${total !== null ? formatYuan(total) : ''}`,
+              `${CHECKOUT_METHOD_LABELS.discount} ${formatYuan(amount)}`,
+              `原因：${reason}`,
+            ],
+          })}
+        />
 
         <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="备注（选填）" maxLength={200} aria-label="结账备注" className="min-h-[44px]" />
         {op.state.phase === 'error' && <Notice tone="error" title={op.state.message} />}
@@ -454,6 +315,23 @@ function SessionsNotice({ sessions }: { sessions: CheckoutPreview['sessions'] })
             <li key={s.sessionNo}>
               <span className="num font-semibold">{s.tagCode}</span> · {s.techNo} 号 {s.techName} · {s.itemName} × {s.clocks} ·{' '}
               {s.status === 'waiting' ? '还没上钟（结账后按已做完记）' : '在钟上（结账时下钟）'}
+            </li>
+          ))}
+        </ul>
+      </Notice>
+    </div>
+  );
+}
+
+/** 餐饮（S5）：客人点的菜还没上齐时提醒（不拦结账；结账后厨房屏标出「客人已结账」） */
+function DishesNotice({ dishes }: { dishes: CheckoutPreview['dishes'] }) {
+  return (
+    <div data-testid="checkout-dishes">
+      <Notice tone="warning" title="客人点的菜还没上齐：请先问客人还要不要，不要的先退菜再结账">
+        <ul className="mt-1 space-y-0.5">
+          {dishes.map((d, i) => (
+            <li key={i}>
+              <span className="num font-semibold">{d.tagCode}</span> · {d.name} × {d.quantity} · {KITCHEN_STATUS_LABELS[d.status]}
             </li>
           ))}
         </ul>
@@ -559,210 +437,10 @@ function ReviewTable({
   );
 }
 
-function PayRowEditor({
-  row,
-  cents,
-  problem,
-  members,
-  split,
-  locked,
-  granted,
-  onChange,
-  onAuthorize,
-  onRemove,
-}: {
-  row: PayRow;
-  cents: number | null;
-  problem: string | null;
-  members: CheckoutPreview['members'];
-  split: ReturnType<typeof splitDeduction> | null;
-  locked: boolean;
-  /** 优惠 / 免单：授权仍覆盖这几张手牌与金额 */
-  granted: boolean;
-  onChange: (patch: Partial<PayRow>) => void;
-  onAuthorize: () => void;
-  onRemove: () => void;
-}) {
-  const tendered = parseYuan(row.tendered);
-  return (
-    <li className={cn('rounded-lg border bg-card p-3', problem ? 'border-clay/40' : 'border-line')} data-testid={`pay-row-${row.method}`}>
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge tone={row.method === 'wallet' ? 'pine' : row.method === 'coupon' || row.method === 'discount' ? 'yuzu' : 'neutral'} className="h-7 px-3 text-[13px]">
-          {row.method === 'wallet' ? (
-            <WalletCards className="size-3.5" />
-          ) : row.method === 'coupon' ? (
-            <Ticket className="size-3.5" />
-          ) : row.method === 'discount' ? (
-            <BadgePercent className="size-3.5" />
-          ) : null}
-          {CHECKOUT_METHOD_LABELS[row.method]}
-        </Badge>
-        <div className="w-[150px]">
-          <MoneyInput value={row.amount} onChange={(e) => onChange({ amount: e.target.value })} disabled={locked} aria-label={`${CHECKOUT_METHOD_LABELS[row.method]}金额`} className="h-10" />
-        </div>
-        {(PAYMENT_METHODS as readonly string[]).includes(row.method) && (
-          <Input
-            fullWidth={false}
-            value={row.ref}
-            onChange={(e) => onChange({ ref: e.target.value })}
-            placeholder={row.method === 'cash' ? '备注（选填）' : row.method === 'other' ? '写明收的是什么（必填）' : '单号后几位（选填）'}
-            maxLength={64}
-            disabled={locked}
-            className="h-10 min-w-0 flex-1 basis-32"
-            aria-label="收款备注"
-          />
-        )}
-        {row.method === 'coupon' && (
-          <>
-            <Select fullWidth={false} value={row.platform} onChange={(e) => onChange({ platform: e.target.value as CouponPlatform })} disabled={locked} className="h-10 w-[120px]" aria-label="团购平台">
-              {COUPON_PLATFORMS.map((pl) => (
-                <option key={pl} value={pl}>
-                  {COUPON_PLATFORM_LABELS[pl]}
-                </option>
-              ))}
-            </Select>
-            <Input
-              fullWidth={false}
-              value={row.code}
-              onChange={(e) => onChange({ code: e.target.value.toUpperCase() })}
-              onBlur={() => onChange({ code: normalizeCouponCode(row.code) })}
-              placeholder="完整券码"
-              disabled={locked}
-              className="num h-10 min-w-0 flex-1 basis-40 font-semibold tracking-wide"
-              aria-label="完整券码"
-              data-testid="coupon-code"
-            />
-          </>
-        )}
-        <span className="flex-1" />
-        <button type="button" aria-label="移除这笔收款" onClick={onRemove} disabled={locked} className="flex size-9 items-center justify-center rounded-md text-ink-3 hover:bg-clay-soft hover:text-clay disabled:opacity-40">
-          <Trash2 className="size-4" />
-        </button>
-      </div>
+/** 结账单结的是餐饮桌台（S5 第二步）：反结账后恢复的是桌台，不是在店客人 */
+const isTableCheckout = (d: CheckoutDetail) => d.bills.some((b) => b.tableSessionId !== null);
 
-      {row.method === 'coupon' && (
-        <Input value={row.dealName} onChange={(e) => onChange({ dealName: e.target.value })} placeholder="团购项目（选填，例如「不含餐 12 小时」）" maxLength={48} disabled={locked} className="mt-2 h-9 text-[13px]" aria-label="团购项目" />
-      )}
-
-      {row.method === 'discount' && (
-        // 优惠 / 免单：员工填原因，值班经理及以上在弹窗里输入自己的账号密码授权；店员不能自行抹零
-        <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="discount-row">
-          <Input
-            fullWidth={false}
-            value={row.reason}
-            // 原因随授权一起记下：改了原因要重新授权
-            onChange={(e) => onChange({ reason: e.target.value, grant: null })}
-            placeholder="优惠原因（必填），例如：抹零、投诉补偿"
-            maxLength={64}
-            disabled={locked}
-            className="h-9 min-w-0 flex-1 basis-48 text-[13px]"
-            aria-label="优惠原因"
-          />
-          {granted && row.grant ? (
-            <span data-testid="discount-granted">
-              <Badge tone="pine" className="h-8 px-3 text-[12.5px]">
-                <ShieldCheck className="size-3.5" /> {row.grant.approverName}已授权
-              </Badge>
-            </span>
-          ) : (
-            <Button
-              size="sm"
-              variant="primary"
-              icon={<ShieldCheck className="size-3.5" />}
-              disabled={locked || !cents || cents <= 0 || row.reason.trim().length < 2}
-              onClick={onAuthorize}
-              data-testid="discount-authorize"
-            >
-              请值班经理授权
-            </Button>
-          )}
-        </div>
-      )}
-
-      {row.method === 'cash' && (
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px] text-ink-3">
-          客人实给
-          <div className="w-[120px]">
-            <MoneyInput value={row.tendered} onChange={(e) => onChange({ tendered: e.target.value })} className="h-8 text-[13px]" aria-label="客人实给现金" />
-          </div>
-          {tendered !== null && cents !== null && tendered >= cents && (
-            <span className="font-semibold text-ink-2">
-              找零 <Money cents={tendered - cents} className="font-bold text-pine" />（找零不用登记）
-            </span>
-          )}
-        </div>
-      )}
-
-      {row.method === 'wallet' &&
-        (row.member ? (
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-pine-tint px-3 py-2 text-[12.5px]">
-            <UserRound className="size-3.5 text-pine" />
-            <span className="font-bold text-ink">{row.member.name}</span>
-            <span className="num text-ink-3">{row.member.memberNo}</span>
-            <span className="text-ink-2">
-              本金 <Money cents={row.member.principalBalance} /> · 赠金 <Money cents={row.member.bonusBalance} />
-            </span>
-            {split?.ok && (
-              <span className="font-semibold text-pine" data-testid="wallet-split">
-                将扣本金 <Money cents={split.principal} /> · 赠金 <Money cents={split.bonus} />
-              </span>
-            )}
-            <span className="flex-1" />
-            {members.length > 1 && (
-              <Select
-                fullWidth={false}
-                value={String(row.member.id)}
-                onChange={(e) => onChange({ member: members.find((m) => m.id === Number(e.target.value)) ?? row.member })}
-                disabled={locked}
-                className="h-8 w-[130px] text-[12.5px]"
-                aria-label="换一位会员"
-              >
-                {members.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </Select>
-            )}
-            <Button size="sm" variant="ghost" disabled={locked} onClick={() => onChange({ member: null })}>
-              换人
-            </Button>
-          </div>
-        ) : (
-          // 只能用本次结账客人里的会员储值（服务端同样核对）；会员替朋友付，把朋友的手牌合并进本次结账
-          <div className="mt-2" data-testid="wallet-members">
-            <p className="text-[12.5px] text-ink-3">
-              {members.length ? '选择付款会员：' : '本次结账的客人里没有会员。'}只能用本次结账客人里的会员储值支付；同行朋友请合并到同一张结账单
-            </p>
-            {members.length > 0 && (
-              <ul className="mt-1 space-y-0.5">
-                {members.map((m) => (
-                  <MemberPick key={m.id} m={m} onPick={() => onChange({ member: m })} />
-                ))}
-              </ul>
-            )}
-          </div>
-        ))}
-      {problem && <p className="mt-1.5 text-[12.5px] font-semibold text-clay">{problem}</p>}
-    </li>
-  );
-}
-
-function MemberPick({ m, onPick }: { m: { name: string; memberNo: string; principalBalance: number; bonusBalance: number; phone?: string }; onPick: () => void }) {
-  return (
-    <li>
-      <button type="button" onClick={onPick} className="flex w-full items-center gap-3 rounded-md px-3 py-1.5 text-left text-[13px] hover:bg-card">
-        <span className="min-w-0 flex-1 truncate font-semibold">{m.name}</span>
-        {m.phone && <span className="num text-ink-3">{maskPhone(m.phone)}</span>}
-        <span className="num text-ink-3">
-          余额 <Money cents={m.principalBalance + m.bonusBalance} />
-        </span>
-      </button>
-    </li>
-  );
-}
-
-/** 结账单：所结手牌、门票与收款明细 */
+/** 结账单：所结手牌（桌台）、门票与收款明细 */
 export function CheckoutReceipt({ detail }: { detail: CheckoutDetail }) {
   return (
     <div className="space-y-3" data-testid="checkout-receipt">
@@ -786,7 +464,7 @@ export function CheckoutReceipt({ detail }: { detail: CheckoutDetail }) {
       )}
       {detail.status === 'voided' && (
         <Notice tone="warning" icon={<Undo2 className="size-4" />} title={`${detail.voidedByName ?? ''} 于 ${detail.voidedAt ? formatDateTime(detail.voidedAt) : ''} 反结账`}>
-          {detail.voidReason}。储值消费已按原单撤销，团购券登记已作废，客人恢复为在店未结。
+          {detail.voidReason}。储值消费已按原单撤销，团购券登记已作废，{isTableCheckout(detail) ? '这几桌恢复为用餐中' : '客人恢复为在店未结'}。
         </Notice>
       )}
       <div className="overflow-hidden rounded-lg border border-line">
@@ -802,11 +480,21 @@ export function CheckoutReceipt({ detail }: { detail: CheckoutDetail }) {
             {detail.bills.map((b) => (
               <tr key={b.billId}>
                 <td className="px-3 py-2">
-                  <span className="num font-bold">{b.tagCode}</span> <span className="text-ink-3">{b.memberName ?? (b.guestLabel || '散客')}</span>
+                  <span className="num font-bold">{b.tableName !== null ? `桌 ${b.tableName}` : b.tagCode}</span>{' '}
+                  <span className="text-ink-3">
+                    {b.memberName ?? (b.guestLabel || '散客')}
+                    {b.tableName !== null && ` · ${b.guests} 人`}
+                  </span>
                 </td>
                 <td className="px-3 py-2 text-ink-2">
-                  {b.ticketName} · {b.ticketSegments === 1 ? '12 小时档' : `${b.ticketSegments} 段`} <Money cents={b.ticketAmount} className="text-ink-3" />
-                  <span className="block text-[11.5px] text-ink-3">在店 {Math.floor(b.stayMinutes / 60)} 时 {b.stayMinutes % 60} 分</span>
+                  {b.ticketName !== null && (
+                    <>
+                      {b.ticketName} · {b.ticketSegments === 1 ? '12 小时档' : `${b.ticketSegments} 段`} <Money cents={b.ticketAmount ?? 0} className="text-ink-3" />
+                    </>
+                  )}
+                  <span className="block text-[11.5px] text-ink-3">
+                    {b.tableName !== null ? '用餐' : '在店'} {Math.floor(b.stayMinutes / 60)} 时 {b.stayMinutes % 60} 分
+                  </span>
                 </td>
                 <td className="px-3 py-2 text-right">
                   <Money cents={b.amount} className="font-bold" />
@@ -885,7 +573,7 @@ export function CheckoutRecordsDialog({ open, onClose, focusId }: { open: boolea
             <li key={c.id}>
               <button type="button" onClick={() => setOpenId(c.id)} className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-left hover:bg-paper-2/60">
                 <span className="num font-bold">{c.checkoutNo}</span>
-                <span className="num text-[13px] font-semibold text-ink-2">{c.tagCodes.join('、')}</span>
+                <span className="num text-[13px] font-semibold text-ink-2">{[...(c.tagCodes ?? []), ...(c.tableNames ?? []).map((n) => `桌 ${n}`)].join('、')}</span>
                 <span className="text-[12.5px] text-ink-3">
                   {formatTime(c.createdAt)} · {c.operatorName} · {(c.methods ?? []).map((m) => CHECKOUT_METHOD_LABELS[m]).join(' + ') || '免收'}
                 </span>
@@ -937,15 +625,17 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
     setError(null);
     try {
       await api.post<CheckoutDetail>(`/api/frontdesk/checkouts/${id}/void`, { reason: reason.trim(), ...(cashRefund > 0 && drawer !== null ? { refundShiftId: drawer } : {}) });
+      const restored = d && isTableCheckout(d) ? '这几桌恢复为用餐中' : '客人恢复为在店未结';
       toast({
         tone: 'success',
         title: `已反结账 ${d?.checkoutNo ?? ''}`,
         body: cashRefund
-          ? `客人恢复为在店未结；退给客人的现金 ¥${(cashRefund / 100).toFixed(2)} 计入${chosen && !chosen.mine ? ` ${chosen.staffName} ` : '你'}当班的交班表`
-          : '客人恢复为在店未结，可更正后重新结账',
+          ? `${restored}；退给客人的现金 ¥${(cashRefund / 100).toFixed(2)} 计入${chosen && !chosen.mine ? ` ${chosen.staffName} ` : '你'}当班的交班表`
+          : `${restored}，可更正后重新结账`,
       });
       setVoiding(false);
       void qc.invalidateQueries({ queryKey: ['frontdesk'] });
+      void qc.invalidateQueries({ queryKey: ['dining'] });
       void qc.invalidateQueries({ queryKey: ['member'] });
       void qc.invalidateQueries({ queryKey: shiftKeys.all });
       refresh();
@@ -984,7 +674,9 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
             <div className="space-y-2 rounded-lg border border-clay/30 bg-clay-soft/40 p-3">
               {cashRefund === 0 && <ShiftGate action="反结账" />}
               <p className="text-[13px] text-ink-2">
-                反结账后：储值消费按原单撤销，团购券登记作废，门票明细作废，客人恢复为在店未结（手牌须仍空闲）；重新结账时门票按第一次结账的时刻计算。
+                {isTableCheckout(d)
+                  ? '反结账后：储值消费按原单撤销，团购券登记作废，这几桌恢复为用餐中（桌台须仍空闲），可以继续点单或更正后重新结账。'
+                  : '反结账后：储值消费按原单撤销，团购券登记作废，门票明细作废，客人恢复为在店未结（手牌须仍空闲）；重新结账时门票按第一次结账的时刻计算。'}
                 {cashRefund ? ` 原单收了现金 ¥${(cashRefund / 100).toFixed(2)}：选从哪个钱箱退给客人，计入那个钱箱当班的交班表（扣减应有现金）。` : ''}
                 扫码、银行卡、团购请在商户后台原路退回并登记退款单号。
               </p>

@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto';
 import { businessDateOf } from '@shared/business-date';
 import { DEFAULT_FRONTDESK_RULES, type FrontdeskRules, type TagKind, type TagZone, ZONE_LABELS } from '@shared/frontdesk';
-import { can } from '@shared/permissions';
+import { can, type Permission } from '@shared/permissions';
 import { isUniqueViolation, type Db, type Tx } from '../../db';
 import type { Actor, Deps } from '../../lib/context';
 import { conflict, forbidden, unprocessable } from '../../lib/errors';
@@ -31,8 +31,24 @@ export async function businessDate(db: Db, deps: Deps, at: Date): Promise<string
 
 export const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 
-export const FRONTDESK_OPS = ['checkin', 'bill_post', 'tag_swap', 'checkout'] as const;
+/** 前台的幂等业务类型；table_open / table_post / table_checkout 是餐饮第二步的开台、桌台点单与桌台结账 */
+export const FRONTDESK_OPS = ['checkin', 'bill_post', 'tag_swap', 'checkout', 'table_open', 'table_post', 'table_checkout'] as const;
 export type FrontdeskOp = (typeof FRONTDESK_OPS)[number];
+
+/**
+ * 作废「结果待确认」的操作要有原业务本身的权限（全部都要，与原接口一致）：
+ * 没有结账收款权限的人不能作废结账、桌台结账，没有餐饮点单权限的人不能作废开台、桌台点单。
+ * 挂账（含点单、派钟挂到手牌上）按前台挂账权限。
+ */
+export const FRONTDESK_OP_PERMISSIONS: Record<FrontdeskOp, readonly Permission[]> = {
+  checkin: ['frontdesk.operate'],
+  bill_post: ['frontdesk.operate'],
+  tag_swap: ['frontdesk.operate'],
+  checkout: ['frontdesk.checkout'],
+  table_open: ['dining.order', 'frontdesk.operate'],
+  table_post: ['dining.order', 'frontdesk.operate'],
+  table_checkout: ['frontdesk.checkout'],
+};
 
 export const abandonedError = () =>
   conflict('OP_ABANDONED', '这笔操作已在「结果待确认」时由员工作废，不会再生效；如仍需要，请重新填写一笔');
@@ -95,6 +111,9 @@ export async function runIdempotent(
 export function mapUniqueViolation(error: unknown): unknown {
   if (isUniqueViolation(error, 'visits_tag_open_uq')) {
     return conflict('TAG_OCCUPIED', '这张手牌刚刚被其他终端发出，请换一张空闲手牌');
+  }
+  if (isUniqueViolation(error, 'table_sessions_table_open_uq')) {
+    return conflict('TABLE_TAKEN', '这张桌台刚刚被其他终端开台，请换一张空桌');
   }
   if (isUniqueViolation(error, 'visits_member_open_uq')) {
     return conflict('MEMBER_IN_STORE', '这位会员已持有一张在店手牌，请先在状态板上找到原手牌');

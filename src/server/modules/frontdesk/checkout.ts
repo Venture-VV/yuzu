@@ -35,7 +35,7 @@ import {
 import { describeHours, PAYMENT_METHODS } from '@shared/labels';
 import { formatYuan } from '@shared/money';
 import { can } from '@shared/permissions';
-import type { Db } from '../../db';
+import type { Db, Tx } from '../../db';
 import { writeAudit } from '../../lib/audit';
 import type { Deps, OpContext } from '../../lib/context';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
@@ -60,6 +60,7 @@ import {
 } from './common';
 import { assertAfterVisits, assertNotReused, backfillDetail, BackfillInput, backfillMarkSql, normalizeMark, recordBackfill, resolveBackfill } from './backfill';
 import { openSessionsOf, settleSessionsAtCheckout } from '../clockroom';
+import { unservedDishesOf } from '../dining';
 import { applyVisitTicket, resolveTicketType } from './tickets';
 
 // ───────────────────────── 输入 ─────────────────────────
@@ -93,7 +94,7 @@ const DiscountPayment = z.object({
   amount: positiveCents('优惠金额'),
   grantId: z.uuid('优惠 / 免单需要值班经理、店总或店主当场授权'),
 });
-const Payment = z.union([CashPayment, WalletPayment, CouponPayment, DiscountPayment], '收款方式不正确');
+export const Payment = z.union([CashPayment, WalletPayment, CouponPayment, DiscountPayment], '收款方式不正确');
 
 export const CheckoutInput = z.object({
   clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
@@ -212,6 +213,7 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
       graceMinutes: rules.overtimeGraceMinutes,
       pricedAt: at.toISOString(),
       sessions: await openSessionsOf(tx, ids),
+      dishes: await unservedDishesOf(tx, ids),
     };
   });
 }
@@ -221,18 +223,109 @@ const ticketEnd = (r: Pick<VisitRow, 'ticketEndAt'>, at: Date) => (r.ticketEndAt
 
 // ───────────────────────── 结账 ─────────────────────────
 
+export type CheckoutPaymentInput = z.infer<typeof Payment>;
+
+/** 收款的基本核对（手牌结账与桌台结账共用）：优惠最多一笔、「其他」要备注、储值要有权限、同一会员与同一张券不重复 */
+export function splitPayments(payments: CheckoutPaymentInput[], actor: OpContext['actor']) {
+  const wallets = payments.filter((p) => p.method === 'wallet');
+  const coupons = payments.filter((p) => p.method === 'coupon');
+  const discounts = payments.filter((p) => p.method === 'discount');
+  if (discounts.length > 1) throw badRequest('优惠 / 免单最多登记一笔，请合并金额后重新授权');
+  if (payments.some((p) => p.method === 'other' && !p.ref)) throw badRequest('「其他」收款请在备注里写明收的是什么');
+  if (wallets.length && !can(actor, 'consume.create')) throw forbidden('当前岗位不能用会员储值收款');
+  if (new Set(wallets.map((w) => w.memberId)).size !== wallets.length) throw badRequest('同一位会员的储值支付请合并为一笔');
+  if (new Set(coupons.map((c) => `${c.platform}:${c.code}`)).size !== coupons.length) throw badRequest('同一张团购券不能登记两次');
+  return { wallets, coupons, discounts };
+}
+
+/** 收款合计必须等于应收（手牌结账与桌台结账共用） */
+export function assertSettled(payments: CheckoutPaymentInput[], total: number) {
+  const paid = payments.reduce((s, p) => s + p.amount, 0);
+  if (paid !== total) {
+    throw unprocessable(
+      'NOT_SETTLED',
+      paid < total
+        ? `还差 ${formatYuan(total - paid)} 没有收，结清才能离店`
+        : `收款合计多了 ${formatYuan(paid - total)}，请核对（现金找零不用登记，按应收金额记）`,
+      { total, paid },
+    );
+  }
+  return paid;
+}
+
+/**
+ * 登记这张结账单的收款（手牌结账与桌台结账共用）：会员储值按会员 id 升序逐位记账（同一事务里生成消费单与余额流水），
+ * 团购券（同一平台同一券码只能有一笔有效登记）、现金类、优惠 / 免单（已核销的当场授权）。
+ */
+export async function recordCheckoutPayments(
+  tx: Tx,
+  deps: Deps,
+  a: {
+    checkoutId: number;
+    checkoutNo: string;
+    payments: CheckoutPaymentInput[];
+    discount: { reason: string; approverId: number } | null;
+    /** 储值消费单备注里的手牌号；桌台结账时为桌号（tables） */
+    tagCodes: string[];
+    tables?: string[];
+    date: string;
+    at: Date;
+    ctx: OpContext;
+  },
+) {
+  const wallets = a.payments.filter((p) => p.method === 'wallet');
+  const coupons = a.payments.filter((p) => p.method === 'coupon');
+  const discounts = a.payments.filter((p) => p.method === 'discount');
+  // 会员储值：按会员 id 升序逐位记账（锁顺序固定）
+  for (const w of [...wallets].sort((x, y) => x.memberId - y.memberId)) {
+    const r = await consumeForCheckout(tx, deps, {
+      memberId: w.memberId,
+      amount: w.amount,
+      expectedSplit: w.expectedSplit,
+      checkoutId: a.checkoutId,
+      checkoutNo: a.checkoutNo,
+      tagCodes: a.tagCodes,
+      tables: a.tables,
+      businessDate: a.date,
+      ctx: a.ctx,
+      at: a.at,
+    });
+    await tx`
+      INSERT INTO checkout_payments (checkout_id, method, amount, member_id, consumption_id)
+      VALUES (${a.checkoutId}, 'wallet', ${w.amount}, ${w.memberId}, ${r.consumptionId})`;
+  }
+  // 团购券：同一平台同一券码只能有一笔有效登记
+  for (const cp of coupons) {
+    const [used] = await tx<{ checkoutNo: string; registeredAt: string }[]>`
+      SELECT c.checkout_no, g.registered_at FROM group_buy_coupons g JOIN checkouts c ON c.id = g.checkout_id
+      WHERE g.platform = ${cp.platform} AND g.code = ${cp.code} AND g.status = 'active'`;
+    if (used) throw couponUsed(cp.platform, cp.code, used.checkoutNo);
+    const [g] = await tx<{ id: number }[]>`
+      INSERT INTO group_buy_coupons (platform, code, deal_name, amount, checkout_id, business_date, registered_by, registered_at)
+      VALUES (${cp.platform}, ${cp.code}, ${cp.dealName}, ${cp.amount}, ${a.checkoutId}, ${a.date}, ${a.ctx.actor.id}, ${a.at})
+      RETURNING id`;
+    await tx`
+      INSERT INTO checkout_payments (checkout_id, method, amount, ref, coupon_id)
+      VALUES (${a.checkoutId}, 'coupon', ${cp.amount}, ${cp.dealName}, ${g!.id})`;
+  }
+  for (const p of a.payments) {
+    if (p.method === 'wallet' || p.method === 'coupon' || p.method === 'discount') continue;
+    await tx`
+      INSERT INTO checkout_payments (checkout_id, method, amount, ref)
+      VALUES (${a.checkoutId}, ${p.method}, ${p.amount}, ${p.ref})`;
+  }
+  if (a.discount && discounts[0]) {
+    await tx`
+      INSERT INTO checkout_payments (checkout_id, method, amount, ref, approved_by, grant_id)
+      VALUES (${a.checkoutId}, 'discount', ${discounts[0].amount}, ${a.discount.reason}, ${a.discount.approverId}, ${discounts[0].grantId})`;
+  }
+}
+
 export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContext): Promise<CheckoutDetail> {
   const input = parse(CheckoutInput, raw);
   const ids = [...new Set(input.visitIds)];
   if (ids.length !== input.visitIds.length) throw badRequest('同一张手牌不能重复结账');
-  const wallets = input.payments.filter((p) => p.method === 'wallet');
-  const coupons = input.payments.filter((p) => p.method === 'coupon');
-  const discounts = input.payments.filter((p) => p.method === 'discount');
-  if (discounts.length > 1) throw badRequest('优惠 / 免单最多登记一笔，请合并金额后重新授权');
-  if (input.payments.some((p) => p.method === 'other' && !p.ref)) throw badRequest('「其他」收款请在备注里写明收的是什么');
-  if (wallets.length && !can(ctx.actor, 'consume.create')) throw forbidden('当前岗位不能用会员储值收款');
-  if (new Set(wallets.map((w) => w.memberId)).size !== wallets.length) throw badRequest('同一位会员的储值支付请合并为一笔');
-  if (new Set(coupons.map((c) => `${c.platform}:${c.code}`)).size !== coupons.length) throw badRequest('同一张团购券不能登记两次');
+  const { wallets, discounts } = splitPayments(input.payments, ctx.actor);
   for (const t of input.tickets) if (!ids.includes(t.visitId)) throw badRequest('补选票种的客人不在本次结账里');
   // 补录纸质单：按纸质单上的实际离店时间结账；储值流水按发生顺序连续记账，不能插到过去，补录的结账不能用储值
   const backfill = resolveBackfill(input.backfill, ctx.actor);
@@ -307,16 +400,7 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
         tickets: priced.map((r) => ({ tagCode: r.tagCode, segments: r.ticket.segments, amount: r.ticket.amount })),
       });
     }
-    const paid = input.payments.reduce((s, p) => s + p.amount, 0);
-    if (paid !== total) {
-      throw unprocessable(
-        'NOT_SETTLED',
-        paid < total
-          ? `还差 ${formatYuan(total - paid)} 没有收，结清才能离店`
-          : `收款合计多了 ${formatYuan(paid - total)}，请核对（现金找零不用登记，按应收金额记）`,
-        { total, paid },
-      );
-    }
+    const paid = assertSettled(input.payments, total);
 
     // 优惠 / 免单：核销值班经理及以上的当场授权（这几张手牌、这个金额；业务回滚时核销一起回滚）
     const discount = discounts[0]
@@ -349,48 +433,7 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
     }
 
     const tagCodes = priced.map((r) => r.tagCode);
-    // 会员储值：按会员 id 升序逐位记账（锁顺序固定）
-    for (const w of [...wallets].sort((a, b) => a.memberId - b.memberId)) {
-      const r = await consumeForCheckout(tx, deps, {
-        memberId: w.memberId,
-        amount: w.amount,
-        expectedSplit: w.expectedSplit,
-        checkoutId,
-        checkoutNo,
-        tagCodes,
-        businessDate: date,
-        ctx,
-        at,
-      });
-      await tx`
-        INSERT INTO checkout_payments (checkout_id, method, amount, member_id, consumption_id)
-        VALUES (${checkoutId}, 'wallet', ${w.amount}, ${w.memberId}, ${r.consumptionId})`;
-    }
-    // 团购券：同一平台同一券码只能有一笔有效登记
-    for (const cp of coupons) {
-      const [used] = await tx<{ checkoutNo: string; registeredAt: string }[]>`
-        SELECT c.checkout_no, g.registered_at FROM group_buy_coupons g JOIN checkouts c ON c.id = g.checkout_id
-        WHERE g.platform = ${cp.platform} AND g.code = ${cp.code} AND g.status = 'active'`;
-      if (used) throw couponUsed(cp.platform, cp.code, used.checkoutNo);
-      const [g] = await tx<{ id: number }[]>`
-        INSERT INTO group_buy_coupons (platform, code, deal_name, amount, checkout_id, business_date, registered_by, registered_at)
-        VALUES (${cp.platform}, ${cp.code}, ${cp.dealName}, ${cp.amount}, ${checkoutId}, ${date}, ${ctx.actor.id}, ${at})
-        RETURNING id`;
-      await tx`
-        INSERT INTO checkout_payments (checkout_id, method, amount, ref, coupon_id)
-        VALUES (${checkoutId}, 'coupon', ${cp.amount}, ${cp.dealName}, ${g!.id})`;
-    }
-    for (const p of input.payments) {
-      if (p.method === 'wallet' || p.method === 'coupon' || p.method === 'discount') continue;
-      await tx`
-        INSERT INTO checkout_payments (checkout_id, method, amount, ref)
-        VALUES (${checkoutId}, ${p.method}, ${p.amount}, ${p.ref})`;
-    }
-    if (discount && discounts[0]) {
-      await tx`
-        INSERT INTO checkout_payments (checkout_id, method, amount, ref, approved_by, grant_id)
-        VALUES (${checkoutId}, 'discount', ${discounts[0].amount}, ${discount.reason}, ${discount.approverId}, ${discounts[0].grantId})`;
-    }
+    await recordCheckoutPayments(tx, deps, { checkoutId, checkoutNo, payments: input.payments, discount, tagCodes, date, at, ctx });
 
     // 结清：账单与来访结束，手牌释放；同行组没有在店客人时关闭
     await tx`UPDATE bills SET status = 'settled', closed_at = ${at} WHERE id IN ${tx(billIds)}`;
@@ -451,6 +494,15 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
       SELECT id, checkout_no, client_key, status, created_at FROM checkouts WHERE id = ${checkoutId} FOR UPDATE`;
     if (!c) throw notFound('结账单不存在');
     if (c.status !== 'completed') throw conflict('ALREADY_VOIDED', `结账单 ${c.checkoutNo} 已反结账`);
+    // 选钱箱只用于退现金（PR #17 复测 P2）：原单没收现金时，扫码等原路退回的提醒记到反结账人自己的班次，
+    // 与页面一致要求先开班（R1.2），不能借别人的班次绕过；收款明细只追加不修改，在这里核对即可
+    if (refundShiftId !== undefined) {
+      const [cash] = await tx<{ amount: number }[]>`
+        SELECT coalesce(sum(amount), 0)::int AS amount FROM checkout_payments WHERE checkout_id = ${c.id} AND method = 'cash'`;
+      if (cash!.amount === 0) {
+        throw unprocessable('REFUND_SHIFT_NOT_CASH', `结账单 ${c.checkoutNo} 没有收现金，不用选退款钱箱；请先开班，再反结账（原路退回的提醒记到你当班的交班表）`);
+      }
+    }
     // 撤销与反结账时限（#10，默认 48 小时）：超过时限只有店主可以反结账
     const windowHours = (await loadSettings(tx)).reversalWindowHours;
     if (windowHours !== null && ctx.actor.role !== 'owner' && at.getTime() - new Date(c.createdAt).getTime() > windowHours * 3_600_000) {
@@ -459,18 +511,25 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
         checkedOutAt: new Date(c.createdAt).toISOString(),
       });
     }
-    const items = await tx<{ visitId: number; billId: number; tagId: number; groupId: number | null; memberId: number | null }[]>`
-      SELECT cb.visit_id, cb.bill_id, v.tag_id, v.group_id, v.member_id
-      FROM checkout_bills cb JOIN visits v ON v.id = cb.visit_id WHERE cb.checkout_id = ${c.id}`;
+    // 手牌结账单恢复来访；桌台结账单（餐饮第二步）恢复开台
+    const all = await tx<{ visitId: number | null; tableSessionId: number | null; billId: number; tagId: number | null; groupId: number | null; memberId: number | null }[]>`
+      SELECT cb.visit_id, cb.table_session_id, cb.bill_id, v.tag_id, v.group_id, v.member_id
+      FROM checkout_bills cb LEFT JOIN visits v ON v.id = cb.visit_id WHERE cb.checkout_id = ${c.id}`;
+    const items = all.filter((i): i is typeof i & { visitId: number; tagId: number } => i.visitId !== null);
+    const tableItems = all.filter((i) => i.tableSessionId !== null).map((i) => ({ sessionId: i.tableSessionId!, billId: i.billId }));
 
     // ① 手牌（id 升序）：必须启用、未锁定、没有其他在店客人
-    const tags = await tx<{ id: number; code: string; locked: boolean; active: boolean }[]>`
-      SELECT id, code, locked, active FROM hand_tags WHERE id IN ${tx(items.map((i) => i.tagId))} ORDER BY id FOR UPDATE`;
+    const tags = items.length
+      ? await tx<{ id: number; code: string; locked: boolean; active: boolean }[]>`
+          SELECT id, code, locked, active FROM hand_tags WHERE id IN ${tx(items.map((i) => i.tagId))} ORDER BY id FOR UPDATE`
+      : [];
     for (const t of tags) {
       if (!t.active || t.locked) throw conflict('TAG_UNAVAILABLE', `手牌 ${t.code} 已${t.active ? '锁定' : '停用'}，不能恢复在店；请先在手牌管理里处理`);
     }
-    const busy = await tx<{ code: string }[]>`
-      SELECT t.code FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE v.status = 'open' AND v.tag_id IN ${tx(tags.map((t) => t.id))}`;
+    const busy = tags.length
+      ? await tx<{ code: string }[]>`
+          SELECT t.code FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE v.status = 'open' AND v.tag_id IN ${tx(tags.map((t) => t.id))}`
+      : [];
     if (busy.length) throw conflict('TAG_REISSUED', `手牌 ${busy.map((b) => b.code).join('、')} 已发给其他客人，不能反结账`);
     const memberIds = items.flatMap((i) => (i.memberId ? [i.memberId] : []));
     if (memberIds.length) {
@@ -484,7 +543,21 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
     for (const v of visits.values()) {
       if (v.status !== 'settled') throw conflict('VISIT_CHANGED', `来访 ${v.visitNo} 状态已变化，请刷新后重试`);
     }
-    const billIds = items.map((i) => i.billId).sort((a, b) => a - b);
+    // 桌台结账单：桌台（id 升序）此刻不能已开给别的客人 → 开台（id 升序）
+    const tables = tableItems.length
+      ? await tx<{ id: number; name: string }[]>`
+          SELECT t.id, t.name FROM dining_tables t
+          WHERE t.id IN (SELECT table_id FROM table_sessions WHERE id IN ${tx(tableItems.map((i) => i.sessionId))}) ORDER BY t.id FOR UPDATE`
+      : [];
+    if (tables.length) {
+      const taken = await tx<{ name: string }[]>`
+        SELECT t.name FROM table_sessions s JOIN dining_tables t ON t.id = s.table_id WHERE s.status = 'open' AND s.table_id IN ${tx(tables.map((t) => t.id))}`;
+      if (taken.length) throw conflict('TABLE_TAKEN', `桌台「${taken.map((t) => t.name).join('、')}」已开给别的客人，不能反结账；请先把那一桌转到别的桌台`);
+      const sessions = await tx<{ id: number; sessionNo: string; status: string }[]>`
+        SELECT id, session_no, status FROM table_sessions WHERE id IN ${tx(tableItems.map((i) => i.sessionId))} ORDER BY id FOR UPDATE`;
+      for (const s of sessions) if (s.status !== 'settled') throw conflict('VISIT_CHANGED', `开台 ${s.sessionNo} 状态已变化，请刷新后重试`);
+    }
+    const billIds = all.map((i) => i.billId).sort((a, b) => a - b);
     await tx`SELECT id FROM bills WHERE id IN ${tx(billIds)} ORDER BY id FOR UPDATE`;
 
     const date = await businessDate(tx, deps, at);
@@ -494,9 +567,14 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
     if (groupIds.length) await tx`UPDATE visit_groups SET status = 'open', closed_at = NULL WHERE id IN ${tx(groupIds)} AND status = 'closed'`;
     await tx`UPDATE bills SET status = 'open', closed_at = NULL WHERE id IN ${tx(billIds)}`;
     // 门票计到第一次结账的时刻（客人已离店，只是更正）；多次反结账保留第一次的时刻
-    await tx`
-      UPDATE visits SET status = 'open', closed_at = NULL, closed_by = NULL, ticket_end_at = coalesce(ticket_end_at, closed_at)
-      WHERE id IN ${tx(items.map((i) => i.visitId))}`;
+    if (items.length) {
+      await tx`
+        UPDATE visits SET status = 'open', closed_at = NULL, closed_by = NULL, ticket_end_at = coalesce(ticket_end_at, closed_at)
+        WHERE id IN ${tx(items.map((i) => i.visitId))}`;
+    }
+    if (tableItems.length) {
+      await tx`UPDATE table_sessions SET status = 'open', closed_at = NULL, closed_by = NULL WHERE id IN ${tx(tableItems.map((i) => i.sessionId))}`;
+    }
     // 门票明细作废（下次结账按届时的在店时长重新计算）
     const ticketLines = await tx<{ id: number; billId: number; amount: number }[]>`
       SELECT id, bill_id, amount FROM bill_lines
@@ -531,6 +609,7 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
       detail: {
         docNo: c.checkoutNo,
         tags: tags.map((t) => t.code),
+        ...(tables.length ? { tables: tables.map((t) => t.name) } : {}),
         reason,
         ...(drawer && drawer.staffId !== ctx.actor.id ? { refundShift: drawer.shiftNo, refundDrawer: drawer.staffName } : {}),
       },
@@ -549,12 +628,16 @@ export async function getCheckout(db: Db, id: number): Promise<CheckoutDetail> {
            c.voided_at, vs.display_name AS voided_by_name, c.void_reason, ${backfillMarkSql(db, 'c.client_key')} AS backfill
     FROM checkouts c JOIN staff s ON s.id = c.operator_id LEFT JOIN staff vs ON vs.id = c.voided_by WHERE c.id = ${id}`;
   if (!c) throw notFound('结账单不存在');
+  // 手牌账单显示牌号；桌台账单（餐饮第二步）显示桌号与人数
   const bills = await db<CheckoutDetail['bills']>`
-    SELECT cb.bill_id, b.bill_no, cb.visit_id, v.visit_no, t.code AS tag_code, m.name AS member_name, v.guest_label, cb.amount,
+    SELECT cb.bill_id, b.bill_no, cb.visit_id, v.visit_no, t.code AS tag_code, cb.table_session_id, dt.name AS table_name, cb.guests,
+           coalesce(m.name, tm.name) AS member_name, coalesce(v.guest_label, ts.guest_label, '') AS guest_label, cb.amount,
            cb.stay_minutes, cb.ticket_name, cb.ticket_segments, cb.ticket_amount
-    FROM checkout_bills cb JOIN bills b ON b.id = cb.bill_id JOIN visits v ON v.id = cb.visit_id JOIN hand_tags t ON t.id = v.tag_id
-    LEFT JOIN members m ON m.id = v.member_id
-    WHERE cb.checkout_id = ${id} ORDER BY t.code`;
+    FROM checkout_bills cb JOIN bills b ON b.id = cb.bill_id
+    LEFT JOIN visits v ON v.id = cb.visit_id LEFT JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id
+    LEFT JOIN table_sessions ts ON ts.id = cb.table_session_id LEFT JOIN dining_tables dt ON dt.id = ts.table_id
+    LEFT JOIN members tm ON tm.id = ts.member_id
+    WHERE cb.checkout_id = ${id} ORDER BY coalesce(t.code, dt.name)`;
   const payments = await db<CheckoutDetail['payments']>`
     SELECT p.id, p.method, p.amount, p.ref, p.member_id, m.name AS member_name, ap.display_name AS approved_by_name,
            CASE WHEN k.id IS NULL THEN NULL ELSE json_build_object('id', k.id, 'docNo', k.doc_no, 'principal', k.principal_amount,
@@ -568,7 +651,7 @@ export async function getCheckout(db: Db, id: number): Promise<CheckoutDetail> {
     SELECT DISTINCT t.code FROM visits v JOIN hand_tags t ON t.id = v.tag_id
     WHERE v.status = 'open' AND v.group_id IN (
       SELECT v2.group_id FROM checkout_bills cb JOIN visits v2 ON v2.id = cb.visit_id WHERE cb.checkout_id = ${id} AND v2.group_id IS NOT NULL)
-      AND v.id NOT IN (SELECT visit_id FROM checkout_bills WHERE checkout_id = ${id})
+      AND v.id NOT IN (SELECT visit_id FROM checkout_bills WHERE checkout_id = ${id} AND visit_id IS NOT NULL)
     ORDER BY t.code`;
   return { ...c, backfill: normalizeMark(c.backfill), bills, payments, remainingMates: mates.map((m) => m.code) };
 }
@@ -576,8 +659,10 @@ export async function getCheckout(db: Db, id: number): Promise<CheckoutDetail> {
 export async function listCheckouts(db: Db, date: string): Promise<CheckoutSummary[]> {
   return db<CheckoutSummary[]>`
     SELECT c.id, c.checkout_no, c.status, c.total_amount, c.business_date, s.display_name AS operator_name, c.created_at,
-           (SELECT array_agg(t.code ORDER BY t.code) FROM checkout_bills cb JOIN visits v ON v.id = cb.visit_id
-            JOIN hand_tags t ON t.id = v.tag_id WHERE cb.checkout_id = c.id) AS tag_codes,
+           coalesce((SELECT array_agg(t.code ORDER BY t.code) FROM checkout_bills cb JOIN visits v ON v.id = cb.visit_id
+                     JOIN hand_tags t ON t.id = v.tag_id WHERE cb.checkout_id = c.id), '{}') AS tag_codes,
+           coalesce((SELECT array_agg(dt.name ORDER BY dt.name) FROM checkout_bills cb JOIN table_sessions ts ON ts.id = cb.table_session_id
+                     JOIN dining_tables dt ON dt.id = ts.table_id WHERE cb.checkout_id = c.id), '{}') AS table_names,
            (SELECT array_agg(DISTINCT p.method) FROM checkout_payments p WHERE p.checkout_id = c.id) AS methods,
            (SELECT bf.slip_no FROM backfill_entries bf WHERE bf.op_key = c.client_key ORDER BY bf.id LIMIT 1) AS backfill_slip_no
     FROM checkouts c JOIN staff s ON s.id = c.operator_id

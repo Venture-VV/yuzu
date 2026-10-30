@@ -54,10 +54,14 @@ function CheckoutSlip({ d }: { d: CheckoutPrint }) {
       {d.bills.map((b, i) => (
         <section key={b.billId}>
           {i > 0 && <Rule />}
-          <Row left={<span className="text-[13px] font-bold">手牌 {b.tagCode}</span>} right={b.memberName ? `会员 ${b.memberName}` : b.guestLabel || '散客'} />
+          <Row
+            left={<span className="text-[13px] font-bold">{b.tableName !== null ? `桌台 ${b.tableName}` : `手牌 ${b.tagCode}`}</span>}
+            right={b.memberName ? `会员 ${b.memberName}` : b.guestLabel || '散客'}
+          />
           <p>
-            在店 {Math.floor(b.stayMinutes / 60)} 小时 {b.stayMinutes % 60} 分
-            {b.ticketAmount === 0 && ` · ${b.ticketName}（${ticketTierLabel(b.ticketSegments)}，免票）`}
+            {b.tableName !== null ? `用餐 ${b.guests} 人 · ` : '在店 '}
+            {Math.floor(b.stayMinutes / 60)} 小时 {b.stayMinutes % 60} 分
+            {b.ticketAmount === 0 && b.ticketSegments !== null && ` · ${b.ticketName}（${ticketTierLabel(b.ticketSegments)}，免票）`}
           </p>
           <div className="mt-1 space-y-0.5">
             {b.lines.map((l, j) => (

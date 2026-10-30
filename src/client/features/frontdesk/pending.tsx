@@ -6,7 +6,7 @@ import { formatDateTime, uuid } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Button, Notice } from '../../components/ui';
 
-// 前台「结果待确认」的操作（接待发牌、挂账、换牌），保存在本机浏览器里。
+// 前台「结果待确认」的操作（接待发牌、挂账、换牌、结账，以及餐饮的开台、桌台点单、桌台结账），保存在本机浏览器里。
 //
 // 提交前先记下操作编号、对象和原请求，并读回核对确实已保存；保存不了（存储已满或被禁用）就不发请求。
 // 只有确认了结果（成功、服务端明确拒绝、员工作废且服务端确认作废）才删除。
@@ -16,7 +16,7 @@ import { Button, Notice } from '../../components/ui';
 //   · 按原内容重新提交：沿用原编号与原请求，服务端保证只生效一次；重提被明确拒绝时，先在服务端作废编号再下结论；
 //   · 确认作废：服务端先把编号登记为作废，原请求之后即使到达也整笔回滚，然后才允许重新填写。
 
-export type FrontdeskOpType = 'checkin' | 'bill_post' | 'tag_swap' | 'checkout';
+export type FrontdeskOpType = 'checkin' | 'bill_post' | 'tag_swap' | 'checkout' | 'table_open' | 'table_post' | 'table_checkout';
 
 export interface FrontdeskPendingOp {
   key: string;
@@ -27,7 +27,11 @@ export interface FrontdeskPendingOp {
   visitId: number | null;
   /** 结账涉及的全部来访（同行合并结账），这些手牌上都不能另起一笔结账 */
   visitIds?: number[];
-  /** 展示用：涉及的手牌、内容摘要、金额 */
+  /** 开台：那张桌台（同一张桌台上不能另起一笔开台） */
+  tableId?: number;
+  /** 桌台点单：那次开台；桌台结账：涉及的全部开台（这几桌都不能另起一笔） */
+  sessionIds?: number[];
+  /** 展示用：涉及的手牌（桌台为「桌 A1」）、内容摘要、金额 */
   tagCodes: string[];
   summary: string;
   amount: number | null;
@@ -35,7 +39,18 @@ export interface FrontdeskPendingOp {
   createdAt: string;
 }
 
-export const FRONTDESK_OP_LABELS: Record<FrontdeskOpType, string> = { checkin: '接待发牌', bill_post: '挂账', tag_swap: '换牌', checkout: '结账' };
+export const FRONTDESK_OP_LABELS: Record<FrontdeskOpType, string> = {
+  checkin: '接待发牌',
+  bill_post: '挂账',
+  tag_swap: '换牌',
+  checkout: '结账',
+  table_open: '开台',
+  table_post: '桌台点单',
+  table_checkout: '桌台结账',
+};
+
+/** 餐饮桌台的操作：对象是桌台或开台，不是手牌 */
+export const isTableOp = (type: FrontdeskOpType) => type === 'table_open' || type === 'table_post' || type === 'table_checkout';
 
 const STORAGE_KEY = 'yuzu.frontdeskPending.v1';
 const listeners = new Set<() => void>();
@@ -160,11 +175,23 @@ export function useFrontdeskPendingForBanner(): FrontdeskPendingOp[] {
   return useSyncExternalStore(subscribe, bannerSnapshot);
 }
 
-/** 某个对象上的待确认操作：接待看全部接待；挂账、换牌看同一位客人；结账看涉及这位客人的结账 */
-export function pendingFor(list: FrontdeskPendingOp[], type: FrontdeskOpType, visitId: number | null) {
-  return list.find(
-    (p) => p.type === type && (type === 'checkin' || p.visitId === visitId || (visitId !== null && !!p.visitIds?.includes(visitId))),
-  );
+/**
+ * 某个对象上的待确认操作：接待看全部接待；挂账、换牌看同一位客人；结账看涉及这位客人的结账；
+ * 开台看同一张桌台；桌台点单看同一次开台；桌台结账看涉及这次开台的结账。
+ */
+export function pendingFor(
+  list: FrontdeskPendingOp[],
+  type: FrontdeskOpType,
+  visitId: number | null,
+  table: { tableId?: number | null; sessionId?: number | null } = {},
+) {
+  return list.find((p) => {
+    if (p.type !== type) return false;
+    if (type === 'checkin') return true;
+    if (type === 'table_open') return table.tableId != null && p.tableId === table.tableId;
+    if (type === 'table_post' || type === 'table_checkout') return table.sessionId != null && !!p.sessionIds?.includes(table.sessionId);
+    return p.visitId === visitId || (visitId !== null && !!p.visitIds?.includes(visitId));
+  });
 }
 
 export type OpState =
@@ -180,9 +207,17 @@ type Pick<T> = (found: Extract<FrontdeskOpLookup, { found: true }>) => T | null;
  * 前台写操作的提交状态机（与会员记账的待确认流程同一思路）。
  * 有待确认记录时，表单锁定、只能查回 / 原样重提 / 确认作废；没有时每次提交使用新的操作编号。
  */
-export function useFrontdeskOp<T>(opts: { type: FrontdeskOpType; visitId: number | null; staffName: string; pick: Pick<T> }) {
+export function useFrontdeskOp<T>(opts: {
+  type: FrontdeskOpType;
+  visitId: number | null;
+  /** 开台：桌台；桌台点单、桌台结账：开台（发起结账的那桌） */
+  tableId?: number | null;
+  sessionId?: number | null;
+  staffName: string;
+  pick: Pick<T>;
+}) {
   const all = useFrontdeskPending();
-  const pending = pendingFor(all, opts.type, opts.visitId) ?? null;
+  const pending = pendingFor(all, opts.type, opts.visitId, { tableId: opts.tableId, sessionId: opts.sessionId }) ?? null;
   const [state, setState] = useState<OpState>({ phase: 'idle' });
   const { pick } = opts;
   const pendingKey = pending?.key;
@@ -243,13 +278,19 @@ export function useFrontdeskOp<T>(opts: { type: FrontdeskOpType; visitId: number
 
   /** 提交一笔新的操作（有待确认记录时不允许） */
   const submit = useCallback(
-    async (build: (key: string) => { url: string; body: unknown; tagCodes: string[]; summary: string; amount: number | null; visitIds?: number[] }) => {
+    async (
+      build: (key: string) => { url: string; body: unknown; tagCodes: string[]; summary: string; amount: number | null; visitIds?: number[]; sessionIds?: number[] },
+    ) => {
       if (pending) return null;
       const key = uuid();
       const b = build(key);
-      return send({ key, type: opts.type, visitId: opts.visitId, staffName: opts.staffName, createdAt: new Date().toISOString(), ...b });
+      const table = {
+        ...(opts.tableId != null ? { tableId: opts.tableId } : {}),
+        ...(opts.sessionId != null ? { sessionIds: [opts.sessionId] } : {}),
+      };
+      return send({ key, type: opts.type, visitId: opts.visitId, staffName: opts.staffName, createdAt: new Date().toISOString(), ...table, ...b });
     },
-    [pending, send, opts.type, opts.visitId, opts.staffName],
+    [pending, send, opts.type, opts.visitId, opts.tableId, opts.sessionId, opts.staffName],
   );
 
   /** 按原内容、原编号重新提交 */
@@ -363,7 +404,7 @@ export function PendingPanel<T>({
           ? `${op.state.message}。`
           : op.state.phase === 'not_found'
             ? '暂未查到已生效的结果，原请求可能仍在处理。可按原内容重新提交（沿用原编号，不会重复），或确认作废后重新填写（作废后原请求即使到达也不会生效）。'
-            : '处理前不能对这张手牌另起一笔，避免重复。'}
+            : `处理前不能对这${isTableOp(p.type) ? '桌' : '张手牌'}另起一笔，避免重复。`}
       </span>
     </Notice>
   );
