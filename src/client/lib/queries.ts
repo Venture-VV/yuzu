@@ -10,7 +10,7 @@ import type {
   StaffRecord,
 } from '@shared/types';
 import type { StoreRules } from '@shared/types';
-import { api } from './api';
+import { api, ApiError } from './api';
 
 export const qk = {
   session: ['session'] as const,
@@ -25,8 +25,14 @@ export const qk = {
   audit: (date?: string) => ['audit', date] as const,
 };
 
+/** 当前会话：服务器一时出错、断网时重试两次（只有 401 才是会话失效，见 AuthGate） */
 export const useSessionQuery = () =>
-  useQuery({ queryKey: qk.session, queryFn: () => api.get<SessionInfo>('/api/auth/me'), retry: false, staleTime: 60_000 });
+  useQuery({
+    queryKey: qk.session,
+    queryFn: () => api.get<SessionInfo>('/api/auth/me'),
+    retry: (count, error) => !(error instanceof ApiError && error.status < 500) && count < 2,
+    staleTime: 60_000,
+  });
 
 export const useMembers = (q: string) =>
   useQuery({

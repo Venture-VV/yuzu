@@ -4,14 +4,13 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { minuteOfDay } from '../src/shared/business-date';
 import expected from '../src/server/demo/billing-expected.json';
 import { applyOpeningImport } from '../src/server/modules/opening';
 import { balanceChanges, parseLocalTime } from '../src/server/ops/balance-changes';
 import { buildDailyRecon, type DailyRecon } from '../src/server/ops/recon';
 import { seedBillingDemo } from '../src/server/seed-billing';
 import { seedFrontdeskDemo } from '../src/server/seed-frontdesk';
-import { setup, type TestContext } from './helpers';
+import { demoSeedTime, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let date: string;
@@ -30,9 +29,7 @@ const file = (name: string) => recon.files.find((f) => f.name === name)!.content
 beforeAll(async () => {
   ctx = await setup();
   // 与 billing-seed.test 相同：避开营业日切换（06:00）附近
-  let now = new Date();
-  const m = minuteOfDay(now, 'Asia/Shanghai');
-  if (m >= 360 && m < 450) now = new Date(now.getTime() - 2 * 3_600_000);
+  const now = demoSeedTime();
   seededAt = now;
   await seedFrontdeskDemo(ctx.sql, ctx.config, { now });
   await seedBillingDemo(ctx.sql, ctx.config, { now });

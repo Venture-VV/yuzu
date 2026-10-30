@@ -55,6 +55,6 @@
     "overtimeGraceMinutes": 15
   },
   "walletRule": "全部前台操作后，以上四位会员余额与充值后一致；consumptions / reversals 中没有任何前台产生的记录",
-  "checks": ["bill_amount_vs_lines", "visit_vs_bill_status", "open_visit_tags", "group_status", "checkout_vs_bills", "checkout_wallet", "checkout_coupons", "checkout_discounts", "backfill_entries"],
+  "checks": ["bill_amount_vs_lines", "visit_vs_bill_status", "open_visit_tags", "group_status", "checkout_vs_bills", "checkout_wallet", "checkout_coupons", "checkout_discounts", "visit_periods", "backfill_entries"],
   "accounts": { "owner": "linlan", "clerk": "xiaozhou", "dutyManager": "zhangjl", "password": "yuzu2026" }
 }

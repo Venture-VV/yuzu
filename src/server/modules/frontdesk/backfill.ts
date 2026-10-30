@@ -4,7 +4,8 @@
 //   · 接待、挂账、结账的请求多带一项 backfill（纸质单号 + 实际时间），服务端按实际时间办理（门票按实际在店时长计价，
 //     营业日按实际时间归属），其余校验与平时相同（先开班、授权、团购券查重、幂等）；
 //   · 实际时间在 BACKFILL_WINDOW_HOURS 小时以内、不晚于此刻；实际时间那一刻手牌或会员已被别的来访占用的，拒绝；
-//     挂账、结账不能早于接待，结账不能早于已挂的明细；补录接待的客人结账时，在店时段里手牌、会员不能已有别的来访；
+//     挂账、结账不能早于接待，结账不能早于已挂的明细；补录接待的客人结账、换牌时，在店时段里用过的每张手牌（含换走的）、
+//     会员都不能已有别的来访；前台自检核对全部来访的手牌、会员时段不重叠；
 //   · 补录的结账不能用会员储值（储值流水按发生顺序连续记账，不能插到过去）；
 //   · 每一步在 backfill_entries 留一条记录（与单据同一事务），日结与每日对账包的异常清单列出「补录」。
 
@@ -51,29 +52,49 @@ export function resolveBackfill(data: BackfillData, actor: Actor, now = new Date
 }
 
 /**
- * 手牌的占用时段：每位客人从接待（或换到这张牌）起，到换走、结账或撤销为止；在店的客人没有终点（until 为 null）。
- * 返回与 [from, to) 重叠的第一段（不含 exclude 里的来访）。
+ * 手牌的占用时段：每位客人从接待（或换到这张牌）起，到换走、结账或撤销为止；反结账后重结的客人到第一次结账的时刻为止
+ * （ticket_end_at，之后只是更正）。在店的客人没有终点（until 为 null）。返回与 [from, to) 重叠的第一段（不含 exclude 里的来访）。
  */
 async function tagOverlap(tx: Tx, tagIds: number[], from: Date, to: Date, exclude: number[]) {
   const [hit] = await tx<{ code: string; visitNo: string; since: string; until: string | null }[]>`
     WITH touched AS (
       SELECT id FROM visits WHERE tag_id IN ${tx(tagIds)}
       UNION SELECT visit_id FROM visit_tag_changes WHERE from_tag_id IN ${tx(tagIds)} OR to_tag_id IN ${tx(tagIds)}
-    ), segs AS (
+    ), raw AS (
       SELECT v.id AS visit_id, v.visit_no, c.from_tag_id AS tag_id,
-             coalesce(lag(c.created_at) OVER (PARTITION BY v.id ORDER BY c.id), v.checked_in_at) AS since, c.created_at AS until
+             coalesce(lag(c.created_at) OVER (PARTITION BY v.id ORDER BY c.id), v.checked_in_at) AS since, c.created_at AS until,
+             coalesce(v.ticket_end_at, v.closed_at) AS left_at
       FROM visits v JOIN visit_tag_changes c ON c.visit_id = v.id
       WHERE v.id IN (SELECT id FROM touched) AND v.status <> 'cancelled'
       UNION ALL
       SELECT v.id, v.visit_no, v.tag_id,
-             coalesce((SELECT max(c.created_at) FROM visit_tag_changes c WHERE c.visit_id = v.id), v.checked_in_at), v.closed_at
+             coalesce((SELECT max(c.created_at) FROM visit_tag_changes c WHERE c.visit_id = v.id), v.checked_in_at), NULL,
+             coalesce(v.ticket_end_at, v.closed_at)
       FROM visits v WHERE v.id IN (SELECT id FROM touched) AND v.status <> 'cancelled'
+    ), segs AS (
+      SELECT visit_id, visit_no, tag_id, since,
+             CASE WHEN until IS NULL THEN left_at WHEN left_at IS NULL THEN until ELSE least(until, left_at) END AS until
+      FROM raw
     )
     SELECT t.code, s.visit_no, s.since, s.until FROM segs s JOIN hand_tags t ON t.id = s.tag_id
     WHERE s.tag_id IN ${tx(tagIds)} AND s.visit_id NOT IN ${tx(exclude.length ? exclude : [0])}
+      AND (s.until IS NULL OR s.since < s.until)
       AND s.since < ${to} AND (s.until IS NULL OR s.until > ${from})
     ORDER BY s.since LIMIT 1`;
   return hit;
+}
+
+/** 一位客人在每张手牌上的时段（接待与各次换牌），截到 end（离店时刻）为止；end 之后才换的牌不算 */
+async function visitSegments(tx: Tx, visitId: number, end: Date) {
+  return tx<{ tagId: number; since: string; until: string }[]>`
+    WITH raw AS (
+      SELECT c.from_tag_id AS tag_id, coalesce(lag(c.created_at) OVER (ORDER BY c.id), v.checked_in_at) AS since, c.created_at AS until
+      FROM visits v JOIN visit_tag_changes c ON c.visit_id = v.id WHERE v.id = ${visitId}
+      UNION ALL
+      SELECT v.tag_id, coalesce((SELECT max(c.created_at) FROM visit_tag_changes c WHERE c.visit_id = v.id), v.checked_in_at), ${end}::timestamptz
+      FROM visits v WHERE v.id = ${visitId}
+    )
+    SELECT tag_id, since, least(until, ${end}) AS until FROM raw WHERE since < least(until, ${end})`;
 }
 
 /** 会员的来访与 [from, to) 重叠的第一笔（不含 exclude 里的来访） */
@@ -112,25 +133,26 @@ export async function assertFreeAt(tx: Tx, at: Date, tagIds: number[], memberIds
 }
 
 /**
- * 结账（平时或补录）：补录接待的客人，在店时段（接待到离店）里手牌或会员不能已有别的来访——
- * 恢复后手牌又发给了别人，说明这位客人在那之前已离店，要按纸质单补录结账时间。平时开的牌一直占着手牌，不受影响。
- * 反结账后重结的，离店时间按第一次结账的时刻（ticket_end_at）。
+ * 结账（平时或补录）与换牌：补录接待的客人，在店时段（接待到离店）里用过的每张手牌（含换走的）、会员都不能已有别的来访——
+ * 恢复后手牌又发给了别人，说明这位客人在那之前已离店，要按纸质单补录结账时间（换到别的牌也不能绕过）。
+ * 平时开的牌一直占着手牌，不受影响。反结账后重结的，离店时间按第一次结账的时刻（ticket_end_at）。
  */
 export async function assertNotReused(tx: Tx, at: Date, visitIds: number[], timeZone: string) {
-  const rows = await tx<{ id: number; tagId: number; memberId: number | null; checkedInAt: string; tagSince: string; endAt: string | null }[]>`
-    SELECT v.id, v.tag_id, v.member_id, v.checked_in_at, v.ticket_end_at AS end_at,
-           coalesce((SELECT max(c.created_at) FROM visit_tag_changes c WHERE c.visit_id = v.id), v.checked_in_at) AS tag_since
+  const rows = await tx<{ id: number; memberId: number | null; checkedInAt: string; endAt: string | null }[]>`
+    SELECT v.id, v.member_id, v.checked_in_at, v.ticket_end_at AS end_at
     FROM visits v
     WHERE v.id IN ${tx(visitIds)} AND EXISTS (SELECT 1 FROM backfill_entries b WHERE b.visit_id = v.id AND b.kind = 'checkin')`;
   for (const r of rows) {
     const end = r.endAt ? new Date(r.endAt) : at;
-    const tag = await tagOverlap(tx, [r.tagId], new Date(r.tagSince), end, [r.id]);
-    if (tag) {
-      throw conflict(
-        'BACKFILL_TAG_REUSED',
-        `手牌 ${tag.code} 在 ${period(tag, timeZone)}已由别的客人使用（来访 ${tag.visitNo}）：补录接待的这位客人应在此之前离店，请按纸质单补录结账时间`,
-        { code: tag.code, visitNo: tag.visitNo },
-      );
+    for (const seg of await visitSegments(tx, r.id, end)) {
+      const tag = await tagOverlap(tx, [seg.tagId], new Date(seg.since), new Date(seg.until), [r.id]);
+      if (tag) {
+        throw conflict(
+          'BACKFILL_TAG_REUSED',
+          `手牌 ${tag.code} 在 ${period(tag, timeZone)}已由别的客人使用（来访 ${tag.visitNo}）：补录接待的这位客人应在此之前离店，请按纸质单补录结账时间`,
+          { code: tag.code, visitNo: tag.visitNo },
+        );
+      }
     }
     const member = r.memberId ? await memberOverlap(tx, [r.memberId], new Date(r.checkedInAt), end, [r.id]) : undefined;
     if (member) {

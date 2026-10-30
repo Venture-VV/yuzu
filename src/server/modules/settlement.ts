@@ -61,6 +61,7 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
     opening: op!,
     net: net!,
     business: await businessTotals(db, date),
+    backfill: (await db<{ count: number }[]>`SELECT count(*)::int AS count FROM backfill_entries WHERE business_date = ${date}`)[0]!,
   };
 }
 
@@ -124,6 +125,7 @@ const withNewSections = (t: SettlementTotals): SettlementTotals => ({
   expiry: t.expiry ?? { count: 0, bonus: 0 },
   opening: t.opening ?? { count: 0, voidCount: 0, principal: 0, bonus: 0 },
   business: t.business ?? EMPTY_BUSINESS,
+  backfill: t.backfill ?? { count: 0 },
 });
 const sameTotals = (snapshot: SettlementTotals, now: SettlementTotals) => canonical(withNewSections(snapshot)) === canonical(now);
 

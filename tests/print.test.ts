@@ -2,13 +2,12 @@
 // 重新结账的单只含新的门票。建在 seed-frontdesk-demo + seed-billing-demo 上。
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { minuteOfDay } from '../src/shared/business-date';
 import type { CheckoutPrint } from '../src/shared/print';
 import expected from '../src/server/demo/billing-expected.json';
 import { createStaff } from '../src/server/modules/staff';
 import { seedBillingDemo } from '../src/server/seed-billing';
 import { seedFrontdeskDemo } from '../src/server/seed-frontdesk';
-import { api, login, setup, type TestContext } from './helpers';
+import { api, demoSeedTime, login, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let cashier: string;
@@ -29,9 +28,7 @@ async function printAll() {
 beforeAll(async () => {
   ctx = await setup();
   // 与 billing-seed.test 相同：避开营业日切换（06:00）附近
-  let now = new Date();
-  const m = minuteOfDay(now, 'Asia/Shanghai');
-  if (m >= 360 && m < 450) now = new Date(now.getTime() - 2 * 3_600_000);
+  const now = demoSeedTime();
   await seedFrontdeskDemo(ctx.sql, ctx.config, { now });
   await seedBillingDemo(ctx.sql, ctx.config, { now });
   cashier = await login(ctx.app, expected.accounts.cashier, expected.accounts.password);

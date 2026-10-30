@@ -24,6 +24,9 @@ import { createSql } from '../src/server/db';
 import { computeFingerprint, diffFingerprints } from '../src/server/ops/fingerprint';
 import { createMember, setup, type TestContext } from './helpers';
 
+/** 试恢复用的临时库名前缀：与 ops/backup.ts 相同，取测试库的库名（测试库不一定叫 yuzu_test） */
+const scratchPrefix = () => `${decodeURIComponent(new URL(ctx.config.databaseUrl).pathname.slice(1)).slice(0, 30)}_v_`;
+
 let ctx: TestContext;
 let dir: string;
 beforeAll(async () => {
@@ -87,7 +90,7 @@ describe('备份与核验', () => {
     const saved = JSON.parse(await readFile(`${file}.json`, 'utf8')) as BackupManifest;
     expect(saved.sha256).toBe(manifest.sha256);
     // 临时库已删除
-    const left = await ctx.sql`SELECT datname FROM pg_database WHERE datname LIKE 'yuzu_test_v_%'`;
+    const left = await ctx.sql`SELECT datname FROM pg_database WHERE datname LIKE ${`${scratchPrefix()}%`}`;
     expect(left).toEqual([]);
   });
 
@@ -167,8 +170,8 @@ describe('备份与核验', () => {
 
   it('清理中途中断留下的临时库，不动正在用的临时库', async () => {
     const now = Date.now();
-    const stale = `yuzu_test_v_${now - 2 * 3600_000}_abcdef`;
-    const fresh = `yuzu_test_v_${now - 60_000}_fedcba`;
+    const stale = `${scratchPrefix()}${now - 2 * 3600_000}_abcdef`;
+    const fresh = `${scratchPrefix()}${now - 60_000}_fedcba`;
     for (const name of [stale, fresh]) await ctx.sql.unsafe(`CREATE DATABASE "${name}"`);
     try {
       expect(await dropStaleScratch(ctx.config.databaseUrl, now)).toEqual([stale]);

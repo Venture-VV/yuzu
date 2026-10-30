@@ -7,7 +7,7 @@ import { SessionProvider } from './lib/session';
 import { setDisplayTimeZone } from './lib/utils';
 import { AppShell } from './components/AppShell';
 import { ToastProvider } from './components/Toast';
-import { Spinner } from './components/ui';
+import { Button, Spinner } from './components/ui';
 import { LogoMark } from './components/Brand';
 import { LoginPage } from './features/auth/LoginPage';
 import { ChangePasswordPage } from './features/auth/ChangePasswordPage';
@@ -72,7 +72,21 @@ function AuthGate({ bare = false }: { bare?: boolean }) {
       </div>
     );
   }
-  if (session.error || !session.data) {
+  // 只有 401 才是会话失效：服务器一时出错、断网时不跳登录页，已打开的页面与没提交的内容保留（PR #13 P2-2）
+  const expired = session.error instanceof ApiError && session.error.status === 401;
+  if (!session.data && session.error && !expired) {
+    return (
+      <div className="flex h-dvh flex-col items-center justify-center gap-4 bg-paper px-6 text-center" data-testid="session-unavailable">
+        <LogoMark className="size-12" />
+        <p className="text-[16px] font-bold text-ink">暂时连不上服务器</p>
+        <p className="max-w-sm text-[13px] text-ink-3">登录状态没有丢，稍后重试即可；一直连不上请联系值班经理。</p>
+        <Button variant="primary" loading={session.isFetching} onClick={() => void session.refetch()}>
+          重试
+        </Button>
+      </div>
+    );
+  }
+  if (!session.data || expired) {
     return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
   }
   if (session.data.staff.mustChangePassword) {

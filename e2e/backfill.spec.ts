@@ -1,7 +1,8 @@
 // v0.5.0 浏览器验收：依赖 seed-demo、seed-frontdesk-demo、seed-billing-demo（仅独立演示库）。
 //   · 按实际时间补录纸质单（R1.9）：值班经理打开「补录纸质单」，填单号与实际时间，接待 → 加项目 → 结账各按纸质单上的时间办理，
 //     补录的结账没有储值；结账单、手牌账单标「补录」，日结异常清单列出；
-//   · 前台按姓名或手机尾号找在店客人；值班经理在前台锁牌 / 解锁；看板在店未结含门票估算。
+//   · 前台按姓名或手机尾号找在店客人；值班经理在前台锁牌 / 解锁；看板在店未结含门票估算；
+//   · 会话接口一时出错（5xx、断网）不跳登录页，页面上没提交的内容保留（PR #13 P2-2）。
 // 账号：值班经理 zhangjl、店主 linlan，密码 yuzu2026。会改数据，只在门店电脑尺寸执行；每次自动挑没用过的空闲手牌，可重复执行。
 import { expect, test, type Page } from '@playwright/test';
 
@@ -159,6 +160,25 @@ test.describe('v0.5.0 前台', () => {
     await expect(page.getByText(`手牌 ${code} 已解锁`)).toBeVisible();
     const after = (await board(page)).find((t) => t.code === code)!;
     expect(after.locked).toBe(false);
+  });
+
+  test('会话接口一时出错不跳登录：页面与补录条里没提交的单号都还在（PR #13 P2-2）', async ({ page }) => {
+    await page.clock.install();
+    await login(page, 'zhangjl');
+    await page.goto('/frontdesk');
+    await expect(page.getByTestId('tag-board')).toBeVisible();
+    await page.getByTestId('backfill-toggle').click();
+    await page.getByTestId('backfill-slip').fill('KEEP-0001');
+    // 会话缓存 60 秒后过期；重新聚焦时会话接口一直 503（重试也失败）
+    await page.route('**/api/auth/me', (route) => route.fulfill({ status: 503, contentType: 'text/plain', body: 'Service Unavailable' }));
+    await page.clock.fastForward(61_000);
+    // 页面重新可见（React Query 在 window 上监听 visibilitychange）
+    await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
+    await page.clock.runFor(10_000);
+    await expect(page).toHaveURL(/\/frontdesk/);
+    await expect(page.getByTestId('backfill-slip')).toHaveValue('KEEP-0001');
+    await page.unroute('**/api/auth/me');
+    await page.getByTestId('backfill-exit').click();
   });
 
   test('看板：在店未结含门票估算', async ({ page }) => {

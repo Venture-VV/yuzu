@@ -45,7 +45,17 @@ import {
   saveKey,
   setTxTimeouts,
 } from './common';
-import { assertAfterVisits, assertFreeAt, backfillDetail, backfillMarkSql, BackfillInput, normalizeMark, recordBackfill, resolveBackfill } from './backfill';
+import {
+  assertAfterVisits,
+  assertFreeAt,
+  assertNotReused,
+  backfillDetail,
+  backfillMarkSql,
+  BackfillInput,
+  normalizeMark,
+  recordBackfill,
+  resolveBackfill,
+} from './backfill';
 import { getCheckout } from './checkout';
 import { resolveTicketType, ticketAuthRequired, visitTicket } from './tickets';
 import { assertVipAllowed, consumeVipShortfalls, memberLevels, vipShortfalls } from './vip';
@@ -294,6 +304,8 @@ export async function swapTag(deps: Deps, visitId: number, raw: SwapInputData, c
     const visit = (await lockVisits(tx, [visitId])).get(visitId)!;
     assertOpen(visit);
     if (visit.tagId !== peek.tagId) throw conflict('VISIT_CHANGED', '这位客人刚刚已换过牌，请刷新后再操作');
+    // 补录接待的客人：手牌之后又发给了别人时，换牌也不能绕过，要先按纸质单补录结账时间
+    await assertNotReused(tx, at, [visit.id], deps.config.timezone);
     const from = tags.get(peek.code)!;
     const to = tags.get(input.toTagCode)!;
     assertTagIssuable(to, visit.zone);

@@ -94,6 +94,38 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
   const [backfills] = await db<{ n: number; slips: number }[]>`
     SELECT count(*)::int AS n, count(DISTINCT slip_no)::int AS slips FROM backfill_entries`;
 
+  // ⑩ 同一张手牌、同一位会员的来访时段不重叠（按接待与换牌记录逐段，截到离店；反结账后重结的截到第一次结账的时刻）。
+  //   在店客人当前这一段还没有终点，不在这里核对（补录的客人结账、换牌时核对），所以补录接待之后、补录结账之前不会误报
+  const periodOverlaps = await db<{ kind: 'tag' | 'member'; label: string; visitNo: string }[]>`
+    WITH raw AS (
+      SELECT v.id AS visit_id, v.visit_no, c.from_tag_id AS tag_id,
+             coalesce(lag(c.created_at) OVER (PARTITION BY v.id ORDER BY c.id), v.checked_in_at) AS since, c.created_at AS until,
+             coalesce(v.ticket_end_at, v.closed_at) AS left_at
+      FROM visits v JOIN visit_tag_changes c ON c.visit_id = v.id WHERE v.status <> 'cancelled'
+      UNION ALL
+      SELECT v.id, v.visit_no, v.tag_id,
+             coalesce((SELECT max(c.created_at) FROM visit_tag_changes c WHERE c.visit_id = v.id), v.checked_in_at), NULL,
+             coalesce(v.ticket_end_at, v.closed_at)
+      FROM visits v WHERE v.status <> 'cancelled'
+    ), segs AS (
+      SELECT visit_id, visit_no, tag_id, since,
+             CASE WHEN until IS NULL THEN left_at WHEN left_at IS NULL THEN until ELSE least(until, left_at) END AS until
+      FROM raw
+    ), tag_runs AS (
+      SELECT tag_id, visit_no, since,
+             max(until) OVER (PARTITION BY tag_id ORDER BY since, visit_id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS before_until
+      FROM segs WHERE until IS NOT NULL AND since < until
+    ), member_runs AS (
+      SELECT member_id, visit_no, checked_in_at AS since,
+             max(coalesce(ticket_end_at, closed_at)) OVER (PARTITION BY member_id ORDER BY checked_in_at, id
+                                                            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS before_until
+      FROM visits WHERE status <> 'cancelled' AND member_id IS NOT NULL AND coalesce(ticket_end_at, closed_at) IS NOT NULL
+    )
+    SELECT 'tag' AS kind, t.code AS label, r.visit_no FROM tag_runs r JOIN hand_tags t ON t.id = r.tag_id WHERE r.since < r.before_until
+    UNION ALL
+    SELECT 'member', m.name, r.visit_no FROM member_runs r JOIN members m ON m.id = r.member_id WHERE r.since < r.before_until
+    LIMIT 5`;
+
   return [
     {
       key: 'bill_amount_vs_lines',
@@ -149,6 +181,14 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
       detail: discountDiff.length
         ? `${discountDiff.length} 笔优惠没有对应的当场授权或与授权不符（如结账单 ${discountDiff[0]!.checkoutNo}）`
         : `优惠 ${discounts!.n} 笔共 ${formatYuan(discounts!.amount)}，每笔都有经办人申请、值班经理及以上在这次结账核销的授权`,
+    },
+    {
+      key: 'visit_periods',
+      label: '同一手牌、同一会员的来访时段不重叠',
+      ok: periodOverlaps.length === 0,
+      detail: periodOverlaps.length
+        ? `${periodOverlaps.map((o) => `${o.kind === 'tag' ? `手牌 ${o.label}` : `会员「${o.label}」`}的来访 ${o.visitNo} 与之前的来访时段重叠`).join('；')}`
+        : '已离店的来访按接待、换牌、离店的时间逐段核对，同一张手牌、同一位会员没有重叠的时段',
     },
     {
       key: 'backfill_entries',

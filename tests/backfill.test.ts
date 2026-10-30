@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { businessDateOf } from '../src/shared/business-date';
 import type { Actor } from '../src/server/lib/context';
 import { checkout } from '../src/server/modules/frontdesk/checkout';
-import { checkin } from '../src/server/modules/frontdesk/visits';
+import { checkin, swapTag } from '../src/server/modules/frontdesk/visits';
 import { createStaff } from '../src/server/modules/staff';
 import { api, createMember, login, PASSWORD, setup, type TestContext } from './helpers';
 
@@ -20,6 +20,9 @@ let duty: string;
 let dutyId: number;
 
 const clerkActor = (): Actor => ({ id: ctx.clerkId, username: 'clerk', displayName: '测试店员', role: 'clerk', duties: [], mustChangePassword: false });
+const dutyActor = (): Actor => ({ id: dutyId, username: 'duty', displayName: '值班经理', role: 'duty_manager', duties: [], mustChangePassword: false });
+const periodsCheck = async () =>
+  ((await api(ctx.app, ctx.owner, 'GET', '/api/frontdesk/checks')).body as { key: string; ok: boolean; detail: string }[]).find((c) => c.key === 'visit_periods')!;
 const deps = () => ({ sql: ctx.sql, config: ctx.config });
 const ago = (hours: number) => new Date(Date.now() - hours * H);
 const slip = (at: Date, slipNo = 'P0001') => ({ slipNo, at: at.toISOString() });
@@ -63,7 +66,7 @@ beforeAll(async () => {
   dutyId = await createStaff(ctx.sql, { username: 'duty', displayName: '值班经理', role: 'duty_manager', password: PASSWORD, mustChangePassword: false });
   await createStaff(ctx.sql, { username: 'duty2', displayName: '另一位值班经理', role: 'duty_manager', password: PASSWORD, mustChangePassword: false });
   duty = await login(ctx.app, 'duty');
-  expect((await api(ctx.app, ctx.owner, 'POST', '/api/frontdesk/tags/batch', { prefix: 'B', from: 1, to: 60, width: 3, zone: 'male' })).status).toBe(200);
+  expect((await api(ctx.app, ctx.owner, 'POST', '/api/frontdesk/tags/batch', { prefix: 'B', from: 1, to: 80, width: 3, zone: 'male' })).status).toBe(200);
 });
 afterAll(async () => ctx.close());
 
@@ -189,6 +192,67 @@ describe('补录纸质单：接待、挂账、结账按实际时间', () => {
     expect((await pay(duty, [id], 49900, [{ method: 'cash', amount: 49900 }], { backfill: slip(ago(2.5), 'P-0030') })).body.error.code).toBe('BACKFILL_TAG_REUSED');
     const ok = await pay(duty, [id], 49900, [{ method: 'cash', amount: 49900 }], { backfill: slip(ago(4), 'P-0030') });
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+  });
+
+  it('补录的客人换牌不能绕过手牌重发：换牌拒绝；绕过换牌留下的旧牌时段，结账逐段核对、自检查得出（Codex 复测 P1）', async () => {
+    // B070 在 3 小时前到 2 小时前给甲用过；补录乙 6 小时前用 B070
+    await pastVisit('B070', ago(3), ago(2));
+    const r = await enter(duty, 'B070', { backfill: slip(ago(6), 'P-0070') });
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    const id = r.body.visits[0].id as number;
+    expect((await preview(duty, [id])).body.error.code).toBe('BACKFILL_TAG_REUSED');
+    // 换牌：拒绝，要先按纸质单补录结账时间
+    const swap = await api(ctx.app, duty, 'POST', `/api/frontdesk/visits/${id}/swap`, { clientKey: randomUUID(), toTagCode: 'B071', reason: '测试换牌' });
+    expect(swap.status).toBe(409);
+    expect(swap.body.error.code).toBe('BACKFILL_TAG_REUSED');
+    expect((await periodsCheck()).ok).toBe(true);
+
+    // 不经换牌接口（直接改库）留下一条换牌记录：乙在 B070 上的时段是 6 小时前到现在，与甲重叠
+    const [b070, b071] = await ctx.sql<{ id: number }[]>`SELECT id FROM hand_tags WHERE code IN ('B070', 'B071') ORDER BY code`;
+    await ctx.sql`UPDATE visits SET tag_id = ${b071!.id} WHERE id = ${id}`;
+    await ctx.sql`
+      INSERT INTO visit_tag_changes (visit_id, from_tag_id, to_tag_id, reason, old_tag_locked, operator_id)
+      VALUES (${id}, ${b070!.id}, ${b071!.id}, '测试绕过', false, ${dutyId})`;
+    const bad = await periodsCheck();
+    expect(bad.ok).toBe(false);
+    expect(bad.detail).toContain('手牌 B070');
+    // 平时结账、结账前核对：核对换走的 B070 那一段，拒绝
+    expect((await preview(duty, [id])).body.error.code).toBe('BACKFILL_TAG_REUSED');
+    expect((await pay(duty, [id], 49900, [{ method: 'cash', amount: 49900 }])).body.error.code).toBe('BACKFILL_TAG_REUSED');
+    // 按纸质单补录到甲之前离店：B070 那一段截到 4 小时前，换牌之后的 B071 不算；自检恢复一致
+    const ok = await pay(duty, [id], 49900, [{ method: 'cash', amount: 49900 }], { backfill: slip(ago(4), 'P-0070') });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect((await periodsCheck()).ok).toBe(true);
+  });
+
+  it('补录的客人在手牌重发之前就换了牌：每段都不重叠，平时结账照常', async () => {
+    const r = await enter(duty, 'B072', { backfill: slip(ago(6), 'P-0072') });
+    const id = r.body.visits[0].id as number;
+    // 5 小时前换到 B073（按当时的时间办理），之后 B072 在 3 小时前到 2 小时前给别人用过
+    await swapTag(deps(), id, { clientKey: randomUUID(), toTagCode: 'B073', reason: '柜锁坏了' }, { actor: dutyActor(), at: ago(5) });
+    await pastVisit('B072', ago(3), ago(2));
+    const pv = await preview(duty, [id]);
+    expect(pv.status, JSON.stringify(pv.body)).toBe(200);
+    expect((await pay(duty, [id], pv.body.totalAmount, [{ method: 'cash', amount: pv.body.totalAmount }])).status).toBe(200);
+    expect((await periodsCheck()).ok).toBe(true);
+  });
+
+  it('补录进已确认的营业日：只补录接待与挂账也提示「有变动」，重新确认后修订号 +1（Codex 复测 P2）', async () => {
+    const at = ago(30);
+    const date = dateOf(at);
+    const closed = await api(ctx.app, ctx.owner, 'POST', `/api/settlements/${date}/close`, { note: '测试确认' });
+    expect(closed.status, JSON.stringify(closed.body)).toBe(200);
+    expect(closed.body.closed).toMatchObject({ changedSinceClose: false });
+    const revision = closed.body.closed.revision as number;
+    const r = await enter(duty, 'B074', { backfill: slip(at, 'P-0074') });
+    expect(r.status).toBe(201);
+    const id = r.body.visits[0].id as number;
+    expect((await charge(duty, id, 1200, { backfill: slip(new Date(at.getTime() + 600_000), 'P-0074') })).status).toBe(200);
+    const s = (await api(ctx.app, ctx.owner, 'GET', `/api/settlements/${date}`)).body;
+    expect(s.backfill.count).toBeGreaterThanOrEqual(2);
+    expect(s.closed).toMatchObject({ changedSinceClose: true, revision });
+    const again = await api(ctx.app, ctx.owner, 'POST', `/api/settlements/${date}/close`, { note: '补录后重新确认' });
+    expect(again.body.closed).toMatchObject({ changedSinceClose: false, revision: revision + 1 });
   });
 
   it('日结异常清单列出「补录」；前台自检核对补录记录与单据一致', async () => {
