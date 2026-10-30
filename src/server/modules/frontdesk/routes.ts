@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { COUPON_PLATFORMS } from '@shared/checkout';
 import { ISO_DATE } from '@shared/business-date';
 import { MAX_VIP_LEVEL, VIP_LEVEL_BASES } from '@shared/frontdesk';
+import { MAX_LEVEL_NAME_LENGTH } from '@shared/members';
 import { guard } from '../../auth/guard';
 import { readSnapshot } from '../../db';
 import { writeAudit } from '../../lib/audit';
@@ -46,6 +47,13 @@ const RulesInput = z.object({
     .refine((t) => t.every((v, i) => i === 0 || v > t[i - 1]!), '各级门槛必须逐级递增'),
   vipOverrideEnabled: z.boolean(),
   overtimeGraceMinutes: z.number().int().min(0, '宽限分钟数不能为负').max(120, '宽限最多 120 分钟'),
+  vipLevelNames: z
+    .array(z.string().trim().max(MAX_LEVEL_NAME_LENGTH, `等级名称最多 ${MAX_LEVEL_NAME_LENGTH} 个字`))
+    .max(MAX_VIP_LEVEL, `最多 ${MAX_VIP_LEVEL} 级`)
+    .refine((names) => {
+      const used = names.filter(Boolean);
+      return new Set(used).size === used.length;
+    }, '各级名称不能重复'),
 });
 
 export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {

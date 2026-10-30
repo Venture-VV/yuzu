@@ -41,6 +41,7 @@ import { loadSettings } from '../modules/settings';
 import { guard } from './guard';
 import { checkLock, clearFailures, recordFailure } from './lockout';
 import { verifyPassword } from './password';
+import { subjectOf } from './role-permissions';
 
 const tagCode = z
   .string('请输入牌号')
@@ -139,7 +140,7 @@ export function registerGrantRoutes(app: FastifyInstance, deps: Deps) {
     }
     clearFailures(input.username);
     const rule = PURPOSE_RULES[input.purpose];
-    if (!can({ role: approver.role, duties: approver.duties ?? [] }, rule.approver)) {
+    if (!can(await subjectOf(sql, approver), rule.approver)) {
       throw new AppError(403, 'AUTH_NOT_ALLOWED', `「${approver.displayName}」的岗位不能授权${rule.approverText}`);
     }
     if (selfDiscount(input.purpose, req.actor.id, approver)) throw selfDiscountError();
@@ -201,7 +202,7 @@ async function lockGrant(tx: Tx, grantId: string, purpose: GrantPurpose, actor: 
   if (g.requestedBy !== actor.id) throw unprocessable('GRANT_INVALID', '这次授权是给其他员工的，请重新授权');
   if (g.usedAt) throw unprocessable('GRANT_USED', '这次授权已经用过，请重新授权');
   if (g.expired) throw unprocessable('GRANT_EXPIRED', `授权已过期（${GRANT_TTL_MINUTES} 分钟内有效），请重新授权`);
-  if (!g.active || !can({ role: g.role, duties: g.duties ?? [] }, PURPOSE_RULES[purpose].approver)) {
+  if (!g.active || !can(await subjectOf(tx, g), PURPOSE_RULES[purpose].approver)) {
     throw unprocessable('GRANT_INVALID', `授权人「${g.approverName}」已停用或已不能授权${PURPOSE_RULES[purpose].approverText.split('，')[0]}，请重新授权`);
   }
   // 升级前签发、还在有效期内的本人授权同样不能用

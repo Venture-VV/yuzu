@@ -6,8 +6,9 @@
 //   reset-password <账号>                 重置密码为临时密码
 //   seed-demo [--force]                   写入合成演示数据（试用、正式环境禁止；--force 在已有演示数据时再写一遍）
 //   seed-inventory-demo                   写入库存与采购合成演示数据（仅独立演示库；试用 / 正式环境与已有真实库存数据时拒绝）
-//   seed-frontdesk-demo                   写入前台手牌与在店账单合成演示数据（仅独立演示库；试用 / 正式环境与已有真实手牌时拒绝）
-//   seed-billing-demo                     在前台演示数据上写入结账、反结账与交班合成演示数据（仅独立演示库；试用 / 正式环境拒绝）
+//   seed-frontdesk-demo [--previous-day]  写入前台手牌与在店账单合成演示数据（仅独立演示库；试用 / 正式环境与已有真实手牌时拒绝）
+//   seed-billing-demo [--previous-day]    在前台演示数据上写入结账、反结账与交班合成演示数据（仅独立演示库；试用 / 正式环境拒绝）
+//                                         营业日切换后 5 个半小时内执行时提示演示单据会跨营业日；两条都加 --previous-day 时整体放到前一个营业日
 //   import-hand-tags <清单.csv> | --store-list [--apply] [--deactivate-missing]
 //                                         按清单导入手牌池（真实业务数据，默认只预览，加 --apply 才写入）；
 //                                         --store-list 使用店主 2026-10-27 的 747 个真实柜号；--deactivate-missing 同时停用清单外的空闲手牌
@@ -58,6 +59,7 @@ import { createStaff } from './modules/staff';
 import { assertBackupTarget, backupDirFromEnv, backupLoop, backupPolicyFromEnv, createBackup, verifyBackup } from './ops/backup';
 import { balanceChanges, balanceChangesCsv, parseLocalTime } from './ops/balance-changes';
 import { consistencyChecks } from './ops/consistency';
+import { demoSeedTime, rememberDemoAnchor } from './ops/demo-time';
 import { computeFingerprint } from './ops/fingerprint';
 import { buildDailyRecon } from './ops/recon';
 
@@ -151,10 +153,15 @@ async function main() {
       }
       case 'seed-frontdesk-demo': {
         await migrate(sql);
-        const result = await seedFrontdeskDemo(sql, config);
+        // 营业日切换后不久灌数据会跨营业日（PR #13 复核 P2-3）：提示，或按 --previous-day 整体放到前一个营业日
+        const t = await demoSeedTime(sql, { timeZone: config.timezone, kind: 'frontdesk', previousDay: args.includes('--previous-day') });
+        if (t.warning) console.warn(`⚠ ${t.warning}`);
+        const result = await seedFrontdeskDemo(sql, config, { now: t.now });
         if (result.skipped) {
           console.log('已存在前台演示数据，跳过。');
         } else {
+          if (t.anchored && t.now) await rememberDemoAnchor(sql, t.now);
+          if (t.notice) console.log(`· ${t.notice}`);
           console.log(`已写入前台演示数据：${result.tags} 张手牌、${result.inStore} 位在店客人。预期结果见 src/server/demo/frontdesk-expected.json`);
           console.log(`演示账号：店主 linlan / 前台 xiaozhou / 值班经理 zhangjl，密码均为 ${DEMO_PASSWORD}`);
         }
@@ -162,10 +169,13 @@ async function main() {
       }
       case 'seed-billing-demo': {
         await migrate(sql);
-        const result = await seedBillingDemo(sql, config);
+        const t = await demoSeedTime(sql, { timeZone: config.timezone, kind: 'billing', previousDay: args.includes('--previous-day') });
+        if (t.warning) console.warn(`⚠ ${t.warning}`);
+        const result = await seedBillingDemo(sql, config, { now: t.now });
         if (result.skipped) {
           console.log('已存在结账演示数据，跳过。');
         } else {
+          if (t.notice) console.log(`· ${t.notice}`);
           console.log(`已写入结账演示数据：${result.checkouts} 张结账单、${result.voided} 张反结账，以及一个已交班的班次。预期结果见 src/server/demo/billing-expected.json`);
           console.log(`演示账号：收银员 chenyin / 值班经理 zhangjl / 店主 linlan，密码均为 ${DEMO_PASSWORD}`);
         }
@@ -351,7 +361,7 @@ async function main() {
         break;
       }
       default:
-        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo | seed-billing-demo | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup | daily-recon | balance-changes');
+        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo [--previous-day] | seed-billing-demo [--previous-day] | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup | daily-recon | balance-changes');
         process.exitCode = command ? 1 : 0;
     }
   } finally {

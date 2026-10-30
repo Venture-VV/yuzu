@@ -203,14 +203,15 @@ function StaffDialog({
         <Field label="姓名" htmlFor="s-name">
           <Input id="s-name" value={name} maxLength={32} onChange={(e) => setName(e.target.value)} />
         </Field>
-        <Field label="岗位" aside={<span className="text-[12px] text-ink-3">权限见「经营规则」</span>}>
+        <Field label="岗位" aside={<span className="text-[12px] text-ink-3">权限见「岗位权限」</span>}>
           <Segmented
             value={role}
             onChange={setRole}
-            className="w-full"
+            className="w-full flex-wrap"
             options={[
               { value: 'clerk', label: '前台店员' },
               { value: 'duty_manager', label: '值班经理' },
+              { value: 'account_manager', label: '客户经理' },
               { value: 'store_manager', label: '店总' },
               { value: 'backoffice', label: '后勤人员' },
               { value: 'owner', label: '店主' },

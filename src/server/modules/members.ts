@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { checkCustomValues, type MemberCustomValues } from '@shared/member-fields';
+import { MEMBER_CHANNEL_KEY, type BonusLotRow } from '@shared/members';
 import type { LedgerRow, MemberDetail, MemberSummary } from '@shared/types';
 import { isUniqueViolation, type Db, type Sql, type Tx } from '../db';
 import { guard } from '../auth/guard';
@@ -9,12 +10,14 @@ import type { Deps, OpContext } from '../lib/context';
 import { badRequest, conflict, notFound } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
 import { expireMemberBonus, openLots } from './bonus';
+import { loadFrontdeskRules } from './frontdesk/common';
 import { listLedger } from './ledger';
+import { memberLevelInfo } from './member-levels';
 import { loadSettings } from './settings';
 
 const MEMBER_COLUMNS = (db: Db) => db`
   m.id, m.member_no, m.name, m.phone, m.gender, m.birthday::text AS birthday, m.note,
-  m.principal_balance, m.bonus_balance, m.status, m.is_synthetic, m.created_at, m.custom_fields,
+  m.principal_balance, m.bonus_balance, m.status, m.is_synthetic, m.created_at, m.custom_fields, m.channel,
   (SELECT max(le.created_at) FROM ledger_entries le WHERE le.member_id = m.id) AS last_activity_at`;
 
 const MemberInput = z.object({
@@ -28,6 +31,8 @@ const MemberInput = z.object({
   note: z.string().trim().max(200, '备注最多 200 字').default(''),
   /** 自定义字段的值（键为字段编号）；编辑时不带则保持原值 */
   customFields: z.record(z.string(), z.unknown(), '自定义字段格式不正确').optional(),
+  /** 渠道来源的编号；编辑时不带则保持原值，null 为清空 */
+  channel: z.string().regex(MEMBER_CHANNEL_KEY, '渠道来源不正确').nullable().optional(),
 });
 export type MemberInputData = z.input<typeof MemberInput>;
 
@@ -78,6 +83,25 @@ export async function getMemberDetail(db: Db, id: number): Promise<MemberDetail>
       ) AS stats
     FROM members m WHERE m.id = ${id}`;
   const lots = await openLots(db, id);
+  // 全部赠金批次（可用、已用完、已过期）：消费扣用与撤销恢复相抵为「已用」，到期作废为「已过期」
+  const lotRows = await db<(Omit<BonusLotRow, 'status' | 'used' | 'expired'> & { used: string; expired: string })[]>`
+    SELECT l.id, l.source, r.doc_no, l.amount, l.remaining, l.expires_at, l.created_at,
+           -coalesce(sum(mv.amount) FILTER (WHERE mv.kind IN ('consume', 'restore')), 0) AS used,
+           -coalesce(sum(mv.amount) FILTER (WHERE mv.kind = 'expire'), 0) AS expired
+    FROM bonus_lots l LEFT JOIN recharges r ON r.id = l.recharge_id LEFT JOIN bonus_lot_moves mv ON mv.lot_id = l.id
+    WHERE l.member_id = ${id}
+    GROUP BY l.id, r.doc_no ORDER BY l.created_at DESC, l.id DESC LIMIT 100`;
+  const bonusLotHistory: BonusLotRow[] = lotRows.map((l) => {
+    const expired = Number(l.expired);
+    return {
+      ...l,
+      amount: Number(l.amount),
+      remaining: Number(l.remaining),
+      used: Number(l.used),
+      expired,
+      status: Number(l.remaining) > 0 ? 'active' : expired > 0 ? 'expired' : 'used',
+    };
+  });
   // 期初导入（旧系统余额）：一位会员最多一笔有效的期初
   const [opening] = await db<NonNullable<MemberDetail['opening']>[]>`
     SELECT i.import_no, b.doc_no, i.source, b.legacy_no, b.principal, b.bonus, b.legacy_recharged, i.created_at AS imported_at
@@ -86,6 +110,8 @@ export async function getMemberDetail(db: Db, id: number): Promise<MemberDetail>
   return {
     ...member,
     createdByName: extra?.createdByName ?? null,
+    level: await memberLevelInfo(db, member, await loadFrontdeskRules(db)),
+    bonusLotHistory,
     stats: extra!.stats,
     bonusLots: lots.map((l) => ({ remaining: l.remaining, expiresAt: l.expiresAt ? new Date(l.expiresAt).toISOString() : null })),
     opening: opening ?? null,
@@ -105,6 +131,17 @@ async function customValuesFor(
   return result.values;
 }
 
+/** 渠道来源：新选的渠道必须是后台启用中的；没改的（包括已停用的旧渠道）照常保留 */
+async function channelFor(db: Db, input: string | null | undefined, previous: string | null): Promise<string | null> {
+  if (input === undefined) return previous;
+  if (input === null || input === previous) return input;
+  const { memberChannels } = await loadSettings(db);
+  const c = memberChannels.find((x) => x.key === input);
+  if (!c) throw badRequest('没有这个渠道来源，请刷新页面后重选', { field: 'channel' });
+  if (!c.active) throw badRequest(`渠道「${c.label}」已停用，请选其他渠道`, { field: 'channel' });
+  return input;
+}
+
 interface InsertMemberOptions {
   /** false 用于期初导入等批量来源：必填的自定义字段可以先空着，之后编辑会员时再补 */
   enforceRequired?: boolean;
@@ -116,10 +153,11 @@ interface InsertMemberOptions {
 export async function insertMember(tx: Tx, raw: MemberInputData, ctx: OpContext, options: InsertMemberOptions = {}): Promise<number> {
   const input = parse(MemberInput, raw);
   const customFields = await customValuesFor(tx, input.customFields ?? {}, {}, options.enforceRequired ?? true);
+  const channel = await channelFor(tx, input.channel, null);
   const [row] = await tx<{ id: number }[]>`
-    INSERT INTO members (member_no, name, phone, gender, birthday, note, custom_fields, created_by)
+    INSERT INTO members (member_no, name, phone, gender, birthday, note, custom_fields, channel, created_by)
     VALUES ('YZ' || lpad(nextval('member_no_seq')::text, 5, '0'),
-            ${input.name}, ${input.phone}, ${input.gender}, ${input.birthday}, ${input.note}, ${tx.json(customFields)}, ${ctx.actor.id})
+            ${input.name}, ${input.phone}, ${input.gender}, ${input.birthday}, ${input.note}, ${tx.json(customFields)}, ${channel}, ${ctx.actor.id})
     RETURNING id`;
   if (options.audit ?? true) {
     await writeAudit(tx, {
@@ -182,11 +220,13 @@ export function registerMemberRoutes(app: FastifyInstance, deps: Deps) {
     try {
       await sql.begin(async (tx) => {
         // 自定义字段在会员行锁内按最新的字段定义核对；没带时保持原值（停用字段的值始终保留）
-        const [locked] = await tx<{ customFields: MemberCustomValues }[]>`SELECT custom_fields FROM members WHERE id = ${id} FOR UPDATE`;
+        const [locked] = await tx<{ customFields: MemberCustomValues; channel: string | null }[]>`
+          SELECT custom_fields, channel FROM members WHERE id = ${id} FOR UPDATE`;
         const customFields = input.customFields === undefined ? locked!.customFields : await customValuesFor(tx, input.customFields, locked!.customFields, true);
+        const channel = await channelFor(tx, input.channel, locked!.channel);
         await tx`
           UPDATE members SET name = ${input.name}, phone = ${input.phone}, gender = ${input.gender},
-                 birthday = ${input.birthday}, note = ${input.note}, custom_fields = ${tx.json(customFields)}, updated_at = now()
+                 birthday = ${input.birthday}, note = ${input.note}, custom_fields = ${tx.json(customFields)}, channel = ${channel}, updated_at = now()
           WHERE id = ${id}`;
         const keys = new Set([...Object.keys(customFields), ...Object.keys(locked!.customFields)]);
         const fieldsChanged = [...keys].some((k) => customFields[k] !== locked!.customFields[k]);
@@ -196,8 +236,20 @@ export function registerMemberRoutes(app: FastifyInstance, deps: Deps) {
           targetType: 'member',
           targetId: id,
           detail: {
-            before: { name: before.name, phone: before.phone, note: before.note, ...(fieldsChanged ? { customFields: locked!.customFields } : {}) },
-            after: { name: input.name, phone: input.phone, note: input.note, ...(fieldsChanged ? { customFields } : {}) },
+            before: {
+              name: before.name,
+              phone: before.phone,
+              note: before.note,
+              ...(fieldsChanged ? { customFields: locked!.customFields } : {}),
+              ...(channel !== locked!.channel ? { channel: locked!.channel } : {}),
+            },
+            after: {
+              name: input.name,
+              phone: input.phone,
+              note: input.note,
+              ...(fieldsChanged ? { customFields } : {}),
+              ...(channel !== locked!.channel ? { channel } : {}),
+            },
           },
           ip: req.ip,
         });

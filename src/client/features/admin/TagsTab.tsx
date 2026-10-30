@@ -1,26 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileUp, Lock, Plus, ShieldCheck } from 'lucide-react';
+import { Link } from 'react-router';
 import {
-  DEFAULT_FRONTDESK_RULES,
   LOCK_REASONS,
   MAX_VIP_LEVEL,
   TAG_KIND_LABELS,
   TAG_ZONES,
-  VIP_LEVEL_BASES,
-  VIP_LEVEL_BASIS_LABELS,
   ZONE_LABELS,
   ZONES,
   type FrontdeskRules,
   type HandTag,
   type TagKind,
-  type VipLevelBasis,
   type Zone,
 } from '@shared/frontdesk';
 import { parseHandTagCsv, type HandTagCsvResult, type HandTagImportReport } from '@shared/hand-tag-import';
 import { formatYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
 import { readImportFile } from '../../lib/import-file';
+import { useCan } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
@@ -35,6 +33,7 @@ const LEVELS = Array.from({ length: MAX_VIP_LEVEL }, (_, i) => i + 1);
 export function TagsTab() {
   const qc = useQueryClient();
   const toast = useToast();
+  const can = useCan();
   const tags = useQuery({ queryKey: ['frontdesk', 'tags'], queryFn: () => api.get<AdminTag[]>('/api/frontdesk/tags') });
   const rules = useQuery({ queryKey: ['frontdesk', 'rules'], queryFn: () => api.get<FrontdeskRules>('/api/frontdesk/rules') });
   const [editing, setEditing] = useState<AdminTag | null>(null);
@@ -46,13 +45,16 @@ export function TagsTab() {
     <div className="space-y-5">
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <ImportCard onImported={refresh} />
-        <RulesCard
-          rules={rules.data}
-          onSaved={() => {
-            refresh();
-            toast({ tone: 'success', title: '前台规则已保存' });
-          }}
-        />
+        {/* 前台规则只有能改经营规则的岗位（店主）能改；值班经理在这里只维护手牌池 */}
+        {can('settings.manage') && (
+          <RulesCard
+            rules={rules.data}
+            onSaved={() => {
+              refresh();
+              toast({ tone: 'success', title: '前台规则已保存' });
+            }}
+          />
+        )}
       </div>
       <BatchCard onCreated={refresh} />
 
@@ -378,8 +380,6 @@ const centsOf = (text: string) => Math.round(Number(text) * 100);
 function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSaved: () => void }) {
   const [minutes, setMinutes] = useState('');
   const [fee, setFee] = useState('');
-  const [basis, setBasis] = useState<VipLevelBasis>(DEFAULT_FRONTDESK_RULES.vipLevelBasis);
-  const [thresholds, setThresholds] = useState<string[]>([]);
   const [override, setOverride] = useState(false);
   const [grace, setGrace] = useState('0');
   const [busy, setBusy] = useState(false);
@@ -388,8 +388,6 @@ function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSa
     if (!rules) return;
     setMinutes(String(rules.selfVoidMinutes));
     setFee(yuan(rules.lostTagFeeCents));
-    setBasis(rules.vipLevelBasis);
-    setThresholds(rules.vipLevelThresholds.map(yuan));
     setOverride(rules.vipOverrideEnabled);
     setGrace(String(rules.overtimeGraceMinutes ?? 0));
   }, [rules]);
@@ -397,16 +395,13 @@ function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSa
   const n = Number(minutes);
   const g = Number(grace);
   const feeCents = centsOf(fee);
-  const levelCents = thresholds.map(centsOf);
   const problem = !Number.isInteger(n) || n < 0 || n > 120
     ? '更正时限应为 0–120 分钟'
     : !Number.isInteger(g) || g < 0 || g > 120
       ? '跳档宽限应为 0–120 分钟'
     : !Number.isInteger(feeCents) || feeCents < 0 || !/^\d+(\.\d{1,2})?$/.test(fee)
       ? '丢牌赔偿金额不正确'
-      : levelCents.some((c, i) => !/^\d+(\.\d{1,2})?$/.test(thresholds[i]!) || (i > 0 && c <= levelCents[i - 1]!))
-        ? '各级门槛必须是金额，并且逐级递增'
-        : null;
+      : null;
 
   const save = async () => {
     setBusy(true);
@@ -415,8 +410,6 @@ function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSa
       await api.put('/api/frontdesk/rules', {
         selfVoidMinutes: n,
         lostTagFeeCents: feeCents,
-        vipLevelBasis: basis,
-        vipLevelThresholds: levelCents,
         vipOverrideEnabled: override,
         overtimeGraceMinutes: g,
       });
@@ -454,31 +447,13 @@ function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSa
         <p className="flex items-center gap-2 text-[13.5px] font-bold text-ink">
           VIP 柜会员等级 <PendingBadge title="等级口径、各级门槛与当场授权开关为店主 2026-10-27 答复里的默认做法，待确认" />
         </p>
-        <p className="mt-1 text-[12.5px] text-ink-3">会员等级不低于柜子等级才能使用该 VIP 柜；散客为 0 级。</p>
-        <Field label="等级口径" className="mt-3">
-          <Segmented value={basis} onChange={setBasis} options={VIP_LEVEL_BASES.map((b) => ({ value: b, label: VIP_LEVEL_BASIS_LABELS[b] }))} />
-        </Field>
-        <div className="mt-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-          {thresholds.map((v, i) => (
-            <Field key={i} label={`第 ${i + 1} 级 ≥（元）`}>
-              <Input
-                value={v}
-                onChange={(e) => setThresholds((list) => list.map((x, j) => (j === i ? e.target.value : x)))}
-                inputMode="decimal"
-                className="num"
-                aria-label={`第 ${i + 1} 级门槛`}
-              />
-            </Field>
-          ))}
-        </div>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <Button size="sm" variant="ghost" disabled={thresholds.length >= MAX_VIP_LEVEL} onClick={() => setThresholds((list) => [...list, ''])}>
-            加一级
-          </Button>
-          <Button size="sm" variant="ghost" disabled={thresholds.length <= 1} onClick={() => setThresholds((list) => list.slice(0, -1))}>
-            减一级
-          </Button>
-        </div>
+        <p className="mt-1 text-[12.5px] text-ink-3">
+          会员等级不低于柜子等级才能使用该 VIP 柜；散客为 0 级。等级口径、各级门槛与名称在「
+          <Link to="/admin/members" className="font-semibold text-pine hover:underline">
+            会员与渠道
+          </Link>
+          」设置。
+        </p>
         <div className="mt-3">
           <ConfirmCheck checked={override} onChange={setOverride}>
             <span className="flex items-center gap-1.5">

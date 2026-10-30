@@ -50,7 +50,7 @@ node dist/server/cli.js migrate                 # 17 个迁移
 node dist/server/cli.js seed-demo
 node dist/server/cli.js seed-inventory-demo
 node dist/server/cli.js seed-frontdesk-demo
-node dist/server/cli.js seed-billing-demo       # 请在 06:00 营业日切换之后 1 小时以上执行
+node dist/server/cli.js seed-billing-demo       # 请在 06:00 营业日切换之后 5 个半小时以上执行；v0.6.0 起在这之前执行会提示，两条命令都加 --previous-day 可整体放到前一个营业日
 node dist/server/cli.js check                   # 20 项全部 ✓（会员 7、库存 5、前台 8，新增「优惠 / 免单都有当场授权」）
 PORT=8899 node dist/server/index.js
 ```

@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Boxes, CalendarCheck2, ClipboardCheck, ConciergeBell, HandCoins, Inbox, KeyRound, LayoutDashboard, LogOut, ReceiptText, Settings2, ShoppingCart, UsersRound } from 'lucide-react';
 import { describeBusinessHours, isOpenAt, minuteOfDay } from '@shared/business-date';
 import { describeDate, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
+import { ADMIN_PERMISSIONS } from '@shared/admin';
 import type { Permission } from '@shared/permissions';
 import { api } from '../lib/api';
 import { useCan, useSession } from '../lib/session';
@@ -31,7 +32,7 @@ const NAV: NavItem[][] = [
     { to: '/ledger', label: '流水', icon: ReceiptText, perm: 'ledger.readToday' },
     { to: '/settlement', label: '日结', icon: CalendarCheck2, perm: 'ledger.readToday' },
     { to: '/shift', label: '交班', icon: ClipboardCheck, perm: 'ledger.readToday' },
-    { to: '/dashboard', label: '看板', icon: LayoutDashboard, perm: 'ledger.readToday' },
+    { to: '/dashboard', label: '看板', icon: LayoutDashboard, perm: ['ledger.readToday', 'report.executive', 'report.members'] },
   ],
   [
     { to: '/inventory', label: '库存', icon: Boxes, perm: 'inventory.read' },
@@ -39,7 +40,8 @@ const NAV: NavItem[][] = [
     { to: '/payables', label: '货款', icon: HandCoins, perm: 'payable.read' },
     { to: '/todo', label: '待办', icon: Inbox, perm: 'inventory.approve' },
   ],
-  [{ to: '/admin', label: '管理', icon: Settings2, perm: 'staff.manage' }],
+  // 管理后台是单独的一套页面（规则、价目、手牌池、员工与权限）
+  [{ to: '/admin', label: '后台', icon: Settings2, perm: [...ADMIN_PERMISSIONS] }],
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -56,17 +58,17 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex h-dvh min-h-0 bg-paper">
       <nav
         aria-label="主导航"
-        className="flex w-[76px] shrink-0 flex-col items-center gap-1 bg-[#1d3f31] pt-4 pb-4 text-paper md:w-[84px]"
+        className="flex w-[76px] shrink-0 flex-col items-center gap-1 bg-[#1d3f31] pt-4 pb-4 text-paper short:gap-0.5 short:pt-2.5 short:pb-2.5 md:w-[84px]"
       >
-        <NavLink to="/" aria-label="浴族 yuzu 首页" className="mb-5 rounded-[14px] ring-1 ring-white/10">
-          <LogoMark className="size-10" />
+        <NavLink to="/" aria-label="浴族 yuzu 首页" className="mb-5 rounded-[14px] ring-1 ring-white/10 short:mb-2">
+          <LogoMark className="size-10 short:size-8" />
         </NavLink>
-        <div className="scroll-thin flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto">
+        <div className="scroll-thin flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto short:gap-0.5">
           {NAV.map((group) => group.filter((n) => (Array.isArray(n.perm) ? n.perm : [n.perm]).some((p) => can(p))))
             .filter((group) => group.length > 0)
             .map((group, gi) => (
-              <div key={group[0]!.to} className="flex flex-col items-center gap-1">
-                {gi > 0 && <span className="my-1.5 h-px w-8 bg-white/12" aria-hidden />}
+              <div key={group[0]!.to} className="flex flex-col items-center gap-1 short:gap-0.5">
+                {gi > 0 && <span className="my-1.5 h-px w-8 bg-white/12 short:my-1" aria-hidden />}
                 {group.map(({ to, label, icon: Icon, end }) => (
                   <NavLink
                     key={to}
@@ -76,7 +78,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     title={badges[to] ? `${badges[to]} 项待确认` : undefined}
                     className={({ isActive }) =>
                       cn(
-                        'group relative flex w-[64px] flex-col items-center gap-0.5 rounded-[14px] py-2 text-[12px] font-semibold transition-colors',
+                        'group relative flex w-[64px] flex-col items-center gap-0.5 rounded-[14px] py-2 text-[12px] font-semibold transition-colors short:rounded-[12px] short:py-1 short:text-[11px]',
                         isActive ? 'bg-white/12 text-paper' : 'text-paper/60 hover:bg-white/6 hover:text-paper',
                       )
                     }
@@ -85,7 +87,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                       <>
                         {isActive && <span className="absolute top-1/2 -left-[10px] h-6 w-1 -translate-y-1/2 rounded-r-full bg-yuzu" />}
                         <span className="relative">
-                          <Icon className="size-[21px]" strokeWidth={isActive ? 2.2 : 1.8} />
+                          <Icon className="size-[21px] short:size-[18px]" strokeWidth={isActive ? 2.2 : 1.8} />
                           {!!badges[to] && (
                             <span aria-hidden className="num absolute -top-1.5 -right-2.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-yuzu px-1 text-[10.5px] font-bold text-ink ring-2 ring-[#1d3f31]">
                               {badges[to]! > 99 ? '99+' : badges[to]}
@@ -146,7 +148,7 @@ function UserMenu() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex size-11 items-center justify-center rounded-full bg-yuzu text-[15px] font-bold text-ink ring-2 ring-white/15 transition hover:ring-white/35"
+        className="flex size-11 items-center justify-center rounded-full bg-yuzu text-[15px] font-bold text-ink ring-2 ring-white/15 transition hover:ring-white/35 short:size-9 short:text-[14px]"
         title={`${session.staff.displayName} · ${roleText(session.staff)}`}
       >
         {session.staff.displayName.slice(0, 1)}

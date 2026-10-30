@@ -183,6 +183,12 @@ export function CheckoutDialog({
     }
     if (r.method === 'coupon' && !COUPON_CODE_PATTERN.test(normalizeCouponCode(r.code))) return '请填写完整券码';
     if (r.method === 'other' && !r.ref.trim()) return '「其他」收款请在备注里写明收的是什么';
+    if (r.method === 'cash' && r.tendered.trim()) {
+      // 「客人实给」只用来算找零，不登记；填了却少于这笔现金，说明现金没收够（测试服 E2E 报告 BUG-2）
+      const given = parseYuan(r.tendered);
+      if (given === null) return '客人实给的金额不正确';
+      if (given < c) return `客人实给少于这笔现金，还差 ¥${((c - given) / 100).toFixed(2)}；请核对现金或改收款方式`;
+    }
     if (r.method === 'discount') {
       if (r.reason.trim().length < 2) return '请填写优惠原因（至少 2 个字），例如：抹零、投诉补偿';
       if (!discountGrantFits(r.grant, visitIds, c)) return r.grant ? '手牌或金额改了，请按当前内容重新授权' : '请值班经理、店总或店主当场授权';
@@ -305,6 +311,11 @@ export function CheckoutDialog({
               <>
                 多收 <Money cents={-remaining} className="font-bold text-clay" />（现金找零不用登记，按应收记）
               </>
+            ) : problems.some(Boolean) ? (
+              // 金额对上了但还有收款没填好（例如客人实给少于现金），不写「已等于应收」，免得以为可以结清
+              <span className="font-semibold text-clay" data-testid="checkout-row-problem">
+                {problems.find(Boolean)}
+              </span>
             ) : (
               <span className="font-semibold text-pine">收款已等于应收</span>
             )}

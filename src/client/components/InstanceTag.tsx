@@ -35,7 +35,7 @@ export function InstanceTag({ instance, version, commit }: { instance: InstanceK
     <div
       data-testid="instance-tag"
       title={`${labelOf(instance)} · ${versionText(version, commit)}`}
-      className="mb-3 flex w-[64px] flex-col items-center gap-1 text-center"
+      className="mb-3 flex w-[64px] flex-col items-center gap-1 text-center short:mb-2 short:gap-0.5"
     >
       <span className={cn('w-full rounded-md px-1 py-1 text-[11px] leading-tight font-bold', toneOf(instance))}>
         {main}

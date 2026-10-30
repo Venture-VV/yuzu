@@ -10,6 +10,7 @@ import { registerAuthRoutes } from './auth/routes';
 import { SESSION_COOKIE, resolveSession } from './auth/session';
 import { AppError } from './lib/errors';
 import type { Deps } from './lib/context';
+import { registerAdminRoutes } from './modules/admin';
 import { registerAuditRoutes } from './modules/audit';
 import { registerCatalogRoutes } from './modules/catalog';
 import { registerFrontdeskRoutes } from './modules/frontdesk/routes';
@@ -24,6 +25,7 @@ import { registerOpeningRoutes } from './modules/opening';
 import { registerPrintRoutes } from './modules/print';
 import { registerShiftRoutes } from './modules/shifts';
 import { registerDashboardRoutes } from './modules/dashboard';
+import { registerDashboardReportRoutes } from './modules/reports';
 import { registerSettingsRoutes } from './modules/settings';
 import { registerSettlementRoutes } from './modules/settlement';
 import { registerStaffRoutes } from './modules/staff';
@@ -65,6 +67,12 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
         req.hasSession = true;
       }
     }
+  });
+
+  // 浏览器按声明的类型解析响应，不猜测内容类型（测试服 E2E 报告）
+  app.addHook('onSend', async (_req, reply, payload) => {
+    reply.header('x-content-type-options', 'nosniff');
+    return payload;
   });
 
   app.setErrorHandler((error, req, reply) => {
@@ -115,12 +123,14 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerShiftRoutes(app, deps);
   registerPrintRoutes(app, deps);
   registerDashboardRoutes(app, deps);
+  registerDashboardReportRoutes(app, deps);
   registerLedgerRoutes(app, deps);
   registerSettlementRoutes(app, deps);
   registerStaffRoutes(app, deps);
   registerCatalogRoutes(app, deps);
   registerSettingsRoutes(app, deps);
   registerAuditRoutes(app, deps);
+  registerAdminRoutes(app, deps);
   registerMasterRoutes(app, deps);
   registerDocRoutes(app, deps);
   registerReportRoutes(app, deps);

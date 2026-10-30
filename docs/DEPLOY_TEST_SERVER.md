@@ -160,7 +160,7 @@ docker compose exec app node dist/server/cli.js import-price-list --tangqi --app
 docker compose exec app node dist/server/cli.js check
 ```
 
-然后用店主账号登录 `http://yuzu-test:8080`，修改初始密码，并在「管理」里：
+然后用店主账号登录 `http://yuzu-test:8080`，修改初始密码，并在「后台」（管理后台）里：
 
 - 核对门票票种与票价（「套餐与项目 → 门票」）；
 - 把跳档宽限改成 15 分钟（「手牌 → 前台规则」；R1.2 发布后会自动改）；

@@ -31,3 +31,14 @@ export function guard(...permissions: Permission[]): preHandlerAsyncHookHandler 
 export const sessionOnly: preHandlerAsyncHookHandler = async (req) => {
   if (!req.hasSession) throw unauthorized();
 };
+
+/** 有其中任一权限即可（后台各分区、看板各页按岗位开放） */
+export function guardAny(...permissions: Permission[]): preHandlerAsyncHookHandler {
+  return async (req: FastifyRequest, _reply: FastifyReply) => {
+    if (!req.hasSession) throw unauthorized();
+    if (req.actor.mustChangePassword) {
+      throw new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '首次登录请先修改密码');
+    }
+    if (!permissions.some((p) => can(req.actor, p))) throw forbidden();
+  };
+}

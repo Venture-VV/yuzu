@@ -1,5 +1,5 @@
 // 视口冒烟（R1.6，只读）：除门店电脑 1440×900、平板 1024×768 / 820×1180 外，再看 1280×720 的小屏电脑与手机（393×727）。
-// 看板、日结在手机上也要能看（店主用手机查）；前台、交班、会员工作台只在电脑与平板上用。依赖四套演示数据，账号店主 linlan。
+// 看板、日结、管理后台在手机上也要能看（店主用手机查）；前台、交班、会员工作台只在电脑与平板上用。依赖四套演示数据，账号店主 linlan。
 // 核对：页面不横向滚动；除了有意横向滚动的区域（表格、标签栏，带 overflow-x-auto），没有横向滚动区，也没有内容超出屏幕右边。
 import { expect, test, type Page } from '@playwright/test';
 
@@ -61,6 +61,47 @@ test.describe('视口冒烟', () => {
     await expect(board).toContainText('今日收款构成');
     await expect(board).toContainText('当班中');
     await expectFits(page);
+  });
+
+  test('看板：经营总览与会员总览（v0.6.0）', async ({ page }) => {
+    await login(page, 'linlan');
+    await page.goto('/dashboard/overview');
+    await expect(page.getByTestId('overview-net')).toBeVisible();
+    await expectFits(page);
+    await page.goto('/dashboard/members');
+    await expect(page.getByTestId('members-total')).toBeVisible();
+    await expectFits(page);
+  });
+
+  test('管理后台：后台首页与规则总表（v0.6.0，手机上分区横排）', async ({ page }) => {
+    await login(page, 'linlan');
+    await page.goto('/admin');
+    await expect(page.getByTestId('admin-home')).toBeVisible();
+    await expect(page.getByTestId('admin-instance')).toBeVisible();
+    await expectFits(page);
+    await page.goto('/admin/settings');
+    await expect(page.getByTestId('rule-catalog')).toBeVisible();
+    await expectFits(page);
+  });
+
+  test('流水：手机上不横向滚动（测试服 E2E 报告）', async ({ page }) => {
+    await login(page, 'linlan');
+    await page.goto('/ledger');
+    await expect(page.getByRole('heading', { name: '流水' })).toBeVisible();
+    await expectFits(page);
+  });
+
+  test('主导航：小屏电脑上所有入口不用滚动就能看到（测试服 E2E 报告 BUG-1）', async ({ page, isMobile }) => {
+    test.skip(!!isMobile, '手机上用不到左侧导航');
+    await login(page, 'linlan');
+    const nav = page.getByRole('navigation', { name: '主导航' });
+    const viewport = page.viewportSize()!;
+    const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
+    for (const name of ['前台', '会员', '流水', '日结', '交班', '看板', '库存', '采购', '货款', '待办', '后台']) {
+      const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
+      expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
+      expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
+    }
   });
 
   test('日结：营业口径、余额核对与异常', async ({ page }) => {

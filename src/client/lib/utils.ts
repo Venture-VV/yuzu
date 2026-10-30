@@ -18,7 +18,9 @@ export function uuid(): string {
 let timeFmt: Intl.DateTimeFormat;
 let dateTimeFmt: Intl.DateTimeFormat;
 let shortDateFmt: Intl.DateTimeFormat;
+let dateFmt: Intl.DateTimeFormat;
 export function setDisplayTimeZone(timeZone: string) {
+  dateFmt = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone });
   timeFmt = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone });
   dateTimeFmt = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone });
   shortDateFmt = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', timeZone });
@@ -27,6 +29,8 @@ setDisplayTimeZone('Asia/Shanghai');
 
 export const formatTime = (iso: string) => timeFmt.format(new Date(iso));
 export const formatDateTime = (iso: string) => dateTimeFmt.format(new Date(iso));
+/** 带年份的日期，例如 2026/10/30（门店时区） */
+export const formatDate = (iso: string) => dateFmt.format(new Date(iso));
 
 /** "刚刚" / "12 分钟前" / "3 小时前" / "10月21日" */
 export function relativeTime(iso: string | null): string {

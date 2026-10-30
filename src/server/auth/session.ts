@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
-import type { Duty, Role } from '@shared/permissions';
+import { permissionsOf, type Duty, type Role } from '@shared/permissions';
 import type { Db } from '../db';
 import type { Actor } from '../lib/context';
+import { sanitizeOverrides } from './role-permissions';
 
 export const SESSION_COOKIE = 'yuzu_sid';
 
@@ -23,9 +24,10 @@ export async function createSession(
 
 /** 校验会话；有效时顺延过期时间（滑动过期，最多每分钟写一次）。 */
 export async function resolveSession(db: Db, token: string, ttlHours: number): Promise<Actor | null> {
-  const rows = await db<(Actor & { active: boolean; tokenHash: string; stale: boolean })[]>`
+  const rows = await db<(Actor & { active: boolean; tokenHash: string; stale: boolean; overrides: unknown })[]>`
     SELECT s.token_hash, st.id, st.username, st.display_name, st.role, st.duties, st.must_change_password, st.active,
-           s.last_seen_at < now() - interval '1 minute' AS stale
+           s.last_seen_at < now() - interval '1 minute' AS stale,
+           (SELECT value FROM settings WHERE key = 'role_permissions') AS overrides
     FROM sessions s JOIN staff st ON st.id = s.staff_id
     WHERE s.token_hash = ${hashToken(token)} AND s.expires_at > now()`;
   const row = rows[0];
@@ -35,13 +37,17 @@ export async function resolveSession(db: Db, token: string, ttlHours: number): P
       UPDATE sessions SET last_seen_at = now(), expires_at = now() + make_interval(hours => ${ttlHours})
       WHERE token_hash = ${row.tokenHash}`;
   }
+  const role = row.role as Role;
+  const duties = (row.duties ?? []) as Duty[];
   return {
     id: row.id,
     username: row.username,
     displayName: row.displayName,
-    role: row.role as Role,
-    duties: (row.duties ?? []) as Duty[],
+    role,
+    duties,
     mustChangePassword: row.mustChangePassword,
+    // 按店主在后台调整后的岗位权限（每次请求重新计算，改完立即生效）
+    permissions: permissionsOf({ role, duties }, sanitizeOverrides(row.overrides)),
   };
 }
 
