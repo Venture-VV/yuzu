@@ -60,6 +60,7 @@ const CREDIT_PO_MESSAGE = '这张采购单按挂账结算（收货已记应付�
 const RulesInput = z.object({
   approvalThresholdCents: z.number().int().min(0, '门槛不能为负').max(100_000_000, '门槛不能超过 100 万元'),
   overdueDays: z.number().int().min(1, '至少 1 天').max(90, '最多 90 天'),
+  arrivalOverdueDays: z.number().int().min(1, '至少 1 天').max(180, '最多 180 天').default(7),
   purposes: z
     .array(z.string().trim().min(1, '用途不能为空').max(20, '用途最多 20 个字'))
     .min(1, '至少保留一个用途')
@@ -106,7 +107,7 @@ export function pettyBalance(
 }
 
 /** 打款列表（含平账）：可按日期、部门、经办人、状态筛选 */
-async function advanceRows(
+export async function advanceRows(
   db: Db,
   f: { from?: string; to?: string; departmentId?: number; handlerId?: number; ids?: number[]; includeVoided?: boolean; unsettledOnly?: boolean },
 ) {
@@ -146,7 +147,7 @@ async function advanceRows(
     ORDER BY a.advance_date DESC, a.id DESC`;
 }
 
-function toAdvanceSummary(r: Awaited<ReturnType<typeof advanceRows>>[number], today: string, overdueDays: number): PettyAdvanceSummary {
+export function toAdvanceSummary(r: Awaited<ReturnType<typeof advanceRows>>[number], today: string, overdueDays: number): PettyAdvanceSummary {
   const bal = pettyBalance(r, today, overdueDays);
   return {
     ...bal,

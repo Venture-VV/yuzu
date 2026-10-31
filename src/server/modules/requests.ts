@@ -10,10 +10,13 @@
 import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { formatAmount } from '@shared/money';
 import { can } from '@shared/permissions';
+import { formatQty } from '@shared/quantity';
 import {
   imageUrl,
   MAX_IMAGE_BYTES,
+  REQUEST_STATUS_LABELS,
   MAX_LINE_IMAGES,
   type OpenRequestLine,
   type PurchaseRequest,
@@ -24,9 +27,10 @@ import {
   type RequestStatus,
 } from '@shared/requests';
 import { isUniqueViolation, readSnapshot, type Db } from '../db';
-import { guardAny } from '../auth/guard';
+import { guard, guardAny } from '../auth/guard';
 import { assertNotFenced } from '../lib/fences';
 import { writeAudit } from '../lib/audit';
+import { toCsv } from '../lib/csv';
 import type { Actor, Deps } from '../lib/context';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
@@ -433,12 +437,91 @@ export async function requestChecks(db: Db) {
   ];
 }
 
+// ───────────────────────── 导出（v0.7.9） ─────────────────────────
+
+const EXPORT_LIMIT = 20_000;
+const PROGRESS_LABELS: Record<RequestLineProgress['state'], string> = { none: '未下单', ordered: '已下单', partial: '部分到货', received: '已到货' };
+
+/** 需求单导出：每一行需求一行，带下单 / 到货 / 退货与采购单号（只导出看得到的） */
+async function requestsCsv(db: Db, timezone: string, f: { from: string; to: string; status?: RequestStatus; departmentId?: number }) {
+  const [n] = await db<{ count: number }[]>`
+    SELECT count(*)::int AS count FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
+    WHERE (r.created_at AT TIME ZONE ${timezone})::date BETWEEN ${f.from} AND ${f.to}
+      ${f.status ? db`AND r.status = ${f.status}` : db``} ${f.departmentId ? db`AND r.department_id = ${f.departmentId}` : db``}`;
+  if (n!.count > EXPORT_LIMIT) throw unprocessable('EXPORT_TOO_LARGE', `这段时间有 ${n!.count} 行需求，一次最多导出 ${EXPORT_LIMIT} 行，请缩短日期范围`);
+  const rows = await db<{
+    docNo: string;
+    createdAt: string;
+    departmentName: string;
+    requesterName: string;
+    status: RequestStatus;
+    needBy: string | null;
+    lineNo: number;
+    name: string;
+    materialName: string | null;
+    purpose: string;
+    qtyMilli: number;
+    unit: string;
+    refPriceCents: number | null;
+    link: string;
+    details: string;
+    note: string;
+    imageCount: number;
+    progress: RawProgress | null;
+  }[]>`
+    SELECT r.doc_no, r.created_at, d.name AS department_name, s.display_name AS requester_name, r.status, r.need_by,
+           l.line_no, l.name, m.name AS material_name, l.purpose, l.qty_milli, l.unit, l.ref_price_cents, l.link, l.details, l.note,
+           (SELECT count(*)::int FROM purchase_request_line_images i WHERE i.request_line_id = l.id) AS image_count,
+           ${PROGRESS_SQL(db)} AS progress
+    FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
+    JOIN departments d ON d.id = r.department_id JOIN staff s ON s.id = r.requester_id
+    LEFT JOIN materials m ON m.id = l.material_id
+    WHERE (r.created_at AT TIME ZONE ${timezone})::date BETWEEN ${f.from} AND ${f.to}
+      ${f.status ? db`AND r.status = ${f.status}` : db``} ${f.departmentId ? db`AND r.department_id = ${f.departmentId}` : db``}
+    ORDER BY r.created_at, r.id, l.line_no`;
+  const out: (string | number)[][] = [
+    ['需求单号', '提交时间', '部门', '提单人', '状态', '需要日期', '行号', '产品名', '物料', '用途', '数量', '单位', '参考单价（元）', '参考链接', '详情 / 规格', '备注', '图片张数',
+     '进度', '采购单号', '供应商', '下单数量', '到货数量', '退货数量', '库存单位'],
+  ];
+  for (const r of rows) {
+    const p = progressOf(r.progress);
+    out.push([
+      r.docNo,
+      String(r.createdAt).replace('T', ' ').slice(0, 16),
+      r.departmentName,
+      r.requesterName,
+      REQUEST_STATUS_LABELS[r.status],
+      r.needBy ?? '',
+      r.lineNo,
+      r.name,
+      r.materialName ?? '新产品',
+      r.purpose,
+      formatQty(Number(r.qtyMilli)).replace(/,/g, ''),
+      r.unit,
+      r.refPriceCents === null ? '' : formatAmount(Number(r.refPriceCents)).replace(/,/g, ''),
+      r.link,
+      r.details,
+      r.note,
+      r.imageCount,
+      PROGRESS_LABELS[p.state],
+      p.po?.docNo ?? '',
+      p.po?.supplierName ?? '',
+      p.po ? formatQty(p.orderedMilli).replace(/,/g, '') : '',
+      p.po ? formatQty(p.receivedMilli).replace(/,/g, '') : '',
+      p.po ? formatQty(p.returnedMilli).replace(/,/g, '') : '',
+      p.inventoryUnit ?? '',
+    ]);
+  }
+  return toCsv(out);
+}
+
 // ───────────────────────── 路由 ─────────────────────────
 
 const ListQuery = z.object({
   status: z.enum(['submitted', 'returned', 'approved', 'rejected', 'cancelled']).optional(),
   departmentId: z.coerce.number().int().positive().optional(),
 });
+const ExportQuery = ListQuery.extend({ from: docDateSchema, to: docDateSchema });
 const IdsQuery = z.object({ ids: z.string().regex(/^\d+(,\d+)*$/).optional() });
 const keyParam = z.object({ key: z.uuid('操作编号格式不正确') });
 
@@ -459,6 +542,15 @@ export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
     return getRequest(sql, req.actor, row.id);
   });
   app.get('/api/erp/requests/checks', { preHandler: anyRequest }, async () => readSnapshot(sql, requestChecks));
+  // 导出需求单（v0.7.9）：与报销、台账同一个导出权限（店主、对账付款、成本核算、负责人）
+  app.get('/api/erp/requests/export', { preHandler: guard('expense.export') }, async (req, reply) => {
+    const f = parse(ExportQuery, req.query);
+    if (f.from > f.to) throw badRequest('开始日期不能晚于结束日期');
+    const csv = await readSnapshot(sql, (tx) => requestsCsv(tx, deps.config.timezone, f));
+    await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'purchase_requests', detail: f, ip: req.ip });
+    reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`采购需求单_${f.from}_${f.to}.csv`)}`);
+    return csv;
+  });
   app.get('/api/erp/requests/meta', { preHandler: anyRequest }, async (req) => readSnapshot(sql, (tx) => requestMeta(tx, req.actor)));
   app.get('/api/erp/requests/:id', { preHandler: anyRequest }, async (req) => readSnapshot(sql, (tx) => getRequest(tx, req.actor, docId(req))));
   app.post('/api/erp/requests', { preHandler: guardAny('request.create') }, async (req, reply) => {
