@@ -42,6 +42,13 @@ export interface PoLine {
   priceCents: number;
   amountCents: number;
   note: string;
+  /** 规格（v0.7.8） */
+  spec: string;
+  /** 来自哪一行需求（v0.7.8，转采购单时带上） */
+  requestLineId: number | null;
+  requestNo: string | null;
+  /** 图片（v0.7.8） */
+  images: import('./requests').ImageRef[];
   /** 已合格实收（库存单位） */
   receivedMilli: number;
   compare: PriceCompare;
@@ -51,7 +58,7 @@ export interface PoRevision {
   revision: number;
   changedByName: string;
   changedAt: string;
-  snapshot: { supplierName: string; totalCents: number; lines: { materialName: string; purchaseQtyMilli: number; purchaseUnit: string; priceCents: number; amountCents: number }[] };
+  snapshot: { supplierName: string; totalCents: number; lines: { materialName: string; spec?: string; purchaseQtyMilli: number; purchaseUnit: string; priceCents: number; amountCents: number; imageIds?: number[] }[] };
 }
 
 export interface PurchaseOrder {

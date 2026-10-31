@@ -36,6 +36,11 @@ export function readSnapshot<T>(sql: Sql, fn: (tx: Tx) => Promise<T>): Promise<T
 }
 
 /** PostgreSQL 唯一约束冲突 */
+/** 外键约束失败（引用的行不存在） */
+export function isForeignKeyViolation(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: string }).code === '23503';
+}
+
 export function isUniqueViolation(error: unknown, constraint?: string): boolean {
   const e = error as { code?: string; constraint_name?: string };
   return e?.code === '23505' && (!constraint || e.constraint_name === constraint);

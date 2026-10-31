@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { DUTIES, ROLES, type Duty, type Role } from '@shared/permissions';
 import type { StaffRecord } from '@shared/types';
-import { isUniqueViolation, type Db } from '../db';
+import { isForeignKeyViolation, isUniqueViolation, type Db } from '../db';
 import { guard } from '../auth/guard';
 import { checkPasswordStrength, generateTempPassword, hashPassword } from '../auth/password';
 import { destroyStaffSessions } from '../auth/session';
@@ -23,6 +23,8 @@ const CreateInput = z.object({
   role: z.enum(ROLES, '请选择岗位'),
   /** 库存与采购职责，可叠加；店主自动拥有全部 */
   duties: z.array(z.enum(DUTIES)).max(DUTIES.length).default([]),
+  /** 所属部门（v0.7.8：部门申购只能给自己的部门提需求单） */
+  departmentId: z.number().int().positive().nullable().default(null),
   /** 不填则自动生成临时密码；员工首次登录必须修改 */
   password: z.string().optional(),
 });
@@ -31,13 +33,17 @@ const UpdateInput = z.object({
   displayName: z.string().trim().min(1, '请填写姓名').max(32, '姓名最多 32 个字'),
   role: z.enum(ROLES, '请选择岗位'),
   duties: z.array(z.enum(DUTIES)).max(DUTIES.length).default([]),
+  /** 不传保持原样，传 null 清空 */
+  departmentId: z.number().int().positive().nullable().optional(),
   active: z.boolean(),
 });
 
 export async function listStaff(db: Db): Promise<StaffRecord[]> {
   return db<StaffRecord[]>`
-    SELECT id, username, display_name, role, duties, active, must_change_password, last_login_at, created_at
-    FROM staff ORDER BY active DESC, (role = 'owner') DESC, id`;
+    SELECT s.id, s.username, s.display_name, s.role, s.duties, s.department_id, d.name AS department_name, s.active, s.must_change_password,
+           s.last_login_at, s.created_at
+    FROM staff s LEFT JOIN departments d ON d.id = s.department_id
+    ORDER BY s.active DESC, (s.role = 'owner') DESC, s.id`;
 }
 
 const uniqueDuties = (duties: Duty[] = []) => [...new Set(duties)].sort();
@@ -45,17 +51,18 @@ const uniqueDuties = (duties: Duty[] = []) => [...new Set(duties)].sort();
 /** 创建员工账号（CLI 与接口共用）。 */
 export async function createStaff(
   db: Db,
-  input: { username: string; displayName: string; role: Role; duties?: Duty[]; password: string; mustChangePassword: boolean },
+  input: { username: string; displayName: string; role: Role; duties?: Duty[]; departmentId?: number | null; password: string; mustChangePassword: boolean },
 ): Promise<number> {
   try {
     const [row] = await db<{ id: number }[]>`
-      INSERT INTO staff (username, display_name, role, duties, password_hash, must_change_password)
-      VALUES (${input.username}, ${input.displayName}, ${input.role}, ${uniqueDuties(input.duties)},
+      INSERT INTO staff (username, display_name, role, duties, department_id, password_hash, must_change_password)
+      VALUES (${input.username}, ${input.displayName}, ${input.role}, ${uniqueDuties(input.duties)}, ${input.departmentId ?? null},
               ${await hashPassword(input.password)}, ${input.mustChangePassword})
       RETURNING id`;
     return row!.id;
   } catch (error) {
     if (isUniqueViolation(error, 'staff_username_key')) throw conflict('USERNAME_EXISTS', '这个账号已存在');
+    if (isForeignKeyViolation(error)) throw unprocessable('DEPARTMENT_INVALID', '所属部门不存在');
     throw error;
   }
 }
@@ -93,8 +100,13 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
       if (id === req.actor.id && (!input.active || input.role !== 'owner')) {
         throw unprocessable('SELF_LOCKOUT', '不能停用自己或取消自己的店主岗位');
       }
+      if (input.departmentId) {
+        const [dept] = await tx<{ id: number }[]>`SELECT id FROM departments WHERE id = ${input.departmentId}`;
+        if (!dept) throw unprocessable('DEPARTMENT_INVALID', '所属部门不存在');
+      }
       await tx`
         UPDATE staff SET display_name = ${input.displayName}, role = ${input.role}, duties = ${uniqueDuties(input.duties)},
+               department_id = ${input.departmentId === undefined ? tx`department_id` : input.departmentId},
                active = ${input.active}, updated_at = now()
         WHERE id = ${id}`;
       const [owners] = await tx<{ count: number }[]>`SELECT count(*) AS count FROM staff WHERE role = 'owner' AND active`;

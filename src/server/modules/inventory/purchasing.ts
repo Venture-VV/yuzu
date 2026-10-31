@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { can } from '@shared/permissions';
+import { MAX_LINE_IMAGES } from '@shared/requests';
 import type { PoLine, PoRevision, PoStatus, PoSummary, PurchaseOrder, ReceivingState } from '@shared/purchasing';
 import { fitsDecimals, formatQty, lineAmountCents, priceChangePercent, toBaseQty, toPurchaseQty } from '@shared/quantity';
 import { isUniqueViolation, type Db, type Tx } from '../../db';
@@ -29,6 +30,12 @@ const LineInput = z.object({
   purchaseQtyMilli: z.number('请填写数量').int().positive('数量必须大于 0').max(1_000_000_000_000),
   priceCents: z.number('请填写单价').int().nonnegative('单价不能为负数').max(100_000_000),
   note: z.string().trim().max(100).default(''),
+  /** 规格（v0.7.8）：默认带物料档案的规格或需求单的详情 */
+  spec: z.string().trim().max(80, '规格最多 80 个字').optional(),
+  /** 图片（v0.7.8）：先上传拿到编号，每行最多 9 张。修改已有的行时不传规格、图片就保持原样 */
+  imageIds: z.array(id).max(MAX_LINE_IMAGES, `每一行最多 ${MAX_LINE_IMAGES} 张图片`).optional(),
+  /** 来自哪一行需求（v0.7.8，转采购单时带上；已有的行不能改） */
+  requestLineId: id.nullable().default(null),
 });
 
 const PoBody = z.object({
@@ -73,7 +80,10 @@ export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
   const rawLines = await db<Omit<PoLine, 'compare'>[]>`
     SELECT pl.id, pl.line_no, pl.material_id, m.code AS material_code, m.name AS material_name, m.specification, m.decimals,
            pl.purchase_qty_milli, pl.purchase_unit, pl.inventory_unit, pl.factor_milli, pl.base_qty_milli,
-           pl.price_cents, pl.amount_cents, pl.note,
+           pl.price_cents, pl.amount_cents, pl.note, pl.spec, pl.request_line_id,
+           (SELECT r.doc_no FROM purchase_request_lines rl JOIN purchase_requests r ON r.id = rl.request_id WHERE rl.id = pl.request_line_id) AS request_no,
+           coalesce((SELECT json_agg(json_build_object('id', i.image_id, 'url', '/api/erp/images/' || i.image_id) ORDER BY i.sort_no)
+                     FROM purchase_order_line_images i WHERE i.po_line_id = pl.id), '[]'::json) AS images,
            coalesce((SELECT sum(l.qty_milli) FROM inv_doc_lines l JOIN inv_docs d ON d.id = l.doc_id
                      WHERE l.po_line_id = pl.id AND d.status = 'confirmed'), 0) AS received_milli
     FROM purchase_order_lines pl JOIN materials m ON m.id = pl.material_id
@@ -174,11 +184,15 @@ interface ExistingLine {
   receivedMilli: number;
   /** 被任何收货明细引用过（含已撤回）：不能删除 */
   referenced: boolean;
+  requestLineId: number | null;
+  spec: string;
+  imageIds: number[];
 }
 
 async function existingLines(db: Db, poId: number): Promise<Map<number, ExistingLine>> {
   const rows = await db<ExistingLine[]>`
-    SELECT pl.id, pl.line_no, pl.material_id, pl.purchase_unit, pl.factor_milli, pl.price_cents,
+    SELECT pl.id, pl.line_no, pl.material_id, pl.purchase_unit, pl.factor_milli, pl.price_cents, pl.request_line_id, pl.spec,
+           coalesce((SELECT array_agg(i.image_id ORDER BY i.sort_no) FROM purchase_order_line_images i WHERE i.po_line_id = pl.id), '{}') AS image_ids,
            coalesce((SELECT sum(l.qty_milli) FROM inv_doc_lines l JOIN inv_docs d ON d.id = l.doc_id
                      WHERE l.po_line_id = pl.id AND d.status IN ('confirmed', 'submitted', 'draft', 'returned')), 0) AS received_milli,
            EXISTS (SELECT 1 FROM inv_doc_lines WHERE po_line_id = pl.id) AS referenced
@@ -197,6 +211,9 @@ interface PreparedLine {
   priceCents: number;
   amountCents: number;
   note: string;
+  spec: string;
+  imageIds: number[];
+  requestLineId: number | null;
 }
 
 async function prepareLines(db: Db, body: z.infer<typeof PoBody>, existing: Map<number, ExistingLine>): Promise<PreparedLine[]> {
@@ -241,8 +258,44 @@ async function prepareLines(db: Db, body: z.infer<typeof PoBody>, existing: Map<
       priceCents: l.priceCents,
       amountCents: lineAmountCents(base, l.priceCents, factorMilli),
       note: l.note,
+      spec: l.spec ?? prev?.spec ?? '',
+      imageIds: [...new Set(l.imageIds ?? prev?.imageIds.map(Number) ?? [])],
+      // 已有的行沿用原来的需求关联；新行按转采购单时带来的
+      requestLineId: prev ? prev.requestLineId : l.requestLineId,
     };
   });
+}
+
+/**
+ * 转采购单（v0.7.8）：新关联的需求行要已通过、没被别的有效采购单（撤回的不算）占用，选了物料的要物料一致；
+ * 锁需求单（id 升序）后再核对，同一行需求不会被两张采购单同时转走。加锁顺序：采购单 → 需求单。
+ */
+async function checkRequestLinks(tx: Tx, poId: number | null, lines: PreparedLine[], existing: Map<number, ExistingLine>, actor: Actor) {
+  const fresh = lines.filter((l) => !l.id && l.requestLineId !== null);
+  const all = lines.map((l) => l.requestLineId).filter((x): x is number => x !== null);
+  if (new Set(all).size !== all.length) throw badRequest('同一行需求在一张采购单里只能出现一次');
+  if (fresh.length === 0) return;
+  if (!can(actor, 'request.review')) throw forbidden('当前账号不能把需求单转成采购单');
+  const ids = fresh.map((l) => l.requestLineId!);
+  await tx`
+    SELECT r.id FROM purchase_requests r
+    WHERE r.id IN (SELECT request_id FROM purchase_request_lines WHERE id IN ${tx(ids)})
+    ORDER BY r.id FOR UPDATE`;
+  const rows = await tx<{ id: number; name: string; materialId: number | null; status: string; docNo: string; takenBy: string | null }[]>`
+    SELECT l.id, l.name, l.material_id, r.status, r.doc_no,
+           (SELECT po.doc_no FROM purchase_order_lines pl JOIN purchase_orders po ON po.id = pl.po_id
+             WHERE pl.request_line_id = l.id AND po.status <> 'cancelled' ${poId ? tx`AND po.id <> ${poId}` : tx``} LIMIT 1) AS taken_by
+    FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
+    WHERE l.id IN ${tx(ids)}`;
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  for (const l of fresh) {
+    const r = byId.get(l.requestLineId!);
+    if (!r) throw unprocessable('REQUEST_LINE_NOT_FOUND', '需求单的行不存在，请刷新后重试');
+    if (r.status !== 'approved') throw conflict('REQUEST_NOT_APPROVED', `需求单 ${r.docNo} 还没通过审核，不能转采购单`);
+    if (r.takenBy) throw conflict('REQUEST_LINE_ORDERED', `「${r.name}」已经在采购单 ${r.takenBy} 里`, { docNo: r.takenBy });
+    if (r.materialId !== null && r.materialId !== l.materialId) throw unprocessable('REQUEST_MATERIAL_MISMATCH', `「${r.name}」的物料与需求单不一致`);
+  }
+  void existing;
 }
 
 /** 明细就地同步：已有行按 id 更新，删掉的行（无收货）删除，新行追加，保持收货对采购单行的引用 */
@@ -259,17 +312,30 @@ async function syncLines(tx: Tx, poId: number, lines: PreparedLine[], existing: 
       await tx`
         UPDATE purchase_order_lines SET material_id = ${l.materialId}, purchase_qty_milli = ${l.purchaseQtyMilli}, purchase_unit = ${l.purchaseUnit},
                inventory_unit = ${l.inventoryUnit}, factor_milli = ${l.factorMilli}, base_qty_milli = ${l.baseQtyMilli},
-               price_cents = ${l.priceCents}, amount_cents = ${l.amountCents}, note = ${l.note}
+               price_cents = ${l.priceCents}, amount_cents = ${l.amountCents}, note = ${l.note}, spec = ${l.spec}
         WHERE id = ${l.id} AND po_id = ${poId}`;
+      await syncLineImages(tx, l.id, l.imageIds);
     } else {
-      await tx`
+      const [row] = await tx<{ id: number }[]>`
         INSERT INTO purchase_order_lines (po_id, line_no, material_id, purchase_qty_milli, purchase_unit, inventory_unit, factor_milli,
-                                          base_qty_milli, price_cents, amount_cents, note)
+                                          base_qty_milli, price_cents, amount_cents, note, spec, request_line_id)
         VALUES (${poId}, ${nextNo++}, ${l.materialId}, ${l.purchaseQtyMilli}, ${l.purchaseUnit}, ${l.inventoryUnit}, ${l.factorMilli},
-                ${l.baseQtyMilli}, ${l.priceCents}, ${l.amountCents}, ${l.note})`;
+                ${l.baseQtyMilli}, ${l.priceCents}, ${l.amountCents}, ${l.note}, ${l.spec}, ${l.requestLineId})
+        RETURNING id`;
+      await syncLineImages(tx, row!.id, l.imageIds);
     }
   }
   return lines.reduce((s, l) => s + l.amountCents, 0);
+}
+
+/** 采购单行的图片：按顺序整组替换（行在采购单改版时就地更新） */
+async function syncLineImages(tx: Tx, poLineId: number, imageIds: number[]) {
+  await tx`DELETE FROM purchase_order_line_images WHERE po_line_id = ${poLineId}`;
+  let sort = 0;
+  for (const imageId of imageIds) {
+    sort += 1;
+    await tx`INSERT INTO purchase_order_line_images (po_line_id, sort_no, image_id) VALUES (${poLineId}, ${sort}, ${imageId})`;
+  }
 }
 
 async function assertSupplier(db: Db, supplierId: number) {
@@ -364,6 +430,7 @@ export async function createPo(deps: Deps, raw: unknown, actor: Actor, opts: { b
       if (existing) return { id: existing, replayed: true };
       await assertSupplier(tx, body.supplierId);
       const lines = await prepareLines(tx, body, new Map());
+      await checkRequestLinks(tx, null, lines, new Map(), actor);
       const settings = await loadInventorySettings(tx);
       const docNo = await nextDocNo(tx, 'purchase_order', 'CG', body.orderDate);
       const [row] = await tx<{ id: number }[]>`
@@ -422,7 +489,7 @@ export async function updatePo(deps: Deps, poId: number, raw: PoBodyInput & { ac
         VALUES (${poId}, ${po.revision}, ${tx.json({
           supplierName: snapshot.supplier.name,
           totalCents: snapshot.totalCents,
-          lines: snapshot.lines.map((l) => ({ materialName: l.materialName, purchaseQtyMilli: l.purchaseQtyMilli, purchaseUnit: l.purchaseUnit, priceCents: l.priceCents, amountCents: l.amountCents })),
+          lines: snapshot.lines.map((l) => ({ materialName: l.materialName, spec: l.spec, purchaseQtyMilli: l.purchaseQtyMilli, purchaseUnit: l.purchaseUnit, priceCents: l.priceCents, amountCents: l.amountCents, imageIds: l.images.map((i) => i.id) })),
         } as never)}, ${actor.id})`;
       await tx`UPDATE purchase_orders SET status = 'returned', revision = revision + 1, updated_at = now() WHERE id = ${poId}`;
       po = { ...po, status: 'returned', revision: po.revision + 1 };
@@ -433,6 +500,7 @@ export async function updatePo(deps: Deps, poId: number, raw: PoBodyInput & { ac
     if (!revise && received && body.supplierId !== po.supplierId) throw unprocessable('PO_SUPPLIER_LOCKED', '已有收货的采购单不能更换供应商');
     await assertSupplier(tx, body.supplierId);
     const lines = await prepareLines(tx, body, existing);
+    await checkRequestLinks(tx, poId, lines, existing, actor);
     const total = await syncLines(tx, poId, lines, existing);
     await tx`
       UPDATE purchase_orders SET supplier_id = ${body.supplierId}, order_date = ${body.orderDate}, expected_date = ${body.expectedDate},

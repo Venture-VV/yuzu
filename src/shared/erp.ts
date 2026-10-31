@@ -4,7 +4,7 @@
 
 import type { Permission } from './permissions';
 
-export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'payables', 'approvals', 'expenses', 'revenue'] as const;
+export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'payables', 'approvals', 'expenses', 'revenue'] as const;
 export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
 
 export interface ErpModuleDef {
@@ -44,11 +44,23 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     description: '采购单的编制、确认、修订与按单收货',
     path: '/purchasing',
     pages: ['/purchasing'],
-    apis: ['/api/purchase-orders', '/api/purchase-baseline'],
+    // 图片（v0.7.8）：采购单与需求单的行都用，跟采购模块走（需求单依赖采购）
+    apis: ['/api/purchase-orders', '/api/purchase-baseline', '/api/erp/images'],
     // 物资经办要看采购单、按单收货（采购单的读接口按「查看库存与物资单据」开放）
     perms: ['inventory.read', 'purchase.manage', 'inventory.approve', 'payable.read'],
     defaultEnabled: true,
     requires: ['inventory'],
+  },
+  requests: {
+    label: '采购需求单',
+    group: '供应链',
+    description: '部门提采购需求（链接、详情、图片），采购审核后一键转采购单，下单 / 到货 / 退货自动回写（v0.7.8，飞书需求 RQ-005）',
+    path: '/erp/requests',
+    pages: ['/erp/requests'],
+    apis: ['/api/erp/requests'],
+    perms: ['request.create', 'request.review'],
+    defaultEnabled: true,
+    requires: ['inventory', 'purchasing'],
   },
   payables: {
     label: '应付货款',
