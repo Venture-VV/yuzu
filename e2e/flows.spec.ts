@@ -66,7 +66,8 @@ test('充值后马上接着消费：会员资料的重新读取还没回来时�
   const memberUrl = /\/api\/members\/\d+$/;
   await page.route(memberUrl, async (route) => {
     await new Promise((r) => setTimeout(r, 3000));
-    await route.continue();
+    // 测试末尾撤掉路由时，等待中的请求可能已被放行或随页面刷新中止：这时不用再放行
+    await route.continue().catch(() => {});
   });
 
   await page.getByRole('button', { name: /^充值/ }).click();
