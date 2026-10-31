@@ -20,10 +20,12 @@ CREATE TABLE checkout_items (
 CREATE TRIGGER checkout_items_append_only BEFORE UPDATE OR DELETE ON checkout_items
   FOR EACH ROW EXECUTE FUNCTION yuzu_forbid_mutation();
 
--- 记下一张结账单的快照：结账那一刻的有效明细（与之前报表的算法相同），优惠按金额比例分摊到分，
--- 分以下的尾差按舍去部分从大到小逐项补 1 分（最大余数法），分摊合计正好等于优惠，每项不超过它的金额。
--- 结账（手牌、桌台）在记好收款之后调用；升级时给已有的结账单补记。
-CREATE FUNCTION yuzu_snapshot_checkout_items(p_checkout bigint) RETURNS void LANGUAGE sql AS $$
+-- 记下一张结账单的快照，优惠按金额比例分摊到分，分以下的尾差按舍去部分从大到小逐项补 1 分（最大余数法），
+-- 分摊合计正好等于优惠，每项不超过它的金额。用哪些明细：
+--   p_current = true：这张结账单所结账单上现在的有效明细，就是这次结掉的（结账时与结账金额一致；补录到更早时刻的结账也一样）。
+--     结账（手牌、桌台）在记好收款之后调用；升级补记时，没反结账过的结账单的账单至今仍是它结的，也这样记。
+--   p_current = false：按结账那一刻的明细重建（与之前报表的算法相同），只用于升级补记反结账过的结账单。
+CREATE FUNCTION yuzu_snapshot_checkout_items(p_checkout bigint, p_current boolean) RETURNS void LANGUAGE sql AS $$
   WITH c AS (SELECT id, created_at FROM checkouts WHERE id = p_checkout),
   r AS (
     SELECT CASE WHEN l.ticket_type_id IS NOT NULL THEN '门票'
@@ -33,7 +35,9 @@ CREATE FUNCTION yuzu_snapshot_checkout_items(p_checkout bigint) RETURNS void LAN
            CASE rc.kind WHEN 'night' THEN '房费（全天房）' WHEN 'half_day' THEN '超时半天' WHEN 'block' THEN '钟点房' ELSE l.name END AS name,
            sum(l.quantity)::int AS quantity, sum(l.amount)::bigint AS amount
     FROM c JOIN checkout_bills cb ON cb.checkout_id = c.id
-    JOIN bill_lines l ON l.bill_id = cb.bill_id AND l.posted_at <= c.created_at AND (l.voided_at IS NULL OR l.voided_at > c.created_at)
+    JOIN bill_lines l ON l.bill_id = cb.bill_id
+     AND CASE WHEN p_current THEN l.status = 'active'
+              ELSE l.posted_at <= c.created_at AND (l.voided_at IS NULL OR l.voided_at > c.created_at) END
     LEFT JOIN service_items si ON si.id = l.item_id
     LEFT JOIN room_stay_charges rc ON rc.line_id = l.id
     GROUP BY 1, 2
@@ -56,7 +60,7 @@ CREATE FUNCTION yuzu_snapshot_checkout_items(p_checkout bigint) RETURNS void LAN
   FROM ranked x, left_over lo
 $$;
 
-SELECT yuzu_snapshot_checkout_items(id) FROM checkouts ORDER BY id;
+SELECT yuzu_snapshot_checkout_items(id, status = 'completed') FROM checkouts ORDER BY id;
 
 -- ───────────── ② 明细转到另一张手牌 ─────────────
 CREATE TABLE bill_line_moves (

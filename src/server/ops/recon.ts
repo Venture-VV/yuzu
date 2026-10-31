@@ -129,7 +129,7 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
            sum(k.sign * ci.discount)::bigint AS discount
     FROM k JOIN checkout_items ci ON ci.checkout_id = k.id
     GROUP BY 1, 2
-    HAVING sum(k.sign * ci.quantity) <> 0 OR sum(k.sign * ci.amount) <> 0`;
+    HAVING sum(k.sign * ci.quantity) <> 0 OR sum(k.sign * ci.amount) <> 0 OR sum(k.sign * ci.discount) <> 0`;
   // 按分类、项目名排序（逐字符比较，结果与数据库的排序规则无关）
   departments.sort((a, b) => (a.category === b.category ? (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) : a.category < b.category ? -1 : 1));
   const voidedLines = await tx<{ at: string; visitNo: string; tag: string; guest: string; staff: string; name: string; quantity: number; amount: number; reason: string; postedByName: string; technician: string | null }[]>`

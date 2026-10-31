@@ -13,6 +13,7 @@ import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Button, Field, Input, Notice } from '../../components/ui';
 import { PendingPanel, useFrontdeskOp } from './pending';
+import { useServerNow } from './queries';
 
 const MOVE_REASONS = ['挂错手牌', '同行客人分开结账', '客人要求转给同行'];
 
@@ -58,10 +59,11 @@ export function MoveLinesDialog({
     op.clearError();
   });
 
+  const now = useServerNow(visit.serverTime);
   const selfMinutes = rules?.selfVoidMinutes ?? 10;
-  // 权限与作废明细相同：有「前台更正」的岗位随时可以；其他人只能转自己在规定分钟内挂的（以服务端为准）
+  // 权限与作废明细相同：有「前台更正」的岗位随时可以；其他人只能转自己在规定分钟内挂的（按服务器时间，以服务端为准）
   const canFix = (l: BillLine) =>
-    can('frontdesk.correct') || (l.postedById === session.staff.id && (Date.now() - new Date(l.postedAt).getTime()) / 60_000 <= selfMinutes);
+    can('frontdesk.correct') || (l.postedById === session.staff.id && (now - new Date(l.postedAt).getTime()) / 60_000 <= selfMinutes);
   const active = visit.lines.filter((l) => l.status === 'active');
   const why = (l: BillLine) => moveBlock(l) ?? (canFix(l) ? null : `超过 ${selfMinutes} 分钟或不是你挂的，请店主或值班经理处理`);
   const chosen = active.filter((l) => picked.includes(l.id));

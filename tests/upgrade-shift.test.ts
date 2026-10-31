@@ -80,7 +80,7 @@ beforeAll(async () => {
   await sql`CREATE TABLE room_stays (id bigint, stay_no text, room_id bigint, visit_id bigint, status text)`;
   await sql`CREATE TABLE rooms (id bigint, room_no text)`;
   // 现版本结账时记部门营业额快照（025 才有）：写入期间临时建一个什么都不做的函数，迁移前删掉（迁移 025 会给这张结账单补记）
-  await sql.unsafe('CREATE FUNCTION yuzu_snapshot_checkout_items(p_checkout bigint) RETURNS void LANGUAGE plpgsql AS $$ BEGIN END $$');
+  await sql.unsafe('CREATE FUNCTION yuzu_snapshot_checkout_items(p_checkout bigint, p_current boolean) RETURNS void LANGUAGE plpgsql AS $$ BEGIN END $$');
   const deps = { sql, config };
   const as = (id: number, username: string): Actor => ({ id, username, displayName: username, role: username === 'owner' ? 'owner' : 'clerk', duties: [], mustChangePassword: false });
   const cash = (amount: number) => ({ idempotencyKey: randomUUID(), memberId, planId: null, paidAmount: amount, bonusAmount: 0, paymentMethod: 'cash' as const, paymentConfirmed: true as const });
@@ -104,7 +104,7 @@ beforeAll(async () => {
   await sql`DROP TABLE dining_tables`;
   await sql`DROP TABLE room_stays`;
   await sql`DROP TABLE rooms`;
-  await sql`DROP FUNCTION yuzu_snapshot_checkout_items(bigint)`;
+  await sql`DROP FUNCTION yuzu_snapshot_checkout_items(bigint, boolean)`;
 
   expect(await migrate(sql)).toEqual(['016_shift_boundary.sql', '017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql', '020_technicians.sql', '021_clockroom.sql', '022_dining.sql', '023_dining_tables.sql', '024_rooms.sql', '025_cashier.sql']);
   app = await buildApp(sql, config);

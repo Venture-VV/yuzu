@@ -3,6 +3,11 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { shiftDate } from '../src/shared/labels';
+import type { Actor } from '../src/server/lib/context';
+import { moveLines, postCharges } from '../src/server/modules/frontdesk/bills';
+import { checkout, previewCheckout } from '../src/server/modules/frontdesk/checkout';
+import { checkin } from '../src/server/modules/frontdesk/visits';
 import { createStaff } from '../src/server/modules/staff';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
@@ -234,5 +239,88 @@ describe('明细转到另一张手牌（转单）', () => {
     const posted = await post(v, [{ itemId: item['快照修脚']!, quantity: 1 }], 5000);
     expect((await move({ lineIds: [posted.lines[0]!.id], toTagCode: 'C011' })).body.error.code).toBe('TAG_NOT_IN_STORE');
     await checks();
+  });
+});
+
+describe('代码审查的修正（v0.7.6）', () => {
+  const deps = () => ({ sql: ctx.sql, config: ctx.config });
+  const owner = (): Actor => ({ id: ctx.ownerId, username: 'owner', displayName: '测试店主', role: 'owner', duties: [], mustChangePassword: false });
+  const M = 60_000;
+  /** 等到有会话卡在匹配的语句上等锁 */
+  const waitForLockWait = async (pattern: string) => {
+    for (let i = 0; i < 100; i++) {
+      const rows = await ctx.sql`SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE ${pattern}`;
+      if (rows.length > 0) return;
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    throw new Error(`等待锁超时：${pattern}`);
+  };
+
+  it('补录到更早时刻的结账：之后才转走的明细不算进它的部门快照（按这一刻要结的有效明细记），转过去的那位结账时只算一次', async () => {
+    const now = Date.now();
+    const enterAt = async (tagCode: string) =>
+      (await checkin(deps(), { clientKey: randomUUID(), guests: [{ tagCode, zone: 'male' }] }, { actor: owner(), at: new Date(now - 50 * M) })).visits[0]!.id;
+    const a = await enterAt('C025');
+    const b = await enterAt('C026');
+    // 40 分钟前挂一项，20 分钟前转给 C026；A 的结账补录在 30 分钟前（早于转单）
+    const posted = await postCharges(deps(), a, { clientKey: randomUUID(), lines: [{ itemId: item['快照修脚']!, quantity: 1 }], expectedTotal: 5000 }, { actor: owner(), at: new Date(now - 40 * M) });
+    const lineId = posted.lines.find((l) => l.status === 'active')!.id;
+    await moveLines(deps(), { clientKey: randomUUID(), lineIds: [lineId], toTagCode: 'C026', reason: '挂错手牌' }, { actor: owner(), at: new Date(now - 20 * M) });
+    const at = new Date(now - 30 * M);
+    const pre = await previewCheckout(deps(), [a], at);
+    expect(pre.totalAmount).toBe(49900);
+    const paid = await checkout(deps(), { clientKey: randomUUID(), visitIds: [a], expectedTotal: 49900, payments: [{ method: 'cash', amount: 49900 }] }, { actor: owner(), at });
+    expect((await items(paid.id)).map((x) => [x.category, x.amount])).toEqual([['门票', 49900]]);
+    const total = (await preview([b])).totalAmount;
+    const paidB = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', { clientKey: randomUUID(), visitIds: [b], expectedTotal: total, payments: [{ method: 'cash', amount: total }] });
+    expect(paidB.status, JSON.stringify(paidB.body)).toBe(200);
+    expect((await items(paidB.body.id)).map((x) => [x.category, x.amount])).toEqual([
+      ['快照足疗', 5000],
+      ['门票', 49900],
+    ]);
+    await checks();
+  });
+
+  it('转单时目标客人刚在别的终端换了牌：锁好来访后核对牌号，对不上就拒绝（TAG_CHANGED），明细不动', async () => {
+    const a = await enter('C030');
+    const b = await enter('C031');
+    const posted = await post(a, [{ itemId: item['快照修脚']!, quantity: 1 }], 5000);
+    // 转单读到 C031 的客人之后卡在这位客人的来访锁上；这时这位客人换到 C032（模拟另一台终端的换牌）并提交
+    const conn = await ctx.sql.reserve();
+    await conn.unsafe('BEGIN');
+    await conn`SELECT id FROM visits WHERE id = ${b} FOR UPDATE`;
+    const moving = moveLines(deps(), { clientKey: randomUUID(), lineIds: [posted.lines[0]!.id], toTagCode: 'C031', reason: '挂错手牌' }, { actor: owner() }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    try {
+      await waitForLockWait('%FROM visits WHERE id IN%');
+      await conn`UPDATE visits SET tag_id = (SELECT id FROM hand_tags WHERE code = 'C032') WHERE id = ${b}`;
+      await conn.unsafe('COMMIT');
+    } finally {
+      conn.release();
+    }
+    expect(await moving).toMatchObject({ status: 409, code: 'TAG_CHANGED' });
+    expect((await visit(a)).bill.amountCents).toBe(5000);
+    expect((await visit(b)).bill.amountCents).toBe(0);
+  });
+
+  it('前一天带优惠的结账今天反结账、按同样的项目换了优惠重结：只差优惠的部门照样列出，优惠的变动不丢', async () => {
+    // 直接写两张结账单与快照（只核对报表的口径；放在最后，之后不再跑自检）
+    const yesterday = shiftDate(today, -1);
+    const [old] = await ctx.sql<{ id: number }[]>`
+      INSERT INTO checkouts (checkout_no, client_key, status, total_amount, paid_amount, business_date, operator_id, created_at,
+                             voided_at, voided_by, void_reason, void_business_date)
+      VALUES ('JZ-TEST-OLD', ${randomUUID()}, 'voided', 10000, 10000, ${yesterday}, ${ctx.ownerId}, now() - interval '1 day',
+              now(), ${ctx.ownerId}, '测试：换了优惠重结', ${today})
+      RETURNING id`;
+    const [fresh] = await ctx.sql<{ id: number }[]>`
+      INSERT INTO checkouts (checkout_no, client_key, total_amount, paid_amount, business_date, operator_id, created_at)
+      VALUES ('JZ-TEST-NEW', ${randomUUID()}, 10000, 10000, ${today}, ${ctx.ownerId}, now())
+      RETURNING id`;
+    await ctx.sql`
+      INSERT INTO checkout_items (checkout_id, category, name, quantity, amount, discount)
+      VALUES (${old!.id}, '换优惠测试', '项目甲', 1, 10000, 500), (${fresh!.id}, '换优惠测试', '项目甲', 1, 10000, 800)`;
+    expect((await departments()).find((d) => d.category === '换优惠测试')).toEqual({ category: '换优惠测试', quantity: 0, amount: 0, discount: 300 });
   });
 });

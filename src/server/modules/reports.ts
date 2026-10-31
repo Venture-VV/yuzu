@@ -73,7 +73,7 @@ async function itemLines(db: Db, from: string, to: string) {
            sum(k.sign * ci.discount)::bigint AS discount
     FROM k JOIN checkout_items ci ON ci.checkout_id = k.id
     GROUP BY 1, 2
-    HAVING sum(k.sign * ci.quantity) <> 0 OR sum(k.sign * ci.amount) <> 0`;
+    HAVING sum(k.sign * ci.quantity) <> 0 OR sum(k.sign * ci.amount) <> 0 OR sum(k.sign * ci.discount) <> 0`;
 }
 
 function byCategory(lines: { category: string; quantity: number; amount: number; discount: number }[]) {

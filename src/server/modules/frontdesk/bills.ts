@@ -281,8 +281,8 @@ export async function moveLines(deps: Deps, raw: unknown, ctx: OpContext) {
   const fromVisitId = peek[0]!.visitId;
   await runIdempotent(deps, { key, opType: 'line_move', requestHash }, async (tx) => {
     const at = ctx.at ?? new Date();
-    const [target] = await tx<{ id: number }[]>`
-      SELECT v.id FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${input.toTagCode} AND v.status = 'open'`;
+    const [target] = await tx<{ id: number; tagId: number }[]>`
+      SELECT v.id, v.tag_id FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${input.toTagCode} AND v.status = 'open'`;
     if (!target) throw conflict('TAG_NOT_IN_STORE', `手牌 ${input.toTagCode} 没有在店客人，请核对牌号`);
     if (target.id === fromVisitId) throw badRequest(`这些明细就在手牌 ${input.toTagCode} 上，不用转`);
     // 来访（id 升序）→ 账单（id 升序）→ 明细（id 升序）
@@ -291,6 +291,8 @@ export async function moveLines(deps: Deps, raw: unknown, ctx: OpContext) {
     const to = visits.get(target.id)!;
     assertOpen(from);
     assertOpen(to);
+    // 读到目标客人之后、锁好之前，这位客人可能刚在别的终端换了牌：牌号对不上就拒绝，不把明细转给已不在这张牌上的客人
+    if (to.tagId !== target.tagId) throw conflict('TAG_CHANGED', `手牌 ${input.toTagCode} 刚刚换过牌，请刷新后重新填写转到哪张手牌`);
     const bills = await tx<{ status: string }[]>`SELECT status FROM bills WHERE id IN ${tx([from.billId, to.billId])} ORDER BY id FOR UPDATE`;
     if (bills.some((b) => b.status !== 'open')) throw conflict('BILL_CLOSED', '账单已结束，不能再转单');
     const lines = await tx<

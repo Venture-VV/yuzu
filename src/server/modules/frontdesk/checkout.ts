@@ -264,11 +264,12 @@ export function assertSettled(payments: CheckoutPaymentInput[], total: number) {
 
 
 /**
- * 部门营业额快照（v0.7.6）：记好收款（含优惠 / 免单）之后调用，按结账那一刻的有效明细记下各部门、各项目的数量与金额，
- * 优惠按金额比例分摊到各项（数据库函数 yuzu_snapshot_checkout_items，升级时也用它给已有的结账单补记）。手牌、桌台结账共用
+ * 部门营业额快照（v0.7.6）：记好收款（含优惠 / 免单）之后调用，按这次要结的有效明细记下各部门、各项目的数量与金额，
+ * 优惠按金额比例分摊到各项（数据库函数 yuzu_snapshot_checkout_items，升级时也用它给已有的结账单补记）。手牌、桌台结账共用。
+ * 补录到更早时刻的结账也按这一刻的有效明细记：之后才转走、作废的明细不算进来，与结账金额一致
  */
 export async function snapshotCheckoutItems(tx: Tx, checkoutId: number) {
-  await tx`SELECT yuzu_snapshot_checkout_items(${checkoutId})`;
+  await tx`SELECT yuzu_snapshot_checkout_items(${checkoutId}, true)`;
 }
 /**
  * 登记这张结账单的收款（手牌结账与桌台结账共用）：会员储值按会员 id 升序逐位记账（同一事务里生成消费单与余额流水），
