@@ -7,7 +7,7 @@ import { levelOf } from '@shared/frontdesk';
 import { shiftDate } from '@shared/labels';
 import { channelLabel, levelName } from '@shared/members';
 import { can } from '@shared/permissions';
-import { MAX_REPORT_DAYS, type DutyExtras, type ExecutiveReport, type MemberBrief, type MembersReport, type PeriodKpis } from '@shared/reports';
+import { MAX_REPORT_DAYS, type DepartmentRevenue, type DutyExtras, type ExecutiveReport, type MemberBrief, type MembersReport, type PeriodKpis } from '@shared/reports';
 import type { RoomBoardStatus, RoomsReport } from '@shared/rooms';
 import { readSnapshot, type Db } from '../db';
 import { guard } from '../auth/guard';
@@ -58,35 +58,31 @@ async function periodKpis(db: Db, from: string, to: string, c: Clock): Promise<P
   return { ...r!, net, perGuest: r!.guests ? Math.round(net / r!.guests) : 0 };
 }
 
-/** 部门（项目分类）与项目：每张结账单结账那一刻的明细（与对账包的部门参考表同一口径），时段内结的计正数、反结账的计负数 */
+/**
+ * 部门（项目分类）与项目：结账时记下的快照（v0.7.6，与对账包的部门参考表同一口径；以后改价目、改分类不影响已结的单），
+ * 时段内结的计正数、反结账的计负数。discount 是分摊到这一项的优惠 / 免单
+ */
 async function itemLines(db: Db, from: string, to: string) {
-  return db<{ category: string; name: string; quantity: number; amount: number }[]>`
+  return db<{ category: string; name: string; quantity: number; amount: number; discount: number }[]>`
     WITH k AS (
-      SELECT id, created_at, 1 AS sign FROM checkouts WHERE business_date BETWEEN ${from} AND ${to}
+      SELECT id, 1 AS sign FROM checkouts WHERE business_date BETWEEN ${from} AND ${to}
       UNION ALL
-      SELECT id, created_at, -1 FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to}
+      SELECT id, -1 FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to}
     )
-    SELECT CASE WHEN l.ticket_type_id IS NOT NULL THEN '门票'
-                WHEN l.source = 'room' THEN '客房'
-                WHEN l.item_id IS NULL THEN '其他（手动金额、赔偿等）'
-                ELSE coalesce(nullif(si.category, ''), '未分类') END AS category,
-           -- 房费（S7）的明细名称带房号与日期，按房费的种类合并
-           CASE rc.kind WHEN 'night' THEN '房费（全天房）' WHEN 'half_day' THEN '超时半天' WHEN 'block' THEN '钟点房' ELSE l.name END AS name,
-           sum(k.sign * l.quantity)::int AS quantity, sum(k.sign * l.amount)::bigint AS amount
-    FROM k JOIN checkout_bills cb ON cb.checkout_id = k.id
-    JOIN bill_lines l ON l.bill_id = cb.bill_id AND l.posted_at <= k.created_at AND (l.voided_at IS NULL OR l.voided_at > k.created_at)
-    LEFT JOIN service_items si ON si.id = l.item_id
-    LEFT JOIN room_stay_charges rc ON rc.line_id = l.id
+    SELECT ci.category, ci.name, sum(k.sign * ci.quantity)::int AS quantity, sum(k.sign * ci.amount)::bigint AS amount,
+           sum(k.sign * ci.discount)::bigint AS discount
+    FROM k JOIN checkout_items ci ON ci.checkout_id = k.id
     GROUP BY 1, 2
-    HAVING sum(k.sign * l.quantity) <> 0 OR sum(k.sign * l.amount) <> 0`;
+    HAVING sum(k.sign * ci.quantity) <> 0 OR sum(k.sign * ci.amount) <> 0`;
 }
 
-function byCategory(lines: { category: string; quantity: number; amount: number }[]) {
-  const map = new Map<string, { category: string; quantity: number; amount: number }>();
+function byCategory(lines: { category: string; quantity: number; amount: number; discount: number }[]) {
+  const map = new Map<string, DepartmentRevenue>();
   for (const l of lines) {
-    const x = map.get(l.category) ?? { category: l.category, quantity: 0, amount: 0 };
+    const x = map.get(l.category) ?? { category: l.category, quantity: 0, amount: 0, discount: 0 };
     x.quantity += l.quantity;
     x.amount += l.amount;
+    x.discount += l.discount;
     map.set(l.category, x);
   }
   return [...map.values()].sort((a, b) => b.amount - a.amount);

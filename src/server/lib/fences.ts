@@ -25,6 +25,8 @@ export const FENCED_OPS = [
   'room_deposit',
   'room_refund',
   'room_close',
+  // 收银完善（v0.7.6）：转单
+  'line_move',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 

@@ -238,7 +238,7 @@ function DutyCards({ duty, startHour }: { duty: DutyExtras; startHour: number })
         </Card>
         <Card className="p-5">
           <SectionTitle aside={<span className="text-[12px] text-ink-3">结账明细，反结账冲回</span>}>今日部门构成</SectionTitle>
-          <HBars testId="dashboard-departments" format={yuan} empty="今天还没有结账" rows={duty.departments.map((x) => ({ key: x.category, label: x.category, value: x.amount, note: `${x.quantity} 项` }))} />
+          <HBars testId="dashboard-departments" format={yuan} empty="今天还没有结账" rows={duty.departments.map((x) => ({ key: x.category, label: x.category, value: x.amount, note: `${x.quantity} 项${x.discount ? ` · 优惠 ${yuan(x.discount)}` : ''}` }))} />
         </Card>
       </div>
       {duty.longStays && duty.longStays.length > 0 && (

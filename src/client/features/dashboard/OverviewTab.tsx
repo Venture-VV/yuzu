@@ -92,7 +92,7 @@ export function OverviewTab() {
                   testId="overview-departments"
                   format={yuan}
                   empty="这段时间没有结账"
-                  rows={d.departments.map((x) => ({ key: x.category, label: x.category, value: x.amount, note: `${x.quantity} 项` }))}
+                  rows={d.departments.map((x) => ({ key: x.category, label: x.category, value: x.amount, note: `${x.quantity} 项${x.discount ? ` · 优惠 ${yuan(x.discount)}` : ''}` }))}
                 />
               </Card>
               <Card className="p-5">

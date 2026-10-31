@@ -30,7 +30,7 @@ import { badRequest, conflict, notFound, unprocessable } from '../lib/errors';
 import { cents, idParam, parse, positiveCents } from '../lib/validate';
 import { expireMemberBonus } from './bonus';
 import { cancelKitchenItem, createKitchenItems, kitchenStationsOf, loadDiningRules, takeDishLimits, type KitchenLine } from './dining';
-import { assertSettled, getCheckout, Payment, recordCheckoutPayments, splitPayments } from './frontdesk/checkout';
+import { assertSettled, getCheckout, Payment, recordCheckoutPayments, snapshotCheckoutItems, splitPayments } from './frontdesk/checkout';
 import { assertCanFix, businessDate, hashRequest, loadFrontdeskRules, nextDocNo, runIdempotent, saveKey, setTxTimeouts } from './frontdesk/common';
 import { loadPricedItems, priceLine } from './pricing';
 import { lockPaymentShift, openShiftOf } from './shifts';
@@ -560,6 +560,7 @@ export async function checkoutTables(deps: Deps, raw: unknown, ctx: OpContext): 
     }
     const tables = rows.map((r) => r.tableName);
     await recordCheckoutPayments(tx, deps, { checkoutId, checkoutNo, payments: input.payments, discount, tagCodes: [], tables, date, at, ctx });
+    await snapshotCheckoutItems(tx, checkoutId);
     // 结清：账单与开台结束，桌台空出来
     await tx`UPDATE bills SET status = 'settled', closed_at = ${at} WHERE id IN ${tx(billIds)}`;
     await tx`UPDATE table_sessions SET status = 'settled', closed_at = ${at}, closed_by = ${ctx.actor.id} WHERE id IN ${tx(ids)}`;

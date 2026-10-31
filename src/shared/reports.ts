@@ -51,8 +51,8 @@ export interface ExecutiveReport {
   trend: { date: string; net: number; guests: number; rechargePaid: number }[];
   byMethod: { method: CheckoutMethod; amount: number }[];
   tickets: { name: string; count: number; amount: number }[];
-  /** 部门（项目分类）构成：结账那一刻的明细，反结账的冲回 */
-  departments: { category: string; quantity: number; amount: number }[];
+  /** 部门（项目分类）构成：结账时记下的快照（v0.7.6），反结账的冲回 */
+  departments: DepartmentRevenue[];
   topItems: { name: string; category: string; quantity: number; amount: number }[];
   /** 到店时段：各小时接待的人数（撤销误开的不计） */
   arrivals: { hour: number; count: number }[];
@@ -86,11 +86,22 @@ export interface MembersReport {
   bonusExpiring: { amount: number; members: number };
 }
 
+/**
+ * 部门营业额（v0.7.6）：结账时按明细记下的快照，以后改价目、改分类不影响已结的单。
+ * amount 是应收（明细金额），discount 是按金额比例分摊到这个部门的优惠 / 免单，净额 = amount − discount
+ */
+export interface DepartmentRevenue {
+  category: string;
+  quantity: number;
+  amount: number;
+  discount: number;
+}
+
 /** 今日看板追加的值班数据 */
 export interface DutyExtras {
   /** 各小时的结账张数与接待人数（营业日从切换时刻起算） */
   hourly: { hour: number; checkouts: number; arrivals: number }[];
-  departments: { category: string; quantity: number; amount: number }[];
+  departments: DepartmentRevenue[];
   /** 在店最久的客人（前 8 位）；没有「查看在店手牌」权限的岗位为 null（v0.7.1） */
   longStays: { visitId: number; tagCode: string; guest: string; checkedInAt: string; amountCents: number }[] | null;
 }

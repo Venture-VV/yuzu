@@ -140,7 +140,7 @@ export interface ErpRevenue {
   kpis: { receivable: number; discount: number; net: number; guests: number; checkouts: number; perGuest: number; rechargePaid: number };
   trend: { date: string; net: number; guests: number; rechargePaid: number }[];
   byMethod: { method: import('./checkout').CheckoutMethod; amount: number }[];
-  departments: { category: string; quantity: number; amount: number }[];
+  departments: import('./reports').DepartmentRevenue[];
   /** 已确认日结的营业日 */
   settlements: { date: string; closedAt: string; closedByName: string }[];
 }

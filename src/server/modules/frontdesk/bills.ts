@@ -5,12 +5,12 @@
 import { z } from 'zod';
 import { PRICE_TIER_LABELS, PRICE_TIERS, type PriceTier } from '@shared/catalog';
 import { can } from '@shared/permissions';
-import { ZONE_LABELS, type BillSource } from '@shared/frontdesk';
+import { MAX_MOVE_LINES, normalizeTagCode, TAG_CODE_PATTERN, ZONE_LABELS, type BillSource } from '@shared/frontdesk';
 import { CALL_TYPES, canServe, gradeLabel, technicianText, tierFor, type CallType } from '@shared/technicians';
 import { MAX_DISH_NOTE } from '@shared/dining';
 import { writeAudit } from '../../lib/audit';
 import type { Deps, OpContext } from '../../lib/context';
-import { conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
+import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
 import { parse, positiveCents } from '../../lib/validate';
 import { assertCanFix, assertOpen, businessDate, hashRequest, loadFrontdeskRules, lockVisits, runIdempotent, saveKey, setTxTimeouts } from './common';
 import { loadPricedItems, priceLine } from '../pricing';
@@ -247,4 +247,120 @@ export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: Op
     });
   });
   return getVisit(deps.sql, peek.visitId);
+}
+
+export const MoveLinesInput = z.object({
+  clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
+  lineIds: z
+    .array(z.number().int().positive(), '请选择要转的明细')
+    .min(1, '请选择要转的明细')
+    .max(MAX_MOVE_LINES, `一次最多转 ${MAX_MOVE_LINES} 条`),
+  toTagCode: z
+    .string('请填写转到哪张手牌')
+    .transform((v) => normalizeTagCode(v))
+    .pipe(z.string().min(1, '请填写转到哪张手牌').regex(TAG_CODE_PATTERN, '牌号格式不正确（例如 A023、1088）')),
+  reason: z.string('请填写转单原因').trim().min(2, '请填写转单原因（至少 2 个字）').max(100, '原因最多 100 字'),
+});
+
+/**
+ * 转单（v0.7.6）：挂错手牌时，把在店客人账单上的一条或几条有效明细转到另一位在店客人的手牌上。
+ * 原明细作废（原因写明转到哪张手牌），目标账单新增一条同样的明细（来源、项目、名称、档位、单价、数量、技师不变，
+ * 挂账人记办理的人），并记下转单记录。权限与作废明细相同（自己挂的、规定分钟内；其他由有「前台更正」的岗位）。
+ * 房费（随入住单走）、餐饮的菜（有出品单）、钟房派的钟（有钟单）、门票不能转。
+ * 加锁：两位客人的来访（id 升序）→ 账单（id 升序）→ 明细（id 升序）
+ */
+export async function moveLines(deps: Deps, raw: unknown, ctx: OpContext) {
+  const input = parse(MoveLinesInput, raw);
+  const lineIds = [...new Set(input.lineIds)].sort((a, b) => a - b);
+  const { clientKey: key, ...payload } = input;
+  const requestHash = hashRequest({ ...payload, lineIds });
+  const peek = await deps.sql<{ visitId: number }[]>`
+    SELECT DISTINCT v.id AS visit_id FROM bill_lines l JOIN visits v ON v.bill_id = l.bill_id WHERE l.id IN ${deps.sql(lineIds)}`;
+  if (peek.length === 0) throw notFound('账单明细不存在');
+  if (peek.length > 1) throw badRequest('一次只能转同一位客人账单上的明细');
+  const fromVisitId = peek[0]!.visitId;
+  await runIdempotent(deps, { key, opType: 'line_move', requestHash }, async (tx) => {
+    const at = ctx.at ?? new Date();
+    const [target] = await tx<{ id: number }[]>`
+      SELECT v.id FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${input.toTagCode} AND v.status = 'open'`;
+    if (!target) throw conflict('TAG_NOT_IN_STORE', `手牌 ${input.toTagCode} 没有在店客人，请核对牌号`);
+    if (target.id === fromVisitId) throw badRequest(`这些明细就在手牌 ${input.toTagCode} 上，不用转`);
+    // 来访（id 升序）→ 账单（id 升序）→ 明细（id 升序）
+    const visits = await lockVisits(tx, [fromVisitId, target.id]);
+    const from = visits.get(fromVisitId)!;
+    const to = visits.get(target.id)!;
+    assertOpen(from);
+    assertOpen(to);
+    const bills = await tx<{ status: string }[]>`SELECT status FROM bills WHERE id IN ${tx([from.billId, to.billId])} ORDER BY id FOR UPDATE`;
+    if (bills.some((b) => b.status !== 'open')) throw conflict('BILL_CLOSED', '账单已结束，不能再转单');
+    const lines = await tx<
+      {
+        id: number;
+        billId: number;
+        source: BillSource;
+        itemId: number | null;
+        tier: PriceTier | null;
+        name: string;
+        unitPrice: number;
+        quantity: number;
+        amount: number;
+        status: string;
+        postedBy: number;
+        postedAt: string;
+        technicianId: number | null;
+        callType: CallType | null;
+        sessionId: number | null;
+        ticketTypeId: number | null;
+        gender: 'male' | 'female' | null;
+      }[]
+    >`
+      SELECT l.id, l.bill_id, l.source, l.item_id, l.tier, l.name, l.unit_price, l.quantity, l.amount, l.status, l.posted_by, l.posted_at,
+             l.technician_id, l.call_type, l.session_id, l.ticket_type_id, si.gender
+      FROM bill_lines l LEFT JOIN service_items si ON si.id = l.item_id
+      WHERE l.id IN ${tx(lineIds)} ORDER BY l.id FOR UPDATE OF l`;
+    if (lines.length !== lineIds.length || lines.some((l) => l.billId !== from.billId)) throw notFound('有明细不存在，请刷新后重试');
+    const rules = await loadFrontdeskRules(tx);
+    for (const l of lines) {
+      if (l.status !== 'active') throw conflict('ALREADY_VOIDED', `「${l.name}」已作废，不能再转`);
+      if (l.source === 'room') throw unprocessable('LINE_NOT_MOVABLE', `「${l.name}」是房费，随入住单走，不能转`);
+      if (l.source === 'dining') throw unprocessable('LINE_NOT_MOVABLE', `「${l.name}」是餐饮的菜（有出品单），不能转；请退菜后在正确的手牌上重新点`);
+      if (l.sessionId !== null) throw unprocessable('LINE_NOT_MOVABLE', `「${l.name}」是钟房派的钟（有钟单），不能转；请在钟房处理`);
+      if (l.ticketTypeId !== null) throw unprocessable('LINE_NOT_MOVABLE', `「${l.name}」是门票，不能转`);
+      if (l.gender && l.gender !== to.zone) {
+        throw unprocessable('ITEM_GENDER', `「${l.name}」仅限${ZONE_LABELS[l.gender].title}，手牌 ${input.toTagCode} 是${ZONE_LABELS[to.zone].title}`);
+      }
+      assertCanFix(ctx.actor, l.postedBy, l.postedAt, rules, at, `「${l.name}」`);
+    }
+    const date = await businessDate(tx, deps, at);
+    const [fromTag] = await tx<{ code: string }[]>`SELECT code FROM hand_tags WHERE id = ${from.tagId}`;
+    const voidReason = `转到手牌 ${input.toTagCode}：${input.reason}`;
+    const total = lines.reduce((t, l) => t + l.amount, 0);
+    for (const l of lines) {
+      await tx`
+        UPDATE bill_lines SET status = 'voided', void_reason = ${voidReason}, voided_by = ${ctx.actor.id}, voided_at = ${at} WHERE id = ${l.id}`;
+      const [row] = await tx<{ id: number }[]>`
+        INSERT INTO bill_lines (bill_id, source, item_id, tier, name, unit_price, quantity, amount, post_key, business_date, posted_by, posted_at,
+                                technician_id, call_type)
+        VALUES (${to.billId}, ${l.source}, ${l.itemId}, ${l.tier}, ${l.name}, ${l.unitPrice}, ${l.quantity}, ${l.amount}, ${key}, ${date},
+                ${ctx.actor.id}, ${at}, ${l.technicianId}, ${l.callType})
+        RETURNING id`;
+      await tx`
+        INSERT INTO bill_line_moves (op_key, from_line_id, to_line_id, from_visit_id, to_visit_id, reason, operator_id, business_date, created_at)
+        VALUES (${key}, ${l.id}, ${row!.id}, ${from.id}, ${to.id}, ${input.reason}, ${ctx.actor.id}, ${date}, ${at})`;
+    }
+    await tx`UPDATE bills SET amount_cents = amount_cents - ${total}, line_count = line_count - ${lines.length} WHERE id = ${from.billId}`;
+    await tx`UPDATE bills SET amount_cents = amount_cents + ${total}, line_count = line_count + ${lines.length} WHERE id = ${to.billId}`;
+    await saveKey(tx, key, 'line_move', requestHash, from.id, ctx.actor.id);
+    await writeAudit(tx, {
+      staffId: ctx.actor.id,
+      action: 'frontdesk_move',
+      targetType: 'visit',
+      targetId: from.id,
+      detail: { visitNo: from.visitNo, from: fromTag!.code, to: input.toTagCode, toVisitNo: to.visitNo, total, lines: lines.map((l) => `${l.name}×${l.quantity}`), reason: input.reason },
+      ip: ctx.ip,
+      businessDate: date,
+    });
+    return from.id;
+  });
+  return getVisit(deps.sql, fromVisitId);
 }

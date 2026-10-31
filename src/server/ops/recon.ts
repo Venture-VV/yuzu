@@ -3,7 +3,7 @@
 //   00-说明.txt        门店、实例、版本与 SHA、营业日与时段、生成时刻、数据指纹、主要数字与交叉核对
 //   01-日结汇总.csv    与「日结」页导出的相同
 //   02-结账单.csv      当天结账与当天反结账的结账单，按收款方式分列
-//   03-部门参考表.csv  结账明细按项目分类（部门）汇总：当天结的计正数、当天反结账的计负数，合计 = 营业额（净额）
+//   03-部门参考表.csv  结账时记下的部门快照（v0.7.6）按项目分类（部门）汇总：当天结的计正数、当天反结账的计负数，合计 = 应收；优惠按比例分摊到各项
 //   04-异常清单.csv    反结账、作废明细、撤销误开的牌、改票种、免票入场、会员撤销与其他日结异常
 //   05-交班.csv        当天的班次：备用金、各收款方式、应有现金、实点、长短款
 //   06-技师业绩.csv    每位技师的钟数、点钟 / 轮钟、金额与提成（v0.7.0 / v0.7.1，与部门参考表同一口径），供与钟房的钟单核对
@@ -117,26 +117,19 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     FROM checkouts c JOIN staff s ON s.id = c.operator_id LEFT JOIN staff vs ON vs.id = c.voided_by
     WHERE c.business_date = ${date} OR c.void_business_date = ${date}
     ORDER BY c.created_at, c.id`;
-  // 部门参考表：每张结账单结账那一刻的明细（与打印的结账单相同口径）；当天结的计正数、当天反结账的计负数
-  const departments = await tx<{ category: string; name: string; quantity: number; amount: number }[]>`
+  // 部门参考表：结账时记下的快照（v0.7.6，以后改价目、改分类不影响已结的单）；当天结的计正数、当天反结账的计负数；
+  // discount 是按金额比例分摊到这一项的优惠 / 免单
+  const departments = await tx<{ category: string; name: string; quantity: number; amount: number; discount: number }[]>`
     WITH k AS (
-      SELECT id, created_at, 1 AS sign FROM checkouts WHERE business_date = ${date}
+      SELECT id, 1 AS sign FROM checkouts WHERE business_date = ${date}
       UNION ALL
-      SELECT id, created_at, -1 FROM checkouts WHERE void_business_date = ${date}
+      SELECT id, -1 FROM checkouts WHERE void_business_date = ${date}
     )
-    SELECT CASE WHEN l.ticket_type_id IS NOT NULL THEN '门票'
-                WHEN l.source = 'room' THEN '客房'
-                WHEN l.item_id IS NULL THEN '其他（手动金额、赔偿等）'
-                ELSE coalesce(nullif(si.category, ''), '未分类') END AS category,
-           -- 房费（S7）的明细名称带房号与日期，按房费的种类合并
-           CASE rc.kind WHEN 'night' THEN '房费（全天房）' WHEN 'half_day' THEN '超时半天' WHEN 'block' THEN '钟点房' ELSE l.name END AS name,
-           sum(k.sign * l.quantity)::int AS quantity, sum(k.sign * l.amount)::bigint AS amount
-    FROM k JOIN checkout_bills cb ON cb.checkout_id = k.id
-    JOIN bill_lines l ON l.bill_id = cb.bill_id AND l.posted_at <= k.created_at AND (l.voided_at IS NULL OR l.voided_at > k.created_at)
-    LEFT JOIN service_items si ON si.id = l.item_id
-    LEFT JOIN room_stay_charges rc ON rc.line_id = l.id
+    SELECT ci.category, ci.name, sum(k.sign * ci.quantity)::int AS quantity, sum(k.sign * ci.amount)::bigint AS amount,
+           sum(k.sign * ci.discount)::bigint AS discount
+    FROM k JOIN checkout_items ci ON ci.checkout_id = k.id
     GROUP BY 1, 2
-    HAVING sum(k.sign * l.quantity) <> 0 OR sum(k.sign * l.amount) <> 0`;
+    HAVING sum(k.sign * ci.quantity) <> 0 OR sum(k.sign * ci.amount) <> 0`;
   // 按分类、项目名排序（逐字符比较，结果与数据库的排序规则无关）
   departments.sort((a, b) => (a.category === b.category ? (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) : a.category < b.category ? -1 : 1));
   const voidedLines = await tx<{ at: string; visitNo: string; tag: string; guest: string; staff: string; name: string; quantity: number; amount: number; reason: string; postedByName: string; technician: string | null }[]>`
@@ -293,23 +286,28 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     ]),
   });
 
-  // 03 部门参考表：明细按结账那一刻计，合计应等于应收；优惠 / 免单是结账时少收的部分，单列在后面（与日结同一口径）
+  // 03 部门参考表：结账时记下的快照，应收合计应等于应收；优惠 / 免单按金额比例分摊到各项（v0.7.6），分摊合计应等于优惠
   const biz = businessBreakdown(s.business);
   const deptTotal = day.departments.reduce((t, d) => t + d.amount, 0);
+  const deptDiscount = day.departments.reduce((t, d) => t + d.discount, 0);
   const categories = [...new Set(day.departments.map((d) => d.category))];
+  const row = (cat: string, name: string, quantity: number | string, amount: number, discount: number) => [cat, name, quantity, yuan(amount), yuan(discount), yuan(amount - discount)];
   files.push({
     name: '03-部门参考表.csv',
     content: toCsv([
-      ['部门（项目分类）', '项目', '数量', '金额（元）'],
+      ['部门（项目分类）', '项目', '数量', '应收（元）', '优惠分摊（元）', '净额（元）'],
       ...categories.flatMap((cat) => {
         const items = day.departments.filter((d) => d.category === cat);
-        return [...items.map((d) => [cat, d.name, d.quantity, yuan(d.amount)]), [cat, '小计', '', yuan(items.reduce((t, d) => t + d.amount, 0))]];
+        return [
+          ...items.map((d) => row(cat, d.name, d.quantity, d.amount, d.discount)),
+          row(cat, '小计', '', items.reduce((t, d) => t + d.amount, 0), items.reduce((t, d) => t + d.discount, 0)),
+        ];
       }),
-      ['合计', '', '', yuan(deptTotal)],
-      ['应收（结账 − 反结账）', '', '', yuan(biz.receivable)],
-      ['核对', deptTotal === biz.receivable ? '一致' : '不一致', '', ''],
-      ['优惠 / 免单（不是收款）', '', '', yuan(-biz.discount)],
-      ['净营业额（应收 − 优惠）', '', '', yuan(biz.netRevenue)],
+      row('合计', '', '', deptTotal, deptDiscount),
+      ['应收（结账 − 反结账）', '', '', yuan(biz.receivable), '', ''],
+      ['核对', deptTotal === biz.receivable && deptDiscount === biz.discount ? '一致' : '不一致', '', '', '', ''],
+      ['优惠 / 免单（不是收款）', '', '', yuan(-biz.discount), '', ''],
+      ['净营业额（应收 − 优惠）', '', '', yuan(biz.netRevenue), '', ''],
     ]),
   });
 
@@ -484,7 +482,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
 
   // 00 说明
   const failed = checks.filter((c: CheckLine) => !c.ok);
-  const deptOk = deptTotal === biz.receivable;
+  const deptOk = deptTotal === biz.receivable && deptDiscount === biz.discount;
   const byMethod = s.business.byMethod.map((m) => `${CHECKOUT_METHOD_LABELS[m.method]} ${formatYuan(m.amount)}`).join('、') || '无';
   const count = (kind: string) => exceptions.filter((e) => e.kind.startsWith(kind)).length;
   const summary = [
@@ -493,7 +491,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     `优惠 / 免单 ${formatYuan(biz.discount)}；净营业额 ${formatYuan(biz.netRevenue)}；实收（现金类）${formatYuan(biz.received)}`,
     `收款方式：${byMethod}`,
     `储值：充值实收 ${formatYuan(s.recharge.paid)}（${s.recharge.count} 笔），储值消费 ${formatYuan(s.consume.total)}（${s.consume.count} 笔）`,
-    `部门参考表合计 ${formatYuan(deptTotal)}：${deptOk ? '✓ 与应收一致' : '✗ 与应收不一致'}`,
+    `部门参考表合计 ${formatYuan(deptTotal)}、优惠分摊 ${formatYuan(deptDiscount)}：${deptOk ? '✓ 与应收一致' : '✗ 与应收或优惠不一致'}`,
     `异常：${EXCEPTION_KINDS.map((k) => `${k} ${count(k)}`).join('、')}、其他 ${exceptions.length - EXCEPTION_KINDS.reduce((t, k) => t + count(k), 0)}`,
     `交班：${day.shifts.length} 个班次，已交班 ${day.shifts.filter((r) => r.status === 'closed').length} 个`,
     `技师：${tr.totals.clocks} 个钟（点钟 ${tr.totals.designated}、轮钟 ${tr.totals.rotation}），${formatYuan(tr.totals.amount)}${tr.unassigned.clocks ? `；未指定技师 ${tr.unassigned.clocks} 个钟` : ''}`,
@@ -513,7 +511,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
       '文件：',
       '  01-日结汇总.csv     与「日结」页导出的相同',
       '  02-结账单.csv       当天结账与当天反结账的结账单，按收款方式分列；「计入本日」两列分别合计 = 结账合计、反结账合计',
-      '  03-部门参考表.csv   结账明细按项目分类（部门）汇总，合计 = 应收；后面单列优惠 / 免单与净营业额',
+      '  03-部门参考表.csv   结账时记下的部门快照按项目分类（部门）汇总，合计 = 应收；优惠 / 免单按金额比例分摊到各项（优惠分摊、净额两列），后面单列优惠 / 免单与净营业额',
       '  04-异常清单.csv     反结账、优惠 / 免单、作废明细、撤销误开的牌（每一次都列，写明是否超过更正时限；日结异常清单只列超过时限的）、改票种（降档、改为免票写明授权人与原因）、免票入场、补录纸质单、会员撤销与其他异常',
       '  05-交班.csv         当天的班次、反结账退现金与长短款',
       '  06-技师业绩.csv     每位技师的钟数、点钟 / 轮钟、金额与提成（与部门参考表同一口径，提成按结账时刻的提成规则），与钟房的钟单核对',

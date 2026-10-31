@@ -42,7 +42,7 @@ async function upgradeWith(settings: Record<string, unknown>) {
       INSERT INTO settings (key, value) VALUES (${key}, ${value === null ? sql`'null'::jsonb` : sql.json(value as never)})
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
   }
-  expect(await migrate(sql)).toEqual(['017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql', '020_technicians.sql', '021_clockroom.sql', '022_dining.sql', '023_dining_tables.sql', '024_rooms.sql']);
+  expect(await migrate(sql)).toEqual(['017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql', '020_technicians.sql', '021_clockroom.sql', '022_dining.sql', '023_dining_tables.sql', '024_rooms.sql', '025_cashier.sql']);
 }
 
 beforeAll(() => {
@@ -109,7 +109,7 @@ describe('迁移 017 · 反结账退款的交班口径只用于升级之后开�
       RETURNING id`;
     await sql`INSERT INTO checkout_payments (checkout_id, method, amount) VALUES (${c1!.id}, 'cash', 55700)`;
 
-    expect(await migrate(sql)).toEqual(['017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql', '020_technicians.sql', '021_clockroom.sql', '022_dining.sql', '023_dining_tables.sql', '024_rooms.sql']);
+    expect(await migrate(sql)).toEqual(['017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql', '020_technicians.sql', '021_clockroom.sql', '022_dining.sql', '023_dining_tables.sql', '024_rooms.sql', '025_cashier.sql']);
     const legacy = await sql<{ shiftNo: string; legacyRefund: boolean }[]>`SELECT shift_no, legacy_refund FROM shifts ORDER BY id`;
     expect(legacy).toEqual([
       { shiftNo: 'BC-UP-A', legacyRefund: true },

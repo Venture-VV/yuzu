@@ -171,6 +171,24 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
   const [charges] = await db<{ n: number; amount: number }[]>`
     SELECT count(*)::int AS n, coalesce(sum(c.amount) FILTER (WHERE l.status = 'active'), 0) AS amount
     FROM room_stay_charges c JOIN bill_lines l ON l.id = c.line_id`;
+  // ⑮ 部门营业额快照（v0.7.6）：每张结账单的快照合计 = 结账金额，分摊的优惠合计 = 这张结账单的优惠 / 免单
+  const itemDiff = await db<{ checkoutNo: string }[]>`
+    SELECT c.checkout_no FROM checkouts c
+    LEFT JOIN (SELECT checkout_id, sum(amount) AS amount, sum(discount) AS discount FROM checkout_items GROUP BY checkout_id) i ON i.checkout_id = c.id
+    LEFT JOIN (SELECT checkout_id, sum(amount) AS amount FROM checkout_payments WHERE method = 'discount' GROUP BY checkout_id) d ON d.checkout_id = c.id
+    WHERE coalesce(i.amount, 0) <> c.total_amount OR coalesce(i.discount, 0) <> coalesce(d.amount, 0)
+    LIMIT 5`;
+  const [items] = await db<{ n: number }[]>`SELECT count(DISTINCT checkout_id)::int AS n FROM checkout_items`;
+  // ⑯ 转单（v0.7.6）：原明细已作废、在原客人的账单上；新明细在目标客人的账单上，来源、项目、名称、档位、数量、金额、技师都相同
+  const moveDiff = await db<{ ref: string }[]>`
+    SELECT '转单 ' || m.id AS ref FROM bill_line_moves m
+    JOIN bill_lines f ON f.id = m.from_line_id JOIN bill_lines t ON t.id = m.to_line_id
+    JOIN visits fv ON fv.id = m.from_visit_id JOIN visits tv ON tv.id = m.to_visit_id
+    WHERE f.status <> 'voided' OR f.bill_id <> fv.bill_id OR t.bill_id <> tv.bill_id
+       OR (f.source, f.item_id, f.name, f.tier, f.unit_price, f.quantity, f.amount, f.technician_id, f.call_type)
+          IS DISTINCT FROM (t.source, t.item_id, t.name, t.tier, t.unit_price, t.quantity, t.amount, t.technician_id, t.call_type)
+    LIMIT 5`;
+  const [moves] = await db<{ n: number }[]>`SELECT count(*)::int AS n FROM bill_line_moves`;
 
   return [
     {
@@ -275,6 +293,22 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
       detail: chargeDiff.length
         ? `${chargeDiff.length} 笔房费与账单明细不符（如 ${chargeDiff.map((d) => d.ref).join('、')}）`
         : `房费 ${charges!.n} 笔（有效 ${formatYuan(charges!.amount)}），每晚、每段只挂一次，都对应一条客房明细`,
+    },
+    {
+      key: 'checkout_items',
+      label: '部门营业额快照与结账单一致',
+      ok: itemDiff.length === 0,
+      detail: itemDiff.length
+        ? `${itemDiff.length} 张结账单的部门快照与结账金额或优惠不符（如 ${itemDiff.map((d) => d.checkoutNo).join('、')}）`
+        : `${items!.n} 张结账单有部门快照，每张的合计 = 结账金额，分摊的优惠 = 这张结账单的优惠 / 免单`,
+    },
+    {
+      key: 'line_moves',
+      label: '转单记录与明细一致',
+      ok: moveDiff.length === 0,
+      detail: moveDiff.length
+        ? `${moveDiff.length} 条转单记录与明细不符（如 ${moveDiff.map((d) => d.ref).join('、')}）`
+        : `转单 ${moves!.n} 条：原明细都已作废，目标手牌上的明细与原明细一致`,
     },
   ];
 }

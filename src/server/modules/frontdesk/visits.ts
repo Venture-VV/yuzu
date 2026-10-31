@@ -777,6 +777,8 @@ export async function lookupFrontdeskOp(db: Db, key: string, expected?: Frontdes
   if (!(FRONTDESK_OPS as readonly string[]).includes(row.opType)) return { found: false as const, abandoned: false };
   if (row.opType === 'checkin') return { found: true as const, type: 'checkin' as const, checkin: await loadCheckin(db, key, true) };
   if (row.opType === 'bill_post') return { found: true as const, type: 'bill_post' as const, visit: await getVisit(db, row.refId) };
+  // 转单（v0.7.6）：查回原客人（明细转出的那位）
+  if (row.opType === 'line_move') return { found: true as const, type: 'line_move' as const, visit: await getVisit(db, row.refId) };
   if (row.opType === 'checkout') return { found: true as const, type: 'checkout' as const, checkout: await getCheckout(db, row.refId) };
   // 餐饮第二步：开台、桌台点单查回这一桌；桌台结账查回结账单
   if (row.opType === 'table_open' || row.opType === 'table_post') {
