@@ -62,6 +62,7 @@
 ## 5. 退房与结账
 
 - **退房**（客房页入住单的「退房」，或前台结账对话框里的「退房」）：按第 3 节补齐房费挂到手牌账单上、押金全部原路退回、房间变待打扫。退房有「结果待确认」。
+- **退房核对**（v0.7.5）：员工确认时看到的要补的房费、押金余额（按收款方式）随请求提交，服务端锁好入住单后逐项核对，对不上就拒绝（`ROOM_DUE_CHANGED`、`DEPOSIT_CHANGED`），对话框重新取核对：退的押金就是员工交给客人的。有押金要退才要求先开班；押金在住期间已经全部退完的，退房不用开班。
 - **结账**：前台结账时，这几位客人还有在住的客房就不能确认结清（`ROOM_OPEN`），结账对话框列出这些房间，有客房权限的员工直接点「退房」；退房后重新核对，房费和门票、其他消费一起结。撤销来访同样要先退房。
 - **反结账**（前台「结账记录」）：与平常一样，客人恢复在店；入住单仍是已退房，房费明细留在手牌账单上，重新结账照常。
 
@@ -109,9 +110,9 @@
 | 客房页：房态看板、夜审提醒 | `GET /api/rooms`（房态、在住单摘要、今天的夜审情况、各房态间数） |
 | 入住 | `POST /api/rooms/checkin`（操作编号；必须带在店客人的 `tagCode`；带 `expectedRate` 核对房价；可带押金） |
 | 入住单：房费、押金、换房记录 | `GET /api/rooms/stays/:id` |
-| 续住、改登记、换房、撤销入住 | `POST /api/rooms/stays/:id/extend`（操作编号）；`PUT /api/rooms/stays/:id`；`POST /api/rooms/stays/:id/move`、`/cancel` |
+| 续住、改登记、换房、撤销入住 | `POST /api/rooms/stays/:id/extend`（操作编号）；`PUT /api/rooms/stays/:id`；`POST /api/rooms/stays/:id/move`（两间房按 id 升序加锁后核对入住单还在原房间，被别的终端先换走了拒绝 `ROOM_CHANGED`）、`/cancel` |
 | 收押金、退押金 | `POST /api/rooms/stays/:id/deposits`、`/refunds`（操作编号，先开班） |
-| 退房 | `GET /api/rooms/stays/:id/checkout-preview`（要补的房费、押金）；`POST /api/rooms/stays/:id/close`（操作编号，带 `expectedDue` 核对） |
+| 退房 | `GET /api/rooms/stays/:id/checkout-preview`（要补的房费、押金）；`POST /api/rooms/stays/:id/close`（操作编号，带 `expectedDue` 与 `expectedDeposits`（按收款方式的押金余额）核对） |
 | 前台结账 | `GET /api/frontdesk/checkout-preview` 的 `rooms` 列出客人还在住的客房（含入住单 id，结账对话框据此退房）；`POST /api/frontdesk/checkouts` 有在住客房时拒绝（`ROOM_OPEN`） |
 | 改房态（打扫、维修） | `PUT /api/rooms/:id/housekeeping` |
 | 夜审 | `POST /api/rooms/audit`（返回夜审报告） |

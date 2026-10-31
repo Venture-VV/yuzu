@@ -25,7 +25,9 @@ export function CloseStayDialog({ stay, onClose, onDone }: { stay: StayDetail; o
   const qc = useQueryClient();
   const toast = useToast();
   const preview = useStayClosePreview(stay.id, stay.status === 'open');
-  const shiftReady = useShiftReady(stay.depositBalance > 0);
+  const p = preview.data;
+  // 有押金要退才要先开班（押金在住期间已经退完的不用）
+  const shiftReady = useShiftReady((p?.depositBalance ?? stay.depositBalance) > 0);
   const op = useFrontdeskOp<StayDetail>({
     type: 'room_close',
     visitId: null,
@@ -38,7 +40,6 @@ export function CloseStayDialog({ stay, onClose, onDone }: { stay: StayDetail; o
     if (op.state.phase === 'error' && SHIFT_ERRORS.includes(op.state.code ?? '')) void qc.invalidateQueries({ queryKey: shiftKeys.all });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [op.state]);
-  const p = preview.data;
   const ok = !!p && !preview.isFetching && (p.depositBalance === 0 || shiftReady.ready);
   const finish = (d: StayDetail) => {
     toast({ tone: 'success', title: `${d.roomNo} 已退房`, body: '房费已挂在手牌账单上，随手牌一起结账；房间变为待打扫。' });
@@ -52,7 +53,8 @@ export function CloseStayDialog({ stay, onClose, onDone }: { stay: StayDetail; o
     if (!ok || !p) return;
     const d = await op.submit((key) => ({
       url: `/api/rooms/stays/${stay.id}/close`,
-      body: { clientKey: key, expectedDue: p.dueAmount },
+      // 带上看到的押金余额：其他终端刚收、退过押金时服务端拒绝，重新核对后再退
+      body: { clientKey: key, expectedDue: p.dueAmount, expectedDeposits: p.depositByMethod.map(({ method, balance }) => ({ method, balance })) },
       tagCodes: [`房 ${stay.roomNo}`],
       summary: `退房（手牌 ${stay.tagCode}）${p.dueAmount > 0 ? '，补房费' : ''}${p.depositBalance > 0 ? '，退押金' : ''}`,
       amount: p.dueAmount || null,
