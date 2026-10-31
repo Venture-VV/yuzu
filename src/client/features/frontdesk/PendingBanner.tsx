@@ -7,7 +7,7 @@ import { api } from '../../lib/api';
 import { formatDateTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
-import { FRONTDESK_OP_LABELS, isTableOp, removeFrontdeskPending, useFrontdeskPendingForBanner, type FrontdeskPendingOp } from './pending';
+import { FRONTDESK_OP_LABELS, isRoomOp, isTableOp, removeFrontdeskPending, useFrontdeskPendingForBanner, type FrontdeskPendingOp } from './pending';
 
 /**
  * 页面顶部的前台「结果待确认」提醒（刷新、重新登录后仍在）。
@@ -32,6 +32,7 @@ export function FrontdeskPendingBanner() {
             removeFrontdeskPending(op.key);
             void qc.invalidateQueries({ queryKey: ['frontdesk'] });
             if (isTableOp(op.type)) void qc.invalidateQueries({ queryKey: ['dining'] });
+            if (isRoomOp(op.type)) void qc.invalidateQueries({ queryKey: ['rooms'] });
             if (found.found) {
               toast({ tone: 'success', title: `已查回：${op.tagCodes.join('、')} 的${FRONTDESK_OP_LABELS[op.type]}已生效`, body: '只生效了一次，无需重新操作。' });
             }
@@ -61,6 +62,13 @@ export function FrontdeskPendingBanner() {
       if (op.tableId) params.set('t', String(op.tableId));
       if (s) params.set('s', String(s));
       navigate(`/dining/tables?${params}`);
+      return;
+    }
+    // 客房的操作到客房页处理：入住回到那间房的入住对话框，其余回到那张入住单
+    if (isRoomOp(op.type)) {
+      if (op.roomId) params.set('r', String(op.roomId));
+      if (op.stayIds?.[0]) params.set('s', String(op.stayIds[0]));
+      navigate(`/rooms?${params}`);
       return;
     }
     if (op.visitId) params.set('v', String(op.visitId));

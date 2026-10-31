@@ -128,6 +128,8 @@ export interface RoomBoardRoom {
   typeName: string;
   kind: RoomKind;
   price: number;
+  /** 钟点房每段分钟；全天房为 null */
+  blockMinutes: number | null;
   status: RoomBoardStatus;
   maintenanceNote: string | null;
   stay: StaySummary | null;
@@ -228,6 +230,38 @@ export interface StayCheckoutPreview {
   depositBalance: number;
   depositByMethod: { method: PaymentMethod; balance: number }[];
 }
+
+/** 只住房的客人退房结账前核对（可以几间房合并结）：每间房的账单明细、此刻要补的房费、应收与押金 */
+export interface RoomCheckoutPreview {
+  at: string;
+  stays: {
+    stayId: number;
+    stayNo: string;
+    roomNo: string;
+    typeName: string;
+    kind: RoomKind;
+    guests: number;
+    guestLabel: string;
+    memberId: number | null;
+    memberName: string | null;
+    checkedInAt: string;
+    /** 账单上未作废的明细（已挂的房费与其他消费） */
+    lines: { id: number; name: string; quantity: number; amount: number }[];
+    /** 退房结账时补挂的房费 */
+    dues: (RoomDue & { name: string })[];
+    /** 这间房的应收 = 账单 + 要补的房费 */
+    amount: number;
+    depositBalance: number;
+  }[];
+  totalAmount: number;
+  depositBalance: number;
+  depositByMethod: { method: PaymentMethod; balance: number }[];
+  /** 这几间房登记的会员（可用储值支付），附余额 */
+  members: { id: number; name: string; memberNo: string; status: 'active' | 'frozen'; principalBalance: number; bonusBalance: number }[];
+}
+
+/** 一次退房结账最多合并几间房（与服务端一致） */
+export const MAX_ROOMS_PER_CHECKOUT = 10;
 
 /** 夜审报告 */
 export interface RoomAuditReport {

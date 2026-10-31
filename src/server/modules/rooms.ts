@@ -20,6 +20,7 @@ import {
   MAX_ROOM_FLOOR,
   MAX_ROOM_NO,
   MAX_ROOM_TYPE_NAME,
+  MAX_ROOMS_PER_CHECKOUT,
   MAX_STAY_GUESTS,
   ROOM_KINDS,
   chargeLineName,
@@ -28,6 +29,7 @@ import {
   type RoomAuditReport,
   type RoomAuditState,
   type RoomBoard,
+  type RoomCheckoutPreview,
   type RoomBoardStatus,
   type RoomDue,
   type RoomKind,
@@ -319,8 +321,10 @@ export async function roomsBoard(deps: Deps): Promise<RoomBoard> {
   const db = deps.sql;
   const now = new Date();
   // 停用的房间还有人住时照样显示，退房为止
-  const rooms = await db<{ id: number; roomNo: string; floor: string; typeName: string; kind: RoomKind; price: number; housekeeping: string; maintenanceNote: string | null; stayId: number | null }[]>`
-    SELECT r.id, r.room_no, r.floor, t.name AS type_name, t.kind, t.price, r.housekeeping, r.maintenance_note, s.id AS stay_id
+  const rooms = await db<
+    { id: number; roomNo: string; floor: string; typeName: string; kind: RoomKind; price: number; blockMinutes: number | null; housekeeping: string; maintenanceNote: string | null; stayId: number | null }[]
+  >`
+    SELECT r.id, r.room_no, r.floor, t.name AS type_name, t.kind, t.price, t.block_minutes, r.housekeeping, r.maintenance_note, s.id AS stay_id
     FROM rooms r JOIN room_types t ON t.id = r.room_type_id LEFT JOIN room_stays s ON s.room_id = r.id AND s.status = 'open'
     WHERE r.active OR s.id IS NOT NULL
     ORDER BY r.floor, r.sort_order, r.room_no`;
@@ -932,7 +936,65 @@ export async function closeStay(deps: Deps, id: number, raw: unknown, ctx: OpCon
 
 // ───────────────────────── 只住房的客人：退房结账 ─────────────────────────
 
-export const MAX_ROOMS_PER_CHECKOUT = 10;
+/** 退房结账前核对（只读）：这几间房的账单明细、此刻要补的房费、应收、押金与登记的会员（附余额） */
+export async function previewRoomCheckout(deps: Deps, stayIds: number[], at = new Date()): Promise<RoomCheckoutPreview> {
+  const ids = [...new Set(stayIds)];
+  if (ids.length === 0) throw badRequest('请选择要退房结账的房间');
+  // 会员到期的赠金先作废，员工核对的余额与入账时一致
+  const memberIds = await deps.sql<{ memberId: number }[]>`SELECT DISTINCT member_id FROM room_stays WHERE id IN ${deps.sql(ids)} AND member_id IS NOT NULL`;
+  for (const m of memberIds) await expireMemberBonus(deps, m.memberId, at);
+  return deps.sql.begin('isolation level repeatable read read only', async (tx) => {
+    const rows = await tx<StayRow[]>`${staySelect(tx)} WHERE s.id IN ${tx(ids)} ORDER BY r.floor, r.sort_order, r.room_no`;
+    if (rows.length !== ids.length) throw notFound('有入住单不存在，请刷新后重试');
+    const lockedLike = await tx<LockedStay[]>`
+      SELECT id, stay_no, room_id, kind, rate, block_minutes, bill_id, visit_id, member_id, guests, status, business_date, checked_in_at, checked_in_by
+      FROM room_stays WHERE id IN ${tx(ids)}`;
+    for (const s of lockedLike) {
+      assertStayOpen(s);
+      if (s.visitId !== null) throw conflict('BATH_GUEST_ROOM', `入住单 ${s.stayNo} 是洗浴客人的房间：请点「退房」，房费随手牌一起结`);
+    }
+    const lines = await tx<{ id: number; billId: number; name: string; quantity: number; amount: number }[]>`
+      SELECT id, bill_id, name, quantity, amount FROM bill_lines WHERE status = 'active' AND bill_id IN ${tx(rows.map((r) => r.billId))} ORDER BY id`;
+    const balances = await depositBalances(tx, ids);
+    const stays: RoomCheckoutPreview['stays'] = [];
+    for (const r of rows) {
+      const dues = await duesNow(tx, deps, lockedLike.find((s) => s.id === r.id)!, at);
+      const dueAmount = dues.reduce((sum, d) => sum + d.amount, 0);
+      stays.push({
+        stayId: r.id,
+        stayNo: r.stayNo,
+        roomNo: r.roomNo,
+        typeName: r.typeName,
+        kind: r.kind,
+        guests: r.guests,
+        guestLabel: r.guestLabel,
+        memberId: r.memberId,
+        memberName: r.memberName,
+        checkedInAt: new Date(r.checkedInAt).toISOString(),
+        lines: lines.filter((l) => l.billId === r.billId).map(({ billId: _b, ...l }) => l),
+        dues: dues.map((d) => ({ ...d, name: chargeLineName(r.roomNo, d) })),
+        amount: r.billAmount + dueAmount,
+        depositBalance: r.depositBalance,
+      });
+    }
+    const total = new Map<PaymentMethod, number>();
+    for (const m of balances.values()) for (const [k, v] of m) total.set(k, (total.get(k) ?? 0) + v);
+    const byMethod = byMethodList(total);
+    const members = rows.some((r) => r.memberId)
+      ? await tx<RoomCheckoutPreview['members']>`
+          SELECT id, name, member_no, status, principal_balance, bonus_balance FROM members
+          WHERE id IN ${tx(rows.flatMap((r) => (r.memberId ? [r.memberId] : [])))} ORDER BY id`
+      : [];
+    return {
+      at: at.toISOString(),
+      stays,
+      totalAmount: stays.reduce((sum, x) => sum + x.amount, 0),
+      depositBalance: byMethod.reduce((sum, x) => sum + x.balance, 0),
+      depositByMethod: byMethod,
+      members,
+    };
+  });
+}
 
 export const RoomCheckoutInput = z.object({
   clientKey,
@@ -1207,5 +1269,11 @@ export function registerRoomRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   // 只住房的客人退房结账：与前台结账同一权限
+  app.get('/api/rooms/checkout-preview', { preHandler: guard('frontdesk.checkout') }, async (req) => {
+    const { ids } = parse(z.object({ ids: z.string('请选择要退房结账的房间') }), req.query ?? {});
+    const list = ids.split(',').map((x) => Number(x)).filter((x) => Number.isInteger(x) && x > 0);
+    if (list.length === 0 || list.length > MAX_ROOMS_PER_CHECKOUT) throw badRequest('请选择要退房结账的房间');
+    return previewRoomCheckout(deps, list);
+  });
   app.post('/api/rooms/checkout', { preHandler: guard('frontdesk.checkout') }, async (req) => checkoutRooms(deps, req.body, ctxOf(req)));
 }
