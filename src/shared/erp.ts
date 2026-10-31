@@ -4,7 +4,7 @@
 
 import type { Permission } from './permissions';
 
-export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'payables', 'approvals', 'revenue'] as const;
+export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'payables', 'approvals', 'expenses', 'revenue'] as const;
 export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
 
 export interface ErpModuleDef {
@@ -70,6 +70,18 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     apis: [],
     perms: ['inventory.approve'],
     defaultEnabled: true,
+    requires: ['inventory'],
+  },
+  expenses: {
+    label: '费用与备用金',
+    group: '财务',
+    description: '费用报销（按采购单或按次；发票、税点、科目、用途）、备用金打款与退回、每日平账（v0.7.7，飞书需求 RQ-005）',
+    path: '/erp/expenses',
+    pages: ['/erp/expenses', '/erp/petty'],
+    apis: ['/api/erp/expenses', '/api/erp/petty'],
+    perms: ['expense.read'],
+    defaultEnabled: true,
+    // 部门、供应商档案在库存模块里；按采购单报销读采购单（采购模块关着时只能按次报销）
     requires: ['inventory'],
   },
   revenue: {

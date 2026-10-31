@@ -38,6 +38,9 @@ import { ErpHome } from './features/erp/ErpHome';
 import { ErpModulesPage } from './features/erp/ErpModulesPage';
 import { ErpShell } from './features/erp/ErpShell';
 import { RevenuePage } from './features/erp/RevenuePage';
+import { ClaimFormPage } from './features/expenses/ClaimFormPage';
+import { ExpensesPage } from './features/expenses/ExpensesPage';
+import { PettyPage } from './features/expenses/PettyPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -157,6 +160,9 @@ const router = createBrowserRouter([
       { index: true, element: <ErpHome /> },
       { path: 'modules', element: <ErpModulesPage /> },
       { path: 'revenue', element: <RevenuePage /> },
+      { path: 'expenses', element: <ExpensesPage /> },
+      { path: 'expenses/new', element: <ClaimFormPage /> },
+      { path: 'petty', element: <PettyPage /> },
       { path: '*', element: <Navigate to="/erp" replace /> },
     ],
   },

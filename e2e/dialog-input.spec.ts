@@ -55,6 +55,8 @@ test.describe('对话框打开后马上输入', () => {
     // 前台：点空闲手牌打开接待，牌号预先填好；马上改成别的牌号，不会被打开时的预填盖回去
     await page.goto('/frontdesk');
     await expect(page.getByTestId('tag-board')).toBeVisible();
+    // 手牌接口回来之前状态板只是骨架：先等真正的空闲牌出现，再验证「打开后马上输入」（测试会话复测 v0.7.6 的观察）
+    await expect(page.locator('[data-testid^="tag-"][data-state="free"]').first()).toBeVisible();
     for (let i = 0; i < 5; i++) {
       const r = await typeRightAfterOpen(page, '[data-testid^="tag-"][data-state="free"]', '[aria-label="第 1 位牌号"]', 'ZZ999');
       expect(r, `接待第 ${i + 1} 次`).toEqual({ value: 'ZZ999' });

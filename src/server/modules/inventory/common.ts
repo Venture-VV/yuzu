@@ -111,7 +111,7 @@ export async function applyMove(
   m.lastMoveId = move!.id;
 }
 
-export type DocKind = 'inv_doc' | 'purchase_order' | 'payment' | 'opening_payable';
+export type DocKind = 'inv_doc' | 'purchase_order' | 'payment' | 'opening_payable' | 'expense_claim' | 'petty_advance' | 'petty_settlement';
 export type ApprovalAction = 'create' | 'submit' | 'approve' | 'return' | 'cancel' | 'void' | 'close' | 'revise';
 
 export async function logApproval(

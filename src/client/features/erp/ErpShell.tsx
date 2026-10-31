@@ -4,7 +4,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Boxes, HandCoins, Inbox, LayoutGrid, LineChart, ShoppingCart, SlidersHorizontal, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, Boxes, HandCoins, Inbox, LayoutGrid, LineChart, ReceiptText, ShoppingCart, SlidersHorizontal, type LucideIcon } from 'lucide-react';
 import { ERP_MODULES, erpModuleOfPage, type ErpModuleKey } from '@shared/erp';
 import { versionText } from '@shared/instance';
 import { DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
@@ -21,6 +21,7 @@ const ICONS: Record<ErpModuleKey, LucideIcon> = {
   purchasing: ShoppingCart,
   payables: HandCoins,
   approvals: Inbox,
+  expenses: ReceiptText,
   revenue: LineChart,
 };
 

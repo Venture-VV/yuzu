@@ -31,6 +31,8 @@ export type AuditAction =
   | 'inventory_doc'
   | 'purchase_order'
   | 'payable_doc'
+  | 'expense_doc'
+  | 'petty_doc'
   | 'inventory_settings_updated'
   | 'frontdesk_checkin'
   | 'frontdesk_swap'

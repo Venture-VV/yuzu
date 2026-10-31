@@ -1,4 +1,5 @@
 import type { ApiErrorBody } from '@shared/types';
+import { noteServerTime } from './serverClock';
 
 export class ApiError extends Error {
   constructor(
@@ -50,7 +51,14 @@ export async function request<T>(
   } finally {
     clearTimeout(timer);
   }
-  if (res.ok) return (await res.json()) as T;
+  if (res.ok) {
+    // 带服务器时间的响应：在收到的这一刻记下时差（前台、餐饮按服务器时间判断时限）
+    const receivedAt = Date.now();
+    const data = (await res.json()) as T;
+    const serverTime = (data as { serverTime?: unknown } | null)?.serverTime;
+    if (typeof serverTime === 'string') noteServerTime(serverTime, receivedAt);
+    return data;
+  }
 
   let payload: ApiErrorBody | null = null;
   try {

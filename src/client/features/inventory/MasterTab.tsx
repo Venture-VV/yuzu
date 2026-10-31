@@ -1,3 +1,4 @@
+import { SUPPLIER_SETTLEMENT_LABELS, type SupplierSettlement } from '@shared/expenses';
 import { useState } from 'react';
 import { Plus, Search } from 'lucide-react';
 import type { Department, Material, Supplier } from '@shared/inventory';
@@ -329,6 +330,7 @@ function Suppliers({ editable }: { editable: boolean }) {
                 <p className="flex items-center gap-2">
                   <span className="num text-[12px] font-semibold text-ink-3">{s.code}</span>
                   <span className="truncate text-[14px] font-bold">{s.name}</span>
+                  {s.settlement === 'cash' && <Badge tone="lake">现付</Badge>}
                   {!s.active && <Badge>已停用</Badge>}
                   {s.isSynthetic && <Badge tone="ember">合成</Badge>}
                 </p>
@@ -347,14 +349,18 @@ function Suppliers({ editable }: { editable: boolean }) {
 function SupplierDialog({ editing, onClose }: { editing: Supplier | 'new' | null; onClose: () => void }) {
   const toast = useToast();
   const invalidate = useInvalidateInventory();
-  const blank = { code: '', name: '', contact: '', phone: '', note: '', active: true };
+  const blank = { code: '', name: '', contact: '', phone: '', note: '', settlement: 'credit' as SupplierSettlement, active: true };
   const [form, setForm] = useState(blank);
   const [last, setLast] = useState<typeof editing>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   if (editing !== last) {
     setLast(editing);
-    setForm(editing && editing !== 'new' ? { code: editing.code, name: editing.name, contact: editing.contact, phone: editing.phone, note: editing.note, active: editing.active } : blank);
+    setForm(
+      editing && editing !== 'new'
+        ? { code: editing.code, name: editing.name, contact: editing.contact, phone: editing.phone, note: editing.note, settlement: editing.settlement, active: editing.active }
+        : blank,
+    );
     setError(null);
   }
   const s = editing && editing !== 'new' ? editing : null;
@@ -405,6 +411,15 @@ function SupplierDialog({ editing, onClose }: { editing: Supplier | 'new' | null
         </Field>
         <Field label="备注" htmlFor="s-note" className="sm:col-span-3" hint="如 含税到货价、结算周期（待确认）">
           <Input id="s-note" value={form.note} maxLength={200} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+        </Field>
+        <Field label="结算方式" className="sm:col-span-3" hint={SUPPLIER_SETTLEMENT_LABELS[form.settlement].hint}>
+          <Segmented
+            ariaLabel="结算方式"
+            value={form.settlement}
+            onChange={(v) => setForm({ ...form, settlement: v })}
+            className="w-full"
+            options={(['credit', 'cash'] as const).map((v) => ({ value: v, label: SUPPLIER_SETTLEMENT_LABELS[v].title }))}
+          />
         </Field>
         <Field label="状态" className="sm:col-span-3">
           <Segmented

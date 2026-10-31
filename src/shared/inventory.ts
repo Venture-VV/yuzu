@@ -92,6 +92,8 @@ export interface Supplier {
   contact: string;
   phone: string;
   note: string;
+  /** 结算方式（v0.7.7）：挂账（收货记应付）/ 现付（收货不记应付，货款走费用报销） */
+  settlement: import('./expenses').SupplierSettlement;
   active: boolean;
   isSynthetic: boolean;
 }

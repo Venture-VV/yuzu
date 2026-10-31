@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { CheckoutDetail, CheckoutPreview, CheckoutSummary, TicketType } from '@shared/checkout';
 import type { FrontdeskBoard, FrontdeskCheck, MemberLevel, PreviewBill, VisitDetail } from '@shared/frontdesk';
 import type { FrontdeskTechnicians } from '@shared/technicians';
 import { api } from '../../lib/api';
+import { useServerNow as useServerNowAt } from '../../lib/serverClock';
 
 export const fk = {
   board: ['frontdesk', 'board'] as const,
@@ -93,21 +93,10 @@ export function useRefreshFrontdesk() {
 }
 
 /**
- * 以服务器时间为准的「现在」：在店时长按服务器时钟计算，避免前台电脑时间不准。
- * 每 30 秒刷新一次显示。
+ * 以服务器时间为准的「现在」：在店时长、作废与转单的时限按服务器时钟判断，避免前台电脑时间不准（每 30 秒刷新显示）。
+ * 时差在接口响应收到时记下，第一次显示就按服务器时间（v0.7.7，见 lib/serverClock.ts）。
  */
-export function useServerNow(serverTime: string | undefined) {
-  const offset = useRef(0);
-  useEffect(() => {
-    if (serverTime) offset.current = new Date(serverTime).getTime() - Date.now();
-  }, [serverTime]);
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(t);
-  }, []);
-  return now + offset.current;
-}
+export const useServerNow = (serverTime: string | undefined) => useServerNowAt(serverTime, 30_000);
 
 /** 在店时长："45分" / "2时05分" */
 export function stayText(checkedInAt: string, now: number): string {

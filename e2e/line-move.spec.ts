@@ -86,4 +86,49 @@ test.describe('转单（v0.7.6）', () => {
       for (const id of ids) await clear(page, id);
     }
   });
+
+  // 测试会话复测 v0.7.6 的 P2：电脑时钟快 24 小时，刚挂的明细打开转单的第一刻就该能勾选（按服务器时间判断）。
+  // 断言对话框刚出现时的状态，只取一次，不用会自动重试的等待（以前要等约 10 秒的刷新才变对）。
+  test('电脑时钟快 24 小时：打开转单的第一刻，刚挂的明细就能勾选', async ({ page }) => {
+    await page.addInitScript({
+      content: `(() => {
+        const shift = 24 * 3600 * 1000;
+        const RealDate = Date;
+        class SkewedDate extends RealDate {
+          constructor(...args) { if (args.length === 0) super(RealDate.now() + shift); else super(...args); }
+          static now() { return RealDate.now() + shift; }
+        }
+        globalThis.Date = SkewedDate;
+      })();`,
+    });
+    await login(page, 'xiaozhou');
+    expect(await page.evaluate(() => Date.now() - performance.timeOrigin - performance.now())).toBeGreaterThan(23 * 3600 * 1000);
+    const board = (await (await page.request.get('/api/frontdesk/board')).json()) as {
+      tags: { code: string; zone: string; kind: string; active: boolean; locked: boolean; visit: unknown }[];
+    };
+    const code = board.tags.filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).at(-3)!;
+    let visitId: number | null = null;
+    try {
+      const r = await page.request.post('/api/frontdesk/checkins', { data: { clientKey: randomUUID(), guests: [{ tagCode: code, zone: 'male' }] } });
+      expect(r.ok(), await r.text()).toBe(true);
+      visitId = ((await r.json()) as { visits: { id: number }[] }).visits[0]!.id;
+      const posted = await page.request.post(`/api/frontdesk/visits/${visitId}/charges`, {
+        data: { clientKey: randomUUID(), lines: [], customLines: [{ name: 'E2E 时钟偏差', amount: 1200 }], expectedTotal: 1200 },
+      });
+      expect(posted.ok(), await posted.text()).toBe(true);
+      const line = ((await posted.json()) as { lines: Line[] }).lines.find((l) => l.name === 'E2E 时钟偏差')!;
+
+      await page.goto(`/frontdesk?v=${visitId}`);
+      await expect(page.getByTestId('bill-tag')).toHaveText(code);
+      await page.getByTestId('action-more').click();
+      await page.getByRole('menuitem', { name: '明细转到别的手牌' }).click();
+      const dialog = page.getByRole('dialog').filter({ hasText: `明细转到别的手牌 · ${code}` });
+      await dialog.waitFor();
+      // 只取一次：对话框刚出现时
+      expect(await dialog.getByTestId(`move-line-${line.id}`).isEnabled()).toBe(true);
+      expect(await dialog.getByText(/分钟或不是你挂的/).count()).toBe(0);
+    } finally {
+      if (visitId) await clear(page, visitId);
+    }
+  });
 });

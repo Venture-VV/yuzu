@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import type { DiningMenu, KitchenBoard, TableCheckoutPreview, TableSessionDetail, TablesBoard } from '@shared/dining';
 import { api } from '../../lib/api';
+import { useServerNow as useServerNowAt } from '../../lib/serverClock';
 
 export const menuKey = ['dining', 'menu'] as const;
 export const kitchenKey = ['dining', 'kitchen'] as const;
@@ -40,15 +40,4 @@ export const useTableCheckoutPreview = (ids: number[], enabled: boolean) =>
   });
 
 /** 以服务器时间为准的「现在」（终端时钟不准也不影响「等了几分钟」），默认 10 秒走一次 */
-export function useServerNow(serverTime: string | undefined, step = 10_000) {
-  const [offset, setOffset] = useState(0);
-  const [tick, setTick] = useState(() => Date.now());
-  useEffect(() => {
-    if (serverTime) setOffset(new Date(serverTime).getTime() - Date.now());
-  }, [serverTime]);
-  useEffect(() => {
-    const t = setInterval(() => setTick(Date.now()), step);
-    return () => clearInterval(t);
-  }, [step]);
-  return tick + offset;
-}
+export const useServerNow = (serverTime: string | undefined, step = 10_000) => useServerNowAt(serverTime, step);
