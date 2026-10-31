@@ -4,7 +4,7 @@
 
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { CircleAlert, Download, HandCoins, Plus, ReceiptText, Undo2, X } from 'lucide-react';
+import { BookOpenCheck, CircleAlert, Download, HandCoins, Plus, ReceiptText, Undo2, X } from 'lucide-react';
 import {
   CLAIM_STATUS_LABELS,
   SETTLEMENT_KIND_LABELS,
@@ -65,6 +65,11 @@ export function PettyPage() {
           <Link to="/erp/expenses">
             <Button variant="secondary" icon={<ReceiptText className="size-4" />}>
               费用报销
+            </Button>
+          </Link>
+          <Link to="/erp/ledger">
+            <Button variant="secondary" icon={<BookOpenCheck className="size-4" />}>
+              采购台账
             </Button>
           </Link>
           {can('expense.export') && (

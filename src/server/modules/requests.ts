@@ -105,7 +105,10 @@ function progressOf(p: RawProgress | null): RequestLineProgress {
   };
 }
 
-async function summaries(db: Db, f: { ids?: number[]; status?: RequestStatus; departmentId?: number; requesterOrDept?: { staffId: number; departmentId: number | null } }) {
+async function summaries(
+  db: Db,
+  f: { ids?: number[]; status?: RequestStatus; departmentId?: number; requesterOrDept?: { staffId: number; departmentId: number | null }; from?: string; to?: string; timezone?: string },
+) {
   return db<(Omit<PurchaseRequestSummary, 'department' | 'requester'> & { departmentId: number; departmentName: string; requesterId: number; requesterName: string })[]>`
     SELECT r.id, r.doc_no, r.status, r.need_by, r.created_at, r.department_id, d.name AS department_name, r.requester_id, s.display_name AS requester_name,
            (SELECT count(*)::int FROM purchase_request_lines l WHERE l.request_id = r.id) AS line_count,
@@ -123,6 +126,8 @@ async function summaries(db: Db, f: { ids?: number[]; status?: RequestStatus; de
       ${f.ids ? db`AND r.id IN ${db(f.ids)}` : db``}
       ${f.status ? db`AND r.status = ${f.status}` : db``}
       ${f.departmentId ? db`AND r.department_id = ${f.departmentId}` : db``}
+      ${f.from && f.timezone ? db`AND (r.created_at AT TIME ZONE ${f.timezone})::date >= ${f.from}` : db``}
+      ${f.to && f.timezone ? db`AND (r.created_at AT TIME ZONE ${f.timezone})::date <= ${f.to}` : db``}
       ${f.requesterOrDept ? db`AND (r.requester_id = ${f.requesterOrDept.staffId} OR r.department_id = ${f.requesterOrDept.departmentId ?? 0})` : db``}
     ORDER BY r.created_at DESC, r.id DESC
     LIMIT 500`;
@@ -133,7 +138,7 @@ const toSummary = (r: Awaited<ReturnType<typeof summaries>>[number]): PurchaseRe
   return { ...rest, department: { id: departmentId, name: departmentName }, requester: { id: requesterId, name: requesterName } };
 };
 
-export async function listRequests(db: Db, actor: Actor, f: { status?: RequestStatus; departmentId?: number }): Promise<RequestsList> {
+export async function listRequests(db: Db, actor: Actor, f: { status?: RequestStatus; departmentId?: number; from?: string; to?: string; timezone?: string }): Promise<RequestsList> {
   const me = await myContext(db, actor);
   const rows = await summaries(db, { ...f, requesterOrDept: me.canReview ? undefined : { staffId: actor.id, departmentId: me.departmentId } });
   return { requests: rows.map(toSummary), me };
@@ -520,6 +525,9 @@ async function requestsCsv(db: Db, timezone: string, f: { from: string; to: stri
 const ListQuery = z.object({
   status: z.enum(['submitted', 'returned', 'approved', 'rejected', 'cancelled']).optional(),
   departmentId: z.coerce.number().int().positive().optional(),
+  // 按提交日期筛选（v0.7.9）
+  from: docDateSchema.optional(),
+  to: docDateSchema.optional(),
 });
 const ExportQuery = ListQuery.extend({ from: docDateSchema, to: docDateSchema });
 const IdsQuery = z.object({ ids: z.string().regex(/^\d+(,\d+)*$/).optional() });
@@ -530,7 +538,9 @@ export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
   const docId = (req: { params: unknown }) => parse(idParam, req.params).id;
   const anyRequest = guardAny('request.create', 'request.review');
 
-  app.get('/api/erp/requests', { preHandler: anyRequest }, async (req) => readSnapshot(sql, (tx) => listRequests(tx, req.actor, parse(ListQuery, req.query))));
+  app.get('/api/erp/requests', { preHandler: anyRequest }, async (req) =>
+    readSnapshot(sql, (tx) => listRequests(tx, req.actor, { ...parse(ListQuery, req.query), timezone: deps.config.timezone })),
+  );
   app.get('/api/erp/requests/open-lines', { preHandler: guardAny('request.review') }, async (req) => {
     const { ids } = parse(IdsQuery, req.query);
     return openLines(sql, ids ? ids.split(',').map(Number) : undefined);

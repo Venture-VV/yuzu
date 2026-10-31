@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { ClipboardList, ExternalLink, PackageCheck, Pencil, Plus, ShoppingCart, X } from 'lucide-react';
+import { ClipboardList, Download, ExternalLink, PackageCheck, Pencil, Plus, ShoppingCart, X } from 'lucide-react';
 import { formatQty } from '@shared/quantity';
 import { REQUEST_STATUS_LABELS, type PurchaseRequest, type RequestLine, type RequestLineProgress, type RequestStatus } from '@shared/requests';
 import { api, errorMessage } from '../../lib/api';
@@ -16,7 +16,7 @@ import { Money } from '../../components/Money';
 import { Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, Card, Notice, Segmented, Select, Skeleton } from '../../components/ui';
+import { Badge, Button, Card, Input, Notice, Segmented, Select, Skeleton } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
 import { useInvalidateRequests, useOpenLines, useRequest, useRequestMeta, useRequests } from './queries';
 
@@ -42,9 +42,21 @@ export function RequestsPage() {
   const meta = useRequestMeta();
   const [params, setParams] = useSearchParams();
   const view = params.get('view') === 'open' && can('request.review') ? 'open' : 'list';
+  const session = useSession();
   const [status, setStatus] = useState('');
   const [departmentId, setDepartmentId] = useState('');
-  const list = useRequests({ status: status || undefined, departmentId: departmentId || undefined });
+  // 按提交日期筛选；不填就是全部（导出时没填按本月）
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const list = useRequests({ status: status || undefined, departmentId: departmentId || undefined, from: from || undefined, to: to || undefined });
+  const exportQs = new URLSearchParams(
+    Object.entries({
+      from: from || `${session.calendarToday.slice(0, 8)}01`,
+      to: to || session.calendarToday,
+      status,
+      departmentId,
+    }).filter(([, v]) => v) as [string, string][],
+  ).toString();
   const openId = Number(params.get('request')) || null;
   const setView = (v: 'list' | 'open') => setParams(v === 'open' ? { view: 'open' } : {}, { replace: true });
   const open = (id: number | null) => setParams(id ? { request: String(id) } : {}, { replace: true });
@@ -56,6 +68,13 @@ export function RequestsPage() {
       description="部门提需求（新产品要带参考链接和图片），采购审核后勾选转采购单；下单、到货、退货由采购单与收货单自动回写。"
       actions={
         <div className="flex flex-wrap gap-2">
+          {can('expense.export') && (
+            <a href={`/api/erp/requests/export?${exportQs}`} download data-testid="requests-export">
+              <Button variant="secondary" icon={<Download className="size-4" />}>
+                导出需求单
+              </Button>
+            </a>
+          )}
           {can('request.create') && (
             <Link to="/erp/requests/new">
               <Button variant="primary" icon={<Plus className="size-4" />} data-testid="request-new">
@@ -105,6 +124,12 @@ export function RequestsPage() {
                   ))}
                 </Select>
               )}
+              <label className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink-3">
+                提交日期
+                <Input type="date" fullWidth={false} value={from} max={to || session.calendarToday} onChange={(e) => setFrom(e.target.value)} className="h-9 w-36" aria-label="提交日期从" />
+                到
+                <Input type="date" fullWidth={false} value={to} min={from || undefined} max={session.calendarToday} onChange={(e) => setTo(e.target.value)} className="h-9 w-36" aria-label="提交日期到" />
+              </label>
               {me && !me.canReview && me.departmentName && <span className="text-[13px] text-ink-2">只显示 {me.departmentName} 的需求单与你提的</span>}
             </Card>
             {list.isPending ? (

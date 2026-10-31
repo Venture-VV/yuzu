@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { Download, Plus, ReceiptText, Wallet, X } from 'lucide-react';
+import { BookOpenCheck, Download, Plus, ReceiptText, ShieldCheck, Wallet, X } from 'lucide-react';
 import {
   CLAIM_STATUS_LABELS,
   EXPENSE_CATEGORY_LABELS,
@@ -58,6 +58,16 @@ export function ExpensesPage() {
           <Link to="/erp/petty">
             <Button variant="secondary" icon={<Wallet className="size-4" />}>
               备用金与每日平账
+            </Button>
+          </Link>
+          <Link to="/erp/ledger">
+            <Button variant="secondary" icon={<BookOpenCheck className="size-4" />}>
+              采购台账
+            </Button>
+          </Link>
+          <Link to="/erp/audit">
+            <Button variant="secondary" icon={<ShieldCheck className="size-4" />} data-testid="audit-link">
+              账目自检
             </Button>
           </Link>
           {can('expense.export') && (
