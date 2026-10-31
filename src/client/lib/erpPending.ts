@@ -140,9 +140,15 @@ export function useErpPending(types: readonly ErpOpType[]): ErpPendingOp[] {
  */
 export async function sendErpOp<T>(op: Omit<ErpPendingOp, 'createdAt' | 'uncertain'> & { createdAt?: string }): Promise<T> {
   const record: ErpPendingOp = { ...op, createdAt: op.createdAt ?? new Date().toISOString() };
-  savePending(record);
-  const stored = readAll().find((p) => p.key === record.key);
+  // 先标成「提交中」再写入：请求还没返回时页面上不显示待确认、不去查回
   setInFlight(record.key, true);
+  try {
+    savePending(record);
+  } catch (e) {
+    setInFlight(record.key, false);
+    throw e;
+  }
+  const stored = readAll().find((p) => p.key === record.key);
   try {
     const result = await api.post<T>(record.url, record.body, { timeoutMs: 20_000 });
     removeErpPending(record.key);
