@@ -13,7 +13,7 @@
 export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice'] as const;
 export type Role = (typeof ROLES)[number];
 
-export const DUTIES = ['stock', 'purchase', 'payable', 'approve', 'cost'] as const;
+export const DUTIES = ['stock', 'purchase', 'payable', 'approve', 'cost', 'request'] as const;
 export type Duty = (typeof DUTIES)[number];
 
 export interface PermissionSubject {
@@ -93,6 +93,11 @@ export const PERMISSIONS = {
   'expense.approve': { roles: ['owner'], duties: ['approve'] },
   /** 导出报销明细与每日平账 */
   'expense.export': { roles: ['owner'], duties: ['payable', 'cost', 'approve'] },
+  // ── 部门采购需求单（v0.7.8，飞书需求 RQ-005 第二步；见 docs/REQUISITIONS.md）──
+  /** 提部门需求单、改与撤回自己的单（只限员工档案里的所属部门） */
+  'request.create': { roles: ['owner'], duties: ['request'] },
+  /** 审核需求单、转采购单（看全部部门的需求单） */
+  'request.review': { roles: ['owner'], duties: ['purchase'] },
   // ── 管理 ──
   // ── 当场授权（主管在弹窗里输入自己的账号密码确认）──
   /** 授权超过单笔上限的充值 / 消费 */
@@ -218,6 +223,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'petty.manage': '登记备用金打款、退回、补付',
   'expense.approve': '确认超门槛的报销；冲销报销与备用金单据',
   'expense.export': '导出报销明细与每日平账',
+  'request.create': '提部门采购需求单（只限本部门）',
+  'request.review': '审核需求单、转采购单',
   'auth.overLimit': '当场授权超过单笔上限的充值 / 消费',
   'auth.vipOverride': '当场授权散客或低等级会员使用 VIP 柜',
   'auth.discount': '当场授权优惠 / 免单、降低票种与免票',
@@ -250,7 +257,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
     title: 'ERP（库存、采购、货款、费用、营业数据）',
     items: [
       'inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'supplierReturn.create', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.export',
-      'expense.read', 'expense.manage', 'petty.manage', 'expense.approve', 'expense.export', 'erp.revenue',
+      'expense.read', 'expense.manage', 'petty.manage', 'expense.approve', 'expense.export', 'request.create', 'request.review', 'erp.revenue',
     ],
   },
   { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount'] },

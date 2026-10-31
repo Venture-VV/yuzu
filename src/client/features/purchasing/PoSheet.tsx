@@ -7,6 +7,7 @@ import { formatQty } from '@shared/quantity';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
+import { ImageThumbs } from '../../components/Images';
 import { Money } from '../../components/Money';
 import { Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
@@ -155,6 +156,7 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
                         <span className="num">{l.materialCode}</span>
                         {l.specification && ` · ${l.specification}`}
                       </p>
+                      {l.spec && <p className="text-[12.5px] font-semibold text-ink-2">规格：{l.spec}</p>}
                     </div>
                     <div className="shrink-0 text-right">
                       <Qty milli={l.purchaseQtyMilli} unit={l.purchaseUnit} className="text-[16px] font-bold" />
@@ -169,6 +171,21 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
                     </span>
                     <CompareChip compare={l.compare} unit={l.purchaseUnit} />
                   </div>
+                  <ImageThumbs images={l.images} size={40} className="mt-2" />
+                  {l.requests.length > 0 && (
+                    <p className="mt-1.5 text-[12px] text-ink-3">
+                      需求：
+                      {l.requests.map((r, i) => (
+                        <span key={r.lineId}>
+                          {i > 0 && '、'}
+                          <Link to={`/erp/requests?request=${r.requestId}`} className="num font-semibold text-lake hover:underline">
+                            {r.requestNo}
+                          </Link>{' '}
+                          {r.departmentName} {formatQty(r.qtyMilli)} {r.unit}
+                        </span>
+                      ))}
+                    </p>
+                  )}
                   {(po.status === 'approved' || po.status === 'closed' || l.receivedMilli > 0) && (
                     <div className="mt-2 flex items-center gap-3">
                       <span className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-paper-3">

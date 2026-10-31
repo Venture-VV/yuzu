@@ -1,10 +1,12 @@
 // 登记费用报销（v0.7.7，飞书需求 RQ-005）：按次报销，或按现付供应商的采购单报销。
 // 用途、发票类型与税点、费用科目都是固定选项；有发票必须填发票号；购买与到货数量不一致要写原因；
-// 单笔超过门槛（默认 2000 元）要负责人确认。断网时「结果待确认」：按原内容重新提交，同一操作编号不会重复登记。
+// 单笔超过门槛（默认 2000 元）要负责人确认。
+// 断网时「结果待确认」（v0.7.8 修正）：提交前把编号和原请求存在本机并读回核对，存不了就不提交；
+// 刷新、关闭页面后仍在页面顶部查回、按原内容重新提交（同一编号不会重复登记）或确认作废。
 
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
-import { ArrowLeft, CircleAlert, CircleCheck, CloudOff, Plus, ReceiptText, RotateCw, Trash2 } from 'lucide-react';
+import { ArrowLeft, CircleAlert, CircleCheck, Plus, ReceiptText, Trash2 } from 'lucide-react';
 import {
   EXPENSE_CATEGORIES,
   EXPENSE_CATEGORY_LABELS,
@@ -16,11 +18,13 @@ import {
 } from '@shared/expenses';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { formatQty, parseQty } from '@shared/quantity';
-import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { cn, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
+import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Button, Field, Input, MoneyInput, Notice, Segmented, Select, Skeleton } from '../../components/ui';
@@ -67,10 +71,9 @@ export function ClaimFormPage() {
   const [poId, setPoId] = useState<number | null>(Number(params.get('po')) || null);
   const [poPick, setPoPick] = useState<Record<number, { on: boolean; category: ExpenseCategory | ''; amount: string; diffReason: string }>>({});
   const [approveNow, setApproveNow] = useState(false);
-  const [clientKey, setClientKey] = useState(uuid);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [uncertain, setUncertain] = useState<unknown>(null);
+  const pending = useErpPending(['expense_claim']);
 
   const advances = useAdvances({ departmentId: departmentId ? String(departmentId) : undefined, unsettled: '1' }, paySource === 'petty' && !!departmentId);
   const candidates = usePoCandidates(poQuery.trim(), mode === 'po' && !poId);
@@ -130,7 +133,9 @@ export function ClaimFormPage() {
   const threshold = rules.data?.approvalThresholdCents ?? 200_000;
   const needsApproval = total > threshold;
 
-  const blocking = !departmentId
+  const blocking = pending.length > 0
+    ? '上一笔报销结果待确认，请先在上方查回、重新提交或作废'
+    : !departmentId
     ? '请选择部门'
     : !handlerId
       ? '请选择经办人'
@@ -154,12 +159,11 @@ export function ClaimFormPage() {
 
   if (!can('expense.manage')) return <Navigate to="/erp/expenses" replace />;
 
-  const send = async (body: unknown) => {
+  const send = async (body: { clientKey: string } & Record<string, unknown>, summary: string) => {
     setBusy(true);
     setError(null);
     try {
-      const r = await api.post<{ claim: ExpenseClaim }>('/api/erp/expenses', body, { timeoutMs: 20_000 });
-      setUncertain(null);
+      const r = await sendErpOp<{ claim: ExpenseClaim }>({ key: body.clientKey, type: 'expense_claim', url: '/api/erp/expenses', body, summary, staffName: session.staff.displayName });
       await invalidate();
       toast({
         tone: 'success',
@@ -168,11 +172,9 @@ export function ClaimFormPage() {
       });
       navigate(`/erp/expenses?claim=${r.claim.id}`);
     } catch (e) {
-      if (e instanceof UncertainError) {
-        setUncertain(body);
-      } else {
-        setError(e instanceof ApiError ? e.message : errorMessage(e));
-        if (e instanceof ApiError && e.code === 'IDEMPOTENCY_CONFLICT') setClientKey(uuid());
+      // 结果待确认：记录留在本机，页面顶部可以查回、重新提交或作废（这里不另起一笔）
+      if (!(e instanceof UncertainError)) {
+        setError(errorMessage(e));
         if (e instanceof ApiError && (e.code === 'PO_CHANGED' || e.code === 'PO_LINE_CLAIMED')) void po.refetch();
       }
     } finally {
@@ -203,8 +205,12 @@ export function ClaimFormPage() {
             amountCents: cents,
             poLineId: pl.poLineId,
           }));
+    const deptName = departments.data?.find((d) => d.id === departmentId)?.name ?? '';
+    const names = payloadLines.map((l) => l.name);
+    const what = mode === 'po' && po.data ? `采购单 ${po.data.docNo}` : `${names[0] ?? ''}${names.length > 1 ? ` 等 ${names.length} 项` : ''}`;
+    // 每次提交用新的操作编号：结果不明的那一笔留在本机，由页面顶部按原编号处理
     void send({
-      clientKey,
+      clientKey: uuid(),
       expenseDate,
       departmentId,
       handlerId,
@@ -218,10 +224,10 @@ export function ClaimFormPage() {
       note: note.trim(),
       approveNow: needsApproval && approveNow,
       lines: payloadLines,
-    });
+    }, `${deptName} · ${purpose} · ${what} · ¥${formatAmount(total)}`);
   };
 
-  const locked = busy || !!uncertain;
+  const locked = busy;
   const setLine = (key: string, patch: Partial<AdhocLine>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   const setPick = (id: number, patch: Partial<(typeof poPick)[number]>) => setPoPick((p) => ({ ...p, [id]: { ...p[id]!, ...patch } }));
 
@@ -244,6 +250,7 @@ export function ClaimFormPage() {
       />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1080px] space-y-4 px-5 py-5 md:px-7" data-testid="claim-form">
+          <ErpPendingPanel types={['expense_claim']} onFound={(_, ref) => navigate(`/erp/expenses?claim=${ref.refId}`)} />
           <Segmented
             ariaLabel="报销方式"
             value={mode}
@@ -481,20 +488,6 @@ export function ClaimFormPage() {
           {error && (
             <Notice tone="error" title={error} icon={<CircleAlert className="size-5" />}>
               报销没有登记，内容仍保留在页面上。
-            </Notice>
-          )}
-          {uncertain != null && (
-            <Notice
-              tone="warning"
-              title="结果待确认"
-              icon={<CloudOff className="size-5" />}
-              action={
-                <Button size="sm" variant="primary" loading={busy} icon={<RotateCw className="size-4" />} onClick={() => void send(uncertain)}>
-                  按原内容重新提交（不会重复登记）
-                </Button>
-              }
-            >
-              报销可能已经登记。重新提交使用同一操作编号：已登记的会直接返回原记录。
             </Notice>
           )}
         </div>

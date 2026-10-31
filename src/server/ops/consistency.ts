@@ -5,6 +5,7 @@ import { readSnapshot, type Sql } from '../db';
 import { frontdeskChecks } from '../modules/frontdesk/checks';
 import { inventoryChecks } from '../modules/inventory/reports';
 import { expenseChecks } from '../modules/expenses';
+import { requestChecks } from '../modules/requests';
 import { computeSettlement } from '../modules/settlement';
 import { loadSettings } from '../modules/settings';
 
@@ -20,6 +21,7 @@ export async function consistencyChecks(sql: Sql, timezone: string): Promise<Che
   const summary = await readSnapshot(sql, (tx) => computeSettlement(tx, today, today));
   const inventory = await readSnapshot(sql, inventoryChecks);
   const expenses = await readSnapshot(sql, expenseChecks);
+  const requests = await readSnapshot(sql, requestChecks);
   const frontdesk = await readSnapshot(sql, frontdeskChecks);
-  return [...summary.checks, ...inventory, ...expenses, ...frontdesk].map(({ label, ok, detail }) => ({ label, ok, detail }));
+  return [...summary.checks, ...inventory, ...expenses, ...requests, ...frontdesk].map(({ label, ok, detail }) => ({ label, ok, detail }));
 }

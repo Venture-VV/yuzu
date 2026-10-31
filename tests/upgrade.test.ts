@@ -87,7 +87,7 @@ beforeAll(async () => {
 
   // 升级：增量执行 002 之后的全部迁移
   const applied = await migrate(sql);
-  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql', '005_frontdesk_g2.sql', '006_op_fences.sql', '007_manager_roles.sql', '008_locker_pool.sql', '009_price_tiers.sql', '010_wallet_limits.sql', '011_member_fields.sql', '012_bonus_expiry.sql', '013_opening_balances.sql', '014_checkout.sql', '015_shifts.sql', '016_shift_boundary.sql', '017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql', '020_technicians.sql', '021_clockroom.sql', '022_dining.sql', '023_dining_tables.sql', '024_rooms.sql', '025_cashier.sql', '026_expenses.sql']);
+  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql', '005_frontdesk_g2.sql', '006_op_fences.sql', '007_manager_roles.sql', '008_locker_pool.sql', '009_price_tiers.sql', '010_wallet_limits.sql', '011_member_fields.sql', '012_bonus_expiry.sql', '013_opening_balances.sql', '014_checkout.sql', '015_shifts.sql', '016_shift_boundary.sql', '017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql', '020_technicians.sql', '021_clockroom.sql', '022_dining.sql', '023_dining_tables.sql', '024_rooms.sql', '025_cashier.sql', '026_expenses.sql', '027_requisitions.sql']);
   app = await buildApp(sql, config);
 }, 60_000);
 

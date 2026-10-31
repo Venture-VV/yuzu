@@ -111,7 +111,7 @@ export async function applyMove(
   m.lastMoveId = move!.id;
 }
 
-export type DocKind = 'inv_doc' | 'purchase_order' | 'payment' | 'opening_payable' | 'expense_claim' | 'petty_advance' | 'petty_settlement';
+export type DocKind = 'inv_doc' | 'purchase_order' | 'payment' | 'opening_payable' | 'expense_claim' | 'petty_advance' | 'petty_settlement' | 'purchase_request';
 export type ApprovalAction = 'create' | 'submit' | 'approve' | 'return' | 'cancel' | 'void' | 'close' | 'revise';
 
 export async function logApproval(
@@ -129,6 +129,23 @@ export async function logApproval(
 }
 
 /** 库存与采购写操作统一的等锁上限，与会员记账一致 */
+/**
+ * 一张采购单只有一种结算方式（v0.7.8 修正 v0.7.7）：以第一张生效的收货记下的为准；还没收货但已按采购单报销（现付）的算现付；
+ * 都没有才看供应商当前的设置。这样供应商改了结算方式之后，同一张采购单不会既记应付又走报销。
+ */
+export async function poSettlement(db: Db, poId: number): Promise<'credit' | 'cash'> {
+  const [row] = await db<{ settlement: 'credit' | 'cash' }[]>`
+    SELECT coalesce(
+             (SELECT d.settlement FROM inv_docs d
+              WHERE d.purchase_order_id = p.id AND d.doc_type = 'receipt' AND d.status = 'confirmed' AND d.settlement IS NOT NULL
+              ORDER BY d.confirmed_at, d.id LIMIT 1),
+             CASE WHEN EXISTS (SELECT 1 FROM expense_claims c WHERE c.purchase_order_id = p.id AND c.status IN ('submitted', 'returned', 'confirmed'))
+                  THEN 'cash' END,
+             s.settlement) AS settlement
+    FROM purchase_orders p JOIN suppliers s ON s.id = p.supplier_id WHERE p.id = ${poId}`;
+  return row?.settlement ?? 'credit';
+}
+
 export async function setTxTimeouts(tx: Tx) {
   await tx.unsafe("SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '10s'");
 }

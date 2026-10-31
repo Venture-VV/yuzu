@@ -80,13 +80,14 @@ describe('ERP 模块开关', () => {
       expect(info.map((m) => [m.key, m.switchedOn, m.enabled])).toEqual([
         ['inventory', false, false],
         ['purchasing', true, false],
+        ['requests', true, false],
         ['payables', true, false],
         ['approvals', true, false],
         ['expenses', true, false],
         ['revenue', true, true],
       ]);
       expect(await modules(ctx.owner)).toEqual(['revenue']);
-      for (const url of ['/api/inventory/materials', '/api/inventory/todo-count', '/api/purchase-orders', '/api/purchase-baseline?materialId=1', '/api/payables/overview', '/api/erp/expenses', '/api/erp/petty/daily']) {
+      for (const url of ['/api/inventory/materials', '/api/inventory/todo-count', '/api/purchase-orders', '/api/purchase-baseline?materialId=1', '/api/payables/overview', '/api/erp/expenses', '/api/erp/petty/daily', '/api/erp/requests', '/api/erp/images/1']) {
         const r = await api(ctx.app, ctx.owner, 'GET', url);
         expect(r.status, url).toBe(403);
         expect(r.body.error.code, url).toBe('ERP_MODULE_DISABLED');

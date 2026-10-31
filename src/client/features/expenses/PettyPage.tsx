@@ -4,7 +4,7 @@
 
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { CircleAlert, CloudOff, Download, HandCoins, Plus, ReceiptText, RotateCw, Undo2, X } from 'lucide-react';
+import { CircleAlert, Download, HandCoins, Plus, ReceiptText, Undo2, X } from 'lucide-react';
 import {
   CLAIM_STATUS_LABELS,
   SETTLEMENT_KIND_LABELS,
@@ -14,11 +14,13 @@ import {
 } from '@shared/expenses';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { PAY_METHOD_LABELS, PAYMENT_METHODS, type PayMethod } from '@shared/purchasing';
-import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { api, errorMessage, UncertainError } from '../../lib/api';
+import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
+import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
 import { Dialog, Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
@@ -81,6 +83,7 @@ export function PettyPage() {
       }
     >
       <div className="space-y-4" data-testid="petty-page">
+        <ErpPendingPanel types={['petty_advance', 'petty_settlement']} onFound={(_, ref) => open(ref.advanceId ?? ref.refId)} />
         {d && d.openByDepartment.length > 0 && (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="petty-open">
             {d.openByDepartment.map((o) => (
@@ -431,10 +434,9 @@ function AdvanceDialog({ open, onClose, onDone }: { open: boolean; onClose: () =
   const [method, setMethod] = useState<PayMethod>('wechat');
   const [evidence, setEvidence] = useState('');
   const [note, setNote] = useState('');
-  const [clientKey, setClientKey] = useState(uuid);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [uncertain, setUncertain] = useState<unknown>(null);
+  const pending = useErpPending(['petty_advance']);
   useResetOnOpen(open, () => {
     setDepartmentId('');
     setHandlerId('');
@@ -443,29 +445,40 @@ function AdvanceDialog({ open, onClose, onDone }: { open: boolean; onClose: () =
     setMethod('wechat');
     setEvidence('');
     setNote('');
-    setClientKey(uuid());
     setError(null);
-    setUncertain(null);
   });
   const cents = amount.trim() ? parseYuan(amount) : null;
-  const blocking = !departmentId ? '请选择部门' : !handlerId ? '请选择经办人' : !cents || cents <= 0 ? '请填写打款金额' : evidence.trim().length < 2 ? '请填写凭据说明' : null;
-  const locked = busy || !!uncertain;
+  const blocking = pending.length > 0
+    ? '上一笔打款结果待确认，请先在页面顶部查回、重新提交或作废'
+    : !departmentId ? '请选择部门' : !handlerId ? '请选择经办人' : !cents || cents <= 0 ? '请填写打款金额' : evidence.trim().length < 2 ? '请填写凭据说明' : null;
+  const locked = busy;
 
-  const send = async (body: unknown) => {
+  // 每次提交用新的操作编号；结果不明的那一笔存在本机，由页面顶部按原编号处理
+  const send = async () => {
+    if (blocking || cents === null) return;
+    const body = { clientKey: uuid(), departmentId: Number(departmentId), handlerId: Number(handlerId), advanceDate: date, amountCents: cents, method, evidence: evidence.trim(), note: note.trim() };
+    const deptName = departments.data?.find((d) => d.id === Number(departmentId))?.name ?? '';
+    const handlerName = handlers.data?.find((h) => h.id === Number(handlerId))?.name ?? '';
     setBusy(true);
     setError(null);
     try {
-      const r = await api.post<{ advance: PettyAdvance }>('/api/erp/petty/advances', body, { timeoutMs: 20_000 });
+      const r = await sendErpOp<{ advance: PettyAdvance }>({
+        key: body.clientKey,
+        type: 'petty_advance',
+        url: '/api/erp/petty/advances',
+        body,
+        summary: `${deptName} · ${handlerName} · 打款 ¥${formatAmount(cents)}`,
+        staffName: session.staff.displayName,
+      });
       await invalidate();
       toast({ tone: 'success', title: '打款已登记', body: `${r.advance.docNo} · ¥${formatAmount(r.advance.advanceCents)}` });
       onClose();
       onDone(r.advance.id);
     } catch (e) {
-      if (e instanceof UncertainError) setUncertain(body);
-      else {
-        setError(e instanceof ApiError ? e.message : errorMessage(e));
-        if (e instanceof ApiError && e.code === 'IDEMPOTENCY_CONFLICT') setClientKey(uuid());
-      }
+      if (e instanceof UncertainError) {
+        toast({ tone: 'info', title: '打款结果待确认', body: '已记在本机：请在页面顶部查回、按原内容重新提交或作废。' });
+        onClose();
+      } else setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -486,7 +499,7 @@ function AdvanceDialog({ open, onClose, onDone }: { open: boolean; onClose: () =
             variant="primary"
             disabled={!!blocking || locked}
             loading={busy}
-            onClick={() => void send({ clientKey, departmentId: Number(departmentId), handlerId: Number(handlerId), advanceDate: date, amountCents: cents, method, evidence: evidence.trim(), note: note.trim() })}
+            onClick={() => void send()}
             data-testid="advance-submit"
           >
             登记打款
@@ -539,21 +552,6 @@ function AdvanceDialog({ open, onClose, onDone }: { open: boolean; onClose: () =
       </div>
       {blocking && !locked && <p className="mt-3 text-[12.5px] font-semibold text-clay">{blocking}</p>}
       {error && <Notice tone="error" title={error} className="mt-3" />}
-      {uncertain != null && (
-        <Notice
-          tone="warning"
-          title="结果待确认"
-          icon={<CloudOff className="size-5" />}
-          className="mt-3"
-          action={
-            <Button size="sm" variant="primary" loading={busy} icon={<RotateCw className="size-4" />} onClick={() => void send(uncertain)}>
-              按原内容重新提交（不会重复登记）
-            </Button>
-          }
-        >
-          打款可能已经登记。重新提交使用同一操作编号：已登记的会直接返回原记录。
-        </Notice>
-      )}
     </Dialog>
   );
 }
@@ -569,39 +567,47 @@ function SettlementDialog({ advance, kind, onClose }: { advance: PettyAdvance; k
   const [method, setMethod] = useState<PayMethod>('cash');
   const [evidence, setEvidence] = useState('');
   const [note, setNote] = useState('');
-  const [clientKey, setClientKey] = useState(uuid);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [uncertain, setUncertain] = useState<unknown>(null);
+  const pending = useErpPending(['petty_settlement']);
   useResetOnOpen(kind !== null, () => {
     setDate(session.calendarToday);
     setAmount(max > 0 ? centsToInput(max) : '');
     setMethod('cash');
     setEvidence('');
     setNote('');
-    setClientKey(uuid());
     setError(null);
-    setUncertain(null);
   });
   const cents = amount.trim() ? parseYuan(amount) : null;
   const label = kind ? SETTLEMENT_KIND_LABELS[kind] : '';
-  const blocking = !cents || cents <= 0 ? '请填写金额' : cents > max ? `最多 ¥${formatAmount(max)}` : evidence.trim().length < 2 ? '请填写凭据说明' : date < advance.advanceDate ? `日期不能早于打款日期 ${advance.advanceDate}` : null;
-  const locked = busy || !!uncertain;
+  const blocking = pending.length > 0
+    ? '上一笔退回 / 补付结果待确认，请先在页面顶部查回、重新提交或作废'
+    : !cents || cents <= 0 ? '请填写金额' : cents > max ? `最多 ¥${formatAmount(max)}` : evidence.trim().length < 2 ? '请填写凭据说明' : date < advance.advanceDate ? `日期不能早于打款日期 ${advance.advanceDate}` : null;
+  const locked = busy;
 
-  const send = async (body: unknown) => {
+  // 每次提交用新的操作编号；结果不明的那一笔存在本机，由页面顶部按原编号处理
+  const send = async () => {
+    if (blocking || cents === null || !kind) return;
+    const body = { clientKey: uuid(), advanceId: advance.id, kind, settleDate: date, amountCents: cents, method, evidence: evidence.trim(), note: note.trim() };
     setBusy(true);
     setError(null);
     try {
-      await api.post('/api/erp/petty/settlements', body, { timeoutMs: 20_000 });
+      await sendErpOp({
+        key: body.clientKey,
+        type: 'petty_settlement',
+        url: '/api/erp/petty/settlements',
+        body,
+        summary: `${advance.docNo} · ${label} ¥${formatAmount(cents)}`,
+        staffName: session.staff.displayName,
+      });
       await invalidate();
       toast({ tone: 'success', title: `${label}已登记` });
       onClose();
     } catch (e) {
-      if (e instanceof UncertainError) setUncertain(body);
-      else {
-        setError(e instanceof ApiError ? e.message : errorMessage(e));
-        if (e instanceof ApiError && e.code === 'IDEMPOTENCY_CONFLICT') setClientKey(uuid());
-      }
+      if (e instanceof UncertainError) {
+        toast({ tone: 'info', title: `${label}结果待确认`, body: '已记在本机：请在页面顶部查回、按原内容重新提交或作废。' });
+        onClose();
+      } else setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -622,7 +628,7 @@ function SettlementDialog({ advance, kind, onClose }: { advance: PettyAdvance; k
             variant="primary"
             disabled={!!blocking || locked}
             loading={busy}
-            onClick={() => void send({ clientKey, advanceId: advance.id, kind, settleDate: date, amountCents: cents, method, evidence: evidence.trim(), note: note.trim() })}
+            onClick={() => void send()}
             data-testid="settle-submit"
           >
             登记{label}
@@ -655,21 +661,6 @@ function SettlementDialog({ advance, kind, onClose }: { advance: PettyAdvance; k
       </div>
       {blocking && !locked && <p className="mt-3 text-[12.5px] font-semibold text-clay">{blocking}</p>}
       {error && <Notice tone="error" title={error} className="mt-3" />}
-      {uncertain != null && (
-        <Notice
-          tone="warning"
-          title="结果待确认"
-          icon={<CloudOff className="size-5" />}
-          className="mt-3"
-          action={
-            <Button size="sm" variant="primary" loading={busy} icon={<RotateCw className="size-4" />} onClick={() => void send(uncertain)}>
-              按原内容重新提交（不会重复登记）
-            </Button>
-          }
-        >
-          可能已经登记。重新提交使用同一操作编号：已登记的会直接返回原记录。
-        </Notice>
-      )}
     </Dialog>
   );
 }

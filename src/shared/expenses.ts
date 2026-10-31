@@ -126,9 +126,12 @@ export interface ExpenseClaim extends ExpenseClaimSummary {
 }
 
 export interface ExpenseClaimList {
+  /** 最近的报销单（最多 2000 张） */
   claims: ExpenseClaimSummary[];
-  /** 筛选条件下各状态的合计 */
+  /** 筛选条件下各状态的合计（按全部单据算，不受列表张数限制） */
   totals: { confirmedCents: number; pendingCents: number; count: number };
+  /** 列表没有显示全部（合计仍按全部算） */
+  truncated: boolean;
 }
 
 /** 一笔打款的平账；只算已确认的报销 */

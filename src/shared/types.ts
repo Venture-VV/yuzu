@@ -396,6 +396,9 @@ export interface StaffRecord {
   displayName: string;
   role: Role;
   duties: Duty[];
+  /** 所属部门（v0.7.8） */
+  departmentId: number | null;
+  departmentName: string | null;
   active: boolean;
   mustChangePassword: boolean;
   lastLoginAt: string | null;

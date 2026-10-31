@@ -42,16 +42,33 @@ export interface PoLine {
   priceCents: number;
   amountCents: number;
   note: string;
+  /** 规格（v0.7.8） */
+  spec: string;
+  /** 来自哪几行需求（v0.7.8，转采购单时带上；同一物料的几行需求可以合并成一行） */
+  requests: PoLineRequest[];
+  /** 图片（v0.7.8） */
+  images: import('./requests').ImageRef[];
   /** 已合格实收（库存单位） */
   receivedMilli: number;
   compare: PriceCompare;
+}
+
+/** 采购单行对应的需求行（v0.7.8） */
+export interface PoLineRequest {
+  lineId: number;
+  requestId: number;
+  requestNo: string;
+  departmentName: string;
+  name: string;
+  qtyMilli: number;
+  unit: string;
 }
 
 export interface PoRevision {
   revision: number;
   changedByName: string;
   changedAt: string;
-  snapshot: { supplierName: string; totalCents: number; lines: { materialName: string; purchaseQtyMilli: number; purchaseUnit: string; priceCents: number; amountCents: number }[] };
+  snapshot: { supplierName: string; totalCents: number; lines: { materialName: string; spec?: string; purchaseQtyMilli: number; purchaseUnit: string; priceCents: number; amountCents: number; imageIds?: number[] }[] };
 }
 
 export interface PurchaseOrder {

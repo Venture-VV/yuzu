@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { Department, Material, Supplier } from '@shared/inventory';
 import { fitsDecimals } from '@shared/quantity';
 import { isUniqueViolation, type Db } from '../../db';
-import { guard } from '../../auth/guard';
+import { guard, guardAny } from '../../auth/guard';
 import { writeAudit } from '../../lib/audit';
 import type { Deps } from '../../lib/context';
 import { conflict, notFound, unprocessable } from '../../lib/errors';
@@ -225,7 +225,10 @@ export function registerMasterRoutes(app: FastifyInstance, { sql }: Deps) {
     return listSuppliers(sql, true);
   });
 
-  app.get('/api/inventory/departments', { preHandler: guard('inventory.read') }, async (req) => listDepartments(sql, all(req.query)));
+  // 部门：库存之外，费用报销（只有费用职责的员工也要选部门）与需求单也要用
+  app.get('/api/inventory/departments', { preHandler: guardAny('inventory.read', 'expense.read', 'request.create', 'request.review') }, async (req) =>
+    listDepartments(sql, all(req.query)),
+  );
   app.post('/api/inventory/departments', { preHandler: guard('inventory.master') }, async (req) => {
     const d = parse(DepartmentInput, req.body);
     try {

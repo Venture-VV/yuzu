@@ -4,7 +4,7 @@
 
 import type { Permission } from './permissions';
 
-export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'payables', 'approvals', 'expenses', 'revenue'] as const;
+export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'payables', 'approvals', 'expenses', 'revenue'] as const;
 export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
 
 export interface ErpModuleDef {
@@ -44,11 +44,23 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     description: '采购单的编制、确认、修订与按单收货',
     path: '/purchasing',
     pages: ['/purchasing'],
-    apis: ['/api/purchase-orders', '/api/purchase-baseline'],
+    // 图片（v0.7.8）：采购单与需求单的行都用，跟采购模块走（需求单依赖采购）
+    apis: ['/api/purchase-orders', '/api/purchase-baseline', '/api/erp/images'],
     // 物资经办要看采购单、按单收货（采购单的读接口按「查看库存与物资单据」开放）
     perms: ['inventory.read', 'purchase.manage', 'inventory.approve', 'payable.read'],
     defaultEnabled: true,
     requires: ['inventory'],
+  },
+  requests: {
+    label: '采购需求单',
+    group: '供应链',
+    description: '部门提采购需求（链接、详情、图片），采购审核后一键转采购单，下单 / 到货 / 退货自动回写（v0.7.8，飞书需求 RQ-005）',
+    path: '/erp/requests',
+    pages: ['/erp/requests'],
+    apis: ['/api/erp/requests'],
+    perms: ['request.create', 'request.review'],
+    defaultEnabled: true,
+    requires: ['inventory', 'purchasing'],
   },
   payables: {
     label: '应付货款',
@@ -142,6 +154,27 @@ export function erpModuleOfPage(path: string): ErpModuleKey | null {
 
 /** 能进 ERP 的权限（有其一即可）：任一模块的权限，或店主的模块设置 */
 export const ERP_PERMISSIONS: readonly Permission[] = [...new Set<Permission>([...ERP_MODULE_KEYS.flatMap((k) => ERP_MODULES[k].perms), 'settings.manage'])];
+
+/**
+ * ERP 单据的「结果待确认」（v0.7.8）：页面提交前把操作编号和原请求存在本机，断网后按编号查回，
+ * 或在服务端确认作废（原请求晚到也不会登记）后再重新填写。
+ */
+export const ERP_OP_TYPES = ['expense_claim', 'petty_advance', 'petty_settlement', 'purchase_request'] as const;
+export type ErpOpType = (typeof ERP_OP_TYPES)[number];
+export const ERP_OP_LABELS: Record<ErpOpType, string> = {
+  expense_claim: '费用报销',
+  petty_advance: '备用金打款',
+  petty_settlement: '备用金退回 / 补付',
+  purchase_request: '部门需求单',
+};
+export interface ErpOpLookup {
+  /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */
+  found: boolean;
+  /** 已在服务端确认作废，原请求不会再登记 */
+  abandoned: boolean;
+  refId?: number;
+  advanceId?: number;
+}
 
 /** 营业数据（只读）：任选时段 */
 export interface ErpRevenue {

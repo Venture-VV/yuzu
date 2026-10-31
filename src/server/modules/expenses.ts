@@ -42,15 +42,18 @@ import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
 import { toCsv } from '../lib/csv';
+import { assertNotFenced } from '../lib/fences';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse, positiveCents } from '../lib/validate';
-import { assertNotFuture, docDateSchema, logApproval, nextDocNo, setTxTimeouts, todayIn } from './inventory/common';
+import { erpOpAbandoned } from './erp-ops';
+import { assertNotFuture, docDateSchema, logApproval, nextDocNo, poSettlement, setTxTimeouts, todayIn } from './inventory/common';
 
 const id = z.number().int().positive();
 const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 const yuan = (cents: number) => (cents < 0 ? '-' : '') + formatAmount(Math.abs(cents)).replace(/,/g, '');
 const ReasonInput = z.object({ reason: z.string().trim().min(2, '请填写原因（至少 2 个字）').max(200) });
 const ACTIVE_CLAIM = ['submitted', 'returned', 'confirmed'] as const;
+const CREDIT_PO_MESSAGE = '这张采购单按挂账结算（收货已记应付），请在「应付货款」里付款核销，不能按采购单报销';
 
 // ───────────────────────── 规则 ─────────────────────────
 
@@ -263,7 +266,22 @@ interface ClaimFilter {
   ids?: number[];
 }
 
-async function claimSummaries(db: Db, f: ClaimFilter): Promise<ExpenseClaimSummary[]> {
+/** 列表最多显示多少张；合计与导出不受这个限制 */
+const CLAIM_LIST_LIMIT = 2000;
+/** 一次导出最多多少张（超过的请缩短日期范围分几次导出） */
+const CLAIM_EXPORT_LIMIT = 20_000;
+
+const claimWhere = (db: Db, f: ClaimFilter) => db`
+      ${f.from ? db`AND c.expense_date >= ${f.from}` : db``}
+      ${f.to ? db`AND c.expense_date <= ${f.to}` : db``}
+      ${f.departmentId ? db`AND c.department_id = ${f.departmentId}` : db``}
+      ${f.handlerId ? db`AND c.handler_id = ${f.handlerId}` : db``}
+      ${f.status ? db`AND c.status = ${f.status}` : db``}
+      ${f.paySource ? db`AND c.pay_source = ${f.paySource}` : db``}
+      ${f.advanceId ? db`AND c.advance_id = ${f.advanceId}` : db``}
+      ${f.ids ? db`AND c.id IN ${db(f.ids)}` : db``}`;
+
+async function claimSummaries(db: Db, f: ClaimFilter, limit: number | null = null): Promise<ExpenseClaimSummary[]> {
   const rows = await db<
     (Omit<ExpenseClaimSummary, 'department' | 'handler' | 'advance' | 'purchaseOrder'> & {
       departmentId: number;
@@ -285,17 +303,9 @@ async function claimSummaries(db: Db, f: ClaimFilter): Promise<ExpenseClaimSumma
     FROM expense_claims c JOIN departments d ON d.id = c.department_id JOIN staff h ON h.id = c.handler_id JOIN staff cb ON cb.id = c.created_by
     LEFT JOIN petty_advances a ON a.id = c.advance_id
     LEFT JOIN purchase_orders po ON po.id = c.purchase_order_id LEFT JOIN suppliers s ON s.id = po.supplier_id
-    WHERE TRUE
-      ${f.from ? db`AND c.expense_date >= ${f.from}` : db``}
-      ${f.to ? db`AND c.expense_date <= ${f.to}` : db``}
-      ${f.departmentId ? db`AND c.department_id = ${f.departmentId}` : db``}
-      ${f.handlerId ? db`AND c.handler_id = ${f.handlerId}` : db``}
-      ${f.status ? db`AND c.status = ${f.status}` : db``}
-      ${f.paySource ? db`AND c.pay_source = ${f.paySource}` : db``}
-      ${f.advanceId ? db`AND c.advance_id = ${f.advanceId}` : db``}
-      ${f.ids ? db`AND c.id IN ${db(f.ids)}` : db``}
+    WHERE TRUE ${claimWhere(db, f)}
     ORDER BY c.expense_date DESC, c.id DESC
-    LIMIT 2000`;
+    ${limit ? db`LIMIT ${limit}` : db``}`;
   return rows.map(({ departmentId, departmentName, handlerId, handlerName, advanceId, advanceNo, poId, poNo, supplierName, ...r }) => ({
     ...r,
     department: { id: departmentId, name: departmentName },
@@ -305,16 +315,20 @@ async function claimSummaries(db: Db, f: ClaimFilter): Promise<ExpenseClaimSumma
   }));
 }
 
+/** 筛选条件下的合计：按全部单据算（列表只显示最近的 CLAIM_LIST_LIMIT 张） */
+async function claimTotals(db: Db, f: ClaimFilter): Promise<ExpenseClaimList['totals']> {
+  const [t] = await db<ExpenseClaimList['totals'][]>`
+    SELECT coalesce(sum(c.amount_cents) FILTER (WHERE c.status = 'confirmed'), 0)::bigint AS confirmed_cents,
+           coalesce(sum(c.amount_cents) FILTER (WHERE c.status IN ('submitted', 'returned')), 0)::bigint AS pending_cents,
+           count(*)::int AS count
+    FROM expense_claims c WHERE TRUE ${claimWhere(db, f)}`;
+  return { confirmedCents: Number(t!.confirmedCents), pendingCents: Number(t!.pendingCents), count: t!.count };
+}
+
 export async function listClaims(db: Db, f: ClaimFilter): Promise<ExpenseClaimList> {
-  const claims = await claimSummaries(db, f);
-  return {
-    claims,
-    totals: {
-      confirmedCents: claims.filter((c) => c.status === 'confirmed').reduce((t, c) => t + c.amountCents, 0),
-      pendingCents: claims.filter((c) => c.status === 'submitted' || c.status === 'returned').reduce((t, c) => t + c.amountCents, 0),
-      count: claims.length,
-    },
-  };
+  const claims = await claimSummaries(db, f, CLAIM_LIST_LIMIT);
+  const totals = await claimTotals(db, f);
+  return { claims, totals, truncated: totals.count > claims.length };
 }
 
 export async function getClaim(db: Db, claimId: number): Promise<ExpenseClaim> {
@@ -345,10 +359,12 @@ async function receivedByLine(db: Db, poId: number) {
 }
 
 export async function poForClaim(db: Db, poId: number, excludeClaimId: number | null = null): Promise<PoForClaim & { settlement: string; status: string }> {
-  const [po] = await db<{ id: number; docNo: string; supplierName: string; orderDate: string; settlement: string; status: string }[]>`
-    SELECT p.id, p.doc_no, s.name AS supplier_name, p.order_date, s.settlement, p.status
+  const [head] = await db<{ id: number; docNo: string; supplierName: string; orderDate: string; status: string }[]>`
+    SELECT p.id, p.doc_no, s.name AS supplier_name, p.order_date, p.status
     FROM purchase_orders p JOIN suppliers s ON s.id = p.supplier_id WHERE p.id = ${poId}`;
-  if (!po) throw notFound('采购单不存在');
+  if (!head) throw notFound('采购单不存在');
+  // 结算方式按这张采购单自己的（第一张收货定下的），不看供应商当前的设置：挂账收下的货已记应付，不能再报销
+  const po = { ...head, settlement: await poSettlement(db, poId) };
   const lines = await db<{ poLineId: number; materialId: number; name: string; unit: string; boughtMilli: number; amountCents: number }[]>`
     SELECT pl.id AS po_line_id, pl.material_id, m.name, pl.inventory_unit AS unit, pl.base_qty_milli AS bought_milli, pl.amount_cents
     FROM purchase_order_lines pl JOIN materials m ON m.id = pl.material_id WHERE pl.po_id = ${poId} ORDER BY pl.line_no`;
@@ -372,7 +388,12 @@ export async function poCandidates(db: Db, q: string): Promise<PoCandidate[]> {
               SELECT 1 FROM expense_claim_lines l JOIN expense_claims c ON c.id = l.claim_id
               WHERE l.po_line_id = pl.id AND c.status IN ${db(ACTIVE_CLAIM)}))::int AS open_lines
     FROM purchase_orders p JOIN suppliers s ON s.id = p.supplier_id
-    WHERE s.settlement = 'cash' AND p.status IN ('approved', 'closed')
+    WHERE p.status IN ('approved', 'closed')
+      AND coalesce((SELECT d.settlement FROM inv_docs d
+                    WHERE d.purchase_order_id = p.id AND d.doc_type = 'receipt' AND d.status = 'confirmed' AND d.settlement IS NOT NULL
+                    ORDER BY d.confirmed_at, d.id LIMIT 1),
+                   CASE WHEN EXISTS (SELECT 1 FROM expense_claims c WHERE c.purchase_order_id = p.id AND c.status IN ${db(ACTIVE_CLAIM)}) THEN 'cash' END,
+                   s.settlement) = 'cash'
       ${q.trim() ? db`AND (p.doc_no ILIKE ${like} OR s.name ILIKE ${like} OR s.code ILIKE ${like})` : db``}
     ORDER BY p.order_date DESC, p.id DESC
     LIMIT 50`;
@@ -455,6 +476,7 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
       await setTxTimeouts(tx);
       const existing = await findExisting(tx);
       if (existing) return { id: existing, replayed: true };
+      await assertNotFenced(tx, input.clientKey, 'expense_claim', erpOpAbandoned);
       const [dept] = await tx<{ active: boolean }[]>`SELECT active FROM departments WHERE id = ${input.departmentId}`;
       if (!dept?.active) throw unprocessable('DEPARTMENT_INVALID', '部门不存在或已停用');
       const [handler] = await tx<{ active: boolean }[]>`SELECT active FROM staff WHERE id = ${input.handlerId}`;
@@ -470,7 +492,7 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
       if (input.purchaseOrderId) {
         await tx`SELECT id FROM purchase_orders WHERE id = ${input.purchaseOrderId} FOR UPDATE`;
         const po = await poForClaim(tx, input.purchaseOrderId);
-        if (po.settlement !== 'cash') throw unprocessable('CREDIT_SUPPLIER', '挂账供应商的采购单请在「应付货款」里付款核销，不能按采购单报销');
+        if (po.settlement !== 'cash') throw unprocessable('CREDIT_SUPPLIER', CREDIT_PO_MESSAGE);
         if (po.status !== 'approved' && po.status !== 'closed') throw conflict('PO_NOT_APPROVED', '只能报销已确认或已关闭的采购单');
         for (const l of lines) {
           if (!l.poLineId) continue;
@@ -618,6 +640,7 @@ async function idempotentInsert(
       await setTxTimeouts(tx);
       const existing = await findExisting(tx);
       if (existing) return { id: existing, replayed: true };
+      await assertNotFenced(tx, input.clientKey, opType, erpOpAbandoned);
       const newId = await body(tx);
       await tx`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (${input.clientKey}, ${opType}, ${requestHash}, ${newId}, ${actor.id})`;
       return { id: newId, replayed: false };
@@ -773,13 +796,24 @@ export async function expenseChecks(db: Db): Promise<ExpenseCheck[]> {
       AND (SELECT count(*) FROM ap_entries e WHERE e.inv_doc_id = d.id AND e.entry_type = 'receipt') <> CASE WHEN d.settlement = 'credit' THEN 1 ELSE 0 END
     UNION ALL
     SELECT d.doc_no, '收货单没有记下结算方式' FROM inv_docs d
-    WHERE d.doc_type IN ('receipt', 'supplier_return') AND d.status IN ('confirmed', 'voided') AND d.settlement IS NULL`;
+    WHERE d.doc_type IN ('receipt', 'supplier_return') AND d.status IN ('confirmed', 'voided') AND d.settlement IS NULL
+    UNION ALL
+    SELECT po.doc_no, '同一张采购单的收货结算方式不一致' FROM purchase_orders po
+    WHERE (SELECT count(DISTINCT d.settlement) FROM inv_docs d
+           WHERE d.purchase_order_id = po.id AND d.doc_type = 'receipt' AND d.status = 'confirmed') > 1
+    UNION ALL
+    SELECT c.doc_no, '报销的采购单有挂账的收货（已记应付）' FROM expense_claims c
+    WHERE c.status IN ('submitted', 'returned', 'confirmed') AND c.purchase_order_id IS NOT NULL
+      AND EXISTS (SELECT 1 FROM inv_docs d WHERE d.purchase_order_id = c.purchase_order_id AND d.doc_type = 'receipt'
+                  AND d.status = 'confirmed' AND d.settlement = 'credit')`;
   const [cash] = await db<{ count: number }[]>`SELECT count(*)::int AS count FROM inv_docs WHERE doc_type = 'receipt' AND status = 'confirmed' AND settlement = 'cash'`;
   items.push({
     key: 'cash_receipts',
     label: '现付供应商的收货不记应付',
     ok: badAp.length === 0,
-    detail: badAp.length ? badAp.map((b) => `${b.docNo} ${b.why}`).join('；') : `挂账的收货各有一条应付；现付的收货 ${cash!.count} 张都没有应付`,
+    detail: badAp.length
+      ? badAp.map((b) => `${b.docNo} ${b.why}`).join('；')
+      : `挂账的收货各有一条应付；现付的收货 ${cash!.count} 张都没有应付；同一张采购单只有一种结算方式，报销的采购单没有挂账的收货`,
   });
   return items;
 }
@@ -792,6 +826,11 @@ function csvReply(reply: FastifyReply, name: string, csv: string) {
 }
 
 async function claimsCsv(db: Db, f: ClaimFilter & { from: string; to: string }) {
+  // 导出要完整：不截断；太多时整份拒绝，不给出看起来完整、其实少了的报表
+  const { count } = await claimTotals(db, f);
+  if (count > CLAIM_EXPORT_LIMIT) {
+    throw unprocessable('EXPORT_TOO_LARGE', `这段时间有 ${count} 张报销，一次最多导出 ${CLAIM_EXPORT_LIMIT} 张，请缩短日期范围分几次导出`);
+  }
   const claims = await claimSummaries(db, f);
   const ids = claims.map((c) => c.id);
   type Line = ExpenseClaim['lines'][number] & { claimId: number };
@@ -933,7 +972,7 @@ export function registerExpenseRoutes(app: FastifyInstance, deps: Deps) {
   });
   app.get('/api/erp/expenses/po/:id', { preHandler: guard('expense.manage') }, async (req) => {
     const po = await poForClaim(sql, docId(req));
-    if (po.settlement !== 'cash') throw unprocessable('CREDIT_SUPPLIER', '挂账供应商的采购单请在「应付货款」里付款核销，不能按采购单报销');
+    if (po.settlement !== 'cash') throw unprocessable('CREDIT_SUPPLIER', CREDIT_PO_MESSAGE);
     const { settlement: _s, status: _st, ...rest } = po;
     return rest satisfies PoForClaim;
   });
