@@ -115,6 +115,7 @@ function ShiftSlip({ s }: { s: ShiftRecord }) {
           {sum.refunds ? (
             <p className="text-[11px]" data-testid="print-shift-refunds">
               退款按原收款方式：{sum.refunds.byMethod.map((m) => `${methodLabel(m.method)} ${yuan(m.amount)}`).join('、')}。现金从本班钱箱退，已从应有现金里扣掉；扫码、银行卡、团购在商户后台原路退回。原单是别人收的款时仍算在原收款人的班次，同一钱箱合并核对时相抵；反结账时选了别人的钱箱的，退款记在那个班次。
+              {sum.refunds.byMethod.some((m) => m.method === 'deposit') && '押金抵扣恢复为客人的押金，不用另退。'}
             </p>
           ) : (
             <p className="text-[11px]">原单收过的现金不计入应有现金，请核对是否已退还或已重新收取。</p>

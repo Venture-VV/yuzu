@@ -211,6 +211,7 @@ function SummaryView({ summary }: { summary: ShiftSummary }) {
               {summary.voids.map((v) => `${v.checkoutNo}（¥${(v.amount / 100).toFixed(2)}，${v.reason}${v.voidedByName ? `，${v.voidedByName}反结账、从本班钱箱退` : ''}）`).join('；')}。
               退款按原收款方式：{refunds.byMethod.map((m) => `${CHECKOUT_METHOD_LABELS[m.method]} ¥${(m.amount / 100).toFixed(2)}`).join('、')}。
               现金从你的钱箱退给客人，已从应有现金里扣掉；扫码、银行卡、团购请在商户后台原路退回并登记退款单号。原单若是别人收的款，仍算在原收款人的班次，同一钱箱合并核对时相抵。
+              {refunds.byMethod.some((m) => m.method === 'deposit') && '客房退房结账的押金抵扣恢复为客人的押金（退房时再结），不用另退。'}
             </span>
           </Notice>
         ) : (
