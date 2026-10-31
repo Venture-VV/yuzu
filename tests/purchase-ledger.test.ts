@@ -5,6 +5,7 @@ import { inflateRawSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildXlsx, colName, crc32, imageSize } from '../src/server/lib/xlsx';
 import { todayIn } from '../src/server/modules/inventory/common';
+import { buildLedger, ledgerCount, orderedXlsx } from '../src/server/modules/purchase-ledger';
 import { createStaff } from '../src/server/modules/staff';
 import { seedInventoryDemo } from '../src/server/seed-inventory';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
@@ -242,5 +243,88 @@ describe('需求单导出', () => {
     expect(csv.status).toBe(200);
     expect(String(csv.body)).toContain(r.body.request.docNo);
     expect(String(csv.body)).toContain('未下单');
+  });
+});
+
+describe('v0.7.9 审查修正', () => {
+  it('台账导出前的笔数与逐笔同一口径：按部门、经办人筛选，别的部门的单据不算进上限', async () => {
+    await api(ctx.app, boss, 'POST', '/api/inventory/departments', { name: '客房部' });
+    const deptB = ((await api(ctx.app, boss, 'GET', '/api/inventory/departments')).body as { id: number; name: string }[]).find((d) => d.name === '客房部')!.id;
+    const [k] = await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'lixiao'`;
+    const keeperId = Number(k!.id);
+    const day = daysAgo(20);
+    const adv = (
+      await api(ctx.app, coster, 'POST', '/api/erp/petty/advances', {
+        clientKey: randomUUID(), departmentId: deptB, handlerId: keeperId, advanceDate: day, amountCents: 20_000, method: 'wechat', evidence: '转账尾号 0002',
+      })
+    ).body.advance;
+    expect((await claim({ expenseDate: day, departmentId: deptB, handlerId: keeperId, paySource: 'petty', advanceId: adv.id })).status).toBe(201);
+    expect(
+      (await api(ctx.app, coster, 'POST', '/api/erp/petty/settlements', {
+        clientKey: randomUUID(), advanceId: adv.id, kind: 'return', settleDate: day, amountCents: 14_000, method: 'cash', evidence: '现金当面点清',
+      })).status,
+    ).toBe(201);
+    await advance(10_000, day);
+
+    const from = daysAgo(30);
+    const shown = async (f: { departmentId?: number; handlerId?: number }) =>
+      (await buildLedger(ctx.sql, { from, to: today, ...f })).days.reduce((n, d) => n + d.entries.length, 0);
+    for (const f of [{}, { departmentId: deptA }, { departmentId: deptB }, { handlerId: costerId }, { handlerId: keeperId }, { departmentId: deptB, handlerId: costerId }]) {
+      expect(await ledgerCount(ctx.sql, { from, to: today, ...f }), JSON.stringify(f)).toBe(await shown(f));
+    }
+    // 客房部：打款、报销一行、退回
+    expect(await ledgerCount(ctx.sql, { from, to: today, departmentId: deptB })).toBe(3);
+    expect(await ledgerCount(ctx.sql, { from, to: today, departmentId: deptB })).toBeLessThan(await ledgerCount(ctx.sql, { from, to: today }));
+  });
+
+  it('下单物料 Excel：先按图片大小排好要嵌入的行，只取这些图片；超过总量的行写明没嵌入', async () => {
+    const jpegA = Buffer.concat([JPEG, Buffer.from('-A')]);
+    const jpegB = Buffer.concat([JPEG, Buffer.from('-BB')]);
+    const imgA = (await api(ctx.app, buyer, 'POST', '/api/erp/images', { mime: 'image/jpeg', data: jpegA.toString('base64') })).body;
+    const imgB = (await api(ctx.app, buyer, 'POST', '/api/erp/images', { mime: 'image/jpeg', data: jpegB.toString('base64') })).body;
+    const day = daysAgo(45);
+    const poA = await newPo({ orderDate: day, lines: [{ materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 45_000, imageIds: [imgA.id] }] });
+    await newPo({ orderDate: day, lines: [{ materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 45_000, imageIds: [imgB.id] }] });
+    const media = (files: Map<string, Buffer>) => [...files.entries()].filter(([name]) => name.startsWith('xl/media/')).map(([, b]) => b);
+
+    // 同一天按单号倒序，后下的单（B）在前；上限只够 B 那张
+    const files = unzip(await orderedXlsx(ctx.sql, ctx.config.timezone, { from: day, to: day }, jpegB.length));
+    expect(media(files)).toHaveLength(1);
+    expect(media(files)[0]!.equals(jpegB)).toBe(true);
+    const sheet = files.get('xl/worksheets/sheet1.xml')!.toString('utf8');
+    expect(sheet).toContain(poA.docNo);
+    expect(sheet).toContain('图片太多没有嵌入');
+    // 上限够两张：都嵌入
+    expect(media(unzip(await orderedXlsx(ctx.sql, ctx.config.timezone, { from: day, to: day }, jpegA.length + jpegB.length)))).toHaveLength(2);
+  });
+
+  it('账目自检第 9 条：一年多以前下单、还没到齐的采购单照样列出来', async () => {
+    const rule9 = async () => (await api(ctx.app, keeper, 'GET', '/api/erp/audit')).body.rules.find((r: { no: number }) => r.no === 9);
+    const before = await rule9();
+    const old = await newPo({ orderDate: daysAgo(400) });
+    const after = await rule9();
+    expect(after.count).toBe(before.count + 1);
+    expect(after.items.some((i: { link: { id: number } }) => i.link.id === old.id)).toBe(true);
+  });
+
+  it('需求单导出的提交时间按门店时区写，与按提交日期筛选一致', async () => {
+    await createStaff(ctx.sql, { username: 'req_tz', displayName: '采购部申购二', role: 'backoffice', duties: ['request'], departmentId: deptA, password: PASSWORD, mustChangePassword: false });
+    const reqTz = await login(ctx.app, 'req_tz');
+    const r = (
+      await api(ctx.app, reqTz, 'POST', '/api/erp/requests', {
+        clientKey: randomUUID(),
+        lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: q(1), unit: '箱' }],
+      })
+    ).body.request as { id: number; docNo: string };
+    // 提交时间挪到今天凌晨 01:30（门店时区）：按 UTC 写就会变成前一天（绕过需求单的保护触发器，只在测试库）
+    await ctx.sql`ALTER TABLE purchase_requests DISABLE TRIGGER purchase_requests_guard`;
+    try {
+      await ctx.sql`UPDATE purchase_requests SET created_at = (${today}::date + time '01:30') AT TIME ZONE ${ctx.config.timezone} WHERE id = ${r.id}`;
+    } finally {
+      await ctx.sql`ALTER TABLE purchase_requests ENABLE TRIGGER purchase_requests_guard`;
+    }
+    const csv = String((await api(ctx.app, coster, 'GET', `/api/erp/requests/export?from=${today}&to=${today}`)).body);
+    const line = csv.split('\n').find((l) => l.includes(r.docNo));
+    expect(line).toContain(`${today} 01:30`);
   });
 });

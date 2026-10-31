@@ -83,6 +83,13 @@ type PurchaseLedgerRow = Omit<LedgerEntry, 'department' | 'handler' | 'qty' | 'd
 
 const KIND_ORDER: Record<LedgerKind, number> = { advance: 0, expense: 1, return: 2, topup: 3 };
 
+// 部门、经办人筛选：打款与退回补付按所属打款（别名 a），报销按报销单（别名 c）。
+// 逐笔、合计、导出前的笔数都用这两个，口径一致（v0.7.9 审查修正：导出笔数原来没按部门、经办人筛选）
+const byAdvance = (db: Db, f: LedgerFilter) =>
+  db`${f.departmentId ? db`AND a.department_id = ${f.departmentId}` : db``} ${f.handlerId ? db`AND a.handler_id = ${f.handlerId}` : db``}`;
+const byClaim = (db: Db, f: LedgerFilter) =>
+  db`${f.departmentId ? db`AND c.department_id = ${f.departmentId}` : db``} ${f.handlerId ? db`AND c.handler_id = ${f.handlerId}` : db``}`;
+
 async function ledgerRows(db: Db, f: LedgerFilter, limit: number | null): Promise<PurchaseLedgerRow[]> {
   const rows = await db<PurchaseLedgerRow[]>`
     SELECT * FROM (
@@ -91,18 +98,14 @@ async function ledgerRows(db: Db, f: LedgerFilter, limit: number | null): Promis
              NULL::text AS item_name, a.method, a.evidence, NULL::text AS category, NULL::bigint AS bought_milli, NULL::bigint AS received_milli,
              NULL::text AS unit, NULL::text AS pay_source, NULL::text AS po_no, a.amount_cents, 1 AS line_no
       FROM petty_advances a JOIN departments d ON d.id = a.department_id JOIN staff h ON h.id = a.handler_id
-      WHERE a.status = 'active' AND a.advance_date BETWEEN ${f.from} AND ${f.to}
-        ${f.departmentId ? db`AND a.department_id = ${f.departmentId}` : db``}
-        ${f.handlerId ? db`AND a.handler_id = ${f.handlerId}` : db``}
+      WHERE a.status = 'active' AND a.advance_date BETWEEN ${f.from} AND ${f.to} ${byAdvance(db, f)}
       UNION ALL
       SELECT s.kind, s.settle_date, s.doc_no, s.id, a.id, a.doc_no,
              a.department_id, d.name, a.handler_id, h.display_name,
              NULL, s.method, s.evidence, NULL, NULL, NULL, NULL, NULL, NULL, s.amount_cents, 1
       FROM petty_settlements s JOIN petty_advances a ON a.id = s.advance_id
       JOIN departments d ON d.id = a.department_id JOIN staff h ON h.id = a.handler_id
-      WHERE s.status = 'active' AND s.settle_date BETWEEN ${f.from} AND ${f.to}
-        ${f.departmentId ? db`AND a.department_id = ${f.departmentId}` : db``}
-        ${f.handlerId ? db`AND a.handler_id = ${f.handlerId}` : db``}
+      WHERE s.status = 'active' AND s.settle_date BETWEEN ${f.from} AND ${f.to} ${byAdvance(db, f)}
       UNION ALL
       SELECT 'expense', c.expense_date, c.doc_no, c.id, c.advance_id, a.doc_no,
              c.department_id, d.name, c.handler_id, h.display_name,
@@ -110,9 +113,7 @@ async function ledgerRows(db: Db, f: LedgerFilter, limit: number | null): Promis
       FROM expense_claim_lines l JOIN expense_claims c ON c.id = l.claim_id
       JOIN departments d ON d.id = c.department_id JOIN staff h ON h.id = c.handler_id
       LEFT JOIN petty_advances a ON a.id = c.advance_id LEFT JOIN purchase_orders po ON po.id = c.purchase_order_id
-      WHERE c.status = 'confirmed' AND c.expense_date BETWEEN ${f.from} AND ${f.to}
-        ${f.departmentId ? db`AND c.department_id = ${f.departmentId}` : db``}
-        ${f.handlerId ? db`AND c.handler_id = ${f.handlerId}` : db``}
+      WHERE c.status = 'confirmed' AND c.expense_date BETWEEN ${f.from} AND ${f.to} ${byClaim(db, f)}
     ) t
     ORDER BY date DESC, CASE kind WHEN 'advance' THEN 0 WHEN 'expense' THEN 1 WHEN 'return' THEN 2 ELSE 3 END, doc_no, line_no
     ${limit ? db`LIMIT ${limit}` : db``}`;
@@ -154,17 +155,17 @@ async function ledgerTotals(db: Db, f: LedgerFilter): Promise<LedgerTotals> {
   const [t] = await db<LedgerTotals[]>`
     SELECT
       coalesce((SELECT sum(a.amount_cents) FROM petty_advances a WHERE a.status = 'active' AND a.advance_date BETWEEN ${f.from} AND ${f.to}
-                ${f.departmentId ? db`AND a.department_id = ${f.departmentId}` : db``} ${f.handlerId ? db`AND a.handler_id = ${f.handlerId}` : db``}), 0)::bigint AS advance_cents,
+                ${byAdvance(db, f)}), 0)::bigint AS advance_cents,
       coalesce((SELECT sum(c.amount_cents) FROM expense_claims c WHERE c.status = 'confirmed' AND c.pay_source = 'petty' AND c.expense_date BETWEEN ${f.from} AND ${f.to}
-                ${f.departmentId ? db`AND c.department_id = ${f.departmentId}` : db``} ${f.handlerId ? db`AND c.handler_id = ${f.handlerId}` : db``}), 0)::bigint AS petty_spent_cents,
+                ${byClaim(db, f)}), 0)::bigint AS petty_spent_cents,
       coalesce((SELECT sum(c.amount_cents) FROM expense_claims c WHERE c.status = 'confirmed' AND c.pay_source = 'company' AND c.expense_date BETWEEN ${f.from} AND ${f.to}
-                ${f.departmentId ? db`AND c.department_id = ${f.departmentId}` : db``} ${f.handlerId ? db`AND c.handler_id = ${f.handlerId}` : db``}), 0)::bigint AS company_spent_cents,
+                ${byClaim(db, f)}), 0)::bigint AS company_spent_cents,
       coalesce((SELECT sum(s.amount_cents) FROM petty_settlements s JOIN petty_advances a ON a.id = s.advance_id
                 WHERE s.status = 'active' AND s.kind = 'return' AND s.settle_date BETWEEN ${f.from} AND ${f.to}
-                ${f.departmentId ? db`AND a.department_id = ${f.departmentId}` : db``} ${f.handlerId ? db`AND a.handler_id = ${f.handlerId}` : db``}), 0)::bigint AS returned_cents,
+                ${byAdvance(db, f)}), 0)::bigint AS returned_cents,
       coalesce((SELECT sum(s.amount_cents) FROM petty_settlements s JOIN petty_advances a ON a.id = s.advance_id
                 WHERE s.status = 'active' AND s.kind = 'topup' AND s.settle_date BETWEEN ${f.from} AND ${f.to}
-                ${f.departmentId ? db`AND a.department_id = ${f.departmentId}` : db``} ${f.handlerId ? db`AND a.handler_id = ${f.handlerId}` : db``}), 0)::bigint AS topped_up_cents`;
+                ${byAdvance(db, f)}), 0)::bigint AS topped_up_cents`;
   return {
     advanceCents: Number(t!.advanceCents),
     pettySpentCents: Number(t!.pettySpentCents),
@@ -192,14 +193,21 @@ export async function buildLedger(db: Db, f: LedgerFilter): Promise<Ledger> {
   return { from: f.from, to: f.to, days: [...byDate.values()], totals: await ledgerTotals(db, f), truncated };
 }
 
-async function ledgerCsv(db: Db, f: LedgerFilter) {
+/** 要导出的笔数：与逐笔同一口径（同样的日期、部门、经办人筛选），导出前先数，超过上限整份拒绝 */
+export async function ledgerCount(db: Db, f: LedgerFilter): Promise<number> {
   const [n] = await db<{ count: number }[]>`
-    SELECT (SELECT count(*) FROM petty_advances a WHERE a.status = 'active' AND a.advance_date BETWEEN ${f.from} AND ${f.to})
-         + (SELECT count(*) FROM petty_settlements s WHERE s.status = 'active' AND s.settle_date BETWEEN ${f.from} AND ${f.to})
+    SELECT (SELECT count(*) FROM petty_advances a WHERE a.status = 'active' AND a.advance_date BETWEEN ${f.from} AND ${f.to} ${byAdvance(db, f)})
+         + (SELECT count(*) FROM petty_settlements s JOIN petty_advances a ON a.id = s.advance_id
+            WHERE s.status = 'active' AND s.settle_date BETWEEN ${f.from} AND ${f.to} ${byAdvance(db, f)})
          + (SELECT count(*) FROM expense_claim_lines l JOIN expense_claims c ON c.id = l.claim_id
-            WHERE c.status = 'confirmed' AND c.expense_date BETWEEN ${f.from} AND ${f.to}) AS count`;
-  if (Number(n!.count) > EXPORT_LIMIT) {
-    throw unprocessable('EXPORT_TOO_LARGE', `这段时间有 ${n!.count} 笔，一次最多导出 ${EXPORT_LIMIT} 笔，请缩短日期范围分几次导出`);
+            WHERE c.status = 'confirmed' AND c.expense_date BETWEEN ${f.from} AND ${f.to} ${byClaim(db, f)}) AS count`;
+  return Number(n!.count);
+}
+
+async function ledgerCsv(db: Db, f: LedgerFilter) {
+  const count = await ledgerCount(db, f);
+  if (count > EXPORT_LIMIT) {
+    throw unprocessable('EXPORT_TOO_LARGE', `这段时间有 ${count} 笔，一次最多导出 ${EXPORT_LIMIT} 笔，请缩短日期范围分几次导出`);
   }
   const entries = (await ledgerRows(db, f, null)).map(toEntry).reverse();
   const rows: (string | number)[][] = [['日期', '类型', '单号', '部门', '经办人', '内容', '费用科目', '购买数量', '到货数量', '单位', '钱从哪来', '打款单号', '采购单号', '金额（元）']];
@@ -234,13 +242,16 @@ async function ledgerCsv(db: Db, f: LedgerFilter) {
 // ───────────────────────── 下单物料 ─────────────────────────
 
 interface OrderedFilter {
-  from: string;
-  to: string;
+  /** 下单日期范围；不给就不限（账目自检第 9 条：没到齐的采购单不管多早下的都要列出来） */
+  from?: string;
+  to?: string;
   supplierId?: number;
   state?: 'open' | 'overdue' | 'received' | 'all';
 }
 
 async function orderedRows(db: Db, f: OrderedFilter) {
+  // 只要未到、超期的：已结束的采购单只会是「已到齐」或「已结束」，直接不读
+  const approvedOnly = f.state === 'open' || f.state === 'overdue';
   return db<(Omit<OrderedLine, 'state' | 'dueDate' | 'overdue'> & { poStatus: string })[]>`
     SELECT po.id AS po_id, po.doc_no, po.order_date, po.expected_date, po.status AS po_status, s.name AS supplier_name,
            pl.id AS line_id, m.code AS material_code, m.name AS material_name, pl.spec, pl.purchase_qty_milli, pl.purchase_unit,
@@ -254,8 +265,11 @@ async function orderedRows(db: Db, f: OrderedFilter) {
                      JOIN departments d ON d.id = r.department_id WHERE x.po_line_id = pl.id), '{}') AS departments
     FROM purchase_order_lines pl JOIN purchase_orders po ON po.id = pl.po_id
     JOIN suppliers s ON s.id = po.supplier_id JOIN materials m ON m.id = pl.material_id
-    WHERE po.status IN ('approved', 'closed') AND po.order_date BETWEEN ${f.from} AND ${f.to}
+    WHERE po.status IN ('approved', 'closed')
+      ${f.from ? db`AND po.order_date >= ${f.from}` : db``}
+      ${f.to ? db`AND po.order_date <= ${f.to}` : db``}
       ${f.supplierId ? db`AND po.supplier_id = ${f.supplierId}` : db``}
+      ${approvedOnly ? db`AND po.status = 'approved'` : db``}
     ORDER BY po.order_date DESC, po.id DESC, pl.line_no`;
 }
 
@@ -324,33 +338,47 @@ async function orderedForExport(db: Db, timezone: string, f: OrderedFilter) {
   return lines;
 }
 
-async function orderedXlsx(db: Db, timezone: string, f: OrderedFilter) {
+/**
+ * 下单物料导出 Excel：每行嵌入第一张图片；总量超过上限后，后面的行写明没嵌入。
+ * 先只读图片的格式与大小排好哪些行能嵌入，再只取这些图片的内容（读进内存的不超过上限，v0.7.9 审查修正）。
+ */
+export async function orderedXlsx(db: Db, timezone: string, f: OrderedFilter, imageBudget = ORDERED_IMAGE_BUDGET) {
   const lines = await orderedForExport(db, timezone, f);
-  // 每行嵌入第一张图片；总量超过上限后，后面的行写明没嵌入
   const firstIds = [...new Set(lines.map((l) => l.images[0]?.id).filter((x): x is number => !!x))];
-  const blobs = new Map<number, { mime: string; data: Buffer }>();
+  const info = new Map<number, { mime: string; size: number }>();
   if (firstIds.length) {
-    for (const r of await db<{ id: number; mime: string; data: Buffer }[]>`SELECT id, mime, data FROM erp_images WHERE id IN ${db(firstIds)}`) {
-      blobs.set(Number(r.id), { mime: r.mime, data: r.data });
+    for (const r of await db<{ id: number; mime: string; sizeBytes: number }[]>`SELECT id, mime, size_bytes FROM erp_images WHERE id IN ${db(firstIds)}`) {
+      info.set(Number(r.id), { mime: r.mime, size: Number(r.sizeBytes) });
     }
   }
-  let budget = ORDERED_IMAGE_BUDGET;
-  const images: { row: number; col: number; image: XlsxImage }[] = [];
-  const rows = lines.map((l, i) => {
+  let budget = imageBudget;
+  const plan = lines.map((l) => {
     const first: ImageRef | undefined = l.images[0];
     let note = l.images.length === 0 ? '无图片' : l.images.length > 1 ? `共 ${l.images.length} 张，嵌入第 1 张` : '';
-    const blob = first ? blobs.get(first.id) : undefined;
-    if (blob) {
-      const ext = blob.mime === 'image/png' ? 'png' : blob.mime === 'image/jpeg' ? 'jpeg' : null;
+    let embed: { id: number; ext: XlsxImage['ext'] } | null = null;
+    const meta = first ? info.get(first.id) : undefined;
+    if (first && meta) {
+      const ext = meta.mime === 'image/png' ? 'png' : meta.mime === 'image/jpeg' ? 'jpeg' : null;
       if (!ext) note = `共 ${l.images.length} 张（WebP 格式没有嵌入，请在系统里看）`;
-      else if (blob.data.length > budget) note = `共 ${l.images.length} 张（图片太多没有嵌入，请缩短日期范围）`;
+      else if (meta.size > budget) note = `共 ${l.images.length} 张（图片太多没有嵌入，请缩短日期范围）`;
       else {
-        budget -= blob.data.length;
-        images.push({ row: i, col: 0, image: { data: blob.data, ext } });
+        budget -= meta.size;
+        embed = { id: first.id, ext };
       }
     }
-    return [null, ...orderedCells(l), note];
+    return { note, embed };
   });
+  const wanted = [...new Set(plan.flatMap((p) => (p.embed ? [p.embed.id] : [])))];
+  const blobs = new Map<number, Buffer>();
+  if (wanted.length) {
+    for (const r of await db<{ id: number; data: Buffer }[]>`SELECT id, data FROM erp_images WHERE id IN ${db(wanted)}`) blobs.set(Number(r.id), r.data);
+  }
+  const images: { row: number; col: number; image: XlsxImage }[] = [];
+  plan.forEach(({ embed }, i) => {
+    const data = embed ? blobs.get(embed.id) : undefined;
+    if (embed && data) images.push({ row: i, col: 0, image: { data, ext: embed.ext } });
+  });
+  const rows = lines.map((l, i) => [null, ...orderedCells(l), plan[i]!.note]);
   return buildXlsx({
     name: '下单物料',
     columns: [
@@ -466,9 +494,8 @@ export async function ledgerAudit(db: Db, timezone: string): Promise<LedgerAudit
   push(8, '到货数量不等于购买数量时必须填差异原因', 'block', '报销明细：购买数量与到货数量不一致的，都写了原因',
     r8.map((c) => ({ text: `${c.docNo}「${c.name}」没写差异原因`, date: c.expenseDate, link: claimLink(c.id) })));
 
-  // 9 已下单未到货超期
-  const lateFrom = addDays(today, -366);
-  const late = (await orderedLines(db, timezone, { from: lateFrom, to: today, state: 'overdue' }, null)).lines;
+  // 9 已下单未到货超期：所有没到齐的已确认采购单，不限下单日期（不能因为单子下得早就从预警里消失，v0.7.9 审查修正）
+  const late = (await orderedLines(db, timezone, { state: 'overdue' }, null)).lines;
   push(9, `已下单未到货超约定天数预警`, 'warn', `已确认的采购单行没到齐：有预计到货日的过了预计日，没有的过了下单后 ${rules.arrivalOverdueDays} 天（费用报销规则里改）`,
     late.map((l) => ({
       text: `${l.docNo} ${l.materialName}：应到 ${l.dueDate}，已到 ${formatQty(l.receivedMilli)} / ${formatQty(l.baseQtyMilli)} ${l.inventoryUnit}`,
@@ -492,12 +519,13 @@ export async function ledgerAudit(db: Db, timezone: string): Promise<LedgerAudit
     bad11.map((c) => ({ text: `${c.docNo}：${c.invoiceLabel} 没有发票号`, date: c.expenseDate, link: claimLink(c.id) })));
 
   // 12 新产品的图片与链接
-  const r12 = await db<{ id: number; docNo: string; createdAt: string; name: string }[]>`
-    SELECT r.id, r.doc_no, r.created_at, l.name FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
+  const r12 = await db<{ id: number; docNo: string; createdDate: string; name: string }[]>`
+    SELECT r.id, r.doc_no, to_char(r.created_at AT TIME ZONE ${timezone}, 'YYYY-MM-DD') AS created_date, l.name
+    FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
     WHERE l.material_id IS NULL AND (l.link = '' OR NOT EXISTS (SELECT 1 FROM purchase_request_line_images i WHERE i.request_line_id = l.id))
     LIMIT 500`;
   push(12, '图片与链接为必填', 'block', '需求单里的新产品（不在物料档案里的）都有参考链接与图片（提交时拦截）',
-    r12.map((r) => ({ text: `${r.docNo}「${r.name}」缺链接或图片`, date: String(r.createdAt).slice(0, 10), link: { kind: 'request' as const, id: Number(r.id) } })));
+    r12.map((r) => ({ text: `${r.docNo}「${r.name}」缺链接或图片`, date: r.createdDate, link: { kind: 'request' as const, id: Number(r.id) } })));
 
   void AUDIT_KIND_LABELS;
   return { today, rules: out };

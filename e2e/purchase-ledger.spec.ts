@@ -68,6 +68,9 @@ test.describe('采购台账、账目自检、下单物料', () => {
     const [csv] = await Promise.all([page.waitForEvent('download'), page.getByTestId('ledger-export').click()]);
     const csvText = (await import('node:fs')).readFileSync((await csv.path())!, 'utf8');
     expect(csvText).toContain(claim.claim.docNo);
+    // 需求单也能在台账页导出（对账付款、成本核算、负责人进不了需求单页）
+    const [reqCsv] = await Promise.all([page.waitForEvent('download'), page.getByTestId('ledger-requests-export').click()]);
+    expect((await import('node:fs')).readFileSync((await reqCsv.path())!, 'utf8')).toContain('需求单号');
 
     // 账目自检：第 2 条列出这笔报销，点开能跳到报销单
     await page.goto('/erp/audit');

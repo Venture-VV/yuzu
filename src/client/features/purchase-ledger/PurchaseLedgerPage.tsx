@@ -84,6 +84,19 @@ export function PurchaseLedgerPage() {
               </Button>
             </a>
           )}
+          {/* 需求单也在这里导出：对账付款、成本核算、负责人能导出需求单，但进不了需求单页（只给提单与审核的人） */}
+          {can('expense.export') && session.erpModules.includes('requests') && (
+            <a
+              href={`/api/erp/requests/export?${search({ from: range.from, to: range.to, departmentId: departmentId || undefined })}`}
+              download
+              title="按提交日期，日期范围与部门同上"
+              data-testid="ledger-requests-export"
+            >
+              <Button variant="secondary" icon={<Download className="size-4" />}>
+                导出需求单
+              </Button>
+            </a>
+          )}
         </div>
       }
     >

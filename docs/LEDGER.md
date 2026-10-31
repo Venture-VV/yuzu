@@ -19,7 +19,7 @@ RQ-005「采购与费用闭环」分版做（ROADMAP 第 10 节第 9 项）：v0
 | 视图 | 看 | 导出 |
 | --- | --- | --- |
 | 采购台账 | 查看费用（店主；物资经办、采购经办、对账付款、成本核算、负责人只读） | 导出费用（店主、对账付款、成本核算、负责人） |
-| 需求单 | 部门申购看本部门；采购看全部 | 导出费用（同上） |
+| 需求单 | 部门申购看本部门；采购看全部 | 导出费用（同上）。对账付款、成本核算、负责人进不了需求单页，在采购台账页「导出需求单」（按提交日期，日期范围与部门同台账） |
 | 下单物料 | 查看库存（店主；物资经办、采购经办、对账付款、负责人） | 同「看」（库管要能导出给仓库用） |
 
 ## 2. 12 条账目自检
@@ -39,7 +39,7 @@ ERP「费用与备用金 → 账目自检」（新页 `/erp/audit`）逐条列�
 | 6 | 费用科目只允许办公费、固定资产、低值易耗 | 拦截 | 报销明细的科目 |
 | 7 | 部门走字典，禁止多部门拼接 | 拦截 | 报销、打款、需求单的部门都引用部门档案 |
 | 8 | 到货数量不等于购买数量时必须填差异原因 | 拦截 | 报销明细 |
-| 9 | 已下单未到货超约定天数预警 | 预警 | 已确认的采购单行没到齐：有预计到货日的过了预计日，没有的过了下单后「约定到货天数」（默认 7 天，待确认，可调） |
+| 9 | 已下单未到货超约定天数预警 | 预警 | 已确认的采购单行没到齐：有预计到货日的过了预计日，没有的过了下单后「约定到货天数」（默认 7 天，待确认，可调）；不限下单日期，多早下的单没到齐都列出 |
 | 10 | 同一物品同一天重复下单提示 | 预警 | 同一物料同一下单日出现在两张以上有效的采购单里 |
 | 11 | 标注有发票但实际无票直接拦截 | 拦截 | 发票类型要求发票号的报销单都有发票号 |
 | 12 | 图片与链接为必填 | 拦截 | 需求单里的新产品都有链接与图片（v0.7.8 的自检，这里一起列） |
@@ -51,10 +51,10 @@ ERP「费用与备用金 → 账目自检」（新页 `/erp/audit`）逐条列�
 
 | 用途 | 接口 |
 | --- | --- |
-| 采购台账 | `GET /api/erp/ledger?from&to&departmentId&handlerId`（一次最多 366 天，逐笔最多显示 3000 笔，合计按全部算）；`GET /api/erp/ledger/export`（CSV，超过 2 万笔整份拒绝） |
+| 采购台账 | `GET /api/erp/ledger?from&to&departmentId&handlerId`（一次最多 366 天，逐笔最多显示 3000 笔，合计按全部算）；`GET /api/erp/ledger/export`（CSV，按同样的筛选数笔数，超过 2 万笔整份拒绝） |
 | 账目自检 | `GET /api/erp/audit`（每条最多列 50 张单，另给总数） |
-| 需求单 | `GET /api/erp/requests?from&to`（按提交日期筛选）；`GET /api/erp/requests/export?from&to&status&departmentId`（CSV） |
-| 下单物料 | `GET /api/purchase-orders/ordered-lines?from&to&supplierId&state=open|overdue|received|all`；`…/export.xlsx`（每行嵌入第一张图片，图片总量超过 60 MB 后的行写明没嵌入；WebP 图片不嵌入）；`…/export.csv`；一次最多 3000 行 |
+| 需求单 | `GET /api/erp/requests?from&to`（按提交日期筛选）；`GET /api/erp/requests/export?from&to&status&departmentId`（CSV，提交时间按门店时区） |
+| 下单物料 | `GET /api/purchase-orders/ordered-lines?from&to&supplierId&state=open|overdue|received|all`；`…/export.xlsx`（每行嵌入第一张图片，图片总量超过 60 MB 后的行写明没嵌入；先按图片大小排好要嵌入的行，只读这些图片；WebP 图片不嵌入）；`…/export.csv`；一次最多 3000 行 |
 
 代码：服务端 `src/server/modules/purchase-ledger.ts`、`src/server/lib/xlsx.ts`；页面 `src/client/features/purchase-ledger/`、`src/client/features/purchasing/OrderedPage.tsx`。（会员的流水是另一个模块 `modules/ledger.ts`，与这里无关。）
 

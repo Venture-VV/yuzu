@@ -448,7 +448,7 @@ export async function requestChecks(db: Db) {
 const EXPORT_LIMIT = 20_000;
 const PROGRESS_LABELS: Record<RequestLineProgress['state'], string> = { none: '未下单', ordered: '已下单', partial: '部分到货', received: '已到货' };
 
-/** 需求单导出：每一行需求一行，带下单 / 到货 / 退货与采购单号（只导出看得到的） */
+/** 需求单导出：每一行需求一行，带下单 / 到货 / 退货与采购单号。能导出的是有「导出费用」权限的人（店主、对账付款、成本核算、负责人），导出全部部门 */
 async function requestsCsv(db: Db, timezone: string, f: { from: string; to: string; status?: RequestStatus; departmentId?: number }) {
   const [n] = await db<{ count: number }[]>`
     SELECT count(*)::int AS count FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
@@ -457,7 +457,8 @@ async function requestsCsv(db: Db, timezone: string, f: { from: string; to: stri
   if (n!.count > EXPORT_LIMIT) throw unprocessable('EXPORT_TOO_LARGE', `这段时间有 ${n!.count} 行需求，一次最多导出 ${EXPORT_LIMIT} 行，请缩短日期范围`);
   const rows = await db<{
     docNo: string;
-    createdAt: string;
+    /** 门店时区的提交时间（与按提交日期筛选同一时区，v0.7.9 审查修正：原来按 UTC 写） */
+    createdLocal: string;
     departmentName: string;
     requesterName: string;
     status: RequestStatus;
@@ -475,7 +476,8 @@ async function requestsCsv(db: Db, timezone: string, f: { from: string; to: stri
     imageCount: number;
     progress: RawProgress | null;
   }[]>`
-    SELECT r.doc_no, r.created_at, d.name AS department_name, s.display_name AS requester_name, r.status, r.need_by,
+    SELECT r.doc_no, to_char(r.created_at AT TIME ZONE ${timezone}, 'YYYY-MM-DD HH24:MI') AS created_local,
+           d.name AS department_name, s.display_name AS requester_name, r.status, r.need_by,
            l.line_no, l.name, m.name AS material_name, l.purpose, l.qty_milli, l.unit, l.ref_price_cents, l.link, l.details, l.note,
            (SELECT count(*)::int FROM purchase_request_line_images i WHERE i.request_line_id = l.id) AS image_count,
            ${PROGRESS_SQL(db)} AS progress
@@ -493,7 +495,7 @@ async function requestsCsv(db: Db, timezone: string, f: { from: string; to: stri
     const p = progressOf(r.progress);
     out.push([
       r.docNo,
-      String(r.createdAt).replace('T', ' ').slice(0, 16),
+      r.createdLocal,
       r.departmentName,
       r.requesterName,
       REQUEST_STATUS_LABELS[r.status],
