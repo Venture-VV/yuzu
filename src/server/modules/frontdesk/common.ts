@@ -11,7 +11,7 @@ import { DEFAULT_FRONTDESK_RULES, type FrontdeskRules, type TagKind, type TagZon
 import { can, type Permission } from '@shared/permissions';
 import { isUniqueViolation, type Db, type Tx } from '../../db';
 import type { Actor, Deps } from '../../lib/context';
-import { conflict, forbidden, unprocessable } from '../../lib/errors';
+import { AppError, conflict, forbidden, unprocessable } from '../../lib/errors';
 import { assertNotFenced, isFenced } from '../../lib/fences';
 import { nextDocNo, setTxTimeouts } from '../inventory/common';
 import { loadSettings } from '../settings';
@@ -84,7 +84,11 @@ export async function saveKey(tx: Tx, key: string, opType: FrontdeskOp, requestH
 
 /**
  * 执行一笔幂等写操作：同一编号重复提交时返回第一次的结果编号。
- * 并发的同编号请求由主键冲突兜底，再查回第一次的结果。
+ *
+ * 同一编号的两次提交并发时（网络重试），后到的那次开头查编号时第一次还没提交，接着排在第一次的锁后面；
+ * 等它拿到锁，看到的是第一次的结果（手牌已发出、桌台已开、客人已结账……），或在写编号时撞上主键。
+ * 这两种失败都先按编号查回：是同一笔就返回第一次的结果，不提示「被其他终端」占用（店主 2026-10-30）；
+ * 查不到，或编号属于另一笔，照原样拒绝。
  */
 export async function runIdempotent(
   deps: Deps,
@@ -99,11 +103,12 @@ export async function runIdempotent(
       return { refId: await body(tx), replayed: false };
     });
   } catch (error) {
-    if (isUniqueViolation(error, 'idempotency_keys_pkey')) {
+    const mapped = mapUniqueViolation(error);
+    if (mapped instanceof AppError || isUniqueViolation(error, 'idempotency_keys_pkey')) {
       const existing = await findKey(deps.sql, opts.key, opts.opType, opts.requestHash);
       if (existing !== null) return { refId: existing, replayed: true };
     }
-    throw mapUniqueViolation(error);
+    throw mapped;
   }
 }
 
