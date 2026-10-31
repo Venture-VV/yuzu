@@ -62,6 +62,14 @@ async function send<T = unknown>(page: Page, method: 'post' | 'put', url: string
 
 const tileOf = async (page: Page, roomNo: string) => (await getJson<RoomBoard>(page, '/api/rooms')).rooms.find((r) => r.roomNo === roomNo)!;
 
+/** 收掉洗浴客人的来访（店主）：作废有效明细后撤销；已离店的不动 */
+async function clearVisit(page: Page, visitId: number, reason: string) {
+  const v = await getJson<{ status: string; lines: { id: number; status: string }[] }>(page, `/api/frontdesk/visits/${visitId}`);
+  if (v.status !== 'open') return;
+  for (const l of v.lines.filter((x) => x.status === 'active')) await send(page, 'post', `/api/frontdesk/lines/${l.id}/void`, { reason });
+  await send(page, 'post', `/api/frontdesk/visits/${visitId}/cancel`, { reason });
+}
+
 /** 收掉一间房上还在住的入住单（店主）：作废房费、退押金后撤销入住；洗浴客人的房费在手牌账单上作废，来访一并撤销 */
 async function clearStay(page: Page, roomNo: string, reason: string) {
   const t = await tileOf(page, roomNo);
@@ -77,13 +85,7 @@ async function clearStay(page: Page, roomNo: string, reason: string) {
     await send(page, 'post', `/api/rooms/stays/${s.id}/refunds`, { clientKey: randomUUID(), method: m.method, amount: m.balance, reason });
   }
   await send(page, 'post', `/api/rooms/stays/${s.id}/cancel`, { reason });
-  if (s.visitId !== null) {
-    const v = await getJson<{ status: string; lines: { id: number; status: string }[] }>(page, `/api/frontdesk/visits/${s.visitId}`);
-    if (v.status === 'open') {
-      for (const l of v.lines.filter((x) => x.status === 'active')) await send(page, 'post', `/api/frontdesk/lines/${l.id}/void`, { reason });
-      await send(page, 'post', `/api/frontdesk/visits/${s.visitId}/cancel`, { reason });
-    }
-  }
+  if (s.visitId !== null) await clearVisit(page, s.visitId, reason);
 }
 
 /** 店主：专用房型（第一个在后台页面上建）、房间都准备好，开启客房、规则恢复默认；收掉上次中断留下的入住，房间都打扫好 */
@@ -135,6 +137,8 @@ test.describe('S7 客房', () => {
   test.setTimeout(300_000);
 
   test('入住（押金）→ 收退押金 → 换房 → 退房结账（押金抵扣 + 现金）→ 反结账 → 洗浴客人入住、先退房再结账 → 改房态 → 夜审 → 看板', async ({ page }) => {
+    /** 洗浴客人的来访：退房后还在店，收尾时撤销 */
+    let bathVisit: number | null = null;
     await login(page, 'linlan');
     try {
       await prepare(page);
@@ -259,6 +263,7 @@ test.describe('S7 客房', () => {
       const tag = board.tags.filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse()[0]!;
       await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'male', guestLabel: 'E2E 住客' }] });
       const visitId = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags.find((t) => t.code === tag)!.visit!.id;
+      bathVisit = visitId;
       await page.goto('/rooms');
       await page.getByTestId(`room-tile-${R3}`).click();
       const bath = page.getByRole('dialog').filter({ hasText: `入住 · ${R3}` });
@@ -334,6 +339,7 @@ test.describe('S7 客房', () => {
       await page.unrouteAll({ behavior: 'ignoreErrors' });
       await relogin(page, 'linlan');
       await cleanup(page);
+      if (bathVisit !== null) await clearVisit(page, bathVisit, 'E2E：收尾');
     }
   });
 
