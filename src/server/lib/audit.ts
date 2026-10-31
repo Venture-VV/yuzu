@@ -35,6 +35,7 @@ export type AuditAction =
   | 'petty_doc'
   | 'purchase_request'
   | 'erp_image'
+  | 'erp_op_abandoned'
   | 'inventory_settings_updated'
   | 'frontdesk_checkin'
   | 'frontdesk_swap'

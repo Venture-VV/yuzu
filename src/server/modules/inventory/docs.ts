@@ -33,6 +33,7 @@ import {
   lockMaterials,
   logApproval,
   nextDocNo,
+  poSettlement,
   priceBaseline,
   setTxTimeouts,
   todayIn,
@@ -710,8 +711,12 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
         }
       }
       for (const l of lines) await applyMove(tx, mats.get(l.materialId)!, l.qtyMilli, ref(l, 'receipt'));
-      const [sup] = await tx<{ settlement: SupplierSettlement }[]>`SELECT settlement FROM suppliers WHERE id = ${doc.supplierId}`;
-      settlement = sup!.settlement;
+      // 按采购单收货：跟着这张采购单的结算方式（第一张收货或已有的报销定下的，供应商改了设置也不变）
+      if (doc.purchaseOrderId) settlement = await poSettlement(tx, doc.purchaseOrderId);
+      else {
+        const [sup] = await tx<{ settlement: SupplierSettlement }[]>`SELECT settlement FROM suppliers WHERE id = ${doc.supplierId}`;
+        settlement = sup!.settlement;
+      }
       if (doc.amountCents > 0 && settlement === 'credit') {
         await tx`
           INSERT INTO ap_entries (supplier_id, entry_type, amount_delta_cents, inv_doc_id, entry_date, operator_id)

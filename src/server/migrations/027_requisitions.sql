@@ -1,7 +1,7 @@
 -- 飞书需求 RQ-005「采购与费用闭环」第二步（v0.7.8，见 docs/REQUISITIONS.md）：
 --   ① 部门采购需求单（XQ）：新职责「部门申购」，员工档案加所属部门；采购审核后转采购单，下单 / 到货 / 退货由采购单与收货单算出。
 --   ② 图片：压缩后的图片存在数据库里（只追加），需求单的行、采购单的行都能挂图。
---   ③ 采购单的行加规格，记着来自哪一行需求。
+--   ③ 采购单的行加规格，记着来自哪几行需求（几个部门要同一种物料时合并成一行下单）。
 -- 只加表、列与约束，不改已有数据。
 
 -- ───────────── 职责：部门申购；员工的所属部门 ─────────────
@@ -115,10 +115,8 @@ END $$;
 CREATE TRIGGER purchase_requests_guard BEFORE UPDATE OR DELETE ON purchase_requests
   FOR EACH ROW EXECUTE FUNCTION yuzu_request_guard();
 
--- ───────────── 采购单的行：规格、来自哪一行需求、图片 ─────────────
+-- ───────────── 采购单的行：规格、图片、来自哪几行需求 ─────────────
 ALTER TABLE purchase_order_lines ADD COLUMN spec text NOT NULL DEFAULT '' CHECK (char_length(spec) <= 80);
-ALTER TABLE purchase_order_lines ADD COLUMN request_line_id bigint REFERENCES purchase_request_lines (id);
-CREATE INDEX purchase_order_lines_request_idx ON purchase_order_lines (request_line_id);
 
 CREATE TABLE purchase_order_line_images (
   po_line_id bigint NOT NULL REFERENCES purchase_order_lines (id) ON DELETE CASCADE,
@@ -127,11 +125,43 @@ CREATE TABLE purchase_order_line_images (
   PRIMARY KEY (po_line_id, sort_no)
 );
 
--- ───────────── 审批记录、幂等：需求单 ─────────────
+-- 采购单的一行可以合并几行需求（几个部门要同一种物料）；一行需求最多对应一行有效的采购单行
+-- （撤回的采购单不算；转采购单时锁需求单再核对，自检兜底）
+CREATE TABLE purchase_order_line_requests (
+  po_line_id      bigint NOT NULL REFERENCES purchase_order_lines (id) ON DELETE CASCADE,
+  request_line_id bigint NOT NULL REFERENCES purchase_request_lines (id),
+  PRIMARY KEY (po_line_id, request_line_id)
+);
+CREATE INDEX purchase_order_line_requests_request_idx ON purchase_order_line_requests (request_line_id);
+
+-- 图片与需求关联跟采购单明细一样：采购单确认、关闭、撤回之后不能再改（改版时先回到待确认）
+CREATE FUNCTION yuzu_po_line_child_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM purchase_order_lines pl JOIN purchase_orders po ON po.id = pl.po_id
+             WHERE pl.id IN (CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE OLD.po_line_id END,
+                             CASE WHEN TG_OP = 'DELETE' THEN NULL ELSE NEW.po_line_id END)
+               AND po.status IN ('approved', 'closed', 'cancelled')) THEN
+    RAISE EXCEPTION '采购单当前状态不能修改明细' USING ERRCODE = 'P0001';
+  END IF;
+  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END $$;
+CREATE TRIGGER purchase_order_line_images_guard BEFORE INSERT OR UPDATE OR DELETE ON purchase_order_line_images
+  FOR EACH ROW EXECUTE FUNCTION yuzu_po_line_child_guard();
+CREATE TRIGGER purchase_order_line_requests_guard BEFORE INSERT OR UPDATE OR DELETE ON purchase_order_line_requests
+  FOR EACH ROW EXECUTE FUNCTION yuzu_po_line_child_guard();
+
+-- ───────────── 审批记录、作废登记、幂等：需求单 ─────────────
 ALTER TABLE approval_logs DROP CONSTRAINT approval_logs_doc_kind_check;
 ALTER TABLE approval_logs ADD CONSTRAINT approval_logs_doc_kind_check
   CHECK (doc_kind IN ('inv_doc', 'purchase_order', 'payment', 'opening_payable', 'expense_claim', 'petty_advance', 'petty_settlement',
                       'purchase_request'));
+
+-- 「确认作废」也用于费用报销、备用金打款与退回补付、需求单（v0.7.8 修正：页面断网后先作废原编号，原请求晚到也不会登记）
+ALTER TABLE op_fences DROP CONSTRAINT op_fences_op_type_check;
+ALTER TABLE op_fences ADD CONSTRAINT op_fences_op_type_check
+  CHECK (op_type IN ('recharge', 'consume', 'reversal', 'checkin', 'bill_post', 'tag_swap', 'checkout', 'table_open', 'table_post', 'table_checkout',
+                     'room_checkin', 'room_extend', 'room_deposit', 'room_refund', 'room_close', 'line_move',
+                     'expense_claim', 'petty_advance', 'petty_settlement', 'purchase_request'));
 
 ALTER TABLE idempotency_keys DROP CONSTRAINT idempotency_keys_op_type_check;
 ALTER TABLE idempotency_keys ADD CONSTRAINT idempotency_keys_op_type_check

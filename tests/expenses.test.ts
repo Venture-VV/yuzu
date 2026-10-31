@@ -120,6 +120,11 @@ describe('权限（D10：岗位 + 职责）', () => {
     const csv = await api(ctx.app, approver, 'GET', `/api/erp/expenses/export?from=${today}&to=${today}`);
     expect(csv.status).toBe(200);
     expect(String(csv.body)).toContain('费用科目');
+    // 只有成本核算职责的员工也能取部门（登记报销、打款要选部门）
+    const depts = await api(ctx.app, coster, 'GET', '/api/inventory/departments');
+    expect(depts.status).toBe(200);
+    expect(depts.body.map((d: { id: number }) => d.id)).toEqual(expect.arrayContaining([deptA, deptB]));
+    expect((await api(ctx.app, coster, 'GET', '/api/inventory/materials')).status).toBe(403);
     // 规则只有店主能改
     const rules = (await api(ctx.app, coster, 'GET', '/api/erp/expenses/rules')).body;
     expect(rules.approvalThresholdCents).toBe(200_000);
@@ -349,6 +354,48 @@ describe('现付供应商与按采购单报销', () => {
     expect(final.balanceCents).toBe(before.balanceCents);
   });
 
+  it('供应商改了结算方式：挂账收下的采购单不能再报销；已按采购单报销的，之后收货也不记应付', async () => {
+    const s2 = await supplier('S002');
+    const setSettlement = (settlement: 'credit' | 'cash') =>
+      api(ctx.app, buyer, 'PUT', `/api/inventory/suppliers/${s2.id}`, { code: s2.code, name: s2.name, settlement });
+    expect(s2.settlement).toBe('credit');
+    // ① 挂账时收的货（已记应付），之后供应商改成现付：这张采购单仍按挂账，不能报销
+    const credited = await newPo(s2.id);
+    const rc1 = await receive(credited, s2.id, 500);
+    expect(rc1.status).toBe(201);
+    await setSettlement('cash');
+    expect((await api(ctx.app, coster, 'GET', `/api/erp/expenses/po/${credited.id}`)).body.error.code).toBe('CREDIT_SUPPLIER');
+    expect((await api(ctx.app, coster, 'GET', `/api/erp/expenses/po-candidates?q=${credited.docNo}`)).body).toEqual([]);
+    const pl1 = credited.lines[0];
+    const r1 = await claim(coster, {
+      purchaseOrderId: credited.id,
+      lines: [{ name: '床单', category: 'low_value', unit: '张', boughtMilli: q(1000), receivedMilli: q(500), diffReason: '分批到', amountCents: 45_000, poLineId: pl1.id }],
+    });
+    expect(r1.body.error.code).toBe('CREDIT_SUPPLIER');
+    // 同一张采购单后面的收货也跟着挂账（记应付）
+    const rc1b = await receive(credited, s2.id, 100);
+    expect((await ctx.sql`SELECT settlement FROM inv_docs WHERE id = ${rc1b.body.doc.id}`)[0]!.settlement).toBe('credit');
+
+    // ② 现付时按采购单报销（货还没到），之后供应商改回挂账：后来的收货仍按现付，不记应付
+    const cashPo = await newPo(s2.id);
+    const fc = (await api(ctx.app, coster, 'GET', `/api/erp/expenses/po/${cashPo.id}`)).body;
+    const paid = await claim(coster, {
+      purchaseOrderId: cashPo.id,
+      purpose: '客用消耗',
+      lines: [{ name: fc.lines[0].name, category: 'low_value', unit: fc.lines[0].unit, boughtMilli: q(1000), receivedMilli: 0, diffReason: '先付款后到货', amountCents: 90_000, poLineId: fc.lines[0].poLineId }],
+    });
+    expect(paid.status).toBe(201);
+    await setSettlement('credit');
+    const rc2 = await receive(cashPo, s2.id, 1000);
+    expect(rc2.status).toBe(201);
+    expect((await ctx.sql`SELECT settlement FROM inv_docs WHERE id = ${rc2.body.doc.id}`)[0]!.settlement).toBe('cash');
+    expect((await ctx.sql`SELECT count(*)::int AS n FROM ap_entries WHERE inv_doc_id = ${rc2.body.doc.id}`)[0]!.n).toBe(0);
+    const open = (await api(ctx.app, boss, 'GET', `/api/payables/suppliers/${s2.id}/open-items`)).body;
+    expect(open.some((i: { id: number }) => i.id === rc2.body.doc.id)).toBe(false);
+    expect(open.some((i: { id: number }) => i.id === rc1.body.doc.id)).toBe(true);
+    for (const c of (await api(ctx.app, boss, 'GET', '/api/erp/expenses/checks')).body) expect(c, c.label).toMatchObject({ ok: true });
+  });
+
   it('挂账供应商的采购单不能按采购单报销', async () => {
     const credit = await supplier('S001');
     expect(credit.settlement).toBe('credit');
@@ -375,6 +422,48 @@ describe('幂等与并发', () => {
     const results = await Promise.all([settle(coster, a.id, 'return', 5_000), settle(buyer, a.id, 'return', 5_000)]);
     expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
     expect((await getAdvance(a.id)).outstandingCents).toBe(0);
+  });
+});
+
+describe('结果待确认：按编号查回与确认作废（v0.7.8）', () => {
+  it('作废后原请求再到也不登记；已登记的作废只返回原单据；按原业务的权限作废，只拦同类型', async () => {
+    const lookup = (cookie: string, key: string, type: string) => api(ctx.app, cookie, 'GET', `/api/erp/ops/${key}?type=${type}`);
+    const abandon = (cookie: string, key: string, type: string) => api(ctx.app, cookie, 'POST', `/api/erp/ops/${key}/abandon`, { type, summary: '测试' });
+
+    const k1 = randomUUID();
+    expect((await lookup(coster, k1, 'expense_claim')).body).toEqual({ found: false, abandoned: false });
+    expect((await abandon(keeper, k1, 'expense_claim')).status).toBe(403);
+    expect((await abandon(coster, k1, 'expense_claim')).body).toEqual({ found: false, abandoned: true });
+    const late = await claim(coster, { clientKey: k1 });
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('OP_ABANDONED');
+    expect((await lookup(keeper, k1, 'expense_claim')).body).toEqual({ found: false, abandoned: true });
+    // 别的类型的作废登记拦不下这一笔
+    const k2 = randomUUID();
+    await abandon(coster, k2, 'petty_advance');
+    expect((await claim(coster, { clientKey: k2 })).status).toBe(201);
+    // 已登记的：作废只返回原单据
+    const k3 = randomUUID();
+    const done = (await claim(coster, { clientKey: k3 })).body.claim;
+    expect((await abandon(coster, k3, 'expense_claim')).body).toEqual({ found: true, abandoned: false, refId: done.id });
+    expect((await abandon(coster, k3, 'petty_advance')).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+    // 打款、退回补付
+    const k4 = randomUUID();
+    expect((await abandon(buyer, k4, 'petty_advance')).body.abandoned).toBe(true);
+    expect((await advance(buyer, { clientKey: k4 })).body.error.code).toBe('OP_ABANDONED');
+    const a = (await advance(coster, { amountCents: 2_000 })).body.advance;
+    const k5 = randomUUID();
+    const s = await settle(coster, a.id, 'return', 1_000, { clientKey: k5 });
+    expect((await lookup(keeper, k5, 'petty_settlement')).body).toEqual({ found: true, abandoned: false, refId: s.body.settlementId, advanceId: a.id });
+    expect((await api(ctx.app, ctx.clerk, 'GET', `/api/erp/ops/${k5}?type=petty_settlement`)).status).toBe(403);
+  });
+
+  it('报销列表的合计按全部单据算，不受列表张数限制', async () => {
+    const list = (await api(ctx.app, boss, 'GET', `/api/erp/expenses?from=${today}&to=${today}`)).body;
+    expect(list.truncated).toBe(false);
+    expect(list.totals.count).toBe(list.claims.length);
+    const confirmed = list.claims.filter((c: { status: string }) => c.status === 'confirmed').reduce((t: number, c: { amountCents: number }) => t + c.amountCents, 0);
+    expect(list.totals.confirmedCents).toBe(confirmed);
   });
 });
 

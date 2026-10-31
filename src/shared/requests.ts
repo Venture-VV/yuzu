@@ -34,6 +34,8 @@ export interface RequestLineProgress {
   /** 已生效的退供应商数量 */
   returnedMilli: number;
   inventoryUnit: string | null;
+  /** 这一行采购单合并了几行需求（1 就是只有这一行）；合并时下单、到货数量是整行的 */
+  mergedLines: number;
   /** none 未下单；ordered 已下单；partial 部分到货；received 已到货 */
   state: 'none' | 'ordered' | 'partial' | 'received';
 }
@@ -105,6 +107,14 @@ export interface OpenRequestLine {
   details: string;
   refPriceCents: number | null;
   images: ImageRef[];
+}
+
+/** 提需求单要用的选项：用途、部门、可选的物料（部门申购没有库存查看权限，也能从这里选物料） */
+export interface RequestMeta {
+  purposes: string[];
+  departments: { id: number; name: string }[];
+  materials: { id: number; code: string; name: string; category: string; specification: string; purchaseUnit: string; inventoryUnit: string }[];
+  me: RequestsList['me'];
 }
 
 export const imageUrl = (id: number) => `/api/erp/images/${id}`;

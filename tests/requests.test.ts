@@ -113,6 +113,16 @@ describe('提需求单', () => {
     expect((await submit(boss, [newLine({ imageIds: [img.id] })], { departmentId: deptB })).body.request.department.id).toBe(deptB);
   });
 
+  it('提单用的选项：用途、部门、受管物料；部门申购没有库存查看权限也能选物料', async () => {
+    expect((await api(ctx.app, reqA, 'GET', '/api/inventory/materials')).status).toBe(403);
+    const meta = (await api(ctx.app, reqA, 'GET', '/api/erp/requests/meta')).body;
+    expect(meta.purposes).toContain('客用消耗');
+    expect(meta.departments.map((d: { id: number }) => d.id)).toEqual(expect.arrayContaining([deptA, deptB]));
+    expect(meta.materials.some((m: { id: number }) => m.id === mat.id)).toBe(true);
+    expect(meta.me).toMatchObject({ departmentId: deptA, departmentName: '采购部', canCreate: true, canReview: false });
+    expect((await api(ctx.app, ctx.clerk, 'GET', '/api/erp/requests/meta')).status).toBe(403);
+  });
+
   it('看得到：部门申购只看本部门的与自己提的；采购看全部；前台店员看不到', async () => {
     const img = await upload(reqB, 'b');
     const b = (await submit(reqB, [newLine({ name: '柠檬', imageIds: [img.id] })])).body.request;
@@ -156,24 +166,28 @@ describe('审核、转采购单、进度回写', () => {
 
     const po = (lines: unknown[]) => api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, lines });
     // 物料对不上
-    const mismatch = await po([{ materialId: other.id, purchaseQtyMilli: q(1), priceCents: 100, requestLineId: lineMat.id }]);
+    const mismatch = await po([{ materialId: other.id, purchaseQtyMilli: q(1), priceCents: 100, requestLineIds: [lineMat.id] }]);
     expect(mismatch.body.error.code).toBe('REQUEST_MATERIAL_MISMATCH');
     // 新产品：采购选（或新建）一个物料
     const first = await po([
-      { materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000, requestLineId: lineMat.id, spec: '白色 80×180', imageIds: [img.id] },
-      { materialId: other.id, purchaseQtyMilli: q(1), priceCents: 1500, requestLineId: lineNew.id },
+      { materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000, requestLineIds: [lineMat.id], spec: '白色 80×180', imageIds: [img.id] },
+      { materialId: other.id, purchaseQtyMilli: q(1), priceCents: 1500, requestLineIds: [lineNew.id] },
     ]);
     expect(first.status).toBe(201);
     const p1 = first.body.po;
-    expect(p1.lines[0]).toMatchObject({ spec: '白色 80×180', requestLineId: lineMat.id, requestNo: created.docNo, images: [{ id: img.id, url: img.url }] });
+    expect(p1.lines[0]).toMatchObject({
+      spec: '白色 80×180',
+      requests: [{ lineId: lineMat.id, requestId: created.id, requestNo: created.docNo, departmentName: '采购部' }],
+      images: [{ id: img.id, url: img.url }],
+    });
     // 同一行需求不能被第二张采购单转走
-    const dup = await po([{ materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 45_000, requestLineId: lineMat.id }]);
+    const dup = await po([{ materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 45_000, requestLineIds: [lineMat.id] }]);
     expect(dup.body.error.code).toBe('REQUEST_LINE_ORDERED');
     // 部门申购不能转采购单（也不能编采购单）
-    expect((await api(ctx.app, reqA, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, lines: [{ materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 1, requestLineId: lineMat.id }] })).status).toBe(403);
+    expect((await api(ctx.app, reqA, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, lines: [{ materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 1, requestLineIds: [lineMat.id] }] })).status).toBe(403);
 
     let detail = (await api(ctx.app, reqA, 'GET', `/api/erp/requests/${created.id}`)).body;
-    expect(detail.lines[0].progress).toMatchObject({ state: 'ordered', po: { id: p1.id, docNo: p1.docNo, status: 'submitted' }, orderedMilli: q(1000) });
+    expect(detail.lines[0].progress).toMatchObject({ state: 'ordered', po: { id: p1.id, docNo: p1.docNo, status: 'submitted' }, orderedMilli: q(1000), mergedLines: 1 });
     expect(detail.orderedLines).toBe(2);
     expect(((await api(ctx.app, buyer, 'GET', '/api/erp/requests/open-lines')).body as { id: number }[]).map((l) => l.id)).not.toContain(lineMat.id);
 
@@ -181,7 +195,7 @@ describe('审核、转采购单、进度回写', () => {
     await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${p1.id}/cancel`, { reason: '换供应商' });
     detail = (await api(ctx.app, reqA, 'GET', `/api/erp/requests/${created.id}`)).body;
     expect(detail.lines[0].progress.state).toBe('none');
-    const second = (await po([{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000, requestLineId: lineMat.id }])).body.po;
+    const second = (await po([{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000, requestLineIds: [lineMat.id] }])).body.po;
     await api(ctx.app, approver, 'POST', `/api/purchase-orders/${second.id}/approve`, {});
 
     // 修改采购单（没带规格、图片）：保持原样；需求关联不变
@@ -221,12 +235,44 @@ describe('审核、转采购单、进度回写', () => {
   it('没通过的需求单不能转；不采购与撤回都要原因', async () => {
     const img = await upload(reqA, 'np');
     const r = (await submit(reqA, [newLine({ imageIds: [img.id] })])).body.request;
-    const po = await api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, lines: [{ materialId: other.id, purchaseQtyMilli: q(1), priceCents: 1, requestLineId: r.lines[0].id }] });
+    const po = await api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, lines: [{ materialId: other.id, purchaseQtyMilli: q(1), priceCents: 1, requestLineIds: [r.lines[0].id] }] });
     expect(po.body.error.code).toBe('REQUEST_NOT_APPROVED');
     expect((await api(ctx.app, buyer, 'POST', `/api/erp/requests/${r.id}/reject`, {})).status).toBe(400);
     expect((await api(ctx.app, buyer, 'POST', `/api/erp/requests/${r.id}/reject`, { reason: '已有库存' })).body).toMatchObject({ status: 'rejected', reason: '已有库存' });
     const r2 = (await submit(reqA, [newLine({ imageIds: [img.id] })])).body.request;
     expect((await api(ctx.app, reqA, 'POST', `/api/erp/requests/${r2.id}/cancel`, { reason: '重复了' })).body.status).toBe('cancelled');
+  });
+
+  it('几个部门要同一种物料：合并成采购单的一行；确认后图片与需求关联不能再改', async () => {
+    const a = (await submit(reqA, [{ materialId: other.id, name: '纸巾', purpose: '客用消耗', qtyMilli: q(3), unit: '箱' }])).body.request;
+    const b = (await submit(reqB, [{ materialId: other.id, name: '纸巾', purpose: '客用消耗', qtyMilli: q(2), unit: '箱' }])).body.request;
+    for (const r of [a, b]) await api(ctx.app, buyer, 'POST', `/api/erp/requests/${r.id}/approve`, {});
+    const img = await upload(buyer, 'merge');
+    const merged = await api(ctx.app, buyer, 'POST', '/api/purchase-orders', {
+      clientKey: randomUUID(),
+      supplierId,
+      orderDate: today,
+      action: 'save',
+      lines: [{ materialId: other.id, purchaseQtyMilli: q(5), priceCents: 100, imageIds: [img.id], requestLineIds: [a.lines[0].id, b.lines[0].id] }],
+    });
+    expect(merged.status).toBe(201);
+    const po = merged.body.po;
+    expect(po.lines[0].requests.map((r: { departmentName: string }) => r.departmentName)).toEqual(['采购部', '水吧']);
+    for (const r of [a, b]) {
+      const d = (await api(ctx.app, buyer, 'GET', `/api/erp/requests/${r.id}`)).body;
+      expect(d.lines[0].progress).toMatchObject({ state: 'ordered', po: { id: po.id }, mergedLines: 2 });
+    }
+    // 修改时去掉一行需求：那一行回到未下单
+    const put = (lines: unknown[]) => api(ctx.app, buyer, 'PUT', `/api/purchase-orders/${po.id}`, { supplierId, orderDate: today, action: 'save', lines });
+    const split = await put([{ id: po.lines[0].id, materialId: other.id, purchaseQtyMilli: q(3), priceCents: 100, requestLineIds: [a.lines[0].id] }]);
+    expect(split.body.lines[0].requests).toHaveLength(1);
+    expect(((await api(ctx.app, buyer, 'GET', '/api/erp/requests/open-lines')).body as { id: number }[]).map((l) => l.id)).toContain(b.lines[0].id);
+    // 图片编号没上传成功的：拒绝
+    expect((await put([{ id: po.lines[0].id, materialId: other.id, purchaseQtyMilli: q(3), priceCents: 100, imageIds: [999_999] }])).body.error.code).toBe('IMAGE_NOT_FOUND');
+    await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po.id}/submit`, {});
+    await api(ctx.app, approver, 'POST', `/api/purchase-orders/${po.id}/approve`, {});
+    await expect(ctx.sql`DELETE FROM purchase_order_line_images WHERE po_line_id = ${po.lines[0].id}`).rejects.toThrow(/不能修改明细/);
+    await expect(ctx.sql`INSERT INTO purchase_order_line_requests (po_line_id, request_line_id) VALUES (${po.lines[0].id}, ${b.lines[0].id})`).rejects.toThrow(/不能修改明细/);
   });
 
   it('同一操作编号只提交一次', async () => {
@@ -236,6 +282,12 @@ describe('审核、转采购单、进度回写', () => {
     expect([a.status, b.status].sort()).toEqual([200, 201]);
     expect(a.body.request.id).toBe(b.body.request.id);
     expect((await api(ctx.app, reqA, 'GET', `/api/erp/requests/by-key/${body.clientKey}`)).body.id).toBe(a.body.request.id);
+    // 断网后确认作废：原请求再到也不登记
+    const key = randomUUID();
+    expect((await api(ctx.app, reqA, 'POST', `/api/erp/ops/${key}/abandon`, { type: 'purchase_request' })).body).toEqual({ found: false, abandoned: true });
+    const late = await api(ctx.app, reqA, 'POST', '/api/erp/requests', { ...body, clientKey: key });
+    expect(late.body.error.code).toBe('OP_ABANDONED');
+    expect((await api(ctx.app, keeper, 'POST', `/api/erp/ops/${randomUUID()}/abandon`, { type: 'purchase_request' })).status).toBe(403);
   });
 });
 

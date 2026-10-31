@@ -2,7 +2,8 @@
 //
 // · 部门申购只能给员工档案里的所属部门提需求，能改、撤回自己的单（审核前）；采购（request.review）看全部、审核。
 // · 新产品（不在物料档案里的）必须有参考链接和至少一张图片（12 条自检第 12 条）。
-// · 通过之后内容不能再改；转采购单在采购单的接口里带 requestLineId，下单 / 到货 / 退货按采购单与收货单算。
+// · 通过之后内容不能再改；转采购单在采购单的接口里每一行带 requestLineIds（同一物料的几行需求可以合并成一行），
+//   下单 / 到货 / 退货按采购单与收货单算。
 // · 图片：浏览器压缩后上传，服务端核对文件头与大小，按内容摘要只存一份。
 // 加锁顺序：采购单 → 需求单（转采购单时锁需求单，见 purchasing.ts）。
 
@@ -18,15 +19,18 @@ import {
   type PurchaseRequest,
   type PurchaseRequestSummary,
   type RequestLineProgress,
+  type RequestMeta,
   type RequestsList,
   type RequestStatus,
 } from '@shared/requests';
 import { isUniqueViolation, readSnapshot, type Db } from '../db';
 import { guardAny } from '../auth/guard';
+import { assertNotFenced } from '../lib/fences';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
+import { erpOpAbandoned } from './erp-ops';
 import { loadExpenseRules } from './expenses';
 import { docDateSchema, logApproval, nextDocNo, setTxTimeouts, todayIn } from './inventory/common';
 
@@ -59,13 +63,15 @@ const PROGRESS_SQL = (db: Db) => db`
   (SELECT json_build_object(
             'poId', po.id, 'docNo', po.doc_no, 'status', po.status, 'supplierName', s.name,
             'orderedMilli', pl.base_qty_milli, 'inventoryUnit', pl.inventory_unit,
+            'mergedLines', (SELECT count(*) FROM purchase_order_line_requests y WHERE y.po_line_id = pl.id),
             'receivedMilli', coalesce((SELECT sum(il.qty_milli) FROM inv_doc_lines il JOIN inv_docs d ON d.id = il.doc_id
                                        WHERE il.po_line_id = pl.id AND d.doc_type = 'receipt' AND d.status = 'confirmed'), 0),
             'returnedMilli', coalesce((SELECT sum(rl.qty_milli) FROM inv_doc_lines rl JOIN inv_docs rd ON rd.id = rl.doc_id
                                        JOIN inv_doc_lines src ON src.id = rl.source_line_id
                                        WHERE src.po_line_id = pl.id AND rd.doc_type = 'supplier_return' AND rd.status = 'confirmed'), 0))
-     FROM purchase_order_lines pl JOIN purchase_orders po ON po.id = pl.po_id JOIN suppliers s ON s.id = po.supplier_id
-     WHERE pl.request_line_id = l.id AND po.status <> 'cancelled'
+     FROM purchase_order_line_requests x JOIN purchase_order_lines pl ON pl.id = x.po_line_id
+     JOIN purchase_orders po ON po.id = pl.po_id JOIN suppliers s ON s.id = po.supplier_id
+     WHERE x.request_line_id = l.id AND po.status <> 'cancelled'
      ORDER BY pl.id LIMIT 1)`;
 
 interface RawProgress {
@@ -75,12 +81,13 @@ interface RawProgress {
   supplierName: string;
   orderedMilli: number;
   inventoryUnit: string;
+  mergedLines: number;
   receivedMilli: number;
   returnedMilli: number;
 }
 
 function progressOf(p: RawProgress | null): RequestLineProgress {
-  if (!p) return { po: null, orderedMilli: 0, receivedMilli: 0, returnedMilli: 0, inventoryUnit: null, state: 'none' };
+  if (!p) return { po: null, orderedMilli: 0, receivedMilli: 0, returnedMilli: 0, inventoryUnit: null, mergedLines: 0, state: 'none' };
   const received = Number(p.receivedMilli);
   const ordered = Number(p.orderedMilli);
   return {
@@ -89,6 +96,7 @@ function progressOf(p: RawProgress | null): RequestLineProgress {
     receivedMilli: received,
     returnedMilli: Number(p.returnedMilli),
     inventoryUnit: p.inventoryUnit,
+    mergedLines: Number(p.mergedLines),
     state: received <= 0 ? 'ordered' : received >= ordered ? 'received' : 'partial',
   };
 }
@@ -99,10 +107,11 @@ async function summaries(db: Db, f: { ids?: number[]; status?: RequestStatus; de
            (SELECT count(*)::int FROM purchase_request_lines l WHERE l.request_id = r.id) AS line_count,
            coalesce((SELECT string_agg(l.name, '、' ORDER BY l.line_no) FROM purchase_request_lines l WHERE l.request_id = r.id AND l.line_no <= 3), '') AS summary,
            (SELECT count(*)::int FROM purchase_request_lines l WHERE l.request_id = r.id AND EXISTS (
-              SELECT 1 FROM purchase_order_lines pl JOIN purchase_orders po ON po.id = pl.po_id WHERE pl.request_line_id = l.id AND po.status <> 'cancelled')) AS ordered_lines,
+              SELECT 1 FROM purchase_order_line_requests x JOIN purchase_order_lines pl ON pl.id = x.po_line_id JOIN purchase_orders po ON po.id = pl.po_id
+              WHERE x.request_line_id = l.id AND po.status <> 'cancelled')) AS ordered_lines,
            (SELECT count(*)::int FROM purchase_request_lines l WHERE l.request_id = r.id AND EXISTS (
-              SELECT 1 FROM purchase_order_lines pl JOIN purchase_orders po ON po.id = pl.po_id
-              WHERE pl.request_line_id = l.id AND po.status <> 'cancelled'
+              SELECT 1 FROM purchase_order_line_requests x JOIN purchase_order_lines pl ON pl.id = x.po_line_id JOIN purchase_orders po ON po.id = pl.po_id
+              WHERE x.request_line_id = l.id AND po.status <> 'cancelled'
                 AND (SELECT coalesce(sum(il.qty_milli), 0) FROM inv_doc_lines il JOIN inv_docs dd ON dd.id = il.doc_id
                      WHERE il.po_line_id = pl.id AND dd.doc_type = 'receipt' AND dd.status = 'confirmed') >= pl.base_qty_milli)) AS received_lines
     FROM purchase_requests r JOIN departments d ON d.id = r.department_id JOIN staff s ON s.id = r.requester_id
@@ -158,12 +167,23 @@ export async function openLines(db: Db, ids?: number[]): Promise<OpenRequestLine
     JOIN departments d ON d.id = r.department_id JOIN staff s ON s.id = r.requester_id
     LEFT JOIN materials m ON m.id = l.material_id
     WHERE r.status = 'approved'
-      AND NOT EXISTS (SELECT 1 FROM purchase_order_lines pl JOIN purchase_orders po ON po.id = pl.po_id
-                      WHERE pl.request_line_id = l.id AND po.status <> 'cancelled')
+      AND NOT EXISTS (SELECT 1 FROM purchase_order_line_requests x JOIN purchase_order_lines pl ON pl.id = x.po_line_id
+                      JOIN purchase_orders po ON po.id = pl.po_id
+                      WHERE x.request_line_id = l.id AND po.status <> 'cancelled')
       ${ids ? db`AND l.id IN ${db(ids)}` : db``}
     ORDER BY r.created_at, r.id, l.line_no
     LIMIT 500`;
   return rows.map(({ departmentId, departmentName, ...r }) => ({ ...r, department: { id: departmentId, name: departmentName } }));
+}
+
+/** 提需求单要用的选项。物料只列受管、在用的（采购单只能下这些） */
+export async function requestMeta(db: Db, actor: Actor): Promise<RequestMeta> {
+  const me = await myContext(db, actor);
+  const rules = await loadExpenseRules(db);
+  const departments = await db<RequestMeta['departments']>`SELECT id, name FROM departments WHERE active ORDER BY sort_order, id`;
+  const materials = await db<RequestMeta['materials']>`
+    SELECT id, code, name, category, specification, purchase_unit, inventory_unit FROM materials WHERE active AND tracked ORDER BY code`;
+  return { purposes: rules.purposes, departments, materials, me };
 }
 
 // ───────────────────────── 提交与修改 ─────────────────────────
@@ -193,15 +213,15 @@ async function validateLines(db: Db, lines: z.infer<typeof LineInput>[]) {
   const rules = await loadExpenseRules(db);
   const matIds = [...new Set(lines.map((l) => l.materialId).filter((x): x is number => x !== null))];
   const mats = matIds.length
-    ? new Map((await db<{ id: number; name: string; active: boolean }[]>`SELECT id, name, active FROM materials WHERE id IN ${db(matIds)}`).map((m) => [m.id, m]))
-    : new Map<number, { id: number; name: string; active: boolean }>();
+    ? new Map((await db<{ id: number; name: string; active: boolean; tracked: boolean }[]>`SELECT id, name, active, tracked FROM materials WHERE id IN ${db(matIds)}`).map((m) => [m.id, m]))
+    : new Map<number, { id: number; name: string; active: boolean; tracked: boolean }>();
   const imageIds = [...new Set(lines.flatMap((l) => l.imageIds))];
   const images = imageIds.length ? new Set((await db<{ id: number }[]>`SELECT id FROM erp_images WHERE id IN ${db(imageIds)}`).map((r) => r.id)) : new Set<number>();
   for (const l of lines) {
     if (!rules.purposes.includes(l.purpose)) throw unprocessable('PURPOSE_INVALID', `用途只能从固定选项里选：${rules.purposes.join('、')}`);
     if (l.materialId !== null) {
       const m = mats.get(l.materialId);
-      if (!m || !m.active) throw unprocessable('MATERIAL_INACTIVE', '选的物料不存在或已停用');
+      if (!m || !m.active || !m.tracked) throw unprocessable('MATERIAL_INACTIVE', '选的物料不存在、已停用或不是受管物料');
     } else {
       // 新产品：图片与链接为必填（12 条自检第 12 条）
       if (!/^https?:\/\/\S+$/i.test(l.link)) throw unprocessable('LINK_REQUIRED', `「${l.name}」是新产品，请填写参考链接（http 或 https 开头）`);
@@ -257,6 +277,7 @@ export async function createRequest(deps: Deps, raw: unknown, actor: Actor, ip?:
       await setTxTimeouts(tx);
       const existing = await findExisting(tx);
       if (existing) return { id: existing, replayed: true };
+      await assertNotFenced(tx, input.clientKey, 'purchase_request', erpOpAbandoned);
       const deptId = await resolveDepartment(tx, actor, input.departmentId);
       await validateLines(tx, input.lines);
       const docNo = await nextDocNo(tx, 'purchase_request', 'XQ', todayIn(deps.config.timezone));
@@ -381,16 +402,18 @@ export async function saveImage(db: Db, raw: unknown, actor: Actor) {
 export async function requestChecks(db: Db) {
   const bad = await db<{ docNo: string; why: string }[]>`
     SELECT min(r.doc_no) AS doc_no, '同一行需求对应了不止一行有效的采购单' AS why
-    FROM purchase_order_lines pl JOIN purchase_orders po ON po.id = pl.po_id
-    JOIN purchase_request_lines l ON l.id = pl.request_line_id JOIN purchase_requests r ON r.id = l.request_id
-    WHERE po.status <> 'cancelled' GROUP BY pl.request_line_id HAVING count(*) > 1
+    FROM purchase_order_line_requests x JOIN purchase_order_lines pl ON pl.id = x.po_line_id JOIN purchase_orders po ON po.id = pl.po_id
+    JOIN purchase_request_lines l ON l.id = x.request_line_id JOIN purchase_requests r ON r.id = l.request_id
+    WHERE po.status <> 'cancelled' GROUP BY x.request_line_id HAVING count(*) > 1
     UNION ALL
-    SELECT r.doc_no, '采购单行的物料与需求行不一致' FROM purchase_order_lines pl JOIN purchase_orders po ON po.id = pl.po_id
-    JOIN purchase_request_lines l ON l.id = pl.request_line_id JOIN purchase_requests r ON r.id = l.request_id
+    SELECT r.doc_no, '采购单行的物料与需求行不一致'
+    FROM purchase_order_line_requests x JOIN purchase_order_lines pl ON pl.id = x.po_line_id JOIN purchase_orders po ON po.id = pl.po_id
+    JOIN purchase_request_lines l ON l.id = x.request_line_id JOIN purchase_requests r ON r.id = l.request_id
     WHERE po.status <> 'cancelled' AND l.material_id IS NOT NULL AND l.material_id <> pl.material_id
     UNION ALL
-    SELECT r.doc_no, '采购单行关联的需求单没有通过' FROM purchase_order_lines pl JOIN purchase_orders po ON po.id = pl.po_id
-    JOIN purchase_request_lines l ON l.id = pl.request_line_id JOIN purchase_requests r ON r.id = l.request_id
+    SELECT r.doc_no, '采购单行关联的需求单没有通过'
+    FROM purchase_order_line_requests x JOIN purchase_order_lines pl ON pl.id = x.po_line_id JOIN purchase_orders po ON po.id = pl.po_id
+    JOIN purchase_request_lines l ON l.id = x.request_line_id JOIN purchase_requests r ON r.id = l.request_id
     WHERE po.status <> 'cancelled' AND r.status <> 'approved'
     UNION ALL
     SELECT r.doc_no, '新产品「' || l.name || '」没有链接或图片' FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
@@ -405,7 +428,7 @@ export async function requestChecks(db: Db) {
       ok: bad.length === 0,
       detail: bad.length
         ? bad.map((b) => `${b.docNo} ${b.why}`).join('；')
-        : `需求单 ${n!.requests} 张：每一行最多对应一行有效的采购单，物料一致；新产品都有链接和图片（图片 ${n!.images} 张，共 ${(Number(n!.bytes) / 1024 / 1024).toFixed(1)} MB）`,
+        : `需求单 ${n!.requests} 张：每一行需求最多对应一行有效的采购单，物料一致；新产品都有链接和图片（图片 ${n!.images} 张，共 ${(Number(n!.bytes) / 1024 / 1024).toFixed(1)} MB）`,
     },
   ];
 }
@@ -436,6 +459,7 @@ export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
     return getRequest(sql, req.actor, row.id);
   });
   app.get('/api/erp/requests/checks', { preHandler: anyRequest }, async () => readSnapshot(sql, requestChecks));
+  app.get('/api/erp/requests/meta', { preHandler: anyRequest }, async (req) => readSnapshot(sql, (tx) => requestMeta(tx, req.actor)));
   app.get('/api/erp/requests/:id', { preHandler: anyRequest }, async (req) => readSnapshot(sql, (tx) => getRequest(tx, req.actor, docId(req))));
   app.post('/api/erp/requests', { preHandler: guardAny('request.create') }, async (req, reply) => {
     const r = await createRequest(deps, req.body, req.actor, req.ip);

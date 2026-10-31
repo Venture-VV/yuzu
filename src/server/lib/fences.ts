@@ -27,6 +27,11 @@ export const FENCED_OPS = [
   'room_close',
   // 收银完善（v0.7.6）：转单
   'line_move',
+  // ERP（v0.7.8）：费用报销、备用金打款与退回补付、部门需求单
+  'expense_claim',
+  'petty_advance',
+  'petty_settlement',
+  'purchase_request',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 

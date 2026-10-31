@@ -16,6 +16,7 @@ import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
+import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
 import { Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
@@ -77,6 +78,7 @@ export function ExpensesPage() {
       }
     >
       <div className="space-y-4" data-testid="expenses-page">
+        <ErpPendingPanel types={['expense_claim']} onFound={(_, ref) => setParams({ claim: String(ref.refId) }, { replace: true })} />
         <Card className="flex flex-wrap items-end gap-3 p-4">
           <label className="flex flex-col gap-1 text-[12.5px] font-semibold text-ink-3">
             从
@@ -119,6 +121,7 @@ export function ExpensesPage() {
                   · 待确认 <Money cents={list.data.totals.pendingCents} className="font-bold text-yuzu-deep" />
                 </>
               )}
+              {list.data.truncated && <span className="block text-[12px] text-ink-3">列表只显示最近 {list.data.claims.length} 张，合计按全部算；要看全部请缩短日期范围或导出</span>}
             </p>
           )}
         </Card>
