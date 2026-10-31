@@ -38,6 +38,7 @@ export type AuditAction =
   | 'frontdesk_cancel'
   | 'frontdesk_post'
   | 'frontdesk_void'
+  | 'frontdesk_move'
   | 'frontdesk_abandon'
   | 'frontdesk_ticket'
   | 'frontdesk_checkout'

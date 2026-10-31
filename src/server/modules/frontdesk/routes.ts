@@ -12,7 +12,7 @@ import type { Deps, OpContext } from '../../lib/context';
 import { forbidden, notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { checkBackfillAt } from './backfill';
-import { postCharges, voidLine, type PostInputData } from './bills';
+import { moveLines, postCharges, voidLine, type PostInputData } from './bills';
 import { resolveReadableDate } from '../ledger';
 import { refundShiftOptions } from '../shifts';
 import { checkout, findCoupon, getCheckout, listCheckouts, previewCheckout, voidCheckout, type CheckoutInputData } from './checkout';
@@ -130,6 +130,9 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
     const { id } = parse(idParam, req.params);
     return voidLine(deps, id, req.body, ctxOf(req));
   });
+
+  // 转单（v0.7.6）：挂错手牌的明细转到另一位在店客人的手牌上（操作编号；权限与作废明细相同）
+  app.post('/api/frontdesk/lines/move', { preHandler: guard('frontdesk.operate') }, async (req) => moveLines(deps, req.body, ctxOf(req)));
 
   // ── 票种与门票 ──
   app.get('/api/frontdesk/ticket-types', { preHandler: guard('frontdesk.read') }, async (req) => {

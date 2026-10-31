@@ -20,6 +20,7 @@ import { groupTags, Stat, TagCard, TagChip, VipChip, ZoneChip } from './parts';
 import { useBoard, useFrontdeskChecks, useRefreshFrontdesk, useServerNow, useVisit } from './queries';
 import { FindGuestDialog, TagLockDialog } from './ToolDialogs';
 import { JoinGroupDialog, PreviewDialog, SwapDialog } from './VisitDialogs';
+import { MoveLinesDialog } from './MoveLinesDialog';
 
 type StatusFilter = 'all' | 'in' | 'free' | 'locked';
 
@@ -101,6 +102,7 @@ function FrontdeskBoard() {
     else if (resume === 'bill_post') setDialog({ kind: 'add' });
     else if (resume === 'tag_swap') setDialog({ kind: 'swap' });
     else if (resume === 'checkout') setDialog({ kind: 'checkout' });
+    else if (resume === 'line_move') setDialog({ kind: 'move' });
     const next = new URLSearchParams(params);
     next.delete('resume');
     setParams(next, { replace: true });
@@ -477,6 +479,19 @@ function FrontdeskBoard() {
       )}
       {visit.data && dialog?.kind === 'swap' && (
         <SwapDialog open visit={visit.data} tags={tags} rules={board.data?.rules} onClose={() => setDialog(null)} onDone={(v) => afterChange(v, `已换牌，现为 ${v.tag.code}`)} />
+      )}
+      {visit.data && dialog?.kind === 'move' && (
+        <MoveLinesDialog
+          open
+          visit={visit.data}
+          tags={tags}
+          rules={board.data?.rules}
+          onClose={() => setDialog(null)}
+          onDone={(v, toVisitId) => {
+            if (toVisitId) refresh([toVisitId]);
+            afterChange(v, '明细已转到别的手牌');
+          }}
+        />
       )}
       {visit.data && dialog?.kind === 'join' && (
         <JoinGroupDialog open visit={visit.data} tags={tags} onClose={() => setDialog(null)} onDone={(v) => afterChange(v, `${v.tag.code} 已加入同行组 ${v.group?.groupNo ?? ''}`)} />

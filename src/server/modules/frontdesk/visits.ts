@@ -609,7 +609,7 @@ export async function getVisit(db: Db, id: number): Promise<VisitDetail> {
       SELECT l.id, l.source, l.item_id, l.tier, l.name, l.unit_price, l.quantity, l.amount, l.status, l.post_key, l.business_date,
              l.posted_by AS posted_by_id, p.display_name AS posted_by_name, l.posted_at, l.void_reason,
              vs.display_name AS voided_by_name, l.voided_at, ${backfillMarkSql(db, 'l.post_key')} AS backfill,
-             ${lineTechnicianSql(db, 'l')} AS technician,
+             ${lineTechnicianSql(db, 'l')} AS technician, l.session_id,
              (SELECT json_build_object('status', k.status, 'note', k.note, 'orderNo', k.order_no) FROM kitchen_items k WHERE k.bill_line_id = l.id) AS kitchen
       FROM bill_lines l JOIN staff p ON p.id = l.posted_by LEFT JOIN staff vs ON vs.id = l.voided_by
       WHERE l.bill_id = ${v.billId} ORDER BY l.id`
@@ -777,6 +777,8 @@ export async function lookupFrontdeskOp(db: Db, key: string, expected?: Frontdes
   if (!(FRONTDESK_OPS as readonly string[]).includes(row.opType)) return { found: false as const, abandoned: false };
   if (row.opType === 'checkin') return { found: true as const, type: 'checkin' as const, checkin: await loadCheckin(db, key, true) };
   if (row.opType === 'bill_post') return { found: true as const, type: 'bill_post' as const, visit: await getVisit(db, row.refId) };
+  // 转单（v0.7.6）：查回原客人（明细转出的那位）
+  if (row.opType === 'line_move') return { found: true as const, type: 'line_move' as const, visit: await getVisit(db, row.refId) };
   if (row.opType === 'checkout') return { found: true as const, type: 'checkout' as const, checkout: await getCheckout(db, row.refId) };
   // 餐饮第二步：开台、桌台点单查回这一桌；桌台结账查回结账单
   if (row.opType === 'table_open' || row.opType === 'table_post') {

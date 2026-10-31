@@ -108,6 +108,9 @@ export interface MemberLevel {
 }
 
 /** 牌号：0–2 位大写字母前缀 + 1–5 位数字 */
+/** 转单（v0.7.6）：一次最多把几条明细转到另一张手牌 */
+export const MAX_MOVE_LINES = 20;
+
 export const TAG_CODE_PATTERN = /^[A-Z]{0,2}[0-9]{1,5}$/;
 
 export function normalizeTagCode(input: string): string {
@@ -249,6 +252,8 @@ export interface BillLine {
   technician: LineTechnician | null;
   /** 进厨房的菜（餐饮）：出品状态与口味备注；其他明细为 null */
   kitchen: { status: 'queued' | 'cooking' | 'done' | 'served' | 'cancelled'; note: string; orderNo: string } | null;
+  /** 钟房派的钟、加的钟（v0.7.1）所属的钟单；其他明细为 null（v0.7.6 起返回，转单时用来判断能不能转） */
+  sessionId: number | null;
 }
 
 export interface VisitMember {
@@ -330,7 +335,7 @@ export interface VisitDetail {
 export type FrontdeskOpLookup =
   | { found: false; abandoned: boolean }
   | { found: true; type: 'checkin'; checkin: CheckinResult }
-  | { found: true; type: 'bill_post' | 'tag_swap'; visit: VisitDetail }
+  | { found: true; type: 'bill_post' | 'tag_swap' | 'line_move'; visit: VisitDetail }
   | { found: true; type: 'checkout' | 'table_checkout'; checkout: CheckoutDetail }
   | { found: true; type: 'table_open' | 'table_post'; session: import('./dining').TableSessionDetail }
   | { found: true; type: 'room_checkin' | 'room_extend' | 'room_deposit' | 'room_refund' | 'room_close'; stay: import('./rooms').StayDetail };

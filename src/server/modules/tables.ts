@@ -30,7 +30,7 @@ import { badRequest, conflict, notFound, unprocessable } from '../lib/errors';
 import { cents, idParam, parse, positiveCents } from '../lib/validate';
 import { expireMemberBonus } from './bonus';
 import { cancelKitchenItem, createKitchenItems, kitchenStationsOf, loadDiningRules, takeDishLimits, type KitchenLine } from './dining';
-import { assertSettled, getCheckout, Payment, recordCheckoutPayments, splitPayments } from './frontdesk/checkout';
+import { assertSettled, getCheckout, Payment, recordCheckoutPayments, snapshotCheckoutItems, splitPayments } from './frontdesk/checkout';
 import { assertCanFix, businessDate, hashRequest, loadFrontdeskRules, nextDocNo, runIdempotent, saveKey, setTxTimeouts } from './frontdesk/common';
 import { loadPricedItems, priceLine } from './pricing';
 import { lockPaymentShift, openShiftOf } from './shifts';
@@ -125,7 +125,7 @@ export async function getTableSession(db: Db, id: number): Promise<TableSessionD
   const lines = await db<BillLine[]>`
     SELECT l.id, l.source, l.item_id, l.tier, l.name, l.unit_price, l.quantity, l.amount, l.status, l.post_key, l.business_date,
            l.posted_by AS posted_by_id, p.display_name AS posted_by_name, l.posted_at, l.void_reason, vs.display_name AS voided_by_name,
-           l.voided_at, NULL AS backfill, NULL AS technician,
+           l.voided_at, NULL AS backfill, NULL AS technician, l.session_id,
            (SELECT json_build_object('status', k.status, 'note', k.note, 'orderNo', k.order_no) FROM kitchen_items k WHERE k.bill_line_id = l.id) AS kitchen
     FROM bill_lines l JOIN staff p ON p.id = l.posted_by LEFT JOIN staff vs ON vs.id = l.voided_by
     WHERE l.bill_id = ${s.billId} ORDER BY l.id`;
@@ -560,6 +560,7 @@ export async function checkoutTables(deps: Deps, raw: unknown, ctx: OpContext): 
     }
     const tables = rows.map((r) => r.tableName);
     await recordCheckoutPayments(tx, deps, { checkoutId, checkoutNo, payments: input.payments, discount, tagCodes: [], tables, date, at, ctx });
+    await snapshotCheckoutItems(tx, checkoutId);
     // 结清：账单与开台结束，桌台空出来
     await tx`UPDATE bills SET status = 'settled', closed_at = ${at} WHERE id IN ${tx(billIds)}`;
     await tx`UPDATE table_sessions SET status = 'settled', closed_at = ${at}, closed_by = ${ctx.actor.id} WHERE id IN ${tx(ids)}`;

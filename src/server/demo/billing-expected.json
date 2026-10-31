@@ -100,7 +100,7 @@
   },
   "openShift": { "staff": "zhangjl", "voids": 1, "cashRefund": 55700, "expectedCash": -55700 },
   "anomalies": ["checkout_void", "discount", "ticket_override"],
-  "frontdeskChecks": ["bill_amount_vs_lines", "visit_vs_bill_status", "open_visit_tags", "group_status", "checkout_vs_bills", "checkout_wallet", "checkout_coupons", "checkout_discounts", "visit_periods", "backfill_entries", "kitchen_items", "room_deposits", "room_stays", "room_charges"],
+  "frontdeskChecks": ["bill_amount_vs_lines", "visit_vs_bill_status", "open_visit_tags", "group_status", "checkout_vs_bills", "checkout_wallet", "checkout_coupons", "checkout_discounts", "visit_periods", "backfill_entries", "kitchen_items", "room_deposits", "room_stays", "room_charges", "checkout_items", "line_moves"],
   "settlementChecks": ["documents_vs_ledger", "opening_plus_net", "ledger_chain", "members_vs_ledger", "business_vs_receipts", "wallet_bridge", "bonus_lots"],
   "inStoreAfter": "前台演示的 13 位在店客人不受影响（结账演示的手牌都已结清释放）"
 }
