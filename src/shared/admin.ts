@@ -13,6 +13,7 @@ export const ADMIN_SECTIONS = {
   tags: { path: '/admin/tags', label: '手牌与前台', perms: ['frontdesk.tags', 'settings.manage'] },
   technicians: { path: '/admin/technicians', label: '技师', perms: ['technician.manage', 'settings.manage', 'catalog.manage', 'audit.read'] },
   dining: { path: '/admin/dining', label: '餐饮', perms: ['settings.manage', 'catalog.manage'] },
+  rooms: { path: '/admin/rooms', label: '客房', perms: ['settings.manage', 'catalog.manage'] },
   staff: { path: '/admin/staff', label: '员工账号', perms: ['staff.manage'] },
   permissions: { path: '/admin/permissions', label: '岗位权限', perms: ['settings.manage', 'audit.read'] },
   opening: { path: '/admin/opening', label: '期初导入', perms: ['wallet.opening'] },
@@ -30,6 +31,7 @@ export const RULE_GROUPS = {
   frontdesk: '前台与结账',
   technicians: '技师',
   dining: '餐饮',
+  rooms: '客房',
   inventory: '库存与采购',
   staff: '岗位与权限',
 } as const;

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router';
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { Banknote, CircleCheck, Clock3, ReceiptText, ShieldCheck, Ticket, Undo2 } from 'lucide-react';
 import {
@@ -89,7 +90,7 @@ export function CheckoutDialog({
 
   // 服务端拒绝（门票跳档、余额变化）后重新取一次核对数据；没有开班或班次刚交班时刷新当前班次，出现开班提示
   useEffect(() => {
-    if (op.state.phase === 'error' && ['PRICE_CHANGED', 'SPLIT_CHANGED', 'INSUFFICIENT_BALANCE', 'TICKET_CHANGED'].includes(op.state.code ?? '')) {
+    if (op.state.phase === 'error' && ['PRICE_CHANGED', 'SPLIT_CHANGED', 'INSUFFICIENT_BALANCE', 'TICKET_CHANGED', 'ROOM_OPEN'].includes(op.state.code ?? '')) {
       void preview.refetch();
     }
     if (op.state.phase === 'error' && SHIFT_ERRORS.includes(op.state.code ?? '')) void qc.invalidateQueries({ queryKey: shiftKeys.all });
@@ -130,7 +131,9 @@ export function CheckoutDialog({
     onEdit: op.clearError,
   });
   const { remaining, problems } = pay;
-  const ready = total !== null && remaining === 0 && pay.ok && !preview.isFetching && shiftReady.ready && !backfillBlocked;
+  // 还住着客房的洗浴客人（S7）要先在客房页退房（补齐房费、退押金）
+  const roomsOpen = (preview.data?.rooms ?? []).length > 0;
+  const ready = total !== null && remaining === 0 && pay.ok && !preview.isFetching && shiftReady.ready && !backfillBlocked && !roomsOpen;
 
   const submit = async () => {
     if (!ready || !p) return;
@@ -275,6 +278,7 @@ export function CheckoutDialog({
             <>
               {(p.sessions ?? []).length > 0 && <SessionsNotice sessions={p.sessions} />}
               {(p.dishes ?? []).length > 0 && <DishesNotice dishes={p.dishes} />}
+              {(p.rooms ?? []).length > 0 && <RoomsNotice rooms={p.rooms!} />}
               <ReviewTable preview={p} amounts={amounts} ticketPick={ticketPick} onPick={(id, t) => edit(() => setTicketPick((x) => ({ ...x, [id]: t })))} />
             </>
           )
@@ -314,6 +318,31 @@ function SessionsNotice({ sessions }: { sessions: CheckoutPreview['sessions'] })
             <li key={s.sessionNo}>
               <span className="num font-semibold">{s.tagCode}</span> · {s.techNo} 号 {s.techName} · {s.itemName} × {s.clocks} ·{' '}
               {s.status === 'waiting' ? '还没上钟（结账后按已做完记）' : '在钟上（结账时下钟）'}
+            </li>
+          ))}
+        </ul>
+      </Notice>
+    </div>
+  );
+}
+
+/** 客房（S7）：洗浴客人还住着客房时不能结账，先在客房页退房（补齐房费挂到手牌账单、押金原路退回） */
+function RoomsNotice({ rooms }: { rooms: NonNullable<CheckoutPreview['rooms']> }) {
+  return (
+    <div data-testid="checkout-rooms">
+      <Notice
+        tone="error"
+        title="有客人还住着客房：请先在客房页退房，再结账"
+        action={
+          <Link to="/rooms" className="text-[13px] font-semibold text-pine hover:underline">
+            去客房页
+          </Link>
+        }
+      >
+        <ul className="mt-1 space-y-0.5">
+          {rooms.map((r) => (
+            <li key={r.stayNo}>
+              <span className="num font-semibold">{r.tagCode}</span> · 客房 {r.roomNo}（{r.stayNo}）：退房时补齐房费挂到手牌账单上，押金原路退回
             </li>
           ))}
         </ul>
@@ -438,6 +467,10 @@ function ReviewTable({
 
 /** 结账单结的是餐饮桌台（S5 第二步）：反结账后恢复的是桌台，不是在店客人 */
 const isTableCheckout = (d: CheckoutDetail) => d.bills.some((b) => b.tableSessionId !== null);
+/** 结账单结的是客房（S7，只住房的客人退房结账）：反结账后恢复为在住 */
+const isRoomCheckout = (d: CheckoutDetail) => d.bills.some((b) => b.roomStayId !== null);
+/** 账单的对象：手牌、桌、房 */
+const billOwner = (b: CheckoutDetail['bills'][number]) => (b.tableName !== null ? `桌 ${b.tableName}` : b.roomNo !== null ? `房 ${b.roomNo}` : b.tagCode);
 
 /** 结账单：所结手牌（桌台）、门票与收款明细 */
 export function CheckoutReceipt({ detail }: { detail: CheckoutDetail }) {
@@ -463,7 +496,8 @@ export function CheckoutReceipt({ detail }: { detail: CheckoutDetail }) {
       )}
       {detail.status === 'voided' && (
         <Notice tone="warning" icon={<Undo2 className="size-4" />} title={`${detail.voidedByName ?? ''} 于 ${detail.voidedAt ? formatDateTime(detail.voidedAt) : ''} 反结账`}>
-          {detail.voidReason}。储值消费已按原单撤销，团购券登记已作废，{isTableCheckout(detail) ? '这几桌恢复为用餐中' : '客人恢复为在店未结'}。
+          {detail.voidReason}。储值消费已按原单撤销，团购券登记已作废，
+          {isTableCheckout(detail) ? '这几桌恢复为用餐中' : isRoomCheckout(detail) ? '这几间房恢复为在住，押金抵扣的部分恢复为押金' : '客人恢复为在店未结'}。
         </Notice>
       )}
       <div className="overflow-hidden rounded-lg border border-line">
@@ -479,10 +513,10 @@ export function CheckoutReceipt({ detail }: { detail: CheckoutDetail }) {
             {detail.bills.map((b) => (
               <tr key={b.billId}>
                 <td className="px-3 py-2">
-                  <span className="num font-bold">{b.tableName !== null ? `桌 ${b.tableName}` : b.tagCode}</span>{' '}
+                  <span className="num font-bold">{billOwner(b)}</span>{' '}
                   <span className="text-ink-3">
                     {b.memberName ?? (b.guestLabel || '散客')}
-                    {b.tableName !== null && ` · ${b.guests} 人`}
+                    {(b.tableName !== null || b.roomNo !== null) && ` · ${b.guests} 人`}
                   </span>
                 </td>
                 <td className="px-3 py-2 text-ink-2">
@@ -492,7 +526,7 @@ export function CheckoutReceipt({ detail }: { detail: CheckoutDetail }) {
                     </>
                   )}
                   <span className="block text-[11.5px] text-ink-3">
-                    {b.tableName !== null ? '用餐' : '在店'} {Math.floor(b.stayMinutes / 60)} 时 {b.stayMinutes % 60} 分
+                    {b.tableName !== null ? '用餐' : b.roomNo !== null ? '入住' : '在店'} {Math.floor(b.stayMinutes / 60)} 时 {b.stayMinutes % 60} 分
                   </span>
                 </td>
                 <td className="px-3 py-2 text-right">
@@ -574,7 +608,7 @@ export function CheckoutRecordsDialog({ open, onClose, focusId }: { open: boolea
             <li key={c.id}>
               <button type="button" onClick={() => setOpenId(c.id)} className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-left hover:bg-paper-2/60">
                 <span className="num font-bold">{c.checkoutNo}</span>
-                <span className="num text-[13px] font-semibold text-ink-2">{[...(c.tagCodes ?? []), ...(c.tableNames ?? []).map((n) => `桌 ${n}`)].join('、')}</span>
+                <span className="num text-[13px] font-semibold text-ink-2">{[...(c.tagCodes ?? []), ...(c.tableNames ?? []).map((n) => `桌 ${n}`), ...(c.roomNos ?? []).map((n) => `房 ${n}`)].join('、')}</span>
                 <span className="text-[12.5px] text-ink-3">
                   {formatTime(c.createdAt)} · {c.operatorName} · {(c.methods ?? []).map((m) => CHECKOUT_METHOD_LABELS[m]).join(' + ') || '免收'}
                 </span>

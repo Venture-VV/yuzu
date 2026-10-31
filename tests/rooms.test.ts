@@ -91,6 +91,16 @@ describe('后台：客房规则、房型、房间', () => {
     expect(rules.status, JSON.stringify(rules.body)).toBe(200);
     expect((await api(ctx.app, ctx.owner, 'GET', '/api/auth/me')).body.rooms).toBe(true);
     expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/rooms/rules', { enabled: true, checkoutMinute: 720, lateFullMinute: 600, hourlyGraceMinutes: 15, defaultDeposit: 0 })).status).toBe(400);
+    // 规则总表列出客房规则：开关不是默认值，其余按默认（待确认）；最近修改记在店主名下
+    const catalog = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/rules')).body as { key: string; group: string; isDefault: boolean; pending: boolean; section: string; updatedBy: string | null }[];
+    const roomRules = catalog.filter((r) => r.group === 'rooms');
+    expect(roomRules.map((r) => [r.key, r.isDefault, r.pending, r.section])).toEqual([
+      ['room_rules.enabled', false, false, 'rooms'],
+      ['room_rules.checkout', true, true, 'rooms'],
+      ['room_rules.hourlyGraceMinutes', true, true, 'rooms'],
+      ['room_rules.defaultDeposit', true, true, 'rooms'],
+    ]);
+    expect(roomRules[0]!.updatedBy).toBeTruthy();
     expect((await board()).rooms.map((r) => [r.roomNo, r.status])).toEqual([
       ['301', 'vacant'],
       ['302', 'vacant'],
@@ -136,6 +146,18 @@ describe('只住房的客人：入住、押金、退房结账、反结账', () =
     const s = (await tile('301')).stay!;
     const preview = (await api(ctx.app, ctx.clerk, 'GET', `/api/rooms/stays/${s.id}/checkout-preview`)).body;
     expect(preview).toMatchObject({ dues: [], billAmount: 38800, total: 38800, depositBalance: 20000 });
+    // 退房结账前的核对（可以几间房合并）：每间房的明细、要补的房费、押金；只有收银（结账收款）能看
+    const combined = await api(ctx.app, ctx.clerk, 'GET', `/api/rooms/checkout-preview?ids=${s.id}`);
+    expect(combined.status, JSON.stringify(combined.body)).toBe(200);
+    expect(combined.body).toMatchObject({
+      totalAmount: 38800,
+      depositBalance: 20000,
+      depositByMethod: [{ method: 'cash', balance: 20000 }],
+      members: [],
+      stays: [{ stayId: s.id, roomNo: '301', guests: 2, guestLabel: '李先生', amount: 38800, depositBalance: 20000, dues: [], lines: [expect.objectContaining({ amount: 38800 })] }],
+    });
+    expect((await api(ctx.app, cleaner, 'GET', `/api/rooms/checkout-preview?ids=${s.id}`)).status).toBe(403);
+    expect((await api(ctx.app, ctx.clerk, 'GET', '/api/rooms/checkout-preview?ids=')).status).toBe(400);
     const m = await createMember(ctx, '外来会员', '19900077001');
     expect((await api(ctx.app, ctx.owner, 'POST', '/api/recharges', rechargeBody(m.id, 100000))).status).toBe(200);
     const pay = (payments: unknown[], expectedTotal = 38800, clientKey = randomUUID()) =>
@@ -255,6 +277,7 @@ describe('洗浴客人：房费挂手牌账单，先退房再结账', () => {
     expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${visitId}/cancel`, { reason: '开错牌' })).body.error.code).toBe('ROOM_OPEN');
     // 只住房的客人才能退房结账
     expect((await api(ctx.app, ctx.clerk, 'POST', '/api/rooms/checkout', { clientKey: randomUUID(), stayIds: [s.id], expectedTotal: 28800, payments: [] })).body.error.code).toBe('BATH_GUEST_ROOM');
+    expect((await api(ctx.app, ctx.clerk, 'GET', `/api/rooms/checkout-preview?ids=${s.id}`)).body.error.code).toBe('BATH_GUEST_ROOM');
     const close = await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${s.id}/close`, { clientKey: randomUUID(), expectedDue: 0 });
     expect(close.status, JSON.stringify(close.body)).toBe(200);
     expect(close.body).toMatchObject({ status: 'checked_out', depositBalance: 0 });

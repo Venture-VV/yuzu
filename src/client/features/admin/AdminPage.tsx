@@ -10,6 +10,7 @@ import { DiningSection } from './DiningSection';
 import { MembersSection } from './MembersSection';
 import { OpeningTab } from './OpeningTab';
 import { PermissionsSection } from './PermissionsSection';
+import { RoomsSection } from './RoomsSection';
 import { RuleCatalog } from './RuleCatalog';
 import { RulesTab } from './RulesTab';
 import { StaffTab } from './StaffTab';
@@ -46,6 +47,7 @@ export const adminRoutes: RouteObject[] = [
   },
   { path: 'technicians', element: <TechniciansSection /> },
   { path: 'dining', element: <DiningSection /> },
+  { path: 'rooms', element: <RoomsSection /> },
   {
     path: 'staff',
     element: (

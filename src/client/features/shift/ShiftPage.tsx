@@ -138,7 +138,7 @@ function OpenShift({ shift }: { shift: ShiftRecord }) {
   );
 }
 
-/** 应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金（R1.2 之前交班的快照没有退款一项） */
+/** 应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金 + 客房押金现金（收 − 退）（之前交班的快照没有退款、押金两项） */
 function CashFormula({ cash }: { cash: ShiftSummary['cash'] }) {
   return (
     <p className="text-[12px] text-ink-3" data-testid="shift-cash-formula">
@@ -147,6 +147,12 @@ function CashFormula({ cash }: { cash: ShiftSummary['cash'] }) {
         <>
           {' '}
           − 反结账退现金 <Money cents={cash.refund} />
+        </>
+      ) : null}
+      {cash.deposit ? (
+        <>
+          {' '}
+          {cash.deposit > 0 ? '+' : '−'} 押金现金（收 − 退） <Money cents={Math.abs(cash.deposit)} />
         </>
       ) : null}
     </p>
@@ -197,6 +203,7 @@ function SummaryView({ summary }: { summary: ShiftSummary }) {
           赠金 <Money cents={summary.recharges.bonus} /> · 会员工作台储值消费 {summary.walletConsumes.count} 笔 <Money cents={summary.walletConsumes.total} />（不是现金）
         </p>
       </div>
+      {summary.deposits && <DepositsView deposits={summary.deposits} />}
       {summary.voids.length > 0 &&
         (refunds ? (
           <Notice tone="warning" icon={<Undo2 className="size-4" />} title={`本班次反结账 ${summary.voids.length} 张 · 退款 ¥${(refunds.total / 100).toFixed(2)}`} className="md:col-span-2">
@@ -211,6 +218,20 @@ function SummaryView({ summary }: { summary: ShiftSummary }) {
             {summary.voids.map((v) => `${v.checkoutNo}（¥${(v.amount / 100).toFixed(2)}，${v.reason}${v.voidedByName ? `，${v.voidedByName}反结账、从本班钱箱退` : ''}）`).join('；')}。原单收过的现金不计入应有现金，请核对是否已退还或已重新收取。
           </Notice>
         ))}
+    </div>
+  );
+}
+
+/** 客房押金（S7）：本班次收、退的押金，按收款方式；押金是负债、不算营业额，现金押金计入应有现金 */
+function DepositsView({ deposits }: { deposits: NonNullable<ShiftSummary['deposits']> }) {
+  const line = (list: typeof deposits.received) =>
+    list.length ? list.map((m) => `${PAYMENT_METHOD_LABELS[m.method]} ${m.count} 笔 ¥${(m.amount / 100).toFixed(2)}`).join('、') : '无';
+  return (
+    <div className="rounded-lg border border-line p-4 md:col-span-2" data-testid="shift-deposits">
+      <p className="text-[13px] font-bold text-ink-2">客房押金（不算营业额）</p>
+      <p className="mt-1.5 text-[13px] text-ink-2">收：{line(deposits.received)}</p>
+      <p className="mt-0.5 text-[13px] text-ink-2">退：{line(deposits.refunded)}</p>
+      <p className="mt-1.5 text-[12px] text-ink-3">现金押金计入应有现金（收的加、退的减）；扫码、银行卡收的押金退房时在商户后台原路退。</p>
     </div>
   );
 }

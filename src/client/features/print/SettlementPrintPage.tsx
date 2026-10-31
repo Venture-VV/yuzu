@@ -136,6 +136,20 @@ function SettlementSheet({ s }: { s: SettlementSummary }) {
           <p className="mt-1 text-[11px]">按收款方式核对抽屉现金与各收款账户；会员储值、团购券、优惠 / 免单不计入。</p>
         </Section>
 
+        {s.deposits && (s.deposits.received.length > 0 || s.deposits.refunded.length > 0 || s.deposits.applied !== 0 || s.deposits.restored !== 0 || s.deposits.held !== 0) && (
+          <Section title="客房押金 · 负债，不算营业额" testId="print-settlement-deposits">
+            {s.deposits.received.map((m) => (
+              <Row key={`r-${m.method}`} left={`收 ${PAYMENT_METHOD_LABELS[m.method]} · ${m.count} 笔`} right={yuan(m.amount)} />
+            ))}
+            {s.deposits.refunded.map((m) => (
+              <Row key={`f-${m.method}`} left={`退 ${PAYMENT_METHOD_LABELS[m.method]} · ${m.count} 笔`} right={yuan(-m.amount)} />
+            ))}
+            <Row left="退房结账押金抵扣（计入营业额）" right={yuan(s.deposits.applied)} />
+            {s.deposits.restored !== 0 && <Row left="反结账恢复为押金" right={yuan(s.deposits.restored)} />}
+            <Row left="当天结束时在住押金" right={yuan(s.deposits.held)} strong />
+          </Section>
+        )}
+
         <Section title="会员储值">
           <Row left={`充值实收 · ${s.recharge.count} 笔`} right={yuan(s.recharge.paid)} strong />
           {s.recharge.byMethod.map((m) => (
