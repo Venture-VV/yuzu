@@ -2,7 +2,8 @@
 //   后台「客房」建房型、房间、开启 → 前台接待一位客人 → 主导航「客房」→ 填手牌入住（收押金）→ 入住单收押金、按原方式退一部分
 //   → 换房（原房间待打扫）→ 前台结账：客人还住着客房，结账对话框里直接退房（押金原路退回），房费挂到手牌账单上和门票一起结
 //   → 改房态（打扫、维修）→ 夜审对话框 → 看板「客房」；
-//   入住响应丢失：刷新后顶部仍提醒待确认，「去处理」回到那间房的入住对话框，查回已生效、只入住一次。
+//   入住响应丢失：刷新后顶部仍提醒待确认，「去处理」回到那间房的入住对话框，查回已生效、只入住一次；
+//   房价刚改过（v0.7.5）：入住被拒绝后对话框里的房价跟着刷新，再确认就按新房价入住。
 // 依赖四套演示数据（仅独立演示库）；账号：店主 linlan、前台 xiaozhou，密码 yuzu2026。
 // 专用房型、房间（E2E 开头）留着下次沿用；开始时收掉上次中断留下的入住，结束时关闭客房功能，可重复执行。
 import { randomUUID } from 'node:crypto';
@@ -338,6 +339,42 @@ test.describe('S7 客房', () => {
     } finally {
       await page.unrouteAll({ behavior: 'ignoreErrors' });
       await relogin(page, 'linlan');
+      await cleanup(page);
+      if (visit !== null) await clearVisit(page, visit, 'E2E：收尾');
+    }
+  });
+
+  test('房价刚改过：入住被拒绝后对话框里的房价跟着刷新，填的内容还在，再确认就按新房价入住（v0.7.5）', async ({ page }) => {
+    let visit: number | null = null;
+    await login(page, 'linlan');
+    const typeOf = async () => (await getJson<RoomsAdmin>(page, '/api/admin/rooms')).types.find((x) => x.name === DAILY.name)!;
+    const setPrice = async (price: number) => {
+      const t = await typeOf();
+      await send(page, 'put', `/api/admin/rooms/types/${t.id}`, { name: t.name, kind: t.kind, price, blockMinutes: t.blockMinutes, sortOrder: t.sortOrder, active: true });
+    };
+    try {
+      await prepare(page);
+      const g = await checkinGuest(page, 'E2E 改价');
+      visit = g.visitId;
+      await page.goto('/rooms');
+      await page.getByTestId(`room-tile-${R1}`).click();
+      const dialog = page.getByRole('dialog').filter({ hasText: `入住 · ${R1}` });
+      await expect(dialog).toContainText('¥288 / 晚');
+      await dialog.getByTestId('room-checkin-tag').fill(g.tag);
+      await dialog.getByTestId('room-checkin-label').fill('E2E 改价');
+      // 对话框开着时后台把房价改成 ¥300：确认被拒绝，对话框里的房价跟着刷新，不用关掉重开
+      await setPrice(30000);
+      await dialog.getByTestId('room-checkin-submit').click();
+      await expect(dialog).toContainText('房价刚刚改为 ¥300.00');
+      await expect(dialog).toContainText('¥300 / 晚');
+      await expect(dialog.getByTestId('room-checkin-tag')).toHaveValue(g.tag);
+      await dialog.getByTestId('room-checkin-submit').click();
+      await expect(page.getByText(`${R1} 已入住`)).toBeVisible();
+      const tile = await tileOf(page, R1);
+      expect(tile.stay).toMatchObject({ guestLabel: 'E2E 改价', tagCode: g.tag });
+      expect((await getJson<StayDetail>(page, `/api/rooms/stays/${tile.stay!.id}`)).rate).toBe(30000);
+    } finally {
+      await setPrice(DAILY.price);
       await cleanup(page);
       if (visit !== null) await clearVisit(page, visit, 'E2E：收尾');
     }

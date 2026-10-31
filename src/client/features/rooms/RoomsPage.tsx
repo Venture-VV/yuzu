@@ -76,7 +76,8 @@ function RoomsBoardView() {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
   const board = useRoomBoard();
-  const [checkinRoom, setCheckinRoom] = useState<RoomBoardRoom | null>(null);
+  // 入住对话框按房间 id 取看板上最新的房间：房价刚改过被拒绝后，看板刷新，对话框里的房价跟着更新
+  const [checkinRoomId, setCheckinRoomId] = useState<number | null>(null);
   const [stay, setStay] = useState<{ id: number; action?: StayAction } | null>(null);
   const [housekeepRoom, setHousekeepRoom] = useState<RoomBoardRoom | null>(null);
   const [auditing, setAuditing] = useState(false);
@@ -90,7 +91,7 @@ function RoomsBoardView() {
     const s = Number(params.get('s')) || null;
     if (resume === 'room_checkin' && r) {
       const room = board.data.rooms.find((x) => x.id === r);
-      if (room) setCheckinRoom(room);
+      if (room) setCheckinRoomId(room.id);
     } else if (s && (resume === 'room_extend' || resume === 'room_deposit' || resume === 'room_refund' || resume === 'room_close')) {
       setStay({ id: s, action: resume === 'room_extend' ? 'extend' : resume === 'room_deposit' ? 'deposit' : resume === 'room_refund' ? 'refund' : 'close' });
     }
@@ -100,6 +101,7 @@ function RoomsBoardView() {
   }, [resume, board.data, params, setParams]);
 
   const rooms = useMemo(() => board.data?.rooms ?? [], [board.data]);
+  const checkinRoom = checkinRoomId == null ? null : (rooms.find((r) => r.id === checkinRoomId) ?? null);
   const floors = useMemo(() => {
     const map = new Map<string, RoomBoardRoom[]>();
     for (const r of rooms) map.set(r.floor, [...(map.get(r.floor) ?? []), r]);
@@ -111,7 +113,7 @@ function RoomsBoardView() {
       // 只管打扫的岗位（后勤）看不了入住单：在住的房退房后才变待打扫
       if (canOperate) setStay({ id: r.stay.id });
       else toast({ tone: 'info', title: `${r.roomNo} 在住`, body: '客人退房后房间变为待打扫，打扫好了再点「已打扫」' });
-    } else if (r.status === 'vacant' && canOperate) setCheckinRoom(r);
+    } else if (r.status === 'vacant' && canOperate) setCheckinRoomId(r.id);
     else if (can('room.housekeep')) setHousekeepRoom(r);
     else toast({ tone: 'info', title: `${r.roomNo} ${ROOM_BOARD_LABELS[r.status]}`, body: '入住要有「客房入住、退房」权限，改房态要有「客房打扫、维修」权限' });
   };
@@ -163,13 +165,13 @@ function RoomsBoardView() {
             can('room.housekeep')
               ? () => {
                   setHousekeepRoom(checkinRoom);
-                  setCheckinRoom(null);
+                  setCheckinRoomId(null);
                 }
               : undefined
           }
-          onClose={() => setCheckinRoom(null)}
+          onClose={() => setCheckinRoomId(null)}
           onDone={(d) => {
-            setCheckinRoom(null);
+            setCheckinRoomId(null);
             setStay({ id: d.id });
             void qc.invalidateQueries({ queryKey: roomsKey });
           }}

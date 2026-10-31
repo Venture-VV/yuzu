@@ -371,18 +371,25 @@ interface LockedStay {
   checkedInBy: number;
 }
 
-/** 入住单按 id 升序加锁（先锁房间：入住单的房间在锁房间之前读一次，锁好后核对没有换过房） */
-async function lockStays(tx: Tx, ids: number[]): Promise<Map<number, LockedStay>> {
+/**
+ * 入住单按 id 升序加锁（先锁房间：入住单的房间在锁房间之前读一次，锁好后核对没有换过房）。
+ * 调用方已经按顺序锁好房间时（换房）传入它读到的房间，这里不再另锁房间，换过房就拒绝
+ */
+async function lockStays(tx: Tx, ids: number[], lockedRooms?: Map<number, number>): Promise<Map<number, LockedStay>> {
   const unique = [...new Set(ids)].sort((a, b) => a - b);
   if (unique.length === 0) return new Map();
-  const peek = await tx<{ id: number; roomId: number }[]>`SELECT id, room_id FROM room_stays WHERE id IN ${tx(unique)}`;
-  if (peek.length !== unique.length) throw notFound('入住单不存在，请刷新后重试');
-  await lockRooms(tx, peek.map((p) => p.roomId));
+  let roomOf = lockedRooms;
+  if (!roomOf) {
+    const peek = await tx<{ id: number; roomId: number }[]>`SELECT id, room_id FROM room_stays WHERE id IN ${tx(unique)}`;
+    if (peek.length !== unique.length) throw notFound('入住单不存在，请刷新后重试');
+    await lockRooms(tx, peek.map((p) => p.roomId));
+    roomOf = new Map(peek.map((p) => [p.id, p.roomId]));
+  }
   const rows = await tx<LockedStay[]>`
     SELECT id, stay_no, room_id, kind, rate, block_minutes, bill_id, visit_id, guests, status, business_date, checked_in_at, checked_in_by
     FROM room_stays WHERE id IN ${tx(unique)} ORDER BY id FOR UPDATE`;
   for (const r of rows) {
-    if (r.roomId !== peek.find((p) => p.id === r.id)!.roomId) throw conflict('ROOM_CHANGED', `入住单 ${r.stayNo} 刚刚换过房，请刷新后重试`);
+    if (r.roomId !== roomOf.get(r.id)) throw conflict('ROOM_CHANGED', `入住单 ${r.stayNo} 刚刚换过房，请刷新后重试`);
   }
   return new Map(rows.map((r) => [r.id, r]));
 }
@@ -644,9 +651,9 @@ export async function moveStay(deps: Deps, id: number, raw: unknown, ctx: OpCont
     const [peek] = await tx<{ roomId: number }[]>`SELECT room_id FROM room_stays WHERE id = ${id}`;
     if (!peek) throw notFound('入住单不存在');
     if (peek.roomId === input.toRoomId) throw badRequest('新房间与原房间相同');
-    // 两间房一起按 id 升序加锁，再锁入住单
+    // 两间房一起按 id 升序加锁，再锁入住单；入住单在这之前被别的终端换走了就拒绝（不再去锁第三间房）
     const rooms = await lockRooms(tx, [peek.roomId, input.toRoomId]);
-    const s = (await lockStays(tx, [id])).get(id)!;
+    const s = (await lockStays(tx, [id], new Map([[id, peek.roomId]]))).get(id)!;
     assertStayOpen(s);
     const from = rooms.get(s.roomId)!;
     const to = rooms.get(input.toRoomId)!;
@@ -821,6 +828,11 @@ export const CloseStayInput = z.object({
   clientKey,
   /** 员工确认时看到的要补的房费合计；过了退房时间等变化时拒绝，重新核对 */
   expectedDue: cents('要补的房费'),
+  /** 员工确认时看到的押金余额（按收款方式），退房按它原路退；其他终端刚收、退过押金时拒绝，重新核对 */
+  expectedDeposits: z
+    .array(z.object({ method: z.enum(PAYMENT_METHODS, '押金的收款方式不正确'), balance: cents('押金余额') }), '请核对要退的押金')
+    .max(PAYMENT_METHODS.length, '押金的收款方式重复')
+    .refine((list) => new Set(list.map((d) => d.method)).size === list.length, '押金的收款方式重复'),
 });
 
 /** 退房：补齐房费（挂在手牌账单上，随手牌结账）、押金全部原路退回、房间变待打扫 */
@@ -829,11 +841,11 @@ export async function closeStay(deps: Deps, id: number, raw: unknown, ctx: OpCon
   const { clientKey: key, ...payload } = input;
   const requestHash = hashRequest({ id, ...payload });
   const seenShift = await openShiftOf(deps.sql, ctx.actor.id);
-  const [held] = await deps.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM room_deposits WHERE stay_id = ${id}`;
+  const expected = new Map(input.expectedDeposits.filter((d) => d.balance > 0).map((d) => [d.method, d.balance] as const));
   await runIdempotent(deps, { key, opType: 'room_close', requestHash }, async (tx) => {
     const at = ctx.at ?? new Date();
-    // 有押金要退时先对班次加共享锁（退现金记在经办人当班的钱箱）
-    const shiftId = held!.n > 0 ? await lockPaymentShift(tx, ctx.actor.id, seenShift) : null;
+    // 员工确认时有押金要退：先对班次加共享锁（退现金记在经办人当班的钱箱）；押金都退完了的不用开班
+    const shiftId = expected.size > 0 ? await lockPaymentShift(tx, ctx.actor.id, seenShift) : null;
     const s = (await lockStays(tx, [id])).get(id)!;
     assertStayOpen(s);
     const visit = (await lockVisits(tx, [s.visitId])).get(s.visitId)!;
@@ -843,11 +855,20 @@ export async function closeStay(deps: Deps, id: number, raw: unknown, ctx: OpCon
     if (dueAmount !== input.expectedDue) {
       throw conflict('ROOM_DUE_CHANGED', `要补的房费刚刚变为 ${formatYuan(dueAmount)}（可能刚过了退房时间），请核对后重新确认`, { dueAmount });
     }
+    // 收、退押金都要锁入住单，锁好后余额不会再变：与员工看到的逐项核对，退的就是员工交给客人的
+    const balances = (await depositBalances(tx, [id])).get(id) ?? new Map<PaymentMethod, number>();
+    const methods = new Set([...balances.keys(), ...expected.keys()]);
+    if ([...methods].some((m) => (balances.get(m) ?? 0) !== (expected.get(m) ?? 0))) {
+      const now = byMethodList(balances).map((x) => ({ method: x.method, amount: x.balance }));
+      throw conflict(
+        'DEPOSIT_CHANGED',
+        `押金刚刚有变动（其他终端刚收或退过），现在${now.length ? `是 ${describeMethods(now)}` : '没有押金'}，请核对后重新确认退房`,
+        { depositByMethod: byMethodList(balances) },
+      );
+    }
     const date = await businessDate(tx, deps, at);
     const [room] = await tx<{ roomNo: string }[]>`SELECT room_no FROM rooms WHERE id = ${s.roomId}`;
     await postRoomCharges(tx, { id: s.id, billId: s.billId, roomNo: room!.roomNo }, dues, { source: 'checkout', postKey: key, actorId: ctx.actor.id, at, date });
-    const balance = [...((await depositBalances(tx, [id])).get(id) ?? new Map()).values()].reduce((sum, x) => sum + x, 0);
-    if (balance > 0 && held!.n === 0) throw conflict('DEPOSIT_CHANGED', '这间房刚刚收了押金，请刷新后重新退房');
     const refunded = await refundAllDeposits(tx, [id], { shiftId, actorId: ctx.actor.id, date, at, reason: '退房，押金原路退回' });
     await tx`UPDATE room_stays SET status = 'checked_out', closed_at = ${at}, closed_by = ${ctx.actor.id} WHERE id = ${id}`;
     await tx`UPDATE rooms SET housekeeping = 'dirty', maintenance_note = NULL, updated_at = now() WHERE id = ${s.roomId}`;
