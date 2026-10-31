@@ -23,6 +23,7 @@ import { guard, guardAny } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { AppError } from '../lib/errors';
+import { routePath } from '../lib/paths';
 import { parse } from '../lib/validate';
 import { executiveReport, reportClock, reportPeriod } from './reports';
 
@@ -75,7 +76,8 @@ const SwitchesInput = z.object({
  */
 export function registerErpModuleGate(app: FastifyInstance, deps: Deps) {
   app.addHook('preHandler', async (req) => {
-    const key = erpModuleOfApi(req.url);
+    // 按实际进入的接口认模块（路由按解码后的路径匹配，原始地址可能做了 URL 编码）
+    const key = erpModuleOfApi(routePath(req));
     if (!key || !req.hasSession) return;
     if ((await enabledErpModules(deps.sql)).has(key)) return;
     const def = ERP_MODULES[key];
