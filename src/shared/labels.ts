@@ -35,6 +35,7 @@ export const DUTY_LABELS: Record<Duty, { title: string; hint: string }> = {
   purchase: { title: '采购经办', hint: '维护档案、编制采购单、跟进价格与到货' },
   payable: { title: '对账付款', hint: '核对货款、登记期初未付与实际付款' },
   approve: { title: '库存采购负责人', hint: '确认采购、报损、盘点调整、退货、付款与冲销' },
+  cost: { title: '成本核算', hint: '登记费用报销（发票、税点、科目）与备用金打款、退回（v0.7.7）' },
 };
 
 export const DEDUCTION_RULE_LABELS: Record<DeductionRule, { title: string; description: string }> = {

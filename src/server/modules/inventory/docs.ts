@@ -15,6 +15,7 @@ import {
   type InvDocSummary,
   type InvDocType,
 } from '@shared/inventory';
+import type { SupplierSettlement } from '@shared/expenses';
 import { can, type Permission } from '@shared/permissions';
 import { fitsDecimals, formatQty, lineAmountCents, priceChangePercent, toBaseQty } from '@shared/quantity';
 import { isUniqueViolation, type Db, type Tx } from '../../db';
@@ -677,6 +678,8 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
     docDate: doc.docDate,
     operatorId: actor.id,
   });
+  // 收货与退货记下结算方式（v0.7.7）：挂账记应付；现付的货款走费用报销，不记应付
+  let settlement: SupplierSettlement | null = null;
 
   switch (doc.docType) {
     case 'opening': {
@@ -707,7 +710,9 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
         }
       }
       for (const l of lines) await applyMove(tx, mats.get(l.materialId)!, l.qtyMilli, ref(l, 'receipt'));
-      if (doc.amountCents > 0) {
+      const [sup] = await tx<{ settlement: SupplierSettlement }[]>`SELECT settlement FROM suppliers WHERE id = ${doc.supplierId}`;
+      settlement = sup!.settlement;
+      if (doc.amountCents > 0 && settlement === 'credit') {
         await tx`
           INSERT INTO ap_entries (supplier_id, entry_type, amount_delta_cents, inv_doc_id, entry_date, operator_id)
           VALUES (${doc.supplierId}, 'receipt', ${doc.amountCents}, ${doc.id}, ${doc.docDate}, ${actor.id})`;
@@ -745,7 +750,10 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
       } else {
         assertEnoughStock(mats, lines);
         for (const l of lines) await applyMove(tx, mats.get(l.materialId)!, -l.qtyMilli, ref(l, 'supplier_return'));
-        if (doc.amountCents > 0) {
+        // 退货跟着原收货单的结算方式：现付的收货没记应付，退货也不记应付扣款（供应商退款在 RQ-002 做）
+        const [src] = await tx<{ settlement: SupplierSettlement | null }[]>`SELECT settlement FROM inv_docs WHERE id = ${doc.sourceDocId}`;
+        settlement = src?.settlement ?? 'credit';
+        if (doc.amountCents > 0 && settlement === 'credit') {
           await tx`
             INSERT INTO ap_entries (supplier_id, entry_type, amount_delta_cents, inv_doc_id, entry_date, operator_id)
             VALUES (${doc.supplierId}, 'supplier_return', ${-doc.amountCents}, ${doc.id}, ${doc.docDate}, ${actor.id})`;
@@ -772,7 +780,7 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
   }
 
   await tx`
-    UPDATE inv_docs SET status = 'confirmed', confirmed_by = ${actor.id}, confirmed_at = now(),
+    UPDATE inv_docs SET status = 'confirmed', confirmed_by = ${actor.id}, confirmed_at = now(), settlement = ${settlement},
            submitted_by = coalesce(submitted_by, ${actor.id}), submitted_at = coalesce(submitted_at, now()), updated_at = now()
     WHERE id = ${doc.id}`;
 }

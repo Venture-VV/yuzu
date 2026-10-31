@@ -58,6 +58,8 @@ export async function openItems(db: Db, supplierId: number, excludePaymentId: nu
                      WHERE l.doc_id = d.id AND l.line_no <= 3), '') AS summary
     FROM inv_docs d LEFT JOIN purchase_orders po ON po.id = d.purchase_order_id
     WHERE d.doc_type = 'receipt' AND d.status = 'confirmed' AND d.supplier_id = ${supplierId} AND d.amount_cents > 0
+      -- 现付供应商的收货没记应付（货款走费用报销，v0.7.7），不能在这里付款核销
+      AND d.settlement = 'credit'
     ORDER BY d.doc_date, d.id`;
   const openings = await db<OpenItem[]>`
     SELECT 'opening' AS kind, o.id, o.doc_no, o.as_of_date AS date, o.amount_cents, 0 AS credit_cents,

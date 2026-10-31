@@ -13,7 +13,7 @@
 export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice'] as const;
 export type Role = (typeof ROLES)[number];
 
-export const DUTIES = ['stock', 'purchase', 'payable', 'approve'] as const;
+export const DUTIES = ['stock', 'purchase', 'payable', 'approve', 'cost'] as const;
 export type Duty = (typeof DUTIES)[number];
 
 export interface PermissionSubject {
@@ -82,6 +82,17 @@ export const PERMISSIONS = {
   'inventory.export': { roles: ['owner'], duties: ['payable', 'approve'] },
   /** ERP 营业数据（只读）：每天的营业收入、收款与部门构成、日结情况（v0.7.3，待确认：默认店主与店总） */
   'erp.revenue': { roles: ['owner', 'store_manager'] },
+  // ── 费用报销与备用金（v0.7.7，飞书需求 RQ-005；D10：按现有的岗位 + 职责，见 docs/EXPENSES.md）──
+  /** 查看费用报销、备用金与每日平账（物资经办、采购经办、负责人只读） */
+  'expense.read': { roles: ['owner'], duties: ['stock', 'purchase', 'payable', 'cost', 'approve'] },
+  /** 登记费用报销（发票、税点、科目） */
+  'expense.manage': { roles: ['owner'], duties: ['cost'] },
+  /** 登记备用金打款、退回、补付 */
+  'petty.manage': { roles: ['owner'], duties: ['payable', 'cost'] },
+  /** 确认超门槛的报销；冲销报销、打款、退回补付 */
+  'expense.approve': { roles: ['owner'], duties: ['approve'] },
+  /** 导出报销明细与每日平账 */
+  'expense.export': { roles: ['owner'], duties: ['payable', 'cost', 'approve'] },
   // ── 管理 ──
   // ── 当场授权（主管在弹窗里输入自己的账号密码确认）──
   /** 授权超过单笔上限的充值 / 消费 */
@@ -202,6 +213,11 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'inventory.approve': '负责人确认（采购、报损、盘点调整、退货、付款、冲销）',
   'inventory.export': '导出库存与对账',
   'erp.revenue': 'ERP：看营业数据（只读）',
+  'expense.read': '查看费用报销、备用金与每日平账',
+  'expense.manage': '登记费用报销（发票、税点、科目）',
+  'petty.manage': '登记备用金打款、退回、补付',
+  'expense.approve': '确认超门槛的报销；冲销报销与备用金单据',
+  'expense.export': '导出报销明细与每日平账',
   'auth.overLimit': '当场授权超过单笔上限的充值 / 消费',
   'auth.vipOverride': '当场授权散客或低等级会员使用 VIP 柜',
   'auth.discount': '当场授权优惠 / 免单、降低票种与免票',
@@ -231,8 +247,11 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
     items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen', 'room.operate', 'room.housekeep'],
   },
   {
-    title: 'ERP（库存、采购、货款、营业数据）',
-    items: ['inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'supplierReturn.create', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.export', 'erp.revenue'],
+    title: 'ERP（库存、采购、货款、费用、营业数据）',
+    items: [
+      'inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'supplierReturn.create', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.export',
+      'expense.read', 'expense.manage', 'petty.manage', 'expense.approve', 'expense.export', 'erp.revenue',
+    ],
   },
   { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount'] },
   { title: '数据看板', items: ['report.executive', 'report.members', 'report.technicians', 'report.commission'] },

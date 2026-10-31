@@ -39,7 +39,7 @@ export async function getMaterial(db: Db, id: number): Promise<Material> {
 
 export const listSuppliers = (db: Db, includeInactive = false) =>
   db<Supplier[]>`
-    SELECT id, code, name, contact, phone, note, active, is_synthetic FROM suppliers
+    SELECT id, code, name, contact, phone, note, settlement, active, is_synthetic FROM suppliers
     ${includeInactive ? db`` : db`WHERE active`} ORDER BY active DESC, code`;
 
 export const listDepartments = (db: Db, includeInactive = false) =>
@@ -83,6 +83,8 @@ export const SupplierInput = z.object({
   contact: text(40, '联系人').default(''),
   phone: text(32, '电话').default(''),
   note: text(200, '备注').default(''),
+  /** 结算方式（v0.7.7）：挂账 / 现付；新建不填按挂账，修改不填保持原样 */
+  settlement: z.enum(['credit', 'cash']).optional(),
   active: z.boolean().default(true),
 });
 export type SupplierInputData = z.input<typeof SupplierInput>;
@@ -135,14 +137,14 @@ export async function saveSupplier(db: Db, id: number | null, raw: SupplierInput
   try {
     if (id === null) {
       const [row] = await db<{ id: number }[]>`
-        INSERT INTO suppliers (code, name, contact, phone, note, active, is_synthetic)
-        VALUES (${s.code}, ${s.name}, ${s.contact}, ${s.phone}, ${s.note}, ${s.active}, ${extra.isSynthetic ?? false})
+        INSERT INTO suppliers (code, name, contact, phone, note, settlement, active, is_synthetic)
+        VALUES (${s.code}, ${s.name}, ${s.contact}, ${s.phone}, ${s.note}, ${s.settlement ?? 'credit'}, ${s.active}, ${extra.isSynthetic ?? false})
         RETURNING id`;
       return row!.id;
     }
     const rows = await db`
       UPDATE suppliers SET code = ${s.code}, name = ${s.name}, contact = ${s.contact}, phone = ${s.phone}, note = ${s.note},
-             active = ${s.active}, updated_at = now()
+             settlement = coalesce(${s.settlement ?? null}, settlement), active = ${s.active}, updated_at = now()
       WHERE id = ${id} RETURNING id`;
     if (rows.length === 0) throw notFound('供应商不存在');
     return id;

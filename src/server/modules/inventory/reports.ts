@@ -163,7 +163,8 @@ export function registerReportRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/inventory/todo-count', { preHandler: guard('inventory.approve') }, async () => {
     const [row] = await sql<{ count: number }[]>`
       SELECT (SELECT count(*) FROM inv_docs WHERE status = 'submitted') + (SELECT count(*) FROM purchase_orders WHERE status = 'submitted')
-           + (SELECT count(*) FROM payments WHERE status = 'submitted') + (SELECT count(*) FROM opening_payables WHERE status = 'submitted') AS count`;
+           + (SELECT count(*) FROM payments WHERE status = 'submitted') + (SELECT count(*) FROM opening_payables WHERE status = 'submitted')
+           + (SELECT count(*) FROM expense_claims WHERE status = 'submitted') AS count`;
     return { count: row!.count };
   });
 
