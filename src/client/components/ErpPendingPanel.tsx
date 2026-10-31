@@ -39,6 +39,8 @@ export function ErpPendingPanel({ types, onFound, className }: { types: readonly
   const qc = useQueryClient();
   const toast = useToast();
   const checked = useRef(new Set<string>());
+  const onFoundRef = useRef(onFound);
+  onFoundRef.current = onFound;
 
   // 进入页面先查回一次：已登记、已作废的不用员工再处理
   useEffect(() => {
@@ -50,7 +52,11 @@ export function ErpPendingPanel({ types, onFound, className }: { types: readonly
           if (!r.found && !r.abandoned) return;
           removeErpPending(op.key);
           void qc.invalidateQueries({ queryKey: ['inv'] });
-          if (r.found) toast({ tone: 'success', title: `已查回：${ERP_OP_LABELS[op.type]}已登记`, body: `${op.summary}。只登记了一次，不用重新填写。` });
+          if (r.found) {
+            toast({ tone: 'success', title: `已查回：${ERP_OP_LABELS[op.type]}已登记`, body: `${op.summary}。只登记了一次，不用重新填写。` });
+            const ref = refOfLookup(r);
+            if (ref) onFoundRef.current?.(op, ref);
+          }
         })
         .catch(() => checked.current.delete(op.key));
     }

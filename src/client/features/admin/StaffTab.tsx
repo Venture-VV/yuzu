@@ -10,7 +10,8 @@ import { useSession } from '../../lib/session';
 import { avatarTone, cn, relativeTime } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, Card, Field, Input, Notice, Segmented, Skeleton } from '../../components/ui';
+import { Badge, Button, Card, Field, Input, Notice, Segmented, Select, Skeleton } from '../../components/ui';
+import { useDepartments } from '../inventory/queries';
 
 export function StaffTab() {
   const session = useSession();
@@ -66,6 +67,7 @@ export function StaffTab() {
                       </Badge>
                     ))}
                 </span>
+                {s.departmentName && <span className="text-[12.5px] text-ink-2">所属部门：{s.departmentName}</span>}
                 {!s.active && <Badge tone="clay">已停用</Badge>}
                 {s.mustChangePassword && s.active && <Badge tone="yuzu">待首次改密</Badge>}
                 <div className="flex gap-1.5">
@@ -142,6 +144,9 @@ function StaffDialog({
   const [name, setName] = useState('');
   const [role, setRole] = useState<Role>('clerk');
   const [duties, setDuties] = useState<Duty[]>([]);
+  // 所属部门（v0.7.8）：部门申购只能给它提需求单；读不到部门列表时不改原来的设置
+  const departments = useDepartments(true);
+  const [departmentId, setDepartmentId] = useState<number | null>(null);
   const [active, setActive] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -153,6 +158,7 @@ function StaffDialog({
     setName(existing?.displayName ?? '');
     setRole(existing?.role ?? 'clerk');
     setDuties(existing?.duties ?? []);
+    setDepartmentId(existing?.departmentId ?? null);
     setActive(existing?.active ?? true);
     setError(null);
   }
@@ -162,10 +168,22 @@ function StaffDialog({
     setError(null);
     try {
       if (isNew) {
-        const r = await api.post<{ temporaryPassword: string }>('/api/staff', { username, displayName: name, role, duties: role === 'owner' ? [] : duties });
+        const r = await api.post<{ temporaryPassword: string }>('/api/staff', {
+          username,
+          displayName: name,
+          role,
+          duties: role === 'owner' ? [] : duties,
+          departmentId: departments.data ? departmentId : null,
+        });
         onCreated(name, r.temporaryPassword);
       } else if (existing) {
-        await api.put(`/api/staff/${existing.id}`, { displayName: name, role, duties: role === 'owner' ? [] : duties, active });
+        await api.put(`/api/staff/${existing.id}`, {
+          displayName: name,
+          role,
+          duties: role === 'owner' ? [] : duties,
+          active,
+          ...(departments.data ? { departmentId } : {}),
+        });
         toast({ tone: 'success', title: '已保存' });
       }
       void qc.invalidateQueries({ queryKey: qk.staff });
@@ -251,6 +269,21 @@ function StaffDialog({
           )}
           {role !== 'owner' && <p className="text-[12px] text-ink-3">库存职责不会带来会员钱包、撤销或日结权限。</p>}
         </Field>
+        {departments.data && (
+          <Field label="所属部门" htmlFor="s-dept" hint="部门申购只能给所属部门提采购需求单">
+            <Select id="s-dept" value={departmentId ?? ''} onChange={(e) => setDepartmentId(Number(e.target.value) || null)} data-testid="staff-dept">
+              <option value="">不设置</option>
+              {departments.data
+                .filter((d) => d.active || d.id === departmentId)
+                .map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                    {d.active ? '' : '（已停用）'}
+                  </option>
+                ))}
+            </Select>
+          </Field>
+        )}
         {!isNew && (
           <Field label="状态">
             <Segmented

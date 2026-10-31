@@ -206,6 +206,8 @@ export function ClaimFormPage() {
             poLineId: pl.poLineId,
           }));
     const deptName = departments.data?.find((d) => d.id === departmentId)?.name ?? '';
+    const names = payloadLines.map((l) => l.name);
+    const what = mode === 'po' && po.data ? `采购单 ${po.data.docNo}` : `${names[0] ?? ''}${names.length > 1 ? ` 等 ${names.length} 项` : ''}`;
     // 每次提交用新的操作编号：结果不明的那一笔留在本机，由页面顶部按原编号处理
     void send({
       clientKey: uuid(),
@@ -222,7 +224,7 @@ export function ClaimFormPage() {
       note: note.trim(),
       approveNow: needsApproval && approveNow,
       lines: payloadLines,
-    }, `${deptName} · ${purpose} · ¥${formatAmount(total)}`);
+    }, `${deptName} · ${purpose} · ${what} · ¥${formatAmount(total)}`);
   };
 
   const locked = busy;

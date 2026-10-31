@@ -115,7 +115,18 @@ function Materials({ editable }: { editable: boolean }) {
   );
 }
 
-function MaterialDialog({ editing, onClose }: { editing: Material | 'new' | null; onClose: () => void }) {
+/** 物料档案的新增 / 编辑。转采购单时（v0.7.8）新产品在这里建档：initial 带入需求单的名称与规格，onSaved 拿到新物料 */
+export function MaterialDialog({
+  editing,
+  onClose,
+  initial,
+  onSaved,
+}: {
+  editing: Material | 'new' | null;
+  onClose: () => void;
+  initial?: Partial<Pick<ReturnType<typeof toForm>, 'name' | 'specification' | 'inventoryUnit' | 'purchaseUnit' | 'supplierId'>>;
+  onSaved?: (m: Material) => void;
+}) {
   const toast = useToast();
   const invalidate = useInvalidateInventory();
   const suppliers = useSuppliers();
@@ -125,7 +136,7 @@ function MaterialDialog({ editing, onClose }: { editing: Material | 'new' | null
   const [saving, setSaving] = useState(false);
   if (editing !== last) {
     setLast(editing);
-    setForm(toForm(editing === 'new' ? null : editing));
+    setForm(editing === 'new' ? { ...toForm(null), ...initial } : toForm(editing));
     setError(null);
   }
   const m = editing && editing !== 'new' ? editing : null;
@@ -139,7 +150,9 @@ function MaterialDialog({ editing, onClose }: { editing: Material | 'new' | null
   const save = async () => {
     if (!form.code.trim() || !form.name.trim()) return setError('请填写物料编码和名称');
     if (!form.inventoryUnit.trim() || !form.purchaseUnit.trim()) return setError('请填写库存单位和采购单位');
-    if (!factor) return setError(`换算数量格式不正确（最多 ${decimals} 位小数）`);
+    // 采购单位与库存单位相同时换算固定为 1（输入框显示 1、不可改）
+    const sameUnits = form.purchaseUnit.trim() === form.inventoryUnit.trim();
+    if (!sameUnits && !factor) return setError(`换算数量格式不正确（最多 ${decimals} 位小数）`);
     if (form.low.trim() && low === null) return setError('提醒线格式不正确');
     if (form.price.trim() && price === null) return setError('参考价格式不正确');
     const body = {
@@ -150,7 +163,7 @@ function MaterialDialog({ editing, onClose }: { editing: Material | 'new' | null
       inventoryUnit: form.inventoryUnit.trim(),
       decimals,
       purchaseUnit: form.purchaseUnit.trim(),
-      purchaseFactorMilli: form.purchaseUnit.trim() === form.inventoryUnit.trim() ? 1000 : factor,
+      purchaseFactorMilli: sameUnits ? 1000 : factor,
       refPriceCents: price,
       defaultSupplierId: Number(form.supplierId) || null,
       lowStockMilli: low,
@@ -161,10 +174,10 @@ function MaterialDialog({ editing, onClose }: { editing: Material | 'new' | null
     setSaving(true);
     setError(null);
     try {
-      if (m) await api.put(`/api/inventory/materials/${m.id}`, body);
-      else await api.post('/api/inventory/materials', body);
+      const saved = m ? await api.put<Material>(`/api/inventory/materials/${m.id}`, body) : await api.post<Material>('/api/inventory/materials', body);
       await invalidate();
       toast({ tone: 'success', title: '物料档案已保存', body: body.name });
+      onSaved?.(saved);
       onClose();
     } catch (e) {
       setError(errorMessage(e));

@@ -41,6 +41,8 @@ import { RevenuePage } from './features/erp/RevenuePage';
 import { ClaimFormPage } from './features/expenses/ClaimFormPage';
 import { ExpensesPage } from './features/expenses/ExpensesPage';
 import { PettyPage } from './features/expenses/PettyPage';
+import { RequestFormPage } from './features/requests/RequestFormPage';
+import { RequestsPage } from './features/requests/RequestsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -163,6 +165,9 @@ const router = createBrowserRouter([
       { path: 'expenses', element: <ExpensesPage /> },
       { path: 'expenses/new', element: <ClaimFormPage /> },
       { path: 'petty', element: <PettyPage /> },
+      { path: 'requests', element: <RequestsPage /> },
+      { path: 'requests/new', element: <RequestFormPage mode="new" /> },
+      { path: 'requests/:id/edit', element: <RequestFormPage mode="edit" /> },
       { path: '*', element: <Navigate to="/erp" replace /> },
     ],
   },

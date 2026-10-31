@@ -9,6 +9,7 @@ import { useCan, useSession } from '../../lib/session';
 import { cn, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
+import { ImageThumbs } from '../../components/Images';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Button, Field, IconButton, Input, MoneyInput, Notice, Select, Skeleton, Spinner } from '../../components/ui';
@@ -1211,6 +1212,9 @@ function ReceiptCells({
                   <Qty milli={Math.max(0, row.poLine.baseQtyMilli - row.poLine.receivedMilli)} unit={row.poLine.inventoryUnit} />
                 </span>
               )}
+              {/* 按单收货（v0.7.8）：采购单行的规格与图片，库管核对实物 */}
+              {row.poLine?.spec && <span className="block font-semibold text-ink-2">规格：{row.poLine.spec}</span>}
+              {row.poLine && row.poLine.images.length > 0 && <ImageThumbs images={row.poLine.images} size={36} className="my-1" />}
               现库存 <Qty milli={m.stockMilli} unit={m.inventoryUnit} />
               {row.after != null && (
                 <>

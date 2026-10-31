@@ -1,22 +1,26 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Link, Navigate, useNavigate, useParams } from 'react-router';
-import { ArrowLeft, CircleAlert, CircleCheck, CloudOff, RotateCw, Search, ShoppingCart, Trash2 } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
+import { ArrowLeft, CircleAlert, CircleCheck, ClipboardList, CloudOff, PackagePlus, RotateCw, Search, ShoppingCart, Trash2, X } from 'lucide-react';
 import type { Material } from '@shared/inventory';
 import { centsToInput, parseYuan } from '@shared/money';
-import type { PriceCompare, PurchaseOrder } from '@shared/purchasing';
+import type { PoLineRequest, PriceCompare, PurchaseOrder } from '@shared/purchasing';
 import { fitsDecimals, formatQty, lineAmountCents, parseQty, priceChangePercent, toBaseQty } from '@shared/quantity';
+import { MAX_LINE_IMAGES, type ImageRef, type OpenRequestLine } from '@shared/requests';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
+import { ImagePicker, ImageThumbs } from '../../components/Images';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Button, Field, IconButton, Input, MoneyInput, Notice, Select, Skeleton } from '../../components/ui';
 import { MaterialPicker } from '../inventory/inputs';
+import { MaterialDialog } from '../inventory/MasterTab';
 import { SimRule } from '../inventory/parts';
 import { useInvSettings, useMaterials, useSuppliers } from '../inventory/queries';
 import { CompareChip } from './parts';
+import { useOpenLines } from '../requests/queries';
 import { useBaseline, useInvalidateAll, usePo } from './queries';
 
 interface Line {
@@ -33,6 +37,31 @@ interface Line {
   /** 已有行的比价（按下单日期计算） */
   compare: PriceCompare | null;
   note: string;
+  /** 规格（v0.7.8）：默认带物料档案的规格或需求单的详情 */
+  spec: string;
+  images: ImageRef[];
+  /** 来自哪几行需求（v0.7.8）：同一物料的几行需求合并成这一行 */
+  requests: PoLineRequest[];
+}
+
+const asRequest = (o: OpenRequestLine): PoLineRequest => ({
+  lineId: o.id,
+  requestId: o.requestId,
+  requestNo: o.requestNo,
+  departmentName: o.department.name,
+  name: o.name,
+  qtyMilli: o.qtyMilli,
+  unit: o.unit,
+});
+
+/** 需求行的数量换成采购单位：单位是采购单位或库存单位时能换，换不出来返回 null（由采购自己填） */
+function requestQtyInPurchase(o: { qtyMilli: number; unit: string }, m: Material): number | null {
+  if (o.unit === m.purchaseUnit) return o.qtyMilli;
+  if (o.unit === m.inventoryUnit) {
+    const purchaseMilli = (o.qtyMilli * 1000) / m.purchaseFactorMilli;
+    return Number.isInteger(purchaseMilli) ? purchaseMilli : null;
+  }
+  return null;
 }
 
 type Mode = 'new' | 'edit' | 'revise';
@@ -64,6 +93,9 @@ function linesFrom(po: PurchaseOrder): Line[] {
     receivedMilli: l.receivedMilli,
     compare: l.compare,
     note: l.note,
+    spec: l.spec,
+    images: l.images,
+    requests: l.requests,
   }));
 }
 
@@ -87,6 +119,13 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
   const [approveNow, setApproveNow] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: 'edit' });
   const [error, setError] = useState<string | null>(null);
+  // 转采购单（v0.7.8）：?requestLines=1,2,3 带来已通过的需求行；选了物料的直接加进明细（同一物料合并），新产品先选或新建物料
+  const [params] = useSearchParams();
+  const requestIds = mode === 'new' && /^\d+(,\d+)*$/.test(params.get('requestLines') ?? '') ? params.get('requestLines') : null;
+  const openLines = useOpenLines(requestIds, !!requestIds);
+  const [unmatched, setUnmatched] = useState<OpenRequestLine[]>([]);
+  const [creating, setCreating] = useState<OpenRequestLine | null>(null);
+  const seeded = useRef(false);
   const qtyRefs = useRef(new Map<string, HTMLInputElement | null>());
   const focusNext = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -104,27 +143,74 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
     return supplierId ? [...list].sort((a, b) => Number(b.defaultSupplierId === supplierId) - Number(a.defaultSupplierId === supplierId)) : list;
   }, [materialsQ.data, supplierId]);
 
+  const newLine = (m: Material): Line => ({
+    key: uuid(),
+    id: null,
+    materialId: m.id,
+    purchaseUnit: m.purchaseUnit,
+    inventoryUnit: m.inventoryUnit,
+    factorMilli: m.purchaseFactorMilli,
+    decimals: m.decimals,
+    qty: '',
+    price: m.refPriceCents !== null ? centsToInput(m.refPriceCents) : '',
+    receivedMilli: 0,
+    compare: null,
+    note: '',
+    spec: m.specification.slice(0, 80),
+    images: [],
+    requests: [],
+  });
   const add = (m: Material) => {
-    const key = uuid();
-    focusNext.current = key;
-    setLines((ls) => [
+    const line = newLine(m);
+    focusNext.current = line.key;
+    setLines((ls) => [...ls, line]);
+  };
+  /** 把一行需求并进明细：已有这个物料的行就合并（数量能换算的加上去），没有就新加一行 */
+  const mergeRequest = (ls: Line[], m: Material, o: OpenRequestLine): Line[] => {
+    const qty = requestQtyInPurchase(o, m);
+    const existingLine = ls.find((l) => l.materialId === m.id);
+    if (existingLine) {
+      if (existingLine.requests.some((r) => r.lineId === o.id)) return ls;
+      const prevQty = parseQty(existingLine.qty, 3);
+      const images = [...existingLine.images, ...o.images.filter((i) => !existingLine.images.some((x) => x.id === i.id))].slice(0, MAX_LINE_IMAGES);
+      return ls.map((l) =>
+        l.key === existingLine.key
+          ? { ...l, requests: [...l.requests, asRequest(o)], images, qty: qty !== null && prevQty !== null ? formatQty(prevQty + qty).replace(/,/g, '') : l.qty }
+          : l,
+      );
+    }
+    const line = newLine(m);
+    return [
       ...ls,
       {
-        key,
-        id: null,
-        materialId: m.id,
-        purchaseUnit: m.purchaseUnit,
-        inventoryUnit: m.inventoryUnit,
-        factorMilli: m.purchaseFactorMilli,
-        decimals: m.decimals,
-        qty: '',
-        price: m.refPriceCents !== null ? centsToInput(m.refPriceCents) : '',
-        receivedMilli: 0,
-        compare: null,
-        note: '',
+        ...line,
+        qty: qty !== null ? formatQty(qty).replace(/,/g, '') : '',
+        price: line.price || (o.refPriceCents !== null && o.unit === m.purchaseUnit ? centsToInput(o.refPriceCents) : ''),
+        spec: (o.details || m.specification).slice(0, 80),
+        images: o.images.slice(0, MAX_LINE_IMAGES),
+        requests: [asRequest(o)],
       },
-    ]);
+    ];
   };
+  const placeRequest = (m: Material, o: OpenRequestLine) => {
+    setLines((ls) => mergeRequest(ls, m, o));
+    setUnmatched((u) => u.filter((x) => x.id !== o.id));
+  };
+  useEffect(() => {
+    if (seeded.current || !openLines.data || !materialsQ.data) return;
+    seeded.current = true;
+    const mats = new Map(materialsQ.data.map((m) => [m.id, m]));
+    const rest: OpenRequestLine[] = [];
+    let next: Line[] = lines;
+    for (const o of openLines.data) {
+      const m = o.materialId ? mats.get(o.materialId) : undefined;
+      if (m) next = mergeRequest(next, m, o);
+      else rest.push(o);
+    }
+    setLines(next);
+    setUnmatched(rest);
+    // 只在需求行第一次读回时并入一次（之后的修改由采购在明细里调整）
+  }, [openLines.data, materialsQ.data]);
   const patch = (key: string, p: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...p } : l)));
 
   const rows = lines.map((l) => {
@@ -143,7 +229,9 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
   });
   const total = rows.reduce((s, r) => s + (r.amount ?? 0), 0);
   const needsApproval = !!settings.data?.approvalRules.purchase_order;
-  const blocking = !supplierId
+  const blocking = unmatched.length > 0
+    ? `还有 ${unmatched.length} 行新产品没选物料`
+    : !supplierId
     ? '请选择供应商'
     : rows.length === 0
       ? '请至少添加一项物料'
@@ -162,7 +250,16 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
     note: note.trim(),
     action,
     approveNow: action === 'submit' && needsApproval && approveNow,
-    lines: rows.map((r) => ({ id: r.l.id, materialId: r.l.materialId, purchaseQtyMilli: r.qty, priceCents: r.price, note: r.l.note })),
+    lines: rows.map((r) => ({
+      id: r.l.id,
+      materialId: r.l.materialId,
+      purchaseQtyMilli: r.qty,
+      priceCents: r.price,
+      note: r.l.note,
+      spec: r.l.spec.trim(),
+      imageIds: r.l.images.map((i) => i.id),
+      requestLineIds: r.l.requests.map((x) => x.lineId),
+    })),
   });
 
   const done = (po: PurchaseOrder) => {
@@ -261,6 +358,63 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
             </Field>
           </section>
 
+          {requestIds && (
+            <section className="rounded-lg border border-line bg-card p-4 shadow-card" data-testid="po-from-requests">
+              <h2 className="flex items-center gap-2 text-[14px] font-bold">
+                <ClipboardList className="size-4 text-pine" />
+                来自需求单
+              </h2>
+              {openLines.isPending ? (
+                <Skeleton className="mt-3 h-16" />
+              ) : openLines.error ? (
+                <Notice tone="error" title={errorMessage(openLines.error)} className="mt-3" />
+              ) : (
+                <>
+                  <p className="mt-1 text-[12.5px] text-ink-3">
+                    {openLines.data!.length === 0
+                      ? '选的需求行已经下单或不再是「已通过」，请回需求单重新勾选。'
+                      : `共 ${openLines.data!.length} 行：选了物料的已加进明细（同一物料合并成一行，数量能换算的已加好，请核对）${unmatched.length ? `；下面 ${unmatched.length} 行新产品要先选或新建物料` : ''}。`}
+                  </p>
+                  {unmatched.length > 0 && (
+                    <ul className="mt-3 divide-y divide-line/70 rounded-lg border border-line">
+                      {unmatched.map((o) => (
+                        <li key={o.id} className="grid gap-2 px-3 py-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]" data-testid={`po-unmatched-${o.id}`}>
+                          <div className="min-w-0 space-y-1">
+                            <p className="text-[13.5px] font-bold">
+                              {o.name}
+                              <span className="num ml-2 font-semibold text-ink-2">
+                                {formatQty(o.qtyMilli)} {o.unit}
+                              </span>
+                            </p>
+                            <p className="text-[12px] text-ink-3">
+                              <span className="num">{o.requestNo}</span> · {o.department.name} · {o.requesterName}
+                              {o.details && ` · ${o.details}`}
+                            </p>
+                            {o.link && (
+                              <a href={o.link} target="_blank" rel="noopener noreferrer" className="block truncate text-[12px] font-semibold text-lake hover:underline">
+                                {o.link}
+                              </a>
+                            )}
+                            <ImageThumbs images={o.images} size={36} />
+                          </div>
+                          <div className="flex flex-wrap items-start gap-2">
+                            <MaterialPicker materials={materials} onPick={(m) => placeRequest(m, o)} placeholder="选已有物料：编码 / 名称" className="min-w-[200px] flex-1" />
+                            <Button size="sm" variant="secondary" icon={<PackagePlus className="size-4" />} disabled={locked} onClick={() => setCreating(o)} data-testid={`po-unmatched-create-${o.id}`}>
+                              新建物料
+                            </Button>
+                            <Button size="sm" variant="ghost" disabled={locked} onClick={() => setUnmatched((u) => u.filter((x) => x.id !== o.id))}>
+                              这次不转
+                            </Button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
+            </section>
+          )}
+
           <section className="@container rounded-lg border border-line bg-card shadow-card">
             <div className="flex items-center gap-3 border-b border-line px-5 py-3">
               <h2 className="text-[14px] font-bold">明细</h2>
@@ -353,6 +507,16 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
           </Button>
         </div>
       </footer>
+      <MaterialDialog
+        editing={creating ? 'new' : null}
+        onClose={() => setCreating(null)}
+        initial={
+          creating
+            ? { name: creating.name, specification: creating.details.slice(0, 80), inventoryUnit: creating.unit, purchaseUnit: creating.unit, supplierId: supplierId ? String(supplierId) : '' }
+            : undefined
+        }
+        onSaved={(m) => creating && placeRequest(m, creating)}
+      />
     </>
   );
 }
@@ -370,6 +534,7 @@ function PoLineRow({
   onPatch: (p: Partial<Line>) => void;
   onRemove?: () => void;
 }) {
+  const unlink = (lineId: number) => onPatch({ requests: row.l.requests.filter((r) => r.lineId !== lineId) });
   const { l, m } = row;
   // 新行实时比价（按物料当前包装）；已有行用下单时的比价
   const live = useBaseline(l.materialId);
@@ -434,6 +599,37 @@ function PoLineRow({
           </IconButton>
         )}
       </span>
+      <div className="flex flex-col gap-2 @lg:col-span-3 @4xl:col-span-full">
+        <div className="flex flex-wrap items-start gap-3">
+          <Input
+            aria-label={`${m?.name ?? '物料'} 的规格`}
+            value={l.spec}
+            maxLength={80}
+            disabled={locked}
+            onChange={(e) => onPatch({ spec: e.target.value })}
+            placeholder="规格：颜色、尺寸、型号等（选填，库管收货时能看到）"
+            className="h-9 max-w-md min-w-[200px] flex-1"
+          />
+          <ImagePicker value={l.images} onChange={(images) => onPatch({ images })} disabled={locked} />
+        </div>
+        {l.requests.length > 0 && (
+          <p className="flex flex-wrap items-center gap-1.5 text-[12px] text-ink-3" data-testid="po-line-requests">
+            <ClipboardList className="size-3.5" />
+            需求
+            {l.requests.map((r) => (
+              <span key={r.lineId} className="inline-flex items-center gap-1 rounded-full bg-pine-tint px-2 py-0.5 font-semibold text-pine">
+                <span className="num">{r.requestNo}</span>
+                {r.departmentName} {formatQty(r.qtyMilli)} {r.unit}
+                {!locked && (
+                  <button type="button" aria-label={`不再关联 ${r.requestNo} 的 ${r.name}`} onClick={() => unlink(r.lineId)} className="rounded-full p-0.5 hover:bg-pine/10">
+                    <X className="size-3" />
+                  </button>
+                )}
+              </span>
+            ))}
+          </p>
+        )}
+      </div>
       {row.err && <p className="text-[12px] font-semibold text-clay @lg:col-span-3 @4xl:col-span-full">{row.err}</p>}
     </li>
   );
