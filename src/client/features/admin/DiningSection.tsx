@@ -2,9 +2,11 @@
 // 挂了档口的菜在餐饮功能开启后才进厨房；没挂档口的项目照常挂账、不进厨房。需要技师的项目不进厨房。
 // 桌台（第二步）：不洗浴的客人在桌台上用餐、单独结账；停用不删除，正在用餐的桌不能停用。
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
+import { Link } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
+import { ADMIN_SECTIONS } from '@shared/admin';
 import {
   DEFAULT_DINING_RULES,
   MAX_STATION_NAME,
@@ -288,30 +290,52 @@ function StationDialog({ target, onClose }: { target: KitchenStation | 'new' | n
   );
 }
 
+/** 按分类分组（价目里没写分类的归「其他」） */
+function byCategory<T extends { category: string }>(list: T[]): [string, T[]][] {
+  const map = new Map<string, T[]>();
+  for (const i of list) map.set(i.category || '其他', [...(map.get(i.category || '其他') ?? []), i]);
+  return [...map];
+}
+
+/**
+ * 菜品挂在哪个档口：只列挂了档口的菜；价目里的其他项目收在「从价目里添加菜品」里，可按名称、分类搜。
+ * 需要技师的项目（按摩、搓澡……）不进厨房，两处都不列出（店主 2026-10-30：这里不该看到按摩）。
+ */
 function ItemsCard() {
   const can = useCan();
   const qc = useQueryClient();
   const toast = useToast();
   const admin = useDiningAdmin();
   const [draft, setDraft] = useState<Map<number, number | null>>(new Map());
+  const [adding, setAdding] = useState(false);
+  const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const items = useMemo(() => admin.data?.items ?? [], [admin.data]);
-  const groups = useMemo(() => {
-    const map = new Map<string, typeof items>();
-    for (const i of items) map.set(i.category || '其他', [...(map.get(i.category || '其他') ?? []), i]);
-    return [...map];
-  }, [items]);
   if (!admin.data) return <Skeleton className="h-56" />;
+  type Item = DiningAdmin['items'][number];
   const editable = can('catalog.manage');
   const stations = admin.data.stations;
-  const value = (i: (typeof items)[number]) => (draft.has(i.id) ? draft.get(i.id)! : i.stationId);
-  const choose = (i: (typeof items)[number], stationId: number | null) => {
+  const items = admin.data.items.filter((i) => !i.technicianRequired);
+  const value = (i: Item) => (draft.has(i.id) ? draft.get(i.id)! : i.stationId);
+  const choose = (i: Item, stationId: number | null) => {
     const next = new Map(draft);
     if (stationId === i.stationId) next.delete(i.id);
     else next.set(i.id, stationId);
     setDraft(next);
   };
+  const chooseAll = (list: Item[], stationId: number | null) => {
+    const next = new Map(draft);
+    for (const i of list) {
+      if (stationId === i.stationId) next.delete(i.id);
+      else next.set(i.id, stationId);
+    }
+    setDraft(next);
+  };
+  // 菜：已挂档口的，加上这次刚挂上、还没保存的；刚改成「不进厨房」的保存之前仍留在这里
+  const dishes = items.filter((i) => i.stationId !== null || value(i) !== null);
+  const rest = items.filter((i) => i.stationId === null && value(i) === null);
+  const q = query.trim().toLowerCase();
+  const found = q ? rest.filter((i) => i.name.toLowerCase().includes(q) || i.category.toLowerCase().includes(q)) : rest;
   const changes = items.filter((i) => draft.has(i.id) && draft.get(i.id) !== i.stationId);
   const options = [{ value: '', label: '不进厨房' }, ...stations.map((s) => ({ value: String(s.id), label: s.active ? s.name : `${s.name}（已停用）` }))];
 
@@ -331,86 +355,115 @@ function ItemsCard() {
     }
   };
 
+  /** 按分类分组的项目，每项选档口；prefix 区分上面的菜品与「从价目里添加菜品」里的项目 */
+  const groups = (list: Item[], prefix: 'dining-items' | 'dining-candidates') => (
+    <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+      {byCategory(list).map(([cat, group]) => (
+        <div key={cat} className="rounded-lg border border-line" data-testid={`${prefix}-${cat}`}>
+          <div className="flex items-center justify-between gap-2 border-b border-line/70 bg-paper-2/60 px-3 py-2">
+            <span className="text-[13.5px] font-bold">{cat}</span>
+            {editable && stations.length > 0 && (
+              <Select
+                value=""
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v !== '') chooseAll(group, v === 'none' ? null : Number(v));
+                }}
+                fullWidth={false}
+                className="text-[12.5px]"
+                aria-label={`${cat} 整类设为`}
+                data-testid={`${prefix}-all-${cat}`}
+              >
+                <option value="">整类设为…</option>
+                {prefix === 'dining-items' && <option value="none">不进厨房</option>}
+                {stations.filter((s) => s.active).map((s) => (
+                  <option key={s.id} value={String(s.id)}>
+                    {s.name}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </div>
+          <ul className="divide-y divide-line/60">
+            {group.map((i) => {
+              const v = value(i);
+              return (
+                <li key={i.id} className="flex items-center gap-2 px-3 py-1.5" data-testid={`dining-item-${i.name}`}>
+                  <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold">{i.name}</span>
+                  {draft.has(i.id) && <Badge tone="lake">未保存</Badge>}
+                  <Money cents={i.price} className="text-[12px] text-ink-3" />
+                  <Select
+                    value={v === null ? '' : String(v)}
+                    disabled={!editable || stations.length === 0}
+                    onChange={(e) => choose(i, e.target.value === '' ? null : Number(e.target.value))}
+                    fullWidth={false}
+                    className="w-32 text-[13px]"
+                    aria-label={`${i.name} 的出品档口`}
+                    data-testid={`dining-item-station-${i.name}`}
+                  >
+                    {options.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </Select>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+
   return (
     <Card className="p-5" data-testid="dining-items">
       <SectionTitle aside={!editable && <Badge>能管理价目的岗位可改</Badge>}>菜品送到哪个档口</SectionTitle>
       <p className="mt-1 text-[12.5px] text-ink-3">
-        挂了档口的菜：点单页能点，前台「加项目」点了也一样进厨房，账单上记在「餐饮」。没挂档口的项目（门票、洗浴用品、按摩等）照常挂账、不进厨房。
+        挂了档口的项目就是菜：点单页能点，前台「加项目」点了也一样进厨房，账单上记在「餐饮」。价目里的其他项目（门票、洗浴用品、按摩等）不用挂，照常挂账、不进厨房，这里不列出。
         {stations.length === 0 && ' 请先在上面建档口。'}
       </p>
-      {items.length === 0 ? (
-        <p className="mt-4 rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">价目表里还没有项目</p>
+      {dishes.length === 0 ? (
+        <p className="mt-4 rounded-lg border border-dashed border-line-strong px-4 py-6 text-center text-[13px] text-ink-3" data-testid="dining-items-empty">
+          还没有菜品。
+          {editable && '点下面「从价目里添加菜品」，把价目里的菜挂到档口；价目里还没有的菜，先在后台「价目与套餐」里新建（分类写「热菜」「饮品」等）。'}
+        </p>
       ) : (
-        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-          {groups.map(([cat, list]) => (
-            <div key={cat} className="rounded-lg border border-line" data-testid={`dining-items-${cat}`}>
-              <div className="flex items-center justify-between gap-2 border-b border-line/70 bg-paper-2/60 px-3 py-2">
-                <span className="text-[13.5px] font-bold">{cat}</span>
-                {editable && stations.length > 0 && (
-                  <Select
-                    value=""
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v === '') return;
-                      const sid = v === 'none' ? null : Number(v);
-                      const next = new Map(draft);
-                      for (const i of list) {
-                        if (i.technicianRequired) continue;
-                        if (sid === i.stationId) next.delete(i.id);
-                        else next.set(i.id, sid);
-                      }
-                      setDraft(next);
-                    }}
-                    fullWidth={false}
-                    className="text-[12.5px]"
-                    aria-label={`${cat} 整类设为`}
-                    data-testid={`dining-items-all-${cat}`}
-                  >
-                    <option value="">整类设为…</option>
-                    <option value="none">不进厨房</option>
-                    {stations.filter((s) => s.active).map((s) => (
-                      <option key={s.id} value={String(s.id)}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </Select>
-                )}
-              </div>
-              <ul className="divide-y divide-line/60">
-                {list.map((i) => {
-                  const v = value(i);
-                  return (
-                    <li key={i.id} className="flex items-center gap-2 px-3 py-1.5" data-testid={`dining-item-${i.name}`}>
-                      <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold">{i.name}</span>
-                      {draft.has(i.id) && <Badge tone="lake">未保存</Badge>}
-                      <Money cents={i.price} className="text-[12px] text-ink-3" />
-                      {i.technicianRequired ? (
-                        <span title="需要技师的项目不进厨房">
-                          <Badge>需要技师</Badge>
-                        </span>
-                      ) : (
-                        <Select
-                          value={v === null ? '' : String(v)}
-                          disabled={!editable || stations.length === 0}
-                          onChange={(e) => choose(i, e.target.value === '' ? null : Number(e.target.value))}
-                          fullWidth={false}
-                          className="w-32 text-[13px]"
-                          aria-label={`${i.name} 的出品档口`}
-                          data-testid={`dining-item-station-${i.name}`}
-                        >
-                          {options.map((o) => (
-                            <option key={o.value} value={o.value}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </Select>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
+        groups(dishes, 'dining-items')
+      )}
+      {editable && (
+        <div className="mt-4">
+          <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => setAdding((a) => !a)} aria-expanded={adding} data-testid="dining-items-add">
+            从价目里添加菜品{rest.length > 0 && `（${rest.length} 项可选）`}
+          </Button>
+          {adding && (
+            <div className="mt-3 rounded-lg border border-line p-3" data-testid="dining-items-candidates">
+              <p className="text-[12.5px] text-ink-3">
+                价目里还没挂档口的项目（需要技师的项目不进厨房，不列出）。给菜选一个档口，它就移到上面的菜品里，点「保存」后生效。价目里没有的菜，先在后台
+                <Link to={ADMIN_SECTIONS.catalog.path} className="font-semibold text-pine hover:underline">
+                  「价目与套餐」
+                </Link>
+                里新建。
+              </p>
+              {rest.length > 0 && (
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="按名称或分类搜，例如 鸡、饮品"
+                  aria-label="按名称或分类搜价目里的项目"
+                  className="mt-2"
+                  data-testid="dining-items-search"
+                />
+              )}
+              {stations.length === 0 ? (
+                <p className="mt-3 text-[13px] text-ink-3">请先在上面建档口。</p>
+              ) : found.length === 0 ? (
+                <p className="mt-3 text-[13px] text-ink-3">{rest.length === 0 ? '价目里没有可以挂档口的项目了。' : '没有找到这个名称或分类的项目。'}</p>
+              ) : (
+                groups(found, 'dining-candidates')
+              )}
             </div>
-          ))}
+          )}
         </div>
       )}
       {error && <Notice tone="error" title={error} className="mt-3" />}
