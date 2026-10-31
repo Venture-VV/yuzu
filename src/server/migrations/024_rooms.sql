@@ -1,11 +1,11 @@
 -- S7 客房（ROADMAP 第 10 节第 3 项，v0.7.4，店主 2026-10-31 选定；见 docs/ROOMS.md）：
 --   · 房型（全天房按晚、钟点房按段）与房间（房号、楼层、打扫状态）；停用不删除；
---   · 入住单（room_stays）：一间房同时只有一个在住单；洗浴客人的房费挂在手牌账单上，只住房的客人单独开客房账单（bills.kind = 'room'）；
+--   · 入住单（room_stays）：一间房同时只有一个在住单；住客都是在店的洗浴客人（店主 2026-10-31：门票必选，没有只住房的客人），
+--     房费挂在客人的手牌账单上，离店时随手牌一起结账（房价不含洗浴门票，门票照常按门票规则计）；
 --   · 房费（room_stay_charges）：每一晚 / 每一段对应一条账单明细，同一晚、同一段只挂一次；
---   · 押金台账（room_deposits，只追加）：收、退、退房结账时抵扣、反结账时恢复，按收款方式；收、退记经办人当班的班次；
---   · 结账单可以结入住单（checkout_bills.room_stay_id）；收款方式加「押金抵扣」（checkout_payments.method = 'deposit'）；
+--   · 押金台账（room_deposits，只追加）：收、退，按收款方式；记经办人当班的班次；
 --   · 幂等与作废登记加客房的业务类型。
--- 只加表、加列、放宽约束，不改已有数据。
+-- 只加表、放宽约束，不改已有数据。
 
 -- ───────────── 房型 ─────────────
 CREATE TABLE room_types (
@@ -47,10 +47,6 @@ CREATE UNIQUE INDEX rooms_no_uq ON rooms (lower(btrim(room_no)));
 CREATE TRIGGER rooms_no_delete BEFORE DELETE ON rooms
   FOR EACH ROW EXECUTE FUNCTION yuzu_forbid_delete();
 
--- ───────────── 共同账单加「客房账单」类型（只住房的客人） ─────────────
-ALTER TABLE bills DROP CONSTRAINT bills_kind_check;
-ALTER TABLE bills ADD CONSTRAINT bills_kind_check CHECK (kind IN ('visit', 'table', 'room'));
-
 -- ───────────── 入住单 ─────────────
 CREATE TABLE room_stays (
   id                     bigserial PRIMARY KEY,
@@ -61,17 +57,15 @@ CREATE TABLE room_stays (
   kind                   text NOT NULL CHECK (kind IN ('daily', 'hourly')),
   rate                   integer NOT NULL CHECK (rate BETWEEN 1 AND 10000000),
   block_minutes          integer CHECK (block_minutes BETWEEN 30 AND 720),
-  -- 房费挂在哪张账单：洗浴客人是手牌账单（visit_id 非空），只住房的客人是客房账单
+  -- 在店的洗浴客人（来访）与房费挂的手牌账单（来访的账单）
   bill_id                bigint NOT NULL REFERENCES bills (id),
-  visit_id               bigint REFERENCES visits (id),
+  visit_id               bigint NOT NULL REFERENCES visits (id),
   guest_label            text NOT NULL DEFAULT '' CHECK (char_length(guest_label) <= 16),
   guests                 integer NOT NULL CHECK (guests BETWEEN 1 AND 20),
-  -- 登记了会员的只住房客人，退房结账时可以用这位会员的储值
-  member_id              bigint REFERENCES members (id),
   -- 预计离店的营业日（全天房只做提醒，房费按夜审与退房时间算）
   expected_checkout_date date,
-  -- 在住 → 已退房（洗浴客人：房费留在手牌账单上）/ 已结账（只住房的客人）/ 已撤销
-  status                 text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'checked_out', 'settled', 'cancelled')),
+  -- 在住 → 已退房（房费留在手牌账单上，随手牌结账）/ 已撤销
+  status                 text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'checked_out', 'cancelled')),
   business_date          date NOT NULL,
   checked_in_at          timestamptz NOT NULL,
   checked_in_by          bigint NOT NULL REFERENCES staff (id),
@@ -81,20 +75,14 @@ CREATE TABLE room_stays (
   closed_by              bigint REFERENCES staff (id),
   close_reason           text CHECK (char_length(close_reason) <= 200),
   CHECK ((kind = 'hourly') = (block_minutes IS NOT NULL)),
-  CHECK ((status = 'open') = (closed_at IS NULL)),
-  CHECK (status <> 'checked_out' OR visit_id IS NOT NULL),
-  CHECK (status <> 'settled' OR visit_id IS NULL)
+  CHECK ((status = 'open') = (closed_at IS NULL))
 );
 -- 一间房同时只有一个在住单
 CREATE UNIQUE INDEX room_stays_room_open_uq ON room_stays (room_id) WHERE status = 'open';
--- 客房账单只属于一个入住单
-CREATE UNIQUE INDEX room_stays_own_bill_uq ON room_stays (bill_id) WHERE visit_id IS NULL;
-CREATE INDEX room_stays_visit_idx ON room_stays (visit_id) WHERE visit_id IS NOT NULL;
+CREATE INDEX room_stays_visit_idx ON room_stays (visit_id);
 CREATE INDEX room_stays_date_idx ON room_stays (business_date);
-CREATE INDEX room_stays_member_idx ON room_stays (member_id);
 
--- 入住单的保护：不能删除；编号、账单、房型与房价、入住信息不可改；退房、结账、撤销之后不能再改，
--- 只有反结账的事务（yuzu.reopen）允许「已结账 → 在住」
+-- 入住单的保护：不能删除；编号、账单、来访、房型与房价、入住信息不可改；退房、撤销之后不能再改
 CREATE FUNCTION yuzu_room_stay_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
@@ -106,14 +94,8 @@ BEGIN
       OLD.business_date, OLD.checked_in_at, OLD.checked_in_by, OLD.open_key) THEN
     RAISE EXCEPTION '入住单编号、账单、房价与入住信息不可修改' USING ERRCODE = 'P0001';
   END IF;
-  IF OLD.status = 'settled' AND NEW.status = 'open' AND NEW.closed_at IS NULL AND NEW.closed_by IS NULL
-     AND (NEW.room_id, NEW.guest_label, NEW.guests, NEW.member_id, NEW.expected_checkout_date)
-         IS NOT DISTINCT FROM (OLD.room_id, OLD.guest_label, OLD.guests, OLD.member_id, OLD.expected_checkout_date)
-     AND current_setting('yuzu.reopen', true) = 'on' THEN
-    RETURN NEW;
-  END IF;
   IF OLD.status <> 'open' THEN
-    RAISE EXCEPTION '已退房、已结账或已撤销的入住单不可修改' USING ERRCODE = 'P0001';
+    RAISE EXCEPTION '已退房或已撤销的入住单不可修改' USING ERRCODE = 'P0001';
   END IF;
   RETURN NEW;
 END $$;
@@ -160,28 +142,26 @@ CREATE TRIGGER room_moves_append_only BEFORE UPDATE OR DELETE ON room_moves
   FOR EACH ROW EXECUTE FUNCTION yuzu_forbid_mutation();
 
 -- ───────────── 押金台账（只追加） ─────────────
--- 每种收款方式的余额 = 收 − 退 − 抵扣 + 恢复，不能为负（服务端保证，自检核对）。
--- 收、退：经办人当班的班次（现金押金计入交班应有现金）、操作编号；抵扣、恢复：对应的结账单（不动现金）
+-- 每种收款方式的余额 = 收 − 退，不能为负（服务端保证，自检核对）；退房、撤销入住之后为 0。
+-- 收、退都记经办人当班的班次（现金押金计入交班应有现金）。「其他」收的押金要写明收的是什么；退的写原因
 CREATE TABLE room_deposits (
   id            bigserial PRIMARY KEY,
   stay_id       bigint NOT NULL REFERENCES room_stays (id),
-  kind          text NOT NULL CHECK (kind IN ('receive', 'refund', 'apply', 'unapply')),
+  kind          text NOT NULL CHECK (kind IN ('receive', 'refund')),
   method        text NOT NULL CHECK (method IN ('cash', 'wechat', 'alipay', 'bank_card', 'other')),
   amount        integer NOT NULL CHECK (amount BETWEEN 1 AND 10000000),
   ref           text NOT NULL DEFAULT '' CHECK (char_length(ref) <= 64),
   reason        text CHECK (char_length(reason) <= 200),
-  checkout_id   bigint REFERENCES checkouts (id),
   shift_id      bigint REFERENCES shifts (id),
   business_date date NOT NULL,
   operator_id   bigint NOT NULL REFERENCES staff (id),
   created_at    timestamptz NOT NULL DEFAULT now(),
-  CHECK ((kind IN ('apply', 'unapply')) = (checkout_id IS NOT NULL)),
-  CHECK (kind IN ('apply', 'unapply') OR method <> 'other' OR char_length(btrim(ref)) > 0)
+  CHECK (kind <> 'receive' OR method <> 'other' OR char_length(btrim(ref)) > 0),
+  CHECK (kind <> 'refund' OR char_length(btrim(reason)) > 0)
 );
 CREATE INDEX room_deposits_stay_idx ON room_deposits (stay_id);
 CREATE INDEX room_deposits_shift_idx ON room_deposits (shift_id) WHERE shift_id IS NOT NULL;
 CREATE INDEX room_deposits_date_idx ON room_deposits (business_date);
-CREATE INDEX room_deposits_checkout_idx ON room_deposits (checkout_id) WHERE checkout_id IS NOT NULL;
 CREATE TRIGGER room_deposits_append_only BEFORE UPDATE OR DELETE ON room_deposits
   FOR EACH ROW EXECUTE FUNCTION yuzu_forbid_mutation();
 
@@ -198,30 +178,13 @@ CREATE INDEX room_audits_date_idx ON room_audits (business_date);
 CREATE TRIGGER room_audits_append_only BEFORE UPDATE OR DELETE ON room_audits
   FOR EACH ROW EXECUTE FUNCTION yuzu_forbid_mutation();
 
--- ───────────── 结账单所结的账单：来访、桌台或入住单（只住房的客人） ─────────────
-ALTER TABLE checkout_bills ADD COLUMN room_stay_id bigint REFERENCES room_stays (id);
-ALTER TABLE checkout_bills DROP CONSTRAINT checkout_bills_owner_check;
-ALTER TABLE checkout_bills ADD CONSTRAINT checkout_bills_owner_check CHECK (
-  (visit_id IS NOT NULL AND table_session_id IS NULL AND room_stay_id IS NULL AND guests = 1
-   AND ticket_type_id IS NOT NULL AND ticket_name IS NOT NULL AND ticket_segments IS NOT NULL AND ticket_amount IS NOT NULL)
-  OR
-  (visit_id IS NULL AND (table_session_id IS NULL) <> (room_stay_id IS NULL)
-   AND ticket_type_id IS NULL AND ticket_name IS NULL AND ticket_segments IS NULL AND ticket_amount IS NULL)
-);
-CREATE INDEX checkout_bills_room_stay_idx ON checkout_bills (room_stay_id) WHERE room_stay_id IS NOT NULL;
-
--- ───────────── 收款方式「押金抵扣」：只住房的客人退房结账时用押金抵扣应收 ─────────────
-ALTER TABLE checkout_payments DROP CONSTRAINT checkout_payments_method_check;
-ALTER TABLE checkout_payments ADD CONSTRAINT checkout_payments_method_check
-  CHECK (method IN ('cash', 'wechat', 'alipay', 'bank_card', 'other', 'wallet', 'coupon', 'discount', 'deposit'));
-
--- ───────────── 幂等与作废登记：入住、续住加段、收押金、退押金、退房、退房结账 ─────────────
+-- ───────────── 幂等与作废登记：入住、续住加段、收押金、退押金、退房 ─────────────
 ALTER TABLE idempotency_keys DROP CONSTRAINT idempotency_keys_op_type_check;
 ALTER TABLE idempotency_keys ADD CONSTRAINT idempotency_keys_op_type_check
   CHECK (op_type IN ('recharge', 'consume', 'reversal', 'inv_doc', 'purchase_order', 'payment', 'opening_payable',
                      'checkin', 'bill_post', 'tag_swap', 'abandoned', 'checkout', 'table_open', 'table_post', 'table_checkout',
-                     'room_checkin', 'room_extend', 'room_deposit', 'room_refund', 'room_close', 'room_checkout'));
+                     'room_checkin', 'room_extend', 'room_deposit', 'room_refund', 'room_close'));
 ALTER TABLE op_fences DROP CONSTRAINT op_fences_op_type_check;
 ALTER TABLE op_fences ADD CONSTRAINT op_fences_op_type_check
   CHECK (op_type IN ('recharge', 'consume', 'reversal', 'checkin', 'bill_post', 'tag_swap', 'checkout', 'table_open', 'table_post', 'table_checkout',
-                     'room_checkin', 'room_extend', 'room_deposit', 'room_refund', 'room_close', 'room_checkout'));
+                     'room_checkin', 'room_extend', 'room_deposit', 'room_refund', 'room_close'));

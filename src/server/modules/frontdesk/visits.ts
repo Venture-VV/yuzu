@@ -783,8 +783,7 @@ export async function lookupFrontdeskOp(db: Db, key: string, expected?: Frontdes
     return { found: true as const, type: row.opType as 'table_open' | 'table_post', session: await getTableSession(db, row.refId) };
   }
   if (row.opType === 'table_checkout') return { found: true as const, type: 'table_checkout' as const, checkout: await getCheckout(db, row.refId) };
-  // 客房（S7）：入住、续住加段、收退押金、退房查回这间房的入住单；退房结账查回结账单
-  if (row.opType === 'room_checkout') return { found: true as const, type: 'room_checkout' as const, checkout: await getCheckout(db, row.refId) };
+  // 客房（S7）：入住、续住加段、收退押金、退房查回这间房的入住单
   if (row.opType === 'room_checkin' || row.opType === 'room_extend' || row.opType === 'room_deposit' || row.opType === 'room_refund' || row.opType === 'room_close') {
     return { found: true as const, type: row.opType as 'room_checkin' | 'room_extend' | 'room_deposit' | 'room_refund' | 'room_close', stay: await getStay(db, row.refId) };
   }

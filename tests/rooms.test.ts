@@ -1,6 +1,6 @@
-// S7 客房（v0.7.4，见 docs/ROOMS.md）：后台房型与房间、入住（只住房 / 洗浴客人）、房费（入住、夜审、退房补挂）、续住、换房、
-// 押金（收、退、退房结账时抵扣、反结账恢复）、洗浴客人退房、只住房的客人退房结账与反结账、撤销入住、打扫与维修、权限、幂等。
-// 用 ctx.at 指定业务发生时间来模拟「昨天入住」「今晚夜审」。
+// S7 客房（v0.7.4，见 docs/ROOMS.md）：后台房型与房间、入住（住客都是在店的洗浴客人：门票必选，店主 2026-10-31 定）、
+// 房费（入住、夜审、退房补挂，都挂在住客的手牌账单上）、续住、换房、押金（收、退，退房时原路退回）、退房后随手牌结账与反结账、
+// 撤销入住、打扫与维修、权限、幂等、交班 / 日结 / 对账包 / 看板 / 自检。用 ctx.at 指定业务发生时间来模拟「昨天入住」「今晚夜审」。
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -10,7 +10,7 @@ import type { Actor } from '../src/server/lib/context';
 import { checkinRoom, closeStay, runNightAudit } from '../src/server/modules/rooms';
 import { buildDailyRecon } from '../src/server/ops/recon';
 import { createStaff } from '../src/server/modules/staff';
-import { api, createMember, login, PASSWORD, rechargeBody, setup, type TestContext } from './helpers';
+import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let boss: string;
@@ -33,6 +33,17 @@ const board = async () => (await api(ctx.app, ctx.clerk, 'GET', '/api/rooms')).b
 const tile = async (roomNo: string) => (await board()).rooms.find((r) => r.roomNo === roomNo)!;
 const housekeep = (roomNo: string, status: string, note?: string, cookie = ctx.clerk) =>
   api(ctx.app, cookie, 'PUT', `/api/rooms/${room[roomNo]}/housekeeping`, { status, ...(note ? { note } : {}) });
+/** 前台接待一位男宾（门票必选），返回来访 */
+const guest = async (tagCode: string) => {
+  const v = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode, zone: 'male' }] });
+  expect(v.status, JSON.stringify(v.body)).toBe(201);
+  return v.body.visits[0].id as number;
+};
+/** 手牌结账：按核对的应收全部收现金 */
+const settle = async (visitId: number) => {
+  const pre = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${visitId}`)).body as { totalAmount: number };
+  return api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', { clientKey: randomUUID(), visitIds: [visitId], expectedTotal: pre.totalAmount, payments: [{ method: 'cash', amount: pre.totalAmount }] });
+};
 const checks = async () => {
   for (const c of (await api(ctx.app, ctx.owner, 'GET', '/api/frontdesk/checks')).body as { ok: boolean; label: string; detail: string }[]) {
     expect(c.ok, `${c.label}：${c.detail}`).toBe(true);
@@ -62,7 +73,7 @@ afterAll(async () => ctx.close());
 describe('后台：客房规则、房型、房间', () => {
   it('客房功能默认关闭：入住拒绝；店主开启；店总能建房型、房间，不能改规则；店员不能建', async () => {
     expect((await api(ctx.app, ctx.owner, 'GET', '/api/auth/me')).body.rooms).toBe(false);
-    expect((await api(ctx.app, boss, 'PUT', '/api/admin/rooms/rules', { enabled: true, checkoutMinute: 720, lateFullMinute: 1080, hourlyGraceMinutes: 15, defaultDeposit: 20000 })).status).toBe(403);
+    expect((await api(ctx.app, boss, 'PUT', '/api/admin/rooms/rules', { enabled: true, checkoutMinute: 720, lateFullMinute: 1080, hourlyGraceMinutes: 15, defaultDeposit: 0 })).status).toBe(403);
     expect((await api(ctx.app, ctx.clerk, 'POST', '/api/admin/rooms/types', { name: '豪华单间', kind: 'daily', price: 38800 })).status).toBe(403);
     for (const [name, kind, price, blockMinutes] of [
       ['豪华单间', 'daily', 38800, null],
@@ -86,8 +97,8 @@ describe('后台：客房规则、房型、房间', () => {
       room[roomNo] = r.body.rooms.find((x: { roomNo: string }) => x.roomNo === roomNo).id;
     }
     expect((await api(ctx.app, boss, 'POST', '/api/admin/rooms/rooms', { roomNo: '301', roomTypeId: type['标准间'] })).body.error.code).toBe('ROOM_NO_TAKEN');
-    expect((await checkin({ roomId: room['301'], expectedRate: 38800 })).body.error.code).toBe('ROOMS_DISABLED');
-    const rules = await api(ctx.app, ctx.owner, 'PUT', '/api/admin/rooms/rules', { enabled: true, checkoutMinute: 720, lateFullMinute: 1080, hourlyGraceMinutes: 15, defaultDeposit: 20000 });
+    expect((await checkin({ roomId: room['301'], expectedRate: 38800, tagCode: 'R001' })).body.error.code).toBe('ROOMS_DISABLED');
+    const rules = await api(ctx.app, ctx.owner, 'PUT', '/api/admin/rooms/rules', { enabled: true, checkoutMinute: 720, lateFullMinute: 1080, hourlyGraceMinutes: 15, defaultDeposit: 0 });
     expect(rules.status, JSON.stringify(rules.body)).toBe(200);
     expect((await api(ctx.app, ctx.owner, 'GET', '/api/auth/me')).body.rooms).toBe(true);
     expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/rooms/rules', { enabled: true, checkoutMinute: 720, lateFullMinute: 600, hourlyGraceMinutes: 15, defaultDeposit: 0 })).status).toBe(400);
@@ -112,180 +123,111 @@ describe('后台：客房规则、房型、房间', () => {
   it('权限：客户经理看不到客房；后勤（客房服务员）能看房态、打扫，不能入住', async () => {
     expect((await api(ctx.app, am, 'GET', '/api/rooms')).status).toBe(403);
     expect((await api(ctx.app, cleaner, 'GET', '/api/rooms')).status).toBe(200);
-    expect((await checkin({ roomId: room['303'], expectedRate: 28800 }, cleaner)).status).toBe(403);
+    expect((await checkin({ roomId: room['303'], expectedRate: 28800, tagCode: 'R010' }, cleaner)).status).toBe(403);
     expect((await housekeep('303', 'dirty', undefined, cleaner)).status).toBe(200);
     expect((await housekeep('303', 'maintenance', undefined, cleaner)).status).toBe(400);
     expect((await housekeep('303', 'maintenance', '空调不制冷', cleaner)).status).toBe(200);
     expect((await tile('303')).status).toBe('maintenance');
-    expect((await checkin({ roomId: room['303'], expectedRate: 28800 })).body.error.code).toBe('ROOM_NOT_READY');
+    expect((await checkin({ roomId: room['303'], expectedRate: 28800, tagCode: 'R010' })).body.error.code).toBe('ROOM_NOT_READY');
     expect((await housekeep('303', 'clean', undefined, cleaner)).status).toBe(200);
     expect((await tile('303')).status).toBe('vacant');
   });
 });
 
-describe('只住房的客人：入住、押金、退房结账、反结账', () => {
-  it('入住挂第一晚、收押金；同一编号重提只入住一次；房间有人住、房价刚改都拒绝', async () => {
+describe('入住：住客要有在店的手牌（门票必选）', () => {
+  it('没填手牌、手牌不在店都拒绝；入住挂第一晚到手牌账单上、收押金；同一编号重提只入住一次；房间有人住、房价刚改都拒绝', async () => {
+    const visitId = await guest('R001');
+    const noTag = await checkin({ roomId: room['301'], expectedRate: 38800 });
+    expect(noTag.status).toBe(400);
+    expect(noTag.body.error.message).toContain('手牌');
+    expect((await checkin({ roomId: room['301'], expectedRate: 38800, tagCode: 'R009' })).body.error.code).toBe('TAG_NOT_IN_STORE');
+    expect((await checkin({ roomId: room['301'], expectedRate: 30000, tagCode: 'R001' })).body.error.code).toBe('PRICE_CHANGED');
     const key = randomUUID();
-    expect((await checkin({ roomId: room['301'], expectedRate: 30000 })).body.error.code).toBe('PRICE_CHANGED');
-    const first = await checkin({ roomId: room['301'], expectedRate: 38800, guestLabel: '李先生', guests: 2, deposit: { method: 'cash', amount: 20000 } }, ctx.clerk, key);
+    const body = { roomId: room['301'], expectedRate: 38800, tagCode: 'r001', guestLabel: '李先生', guests: 2, deposit: { method: 'cash', amount: 20000 } };
+    const first = await checkin(body, ctx.clerk, key);
     expect(first.status, JSON.stringify(first.body)).toBe(200);
     const s = first.body as StayDetail;
-    expect(s).toMatchObject({ roomNo: '301', kind: 'daily', rate: 38800, status: 'open', guests: 2, tagCode: null, chargedAmount: 38800, depositBalance: 20000, billAmount: 38800 });
+    expect(s).toMatchObject({ roomNo: '301', kind: 'daily', rate: 38800, status: 'open', guests: 2, tagCode: 'R001', visitId, chargedAmount: 38800, depositBalance: 20000 });
     expect(s.charges).toEqual([expect.objectContaining({ kind: 'night', nightDate: today, amount: 38800, source: 'checkin', lineStatus: 'active' })]);
     expect(s.depositByMethod).toEqual([{ method: 'cash', balance: 20000 }]);
-    const again = await checkin({ roomId: room['301'], expectedRate: 38800, guestLabel: '李先生', guests: 2, deposit: { method: 'cash', amount: 20000 } }, ctx.clerk, key);
-    expect(again.body.id).toBe(s.id);
-    expect((await checkin({ roomId: room['301'], expectedRate: 38800 })).body.error.code).toBe('ROOM_TAKEN');
+    expect((await checkin(body, ctx.clerk, key)).body.id).toBe(s.id);
+    expect((await checkin({ roomId: room['301'], expectedRate: 38800, tagCode: 'R001' })).body.error.code).toBe('ROOM_TAKEN');
     const [count] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM room_stays WHERE room_id = ${room['301']!}`;
     expect(count!.n).toBe(1);
+    // 房费是手牌账单上的明细（来源「客房」）
+    const visit = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/visits/${visitId}`)).body as { bill: { id: number }; lines: { name: string; source: string; amount: number }[] };
+    expect(s.billId).toBe(visit.bill.id);
+    expect(visit.lines.filter((l) => l.source === 'room').map((l) => [l.name, l.amount])).toEqual([[`房费 301 ${Number(today.slice(5, 7))}月${Number(today.slice(8, 10))}日`, 38800]]);
     expect(await tile('301')).toMatchObject({ status: 'occupied', stay: { id: s.id, chargedAmount: 38800, depositBalance: 20000 } });
-    await checks();
-  });
-
-  it('退房结账：押金抵扣 + 现金；结清后入住单已结账、房间待打扫、押金清零；储值只能用登记的会员', async () => {
-    const s = (await tile('301')).stay!;
-    const preview = (await api(ctx.app, ctx.clerk, 'GET', `/api/rooms/stays/${s.id}/checkout-preview`)).body;
-    expect(preview).toMatchObject({ dues: [], billAmount: 38800, total: 38800, depositBalance: 20000 });
-    // 退房结账前的核对（可以几间房合并）：每间房的明细、要补的房费、押金；只有收银（结账收款）能看
-    const combined = await api(ctx.app, ctx.clerk, 'GET', `/api/rooms/checkout-preview?ids=${s.id}`);
-    expect(combined.status, JSON.stringify(combined.body)).toBe(200);
-    expect(combined.body).toMatchObject({
-      totalAmount: 38800,
-      depositBalance: 20000,
-      depositByMethod: [{ method: 'cash', balance: 20000 }],
-      members: [],
-      stays: [{ stayId: s.id, roomNo: '301', guests: 2, guestLabel: '李先生', amount: 38800, depositBalance: 20000, dues: [], lines: [expect.objectContaining({ amount: 38800 })] }],
-    });
-    expect((await api(ctx.app, cleaner, 'GET', `/api/rooms/checkout-preview?ids=${s.id}`)).status).toBe(403);
-    expect((await api(ctx.app, ctx.clerk, 'GET', '/api/rooms/checkout-preview?ids=')).status).toBe(400);
-    const m = await createMember(ctx, '外来会员', '19900077001');
-    expect((await api(ctx.app, ctx.owner, 'POST', '/api/recharges', rechargeBody(m.id, 100000))).status).toBe(200);
-    const pay = (payments: unknown[], expectedTotal = 38800, clientKey = randomUUID()) =>
-      api(ctx.app, ctx.clerk, 'POST', '/api/rooms/checkout', { clientKey, stayIds: [s.id], expectedTotal, payments });
-    expect((await pay([{ method: 'cash', amount: 38800 }], 30000)).body.error.code).toBe('PRICE_CHANGED');
-    expect((await pay([{ method: 'deposit', amount: 30000 }, { method: 'cash', amount: 8800 }])).body.error.code).toBe('DEPOSIT_INSUFFICIENT');
-    expect((await pay([{ method: 'wallet', memberId: m.id, amount: 38800, expectedSplit: { principal: 38800, bonus: 0 } }])).body.error.code).toBe('WALLET_MEMBER_NOT_IN_CHECKOUT');
-    // 手牌结账不能用押金抵扣
-    expect((await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', { clientKey: randomUUID(), visitIds: [1], expectedTotal: 0, payments: [{ method: 'deposit', amount: 1 }] })).status).toBe(400);
-    const key = randomUUID();
-    const done = await pay([{ method: 'deposit', amount: 20000 }, { method: 'cash', amount: 18800 }], 38800, key);
-    expect(done.status, JSON.stringify(done.body)).toBe(200);
-    expect(done.body).toMatchObject({ status: 'completed', totalAmount: 38800 });
-    expect(done.body.bills).toEqual([expect.objectContaining({ roomNo: '301', guests: 2, tagCode: null, tableName: null, amount: 38800 })]);
-    expect(done.body.payments.map((p: { method: string; amount: number }) => [p.method, p.amount])).toEqual([
-      ['deposit', 20000],
-      ['cash', 18800],
-    ]);
-    expect((await pay([{ method: 'deposit', amount: 20000 }, { method: 'cash', amount: 18800 }], 38800, key)).body.id).toBe(done.body.id);
-    const after = await stay(s.id);
-    expect(after).toMatchObject({ status: 'settled', depositBalance: 0 });
-    expect(after.deposits.map((d) => [d.kind, d.method, d.amount])).toEqual([
-      ['receive', 'cash', 20000],
-      ['apply', 'cash', 20000],
-    ]);
-    expect((await tile('301')).status).toBe('dirty');
-    const list = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkouts?date=${today}`)).body as { id: number; roomNos: string[] }[];
-    expect(list.find((c) => c.id === done.body.id)!.roomNos).toEqual(['301']);
-    await checks();
-  });
-
-  it('反结账：入住单恢复在住、押金抵扣恢复为押金；房间已有别人入住时不能反结账', async () => {
-    const [c] = await ctx.sql<{ id: number }[]>`SELECT checkout_id AS id FROM room_deposits WHERE kind = 'apply' ORDER BY id DESC LIMIT 1`;
-    const [s] = await ctx.sql<{ id: number }[]>`SELECT id FROM room_stays WHERE room_id = ${room['301']!} ORDER BY id DESC LIMIT 1`;
-    expect((await housekeep('301', 'clean')).status).toBe(200);
-    const other = await checkin({ roomId: room['301'], expectedRate: 38800 });
-    expect(other.status).toBe(200);
-    expect((await api(ctx.app, duty, 'POST', `/api/frontdesk/checkouts/${c!.id}/void`, { reason: '收错了' })).body.error.code).toBe('ROOM_TAKEN');
-    // 先给那位客人换到 302，再反结账
-    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${other.body.id}/move`, { toRoomId: room['302'], reason: '房间搞错了' })).status).toBe(200);
-    expect((await tile('301')).status).toBe('dirty');
-    const v = await api(ctx.app, duty, 'POST', `/api/frontdesk/checkouts/${c!.id}/void`, { reason: '收错了' });
-    expect(v.status, JSON.stringify(v.body)).toBe(200);
-    const back = await stay(s!.id);
-    expect(back).toMatchObject({ status: 'open', depositBalance: 20000, billAmount: 38800 });
-    expect(back.deposits.map((d) => d.kind)).toEqual(['receive', 'apply', 'unapply']);
-    expect((await tile('301')).status).toBe('occupied');
-    // 重结：全部现金，押金原路退回
-    const redo = await api(ctx.app, ctx.clerk, 'POST', '/api/rooms/checkout', { clientKey: randomUUID(), stayIds: [s!.id], expectedTotal: 38800, payments: [{ method: 'cash', amount: 38800 }] });
-    expect(redo.status, JSON.stringify(redo.body)).toBe(200);
-    expect((await stay(s!.id)).deposits.map((d) => [d.kind, d.method, d.amount])).toEqual([
-      ['receive', 'cash', 20000],
-      ['apply', 'cash', 20000],
-      ['unapply', 'cash', 20000],
-      ['refund', 'cash', 20000],
-    ]);
-    // 302 那位客人：撤销入住要先作废房费、退押金
-    const o = (await stay(other.body.id)) as StayDetail;
-    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${o.id}/cancel`, { reason: '开错房' })).body.error.code).toBe('ROOM_CHARGED');
-    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/lines/${o.charges[0]!.lineId}/void`, { reason: '开错房' })).status).toBe(200);
-    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${o.id}/cancel`, { reason: '开错房' })).status).toBe(200);
-    expect((await stay(o.id)).status).toBe('cancelled');
-    expect((await tile('302')).status).toBe('dirty');
     await checks();
   });
 });
 
 describe('押金：收、退', () => {
-  it('在住期间收押金、按原收款方式退一部分；超过余额、方式不对都拒绝', async () => {
-    expect((await housekeep('302', 'clean')).status).toBe(200);
-    const s = (await checkin({ roomId: room['302'], expectedRate: 38800, deposit: { method: 'wechat', amount: 30000, ref: '尾号 1234' } })).body as StayDetail;
-    const receive = await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${s.id}/deposits`, { clientKey: randomUUID(), method: 'cash', amount: 10000 });
-    expect(receive.status, JSON.stringify(receive.body)).toBe(200);
-    expect(receive.body.depositByMethod).toEqual([
-      { method: 'wechat', balance: 30000 },
-      { method: 'cash', balance: 10000 },
-    ]);
+  it('收现金、微信、「其他」押金；按原收款方式退一部分（「其他」也能退）；超过余额、方式不对都拒绝', async () => {
+    const s = (await tile('301')).stay!;
+    const receive = (method: string, amount: number, ref = '') =>
+      api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${s.id}/deposits`, { clientKey: randomUUID(), method, amount, ref });
+    expect((await receive('wechat', 30000, '尾号 1234')).status).toBe(200);
+    expect((await receive('other', 5000)).status).toBe(400);
+    const other = await receive('other', 5000, '代金卡 0088');
+    expect(other.status, JSON.stringify(other.body)).toBe(200);
     const refund = (method: string, amount: number) =>
       api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${s.id}/refunds`, { clientKey: randomUUID(), method, amount, reason: '客人要回一部分' });
-    expect((await refund('cash', 20000)).body.error.code).toBe('DEPOSIT_INSUFFICIENT');
+    expect((await refund('cash', 30000)).body.error.code).toBe('DEPOSIT_INSUFFICIENT');
     expect((await refund('alipay', 100)).body.error.code).toBe('DEPOSIT_INSUFFICIENT');
     expect((await refund('wechat', 5000)).status).toBe(200);
-    expect((await stay(s.id)).depositBalance).toBe(35000);
-    // 退房结账：押金抵扣先用非现金（微信），余下现金原路退回
-    const done = await api(ctx.app, ctx.clerk, 'POST', '/api/rooms/checkout', {
-      clientKey: randomUUID(),
-      stayIds: [s.id],
-      expectedTotal: 38800,
-      payments: [{ method: 'deposit', amount: 30000 }, { method: 'cash', amount: 8800 }],
-    });
-    expect(done.status, JSON.stringify(done.body)).toBe(200);
-    expect((await stay(s.id)).deposits.map((d) => [d.kind, d.method, d.amount])).toEqual([
-      ['receive', 'wechat', 30000],
-      ['receive', 'cash', 10000],
-      ['refund', 'wechat', 5000],
-      ['apply', 'wechat', 25000],
-      ['apply', 'cash', 5000],
-      ['refund', 'cash', 5000],
+    const r = await refund('other', 1000);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const after = await stay(s.id);
+    expect(after.depositBalance).toBe(20000 + 30000 + 5000 - 5000 - 1000);
+    expect([...after.depositByMethod].sort((a, b) => a.method.localeCompare(b.method))).toEqual([
+      { method: 'cash', balance: 20000 },
+      { method: 'other', balance: 4000 },
+      { method: 'wechat', balance: 25000 },
     ]);
     await checks();
   });
 });
 
-describe('洗浴客人：房费挂手牌账单，先退房再结账', () => {
-  it('入住挂在手牌账单上；手牌结账前要先退房；退房退押金、房间待打扫，房费随手牌结账', async () => {
-    const v = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: 'R001', zone: 'male' }] });
-    expect(v.status, JSON.stringify(v.body)).toBe(201);
-    const visitId = v.body.visits[0].id as number;
-    expect((await checkin({ roomId: room['303'], expectedRate: 28800, tagCode: 'R009' })).body.error.code).toBe('TAG_NOT_IN_STORE');
-    const s = (await checkin({ roomId: room['303'], expectedRate: 28800, tagCode: 'r001', deposit: { method: 'cash', amount: 5000 } })).body as StayDetail;
-    expect(s).toMatchObject({ tagCode: 'R001', visitId, chargedAmount: 28800 });
-    const pre = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${visitId}`)).body;
-    expect(pre.rooms).toEqual([{ tagCode: 'R001', roomNo: '303', stayNo: s.stayNo }]);
-    expect(pre.visits[0].lines.map((l: { name: string }) => l.name)).toContain(`房费 303 ${Number(today.slice(5, 7))}月${Number(today.slice(8, 10))}日`);
-    const pay = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', { clientKey: randomUUID(), visitIds: [visitId], expectedTotal: pre.totalAmount, payments: [{ method: 'cash', amount: pre.totalAmount }] });
-    expect(pay.body.error.code).toBe('ROOM_OPEN');
-    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${visitId}/cancel`, { reason: '开错牌' })).body.error.code).toBe('ROOM_OPEN');
-    // 只住房的客人才能退房结账
-    expect((await api(ctx.app, ctx.clerk, 'POST', '/api/rooms/checkout', { clientKey: randomUUID(), stayIds: [s.id], expectedTotal: 28800, payments: [] })).body.error.code).toBe('BATH_GUEST_ROOM');
-    expect((await api(ctx.app, ctx.clerk, 'GET', `/api/rooms/checkout-preview?ids=${s.id}`)).body.error.code).toBe('BATH_GUEST_ROOM');
-    const close = await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${s.id}/close`, { clientKey: randomUUID(), expectedDue: 0 });
+describe('退房：补齐房费、押金原路退回，房费随手牌结账', () => {
+  it('手牌结账前要先退房；退房后押金全部退回、房间待打扫；手牌结账连房费一起结；反结账后客人恢复在店、入住单仍是已退房', async () => {
+    const s = await stay((await tile('301')).stay!.id);
+    const pre = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${s.visitId}`)).body;
+    expect(pre.rooms).toEqual([{ stayId: s.id, tagCode: 'R001', roomNo: '301', stayNo: s.stayNo }]);
+    expect((await settle(s.visitId)).body.error.code).toBe('ROOM_OPEN');
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${s.visitId}/cancel`, { reason: '开错牌' })).body.error.code).toBe('ROOM_OPEN');
+    // 只读核对：今天入住、今天退房，房费已经挂齐
+    const preview = (await api(ctx.app, ctx.clerk, 'GET', `/api/rooms/stays/${s.id}/checkout-preview`)).body;
+    expect(preview).toMatchObject({ dues: [], dueAmount: 0, billAmount: 38800, depositBalance: 49000 });
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${s.id}/close`, { clientKey: randomUUID(), expectedDue: 100 })).body.error.code).toBe('ROOM_DUE_CHANGED');
+    const key = randomUUID();
+    const close = await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${s.id}/close`, { clientKey: key, expectedDue: 0 });
     expect(close.status, JSON.stringify(close.body)).toBe(200);
     expect(close.body).toMatchObject({ status: 'checked_out', depositBalance: 0 });
-    expect((await tile('303')).status).toBe('dirty');
-    const pre2 = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${visitId}`)).body;
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${s.id}/close`, { clientKey: key, expectedDue: 0 })).body.id).toBe(s.id);
+    const refunds = (close.body as StayDetail).deposits.filter((d) => d.kind === 'refund' && d.reason === '退房，押金原路退回');
+    expect(refunds.map((d) => [d.method, d.amount]).sort()).toEqual([
+      ['cash', 20000],
+      ['other', 4000],
+      ['wechat', 25000],
+    ]);
+    expect((await tile('301')).status).toBe('dirty');
+    // 退房之后：结账核对没有在住的客房，应收里有房费
+    const pre2 = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${s.visitId}`)).body;
     expect(pre2.rooms).toEqual([]);
-    const ok = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', { clientKey: randomUUID(), visitIds: [visitId], expectedTotal: pre2.totalAmount, payments: [{ method: 'cash', amount: pre2.totalAmount }] });
+    const ok = await settle(s.visitId);
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(ok.body.bills).toEqual([expect.objectContaining({ tagCode: 'R001', amount: ok.body.totalAmount })]);
+    expect(ok.body.totalAmount).toBeGreaterThan(38800);
+    // 反结账：客人恢复在店（房费留在手牌账单上），入住单仍是已退房；重新结账照常
+    const v = await api(ctx.app, duty, 'POST', `/api/frontdesk/checkouts/${ok.body.id}/void`, { reason: '收款方式记错' });
+    expect(v.status, JSON.stringify(v.body)).toBe(200);
+    expect((await stay(s.id)).status).toBe('checked_out');
+    const visit = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/visits/${s.visitId}`)).body as { status: string; lines: { source: string; status: string }[] };
+    expect(visit.status).toBe('open');
+    expect(visit.lines.filter((l) => l.source === 'room' && l.status === 'active')).toHaveLength(1);
+    expect((await settle(s.visitId)).status).toBe(200);
     await checks();
   });
 });
@@ -294,10 +236,9 @@ describe('夜审与超时加收', () => {
   it('昨天入住：夜审给今晚挂一晚，同一晚不重复挂；18:00 前不能做；第二天 12:00–18:00 退房加收半天', async () => {
     expect((await housekeep('302', 'clean')).status).toBe(200);
     const yesterday = shiftDate(today, -1);
-    const v = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: 'R002', zone: 'male' }] });
+    await guest('R002');
     const s = await checkinRoom(deps(), { clientKey: randomUUID(), roomId: room['302'], expectedRate: 38800, tagCode: 'R002' }, { actor: clerk, at: at(yesterday, 22) });
     expect(s).toMatchObject({ businessDate: yesterday, chargedAmount: 38800 });
-    expect(v.status).toBe(201);
     await expect(runNightAudit(deps(), { actor: clerk, at: at(today, 17) })).rejects.toMatchObject({ code: 'AUDIT_TOO_EARLY' });
     const report = await runNightAudit(deps(), { actor: clerk, at: at(today, 19) });
     expect(report.posted).toEqual([{ stayNo: s.stayNo, roomNo: '302', nightDate: today, amount: 38800 }]);
@@ -319,24 +260,36 @@ describe('夜审与超时加收', () => {
   });
 });
 
-describe('钟点房与换房、改登记', () => {
-  it('钟点房入住挂第一段，续住加一段；全天房续住只改预计离店；换房只能换到空房，原房间待打扫', async () => {
-    const s = (await checkin({ roomId: room['8A'], expectedRate: 12800 })).body as StayDetail;
+describe('钟点房、续住、换房、改登记与撤销入住', () => {
+  it('钟点房入住挂第一段，续住加一段；全天房续住只改预计离店；换房只能换到空房，原房间待打扫；撤销入住要先在前台作废房费', async () => {
+    await guest('R003');
+    const s = (await checkin({ roomId: room['8A'], expectedRate: 12800, tagCode: 'R003' })).body as StayDetail;
     expect(s.charges.map((c) => [c.kind, c.blockNo])).toEqual([['block', 1]]);
     const ext = await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${s.id}/extend`, { clientKey: randomUUID(), addBlock: true });
     expect(ext.status, JSON.stringify(ext.body)).toBe(200);
     expect((ext.body as StayDetail).charges.map((c) => c.blockNo)).toEqual([1, 2]);
     expect((await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${s.id}/extend`, { clientKey: randomUUID(), expectedCheckoutDate: today })).status).toBe(400);
     expect((await api(ctx.app, ctx.clerk, 'PUT', `/api/rooms/stays/${s.id}`, { guestLabel: '王女士', guests: 2 })).body).toMatchObject({ guestLabel: '王女士', guests: 2 });
+    // 撤销入住：房费要先在前台手牌账单上作废
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${s.id}/cancel`, { reason: '开错房' })).body.error.code).toBe('ROOM_CHARGED');
+    for (const c of (await stay(s.id)).charges) {
+      expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/lines/${c.lineId}/void`, { reason: '开错房' })).status).toBe(200);
+    }
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${s.id}/cancel`, { reason: '开错房' })).status).toBe(200);
+    expect((await stay(s.id)).status).toBe('cancelled');
+    expect((await tile('8A')).status).toBe('dirty');
+    // 全天房：续住只改预计离店；换房
     expect((await housekeep('301', 'clean')).status).toBe(200);
-    const d = (await checkin({ roomId: room['301'], expectedRate: 38800 })).body as StayDetail;
+    await guest('R004');
+    const d = (await checkin({ roomId: room['301'], expectedRate: 38800, tagCode: 'R004' })).body as StayDetail;
     const tomorrow = shiftDate(today, 1);
     expect((await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${d.id}/extend`, { clientKey: randomUUID(), expectedCheckoutDate: tomorrow })).body.expectedCheckoutDate).toBe(tomorrow);
+    expect((await housekeep('303', 'dirty')).status).toBe(200);
     expect((await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${d.id}/move`, { toRoomId: room['303'], reason: '客人嫌吵' })).body.error.code).toBe('ROOM_NOT_READY');
     expect((await housekeep('303', 'clean')).status).toBe(200);
     const moved = await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${d.id}/move`, { toRoomId: room['303'], reason: '客人嫌吵' });
     expect(moved.status, JSON.stringify(moved.body)).toBe(200);
-    expect(moved.body).toMatchObject({ roomNo: '303', rate: 38800, moves: [expect.objectContaining({ fromRoom: '301', toRoom: '303', reason: '客人嫌吵' })] });
+    expect(moved.body).toMatchObject({ roomNo: '303', rate: 38800, tagCode: 'R004', moves: [expect.objectContaining({ fromRoom: '301', toRoom: '303', reason: '客人嫌吵' })] });
     expect((await tile('301')).status).toBe('dirty');
     expect((await housekeep('303', 'maintenance', '漏水')).body.error.code).toBe('ROOM_IN_USE');
     await checks();
@@ -344,46 +297,51 @@ describe('钟点房与换房、改登记', () => {
 });
 
 describe('交班、日结、对账包与看板', () => {
-  type Shift = { summary: { cash: { expected: number; deposit?: number }; deposits?: { received: { method: string; count: number; amount: number }[]; refunded: { method: string; amount: number }[] } } };
-  type Settlement = { deposits: { received: { method: string; amount: number }[]; refunded: { method: string; amount: number }[]; applied: number; restored: number; held: number }; checks: { key: string; ok: boolean; label: string; detail: string }[] };
+  type Shift = { summary: { cash: { expected: number; checkout: number; deposit?: number }; deposits?: { received: { method: string; count: number; amount: number }[]; refunded: { method: string; count: number; amount: number }[] } } };
+  type Settlement = { deposits: { received: { method: string; amount: number }[]; refunded: { method: string; amount: number }[]; held: number }; checks: { key: string; ok: boolean; label: string; detail: string }[] };
   const sum = (list: { method: string; amount: number }[], method: string) => list.filter((x) => x.method === method).reduce((t, x) => t + x.amount, 0);
 
-  it('现金押金计入交班应有现金（收 − 退）；日结单列押金并核对押金抵扣；对账包第 07 个文件；看板「客房」与部门「客房」', async () => {
+  it('现金押金计入交班应有现金（收 − 退）；日结单列押金；对账包第 07 个文件；看板「客房」与部门「客房」', async () => {
     const r = await api(ctx.app, boss, 'POST', '/api/admin/rooms/rooms', { roomNo: '305', floor: '3', roomTypeId: type['豪华单间'] });
     room['305'] = r.body.rooms.find((x: { roomNo: string }) => x.roomNo === '305').id;
     expect((await api(ctx.app, ctx.clerk, 'POST', '/api/shifts', { openingCash: 0 })).status).toBe(200);
     const shift = async () => (await api(ctx.app, ctx.clerk, 'GET', '/api/shifts/current')).body.shift as Shift;
     const settlement = async () => (await api(ctx.app, ctx.owner, 'GET', `/api/settlements/${today}`)).body as Settlement;
     const before = await settlement();
-    // 收现金押金 500，退房结账押金抵扣 388（全是现金收的），余下 112 现金退回：钱箱净增 388 = 房费
-    const s = (await checkin({ roomId: room['305'], expectedRate: 38800, deposit: { method: 'cash', amount: 50000 } })).body as StayDetail;
+    // 收现金押金 500、在住时退 100、退房时余下 400 原路退回：钱箱的押金净额回到 0；房费随手牌结账收现金
+    const visitId = await guest('R006');
+    const s = (await checkin({ roomId: room['305'], expectedRate: 38800, tagCode: 'R006', deposit: { method: 'cash', amount: 50000 } })).body as StayDetail;
     expect((await shift()).summary.cash.deposit).toBe(50000);
-    const done = await api(ctx.app, ctx.clerk, 'POST', '/api/rooms/checkout', { clientKey: randomUUID(), stayIds: [s.id], expectedTotal: 38800, payments: [{ method: 'deposit', amount: 38800 }] });
-    expect(done.status, JSON.stringify(done.body)).toBe(200);
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${s.id}/refunds`, { clientKey: randomUUID(), method: 'cash', amount: 10000, reason: '客人要回一部分' })).status).toBe(200);
+    expect((await shift()).summary.cash.deposit).toBe(40000);
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${s.id}/close`, { clientKey: randomUUID(), expectedDue: 0 })).status).toBe(200);
+    const paid = await settle(visitId);
+    expect(paid.status, JSON.stringify(paid.body)).toBe(200);
     const sh = await shift();
-    expect(sh.summary.cash.deposit).toBe(38800);
+    expect(sh.summary.cash.deposit ?? 0).toBe(0);
     expect(sh.summary.deposits!.received).toEqual([{ method: 'cash', count: 1, amount: 50000 }]);
-    expect(sh.summary.deposits!.refunded).toEqual([{ method: 'cash', count: 1, amount: 11200 }]);
-    expect(sh.summary.cash.expected).toBe(38800);
+    expect(sh.summary.deposits!.refunded).toEqual([{ method: 'cash', count: 2, amount: 50000 }]);
+    expect(sh.summary.cash.checkout).toBe(paid.body.totalAmount);
+    expect(sh.summary.cash.expected).toBe(paid.body.totalAmount);
     const after = await settlement();
     expect(sum(after.deposits.received, 'cash') - sum(before.deposits.received, 'cash')).toBe(50000);
-    expect(sum(after.deposits.refunded, 'cash') - sum(before.deposits.refunded, 'cash')).toBe(11200);
-    expect(after.deposits.applied - before.deposits.applied).toBe(38800);
+    expect(sum(after.deposits.refunded, 'cash') - sum(before.deposits.refunded, 'cash')).toBe(50000);
     expect(after.deposits.held).toBe(before.deposits.held);
-    expect(after.checks.find((c) => c.key === 'deposit_bridge')).toMatchObject({ ok: true });
     for (const c of after.checks) expect(c.ok, `${c.label}：${c.detail}`).toBe(true);
     await checks();
-    // 对账包
+    // 对账包：07 客房与押金；结账单里是住客的手牌
     const recon = await buildDailyRecon(ctx.sql, ctx.config, today);
     expect(recon.ok).toBe(true);
     const f07 = recon.files.find((f) => f.name === '07-客房与押金.csv')!.content;
-    for (const text of [s.stayNo, '收押金', '押金抵扣', '退押金', '退房结账', '入住（只住房）', '当天结束时在住押金余额']) expect(f07).toContain(text);
-    expect(recon.files.find((f) => f.name === '02-结账单.csv')!.content).toContain('房 305');
+    for (const text of [s.stayNo, 'R006', '入住', '收押金', '退押金', '退房', '当天结束时在住押金余额']) expect(f07).toContain(text);
+    expect(f07).not.toContain('押金抵扣');
+    expect(recon.files.find((f) => f.name === '02-结账单.csv')!.content).toContain('R006');
     // 看板「客房」：经营总览的岗位看；店员看不到
     expect((await api(ctx.app, ctx.clerk, 'GET', `/api/reports/rooms?from=${today}&to=${today}`)).status).toBe(403);
     const rep = await api(ctx.app, boss, 'GET', `/api/reports/rooms?from=${today}&to=${today}`);
     expect(rep.status, JSON.stringify(rep.body)).toBe(200);
     expect(rep.body.now.rooms).toBe(5);
+    expect(rep.body.deposits).toEqual({ received: expect.any(Number), refunded: expect.any(Number) });
     expect(rep.body.revenue.byKind.map((k: { name: string }) => k.name)).toContain('房费（全天房）');
     expect(rep.body.revenue.total).toBeGreaterThanOrEqual(38800);
     expect(rep.body.days).toHaveLength(1);

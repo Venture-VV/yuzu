@@ -1,14 +1,14 @@
 // 客房（S7，v0.7.4，见 docs/ROOMS.md）：按楼层的房态看板（空闲 / 在住 / 待打扫 / 维修）。
-// 点空闲的房入住（洗浴客人填手牌，房费挂在手牌账单上；只住房的客人开客房账单，默认收押金）；
-// 点在住的房看入住单：房费与押金、续住、换房、改登记、收退押金、退房（洗浴客人）或退房结账（只住房的客人）、撤销入住；
+// 住客都是在店的洗浴客人（店主 2026-10-31：门票必选，没有只住房的客人；房价不含洗浴门票）：
+// 点空闲的房入住（填在店客人的手牌，房费挂在手牌账单上，离店时随手牌在前台结账）；
+// 点在住的房看入住单：房费与押金、续住、换房、改登记、收退押金、退房、撤销入住；
 // 点待打扫、维修的房改房态。全天房每晚过了加收一晚的时刻做夜审，给在住的客人挂今晚的房费（同一晚只挂一次）。
-// 入住、续住、收退押金、退房、退房结账与前台一样有「结果待确认」：断网后查回、原样重提或确认作废。
+// 入住、续住、收退押金、退房与前台一样有「结果待确认」：断网后查回、原样重提或确认作废。
 
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { BedDouble, MoonStar, ReceiptText, Sparkles, Users, Wrench } from 'lucide-react';
-import type { CheckoutDetail } from '@shared/checkout';
+import { BedDouble, MoonStar, Sparkles, Users, Wrench } from 'lucide-react';
 import { normalizeTagCode, TAG_CODE_PATTERN } from '@shared/frontdesk';
 import { PAYMENT_METHOD_LABELS, shiftDate } from '@shared/labels';
 import { centsToInput, formatYuan, parseYuan } from '@shared/money';
@@ -23,7 +23,6 @@ import {
   type RoomBoardStatus,
   type StayDetail,
 } from '@shared/rooms';
-import type { MemberSummary } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, formatTime } from '../../lib/utils';
@@ -33,14 +32,11 @@ import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Field, Input, Notice, Segmented, Skeleton } from '../../components/ui';
-import { MemberField } from '../dining/TablesTab';
-import { CheckoutRecordsDialog } from '../frontdesk/CheckoutDialog';
 import { PendingPanel, useFrontdeskOp } from '../frontdesk/pending';
 import { stayText } from '../frontdesk/queries';
 import { SHIFT_ERRORS, shiftKeys, ShiftGate, useShiftReady } from '../shift/ShiftGate';
 import { DepositFields, depositProblem, guestOf, kindLabel, rateText, type DepositDraft } from './parts';
 import { dayText, minuteText, roomsKey, useRoomBoard } from './queries';
-import { RoomCheckoutDialog } from './RoomCheckoutDialog';
 import { StayDialog, type StayAction } from './StayDialog';
 
 export function RoomsPage() {
@@ -59,7 +55,7 @@ export function RoomsPage() {
   }
   return (
     <>
-      <PageHeader title="客房" subtitle="点空闲的房入住，点在住的房看房费与押金、续住、换房、退房；点待打扫、维修的房改房态" />
+      <PageHeader title="客房" subtitle="住客先在前台接待、买门票，再点空闲的房入住；点在住的房看房费与押金、续住、换房、退房；点待打扫、维修的房改房态" />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <RoomsBoardView />
       </div>
@@ -82,13 +78,11 @@ function RoomsBoardView() {
   const board = useRoomBoard();
   const [checkinRoom, setCheckinRoom] = useState<RoomBoardRoom | null>(null);
   const [stay, setStay] = useState<{ id: number; action?: StayAction } | null>(null);
-  const [checkoutFor, setCheckoutFor] = useState<number | null>(null);
   const [housekeepRoom, setHousekeepRoom] = useState<RoomBoardRoom | null>(null);
   const [auditing, setAuditing] = useState(false);
-  const [records, setRecords] = useState(false);
   const canOperate = can('room.operate');
 
-  // 顶部「结果待确认」的「去处理」：入住回到那间房的入住对话框，退房结账回到那间房的结账，其余回到那张入住单的对应操作
+  // 顶部「结果待确认」的「去处理」：入住回到那间房的入住对话框，其余回到那张入住单的对应操作
   const resume = params.get('resume');
   useEffect(() => {
     if (!resume || !board.data) return;
@@ -97,8 +91,6 @@ function RoomsBoardView() {
     if (resume === 'room_checkin' && r) {
       const room = board.data.rooms.find((x) => x.id === r);
       if (room) setCheckinRoom(room);
-    } else if (resume === 'room_checkout' && s) {
-      setCheckoutFor(s);
     } else if (s && (resume === 'room_extend' || resume === 'room_deposit' || resume === 'room_refund' || resume === 'room_close')) {
       setStay({ id: s, action: resume === 'room_extend' ? 'extend' : resume === 'room_deposit' ? 'deposit' : resume === 'room_refund' ? 'refund' : 'close' });
     }
@@ -117,18 +109,11 @@ function RoomsBoardView() {
   const click = (r: RoomBoardRoom) => {
     if (r.stay) {
       // 只管打扫的岗位（后勤）看不了入住单：在住的房退房后才变待打扫
-      if (canOperate || can('frontdesk.checkout')) setStay({ id: r.stay.id });
+      if (canOperate) setStay({ id: r.stay.id });
       else toast({ tone: 'info', title: `${r.roomNo} 在住`, body: '客人退房后房间变为待打扫，打扫好了再点「已打扫」' });
     } else if (r.status === 'vacant' && canOperate) setCheckinRoom(r);
     else if (can('room.housekeep')) setHousekeepRoom(r);
     else toast({ tone: 'info', title: `${r.roomNo} ${ROOM_BOARD_LABELS[r.status]}`, body: '入住要有「客房入住、退房」权限，改房态要有「客房打扫、维修」权限' });
-  };
-
-  const done = (detail: CheckoutDetail) => {
-    setCheckoutFor(null);
-    setStay(null);
-    void qc.invalidateQueries({ queryKey: roomsKey });
-    toast({ tone: 'success', title: `已退房结账 ${detail.checkoutNo}`, body: '房间变为待打扫；结账单在「结账记录」里，可以重打或反结账。' });
   };
 
   if (board.isPending) return <Skeleton className="m-5 h-64 md:m-7" />;
@@ -149,11 +134,6 @@ function RoomsBoardView() {
         {canOperate && (
           <Button size="sm" variant="secondary" icon={<MoonStar className="size-4" />} onClick={() => setAuditing(true)} data-testid="rooms-audit">
             夜审
-          </Button>
-        )}
-        {can('frontdesk.read') && (
-          <Button size="sm" variant="secondary" icon={<ReceiptText className="size-4" />} onClick={() => setRecords(true)} data-testid="rooms-records">
-            结账记录
           </Button>
         )}
       </div>
@@ -195,19 +175,9 @@ function RoomsBoardView() {
           }}
         />
       )}
-      {stay && (
-        <StayDialog
-          id={stay.id}
-          action={stay.action}
-          board={b}
-          onClose={() => setStay(null)}
-          onCheckout={(id) => setCheckoutFor(id)}
-        />
-      )}
-      {checkoutFor !== null && <RoomCheckoutDialog open stayId={checkoutFor} board={b} onClose={() => setCheckoutFor(null)} onDone={done} />}
+      {stay && <StayDialog id={stay.id} action={stay.action} board={b} onClose={() => setStay(null)} />}
       {housekeepRoom && <HousekeepingDialog room={housekeepRoom} onClose={() => setHousekeepRoom(null)} />}
       {auditing && <AuditDialog board={b} onClose={() => setAuditing(false)} />}
-      <CheckoutRecordsDialog open={records} onClose={() => setRecords(false)} />
     </div>
   );
 }
@@ -244,7 +214,7 @@ function RoomTile({ r, canCheckin, onClick }: { r: RoomBoardRoom; canCheckin: bo
             ) : (
               <span className="num">钟点房 · 已住 {stayText(s.checkedInAt, Date.now())}</span>
             )}
-            {s.tagCode && <Badge tone="lake">手牌 {s.tagCode}</Badge>}
+            <Badge tone="lake">手牌 {s.tagCode}</Badge>
             {s.depositBalance > 0 && (
               <span className="font-semibold text-ink-2">
                 押金 <Money cents={s.depositBalance} />
@@ -298,7 +268,7 @@ function AuditStrip({ board, onRun }: { board: RoomBoard; onRun?: () => void }) 
   );
 }
 
-/** 入住：只住房的客人开客房账单（默认收押金），洗浴客人填手牌（房费挂在手牌账单上，随手牌结账） */
+/** 入住：填在店客人的手牌（住客要先在前台接待、买门票），房费挂在手牌账单上，离店时随手牌结账；押金按规则默认收或不收 */
 function CheckinDialog({
   room,
   board,
@@ -314,15 +284,12 @@ function CheckinDialog({
   onDone: (d: StayDetail) => void;
 }) {
   const session = useSession();
-  const can = useCan();
   const qc = useQueryClient();
   const toast = useToast();
   const rules = board.rules;
-  const [mode, setMode] = useState<'room' | 'bath'>('room');
   const [tag, setTag] = useState('');
   const [label, setLabel] = useState('');
   const [guests, setGuests] = useState(1);
-  const [member, setMember] = useState<MemberSummary | null>(null);
   const [leave, setLeave] = useState(room.kind === 'daily' ? shiftDate(session.today, 1) : '');
   const [withDeposit, setWithDeposit] = useState(rules.defaultDeposit > 0);
   const [deposit, setDeposit] = useState<DepositDraft>({ method: 'cash', amount: rules.defaultDeposit > 0 ? centsToInput(rules.defaultDeposit) : '', ref: '' });
@@ -340,14 +307,8 @@ function CheckinDialog({
     if (op.state.phase === 'error' && SHIFT_ERRORS.includes(op.state.code ?? '')) void qc.invalidateQueries({ queryKey: shiftKeys.all });
   }, [op.state, qc]);
 
-  const changeMode = (m: 'room' | 'bath') => {
-    setMode(m);
-    // 洗浴客人默认不收押金（离店时随手牌结账），只住房的客人默认收
-    setWithDeposit(m === 'room' && rules.defaultDeposit > 0);
-    op.clearError();
-  };
   const tagCode = normalizeTagCode(tag);
-  const tagOk = mode === 'room' || TAG_CODE_PATTERN.test(tagCode);
+  const tagOk = TAG_CODE_PATTERN.test(tagCode);
   const depProblem = withDeposit ? depositProblem(deposit, { required: true }) : null;
   const ok =
     tagOk &&
@@ -366,16 +327,15 @@ function CheckinDialog({
   const submit = async () => {
     if (!ok) return;
     const dep = withDeposit ? { method: deposit.method, amount: parseYuan(deposit.amount)!, ref: deposit.ref.trim() } : null;
-    const who = member ? `会员 ${member.name}` : label.trim() || (mode === 'bath' ? `手牌 ${tagCode}` : '散客');
+    const who = `手牌 ${tagCode}${label.trim() ? ` · ${label.trim()}` : ''}`;
     const d = await op.submit((key) => ({
       url: '/api/rooms/checkin',
       body: {
         clientKey: key,
         roomId: room.id,
-        tagCode: mode === 'bath' ? tagCode : null,
+        tagCode,
         guestLabel: label.trim(),
         guests,
-        memberId: member?.id ?? null,
         expectedCheckoutDate: room.kind === 'daily' && leave ? leave : null,
         expectedRate: room.price,
         deposit: dep,
@@ -415,22 +375,26 @@ function CheckinDialog({
     >
       <PendingPanel op={op} onResolved={finish} />
       <div className="space-y-4" data-testid="room-checkin">
-        <Segmented
-          value={mode}
-          onChange={changeMode}
-          ariaLabel="住客"
-          options={[
-            { value: 'room', label: '只住房的客人' },
-            { value: 'bath', label: '洗浴客人（有手牌）', disabled: !can('frontdesk.operate') },
-          ]}
-        />
-        {mode === 'bath' ? (
-          <Field label="手牌号" htmlFor="room-tag" hint="在店客人的手牌：房费挂在手牌账单上，离店时随手牌一起结账" error={tag && !tagOk ? '牌号格式不正确（例如 A023、1088）' : null}>
-            <Input fullWidth={false} id="room-tag" value={tag} onChange={(e) => setTag(e.target.value.toUpperCase())} disabled={op.locked} className="num w-40 text-[16px] font-bold" data-testid="room-checkin-tag" />
-          </Field>
-        ) : (
-          <p className="text-[12.5px] text-ink-3">只住房的客人开一张客房账单，房费与押金在这里结：退房时「退房结账」。</p>
-        )}
+        <Field
+          label="住客的手牌号"
+          htmlFor="room-tag"
+          hint="住客要先在前台接待、买门票（门票必选，房价不含门票）；房费挂在这张手牌的账单上，离店时随手牌一起结账"
+          error={tag && !tagOk ? '牌号格式不正确（例如 A023、1088）' : null}
+        >
+          <Input
+            fullWidth={false}
+            id="room-tag"
+            value={tag}
+            onChange={(e) => {
+              setTag(e.target.value.toUpperCase());
+              op.clearError();
+            }}
+            disabled={op.locked}
+            className="num w-40 text-[16px] font-bold"
+            data-autofocus
+            data-testid="room-checkin-tag"
+          />
+        </Field>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="住客称呼" htmlFor="room-label" hint="选填，例如 王先生">
             <Input id="room-label" value={label} maxLength={16} onChange={(e) => setLabel(e.target.value)} disabled={op.locked} data-testid="room-checkin-label" />
@@ -456,12 +420,11 @@ function CheckinDialog({
             <Input fullWidth={false} id="room-leave" type="date" min={session.today} value={leave} onChange={(e) => setLeave(e.target.value)} disabled={op.locked} className="w-48" data-testid="room-checkin-leave" />
           </Field>
         )}
-        {can('member.read') && <MemberField value={member} onChange={setMember} disabled={op.locked} testPrefix="room" />}
         <div className="rounded-lg border border-line bg-paper/50 p-3">
           <label className="flex items-center gap-2 text-[13.5px] font-semibold">
             <input type="checkbox" checked={withDeposit} onChange={(e) => setWithDeposit(e.target.checked)} disabled={op.locked} className="size-4 accent-pine" data-testid="room-checkin-with-deposit" />
             收押金
-            <span className="text-[12px] font-normal text-ink-3">押金不算营业额，退房时原路退回或抵扣房费；现金押金计入交班</span>
+            <span className="text-[12px] font-normal text-ink-3">押金不算营业额，退房时原路退回；现金押金计入交班</span>
           </label>
           {withDeposit && (
             <div className="mt-2.5 space-y-2">

@@ -508,11 +508,11 @@ function CloseDialog({ open, onClose, s }: { open: boolean; onClose: () => void;
 
 /**
  * 客房押金（S7，v0.7.4）：押金是负债，不算营业额。收、退按收款方式（现金进出钱箱，交班按此核对）；
- * 退房结账时抵扣的押金随结账单计入营业额（收款方式「押金抵扣」），反结账恢复为押金。没有押金往来、也没有在住押金时不显示。
+ * 房费挂在住客的手牌账单上、随手牌结账。没有押金往来、也没有在住押金时不显示。
  */
 function DepositsCard({ s }: { s: SettlementSummary }) {
   const d = s.deposits;
-  if (!d || (d.received.length === 0 && d.refunded.length === 0 && d.applied === 0 && d.restored === 0 && d.held === 0)) return null;
+  if (!d || (d.received.length === 0 && d.refunded.length === 0 && d.held === 0)) return null;
   const sum = (list: typeof d.received) => list.reduce((t, m) => t + m.amount, 0);
   const line = (list: typeof d.received) => (list.length ? list.map((m) => `${PAYMENT_METHOD_LABELS[m.method]} ${m.count} 笔 ¥${(m.amount / 100).toFixed(2)}`).join('、') : '无');
   return (
@@ -531,8 +531,6 @@ function DepositsCard({ s }: { s: SettlementSummary }) {
         <p className="pl-3 text-[12px] text-ink-3">{line(d.received)}</p>
         <Row label="退押金（原路退回）" cents={-sum(d.refunded)} className="text-clay" />
         <p className="pl-3 text-[12px] text-ink-3">{line(d.refunded)}</p>
-        <Row label="退房结账时押金抵扣（计入营业额）" cents={d.applied} className="text-ink-2" />
-        {d.restored !== 0 && <Row label="反结账恢复为押金" cents={d.restored} className="text-ink-2" />}
         <p className="text-[12px] text-ink-4">现金押金进出钱箱，交班按此核对应有现金；扫码、银行卡收的押金退房时在商户后台原路退。</p>
       </div>
     </Card>

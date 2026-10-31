@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BadgePercent, HandCoins, Plus, ShieldCheck, Ticket, Trash2, UserRound, WalletCards } from 'lucide-react';
+import { BadgePercent, Plus, ShieldCheck, Ticket, Trash2, UserRound, WalletCards } from 'lucide-react';
 import {
   CHECKOUT_METHOD_LABELS,
   COUPON_CODE_PATTERN,
@@ -20,8 +20,7 @@ import { AuthorizeDialog } from '../../components/AuthorizeDialog';
 import { Money } from '../../components/Money';
 import { Badge, Button, Input, MoneyInput, Select } from '../../components/ui';
 
-// 结账收款（手牌结账、餐饮桌台结账与客房退房结账共用）：可组合多种方式，收款合计等于应收才能结清。
-// 客房退房结账（S7）另有「押金抵扣」：不超过这几间房的押金余额，余下的押金原路退回。
+// 结账收款（手牌结账与餐饮桌台结账共用）：可组合多种方式，收款合计等于应收才能结清。
 // R1.2（店主 2026-10-29 签认）：「优惠 / 免单」由值班经理及以上当场授权（这几张手牌或这几桌、这个金额），
 // 原因随授权填写，店员不能自行抹零；「其他」收款必须填备注；储值只能用本次结账客人里的会员。
 
@@ -81,8 +80,7 @@ export type PaymentBody =
   | { method: 'wallet'; memberId: number; amount: number; expectedSplit: { principal: number; bonus: number } }
   | { method: 'coupon'; platform: CouponPlatform; code: string; dealName: string; amount: number }
   | { method: 'discount'; amount: number; grantId: string }
-  | { method: 'deposit'; amount: number }
-  | { method: Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'deposit'>; amount: number; ref: string };
+  | { method: Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount'>; amount: number; ref: string };
 
 /**
  * 收款登记的状态与核对：每笔的金额、储值扣款构成（余额不足、会员不在本次结账里）、团购券码、「其他」备注、
@@ -96,12 +94,10 @@ export function usePayRows(opts: {
   grantFits: (grant: DiscountGrant | null, cents: number) => boolean;
   /** 补录纸质单：不能用会员储值 */
   backfill: boolean;
-  /** 对象的叫法（「手牌」「桌台」「房间」），用于提示授权要重新做 */
+  /** 对象的叫法（「手牌」「桌台」），用于提示授权要重新做 */
   scopeName: string;
   locked: boolean;
   onEdit: () => void;
-  /** 客房退房结账：这几间房的押金余额（押金抵扣不能超过它）；其他结账没有押金抵扣 */
-  deposit?: number | null;
 }) {
   const session = useSession();
   const [rows, setRows] = useState<PayRow[]>([]);
@@ -128,10 +124,6 @@ export function usePayRows(opts: {
     }
     if (r.method === 'coupon' && !COUPON_CODE_PATTERN.test(normalizeCouponCode(r.code))) return '请填写完整券码';
     if (r.method === 'other' && !r.ref.trim()) return '「其他」收款请在备注里写明收的是什么';
-    if (r.method === 'deposit') {
-      if (opts.deposit == null) return '这次结账不能用押金抵扣';
-      if (c > opts.deposit) return `押金只有 ¥${(opts.deposit / 100).toFixed(2)}，押金抵扣最多 ¥${(opts.deposit / 100).toFixed(2)}`;
-    }
     if (r.method === 'cash' && r.tendered.trim()) {
       // 「客人实给」只用来算找零，不登记；填了却少于这笔现金，说明现金没收够（测试服 E2E 报告 BUG-2）
       const given = parseYuan(r.tendered);
@@ -155,8 +147,7 @@ export function usePayRows(opts: {
   };
   const addRow = (method: CheckoutMethod) =>
     edit(() => {
-      const due = Math.max(0, remaining ?? 0);
-      const row = newRow(method, method === 'deposit' ? Math.min(due, opts.deposit ?? 0) : due);
+      const row = newRow(method, Math.max(0, remaining ?? 0));
       if (method === 'wallet') {
         const m = opts.members?.find((x) => !rows.some((r) => r.member?.id === x.id));
         if (m) row.member = m;
@@ -178,7 +169,6 @@ export function usePayRows(opts: {
       }
       if (r.method === 'coupon') return { method: 'coupon' as const, platform: r.platform, code: normalizeCouponCode(r.code), dealName: r.dealName.trim(), amount };
       if (r.method === 'discount') return { method: 'discount' as const, amount, grantId: r.grant!.grantId };
-      if (r.method === 'deposit') return { method: 'deposit' as const, amount };
       return { method: r.method, amount, ref: r.ref.trim() };
     });
 
@@ -190,9 +180,6 @@ export function usePayRows(opts: {
     problems,
     dupWallet,
     hasDiscount: rows.some((r) => r.method === 'discount'),
-    hasDeposit: rows.some((r) => r.method === 'deposit'),
-    /** 押金余额（客房退房结账）；没有押金抵扣时为 null */
-    depositLimit: opts.deposit ?? null,
     /** 每笔都填好了、没有重复的储值会员 */
     ok: problems.every((x) => x === null) && !dupWallet,
     methods: [...new Set(rows.map((r) => CHECKOUT_METHOD_LABELS[r.method]))],
@@ -234,14 +221,14 @@ export function PaymentsSection({
     <div className="rounded-lg border border-line bg-paper/50 p-3">
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="mr-1 text-[13px] font-bold text-ink-2">收款</span>
-        {[...QUICK_METHODS.filter((m) => m !== 'wallet' || canWallet), ...(pay.depositLimit ? (['deposit'] as const) : [])].map((m) => (
+        {QUICK_METHODS.filter((m) => m !== 'wallet' || canWallet).map((m) => (
           <Button
             key={m}
             size="sm"
             variant="secondary"
-            icon={m === 'discount' ? <BadgePercent className="size-3.5" /> : m === 'deposit' ? <HandCoins className="size-3.5" /> : <Plus className="size-3.5" />}
+            icon={m === 'discount' ? <BadgePercent className="size-3.5" /> : <Plus className="size-3.5" />}
             // 应收合计取回之前不能选（店主 2026-10-30 定）：网络慢时先点了，新加的一笔没有默认金额
-            disabled={pay.locked || total === null || (m === 'discount' && pay.hasDiscount) || (m === 'deposit' && pay.hasDeposit)}
+            disabled={pay.locked || total === null || (m === 'discount' && pay.hasDiscount)}
             onClick={() => pay.addRow(m)}
             data-testid={`pay-add-${m}`}
           >
@@ -325,15 +312,13 @@ export function PayRowEditor({
   return (
     <li className={cn('rounded-lg border bg-card p-3', problem ? 'border-clay/40' : 'border-line')} data-testid={`pay-row-${row.method}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <Badge tone={row.method === 'wallet' ? 'pine' : row.method === 'coupon' || row.method === 'discount' ? 'yuzu' : row.method === 'deposit' ? 'lake' : 'neutral'} className="h-7 px-3 text-[13px]">
+        <Badge tone={row.method === 'wallet' ? 'pine' : row.method === 'coupon' || row.method === 'discount' ? 'yuzu' : 'neutral'} className="h-7 px-3 text-[13px]">
           {row.method === 'wallet' ? (
             <WalletCards className="size-3.5" />
           ) : row.method === 'coupon' ? (
             <Ticket className="size-3.5" />
           ) : row.method === 'discount' ? (
             <BadgePercent className="size-3.5" />
-          ) : row.method === 'deposit' ? (
-            <HandCoins className="size-3.5" />
           ) : null}
           {CHECKOUT_METHOD_LABELS[row.method]}
         </Badge>

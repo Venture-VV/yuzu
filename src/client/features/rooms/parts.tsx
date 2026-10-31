@@ -3,7 +3,7 @@ import { parseYuan } from '@shared/money';
 import { ROOM_KIND_LABELS, type RoomKind } from '@shared/rooms';
 import { Input, MoneyInput, Select } from '../../components/ui';
 
-/** 住客的叫法：登记的会员、称呼、洗浴客人的手牌，都没有时为「散客」 */
+/** 住客的叫法：手牌上登记的会员、入住时的称呼，都没有时写手牌号 */
 export const guestOf = (s: { memberName: string | null; guestLabel: string; tagCode?: string | null }) =>
   s.memberName ?? (s.guestLabel || (s.tagCode ? `手牌 ${s.tagCode}` : '散客'));
 

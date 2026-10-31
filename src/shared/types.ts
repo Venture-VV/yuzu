@@ -336,9 +336,8 @@ export interface SettlementTotals {
    */
   backfill: { count: number };
   /**
-   * 客房押金（S7，v0.7.4）：押金是负债，不算营业额。received / refunded 是当天收、退的押金（按收款方式，现金计入钱箱）；
-   * applied / restored 是退房结账时抵扣、反结账时恢复的押金（不动现金，抵扣的部分随结账单计入营业额）；held 是当天结束时的在住押金余额。
-   * 升级之前确认的日结快照没有这一项，按 0 补齐
+   * 客房押金（S7，v0.7.4）：押金是负债，不算营业额。received / refunded 是当天收、退的押金（按收款方式，现金进出钱箱）；
+   * held 是当天结束时的在住押金余额。升级之前确认的日结快照没有这一项，按 0 补齐
    */
   deposits: SettlementDeposits;
 }
@@ -346,8 +345,6 @@ export interface SettlementTotals {
 export interface SettlementDeposits {
   received: { method: PaymentMethod; count: number; amount: number }[];
   refunded: { method: PaymentMethod; count: number; amount: number }[];
-  applied: number;
-  restored: number;
   held: number;
 }
 

@@ -1,10 +1,12 @@
 // S7 客房（v0.7.4，店主 2026-10-31 选定，见 docs/ROOMS.md）：房型与房价、房间与房态、入住单与房费、押金台账、夜审。
 //
-// 规则先按洗浴中心客房、酒店的常见做法设默认值，标「待确认」，店主在后台「客房」里改：
+// 店主 2026-10-31 定：住客都是在店的洗浴客人（门票必选，没有只住房的客人）；房价不含洗浴门票，门票照常按门票规则计。
+// 房费挂在客人的手牌账单上，离店时随手牌一起结账。其余规则先按洗浴中心客房、酒店的常见做法设默认值，标「待确认」，
+// 店主在后台「客房」里改：
 //   · 全天房按晚计价：入住时挂第一晚，夜审每晚挂一晚，同一晚只挂一次；退房时间 12:00，12:00–18:00 退房加收半天，
 //     18:00 以后再加一晚；漏挂的在退房时补上；
 //   · 钟点房按段计价（每段时长按房型）：入住时挂第一段，续住加一段，退房时超过已付时段加宽限按段补；
-//   · 押金是负债，不算营业额：按收款方式记收、退、抵扣，原路退回；现金押金计入交班应有现金。
+//   · 押金是负债，不算营业额：按收款方式记收、退，退房时原路退回；现金押金计入交班应有现金。
 
 import { businessDateOf, businessDayStart } from './business-date';
 import { PAYMENT_METHODS, shiftDate, type PaymentMethod } from './labels';
@@ -18,7 +20,7 @@ export interface RoomRules {
   lateFullMinute: number;
   /** 钟点房超过已付时段的宽限分钟（默认 15） */
   hourlyGraceMinutes: number;
-  /** 只住房的客人入住时默认收的押金（分，默认 ¥200）；洗浴客人默认不收 */
+  /** 入住时默认收的押金（分）；0 为默认不收（默认：住客都有手牌，离店前在前台结清） */
   defaultDeposit: number;
 }
 
@@ -27,7 +29,7 @@ export const DEFAULT_ROOM_RULES: RoomRules = {
   checkoutMinute: 12 * 60,
   lateFullMinute: 18 * 60,
   hourlyGraceMinutes: 15,
-  defaultDeposit: 20000,
+  defaultDeposit: 0,
 };
 
 export const ROOM_KINDS = ['daily', 'hourly'] as const;
@@ -44,14 +46,14 @@ export const HOUSEKEEPING_LABELS: Record<Housekeeping, string> = { clean: '已�
 export type RoomBoardStatus = 'vacant' | 'occupied' | 'dirty' | 'maintenance';
 export const ROOM_BOARD_LABELS: Record<RoomBoardStatus, string> = { vacant: '空闲', occupied: '在住', dirty: '待打扫', maintenance: '维修' };
 
-export const STAY_STATUSES = ['open', 'checked_out', 'settled', 'cancelled'] as const;
+export const STAY_STATUSES = ['open', 'checked_out', 'cancelled'] as const;
 export type StayStatus = (typeof STAY_STATUSES)[number];
-export const STAY_STATUS_LABELS: Record<StayStatus, string> = { open: '在住', checked_out: '已退房', settled: '已结账', cancelled: '已撤销' };
+export const STAY_STATUS_LABELS: Record<StayStatus, string> = { open: '在住', checked_out: '已退房', cancelled: '已撤销' };
 
-/** 押金台账：收、退、退房结账时抵扣、反结账时恢复 */
-export const DEPOSIT_KINDS = ['receive', 'refund', 'apply', 'unapply'] as const;
+/** 押金台账：收、退 */
+export const DEPOSIT_KINDS = ['receive', 'refund'] as const;
 export type DepositKind = (typeof DEPOSIT_KINDS)[number];
-export const DEPOSIT_KIND_LABELS: Record<DepositKind, string> = { receive: '收押金', refund: '退押金', apply: '押金抵扣', unapply: '反结账恢复押金' };
+export const DEPOSIT_KIND_LABELS: Record<DepositKind, string> = { receive: '收押金', refund: '退押金' };
 /** 押金的收款方式：现金、微信、支付宝、银行卡、其他（储值、团购券不能当押金） */
 export const DEPOSIT_METHODS = PAYMENT_METHODS;
 
@@ -107,9 +109,10 @@ export interface StaySummary {
   rate: number;
   guestLabel: string;
   guests: number;
-  /** 洗浴客人的手牌；只住房的客人为 null（客房账单） */
-  tagCode: string | null;
-  visitId: number | null;
+  /** 住客的手牌与来访（房费挂在手牌账单上） */
+  tagCode: string;
+  visitId: number;
+  /** 手牌上登记的会员 */
   memberId: number | null;
   memberName: string | null;
   checkedInAt: string;
@@ -176,7 +179,6 @@ export interface DepositEntry {
   amount: number;
   ref: string;
   reason: string | null;
-  checkoutNo: string | null;
   operatorName: string;
   createdAt: string;
 }
@@ -205,7 +207,7 @@ export interface StayDetail extends StaySummary {
   status: StayStatus;
   billId: number;
   billNo: string;
-  /** 账单上未作废的明细合计（房费之外，洗浴客人的手牌账单还有门票以外的挂账） */
+  /** 手牌账单上未作废的明细合计（房费之外还有客人的其他挂账） */
   billAmount: number;
   charges: StayCharge[];
   deposits: DepositEntry[];
@@ -217,51 +219,17 @@ export interface StayDetail extends StaySummary {
   closeReason: string | null;
 }
 
-/** 退房核对：按此刻要补的房费、账单合计与押金 */
+/** 退房核对：按此刻要补的房费、手牌账单合计与押金 */
 export interface StayCheckoutPreview {
   stayId: number;
   at: string;
   dues: RoomDue[];
   dueAmount: number;
-  /** 账单上未作废的明细合计（不含要补的房费） */
+  /** 手牌账单上未作废的明细合计（不含要补的房费） */
   billAmount: number;
-  /** 只住房的客人：退房结账的应收（账单 + 要补的房费）；洗浴客人随手牌结账，为 null */
-  total: number | null;
   depositBalance: number;
   depositByMethod: { method: PaymentMethod; balance: number }[];
 }
-
-/** 只住房的客人退房结账前核对（可以几间房合并结）：每间房的账单明细、此刻要补的房费、应收与押金 */
-export interface RoomCheckoutPreview {
-  at: string;
-  stays: {
-    stayId: number;
-    stayNo: string;
-    roomNo: string;
-    typeName: string;
-    kind: RoomKind;
-    guests: number;
-    guestLabel: string;
-    memberId: number | null;
-    memberName: string | null;
-    checkedInAt: string;
-    /** 账单上未作废的明细（已挂的房费与其他消费） */
-    lines: { id: number; name: string; quantity: number; amount: number }[];
-    /** 退房结账时补挂的房费 */
-    dues: (RoomDue & { name: string })[];
-    /** 这间房的应收 = 账单 + 要补的房费 */
-    amount: number;
-    depositBalance: number;
-  }[];
-  totalAmount: number;
-  depositBalance: number;
-  depositByMethod: { method: PaymentMethod; balance: number }[];
-  /** 这几间房登记的会员（可用储值支付），附余额 */
-  members: { id: number; name: string; memberNo: string; status: 'active' | 'frozen'; principalBalance: number; bonusBalance: number }[];
-}
-
-/** 一次退房结账最多合并几间房（与服务端一致） */
-export const MAX_ROOMS_PER_CHECKOUT = 10;
 
 /** 夜审报告 */
 export interface RoomAuditReport {
@@ -297,8 +265,8 @@ export interface RoomsReport {
   revenue: { total: number; byKind: { name: string; quantity: number; amount: number }[] };
   /** 平均房价：结账口径的全天房房费 ÷ 晚数；没有全天房房费时为 null */
   averageRate: number | null;
-  /** 时段内押金的收、退、抵扣（抵扣扣除反结账恢复） */
-  deposits: { received: number; refunded: number; applied: number };
+  /** 时段内押金的收、退 */
+  deposits: { received: number; refunded: number };
   days: { date: string; checkins: number; nights: number; revenue: number }[];
 }
 

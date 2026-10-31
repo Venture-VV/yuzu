@@ -1,4 +1,4 @@
-// 后台「客房」（S7，v0.7.4，见 docs/ROOMS.md）：客房规则（只有店主能改：开关、退房时间、加收一晚的时刻、钟点房宽限、默认押金）、
+// 后台「客房」（S7，v0.7.4，见 docs/ROOMS.md）：客房规则（只有店主能改：开关、退房时间、加收一晚的时刻、钟点房宽限、入住默认押金）、
 // 房型与房价（全天房每晚、钟点房每段；能管理价目的岗位）、房间（房号、楼层、房型）。
 // 房型、房间停用不删除，历史入住单与结账单照常显示；有人住的房间不能停用、不能改房型；改房价只影响之后的入住。
 
@@ -164,8 +164,8 @@ function RulesCard() {
           true,
         )}
         {row(
-          '默认押金',
-          '只住房的客人入住时默认收的押金（入住时可以改，填 0 为默认不收）；洗浴客人默认不收。',
+          '入住默认押金',
+          '入住时默认收的押金，入住时可以改；填 0 为默认不收（住客都有手牌，离店前在前台结清）。',
           <div className="w-[140px]">
             <MoneyInput value={draft.deposit} onChange={(e) => set({ deposit: e.target.value })} disabled={!editable} aria-label="默认押金" className="h-10" data-testid="rooms-default-deposit" />
           </div>,

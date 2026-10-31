@@ -1,15 +1,15 @@
-// 入住单（S7）：房费（入住、夜审、续住、退房时挂上的每一晚 / 每一段）、押金台账与余额、换房记录；
+// 入住单（S7）：房费（入住、夜审、续住、退房时挂上的每一晚 / 每一段，都在住客的手牌账单上）、押金台账与余额、换房记录；
 // 续住（全天房改预计离店、钟点房加一段）、换房（写原因）、改登记、收押金、退押金（原路退）、
-// 退房（洗浴客人：补齐房费挂到手牌账单、押金原路退回）、退房结账（只住房的客人，见 RoomCheckoutDialog）、撤销入住。
-// 续住、收退押金、退房有「结果待确认」；换房、改登记、撤销入住、作废房费是普通操作（失败可直接重试，不会重复记账）。
+// 退房（补齐房费挂到手牌账单、押金原路退回，见 CloseStayDialog）、撤销入住。房费挂错了在前台手牌账单上作废。
+// 续住、收退押金、退房有「结果待确认」；换房、改登记、撤销入住是普通操作（失败可直接重试，不会重复记账）。
 
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowRightLeft, BedDouble, CalendarPlus, HandCoins, LogOut, Pencil, Undo2, Wallet } from 'lucide-react';
+import { ArrowRightLeft, BedDouble, CalendarPlus, HandCoins, LogOut, Pencil, ReceiptText, Undo2, Wallet } from 'lucide-react';
 import { PAYMENT_METHOD_LABELS, type PaymentMethod } from '@shared/labels';
 import { formatYuan, parseYuan, centsToInput } from '@shared/money';
 import { DEPOSIT_KIND_LABELS, MAX_STAY_GUESTS, STAY_STATUS_LABELS, type RoomBoard, type StayCharge, type StayDetail } from '@shared/rooms';
-import type { MemberSummary } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, formatTime } from '../../lib/utils';
@@ -18,42 +18,25 @@ import { Dialog } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Field, Input, Notice, SectionTitle, Select, Skeleton } from '../../components/ui';
-import { MemberField } from '../dining/TablesTab';
 import { PendingPanel, useFrontdeskOp } from '../frontdesk/pending';
 import { stayText } from '../frontdesk/queries';
 import { SHIFT_ERRORS, shiftKeys, ShiftGate, useShiftReady } from '../shift/ShiftGate';
+import { chargeText, CloseStayDialog } from './CloseStayDialog';
 import { DepositFields, depositProblem, guestOf, kindLabel, rateText, type DepositDraft } from './parts';
-import { dayText, roomsKey, stayKey, useStay, useStayClosePreview } from './queries';
+import { dayText, roomsKey, stayKey, useStay } from './queries';
 
 /** 从「结果待确认」回来时直接打开的操作 */
 export type StayAction = 'extend' | 'deposit' | 'refund' | 'close';
 
 const SOURCE_LABELS: Record<StayCharge['source'], string> = { checkin: '入住', audit: '夜审', checkout: '退房', extend: '续住' };
 
-const chargeText = (c: Pick<StayCharge, 'kind' | 'nightDate' | 'blockNo'>) =>
-  c.kind === 'block' ? `第 ${c.blockNo} 段` : c.kind === 'half_day' ? `${dayText(c.nightDate!)} 超时半天` : `${dayText(c.nightDate!)} 一晚`;
-
-export function StayDialog({
-  id,
-  action,
-  board,
-  onClose,
-  onCheckout,
-}: {
-  id: number;
-  action?: StayAction;
-  board: RoomBoard;
-  onClose: () => void;
-  /** 只住房的客人：打开退房结账 */
-  onCheckout: (stayId: number) => void;
-}) {
+export function StayDialog({ id, action, board, onClose }: { id: number; action?: StayAction; board: RoomBoard; onClose: () => void }) {
   const can = useCan();
   const qc = useQueryClient();
   const toast = useToast();
   const detail = useStay(id);
   const [sub, setSub] = useState<StayAction | 'move' | 'edit' | null>(action ?? null);
   const [cancelling, setCancelling] = useState(false);
-  const [voiding, setVoiding] = useState<StayCharge | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const d = detail.data;
   const canOperate = can('room.operate');
@@ -86,7 +69,6 @@ export function StayDialog({
   }
 
   const open = d.status === 'open';
-  const bath = d.visitId !== null;
   const activeCharges = d.charges.filter((c) => c.lineStatus === 'active');
   const freeRooms = board.rooms.filter((r) => r.status === 'vacant' && r.id !== d.roomId);
 
@@ -113,17 +95,11 @@ export function StayDialog({
             <span className="mr-auto self-center text-[13px] text-ink-3">
               房费 <Money cents={d.chargedAmount} className="text-[16px] font-bold text-ink" /> · 押金 <Money cents={d.depositBalance} className="text-[16px] font-bold text-ink" />
             </span>
-            {bath
-              ? canOperate && (
-                  <Button variant="primary" size="lg" icon={<LogOut className="size-4" />} onClick={() => setSub('close')} data-testid="stay-close">
-                    退房
-                  </Button>
-                )
-              : can('frontdesk.checkout') && (
-                  <Button variant="primary" size="lg" icon={<LogOut className="size-4" />} onClick={() => onCheckout(d.id)} data-testid="stay-checkout">
-                    退房结账
-                  </Button>
-                )}
+            {canOperate && (
+              <Button variant="primary" size="lg" icon={<LogOut className="size-4" />} onClick={() => setSub('close')} data-testid="stay-close">
+                退房
+              </Button>
+            )}
           </>
         ) : (
           <Button variant="primary" onClick={onClose}>
@@ -135,15 +111,20 @@ export function StayDialog({
       <div className="space-y-4" data-testid="stay-detail">
         {d.status === 'cancelled' && <Notice tone="warning" title={`已撤销入住：${d.closeReason ?? ''}`} />}
         {!open && d.status !== 'cancelled' && d.checkedOutAt && (
-          <Notice tone="info" title={`${formatDateTime(d.checkedOutAt)} ${d.checkedOutByName ?? ''}${d.status === 'settled' ? '退房结账' : '退房'}`}>
-            {bath ? '房费已挂在手牌账单上，随手牌一起结账。' : '房费与押金已结清。'}
+          <Notice tone="info" title={`${formatDateTime(d.checkedOutAt)} ${d.checkedOutByName ?? ''}退房`}>
+            房费已挂在手牌账单上，随手牌一起结账。
           </Notice>
         )}
-        {bath && (
-          <p className="rounded-lg bg-lake-soft/50 px-3 py-2 text-[12.5px] text-ink-2">
-            洗浴客人 · 手牌 <b className="num">{d.tagCode}</b>：房费挂在手牌账单 {d.billNo} 上（账单合计 <Money cents={d.billAmount} />），离店时随手牌在前台一起结账。
-          </p>
-        )}
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-lake-soft/50 px-3 py-2 text-[12.5px] text-ink-2">
+          <span className="min-w-0 flex-1">
+            手牌 <b className="num">{d.tagCode}</b>：房费挂在手牌账单 {d.billNo} 上（账单合计 <Money cents={d.billAmount} />），离店时随手牌在前台一起结账。
+          </span>
+          {can('frontdesk.read') && (
+            <Link to={`/frontdesk?v=${d.visitId}`} className="inline-flex items-center gap-1 font-semibold text-pine hover:underline" data-testid="stay-open-bill">
+              <ReceiptText className="size-3.5" /> 打开手牌账单
+            </Link>
+          )}
+        </p>
         {open && canOperate && (
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="secondary" icon={<CalendarPlus className="size-3.5" />} onClick={() => setSub('extend')} data-testid="stay-extend">
@@ -190,17 +171,12 @@ export function StayDialog({
                       </span>
                     </span>
                     <Money cents={c.amount} className="w-20 justify-end text-[13.5px] font-bold" />
-                    {open && !voided && !bath && canOperate && (
-                      <Button size="sm" variant="ghost" icon={<Undo2 className="size-3.5" />} onClick={() => setVoiding(c)} data-testid={`stay-void-${c.id}`}>
-                        作废
-                      </Button>
-                    )}
                   </li>
                 );
               })}
             </ul>
           )}
-          {open && bath && <p className="mt-1 text-[12px] text-ink-4">洗浴客人的房费挂错了，在前台这张手牌的账单上作废。</p>}
+          {open && <p className="mt-1 text-[12px] text-ink-4">房费挂错了，在前台这张手牌的账单上作废（时限与作废明细相同；作废过的那一晚 / 那一段退房时不再补挂）。</p>}
         </div>
 
         {/* 押金 */}
@@ -224,9 +200,9 @@ export function StayDialog({
                   <span className="font-semibold">{DEPOSIT_KIND_LABELS[x.kind]}</span>
                   <span className="text-ink-3">{PAYMENT_METHOD_LABELS[x.method]}</span>
                   <span className="min-w-0 flex-1 truncate text-[12px] text-ink-3">
-                    {[x.checkoutNo, x.reason, x.ref, `${formatTime(x.createdAt)} ${x.operatorName}`].filter(Boolean).join(' · ')}
+                    {[x.reason, x.ref, `${formatTime(x.createdAt)} ${x.operatorName}`].filter(Boolean).join(' · ')}
                   </span>
-                  <Money cents={x.kind === 'receive' || x.kind === 'unapply' ? x.amount : -x.amount} signed className="font-bold" />
+                  <Money cents={x.kind === 'receive' ? x.amount : -x.amount} signed className="font-bold" />
                 </li>
               ))}
             </ul>
@@ -245,26 +221,12 @@ export function StayDialog({
             </ul>
           </div>
         )}
-        {open && !bath && !can('frontdesk.checkout') && <p className="text-[12px] text-ink-4">退房结账请找有「结账收款」权限的同事。</p>}
       </div>
 
       <ReasonDialog
-        open={!!voiding}
-        title={voiding ? `作废房费 · ${chargeText(voiding)}` : '作废房费'}
-        description="挂错的房费作废（留痕，不收这笔钱）；作废过的那一晚 / 那一段退房时不再补挂。"
-        confirmLabel="确认作废"
-        danger
-        busy={!!voiding && busy === `void-${voiding.id}`}
-        onClose={() => setVoiding(null)}
-        onConfirm={(reason) => {
-          const v = voiding!;
-          void run(`void-${v.id}`, () => api.post(`/api/rooms/lines/${v.lineId}/void`, { reason }), `${chargeText(v)} 的房费已作废`).then((ok) => ok && setVoiding(null));
-        }}
-      />
-      <ReasonDialog
         open={cancelling}
         title={`撤销入住 · ${d.roomNo}`}
-        description="开错房、客人没住就走时撤销：这次入住作废（留痕），房间变为待打扫。房费都作废了、押金都退了才能撤销。"
+        description="开错房、客人没住就走时撤销：这次入住作废（留痕），房间变为待打扫。房费都在前台手牌账单上作废了、押金都退了才能撤销。"
         confirmLabel="确认撤销"
         danger
         busy={busy === 'cancel'}
@@ -281,16 +243,7 @@ export function StayDialog({
       {sub === 'extend' && <ExtendDialog stay={d} onClose={() => setSub(null)} onDone={refresh} />}
       {sub === 'deposit' && <DepositDialog stay={d} mode="receive" onClose={() => setSub(null)} onDone={refresh} />}
       {sub === 'refund' && <DepositDialog stay={d} mode="refund" onClose={() => setSub(null)} onDone={refresh} />}
-      {sub === 'close' && (
-        <CloseStayDialog
-          stay={d}
-          onClose={() => setSub(null)}
-          onDone={() => {
-            refresh();
-            setSub(null);
-          }}
-        />
-      )}
+      {sub === 'close' && <CloseStayDialog stay={d} onClose={() => setSub(null)} onDone={() => setSub(null)} />}
       {sub === 'move' && <MoveDialog stay={d} free={freeRooms} onClose={() => setSub(null)} onDone={refresh} />}
       {sub === 'edit' && <EditStayDialog stay={d} onClose={() => setSub(null)} onDone={refresh} />}
     </Dialog>
@@ -491,109 +444,6 @@ function DepositDialog({ stay, mode, onClose, onDone }: { stay: StayDetail; mode
   );
 }
 
-/** 洗浴客人退房：按此刻补齐房费（挂到手牌账单上，随手牌结账），押金全部原路退回，房间变待打扫 */
-function CloseStayDialog({ stay, onClose, onDone }: { stay: StayDetail; onClose: () => void; onDone: () => void }) {
-  const session = useSession();
-  const qc = useQueryClient();
-  const toast = useToast();
-  const refresh = useStayRefresh(stay.id);
-  const preview = useStayClosePreview(stay.id, stay.status === 'open');
-  const shiftReady = useShiftReady(stay.depositBalance > 0);
-  const op = useFrontdeskOp<StayDetail>({
-    type: 'room_close',
-    visitId: null,
-    stayId: stay.id,
-    staffName: session.staff.displayName,
-    pick: (found) => (found.type === 'room_close' ? found.stay : null),
-  });
-  useEffect(() => {
-    if (op.state.phase === 'error' && ['ROOM_DUE_CHANGED', 'DEPOSIT_CHANGED'].includes(op.state.code ?? '')) void preview.refetch();
-    if (op.state.phase === 'error' && SHIFT_ERRORS.includes(op.state.code ?? '')) void qc.invalidateQueries({ queryKey: shiftKeys.all });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [op.state]);
-  const p = preview.data;
-  const ok = !!p && !preview.isFetching && (p.depositBalance === 0 || shiftReady.ready);
-  const finish = (d: StayDetail) => {
-    toast({ tone: 'success', title: `${d.roomNo} 已退房`, body: '房费已挂在手牌账单上，随手牌一起结账；房间变为待打扫。' });
-    refresh();
-    void qc.invalidateQueries({ queryKey: ['frontdesk'] });
-    onDone();
-  };
-  const submit = async () => {
-    if (!ok || !p) return;
-    const d = await op.submit((key) => ({
-      url: `/api/rooms/stays/${stay.id}/close`,
-      body: { clientKey: key, expectedDue: p.dueAmount },
-      tagCodes: [`房 ${stay.roomNo}`],
-      summary: `退房（手牌 ${stay.tagCode ?? ''}）${p.dueAmount > 0 ? `，补房费` : ''}${p.depositBalance > 0 ? '，退押金' : ''}`,
-      amount: p.dueAmount || null,
-    }));
-    if (d) finish(d);
-  };
-  return (
-    <Dialog
-      open
-      onClose={op.busy ? () => {} : onClose}
-      title={`退房 · ${stay.roomNo}`}
-      description={`洗浴客人（手牌 ${stay.tagCode ?? ''}）：房费挂在手牌账单上，离店时随手牌在前台一起结账。`}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose} disabled={op.busy}>
-            取消
-          </Button>
-          <Button variant="primary" size="lg" disabled={!ok || op.locked} loading={op.busy} onClick={submit} data-testid="stay-close-submit">
-            确认退房
-          </Button>
-        </>
-      }
-    >
-      <PendingPanel op={op} onResolved={finish} />
-      <div className="space-y-3" data-testid="stay-close-review">
-        {preview.isPending ? (
-          <Skeleton className="h-24" />
-        ) : preview.error ? (
-          <Notice tone="error" title={errorMessage(preview.error)} />
-        ) : (
-          p && (
-            <>
-              <DuesList dues={p.dues.map((d) => ({ ...d, name: chargeText(d) }))} />
-              <p className="flex items-baseline justify-between text-[13px]">
-                <span className="text-ink-2">退房后手牌账单合计（含门票与其他消费）</span>
-                <Money cents={p.billAmount + p.dueAmount} className="text-[16px] font-bold" />
-              </p>
-              {p.depositBalance > 0 && (
-                <Notice tone="info" title={`押金 ${formatYuan(p.depositBalance)} 全部原路退回`}>
-                  {p.depositByMethod.map((m) => `${PAYMENT_METHOD_LABELS[m.method]} ${formatYuan(m.balance)}`).join('、')}。现金从你当班的钱箱退，扫码、银行卡在商户后台退。
-                </Notice>
-              )}
-              {p.depositBalance > 0 && <ShiftGate action="退押金" />}
-            </>
-          )
-        )}
-        {op.state.phase === 'error' && <Notice tone="error" title={op.state.message} />}
-      </div>
-    </Dialog>
-  );
-}
-
-/** 退房时要补挂的房费（没有时说明已经挂齐） */
-export function DuesList({ dues }: { dues: { name: string; amount: number }[] }) {
-  if (dues.length === 0) return <p className="text-[13px] text-ink-3">房费已经挂齐，退房不用再补。</p>;
-  return (
-    <div data-testid="room-dues">
-      <p className="text-[13px] font-bold text-ink-2">退房时补挂的房费</p>
-      <ul className="mt-1 space-y-0.5 text-[13px]">
-        {dues.map((x, i) => (
-          <li key={i} className="flex items-baseline gap-2">
-            <span className="min-w-0 flex-1 truncate">{x.name}</span>
-            <Money cents={x.amount} className="font-semibold" />
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 /** 换房：只能换到空闲的房间；房价按入住时的不变；原房间变待打扫 */
 function MoveDialog({ stay, free, onClose, onDone }: { stay: StayDetail; free: RoomBoard['rooms']; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
@@ -657,15 +507,11 @@ function MoveDialog({ stay, free, onClose, onDone }: { stay: StayDetail; free: R
   );
 }
 
-/** 改登记：住客称呼、人数、登记的会员（退房结账时可以用这位会员的储值） */
+/** 改登记：住客称呼、人数（会员按手牌上登记的） */
 function EditStayDialog({ stay, onClose, onDone }: { stay: StayDetail; onClose: () => void; onDone: () => void }) {
-  const can = useCan();
   const toast = useToast();
   const [guests, setGuests] = useState(stay.guests);
   const [label, setLabel] = useState(stay.guestLabel);
-  const [member, setMember] = useState<MemberSummary | { id: number; name: string; memberNo: string } | null>(
-    stay.memberId !== null ? { id: stay.memberId, name: stay.memberName ?? '', memberNo: '' } : null,
-  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ok = Number.isInteger(guests) && guests >= 1 && guests <= MAX_STAY_GUESTS && label.trim().length <= 16;
@@ -673,7 +519,7 @@ function EditStayDialog({ stay, onClose, onDone }: { stay: StayDetail; onClose: 
     setBusy(true);
     setError(null);
     try {
-      await api.put(`/api/rooms/stays/${stay.id}`, { guests, guestLabel: label.trim(), memberId: member?.id ?? null });
+      await api.put(`/api/rooms/stays/${stay.id}`, { guests, guestLabel: label.trim() });
       toast({ tone: 'success', title: `${stay.roomNo} 的登记已保存` });
       onDone();
       onClose();
@@ -717,7 +563,6 @@ function EditStayDialog({ stay, onClose, onDone }: { stay: StayDetail; onClose: 
         <Field label="住客称呼" htmlFor="stay-label">
           <Input id="stay-label" value={label} maxLength={16} onChange={(e) => setLabel(e.target.value)} />
         </Field>
-        {can('member.read') && <MemberField value={member} onChange={setMember} testPrefix="stay" />}
         {error && <Notice tone="error" title={error} />}
       </div>
     </Dialog>

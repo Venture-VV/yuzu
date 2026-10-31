@@ -28,8 +28,7 @@ export type FrontdeskOpType =
   | 'room_extend'
   | 'room_deposit'
   | 'room_refund'
-  | 'room_close'
-  | 'room_checkout';
+  | 'room_close';
 
 export interface FrontdeskPendingOp {
   key: string;
@@ -46,7 +45,7 @@ export interface FrontdeskPendingOp {
   sessionIds?: number[];
   /** 客房入住（S7）：那间房（同一间房上不能另起一笔入住） */
   roomId?: number;
-  /** 客房续住、押金、退房、退房结账：涉及的入住单 */
+  /** 客房续住、押金、退房：那张入住单 */
   stayIds?: number[];
   /** 展示用：涉及的手牌（桌台为「桌 A1」）、内容摘要、金额 */
   tagCodes: string[];
@@ -69,7 +68,6 @@ export const FRONTDESK_OP_LABELS: Record<FrontdeskOpType, string> = {
   room_deposit: '收押金',
   room_refund: '退押金',
   room_close: '客房退房',
-  room_checkout: '客房退房结账',
 };
 
 /** 餐饮桌台的操作：对象是桌台或开台，不是手牌 */
@@ -240,7 +238,7 @@ export function useFrontdeskOp<T>(opts: {
   /** 开台：桌台；桌台点单、桌台结账：开台（发起结账的那桌） */
   tableId?: number | null;
   sessionId?: number | null;
-  /** 客房入住：房间；续住、押金、退房、退房结账：入住单（发起结账的那间） */
+  /** 客房入住：房间；续住、押金、退房：入住单 */
   roomId?: number | null;
   stayId?: number | null;
   staffName: string;

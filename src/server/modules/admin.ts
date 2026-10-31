@@ -225,7 +225,7 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
     hint: '夜审也在加收一晚的时刻以后做', current: [rm.checkoutMinute, rm.lateFullMinute], dflt: [rmd.checkoutMinute, rmd.lateFullMinute], metaKey: 'room_rules',
   });
   add({ key: 'room_rules.hourlyGraceMinutes', group: 'rooms', label: '钟点房超时宽限', value: `${rm.hourlyGraceMinutes} 分钟`, defaultValue: `${rmd.hourlyGraceMinutes} 分钟`, pending: true, section: 'rooms', hint: '超过已付时段加宽限才按段补', current: rm.hourlyGraceMinutes, dflt: rmd.hourlyGraceMinutes, metaKey: 'room_rules' });
-  add({ key: 'room_rules.defaultDeposit', group: 'rooms', label: '默认押金', value: rm.defaultDeposit ? `只住房的客人 ${formatYuan(rm.defaultDeposit)}` : '不收', defaultValue: `只住房的客人 ${formatYuan(rmd.defaultDeposit)}`, pending: true, section: 'rooms', hint: '洗浴客人默认不收；入住时可以改', current: rm.defaultDeposit, dflt: rmd.defaultDeposit, metaKey: 'room_rules' });
+  add({ key: 'room_rules.defaultDeposit', group: 'rooms', label: '入住默认押金', value: rm.defaultDeposit ? `默认收 ${formatYuan(rm.defaultDeposit)}` : '默认不收', defaultValue: '默认不收', pending: true, section: 'rooms', hint: '住客都有手牌、离店前在前台结清；入住时可以改', current: rm.defaultDeposit, dflt: rmd.defaultDeposit, metaKey: 'room_rules' });
   // ── 库存与采购 ──
   add({ key: 'inventory_scope_name', group: 'inventory', label: '库存范围', value: inv.scopeName, defaultValue: '后勤总库', pending: true, section: 'rules', current: inv.scopeName, dflt: '后勤总库', metaKey: 'inventory_scope_name' });
   // 迁移 002 写入的初始口径

@@ -76,9 +76,8 @@ beforeAll(async () => {
   await sql`ALTER TABLE checkout_bills ADD COLUMN table_session_id bigint, ADD COLUMN guests smallint NOT NULL DEFAULT 1`;
   await sql`CREATE TABLE table_sessions (id bigint, table_id bigint, member_id bigint, guest_label text)`;
   await sql`CREATE TABLE dining_tables (id bigint, name text)`;
-  // 现版本结账时核对还在住的客房、读结账单时兼容客房账单（024 才有）：写入期间临时加列、建最小的表，迁移前删掉
-  await sql`ALTER TABLE checkout_bills ADD COLUMN room_stay_id bigint`;
-  await sql`CREATE TABLE room_stays (id bigint, stay_no text, room_id bigint, visit_id bigint, member_id bigint, guest_label text, status text)`;
+  // 现版本结账时核对客人还住着的客房（024 才有）：写入期间临时建最小的表，迁移前删掉
+  await sql`CREATE TABLE room_stays (id bigint, stay_no text, room_id bigint, visit_id bigint, status text)`;
   await sql`CREATE TABLE rooms (id bigint, room_no text)`;
   const deps = { sql, config };
   const as = (id: number, username: string): Actor => ({ id, username, displayName: username, role: username === 'owner' ? 'owner' : 'clerk', duties: [], mustChangePassword: false });
@@ -101,7 +100,6 @@ beforeAll(async () => {
   await sql`ALTER TABLE checkout_bills DROP COLUMN table_session_id, DROP COLUMN guests`;
   await sql`DROP TABLE table_sessions`;
   await sql`DROP TABLE dining_tables`;
-  await sql`ALTER TABLE checkout_bills DROP COLUMN room_stay_id`;
   await sql`DROP TABLE room_stays`;
   await sql`DROP TABLE rooms`;
 

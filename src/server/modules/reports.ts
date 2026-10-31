@@ -302,7 +302,7 @@ export async function roomsReport(db: Db, from: string, to: string): Promise<Roo
   const counts: Record<RoomBoardStatus, number> = { vacant: 0, occupied: 0, dirty: 0, maintenance: 0 };
   for (const r of status) counts[r.occupied ? 'occupied' : r.housekeeping === 'clean' ? 'vacant' : (r.housekeeping as RoomBoardStatus)] += 1;
   const [held] = await db<{ amount: number }[]>`
-    SELECT coalesce(sum(CASE WHEN d.kind IN ('receive', 'unapply') THEN d.amount ELSE -d.amount END), 0) AS amount
+    SELECT coalesce(sum(CASE WHEN d.kind = 'receive' THEN d.amount ELSE -d.amount END), 0) AS amount
     FROM room_deposits d JOIN room_stays s ON s.id = d.stay_id WHERE s.status = 'open'`;
   // 房费营业额：每张结账单结账那一刻的房费明细，时段内结的计正数、反结账的计负数
   const revenueRows = await db<{ date: string; kind: string; quantity: number; amount: number }[]>`
@@ -325,10 +325,9 @@ export async function roomsReport(db: Db, from: string, to: string): Promise<Roo
   const [blocks] = await db<{ n: number }[]>`
     SELECT count(*)::int AS n FROM room_stay_charges c JOIN bill_lines l ON l.id = c.line_id
     WHERE c.kind = 'block' AND l.status = 'active' AND l.business_date BETWEEN ${from} AND ${to}`;
-  const [dep] = await db<{ received: number; refunded: number; applied: number }[]>`
+  const [dep] = await db<{ received: number; refunded: number }[]>`
     SELECT coalesce(sum(amount) FILTER (WHERE kind = 'receive'), 0) AS received,
-           coalesce(sum(amount) FILTER (WHERE kind = 'refund'), 0) AS refunded,
-           coalesce(sum(amount) FILTER (WHERE kind = 'apply'), 0) - coalesce(sum(amount) FILTER (WHERE kind = 'unapply'), 0) AS applied
+           coalesce(sum(amount) FILTER (WHERE kind = 'refund'), 0) AS refunded
     FROM room_deposits WHERE business_date BETWEEN ${from} AND ${to}`;
   const KIND_NAMES: Record<string, string> = { night: '房费（全天房）', half_day: '超时半天', block: '钟点房' };
   const byKind = ['night', 'half_day', 'block'].flatMap((kind) => {

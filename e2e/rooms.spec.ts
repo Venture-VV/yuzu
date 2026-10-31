@@ -1,7 +1,7 @@
-// S7 客房浏览器验收（v0.7.4）：
-//   后台「客房」建房型、房间、开启 → 主导航「客房」→ 只住房的客人入住（收押金）→ 入住单收押金、按原方式退一部分 → 换房（原房间待打扫）
-//   → 退房结账（押金抵扣 + 现金，余下押金原路退回）→ 店主在结账记录里反结账，恢复为在住 → 洗浴客人入住（房费挂手牌账单）
-//   → 手牌结账被拦（先退房）→ 退房 → 改房态（打扫、维修）→ 夜审对话框 → 看板「客房」；
+// S7 客房浏览器验收（v0.7.4；店主 2026-10-31 定：住客都是洗浴客人，门票必选，房价不含门票）：
+//   后台「客房」建房型、房间、开启 → 前台接待一位客人 → 主导航「客房」→ 填手牌入住（收押金）→ 入住单收押金、按原方式退一部分
+//   → 换房（原房间待打扫）→ 前台结账：客人还住着客房，结账对话框里直接退房（押金原路退回），房费挂到手牌账单上和门票一起结
+//   → 改房态（打扫、维修）→ 夜审对话框 → 看板「客房」；
 //   入住响应丢失：刷新后顶部仍提醒待确认，「去处理」回到那间房的入住对话框，查回已生效、只入住一次。
 // 依赖四套演示数据（仅独立演示库）；账号：店主 linlan、前台 xiaozhou，密码 yuzu2026。
 // 专用房型、房间（E2E 开头）留着下次沿用；开始时收掉上次中断留下的入住，结束时关闭客房功能，可重复执行。
@@ -24,7 +24,7 @@ const ROOMS = [
   { roomNo: R3, type: DAILY.name },
   { roomNo: 'E2E-08', type: HOURLY.name },
 ] as const;
-const RULES = { enabled: true, checkoutMinute: 720, lateFullMinute: 1080, hourlyGraceMinutes: 15, defaultDeposit: 20000 };
+const RULES = { enabled: true, checkoutMinute: 720, lateFullMinute: 1080, hourlyGraceMinutes: 15, defaultDeposit: 0 };
 
 interface BoardTag {
   code: string;
@@ -70,22 +70,28 @@ async function clearVisit(page: Page, visitId: number, reason: string) {
   await send(page, 'post', `/api/frontdesk/visits/${visitId}/cancel`, { reason });
 }
 
-/** 收掉一间房上还在住的入住单（店主）：作废房费、退押金后撤销入住；洗浴客人的房费在手牌账单上作废，来访一并撤销 */
+/** 收掉一间房上还在住的入住单（店主）：在手牌账单上作废房费、退押金后撤销入住，来访一并撤销 */
 async function clearStay(page: Page, roomNo: string, reason: string) {
   const t = await tileOf(page, roomNo);
   if (!t?.stay) return;
   const s = await getJson<StayDetail>(page, `/api/rooms/stays/${t.stay.id}`);
-  for (const c of s.charges.filter((x) => x.lineStatus === 'active')) {
-    if (s.visitId === null) await send(page, 'post', `/api/rooms/lines/${c.lineId}/void`, { reason });
-    else await send(page, 'post', `/api/frontdesk/lines/${c.lineId}/void`, { reason });
-  }
+  for (const c of s.charges.filter((x) => x.lineStatus === 'active')) await send(page, 'post', `/api/frontdesk/lines/${c.lineId}/void`, { reason });
   // 退押金和收款一样要先开班（现金从当班的钱箱退）
   if (s.depositBalance > 0) await ensureShift(page);
   for (const m of s.depositByMethod.filter((x) => x.balance > 0)) {
     await send(page, 'post', `/api/rooms/stays/${s.id}/refunds`, { clientKey: randomUUID(), method: m.method, amount: m.balance, reason });
   }
   await send(page, 'post', `/api/rooms/stays/${s.id}/cancel`, { reason });
-  if (s.visitId !== null) await clearVisit(page, s.visitId, reason);
+  await clearVisit(page, s.visitId, reason);
+}
+
+/** 前台接待一位男宾（接口办理，按默认票种），返回手牌与来访 */
+async function checkinGuest(page: Page, label: string) {
+  const board = await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board');
+  const tag = board.tags.filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse()[0]!;
+  await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'male', guestLabel: label }] });
+  const visitId = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags.find((t) => t.code === tag)!.visit!.id;
+  return { tag, visitId };
 }
 
 /** 店主：专用房型（第一个在后台页面上建）、房间都准备好，开启客房、规则恢复默认；收掉上次中断留下的入住，房间都打扫好 */
@@ -136,14 +142,16 @@ test.describe('S7 客房', () => {
   test.skip(({ viewport }) => (viewport?.width ?? 0) < 1280, '会改规则的流程只在门店电脑尺寸执行一次');
   test.setTimeout(300_000);
 
-  test('入住（押金）→ 收退押金 → 换房 → 退房结账（押金抵扣 + 现金）→ 反结账 → 洗浴客人入住、先退房再结账 → 改房态 → 夜审 → 看板', async ({ page }) => {
-    /** 洗浴客人的来访：退房后还在店，收尾时撤销 */
-    let bathVisit: number | null = null;
+  test('接待 → 入住（押金）→ 收退押金 → 换房 → 前台结账时直接退房、房费随手牌一起结 → 改房态 → 夜审 → 看板', async ({ page }) => {
+    /** 这次接待的客人：中途失败时收尾撤销 */
+    let visit: number | null = null;
     await login(page, 'linlan');
     try {
       await prepare(page);
       await relogin(page, 'xiaozhou');
       await ensureShift(page);
+      const g = await checkinGuest(page, 'E2E 住客');
+      visit = g.visitId;
 
       // ① 主导航「客房」：按楼层的房态看板
       await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '客房' }).click();
@@ -151,18 +159,21 @@ test.describe('S7 客房', () => {
       const tile1 = page.getByTestId(`room-tile-${R1}`);
       await expect(tile1).toHaveAttribute('data-state', 'vacant');
 
-      // ② 只住房的客人入住 E2E-01：2 人，默认收现金押金 ¥200；入住挂第一晚
+      // ② 入住 E2E-01：填在店客人的手牌（小写也行），2 人；押金默认不收，这里勾上收现金 ¥200；入住挂第一晚到手牌账单上
       await tile1.click();
       const checkin = page.getByRole('dialog').filter({ hasText: `入住 · ${R1}` });
       await expect(checkin).toContainText('¥288 / 晚');
+      await expect(checkin.getByTestId('room-checkin-submit')).toBeDisabled();
+      await checkin.getByTestId('room-checkin-tag').fill(g.tag.toLowerCase());
       await checkin.getByTestId('room-checkin-label').fill('E2E 李先生');
       await checkin.getByTestId('room-checkin-guests').fill('2');
-      await expect(checkin.getByTestId('room-checkin-with-deposit')).toBeChecked();
-      await expect(checkin.getByTestId('deposit-amount')).toHaveValue(/^200(\.0+)?$/);
+      await expect(checkin.getByTestId('room-checkin-with-deposit')).not.toBeChecked();
+      await checkin.getByTestId('room-checkin-with-deposit').check();
+      await checkin.getByTestId('deposit-amount').fill('200');
       await checkin.getByTestId('room-checkin-submit').click();
       await expect(page.getByText(`${R1} 已入住`)).toBeVisible();
       const detail = page.getByTestId('stay-detail');
-      await expect(detail).toBeVisible();
+      await expect(detail).toContainText(`手牌 ${g.tag}`);
       await expect(detail.getByTestId('stay-charges')).toContainText('一晚');
       await expect(detail.getByTestId('stay-deposit-balance')).toContainText('200.00');
       await expect(tile1).toHaveAttribute('data-state', 'occupied');
@@ -196,110 +207,50 @@ test.describe('S7 客房', () => {
       await expect(detail).toContainText('换房记录');
       await page.keyboard.press('Escape');
       await expect(tile1).toHaveAttribute('data-state', 'dirty');
-      const tile2 = page.getByTestId(`room-tile-${R2}`);
-      await expect(tile2).toHaveAttribute('data-state', 'occupied');
+      await expect(page.getByTestId(`room-tile-${R2}`)).toHaveAttribute('data-state', 'occupied');
 
-      // ⑤ 退房结账：应收 ¥288；押金抵扣 ¥200（先抵微信收的 ¥50，再抵现金）+ 现金 ¥88；余下的现金押金 ¥50 原路退回
-      await tile2.click();
-      await page.getByTestId('stay-checkout').click();
-      const checkout = page.getByRole('dialog').filter({ hasText: '退房结账' });
-      await expect(checkout.getByTestId('room-checkout-review')).toContainText(R2);
-      await expect(checkout.getByTestId('room-checkout-total')).toContainText('288.00');
-      await checkout.getByTestId('pay-add-deposit').click();
-      // 押金抵扣默认填押金余额与还差的较小者
-      await expect(checkout.getByTestId('pay-row-deposit').getByLabel('押金抵扣金额')).toHaveValue(/^250(\.0+)?$/);
-      await checkout.getByTestId('pay-row-deposit').getByLabel('押金抵扣金额').fill('300');
-      await expect(checkout.getByTestId('pay-row-deposit')).toContainText('押金只有 ¥250.00');
-      await checkout.getByTestId('pay-row-deposit').getByLabel('押金抵扣金额').fill('200');
-      await checkout.getByTestId('pay-add-cash').click();
-      await expect(checkout.getByTestId('pay-row-cash').getByLabel('现金金额')).toHaveValue(/^88(\.0+)?$/);
-      await expect(checkout.getByTestId('room-checkout-deposit-back')).toContainText('50.00');
-      await checkout.getByTestId('checkout-submit').click();
-      const receipt = page.getByTestId('checkout-receipt');
-      await expect(receipt).toContainText(`房 ${R2}`);
-      await expect(receipt).toContainText('2 人');
-      await expect(receipt).toContainText('押金抵扣');
-      await page.getByTestId('checkout-finish').click();
-      await expect(tile2).toHaveAttribute('data-state', 'dirty');
-      const settled = await getJson<StayDetail>(page, `/api/rooms/stays/${stayId}`);
-      expect(settled.status).toBe('settled');
-      expect(settled.depositBalance).toBe(0);
-      expect(settled.deposits.map((d) => [d.kind, d.method, d.amount])).toEqual([
-        ['receive', 'cash', 20000],
-        ['receive', 'wechat', 10000],
-        ['refund', 'wechat', 5000],
-        ['apply', 'wechat', 5000],
-        ['apply', 'cash', 15000],
-        ['refund', 'cash', 5000],
-      ]);
-      const list = await getJson<{ id: number; checkoutNo: string; roomNos: string[]; totalAmount: number }[]>(page, '/api/frontdesk/checkouts');
-      const done = list.find((c) => c.roomNos.includes(R2))!;
-      expect(done.totalAmount).toBe(DAILY.price);
-      const full = await getJson<CheckoutDetail>(page, `/api/frontdesk/checkouts/${done.id}`);
-      expect(full.payments.map((p) => [p.method, p.amount])).toEqual([
-        ['deposit', 20000],
-        ['cash', 8800],
-      ]);
-
-      // ⑥ 店主在结账记录里反结账：恢复为在住，押金抵扣恢复为押金
-      await relogin(page, 'linlan');
-      await page.goto('/rooms');
-      await page.getByTestId('rooms-records').click();
-      const records = page.getByRole('dialog').filter({ hasText: '结账记录' });
-      await records.getByText(done.checkoutNo).click();
-      await records.getByTestId('checkout-void').click();
-      await expect(records).toContainText('这几间房恢复为在住');
-      await records.getByLabel('反结账原因').fill('E2E：收款方式记错');
-      await records.getByTestId('checkout-void-confirm').click();
-      await expect(page.getByText(`已反结账 ${done.checkoutNo}`)).toBeVisible();
-      await page.keyboard.press('Escape');
-      await expect(tile2).toHaveAttribute('data-state', 'occupied');
-      const back = await getJson<StayDetail>(page, `/api/rooms/stays/${stayId}`);
-      expect(back).toMatchObject({ status: 'open', depositBalance: 20000 });
-
-      // ⑦ 洗浴客人（前台接待的手牌）入住 E2E-03：房费挂在手牌账单上，默认不收押金
-      await relogin(page, 'xiaozhou');
-      const board = await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board');
-      const tag = board.tags.filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse()[0]!;
-      await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'male', guestLabel: 'E2E 住客' }] });
-      const visitId = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags.find((t) => t.code === tag)!.visit!.id;
-      bathVisit = visitId;
-      await page.goto('/rooms');
-      await page.getByTestId(`room-tile-${R3}`).click();
-      const bath = page.getByRole('dialog').filter({ hasText: `入住 · ${R3}` });
-      await bath.getByRole('radio', { name: '洗浴客人（有手牌）' }).click();
-      await bath.getByTestId('room-checkin-tag').fill(tag);
-      await expect(bath.getByTestId('room-checkin-with-deposit')).not.toBeChecked();
-      await bath.getByTestId('room-checkin-submit').click();
-      await expect(page.getByText(`${R3} 已入住`)).toBeVisible();
-      await expect(page.getByTestId('stay-detail')).toContainText(`手牌 ${tag}`);
-      await page.keyboard.press('Escape');
-      await expect(page.getByTestId(`room-tile-${R3}`)).toContainText(`手牌 ${tag}`);
-
-      // ⑧ 手牌结账：还住着客房，提示先到客房页退房，不能确认结清
-      await page.goto(`/frontdesk?v=${visitId}`);
+      // ⑤ 前台结账：客人还住着客房，不能确认结清；在结账对话框里直接退房（押金 ¥250 原路退回），房费随门票一起结
+      await page.goto(`/frontdesk?v=${g.visitId}`);
       const panel = page.getByTestId('bill-panel');
-      await expect(panel.getByTestId('bill-tag')).toHaveText(tag);
-      await expect(panel).toContainText(`房费 ${R3}`);
+      await expect(panel.getByTestId('bill-tag')).toHaveText(g.tag);
+      await expect(panel).toContainText(`房费 ${R1}`);
       await panel.getByTestId('action-checkout').click();
-      await expect(page.getByTestId('checkout-rooms')).toContainText(`客房 ${R3}`);
+      const rooms = page.getByTestId('checkout-rooms');
+      await expect(rooms).toContainText(R2);
       await expect(page.getByTestId('checkout-submit')).toBeDisabled();
-      await page.keyboard.press('Escape');
-
-      // ⑨ 客房页退房：房费已挂齐，房间待打扫；之后手牌结账不再提示
-      await page.goto('/rooms');
-      await page.getByTestId(`room-tile-${R3}`).click();
-      await page.getByTestId('stay-close').click();
-      const close = page.getByRole('dialog').filter({ hasText: `退房 · ${R3}` });
+      await rooms.getByTestId(`checkout-room-close-${R2}`).click();
+      const close = page.getByRole('dialog').filter({ hasText: `退房 · ${R2}` });
       await expect(close.getByTestId('stay-close-review')).toContainText('房费已经挂齐');
+      await expect(close.getByTestId('stay-close-review')).toContainText('押金 ¥250.00 全部原路退回');
       await close.getByTestId('stay-close-submit').click();
-      await expect(page.getByText(`${R3} 已退房`)).toBeVisible();
-      await page.keyboard.press('Escape');
-      await expect(page.getByTestId(`room-tile-${R3}`)).toHaveAttribute('data-state', 'dirty');
-      const pre = await getJson<{ rooms?: unknown[] }>(page, `/api/frontdesk/checkout-preview?ids=${visitId}`);
-      expect(pre.rooms ?? []).toEqual([]);
+      await expect(page.getByText(`${R2} 已退房`)).toBeVisible();
+      await expect(page.getByTestId('checkout-rooms')).toHaveCount(0);
+      await page.getByTestId('pay-add-cash').click();
+      await page.getByTestId('checkout-submit').click();
+      const receipt = page.getByTestId('checkout-receipt');
+      await expect(receipt).toContainText(g.tag);
+      await page.getByTestId('checkout-finish').click();
+      const settled = await getJson<StayDetail>(page, `/api/rooms/stays/${stayId}`);
+      expect(settled.status).toBe('checked_out');
+      expect(settled.depositBalance).toBe(0);
+      expect(settled.deposits.map((d) => [d.kind, d.method, d.amount]).sort()).toEqual(
+        [
+          ['receive', 'cash', 20000],
+          ['receive', 'wechat', 10000],
+          ['refund', 'wechat', 5000],
+          ['refund', 'cash', 20000],
+          ['refund', 'wechat', 5000],
+        ].sort(),
+      );
+      const list = await getJson<{ id: number; tagCodes: string[]; totalAmount: number; status: string }[]>(page, '/api/frontdesk/checkouts');
+      const done = list.find((c) => c.tagCodes.includes(g.tag) && c.status === 'completed')!;
+      const full = await getJson<CheckoutDetail>(page, `/api/frontdesk/checkouts/${done.id}`);
+      expect(full.totalAmount).toBe(full.bills[0]!.amount);
+      expect(full.totalAmount - (full.bills[0]!.ticketAmount ?? 0)).toBe(DAILY.price);
 
-      // ⑩ 改房态：E2E-01 打扫好（空闲）；E2E-03 设为维修（写原因）
+      // ⑥ 改房态：E2E-01 打扫好（空闲）；E2E-03 设为维修（写原因）
+      await page.goto('/rooms');
+      await expect(page.getByTestId(`room-tile-${R2}`)).toHaveAttribute('data-state', 'dirty');
       await page.getByTestId(`room-tile-${R1}`).click();
       const hk = page.getByRole('dialog').filter({ hasText: `改房态 · ${R1}` });
       await hk.getByRole('radio', { name: '已打扫（空闲）' }).click();
@@ -307,6 +258,8 @@ test.describe('S7 客房', () => {
       await expect(page.getByText(`${R1} 已改为已打扫`)).toBeVisible();
       await expect(tile1).toHaveAttribute('data-state', 'vacant');
       await page.getByTestId(`room-tile-${R3}`).click();
+      // 空闲的房点开是入住；改房态在入住对话框左下角
+      await page.getByRole('dialog').filter({ hasText: `入住 · ${R3}` }).getByTestId('room-checkin-housekeep').click();
       const hk3 = page.getByRole('dialog').filter({ hasText: `改房态 · ${R3}` });
       await hk3.getByRole('radio', { name: '维修' }).click();
       await expect(hk3.getByTestId('room-housekeeping-save')).toBeDisabled();
@@ -315,7 +268,7 @@ test.describe('S7 客房', () => {
       await expect(page.getByTestId(`room-tile-${R3}`)).toHaveAttribute('data-state', 'maintenance');
       await expect(page.getByTestId(`room-tile-${R3}`)).toContainText('E2E 空调不制冷');
 
-      // ⑪ 夜审：过了加收一晚的时刻才能做（做了也不会给今天入住的客人重复挂今晚）
+      // ⑦ 夜审：过了加收一晚的时刻才能做
       await page.getByTestId('rooms-audit').click();
       const audit = page.getByRole('dialog').filter({ hasText: '夜审 · 营业日' });
       const run = audit.getByTestId('room-audit-run');
@@ -327,9 +280,8 @@ test.describe('S7 客房', () => {
         await expect(audit).toContainText('夜审要在 18:00 以后做');
         await page.keyboard.press('Escape');
       }
-      expect((await getJson<StayDetail>(page, `/api/rooms/stays/${stayId}`)).charges.filter((c) => c.kind === 'night' && c.lineStatus === 'active')).toHaveLength(1);
 
-      // ⑫ 店主看板「客房」：此刻在住、在住押金
+      // ⑧ 店主看板「客房」：此刻在住、在住押金
       await relogin(page, 'linlan');
       await page.goto('/dashboard/rooms');
       const dash = page.getByTestId('dashboard-rooms');
@@ -339,16 +291,19 @@ test.describe('S7 客房', () => {
       await page.unrouteAll({ behavior: 'ignoreErrors' });
       await relogin(page, 'linlan');
       await cleanup(page);
-      if (bathVisit !== null) await clearVisit(page, bathVisit, 'E2E：收尾');
+      if (visit !== null) await clearVisit(page, visit, 'E2E：收尾');
     }
   });
 
   test('入住响应丢失：刷新后顶部仍提醒待确认，「去处理」回到入住对话框，查回已生效、只入住一次', async ({ page }) => {
+    let visit: number | null = null;
     await login(page, 'linlan');
     try {
       await prepare(page);
       await relogin(page, 'xiaozhou');
       await ensureShift(page);
+      const g = await checkinGuest(page, 'E2E 断网');
+      visit = g.visitId;
       // 入住请求真实到达服务器并生效，但浏览器收不到响应；查回也先连不上
       await page.route('**/api/rooms/checkin', async (route) => {
         await route.fetch();
@@ -358,6 +313,7 @@ test.describe('S7 客房', () => {
       await page.goto('/rooms');
       await page.getByTestId(`room-tile-${R1}`).click();
       const dialog = page.getByRole('dialog').filter({ hasText: `入住 · ${R1}` });
+      await dialog.getByTestId('room-checkin-tag').fill(g.tag);
       await dialog.getByTestId('room-checkin-label').fill('E2E 断网');
       await dialog.getByTestId('room-checkin-submit').click();
       await expect(dialog.getByTestId('pending-op')).toContainText(`房 ${R1}`);
@@ -378,11 +334,12 @@ test.describe('S7 客房', () => {
       await expect(page.getByTestId('stay-detail')).toBeVisible();
       await expect(banner).toHaveCount(0);
       const board = await getJson<RoomBoard>(page, '/api/rooms');
-      expect(board.rooms.filter((r) => r.roomNo === R1 && r.stay).map((r) => [r.stay!.guestLabel, r.stay!.depositBalance])).toEqual([['E2E 断网', 20000]]);
+      expect(board.rooms.filter((r) => r.roomNo === R1 && r.stay).map((r) => [r.stay!.guestLabel, r.stay!.tagCode])).toEqual([['E2E 断网', g.tag]]);
     } finally {
       await page.unrouteAll({ behavior: 'ignoreErrors' });
       await relogin(page, 'linlan');
       await cleanup(page);
+      if (visit !== null) await clearVisit(page, visit, 'E2E：收尾');
     }
   });
 });

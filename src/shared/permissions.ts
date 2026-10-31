@@ -100,7 +100,7 @@ export const PERMISSIONS = {
   'dining.order': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 厨房出品屏：开始做、出餐、估清（S5 第一步，待确认：前台岗位与后勤人员；厨房可以用后勤账号） */
   'dining.kitchen': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk', 'backoffice'] },
-  /** 客房：入住、续住、换房、退房、收退押金、撤销入住、夜审（S7，v0.7.4，待确认：前台岗位都能做；只住房的客人退房结账还要「结账收款」） */
+  /** 客房：入住、续住、换房、退房、收退押金、撤销入住、夜审（S7，v0.7.4，待确认：前台岗位都能做） */
   'room.operate': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 客房：打扫、维修（房态）（S7，v0.7.4，待确认：前台岗位与后勤人员；客房服务员可以用后勤账号） */
   'room.housekeep': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk', 'backoffice'] },

@@ -71,7 +71,6 @@ export type AuditAction =
   | 'room_update'
   | 'room_move'
   | 'room_cancel'
-  | 'room_void'
   | 'room_deposit'
   | 'room_close'
   | 'room_housekeeping'

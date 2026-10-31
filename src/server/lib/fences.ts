@@ -25,7 +25,6 @@ export const FENCED_OPS = [
   'room_deposit',
   'room_refund',
   'room_close',
-  'room_checkout',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 

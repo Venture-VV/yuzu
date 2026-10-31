@@ -1,5 +1,5 @@
 // 看板「客房」（S7，v0.7.4，经营总览的岗位看；客房功能开启后才显示）：此刻的房态与在住押金、任选时段的入住、晚数、
-// 客房营业额（结账口径：时段内结账的房费，反结账冲回，与部门参考表的「客房」一致）、平均房价、押金的收退与抵扣。
+// 客房营业额（结账口径：时段内结账的房费，反结账冲回，与部门参考表的「客房」一致）、平均房价、押金的收退。
 
 import { useState } from 'react';
 import { BedDouble, HandCoins, Moon, TrendingUp } from 'lucide-react';
@@ -50,7 +50,7 @@ export function RoomsTab() {
               <Kpi icon={<HandCoins className="size-4" />} label="在住押金余额" tone="lake" testId="rooms-deposit">
                 <Money cents={d.now.depositHeld} />
                 <span className="block text-[12px] font-semibold text-ink-3">
-                  时段内收 <Money cents={d.deposits.received} /> · 退 <Money cents={d.deposits.refunded} /> · 抵扣 <Money cents={d.deposits.applied} />
+                  时段内收 <Money cents={d.deposits.received} /> · 退 <Money cents={d.deposits.refunded} />
                 </span>
               </Kpi>
             </div>
