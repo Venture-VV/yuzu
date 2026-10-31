@@ -42,7 +42,10 @@ if [[ -n "$running" && -n "$image" ]]; then
 fi
 mark_dirty
 git checkout -q --detach "$commit"
-YUZU_VERSION="$(git describe --tags --always)"
+# 版本号按这个提交的 package.json（发版 PR 里改好、与之后 CI 打的标签一致）。不用 git describe：
+# 合并后、main 上 CI 打标签之前就部署时，describe 会显示成上一个版本（例如 v0.7.3 显示成 0.7.2-15-g13e9d3d）
+YUZU_VERSION="$(sed -n 's/^  "version": "\([^"]*\)",$/\1/p' package.json | head -n 1)"
+[[ -n "$YUZU_VERSION" ]] || YUZU_VERSION="$(git describe --tags --always)"
 export YUZU_VERSION YUZU_COMMIT="$commit"
 docker compose build app
 docker tag "$image" "$image-$commit"
