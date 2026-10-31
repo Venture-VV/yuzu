@@ -1,15 +1,16 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Link, Navigate, useSearchParams } from 'react-router';
-import { ArrowRight, HandCoins, Inbox, Scale, ShoppingCart, TriangleAlert } from 'lucide-react';
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
+import { ArrowRight, HandCoins, Inbox, ReceiptText, Scale, ShoppingCart, TriangleAlert } from 'lucide-react';
 import { INV_DOC_META, type InvDocType } from '@shared/inventory';
 import type { OpeningPayableDoc } from '@shared/purchasing';
 import { errorMessage } from '../../lib/api';
-import { useCan } from '../../lib/session';
+import { useCan, useSession } from '../../lib/session';
 import { cn, relativeTime } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
 import { Badge, Notice, Skeleton } from '../../components/ui';
+import { useClaims } from '../expenses/queries';
 import { OpeningSheet, PaymentSheet } from '../payables/PayableSheets';
 import { PoSheet } from '../purchasing/PoSheet';
 import { useOpenings, usePayablesOverview, usePayments, usePos } from '../purchasing/queries';
@@ -31,6 +32,10 @@ export function TodoPage() {
   const payments = usePayments({ status: 'submitted' }, payableRead);
   const openings = useOpenings({ status: 'submitted' }, payableRead);
   const noPo = useInvDocs({ type: 'receipt', status: 'confirmed' });
+  // 超过门槛、等负责人确认的费用报销（v0.7.7）：在「费用报销」里确认
+  const session = useSession();
+  const navigate = useNavigate();
+  const claims = useClaims({ status: 'submitted' }, can('expense.approve') && session.erpModules.includes('expenses'));
   const materials = useMaterials();
   const overview = usePayablesOverview(payableRead);
   const low = useMemo(() => (materials.data ?? []).filter((m) => m.isLow), [materials.data]);
@@ -39,7 +44,7 @@ export function TodoPage() {
 
   if (!can('inventory.approve')) return <Navigate to="/inventory" replace />;
   const open = (key: 'doc' | 'po' | 'payment', id: number | null) => setParams(id ? { [key]: String(id) } : {}, { replace: true });
-  const total = (docs.data?.length ?? 0) + (pos.data?.length ?? 0) + (payments.data?.length ?? 0) + (openings.data?.length ?? 0);
+  const total = (docs.data?.length ?? 0) + (pos.data?.length ?? 0) + (payments.data?.length ?? 0) + (openings.data?.length ?? 0) + (claims.data?.claims.length ?? 0);
   const loading = docs.isPending || pos.isPending;
 
   return (
@@ -108,6 +113,28 @@ export function TodoPage() {
                         />
                       );
                     })}
+                  </Group>
+                )}
+                {(claims.data?.claims.length ?? 0) > 0 && (
+                  <Group title="费用报销（超过确认门槛）" icon={<ReceiptText className="size-4" />}>
+                    {claims.data!.claims.map((c) => (
+                      <TodoRow
+                        key={`c${c.id}`}
+                        active={false}
+                        onClick={() => navigate(`/erp/expenses?claim=${c.id}`)}
+                        icon={<ReceiptText className="size-5" />}
+                        tone="bg-lake-soft text-lake"
+                        title={
+                          <>
+                            费用报销
+                            <span className="num ml-2 text-[12.5px] font-normal text-ink-3">{c.docNo}</span>
+                          </>
+                        }
+                        line={`${c.department.name} · ${c.handler.name} · ${c.purpose} · ${c.summary}`}
+                        meta={`${c.createdByName} 登记 · ${relativeTime(c.createdAt)}`}
+                        amount={<Money cents={c.amountCents} className="text-[14px] font-bold" />}
+                      />
+                    ))}
                   </Group>
                 )}
                 {((payments.data?.length ?? 0) > 0 || (openings.data?.length ?? 0) > 0) && (

@@ -923,6 +923,10 @@ export function registerExpenseRoutes(app: FastifyInstance, deps: Deps) {
     return csvReply(reply, `费用报销明细_${f.from}_${f.to}.csv`, csv);
   });
   app.get('/api/erp/expenses/checks', { preHandler: guard('expense.read') }, async () => readSnapshot(sql, expenseChecks));
+  // 经办人：在职的员工（只给名字，不给账号与岗位）
+  app.get('/api/erp/expenses/handlers', { preHandler: guard('expense.read') }, async () =>
+    sql<{ id: number; name: string }[]>`SELECT id, display_name AS name FROM staff WHERE active ORDER BY display_name`,
+  );
   app.get('/api/erp/expenses/po-candidates', { preHandler: guard('expense.manage') }, async (req) => {
     const { q } = parse(z.object({ q: z.string().max(40).default('') }), req.query);
     return poCandidates(sql, q);

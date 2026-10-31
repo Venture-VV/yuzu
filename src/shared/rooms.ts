@@ -35,8 +35,10 @@ export const DEFAULT_ROOM_RULES: RoomRules = {
 export const ROOM_KINDS = ['daily', 'hourly'] as const;
 export type RoomKind = (typeof ROOM_KINDS)[number];
 export const ROOM_KIND_LABELS: Record<RoomKind, string> = { daily: '全天房', hourly: '钟点房' };
-/** 钟点房每段默认 3 小时 */
-export const DEFAULT_BLOCK_MINUTES = 180;
+/** 钟点房按小时计费：新建房型时每段默认 1 小时（店主 2026-10-31：要按小时计费，金额先给默认、后台可调；待确认） */
+export const DEFAULT_BLOCK_MINUTES = 60;
+/** 新建钟点房时默认的每小时房价 ¥60（待确认，后台「客房 → 房型」可改） */
+export const DEFAULT_HOURLY_PRICE = 6000;
 
 export const HOUSEKEEPING_STATES = ['clean', 'dirty', 'maintenance'] as const;
 export type Housekeeping = (typeof HOUSEKEEPING_STATES)[number];

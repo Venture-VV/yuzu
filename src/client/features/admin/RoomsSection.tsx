@@ -8,6 +8,7 @@ import { Plus } from 'lucide-react';
 import { formatYuan, centsToInput, parseYuan } from '@shared/money';
 import {
   DEFAULT_BLOCK_MINUTES,
+  DEFAULT_HOURLY_PRICE,
   DEFAULT_ROOM_RULES,
   MAX_ROOM_FLOOR,
   MAX_ROOM_NO,
@@ -214,11 +215,11 @@ function TypesCard() {
         房型与房价
       </SectionTitle>
       <p className="mt-1 text-[12.5px] text-ink-3">
-        全天房按晚计价（入住挂第一晚、夜审每晚挂一晚、退房时补齐）；钟点房按段计价（入住挂第一段、续住加一段、超时按段补）。改房价只影响之后的入住，在住的客人按入住时的房价。
+        全天房按晚计价（入住挂第一晚、夜审每晚挂一晚、退房时补齐）；钟点房按小时（每段 60 分钟）或按段计价（入住挂第一段、续住加一段、超时按段补）。改房价只影响之后的入住，在住的客人按入住时的房价。
       </p>
       {types.length === 0 ? (
         <p className="mt-4 rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">
-          还没有房型。{editable ? '点「新建房型」，例如「标准间」全天房 ¥288 / 晚、「钟点房」¥98 / 3 小时。' : ''}
+          还没有房型。{editable ? '点「新建房型」，例如「标准间」全天房 ¥288 / 晚、「钟点房」¥60 / 小时。' : ''}
         </p>
       ) : (
         <ul className="mt-3 divide-y divide-line/70 rounded-lg border border-line">
@@ -320,20 +321,24 @@ function TypeDialog({ target, onClose }: { target: RoomType | 'new' | null; onCl
         <Segmented
           ariaLabel="计价方式"
           value={kind}
-          onChange={setKind}
+          onChange={(k) => {
+            setKind(k);
+            // 新建钟点房：按小时计费，每段 1 小时、¥60 / 小时（默认，待确认；可改）
+            if (target === 'new' && k === 'hourly' && !price.trim()) setPrice(centsToInput(DEFAULT_HOURLY_PRICE));
+          }}
           options={[
             { value: 'daily', label: '全天房（按晚）' },
-            { value: 'hourly', label: '钟点房（按段）' },
+            { value: 'hourly', label: '钟点房（按小时 / 按段）' },
           ]}
         />
         <div className="flex flex-wrap gap-4">
-          <Field label={kind === 'daily' ? '每晚房价' : '每段房价'} htmlFor="room-type-price">
+          <Field label={kind === 'daily' ? '每晚房价' : Number(block) === 60 ? '每小时房价' : '每段房价'} htmlFor="room-type-price" hint={kind === 'hourly' && target === 'new' ? '默认 ¥60 / 小时（待确认）' : undefined}>
             <div className="w-[160px]">
               <MoneyInput id="room-type-price" value={price} onChange={(e) => setPrice(e.target.value)} data-testid="rooms-type-price" />
             </div>
           </Field>
           {kind === 'hourly' && (
-            <Field label="每段时长（分钟）" htmlFor="room-type-block" hint="30–720，例如 180 为 3 小时">
+            <Field label="每段时长（分钟）" htmlFor="room-type-block" hint="30–720；60 = 按小时计费，180 = 3 小时一段">
               <Input fullWidth={false} id="room-type-block" type="number" inputMode="numeric" min={30} max={720} value={block} onChange={(e) => setBlock(e.target.value)} className="num w-28" data-testid="rooms-type-block" />
             </Field>
           )}

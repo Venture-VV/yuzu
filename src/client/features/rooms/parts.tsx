@@ -7,11 +7,12 @@ import { Input, MoneyInput, Select } from '../../components/ui';
 export const guestOf = (s: { memberName: string | null; guestLabel: string; tagCode?: string | null }) =>
   s.memberName ?? (s.guestLabel || (s.tagCode ? `手牌 ${s.tagCode}` : '散客'));
 
-/** 「¥288 / 晚」「¥98 / 段（3 小时）」 */
+/** 「¥288 / 晚」「¥60 / 小时」「¥98 / 段（3 小时）」 */
 export function rateText(kind: RoomKind, price: number, blockMinutes: number | null) {
   const yuan = `¥${(price / 100).toFixed(2).replace(/\.00$/, '')}`;
   if (kind === 'daily') return `${yuan} / 晚`;
-  const m = blockMinutes ?? 180;
+  const m = blockMinutes ?? 60;
+  if (m === 60) return `${yuan} / 小时`;
   return `${yuan} / 段（${m % 60 === 0 ? `${m / 60} 小时` : `${m} 分钟`}）`;
 }
 
