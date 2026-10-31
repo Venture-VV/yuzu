@@ -224,7 +224,7 @@ export function StayDialog({
                   <span className="font-semibold">{DEPOSIT_KIND_LABELS[x.kind]}</span>
                   <span className="text-ink-3">{PAYMENT_METHOD_LABELS[x.method]}</span>
                   <span className="min-w-0 flex-1 truncate text-[12px] text-ink-3">
-                    {[x.checkoutNo, x.reason, x.ref].filter(Boolean).join(' · ')} · {formatTime(x.createdAt)} {x.operatorName}
+                    {[x.checkoutNo, x.reason, x.ref, `${formatTime(x.createdAt)} ${x.operatorName}`].filter(Boolean).join(' · ')}
                   </span>
                   <Money cents={x.kind === 'receive' || x.kind === 'unapply' ? x.amount : -x.amount} signed className="font-bold" />
                 </li>
@@ -362,7 +362,7 @@ function ExtendDialog({ stay, onClose, onDone }: { stay: StayDetail; onClose: ()
       <PendingPanel op={op} onResolved={finish} />
       {!hourly && (
         <Field label="预计离店" htmlFor="stay-leave">
-          <Input id="stay-leave" type="date" min={stay.businessDate} value={leave} onChange={(e) => setLeave(e.target.value)} disabled={op.locked} className="w-48" data-testid="stay-extend-date" />
+          <Input fullWidth={false} id="stay-leave" type="date" min={stay.businessDate} value={leave} onChange={(e) => setLeave(e.target.value)} disabled={op.locked} className="w-48" data-testid="stay-extend-date" />
         </Field>
       )}
       {op.state.phase === 'error' && <Notice tone="error" title={op.state.message} className="mt-3" />}
@@ -702,6 +702,7 @@ function EditStayDialog({ stay, onClose, onDone }: { stay: StayDetail; onClose: 
       <div className="space-y-4">
         <Field label="入住人数" htmlFor="stay-guests">
           <Input
+            fullWidth={false}
             id="stay-guests"
             type="number"
             inputMode="numeric"

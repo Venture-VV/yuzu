@@ -115,8 +115,11 @@ function RoomsBoardView() {
   }, [rooms]);
 
   const click = (r: RoomBoardRoom) => {
-    if (r.stay) setStay({ id: r.stay.id });
-    else if (r.status === 'vacant' && canOperate) setCheckinRoom(r);
+    if (r.stay) {
+      // 只管打扫的岗位（后勤）看不了入住单：在住的房退房后才变待打扫
+      if (canOperate || can('frontdesk.checkout')) setStay({ id: r.stay.id });
+      else toast({ tone: 'info', title: `${r.roomNo} 在住`, body: '客人退房后房间变为待打扫，打扫好了再点「已打扫」' });
+    } else if (r.status === 'vacant' && canOperate) setCheckinRoom(r);
     else if (can('room.housekeep')) setHousekeepRoom(r);
     else toast({ tone: 'info', title: `${r.roomNo} ${ROOM_BOARD_LABELS[r.status]}`, body: '入住要有「客房入住、退房」权限，改房态要有「客房打扫、维修」权限' });
   };
@@ -423,7 +426,7 @@ function CheckinDialog({
         />
         {mode === 'bath' ? (
           <Field label="手牌号" htmlFor="room-tag" hint="在店客人的手牌：房费挂在手牌账单上，离店时随手牌一起结账" error={tag && !tagOk ? '牌号格式不正确（例如 A023、1088）' : null}>
-            <Input id="room-tag" value={tag} onChange={(e) => setTag(e.target.value.toUpperCase())} disabled={op.locked} className="num w-40 text-[16px] font-bold" data-testid="room-checkin-tag" />
+            <Input fullWidth={false} id="room-tag" value={tag} onChange={(e) => setTag(e.target.value.toUpperCase())} disabled={op.locked} className="num w-40 text-[16px] font-bold" data-testid="room-checkin-tag" />
           </Field>
         ) : (
           <p className="text-[12.5px] text-ink-3">只住房的客人开一张客房账单，房费与押金在这里结：退房时「退房结账」。</p>
@@ -434,6 +437,7 @@ function CheckinDialog({
           </Field>
           <Field label="入住人数" htmlFor="room-guests">
             <Input
+              fullWidth={false}
               id="room-guests"
               type="number"
               inputMode="numeric"
@@ -449,7 +453,7 @@ function CheckinDialog({
         </div>
         {room.kind === 'daily' && (
           <Field label="预计离店" htmlFor="room-leave" hint={`只做提醒；房费按实际住的晚数算：${minuteText(rules.checkoutMinute)} 以后退房加收半天，${minuteText(rules.lateFullMinute)} 以后加收一晚`}>
-            <Input id="room-leave" type="date" min={session.today} value={leave} onChange={(e) => setLeave(e.target.value)} disabled={op.locked} className="w-48" data-testid="room-checkin-leave" />
+            <Input fullWidth={false} id="room-leave" type="date" min={session.today} value={leave} onChange={(e) => setLeave(e.target.value)} disabled={op.locked} className="w-48" data-testid="room-checkin-leave" />
           </Field>
         )}
         {can('member.read') && <MemberField value={member} onChange={setMember} disabled={op.locked} testPrefix="room" />}

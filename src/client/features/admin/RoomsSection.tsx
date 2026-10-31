@@ -122,7 +122,7 @@ function RulesCard() {
     </div>
   );
   const clockInput = (value: string, onChange: (v: string) => void, label: string, testId: string) => (
-    <Input value={value} onChange={(e) => onChange(e.target.value)} disabled={!editable} placeholder="12:00" className="num h-10 w-24 text-center" aria-label={label} data-testid={testId} />
+    <Input fullWidth={false} value={value} onChange={(e) => onChange(e.target.value)} disabled={!editable} placeholder="12:00" className="num h-10 w-24 shrink-0 text-center" aria-label={label} data-testid={testId} />
   );
 
   return (
@@ -158,7 +158,7 @@ function RulesCard() {
           '钟点房超时宽限',
           '钟点房超过已付时段多少分钟内不补下一段。',
           <span className="flex shrink-0 items-center gap-2 whitespace-nowrap">
-            <Input type="number" inputMode="numeric" min={0} max={120} value={draft.grace} disabled={!editable} onChange={(e) => set({ grace: e.target.value })} className="num h-10 w-20" aria-label="钟点房超时宽限（分钟）" data-testid="rooms-grace" />
+            <Input fullWidth={false} type="number" inputMode="numeric" min={0} max={120} value={draft.grace} disabled={!editable} onChange={(e) => set({ grace: e.target.value })} className="num h-10 w-20" aria-label="钟点房超时宽限（分钟）" data-testid="rooms-grace" />
             <span className="text-[13px] text-ink-3">分钟</span>
           </span>,
           true,
@@ -334,11 +334,11 @@ function TypeDialog({ target, onClose }: { target: RoomType | 'new' | null; onCl
           </Field>
           {kind === 'hourly' && (
             <Field label="每段时长（分钟）" htmlFor="room-type-block" hint="30–720，例如 180 为 3 小时">
-              <Input id="room-type-block" type="number" inputMode="numeric" min={30} max={720} value={block} onChange={(e) => setBlock(e.target.value)} className="num w-28" data-testid="rooms-type-block" />
+              <Input fullWidth={false} id="room-type-block" type="number" inputMode="numeric" min={30} max={720} value={block} onChange={(e) => setBlock(e.target.value)} className="num w-28" data-testid="rooms-type-block" />
             </Field>
           )}
           <Field label="排序" htmlFor="room-type-order" hint="小的排前面">
-            <Input id="room-type-order" type="number" inputMode="numeric" min={0} max={9999} value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="num w-28" />
+            <Input fullWidth={false} id="room-type-order" type="number" inputMode="numeric" min={0} max={9999} value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="num w-28" />
           </Field>
         </div>
         {target !== 'new' && target && target.price !== cents && cents !== null && (
@@ -475,10 +475,10 @@ function RoomDialog({ target, types, floors, onClose }: { target: Room | 'new' |
       <div className="space-y-4">
         <div className="flex flex-wrap gap-4">
           <Field label="房号" htmlFor="room-no" hint={`最多 ${MAX_ROOM_NO} 字，例如 301、8A`}>
-            <Input id="room-no" value={roomNo} maxLength={MAX_ROOM_NO} onChange={(e) => setRoomNo(e.target.value)} className="num w-32" data-autofocus data-testid="rooms-room-no" />
+            <Input fullWidth={false} id="room-no" value={roomNo} maxLength={MAX_ROOM_NO} onChange={(e) => setRoomNo(e.target.value)} className="num w-32" data-autofocus data-testid="rooms-room-no" />
           </Field>
           <Field label="楼层" htmlFor="room-floor" hint="选填，例如 3">
-            <Input id="room-floor" value={floor} maxLength={MAX_ROOM_FLOOR} onChange={(e) => setFloor(e.target.value)} list="room-floors" className="num w-28" data-testid="rooms-room-floor" />
+            <Input fullWidth={false} id="room-floor" value={floor} maxLength={MAX_ROOM_FLOOR} onChange={(e) => setFloor(e.target.value)} list="room-floors" className="num w-28" data-testid="rooms-room-floor" />
             <datalist id="room-floors">
               {floors.map((f) => (
                 <option key={f} value={f} />
@@ -486,7 +486,7 @@ function RoomDialog({ target, types, floors, onClose }: { target: Room | 'new' |
             </datalist>
           </Field>
           <Field label="排序" htmlFor="room-order" hint="同一楼层小的排前面">
-            <Input id="room-order" type="number" inputMode="numeric" min={0} max={9999} value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="num w-28" />
+            <Input fullWidth={false} id="room-order" type="number" inputMode="numeric" min={0} max={9999} value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="num w-28" />
           </Field>
         </div>
         <Field label="房型" htmlFor="room-type">

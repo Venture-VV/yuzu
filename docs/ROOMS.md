@@ -98,3 +98,23 @@
 - **押金台账**：每个入住单、每种收款方式的押金余额不为负；已退房、已结账、已撤销的入住单余额为 0；押金抵扣与结账单的「押金抵扣」收款一致。
 - **房态与在住单**：在住单的房间是启用的；一间房最多一个在住单；入住单的账单与来访状态一致（洗浴客人的手牌在店，只住房的客人的客房账单未结）。
 - **房费不重复**：每个入住单每一晚、每一段最多一笔有效房费；每笔房费都对应一条客房明细。
+
+## 10. 页面与接口
+
+| 页面 | 接口 |
+| --- | --- |
+| 后台「客房」：客房规则（店主）、房型与房价、房间 | `GET /api/admin/rooms`；`PUT /api/admin/rooms/rules`；`POST/PUT /api/admin/rooms/types[/:id]`；`POST/PUT /api/admin/rooms/rooms[/:id]` |
+| 客房页：房态看板、夜审提醒 | `GET /api/rooms`（房态、在住单摘要、今天的夜审情况、各房态间数） |
+| 入住 | `POST /api/rooms/checkin`（操作编号；带 `expectedRate` 核对房价；可带押金） |
+| 入住单：房费、押金、换房记录 | `GET /api/rooms/stays/:id` |
+| 续住、改登记、换房、撤销入住 | `POST /api/rooms/stays/:id/extend`（操作编号）；`PUT /api/rooms/stays/:id`；`POST /api/rooms/stays/:id/move`、`/cancel` |
+| 收押金、退押金 | `POST /api/rooms/stays/:id/deposits`、`/refunds`（操作编号，先开班） |
+| 作废只住房客人的房费 | `POST /api/rooms/lines/:lineId/void` |
+| 洗浴客人退房 | `GET /api/rooms/stays/:id/checkout-preview`（要补的房费、押金）；`POST /api/rooms/stays/:id/close`（操作编号，带 `expectedDue` 核对） |
+| 只住房的客人退房结账（可合并几间房） | `GET /api/rooms/checkout-preview?ids=1,2`（每间房的明细、要补的房费、押金、登记会员的余额）；`POST /api/rooms/checkout`（操作编号，带 `expectedTotal` 核对；收款可含 `{ method: 'deposit', amount }`） |
+| 改房态（打扫、维修） | `PUT /api/rooms/:id/housekeeping` |
+| 夜审 | `POST /api/rooms/audit`（返回夜审报告） |
+| 看板「客房」 | `GET /api/reports/rooms?from=&to=` |
+| 反结账 | 前台 `POST /api/frontdesk/checkouts/:id/void`（与手牌、桌台结账相同） |
+
+带操作编号的六种（入住、续住、收押金、退押金、退房、退房结账）与前台一样有「结果待确认」：查回走 `GET /api/frontdesk/ops/:key`，确认作废走 `POST /api/frontdesk/ops/:key/abandon`（按业务类型检查权限）。

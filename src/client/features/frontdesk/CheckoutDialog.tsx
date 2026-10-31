@@ -660,7 +660,7 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
     setError(null);
     try {
       await api.post<CheckoutDetail>(`/api/frontdesk/checkouts/${id}/void`, { reason: reason.trim(), ...(cashRefund > 0 && drawer !== null ? { refundShiftId: drawer } : {}) });
-      const restored = d && isTableCheckout(d) ? '这几桌恢复为用餐中' : '客人恢复为在店未结';
+      const restored = d && isTableCheckout(d) ? '这几桌恢复为用餐中' : d && isRoomCheckout(d) ? '这几间房恢复为在住' : '客人恢复为在店未结';
       toast({
         tone: 'success',
         title: `已反结账 ${d?.checkoutNo ?? ''}`,
@@ -671,6 +671,7 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
       setVoiding(false);
       void qc.invalidateQueries({ queryKey: ['frontdesk'] });
       void qc.invalidateQueries({ queryKey: ['dining'] });
+      void qc.invalidateQueries({ queryKey: ['rooms'] });
       void qc.invalidateQueries({ queryKey: ['member'] });
       void qc.invalidateQueries({ queryKey: shiftKeys.all });
       refresh();
@@ -711,7 +712,9 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
               <p className="text-[13px] text-ink-2">
                 {isTableCheckout(d)
                   ? '反结账后：储值消费按原单撤销，团购券登记作废，这几桌恢复为用餐中（桌台须仍空闲），可以继续点单或更正后重新结账。'
-                  : '反结账后：储值消费按原单撤销，团购券登记作废，门票明细作废，客人恢复为在店未结（手牌须仍空闲）；重新结账时门票按第一次结账的时刻计算。'}
+                  : isRoomCheckout(d)
+                    ? '反结账后：储值消费按原单撤销，团购券登记作废，这几间房恢复为在住（房间须还空着），押金抵扣的部分恢复为押金；结账时已原路退回的押金不再恢复。'
+                    : '反结账后：储值消费按原单撤销，团购券登记作废，门票明细作废，客人恢复为在店未结（手牌须仍空闲）；重新结账时门票按第一次结账的时刻计算。'}
                 {cashRefund ? ` 原单收了现金 ¥${(cashRefund / 100).toFixed(2)}：选从哪个钱箱退给客人，计入那个钱箱当班的交班表（扣减应有现金）。` : ''}
                 扫码、银行卡、团购请在商户后台原路退回并登记退款单号。
               </p>
