@@ -40,8 +40,8 @@ beforeAll(async () => {
 afterAll(async () => ctx.close());
 
 describe('每日对账包', () => {
-  it('七个文件；自检全部一致，部门参考表合计 = 应收，再单列优惠 / 免单与净营业额', () => {
-    expect(recon.files.map((f) => f.name)).toEqual(['00-说明.txt', '01-日结汇总.csv', '02-结账单.csv', '03-部门参考表.csv', '04-异常清单.csv', '05-交班.csv', '06-技师业绩.csv']);
+  it('八个文件；自检全部一致，部门参考表合计 = 应收，再单列优惠 / 免单与净营业额', () => {
+    expect(recon.files.map((f) => f.name)).toEqual(['00-说明.txt', '01-日结汇总.csv', '02-结账单.csv', '03-部门参考表.csv', '04-异常清单.csv', '05-交班.csv', '06-技师业绩.csv', '07-客房与押金.csv']);
     expect(recon.ok).toBe(true);
     const dept = rowsOf(file('03-部门参考表.csv'));
     const total = dept.find((r) => r[0] === '合计')!;

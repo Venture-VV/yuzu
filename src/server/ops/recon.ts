@@ -7,6 +7,7 @@
 //   04-异常清单.csv    反结账、作废明细、撤销误开的牌、改票种、免票入场、会员撤销与其他日结异常
 //   05-交班.csv        当天的班次：备用金、各收款方式、应有现金、实点、长短款
 //   06-技师业绩.csv    每位技师的钟数、点钟 / 轮钟、金额与提成（v0.7.0 / v0.7.1，与部门参考表同一口径），供与钟房的钟单核对
+//   07-客房与押金.csv  当天的入住、房费、换房、退房、夜审与押金的收、退、抵扣（S7，v0.7.4），供与客房登记、押金袋核对
 // 优惠 / 免单与降档 / 免票授权在资金轨 R1.2 合并后加入异常清单。
 
 import { businessDateOf, businessDayStart } from '@shared/business-date';
@@ -107,7 +108,10 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
               WHERE cb.checkout_id = c.id
               UNION ALL
               SELECT '桌 ' || dt.name FROM checkout_bills cb JOIN table_sessions ts ON ts.id = cb.table_session_id
-              JOIN dining_tables dt ON dt.id = ts.table_id WHERE cb.checkout_id = c.id) x) AS tags,
+              JOIN dining_tables dt ON dt.id = ts.table_id WHERE cb.checkout_id = c.id
+              UNION ALL
+              SELECT '房 ' || rm.room_no FROM checkout_bills cb JOIN room_stays rs ON rs.id = cb.room_stay_id
+              JOIN rooms rm ON rm.id = rs.room_id WHERE cb.checkout_id = c.id) x) AS tags,
            (SELECT json_agg(json_build_object('method', p.method, 'amount', p.amount, 'ref', p.ref, 'member', m.name,
                                               'coupon', g.code, 'platform', g.platform, 'approver', ap.display_name) ORDER BY p.id)
             FROM checkout_payments p LEFT JOIN members m ON m.id = p.member_id LEFT JOIN group_buy_coupons g ON g.id = p.coupon_id
@@ -124,12 +128,16 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
       SELECT id, created_at, -1 FROM checkouts WHERE void_business_date = ${date}
     )
     SELECT CASE WHEN l.ticket_type_id IS NOT NULL THEN '门票'
+                WHEN l.source = 'room' THEN '客房'
                 WHEN l.item_id IS NULL THEN '其他（手动金额、赔偿等）'
                 ELSE coalesce(nullif(si.category, ''), '未分类') END AS category,
-           l.name, sum(k.sign * l.quantity)::int AS quantity, sum(k.sign * l.amount)::bigint AS amount
+           -- 房费（S7）的明细名称带房号与日期，按房费的种类合并
+           CASE rc.kind WHEN 'night' THEN '房费（全天房）' WHEN 'half_day' THEN '超时半天' WHEN 'block' THEN '钟点房' ELSE l.name END AS name,
+           sum(k.sign * l.quantity)::int AS quantity, sum(k.sign * l.amount)::bigint AS amount
     FROM k JOIN checkout_bills cb ON cb.checkout_id = k.id
     JOIN bill_lines l ON l.bill_id = cb.bill_id AND l.posted_at <= k.created_at AND (l.voided_at IS NULL OR l.voided_at > k.created_at)
     LEFT JOIN service_items si ON si.id = l.item_id
+    LEFT JOIN room_stay_charges rc ON rc.line_id = l.id
     GROUP BY 1, 2
     HAVING sum(k.sign * l.quantity) <> 0 OR sum(k.sign * l.amount) <> 0`;
   // 按分类、项目名排序（逐字符比较，结果与数据库的排序规则无关）
@@ -188,7 +196,44 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     ORDER BY v.checked_in_at, v.id`;
   const shifts = (await listShifts(tx, date)).filter((s) => s.businessDate === date);
   const technicians = await technicianReport(tx, date, date);
-  return { summary, checkouts, departments, voidedLines, cancelled, ticketChanges, freeEntries, shifts, technicians };
+  // 客房（S7）：当天的入住、房费、换房、退房 / 退房结账 / 撤销入住、夜审与押金台账，按时间排
+  const rooms = await tx<{ at: string; event: string; stayNo: string; roomNo: string; guest: string; tagCode: string | null; method: string | null; amount: number | null; checkoutNo: string | null; operator: string; note: string }[]>`
+    SELECT s.checked_in_at AS at, CASE WHEN s.visit_id IS NULL THEN '入住（只住房）' ELSE '入住（洗浴客人）' END AS event, s.stay_no, r.room_no,
+           s.guest_label AS guest, ht.code AS tag_code, NULL AS method, s.rate AS amount, NULL AS checkout_no, st.display_name AS operator,
+           CASE s.kind WHEN 'daily' THEN '全天房，房价每晚' ELSE '钟点房，房价每段 ' || s.block_minutes || ' 分钟' END AS note
+    FROM room_stays s JOIN rooms r ON r.id = s.room_id JOIN staff st ON st.id = s.checked_in_by
+    LEFT JOIN visits v ON v.id = s.visit_id LEFT JOIN hand_tags ht ON ht.id = v.tag_id
+    WHERE s.checked_in_at >= ${from} AND s.checked_in_at < ${to}
+    UNION ALL
+    SELECT c.created_at, CASE c.source WHEN 'checkin' THEN '房费（随入住）' WHEN 'audit' THEN '房费（夜审）' WHEN 'checkout' THEN '房费（退房补挂）' ELSE '房费（续住）' END,
+           s.stay_no, r.room_no, s.guest_label, ht.code, NULL, c.amount, NULL, st.display_name,
+           l.name || CASE WHEN l.status = 'voided' THEN '（已作废：' || l.void_reason || '）' ELSE '' END
+    FROM room_stay_charges c JOIN room_stays s ON s.id = c.stay_id JOIN rooms r ON r.id = s.room_id JOIN bill_lines l ON l.id = c.line_id
+    JOIN staff st ON st.id = c.created_by LEFT JOIN visits v ON v.id = s.visit_id LEFT JOIN hand_tags ht ON ht.id = v.tag_id
+    WHERE c.created_at >= ${from} AND c.created_at < ${to}
+    UNION ALL
+    SELECT d.created_at, CASE d.kind WHEN 'receive' THEN '收押金' WHEN 'refund' THEN '退押金' WHEN 'apply' THEN '押金抵扣' ELSE '反结账恢复押金' END,
+           s.stay_no, r.room_no, s.guest_label, ht.code, d.method, CASE WHEN d.kind IN ('receive', 'unapply') THEN d.amount ELSE -d.amount END,
+           k.checkout_no, st.display_name, concat_ws('；', nullif(d.ref, ''), d.reason)
+    FROM room_deposits d JOIN room_stays s ON s.id = d.stay_id JOIN rooms r ON r.id = s.room_id JOIN staff st ON st.id = d.operator_id
+    LEFT JOIN checkouts k ON k.id = d.checkout_id LEFT JOIN visits v ON v.id = s.visit_id LEFT JOIN hand_tags ht ON ht.id = v.tag_id
+    WHERE d.business_date = ${date}
+    UNION ALL
+    SELECT mv.created_at, '换房', s.stay_no, tr.room_no, s.guest_label, ht.code, NULL, NULL, NULL, st.display_name, fr.room_no || ' → ' || tr.room_no || '：' || mv.reason
+    FROM room_moves mv JOIN room_stays s ON s.id = mv.stay_id JOIN rooms fr ON fr.id = mv.from_room_id JOIN rooms tr ON tr.id = mv.to_room_id
+    JOIN staff st ON st.id = mv.operator_id LEFT JOIN visits v ON v.id = s.visit_id LEFT JOIN hand_tags ht ON ht.id = v.tag_id
+    WHERE mv.created_at >= ${from} AND mv.created_at < ${to}
+    UNION ALL
+    SELECT s.closed_at, CASE s.status WHEN 'checked_out' THEN '退房（洗浴客人）' WHEN 'settled' THEN '退房结账' ELSE '撤销入住' END,
+           s.stay_no, r.room_no, s.guest_label, ht.code, NULL, NULL, NULL, st.display_name, coalesce(s.close_reason, '')
+    FROM room_stays s JOIN rooms r ON r.id = s.room_id JOIN staff st ON st.id = s.closed_by
+    LEFT JOIN visits v ON v.id = s.visit_id LEFT JOIN hand_tags ht ON ht.id = v.tag_id
+    WHERE s.status <> 'open' AND s.closed_at >= ${from} AND s.closed_at < ${to}
+    UNION ALL
+    SELECT a.run_at, '夜审', '', '', '', NULL, NULL, a.amount, NULL, st.display_name, '挂了 ' || a.nights || ' 晚房费'
+    FROM room_audits a JOIN staff st ON st.id = a.run_by WHERE a.business_date = ${date}
+    ORDER BY 1, 3`;
+  return { summary, checkouts, departments, voidedLines, cancelled, ticketChanges, freeEntries, shifts, technicians, rooms };
 }
 
 export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string, now = new Date()): Promise<DailyRecon> {
@@ -363,7 +408,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     name: '05-交班.csv',
     content: toCsv([
       ['班次', '员工', '营业日', '状态', '开班', '交班', '备用金', '结账张数', '结账合计', ...methods.map((m) => `结账·${CHECKOUT_METHOD_LABELS[m]}`),
-        '充值实收', '赠金', '工作台储值消费', '反结账退现金', '应有现金', '实点现金', '长短款', '反结账张数', '接班人', '备注'],
+        '充值实收', '赠金', '工作台储值消费', '反结账退现金', '押金现金（收 − 退）', '应有现金', '实点现金', '长短款', '反结账张数', '接班人', '备注'],
       ...day.shifts.map((r) => [
         r.shiftNo,
         r.staffName,
@@ -379,6 +424,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
         yuan(r.summary.recharges.bonus),
         yuan(r.summary.walletConsumes.total),
         yuan(cashRefund(r)),
+        yuan(r.summary.cash.deposit ?? 0),
         yuan(r.expectedCash ?? r.summary.cash.expected),
         r.countedCash === null ? '' : yuan(r.countedCash),
         r.countedCash === null || r.expectedCash === null ? '' : yuan(r.countedCash - r.expectedCash),
@@ -413,6 +459,35 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     ]),
   });
 
+  // 07 客房与押金（S7）：当天的入住、房费、换房、退房、夜审与押金台账；押金是负债，不算营业额
+  const methodLabel = (m: string | null) => (m ? (CHECKOUT_METHOD_LABELS[m as CheckoutMethod] ?? m) : '');
+  files.push({
+    name: '07-客房与押金.csv',
+    content: toCsv([
+      ['时间', '事项', '入住单', '房号', '住客', '手牌', '方式', '金额（元）', '结账单', '经办人', '说明'],
+      ...day.rooms.map((r) => [
+        stampOf(r.at),
+        r.event,
+        r.stayNo,
+        r.roomNo,
+        r.guest,
+        r.tagCode ?? '',
+        methodLabel(r.method),
+        r.amount === null ? '' : (r.amount < 0 ? '-' : '') + yuan(Math.abs(r.amount)),
+        r.checkoutNo ?? '',
+        r.operator,
+        r.note,
+      ]),
+      [],
+      ['押金汇总', '', '', '', '', '', '方式', '金额（元）'],
+      ...s.deposits.received.map((m) => ['收押金', '', '', '', '', '', methodLabel(m.method), yuan(m.amount)]),
+      ...s.deposits.refunded.map((m) => ['退押金', '', '', '', '', '', methodLabel(m.method), '-' + yuan(m.amount)]),
+      ['押金抵扣（转为营业额）', '', '', '', '', '', '', yuan(s.deposits.applied)],
+      ['反结账恢复押金', '', '', '', '', '', '', yuan(s.deposits.restored)],
+      ['当天结束时在住押金余额', '', '', '', '', '', '', yuan(s.deposits.held)],
+    ]),
+  });
+
   // 00 说明
   const failed = checks.filter((c: CheckLine) => !c.ok);
   const deptOk = deptTotal === biz.receivable;
@@ -428,6 +503,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     `异常：${EXCEPTION_KINDS.map((k) => `${k} ${count(k)}`).join('、')}、其他 ${exceptions.length - EXCEPTION_KINDS.reduce((t, k) => t + count(k), 0)}`,
     `交班：${day.shifts.length} 个班次，已交班 ${day.shifts.filter((r) => r.status === 'closed').length} 个`,
     `技师：${tr.totals.clocks} 个钟（点钟 ${tr.totals.designated}、轮钟 ${tr.totals.rotation}），${formatYuan(tr.totals.amount)}${tr.unassigned.clocks ? `；未指定技师 ${tr.unassigned.clocks} 个钟` : ''}`,
+    `客房押金：收 ${formatYuan(s.deposits.received.reduce((t, m) => t + m.amount, 0))}、退 ${formatYuan(s.deposits.refunded.reduce((t, m) => t + m.amount, 0))}、抵扣 ${formatYuan(s.deposits.applied - s.deposits.restored)}；当天结束时在住押金 ${formatYuan(s.deposits.held)}`,
     failed.length ? `自检：✗ ${failed.length} 项不一致：${failed.map((c) => c.label).join('、')}` : `自检：✓ ${checks.length} 项全部一致`,
   ];
   files.unshift({
@@ -447,6 +523,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
       '  04-异常清单.csv     反结账、优惠 / 免单、作废明细、撤销误开的牌（每一次都列，写明是否超过更正时限；日结异常清单只列超过时限的）、改票种（降档、改为免票写明授权人与原因）、免票入场、补录纸质单、会员撤销与其他异常',
       '  05-交班.csv         当天的班次、反结账退现金与长短款',
       '  06-技师业绩.csv     每位技师的钟数、点钟 / 轮钟、金额与提成（与部门参考表同一口径，提成按结账时刻的提成规则），与钟房的钟单核对',
+      '  07-客房与押金.csv   当天的入住、房费、换房、退房、夜审与押金的收、退、抵扣（押金是负债，不算营业额），与客房登记、押金袋核对',
       '',
     ].join('\n'),
   });

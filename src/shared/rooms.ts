@@ -243,6 +243,31 @@ export interface RoomAuditReport {
   counts: Record<RoomBoardStatus, number>;
 }
 
+/** 看板「客房」（经营总览的岗位看）：此刻的房态与押金、任选时段的入住、房费营业额（结账口径）与押金 */
+export interface RoomsReport {
+  from: string;
+  to: string;
+  now: {
+    counts: Record<RoomBoardStatus, number>;
+    /** 启用的房间数 */
+    rooms: number;
+    /** 在住押金余额 */
+    depositHeld: number;
+  };
+  /** 时段内入住的入住单（不含撤销的），按入住营业日 */
+  checkins: number;
+  /** 时段内挂上、没作废的全天房晚数（按哪一晚）与钟点房段数（按挂上的营业日） */
+  nights: number;
+  blocks: number;
+  /** 客房营业额：时段内结账的房费（反结账冲回），与部门参考表的「客房」同一口径，按房费种类 */
+  revenue: { total: number; byKind: { name: string; quantity: number; amount: number }[] };
+  /** 平均房价：结账口径的全天房房费 ÷ 晚数；没有全天房房费时为 null */
+  averageRate: number | null;
+  /** 时段内押金的收、退、抵扣（抵扣扣除反结账恢复） */
+  deposits: { received: number; refunded: number; applied: number };
+  days: { date: string; checkins: number; nights: number; revenue: number }[];
+}
+
 /** 门店时区某天的第几分钟对应的时刻 */
 export function localMinuteAt(date: string, minute: number, timeZone: string): Date {
   return new Date(businessDayStart(date, timeZone, 0).getTime() + minute * 60_000);

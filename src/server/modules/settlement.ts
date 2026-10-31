@@ -7,7 +7,7 @@ import { businessDateOf, ISO_DATE } from '@shared/business-date';
 import { PAYMENT_METHOD_LABELS, type PaymentMethod } from '@shared/labels';
 import { formatAmount, formatYuan } from '@shared/money';
 import { businessBreakdown, CHECKOUT_METHOD_LABELS, COUPON_PLATFORM_LABELS } from '@shared/checkout';
-import type { BusinessTotals, SettlementAnomaly, SettlementCheck, SettlementSummary, SettlementTotals } from '@shared/types';
+import type { BusinessTotals, SettlementAnomaly, SettlementCheck, SettlementDeposits, SettlementSummary, SettlementTotals } from '@shared/types';
 import { readSnapshot, type Db } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
@@ -62,8 +62,24 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
     net: net!,
     business: await businessTotals(db, date),
     backfill: (await db<{ count: number }[]>`SELECT count(*)::int AS count FROM backfill_entries WHERE business_date = ${date}`)[0]!,
+    deposits: await depositTotals(db, date),
   };
 }
+
+/** 客房押金（S7）：当天收、退（按收款方式）、退房结账时抵扣、反结账时恢复，以及当天结束时的在住押金余额 */
+async function depositTotals(db: Db, date: string): Promise<SettlementDeposits> {
+  const rows = await db<{ kind: string; method: PaymentMethod; count: number; amount: number }[]>`
+    SELECT kind, method, count(*) AS count, sum(amount) AS amount FROM room_deposits
+    WHERE business_date = ${date} GROUP BY kind, method ORDER BY kind, method`;
+  const [held] = await db<{ amount: number }[]>`
+    SELECT coalesce(sum(CASE WHEN kind IN ('receive', 'unapply') THEN amount ELSE -amount END), 0) AS amount
+    FROM room_deposits WHERE business_date <= ${date}`;
+  const pick = (kind: string) => rows.filter((r) => r.kind === kind).map(({ method, count, amount }) => ({ method, count, amount }));
+  const sumOf = (kind: string) => rows.filter((r) => r.kind === kind).reduce((sum, r) => sum + r.amount, 0);
+  return { received: pick('receive'), refunded: pick('refund'), applied: sumOf('apply'), restored: sumOf('unapply'), held: held!.amount };
+}
+
+const EMPTY_DEPOSITS: SettlementDeposits = { received: [], refunded: [], applied: 0, restored: 0, held: 0 };
 
 /** 营业口径：当天结账的计入当天，反结账计入反结账当天（负数） */
 async function businessTotals(db: Db, date: string): Promise<BusinessTotals> {
@@ -126,6 +142,7 @@ const withNewSections = (t: SettlementTotals): SettlementTotals => ({
   opening: t.opening ?? { count: 0, voidCount: 0, principal: 0, bonus: 0 },
   business: t.business ?? EMPTY_BUSINESS,
   backfill: t.backfill ?? { count: 0 },
+  deposits: t.deposits ?? EMPTY_DEPOSITS,
 });
 const sameTotals = (snapshot: SettlementTotals, now: SettlementTotals) => canonical(withNewSections(snapshot)) === canonical(now);
 
@@ -207,6 +224,7 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
        FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id
        WHERE c.business_date = ${date} OR c.void_business_date = ${date}) AS bills`;
   const receiptsNet = totals.business.byMethod.reduce((s, m) => s + m.amount, 0);
+  const depositPaid = totals.business.byMethod.find((m) => m.method === 'deposit')?.amount ?? 0;
 
   const docDelta = {
     principal: totals.recharge.paid - totals.consume.principal + totals.reversal.principal + totals.opening.principal,
@@ -252,6 +270,12 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
       label: '结账储值支付 = 储值消费（营业口径与会员口径的桥）',
       ok: bridge!.payments === bridge!.consumed - bridge!.reversed,
       detail: `结账储值支付（净额）${formatYuan(bridge!.payments)}；结账产生的储值消费 ${formatYuan(bridge!.consumed)}，其中当天撤销 ${formatYuan(bridge!.reversed)}`,
+    },
+    {
+      key: 'deposit_bridge',
+      label: '结账押金抵扣 = 押金台账的抵扣（客房）',
+      ok: depositPaid === totals.deposits.applied - totals.deposits.restored,
+      detail: `结账押金抵扣（净额）${formatYuan(depositPaid)}；押金台账抵扣 ${formatYuan(totals.deposits.applied)}，其中当天反结账恢复 ${formatYuan(totals.deposits.restored)}`,
     },
     {
       key: 'bonus_lots',
@@ -514,9 +538,24 @@ export function settlementCsv(s: SettlementSummary): string {
       `  · ${CHECKOUT_METHOD_LABELS[m.method]}`,
       m.count,
       signed(m.amount),
-      m.method === 'wallet' ? '会员余额抵扣，同时计入储值消费' : m.method === 'coupon' ? '平台团购核销，由平台结算' : m.method === 'discount' ? '优惠，不是收款' : '',
+      m.method === 'wallet'
+        ? '会员余额抵扣，同时计入储值消费'
+        : m.method === 'coupon'
+          ? '平台团购核销，由平台结算'
+          : m.method === 'discount'
+            ? '优惠，不是收款'
+            : m.method === 'deposit'
+              ? '客房押金抵扣，押金在收押金时已经收过'
+              : '',
     ]),
     ...s.business.coupons.map((c) => [`  · 团购 ${COUPON_PLATFORM_LABELS[c.platform]}`, c.count, (c.amount < 0 ? '-' : '') + y(c.amount), c.voidCount ? `作废 ${c.voidCount} 张` : '']),
+    [],
+    ['客房押金（负债，不算营业额）', '笔数', '金额（元）', '说明'],
+    ...s.deposits.received.map((m) => [`收押金 · ${PAYMENT_METHOD_LABELS[m.method]}`, m.count, y(m.amount), m.method === 'cash' ? '现金计入钱箱' : '']),
+    ...s.deposits.refunded.map((m) => [`退押金 · ${PAYMENT_METHOD_LABELS[m.method]}`, m.count, '-' + y(m.amount), m.method === 'cash' ? '现金从钱箱退' : '原路退回']),
+    ['退房结账时抵扣', '', y(s.deposits.applied), '转为营业额（收款方式「押金抵扣」）'],
+    ['反结账恢复为押金', '', y(s.deposits.restored), ''],
+    ['当天结束时在住押金余额', '', y(s.deposits.held), ''],
     [],
     ['余额核对', '本金（元）', '赠金（元）'],
     ['期初余额', y(s.balances.opening.principal), y(s.balances.opening.bonus)],
