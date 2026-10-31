@@ -406,6 +406,8 @@ export async function consumeForCheckout(
     tagCodes: string[];
     /** 桌台结账（餐饮第二步）：桌号；手牌结账不带 */
     tables?: string[];
+    /** 客房退房结账（S7）：房号 */
+    rooms?: string[];
     businessDate: string;
     ctx: OpContext;
     at: Date;
@@ -436,8 +438,14 @@ export async function consumeForCheckout(
       balance,
     });
   }
-  const name = o.tables?.length ? `餐饮结账 ${o.checkoutNo}` : `手牌结账 ${o.checkoutNo}`;
-  const note = (o.tables?.length ? `结账 ${o.checkoutNo}（桌台 ${o.tables.join('、')}）` : `结账 ${o.checkoutNo}（手牌 ${o.tagCodes.join('、')}）`).slice(0, 200);
+  const name = o.rooms?.length ? `客房结账 ${o.checkoutNo}` : o.tables?.length ? `餐饮结账 ${o.checkoutNo}` : `手牌结账 ${o.checkoutNo}`;
+  const note = (
+    o.rooms?.length
+      ? `结账 ${o.checkoutNo}（客房 ${o.rooms.join('、')}）`
+      : o.tables?.length
+        ? `结账 ${o.checkoutNo}（桌台 ${o.tables.join('、')}）`
+        : `结账 ${o.checkoutNo}（手牌 ${o.tagCodes.join('、')}）`
+  ).slice(0, 200);
   const { id, docNo } = await insertConsumption(tx, member, {
     total: o.amount,
     split,

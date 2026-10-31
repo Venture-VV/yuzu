@@ -36,10 +36,11 @@ export interface OverLimitScope {
 }
 
 /** 优惠 / 免单的授权对象：一起结账的来访（升序）、优惠金额与原因（金额与客人必须与结账时完全一致）；
- *  桌台结账（餐饮第二步）时来访为空，对象是一起结账的开台（升序） */
+ *  桌台结账（餐饮第二步）时来访为空，对象是一起结账的开台（升序）；客房退房结账（S7）时对象是一起结账的入住单（升序） */
 export interface DiscountScope {
   visitIds: number[];
   tableSessionIds?: number[];
+  roomStayIds?: number[];
   amount: number;
   reason: string;
 }
@@ -82,6 +83,7 @@ export function discountGrantFits(
   amount: number,
   now = Date.now(),
   tableSessionIds: readonly number[] = [],
+  roomStayIds: readonly number[] = [],
 ): grant is DiscountGrant {
   if (!grant || grant.scope.amount !== amount || new Date(grant.expiresAt).getTime() <= now) return false;
   const same = (x: readonly number[], y: readonly number[]) => {
@@ -89,7 +91,7 @@ export function discountGrantFits(
     const b = sortedVisitIds(y);
     return a.length === b.length && a.every((id, i) => id === b[i]);
   };
-  return same(grant.scope.visitIds, visitIds) && same(grant.scope.tableSessionIds ?? [], tableSessionIds);
+  return same(grant.scope.visitIds, visitIds) && same(grant.scope.tableSessionIds ?? [], tableSessionIds) && same(grant.scope.roomStayIds ?? [], roomStayIds);
 }
 
 /** 降档 / 免票授权是否覆盖这些手牌与票种 */

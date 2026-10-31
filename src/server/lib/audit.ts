@@ -62,7 +62,20 @@ export type AuditAction =
   | 'table_move'
   | 'table_cancel'
   | 'table_post'
-  | 'table_void';
+  | 'table_void'
+  // 客房（S7，v0.7.4）
+  | 'room_type_saved'
+  | 'room_saved'
+  | 'room_checkin'
+  | 'room_extend'
+  | 'room_update'
+  | 'room_move'
+  | 'room_cancel'
+  | 'room_void'
+  | 'room_deposit'
+  | 'room_close'
+  | 'room_housekeeping'
+  | 'room_audit';
 
 export interface AuditEntry {
   staffId: number | null;

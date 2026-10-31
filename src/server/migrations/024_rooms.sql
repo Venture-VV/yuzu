@@ -12,8 +12,8 @@ CREATE TABLE room_types (
   id            bigserial PRIMARY KEY,
   name          text NOT NULL CHECK (char_length(btrim(name)) BETWEEN 1 AND 16),
   kind          text NOT NULL CHECK (kind IN ('daily', 'hourly')),
-  -- 分：全天房每晚、钟点房每段
-  price         integer NOT NULL CHECK (price BETWEEN 0 AND 10000000),
+  -- 分：全天房每晚、钟点房每段（房费是账单明细，单价要大于 0）
+  price         integer NOT NULL CHECK (price BETWEEN 1 AND 10000000),
   -- 钟点房每段分钟；全天房为空
   block_minutes integer CHECK (block_minutes BETWEEN 30 AND 720),
   sort_order    integer NOT NULL DEFAULT 0,
@@ -59,7 +59,7 @@ CREATE TABLE room_stays (
   room_id                bigint NOT NULL REFERENCES rooms (id),
   room_type_id           bigint NOT NULL REFERENCES room_types (id),
   kind                   text NOT NULL CHECK (kind IN ('daily', 'hourly')),
-  rate                   integer NOT NULL CHECK (rate BETWEEN 0 AND 10000000),
+  rate                   integer NOT NULL CHECK (rate BETWEEN 1 AND 10000000),
   block_minutes          integer CHECK (block_minutes BETWEEN 30 AND 720),
   -- 房费挂在哪张账单：洗浴客人是手牌账单（visit_id 非空），只住房的客人是客房账单
   bill_id                bigint NOT NULL REFERENCES bills (id),
@@ -130,7 +130,7 @@ CREATE TABLE room_stay_charges (
   -- 钟点房：第几段
   block_no   integer CHECK (block_no BETWEEN 1 AND 999),
   line_id    bigint NOT NULL UNIQUE REFERENCES bill_lines (id),
-  amount     integer NOT NULL CHECK (amount BETWEEN 0 AND 10000000),
+  amount     integer NOT NULL CHECK (amount BETWEEN 1 AND 10000000),
   source     text NOT NULL CHECK (source IN ('checkin', 'audit', 'checkout', 'extend')),
   created_by bigint NOT NULL REFERENCES staff (id),
   created_at timestamptz NOT NULL DEFAULT now(),

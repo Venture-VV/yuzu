@@ -58,6 +58,7 @@ import {
   resolveBackfill,
 } from './backfill';
 import { getCheckout } from './checkout';
+import { getStay } from '../rooms';
 import { getTableSession } from '../tables';
 import { resolveTicketType, ticketAuthRequired, visitTicket } from './tickets';
 import { lineTechnicianSql } from '../technicians';
@@ -474,6 +475,10 @@ export async function cancelVisit(deps: Deps, visitId: number, raw: unknown, ctx
     const visit = (await lockVisits(tx, [visitId])).get(visitId)!;
     assertOpen(visit);
     if (visit.groupId !== peek.groupId) throw conflict('VISIT_CHANGED', '同行组刚刚有变化，请刷新后重试');
+    // 客房（S7）：还住着客房的不能释放手牌，先在客房页退房或撤销入住
+    const [room] = await tx<{ roomNo: string }[]>`
+      SELECT r.room_no FROM room_stays s JOIN rooms r ON r.id = s.room_id WHERE s.visit_id = ${visit.id} AND s.status = 'open' LIMIT 1`;
+    if (room) throw conflict('ROOM_OPEN', `这位客人还住着客房 ${room.roomNo}，请先在客房页退房或撤销入住`);
     const [bill] = await tx<{ lineCount: number; amountCents: number }[]>`
       SELECT line_count, amount_cents FROM bills WHERE id = ${visit.billId} FOR UPDATE`;
     if (bill!.lineCount > 0) {
@@ -778,6 +783,11 @@ export async function lookupFrontdeskOp(db: Db, key: string, expected?: Frontdes
     return { found: true as const, type: row.opType as 'table_open' | 'table_post', session: await getTableSession(db, row.refId) };
   }
   if (row.opType === 'table_checkout') return { found: true as const, type: 'table_checkout' as const, checkout: await getCheckout(db, row.refId) };
+  // 客房（S7）：入住、续住加段、收退押金、退房查回这间房的入住单；退房结账查回结账单
+  if (row.opType === 'room_checkout') return { found: true as const, type: 'room_checkout' as const, checkout: await getCheckout(db, row.refId) };
+  if (row.opType === 'room_checkin' || row.opType === 'room_extend' || row.opType === 'room_deposit' || row.opType === 'room_refund' || row.opType === 'room_close') {
+    return { found: true as const, type: row.opType as 'room_checkin' | 'room_extend' | 'room_deposit' | 'room_refund' | 'room_close', stay: await getStay(db, row.refId) };
+  }
   const [c] = await db<{ visitId: number }[]>`SELECT visit_id FROM visit_tag_changes WHERE id = ${row.refId}`;
   return { found: true as const, type: 'tag_swap' as const, visit: await getVisit(db, c!.visitId) };
 }

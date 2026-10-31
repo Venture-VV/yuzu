@@ -82,16 +82,18 @@ export function priceTicket(t: Pick<TicketType, 'price12h' | 'price24h'>, checke
  * 结账收款：现金、微信、支付宝、银行卡、其他（与充值相同），以及会员储值、团购券、优惠 / 免单。
  * 「优惠 / 免单」（R1.2，店主 2026-10-29 签认）由值班经理及以上当场授权并填原因，一张结账单最多一笔；
  * 店员不能自行抹零，抹零也走优惠。
+ * 「押金抵扣」（S7 客房，v0.7.4）只在客房退房结账时用：押金入住时已经收过（记在收押金的班次），抵扣时不动现金。
  */
-export const CHECKOUT_METHODS = [...PAYMENT_METHODS, 'wallet', 'coupon', 'discount'] as const;
+export const CHECKOUT_METHODS = [...PAYMENT_METHODS, 'wallet', 'coupon', 'discount', 'deposit'] as const;
 export type CheckoutMethod = (typeof CHECKOUT_METHODS)[number];
 export const CHECKOUT_METHOD_LABELS: Record<CheckoutMethod, string> = {
   ...PAYMENT_METHOD_LABELS,
   wallet: '会员储值',
   coupon: '团购券',
   discount: '优惠 / 免单',
+  deposit: '押金抵扣',
 };
-/** 实收（现金流入）的方式：会员储值是会员余额抵扣，团购券由平台结算，优惠 / 免单没有收钱，三者都不是本次实收 */
+/** 实收（现金流入）的方式：会员储值是会员余额抵扣，团购券由平台结算，优惠 / 免单没有收钱，押金抵扣在收押金时已经收过，都不是本次实收 */
 export const isCashLike = (m: CheckoutMethod): m is PaymentMethod => (PAYMENT_METHODS as readonly string[]).includes(m);
 
 /**
@@ -161,6 +163,8 @@ export interface CheckoutPreview {
   sessions: { sessionNo: string; tagCode: string; techNo: string; techName: string; itemName: string; clocks: number; status: 'waiting' | 'serving' }[];
   /** 还没上的菜（餐饮）：结账时只提醒，不改出品状态；客人没吃到的请先退菜 */
   dishes: { tagCode: string; name: string; quantity: number; status: 'queued' | 'cooking' | 'done' | 'served' | 'cancelled' }[];
+  /** 还在住的客房（S7）：要先在客房页退房（补齐房费、退押金）才能结账 */
+  rooms?: { tagCode: string; roomNo: string; stayNo: string }[];
 }
 
 /** 反结账退现金可以选的钱箱（v0.7.1，跨钱箱退款）：此刻当班的班次；original 原单收款的班次，mine 反结账人自己的班次 */
@@ -207,7 +211,10 @@ export interface CheckoutDetail {
     /** 桌台账单：开台与桌号；手牌账单为 null */
     tableSessionId: number | null;
     tableName: string | null;
-    /** 结账客人：手牌 1 人，桌台按开台人数 */
+    /** 客房账单（S7，只住房的客人）：入住单与房号；其他账单为 null */
+    roomStayId: number | null;
+    roomNo: string | null;
+    /** 结账客人：手牌 1 人，桌台按开台人数，客房按入住人数 */
     guests: number;
     memberName: string | null;
     guestLabel: string;
@@ -231,6 +238,8 @@ export interface CheckoutSummary {
   tagCodes: string[];
   /** 桌台结账单（餐饮第二步）的桌号；手牌结账单为空 */
   tableNames: string[];
+  /** 客房退房结账单（S7）的房号；其他结账单为空 */
+  roomNos: string[];
   methods: CheckoutMethod[];
   operatorName: string;
   createdAt: string;

@@ -94,7 +94,12 @@ const DiscountPayment = z.object({
   amount: positiveCents('优惠金额'),
   grantId: z.uuid('优惠 / 免单需要值班经理、店总或店主当场授权'),
 });
-export const Payment = z.union([CashPayment, WalletPayment, CouponPayment, DiscountPayment], '收款方式不正确');
+/** 押金抵扣（S7 客房）：只住房的客人退房结账时用这几间房的押金抵扣应收，先用非现金收的部分 */
+const DepositPayment = z.object({
+  method: z.literal('deposit'),
+  amount: positiveCents('押金抵扣金额'),
+});
+export const Payment = z.union([CashPayment, WalletPayment, CouponPayment, DiscountPayment, DepositPayment], '收款方式不正确');
 
 export const CheckoutInput = z.object({
   clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
@@ -214,8 +219,17 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
       pricedAt: at.toISOString(),
       sessions: await openSessionsOf(tx, ids),
       dishes: await unservedDishesOf(tx, ids),
+      rooms: await openRoomsOf(tx, ids),
     };
   });
+}
+
+/** 这几位洗浴客人还在住的客房（S7）：要先在客房页退房（补齐房费、退押金）才能结账 */
+async function openRoomsOf(db: Db, visitIds: number[]) {
+  return db<{ tagCode: string; roomNo: string; stayNo: string }[]>`
+    SELECT ht.code AS tag_code, r.room_no, s.stay_no
+    FROM room_stays s JOIN rooms r ON r.id = s.room_id JOIN visits v ON v.id = s.visit_id JOIN hand_tags ht ON ht.id = v.tag_id
+    WHERE s.visit_id IN ${db(visitIds)} AND s.status = 'open' ORDER BY ht.code, r.room_no`;
 }
 
 /** 门票计到的时刻：反结账后重结按第一次结账的时刻，平时按此刻 */
@@ -225,17 +239,23 @@ const ticketEnd = (r: Pick<VisitRow, 'ticketEndAt'>, at: Date) => (r.ticketEndAt
 
 export type CheckoutPaymentInput = z.infer<typeof Payment>;
 
-/** 收款的基本核对（手牌结账与桌台结账共用）：优惠最多一笔、「其他」要备注、储值要有权限、同一会员与同一张券不重复 */
-export function splitPayments(payments: CheckoutPaymentInput[], actor: OpContext['actor']) {
+/**
+ * 收款的基本核对（手牌、桌台、客房结账共用）：优惠最多一笔、「其他」要备注、储值要有权限、同一会员与同一张券不重复；
+ * 押金抵扣只在客房退房结账时用（opts.deposit），最多一笔
+ */
+export function splitPayments(payments: CheckoutPaymentInput[], actor: OpContext['actor'], opts: { deposit?: boolean } = {}) {
   const wallets = payments.filter((p) => p.method === 'wallet');
   const coupons = payments.filter((p) => p.method === 'coupon');
   const discounts = payments.filter((p) => p.method === 'discount');
+  const deposits = payments.filter((p) => p.method === 'deposit');
+  if (deposits.length && !opts.deposit) throw badRequest('押金抵扣只能在客房退房结账时使用');
+  if (deposits.length > 1) throw badRequest('押金抵扣请合并为一笔');
   if (discounts.length > 1) throw badRequest('优惠 / 免单最多登记一笔，请合并金额后重新授权');
   if (payments.some((p) => p.method === 'other' && !p.ref)) throw badRequest('「其他」收款请在备注里写明收的是什么');
   if (wallets.length && !can(actor, 'consume.create')) throw forbidden('当前岗位不能用会员储值收款');
   if (new Set(wallets.map((w) => w.memberId)).size !== wallets.length) throw badRequest('同一位会员的储值支付请合并为一笔');
   if (new Set(coupons.map((c) => `${c.platform}:${c.code}`)).size !== coupons.length) throw badRequest('同一张团购券不能登记两次');
-  return { wallets, coupons, discounts };
+  return { wallets, coupons, discounts, deposits };
 }
 
 /** 收款合计必须等于应收（手牌结账与桌台结账共用） */
@@ -265,9 +285,10 @@ export async function recordCheckoutPayments(
     checkoutNo: string;
     payments: CheckoutPaymentInput[];
     discount: { reason: string; approverId: number } | null;
-    /** 储值消费单备注里的手牌号；桌台结账时为桌号（tables） */
+    /** 储值消费单备注里的手牌号；桌台结账时为桌号（tables），客房退房结账时为房号（rooms） */
     tagCodes: string[];
     tables?: string[];
+    rooms?: string[];
     date: string;
     at: Date;
     ctx: OpContext;
@@ -286,6 +307,7 @@ export async function recordCheckoutPayments(
       checkoutNo: a.checkoutNo,
       tagCodes: a.tagCodes,
       tables: a.tables,
+      rooms: a.rooms,
       businessDate: a.date,
       ctx: a.ctx,
       at: a.at,
@@ -310,9 +332,10 @@ export async function recordCheckoutPayments(
   }
   for (const p of a.payments) {
     if (p.method === 'wallet' || p.method === 'coupon' || p.method === 'discount') continue;
+    // 押金抵扣：押金台账的抵扣记录由客房退房结账在同一事务里写（rooms.ts）
     await tx`
       INSERT INTO checkout_payments (checkout_id, method, amount, ref)
-      VALUES (${a.checkoutId}, ${p.method}, ${p.amount}, ${p.ref})`;
+      VALUES (${a.checkoutId}, ${p.method}, ${p.amount}, ${p.method === 'deposit' ? '' : p.ref})`;
   }
   if (a.discount && discounts[0]) {
     await tx`
@@ -355,6 +378,9 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
       assertOpen(v);
       if (v.groupId !== p.groupId) throw conflict('VISIT_CHANGED', '同行组刚刚有变化，请刷新后重试');
     }
+    // 客房（S7）：还住着客房的先退房（补齐房费、退押金）；客房入住也要先锁这位客人的来访，两边不会交错
+    const [room] = await openRoomsOf(tx, ids);
+    if (room) throw conflict('ROOM_OPEN', `手牌 ${room.tagCode} 还住着客房 ${room.roomNo}，请先在客房页退房（补齐房费、退押金），再结账`);
     // 储值只能由本次结账的客人里的会员支付，不能扣不在这张结账单上的会员（串单）；会员替朋友付，把朋友的手牌合并进来一起结
     const guests = new Set([...locked.values()].map((v) => v.memberId));
     const outsider = wallets.find((w) => !guests.has(w.memberId));
@@ -511,12 +537,13 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
         checkedOutAt: new Date(c.createdAt).toISOString(),
       });
     }
-    // 手牌结账单恢复来访；桌台结账单（餐饮第二步）恢复开台
-    const all = await tx<{ visitId: number | null; tableSessionId: number | null; billId: number; tagId: number | null; groupId: number | null; memberId: number | null }[]>`
-      SELECT cb.visit_id, cb.table_session_id, cb.bill_id, v.tag_id, v.group_id, v.member_id
+    // 手牌结账单恢复来访；桌台结账单（餐饮第二步）恢复开台；客房退房结账单（S7）恢复入住单
+    const all = await tx<{ visitId: number | null; tableSessionId: number | null; roomStayId: number | null; billId: number; tagId: number | null; groupId: number | null; memberId: number | null }[]>`
+      SELECT cb.visit_id, cb.table_session_id, cb.room_stay_id, cb.bill_id, v.tag_id, v.group_id, v.member_id
       FROM checkout_bills cb LEFT JOIN visits v ON v.id = cb.visit_id WHERE cb.checkout_id = ${c.id}`;
     const items = all.filter((i): i is typeof i & { visitId: number; tagId: number } => i.visitId !== null);
     const tableItems = all.filter((i) => i.tableSessionId !== null).map((i) => ({ sessionId: i.tableSessionId!, billId: i.billId }));
+    const stayIds = all.flatMap((i) => (i.roomStayId !== null ? [i.roomStayId] : []));
 
     // ① 手牌（id 升序）：必须启用、未锁定、没有其他在店客人
     const tags = items.length
@@ -557,6 +584,20 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
         SELECT id, session_no, status FROM table_sessions WHERE id IN ${tx(tableItems.map((i) => i.sessionId))} ORDER BY id FOR UPDATE`;
       for (const s of sessions) if (s.status !== 'settled') throw conflict('VISIT_CHANGED', `开台 ${s.sessionNo} 状态已变化，请刷新后重试`);
     }
+    // 客房退房结账单：房间（id 升序）此刻不能已有别的客人入住 → 入住单（id 升序）
+    const rooms = stayIds.length
+      ? await tx<{ id: number; roomNo: string }[]>`
+          SELECT r.id, r.room_no FROM rooms r
+          WHERE r.id IN (SELECT room_id FROM room_stays WHERE id IN ${tx(stayIds)}) ORDER BY r.id FOR UPDATE`
+      : [];
+    if (rooms.length) {
+      const taken = await tx<{ roomNo: string }[]>`
+        SELECT r.room_no FROM room_stays s JOIN rooms r ON r.id = s.room_id WHERE s.status = 'open' AND s.room_id IN ${tx(rooms.map((r) => r.id))}`;
+      if (taken.length) throw conflict('ROOM_TAKEN', `房间「${taken.map((t) => t.roomNo).join('、')}」已有别的客人入住，不能反结账；请先给那位客人换房`);
+      const stays = await tx<{ id: number; stayNo: string; status: string }[]>`
+        SELECT id, stay_no, status FROM room_stays WHERE id IN ${tx(stayIds)} ORDER BY id FOR UPDATE`;
+      for (const st of stays) if (st.status !== 'settled') throw conflict('VISIT_CHANGED', `入住单 ${st.stayNo} 状态已变化，请刷新后重试`);
+    }
     const billIds = all.map((i) => i.billId).sort((a, b) => a - b);
     await tx`SELECT id FROM bills WHERE id IN ${tx(billIds)} ORDER BY id FOR UPDATE`;
 
@@ -574,6 +615,17 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
     }
     if (tableItems.length) {
       await tx`UPDATE table_sessions SET status = 'open', closed_at = NULL, closed_by = NULL WHERE id IN ${tx(tableItems.map((i) => i.sessionId))}`;
+    }
+    if (stayIds.length) {
+      await tx`UPDATE room_stays SET status = 'open', closed_at = NULL, closed_by = NULL WHERE id IN ${tx(stayIds)}`;
+      // 押金抵扣恢复为押金（按原收款方式）；退房结账时退回的押金已经退给客人，不恢复
+      const applied = await tx<{ stayId: number; method: string; amount: number }[]>`
+        SELECT stay_id, method, amount FROM room_deposits WHERE checkout_id = ${c.id} AND kind = 'apply' ORDER BY id`;
+      for (const a of applied) {
+        await tx`
+          INSERT INTO room_deposits (stay_id, kind, method, amount, reason, checkout_id, business_date, operator_id, created_at)
+          VALUES (${a.stayId}, 'unapply', ${a.method}, ${a.amount}, ${voidText}, ${c.id}, ${date}, ${ctx.actor.id}, ${at})`;
+      }
     }
     // 门票明细作废（下次结账按届时的在店时长重新计算）
     const ticketLines = await tx<{ id: number; billId: number; amount: number }[]>`
@@ -610,6 +662,7 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
         docNo: c.checkoutNo,
         tags: tags.map((t) => t.code),
         ...(tables.length ? { tables: tables.map((t) => t.name) } : {}),
+        ...(rooms.length ? { rooms: rooms.map((r) => r.roomNo) } : {}),
         reason,
         ...(drawer && drawer.staffId !== ctx.actor.id ? { refundShift: drawer.shiftNo, refundDrawer: drawer.staffName } : {}),
       },
@@ -628,16 +681,18 @@ export async function getCheckout(db: Db, id: number): Promise<CheckoutDetail> {
            c.voided_at, vs.display_name AS voided_by_name, c.void_reason, ${backfillMarkSql(db, 'c.client_key')} AS backfill
     FROM checkouts c JOIN staff s ON s.id = c.operator_id LEFT JOIN staff vs ON vs.id = c.voided_by WHERE c.id = ${id}`;
   if (!c) throw notFound('结账单不存在');
-  // 手牌账单显示牌号；桌台账单（餐饮第二步）显示桌号与人数
+  // 手牌账单显示牌号；桌台账单（餐饮第二步）显示桌号与人数；客房账单（S7）显示房号与人数
   const bills = await db<CheckoutDetail['bills']>`
-    SELECT cb.bill_id, b.bill_no, cb.visit_id, v.visit_no, t.code AS tag_code, cb.table_session_id, dt.name AS table_name, cb.guests,
-           coalesce(m.name, tm.name) AS member_name, coalesce(v.guest_label, ts.guest_label, '') AS guest_label, cb.amount,
+    SELECT cb.bill_id, b.bill_no, cb.visit_id, v.visit_no, t.code AS tag_code, cb.table_session_id, dt.name AS table_name,
+           cb.room_stay_id, rm.room_no, cb.guests, coalesce(m.name, tm.name, sm.name) AS member_name,
+           coalesce(v.guest_label, ts.guest_label, rs.guest_label, '') AS guest_label, cb.amount,
            cb.stay_minutes, cb.ticket_name, cb.ticket_segments, cb.ticket_amount
     FROM checkout_bills cb JOIN bills b ON b.id = cb.bill_id
     LEFT JOIN visits v ON v.id = cb.visit_id LEFT JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id
     LEFT JOIN table_sessions ts ON ts.id = cb.table_session_id LEFT JOIN dining_tables dt ON dt.id = ts.table_id
     LEFT JOIN members tm ON tm.id = ts.member_id
-    WHERE cb.checkout_id = ${id} ORDER BY coalesce(t.code, dt.name)`;
+    LEFT JOIN room_stays rs ON rs.id = cb.room_stay_id LEFT JOIN rooms rm ON rm.id = rs.room_id LEFT JOIN members sm ON sm.id = rs.member_id
+    WHERE cb.checkout_id = ${id} ORDER BY coalesce(t.code, dt.name, rm.room_no)`;
   const payments = await db<CheckoutDetail['payments']>`
     SELECT p.id, p.method, p.amount, p.ref, p.member_id, m.name AS member_name, ap.display_name AS approved_by_name,
            CASE WHEN k.id IS NULL THEN NULL ELSE json_build_object('id', k.id, 'docNo', k.doc_no, 'principal', k.principal_amount,
@@ -663,6 +718,8 @@ export async function listCheckouts(db: Db, date: string): Promise<CheckoutSumma
                      JOIN hand_tags t ON t.id = v.tag_id WHERE cb.checkout_id = c.id), '{}') AS tag_codes,
            coalesce((SELECT array_agg(dt.name ORDER BY dt.name) FROM checkout_bills cb JOIN table_sessions ts ON ts.id = cb.table_session_id
                      JOIN dining_tables dt ON dt.id = ts.table_id WHERE cb.checkout_id = c.id), '{}') AS table_names,
+           coalesce((SELECT array_agg(rm.room_no ORDER BY rm.room_no) FROM checkout_bills cb JOIN room_stays rs ON rs.id = cb.room_stay_id
+                     JOIN rooms rm ON rm.id = rs.room_id WHERE cb.checkout_id = c.id), '{}') AS room_nos,
            (SELECT array_agg(DISTINCT p.method) FROM checkout_payments p WHERE p.checkout_id = c.id) AS methods,
            (SELECT bf.slip_no FROM backfill_entries bf WHERE bf.op_key = c.client_key ORDER BY bf.id LIMIT 1) AS backfill_slip_no
     FROM checkouts c JOIN staff s ON s.id = c.operator_id

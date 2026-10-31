@@ -72,10 +72,12 @@ const DiscountScopeInput = z
     visitIds: z.array(z.number().int().positive(), '请说明授权哪次结账').max(30, '一次最多合并 30 张手牌').default([]),
     /** 桌台结账（餐饮第二步）：一起结账的开台；手牌结账时不带 */
     tableSessionIds: z.array(z.number().int().positive()).max(10, '一次最多合并 10 桌').default([]),
+    /** 客房退房结账（S7）：一起结账的入住单 */
+    roomStayIds: z.array(z.number().int().positive()).max(10, '一次最多合并 10 间房').default([]),
     amount: positiveCents('优惠金额'),
     reason: z.string('请填写优惠原因').trim().min(2, '请填写优惠原因（至少 2 个字）').max(64, '优惠原因最多 64 字'),
   })
-  .refine((d) => (d.visitIds.length > 0) !== (d.tableSessionIds.length > 0), '请说明授权哪次结账');
+  .refine((d) => [d.visitIds, d.tableSessionIds, d.roomStayIds].filter((x) => x.length > 0).length === 1, '请说明授权哪次结账');
 
 const TicketScopeInput = z.object({
   items: z
@@ -117,7 +119,9 @@ export function registerGrantRoutes(app: FastifyInstance, deps: Deps) {
       const d = parse(DiscountScopeInput, rawScope);
       scope = d.tableSessionIds.length
         ? { visitIds: [], tableSessionIds: sortedVisitIds(d.tableSessionIds), amount: d.amount, reason: d.reason }
-        : { visitIds: sortedVisitIds(d.visitIds), amount: d.amount, reason: d.reason };
+        : d.roomStayIds.length
+          ? { visitIds: [], roomStayIds: sortedVisitIds(d.roomStayIds), amount: d.amount, reason: d.reason }
+          : { visitIds: sortedVisitIds(d.visitIds), amount: d.amount, reason: d.reason };
     } else if (input.purpose === 'ticket_discount') {
       if (!can(req.actor, 'frontdesk.operate')) throw forbidden();
       scope = parse(TicketScopeInput, rawScope);
@@ -260,7 +264,7 @@ export async function consumeVipGrant(
  */
 export async function consumeDiscountGrant(
   tx: Tx,
-  opts: { grantId: string; actor: Actor; visitIds: number[]; tableSessionIds?: number[]; amount: number; usedRef: string },
+  opts: { grantId: string; actor: Actor; visitIds: number[]; tableSessionIds?: number[]; roomStayIds?: number[]; amount: number; usedRef: string },
 ): Promise<{ approverId: number; approverName: string; reason: string }> {
   const g = await lockGrant(tx, opts.grantId, 'checkout_discount', opts.actor);
   const s = g.scope as DiscountScope;
@@ -269,8 +273,14 @@ export async function consumeDiscountGrant(
     const y = sortedVisitIds(b);
     return x.length === y.length && x.every((id, i) => id === y[i]);
   };
-  // 手牌结账的授权只能用于这几张手牌，桌台结账的授权只能用于这几桌（升级前签发的授权没有桌台一项，按空处理）
-  if (s.amount !== opts.amount || !same(s.visitIds, opts.visitIds) || !same(s.tableSessionIds ?? [], opts.tableSessionIds ?? [])) {
+  // 手牌结账的授权只能用于这几张手牌，桌台结账的授权只能用于这几桌，客房退房结账的只能用于这几间房的入住单
+  // （升级前签发的授权没有桌台、入住单，按空处理）
+  if (
+    s.amount !== opts.amount ||
+    !same(s.visitIds, opts.visitIds) ||
+    !same(s.tableSessionIds ?? [], opts.tableSessionIds ?? []) ||
+    !same(s.roomStayIds ?? [], opts.roomStayIds ?? [])
+  ) {
     throw unprocessable(
       'GRANT_SCOPE',
       `授权的是优惠 ${formatYuan(s.amount)}，与这次结账的优惠 ${formatYuan(opts.amount)}（或结账的手牌）不一致，请按当前内容重新授权`,
