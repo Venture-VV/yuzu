@@ -609,7 +609,7 @@ export async function getVisit(db: Db, id: number): Promise<VisitDetail> {
       SELECT l.id, l.source, l.item_id, l.tier, l.name, l.unit_price, l.quantity, l.amount, l.status, l.post_key, l.business_date,
              l.posted_by AS posted_by_id, p.display_name AS posted_by_name, l.posted_at, l.void_reason,
              vs.display_name AS voided_by_name, l.voided_at, ${backfillMarkSql(db, 'l.post_key')} AS backfill,
-             ${lineTechnicianSql(db, 'l')} AS technician,
+             ${lineTechnicianSql(db, 'l')} AS technician, l.session_id,
              (SELECT json_build_object('status', k.status, 'note', k.note, 'orderNo', k.order_no) FROM kitchen_items k WHERE k.bill_line_id = l.id) AS kitchen
       FROM bill_lines l JOIN staff p ON p.id = l.posted_by LEFT JOIN staff vs ON vs.id = l.voided_by
       WHERE l.bill_id = ${v.billId} ORDER BY l.id`

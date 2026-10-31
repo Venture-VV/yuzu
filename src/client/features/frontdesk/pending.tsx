@@ -28,7 +28,8 @@ export type FrontdeskOpType =
   | 'room_extend'
   | 'room_deposit'
   | 'room_refund'
-  | 'room_close';
+  | 'room_close'
+  | 'line_move';
 
 export interface FrontdeskPendingOp {
   key: string;
@@ -68,6 +69,7 @@ export const FRONTDESK_OP_LABELS: Record<FrontdeskOpType, string> = {
   room_deposit: '收押金',
   room_refund: '退押金',
   room_close: '客房退房',
+  line_move: '转单',
 };
 
 /** 餐饮桌台的操作：对象是桌台或开台，不是手牌 */

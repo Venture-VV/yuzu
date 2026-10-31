@@ -252,6 +252,8 @@ export interface BillLine {
   technician: LineTechnician | null;
   /** 进厨房的菜（餐饮）：出品状态与口味备注；其他明细为 null */
   kitchen: { status: 'queued' | 'cooking' | 'done' | 'served' | 'cancelled'; note: string; orderNo: string } | null;
+  /** 钟房派的钟、加的钟（v0.7.1）所属的钟单；其他明细为 null（v0.7.6 起返回，转单时用来判断能不能转） */
+  sessionId: number | null;
 }
 
 export interface VisitMember {

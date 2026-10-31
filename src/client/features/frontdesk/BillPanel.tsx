@@ -19,6 +19,7 @@ import {
   Banknote,
   Ticket,
   UtensilsCrossed,
+  Shuffle,
 } from 'lucide-react';
 import {
   BILL_SOURCE_LABELS,
@@ -47,7 +48,7 @@ import { GroupMark, LONG_STAY_MINUTES, VipChip, ZoneChip, ZONE_STYLE } from './p
 import { FRONTDESK_OP_LABELS, useFrontdeskPending } from './pending';
 import { stayMinutes, stayText, useServerNow } from './queries';
 
-export type PanelAction = 'add' | 'swap' | 'join' | 'companion' | 'preview' | 'checkout' | 'ticket' | 'records';
+export type PanelAction = 'add' | 'swap' | 'join' | 'companion' | 'preview' | 'checkout' | 'ticket' | 'records' | 'move';
 
 /** 右侧「小票」：当前手牌的共同账单，按消费来源分组；挂账、换牌、同行、预结账都从这里发起 */
 export function BillPanel({
@@ -224,7 +225,7 @@ export function BillPanel({
               <Button
                 size="sm"
                 variant="primary"
-                onClick={() => onAction(p.type === 'bill_post' ? 'add' : p.type === 'checkout' ? 'checkout' : 'swap')}
+                onClick={() => onAction(p.type === 'bill_post' ? 'add' : p.type === 'checkout' ? 'checkout' : p.type === 'line_move' ? 'move' : 'swap')}
                 data-testid="bill-pending-resolve"
               >
                 去处理
@@ -405,6 +406,7 @@ export function BillPanel({
               items={[
                 { icon: <UserPlus className="size-4" />, label: '再发一张同行手牌', onClick: () => onAction('companion') },
                 { icon: <Link2 className="size-4" />, label: visit.group ? '改为与其他客人同行' : '与在店客人同行', onClick: () => onAction('join') },
+                ...(active.length ? [{ icon: <Shuffle className="size-4" />, label: '明细转到别的手牌', onClick: () => onAction('move') }] : []),
                 ...(visit.group ? [{ icon: <LogOut className="size-4" />, label: '退出同行组', onClick: leaveGroup }] : []),
                 { icon: <Undo2 className="size-4" />, label: '撤销误开的牌', onClick: () => setCancelling(true), danger: true },
               ]}
