@@ -75,8 +75,10 @@ test.describe('单笔上限与撤销时限', () => {
     const rows = (await (await page.request.get(`/api/ledger?date=${shiftDate(me.today, -1)}&type=consume`)).json()) as {
       docNo: string;
       consumptionStatus: string;
+      checkoutNo: string | null;
     }[];
-    const target = rows.find((r) => r.consumptionStatus === 'completed');
+    // 前台结账的储值支付只能反结账、没有「撤销这张消费单」：按 --previous-day 灌的数据里，昨天也有这种单（测试会话复测 v0.7.3）
+    const target = rows.find((r) => r.consumptionStatus === 'completed' && !r.checkoutNo);
     expect(target, '演示数据昨天应有未撤销的消费').toBeTruthy();
     // 记下原来的撤销时限，结束后恢复（R1.2 起默认 48 小时，不是「不限」）
     const previous = ((await (await page.request.get('/api/settings')).json()) as { reversalWindowHours: number | null }).reversalWindowHours;

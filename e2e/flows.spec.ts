@@ -122,8 +122,19 @@ test('店主：前台结账的储值消费不能在会员这里单独撤销，�
   // 流水的单据详情：不提供「撤销这张消费单」，写明对哪张结账单反结账
   await nav(page, '流水').click();
   await expect(page.getByRole('heading', { name: '流水' })).toBeVisible();
-  // 只看沈先生的：当天可能还有其他用例（如完整收银）结账后又反结账、储值已撤销的单
-  await page.goto(`/ledger?q=${encodeURIComponent('沈先生')}`);
+  // 只看沈先生的：当天可能还有其他用例（如完整收银）结账后又反结账、储值已撤销的单。
+  // 结账演示可能落在前一个营业日（营业日切换后不久灌的数据，或按 AGENTS.md 加 --previous-day）：按它实际所在的营业日打开流水（测试会话复测 v0.7.3）
+  const me = (await (await page.request.get('/api/auth/me')).json()) as { today: string };
+  const yesterday = new Date(Date.parse(`${me.today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+  let date = me.today;
+  for (const d of [me.today, yesterday]) {
+    const rows = (await (await page.request.get(`/api/ledger?date=${d}&type=consume&q=${encodeURIComponent('沈先生')}`)).json()) as { checkoutNo: string | null }[];
+    if (rows.some((r) => r.checkoutNo)) {
+      date = d;
+      break;
+    }
+  }
+  await page.goto(`/ledger?date=${date}&q=${encodeURIComponent('沈先生')}`);
   await expect(page.getByLabel('搜索流水')).toHaveValue('沈先生');
   await page.getByText(/^手牌结账 JZ/).filter({ visible: true }).first().click();
   const drawer = page.getByRole('dialog', { name: '单据详情' });
