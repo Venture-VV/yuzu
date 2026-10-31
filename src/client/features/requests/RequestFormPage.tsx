@@ -102,6 +102,16 @@ function RequestForm({ meta, existing }: { meta: RequestMeta; existing?: Purchas
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uncertainEdit, setUncertainEdit] = useState(false);
+  // 还在上传图片的行：上传完之前不能提交
+  const [uploading, setUploading] = useState<ReadonlySet<string>>(new Set());
+  const setLineUploading = (key: string, busy: boolean) =>
+    setUploading((s) => {
+      if (busy === s.has(key)) return s;
+      const next = new Set(s);
+      if (busy) next.add(key);
+      else next.delete(key);
+      return next;
+    });
   const materials = new Map(meta.materials.map((m) => [m.id, m]));
 
   const rows = lines.map((l) => {
@@ -135,6 +145,8 @@ function RequestForm({ meta, existing }: { meta: RequestMeta; existing?: Purchas
   const blocking =
     !existing && pending.length > 0
       ? '上一张需求单结果待确认，请先在上方查回、重新提交或作废'
+      : uploading.size > 0
+        ? '图片还在上传，请稍等'
       : !departmentId
         ? free
           ? '请选择部门'
@@ -332,7 +344,13 @@ function RequestForm({ meta, existing }: { meta: RequestMeta; existing?: Purchas
                     <Input aria-label={`第 ${i + 1} 行备注`} value={l.note} maxLength={100} disabled={busy} onChange={(e) => setLine(l.key, { note: e.target.value })} placeholder="可选" className="h-10" />
                   </Field>
                   <Field label="图片" hint={`${l.kind === 'new' ? '新产品至少一张；' : ''}最多 ${MAX_LINE_IMAGES} 张，上传前自动压缩`} className="sm:col-span-6">
-                    <ImagePicker value={l.images} onChange={(images) => setLine(l.key, { images })} disabled={busy} testId={`rq-images-${i}`} />
+                    <ImagePicker
+                      value={l.images}
+                      onChange={(images) => setLine(l.key, { images })}
+                      disabled={busy}
+                      testId={`rq-images-${i}`}
+                      onBusyChange={(b) => setLineUploading(l.key, b)}
+                    />
                   </Field>
                 </div>
                 {err && l.name.trim() && <p className="mt-2 text-[12px] font-semibold text-clay">{err}</p>}

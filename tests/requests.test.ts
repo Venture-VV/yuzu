@@ -275,6 +275,22 @@ describe('审核、转采购单、进度回写', () => {
     await expect(ctx.sql`INSERT INTO purchase_order_line_requests (po_line_id, request_line_id) VALUES (${po.lines[0].id}, ${b.lines[0].id})`).rejects.toThrow(/不能修改明细/);
   });
 
+  it('同一个操作编号同时转两次采购单：两次都返回同一张采购单（不报「已在采购单里」）', async () => {
+    const img = await upload(reqA, 'same-key-po');
+    const r = (await submit(reqA, [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: q(1), unit: '箱' }, newLine({ imageIds: [img.id] })])).body.request;
+    await api(ctx.app, buyer, 'POST', `/api/erp/requests/${r.id}/approve`, {});
+    const body = {
+      clientKey: randomUUID(),
+      supplierId,
+      orderDate: today,
+      action: 'save',
+      lines: [{ materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 45_000, requestLineIds: [r.lines[0].id] }],
+    };
+    const [a, b] = await Promise.all([api(ctx.app, buyer, 'POST', '/api/purchase-orders', body), api(ctx.app, buyer, 'POST', '/api/purchase-orders', body)]);
+    expect([a.status, b.status].sort()).toEqual([200, 201]);
+    expect(a.body.po.id).toBe(b.body.po.id);
+  });
+
   it('同一操作编号只提交一次', async () => {
     const img = await upload(reqA, 'idem');
     const body = { clientKey: randomUUID(), lines: [newLine({ imageIds: [img.id] })] };

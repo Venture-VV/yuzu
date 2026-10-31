@@ -125,6 +125,16 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
   const openLines = useOpenLines(requestIds, !!requestIds);
   const [unmatched, setUnmatched] = useState<OpenRequestLine[]>([]);
   const [creating, setCreating] = useState<OpenRequestLine | null>(null);
+  // 还在上传图片的行：上传完之前不能提交（v0.7.9 修正）
+  const [uploading, setUploading] = useState<ReadonlySet<string>>(new Set());
+  const setLineUploading = (key: string, busy: boolean) =>
+    setUploading((s) => {
+      if (busy === s.has(key)) return s;
+      const next = new Set(s);
+      if (busy) next.add(key);
+      else next.delete(key);
+      return next;
+    });
   const seeded = useRef(false);
   const qtyRefs = useRef(new Map<string, HTMLInputElement | null>());
   const focusNext = useRef<string | null>(null);
@@ -229,7 +239,9 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
   });
   const total = rows.reduce((s, r) => s + (r.amount ?? 0), 0);
   const needsApproval = !!settings.data?.approvalRules.purchase_order;
-  const blocking = unmatched.length > 0
+  const blocking = uploading.size > 0
+    ? '图片还在上传，请稍等'
+    : unmatched.length > 0
     ? `还有 ${unmatched.length} 行新产品没选物料`
     : !supplierId
     ? '请选择供应商'
@@ -437,6 +449,7 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
                   locked={locked}
                   qtyRef={(el) => qtyRefs.current.set(r.l.key, el)}
                   onPatch={(p) => patch(r.l.key, p)}
+                  onUploading={(b) => setLineUploading(r.l.key, b)}
                   onRemove={r.l.receivedMilli > 0 ? undefined : () => setLines((ls) => ls.filter((x) => x.key !== r.l.key))}
                 />
               ))}
@@ -527,12 +540,14 @@ function PoLineRow({
   qtyRef,
   onPatch,
   onRemove,
+  onUploading,
 }: {
   row: { l: Line; m: Material | undefined; base: number | null; price: number | null; err: string | null; amount: number | null };
   locked: boolean;
   qtyRef: (el: HTMLInputElement | null) => void;
   onPatch: (p: Partial<Line>) => void;
   onRemove?: () => void;
+  onUploading: (busy: boolean) => void;
 }) {
   const unlink = (lineId: number) => onPatch({ requests: row.l.requests.filter((r) => r.lineId !== lineId) });
   const { l, m } = row;
@@ -610,7 +625,7 @@ function PoLineRow({
             placeholder="规格：颜色、尺寸、型号等（选填，库管收货时能看到）"
             className="h-9 max-w-md min-w-[200px] flex-1"
           />
-          <ImagePicker value={l.images} onChange={(images) => onPatch({ images })} disabled={locked} />
+          <ImagePicker value={l.images} onChange={(images) => onPatch({ images })} disabled={locked} onBusyChange={onUploading} />
         </div>
         {l.requests.length > 0 && (
           <p className="flex flex-wrap items-center gap-1.5 text-[12px] text-ink-3" data-testid="po-line-requests">

@@ -23,6 +23,7 @@ import { guard } from '../../auth/guard';
 import { writeAudit } from '../../lib/audit';
 import type { Actor, Deps } from '../../lib/context';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
+import { lockOpKey } from '../../lib/fences';
 import { idParam, parse } from '../../lib/validate';
 import {
   applyMove,
@@ -847,6 +848,7 @@ export async function createDoc(deps: Deps, raw: CreateDocInput, actor: Actor, i
   try {
     const result = await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
+      await lockOpKey(tx, meta.clientKey);
       const existing = await findExisting(tx);
       if (existing) return { id: existing, replayed: true };
       const prepared = await prepare(tx, deps, body, null);

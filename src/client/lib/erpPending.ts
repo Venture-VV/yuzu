@@ -140,6 +140,8 @@ export function useErpPending(types: readonly ErpOpType[]): ErpPendingOp[] {
  */
 export async function sendErpOp<T>(op: Omit<ErpPendingOp, 'createdAt' | 'uncertain'> & { createdAt?: string }): Promise<T> {
   const record: ErpPendingOp = { ...op, createdAt: op.createdAt ?? new Date().toISOString() };
+  // 本机已经有这条记录（页面刷新、关闭前发出的那次可能还在路上，或之前结果不明）：这是重提，不是新的一笔
+  const retry = readAll().some((p) => p.key === record.key);
   // 先标成「提交中」再写入：请求还没返回时页面上不显示待确认、不去查回
   setInFlight(record.key, true);
   try {
@@ -148,14 +150,15 @@ export async function sendErpOp<T>(op: Omit<ErpPendingOp, 'createdAt' | 'uncerta
     setInFlight(record.key, false);
     throw e;
   }
-  const stored = readAll().find((p) => p.key === record.key);
   try {
     const result = await api.post<T>(record.url, record.body, { timeoutMs: 20_000 });
     removeErpPending(record.key);
     return result;
   } catch (e) {
     if (e instanceof UncertainError) markUncertain(record.key);
-    else if (!stored?.uncertain && e instanceof ApiError) removeErpPending(record.key);
+    // 只有第一次提交就被服务端明确拒绝才删：重提被拒绝时，之前那次请求可能随后登记，要先查回或作废（v0.7.9 修正）
+    else if (retry) markUncertain(record.key);
+    else if (e instanceof ApiError) removeErpPending(record.key);
     throw e;
   } finally {
     setInFlight(record.key, false);

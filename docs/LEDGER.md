@@ -47,14 +47,16 @@ ERP「费用与备用金 → 账目自检」（新页 `/erp/audit`）逐条列�
 - 约定到货天数加在「费用报销规则」里（店主在 ERP「模块设置」里改）。
 - 账目自检是**经营预警**，不进 `check`（`check` 只管数据一致性，必须全 ✓；未退回、未到货是正常业务状态）。数据一致性的自检（报销单与明细一致、备用金台账一致、需求单与采购单一致……）照旧在 `check` 里。
 
-## 3. 接口（计划）
+## 3. 接口
 
 | 用途 | 接口 |
 | --- | --- |
-| 采购台账 | `GET /api/erp/ledger?from&to&departmentId`；`GET /api/erp/ledger/export`（CSV） |
-| 账目自检 | `GET /api/erp/audit` |
-| 需求单导出 | `GET /api/erp/requests/export?from&to&status&departmentId`（CSV） |
-| 下单物料 | `GET /api/purchase-orders/ordered-lines?from&to&supplierId&state`；`…/export.xlsx`；`…/export.csv` |
+| 采购台账 | `GET /api/erp/ledger?from&to&departmentId&handlerId`（一次最多 366 天，逐笔最多显示 3000 笔，合计按全部算）；`GET /api/erp/ledger/export`（CSV，超过 2 万笔整份拒绝） |
+| 账目自检 | `GET /api/erp/audit`（每条最多列 50 张单，另给总数） |
+| 需求单 | `GET /api/erp/requests?from&to`（按提交日期筛选）；`GET /api/erp/requests/export?from&to&status&departmentId`（CSV） |
+| 下单物料 | `GET /api/purchase-orders/ordered-lines?from&to&supplierId&state=open|overdue|received|all`；`…/export.xlsx`（每行嵌入第一张图片，图片总量超过 60 MB 后的行写明没嵌入；WebP 图片不嵌入）；`…/export.csv`；一次最多 3000 行 |
+
+代码：服务端 `src/server/modules/purchase-ledger.ts`、`src/server/lib/xlsx.ts`；页面 `src/client/features/purchase-ledger/`、`src/client/features/purchasing/OrderedPage.tsx`。（会员的流水是另一个模块 `modules/ledger.ts`，与这里无关。）
 
 ## 4. 迁移
 

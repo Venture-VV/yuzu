@@ -26,6 +26,7 @@ import { writeAudit } from '../../lib/audit';
 import type { Actor, Deps } from '../../lib/context';
 import { toCsv } from '../../lib/csv';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
+import { lockOpKey } from '../../lib/fences';
 import { idParam, parse, positiveCents } from '../../lib/validate';
 import { assertNotFuture, docDateSchema, loadInventorySettings, logApproval, nextDocNo, setTxTimeouts, todayIn } from './common';
 
@@ -129,6 +130,7 @@ export async function createOpening(deps: Deps, raw: unknown, actor: Actor, ip?:
   try {
     const r = await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
+      await lockOpKey(tx, input.clientKey);
       const existing = await findExisting(tx);
       if (existing) return { id: existing, replayed: true };
       const sup = await lockSupplier(tx, input.supplierId);
@@ -313,6 +315,7 @@ export async function createPayment(deps: Deps, raw: unknown, actor: Actor, ip?:
   try {
     const r = await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
+      await lockOpKey(tx, input.clientKey);
       const existing = await findExisting(tx);
       if (existing) return { id: existing, replayed: true };
       await lockSupplier(tx, input.supplierId);

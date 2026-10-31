@@ -28,7 +28,7 @@ import {
 } from '@shared/requests';
 import { isUniqueViolation, readSnapshot, type Db } from '../db';
 import { guard, guardAny } from '../auth/guard';
-import { assertNotFenced } from '../lib/fences';
+import { assertNotFenced, lockOpKey } from '../lib/fences';
 import { writeAudit } from '../lib/audit';
 import { toCsv } from '../lib/csv';
 import type { Actor, Deps } from '../lib/context';
@@ -284,6 +284,7 @@ export async function createRequest(deps: Deps, raw: unknown, actor: Actor, ip?:
   try {
     const r = await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
+      await lockOpKey(tx, input.clientKey);
       const existing = await findExisting(tx);
       if (existing) return { id: existing, replayed: true };
       await assertNotFenced(tx, input.clientKey, 'purchase_request', erpOpAbandoned);

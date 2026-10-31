@@ -42,7 +42,7 @@ import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
 import { toCsv } from '../lib/csv';
-import { assertNotFenced } from '../lib/fences';
+import { assertNotFenced, lockOpKey } from '../lib/fences';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse, positiveCents } from '../lib/validate';
 import { erpOpAbandoned } from './erp-ops';
@@ -475,6 +475,7 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
   try {
     const r = await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
+      await lockOpKey(tx, input.clientKey);
       const existing = await findExisting(tx);
       if (existing) return { id: existing, replayed: true };
       await assertNotFenced(tx, input.clientKey, 'expense_claim', erpOpAbandoned);
@@ -639,6 +640,7 @@ async function idempotentInsert(
   try {
     return await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
+      await lockOpKey(tx, input.clientKey);
       const existing = await findExisting(tx);
       if (existing) return { id: existing, replayed: true };
       await assertNotFenced(tx, input.clientKey, opType, erpOpAbandoned);
