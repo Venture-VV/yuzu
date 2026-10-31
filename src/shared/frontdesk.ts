@@ -332,7 +332,8 @@ export type FrontdeskOpLookup =
   | { found: true; type: 'checkin'; checkin: CheckinResult }
   | { found: true; type: 'bill_post' | 'tag_swap'; visit: VisitDetail }
   | { found: true; type: 'checkout' | 'table_checkout'; checkout: CheckoutDetail }
-  | { found: true; type: 'table_open' | 'table_post'; session: import('./dining').TableSessionDetail };
+  | { found: true; type: 'table_open' | 'table_post'; session: import('./dining').TableSessionDetail }
+  | { found: true; type: 'room_checkin' | 'room_extend' | 'room_deposit' | 'room_refund' | 'room_close'; stay: import('./rooms').StayDetail };
 
 export interface CheckinResult {
   replayed: boolean;

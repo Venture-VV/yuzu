@@ -278,14 +278,24 @@ function OpenTableDialog({ table, onClose, onOpened }: { table: Tile; onClose: (
   );
 }
 
-/** 登记会员（选填）：结账时可以用这位会员的储值 */
-function MemberField({ value, onChange, disabled }: { value: MemberSummary | { id: number; name: string; memberNo: string } | null; onChange: (m: MemberSummary | null) => void; disabled?: boolean }) {
+/** 登记会员（选填）：结账时可以用这位会员的储值（桌台与客房共用，testPrefix 区分页面） */
+export function MemberField({
+  value,
+  onChange,
+  disabled,
+  testPrefix = 'table',
+}: {
+  value: MemberSummary | { id: number; name: string; memberNo: string } | null;
+  onChange: (m: MemberSummary | null) => void;
+  disabled?: boolean;
+  testPrefix?: string;
+}) {
   const [q, setQ] = useState('');
   const members = useMembers(value ? '' : q.trim());
   if (value) {
     return (
       <Field label="会员" hint="结账时可以用这位会员的储值支付">
-        <div className="flex items-center gap-3 rounded-lg border border-pine/25 bg-pine-tint px-3 py-2" data-testid="table-member">
+        <div className="flex items-center gap-3 rounded-lg border border-pine/25 bg-pine-tint px-3 py-2" data-testid={`${testPrefix}-member`}>
           <UserRound className="size-4 text-pine" />
           <span className="min-w-0 flex-1 truncate text-[14px] font-bold">
             {value.name} <span className="num text-[12px] font-semibold text-ink-3">{value.memberNo}</span>
@@ -302,13 +312,13 @@ function MemberField({ value, onChange, disabled }: { value: MemberSummary | { i
       <div>
         <div className="relative">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-3" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="手机号 / 姓名 / 会员号" className="pl-9" aria-label="查找会员" disabled={disabled} data-testid="table-member-search" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="手机号 / 姓名 / 会员号" className="pl-9" aria-label="查找会员" disabled={disabled} data-testid={`${testPrefix}-member-search`} />
         </div>
         {q.trim() && (
           <ul className="mt-1.5 space-y-0.5">
             {members.data?.slice(0, 5).map((m) => (
               <li key={m.id}>
-                <button type="button" onClick={() => onChange(m)} className="flex w-full items-center gap-3 rounded-md px-3 py-1.5 text-left hover:bg-paper-2" data-testid={`table-member-${m.memberNo}`}>
+                <button type="button" onClick={() => onChange(m)} className="flex w-full items-center gap-3 rounded-md px-3 py-1.5 text-left hover:bg-paper-2" data-testid={`${testPrefix}-member-${m.memberNo}`}>
                   <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold">{m.name}</span>
                   <span className="num text-[12.5px] text-ink-3">{maskPhone(m.phone)}</span>
                   <span className="num text-[12px] text-ink-4">{m.memberNo}</span>

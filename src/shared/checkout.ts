@@ -161,6 +161,8 @@ export interface CheckoutPreview {
   sessions: { sessionNo: string; tagCode: string; techNo: string; techName: string; itemName: string; clocks: number; status: 'waiting' | 'serving' }[];
   /** 还没上的菜（餐饮）：结账时只提醒，不改出品状态；客人没吃到的请先退菜 */
   dishes: { tagCode: string; name: string; quantity: number; status: 'queued' | 'cooking' | 'done' | 'served' | 'cancelled' }[];
+  /** 还在住的客房（S7）：要先退房（补齐房费挂到手牌账单、退押金）才能结账 */
+  rooms?: { stayId: number; tagCode: string; roomNo: string; stayNo: string }[];
 }
 
 /** 反结账退现金可以选的钱箱（v0.7.1，跨钱箱退款）：此刻当班的班次；original 原单收款的班次，mine 反结账人自己的班次 */
@@ -265,8 +267,16 @@ export interface ShiftSummary {
    * 升级（迁移 017）时已有的班次与之前的快照没有这一项：反结账只列提醒、不扣现金（cashRefund、cash.refund 同样没有）
    */
   refunds?: { count: number; total: number; byMethod: { method: CheckoutMethod; amount: number }[] };
-  /** 应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金 */
-  cash: { opening: number; checkout: number; recharge: number; refund?: number; expected: number };
+  /**
+   * 客房押金（S7，v0.7.4）：本班次收、退的押金，按收款方式；押金是负债、不算营业额，现金押金计入应有现金。
+   * 本班次没有押金往来、升级之前交班的快照都没有这一项（没有现金押金时 cash.deposit 同样没有）
+   */
+  deposits?: {
+    received: { method: PaymentMethod; count: number; amount: number }[];
+    refunded: { method: PaymentMethod; count: number; amount: number }[];
+  };
+  /** 应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金 + 押金现金（收 − 退） */
+  cash: { opening: number; checkout: number; recharge: number; refund?: number; deposit?: number; expected: number };
 }
 
 export interface ShiftRecord {

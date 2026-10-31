@@ -65,6 +65,17 @@ function ShiftSlip({ s }: { s: ShiftRecord }) {
       ))}
       <Row left="充值实收" right={yuan(sum.recharges.paid)} strong />
       <Row left="赠送赠金（不是收款）" right={yuan(sum.recharges.bonus)} />
+      {sum.deposits && (
+        <div data-testid="print-shift-deposits">
+          <p className="mt-1.5 font-bold">客房押金（不算营业额）</p>
+          {sum.deposits.received.map((m) => (
+            <Row key={`r-${m.method}`} left={`收 ${PAYMENT_METHOD_LABELS[m.method] ?? m.method} · ${m.count} 笔`} right={yuan(m.amount)} />
+          ))}
+          {sum.deposits.refunded.map((m) => (
+            <Row key={`f-${m.method}`} left={`退 ${PAYMENT_METHOD_LABELS[m.method] ?? m.method} · ${m.count} 笔`} right={yuan(m.amount)} />
+          ))}
+        </div>
+      )}
       <p className="text-[11px]">
         会员工作台储值消费 {sum.walletConsumes.count} 笔 {yuan(sum.walletConsumes.total)}（不是现金）
       </p>
@@ -74,6 +85,7 @@ function ShiftSlip({ s }: { s: ShiftRecord }) {
       <Row left="+ 结账现金" right={yuan(sum.cash.checkout)} />
       <Row left="+ 充值现金" right={yuan(sum.cash.recharge)} />
       {!!sum.cash.refund && <Row left="− 反结账退现金" right={yuan(sum.cash.refund)} />}
+      {!!sum.cash.deposit && <Row left={sum.cash.deposit > 0 ? '+ 押金现金（收 − 退）' : '− 押金现金（退 − 收）'} right={yuan(Math.abs(sum.cash.deposit))} />}
       <Row left="= 应有现金" right={yuan(s.expectedCash ?? sum.cash.expected)} strong />
       {closed && s.countedCash !== null && (
         <>

@@ -193,6 +193,48 @@ test.describe('视口冒烟', () => {
     }
   });
 
+  test('客房：房态看板、后台「客房」与看板「客房」，技师、餐饮、客房都开启后主导航 10 个入口都看得到（S7）', async ({ page, isMobile }) => {
+    await login(page, 'linlan');
+    // 只临时打开三个功能开关看页面（不入住、不写业务数据），结束时恢复原样
+    const tech = (await (await page.request.get('/api/admin/technicians')).json()) as { rules: { enabled: boolean } };
+    const dining = (await (await page.request.get('/api/admin/dining')).json()) as { rules: { enabled: boolean } };
+    const rooms = (await (await page.request.get('/api/admin/rooms')).json()) as { rules: { enabled: boolean } & Record<string, unknown> };
+    if (!tech.rules.enabled) expect((await page.request.put('/api/admin/technicians/rules', { data: { enabled: true } })).ok()).toBe(true);
+    if (!dining.rules.enabled) expect((await page.request.put('/api/admin/dining/rules', { data: { enabled: true } })).ok()).toBe(true);
+    if (!rooms.rules.enabled) expect((await page.request.put('/api/admin/rooms/rules', { data: { ...rooms.rules, enabled: true } })).ok()).toBe(true);
+    try {
+      await page.goto('/rooms');
+      await expect(page.getByTestId('rooms-board')).toBeVisible();
+      await expectFits(page);
+      if (!isMobile) {
+        const nav = page.getByRole('navigation', { name: '主导航' });
+        const viewport = page.viewportSize()!;
+        const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
+        for (const name of ['前台', '钟房', '餐饮', '客房', '会员', '流水', '日结', '交班', '看板', '后台']) {
+          const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
+          expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
+          expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
+        }
+        // 演示库、测试服的实例标识是两行，比这里的开发环境多一行：最后一个入口与标识之间要留出这一行
+        const last = (await nav.getByRole('link', { name: '后台', exact: true }).boundingBox())!;
+        expect(last.y + last.height, '「后台」与实例标识之间放得下多一行标识').toBeLessThanOrEqual(tag.y - 16);
+      }
+      await page.goto('/admin/rooms');
+      await expect(page.getByTestId('rooms-rules-card')).toBeVisible();
+      await expect(page.getByTestId('rooms-types')).toBeVisible();
+      await expect(page.getByTestId('rooms-rooms')).toBeVisible();
+      await expectFits(page);
+      await page.goto('/dashboard/rooms');
+      await expect(page.getByTestId('dashboard-rooms')).toBeVisible();
+      await expect(page.getByTestId('rooms-now')).toBeVisible();
+      await expectFits(page);
+    } finally {
+      if (!rooms.rules.enabled) expect((await page.request.put('/api/admin/rooms/rules', { data: { ...rooms.rules, enabled: false } })).ok()).toBe(true);
+      if (!dining.rules.enabled) expect((await page.request.put('/api/admin/dining/rules', { data: { enabled: false } })).ok()).toBe(true);
+      if (!tech.rules.enabled) expect((await page.request.put('/api/admin/technicians/rules', { data: { enabled: false } })).ok()).toBe(true);
+    }
+  });
+
   test('流水：手机上不横向滚动（测试服 E2E 报告）', async ({ page }) => {
     await login(page, 'linlan');
     await page.goto('/ledger');

@@ -256,6 +256,7 @@ function Summary({ s, dayLabel }: { s: SettlementSummary; dayLabel: string }) {
       </div>
 
       <BusinessCard s={s} />
+      <DepositsCard s={s} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
         {/* 余额核对（手机上表格放不下时在框内横向滑动） */}
@@ -502,6 +503,37 @@ function CloseDialog({ open, onClose, s }: { open: boolean; onClose: () => void;
         {error && <Notice tone="error" title={error} />}
       </div>
     </Dialog>
+  );
+}
+
+/**
+ * 客房押金（S7，v0.7.4）：押金是负债，不算营业额。收、退按收款方式（现金进出钱箱，交班按此核对）；
+ * 房费挂在住客的手牌账单上、随手牌结账。没有押金往来、也没有在住押金时不显示。
+ */
+function DepositsCard({ s }: { s: SettlementSummary }) {
+  const d = s.deposits;
+  if (!d || (d.received.length === 0 && d.refunded.length === 0 && d.held === 0)) return null;
+  const sum = (list: typeof d.received) => list.reduce((t, m) => t + m.amount, 0);
+  const line = (list: typeof d.received) => (list.length ? list.map((m) => `${PAYMENT_METHOD_LABELS[m.method]} ${m.count} 笔 ¥${(m.amount / 100).toFixed(2)}`).join('、') : '无');
+  return (
+    <Card className="overflow-hidden" data-testid="settlement-deposits">
+      <div className="border-b border-line px-5 pt-4 pb-3">
+        <p className="flex items-center gap-2 text-[13px] font-bold text-ink-2">
+          <span className="size-2 rounded-full bg-lake" />
+          客房押金 · 负债，不算营业额
+        </p>
+        <p className="mt-1.5 text-[12.5px] text-ink-3">
+          当天结束时在住押金 <Money cents={d.held} className="font-bold text-ink" />
+        </p>
+      </div>
+      <div className="space-y-2 px-5 py-4 text-[13px]">
+        <Row label="收押金" cents={sum(d.received)} className="text-ink" />
+        <p className="pl-3 text-[12px] text-ink-3">{line(d.received)}</p>
+        <Row label="退押金（原路退回）" cents={-sum(d.refunded)} className="text-clay" />
+        <p className="pl-3 text-[12px] text-ink-3">{line(d.refunded)}</p>
+        <p className="text-[12px] text-ink-4">现金押金进出钱箱，交班按此核对应有现金；扫码、银行卡收的押金退房时在商户后台原路退。</p>
+      </div>
+    </Card>
   );
 }
 

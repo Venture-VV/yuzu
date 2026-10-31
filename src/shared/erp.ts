@@ -64,7 +64,7 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
   approvals: {
     label: '审批待办',
     group: '供应链',
-    description: '负责人确认：采购、报损、盘点调整、退货、付款、期初',
+    description: '待办汇总：负责人要确认的采购、报损、盘点调整、退货、付款、期初集中在一页。关掉只是不显示这一页，各单据里的确认照常',
     path: '/todo',
     pages: ['/todo'],
     apis: [],

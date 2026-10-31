@@ -16,7 +16,19 @@ import { Button, Notice } from '../../components/ui';
 //   · 按原内容重新提交：沿用原编号与原请求，服务端保证只生效一次；重提被明确拒绝时，先在服务端作废编号再下结论；
 //   · 确认作废：服务端先把编号登记为作废，原请求之后即使到达也整笔回滚，然后才允许重新填写。
 
-export type FrontdeskOpType = 'checkin' | 'bill_post' | 'tag_swap' | 'checkout' | 'table_open' | 'table_post' | 'table_checkout';
+export type FrontdeskOpType =
+  | 'checkin'
+  | 'bill_post'
+  | 'tag_swap'
+  | 'checkout'
+  | 'table_open'
+  | 'table_post'
+  | 'table_checkout'
+  | 'room_checkin'
+  | 'room_extend'
+  | 'room_deposit'
+  | 'room_refund'
+  | 'room_close';
 
 export interface FrontdeskPendingOp {
   key: string;
@@ -31,6 +43,10 @@ export interface FrontdeskPendingOp {
   tableId?: number;
   /** 桌台点单：那次开台；桌台结账：涉及的全部开台（这几桌都不能另起一笔） */
   sessionIds?: number[];
+  /** 客房入住（S7）：那间房（同一间房上不能另起一笔入住） */
+  roomId?: number;
+  /** 客房续住、押金、退房：那张入住单 */
+  stayIds?: number[];
   /** 展示用：涉及的手牌（桌台为「桌 A1」）、内容摘要、金额 */
   tagCodes: string[];
   summary: string;
@@ -47,10 +63,17 @@ export const FRONTDESK_OP_LABELS: Record<FrontdeskOpType, string> = {
   table_open: '开台',
   table_post: '桌台点单',
   table_checkout: '桌台结账',
+  room_checkin: '客房入住',
+  room_extend: '客房续住',
+  room_deposit: '收押金',
+  room_refund: '退押金',
+  room_close: '客房退房',
 };
 
 /** 餐饮桌台的操作：对象是桌台或开台，不是手牌 */
 export const isTableOp = (type: FrontdeskOpType) => type === 'table_open' || type === 'table_post' || type === 'table_checkout';
+/** 客房的操作（S7）：对象是房间或入住单，在客房页处理 */
+export const isRoomOp = (type: FrontdeskOpType) => type.startsWith('room_');
 
 const STORAGE_KEY = 'yuzu.frontdeskPending.v1';
 const listeners = new Set<() => void>();
@@ -183,13 +206,15 @@ export function pendingFor(
   list: FrontdeskPendingOp[],
   type: FrontdeskOpType,
   visitId: number | null,
-  table: { tableId?: number | null; sessionId?: number | null } = {},
+  table: { tableId?: number | null; sessionId?: number | null; roomId?: number | null; stayId?: number | null } = {},
 ) {
   return list.find((p) => {
     if (p.type !== type) return false;
     if (type === 'checkin') return true;
     if (type === 'table_open') return table.tableId != null && p.tableId === table.tableId;
     if (type === 'table_post' || type === 'table_checkout') return table.sessionId != null && !!p.sessionIds?.includes(table.sessionId);
+    if (type === 'room_checkin') return table.roomId != null && p.roomId === table.roomId;
+    if (isRoomOp(type)) return table.stayId != null && !!p.stayIds?.includes(table.stayId);
     return p.visitId === visitId || (visitId !== null && !!p.visitIds?.includes(visitId));
   });
 }
@@ -213,11 +238,14 @@ export function useFrontdeskOp<T>(opts: {
   /** 开台：桌台；桌台点单、桌台结账：开台（发起结账的那桌） */
   tableId?: number | null;
   sessionId?: number | null;
+  /** 客房入住：房间；续住、押金、退房：入住单 */
+  roomId?: number | null;
+  stayId?: number | null;
   staffName: string;
   pick: Pick<T>;
 }) {
   const all = useFrontdeskPending();
-  const pending = pendingFor(all, opts.type, opts.visitId, { tableId: opts.tableId, sessionId: opts.sessionId }) ?? null;
+  const pending = pendingFor(all, opts.type, opts.visitId, { tableId: opts.tableId, sessionId: opts.sessionId, roomId: opts.roomId, stayId: opts.stayId }) ?? null;
   const [state, setState] = useState<OpState>({ phase: 'idle' });
   const { pick } = opts;
   const pendingKey = pending?.key;
@@ -279,7 +307,16 @@ export function useFrontdeskOp<T>(opts: {
   /** 提交一笔新的操作（有待确认记录时不允许） */
   const submit = useCallback(
     async (
-      build: (key: string) => { url: string; body: unknown; tagCodes: string[]; summary: string; amount: number | null; visitIds?: number[]; sessionIds?: number[] },
+      build: (key: string) => {
+        url: string;
+        body: unknown;
+        tagCodes: string[];
+        summary: string;
+        amount: number | null;
+        visitIds?: number[];
+        sessionIds?: number[];
+        stayIds?: number[];
+      },
     ) => {
       if (pending) return null;
       const key = uuid();
@@ -287,10 +324,12 @@ export function useFrontdeskOp<T>(opts: {
       const table = {
         ...(opts.tableId != null ? { tableId: opts.tableId } : {}),
         ...(opts.sessionId != null ? { sessionIds: [opts.sessionId] } : {}),
+        ...(opts.roomId != null ? { roomId: opts.roomId } : {}),
+        ...(opts.stayId != null ? { stayIds: [opts.stayId] } : {}),
       };
       return send({ key, type: opts.type, visitId: opts.visitId, staffName: opts.staffName, createdAt: new Date().toISOString(), ...table, ...b });
     },
-    [pending, send, opts.type, opts.visitId, opts.tableId, opts.sessionId, opts.staffName],
+    [pending, send, opts.type, opts.visitId, opts.tableId, opts.sessionId, opts.roomId, opts.stayId, opts.staffName],
   );
 
   /** 按原内容、原编号重新提交 */
@@ -404,7 +443,7 @@ export function PendingPanel<T>({
           ? `${op.state.message}。`
           : op.state.phase === 'not_found'
             ? '暂未查到已生效的结果，原请求可能仍在处理。可按原内容重新提交（沿用原编号，不会重复），或确认作废后重新填写（作废后原请求即使到达也不会生效）。'
-            : `处理前不能对这${isTableOp(p.type) ? '桌' : '张手牌'}另起一笔，避免重复。`}
+            : `处理前不能对这${isTableOp(p.type) ? '桌' : isRoomOp(p.type) ? '间房' : '张手牌'}另起一笔，避免重复。`}
       </span>
     </Notice>
   );

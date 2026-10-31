@@ -26,7 +26,7 @@
 //   backup-loop                           备份服务：按 BACKUP_INTERVAL_MINUTES 定时备份并清理过期文件（compose 的 backup 服务）
 //   verify-backup <备份文件.dump>         演练：在临时库恢复这份备份，核对文件摘要、数据指纹与自检（不碰当前数据库）
 //   daily-recon [--date YYYY-MM-DD] [--out 目录]
-//                                         每日对账包（只读）：日结汇总、结账单、部门参考表、异常清单、交班，写到 <目录>/<营业日>/
+//                                         每日对账包（只读）：日结汇总、结账单、部门参考表、异常清单、交班、技师业绩、客房与押金，写到 <目录>/<营业日>/
 //   balance-changes --since "YYYY-MM-DD HH:MM" [--include-opening] [--out 文件.csv]
 //                                         某时刻之后有余额变动的会员（只读），退回旧系统时用于回写 EBC；不给 --out 时 CSV 打到标准输出
 

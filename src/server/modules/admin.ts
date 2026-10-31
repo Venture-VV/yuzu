@@ -13,6 +13,7 @@ import { levelName } from '@shared/members';
 import { CALL_TYPE_LABELS, DEFAULT_TECHNICIAN_RULES } from '@shared/technicians';
 import { AFTER_DESIGNATED_LABELS, AFTER_ROTATION_LABELS, DEFAULT_CLOCKROOM_RULES, DEFAULT_COMMISSION_RULES, describeCommissionBase } from '@shared/clockroom';
 import { DEFAULT_DINING_RULES } from '@shared/dining';
+import { DEFAULT_ROOM_RULES } from '@shared/rooms';
 import { formatYuan } from '@shared/money';
 import {
   ALL_PERMISSIONS,
@@ -42,6 +43,7 @@ import { loadTechnicianRules } from './technicians';
 import { loadClockroomRules } from './clockroom';
 import { commissionSettings } from './commission';
 import { loadDiningRules } from './dining';
+import { loadRoomRules } from './rooms';
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const onOff = (v: boolean, on: string, off: string) => (v ? on : off);
@@ -212,6 +214,18 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   add({ key: 'dining_rules.enabled', group: 'dining', label: '餐饮功能', value: onOff(dn.enabled, '开启（点单、厨房出品屏、估清）', '关闭（与升级前一样）'), defaultValue: '关闭（与升级前一样）', pending: false, section: 'dining', current: dn.enabled, dflt: dnd.enabled, metaKey: 'dining_rules' });
   add({ key: 'dining_rules.trackServed', group: 'dining', label: '上菜确认', value: onOff(dn.trackServed, '出餐后服务员点「上菜」', '出餐即算上菜'), defaultValue: '出餐后服务员点「上菜」', pending: true, section: 'dining', current: dn.trackServed, dflt: dnd.trackServed, metaKey: 'dining_rules' });
   add({ key: 'dining_rules.warnMinutes', group: 'dining', label: '出品超时提醒', value: `下单 ${dn.warnMinutes} 分钟还没出餐标红`, defaultValue: `下单 ${dnd.warnMinutes} 分钟还没出餐标红`, pending: true, section: 'dining', current: dn.warnMinutes, dflt: dnd.warnMinutes, metaKey: 'dining_rules' });
+  // ── 客房（S7，v0.7.4）──
+  const rm = await loadRoomRules(db);
+  const rmd = DEFAULT_ROOM_RULES;
+  const clock = (minute: number) => `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
+  const lateText = (r: typeof rm) => `${clock(r.checkoutMinute)} 退房；${clock(r.checkoutMinute)}–${clock(r.lateFullMinute)} 加收半天，${clock(r.lateFullMinute)} 以后加收一晚`;
+  add({ key: 'room_rules.enabled', group: 'rooms', label: '客房功能', value: onOff(rm.enabled, '开启（房态、入住、押金、夜审）', '关闭（与升级前一样）'), defaultValue: '关闭（与升级前一样）', pending: false, section: 'rooms', current: rm.enabled, dflt: rmd.enabled, metaKey: 'room_rules' });
+  add({
+    key: 'room_rules.checkout', group: 'rooms', label: '全天房退房时间', value: lateText(rm), defaultValue: lateText(rmd), pending: true, section: 'rooms',
+    hint: '夜审也在加收一晚的时刻以后做', current: [rm.checkoutMinute, rm.lateFullMinute], dflt: [rmd.checkoutMinute, rmd.lateFullMinute], metaKey: 'room_rules',
+  });
+  add({ key: 'room_rules.hourlyGraceMinutes', group: 'rooms', label: '钟点房超时宽限', value: `${rm.hourlyGraceMinutes} 分钟`, defaultValue: `${rmd.hourlyGraceMinutes} 分钟`, pending: true, section: 'rooms', hint: '超过已付时段加宽限才按段补', current: rm.hourlyGraceMinutes, dflt: rmd.hourlyGraceMinutes, metaKey: 'room_rules' });
+  add({ key: 'room_rules.defaultDeposit', group: 'rooms', label: '入住默认押金', value: rm.defaultDeposit ? `默认收 ${formatYuan(rm.defaultDeposit)}` : '默认不收', defaultValue: '默认不收', pending: true, section: 'rooms', hint: '住客都有手牌、离店前在前台结清；入住时可以改', current: rm.defaultDeposit, dflt: rmd.defaultDeposit, metaKey: 'room_rules' });
   // ── 库存与采购 ──
   add({ key: 'inventory_scope_name', group: 'inventory', label: '库存范围', value: inv.scopeName, defaultValue: '后勤总库', pending: true, section: 'rules', current: inv.scopeName, dflt: '后勤总库', metaKey: 'inventory_scope_name' });
   // 迁移 002 写入的初始口径
@@ -251,6 +265,8 @@ const CHANGE_ACTIONS = [
   'items_technician_updated',
   'kitchen_station_saved',
   'items_station_updated',
+  'room_type_saved',
+  'room_saved',
 ];
 
 const SETTING_LABELS: Record<string, string> = {
@@ -278,6 +294,7 @@ function describeChange(action: string, detail: Record<string, unknown>): string
       if (detail.key === 'clockroom_rules') return '修改了钟房与轮钟规则';
       if (detail.key === 'commission_rules') return '修改了技师提成规则';
       if (detail.key === 'dining_rules') return '修改了餐饮规则';
+      if (detail.key === 'room_rules') return '修改了客房规则';
       const after = (detail.after ?? {}) as Record<string, unknown>;
       const keys = Object.keys(after).map((x) => SETTING_LABELS[x] ?? x);
       return keys.length ? `修改了${keys.join('、')}` : '修改了经营规则';
@@ -312,6 +329,10 @@ function describeChange(action: string, detail: Record<string, unknown>): string
       return typeof detail.summary === 'string' ? detail.summary : '保存了出品档口';
     case 'items_station_updated':
       return '调整了菜品的出品档口';
+    case 'room_type_saved':
+      return typeof detail.summary === 'string' ? detail.summary : '保存了房型';
+    case 'room_saved':
+      return typeof detail.summary === 'string' ? detail.summary : '保存了房间';
     default:
       return action;
   }

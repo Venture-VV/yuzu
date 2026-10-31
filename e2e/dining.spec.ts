@@ -99,10 +99,19 @@ test.describe('S5 餐饮', () => {
       }
       await page.reload();
       admin = await getJson<DiningAdmin>(page, '/api/admin/dining');
+      // 菜品列表只列挂了档口的菜；价目里的其他项目收在「从价目里添加菜品」里，需要技师的项目两处都不列出（店主 2026-10-30）
+      const other = admin.items.find((i) => i.stationId === null && !i.technicianRequired && !DISHES.some((d) => d.name === i.name));
+      const tech = admin.items.find((i) => i.technicianRequired);
+      if (other) await expect(page.getByTestId(`dining-item-${other.name}`)).toHaveCount(0);
+      await page.getByTestId('dining-items-add').click();
+      await expect(page.getByTestId('dining-items-candidates')).toBeVisible();
+      if (other) await expect(page.getByTestId(`dining-item-${other.name}`)).toHaveCount(1);
+      if (tech) await expect(page.getByTestId(`dining-item-${tech.name}`)).toHaveCount(0);
       let changed = 0;
       for (const d of DISHES) {
         const station = admin.stations.find((s) => s.name === d.station)!;
         if (admin.items.find((i) => i.name === d.name)!.stationId === station.id) continue;
+        // 还没挂档口的菜在「从价目里添加菜品」里，选了档口就移到上面的菜品里
         await page.getByTestId(`dining-item-station-${d.name}`).selectOption({ label: d.station });
         changed += 1;
       }

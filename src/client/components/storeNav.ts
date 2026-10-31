@@ -1,7 +1,7 @@
 // 门店主导航的入口：主导航按它显示；ERP 顶栏的「返回门店」也按它判断门店那边有没有能用的页面、回到哪一页。
 // 库存、采购、货款、待办在 ERP 工作区（v0.7.3，用户菜单「进入 ERP」），不在这里。
 
-import { CalendarCheck2, ClipboardCheck, ConciergeBell, Hourglass, LayoutDashboard, ReceiptText, Settings2, UsersRound, UtensilsCrossed } from 'lucide-react';
+import { BedDouble, CalendarCheck2, ClipboardCheck, ConciergeBell, Hourglass, LayoutDashboard, ReceiptText, Settings2, UsersRound, UtensilsCrossed } from 'lucide-react';
 import { ADMIN_PERMISSIONS } from '@shared/admin';
 import type { Permission } from '@shared/permissions';
 import { useCan, useSession } from '../lib/session';
@@ -13,7 +13,7 @@ export interface StoreNavItem {
   /** 拥有其中任一权限即显示 */
   perm: Permission | Permission[];
   end?: boolean;
-  /** 额外条件，例如「钟房」只在技师功能开启后显示、「餐饮」只在餐饮功能开启后显示 */
+  /** 额外条件，例如「钟房」只在技师功能开启后显示、「餐饮」「客房」只在对应功能开启后显示 */
   when?: (session: ReturnType<typeof useSession>) => boolean;
 }
 
@@ -23,6 +23,7 @@ const STORE_NAV: StoreNavItem[][] = [
     { to: '/frontdesk', label: '前台', icon: ConciergeBell, perm: 'frontdesk.read' },
     { to: '/clockroom', label: '钟房', icon: Hourglass, perm: 'technician.dispatch', when: (s) => s.technicians },
     { to: '/dining', label: '餐饮', icon: UtensilsCrossed, perm: ['dining.order', 'dining.kitchen', 'frontdesk.checkout'], when: (s) => s.dining },
+    { to: '/rooms', label: '客房', icon: BedDouble, perm: ['room.operate', 'room.housekeep', 'frontdesk.checkout'], when: (s) => s.rooms },
     { to: '/', label: '会员', icon: UsersRound, end: true, perm: 'member.read' },
     { to: '/ledger', label: '流水', icon: ReceiptText, perm: 'ledger.readToday' },
     { to: '/settlement', label: '日结', icon: CalendarCheck2, perm: 'ledger.readToday' },

@@ -9,6 +9,7 @@ import { registerGrantRoutes } from './auth/grants';
 import { registerAuthRoutes } from './auth/routes';
 import { SESSION_COOKIE, resolveSession } from './auth/session';
 import { AppError } from './lib/errors';
+import { isApiRequest, routePath } from './lib/paths';
 import type { Deps } from './lib/context';
 import { registerAdminRoutes } from './modules/admin';
 import { registerAuditRoutes } from './modules/audit';
@@ -33,6 +34,7 @@ import { registerTechnicianRoutes } from './modules/technicians';
 import { registerClockroomRoutes } from './modules/clockroom';
 import { registerDiningRoutes } from './modules/dining';
 import { registerTableRoutes } from './modules/tables';
+import { registerRoomRoutes } from './modules/rooms';
 import { registerCommissionRoutes } from './modules/commission';
 import { registerWalletRoutes } from './modules/wallet';
 import { registerErpModuleGate, registerErpRoutes } from './modules/erp';
@@ -57,7 +59,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   app.decorateRequest('hasSession', false);
 
   app.addHook('onRequest', async (req) => {
-    if (!req.url.startsWith('/api/')) return;
+    // 按解码后的路径认接口：/%61pi/… 与 /api/… 进的是同一个接口，来源检查、读会话都要一样
+    if (!isApiRequest(req)) return;
     // 修改类请求必须来自本站页面（防止跨站请求伪造）
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       const origin = req.headers.origin;
@@ -95,9 +98,10 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
     if (e.code === '55P03' || e.code === '57014') {
       // 等锁或执行超时：事务已回滚，操作没有生效
       req.log.warn({ err: error }, '记账等待超时');
-      const what = req.url.startsWith('/api/inventory') || req.url.startsWith('/api/purchase') || req.url.startsWith('/api/payables')
+      const path = routePath(req);
+      const what = path.startsWith('/api/inventory') || path.startsWith('/api/purchase') || path.startsWith('/api/payables')
         ? '相关物料或单据'
-        : req.url.startsWith('/api/frontdesk')
+        : path.startsWith('/api/frontdesk')
           ? '这张手牌或账单'
           : '该会员';
       reply.status(409).send({ error: { code: 'BUSY', message: `${what}正在被其他终端操作，本次未生效，请稍后重试` } });
@@ -149,6 +153,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerClockroomRoutes(app, deps);
   registerDiningRoutes(app, deps);
   registerTableRoutes(app, deps);
+  registerRoomRoutes(app, deps);
   registerCommissionRoutes(app, deps);
   registerErpRoutes(app, deps);
 
@@ -167,7 +172,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   }
 
   app.setNotFoundHandler((req, reply) => {
-    if (req.url.startsWith('/api/') || !hasClient || req.method !== 'GET') {
+    if (isApiRequest(req) || !hasClient || req.method !== 'GET') {
       reply.status(404).send({ error: { code: 'NOT_FOUND', message: '接口不存在' } });
       return;
     }

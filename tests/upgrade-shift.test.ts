@@ -76,6 +76,9 @@ beforeAll(async () => {
   await sql`ALTER TABLE checkout_bills ADD COLUMN table_session_id bigint, ADD COLUMN guests smallint NOT NULL DEFAULT 1`;
   await sql`CREATE TABLE table_sessions (id bigint, table_id bigint, member_id bigint, guest_label text)`;
   await sql`CREATE TABLE dining_tables (id bigint, name text)`;
+  // 现版本结账时核对客人还住着的客房（024 才有）：写入期间临时建最小的表，迁移前删掉
+  await sql`CREATE TABLE room_stays (id bigint, stay_no text, room_id bigint, visit_id bigint, status text)`;
+  await sql`CREATE TABLE rooms (id bigint, room_no text)`;
   const deps = { sql, config };
   const as = (id: number, username: string): Actor => ({ id, username, displayName: username, role: username === 'owner' ? 'owner' : 'clerk', duties: [], mustChangePassword: false });
   const cash = (amount: number) => ({ idempotencyKey: randomUUID(), memberId, planId: null, paidAmount: amount, bonusAmount: 0, paymentMethod: 'cash' as const, paymentConfirmed: true as const });
@@ -97,8 +100,10 @@ beforeAll(async () => {
   await sql`ALTER TABLE checkout_bills DROP COLUMN table_session_id, DROP COLUMN guests`;
   await sql`DROP TABLE table_sessions`;
   await sql`DROP TABLE dining_tables`;
+  await sql`DROP TABLE room_stays`;
+  await sql`DROP TABLE rooms`;
 
-  expect(await migrate(sql)).toEqual(['016_shift_boundary.sql', '017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql', '020_technicians.sql', '021_clockroom.sql', '022_dining.sql', '023_dining_tables.sql']);
+  expect(await migrate(sql)).toEqual(['016_shift_boundary.sql', '017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql', '020_technicians.sql', '021_clockroom.sql', '022_dining.sql', '023_dining_tables.sql', '024_rooms.sql']);
   app = await buildApp(sql, config);
 }, 60_000);
 

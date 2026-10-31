@@ -7,7 +7,7 @@ import { api } from '../../lib/api';
 import { formatDateTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
-import { FRONTDESK_OP_LABELS, isTableOp, removeFrontdeskPending, useFrontdeskPendingForBanner, type FrontdeskPendingOp } from './pending';
+import { FRONTDESK_OP_LABELS, isRoomOp, isTableOp, removeFrontdeskPending, useFrontdeskPendingForBanner, type FrontdeskPendingOp } from './pending';
 
 /**
  * 页面顶部的前台「结果待确认」提醒（刷新、重新登录后仍在）。
@@ -32,6 +32,7 @@ export function FrontdeskPendingBanner() {
             removeFrontdeskPending(op.key);
             void qc.invalidateQueries({ queryKey: ['frontdesk'] });
             if (isTableOp(op.type)) void qc.invalidateQueries({ queryKey: ['dining'] });
+            if (isRoomOp(op.type)) void qc.invalidateQueries({ queryKey: ['rooms'] });
             if (found.found) {
               toast({ tone: 'success', title: `已查回：${op.tagCodes.join('、')} 的${FRONTDESK_OP_LABELS[op.type]}已生效`, body: '只生效了一次，无需重新操作。' });
             }
@@ -63,17 +64,26 @@ export function FrontdeskPendingBanner() {
       navigate(`/dining/tables?${params}`);
       return;
     }
+    // 客房的操作到客房页处理：入住回到那间房的入住对话框，其余回到那张入住单
+    if (isRoomOp(op.type)) {
+      if (op.roomId) params.set('r', String(op.roomId));
+      if (op.stayIds?.[0]) params.set('s', String(op.stayIds[0]));
+      navigate(`/rooms?${params}`);
+      return;
+    }
     if (op.visitId) params.set('v', String(op.visitId));
     navigate(`/frontdesk?${params}`);
   };
   const anyTable = ops.some((op) => isTableOp(op.type));
+  const anyRoom = ops.some((op) => isRoomOp(op.type));
+  const objects = ['手牌', ...(anyTable ? ['桌台'] : []), ...(anyRoom ? ['房间'] : [])];
 
   return (
     <div role="status" data-testid="frontdesk-pending-banner" className="shrink-0 border-b border-yuzu-deep/25 bg-yuzu-tint px-5 py-2.5 md:px-7">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="flex items-center gap-2 text-[13.5px] font-bold text-yuzu-deep">
           <Hourglass className="size-4" />
-          {ops.length} 笔前台操作结果待确认，处理前请勿对同一{anyTable ? '手牌或桌台' : '手牌'}重复登记
+          {ops.length} 笔前台操作结果待确认，处理前请勿对同一{objects.length > 2 ? `${objects.slice(0, -1).join('、')}或${objects.at(-1)}` : objects.join('或')}重复登记
         </span>
         {ops.slice(0, 3).map((op) => (
           <span key={op.key} className="flex items-center gap-2 rounded-full bg-card py-1 pr-1 pl-3 text-[13px] ring-1 ring-yuzu-deep/20">

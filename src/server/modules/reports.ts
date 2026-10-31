@@ -8,6 +8,7 @@ import { shiftDate } from '@shared/labels';
 import { channelLabel, levelName } from '@shared/members';
 import { can } from '@shared/permissions';
 import { MAX_REPORT_DAYS, type DutyExtras, type ExecutiveReport, type MemberBrief, type MembersReport, type PeriodKpis } from '@shared/reports';
+import type { RoomBoardStatus, RoomsReport } from '@shared/rooms';
 import { readSnapshot, type Db } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
@@ -66,12 +67,16 @@ async function itemLines(db: Db, from: string, to: string) {
       SELECT id, created_at, -1 FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to}
     )
     SELECT CASE WHEN l.ticket_type_id IS NOT NULL THEN '门票'
+                WHEN l.source = 'room' THEN '客房'
                 WHEN l.item_id IS NULL THEN '其他（手动金额、赔偿等）'
                 ELSE coalesce(nullif(si.category, ''), '未分类') END AS category,
-           l.name, sum(k.sign * l.quantity)::int AS quantity, sum(k.sign * l.amount)::bigint AS amount
+           -- 房费（S7）的明细名称带房号与日期，按房费的种类合并
+           CASE rc.kind WHEN 'night' THEN '房费（全天房）' WHEN 'half_day' THEN '超时半天' WHEN 'block' THEN '钟点房' ELSE l.name END AS name,
+           sum(k.sign * l.quantity)::int AS quantity, sum(k.sign * l.amount)::bigint AS amount
     FROM k JOIN checkout_bills cb ON cb.checkout_id = k.id
     JOIN bill_lines l ON l.bill_id = cb.bill_id AND l.posted_at <= k.created_at AND (l.voided_at IS NULL OR l.voided_at > k.created_at)
     LEFT JOIN service_items si ON si.id = l.item_id
+    LEFT JOIN room_stay_charges rc ON rc.line_id = l.id
     GROUP BY 1, 2
     HAVING sum(k.sign * l.quantity) <> 0 OR sum(k.sign * l.amount) <> 0`;
 }
@@ -290,6 +295,72 @@ export async function dutyExtras(db: Db, today: string, c: Clock, opts: { inStor
 const PeriodQuery = z.object({ from: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD'), to: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD') });
 
 /** 门店时区与营业日切换时刻，以及此刻的营业日（看板、ERP 营业数据共用） */
+/** 看板「客房」（S7）：此刻的房态与押金；时段内的入住、挂的晚数 / 段数、房费营业额（结账口径，与部门参考表同一口径）与押金 */
+export async function roomsReport(db: Db, from: string, to: string): Promise<RoomsReport> {
+  const status = await db<{ housekeeping: string; occupied: boolean }[]>`
+    SELECT r.housekeeping, EXISTS (SELECT 1 FROM room_stays s WHERE s.room_id = r.id AND s.status = 'open') AS occupied FROM rooms r WHERE r.active`;
+  const counts: Record<RoomBoardStatus, number> = { vacant: 0, occupied: 0, dirty: 0, maintenance: 0 };
+  for (const r of status) counts[r.occupied ? 'occupied' : r.housekeeping === 'clean' ? 'vacant' : (r.housekeeping as RoomBoardStatus)] += 1;
+  const [held] = await db<{ amount: number }[]>`
+    SELECT coalesce(sum(CASE WHEN d.kind = 'receive' THEN d.amount ELSE -d.amount END), 0) AS amount
+    FROM room_deposits d JOIN room_stays s ON s.id = d.stay_id WHERE s.status = 'open'`;
+  // 房费营业额：每张结账单结账那一刻的房费明细，时段内结的计正数、反结账的计负数
+  const revenueRows = await db<{ date: string; kind: string; quantity: number; amount: number }[]>`
+    WITH k AS (
+      SELECT id, created_at, business_date AS d, 1 AS sign FROM checkouts WHERE business_date BETWEEN ${from} AND ${to}
+      UNION ALL
+      SELECT id, created_at, void_business_date, -1 FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to}
+    )
+    SELECT k.d AS date, rc.kind, sum(k.sign * l.quantity)::int AS quantity, sum(k.sign * l.amount)::bigint AS amount
+    FROM k JOIN checkout_bills cb ON cb.checkout_id = k.id
+    JOIN bill_lines l ON l.bill_id = cb.bill_id AND l.source = 'room' AND l.posted_at <= k.created_at AND (l.voided_at IS NULL OR l.voided_at > k.created_at)
+    JOIN room_stay_charges rc ON rc.line_id = l.id
+    GROUP BY 1, 2`;
+  const stays = await db<{ date: string; checkins: number }[]>`
+    SELECT business_date AS date, count(*)::int AS checkins FROM room_stays
+    WHERE business_date BETWEEN ${from} AND ${to} AND status <> 'cancelled' GROUP BY 1`;
+  const nightRows = await db<{ date: string; nights: number }[]>`
+    SELECT c.night_date AS date, count(*)::int AS nights FROM room_stay_charges c JOIN bill_lines l ON l.id = c.line_id
+    WHERE c.kind = 'night' AND l.status = 'active' AND c.night_date BETWEEN ${from} AND ${to} GROUP BY 1`;
+  const [blocks] = await db<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM room_stay_charges c JOIN bill_lines l ON l.id = c.line_id
+    WHERE c.kind = 'block' AND l.status = 'active' AND l.business_date BETWEEN ${from} AND ${to}`;
+  const [dep] = await db<{ received: number; refunded: number }[]>`
+    SELECT coalesce(sum(amount) FILTER (WHERE kind = 'receive'), 0) AS received,
+           coalesce(sum(amount) FILTER (WHERE kind = 'refund'), 0) AS refunded
+    FROM room_deposits WHERE business_date BETWEEN ${from} AND ${to}`;
+  const KIND_NAMES: Record<string, string> = { night: '房费（全天房）', half_day: '超时半天', block: '钟点房' };
+  const byKind = ['night', 'half_day', 'block'].flatMap((kind) => {
+    const rows = revenueRows.filter((r) => r.kind === kind);
+    const quantity = rows.reduce((t, r) => t + r.quantity, 0);
+    const amount = rows.reduce((t, r) => t + r.amount, 0);
+    return quantity || amount ? [{ name: KIND_NAMES[kind]!, quantity, amount }] : [];
+  });
+  const total = byKind.reduce((t, r) => t + r.amount, 0);
+  const night = byKind.find((r) => r.name === KIND_NAMES.night);
+  const days: RoomsReport['days'] = [];
+  for (let d = from; d <= to; d = shiftDate(d, 1)) {
+    days.push({
+      date: d,
+      checkins: stays.find((x) => x.date === d)?.checkins ?? 0,
+      nights: nightRows.find((x) => x.date === d)?.nights ?? 0,
+      revenue: revenueRows.filter((x) => x.date === d).reduce((t, x) => t + x.amount, 0),
+    });
+  }
+  return {
+    from,
+    to,
+    now: { counts, rooms: status.length, depositHeld: held!.amount },
+    checkins: stays.reduce((t, x) => t + x.checkins, 0),
+    nights: nightRows.reduce((t, x) => t + x.nights, 0),
+    blocks: blocks!.n,
+    revenue: { total, byKind },
+    averageRate: night && night.quantity > 0 ? Math.round(night.amount / night.quantity) : null,
+    deposits: dep!,
+    days,
+  };
+}
+
 export async function reportClock(deps: Deps): Promise<{ c: Clock; today: string }> {
   const s = await loadSettings(deps.sql);
   const c: Clock = { tz: deps.config.timezone, startHour: s.businessDayStartHour };
@@ -322,6 +393,13 @@ export function registerDashboardReportRoutes(app: FastifyInstance, deps: Deps) 
     const { c, today } = await clockAndToday();
     const { from, to } = period(req.query, today);
     return readSnapshot(deps.sql, (tx) => membersReport(tx, from, to, c));
+  });
+
+  // 客房（S7）：经营总览的岗位看
+  app.get('/api/reports/rooms', { preHandler: guard('report.executive') }, async (req) => {
+    const { today } = await clockAndToday();
+    const { from, to } = period(req.query, today);
+    return readSnapshot(deps.sql, (tx) => roomsReport(tx, from, to));
   });
 
   app.get('/api/reports/technicians', { preHandler: guard('report.technicians') }, async (req) => {

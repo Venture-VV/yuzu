@@ -214,8 +214,17 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
       pricedAt: at.toISOString(),
       sessions: await openSessionsOf(tx, ids),
       dishes: await unservedDishesOf(tx, ids),
+      rooms: await openRoomsOf(tx, ids),
     };
   });
+}
+
+/** 这几位客人还在住的客房（S7）：结账前要先退房（补齐房费挂到手牌账单、退押金） */
+async function openRoomsOf(db: Db, visitIds: number[]) {
+  return db<{ stayId: number; tagCode: string; roomNo: string; stayNo: string }[]>`
+    SELECT s.id AS stay_id, ht.code AS tag_code, r.room_no, s.stay_no
+    FROM room_stays s JOIN rooms r ON r.id = s.room_id JOIN visits v ON v.id = s.visit_id JOIN hand_tags ht ON ht.id = v.tag_id
+    WHERE s.visit_id IN ${db(visitIds)} AND s.status = 'open' ORDER BY ht.code, r.room_no`;
 }
 
 /** 门票计到的时刻：反结账后重结按第一次结账的时刻，平时按此刻 */
@@ -355,6 +364,9 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
       assertOpen(v);
       if (v.groupId !== p.groupId) throw conflict('VISIT_CHANGED', '同行组刚刚有变化，请刷新后重试');
     }
+    // 客房（S7）：还住着客房的先退房（补齐房费、退押金）；客房入住、退房也先锁这位客人的来访，两边不会交错
+    const [room] = await openRoomsOf(tx, ids);
+    if (room) throw conflict('ROOM_OPEN', `手牌 ${room.tagCode} 还住着客房 ${room.roomNo}，请先退房（补齐房费、退押金），再结账`);
     // 储值只能由本次结账的客人里的会员支付，不能扣不在这张结账单上的会员（串单）；会员替朋友付，把朋友的手牌合并进来一起结
     const guests = new Set([...locked.values()].map((v) => v.memberId));
     const outsider = wallets.find((w) => !guests.has(w.memberId));

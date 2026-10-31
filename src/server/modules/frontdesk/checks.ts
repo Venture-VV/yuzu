@@ -142,6 +142,36 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
   const [kitchen] = await db<{ n: number; open: number }[]>`
     SELECT count(*)::int AS n, count(*) FILTER (WHERE status IN ('queued', 'cooking', 'done'))::int AS open FROM kitchen_items`;
 
+  // ⑫ 客房（S7）押金台账：每个入住单、每种收款方式的余额（收 − 退）不为负；退房、撤销之后余额为 0
+  const depositDiff = await db<{ ref: string }[]>`
+    SELECT s.stay_no || ' ' || d.method AS ref FROM room_stays s
+    JOIN (SELECT stay_id, method, sum(CASE WHEN kind = 'receive' THEN amount ELSE -amount END) AS balance
+          FROM room_deposits GROUP BY stay_id, method) d ON d.stay_id = s.id
+    WHERE d.balance < 0 OR (s.status <> 'open' AND d.balance <> 0)
+    LIMIT 5`;
+  const [deposits] = await db<{ held: number; stays: number }[]>`
+    SELECT coalesce(sum(CASE WHEN d.kind = 'receive' THEN d.amount ELSE -d.amount END), 0) AS held,
+           count(DISTINCT s.id) FILTER (WHERE s.status = 'open')::int AS stays
+    FROM room_stays s LEFT JOIN room_deposits d ON d.stay_id = s.id`;
+  // ⑬ 房态与在住单：在住单的房间启用；在住单的手牌客人仍在店；房费挂的就是这位客人的手牌账单
+  const stayDiff = await db<{ ref: string }[]>`
+    SELECT s.stay_no AS ref FROM room_stays s JOIN rooms r ON r.id = s.room_id WHERE s.status = 'open' AND NOT r.active
+    UNION ALL
+    SELECT s.stay_no FROM room_stays s JOIN visits v ON v.id = s.visit_id WHERE (s.status = 'open' AND v.status <> 'open') OR s.bill_id <> v.bill_id
+    LIMIT 5`;
+  const [stays] = await db<{ open: number; rooms: number }[]>`
+    SELECT count(*) FILTER (WHERE status = 'open')::int AS open, (SELECT count(*) FROM rooms WHERE active)::int AS rooms FROM room_stays`;
+  // ⑭ 房费不重复：每笔房费对应入住单账单上的一条客房明细（金额一致）；每条客房明细都有房费记录（同一晚、同一段由唯一索引兜底）
+  const chargeDiff = await db<{ ref: string }[]>`
+    SELECT s.stay_no || ' 明细 ' || l.id AS ref FROM room_stay_charges c JOIN room_stays s ON s.id = c.stay_id JOIN bill_lines l ON l.id = c.line_id
+    WHERE l.bill_id <> s.bill_id OR l.source <> 'room' OR l.amount <> c.amount OR l.quantity <> 1
+    UNION ALL
+    SELECT '明细 ' || l.id FROM bill_lines l WHERE l.source = 'room' AND NOT EXISTS (SELECT 1 FROM room_stay_charges c WHERE c.line_id = l.id)
+    LIMIT 5`;
+  const [charges] = await db<{ n: number; amount: number }[]>`
+    SELECT count(*)::int AS n, coalesce(sum(c.amount) FILTER (WHERE l.status = 'active'), 0) AS amount
+    FROM room_stay_charges c JOIN bill_lines l ON l.id = c.line_id`;
+
   return [
     {
       key: 'bill_amount_vs_lines',
@@ -221,6 +251,30 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
       detail: kitchenDiff.length
         ? `${kitchenDiff.length} 张出品单与餐饮明细不符（如 ${kitchenDiff.map((d) => d.ref).join('、')}）`
         : `出品单 ${kitchen!.n} 道（还没上的 ${kitchen!.open} 道），每道都对应一条餐饮明细，退菜的明细已作废`,
+    },
+    {
+      key: 'room_deposits',
+      label: '客房押金台账一致',
+      ok: depositDiff.length === 0,
+      detail: depositDiff.length
+        ? `${depositDiff.length} 处押金余额不符（如 ${depositDiff.map((d) => d.ref).join('、')}）`
+        : `在住押金余额 ${formatYuan(deposits!.held)}（在住 ${deposits!.stays} 间）；每种收款方式的余额都不为负，退房、撤销后为 0`,
+    },
+    {
+      key: 'room_stays',
+      label: '客房房态与在住单一致',
+      ok: stayDiff.length === 0,
+      detail: stayDiff.length
+        ? `${stayDiff.length} 个入住单的房间、手牌客人或账单不符（如 ${stayDiff.map((d) => d.ref).join('、')}）`
+        : `在住 ${stays!.open} 间（启用的房间 ${stays!.rooms} 间），一间房最多一个在住单，住客的手牌都在店，房费都挂在住客的手牌账单上`,
+    },
+    {
+      key: 'room_charges',
+      label: '客房房费不重复、与账单明细一致',
+      ok: chargeDiff.length === 0,
+      detail: chargeDiff.length
+        ? `${chargeDiff.length} 笔房费与账单明细不符（如 ${chargeDiff.map((d) => d.ref).join('、')}）`
+        : `房费 ${charges!.n} 笔（有效 ${formatYuan(charges!.amount)}），每晚、每段只挂一次，都对应一条客房明细`,
     },
   ];
 }

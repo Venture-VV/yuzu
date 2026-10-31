@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { Banknote, CircleCheck, Clock3, ReceiptText, ShieldCheck, Ticket, Undo2 } from 'lucide-react';
+import { Banknote, CircleCheck, Clock3, LogOut, ReceiptText, ShieldCheck, Ticket, Undo2 } from 'lucide-react';
 import {
   CHECKOUT_METHOD_LABELS,
   COUPON_PLATFORM_LABELS,
@@ -28,6 +28,7 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Input, Notice, Select, Skeleton, Textarea } from '../../components/ui';
 import { PrintButton } from '../print/PrintButton';
+import { CloseStayById } from '../rooms/CloseStayDialog';
 import { SHIFT_ERRORS, shiftKeys, ShiftGate, StartShiftForm, useShiftReady } from '../shift/ShiftGate';
 import { ZoneChip } from './parts';
 import { BackfillNotice, backfillBody, backfillSummary, useBackfill } from './backfill';
@@ -89,7 +90,7 @@ export function CheckoutDialog({
 
   // 服务端拒绝（门票跳档、余额变化）后重新取一次核对数据；没有开班或班次刚交班时刷新当前班次，出现开班提示
   useEffect(() => {
-    if (op.state.phase === 'error' && ['PRICE_CHANGED', 'SPLIT_CHANGED', 'INSUFFICIENT_BALANCE', 'TICKET_CHANGED'].includes(op.state.code ?? '')) {
+    if (op.state.phase === 'error' && ['PRICE_CHANGED', 'SPLIT_CHANGED', 'INSUFFICIENT_BALANCE', 'TICKET_CHANGED', 'ROOM_OPEN'].includes(op.state.code ?? '')) {
       void preview.refetch();
     }
     if (op.state.phase === 'error' && SHIFT_ERRORS.includes(op.state.code ?? '')) void qc.invalidateQueries({ queryKey: shiftKeys.all });
@@ -130,7 +131,9 @@ export function CheckoutDialog({
     onEdit: op.clearError,
   });
   const { remaining, problems } = pay;
-  const ready = total !== null && remaining === 0 && pay.ok && !preview.isFetching && shiftReady.ready && !backfillBlocked;
+  // 客房（S7）：还住着客房的客人要先退房（补齐房费挂到手牌账单、退押金），房费才都在账单上
+  const roomsOpen = (preview.data?.rooms ?? []).length > 0;
+  const ready = total !== null && remaining === 0 && pay.ok && !preview.isFetching && shiftReady.ready && !backfillBlocked && !roomsOpen;
 
   const submit = async () => {
     if (!ready || !p) return;
@@ -275,6 +278,7 @@ export function CheckoutDialog({
             <>
               {(p.sessions ?? []).length > 0 && <SessionsNotice sessions={p.sessions} />}
               {(p.dishes ?? []).length > 0 && <DishesNotice dishes={p.dishes} />}
+              {(p.rooms ?? []).length > 0 && <RoomsNotice rooms={p.rooms!} onClosed={() => void preview.refetch()} />}
               <ReviewTable preview={p} amounts={amounts} ticketPick={ticketPick} onPick={(id, t) => edit(() => setTicketPick((x) => ({ ...x, [id]: t })))} />
             </>
           )
@@ -318,6 +322,47 @@ function SessionsNotice({ sessions }: { sessions: CheckoutPreview['sessions'] })
           ))}
         </ul>
       </Notice>
+    </div>
+  );
+}
+
+/**
+ * 客房（S7）：客人还住着客房时不能结账，先退房——补齐此刻要付的房费（挂到手牌账单上）、押金原路退回、房间变待打扫；
+ * 退房后重新核对，房费就在这张结账单里一起结。有客房权限的在这里直接退房
+ */
+function RoomsNotice({ rooms, onClosed }: { rooms: NonNullable<CheckoutPreview['rooms']>; onClosed: () => void }) {
+  const can = useCan();
+  const [closing, setClosing] = useState<number | null>(null);
+  return (
+    <div data-testid="checkout-rooms">
+      <Notice tone="warning" title="有客人还住着客房：先退房，房费挂到手牌账单上再一起结账">
+        <ul className="mt-1 space-y-1">
+          {rooms.map((r) => (
+            <li key={r.stayId} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span>
+                <span className="num font-semibold">{r.tagCode}</span> · 客房 <span className="num font-semibold">{r.roomNo}</span>（{r.stayNo}）
+              </span>
+              {can('room.operate') ? (
+                <Button size="sm" variant="secondary" icon={<LogOut className="size-3.5" />} onClick={() => setClosing(r.stayId)} data-testid={`checkout-room-close-${r.roomNo}`}>
+                  退房
+                </Button>
+              ) : (
+                <span className="text-[12px] text-ink-3">请有客房权限的同事退房</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      </Notice>
+      {closing !== null && (
+        <CloseStayById
+          stayId={closing}
+          onClose={() => setClosing(null)}
+          onDone={() => {
+            setClosing(null);
+            onClosed();
+          }}
+        />
+      )}
     </div>
   );
 }

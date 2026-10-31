@@ -6,10 +6,12 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { businessDayStart } from '../src/shared/business-date';
 import { shiftDate } from '../src/shared/labels';
 import type { Actor } from '../src/server/lib/context';
 import { checkout } from '../src/server/modules/frontdesk/checkout';
 import { checkin } from '../src/server/modules/frontdesk/visits';
+import { loadSettings } from '../src/server/modules/settings';
 import { createStaff } from '../src/server/modules/staff';
 import { api, createMember, login, PASSWORD, rechargeBody, setup, type TestContext } from './helpers';
 
@@ -70,7 +72,10 @@ describe('测试会话问题 2：跨营业日反结账时看板与日结同一�
   it('昨天结的单今天反结账：昨天的收款、门票、结账单、客人、储值消费不变，今天冲回；两天都与日结一致', async () => {
     const deps = { sql: ctx.sql, config: ctx.config };
     const yesterday = shiftDate(today, -1);
-    const at = new Date(Date.now() - 26 * H);
+    // 昨天营业日开始后 3 小时结账（在店 1 小时）：不论现在几点都落在昨天。原来用「现在 − 26 小时」，
+    // 在营业日切换后的两小时里（北京时间 06:00–08:00）会落到前天（测试会话复测 v0.7.3 的观察）
+    const startHour = (await loadSettings(ctx.sql)).businessDayStartHour;
+    const at = new Date(businessDayStart(yesterday, ctx.config.timezone, startHour).getTime() + 3 * H);
     const m = await createMember(ctx, '跨日会员', '19900099902');
     expect((await api(ctx.app, ctx.owner, 'POST', '/api/recharges', rechargeBody(m.id, 100000))).status).toBe(200);
     const v = await checkin(deps, { clientKey: randomUUID(), guests: [{ tagCode: 'R002', zone: 'male', memberId: m.id }, { tagCode: 'R003', zone: 'male' }] }, { actor: clerk, at: new Date(at.getTime() - H) });

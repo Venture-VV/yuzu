@@ -93,6 +93,19 @@ describe('ERP 模块开关', () => {
       // 写接口同样拦下（还没走到权限与校验）
       const doc = await api(ctx.app, stock, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docType: 'receipt', lines: [] });
       expect(doc.body.error.code).toBe('ERP_MODULE_DISABLED');
+      // 地址里的模块名做了 URL 编码，路由照样进到原接口：拦截按实际进入的接口认模块（测试会话复测 v0.7.3 的 P1）
+      for (const url of ['/api/%69nventory/materials', '/api/%69nventory/todo-count', '/api/%70urchase-orders', '/api/purchase%2Dorders', '/api/%70ayables/overview']) {
+        const r = await api(ctx.app, ctx.owner, 'GET', url);
+        expect(r.status, url).toBe(403);
+        expect(r.body.error.code, url).toBe('ERP_MODULE_DISABLED');
+      }
+      for (const [cookie, method, url] of [
+        [stock, 'POST', '/api/%69nventory/docs'],
+        [ctx.owner, 'PUT', '/api/%69nventory/materials/1'],
+      ] as const) {
+        const r = await api(ctx.app, cookie, method, url, { clientKey: randomUUID(), docType: 'receipt', lines: [] });
+        expect(r.body.error.code, `${method} ${url}`).toBe('ERP_MODULE_DISABLED');
+      }
       // 没登录的照常 401，不透露模块设置；不属于 ERP 的接口不受影响
       expect((await api(ctx.app, null, 'GET', '/api/inventory/materials')).status).toBe(401);
       expect((await api(ctx.app, ctx.owner, 'GET', '/api/frontdesk/board')).status).toBe(200);
@@ -149,8 +162,29 @@ describe('营业数据（只读）', () => {
     expect((await switchModules(ctx.owner, { modules: { revenue: false } })).status).toBe(200);
     try {
       expect((await api(ctx.app, ctx.owner, 'GET', `/api/erp/revenue?from=${today}&to=${today}`)).body.error.code).toBe('ERP_MODULE_DISABLED');
+      expect((await api(ctx.app, ctx.owner, 'GET', `/api/erp/%72evenue?from=${today}&to=${today}`)).body.error.code).toBe('ERP_MODULE_DISABLED');
     } finally {
       expect((await switchModules(ctx.owner, { modules: { revenue: true } })).status).toBe(200);
+    }
+  });
+});
+
+describe('按实际进入的接口判断（地址编码不改变结果）', () => {
+  it('跨站的修改请求一律拒绝，地址把 /api 编码成 /%61pi 也一样；同站照常登录、读会话', async () => {
+    for (const url of ['/api/auth/login', '/%61pi/auth/login']) {
+      const r = await ctx.app.inject({ method: 'POST', url, headers: { origin: 'https://evil.example' }, payload: { username: 'owner', password: PASSWORD } });
+      expect(r.statusCode, url).toBe(403);
+      expect(r.json().error.code, url).toBe('BAD_ORIGIN');
+      expect(r.cookies.find((c) => c.name === 'yuzu_sid'), url).toBeUndefined();
+    }
+    const me = await api(ctx.app, ctx.owner, 'GET', '/%61pi/auth/me');
+    expect(me.status).toBe(200);
+    expect(me.body.staff.username).toBe('owner');
+    // 不存在的接口照旧回 404（不回落到前端页面）
+    for (const url of ['/api/nope', '/%61pi/nope']) {
+      const r = await api(ctx.app, ctx.owner, 'GET', url);
+      expect(r.status, url).toBe(404);
+      expect(r.body.error.code, url).toBe('NOT_FOUND');
     }
   });
 });

@@ -100,6 +100,10 @@ export const PERMISSIONS = {
   'dining.order': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 厨房出品屏：开始做、出餐、估清（S5 第一步，待确认：前台岗位与后勤人员；厨房可以用后勤账号） */
   'dining.kitchen': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk', 'backoffice'] },
+  /** 客房：入住、续住、换房、退房、收退押金、撤销入住、夜审（S7，v0.7.4，待确认：前台岗位都能做） */
+  'room.operate': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
+  /** 客房：打扫、维修（房态）（S7，v0.7.4，待确认：前台岗位与后勤人员；客房服务员可以用后勤账号） */
+  'room.housekeep': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk', 'backoffice'] },
   'settings.manage': { roles: ['owner'] },
   'audit.read': { roles: ['owner', 'store_manager'] },
   // ── 数据看板（v0.6.0；当日看板仍按「查看当日流水与日结」）──
@@ -207,6 +211,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'technician.dispatch': '钟房派钟、上下钟、加钟、退钟、上牌',
   'dining.order': '餐饮点单、催单、上菜',
   'dining.kitchen': '厨房出品屏：开始做、出餐、估清',
+  'room.operate': '客房入住、续住、换房、退房、押金、夜审',
+  'room.housekeep': '客房打扫、维修（房态）',
   'settings.manage': '修改经营规则设置',
   'audit.read': '查看操作审计',
   'report.executive': '看经营总览（任选时段、环比）',
@@ -222,7 +228,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   },
   {
     title: '前台手牌与账单',
-    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen'],
+    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen', 'room.operate', 'room.housekeep'],
   },
   {
     title: 'ERP（库存、采购、货款、营业数据）',

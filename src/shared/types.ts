@@ -69,6 +69,8 @@ export interface SessionInfo {
   technicians: boolean;
   /** 餐饮功能已开启（主导航的「餐饮」只在开启后显示） */
   dining: boolean;
+  /** 客房功能已开启（S7，v0.7.4：主导航的「客房」只在开启后显示） */
+  rooms: boolean;
   /** ERP 里能用的模块（v0.7.3：店主的模块开关与依赖算好的结果） */
   erpModules: import('./erp').ErpModuleKey[];
 }
@@ -333,6 +335,17 @@ export interface SettlementTotals {
    * 靠它让已确认的日结提示「有变动」
    */
   backfill: { count: number };
+  /**
+   * 客房押金（S7，v0.7.4）：押金是负债，不算营业额。received / refunded 是当天收、退的押金（按收款方式，现金进出钱箱）；
+   * held 是当天结束时的在住押金余额。升级之前确认的日结快照没有这一项，按 0 补齐
+   */
+  deposits: SettlementDeposits;
+}
+
+export interface SettlementDeposits {
+  received: { method: PaymentMethod; count: number; amount: number }[];
+  refunded: { method: PaymentMethod; count: number; amount: number }[];
+  held: number;
 }
 
 export interface BusinessTotals {

@@ -142,6 +142,8 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
       rechargeByMethod: ShiftSummary['recharges']['byMethod'];
       refunds: Omit<NonNullable<ShiftSummary['refunds']>, 'byMethod'>;
       refundByMethod: NonNullable<ShiftSummary['refunds']>['byMethod'];
+      depositReceived: NonNullable<ShiftSummary['deposits']>['received'];
+      depositRefunded: NonNullable<ShiftSummary['deposits']>['refunded'];
     })[]
   >`
     WITH co AS (
@@ -171,6 +173,10 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
     ), wc AS (
       SELECT total_amount FROM consumptions
       WHERE operator_id = ${s.staffId} AND checkout_id IS NULL AND status = 'completed' AND created_at >= ${from} AND created_at < ${to}
+    ), dp AS (
+      -- 客房押金（S7）：收、退都记在经办人当班的班次
+      SELECT kind, method, count(*) AS count, sum(amount) AS amount FROM room_deposits
+      WHERE shift_id = ${s.id} AND kind IN ('receive', 'refund') GROUP BY kind, method
     )
     SELECT
       (SELECT json_build_object('count', count(*), 'total', coalesce(sum(total_amount), 0)) FROM co) AS checkouts,
@@ -187,12 +193,20 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
                                                   'cashRefund', cash_refund, 'voidedByName', voided_by_name)
                                 ORDER BY voided_at), '[]'::json) FROM vd) AS voids,
       (SELECT json_build_object('count', count(*), 'total', coalesce(sum(total_amount), 0)) FROM vd) AS refunds,
-      (SELECT coalesce(json_agg(json_build_object('method', method, 'amount', amount) ORDER BY method), '[]'::json) FROM rf) AS refund_by_method`;
-  const { checkouts, checkoutByMethod, recharges, rechargeByMethod, walletConsumes, coupons, refunds, refundByMethod } = row!;
+      (SELECT coalesce(json_agg(json_build_object('method', method, 'amount', amount) ORDER BY method), '[]'::json) FROM rf) AS refund_by_method,
+      (SELECT coalesce(json_agg(json_build_object('method', method, 'count', count, 'amount', amount) ORDER BY method), '[]'::json)
+       FROM dp WHERE kind = 'receive') AS deposit_received,
+      (SELECT coalesce(json_agg(json_build_object('method', method, 'count', count, 'amount', amount) ORDER BY method), '[]'::json)
+       FROM dp WHERE kind = 'refund') AS deposit_refunded`;
+  const { checkouts, checkoutByMethod, recharges, rechargeByMethod, walletConsumes, coupons, refunds, refundByMethod, depositReceived, depositRefunded } = row!;
   const cashCheckout = checkoutByMethod.find((m) => m.method === 'cash')?.amount ?? 0;
   const cashRecharge = rechargeByMethod.find((m) => m.method === 'cash')?.amount ?? 0;
   // 升级时已有的班次：反结账按原口径只列提醒（与 v0.3 的交班表相同），不列退款、不扣现金
   const cashRefund = s.legacyRefund ? 0 : (refundByMethod.find((m) => m.method === 'cash')?.amount ?? 0);
+  // 客房押金的现金：收的计入、退的扣减（押金是负债，交班时钱箱里有这笔钱）；本班次没有押金往来时不列这一项
+  const hasDeposits = depositReceived.length > 0 || depositRefunded.length > 0;
+  const hasCashDeposit = [...depositReceived, ...depositRefunded].some((m) => m.method === 'cash');
+  const cashDeposit = (depositReceived.find((m) => m.method === 'cash')?.amount ?? 0) - (depositRefunded.find((m) => m.method === 'cash')?.amount ?? 0);
   return {
     from: new Date(from).toISOString(),
     to: new Date(to).toISOString(),
@@ -209,12 +223,14 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
       ...(voidedByName ? { voidedByName } : {}),
     })),
     ...(s.legacyRefund ? {} : { refunds: { ...refunds, byMethod: refundByMethod } }),
+    ...(hasDeposits ? { deposits: { received: depositReceived, refunded: depositRefunded } } : {}),
     cash: {
       opening: s.openingCash,
       checkout: cashCheckout,
       recharge: cashRecharge,
       ...(s.legacyRefund ? {} : { refund: cashRefund }),
-      expected: s.openingCash + cashCheckout + cashRecharge - cashRefund,
+      ...(hasCashDeposit ? { deposit: cashDeposit } : {}),
+      expected: s.openingCash + cashCheckout + cashRecharge - cashRefund + cashDeposit,
     },
   };
 }

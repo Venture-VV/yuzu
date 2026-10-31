@@ -15,6 +15,7 @@ import { WorkbenchPage } from './features/workbench/WorkbenchPage';
 import { FrontdeskPage } from './features/frontdesk/FrontdeskPage';
 import { ClockroomPage } from './features/clockroom/ClockroomPage';
 import { DiningPage } from './features/dining/DiningPage';
+import { RoomsPage } from './features/rooms/RoomsPage';
 import { LedgerPage } from './features/ledger/LedgerPage';
 import { SettlementPage } from './features/settlement/SettlementPage';
 import { ShiftPage } from './features/shift/ShiftPage';
@@ -121,14 +122,16 @@ function AuthGate({ shell = 'app' }: { shell?: 'app' | 'admin' | 'erp' | 'bare' 
   );
 }
 
-/** 首页：前台进入会员工作台；只用 ERP 的人（库存、采购、货款职责）直接进 ERP 的第一个模块；只管厨房的岗位进入餐饮 */
+/** 首页：前台进入会员工作台；只用 ERP 的人（库存、采购、货款职责）直接进 ERP 的第一个模块；只管厨房的岗位进入餐饮，只管客房打扫的进入客房 */
 function Home() {
   const can = useCan();
   const erp = useErpAccess();
-  const dining = useOptionalSession()?.dining ?? false;
+  const session = useOptionalSession();
+  const dining = session?.dining ?? false;
   if (can('member.read')) return <WorkbenchPage />;
   if (erp.landing) return <Navigate to={erp.landing} replace />;
   if (dining && (can('dining.kitchen') || can('dining.order'))) return <Navigate to="/dining" replace />;
+  if (session?.rooms && (can('room.operate') || can('room.housekeep'))) return <Navigate to="/rooms" replace />;
   if (erp.canEnter) return <Navigate to="/erp" replace />;
   return <Navigate to="/password" replace />;
 }
@@ -179,6 +182,7 @@ const router = createBrowserRouter([
       { path: 'frontdesk', element: <FrontdeskPage /> },
       { path: 'clockroom', element: <ClockroomPage /> },
       { path: 'dining/:tab?', element: <DiningPage /> },
+      { path: 'rooms', element: <RoomsPage /> },
       { path: 'ledger', element: <LedgerPage /> },
       { path: 'settlement/:date?', element: <SettlementPage /> },
       { path: 'shift', element: <ShiftPage /> },

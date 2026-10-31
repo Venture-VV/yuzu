@@ -14,15 +14,18 @@ import { Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { Columns, HBars, yuan } from './charts';
 import { MembersTab } from './MembersTab';
 import { OverviewTab } from './OverviewTab';
+import { RoomsTab } from './RoomsTab';
 import { TechniciansTab } from './TechniciansTab';
 
 // 看板按岗位分页（v0.6.0）：今日（值班经理、收银）、经营总览（总经理）、会员总览（客户经理）；各页按权限显示
 // v0.7.0 加「技师业绩」（店主、店总、值班经理）；技师功能关闭时不显示（店主 2026-10-30 定，数据保留，重新开启后照常显示）
+// v0.7.4 加「客房」（经营总览的岗位看）；客房功能关闭时同样不显示
 const TABS = [
   { key: 'today', label: '今日', perm: 'ledger.readToday' },
   { key: 'overview', label: '经营总览', perm: 'report.executive' },
   { key: 'members', label: '会员总览', perm: 'report.members' },
   { key: 'technicians', label: '技师业绩', perm: 'report.technicians' },
+  { key: 'rooms', label: '客房', perm: 'report.executive' },
 ] as const satisfies readonly { key: string; label: string; perm: Permission }[];
 type TabKey = (typeof TABS)[number]['key'];
 
@@ -48,7 +51,7 @@ export function DashboardPage() {
   const can = useCan();
   const { tab } = useParams();
   const [pref, setPref] = useState(readPref);
-  const tabs = TABS.filter((t) => can(t.perm) && (t.key !== 'technicians' || session.technicians));
+  const tabs = TABS.filter((t) => can(t.perm) && (t.key !== 'technicians' || session.technicians) && (t.key !== 'rooms' || session.rooms));
   const current = tabs.find((t) => t.key === tab) ?? (tab ? undefined : (tabs.find((t) => t.key === pref) ?? tabs[0]));
   if (!current) return <Navigate to={tabs.length ? '/dashboard' : '/'} replace />;
   return (
@@ -86,7 +89,17 @@ export function DashboardPage() {
       )}
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[1080px] space-y-5 px-5 py-6 md:px-7" data-testid="dashboard">
-          {current.key === 'overview' ? <OverviewTab /> : current.key === 'members' ? <MembersTab /> : current.key === 'technicians' ? <TechniciansTab /> : <TodayTab />}
+          {current.key === 'overview' ? (
+            <OverviewTab />
+          ) : current.key === 'members' ? (
+            <MembersTab />
+          ) : current.key === 'technicians' ? (
+            <TechniciansTab />
+          ) : current.key === 'rooms' ? (
+            <RoomsTab />
+          ) : (
+            <TodayTab />
+          )}
         </div>
       </div>
     </>
