@@ -1,7 +1,7 @@
 // v0.7.10 浏览器验收（8–10 月旧账只读对照，见 docs/LEGACY_LEDGER.md）：
 //   旧账合成样例（seed-legacy-demo）导入后，ERP「费用与备用金 → 旧账对照」常显「不进正式账」；核验的数与
 //   src/server/demo/legacy-expected.json 一致；点开第 3 条里不平的日子跳到付款台账并高亮那一行；已下单物料显示原图；
-//   品牌清单的链接只放行 http(s)。另：班次从前一个营业日开到现在时，交班页与前台提醒先交班（接口返回模拟的跨日班次）。
+//   品牌清单的链接只放行 http(s)（超链接或格里写的网址；只写了名称的算没有链接）。另：班次从前一个营业日开到现在时，交班页与前台提醒先交班（接口返回模拟的跨日班次）。
 // 依赖五套演示数据（仅独立演示库）；账号：店主 linlan，密码 yuzu2026。数据流程只在门店电脑尺寸执行。
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
@@ -58,18 +58,25 @@ test.describe('旧账对照（8–10 月）', () => {
     await expect(page.getByTestId('legacy-row-r-Sheet1:9')).toContainText('金额与第 8 行合并');
     await page.getByTestId('legacy-row-r-Sheet1:15').getByRole('button', { name: '看原表' }).click();
     await expect(page.getByTestId('legacy-row-r-Sheet1:15')).toContainText('=-1500-500');
+    // 没存结果的公式按精确的十进制算：=64.005-18.51 是 ¥45.50（不是 ¥45.49）
+    await expect(page.getByTestId('legacy-row-r-Sheet1:7')).toContainText('¥45.50');
 
     // 已下单物料：原图能打开
     await page.getByTestId('legacy-tab-ordered').click();
     const img = page.getByTestId('legacy-ordered').getByRole('img').first();
     await expect(img).toBeVisible();
-    expect(await img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true);
+    // 图片可能还在加载：等到加载完再看尺寸
+    await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true);
 
     // 品牌清单：链接只放行 http(s)，新窗口打开
     await page.getByTestId('legacy-tab-brand').click();
     const link = page.getByTestId('legacy-brand').getByRole('link').first();
     await expect(link).toHaveAttribute('href', /^https:\/\/example\.com\/sample\//);
     await expect(link).toHaveAttribute('rel', /noopener/);
+    // 网址写在分享文字里也能点开；只写了店铺名称的标「没有链接」
+    await expect(page.getByTestId('legacy-row-r-工作表1:5').getByRole('link')).toHaveAttribute('href', 'https://example.com/sample/3');
+    await expect(page.getByTestId('legacy-row-r-工作表1:6')).toContainText('没有链接');
+    await expect(page.getByTestId('legacy-row-r-工作表1:6').getByRole('link')).toHaveCount(0);
 
     // 只读：没有任何改动旧账的接口；正式的采购台账里没有旧账的单
     expect((await page.request.post('/api/erp/legacy/imports', { data: {} })).status()).toBe(404);

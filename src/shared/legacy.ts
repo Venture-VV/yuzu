@@ -228,3 +228,50 @@ export function legacyLedgerKind(l: Pick<LegacyLedgerLine, 'preHeader' | 'amount
   if (abs < LEGACY_RULES.payoutThresholdCents) return 'refund';
   return 'unclear';
 }
+
+/**
+ * 旧表「发票」列的写法 → 新账发票字典的键（待确认：「普通」按增值税普通发票算）。
+ * 写法与字典里的名称完全一样的直接认；其余写法都算「认不出」。
+ */
+export const LEGACY_INVOICE_ALIASES: Record<string, string> = {
+  专票: 'vat_special',
+  专用发票: 'vat_special',
+  增值税专票: 'vat_special',
+  增值税专用发票: 'vat_special',
+  普票: 'vat_normal',
+  普通: 'vat_normal',
+  普通发票: 'vat_normal',
+  增值税普票: 'vat_normal',
+  增值税普通发票: 'vat_normal',
+  收据: 'receipt',
+  无: 'none',
+  无票: 'none',
+};
+
+/** 旧表的发票写法对应新账字典里的哪一类；认不出返回 null */
+export function legacyInvoiceType<T extends { key: string; label: string }>(spelling: string, types: T[]): T | null {
+  const s = spelling.replace(/\s+/g, '');
+  if (!s) return null;
+  const key = LEGACY_INVOICE_ALIASES[s];
+  return types.find((t) => t.label.replace(/\s+/g, '') === s) ?? (key ? (types.find((t) => t.key === key) ?? null) : null);
+}
+
+/** 网址到空白或中文标点为止（淘宝、京东分享出来的「【淘宝】… https://… 点击链接直接打开」） */
+const URL_IN_TEXT = /https?:\/\/[^\s"'<>，。；！？、「」『』【】（）《》]+/i;
+
+/**
+ * 品牌清单一行能点开的参考链接：先看单元格的超链接，再看格里写的网址（整格是网址，或分享文字里带的网址）；
+ * 只认 http / https。格里只写了商品或店铺名称、没有网址的算没有链接
+ */
+export function legacyBrandLink(b: Pick<LegacyBrandLine, 'linkUrl' | 'linkText'>): string | null {
+  for (const s of [b.linkUrl.trim(), URL_IN_TEXT.exec(b.linkText)?.[0] ?? '']) {
+    if (!/^https?:\/\//i.test(s)) continue;
+    try {
+      const u = new URL(s);
+      if (u.protocol === 'http:' || u.protocol === 'https:') return s;
+    } catch {
+      // 不是合法网址
+    }
+  }
+  return null;
+}

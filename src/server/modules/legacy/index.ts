@@ -20,6 +20,8 @@ import { writeAudit } from '../../lib/audit';
 import type { Deps } from '../../lib/context';
 import { conflict, notFound, unprocessable } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
+import type { InvoiceTypeDef } from '@shared/expenses';
+import { loadExpenseRules } from '../expenses';
 import { legacyAudit, type LegacyData } from './audit';
 import { parseLegacyWorkbook, type ParsedLegacy } from './parse';
 
@@ -76,12 +78,15 @@ export interface LegacyBook {
   materials: LegacyMaterialLine[];
   ordered: LegacyOrderedLine[];
   brand: LegacyBrandLine[];
+  /** 新账的发票字典（核验第 5 条按它核对） */
+  invoiceTypes: InvoiceTypeDef[];
 }
 
 export async function loadLegacyBook(db: Db): Promise<LegacyBook> {
   const imports = await activeImports(db);
   const of = (s: LegacySource) => imports.find((i) => i.source === s);
-  const book: LegacyBook = { imports, ledger: [], payments: [], materials: [], ordered: [], brand: [] };
+  const { invoiceTypes } = await loadExpenseRules(db);
+  const book: LegacyBook = { imports, ledger: [], payments: [], materials: [], ordered: [], brand: [], invoiceTypes };
   const pl = of('purchase_ledger');
   if (pl) {
     book.ledger = await LEDGER_SQL(db, pl.id);
@@ -114,6 +119,7 @@ function dataOf(book: LegacyBook): LegacyData {
     brand: book.brand,
     brandSheet: brSheet?.name ?? '',
     brandTableRows: brSheet ? brSheet.rowElements - brSheet.headerRow : null,
+    invoiceTypes: book.invoiceTypes,
   };
 }
 

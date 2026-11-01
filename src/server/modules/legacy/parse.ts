@@ -11,6 +11,7 @@ import {
   type LegacyRawCells,
   type LegacySource,
 } from '@shared/legacy';
+import { add, div, lessThan, mul, neg, parseExact, roundScaled, sub, toSignificant, truncExact, exactInt, type Exact } from '../../lib/exact';
 import { dispImgId, readXlsx, serialToDate, XlsxReadError, type XlsxCell, type XlsxSheet } from '../../lib/xlsx-read';
 
 export class LegacyParseError extends Error {}
@@ -56,18 +57,21 @@ function display(c: XlsxCell): string {
   return c.formula ? `=${c.formula}${v !== '' ? ` → ${v}` : ''}` : v;
 }
 
-/** 只算纯四则运算的公式（文件里没存计算结果时用）；算不了返回 null */
-export function evalArithmetic(formula: string): number | null {
+/**
+ * 只算纯四则运算的公式（文件里没存计算结果时用），用精确的十进制算（不经过二进制浮点数：1.005-0.01 是 0.995，
+ * 不是 0.99499…）；算不了（有单元格引用、函数、除以 0）返回 null
+ */
+export function evalArithmetic(formula: string): Exact | null {
   const src = formula.replace(/^=/, '').replace(/\s+/g, '');
   if (!/^[0-9+\-*/().]+$/.test(src)) return null;
   let i = 0;
   const peek = () => src[i];
-  function factor(): number {
+  function factor(): Exact {
     const ch = peek();
     if (ch === '+' || ch === '-') {
       i++;
       const v = factor();
-      return ch === '-' ? -v : v;
+      return ch === '-' ? neg(v) : v;
     }
     if (ch === '(') {
       i++;
@@ -76,63 +80,69 @@ export function evalArithmetic(formula: string): number | null {
       i++;
       return v;
     }
-    const m = /^\d+(\.\d+)?|^\.\d+/.exec(src.slice(i));
+    const m = /^\d+(\.\d*)?|^\.\d+/.exec(src.slice(i));
     if (!m) throw new Error('number');
     i += m[0].length;
-    return Number(m[0]);
+    const v = parseExact(m[0]);
+    if (!v) throw new Error('number');
+    return v;
   }
-  function term(): number {
+  function term(): Exact {
     let v = factor();
     while (peek() === '*' || peek() === '/') {
       const op = src[i++];
       const r = factor();
-      v = op === '*' ? v * r : v / r;
+      v = op === '*' ? mul(v, r) : div(v, r);
     }
     return v;
   }
-  function expr(): number {
+  function expr(): Exact {
     let v = term();
     while (peek() === '+' || peek() === '-') {
       const op = src[i++];
       const r = term();
-      v = op === '+' ? v + r : v - r;
+      v = op === '+' ? add(v, r) : sub(v, r);
     }
     return v;
   }
   try {
     const v = expr();
-    return i === src.length && Number.isFinite(v) ? v : null;
+    return i === src.length ? v : null;
   } catch {
     return null;
   }
 }
 
-function num(c: XlsxCell | undefined): number | null {
+/** Excel 存数与显示的精度：15 位有效数字 */
+const EXCEL_DIGITS = 15;
+
+/**
+ * 文件里存的数字（如「2068.1199999999998」「1.0049999999999999」：Excel 按二进制浮点数存）按 Excel 的 15 位有效数字读成
+ * 精确的十进制（2068.12、1.005），与在 Excel 里看到的一致；不是数返回 null
+ */
+export function excelNumber(s: string): Exact | null {
+  const v = parseExact(s);
+  return v && toSignificant(v, EXCEL_DIGITS);
+}
+
+const NUMERIC_TEXT = /^[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?$/;
+
+/** 单元格的数：数字格按 Excel 的精度读；写成文字的数按原样读；没存结果的公式只算四则运算 */
+function num(c: XlsxCell | undefined): Exact | null {
   if (!c) return null;
   if (c.value !== null && c.value.trim() !== '') {
     const s = c.value.trim();
-    if (c.type === 'number' || /^[-+]?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(s)) {
-      const n = Number(s);
-      return Number.isFinite(n) ? n : null;
-    }
-    return null;
+    if (c.type === 'number') return excelNumber(s);
+    return NUMERIC_TEXT.test(s) ? parseExact(s) : null;
   }
   return c.formula ? evalArithmetic(c.formula) : null;
 }
 
-/** 元 → 分：按最短的十进制写法四舍五入到分（避免 1.005 这类二进制误差） */
-export function toCents(n: number): number {
-  const sign = n < 0 ? -1 : 1;
-  let s = String(Math.abs(n));
-  if (/e/i.test(s)) s = Math.abs(n).toFixed(10);
-  const [int, frac = ''] = s.split('.');
-  const padded = (frac + '000').slice(0, 3);
-  let cents = Number(int) * 100 + Number(padded.slice(0, 2));
-  if (Number(padded[2]) >= 5) cents += 1;
-  return sign * cents;
-}
+/** 元 → 分：精确值四舍五入到分（.5 远离 0） */
+export const toCents = (x: Exact): number => Number(roundScaled(x, 100n));
 
-const toMilli = (n: number) => Math.round(n * 1000);
+/** 数量 → 千分之一 */
+const toMilli = (x: Exact): number => Number(roundScaled(x, 1000n));
 
 /** 文字写的日期：2026-9-1、2026/9/1、2026.9.1、2026年9月1日 */
 export function parseDateText(s: string): string | null {
@@ -146,20 +156,22 @@ export function parseDateText(s: string): string | null {
 function dateOf(c: XlsxCell | undefined): { date: string | null; text: string } {
   if (!c) return { date: null, text: '' };
   const n = c.type === 'number' ? num(c) : null;
-  if (n !== null) return { date: serialToDate(n), text: c.value ?? '' };
+  if (n !== null) return { date: serialToDate(Number(truncExact(n))), text: c.value ?? '' };
   const t = text(c);
   return { date: t ? parseDateText(t) : null, text: t };
 }
+
+const ONE = exactInt(1);
 
 /** 税点：0.13、13%、13 → 万分之几 */
 function taxBp(c: XlsxCell | undefined): number | null {
   const t = text(c);
   if (!t) return null;
   const pct = /^(\d+(\.\d+)?)\s*%$/.exec(t);
-  if (pct) return Math.round(Number(pct[1]) * 100);
+  if (pct) return Number(roundScaled(parseExact(pct[1]!)!, 100n));
   const n = num(c);
   if (n === null) return null;
-  return n < 1 ? Math.round(n * 10_000) : Math.round(n * 100);
+  return Number(roundScaled(n, lessThan(n, ONE) ? 10_000n : 100n));
 }
 
 const YES = new Set(['是', '√', '✓', '✔', 'Y', 'y', 'yes', 'Yes']);
@@ -176,20 +188,59 @@ function matches(header: string, name: string): boolean {
   return name.endsWith('…') ? header.startsWith(name.slice(0, -1)) : header === name;
 }
 
-function findHeader(sheet: XlsxSheet, specs: ColumnSpec[], maxScan = 6): { row: number; cols: Record<string, number> } | null {
-  for (let r = 1; r <= maxScan; r++) {
-    const line = sheet.rows.get(r);
-    if (!line) continue;
-    const cols: Record<string, number> = {};
-    for (const c of line.values()) {
-      const h = norm(text(c));
-      if (!h) continue;
-      const spec = specs.find((s) => cols[s.key] === undefined && s.names.some((n) => matches(h, n)));
-      if (spec) cols[spec.key] = c.col;
-    }
+/** 表头最多在前几行 */
+const HEADER_SCAN_ROWS = 6;
+
+/** 一行里认出了哪几列：列键 → 列号 */
+function matchRow(sheet: XlsxSheet, r: number, specs: ColumnSpec[]): Record<string, number> {
+  const cols: Record<string, number> = {};
+  for (const c of sheet.rows.get(r)?.values() ?? []) {
+    const h = norm(text(c));
+    if (!h) continue;
+    const spec = specs.find((s) => cols[s.key] === undefined && s.names.some((n) => matches(h, n)));
+    if (spec) cols[spec.key] = c.col;
+  }
+  return cols;
+}
+
+function findHeader(sheet: XlsxSheet, specs: ColumnSpec[]): { row: number; cols: Record<string, number> } | null {
+  for (let r = 1; r <= HEADER_SCAN_ROWS; r++) {
+    const cols = matchRow(sheet, r, specs);
     if (specs.every((s) => cols[s.key] !== undefined)) return { row: r, cols };
   }
   return null;
+}
+
+/** 说明里列的名称（以「…」结尾的是「以它开头的列」） */
+const specLabel = (s: ColumnSpec) => s.names.join('」或「');
+
+/** 一张没导入的表为什么没导入：缺哪几列（按认出列最多的那一行；几种表头都试） */
+function sheetDiagnosis(sheet: XlsxSheet, alternatives: ColumnSpec[][]): string {
+  let best: { row: number; matched: number; missing: ColumnSpec[] } | null = null;
+  for (const specs of alternatives)
+    for (let r = 1; r <= HEADER_SCAN_ROWS; r++) {
+      const cols = matchRow(sheet, r, specs);
+      const matched = Object.keys(cols).length;
+      if (!best || matched > best.matched) best = { row: r, matched, missing: specs.filter((s) => cols[s.key] === undefined) };
+    }
+  if (!best || best.matched === 0) return `「${sheet.name}」前 ${HEADER_SCAN_ROWS} 行认不出表头`;
+  if (best.missing.length === 0) return `「${sheet.name}」与另一张表重复（这份表只导入一张）`;
+  return `「${sheet.name}」第 ${best.row} 行的表头缺「${best.missing.map(specLabel).join('」「')}」`;
+}
+
+/** 工作表里有没有写东西（有值或公式的格子） */
+const hasContent = (sheet: XlsxSheet) =>
+  [...sheet.rows.values()].some((row) => [...row.values()].some((c) => (c.value !== null && c.value.trim() !== '') || c.formula));
+
+/**
+ * 认出是哪份表之后，其余写了东西的工作表也必须导入：认不出的整份拒绝，不悄悄少导入一个月；完全空白的表跳过
+ */
+function rejectUnused(source: LegacySource, sheets: XlsxSheet[], used: XlsxSheet[], alternatives: ColumnSpec[][]) {
+  const bad = sheets.filter((s) => !used.includes(s) && hasContent(s));
+  if (bad.length === 0) return;
+  throw new LegacyParseError(
+    `「${LEGACY_SOURCE_LABELS[source]}」里有 ${bad.length} 张表认不出，整份没有导入：${bad.map((s) => sheetDiagnosis(s, alternatives)).join('；')}。改好表头（要的表头见 docs/LEGACY_LEDGER.md 第 2 节）或删掉这张表后再导入`,
+  );
 }
 
 function headerNames(sheet: XlsxSheet, row: number): string[] {
@@ -290,6 +341,7 @@ function parsePurchaseLedger(sheets: XlsxSheet[]): ParsedLegacy {
   const detail = sheets.map((s) => ({ s, h: findHeader(s, LEDGER_COLS) })).find((x) => x.h);
   const pay = sheets.map((s) => ({ s, h: findHeader(s, PAYMENT_COLS) })).find((x) => x.h && x.s !== detail?.s);
   if (!detail?.h || !pay?.h) throw new LegacyParseError('采购台账要有「费用报销明细」与「付款台账」两张表');
+  rejectUnused('purchase_ledger', sheets, [detail.s, pay.s], [LEDGER_COLS, PAYMENT_COLS]);
   {
     const { s, h } = detail;
     const top = mergedTop(s);
@@ -366,8 +418,9 @@ function parsePurchaseLedger(sheets: XlsxSheet[]): ParsedLegacy {
 
 function parseMaterialDetail(sheets: XlsxSheet[]): ParsedLegacy {
   const out = emptyResult('material_detail');
-  for (const s of sheets) {
-    const h = findHeader(s, MATERIAL_COLS);
+  const found = sheets.map((s) => ({ s, h: findHeader(s, MATERIAL_COLS) }));
+  rejectUnused('material_detail', sheets, found.filter((x) => x.h).map((x) => x.s), [MATERIAL_COLS]);
+  for (const { s, h } of found) {
     if (!h) continue;
     const top = mergedTop(s);
     const before = out.materials.length;
@@ -413,8 +466,9 @@ function parseMaterialDetail(sheets: XlsxSheet[]): ParsedLegacy {
 
 function parseOrdered(sheets: XlsxSheet[], cellImages: Map<string, { data: Buffer; ext: string }>): ParsedLegacy {
   const out = emptyResult('ordered_materials');
-  for (const s of sheets) {
-    const h = findHeader(s, ORDERED_COLS);
+  const found = sheets.map((s) => ({ s, h: findHeader(s, ORDERED_COLS) }));
+  rejectUnused('ordered_materials', sheets, found.filter((x) => x.h).map((x) => x.s), [ORDERED_COLS]);
+  for (const { s, h } of found) {
     if (!h) continue;
     const top = mergedTop(s);
     const before = out.ordered.length;
@@ -482,6 +536,7 @@ function parseBrand(sheets: XlsxSheet[]): ParsedLegacy {
   const out = emptyResult('brand_requests');
   const found = sheets.map((s) => ({ s, h: findHeader(s, BRAND_COLS) })).find((x) => x.h);
   if (!found?.h) throw new LegacyParseError('品牌新增寻款采购清单没有认出表头');
+  rejectUnused('brand_requests', sheets, [found.s], [BRAND_COLS]);
   const { s, h } = found;
   for (const [r, row] of [...s.rows].sort((a, b) => a[0] - b[0])) {
     if (r <= h.row || row.size === 0) continue;

@@ -8,6 +8,7 @@ import {
   LEGACY_LEDGER_KIND_LABELS,
   LEGACY_RULES,
   LEGACY_SOURCE_LABELS,
+  legacyBrandLink,
   legacyLedgerKind,
   type LegacyAudit,
   type LegacyFinding,
@@ -46,8 +47,6 @@ function tabOf(ref: LegacyRowRef, paymentSheet: string | undefined): Tab {
 const rowKey = (sheet: string, rowNo: number) => `${sheet}:${rowNo}`;
 const yuan = (cents: number | null) => (cents === null ? '—' : formatYuan(cents));
 /** 只放行 http(s) 链接（旧表里的链接是外部来的文字） */
-const safeUrl = (url: string) => (/^https?:\/\//i.test(url.trim()) ? url.trim() : null);
-
 function RawCells({ raw }: { raw: LegacyRawCells }) {
   return (
     <dl className="mt-1.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 rounded-md bg-paper-2/70 px-3 py-2 text-[12px]">
@@ -459,7 +458,8 @@ function BrandTab({ highlight }: { highlight: string | null }) {
     <Card className="overflow-hidden" data-testid="legacy-brand">
       <ul className="divide-y divide-line/70">
         {(rows.data!.brand ?? []).map((b) => {
-          const url = safeUrl(b.linkUrl) ?? safeUrl(b.linkText);
+          // 与核验第 12 条同一个判断：超链接或格里写的网址，只认 http / https
+          const url = legacyBrandLink(b);
           return (
             <RowItem
               key={b.rowNo}
@@ -477,6 +477,7 @@ function BrandTab({ highlight }: { highlight: string | null }) {
                   {b.ordered && <Badge tone="lake">已下单</Badge>}
                   {b.received && <Badge tone="pine">已到货</Badge>}
                   {b.returned && <Badge tone="clay">已退货</Badge>}
+                  {!url && <Badge tone="clay">没有链接</Badge>}
                 </>
               }
               lines={

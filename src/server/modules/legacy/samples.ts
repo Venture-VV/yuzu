@@ -9,7 +9,7 @@ import { crc32, zip } from '../../lib/xlsx';
 
 type CellSpec = string | number | { f: string; v?: string | number } | null | undefined;
 
-interface SheetSpec {
+export interface SheetSpec {
   name: string;
   /** 行号 → 各列（从 A 起）的值；数字按数字存，文字按共享字符串存 */
   rows: Record<number, CellSpec[]>;
@@ -31,7 +31,7 @@ const colName = (i: number) => {
   return s;
 };
 
-function buildWorkbook(sheets: SheetSpec[], images: CellImageSpec[] = []): Buffer {
+export function buildWorkbook(sheets: SheetSpec[], images: CellImageSpec[] = []): Buffer {
   const shared: string[] = [];
   const sharedIndex = new Map<string, number>();
   const si = (s: string) => {
@@ -190,7 +190,8 @@ function purchaseLedgerSample(): Buffer {
         4: [null, null, null, null, { f: '-3000-500', v: -3500 }],
         5: [1, D('2026-08-31'), '样例-抹布', 10, 120, '样例网店', '保洁', '普通发票'],
         6: [2, D('2026-08-31'), '样例-拖把', 2, 80, '样例网店', '保洁'],
-        7: [3, null, '样例-洗洁精', 3, 45.5, '样例超市', '厨房'],
+        // 没存结果的公式：精确算是 45.495 → ¥45.50（用二进制浮点数算会得 45.49499… → ¥45.49）
+        7: [3, null, '样例-洗洁精', 3, { f: '64.005-18.51' }, '样例超市', '厨房'],
         8: [4, D('2026-09-01'), '样例-托盘', 4, 600, '样例网店', '客房'],
         9: [5, D('2026-09-01'), '样例-托盘垫', 4, null, '样例网店', '客房'],
         10: [6, D('2026-09-01'), '样例-抹布退货', 1, -20, '样例网店', '保洁', null, '退货退款'],
@@ -235,7 +236,8 @@ function materialDetailSample(): Buffer {
         4: [2, D('2026-08-31'), '样例-托盘', null, 190, 4, 3, '男女宾、餐厅', '普通', 0.13, '低值耗材'],
         5: [3, D('2026-08-31')],
         6: [4, D('2026-08-31'), '样例-清洁剂', null, 60, 1, 1, '厨房耗材', '专票', 0.13, '耗材'],
-        7: [5, D('2026-08-31'), '样例-清洁布', null, null, 1, 1, '保洁', '普票', 0.03, '低值易耗'],
+        // 收据只能是 0 税点：第 5 条算对不上字典
+        7: [5, D('2026-08-31'), '样例-清洁布', null, null, 1, 1, '保洁', '收据', 0.03, '低值易耗'],
       },
       emptyRowsUntil: 12,
     },
@@ -293,8 +295,10 @@ function brandRequestsSample(): Buffer {
         2: ['序号', '是否下单', '是否到货', '是否退货', '产品名称', '用途', '采购数量', '备注', '产品详情', '参考链接渠道'],
         3: [1, '是', '是', null, '样例-玻璃杯', '客房漱口', 19, '大货', '水波杯 300ml', '样例店铺 玻璃杯'],
         4: [2, '是', '是', '是', '样例-托盘', '客房桌面', 9, null, '方舟托盘 30×24', '样例店铺 托盘'],
-        5: [3, '是', null, null, '样例-垃圾桶', '淋浴间', 1, '样品采购', '米白', 'https://example.com/sample/3'],
-        6: [4, null, null, null, '样例-香薰'],
+        // 没有超链接，网址写在分享文字里：算有链接
+        5: [3, '是', null, null, '样例-垃圾桶', '淋浴间', 1, '样品采购', '米白', '【样例】垃圾桶 https://example.com/sample/3 点击链接直接打开'],
+        // 只写了店铺名称、没有网址：算没有链接
+        6: [4, null, null, null, '样例-香薰', null, null, null, null, '样例店铺 香薰'],
         7: [5],
       },
       emptyRowsUntil: 12,

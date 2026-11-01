@@ -4,9 +4,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { LegacyAudit } from '../src/shared/legacy';
 import expected from '../src/server/demo/legacy-expected.json';
-import { evalArithmetic, parseDateText, toCents } from '../src/server/modules/legacy/parse';
+import { DEFAULT_EXPENSE_RULES } from '../src/shared/expenses';
+import { legacyBrandLink, legacyInvoiceType, type LegacyBrandLine, type LegacyMaterialLine } from '../src/shared/legacy';
+import { parseExact, toSignificant } from '../src/server/lib/exact';
+import { evalArithmetic, excelNumber, parseDateText, toCents } from '../src/server/modules/legacy/parse';
+import { legacyAudit, legacyInvoiceIssue, type LegacyData } from '../src/server/modules/legacy/audit';
 import { applyLegacyImport, fileMeta, legacyChecks, LegacyParseError, parseLegacyWorkbook, voidLegacyImport } from '../src/server/modules/legacy';
-import { legacySampleFiles, solidPng } from '../src/server/modules/legacy/samples';
+import { buildWorkbook, legacySampleFiles, solidPng } from '../src/server/modules/legacy/samples';
 import { parseRef, readXlsx, serialToDate } from '../src/server/lib/xlsx-read';
 import { buildXlsx } from '../src/server/lib/xlsx';
 import { createStaff } from '../src/server/modules/staff';
@@ -19,15 +23,35 @@ describe('读 Excel 与规整', () => {
     expect(parseRef('AA10')).toEqual({ row: 10, col: 26 });
     expect(serialToDate(46265)).toBe('2026-08-31');
     expect(serialToDate(46317)).toBe('2026-10-22');
-    expect(evalArithmetic('=-1234.5-678.9-10.6')).toBeCloseTo(-1924, 6);
-    expect(evalArithmetic('1999+12.34+56.78')).toBeCloseTo(2068.12, 6);
-    expect(evalArithmetic('(1+2)*3/2')).toBe(4.5);
+    const cents = (formula: string) => toCents(evalArithmetic(formula)!);
+    expect(cents('=-1234.5-678.9-10.6')).toBe(-192400);
+    expect(cents('1999+12.34+56.78')).toBe(206812);
+    expect(evalArithmetic('(1+2)*3/2')).toEqual({ n: 9n, d: 2n });
+    expect(cents('10/3')).toBe(333);
     expect(evalArithmetic('B2+B3')).toBeNull();
     expect(evalArithmetic('1+')).toBeNull();
-    expect(toCents(2068.1199999999998)).toBe(206812);
-    expect(toCents(1.005)).toBe(101);
-    expect(toCents(-1924.04)).toBe(-192404);
-    expect(toCents(0.5)).toBe(50);
+    expect(evalArithmetic('1/0')).toBeNull();
+    expect(toCents(parseExact('-1924.04')!)).toBe(-192404);
+    expect(toCents(parseExact('0.5')!)).toBe(50);
+    expect(toCents(parseExact('-0.005')!)).toBe(-1);
+    expect(parseExact('1.5E-3')).toEqual({ n: 3n, d: 2000n });
+    expect(parseExact('.5')).toEqual({ n: 1n, d: 2n });
+    expect(parseExact('-')).toBeNull();
+    expect(parseExact('1e999')).toBeNull();
+    expect(toSignificant(parseExact('12345678901234567890')!, 15)).toEqual({ n: 12345678901234600000n, d: 1n });
+  });
+
+  it('公式与金额用精确的十进制算，不经过二进制浮点数（Codex PR #26 P1）', () => {
+    const cents = (formula: string) => toCents(evalArithmetic(formula)!);
+    // 用浮点数算是 0.99499… → 99 分、0.00499… → 0 分
+    expect(cents('1.005-0.01')).toBe(100);
+    expect(cents('4.1-4.095')).toBe(1);
+    expect(cents('64.005-18.51')).toBe(4550);
+    // 文件里存的数按 Excel 的 15 位有效数字读（与在 Excel 里看到的一致）
+    expect(toCents(excelNumber('2068.1199999999998')!)).toBe(206812);
+    expect(toCents(excelNumber('1.0049999999999999')!)).toBe(101);
+    expect(toCents(excelNumber('0.30000000000000004')!)).toBe(30);
+    expect(toCents(excelNumber('-3500')!)).toBe(-350000);
     expect(parseDateText('2026/9/4')).toBe('2026-09-04');
     expect(parseDateText('2026年9月4日')).toBe('2026-09-04');
     expect(parseDateText('2026-02-30')).toBeNull();
@@ -62,14 +86,120 @@ describe('读 Excel 与规整', () => {
     expect(ledger.find((l) => l.rowNo === 9)).toMatchObject({ amountCents: null, mergedInto: 8 });
     expect(ledger.find((l) => l.rowNo === 15)).toMatchObject({ amountCents: -200000, amountFormula: '-1500-500' });
     expect(ledger.find((l) => l.rowNo === 18)).toMatchObject({ date: '2026-09-04', dateText: '2026/9/4' });
+    // 没存结果的公式按精确的十进制算
+    expect(ledger.find((l) => l.rowNo === 7)).toMatchObject({ amountCents: 4550, amountFormula: '64.005-18.51' });
     const ordered = parsed[2]!.ordered;
     expect(ordered.find((o) => o.rowNo === 4)).toMatchObject({ imageKey: 'ID_SAMPLE_B', imageShared: true });
     expect(ordered.find((o) => o.rowNo === 5)).toMatchObject({ imageKey: null });
-    expect(parsed[3]!.brand.find((b) => b.rowNo === 3)).toMatchObject({ ordered: true, received: true, returned: false, linkUrl: 'https://example.com/sample/1' });
+    const brand = parsed[3]!.brand;
+    expect(brand.find((b) => b.rowNo === 3)).toMatchObject({ ordered: true, received: true, returned: false, linkUrl: 'https://example.com/sample/1' });
+    // 能点开的链接：超链接、分享文字里的网址；只写了店铺名称的没有链接
+    expect(brand.map((b) => [b.rowNo, legacyBrandLink(b)])).toEqual([
+      [3, 'https://example.com/sample/1'],
+      [4, 'https://example.com/sample/2'],
+      [5, 'https://example.com/sample/3'],
+      [6, null],
+      [7, null],
+    ]);
 
     const other = buildXlsx({ name: '随便一张表', columns: [{ header: '姓名' }, { header: '电话' }], rows: [['张三', '1']] });
     expect(() => parseLegacyWorkbook(other)).toThrow(LegacyParseError);
     expect(() => parseLegacyWorkbook(Buffer.from('not a zip'))).toThrow(LegacyParseError);
+  });
+
+  it('认出是哪份表后，其余写了东西的表认不出就整份拒绝（不悄悄少导入一个月）；空白的表跳过（Codex PR #26）', () => {
+    const header = ['序号', '购买日期', '物品名', '用途', '金额', '购买数量', '到货数量', '部门', '发票（专票、普票）', '税点', '备注（办公费、固定资产、低值易耗等）'];
+    const row = [1, 46265, '样例-水杯', null, 9.9, 2, 2, '餐厅', '普票', 0.01, '固定资产'];
+    const month = (name: string, h: string[]) => ({ name, rows: { 1: ['采购物资明细表（合成样例）'], 2: h, 3: row } });
+    const renamed = header.map((h) => (h === '物品名' ? '品名' : h));
+    const err = (() => {
+      try {
+        parseLegacyWorkbook(buildWorkbook([month('8月', header), month('9月', renamed), month('10月', header)]));
+      } catch (e) {
+        return e;
+      }
+      return null;
+    })();
+    expect(err).toBeInstanceOf(LegacyParseError);
+    expect((err as Error).message).toContain('「9月」第 2 行的表头缺「物品名」');
+    expect((err as Error).message).toContain('整份没有导入');
+    // 完全空白的表（WPS 默认带的 Sheet3）跳过；三张都认得出就照常导入
+    const ok = parseLegacyWorkbook(buildWorkbook([month('8月', header), month('9月', header), { name: 'Sheet3', rows: {} }]));
+    expect(ok.sheets.map((s) => s.name)).toEqual(['8月', '9月']);
+    // 已下单物料同样：11 月的表头改了名
+    const ordered = ['下单时间', '产品名称', '图片', '选款', '部门', '下单人', '数量', '金额', '备注'];
+    const orderedBad = ordered.map((h) => (h === '下单人' ? '经办人' : h));
+    expect(() =>
+      parseLegacyWorkbook(buildWorkbook([{ name: '10月', rows: { 1: ordered, 2: [46318, '样例-芝士'] } }, { name: '11月', rows: { 1: orderedBad, 2: [46330, '样例-乳酪'] } }])),
+    ).toThrow('「11月」第 1 行的表头缺「下单人」');
+    // 品牌清单只导入一张：另一张写了东西又认不出也拒绝
+    expect(() => parseLegacyWorkbook(buildWorkbook([{ name: '工作表1', rows: { 1: ['标题'], 2: ['序号', '是否下单', '是否到货', '是否退货', '产品名称', '用途', '采购数量', '备注', '产品详情', '参考链接渠道'], 3: [1] } }, { name: '备忘', rows: { 1: ['随手记'] } }]))).toThrow(
+      '「备忘」前 6 行认不出表头',
+    );
+  });
+});
+
+describe('核验规则（纯计算）', () => {
+  const types = DEFAULT_EXPENSE_RULES.invoiceTypes;
+  const mat = (i: number, extra: Partial<LegacyMaterialLine> = {}): LegacyMaterialLine => ({
+    sheet: '8月', rowNo: i + 3, seq: String(i + 1), date: '2026-08-31', dateText: '', item: `样例-${i}`, purpose: '', amountCents: 100, amountFormula: null,
+    boughtText: '', boughtMilli: null, receivedText: '', receivedMilli: null, department: '保洁', invoice: '普票', taxText: '0.01', taxRateBp: 100,
+    category: '低值易耗', mergedInto: null, raw: {}, ...extra,
+  });
+  const brandLine = (rowNo: number, extra: Partial<LegacyBrandLine>): LegacyBrandLine => ({
+    rowNo, seq: String(rowNo), ordered: false, received: false, returned: false, product: '样例-杯', purpose: '客房', qtyText: '1', qtyMilli: 1000, note: '', details: '', linkText: '', linkUrl: '', raw: {}, ...extra,
+  });
+  const data = (over: Partial<LegacyData>): LegacyData => ({
+    imported: ['material_detail', 'brand_requests'], ledger: [], ledgerSheet: '', payments: [], paymentSheet: '', materials: [], materialSheets: [{ name: '8月', rows: 0 }],
+    ordered: [], brand: [], brandSheet: '工作表1', brandTableRows: 0, invoiceTypes: types, ...over,
+  });
+
+  it('第 5 条：发票写法换成新账字典的类别，再核对税点（Codex PR #26）', () => {
+    expect(legacyInvoiceType('普通', types)?.key).toBe('vat_normal');
+    expect(legacyInvoiceType('专 票', types)?.key).toBe('vat_special');
+    expect(legacyInvoiceType('增值税普通发票', types)?.key).toBe('vat_normal');
+    expect(legacyInvoiceType('电子票', types)).toBeNull();
+    const issue = (invoice: string, taxText: string, taxRateBp: number | null) => legacyInvoiceIssue({ invoice, taxText, taxRateBp }, types);
+    expect(issue('普票', '0.01', 100)).toBeNull();
+    expect(issue('专票', '0.13', 1300)).toBeNull();
+    expect(issue('无票', '', null)).toBeNull();
+    expect(issue('收据', '0.13', 1300)).toMatchObject({ kind: 'rate' });
+    expect(issue('专票', '0', 0)).toMatchObject({ kind: 'rate' });
+    expect(issue('专票', '', null)).toMatchObject({ kind: 'missing' });
+    expect(issue('', '', null)).toMatchObject({ kind: 'missing', why: '发票与税点都没填' });
+    expect(issue('电子票', '0.01', 100)).toMatchObject({ kind: 'unknown' });
+    expect(issue('普票', '免税', null)).toMatchObject({ kind: 'unknown' });
+
+    const audit = legacyAudit(data({ materials: [mat(0), mat(1, { invoice: '收据', taxText: '0.13', taxRateBp: 1300 }), mat(2, { invoice: '', taxText: '', taxRateBp: null })] }));
+    const r5 = audit.rules.find((r) => r.no === 5)!;
+    expect(r5.count).toBe(2);
+    expect(r5.result).toContain('2 行对不上（1 行没填、0 行写法认不出、1 行税点不在这类发票的范围里）');
+    expect(r5.rows.map((r) => r.rowNo)).toEqual([4, 5]);
+    // 店主在模块设置里给收据加上 13% 后就对得上
+    const loose = types.map((t) => (t.key === 'receipt' ? { ...t, taxRatesBp: [0, 1300] } : t));
+    expect(legacyAudit(data({ materials: [mat(1, { invoice: '收据', taxText: '0.13', taxRateBp: 1300 })], invoiceTypes: loose })).rules.find((r) => r.no === 5)!.count).toBe(0);
+  });
+
+  it('第 6 条：问题行超过 300 行时，条数按全部行算，只列前 300 行（Codex PR #26）', () => {
+    const audit = legacyAudit(data({ materials: Array.from({ length: 301 }, (_, i) => mat(i, { category: '耗材' })) }));
+    const r6 = audit.rules.find((r) => r.no === 6)!;
+    expect(r6.count).toBe(301);
+    expect(r6.rows).toHaveLength(300);
+  });
+
+  it('第 12 条与品牌清单完整度：只写了商品、店铺名称没有网址的算没有链接（Codex PR #26）', () => {
+    const brand = [
+      brandLine(3, { linkText: '样例店铺 玻璃杯', linkUrl: 'https://example.com/a' }),
+      brandLine(4, { linkText: '样例店铺 托盘' }),
+      brandLine(5, { linkText: '【样例】托盘 https://example.com/b 点击链接直接打开' }),
+      brandLine(6, { linkText: 'javascript:alert(1)' }),
+      brandLine(7, { linkUrl: 'ftp://example.com/c' }),
+    ];
+    const audit = legacyAudit(data({ imported: ['brand_requests'], brand, brandTableRows: 5 }));
+    const r12 = audit.rules.find((r) => r.no === 12)!;
+    expect(r12.rows.map((r) => r.rowNo)).toEqual([4, 6, 7]);
+    expect(r12.rows[0]!.text).toContain('只写了「样例店铺 托盘」，没有能点开的网址');
+    expect(audit.overview.find((o) => o.source === 'brand_requests')!.problems).toContain('3 行缺链接 / 用途 / 数量');
   });
 });
 
@@ -128,7 +258,8 @@ describe('导入只读表与核验', () => {
     expect(field('mixed_negatives').detail).toContain(`${expected.ledger.unclearRows} 行正好 -¥1,000.00 无法判断`);
     expect(field('material_missing').detail).toBe(`${expected.materials.noAmount} 行无金额、${expected.materials.noItem} 行无物品名`);
     expect(field('invoice_tax').detail).toContain(`发票写法 ${expected.materials.invoiceSpellings} 种`);
-    expect(field('invoice_tax').detail).toContain(`「（空） （空）」${expected.materials.emptyInvoiceTax} 行`);
+    expect(field('invoice_tax').detail).toContain(`「（空） （空）」${expected.materials.emptyInvoiceTax} 行（对不上字典）`);
+    expect(field('invoice_tax').detail).toContain('「收据 3%」1 行（对不上字典）');
     expect(field('category_synonyms').detail).toContain(`有 ${expected.materials.categoryVariants} 种写法`);
     expect(field('category_synonyms').count).toBe(expected.materials.categorySynonymRows);
     expect(field('department_text').detail).toContain(`${expected.materials.joinedDepartments} 行把几个部门拼在一起`);
@@ -139,6 +270,11 @@ describe('导入只读表与核验', () => {
     expect(Object.fromEntries(audit.rules.map((r) => [String(r.no), r.count]))).toEqual(expected.rules);
     const rule3 = audit.rules.find((r) => r.no === 3)!;
     expect(rule3.rows[0]!.text).toContain('2026-09-02');
+    const inv = expected.materials.invoiceIssues;
+    expect(audit.rules.find((r) => r.no === 5)!.result).toContain(
+      `${expected.rules['5']} 行对不上（${inv.missing} 行没填、${inv.unknown} 行写法认不出、${inv.rate} 行税点不在这类发票的范围里）`,
+    );
+    expect(audit.rules.find((r) => r.no === 12)!.rows.map((r) => r.text).join('；')).toContain('只写了「样例店铺 香薰」，没有能点开的网址');
   });
 
   it('逐行接口、原图；只读表不能改不能删；同一个文件再导入返回原来那次；换文件要写原因', async () => {
@@ -213,5 +349,9 @@ describe('同版小改（v0.7.10）', () => {
     expect(bad.body.error).toMatchObject({ message: '开始日期格式应为 YYYY-MM-DD', details: { field: 'from' } });
     const report = await api(ctx.app, ctx.owner, 'GET', '/api/reports/executive?from=2026-11-01');
     expect(report.body.error).toMatchObject({ message: '请填写结束日期（YYYY-MM-DD）', details: { field: 'to' } });
+    // 测试服回归报告里的例子：已下单物料缺 from 原来返回英文
+    const ordered = await api(ctx.app, ctx.owner, 'GET', '/api/purchase-orders/ordered-lines');
+    expect(ordered.status).toBe(400);
+    expect(ordered.body.error).toMatchObject({ message: '请填写开始日期（YYYY-MM-DD）', details: { field: 'from' } });
   });
 });

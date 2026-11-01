@@ -1,9 +1,12 @@
 // 旧账核验（v0.7.10）：按「账目问题清单」的结构与口径重算（见 docs/LEGACY_LEDGER.md 第 6、7 节）。
 // 纯计算：导入预览（内存里的解析结果）与页面（数据库里的只读表）用同一个函数，结果一致。
 
+import { taxRateText, type InvoiceTypeDef } from '@shared/expenses';
 import {
   LEGACY_RULES,
   LEGACY_SOURCE_LABELS,
+  legacyBrandLink,
+  legacyInvoiceType,
   legacyLedgerKind,
   type LegacyAudit,
   type LegacyBrandLine,
@@ -35,6 +38,23 @@ export interface LegacyData {
   brandSheet: string;
   /** 品牌清单表头之后表格里写出来的行数（含空行），没有导入为 null */
   brandTableRows: number | null;
+  /** 新账的发票字典（ERP「模块设置 → 费用与备用金」）：第 5 条按它核对旧表的发票与税点 */
+  invoiceTypes: InvoiceTypeDef[];
+}
+
+/** 明细表一行的发票与税点对不上新账字典的原因；对得上为 null */
+export function legacyInvoiceIssue(m: Pick<LegacyMaterialLine, 'invoice' | 'taxText' | 'taxRateBp'>, types: InvoiceTypeDef[]): { kind: 'missing' | 'unknown' | 'rate'; why: string } | null {
+  const tax = m.taxRateBp;
+  if (tax === null && m.taxText) return { kind: 'unknown', why: `税点写成「${m.taxText}」，认不出` };
+  if (!m.invoice) return { kind: 'missing', why: tax === null ? '发票与税点都没填' : '没填发票类型' };
+  const t = legacyInvoiceType(m.invoice, types);
+  if (!t) return { kind: 'unknown', why: `发票写成「${m.invoice}」，新账字典里没有这一类` };
+  const rates = t.taxRatesBp.map(taxRateText).join('、');
+  const name = m.invoice.replace(/\s+/g, '') === t.label.replace(/\s+/g, '') ? `「${t.label}」` : `「${m.invoice}」（按${t.label}）`;
+  // 只允许 0 的（收据、无票）没填税点按 0 算
+  if (tax === null) return t.taxRatesBp.length === 1 && t.taxRatesBp[0] === 0 ? null : { kind: 'missing', why: `${name}没填税点（只能是 ${rates}）` };
+  if (!t.taxRatesBp.includes(tax)) return { kind: 'rate', why: `${name}的税点 ${taxRateText(tax)} 不在字典里（只能是 ${rates}）` };
+  return null;
 }
 
 /** 每条最多列多少行（另给总数） */
@@ -115,7 +135,9 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
   // ── 品牌清单 ──
   const B = d.brand;
   const brandRef = (b: LegacyBrandLine, why: string): LegacyRowRef => ({ source: 'brand_requests', sheet: d.brandSheet, rowNo: b.rowNo, text: `第 ${b.rowNo} 行${b.product ? `「${b.product}」` : ''}：${why}` });
-  const brandComplete = B.filter((b) => b.product && b.purpose && b.qtyMilli !== null && (b.linkUrl || b.linkText));
+  // 链接要能点开（超链接或格里写的网址）；格里只写了商品、店铺名称的算没有链接
+  const noLink = B.filter((b) => legacyBrandLink(b) === null);
+  const brandComplete = B.filter((b) => b.product && b.purpose && b.qtyMilli !== null && !noLink.includes(b));
   const brandRows = d.brandTableRows ?? B.length;
 
   // ───────── 一、总览 ─────────
@@ -284,16 +306,18 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
     );
     const combos = new Map<string, LegacyMaterialLine[]>();
     for (const m of M) {
-      const key = `${m.invoice || '（空）'} ${m.taxRateBp !== null ? `${m.taxRateBp / 100}%` : m.taxText || '（空）'}`;
+      const key = `${m.invoice || '（空）'} ${m.taxRateBp !== null ? taxRateText(m.taxRateBp) : m.taxText || '（空）'}`;
       combos.set(key, [...(combos.get(key) ?? []), m]);
     }
     const sorted = [...combos.entries()].sort((a, b) => b[1].length - a[1].length);
     const spellings = [...new Set(M.map((m) => m.invoice).filter(Boolean))];
+    // 对不上的组合标出来（按第 5 条同样的字典）
+    const comboOk = (v: LegacyMaterialLine[]) => legacyInvoiceIssue(v[0]!, d.invoiceTypes) === null;
     fieldIssues.push(
       finding(
         'invoice_tax',
         '发票与税点',
-        `发票写法 ${spellings.length} 种（${spellings.join(' / ') || '—'}）；组合：${sorted.map(([k, v]) => `「${k}」${v.length} 行`).join('、')}`,
+        `发票写法 ${spellings.length} 种（${spellings.join(' / ') || '—'}）；组合：${sorted.map(([k, v]) => `「${k}」${v.length} 行${comboOk(v) ? '' : '（对不上字典）'}`).join('、')}`,
         sorted.flatMap(([k, v]) => v.map((m) => matRef(m, k))),
       ),
     );
@@ -385,14 +409,23 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
         )
       : skip(4, '应退回减实际退回为未退回，超 7 天预警', 'purchase_ledger'),
   );
-  const inv = fieldIssues.find((f) => f.key === 'invoice_tax');
+  // 第 5 条：旧表的发票写法换成新账字典里的类别（专票 → 增值税专用发票，普票、普通 → 增值税普通发票……），再看税点在不在这一类允许的范围里
+  const invoiceBad = M.map((m) => ({ m, issue: legacyInvoiceIssue(m, d.invoiceTypes) })).filter((x) => x.issue !== null);
+  const invoiceKinds = (k: 'missing' | 'unknown' | 'rate') => invoiceBad.filter((x) => x.issue!.kind === k).length;
   rules.push(
     has('material_detail')
-      ? rule(5, '发票类型与税点必须匹配字典', `旧表没有字典：${inv?.detail ?? ''}`, M.filter((m) => !m.invoice || m.taxRateBp === null).length, M.filter((m) => !m.invoice || m.taxRateBp === null).map((m) => matRef(m, '发票或税点没填')))
+      ? rule(
+          5,
+          '发票类型与税点必须匹配字典',
+          `按新账的发票字典（${d.invoiceTypes.map((t) => `${t.label} ${t.taxRatesBp.map(taxRateText).join('/')}`).join('；')}）核对明细表 ${M.length} 行：${invoiceBad.length} 行对不上（${invoiceKinds('missing')} 行没填、${invoiceKinds('unknown')} 行写法认不出、${invoiceKinds('rate')} 行税点不在这类发票的范围里）`,
+          invoiceBad.length,
+          invoiceBad.map((x) => matRef(x.m, x.issue!.why)),
+        )
       : skip(5, '发票类型与税点必须匹配字典', 'material_detail'),
   );
   const syn = fieldIssues.find((f) => f.key === 'category_synonyms');
-  rules.push(has('material_detail') ? rule(6, '费用科目只允许办公费、固定资产、低值易耗', syn?.detail ?? '', syn?.rows.length ?? 0, syn?.rows) : skip(6, '费用科目只允许办公费、固定资产、低值易耗', 'material_detail'));
+  // count 是全部行数；rows 只列前 MAX_ROWS 行
+  rules.push(has('material_detail') ? rule(6, '费用科目只允许办公费、固定资产、低值易耗', syn?.detail ?? '', syn?.count ?? 0, syn?.rows) : skip(6, '费用科目只允许办公费、固定资产、低值易耗', 'material_detail'));
   const dep = fieldIssues.find((f) => f.key === 'department_text');
   rules.push(has('material_detail') ? rule(7, '部门走字典，禁止多部门拼接', dep?.detail ?? '', dep?.count ?? 0, dep?.rows) : skip(7, '部门走字典，禁止多部门拼接', 'material_detail'));
   const diffQty = M.filter((m) => m.boughtMilli !== null && m.receivedMilli !== null && m.boughtMilli !== m.receivedMilli);
@@ -416,7 +449,6 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
       : skip(10, '同一物品同一天重复下单提示', 'ordered_materials'),
   );
   rules.push(rule(11, '标注有发票但实际无票直接拦截', '旧表没有发票号，核对不了（新账登记时按发票类型要求发票号）', null));
-  const noLink = B.filter((b) => !(b.linkUrl || b.linkText));
   const noImage = O.filter((o) => !o.hasImage);
   rules.push(
     has('brand_requests') || has('ordered_materials')
@@ -425,7 +457,7 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
           '图片与链接为必填',
           [has('brand_requests') ? `品牌清单有内容的 ${B.length} 行里 ${noLink.length} 行没有链接（表格共 ${brandRows} 行，${brandRows - B.length} 行是空行）` : notImported('brand_requests'), has('ordered_materials') ? `已下单物料 ${noImage.length} 行没有图片` : notImported('ordered_materials')].join('；'),
           noLink.length + noImage.length,
-          [...noLink.map((b) => brandRef(b, '没有链接')), ...noImage.map((o) => ordRef(o, '没有图片'))],
+          [...noLink.map((b) => brandRef(b, b.linkText ? `只写了「${b.linkText.slice(0, 40)}」，没有能点开的网址` : '没有链接')), ...noImage.map((o) => ordRef(o, '没有图片'))],
         )
       : skip(12, '图片与链接为必填', 'brand_requests'),
   );

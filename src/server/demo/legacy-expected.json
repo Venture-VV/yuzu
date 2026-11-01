@@ -40,8 +40,8 @@
     "zeroAdvanceWithSpend": ["2026-09-03"],
     "diffs": { "2026-08-31": 0, "2026-09-01": 0, "2026-09-02": 10000, "2026-09-03": -5000, "2026-09-04": -49, "2026-09-05": 5000 }
   },
-  "materials": { "rows": 8, "cents": 129040, "noAmount": 3, "noItem": 2, "noPurpose": 7, "invoiceSpellings": 3, "emptyInvoiceTax": 3, "categoryVariants": 4, "categorySynonymRows": 2, "joinedDepartments": 1, "costInDepartment": 1, "boughtNotReceived": 1 },
+  "materials": { "rows": 8, "cents": 129040, "noAmount": 3, "noItem": 2, "noPurpose": 7, "invoiceSpellings": 4, "emptyInvoiceTax": 3, "invoiceIssues": { "missing": 3, "unknown": 0, "rate": 1 }, "categoryVariants": 4, "categorySynonymRows": 2, "joinedDepartments": 1, "costInDepartment": 1, "boughtNotReceived": 1 },
   "ordered": { "rows": 5, "cents": 35770, "withImage": 4, "emptyNotes": 5, "sameDayDuplicates": 1 },
   "brand": { "contentRows": 5, "tableRows": 10, "qty": 29, "incomplete": 7, "ordered": 3, "received": 2, "returned": 1, "orderedNotReceived": 1, "noLink": 2 },
-  "rules": { "1": 8, "2": 2, "3": 3, "4": 2, "5": 3, "6": 2, "7": 2, "8": 1, "9": 1, "10": 1, "11": null, "12": 3 }
+  "rules": { "1": 8, "2": 2, "3": 3, "4": 2, "5": 4, "6": 2, "7": 2, "8": 1, "9": 1, "10": 1, "11": null, "12": 3 }
 }
