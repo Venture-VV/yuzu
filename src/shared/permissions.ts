@@ -18,7 +18,7 @@ export type Duty = (typeof DUTIES)[number];
 
 /**
  * 分岗不兼任（#17 后半句，v0.7.12）：职责分五组，一名员工的职责只能在一组里；财务组内对账付款、成本核算可以同时有。
- * 店主不受限制。后台保存员工时校验；已有跨组的员工不自动改，后台与库存工作台提示。
+ * 店主不受限制。后台保存员工时校验；已有跨组的员工不自动改，后台员工页提示（不进自检）。
  */
 export const DUTY_GROUPS: { key: 'stock' | 'purchase' | 'department' | 'finance' | 'approve'; label: string; duties: readonly Duty[] }[] = [
   { key: 'stock', label: '仓库', duties: ['stock'] },

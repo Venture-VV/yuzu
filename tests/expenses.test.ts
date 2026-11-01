@@ -350,9 +350,23 @@ describe('现付供应商与按采购单报销', () => {
     expect(blocked.body.error.message).toContain(ok.body.claim.docNo);
     expect((await api(ctx.app, coster, 'GET', `/api/erp/expenses/po/${po.id}`)).body.lines[0].claimedBy).toBe(ok.body.claim.docNo);
 
-    // 冲销后可以重新报
+    // 冲销后可以重新报；按采购单报销时可以单独加一行运费（#15，v0.7.12）：不对应采购单的物料行
     await api(ctx.app, coster, 'POST', `/api/erp/expenses/${ok.body.claim.id}/void`, { reason: '金额登记错了' });
-    expect((await byPo({ diffReason: '另一箱下周到', amountCents: 90_000 })).status).toBe(201);
+    const again = await claim(coster, {
+      purchaseOrderId: po.id,
+      purpose: '客用消耗',
+      lines: [
+        { name: pl.name, category: 'low_value', unit: pl.unit, boughtMilli: pl.boughtMilli, receivedMilli: pl.receivedMilli, diffReason: '另一箱下周到', amountCents: 90_000, poLineId: pl.poLineId },
+        { name: '运费', category: 'freight', unit: '次', boughtMilli: q(1), receivedMilli: q(1), amountCents: 2_000 },
+      ],
+    });
+    expect(again.status).toBe(201);
+    expect(again.body.claim).toMatchObject({ amountCents: 92_000, purchaseOrder: { id: po.id } });
+    expect(again.body.claim.lines).toEqual([
+      expect.objectContaining({ category: 'low_value', poLineId: pl.poLineId, amountCents: 90_000 }),
+      expect.objectContaining({ category: 'freight', poLineId: null, amountCents: 2_000 }),
+    ]);
+    expect((await api(ctx.app, coster, 'GET', `/api/erp/expenses/po/${po.id}`)).body.lines[0].claimedBy).toBe(again.body.claim.docNo);
 
     // 现付收货的退货也不记应付扣款
     const ret = await api(ctx.app, keeper, 'POST', '/api/inventory/docs', {

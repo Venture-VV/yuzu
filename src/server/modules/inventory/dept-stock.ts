@@ -117,7 +117,7 @@ export async function deptStockMeta(db: Db, actor: Actor): Promise<DeptStockMeta
 
 const DocsQuery = z.object({
   type: z.enum(INV_DOC_TYPES).optional(),
-  status: z.string().max(16).optional(),
+  status: z.string().max(32).optional(),
   from: docDateSchema.optional(),
   to: docDateSchema.optional(),
   unsigned: z.enum(['1']).optional(),

@@ -1486,7 +1486,7 @@ export async function findDocByKey(db: Db, key: string): Promise<InvDoc | null> 
 
 const ListQuery = z.object({
   type: z.enum(Object.keys(INV_DOC_META) as [InvDocType, ...InvDocType[]]).optional(),
-  status: z.string().max(16).optional(),
+  status: z.string().max(32).optional(),
   from: docDateSchema.optional(),
   to: docDateSchema.optional(),
   materialId: z.coerce.number().int().positive().optional(),

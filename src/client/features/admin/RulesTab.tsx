@@ -300,21 +300,29 @@ function InventoryRules() {
   const toast = useToast();
   const [draft, setDraft] = useState<InventorySettings | null>(null);
   const [capText, setCapText] = useState('');
+  const [thresholdText, setThresholdText] = useState('');
+  const [windowText, setWindowText] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (settings.data && !draft) {
     setDraft(settings.data);
     setCapText(centsToInput(settings.data.urgentCapCents));
+    setThresholdText(centsToInput(settings.data.approvalThresholdCents));
+    setWindowText(String(settings.data.usageWindowDays));
   }
   if (!draft) return <Skeleton className="h-48" />;
 
   const save = async () => {
     const urgentCapCents = parseYuan(capText);
     if (!urgentCapCents || urgentCapCents < 100) return setError('请填写急采上限（至少 1 元）');
+    const approvalThresholdCents = thresholdText.trim() === '' ? 0 : parseYuan(thresholdText);
+    if (approvalThresholdCents === null || approvalThresholdCents < 0) return setError('免确认门槛要是不小于 0 的金额（0 表示全部要负责人确认）');
+    const usageWindowDays = Number(windowText);
+    if (!Number.isInteger(usageWindowDays) || usageWindowDays < 7 || usageWindowDays > 90) return setError('用量统计天数要在 7 到 90 天之间');
     setSaving(true);
     setError(null);
     try {
-      const next = await api.put<InventorySettings>('/api/inventory/settings', { ...draft, urgentCapCents });
+      const next = await api.put<InventorySettings>('/api/inventory/settings', { ...draft, urgentCapCents, approvalThresholdCents, usageWindowDays });
       qc.setQueryData(['inv', 'settings'], next);
       toast({ tone: 'success', title: '库存与采购规则已保存', body: '只影响之后提交的单据。' });
     } catch (err) {
@@ -338,6 +346,12 @@ function InventoryRules() {
         </Field>
         <Field label="急采上限" htmlFor="i-urgent-cap" hint="收货必须按采购单；没有采购单只能登记急采，每张不超过这个金额">
           <MoneyInput id="i-urgent-cap" value={capText} onChange={(e) => setCapText(e.target.value)} />
+        </Field>
+        <Field label="免确认门槛" htmlFor="i-threshold" hint="下面勾选的单据，金额不超过这个数的提交即生效（报损按参考价估算）；填 0 全部要确认">
+          <MoneyInput id="i-threshold" value={thresholdText} onChange={(e) => setThresholdText(e.target.value)} />
+        </Field>
+        <Field label="可用天数按近几天的用量算" htmlFor="i-window" hint="物料设了提醒天数时：可用天数 = 结存 ÷ 这段时间的日均用量（7–90 天）">
+          <Input id="i-window" inputMode="numeric" value={windowText} onChange={(e) => setWindowText(e.target.value.replace(/\D/g, ''))} />
         </Field>
       </div>
       <p className="mt-5 mb-2 text-[13px] font-bold text-ink-2">需要负责人确认的单据</p>

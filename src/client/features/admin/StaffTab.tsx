@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { KeyRound, UserPlus } from 'lucide-react';
 import { DUTY_LABELS, ROLE_HINTS, ROLE_LABELS } from '@shared/labels';
-import { DUTIES, type Duty, type Role } from '@shared/permissions';
+import { DUTIES, dutyConflict, type Duty, type Role } from '@shared/permissions';
 import type { StaffRecord } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
 import { qk, useStaff } from '../../lib/queries';
@@ -37,6 +37,14 @@ export function StaffTab() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-[13px] text-ink-3">每位员工使用自己的账号，所有余额与库存操作都记录经办人。停用后立即退出登录。</p>
+        {(() => {
+          const conflicts = (staff.data ?? []).filter((s) => s.active && dutyConflict(s.role, s.duties));
+          return conflicts.length > 0 ? (
+            <Notice tone="warning" title={`${conflicts.length} 名员工的职责跨了组，请改成一组（仓库、采购、部门、财务、负责人不兼任）`} className="w-full">
+              {conflicts.map((s) => `${s.displayName}（${dutyConflict(s.role, s.duties)}）`).join('、')}。不改也照常能用，但下次保存这名员工时要先改成一组。
+            </Notice>
+          ) : null;
+        })()}
         <Button variant="primary" size="sm" icon={<UserPlus className="size-4" />} onClick={() => setEditing('new')}>
           添加员工
         </Button>
@@ -69,6 +77,7 @@ export function StaffTab() {
                 </span>
                 {s.departmentName && <span className="text-[12.5px] text-ink-2">所属部门：{s.departmentName}</span>}
                 {!s.active && <Badge tone="clay">已停用</Badge>}
+                {s.active && dutyConflict(s.role, s.duties) && <Badge tone="ember">职责跨组</Badge>}
                 {s.mustChangePassword && s.active && <Badge tone="yuzu">待首次改密</Badge>}
                 <div className="flex gap-1.5">
                   <Button size="sm" variant="ghost" icon={<KeyRound className="size-3.5" />} onClick={() => setResetting(s)}>
@@ -237,7 +246,7 @@ function StaffDialog({
           />
           <p className="text-[12.5px] text-ink-3">{ROLE_HINTS[role]}</p>
         </Field>
-        <Field label="库存与采购职责" aside={<span className="text-[12px] text-ink-3">可兼任多项</span>}>
+        <Field label="库存与采购职责" aside={<span className="text-[12px] text-ink-3">仓库、采购、部门、财务（含成本）、负责人不兼任</span>}>
           {role === 'owner' ? (
             <p className="rounded-md bg-paper-2/70 px-3 py-2.5 text-[13px] text-ink-2">店主默认拥有全部库存与采购权限。</p>
           ) : (
@@ -266,6 +275,9 @@ function StaffDialog({
                 );
               })}
             </div>
+          )}
+          {role !== 'owner' && dutyConflict(role, duties) && (
+            <p className="text-[12.5px] font-semibold text-clay">职责跨了「{dutyConflict(role, duties)}」：只能在一组里（对账付款与成本核算同属财务，可以同时有）。</p>
           )}
           {role !== 'owner' && <p className="text-[12px] text-ink-3">库存职责不会带来会员钱包、撤销或日结权限。</p>}
         </Field>

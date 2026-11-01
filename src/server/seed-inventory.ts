@@ -40,7 +40,7 @@ export async function seedInventoryDemo(sql: Sql, config: AppConfig) {
 
   const deps: Deps = { sql, config };
   // 演示库统一使用默认的模拟审批规则；免确认门槛设为 0（全部要负责人确认），固定预期里的待确认单据才会停在待确认（v0.7.12）。
-  // 验收 #18 时在 ERP「模块设置 → 库存」把门槛改回 2000 元。
+  // 验收 #18 时在 后台「规则总表 → 库存与采购」把门槛改回 2000 元。
   await sql`
     INSERT INTO settings (key, value) VALUES ('inventory_approval_rules', ${sql.json(DEFAULT_APPROVAL_RULES as never)})
     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`;

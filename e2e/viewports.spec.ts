@@ -281,6 +281,10 @@ test.describe('视口冒烟', () => {
       // v0.7.10：旧账对照（核验页与带原图的已下单物料）
       ['/erp/legacy', 'legacy-page'],
       ['/erp/legacy?tab=ordered', 'legacy-page'],
+      // v0.7.12：核销与退款、批量导入、付款登记（预付款）
+      ['/payables?view=settlements', null],
+      ['/payables/import', null],
+      ['/payables/pay', null],
     ] as const) {
       await page.goto(url);
       await expect(page.getByTestId('erp-shell')).toBeVisible();

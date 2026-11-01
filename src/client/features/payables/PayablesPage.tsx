@@ -64,7 +64,8 @@ export function PayablesPage() {
           )
         }
       />
-      <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-line px-5 py-3 md:px-7">
+      {/* 手机上五个视图放不下：这一行横向滑动（v0.7.12 加了「核销与退款」） */}
+      <div className="scroll-thin flex shrink-0 items-center gap-3 overflow-x-auto border-b border-line px-5 py-3 md:px-7">
         <Segmented<View>
           size="sm"
           value={view}

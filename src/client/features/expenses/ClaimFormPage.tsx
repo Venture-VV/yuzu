@@ -70,6 +70,8 @@ export function ClaimFormPage() {
   const [poQuery, setPoQuery] = useState('');
   const [poId, setPoId] = useState<number | null>(Number(params.get('po')) || null);
   const [poPick, setPoPick] = useState<Record<number, { on: boolean; category: ExpenseCategory | ''; amount: string; diffReason: string }>>({});
+  const [freightOn, setFreightOn] = useState(false);
+  const [freightText, setFreightText] = useState('');
   const [approveNow, setApproveNow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -129,7 +131,10 @@ export function ClaimFormPage() {
     return { pl, pick, cents, differs, err };
   });
   const chosenPo = poRows.filter((r) => r.pick.on);
-  const total = mode === 'adhoc' ? adhocRows.reduce((t, r) => t + (r.cents ?? 0), 0) : chosenPo.reduce((t, r) => t + (r.cents ?? 0), 0);
+  // 按采购单报销时单独加一行运费（#15，v0.7.12）：不对应物料，不进物料成本
+  const freightCents = mode === 'po' && freightOn ? parseYuan(freightText) : null;
+  const total =
+    mode === 'adhoc' ? adhocRows.reduce((t, r) => t + (r.cents ?? 0), 0) : chosenPo.reduce((t, r) => t + (r.cents ?? 0), 0) + (freightCents ?? 0);
   const threshold = rules.data?.approvalThresholdCents ?? 200_000;
   const needsApproval = total > threshold;
 
@@ -154,7 +159,9 @@ export function ClaimFormPage() {
                     ? '请选择采购单'
                     : chosenPo.length === 0
                       ? '请勾选要报销的行'
-                      : chosenPo.find((r) => r.err)?.err ?? null
+                      : freightOn && (!freightCents || freightCents <= 0)
+                        ? '请填写运费金额'
+                        : chosenPo.find((r) => r.err)?.err ?? null
                   : adhocRows.find((r) => r.err)?.err ?? null;
 
   if (!can('expense.manage')) return <Navigate to="/erp/expenses" replace />;
@@ -195,16 +202,19 @@ export function ClaimFormPage() {
             diffReason: differs ? l.diffReason.trim() : '',
             amountCents: cents,
           }))
-        : chosenPo.map(({ pl, pick, cents, differs }) => ({
-            name: pl.name,
-            category: pick.category,
-            unit: pl.unit,
-            boughtMilli: pl.boughtMilli,
-            receivedMilli: pl.receivedMilli,
-            diffReason: differs ? pick.diffReason.trim() : '',
-            amountCents: cents,
-            poLineId: pl.poLineId,
-          }));
+        : [
+            ...chosenPo.map(({ pl, pick, cents, differs }) => ({
+              name: pl.name,
+              category: pick.category,
+              unit: pl.unit,
+              boughtMilli: pl.boughtMilli,
+              receivedMilli: pl.receivedMilli,
+              diffReason: differs ? pick.diffReason.trim() : '',
+              amountCents: cents,
+              poLineId: pl.poLineId,
+            })),
+            ...(freightOn && freightCents ? [{ name: '运费', category: 'freight', unit: '次', boughtMilli: 1000, receivedMilli: 1000, diffReason: '', amountCents: freightCents }] : []),
+          ];
     const deptName = departments.data?.find((d) => d.id === departmentId)?.name ?? '';
     const names = payloadLines.map((l) => l.name);
     const what = mode === 'po' && po.data ? `采购单 ${po.data.docNo}` : `${names[0] ?? ''}${names.length > 1 ? ` 等 ${names.length} 项` : ''}`;
@@ -466,7 +476,7 @@ export function ClaimFormPage() {
                       </span>
                       <Select aria-label={`${pl.name} 费用科目`} value={pick.category} disabled={locked || !pick.on} onChange={(e) => setPick(pl.poLineId, { category: e.target.value as ExpenseCategory })} className="col-start-2 md:col-start-auto">
                         <option value="">费用科目</option>
-                        {EXPENSE_CATEGORIES.map((c) => (
+                        {EXPENSE_CATEGORIES.filter((c) => c !== 'freight').map((c) => (
                           <option key={c} value={c}>
                             {EXPENSE_CATEGORY_LABELS[c]}
                           </option>
@@ -480,6 +490,14 @@ export function ClaimFormPage() {
                       {err && <p className="col-start-2 text-[12px] font-semibold text-clay md:col-span-4">{err}</p>}
                     </li>
                   ))}
+                  <li className={cn('flex flex-wrap items-center gap-3 px-5 py-3', freightOn && 'bg-pine-tint/40')}>
+                    <label className="flex cursor-pointer items-center gap-2 text-[13px] font-semibold">
+                      <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={freightOn} disabled={locked} onChange={(e) => setFreightOn(e.target.checked)} data-testid="claim-freight" />
+                      另有运费
+                    </label>
+                    <span className="flex-1 text-[12px] text-ink-3">单独一行记「运费」科目，不进物料成本</span>
+                    {freightOn && <MoneyInput aria-label="运费金额" value={freightText} disabled={locked} onChange={(e) => setFreightText(e.target.value)} className="h-10 w-[150px] text-right" />}
+                  </li>
                 </ul>
               )}
             </section>

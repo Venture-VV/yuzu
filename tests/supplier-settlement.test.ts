@@ -145,6 +145,10 @@ describe('退货待供应商确认（#20）', () => {
     expect(await ctx.sql`SELECT 1 FROM ap_entries WHERE inv_doc_id = ${ret.id}`).toHaveLength(0);
     // 待供应商确认的退货占着可退数量
     expect((await returnOf(rc, 90)).body.error.code).toBe('RETURN_EXCEEDS_SOURCE');
+    // 库存工作台「退货待供应商确认」点进的单据列表按这个状态筛选
+    const listed = await api(ctx.app, keeper, 'GET', '/api/inventory/docs?type=supplier_return&status=awaiting_supplier');
+    expect(listed.status).toBe(200);
+    expect((listed.body as { id: number }[]).map((d) => d.id)).toContain(ret.id);
     // 物资经办不能登记供应商的答复（采购与供应商沟通）
     expect((await answer(ret.id, { agreed: true, date: today }, keeper)).status).toBe(403);
     expect((await answer(ret.id, { agreed: true, date: '2000-01-01' })).status).toBe(400);
@@ -347,7 +351,7 @@ describe('免确认门槛（#18）', () => {
     // 报损按物料参考价估算：1 个 = 1 元；没有参考价的照旧要确认
     expect((await ok(doc(keeper, { docType: 'damage', note: '破损', lines: [{ materialId: m.id, qtyMilli: q(2) }] }))).doc.status).toBe('confirmed');
     expect((await ok(doc(keeper, { docType: 'damage', note: '破损', lines: [{ materialId: noRef.id, qtyMilli: q(2) }] }))).doc.status).toBe('submitted');
-    // 门槛在「模块设置 → 库存」调
+    // 门槛在后台「规则总表 → 库存与采购」调
     const settings = (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/settings')).body;
     expect(settings).toMatchObject({ approvalThresholdCents: 200_000, usageWindowDays: 28 });
     const saved = await ok(api(ctx.app, ctx.owner, 'PUT', '/api/inventory/settings', { ...settings, approvalThresholdCents: 0 }), 200);
