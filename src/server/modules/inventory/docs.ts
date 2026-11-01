@@ -1450,6 +1450,21 @@ export async function voidDoc(deps: Deps, docId: number, raw: unknown, actor: Ac
         warehouseName: mv.warehouseId === CENTRAL_WAREHOUSE_ID ? '总仓' : wh?.name,
       });
     }
+    // 台面日耗品（v0.7.13）：冲销不能让部门小仓留下结存——物料可能是这张单之后才改成台面日耗品的
+    // （例如部门先耗用、清零后改成台面日耗品，再冲销那张耗用单）
+    const counterTouched = [...new Set(moves.filter((mv) => mv.warehouseId !== CENTRAL_WAREHOUSE_ID && mats.get(mv.materialId)!.counterUse).map((mv) => `${mv.warehouseId}:${mv.materialId}`))];
+    for (const key of counterTouched) {
+      const [warehouseId, materialId] = key.split(':').map(Number) as [number, number];
+      const [left] = await tx<{ stockMilli: number }[]>`
+        SELECT stock_milli FROM warehouse_stock WHERE warehouse_id = ${warehouseId} AND material_id = ${materialId}`;
+      if ((left?.stockMilli ?? 0) > 0) {
+        const m = mats.get(materialId)!;
+        throw conflict(
+          'COUNTER_USE_NOT_ALLOWED',
+          `「${m.name}」现在是台面日耗品，冲销这张单会让${wh?.id === warehouseId ? wh.name : '部门小仓'}留下结存；确实要冲销，请先在物料档案里取消「台面日耗品」，冲销后把结存登记耗用或退回总仓，再改回来`,
+        );
+      }
+    }
     const ap = await tx<{ supplierId: number; amountDeltaCents: number }[]>`
       SELECT supplier_id, amount_delta_cents FROM ap_entries WHERE inv_doc_id = ${docId} AND entry_type <> 'void'`;
     for (const e of ap) {

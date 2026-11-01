@@ -311,6 +311,9 @@ const CHANGE_ACTIONS = [
   'items_station_updated',
   'room_type_saved',
   'room_saved',
+  'space_saved',
+  'space_zone_saved',
+  'space_import',
 ];
 
 const SETTING_LABELS: Record<string, string> = {
@@ -377,6 +380,12 @@ function describeChange(action: string, detail: Record<string, unknown>): string
       return typeof detail.summary === 'string' ? detail.summary : '保存了房型';
     case 'room_saved':
       return typeof detail.summary === 'string' ? detail.summary : '保存了房间';
+    case 'space_saved':
+      return typeof detail.summary === 'string' ? detail.summary : '修改了空间台账';
+    case 'space_zone_saved':
+      return typeof detail.summary === 'string' ? detail.summary : '修改了楼层或区域';
+    case 'space_import':
+      return typeof detail.summary === 'string' ? detail.summary : '导入了空间台账';
     default:
       return action;
   }

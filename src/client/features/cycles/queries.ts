@@ -1,6 +1,6 @@
 // 每月盘点与供应商对账的提醒、对账登记（#23，v0.7.13）。查询键挂在 'inv' 下：库存单据、付款变化后一起刷新
 
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import type { ReconReminders, StocktakeReminders, SupplierReconciliation } from '@shared/cycles';
 import { api } from '../../lib/api';
 
@@ -33,5 +33,17 @@ export const useReconciliations = (supplierId: number | null, enabled = true) =>
   useQuery({
     queryKey: cyclesKeys.recons(supplierId ?? 0),
     queryFn: () => api.get<SupplierReconciliation[]>(`/api/payables/reconciliations${supplierId ? `?supplierId=${supplierId}` : ''}`),
+    enabled,
+  });
+
+const RECON_PAGE = 50;
+/** 对账登记记录按页往前翻（新的在前；v0.7.14：超过一页的也能找到并撤销） */
+export const useReconciliationPages = (enabled = true) =>
+  useInfiniteQuery({
+    queryKey: ['inv', 'cycles', 'recon-pages'] as const,
+    queryFn: ({ pageParam }) =>
+      api.get<SupplierReconciliation[]>(`/api/payables/reconciliations?limit=${RECON_PAGE}${pageParam ? `&beforeId=${pageParam}` : ''}`),
+    initialPageParam: 0,
+    getNextPageParam: (last) => (last.length === RECON_PAGE ? last[last.length - 1]!.id : undefined),
     enabled,
   });

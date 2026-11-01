@@ -84,7 +84,11 @@ export type AuditAction =
   | 'room_audit'
   // 8–10 月旧账只读对照（v0.7.10）
   | 'legacy_imported'
-  | 'legacy_import_voided';
+  | 'legacy_import_voided'
+  // 空间台账（RQ-004 第一段，v0.7.14）：空间（含别名、核对、批量设区域）、楼层与区域、导入
+  | 'space_saved'
+  | 'space_zone_saved'
+  | 'space_import';
 
 export interface AuditEntry {
   staffId: number | null;

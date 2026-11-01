@@ -43,6 +43,7 @@ import { registerClockroomRoutes } from './modules/clockroom';
 import { registerDiningRoutes } from './modules/dining';
 import { registerTableRoutes } from './modules/tables';
 import { registerRoomRoutes } from './modules/rooms';
+import { registerSpaceRoutes } from './modules/spaces';
 import { registerCommissionRoutes } from './modules/commission';
 import { registerWalletRoutes } from './modules/wallet';
 import { registerErpModuleGate, registerErpRoutes } from './modules/erp';
@@ -111,7 +112,9 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
         ? '相关物料或单据'
         : path.startsWith('/api/frontdesk')
           ? '这张手牌或账单'
-          : '该会员';
+          : path.startsWith('/api/admin/spaces')
+            ? '空间台账'
+            : '该会员';
       reply.status(409).send({ error: { code: 'BUSY', message: `${what}正在被其他终端操作，本次未生效，请稍后重试` } });
       return;
     }
@@ -170,6 +173,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerDiningRoutes(app, deps);
   registerTableRoutes(app, deps);
   registerRoomRoutes(app, deps);
+  registerSpaceRoutes(app, deps);
   registerCommissionRoutes(app, deps);
   registerErpRoutes(app, deps);
 

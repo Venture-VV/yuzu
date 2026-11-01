@@ -35,8 +35,10 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     case 'supplier_refund':
       return d.refund && typeof d.refund === 'object' ? { refId: d.refund.id } : null;
     case 'erp_import':
+    case 'space_import':
       return d.import && typeof d.import === 'object' ? { refId: d.import.id } : null;
     case 'supplier_recon':
+    case 'supplier_recon_void':
       return d.reconciliation && typeof d.reconciliation === 'object' ? { refId: d.reconciliation.id } : null;
   }
 }

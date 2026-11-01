@@ -14,6 +14,8 @@ export const ADMIN_SECTIONS = {
   technicians: { path: '/admin/technicians', label: '技师', perms: ['technician.manage', 'settings.manage', 'catalog.manage', 'audit.read'] },
   dining: { path: '/admin/dining', label: '餐饮', perms: ['settings.manage', 'catalog.manage'] },
   rooms: { path: '/admin/rooms', label: '客房', perms: ['settings.manage', 'catalog.manage'] },
+  // 空间台账（RQ-004 第一段，v0.7.14）：店主、店总，与「客房」同一组权限
+  spaces: { path: '/admin/spaces', label: '空间台账', perms: ['settings.manage', 'catalog.manage'] },
   staff: { path: '/admin/staff', label: '员工账号', perms: ['staff.manage'] },
   permissions: { path: '/admin/permissions', label: '岗位权限', perms: ['settings.manage', 'audit.read'] },
   opening: { path: '/admin/opening', label: '期初导入', perms: ['wallet.opening'] },

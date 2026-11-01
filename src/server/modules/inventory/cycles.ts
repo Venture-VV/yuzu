@@ -284,14 +284,18 @@ const ReconInput = z
   .refine((r) => (r.kind === 'month' ? !!r.month : (r.docIds?.length ?? 0) > 0), {
     message: '月结要选月份，按批次要选收货单',
   });
-const VoidInput = z.object({ reason: z.string().trim().min(2, '请填写撤销原因（至少 2 个字）').max(200) });
+/** 撤销也带操作编号（v0.7.14，v0.7.13 审查的修正）：提交前存本机，断网后查回、重提或作废 */
+const VoidInput = z.object({
+  clientKey: z.uuid('操作编号格式不正确'),
+  reason: z.string().trim().min(2, '请填写撤销原因（至少 2 个字）').max(200),
+});
 const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 
-async function findByKey(db: Db, key: string, requestHash: string): Promise<number | null> {
+async function findByKey(db: Db, key: string, requestHash: string, opType: 'supplier_recon' | 'supplier_recon_void' = 'supplier_recon'): Promise<number | null> {
   const [row] = await db<{ opType: string; requestHash: string; refId: number }[]>`
     SELECT op_type, request_hash, ref_id FROM idempotency_keys WHERE key = ${key}`;
   if (!row) return null;
-  if (row.opType !== 'supplier_recon' || row.requestHash !== requestHash) {
+  if (row.opType !== opType || row.requestHash !== requestHash) {
     throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于其他内容，请刷新后重新填写');
   }
   return Number(row.refId);
@@ -390,19 +394,34 @@ export async function createReconciliation(deps: Deps, raw: unknown, actor: Acto
 }
 
 export async function voidReconciliation(deps: Deps, reconId: number, raw: unknown, actor: Actor, ip?: string) {
-  const { reason } = parse(VoidInput, raw);
+  const input = parse(VoidInput, raw);
   const [head] = await deps.sql<{ supplierId: number; kind: 'month' | 'batch' }[]>`SELECT supplier_id, kind FROM supplier_reconciliations WHERE id = ${reconId}`;
   if (!head) throw notFound('对账登记不存在');
   assertCanKind(actor, head.kind);
-  await deps.sql.begin(async (tx) => {
-    await setTxTimeouts(tx);
-    await lockSupplier(tx, head.supplierId);
-    const [cur] = await tx<{ voidedAt: string | null }[]>`SELECT voided_at FROM supplier_reconciliations WHERE id = ${reconId} FOR UPDATE`;
-    if (cur!.voidedAt) return; // 已撤销：重复提交不再改
-    await tx`UPDATE supplier_reconciliations SET voided_by = ${actor.id}, voided_at = now(), void_reason = ${reason} WHERE id = ${reconId}`;
-    await writeAudit(tx, { staffId: actor.id, action: 'payable_doc', targetType: 'supplier_reconciliation', targetId: reconId, detail: { voided: true, reason }, ip });
-  });
-  return getReconciliation(deps.sql, reconId);
+  const requestHash = hashRequest({ reconId, reason: input.reason });
+  let replayed = false;
+  try {
+    replayed = await deps.sql.begin(async (tx) => {
+      await setTxTimeouts(tx);
+      await lockOpKey(tx, input.clientKey);
+      if (await findByKey(tx, input.clientKey, requestHash, 'supplier_recon_void')) return true;
+      // 页面上确认作废过的编号：原请求晚到也不撤销
+      await assertNotFenced(tx, input.clientKey, 'supplier_recon_void', erpOpAbandoned);
+      await lockSupplier(tx, head.supplierId);
+      const [cur] = await tx<{ voidedAt: string | null }[]>`SELECT voided_at FROM supplier_reconciliations WHERE id = ${reconId} FOR UPDATE`;
+      // 已经被撤销（别的请求）：这一笔也算完成，记下编号
+      if (!cur!.voidedAt) {
+        await tx`UPDATE supplier_reconciliations SET voided_by = ${actor.id}, voided_at = now(), void_reason = ${input.reason} WHERE id = ${reconId}`;
+        await writeAudit(tx, { staffId: actor.id, action: 'payable_doc', targetType: 'supplier_reconciliation', targetId: reconId, detail: { voided: true, reason: input.reason }, ip });
+      }
+      await tx`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (${input.clientKey}, 'supplier_recon_void', ${requestHash}, ${reconId}, ${actor.id})`;
+      return false;
+    });
+  } catch (error) {
+    if (!isUniqueViolation(error, 'idempotency_keys_pkey') || !(await findByKey(deps.sql, input.clientKey, requestHash, 'supplier_recon_void'))) throw error;
+    replayed = true;
+  }
+  return { reconciliation: await getReconciliation(deps.sql, reconId), replayed };
 }
 
 const RECON_SELECT = (db: Db) => db`
@@ -497,10 +516,13 @@ export async function getReconciliation(db: Db, reconId: number): Promise<Suppli
   return toReconciliation(db, r);
 }
 
-export async function listReconciliations(db: Db, q: { supplierId?: number; limit?: number }): Promise<SupplierReconciliation[]> {
+/** 对账登记记录，新的在前；beforeId 往前翻页（v0.7.14：超过一页的也能找到并撤销） */
+export async function listReconciliations(db: Db, q: { supplierId?: number; limit?: number; beforeId?: number }): Promise<SupplierReconciliation[]> {
   const rows = await db<ReconRow[]>`
     ${RECON_SELECT(db)}
-    ${q.supplierId ? db`WHERE r.supplier_id = ${q.supplierId}` : db``}
+    WHERE true
+      ${q.supplierId ? db`AND r.supplier_id = ${q.supplierId}` : db``}
+      ${q.beforeId ? db`AND r.id < ${q.beforeId}` : db``}
     ORDER BY r.id DESC LIMIT ${q.limit ?? 50}`;
   const out: SupplierReconciliation[] = [];
   for (const r of rows) out.push(await toReconciliation(db, r));
@@ -542,7 +564,14 @@ export function registerCycleRoutes(app: FastifyInstance, deps: Deps) {
     readSnapshot(sql, (tx) => reconReminders(tx, req.actor, config.timezone)),
   );
   app.get('/api/payables/reconciliations', { preHandler: guard('payable.read') }, async (req) => {
-    const q = parse(z.object({ supplierId: z.coerce.number().int().positive().optional(), limit: z.coerce.number().int().min(1).max(200).optional() }), req.query);
+    const q = parse(
+      z.object({
+        supplierId: z.coerce.number().int().positive().optional(),
+        limit: z.coerce.number().int().min(1).max(200).optional(),
+        beforeId: z.coerce.number().int().positive().optional(),
+      }),
+      req.query,
+    );
     return readSnapshot(sql, (tx) => listReconciliations(tx, q));
   });
   app.get('/api/payables/reconciliations/:id', { preHandler: guard('payable.read') }, async (req) =>
