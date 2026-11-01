@@ -76,7 +76,8 @@ export function ErpShell() {
           cn(
             'flex items-center gap-2.5 font-semibold whitespace-nowrap transition-colors',
             compact ? 'h-10 rounded-full px-3.5 text-[13.5px]' : 'h-10 rounded-lg px-3 text-[14px]',
-            isActive ? 'bg-pine text-paper' : 'text-ink-2 hover:bg-paper-2 hover:text-ink',
+            // 模块下的其他页面（如费用模块的备用金、采购台账、账目自检）也高亮所属模块
+            isActive || erpModuleOfPage(pathname) === it.key ? 'bg-pine text-paper' : 'text-ink-2 hover:bg-paper-2 hover:text-ink',
           )
         }
       >

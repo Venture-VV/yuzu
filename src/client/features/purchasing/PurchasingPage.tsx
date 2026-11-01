@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router';
-import { Plus, Search } from 'lucide-react';
+import { PackageSearch, Plus, Search } from 'lucide-react';
 import type { PoStatus } from '@shared/purchasing';
 import { errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
@@ -58,12 +58,22 @@ export function PurchasingPage() {
         title="采购"
         subtitle="采购单表达「准备买什么」；收货按实际合格数量入库；付款另行登记"
         actions={
-          can('purchase.manage') && (
-            <Link to="/purchasing/new" className="flex h-9 items-center gap-1.5 rounded-md bg-pine px-3.5 text-[13.5px] font-bold text-paper hover:bg-pine-hover">
-              <Plus className="size-4" />
-              新建采购单
+          <span className="flex flex-wrap items-center gap-2">
+            <Link
+              to="/purchasing/ordered"
+              className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
+              data-testid="ordered-link"
+            >
+              <PackageSearch className="size-4" />
+              下单物料
             </Link>
-          )
+            {can('purchase.manage') && (
+              <Link to="/purchasing/new" className="flex h-9 items-center gap-1.5 rounded-md bg-pine px-3.5 text-[13.5px] font-bold text-paper hover:bg-pine-hover">
+                <Plus className="size-4" />
+                新建采购单
+              </Link>
+            )}
+          </span>
         }
       />
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-5 py-3 md:px-7">

@@ -274,6 +274,10 @@ test.describe('视口冒烟', () => {
       ['/todo', null],
       ['/erp/revenue', 'erp-revenue'],
       ['/erp/modules', 'erp-module-switches'],
+      // v0.7.9：采购台账、账目自检、下单物料
+      ['/erp/ledger', 'ledger-page'],
+      ['/erp/audit', 'audit-page'],
+      ['/purchasing/ordered', 'ordered-page'],
     ] as const) {
       await page.goto(url);
       await expect(page.getByTestId('erp-shell')).toBeVisible();

@@ -37,6 +37,13 @@ export type FencedOp = (typeof FENCED_OPS)[number];
 
 const lockKey = (tx: Tx, key: string) => tx`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
 
+/**
+ * 同一操作编号的提交排队（v0.7.9 修正）：在查「这个编号是否已有结果」之前先取这把锁，
+ * 同一编号的两次提交（重提、连点）就不会都以为是第一次，后一次等前一次提交后直接返回原结果，
+ * 而不是在业务检查里报「已被占用」之类的错。与登记作废用的是同一把锁。
+ */
+export const lockOpKey = lockKey;
+
 /** 是否已有给定类型之一的作废登记（只读，不加锁） */
 export async function isFenced(db: Db, key: string, opTypes: readonly FencedOp[]): Promise<boolean> {
   const [row] = await db<{ hit: number }[]>`SELECT 1 AS hit FROM op_fences WHERE key = ${key} AND op_type IN ${db(opTypes)}`;

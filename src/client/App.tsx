@@ -27,6 +27,7 @@ import { InventoryPage } from './features/inventory/InventoryPage';
 import { TodoPage } from './features/inventory/TodoPage';
 import { PayablesPage } from './features/payables/PayablesPage';
 import { PaymentFormPage } from './features/payables/PaymentFormPage';
+import { OrderedPage } from './features/purchasing/OrderedPage';
 import { PoFormPage } from './features/purchasing/PoFormPage';
 import { PurchasingPage } from './features/purchasing/PurchasingPage';
 import { CheckoutPrintPage } from './features/print/CheckoutPrintPage';
@@ -41,6 +42,8 @@ import { RevenuePage } from './features/erp/RevenuePage';
 import { ClaimFormPage } from './features/expenses/ClaimFormPage';
 import { ExpensesPage } from './features/expenses/ExpensesPage';
 import { PettyPage } from './features/expenses/PettyPage';
+import { AuditPage } from './features/purchase-ledger/AuditPage';
+import { PurchaseLedgerPage } from './features/purchase-ledger/PurchaseLedgerPage';
 import { RequestFormPage } from './features/requests/RequestFormPage';
 import { RequestsPage } from './features/requests/RequestsPage';
 
@@ -168,6 +171,8 @@ const router = createBrowserRouter([
       { path: 'requests', element: <RequestsPage /> },
       { path: 'requests/new', element: <RequestFormPage mode="new" /> },
       { path: 'requests/:id/edit', element: <RequestFormPage mode="edit" /> },
+      { path: 'ledger', element: <PurchaseLedgerPage /> },
+      { path: 'audit', element: <AuditPage /> },
       { path: '*', element: <Navigate to="/erp" replace /> },
     ],
   },
@@ -180,6 +185,7 @@ const router = createBrowserRouter([
       { path: 'todo', element: <TodoPage /> },
       { path: 'purchasing', element: <PurchasingPage /> },
       { path: 'purchasing/new', element: <PoFormPage mode="new" /> },
+      { path: 'purchasing/ordered', element: <OrderedPage /> },
       { path: 'purchasing/:id/edit', element: <PoFormPage mode="edit" /> },
       { path: 'purchasing/:id/revise', element: <PoFormPage mode="revise" /> },
       { path: 'payables', element: <PayablesPage /> },

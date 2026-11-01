@@ -1,7 +1,7 @@
 // 图片（v0.7.8，需求单与采购单的行）：上传前在浏览器里压缩成 JPEG（最长边 1600 像素、质量 0.8），
 // 压缩后单张不超过 1 MB；缩略图点开看大图。图片地址要登录才能看（同源 cookie）。
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ImagePlus, X } from 'lucide-react';
 import { IMAGE_MAX_EDGE, IMAGE_QUALITY, MAX_IMAGE_BYTES, MAX_LINE_IMAGES, type ImageRef } from '@shared/requests';
 import { api, errorMessage } from '../lib/api';
@@ -74,23 +74,35 @@ export function ImageThumbs({ images, size = 44, className }: { images: ImageRef
   );
 }
 
-/** 可编辑的图片：上传（压缩）、删除；最多 max 张 */
+/**
+ * 可编辑的图片：上传（压缩）、删除；最多 max 张。
+ * onBusyChange 告诉表单还有没有图片在上传：上传完之前表单不能提交，否则提交的是上传前的图片（v0.7.9 修正）。
+ */
 export function ImagePicker({
   value,
   onChange,
   max = MAX_LINE_IMAGES,
   disabled,
   testId,
+  onBusyChange,
 }: {
   value: ImageRef[];
   onChange: (next: ImageRef[]) => void;
   max?: number;
   disabled?: boolean;
   testId?: string;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const busyRef = useRef(onBusyChange);
+  busyRef.current = onBusyChange;
+  useEffect(() => {
+    busyRef.current?.(busy);
+  }, [busy]);
+  // 上传中这一行被删掉：别让表单一直以为还在上传
+  useEffect(() => () => busyRef.current?.(false), []);
   const add = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setBusy(true);

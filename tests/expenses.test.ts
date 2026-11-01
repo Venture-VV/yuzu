@@ -422,6 +422,14 @@ describe('幂等与并发', () => {
     const results = await Promise.all([settle(coster, a.id, 'return', 5_000), settle(buyer, a.id, 'return', 5_000)]);
     expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
     expect((await getAdvance(a.id)).outstandingCents).toBe(0);
+
+    // 同一个操作编号同时提交两次（重提、连点）：两次都返回同一笔，不报「超过未退回」（v0.7.9 修正）
+    const b2 = (await advance(coster, { amountCents: 3_000 })).body.advance;
+    const sameKey = randomUUID();
+    const twice = await Promise.all([settle(coster, b2.id, 'return', 3_000, { clientKey: sameKey }), settle(coster, b2.id, 'return', 3_000, { clientKey: sameKey })]);
+    expect(twice.map((r) => r.status).sort()).toEqual([200, 201]);
+    expect(twice[0]!.body.settlementId).toBe(twice[1]!.body.settlementId);
+    expect((await getAdvance(b2.id)).outstandingCents).toBe(0);
   });
 });
 

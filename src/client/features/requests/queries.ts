@@ -20,7 +20,7 @@ export function useInvalidateRequests() {
 const search = (params: Record<string, string | undefined>) =>
   new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
 
-export const useRequests = (params: { status?: string; departmentId?: string }) =>
+export const useRequests = (params: { status?: string; departmentId?: string; from?: string; to?: string }) =>
   useQuery({ queryKey: rk.list(params), queryFn: () => api.get<RequestsList>(`/api/erp/requests?${search(params)}`), placeholderData: keepPreviousData });
 
 export const useRequest = (id: number | null) =>

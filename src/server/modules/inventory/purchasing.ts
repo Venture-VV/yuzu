@@ -16,6 +16,7 @@ import { guard } from '../../auth/guard';
 import { writeAudit } from '../../lib/audit';
 import type { Actor, Deps } from '../../lib/context';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
+import { lockOpKey } from '../../lib/fences';
 import { idParam, parse } from '../../lib/validate';
 import { assertNotFuture, docDateSchema, loadInventorySettings, logApproval, nextDocNo, priceBaseline, setTxTimeouts, todayIn } from './common';
 
@@ -455,6 +456,7 @@ export async function createPo(deps: Deps, raw: unknown, actor: Actor, opts: { b
   try {
     const r = await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
+      await lockOpKey(tx, meta.clientKey);
       const existing = await findExisting(tx);
       if (existing) return { id: existing, replayed: true };
       await assertSupplier(tx, body.supplierId);
