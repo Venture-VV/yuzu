@@ -108,5 +108,17 @@ test.describe('旧账对照（8–10 月）', () => {
     await page.goto('/frontdesk');
     await expect(page.getByRole('heading', { name: /前台/ })).toBeVisible();
     await expect(page.getByTestId('shift-cross-day')).toHaveCount(0);
+    await page.unroute('**/api/shifts/current');
+
+    // 页面一直开着、过了营业日切换时间：登录时记下的营业日过时了，按当班接口（每 30 秒轮询）带回的营业日提醒
+    const tomorrow = new Date(Date.parse(`${me.today}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+    await page.route('**/api/shifts/current', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ shift: { ...shift, businessDate: me.today }, today: tomorrow }) }),
+    );
+    const [, tm, td] = me.today.split('-');
+    await page.goto('/frontdesk');
+    await expect(page.getByTestId('shift-cross-day')).toContainText(`这个班次从 ${Number(tm)} 月 ${Number(td)} 日开到现在，请先交班`);
+    await expect(page.getByTestId('shift-cross-day')).toContainText(`今天是 ${tomorrow}`);
+    await page.unroute('**/api/shifts/current');
   });
 });

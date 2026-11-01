@@ -343,7 +343,11 @@ export function registerShiftRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
   const ctxOf = (req: import('fastify').FastifyRequest): OpContext => ({ actor: req.actor, ip: req.ip });
 
-  app.get('/api/shifts/current', { preHandler: guard('ledger.readToday') }, async (req) => ({ shift: await currentShift(sql, req.actor.id) }));
+  // today：此刻的营业日（与 /api/auth/me 同一算法）。页面每 30 秒轮询这个接口，过了营业日切换时间不用刷新页面也能提醒跨营业日的班次
+  app.get('/api/shifts/current', { preHandler: guard('ledger.readToday') }, async (req) => {
+    const settings = await loadSettings(sql);
+    return { shift: await currentShift(sql, req.actor.id), today: businessDateOf(new Date(), deps.config.timezone, settings.businessDayStartHour) };
+  });
 
   app.get('/api/shifts', { preHandler: guard('ledger.readToday') }, async (req) => {
     const { date } = parse(z.object({ date: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD').optional() }), req.query ?? {});

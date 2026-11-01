@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { LegacyAudit } from '../src/shared/legacy';
 import expected from '../src/server/demo/legacy-expected.json';
 import { DEFAULT_EXPENSE_RULES } from '../src/shared/expenses';
-import { legacyBrandLink, legacyInvoiceType, type LegacyBrandLine, type LegacyMaterialLine } from '../src/shared/legacy';
+import { legacyBrandLink, legacyInvoiceType, type LegacyBrandLine, type LegacyMaterialLine, type LegacyPaymentDay } from '../src/shared/legacy';
 import { parseExact, toSignificant } from '../src/server/lib/exact';
 import { evalArithmetic, excelNumber, parseDateText, toCents } from '../src/server/modules/legacy/parse';
 import { legacyAudit, legacyInvoiceIssue, type LegacyData } from '../src/server/modules/legacy/audit';
@@ -187,6 +187,25 @@ describe('核验规则（纯计算）', () => {
     expect(r6.rows).toHaveLength(300);
   });
 
+  it('付款台账没写日期的行：金额算进合计并单列，不算进每日平账（Codex PR #26）', () => {
+    const pay = (rowNo: number, date: string | null, advance: number | null, should: number | null, returned: number | null): LegacyPaymentDay => ({
+      rowNo, date, dateText: date ?? '九月初', advanceCents: advance, advanceFormula: null, shouldReturnCents: should, shouldReturnFormula: null,
+      returnedCents: returned, returnedFormula: null, note: '', raw: {},
+    });
+    const audit = legacyAudit(data({ imported: ['purchase_ledger'], ledgerSheet: 'Sheet1', paymentSheet: 'Sheet2', payments: [pay(2, '2026-09-01', 10000, null, null), pay(3, null, 50000, 20000, 15000)] }));
+    const ov = audit.overview.find((o) => o.label === '采购台账（付款台账）')!;
+    expect(ov.amountText).toBe('打款 ¥600.00 / 应退回 ¥200.00 / 实际退回 ¥150.00');
+    expect(ov.problems).toBe('应退回比实际退回多 ¥50.00；1 行没有日期（金额算进合计，没算进每日平账）');
+    expect(audit.crossChecks.find((c) => c.key === 'should_vs_returned')!.detail).toContain('少退 ¥50.00');
+    expect(audit.daily!.days.map((x) => x.date)).toEqual(['2026-09-01']);
+    expect(audit.rules.find((r) => r.no === 3)!.result).toContain('付款台账另有 1 行没有日期');
+    const f = audit.fieldIssues.find((x) => x.key === 'payment_undated')!;
+    expect(f.detail).toContain('打款 ¥500.00、应退回 ¥200.00、退回出纳 ¥150.00');
+    expect(f.rows.map((r) => r.text)).toEqual(['第 3 行：日期写成「九月初」，认不出']);
+    // 都有日期时不单列
+    expect(legacyAudit(data({ imported: ['purchase_ledger'], payments: [pay(2, '2026-09-01', 10000, null, null)] })).fieldIssues.some((x) => x.key === 'payment_undated')).toBe(false);
+  });
+
   it('第 12 条与品牌清单完整度：只写了商品、店铺名称没有网址的算没有链接（Codex PR #26）', () => {
     const brand = [
       brandLine(3, { linkText: '样例店铺 玻璃杯', linkUrl: 'https://example.com/a' }),
@@ -349,6 +368,9 @@ describe('同版小改（v0.7.10）', () => {
     expect(bad.body.error).toMatchObject({ message: '开始日期格式应为 YYYY-MM-DD', details: { field: 'from' } });
     const report = await api(ctx.app, ctx.owner, 'GET', '/api/reports/executive?from=2026-11-01');
     expect(report.body.error).toMatchObject({ message: '请填写结束日期（YYYY-MM-DD）', details: { field: 'to' } });
+    // 当班接口带回此刻的营业日：页面一直开着、过了营业日切换时间也能提醒跨营业日的班次（Codex PR #26）
+    const me = await api(ctx.app, ctx.owner, 'GET', '/api/auth/me');
+    expect((await api(ctx.app, ctx.owner, 'GET', '/api/shifts/current')).body.today).toBe(me.body.today);
     // 测试服回归报告里的例子：已下单物料缺 from 原来返回英文
     const ordered = await api(ctx.app, ctx.owner, 'GET', '/api/purchase-orders/ordered-lines');
     expect(ordered.status).toBe(400);

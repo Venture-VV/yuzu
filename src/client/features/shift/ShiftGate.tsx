@@ -17,7 +17,7 @@ export const shiftKeys = { all: ['shift'] as const, current: ['shift', 'current'
 export function useCurrentShift(enabled = true) {
   return useQuery({
     queryKey: shiftKeys.current,
-    queryFn: () => api.get<{ shift: ShiftRecord | null }>('/api/shifts/current'),
+    queryFn: () => api.get<{ shift: ShiftRecord | null; today?: string }>('/api/shifts/current'),
     enabled,
     refetchInterval: 30_000,
   });
@@ -26,18 +26,20 @@ export function useCurrentShift(enabled = true) {
 /**
  * 班次跨营业日的提醒（店主 2026-11-01 同意，v0.7.10）：本人还没交班的班次，开班时的营业日早于今天的营业日，
  * 提醒先交班；只提醒、不拦截收款（按人交班、交班时核对现金的规则不变）。
+ * 「今天」用当班接口每 30 秒轮询时带回的营业日：页面一直开着、过了营业日切换时间也能提醒（登录时的营业日会过时）。
  */
 export function CrossDayShiftNotice({ className }: { className?: string }) {
   const session = useSession();
   const can = useCan();
   const current = useCurrentShift(can('ledger.readToday'));
   const shift = current.data?.shift;
-  if (!shift || shift.status !== 'open' || shift.businessDate >= session.today) return null;
+  const today = current.data?.today ?? session.today;
+  if (!shift || shift.status !== 'open' || shift.businessDate >= today) return null;
   const [, m, d] = shift.businessDate.split('-');
   return (
     <div className={className} data-testid="shift-cross-day">
       <Notice tone="warning" title={`这个班次从 ${Number(m)} 月 ${Number(d)} 日开到现在，请先交班`}>
-        班次 {shift.shiftNo} 开班时是营业日 {shift.businessDate}，今天是 {session.today}。交班后再开新班，交班表按营业日分开；收款照常可以办理。
+        班次 {shift.shiftNo} 开班时是营业日 {shift.businessDate}，今天是 {today}。交班后再开新班，交班表按营业日分开；收款照常可以办理。
       </Notice>
     </div>
   );

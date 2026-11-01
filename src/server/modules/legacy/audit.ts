@@ -104,12 +104,16 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
   const spendOf = (pred: (l: LegacyLedgerLine) => boolean) => sum([...expenses, ...refunds].filter(pred).map((l) => l.amountCents));
 
   // ── 付款台账 ──
-  const P = d.payments.filter((p) => p.date !== null);
-  const advanceTotal = sum(P.map((p) => p.advanceCents));
-  const shouldTotal = sum(P.map((p) => p.shouldReturnCents));
-  const returnedTotal = sum(P.map((p) => p.returnedCents));
+  // 合计按全部行算：没写日期或日期认不出的行也有钱，不能从合计里漏掉；每日平账只能按有日期的行，没日期的单列
+  const PAll = d.payments;
+  const P = PAll.filter((p) => p.date !== null);
+  const undatedPay = PAll.filter((p) => p.date === null && (p.advanceCents || p.shouldReturnCents || p.returnedCents));
+  const advanceTotal = sum(PAll.map((p) => p.advanceCents));
+  const shouldTotal = sum(PAll.map((p) => p.shouldReturnCents));
+  const returnedTotal = sum(PAll.map((p) => p.returnedCents));
   const payRef = (p: LegacyPaymentDay, why: string): LegacyRowRef => ({ source: 'purchase_ledger', sheet: d.paymentSheet, rowNo: p.rowNo, text: `${p.date ?? `第 ${p.rowNo} 行`}：${why}` });
-  const shouldNoReturn = P.filter((p) => (p.shouldReturnCents ?? 0) > 0 && !(p.returnedCents ?? 0));
+  const shouldNoReturn = PAll.filter((p) => (p.shouldReturnCents ?? 0) > 0 && !(p.returnedCents ?? 0));
+  const undatedNote = undatedPay.length ? `${undatedPay.length} 行没有日期（金额算进合计，没算进每日平账）` : '';
 
   // ── 采购物资明细表 ──
   const M = d.materials;
@@ -154,11 +158,15 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
     overview.push({
       source: 'purchase_ledger',
       label: '采购台账（付款台账）',
-      rows: P.length,
+      rows: PAll.length,
       period: range(P.map((p) => p.date)),
       amountText: `打款 ${y(advanceTotal)} / 应退回 ${y(shouldTotal)} / 实际退回 ${y(returnedTotal)}`,
-      problems:
+      problems: [
         shouldTotal === returnedTotal ? '应退回与实际退回相等' : `应退回比实际退回${shouldTotal < returnedTotal ? '少' : '多'} ${y(Math.abs(returnedTotal - shouldTotal))}`,
+        undatedNote,
+      ]
+        .filter(Boolean)
+        .join('；'),
     });
   }
   if (has('material_detail')) {
@@ -294,6 +302,15 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
         [...noAmount.map((l) => ledgerRef(l, l.mergedInto !== null ? `金额与第 ${l.mergedInto} 行合并` : '没有金额')), ...noDate.map((l) => ledgerRef(l, '没有日期')), ...noCategory.map((l) => ledgerRef(l, '没有类别'))],
       ),
     );
+    if (undatedPay.length)
+      fieldIssues.push(
+        finding(
+          'payment_undated',
+          '付款台账没有日期的行',
+          `${undatedNote}：打款 ${y(sum(undatedPay.map((p) => p.advanceCents)))}、应退回 ${y(sum(undatedPay.map((p) => p.shouldReturnCents)))}、退回出纳 ${y(sum(undatedPay.map((p) => p.returnedCents)))}`,
+          undatedPay.map((p) => payRef(p, p.dateText ? `日期写成「${p.dateText}」，认不出` : '没有日期')),
+        ),
+      );
   }
   if (has('material_detail')) {
     const mNoAmount = M.filter((m) => m.amountCents === null);
@@ -389,7 +406,7 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
       ? rule(
           3,
           '每日打款减支出必须等于应退回，不平即报警',
-          `${daily.days.length} 个付款日里 ${daily.unbalanced} 天不平（另有 ${daily.tail} 天差额不到 1 元，算尾差）；${daily.zeroAdvanceWithSpend.length} 天打款为 0 但当天仍有支出`,
+          `${daily.days.length} 个付款日里 ${daily.unbalanced} 天不平（另有 ${daily.tail} 天差额不到 1 元，算尾差）；${daily.zeroAdvanceWithSpend.length} 天打款为 0 但当天仍有支出${undatedNote ? `；付款台账另有 ${undatedNote}` : ''}`,
           daily.unbalanced,
           [...daily.days]
             .filter((x) => x.state === 'unbalanced')
