@@ -191,7 +191,8 @@ test.describe('库存与采购流程', () => {
     const balanceRow = page.getByRole('row').filter({ hasText: '栖谷护理用品' });
     await expect(balanceRow).toBeVisible();
     await balanceRow.getByRole('link', { name: '付款' }).click();
-    const target = page.getByRole('checkbox').last();
+    // 「含预付款」也是勾选框（v0.7.12），未结清货款加载出来之前它是页面上唯一的勾选框：按名称找核销行
+    const target = page.getByRole('checkbox', { name: /^核销 / }).last();
     await target.check();
     await page.fill('#pay-ev', '流水尾号 1026');
     await page.getByRole('button', { name: '登记付款' }).click();
