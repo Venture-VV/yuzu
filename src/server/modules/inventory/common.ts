@@ -6,7 +6,7 @@
 //   · 结存字段有 CHECK (>= 0) 兜底，任何情况下都不会出现负库存。
 
 import { businessDateOf } from '@shared/business-date';
-import type { ApprovalRules, InventorySettings, MoveType } from '@shared/inventory';
+import { CENTRAL_WAREHOUSE_ID, type ApprovalRules, type InventorySettings, type MoveType } from '@shared/inventory';
 import { formatQty } from '@shared/quantity';
 import { z } from 'zod';
 import type { Db, Tx } from '../../db';
@@ -24,14 +24,47 @@ export const DEFAULT_APPROVAL_RULES: ApprovalRules = {
 export async function loadInventorySettings(db: Db): Promise<InventorySettings> {
   const rows = await db<{ key: string; value: unknown }[]>`
     SELECT key, value FROM settings
-    WHERE key IN ('inventory_scope_name', 'inventory_price_basis', 'inventory_allow_direct_receipt', 'inventory_approval_rules')`;
+    WHERE key IN ('inventory_scope_name', 'inventory_price_basis', 'inventory_urgent_cap_cents', 'inventory_approval_rules')`;
   const map = new Map(rows.map((r) => [r.key, r.value]));
   return {
     scopeName: (map.get('inventory_scope_name') as string) ?? '后勤总库',
     priceBasis: (map.get('inventory_price_basis') as string) ?? '含税到货价',
-    allowDirectReceipt: (map.get('inventory_allow_direct_receipt') as boolean) ?? true,
+    urgentCapCents: Number(map.get('inventory_urgent_cap_cents') ?? DEFAULT_URGENT_CAP_CENTS),
     approvalRules: { ...DEFAULT_APPROVAL_RULES, ...((map.get('inventory_approval_rules') as Partial<ApprovalRules>) ?? {}) },
   };
+}
+
+/** 急采上限默认 2000 元（#19，可调） */
+export const DEFAULT_URGENT_CAP_CENTS = 200_000;
+
+/** #21：当月发生的当月冲销完——单据日期所在的月份（门店时区的自然月）过了就不能冲销 */
+export function assertSameMonth(date: string, timeZone: string, what = '单据') {
+  const today = todayIn(timeZone);
+  if (date.slice(0, 7) !== today.slice(0, 7)) {
+    throw unprocessable('VOID_CROSS_MONTH', `${what}日期在 ${date.slice(0, 4)} 年 ${Number(date.slice(5, 7))} 月，跨月不能冲销；请用本月的单据更正`, {
+      docDate: date,
+    });
+  }
+}
+
+/** 部门的小仓（部门停用后小仓也停用）；没有返回 null */
+export async function departmentWarehouse(db: Db, departmentId: number): Promise<{ id: number; name: string; active: boolean } | null> {
+  const [row] = await db<{ id: number; name: string; active: boolean }[]>`
+    SELECT w.id, d.name || '小仓' AS name, d.active FROM warehouses w JOIN departments d ON d.id = w.department_id
+    WHERE w.department_id = ${departmentId}`;
+  return row ?? null;
+}
+
+/** 仓的名称、类别与所属部门（总仓用「库存范围名称」） */
+export async function warehouseInfo(db: Db, warehouseId: number) {
+  const [row] = await db<{ id: number; kind: 'central' | 'department'; departmentId: number | null; name: string; active: boolean }[]>`
+    SELECT w.id, w.kind, w.department_id,
+           CASE WHEN w.kind = 'central'
+                THEN coalesce((SELECT value #>> '{}' FROM settings WHERE key = 'inventory_scope_name'), '后勤总库')
+                ELSE d.name || '小仓' END AS name,
+           coalesce(d.active, true) AS active
+    FROM warehouses w LEFT JOIN departments d ON d.id = w.department_id WHERE w.id = ${warehouseId}`;
+  return row ?? null;
 }
 
 /** 门店时区的自然日（库存与采购按自然日统计，不沿用会员营业日切换规则） */
@@ -93,27 +126,81 @@ export function assertEnoughStock(materials: Map<number, LockedMaterial>, outs: 
   }
 }
 
-/** 写一条库存流水并更新物料结存 */
+/** 部门小仓里这些物料的结存（没有记录的算 0）；调用方已锁定物料行 */
+export async function deptBalances(db: Db, warehouseId: number, materialIds: number[]): Promise<Map<number, { stockMilli: number; lastMoveId: number | null }>> {
+  const unique = [...new Set(materialIds)];
+  const rows = unique.length
+    ? await db<{ materialId: number; stockMilli: number; lastMoveId: number | null }[]>`
+        SELECT material_id, stock_milli, last_move_id FROM warehouse_stock WHERE warehouse_id = ${warehouseId} AND material_id IN ${db(unique)}`
+    : [];
+  const map = new Map(rows.map((r) => [r.materialId, { stockMilli: r.stockMilli, lastMoveId: r.lastMoveId }]));
+  for (const id of unique) if (!map.has(id)) map.set(id, { stockMilli: 0, lastMoveId: null });
+  return map;
+}
+
+/** 部门小仓出库前按物料汇总校验 */
+export async function assertEnoughDeptStock(db: Db, warehouseId: number, warehouseName: string, materials: Map<number, LockedMaterial>, outs: { materialId: number; qtyMilli: number }[]) {
+  const need = new Map<number, number>();
+  for (const o of outs) need.set(o.materialId, (need.get(o.materialId) ?? 0) + o.qtyMilli);
+  const have = await deptBalances(db, warehouseId, [...need.keys()]);
+  for (const [id, qty] of need) {
+    const stock = have.get(id)!.stockMilli;
+    if (stock < qty) {
+      const m = materials.get(id)!;
+      throw unprocessable(
+        'INSUFFICIENT_STOCK',
+        `「${m.name}」${warehouseName}库存不足：当前 ${formatQty(stock)} ${m.inventoryUnit}，需要 ${formatQty(qty)} ${m.inventoryUnit}`,
+        { materialId: m.id, stockMilli: stock, needMilli: qty, warehouseId },
+      );
+    }
+  }
+}
+
+/**
+ * 写一条库存流水并更新所在仓的结存（v0.7.11 两级库存）：总仓的结存在物料上（stock_milli、last_move_id），
+ * 部门小仓的在 warehouse_stock；流水的「变动后结存」按所在仓算。调用方已按 id 升序锁定物料行（所有仓的收发都串行）。
+ */
 export async function applyMove(
   tx: Tx,
   m: LockedMaterial,
   deltaMilli: number,
-  ref: { moveType: MoveType; docId: number; lineId: number; docDate: string; operatorId: number },
+  ref: { moveType: MoveType; docId: number; lineId: number; docDate: string; operatorId: number; warehouseId: number; warehouseName?: string },
 ) {
   if (deltaMilli === 0) return;
-  const after = m.stockMilli + deltaMilli;
-  if (after < 0) throw insufficient(m, -deltaMilli);
+  if (ref.warehouseId === CENTRAL_WAREHOUSE_ID) {
+    const after = m.stockMilli + deltaMilli;
+    if (after < 0) throw insufficient(m, -deltaMilli);
+    const [move] = await tx<{ id: number }[]>`
+      INSERT INTO stock_moves (material_id, move_type, doc_id, doc_line_id, qty_delta_milli, qty_after_milli, doc_date, operator_id, warehouse_id)
+      VALUES (${m.id}, ${ref.moveType}, ${ref.docId}, ${ref.lineId}, ${deltaMilli}, ${after}, ${ref.docDate}, ${ref.operatorId}, ${CENTRAL_WAREHOUSE_ID})
+      RETURNING id`;
+    await tx`UPDATE materials SET stock_milli = ${after}, last_move_id = ${move!.id}, updated_at = now() WHERE id = ${m.id}`;
+    m.stockMilli = after;
+    m.lastMoveId = move!.id;
+    return;
+  }
+  const [cur] = await tx<{ stockMilli: number }[]>`
+    SELECT stock_milli FROM warehouse_stock WHERE warehouse_id = ${ref.warehouseId} AND material_id = ${m.id} FOR UPDATE`;
+  const before = cur?.stockMilli ?? 0;
+  const after = before + deltaMilli;
+  if (after < 0) {
+    throw unprocessable(
+      'INSUFFICIENT_STOCK',
+      `「${m.name}」${ref.warehouseName ?? '部门小仓'}库存不足：当前 ${formatQty(before)} ${m.inventoryUnit}，需要 ${formatQty(-deltaMilli)} ${m.inventoryUnit}`,
+      { materialId: m.id, stockMilli: before, needMilli: -deltaMilli, warehouseId: ref.warehouseId },
+    );
+  }
   const [move] = await tx<{ id: number }[]>`
-    INSERT INTO stock_moves (material_id, move_type, doc_id, doc_line_id, qty_delta_milli, qty_after_milli, doc_date, operator_id)
-    VALUES (${m.id}, ${ref.moveType}, ${ref.docId}, ${ref.lineId}, ${deltaMilli}, ${after}, ${ref.docDate}, ${ref.operatorId})
+    INSERT INTO stock_moves (material_id, move_type, doc_id, doc_line_id, qty_delta_milli, qty_after_milli, doc_date, operator_id, warehouse_id)
+    VALUES (${m.id}, ${ref.moveType}, ${ref.docId}, ${ref.lineId}, ${deltaMilli}, ${after}, ${ref.docDate}, ${ref.operatorId}, ${ref.warehouseId})
     RETURNING id`;
-  await tx`UPDATE materials SET stock_milli = ${after}, last_move_id = ${move!.id}, updated_at = now() WHERE id = ${m.id}`;
-  m.stockMilli = after;
-  m.lastMoveId = move!.id;
+  await tx`
+    INSERT INTO warehouse_stock (warehouse_id, material_id, stock_milli, last_move_id) VALUES (${ref.warehouseId}, ${m.id}, ${after}, ${move!.id})
+    ON CONFLICT (warehouse_id, material_id) DO UPDATE SET stock_milli = ${after}, last_move_id = ${move!.id}, updated_at = now()`;
 }
 
 export type DocKind = 'inv_doc' | 'purchase_order' | 'payment' | 'opening_payable' | 'expense_claim' | 'petty_advance' | 'petty_settlement' | 'purchase_request';
-export type ApprovalAction = 'create' | 'submit' | 'approve' | 'return' | 'cancel' | 'void' | 'close' | 'revise';
+export type ApprovalAction = 'create' | 'submit' | 'approve' | 'return' | 'cancel' | 'void' | 'close' | 'revise' | 'sign';
 
 export async function logApproval(
   tx: Db,

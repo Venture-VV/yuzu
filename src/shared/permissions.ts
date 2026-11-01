@@ -77,8 +77,16 @@ export const PERMISSIONS = {
   'payable.read': { roles: ['owner'], duties: ['purchase', 'payable', 'approve'] },
   /** 期初未付、付款登记 */
   'payable.manage': { roles: ['owner'], duties: ['payable'] },
-  /** 负责人确认：采购、报损、盘点调整、退货、付款、期初、冲销 */
+  /** 负责人确认：采购、报损、盘点调整、退货、付款、期初（v0.7.11 起冲销按 #21 分工，见下面两项） */
   'inventory.approve': { roles: ['owner'], duties: ['approve'] },
+  /** 冲销库存单据（#21：仓库或财务成本岗；只限当月，v0.7.11） */
+  'inventory.void': { roles: ['owner'], duties: ['stock', 'cost'] },
+  /** 冲销付款、期初未付、费用报销、备用金单据（#21：账务冲销由财务负责；只限当月，v0.7.11） */
+  'finance.void': { roles: ['owner'], duties: ['payable', 'cost'] },
+  /** 本部门小仓：签收领料、登记急采与补单、耗用、报损、盘点（v0.7.11，只限员工档案里的所属部门） */
+  'deptStock.operate': { roles: ['owner'], duties: ['request'] },
+  /** 部门小仓（所有部门）：查看结存、盘点、登记耗用（#17：每月 1 号财务到部门盘点，v0.7.11） */
+  'deptStock.audit': { roles: ['owner'], duties: ['cost'] },
   'inventory.export': { roles: ['owner'], duties: ['payable', 'approve'] },
   /** ERP 营业数据（只读）：每天的营业收入、收款与部门构成、日结情况（v0.7.3，待确认：默认店主与店总） */
   'erp.revenue': { roles: ['owner', 'store_manager'] },
@@ -89,7 +97,7 @@ export const PERMISSIONS = {
   'expense.manage': { roles: ['owner'], duties: ['cost'] },
   /** 登记备用金打款、退回、补付 */
   'petty.manage': { roles: ['owner'], duties: ['payable', 'cost'] },
-  /** 确认超门槛的报销；冲销报销、打款、退回补付 */
+  /** 确认超门槛的报销（v0.7.11 起冲销归「finance.void」） */
   'expense.approve': { roles: ['owner'], duties: ['approve'] },
   /** 导出报销明细与每日平账 */
   'expense.export': { roles: ['owner'], duties: ['payable', 'cost', 'approve'] },
@@ -209,19 +217,23 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'frontdesk.checkoutVoid': '反结账（撤销结账单）',
   'frontdesk.backfill': '按实际时间补录纸质单',
   'inventory.read': '查看库存与物资单据',
-  'inventory.operate': '期初、收货、领用、退回、耗用、报损、盘点录入',
+  'inventory.operate': '期初、收货、领料、退回、耗用、报损、盘点录入（总仓）',
   'inventory.master': '维护物料、供应商、部门档案',
   'purchase.manage': '编制与提交采购单',
   'supplierReturn.create': '发起退供应商',
   'payable.read': '查看供应商货款与对账',
   'payable.manage': '登记期初未付与付款',
-  'inventory.approve': '负责人确认（采购、报损、盘点调整、退货、付款、冲销）',
+  'inventory.approve': '负责人确认（采购、报损、盘点调整、退货、付款）',
+  'inventory.void': '冲销库存单据（只限当月）',
+  'finance.void': '冲销付款、期初未付、报销与备用金（只限当月）',
+  'deptStock.operate': '本部门小仓：签收领料、急采与补单、耗用、报损、盘点',
+  'deptStock.audit': '部门小仓（所有部门）：查看、盘点、登记耗用',
   'inventory.export': '导出库存与对账',
   'erp.revenue': 'ERP：看营业数据（只读）',
   'expense.read': '查看费用报销、备用金与每日平账',
   'expense.manage': '登记费用报销（发票、税点、科目）',
   'petty.manage': '登记备用金打款、退回、补付',
-  'expense.approve': '确认超门槛的报销；冲销报销与备用金单据',
+  'expense.approve': '确认超门槛的报销',
   'expense.export': '导出报销明细与每日平账',
   'request.create': '提部门采购需求单（只限本部门）',
   'request.review': '审核需求单、转采购单',
@@ -256,8 +268,9 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   {
     title: 'ERP（库存、采购、货款、费用、营业数据）',
     items: [
-      'inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'supplierReturn.create', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.export',
-      'expense.read', 'expense.manage', 'petty.manage', 'expense.approve', 'expense.export', 'request.create', 'request.review', 'erp.revenue',
+      'inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'supplierReturn.create', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.void', 'inventory.export',
+      'deptStock.operate', 'deptStock.audit',
+      'expense.read', 'expense.manage', 'petty.manage', 'expense.approve', 'finance.void', 'expense.export', 'request.create', 'request.review', 'erp.revenue',
     ],
   },
   { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount'] },

@@ -157,7 +157,8 @@ export async function saveSupplier(db: Db, id: number | null, raw: SupplierInput
 const SettingsInput = z.object({
   scopeName: required(20, '库存范围名称'),
   priceBasis: required(20, '价格口径'),
-  allowDirectReceipt: z.boolean(),
+  /** 急采上限（分，#19）：1 元到 100 万元 */
+  urgentCapCents: z.number().int().min(100).max(100_000_000),
   approvalRules: z.object({
     purchase_order: z.boolean(),
     damage: z.boolean(),
@@ -178,7 +179,7 @@ export function registerMasterRoutes(app: FastifyInstance, { sql }: Deps) {
       const entries: [string, unknown][] = [
         ['inventory_scope_name', s.scopeName],
         ['inventory_price_basis', s.priceBasis],
-        ['inventory_allow_direct_receipt', s.allowDirectReceipt],
+        ['inventory_urgent_cap_cents', s.urgentCapCents],
         ['inventory_approval_rules', s.approvalRules],
       ];
       for (const [key, value] of entries) {

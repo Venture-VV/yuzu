@@ -37,7 +37,7 @@ import type { Actor, Deps } from '../lib/context';
 import { badRequest } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { loadFrontdeskRules } from './frontdesk/common';
-import { DEFAULT_APPROVAL_RULES, loadInventorySettings } from './inventory/common';
+import { DEFAULT_APPROVAL_RULES, DEFAULT_URGENT_CAP_CENTS, loadInventorySettings } from './inventory/common';
 import { DEFAULT_SETTINGS, loadSettings, SETTINGS_KEYS } from './settings';
 import { loadTechnicianRules } from './technicians';
 import { loadClockroomRules } from './clockroom';
@@ -232,8 +232,9 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   const basis = '含税到货价（模拟口径，待确认）';
   add({ key: 'inventory_price_basis', group: 'inventory', label: '价格口径', value: inv.priceBasis, defaultValue: basis, pending: true, section: 'rules', current: inv.priceBasis, dflt: basis, metaKey: 'inventory_price_basis' });
   add({
-    key: 'inventory_allow_direct_receipt', group: 'inventory', label: '无采购单直接收货', value: onOff(inv.allowDirectReceipt, '允许（标记缺少依据）', '不允许'), defaultValue: '允许（标记缺少依据）',
-    pending: true, section: 'rules', current: inv.allowDirectReceipt, dflt: true, metaKey: 'inventory_allow_direct_receipt',
+    key: 'inventory_urgent_cap_cents', group: 'inventory', label: '急采上限', value: `每张急采单不超过 ${formatYuan(inv.urgentCapCents)}`,
+    defaultValue: `每张急采单不超过 ${formatYuan(DEFAULT_URGENT_CAP_CENTS)}`, pending: true, section: 'rules',
+    hint: '没有采购单的收货只能登记急采：进部门小仓，仓库验收后生效，部门补采购单', current: inv.urgentCapCents, dflt: DEFAULT_URGENT_CAP_CENTS, metaKey: 'inventory_urgent_cap_cents',
   });
   add({
     key: 'inventory_approval_rules', group: 'inventory', label: '需要负责人确认的单据', value: approvals(inv.approvalRules), defaultValue: approvals(DEFAULT_APPROVAL_RULES),

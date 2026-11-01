@@ -299,16 +299,22 @@ function InventoryRules() {
   const qc = useQueryClient();
   const toast = useToast();
   const [draft, setDraft] = useState<InventorySettings | null>(null);
+  const [capText, setCapText] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  if (settings.data && !draft) setDraft(settings.data);
+  if (settings.data && !draft) {
+    setDraft(settings.data);
+    setCapText(centsToInput(settings.data.urgentCapCents));
+  }
   if (!draft) return <Skeleton className="h-48" />;
 
   const save = async () => {
+    const urgentCapCents = parseYuan(capText);
+    if (!urgentCapCents || urgentCapCents < 100) return setError('请填写急采上限（至少 1 元）');
     setSaving(true);
     setError(null);
     try {
-      const next = await api.put<InventorySettings>('/api/inventory/settings', draft);
+      const next = await api.put<InventorySettings>('/api/inventory/settings', { ...draft, urgentCapCents });
       qc.setQueryData(['inv', 'settings'], next);
       toast({ tone: 'success', title: '库存与采购规则已保存', body: '只影响之后提交的单据。' });
     } catch (err) {
@@ -322,7 +328,7 @@ function InventoryRules() {
   return (
     <Card className="p-5">
       <SectionTitle aside={<PendingBadge />}>库存与采购</SectionTitle>
-      <p className="mt-1 text-[12.5px] text-ink-3">库存范围、价格口径与单层负责人确认。常规领用、收货、退回不需要逐笔审批；盘点调整固定需要负责人确认。</p>
+      <p className="mt-1 text-[12.5px] text-ink-3">库存范围、价格口径、急采上限与单层负责人确认。常规领料、收货、退回不需要逐笔审批；总仓的盘点调整固定需要负责人确认，部门小仓的盘点差异由部门自己管。</p>
       <div className="mt-4 grid gap-4 md:grid-cols-3">
         <Field label="库存范围" htmlFor="i-scope" hint="库存数字代表哪里，避免重复管理">
           <Input id="i-scope" value={draft.scopeName} maxLength={20} onChange={(e) => setDraft({ ...draft, scopeName: e.target.value })} />
@@ -330,16 +336,8 @@ function InventoryRules() {
         <Field label="价格口径" htmlFor="i-basis" hint="比价只比较同规格、同单位、同口径">
           <Input id="i-basis" value={draft.priceBasis} maxLength={20} onChange={(e) => setDraft({ ...draft, priceBasis: e.target.value })} />
         </Field>
-        <Field label="无采购单直接收货">
-          <Segmented
-            value={draft.allowDirectReceipt ? 'on' : 'off'}
-            onChange={(v) => setDraft({ ...draft, allowDirectReceipt: v === 'on' })}
-            className="w-full"
-            options={[
-              { value: 'on', label: '允许（标记缺少依据）' },
-              { value: 'off', label: '不允许' },
-            ]}
-          />
+        <Field label="急采上限" htmlFor="i-urgent-cap" hint="收货必须按采购单；没有采购单只能登记急采，每张不超过这个金额">
+          <MoneyInput id="i-urgent-cap" value={capText} onChange={(e) => setCapText(e.target.value)} />
         </Field>
       </div>
       <p className="mt-5 mb-2 text-[13px] font-bold text-ink-2">需要负责人确认的单据</p>

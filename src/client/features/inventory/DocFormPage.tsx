@@ -721,7 +721,7 @@ function DocForm({
                 </Field>
                 <Field label="采购单" htmlFor="po" hint={form.supplierId ? undefined : '先选供应商'}>
                   <Select id="po" value={form.purchaseOrderId ?? ''} disabled={locked || !form.supplierId || !!editing} onChange={(e) => choosePo(Number(e.target.value) || null)}>
-                    <option value="">{settings.data?.allowDirectReceipt === false ? '请选择采购单' : '无采购单（直接收货）'}</option>
+                    <option value="">请选择采购单</option>
                     {form.purchaseOrderId && !openPos.data?.some((p) => p.id === form.purchaseOrderId) && po.data && <option value={po.data.id}>{po.data.docNo}</option>}
                     {openPos.data
                       ?.filter((p) => p.receiving !== 'full')

@@ -24,6 +24,7 @@ const ACTION_LABELS: Record<InvDoc['approvals'][number]['action'], string> = {
   void: '冲销',
   close: '关闭',
   revise: '修改版本',
+  sign: '部门签收',
 };
 
 /** 单据详情抽屉：明细、审批记录、关联单据，以及按状态与职责可做的操作 */
