@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { BookOpenCheck, Download, Plus, ReceiptText, ShieldCheck, Wallet, X } from 'lucide-react';
+import { Archive, BookOpenCheck, Download, Plus, ReceiptText, ShieldCheck, Wallet, X } from 'lucide-react';
 import {
   CLAIM_STATUS_LABELS,
   EXPENSE_CATEGORY_LABELS,
@@ -68,6 +68,11 @@ export function ExpensesPage() {
           <Link to="/erp/audit">
             <Button variant="secondary" icon={<ShieldCheck className="size-4" />} data-testid="audit-link">
               账目自检
+            </Button>
+          </Link>
+          <Link to="/erp/legacy">
+            <Button variant="secondary" icon={<Archive className="size-4" />} data-testid="legacy-link">
+              旧账对照
             </Button>
           </Link>
           {can('expense.export') && (

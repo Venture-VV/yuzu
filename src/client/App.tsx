@@ -43,6 +43,7 @@ import { ClaimFormPage } from './features/expenses/ClaimFormPage';
 import { ExpensesPage } from './features/expenses/ExpensesPage';
 import { PettyPage } from './features/expenses/PettyPage';
 import { AuditPage } from './features/purchase-ledger/AuditPage';
+import { LegacyPage } from './features/legacy/LegacyPage';
 import { PurchaseLedgerPage } from './features/purchase-ledger/PurchaseLedgerPage';
 import { RequestFormPage } from './features/requests/RequestFormPage';
 import { RequestsPage } from './features/requests/RequestsPage';
@@ -173,6 +174,7 @@ const router = createBrowserRouter([
       { path: 'requests/:id/edit', element: <RequestFormPage mode="edit" /> },
       { path: 'ledger', element: <PurchaseLedgerPage /> },
       { path: 'audit', element: <AuditPage /> },
+      { path: 'legacy', element: <LegacyPage /> },
       { path: '*', element: <Navigate to="/erp" replace /> },
     ],
   },

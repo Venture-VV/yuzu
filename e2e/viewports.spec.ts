@@ -278,6 +278,9 @@ test.describe('视口冒烟', () => {
       ['/erp/ledger', 'ledger-page'],
       ['/erp/audit', 'audit-page'],
       ['/purchasing/ordered', 'ordered-page'],
+      // v0.7.10：旧账对照（核验页与带原图的已下单物料）
+      ['/erp/legacy', 'legacy-page'],
+      ['/erp/legacy?tab=ordered', 'legacy-page'],
     ] as const) {
       await page.goto(url);
       await expect(page.getByTestId('erp-shell')).toBeVisible();

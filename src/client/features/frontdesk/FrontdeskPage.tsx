@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router';
 import { FilePenLine, Hash, Keyboard, Lock, ReceiptText, Search, ShieldCheck, UserPlus, X } from 'lucide-react';
 import { matchTags, normalizeTagCode, TAG_ZONES, uniqueTagMatch, ZONE_LABELS, type BoardTag, type CheckinResult, type TagZone, type VisitDetail } from '@shared/frontdesk';
 import { useCan, useSession } from '../../lib/session';
+import { CrossDayShiftNotice } from '../shift/ShiftGate';
 import { cn, isTypingTarget } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
@@ -257,6 +258,7 @@ function FrontdeskBoard() {
         <div className="flex min-h-0 flex-col">
           {/* 牌号快检 */}
           <div className="shrink-0 space-y-3 border-b border-line px-5 pt-4 pb-3 md:px-6">
+            <CrossDayShiftNotice />
             <div className="flex flex-wrap items-stretch gap-3">
               <div className="relative min-w-[240px] flex-1">
                 <Hash className="pointer-events-none absolute top-1/2 left-4 size-5 -translate-y-1/2 text-ink-3" />
