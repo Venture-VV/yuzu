@@ -40,6 +40,22 @@ const preview = async (kind: string, csv: string, fileName = `${kind}.csv`, cook
 };
 const apply = (kind: string, csv: string, clientKey = randomUUID(), fileName = `${kind}.csv`, cookie = ctx.owner) =>
   api(ctx.app, cookie, 'POST', '/api/admin/spaces/imports', { kind, fileName, csv, encoding: 'UTF-8', clientKey });
+/** 编辑空间的请求体：读到的字段与版本号，再改 patch 里的 */
+const fieldsOf = (s: SpaceLedger['spaces'][number], patch: Record<string, unknown> = {}) => ({
+  floorId: s.floorId,
+  zoneId: s.zoneId,
+  businessType: s.businessType,
+  capacity: s.capacity,
+  areaCentiM2: s.areaCentiM2,
+  displayName: s.displayName,
+  nameEn: s.nameEn,
+  sellable: s.sellable,
+  sourceLabel: s.sourceLabel,
+  note: s.note,
+  active: s.active,
+  version: s.version,
+  ...patch,
+});
 const saveRoom = (body: Record<string, unknown>, id?: number) =>
   id ? api(ctx.app, boss, 'PUT', `/api/admin/rooms/rooms/${id}`, body) : api(ctx.app, boss, 'POST', '/api/admin/rooms/rooms', body);
 const allChecksOk = async () => {
@@ -206,22 +222,11 @@ describe('逐条维护：新建、编辑、核对、别名、批量设区域', (
   });
 
   it('编辑与停用；核对状态改成已核对要写说明、留经办人', async () => {
-    const s = await space('S305');
-    const put = (patch: Record<string, unknown>) =>
-      api(ctx.app, boss, 'PUT', `/api/admin/spaces/${s.id}`, {
-        floorId: s.floorId,
-        zoneId: s.zoneId,
-        businessType: s.businessType,
-        capacity: s.capacity,
-        areaCentiM2: s.areaCentiM2,
-        displayName: s.displayName,
-        nameEn: s.nameEn,
-        sellable: s.sellable,
-        sourceLabel: s.sourceLabel,
-        note: s.note,
-        active: s.active,
-        ...patch,
-      });
+    // 每次按最新读到的（含版本号）提交
+    const put = async (patch: Record<string, unknown>) => {
+      const s = await space('S305');
+      return api(ctx.app, boss, 'PUT', `/api/admin/spaces/${s.id}`, fieldsOf(s, patch));
+    };
     expect((await put({ displayName: '合成SPA 新名', sellable: false })).status).toBe(200);
     expect([(await space('S305')).displayName, (await space('S305')).sellable]).toEqual(['合成SPA 新名', false]);
     expect((await put({ active: false })).status).toBe(200);
@@ -229,8 +234,8 @@ describe('逐条维护：新建、编辑、核对、别名、批量设区域', (
     expect((await put({ active: true })).status).toBe(200);
 
     const m310 = await space('M310');
-    expect((await api(ctx.app, boss, 'POST', `/api/admin/spaces/${m310.id}/verify`, { status: 'confirmed', note: '' })).status).toBe(400);
-    const v = await api(ctx.app, boss, 'POST', `/api/admin/spaces/${m310.id}/verify`, { status: 'confirmed', note: '店长现场按门牌核对' });
+    expect((await api(ctx.app, boss, 'POST', `/api/admin/spaces/${m310.id}/verify`, { status: 'confirmed', note: '', version: m310.version })).status).toBe(400);
+    const v = await api(ctx.app, boss, 'POST', `/api/admin/spaces/${m310.id}/verify`, { status: 'confirmed', note: '店长现场按门牌核对', version: m310.version });
     expect(v.status, JSON.stringify(v.body)).toBe(200);
     const after = await space('M310');
     expect([after.verifyStatus, after.verifyNote, after.verifiedByName]).toEqual(['confirmed', '店长现场按门牌核对', '店长']);
@@ -259,15 +264,77 @@ describe('逐条维护：新建、编辑、核对、别名、批量设区域', (
   });
 
   it('批量设区域：空间都要在区域那一层', async () => {
-    const ids = [(await space('S301')).id, (await space('S302')).id];
+    const picked = [await space('S301'), await space('S302')].map((s) => ({ id: s.id, version: s.version }));
+    const p201 = await space('P201');
     const zone = await zoneId('合成SPA区');
-    expect((await api(ctx.app, boss, 'POST', '/api/admin/spaces/bulk-zone', { spaceIds: [...ids, (await space('P201')).id], zoneId: zone })).body.error.code).toBe('ZONE_FLOOR_MISMATCH');
-    expect((await api(ctx.app, boss, 'POST', '/api/admin/spaces/bulk-zone', { spaceIds: ids, zoneId: zone })).status).toBe(200);
+    expect((await api(ctx.app, boss, 'POST', '/api/admin/spaces/bulk-zone', { spaces: [...picked, { id: p201.id, version: p201.version }], zoneId: zone })).body.error.code).toBe(
+      'ZONE_FLOOR_MISMATCH',
+    );
+    expect((await api(ctx.app, boss, 'POST', '/api/admin/spaces/bulk-zone', { spaces: picked, zoneId: zone })).status).toBe(200);
+    // 同一批（版本号已经过时）再提交一次：拒绝
+    expect((await api(ctx.app, boss, 'POST', '/api/admin/spaces/bulk-zone', { spaces: picked, zoneId: null })).body.error.code).toBe('SPACE_STALE');
     expect([(await space('S301')).zoneId, (await space('S302')).zoneId]).toEqual([zone, zone]);
     // 区域里还有在用的空间不能停用
     const z = (await ledger()).zones.find((x) => x.id === zone)!;
-    const off = await api(ctx.app, boss, 'PUT', `/api/admin/spaces/zones/${zone}`, { name: z.name, nameEn: z.nameEn, note: z.note, sortOrder: z.sortOrder, active: false });
+    const off = await api(ctx.app, boss, 'PUT', `/api/admin/spaces/zones/${zone}`, { name: z.name, nameEn: z.nameEn, note: z.note, sortOrder: z.sortOrder, active: false, version: z.version });
     expect(off.body.error.code).toBe('ZONE_IN_USE');
+  });
+
+  it('修改带版本号：迟到的旧请求、别人同时的修改都不会悄悄覆盖新的修改（v0.7.14 审查 P1）', async () => {
+    // 第一次提交「没收到结果」，操作员改了别的值又提交；第一次的请求之后才到：按版本号拒绝，不覆盖后来的修改
+    const s = await space('S303');
+    const late = fieldsOf(s, { displayName: '超时那次' });
+    expect((await api(ctx.app, boss, 'PUT', `/api/admin/spaces/${s.id}`, fieldsOf(s, { displayName: '后来改的' }))).status).toBe(200);
+    const r = await api(ctx.app, boss, 'PUT', `/api/admin/spaces/${s.id}`, late);
+    expect([r.status, r.body.error.code]).toEqual([409, 'SPACE_STALE']);
+    expect((await space('S303')).displayName).toBe('后来改的');
+    // 同一次修改原样重提（第一次其实已经生效）：拒绝，刷新后看到已经改好
+    const now = await space('S303');
+    expect((await api(ctx.app, boss, 'PUT', `/api/admin/spaces/${now.id}`, fieldsOf(now, { note: '一次' }))).status).toBe(200);
+    expect((await api(ctx.app, boss, 'PUT', `/api/admin/spaces/${now.id}`, fieldsOf(now, { note: '一次' }))).body.error.code).toBe('SPACE_STALE');
+    expect((await space('S303')).version).toBe(now.version + 1);
+    // 核对状态同样按版本号
+    const s305 = await space('S305');
+    expect((await api(ctx.app, boss, 'POST', `/api/admin/spaces/${s305.id}/verify`, { status: 'site_check', note: '要现场看', version: s305.version })).status).toBe(200);
+    expect((await api(ctx.app, boss, 'POST', `/api/admin/spaces/${s305.id}/verify`, { status: 'confirmed', note: '迟到的那次', version: s305.version })).body.error.code).toBe(
+      'SPACE_STALE',
+    );
+    expect((await space('S305')).verifyStatus).toBe('site_check');
+    // 楼层、区域
+    const l1 = (await ledger()).floors.find((f) => f.code === 'L1')!;
+    expect((await api(ctx.app, boss, 'PUT', `/api/admin/spaces/floors/${l1.id}`, { name: '一层大堂', sortOrder: l1.sortOrder, active: true, version: l1.version })).status).toBe(200);
+    expect((await api(ctx.app, boss, 'PUT', `/api/admin/spaces/floors/${l1.id}`, { name: '一层', sortOrder: l1.sortOrder, active: true, version: l1.version })).body.error.code).toBe('FLOOR_STALE');
+    const z = (await ledger()).zones.find((x) => x.name === '合成派对区')!;
+    const zoneBody = { name: z.name, nameEn: z.nameEn, note: '改备注', sortOrder: z.sortOrder, active: true, version: z.version };
+    expect((await api(ctx.app, boss, 'PUT', `/api/admin/spaces/zones/${z.id}`, zoneBody)).status).toBe(200);
+    expect((await api(ctx.app, boss, 'PUT', `/api/admin/spaces/zones/${z.id}`, zoneBody)).body.error.code).toBe('ZONE_STALE');
+    // 没带版本号：400
+    expect((await api(ctx.app, boss, 'PUT', `/api/admin/spaces/${s.id}`, { ...fieldsOf(await space('S303')), version: undefined })).status).toBe(400);
+  });
+
+  it('导入与改区域同时进行：不会互相等成死锁（v0.7.14 审查 P2）', async () => {
+    const z = (await ledger()).zones.find((x) => x.name === '合成派对区')!;
+    // 改区域的事务先锁住区域这一行，导入在这时开始、要插入挂在这个区域的空间；改区域的事务接着更新区域再提交
+    let release!: () => void;
+    const holding = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const rowLocked = new Promise<void>((r) => (locked = r));
+    const editing = ctx.sql.begin(async (tx) => {
+      await tx`SELECT id FROM zones WHERE id = ${z.id} FOR UPDATE`;
+      locked();
+      await holding;
+      await tx`UPDATE zones SET note = '并发改备注', version = version + 1, updated_at = now() WHERE id = ${z.id}`;
+    });
+    await rowLocked;
+    const importing = apply('spaces', ['楼层,编码,业态,区域', 'L2,P209,派对房,合成派对区'].join('\n'));
+    // 让导入走到等区域行锁的地方
+    await new Promise((r) => setTimeout(r, 600));
+    release();
+    await editing;
+    const r = await importing;
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    expect((await space('P209')).zoneId).toBe(z.id);
+    expect((await ledger()).zones.find((x) => x.id === z.id)!.note).toBe('并发改备注');
   });
 });
 
@@ -308,6 +375,7 @@ describe('客房房间挂接空间（RQ-003 剩余项）', () => {
       sourceLabel: g301.sourceLabel,
       note: g301.note,
       active: true,
+      version: g301.version,
     };
     expect((await api(ctx.app, boss, 'PUT', `/api/admin/spaces/${g301.id}`, { ...base, active: false })).body.error.code).toBe('SPACE_HAS_ROOM');
     expect((await api(ctx.app, boss, 'PUT', `/api/admin/spaces/${g301.id}`, { ...base, businessType: 'SPA' })).body.error.code).toBe('SPACE_HAS_ROOM');

@@ -362,12 +362,15 @@ function SpaceDialog({ target, ledger, onClose }: { target: Space | 'new' | null
   const toast = useToast();
   const invalidate = useInvalidateSpaces();
   const [draft, setDraft] = useState<SpaceDraft | null>(null);
+  // 打开时读到的版本号：保存、核对时原样带回，对不上（刚被改过）服务端拒绝；本对话框自己核对成功后跟着更新
+  const [baseVersion, setBaseVersion] = useState(0);
   const [opened, setOpened] = useState<typeof target>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (target !== opened) {
     setOpened(target);
     setDraft(target ? draftOf(target === 'new' ? null : target, ledger) : null);
+    setBaseVersion(target && target !== 'new' ? target.version : 0);
     setError(null);
   }
   // 详情里显示最新的（核对、加别名后台账会刷新）
@@ -411,7 +414,7 @@ function SpaceDialog({ target, ledger, onClose }: { target: Space | 'new' | null
       };
       const next = isNew
         ? await api.post<SpaceLedger>('/api/admin/spaces', { ...body, code, verifyStatus: draft.verifyStatus })
-        : await api.put<SpaceLedger>(`/api/admin/spaces/${target.id}`, { ...body, active: draft.active });
+        : await api.put<SpaceLedger>(`/api/admin/spaces/${target.id}`, { ...body, active: draft.active, version: baseVersion });
       await invalidate(next);
       toast({ tone: 'success', title: isNew ? `已新建空间 ${code}` : `空间 ${target.code} 已保存` });
       onClose();
@@ -542,7 +545,7 @@ function SpaceDialog({ target, ledger, onClose }: { target: Space | 'new' | null
         {error && <Notice tone="error" title={error} />}
         {current && (
           <>
-            <VerifyPanel space={current} />
+            <VerifyPanel space={current} version={baseVersion} onVerified={setBaseVersion} />
             <AliasPanel space={current} />
           </>
         )}
@@ -551,7 +554,7 @@ function SpaceDialog({ target, ledger, onClose }: { target: Space | 'new' | null
   );
 }
 
-function VerifyPanel({ space }: { space: Space }) {
+function VerifyPanel({ space, version, onVerified }: { space: Space; version: number; onVerified: (version: number) => void }) {
   const toast = useToast();
   const invalidate = useInvalidateSpaces();
   const [status, setStatus] = useState<SpaceVerifyStatus>('confirmed');
@@ -562,7 +565,10 @@ function VerifyPanel({ space }: { space: Space }) {
     setBusy(true);
     setError(null);
     try {
-      await invalidate(await api.post<SpaceLedger>(`/api/admin/spaces/${space.id}/verify`, { status, note: note.trim() }));
+      const next = await api.post<SpaceLedger>(`/api/admin/spaces/${space.id}/verify`, { status, note: note.trim(), version });
+      await invalidate(next);
+      const updated = next.spaces.find((s) => s.id === space.id);
+      if (updated) onVerified(updated.version);
       toast({ tone: 'success', title: `${space.code} 改为${SPACE_VERIFY_LABELS[status]}` });
       setNote('');
     } catch (e) {
@@ -725,7 +731,7 @@ function BulkZoneDialog({ spaces, ledger, onClose }: { spaces: Space[]; ledger: 
     setBusy(true);
     setError(null);
     try {
-      await invalidate(await api.post<SpaceLedger>('/api/admin/spaces/bulk-zone', { spaceIds: spaces.map((s) => s.id), zoneId }));
+      await invalidate(await api.post<SpaceLedger>('/api/admin/spaces/bulk-zone', { spaces: spaces.map((s) => ({ id: s.id, version: s.version })), zoneId }));
       toast({ tone: 'success', title: `${spaces.length} 个空间已设区域` });
       onClose(true);
     } catch (e) {
@@ -858,7 +864,7 @@ function FloorDialog({ target, onClose }: { target: Floor | 'new'; onClose: () =
     try {
       const next = isNew
         ? await api.post<SpaceLedger>('/api/admin/spaces/floors', { code: code.trim().toUpperCase(), name: name.trim(), sortOrder: order })
-        : await api.put<SpaceLedger>(`/api/admin/spaces/floors/${target.id}`, { name: name.trim(), sortOrder: order, active });
+        : await api.put<SpaceLedger>(`/api/admin/spaces/floors/${target.id}`, { name: name.trim(), sortOrder: order, active, version: target.version });
       await invalidate(next);
       toast({ tone: 'success', title: isNew ? `已新建楼层 ${code.trim().toUpperCase()}` : '楼层已保存' });
       onClose();
@@ -935,7 +941,7 @@ function ZoneDialog({ target, ledger, onClose }: { target: Zone | { floorId: num
     try {
       const body = { name: name.trim(), nameEn: nameEn.trim(), note: note.trim(), sortOrder: order };
       const next = existing
-        ? await api.put<SpaceLedger>(`/api/admin/spaces/zones/${existing.id}`, { ...body, active })
+        ? await api.put<SpaceLedger>(`/api/admin/spaces/zones/${existing.id}`, { ...body, active, version: existing.version })
         : await api.post<SpaceLedger>('/api/admin/spaces/zones', { ...body, floorId: target.floorId });
       await invalidate(next);
       toast({ tone: 'success', title: existing ? '区域已保存' : `已新建区域「${body.name}」` });

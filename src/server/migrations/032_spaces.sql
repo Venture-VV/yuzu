@@ -23,6 +23,8 @@ CREATE TABLE floors (
   name       text NOT NULL CHECK (char_length(btrim(name)) BETWEEN 1 AND 16),
   sort_order integer NOT NULL DEFAULT 0,
   active     boolean NOT NULL DEFAULT true,
+  -- 版本号：每次修改加 1；页面提交读到的版本号，对不上就拒绝（迟到的旧请求、别人同时修改都不会悄悄覆盖新的修改）
+  version    integer NOT NULL DEFAULT 1 CHECK (version >= 1),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -41,6 +43,7 @@ CREATE TABLE zones (
   sort_order integer NOT NULL DEFAULT 0,
   active     boolean NOT NULL DEFAULT true,
   import_id  bigint REFERENCES space_imports (id),
+  version    integer NOT NULL DEFAULT 1 CHECK (version >= 1),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -71,6 +74,8 @@ CREATE TABLE spaces (
   note          text NOT NULL DEFAULT '' CHECK (char_length(note) <= 200),
   active        boolean NOT NULL DEFAULT true,
   import_id     bigint REFERENCES space_imports (id),
+  -- 版本号：编辑、核对、设区域各加 1（别名、客房挂接不改这一行）
+  version       integer NOT NULL DEFAULT 1 CHECK (version >= 1),
   created_by    bigint REFERENCES staff (id),
   created_at    timestamptz NOT NULL DEFAULT now(),
   updated_at    timestamptz NOT NULL DEFAULT now()

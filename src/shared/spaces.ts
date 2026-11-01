@@ -43,6 +43,8 @@ export interface Floor {
   name: string;
   sortOrder: number;
   active: boolean;
+  /** 版本号：修改时原样带回，对不上（刚被改过）就拒绝 */
+  version: number;
   zoneCount: number;
   /** 在用的空间数 */
   spaceCount: number;
@@ -56,6 +58,7 @@ export interface Zone {
   note: string;
   sortOrder: number;
   active: boolean;
+  version: number;
   /** 在用的空间数 */
   spaceCount: number;
 }
@@ -92,6 +95,8 @@ export interface Space {
   note: string;
   active: boolean;
   importId: number | null;
+  /** 版本号：编辑、核对、设区域时原样带回，对不上（刚被改过）就拒绝 */
+  version: number;
   createdAt: string;
   updatedAt: string;
   aliases: SpaceAlias[];

@@ -56,6 +56,7 @@ async function cleanup(page: Page, code: string) {
       sourceLabel: s.sourceLabel,
       note: s.note,
       active: false,
+      version: s.version,
     });
   }
 }
