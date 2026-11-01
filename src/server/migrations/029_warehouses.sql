@@ -13,6 +13,22 @@ CREATE UNIQUE INDEX warehouses_one_central ON warehouses (kind) WHERE kind = 'ce
 INSERT INTO warehouses (id, kind) VALUES (1, 'central');
 SELECT setval(pg_get_serial_sequence('warehouses', 'id'), 1);
 INSERT INTO warehouses (kind, department_id) SELECT 'department', id FROM departments ORDER BY id;
+-- 以后新建的部门自动有小仓
+CREATE FUNCTION yuzu_department_warehouse() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  INSERT INTO warehouses (kind, department_id) VALUES ('department', NEW.id);
+  RETURN NEW;
+END $$;
+CREATE TRIGGER departments_warehouse AFTER INSERT ON departments FOR EACH ROW EXECUTE FUNCTION yuzu_department_warehouse();
+-- 仓库只增不删，不改归属
+CREATE FUNCTION yuzu_warehouse_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'DELETE' OR (NEW.kind, NEW.department_id) IS DISTINCT FROM (OLD.kind, OLD.department_id) THEN
+    RAISE EXCEPTION '仓库不能删除或改归属' USING ERRCODE = 'P0001';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER warehouses_guard BEFORE UPDATE OR DELETE ON warehouses FOR EACH ROW EXECUTE FUNCTION yuzu_warehouse_guard();
 
 -- ───────────── 部门小仓的结存（总仓的结存仍记在 materials.stock_milli / last_move_id） ─────────────
 CREATE TABLE warehouse_stock (

@@ -3,8 +3,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Department, Material, Supplier } from '@shared/inventory';
-import { fitsDecimals } from '@shared/quantity';
-import { isUniqueViolation, type Db } from '../../db';
+import { fitsDecimals, formatQty } from '@shared/quantity';
+import { isUniqueViolation, type Db, type Tx } from '../../db';
 import { guard, guardAny } from '../../auth/guard';
 import { writeAudit } from '../../lib/audit';
 import type { Deps } from '../../lib/context';
@@ -16,6 +16,7 @@ const MATERIAL_COLUMNS = (db: Db) => db`
   m.id, m.code, m.name, m.category, m.specification, m.inventory_unit, m.decimals, m.purchase_unit,
   m.purchase_factor_milli, m.ref_price_cents, m.default_supplier_id, s.name AS default_supplier_name,
   m.low_stock_milli, m.tracked, m.active, m.stock_milli,
+  (SELECT coalesce(sum(ws.stock_milli), 0) FROM warehouse_stock ws WHERE ws.material_id = m.id) AS dept_stock_milli,
   (m.low_stock_milli IS NOT NULL AND m.tracked AND m.stock_milli < m.low_stock_milli) AS is_low,
   (m.last_move_id IS NOT NULL) AS has_moves,
   (SELECT created_at FROM stock_moves WHERE id = m.last_move_id) AS last_move_at,
@@ -94,6 +95,24 @@ const DepartmentInput = z.object({
   active: z.boolean().default(true),
   sortOrder: z.number().int().default(0),
 });
+
+/** 停用部门前：它的小仓没有存货、没有待确认的单据 */
+async function assertDeptWarehouseEmpty(tx: Tx, departmentId: number) {
+  const left = await tx<{ name: string; stockMilli: number; inventoryUnit: string }[]>`
+    SELECT m.name, ws.stock_milli, m.inventory_unit FROM warehouse_stock ws
+    JOIN warehouses w ON w.id = ws.warehouse_id JOIN materials m ON m.id = ws.material_id
+    WHERE w.department_id = ${departmentId} AND ws.stock_milli > 0 ORDER BY m.code LIMIT 6`;
+  if (left.length > 0) {
+    throw unprocessable(
+      'DEPT_STOCK_NOT_EMPTY',
+      `这个部门的小仓还有存货（${left.slice(0, 5).map((r) => `${r.name} ${formatQty(r.stockMilli)} ${r.inventoryUnit}`).join('、')}${left.length > 5 ? ' 等' : ''}），请先退回总仓或盘点到 0 再停用`,
+    );
+  }
+  const [pending] = await tx<{ docNo: string }[]>`
+    SELECT d.doc_no FROM inv_docs d JOIN warehouses w ON w.id = d.warehouse_id
+    WHERE w.department_id = ${departmentId} AND d.status = 'submitted' ORDER BY d.id LIMIT 1`;
+  if (pending) throw unprocessable('DEPT_DOCS_PENDING', `这个部门的小仓还有待确认的单据 ${pending.docNo}，请先确认或退回再停用`);
+}
 
 export async function saveMaterial(db: Db, id: number | null, raw: MaterialInputData, extra: { isSynthetic?: boolean } = {}): Promise<number> {
   const m = parse(MaterialInput, raw);
@@ -246,9 +265,13 @@ export function registerMasterRoutes(app: FastifyInstance, { sql }: Deps) {
     const { id } = parse(idParam, req.params);
     const d = parse(DepartmentInput, req.body);
     try {
-      const rows = await sql`
-        UPDATE departments SET name = ${d.name}, active = ${d.active}, sort_order = ${d.sortOrder} WHERE id = ${id} RETURNING id`;
-      if (rows.length === 0) throw notFound('部门不存在');
+      await sql.begin(async (tx) => {
+        // 停用前小仓要清空、没有待确认的单据（v0.7.11）；部门行排他锁与收发时的共享锁串行
+        const [cur] = await tx<{ active: boolean }[]>`SELECT active FROM departments WHERE id = ${id} FOR UPDATE`;
+        if (!cur) throw notFound('部门不存在');
+        if (cur.active && !d.active) await assertDeptWarehouseEmpty(tx, id);
+        await tx`UPDATE departments SET name = ${d.name}, active = ${d.active}, sort_order = ${d.sortOrder} WHERE id = ${id}`;
+      });
     } catch (error) {
       if (isUniqueViolation(error)) throw conflict('NAME_EXISTS', '部门名称已存在');
       throw error;

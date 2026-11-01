@@ -64,7 +64,7 @@ export const PERMISSIONS = {
   'frontdesk.backfill': { roles: ['owner', 'store_manager', 'duty_manager'] },
   // ── 库存与采购 ──
   /** 查看库存数量、物料档案与库存单据 */
-  'inventory.read': { roles: ['owner'], duties: ['stock', 'purchase', 'payable', 'approve'] },
+  'inventory.read': { roles: ['owner'], duties: ['stock', 'purchase', 'payable', 'approve', 'cost'] },
   /** 期初录入、收货、领用、退回、直接耗用、报损申请、盘点录入 */
   'inventory.operate': { roles: ['owner'], duties: ['stock'] },
   /** 物料、供应商、部门档案 */

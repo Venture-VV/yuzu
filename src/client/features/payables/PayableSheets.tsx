@@ -77,7 +77,7 @@ function Footer({
   const manage = can('payable.manage');
   return (
     <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-line bg-card px-5 py-3.5">
-      {status === 'confirmed' && approve && (
+      {status === 'confirmed' && can('finance.void') && (
         <Button variant="ghost" size="sm" icon={<RotateCcw className="size-4" />} onClick={() => onReason('void')} className="text-clay hover:bg-clay-soft/60 hover:text-clay">
           冲销
         </Button>

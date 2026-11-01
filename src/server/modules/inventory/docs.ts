@@ -32,10 +32,12 @@ import {
   assertEnoughStock,
   assertNotFuture,
   assertSameMonth,
+  canOperateDept,
   departmentWarehouse,
   deptBalances,
   docDateSchema,
   loadInventorySettings,
+  lockDeptWarehouse,
   lockMaterials,
   logApproval,
   nextDocNo,
@@ -148,23 +150,11 @@ export interface WarehouseRef {
   active: boolean;
 }
 
-export async function actorDepartmentId(db: Db, actorId: number): Promise<number | null> {
-  const [row] = await db<{ departmentId: number | null }[]>`SELECT department_id FROM staff WHERE id = ${actorId}`;
-  return row?.departmentId ?? null;
-}
-
-/** 本部门小仓的部门申购（或店主）：签收领料、急采与补单等 */
-export async function canOperateDept(db: Db, actor: Actor, departmentId: number | null): Promise<boolean> {
-  if (actor.role === 'owner') return true;
-  if (departmentId === null || !can(actor, 'deptStock.operate')) return false;
-  return (await actorDepartmentId(db, actor.id)) === departmentId;
-}
-
 /**
  * 谁能登记（v0.7.11 两级库存，见 docs/WAREHOUSES.md）：总仓的单据与领料、退回要「物资经办」（退供应商：物资经办或采购经办）；
  * 部门小仓：本部门的部门申购（期初、急采、耗用、报损、盘点、退供应商），财务成本岗可给任何部门盘点、登记耗用；店主不限。
  */
-async function assertCanOperate(db: Db, actor: Actor, type: InvDocType, wh: WarehouseRef | null) {
+export async function assertCanOperate(db: Db, actor: Actor, type: InvDocType, wh: WarehouseRef | null) {
   const central = !wh || wh.kind === 'central' || type === 'issue' || type === 'issue_return';
   if (central) {
     if (!can(actor, OPERATE_PERMISSION[type])) throw forbidden(`当前账号没有「${INV_DOC_META[type].title}」的职责`);
@@ -177,7 +167,7 @@ async function assertCanOperate(db: Db, actor: Actor, type: InvDocType, wh: Ware
   throw forbidden(`只有${wh.name}所属部门的部门申购${type === 'count' || type === 'direct_use' ? '或财务成本岗' : ''}可以登记`);
 }
 
-async function warehouseRef(db: Db, warehouseId: number | null): Promise<WarehouseRef | null> {
+export async function warehouseRef(db: Db, warehouseId: number | null): Promise<WarehouseRef | null> {
   if (warehouseId === null) return null;
   const w = await warehouseInfo(db, warehouseId);
   if (!w) throw unprocessable('WAREHOUSE_NOT_FOUND', '仓库不存在，请刷新后重试');
@@ -531,7 +521,8 @@ async function prepare(
   const empty: Prepared = {
     supplierId: null,
     purchaseOrderId: null,
-    departmentId: null,
+    // 部门小仓的单据记下部门（列表、库存卡的「对象」显示部门）
+    departmentId: wh?.kind === 'department' ? wh.departmentId : null,
     sourceDocId: null,
     handler: '',
     amountCents: 0,
@@ -568,7 +559,7 @@ async function prepare(
       const mats = await loadMaterials(db, body.lines.map((l) => l.materialId));
       return {
         ...empty,
-        departmentId: body.docType === 'issue' ? body.departmentId : null,
+        departmentId: body.docType === 'issue' ? body.departmentId : empty.departmentId,
         handler: body.docType === 'issue' ? body.handler : '',
         lines: body.lines.map((l) => {
           const m = mats.get(l.materialId)!;
@@ -874,6 +865,7 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
   const wh = doc.warehouseId === null ? null : await warehouseRef(tx, doc.warehouseId);
   const whId = wh?.id ?? CENTRAL_WAREHOUSE_ID;
   const isDept = whId !== CENTRAL_WAREHOUSE_ID;
+  if (isDept) await lockDeptWarehouse(tx, whId);
   const ref = (l: LineRow, moveType: Parameters<typeof applyMove>[3]['moveType'], warehouseId = whId) => ({
     moveType,
     docId: doc.id,
@@ -1057,6 +1049,7 @@ async function submitLocked(tx: Tx, doc: DocRow & { docNo: string; amountCents: 
     await confirmDoc(tx, { ...doc, status: 'submitted' }, actor);
   } else if (approveNow) {
     if (!can(actor, 'inventory.approve')) throw forbidden('当前账号不能确认这类单据，请提交给负责人');
+    if (doc.urgent && actor.role !== 'owner') throw forbidden('急采要由另一个人（仓库）到部门验收后确认');
     await confirmDoc(tx, { ...doc, status: 'submitted' }, actor);
     await logApproval(tx, 'inv_doc', doc.id, 'approve', actor.id);
   }
@@ -1177,6 +1170,7 @@ export async function approveDoc(deps: Deps, docId: number, raw: unknown, actor:
     const doc = await lockDoc(tx, docId);
     if (doc.status === 'confirmed') return; // 幂等
     if (doc.status !== 'submitted') throw conflict('INVALID_STATE', '只有待确认的单据可以确认');
+    if (doc.urgent && doc.createdBy === actor.id && actor.role !== 'owner') throw forbidden('急采要由另一个人（仓库）验收，不能自己确认');
     await confirmDoc(tx, doc, actor, { countReasons });
     await logApproval(tx, 'inv_doc', docId, 'approve', actor.id);
   });
@@ -1225,6 +1219,8 @@ export async function voidDoc(deps: Deps, docId: number, raw: unknown, actor: Ac
       SELECT material_id, doc_line_id, qty_delta_milli, warehouse_id FROM stock_moves WHERE doc_id = ${docId} AND move_type <> 'void' ORDER BY id`;
     const mats = await lockMaterials(tx, moves.map((m) => m.materialId));
     const wh = await warehouseRef(tx, doc.warehouseId);
+    // 部门停用后它的小仓已清空，不能再冲回去
+    for (const w of [...new Set(moves.map((m) => m.warehouseId))].sort((a, b) => a - b)) await lockDeptWarehouse(tx, w);
     // 冲销流水记在冲销当天，原单日期不变；按日期汇总时原单与冲销分别出现在各自日期；各仓按原流水反向记
     const voidDate = todayIn(deps.config.timezone);
     for (const mv of moves) {

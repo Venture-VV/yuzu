@@ -327,7 +327,7 @@ function ClaimSheet({ id, onClose }: { id: number | null; onClose: () => void })
               撤回
             </Button>
           )}
-          {c.status === 'confirmed' && can('expense.approve') && (
+          {c.status === 'confirmed' && can('finance.void') && (
             <Button variant="danger" disabled={busy} onClick={() => setReasonFor('void')} data-testid="claim-void">
               冲销
             </Button>

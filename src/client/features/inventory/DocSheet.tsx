@@ -66,6 +66,8 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
   const operatePerm = doc.docType === 'supplier_return' ? 'supplierReturn.create' : 'inventory.operate';
   const canOperate = can(operatePerm);
   const canApprove = can('inventory.approve');
+  // #21：库存冲销由仓库或财务成本岗，只限当月（v0.7.11）
+  const canVoid = can('inventory.void');
   const isMine = doc.createdBy === session.staff.id;
   const editable = (doc.status === 'draft' || doc.status === 'returned') && canOperate;
 
@@ -333,7 +335,7 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
           </ol>
         </section>
 
-        {doc.status === 'confirmed' && !doc.voidable.ok && canApprove && <p className="text-[12.5px] text-ink-3">不能冲销：{doc.voidable.reason}</p>}
+        {doc.status === 'confirmed' && !doc.voidable.ok && canVoid && <p className="text-[12.5px] text-ink-3">不能冲销：{doc.voidable.reason}</p>}
       </div>
 
       {/* 操作 */}
@@ -353,7 +355,7 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             退供应商
           </Button>
         )}
-        {doc.status === 'confirmed' && canApprove && doc.voidable.ok && (
+        {doc.status === 'confirmed' && canVoid && doc.voidable.ok && (
           <Button variant="ghost" size="sm" icon={<RotateCcw className="size-4" />} onClick={() => setDialog({ kind: 'void' })} className="text-clay hover:bg-clay-soft/60 hover:text-clay">
             冲销
           </Button>

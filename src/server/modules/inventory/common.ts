@@ -9,7 +9,9 @@ import { businessDateOf } from '@shared/business-date';
 import { CENTRAL_WAREHOUSE_ID, type ApprovalRules, type InventorySettings, type MoveType } from '@shared/inventory';
 import { formatQty } from '@shared/quantity';
 import { z } from 'zod';
+import { can } from '@shared/permissions';
 import type { Db, Tx } from '../../db';
+import type { Actor } from '../../lib/context';
 import { AppError, unprocessable } from '../../lib/errors';
 import { dateSchema } from '../../lib/validate';
 
@@ -47,12 +49,37 @@ export function assertSameMonth(date: string, timeZone: string, what = '单据')
   }
 }
 
+/** 员工档案里的所属部门（v0.7.8 起有） */
+export async function actorDepartmentId(db: Db, actorId: number): Promise<number | null> {
+  const [row] = await db<{ departmentId: number | null }[]>`SELECT department_id FROM staff WHERE id = ${actorId}`;
+  return row?.departmentId ?? null;
+}
+
+/** 本部门小仓的部门申购（或店主）：签收领料、急采与补单等（v0.7.11） */
+export async function canOperateDept(db: Db, actor: Actor, departmentId: number | null): Promise<boolean> {
+  if (actor.role === 'owner') return true;
+  if (departmentId === null || !can(actor, 'deptStock.operate')) return false;
+  return (await actorDepartmentId(db, actor.id)) === departmentId;
+}
+
 /** 部门的小仓（部门停用后小仓也停用）；没有返回 null */
 export async function departmentWarehouse(db: Db, departmentId: number): Promise<{ id: number; name: string; active: boolean } | null> {
   const [row] = await db<{ id: number; name: string; active: boolean }[]>`
     SELECT w.id, d.name || '小仓' AS name, d.active FROM warehouses w JOIN departments d ON d.id = w.department_id
     WHERE w.department_id = ${departmentId}`;
   return row ?? null;
+}
+
+/**
+ * 动部门小仓之前：对部门行加共享锁并确认部门没停用（v0.7.11）。停用部门时对部门行加排他锁、核对小仓已清空，
+ * 两边串行，停用后的小仓不会再有收发。在锁物料之后调用（停用部门只锁部门一行，不会互相等待）。
+ */
+export async function lockDeptWarehouse(tx: Tx, warehouseId: number) {
+  if (warehouseId === CENTRAL_WAREHOUSE_ID) return;
+  const [row] = await tx<{ active: boolean; name: string }[]>`
+    SELECT d.active, d.name FROM warehouses w JOIN departments d ON d.id = w.department_id WHERE w.id = ${warehouseId} FOR SHARE OF d`;
+  if (!row) throw unprocessable('WAREHOUSE_NOT_FOUND', '仓库不存在，请刷新后重试');
+  if (!row.active) throw unprocessable('DEPARTMENT_INACTIVE', `「${row.name}」已停用，它的小仓不能再收发`);
 }
 
 /** 仓的名称、类别与所属部门（总仓用「库存范围名称」） */
@@ -69,6 +96,8 @@ export async function warehouseInfo(db: Db, warehouseId: number) {
 
 /** 门店时区的自然日（库存与采购按自然日统计，不沿用会员营业日切换规则） */
 export const todayIn = (timeZone: string) => businessDateOf(new Date(), timeZone, 0);
+/** 某个时刻在门店时区是哪一天 */
+export const dateIn = (at: string | Date, timeZone: string) => businessDateOf(new Date(at), timeZone, 0);
 
 export const docDateSchema = dateSchema();
 

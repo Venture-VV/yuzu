@@ -93,6 +93,32 @@ export interface DeptSign {
 /** 领料超过这么多天没签收，在待办与自检里标出（待确认） */
 export const ISSUE_SIGN_DUE_DAYS = 3;
 
+/** 「本部门小仓」页面用的基础资料（部门的员工没有「查看库存」，这里只给需要的字段，不含参考价与总仓结存） */
+export interface DeptStockMeta {
+  /** 能看的部门：店主与成本岗是所有在用部门，部门申购只有自己所属的部门 */
+  departments: { id: number; name: string; warehouseId: number }[];
+  /** 员工档案里的所属部门 */
+  myDepartmentId: number | null;
+  /** 能登记本部门的急采、期初、报损、签收（部门申购或店主） */
+  canOperate: boolean;
+  /** 能给所有部门盘点、登记耗用（财务成本岗） */
+  canAudit: boolean;
+  urgentCapCents: number;
+  signDueDays: number;
+  materials: {
+    id: number;
+    code: string;
+    name: string;
+    category: string;
+    specification: string;
+    inventoryUnit: string;
+    decimals: number;
+    purchaseUnit: string;
+    purchaseFactorMilli: number;
+  }[];
+  suppliers: { id: number; code: string; name: string }[];
+}
+
 /** 需要负责人确认的单据（模拟规则，待店主确认）。盘点调整固定需要确认。 */
 export interface ApprovalRules {
   purchase_order: boolean;
@@ -285,6 +311,19 @@ export interface InvDocSummary {
   createdAt: string;
 }
 
+/** 库存卡：一个物料在一个仓的流水（v0.7.11 起按仓） */
+export interface StockCard {
+  material: Material;
+  warehouse: { id: number; name: string; kind: Warehouse['kind'] };
+  /** 这个物料在各仓的结存：总仓在前，部门小仓只列有过收发的 */
+  balances: { warehouseId: number; name: string; kind: Warehouse['kind']; stockMilli: number }[];
+  moves: StockMoveRow[];
+  pending: { id: number; docNo: string; docType: InvDocType; status: InvDocStatus; docDate: string; qtyMilli: number }[];
+}
+
+/** 报表选的仓：某一个仓，或「全部合计」 */
+export type WarehouseSel = number | 'all';
+
 export interface StockMoveRow {
   id: number;
   moveType: MoveType;
@@ -300,7 +339,10 @@ export interface StockMoveRow {
   note: string;
 }
 
-/** 期间收发汇总；出库类为正数，盘点调整与冲销带正负号。begin + 各项 = closing */
+/**
+ * 期间收发汇总；出库类为正数，盘点调整与冲销带正负号。begin + 各项 = closing。
+ * 总仓与「全部合计」：issued 是领料出、issueReturned 是退回进；部门小仓反过来：issued 是从总仓领进、issueReturned 是退回总仓（v0.7.11）。
+ */
 export interface StockSummaryRow {
   materialId: number;
   code: string;
