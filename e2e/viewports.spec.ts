@@ -84,6 +84,20 @@ test.describe('视口冒烟', () => {
     await expectFits(page);
   });
 
+  test('管理后台：空间台账（v0.7.14）的空间、楼层与区域、导入', async ({ page }) => {
+    await login(page, 'linlan');
+    await page.goto('/admin/spaces');
+    await expect(page.getByTestId('spaces-summary')).toBeVisible();
+    await expect(page.getByTestId('spaces-list')).toBeVisible();
+    await expectFits(page);
+    await page.getByRole('radio', { name: '楼层与区域' }).click();
+    await expect(page.getByTestId('floor-L3')).toBeVisible();
+    await expectFits(page);
+    await page.getByRole('radio', { name: '导入' }).click();
+    await expect(page.getByTestId('space-import')).toBeVisible();
+    await expectFits(page);
+  });
+
   test('技师：后台「技师」与看板「技师业绩」（v0.7.0；技师功能关闭时看板不显示「技师业绩」，v0.7.3）', async ({ page }) => {
     await login(page, 'linlan');
     const tech = (await (await page.request.get('/api/admin/technicians')).json()) as { rules: { enabled: boolean } };

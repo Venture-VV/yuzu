@@ -33,6 +33,8 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   // 对账登记（v0.7.13）：月结由对账付款，按批次由采购经办或对账付款；接口里按种类再核对一次
   supplier_recon: ['payable.manage', 'purchase.manage'],
   supplier_recon_void: ['payable.manage', 'purchase.manage'],
+  // 空间台账导入（v0.7.14）：店主、店总（与后台「客房」同一组权限）
+  space_import: ['settings.manage', 'catalog.manage'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -45,6 +47,7 @@ const READ: Record<ErpOpType, Permission[]> = {
   erp_import: ['inventory.master', 'payable.manage', 'inventory.approve'],
   supplier_recon: ['payable.read'],
   supplier_recon_void: ['payable.read'],
+  space_import: ['settings.manage', 'catalog.manage'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {

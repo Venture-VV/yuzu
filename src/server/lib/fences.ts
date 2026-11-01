@@ -39,6 +39,8 @@ export const FENCED_OPS = [
   // 对账登记（v0.7.13）与撤销（v0.7.14）
   'supplier_recon',
   'supplier_recon_void',
+  // 空间台账导入（v0.7.14）
+  'space_import',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 

@@ -172,7 +172,19 @@ export const ERP_PERMISSIONS: readonly Permission[] = [...new Set<Permission>([.
  * ERP 单据的「结果待确认」（v0.7.8）：页面提交前把操作编号和原请求存在本机，断网后按编号查回，
  * 或在服务端确认作废（原请求晚到也不会登记）后再重新填写。
  */
-export const ERP_OP_TYPES = ['expense_claim', 'petty_advance', 'petty_settlement', 'purchase_request', 'ap_offset', 'supplier_refund', 'erp_import', 'supplier_recon', 'supplier_recon_void'] as const;
+export const ERP_OP_TYPES = [
+  'expense_claim',
+  'petty_advance',
+  'petty_settlement',
+  'purchase_request',
+  'ap_offset',
+  'supplier_refund',
+  'erp_import',
+  'supplier_recon',
+  'supplier_recon_void',
+  // 后台「空间台账」的导入（v0.7.14）：不属于 ERP 模块，借用同一套「结果待确认」
+  'space_import',
+] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   expense_claim: '费用报销',
@@ -184,6 +196,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   erp_import: '批量导入',
   supplier_recon: '对账登记',
   supplier_recon_void: '撤销对账登记',
+  space_import: '空间台账导入',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

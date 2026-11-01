@@ -23,6 +23,7 @@ import {
   type RoomBoardStatus,
   type StayDetail,
 } from '@shared/rooms';
+import { spaceLabel } from '@shared/spaces';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, formatTime } from '../../lib/utils';
@@ -205,6 +206,8 @@ function RoomTile({ r, canCheckin, onClick }: { r: RoomBoardRoom; canCheckin: bo
           <span className="truncate text-[12px] text-ink-4">{r.typeName}</span>
         )}
       </span>
+      {/* 挂接了空间台账的房间：显示名（品牌图上可能几间同名，靠房号——空间编码——区分） */}
+      {r.spaceName && r.spaceName !== r.roomNo && <span className="w-full truncate text-[11.5px] text-ink-3">{r.spaceName}</span>}
       {s ? (
         <>
           <span className="mt-0.5 w-full truncate text-[12.5px] font-semibold text-ink-2">{guestOf(s)}</span>
@@ -355,7 +358,7 @@ function CheckinDialog({
       onClose={op.busy ? () => {} : onClose}
       title={
         <span className="flex items-center gap-2">
-          <BedDouble className="size-5 text-pine" /> 入住 · {room.roomNo}
+          <BedDouble className="size-5 text-pine" /> 入住 · {spaceLabel(room.roomNo, room.spaceName)}
         </span>
       }
       description={`${room.typeName} · ${kindLabel(room.kind)} · ${rateText(room.kind, room.price, room.blockMinutes)}。入住时先挂${room.kind === 'daily' ? '第一晚' : '第一段'}房费 ${formatYuan(room.price)}。`}

@@ -1,8 +1,11 @@
 // 后台「客房」（S7，v0.7.4，见 docs/ROOMS.md）：客房规则（只有店主能改：开关、退房时间、加收一晚的时刻、钟点房宽限、入住默认押金）、
 // 房型与房价（全天房每晚、钟点房每段；能管理价目的岗位）、房间（房号、楼层、房型）。
 // 房型、房间停用不删除，历史入住单与结账单照常显示；有人住的房间不能停用、不能改房型；改房价只影响之后的入住。
+// v0.7.14：房间挂接空间台账里的「客房」空间（RQ-003 剩余项），挂上后房号就是空间编码；台账里有客房后新建房间必须选空间；
+// 换挂、取消挂接要写原因；有人住时不改挂接。
 
 import { useState } from 'react';
+import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { formatYuan, centsToInput, parseYuan } from '@shared/money';
@@ -18,8 +21,10 @@ import {
   type RoomKind,
   type RoomRules,
   type RoomsAdmin,
+  type RoomSpaceOption,
   type RoomType,
 } from '@shared/rooms';
+import { ADMIN_SECTIONS } from '@shared/admin';
 import { api, errorMessage } from '../../lib/api';
 import { qk } from '../../lib/queries';
 import { useCan } from '../../lib/session';
@@ -35,7 +40,7 @@ import { AdminPage } from './AdminShell';
 
 export function RoomsSection() {
   return (
-    <AdminPage section="rooms" description="客房功能开关与退房、押金规则，房型与房价（全天房、钟点房），房间（房号、楼层）。">
+    <AdminPage section="rooms" description="客房功能开关与退房、押金规则，房型与房价（全天房、钟点房），房间（房号、楼层、挂接空间台账）。">
       <div className="space-y-5">
         <RulesCard />
         <TypesCard />
@@ -374,8 +379,9 @@ function RoomsCard() {
   const [editing, setEditing] = useState<Room | 'new' | null>(null);
   if (!admin.data) return <Skeleton className="h-40" />;
   const editable = can('catalog.manage');
-  const { rooms, types } = admin.data;
+  const { rooms, types, spaces, spaceRequired } = admin.data;
   const typeName = (id: number) => types.find((t) => t.id === id)?.name ?? '';
+  const unlinked = rooms.filter((r) => r.active && r.spaceId === null).length;
   return (
     <Card className="p-5" data-testid="rooms-rooms">
       <SectionTitle
@@ -390,6 +396,15 @@ function RoomsCard() {
         房间
       </SectionTitle>
       <p className="mt-1 text-[12.5px] text-ink-3">房号在房态看板上按楼层排在一起。有人住的房间不能停用、不能改房型（先退房或换房）；房间不删除，历史入住单照常显示房号。</p>
+      {spaceRequired && unlinked > 0 && (
+        <Notice tone="info" title={`${unlinked} 间房还没挂接空间台账`} className="mt-3">
+          编辑房间、选一个「客房」空间，房号就改成空间编码（不按图纸自动匹配）；品牌房号要现场按门牌核对后，在
+          <Link to={ADMIN_SECTIONS.spaces.path} className="font-semibold text-pine hover:underline">
+            「空间台账」
+          </Link>
+          里加别名。
+        </Notice>
+      )}
       {rooms.length === 0 ? (
         <p className="mt-4 rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">
           还没有房间。{editable ? (types.some((t) => t.active) ? '点「新建房间」，例如 301（3 楼）。' : '先建一个房型，再建房间。') : ''}
@@ -400,8 +415,10 @@ function RoomsCard() {
             <li key={r.id} className={cn('flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5', !r.active && 'bg-paper-2/50 opacity-70')} data-testid={`rooms-room-${r.roomNo}`}>
               <span className="num min-w-[72px] text-[14.5px] font-bold">{r.roomNo}</span>
               <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink-3">
+                {r.spaceName ? `${r.spaceName} · ` : ''}
                 {r.floor ? `${r.floor} 楼` : '未分楼层'} · {typeName(r.roomTypeId)}
               </span>
+              {r.spaceId !== null ? <Badge tone="lake">空间 {r.spaceCode}</Badge> : spaceRequired && r.active ? <Badge>未挂接</Badge> : null}
               {r.occupied && <Badge tone="yuzu">在住</Badge>}
               <span className="num text-[12px] text-ink-4">排序 {r.sortOrder}</span>
               {!r.active && <Badge tone="clay">已停用</Badge>}
@@ -414,15 +431,38 @@ function RoomsCard() {
           ))}
         </ul>
       )}
-      <RoomDialog target={editing} types={types} floors={[...new Set(rooms.map((r) => r.floor).filter(Boolean))]} onClose={() => setEditing(null)} />
+      <RoomDialog
+        target={editing}
+        types={types}
+        spaces={spaces}
+        spaceRequired={spaceRequired}
+        floors={[...new Set(rooms.map((r) => r.floor).filter(Boolean))]}
+        onClose={() => setEditing(null)}
+      />
     </Card>
   );
 }
 
-function RoomDialog({ target, types, floors, onClose }: { target: Room | 'new' | null; types: RoomType[]; floors: string[]; onClose: () => void }) {
+function RoomDialog({
+  target,
+  types,
+  spaces,
+  spaceRequired,
+  floors,
+  onClose,
+}: {
+  target: Room | 'new' | null;
+  types: RoomType[];
+  spaces: RoomSpaceOption[];
+  spaceRequired: boolean;
+  floors: string[];
+  onClose: () => void;
+}) {
   const qc = useQueryClient();
   const toast = useToast();
   const [roomNo, setRoomNo] = useState('');
+  const [spaceId, setSpaceId] = useState<number | null>(null);
+  const [linkReason, setLinkReason] = useState('');
   const [floor, setFloor] = useState('');
   const [typeId, setTypeId] = useState<number | null>(null);
   const [sortOrder, setSortOrder] = useState('0');
@@ -438,21 +478,49 @@ function RoomDialog({ target, types, floors, onClose }: { target: Room | 'new' |
     setTypeId(r?.roomTypeId ?? types.find((t) => t.active)?.id ?? null);
     setSortOrder(String(r?.sortOrder ?? 0));
     setActive(r?.active ?? true);
+    setSpaceId(r?.spaceId ?? null);
+    setLinkReason('');
     setError(null);
   }
   const order = Number(sortOrder);
   const choices = types.filter((t) => t.active || (target !== 'new' && target?.roomTypeId === t.id));
-  const ok = roomNo.trim().length >= 1 && roomNo.trim().length <= MAX_ROOM_NO && floor.trim().length <= MAX_ROOM_FLOOR && typeId !== null && Number.isInteger(order) && order >= 0 && order <= 9999;
+  const current = target && target !== 'new' ? target : null;
+  // 能挂的空间：在用、还没挂在别的房间上的「客房」空间（原来挂着的照样列出）
+  const spaceChoices = spaces.filter((s) => (s.active && (s.roomId === null || s.roomId === current?.id)) || s.id === current?.spaceId);
+  const chosen = spaces.find((s) => s.id === spaceId) ?? null;
+  const relink = !!current && spaceId !== current.spaceId;
+  const needReason = relink && current.spaceId !== null;
+  const mustPick = target === 'new' && spaceRequired;
+  const ok =
+    (spaceId !== null || (roomNo.trim().length >= 1 && roomNo.trim().length <= MAX_ROOM_NO)) &&
+    (!mustPick || spaceId !== null) &&
+    (!needReason || linkReason.trim().length >= 2) &&
+    !(relink && current.occupied) &&
+    floor.trim().length <= MAX_ROOM_FLOOR &&
+    typeId !== null &&
+    Number.isInteger(order) &&
+    order >= 0 &&
+    order <= 9999;
 
   const save = async () => {
     setBusy(true);
     setError(null);
     try {
-      const body = { roomNo: roomNo.trim(), floor: floor.trim(), roomTypeId: typeId!, sortOrder: order, active };
+      const body = {
+        roomNo: spaceId !== null ? '' : roomNo.trim(),
+        floor: floor.trim(),
+        roomTypeId: typeId!,
+        sortOrder: order,
+        active,
+        spaceId,
+        linkReason: linkReason.trim(),
+      };
       const next = target === 'new' ? await api.post<RoomsAdmin>('/api/admin/rooms/rooms', body) : await api.put<RoomsAdmin>(`/api/admin/rooms/rooms/${target!.id}`, body);
       qc.setQueryData(adminKey, next);
       void qc.invalidateQueries({ queryKey: ['rooms'] });
-      toast({ tone: 'success', title: target === 'new' ? `已新建房间「${body.roomNo}」` : '房间已保存' });
+      void qc.invalidateQueries({ queryKey: ['admin', 'spaces'] });
+      const name = chosen ? chosen.code : body.roomNo;
+      toast({ tone: 'success', title: target === 'new' ? `已新建房间「${name}」` : '房间已保存' });
       onClose();
     } catch (e) {
       setError(errorMessage(e));
@@ -478,10 +546,44 @@ function RoomDialog({ target, types, floors, onClose }: { target: Room | 'new' |
       }
     >
       <div className="space-y-4">
-        <div className="flex flex-wrap gap-4">
-          <Field label="房号" htmlFor="room-no" hint={`最多 ${MAX_ROOM_NO} 字，例如 301、8A`}>
-            <Input fullWidth={false} id="room-no" value={roomNo} maxLength={MAX_ROOM_NO} onChange={(e) => setRoomNo(e.target.value)} className="num w-32" data-autofocus data-testid="rooms-room-no" />
+        {(spaces.length > 0 || current?.spaceId) && (
+          <Field
+            label="空间台账"
+            htmlFor="room-space"
+            hint={mustPick ? '台账里已有客房：新建房间要选一个空间，房号就是空间编码' : '挂上后房号就是空间编码；只列在用、还没挂的「客房」空间'}
+          >
+            <Select id="room-space" value={spaceId ?? ''} onChange={(e) => setSpaceId(Number(e.target.value) || null)} data-testid="rooms-room-space">
+              <option value="">{mustPick ? '请选择空间' : '不挂接（手工房号）'}</option>
+              {spaceChoices.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.code}
+                  {s.displayName && s.displayName !== s.code ? ` · ${s.displayName}` : ''}（{s.floorCode}）{s.active ? '' : '（已停用）'}
+                </option>
+              ))}
+            </Select>
           </Field>
+        )}
+        {mustPick && spaceChoices.length === 0 && (
+          <Notice tone="warning" title="台账里的客房空间都已挂了房间">
+            先在「空间台账」里新建这间房的空间（编码按编码图），再回来建房间。
+          </Notice>
+        )}
+        {needReason && (
+          <Field label={spaceId === null ? '取消挂接的原因' : '换挂的原因'} htmlFor="room-link-reason" hint="例如：现场核对后发现挂错了">
+            <Input id="room-link-reason" value={linkReason} maxLength={200} onChange={(e) => setLinkReason(e.target.value)} data-testid="rooms-room-link-reason" />
+          </Field>
+        )}
+        {relink && current.occupied && <Notice tone="warning" title="这间房有人住：退房后才能挂接、换挂或取消挂接" />}
+        <div className="flex flex-wrap gap-4">
+          {spaceId !== null ? (
+            <Field label="房号" htmlFor="room-no" hint="挂接空间后房号就是空间编码">
+              <Input fullWidth={false} id="room-no" value={chosen?.code ?? ''} disabled className="num w-32" data-testid="rooms-room-no" />
+            </Field>
+          ) : (
+            <Field label="房号" htmlFor="room-no" hint={`最多 ${MAX_ROOM_NO} 字，例如 301、8A`}>
+              <Input fullWidth={false} id="room-no" value={roomNo} maxLength={MAX_ROOM_NO} onChange={(e) => setRoomNo(e.target.value)} className="num w-32" data-autofocus data-testid="rooms-room-no" />
+            </Field>
+          )}
           <Field label="楼层" htmlFor="room-floor" hint="选填，例如 3">
             <Input fullWidth={false} id="room-floor" value={floor} maxLength={MAX_ROOM_FLOOR} onChange={(e) => setFloor(e.target.value)} list="room-floors" className="num w-28" data-testid="rooms-room-floor" />
             <datalist id="room-floors">

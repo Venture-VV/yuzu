@@ -11,6 +11,7 @@ import {
   Gift,
   HandHeart,
   IdCard,
+  Layers,
   LayoutGrid,
   ListChecks,
   Scale,
@@ -38,6 +39,7 @@ const ICONS: Record<AdminSection, LucideIcon> = {
   technicians: HandHeart,
   dining: UtensilsCrossed,
   rooms: BedDouble,
+  spaces: Layers,
   staff: UsersRound,
   permissions: ShieldCheck,
   opening: ArchiveRestore,
@@ -46,7 +48,7 @@ const ICONS: Record<AdminSection, LucideIcon> = {
 
 const GROUPS: { title: string; items: AdminSection[] }[] = [
   { title: '概览', items: ['home', 'settings'] },
-  { title: '经营设置', items: ['rules', 'members', 'catalog', 'tags', 'technicians', 'dining', 'rooms'] },
+  { title: '经营设置', items: ['rules', 'members', 'catalog', 'tags', 'technicians', 'dining', 'rooms', 'spaces'] },
   { title: '人员与权限', items: ['staff', 'permissions'] },
   { title: '数据', items: ['opening', 'audit'] },
 ];

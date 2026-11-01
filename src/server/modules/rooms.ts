@@ -36,7 +36,8 @@ import {
   type StayDetail,
   type StaySummary,
 } from '@shared/rooms';
-import type { Db, Tx } from '../db';
+import { ROOM_BUSINESS_TYPE } from '@shared/spaces';
+import { isUniqueViolation, type Db, type Tx } from '../db';
 import { guard, guardAny } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps, OpContext } from '../lib/context';
@@ -87,9 +88,23 @@ export async function roomsAdmin(db: Db): Promise<RoomsAdmin> {
     FROM room_types t ORDER BY t.sort_order, t.id`;
   const rooms = await db<RoomsAdmin['rooms']>`
     SELECT r.id, r.room_no, r.floor, r.room_type_id, r.housekeeping, r.maintenance_note, r.sort_order, r.active,
-           EXISTS (SELECT 1 FROM room_stays s WHERE s.room_id = r.id AND s.status = 'open') AS occupied
-    FROM rooms r ORDER BY r.floor, r.sort_order, r.room_no`;
-  return { rules, rulesUpdatedAt: meta?.updatedAt ?? null, rulesUpdatedBy: meta?.updatedBy ?? null, types, rooms };
+           EXISTS (SELECT 1 FROM room_stays s WHERE s.room_id = r.id AND s.status = 'open') AS occupied,
+           r.space_id, sp.code AS space_code, sp.display_name AS space_name
+    FROM rooms r LEFT JOIN spaces sp ON sp.id = r.space_id ORDER BY r.floor, r.sort_order, r.room_no`;
+  const spaces = await db<RoomsAdmin['spaces']>`
+    SELECT s.id, s.code, s.display_name, f.code AS floor_code, s.active, r.id AS room_id
+    FROM spaces s JOIN floors f ON f.id = s.floor_id LEFT JOIN rooms r ON r.space_id = s.id
+    WHERE s.business_type = ${ROOM_BUSINESS_TYPE} AND (s.active OR r.id IS NOT NULL)
+    ORDER BY f.sort_order, s.code`;
+  return {
+    rules,
+    rulesUpdatedAt: meta?.updatedAt ?? null,
+    rulesUpdatedBy: meta?.updatedBy ?? null,
+    types,
+    rooms,
+    spaces,
+    spaceRequired: spaces.some((s) => s.active),
+  };
 }
 
 async function saveRoomRules(deps: Deps, raw: unknown, ctx: OpContext) {
@@ -160,48 +175,121 @@ async function saveRoomType(deps: Deps, id: number | null, raw: unknown, ctx: Op
 }
 
 const RoomInput = z.object({
-  roomNo: z.string('请填写房号').trim().min(1, '请填写房号').max(MAX_ROOM_NO, `房号最多 ${MAX_ROOM_NO} 字`),
+  /** 房号：挂了空间的房间用空间编码，不用填 */
+  roomNo: z.string('房号不正确').trim().max(MAX_ROOM_NO, `房号最多 ${MAX_ROOM_NO} 字`).default(''),
   floor: z.string().trim().max(MAX_ROOM_FLOOR, `楼层最多 ${MAX_ROOM_FLOOR} 字`).default(''),
   roomTypeId: z.number('请选择房型').int().positive('请选择房型'),
   sortOrder: z.number().int().min(0).max(9999).default(0),
   active: z.boolean().default(true),
+  /** 挂接的空间（v0.7.14）：不带 = 不改挂接；null = 不挂（已挂着的就是取消挂接） */
+  spaceId: z.number('空间不正确').int().positive('空间不正确').nullable().optional(),
+  /** 换挂、取消挂接的原因（例如现场核对后发现挂错了） */
+  linkReason: z.string('原因不正确').trim().max(200, '原因最多 200 字').default(''),
 });
+
+/**
+ * 锁住要挂的空间（房间之后：房间 → 空间），核对能挂：空间台账里在用的「客房」空间，没挂在别的房间上。
+ * 空间编辑（停用、改业态）也锁这一行，两边串行。
+ */
+async function lockLinkableSpace(tx: Tx, spaceId: number, roomId: number | null) {
+  const [space] = await tx<{ code: string; displayName: string; businessType: string; active: boolean }[]>`
+    SELECT code, display_name, business_type, active FROM spaces WHERE id = ${spaceId} FOR UPDATE`;
+  if (!space) throw notFound('空间不存在，请刷新后重试');
+  if (!space.active) throw conflict('SPACE_INACTIVE', `空间 ${space.code} 已停用，不能挂客房`);
+  if (space.businessType !== ROOM_BUSINESS_TYPE) throw conflict('SPACE_NOT_ROOM', `空间 ${space.code} 的业态是「${space.businessType}」，客房只能挂「${ROOM_BUSINESS_TYPE}」的空间`);
+  const [other] = await tx<{ roomNo: string }[]>`SELECT room_no FROM rooms WHERE space_id = ${spaceId} AND id IS DISTINCT FROM ${roomId}`;
+  if (other) throw conflict('SPACE_LINKED', `空间 ${space.code} 已挂在房间「${other.roomNo}」上`);
+  return space;
+}
 
 async function saveRoom(deps: Deps, id: number | null, raw: unknown, ctx: OpContext) {
   const r = parse(RoomInput, raw);
-  await deps.sql.begin(async (tx) => {
-    const [dup] = await tx<{ id: number }[]>`SELECT id FROM rooms WHERE lower(btrim(room_no)) = lower(${r.roomNo}) AND id IS DISTINCT FROM ${id}`;
-    if (dup) throw conflict('ROOM_NO_TAKEN', `已有房间「${r.roomNo}」`);
-    const [type] = await tx<{ active: boolean }[]>`SELECT active FROM room_types WHERE id = ${r.roomTypeId}`;
-    if (!type) throw notFound('房型不存在，请刷新后重试');
-    if (id === null) {
-      if (!type.active) throw conflict('ROOM_TYPE_INACTIVE', '这个房型已停用，请换一个房型');
-      const [row] = await tx<{ id: number }[]>`
-        INSERT INTO rooms (room_no, floor, room_type_id, sort_order, active, created_by)
-        VALUES (${r.roomNo}, ${r.floor}, ${r.roomTypeId}, ${r.sortOrder}, ${r.active}, ${ctx.actor.id}) RETURNING id`;
-      await writeAudit(tx, { staffId: ctx.actor.id, action: 'room_saved', targetType: 'room', targetId: row!.id, detail: { summary: `新建房间「${r.roomNo}」` }, ip: ctx.ip });
-      return;
-    }
-    const [cur] = await tx<{ roomNo: string; roomTypeId: number }[]>`SELECT room_no, room_type_id FROM rooms WHERE id = ${id} FOR UPDATE`;
-    if (!cur) throw notFound('房间不存在');
-    const [busy] = await tx<{ stayNo: string }[]>`SELECT stay_no FROM room_stays WHERE room_id = ${id} AND status = 'open'`;
-    if (busy && (!r.active || r.roomTypeId !== cur.roomTypeId)) {
-      throw conflict('ROOM_IN_USE', `房间「${cur.roomNo}」有人住（${busy.stayNo}），退房或换房后才能停用、改房型`);
-    }
-    if (r.roomTypeId !== cur.roomTypeId && !type.active) throw conflict('ROOM_TYPE_INACTIVE', '这个房型已停用，请换一个房型');
-    await tx`
-      UPDATE rooms SET room_no = ${r.roomNo}, floor = ${r.floor}, room_type_id = ${r.roomTypeId}, sort_order = ${r.sortOrder}, active = ${r.active},
-             updated_at = now()
-      WHERE id = ${id}`;
-    await writeAudit(tx, {
-      staffId: ctx.actor.id,
-      action: 'room_saved',
-      targetType: 'room',
-      targetId: id,
-      detail: { summary: `修改房间「${cur.roomNo}」${cur.roomNo !== r.roomNo ? ` → 「${r.roomNo}」` : ''}${r.active ? '' : '（停用）'}` },
-      ip: ctx.ip,
+  const reasonOk = r.linkReason.length >= 2;
+  try {
+    await deps.sql.begin(async (tx) => {
+      const [type] = await tx<{ active: boolean }[]>`SELECT active FROM room_types WHERE id = ${r.roomTypeId}`;
+      if (!type) throw notFound('房型不存在，请刷新后重试');
+      if (id === null) {
+        if (!type.active) throw conflict('ROOM_TYPE_INACTIVE', '这个房型已停用，请换一个房型');
+        let roomNo = r.roomNo;
+        let spaceId: number | null = null;
+        if (r.spaceId != null) {
+          const space = await lockLinkableSpace(tx, r.spaceId, null);
+          roomNo = space.code;
+          spaceId = r.spaceId;
+        } else {
+          // 空间台账里已有客房：新建的房间都要从台账里选（房号不再手工录入）
+          const [required] = await tx`SELECT 1 FROM spaces WHERE business_type = ${ROOM_BUSINESS_TYPE} AND active LIMIT 1`;
+          if (required) throw unprocessable('ROOM_SPACE_REQUIRED', '空间台账里已有客房：新建房间请选一个空间，房号就是空间编码');
+          if (!roomNo) throw unprocessable('ROOM_NO_REQUIRED', '请填写房号');
+        }
+        const [dup] = await tx<{ id: number }[]>`SELECT id FROM rooms WHERE lower(btrim(room_no)) = lower(${roomNo})`;
+        if (dup) throw conflict('ROOM_NO_TAKEN', `已有房间「${roomNo}」${spaceId ? '（先把那间房挂到这个空间上，或改它的房号）' : ''}`);
+        const [row] = await tx<{ id: number }[]>`
+          INSERT INTO rooms (room_no, floor, room_type_id, sort_order, active, created_by, space_id)
+          VALUES (${roomNo}, ${r.floor}, ${r.roomTypeId}, ${r.sortOrder}, ${r.active}, ${ctx.actor.id}, ${spaceId}) RETURNING id`;
+        await writeAudit(tx, {
+          staffId: ctx.actor.id,
+          action: 'room_saved',
+          targetType: 'room',
+          targetId: row!.id,
+          detail: { summary: `新建房间「${roomNo}」${spaceId ? '（挂接空间台账）' : ''}`, spaceId },
+          ip: ctx.ip,
+        });
+        return;
+      }
+      const [cur] = await tx<{ roomNo: string; roomTypeId: number; spaceId: number | null }[]>`
+        SELECT room_no, room_type_id, space_id FROM rooms WHERE id = ${id} FOR UPDATE`;
+      if (!cur) throw notFound('房间不存在');
+      const [busy] = await tx<{ stayNo: string }[]>`SELECT stay_no FROM room_stays WHERE room_id = ${id} AND status = 'open'`;
+      if (busy && (!r.active || r.roomTypeId !== cur.roomTypeId)) {
+        throw conflict('ROOM_IN_USE', `房间「${cur.roomNo}」有人住（${busy.stayNo}），退房或换房后才能停用、改房型`);
+      }
+      if (r.roomTypeId !== cur.roomTypeId && !type.active) throw conflict('ROOM_TYPE_INACTIVE', '这个房型已停用，请换一个房型');
+      const nextSpace = r.spaceId === undefined ? cur.spaceId : r.spaceId;
+      const relink = nextSpace !== cur.spaceId;
+      let roomNo = r.roomNo;
+      let linkNote = '';
+      if (relink) {
+        // 挂接改了：有人住时不改（房费明细上的房号要与入住时一致）；换挂、取消挂接要写原因
+        if (busy) throw conflict('ROOM_IN_USE', `房间「${cur.roomNo}」有人住（${busy.stayNo}），退房后才能${cur.spaceId ? '换挂或取消挂接' : '挂接空间'}`);
+        if (cur.spaceId !== null && !reasonOk) throw unprocessable('LINK_REASON_REQUIRED', '换挂或取消挂接要写原因（至少 2 个字），例如现场核对后发现挂错了');
+      }
+      if (nextSpace !== null) {
+        // 挂着空间：房号就是空间编码（不能另改）
+        const space = relink
+          ? await lockLinkableSpace(tx, nextSpace, id)
+          : (await tx<{ code: string }[]>`SELECT code FROM spaces WHERE id = ${nextSpace} FOR SHARE`)[0]!;
+        roomNo = space.code;
+        if (relink) linkNote = cur.spaceId === null ? `，挂接空间 ${space.code}` : `，换挂空间 ${space.code}（${r.linkReason}）`;
+      } else {
+        if (!roomNo) throw unprocessable('ROOM_NO_REQUIRED', '请填写房号');
+        if (relink) linkNote = `，取消挂接空间（${r.linkReason}）`;
+      }
+      const [dup] = await tx<{ id: number }[]>`SELECT id FROM rooms WHERE lower(btrim(room_no)) = lower(${roomNo}) AND id <> ${id}`;
+      if (dup) throw conflict('ROOM_NO_TAKEN', `已有房间「${roomNo}」`);
+      await tx`
+        UPDATE rooms SET room_no = ${roomNo}, floor = ${r.floor}, room_type_id = ${r.roomTypeId}, sort_order = ${r.sortOrder}, active = ${r.active},
+               space_id = ${nextSpace}, updated_at = now()
+        WHERE id = ${id}`;
+      await writeAudit(tx, {
+        staffId: ctx.actor.id,
+        action: 'room_saved',
+        targetType: 'room',
+        targetId: id,
+        detail: {
+          summary: `修改房间「${cur.roomNo}」${cur.roomNo !== roomNo ? ` → 「${roomNo}」` : ''}${linkNote}${r.active ? '' : '（停用）'}`,
+          ...(relink ? { spaceBefore: cur.spaceId, spaceAfter: nextSpace, reason: r.linkReason || null } : {}),
+        },
+        ip: ctx.ip,
+      });
     });
-  });
+  } catch (e) {
+    // 两个房间同时挂同一个空间、或同时用同一个房号：唯一索引兜底
+    if (isUniqueViolation(e, 'rooms_space_uq')) throw conflict('SPACE_LINKED', '这个空间刚被挂到别的房间上，请刷新后重试');
+    if (isUniqueViolation(e, 'rooms_no_uq')) throw conflict('ROOM_NO_TAKEN', '房号刚被别的房间用了，请刷新后重试');
+    throw e;
+  }
 }
 
 // ───────────────────────── 读取：入住单、房态看板 ─────────────────────────
@@ -316,10 +404,24 @@ export async function roomsBoard(deps: Deps): Promise<RoomBoard> {
   const now = new Date();
   // 停用的房间还有人住时照样显示，退房为止
   const rooms = await db<
-    { id: number; roomNo: string; floor: string; typeName: string; kind: RoomKind; price: number; blockMinutes: number | null; housekeeping: string; maintenanceNote: string | null; stayId: number | null }[]
+    {
+      id: number;
+      roomNo: string;
+      spaceName: string | null;
+      floor: string;
+      typeName: string;
+      kind: RoomKind;
+      price: number;
+      blockMinutes: number | null;
+      housekeeping: string;
+      maintenanceNote: string | null;
+      stayId: number | null;
+    }[]
   >`
-    SELECT r.id, r.room_no, r.floor, t.name AS type_name, t.kind, t.price, t.block_minutes, r.housekeeping, r.maintenance_note, s.id AS stay_id
+    SELECT r.id, r.room_no, sp.display_name AS space_name, r.floor, t.name AS type_name, t.kind, t.price, t.block_minutes, r.housekeeping,
+           r.maintenance_note, s.id AS stay_id
     FROM rooms r JOIN room_types t ON t.id = r.room_type_id LEFT JOIN room_stays s ON s.room_id = r.id AND s.status = 'open'
+    LEFT JOIN spaces sp ON sp.id = r.space_id
     WHERE r.active OR s.id IS NOT NULL
     ORDER BY r.floor, r.sort_order, r.room_no`;
   const ids = rooms.flatMap((r) => (r.stayId ? [r.stayId] : []));

@@ -90,8 +90,23 @@ export interface Room {
   maintenanceNote: string | null;
   sortOrder: number;
   active: boolean;
-  /** 有没有在住的入住单（有人住的房间不能停用、不能改房型） */
+  /** 有没有在住的入住单（有人住的房间不能停用、不能改房型、不能改挂接） */
   occupied: boolean;
+  /** 挂接的空间台账空间（v0.7.14，RQ-003 剩余项）：挂上后房号就是空间编码 */
+  spaceId: number | null;
+  spaceCode: string | null;
+  spaceName: string | null;
+}
+
+/** 房间可以挂的空间：空间台账里业态是「客房」的（停用的只在已挂着时列出） */
+export interface RoomSpaceOption {
+  id: number;
+  code: string;
+  displayName: string;
+  floorCode: string;
+  active: boolean;
+  /** 已挂在哪间房上 */
+  roomId: number | null;
 }
 
 export interface RoomsAdmin {
@@ -100,6 +115,10 @@ export interface RoomsAdmin {
   rulesUpdatedBy: string | null;
   types: RoomType[];
   rooms: Room[];
+  /** 空间台账里的「客房」空间（v0.7.14） */
+  spaces: RoomSpaceOption[];
+  /** 台账里已有在用的「客房」空间：新建房间必须选空间（房号不再手工录入） */
+  spaceRequired: boolean;
 }
 
 /** 在住的入住单（房态看板、详情） */
@@ -129,6 +148,8 @@ export interface StaySummary {
 export interface RoomBoardRoom {
   id: number;
   roomNo: string;
+  /** 挂接空间的显示名（v0.7.14；同名的品牌房号靠编码区分，显示「G305 · 客房 C5」） */
+  spaceName: string | null;
   floor: string;
   typeName: string;
   kind: RoomKind;
