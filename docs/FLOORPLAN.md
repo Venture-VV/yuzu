@@ -78,7 +78,7 @@ node dist/server/cli.js floorplan-convert <图纸.dwg|.dxf> [--out 目录]   # �
 node dist/server/cli.js floorplan-sample <文件.dxf>                      # 写出合成样例图纸（第一版）
 ```
 
-`floorplan-convert` 与后台走同一个转换进程，适合在测试服上量用时与内存，或在不想写进系统时先看结果。
+这两个命令不连数据库，不需要 `DATABASE_URL`。`floorplan-convert` 与后台走同一个转换进程，适合在测试服上量用时与内存、在本机核对图层归类（`report.json` 列出每个图层的用途与图元数），或在不想写进系统时先看结果。
 
 ## 6. 部署与授权
 
