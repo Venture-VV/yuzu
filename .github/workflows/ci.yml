@@ -79,12 +79,13 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - name: 写入合成演示数据（会员 + 库存采购 + 前台手牌 + 结账交班）
+      - name: 写入合成演示数据（会员 + 库存采购 + 前台手牌 + 结账交班 + 旧账合成样例）
         run: |
           node dist/server/cli.js seed-demo
           node dist/server/cli.js seed-inventory-demo
           node dist/server/cli.js seed-frontdesk-demo
           node dist/server/cli.js seed-billing-demo
+          node dist/server/cli.js seed-legacy-demo
           node dist/server/cli.js check
       - name: 启动应用
         run: |

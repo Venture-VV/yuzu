@@ -5,12 +5,13 @@
 //   · 先按 id 升序锁定涉及的物料行（SELECT … FOR UPDATE），同一物料的收发严格串行；
 //   · 结存字段有 CHECK (>= 0) 兜底，任何情况下都不会出现负库存。
 
-import { businessDateOf, ISO_DATE } from '@shared/business-date';
+import { businessDateOf } from '@shared/business-date';
 import type { ApprovalRules, InventorySettings, MoveType } from '@shared/inventory';
 import { formatQty } from '@shared/quantity';
 import { z } from 'zod';
 import type { Db, Tx } from '../../db';
 import { AppError, unprocessable } from '../../lib/errors';
+import { dateSchema } from '../../lib/validate';
 
 export const DEFAULT_APPROVAL_RULES: ApprovalRules = {
   purchase_order: true,
@@ -36,7 +37,7 @@ export async function loadInventorySettings(db: Db): Promise<InventorySettings> 
 /** 门店时区的自然日（库存与采购按自然日统计，不沿用会员营业日切换规则） */
 export const todayIn = (timeZone: string) => businessDateOf(new Date(), timeZone, 0);
 
-export const docDateSchema = z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD');
+export const docDateSchema = dateSchema();
 
 export function assertNotFuture(date: string, timeZone: string) {
   if (date > todayIn(timeZone)) throw unprocessable('FUTURE_DATE', '单据日期不能晚于今天');

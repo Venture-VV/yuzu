@@ -1,0 +1,47 @@
+{
+  "description": "旧账合成样例（legacy-samples / seed-legacy-demo）导入后，核验页的固定预期结果。金额单位为分；四份样例的内容是编的，结构与原表一致。",
+  "files": {
+    "purchase_ledger": { "sheets": { "Sheet1": 15, "Sheet2": 6 }, "fileTotals": { "打款金额": 880000, "应退回金额": 617050, "退回出纳": 625000 } },
+    "material_detail": { "sheets": { "8月": 5, "9月": 3, "10月": 0 } },
+    "ordered_materials": { "sheets": { "10月": 5, "11月": 0 }, "images": 2 },
+    "brand_requests": { "sheets": { "工作表1": 5 }, "tableRows": 10 }
+  },
+  "ledger": {
+    "rows": 14,
+    "preHeaderRows": 1,
+    "netCents": -292451,
+    "noAmount": 2,
+    "noAmountMerged": 1,
+    "noDate": 3,
+    "noCategory": 3,
+    "expenseCents": 259549,
+    "refundRows": 1,
+    "refundCents": -2000,
+    "payoutRows": 2,
+    "payoutCents": -450000,
+    "unclearRows": 1
+  },
+  "payments": { "days": 6, "advanceCents": 880000, "shouldReturnCents": 617050, "returnedCents": 625000 },
+  "crossChecks": {
+    "advanceMinusPayoutsCents": 430000,
+    "netSpendCents": 257549,
+    "advanceMinusNetSpendCents": 622451,
+    "returnedMinusShouldCents": 7950,
+    "shouldNoReturnDays": 2,
+    "shouldNoReturnCents": 2050,
+    "ledgerAugSepCents": 252999,
+    "materialAugSepCents": 129040,
+    "ledgerOctCents": 0,
+    "orderedOctCents": 35770
+  },
+  "daily": {
+    "unbalanced": 3,
+    "tail": 1,
+    "zeroAdvanceWithSpend": ["2026-09-03"],
+    "diffs": { "2026-08-31": 0, "2026-09-01": 0, "2026-09-02": 10000, "2026-09-03": -5000, "2026-09-04": -49, "2026-09-05": 5000 }
+  },
+  "materials": { "rows": 8, "cents": 129040, "noAmount": 3, "noItem": 2, "noPurpose": 7, "invoiceSpellings": 4, "emptyInvoiceTax": 3, "invoiceIssues": { "missing": 3, "unknown": 0, "rate": 1 }, "categoryVariants": 4, "categorySynonymRows": 2, "joinedDepartments": 1, "costInDepartment": 1, "boughtNotReceived": 1 },
+  "ordered": { "rows": 5, "cents": 35770, "withImage": 4, "emptyNotes": 5, "sameDayDuplicates": 1 },
+  "brand": { "contentRows": 5, "tableRows": 10, "qty": 29, "incomplete": 7, "ordered": 3, "received": 2, "returned": 1, "orderedNotReceived": 1, "noLink": 2 },
+  "rules": { "1": 13, "2": 2, "3": 3, "4": 2, "5": 4, "6": 2, "7": 2, "8": 1, "9": 1, "10": 1, "11": null, "12": 3 }
+}

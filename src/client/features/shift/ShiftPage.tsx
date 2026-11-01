@@ -13,7 +13,7 @@ import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, MoneyInput, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { PrintButton } from '../print/PrintButton';
-import { shiftKeys, StartShiftForm, useCurrentShift } from './ShiftGate';
+import { CrossDayShiftNotice, shiftKeys, StartShiftForm, useCurrentShift } from './ShiftGate';
 
 // 交班（店主 #11，2026-10-29 签认）：开班登记备用金 → 当班期间系统按本人经办的结账与充值汇总 → 交班时实点现金，记下长款 / 短款。
 // 结账收款算在收款时的班次；反结账退的现金算在执行反结账的人当时的班次、扣减应有现金（同一钱箱的人合并核对时相抵）。
@@ -28,6 +28,7 @@ export function ShiftPage() {
       <PageHeader title="交班" subtitle={`营业日 ${session.today} · ${session.staff.displayName}`} />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[960px] space-y-5 px-5 py-6 md:px-7">
+          <CrossDayShiftNotice />
           {current.isPending ? <Skeleton className="h-48" /> : shift ? <OpenShift shift={shift} /> : <StartShift />}
           <Card className="p-5">
             <SectionTitle>今天的班次</SectionTitle>

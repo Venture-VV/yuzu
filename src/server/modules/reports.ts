@@ -2,7 +2,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { businessDateOf, ISO_DATE } from '@shared/business-date';
+import { businessDateOf } from '@shared/business-date';
 import { levelOf } from '@shared/frontdesk';
 import { shiftDate } from '@shared/labels';
 import { channelLabel, levelName } from '@shared/members';
@@ -15,7 +15,7 @@ import { writeAudit } from '../lib/audit';
 import { toCsv } from '../lib/csv';
 import type { Deps } from '../lib/context';
 import { badRequest } from '../lib/errors';
-import { parse } from '../lib/validate';
+import { dateSchema, parse } from '../lib/validate';
 import { loadFrontdeskRules } from './frontdesk/common';
 import { loadSettings } from './settings';
 import { loadTechnicians, technicianReport, withoutCommission } from './technicians';
@@ -288,7 +288,7 @@ export async function dutyExtras(db: Db, today: string, c: Clock, opts: { inStor
   return { hourly, departments: byCategory(await itemLines(db, today, today)), longStays };
 }
 
-const PeriodQuery = z.object({ from: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD'), to: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD') });
+const PeriodQuery = z.object({ from: dateSchema('开始日期'), to: dateSchema('结束日期') });
 
 /** 门店时区与营业日切换时刻，以及此刻的营业日（看板、ERP 营业数据共用） */
 /** 看板「客房」（S7）：此刻的房态与押金；时段内的入住、挂的晚数 / 段数、房费营业额（结账口径，与部门参考表同一口径）与押金 */

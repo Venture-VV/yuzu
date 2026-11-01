@@ -3,7 +3,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { BACKFILL_KIND_LABELS, type BackfillKind } from '@shared/backfill';
-import { businessDateOf, ISO_DATE } from '@shared/business-date';
+import { businessDateOf } from '@shared/business-date';
 import { PAYMENT_METHOD_LABELS, type PaymentMethod } from '@shared/labels';
 import { formatAmount, formatYuan } from '@shared/money';
 import { businessBreakdown, CHECKOUT_METHOD_LABELS, COUPON_PLATFORM_LABELS } from '@shared/checkout';
@@ -14,7 +14,7 @@ import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { unprocessable } from '../lib/errors';
 import { toCsv } from '../lib/csv';
-import { parse } from '../lib/validate';
+import { dateSchema, parse } from '../lib/validate';
 import { resolveReadableDate } from './ledger';
 import { loadFrontdeskRules } from './frontdesk/common';
 import { loadSettings } from './settings';
@@ -553,7 +553,7 @@ export function settlementCsv(s: SettlementSummary): string {
   return toCsv(rows);
 }
 
-const DateParam = z.object({ date: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD') });
+const DateParam = z.object({ date: dateSchema() });
 const CloseInput = z.object({ note: z.string().trim().max(200, '备注最多 200 字').default('') });
 
 export function registerSettlementRoutes(app: FastifyInstance, deps: Deps) {

@@ -80,7 +80,10 @@ export type AuditAction =
   | 'room_deposit'
   | 'room_close'
   | 'room_housekeeping'
-  | 'room_audit';
+  | 'room_audit'
+  // 8–10 月旧账只读对照（v0.7.10）
+  | 'legacy_imported'
+  | 'legacy_import_voided';
 
 export interface AuditEntry {
   staffId: number | null;
