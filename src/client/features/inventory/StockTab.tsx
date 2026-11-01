@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ArrowRight, Download, Hourglass, Search, TriangleAlert, X } from 'lucide-react';
-import { INV_DOC_META, INV_STATUS_LABELS, MOVE_TYPE_LABELS, type InvDocType, type Material } from '@shared/inventory';
+import { CENTRAL_WAREHOUSE_ID, INV_DOC_META, INV_STATUS_LABELS, ISSUE_SIGN_DUE_DAYS, MOVE_TYPE_LABELS, type InvDocType, type Material, type WarehouseStockRow } from '@shared/inventory';
 import { formatAmount } from '@shared/money';
 import { conversionText, formatQty } from '@shared/quantity';
 import { errorMessage } from '../../lib/api';
@@ -11,7 +11,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { Sheet } from '../../components/Overlay';
 import { Badge, Button, IconButton, Notice, Skeleton, Spinner } from '../../components/ui';
 import { DOC_VISUAL, MoveIcon, PackHint, Qty, StockMeter } from './parts';
-import { useMaterials, useOverview, useStockCard } from './queries';
+import { useMaterials, useOverview, useStockCard, useWarehouseStock, useWarehouses } from './queries';
 import { useMedia } from './useMedia';
 
 /** 工作台上的快捷入口（顺序即日常频率） */
@@ -22,10 +22,15 @@ export function StockTab() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const selectedId = Number(params.get('m')) || null;
+  // 两级库存（v0.7.11）：看总仓还是某个部门小仓
+  const warehouseId = Number(params.get('wh')) || CENTRAL_WAREHOUSE_ID;
+  const dept = warehouseId !== CENTRAL_WAREHOUSE_ID;
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<string>('all');
   const materials = useMaterials();
   const overview = useOverview();
+  const warehouses = useWarehouses();
+  const deptStock = useWarehouseStock(dept ? warehouseId : null);
   const wide = useMedia('(min-width: 1280px)');
 
   const tracked = useMemo(() => (materials.data ?? []).filter((m) => m.tracked), [materials.data]);
@@ -48,10 +53,27 @@ export function StockTab() {
     else next.delete('m');
     setParams(next, { replace: true });
   };
+  const chooseWarehouse = (id: number) => {
+    const next = new URLSearchParams(params);
+    if (id === CENTRAL_WAREHOUSE_ID) next.delete('wh');
+    else next.set('wh', String(id));
+    setParams(next, { replace: true });
+  };
+  const deptRows = useMemo(() => {
+    const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return (deptStock.data ?? []).filter((r) => words.every((w) => `${r.code} ${r.name} ${r.specification} ${r.category}`.toLowerCase().includes(w)));
+  }, [deptStock.data, q]);
 
   const canAct = (t: InvDocType) => (t === 'supplier_return' ? can('supplierReturn.create') : can('inventory.operate'));
 
-  const detail = selectedId ? <MaterialDetail id={selectedId} onClose={() => select(null)} closable={!wide} /> : null;
+  const detail = selectedId ? <MaterialDetail key={`${selectedId}-${warehouseId}`} id={selectedId} warehouseId={warehouseId} onClose={() => select(null)} closable={!wide} /> : null;
+  const todo = overview.data
+    ? [
+        { n: overview.data.urgentToVerify, label: '急采待仓库验收', to: '/inventory/docs?type=receipt&urgent=1&status=submitted' },
+        { n: overview.data.unsignedIssues, label: `领料超过 ${ISSUE_SIGN_DUE_DAYS} 天部门没签收`, to: '/inventory/docs?type=issue&unsigned=1' },
+        { n: overview.data.urgentToBackfill, label: '急采待补采购单', to: '/inventory/docs?type=receipt&urgent=1&status=confirmed' },
+      ].filter((t) => t.n > 0)
+    : [];
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -70,6 +92,16 @@ export function StockTab() {
             />
             <Tile label="今日收发" value={overview.data ? overview.data.todayIn + overview.data.todayOut : undefined} sub={overview.data ? `入库 ${overview.data.todayIn} 单 · 出库 ${overview.data.todayOut} 单` : ' '} onClick={() => navigate('/inventory/docs')} />
           </div>
+          {todo.length > 0 && (
+            <div className="flex flex-wrap gap-2" data-testid="inv-todo-chips">
+              {todo.map((t) => (
+                <Link key={t.label} to={t.to} className="flex h-8 items-center gap-1.5 rounded-full bg-yuzu-soft px-3 text-[12.5px] font-bold text-yuzu-deep hover:bg-yuzu-tint">
+                  {t.label} <span className="num">{t.n}</span>
+                  <ArrowRight className="size-3.5" />
+                </Link>
+              ))}
+            </div>
+          )}
           {ACTIONS.some(canAct) && (
             <div className="flex flex-wrap gap-2">
               {ACTIONS.filter((t) => canAct(t) && (t !== 'opening' || noOpening > 0)).map((t) => {
@@ -96,6 +128,22 @@ export function StockTab() {
 
         {/* 搜索与筛选 */}
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-5 py-3 md:px-7">
+          {(warehouses.data?.length ?? 0) > 1 && (
+            <select
+              value={warehouseId}
+              onChange={(e) => chooseWarehouse(Number(e.target.value))}
+              aria-label="仓库"
+              data-testid="warehouse-select"
+              className="h-9 rounded-md border border-line-strong bg-card px-2.5 text-[13px] font-semibold outline-none focus:border-pine"
+            >
+              {warehouses.data!.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.kind === 'central' ? `总仓 · ${w.name}` : w.name}
+                  {!w.active ? '（已停用）' : ''}
+                </option>
+              ))}
+            </select>
+          )}
           <div className="relative min-w-[200px] flex-1 md:max-w-xs">
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-3" />
             <input
@@ -106,21 +154,40 @@ export function StockTab() {
               className="h-9 w-full rounded-md border border-line-strong bg-card pr-3 pl-9 text-[13px] outline-none focus:border-pine"
             />
           </div>
-          <FilterChip active={filter === 'all'} onClick={() => setFilter('all')}>
-            全部 {tracked.length}
-          </FilterChip>
-          <FilterChip active={filter === 'low'} onClick={() => setFilter('low')} tone="clay">
-            低库存 {tracked.filter((m) => m.isLow).length}
-          </FilterChip>
-          {categories.map((c) => (
-            <FilterChip key={c} active={filter === `c:${c}`} onClick={() => setFilter(`c:${c}`)}>
-              {c}
-            </FilterChip>
-          ))}
+          {!dept && (
+            <>
+              <FilterChip active={filter === 'all'} onClick={() => setFilter('all')}>
+                全部 {tracked.length}
+              </FilterChip>
+              <FilterChip active={filter === 'low'} onClick={() => setFilter('low')} tone="clay">
+                低库存 {tracked.filter((m) => m.isLow).length}
+              </FilterChip>
+              {categories.map((c) => (
+                <FilterChip key={c} active={filter === `c:${c}`} onClick={() => setFilter(`c:${c}`)}>
+                  {c}
+                </FilterChip>
+              ))}
+            </>
+          )}
+          {dept && <span className="text-[12.5px] text-ink-3">部门小仓的东西由部门登记耗用、盘点；仓库在这里看结存，领料与退回照常登记</span>}
         </div>
 
         <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-5 py-4 md:px-7">
-          {materials.error ? (
+          {dept ? (
+            deptStock.error ? (
+              <Notice tone="error" title={errorMessage(deptStock.error)} />
+            ) : deptStock.isPending ? (
+              <Skeleton className="h-48" />
+            ) : deptRows.length === 0 ? (
+              <EmptyState art="leaf" title="这个部门小仓里还没有东西" description="仓库登记领料、急采验收后，或者部门登记了期初，这里就会有结存。" className="rounded-lg border border-dashed border-line-strong" />
+            ) : (
+              <ul className="overflow-hidden rounded-lg border border-line bg-card shadow-card" aria-label="部门小仓结存">
+                {deptRows.map((r) => (
+                  <DeptRow key={r.materialId} r={r} selected={r.materialId === selectedId} onSelect={() => select(r.materialId)} />
+                ))}
+              </ul>
+            )
+          ) : materials.error ? (
             <Notice tone="error" title={errorMessage(materials.error)} />
           ) : materials.isPending ? (
             <div className="space-y-2">
@@ -231,19 +298,52 @@ function MaterialRow({ m, selected, onSelect }: { m: Material; selected: boolean
         </span>
         <span className="text-right">
           <Qty milli={m.stockMilli} unit={m.inventoryUnit} className={cn('text-[17px] font-bold', m.isLow && 'text-clay')} />
-          <span className="block text-[11.5px] text-ink-3">{relativeTime(m.lastMoveAt)}</span>
+          <span className="block text-[11.5px] text-ink-3">
+            {m.deptStockMilli > 0 ? (
+              <>
+                部门小仓 <Qty milli={m.deptStockMilli} unit={m.inventoryUnit} />
+              </>
+            ) : (
+              relativeTime(m.lastMoveAt)
+            )}
+          </span>
         </span>
       </button>
     </li>
   );
 }
 
-function MaterialDetail({ id, onClose, closable }: { id: number; onClose: () => void; closable: boolean }) {
+/** 部门小仓里的一项物料（v0.7.11） */
+function DeptRow({ r, selected, onSelect }: { r: WarehouseStockRow; selected: boolean; onSelect: () => void }) {
+  return (
+    <li className="border-b border-line/70 last:border-0">
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-current={selected || undefined}
+        className={cn('grid w-full grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-x-3 px-4 py-2.5 text-left transition-colors', selected ? 'bg-pine-tint' : 'hover:bg-paper/70', r.stockMilli === 0 && 'opacity-60')}
+      >
+        <span className="num text-[12px] font-semibold text-ink-3">{r.code}</span>
+        <span className="min-w-0">
+          <span className="block truncate text-[14px] font-bold">{r.name}</span>
+          <span className="block truncate text-[12px] text-ink-3">{r.specification || '—'}</span>
+        </span>
+        <span className="text-right">
+          <Qty milli={r.stockMilli} unit={r.inventoryUnit} className="text-[17px] font-bold" />
+          <span className="block text-[11.5px] text-ink-3">{relativeTime(r.lastMoveAt)}</span>
+        </span>
+      </button>
+    </li>
+  );
+}
+
+function MaterialDetail({ id, warehouseId: initialWarehouse, onClose, closable }: { id: number; warehouseId: number; onClose: () => void; closable: boolean }) {
   const can = useCan();
   const session = useSession();
-  const card = useStockCard(id);
+  const [warehouseId, setWarehouseId] = useState(initialWarehouse);
+  const card = useStockCard(id, warehouseId);
   const [limit, setLimit] = useState(30);
-  useEffect(() => setLimit(30), [id]);
+  useEffect(() => setLimit(30), [id, warehouseId]);
 
   if (card.error) return <Notice tone="error" title={errorMessage(card.error)} className="m-5" />;
   if (!card.data)
@@ -252,7 +352,9 @@ function MaterialDetail({ id, onClose, closable }: { id: number; onClose: () => 
         <Spinner />
       </div>
     );
-  const { material: m, moves, pending } = card.data;
+  const { material: m, moves, pending, balances } = card.data;
+  const central = card.data.warehouse.kind === 'central';
+  const balance = balances.find((b) => b.warehouseId === card.data.warehouse.id)?.stockMilli ?? 0;
   const quick: InvDocType[] = ['issue', 'receipt', 'count', 'damage'];
 
   return (
@@ -272,11 +374,36 @@ function MaterialDetail({ id, onClose, closable }: { id: number; onClose: () => 
             </IconButton>
           )}
         </div>
+        {balances.length > 1 && (
+          <div className="mt-3 flex flex-wrap gap-1.5" role="radiogroup" aria-label="看哪个仓的库存卡">
+            {balances.map((b) => (
+              <button
+                key={b.warehouseId}
+                type="button"
+                role="radio"
+                aria-checked={b.warehouseId === card.data.warehouse.id}
+                onClick={() => setWarehouseId(b.warehouseId)}
+                className={cn(
+                  'flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-semibold',
+                  b.warehouseId === card.data.warehouse.id ? 'bg-ink text-paper' : 'border border-line-strong bg-card text-ink-2 hover:border-ink-3',
+                )}
+              >
+                {b.kind === 'central' ? '总仓' : b.name}
+                <Qty milli={b.stockMilli} unit={m.inventoryUnit} unitClassName="opacity-70" />
+              </button>
+            ))}
+          </div>
+        )}
         <div className="mt-3 flex items-end justify-between gap-4 rounded-lg bg-paper-2/70 px-4 py-3">
           <div>
-            <p className="text-[12px] font-semibold text-ink-3">当前库存</p>
-            <Qty milli={m.stockMilli} unit={m.inventoryUnit} className={cn('text-[30px] leading-tight font-bold', m.isLow && 'text-clay')} />
-            <PackHint milli={m.stockMilli} factorMilli={m.purchaseFactorMilli} purchaseUnit={m.purchaseUnit} inventoryUnit={m.inventoryUnit} className="ml-2" />
+            <p className="text-[12px] font-semibold text-ink-3">{central ? '总仓当前库存' : `${card.data.warehouse.name}当前库存`}</p>
+            <Qty milli={balance} unit={m.inventoryUnit} className={cn('text-[30px] leading-tight font-bold', central && m.isLow && 'text-clay')} />
+            <PackHint milli={balance} factorMilli={m.purchaseFactorMilli} purchaseUnit={m.purchaseUnit} inventoryUnit={m.inventoryUnit} className="ml-2" />
+            {central && m.deptStockMilli > 0 && (
+              <p className="text-[12px] text-ink-3">
+                各部门小仓合计 <Qty milli={m.deptStockMilli} unit={m.inventoryUnit} />
+              </p>
+            )}
           </div>
           <div className="text-right text-[12px] text-ink-3">
             <p>{conversionText(m.purchaseUnit, m.purchaseFactorMilli, m.inventoryUnit)}</p>
@@ -284,13 +411,13 @@ function MaterialDetail({ id, onClose, closable }: { id: number; onClose: () => 
             {m.refPriceCents !== null && <p>参考价 ¥{formatAmount(m.refPriceCents)}/{m.purchaseUnit}</p>}
           </div>
         </div>
-        {m.isLow && (
+        {central && m.isLow && (
           <p className="mt-2 flex items-center gap-1.5 text-[12.5px] font-semibold text-clay">
             <TriangleAlert className="size-4" />
             低于人工设定的提醒线（阈值为模拟值，不是行业推荐用量）
           </p>
         )}
-        {can('inventory.operate') && (
+        {can('inventory.operate') && central && (
           <div className="mt-3 flex flex-wrap gap-1.5">
             {quick.map((t) => (
               <Link
@@ -334,8 +461,8 @@ function MaterialDetail({ id, onClose, closable }: { id: number; onClose: () => 
         )}
 
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-[13px] font-bold text-ink-2">库存卡</h3>
-          <Button size="sm" variant="ghost" icon={<Download className="size-4" />} onClick={() => downloadUrl(`/api/inventory/materials/${m.id}/card/export`)}>
+          <h3 className="text-[13px] font-bold text-ink-2">库存卡{central ? '' : ` · ${card.data.warehouse.name}`}</h3>
+          <Button size="sm" variant="ghost" icon={<Download className="size-4" />} onClick={() => downloadUrl(`/api/inventory/materials/${m.id}/card/export?warehouse=${card.data.warehouse.id}`)}>
             导出
           </Button>
         </div>
@@ -345,7 +472,8 @@ function MaterialDetail({ id, onClose, closable }: { id: number; onClose: () => 
             title="还没有库存流水"
             description="这项物料需要先建立经确认的期初，之后的每一笔收发都会记在这里。"
             action={
-              can('inventory.operate') && (
+              can('inventory.operate') &&
+              central && (
                 <Link to={`/inventory/new/opening?m=${m.id}`} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-pine px-3.5 text-[13px] font-bold text-paper hover:bg-pine-hover">
                   建立期初 <ArrowRight className="size-4" />
                 </Link>

@@ -16,7 +16,7 @@ import { PoSheet } from '../purchasing/PoSheet';
 import { useOpenings, usePayablesOverview, usePayments, usePos } from '../purchasing/queries';
 import { DocSheet } from './DocSheet';
 import { DOC_VISUAL, Qty, SimRule } from './parts';
-import { useInvDocs, useMaterials } from './queries';
+import { useInvDocs, useMaterials, useWarehouses } from './queries';
 
 /** 负责人待办：先处理需要确认的申请，再看需要关注的异常，最后才是经营汇总 */
 export function TodoPage() {
@@ -39,7 +39,10 @@ export function TodoPage() {
   const materials = useMaterials();
   const overview = usePayablesOverview(payableRead);
   const low = useMemo(() => (materials.data ?? []).filter((m) => m.isLow), [materials.data]);
-  const missingPo = (noPo.data ?? []).filter((d) => d.noPo);
+  // 没有采购单的收货：迁移 029 以前的直接收货与急采，补单前列在这里
+  const missingPo = (noPo.data ?? []).filter((d) => d.noPo && (!d.urgent || d.needsBackfill));
+  const warehouses = useWarehouses();
+  const centralName = warehouses.data?.find((w) => w.kind === 'central')?.name;
   const credit = (overview.data?.suppliers ?? []).filter((s) => s.balanceCents < 0);
 
   if (!can('inventory.approve')) return <Navigate to="/inventory" replace />;
@@ -103,13 +106,22 @@ export function TodoPage() {
                           tone={v.tone}
                           title={
                             <>
-                              {INV_DOC_META[d.docType as InvDocType].title}
+                              {d.urgent ? '急采（待验收）' : INV_DOC_META[d.docType as InvDocType].title}
+                              {d.warehouseName && d.docType !== 'issue' && d.docType !== 'issue_return' && d.warehouseName !== centralName && (
+                                <span className="ml-1.5 text-[12.5px] font-semibold text-lake">{d.warehouseName}</span>
+                              )}
                               <span className="num ml-2 text-[12.5px] font-normal text-ink-3">{d.docNo}</span>
                             </>
                           }
                           line={`${d.partyName ? `${d.partyName} · ` : ''}${d.summary}${d.lineCount > 3 ? ` 等 ${d.lineCount} 项` : ''}`}
                           meta={`${d.createdByName} 提交 · ${relativeTime(d.createdAt)}`}
-                          amount={d.docType === 'supplier_return' ? <Money cents={-d.amountCents} className="text-[14px] font-bold text-clay" /> : undefined}
+                          amount={
+                            d.docType === 'supplier_return' ? (
+                              <Money cents={-d.amountCents} className="text-[14px] font-bold text-clay" />
+                            ) : d.urgent ? (
+                              <Money cents={d.amountCents} className="text-[14px] font-bold" />
+                            ) : undefined
+                          }
                         />
                       );
                     })}

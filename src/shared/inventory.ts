@@ -307,6 +307,8 @@ export interface InvDocSummary {
   noPo: boolean;
   warehouseName: string | null;
   urgent: boolean;
+  /** 急采已生效、还没补采购单 */
+  needsBackfill: boolean;
   /** 领料：部门是否已签收（其他单据为空） */
   deptSigned: boolean | null;
   createdByName: string;

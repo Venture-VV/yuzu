@@ -323,6 +323,7 @@ export async function listDocs(
            coalesce(s.name, dep.name) AS party_name, cb.display_name AS created_by_name,
            CASE WHEN w.id IS NULL THEN NULL ELSE ${WAREHOUSE_NAME_SQL(db)} END AS warehouse_name,
            CASE WHEN d.doc_type = 'issue' AND d.warehouse_id IS NOT NULL THEN d.dept_signed_at IS NOT NULL END AS dept_signed,
+           (d.urgent AND d.status = 'confirmed' AND d.purchase_order_id IS NULL) AS needs_backfill,
            (SELECT count(*) FROM inv_doc_lines WHERE doc_id = d.id) AS line_count,
            coalesce((SELECT string_agg(m.name, '、' ORDER BY l.line_no) FROM (
               SELECT * FROM inv_doc_lines WHERE doc_id = d.id ORDER BY line_no LIMIT 3) l
