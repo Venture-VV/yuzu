@@ -88,7 +88,10 @@ export type AuditAction =
   // 空间台账（RQ-004 第一段，v0.7.14）：空间（含别名、核对、批量设区域）、楼层与区域、导入
   | 'space_saved'
   | 'space_zone_saved'
-  | 'space_import';
+  | 'space_import'
+  // 底图转换（RQ-004 第二段，v0.7.15）：上传图纸、启用一批底图
+  | 'floorplan_upload'
+  | 'floorplan_activate';
 
 export interface AuditEntry {
   staffId: number | null;

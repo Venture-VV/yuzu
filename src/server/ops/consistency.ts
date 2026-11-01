@@ -8,6 +8,7 @@ import { expenseChecks } from '../modules/expenses';
 import { requestChecks } from '../modules/requests';
 import { legacyChecks } from '../modules/legacy';
 import { spaceChecks } from '../modules/spaces';
+import { floorplanChecks } from '../modules/floorplans';
 import { computeSettlement } from '../modules/settlement';
 import { loadSettings } from '../modules/settings';
 
@@ -29,5 +30,7 @@ export async function consistencyChecks(sql: Sql, timezone: string): Promise<Che
   const legacy = await readSnapshot(sql, legacyChecks);
   // 空间台账与客房挂接（v0.7.14）
   const spaces = await readSnapshot(sql, spaceChecks);
-  return [...summary.checks, ...inventory, ...expenses, ...requests, ...frontdesk, legacy, ...spaces].map(({ label, ok, detail }) => ({ label, ok, detail }));
+  // 底图批次与房间轮廓（v0.7.15）
+  const floorplans = await readSnapshot(sql, floorplanChecks);
+  return [...summary.checks, ...inventory, ...expenses, ...requests, ...frontdesk, legacy, ...spaces, ...floorplans].map(({ label, ok, detail }) => ({ label, ok, detail }));
 }

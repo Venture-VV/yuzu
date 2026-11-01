@@ -1,0 +1,27 @@
+{
+  "说明": "底图转换合成样例的固定预期（v0.7.15）。图纸：docs/data/floorplan-sample.dxf（第一版）、floorplan-sample-v2.dxf（第二版），也可以用 node dist/server/cli.js floorplan-sample <文件> 生成第一版。台账比对按 docs/data/space-zones-sample.csv 与 space-ledger-sample.csv 导入后的样例台账。",
+  "floors": ["L2", "L3"],
+  "v1": {
+    "ok": ["T301", "T302", "T303", "V312", "W301", "W302", "X201", "X202"],
+    "merged": ["W303", "W305"],
+    "leak": ["W306"],
+    "ledgerDiff": {
+      "onlyDrawing": ["T303", "W303", "W305", "W306", "X202"],
+      "onlyLedger": ["U310"],
+      "floorMismatch": [],
+      "labelChanged": ["T302"],
+      "matched": 6
+    }
+  },
+  "v2": {
+    "ok": ["T301", "T302", "T305", "V312", "W301", "W302", "W306", "X201"],
+    "merged": ["W303", "W305"],
+    "leak": [],
+    "batchDiffAgainstV1": {
+      "added": [],
+      "removed": ["X202"],
+      "renamed": [["T303", "T305"]],
+      "moved": []
+    }
+  }
+}

@@ -15,5 +15,7 @@ const common = {
 
 await build({ ...common, entryPoints: ['src/server/index.ts'], outfile: 'dist/server/index.js' });
 await build({ ...common, entryPoints: ['src/server/cli.ts'], outfile: 'dist/server/cli.js' });
+// 底图转换进程（RQ-004 第二段）：单独的入口，应用与命令行起子进程跑它
+await build({ ...common, entryPoints: ['src/server/floorplan/worker.ts'], outfile: 'dist/server/floorplan-worker.js' });
 await mkdir('dist/server/migrations', { recursive: true });
 await cp('src/server/migrations', 'dist/server/migrations', { recursive: true });
