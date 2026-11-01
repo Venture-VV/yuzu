@@ -279,6 +279,35 @@ describe('审核、转采购单、进度回写', () => {
     await expect(ctx.sql`INSERT INTO purchase_order_line_requests (po_line_id, request_line_id) VALUES (${po.lines[0].id}, ${b.lines[0].id})`).rejects.toThrow(/不能修改明细/);
   });
 
+  it('测试服回归报告（店主确认）：负责人能审核需求单；采购单关闭后需求行显示「采购单已关闭」；流转的审计记下 IP', async () => {
+    const r = (await submit(reqA, [{ materialId: other.id, name: '纸巾', purpose: '客用消耗', qtyMilli: q(2), unit: '箱' }])).body.request;
+    // 负责人（只有确认职责）退回、通过需求单；转采购单仍要能编采购单
+    expect((await api(ctx.app, approver, 'POST', `/api/erp/requests/${r.id}/return`, { reason: '数量再核一下' })).body.status).toBe('returned');
+    expect((await api(ctx.app, reqA, 'PUT', `/api/erp/requests/${r.id}`, { lines: [{ materialId: other.id, name: '纸巾', purpose: '客用消耗', qtyMilli: q(2), unit: '箱' }] })).body.status).toBe('submitted');
+    const approvedReq = (await api(ctx.app, approver, 'POST', `/api/erp/requests/${r.id}/approve`, {})).body;
+    expect(approvedReq.status).toBe('approved');
+    // 修改时整单替换了明细：按通过后的行下单
+    const lineId = approvedReq.lines[0].id as number;
+    expect((await api(ctx.app, approver, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, lines: [{ materialId: other.id, purchaseQtyMilli: q(2), priceCents: 100, requestLineIds: [lineId] }] })).status).toBe(403);
+    // 下单后没到货就关闭：不再挂在「已下单」
+    const created = await api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, lines: [{ materialId: other.id, purchaseQtyMilli: q(2), priceCents: 100, requestLineIds: [lineId] }] });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const po = created.body.po;
+    await api(ctx.app, approver, 'POST', `/api/purchase-orders/${po.id}/approve`, {});
+    expect((await api(ctx.app, reqA, 'GET', `/api/erp/requests/${r.id}`)).body.lines[0].progress.state).toBe('ordered');
+    await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po.id}/close`, { reason: '供应商缺货' });
+    const closed = (await api(ctx.app, reqA, 'GET', `/api/erp/requests/${r.id}`)).body.lines[0].progress;
+    expect(closed).toMatchObject({ state: 'closed', po: { id: po.id, status: 'closed' }, receivedMilli: 0 });
+    // 审核、修改、撤回的审计都有 IP
+    const r2 = (await submit(reqA, [{ materialId: other.id, name: '纸巾', purpose: '客用消耗', qtyMilli: q(1), unit: '箱' }])).body.request;
+    await api(ctx.app, reqA, 'POST', `/api/erp/requests/${r2.id}/cancel`, { reason: '不要了' });
+    const audits = await ctx.sql<{ action: string | null; ip: string | null }[]>`
+      SELECT detail->>'action' AS action, ip FROM audit_logs
+      WHERE action = 'purchase_request' AND target_id IN (${String(r.id)}, ${String(r2.id)}) ORDER BY id`;
+    expect(audits.map((a) => a.action)).toEqual([null, 'return', 'update', 'approve', null, 'cancel']);
+    for (const a of audits) expect(a.ip, a.action ?? 'create').toBeTruthy();
+  });
+
   it('同一个操作编号同时转两次采购单：两次都返回同一张采购单（不报「已在采购单里」）', async () => {
     const img = await upload(reqA, 'same-key-po');
     const r = (await submit(reqA, [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: q(1), unit: '箱' }, newLine({ imageIds: [img.id] })])).body.request;

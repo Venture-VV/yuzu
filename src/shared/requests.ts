@@ -36,8 +36,8 @@ export interface RequestLineProgress {
   inventoryUnit: string | null;
   /** 这一行采购单合并了几行需求（1 就是只有这一行）；合并时下单、到货数量是整行的 */
   mergedLines: number;
-  /** none 未下单；ordered 已下单；partial 部分到货；received 已到货 */
-  state: 'none' | 'ordered' | 'partial' | 'received';
+  /** none 未下单；ordered 已下单；partial 部分到货；received 已到货；closed 采购单已关闭、没到齐的不再到（v0.7.11） */
+  state: 'none' | 'ordered' | 'partial' | 'received' | 'closed';
 }
 
 export interface RequestLine {

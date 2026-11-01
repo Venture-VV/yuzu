@@ -341,6 +341,11 @@ describe('现付供应商与按采购单报销', () => {
     expect(ok.status).toBe(201);
     expect(ok.body.claim).toMatchObject({ status: 'confirmed', purchaseOrder: { id: po.id, docNo: po.docNo } });
     expect((await byPo({ diffReason: '另一箱下周到' })).body.error.code).toBe('PO_LINE_CLAIMED');
+    // 已按采购单报销的收货单不能冲销（到货数量取自收货），先冲销报销（测试服回归报告，v0.7.11）
+    const blocked = await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${rc.body.doc.id}/void`, { reason: '测试冲销' });
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error.code).toBe('NOT_VOIDABLE');
+    expect(blocked.body.error.message).toContain(ok.body.claim.docNo);
     expect((await api(ctx.app, coster, 'GET', `/api/erp/expenses/po/${po.id}`)).body.lines[0].claimedBy).toBe(ok.body.claim.docNo);
 
     // 冲销后可以重新报

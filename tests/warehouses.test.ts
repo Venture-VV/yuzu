@@ -173,6 +173,11 @@ describe('领料：总仓出、部门小仓进；部门签收（#17）', () => {
     const unsigned = await api(ctx.app, bath, 'GET', `/api/erp/dept-stock/${bathId}/docs?unsigned=1`);
     expect(unsigned.body.map((x: { id: number }) => x.id)).toContain(issued.id);
     expect(unsigned.body.find((x: { id: number }) => x.id === issued.id)).toMatchObject({ deptSigned: false, warehouseName: '浴区小仓' });
+    // 库存页按仓筛单据：领料一头是总仓，按总仓、按浴区小仓都列出；水吧小仓不列
+    const byWh = async (w: number) => (await api(ctx.app, keeper, 'GET', `/api/inventory/docs?warehouseId=${w}`)).body.map((x: { id: number }) => x.id);
+    expect(await byWh(1)).toContain(issued.id);
+    expect(await byWh(bathWh)).toContain(issued.id);
+    expect(await byWh(barWh)).not.toContain(issued.id);
     expect((await api(ctx.app, bar, 'POST', `/api/erp/dept-stock/docs/${issued.id}/sign`, {})).status).toBe(403);
     expect((await api(ctx.app, keeper, 'POST', `/api/erp/dept-stock/docs/${issued.id}/sign`, {})).status).toBe(403);
     const signed = await api(ctx.app, bath, 'POST', `/api/erp/dept-stock/docs/${issued.id}/sign`, { note: '少了 1 双，已告诉仓库' });

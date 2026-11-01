@@ -336,7 +336,14 @@ export async function listDocs(
     JOIN staff cb ON cb.id = d.created_by
     WHERE true
       ${f.type ? db`AND d.doc_type = ${f.type}` : db``}
-      ${f.warehouseId ? db`AND coalesce(d.warehouse_id, ${CENTRAL_WAREHOUSE_ID}) = ${f.warehouseId}` : db``}
+      ${
+        !f.warehouseId
+          ? db``
+          : f.warehouseId === CENTRAL_WAREHOUSE_ID
+            ? // 领料、退回一头是总仓，按总仓筛也列出
+              db`AND (d.warehouse_id IS NULL OR d.warehouse_id = ${CENTRAL_WAREHOUSE_ID} OR d.doc_type IN ('issue', 'issue_return'))`
+            : db`AND d.warehouse_id = ${f.warehouseId}`
+      }
       ${f.unsigned ? db`AND d.doc_type = 'issue' AND d.status = 'confirmed' AND d.warehouse_id IS NOT NULL AND d.dept_signed_at IS NULL` : db``}
       ${f.urgent !== undefined ? db`AND d.urgent = ${f.urgent}` : db``}
       ${f.status ? db`AND d.status = ${f.status}` : db``}
@@ -365,6 +372,13 @@ async function voidability(db: Db, doc: InvDoc, timeZone?: string): Promise<InvD
       SELECT count(*) AS count FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
       WHERE pa.receipt_doc_id = ${doc.id} AND p.status IN ('confirmed', 'submitted')`;
     if (paid && paid.count > 0) return { ok: false, reason: '这张收货单已有付款核销，需先冲销付款' };
+    // 现付的采购单按采购单报销了这几行（到货数量取自收货）：先冲销或撤回报销（测试服回归报告，v0.7.11）
+    const [claimed] = await db<{ docNo: string }[]>`
+      SELECT c.doc_no FROM expense_claim_lines cl JOIN expense_claims c ON c.id = cl.claim_id
+      WHERE c.status IN ('submitted', 'returned', 'confirmed')
+        AND cl.po_line_id IN (SELECT po_line_id FROM inv_doc_lines WHERE doc_id = ${doc.id} AND po_line_id IS NOT NULL)
+      ORDER BY c.id LIMIT 1`;
+    if (claimed) return { ok: false, reason: `这张收货单的采购单已按采购单报销（${claimed.docNo}），需先冲销或撤回报销` };
   }
   return { ok: true, reason: null };
 }
@@ -1214,6 +1228,8 @@ export async function voidDoc(deps: Deps, docId: number, raw: unknown, actor: Ac
     if (doc.status === 'voided') return;
     // #21：当月发生的当月冲销完，跨月不能冲销
     assertSameMonth(doc.docDate, deps.config.timezone);
+    // 锁顺序：单据 → 采购单 → 物料；锁住采购单再查报销，与「按采购单报销」（采购单 → 报销单）串行
+    if (doc.purchaseOrderId) await tx`SELECT id FROM purchase_orders WHERE id = ${doc.purchaseOrderId} FOR UPDATE`;
     const check = await voidability(tx, await getDoc(tx, docId), deps.config.timezone);
     if (!check.ok) throw conflict('NOT_VOIDABLE', check.reason ?? '这张单据不能冲销');
     const moves = await tx<{ materialId: number; docLineId: number; qtyDeltaMilli: number; warehouseId: number }[]>`

@@ -105,7 +105,7 @@ export const PERMISSIONS = {
   /** 提部门需求单、改与撤回自己的单（只限员工档案里的所属部门） */
   'request.create': { roles: ['owner'], duties: ['request'] },
   /** 审核需求单、转采购单（看全部部门的需求单） */
-  'request.review': { roles: ['owner'], duties: ['purchase'] },
+  'request.review': { roles: ['owner'], duties: ['purchase', 'approve'] },
   // ── 管理 ──
   // ── 当场授权（主管在弹窗里输入自己的账号密码确认）──
   /** 授权超过单笔上限的充值 / 消费 */
