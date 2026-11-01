@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, Navigate } from 'react-router';
 import { ArrowLeft, CircleCheck, Download, FileSearch, FileUp } from 'lucide-react';
 import { formatAmount } from '@shared/money';
@@ -67,6 +67,8 @@ export function ImportPage() {
   const [kind, setKind] = useState<ErpImportKind>(kinds[0] ?? 'suppliers');
   const [file, setFile] = useState<Loaded | null>(null);
   const [preview, setPreview] = useState<ErpImportPreview | null>(null);
+  // 每换一次文件或导入类型就加一：晚回来的预览、文件读取对不上现在选的文件，丢掉（不能让 A 的预览配着 B 写入）
+  const selection = useRef(0);
   const [busy, setBusy] = useState<'read' | 'preview' | 'apply' | null>(null);
   const [error, setError] = useState<string | null>(null);
   // 负责人只看导入记录、一次确认整批导入的期初未付（不能导入）
@@ -77,6 +79,7 @@ export function ImportPage() {
   if (kinds.length === 0 && !canApprove) return <Navigate to="/payables" replace />;
 
   const reset = () => {
+    selection.current += 1;
     setFile(null);
     setPreview(null);
     setError(null);
@@ -86,15 +89,19 @@ export function ImportPage() {
   const choose = async (f: File | undefined) => {
     reset();
     if (!f) return;
+    const ticket = selection.current;
+    const current = () => selection.current === ticket;
     setBusy('read');
     try {
-      if (/\.xlsx$/i.test(f.name)) setFile({ fileName: f.name, xlsxBase64: toBase64(await f.arrayBuffer()), encoding: 'Excel' });
-      else if (/\.csv$/i.test(f.name) || f.type === 'text/csv') {
+      if (/\.xlsx$/i.test(f.name)) {
+        const xlsxBase64 = toBase64(await f.arrayBuffer());
+        if (current()) setFile({ fileName: f.name, xlsxBase64, encoding: 'Excel' });
+      } else if (/\.csv$/i.test(f.name) || f.type === 'text/csv') {
         const loaded = await readImportFile(f);
-        setFile({ fileName: f.name, csv: loaded.text, encoding: loaded.label.includes('GBK') ? 'GBK' : 'UTF-8' });
+        if (current()) setFile({ fileName: f.name, csv: loaded.text, encoding: loaded.label.includes('GBK') ? 'GBK' : 'UTF-8' });
       } else setError('只能导入 CSV（.csv）或 Excel（.xlsx）文件；老版本的 .xls 请另存为 .xlsx 或 CSV');
     } catch (e) {
-      setError(errorMessage(e));
+      if (current()) setError(errorMessage(e));
     } finally {
       setBusy(null);
     }
@@ -102,12 +109,14 @@ export function ImportPage() {
 
   const runPreview = async () => {
     if (!file) return;
+    const ticket = selection.current;
     setBusy('preview');
     setError(null);
     try {
-      setPreview(await api.post<ErpImportPreview>('/api/payables/imports/preview', body()));
+      const result = await api.post<ErpImportPreview>('/api/payables/imports/preview', body());
+      if (selection.current === ticket) setPreview(result);
     } catch (e) {
-      setError(errorMessage(e));
+      if (selection.current === ticket) setError(errorMessage(e));
     } finally {
       setBusy(null);
     }
@@ -178,7 +187,7 @@ export function ImportPage() {
                   reset();
                 }}
                 ariaLabel="导入什么"
-                options={kinds.map((k) => ({ value: k, label: ERP_IMPORT_LABELS[k] }))}
+                options={kinds.map((k) => ({ value: k, label: ERP_IMPORT_LABELS[k], disabled: busy !== null }))}
               />
               <Button size="sm" variant="ghost" icon={<Download className="size-4" />} onClick={() => downloadTemplate(kind)}>
                 下载模板
@@ -190,7 +199,15 @@ export function ImportPage() {
             <label className="flex cursor-pointer flex-wrap items-center gap-3 rounded-md border border-dashed border-line-strong px-4 py-3 text-[13px] hover:border-ink-3">
               <FileUp className="size-5 text-ink-3" />
               <span className="font-semibold">{file ? `${file.fileName}（${file.encoding}）` : '选择 CSV 或 Excel 文件'}</span>
-              <input type="file" accept=".csv,.xlsx,text/csv" className="sr-only" aria-label="选择导入文件" onChange={(e) => void choose(e.target.files?.[0])} data-testid="import-file" />
+              <input
+                type="file"
+                accept=".csv,.xlsx,text/csv"
+                className="sr-only"
+                aria-label="选择导入文件"
+                disabled={busy === 'preview' || busy === 'apply'}
+                onChange={(e) => void choose(e.target.files?.[0])}
+                data-testid="import-file"
+              />
             </label>
             <div className="flex flex-wrap gap-2">
               <Button variant="secondary" disabled={!file} loading={busy === 'preview'} icon={<FileSearch className="size-4" />} onClick={runPreview}>

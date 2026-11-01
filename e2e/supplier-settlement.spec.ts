@@ -183,8 +183,17 @@ test.describe('供应商结算：退货待供应商确认、退货余额核销�
     const code = `E${Date.now().toString().slice(-6)}`;
     const csv = `编码,名称,结算方式\n${code},E2E 导入供应商,现付\n`;
     await page.getByTestId('import-file').setInputFiles({ name: 'e2e-suppliers.csv', mimeType: 'text/csv', buffer: Buffer.from(csv, 'utf8') });
+    // 预览还没回来时不能换文件、换类型（不能让上一个文件的预览配着新文件写入）
+    const isPreview = (url: URL) => url.pathname === '/api/payables/imports/preview';
+    await page.route(isPreview, async (route) => {
+      await new Promise((r) => setTimeout(r, 1_500));
+      await route.continue();
+    });
     await page.getByRole('button', { name: '预览' }).click();
+    await expect(page.getByTestId('import-file')).toBeDisabled();
     await expect(page.getByTestId('import-preview')).toContainText('全部可以导入');
+    await page.unroute(isPreview);
+    await expect(page.getByTestId('import-file')).toBeEnabled();
     await page.getByTestId('import-apply').click();
     await expect(page.getByText('已导入 1 行供应商')).toBeVisible();
     const suppliers = await getJson<{ code: string; settlement: string }[]>(page, '/api/inventory/suppliers?all=1');

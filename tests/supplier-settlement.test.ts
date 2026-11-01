@@ -537,6 +537,22 @@ describe('供应商与期初未付批量导入（#16）', () => {
     await checksOk();
   });
 
+  it('CSV 引号里的换行算同一格：多行备注不会拆成两行，后半截像一行数据也不会多写一笔', async () => {
+    const preview = (body: Record<string, unknown>) => api(ctx.app, payer, 'POST', '/api/payables/imports/preview', body);
+    const csv = `供应商编码,金额,截至日期,备注\nIM01,100,${today},"对账备注第一行\r\nIM01,999,${today} 是备注的第二行"\r\n`;
+    expect((await ok(preview(file('opening_payables', csv, 'multiline.csv')), 200))).toMatchObject({ rowCount: 1, totalCents: 10_000, issues: [] });
+    const applied = await ok(write(payer, file('opening_payables', csv, 'multiline.csv')));
+    const ops = await ctx.sql<{ amountCents: number; note: string }[]>`SELECT amount_cents, note FROM opening_payables WHERE import_id = ${applied.import.id}`;
+    expect(ops).toEqual([{ amountCents: 10_000, note: `对账备注第一行\nIM01,999,${today} 是备注的第二行` }]);
+    // 引号没有配对：整份拒绝，不猜
+    const broken = await preview(file('opening_payables', `供应商编码,金额,截至日期,备注\nIM01,100,${today},"没有收尾的引号\n`));
+    expect(broken.body.error.code).toBe('IMPORT_FILE_INVALID');
+    // 提示的行号是这条记录在文件里开始的那一行：第 2 条记录从第 4 行开始；只有逗号的空行跳过
+    const rowed = await ok(preview(file('opening_payables', `供应商编码,金额,截至日期,备注\nIM01,100,${today},"两行\n备注"\nNOPE,1,${today},\n,,,\n`)), 200);
+    expect(rowed.rowCount).toBe(2);
+    expect(rowed.issues).toEqual([expect.objectContaining({ row: 4 })]);
+  });
+
   it('写入的结果待确认：按编号查回、原样重提只写一次、编号不能挪用、作废后晚到不写入；负责人能看导入记录', async () => {
     const lookup = (key: string, cookie = ctx.owner) => api(ctx.app, cookie, 'GET', `/api/erp/ops/${key}?type=erp_import`);
     const sup = (code: string) => file('suppliers', `编码,名称\n${code},待确认测试${code}`, `${code}.csv`);

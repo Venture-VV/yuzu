@@ -62,40 +62,59 @@ interface Sheet {
   rows: { row: number; cells: string[] }[];
 }
 
-function splitCsvLine(line: string): string[] {
-  const cells: string[] = [];
+/**
+ * 按 RFC 4180 读 CSV：引号里的逗号、换行与两个连写的引号都算单元格内容（Excel 导出的多行备注就是这样）。
+ * 先按引号状态切出一条条记录，再逐条校验——不能先按换行切：引号里的换行会把一条记录拆成两条，
+ * 拆出来的后半截如果像一行完整的数据（编码、金额、日期），会多写一笔。返回每条记录在文件里开始的行号。
+ */
+function parseCsv(text: string): { line: number; cells: string[] }[] {
+  const records: { line: number; cells: string[] }[] = [];
+  let cells: string[] = [];
   let cur = '';
   let quoted = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]!;
+  let line = 1;
+  let startLine = 1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
     if (quoted) {
-      if (ch === '"' && line[i + 1] === '"') {
-        cur += '"';
-        i++;
-      } else if (ch === '"') quoted = false;
-      else cur += ch;
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else quoted = false;
+      } else {
+        if (ch === '\n' || (ch === '\r' && text[i + 1] !== '\n')) line++;
+        cur += ch;
+      }
     } else if (ch === '"') quoted = true;
     else if (ch === ',') {
       cells.push(cur);
       cur = '';
+    } else if (ch === '\r' || ch === '\n') {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      cells.push(cur);
+      records.push({ line: startLine, cells });
+      cells = [];
+      cur = '';
+      line++;
+      startLine = line;
     } else cur += ch;
   }
-  cells.push(cur);
-  return cells.map((c) => c.trim());
+  if (quoted) throw unprocessable('IMPORT_FILE_INVALID', `第 ${startLine} 行开始的引号没有配对，请检查文件（单元格里的引号要写成两个）`);
+  if (cur !== '' || cells.length > 0) {
+    cells.push(cur);
+    records.push({ line: startLine, cells });
+  }
+  return records.map((r) => ({ line: r.line, cells: r.cells.map((c) => c.replace(/\r\n?/g, '\n').trim()) }));
 }
 
 function readSheet(f: FileInputData, dateColumns: string[]): Sheet {
   if (f.csv !== undefined) {
-    const lines = f.csv.replace(/^﻿/, '').split(/\r?\n/);
-    const headerAt = lines.findIndex((l) => l.trim() !== '');
-    if (headerAt < 0) throw unprocessable('IMPORT_EMPTY', '文件是空的');
-    const header = splitCsvLine(lines[headerAt]!);
-    const rows: Sheet['rows'] = [];
-    for (let i = headerAt + 1; i < lines.length; i++) {
-      if (lines[i]!.trim() === '') continue;
-      rows.push({ row: i + 1, cells: splitCsvLine(lines[i]!) });
-    }
-    return { sha256: createHash('sha256').update(f.csv, 'utf8').digest('hex'), header, rows };
+    // 空行（包括只有逗号的行）不算数据，与 Excel 一样跳过
+    const records = parseCsv(f.csv.replace(/^\ufeff/, '')).filter((r) => r.cells.some((c) => c !== ''));
+    const [head, ...rest] = records;
+    if (!head) throw unprocessable('IMPORT_EMPTY', '文件是空的');
+    return { sha256: createHash('sha256').update(f.csv, 'utf8').digest('hex'), header: head.cells, rows: rest.map((r) => ({ row: r.line, cells: r.cells })) };
   }
   const buf = Buffer.from(f.xlsxBase64!, 'base64');
   let book;
