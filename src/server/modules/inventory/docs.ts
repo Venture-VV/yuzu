@@ -857,8 +857,12 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
 
   // 锁顺序：原单 / 采购单 → 物料（与其他单据一致，避免死锁）
   if (doc.sourceDocId) {
-    const [src] = await tx<{ status: string }[]>`SELECT status FROM inv_docs WHERE id = ${doc.sourceDocId} FOR UPDATE`;
+    const [src] = await tx<{ status: string; warehouseId: number | null }[]>`SELECT status, warehouse_id FROM inv_docs WHERE id = ${doc.sourceDocId} FOR UPDATE`;
     if (src?.status !== 'confirmed') throw conflict('SOURCE_NOT_CONFIRMED', '原单已冲销或未生效，不能继续');
+    // 领料退回、退供应商动的仓跟原单走（迁移前的领料没进部门小仓，退回只进总仓）
+    if ((src.warehouseId ?? null) !== (doc.warehouseId ?? null)) {
+      throw conflict('SOURCE_WAREHOUSE_MISMATCH', '这张单与原单不在同一个仓，请撤回后按原单重新登记');
+    }
   }
   if (doc.purchaseOrderId) {
     const [po] = await tx<{ status: string }[]>`SELECT status FROM purchase_orders WHERE id = ${doc.purchaseOrderId} FOR UPDATE`;

@@ -13,7 +13,7 @@ import type { Actor, Deps } from '../../lib/context';
 import { badRequest, forbidden, notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { enabledErpModules } from '../erp';
-import { actorDepartmentId, docDateSchema, loadInventorySettings } from './common';
+import { actorDepartmentId, deptBalances, docDateSchema, loadInventorySettings } from './common';
 import {
   assertCanOperate,
   cancelDoc,
@@ -60,6 +60,19 @@ async function assertVisibleDoc(db: Db, actor: Actor, docId: number) {
   if (!row) throw notFound('单据不存在');
   if (row.kind !== 'department' || row.departmentId === null) throw forbidden('这张单据不在部门小仓');
   await assertVisibleDept(db, actor, row.departmentId);
+}
+
+/**
+ * 给部门看的单据：行上的「当前结存」换成这个部门小仓的（领料单原来显示总仓的），去掉与全公司历史成交价的比较；
+ * 部门的员工没有「查看库存」，不能借单据看到总仓结存与别的采购价格。
+ */
+async function deptSafeDoc(db: Db, doc: InvDoc): Promise<InvDoc> {
+  const whId = doc.warehouse?.kind === 'department' ? doc.warehouse.id : null;
+  const balances = whId ? await deptBalances(db, whId, doc.lines.map((l) => l.materialId)) : new Map<number, { stockMilli: number }>();
+  return {
+    ...doc,
+    lines: doc.lines.map(({ compare: _compare, ...l }) => ({ ...l, stockMilli: balances.get(l.materialId)?.stockMilli ?? 0 })),
+  };
 }
 
 /** 部门能登记的单据：本部门小仓的期初、耗用、报损、盘点，以及急采（按采购单收货、领料、退回由仓库办理） */
@@ -144,31 +157,33 @@ export function registerDeptStockRoutes(app: FastifyInstance, deps: Deps) {
     const [row] = await sql<{ id: number }[]>`SELECT id FROM inv_docs WHERE client_key = ${key}`;
     if (!row) return { found: false };
     await assertVisibleDoc(sql, req.actor, row.id);
-    return { found: true, doc: await getDoc(sql, row.id, deps.config.timezone) };
+    return { found: true, doc: await deptSafeDoc(sql, await getDoc(sql, row.id, deps.config.timezone)) };
   });
-  app.get('/api/erp/dept-stock/docs/:id', { preHandler: anyDept }, async (req): Promise<InvDoc> => getDoc(sql, await visibleDoc(req), deps.config.timezone));
+  app.get('/api/erp/dept-stock/docs/:id', { preHandler: anyDept }, async (req): Promise<InvDoc> =>
+    deptSafeDoc(sql, await getDoc(sql, await visibleDoc(req), deps.config.timezone)),
+  );
 
   app.post('/api/erp/dept-stock/docs', { preHandler: anyDept }, async (req, reply) => {
     await assertDeptBody(sql, req.actor, req.body);
     const result = await createDoc(deps, req.body as CreateDocInput, req.actor, req.ip);
     reply.code(result.replayed ? 200 : 201);
-    return result;
+    return { ...result, doc: await deptSafeDoc(sql, result.doc) };
   });
   app.put('/api/erp/dept-stock/docs/:id', { preHandler: anyDept }, async (req) => {
     const id = await visibleDoc(req);
     await assertDeptBody(sql, req.actor, req.body);
-    return updateDoc(deps, id, req.body as DocBodyInput, req.actor);
+    return deptSafeDoc(sql, await updateDoc(deps, id, req.body as DocBodyInput, req.actor));
   });
-  app.post('/api/erp/dept-stock/docs/:id/submit', { preHandler: anyDept }, async (req) => submitDoc(deps, await visibleDoc(req), req.actor));
+  app.post('/api/erp/dept-stock/docs/:id/submit', { preHandler: anyDept }, async (req) => deptSafeDoc(sql, await submitDoc(deps, await visibleDoc(req), req.actor)));
   app.post('/api/erp/dept-stock/docs/:id/cancel', { preHandler: anyDept }, async (req) => {
     const id = await visibleDoc(req);
     const [row] = await sql<{ docType: InvDoc['docType']; warehouseId: number | null }[]>`SELECT doc_type, warehouse_id FROM inv_docs WHERE id = ${id}`;
     await assertCanOperate(sql, req.actor, row!.docType, await warehouseRef(sql, row!.warehouseId));
-    return cancelDoc(deps, id, req.body, req.actor);
+    return deptSafeDoc(sql, await cancelDoc(deps, id, req.body, req.actor));
   });
-  app.post('/api/erp/dept-stock/docs/:id/refresh-book', { preHandler: anyDept }, async (req) => refreshCountBook(deps, await visibleDoc(req), req.actor));
+  app.post('/api/erp/dept-stock/docs/:id/refresh-book', { preHandler: anyDept }, async (req) => deptSafeDoc(sql, await refreshCountBook(deps, await visibleDoc(req), req.actor)));
   // #17 第二次验收：部门签收仓库登记的领料
-  app.post('/api/erp/dept-stock/docs/:id/sign', { preHandler: anyDept }, async (req) => signIssue(deps, await visibleDoc(req), req.body, req.actor));
+  app.post('/api/erp/dept-stock/docs/:id/sign', { preHandler: anyDept }, async (req) => deptSafeDoc(sql, await signIssue(deps, await visibleDoc(req), req.body, req.actor)));
   // #19：急采后补采购单，由本部门确认（采购模块关着时不能补单）
   app.post('/api/erp/dept-stock/docs/:id/backfill', { preHandler: anyDept }, async (req, reply) => {
     const id = await visibleDoc(req);

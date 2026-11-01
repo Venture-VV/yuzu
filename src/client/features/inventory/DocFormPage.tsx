@@ -137,6 +137,7 @@ function deptMaterial(m: DeptStockMeta['materials'][number], row: WarehouseStock
     deptStockMilli: 0,
     isLow: false,
     hasMoves: !!row,
+    anyMoves: !!row,
     lastMoveAt: row?.lastMoveAt ?? null,
     note: '',
     isSynthetic: false,

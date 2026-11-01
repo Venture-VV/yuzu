@@ -74,7 +74,8 @@ export const PERMISSIONS = {
   /** 退供应商申请（仓库或采购均可发起） */
   'supplierReturn.create': { roles: ['owner'], duties: ['stock', 'purchase'] },
   /** 查看供应商货款、付款与对账 */
-  'payable.read': { roles: ['owner'], duties: ['purchase', 'payable', 'approve'] },
+  // 成本核算要冲销付款、期初未付（#21，v0.7.11），能看货款
+  'payable.read': { roles: ['owner'], duties: ['purchase', 'payable', 'approve', 'cost'] },
   /** 期初未付、付款登记 */
   'payable.manage': { roles: ['owner'], duties: ['payable'] },
   /** 负责人确认：采购、报损、盘点调整、退货、付款、期初（v0.7.11 起冲销按 #21 分工，见下面两项） */

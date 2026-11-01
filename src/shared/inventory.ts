@@ -188,8 +188,10 @@ export interface Material {
   deptStockMilli: number;
   /** 总仓低于人工设定阈值 */
   isLow: boolean;
-  /** 已有库存流水（期初只能在没有流水时建立） */
+  /** 总仓已有库存流水（总仓的期初只能在没有流水时建立） */
   hasMoves: boolean;
+  /** 任何一个仓已有流水（库存单位、精度不能再改，也不能改成候选物料；v0.7.11） */
+  anyMoves: boolean;
   lastMoveAt: string | null;
   note: string;
   isSynthetic: boolean;

@@ -189,6 +189,10 @@ describe('领料：总仓出、部门小仓进；部门签收（#17）', () => {
     expect(again.body.deptSign.note).toBe('少了 1 双，已告诉仓库');
     expect((await api(ctx.app, bath, 'GET', `/api/erp/dept-stock/${bathId}/docs?unsigned=1`)).body.map((x: { id: number }) => x.id)).not.toContain(issued.id);
     await expect(ctx.sql`UPDATE inv_docs SET dept_sign_note = '偷偷改' WHERE id = ${issued.id}`).rejects.toThrow(/已签收/);
+    // 部门入口的单据不带总仓结存（Codex 复审 P2）：领料单行上的「当前结存」是本部门小仓的
+    const viewed = (await api(ctx.app, bath, 'GET', `/api/erp/dept-stock/docs/${issued.id}`)).body;
+    expect(viewed.lines[0].stockMilli).toBe(await deptStock(bathWh, m.id));
+    expect(viewed.lines[0].stockMilli).not.toBe(await central(m.id));
     // 不是领料单不用签收
     const op = await ok(deptDoc(bath, { docType: 'direct_use', warehouseId: bathWh, note: '客用', lines: [{ materialId: m.id, qtyMilli: q(1) }] }));
     expect((await api(ctx.app, bath, 'POST', `/api/erp/dept-stock/docs/${op.id}/sign`, {})).status).toBe(400);
@@ -220,6 +224,14 @@ describe('领料：总仓出、部门小仓进；部门签收（#17）', () => {
     expect(await central(m2.id)).toBe(q(15));
     expect(await deptStock(bathWh, m2.id)).toBe(0);
     expect((await api(ctx.app, ctx.owner, 'POST', `/api/erp/dept-stock/docs/${legacy.id}/sign`, {})).status).toBe(403);
+    // 退回的仓跟原领料单走：被改成部门小仓的退回草稿确认时拒绝（Codex 复审 P1，迁移的兜底）
+    const odd = await ok(doc(keeper, { docType: 'issue_return', action: 'save', sourceDocId: legacy.id, lines: [{ sourceLineId: legacy.lines[0].id, qtyMilli: q(1) }] }));
+    expect(odd.warehouse).toBeNull();
+    await ctx.sql`UPDATE inv_docs SET warehouse_id = ${bathWh} WHERE id = ${odd.id}`;
+    const mismatch = await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${odd.id}/submit`, {});
+    expect(mismatch.status).toBe(409);
+    expect(mismatch.body.error.code).toBe('SOURCE_WAREHOUSE_MISMATCH');
+    await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${odd.id}/cancel`, { reason: '测试' });
     const back = await ok(doc(keeper, { docType: 'issue_return', sourceDocId: legacy.id, lines: [{ sourceLineId: legacy.lines[0].id, qtyMilli: q(2) }] }));
     expect(back.warehouse).toBeNull();
     expect(await central(m2.id)).toBe(q(17));
@@ -272,6 +284,12 @@ describe('部门小仓的盘点、耗用、报损与期初', () => {
     const again = await ok(deptDoc(bar, { docType: 'opening', warehouseId: barWh, lines: [{ materialId: m.id, qtyMilli: q(1) }] }));
     const r = await api(ctx.app, approver, 'POST', `/api/inventory/docs/${again.id}/approve`, {});
     expect(r.body.error.code).toBe('OPENING_EXISTS');
+    // 只在部门小仓有流水：库存单位、精度、是否受管同样不能再改（Codex 复审 P1）
+    const before = (await api(ctx.app, ctx.owner, 'GET', `/api/inventory/materials/${m.id}`)).body;
+    expect(before).toMatchObject({ hasMoves: false, anyMoves: true });
+    const body = { code: 'W003', name: '柠檬片', inventoryUnit: '个', purchaseUnit: '箱', purchaseFactorMilli: q(10) };
+    expect((await api(ctx.app, ctx.owner, 'PUT', `/api/inventory/materials/${m.id}`, { ...body, inventoryUnit: '片' })).body.error.code).toBe('UNIT_LOCKED');
+    expect((await api(ctx.app, ctx.owner, 'PUT', `/api/inventory/materials/${m.id}`, { ...body, tracked: false })).body.error.code).toBe('TRACKED_LOCKED');
     // 总仓的期初不受部门小仓影响
     await opening(m.id, q(3));
     expect(await central(m.id)).toBe(q(3));
@@ -360,6 +378,9 @@ describe('急采（#19）', () => {
     ]);
     const linked = (await api(ctx.app, bath, 'GET', `/api/erp/dept-stock/docs/${rc.id}`)).body;
     expect(linked.purchaseOrder.id).toBe(bf.body.poId);
+    // 部门看不到与全公司历史成交价的比较；库存页照常有
+    expect(linked.lines[0]).not.toHaveProperty('compare');
+    expect((await api(ctx.app, keeper, 'GET', `/api/inventory/docs/${rc.id}`)).body.lines[0]).toHaveProperty('compare');
     expect(await deptStock(bathWh, m.id)).toBe(q(20));
     const [ap2] = await ctx.sql<{ total: number }[]>`SELECT coalesce(sum(amount_delta_cents), 0) AS total FROM ap_entries WHERE supplier_id = ${supplierId}`;
     expect(ap2!.total).toBeGreaterThanOrEqual(30_000);
@@ -416,6 +437,21 @@ describe('冲销：当月发生的当月冲销完（#21）与分工', () => {
     expect((await api(ctx.app, approver, 'POST', `/api/payables/payments/${pay.body.payment.id}/void`, { reason: '登记错了' })).status).toBe(403);
     const cross = await api(ctx.app, payer, 'POST', `/api/payables/payments/${pay.body.payment.id}/void`, { reason: '登记错了' });
     expect(cross.body.error.code).toBe('VOID_CROSS_MONTH');
+    // 成本核算能看货款、冲销本月的付款（Codex 复审 P2：原来能冲销却看不到）
+    const curPay = await api(ctx.app, payer, 'POST', '/api/payables/payments', {
+      clientKey: randomUUID(),
+      supplierId,
+      payDate: today,
+      amountCents: 5_000,
+      method: 'bank_transfer',
+      evidence: '流水尾号 0002',
+      allocations: [{ kind: 'opening', targetId: opening.body.opening.id, amountCents: 5_000 }],
+    });
+    await api(ctx.app, approver, 'POST', `/api/payables/payments/${curPay.body.payment.id}/approve`, {});
+    expect((await api(ctx.app, coster, 'GET', `/api/payables/payments/${curPay.body.payment.id}`)).status).toBe(200);
+    expect((await api(ctx.app, coster, 'GET', '/api/payables/overview')).status).toBe(200);
+    const voided = await api(ctx.app, coster, 'POST', `/api/payables/payments/${curPay.body.payment.id}/void`, { reason: '登记错了' });
+    expect(voided.body.status).toBe('voided');
 
     // 报销与备用金：上月的不能冲销，本月的成本岗可以
     const claim = (expenseDate: string) =>

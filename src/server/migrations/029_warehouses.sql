@@ -60,9 +60,10 @@ ALTER TABLE inv_docs
   ADD COLUMN dept_sign_note   text CHECK (char_length(dept_sign_note) <= 200);
 
 UPDATE inv_docs SET warehouse_id = 1 WHERE doc_type NOT IN ('issue', 'issue_return');
--- 还没生效的领料、退回按新规则走（生效时进出部门小仓）
+-- 还没生效的领料按新规则走（生效时进领料部门的小仓）。
+-- 还没生效的领料退回跟着原领料单：原单都是迁移前生效的、没进部门小仓，所以退回仍为空（生效时只进总仓）
 UPDATE inv_docs d SET warehouse_id = w.id FROM warehouses w
-WHERE d.doc_type IN ('issue', 'issue_return') AND d.status IN ('draft', 'submitted', 'returned') AND w.department_id = d.department_id;
+WHERE d.doc_type = 'issue' AND d.status IN ('draft', 'submitted', 'returned') AND w.department_id = d.department_id;
 
 ALTER TABLE inv_docs ADD CONSTRAINT inv_docs_urgent_check
   CHECK (NOT urgent OR (doc_type = 'receipt' AND warehouse_id IS NOT NULL AND warehouse_id <> 1

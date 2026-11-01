@@ -140,7 +140,8 @@ export function MaterialDialog({
     setError(null);
   }
   const m = editing && editing !== 'new' ? editing : null;
-  const unitLocked = !!m?.hasMoves;
+  // 任何一个仓有流水（部门小仓的期初、急采也算）就不能再改库存单位与精度（v0.7.11）
+  const unitLocked = !!m?.anyMoves;
   const set = (p: Partial<typeof form>) => setForm((f) => ({ ...f, ...p }));
   const decimals = Number(form.decimals);
   const factor = parseQty(form.factor, decimals);

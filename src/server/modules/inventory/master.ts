@@ -19,6 +19,7 @@ const MATERIAL_COLUMNS = (db: Db) => db`
   (SELECT coalesce(sum(ws.stock_milli), 0) FROM warehouse_stock ws WHERE ws.material_id = m.id) AS dept_stock_milli,
   (m.low_stock_milli IS NOT NULL AND m.tracked AND m.stock_milli < m.low_stock_milli) AS is_low,
   (m.last_move_id IS NOT NULL) AS has_moves,
+  (m.last_move_id IS NOT NULL OR EXISTS (SELECT 1 FROM stock_moves sm WHERE sm.material_id = m.id)) AS any_moves,
   (SELECT created_at FROM stock_moves WHERE id = m.last_move_id) AS last_move_at,
   m.note, m.is_synthetic`;
 
@@ -127,8 +128,10 @@ export async function saveMaterial(db: Db, id: number | null, raw: MaterialInput
         RETURNING id`;
       return row!.id;
     }
+    // 任何一个仓有流水都算（部门小仓的期初、急采也会先于总仓有流水，v0.7.11）
     const [before] = await db<{ inventoryUnit: string; decimals: number; hasMoves: boolean; tracked: boolean }[]>`
-      SELECT inventory_unit, decimals, last_move_id IS NOT NULL AS has_moves, tracked FROM materials WHERE id = ${id}`;
+      SELECT inventory_unit, decimals, (last_move_id IS NOT NULL OR EXISTS (SELECT 1 FROM stock_moves WHERE material_id = ${id})) AS has_moves, tracked
+      FROM materials WHERE id = ${id}`;
     if (!before) throw notFound('物料不存在');
     // 已有流水的物料不能改库存单位或精度，否则会改写历史数量的含义
     if (before.hasMoves && (before.inventoryUnit !== m.inventoryUnit || before.decimals !== m.decimals)) {
