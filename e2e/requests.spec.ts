@@ -4,6 +4,8 @@
 //      → 需求单每一行显示「已下单」与采购单号；采购单详情显示对应的需求单；自检全部通过。
 //   ② 报销登记断网（v0.7.7 审查修正）：响应丢了 → 进页面自动查回、只登记一次；请求没发出去 → 刷新后仍显示
 //      「结果待确认」，按原内容重新提交只登记一次。
+//   ③ 关页面后恢复的「结果待确认」按原内容重新提交被服务端明确拒绝（v0.7.9 修正，测试会话在 v0.7.8 上复现的 P1）：
+//      本机记录保留并标成结果不明，不能另填一张；原请求晚到登记后，查回找到它，只登记一次。
 // 依赖四套演示数据（仅独立演示库）；账号：店主 linlan，密码 yuzu2026。只在门店电脑尺寸执行。
 import { expect, test, type Page } from '@playwright/test';
 
@@ -154,5 +156,66 @@ test.describe('部门采购需求单', () => {
     await expect(page.getByTestId('claim-sheet')).toContainText(offline);
     await expect(page.getByTestId('erp-pending')).toHaveCount(0);
     expect(await count(offline)).toBe(1);
+  });
+
+  test('关页面后恢复的「结果待确认」重提被明确拒绝：保留记录、不能重新填写；原请求晚到后查回，只登记一次', async ({ page }) => {
+    await login(page, 'linlan');
+    const dept = await department(page);
+    const { calendarToday } = (await (await page.request.get('/api/auth/me')).json()) as { calendarToday: string };
+    const name = `E2E 重提被拒${String(Date.now()).slice(-5)}`;
+    const isPost = (url: URL) => url.pathname === '/api/erp/expenses';
+    type Stored = { key: string; body: unknown; uncertain?: boolean };
+    const stored = async () =>
+      (JSON.parse((await page.evaluate(() => localStorage.getItem('yuzu.erpPending.v1'))) ?? '[]') as Stored[]).find((r) => JSON.stringify(r.body).includes(name));
+    const count = async () => {
+      const list = (await (await page.request.get(`/api/erp/expenses?from=${calendarToday}&to=${calendarToday}`)).json()) as { claims: { summary: string }[] };
+      return list.claims.filter((c) => c.summary.includes(name)).length;
+    };
+
+    // 提交时请求没到服务端（用断网模拟），本机记下了原编号与原请求
+    await page.goto('/erp/expenses/new');
+    await expect(page.getByTestId('claim-form')).toBeVisible();
+    await page.getByTestId('ex-dept').selectOption(String(dept.id));
+    await page.getByTestId('ex-purpose').selectOption('办公');
+    await page.getByTestId('ex-invoice').selectOption({ label: '无票' });
+    await page.getByTestId('line-name-0').fill(name);
+    await page.getByTestId('line-cat-0').selectOption('office');
+    await page.getByTestId('line-unit-0').fill('包');
+    await page.getByTestId('line-amount-0').fill('12');
+    await page.route(isPost, (route) => (route.request().method() === 'POST' ? route.abort('internetdisconnected') : route.continue()));
+    await page.getByTestId('claim-submit').click();
+    await expect(page.getByTestId('erp-pending')).toContainText('费用报销结果待确认');
+    await page.unroute(isPost);
+    // 测试会话在 v0.7.8 上的复现：请求还在服务端排队时关掉页面再重开，恢复的记录没有标「结果不明」
+    await page.evaluate(() => {
+      const list = JSON.parse(localStorage.getItem('yuzu.erpPending.v1') ?? '[]') as { uncertain?: boolean }[];
+      localStorage.setItem('yuzu.erpPending.v1', JSON.stringify(list.map(({ uncertain: _, ...r }) => r)));
+    });
+    await page.reload();
+    await expect(page.getByTestId('erp-pending')).toContainText(name);
+    const original = (await stored())!;
+    expect(original.uncertain).toBeFalsy();
+
+    // 按原内容重新提交，被服务端明确拒绝（403）：记录保留并标成结果不明，提示先查回或作废；不能另填一张
+    await page.route(isPost, (route) =>
+      route.request().method() === 'POST'
+        ? route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: { code: 'FORBIDDEN', message: '当前账号没有这个权限' } }) })
+        : route.continue(),
+    );
+    await page.getByTestId('erp-pending-resend').click();
+    await expect(page.getByTestId('erp-pending')).toContainText('之前那次提交可能仍会登记');
+    expect((await stored())?.uncertain).toBe(true);
+    await page.unroute(isPost);
+    await page.reload();
+    await expect(page.getByTestId('erp-pending')).toContainText(name);
+    await expect(page.getByTestId('claim-submit')).toBeDisabled();
+
+    // 原请求这时才到服务端并登记；查回找到它，记录移除：只有一张报销单
+    expect((await page.request.post('/api/erp/expenses', { data: original.body as Record<string, unknown> })).status()).toBe(201);
+    await page.getByTestId('erp-pending-check').click();
+    await expect(page).toHaveURL(/\/erp\/expenses\?claim=\d+/);
+    await expect(page.getByTestId('claim-sheet')).toContainText(name);
+    expect(await stored()).toBeUndefined();
+    expect(await count()).toBe(1);
   });
 });

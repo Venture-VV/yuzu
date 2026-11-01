@@ -142,12 +142,14 @@ export async function sendErpOp<T>(op: Omit<ErpPendingOp, 'createdAt' | 'uncerta
   const record: ErpPendingOp = { ...op, createdAt: op.createdAt ?? new Date().toISOString() };
   // 本机已经有这条记录（页面刷新、关闭前发出的那次可能还在路上，或之前结果不明）：这是重提，不是新的一笔
   const retry = readAll().some((p) => p.key === record.key);
-  // 先标成「提交中」再写入：请求还没返回时页面上不显示待确认、不去查回
-  setInFlight(record.key, true);
+  // 第一次提交先标成「提交中」再写入：请求还没返回时页面上不显示待确认、不去查回。
+  // 重提（从「结果待确认」里按原内容重新提交）不隐藏：那一行留在页面上显示提交中，被拒绝时原因写在这一行里
+  const hide = !retry;
+  if (hide) setInFlight(record.key, true);
   try {
     savePending(record);
   } catch (e) {
-    setInFlight(record.key, false);
+    if (hide) setInFlight(record.key, false);
     throw e;
   }
   try {
@@ -161,7 +163,7 @@ export async function sendErpOp<T>(op: Omit<ErpPendingOp, 'createdAt' | 'uncerta
     else if (e instanceof ApiError) removeErpPending(record.key);
     throw e;
   } finally {
-    setInFlight(record.key, false);
+    if (hide) setInFlight(record.key, false);
   }
 }
 
