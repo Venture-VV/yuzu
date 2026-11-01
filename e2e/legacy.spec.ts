@@ -84,6 +84,23 @@ test.describe('旧账对照（8–10 月）', () => {
     expect(ledgerApi.days.flatMap((d) => d.entries).some((e) => e.description.startsWith('样例-'))).toBe(false);
   });
 
+  test('点核验里的行：原表还在加载时也能跳到那一行（Codex PR #26）', async ({ page }) => {
+    await login(page, 'linlan');
+    const audit = (await (await page.request.get('/api/erp/legacy/audit')).json()) as { imported: string[] };
+    test.skip(audit.imported.length === 0, '这个演示库没有执行 seed-legacy-demo');
+    // 矮一点的窗口：第 15 行在第一屏之外；原表接口慢一点：点开时那一行还没画出来
+    await page.setViewportSize({ width: 1440, height: 520 });
+    await page.route('**/api/erp/legacy/rows/purchase_ledger', async (route) => {
+      await new Promise((r) => setTimeout(r, 800));
+      await route.continue();
+    });
+    // 直接打开核验里点出来的链接（刷新页面、转发链接同样）：原表接口返回之前那一行还不存在
+    await page.goto('/erp/legacy?tab=ledger&row=Sheet1%3A15');
+    const row = page.getByTestId('legacy-row-r-Sheet1:15');
+    await expect(row).toHaveClass(/bg-yuzu-soft/);
+    await expect(row).toBeInViewport();
+  });
+
   test('班次从前一个营业日开到现在：交班页与前台提醒先交班（只提醒、不拦截）', async ({ page }) => {
     await login(page, 'linlan');
     const me = (await (await page.request.get('/api/auth/me')).json()) as { today: string; staff: { id: number; displayName: string } };

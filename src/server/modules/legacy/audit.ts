@@ -124,6 +124,12 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
     text: `「${m.sheet}」第 ${m.rowNo} 行${m.item ? `「${m.item}」` : ''}：${why}`,
   });
   const matTotal = sum(M.map((m) => m.amountCents));
+  const mNoAmount = M.filter((m) => m.amountCents === null);
+  const mNoItem = M.filter((m) => !m.item);
+  const matMissingRefs = () => [
+    ...mNoAmount.map((m) => matRef(m, m.mergedInto !== null ? `金额与第 ${m.mergedInto} 行合并` : '没有金额')),
+    ...mNoItem.map((m) => matRef(m, '没有物品名')),
+  ];
   const matMonth = (m: LegacyMaterialLine) => sheetMonth(m.sheet) ?? monthOf(m.date);
 
   // ── 已下单物料 ──
@@ -313,14 +319,7 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
       );
   }
   if (has('material_detail')) {
-    const mNoAmount = M.filter((m) => m.amountCents === null);
-    const mNoItem = M.filter((m) => !m.item);
-    fieldIssues.push(
-      finding('material_missing', '明细表必填缺失', `${mNoAmount.length} 行无金额、${mNoItem.length} 行无物品名`, [
-        ...mNoAmount.map((m) => matRef(m, m.mergedInto !== null ? `金额与第 ${m.mergedInto} 行合并` : '没有金额')),
-        ...mNoItem.map((m) => matRef(m, '没有物品名')),
-      ]),
-    );
+    fieldIssues.push(finding('material_missing', '明细表必填缺失', `${mNoAmount.length} 行无金额、${mNoItem.length} 行无物品名`, matMissingRefs()));
     const combos = new Map<string, LegacyMaterialLine[]>();
     for (const m of M) {
       const key = `${m.invoice || '（空）'} ${m.taxRateBp !== null ? taxRateText(m.taxRateBp) : m.taxText || '（空）'}`;
@@ -387,14 +386,21 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
   const rule = (no: number, title: string, result: string, count: number | null, rows: LegacyRowRef[] = []): LegacyRuleResult => ({ no, title, result, count, rows: rows.slice(0, MAX_ROWS) });
   const skip = (no: number, title: string, src: LegacySource) => rule(no, title, `${notImported(src)}，没有核对`, null);
   const rules: LegacyRuleResult[] = [];
+  // 第 1 条：台账没有日期、金额、类别的行，加上明细表没有金额、物品名的行（docs/LEGACY_LEDGER.md 第 7 节）；两份都没导入才不核对
+  const rule1Title = '支出必须有日期、金额、类别、部门、经办人';
   rules.push(
-    has('purchase_ledger')
-      ? rule(1, '支出必须有日期、金额、类别、部门、经办人', `台账 ${noAmount.length} 行无金额、${noDate.length} 行无日期、${noCategory.length} 行无类别；旧台账没有部门、经办人列`, noAmount.length + noDate.length + noCategory.length, [
-          ...noAmount.map((l) => ledgerRef(l, '没有金额')),
-          ...noDate.map((l) => ledgerRef(l, '没有日期')),
-          ...noCategory.map((l) => ledgerRef(l, '没有类别')),
-        ])
-      : skip(1, '支出必须有日期、金额、类别、部门、经办人', 'purchase_ledger'),
+    has('purchase_ledger') || has('material_detail')
+      ? rule(
+          1,
+          rule1Title,
+          [
+            has('purchase_ledger') ? `台账 ${noAmount.length} 行无金额、${noDate.length} 行无日期、${noCategory.length} 行无类别；旧台账没有部门、经办人列` : notImported('purchase_ledger'),
+            has('material_detail') ? `明细表 ${mNoAmount.length} 行无金额、${mNoItem.length} 行无物品名` : notImported('material_detail'),
+          ].join('；'),
+          noAmount.length + noDate.length + noCategory.length + mNoAmount.length + mNoItem.length,
+          [...noAmount.map((l) => ledgerRef(l, '没有金额')), ...noDate.map((l) => ledgerRef(l, '没有日期')), ...noCategory.map((l) => ledgerRef(l, '没有类别')), ...matMissingRefs()],
+        )
+      : rule(1, rule1Title, `${notImported('purchase_ledger')}，${notImported('material_detail')}，没有核对`, null),
   );
   rules.push(
     has('purchase_ledger')

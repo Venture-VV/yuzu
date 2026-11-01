@@ -1,7 +1,7 @@
 // 8–10 月旧账只读对照（v0.7.10，飞书需求 RQ-005 收尾，见 docs/LEGACY_LEDGER.md）。
 // 四份原始 Excel 按原样导入只读表：页面常显「不进正式账」；核验按「账目问题清单」的结构与口径重算，点开看是原表哪几行。
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 import { Archive, ChevronDown, ChevronRight, CircleAlert, CircleCheck, ExternalLink } from 'lucide-react';
 import {
@@ -63,8 +63,13 @@ function RawCells({ raw }: { raw: LegacyRawCells }) {
 /** 一行原表：标题行 + 说明 + 可展开的原始单元格；被核验点名的行高亮 */
 function RowItem({ id, title, lines, flags, raw, highlight }: { id: string; title: ReactNode; lines: ReactNode; flags?: ReactNode; raw: LegacyRawCells; highlight: boolean }) {
   const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLLIElement>(null);
+  // 被点名的行画出来时自己滚到中间：原表接口慢、这一行晚出现也能对上（不靠固定的延时）
+  useEffect(() => {
+    if (highlight) ref.current?.scrollIntoView({ block: 'center' });
+  }, [highlight]);
   return (
-    <li id={id} className={cn('px-4 py-2.5', highlight && 'bg-yuzu-soft/60')} data-testid={`legacy-row-${id}`}>
+    <li ref={ref} id={id} className={cn('px-4 py-2.5', highlight && 'bg-yuzu-soft/60')} data-testid={`legacy-row-${id}`}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         {title}
         {flags}
@@ -78,15 +83,10 @@ function RowItem({ id, title, lines, flags, raw, highlight }: { id: string; titl
   );
 }
 
-function useHighlight(tab: Tab) {
+/** 地址里点名的行（滚动由那一行自己在画出来时做，见 RowItem） */
+function useHighlight() {
   const [params] = useSearchParams();
-  const row = params.get('row');
-  useEffect(() => {
-    if (!row) return;
-    const t = setTimeout(() => document.getElementById(`r-${row}`)?.scrollIntoView({ block: 'center' }), 50);
-    return () => clearTimeout(t);
-  }, [row, tab]);
-  return row;
+  return params.get('row');
 }
 
 // ───────────────────────── 核验 ─────────────────────────
@@ -535,7 +535,7 @@ export function LegacyPage() {
   const tab = (TABS.find((t) => t.value === params.get('tab'))?.value ?? 'audit') as Tab;
   const audit = useLegacyAudit();
   const imports = useLegacyImports();
-  const highlight = useHighlight(tab);
+  const highlight = useHighlight();
   const paymentSheet = imports.data?.find((i) => i.source === 'purchase_ledger' && i.status === 'active')?.sheets[1]?.name;
   const setTab = (t: Tab) => setParams(t === 'audit' ? {} : { tab: t }, { replace: true });
   const open = (r: LegacyRowRef) => setParams({ tab: tabOf(r, paymentSheet), row: rowKey(r.sheet, r.rowNo) });

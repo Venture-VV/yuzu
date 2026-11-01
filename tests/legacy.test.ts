@@ -180,6 +180,15 @@ describe('核验规则（纯计算）', () => {
     expect(legacyAudit(data({ materials: [mat(1, { invoice: '收据', taxText: '0.13', taxRateBp: 1300 })], invoiceTypes: loose })).rules.find((r) => r.no === 5)!.count).toBe(0);
   });
 
+  it('第 1 条：明细表没有金额、物品名的行也算；只导入明细表也核对，两份都没导入才不核对（Codex PR #26）', () => {
+    const audit = legacyAudit(data({ imported: ['material_detail'], materials: [mat(0), mat(1, { amountCents: null, mergedInto: 3 }), mat(2, { item: '' })] }));
+    const r1 = audit.rules.find((r) => r.no === 1)!;
+    expect(r1.count).toBe(2);
+    expect(r1.result).toBe('「采购台账」还没有导入；明细表 1 行无金额、1 行无物品名');
+    expect(r1.rows.map((r) => r.text)).toEqual(['「8月」第 4 行「样例-1」：金额与第 3 行合并', '「8月」第 5 行：没有物品名']);
+    expect(legacyAudit(data({ imported: [] })).rules.find((r) => r.no === 1)).toMatchObject({ count: null });
+  });
+
   it('第 6 条：问题行超过 300 行时，条数按全部行算，只列前 300 行（Codex PR #26）', () => {
     const audit = legacyAudit(data({ materials: Array.from({ length: 301 }, (_, i) => mat(i, { category: '耗材' })) }));
     const r6 = audit.rules.find((r) => r.no === 6)!;
