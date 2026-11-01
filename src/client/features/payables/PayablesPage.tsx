@@ -44,7 +44,7 @@ export function PayablesPage() {
         title="货款"
         subtitle="供应商余额 = 期初未付 + 收货货款 − 退货扣款 − 净付款 + 供应商退款 = 未付 − 可抵扣（门店内部管理口径）"
         actions={
-          (can('payable.manage') || can('inventory.master')) && (
+          (can('payable.manage') || can('inventory.master') || can('inventory.approve')) && (
             <div className="flex gap-2">
               <Link to="/payables/import" className="flex h-8 items-center gap-1.5 rounded-sm border border-line-strong bg-card px-3 text-[13px] font-semibold hover:border-ink-3">
                 <FileUp className="size-4" />

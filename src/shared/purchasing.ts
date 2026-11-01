@@ -99,11 +99,13 @@ export interface PurchaseOrder {
   totalCents: number;
   /** 已确认收货金额 */
   receivedCents: number;
-  /** 关联收货的退货扣款 */
+  /** 退货抵了本单收货的部分（v0.7.12 起：挂账的按 return_applied_cents，现付的整笔） */
   returnCreditCents: number;
-  /** 已登记付款（核销到本单收货的已确认付款） */
+  /** 本单退货里没抵到收货、还可以抵扣 / 退款的退货余额（在供应商的可抵扣里，不从本单扣；v0.7.12） */
+  returnBalanceCents: number;
+  /** 已登记付款：核销到本单收货的已确认付款，加上预付款、退货余额核销到本单收货的（v0.7.12） */
   paidCents: number;
-  /** 本单未付 = 已确认收货 − 退货扣款 − 已付 */
+  /** 本单未付 = 已确认收货 − 退货抵扣 − 已付（与应付未结清一致） */
   unpaidCents: number;
   receipts: (DocRef & { docDate: string; amountCents: number })[];
   revisions: PoRevision[];

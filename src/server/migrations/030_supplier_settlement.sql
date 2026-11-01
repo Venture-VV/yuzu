@@ -229,13 +229,13 @@ ALTER TABLE idempotency_keys ADD CONSTRAINT idempotency_keys_op_type_check
   CHECK (op_type IN ('recharge', 'consume', 'reversal', 'inv_doc', 'purchase_order', 'payment', 'opening_payable',
                      'checkin', 'bill_post', 'tag_swap', 'abandoned', 'checkout', 'table_open', 'table_post', 'table_checkout',
                      'room_checkin', 'room_extend', 'room_deposit', 'room_refund', 'room_close', 'line_move',
-                     'expense_claim', 'petty_advance', 'petty_settlement', 'purchase_request', 'ap_offset', 'supplier_refund'));
--- 核销、供应商退款的「结果待确认」可以在服务端确认作废（与费用报销等一样，见 modules/erp-ops.ts）
+                     'expense_claim', 'petty_advance', 'petty_settlement', 'purchase_request', 'ap_offset', 'supplier_refund', 'erp_import'));
+-- 核销、供应商退款、批量导入的「结果待确认」可以在服务端确认作废（与费用报销等一样，见 modules/erp-ops.ts）
 ALTER TABLE op_fences DROP CONSTRAINT op_fences_op_type_check;
 ALTER TABLE op_fences ADD CONSTRAINT op_fences_op_type_check
   CHECK (op_type IN ('recharge', 'consume', 'reversal', 'checkin', 'bill_post', 'tag_swap', 'checkout', 'table_open', 'table_post', 'table_checkout',
                      'room_checkin', 'room_extend', 'room_deposit', 'room_refund', 'room_close', 'line_move',
-                     'expense_claim', 'petty_advance', 'petty_settlement', 'purchase_request', 'ap_offset', 'supplier_refund'));
+                     'expense_claim', 'petty_advance', 'petty_settlement', 'purchase_request', 'ap_offset', 'supplier_refund', 'erp_import'));
 
 -- ───────────── 运费单独记费用（#15） ─────────────
 ALTER TABLE expense_claim_lines DROP CONSTRAINT expense_claim_lines_category_check;

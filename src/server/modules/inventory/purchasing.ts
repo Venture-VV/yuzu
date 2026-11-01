@@ -106,11 +106,21 @@ export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
   const receipts = await db<PurchaseOrder['receipts']>`
     SELECT id, doc_no, doc_type, status, doc_date, amount_cents FROM inv_docs
     WHERE purchase_order_id = ${poId} AND doc_type = 'receipt' ORDER BY doc_date, id`;
-  const [money] = await db<{ receivedCents: number; returnCreditCents: number; paidCents: number }[]>`
+  // 与应付未结清、供应商往来同一口径（v0.7.12）：退货只扣抵了本单收货的部分（return_applied_cents，现付的整笔），
+  // 已付含付款核销与核销（预付款、退货余额）到本单收货的；没抵到的退货余额在供应商的可抵扣里，单列，不再从本单扣
+  const [money] = await db<{ receivedCents: number; returnCreditCents: number; returnBalanceCents: number; paidCents: number }[]>`
     SELECT
       coalesce((SELECT sum(amount_cents) FROM inv_docs WHERE purchase_order_id = ${poId} AND doc_type = 'receipt' AND status = 'confirmed'), 0) AS received_cents,
-      coalesce((SELECT sum(r.amount_cents) FROM inv_docs r JOIN inv_docs src ON src.id = r.source_doc_id
+      coalesce((SELECT sum(CASE WHEN r.settlement = 'cash' THEN r.amount_cents ELSE coalesce(r.return_applied_cents, r.amount_cents) END)
+                FROM inv_docs r JOIN inv_docs src ON src.id = r.source_doc_id
                 WHERE src.purchase_order_id = ${poId} AND r.doc_type = 'supplier_return' AND r.status = 'confirmed'), 0) AS return_credit_cents,
+      -- 本单退货里还可以抵扣 / 退款的退货余额（挂账的，扣掉已核销、已退款的）
+      coalesce((SELECT sum(r.amount_cents - coalesce(r.return_applied_cents, r.amount_cents)
+                           - coalesce((SELECT sum(o.amount_cents) FROM ap_offsets o WHERE o.credit_return_id = r.id AND o.status = 'confirmed'), 0)
+                           - coalesce((SELECT sum(f.amount_cents) FROM supplier_refunds f WHERE f.credit_return_id = r.id AND f.status = 'confirmed'), 0))
+                FROM inv_docs r JOIN inv_docs src ON src.id = r.source_doc_id
+                WHERE src.purchase_order_id = ${poId} AND r.doc_type = 'supplier_return' AND r.status = 'confirmed'
+                  AND coalesce(r.settlement, 'credit') = 'credit'), 0) AS return_balance_cents,
       -- 已付含预付款、退货余额核销到这几张收货单的（v0.7.12）
       coalesce((SELECT sum(pa.amount_cents) FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
                 JOIN inv_docs d ON d.id = pa.receipt_doc_id
@@ -139,6 +149,7 @@ export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
     receiving: receivingOf(lines),
     receivedCents: money!.receivedCents,
     returnCreditCents: money!.returnCreditCents,
+    returnBalanceCents: money!.returnBalanceCents,
     paidCents: money!.paidCents,
     unpaidCents: money!.receivedCents - money!.returnCreditCents - money!.paidCents,
     receipts,

@@ -24,26 +24,35 @@ import type { Db, Tx } from '../../db';
 import { guard, guardAny } from '../../auth/guard';
 import { writeAudit } from '../../lib/audit';
 import type { Actor, Deps } from '../../lib/context';
-import { badRequest, forbidden, unprocessable } from '../../lib/errors';
+import { badRequest, conflict, forbidden, unprocessable } from '../../lib/errors';
+import { assertNotFenced, lockOpKey } from '../../lib/fences';
 import { idParam, parse } from '../../lib/validate';
 import { readXlsx, serialToDate, XlsxReadError } from '../../lib/xlsx-read';
 import { loadInventorySettings, logApproval, nextDocNo, overThreshold, setTxTimeouts, todayIn } from './common';
+import { erpOpAbandoned } from '../erp-ops';
 import { actOnOpening, confirmOpening, lockSupplier } from './payables';
+
+const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 
 /** 一份文件最多多少行 */
 export const IMPORT_MAX_ROWS = 2000;
 
-const FileInput = z
-  .object({
-    kind: z.enum(['suppliers', 'opening_payables']),
-    fileName: z.string().trim().min(1, '缺少文件名').max(200, '文件名太长'),
-    /** CSV 的文字（浏览器已识别 UTF-8 / GBK） */
-    csv: z.string().max(2_000_000, '文件太大，请分批导入').optional(),
-    /** Excel 原文件（base64） */
-    xlsxBase64: z.string().max(2_800_000, '文件太大，请分批导入').optional(),
-    encoding: z.string().max(16).default(''),
-  })
-  .refine((f) => !!f.csv !== !!f.xlsxBase64, { message: '请选择一个 CSV 或 Excel 文件', path: ['csv'] });
+const FileFields = z.object({
+  kind: z.enum(['suppliers', 'opening_payables']),
+  fileName: z.string().trim().min(1, '缺少文件名').max(200, '文件名太长'),
+  /** CSV 的文字（浏览器已识别 UTF-8 / GBK） */
+  csv: z.string().max(2_000_000, '文件太大，请分批导入').optional(),
+  /** Excel 原文件（base64） */
+  xlsxBase64: z.string().max(2_800_000, '文件太大，请分批导入').optional(),
+  encoding: z.string().max(16).default(''),
+});
+const oneFile = (f: { csv?: string; xlsxBase64?: string }) => !!f.csv !== !!f.xlsxBase64;
+const FileInput = FileFields.refine(oneFile, { message: '请选择一个 CSV 或 Excel 文件', path: ['csv'] });
+/** 写入带操作编号：页面先把编号和原请求存在本机，断网后按编号查回或确认作废（AGENTS.md） */
+const ApplyInput = FileFields.extend({ clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试') }).refine(oneFile, {
+  message: '请选择一个 CSV 或 Excel 文件',
+  path: ['csv'],
+});
 type FileInputData = z.infer<typeof FileInput>;
 
 interface Sheet {
@@ -274,15 +283,32 @@ export async function getImport(db: Db, importId: number): Promise<ErpImportReco
 
 /** 写入：整份在一个事务里；同一个文件只写一次（重复提交得到原来那次的结果） */
 export async function applyImport(deps: Deps, raw: unknown, actor: Actor, ip?: string): Promise<{ import: ErpImportRecord; replayed: boolean }> {
-  const f = parse(FileInput, raw);
+  const f = parse(ApplyInput, raw);
   assertKindPermission(actor, f.kind);
+  const requestHash = hashRequest({ ...f, clientKey: undefined });
   const r = await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
+    // 同一个操作编号排队：重提得到原来那次的结果；页面上确认作废过的编号晚到也不写入
+    await lockOpKey(tx, f.clientKey);
+    const [seen] = await tx<{ opType: string; requestHash: string; refId: number }[]>`
+      SELECT op_type, request_hash, ref_id FROM idempotency_keys WHERE key = ${f.clientKey}`;
+    if (seen) {
+      if (seen.opType !== 'erp_import' || seen.requestHash !== requestHash) {
+        throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一次导入，请刷新页面后重新选择文件');
+      }
+      return { id: Number(seen.refId), replayed: true };
+    }
+    await assertNotFenced(tx, f.clientKey, 'erp_import', erpOpAbandoned);
     const first = readSheet(f, f.kind === 'opening_payables' ? ['截至日期'] : []);
     // 同一个文件串行处理
     await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`erp_import:${f.kind}:${first.sha256}`}, 0))`;
+    const keep = (importId: number) =>
+      tx`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (${f.clientKey}, 'erp_import', ${requestHash}, ${importId}, ${actor.id})`;
     const dup = await duplicateOf(tx, f.kind, first.sha256);
-    if (dup) return { id: dup.id, replayed: true };
+    if (dup) {
+      await keep(dup.id);
+      return { id: dup.id, replayed: true };
+    }
     // 供应商编码唯一：导入供应商时与新建供应商串行
     if (f.kind === 'suppliers') await tx`LOCK TABLE suppliers IN SHARE ROW EXCLUSIVE MODE`;
     const p = await plan(tx, f, deps.config.timezone);
@@ -296,6 +322,7 @@ export async function applyImport(deps: Deps, raw: unknown, actor: Actor, ip?: s
       VALUES (${f.kind}, ${f.fileName}, ${p.sheet.sha256}, ${p.sheet.rows.length}, ${p.totalCents}, ${actor.id})
       RETURNING id`;
     const importId = imp!.id;
+    await keep(importId);
     if (f.kind === 'suppliers') {
       for (const s of p.suppliers) {
         await tx`
@@ -346,7 +373,8 @@ export function registerImportRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
   const bodyLimit = 4 * 1024 * 1024;
   const anyImport = guardAny('inventory.master', 'payable.manage');
-  app.get('/api/payables/imports', { preHandler: anyImport }, async () => listImports(sql));
+  // 导入记录：负责人也能看（导入的期初未付超过门槛时在这里一次确认整批），只读
+  app.get('/api/payables/imports', { preHandler: guardAny('inventory.master', 'payable.manage', 'inventory.approve') }, async () => listImports(sql));
   app.post('/api/payables/imports/preview', { preHandler: anyImport, bodyLimit }, async (req) => previewImport(deps, req.body, req.actor));
   app.post('/api/payables/imports', { preHandler: anyImport, bodyLimit }, async (req, reply) => {
     const r = await applyImport(deps, req.body, req.actor, req.ip);

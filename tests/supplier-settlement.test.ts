@@ -489,6 +489,9 @@ describe('按可用天数提醒（#22）', () => {
 
 describe('供应商与期初未付批量导入（#16）', () => {
   const file = (kind: string, csv: string, fileName = `${kind}.csv`) => ({ kind, fileName, csv });
+  /** 写入要带操作编号（页面先存本机，断网后按编号查回或作废） */
+  const write = (cookie: string, body: Record<string, unknown>, clientKey: string = randomUUID()) =>
+    api(ctx.app, cookie, 'POST', '/api/payables/imports', { ...body, clientKey });
 
   it('预览逐行校验；有问题整份不写；同一个文件只写一次；没有权限的看不到', async () => {
     const bad = file('suppliers', '编码,名称,联系人,电话,结算方式,备注\nIM01,导入供应商一,张三,13800000001,挂账,\nIM01,重复的编码,,,,\nIM03,,,,月付,');
@@ -497,21 +500,21 @@ describe('供应商与期初未付批量导入（#16）', () => {
     expect(preview.issues.map((i) => i.row)).toEqual([3, 4]);
     expect(preview.issues[0]!.message).toContain('与第 2 行重复');
     expect(preview.issues[1]!.message).toContain('名称为空');
-    const rejected = await api(ctx.app, ctx.owner, 'POST', '/api/payables/imports', bad);
+    const rejected = await write(ctx.owner, bad);
     expect(rejected.status).toBe(422);
     expect(rejected.body.error.code).toBe('IMPORT_INVALID');
     expect(await ctx.sql`SELECT 1 FROM suppliers WHERE code = 'IM01'`).toHaveLength(0);
     expect((await api(ctx.app, keeper, 'POST', '/api/payables/imports/preview', bad)).status).toBe(403);
 
     const good = file('suppliers', '﻿名称,编码,结算方式\n导入供应商一,IM01,挂账\n导入供应商二,IM02,现付');
-    const applied = await ok(api(ctx.app, ctx.owner, 'POST', '/api/payables/imports', good));
+    const applied = await ok(write(ctx.owner, good));
     expect(applied.import).toMatchObject({ kind: 'suppliers', rowCount: 2 });
     const rows = await ctx.sql<{ code: string; settlement: string; importId: number }[]>`SELECT code, settlement, import_id FROM suppliers WHERE code IN ('IM01', 'IM02') ORDER BY code`;
     expect(rows).toEqual([
       { code: 'IM01', settlement: 'credit', importId: applied.import.id },
       { code: 'IM02', settlement: 'cash', importId: applied.import.id },
     ]);
-    const again = await api(ctx.app, ctx.owner, 'POST', '/api/payables/imports', good);
+    const again = await write(ctx.owner, good); // 新的操作编号、同一个文件：按文件查重
     expect(again.status).toBe(200);
     expect(again.body).toMatchObject({ replayed: true, import: { id: applied.import.id } });
     expect((await ok(api(ctx.app, ctx.owner, 'POST', '/api/payables/imports/preview', good), 200)).duplicateOf).toMatchObject({ id: applied.import.id });
@@ -519,7 +522,7 @@ describe('供应商与期初未付批量导入（#16）', () => {
 
   it('期初未付：免确认门槛以内的直接确认，超过的等负责人，可以一次确认整批', async () => {
     const csv = `供应商编码,金额,截至日期,备注\nIM01,"1,200.50",${today.replaceAll('-', '/')},对账确认\nIM01,3000,${today},`;
-    const applied = await ok(api(ctx.app, payer, 'POST', '/api/payables/imports', file('opening_payables', csv)));
+    const applied = await ok(write(payer, file('opening_payables', csv)));
     expect(applied.import).toMatchObject({ kind: 'opening_payables', rowCount: 2, totalCents: 420_050 });
     const ops = await ctx.sql<{ amountCents: number; status: string }[]>`
       SELECT amount_cents, status FROM opening_payables WHERE import_id = ${applied.import.id} ORDER BY amount_cents`;
@@ -531,6 +534,75 @@ describe('供应商与期初未付批量导入（#16）', () => {
     expect((await ok(api(ctx.app, approver, 'POST', `/api/payables/imports/${applied.import.id}/approve-openings`, {}), 200)).approved).toBe(1);
     const unknown = await ok(api(ctx.app, payer, 'POST', '/api/payables/imports/preview', file('opening_payables', '供应商编码,金额,截至日期\nNOPE,10,2026-01-01\nIM01,-5,2026-01-01')), 200);
     expect(unknown.issues.map((i: { message: string }) => i.message)).toEqual([expect.stringContaining('没有编码为 NOPE'), expect.stringContaining('大于 0')]);
+    await checksOk();
+  });
+
+  it('写入的结果待确认：按编号查回、原样重提只写一次、编号不能挪用、作废后晚到不写入；负责人能看导入记录', async () => {
+    const lookup = (key: string, cookie = ctx.owner) => api(ctx.app, cookie, 'GET', `/api/erp/ops/${key}?type=erp_import`);
+    const sup = (code: string) => file('suppliers', `编码,名称\n${code},待确认测试${code}`, `${code}.csv`);
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/payables/imports', sup('IK01'))).status).toBe(400); // 没有操作编号
+
+    // ① 写入了、响应丢了：按编号查回；原样重提得到原来那次
+    const k1 = randomUUID();
+    const first = await ok(write(ctx.owner, sup('IK01'), k1));
+    expect((await lookup(k1)).body).toEqual({ found: true, abandoned: false, refId: first.import.id });
+    const replay = await write(ctx.owner, sup('IK01'), k1);
+    expect(replay.status).toBe(200);
+    expect(replay.body).toMatchObject({ replayed: true, import: { id: first.import.id } });
+    // 同一个编号换了文件内容：拒绝，不写入
+    expect((await write(ctx.owner, sup('IK02'), k1)).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+    expect(await ctx.sql`SELECT 1 FROM suppliers WHERE code = 'IK02'`).toHaveLength(0);
+
+    // ② 请求没到：确认作废后，原请求晚到也不写入（哪怕文件改过、查重认不出来）
+    const k2 = randomUUID();
+    expect((await api(ctx.app, keeper, 'POST', `/api/erp/ops/${k2}/abandon`, { type: 'erp_import' })).status).toBe(403);
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/erp/ops/${k2}/abandon`, { type: 'erp_import' })).body).toEqual({ found: false, abandoned: true });
+    const late = await write(ctx.owner, sup('IK03'), k2);
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('OP_ABANDONED');
+    expect(await ctx.sql`SELECT 1 FROM suppliers WHERE code = 'IK03'`).toHaveLength(0);
+
+    // 负责人（确认职责）能看导入记录、能查回，不能导入；物资经办都不行
+    const list = await api(ctx.app, approver, 'GET', '/api/payables/imports');
+    expect(list.status).toBe(200);
+    expect((list.body as { id: number }[]).map((i) => i.id)).toContain(first.import.id);
+    expect((await lookup(k1, approver)).body).toMatchObject({ found: true });
+    expect((await write(approver, sup('IK04'))).status).toBe(403);
+    expect((await api(ctx.app, keeper, 'GET', '/api/payables/imports')).status).toBe(403);
+  });
+});
+
+describe('采购单的货款与应付同一口径（Codex 审查）', () => {
+  it('退货余额核销到同一采购单的另一张收货：本单未付不重复扣退货，与未结清一致', async () => {
+    const m = await material('SP02');
+    const po = await approvedPo(m.id, q(20), 1_000); // 20 箱 × 10 元
+    const receiveOn = async () =>
+      (await ok(doc(keeper, {
+        docType: 'receipt',
+        supplierId,
+        purchaseOrderId: po.id,
+        coAcceptorId: buyerId,
+        lines: [{ materialId: m.id, poLineId: po.lines[0]!.id, deliveredMilli: q(100), acceptedMilli: q(100) }],
+      }))).doc as { id: number; amountCents: number; lines: { id: number }[] };
+    const a = await receiveOn(); // 100 元
+    const b = await receiveOn(); // 100 元
+    await ok(pay(10_000, [{ kind: 'receipt', targetId: a.id, amountCents: 10_000 }]));
+    // A 付清后退 20 个（20 元）：没抵到 A，整笔是退货余额
+    const ret = (await ok(returnOf(a, 20))).doc;
+    const agreed = await ok(answer(ret.id, { agreed: true, date: today }), 200);
+    expect(agreed.returnCredit).toMatchObject({ appliedCents: 0, availableCents: 2_000 });
+    const poOf = async () => (await api(ctx.app, payer, 'GET', `/api/purchase-orders/${po.id}`)).body;
+    expect(await poOf()).toMatchObject({ receivedCents: 20_000, returnCreditCents: 0, returnBalanceCents: 2_000, paidCents: 10_000, unpaidCents: 10_000 });
+    // 退货余额核销到 B：本单未付 80 元（不是 60 元），与 B 的未结清一致
+    await ok(api(ctx.app, payer, 'POST', '/api/payables/offsets', {
+      clientKey: randomUUID(),
+      supplierId,
+      offsetDate: today,
+      credit: { kind: 'return', id: ret.id },
+      lines: [{ kind: 'receipt', targetId: b.id, amountCents: 2_000 }],
+    }));
+    expect(await poOf()).toMatchObject({ returnCreditCents: 0, returnBalanceCents: 0, paidCents: 12_000, unpaidCents: 8_000 });
+    expect((await openOf(a.id)).openCents + (await openOf(b.id)).openCents).toBe(8_000);
     await checksOk();
   });
 });

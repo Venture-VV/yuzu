@@ -1,4 +1,4 @@
-// ERP 单据「结果待确认」的提醒（v0.7.8）：费用报销、备用金打款与退回补付、部门需求单；v0.7.12 起还有核销、供应商退款。
+// ERP 单据「结果待确认」的提醒（v0.7.8）：费用报销、备用金打款与退回补付、部门需求单；v0.7.12 起还有核销、供应商退款、批量导入。
 // 进入页面时按原编号只读查回：已登记或已作废的直接移除；查不到的保留，由员工选择
 // 「按原内容重新提交」（同一编号，不会重复登记）或「确认作废」（服务端登记作废，原请求晚到也不会登记）。
 
@@ -33,6 +33,8 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
       return d.offset && typeof d.offset === 'object' ? { refId: d.offset.id } : null;
     case 'supplier_refund':
       return d.refund && typeof d.refund === 'object' ? { refId: d.refund.id } : null;
+    case 'erp_import':
+      return d.import && typeof d.import === 'object' ? { refId: d.import.id } : null;
   }
 }
 

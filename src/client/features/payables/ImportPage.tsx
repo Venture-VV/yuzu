@@ -11,11 +11,13 @@ import {
   type ErpImportRecord,
 } from '@shared/purchasing';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { ErpPendingStoreError, sendErpOp, useErpPending } from '../../lib/erpPending';
 import { readImportFile } from '../../lib/import-file';
-import { useCan } from '../../lib/session';
-import { cn, formatDateTime } from '../../lib/utils';
+import { useCan, useSession } from '../../lib/session';
+import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
+import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Notice, Segmented, Skeleton } from '../../components/ui';
@@ -58,6 +60,7 @@ function downloadTemplate(kind: ErpImportKind) {
 
 export function ImportPage() {
   const can = useCan();
+  const session = useSession();
   const toast = useToast();
   const invalidate = useInvalidateAll();
   const kinds = (['suppliers', 'opening_payables'] as const).filter((k) => (k === 'suppliers' ? can('inventory.master') : can('payable.manage')));
@@ -66,8 +69,12 @@ export function ImportPage() {
   const [preview, setPreview] = useState<ErpImportPreview | null>(null);
   const [busy, setBusy] = useState<'read' | 'preview' | 'apply' | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const history = useErpImports(kinds.length > 0);
-  if (kinds.length === 0) return <Navigate to="/payables" replace />;
+  // 负责人只看导入记录、一次确认整批导入的期初未付（不能导入）
+  const canApprove = can('inventory.approve');
+  // 结果待确认的导入记在本机（AGENTS.md）：查回、按原内容重新提交或作废之前，不能再写入新的一份
+  const pending = useErpPending(['erp_import']);
+  const history = useErpImports(kinds.length > 0 || canApprove);
+  if (kinds.length === 0 && !canApprove) return <Navigate to="/payables" replace />;
 
   const reset = () => {
     setFile(null);
@@ -106,18 +113,32 @@ export function ImportPage() {
     }
   };
 
+  // 每次写入用新的操作编号：先把编号和原请求（含文件内容）记在本机并读回核对，记不下就不发请求；
+  // 结果不明的那一次由页面上方按原编号查回、原样重新提交或作废——不要改了文件再导入（内容一变，同一个文件的查重就认不出来）
   const apply = async () => {
     if (!file) return;
+    if (pending.length > 0) return setError('上一次导入结果待确认：请先在页面上方查回、按原内容重新提交或作废');
+    const clientKey = uuid();
     setBusy('apply');
     setError(null);
     try {
-      const r = await api.post<{ import: ErpImportRecord; replayed: boolean }>('/api/payables/imports', body(), { timeoutMs: 30_000 });
+      const r = await sendErpOp<{ import: ErpImportRecord; replayed: boolean }>({
+        key: clientKey,
+        type: 'erp_import',
+        url: '/api/payables/imports',
+        body: { ...body(), clientKey },
+        summary: `${ERP_IMPORT_LABELS[kind]} · ${file.fileName}${preview ? ` · ${preview.rowCount} 行` : ''}`,
+        staffName: session.staff.displayName,
+      });
       await invalidate();
       toast({ tone: 'success', title: r.replayed ? '这个文件之前已经导入过' : `已导入 ${r.import.rowCount} 行${ERP_IMPORT_LABELS[r.import.kind]}`, body: r.import.fileName });
       reset();
     } catch (e) {
-      // 同一个文件只写一次：结果不明时再点一次就能核对，不会重复导入
-      setError(e instanceof UncertainError ? '结果待确认：请再点一次「写入」核对（同一个文件不会重复导入）' : e instanceof ApiError ? e.message : errorMessage(e));
+      if (e instanceof UncertainError) {
+        toast({ tone: 'info', title: '导入结果待确认', body: '已记在本机：请在页面上方查回、按原内容重新提交或作废，不要改了文件再导入。' });
+        reset();
+      } else if (e instanceof ErpPendingStoreError) setError(`${e.message} 文件较大时也可以拆成几份分批导入。`);
+      else setError(e instanceof ApiError ? e.message : errorMessage(e));
     } finally {
       setBusy(null);
     }
@@ -141,6 +162,12 @@ export function ImportPage() {
       />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1080px] space-y-4 px-5 py-5 md:px-7">
+          <ErpPendingPanel types={['erp_import']} className="space-y-2" onFound={() => void invalidate()} />
+          {kinds.length === 0 ? (
+            <Notice tone="info" title="导入由采购（供应商）与对账付款（期初未付）登记">
+              导入的期初未付超过免确认门槛时，在下面的导入记录里一次确认整批。
+            </Notice>
+          ) : (
           <section className="space-y-3 rounded-lg border border-line bg-card p-5 shadow-card">
             <div className="flex flex-wrap items-center gap-3">
               <Segmented<ErpImportKind>
@@ -171,7 +198,7 @@ export function ImportPage() {
               </Button>
               <Button
                 variant="primary"
-                disabled={!preview || preview.issues.length > 0 || !!preview.duplicateOf}
+                disabled={!preview || preview.issues.length > 0 || !!preview.duplicateOf || pending.length > 0}
                 loading={busy === 'apply'}
                 icon={<CircleCheck className="size-4" />}
                 onClick={apply}
@@ -180,8 +207,10 @@ export function ImportPage() {
                 写入
               </Button>
             </div>
+            {pending.length > 0 && <Notice tone="warning" title="上一次导入结果待确认：请先在页面上方处理，再写入新的一份" />}
             {error && <Notice tone="error" title={error} />}
           </section>
+          )}
 
           {preview && (
             <section className="space-y-3" data-testid="import-preview">

@@ -32,9 +32,10 @@ export const FENCED_OPS = [
   'petty_advance',
   'petty_settlement',
   'purchase_request',
-  // 供应商结算（v0.7.12）：核销、供应商退款
+  // 供应商结算（v0.7.12）：核销、供应商退款、批量导入
   'ap_offset',
   'supplier_refund',
+  'erp_import',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
