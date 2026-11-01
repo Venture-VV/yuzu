@@ -1,6 +1,7 @@
 // 后台「空间台账」（飞书需求 RQ-004 第一段，v0.7.14，见 docs/SPACES.md）：楼层 → 区域 → 空间（编码图的编码做主键，建好后不能改，缺号不补）、
 // 别名（品牌名、编码图原始标注、旧名；只追加，不用了停用）、核对状态（已核对 / 推断 / 待现场核对，改状态要写说明）、
 // 空间清单与区域清单的导入、导出。客房房间在「客房 → 房间」里挂接空间（房号就是空间编码）。店主、店总可以改（与「客房」同一组权限）。
+// 「底图」（RQ-004 第二段，v0.7.15）：上传编码图 → 转换出每层底图与房间轮廓 → 与台账比对 → 启用（FloorplanCard）。
 
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
@@ -41,8 +42,9 @@ import { Badge, Button, Card, Field, Input, Notice, SectionTitle, Segmented, Sel
 import { useInvalidateSpaces, useSpaceLedger } from '../spaces/queries';
 import { AdminPage } from './AdminShell';
 import { SpaceImportCard } from './SpaceImportCard';
+import { FloorplanCard } from './FloorplanCard';
 
-type Tab = 'spaces' | 'zones' | 'import';
+type Tab = 'spaces' | 'zones' | 'import' | 'plans';
 type VerifyFilter = '' | SpaceVerifyStatus | 'unverified';
 interface Filters {
   floorId: number;
@@ -66,7 +68,7 @@ export function SpacesSection() {
     <AdminPage
       section="spaces"
       wide
-      description="楼层、区域与空间（编码图的编码，建好后不能改）、别名与核对状态；空间清单、区域清单的导入与导出。客房房间在「客房」里挂接空间。"
+      description="楼层、区域与空间（编码图的编码，建好后不能改）、别名与核对状态；空间清单、区域清单的导入与导出；编码图转换成每层底图与房间轮廓。客房房间在「客房」里挂接空间。"
     >
       <div className="space-y-4">
         <ErpPendingPanel types={['space_import']} className="space-y-2" onFound={() => void invalidate()} />
@@ -93,9 +95,12 @@ export function SpacesSection() {
             { value: 'spaces', label: '空间' },
             { value: 'zones', label: '楼层与区域' },
             { value: 'import', label: '导入' },
+            { value: 'plans', label: '底图' },
           ]}
         />
-        {tab === 'import' ? (
+        {tab === 'plans' ? (
+          <FloorplanCard />
+        ) : tab === 'import' ? (
           <SpaceImportCard />
         ) : !ledger.data ? (
           <Skeleton className="h-64" />

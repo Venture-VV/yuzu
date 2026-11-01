@@ -36,9 +36,13 @@
 //                                         每日对账包（只读）：日结汇总、结账单、部门参考表、异常清单、交班、技师业绩、客房与押金，写到 <目录>/<营业日>/
 //   balance-changes --since "YYYY-MM-DD HH:MM" [--include-opening] [--out 文件.csv]
 //                                         某时刻之后有余额变动的会员（只读），退回旧系统时用于回写 EBC；不给 --out 时 CSV 打到标准输出
+//   floorplan-convert <图纸.dwg|.dxf> [--out 目录]
+//                                         底图转换（RQ-004 第二段，不连数据库、不需要 DATABASE_URL）：每层 SVG 底图、spaces.geojson、
+//                                         转换报告（每个图层的用途与图元数）写到目录（默认 floorplan-<文件名>）
+//   floorplan-sample <文件.dxf>           写出合成的样例图纸（两层、与 docs/data/space-ledger-sample.csv 的编码对应），演示与验收用
 
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { businessDateOf, ISO_DATE } from '@shared/business-date';
 import { ZONE_LABELS } from '@shared/frontdesk';
@@ -73,6 +77,11 @@ import { consistencyChecks } from './ops/consistency';
 import { demoSeedTime, rememberDemoAnchor } from './ops/demo-time';
 import { computeFingerprint } from './ops/fingerprint';
 import { buildDailyRecon } from './ops/recon';
+import { FLOORPLAN_ROOM_LABELS } from '@shared/floorplans';
+import { floorplanSampleDxf, FLOORPLAN_SAMPLE_EXPECTED } from './demo/floorplan-sample';
+import { spacesGeoJson } from './floorplan/geojson';
+import { startConversion } from './floorplan/run';
+import { FLOORPLAN_TIMEOUT_MS } from './modules/floorplans';
 
 /** --control 人数,本金,赠金,累计充值（金额单位元），例如 1234,567890.12,12345,987654 */
 function parseControl(text: string | undefined) {
@@ -129,8 +138,51 @@ function printLegacyAudit(a: LegacyAudit) {
   for (const r of a.rules) console.log(`  ${r.no}. ${r.title}：${r.result}`);
 }
 
+/** 不连数据库的命令（底图转换）：不需要 DATABASE_URL；处理了返回 true */
+async function offlineCommand(command: string | undefined, args: string[]): Promise<boolean> {
+  switch (command) {
+    case 'floorplan-convert': {
+      const file = args[0];
+      if (!file || file.startsWith('--')) throw new Error('用法：floorplan-convert <图纸.dwg|.dxf> [--out 目录]');
+      const out = flag(args, 'out') ?? `floorplan-${basename(file).replace(/\.[^.]+$/, '')}`;
+      await mkdir(out, { recursive: true });
+      const resultFile = join(out, 'worker-result.json');
+      console.log(`转换中（单独的进程，DWG 大约要半分钟）：${file}`);
+      const t0 = Date.now();
+      const res = await startConversion(file, resultFile, FLOORPLAN_TIMEOUT_MS).done;
+      await rm(resultFile, { force: true });
+      if (!res.ok || !res.result) throw new Error(res.error ?? '转换失败');
+      const r = res.result;
+      for (const f of r.floors) await writeFile(join(out, `${f.code}.svg`), f.svg);
+      await writeFile(join(out, 'spaces.geojson'), JSON.stringify(spacesGeoJson(r.rooms, { converter: r.converter, file: basename(file) }), null, 1));
+      await writeFile(join(out, 'report.json'), JSON.stringify({ ...r, floors: r.floors.map((f) => ({ ...f, svg: undefined })) }, null, 1));
+      console.log(`读图 ${((res.readMs ?? 0) / 1000).toFixed(1)} 秒，转换 ${(r.convertMs / 1000).toFixed(1)} 秒，共 ${((Date.now() - t0) / 1000).toFixed(1)} 秒；图元 ${r.source.entities} 个、图层 ${r.source.layers} 个`);
+      for (const f of r.floors) {
+        const rooms = r.rooms.filter((x) => x.floor === f.code);
+        const ok = rooms.filter((x) => x.status === 'ok').length;
+        console.log(`  ${f.code}${f.title ? `（${f.title}）` : ''}：底图 ${(f.svgBytes / 1024).toFixed(0)} KB，编码 ${rooms.length} 个，配上轮廓 ${ok} 个`);
+      }
+      const ex = r.rooms.filter((x) => x.status !== 'ok');
+      if (ex.length) console.log(`例外 ${ex.length} 个：${ex.map((x) => `${x.code}（${FLOORPLAN_ROOM_LABELS[x.status]}${x.with.length ? `：${x.with.join('、')}` : ''}）`).join('，')}`);
+      for (const i of r.issues) console.log(`  · ${i.message}`);
+      console.log(`已写到 ${out}/：每层 SVG、spaces.geojson、report.json`);
+      return true;
+    }
+    case 'floorplan-sample': {
+      const file = args[0];
+      if (!file) throw new Error('用法：floorplan-sample <文件.dxf>');
+      await writeFile(file, floorplanSampleDxf());
+      console.log(`已写出 ${file}（合成样例：两层、${FLOORPLAN_SAMPLE_EXPECTED.rooms} 个编码，预期结果见 src/server/demo/floorplan-expected.json）`);
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
 async function main() {
   const [command, ...args] = process.argv.slice(2);
+  if (await offlineCommand(command, args)) return;
   const config = loadConfig();
   const sql = createSql(config.databaseUrl, { max: 2 });
   try {
@@ -467,7 +519,7 @@ async function main() {
         break;
       }
       default:
-        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo [--previous-day] | seed-billing-demo [--previous-day] | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup | daily-recon | balance-changes');
+        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo [--previous-day] | seed-billing-demo [--previous-day] | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup | daily-recon | balance-changes | floorplan-convert | floorplan-sample');
         process.exitCode = command ? 1 : 0;
     }
   } finally {
