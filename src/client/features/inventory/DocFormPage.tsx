@@ -521,7 +521,10 @@ function DocForm({
       case 'issue_return':
       case 'supplier_return':
         // 台面日耗品领到部门即算耗用，不能退回（v0.7.13）
-        if (type === 'issue_return' && m.counterUse && qty.milli !== null && qty.milli > 0) errorText = '台面日耗品领到即算耗用，不能退回';
+        // 迁移前的领料没进部门小仓，退回只进总仓，不受限制
+        if (type === 'issue_return' && m.counterUse && source.data?.warehouse?.kind === 'department' && qty.milli !== null && qty.milli > 0) {
+          errorText = '台面日耗品领到即算耗用，不能退回';
+        }
         if (srcLine) {
           maxReturn = srcLine.qtyMilli - srcLine.returnedMilli;
           if (qty.milli !== null && qty.milli > maxReturn) errorText = errorText ?? `最多 ${formatQty(Math.max(0, maxReturn))} ${m.inventoryUnit}`;

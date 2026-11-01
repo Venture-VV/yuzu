@@ -730,7 +730,8 @@ async function prepare(
         SELECT id, material_id, qty_milli, price_cents, factor_milli, inventory_unit, purchase_unit FROM inv_doc_lines WHERE doc_id = ${src.id}`;
       const byId = new Map(srcLines.map((l) => [l.id, l]));
       const mats = await loadMaterials(db, srcLines.filter((l) => body.lines.some((b) => b.sourceLineId === l.id)).map((l) => l.materialId));
-      if (body.docType === 'issue_return') assertNoCounterUse(mats, 'return');
+      // 迁移 029 以前的领料没进部门小仓，退回只进总仓，不受台面日耗品的限制
+      if (body.docType === 'issue_return' && wh?.kind === 'department') assertNoCounterUse(mats, 'return');
       const already = await returnedBySourceLine(db, body.lines.map((l) => l.sourceLineId), existing?.id ?? null);
       const seen = new Set<number>();
       let amount = 0;
@@ -1011,7 +1012,7 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
   };
   // 台面日耗品（#14，v0.7.13）：部门小仓不登记它的期初、耗用、报损、盘点，也不能退回（物料可能在单据提交后才改成台面日耗品）
   if (isDept && ['opening', 'direct_use', 'damage', 'count'].includes(doc.docType)) assertNoCounterUse(mats, 'dept', 'confirm');
-  if (doc.docType === 'issue_return') assertNoCounterUse(mats, 'return', 'confirm');
+  if (doc.docType === 'issue_return' && isDept) assertNoCounterUse(mats, 'return', 'confirm');
   /** 领料、急采进部门小仓的台面日耗品，在同一张单里接着记一笔部门小仓的「耗用」流水，结存回到 0 */
   const consumeCounterUse = async (ls: LineRow[]) => {
     for (const l of ls) {

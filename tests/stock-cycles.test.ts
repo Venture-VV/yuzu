@@ -409,6 +409,13 @@ describe('对账提醒与登记（#23）', () => {
     await checksOk();
   });
 
+  it('新建时就选按批次：记下当天；不选按月结；现付供应商也存着对账方式但不提醒', async () => {
+    const list = (await api(ctx.app, ctx.owner, 'POST', '/api/inventory/suppliers', { code: 'SC02', name: '新建即按批次', reconcileCycle: 'batch' })).body;
+    expect(list.find((x: { code: string }) => x.code === 'SC02')).toMatchObject({ reconcileCycle: 'batch', reconcileSince: today });
+    const list2 = (await api(ctx.app, ctx.owner, 'POST', '/api/inventory/suppliers', { code: 'SC03', name: '默认月结' })).body;
+    expect(list2.find((x: { code: string }) => x.code === 'SC03')).toMatchObject({ reconcileCycle: 'monthly', reconcileSince: null });
+  });
+
   it('按批次：改成按批次以后的每张收货单提醒对账，采购可以勾选几张登记；一张只能登记一次；冲销后提示有变动', async () => {
     // 之前的收货不翻旧账
     const m = await material('RC02');
