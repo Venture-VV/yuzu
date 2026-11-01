@@ -16,8 +16,9 @@ import { PayableStatusChip } from '../purchasing/parts';
 import { useOffsets, useOpenings, usePayablesOverview, usePayments, useRefunds, useStatement } from '../purchasing/queries';
 import { OpeningDialog, OpeningSheet, PaymentSheet } from './PayableSheets';
 import { CreditsSection, OffsetSheet, RefundSheet } from './SettlementSheets';
+import { ReconView } from './ReconView';
 
-type View = 'suppliers' | 'statement' | 'payments' | 'openings' | 'settlements';
+type View = 'suppliers' | 'statement' | 'payments' | 'openings' | 'settlements' | 'recon';
 
 export function PayablesPage() {
   const can = useCan();
@@ -65,7 +66,7 @@ export function PayablesPage() {
           )
         }
       />
-      {/* 手机上五个视图放不下：这一行横向滑动（v0.7.12 加了「核销与退款」） */}
+      {/* 手机上几个视图放不下：这一行横向滑动（v0.7.12 加了「核销与退款」，v0.7.13 加了「对账」） */}
       <div className="scroll-thin flex shrink-0 items-center gap-3 overflow-x-auto border-b border-line px-5 py-3 md:px-7">
         <Segmented<View>
           size="sm"
@@ -78,17 +79,32 @@ export function PayablesPage() {
             { value: 'payments', label: '付款记录' },
             { value: 'openings', label: '期初未付' },
             { value: 'settlements', label: '核销与退款' },
+            { value: 'recon', label: '对账' },
           ]}
         />
       </div>
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-5 py-4 md:px-7">
         {/* 核销、供应商退款结果待确认（v0.7.12）：进入页面先按原编号查回；查不到的由员工重新提交或作废 */}
-        <ErpPendingPanel types={['ap_offset', 'supplier_refund']} className="mb-4 space-y-2" onFound={() => update({ view: 'settlements' })} />
+        <ErpPendingPanel
+          types={['ap_offset', 'supplier_refund', 'supplier_recon']}
+          className="mb-4 space-y-2"
+          onFound={(op) => update({ view: op.type === 'supplier_recon' ? 'recon' : 'settlements' })}
+        />
         {view === 'suppliers' && <SuppliersView onStatement={(id) => update({ view: 'statement', supplier: String(id) })} />}
-        {view === 'statement' && <StatementView supplierId={Number(params.get('supplier')) || null} onSupplier={(id) => update({ supplier: id ? String(id) : null })} onPayment={(id) => update({ payment: String(id) })} onOpening={setOpening} />}
+        {view === 'statement' && (
+          <StatementView
+            key={`${params.get('from') ?? ''}-${params.get('to') ?? ''}`}
+            supplierId={Number(params.get('supplier')) || null}
+            initialRange={params.get('from') && params.get('to') ? { from: params.get('from')!, to: params.get('to')! } : null}
+            onSupplier={(id) => update({ supplier: id ? String(id) : null })}
+            onPayment={(id) => update({ payment: String(id) })}
+            onOpening={setOpening}
+          />
+        )}
         {view === 'payments' && <PaymentsView onOpen={(id) => update({ payment: String(id) })} />}
         {view === 'openings' && <OpeningsView onOpen={setOpening} />}
         {view === 'settlements' && <SettlementsView />}
+        {view === 'recon' && <ReconView onStatement={(id, from, to) => update({ view: 'statement', supplier: String(id), from, to })} />}
       </div>
       <PaymentSheet id={paymentId} onClose={() => update({ payment: null })} />
       <OpeningSheet doc={opening} onClose={() => setOpening(null)} />
@@ -199,11 +215,14 @@ function SuppliersView({ onStatement }: { onStatement: (id: number) => void }) {
 
 function StatementView({
   supplierId,
+  initialRange,
   onSupplier,
   onPayment,
   onOpening,
 }: {
   supplierId: number | null;
+  /** 从「对账」进来时带上那个月（v0.7.13） */
+  initialRange: { from: string; to: string } | null;
   onSupplier: (id: number | null) => void;
   onPayment: (id: number) => void;
   onOpening: (doc: OpeningPayableDoc) => void;
@@ -212,7 +231,7 @@ function StatementView({
   const can = useCan();
   const today = session.calendarToday;
   const suppliers = useSuppliers(true);
-  const [range, setRange] = useState({ from: `${today.slice(0, 8)}01`, to: today });
+  const [range, setRange] = useState(initialRange ?? { from: `${today.slice(0, 8)}01`, to: today });
   const st = useStatement(supplierId, range.from, range.to);
   const openings = useOpenings({ supplierId: supplierId ? String(supplierId) : undefined }, !!supplierId);
   return (

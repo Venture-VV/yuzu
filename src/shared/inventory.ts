@@ -89,6 +89,8 @@ export interface WarehouseStockRow {
   daysOfCover: number | null;
   /** 可用天数少于提醒天数 */
   isLow: boolean;
+  /** 台面日耗品（v0.7.13）：领到即耗用，部门小仓结存始终为 0、不提醒 */
+  counterUse: boolean;
 }
 
 /** 领料单的部门签收（#17 第二次验收） */
@@ -125,6 +127,9 @@ export interface DeptStockMeta {
     decimals: number;
     purchaseUnit: string;
     purchaseFactorMilli: number;
+    /** 台面日耗品（v0.7.13）：部门小仓不登记它的期初、耗用、报损、盘点 */
+    counterUse: boolean;
+    weighed: boolean;
   }[];
   suppliers: { id: number; code: string; name: string }[];
 }
@@ -155,6 +160,16 @@ export interface InventorySettings {
   approvalThresholdCents: number;
   /** 可用天数按近多少天的用量算（#22，默认 28 天，v0.7.12） */
   usageWindowDays: number;
+  /** 称重收货容差（%，#14，默认 10，v0.7.13）：称重物料的实收可以比采购单这一行的订购数量多出这么多 */
+  weighTolerancePct: number;
+  /** 每月盘点日（1–28，#23，默认 1 号）与宽限天数（默认 3 天，过了标红） */
+  stocktakeDay: number;
+  stocktakeGraceDays: number;
+  /** 月结供应商的对账日（1–28，#23，默认次月 1 号）与宽限天数（默认 5 天） */
+  monthlyReconDay: number;
+  monthlyReconGraceDays: number;
+  /** 按批次供应商：收货后几天没对账标红（#23，默认 3 天） */
+  batchReconGraceDays: number;
   approvalRules: ApprovalRules;
 }
 
@@ -174,9 +189,20 @@ export interface Supplier {
   note: string;
   /** 结算方式（v0.7.7）：挂账（收货记应付）/ 现付（收货不记应付，货款走费用报销） */
   settlement: import('./expenses').SupplierSettlement;
+  /** 挂账供应商的对账方式（#23，v0.7.13）：月结（默认）/ 按批次；现付供应商不对账 */
+  reconcileCycle: ReconcileCycle;
+  /** 改成按批次的日期：之前的收货不提醒对账 */
+  reconcileSince: string | null;
   active: boolean;
   isSynthetic: boolean;
 }
+
+export const RECONCILE_CYCLES = ['monthly', 'batch'] as const;
+export type ReconcileCycle = (typeof RECONCILE_CYCLES)[number];
+export const RECONCILE_CYCLE_LABELS: Record<ReconcileCycle, { title: string; hint: string }> = {
+  monthly: { title: '月结', hint: '次月初与供应商对上个月的账' },
+  batch: { title: '按批次', hint: '每批货到后对一次账' },
+};
 
 export interface Material {
   id: number;
@@ -194,6 +220,10 @@ export interface Material {
   lowStockMilli: number | null;
   /** 提醒天数（#22，v0.7.12）：可用天数少于它时提醒；为空时按固定的低库存提醒数量 */
   coverDays: number | null;
+  /** 台面日耗品（#14，v0.7.13）：领到部门即算耗用，部门小仓不留结存、不再清点 */
+  counterUse: boolean;
+  /** 称重（#14，v0.7.13）：按实际称重记数量，收货可以比采购单多出容差 */
+  weighed: boolean;
   tracked: boolean;
   active: boolean;
   /** 总仓结存 */
@@ -257,6 +287,11 @@ export interface InvDocLine {
   returnedMilli: number;
   /** 单据所在仓的当前结存（详情展示用） */
   stockMilli: number;
+  /** 台面日耗品：这一行领到部门（或急采）时已自动记为部门耗用（#14，v0.7.13） */
+  autoConsumed: boolean;
+  /** 物料现在是台面日耗品 / 称重（单据表单的提示用） */
+  counterUse: boolean;
+  weighed: boolean;
   note: string;
   /** 收货行：与此前同口径成交价的比较 */
   compare?: PriceCompare;

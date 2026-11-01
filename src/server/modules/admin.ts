@@ -42,6 +42,7 @@ import {
   DEFAULT_APPROVAL_THRESHOLD_CENTS,
   DEFAULT_URGENT_CAP_CENTS,
   DEFAULT_USAGE_WINDOW_DAYS,
+  DEFAULT_CYCLE_RULES,
   loadInventorySettings,
 } from './inventory/common';
 import { DEFAULT_SETTINGS, loadSettings, SETTINGS_KEYS } from './settings';
@@ -258,6 +259,29 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
     defaultValue: `按近 ${DEFAULT_USAGE_WINDOW_DAYS} 天的用量`, pending: true, section: 'rules',
     hint: '物料设了提醒天数时，可用天数 = 结存 ÷ 这段时间的日均用量，少于提醒天数就提醒',
     current: inv.usageWindowDays, dflt: DEFAULT_USAGE_WINDOW_DAYS, metaKey: 'inventory_usage_window_days',
+  });
+  // 称重与盘点、对账提醒（#14、#23，v0.7.13）：存成一条 inventory_cycle_rules
+  const cyc = DEFAULT_CYCLE_RULES;
+  add({
+    key: 'inventory_cycle_rules.weighTolerancePct', group: 'inventory', label: '称重收货容差', value: `可以比采购单多 ${inv.weighTolerancePct}%`,
+    defaultValue: `可以比采购单多 ${cyc.weighTolerancePct}%`, pending: true, section: 'rules',
+    hint: '物料设为称重的，按实际称重收货，可以比采购单这一行的订购数量多出这么多；货款按实收重量算',
+    current: inv.weighTolerancePct, dflt: cyc.weighTolerancePct, metaKey: 'inventory_cycle_rules',
+  });
+  const stText = (d: number, g: number) => `每月 ${d} 号起提醒，过 ${g} 天没盘完标红`;
+  add({
+    key: 'inventory_cycle_rules.stocktake', group: 'inventory', label: '每月盘点提醒', value: stText(inv.stocktakeDay, inv.stocktakeGraceDays),
+    defaultValue: stText(cyc.stocktakeDay, cyc.stocktakeGraceDays), pending: true, section: 'rules',
+    hint: '每个仓按「月初有结存的物料本月都在盘点单里盘到」算盘完；部门小仓的台面日耗品不用清点',
+    current: [inv.stocktakeDay, inv.stocktakeGraceDays], dflt: [cyc.stocktakeDay, cyc.stocktakeGraceDays], metaKey: 'inventory_cycle_rules',
+  });
+  const rcText = (d: number, g: number, b: number) => `月结：每月 ${d} 号起提醒对上个月的账，过 ${g} 天标红；按批次：收货后 ${b} 天标红`;
+  add({
+    key: 'inventory_cycle_rules.recon', group: 'inventory', label: '供应商对账提醒', value: rcText(inv.monthlyReconDay, inv.monthlyReconGraceDays, inv.batchReconGraceDays),
+    defaultValue: rcText(cyc.monthlyReconDay, cyc.monthlyReconGraceDays, cyc.batchReconGraceDays), pending: true, section: 'rules',
+    hint: '挂账供应商在档案里选「月结」或「按批次」；对完账在「货款 → 对账」登记',
+    current: [inv.monthlyReconDay, inv.monthlyReconGraceDays, inv.batchReconGraceDays],
+    dflt: [cyc.monthlyReconDay, cyc.monthlyReconGraceDays, cyc.batchReconGraceDays], metaKey: 'inventory_cycle_rules',
   });
   // ── 岗位与权限 ──
   const changed = overrideCount(overrides);

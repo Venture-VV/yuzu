@@ -19,6 +19,7 @@ import { registerDeptStockRoutes } from './modules/inventory/dept-stock';
 import { registerDocRoutes } from './modules/inventory/docs';
 import { registerMasterRoutes } from './modules/inventory/master';
 import { registerPayableRoutes } from './modules/inventory/payables';
+import { registerCycleRoutes } from './modules/inventory/cycles';
 import { registerImportRoutes } from './modules/inventory/imports';
 import { registerExpenseRoutes } from './modules/expenses';
 import { registerErpOpsRoutes } from './modules/erp-ops';
@@ -156,6 +157,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerDeptStockRoutes(app, deps);
   registerPurchasingRoutes(app, deps);
   registerPayableRoutes(app, deps);
+  registerCycleRoutes(app, deps);
   registerImportRoutes(app, deps);
   registerExpenseRoutes(app, deps);
   registerRequestRoutes(app, deps);

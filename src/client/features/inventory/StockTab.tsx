@@ -13,6 +13,9 @@ import { Badge, Button, IconButton, Notice, Skeleton, Spinner } from '../../comp
 import { DOC_VISUAL, MoveIcon, PackHint, Qty, StockMeter } from './parts';
 import { useMaterials, useOverview, useStockCard, useWarehouseStock, useWarehouses } from './queries';
 import { useMedia } from './useMedia';
+import type { StocktakeProgress } from '@shared/cycles';
+import { useStocktakeReminders } from '../cycles/queries';
+import { StocktakeNotice } from '../cycles/StocktakeNotice';
 
 /** 工作台上的快捷入口（顺序即日常频率） */
 const ACTIONS: InvDocType[] = ['receipt', 'issue', 'issue_return', 'direct_use', 'damage', 'count', 'supplier_return', 'opening'];
@@ -32,6 +35,17 @@ export function StockTab() {
   const warehouses = useWarehouses();
   const deptStock = useWarehouseStock(dept ? warehouseId : null);
   const wide = useMedia('(min-width: 1280px)');
+  const session = useSession();
+  // 每月盘点提醒（#23，v0.7.13）：总仓给仓库，所有部门小仓给成本核算与负责人
+  const stocktake = useStocktakeReminders(can('inventory.operate') || can('deptStock.audit') || can('inventory.approve'));
+  const stocktakeLink = (w: StocktakeProgress) =>
+    w.kind === 'central'
+      ? can('inventory.operate')
+        ? '/inventory/new/count'
+        : null
+      : can('deptStock.audit') && session.erpModules.includes('deptStock') && w.departmentId
+        ? `/erp/dept-stock/new/count?dept=${w.departmentId}`
+        : null;
 
   const tracked = useMemo(() => (materials.data ?? []).filter((m) => m.tracked), [materials.data]);
   const categories = useMemo(() => [...new Set(tracked.map((m) => m.category || '未分类'))], [tracked]);
@@ -109,6 +123,7 @@ export function StockTab() {
               ))}
             </div>
           )}
+          <StocktakeNotice data={stocktake.data} linkFor={stocktakeLink} />
           {ACTIONS.some(canAct) && (
             <div className="flex flex-wrap gap-2">
               {ACTIONS.filter((t) => canAct(t) && (t !== 'opening' || noOpening > 0)).map((t) => {

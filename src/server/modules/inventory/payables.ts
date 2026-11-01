@@ -487,6 +487,22 @@ const CATEGORIZED = (db: Db) => db`
               ELSE 'supplier_return' END AS kind
   FROM ap_entries e LEFT JOIN inv_docs d ON d.id = e.inv_doc_id`;
 
+/** 对账单的合计数字（不含明细；对账登记与「登记后有变动」的比较用，v0.7.13） */
+export async function statementTotals(db: Db, supplierId: number, from: string, to: string) {
+  const [r] = await db<
+    { beginCents: number; openingCents: number; receivedCents: number; returnCreditCents: number; paidCents: number; refundedCents: number; endCents: number }[]
+  >`
+    SELECT coalesce(sum(x.amount_delta_cents) FILTER (WHERE x.entry_date < ${from}), 0) AS begin_cents,
+           coalesce(sum(x.amount_delta_cents) FILTER (WHERE x.entry_date BETWEEN ${from} AND ${to} AND x.kind = 'opening'), 0) AS opening_cents,
+           coalesce(sum(x.amount_delta_cents) FILTER (WHERE x.entry_date BETWEEN ${from} AND ${to} AND x.kind = 'receipt'), 0) AS received_cents,
+           -coalesce(sum(x.amount_delta_cents) FILTER (WHERE x.entry_date BETWEEN ${from} AND ${to} AND x.kind = 'supplier_return'), 0) AS return_credit_cents,
+           -coalesce(sum(x.amount_delta_cents) FILTER (WHERE x.entry_date BETWEEN ${from} AND ${to} AND x.kind = 'payment'), 0) AS paid_cents,
+           coalesce(sum(x.amount_delta_cents) FILTER (WHERE x.entry_date BETWEEN ${from} AND ${to} AND x.kind = 'refund'), 0) AS refunded_cents,
+           coalesce(sum(x.amount_delta_cents) FILTER (WHERE x.entry_date <= ${to}), 0) AS end_cents
+    FROM (${CATEGORIZED(db)}) x WHERE x.supplier_id = ${supplierId}`;
+  return r!;
+}
+
 export async function supplierBalances(db: Db): Promise<SupplierBalance[]> {
   const rows = await db<Omit<SupplierBalance, 'openItemCount'>[]>`
     SELECT s.id AS supplier_id, s.code, s.name, s.active,

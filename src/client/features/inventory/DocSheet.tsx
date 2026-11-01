@@ -260,7 +260,15 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
               <li key={l.id} className="px-4 py-3">
                 <div className="flex items-start gap-3">
                   <div className="min-w-0 flex-1">
-                    <p className="text-[14px] leading-snug font-bold">{l.materialName}</p>
+                    <p className="text-[14px] leading-snug font-bold">
+                      {l.materialName}
+                      {/* 台面日耗品（v0.7.13）：领到部门（或急采验收）时已自动记为部门耗用 */}
+                      {l.autoConsumed && (
+                        <Badge tone="lake" className="ml-1.5 align-middle">
+                          已记部门耗用
+                        </Badge>
+                      )}
+                    </p>
                     <p className="truncate text-[12px] text-ink-3">
                       <span className="num">{l.materialCode}</span>
                       {l.specification && ` · ${l.specification}`}

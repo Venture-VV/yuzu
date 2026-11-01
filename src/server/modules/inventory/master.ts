@@ -4,19 +4,19 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Department, Material, Supplier } from '@shared/inventory';
 import { fitsDecimals, formatQty } from '@shared/quantity';
-import { isUniqueViolation, type Db, type Tx } from '../../db';
+import { isUniqueViolation, type Db, type Sql, type Tx } from '../../db';
 import { guard, guardAny } from '../../auth/guard';
 import { writeAudit } from '../../lib/audit';
 import type { Deps } from '../../lib/context';
 import { conflict, notFound, unprocessable } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { CENTRAL_WAREHOUSE_ID } from '@shared/inventory';
-import { coverFor, loadInventorySettings, usageByMaterial, usageSince } from './common';
+import { coverFor, loadInventorySettings, todayIn, usageByMaterial, usageSince } from './common';
 
 const MATERIAL_COLUMNS = (db: Db) => db`
   m.id, m.code, m.name, m.category, m.specification, m.inventory_unit, m.decimals, m.purchase_unit,
   m.purchase_factor_milli, m.ref_price_cents, m.default_supplier_id, s.name AS default_supplier_name,
-  m.low_stock_milli, m.cover_days, m.tracked, m.active, m.stock_milli,
+  m.low_stock_milli, m.cover_days, m.counter_use, m.weighed, m.tracked, m.active, m.stock_milli,
   (SELECT coalesce(sum(ws.stock_milli), 0) FROM warehouse_stock ws WHERE ws.material_id = m.id) AS dept_stock_milli,
   (m.low_stock_milli IS NOT NULL AND m.tracked AND m.stock_milli < m.low_stock_milli) AS is_low,
   (m.last_move_id IS NOT NULL) AS has_moves,
@@ -54,7 +54,7 @@ export async function getMaterial(db: Db, id: number, timeZone?: string): Promis
 
 export const listSuppliers = (db: Db, includeInactive = false) =>
   db<Supplier[]>`
-    SELECT id, code, name, contact, phone, note, settlement, active, is_synthetic FROM suppliers
+    SELECT id, code, name, contact, phone, note, settlement, reconcile_cycle, reconcile_since::text AS reconcile_since, active, is_synthetic FROM suppliers
     ${includeInactive ? db`` : db`WHERE active`} ORDER BY active DESC, code`;
 
 export const listDepartments = (db: Db, includeInactive = false) =>
@@ -80,6 +80,10 @@ export const MaterialInput = z
     lowStockMilli: z.number().int().nonnegative().max(1_000_000_000_000).nullable().default(null),
     /** 提醒天数（#22，v0.7.12）：可用天数少于它时提醒；为空按固定的低库存提醒数量 */
     coverDays: z.number('提醒天数必须是数字').int('提醒天数要是整数').min(1, '提醒天数至少 1 天').max(90, '提醒天数最多 90 天').nullable().default(null),
+    /** 台面日耗品（#14，v0.7.13）：领到部门即算耗用，部门小仓不留结存 */
+    counterUse: z.boolean().default(false),
+    /** 称重（#14，v0.7.13）：按实际称重记数量，至少 1 位小数 */
+    weighed: z.boolean().default(false),
     tracked: z.boolean().default(true),
     active: z.boolean().default(true),
     note: text(200, '备注').default(''),
@@ -91,6 +95,10 @@ export const MaterialInput = z
   .refine((m) => m.lowStockMilli === null || fitsDecimals(m.lowStockMilli, m.decimals), {
     message: '低库存阈值的小数位超过了库存单位允许的精度',
     path: ['lowStockMilli'],
+  })
+  .refine((m) => !m.weighed || m.decimals >= 1, {
+    message: '称重的物料按实际重量记，小数位至少 1 位（例如斤保留 2 位）',
+    path: ['decimals'],
   });
 export type MaterialInputData = z.input<typeof MaterialInput>;
 
@@ -102,6 +110,8 @@ export const SupplierInput = z.object({
   note: text(200, '备注').default(''),
   /** 结算方式（v0.7.7）：挂账 / 现付；新建不填按挂账，修改不填保持原样 */
   settlement: z.enum(['credit', 'cash']).optional(),
+  /** 挂账的对账方式（#23，v0.7.13）：月结 / 按批次；新建不填按月结，修改不填保持原样 */
+  reconcileCycle: z.enum(['monthly', 'batch']).optional(),
   active: z.boolean().default(true),
 });
 export type SupplierInputData = z.input<typeof SupplierInput>;
@@ -130,58 +140,88 @@ async function assertDeptWarehouseEmpty(tx: Tx, departmentId: number) {
   if (pending) throw unprocessable('DEPT_DOCS_PENDING', `这个部门的小仓还有待确认的单据 ${pending.docNo}，请先确认或退回再停用`);
 }
 
-export async function saveMaterial(db: Db, id: number | null, raw: MaterialInputData, extra: { isSynthetic?: boolean } = {}): Promise<number> {
+export async function saveMaterial(db: Sql, id: number | null, raw: MaterialInputData, extra: { isSynthetic?: boolean } = {}): Promise<number> {
   const m = parse(MaterialInput, raw);
   try {
     if (id === null) {
       const [row] = await db<{ id: number }[]>`
         INSERT INTO materials (code, name, category, specification, inventory_unit, decimals, purchase_unit, purchase_factor_milli,
-                               ref_price_cents, default_supplier_id, low_stock_milli, cover_days, tracked, active, note, is_synthetic)
+                               ref_price_cents, default_supplier_id, low_stock_milli, cover_days, counter_use, weighed, tracked, active, note, is_synthetic)
         VALUES (${m.code}, ${m.name}, ${m.category}, ${m.specification}, ${m.inventoryUnit}, ${m.decimals}, ${m.purchaseUnit},
-                ${m.purchaseFactorMilli}, ${m.refPriceCents}, ${m.defaultSupplierId}, ${m.lowStockMilli}, ${m.coverDays}, ${m.tracked}, ${m.active},
-                ${m.note}, ${extra.isSynthetic ?? false})
+                ${m.purchaseFactorMilli}, ${m.refPriceCents}, ${m.defaultSupplierId}, ${m.lowStockMilli}, ${m.coverDays}, ${m.counterUse}, ${m.weighed},
+                ${m.tracked}, ${m.active}, ${m.note}, ${extra.isSynthetic ?? false})
         RETURNING id`;
       return row!.id;
     }
-    // 任何一个仓有流水都算（部门小仓的期初、急采也会先于总仓有流水，v0.7.11）
-    const [before] = await db<{ inventoryUnit: string; decimals: number; hasMoves: boolean; tracked: boolean }[]>`
-      SELECT inventory_unit, decimals, (last_move_id IS NOT NULL OR EXISTS (SELECT 1 FROM stock_moves WHERE material_id = ${id})) AS has_moves, tracked
-      FROM materials WHERE id = ${id}`;
-    if (!before) throw notFound('物料不存在');
-    // 已有流水的物料不能改库存单位或精度，否则会改写历史数量的含义
-    if (before.hasMoves && (before.inventoryUnit !== m.inventoryUnit || before.decimals !== m.decimals)) {
-      throw unprocessable('UNIT_LOCKED', '该物料已有库存流水，库存单位与小数位不能再修改；包装变化请修改采购单位与换算');
-    }
-    if (before.hasMoves && before.tracked && !m.tracked) {
-      throw unprocessable('TRACKED_LOCKED', '该物料已有库存流水，不能改为候选物料；不再使用请停用');
-    }
-    await db`
-      UPDATE materials SET code = ${m.code}, name = ${m.name}, category = ${m.category}, specification = ${m.specification},
-             inventory_unit = ${m.inventoryUnit}, decimals = ${m.decimals}, purchase_unit = ${m.purchaseUnit},
-             purchase_factor_milli = ${m.purchaseFactorMilli}, ref_price_cents = ${m.refPriceCents},
-             default_supplier_id = ${m.defaultSupplierId}, low_stock_milli = ${m.lowStockMilli}, cover_days = ${m.coverDays}, tracked = ${m.tracked},
-             active = ${m.active}, note = ${m.note}, updated_at = now()
-      WHERE id = ${id}`;
-    return id;
+    return await db.begin(async (tx) => {
+      // 锁物料行：与库存收发串行（改成台面日耗品时核对的部门小仓结存不会在核对后又变）
+      // 任何一个仓有流水都算（部门小仓的期初、急采也会先于总仓有流水，v0.7.11）
+      const [before] = await tx<{ inventoryUnit: string; decimals: number; hasMoves: boolean; tracked: boolean; counterUse: boolean }[]>`
+        SELECT inventory_unit, decimals, (last_move_id IS NOT NULL OR EXISTS (SELECT 1 FROM stock_moves WHERE material_id = ${id})) AS has_moves,
+               tracked, counter_use
+        FROM materials WHERE id = ${id} FOR UPDATE`;
+      if (!before) throw notFound('物料不存在');
+      // 已有流水的物料不能改库存单位、不能减少小数位，否则会改写历史数量的含义；增加小数位不影响历史（例如改成称重，v0.7.13）
+      if (before.hasMoves && (before.inventoryUnit !== m.inventoryUnit || m.decimals < before.decimals)) {
+        throw unprocessable('UNIT_LOCKED', '该物料已有库存流水，库存单位不能再改、小数位只能增加；包装变化请修改采购单位与换算');
+      }
+      if (before.hasMoves && before.tracked && !m.tracked) {
+        throw unprocessable('TRACKED_LOCKED', '该物料已有库存流水，不能改为候选物料；不再使用请停用');
+      }
+      // 改成台面日耗品（#14，v0.7.13）：之后领到部门即算耗用，部门小仓不留结存，所以各部门小仓要先清零
+      if (m.counterUse && !before.counterUse) {
+        const left = await tx<{ name: string; stockMilli: number }[]>`
+          SELECT d.name, ws.stock_milli FROM warehouse_stock ws JOIN warehouses w ON w.id = ws.warehouse_id JOIN departments d ON d.id = w.department_id
+          WHERE ws.material_id = ${id} AND ws.stock_milli > 0 ORDER BY d.sort_order, d.id LIMIT 6`;
+        if (left.length > 0) {
+          throw unprocessable(
+            'COUNTER_USE_DEPT_STOCK',
+            `${left.slice(0, 5).map((r) => `${r.name} ${formatQty(r.stockMilli)} ${m.inventoryUnit}`).join('、')}${left.length > 5 ? ' 等' : ''} 的小仓里还有这个物料，请先在部门小仓登记耗用或退回总仓，再改成台面日耗品`,
+          );
+        }
+      }
+      await tx`
+        UPDATE materials SET code = ${m.code}, name = ${m.name}, category = ${m.category}, specification = ${m.specification},
+               inventory_unit = ${m.inventoryUnit}, decimals = ${m.decimals}, purchase_unit = ${m.purchaseUnit},
+               purchase_factor_milli = ${m.purchaseFactorMilli}, ref_price_cents = ${m.refPriceCents},
+               default_supplier_id = ${m.defaultSupplierId}, low_stock_milli = ${m.lowStockMilli}, cover_days = ${m.coverDays},
+               counter_use = ${m.counterUse}, weighed = ${m.weighed}, tracked = ${m.tracked},
+               active = ${m.active}, note = ${m.note}, updated_at = now()
+        WHERE id = ${id}`;
+      return id;
+    });
   } catch (error) {
     if (isUniqueViolation(error, 'materials_code_key')) throw conflict('CODE_EXISTS', '物料编码已存在');
     throw error;
   }
 }
 
-export async function saveSupplier(db: Db, id: number | null, raw: SupplierInputData, extra: { isSynthetic?: boolean } = {}): Promise<number> {
+export async function saveSupplier(
+  db: Db,
+  id: number | null,
+  raw: SupplierInputData,
+  extra: { isSynthetic?: boolean; today?: string } = {},
+): Promise<number> {
   const s = parse(SupplierInput, raw);
+  // 改成按批次对账的那天（#23，v0.7.13）：之前的收货不提醒对账
+  const today = extra.today ?? null;
+  const cycle = s.reconcileCycle ?? null;
   try {
     if (id === null) {
       const [row] = await db<{ id: number }[]>`
-        INSERT INTO suppliers (code, name, contact, phone, note, settlement, active, is_synthetic)
-        VALUES (${s.code}, ${s.name}, ${s.contact}, ${s.phone}, ${s.note}, ${s.settlement ?? 'credit'}, ${s.active}, ${extra.isSynthetic ?? false})
+        INSERT INTO suppliers (code, name, contact, phone, note, settlement, reconcile_cycle, reconcile_since, active, is_synthetic)
+        VALUES (${s.code}, ${s.name}, ${s.contact}, ${s.phone}, ${s.note}, ${s.settlement ?? 'credit'}, ${cycle ?? 'monthly'},
+                ${cycle === 'batch' ? db`coalesce(${today}::date, CURRENT_DATE)` : null}, ${s.active}, ${extra.isSynthetic ?? false})
         RETURNING id`;
       return row!.id;
     }
     const rows = await db`
       UPDATE suppliers SET code = ${s.code}, name = ${s.name}, contact = ${s.contact}, phone = ${s.phone}, note = ${s.note},
-             settlement = coalesce(${s.settlement ?? null}, settlement), active = ${s.active}, updated_at = now()
+             settlement = coalesce(${s.settlement ?? null}, settlement),
+             reconcile_since = CASE WHEN ${cycle}::text = 'batch' AND reconcile_cycle <> 'batch' THEN coalesce(${today}::date, CURRENT_DATE)
+                                    ELSE reconcile_since END,
+             reconcile_cycle = coalesce(${cycle}::text, reconcile_cycle),
+             active = ${s.active}, updated_at = now()
       WHERE id = ${id} RETURNING id`;
     if (rows.length === 0) throw notFound('供应商不存在');
     return id;
@@ -200,6 +240,13 @@ const SettingsInput = z.object({
   approvalThresholdCents: z.number().int().min(0, '免确认门槛不能为负').max(100_000_000, '免确认门槛不能超过 100 万元'),
   /** 可用天数的用量统计天数（#22，v0.7.12）：7 到 90 天 */
   usageWindowDays: z.number().int().min(7, '用量至少按近 7 天统计').max(90, '用量最多按近 90 天统计'),
+  /** 称重收货容差与盘点、对账提醒（#14、#23，v0.7.13）；不传的保持原样 */
+  weighTolerancePct: z.number().int('称重收货容差要是整数').min(0, '称重收货容差不能为负').max(30, '称重收货容差最多 30%').optional(),
+  stocktakeDay: z.number().int().min(1, '盘点日要在 1 到 28 号之间').max(28, '盘点日要在 1 到 28 号之间').optional(),
+  stocktakeGraceDays: z.number().int().min(0, '宽限天数不能为负').max(27, '宽限天数最多 27 天').optional(),
+  monthlyReconDay: z.number().int().min(1, '对账日要在 1 到 28 号之间').max(28, '对账日要在 1 到 28 号之间').optional(),
+  monthlyReconGraceDays: z.number().int().min(0, '宽限天数不能为负').max(27, '宽限天数最多 27 天').optional(),
+  batchReconGraceDays: z.number().int().min(0, '宽限天数不能为负').max(30, '宽限天数最多 30 天').optional(),
   approvalRules: z.object({
     purchase_order: z.boolean(),
     damage: z.boolean(),
@@ -224,6 +271,17 @@ export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps
         ['inventory_approval_threshold_cents', s.approvalThresholdCents],
         ['inventory_usage_window_days', s.usageWindowDays],
         ['inventory_approval_rules', s.approvalRules],
+        [
+          'inventory_cycle_rules',
+          {
+            weighTolerancePct: s.weighTolerancePct ?? before.weighTolerancePct,
+            stocktakeDay: s.stocktakeDay ?? before.stocktakeDay,
+            stocktakeGraceDays: s.stocktakeGraceDays ?? before.stocktakeGraceDays,
+            monthlyReconDay: s.monthlyReconDay ?? before.monthlyReconDay,
+            monthlyReconGraceDays: s.monthlyReconGraceDays ?? before.monthlyReconGraceDays,
+            batchReconGraceDays: s.batchReconGraceDays ?? before.batchReconGraceDays,
+          },
+        ],
       ];
       for (const [key, value] of entries) {
         await tx`
@@ -257,14 +315,14 @@ export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps
 
   app.get('/api/inventory/suppliers', { preHandler: guard('inventory.read') }, async (req) => listSuppliers(sql, all(req.query)));
   app.post('/api/inventory/suppliers', { preHandler: guard('inventory.master') }, async (req, reply) => {
-    const id = await saveSupplier(sql, null, req.body as SupplierInputData);
+    const id = await saveSupplier(sql, null, req.body as SupplierInputData, { today: todayIn(config.timezone) });
     await writeAudit(sql, { staffId: req.actor.id, action: 'inventory_master_saved', targetType: 'supplier', targetId: id, detail: req.body as Record<string, unknown>, ip: req.ip });
     reply.code(201);
     return listSuppliers(sql, true);
   });
   app.put('/api/inventory/suppliers/:id', { preHandler: guard('inventory.master') }, async (req) => {
     const { id } = parse(idParam, req.params);
-    await saveSupplier(sql, id, req.body as SupplierInputData);
+    await saveSupplier(sql, id, req.body as SupplierInputData, { today: todayIn(config.timezone) });
     await writeAudit(sql, { staffId: req.actor.id, action: 'inventory_master_saved', targetType: 'supplier', targetId: id, detail: req.body as Record<string, unknown>, ip: req.ip });
     return listSuppliers(sql, true);
   });

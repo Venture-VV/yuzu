@@ -79,7 +79,7 @@ export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
   if (!po) throw notFound('采购单不存在');
 
   const rawLines = await db<Omit<PoLine, 'compare'>[]>`
-    SELECT pl.id, pl.line_no, pl.material_id, m.code AS material_code, m.name AS material_name, m.specification, m.decimals,
+    SELECT pl.id, pl.line_no, pl.material_id, m.code AS material_code, m.name AS material_name, m.specification, m.decimals, m.weighed,
            pl.purchase_qty_milli, pl.purchase_unit, pl.inventory_unit, pl.factor_milli, pl.base_qty_milli,
            pl.price_cents, pl.amount_cents, pl.note, pl.spec,
            coalesce((SELECT json_agg(json_build_object('lineId', rl.id, 'requestId', r.id, 'requestNo', r.doc_no, 'departmentName', d.name,

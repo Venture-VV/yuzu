@@ -293,6 +293,16 @@ export function RulesTab() {
   );
 }
 
+type CycleKey = 'weighTolerancePct' | 'stocktakeDay' | 'stocktakeGraceDays' | 'monthlyReconDay' | 'monthlyReconGraceDays' | 'batchReconGraceDays';
+const CYCLE_FIELDS: { key: CycleKey; label: string; hint: string; min: number; max: number }[] = [
+  { key: 'weighTolerancePct', label: '称重收货容差（%）', hint: '称重的物料按实际称重收货，可以比采购单多出这么多（0–30）', min: 0, max: 30 },
+  { key: 'stocktakeDay', label: '每月盘点日', hint: '每月几号起提醒盘点（1–28）', min: 1, max: 28 },
+  { key: 'stocktakeGraceDays', label: '盘点宽限天数', hint: '盘点日过了几天还没盘完标红', min: 0, max: 27 },
+  { key: 'monthlyReconDay', label: '月结对账日', hint: '每月几号起提醒月结供应商对上个月的账（1–28）', min: 1, max: 28 },
+  { key: 'monthlyReconGraceDays', label: '月结对账宽限天数', hint: '对账日过了几天还没登记标红', min: 0, max: 27 },
+  { key: 'batchReconGraceDays', label: '按批次对账宽限天数', hint: '按批次的供应商，收货后几天还没登记对账标红', min: 0, max: 30 },
+];
+
 /** 库存与采购的经营规则（模拟规则，可由店主调整） */
 function InventoryRules() {
   const settings = useInvSettings();
@@ -302,6 +312,15 @@ function InventoryRules() {
   const [capText, setCapText] = useState('');
   const [thresholdText, setThresholdText] = useState('');
   const [windowText, setWindowText] = useState('');
+  // 称重容差与盘点、对账提醒（#14、#23，v0.7.13）
+  const [cycle, setCycle] = useState<Record<CycleKey, string>>({
+    weighTolerancePct: '',
+    stocktakeDay: '',
+    stocktakeGraceDays: '',
+    monthlyReconDay: '',
+    monthlyReconGraceDays: '',
+    batchReconGraceDays: '',
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (settings.data && !draft) {
@@ -309,6 +328,7 @@ function InventoryRules() {
     setCapText(centsToInput(settings.data.urgentCapCents));
     setThresholdText(centsToInput(settings.data.approvalThresholdCents));
     setWindowText(String(settings.data.usageWindowDays));
+    setCycle(Object.fromEntries(CYCLE_FIELDS.map((f) => [f.key, String(settings.data![f.key])])) as Record<CycleKey, string>);
   }
   if (!draft) return <Skeleton className="h-48" />;
 
@@ -319,10 +339,16 @@ function InventoryRules() {
     if (approvalThresholdCents === null || approvalThresholdCents < 0) return setError('免确认门槛要是不小于 0 的金额（0 表示全部要负责人确认）');
     const usageWindowDays = Number(windowText);
     if (!Number.isInteger(usageWindowDays) || usageWindowDays < 7 || usageWindowDays > 90) return setError('用量统计天数要在 7 到 90 天之间');
+    const cycleValues = {} as Record<CycleKey, number>;
+    for (const f of CYCLE_FIELDS) {
+      const v = Number(cycle[f.key]);
+      if (cycle[f.key].trim() === '' || !Number.isInteger(v) || v < f.min || v > f.max) return setError(`${f.label}要在 ${f.min} 到 ${f.max} 之间`);
+      cycleValues[f.key] = v;
+    }
     setSaving(true);
     setError(null);
     try {
-      const next = await api.put<InventorySettings>('/api/inventory/settings', { ...draft, urgentCapCents, approvalThresholdCents, usageWindowDays });
+      const next = await api.put<InventorySettings>('/api/inventory/settings', { ...draft, urgentCapCents, approvalThresholdCents, usageWindowDays, ...cycleValues });
       qc.setQueryData(['inv', 'settings'], next);
       toast({ tone: 'success', title: '库存与采购规则已保存', body: '只影响之后提交的单据。' });
     } catch (err) {
@@ -353,6 +379,14 @@ function InventoryRules() {
         <Field label="可用天数按近几天的用量算" htmlFor="i-window" hint="物料设了提醒天数时：可用天数 = 结存 ÷ 这段时间的日均用量（7–90 天）">
           <Input id="i-window" inputMode="numeric" value={windowText} onChange={(e) => setWindowText(e.target.value.replace(/\D/g, ''))} />
         </Field>
+      </div>
+      <p className="mt-5 mb-2 text-[13px] font-bold text-ink-2">称重与盘点、对账提醒</p>
+      <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
+        {CYCLE_FIELDS.map((f) => (
+          <Field key={f.key} label={f.label} htmlFor={`i-${f.key}`} hint={f.hint}>
+            <Input id={`i-${f.key}`} inputMode="numeric" value={cycle[f.key]} onChange={(e) => setCycle({ ...cycle, [f.key]: e.target.value.replace(/\D/g, '') })} />
+          </Field>
+        ))}
       </div>
       <p className="mt-5 mb-2 text-[13px] font-bold text-ink-2">需要负责人确认的单据</p>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">

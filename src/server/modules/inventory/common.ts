@@ -28,7 +28,7 @@ export async function loadInventorySettings(db: Db): Promise<InventorySettings> 
   const rows = await db<{ key: string; value: unknown }[]>`
     SELECT key, value FROM settings
     WHERE key IN ('inventory_scope_name', 'inventory_price_basis', 'inventory_urgent_cap_cents', 'inventory_approval_rules',
-                  'inventory_approval_threshold_cents', 'inventory_usage_window_days')`;
+                  'inventory_approval_threshold_cents', 'inventory_usage_window_days', 'inventory_cycle_rules')`;
   const map = new Map(rows.map((r) => [r.key, r.value]));
   return {
     scopeName: (map.get('inventory_scope_name') as string) ?? '后勤总库',
@@ -36,6 +36,8 @@ export async function loadInventorySettings(db: Db): Promise<InventorySettings> 
     urgentCapCents: Number(map.get('inventory_urgent_cap_cents') ?? DEFAULT_URGENT_CAP_CENTS),
     approvalThresholdCents: Number(map.get('inventory_approval_threshold_cents') ?? DEFAULT_APPROVAL_THRESHOLD_CENTS),
     usageWindowDays: Number(map.get('inventory_usage_window_days') ?? DEFAULT_USAGE_WINDOW_DAYS),
+    ...DEFAULT_CYCLE_RULES,
+    ...pickCycleRules(map.get('inventory_cycle_rules')),
     approvalRules: { ...DEFAULT_APPROVAL_RULES, ...((map.get('inventory_approval_rules') as Partial<ApprovalRules>) ?? {}) },
   };
 }
@@ -46,6 +48,35 @@ export const DEFAULT_URGENT_CAP_CENTS = 200_000;
 export const DEFAULT_APPROVAL_THRESHOLD_CENTS = 200_000;
 /** 可用天数按近 28 天的用量算（#22，可调，v0.7.12） */
 export const DEFAULT_USAGE_WINDOW_DAYS = 28;
+
+/** 称重容差与盘点、对账提醒的规则（#14、#23，v0.7.13，可调）：存成一条设置 inventory_cycle_rules */
+export type CycleRules = Pick<
+  InventorySettings,
+  'weighTolerancePct' | 'stocktakeDay' | 'stocktakeGraceDays' | 'monthlyReconDay' | 'monthlyReconGraceDays' | 'batchReconGraceDays'
+>;
+export const DEFAULT_CYCLE_RULES: CycleRules = {
+  weighTolerancePct: 10,
+  stocktakeDay: 1,
+  stocktakeGraceDays: 3,
+  monthlyReconDay: 1,
+  monthlyReconGraceDays: 5,
+  batchReconGraceDays: 3,
+};
+const CYCLE_RULE_KEYS = Object.keys(DEFAULT_CYCLE_RULES) as (keyof CycleRules)[];
+function pickCycleRules(raw: unknown): Partial<CycleRules> {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Partial<CycleRules> = {};
+  for (const k of CYCLE_RULE_KEYS) {
+    const v = (raw as Record<string, unknown>)[k];
+    if (typeof v === 'number' && Number.isInteger(v)) out[k] = v;
+  }
+  return out;
+}
+
+/** 称重物料这一行最多能收多少（订购数量 + 容差，按千分之一单位向下取整） */
+export function weighedCapMilli(orderedMilli: number, tolerancePct: number): number {
+  return orderedMilli + Math.floor((orderedMilli * Math.max(0, tolerancePct)) / 100);
+}
 
 /**
  * 这张单要不要负责人确认（#18，v0.7.12）：类型设为需要确认，且金额超过免确认门槛（金额不知道时按超过算）。
@@ -183,6 +214,10 @@ export interface LockedMaterial {
   lastMoveId: number | null;
   tracked: boolean;
   active: boolean;
+  /** 台面日耗品（#14，v0.7.13）：领到部门即算耗用 */
+  counterUse: boolean;
+  /** 称重（#14，v0.7.13） */
+  weighed: boolean;
 }
 
 /** 按 id 升序锁定物料，返回可变的结存快照 */
@@ -190,7 +225,7 @@ export async function lockMaterials(tx: Tx, ids: number[]): Promise<Map<number, 
   const unique = [...new Set(ids)].sort((a, b) => a - b);
   if (unique.length === 0) return new Map();
   const rows = await tx<LockedMaterial[]>`
-    SELECT id, code, name, inventory_unit, decimals, stock_milli, last_move_id, tracked, active
+    SELECT id, code, name, inventory_unit, decimals, stock_milli, last_move_id, tracked, active, counter_use, weighed
     FROM materials WHERE id IN ${tx(unique)} ORDER BY id FOR UPDATE`;
   if (rows.length !== unique.length) throw unprocessable('MATERIAL_NOT_FOUND', '有物料不存在，请刷新后重试');
   return new Map(rows.map((r) => [r.id, r]));

@@ -19,6 +19,8 @@ import { Badge, Button, Card, IconButton, Notice, Segmented, Select, Skeleton, S
 import { ErpPage } from '../erp/ErpHome';
 import { Qty, SimRule, StatusChip } from '../inventory/parts';
 import { useDeptDoc, useDeptDocs, useDeptMeta, useDeptStock, useInvalidateDept } from './queries';
+import { useDeptStocktake } from '../cycles/queries';
+import { StocktakeNotice } from '../cycles/StocktakeNotice';
 
 type View = 'stock' | 'sign' | 'docs';
 
@@ -104,6 +106,7 @@ export function DeptStockPage() {
                 ]}
               />
             </div>
+            <DeptStocktakeNotice dept={dept} canCount={!!meta.data && (meta.data.canOperate || meta.data.canAudit)} />
             {view === 'stock' && <StockList deptId={dept.id} />}
             {view === 'sign' && <DocList deptId={dept.id} meta={meta.data!} filter={{ unsigned: '1' }} empty="没有待签收的领料" onOpen={(id) => set({ doc: String(id) })} />}
             {view === 'docs' && <DocsView deptId={dept.id} meta={meta.data!} onOpen={(id) => set({ doc: String(id) })} />}
@@ -113,6 +116,12 @@ export function DeptStockPage() {
       {dept && meta.data && <DeptDocSheet id={docId} dept={dept} meta={meta.data} onClose={() => set({ doc: null })} />}
     </ErpPage>
   );
+}
+
+/** 本月盘点提醒（#23，v0.7.13）：这个部门小仓月初有结存的物料本月盘到了几种 */
+function DeptStocktakeNotice({ dept, canCount }: { dept: { id: number; name: string }; canCount: boolean }) {
+  const q = useDeptStocktake(dept.id);
+  return <StocktakeNotice data={q.data} linkFor={() => (canCount ? `/erp/dept-stock/new/count?dept=${dept.id}` : null)} />;
 }
 
 function StockList({ deptId }: { deptId: number }) {
@@ -131,6 +140,8 @@ function StockList({ deptId }: { deptId: number }) {
               <span className="flex items-center gap-2">
                 <span className="truncate text-[14px] font-bold">{r.name}</span>
                 {r.isLow && <Badge tone="clay">该补货了</Badge>}
+                {/* 台面日耗品（v0.7.13）：领到即算耗用，小仓不留结存、不用盘点 */}
+                {r.counterUse && <Badge tone="lake">台面日耗品 · 领到即耗用</Badge>}
               </span>
               <span className="num block truncate text-[12px] text-ink-3">
                 {r.code}

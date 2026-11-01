@@ -285,6 +285,8 @@ test.describe('视口冒烟', () => {
       ['/payables?view=settlements', null],
       ['/payables/import', null],
       ['/payables/pay', null],
+      // v0.7.13：供应商对账
+      ['/payables?view=recon', null],
     ] as const) {
       await page.goto(url);
       await expect(page.getByTestId('erp-shell')).toBeVisible();
