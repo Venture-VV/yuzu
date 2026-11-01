@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
-import { ArrowRight, HandCoins, Inbox, ReceiptText, Scale, ShoppingCart, TriangleAlert } from 'lucide-react';
+import { ArrowRight, CalendarClock, HandCoins, Inbox, ReceiptText, Scale, ShoppingCart, TriangleAlert } from 'lucide-react';
 import { INV_DOC_META, type InvDocType } from '@shared/inventory';
 import type { OpeningPayableDoc } from '@shared/purchasing';
 import { errorMessage } from '../../lib/api';
@@ -17,6 +17,7 @@ import { useOpenings, usePayablesOverview, usePayments, usePos } from '../purcha
 import { DocSheet } from './DocSheet';
 import { DOC_VISUAL, Qty, SimRule } from './parts';
 import { useInvDocs, useMaterials, useWarehouses } from './queries';
+import { useReconReminders, useStocktakeReminders } from '../cycles/queries';
 
 /** 负责人待办：先处理需要确认的申请，再看需要关注的异常，最后才是经营汇总 */
 export function TodoPage() {
@@ -44,6 +45,13 @@ export function TodoPage() {
   const warehouses = useWarehouses();
   const centralName = warehouses.data?.find((w) => w.kind === 'central')?.name;
   const credit = (overview.data?.suppliers ?? []).filter((s) => s.balanceCents < 0);
+  // 每月盘点与供应商对账提醒（#23，v0.7.13）
+  const stocktake = useStocktakeReminders();
+  const recon = useReconReminders(payableRead);
+  const stocktakeLeft = stocktake.data?.active ? stocktake.data.warehouses.filter((w) => !w.done) : [];
+  const reconLeft = recon.data
+    ? (recon.data.monthly.active ? recon.data.monthly.items.length : recon.data.monthly.items.filter((i) => i.state === 'changed').length) + recon.data.batch.length
+    : 0;
 
   if (!can('inventory.approve')) return <Navigate to="/inventory" replace />;
   const open = (key: 'doc' | 'po' | 'payment', id: number | null) => setParams(id ? { [key]: String(id) } : {}, { replace: true });
@@ -192,6 +200,31 @@ export function TodoPage() {
           </section>
 
           <aside className="space-y-4">
+            {(stocktakeLeft.length > 0 || reconLeft > 0) && (
+              <Card title="盘点与对账" count={stocktakeLeft.length + reconLeft} icon={<CalendarClock className="size-4 text-yuzu-deep" />}>
+                <ul className="space-y-1.5 text-[13px]" data-testid="todo-cycles">
+                  {stocktakeLeft.length > 0 && (
+                    <li>
+                      <Link to="/inventory" className="flex items-center gap-2 hover:text-pine">
+                        <span className="min-w-0 flex-1 font-semibold">
+                          {Number(stocktake.data!.month.slice(5, 7))} 月盘点还有 {stocktakeLeft.length} 个仓没盘完
+                        </span>
+                        {stocktake.data!.overdue && <Badge tone="clay">已超期</Badge>}
+                      </Link>
+                    </li>
+                  )}
+                  {reconLeft > 0 && (
+                    <li>
+                      <Link to="/payables?view=recon" className="flex items-center gap-2 hover:text-pine">
+                        <span className="min-w-0 flex-1 font-semibold">供应商对账待登记 {reconLeft} 项</span>
+                        {(recon.data!.monthly.overdue && recon.data!.monthly.items.length > 0) || recon.data!.batch.some((b) => b.overdue) ? <Badge tone="clay">已超期</Badge> : null}
+                      </Link>
+                    </li>
+                  )}
+                </ul>
+                <p className="mt-2 text-[11.5px] text-ink-3">每月盘点、月结供应商次月初对账、按批次的每批货到后对账（规则在后台「规则总表 → 库存与采购」）。</p>
+              </Card>
+            )}
             <Card title="低库存提醒" count={low.length} icon={<TriangleAlert className="size-4 text-clay" />}>
               {low.length === 0 ? (
                 <p className="text-[12.5px] text-ink-3">没有低于提醒线的物料。</p>

@@ -201,6 +201,12 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
                       </span>
                       <span className="num shrink-0 text-[12px] text-ink-2">
                         已收 {formatQty(l.receivedMilli)} / {formatQty(l.baseQtyMilli)} {l.inventoryUnit}
+                        {/* 称重物料按实际称重收货，可以比订购数量多一点（v0.7.13） */}
+                        {l.weighed && l.receivedMilli > l.baseQtyMilli && (
+                          <span className="ml-1 font-semibold text-lake">
+                            · 称重多到 {formatQty(l.receivedMilli - l.baseQtyMilli)} {l.inventoryUnit}
+                          </span>
+                        )}
                       </span>
                     </div>
                   )}

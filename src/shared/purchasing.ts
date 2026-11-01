@@ -48,8 +48,10 @@ export interface PoLine {
   requests: PoLineRequest[];
   /** 图片（v0.7.8） */
   images: import('./requests').ImageRef[];
-  /** 已合格实收（库存单位） */
+  /** 已合格实收（库存单位）；称重物料可以比订购数量多出容差（v0.7.13） */
   receivedMilli: number;
+  /** 称重物料（#14，v0.7.13） */
+  weighed: boolean;
   compare: PriceCompare;
 }
 

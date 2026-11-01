@@ -12,7 +12,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { ImageThumbs } from '../../components/Images';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
-import { Button, Field, IconButton, Input, MoneyInput, Notice, Select, Skeleton, Spinner } from '../../components/ui';
+import { Badge, Button, Field, IconButton, Input, MoneyInput, Notice, Select, Skeleton, Spinner } from '../../components/ui';
 import { emptyQty, MaterialPicker, qtyEntryFromMilli, QtyInput, resolveQty, type QtyEntry } from './inputs';
 import { DOC_VISUAL, Qty, SimRule, StatusChip } from './parts';
 import type { PoLine } from '@shared/purchasing';
@@ -166,6 +166,8 @@ function useScopeData(scope: FormScope) {
     suppliers: central ? suppliersQ.data : meta.data?.suppliers,
     approvalRules: central ? settingsQ.data?.approvalRules : meta.data?.approvalRules,
     urgentCapCents: central ? settingsQ.data?.urgentCapCents : meta.data?.urgentCapCents,
+    /** 称重收货容差（%，v0.7.13）：按采购单收货只在总仓 */
+    weighTolerancePct: central ? (settingsQ.data?.weighTolerancePct ?? 10) : 10,
   };
 }
 
@@ -518,12 +520,14 @@ function DocForm({
         break;
       case 'issue_return':
       case 'supplier_return':
+        // 台面日耗品领到部门即算耗用，不能退回（v0.7.13）
+        if (type === 'issue_return' && m.counterUse && qty.milli !== null && qty.milli > 0) errorText = '台面日耗品领到即算耗用，不能退回';
         if (srcLine) {
           maxReturn = srcLine.qtyMilli - srcLine.returnedMilli;
-          if (qty.milli !== null && qty.milli > maxReturn) errorText = `最多 ${formatQty(Math.max(0, maxReturn))} ${m.inventoryUnit}`;
+          if (qty.milli !== null && qty.milli > maxReturn) errorText = errorText ?? `最多 ${formatQty(Math.max(0, maxReturn))} ${m.inventoryUnit}`;
           if (qty.milli !== null) {
             after = m.stockMilli + (type === 'issue_return' ? qty.milli : -qty.milli);
-            if (after < 0) errorText = `库存不足，当前 ${formatQty(m.stockMilli)} ${m.inventoryUnit}`;
+            if (after < 0) errorText = errorText ?? `库存不足，当前 ${formatQty(m.stockMilli)} ${m.inventoryUnit}`;
           }
           if (type === 'supplier_return' && qty.milli !== null && srcLine.priceCents !== null) {
             amount = lineAmountCents(qty.milli, srcLine.priceCents, srcLine.factorMilli);
@@ -544,8 +548,14 @@ function DocForm({
         price = pl ? pl.priceCents : parseYuan(l.price);
         errorText = delivered.error ?? accepted.error;
         if (pl) {
-          maxReturn = pl.baseQtyMilli - pl.receivedMilli;
-          if (accepted.milli !== null && accepted.milli > maxReturn) errorText = `超出采购单未到数量（还差 ${formatQty(Math.max(0, maxReturn))} ${m.inventoryUnit}）`;
+          // 称重物料按实际称重收货，可以比订购数量多出容差（v0.7.13）
+          const cap = m.weighed ? pl.baseQtyMilli + Math.floor((pl.baseQtyMilli * data.weighTolerancePct) / 100) : pl.baseQtyMilli;
+          maxReturn = cap - pl.receivedMilli;
+          if (accepted.milli !== null && accepted.milli > maxReturn) {
+            errorText = m.weighed
+              ? `超出称重容差 ${data.weighTolerancePct}%（最多还能收 ${formatQty(Math.max(0, maxReturn))} ${m.inventoryUnit}）`
+              : `超出采购单未到数量（还差 ${formatQty(Math.max(0, maxReturn))} ${m.inventoryUnit}）`;
+          }
         }
         if (delivered.milli !== null && accepted.milli !== null) {
           rejected = delivered.milli - accepted.milli;
@@ -964,6 +974,7 @@ function DocForm({
           {type === 'receipt' && po.data && form.purchaseOrderId === po.data.id && (
             <Notice tone="info" title={`按采购单 ${po.data.docNo} 收货`}>
               单价与包装换算以采购单为准；本次合格实收不能超过未到数量，拒收部分不入库、不计货款。
+              {po.data.lines.some((l) => l.weighed) && <> 称重的物料按实际称重填，可以比订购数量多出 {data.weighTolerancePct}%，货款按实收重量算。</>}
             </Notice>
           )}
 
@@ -976,7 +987,7 @@ function DocForm({
               {type === 'issue' && <UsualChips departmentId={form.departmentId} materials={materials} taken={takenMaterials} disabled={locked} onAdd={(m, qty) => addMaterial(m, { qty: qtyEntryFromMilli(qty, m) })} />}
               {type === 'count' && !locked && (
                 <CountFillMenu
-                  materials={central ? (data.materials ?? []) : (data.materials ?? []).filter((m) => m.hasMoves)}
+                  materials={central ? (data.materials ?? []) : (data.materials ?? []).filter((m) => m.hasMoves && !m.counterUse)}
                   taken={takenMaterials}
                   onAdd={(list) => setForm((f) => ({ ...f, lines: [...f.lines, ...list.map((m) => blankLine(m.id))] }))}
                 />
@@ -1030,13 +1041,13 @@ function DocForm({
                   ref={pickerRef}
                   materials={data.materials ?? []}
                   taken={takenMaterials}
-                  disabledReason={
-                    type === 'opening'
-                      ? (m) => (m.hasMoves ? '已有库存记录' : null)
-                      : OUTBOUND.includes(type)
-                        ? (m) => (m.stockMilli <= 0 ? '无库存' : null)
-                        : undefined
-                  }
+                  disabledReason={(m) => {
+                    // 台面日耗品领到部门即算耗用，部门小仓不登记它的期初、耗用、报损、盘点（急采照常，v0.7.13）
+                    if (!central && m.counterUse && type !== 'receipt') return '台面日耗品，领到即耗用';
+                    if (type === 'opening') return m.hasMoves ? '已有库存记录' : null;
+                    if (OUTBOUND.includes(type)) return m.stockMilli <= 0 ? '无库存' : null;
+                    return null;
+                  }}
                   onPick={(m) => addMaterial(m)}
                   placeholder={type === 'opening' ? '搜索还没有建期初的物料' : '搜索物料：编码 / 名称 / 规格，回车加入'}
                 />
@@ -1191,11 +1202,21 @@ function LineHeader({ type }: { type: InvDocType }) {
   );
 }
 
-function MaterialCell({ m, sub }: { m: Material; sub?: ReactNode }) {
+function MaterialCell({ m, sub, type }: { m: Material; sub?: ReactNode; type?: InvDocType }) {
   return (
     <div className="min-w-0">
       <p className="line-clamp-2 text-[14px] leading-snug font-bold" title={m.name}>
         {m.name}
+        {m.counterUse && (type === 'issue' || type === 'receipt') && (
+          <Badge tone="lake" className="ml-1.5 align-middle">
+            领到即耗用
+          </Badge>
+        )}
+        {m.weighed && (type === 'receipt' || type === 'count') && (
+          <Badge tone="lake" className="ml-1.5 align-middle">
+            称重
+          </Badge>
+        )}
       </p>
       <p className="truncate text-[12px] text-ink-3">
         <span className="num font-semibold">{m.code}</span>
@@ -1259,6 +1280,7 @@ function LineRow({
           <div className="flex items-start justify-between gap-2 @lg:col-span-2 @3xl:col-span-1">
             <MaterialCell
               m={m}
+              type={type}
               sub={
                 row.srcLine && (
                   <>
@@ -1368,12 +1390,21 @@ function ReceiptCells({
       <div className="flex items-start justify-between gap-2 @lg:col-span-3 @5xl:col-span-1">
         <MaterialCell
           m={m}
+          type="receipt"
           sub={
             <>
               {row.poLine && (
                 <span className="block font-semibold text-lake">
-                  订 <Qty milli={row.poLine.baseQtyMilli} unit={row.poLine.inventoryUnit} /> · 已收 <Qty milli={row.poLine.receivedMilli} unit={row.poLine.inventoryUnit} /> · 未到{' '}
-                  <Qty milli={Math.max(0, row.poLine.baseQtyMilli - row.poLine.receivedMilli)} unit={row.poLine.inventoryUnit} />
+                  订 <Qty milli={row.poLine.baseQtyMilli} unit={row.poLine.inventoryUnit} /> · 已收 <Qty milli={row.poLine.receivedMilli} unit={row.poLine.inventoryUnit} /> ·{' '}
+                  {row.poLine.receivedMilli > row.poLine.baseQtyMilli ? (
+                    <>
+                      称重多到 <Qty milli={row.poLine.receivedMilli - row.poLine.baseQtyMilli} unit={row.poLine.inventoryUnit} />
+                    </>
+                  ) : (
+                    <>
+                      未到 <Qty milli={row.poLine.baseQtyMilli - row.poLine.receivedMilli} unit={row.poLine.inventoryUnit} />
+                    </>
+                  )}
                 </span>
               )}
               {/* 按单收货（v0.7.8）：采购单行的规格与图片，库管核对实物 */}

@@ -1,7 +1,7 @@
 import { SUPPLIER_SETTLEMENT_LABELS, type SupplierSettlement } from '@shared/expenses';
 import { useState } from 'react';
 import { Plus, Search } from 'lucide-react';
-import type { Department, Material, Supplier } from '@shared/inventory';
+import { RECONCILE_CYCLE_LABELS, RECONCILE_CYCLES, type Department, type Material, type ReconcileCycle, type Supplier } from '@shared/inventory';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { conversionText, formatQty, parseQty } from '@shared/quantity';
 import { api, errorMessage } from '../../lib/api';
@@ -103,6 +103,8 @@ function Materials({ editable }: { editable: boolean }) {
                   <td className="px-4 py-2.5">
                     <span className="flex flex-wrap gap-1">
                       {!m.tracked ? <Badge tone="lake">候选</Badge> : m.active ? <Badge tone="pine">受管</Badge> : <Badge>已停用</Badge>}
+                      {m.counterUse && <Badge tone="lake">台面日耗品</Badge>}
+                      {m.weighed && <Badge tone="lake">称重</Badge>}
                       {m.isSynthetic && <Badge tone="ember">合成</Badge>}
                     </span>
                   </td>
@@ -142,8 +144,9 @@ export function MaterialDialog({
     setError(null);
   }
   const m = editing && editing !== 'new' ? editing : null;
-  // 任何一个仓有流水（部门小仓的期初、急采也算）就不能再改库存单位与精度（v0.7.11）
+  // 任何一个仓有流水（部门小仓的期初、急采也算）就不能再改库存单位（v0.7.11）；小数位只能增加（例如改成称重，v0.7.13）
   const unitLocked = !!m?.anyMoves;
+  const minDecimals = unitLocked && m ? m.decimals : 0;
   const set = (p: Partial<typeof form>) => setForm((f) => ({ ...f, ...p }));
   const decimals = Number(form.decimals);
   const factor = parseQty(form.factor, decimals);
@@ -160,6 +163,7 @@ export function MaterialDialog({
     const coverDays = form.coverDays.trim() ? Number(form.coverDays) : null;
     if (coverDays !== null && (!Number.isInteger(coverDays) || coverDays < 1 || coverDays > 90)) return setError('提醒天数要是 1 到 90 的整数');
     if (form.price.trim() && price === null) return setError('参考价格式不正确');
+    if (form.weighed && decimals < 1) return setError('称重的物料按实际重量记，小数位至少 1 位（例如斤保留 2 位）');
     const body = {
       code: form.code.trim(),
       name: form.name.trim(),
@@ -173,6 +177,8 @@ export function MaterialDialog({
       defaultSupplierId: Number(form.supplierId) || null,
       lowStockMilli: low,
       coverDays,
+      counterUse: form.counterUse,
+      weighed: form.weighed,
       tracked: form.tracked,
       active: form.active,
       note: form.note.trim(),
@@ -231,12 +237,13 @@ export function MaterialDialog({
             <Field label="库存单位" htmlFor="m-unit" hint={unitLocked ? '已有流水，不能修改' : '按实际可盘点的颗粒度'}>
               <Input id="m-unit" value={form.inventoryUnit} maxLength={8} disabled={unitLocked} onChange={(e) => set({ inventoryUnit: e.target.value })} placeholder="双 / 瓶 / 卷" />
             </Field>
-            <Field label="小数位" htmlFor="m-dec" hint={unitLocked ? '已有流水，不能修改' : '称重类可用小数'}>
-              <Select id="m-dec" value={form.decimals} disabled={unitLocked} onChange={(e) => set({ decimals: e.target.value })}>
-                <option value="0">整数</option>
-                <option value="1">1 位</option>
-                <option value="2">2 位</option>
-                <option value="3">3 位</option>
+            <Field label="小数位" htmlFor="m-dec" hint={unitLocked ? '已有流水，只能增加' : '称重类可用小数'}>
+              <Select id="m-dec" value={form.decimals} onChange={(e) => set({ decimals: e.target.value })}>
+                {['0', '1', '2', '3'].map((d) => (
+                  <option key={d} value={d} disabled={Number(d) < minDecimals}>
+                    {d === '0' ? '整数' : `${d} 位`}
+                  </option>
+                ))}
               </Select>
             </Field>
             <Field label="采购单位" htmlFor="m-punit">
@@ -270,6 +277,30 @@ export function MaterialDialog({
         <Field label={<span className="flex items-center gap-1.5">低库存提醒线 <SimRule>人工设定</SimRule></span>} htmlFor="m-low" hint={`低于此数提醒（${form.inventoryUnit || '库存单位'}，只看总仓），留空不提醒`}>
           <Input id="m-low" value={form.low} inputMode="decimal" onChange={(e) => set({ low: e.target.value })} className="num text-right" />
         </Field>
+
+        <div className="space-y-2.5 rounded-lg border border-line bg-paper-2/50 p-4 sm:col-span-6">
+          <label className="flex items-start gap-2.5 text-[13px]">
+            <input type="checkbox" className="mt-0.5 size-4 accent-[var(--color-pine)]" checked={form.counterUse} onChange={(e) => set({ counterUse: e.target.checked })} />
+            <span>
+              <span className="font-bold">台面日耗品</span>
+              <span className="block text-[12px] text-ink-3">
+                放到部门台面给客人用的（牙刷、梳子、浴帽等）：领到部门即算耗用，部门小仓不留结存、月初盘点不用清点；总仓照常。改成台面日耗品前，各部门小仓里要先清零
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2.5 text-[13px]">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 accent-[var(--color-pine)]"
+              checked={form.weighed}
+              onChange={(e) => set(e.target.checked && Number(form.decimals) < 1 ? { weighed: true, decimals: '2' } : { weighed: e.target.checked })}
+            />
+            <span>
+              <span className="font-bold">称重</span>
+              <span className="block text-[12px] text-ink-3">按斤等计量的：按实际称重记数量（至少 1 位小数），收货可以比采购单多出称重容差（规则总表里调），货款按实收重量算</span>
+            </span>
+          </label>
+        </div>
 
         <Field label="纳入库存" className="sm:col-span-3" hint="候选物料只保留档案，不进入首轮库存">
           <Segmented
@@ -316,6 +347,8 @@ function toForm(m: Material | null) {
     supplierId: m?.defaultSupplierId ? String(m.defaultSupplierId) : '',
     low: m?.lowStockMilli != null ? formatQty(m.lowStockMilli).replace(/,/g, '') : '',
     coverDays: m?.coverDays != null ? String(m.coverDays) : '',
+    counterUse: m?.counterUse ?? false,
+    weighed: m?.weighed ?? false,
     tracked: m?.tracked ?? true,
     active: m?.active ?? true,
     note: m?.note ?? '',
@@ -354,6 +387,7 @@ function Suppliers({ editable }: { editable: boolean }) {
                   <span className="num text-[12px] font-semibold text-ink-3">{s.code}</span>
                   <span className="truncate text-[14px] font-bold">{s.name}</span>
                   {s.settlement === 'cash' && <Badge tone="lake">现付</Badge>}
+                  {s.settlement === 'credit' && s.reconcileCycle === 'batch' && <Badge tone="lake">按批次对账</Badge>}
                   {!s.active && <Badge>已停用</Badge>}
                   {s.isSynthetic && <Badge tone="ember">合成</Badge>}
                 </p>
@@ -372,7 +406,7 @@ function Suppliers({ editable }: { editable: boolean }) {
 function SupplierDialog({ editing, onClose }: { editing: Supplier | 'new' | null; onClose: () => void }) {
   const toast = useToast();
   const invalidate = useInvalidateInventory();
-  const blank = { code: '', name: '', contact: '', phone: '', note: '', settlement: 'credit' as SupplierSettlement, active: true };
+  const blank = { code: '', name: '', contact: '', phone: '', note: '', settlement: 'credit' as SupplierSettlement, reconcileCycle: 'monthly' as ReconcileCycle, active: true };
   const [form, setForm] = useState(blank);
   const [last, setLast] = useState<typeof editing>(null);
   const [error, setError] = useState<string | null>(null);
@@ -381,7 +415,16 @@ function SupplierDialog({ editing, onClose }: { editing: Supplier | 'new' | null
     setLast(editing);
     setForm(
       editing && editing !== 'new'
-        ? { code: editing.code, name: editing.name, contact: editing.contact, phone: editing.phone, note: editing.note, settlement: editing.settlement, active: editing.active }
+        ? {
+            code: editing.code,
+            name: editing.name,
+            contact: editing.contact,
+            phone: editing.phone,
+            note: editing.note,
+            settlement: editing.settlement,
+            reconcileCycle: editing.reconcileCycle,
+            active: editing.active,
+          }
         : blank,
     );
     setError(null);
@@ -444,6 +487,25 @@ function SupplierDialog({ editing, onClose }: { editing: Supplier | 'new' | null
             options={(['credit', 'cash'] as const).map((v) => ({ value: v, label: SUPPLIER_SETTLEMENT_LABELS[v].title }))}
           />
         </Field>
+        {form.settlement === 'credit' && (
+          <Field
+            label="对账方式"
+            className="sm:col-span-3"
+            hint={
+              form.reconcileCycle === 'batch' && s?.reconcileCycle !== 'batch'
+                ? '按批次：每批货到后对一次账，只提醒今天以后的收货'
+                : RECONCILE_CYCLE_LABELS[form.reconcileCycle].hint
+            }
+          >
+            <Segmented
+              ariaLabel="对账方式"
+              value={form.reconcileCycle}
+              onChange={(v) => setForm({ ...form, reconcileCycle: v })}
+              className="w-full"
+              options={RECONCILE_CYCLES.map((v) => ({ value: v, label: RECONCILE_CYCLE_LABELS[v].title }))}
+            />
+          </Field>
+        )}
         <Field label="状态" className="sm:col-span-3">
           <Segmented
             value={form.active ? 'on' : 'off'}

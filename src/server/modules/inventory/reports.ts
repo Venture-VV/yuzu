@@ -27,6 +27,7 @@ import { badRequest, notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { coverFor, docDateSchema, loadInventorySettings, todayIn, usageByMaterial, usageSince, warehouseInfo } from './common';
 import { getMaterial, listMaterials } from './master';
+import { reconciliationChecks } from './cycles';
 
 /** 查询参数里的仓：数字是某一个仓，all 是全部合计；不填是总仓（与 v0.7.10 以前一样） */
 export const warehouseParam = z
@@ -51,15 +52,18 @@ export async function listWarehouses(db: Db): Promise<Warehouse[]> {
 export async function warehouseStock(db: Db, warehouseId: number, timeZone?: string): Promise<WarehouseStockRow[]> {
   const rows = await db<Omit<WarehouseStockRow, 'dailyUsageMilli' | 'daysOfCover' | 'isLow'>[]>`
     SELECT m.id AS material_id, m.code, m.name, m.specification, m.category, m.inventory_unit, m.decimals, ws.stock_milli, m.cover_days,
-           (SELECT created_at FROM stock_moves WHERE id = ws.last_move_id) AS last_move_at
+           m.counter_use, (SELECT created_at FROM stock_moves WHERE id = ws.last_move_id) AS last_move_at
     FROM warehouse_stock ws JOIN materials m ON m.id = ws.material_id
     WHERE ws.warehouse_id = ${warehouseId}
-    ORDER BY ws.stock_milli = 0, m.code`;
+    ORDER BY ws.stock_milli = 0, m.counter_use, m.code`;
   if (!timeZone) return rows.map((r) => ({ ...r, dailyUsageMilli: 0, daysOfCover: null, isLow: false }));
   const { usageWindowDays } = await loadInventorySettings(db);
   const used = await usageByMaterial(db, warehouseId, usageSince(timeZone, usageWindowDays));
-  // 部门小仓只按可用天数提醒（固定的低库存数量是总仓的）
-  return rows.map((r) => ({ ...r, ...coverFor(r.stockMilli, used.get(r.materialId) ?? 0, usageWindowDays, { coverDays: r.coverDays, lowStockMilli: null }) }));
+  // 部门小仓只按可用天数提醒（固定的低库存数量是总仓的）；台面日耗品领到即耗用、没有结存，不提醒（v0.7.13）
+  return rows.map((r) => {
+    const cover = coverFor(r.stockMilli, used.get(r.materialId) ?? 0, usageWindowDays, { coverDays: r.coverDays, lowStockMilli: null });
+    return r.counterUse ? { ...r, ...cover, daysOfCover: null, isLow: false } : { ...r, ...cover };
+  });
 }
 
 /** 这个物料在各仓的结存：总仓在前，部门小仓只列有过收发的 */
@@ -261,11 +265,12 @@ export async function inventoryChecks(db: Db): Promise<CheckItem[]> {
             SELECT 1 FROM inv_doc_lines l WHERE l.doc_id = d.id AND (
               coalesce((SELECT sum(sm.qty_delta_milli) FROM stock_moves sm WHERE sm.doc_line_id = l.id AND sm.move_type <> 'void' AND sm.warehouse_id = 1), 0)
                 <> CASE WHEN d.doc_type = 'issue' THEN -l.qty_milli ELSE l.qty_milli END
-              OR coalesce((SELECT sum(sm.qty_delta_milli) FROM stock_moves sm WHERE sm.doc_line_id = l.id AND sm.move_type <> 'void' AND sm.warehouse_id = d.warehouse_id), 0)
+              OR coalesce((SELECT sum(sm.qty_delta_milli) FROM stock_moves sm WHERE sm.doc_line_id = l.id AND sm.move_type NOT IN ('void', 'direct_use')
+                           AND sm.warehouse_id = d.warehouse_id), 0)
                 <> CASE WHEN d.doc_type = 'issue' THEN l.qty_milli ELSE -l.qty_milli END))))`;
   items.push({
     key: 'move_warehouse',
-    label: '流水记在单据的仓（领料、退回是总仓与部门小仓一出一进）',
+    label: '流水记在单据的仓（领料、退回是总仓与部门小仓一出一进；台面日耗品的自动耗用不计）',
     ok: wrongWh.length === 0,
     detail: wrongWh.length ? wrongWh.map((o) => o.docNo).join('、') : '一致',
   });
@@ -292,6 +297,30 @@ export async function inventoryChecks(db: Db): Promise<CheckItem[]> {
     label: '收货都有采购单，没有的是急采且不超过上限',
     ok: noPo.length === 0,
     detail: noPo.length ? noPo.map((o) => o.docNo).join('、') : '一致',
+  });
+
+  // 台面日耗品（#14，v0.7.13）：部门小仓没有结存；领料、急采里的自动耗用要么没有、要么正好是这一行的数量，且只在部门小仓
+  const counterBad = await db<{ label: string }[]>`
+    SELECT m.name || '在' || dep.name || '小仓还有结存' AS label
+    FROM warehouse_stock ws JOIN materials m ON m.id = ws.material_id
+    JOIN warehouses w ON w.id = ws.warehouse_id JOIN departments dep ON dep.id = w.department_id
+    WHERE m.counter_use AND ws.stock_milli > 0
+    UNION ALL
+    SELECT d.doc_no || ' ' || m.name || '的自动耗用与领料数量不一致'
+    FROM inv_docs d JOIN inv_doc_lines l ON l.doc_id = d.id JOIN materials m ON m.id = l.material_id
+    WHERE d.doc_type IN ('issue', 'receipt') AND d.status IN ('confirmed', 'voided')
+      AND coalesce((SELECT sum(sm.qty_delta_milli) FROM stock_moves sm WHERE sm.doc_line_id = l.id AND sm.move_type = 'direct_use'), 0)
+          NOT IN (0, -l.qty_milli)
+    UNION ALL
+    SELECT d.doc_no || ' 的自动耗用不在部门小仓'
+    FROM inv_docs d JOIN stock_moves sm ON sm.doc_id = d.id
+    WHERE d.doc_type IN ('issue', 'receipt') AND sm.move_type = 'direct_use'
+      AND (sm.warehouse_id = ${CENTRAL_WAREHOUSE_ID} OR sm.warehouse_id IS DISTINCT FROM d.warehouse_id)`;
+  items.push({
+    key: 'counter_use',
+    label: '台面日耗品在部门小仓没有结存，领料、急采的自动耗用与数量一致',
+    ok: counterBad.length === 0,
+    detail: counterBad.length ? counterBad.map((c) => c.label).join('、') : '一致',
   });
 
   // 每个部门都有小仓；停用的部门小仓已清空
@@ -400,6 +429,18 @@ export async function inventoryChecks(db: Db): Promise<CheckItem[]> {
     label: '待供应商确认的退货没有出库、没有扣款',
     ok: awaitingPosted.length === 0,
     detail: awaitingPosted.length ? awaitingPosted.map((o) => o.docNo).join('、') : '一致',
+  });
+
+  // 对账登记（#23，v0.7.13）：按批次登记的是同一供应商的收货单，一张最多在一条有效登记里，合计与明细一致
+  const recon = await reconciliationChecks(db);
+  items.push({
+    key: 'supplier_reconciliations',
+    label: '对账登记：按批次的收货单属于这个供应商、一张最多登记一次，合计与明细一致',
+    ok: recon.bad.length === 0 && recon.badTotals.length === 0,
+    detail:
+      recon.bad.length || recon.badTotals.length
+        ? [...recon.bad, ...recon.badTotals.map((id) => `对账登记 #${id} 合计不一致`)].join('、')
+        : '一致',
   });
   return items;
 }

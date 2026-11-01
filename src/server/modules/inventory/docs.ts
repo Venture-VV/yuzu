@@ -49,6 +49,7 @@ import {
   setTxTimeouts,
   todayIn,
   warehouseInfo,
+  weighedCapMilli,
 } from './common';
 
 // ───────────────────────── 输入 ─────────────────────────
@@ -278,8 +279,11 @@ export async function getDoc(db: Db, docId: number, timeZone?: string): Promise<
     SELECT l.id, l.line_no, l.material_id, m.code AS material_code, m.name AS material_name, m.specification, m.decimals,
            l.qty_milli, l.inventory_unit, l.purchase_unit, l.factor_milli, l.entered_qty_milli, l.entered_unit,
            l.delivered_milli, l.rejected_milli, l.reject_reason, l.price_cents, l.amount_cents, l.po_line_id,
-           l.book_milli, l.counted_milli, l.diff_reason, l.source_line_id, l.note,
+           l.book_milli, l.counted_milli, l.diff_reason, l.source_line_id, l.note, m.counter_use, m.weighed,
            CASE WHEN ${isDept} THEN coalesce(ws.stock_milli, 0) ELSE m.stock_milli END AS stock_milli,
+           -- 台面日耗品（#14，v0.7.13）：领料、急采生效时在部门小仓自动记的耗用
+           EXISTS (SELECT 1 FROM stock_moves am WHERE am.doc_line_id = l.id AND am.move_type = 'direct_use'
+                   AND ${d.docType === 'issue' || d.docType === 'receipt'}) AS auto_consumed,
            (${d.docType === 'count' && ['draft', 'submitted', 'returned'].includes(d.status)}
             AND l.book_move_id IS DISTINCT FROM CASE WHEN ${isDept} THEN ws.last_move_id ELSE m.last_move_id END) AS stale,
            coalesce((SELECT sum(rl.qty_milli) FROM inv_doc_lines rl JOIN inv_docs rd ON rd.id = rl.doc_id
@@ -484,13 +488,16 @@ interface MaterialInfo {
   active: boolean;
   stockMilli: number;
   lastMoveId: number | null;
+  counterUse: boolean;
+  weighed: boolean;
 }
 
 async function loadMaterials(db: Db, ids: number[]): Promise<Map<number, MaterialInfo>> {
   const unique = [...new Set(ids)];
   const rows = unique.length
     ? await db<MaterialInfo[]>`
-        SELECT id, name, inventory_unit, decimals, purchase_unit, purchase_factor_milli, tracked, active, stock_milli, last_move_id
+        SELECT id, name, inventory_unit, decimals, purchase_unit, purchase_factor_milli, tracked, active, stock_milli, last_move_id,
+               counter_use, weighed
         FROM materials WHERE id IN ${db(unique)}`
     : [];
   const map = new Map(rows.map((r) => [r.id, r]));
@@ -550,6 +557,37 @@ function assertUniqueMaterials(lines: { materialId: number }[], what: string) {
   }
 }
 
+/**
+ * 台面日耗品（#14，v0.7.13）领到部门即算耗用，部门小仓始终没有结存：部门小仓不登记它的期初、耗用、报损、盘点，
+ * 也不能退回总仓（领错了冲销整张领料单再重新登记）。
+ */
+export function assertNoCounterUse(
+  mats: Map<number, { name: string; counterUse: boolean }>,
+  what: 'dept' | 'return',
+  status: 'prepare' | 'confirm' = 'prepare',
+) {
+  const hit = [...mats.values()].filter((m) => m.counterUse);
+  if (hit.length === 0) return;
+  const names = hit.map((m) => `「${m.name}」`).join('');
+  const msg =
+    what === 'return'
+      ? `${names}是台面日耗品，领到部门时已经算耗用，不能退回；数量登记错了请冲销原领料单后重新登记`
+      : `${names}是台面日耗品，领到部门即算耗用，部门小仓不登记期初、耗用、报损、盘点；请从单据里去掉`;
+  if (status === 'confirm') throw conflict('COUNTER_USE_NOT_ALLOWED', msg);
+  throw unprocessable('COUNTER_USE_NOT_ALLOWED', msg);
+}
+
+/** 称重物料（#14，v0.7.13）按实际称重收货，可以比订购数量多出容差；其他物料不能超过订购数量 */
+function receiptRoom(m: { weighed: boolean }, orderedMilli: number, receivedMilli: number, tolerancePct: number): number {
+  return (m.weighed ? weighedCapMilli(orderedMilli, tolerancePct) : orderedMilli) - receivedMilli;
+}
+function receiptExceedsMessage(m: { name: string; weighed: boolean }, unit: string, orderedMilli: number, receivedMilli: number, room: number, tolerancePct: number) {
+  if (m.weighed) {
+    return `「${m.name}」超出采购单数量的称重容差：订 ${formatQty(orderedMilli)} ${unit}，已收 ${formatQty(receivedMilli)} ${unit}，容差 ${tolerancePct}%，最多还能收 ${formatQty(Math.max(0, room))} ${unit}`;
+  }
+  return `「${m.name}」超出采购单未到数量（还差 ${formatQty(Math.max(0, room))} ${unit}）`;
+}
+
 /** 已退回 / 已退货数量：只统计已生效与待确认的单据，排除正在编辑的这张 */
 async function returnedBySourceLine(db: Db, sourceLineIds: number[], excludeDocId: number | null) {
   if (sourceLineIds.length === 0) return new Map<number, number>();
@@ -604,6 +642,7 @@ async function prepare(
     case 'opening': {
       assertUniqueMaterials(body.lines, '期初单');
       const mats = await loadMaterials(db, body.lines.map((l) => l.materialId));
+      if (wh?.kind === 'department') assertNoCounterUse(mats, 'dept');
       return {
         ...empty,
         lines: body.lines.map((l) => {
@@ -622,6 +661,7 @@ async function prepare(
         if (!dep || !dep.active) throw unprocessable('DEPARTMENT_INACTIVE', '领用部门不存在或已停用');
       }
       const mats = await loadMaterials(db, body.lines.map((l) => l.materialId));
+      if (body.docType !== 'issue' && wh?.kind === 'department') assertNoCounterUse(mats, 'dept');
       return {
         ...empty,
         departmentId: body.docType === 'issue' ? body.departmentId : empty.departmentId,
@@ -637,6 +677,7 @@ async function prepare(
     case 'count': {
       assertUniqueMaterials(body.lines, '盘点单');
       const mats = await loadMaterials(db, body.lines.map((l) => l.materialId));
+      if (wh?.kind === 'department') assertNoCounterUse(mats, 'dept');
       // 账面按盘点的仓：总仓在物料上，部门小仓在 warehouse_stock（v0.7.11）
       if (wh && wh.kind === 'department') {
         const dept = await deptBalances(db, wh.id, body.lines.map((l) => l.materialId));
@@ -689,6 +730,7 @@ async function prepare(
         SELECT id, material_id, qty_milli, price_cents, factor_milli, inventory_unit, purchase_unit FROM inv_doc_lines WHERE doc_id = ${src.id}`;
       const byId = new Map(srcLines.map((l) => [l.id, l]));
       const mats = await loadMaterials(db, srcLines.filter((l) => body.lines.some((b) => b.sourceLineId === l.id)).map((l) => l.materialId));
+      if (body.docType === 'issue_return') assertNoCounterUse(mats, 'return');
       const already = await returnedBySourceLine(db, body.lines.map((l) => l.sourceLineId), existing?.id ?? null);
       const seen = new Set<number>();
       let amount = 0;
@@ -789,9 +831,10 @@ async function prepare(
         if (body.purchaseOrderId) {
           const pl = l.poLineId ? poLines.get(l.poLineId) : undefined;
           if (!pl || pl.materialId !== m.id) throw unprocessable('PO_LINE_MISMATCH', `「${m.name}」不在这张采购单里，请另做直接收货`);
-          const remaining = pl.baseQtyMilli - (received.get(pl.id) ?? 0);
+          const got = received.get(pl.id) ?? 0;
+          const remaining = receiptRoom(m, pl.baseQtyMilli, got, settings.weighTolerancePct);
           if (l.acceptedMilli > remaining) {
-            throw unprocessable('RECEIPT_EXCEEDS_ORDER', `「${m.name}」超出采购单未到数量（还差 ${formatQty(Math.max(0, remaining))} ${pl.inventoryUnit}）`, {
+            throw unprocessable('RECEIPT_EXCEEDS_ORDER', receiptExceedsMessage(m, pl.inventoryUnit, pl.baseQtyMilli, got, remaining, settings.weighTolerancePct), {
               materialId: m.id,
               remainingMilli: remaining,
             });
@@ -966,6 +1009,16 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
     if (warehouseId === CENTRAL_WAREHOUSE_ID) assertEnoughStock(mats, outs);
     else await assertEnoughDeptStock(tx, warehouseId, wh?.name ?? '部门小仓', mats, outs);
   };
+  // 台面日耗品（#14，v0.7.13）：部门小仓不登记它的期初、耗用、报损、盘点，也不能退回（物料可能在单据提交后才改成台面日耗品）
+  if (isDept && ['opening', 'direct_use', 'damage', 'count'].includes(doc.docType)) assertNoCounterUse(mats, 'dept', 'confirm');
+  if (doc.docType === 'issue_return') assertNoCounterUse(mats, 'return', 'confirm');
+  /** 领料、急采进部门小仓的台面日耗品，在同一张单里接着记一笔部门小仓的「耗用」流水，结存回到 0 */
+  const consumeCounterUse = async (ls: LineRow[]) => {
+    for (const l of ls) {
+      const m = mats.get(l.materialId)!;
+      if (m.counterUse && l.qtyMilli > 0) await applyMove(tx, m, -l.qtyMilli, ref(l, 'direct_use', whId));
+    }
+  };
   // 收货与退货记下结算方式（v0.7.7）：挂账记应付；现付的货款走费用报销，不记应付
   let settlement: SupplierSettlement | null = null;
   // 退供应商：扣款抵了原收货单多少（v0.7.12）
@@ -994,11 +1047,14 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
           (await tx<{ id: number; baseQtyMilli: number }[]>`SELECT id, base_qty_milli FROM purchase_order_lines WHERE po_id = ${doc.purchaseOrderId}`).map((r) => [r.id, r.baseQtyMilli]),
         );
         const received = await receivedByPoLine(tx, doc.purchaseOrderId, doc.id);
+        const { weighTolerancePct } = await loadInventorySettings(tx);
         for (const l of lines) {
-          const remaining = (ordered.get(l.poLineId!) ?? 0) - (received.get(l.poLineId!) ?? 0);
+          const m = mats.get(l.materialId)!;
+          const orderedMilli = ordered.get(l.poLineId!) ?? 0;
+          const got = received.get(l.poLineId!) ?? 0;
+          const remaining = receiptRoom(m, orderedMilli, got, weighTolerancePct);
           if (l.qtyMilli > remaining) {
-            const m = mats.get(l.materialId)!;
-            throw conflict('RECEIPT_EXCEEDS_ORDER', `「${m.name}」超出采购单未到数量（还差 ${formatQty(Math.max(0, remaining))} ${m.inventoryUnit}）`);
+            throw conflict('RECEIPT_EXCEEDS_ORDER', receiptExceedsMessage(m, m.inventoryUnit, orderedMilli, got, remaining, weighTolerancePct));
           }
         }
       }
@@ -1011,6 +1067,8 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
       }
       // 按采购单收货进总仓；急采进部门小仓
       for (const l of lines) await applyMove(tx, mats.get(l.materialId)!, l.qtyMilli, ref(l, 'receipt'));
+      // 急采的台面日耗品：进部门小仓即算耗用（#14，v0.7.13）
+      if (isDept) await consumeCounterUse(lines);
       // 按采购单收货：跟着这张采购单的结算方式（第一张收货或已有的报销定下的，供应商改了设置也不变）
       if (doc.purchaseOrderId) settlement = await poSettlement(tx, doc.purchaseOrderId);
       else {
@@ -1031,6 +1089,8 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
         await applyMove(tx, mats.get(l.materialId)!, -l.qtyMilli, ref(l, 'issue', CENTRAL_WAREHOUSE_ID));
         if (wh) await applyMove(tx, mats.get(l.materialId)!, l.qtyMilli, ref(l, 'issue', wh.id));
       }
+      // 台面日耗品：领到部门即算耗用（#14，v0.7.13）；迁移前的领料没有仓，不动
+      if (wh) await consumeCounterUse(lines);
       break;
     }
     case 'direct_use':
@@ -1370,12 +1430,13 @@ export async function voidDoc(deps: Deps, docId: number, raw: unknown, actor: Ac
     const check = await voidability(tx, await getDoc(tx, docId), deps.config.timezone);
     if (!check.ok) throw conflict('NOT_VOIDABLE', check.reason ?? '这张单据不能冲销');
     const moves = await tx<{ materialId: number; docLineId: number; qtyDeltaMilli: number; warehouseId: number }[]>`
-      SELECT material_id, doc_line_id, qty_delta_milli, warehouse_id FROM stock_moves WHERE doc_id = ${docId} AND move_type <> 'void' ORDER BY id`;
+      SELECT material_id, doc_line_id, qty_delta_milli, warehouse_id FROM stock_moves WHERE doc_id = ${docId} AND move_type <> 'void' ORDER BY id DESC`;
     const mats = await lockMaterials(tx, moves.map((m) => m.materialId));
     const wh = await warehouseRef(tx, doc.warehouseId);
     // 部门停用后它的小仓已清空，不能再冲回去
     for (const w of [...new Set(moves.map((m) => m.warehouseId))].sort((a, b) => a - b)) await lockDeptWarehouse(tx, w);
-    // 冲销流水记在冲销当天，原单日期不变；按日期汇总时原单与冲销分别出现在各自日期；各仓按原流水反向记
+    // 冲销流水记在冲销当天，原单日期不变；按日期汇总时原单与冲销分别出现在各自日期；各仓按原流水反向记。
+    // 从最后一条往前冲（台面日耗品的领料：先冲部门小仓的自动耗用，再冲领料，部门小仓的结存不会先变负，v0.7.13）
     const voidDate = todayIn(deps.config.timezone);
     for (const mv of moves) {
       await applyMove(tx, mats.get(mv.materialId)!, -mv.qtyDeltaMilli, {

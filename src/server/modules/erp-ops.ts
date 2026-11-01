@@ -1,5 +1,5 @@
 // ERP 单据「结果待确认」的查回与确认作废（v0.7.8，修正 v0.7.7）：费用报销、备用金打款与退回补付、部门需求单；
-// v0.7.12 起还有核销、供应商退款、批量导入。
+// v0.7.12 起还有核销、供应商退款、批量导入；v0.7.13 起还有对账登记。
 //
 // 页面提交前把操作编号和原请求存在本机（读回核对，存不了就不发请求）；断网或超时后：
 //   · 查回：按编号只读查询。查不到不能断定没有登记（原请求可能还在路上或在等锁）；
@@ -30,6 +30,8 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   ap_offset: ['payable.manage'],
   supplier_refund: ['payable.manage'],
   erp_import: ['inventory.master', 'payable.manage'],
+  // 对账登记（v0.7.13）：月结由对账付款，按批次由采购经办或对账付款；接口里按种类再核对一次
+  supplier_recon: ['payable.manage', 'purchase.manage'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -40,6 +42,7 @@ const READ: Record<ErpOpType, Permission[]> = {
   ap_offset: ['payable.read'],
   supplier_refund: ['payable.read'],
   erp_import: ['inventory.master', 'payable.manage', 'inventory.approve'],
+  supplier_recon: ['payable.read'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {

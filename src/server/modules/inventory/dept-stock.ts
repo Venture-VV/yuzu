@@ -28,6 +28,7 @@ import {
   type CreateDocInput,
   type DocBodyInput,
 } from './docs';
+import { deptStocktakeReminder } from './cycles';
 import { backfillPo } from './purchasing';
 import { warehouseStock } from './reports';
 
@@ -108,8 +109,9 @@ export async function deptStockMeta(db: Db, actor: Actor): Promise<DeptStockMeta
     urgentCapCents: settings.urgentCapCents,
     signDueDays: ISSUE_SIGN_DUE_DAYS,
     approvalRules: settings.approvalRules,
+    // 台面日耗品（v0.7.13）：部门小仓不登记它的期初、耗用、报损、盘点，急采照常（验收后即算耗用）
     materials: await db<DeptStockMeta['materials']>`
-      SELECT id, code, name, category, specification, inventory_unit, decimals, purchase_unit, purchase_factor_milli
+      SELECT id, code, name, category, specification, inventory_unit, decimals, purchase_unit, purchase_factor_milli, counter_use, weighed
       FROM materials WHERE active AND tracked ORDER BY code`,
     suppliers: await db<DeptStockMeta['suppliers']>`SELECT id, code, name FROM suppliers WHERE active ORDER BY code`,
   };
@@ -138,6 +140,14 @@ export function registerDeptStockRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/erp/dept-stock/:id/stock', { preHandler: anyDept }, async (req) => {
     const d = await assertVisibleDept(sql, req.actor, parse(idParam, req.params).id);
     return warehouseStock(sql, d.warehouseId, deps.config.timezone);
+  });
+
+  // 本月盘点提醒（#23，v0.7.13）：这个部门小仓月初有结存的物料本月盘到了几种
+  app.get('/api/erp/dept-stock/:id/stocktake', { preHandler: anyDept }, async (req) => {
+    const d = await assertVisibleDept(sql, req.actor, parse(idParam, req.params).id);
+    return readSnapshot(sql, (tx) =>
+      deptStocktakeReminder(tx, { id: d.warehouseId, name: `${d.name}小仓`, kind: 'department', departmentId: d.id }, deps.config.timezone),
+    );
   });
 
   app.get('/api/erp/dept-stock/:id/docs', { preHandler: anyDept }, async (req) => {
