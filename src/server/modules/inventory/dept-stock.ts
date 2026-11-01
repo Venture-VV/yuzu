@@ -94,6 +94,7 @@ export async function deptStockMeta(db: Db, actor: Actor): Promise<DeptStockMeta
     canAudit: seesAll(actor),
     urgentCapCents: settings.urgentCapCents,
     signDueDays: ISSUE_SIGN_DUE_DAYS,
+    approvalRules: settings.approvalRules,
     materials: await db<DeptStockMeta['materials']>`
       SELECT id, code, name, category, specification, inventory_unit, decimals, purchase_unit, purchase_factor_milli
       FROM materials WHERE active AND tracked ORDER BY code`,

@@ -14,6 +14,7 @@ let boss: string; // 演示店主 linlan
 let keeper: string; // 物资经办
 let buyer: string; // 采购 + 对账付款
 let approver: string; // 只有负责人职责
+let buyerId: number; // 收货时一起验收的采购经办（v0.7.11，#17）
 const demo = demoData();
 const q = (n: number) => Math.round(n * 1000);
 
@@ -34,6 +35,7 @@ beforeAll(async () => {
   boss = await login(ctx.app, 'linlan', 'yuzu2026');
   keeper = await login(ctx.app, 'lixiao', 'yuzu2026');
   buyer = await login(ctx.app, 'zhouyi', 'yuzu2026');
+  buyerId = (await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'zhouyi'`)[0]!.id;
   await createStaff(ctx.sql, { username: 'appr', displayName: '负责人', role: 'backoffice', duties: ['approve'], password: PASSWORD, mustChangePassword: false });
   approver = await login(ctx.app, 'appr');
 }, 120_000);
@@ -163,6 +165,7 @@ describe('采购单', () => {
       docDate: today,
       supplierId: sup,
       purchaseOrderId: poId,
+      coAcceptorId: buyerId,
       lines: [{ materialId: mat.id, poLineId, deliveredMilli: q(accepted), acceptedMilli: q(accepted) }],
     });
 
@@ -225,18 +228,42 @@ describe('采购单', () => {
     expect(a.body.po.id).toBe(b.body.po.id);
   });
 
-  it('先收货后补单：补单只关联原收货，不再入库、不再形成应付', async () => {
-    const before = (await byCode('M016')).stockMilli;
+  it('急采与补单：部门登记、仓库验收后进部门小仓；补单只关联原收货，不再入库、不再形成应付（v0.7.11，#19）', async () => {
+    const material = async () => (await api(ctx.app, boss, 'GET', '/api/inventory/materials')).body.find((m: { id: number }) => m.id === mat.id);
+    const before = await material();
     const balance = async () => (await api(ctx.app, boss, 'GET', '/api/payables/overview')).body.suppliers.find((s: { supplierId: number }) => s.supplierId === sup).balanceCents;
-    const rc = await api(ctx.app, keeper, 'POST', '/api/inventory/docs', {
+    // 没有采购单不能收货（#19）
+    const direct = await api(ctx.app, keeper, 'POST', '/api/inventory/docs', {
       clientKey: randomUUID(),
       docType: 'receipt',
       docDate: today,
       supplierId: sup,
       lines: [{ materialId: mat.id, deliveredMilli: q(500), acceptedMilli: q(500), priceCents: 45000 }],
     });
-    expect(rc.body.doc.noPo).toBe(true);
+    expect(direct.status).toBe(422);
+    expect(direct.body.error.code).toBe('PO_REQUIRED');
+    // 浴区的部门申购登记急采
+    const [dept] = await ctx.sql<{ id: number }[]>`SELECT id FROM departments WHERE name = '浴区'`;
+    await createStaff(ctx.sql, { username: 'bath-req', displayName: '浴区申购', role: 'backoffice', duties: ['request'], departmentId: dept!.id, password: PASSWORD, mustChangePassword: false });
+    const deptUser = await login(ctx.app, 'bath-req');
+    const rc = await api(ctx.app, deptUser, 'POST', '/api/erp/dept-stock/docs', {
+      clientKey: randomUUID(),
+      docType: 'receipt',
+      docDate: today,
+      supplierId: sup,
+      urgent: true,
+      departmentId: dept!.id,
+      lines: [{ materialId: mat.id, deliveredMilli: q(500), acceptedMilli: q(500), priceCents: 45000 }],
+    });
+    expect(rc.status, JSON.stringify(rc.body)).toBe(201);
+    expect(rc.body.doc).toMatchObject({ status: 'submitted', urgent: true, noPo: true, urgentCapCents: 200000, amountCents: 45000 });
+    // 仓库到部门验收后生效：进部门小仓，总仓不变
+    const verified = await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${rc.body.doc.id}/verify-urgent`, {});
+    expect(verified.body.status).toBe('confirmed');
     const afterReceipt = await balance();
+    expect((await material()).stockMilli).toBe(before.stockMilli);
+    expect((await material()).deptStockMilli).toBe(before.deptStockMilli + q(500));
+
     const bf = await api(ctx.app, buyer, 'POST', '/api/purchase-orders/backfill', { clientKey: randomUUID(), receiptDocId: rc.body.doc.id });
     expect(bf.status).toBe(201);
     expect(bf.body.po).toMatchObject({ backfill: true, status: 'submitted', totalCents: 45000 });
@@ -246,7 +273,7 @@ describe('采购单', () => {
     expect(ok.body).toMatchObject({ status: 'approved', receiving: 'full', receivedCents: 45000 });
     const linked = (await api(ctx.app, boss, 'GET', `/api/inventory/docs/${rc.body.doc.id}`)).body;
     expect(linked.purchaseOrder.id).toBe(bf.body.po.id);
-    expect((await byCode('M016')).stockMilli).toBe(before + q(500));
+    expect((await material()).deptStockMilli).toBe(before.deptStockMilli + q(500));
     expect(await balance()).toBe(afterReceipt);
     // 补单不能当作普通采购单继续收货
     const open = await api(ctx.app, keeper, 'GET', `/api/purchase-orders?open=1&supplierId=${sup}`);
@@ -290,12 +317,13 @@ describe('付款登记', () => {
     const mid = (await api(ctx.app, boss, 'GET', '/api/payables/overview')).body.suppliers.find((s: { supplierId: number }) => s.supplierId === s2).balanceCents;
     expect(mid).toBe(before - 23000);
 
-    // 已有付款核销的收货单不能冲销
-    const voidReceipt = await api(ctx.app, approver, 'POST', `/api/inventory/docs/${rc008.id}/void`, { reason: '测试冲销' });
-    expect(voidReceipt.body.error.code).toBe('NOT_VOIDABLE');
+    // 演示数据的收货在 10 月：跨月不能冲销（#21，v0.7.11）；已有付款核销的收货单不能冲销另见两级库存的测试
+    const voidReceipt = await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${rc008.id}/void`, { reason: '测试冲销' });
+    expect(voidReceipt.body.error.code).toBe(today.startsWith('2026-10') ? 'NOT_VOIDABLE' : 'VOID_CROSS_MONTH');
 
-    // 冲销付款：余额恢复，货款重新可以核销
-    const voided = await api(ctx.app, approver, 'POST', `/api/payables/payments/${created.id}/void`, { reason: '付款登记错了供应商' });
+    // 冲销付款（#21：账务冲销由财务，负责人不能冲销）：余额恢复，货款重新可以核销
+    expect((await api(ctx.app, approver, 'POST', `/api/payables/payments/${created.id}/void`, { reason: '付款登记错了供应商' })).status).toBe(403);
+    const voided = await api(ctx.app, buyer, 'POST', `/api/payables/payments/${created.id}/void`, { reason: '付款登记错了供应商' });
     expect(voided.body.status).toBe('voided');
     const end = (await api(ctx.app, boss, 'GET', '/api/payables/overview')).body.suppliers.find((s: { supplierId: number }) => s.supplierId === s2).balanceCents;
     expect(end).toBe(before);
@@ -325,7 +353,7 @@ describe('付款登记', () => {
     const s3 = await supplierId('S003');
     const openings = (await api(ctx.app, buyer, 'GET', `/api/payables/openings?supplierId=${s3}`)).body;
     expect(openings[0]).toMatchObject({ amountCents: 20000, paidCents: 20000, status: 'confirmed' });
-    const v = await api(ctx.app, approver, 'POST', `/api/payables/openings/${openings[0].id}/void`, { reason: '测试' });
+    const v = await api(ctx.app, buyer, 'POST', `/api/payables/openings/${openings[0].id}/void`, { reason: '测试' });
     expect(v.body.error.code).toBe('NOT_VOIDABLE');
   });
 });

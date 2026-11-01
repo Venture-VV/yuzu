@@ -105,6 +105,8 @@ export interface DeptStockMeta {
   canAudit: boolean;
   urgentCapCents: number;
   signDueDays: number;
+  /** 期初、报损要不要负责人确认（与库存规则一致） */
+  approvalRules: ApprovalRules;
   materials: {
     id: number;
     code: string;

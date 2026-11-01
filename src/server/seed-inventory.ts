@@ -156,6 +156,8 @@ export async function seedInventoryDemo(sql: Sql, config: AppConfig) {
         supplierId: suppliers.get(rc.supplierCode)!,
         purchaseOrderId: poId,
         handler: rc.receiver,
+        // #17：采购和仓库一起验收（v0.7.11）
+        coAcceptorId: buyer.id,
         note: (rc as { note?: string }).note ?? '',
         lines: rc.lines.map((l) => {
           const materialId = materials.get(l.materialCode)!;

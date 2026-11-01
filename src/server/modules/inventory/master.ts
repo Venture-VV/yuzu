@@ -245,6 +245,12 @@ export function registerMasterRoutes(app: FastifyInstance, { sql }: Deps) {
     return listSuppliers(sql, true);
   });
 
+  // 收货时一起验收的采购经办（#17，v0.7.11）：在职的采购经办与店主
+  app.get('/api/inventory/co-acceptors', { preHandler: guard('inventory.read') }, async () =>
+    sql<{ id: number; displayName: string }[]>`
+      SELECT id, display_name FROM staff WHERE active AND (role = 'owner' OR 'purchase' = ANY (duties)) ORDER BY role = 'owner', display_name`,
+  );
+
   // 部门：库存之外，费用报销（只有费用职责的员工也要选部门）与需求单也要用
   app.get('/api/inventory/departments', { preHandler: guardAny('inventory.read', 'expense.read', 'request.create', 'request.review') }, async (req) =>
     listDepartments(sql, all(req.query)),

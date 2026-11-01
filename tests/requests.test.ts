@@ -20,6 +20,8 @@ let reqNoDept: string; // 部门申购，没填所属部门
 let reqB: string; // 部门申购（水吧）
 let deptA: number;
 let deptB: number;
+/** 采购经办 zhouyi：收货时一起验收（v0.7.11，#17） */
+let buyerId: number;
 let reqAId: number;
 let supplierId: number;
 let mat: { id: number; name: string };
@@ -52,6 +54,7 @@ beforeAll(async () => {
   boss = await login(ctx.app, 'linlan', 'yuzu2026');
   keeper = await login(ctx.app, 'lixiao', 'yuzu2026');
   buyer = await login(ctx.app, 'zhouyi', 'yuzu2026');
+  buyerId = (await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'zhouyi'`)[0]!.id;
   await createStaff(ctx.sql, { username: 'appr', displayName: '负责人', role: 'backoffice', duties: ['approve'], password: PASSWORD, mustChangePassword: false });
   approver = await login(ctx.app, 'appr');
   const mk = async (name: string) => {
@@ -211,6 +214,7 @@ describe('审核、转采购单、进度回写', () => {
         docDate: today,
         supplierId,
         purchaseOrderId: second.id,
+        coAcceptorId: buyerId,
         lines: [{ materialId: mat.id, poLineId: second.lines[0].id, deliveredMilli: q(accepted), acceptedMilli: q(accepted) }],
       });
     const r1 = await receive(500);

@@ -3,11 +3,20 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { todayIn } from '../src/server/modules/inventory/common';
-import { api, setup, type TestContext } from './helpers';
+import { createStaff } from '../src/server/modules/staff';
+import { api, PASSWORD, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let today: string;
-beforeAll(async () => { ctx = await setup(); today = todayIn(ctx.config.timezone); });
+/** v0.7.11 起按采购单收货要写明一起验收的采购经办（#17） */
+let buyerId: number;
+let deptId: number;
+beforeAll(async () => {
+  ctx = await setup();
+  today = todayIn(ctx.config.timezone);
+  buyerId = await createStaff(ctx.sql, { username: 'rv-buyer', displayName: '复审采购', role: 'backoffice', duties: ['purchase'], password: PASSWORD, mustChangePassword: false });
+  deptId = (await ctx.sql<{ id: number }[]>`SELECT id FROM departments ORDER BY id LIMIT 1`)[0]!.id;
+});
 afterAll(async () => ctx?.close());
 
 const post = (path: string, body: unknown) => api(ctx.app, ctx.owner, 'POST', path, body);
@@ -24,7 +33,7 @@ async function orderAndDraft() {
   const po = await post('/api/purchase-orders', { clientKey: randomUUID(), supplierId: f.supplierId, orderDate: today, approveNow: true,
     lines: [{ materialId: f.materialId, purchaseQtyMilli: 1000, priceCents: 1000 }] });
   expect(po.status, JSON.stringify(po.body)).toBe(201);
-  const receiptBody = { docType: 'receipt', docDate: today, supplierId: f.supplierId, purchaseOrderId: po.body.po.id,
+  const receiptBody = { docType: 'receipt', docDate: today, supplierId: f.supplierId, purchaseOrderId: po.body.po.id, coAcceptorId: buyerId,
     lines: [{ materialId: f.materialId, poLineId: po.body.po.lines[0].id, deliveredMilli: 10000, acceptedMilli: 10000 }] };
   const draft = await post('/api/inventory/docs', { clientKey: randomUUID(), ...receiptBody, action: 'save' });
   expect(draft.status).toBe(201);
@@ -49,7 +58,7 @@ it.each(['price', 'supplier', 'material'] as const)('收货与采购改版交错
   });
   await locked;
   const receipt = post('/api/inventory/docs', { clientKey: randomUUID(), docType: 'receipt', docDate: today, supplierId: f.supplierId, purchaseOrderId: po.id,
-    lines: [{ materialId: f.materialId, poLineId: po.lines[0].id, deliveredMilli: 10000, acceptedMilli: 10000 }] });
+    coAcceptorId: buyerId, lines: [{ materialId: f.materialId, poLineId: po.lines[0].id, deliveredMilli: 10000, acceptedMilli: 10000 }] });
   try {
     await waitForLock('%INSERT INTO doc_counters%');
     const revision = await post(`/api/purchase-orders/${po.id}/revise`, {
@@ -79,26 +88,28 @@ async function waitForLock(pattern: string) {
 
 const priceBasisOf = async (id: number) => (await ctx.sql<{ priceBasis: string }[]>`SELECT price_basis FROM inv_docs WHERE id = ${id}`)[0]!.priceBasis;
 
-it('按单收货的价格口径沿用采购单，直接收货草稿重录时使用当前口径', async () => {
+it('按单收货的价格口径沿用采购单，急采（没有采购单）草稿重录时使用当前口径', async () => {
   const f = await orderAndDraft();
   const originalBasis = f.po.priceBasis;
   await ctx.sql`UPDATE settings SET value = '"不含税到货价"'::jsonb WHERE key = 'inventory_price_basis'`;
   const receipt = await post('/api/inventory/docs', { clientKey: randomUUID(), ...f.receiptBody });
   expect(receipt.status).toBe(201);
   expect(await priceBasisOf(receipt.body.doc.id)).toBe(originalBasis);
-  const direct = await post('/api/inventory/docs', { clientKey: randomUUID(), ...f.receiptBody, purchaseOrderId: null, action: 'save',
+  // v0.7.11 起没有采购单的收货只能是急采（#19）
+  const urgent = { purchaseOrderId: null, coAcceptorId: null, urgent: true, departmentId: deptId };
+  const direct = await post('/api/inventory/docs', { clientKey: randomUUID(), ...f.receiptBody, ...urgent, action: 'save',
     lines: [{ materialId: f.materialId, deliveredMilli: 1000, acceptedMilli: 1000, priceCents: 1000 }] });
+  expect(direct.status, JSON.stringify(direct.body)).toBe(201);
   await ctx.sql`UPDATE settings SET value = '"含税到货价"'::jsonb WHERE key = 'inventory_price_basis'`;
-  const edited = await api(ctx.app, ctx.owner, 'PUT', `/api/inventory/docs/${direct.body.doc.id}`, { ...f.receiptBody, purchaseOrderId: null,
+  const edited = await api(ctx.app, ctx.owner, 'PUT', `/api/inventory/docs/${direct.body.doc.id}`, { ...f.receiptBody, ...urgent,
     lines: [{ materialId: f.materialId, deliveredMilli: 1000, acceptedMilli: 1000, priceCents: 1000 }] });
   expect(edited.status).toBe(200);
   expect(await priceBasisOf(edited.body.id)).toBe('含税到货价');
 });
 
 it('付款与收货冲销交错时，付款不得核销到已冲销的收货单', async () => {
-  const f = await fixture();
-  const receipt = await post('/api/inventory/docs', { clientKey: randomUUID(), docType: 'receipt', docDate: today, supplierId: f.supplierId,
-    lines: [{ materialId: f.materialId, deliveredMilli: 10000, acceptedMilli: 10000, priceCents: 1000 }] });
+  const f = await orderAndDraft();
+  const receipt = await post('/api/inventory/docs', { clientKey: randomUUID(), ...f.receiptBody });
   expect(receipt.status).toBe(201);
   let release!: () => void;
   let acquired!: () => void;
