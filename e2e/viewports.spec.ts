@@ -96,6 +96,12 @@ test.describe('视口冒烟', () => {
     await page.getByRole('radio', { name: '导入' }).click();
     await expect(page.getByTestId('space-import')).toBeVisible();
     await expectFits(page);
+    // 底图（v0.7.15）：有批次时连预览一起看
+    await page.getByRole('radio', { name: '底图' }).click();
+    await expect(page.getByTestId('floorplan-upload')).toBeVisible();
+    const hasBatch = (await (await page.request.get('/api/admin/floorplans')).json()).batches.length > 0;
+    if (hasBatch) await expect(page.getByTestId('floorplan-detail')).toBeVisible();
+    await expectFits(page);
   });
 
   test('技师：后台「技师」与看板「技师业绩」（v0.7.0；技师功能关闭时看板不显示「技师业绩」，v0.7.3）', async ({ page }) => {

@@ -5,3 +5,11 @@ export async function readImportFile(file: File): Promise<{ text: string; label:
   const { text, encoding } = decodeImportFile(new Uint8Array(await file.arrayBuffer()));
   return { text, label: encoding === 'GBK' ? `${file.name}（GBK 编码，已自动识别）` : file.name };
 }
+
+/** 二进制文件转 base64（上传图纸、Excel 用） */
+export function bytesToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
