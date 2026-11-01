@@ -36,8 +36,9 @@ export const FENCED_OPS = [
   'ap_offset',
   'supplier_refund',
   'erp_import',
-  // 对账登记（v0.7.13）
+  // 对账登记（v0.7.13）与撤销（v0.7.14）
   'supplier_recon',
+  'supplier_recon_void',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 

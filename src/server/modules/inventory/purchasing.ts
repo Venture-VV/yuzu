@@ -18,7 +18,19 @@ import type { Actor, Deps } from '../../lib/context';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
 import { lockOpKey } from '../../lib/fences';
 import { idParam, parse } from '../../lib/validate';
-import { assertNotFuture, canOperateDept, docDateSchema, loadInventorySettings, logApproval, nextDocNo, overThreshold, priceBaseline, setTxTimeouts, todayIn } from './common';
+import {
+  assertNotFuture,
+  canOperateDept,
+  docDateSchema,
+  loadInventorySettings,
+  logApproval,
+  nextDocNo,
+  overThreshold,
+  priceBaseline,
+  setTxTimeouts,
+  todayIn,
+  weighedCapMilli,
+} from './common';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -200,7 +212,9 @@ interface ExistingLine {
   purchaseUnit: string;
   factorMilli: number;
   priceCents: number;
-  /** 已生效或在途收货占用的数量：不能改价、不能减到它以下 */
+  /** 这一行现在的订购数量（库存单位） */
+  baseQtyMilli: number;
+  /** 已生效或在途收货占用的数量：不能改价、不能减到它以下（称重物料多到的除外，v0.7.13） */
   receivedMilli: number;
   /** 被任何收货明细引用过（含已撤回）：不能删除 */
   referenced: boolean;
@@ -211,7 +225,7 @@ interface ExistingLine {
 
 async function existingLines(db: Db, poId: number): Promise<Map<number, ExistingLine>> {
   const rows = await db<ExistingLine[]>`
-    SELECT pl.id, pl.line_no, pl.material_id, pl.purchase_unit, pl.factor_milli, pl.price_cents, pl.spec,
+    SELECT pl.id, pl.line_no, pl.material_id, pl.purchase_unit, pl.factor_milli, pl.price_cents, pl.base_qty_milli, pl.spec,
            coalesce((SELECT array_agg(i.image_id ORDER BY i.sort_no) FROM purchase_order_line_images i WHERE i.po_line_id = pl.id), '{}') AS image_ids,
            coalesce((SELECT array_agg(x.request_line_id ORDER BY x.request_line_id) FROM purchase_order_line_requests x WHERE x.po_line_id = pl.id), '{}') AS request_line_ids,
            coalesce((SELECT sum(l.qty_milli) FROM inv_doc_lines l JOIN inv_docs d ON d.id = l.doc_id
@@ -242,10 +256,11 @@ async function prepareLines(db: Db, body: z.infer<typeof PoBody>, existing: Map<
   if (ids.length !== body.lines.length) throw badRequest('同一物料在一张采购单里只能出现一次');
   const mats = new Map(
     (
-      await db<{ id: number; name: string; inventoryUnit: string; purchaseUnit: string; purchaseFactorMilli: number; decimals: number; tracked: boolean; active: boolean }[]>`
-        SELECT id, name, inventory_unit, purchase_unit, purchase_factor_milli, decimals, tracked, active FROM materials WHERE id IN ${db(ids)}`
+      await db<{ id: number; name: string; inventoryUnit: string; purchaseUnit: string; purchaseFactorMilli: number; decimals: number; tracked: boolean; active: boolean; weighed: boolean }[]>`
+        SELECT id, name, inventory_unit, purchase_unit, purchase_factor_milli, decimals, tracked, active, weighed FROM materials WHERE id IN ${db(ids)}`
     ).map((m) => [m.id, m]),
   );
+  const { weighTolerancePct } = await loadInventorySettings(db);
   return body.lines.map((l) => {
     const m = mats.get(l.materialId);
     if (!m) throw unprocessable('MATERIAL_NOT_FOUND', '有物料不存在，请刷新后重试');
@@ -261,7 +276,9 @@ async function prepareLines(db: Db, body: z.infer<typeof PoBody>, existing: Map<
     }
     if (prev && prev.receivedMilli > 0) {
       if (prev.materialId !== m.id) throw unprocessable('PO_LINE_RECEIVED', `「${m.name}」所在行已有收货，不能更换物料`);
-      if (base < prev.receivedMilli) {
+      // 称重物料按实际称重收货，可以比订购数量多出容差（v0.7.13）：数量没改的照旧；改了的，已收货不超过新数量加容差就行
+      const weighedOk = m.weighed && (base === prev.baseQtyMilli || weighedCapMilli(base, weighTolerancePct) >= prev.receivedMilli);
+      if (base < prev.receivedMilli && !weighedOk) {
         throw unprocessable('PO_QTY_BELOW_RECEIVED', `「${m.name}」已收货 ${formatQty(prev.receivedMilli)} ${m.inventoryUnit}，数量不能少于已收货`);
       }
       if (l.priceCents !== prev.priceCents) {

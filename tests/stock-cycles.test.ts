@@ -403,8 +403,8 @@ describe('对账提醒与登记（#23）', () => {
     expect(r3.monthly.items.find((i) => i.supplierId === supplierId)).toMatchObject({ state: 'changed' });
 
     // 撤销上个月的登记：写原因，留经办人；撤销后可以重新登记
-    const v = await ok(api(ctx.app, payer, 'POST', `/api/payables/reconciliations/${reg.reconciliation.id}/void`, { reason: '金额核错了' }), 200);
-    expect(v.voided).toMatchObject({ reason: '金额核错了' });
+    const v = await ok(api(ctx.app, payer, 'POST', `/api/payables/reconciliations/${reg.reconciliation.id}/void`, { clientKey: randomUUID(), reason: '金额核错了' }), 200);
+    expect(v.reconciliation.voided).toMatchObject({ reason: '金额核错了' });
     expect((await api(ctx.app, payer, 'POST', '/api/payables/reconciliations', { clientKey: randomUUID(), supplierId, kind: 'month', month: prev })).status).toBe(201);
     await checksOk();
   });
@@ -502,5 +502,73 @@ describe('对账提醒与登记（#23）', () => {
     const keep = await api(ctx.app, ctx.owner, 'PUT', '/api/inventory/settings', legacy);
     expect(keep.body).toMatchObject({ stocktakeDay: 5, batchReconGraceDays: 7 });
     await api(ctx.app, ctx.owner, 'PUT', '/api/inventory/settings', s);
+  });
+});
+
+describe('v0.7.13 审查的修正（v0.7.14）', () => {
+  it('撤销对账登记带操作编号：没有编号拒绝；同一编号重提只撤销一次；作废过的编号晚到不撤销；查回能找到', async () => {
+    const prev3 = shiftMonth(monthStartOf(today), -3).slice(0, 7);
+    const reg = await ok(api(ctx.app, payer, 'POST', '/api/payables/reconciliations', { clientKey: randomUUID(), supplierId, kind: 'month', month: prev3 }));
+    const id = reg.reconciliation.id as number;
+    // 没有操作编号：拒绝
+    expect((await api(ctx.app, payer, 'POST', `/api/payables/reconciliations/${id}/void`, { reason: '金额核错了' })).status).toBe(400);
+    // 作废过的编号：原请求晚到也不撤销
+    const fenced = randomUUID();
+    expect((await api(ctx.app, payer, 'POST', `/api/erp/ops/${fenced}/abandon`, { type: 'supplier_recon_void', summary: '撤销对账' })).status).toBe(200);
+    const late = await api(ctx.app, payer, 'POST', `/api/payables/reconciliations/${id}/void`, { clientKey: fenced, reason: '金额核错了' });
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('OP_ABANDONED');
+    expect((await api(ctx.app, payer, 'GET', `/api/payables/reconciliations/${id}`)).body.voided).toBeNull();
+    // 正常撤销；同一编号重提返回原结果
+    const key = randomUUID();
+    const v1 = await ok(api(ctx.app, payer, 'POST', `/api/payables/reconciliations/${id}/void`, { clientKey: key, reason: '金额核错了' }), 200);
+    expect(v1).toMatchObject({ replayed: false, reconciliation: { voided: { reason: '金额核错了' } } });
+    const v2 = await ok(api(ctx.app, payer, 'POST', `/api/payables/reconciliations/${id}/void`, { clientKey: key, reason: '金额核错了' }), 200);
+    expect(v2.replayed).toBe(true);
+    const look = await ok(api(ctx.app, payer, 'GET', `/api/erp/ops/${key}?type=supplier_recon_void`), 200);
+    expect(look).toMatchObject({ found: true, refId: id });
+    // 同一编号换内容：拒绝
+    expect((await api(ctx.app, payer, 'POST', `/api/payables/reconciliations/${id}/void`, { clientKey: key, reason: '另一个原因' })).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+  });
+
+  it('对账记录可以往前翻页（beforeId），超过一页的也找得到', async () => {
+    const all = (await ok(api(ctx.app, payer, 'GET', '/api/payables/reconciliations?limit=200'), 200)) as { id: number }[];
+    expect(all.length).toBeGreaterThanOrEqual(3);
+    const first = (await ok(api(ctx.app, payer, 'GET', '/api/payables/reconciliations?limit=2'), 200)) as { id: number }[];
+    expect(first.map((x) => x.id)).toEqual(all.slice(0, 2).map((x) => x.id));
+    const next = (await ok(api(ctx.app, payer, 'GET', `/api/payables/reconciliations?limit=2&beforeId=${first[1]!.id}`), 200)) as { id: number }[];
+    expect(next.map((x) => x.id)).toEqual(all.slice(2, 4).map((x) => x.id));
+  });
+
+  it('物料清零后改成台面日耗品，再冲销部门之前的耗用单：拒绝（部门小仓不会留下台面日耗品的结存）', async () => {
+    const m = await material('CU09');
+    await stockIn(m.id, 1);
+    await ok(issue(m.id, q(5)));
+    const use = await ok(deptDoc(bath, { docType: 'direct_use', warehouseId: bathWh, note: '客用', lines: [{ materialId: m.id, qtyMilli: q(5) }] }));
+    expect(await deptStock(m.id)).toBe(0);
+    expect((await updateMaterial(m.id, { counterUse: true })).status).toBe(200);
+    const v = await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${use.doc.id}/void`, { reason: '耗用登记错了' });
+    expect(v.status).toBe(409);
+    expect(v.body.error.code).toBe('COUNTER_USE_NOT_ALLOWED');
+    expect(await deptStock(m.id)).toBe(0);
+    await checksOk();
+  });
+
+  it('称重物料多到以后，采购单照样能改版：数量不变可以；改小到容差以内可以；再小拒绝', async () => {
+    const m = await material('WG09', { inventoryUnit: '斤', decimals: 2, purchaseUnit: '斤', purchaseFactorMilli: q(1), weighed: true });
+    const po = await approvedPo(m.id, q(20), 1_500);
+    await ok(receivePo(po, m.id, q(21)));
+    const revise = (purchaseQtyMilli: number) =>
+      api(ctx.app, ctx.owner, 'POST', `/api/purchase-orders/${po.id}/revise`, {
+        supplierId,
+        orderDate: today,
+        note: '改备注',
+        lines: [{ id: po.lines[0]!.id, materialId: m.id, purchaseQtyMilli, priceCents: 1_500 }],
+      });
+    expect((await revise(q(20))).status).toBe(200); // 数量不变
+    expect((await revise(q(19.5))).status).toBe(200); // 19.5 + 10% = 21.45 ≥ 已收 21
+    const below = await revise(q(18)); // 18 + 10% = 19.8 < 已收 21
+    expect(below.status).toBe(422);
+    expect(below.body.error.code).toBe('PO_QTY_BELOW_RECEIVED');
   });
 });

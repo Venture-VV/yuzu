@@ -86,9 +86,9 @@ export function PayablesPage() {
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-5 py-4 md:px-7">
         {/* 核销、供应商退款结果待确认（v0.7.12）：进入页面先按原编号查回；查不到的由员工重新提交或作废 */}
         <ErpPendingPanel
-          types={['ap_offset', 'supplier_refund', 'supplier_recon']}
+          types={['ap_offset', 'supplier_refund', 'supplier_recon', 'supplier_recon_void']}
           className="mb-4 space-y-2"
-          onFound={(op) => update({ view: op.type === 'supplier_recon' ? 'recon' : 'settlements' })}
+          onFound={(op) => update({ view: op.type === 'supplier_recon' || op.type === 'supplier_recon_void' ? 'recon' : 'settlements' })}
         />
         {view === 'suppliers' && <SuppliersView onStatement={(id) => update({ view: 'statement', supplier: String(id) })} />}
         {view === 'statement' && (

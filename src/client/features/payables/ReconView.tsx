@@ -16,7 +16,7 @@ import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Field, Input, Notice, Skeleton, Spinner } from '../../components/ui';
 import { useInvalidateAll, useStatement } from '../purchasing/queries';
-import { useReconciliations, useReconReminders } from '../cycles/queries';
+import { useReconciliationPages, useReconReminders } from '../cycles/queries';
 
 /** 某月（YYYY-MM）的最后一天 */
 function monthEnd(ym: string): string {
@@ -31,11 +31,20 @@ type BatchTarget = { supplierId: number; supplierName: string; docs: BatchReconI
 
 export function ReconView({ onStatement }: { onStatement: (supplierId: number, from: string, to: string) => void }) {
   const reminders = useReconReminders();
-  const records = useReconciliations(null);
+  const records = useReconciliationPages();
+  const toast = useToast();
   const [monthTarget, setMonthTarget] = useState<MonthTarget | null>(null);
   const [batchTarget, setBatchTarget] = useState<BatchTarget | null>(null);
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [voiding, setVoiding] = useState<SupplierReconciliation | null>(null);
+  // 提醒里「登记后有变动」的那条登记可能不在记录的第一页：按编号取来再撤销（v0.7.14）
+  const revoke = async (reconId: number) => {
+    try {
+      setVoiding(await api.get<SupplierReconciliation>(`/api/payables/reconciliations/${reconId}`));
+    } catch (e) {
+      toast({ tone: 'error', title: errorMessage(e) });
+    }
+  };
 
   if (reminders.isPending) return <Skeleton className="h-64" />;
   if (reminders.error) return <Notice tone="error" title={errorMessage(reminders.error)} />;
@@ -77,6 +86,7 @@ export function ReconView({ onStatement }: { onStatement: (supplierId: number, f
                 canRegister={r.canMonthly}
                 onStatement={() => onStatement(i.supplierId, `${i.month}-01`, monthEnd(i.month))}
                 onRegister={() => setMonthTarget({ supplierId: i.supplierId, supplierName: i.supplierName, month: i.month })}
+                onRevoke={i.reconciliationId ? () => revoke(i.reconciliationId!) : undefined}
               />
             ))}
           </ul>
@@ -139,7 +149,21 @@ export function ReconView({ onStatement }: { onStatement: (supplierId: number, f
             })}
             {changedBatch.length > 0 && (
               <Notice tone="warning" title="登记对账以后，这些收货单被冲销了" icon={<CircleAlert className="size-5" />}>
-                {changedBatch.map((d) => `${d.supplierName} ${d.docNo}`).join('、')}。请在下面的对账记录里撤销原登记，按现在的单据重新对账。
+                <p>撤销原登记，按现在的单据重新对账：</p>
+                <ul className="mt-1 space-y-1" data-testid="recon-batch-changed">
+                  {changedBatch.map((d) => (
+                    <li key={d.docId} className="flex flex-wrap items-center gap-2">
+                      <span>
+                        {d.supplierName} {d.docNo}
+                      </span>
+                      {r.canBatch && d.reconciliationId && (
+                        <Button size="sm" variant="ghost" onClick={() => revoke(d.reconciliationId!)}>
+                          撤销登记
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               </Notice>
             )}
           </div>
@@ -153,14 +177,23 @@ export function ReconView({ onStatement }: { onStatement: (supplierId: number, f
           <Skeleton className="h-32" />
         ) : records.error ? (
           <Notice tone="error" title={errorMessage(records.error)} />
-        ) : records.data!.length === 0 ? (
+        ) : records.data!.pages.flat().length === 0 ? (
           <EmptyState art="leaf" title="还没有登记过对账" description="对完账后在上面「登记已对账」，这里会留下记录。" className="rounded-lg border border-dashed border-line-strong py-8" />
         ) : (
-          <ul className="divide-y divide-line/70 rounded-lg border border-line bg-card" data-testid="recon-records">
-            {records.data!.map((x) => (
-              <RecordRow key={x.id} rec={x} canVoid={x.kind === 'month' ? r.canMonthly : r.canBatch} onVoid={() => setVoiding(x)} />
-            ))}
-          </ul>
+          <>
+            <ul className="divide-y divide-line/70 rounded-lg border border-line bg-card" data-testid="recon-records">
+              {records.data!.pages.flat().map((x) => (
+                <RecordRow key={x.id} rec={x} canVoid={x.kind === 'month' ? r.canMonthly : r.canBatch} onVoid={() => setVoiding(x)} />
+              ))}
+            </ul>
+            {records.hasNextPage && (
+              <div className="mt-2 flex justify-center">
+                <Button size="sm" variant="ghost" loading={records.isFetchingNextPage} onClick={() => records.fetchNextPage()}>
+                  加载更早的记录
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </section>
 
@@ -183,12 +216,15 @@ function MonthlyRow({
   canRegister,
   onStatement,
   onRegister,
+  onRevoke,
 }: {
   item: MonthlyReconItem;
   overdue: boolean;
   canRegister: boolean;
   onStatement: () => void;
   onRegister: () => void;
+  /** 登记后有变动：撤销原登记（按编号取，不依赖记录列表的第一页） */
+  onRevoke?: () => void;
 }) {
   return (
     <li className="flex flex-wrap items-center gap-3 px-4 py-2.5 text-[13px]">
@@ -205,6 +241,11 @@ function MonthlyRow({
       {canRegister && item.state === 'pending' && (
         <Button size="sm" variant="primary" onClick={onRegister} data-testid={`recon-month-${item.supplierId}`}>
           登记已对账
+        </Button>
+      )}
+      {canRegister && item.state === 'changed' && onRevoke && (
+        <Button size="sm" variant="secondary" onClick={onRevoke}>
+          撤销登记
         </Button>
       )}
     </li>
@@ -404,9 +445,12 @@ function BatchDialog({ target, onClose }: { target: BatchTarget | null; onClose:
   );
 }
 
+/** 撤销对账登记（v0.7.14：与登记一样带操作编号、提交前存本机，结果不明时在页面上方查回、重提或作废） */
 function VoidDialog({ rec, onClose }: { rec: SupplierReconciliation | null; onClose: () => void }) {
+  const session = useSession();
   const toast = useToast();
   const invalidate = useInvalidateAll();
+  const pending = useErpPending(['supplier_recon_void']);
   const [busy, setBusy] = useState(false);
   return (
     <ReasonDialog
@@ -416,17 +460,33 @@ function VoidDialog({ rec, onClose }: { rec: SupplierReconciliation | null; onCl
       confirmLabel="撤销登记"
       danger
       busy={busy}
+      extra={pending.length > 0 ? <Notice tone="warning" title="上一笔撤销结果待确认">请先在页面上方查回、按原内容重新提交或作废。</Notice> : undefined}
       onClose={onClose}
       onConfirm={async (reason) => {
         if (!rec) return;
+        if (pending.length > 0) {
+          toast({ tone: 'error', title: '上一笔撤销结果待确认：请先在页面上方查回、按原内容重新提交或作废' });
+          return;
+        }
         setBusy(true);
         try {
-          await api.post(`/api/payables/reconciliations/${rec.id}/void`, { reason });
+          const body = { clientKey: uuid(), reason };
+          await sendErpOp({
+            key: body.clientKey,
+            type: 'supplier_recon_void',
+            url: `/api/payables/reconciliations/${rec.id}/void`,
+            body,
+            summary: `撤销 ${rec.supplierName} ${rec.kind === 'month' ? `${monthLabel(rec.month!)}月结对账` : `按批次对账 ${rec.docs.map((d) => d.docNo).join('、')}`}`,
+            staffName: session.staff.displayName,
+          });
           await invalidate();
           toast({ tone: 'success', title: '已撤销对账登记' });
           onClose();
         } catch (e) {
-          toast({ tone: 'error', title: errorMessage(e) });
+          if (e instanceof UncertainError) {
+            toast({ tone: 'info', title: '撤销结果待确认', body: '已记在本机：请在页面上方查回、按原内容重新提交或作废，不要重新填写。' });
+            onClose();
+          } else toast({ tone: 'error', title: e instanceof ApiError ? e.message : errorMessage(e) });
         } finally {
           setBusy(false);
         }

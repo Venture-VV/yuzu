@@ -34,6 +34,10 @@ interface Line {
   qty: string;
   price: string;
   receivedMilli: number;
+  /** 已有行原来的订购数量（库存单位）；新行为空 */
+  origBaseMilli: number | null;
+  /** 称重物料（v0.7.13）：按实际称重收货，可以比订购数量多出容差 */
+  weighed: boolean;
   /** 已有行的比价（按下单日期计算） */
   compare: PriceCompare | null;
   note: string;
@@ -91,6 +95,8 @@ function linesFrom(po: PurchaseOrder): Line[] {
     qty: formatQty(l.purchaseQtyMilli).replace(/,/g, ''),
     price: centsToInput(l.priceCents),
     receivedMilli: l.receivedMilli,
+    origBaseMilli: l.baseQtyMilli,
+    weighed: l.weighed,
     compare: l.compare,
     note: l.note,
     spec: l.spec,
@@ -110,6 +116,9 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
   const suppliers = useSuppliers();
   const materialsQ = useMaterials();
   const settings = useInvSettings();
+  // 称重物料多到的（v0.7.13）：数量没改的照旧可以改单；改了的，已收货不超过新数量加容差就行（与服务端一致）
+  const weighedOk = (l: Line, base: number) =>
+    l.weighed && (base === l.origBaseMilli || base + Math.floor((base * (settings.data?.weighTolerancePct ?? 10)) / 100) >= l.receivedMilli);
   const [clientKey] = useState(uuid);
   const [supplierId, setSupplierId] = useState<number | null>(existing?.supplier.id ?? null);
   const [orderDate, setOrderDate] = useState(existing?.orderDate ?? session.calendarToday);
@@ -164,6 +173,8 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
     qty: '',
     price: m.refPriceCents !== null ? centsToInput(m.refPriceCents) : '',
     receivedMilli: 0,
+    origBaseMilli: null,
+    weighed: m.weighed,
     compare: null,
     note: '',
     spec: m.specification.slice(0, 80),
@@ -231,7 +242,7 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
     let err: string | null = null;
     if (l.qty.trim() && (qty === null || qty === 0)) err = '数量格式不正确';
     else if (qty !== null && (base === null || !fitsDecimals(base, l.decimals))) err = `换算后不是整${l.inventoryUnit}`;
-    else if (base !== null && base < l.receivedMilli) err = `已收货 ${formatQty(l.receivedMilli)} ${l.inventoryUnit}，不能少于已收货`;
+    else if (base !== null && base < l.receivedMilli && !weighedOk(l, base)) err = `已收货 ${formatQty(l.receivedMilli)} ${l.inventoryUnit}，不能少于已收货`;
     else if (l.price.trim() && price === null) err = '单价格式不正确';
     const amount = base !== null && price !== null ? lineAmountCents(base, price, l.factorMilli) : null;
     const ready = !err && qty !== null && qty > 0 && price !== null;
