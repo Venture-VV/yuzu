@@ -495,28 +495,31 @@ export async function voidSession(deps: Deps, id: number, raw: unknown, ctx: OpC
 export const SessionSpaceInput = z.object({
   /** 换到的房间；null 为清掉房间 */
   spaceId: z.number().int().positive().nullable(),
-  /** 页面上看到的房间：对不上（别人刚换过、超时后迟到的旧请求）就拒绝，不悄悄覆盖 */
-  expectedSpaceId: z.number().int().positive().nullable(),
+  /**
+   * 页面上看到的房间版本号（每换一次加 1）：对不上就拒绝，不悄悄覆盖。只比房间会漏掉「A 换成 C 又换回 A」，
+   * 超时后迟到的「A → B」旧请求就会盖掉后来的修改；版本号只增不减，中间有过任何修改都对不上
+   */
+  expectedVersion: z.number().int().min(0),
 });
 
 /** 派钟后改服务的房间、补选房间（前台挂账建的钟单没有房间）、清掉房间：只锁钟单一行，再给新房间加共享锁 */
 export async function setSessionSpace(deps: Deps, id: number, raw: unknown, ctx: OpContext) {
-  const { spaceId, expectedSpaceId } = parse(SessionSpaceInput, raw);
+  const { spaceId, expectedVersion } = parse(SessionSpaceInput, raw);
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const at = ctx.at ?? new Date();
-    const [s] = await tx<{ id: number; sessionNo: string; technicianId: number; status: string; spaceId: number | null; visitStatus: string }[]>`
-      SELECT s.id, s.session_no, s.technician_id, s.status, s.space_id, v.status AS visit_status
+    const [s] = await tx<{ id: number; sessionNo: string; technicianId: number; status: string; spaceId: number | null; spaceVersion: number; visitStatus: string }[]>`
+      SELECT s.id, s.session_no, s.technician_id, s.status, s.space_id, s.space_version, v.status AS visit_status
       FROM technician_sessions s JOIN visits v ON v.id = s.visit_id WHERE s.id = ${id} FOR UPDATE OF s`;
     if (!s) throw notFound('钟单不存在');
     if (s.status !== 'waiting' && s.status !== 'serving') throw conflict('SESSION_CLOSED', `钟单 ${s.sessionNo} 已结束，不能再换房间`);
     if (s.visitStatus !== 'open') throw conflict('VISIT_CLOSED', `钟单 ${s.sessionNo} 的客人已离店，不能再换房间`);
-    // 已经是这间：重发、两个人同时选了同一间都照常返回
+    // 已经是这间：重发、两个人同时选了同一间都照常返回（不改、不记日志）
     if (s.spaceId === spaceId) return;
-    if (s.spaceId !== expectedSpaceId) throw conflict('SESSION_SPACE_STALE', `钟单 ${s.sessionNo} 的房间刚被改过，请刷新后再选`);
+    if (s.spaceVersion !== expectedVersion) throw conflict('SESSION_SPACE_STALE', `钟单 ${s.sessionNo} 的房间刚被改过，请刷新后再选`);
     const to = spaceId === null ? null : await lockServiceSpace(tx, spaceId);
     const [from] = s.spaceId === null ? [] : await tx<{ code: string; displayName: string }[]>`SELECT code, display_name FROM spaces WHERE id = ${s.spaceId}`;
-    await tx`UPDATE technician_sessions SET space_id = ${spaceId} WHERE id = ${s.id}`;
+    await tx`UPDATE technician_sessions SET space_id = ${spaceId}, space_version = space_version + 1 WHERE id = ${s.id}`;
     await logEvent(tx, {
       technicianId: s.technicianId,
       sessionId: s.id,
@@ -629,7 +632,7 @@ export async function clockroomBoard(db: Db, deps: Deps): Promise<ClockroomBoard
   >`
     SELECT s.id, s.session_no, s.technician_id, t.tech_no, t.name AS tech_name, s.visit_id, h.code AS tag_code, v.zone,
            m.name AS member_name, v.guest_label, s.item_id, i.name AS item_name, s.call_type, s.clocks, s.minutes, s.status, s.created_at, s.started_at,
-           s.space_id, sp.code AS space_code, sp.display_name AS space_name
+           s.space_id, s.space_version, sp.code AS space_code, sp.display_name AS space_name
     FROM technician_sessions s JOIN technicians t ON t.id = s.technician_id JOIN visits v ON v.id = s.visit_id
     JOIN hand_tags h ON h.id = v.tag_id JOIN service_items i ON i.id = s.item_id LEFT JOIN members m ON m.id = v.member_id
     LEFT JOIN spaces sp ON sp.id = s.space_id

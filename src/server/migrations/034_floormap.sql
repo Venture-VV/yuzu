@@ -3,6 +3,9 @@
 -- 只加列、加索引、放宽约束。
 
 ALTER TABLE technician_sessions ADD COLUMN space_id bigint REFERENCES spaces (id);
+-- 房间的版本号：每换一次房间加 1。换房间的请求带上页面看到的版本号，对不上就拒绝——中间有过任何修改（哪怕又换回原来那间），
+-- 超时后迟到的旧请求都不会盖掉后来的修改
+ALTER TABLE technician_sessions ADD COLUMN space_version integer NOT NULL DEFAULT 0 CHECK (space_version >= 0);
 -- 房态图、派钟选房间：每个房间里还没结束的钟单
 CREATE INDEX technician_sessions_space_idx ON technician_sessions (space_id, id) WHERE space_id IS NOT NULL AND status IN ('waiting', 'serving');
 

@@ -59,12 +59,12 @@ const enter = async () => {
 };
 const dispatch = (body: Record<string, unknown>, clientKey = randomUUID()) =>
   api(ctx.app, ctx.clerk, 'POST', '/api/clockroom/dispatch', { clientKey, quantity: 1, startNow: true, itemId: foot, tier: 'standard', expectedTotal: 19800, callType: 'designated', ...body });
-type Session = { id: number; visitId: number; status: string; techNo: string; space: { id: number; code: string; displayName: string } | null };
+type Session = { id: number; visitId: number; status: string; techNo: string; space: { id: number; code: string; displayName: string } | null; spaceVersion: number };
 const sessions = async () => (await api(ctx.app, ctx.clerk, 'GET', '/api/clockroom')).body.sessions as Session[];
 const sessionOf = async (visitId: number) => (await sessions()).find((s) => s.visitId === visitId)!;
 const map = async (cookie = ctx.clerk) => (await api(ctx.app, cookie, 'GET', '/api/floormap')).body as FloorMapData;
-const setRoom = (id: number, spaceId: number | null, expectedSpaceId: number | null) =>
-  api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/sessions/${id}/space`, { spaceId, expectedSpaceId });
+const setRoom = (id: number, spaceId: number | null, expectedVersion: number) =>
+  api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/sessions/${id}/space`, { spaceId, expectedVersion });
 const pay = async (visitId: number) => {
   const preview = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${visitId}`)).body;
   const r = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', {
@@ -241,23 +241,42 @@ describe('派钟选房间', () => {
 });
 
 describe('换房间', () => {
-  it('补选、换、清掉房间都记钟房日志；页面看到的房间对不上拒绝；已经是这间照常返回；只能换到技师房', async () => {
+  it('补选、换、清掉房间都记钟房日志、版本号加 1；版本号对不上拒绝；已经是这间照常返回；只能换到技师房', async () => {
+    const d = (await sessions()).find((x) => x.techNo === '03')!;
+    expect([d.space, d.spaceVersion]).toEqual([null, 0]);
+    const s302 = await space('S302');
+    const f312 = await space('F312');
+    expect((await setRoom(d.id, f312.id, 1)).body.error.code).toBe('SESSION_SPACE_STALE');
+    expect((await setRoom(d.id, (await space('G302')).id, 0)).body.error.code).toBe('SPACE_NOT_SERVICE');
+    expect((await setRoom(d.id, f312.id, 0)).status).toBe(200);
+    expect(await sessionOf(d.visitId)).toMatchObject({ space: { code: 'F312' }, spaceVersion: 1 });
+    // 重发、两个人同时选了同一间：照常返回，不改版本号、不另记日志
+    expect((await setRoom(d.id, f312.id, 0)).status).toBe(200);
+    expect((await sessionOf(d.visitId)).spaceVersion).toBe(1);
+    expect((await setRoom(d.id, s302.id, 1)).status).toBe(200);
+    expect((await setRoom(d.id, null, 2)).status).toBe(200);
+    expect(await sessionOf(d.visitId)).toMatchObject({ space: null, spaceVersion: 3 });
+    const events = (await api(ctx.app, ctx.clerk, 'GET', '/api/clockroom/events')).body as { kind: string; text: string; sessionNo: string }[];
+    expect(events.filter((e) => e.kind === 'room').map((e) => e.text)).toEqual(['清掉房间 S302 · 合成SPA 2人间', '房间 F312 · 合成足浴 4人间 → S302 · 合成SPA 2人间', '选房间 F312 · 合成足浴 4人间']);
+    expect((await api(ctx.app, manager, 'POST', `/api/clockroom/sessions/${d.id}/space`, { spaceId: f312.id, expectedVersion: 3 })).status).toBe(403);
+  });
+
+  it('超时后迟到的旧请求：中间换过又换回原来的房间（A → C → A），旧请求照样被拒绝，不盖掉后来的修改', async () => {
     const d = (await sessions()).find((x) => x.techNo === '03')!;
     const s302 = await space('S302');
     const f312 = await space('F312');
-    expect((await setRoom(d.id, f312.id, s302.id)).body.error.code).toBe('SESSION_SPACE_STALE');
-    expect((await setRoom(d.id, (await space('G302')).id, null)).body.error.code).toBe('SPACE_NOT_SERVICE');
-    expect((await setRoom(d.id, f312.id, null)).status).toBe(200);
-    expect((await sessionOf(d.visitId)).space?.code).toBe('F312');
-    // 重发、两个人同时选了同一间：照常返回，不另记日志
-    expect((await setRoom(d.id, f312.id, null)).status).toBe(200);
-    expect((await setRoom(d.id, s302.id, f312.id)).status).toBe(200);
-    expect((await setRoom(d.id, null, s302.id)).status).toBe(200);
-    expect((await sessionOf(d.visitId)).space).toBeNull();
-    const events = (await api(ctx.app, ctx.clerk, 'GET', '/api/clockroom/events')).body as { kind: string; text: string; sessionNo: string }[];
-    expect(events.filter((e) => e.kind === 'room').map((e) => e.text)).toEqual(['清掉房间 S302 · 合成SPA 2人间', '房间 F312 · 合成足浴 4人间 → S302 · 合成SPA 2人间', '选房间 F312 · 合成足浴 4人间']);
-    expect((await api(ctx.app, manager, 'POST', `/api/clockroom/sessions/${d.id}/space`, { spaceId: f312.id, expectedSpaceId: null })).status).toBe(403);
-    expect((await setRoom(d.id, f312.id, null)).status).toBe(200);
+    // 页面看到「没有房间、版本 3」时发出「换到 S302」，请求在路上耽搁了
+    const seen = d.spaceVersion;
+    expect([d.space, seen]).toEqual([null, 3]);
+    // 这期间另一台终端换到 F312、又清掉（回到没有房间）
+    expect((await setRoom(d.id, f312.id, seen)).status).toBe(200);
+    expect((await setRoom(d.id, null, seen + 1)).status).toBe(200);
+    // 迟到的那次到了：房间与看到时一样，但版本号对不上，拒绝
+    expect((await setRoom(d.id, s302.id, seen)).body.error.code).toBe('SESSION_SPACE_STALE');
+    expect(await sessionOf(d.visitId)).toMatchObject({ space: null, spaceVersion: seen + 2 });
+    // 按看板上现在的版本号再选
+    expect((await setRoom(d.id, f312.id, seen + 2)).status).toBe(200);
+    expect(await sessionOf(d.visitId)).toMatchObject({ space: { code: 'F312' }, spaceVersion: seen + 3 });
   });
 });
 

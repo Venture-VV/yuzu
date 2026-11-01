@@ -6,7 +6,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { BoardSession, ClockroomBoard } from '@shared/clockroom';
 import type { ClockSpace } from '@shared/floormap';
 import { spaceLabel } from '@shared/spaces';
-import { api, errorMessage } from '../../lib/api';
+import { api, errorMessage, UncertainError } from '../../lib/api';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Dialog } from '../../components/Overlay';
 import { Button, Field, Notice, Select } from '../../components/ui';
@@ -73,10 +73,15 @@ export function RoomDialog({ session: s, onClose, onSaved }: { session: BoardSes
     setBusy(true);
     setError(null);
     try {
-      onSaved(await api.post<ClockroomBoard>(`/api/clockroom/sessions/${s.id}/space`, { spaceId: value, expectedSpaceId: s.space?.id ?? null }));
+      onSaved(await api.post<ClockroomBoard>(`/api/clockroom/sessions/${s.id}/space`, { spaceId: value, expectedVersion: s.spaceVersion }));
     } catch (e) {
-      // 被拒绝（别人刚换过、房间停用了）或结果不明：刷新钟房看板，按看板上的房间再选
-      setError(errorMessage(e));
+      // 被拒绝（别人刚换过、房间停用了）或结果不明：刷新钟房看板，按看板上的房间再选。
+      // 请求带着看到的版本号，结果不明的那次就算迟到生效，也盖不掉之后的修改
+      setError(
+        e instanceof UncertainError
+          ? `${e.message}，不确定换好了没有：钟房看板已刷新，关掉看钟单上现在的房间，不对再换`
+          : errorMessage(e),
+      );
       void qc.invalidateQueries({ queryKey: ['clockroom'] });
     } finally {
       setBusy(false);

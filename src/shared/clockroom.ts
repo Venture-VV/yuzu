@@ -120,6 +120,8 @@ export interface BoardSession {
   plannedEnd: string | null;
   /** 服务的房间（v0.7.16，空间台账里的技师服务类空间；没选为 null） */
   space: { id: number; code: string; displayName: string } | null;
+  /** 房间的版本号（每换一次加 1）：换房间时原样带回，对不上（刚被改过）就拒绝 */
+  spaceVersion: number;
 }
 
 export interface ClockroomBoard {

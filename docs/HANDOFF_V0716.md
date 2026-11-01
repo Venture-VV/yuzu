@@ -25,8 +25,8 @@
 | 缩放平移 | 滚轮（以鼠标为中心）、双指、拖动；「缩小」「放大」「适应屏幕」；1–12 倍 |
 | 刷新 | 状态与客房房态每 5 秒；底图与轮廓只取一次，启用了新的一批自动换 |
 | 点房间 | 客房：开房 / 查房 / 续住 / 换房 / 押金 / 退房 / 改房态（打扫好了、维修好了），都是「客房」页原来的对话框；技师房：房里的钟（技师、手牌、项目、上钟时间、剩几分钟），「去钟房」；其他：业态、楼层区域、容量、面积、别名 |
-| 钟房 | 派钟对话框「房间（可不选）」：在用、可售的技师服务类空间按楼层分组、写占用；钟单卡片显示房间，点开换房间 / 补选 / 清掉（带上看到的房间，对不上 409 `SESSION_SPACE_STALE`），记钟房日志 |
-| 接口 | `GET /api/floormap`（空间台账的空间 + 记了房间、没结束的钟单 + 在用底图批次；`room.operate` / `room.housekeep` / `frontdesk.checkout` 任一）；`GET /api/clockroom/spaces`（可选的技师房与占用，`technician.dispatch`）；`POST /api/clockroom/sessions/:id/space`（`{ spaceId, expectedSpaceId }`，`technician.dispatch`）；派钟 `POST /api/clockroom/dispatch` 可带 `spaceId`；`GET /api/rooms` 的房间带 `spaceId`；钟房看板的钟单带 `space` |
+| 钟房 | 派钟对话框「房间（可不选）」：在用、可售的技师服务类空间按楼层分组、写占用；钟单卡片显示房间，点开换房间 / 补选 / 清掉（带上看到的版本号，每换一次加 1，对不上 409 `SESSION_SPACE_STALE`），记钟房日志 |
+| 接口 | `GET /api/floormap`（空间台账的空间 + 记了房间、没结束的钟单 + 在用底图批次；`room.operate` / `room.housekeep` / `frontdesk.checkout` 任一）；`GET /api/clockroom/spaces`（可选的技师房与占用，`technician.dispatch`）；`POST /api/clockroom/sessions/:id/space`（`{ spaceId, expectedVersion }`，`technician.dispatch`）；派钟 `POST /api/clockroom/dispatch` 可带 `spaceId`；`GET /api/rooms` 的房间带 `spaceId`；钟房看板的钟单带 `space` 与 `spaceVersion` |
 | 拒绝 | 派钟、换房间到不是技师服务类的空间 422 `SPACE_NOT_SERVICE`，停用 409 `SPACE_INACTIVE`，不可售 409 `SPACE_NOT_SELLABLE`，不存在 404；同一个操作编号换了房间重发 409 `IDEMPOTENCY_CONFLICT`；空间台账停用或改业态时房间里有没结束的钟单 409 `SPACE_HAS_SESSIONS` |
 | 自检 | `check` 加一项「钟单记的房间是在用的技师服务类空间」（比 v0.7.15 多一项） |
 | 其他修正 | 入住单对话框一打开就要做的操作（续住、换房、押金、退房）等入住单先挂上再打开，子对话框不再被压在下面（入住单已经缓存过时会这样，原来的「去处理」也可能碰到） |
@@ -64,7 +64,7 @@
 | M8 | 前台账号点 W301「开房」，填在店客人的手牌入住 | 「客房」页原来的入住对话框；入住后 W301 变在住，侧栏写手牌、入住与预离、房费 |
 | M9 | 侧栏「查房」「续住」「换房」「押金」「退房」 | 各自打开原来的对话框（在入住单上面，能直接操作）；退房后 W301 待打扫 |
 | M10 | 侧栏「打扫好了」（后勤账号也能做） | W301 变空闲；后勤账号在平面图上看不到开房、退房按钮 |
-| M11 | 钟房的钟单卡片点房间 → 换到 T302；接口拿换之前的房间（`expectedSpaceId` 写 T301 的编号）再换一次到 V312 | 卡片显示 T302；平面图 5 秒内 T302「服务中 1/2」、T301 空闲；钟房日志「房间 T301 · … → T302 · …」；后一次 409 `SESSION_SPACE_STALE` |
+| M11 | 钟房的钟单卡片点房间 → 换到 T302；接口拿换之前的版本号（钟房看板 `sessions[].spaceVersion` 换之前的值）再换一次到 V312；再试「A → C → A」之后用最早的版本号换到 B | 卡片显示 T302；平面图 5 秒内 T302「服务中 1/2」、T301 空闲；钟房日志「房间 T301 · … → T302 · …」；后两次都是 409 `SESSION_SPACE_STALE`，房间不变 |
 | M12 | 下钟；再派一个钟到 T302、不上钟 | 下钟后 T302 变空闲；派了没上钟是「待上钟」 |
 | M13 | 房间里有没结束的钟单时，后台把这个空间停用、改成「娱乐室」；改成「按摩」 | 前两个 409 `SPACE_HAS_SESSIONS`；改成「按摩」可以 |
 | M14 | 同一个操作编号的派钟原样重发；换了 `spaceId` 重发 | 原样重发返回原结果、只有一张钟单；换了房间 409 `IDEMPOTENCY_CONFLICT` |
