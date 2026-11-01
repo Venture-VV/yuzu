@@ -253,24 +253,71 @@ function PlanCanvas({
   onPick: (code: string) => void;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
-  const gRef = useRef<SVGGElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
   const view = useRef<View>({ k: 1, x: 0, y: 0 });
+  // 已经按它重画了文字的倍数（手势停下来才更新）
   const [k, setK] = useState(1);
-  const frame = useRef<number | null>(null);
+  const settle = useRef<number | null>(null);
   const W = floor.width;
   const H = floor.height;
 
-  const apply = useCallback(() => {
+  /** 画布大小与底图在画布里的位置（viewBox 按 meet 居中）：s 为每个底图单位多少像素 */
+  const metrics = useCallback(() => {
+    const r = boxRef.current!.getBoundingClientRect();
+    const s = Math.min(r.width / W, r.height / H) || 1;
+    return { r, s, ox: (r.width - W * s) / 2, oy: (r.height - H * s) / 2 };
+  }, [W, H]);
+
+  /** 把视图画上去：整个 SVG 用 CSS 变换缩放平移（以左上角为原点），视图按底图单位记 */
+  const paint = useCallback(() => {
+    const svg = svgRef.current;
+    if (!svg || !boxRef.current) return;
     const v = view.current;
-    gRef.current?.setAttribute('transform', `translate(${v.x} ${v.y}) scale(${v.k})`);
-    if (frame.current === null) {
-      frame.current = requestAnimationFrame(() => {
-        frame.current = null;
-        setK(view.current.k);
-      });
-    }
+    const { s, ox, oy } = metrics();
+    svg.style.transform = `translate(${s * v.x + ox * (1 - v.k)}px, ${s * v.y + oy * (1 - v.k)}px) scale(${v.k})`;
+    svg.dataset.view = `${v.k.toFixed(3)} ${v.x.toFixed(0)} ${v.y.toFixed(0)}`;
+  }, [metrics]);
+
+  /** 停下来：去掉合成层，按最后的倍数清晰重画，字号跟上 */
+  const settleNow = useCallback(() => {
+    if (settle.current !== null) window.clearTimeout(settle.current);
+    settle.current = null;
+    if (svgRef.current) svgRef.current.style.willChange = '';
+    setK(view.current.k);
   }, []);
-  useEffect(() => () => void (frame.current !== null && cancelAnimationFrame(frame.current)), []);
+
+  /**
+   * 手势进行中（滚轮、拖动、双指）：整张图作为合成层缩放平移，不重画房间与文字（300 个房号每帧重画在没有显卡加速的机器上很慢）；
+   * 停 150 毫秒后按最后的倍数清晰重画
+   */
+  const moving = useCallback(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    svg.style.willChange = 'transform';
+    paint();
+    if (settle.current !== null) window.clearTimeout(settle.current);
+    settle.current = window.setTimeout(settleNow, 150);
+  }, [paint, settleNow]);
+
+  /** 按钮、搜索定位、换楼层：直接画到位 */
+  const jump = useCallback(() => {
+    paint();
+    settleNow();
+  }, [paint, settleNow]);
+  useEffect(
+    () => () => {
+      if (settle.current !== null) window.clearTimeout(settle.current);
+    },
+    [],
+  );
+  // 画布大小变了（转屏、拉窗口）重算位置
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => paint());
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, [paint]);
 
   /** 平移不超出太多：整层至少留一半在视野里 */
   const clampPan = useCallback(() => {
@@ -283,22 +330,23 @@ function PlanCanvas({
 
   const reset = useCallback(() => {
     view.current = { k: 1, x: 0, y: 0 };
-    apply();
-  }, [apply]);
+    jump();
+  }, [jump]);
   // 换了楼层或换了一批底图（店主启用了新的一批）回到整层
   useEffect(() => reset(), [floor.svgUrl, reset]);
 
-  /** 屏幕坐标 → 底图坐标（viewBox，缩放之前） */
-  const toLocal = useCallback((clientX: number, clientY: number) => {
-    const svg = svgRef.current!;
-    const m = svg.getScreenCTM();
-    if (!m) return { x: 0, y: 0 };
-    const pt = new DOMPoint(clientX, clientY).matrixTransform(m.inverse());
-    return { x: pt.x, y: pt.y };
-  }, []);
+  /** 屏幕坐标 → 底图坐标（viewBox，缩放平移之前；按画布算，不受 CSS 变换影响） */
+  const toLocal = useCallback(
+    (clientX: number, clientY: number) => {
+      const { r, s, ox, oy } = metrics();
+      return { x: (clientX - r.left - ox) / s, y: (clientY - r.top - oy) / s };
+    },
+    [metrics],
+  );
 
+  /** 以 (px, py) 为中心缩放；live 为手势进行中 */
   const zoomAt = useCallback(
-    (px: number, py: number, factor: number) => {
+    (px: number, py: number, factor: number, live = false) => {
       const v = view.current;
       const k2 = Math.min(MAX_ZOOM, Math.max(1, v.k * factor));
       const f = k2 / v.k;
@@ -306,28 +354,29 @@ function PlanCanvas({
       v.y = py - (py - v.y) * f;
       v.k = k2;
       clampPan();
-      apply();
+      if (live) moving();
+      else jump();
     },
-    [apply, clampPan],
+    [clampPan, jump, moving],
   );
 
-  // 滚轮缩放（以鼠标位置为中心）：要阻止页面滚动，用非被动的监听
+  // 滚轮缩放（以鼠标位置为中心）：监听整个画布（平移后露出的空白处也能缩放），要阻止页面滚动，用非被动的监听
   useEffect(() => {
-    const svg = svgRef.current;
-    if (!svg) return;
+    const box = boxRef.current;
+    if (!box) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const p = toLocal(e.clientX, e.clientY);
-      zoomAt(p.x, p.y, Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015)));
+      zoomAt(p.x, p.y, Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015)), true);
     };
-    svg.addEventListener('wheel', onWheel, { passive: false });
-    return () => svg.removeEventListener('wheel', onWheel);
+    box.addEventListener('wheel', onWheel, { passive: false });
+    return () => box.removeEventListener('wheel', onWheel);
   }, [toLocal, zoomAt]);
 
   // 拖动平移、双指缩放；移动超过 6 像素就不算点击
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<{ moved: boolean; downX: number; downY: number; last: { x: number; y: number; d: number } | null }>({ moved: false, downX: 0, downY: 0, last: null });
-  const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.current.size === 1) gesture.current = { moved: false, downX: e.clientX, downY: e.clientY, last: null };
@@ -338,8 +387,11 @@ function PlanCanvas({
       if (!pointers.current.has(e.pointerId)) return;
       pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
       const g = gesture.current;
-      if (!g.moved && Math.hypot(e.clientX - g.downX, e.clientY - g.downY) > 6) g.moved = true;
-      if (!g.moved && pointers.current.size < 2) return;
+      if (!g.moved && pointers.current.size < 2) {
+        if (Math.hypot(e.clientX - g.downX, e.clientY - g.downY) <= 6) return;
+        // 刚超过 6 像素：从按下的位置算起，整段拖动都平移
+        g.last = { ...toLocal(g.downX, g.downY), d: 0 };
+      }
       const pts = [...pointers.current.values()];
       const mid = pts.length >= 2 ? { x: (pts[0]!.x + pts[1]!.x) / 2, y: (pts[0]!.y + pts[1]!.y) / 2 } : pts[0]!;
       const local = toLocal(mid.x, mid.y);
@@ -348,10 +400,10 @@ function PlanCanvas({
         const v = view.current;
         v.x += local.x - g.last.x;
         v.y += local.y - g.last.y;
-        if (pts.length >= 2 && g.last.d > 0 && d > 0) zoomAt(local.x, local.y, d / g.last.d);
+        if (pts.length >= 2 && g.last.d > 0 && d > 0) zoomAt(local.x, local.y, d / g.last.d, true);
         else {
           clampPan();
-          apply();
+          moving();
         }
       }
       g.moved = true;
@@ -369,7 +421,7 @@ function PlanCanvas({
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
     };
-  }, [apply, clampPan, toLocal, zoomAt]);
+  }, [clampPan, moving, toLocal, zoomAt]);
 
   const onClick = (e: React.MouseEvent<SVGSVGElement>) => {
     if (gesture.current.moved) return;
@@ -391,7 +443,7 @@ function PlanCanvas({
     v.x = W / 2 - cx * v.k;
     v.y = H / 2 - cy * v.k;
     clampPan();
-    apply();
+    jump();
     // entries 每 5 秒刷新一次，只在定位请求变化时移动
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus]);
@@ -412,24 +464,24 @@ function PlanCanvas({
       </div>
       {/* 画布按楼层的长宽比定高度（不超过一屏），竖屏、手机上不留大片空白 */}
       <div
-        className="relative min-h-[260px] w-full overflow-hidden rounded-lg border border-line bg-white"
+        ref={boxRef}
+        className="relative min-h-[260px] w-full cursor-grab touch-none overflow-hidden rounded-lg border border-line bg-white select-none active:cursor-grabbing"
         style={{ aspectRatio: `${W} / ${H}`, maxHeight: 'max(260px, calc(100dvh - 330px))' }}
+        onPointerDown={onPointerDown}
         data-testid="floormap-canvas"
       >
         <svg
           ref={svgRef}
           viewBox={`0 0 ${W} ${H}`}
           preserveAspectRatio="xMidYMid meet"
-          className="block h-full w-full cursor-grab touch-none select-none active:cursor-grabbing"
+          className="block h-full w-full origin-top-left"
           role="img"
           aria-label={`${floor.code} 房态图`}
-          onPointerDown={onPointerDown}
           onClick={onClick}
+          data-testid="floormap-view"
         >
-          <g ref={gRef} data-testid="floormap-view">
-            <image href={floor.svgUrl} x={0} y={0} width={W} height={H} />
-            <RoomsLayer entries={entries} selected={selected} dim={dim} labelK={labelK} W={W} H={H} flash={focus?.code ?? null} flashN={focus?.n ?? 0} />
-          </g>
+          <image href={floor.svgUrl} x={0} y={0} width={W} height={H} />
+          <RoomsLayer entries={entries} selected={selected} dim={dim} labelK={labelK} zoom={k} W={W} H={H} flash={focus?.code ?? null} flashN={focus?.n ?? 0} />
         </svg>
       </div>
     </div>
@@ -441,6 +493,7 @@ const RoomsLayer = memo(function RoomsLayer({
   selected,
   dim,
   labelK,
+  zoom,
   W,
   H,
   flash,
@@ -450,6 +503,8 @@ const RoomsLayer = memo(function RoomsLayer({
   selected: string | null;
   dim: Set<string>;
   labelK: number;
+  /** 整张图的 CSS 缩放倍数：轮廓线宽、虚线按它除回去，放大后线不变粗 */
+  zoom: number;
   W: number;
   H: number;
   flash: string | null;
@@ -457,6 +512,9 @@ const RoomsLayer = memo(function RoomsLayer({
 }) {
   const font = Math.max(W, H) / 90 / Math.sqrt(labelK);
   const showNames = labelK >= 2;
+  // 线宽：non-scaling-stroke 抵消 viewBox 的缩放，整张图的 CSS 缩放再除回去
+  const sw = (w: number) => w / zoom;
+  const dash = (a: number, b: number) => `${sw(a)} ${sw(b)}`;
   return (
     <>
       {entries.map((e) => {
@@ -471,12 +529,12 @@ const RoomsLayer = memo(function RoomsLayer({
                 fill={c.fill}
                 fillOpacity={0.78}
                 stroke={isSel ? '#a87508' : c.stroke}
-                strokeWidth={isSel ? 3.5 : 1.5}
-                strokeDasharray={dashed ? '6 4' : undefined}
+                strokeWidth={sw(isSel ? 3.5 : 1.5)}
+                strokeDasharray={dashed ? dash(6, 4) : undefined}
                 vectorEffect="non-scaling-stroke"
               />
             ) : (
-              <circle cx={e.labelAt[0]} cy={e.labelAt[1]} r={font * 1.1} fill={c.fill} stroke={isSel ? '#a87508' : c.stroke} strokeWidth={isSel ? 3.5 : 1.5} strokeDasharray={dashed ? '4 3' : undefined} vectorEffect="non-scaling-stroke" />
+              <circle cx={e.labelAt[0]} cy={e.labelAt[1]} r={font * 1.1} fill={c.fill} stroke={isSel ? '#a87508' : c.stroke} strokeWidth={sw(isSel ? 3.5 : 1.5)} strokeDasharray={dashed ? dash(4, 3) : undefined} vectorEffect="non-scaling-stroke" />
             )}
             <text
               x={e.labelAt[0]}
@@ -517,9 +575,9 @@ const RoomsLayer = memo(function RoomsLayer({
           .filter((e) => e.code === flash)
           .map((e) =>
             e.polygon ? (
-              <polygon key={`flash-${e.key}-${flashN}`} points={e.polygon.map((pt) => pt.join(',')).join(' ')} fill="none" stroke="#f2c230" strokeWidth={6} vectorEffect="non-scaling-stroke" className="pointer-events-none animate-flash" />
+              <polygon key={`flash-${e.key}-${flashN}`} points={e.polygon.map((pt) => pt.join(',')).join(' ')} fill="none" stroke="#f2c230" strokeWidth={sw(6)} vectorEffect="non-scaling-stroke" className="pointer-events-none animate-flash" />
             ) : (
-              <circle key={`flash-${e.key}-${flashN}`} cx={e.labelAt[0]} cy={e.labelAt[1]} r={font * 1.6} fill="none" stroke="#f2c230" strokeWidth={6} vectorEffect="non-scaling-stroke" className="pointer-events-none animate-flash" />
+              <circle key={`flash-${e.key}-${flashN}`} cx={e.labelAt[0]} cy={e.labelAt[1]} r={font * 1.6} fill="none" stroke="#f2c230" strokeWidth={sw(6)} vectorEffect="non-scaling-stroke" className="pointer-events-none animate-flash" />
             ),
           )}
     </>

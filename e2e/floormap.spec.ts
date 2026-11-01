@@ -430,7 +430,7 @@ test.describe('v0.7.16 房态图 · 各尺寸', () => {
     await page.getByTestId('floormap-fit').click();
     // 流畅：在页面里连续 30 帧，每帧一次滚轮缩放，平均每帧不超过 50 毫秒（300 个空间都在图上）
     const perFrame = await page.evaluate(async () => {
-      const svg = document.querySelector('[data-testid="floormap-canvas"] svg')!;
+      const svg = document.querySelector('[data-testid="floormap-canvas"]')!;
       const r = svg.getBoundingClientRect();
       const frame = () => new Promise((done) => requestAnimationFrame(done));
       await frame();
@@ -445,12 +445,12 @@ test.describe('v0.7.16 房态图 · 各尺寸', () => {
     expect(perFrame).toBeLessThan(50);
     await expect.poll(async () => Number(await zoom.getAttribute('data-zoom'))).toBeGreaterThan(3);
     // 拖动平移：底图跟着移动，松开后不算点击
-    const before = await page.getByTestId('floormap-view').getAttribute('transform');
+    const before = await page.getByTestId('floormap-view').getAttribute('data-view');
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
     await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 + 60, { steps: 6 });
     await page.mouse.up();
-    expect(await page.getByTestId('floormap-view').getAttribute('transform')).not.toBe(before);
+    expect(await page.getByTestId('floormap-view').getAttribute('data-view')).not.toBe(before);
     await expect(page.getByTestId('floormap-panel')).toHaveCount(0);
     await page.getByTestId('floormap-fit').click();
 
