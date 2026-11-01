@@ -141,6 +141,8 @@ export interface FloorplanBatchDiff {
   renamed: { floorCode: string; from: string; to: string }[];
   /** 同一个编码，位置挪了 2 米以上 */
   moved: { floorCode: string; code: string; distanceM: number }[];
+  /** 同一个编码换了楼层 */
+  floorChanged: { code: string; from: string; to: string }[];
 }
 
 export interface FloorplanDetail {

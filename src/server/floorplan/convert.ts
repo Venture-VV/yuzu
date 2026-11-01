@@ -884,8 +884,26 @@ export function convertDrawing(drawing: PlanDrawing, params: Partial<ConvertPara
     .map((t) => ({ t, n: floorTitleNumber(t.text), c: textCenter(t) }))
     .filter((x): x is { t: PlanText; n: number; c: Pt } => x.n !== null);
 
-  // 每块图形是哪一层：图上编码的楼层位多数决；没有编码看下方（或上方）最近的楼层标题
+  // 每块图形是哪一层：先看图上的楼层标题（图框横向范围内、上下一个空隙之内；按距离从近到远分配，一个标题只给一块），
+  // 没有标题再按房号楼层位的多数（v0.7.15 审查：个别房号换了楼层时不能让整层认错）
   const gapUnits = p.floorGapMm / p.unitMm;
+  const pairs: { cluster: number; title: number; d: number }[] = [];
+  clusters.forEach((cl, ci) => {
+    titles.forEach((tt, ti) => {
+      const [x, y] = tt.c;
+      if (x < cl.frame[0] || x > cl.frame[2]) return;
+      const d = y < cl.frame[1] ? cl.frame[1] - y : y > cl.frame[3] ? y - cl.frame[3] : 0;
+      if (d <= gapUnits) pairs.push({ cluster: ci, title: ti, d });
+    });
+  });
+  pairs.sort((a, b) => a.d - b.d || a.cluster - b.cluster || a.title - b.title);
+  const titleOf = new Map<number, number>();
+  const usedTitles = new Set<number>();
+  for (const pr of pairs) {
+    if (titleOf.has(pr.cluster) || usedTitles.has(pr.title)) continue;
+    titleOf.set(pr.cluster, pr.title);
+    usedTitles.add(pr.title);
+  }
   const candidates = clusters.map((cl, idx) => {
     const digits = new Map<number, number>();
     let codeCount = 0;
@@ -897,29 +915,19 @@ export function convertDrawing(drawing: PlanDrawing, params: Partial<ConvertPara
         codeCount++;
       }
     }
-    // 标题：在图框的横向范围内、上下各一个空隙之内，取离图框最近的
-    let title = '';
-    let titleN: number | null = null;
-    let titleD = Infinity;
-    for (const tt of titles) {
-      const [x, y] = tt.c;
-      if (x < cl.frame[0] || x > cl.frame[2]) continue;
-      const d = y < cl.frame[1] ? cl.frame[1] - y : y > cl.frame[3] ? y - cl.frame[3] : 0;
-      if (d > gapUnits || d >= titleD) continue;
-      titleD = d;
-      title = tt.t.text.replace(/\s+/g, '').slice(0, 16);
-      titleN = tt.n;
-    }
-    // 楼层位多数决；票数相同时看标题，再取小的
+    const ti = titleOf.get(idx);
+    const title = ti === undefined ? '' : titles[ti]!.t.text.replace(/\s+/g, '').slice(0, 16);
+    const titleN = ti === undefined ? null : titles[ti]!.n;
+    // 没有标题：楼层位多数，票数相同取小的
     let n: number | null = null;
     let best = 0;
     for (const [dgt, cnt] of [...digits].sort((a, b) => a[0] - b[0])) {
-      if (cnt > best || (cnt === best && dgt === titleN)) {
+      if (cnt > best) {
         best = cnt;
         n = dgt;
       }
     }
-    return { idx, cl, n: n ?? titleN, codeCount, title };
+    return { idx, cl, n: titleN ?? n, codeCount, title };
   });
   const byFloor = new Map<number, (typeof candidates)[number]>();
   for (const c of candidates) {

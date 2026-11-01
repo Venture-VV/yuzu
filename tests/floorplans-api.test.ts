@@ -27,6 +27,8 @@ async function waitReady(id: number): Promise<FloorplanDetail> {
   throw new Error('转换超时');
 }
 const codes = (list: { code: string }[]) => list.map((x) => x.code).sort();
+/** 启用：带上页面看到的在用批次 */
+const activate = (id: number, expectedActiveId: number | null, cookie = ctx.owner) => api(ctx.app, cookie, 'POST', `/api/admin/floorplans/${id}/activate`, { expectedActiveId });
 const readCsv = (file: string) => readFileSync(file, 'utf8').replace(/^﻿/, '');
 
 beforeAll(async () => {
@@ -113,11 +115,13 @@ describe('上传与转换', () => {
 
   it('启用：店长可以启用；在用的底图前台客房岗位能读（房间按编码对上台账）', async () => {
     expect(((await api(ctx.app, ctx.clerk, 'GET', '/api/floorplans/active')).body as ActiveFloorplan).batchId).toBeNull();
-    const r = await api(ctx.app, boss, 'POST', `/api/admin/floorplans/${v1}/activate`);
+    // 不带页面上的在用批次：拒绝
+    expect((await api(ctx.app, boss, 'POST', `/api/admin/floorplans/${v1}/activate`)).status).toBe(400);
+    const r = await activate(v1, null, boss);
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(r.body.batch).toMatchObject({ status: 'active', activatedByName: '店长' });
-    // 再点一次：不报错
-    expect((await api(ctx.app, boss, 'POST', `/api/admin/floorplans/${v1}/activate`)).status).toBe(200);
+    // 同一次启用再发一次（结果不明后重提）：已经在用，不报错
+    expect((await activate(v1, null, boss)).status).toBe(200);
     const active = (await api(ctx.app, ctx.clerk, 'GET', '/api/floorplans/active')).body as ActiveFloorplan;
     expect(active.batchId).toBe(v1);
     expect(active.floors.map((f) => f.svgUrl)).toEqual([`/api/floorplans/${v1}/floors/L2/svg`, `/api/floorplans/${v1}/floors/L3/svg`]);
@@ -142,18 +146,43 @@ describe('上传与转换', () => {
     expect(diff.removed.map((x) => x.code)).toEqual(expected.v2.batchDiffAgainstV1.removed);
     expect(diff.renamed.map((x) => [x.from, x.to])).toEqual(expected.v2.batchDiffAgainstV1.renamed);
     expect(diff.moved).toEqual([]);
-    const act = await api(ctx.app, ctx.owner, 'POST', `/api/admin/floorplans/${v2}/activate`);
+    expect(diff.floorChanged).toEqual([]);
+    // 页面还以为没有在用的（例如超时后迟到的请求、另一个标签页）：在用的已经是第一版，拒绝，第一版不被换下
+    const stale = await activate(v2, null);
+    expect(stale.status).toBe(409);
+    expect(stale.body.error.code).toBe('FLOORPLAN_STALE');
+    expect(((await api(ctx.app, ctx.owner, 'GET', '/api/admin/floorplans')).body as FloorplanList).activeId).toBe(v1);
+    const act = await activate(v2, v1);
     expect(act.status).toBe(200);
     const list = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/floorplans')).body as FloorplanList;
     expect(list.activeId).toBe(v2);
     expect(list.batches.find((b) => b.id === v1)!.status).toBe('retired');
-    const again = await api(ctx.app, ctx.owner, 'POST', `/api/admin/floorplans/${v1}/activate`);
+    const again = await activate(v1, v2);
     expect(again.status).toBe(409);
     expect(again.body.error.code).toBe('FLOORPLAN_NOT_READY');
+    // 第二版那次启用晚到地再发一次：已经在用，不报错，也不换下什么
+    expect((await activate(v2, v1)).status).toBe(200);
+    expect(((await api(ctx.app, ctx.owner, 'GET', '/api/admin/floorplans')).body as FloorplanList).activeId).toBe(v2);
     // 在用的那批与它换下的那批比
     expect((await detail(v2)).batchDiff!.againstBatchId).toBe(v1);
     // 原来那一批的底图前台看不到了
     expect((await api(ctx.app, ctx.clerk, 'GET', `/api/floorplans/${v1}/floors/L3/svg`)).status).toBe(404);
+  }, 60_000);
+
+  it('与在用的那一批比对：同一个编码换了楼层单独列出（不算增减、不算挪动）', async () => {
+    // 第二版上把三层的 T305 与二层的 X201 对调
+    const swapped = floorplanSampleDxf(2).replace('样例 SPA T305 2人间', '样例 SPA X201 2人间').replace('样例派对房X201', '样例派对房T305');
+    const r = await upload(swapped, '编码对调.dxf');
+    expect(r.status).toBe(202);
+    const d = await waitReady(r.body.batch.id);
+    expect(d.batch.status, d.batch.error ?? '').toBe('ready');
+    // 楼层按图上的标题定，不因为编码的楼层位对不上而认错
+    expect(d.floors.map((f) => f.code)).toEqual(['L2', 'L3']);
+    expect(d.batchDiff!.floorChanged).toEqual([
+      { code: 'T305', from: 'L3', to: 'L2' },
+      { code: 'X201', from: 'L2', to: 'L3' },
+    ]);
+    expect(d.batchDiff).toMatchObject({ added: [], removed: [], renamed: [], moved: [] });
   }, 60_000);
 
   it('spaces.geojson：每个编码一个要素，配上的是多边形、例外是点', async () => {
@@ -177,7 +206,7 @@ describe('上传与转换', () => {
     expect(again.status).toBe(202);
     expect(again.body.batch.id).not.toBe(r.body.batch.id);
     await waitReady(again.body.batch.id);
-    const act = await api(ctx.app, ctx.owner, 'POST', `/api/admin/floorplans/${r.body.batch.id}/activate`);
+    const act = await activate(r.body.batch.id, null);
     expect(act.status).toBe(409);
   }, 60_000);
 

@@ -194,7 +194,7 @@ async function batchDiff(db: Db, batchId: number, status: FloorplanBatchStatus, 
   const local = (fr: number[] | undefined, [x, y]: Pt): Pt => (fr ? [(x - fr[0]!) / k, (fr[3]! - y) / k] : [x / k, -y / k]);
   const newCodes = new Set(rooms.map((r) => r.code));
   const oldCodes = new Set(oldRooms.map((r) => r.code));
-  const diff: FloorplanBatchDiff = { againstBatchId: otherId, added: [], removed: [], renamed: [], moved: [] };
+  const diff: FloorplanBatchDiff = { againstBatchId: otherId, added: [], removed: [], renamed: [], moved: [], floorChanged: [] };
   const addedCands = rooms.filter((r) => !oldCodes.has(r.code));
   const removedCands = oldRooms.filter((r) => !newCodes.has(r.code));
   const usedOld = new Set<string>();
@@ -217,7 +217,12 @@ async function batchDiff(db: Db, batchId: number, status: FloorplanBatchStatus, 
   const oldByCode = new Map(oldRooms.map((r) => [r.code, r]));
   for (const n of rooms) {
     const o = oldByCode.get(n.code);
-    if (!o || o.floorCode !== n.floorCode) continue;
+    if (!o) continue;
+    // 同一个编码换了楼层（v0.7.15 审查）：单独列出，不当作位置挪动
+    if (o.floorCode !== n.floorCode) {
+      diff.floorChanged.push({ code: n.code, from: o.floorCode, to: n.floorCode });
+      continue;
+    }
     const nw = world(frames.get(n.floorCode), n.labelAt);
     const ow = world(oldFrames.get(o.floorCode), o.labelAt);
     const d = (Math.hypot(nw[0] - ow[0], nw[1] - ow[1]) * unitMm) / 1000;
@@ -419,8 +424,14 @@ export async function uploadFloorplan(
 
 // ───────────────────────── 启用 ─────────────────────────
 
-export async function activateFloorplan(deps: Deps, id: number, actor: Actor, ip?: string): Promise<{ replayed: boolean }> {
+const ActivateSchema = z.object({
+  // 页面上看到的在用批次（没有为 null）：对不上说明刚被换过，这次不启用（v0.7.15 审查：超时后迟到的启用请求不能把后来启用的那批换下）
+  expectedActiveId: z.number('缺少页面上的在用批次，请刷新后重试').int().positive().nullable(),
+});
+
+export async function activateFloorplan(deps: Deps, id: number, raw: unknown, actor: Actor, ip?: string): Promise<{ replayed: boolean }> {
   const { sql } = deps;
+  const { expectedActiveId } = parse(ActivateSchema, raw);
   try {
     return await sql.begin(async (tx) => {
       await setTxTimeouts(tx);
@@ -437,6 +448,12 @@ export async function activateFloorplan(deps: Deps, id: number, actor: Actor, ip
         );
       }
       const previous = rows.find((r) => r.status === 'active');
+      if ((previous ? Number(previous.id) : null) !== expectedActiveId) {
+        throw conflict(
+          'FLOORPLAN_STALE',
+          '在用的底图刚被换过（可能是刚才没收到结果的那次启用已经生效，或有人同时在操作），这次没有启用；请刷新后看一下再决定',
+        );
+      }
       if (previous) await tx`UPDATE floorplan_batches SET status = 'retired', retired_by = ${actor.id}, retired_at = now() WHERE id = ${previous.id}`;
       await tx`UPDATE floorplan_batches SET status = 'active', activated_by = ${actor.id}, activated_at = now() WHERE id = ${id}`;
       await writeAudit(tx, {
@@ -522,7 +539,7 @@ export function registerFloorplanRoutes(app: FastifyInstance, deps: Deps, jobs =
   app.get('/api/admin/floorplans/:id', { preHandler: admin }, async (req) => floorplanDetail(sql, parse(idParam, req.params).id));
   app.post('/api/admin/floorplans/:id/activate', { preHandler: admin }, async (req) => {
     const id = parse(idParam, req.params).id;
-    await activateFloorplan(deps, id, req.actor, req.ip);
+    await activateFloorplan(deps, id, req.body, req.actor, req.ip);
     return floorplanDetail(sql, id);
   });
   // spaces.geojson：每个编码一个要素（配上的是多边形，例外是文字所在的点）

@@ -192,6 +192,7 @@ function BatchList({ batches, current, onPick }: { batches: FloorplanBatch[]; cu
 
 function BatchDetail({ id }: { id: number }) {
   const detail = useFloorplanDetail(id);
+  const list = useFloorplans();
   const invalidate = useInvalidateFloorplans();
   const toast = useToast();
   const [confirming, setConfirming] = useState(false);
@@ -202,17 +203,24 @@ function BatchDetail({ id }: { id: number }) {
   const b = d.batch;
   const exceptions = d.rooms.filter((r) => r.status !== 'ok');
 
+  // 带上页面看到的在用批次：超时后迟到的这次请求、别人同时的启用，对不上的服务端拒绝（FLOORPLAN_STALE），
+  // 不会把后来启用的那批换下；结果不明或被拒绝时刷新，按最新状态再决定
   const activate = async () => {
     setActivating(true);
     setError(null);
     try {
-      const next = await api.post<FloorplanDetail>(`/api/admin/floorplans/${b.id}/activate`);
+      const next = await api.post<FloorplanDetail>(`/api/admin/floorplans/${b.id}/activate`, { expectedActiveId: list.data?.activeId ?? null });
       await invalidate(next);
       setConfirming(false);
       toast({ tone: 'success', title: `批次 #${b.id} 已启用`, body: '房态图（第三段）会用这一批底图' });
     } catch (e) {
-      setError(errorMessage(e));
+      setError(
+        e instanceof UncertainError
+          ? '启用结果不明（网络中断或服务器很久没回应）：已刷新，看这一批是不是已经「在用」；没有的话再点一次启用。这次请求要是晚到，而在用的底图已经换过，会被拒绝，不会把后来启用的那批换下。'
+          : errorMessage(e),
+      );
       setConfirming(false);
+      await invalidate();
     } finally {
       setActivating(false);
     }
@@ -458,7 +466,7 @@ function LedgerDiffView({ detail }: { detail: FloorplanDetail }) {
 function BatchDiffView({ detail }: { detail: FloorplanDetail }) {
   const diff = detail.batchDiff;
   if (!diff) return null;
-  const none = !diff.added.length && !diff.removed.length && !diff.renamed.length && !diff.moved.length;
+  const none = !diff.added.length && !diff.removed.length && !diff.renamed.length && !diff.moved.length && !diff.floorChanged.length;
   const label = detail.batch.status === 'active' ? '与它换下的那一批' : '与在用的那一批';
   return (
     <div className="space-y-2" data-testid="floorplan-batch-diff">
@@ -466,6 +474,11 @@ function BatchDiffView({ detail }: { detail: FloorplanDetail }) {
         {label}（#{diff.againstBatchId}）比对：房间增减、编码变更
       </SectionTitle>
       {none && <Notice tone="success">房间与编码没有变化。</Notice>}
+      {diff.floorChanged.length > 0 && (
+        <DiffRow title={`换了楼层 ${diff.floorChanged.length} 个`} hint="同一个编码在两批图上的楼层不同">
+          <CodeChips tone="clay" items={diff.floorChanged.map((x) => `${x.code}：${x.from} → ${x.to}`)} />
+        </DiffRow>
+      )}
       {diff.renamed.length > 0 && (
         <DiffRow title={`编码变更 ${diff.renamed.length} 个`} hint="同一个位置换了编码">
           <CodeChips tone="yuzu" items={diff.renamed.map((x) => `${x.from} → ${x.to}`)} />

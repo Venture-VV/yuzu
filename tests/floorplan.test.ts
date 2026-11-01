@@ -187,6 +187,14 @@ describe('读 DXF', () => {
     expect(readDxf(bytes).texts[0]!.text).toBe('走道');
   });
 
+  it('多行文字的旋转：组码 50 按度（AutoCAD 实际按度写，DXF 参考手册写的弧度有误，ezdxf 同样按度），有方向向量时以方向向量为准', () => {
+    const mtext = (extra: string) =>
+      readDxf(enc(`0\nSECTION\n2\nENTITIES\n0\nMTEXT\n8\nW-区域文字\n10\n0\n20\n0\n40\n300\n71\n5\n${extra}1\nG301\n0\nENDSEC\n0\nEOF\n`)).texts[0]!.rotation;
+    expect(mtext('50\n90\n')).toBeCloseTo(Math.PI / 2);
+    expect(mtext('11\n0\n21\n1\n50\n45\n')).toBeCloseTo(Math.PI / 2);
+    expect(mtext('')).toBe(0);
+  });
+
   it('二进制 DXF、损坏的组码给出原因', () => {
     expect(() => readDxf(enc('AutoCAD Binary DXF\r\n\x1a\0'))).toThrow(/二进制 DXF/);
     expect(() => readDxf(enc('0\nSECTION\n2\nENTITIES\nabc\nLINE\n'))).toThrow(/不是组码/);
@@ -291,6 +299,28 @@ describe('转换：例外与提示', () => {
     expect(r.issues.map((i) => i.kind).sort()).toEqual(['code_floor_digit', 'code_outside', 'floor_unknown']);
     expect(r.issues.find((i) => i.kind === 'code_floor_digit')).toMatchObject({ floor: 'L3', code: 'G202' });
     expect(r.issues.find((i) => i.kind === 'code_outside')).toMatchObject({ code: 'G309' });
+  });
+
+  it('楼层先看图上的标题：个别房号换了楼层（楼层位对不上）不会让整层认错，只列提示；一个标题只给最近的一块', () => {
+    const l3 = [...room(0, 0, 5000, 5000), ...room(6000, 0, 5000, 5000), ...room(12000, 0, 5000, 5000)];
+    const l2 = [...room(100000, 0, 5000, 5000), ...room(106000, 0, 5000, 5000)];
+    const texts = [
+      text('W-区域文字', 'G301', 2500, 2500),
+      text('W-区域文字', 'G302', 8500, 2500),
+      text('W-区域文字', 'P201', 14500, 2500),
+      // 二层只剩一个编码，而且是三层的编码
+      text('W-区域文字', 'G303', 102500, 2500),
+      text('W-文字', '三层', 8500, -3000, 1000),
+      text('W-文字', '二层', 105500, -3000, 1000),
+    ];
+    const r = convertDrawing(drawing([...l3, ...l2], texts));
+    expect(r.floors.map((f) => [f.code, f.title])).toEqual([
+      ['L2', '二层'],
+      ['L3', '三层'],
+    ]);
+    expect(r.rooms.find((x) => x.code === 'G303')).toMatchObject({ floor: 'L2', status: 'ok' });
+    expect(r.issues.filter((i) => i.kind === 'code_floor_digit').map((i) => i.code).sort()).toEqual(['G303', 'P201']);
+    expect(r.issues.some((i) => i.kind === 'floor_duplicate')).toBe(false);
   });
 
   it('区域文字里的 < & > 在底图里转义', () => {
