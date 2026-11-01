@@ -18,7 +18,7 @@ import type { Actor, Deps } from '../../lib/context';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
 import { lockOpKey } from '../../lib/fences';
 import { idParam, parse } from '../../lib/validate';
-import { assertNotFuture, canOperateDept, docDateSchema, loadInventorySettings, logApproval, nextDocNo, priceBaseline, setTxTimeouts, todayIn } from './common';
+import { assertNotFuture, canOperateDept, docDateSchema, loadInventorySettings, logApproval, nextDocNo, overThreshold, priceBaseline, setTxTimeouts, todayIn } from './common';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -106,14 +106,28 @@ export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
   const receipts = await db<PurchaseOrder['receipts']>`
     SELECT id, doc_no, doc_type, status, doc_date, amount_cents FROM inv_docs
     WHERE purchase_order_id = ${poId} AND doc_type = 'receipt' ORDER BY doc_date, id`;
-  const [money] = await db<{ receivedCents: number; returnCreditCents: number; paidCents: number }[]>`
+  // 与应付未结清、供应商往来同一口径（v0.7.12）：退货只扣抵了本单收货的部分（return_applied_cents，现付的整笔），
+  // 已付含付款核销与核销（预付款、退货余额）到本单收货的；没抵到的退货余额在供应商的可抵扣里，单列，不再从本单扣
+  const [money] = await db<{ receivedCents: number; returnCreditCents: number; returnBalanceCents: number; paidCents: number }[]>`
     SELECT
       coalesce((SELECT sum(amount_cents) FROM inv_docs WHERE purchase_order_id = ${poId} AND doc_type = 'receipt' AND status = 'confirmed'), 0) AS received_cents,
-      coalesce((SELECT sum(r.amount_cents) FROM inv_docs r JOIN inv_docs src ON src.id = r.source_doc_id
+      coalesce((SELECT sum(CASE WHEN r.settlement = 'cash' THEN r.amount_cents ELSE coalesce(r.return_applied_cents, r.amount_cents) END)
+                FROM inv_docs r JOIN inv_docs src ON src.id = r.source_doc_id
                 WHERE src.purchase_order_id = ${poId} AND r.doc_type = 'supplier_return' AND r.status = 'confirmed'), 0) AS return_credit_cents,
+      -- 本单退货里还可以抵扣 / 退款的退货余额（挂账的，扣掉已核销、已退款的）
+      coalesce((SELECT sum(r.amount_cents - coalesce(r.return_applied_cents, r.amount_cents)
+                           - coalesce((SELECT sum(o.amount_cents) FROM ap_offsets o WHERE o.credit_return_id = r.id AND o.status = 'confirmed'), 0)
+                           - coalesce((SELECT sum(f.amount_cents) FROM supplier_refunds f WHERE f.credit_return_id = r.id AND f.status = 'confirmed'), 0))
+                FROM inv_docs r JOIN inv_docs src ON src.id = r.source_doc_id
+                WHERE src.purchase_order_id = ${poId} AND r.doc_type = 'supplier_return' AND r.status = 'confirmed'
+                  AND coalesce(r.settlement, 'credit') = 'credit'), 0) AS return_balance_cents,
+      -- 已付含预付款、退货余额核销到这几张收货单的（v0.7.12）
       coalesce((SELECT sum(pa.amount_cents) FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
                 JOIN inv_docs d ON d.id = pa.receipt_doc_id
-                WHERE d.purchase_order_id = ${poId} AND p.status = 'confirmed'), 0) AS paid_cents`;
+                WHERE d.purchase_order_id = ${poId} AND p.status = 'confirmed'), 0)
+      + coalesce((SELECT sum(ol.amount_cents) FROM ap_offset_lines ol JOIN ap_offsets o ON o.id = ol.offset_id
+                  JOIN inv_docs d ON d.id = ol.receipt_doc_id
+                  WHERE d.purchase_order_id = ${poId} AND o.status = 'confirmed'), 0) AS paid_cents`;
   const revisions = await db<PoRevision[]>`
     SELECT r.revision, s.display_name AS changed_by_name, r.changed_at, r.snapshot
     FROM purchase_order_revisions r JOIN staff s ON s.id = r.changed_by
@@ -135,6 +149,7 @@ export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
     receiving: receivingOf(lines),
     receivedCents: money!.receivedCents,
     returnCreditCents: money!.returnCreditCents,
+    returnBalanceCents: money!.returnBalanceCents,
     paidCents: money!.paidCents,
     unpaidCents: money!.receivedCents - money!.returnCreditCents - money!.paidCents,
     receipts,
@@ -425,11 +440,14 @@ async function submitLocked(tx: Tx, po: PoRow, actor: Actor, approveNow: boolean
   if (po.status !== 'draft' && po.status !== 'returned') throw conflict('INVALID_STATE', '采购单当前状态不能提交');
   await tx`UPDATE purchase_orders SET status = 'submitted', submitted_by = ${actor.id}, submitted_at = now(), updated_at = now() WHERE id = ${po.id}`;
   await logApproval(tx, 'purchase_order', po.id, 'submit', actor.id, '', po.revision);
-  const rules = (await loadInventorySettings(tx)).approvalRules;
+  const settings = await loadInventorySettings(tx);
+  // #18：合计不超过免确认门槛的采购单提交即确认（v0.7.12）
+  const [totals] = await tx<{ totalCents: number }[]>`SELECT total_cents FROM purchase_orders WHERE id = ${po.id}`;
+  const totalCents = totals?.totalCents ?? null;
   if (deptConfirm) {
     await approveLocked(tx, { ...po, status: 'submitted' }, actor, '急采补单，部门确认');
-  } else if (!rules.purchase_order) {
-    await approveLocked(tx, { ...po, status: 'submitted' }, actor);
+  } else if (!(settings.approvalRules.purchase_order && overThreshold(settings, totalCents))) {
+    await approveLocked(tx, { ...po, status: 'submitted' }, actor, settings.approvalRules.purchase_order ? '未超过免确认门槛，提交即确认' : '');
   } else if (approveNow) {
     if (!can(actor, 'inventory.approve')) throw forbidden('当前账号不能确认采购单，请提交给负责人');
     await approveLocked(tx, { ...po, status: 'submitted' }, actor);

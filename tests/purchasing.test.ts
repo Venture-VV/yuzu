@@ -12,7 +12,8 @@ let ctx: TestContext;
 let today: string;
 let boss: string; // 演示店主 linlan
 let keeper: string; // 物资经办
-let buyer: string; // 采购 + 对账付款
+let buyer: string; // 采购经办（v0.7.12 分岗不兼任：对账付款另有其人）
+let payer: string; // 对账付款
 let approver: string; // 只有负责人职责
 let buyerId: number; // 收货时一起验收的采购经办（v0.7.11，#17）
 const demo = demoData();
@@ -35,6 +36,7 @@ beforeAll(async () => {
   boss = await login(ctx.app, 'linlan', 'yuzu2026');
   keeper = await login(ctx.app, 'lixiao', 'yuzu2026');
   buyer = await login(ctx.app, 'zhouyi', 'yuzu2026');
+  payer = await login(ctx.app, 'qianfen', 'yuzu2026');
   buyerId = (await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'zhouyi'`)[0]!.id;
   await createStaff(ctx.sql, { username: 'appr', displayName: '负责人', role: 'backoffice', duties: ['approve'], password: PASSWORD, mustChangePassword: false });
   approver = await login(ctx.app, 'appr');
@@ -97,7 +99,9 @@ describe('合成数据：与附件预期结果逐项一致', () => {
       receivedCents: t.receivedCents,
       returnCreditCents: t.returnCreditCents,
       paidCents: t.paidCents,
+      refundedCents: 0,
       balanceCents: t.closingPayableCents,
+      creditCents: 0,
     });
   });
 
@@ -301,22 +305,25 @@ describe('采购单', () => {
 describe('付款登记', () => {
   it('不能超额、不能重复核销；核销合计必须等于付款；并发时只有一笔成功', async () => {
     const s2 = await supplierId('S002');
-    const items = (await api(ctx.app, buyer, 'GET', `/api/payables/suppliers/${s2}/open-items`)).body;
+    const items = (await api(ctx.app, payer, 'GET', `/api/payables/suppliers/${s2}/open-items`)).body;
     // RC-003 1,214 元已付 1,000；RC-008 230 元未付
     const rc003 = items.find((i: { amountCents: number }) => i.amountCents === 121400);
     const rc008 = items.find((i: { amountCents: number }) => i.amountCents === 23000);
     expect(rc003.openCents).toBe(21400);
     expect(rc008.openCents).toBe(23000);
 
-    const pay = (allocations: unknown[], amountCents: number, key = randomUUID(), cookie = buyer) =>
+    const pay = (allocations: unknown[], amountCents: number, key = randomUUID(), cookie = payer) =>
       api(ctx.app, cookie, 'POST', '/api/payables/payments', { clientKey: key, supplierId: s2, payDate: today, amountCents, method: 'bank_transfer', evidence: '流水尾号 0423', allocations });
 
     expect((await pay([{ kind: 'receipt', targetId: rc003.id, amountCents: 30000 }], 30000)).body.error.code).toBe('OVER_ALLOCATION');
+    // 核销合计小于付款金额：没勾「其余记为预付款」拒绝（v0.7.12 起可以留预付款）
     expect((await pay([{ kind: 'receipt', targetId: rc003.id, amountCents: 10000 }], 20000)).status).toBe(400);
     expect((await pay([{ kind: 'receipt', targetId: rc003.id, amountCents: 10000 }], 10000, randomUUID(), keeper)).status).toBe(403);
+    // 采购经办不兼对账付款（#17）
+    expect((await pay([{ kind: 'receipt', targetId: rc003.id, amountCents: 10000 }], 10000, randomUUID(), buyer)).status).toBe(403);
     // 别的供应商的收货单不能核销
     const s1 = await supplierId('S001');
-    const s1Items = (await api(ctx.app, buyer, 'GET', `/api/payables/suppliers/${s1}/open-items`)).body;
+    const s1Items = (await api(ctx.app, payer, 'GET', `/api/payables/suppliers/${s1}/open-items`)).body;
     expect((await pay([{ kind: 'receipt', targetId: s1Items[0].id, amountCents: 100 }], 100)).body.error.code).toBe('ALLOCATION_TARGET_INVALID');
 
     // 两笔并发付款同时核销 RC-008 全额：只有一笔成功
@@ -325,7 +332,7 @@ describe('付款登记', () => {
     const created = results.find((r) => r.status === 201)!.body.payment;
     expect(created.status).toBe('submitted');
     // 待确认的付款不计入余额，但占用未结清金额
-    const after = (await api(ctx.app, buyer, 'GET', `/api/payables/suppliers/${s2}/open-items`)).body.find((i: { id: number }) => i.id === rc008.id);
+    const after = (await api(ctx.app, payer, 'GET', `/api/payables/suppliers/${s2}/open-items`)).body.find((i: { id: number }) => i.id === rc008.id);
     expect(after).toMatchObject({ pendingCents: 23000, openCents: 0 });
 
     const before = (await api(ctx.app, boss, 'GET', '/api/payables/overview')).body.suppliers.find((s: { supplierId: number }) => s.supplierId === s2).balanceCents;
@@ -340,37 +347,38 @@ describe('付款登记', () => {
 
     // 冲销付款（#21：账务冲销由财务，负责人不能冲销）：余额恢复，货款重新可以核销
     expect((await api(ctx.app, approver, 'POST', `/api/payables/payments/${created.id}/void`, { reason: '付款登记错了供应商' })).status).toBe(403);
-    const voided = await api(ctx.app, buyer, 'POST', `/api/payables/payments/${created.id}/void`, { reason: '付款登记错了供应商' });
+    const voided = await api(ctx.app, payer, 'POST', `/api/payables/payments/${created.id}/void`, { reason: '付款登记错了供应商' });
     expect(voided.body.status).toBe('voided');
     const end = (await api(ctx.app, boss, 'GET', '/api/payables/overview')).body.suppliers.find((s: { supplierId: number }) => s.supplierId === s2).balanceCents;
     expect(end).toBe(before);
-    const reopened = (await api(ctx.app, buyer, 'GET', `/api/payables/suppliers/${s2}/open-items`)).body.find((i: { id: number }) => i.id === rc008.id);
+    const reopened = (await api(ctx.app, payer, 'GET', `/api/payables/suppliers/${s2}/open-items`)).body.find((i: { id: number }) => i.id === rc008.id);
     expect(reopened.openCents).toBe(23000);
   });
 
   it('对账单：上期结余 + 本期各项 = 期末，与余额一致；导出受权限控制', async () => {
     const s1 = await supplierId('S001');
-    const st = (await api(ctx.app, buyer, 'GET', `/api/payables/statement?supplierId=${s1}&from=2026-10-01&to=${today}`)).body;
+    const st = (await api(ctx.app, payer, 'GET', `/api/payables/statement?supplierId=${s1}&from=2026-10-01&to=${today}`)).body;
     expect(st.beginCents).toBe(0);
-    expect(st.endCents).toBe(st.beginCents + st.openingCents + st.receivedCents - st.returnCreditCents - st.paidCents);
+    expect(st.endCents).toBe(st.beginCents + st.openingCents + st.receivedCents - st.returnCreditCents - st.paidCents + st.refundedCents);
     expect(st.endCents).toBe(310200);
     expect(st.rows.at(-1).balanceCents).toBe(st.endCents);
     // 退货后供应商对 RC-001 的未结清：1,440 − 18 − 1,000 = 422
     const rc001 = st.openItems.find((i: { amountCents: number }) => i.amountCents === 144000);
-    expect(rc001).toMatchObject({ creditCents: 1800, paidCents: 100000, openCents: 42200 });
+    expect(rc001).toMatchObject({ creditCents: 1800, offsetCents: 0, paidCents: 100000, openCents: 42200 });
+    expect(st.credits).toEqual([]);
     expect((await api(ctx.app, keeper, 'GET', `/api/payables/statement?supplierId=${s1}&from=2026-10-01&to=${today}`)).status).toBe(403);
     expect((await api(ctx.app, keeper, 'GET', `/api/payables/statement/export?supplierId=${s1}&from=2026-10-01&to=${today}`)).status).toBe(403);
     // 对账付款职责可以导出
-    const csv = await api(ctx.app, buyer, 'GET', `/api/payables/statement/export?supplierId=${s1}&from=2026-10-01&to=${today}`);
+    const csv = await api(ctx.app, payer, 'GET', `/api/payables/statement/export?supplierId=${s1}&from=2026-10-01&to=${today}`);
     expect(csv.status).toBe(200);
     expect(String(csv.body)).toContain('3102.00');
   });
 
   it('期初未付：已核销的不能冲销', async () => {
     const s3 = await supplierId('S003');
-    const openings = (await api(ctx.app, buyer, 'GET', `/api/payables/openings?supplierId=${s3}`)).body;
+    const openings = (await api(ctx.app, payer, 'GET', `/api/payables/openings?supplierId=${s3}`)).body;
     expect(openings[0]).toMatchObject({ amountCents: 20000, paidCents: 20000, status: 'confirmed' });
-    const v = await api(ctx.app, buyer, 'POST', `/api/payables/openings/${openings[0].id}/void`, { reason: '测试' });
+    const v = await api(ctx.app, payer, 'POST', `/api/payables/openings/${openings[0].id}/void`, { reason: '测试' });
     expect(v.body.error.code).toBe('NOT_VOIDABLE');
   });
 });

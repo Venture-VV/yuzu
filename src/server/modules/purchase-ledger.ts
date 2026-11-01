@@ -475,11 +475,11 @@ export async function ledgerAudit(db: Db, timezone: string): Promise<LedgerAudit
   push(5, '发票类型与税点必须匹配字典', 'block', '有效报销单的发票类型与税点在当前的费用报销规则里（规则改过之后的旧单会列出来）',
     bad5.map((c) => ({ text: `${c.docNo}：${c.invoiceLabel} · 税点 ${Number(c.taxRateBp) / 100}% 不在当前规则里`, date: c.expenseDate, link: claimLink(c.id) })));
 
-  // 6 费用科目只有三种
+  // 6 费用科目只允许固定选项（v0.7.12 起加「运费」，#15）
   const r6 = await db<{ id: number; docNo: string; expenseDate: string; category: string }[]>`
     SELECT c.id, c.doc_no, c.expense_date, l.category FROM expense_claim_lines l JOIN expense_claims c ON c.id = l.claim_id
-    WHERE c.status IN ${db(ACTIVE_CLAIM)} AND l.category NOT IN ('office', 'fixed_asset', 'low_value') LIMIT 500`;
-  push(6, '费用科目只允许办公费、固定资产、低值易耗', 'block', '报销明细的费用科目（数据库约束，只能是这三种）',
+    WHERE c.status IN ${db(ACTIVE_CLAIM)} AND l.category NOT IN ('office', 'fixed_asset', 'low_value', 'freight') LIMIT 500`;
+  push(6, '费用科目只允许办公费、固定资产、低值易耗、运费', 'block', '报销明细的费用科目（数据库约束，只能是这四种；运费 v0.7.12 起单独记）',
     r6.map((c) => ({ text: `${c.docNo}：${c.category}`, date: c.expenseDate, link: claimLink(c.id) })));
 
   // 7 部门走字典：引用的部门都在档案里；部门名里不能像是几个部门拼在一起

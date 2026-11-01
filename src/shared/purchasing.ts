@@ -99,11 +99,13 @@ export interface PurchaseOrder {
   totalCents: number;
   /** 已确认收货金额 */
   receivedCents: number;
-  /** 关联收货的退货扣款 */
+  /** 退货抵了本单收货的部分（v0.7.12 起：挂账的按 return_applied_cents，现付的整笔） */
   returnCreditCents: number;
-  /** 已登记付款（核销到本单收货的已确认付款） */
+  /** 本单退货里没抵到收货、还可以抵扣 / 退款的退货余额（在供应商的可抵扣里，不从本单扣；v0.7.12） */
+  returnBalanceCents: number;
+  /** 已登记付款：核销到本单收货的已确认付款，加上预付款、退货余额核销到本单收货的（v0.7.12） */
   paidCents: number;
-  /** 本单未付 = 已确认收货 − 退货扣款 − 已付 */
+  /** 本单未付 = 已确认收货 − 退货抵扣 − 已付（与应付未结清一致） */
   unpaidCents: number;
   receipts: (DocRef & { docDate: string; amountCents: number })[];
   revisions: PoRevision[];
@@ -158,13 +160,15 @@ export interface OpenItem {
   date: string;
   /** 货款（收货确认金额 / 期初未付金额） */
   amountCents: number;
-  /** 关联退货扣款 */
+  /** 退货扣款抵到这笔货款的部分（v0.7.12 起只算抵到的，多出来的是退货单的退货余额） */
   creditCents: number;
+  /** 预付款、退货余额核销到这笔货款的（v0.7.12） */
+  offsetCents: number;
   /** 已确认付款核销 */
   paidCents: number;
   /** 待确认付款占用（防止两笔付款同时核销同一货款） */
   pendingCents: number;
-  /** 还可以核销的金额 = 货款 − 扣款 − 已付 − 待确认占用；可能为负（已付后退货，供应商待退 / 可抵） */
+  /** 还可以核销的金额 = 货款 − 退货抵扣 − 核销 − 已付 − 待确认占用 */
   openCents: number;
   purchaseOrderNo: string | null;
   summary: string;
@@ -199,6 +203,12 @@ export interface PaymentDoc {
   voidReason: string | null;
   isSynthetic: boolean;
   allocations: PaymentAllocation[];
+  /** 没核销到具体货款的部分：预付款（v0.7.12） */
+  prepaidCents: number;
+  /** 预付款已核销、已退款与还可以用的（已确认的付款才有意义） */
+  prepayOffsetCents: number;
+  prepayRefundedCents: number;
+  prepayAvailableCents: number;
   approvals: ApprovalLog[];
 }
 
@@ -222,6 +232,10 @@ export interface OpeningPayableDoc {
   isSynthetic: boolean;
   /** 已核销金额（已确认付款） */
   paidCents: number;
+  /** 预付款、退货余额核销到这笔期初未付的（v0.7.12） */
+  offsetCents: number;
+  /** 批量导入的（v0.7.12） */
+  importId: number | null;
   approvals: ApprovalLog[];
 }
 
@@ -235,7 +249,11 @@ export interface SupplierBalance {
   receivedCents: number;
   returnCreditCents: number;
   paidCents: number;
+  /** 供应商退款（v0.7.12，冲减付款） */
+  refundedCents: number;
   balanceCents: number;
+  /** 可抵扣合计：预付款与退货余额还没核销、没退款的（v0.7.12） */
+  creditCents: number;
   /** 待确认的付款（不计入余额） */
   pendingPaymentCents: number;
   /** 未结清货款张数 */
@@ -243,7 +261,7 @@ export interface SupplierBalance {
   lastActivity: string | null;
 }
 
-export type ApEntryKind = 'opening' | 'receipt' | 'supplier_return' | 'payment';
+export type ApEntryKind = 'opening' | 'receipt' | 'supplier_return' | 'payment' | 'refund';
 
 export interface StatementRow {
   id: number;
@@ -251,7 +269,7 @@ export interface StatementRow {
   kind: ApEntryKind;
   /** 冲销行：原单类型同上，isVoid 为 true */
   isVoid: boolean;
-  docKind: 'inv_doc' | 'payment' | 'opening_payable';
+  docKind: 'inv_doc' | 'payment' | 'opening_payable' | 'supplier_refund';
   docId: number;
   docNo: string;
   amountDeltaCents: number;
@@ -272,13 +290,129 @@ export interface Statement {
   receivedCents: number;
   returnCreditCents: number;
   paidCents: number;
+  refundedCents: number;
   endCents: number;
   rows: StatementRow[];
   openItems: OpenItem[];
+  /** 期末还可以核销或退款的预付款、退货余额（v0.7.12） */
+  credits: SupplierCredit[];
 }
 
 export interface PayablesOverview {
-  totals: { openingCents: number; receivedCents: number; returnCreditCents: number; paidCents: number; balanceCents: number };
+  totals: { openingCents: number; receivedCents: number; returnCreditCents: number; paidCents: number; refundedCents: number; balanceCents: number; creditCents: number };
   suppliers: SupplierBalance[];
   pending: { payments: number; openings: number; purchaseOrders: number };
+}
+
+// ───────────────────────── 可抵扣、核销与供应商退款（v0.7.12，docs/SUPPLIER_SETTLEMENT.md） ─────────────────────────
+
+/**
+ * 可抵扣：预付款（已确认的付款没核销到具体货款的部分）或退货余额（已生效退货单没抵到原收货单的部分）。
+ * 挂账的可以核销到以后的应付或登记退款；现付供应商的退货不记应付，只能登记退款（canOffset 为 false）。
+ */
+export interface SupplierCredit {
+  kind: 'prepayment' | 'return';
+  id: number;
+  docNo: string;
+  date: string;
+  /** 付款金额 / 退货扣款 */
+  amountCents: number;
+  /** 付款核销到货款的 / 退货抵到原收货单的 */
+  usedCents: number;
+  offsetCents: number;
+  refundedCents: number;
+  availableCents: number;
+  canOffset: boolean;
+  summary: string;
+}
+
+export type SettlementStatus = 'confirmed' | 'voided';
+export const SETTLEMENT_STATUS_LABELS: Record<SettlementStatus, string> = { confirmed: '已生效', voided: '已冲销' };
+
+export interface ApOffsetLine {
+  id: number;
+  kind: 'receipt' | 'opening';
+  targetId: number;
+  docNo: string;
+  amountCents: number;
+}
+
+/** 核销单：用一笔预付款或退货余额抵扣同一供应商的若干笔应付；不动钱、不记应付流水 */
+export interface ApOffsetDoc {
+  id: number;
+  docNo: string;
+  status: SettlementStatus;
+  supplier: Ref;
+  offsetDate: string;
+  credit: { kind: 'prepayment' | 'return'; id: number; docNo: string };
+  amountCents: number;
+  note: string;
+  lines: ApOffsetLine[];
+  createdByName: string;
+  createdAt: string;
+  voidedByName: string | null;
+  voidedAt: string | null;
+  voidReason: string | null;
+  isSynthetic: boolean;
+}
+
+/** 供应商退款：供应商把预付款或退货的钱退回来；挂账的记应付流水「供应商退款」 */
+export interface SupplierRefundDoc {
+  id: number;
+  docNo: string;
+  status: SettlementStatus;
+  supplier: Ref;
+  refundDate: string;
+  amountCents: number;
+  method: PayMethod;
+  evidence: string;
+  note: string;
+  credit: { kind: 'prepayment' | 'return'; id: number; docNo: string };
+  postsAp: boolean;
+  createdByName: string;
+  createdAt: string;
+  voidedByName: string | null;
+  voidedAt: string | null;
+  voidReason: string | null;
+  isSynthetic: boolean;
+}
+
+// ───────────────────────── 供应商与期初未付批量导入（#16，v0.7.12） ─────────────────────────
+
+export type ErpImportKind = 'suppliers' | 'opening_payables';
+export const ERP_IMPORT_LABELS: Record<ErpImportKind, string> = { suppliers: '供应商', opening_payables: '期初未付' };
+
+/** 导入模板的列（第一行是表头，顺序不限，按名称找） */
+export const SUPPLIER_IMPORT_COLUMNS = ['编码', '名称', '联系人', '电话', '结算方式', '备注'] as const;
+export const OPENING_IMPORT_COLUMNS = ['供应商编码', '金额', '截至日期', '备注'] as const;
+
+export interface ErpImportRowIssue {
+  /** 文件里的行号（表头是第 1 行） */
+  row: number;
+  message: string;
+}
+
+export interface ErpImportPreview {
+  kind: ErpImportKind;
+  fileName: string;
+  fileSha256: string;
+  encoding: string;
+  rowCount: number;
+  totalCents: number;
+  /** 有问题的行（有任何一行有问题整份不能写入） */
+  issues: ErpImportRowIssue[];
+  /** 已经导入过同一个文件 */
+  duplicateOf: { id: number; createdAt: string; createdByName: string } | null;
+  /** 前 20 行预览 */
+  sample: Record<string, string>[];
+}
+
+export interface ErpImportRecord {
+  id: number;
+  kind: ErpImportKind;
+  fileName: string;
+  rowCount: number;
+  totalCents: number;
+  createdByName: string;
+  createdAt: string;
 }

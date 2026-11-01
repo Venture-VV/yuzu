@@ -12,7 +12,8 @@ let ctx: TestContext;
 let today: string;
 let boss: string; // 演示店主 linlan
 let keeper: string; // 物资经办（只读）
-let buyer: string; // 采购经办 + 对账付款（可登记打款、不能登记报销）
+let buyer: string; // 采购经办（v0.7.12 分岗不兼任：不再兼对账付款）
+let payer: string; // 对账付款（可登记打款、不能登记报销）
 let coster: string; // 成本核算
 let approver: string; // 负责人
 let deptA: number;
@@ -93,6 +94,7 @@ beforeAll(async () => {
   boss = await login(ctx.app, 'linlan', 'yuzu2026');
   keeper = await login(ctx.app, 'lixiao', 'yuzu2026');
   buyer = await login(ctx.app, 'zhouyi', 'yuzu2026');
+  payer = await login(ctx.app, 'qianfen', 'yuzu2026');
   buyerId = (await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'zhouyi'`)[0]!.id;
   costerId = await createStaff(ctx.sql, { username: 'coster', displayName: '成本岗', role: 'backoffice', duties: ['cost'], password: PASSWORD, mustChangePassword: false });
   await createStaff(ctx.sql, { username: 'appr', displayName: '负责人', role: 'backoffice', duties: ['approve'], password: PASSWORD, mustChangePassword: false });
@@ -113,7 +115,7 @@ describe('权限（D10：岗位 + 职责）', () => {
     expect((await claim(coster)).status).toBe(201);
     expect((await claim(buyer)).status).toBe(403);
     expect((await claim(keeper)).status).toBe(403);
-    expect((await advance(buyer)).status).toBe(201);
+    expect((await advance(payer)).status).toBe(201);
     expect((await advance(keeper)).status).toBe(403);
     expect((await api(ctx.app, keeper, 'GET', `/api/erp/expenses?from=${today}&to=${today}`)).status).toBe(200);
     expect((await api(ctx.app, keeper, 'GET', `/api/erp/petty/daily?from=${today}&to=${today}`)).status).toBe(200);
@@ -235,7 +237,7 @@ describe('备用金：按部门平账（D14）', () => {
     expect(now).toMatchObject({ outstandingCents: -5_000, state: 'owed' });
     expect((await settle(coster, a.id, 'return', 1_000)).body.error.code).toBe('NOTHING_TO_RETURN');
     expect((await settle(coster, a.id, 'topup', 6_000)).body.error.code).toBe('TOPUP_EXCEEDS');
-    const topup = await settle(buyer, a.id, 'topup', 5_000);
+    const topup = await settle(payer, a.id, 'topup', 5_000);
     expect(topup.body.advance).toMatchObject({ settledCents: 35_000, outstandingCents: 0, state: 'settled' });
 
     // 每日平账：当天、采购部
@@ -245,7 +247,7 @@ describe('备用金：按部门平账（D14）', () => {
     expect(mine).toMatchObject({ advanceCents: 100_000, spentCents: 65_000, dueCents: 35_000, settledCents: 35_000, outstandingCents: 0, state: 'settled' });
     expect(row.advanceCents - row.spentCents).toBe(row.dueCents);
     expect(row.dueCents - row.settledCents).toBe(row.outstandingCents);
-    const csv = await api(ctx.app, buyer, 'GET', `/api/erp/petty/daily/export?from=${today}&to=${today}`);
+    const csv = await api(ctx.app, payer, 'GET', `/api/erp/petty/daily/export?from=${today}&to=${today}`);
     expect(String(csv.body)).toContain(a.docNo);
   });
 
@@ -270,7 +272,7 @@ describe('备用金：按部门平账（D14）', () => {
     expect((await api(ctx.app, keeper, 'POST', `/api/erp/petty/advances/${a.id}/void`, { reason: '打错了' })).status).toBe(403);
     expect((await api(ctx.app, coster, 'POST', `/api/erp/petty/advances/${a.id}/void`, { reason: '打错了' })).body.error.code).toBe('ADVANCE_IN_USE');
     await api(ctx.app, coster, 'POST', `/api/erp/expenses/${c.id}/void`, { reason: '打款错了' });
-    await api(ctx.app, buyer, 'POST', `/api/erp/petty/settlements/${s.settlementId}/void`, { reason: '打款错了' });
+    await api(ctx.app, payer, 'POST', `/api/erp/petty/settlements/${s.settlementId}/void`, { reason: '打款错了' });
     const voided = await api(ctx.app, coster, 'POST', `/api/erp/petty/advances/${a.id}/void`, { reason: '打错了' });
     expect(voided.body).toMatchObject({ status: 'voided', voidReason: '打错了' });
     expect((await claim(coster, { paySource: 'petty', advanceId: a.id })).body.error.code).toBe('ADVANCE_VOIDED');
@@ -348,9 +350,23 @@ describe('现付供应商与按采购单报销', () => {
     expect(blocked.body.error.message).toContain(ok.body.claim.docNo);
     expect((await api(ctx.app, coster, 'GET', `/api/erp/expenses/po/${po.id}`)).body.lines[0].claimedBy).toBe(ok.body.claim.docNo);
 
-    // 冲销后可以重新报
+    // 冲销后可以重新报；按采购单报销时可以单独加一行运费（#15，v0.7.12）：不对应采购单的物料行
     await api(ctx.app, coster, 'POST', `/api/erp/expenses/${ok.body.claim.id}/void`, { reason: '金额登记错了' });
-    expect((await byPo({ diffReason: '另一箱下周到', amountCents: 90_000 })).status).toBe(201);
+    const again = await claim(coster, {
+      purchaseOrderId: po.id,
+      purpose: '客用消耗',
+      lines: [
+        { name: pl.name, category: 'low_value', unit: pl.unit, boughtMilli: pl.boughtMilli, receivedMilli: pl.receivedMilli, diffReason: '另一箱下周到', amountCents: 90_000, poLineId: pl.poLineId },
+        { name: '运费', category: 'freight', unit: '次', boughtMilli: q(1), receivedMilli: q(1), amountCents: 2_000 },
+      ],
+    });
+    expect(again.status).toBe(201);
+    expect(again.body.claim).toMatchObject({ amountCents: 92_000, purchaseOrder: { id: po.id } });
+    expect(again.body.claim.lines).toEqual([
+      expect.objectContaining({ category: 'low_value', poLineId: pl.poLineId, amountCents: 90_000 }),
+      expect.objectContaining({ category: 'freight', poLineId: null, amountCents: 2_000 }),
+    ]);
+    expect((await api(ctx.app, coster, 'GET', `/api/erp/expenses/po/${po.id}`)).body.lines[0].claimedBy).toBe(again.body.claim.docNo);
 
     // 现付收货的退货也不记应付扣款
     const ret = await api(ctx.app, keeper, 'POST', '/api/inventory/docs', {
@@ -362,8 +378,13 @@ describe('现付供应商与按采购单报销', () => {
       lines: [{ sourceLineId: rc.body.doc.lines[0].id, qtyMilli: q(10) }],
     });
     expect(ret.status).toBe(201);
-    const retOk = await api(ctx.app, approver, 'POST', `/api/inventory/docs/${ret.body.doc.id}/approve`, {});
+    // 负责人确认后等供应商同意（#20，v0.7.12），采购登记同意后才出库
+    const retApproved = await api(ctx.app, approver, 'POST', `/api/inventory/docs/${ret.body.doc.id}/approve`, {});
+    expect(retApproved.body).toMatchObject({ status: 'awaiting_supplier' });
+    const retOk = await api(ctx.app, buyer, 'POST', `/api/inventory/docs/${ret.body.doc.id}/supplier-answer`, { agreed: true, date: today });
     expect(retOk.body).toMatchObject({ status: 'confirmed' });
+    // 现付供应商的退货不记应付，整笔等供应商退款（不算进供应商余额的可抵扣）
+    expect(retOk.body.returnCredit).toMatchObject({ settlement: 'cash', appliedCents: 0, availableCents: retOk.body.amountCents });
     const final = (await api(ctx.app, boss, 'GET', '/api/payables/overview')).body.suppliers.find((s: { code: string }) => s.code === 'S004');
     expect(final.returnCreditCents).toBe(before.returnCreditCents);
     expect(final.balanceCents).toBe(before.balanceCents);
@@ -434,7 +455,7 @@ describe('幂等与并发', () => {
     expect(diff.body.error.code).toBe('IDEMPOTENCY_CONFLICT');
 
     const a = (await advance(coster, { amountCents: 5_000 })).body.advance;
-    const results = await Promise.all([settle(coster, a.id, 'return', 5_000), settle(buyer, a.id, 'return', 5_000)]);
+    const results = await Promise.all([settle(coster, a.id, 'return', 5_000), settle(payer, a.id, 'return', 5_000)]);
     expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
     expect((await getAdvance(a.id)).outstandingCents).toBe(0);
 
@@ -472,8 +493,8 @@ describe('结果待确认：按编号查回与确认作废（v0.7.8）', () => {
     expect((await abandon(coster, k3, 'petty_advance')).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
     // 打款、退回补付
     const k4 = randomUUID();
-    expect((await abandon(buyer, k4, 'petty_advance')).body.abandoned).toBe(true);
-    expect((await advance(buyer, { clientKey: k4 })).body.error.code).toBe('OP_ABANDONED');
+    expect((await abandon(payer, k4, 'petty_advance')).body.abandoned).toBe(true);
+    expect((await advance(payer, { clientKey: k4 })).body.error.code).toBe('OP_ABANDONED');
     const a = (await advance(coster, { amountCents: 2_000 })).body.advance;
     const k5 = randomUUID();
     const s = await settle(coster, a.id, 'return', 1_000, { clientKey: k5 });

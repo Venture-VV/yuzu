@@ -31,6 +31,7 @@ export type AuditAction =
   | 'inventory_doc'
   | 'purchase_order'
   | 'payable_doc'
+  | 'erp_import'
   | 'expense_doc'
   | 'petty_doc'
   | 'purchase_request'

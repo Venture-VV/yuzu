@@ -1,5 +1,18 @@
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { OpeningPayableDoc, OpenItem, PayablesOverview, PaymentDoc, PoSummary, PriceCompare, PurchaseOrder, Statement } from '@shared/purchasing';
+import type {
+  ApOffsetDoc,
+  ErpImportRecord,
+  OpeningPayableDoc,
+  OpenItem,
+  PayablesOverview,
+  PaymentDoc,
+  PoSummary,
+  PriceCompare,
+  PurchaseOrder,
+  Statement,
+  SupplierCredit,
+  SupplierRefundDoc,
+} from '@shared/purchasing';
 import { api } from '../../lib/api';
 
 export const pk = {
@@ -14,6 +27,12 @@ export const pk = {
   openings: (params: Record<string, string | undefined>) => ['inv', 'openings', params] as const,
   opening: (id: number) => ['inv', 'opening', id] as const,
   baseline: (materialId: number) => ['inv', 'baseline', materialId] as const,
+  credits: (supplierId: number) => ['inv', 'credits', supplierId] as const,
+  offsets: (params: Record<string, string | undefined>) => ['inv', 'offsets', params] as const,
+  offset: (id: number) => ['inv', 'offset', id] as const,
+  refunds: (params: Record<string, string | undefined>) => ['inv', 'refunds', params] as const,
+  refund: (id: number) => ['inv', 'refund', id] as const,
+  imports: ['inv', 'erp-imports'] as const,
 };
 
 /** 采购、货款与库存共用一个缓存前缀：任何单据变化后一起刷新 */
@@ -69,3 +88,26 @@ export const usePayment = (id: number | null) =>
 
 export const useOpenings = (params: { supplierId?: string; status?: string }, enabled = true) =>
   useQuery({ queryKey: pk.openings(params), queryFn: () => api.get<OpeningPayableDoc[]>(`/api/payables/openings?${search(params)}`), enabled });
+
+// ── 可抵扣、核销与供应商退款（v0.7.12） ──
+
+export const useCredits = (supplierId: number | null) =>
+  useQuery({
+    queryKey: pk.credits(supplierId ?? 0),
+    queryFn: () => api.get<(SupplierCredit & { supplierId: number })[]>(`/api/payables/suppliers/${supplierId}/credits`),
+    enabled: !!supplierId,
+  });
+
+export const useOffsets = (params: { supplierId?: string; status?: string }, enabled = true) =>
+  useQuery({ queryKey: pk.offsets(params), queryFn: () => api.get<ApOffsetDoc[]>(`/api/payables/offsets?${search(params)}`), enabled });
+
+export const useOffset = (id: number | null) =>
+  useQuery({ queryKey: pk.offset(id ?? 0), queryFn: () => api.get<ApOffsetDoc>(`/api/payables/offsets/${id}`), enabled: !!id });
+
+export const useRefunds = (params: { supplierId?: string; status?: string }, enabled = true) =>
+  useQuery({ queryKey: pk.refunds(params), queryFn: () => api.get<SupplierRefundDoc[]>(`/api/payables/refunds?${search(params)}`), enabled });
+
+export const useRefund = (id: number | null) =>
+  useQuery({ queryKey: pk.refund(id ?? 0), queryFn: () => api.get<SupplierRefundDoc>(`/api/payables/refunds/${id}`), enabled: !!id });
+
+export const useErpImports = (enabled = true) => useQuery({ queryKey: pk.imports, queryFn: () => api.get<ErpImportRecord[]>('/api/payables/imports'), enabled });

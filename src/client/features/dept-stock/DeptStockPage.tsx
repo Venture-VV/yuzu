@@ -128,7 +128,10 @@ function StockList({ deptId }: { deptId: number }) {
         {stock.data!.map((r) => (
           <li key={r.materialId} className={cn('grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 px-4 py-2.5', r.stockMilli === 0 && 'opacity-60')}>
             <span className="min-w-0">
-              <span className="block truncate text-[14px] font-bold">{r.name}</span>
+              <span className="flex items-center gap-2">
+                <span className="truncate text-[14px] font-bold">{r.name}</span>
+                {r.isLow && <Badge tone="clay">该补货了</Badge>}
+              </span>
               <span className="num block truncate text-[12px] text-ink-3">
                 {r.code}
                 {r.specification && ` · ${r.specification}`}
@@ -136,8 +139,10 @@ function StockList({ deptId }: { deptId: number }) {
               </span>
             </span>
             <span className="text-right">
-              <Qty milli={r.stockMilli} unit={r.inventoryUnit} className="text-[17px] font-bold" />
-              <span className="block text-[11.5px] text-ink-3">{relativeTime(r.lastMoveAt)}</span>
+              <Qty milli={r.stockMilli} unit={r.inventoryUnit} className={cn('text-[17px] font-bold', r.isLow && 'text-clay')} />
+              <span className="block text-[11.5px] text-ink-3">
+                {r.daysOfCover !== null ? `可用 ${r.daysOfCover} 天${r.coverDays !== null ? ` · 提醒 ${r.coverDays} 天` : ''}` : relativeTime(r.lastMoveAt)}
+              </span>
             </span>
           </li>
         ))}

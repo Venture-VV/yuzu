@@ -58,6 +58,7 @@ const STATUS_TONE: Record<InvDocStatus, string> = {
   draft: 'bg-paper-2 text-ink-2 ring-1 ring-line-strong',
   submitted: 'bg-yuzu-soft text-yuzu-deep',
   returned: 'bg-ember-soft text-ember',
+  awaiting_supplier: 'bg-ember-soft text-ember',
   confirmed: 'bg-pine-soft text-pine',
   cancelled: 'bg-paper-2 text-ink-3 line-through decoration-ink-4',
   voided: 'bg-clay-soft text-clay',

@@ -12,7 +12,7 @@ import { DEFAULT_APPROVAL_RULES } from './modules/inventory/common';
 import type { AppConfig } from './config';
 import type { Sql } from './db';
 import type { Actor, Deps } from './lib/context';
-import { approveDoc, createDoc } from './modules/inventory/docs';
+import { answerReturn, approveDoc, createDoc } from './modules/inventory/docs';
 import { saveMaterial, saveSupplier } from './modules/inventory/master';
 import { actOnOpening, actOnPayment, createOpening, createPayment } from './modules/inventory/payables';
 import { approvePo, createPo, submitPo } from './modules/inventory/purchasing';
@@ -39,9 +39,13 @@ export async function seedInventoryDemo(sql: Sql, config: AppConfig) {
   if (done!.n > 0) return { skipped: true as const };
 
   const deps: Deps = { sql, config };
-  // 演示库统一使用默认的模拟审批规则
+  // 演示库统一使用默认的模拟审批规则；免确认门槛设为 0（全部要负责人确认），固定预期里的待确认单据才会停在待确认（v0.7.12）。
+  // 验收 #18 时在 后台「规则总表 → 库存与采购」把门槛改回 2000 元。
   await sql`
     INSERT INTO settings (key, value) VALUES ('inventory_approval_rules', ${sql.json(DEFAULT_APPROVAL_RULES as never)})
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`;
+  await sql`
+    INSERT INTO settings (key, value) VALUES ('inventory_approval_threshold_cents', '0')
     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`;
 
   const ensure = async (username: string, displayName: string, role: Actor['role'], duties: Actor['duties']): Promise<Actor> => {
@@ -51,7 +55,9 @@ export async function seedInventoryDemo(sql: Sql, config: AppConfig) {
   };
   const owner = await ensure('linlan', '林岚', 'owner', []);
   const keeper = await ensure('lixiao', '李晓（物资）', 'backoffice', ['stock']);
-  const buyer = await ensure('zhouyi', '周一（采购对账）', 'backoffice', ['purchase', 'payable']);
+  // 分岗不兼任（#17，v0.7.12）：采购与对账付款是两个人
+  const buyer = await ensure('zhouyi', '周一（采购）', 'backoffice', ['purchase']);
+  const payer = await ensure('qianfen', '钱芬（对账付款）', 'backoffice', ['payable']);
 
   // ── 档案 ──
   const suppliers = new Map<string, number>();
@@ -116,7 +122,7 @@ export async function seedInventoryDemo(sql: Sql, config: AppConfig) {
 
   // 期初未付：对账开账，先提交再由店主确认
   for (const o of demo.openingPayables) {
-    const r = await createOpening(deps, { clientKey: randomUUID(), supplierId: suppliers.get(o.supplierCode)!, amountCents: o.amountCents, asOfDate: o.date, note: o.note }, buyer);
+    const r = await createOpening(deps, { clientKey: randomUUID(), supplierId: suppliers.get(o.supplierCode)!, amountCents: o.amountCents, asOfDate: o.date, note: o.note }, payer);
     await mark('opening_payables', r.opening.id);
     await actOnOpening(deps, r.opening.id, 'approve', {}, owner);
     docIds.set(o.id, r.opening.id);
@@ -219,7 +225,11 @@ export async function seedInventoryDemo(sql: Sql, config: AppConfig) {
     at(r.date, 8, async () => {
       const src = docIds.get(r.sourceReceiptId)!;
       const created = await doc(r.id, keeper, { docType: 'supplier_return', docDate: r.date, sourceDocId: src, note: r.reason, lines: [{ sourceLineId: await lineOf(src, r.materialCode), qtyMilli: q(r.quantity) }] });
-      if (r.status === 'confirmed') await approveDoc(deps, created.id, {}, owner);
+      if (r.status === 'confirmed') {
+        // 负责人确认后等供应商同意（#20，v0.7.12）：采购登记供应商已同意，才出库、扣款
+        await approveDoc(deps, created.id, {}, owner);
+        await answerReturn(deps, created.id, { agreed: true, date: r.date, note: '供应商已确认扣款（模拟）' }, buyer);
+      }
     });
   }
 
@@ -241,7 +251,7 @@ export async function seedInventoryDemo(sql: Sql, config: AppConfig) {
               : { kind: 'receipt', targetId: docIds.get(a.sourceId)!, amountCents: a.amountCents },
           ),
         },
-        buyer,
+        payer,
       );
       await mark('payments', r.payment.id);
       if (p.status === 'confirmed') await actOnPayment(deps, r.payment.id, 'approve', {}, owner);

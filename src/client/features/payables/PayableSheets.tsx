@@ -172,9 +172,31 @@ function PaymentBody({ p, onClose }: { p: PaymentDoc; onClose: () => void }) {
             <Info label="确认">{p.confirmedByName ? `${p.confirmedByName} · ${formatDateTime(p.confirmedAt!)}` : '—'}</Info>
           </dl>
         </div>
+        {p.prepaidCents > 0 && (
+          <div className="rounded-lg border border-line bg-card px-4 py-3 text-[13px]" data-testid="payment-prepay">
+            <p className="font-bold text-ink-2">
+              其中预付款 <Money cents={p.prepaidCents} />
+            </p>
+            <p className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-ink-3">
+              <span>
+                已核销 <Money cents={p.prepayOffsetCents} />
+              </span>
+              <span>
+                已退款 <Money cents={p.prepayRefundedCents} />
+              </span>
+              {p.status === 'confirmed' && (
+                <span className="font-bold text-ember">
+                  还可以抵扣 / 退款 <Money cents={p.prepayAvailableCents} />
+                </span>
+              )}
+            </p>
+            <p className="mt-1 text-[12px] text-ink-3">在「货款 → 对账单 → 可抵扣」里核销到以后的货款，或登记供应商退款。</p>
+          </div>
+        )}
         <section>
           <h3 className="mb-2 text-[13px] font-bold text-ink-2">核销到</h3>
-          <ul className="divide-y divide-line/70 rounded-lg border border-line bg-card">
+          {p.allocations.length === 0 && <p className="text-[13px] text-ink-3">全部是预付款，没有核销到具体货款。</p>}
+          <ul className="divide-y divide-line/70 rounded-lg border border-line bg-card empty:hidden">
             {p.allocations.map((a) => (
               <li key={a.id} className="flex items-center gap-3 px-4 py-2.5 text-[13px]">
                 {a.kind === 'receipt' ? (
@@ -243,9 +265,14 @@ export function OpeningSheet({ doc, onClose }: { doc: OpeningPayableDoc | null; 
                 <Info label="截至日期">
                   <span className="num">{doc.asOfDate}</span>
                 </Info>
-                <Info label="已核销">
+                <Info label="已付款核销">
                   <Money cents={doc.paidCents} />
                 </Info>
+                {doc.offsetCents > 0 && (
+                  <Info label="预付款 / 退货余额核销">
+                    <Money cents={doc.offsetCents} />
+                  </Info>
+                )}
                 <Info label="登记">{doc.createdByName}</Info>
                 {doc.note && (
                   <Info label="说明" wide>

@@ -16,6 +16,25 @@ export type Role = (typeof ROLES)[number];
 export const DUTIES = ['stock', 'purchase', 'payable', 'approve', 'cost', 'request'] as const;
 export type Duty = (typeof DUTIES)[number];
 
+/**
+ * 分岗不兼任（#17 后半句，v0.7.12）：职责分五组，一名员工的职责只能在一组里；财务组内对账付款、成本核算可以同时有。
+ * 店主不受限制。后台保存员工时校验；已有跨组的员工不自动改，后台员工页提示（不进自检）。
+ */
+export const DUTY_GROUPS: { key: 'stock' | 'purchase' | 'department' | 'finance' | 'approve'; label: string; duties: readonly Duty[] }[] = [
+  { key: 'stock', label: '仓库', duties: ['stock'] },
+  { key: 'purchase', label: '采购', duties: ['purchase'] },
+  { key: 'department', label: '部门', duties: ['request'] },
+  { key: 'finance', label: '财务（含成本）', duties: ['payable', 'cost'] },
+  { key: 'approve', label: '负责人', duties: ['approve'] },
+];
+
+/** 职责跨组时返回涉及的组名（如「仓库、采购」），不跨组返回 null；店主不受限制 */
+export function dutyConflict(role: Role, duties: readonly Duty[]): string | null {
+  if (role === 'owner') return null;
+  const groups = DUTY_GROUPS.filter((g) => g.duties.some((d) => duties.includes(d)));
+  return groups.length > 1 ? groups.map((g) => g.label).join('、') : null;
+}
+
 export interface PermissionSubject {
   role: Role;
   duties?: readonly Duty[];
@@ -73,6 +92,8 @@ export const PERMISSIONS = {
   'purchase.manage': { roles: ['owner'], duties: ['purchase'] },
   /** 退供应商申请（仓库或采购均可发起） */
   'supplierReturn.create': { roles: ['owner'], duties: ['stock', 'purchase'] },
+  /** 登记供应商对退货的答复（同意 → 退货生效；不同意 → 撤回），采购与供应商沟通（#20，v0.7.12） */
+  'supplierReturn.answer': { roles: ['owner'], duties: ['purchase'] },
   /** 查看供应商货款、付款与对账 */
   // 成本核算要冲销付款、期初未付（#21，v0.7.11），能看货款
   'payable.read': { roles: ['owner'], duties: ['purchase', 'payable', 'approve', 'cost'] },
@@ -222,8 +243,9 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'inventory.master': '维护物料、供应商、部门档案',
   'purchase.manage': '编制与提交采购单',
   'supplierReturn.create': '发起退供应商',
+  'supplierReturn.answer': '登记供应商对退货的答复',
   'payable.read': '查看供应商货款与对账',
-  'payable.manage': '登记期初未付与付款',
+  'payable.manage': '登记期初未付、付款、核销与供应商退款',
   'inventory.approve': '负责人确认（采购、报损、盘点调整、退货、付款）',
   'inventory.void': '冲销库存单据（只限当月）',
   'finance.void': '冲销付款、期初未付、报销与备用金（只限当月）',
@@ -269,7 +291,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   {
     title: 'ERP（库存、采购、货款、费用、营业数据）',
     items: [
-      'inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'supplierReturn.create', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.void', 'inventory.export',
+      'inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'supplierReturn.create', 'supplierReturn.answer', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.void', 'inventory.export',
       'deptStock.operate', 'deptStock.audit',
       'expense.read', 'expense.manage', 'petty.manage', 'expense.approve', 'finance.void', 'expense.export', 'request.create', 'request.review', 'erp.revenue',
     ],

@@ -117,7 +117,7 @@ export async function deptStockMeta(db: Db, actor: Actor): Promise<DeptStockMeta
 
 const DocsQuery = z.object({
   type: z.enum(INV_DOC_TYPES).optional(),
-  status: z.string().max(16).optional(),
+  status: z.string().max(32).optional(),
   from: docDateSchema.optional(),
   to: docDateSchema.optional(),
   unsigned: z.enum(['1']).optional(),
@@ -137,7 +137,7 @@ export function registerDeptStockRoutes(app: FastifyInstance, deps: Deps) {
 
   app.get('/api/erp/dept-stock/:id/stock', { preHandler: anyDept }, async (req) => {
     const d = await assertVisibleDept(sql, req.actor, parse(idParam, req.params).id);
-    return warehouseStock(sql, d.warehouseId);
+    return warehouseStock(sql, d.warehouseId, deps.config.timezone);
   });
 
   app.get('/api/erp/dept-stock/:id/docs', { preHandler: anyDept }, async (req) => {

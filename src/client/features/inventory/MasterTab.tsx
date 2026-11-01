@@ -97,7 +97,9 @@ function Materials({ editable }: { editable: boolean }) {
                   <td className="px-2 py-2.5 text-ink-2">{m.category || '—'}</td>
                   <td className="num px-2 py-2.5 text-ink-2">{conversionText(m.purchaseUnit, m.purchaseFactorMilli, m.inventoryUnit)}</td>
                   <td className="num px-2 py-2.5 text-right">{m.refPriceCents !== null ? `¥${formatAmount(m.refPriceCents)}/${m.purchaseUnit}` : <span className="text-ink-4">—</span>}</td>
-                  <td className="num px-2 py-2.5 text-right">{m.lowStockMilli !== null ? `${formatQty(m.lowStockMilli)} ${m.inventoryUnit}` : <span className="text-ink-4">—</span>}</td>
+                  <td className="num px-2 py-2.5 text-right">
+                    {m.coverDays !== null ? `可用不足 ${m.coverDays} 天` : m.lowStockMilli !== null ? `${formatQty(m.lowStockMilli)} ${m.inventoryUnit}` : <span className="text-ink-4">—</span>}
+                  </td>
                   <td className="px-4 py-2.5">
                     <span className="flex flex-wrap gap-1">
                       {!m.tracked ? <Badge tone="lake">候选</Badge> : m.active ? <Badge tone="pine">受管</Badge> : <Badge>已停用</Badge>}
@@ -155,6 +157,8 @@ export function MaterialDialog({
     const sameUnits = form.purchaseUnit.trim() === form.inventoryUnit.trim();
     if (!sameUnits && !factor) return setError(`换算数量格式不正确（最多 ${decimals} 位小数）`);
     if (form.low.trim() && low === null) return setError('提醒线格式不正确');
+    const coverDays = form.coverDays.trim() ? Number(form.coverDays) : null;
+    if (coverDays !== null && (!Number.isInteger(coverDays) || coverDays < 1 || coverDays > 90)) return setError('提醒天数要是 1 到 90 的整数');
     if (form.price.trim() && price === null) return setError('参考价格式不正确');
     const body = {
       code: form.code.trim(),
@@ -168,6 +172,7 @@ export function MaterialDialog({
       refPriceCents: price,
       defaultSupplierId: Number(form.supplierId) || null,
       lowStockMilli: low,
+      coverDays,
       tracked: form.tracked,
       active: form.active,
       note: form.note.trim(),
@@ -259,7 +264,10 @@ export function MaterialDialog({
             ))}
           </Select>
         </Field>
-        <Field label={<span className="flex items-center gap-1.5">低库存提醒线 <SimRule>人工设定</SimRule></span>} htmlFor="m-low" className="sm:col-span-2" hint={`低于此数提醒（${form.inventoryUnit || '库存单位'}），留空不提醒`}>
+        <Field label="提醒天数" htmlFor="m-cover" hint="可用天数少于它时提醒：一般用品约 7 天，新鲜食材 1–2 天；按近期用量算，没有用量时用右边的固定数量">
+          <Input id="m-cover" value={form.coverDays} inputMode="numeric" placeholder="不按天数" onChange={(e) => set({ coverDays: e.target.value.replace(/\D/g, '') })} className="num text-right" />
+        </Field>
+        <Field label={<span className="flex items-center gap-1.5">低库存提醒线 <SimRule>人工设定</SimRule></span>} htmlFor="m-low" hint={`低于此数提醒（${form.inventoryUnit || '库存单位'}，只看总仓），留空不提醒`}>
           <Input id="m-low" value={form.low} inputMode="decimal" onChange={(e) => set({ low: e.target.value })} className="num text-right" />
         </Field>
 
@@ -307,6 +315,7 @@ function toForm(m: Material | null) {
     price: m?.refPriceCents != null ? centsToInput(m.refPriceCents) : '',
     supplierId: m?.defaultSupplierId ? String(m.defaultSupplierId) : '',
     low: m?.lowStockMilli != null ? formatQty(m.lowStockMilli).replace(/,/g, '') : '',
+    coverDays: m?.coverDays != null ? String(m.coverDays) : '',
     tracked: m?.tracked ?? true,
     active: m?.active ?? true,
     note: m?.note ?? '',

@@ -151,18 +151,20 @@ describe('核心案例（库存部分）：拖鞋 箱入双出、拒收、领用
     expect(approved.body.lines[0].diffReason).toBe('unknown');
     expect(await stockOf(slipper.id)).toBe(q(977));
 
-    // 关联首批收货退供应商 10 双：退货单需负责人确认，扣款按原价换算 = 18 元
+    // 关联首批收货退供应商 10 双：扣款按原价换算 = 18 元，不超过免确认门槛（#18，默认 2000 元）不用负责人确认，
+    // 先等供应商确认（#20，v0.7.12）：这时库存、货款都不动
     const ret = await okDoc(keeper, {
       docType: 'supplier_return',
       sourceDocId: r1.id,
       note: '部分拖鞋开胶',
       lines: [{ sourceLineId: r1.lines[0].id, qtyMilli: q(10) }],
     });
-    expect(ret.status).toBe('submitted');
+    expect(ret.status).toBe('awaiting_supplier');
     expect(ret.amountCents).toBe(1800);
     expect(await stockOf(slipper.id)).toBe(q(977));
-    const retOk = await api(ctx.app, approver, 'POST', `/api/inventory/docs/${ret.id}/approve`, {});
+    const retOk = await api(ctx.app, ctx.owner, 'POST', `/api/inventory/docs/${ret.id}/supplier-answer`, { agreed: true, date: today, note: '供应商同意扣款' });
     expect(retOk.body.status).toBe('confirmed');
+    expect(retOk.body.supplierAnswer).toMatchObject({ agreed: true, date: today, note: '供应商同意扣款' });
     expect(await stockOf(slipper.id)).toBe(q(967));
 
     // 应付流水：1,440 + 360 − 18 = 1,782 元

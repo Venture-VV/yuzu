@@ -27,6 +27,7 @@ import { InventoryPage } from './features/inventory/InventoryPage';
 import { TodoPage } from './features/inventory/TodoPage';
 import { PayablesPage } from './features/payables/PayablesPage';
 import { PaymentFormPage } from './features/payables/PaymentFormPage';
+import { ImportPage } from './features/payables/ImportPage';
 import { OrderedPage } from './features/purchasing/OrderedPage';
 import { PoFormPage } from './features/purchasing/PoFormPage';
 import { PurchasingPage } from './features/purchasing/PurchasingPage';
@@ -197,6 +198,7 @@ const router = createBrowserRouter([
       { path: 'purchasing/:id/revise', element: <PoFormPage mode="revise" /> },
       { path: 'payables', element: <PayablesPage /> },
       { path: 'payables/pay', element: <PaymentFormPage /> },
+      { path: 'payables/import', element: <ImportPage /> },
     ],
   },
   {

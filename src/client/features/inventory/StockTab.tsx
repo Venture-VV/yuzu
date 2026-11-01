@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ArrowRight, Download, Hourglass, Search, TriangleAlert, X } from 'lucide-react';
-import { CENTRAL_WAREHOUSE_ID, INV_DOC_META, INV_STATUS_LABELS, ISSUE_SIGN_DUE_DAYS, MOVE_TYPE_LABELS, type InvDocType, type Material, type WarehouseStockRow } from '@shared/inventory';
+import { CENTRAL_WAREHOUSE_ID, INV_DOC_META, INV_STATUS_LABELS, ISSUE_SIGN_DUE_DAYS, MOVE_TYPE_LABELS, SUPPLIER_ANSWER_DUE_DAYS, type InvDocType, type Material, type WarehouseStockRow } from '@shared/inventory';
 import { formatAmount } from '@shared/money';
 import { conversionText, formatQty } from '@shared/quantity';
 import { errorMessage } from '../../lib/api';
@@ -72,6 +72,13 @@ export function StockTab() {
         { n: overview.data.urgentToVerify, label: '急采待仓库验收', to: '/inventory/docs?type=receipt&urgent=1&status=submitted' },
         { n: overview.data.unsignedIssues, label: `领料超过 ${ISSUE_SIGN_DUE_DAYS} 天部门没签收`, to: '/inventory/docs?type=issue&unsigned=1' },
         { n: overview.data.urgentToBackfill, label: '急采待补采购单', to: '/inventory/docs?type=receipt&urgent=1&status=confirmed' },
+        {
+          n: overview.data.awaitingSupplier,
+          label: overview.data.awaitingSupplierOverdue
+            ? `退货待供应商确认（其中 ${overview.data.awaitingSupplierOverdue} 张超过 ${SUPPLIER_ANSWER_DUE_DAYS} 天）`
+            : '退货待供应商确认',
+          to: '/inventory/docs?type=supplier_return&status=awaiting_supplier',
+        },
       ].filter((t) => t.n > 0)
     : [];
 
@@ -82,7 +89,7 @@ export function StockTab() {
         <div className="shrink-0 space-y-3 border-b border-line px-5 py-4 md:px-7">
           <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
             <Tile label="受管物料" value={overview.data?.materialCount} sub={noOpening ? `${noOpening} 项未建期初` : '均已建期初'} onClick={() => setFilter(noOpening ? 'empty' : 'all')} />
-            <Tile label="低库存提醒" value={overview.data?.lowCount} tone={overview.data?.lowCount ? 'clay' : undefined} sub="低于人工设定阈值" onClick={() => setFilter('low')} />
+            <Tile label="低库存提醒" value={overview.data?.lowCount} tone={overview.data?.lowCount ? 'clay' : undefined} sub="可用天数不足或低于提醒线" onClick={() => setFilter('low')} />
             <Tile
               label="待确认单据"
               value={overview.data?.pendingApprovals}
@@ -294,7 +301,7 @@ function MaterialRow({ m, selected, onSelect }: { m: Material; selected: boolean
         </span>
         <span className="hidden text-[12px] text-ink-3 md:block">
           <StockMeter stock={m.stockMilli} low={m.lowStockMilli} className="mb-1" />
-          {m.lowStockMilli !== null ? `提醒线 ${formatQty(m.lowStockMilli)} ${m.inventoryUnit}` : '未设提醒线'}
+          {coverText(m)}
         </span>
         <span className="text-right">
           <Qty milli={m.stockMilli} unit={m.inventoryUnit} className={cn('text-[17px] font-bold', m.isLow && 'text-clay')} />
@@ -325,12 +332,17 @@ function DeptRow({ r, selected, onSelect }: { r: WarehouseStockRow; selected: bo
       >
         <span className="num text-[12px] font-semibold text-ink-3">{r.code}</span>
         <span className="min-w-0">
-          <span className="block truncate text-[14px] font-bold">{r.name}</span>
+          <span className="flex items-center gap-2">
+            <span className="truncate text-[14px] font-bold">{r.name}</span>
+            {r.isLow && <Badge tone="clay">低库存</Badge>}
+          </span>
           <span className="block truncate text-[12px] text-ink-3">{r.specification || '—'}</span>
         </span>
         <span className="text-right">
-          <Qty milli={r.stockMilli} unit={r.inventoryUnit} className="text-[17px] font-bold" />
-          <span className="block text-[11.5px] text-ink-3">{relativeTime(r.lastMoveAt)}</span>
+          <Qty milli={r.stockMilli} unit={r.inventoryUnit} className={cn('text-[17px] font-bold', r.isLow && 'text-clay')} />
+          <span className="block text-[11.5px] text-ink-3">
+            {r.daysOfCover !== null ? `可用 ${r.daysOfCover} 天${r.coverDays !== null ? ` · 提醒 ${r.coverDays} 天` : ''}` : relativeTime(r.lastMoveAt)}
+          </span>
         </span>
       </button>
     </li>
@@ -407,14 +419,14 @@ function MaterialDetail({ id, warehouseId: initialWarehouse, onClose, closable }
           </div>
           <div className="text-right text-[12px] text-ink-3">
             <p>{conversionText(m.purchaseUnit, m.purchaseFactorMilli, m.inventoryUnit)}</p>
-            <p>{m.lowStockMilli !== null ? `提醒线 ${formatQty(m.lowStockMilli)} ${m.inventoryUnit}` : '未设提醒线'}</p>
+            <p>{coverText(m)}</p>
             {m.refPriceCents !== null && <p>参考价 ¥{formatAmount(m.refPriceCents)}/{m.purchaseUnit}</p>}
           </div>
         </div>
         {central && m.isLow && (
           <p className="mt-2 flex items-center gap-1.5 text-[12.5px] font-semibold text-clay">
             <TriangleAlert className="size-4" />
-            低于人工设定的提醒线（阈值为模拟值，不是行业推荐用量）
+            {m.coverDays !== null && m.daysOfCover !== null ? `按近期用量只够 ${m.daysOfCover} 天，少于提醒天数 ${m.coverDays} 天` : '低于人工设定的提醒线（阈值为模拟值，不是行业推荐用量）'}
           </p>
         )}
         {can('inventory.operate') && central && (
@@ -525,4 +537,11 @@ function MaterialDetail({ id, warehouseId: initialWarehouse, onClose, closable }
       </div>
     </div>
   );
+}
+
+/** 提醒线说明（#22，v0.7.12）：设了提醒天数且有用量的按可用天数，否则按固定数量 */
+function coverText(m: Material): string {
+  if (m.coverDays !== null && m.daysOfCover !== null) return `可用 ${m.daysOfCover} 天 · 提醒 ${m.coverDays} 天`;
+  if (m.coverDays !== null) return `提醒 ${m.coverDays} 天 · 近期没有用量`;
+  return m.lowStockMilli !== null ? `提醒线 ${formatQty(m.lowStockMilli)} ${m.inventoryUnit}` : '未设提醒线';
 }

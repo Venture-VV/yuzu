@@ -27,6 +27,8 @@ const ACTION_LABELS: Record<PurchaseOrder['approvals'][number]['action'], string
   close: '关闭',
   revise: '改版',
   sign: '签收',
+  supplier_agree: '供应商已同意',
+  supplier_reject: '供应商不同意',
 };
 
 export function PoSheet({ id, onClose }: { id: number | null; onClose: () => void }) {
@@ -121,8 +123,13 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <MoneyTile label="下单金额" cents={po.totalCents} hint="采购承诺" />
           <MoneyTile label="已确认收货" cents={po.receivedCents} tone="pine" hint="合格实收 × 单价" />
-          <MoneyTile label="已登记付款" cents={po.paidCents} tone="lake" hint={po.returnCreditCents ? `另有退货扣款 ¥${(po.returnCreditCents / 100).toFixed(2)}` : '核销到本单收货'} />
-          <MoneyTile label="本单未付" cents={po.unpaidCents} tone={po.unpaidCents < 0 ? 'clay' : 'ink'} hint={po.unpaidCents < 0 ? '供应商待退 / 可抵' : '收货 − 退货 − 已付'} />
+          <MoneyTile label="已登记付款" cents={po.paidCents} tone="lake" hint={po.returnCreditCents ? `另有退货抵扣 ¥${(po.returnCreditCents / 100).toFixed(2)}` : '含核销到本单收货的'} />
+          <MoneyTile
+            label="本单未付"
+            cents={po.unpaidCents}
+            tone={po.unpaidCents < 0 ? 'clay' : 'ink'}
+            hint={po.returnBalanceCents > 0 ? `另有退货余额 ¥${(po.returnBalanceCents / 100).toFixed(2)}（在货款的可抵扣里）` : '收货 − 退货抵扣 − 已付'}
+          />
         </div>
 
         <dl className="grid grid-cols-2 gap-x-5 gap-y-2.5 rounded-lg border border-line bg-card px-4 py-3.5 text-[13px] sm:grid-cols-3">
