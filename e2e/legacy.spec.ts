@@ -67,6 +67,10 @@ test.describe('旧账对照（8–10 月）', () => {
     await expect(img).toBeVisible();
     // 图片可能还在加载：等到加载完再看尺寸
     await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true);
+    // 已下单物料同样能看原表（图片格是 WPS 的 DISPIMG 公式）
+    const orderedRow = page.getByTestId('legacy-row-r-10月:2');
+    await orderedRow.getByRole('button', { name: '看原表' }).click();
+    await expect(orderedRow).toContainText('DISPIMG("ID_SAMPLE_A",1)');
 
     // 品牌清单：链接只放行 http(s)，新窗口打开
     await page.getByTestId('legacy-tab-brand').click();
@@ -99,6 +103,16 @@ test.describe('旧账对照（8–10 月）', () => {
     const row = page.getByTestId('legacy-row-r-Sheet1:15');
     await expect(row).toHaveClass(/bg-yuzu-soft/);
     await expect(row).toBeInViewport();
+
+    // 已下单物料（带原图的一行）同样
+    await page.route('**/api/erp/legacy/rows/ordered_materials', async (route) => {
+      await new Promise((r) => setTimeout(r, 800));
+      await route.continue();
+    });
+    await page.goto('/erp/legacy?tab=ordered&row=10%E6%9C%88%3A6');
+    const ordered = page.getByTestId('legacy-row-r-10月:6');
+    await expect(ordered).toHaveClass(/bg-yuzu-soft/);
+    await expect(ordered).toBeInViewport();
   });
 
   test('班次从前一个营业日开到现在：交班页与前台提醒先交班（只提醒、不拦截）', async ({ page }) => {

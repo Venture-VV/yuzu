@@ -60,16 +60,37 @@ function RawCells({ raw }: { raw: LegacyRawCells }) {
   );
 }
 
-/** 一行原表：标题行 + 说明 + 可展开的原始单元格；被核验点名的行高亮 */
-function RowItem({ id, title, lines, flags, raw, highlight }: { id: string; title: ReactNode; lines: ReactNode; flags?: ReactNode; raw: LegacyRawCells; highlight: boolean }) {
+/** 金额格是公式、文件里没存结果又算不了（有单元格引用、函数）：标出来，公式原文在「看原表」里 */
+function FormulaFlag({ cents, formula }: { cents: number | null; formula: string | null }) {
+  return cents === null && formula ? <Badge tone="clay">公式没有结果</Badge> : null;
+}
+
+/** 一行原表：标题行 + 说明 + 可展开的原始单元格；被核验点名的行高亮。leading 放在左边（已下单物料的原图） */
+function RowItem({
+  id,
+  title,
+  lines,
+  flags,
+  raw,
+  highlight,
+  leading,
+}: {
+  id: string;
+  title: ReactNode;
+  lines: ReactNode;
+  flags?: ReactNode;
+  raw: LegacyRawCells;
+  highlight: boolean;
+  leading?: ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLLIElement>(null);
   // 被点名的行画出来时自己滚到中间：原表接口慢、这一行晚出现也能对上（不靠固定的延时）
   useEffect(() => {
     if (highlight) ref.current?.scrollIntoView({ block: 'center' });
   }, [highlight]);
-  return (
-    <li ref={ref} id={id} className={cn('px-4 py-2.5', highlight && 'bg-yuzu-soft/60')} data-testid={`legacy-row-${id}`}>
+  const body = (
+    <>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         {title}
         {flags}
@@ -79,6 +100,18 @@ function RowItem({ id, title, lines, flags, raw, highlight }: { id: string; titl
       </div>
       <div className="mt-0.5 text-[12.5px] text-ink-2">{lines}</div>
       {open && <RawCells raw={raw} />}
+    </>
+  );
+  return (
+    <li ref={ref} id={id} className={cn('px-4 py-2.5', leading !== undefined && 'flex gap-3', highlight && 'bg-yuzu-soft/60')} data-testid={`legacy-row-${id}`}>
+      {leading !== undefined ? (
+        <>
+          {leading}
+          <div className="min-w-0 flex-1">{body}</div>
+        </>
+      ) : (
+        body
+      )}
     </li>
   );
 }
@@ -298,6 +331,7 @@ function LedgerTab({ highlight }: { highlight: string | null }) {
                 <Badge tone={KIND_TONE[k]}>{LEGACY_LEDGER_KIND_LABELS[k]}</Badge>
                 {!l.preHeader && l.date === null && <Badge tone="clay">无日期</Badge>}
                 {l.mergedInto !== null && <Badge tone="neutral">金额与第 {l.mergedInto} 行合并</Badge>}
+                <FormulaFlag cents={l.amountCents} formula={l.amountFormula} />
               </>
             }
             lines={[l.date ?? l.dateText, l.qtyText && `数量 ${l.qtyText}`, l.merchant, l.purpose, l.invoice, l.note].filter(Boolean).join(' · ') || '—'}
@@ -381,6 +415,7 @@ function MaterialsTab({ highlight }: { highlight: string | null }) {
                       <>
                         {m.category && <Badge tone="neutral">{m.category}</Badge>}
                         {m.mergedInto !== null && <Badge tone="neutral">金额与第 {m.mergedInto} 行合并</Badge>}
+                        <FormulaFlag cents={m.amountCents} formula={m.amountFormula} />
                       </>
                     }
                     lines={
@@ -415,32 +450,40 @@ function OrderedTab({ highlight }: { highlight: string | null }) {
       <p className="border-b border-line px-4 py-2 text-[12.5px] text-ink-2">图片是原表里的 WPS 单元格图（导出 Excel 会丢），导入时已把原图存下来；点图片看大图。</p>
       <ul className="divide-y divide-line/70">
         {(rows.data!.ordered ?? []).map((o) => (
-          <li
+          <RowItem
             key={`${o.sheet}:${o.rowNo}`}
             id={`r-${rowKey(o.sheet, o.rowNo)}`}
-            className={cn('flex gap-3 px-4 py-2.5', highlight === rowKey(o.sheet, o.rowNo) && 'bg-yuzu-soft/60')}
-          >
-            {o.imageId !== null ? (
-              <a href={`/api/erp/legacy/images/${o.imageId}`} target="_blank" rel="noreferrer" className="shrink-0">
-                <img src={`/api/erp/legacy/images/${o.imageId}`} alt={o.product} loading="lazy" className="size-14 rounded-md border border-line object-cover" />
-              </a>
-            ) : (
-              <span className="flex size-14 shrink-0 items-center justify-center rounded-md border border-dashed border-clay/50 text-[11px] text-clay">没有图</span>
-            )}
-            <div className="min-w-0 flex-1">
-              <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            highlight={highlight === rowKey(o.sheet, o.rowNo)}
+            raw={o.raw}
+            leading={
+              o.imageId !== null ? (
+                <a href={`/api/erp/legacy/images/${o.imageId}`} target="_blank" rel="noreferrer" className="shrink-0">
+                  <img src={`/api/erp/legacy/images/${o.imageId}`} alt={o.product} loading="lazy" className="size-14 rounded-md border border-line object-cover" />
+                </a>
+              ) : (
+                <span className="flex size-14 shrink-0 items-center justify-center rounded-md border border-dashed border-clay/50 text-[11px] text-clay">没有图</span>
+              )
+            }
+            title={
+              <>
                 <span className="num text-[12px] text-ink-3">
                   {o.sheet} 第 {o.rowNo} 行
                 </span>
                 <span className="font-semibold">{o.product}</span>
                 <span className="num font-bold">{yuan(o.amountCents)}</span>
+              </>
+            }
+            flags={
+              <>
                 {o.imageShared && <Badge tone="neutral">与上一行同一张图</Badge>}
-              </p>
-              <p className="text-[12.5px] text-ink-2">
-                {[o.date ?? o.dateText, o.variant, o.department, o.orderer, o.qtyMilli !== null ? `数量 ${formatQty(o.qtyMilli)}` : o.qtyText, o.note].filter(Boolean).join(' · ')}
-              </p>
-            </div>
-          </li>
+                {o.mergedInto !== null && <Badge tone="neutral">金额与第 {o.mergedInto} 行合并</Badge>}
+                <FormulaFlag cents={o.amountCents} formula={o.amountFormula} />
+              </>
+            }
+            lines={
+              [o.date ?? o.dateText, o.variant, o.department, o.orderer, o.qtyMilli !== null ? `数量 ${formatQty(o.qtyMilli)}` : o.qtyText, o.note].filter(Boolean).join(' · ') || '—'
+            }
+          />
         ))}
       </ul>
     </Card>
