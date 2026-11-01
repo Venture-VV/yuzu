@@ -150,6 +150,8 @@ export interface RoomBoardRoom {
   roomNo: string;
   /** 挂接空间的显示名（v0.7.14；同名的品牌房号靠编码区分，显示「G305 · 客房 C5」） */
   spaceName: string | null;
+  /** 挂接的空间（v0.7.16 房态图按它把房间画到图上） */
+  spaceId: number | null;
   floor: string;
   typeName: string;
   kind: RoomKind;

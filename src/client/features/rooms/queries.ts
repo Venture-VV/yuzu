@@ -7,9 +7,9 @@ export const roomsKey = ['rooms'] as const;
 export const stayKey = (id: number | null) => ['rooms', 'stay', id] as const;
 export const roomsAdminKey = ['admin', 'rooms'] as const;
 
-/** 房态看板：多台终端同时入住、退房，15 秒刷新一次 */
-export const useRoomBoard = (enabled = true) =>
-  useQuery({ queryKey: roomsKey, queryFn: () => api.get<RoomBoard>('/api/rooms'), refetchInterval: 15_000, placeholderData: keepPreviousData, enabled });
+/** 房态看板：多台终端同时入住、退房，15 秒刷新一次（平面图打开时 5 秒，与平面图的状态一起刷新） */
+export const useRoomBoard = (enabled = true, refetchInterval = 15_000) =>
+  useQuery({ queryKey: roomsKey, queryFn: () => api.get<RoomBoard>('/api/rooms'), refetchInterval, placeholderData: keepPreviousData, enabled });
 
 export const useStay = (id: number | null) =>
   useQuery({ queryKey: stayKey(id), queryFn: () => api.get<StayDetail>(`/api/rooms/stays/${id}`), enabled: id !== null, refetchInterval: 30_000 });

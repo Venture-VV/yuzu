@@ -37,8 +37,10 @@ import {
   SPACE_IMPORT_LABELS,
   SPACE_VERIFY_LABELS,
   SPACE_VERIFY_STATUSES,
+  TECHNICIAN_BUSINESS_TYPES,
   ZONE_IMPORT_COLUMNS,
   areaText,
+  isTechnicianBusinessType,
   parseArea,
   parseCapacity,
   parseSellable,
@@ -397,6 +399,17 @@ async function linkedRoom(tx: Tx, spaceId: number) {
   return room ?? null;
 }
 
+/**
+ * 房间里还没结束的钟单（v0.7.16，客人在店）：这时不能停用、不能改成非技师服务的业态（等下钟，或在钟房把钟单换到别的房间）。
+ * 调用前已锁空间一行（排他）；派钟、换房间给房间加共享锁，所以刚派进来的钟单这里一定看得到。
+ */
+async function openSessionsIn(tx: Tx, spaceId: number) {
+  const [row] = await tx<{ n: number; sample: string | null }[]>`
+    SELECT count(*)::int AS n, min(s.session_no) AS sample FROM technician_sessions s JOIN visits v ON v.id = s.visit_id
+    WHERE s.space_id = ${spaceId} AND s.status IN ('waiting', 'serving') AND v.status = 'open'`;
+  return row!;
+}
+
 async function updateSpace(deps: Deps, id: number, raw: unknown, ctx: OpContext) {
   const s = parse(SpaceUpdateInput, raw);
   await deps.sql.begin(async (tx) => {
@@ -407,6 +420,15 @@ async function updateSpace(deps: Deps, id: number, raw: unknown, ctx: OpContext)
       const room = await linkedRoom(tx, id);
       if (room) {
         throw conflict('SPACE_HAS_ROOM', `空间 ${cur.code} 挂着客房房间「${room.roomNo}」，不能${s.active ? `改成「${s.businessType}」` : '停用'}；先在后台「客房 → 房间」里取消挂接`);
+      }
+    }
+    if ((!s.active && cur.active) || (!isTechnicianBusinessType(s.businessType) && isTechnicianBusinessType(cur.businessType))) {
+      const open = await openSessionsIn(tx, id);
+      if (open.n > 0) {
+        throw conflict(
+          'SPACE_HAS_SESSIONS',
+          `空间 ${cur.code} 里还有 ${open.n} 张没结束的钟单（如 ${open.sample}），不能${s.active ? `改成「${s.businessType}」` : '停用'}；等下钟后再改，或在钟房把钟单换到别的房间`,
+        );
       }
     }
     await tx`
@@ -958,6 +980,14 @@ export async function spaceChecks(db: Db): Promise<{ label: string; ok: boolean;
     LIMIT 5`;
   const [links] = await db<{ linked: number; unlinked: number }[]>`
     SELECT count(*) FILTER (WHERE space_id IS NOT NULL)::int AS linked, count(*) FILTER (WHERE space_id IS NULL AND active)::int AS unlinked FROM rooms`;
+  // ③ 钟单记的房间（v0.7.16）：还没结束的钟单（客人在店）记的房间是在用的技师服务类空间
+  const sessionDiff = await db<{ ref: string }[]>`
+    SELECT s.session_no || ' ' || sp.code AS ref FROM technician_sessions s JOIN visits v ON v.id = s.visit_id JOIN spaces sp ON sp.id = s.space_id
+    WHERE s.status IN ('waiting', 'serving') AND v.status = 'open' AND (NOT sp.active OR sp.business_type NOT IN ${db([...TECHNICIAN_BUSINESS_TYPES])})
+    LIMIT 5`;
+  const [sessionRooms] = await db<{ open: number; total: number }[]>`
+    SELECT count(*) FILTER (WHERE s.status IN ('waiting', 'serving') AND v.status = 'open')::int AS open, count(*)::int AS total
+    FROM technician_sessions s JOIN visits v ON v.id = s.visit_id WHERE s.space_id IS NOT NULL`;
   return [
     {
       label: '空间台账编码唯一、区域与楼层一致',
@@ -972,6 +1002,13 @@ export async function spaceChecks(db: Db): Promise<{ label: string; ok: boolean;
       detail: linkDiff.length
         ? `${linkDiff.length} 间房的挂接不符（空间不是在用的「客房」或房号不是空间编码，如 ${linkDiff.map((d) => d.ref).join('、')}）`
         : `挂接了空间的房间 ${links!.linked} 间，房号都是空间编码、空间都是在用的「客房」${links!.unlinked ? `；还没挂接的启用房间 ${links!.unlinked} 间` : ''}`,
+    },
+    {
+      label: '钟单记的房间是在用的技师服务类空间',
+      ok: sessionDiff.length === 0,
+      detail: sessionDiff.length
+        ? `${sessionDiff.length} 张没结束的钟单记的房间已停用或不是技师服务类业态（如 ${sessionDiff.map((d) => d.ref).join('、')}）`
+        : `记了房间的钟单 ${sessionRooms!.total} 张（客人在店、没结束的 ${sessionRooms!.open} 张），房间都是在用的技师服务类空间`,
     },
   ];
 }

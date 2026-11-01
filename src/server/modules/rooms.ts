@@ -408,6 +408,7 @@ export async function roomsBoard(deps: Deps): Promise<RoomBoard> {
       id: number;
       roomNo: string;
       spaceName: string | null;
+      spaceId: number | null;
       floor: string;
       typeName: string;
       kind: RoomKind;
@@ -418,7 +419,7 @@ export async function roomsBoard(deps: Deps): Promise<RoomBoard> {
       stayId: number | null;
     }[]
   >`
-    SELECT r.id, r.room_no, sp.display_name AS space_name, r.floor, t.name AS type_name, t.kind, t.price, t.block_minutes, r.housekeeping,
+    SELECT r.id, r.room_no, sp.display_name AS space_name, r.space_id, r.floor, t.name AS type_name, t.kind, t.price, t.block_minutes, r.housekeeping,
            r.maintenance_note, s.id AS stay_id
     FROM rooms r JOIN room_types t ON t.id = r.room_type_id LEFT JOIN room_stays s ON s.room_id = r.id AND s.status = 'open'
     LEFT JOIN spaces sp ON sp.id = r.space_id

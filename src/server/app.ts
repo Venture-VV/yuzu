@@ -45,6 +45,7 @@ import { registerTableRoutes } from './modules/tables';
 import { registerRoomRoutes } from './modules/rooms';
 import { registerSpaceRoutes } from './modules/spaces';
 import { registerFloorplanRoutes } from './modules/floorplans';
+import { registerFloorMapRoutes } from './modules/floormap';
 import { registerCommissionRoutes } from './modules/commission';
 import { registerWalletRoutes } from './modules/wallet';
 import { registerErpModuleGate, registerErpRoutes } from './modules/erp';
@@ -176,6 +177,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerRoomRoutes(app, deps);
   registerSpaceRoutes(app, deps);
   registerFloorplanRoutes(app, deps);
+  registerFloorMapRoutes(app, deps);
   registerCommissionRoutes(app, deps);
   registerErpRoutes(app, deps);
 
