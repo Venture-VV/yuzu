@@ -1,6 +1,6 @@
 {
   "name": "yuzu",
-  "version": "0.7.10",
+  "version": "0.7.11",
   "private": true,
   "description": "浴族 yuzu · 汤泉门店经营系统（会员充值、消费、撤销、流水与日结）",
   "type": "module",
@@ -51,5 +51,10 @@
     "typescript": "^6.0.3",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
+  },
+  "overrides": {
+    "@fastify/static": {
+      "glob": "^14.0.3"
+    }
   }
 }

@@ -61,6 +61,23 @@ describe('合成数据：与附件预期结果逐项一致', () => {
     }
   });
 
+  it('两级库存（v0.7.11）：领料进领料部门的小仓，部门小仓结存 = 领料 − 退回；领料都待部门签收', async () => {
+    const expected = new Map<string, number>();
+    const issueDept = new Map(demo.issues.map((i) => [i.id, i.department]));
+    for (const i of demo.issues) for (const l of i.lines) expected.set(`${i.department}|${l.materialCode}`, (expected.get(`${i.department}|${l.materialCode}`) ?? 0) + q(Number(l.quantity)));
+    for (const r of demo.issueReturns) {
+      const k = `${issueDept.get(r.sourceIssueId)}|${r.materialCode}`;
+      expected.set(k, expected.get(k)! - q(Number(r.quantity)));
+    }
+    const rows = await ctx.sql<{ dept: string; code: string; stock: number }[]>`
+      SELECT d.name AS dept, m.code, ws.stock_milli AS stock FROM warehouse_stock ws
+      JOIN warehouses w ON w.id = ws.warehouse_id JOIN departments d ON d.id = w.department_id JOIN materials m ON m.id = ws.material_id
+      WHERE ws.stock_milli <> 0`;
+    expect(new Map(rows.map((r) => [`${r.dept}|${r.code}`, r.stock]))).toEqual(new Map([...expected].filter(([, v]) => v !== 0)));
+    const unsigned = await api(ctx.app, boss, 'GET', '/api/inventory/docs?type=issue&unsigned=1');
+    expect(unsigned.body).toHaveLength(demo.issues.length);
+  });
+
   it('供应商货款：期初未付 + 收货 − 退货 − 付款 = 余额', async () => {
     const res = await api(ctx.app, boss, 'GET', '/api/payables/overview');
     for (const e of demo.expected.suppliers) {
