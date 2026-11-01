@@ -128,7 +128,8 @@ async function prepare(page: Page) {
   const t = roster.find((x) => x.techNo === TECH.techNo);
   if (!t) await send(page, 'post', '/api/admin/technicians', TECH);
   else if (!t.active) await send(page, 'put', `/api/admin/technicians/${t.id}`, { name: t.name, gender: t.gender, grade: TECH.grade, skills: [], active: true });
-  await send(page, 'put', '/api/admin/technicians/rules', { enabled: true, tierByGrade: false });
+  // 只开技师功能，其余技师规则（价格跟等级等）不动，免得影响之后的技师、钟房用例
+  await send(page, 'put', '/api/admin/technicians/rules', { enabled: true });
   return { roomId: room.id };
 }
 
@@ -150,8 +151,11 @@ async function clearVisit(page: Page, visitId: number, reason: string) {
   await send(page, 'post', `/api/frontdesk/visits/${visitId}/cancel`, { reason });
 }
 
-/** 收尾（店主）：W301 的房间取消挂接、停用；W301、W302 停用；关闭客房与技师功能 */
+/** 收尾（店主）：E7 下牌（不留在轮钟队列里）；W301 的房间取消挂接、停用；W301、W302 停用；关闭客房与技师功能 */
 async function cleanup(page: Page) {
+  const board = await page.request.get('/api/clockroom');
+  const e7 = board.ok() ? ((await board.json()) as ClockroomBoard).technicians.find((t) => t.techNo === TECH.techNo) : undefined;
+  if (e7 && e7.state !== 'off') await send(page, 'post', `/api/clockroom/technicians/${e7.id}/state`, { action: 'sign_out' });
   const admin = await getJson<RoomsAdmin>(page, '/api/admin/rooms');
   const room = admin.rooms.find((r) => r.spaceCode === 'W301');
   if (room) {
