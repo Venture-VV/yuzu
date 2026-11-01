@@ -21,31 +21,37 @@ async function post<T = Record<string, any>>(page: Page, url: string, data: unkn
   return (await res.json()) as T;
 }
 
+/** 店主用接口准备：S003 的 M011 按采购单收货（每张 2 桶，单价自定），收货由周一（采购）一起验收 */
+async function ownerSetup(page: Page) {
+  const me = await getJson<{ calendarToday: string }>(page, '/api/auth/me');
+  const today = me.calendarToday;
+  const suppliers = await getJson<{ id: number; code: string; name: string }[]>(page, '/api/inventory/suppliers');
+  const sup = suppliers.find((s) => s.code === 'S003')!;
+  const materials = await getJson<{ id: number; code: string }[]>(page, '/api/inventory/materials');
+  const mat = materials.find((m) => m.code === 'M011')!;
+  const buyer = (await getJson<{ id: number; displayName: string }[]>(page, '/api/inventory/co-acceptors')).find((s) => s.displayName.startsWith('周一'))!;
+  const receive = async (priceCents: number) => {
+    const po = (await post(page, '/api/purchase-orders', { clientKey: crypto.randomUUID(), supplierId: sup.id, orderDate: today, approveNow: true, lines: [{ materialId: mat.id, purchaseQtyMilli: 2000, priceCents }] })).po;
+    return (await post(page, '/api/inventory/docs', {
+      clientKey: crypto.randomUUID(),
+      docType: 'receipt',
+      docDate: today,
+      supplierId: sup.id,
+      purchaseOrderId: po.id,
+      coAcceptorId: buyer.id,
+      lines: [{ materialId: mat.id, poLineId: po.lines[0].id, deliveredMilli: po.lines[0].baseQtyMilli, acceptedMilli: po.lines[0].baseQtyMilli }],
+    })).doc as { id: number; docNo: string; amountCents: number; lines: { id: number; qtyMilli: number }[] };
+  };
+  return { today, sup, receive };
+}
+
 test.describe('供应商结算：退货待供应商确认、退货余额核销与退款', () => {
   test.skip(({ viewport }) => (viewport?.width ?? 0) < 1280, '会登记单据的流程只在门店电脑尺寸执行一次');
 
   test('退货 → 采购登记供应商同意 → 退货余额核销一部分、其余登记供应商退款', async ({ page }) => {
     // ── 店主用接口准备：采购单、按单收货（已付清），再退 2 个 ──
     await login(page, 'linlan', '会员工作台');
-    const me = await getJson<{ calendarToday: string }>(page, '/api/auth/me');
-    const today = me.calendarToday;
-    const suppliers = await getJson<{ id: number; code: string; name: string }[]>(page, '/api/inventory/suppliers');
-    const sup = suppliers.find((s) => s.code === 'S003')!;
-    const materials = await getJson<{ id: number; code: string }[]>(page, '/api/inventory/materials');
-    const mat = materials.find((m) => m.code === 'M011')!;
-    const buyer = (await getJson<{ id: number; displayName: string }[]>(page, '/api/inventory/co-acceptors')).find((s) => s.displayName.startsWith('周一'))!;
-    const receive = async (priceCents: number) => {
-      const po = (await post(page, '/api/purchase-orders', { clientKey: crypto.randomUUID(), supplierId: sup.id, orderDate: today, approveNow: true, lines: [{ materialId: mat.id, purchaseQtyMilli: 2000, priceCents }] })).po;
-      return (await post(page, '/api/inventory/docs', {
-        clientKey: crypto.randomUUID(),
-        docType: 'receipt',
-        docDate: today,
-        supplierId: sup.id,
-        purchaseOrderId: po.id,
-        coAcceptorId: buyer.id,
-        lines: [{ materialId: mat.id, poLineId: po.lines[0].id, deliveredMilli: po.lines[0].baseQtyMilli, acceptedMilli: po.lines[0].baseQtyMilli }],
-      })).doc as { id: number; docNo: string; amountCents: number; lines: { id: number; qtyMilli: number }[] };
-    };
+    const { today, sup, receive } = await ownerSetup(page);
     const paid = await receive(5_000);
     const pay = (await post(page, '/api/payables/payments', {
       clientKey: crypto.randomUUID(),
@@ -104,6 +110,69 @@ test.describe('供应商结算：退货待供应商确认、退货余额核销�
     await expect(page.getByTestId('credits-section')).toContainText('核销与供应商退款记录');
 
     // 账实与往来自检全 ✓
+    const checks = await getJson<{ key: string; ok: boolean; detail: string }[]>(page, '/api/inventory/checks');
+    for (const c of checks) expect(c.ok, `${c.key} ${c.detail}`).toBe(true);
+  });
+
+  test('核销的响应丢了：自动查回只登记一次；请求没发出去：刷新后仍待确认、不能登记新的核销，按原内容重新提交只登记一次', async ({ page }) => {
+    // ── 店主用接口准备：一笔还没付的货款，与一笔 20 元的预付款（可抵扣）──
+    await login(page, 'linlan', '会员工作台');
+    const { today, sup, receive } = await ownerSetup(page);
+    const fresh = await receive(3_000);
+    const prepaid = (await post(page, '/api/payables/payments', {
+      clientKey: crypto.randomUUID(),
+      supplierId: sup.id,
+      payDate: today,
+      amountCents: 2_000,
+      method: 'bank_transfer',
+      evidence: 'E2E 定金',
+      note: 'E2E 先付定金',
+      prepay: true,
+      approveNow: true,
+      allocations: [],
+    })).payment as { docNo: string; status: string };
+    expect(prepaid.status).toBe('confirmed');
+    await logout(page);
+
+    await login(page, 'qianfen', '库存');
+    const offsetsOf = async () =>
+      (await getJson<{ credit: { docNo: string }; status: string }[]>(page, `/api/payables/offsets?supplierId=${sup.id}`)).filter(
+        (o) => o.credit.docNo === prepaid.docNo && o.status === 'confirmed',
+      ).length;
+    const isPost = (url: URL) => url.pathname === '/api/payables/offsets';
+    const openOffset = async (amount: string) => {
+      await page.goto(`/payables?view=statement&supplier=${sup.id}`);
+      await page.getByTestId(`credit-${prepaid.docNo}`).getByRole('button', { name: '核销' }).click();
+      await page.getByLabel(`核销 ${fresh.docNo}`).fill(amount);
+    };
+
+    // ① 服务器已登记、响应丢了：页面记下待确认后马上按原编号查回，只登记一次
+    await openOffset('5.00');
+    await page.route(isPost, async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      await route.fetch();
+      await route.abort('internetdisconnected');
+    });
+    await page.getByTestId('offset-submit').click();
+    await expect(page.getByText('已查回：核销已登记')).toBeVisible({ timeout: 15_000 });
+    await page.unroute(isPost);
+    await expect(page.getByTestId('erp-pending')).toHaveCount(0);
+    expect(await offsetsOf()).toBe(1);
+
+    // ② 请求没发出去：刷新后仍显示「结果待确认」，这时不能登记新的核销；按原内容重新提交只登记一次
+    await openOffset('6.00');
+    await page.route(isPost, (route) => (route.request().method() === 'POST' ? route.abort('internetdisconnected') : route.continue()));
+    await page.getByTestId('offset-submit').click();
+    await expect(page.getByTestId('erp-pending')).toContainText('核销结果待确认');
+    await page.unroute(isPost);
+    await page.reload();
+    await expect(page.getByTestId('erp-pending')).toContainText(prepaid.docNo);
+    await page.getByTestId(`credit-${prepaid.docNo}`).getByRole('button', { name: '核销' }).click();
+    await expect(page.getByTestId('offset-submit')).toBeDisabled();
+    await page.getByRole('dialog').getByRole('button', { name: '取消' }).click();
+    await page.getByTestId('erp-pending-resend').click();
+    await expect(page.getByTestId('erp-pending')).toHaveCount(0);
+    expect(await offsetsOf()).toBe(2);
     const checks = await getJson<{ key: string; ok: boolean; detail: string }[]>(page, '/api/inventory/checks');
     for (const c of checks) expect(c.ok, `${c.key} ${c.detail}`).toBe(true);
   });

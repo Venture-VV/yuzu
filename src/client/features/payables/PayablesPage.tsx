@@ -8,6 +8,7 @@ import { useCan, useSession } from '../../lib/session';
 import { cn, downloadUrl } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
+import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
 import { Badge, Button, Input, Notice, Segmented, Select, Skeleton } from '../../components/ui';
 import { useSuppliers } from '../inventory/queries';
@@ -81,6 +82,8 @@ export function PayablesPage() {
         />
       </div>
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-5 py-4 md:px-7">
+        {/* 核销、供应商退款结果待确认（v0.7.12）：进入页面先按原编号查回；查不到的由员工重新提交或作废 */}
+        <ErpPendingPanel types={['ap_offset', 'supplier_refund']} className="mb-4 space-y-2" onFound={() => update({ view: 'settlements' })} />
         {view === 'suppliers' && <SuppliersView onStatement={(id) => update({ view: 'statement', supplier: String(id) })} />}
         {view === 'statement' && <StatementView supplierId={Number(params.get('supplier')) || null} onSupplier={(id) => update({ supplier: id ? String(id) : null })} onPayment={(id) => update({ payment: String(id) })} onOpening={setOpening} />}
         {view === 'payments' && <PaymentsView onOpen={(id) => update({ payment: String(id) })} />}

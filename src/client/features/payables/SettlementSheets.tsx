@@ -13,6 +13,7 @@ import {
   type SupplierRefundDoc,
 } from '@shared/purchasing';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { Money } from '../../components/Money';
@@ -119,9 +120,10 @@ export function OffsetDialog({ supplierId, credit, onClose }: { supplierId: numb
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [date, setDate] = useState(session.calendarToday);
   const [note, setNote] = useState('');
-  const [key, setKey] = useState(uuid);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 结果待确认的核销记在本机（AGENTS.md）：在页面上方查回、按原内容重新提交或作废之前，不能再登记新的一笔
+  const pending = useErpPending(['ap_offset']);
   const [last, setLast] = useState<SupplierCredit | null>(null);
   if (credit !== last) {
     setLast(credit);
@@ -129,7 +131,6 @@ export function OffsetDialog({ supplierId, credit, onClose }: { supplierId: numb
       setAmounts({});
       setDate(session.calendarToday);
       setNote('');
-      setKey(uuid());
       setError(null);
     }
   }
@@ -144,26 +145,39 @@ export function OffsetDialog({ supplierId, credit, onClose }: { supplierId: numb
     const cents = Math.max(0, Math.min(i.openCents, remaining));
     setAmounts({ ...amounts, [keyOf(i)]: cents ? (cents / 100).toFixed(2) : '' });
   };
+  // 每次提交用新的操作编号：先记在本机并读回核对（记不下就不发请求），结果不明的那一笔由页面上方按原编号处理
   const save = async () => {
     if (!credit) return;
+    if (pending.length > 0) return setError('上一笔核销结果待确认：请先在页面上方查回、按原内容重新提交或作废');
     if (lines.length === 0) return setError('请在要核销的货款上填金额');
     if (total > credit.availableCents) return setError(`核销合计 ¥${formatAmount(total)} 超过可抵扣 ¥${formatAmount(credit.availableCents)}`);
+    const body = {
+      clientKey: uuid(),
+      supplierId,
+      offsetDate: date,
+      credit: { kind: credit.kind, id: credit.id },
+      note: note.trim(),
+      lines: lines.map((l) => ({ kind: l.i.kind, targetId: l.i.id, amountCents: l.cents })),
+    };
     setBusy(true);
     setError(null);
     try {
-      await api.post('/api/payables/offsets', {
-        clientKey: key,
-        supplierId,
-        offsetDate: date,
-        credit: { kind: credit.kind, id: credit.id },
-        note: note.trim(),
-        lines: lines.map((l) => ({ kind: l.i.kind, targetId: l.i.id, amountCents: l.cents })),
+      await sendErpOp({
+        key: body.clientKey,
+        type: 'ap_offset',
+        url: '/api/payables/offsets',
+        body,
+        summary: `${credit.docNo} 核销 ¥${formatAmount(total)} → ${lines.map((l) => l.i.docNo).join('、')}`,
+        staffName: session.staff.displayName,
       });
       await invalidate();
       toast({ tone: 'success', title: '已核销', body: `${credit.docNo} 抵扣 ¥${formatAmount(total)}` });
       onClose();
     } catch (e) {
-      setError(e instanceof UncertainError ? '结果待确认：请再点一次「确认核销」核对（同一笔不会重复登记）' : e instanceof ApiError ? e.message : errorMessage(e));
+      if (e instanceof UncertainError) {
+        toast({ tone: 'info', title: '核销结果待确认', body: '已记在本机：请在页面上方查回、按原内容重新提交或作废，不要重新填写。' });
+        onClose();
+      } else setError(e instanceof ApiError ? e.message : errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -171,7 +185,7 @@ export function OffsetDialog({ supplierId, credit, onClose }: { supplierId: numb
   return (
     <Dialog
       open={!!credit}
-      onClose={onClose}
+      onClose={busy ? () => {} : onClose}
       width="max-w-2xl"
       title={credit ? `核销 ${credit.docNo}` : '核销'}
       description={credit ? `${creditKindLabel(credit)}还可以抵扣 ¥${formatAmount(credit.availableCents)}；核销不动钱，只把它抵到下面这些还没付的货款上。` : ''}
@@ -180,16 +194,17 @@ export function OffsetDialog({ supplierId, credit, onClose }: { supplierId: numb
           <span className="mr-auto text-[13px] font-semibold text-ink-2">
             本次核销 <Money cents={total} className="font-bold" />
           </span>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose} disabled={busy}>
             取消
           </Button>
-          <Button variant="primary" loading={busy} onClick={save} data-testid="offset-submit">
+          <Button variant="primary" loading={busy} disabled={pending.length > 0} onClick={save} data-testid="offset-submit">
             确认核销
           </Button>
         </>
       }
     >
       <div className="space-y-3">
+        {pending.length > 0 && <Notice tone="warning" title="上一笔核销结果待确认">请先在页面上方查回、按原内容重新提交或作废，再登记新的核销。</Notice>}
         {items.isPending ? (
           <Spinner />
         ) : open.length === 0 ? (
@@ -235,42 +250,54 @@ export function RefundDialog({ supplierId, credit, onClose }: { supplierId: numb
   const toast = useToast();
   const invalidate = useInvalidateAll();
   const [form, setForm] = useState({ amount: '', date: session.calendarToday, method: 'bank_transfer' as PayMethod, evidence: '', note: '' });
-  const [key, setKey] = useState(uuid);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 结果待确认的退款记在本机（AGENTS.md）：查回、重新提交或作废之前不能再登记新的一笔
+  const pending = useErpPending(['supplier_refund']);
   const [last, setLast] = useState<SupplierCredit | null>(null);
   if (credit !== last) {
     setLast(credit);
     if (credit) {
       setForm({ amount: (credit.availableCents / 100).toFixed(2), date: session.calendarToday, method: 'bank_transfer', evidence: '', note: '' });
-      setKey(uuid());
       setError(null);
     }
   }
   const cents = parseYuan(form.amount);
   const save = async () => {
     if (!credit) return;
+    if (pending.length > 0) return setError('上一笔供应商退款结果待确认：请先在页面上方查回、按原内容重新提交或作废');
     if (!cents || cents <= 0) return setError('请填写正确的退款金额');
     if (cents > credit.availableCents) return setError(`最多还能退 ¥${formatAmount(credit.availableCents)}`);
     if (form.evidence.trim().length < 2) return setError('请填写凭据说明，例如到账流水号后四位');
+    const body = {
+      clientKey: uuid(),
+      supplierId,
+      refundDate: form.date,
+      amountCents: cents,
+      method: form.method,
+      evidence: form.evidence.trim(),
+      note: form.note.trim(),
+      credit: { kind: credit.kind, id: credit.id },
+    };
     setBusy(true);
     setError(null);
     try {
-      await api.post('/api/payables/refunds', {
-        clientKey: key,
-        supplierId,
-        refundDate: form.date,
-        amountCents: cents,
-        method: form.method,
-        evidence: form.evidence.trim(),
-        note: form.note.trim(),
-        credit: { kind: credit.kind, id: credit.id },
+      await sendErpOp({
+        key: body.clientKey,
+        type: 'supplier_refund',
+        url: '/api/payables/refunds',
+        body,
+        summary: `${credit.docNo} 供应商退款 ¥${formatAmount(cents)}`,
+        staffName: session.staff.displayName,
       });
       await invalidate();
       toast({ tone: 'success', title: '已登记供应商退款', body: `${credit.docNo} 退回 ¥${formatAmount(cents)}` });
       onClose();
     } catch (e) {
-      setError(e instanceof UncertainError ? '结果待确认：请再点一次「登记退款」核对（同一笔不会重复登记）' : e instanceof ApiError ? e.message : errorMessage(e));
+      if (e instanceof UncertainError) {
+        toast({ tone: 'info', title: '供应商退款结果待确认', body: '已记在本机：请在页面上方查回、按原内容重新提交或作废，不要重新填写。' });
+        onClose();
+      } else setError(e instanceof ApiError ? e.message : errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -278,7 +305,7 @@ export function RefundDialog({ supplierId, credit, onClose }: { supplierId: numb
   return (
     <Dialog
       open={!!credit}
-      onClose={onClose}
+      onClose={busy ? () => {} : onClose}
       title={credit ? `登记供应商退款 · ${credit.docNo}` : '登记供应商退款'}
       description={
         credit
@@ -289,16 +316,21 @@ export function RefundDialog({ supplierId, credit, onClose }: { supplierId: numb
       }
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose} disabled={busy}>
             取消
           </Button>
-          <Button variant="primary" loading={busy} onClick={save} data-testid="refund-submit">
+          <Button variant="primary" loading={busy} disabled={pending.length > 0} onClick={save} data-testid="refund-submit">
             登记退款
           </Button>
         </>
       }
     >
       <div className="grid gap-4 sm:grid-cols-2">
+        {pending.length > 0 && (
+          <Notice tone="warning" title="上一笔供应商退款结果待确认" className="sm:col-span-2">
+            请先在页面上方查回、按原内容重新提交或作废，再登记新的退款。
+          </Notice>
+        )}
         <Field label="退款金额" htmlFor="rf-amt">
           <MoneyInput id="rf-amt" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
         </Field>

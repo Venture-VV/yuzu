@@ -31,7 +31,8 @@ import { writeAudit } from '../../lib/audit';
 import type { Actor, Deps } from '../../lib/context';
 import { toCsv } from '../../lib/csv';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
-import { lockOpKey } from '../../lib/fences';
+import { assertNotFenced, lockOpKey } from '../../lib/fences';
+import { erpOpAbandoned } from '../erp-ops';
 import { idParam, parse, positiveCents } from '../../lib/validate';
 import {
   assertNotFuture,
@@ -706,6 +707,8 @@ export async function createOffset(deps: Deps, raw: unknown, actor: Actor, ip?: 
       await lockOpKey(tx, input.clientKey);
       const existing = await findByKey(tx, input.clientKey, 'ap_offset', requestHash);
       if (existing) return { id: existing, replayed: true };
+      // 页面上确认作废过的编号（结果待确认后作废）：原请求晚到也不登记
+      await assertNotFenced(tx, input.clientKey, 'ap_offset', erpOpAbandoned);
       await lockSupplier(tx, input.supplierId);
       const credit = await lockCredit(tx, input.supplierId, input.credit);
       if (!credit.canOffset) throw unprocessable('CREDIT_NOT_OFFSETTABLE', '现付供应商的退货没记应付，只能登记供应商退款，不能核销');
@@ -793,6 +796,8 @@ export async function createRefund(deps: Deps, raw: unknown, actor: Actor, ip?: 
       await lockOpKey(tx, input.clientKey);
       const existing = await findByKey(tx, input.clientKey, 'supplier_refund', requestHash);
       if (existing) return { id: existing, replayed: true };
+      // 页面上确认作废过的编号（结果待确认后作废）：原请求晚到也不登记
+      await assertNotFenced(tx, input.clientKey, 'supplier_refund', erpOpAbandoned);
       await lockSupplier(tx, input.supplierId);
       const credit = await lockCredit(tx, input.supplierId, input.credit);
       if (input.amountCents > credit.availableCents) {

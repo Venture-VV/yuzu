@@ -335,6 +335,65 @@ describe('退货余额、预付款、核销与供应商退款（#25、#20）', (
   });
 });
 
+describe('核销、供应商退款的「结果待确认」（AGENTS.md：断网后按编号查回或确认作废）', () => {
+  it('按编号查回；登记过的不能作废；作废后原请求晚到也不登记；只有能登记的人能作废', async () => {
+    const m = await material('SP01');
+    const rc = await receive(m.id, 5, 1_000); // 50 元，还没付
+    const p = await ok(pay(4_000, [], { prepay: true, note: '先付的定金' }));
+    const prepaid = { kind: 'prepayment', id: p.payment.id };
+    const offset = (key: string, amountCents: number) =>
+      api(ctx.app, payer, 'POST', '/api/payables/offsets', {
+        clientKey: key,
+        supplierId,
+        offsetDate: today,
+        credit: prepaid,
+        lines: [{ kind: 'receipt', targetId: rc.id, amountCents }],
+      });
+    const refund = (key: string, amountCents: number) =>
+      api(ctx.app, payer, 'POST', '/api/payables/refunds', {
+        clientKey: key,
+        supplierId,
+        refundDate: today,
+        amountCents,
+        method: 'bank_transfer',
+        evidence: '到账尾号 0002',
+        credit: prepaid,
+      });
+    const lookup = (key: string, type: string, cookie = payer) => api(ctx.app, cookie, 'GET', `/api/erp/ops/${key}?type=${type}`);
+    const abandon = (key: string, type: string, cookie = payer) => api(ctx.app, cookie, 'POST', `/api/erp/ops/${key}/abandon`, { type, summary: '测试作废' });
+
+    // ① 登记了、响应丢了：按编号查回到这笔核销；已经登记的不能作废（作废返回查回的结果）
+    const k1 = randomUUID();
+    const o1 = await ok(offset(k1, 1_000));
+    expect((await lookup(k1, 'ap_offset')).body).toEqual({ found: true, abandoned: false, refId: o1.offset.id });
+    expect((await abandon(k1, 'ap_offset')).body).toEqual({ found: true, abandoned: false, refId: o1.offset.id });
+
+    // ② 请求没到：物资经办不能作废核销；对账付款确认作废后，原请求晚到也不登记
+    const k2 = randomUUID();
+    expect((await abandon(k2, 'ap_offset', keeper)).status).toBe(403);
+    expect((await lookup(k2, 'ap_offset', keeper)).status).toBe(403);
+    expect((await abandon(k2, 'ap_offset')).body).toEqual({ found: false, abandoned: true });
+    const late = await offset(k2, 1_000);
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('OP_ABANDONED');
+    expect((await lookup(k2, 'ap_offset')).body).toEqual({ found: false, abandoned: true });
+    // 只登记了一笔核销：预付款还剩 30 元，收货单还欠 40 元
+    expect((await creditsOf()).find((c) => c.kind === 'prepayment' && c.id === p.payment.id)).toMatchObject({ availableCents: 3_000 });
+    expect((await openOf(rc.id)).openCents).toBe(4_000);
+
+    // ③ 供应商退款同样：作废的编号晚到不登记；登记过的按编号查回；编号的业务类型对不上不能当核销查回
+    const k3 = randomUUID();
+    expect((await abandon(k3, 'supplier_refund')).body).toEqual({ found: false, abandoned: true });
+    expect((await refund(k3, 500)).body.error.code).toBe('OP_ABANDONED');
+    const k4 = randomUUID();
+    const r4 = await ok(refund(k4, 500));
+    expect((await lookup(k4, 'supplier_refund')).body).toEqual({ found: true, abandoned: false, refId: r4.refund.id });
+    expect((await lookup(k4, 'ap_offset')).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+    expect((await creditsOf()).find((c) => c.kind === 'prepayment' && c.id === p.payment.id)).toMatchObject({ availableCents: 2_500 });
+    await checksOk();
+  });
+});
+
 describe('免确认门槛（#18）', () => {
   it('采购单、期初未付、报损在门槛以内提交即生效，超过的等负责人确认；门槛改成 0 全部要确认', async () => {
     const m = await material('TH01', { refPriceCents: 1_000 });
