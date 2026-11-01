@@ -3,10 +3,10 @@
 
 import type { PayMethod } from './purchasing';
 
-export const EXPENSE_CATEGORIES = ['office', 'fixed_asset', 'low_value'] as const;
+export const EXPENSE_CATEGORIES = ['office', 'fixed_asset', 'low_value', 'freight'] as const;
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
-/** 费用科目只有这三种（飞书需求原话，不能自由填写） */
-export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = { office: '办公费', fixed_asset: '固定资产', low_value: '低值易耗' };
+/** 费用科目：办公费、固定资产、低值易耗（飞书需求原话，不能自由填写）；v0.7.12 加「运费」（#15：运费单独记费用，不进物料成本） */
+export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = { office: '办公费', fixed_asset: '固定资产', low_value: '低值易耗', freight: '运费' };
 
 export const PAY_SOURCES = ['petty', 'company'] as const;
 export type PaySource = (typeof PAY_SOURCES)[number];

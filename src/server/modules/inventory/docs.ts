@@ -1,6 +1,8 @@
 // 库存单据：期初、收货、领用、领用退回、直接耗用、报损、盘点、退供应商。
 //
 // 生命周期：草稿 → 提交 →（需要时）负责人确认 → 已生效；负责人可退回修改；生效后只能冲销。
+// 退供应商（#20，v0.7.12）：确认后先进「待供应商确认」，采购登记「供应商已同意」才生效（出库、扣款），「不同意」则撤回。
+// 免确认门槛（#18，v0.7.12）：设为需要确认的单据，金额不超过门槛的提交即生效（报损、期初按物料参考价估算）。
 // 只有「已生效」才写库存流水和应付流水；草稿、待确认、已退回都不影响库存或货款。
 // 新建单据带操作编号（幂等键），重复提交只得到同一张单；提交、确认、退回、冲销按状态幂等。
 
@@ -38,6 +40,7 @@ import {
   docDateSchema,
   loadInventorySettings,
   lockDeptWarehouse,
+  overThreshold,
   lockMaterials,
   logApproval,
   nextDocNo,
@@ -123,6 +126,11 @@ const CreateInput = z.object({
 export type CreateDocInput = DocBodyInput & z.input<typeof CreateInput>;
 
 const ReasonInput = z.object({ reason: z.string().trim().min(2, '请填写原因（至少 2 个字）').max(200) });
+/** 供应商对退货的答复（#20）：同意写同意的日期，不同意写原因 */
+const AnswerInput = z.discriminatedUnion('agreed', [
+  z.object({ agreed: z.literal(true), date: docDateSchema, note: z.string().trim().max(200, '说明最多 200 字').default('') }),
+  z.object({ agreed: z.literal(false), note: z.string().trim().min(2, '请写明供应商不同意的原因（至少 2 个字）').max(200, '说明最多 200 字') }),
+]);
 const ApproveInput = z.object({
   /** 盘点：每行差异的确认原因 */
   countReasons: z.record(z.string(), z.enum(COUNT_REASONS)).default({}),
@@ -217,6 +225,8 @@ interface DocRow {
   urgent: boolean;
   createdBy: number;
   submittedBy: number | null;
+  /** 退供应商：供应商同意的日期（生效日期，v0.7.12） */
+  supplierAnswerDate?: string | null;
 }
 
 /** 仓的显示名（总仓用「库存范围名称」） */
@@ -233,6 +243,10 @@ export async function getDoc(db: Db, docId: number, timeZone?: string): Promise<
            CASE WHEN ca.id IS NULL THEN NULL ELSE json_build_object('id', ca.id, 'name', ca.display_name) END AS co_acceptor,
            CASE WHEN d.dept_signed_at IS NULL THEN NULL
                 ELSE json_build_object('signedByName', sg.display_name, 'signedAt', d.dept_signed_at, 'note', coalesce(d.dept_sign_note, '')) END AS dept_sign,
+           CASE WHEN d.supplier_answer_at IS NULL THEN NULL
+                ELSE json_build_object('agreed', d.supplier_answer_date IS NOT NULL, 'date', d.supplier_answer_date, 'note', coalesce(d.supplier_answer_note, ''),
+                                       'byName', sa.display_name, 'at', d.supplier_answer_at) END AS supplier_answer,
+           d.return_applied_cents, coalesce(src.settlement, 'credit') AS source_settlement,
            CASE WHEN s.id IS NULL THEN NULL ELSE json_build_object('id', s.id, 'name', s.name) END AS supplier,
            CASE WHEN po.id IS NULL THEN NULL ELSE json_build_object('id', po.id, 'docNo', po.doc_no) END AS purchase_order,
            CASE WHEN dep.id IS NULL THEN NULL ELSE json_build_object('id', dep.id, 'name', dep.name) END AS department,
@@ -252,6 +266,7 @@ export async function getDoc(db: Db, docId: number, timeZone?: string): Promise<
     LEFT JOIN departments wd ON wd.id = w.department_id
     LEFT JOIN staff ca ON ca.id = d.co_acceptor_id
     LEFT JOIN staff sg ON sg.id = d.dept_signed_by
+    LEFT JOIN staff sa ON sa.id = d.supplier_answer_by
     WHERE d.id = ${docId}`;
   if (!d) throw notFound('单据不存在');
   // 行上的「当前结存」与盘点的账面：按这张单出库的那个仓（领料从总仓出，退回从部门小仓出）
@@ -268,7 +283,7 @@ export async function getDoc(db: Db, docId: number, timeZone?: string): Promise<
            (${d.docType === 'count' && ['draft', 'submitted', 'returned'].includes(d.status)}
             AND l.book_move_id IS DISTINCT FROM CASE WHEN ${isDept} THEN ws.last_move_id ELSE m.last_move_id END) AS stale,
            coalesce((SELECT sum(rl.qty_milli) FROM inv_doc_lines rl JOIN inv_docs rd ON rd.id = rl.doc_id
-                     WHERE rl.source_line_id = l.id AND rd.status IN ('confirmed', 'submitted')), 0) AS returned_milli
+                     WHERE rl.source_line_id = l.id AND rd.status IN ('confirmed', 'submitted', 'awaiting_supplier')), 0) AS returned_milli
     FROM inv_doc_lines l JOIN materials m ON m.id = l.material_id
     LEFT JOIN warehouse_stock ws ON ws.warehouse_id = ${stockWarehouseId} AND ws.material_id = l.material_id
     WHERE l.doc_id = ${docId} ORDER BY l.line_no`;
@@ -293,8 +308,23 @@ export async function getDoc(db: Db, docId: number, timeZone?: string): Promise<
     FROM approval_logs a JOIN staff s ON s.id = a.actor_id
     WHERE a.doc_kind = 'inv_doc' AND a.doc_id = ${docId} ORDER BY a.id`;
 
-  const { warehouseId: _w, ...rest } = d;
-  const doc = { ...rest, lines, children, approvals, voidable: { ok: false, reason: null } } as InvDoc;
+  // 已生效的退货：扣款抵了原收货单多少，退货余额的核销与退款（v0.7.12）
+  let returnCredit: InvDoc['returnCredit'] = null;
+  if (d.docType === 'supplier_return' && d.status === 'confirmed') {
+    const [used] = await db<{ offsetCents: number; refundedCents: number }[]>`
+      SELECT coalesce((SELECT sum(amount_cents) FROM ap_offsets WHERE credit_return_id = ${docId} AND status = 'confirmed'), 0) AS offset_cents,
+             coalesce((SELECT sum(amount_cents) FROM supplier_refunds WHERE credit_return_id = ${docId} AND status = 'confirmed'), 0) AS refunded_cents`;
+    const applied = (d.returnAppliedCents as number | null) ?? d.amountCents;
+    returnCredit = {
+      settlement: d.sourceSettlement as NonNullable<InvDoc['returnCredit']>['settlement'],
+      appliedCents: applied,
+      offsetCents: used!.offsetCents,
+      refundedCents: used!.refundedCents,
+      availableCents: d.amountCents - applied - used!.offsetCents - used!.refundedCents,
+    };
+  }
+  const { warehouseId: _w, returnAppliedCents: _a, sourceSettlement: _s, ...rest } = d;
+  const doc = { ...rest, returnCredit, lines, children, approvals, voidable: { ok: false, reason: null } } as InvDoc;
   doc.voidable = await voidability(db, doc, timeZone);
   return doc;
 }
@@ -360,10 +390,12 @@ export async function listDocs(
 async function voidability(db: Db, doc: InvDoc, timeZone?: string): Promise<InvDoc['voidable']> {
   if (doc.status !== 'confirmed') return { ok: false, reason: '只有已生效的单据可以冲销' };
   if (doc.docType === 'count') return { ok: false, reason: '盘点调整不能冲销，如有错误请重新盘点' };
-  if (timeZone && doc.docDate.slice(0, 7) !== todayIn(timeZone).slice(0, 7)) {
-    return { ok: false, reason: `单据日期在 ${Number(doc.docDate.slice(5, 7))} 月，跨月不能冲销；请用本月的单据更正` };
+  // 退供应商按供应商同意（生效）那天算月份（v0.7.12）
+  const effectiveDate = effectiveDateOf(doc);
+  if (timeZone && effectiveDate.slice(0, 7) !== todayIn(timeZone).slice(0, 7)) {
+    return { ok: false, reason: `单据日期在 ${Number(effectiveDate.slice(5, 7))} 月，跨月不能冲销；请用本月的单据更正` };
   }
-  const activeChildren = doc.children.filter((c) => c.status === 'confirmed' || c.status === 'submitted');
+  const activeChildren = doc.children.filter((c) => c.status === 'confirmed' || c.status === 'submitted' || c.status === 'awaiting_supplier');
   if (activeChildren.length > 0) {
     return { ok: false, reason: `已有后续单据 ${activeChildren.map((c) => c.docNo).join('、')}，需先冲销或撤回后续单据` };
   }
@@ -372,6 +404,10 @@ async function voidability(db: Db, doc: InvDoc, timeZone?: string): Promise<InvD
       SELECT count(*) AS count FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
       WHERE pa.receipt_doc_id = ${doc.id} AND p.status IN ('confirmed', 'submitted')`;
     if (paid && paid.count > 0) return { ok: false, reason: '这张收货单已有付款核销，需先冲销付款' };
+    const [offset] = await db<{ docNo: string }[]>`
+      SELECT o.doc_no FROM ap_offset_lines ol JOIN ap_offsets o ON o.id = ol.offset_id
+      WHERE ol.receipt_doc_id = ${doc.id} AND o.status = 'confirmed' ORDER BY o.id LIMIT 1`;
+    if (offset) return { ok: false, reason: `这张收货单已有核销（${offset.docNo}），需先冲销核销单` };
     // 现付的采购单按采购单报销了这几行（到货数量取自收货）：先冲销或撤回报销（测试服回归报告，v0.7.11）
     const [claimed] = await db<{ docNo: string }[]>`
       SELECT c.doc_no FROM expense_claim_lines cl JOIN expense_claims c ON c.id = cl.claim_id
@@ -380,7 +416,21 @@ async function voidability(db: Db, doc: InvDoc, timeZone?: string): Promise<InvD
       ORDER BY c.id LIMIT 1`;
     if (claimed) return { ok: false, reason: `这张收货单的采购单已按采购单报销（${claimed.docNo}），需先冲销或撤回报销` };
   }
+  if (doc.docType === 'supplier_return') {
+    // 退货余额已经核销到别的货款或退了款：先冲销那一笔（v0.7.12）
+    const [used] = await db<{ docNo: string }[]>`
+      SELECT doc_no FROM (
+        SELECT doc_no, id FROM ap_offsets WHERE credit_return_id = ${doc.id} AND status = 'confirmed'
+        UNION ALL SELECT doc_no, id FROM supplier_refunds WHERE credit_return_id = ${doc.id} AND status = 'confirmed'
+      ) x ORDER BY id LIMIT 1`;
+    if (used) return { ok: false, reason: `这张退货单的退货余额已核销或退款（${used.docNo}），需先冲销那一笔` };
+  }
   return { ok: true, reason: null };
+}
+
+/** 单据的生效日期：退供应商按供应商同意的日期（v0.7.12），其他按单据日期 */
+function effectiveDateOf(doc: Pick<InvDoc, 'docType' | 'docDate' | 'supplierAnswer'>): string {
+  return doc.docType === 'supplier_return' && doc.supplierAnswer?.agreed && doc.supplierAnswer.date ? doc.supplierAnswer.date : doc.docDate;
 }
 
 // ───────────────────────── 准备：校验并生成行快照 ─────────────────────────
@@ -505,7 +555,7 @@ async function returnedBySourceLine(db: Db, sourceLineIds: number[], excludeDocI
   if (sourceLineIds.length === 0) return new Map<number, number>();
   const rows = await db<{ sourceLineId: number; qty: number }[]>`
     SELECT l.source_line_id, sum(l.qty_milli) AS qty FROM inv_doc_lines l JOIN inv_docs d ON d.id = l.doc_id
-    WHERE l.source_line_id IN ${db(sourceLineIds)} AND d.status IN ('confirmed', 'submitted')
+    WHERE l.source_line_id IN ${db(sourceLineIds)} AND d.status IN ('confirmed', 'submitted', 'awaiting_supplier')
       ${excludeDocId ? db`AND d.id <> ${excludeDocId}` : db``}
     GROUP BY l.source_line_id`;
   return new Map(rows.map((r) => [r.sourceLineId, r.qty]));
@@ -816,19 +866,37 @@ async function insertLines(tx: Tx, docId: number, lines: PreparedLine[]) {
 
 // ───────────────────────── 生效 ─────────────────────────
 
+/**
+ * 单据金额（#18 免确认门槛用）：有金额的按金额；期初、报损没有价格，按物料参考价估算；有一行没有参考价返回 null（照旧要确认）。
+ */
+async function approvalAmount(db: Db, docId: number): Promise<number | null> {
+  const lines = await db<{ qtyMilli: number; factorMilli: number; amountCents: number | null; refPriceCents: number | null }[]>`
+    SELECT l.qty_milli, l.factor_milli, l.amount_cents, m.ref_price_cents
+    FROM inv_doc_lines l JOIN materials m ON m.id = l.material_id WHERE l.doc_id = ${docId}`;
+  let total = 0;
+  for (const l of lines) {
+    if (l.amountCents !== null) total += l.amountCents;
+    else if (l.refPriceCents !== null) total += lineAmountCents(Math.abs(l.qtyMilli), l.refPriceCents, l.factorMilli);
+    else return null;
+  }
+  return total;
+}
+
 async function needsApproval(db: Db, docId: number, type: InvDocType, doc?: { warehouseId: number | null; urgent: boolean }): Promise<boolean> {
-  const rules = (await loadInventorySettings(db)).approvalRules;
+  const settings = await loadInventorySettings(db);
+  const rules = settings.approvalRules;
   // 急采：仓库到部门验收、确认后才生效（#19）
   if (type === 'receipt' && doc?.urgent) return true;
   // 部门小仓的盘点差异由部门自己管：提交即生效（#17，待确认）
   if (type === 'count' && doc?.warehouseId && doc.warehouseId !== CENTRAL_WAREHOUSE_ID) return false;
   switch (type) {
+    // #18：设为需要确认的单据，金额不超过免确认门槛的提交即生效（v0.7.12）
     case 'opening':
-      return rules.opening;
+      return rules.opening && overThreshold(settings, await approvalAmount(db, docId));
     case 'damage':
-      return rules.damage;
+      return rules.damage && overThreshold(settings, await approvalAmount(db, docId));
     case 'supplier_return':
-      return rules.supplier_return;
+      return rules.supplier_return && overThreshold(settings, await approvalAmount(db, docId));
     case 'count': {
       // 没有差异的盘点不需要调整，直接生效
       const [row] = await db<{ diffs: number }[]>`SELECT count(*) AS diffs FROM inv_doc_lines WHERE doc_id = ${docId} AND qty_milli <> 0`;
@@ -900,6 +968,8 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
   };
   // 收货与退货记下结算方式（v0.7.7）：挂账记应付；现付的货款走费用报销，不记应付
   let settlement: SupplierSettlement | null = null;
+  // 退供应商：扣款抵了原收货单多少（v0.7.12）
+  let returnApplied: number | null = null;
 
   switch (doc.docType) {
     case 'opening': {
@@ -1006,6 +1076,20 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
           await tx`
             INSERT INTO ap_entries (supplier_id, entry_type, amount_delta_cents, inv_doc_id, entry_date, operator_id)
             VALUES (${doc.supplierId}, 'supplier_return', ${-doc.amountCents}, ${doc.id}, ${doc.docDate}, ${actor.id})`;
+          // 先抵原收货单还没付、也没在待确认付款里的部分（原单已在上面锁住，与付款、核销串行）；多出来的是退货余额（#20、#25）
+          const [open] = await tx<{ openCents: number }[]>`
+            SELECT x.amount_cents
+              - coalesce((SELECT sum(r.return_applied_cents) FROM inv_docs r
+                          WHERE r.source_doc_id = x.id AND r.doc_type = 'supplier_return' AND r.status = 'confirmed' AND r.id <> ${doc.id}), 0)
+              - coalesce((SELECT sum(pa.amount_cents) FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
+                          WHERE pa.receipt_doc_id = x.id AND p.status IN ('confirmed', 'submitted')), 0)
+              - coalesce((SELECT sum(ol.amount_cents) FROM ap_offset_lines ol JOIN ap_offsets o ON o.id = ol.offset_id
+                          WHERE ol.receipt_doc_id = x.id AND o.status = 'confirmed'), 0) AS open_cents
+            FROM inv_docs x WHERE x.id = ${doc.sourceDocId}`;
+          returnApplied = Math.max(0, Math.min(doc.amountCents, open?.openCents ?? 0));
+        } else {
+          // 现付供应商的退货不记应付，整笔等供应商退款；金额为 0 的没有可退的
+          returnApplied = 0;
         }
       }
       break;
@@ -1033,6 +1117,7 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
 
   await tx`
     UPDATE inv_docs SET status = 'confirmed', confirmed_by = ${actor.id}, confirmed_at = now(), settlement = ${settlement},
+           return_applied_cents = coalesce(${returnApplied}::bigint, return_applied_cents),
            submitted_by = coalesce(submitted_by, ${actor.id}), submitted_at = coalesce(submitted_at, now()), updated_at = now()
     WHERE id = ${doc.id}`;
 }
@@ -1040,7 +1125,7 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
 async function lockDoc(tx: Tx, docId: number) {
   const [doc] = await tx<(DocRow & { docNo: string; amountCents: number })[]>`
     SELECT id, doc_no, doc_type, status, doc_date, supplier_id, purchase_order_id, department_id, source_doc_id,
-           warehouse_id, urgent, amount_cents, created_by, submitted_by
+           warehouse_id, urgent, amount_cents, created_by, submitted_by, supplier_answer_date
     FROM inv_docs WHERE id = ${docId} FOR UPDATE`;
   if (!doc) throw notFound('单据不存在');
   return doc;
@@ -1048,7 +1133,7 @@ async function lockDoc(tx: Tx, docId: number) {
 
 /** 提交：不需要确认的单据直接生效；需要确认时进入待确认，提交人有确认权限且选择 approveNow 时一并确认 */
 async function submitLocked(tx: Tx, doc: DocRow & { docNo: string; amountCents: number }, actor: Actor, approveNow: boolean) {
-  if (doc.status === 'submitted' || doc.status === 'confirmed') return; // 幂等
+  if (doc.status === 'submitted' || doc.status === 'awaiting_supplier' || doc.status === 'confirmed') return; // 幂等
   if (doc.status !== 'draft' && doc.status !== 'returned') throw conflict('INVALID_STATE', '单据当前状态不能提交');
   if (doc.docType === 'count') {
     const whId = doc.warehouseId ?? CENTRAL_WAREHOUSE_ID;
@@ -1065,13 +1150,25 @@ async function submitLocked(tx: Tx, doc: DocRow & { docNo: string; amountCents: 
   await tx`UPDATE inv_docs SET status = 'submitted', submitted_by = ${actor.id}, submitted_at = now(), returned_reason = NULL, updated_at = now() WHERE id = ${doc.id}`;
   await logApproval(tx, 'inv_doc', doc.id, 'submit', actor.id);
   if (!approval) {
-    await confirmDoc(tx, { ...doc, status: 'submitted' }, actor);
+    await afterApproval(tx, { ...doc, status: 'submitted' }, actor);
   } else if (approveNow) {
     if (!can(actor, 'inventory.approve')) throw forbidden('当前账号不能确认这类单据，请提交给负责人');
     if (doc.urgent && actor.role !== 'owner') throw forbidden('急采要由另一个人（仓库）到部门验收后确认');
-    await confirmDoc(tx, { ...doc, status: 'submitted' }, actor);
+    await afterApproval(tx, { ...doc, status: 'submitted' }, actor);
     await logApproval(tx, 'inv_doc', doc.id, 'approve', actor.id);
   }
+}
+
+/** 不用确认或负责人确认之后：退供应商先等供应商同意（#20，v0.7.12），其他单据直接生效 */
+async function afterApproval(tx: Tx, doc: DocRow & { docNo: string; amountCents: number }, actor: Actor, opts: { countReasons?: Record<string, CountReason> } = {}) {
+  if (doc.docType === 'supplier_return') {
+    // 原收货单还得有效；可退数量在供应商同意、真正出库时再核对一次
+    const [src] = await tx<{ status: string }[]>`SELECT status FROM inv_docs WHERE id = ${doc.sourceDocId}`;
+    if (src?.status !== 'confirmed') throw conflict('SOURCE_NOT_CONFIRMED', '原收货单已冲销或未生效，不能退货');
+    await tx`UPDATE inv_docs SET status = 'awaiting_supplier', updated_at = now() WHERE id = ${doc.id}`;
+    return;
+  }
+  await confirmDoc(tx, doc, actor, opts);
 }
 
 // ───────────────────────── 对外操作 ─────────────────────────
@@ -1187,10 +1284,10 @@ export async function approveDoc(deps: Deps, docId: number, raw: unknown, actor:
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const doc = await lockDoc(tx, docId);
-    if (doc.status === 'confirmed') return; // 幂等
+    if (doc.status === 'confirmed' || doc.status === 'awaiting_supplier') return; // 幂等
     if (doc.status !== 'submitted') throw conflict('INVALID_STATE', '只有待确认的单据可以确认');
     if (doc.urgent && doc.createdBy === actor.id && actor.role !== 'owner') throw forbidden('急采要由另一个人（仓库）验收，不能自己确认');
-    await confirmDoc(tx, doc, actor, { countReasons });
+    await afterApproval(tx, doc, actor, { countReasons });
     await logApproval(tx, 'inv_doc', docId, 'approve', actor.id);
   });
   return getDoc(deps.sql, docId, deps.config.timezone);
@@ -1215,10 +1312,46 @@ export async function cancelDoc(deps: Deps, docId: number, raw: unknown, actor: 
   await deps.sql.begin(async (tx) => {
     const doc = await lockDoc(tx, docId);
     if (doc.status === 'cancelled') return;
-    if (!['draft', 'submitted', 'returned'].includes(doc.status)) throw conflict('INVALID_STATE', '已生效的单据不能撤回，只能冲销');
-    if (!can(actor, 'inventory.approve') && doc.createdBy !== actor.id) throw forbidden('只能撤回自己创建的单据');
+    if (!['draft', 'submitted', 'returned', 'awaiting_supplier'].includes(doc.status)) throw conflict('INVALID_STATE', '已生效的单据不能撤回，只能冲销');
+    // 等供应商确认的退货：登记的人、负责人、能登记供应商答复的采购都可以撤回
+    const mayCancelOthers = can(actor, 'inventory.approve') || (doc.status === 'awaiting_supplier' && can(actor, 'supplierReturn.answer'));
+    if (!mayCancelOthers && doc.createdBy !== actor.id) throw forbidden('只能撤回自己创建的单据');
     await tx`UPDATE inv_docs SET status = 'cancelled', returned_reason = ${reason}, updated_at = now() WHERE id = ${docId}`;
     await logApproval(tx, 'inv_doc', docId, 'cancel', actor.id, reason);
+  });
+  return getDoc(deps.sql, docId, deps.config.timezone);
+}
+
+/**
+ * 登记供应商对退货的答复（#20，v0.7.12）：同意 → 按同意的日期出库、扣款（单据生效）；不同意 → 撤回，库存不动。
+ * 采购与供应商沟通（「登记供应商对退货的答复」，默认采购经办与店主）。
+ */
+export async function answerReturn(deps: Deps, docId: number, raw: unknown, actor: Actor) {
+  const input = parse(AnswerInput, raw);
+  await deps.sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
+    const doc = await lockDoc(tx, docId);
+    if (doc.docType !== 'supplier_return') throw badRequest('只有退供应商单要登记供应商的答复');
+    if (input.agreed && doc.status === 'confirmed') return; // 幂等
+    if (!input.agreed && doc.status === 'cancelled') return;
+    if (doc.status !== 'awaiting_supplier') throw conflict('INVALID_STATE', '这张退货单不在「待供应商确认」，不能登记供应商的答复');
+    if (input.agreed) {
+      assertNotFuture(input.date, deps.config.timezone);
+      if (input.date < doc.docDate) throw badRequest('供应商同意的日期不能早于退货单的日期');
+      await tx`
+        UPDATE inv_docs SET supplier_answer_by = ${actor.id}, supplier_answer_at = now(), supplier_answer_date = ${input.date},
+               supplier_answer_note = ${input.note}, updated_at = now()
+        WHERE id = ${docId}`;
+      // 出库与扣款记在供应商同意的那天
+      await confirmDoc(tx, { ...doc, docDate: input.date }, actor);
+      await logApproval(tx, 'inv_doc', docId, 'supplier_agree', actor.id, input.note);
+    } else {
+      await tx`
+        UPDATE inv_docs SET supplier_answer_by = ${actor.id}, supplier_answer_at = now(), supplier_answer_note = ${input.note},
+               status = 'cancelled', returned_reason = ${`供应商不同意：${input.note}`}, updated_at = now()
+        WHERE id = ${docId}`;
+      await logApproval(tx, 'inv_doc', docId, 'supplier_reject', actor.id, input.note);
+    }
   });
   return getDoc(deps.sql, docId, deps.config.timezone);
 }
@@ -1230,8 +1363,8 @@ export async function voidDoc(deps: Deps, docId: number, raw: unknown, actor: Ac
     await setTxTimeouts(tx);
     const doc = await lockDoc(tx, docId);
     if (doc.status === 'voided') return;
-    // #21：当月发生的当月冲销完，跨月不能冲销
-    assertSameMonth(doc.docDate, deps.config.timezone);
+    // #21：当月发生的当月冲销完，跨月不能冲销；退供应商按供应商同意（生效）的日期算（v0.7.12）
+    assertSameMonth(doc.docType === 'supplier_return' && doc.supplierAnswerDate ? doc.supplierAnswerDate : doc.docDate, deps.config.timezone);
     // 锁顺序：单据 → 采购单 → 物料；锁住采购单再查报销，与「按采购单报销」（采购单 → 报销单）串行
     if (doc.purchaseOrderId) await tx`SELECT id FROM purchase_orders WHERE id = ${doc.purchaseOrderId} FOR UPDATE`;
     const check = await voidability(tx, await getDoc(tx, docId), deps.config.timezone);
@@ -1413,6 +1546,9 @@ export function registerDocRoutes(app: FastifyInstance, deps: Deps) {
     return cancelDoc(deps, id, req.body, req.actor);
   });
   // #21：库存冲销由仓库或财务成本岗操作，只限当月（v0.7.11）
+  app.post('/api/inventory/docs/:id/supplier-answer', { preHandler: guard('supplierReturn.answer') }, async (req) =>
+    answerReturn(deps, docId(req), req.body, req.actor),
+  );
   app.post('/api/inventory/docs/:id/void', { preHandler: guard('inventory.void') }, async (req) =>
     voidDoc(deps, docId(req), req.body, req.actor),
   );

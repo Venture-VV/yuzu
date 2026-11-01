@@ -7,6 +7,7 @@
 
 import { businessDateOf } from '@shared/business-date';
 import { CENTRAL_WAREHOUSE_ID, type ApprovalRules, type InventorySettings, type MoveType } from '@shared/inventory';
+import { shiftDate } from '@shared/labels';
 import { formatQty } from '@shared/quantity';
 import { z } from 'zod';
 import { can } from '@shared/permissions';
@@ -26,18 +27,76 @@ export const DEFAULT_APPROVAL_RULES: ApprovalRules = {
 export async function loadInventorySettings(db: Db): Promise<InventorySettings> {
   const rows = await db<{ key: string; value: unknown }[]>`
     SELECT key, value FROM settings
-    WHERE key IN ('inventory_scope_name', 'inventory_price_basis', 'inventory_urgent_cap_cents', 'inventory_approval_rules')`;
+    WHERE key IN ('inventory_scope_name', 'inventory_price_basis', 'inventory_urgent_cap_cents', 'inventory_approval_rules',
+                  'inventory_approval_threshold_cents', 'inventory_usage_window_days')`;
   const map = new Map(rows.map((r) => [r.key, r.value]));
   return {
     scopeName: (map.get('inventory_scope_name') as string) ?? '后勤总库',
     priceBasis: (map.get('inventory_price_basis') as string) ?? '含税到货价',
     urgentCapCents: Number(map.get('inventory_urgent_cap_cents') ?? DEFAULT_URGENT_CAP_CENTS),
+    approvalThresholdCents: Number(map.get('inventory_approval_threshold_cents') ?? DEFAULT_APPROVAL_THRESHOLD_CENTS),
+    usageWindowDays: Number(map.get('inventory_usage_window_days') ?? DEFAULT_USAGE_WINDOW_DAYS),
     approvalRules: { ...DEFAULT_APPROVAL_RULES, ...((map.get('inventory_approval_rules') as Partial<ApprovalRules>) ?? {}) },
   };
 }
 
 /** 急采上限默认 2000 元（#19，可调） */
 export const DEFAULT_URGENT_CAP_CENTS = 200_000;
+/** 免确认门槛默认 2000 元（#18，可调，v0.7.12）：设为需要确认的单据，金额不超过它的提交即生效 */
+export const DEFAULT_APPROVAL_THRESHOLD_CENTS = 200_000;
+/** 可用天数按近 28 天的用量算（#22，可调，v0.7.12） */
+export const DEFAULT_USAGE_WINDOW_DAYS = 28;
+
+/**
+ * 这张单要不要负责人确认（#18，v0.7.12）：类型设为需要确认，且金额超过免确认门槛（金额不知道时按超过算）。
+ */
+export function overThreshold(settings: Pick<InventorySettings, 'approvalThresholdCents'>, amountCents: number | null): boolean {
+  return amountCents === null || amountCents > settings.approvalThresholdCents;
+}
+
+// ───────────────────────── 可用天数（#22，v0.7.12） ─────────────────────────
+
+/** 用量统计的起始日：含今天共 windowDays 天 */
+export function usageSince(timeZone: string, windowDays: number): string {
+  return shiftDate(todayIn(timeZone), -(Math.max(1, windowDays) - 1));
+}
+
+/**
+ * 这个仓从 since（含）起每个物料的用量（milli，正数）。总仓：领料、直接耗用、报损；部门小仓：盘点耗用（差异原因「耗用」）、
+ * 报损、直接耗用。退供应商、冲销不算，已冲销的单据整张不算。
+ */
+export async function usageByMaterial(db: Db, warehouseId: number, since: string): Promise<Map<number, number>> {
+  const rows = await db<{ materialId: number; used: number }[]>`
+    SELECT sm.material_id, -sum(sm.qty_delta_milli) AS used
+    FROM stock_moves sm JOIN inv_docs d ON d.id = sm.doc_id LEFT JOIN inv_doc_lines l ON l.id = sm.doc_line_id
+    WHERE sm.warehouse_id = ${warehouseId} AND sm.doc_date >= ${since} AND d.status = 'confirmed' AND sm.qty_delta_milli < 0
+      AND (sm.move_type IN ('direct_use', 'damage')
+           OR (sm.move_type = 'issue' AND ${warehouseId === CENTRAL_WAREHOUSE_ID})
+           OR (sm.move_type = 'count_adjust' AND l.diff_reason = 'consumed'))
+    GROUP BY sm.material_id`;
+  return new Map(rows.map((r) => [r.materialId, r.used]));
+}
+
+/**
+ * 日均用量（milli/天）与可用天数（结存 ÷ 日均用量，一位小数；没有用量为空）；
+ * 提醒：设了提醒天数且有用量时按可用天数，否则按固定的低库存提醒数量（只有总仓有）。
+ */
+export function coverFor(
+  stockMilli: number,
+  usedMilli: number,
+  windowDays: number,
+  m: { coverDays: number | null; lowStockMilli?: number | null; tracked?: boolean },
+): { dailyUsageMilli: number; daysOfCover: number | null; isLow: boolean } {
+  const days = Math.max(1, windowDays);
+  const dailyUsageMilli = usedMilli > 0 ? Math.round(usedMilli / days) : 0;
+  const daysOfCover = usedMilli > 0 ? Math.floor((stockMilli * days * 10) / usedMilli) / 10 : null;
+  const isLow =
+    m.tracked !== false &&
+    (m.coverDays !== null && daysOfCover !== null
+      ? daysOfCover < m.coverDays
+      : m.lowStockMilli !== undefined && m.lowStockMilli !== null && stockMilli < m.lowStockMilli);
+  return { dailyUsageMilli, daysOfCover, isLow };
+}
 
 /** #21：当月发生的当月冲销完——单据日期所在的月份（门店时区的自然月）过了就不能冲销 */
 export function assertSameMonth(date: string, timeZone: string, what = '单据') {
@@ -228,8 +287,10 @@ export async function applyMove(
     ON CONFLICT (warehouse_id, material_id) DO UPDATE SET stock_milli = ${after}, last_move_id = ${move!.id}, updated_at = now()`;
 }
 
-export type DocKind = 'inv_doc' | 'purchase_order' | 'payment' | 'opening_payable' | 'expense_claim' | 'petty_advance' | 'petty_settlement' | 'purchase_request';
-export type ApprovalAction = 'create' | 'submit' | 'approve' | 'return' | 'cancel' | 'void' | 'close' | 'revise' | 'sign';
+export type DocKind =
+  | 'inv_doc' | 'purchase_order' | 'payment' | 'opening_payable' | 'expense_claim' | 'petty_advance' | 'petty_settlement' | 'purchase_request'
+  | 'ap_offset' | 'supplier_refund';
+export type ApprovalAction = 'create' | 'submit' | 'approve' | 'return' | 'cancel' | 'void' | 'close' | 'revise' | 'sign' | 'supplier_agree' | 'supplier_reject';
 
 export async function logApproval(
   tx: Db,

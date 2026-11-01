@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { DUTIES, ROLES, type Duty, type Role } from '@shared/permissions';
+import { DUTIES, ROLES, dutyConflict, type Duty, type Role } from '@shared/permissions';
 import type { StaffRecord } from '@shared/types';
 import { isForeignKeyViolation, isUniqueViolation, type Db } from '../db';
 import { guard } from '../auth/guard';
@@ -48,6 +48,14 @@ export async function listStaff(db: Db): Promise<StaffRecord[]> {
 
 const uniqueDuties = (duties: Duty[] = []) => [...new Set(duties)].sort();
 
+/** 分岗不兼任（#17，v0.7.12）：仓库、采购、部门、财务（含成本）、负责人五组，职责只能在一组里；店主不受限 */
+function assertDutiesCompatible(role: Role, duties: readonly Duty[]) {
+  const groups = dutyConflict(role, duties);
+  if (groups) {
+    throw unprocessable('DUTY_CONFLICT', `仓库、采购、部门、财务（含成本）、负责人不兼任：这名员工的职责跨了「${groups}」，请只保留其中一组`, { field: 'duties' });
+  }
+}
+
 /** 创建员工账号（CLI 与接口共用）。 */
 export async function createStaff(
   db: Db,
@@ -72,6 +80,7 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
 
   app.post('/api/staff', { preHandler: guard('staff.manage') }, async (req, reply) => {
     const input = parse(CreateInput, req.body);
+    assertDutiesCompatible(input.role, input.duties);
     const password = input.password || generateTempPassword();
     const weak = checkPasswordStrength(password);
     if (weak) throw badRequest(weak, { field: 'password' });
@@ -91,6 +100,8 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
   app.put('/api/staff/:id', { preHandler: guard('staff.manage') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const input = parse(UpdateInput, req.body);
+    // 停用的员工不用先改职责（停用后没有任何权限）
+    if (input.active) assertDutiesCompatible(input.role, input.duties);
     await sql.begin(async (tx) => {
       // 锁住全部店主行，保证并发修改时仍至少保留一位在职店主
       await tx`SELECT id FROM staff WHERE role = 'owner' FOR UPDATE`;

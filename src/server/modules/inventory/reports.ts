@@ -7,6 +7,7 @@ import {
   CENTRAL_WAREHOUSE_ID,
   ISSUE_SIGN_DUE_DAYS,
   MOVE_TYPE_LABELS,
+  SUPPLIER_ANSWER_DUE_DAYS,
   type CheckItem,
   type InventoryOverview,
   type StockCard,
@@ -24,8 +25,8 @@ import type { Deps } from '../../lib/context';
 import { toCsv } from '../../lib/csv';
 import { badRequest, notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
-import { docDateSchema, loadInventorySettings, todayIn, warehouseInfo } from './common';
-import { getMaterial } from './master';
+import { coverFor, docDateSchema, loadInventorySettings, todayIn, usageByMaterial, usageSince, warehouseInfo } from './common';
+import { getMaterial, listMaterials } from './master';
 
 /** 查询参数里的仓：数字是某一个仓，all 是全部合计；不填是总仓（与 v0.7.10 以前一样） */
 export const warehouseParam = z
@@ -46,14 +47,19 @@ export async function listWarehouses(db: Db): Promise<Warehouse[]> {
     ORDER BY w.kind = 'department', d.active DESC, d.sort_order, d.id`;
 }
 
-/** 部门小仓的结存（有过收发的物料；结存为 0 的排在后面） */
-export async function warehouseStock(db: Db, warehouseId: number): Promise<WarehouseStockRow[]> {
-  return db<WarehouseStockRow[]>`
-    SELECT m.id AS material_id, m.code, m.name, m.specification, m.category, m.inventory_unit, m.decimals, ws.stock_milli,
+/** 部门小仓的结存（有过收发的物料；结存为 0 的排在后面），带近期日均用量与可用天数（#22，v0.7.12） */
+export async function warehouseStock(db: Db, warehouseId: number, timeZone?: string): Promise<WarehouseStockRow[]> {
+  const rows = await db<Omit<WarehouseStockRow, 'dailyUsageMilli' | 'daysOfCover' | 'isLow'>[]>`
+    SELECT m.id AS material_id, m.code, m.name, m.specification, m.category, m.inventory_unit, m.decimals, ws.stock_milli, m.cover_days,
            (SELECT created_at FROM stock_moves WHERE id = ws.last_move_id) AS last_move_at
     FROM warehouse_stock ws JOIN materials m ON m.id = ws.material_id
     WHERE ws.warehouse_id = ${warehouseId}
     ORDER BY ws.stock_milli = 0, m.code`;
+  if (!timeZone) return rows.map((r) => ({ ...r, dailyUsageMilli: 0, daysOfCover: null, isLow: false }));
+  const { usageWindowDays } = await loadInventorySettings(db);
+  const used = await usageByMaterial(db, warehouseId, usageSince(timeZone, usageWindowDays));
+  // 部门小仓只按可用天数提醒（固定的低库存数量是总仓的）
+  return rows.map((r) => ({ ...r, ...coverFor(r.stockMilli, used.get(r.materialId) ?? 0, usageWindowDays, { coverDays: r.coverDays, lowStockMilli: null }) }));
 }
 
 /** 这个物料在各仓的结存：总仓在前，部门小仓只列有过收发的 */
@@ -69,8 +75,12 @@ export async function materialBalances(db: Db, materialId: number): Promise<Stoc
       WHERE ws.material_id = ${materialId} ORDER BY d.sort_order, d.id) x`;
 }
 
-export async function stockCard(db: Db, materialId: number, f: { from?: string; to?: string; limit?: number; warehouseId?: number } = {}): Promise<StockCard> {
-  const material = await getMaterial(db, materialId);
+export async function stockCard(
+  db: Db,
+  materialId: number,
+  f: { from?: string; to?: string; limit?: number; warehouseId?: number; timeZone?: string } = {},
+): Promise<StockCard> {
+  const material = await getMaterial(db, materialId, f.timeZone);
   const whId = f.warehouseId ?? CENTRAL_WAREHOUSE_ID;
   const wh = await warehouseInfo(db, whId);
   if (!wh) throw notFound('仓库不存在');
@@ -95,7 +105,7 @@ export async function stockCard(db: Db, materialId: number, f: { from?: string; 
   const pending = await db<StockCard['pending']>`
     SELECT d.id, d.doc_no, d.doc_type, d.status, d.doc_date, l.qty_milli
     FROM inv_doc_lines l JOIN inv_docs d ON d.id = l.doc_id
-    WHERE l.material_id = ${materialId} AND d.status IN ('draft', 'submitted', 'returned')
+    WHERE l.material_id = ${materialId} AND d.status IN ('draft', 'submitted', 'returned', 'awaiting_supplier')
       AND ${central ? db`(d.warehouse_id = 1 OR d.warehouse_id IS NULL OR d.doc_type IN ('issue', 'issue_return'))` : db`d.warehouse_id = ${whId}`}
     ORDER BY d.id DESC LIMIT 20`;
   return {
@@ -146,13 +156,17 @@ export async function inventoryOverview(db: Db, timeZone: string): Promise<Inven
          AND dept_signed_at IS NULL AND confirmed_at < now() - make_interval(days => ${ISSUE_SIGN_DUE_DAYS})) AS unsigned_issues,
       (SELECT count(*) FROM inv_docs WHERE doc_type = 'receipt' AND urgent AND status = 'submitted') AS urgent_to_verify,
       (SELECT count(*) FROM inv_docs WHERE doc_type = 'receipt' AND urgent AND status = 'confirmed' AND purchase_order_id IS NULL) AS urgent_to_backfill,
+      (SELECT count(*) FROM inv_docs WHERE status = 'awaiting_supplier') AS awaiting_supplier,
+      (SELECT count(*) FROM inv_docs WHERE status = 'awaiting_supplier'
+         AND coalesce(submitted_at, created_at) < now() - make_interval(days => ${SUPPLIER_ANSWER_DUE_DAYS})) AS awaiting_supplier_overdue,
       (SELECT count(*) FROM materials WHERE tracked AND active) AS material_count,
-      (SELECT count(*) FROM materials WHERE tracked AND active AND low_stock_milli IS NOT NULL AND stock_milli < low_stock_milli) AS low_count,
       (SELECT count(*) FROM inv_docs WHERE doc_type = 'count' AND status IN ('draft', 'submitted', 'returned')) AS pending_counts,
       (SELECT count(*) FROM inv_docs WHERE status = 'submitted') AS pending_approvals,
       (SELECT count(DISTINCT doc_id) FROM stock_moves WHERE doc_date = ${today} AND qty_delta_milli > 0 AND move_type <> 'void') AS today_in,
       (SELECT count(DISTINCT doc_id) FROM stock_moves WHERE doc_date = ${today} AND qty_delta_milli < 0 AND move_type <> 'void') AS today_out`;
-  return { scopeName: settings.scopeName, ...row! };
+  // 提醒线（#22）：设了提醒天数且有用量的按可用天数，否则按固定数量
+  const lowCount = (await listMaterials(db, { trackedOnly: true, timeZone })).filter((m) => m.isLow).length;
+  return { scopeName: settings.scopeName, ...row!, lowCount };
 }
 
 /**
@@ -292,6 +306,101 @@ export async function inventoryChecks(db: Db): Promise<CheckItem[]> {
     ok: deptWh.length === 0,
     detail: deptWh.length ? deptWh.map((d) => `${d.name}${d.problem}`).join('、') : '一致',
   });
+
+  // ── 供应商往来（v0.7.12）：应付流水合计 = 应付未付合计 − 可抵扣合计 ──
+  const apMismatch = await db<{ name: string; balance: number; open: number; credit: number }[]>`
+    WITH debit AS (
+      SELECT d.supplier_id, d.amount_cents
+        - coalesce((SELECT sum(coalesce(r.return_applied_cents, r.amount_cents)) FROM inv_docs r
+                    WHERE r.source_doc_id = d.id AND r.doc_type = 'supplier_return' AND r.status = 'confirmed'), 0)
+        - coalesce((SELECT sum(pa.amount_cents) FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
+                    WHERE pa.receipt_doc_id = d.id AND p.status = 'confirmed'), 0)
+        - coalesce((SELECT sum(ol.amount_cents) FROM ap_offset_lines ol JOIN ap_offsets o ON o.id = ol.offset_id
+                    WHERE ol.receipt_doc_id = d.id AND o.status = 'confirmed'), 0) AS open_cents
+      FROM inv_docs d WHERE d.doc_type = 'receipt' AND d.status = 'confirmed' AND d.settlement = 'credit'
+      UNION ALL
+      SELECT o.supplier_id, o.amount_cents
+        - coalesce((SELECT sum(pa.amount_cents) FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
+                    WHERE pa.opening_payable_id = o.id AND p.status = 'confirmed'), 0)
+        - coalesce((SELECT sum(ol.amount_cents) FROM ap_offset_lines ol JOIN ap_offsets f ON f.id = ol.offset_id
+                    WHERE ol.opening_payable_id = o.id AND f.status = 'confirmed'), 0)
+      FROM opening_payables o WHERE o.status = 'confirmed'
+    ), credit AS (
+      SELECT p.supplier_id, p.amount_cents
+        - coalesce((SELECT sum(amount_cents) FROM payment_allocations WHERE payment_id = p.id), 0)
+        - coalesce((SELECT sum(amount_cents) FROM ap_offsets WHERE credit_payment_id = p.id AND status = 'confirmed'), 0)
+        - coalesce((SELECT sum(amount_cents) FROM supplier_refunds WHERE credit_payment_id = p.id AND status = 'confirmed'), 0) AS credit_cents
+      FROM payments p WHERE p.status = 'confirmed'
+      UNION ALL
+      SELECT r.supplier_id, r.amount_cents - coalesce(r.return_applied_cents, r.amount_cents)
+        - coalesce((SELECT sum(amount_cents) FROM ap_offsets WHERE credit_return_id = r.id AND status = 'confirmed'), 0)
+        - coalesce((SELECT sum(amount_cents) FROM supplier_refunds WHERE credit_return_id = r.id AND status = 'confirmed'), 0)
+      FROM inv_docs r JOIN inv_docs src ON src.id = r.source_doc_id
+      WHERE r.doc_type = 'supplier_return' AND r.status = 'confirmed' AND coalesce(src.settlement, 'credit') = 'credit'
+    )
+    SELECT s.name,
+           coalesce((SELECT sum(amount_delta_cents) FROM ap_entries WHERE supplier_id = s.id), 0) AS balance,
+           coalesce((SELECT sum(open_cents) FROM debit WHERE supplier_id = s.id), 0) AS open,
+           coalesce((SELECT sum(credit_cents) FROM credit WHERE supplier_id = s.id), 0) AS credit
+    FROM suppliers s`;
+  const apBad = apMismatch.filter((r) => r.balance !== r.open - r.credit);
+  items.push({
+    key: 'ap_balance',
+    label: '供应商余额 = 应付未付合计 − 可抵扣合计',
+    ok: apBad.length === 0,
+    detail: apBad.length
+      ? apBad.map((r) => `${r.name}：余额 ${r.balance / 100}，未付 ${r.open / 100}，可抵扣 ${r.credit / 100}`).join('；')
+      : '全部供应商一致',
+  });
+
+  // 核销、退款不超过可抵扣；核销单的明细合计等于核销金额；没有负的未付或可抵扣
+  const overUsed = await db<{ docNo: string; problem: string }[]>`
+    SELECT o.doc_no, '明细合计与核销金额不一致' AS problem FROM ap_offsets o
+    WHERE (SELECT coalesce(sum(amount_cents), 0) FROM ap_offset_lines WHERE offset_id = o.id) <> o.amount_cents
+    UNION ALL
+    SELECT p.doc_no, '预付款被用超了' FROM payments p WHERE p.status = 'confirmed' AND p.amount_cents
+      < coalesce((SELECT sum(amount_cents) FROM payment_allocations WHERE payment_id = p.id), 0)
+      + coalesce((SELECT sum(amount_cents) FROM ap_offsets WHERE credit_payment_id = p.id AND status = 'confirmed'), 0)
+      + coalesce((SELECT sum(amount_cents) FROM supplier_refunds WHERE credit_payment_id = p.id AND status = 'confirmed'), 0)
+    UNION ALL
+    SELECT r.doc_no, '退货余额被用超了' FROM inv_docs r WHERE r.doc_type = 'supplier_return' AND r.status = 'confirmed' AND r.amount_cents
+      < coalesce(r.return_applied_cents, r.amount_cents)
+      + coalesce((SELECT sum(amount_cents) FROM ap_offsets WHERE credit_return_id = r.id AND status = 'confirmed'), 0)
+      + coalesce((SELECT sum(amount_cents) FROM supplier_refunds WHERE credit_return_id = r.id AND status = 'confirmed'), 0)
+    UNION ALL
+    SELECT d.doc_no, '核销与付款超过了未付' FROM inv_docs d WHERE d.doc_type = 'receipt' AND d.status = 'confirmed' AND d.amount_cents
+      < coalesce((SELECT sum(coalesce(r.return_applied_cents, r.amount_cents)) FROM inv_docs r
+                  WHERE r.source_doc_id = d.id AND r.doc_type = 'supplier_return' AND r.status = 'confirmed'), 0)
+      + coalesce((SELECT sum(pa.amount_cents) FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
+                  WHERE pa.receipt_doc_id = d.id AND p.status = 'confirmed'), 0)
+      + coalesce((SELECT sum(ol.amount_cents) FROM ap_offset_lines ol JOIN ap_offsets o ON o.id = ol.offset_id
+                  WHERE ol.receipt_doc_id = d.id AND o.status = 'confirmed'), 0)
+    UNION ALL
+    SELECT o.doc_no, '核销到了已冲销的应付' FROM ap_offsets o JOIN ap_offset_lines ol ON ol.offset_id = o.id
+      LEFT JOIN inv_docs d ON d.id = ol.receipt_doc_id LEFT JOIN opening_payables op ON op.id = ol.opening_payable_id
+    WHERE o.status = 'confirmed' AND coalesce(d.status, op.status) <> 'confirmed'
+    UNION ALL
+    SELECT r.doc_no, '退货单不在已生效却还有退款或核销' FROM inv_docs r
+    WHERE r.doc_type = 'supplier_return' AND r.status <> 'confirmed'
+      AND (EXISTS (SELECT 1 FROM ap_offsets WHERE credit_return_id = r.id AND status = 'confirmed')
+           OR EXISTS (SELECT 1 FROM supplier_refunds WHERE credit_return_id = r.id AND status = 'confirmed'))`;
+  items.push({
+    key: 'ap_settlements',
+    label: '核销与供应商退款不超过可抵扣，核销不超过未付',
+    ok: overUsed.length === 0,
+    detail: overUsed.length ? overUsed.map((o) => `${o.docNo}${o.problem}`).join('、') : '一致',
+  });
+
+  // 待供应商确认的退货（#20）：没有库存流水、没有应付流水
+  const awaitingPosted = await db<{ docNo: string }[]>`
+    SELECT d.doc_no FROM inv_docs d WHERE d.status = 'awaiting_supplier'
+      AND (EXISTS (SELECT 1 FROM stock_moves WHERE doc_id = d.id) OR EXISTS (SELECT 1 FROM ap_entries WHERE inv_doc_id = d.id))`;
+  items.push({
+    key: 'awaiting_supplier',
+    label: '待供应商确认的退货没有出库、没有扣款',
+    ok: awaitingPosted.length === 0,
+    detail: awaitingPosted.length ? awaitingPosted.map((o) => o.docNo).join('、') : '一致',
+  });
   return items;
 }
 
@@ -323,7 +432,7 @@ export function registerReportRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/inventory/materials/:id/card', { preHandler: guard('inventory.read') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const f = parse(CardQuery, req.query);
-    return readSnapshot(sql, (tx) => stockCard(tx, id, { from: f.from, to: f.to, warehouseId: cardWarehouse(f.warehouse) }));
+    return readSnapshot(sql, (tx) => stockCard(tx, id, { from: f.from, to: f.to, warehouseId: cardWarehouse(f.warehouse), timeZone: config.timezone }));
   });
 
   app.get('/api/inventory/summary', { preHandler: guard('inventory.read') }, async (req) => {
@@ -339,7 +448,7 @@ export function registerReportRoutes(app: FastifyInstance, deps: Deps) {
     const { id } = parse(idParam, req.params);
     if (id === CENTRAL_WAREHOUSE_ID) throw badRequest('总仓的结存在物料列表里');
     if (!(await warehouseInfo(sql, id))) throw notFound('仓库不存在');
-    return warehouseStock(sql, id);
+    return warehouseStock(sql, id, config.timezone);
   });
 
   app.get('/api/inventory/summary/export', { preHandler: guard('inventory.read') }, async (req, reply) => {

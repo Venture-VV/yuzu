@@ -137,7 +137,7 @@ export function registerDeptStockRoutes(app: FastifyInstance, deps: Deps) {
 
   app.get('/api/erp/dept-stock/:id/stock', { preHandler: anyDept }, async (req) => {
     const d = await assertVisibleDept(sql, req.actor, parse(idParam, req.params).id);
-    return warehouseStock(sql, d.warehouseId);
+    return warehouseStock(sql, d.warehouseId, deps.config.timezone);
   });
 
   app.get('/api/erp/dept-stock/:id/docs', { preHandler: anyDept }, async (req) => {

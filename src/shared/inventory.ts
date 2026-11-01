@@ -16,13 +16,15 @@ export const INV_DOC_META: Record<InvDocType, { title: string; prefix: string; v
   supplier_return: { title: '退供应商', prefix: 'TG', verb: '退货', direction: 'out' },
 };
 
-export const INV_DOC_STATUSES = ['draft', 'submitted', 'returned', 'confirmed', 'cancelled', 'voided'] as const;
+// 待供应商确认：退供应商单确认后先等供应商同意，库存、货款都不动（#20，v0.7.12）
+export const INV_DOC_STATUSES = ['draft', 'submitted', 'returned', 'awaiting_supplier', 'confirmed', 'cancelled', 'voided'] as const;
 export type InvDocStatus = (typeof INV_DOC_STATUSES)[number];
 
 export const INV_STATUS_LABELS: Record<InvDocStatus, string> = {
   draft: '草稿',
   submitted: '待确认',
   returned: '已退回修改',
+  awaiting_supplier: '待供应商确认',
   confirmed: '已生效',
   cancelled: '已撤回',
   voided: '已冲销',
@@ -81,6 +83,12 @@ export interface WarehouseStockRow {
   decimals: number;
   stockMilli: number;
   lastMoveAt: string | null;
+  /** 提醒天数与这个仓近期的日均用量、可用天数（#22，v0.7.12）；没有用量时可用天数为空 */
+  coverDays: number | null;
+  dailyUsageMilli: number;
+  daysOfCover: number | null;
+  /** 可用天数少于提醒天数 */
+  isLow: boolean;
 }
 
 /** 领料单的部门签收（#17 第二次验收） */
@@ -143,6 +151,10 @@ export interface InventorySettings {
   priceBasis: string;
   /** 急采上限（分，#19：默认 2000 元，可调）；没有采购单的收货只能走急采 */
   urgentCapCents: number;
+  /** 免确认门槛（分，#18：默认 2000 元，可调）：设为需要确认的单据，金额不超过门槛的提交即生效（v0.7.12） */
+  approvalThresholdCents: number;
+  /** 可用天数按近多少天的用量算（#22，默认 28 天，v0.7.12） */
+  usageWindowDays: number;
   approvalRules: ApprovalRules;
 }
 
@@ -180,14 +192,20 @@ export interface Material {
   defaultSupplierId: number | null;
   defaultSupplierName: string | null;
   lowStockMilli: number | null;
+  /** 提醒天数（#22，v0.7.12）：可用天数少于它时提醒；为空时按固定的低库存提醒数量 */
+  coverDays: number | null;
   tracked: boolean;
   active: boolean;
   /** 总仓结存 */
   stockMilli: number;
   /** 各部门小仓合计（v0.7.11） */
   deptStockMilli: number;
-  /** 总仓低于人工设定阈值 */
+  /** 总仓低于提醒线：设了提醒天数且有用量的按可用天数，否则按人工设定的数量 */
   isLow: boolean;
+  /** 总仓近期日均用量（milli/天，按「用量统计天数」算；没有用量为 0） */
+  dailyUsageMilli: number;
+  /** 总仓可用天数（结存 ÷ 日均用量，一位小数；没有用量为空） */
+  daysOfCover: number | null;
   /** 总仓已有库存流水（总仓的期初只能在没有流水时建立） */
   hasMoves: boolean;
   /** 任何一个仓已有流水（库存单位、精度不能再改，也不能改成候选物料；v0.7.11） */
@@ -246,7 +264,7 @@ export interface InvDocLine {
 
 export interface ApprovalLog {
   id: number;
-  action: 'create' | 'submit' | 'approve' | 'return' | 'cancel' | 'void' | 'close' | 'revise' | 'sign';
+  action: 'create' | 'submit' | 'approve' | 'return' | 'cancel' | 'void' | 'close' | 'revise' | 'sign' | 'supplier_agree' | 'supplier_reject';
   actorName: string;
   reason: string;
   revision: number | null;
@@ -276,6 +294,10 @@ export interface InvDoc {
   coAcceptor: Ref | null;
   /** 领料：部门签收（#17 第二次验收）；没签收为空 */
   deptSign: DeptSign | null;
+  /** 退供应商：供应商的答复（#20，v0.7.12）；还没答复为空 */
+  supplierAnswer: SupplierAnswer | null;
+  /** 退供应商（已生效）：退货扣款抵了原收货单多少、退货余额核销与退款的情况（v0.7.12） */
+  returnCredit: ReturnCredit | null;
   createdBy: number;
   createdByName: string;
   createdAt: string;
@@ -316,6 +338,32 @@ export interface InvDocSummary {
   createdByName: string;
   createdAt: string;
 }
+
+/** 退供应商的供应商答复（#20） */
+export interface SupplierAnswer {
+  agreed: boolean;
+  /** 对方同意的日期（不同意时为空） */
+  date: string | null;
+  note: string;
+  byName: string;
+  at: string;
+}
+
+/**
+ * 已生效退货的扣款去向（v0.7.12）：挂账的先抵原收货单还没付的部分（appliedCents），多出来的是退货余额，
+ * 可以核销到以后的应付或登记供应商退款；现付供应商的退货不记应付，整笔等供应商退款（迁移前的视为已了结）。
+ */
+export interface ReturnCredit {
+  settlement: import('./expenses').SupplierSettlement;
+  appliedCents: number;
+  offsetCents: number;
+  refundedCents: number;
+  /** 还可以核销或退款的余额 */
+  availableCents: number;
+}
+
+/** 退供应商单在「待供应商确认」超过这么多天时在工作台标红（待确认） */
+export const SUPPLIER_ANSWER_DUE_DAYS = 7;
 
 /** 库存卡：一个物料在一个仓的流水（v0.7.11 起按仓） */
 export interface StockCard {
@@ -378,6 +426,9 @@ export interface InventoryOverview {
   /** 急采待仓库验收、待补采购单 */
   urgentToVerify: number;
   urgentToBackfill: number;
+  /** 退货待供应商确认的张数，其中超过 SUPPLIER_ANSWER_DUE_DAYS 天的（v0.7.12） */
+  awaitingSupplier: number;
+  awaitingSupplierOverdue: number;
   materialCount: number;
   lowCount: number;
   pendingCounts: number;

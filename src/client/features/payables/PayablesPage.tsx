@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router';
-import { Download, Plus, Wallet } from 'lucide-react';
+import { Download, FileUp, Plus, Wallet } from 'lucide-react';
 import { shiftDate } from '@shared/labels';
 import { PAY_METHOD_LABELS, type OpeningPayableDoc, type Statement } from '@shared/purchasing';
 import { errorMessage } from '../../lib/api';
@@ -12,10 +12,11 @@ import { Money } from '../../components/Money';
 import { Badge, Button, Input, Notice, Segmented, Select, Skeleton } from '../../components/ui';
 import { useSuppliers } from '../inventory/queries';
 import { PayableStatusChip } from '../purchasing/parts';
-import { useOpenings, usePayablesOverview, usePayments, useStatement } from '../purchasing/queries';
+import { useOffsets, useOpenings, usePayablesOverview, usePayments, useRefunds, useStatement } from '../purchasing/queries';
 import { OpeningDialog, OpeningSheet, PaymentSheet } from './PayableSheets';
+import { CreditsSection, OffsetSheet, RefundSheet } from './SettlementSheets';
 
-type View = 'suppliers' | 'statement' | 'payments' | 'openings';
+type View = 'suppliers' | 'statement' | 'payments' | 'openings' | 'settlements';
 
 export function PayablesPage() {
   const can = useCan();
@@ -40,17 +41,25 @@ export function PayablesPage() {
       <PageHeader
         dateMode="calendar"
         title="货款"
-        subtitle="供应商余额 = 期初未付 + 已确认收货货款 − 已确认退货扣款 − 净付款（门店内部管理口径）"
+        subtitle="供应商余额 = 期初未付 + 收货货款 − 退货扣款 − 净付款 + 供应商退款 = 未付 − 可抵扣（门店内部管理口径）"
         actions={
-          can('payable.manage') && (
+          (can('payable.manage') || can('inventory.master')) && (
             <div className="flex gap-2">
-              <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => setOpeningDialog(true)}>
-                期初未付
-              </Button>
-              <Link to="/payables/pay" className="flex h-8 items-center gap-1.5 rounded-sm bg-pine px-3 text-[13px] font-bold text-paper hover:bg-pine-hover">
-                <Wallet className="size-4" />
-                登记付款
+              <Link to="/payables/import" className="flex h-8 items-center gap-1.5 rounded-sm border border-line-strong bg-card px-3 text-[13px] font-semibold hover:border-ink-3">
+                <FileUp className="size-4" />
+                导入
               </Link>
+              {can('payable.manage') && (
+                <>
+                  <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => setOpeningDialog(true)}>
+                    期初未付
+                  </Button>
+                  <Link to="/payables/pay" className="flex h-8 items-center gap-1.5 rounded-sm bg-pine px-3 text-[13px] font-bold text-paper hover:bg-pine-hover">
+                    <Wallet className="size-4" />
+                    登记付款
+                  </Link>
+                </>
+              )}
             </div>
           )
         }
@@ -66,6 +75,7 @@ export function PayablesPage() {
             { value: 'statement', label: '对账单' },
             { value: 'payments', label: '付款记录' },
             { value: 'openings', label: '期初未付' },
+            { value: 'settlements', label: '核销与退款' },
           ]}
         />
       </div>
@@ -74,6 +84,7 @@ export function PayablesPage() {
         {view === 'statement' && <StatementView supplierId={Number(params.get('supplier')) || null} onSupplier={(id) => update({ supplier: id ? String(id) : null })} onPayment={(id) => update({ payment: String(id) })} onOpening={setOpening} />}
         {view === 'payments' && <PaymentsView onOpen={(id) => update({ payment: String(id) })} />}
         {view === 'openings' && <OpeningsView onOpen={setOpening} />}
+        {view === 'settlements' && <SettlementsView />}
       </div>
       <PaymentSheet id={paymentId} onClose={() => update({ payment: null })} />
       <OpeningSheet doc={opening} onClose={() => setOpening(null)} />
@@ -101,15 +112,17 @@ function SuppliersView({ onStatement }: { onStatement: (id: number) => void }) {
   if (overview.error) return <Notice tone="error" title={errorMessage(overview.error)} />;
   if (!overview.data) return <Skeleton className="h-64" />;
   const { totals, suppliers, pending } = overview.data;
-  const active = suppliers.filter((s) => s.balanceCents !== 0 || s.receivedCents !== 0 || s.openingCents !== 0);
+  const active = suppliers.filter((s) => s.balanceCents !== 0 || s.receivedCents !== 0 || s.openingCents !== 0 || s.creditCents !== 0 || s.paidCents !== 0);
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-2.5 md:grid-cols-5">
+      <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4 xl:grid-cols-7">
         <Tile label="期初未付" cents={totals.openingCents} />
         <Tile label="收货货款" cents={totals.receivedCents} tone="pine" sign="+" />
         <Tile label="退货扣款" cents={totals.returnCreditCents} tone="clay" sign="−" />
         <Tile label="已付款" cents={totals.paidCents} tone="lake" sign="−" />
+        <Tile label="供应商退款" cents={totals.refundedCents} sign="+" />
         <Tile label="当前余额" cents={totals.balanceCents} sign="=" />
+        <Tile label="其中可抵扣" cents={totals.creditCents} tone="clay" />
       </div>
       {(pending.payments > 0 || pending.openings > 0) && (
         <Notice tone="warning" title={`${pending.payments} 笔付款、${pending.openings} 笔期初未付待负责人确认`}>
@@ -120,7 +133,7 @@ function SuppliersView({ onStatement }: { onStatement: (id: number) => void }) {
         <EmptyState art="calm" title="还没有供应商货款" description="收货生效后，货款会按供应商自动汇总在这里。" className="rounded-lg border border-dashed border-line-strong" />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-line bg-card shadow-card">
-          <table className="w-full min-w-[860px] text-left text-[13px]">
+          <table className="w-full min-w-[1020px] text-left text-[13px]">
             <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
               <tr>
                 <th className="px-4 py-2.5">供应商</th>
@@ -128,7 +141,9 @@ function SuppliersView({ onStatement }: { onStatement: (id: number) => void }) {
                 <th className="px-2 py-2.5 text-right">+ 收货货款</th>
                 <th className="px-2 py-2.5 text-right">− 退货扣款</th>
                 <th className="px-2 py-2.5 text-right">− 已付款</th>
+                <th className="px-2 py-2.5 text-right">+ 供应商退款</th>
                 <th className="bg-paper-3/50 px-2 py-2.5 text-right text-ink-2">= 余额</th>
+                <th className="px-2 py-2.5 text-right">可抵扣</th>
                 <th className="px-2 py-2.5 text-right">待确认付款</th>
                 <th className="w-[170px] px-4 py-2.5" />
               </tr>
@@ -149,10 +164,12 @@ function SuppliersView({ onStatement }: { onStatement: (id: number) => void }) {
                   </td>
                   <td className="num px-2 py-2.5 text-right">{s.returnCreditCents ? <Money cents={s.returnCreditCents} className="text-clay" /> : <span className="text-ink-4">·</span>}</td>
                   <td className="num px-2 py-2.5 text-right">{s.paidCents ? <Money cents={s.paidCents} className="text-lake" /> : <span className="text-ink-4">·</span>}</td>
+                  <td className="num px-2 py-2.5 text-right">{s.refundedCents ? <Money cents={s.refundedCents} /> : <span className="text-ink-4">·</span>}</td>
                   <td className="bg-paper-2/50 px-2 py-2.5 text-right">
                     <Money cents={s.balanceCents} className={cn('text-[15px] font-bold', s.balanceCents < 0 && 'text-clay')} />
-                    {s.balanceCents < 0 && <span className="block text-[11px] font-semibold text-clay">供应商待退 / 可抵</span>}
+                    {s.balanceCents < 0 && <span className="block text-[11px] font-semibold text-clay">供应商欠我们（预付 / 退货余额）</span>}
                   </td>
+                  <td className="num px-2 py-2.5 text-right">{s.creditCents ? <Money cents={s.creditCents} className="text-ember" /> : <span className="text-ink-4">·</span>}</td>
                   <td className="num px-2 py-2.5 text-right text-yuzu-deep">{s.pendingPaymentCents ? <Money cents={s.pendingPaymentCents} /> : <span className="text-ink-4">·</span>}</td>
                   <td className="px-4 py-2.5 text-right">
                     <span className="flex justify-end gap-1.5">
@@ -232,13 +249,15 @@ function StatementView({
           if (doc) onOpening(doc);
         }} />
       )}
+      {supplierId && st.data && <CreditsSection supplierId={supplierId} />}
     </div>
   );
 }
 
-const KIND_LABEL = { opening: '期初未付', receipt: '收货货款', supplier_return: '退货扣款', payment: '付款' } as const;
+const KIND_LABEL = { opening: '期初未付', receipt: '收货货款', supplier_return: '退货扣款', payment: '付款', refund: '供应商退款' } as const;
 
 function StatementBody({ st, onPayment, onOpening }: { st: Statement; onPayment: (id: number) => void; onOpening: (id: number) => void }) {
+  const [refundId, setRefundId] = useState<number | null>(null);
   return (
     <>
       <div className="flex flex-wrap items-stretch gap-2 rounded-lg border border-line bg-card p-3 shadow-card">
@@ -251,6 +270,8 @@ function StatementBody({ st, onPayment, onOpening }: { st: Statement; onPayment:
         <Formula label="退货扣款" cents={st.returnCreditCents} tone="clay" />
         <Op>−</Op>
         <Formula label="付款" cents={st.paidCents} tone="lake" />
+        <Op>+</Op>
+        <Formula label="供应商退款" cents={st.refundedCents} />
         <Op>=</Op>
         <Formula label="期末余额" cents={st.endCents} strong />
       </div>
@@ -289,7 +310,11 @@ function StatementBody({ st, onPayment, onOpening }: { st: Statement; onPayment:
                           {r.docNo}
                         </Link>
                       ) : (
-                        <button type="button" onClick={() => (r.docKind === 'payment' ? onPayment(r.docId) : onOpening(r.docId))} className="font-semibold text-pine hover:underline">
+                        <button
+                          type="button"
+                          onClick={() => (r.docKind === 'payment' ? onPayment(r.docId) : r.docKind === 'supplier_refund' ? setRefundId(r.docId) : onOpening(r.docId))}
+                          className="font-semibold text-pine hover:underline"
+                        >
                           {r.docNo}
                         </button>
                       )}
@@ -311,7 +336,7 @@ function StatementBody({ st, onPayment, onOpening }: { st: Statement; onPayment:
 
       <section>
         <h3 className="mb-2 text-[13px] font-bold text-ink-2">未结清货款</h3>
-        {st.openItems.filter((i) => i.amountCents - i.creditCents - i.paidCents !== 0).length === 0 ? (
+        {st.openItems.filter((i) => i.amountCents - i.creditCents - i.offsetCents - i.paidCents !== 0).length === 0 ? (
           <p className="text-[13px] text-ink-3">全部货款已结清。</p>
         ) : (
           <div className="overflow-x-auto rounded-lg border border-line bg-card shadow-card">
@@ -320,7 +345,8 @@ function StatementBody({ st, onPayment, onOpening }: { st: Statement; onPayment:
                 <tr>
                   <th className="px-4 py-2">货款</th>
                   <th className="px-2 py-2 text-right">金额</th>
-                  <th className="px-2 py-2 text-right">退货扣款</th>
+                  <th className="px-2 py-2 text-right">退货抵扣</th>
+                  <th className="px-2 py-2 text-right">核销</th>
                   <th className="px-2 py-2 text-right">已付</th>
                   <th className="px-2 py-2 text-right">待确认付款</th>
                   <th className="px-4 py-2 text-right">未结清</th>
@@ -328,7 +354,7 @@ function StatementBody({ st, onPayment, onOpening }: { st: Statement; onPayment:
               </thead>
               <tbody className="divide-y divide-line/70">
                 {st.openItems
-                  .filter((i) => i.amountCents - i.creditCents - i.paidCents !== 0)
+                  .filter((i) => i.amountCents - i.creditCents - i.offsetCents - i.paidCents !== 0)
                   .map((i) => (
                     <tr key={`${i.kind}${i.id}`}>
                       <td className="px-4 py-2">
@@ -341,11 +367,11 @@ function StatementBody({ st, onPayment, onOpening }: { st: Statement; onPayment:
                         <Money cents={i.amountCents} />
                       </td>
                       <td className="px-2 py-2 text-right">{i.creditCents ? <Money cents={i.creditCents} className="text-clay" /> : <span className="text-ink-4">·</span>}</td>
+                      <td className="px-2 py-2 text-right">{i.offsetCents ? <Money cents={i.offsetCents} className="text-ember" /> : <span className="text-ink-4">·</span>}</td>
                       <td className="px-2 py-2 text-right">{i.paidCents ? <Money cents={i.paidCents} className="text-lake" /> : <span className="text-ink-4">·</span>}</td>
                       <td className="px-2 py-2 text-right">{i.pendingCents ? <Money cents={i.pendingCents} className="text-yuzu-deep" /> : <span className="text-ink-4">·</span>}</td>
                       <td className="px-4 py-2 text-right">
-                        <Money cents={i.amountCents - i.creditCents - i.paidCents} className={cn('font-bold', i.amountCents - i.creditCents - i.paidCents < 0 && 'text-clay')} />
-                        {i.amountCents - i.creditCents - i.paidCents < 0 && <span className="block text-[11px] font-semibold text-clay">已付后退货，待退 / 可抵</span>}
+                        <Money cents={i.amountCents - i.creditCents - i.offsetCents - i.paidCents} className="font-bold" />
                       </td>
                     </tr>
                   ))}
@@ -354,6 +380,7 @@ function StatementBody({ st, onPayment, onOpening }: { st: Statement; onPayment:
           </div>
         )}
       </section>
+      <RefundSheet id={refundId} onClose={() => setRefundId(null)} />
     </>
   );
 }
@@ -445,5 +472,61 @@ function OpeningsView({ onOpen }: { onOpen: (doc: OpeningPayableDoc) => void }) 
         </li>
       ))}
     </ul>
+  );
+}
+
+/** 核销与供应商退款（v0.7.12）：所有供应商的记录，点开可冲销（当月） */
+function SettlementsView() {
+  const [kind, setKind] = useState<'offsets' | 'refunds'>('offsets');
+  const offsets = useOffsets({}, kind === 'offsets');
+  const refunds = useRefunds({}, kind === 'refunds');
+  const [offsetId, setOffsetId] = useState<number | null>(null);
+  const [refundId, setRefundId] = useState<number | null>(null);
+  const rows =
+    kind === 'offsets'
+      ? (offsets.data ?? []).map((o) => ({ id: o.id, docNo: o.docNo, supplier: o.supplier.name, date: o.offsetDate, amountCents: o.amountCents, status: o.status, detail: `用 ${o.credit.docNo} 抵扣 ${o.lines.map((l) => l.docNo).join('、')}` }))
+      : (refunds.data ?? []).map((r) => ({ id: r.id, docNo: r.docNo, supplier: r.supplier.name, date: r.refundDate, amountCents: r.amountCents, status: r.status, detail: `退回 ${r.credit.docNo} · ${PAY_METHOD_LABELS[r.method]} · ${r.evidence}` }));
+  const pending = kind === 'offsets' ? offsets.isPending : refunds.isPending;
+  return (
+    <div className="space-y-3">
+      <Segmented
+        size="sm"
+        value={kind}
+        onChange={setKind}
+        ariaLabel="类型"
+        options={[
+          { value: 'offsets', label: '核销' },
+          { value: 'refunds', label: '供应商退款' },
+        ]}
+      />
+      <p className="text-[12.5px] text-ink-3">预付款、退货余额在对账单的「可抵扣」里核销或登记退款；核销不动钱，供应商退款记应付流水（现付供应商的退货除外）。</p>
+      {pending ? (
+        <Skeleton className="h-40" />
+      ) : rows.length === 0 ? (
+        <EmptyState art="calm" title={kind === 'offsets' ? '还没有核销' : '还没有供应商退款'} className="rounded-lg border border-dashed border-line-strong" />
+      ) : (
+        <ul className="overflow-hidden rounded-lg border border-line bg-card shadow-card">
+          {rows.map((r) => (
+            <li key={r.id} className="border-b border-line/70 last:border-0">
+              <button type="button" onClick={() => (kind === 'offsets' ? setOffsetId(r.id) : setRefundId(r.id))} className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-4 px-4 py-2.5 text-left hover:bg-pine-tint/50">
+                <span className="min-w-0">
+                  <span className="flex items-center gap-2">
+                    <span className="num text-[13.5px] font-bold">{r.docNo}</span>
+                    <span className="truncate text-[13px] font-semibold">{r.supplier}</span>
+                  </span>
+                  <span className="block truncate text-[12px] text-ink-3">
+                    {r.date} · {r.detail}
+                  </span>
+                </span>
+                <Money cents={r.amountCents} className={cn('text-[15px] font-bold', r.status === 'voided' && 'text-ink-4 line-through')} />
+                {r.status === 'voided' ? <Badge tone="clay">已冲销</Badge> : <Badge tone="pine">已生效</Badge>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <OffsetSheet id={offsetId} onClose={() => setOffsetId(null)} />
+      <RefundSheet id={refundId} onClose={() => setRefundId(null)} />
+    </div>
   );
 }

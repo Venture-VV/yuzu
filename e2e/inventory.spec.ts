@@ -1,6 +1,6 @@
 // 库存与采购浏览器验收：依赖两套合成数据（npm run seed 与 npm run cli seed-inventory-demo，仅独立演示库）。
 // v0.7.3 起库存、采购、货款、待办在 ERP 工作区（地址不变，导航在 ERP 里；门店主导航没有这几项）。
-// 账号：店主 linlan / 物资经办 lixiao / 采购对账 zhouyi，密码 yuzu2026。
+// 账号：店主 linlan / 物资经办 lixiao / 采购 zhouyi / 对账付款 qianfen（v0.7.12 分岗不兼任），密码 yuzu2026。
 // 业务流程只在门店电脑尺寸跑一遍（会改变演示数据，断言都用相对变化）；平板尺寸检查主要页面布局。
 import { expect, request, test, type Page } from '@playwright/test';
 
@@ -31,7 +31,7 @@ async function stockOf(page: Page, code: string): Promise<number> {
 
 /**
  * 补货：v0.7.11 起收货必须按已确认的采购单、写明一起验收的采购（#17、#19）。
- * 用店主的接口会话建采购单并确认，再按单收货（一起验收的是采购对账 zhouyi）；不影响页面上登录的账号。
+ * 用店主的接口会话建采购单并确认，再按单收货（一起验收的是采购 zhouyi）；不影响页面上登录的账号。
  */
 async function topUp(baseURL: string, materialCode: string, supplierCode: string, purchaseQty: number) {
   const api = await request.newContext({ baseURL });
@@ -176,7 +176,7 @@ test.describe('库存与采购流程', () => {
     await expect(page.getByText(`按采购单 ${poNo} 收货`)).toBeVisible();
     // 采购和仓库一起验收（#17）：没选一起验收的采购不能提交
     await expect(page.getByRole('button', { name: /确认收货/ })).toBeDisabled();
-    await page.selectOption('#coAcceptor', { label: '周一（采购对账）' });
+    await page.selectOption('#coAcceptor', { label: '周一（采购）' });
     // 送达 2 箱，只验收 1 箱
     await page.getByLabel('合格实收（箱）').fill('1');
     await page.getByLabel('拒收原因').fill('一箱受潮');
@@ -185,7 +185,8 @@ test.describe('库存与采购流程', () => {
     expect(await stockOf(page, 'M016')).toBe(before + 500);
     await logout(page);
 
-    await login(page, 'zhouyi', '库存');
+    // 付款由对账付款登记（#17 分岗不兼任，v0.7.12）
+    await login(page, 'qianfen', '库存');
     await page.goto('/payables');
     const balanceRow = page.getByRole('row').filter({ hasText: '栖谷护理用品' });
     await expect(balanceRow).toBeVisible();

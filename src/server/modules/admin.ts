@@ -37,7 +37,13 @@ import type { Actor, Deps } from '../lib/context';
 import { badRequest } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { loadFrontdeskRules } from './frontdesk/common';
-import { DEFAULT_APPROVAL_RULES, DEFAULT_URGENT_CAP_CENTS, loadInventorySettings } from './inventory/common';
+import {
+  DEFAULT_APPROVAL_RULES,
+  DEFAULT_APPROVAL_THRESHOLD_CENTS,
+  DEFAULT_URGENT_CAP_CENTS,
+  DEFAULT_USAGE_WINDOW_DAYS,
+  loadInventorySettings,
+} from './inventory/common';
 import { DEFAULT_SETTINGS, loadSettings, SETTINGS_KEYS } from './settings';
 import { loadTechnicianRules } from './technicians';
 import { loadClockroomRules } from './clockroom';
@@ -239,6 +245,19 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   add({
     key: 'inventory_approval_rules', group: 'inventory', label: '需要负责人确认的单据', value: approvals(inv.approvalRules), defaultValue: approvals(DEFAULT_APPROVAL_RULES),
     pending: true, section: 'rules', current: inv.approvalRules, dflt: DEFAULT_APPROVAL_RULES, metaKey: 'inventory_approval_rules',
+  });
+  const threshold = (c: number) => (c > 0 ? `${formatYuan(c)} 以内不用负责人确认` : '全部要负责人确认');
+  add({
+    key: 'inventory_approval_threshold_cents', group: 'inventory', label: '免确认门槛', value: threshold(inv.approvalThresholdCents),
+    defaultValue: threshold(DEFAULT_APPROVAL_THRESHOLD_CENTS), pending: true, section: 'rules',
+    hint: '采购单、报损、退供应商、付款、期初在设为需要确认时，金额不超过门槛的提交即生效；总仓盘点调整照旧要确认',
+    current: inv.approvalThresholdCents, dflt: DEFAULT_APPROVAL_THRESHOLD_CENTS, metaKey: 'inventory_approval_threshold_cents',
+  });
+  add({
+    key: 'inventory_usage_window_days', group: 'inventory', label: '可用天数的用量统计', value: `按近 ${inv.usageWindowDays} 天的用量`,
+    defaultValue: `按近 ${DEFAULT_USAGE_WINDOW_DAYS} 天的用量`, pending: true, section: 'rules',
+    hint: '物料设了提醒天数时，可用天数 = 结存 ÷ 这段时间的日均用量，少于提醒天数就提醒',
+    current: inv.usageWindowDays, dflt: DEFAULT_USAGE_WINDOW_DAYS, metaKey: 'inventory_usage_window_days',
   });
   // ── 岗位与权限 ──
   const changed = overrideCount(overrides);

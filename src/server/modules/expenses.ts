@@ -404,7 +404,7 @@ export async function poCandidates(db: Db, q: string): Promise<PoCandidate[]> {
 
 const LineInput = z.object({
   name: z.string().trim().min(1, '请填写物品或内容').max(40, '物品名称最多 40 个字'),
-  category: z.enum(EXPENSE_CATEGORIES, '费用科目只能选办公费、固定资产、低值易耗'),
+  category: z.enum(EXPENSE_CATEGORIES, '费用科目只能选办公费、固定资产、低值易耗、运费'),
   unit: z.string().trim().min(1, '请填写单位').max(8, '单位最多 8 个字'),
   boughtMilli: z.number().int().positive('购买数量必须大于 0').max(1_000_000_000),
   receivedMilli: z.number().int().min(0, '到货数量不能为负').max(1_000_000_000),
@@ -455,6 +455,8 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
   const poLineIds = input.lines.map((l) => l.poLineId).filter((x): x is number => x !== null);
   if (new Set(poLineIds).size !== poLineIds.length) throw badRequest('同一采购单行在一张报销单里只能出现一次');
   for (const l of input.lines) {
+    // #15：运费单独一行记费用，不对应采购单的物料行（v0.7.12）
+    if (l.category === 'freight' && l.poLineId) throw badRequest(`「${l.name}」是运费，单独一行登记，不关联采购单的物料行`);
     if (!l.poLineId && l.boughtMilli !== l.receivedMilli && l.diffReason.length < 2) {
       throw unprocessable('DIFF_REASON_REQUIRED', `「${l.name}」到货数量与购买数量不一致，请填写差异原因`);
     }

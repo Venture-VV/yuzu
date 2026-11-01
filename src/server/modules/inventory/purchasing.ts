@@ -18,7 +18,7 @@ import type { Actor, Deps } from '../../lib/context';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
 import { lockOpKey } from '../../lib/fences';
 import { idParam, parse } from '../../lib/validate';
-import { assertNotFuture, canOperateDept, docDateSchema, loadInventorySettings, logApproval, nextDocNo, priceBaseline, setTxTimeouts, todayIn } from './common';
+import { assertNotFuture, canOperateDept, docDateSchema, loadInventorySettings, logApproval, nextDocNo, overThreshold, priceBaseline, setTxTimeouts, todayIn } from './common';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -111,9 +111,13 @@ export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
       coalesce((SELECT sum(amount_cents) FROM inv_docs WHERE purchase_order_id = ${poId} AND doc_type = 'receipt' AND status = 'confirmed'), 0) AS received_cents,
       coalesce((SELECT sum(r.amount_cents) FROM inv_docs r JOIN inv_docs src ON src.id = r.source_doc_id
                 WHERE src.purchase_order_id = ${poId} AND r.doc_type = 'supplier_return' AND r.status = 'confirmed'), 0) AS return_credit_cents,
+      -- 已付含预付款、退货余额核销到这几张收货单的（v0.7.12）
       coalesce((SELECT sum(pa.amount_cents) FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
                 JOIN inv_docs d ON d.id = pa.receipt_doc_id
-                WHERE d.purchase_order_id = ${poId} AND p.status = 'confirmed'), 0) AS paid_cents`;
+                WHERE d.purchase_order_id = ${poId} AND p.status = 'confirmed'), 0)
+      + coalesce((SELECT sum(ol.amount_cents) FROM ap_offset_lines ol JOIN ap_offsets o ON o.id = ol.offset_id
+                  JOIN inv_docs d ON d.id = ol.receipt_doc_id
+                  WHERE d.purchase_order_id = ${poId} AND o.status = 'confirmed'), 0) AS paid_cents`;
   const revisions = await db<PoRevision[]>`
     SELECT r.revision, s.display_name AS changed_by_name, r.changed_at, r.snapshot
     FROM purchase_order_revisions r JOIN staff s ON s.id = r.changed_by
@@ -425,11 +429,14 @@ async function submitLocked(tx: Tx, po: PoRow, actor: Actor, approveNow: boolean
   if (po.status !== 'draft' && po.status !== 'returned') throw conflict('INVALID_STATE', '采购单当前状态不能提交');
   await tx`UPDATE purchase_orders SET status = 'submitted', submitted_by = ${actor.id}, submitted_at = now(), updated_at = now() WHERE id = ${po.id}`;
   await logApproval(tx, 'purchase_order', po.id, 'submit', actor.id, '', po.revision);
-  const rules = (await loadInventorySettings(tx)).approvalRules;
+  const settings = await loadInventorySettings(tx);
+  // #18：合计不超过免确认门槛的采购单提交即确认（v0.7.12）
+  const [totals] = await tx<{ totalCents: number }[]>`SELECT total_cents FROM purchase_orders WHERE id = ${po.id}`;
+  const totalCents = totals?.totalCents ?? null;
   if (deptConfirm) {
     await approveLocked(tx, { ...po, status: 'submitted' }, actor, '急采补单，部门确认');
-  } else if (!rules.purchase_order) {
-    await approveLocked(tx, { ...po, status: 'submitted' }, actor);
+  } else if (!(settings.approvalRules.purchase_order && overThreshold(settings, totalCents))) {
+    await approveLocked(tx, { ...po, status: 'submitted' }, actor, settings.approvalRules.purchase_order ? '未超过免确认门槛，提交即确认' : '');
   } else if (approveNow) {
     if (!can(actor, 'inventory.approve')) throw forbidden('当前账号不能确认采购单，请提交给负责人');
     await approveLocked(tx, { ...po, status: 'submitted' }, actor);

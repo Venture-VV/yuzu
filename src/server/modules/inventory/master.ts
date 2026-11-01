@@ -10,12 +10,13 @@ import { writeAudit } from '../../lib/audit';
 import type { Deps } from '../../lib/context';
 import { conflict, notFound, unprocessable } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
-import { loadInventorySettings } from './common';
+import { CENTRAL_WAREHOUSE_ID } from '@shared/inventory';
+import { coverFor, loadInventorySettings, usageByMaterial, usageSince } from './common';
 
 const MATERIAL_COLUMNS = (db: Db) => db`
   m.id, m.code, m.name, m.category, m.specification, m.inventory_unit, m.decimals, m.purchase_unit,
   m.purchase_factor_milli, m.ref_price_cents, m.default_supplier_id, s.name AS default_supplier_name,
-  m.low_stock_milli, m.tracked, m.active, m.stock_milli,
+  m.low_stock_milli, m.cover_days, m.tracked, m.active, m.stock_milli,
   (SELECT coalesce(sum(ws.stock_milli), 0) FROM warehouse_stock ws WHERE ws.material_id = m.id) AS dept_stock_milli,
   (m.low_stock_milli IS NOT NULL AND m.tracked AND m.stock_milli < m.low_stock_milli) AS is_low,
   (m.last_move_id IS NOT NULL) AS has_moves,
@@ -23,20 +24,32 @@ const MATERIAL_COLUMNS = (db: Db) => db`
   (SELECT created_at FROM stock_moves WHERE id = m.last_move_id) AS last_move_at,
   m.note, m.is_synthetic`;
 
-export async function listMaterials(db: Db, opts: { includeInactive?: boolean; trackedOnly?: boolean } = {}): Promise<Material[]> {
-  return db<Material[]>`
+/**
+ * 总仓的日均用量、可用天数与提醒（#22，v0.7.12）：设了提醒天数且近期有用量的按可用天数，否则按固定的低库存提醒数量。
+ * 不给门店时区时不算用量（可用天数为空，提醒按固定数量）。
+ */
+async function withCover(db: Db, rows: Material[], timeZone?: string): Promise<Material[]> {
+  if (!timeZone) return rows.map((m) => ({ ...m, dailyUsageMilli: 0, daysOfCover: null }));
+  const { usageWindowDays } = await loadInventorySettings(db);
+  const used = await usageByMaterial(db, CENTRAL_WAREHOUSE_ID, usageSince(timeZone, usageWindowDays));
+  return rows.map((m) => ({ ...m, ...coverFor(m.stockMilli, used.get(m.id) ?? 0, usageWindowDays, m) }));
+}
+
+export async function listMaterials(db: Db, opts: { includeInactive?: boolean; trackedOnly?: boolean; timeZone?: string } = {}): Promise<Material[]> {
+  const rows = await db<Material[]>`
     SELECT ${MATERIAL_COLUMNS(db)} FROM materials m LEFT JOIN suppliers s ON s.id = m.default_supplier_id
     WHERE true
       ${opts.includeInactive ? db`` : db`AND m.active`}
       ${opts.trackedOnly ? db`AND m.tracked` : db``}
     ORDER BY m.tracked DESC, m.code`;
+  return withCover(db, rows, opts.timeZone);
 }
 
-export async function getMaterial(db: Db, id: number): Promise<Material> {
+export async function getMaterial(db: Db, id: number, timeZone?: string): Promise<Material> {
   const [row] = await db<Material[]>`
     SELECT ${MATERIAL_COLUMNS(db)} FROM materials m LEFT JOIN suppliers s ON s.id = m.default_supplier_id WHERE m.id = ${id}`;
   if (!row) throw notFound('物料不存在');
-  return row;
+  return (await withCover(db, [row], timeZone))[0]!;
 }
 
 export const listSuppliers = (db: Db, includeInactive = false) =>
@@ -65,6 +78,8 @@ export const MaterialInput = z
     refPriceCents: z.number().int().nonnegative().max(100_000_000).nullable().default(null),
     defaultSupplierId: z.number().int().positive().nullable().default(null),
     lowStockMilli: z.number().int().nonnegative().max(1_000_000_000_000).nullable().default(null),
+    /** 提醒天数（#22，v0.7.12）：可用天数少于它时提醒；为空按固定的低库存提醒数量 */
+    coverDays: z.number('提醒天数必须是数字').int('提醒天数要是整数').min(1, '提醒天数至少 1 天').max(90, '提醒天数最多 90 天').nullable().default(null),
     tracked: z.boolean().default(true),
     active: z.boolean().default(true),
     note: text(200, '备注').default(''),
@@ -111,7 +126,7 @@ async function assertDeptWarehouseEmpty(tx: Tx, departmentId: number) {
   }
   const [pending] = await tx<{ docNo: string }[]>`
     SELECT d.doc_no FROM inv_docs d JOIN warehouses w ON w.id = d.warehouse_id
-    WHERE w.department_id = ${departmentId} AND d.status = 'submitted' ORDER BY d.id LIMIT 1`;
+    WHERE w.department_id = ${departmentId} AND d.status IN ('submitted', 'awaiting_supplier') ORDER BY d.id LIMIT 1`;
   if (pending) throw unprocessable('DEPT_DOCS_PENDING', `这个部门的小仓还有待确认的单据 ${pending.docNo}，请先确认或退回再停用`);
 }
 
@@ -121,9 +136,9 @@ export async function saveMaterial(db: Db, id: number | null, raw: MaterialInput
     if (id === null) {
       const [row] = await db<{ id: number }[]>`
         INSERT INTO materials (code, name, category, specification, inventory_unit, decimals, purchase_unit, purchase_factor_milli,
-                               ref_price_cents, default_supplier_id, low_stock_milli, tracked, active, note, is_synthetic)
+                               ref_price_cents, default_supplier_id, low_stock_milli, cover_days, tracked, active, note, is_synthetic)
         VALUES (${m.code}, ${m.name}, ${m.category}, ${m.specification}, ${m.inventoryUnit}, ${m.decimals}, ${m.purchaseUnit},
-                ${m.purchaseFactorMilli}, ${m.refPriceCents}, ${m.defaultSupplierId}, ${m.lowStockMilli}, ${m.tracked}, ${m.active},
+                ${m.purchaseFactorMilli}, ${m.refPriceCents}, ${m.defaultSupplierId}, ${m.lowStockMilli}, ${m.coverDays}, ${m.tracked}, ${m.active},
                 ${m.note}, ${extra.isSynthetic ?? false})
         RETURNING id`;
       return row!.id;
@@ -144,7 +159,7 @@ export async function saveMaterial(db: Db, id: number | null, raw: MaterialInput
       UPDATE materials SET code = ${m.code}, name = ${m.name}, category = ${m.category}, specification = ${m.specification},
              inventory_unit = ${m.inventoryUnit}, decimals = ${m.decimals}, purchase_unit = ${m.purchaseUnit},
              purchase_factor_milli = ${m.purchaseFactorMilli}, ref_price_cents = ${m.refPriceCents},
-             default_supplier_id = ${m.defaultSupplierId}, low_stock_milli = ${m.lowStockMilli}, tracked = ${m.tracked},
+             default_supplier_id = ${m.defaultSupplierId}, low_stock_milli = ${m.lowStockMilli}, cover_days = ${m.coverDays}, tracked = ${m.tracked},
              active = ${m.active}, note = ${m.note}, updated_at = now()
       WHERE id = ${id}`;
     return id;
@@ -181,6 +196,10 @@ const SettingsInput = z.object({
   priceBasis: required(20, '价格口径'),
   /** 急采上限（分，#19）：1 元到 100 万元 */
   urgentCapCents: z.number().int().min(100).max(100_000_000),
+  /** 免确认门槛（分，#18，v0.7.12）：0（全部要确认）到 100 万元 */
+  approvalThresholdCents: z.number().int().min(0, '免确认门槛不能为负').max(100_000_000, '免确认门槛不能超过 100 万元'),
+  /** 可用天数的用量统计天数（#22，v0.7.12）：7 到 90 天 */
+  usageWindowDays: z.number().int().min(7, '用量至少按近 7 天统计').max(90, '用量最多按近 90 天统计'),
   approvalRules: z.object({
     purchase_order: z.boolean(),
     damage: z.boolean(),
@@ -190,7 +209,7 @@ const SettingsInput = z.object({
   }),
 });
 
-export function registerMasterRoutes(app: FastifyInstance, { sql }: Deps) {
+export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps) {
   const all = (q: unknown) => (q as { all?: string }).all === '1';
 
   app.get('/api/inventory/settings', { preHandler: guard('inventory.read') }, async () => loadInventorySettings(sql));
@@ -202,6 +221,8 @@ export function registerMasterRoutes(app: FastifyInstance, { sql }: Deps) {
         ['inventory_scope_name', s.scopeName],
         ['inventory_price_basis', s.priceBasis],
         ['inventory_urgent_cap_cents', s.urgentCapCents],
+        ['inventory_approval_threshold_cents', s.approvalThresholdCents],
+        ['inventory_usage_window_days', s.usageWindowDays],
         ['inventory_approval_rules', s.approvalRules],
       ];
       for (const [key, value] of entries) {
@@ -215,23 +236,23 @@ export function registerMasterRoutes(app: FastifyInstance, { sql }: Deps) {
   });
 
   app.get('/api/inventory/materials', { preHandler: guard('inventory.read') }, async (req) =>
-    listMaterials(sql, { includeInactive: all(req.query) }),
+    listMaterials(sql, { includeInactive: all(req.query), timeZone: config.timezone }),
   );
   app.get('/api/inventory/materials/:id', { preHandler: guard('inventory.read') }, async (req) => {
     const { id } = parse(idParam, req.params);
-    return getMaterial(sql, id);
+    return getMaterial(sql, id, config.timezone);
   });
   app.post('/api/inventory/materials', { preHandler: guard('inventory.master') }, async (req, reply) => {
     const id = await saveMaterial(sql, null, req.body as MaterialInputData);
     await writeAudit(sql, { staffId: req.actor.id, action: 'inventory_master_saved', targetType: 'material', targetId: id, detail: req.body as Record<string, unknown>, ip: req.ip });
     reply.code(201);
-    return getMaterial(sql, id);
+    return getMaterial(sql, id, config.timezone);
   });
   app.put('/api/inventory/materials/:id', { preHandler: guard('inventory.master') }, async (req) => {
     const { id } = parse(idParam, req.params);
     await saveMaterial(sql, id, req.body as MaterialInputData);
     await writeAudit(sql, { staffId: req.actor.id, action: 'inventory_master_saved', targetType: 'material', targetId: id, detail: req.body as Record<string, unknown>, ip: req.ip });
-    return getMaterial(sql, id);
+    return getMaterial(sql, id, config.timezone);
   });
 
   app.get('/api/inventory/suppliers', { preHandler: guard('inventory.read') }, async (req) => listSuppliers(sql, all(req.query)));

@@ -231,6 +231,9 @@ describe('审核、转采购单、进度回写', () => {
       lines: [{ sourceLineId: r1.body.doc.lines[0].id, qtyMilli: q(20) }],
     });
     await api(ctx.app, approver, 'POST', `/api/inventory/docs/${ret2.body.doc.id}/approve`, {});
+    // 退货等供应商同意后才生效（#20，v0.7.12）：采购登记供应商的答复
+    const agreed = await api(ctx.app, buyer, 'POST', `/api/inventory/docs/${ret2.body.doc.id}/supplier-answer`, { agreed: true, date: today });
+    expect(agreed.body.status).toBe('confirmed');
     detail = (await api(ctx.app, reqA, 'GET', `/api/erp/requests/${created.id}`)).body;
     expect(detail.lines[0].progress).toMatchObject({ state: 'received', receivedMilli: q(1000), returnedMilli: q(20) });
     expect(detail.receivedLines).toBe(1);

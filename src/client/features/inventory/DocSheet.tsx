@@ -1,12 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Ban, CircleCheck, CornerUpLeft, FilePlus2, Pencil, RotateCcw, Send, Truck, Undo2, X } from 'lucide-react';
+import { Ban, CircleCheck, CircleX, CornerUpLeft, FilePlus2, Handshake, Pencil, RotateCcw, Send, Truck, Undo2, X } from 'lucide-react';
 import { COUNT_REASON_LABELS, COUNT_REASONS, INV_DOC_META, type CountReason, type InvDoc } from '@shared/inventory';
 import { formatQty } from '@shared/quantity';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
-import { Sheet } from '../../components/Overlay';
+import { Dialog, Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
@@ -25,6 +25,8 @@ const ACTION_LABELS: Record<InvDoc['approvals'][number]['action'], string> = {
   close: '关闭',
   revise: '修改版本',
   sign: '部门签收',
+  supplier_agree: '供应商已同意',
+  supplier_reject: '供应商不同意',
 };
 
 /** 单据详情抽屉：明细、审批记录、关联单据，以及按状态与职责可做的操作 */
@@ -47,7 +49,7 @@ export function DocSheet({ id, onClose }: { id: number | null; onClose: () => vo
   );
 }
 
-type Pending = { kind: 'return' | 'cancel' | 'void' } | null;
+type Pending = { kind: 'return' | 'cancel' | 'void' | 'reject' } | null;
 
 function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
   const can = useCan();
@@ -74,6 +76,10 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
   const editable = (doc.status === 'draft' || doc.status === 'returned') && canOperate && !deptDoc;
   // 急采：仓库到部门验收后确认（#19）；登记的人不能自己验收
   const canVerify = doc.urgent && doc.status === 'submitted' && (can('inventory.operate') || canApprove) && (!isMine || session.staff.role === 'owner');
+  // 退货等供应商确认（#20，v0.7.12）：采购登记供应商的答复
+  const awaiting = doc.status === 'awaiting_supplier';
+  const canAnswer = awaiting && can('supplierReturn.answer');
+  const [agreeOpen, setAgreeOpen] = useState(false);
 
   const run = async (key: string, url: string, body: unknown, success: string) => {
     setBusy(key);
@@ -163,6 +169,42 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
           <Notice tone="success" title={`${doc.deptSign.signedByName} 已签收 · ${formatDateTime(doc.deptSign.signedAt)}`}>
             {doc.deptSign.note || '部门签收时没有写差异。'}
           </Notice>
+        )}
+        {awaiting && (
+          <Notice tone="warning" title="等供应商确认：库存、货款都还没动">
+            与供应商谈妥后由采购登记「供应商已同意」，才从{doc.warehouse?.name ?? '原收货单的仓'}出库、扣款；供应商不同意就撤回。只同意一部分的，先撤回再按同意的数量重新登记。
+          </Notice>
+        )}
+        {doc.supplierAnswer && (
+          <Notice
+            tone={doc.supplierAnswer.agreed ? 'success' : 'info'}
+            title={`${doc.supplierAnswer.agreed ? `供应商 ${doc.supplierAnswer.date} 同意` : '供应商不同意'} · ${doc.supplierAnswer.byName} 登记于 ${formatDateTime(doc.supplierAnswer.at)}`}
+          >
+            {doc.supplierAnswer.note || '没有写说明。'}
+          </Notice>
+        )}
+        {doc.returnCredit && doc.amountCents > 0 && (
+          <div className="rounded-lg border border-line bg-card px-4 py-3 text-[13px]" data-testid="return-credit">
+            <p className="font-bold text-ink-2">退货扣款的去向</p>
+            {doc.returnCredit.settlement === 'cash' ? (
+              <p className="mt-1 text-ink-3">现付供应商的退货不记应付：退回的钱在「货款 → 对账单 → 可抵扣」登记供应商退款。</p>
+            ) : (
+              <p className="mt-1 text-ink-3">
+                抵原收货单 <Money cents={doc.returnCredit.appliedCents} className="font-semibold text-ink" />；多出来的是退货余额（原收货单已经付过款），在「货款 → 对账单 → 可抵扣」核销到以后的货款或登记供应商退款。
+              </p>
+            )}
+            <p className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
+              <span>
+                已核销 <Money cents={doc.returnCredit.offsetCents} />
+              </span>
+              <span>
+                已退款 <Money cents={doc.returnCredit.refundedCents} />
+              </span>
+              <span className="font-bold text-ember">
+                还可以抵扣 / 退款 <Money cents={doc.returnCredit.availableCents} />
+              </span>
+            </p>
+          </div>
         )}
 
         <dl className="grid grid-cols-2 gap-x-5 gap-y-2.5 rounded-lg border border-line bg-card px-4 py-3.5 text-[13px]">
@@ -393,10 +435,20 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             冲销
           </Button>
         )}
-        {['draft', 'submitted', 'returned'].includes(doc.status) && !deptDoc && (canApprove || (canOperate && isMine)) && (
+        {['draft', 'submitted', 'returned', 'awaiting_supplier'].includes(doc.status) && !deptDoc && (canApprove || (canOperate && isMine) || canAnswer) && (
           <Button variant="ghost" size="sm" icon={<Ban className="size-4" />} onClick={() => setDialog({ kind: 'cancel' })}>
             撤回
           </Button>
+        )}
+        {canAnswer && (
+          <>
+            <Button variant="secondary" icon={<CircleX className="size-4" />} onClick={() => setDialog({ kind: 'reject' })} data-testid="supplier-reject">
+              供应商不同意
+            </Button>
+            <Button variant="primary" icon={<Handshake className="size-4" />} onClick={() => setAgreeOpen(true)} data-testid="supplier-agree">
+              供应商已同意
+            </Button>
+          </>
         )}
         {editable && (
           <Button variant="secondary" icon={<Pencil className="size-4" />} onClick={() => navigate(`/inventory/docs/${doc.id}/edit`)}>
@@ -446,16 +498,18 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
       <ReasonDialog
         open={!!dialog}
         busy={!!busy}
-        title={`${dialog?.kind === 'void' ? '冲销' : dialog?.kind === 'return' ? '退回修改' : '撤回'} ${doc.docNo}`}
+        title={`${dialog?.kind === 'void' ? '冲销' : dialog?.kind === 'return' ? '退回修改' : dialog?.kind === 'reject' ? '供应商不同意' : '撤回'} ${doc.docNo}`}
         description={
           dialog?.kind === 'void'
             ? '冲销会按原流水反向记账：原单保留并标记「已冲销」，库存与货款恢复到这张单之前。'
             : dialog?.kind === 'return'
               ? '退回后经办人可以修改再提交；退回不影响库存。'
-              : '撤回未生效的单据，不影响库存。'
+              : dialog?.kind === 'reject'
+                ? '登记供应商不同意退货：退货单撤回，库存与货款都不动。'
+                : '撤回未生效的单据，不影响库存。'
         }
-        label={dialog?.kind === 'return' ? '需要修改什么' : '原因'}
-        confirmLabel={dialog?.kind === 'void' ? '确认冲销' : dialog?.kind === 'return' ? '退回修改' : '确认撤回'}
+        label={dialog?.kind === 'return' ? '需要修改什么' : dialog?.kind === 'reject' ? '供应商为什么不同意' : '原因'}
+        confirmLabel={dialog?.kind === 'void' ? '确认冲销' : dialog?.kind === 'return' ? '退回修改' : dialog?.kind === 'reject' ? '登记不同意' : '确认撤回'}
         danger={dialog?.kind === 'void'}
         extra={
           dialog?.kind === 'void' && (
@@ -467,10 +521,83 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
         onClose={() => setDialog(null)}
         onConfirm={(reason) => {
           const kind = dialog!.kind;
+          if (kind === 'reject') {
+            void run('reject', `/api/inventory/docs/${doc.id}/supplier-answer`, { agreed: false, note: reason }, '已登记供应商不同意，退货单撤回');
+            return;
+          }
           void run(kind, `/api/inventory/docs/${doc.id}/${kind}`, { reason }, kind === 'void' ? '已冲销' : kind === 'return' ? '已退回修改' : '已撤回');
         }}
       />
+      <AgreeDialog
+        open={agreeOpen}
+        doc={doc}
+        busy={busy === 'agree'}
+        onClose={() => setAgreeOpen(false)}
+        onConfirm={async (date, note) => {
+          await run('agree', `/api/inventory/docs/${doc.id}/supplier-answer`, { agreed: true, date, note }, '供应商已同意：退货生效，已出库扣款');
+          setAgreeOpen(false);
+        }}
+      />
     </>
+  );
+}
+
+/** 登记供应商已同意（#20）：写明同意的日期（出库、扣款记在这天）与对方联系人或说明 */
+function AgreeDialog({ open, doc, busy, onClose, onConfirm }: { open: boolean; doc: InvDoc; busy: boolean; onClose: () => void; onConfirm: (date: string, note: string) => Promise<void> }) {
+  const session = useSession();
+  const [date, setDate] = useState(session.calendarToday);
+  const [note, setNote] = useState('');
+  const [last, setLast] = useState(false);
+  if (open !== last) {
+    setLast(open);
+    if (open) {
+      setDate(session.calendarToday);
+      setNote('');
+    }
+  }
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={`供应商已同意 · ${doc.docNo}`}
+      description={`登记后退货生效：从${doc.warehouse?.name ?? '原收货单的仓'}出库，${doc.amountCents > 0 ? '按原收货价扣款' : '不涉及金额'}。出库与扣款记在供应商同意的那天。`}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            取消
+          </Button>
+          <Button variant="primary" loading={busy} onClick={() => void onConfirm(date, note.trim())} data-testid="supplier-agree-submit">
+            确认，退货生效
+          </Button>
+        </>
+      }
+    >
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="flex flex-col gap-1.5 text-[13px] font-semibold text-ink-2">
+          供应商同意的日期
+          <input
+            type="date"
+            className="h-10 rounded-sm border border-line-strong bg-card px-3 text-[14px] font-normal"
+            value={date}
+            min={doc.docDate}
+            max={session.calendarToday}
+            onChange={(e) => setDate(e.target.value)}
+            aria-label="供应商同意的日期"
+          />
+        </label>
+        <label className="flex flex-col gap-1.5 text-[13px] font-semibold text-ink-2">
+          对方联系人或说明
+          <input
+            className="h-10 rounded-sm border border-line-strong bg-card px-3 text-[14px] font-normal"
+            value={note}
+            maxLength={200}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="例如：业务员王经理电话确认"
+            aria-label="对方联系人或说明"
+          />
+        </label>
+      </div>
+    </Dialog>
   );
 }
 
