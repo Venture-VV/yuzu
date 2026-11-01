@@ -1,0 +1,195 @@
+// 本部门小仓（v0.7.11，飞书需求 RQ-002 第一步，见 docs/WAREHOUSES.md）：部门申购看本部门小仓的结存、签收仓库登记的领料、
+// 登记急采与补采购单、本部门的期初、耗用、报损、盘点；财务成本岗（deptStock.audit）看所有部门，给部门盘点、登记耗用。
+// 部门的员工没有「查看库存与物资单据」，这组接口只给能看的部门的小仓，不含总仓的参考价与结存；
+// 单据的登记、生效、冲销都走库存单据的同一套逻辑（docs.ts），权限在那里再按仓核对一次。
+
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+import { CENTRAL_WAREHOUSE_ID, INV_DOC_TYPES, ISSUE_SIGN_DUE_DAYS, type DeptStockMeta, type InvDoc } from '@shared/inventory';
+import { can } from '@shared/permissions';
+import { readSnapshot, type Db } from '../../db';
+import { guardAny } from '../../auth/guard';
+import type { Actor, Deps } from '../../lib/context';
+import { badRequest, forbidden, notFound } from '../../lib/errors';
+import { idParam, parse } from '../../lib/validate';
+import { enabledErpModules } from '../erp';
+import { actorDepartmentId, deptBalances, docDateSchema, loadInventorySettings } from './common';
+import {
+  assertCanOperate,
+  cancelDoc,
+  createDoc,
+  getDoc,
+  listDocs,
+  refreshCountBook,
+  signIssue,
+  submitDoc,
+  updateDoc,
+  warehouseRef,
+  type CreateDocInput,
+  type DocBodyInput,
+} from './docs';
+import { backfillPo } from './purchasing';
+import { warehouseStock } from './reports';
+
+const anyDept = guardAny('deptStock.operate', 'deptStock.audit');
+
+/** 能看所有部门：店主、财务成本岗 */
+const seesAll = (actor: Actor) => actor.role === 'owner' || can(actor, 'deptStock.audit');
+
+/** 当前账号能看的部门（在用的）：店主与成本岗是所有部门，部门申购只有自己所属的部门 */
+export async function visibleDepartments(db: Db, actor: Actor): Promise<DeptStockMeta['departments']> {
+  const all = seesAll(actor);
+  const mine = all ? null : await actorDepartmentId(db, actor.id);
+  if (!all && (mine === null || !can(actor, 'deptStock.operate'))) return [];
+  return db<DeptStockMeta['departments']>`
+    SELECT d.id, d.name, w.id AS warehouse_id FROM departments d JOIN warehouses w ON w.department_id = d.id
+    WHERE d.active ${all ? db`` : db`AND d.id = ${mine}`}
+    ORDER BY d.sort_order, d.id`;
+}
+
+async function assertVisibleDept(db: Db, actor: Actor, departmentId: number) {
+  const d = (await visibleDepartments(db, actor)).find((x) => x.id === departmentId);
+  if (!d) throw forbidden('只能看自己所属部门的小仓；员工档案里没有所属部门的，请店主在「员工」里设置');
+  return d;
+}
+
+/** 单据要在能看的部门小仓里（领料、退回按部门那一头） */
+async function assertVisibleDoc(db: Db, actor: Actor, docId: number) {
+  const [row] = await db<{ kind: 'central' | 'department' | null; departmentId: number | null }[]>`
+    SELECT w.kind, w.department_id FROM inv_docs d LEFT JOIN warehouses w ON w.id = d.warehouse_id WHERE d.id = ${docId}`;
+  if (!row) throw notFound('单据不存在');
+  if (row.kind !== 'department' || row.departmentId === null) throw forbidden('这张单据不在部门小仓');
+  await assertVisibleDept(db, actor, row.departmentId);
+}
+
+/**
+ * 给部门看的单据：行上的「当前结存」换成这个部门小仓的（领料单原来显示总仓的），去掉与全公司历史成交价的比较；
+ * 部门的员工没有「查看库存」，不能借单据看到总仓结存与别的采购价格。
+ */
+async function deptSafeDoc(db: Db, doc: InvDoc): Promise<InvDoc> {
+  const whId = doc.warehouse?.kind === 'department' ? doc.warehouse.id : null;
+  const balances = whId ? await deptBalances(db, whId, doc.lines.map((l) => l.materialId)) : new Map<number, { stockMilli: number }>();
+  return {
+    ...doc,
+    lines: doc.lines.map(({ compare: _compare, ...l }) => ({ ...l, stockMilli: balances.get(l.materialId)?.stockMilli ?? 0 })),
+  };
+}
+
+/** 部门能登记的单据：本部门小仓的期初、耗用、报损、盘点，以及急采（按采购单收货、领料、退回由仓库办理） */
+const DEPT_DOC_TYPES = ['opening', 'direct_use', 'damage', 'count', 'receipt'] as const;
+const DeptBodyHead = z.looseObject({
+  docType: z.enum(INV_DOC_TYPES).refine((t) => (DEPT_DOC_TYPES as readonly string[]).includes(t), '部门只能登记期初、耗用、报损、盘点与急采；领料、退回由仓库登记'),
+  warehouseId: z.number().int().positive().optional(),
+  urgent: z.boolean().optional(),
+  departmentId: z.number().int().positive().nullable().optional(),
+});
+
+async function assertDeptBody(db: Db, actor: Actor, raw: unknown) {
+  const b = parse(DeptBodyHead, raw);
+  if (b.docType === 'receipt') {
+    if (!b.urgent) throw badRequest('部门只能登记急采；按采购单收货由仓库办理');
+    if (!b.departmentId) throw badRequest('急采要选是哪个部门买的');
+    await assertVisibleDept(db, actor, b.departmentId);
+    return;
+  }
+  if (!b.warehouseId || b.warehouseId === CENTRAL_WAREHOUSE_ID) throw badRequest('请选部门的小仓；总仓的单据由仓库登记');
+  const wh = await warehouseRef(db, b.warehouseId);
+  if (!wh || wh.departmentId === null) throw badRequest('请选部门的小仓');
+  await assertVisibleDept(db, actor, wh.departmentId);
+}
+
+export async function deptStockMeta(db: Db, actor: Actor): Promise<DeptStockMeta> {
+  const settings = await loadInventorySettings(db);
+  return {
+    departments: await visibleDepartments(db, actor),
+    myDepartmentId: await actorDepartmentId(db, actor.id),
+    canOperate: actor.role === 'owner' || can(actor, 'deptStock.operate'),
+    canAudit: seesAll(actor),
+    urgentCapCents: settings.urgentCapCents,
+    signDueDays: ISSUE_SIGN_DUE_DAYS,
+    approvalRules: settings.approvalRules,
+    materials: await db<DeptStockMeta['materials']>`
+      SELECT id, code, name, category, specification, inventory_unit, decimals, purchase_unit, purchase_factor_milli
+      FROM materials WHERE active AND tracked ORDER BY code`,
+    suppliers: await db<DeptStockMeta['suppliers']>`SELECT id, code, name FROM suppliers WHERE active ORDER BY code`,
+  };
+}
+
+const DocsQuery = z.object({
+  type: z.enum(INV_DOC_TYPES).optional(),
+  status: z.string().max(16).optional(),
+  from: docDateSchema.optional(),
+  to: docDateSchema.optional(),
+  unsigned: z.enum(['1']).optional(),
+  urgent: z.enum(['1', '0']).optional(),
+});
+
+export function registerDeptStockRoutes(app: FastifyInstance, deps: Deps) {
+  const { sql } = deps;
+  const docId = (req: FastifyRequest) => parse(idParam, req.params).id;
+  const visibleDoc = async (req: FastifyRequest) => {
+    const id = docId(req);
+    await assertVisibleDoc(sql, req.actor, id);
+    return id;
+  };
+
+  app.get('/api/erp/dept-stock/meta', { preHandler: anyDept }, async (req) => readSnapshot(sql, (tx) => deptStockMeta(tx, req.actor)));
+
+  app.get('/api/erp/dept-stock/:id/stock', { preHandler: anyDept }, async (req) => {
+    const d = await assertVisibleDept(sql, req.actor, parse(idParam, req.params).id);
+    return warehouseStock(sql, d.warehouseId);
+  });
+
+  app.get('/api/erp/dept-stock/:id/docs', { preHandler: anyDept }, async (req) => {
+    const d = await assertVisibleDept(sql, req.actor, parse(idParam, req.params).id);
+    const q = parse(DocsQuery, req.query);
+    return listDocs(sql, {
+      ...q,
+      warehouseId: d.warehouseId,
+      unsigned: q.unsigned === '1',
+      urgent: q.urgent === undefined ? undefined : q.urgent === '1',
+      limit: 100,
+    });
+  });
+
+  app.get('/api/erp/dept-stock/docs/by-key/:key', { preHandler: anyDept }, async (req) => {
+    const { key } = parse(z.object({ key: z.uuid() }), req.params);
+    const [row] = await sql<{ id: number }[]>`SELECT id FROM inv_docs WHERE client_key = ${key}`;
+    if (!row) return { found: false };
+    await assertVisibleDoc(sql, req.actor, row.id);
+    return { found: true, doc: await deptSafeDoc(sql, await getDoc(sql, row.id, deps.config.timezone)) };
+  });
+  app.get('/api/erp/dept-stock/docs/:id', { preHandler: anyDept }, async (req): Promise<InvDoc> =>
+    deptSafeDoc(sql, await getDoc(sql, await visibleDoc(req), deps.config.timezone)),
+  );
+
+  app.post('/api/erp/dept-stock/docs', { preHandler: anyDept }, async (req, reply) => {
+    await assertDeptBody(sql, req.actor, req.body);
+    const result = await createDoc(deps, req.body as CreateDocInput, req.actor, req.ip);
+    reply.code(result.replayed ? 200 : 201);
+    return { ...result, doc: await deptSafeDoc(sql, result.doc) };
+  });
+  app.put('/api/erp/dept-stock/docs/:id', { preHandler: anyDept }, async (req) => {
+    const id = await visibleDoc(req);
+    await assertDeptBody(sql, req.actor, req.body);
+    return deptSafeDoc(sql, await updateDoc(deps, id, req.body as DocBodyInput, req.actor));
+  });
+  app.post('/api/erp/dept-stock/docs/:id/submit', { preHandler: anyDept }, async (req) => deptSafeDoc(sql, await submitDoc(deps, await visibleDoc(req), req.actor)));
+  app.post('/api/erp/dept-stock/docs/:id/cancel', { preHandler: anyDept }, async (req) => {
+    const id = await visibleDoc(req);
+    const [row] = await sql<{ docType: InvDoc['docType']; warehouseId: number | null }[]>`SELECT doc_type, warehouse_id FROM inv_docs WHERE id = ${id}`;
+    await assertCanOperate(sql, req.actor, row!.docType, await warehouseRef(sql, row!.warehouseId));
+    return deptSafeDoc(sql, await cancelDoc(deps, id, req.body, req.actor));
+  });
+  app.post('/api/erp/dept-stock/docs/:id/refresh-book', { preHandler: anyDept }, async (req) => deptSafeDoc(sql, await refreshCountBook(deps, await visibleDoc(req), req.actor)));
+  // #17 第二次验收：部门签收仓库登记的领料
+  app.post('/api/erp/dept-stock/docs/:id/sign', { preHandler: anyDept }, async (req) => deptSafeDoc(sql, await signIssue(deps, await visibleDoc(req), req.body, req.actor)));
+  // #19：急采后补采购单，由本部门确认（采购模块关着时不能补单）
+  app.post('/api/erp/dept-stock/docs/:id/backfill', { preHandler: anyDept }, async (req, reply) => {
+    const id = await visibleDoc(req);
+    if (!(await enabledErpModules(sql)).has('purchasing')) throw forbidden('ERP 的「采购」模块已关闭，不能补采购单');
+    const r = await backfillPo(deps, { ...(req.body as object), receiptDocId: id }, req.actor, req.ip, { dept: true });
+    reply.code(r.replayed ? 200 : 201);
+    return { poId: r.po.id, docNo: r.po.docNo, status: r.po.status, replayed: r.replayed };
+  });
+}

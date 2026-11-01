@@ -28,7 +28,7 @@ import { toCsv } from '../../lib/csv';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
 import { lockOpKey } from '../../lib/fences';
 import { idParam, parse, positiveCents } from '../../lib/validate';
-import { assertNotFuture, docDateSchema, loadInventorySettings, logApproval, nextDocNo, setTxTimeouts, todayIn } from './common';
+import { assertNotFuture, assertSameMonth, dateIn, docDateSchema, loadInventorySettings, logApproval, nextDocNo, setTxTimeouts, todayIn } from './common';
 
 const id = z.number().int().positive();
 const ReasonInput = z.object({ reason: z.string().trim().min(2, '请填写原因（至少 2 个字）').max(200) });
@@ -163,12 +163,12 @@ export async function createOpening(deps: Deps, raw: unknown, actor: Actor, ip?:
 }
 
 async function lockOpening(tx: Tx, openingId: number) {
-  const [o] = await tx<{ id: number; status: string; supplierId: number; amountCents: number; asOfDate: string; createdBy: number }[]>`
-    SELECT id, status, supplier_id, amount_cents, as_of_date, created_by FROM opening_payables WHERE id = ${openingId}`;
+  const [o] = await tx<{ id: number; status: string; supplierId: number; amountCents: number; asOfDate: string; createdBy: number; confirmedAt: string | null }[]>`
+    SELECT id, status, supplier_id, amount_cents, as_of_date, created_by, confirmed_at FROM opening_payables WHERE id = ${openingId}`;
   if (!o) throw notFound('期初未付记录不存在');
   await lockSupplier(tx, o.supplierId);
   const [locked] = await tx<typeof o[]>`
-    SELECT id, status, supplier_id, amount_cents, as_of_date, created_by FROM opening_payables WHERE id = ${openingId} FOR UPDATE`;
+    SELECT id, status, supplier_id, amount_cents, as_of_date, created_by, confirmed_at FROM opening_payables WHERE id = ${openingId} FOR UPDATE`;
   return locked!;
 }
 
@@ -201,6 +201,8 @@ export async function actOnOpening(deps: Deps, openingId: number, action: 'appro
       case 'void': {
         if (o.status === 'voided') return;
         if (o.status !== 'confirmed') throw conflict('INVALID_STATE', '只有已确认的记录可以冲销');
+        // #21：当月的当月冲销完；期初未付没有业务日期，按确认那天的月份算
+        assertSameMonth(dateIn(o.confirmedAt!, deps.config.timezone), deps.config.timezone, '期初未付的确认');
         const [used] = await tx<{ n: number }[]>`
           SELECT count(*) AS n FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
           WHERE pa.opening_payable_id = ${o.id} AND p.status IN ('confirmed', 'submitted')`;
@@ -392,6 +394,7 @@ export async function actOnPayment(deps: Deps, paymentId: number, action: 'appro
       case 'void':
         if (p!.status === 'voided') return;
         if (p!.status !== 'confirmed') throw conflict('INVALID_STATE', '只有已确认的付款可以冲销');
+        assertSameMonth(p!.payDate, deps.config.timezone, '付款');
         await tx`UPDATE payments SET status = 'voided', voided_by = ${actor.id}, voided_at = now(), void_reason = ${reason}, updated_at = now() WHERE id = ${p!.id}`;
         await tx`
           INSERT INTO ap_entries (supplier_id, entry_type, amount_delta_cents, payment_id, entry_date, operator_id)
@@ -554,7 +557,10 @@ export function registerPayableRoutes(app: FastifyInstance, deps: Deps) {
     return r;
   });
   for (const action of ['approve', 'return', 'void'] as const) {
-    app.post(`/api/payables/openings/:id/${action}`, { preHandler: guard('inventory.approve') }, async (req) => actOnOpening(deps, docId(req), action, req.body, req.actor));
+    // #21：账务冲销由财务（对账付款、成本核算）负责，只限当月（v0.7.11）
+    app.post(`/api/payables/openings/:id/${action}`, { preHandler: guard(action === 'void' ? 'finance.void' : 'inventory.approve') }, async (req) =>
+      actOnOpening(deps, docId(req), action, req.body, req.actor),
+    );
   }
   for (const action of ['cancel', 'resubmit'] as const) {
     app.post(`/api/payables/openings/:id/${action}`, { preHandler: guard('payable.read') }, async (req) => {
@@ -584,7 +590,9 @@ export function registerPayableRoutes(app: FastifyInstance, deps: Deps) {
     return r;
   });
   for (const action of ['approve', 'return', 'void'] as const) {
-    app.post(`/api/payables/payments/:id/${action}`, { preHandler: guard('inventory.approve') }, async (req) => actOnPayment(deps, docId(req), action, req.body, req.actor));
+    app.post(`/api/payables/payments/:id/${action}`, { preHandler: guard(action === 'void' ? 'finance.void' : 'inventory.approve') }, async (req) =>
+      actOnPayment(deps, docId(req), action, req.body, req.actor),
+    );
   }
   for (const action of ['cancel', 'resubmit'] as const) {
     app.post(`/api/payables/payments/:id/${action}`, { preHandler: guard('payable.read') }, async (req) => {

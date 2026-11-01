@@ -24,6 +24,7 @@ const ACTION_LABELS: Record<InvDoc['approvals'][number]['action'], string> = {
   void: '冲销',
   close: '关闭',
   revise: '修改版本',
+  sign: '部门签收',
 };
 
 /** 单据详情抽屉：明细、审批记录、关联单据，以及按状态与职责可做的操作 */
@@ -59,14 +60,20 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
   const [reasons, setReasons] = useState<Record<number, CountReason>>({});
   useEffect(() => setReasons({}), [doc.id]);
 
-  const meta = INV_DOC_META[doc.docType];
+  const meta = doc.urgent ? { ...INV_DOC_META[doc.docType], title: '急采收货' } : INV_DOC_META[doc.docType];
   const visual = DOC_VISUAL[doc.docType];
+  // v0.7.11：部门小仓的单据（耗用、报损、盘点、期初、急采）由部门在「本部门小仓」登记，这里只看、冲销与确认
+  const deptDoc = doc.warehouse?.kind === 'department' && doc.docType !== 'issue' && doc.docType !== 'issue_return';
   const Icon = visual.icon;
   const operatePerm = doc.docType === 'supplier_return' ? 'supplierReturn.create' : 'inventory.operate';
   const canOperate = can(operatePerm);
   const canApprove = can('inventory.approve');
+  // #21：库存冲销由仓库或财务成本岗，只限当月（v0.7.11）
+  const canVoid = can('inventory.void');
   const isMine = doc.createdBy === session.staff.id;
-  const editable = (doc.status === 'draft' || doc.status === 'returned') && canOperate;
+  const editable = (doc.status === 'draft' || doc.status === 'returned') && canOperate && !deptDoc;
+  // 急采：仓库到部门验收后确认（#19）；登记的人不能自己验收
+  const canVerify = doc.urgent && doc.status === 'submitted' && (can('inventory.operate') || canApprove) && (!isMine || session.staff.role === 'owner');
 
   const run = async (key: string, url: string, body: unknown, success: string) => {
     setBusy(key);
@@ -111,7 +118,14 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
           <p className="num text-[18px] font-bold">{doc.docNo}</p>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             <StatusChip status={doc.status} />
-            {doc.noPo && doc.docType === 'receipt' && <Badge tone="ember">缺少采购依据</Badge>}
+            {doc.noPo && doc.docType === 'receipt' && !doc.urgent && <Badge tone="ember">缺少采购依据</Badge>}
+            {doc.urgent && (
+              <Badge tone="yuzu">
+                急采 · 上限 <Money cents={doc.urgentCapCents ?? 0} />
+              </Badge>
+            )}
+            {doc.warehouse && <Badge tone={doc.warehouse.kind === 'central' ? 'neutral' : 'lake'}>{doc.warehouse.name}</Badge>}
+            {doc.docType === 'issue' && doc.warehouse && doc.status === 'confirmed' && (doc.deptSign ? <Badge tone="pine">部门已签收</Badge> : <Badge tone="yuzu">部门待签收</Badge>)}
             {doc.isSynthetic && <Badge tone="ember">合成演示</Badge>}
           </div>
         </div>
@@ -132,9 +146,22 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             {doc.voidReason}。原单内容保留，库存已按原流水反向记回。
           </Notice>
         )}
-        {doc.status === 'submitted' && (
-          <Notice tone="warning" title="待负责人确认，确认前不影响库存">
-            {doc.docType === 'count' ? '盘点差异目前是「待核差异」，不是已认定的浪费或损失。' : '审批安排为模拟规则，待店主确认。'}
+        {doc.status === 'submitted' &&
+          (doc.urgent ? (
+            <Notice tone="warning" title="急采：等仓库到部门验收，确认前不影响库存与货款">
+              部门登记的急采（没有采购单），验收确认后进{doc.warehouse?.name}；合计不超过登记时的上限，确认时按现在的上限再核对一次。
+            </Notice>
+          ) : (
+            <Notice tone="warning" title="待负责人确认，确认前不影响库存">
+              {doc.docType === 'count' ? '盘点差异目前是「待核差异」，不是已认定的浪费或损失。' : '审批安排为模拟规则，待店主确认。'}
+            </Notice>
+          ))}
+        {doc.urgent && doc.status === 'confirmed' && !doc.purchaseOrder && (
+          <Notice tone="warning" title="急采还没补采购单">部门在「本部门小仓」里补采购单并自己确认；也可以由采购补单、负责人确认。</Notice>
+        )}
+        {doc.deptSign && (
+          <Notice tone="success" title={`${doc.deptSign.signedByName} 已签收 · ${formatDateTime(doc.deptSign.signedAt)}`}>
+            {doc.deptSign.note || '部门签收时没有写差异。'}
           </Notice>
         )}
 
@@ -143,8 +170,17 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             <span className="num">{doc.docDate}</span>
           </Info>
           {doc.supplier && <Info label="供应商">{doc.supplier.name}</Info>}
-          {doc.department && <Info label={doc.docType === 'issue_return' ? '退回部门' : '领用部门'}>{doc.department.name}</Info>}
-          {doc.handler && <Info label={doc.docType === 'receipt' ? '收货人' : doc.docType === 'issue' ? '领用人' : '经办人'}>{doc.handler}</Info>}
+          {doc.department && (
+            <Info label={doc.docType === 'issue_return' ? '退回部门' : doc.docType === 'issue' ? '领料部门' : '部门'}>{doc.department.name}</Info>
+          )}
+          {doc.warehouse && (
+            <Info label={doc.docType === 'issue' ? '进' : doc.docType === 'issue_return' ? '从' : '仓'}>
+              {doc.warehouse.name}
+              {(doc.docType === 'issue' || doc.docType === 'issue_return') && <span className="ml-1 text-[12px] text-ink-3">（另一头是总仓）</span>}
+            </Info>
+          )}
+          {doc.coAcceptor && <Info label="一起验收的采购">{doc.coAcceptor.name}</Info>}
+          {doc.handler && <Info label={doc.docType === 'receipt' ? '收货人' : doc.docType === 'issue' ? '领料人' : '经办人'}>{doc.handler}</Info>}
           {doc.sourceDoc && (
             <Info label="原单">
               <Link to={`/inventory/docs?doc=${doc.sourceDoc.id}`} className="num font-semibold text-pine hover:underline">
@@ -169,7 +205,7 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             {doc.createdByName} · {formatDateTime(doc.createdAt)}
           </Info>
           {doc.confirmedAt && (
-            <Info label="生效">
+            <Info label={doc.urgent ? '仓库验收' : '生效'}>
               {doc.confirmedByName} · {formatDateTime(doc.confirmedAt)}
             </Info>
           )}
@@ -332,17 +368,17 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
           </ol>
         </section>
 
-        {doc.status === 'confirmed' && !doc.voidable.ok && canApprove && <p className="text-[12.5px] text-ink-3">不能冲销：{doc.voidable.reason}</p>}
+        {doc.status === 'confirmed' && !doc.voidable.ok && canVoid && <p className="text-[12.5px] text-ink-3">不能冲销：{doc.voidable.reason}</p>}
       </div>
 
       {/* 操作 */}
       <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-line bg-card px-5 py-3.5">
         {doc.status === 'confirmed' && doc.docType === 'issue' && can('inventory.operate') && (
           <Button variant="secondary" size="sm" icon={<Undo2 className="size-4" />} onClick={() => navigate(`/inventory/new/issue_return?src=${doc.id}`)}>
-            领用退回
+            领料退回
           </Button>
         )}
-        {doc.status === 'confirmed' && doc.docType === 'receipt' && doc.noPo && !doc.purchaseOrder && can('purchase.manage') && (
+        {doc.status === 'confirmed' && doc.docType === 'receipt' && doc.noPo && !doc.purchaseOrder && can('purchase.manage') && !doc.urgent && (
           <Button variant="secondary" size="sm" loading={busy === 'backfill'} icon={<FilePlus2 className="size-4" />} onClick={backfill}>
             补采购单
           </Button>
@@ -352,12 +388,12 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             退供应商
           </Button>
         )}
-        {doc.status === 'confirmed' && canApprove && doc.voidable.ok && (
+        {doc.status === 'confirmed' && canVoid && doc.voidable.ok && (
           <Button variant="ghost" size="sm" icon={<RotateCcw className="size-4" />} onClick={() => setDialog({ kind: 'void' })} className="text-clay hover:bg-clay-soft/60 hover:text-clay">
             冲销
           </Button>
         )}
-        {['draft', 'submitted', 'returned'].includes(doc.status) && (canApprove || (canOperate && isMine)) && (
+        {['draft', 'submitted', 'returned'].includes(doc.status) && !deptDoc && (canApprove || (canOperate && isMine)) && (
           <Button variant="ghost" size="sm" icon={<Ban className="size-4" />} onClick={() => setDialog({ kind: 'cancel' })}>
             撤回
           </Button>
@@ -372,7 +408,18 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             提交
           </Button>
         )}
-        {doc.status === 'submitted' && canApprove && (
+        {canVerify && (
+          <Button
+            variant="primary"
+            loading={busy === 'verify'}
+            icon={<CircleCheck className="size-4" />}
+            onClick={() => run('verify', `/api/inventory/docs/${doc.id}/verify-urgent`, {}, '急采已验收，进部门小仓')}
+            data-testid="verify-urgent"
+          >
+            到部门验收确认
+          </Button>
+        )}
+        {doc.status === 'submitted' && canApprove && !doc.urgent && (
           <>
             <Button variant="secondary" icon={<CornerUpLeft className="size-4" />} onClick={() => setDialog({ kind: 'return' })}>
               退回修改

@@ -18,6 +18,8 @@ let approver: string; // 负责人
 let deptA: number;
 let deptB: number;
 let costerId: number;
+/** 采购经办 zhouyi：收货时一起验收（v0.7.11，#17） */
+let buyerId: number;
 const q = (n: number) => Math.round(n * 1000);
 const daysAgo = (n: number) => {
   const d = new Date(`${today}T00:00:00Z`);
@@ -91,6 +93,7 @@ beforeAll(async () => {
   boss = await login(ctx.app, 'linlan', 'yuzu2026');
   keeper = await login(ctx.app, 'lixiao', 'yuzu2026');
   buyer = await login(ctx.app, 'zhouyi', 'yuzu2026');
+  buyerId = (await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'zhouyi'`)[0]!.id;
   costerId = await createStaff(ctx.sql, { username: 'coster', displayName: '成本岗', role: 'backoffice', duties: ['cost'], password: PASSWORD, mustChangePassword: false });
   await createStaff(ctx.sql, { username: 'appr', displayName: '负责人', role: 'backoffice', duties: ['approve'], password: PASSWORD, mustChangePassword: false });
   coster = await login(ctx.app, 'coster');
@@ -124,7 +127,9 @@ describe('权限（D10：岗位 + 职责）', () => {
     const depts = await api(ctx.app, coster, 'GET', '/api/inventory/departments');
     expect(depts.status).toBe(200);
     expect(depts.body.map((d: { id: number }) => d.id)).toEqual(expect.arrayContaining([deptA, deptB]));
-    expect((await api(ctx.app, coster, 'GET', '/api/inventory/materials')).status).toBe(403);
+    // v0.7.11 起成本核算可看库存（#21：库存冲销由仓库或成本岗做），但不能录入收发
+    expect((await api(ctx.app, coster, 'GET', '/api/inventory/materials')).status).toBe(200);
+    expect((await api(ctx.app, coster, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docType: 'direct_use', docDate: today, note: '越权测试', lines: [{ materialId: 1, qtyMilli: 1000 }] })).status).toBe(403);
     // 规则只有店主能改
     const rules = (await api(ctx.app, coster, 'GET', '/api/erp/expenses/rules')).body;
     expect(rules.approvalThresholdCents).toBe(200_000);
@@ -182,7 +187,9 @@ describe('费用确认（D13：单笔超 2000 元要负责人确认）', () => {
     expect(ok.body.approvals.map((a: { action: string }) => a.action)).toEqual(['create', 'submit', 'return', 'submit', 'approve']);
     // 已确认的不能撤回，只能冲销
     expect((await api(ctx.app, coster, 'POST', `/api/erp/expenses/${id}/cancel`, { reason: '不要了' })).status).toBe(409);
-    expect((await api(ctx.app, approver, 'POST', `/api/erp/expenses/${id}/void`, { reason: '重复登记' })).body.status).toBe('voided');
+    // #21：账务冲销由财务（成本核算、对账付款），负责人不再冲销（v0.7.11）
+    expect((await api(ctx.app, approver, 'POST', `/api/erp/expenses/${id}/void`, { reason: '重复登记' })).status).toBe(403);
+    expect((await api(ctx.app, coster, 'POST', `/api/erp/expenses/${id}/void`, { reason: '重复登记' })).body.status).toBe('voided');
 
     // 负责人也是店主：登记时可以同时确认
     const now = await claim(boss, { approveNow: true, lines: [line({ amountCents: 300_000 })] });
@@ -258,11 +265,13 @@ describe('备用金：按部门平账（D14）', () => {
     const a = (await advance(coster, { amountCents: 10_000 })).body.advance;
     const c = (await claim(coster, { paySource: 'petty', advanceId: a.id, lines: [line({ amountCents: 4_000 })] })).body.claim;
     const s = (await settle(coster, a.id, 'return', 6_000)).body;
-    expect((await api(ctx.app, coster, 'POST', `/api/erp/petty/advances/${a.id}/void`, { reason: '打错了' })).status).toBe(403);
-    expect((await api(ctx.app, approver, 'POST', `/api/erp/petty/advances/${a.id}/void`, { reason: '打错了' })).body.error.code).toBe('ADVANCE_IN_USE');
-    await api(ctx.app, approver, 'POST', `/api/erp/expenses/${c.id}/void`, { reason: '打款错了' });
-    await api(ctx.app, approver, 'POST', `/api/erp/petty/settlements/${s.settlementId}/void`, { reason: '打款错了' });
-    const voided = await api(ctx.app, approver, 'POST', `/api/erp/petty/advances/${a.id}/void`, { reason: '打错了' });
+    // #21：备用金的冲销由财务（成本核算、对账付款），负责人不能冲销（v0.7.11）
+    expect((await api(ctx.app, approver, 'POST', `/api/erp/petty/advances/${a.id}/void`, { reason: '打错了' })).status).toBe(403);
+    expect((await api(ctx.app, keeper, 'POST', `/api/erp/petty/advances/${a.id}/void`, { reason: '打错了' })).status).toBe(403);
+    expect((await api(ctx.app, coster, 'POST', `/api/erp/petty/advances/${a.id}/void`, { reason: '打错了' })).body.error.code).toBe('ADVANCE_IN_USE');
+    await api(ctx.app, coster, 'POST', `/api/erp/expenses/${c.id}/void`, { reason: '打款错了' });
+    await api(ctx.app, buyer, 'POST', `/api/erp/petty/settlements/${s.settlementId}/void`, { reason: '打款错了' });
+    const voided = await api(ctx.app, coster, 'POST', `/api/erp/petty/advances/${a.id}/void`, { reason: '打错了' });
     expect(voided.body).toMatchObject({ status: 'voided', voidReason: '打错了' });
     expect((await claim(coster, { paySource: 'petty', advanceId: a.id })).body.error.code).toBe('ADVANCE_VOIDED');
     expect((await settle(coster, a.id, 'return', 100)).body.error.code).toBe('ADVANCE_VOIDED');
@@ -300,6 +309,7 @@ describe('现付供应商与按采购单报销', () => {
       docDate: today,
       supplierId,
       purchaseOrderId: po.id,
+      coAcceptorId: buyerId,
       lines: [{ materialId: mat.id, poLineId: po.lines[0]!.id, deliveredMilli: q(accepted), acceptedMilli: q(accepted) }],
     });
 
@@ -331,10 +341,15 @@ describe('现付供应商与按采购单报销', () => {
     expect(ok.status).toBe(201);
     expect(ok.body.claim).toMatchObject({ status: 'confirmed', purchaseOrder: { id: po.id, docNo: po.docNo } });
     expect((await byPo({ diffReason: '另一箱下周到' })).body.error.code).toBe('PO_LINE_CLAIMED');
+    // 已按采购单报销的收货单不能冲销（到货数量取自收货），先冲销报销（测试服回归报告，v0.7.11）
+    const blocked = await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${rc.body.doc.id}/void`, { reason: '测试冲销' });
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error.code).toBe('NOT_VOIDABLE');
+    expect(blocked.body.error.message).toContain(ok.body.claim.docNo);
     expect((await api(ctx.app, coster, 'GET', `/api/erp/expenses/po/${po.id}`)).body.lines[0].claimedBy).toBe(ok.body.claim.docNo);
 
     // 冲销后可以重新报
-    await api(ctx.app, approver, 'POST', `/api/erp/expenses/${ok.body.claim.id}/void`, { reason: '金额登记错了' });
+    await api(ctx.app, coster, 'POST', `/api/erp/expenses/${ok.body.claim.id}/void`, { reason: '金额登记错了' });
     expect((await byPo({ diffReason: '另一箱下周到', amountCents: 90_000 })).status).toBe(201);
 
     // 现付收货的退货也不记应付扣款

@@ -15,6 +15,8 @@ let approver: string;
 let today: string;
 let deptId: number;
 let supplierId: number;
+/** 采购经办（收货时一起验收，#17） */
+let buyerId: number;
 
 const q = (n: number) => Math.round(n * 1000);
 
@@ -47,6 +49,32 @@ async function stockOf(id: number) {
   return res.body.stockMilli as number;
 }
 
+/** 已确认的采购单（v0.7.11 起收货必须按采购单，#19）：店主建单并确认 */
+async function approvedPo(materialId: number, purchaseQtyMilli: number, priceCents: number) {
+  const res = await api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', {
+    clientKey: randomUUID(),
+    supplierId,
+    orderDate: today,
+    approveNow: true,
+    lines: [{ materialId, purchaseQtyMilli, priceCents }],
+  });
+  if (res.status !== 201) throw new Error(`${res.status} ${JSON.stringify(res.body)}`);
+  expect(res.body.po.status).toBe('approved');
+  return res.body.po as { id: number; lines: { id: number; materialId: number }[] };
+}
+
+/** 按采购单收货（一起验收的是采购经办） */
+function receiptBody(po: { id: number; lines: { id: number; materialId: number }[] }, line: Record<string, unknown>, extra: Record<string, unknown> = {}) {
+  return {
+    docType: 'receipt',
+    supplierId,
+    purchaseOrderId: po.id,
+    coAcceptorId: buyerId,
+    lines: [{ materialId: po.lines[0]!.materialId, poLineId: po.lines[0]!.id, ...line }],
+    ...extra,
+  };
+}
+
 async function opening(materialId: number, qtyMilli: number) {
   const d = await okDoc(ctx.owner, { docType: 'opening', approveNow: true, lines: [{ materialId, qtyMilli }] });
   expect(d.status).toBe('confirmed');
@@ -58,6 +86,7 @@ beforeAll(async () => {
   today = todayIn(ctx.config.timezone);
   await createStaff(ctx.sql, { username: 'keeper', displayName: '物资小林', role: 'backoffice', duties: ['stock'], password: PASSWORD, mustChangePassword: false });
   await createStaff(ctx.sql, { username: 'boss2', displayName: '负责人老周', role: 'backoffice', duties: ['approve'], password: PASSWORD, mustChangePassword: false });
+  buyerId = await createStaff(ctx.sql, { username: 'buyer1', displayName: '采购小陈', role: 'backoffice', duties: ['purchase'], password: PASSWORD, mustChangePassword: false });
   keeper = await login(ctx.app, 'keeper');
   approver = await login(ctx.app, 'boss2');
   const deps = await api(ctx.app, ctx.owner, 'GET', '/api/inventory/departments');
@@ -74,24 +103,21 @@ describe('核心案例（库存部分）：拖鞋 箱入双出、拒收、领用
     await opening(slipper.id, q(100));
     expect(await stockOf(slipper.id)).toBe(q(100));
 
-    // 首批到 10 箱，验收 8 箱、拒收 2 箱：拒收部分不入库、不计货款
+    // 采购单 10 箱（每箱 100 双、180 元）；首批到 10 箱，验收 8 箱、拒收 2 箱：拒收部分不入库、不计货款
+    const po = await approvedPo(slipper.id, q(10), 18000);
     const r1 = await okDoc(keeper, {
-      docType: 'receipt',
-      supplierId,
+      ...receiptBody(po, { deliveredMilli: q(1000), acceptedMilli: q(800), rejectReason: '外箱压损受潮' }),
       handler: '小林',
-      lines: [{ materialId: slipper.id, deliveredMilli: q(1000), acceptedMilli: q(800), rejectReason: '外箱压损受潮', priceCents: 18000 }],
     });
     expect(r1.status).toBe('confirmed');
-    expect(r1.noPo).toBe(true);
+    expect(r1.noPo).toBe(false);
+    expect(r1.coAcceptor.id).toBe(buyerId);
+    expect(r1.warehouse).toMatchObject({ id: 1, kind: 'central' });
     expect(r1.amountCents).toBe(144000);
     expect(r1.lines[0].rejectedMilli).toBe(q(200));
     expect(await stockOf(slipper.id)).toBe(q(900));
 
-    const r2 = await okDoc(keeper, {
-      docType: 'receipt',
-      supplierId,
-      lines: [{ materialId: slipper.id, deliveredMilli: q(200), acceptedMilli: q(200), priceCents: 18000 }],
-    });
+    const r2 = await okDoc(keeper, receiptBody(po, { deliveredMilli: q(200), acceptedMilli: q(200) }));
     expect(r2.amountCents).toBe(36000);
     expect(await stockOf(slipper.id)).toBe(q(1100));
 
@@ -171,7 +197,8 @@ describe('包装换算与退回', () => {
   it('饮用水箱入瓶出：退回 12 瓶、报损 4 瓶', async () => {
     const water = await material('M018', { name: '瓶装饮用水', inventoryUnit: '瓶', purchaseUnit: '箱', purchaseFactorMilli: q(24) });
     await opening(water.id, q(48));
-    await okDoc(keeper, { docType: 'receipt', supplierId, lines: [{ materialId: water.id, deliveredMilli: q(240), acceptedMilli: q(240), priceCents: 3600 }] });
+    const waterPo = await approvedPo(water.id, q(10), 3600);
+    await okDoc(keeper, receiptBody(waterPo, { deliveredMilli: q(240), acceptedMilli: q(240) }));
     // 按箱录入 9 箱 = 216 瓶；录入数量与换算不一致会被拒绝
     const bad = await doc(keeper, {
       docType: 'issue',
@@ -248,16 +275,16 @@ describe('期初、库存不足与冲销', () => {
 
     const issue = await okDoc(keeper, { docType: 'issue', departmentId: deptId, handler: '浴区', lines: [{ materialId: m.id, qtyMilli: q(6) }] });
     expect(await stockOf(m.id)).toBe(q(4));
-    // 冲销需要负责人
-    const denied = await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${issue.id}/void`, { reason: '部门选错' });
+    // #21：库存冲销由仓库（物资经办）或财务成本岗做，负责人不再冲销（v0.7.11）
+    const denied = await api(ctx.app, approver, 'POST', `/api/inventory/docs/${issue.id}/void`, { reason: '部门选错' });
     expect(denied.status).toBe(403);
-    const v = await api(ctx.app, approver, 'POST', `/api/inventory/docs/${issue.id}/void`, { reason: '部门选错' });
+    const v = await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${issue.id}/void`, { reason: '部门选错' });
     expect(v.status).toBe(200);
     expect(v.body.status).toBe('voided');
     expect(v.body.voidReason).toBe('部门选错');
     expect(await stockOf(m.id)).toBe(q(10));
     // 再次冲销幂等，不再反向
-    const v2 = await api(ctx.app, approver, 'POST', `/api/inventory/docs/${issue.id}/void`, { reason: '部门选错' });
+    const v2 = await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${issue.id}/void`, { reason: '部门选错' });
     expect(v2.status).toBe(200);
     expect(await stockOf(m.id)).toBe(q(10));
     // 已冲销的领用单不能再退回

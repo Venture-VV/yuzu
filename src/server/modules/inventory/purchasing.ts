@@ -18,7 +18,7 @@ import type { Actor, Deps } from '../../lib/context';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
 import { lockOpKey } from '../../lib/fences';
 import { idParam, parse } from '../../lib/validate';
-import { assertNotFuture, docDateSchema, loadInventorySettings, logApproval, nextDocNo, priceBaseline, setTxTimeouts, todayIn } from './common';
+import { assertNotFuture, canOperateDept, docDateSchema, loadInventorySettings, logApproval, nextDocNo, priceBaseline, setTxTimeouts, todayIn } from './common';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -394,7 +394,7 @@ async function lockPo(tx: Tx, poId: number): Promise<PoRow> {
   return po;
 }
 
-async function approveLocked(tx: Tx, po: PoRow, actor: Actor) {
+async function approveLocked(tx: Tx, po: PoRow, actor: Actor, reason = '') {
   if (po.backfill && po.backfillReceiptId) {
     // 补单：把原收货单关联到这张采购单。只建立关联，不新增库存流水或应付
     const [rc] = await tx<{ status: string; purchaseOrderId: number | null; supplierId: number }[]>`
@@ -416,16 +416,19 @@ async function approveLocked(tx: Tx, po: PoRow, actor: Actor) {
   await tx`
     UPDATE purchase_orders SET status = 'approved', approved_by = ${actor.id}, approved_at = now(), returned_reason = NULL, updated_at = now()
     WHERE id = ${po.id}`;
-  await logApproval(tx, 'purchase_order', po.id, 'approve', actor.id, '', po.revision);
+  await logApproval(tx, 'purchase_order', po.id, 'approve', actor.id, reason, po.revision);
 }
 
-async function submitLocked(tx: Tx, po: PoRow, actor: Actor, approveNow: boolean) {
+/** deptConfirm：急采的补单由本部门自己确认（#19，v0.7.11），不走负责人确认 */
+async function submitLocked(tx: Tx, po: PoRow, actor: Actor, approveNow: boolean, deptConfirm = false) {
   if (po.status === 'submitted' || po.status === 'approved') return;
   if (po.status !== 'draft' && po.status !== 'returned') throw conflict('INVALID_STATE', '采购单当前状态不能提交');
   await tx`UPDATE purchase_orders SET status = 'submitted', submitted_by = ${actor.id}, submitted_at = now(), updated_at = now() WHERE id = ${po.id}`;
   await logApproval(tx, 'purchase_order', po.id, 'submit', actor.id, '', po.revision);
   const rules = (await loadInventorySettings(tx)).approvalRules;
-  if (!rules.purchase_order) {
+  if (deptConfirm) {
+    await approveLocked(tx, { ...po, status: 'submitted' }, actor, '急采补单，部门确认');
+  } else if (!rules.purchase_order) {
     await approveLocked(tx, { ...po, status: 'submitted' }, actor);
   } else if (approveNow) {
     if (!can(actor, 'inventory.approve')) throw forbidden('当前账号不能确认采购单，请提交给负责人');
@@ -435,13 +438,13 @@ async function submitLocked(tx: Tx, po: PoRow, actor: Actor, approveNow: boolean
 
 const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 
-export async function createPo(deps: Deps, raw: unknown, actor: Actor, opts: { backfillReceiptId?: number; ip?: string } = {}) {
+export async function createPo(deps: Deps, raw: unknown, actor: Actor, opts: { backfillReceiptId?: number; ip?: string; deptConfirm?: boolean } = {}) {
   const meta = parse(CreateInput, raw);
   const body = parse(PoBody, raw);
   if (meta.approveNow && !can(actor, 'inventory.approve')) throw forbidden('当前账号不能确认采购单，请提交给负责人');
   assertNotFuture(body.orderDate, deps.config.timezone);
   if (body.expectedDate && body.expectedDate < body.orderDate) throw badRequest('预计到货日期不能早于下单日期');
-  const requestHash = hashRequest({ ...body, ...meta, clientKey: undefined, backfill: opts.backfillReceiptId ?? null });
+  const requestHash = hashRequest({ ...body, ...meta, clientKey: undefined, backfill: opts.backfillReceiptId ?? null, deptConfirm: !!opts.deptConfirm });
   const findExisting = async (db: Db) => {
     const [row] = await db<{ opType: string; requestHash: string; refId: number }[]>`
       SELECT op_type, request_hash, ref_id FROM idempotency_keys WHERE key = ${meta.clientKey}`;
@@ -478,8 +481,15 @@ export async function createPo(deps: Deps, raw: unknown, actor: Actor, opts: { b
         INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id)
         VALUES (${meta.clientKey}, 'purchase_order', ${requestHash}, ${newId}, ${actor.id})`;
       await logApproval(tx, 'purchase_order', newId, 'create', actor.id, '', 1);
-      if (meta.action === 'submit') await submitLocked(tx, await lockPo(tx, newId), actor, meta.approveNow);
-      await writeAudit(tx, { staffId: actor.id, action: 'purchase_order', targetType: 'purchase_order', targetId: newId, detail: { docNo, action: meta.action, backfill: !!opts.backfillReceiptId }, ip: opts.ip });
+      if (meta.action === 'submit') await submitLocked(tx, await lockPo(tx, newId), actor, meta.approveNow, opts.deptConfirm);
+      await writeAudit(tx, {
+        staffId: actor.id,
+        action: 'purchase_order',
+        targetType: 'purchase_order',
+        targetId: newId,
+        detail: { docNo, action: meta.action, backfill: !!opts.backfillReceiptId, deptConfirm: !!opts.deptConfirm },
+        ip: opts.ip,
+      });
       return { id: newId, replayed: false };
     });
     poId = r.id;
@@ -606,12 +616,21 @@ export async function closePo(deps: Deps, poId: number, raw: unknown, actor: Act
   return getPo(deps.sql, poId);
 }
 
-/** 按直接收货单生成补单采购单（数量、价格取自收货单，不再入库或计款） */
-export async function backfillPo(deps: Deps, raw: unknown, actor: Actor, ip?: string) {
+/**
+ * 按直接收货单（迁移 029 以前）或急采生成补单采购单（数量、价格取自收货单，不再入库或计款）。
+ * dept：急采由本部门的部门申购补单并自己确认（#19，v0.7.11）。
+ */
+export async function backfillPo(deps: Deps, raw: unknown, actor: Actor, ip?: string, opts: { dept?: boolean } = {}) {
   const input = parse(z.object({ receiptDocId: id, clientKey: z.uuid(), approveNow: z.boolean().default(false), note: z.string().trim().max(200).default('') }), raw);
-  const [rc] = await deps.sql<{ id: number; docType: string; status: string; supplierId: number; docDate: string; purchaseOrderId: number | null; docNo: string }[]>`
-    SELECT id, doc_type, status, supplier_id, doc_date, purchase_order_id, doc_no FROM inv_docs WHERE id = ${input.receiptDocId}`;
+  const [rc] = await deps.sql<{ id: number; docType: string; status: string; supplierId: number; docDate: string; purchaseOrderId: number | null; docNo: string; urgent: boolean; departmentId: number | null }[]>`
+    SELECT d.id, d.doc_type, d.status, d.supplier_id, d.doc_date, d.purchase_order_id, d.doc_no, d.urgent, w.department_id
+    FROM inv_docs d LEFT JOIN warehouses w ON w.id = d.warehouse_id WHERE d.id = ${input.receiptDocId}`;
   if (!rc || rc.docType !== 'receipt') throw notFound('收货单不存在');
+  if (opts.dept) {
+    if (!rc.urgent) throw unprocessable('BACKFILL_NOT_URGENT', '部门只能给本部门的急采补单');
+    if (!(await canOperateDept(deps.sql, actor, rc.departmentId))) throw forbidden('只有急采部门的部门申购可以补单');
+    if (input.approveNow) throw badRequest('部门补单会直接由部门确认，不用再选「提交并确认」');
+  }
   if (rc.status !== 'confirmed') throw unprocessable('BACKFILL_SOURCE_INVALID', '只有已生效的收货单可以补采购单');
   if (rc.purchaseOrderId) throw unprocessable('BACKFILL_LINKED', '这张收货单已关联采购单');
   const lines = await deps.sql<{ materialId: number; qtyMilli: number; factorMilli: number; priceCents: number; purchaseUnit: string }[]>`
@@ -624,9 +643,17 @@ export async function backfillPo(deps: Deps, raw: unknown, actor: Actor, ip?: st
   });
   return createPo(
     deps,
-    { clientKey: input.clientKey, supplierId: rc.supplierId, orderDate: rc.docDate, note: input.note || `补单：${rc.docNo}`, lines: poLines, action: 'submit', approveNow: input.approveNow },
+    {
+      clientKey: input.clientKey,
+      supplierId: rc.supplierId,
+      orderDate: rc.docDate,
+      note: input.note || `${rc.urgent ? '急采补单' : '补单'}：${rc.docNo}`,
+      lines: poLines,
+      action: 'submit',
+      approveNow: input.approveNow,
+    },
     actor,
-    { backfillReceiptId: rc.id, ip },
+    { backfillReceiptId: rc.id, ip, deptConfirm: opts.dept },
   );
 }
 

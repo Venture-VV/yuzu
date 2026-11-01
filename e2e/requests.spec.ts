@@ -107,6 +107,49 @@ test.describe('部门采购需求单', () => {
     }
   });
 
+  // 测试会话 v0.7.10 的提示：图片还在上传时表单不能提交（否则提交的是上传前的图片，v0.7.9 修正）
+  test('图片还在上传时不能提交；上传完成后才能提交，提交的需求单带上这张图片', async ({ page }) => {
+    await login(page, 'linlan');
+    const dept = await department(page);
+    const name = `E2E 慢上传${String(Date.now()).slice(-6)}`;
+    await page.goto('/erp/requests/new');
+    await expect(page.getByTestId('request-form')).toBeVisible();
+    await page.getByTestId('rq-dept').selectOption(String(dept.id));
+    await page.getByTestId('rq-name-0').fill(name);
+    await page.getByTestId('rq-purpose-0').selectOption('客用消耗');
+    await page.getByTestId('rq-qty-0').fill('3');
+    await page.getByTestId('rq-unit-0').fill('个');
+    await page.getByTestId('rq-link-0').fill('https://example.com/e2e-slow-upload');
+    // 拦住图片上传，等断言完再放行
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let seen = false;
+    await page.route('**/api/erp/images', async (route) => {
+      seen = true;
+      await gate;
+      await route.continue();
+    });
+    try {
+      await page.getByTestId('rq-images-0-input').setInputFiles({ name: 'slow.png', mimeType: 'image/png', buffer: PNG });
+      await expect.poll(() => seen).toBe(true);
+      await expect(page.getByText('图片还在上传，请稍等')).toBeVisible();
+      await expect(page.getByTestId('rq-submit')).toBeDisabled();
+      await expect(page.getByRole('button', { name: '上传中' })).toBeVisible();
+    } finally {
+      release();
+    }
+    await expect(page.getByLabel('删除图片 1')).toBeVisible();
+    await expect(page.getByText('图片还在上传，请稍等')).toHaveCount(0);
+    await expect(page.getByTestId('rq-submit')).toBeEnabled();
+    await page.unroute('**/api/erp/images');
+    await page.getByTestId('rq-submit').click();
+    await expect(page).toHaveURL(/\/erp\/requests\?request=\d+/);
+    const requestId = Number(new URL(page.url()).searchParams.get('request'));
+    const saved = (await (await page.request.get(`/api/erp/requests/${requestId}`)).json()) as { lines: { name: string; images: unknown[] }[] };
+    expect(saved.lines[0]).toMatchObject({ name });
+    expect(saved.lines[0]!.images).toHaveLength(1);
+  });
+
   test('报销登记断网：响应丢了自动查回只登记一次；请求没发出去，刷新后按原内容重新提交只登记一次', async ({ page }) => {
     await login(page, 'linlan');
     const dept = await department(page);

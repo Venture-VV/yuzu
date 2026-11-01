@@ -31,7 +31,7 @@ export function MasterTab() {
           options={[
             { value: 'materials', label: '物料' },
             { value: 'suppliers', label: '供应商' },
-            { value: 'departments', label: '领用部门' },
+            { value: 'departments', label: '部门' },
           ]}
         />
         <p className="text-[12.5px] text-ink-3">档案停用而不删除，历史单据始终可追溯。{!editable && '维护档案需要采购经办职责。'}</p>
@@ -140,7 +140,8 @@ export function MaterialDialog({
     setError(null);
   }
   const m = editing && editing !== 'new' ? editing : null;
-  const unitLocked = !!m?.hasMoves;
+  // 任何一个仓有流水（部门小仓的期初、急采也算）就不能再改库存单位与精度（v0.7.11）
+  const unitLocked = !!m?.anyMoves;
   const set = (p: Partial<typeof form>) => setForm((f) => ({ ...f, ...p }));
   const decimals = Number(form.decimals);
   const factor = parseQty(form.factor, decimals);
@@ -474,7 +475,7 @@ function Departments({ editable }: { editable: boolean }) {
   };
   return (
     <div className="max-w-xl">
-      <p className="mb-3 text-[12.5px] text-ink-3">领用部门是物资的去向。部门领走后的实际使用不再扣总库库存。</p>
+      <p className="mb-3 text-[12.5px] text-ink-3">每个部门有一个小仓（新建部门时自动建）：仓库登记领料进部门小仓，部门在「本部门小仓」签收、耗用、盘点。停用部门前要先把它的小仓清空（退回总仓或盘点到 0）。</p>
       <ul className="divide-y divide-line/70 rounded-lg border border-line bg-card shadow-card">
         {departments.data?.map((d) => (
           <li key={d.id} className={cn('flex items-center gap-3 px-4 py-2.5', !d.active && 'opacity-55')}>

@@ -101,7 +101,8 @@ function progressOf(p: RawProgress | null): RequestLineProgress {
     returnedMilli: Number(p.returnedMilli),
     inventoryUnit: p.inventoryUnit,
     mergedLines: Number(p.mergedLines),
-    state: received <= 0 ? 'ordered' : received >= ordered ? 'received' : 'partial',
+    // 采购单关闭后没到齐的不再到：不再挂在「已下单 / 部分到货」（测试服回归报告，店主确认）
+    state: received >= ordered ? 'received' : p.status === 'closed' ? 'closed' : received <= 0 ? 'ordered' : 'partial',
   };
 }
 
@@ -323,7 +324,7 @@ async function lockRequest(tx: Db, requestId: number) {
 }
 
 /** 提交后、退回后由提单人修改（整单替换明细），改完回到待审核 */
-export async function updateRequest(deps: Deps, requestId: number, raw: unknown, actor: Actor) {
+export async function updateRequest(deps: Deps, requestId: number, raw: unknown, actor: Actor, ip?: string) {
   const input = parse(BodyInput, raw);
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
@@ -338,11 +339,11 @@ export async function updateRequest(deps: Deps, requestId: number, raw: unknown,
     await tx`UPDATE purchase_requests SET need_by = ${input.needBy}, note = ${input.note}, status = 'submitted', reason = NULL, updated_at = now() WHERE id = ${requestId}`;
     await logApproval(tx, 'purchase_request', requestId, r.status === 'returned' ? 'submit' : 'revise', actor.id);
   });
-  await writeAudit(deps.sql, { staffId: actor.id, action: 'purchase_request', targetType: 'purchase_request', targetId: requestId, detail: { action: 'update' } });
+  await writeAudit(deps.sql, { staffId: actor.id, action: 'purchase_request', targetType: 'purchase_request', targetId: requestId, detail: { action: 'update' }, ip });
   return getRequest(deps.sql, actor, requestId);
 }
 
-export async function actOnRequest(deps: Deps, requestId: number, action: 'approve' | 'return' | 'reject' | 'cancel', raw: unknown, actor: Actor) {
+export async function actOnRequest(deps: Deps, requestId: number, action: 'approve' | 'return' | 'reject' | 'cancel', raw: unknown, actor: Actor, ip?: string) {
   const reason = action === 'approve' ? '' : parse(ReasonInput, raw).reason;
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
@@ -374,7 +375,7 @@ export async function actOnRequest(deps: Deps, requestId: number, action: 'appro
         return logApproval(tx, 'purchase_request', requestId, 'cancel', actor.id, reason);
     }
   });
-  await writeAudit(deps.sql, { staffId: actor.id, action: 'purchase_request', targetType: 'purchase_request', targetId: requestId, detail: { action, reason } });
+  await writeAudit(deps.sql, { staffId: actor.id, action: 'purchase_request', targetType: 'purchase_request', targetId: requestId, detail: { action, reason }, ip });
   return getRequest(deps.sql, actor, requestId);
 }
 
@@ -446,7 +447,7 @@ export async function requestChecks(db: Db) {
 // ───────────────────────── 导出（v0.7.9） ─────────────────────────
 
 const EXPORT_LIMIT = 20_000;
-const PROGRESS_LABELS: Record<RequestLineProgress['state'], string> = { none: '未下单', ordered: '已下单', partial: '部分到货', received: '已到货' };
+const PROGRESS_LABELS: Record<RequestLineProgress['state'], string> = { none: '未下单', ordered: '已下单', partial: '部分到货', received: '已到货', closed: '采购单已关闭' };
 
 /** 需求单导出：每一行需求一行，带下单 / 到货 / 退货与采购单号。能导出的是有「导出费用」权限的人（店主、对账付款、成本核算、负责人），导出全部部门 */
 async function requestsCsv(db: Db, timezone: string, f: { from: string; to: string; status?: RequestStatus; departmentId?: number }) {
@@ -571,11 +572,11 @@ export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
     if (!r.replayed) reply.code(201);
     return r;
   });
-  app.put('/api/erp/requests/:id', { preHandler: guardAny('request.create') }, async (req) => updateRequest(deps, docId(req), req.body, req.actor));
+  app.put('/api/erp/requests/:id', { preHandler: guardAny('request.create') }, async (req) => updateRequest(deps, docId(req), req.body, req.actor, req.ip));
   for (const action of ['approve', 'return', 'reject'] as const) {
-    app.post(`/api/erp/requests/:id/${action}`, { preHandler: guardAny('request.review') }, async (req) => actOnRequest(deps, docId(req), action, req.body, req.actor));
+    app.post(`/api/erp/requests/:id/${action}`, { preHandler: guardAny('request.review') }, async (req) => actOnRequest(deps, docId(req), action, req.body, req.actor, req.ip));
   }
-  app.post('/api/erp/requests/:id/cancel', { preHandler: guardAny('request.create') }, async (req) => actOnRequest(deps, docId(req), 'cancel', req.body, req.actor));
+  app.post('/api/erp/requests/:id/cancel', { preHandler: guardAny('request.create') }, async (req) => actOnRequest(deps, docId(req), 'cancel', req.body, req.actor, req.ip));
 
   // 图片：上传（压缩后的 Base64，单张不超过 1 MB）与查看（要登录、要有需求单或库存采购的查看权限）
   app.post('/api/erp/images', { preHandler: guardAny('request.create', 'request.review', 'purchase.manage'), bodyLimit: 1_600_000 }, async (req, reply) => {

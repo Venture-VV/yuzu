@@ -9,7 +9,7 @@ import { Money } from '../../components/Money';
 import { Badge, Input, Notice, Select, Skeleton } from '../../components/ui';
 import { DocSheet } from './DocSheet';
 import { DocTypeChip, StatusChip } from './parts';
-import { useInvDocs } from './queries';
+import { useInvDocs, useWarehouses } from './queries';
 
 export function DocsTab() {
   const [params, setParams] = useSearchParams();
@@ -20,7 +20,13 @@ export function DocsTab() {
     from: params.get('from') ?? undefined,
     to: params.get('to') ?? undefined,
     q: params.get('q') ?? undefined,
+    // v0.7.11：按仓、急采、未签收的领料（工作台的待办链接带过来）
+    warehouseId: params.get('warehouseId') ?? undefined,
+    urgent: params.get('urgent') ?? undefined,
+    unsigned: params.get('unsigned') ?? undefined,
   };
+  const warehouses = useWarehouses();
+  const centralName = warehouses.data?.find((w) => w.kind === 'central')?.name;
   const docs = useInvDocs(filter);
   const openId = Number(params.get('doc')) || null;
 
@@ -60,6 +66,26 @@ export function DocsTab() {
             </option>
           ))}
         </Select>
+        {(warehouses.data?.length ?? 0) > 1 && (
+          <Select fullWidth={false} value={filter.warehouseId ?? ''} onChange={(e) => update({ warehouseId: e.target.value || null })} className="h-9 min-w-[128px] text-[13px]" aria-label="仓库">
+            <option value="">全部仓库</option>
+            {warehouses.data!.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.kind === 'central' ? `总仓 · ${w.name}` : w.name}
+              </option>
+            ))}
+          </Select>
+        )}
+        {(filter.urgent || filter.unsigned) && (
+          <button
+            type="button"
+            onClick={() => update({ urgent: null, unsigned: null })}
+            className="flex h-9 items-center gap-1 rounded-full bg-yuzu-soft px-3 text-[12.5px] font-bold text-yuzu-deep"
+            aria-label="清除筛选"
+          >
+            {filter.urgent ? '只看急采' : '只看部门没签收的领料'} ×
+          </button>
+        )}
         <span className="flex items-center gap-1.5 text-[13px] text-ink-3">
           <Input fullWidth={false} type="date" value={filter.from ?? ''} onChange={(e) => update({ from: e.target.value || null })} className="h-9 w-[150px] text-[13px]" aria-label="开始日期" />
           至
@@ -115,7 +141,13 @@ export function DocsTab() {
                         <DocTypeChip type={d.docType as InvDocType} />
                       </span>
                       {d.partyName && <span className="truncate text-[13px] font-semibold">{d.partyName}</span>}
-                      {d.noPo && d.docType === 'receipt' && <Badge tone="ember">缺少采购依据</Badge>}
+                      {d.noPo && d.docType === 'receipt' && !d.urgent && <Badge tone="ember">缺少采购依据</Badge>}
+                      {d.urgent && <Badge tone="yuzu">急采</Badge>}
+                      {d.needsBackfill && <Badge tone="clay">待补采购单</Badge>}
+                      {d.deptSigned === false && <Badge tone="yuzu">待签收</Badge>}
+                      {d.warehouseName && d.docType !== 'issue' && d.docType !== 'issue_return' && d.warehouseName !== centralName && (
+                        <Badge tone="lake">{d.warehouseName}</Badge>
+                      )}
                     </span>
                     <span className="block truncate text-[12.5px] text-ink-3">
                       {d.summary}

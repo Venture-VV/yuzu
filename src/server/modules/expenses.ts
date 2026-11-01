@@ -46,7 +46,7 @@ import { assertNotFenced, lockOpKey } from '../lib/fences';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse, positiveCents } from '../lib/validate';
 import { erpOpAbandoned } from './erp-ops';
-import { assertNotFuture, docDateSchema, logApproval, nextDocNo, poSettlement, setTxTimeouts, todayIn } from './inventory/common';
+import { assertNotFuture, assertSameMonth, docDateSchema, logApproval, nextDocNo, poSettlement, setTxTimeouts, todayIn } from './inventory/common';
 
 const id = z.number().int().positive();
 const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
@@ -559,7 +559,8 @@ export async function actOnClaim(deps: Deps, claimId: number, action: 'approve' 
     const [head] = await tx<{ advanceId: number | null }[]>`SELECT advance_id FROM expense_claims WHERE id = ${claimId}`;
     if (!head) throw notFound('报销单不存在');
     const advance = head.advanceId ? await lockAdvance(tx, head.advanceId) : null;
-    const [c] = await tx<{ id: number; status: ClaimStatus; createdBy: number }[]>`SELECT id, status, created_by FROM expense_claims WHERE id = ${claimId} FOR UPDATE`;
+    const [c] = await tx<{ id: number; status: ClaimStatus; createdBy: number; expenseDate: string }[]>`
+      SELECT id, status, created_by, expense_date FROM expense_claims WHERE id = ${claimId} FOR UPDATE`;
     const mine = c!.createdBy === actor.id;
     switch (action) {
       case 'approve':
@@ -582,13 +583,15 @@ export async function actOnClaim(deps: Deps, claimId: number, action: 'approve' 
         return logApproval(tx, 'expense_claim', claimId, 'submit', actor.id);
       case 'cancel':
         if (c!.status === 'cancelled') return;
-        if (c!.status !== 'submitted' && c!.status !== 'returned') throw conflict('INVALID_STATE', '已确认的报销不能撤回，只能由负责人冲销');
+        if (c!.status !== 'submitted' && c!.status !== 'returned') throw conflict('INVALID_STATE', '已确认的报销不能撤回，只能由财务冲销');
         if (!mine && !can(actor, 'expense.approve')) throw forbidden('只能撤回自己登记的报销');
         await tx`UPDATE expense_claims SET status = 'cancelled', returned_reason = ${reason}, updated_at = now() WHERE id = ${claimId}`;
         return logApproval(tx, 'expense_claim', claimId, 'cancel', actor.id, reason);
       case 'void':
         if (c!.status === 'voided') return;
         if (c!.status !== 'confirmed') throw conflict('INVALID_STATE', '只有已确认的报销可以冲销');
+        // #21：当月发生的当月冲销完（v0.7.11）
+        assertSameMonth(c!.expenseDate, deps.config.timezone, '报销的费用');
         await tx`UPDATE expense_claims SET status = 'voided', voided_by = ${actor.id}, voided_at = now(), void_reason = ${reason}, updated_at = now() WHERE id = ${claimId}`;
         return logApproval(tx, 'expense_claim', claimId, 'void', actor.id, reason);
     }
@@ -715,6 +718,7 @@ export async function voidAdvance(deps: Deps, advanceId: number, raw: unknown, a
     await setTxTimeouts(tx);
     const a = await lockAdvance(tx, advanceId);
     if (a.status === 'voided') return;
+    assertSameMonth(a.advanceDate, deps.config.timezone, '打款');
     const [used] = await tx<{ claims: number; settlements: number }[]>`
       SELECT (SELECT count(*) FROM expense_claims WHERE advance_id = ${advanceId} AND status IN ${tx(ACTIVE_CLAIM)})::int AS claims,
              (SELECT count(*) FROM petty_settlements WHERE advance_id = ${advanceId} AND status = 'active')::int AS settlements`;
@@ -735,8 +739,10 @@ export async function voidSettlement(deps: Deps, settlementId: number, raw: unkn
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     await lockAdvance(tx, head.advanceId);
-    const [s] = await tx<{ status: string }[]>`SELECT status FROM petty_settlements WHERE id = ${settlementId} FOR UPDATE`;
+    const [s] = await tx<{ status: string; kind: 'return' | 'topup'; settleDate: string }[]>`
+      SELECT status, kind, settle_date FROM petty_settlements WHERE id = ${settlementId} FOR UPDATE`;
     if (s!.status === 'voided') return;
+    assertSameMonth(s!.settleDate, deps.config.timezone, s!.kind === 'return' ? '退回' : '补付');
     await tx`UPDATE petty_settlements SET status = 'voided', voided_by = ${actor.id}, voided_at = now(), void_reason = ${reason} WHERE id = ${settlementId}`;
     await logApproval(tx, 'petty_settlement', settlementId, 'void', actor.id, reason);
   });
@@ -992,7 +998,10 @@ export function registerExpenseRoutes(app: FastifyInstance, deps: Deps) {
     return r;
   });
   for (const action of ['approve', 'return', 'void'] as const) {
-    app.post(`/api/erp/expenses/:id/${action}`, { preHandler: guard('expense.approve') }, async (req) => actOnClaim(deps, docId(req), action, req.body, req.actor));
+    // #21：账务冲销由财务（对账付款、成本核算）负责，只限当月（v0.7.11）
+    app.post(`/api/erp/expenses/:id/${action}`, { preHandler: guard(action === 'void' ? 'finance.void' : 'expense.approve') }, async (req) =>
+      actOnClaim(deps, docId(req), action, req.body, req.actor),
+    );
   }
   for (const action of ['resubmit', 'cancel'] as const) {
     app.post(`/api/erp/expenses/:id/${action}`, { preHandler: guard('expense.read') }, async (req) => {
@@ -1020,7 +1029,7 @@ export function registerExpenseRoutes(app: FastifyInstance, deps: Deps) {
     if (!r.replayed) reply.code(201);
     return r;
   });
-  app.post('/api/erp/petty/advances/:id/void', { preHandler: guard('expense.approve') }, async (req) => voidAdvance(deps, docId(req), req.body, req.actor));
+  app.post('/api/erp/petty/advances/:id/void', { preHandler: guard('finance.void') }, async (req) => voidAdvance(deps, docId(req), req.body, req.actor));
   app.get('/api/erp/petty/settlements/by-key/:key', { preHandler: guard('expense.read') }, async (req) => {
     const { key } = parse(keyParam, req.params);
     const [row] = await sql<{ advanceId: number; id: number }[]>`SELECT id, advance_id FROM petty_settlements WHERE client_key = ${key}`;
@@ -1032,7 +1041,7 @@ export function registerExpenseRoutes(app: FastifyInstance, deps: Deps) {
     if (!r.replayed) reply.code(201);
     return r;
   });
-  app.post('/api/erp/petty/settlements/:id/void', { preHandler: guard('expense.approve') }, async (req) => voidSettlement(deps, docId(req), req.body, req.actor));
+  app.post('/api/erp/petty/settlements/:id/void', { preHandler: guard('finance.void') }, async (req) => voidSettlement(deps, docId(req), req.body, req.actor));
   app.get('/api/erp/petty/daily', { preHandler: guard('expense.read') }, async (req) => {
     const f = parse(RangeQuery, req.query);
     checkRange(f.from, f.to);

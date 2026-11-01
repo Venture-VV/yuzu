@@ -26,6 +26,7 @@ const ACTION_LABELS: Record<PurchaseOrder['approvals'][number]['action'], string
   void: '冲销',
   close: '关闭',
   revise: '改版',
+  sign: '签收',
 };
 
 export function PoSheet({ id, onClose }: { id: number | null; onClose: () => void }) {

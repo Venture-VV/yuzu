@@ -8,8 +8,8 @@ export type InvDocType = (typeof INV_DOC_TYPES)[number];
 export const INV_DOC_META: Record<InvDocType, { title: string; prefix: string; verb: string; direction: 'in' | 'out' | 'both' }> = {
   opening: { title: '期初库存', prefix: 'QC', verb: '建立期初', direction: 'in' },
   receipt: { title: '收货入库', prefix: 'RK', verb: '收货', direction: 'in' },
-  issue: { title: '部门领用', prefix: 'LY', verb: '领用', direction: 'out' },
-  issue_return: { title: '领用退回', prefix: 'LT', verb: '退回', direction: 'in' },
+  issue: { title: '部门领料', prefix: 'LY', verb: '领料', direction: 'out' },
+  issue_return: { title: '领料退回', prefix: 'LT', verb: '退回', direction: 'in' },
   direct_use: { title: '直接耗用', prefix: 'HY', verb: '耗用', direction: 'out' },
   damage: { title: '报损', prefix: 'BS', verb: '报损', direction: 'out' },
   count: { title: '盘点', prefix: 'PD', verb: '盘点', direction: 'both' },
@@ -34,8 +34,8 @@ export type MoveType = (typeof MOVE_TYPES)[number];
 export const MOVE_TYPE_LABELS: Record<MoveType, string> = {
   opening: '期初',
   receipt: '收货入库',
-  issue: '部门领用',
-  issue_return: '领用退回',
+  issue: '部门领料',
+  issue_return: '领料退回',
   direct_use: '直接耗用',
   damage: '报损',
   count_adjust: '盘点调整',
@@ -43,8 +43,8 @@ export const MOVE_TYPE_LABELS: Record<MoveType, string> = {
   void: '冲销',
 };
 
-/** 盘点差异原因：确认前一律为「待核差异」，不自动认定为浪费或失窃 */
-export const COUNT_REASONS = ['unrecorded', 'measurement', 'damaged', 'unknown'] as const;
+/** 盘点差异原因：确认前一律为「待核差异」，不自动认定为浪费或失窃；部门小仓默认「耗用」（v0.7.11） */
+export const COUNT_REASONS = ['unrecorded', 'measurement', 'damaged', 'unknown', 'consumed'] as const;
 export type CountReason = (typeof COUNT_REASONS)[number];
 export const COUNT_REASON_LABELS: Record<CountReason | 'pending', string> = {
   pending: '待核差异',
@@ -52,7 +52,74 @@ export const COUNT_REASON_LABELS: Record<CountReason | 'pending', string> = {
   measurement: '计量错误',
   damaged: '损坏',
   unknown: '不明差异',
+  consumed: '耗用',
 };
+
+// ───────────────────────── 两级库存（v0.7.11，docs/WAREHOUSES.md） ─────────────────────────
+
+/** 总仓固定是 1 号仓；每个部门一个小仓 */
+export const CENTRAL_WAREHOUSE_ID = 1;
+
+export interface Warehouse {
+  id: number;
+  kind: 'central' | 'department';
+  departmentId: number | null;
+  /** 总仓用「库存范围名称」，部门小仓是「部门名 + 小仓」 */
+  name: string;
+  /** 部门停用后它的小仓也停用（停用前要清空） */
+  active: boolean;
+}
+
+/** 部门小仓里一个物料的结存 */
+export interface WarehouseStockRow {
+  materialId: number;
+  code: string;
+  name: string;
+  specification: string;
+  category: string;
+  inventoryUnit: string;
+  decimals: number;
+  stockMilli: number;
+  lastMoveAt: string | null;
+}
+
+/** 领料单的部门签收（#17 第二次验收） */
+export interface DeptSign {
+  signedByName: string;
+  signedAt: string;
+  note: string;
+}
+
+/** 领料超过这么多天没签收，在待办与自检里标出（待确认） */
+export const ISSUE_SIGN_DUE_DAYS = 3;
+
+/** 「本部门小仓」页面用的基础资料（部门的员工没有「查看库存」，这里只给需要的字段，不含参考价与总仓结存） */
+export interface DeptStockMeta {
+  /** 能看的部门：店主与成本岗是所有在用部门，部门申购只有自己所属的部门 */
+  departments: { id: number; name: string; warehouseId: number }[];
+  /** 员工档案里的所属部门 */
+  myDepartmentId: number | null;
+  /** 能登记本部门的急采、期初、报损、签收（部门申购或店主） */
+  canOperate: boolean;
+  /** 能给所有部门盘点、登记耗用（财务成本岗） */
+  canAudit: boolean;
+  urgentCapCents: number;
+  signDueDays: number;
+  /** 期初、报损要不要负责人确认（与库存规则一致） */
+  approvalRules: ApprovalRules;
+  materials: {
+    id: number;
+    code: string;
+    name: string;
+    category: string;
+    specification: string;
+    inventoryUnit: string;
+    decimals: number;
+    purchaseUnit: string;
+    purchaseFactorMilli: number;
+  }[];
+  suppliers: { id: number; code: string; name: string }[];
+}
 
 /** 需要负责人确认的单据（模拟规则，待店主确认）。盘点调整固定需要确认。 */
 export interface ApprovalRules {
@@ -74,7 +141,8 @@ export const APPROVAL_RULE_LABELS: Record<keyof ApprovalRules, string> = {
 export interface InventorySettings {
   scopeName: string;
   priceBasis: string;
-  allowDirectReceipt: boolean;
+  /** 急采上限（分，#19：默认 2000 元，可调）；没有采购单的收货只能走急采 */
+  urgentCapCents: number;
   approvalRules: ApprovalRules;
 }
 
@@ -114,11 +182,16 @@ export interface Material {
   lowStockMilli: number | null;
   tracked: boolean;
   active: boolean;
+  /** 总仓结存 */
   stockMilli: number;
-  /** 低于人工设定阈值 */
+  /** 各部门小仓合计（v0.7.11） */
+  deptStockMilli: number;
+  /** 总仓低于人工设定阈值 */
   isLow: boolean;
-  /** 已有库存流水（期初只能在没有流水时建立） */
+  /** 总仓已有库存流水（总仓的期初只能在没有流水时建立） */
   hasMoves: boolean;
+  /** 任何一个仓已有流水（库存单位、精度不能再改，也不能改成候选物料；v0.7.11） */
+  anyMoves: boolean;
   lastMoveAt: string | null;
   note: string;
   isSynthetic: boolean;
@@ -164,7 +237,7 @@ export interface InvDocLine {
   sourceLineId: number | null;
   /** 领用 / 收货行已被退回或退货的数量（已生效 + 待确认） */
   returnedMilli: number;
-  /** 当前库存（详情展示用） */
+  /** 单据所在仓的当前结存（详情展示用） */
   stockMilli: number;
   note: string;
   /** 收货行：与此前同口径成交价的比较 */
@@ -173,7 +246,7 @@ export interface InvDocLine {
 
 export interface ApprovalLog {
   id: number;
-  action: 'create' | 'submit' | 'approve' | 'return' | 'cancel' | 'void' | 'close' | 'revise';
+  action: 'create' | 'submit' | 'approve' | 'return' | 'cancel' | 'void' | 'close' | 'revise' | 'sign';
   actorName: string;
   reason: string;
   revision: number | null;
@@ -194,6 +267,15 @@ export interface InvDoc {
   note: string;
   amountCents: number;
   noPo: boolean;
+  /** 这张单动的仓；领料与退回是部门小仓（另一头是总仓）；迁移前的领料、退回为空（没进部门小仓） */
+  warehouse: { id: number; name: string; kind: Warehouse['kind'] } | null;
+  /** 急采收货（#19）：没有采购单，进部门小仓，合计不超过登记时的上限 */
+  urgent: boolean;
+  urgentCapCents: number | null;
+  /** 一起验收的采购经办（#17 第一次验收） */
+  coAcceptor: Ref | null;
+  /** 领料：部门签收（#17 第二次验收）；没签收为空 */
+  deptSign: DeptSign | null;
   createdBy: number;
   createdByName: string;
   createdAt: string;
@@ -225,9 +307,28 @@ export interface InvDocSummary {
   summary: string;
   amountCents: number;
   noPo: boolean;
+  warehouseName: string | null;
+  urgent: boolean;
+  /** 急采已生效、还没补采购单 */
+  needsBackfill: boolean;
+  /** 领料：部门是否已签收（其他单据为空） */
+  deptSigned: boolean | null;
   createdByName: string;
   createdAt: string;
 }
+
+/** 库存卡：一个物料在一个仓的流水（v0.7.11 起按仓） */
+export interface StockCard {
+  material: Material;
+  warehouse: { id: number; name: string; kind: Warehouse['kind'] };
+  /** 这个物料在各仓的结存：总仓在前，部门小仓只列有过收发的 */
+  balances: { warehouseId: number; name: string; kind: Warehouse['kind']; stockMilli: number }[];
+  moves: StockMoveRow[];
+  pending: { id: number; docNo: string; docType: InvDocType; status: InvDocStatus; docDate: string; qtyMilli: number }[];
+}
+
+/** 报表选的仓：某一个仓，或「全部合计」 */
+export type WarehouseSel = number | 'all';
 
 export interface StockMoveRow {
   id: number;
@@ -244,7 +345,10 @@ export interface StockMoveRow {
   note: string;
 }
 
-/** 期间收发汇总；出库类为正数，盘点调整与冲销带正负号。begin + 各项 = closing */
+/**
+ * 期间收发汇总；出库类为正数，盘点调整与冲销带正负号。begin + 各项 = closing。
+ * 总仓与「全部合计」：issued 是领料出、issueReturned 是退回进；部门小仓反过来：issued 是从总仓领进、issueReturned 是退回总仓（v0.7.11）。
+ */
 export interface StockSummaryRow {
   materialId: number;
   code: string;
@@ -269,6 +373,11 @@ export interface StockSummaryRow {
 
 export interface InventoryOverview {
   scopeName: string;
+  /** 领料超过 ISSUE_SIGN_DUE_DAYS 天部门没签收 */
+  unsignedIssues: number;
+  /** 急采待仓库验收、待补采购单 */
+  urgentToVerify: number;
+  urgentToBackfill: number;
   materialCount: number;
   lowCount: number;
   pendingCounts: number;

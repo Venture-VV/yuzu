@@ -370,7 +370,7 @@ function AdvanceSheet({ id, onClose }: { id: number | null; onClose: () => void 
                         {s.status === 'voided' && ` · 已冲销：${s.voidReason}`}
                       </span>
                       <Money cents={s.amountCents} className="font-bold" />
-                      {s.status === 'active' && can('expense.approve') && (
+                      {s.status === 'active' && can('finance.void') && (
                         <Button variant="ghost" size="sm" icon={<Undo2 className="size-3.5" />} onClick={() => setVoidTarget({ kind: 'settlement', id: s.id, docNo: s.docNo })} aria-label={`冲销 ${s.docNo}`} />
                       )}
                     </li>
@@ -388,7 +388,7 @@ function AdvanceSheet({ id, onClose }: { id: number | null; onClose: () => void 
       </div>
       {a && a.status === 'active' && (
         <div className="flex flex-wrap justify-end gap-2 border-t border-line px-5 py-3">
-          {can('expense.approve') && (
+          {can('finance.void') && (
             <Button variant="ghost" disabled={busy} onClick={() => setVoidTarget({ kind: 'advance' })}>
               冲销打款
             </Button>

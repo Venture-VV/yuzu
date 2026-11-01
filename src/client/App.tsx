@@ -47,6 +47,8 @@ import { LegacyPage } from './features/legacy/LegacyPage';
 import { PurchaseLedgerPage } from './features/purchase-ledger/PurchaseLedgerPage';
 import { RequestFormPage } from './features/requests/RequestFormPage';
 import { RequestsPage } from './features/requests/RequestsPage';
+import { DeptDocFormPage } from './features/dept-stock/DeptDocFormPage';
+import { DeptStockPage } from './features/dept-stock/DeptStockPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -170,6 +172,9 @@ const router = createBrowserRouter([
       { path: 'expenses/new', element: <ClaimFormPage /> },
       { path: 'petty', element: <PettyPage /> },
       { path: 'requests', element: <RequestsPage /> },
+      { path: 'dept-stock', element: <DeptStockPage /> },
+      { path: 'dept-stock/new/:type', element: <DeptDocFormPage /> },
+      { path: 'dept-stock/docs/:id/edit', element: <DeptDocFormPage /> },
       { path: 'requests/new', element: <RequestFormPage mode="new" /> },
       { path: 'requests/:id/edit', element: <RequestFormPage mode="edit" /> },
       { path: 'ledger', element: <PurchaseLedgerPage /> },

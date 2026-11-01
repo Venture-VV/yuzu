@@ -33,6 +33,7 @@ const PROGRESS: Record<RequestLineProgress['state'], { label: string; tone: 'neu
   ordered: { label: '已下单', tone: 'lake' },
   partial: { label: '部分到货', tone: 'yuzu' },
   received: { label: '已到货', tone: 'pine' },
+  closed: { label: '采购单已关闭', tone: 'neutral' },
 };
 
 const ACTION_LABELS: Record<string, string> = { create: '新建', submit: '提交', revise: '修改', approve: '通过', return: '退回', cancel: '结束' };
@@ -41,7 +42,9 @@ export function RequestsPage() {
   const can = useCan();
   const meta = useRequestMeta();
   const [params, setParams] = useSearchParams();
-  const view = params.get('view') === 'open' && can('request.review') ? 'open' : 'list';
+  // 转采购单要能编采购单：负责人（v0.7.11 起能审核需求单）只审核，不转单
+  const canConvert = can('request.review') && can('purchase.manage');
+  const view = params.get('view') === 'open' && canConvert ? 'open' : 'list';
   const session = useSession();
   const [status, setStatus] = useState('');
   const [departmentId, setDepartmentId] = useState('');
@@ -90,7 +93,7 @@ export function RequestsPage() {
         {me && !me.canReview && me.canCreate && !me.departmentId && (
           <Notice tone="warning" title="你的员工档案里还没有填所属部门">请店主在「后台 → 员工」里给你选所属部门，之后才能提需求单。</Notice>
         )}
-        {can('request.review') && (
+        {canConvert && (
           <Segmented
             ariaLabel="需求单视图"
             value={view}

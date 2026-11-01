@@ -4,7 +4,7 @@
 
 import type { Permission } from './permissions';
 
-export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'payables', 'approvals', 'expenses', 'revenue'] as const;
+export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'approvals', 'expenses', 'revenue'] as const;
 export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
 
 export interface ErpModuleDef {
@@ -30,7 +30,7 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
   inventory: {
     label: '库存',
     group: '供应链',
-    description: '物料、供应商、部门档案；期初、收货、领用、退回、报损、盘点；库存报表',
+    description: '物料、供应商、部门档案；总仓与部门小仓两级库存；期初、收货、领料、退回、报损、盘点；库存报表',
     path: '/inventory',
     pages: ['/inventory'],
     apis: ['/api/inventory'],
@@ -61,6 +61,18 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     perms: ['request.create', 'request.review'],
     defaultEnabled: true,
     requires: ['inventory', 'purchasing'],
+  },
+  deptStock: {
+    label: '本部门小仓',
+    group: '供应链',
+    description: '部门自己的小仓：结存、签收仓库登记的领料、急采与补采购单、本部门的期初、耗用、报损、盘点；财务成本岗可看所有部门、给部门盘点（v0.7.11，飞书需求 RQ-002）',
+    path: '/erp/dept-stock',
+    pages: ['/erp/dept-stock'],
+    apis: ['/api/erp/dept-stock'],
+    perms: ['deptStock.operate', 'deptStock.audit'],
+    defaultEnabled: true,
+    // 补采购单另要采购模块开着（接口里核对）
+    requires: ['inventory'],
   },
   payables: {
     label: '应付货款',

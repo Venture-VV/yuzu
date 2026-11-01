@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
+  CENTRAL_WAREHOUSE_ID,
   COUNT_REASONS,
   INV_DOC_META,
   type CountReason,
@@ -27,10 +28,16 @@ import { lockOpKey } from '../../lib/fences';
 import { idParam, parse } from '../../lib/validate';
 import {
   applyMove,
+  assertEnoughDeptStock,
   assertEnoughStock,
   assertNotFuture,
+  assertSameMonth,
+  canOperateDept,
+  departmentWarehouse,
+  deptBalances,
   docDateSchema,
   loadInventorySettings,
+  lockDeptWarehouse,
   lockMaterials,
   logApproval,
   nextDocNo,
@@ -38,6 +45,7 @@ import {
   priceBaseline,
   setTxTimeouts,
   todayIn,
+  warehouseInfo,
 } from './common';
 
 // ───────────────────────── 输入 ─────────────────────────
@@ -78,22 +86,29 @@ const Header = {
   docDate: docDateSchema,
   note: note(200),
 };
+/** 期初、耗用、报损、盘点动哪个仓（v0.7.11 两级库存；不填是总仓） */
+const WarehouseField = { warehouseId: id.default(CENTRAL_WAREHOUSE_ID) };
 
 const DocBody = z.discriminatedUnion('docType', [
-  z.object({ docType: z.literal('opening'), ...Header, lines: lines(OpeningLine) }),
+  z.object({ docType: z.literal('opening'), ...Header, ...WarehouseField, lines: lines(OpeningLine) }),
   z.object({
     docType: z.literal('receipt'),
     ...Header,
     supplierId: id,
     purchaseOrderId: id.nullable().default(null),
     handler: z.string().trim().max(32).default(''),
+    /** 一起验收的采购经办（#17 第一次验收；按采购单收货必选） */
+    coAcceptorId: id.nullable().default(null),
+    /** 急采（#19）：没有采购单，进这个部门的小仓，合计不超过急采上限 */
+    urgent: z.boolean().default(false),
+    departmentId: id.nullable().default(null),
     lines: lines(ReceiptLine),
   }),
-  z.object({ docType: z.literal('issue'), ...Header, departmentId: id, handler: z.string().trim().min(1, '请填写领用人').max(32), lines: lines(QtyLine) }),
+  z.object({ docType: z.literal('issue'), ...Header, departmentId: id, handler: z.string().trim().min(1, '请填写领料人').max(32), lines: lines(QtyLine) }),
   z.object({ docType: z.literal('issue_return'), ...Header, sourceDocId: id, handler: z.string().trim().max(32).default(''), lines: lines(SourceLine) }),
-  z.object({ docType: z.literal('direct_use'), ...Header, note: z.string().trim().min(2, '请填写耗用用途').max(200), lines: lines(QtyLine) }),
-  z.object({ docType: z.literal('damage'), ...Header, note: z.string().trim().min(2, '请填写报损原因').max(200), lines: lines(QtyLine) }),
-  z.object({ docType: z.literal('count'), ...Header, lines: lines(CountLine) }),
+  z.object({ docType: z.literal('direct_use'), ...Header, ...WarehouseField, note: z.string().trim().min(2, '请填写耗用用途').max(200), lines: lines(QtyLine) }),
+  z.object({ docType: z.literal('damage'), ...Header, ...WarehouseField, note: z.string().trim().min(2, '请填写报损原因').max(200), lines: lines(QtyLine) }),
+  z.object({ docType: z.literal('count'), ...Header, ...WarehouseField, lines: lines(CountLine) }),
   z.object({ docType: z.literal('supplier_return'), ...Header, note: z.string().trim().min(2, '请填写退货原因').max(200), sourceDocId: id, lines: lines(SourceLine) }),
 ]);
 export type DocBodyInput = z.input<typeof DocBody>;
@@ -126,8 +141,65 @@ const OPERATE_PERMISSION: Record<InvDocType, Permission> = {
   supplier_return: 'supplierReturn.create',
 };
 
-function assertCanOperate(actor: Actor, type: InvDocType) {
-  if (!can(actor, OPERATE_PERMISSION[type])) throw forbidden(`当前账号没有「${INV_DOC_META[type].title}」的职责`);
+/** 单据动的仓（领料、退回是部门小仓那一头；迁移前的领料、退回为空） */
+export interface WarehouseRef {
+  id: number;
+  kind: 'central' | 'department';
+  departmentId: number | null;
+  name: string;
+  active: boolean;
+}
+
+/**
+ * 谁能登记（v0.7.11 两级库存，见 docs/WAREHOUSES.md）：总仓的单据与领料、退回要「物资经办」（退供应商：物资经办或采购经办）；
+ * 部门小仓：本部门的部门申购（期初、急采、耗用、报损、盘点、退供应商），财务成本岗可给任何部门盘点、登记耗用；店主不限。
+ */
+export async function assertCanOperate(db: Db, actor: Actor, type: InvDocType, wh: WarehouseRef | null) {
+  const central = !wh || wh.kind === 'central' || type === 'issue' || type === 'issue_return';
+  if (central) {
+    if (!can(actor, OPERATE_PERMISSION[type])) throw forbidden(`当前账号没有「${INV_DOC_META[type].title}」的职责`);
+    return;
+  }
+  if (actor.role === 'owner') return;
+  if ((type === 'count' || type === 'direct_use') && can(actor, 'deptStock.audit')) return;
+  if (type === 'supplier_return' && can(actor, 'supplierReturn.create')) return;
+  if (await canOperateDept(db, actor, wh.departmentId)) return;
+  throw forbidden(`只有${wh.name}所属部门的部门申购${type === 'count' || type === 'direct_use' ? '或财务成本岗' : ''}可以登记`);
+}
+
+export async function warehouseRef(db: Db, warehouseId: number | null): Promise<WarehouseRef | null> {
+  if (warehouseId === null) return null;
+  const w = await warehouseInfo(db, warehouseId);
+  if (!w) throw unprocessable('WAREHOUSE_NOT_FOUND', '仓库不存在，请刷新后重试');
+  return w;
+}
+
+/** 新建、编辑时按输入算这张单动的仓 */
+async function warehouseOfBody(db: Db, body: z.infer<typeof DocBody>): Promise<WarehouseRef | null> {
+  switch (body.docType) {
+    case 'opening':
+    case 'direct_use':
+    case 'damage':
+    case 'count':
+      return warehouseRef(db, body.warehouseId);
+    case 'receipt': {
+      if (!body.urgent) return warehouseRef(db, CENTRAL_WAREHOUSE_ID);
+      if (!body.departmentId) throw badRequest('急采要选是哪个部门买的');
+      const w = await departmentWarehouse(db, body.departmentId);
+      if (!w) throw unprocessable('WAREHOUSE_NOT_FOUND', '这个部门还没有小仓，请刷新后重试');
+      return warehouseRef(db, w.id);
+    }
+    case 'issue': {
+      const w = await departmentWarehouse(db, body.departmentId);
+      if (!w) throw unprocessable('WAREHOUSE_NOT_FOUND', '这个部门还没有小仓，请刷新后重试');
+      return warehouseRef(db, w.id);
+    }
+    case 'issue_return':
+    case 'supplier_return': {
+      const [src] = await db<{ warehouseId: number | null }[]>`SELECT warehouse_id FROM inv_docs WHERE id = ${body.sourceDocId}`;
+      return warehouseRef(db, src?.warehouseId ?? null);
+    }
+  }
 }
 
 // ───────────────────────── 读取 ─────────────────────────
@@ -141,14 +213,26 @@ interface DocRow {
   purchaseOrderId: number | null;
   departmentId: number | null;
   sourceDocId: number | null;
+  warehouseId: number | null;
+  urgent: boolean;
   createdBy: number;
   submittedBy: number | null;
 }
 
-export async function getDoc(db: Db, docId: number): Promise<InvDoc> {
+/** 仓的显示名（总仓用「库存范围名称」） */
+const WAREHOUSE_NAME_SQL = (db: Db) => db`CASE WHEN w.kind = 'central'
+  THEN coalesce((SELECT value #>> '{}' FROM settings WHERE key = 'inventory_scope_name'), '后勤总库')
+  ELSE wd.name || '小仓' END`;
+
+export async function getDoc(db: Db, docId: number, timeZone?: string): Promise<InvDoc> {
   const [d] = await db<(InvDoc & Record<string, unknown>)[]>`
     SELECT d.id, d.doc_no, d.doc_type, d.status, d.doc_date, d.handler, d.note, d.amount_cents, d.no_po, d.is_synthetic, d.created_by,
            d.created_at, d.submitted_at, d.confirmed_at, d.returned_reason, d.voided_at, d.void_reason,
+           d.warehouse_id, d.urgent, d.urgent_cap_cents,
+           CASE WHEN w.id IS NULL THEN NULL ELSE json_build_object('id', w.id, 'name', ${WAREHOUSE_NAME_SQL(db)}, 'kind', w.kind) END AS warehouse,
+           CASE WHEN ca.id IS NULL THEN NULL ELSE json_build_object('id', ca.id, 'name', ca.display_name) END AS co_acceptor,
+           CASE WHEN d.dept_signed_at IS NULL THEN NULL
+                ELSE json_build_object('signedByName', sg.display_name, 'signedAt', d.dept_signed_at, 'note', coalesce(d.dept_sign_note, '')) END AS dept_sign,
            CASE WHEN s.id IS NULL THEN NULL ELSE json_build_object('id', s.id, 'name', s.name) END AS supplier,
            CASE WHEN po.id IS NULL THEN NULL ELSE json_build_object('id', po.id, 'docNo', po.doc_no) END AS purchase_order,
            CASE WHEN dep.id IS NULL THEN NULL ELSE json_build_object('id', dep.id, 'name', dep.name) END AS department,
@@ -164,18 +248,29 @@ export async function getDoc(db: Db, docId: number): Promise<InvDoc> {
     LEFT JOIN staff sb ON sb.id = d.submitted_by
     LEFT JOIN staff ob ON ob.id = d.confirmed_by
     LEFT JOIN staff vb ON vb.id = d.voided_by
+    LEFT JOIN warehouses w ON w.id = d.warehouse_id
+    LEFT JOIN departments wd ON wd.id = w.department_id
+    LEFT JOIN staff ca ON ca.id = d.co_acceptor_id
+    LEFT JOIN staff sg ON sg.id = d.dept_signed_by
     WHERE d.id = ${docId}`;
   if (!d) throw notFound('单据不存在');
+  // 行上的「当前结存」与盘点的账面：按这张单出库的那个仓（领料从总仓出，退回从部门小仓出）
+  const docWarehouseId = (d.warehouseId as number | null) ?? null;
+  const stockWarehouseId = d.docType === 'issue' || docWarehouseId === null ? CENTRAL_WAREHOUSE_ID : docWarehouseId;
+  const isDept = stockWarehouseId !== CENTRAL_WAREHOUSE_ID;
 
   const lines = await db<InvDoc['lines']>`
     SELECT l.id, l.line_no, l.material_id, m.code AS material_code, m.name AS material_name, m.specification, m.decimals,
            l.qty_milli, l.inventory_unit, l.purchase_unit, l.factor_milli, l.entered_qty_milli, l.entered_unit,
            l.delivered_milli, l.rejected_milli, l.reject_reason, l.price_cents, l.amount_cents, l.po_line_id,
-           l.book_milli, l.counted_milli, l.diff_reason, l.source_line_id, l.note, m.stock_milli,
-           (${d.docType === 'count' && ['draft', 'submitted', 'returned'].includes(d.status)} AND l.book_move_id IS DISTINCT FROM m.last_move_id) AS stale,
+           l.book_milli, l.counted_milli, l.diff_reason, l.source_line_id, l.note,
+           CASE WHEN ${isDept} THEN coalesce(ws.stock_milli, 0) ELSE m.stock_milli END AS stock_milli,
+           (${d.docType === 'count' && ['draft', 'submitted', 'returned'].includes(d.status)}
+            AND l.book_move_id IS DISTINCT FROM CASE WHEN ${isDept} THEN ws.last_move_id ELSE m.last_move_id END) AS stale,
            coalesce((SELECT sum(rl.qty_milli) FROM inv_doc_lines rl JOIN inv_docs rd ON rd.id = rl.doc_id
                      WHERE rl.source_line_id = l.id AND rd.status IN ('confirmed', 'submitted')), 0) AS returned_milli
     FROM inv_doc_lines l JOIN materials m ON m.id = l.material_id
+    LEFT JOIN warehouse_stock ws ON ws.warehouse_id = ${stockWarehouseId} AND ws.material_id = l.material_id
     WHERE l.doc_id = ${docId} ORDER BY l.line_no`;
 
   if (d.docType === 'receipt') {
@@ -198,19 +293,37 @@ export async function getDoc(db: Db, docId: number): Promise<InvDoc> {
     FROM approval_logs a JOIN staff s ON s.id = a.actor_id
     WHERE a.doc_kind = 'inv_doc' AND a.doc_id = ${docId} ORDER BY a.id`;
 
-  const doc = { ...d, lines, children, approvals, voidable: { ok: false, reason: null } } as InvDoc;
-  doc.voidable = await voidability(db, doc);
+  const { warehouseId: _w, ...rest } = d;
+  const doc = { ...rest, lines, children, approvals, voidable: { ok: false, reason: null } } as InvDoc;
+  doc.voidable = await voidability(db, doc, timeZone);
   return doc;
 }
 
 export async function listDocs(
   db: Db,
-  f: { type?: InvDocType; status?: string; from?: string; to?: string; materialId?: number; q?: string; supplierId?: number; limit?: number },
+  f: {
+    type?: InvDocType;
+    status?: string;
+    from?: string;
+    to?: string;
+    materialId?: number;
+    q?: string;
+    supplierId?: number;
+    /** 只看动这个仓的单据（领料、退回按部门小仓那一头） */
+    warehouseId?: number;
+    /** 领料：只看部门还没签收的 */
+    unsigned?: boolean;
+    urgent?: boolean;
+    limit?: number;
+  },
 ): Promise<InvDocSummary[]> {
   const like = f.q ? `%${f.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null;
   return db<InvDocSummary[]>`
-    SELECT d.id, d.doc_no, d.doc_type, d.status, d.doc_date, d.amount_cents, d.no_po, d.created_at,
+    SELECT d.id, d.doc_no, d.doc_type, d.status, d.doc_date, d.amount_cents, d.no_po, d.created_at, d.urgent,
            coalesce(s.name, dep.name) AS party_name, cb.display_name AS created_by_name,
+           CASE WHEN w.id IS NULL THEN NULL ELSE ${WAREHOUSE_NAME_SQL(db)} END AS warehouse_name,
+           CASE WHEN d.doc_type = 'issue' AND d.warehouse_id IS NOT NULL THEN d.dept_signed_at IS NOT NULL END AS dept_signed,
+           (d.urgent AND d.status = 'confirmed' AND d.purchase_order_id IS NULL) AS needs_backfill,
            (SELECT count(*) FROM inv_doc_lines WHERE doc_id = d.id) AS line_count,
            coalesce((SELECT string_agg(m.name, '、' ORDER BY l.line_no) FROM (
               SELECT * FROM inv_doc_lines WHERE doc_id = d.id ORDER BY line_no LIMIT 3) l
@@ -218,9 +331,21 @@ export async function listDocs(
     FROM inv_docs d
     LEFT JOIN suppliers s ON s.id = d.supplier_id
     LEFT JOIN departments dep ON dep.id = d.department_id
+    LEFT JOIN warehouses w ON w.id = d.warehouse_id
+    LEFT JOIN departments wd ON wd.id = w.department_id
     JOIN staff cb ON cb.id = d.created_by
     WHERE true
       ${f.type ? db`AND d.doc_type = ${f.type}` : db``}
+      ${
+        !f.warehouseId
+          ? db``
+          : f.warehouseId === CENTRAL_WAREHOUSE_ID
+            ? // 领料、退回一头是总仓，按总仓筛也列出
+              db`AND (d.warehouse_id IS NULL OR d.warehouse_id = ${CENTRAL_WAREHOUSE_ID} OR d.doc_type IN ('issue', 'issue_return'))`
+            : db`AND d.warehouse_id = ${f.warehouseId}`
+      }
+      ${f.unsigned ? db`AND d.doc_type = 'issue' AND d.status = 'confirmed' AND d.warehouse_id IS NOT NULL AND d.dept_signed_at IS NULL` : db``}
+      ${f.urgent !== undefined ? db`AND d.urgent = ${f.urgent}` : db``}
       ${f.status ? db`AND d.status = ${f.status}` : db``}
       ${f.from ? db`AND d.doc_date >= ${f.from}` : db``}
       ${f.to ? db`AND d.doc_date <= ${f.to}` : db``}
@@ -231,10 +356,13 @@ export async function listDocs(
     LIMIT ${f.limit ?? 200}`;
 }
 
-/** 冲销条件：有后续业务的原单不能冲销，需先处理后续单据 */
-async function voidability(db: Db, doc: InvDoc): Promise<InvDoc['voidable']> {
+/** 冲销条件：有后续业务的原单不能冲销，需先处理后续单据；#21 跨月不能冲销（给了门店时区才判断，冲销时一定判断） */
+async function voidability(db: Db, doc: InvDoc, timeZone?: string): Promise<InvDoc['voidable']> {
   if (doc.status !== 'confirmed') return { ok: false, reason: '只有已生效的单据可以冲销' };
   if (doc.docType === 'count') return { ok: false, reason: '盘点调整不能冲销，如有错误请重新盘点' };
+  if (timeZone && doc.docDate.slice(0, 7) !== todayIn(timeZone).slice(0, 7)) {
+    return { ok: false, reason: `单据日期在 ${Number(doc.docDate.slice(5, 7))} 月，跨月不能冲销；请用本月的单据更正` };
+  }
   const activeChildren = doc.children.filter((c) => c.status === 'confirmed' || c.status === 'submitted');
   if (activeChildren.length > 0) {
     return { ok: false, reason: `已有后续单据 ${activeChildren.map((c) => c.docNo).join('、')}，需先冲销或撤回后续单据` };
@@ -244,6 +372,13 @@ async function voidability(db: Db, doc: InvDoc): Promise<InvDoc['voidable']> {
       SELECT count(*) AS count FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
       WHERE pa.receipt_doc_id = ${doc.id} AND p.status IN ('confirmed', 'submitted')`;
     if (paid && paid.count > 0) return { ok: false, reason: '这张收货单已有付款核销，需先冲销付款' };
+    // 现付的采购单按采购单报销了这几行（到货数量取自收货）：先冲销或撤回报销（测试服回归报告，v0.7.11）
+    const [claimed] = await db<{ docNo: string }[]>`
+      SELECT c.doc_no FROM expense_claim_lines cl JOIN expense_claims c ON c.id = cl.claim_id
+      WHERE c.status IN ('submitted', 'returned', 'confirmed')
+        AND cl.po_line_id IN (SELECT po_line_id FROM inv_doc_lines WHERE doc_id = ${doc.id} AND po_line_id IS NOT NULL)
+      ORDER BY c.id LIMIT 1`;
+    if (claimed) return { ok: false, reason: `这张收货单的采购单已按采购单报销（${claimed.docNo}），需先冲销或撤回报销` };
   }
   return { ok: true, reason: null };
 }
@@ -280,6 +415,11 @@ interface Prepared {
   amountCents: number;
   noPo: boolean;
   priceBasis: string;
+  /** 动的仓（领料、退回记部门小仓那一头；迁移前的领料的退回为空） */
+  warehouseId: number | null;
+  urgent: boolean;
+  urgentCapCents: number | null;
+  coAcceptorId: number | null;
   lines: PreparedLine[];
 }
 
@@ -381,9 +521,34 @@ export async function receivedByPoLine(db: Db, poId: number, excludeDocId: numbe
   return new Map(rows.map((r) => [r.poLineId, r.qty]));
 }
 
-async function prepare(db: Db, deps: Deps, body: z.infer<typeof DocBody>, existing: { id: number; lines: { materialId: number; bookMilli: number | null; bookMoveId: number | null }[] } | null): Promise<Prepared> {
+async function prepare(
+  db: Db,
+  deps: Deps,
+  body: z.infer<typeof DocBody>,
+  existing: { id: number; lines: { materialId: number; bookMilli: number | null; bookMoveId: number | null }[] } | null,
+  wh: WarehouseRef | null,
+  actor: Actor,
+): Promise<Prepared> {
   assertNotFuture(body.docDate, deps.config.timezone);
-  const empty: Prepared = { supplierId: null, purchaseOrderId: null, departmentId: null, sourceDocId: null, handler: '', amountCents: 0, noPo: false, priceBasis: '', lines: [] };
+  if (wh && !wh.active && body.docType !== 'issue_return' && body.docType !== 'supplier_return') {
+    throw unprocessable('WAREHOUSE_INACTIVE', `${wh.name}所属的部门已停用`);
+  }
+  const empty: Prepared = {
+    supplierId: null,
+    purchaseOrderId: null,
+    // 部门小仓的单据记下部门（列表、库存卡的「对象」显示部门）
+    departmentId: wh?.kind === 'department' ? wh.departmentId : null,
+    sourceDocId: null,
+    handler: '',
+    amountCents: 0,
+    noPo: false,
+    priceBasis: '',
+    warehouseId: wh?.id ?? null,
+    urgent: false,
+    urgentCapCents: null,
+    coAcceptorId: null,
+    lines: [],
+  };
 
   switch (body.docType) {
     case 'opening': {
@@ -409,7 +574,7 @@ async function prepare(db: Db, deps: Deps, body: z.infer<typeof DocBody>, existi
       const mats = await loadMaterials(db, body.lines.map((l) => l.materialId));
       return {
         ...empty,
-        departmentId: body.docType === 'issue' ? body.departmentId : null,
+        departmentId: body.docType === 'issue' ? body.departmentId : empty.departmentId,
         handler: body.docType === 'issue' ? body.handler : '',
         lines: body.lines.map((l) => {
           const m = mats.get(l.materialId)!;
@@ -422,6 +587,15 @@ async function prepare(db: Db, deps: Deps, body: z.infer<typeof DocBody>, existi
     case 'count': {
       assertUniqueMaterials(body.lines, '盘点单');
       const mats = await loadMaterials(db, body.lines.map((l) => l.materialId));
+      // 账面按盘点的仓：总仓在物料上，部门小仓在 warehouse_stock（v0.7.11）
+      if (wh && wh.kind === 'department') {
+        const dept = await deptBalances(db, wh.id, body.lines.map((l) => l.materialId));
+        for (const [mid, b] of dept) {
+          const m = mats.get(mid)!;
+          m.stockMilli = b.stockMilli;
+          m.lastMoveId = b.lastMoveId;
+        }
+      }
       // 账面数在开始盘点时记下；修改草稿时已有物料沿用原快照，新增物料取当前账面
       const previous = new Map(existing?.lines.map((l) => [l.materialId, l]) ?? []);
       const changed = body.lines.filter((l) => {
@@ -514,6 +688,25 @@ async function prepare(db: Db, deps: Deps, body: z.infer<typeof DocBody>, existi
     case 'receipt': {
       const [sup] = await db<{ active: boolean }[]>`SELECT active FROM suppliers WHERE id = ${body.supplierId}`;
       if (!sup || !sup.active) throw unprocessable('SUPPLIER_INACTIVE', '供应商不存在或已停用');
+      const settings = await loadInventorySettings(db);
+      const capText = `¥${(settings.urgentCapCents / 100).toFixed(2)}`;
+      // #19：不允许没开采购单先收货；没有采购单只能由部门登记急采（进部门小仓，不超过上限）
+      if (body.urgent && body.purchaseOrderId) throw badRequest('急采是没有采购单的收货；有采购单请按采购单收货');
+      if (!body.urgent && !body.purchaseOrderId) {
+        throw unprocessable('PO_REQUIRED', `收货必须对应已确认的采购单；没有采购单的只能由部门登记急采（合计不超过 ${capText}）`);
+      }
+      // #17：按采购单收货，采购和仓库一起第一次验收
+      let coAcceptorId: number | null = null;
+      if (!body.urgent) {
+        if (!body.coAcceptorId) throw badRequest('请选一起验收的采购经办');
+        if (body.coAcceptorId === actor.id) throw badRequest('一起验收的采购要另一个人，不能选自己');
+        const [co] = await db<{ active: boolean; role: string; duties: string[] }[]>`
+          SELECT active, role, duties FROM staff WHERE id = ${body.coAcceptorId}`;
+        if (!co || !co.active || (co.role !== 'owner' && !co.duties.includes('purchase'))) {
+          throw unprocessable('CO_ACCEPTOR_INVALID', '一起验收的人要是在职的采购经办');
+        }
+        coAcceptorId = body.coAcceptorId;
+      }
       const mats = await loadMaterials(db, body.lines.map((l) => l.materialId));
       let poLines = new Map<number, { id: number; materialId: number; baseQtyMilli: number; priceCents: number; factorMilli: number; purchaseUnit: string; inventoryUnit: string }>();
       let received = new Map<number, number>();
@@ -530,9 +723,6 @@ async function prepare(db: Db, deps: Deps, body: z.infer<typeof DocBody>, existi
           FROM purchase_order_lines WHERE po_id = ${body.purchaseOrderId}`;
         poLines = new Map(rows.map((r) => [r.id, r]));
         received = await receivedByPoLine(db, body.purchaseOrderId, existing?.id ?? null);
-      } else {
-        const settings = await loadInventorySettings(db);
-        if (!settings.allowDirectReceipt) throw unprocessable('DIRECT_RECEIPT_DISABLED', '当前规则不允许无采购单直接收货');
       }
       let amount = 0;
       const prepared = body.lines.map((l) => {
@@ -588,6 +778,12 @@ async function prepare(db: Db, deps: Deps, body: z.infer<typeof DocBody>, existi
           seen.add(l.poLineId!);
         }
       }
+      if (body.urgent && amount > settings.urgentCapCents) {
+        throw unprocessable('URGENT_OVER_CAP', `急采合计 ¥${(amount / 100).toFixed(2)} 超过上限 ${capText}，请先开采购单`, {
+          amountCents: amount,
+          capCents: settings.urgentCapCents,
+        });
+      }
       return {
         ...empty,
         supplierId: body.supplierId,
@@ -596,6 +792,9 @@ async function prepare(db: Db, deps: Deps, body: z.infer<typeof DocBody>, existi
         amountCents: amount,
         noPo: !body.purchaseOrderId,
         priceBasis,
+        urgent: body.urgent,
+        urgentCapCents: body.urgent ? settings.urgentCapCents : null,
+        coAcceptorId,
         lines: prepared,
       };
     }
@@ -617,8 +816,12 @@ async function insertLines(tx: Tx, docId: number, lines: PreparedLine[]) {
 
 // ───────────────────────── 生效 ─────────────────────────
 
-async function needsApproval(db: Db, docId: number, type: InvDocType): Promise<boolean> {
+async function needsApproval(db: Db, docId: number, type: InvDocType, doc?: { warehouseId: number | null; urgent: boolean }): Promise<boolean> {
   const rules = (await loadInventorySettings(db)).approvalRules;
+  // 急采：仓库到部门验收、确认后才生效（#19）
+  if (type === 'receipt' && doc?.urgent) return true;
+  // 部门小仓的盘点差异由部门自己管：提交即生效（#17，待确认）
+  if (type === 'count' && doc?.warehouseId && doc.warehouseId !== CENTRAL_WAREHOUSE_ID) return false;
   switch (type) {
     case 'opening':
       return rules.opening;
@@ -654,8 +857,12 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
 
   // 锁顺序：原单 / 采购单 → 物料（与其他单据一致，避免死锁）
   if (doc.sourceDocId) {
-    const [src] = await tx<{ status: string }[]>`SELECT status FROM inv_docs WHERE id = ${doc.sourceDocId} FOR UPDATE`;
+    const [src] = await tx<{ status: string; warehouseId: number | null }[]>`SELECT status, warehouse_id FROM inv_docs WHERE id = ${doc.sourceDocId} FOR UPDATE`;
     if (src?.status !== 'confirmed') throw conflict('SOURCE_NOT_CONFIRMED', '原单已冲销或未生效，不能继续');
+    // 领料退回、退供应商动的仓跟原单走（迁移前的领料没进部门小仓，退回只进总仓）
+    if ((src.warehouseId ?? null) !== (doc.warehouseId ?? null)) {
+      throw conflict('SOURCE_WAREHOUSE_MISMATCH', '这张单与原单不在同一个仓，请撤回后按原单重新登记');
+    }
   }
   if (doc.purchaseOrderId) {
     const [po] = await tx<{ status: string }[]>`SELECT status FROM purchase_orders WHERE id = ${doc.purchaseOrderId} FOR UPDATE`;
@@ -673,25 +880,39 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
     if (stale?.changed) throw conflict('PO_RECEIPT_STALE', '采购单内容已变化，请重新打开收货单，按最新采购单核对后再提交');
   }
   const mats = await lockMaterials(tx, lines.map((l) => l.materialId));
-  const ref = (l: LineRow, moveType: Parameters<typeof applyMove>[3]['moveType']) => ({
+  // v0.7.11 两级库存：这张单动的仓（迁移前的领料、退回为空，只动总仓）
+  const wh = doc.warehouseId === null ? null : await warehouseRef(tx, doc.warehouseId);
+  const whId = wh?.id ?? CENTRAL_WAREHOUSE_ID;
+  const isDept = whId !== CENTRAL_WAREHOUSE_ID;
+  if (isDept) await lockDeptWarehouse(tx, whId);
+  const ref = (l: LineRow, moveType: Parameters<typeof applyMove>[3]['moveType'], warehouseId = whId) => ({
     moveType,
     docId: doc.id,
     lineId: l.id,
     docDate: doc.docDate,
     operatorId: actor.id,
+    warehouseId,
+    warehouseName: warehouseId === CENTRAL_WAREHOUSE_ID ? '总仓' : wh?.name,
   });
+  const assertEnough = async (warehouseId: number, outs: { materialId: number; qtyMilli: number }[]) => {
+    if (warehouseId === CENTRAL_WAREHOUSE_ID) assertEnoughStock(mats, outs);
+    else await assertEnoughDeptStock(tx, warehouseId, wh?.name ?? '部门小仓', mats, outs);
+  };
   // 收货与退货记下结算方式（v0.7.7）：挂账记应付；现付的货款走费用报销，不记应付
   let settlement: SupplierSettlement | null = null;
 
   switch (doc.docType) {
     case 'opening': {
+      // 每个仓每个物料只能建一次期初（这个仓已有流水或结存时用盘点调整）
+      const dept = isDept ? await deptBalances(tx, whId, lines.map((l) => l.materialId)) : null;
       for (const l of lines) {
         const [other] = await tx<{ count: number }[]>`
           SELECT count(*) AS count FROM stock_moves sm JOIN inv_docs d ON d.id = sm.doc_id
-          WHERE sm.material_id = ${l.materialId} AND NOT (d.doc_type = 'opening' AND d.status = 'voided')`;
+          WHERE sm.material_id = ${l.materialId} AND sm.warehouse_id = ${whId} AND NOT (d.doc_type = 'opening' AND d.status = 'voided')`;
         const m = mats.get(l.materialId)!;
-        if ((other?.count ?? 0) > 0 || m.stockMilli !== 0) {
-          throw conflict('OPENING_EXISTS', `「${m.name}」已有库存记录，不能再建期初；请用盘点调整`);
+        const balance = dept ? dept.get(l.materialId)!.stockMilli : m.stockMilli;
+        if ((other?.count ?? 0) > 0 || balance !== 0) {
+          throw conflict('OPENING_EXISTS', `「${m.name}」在${isDept ? wh!.name : '总仓'}已有库存记录，不能再建期初；请用盘点调整`);
         }
         await applyMove(tx, m, l.qtyMilli, ref(l, 'opening'));
       }
@@ -711,6 +932,14 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
           }
         }
       }
+      if (doc.urgent) {
+        // 急采：仓库确认时按当时的上限再核对一次（#19）
+        const cap = (await loadInventorySettings(tx)).urgentCapCents;
+        if (doc.amountCents > cap) {
+          throw conflict('URGENT_OVER_CAP', `急采合计 ¥${(doc.amountCents / 100).toFixed(2)} 超过现在的上限 ¥${(cap / 100).toFixed(2)}，请退回部门改开采购单`);
+        }
+      }
+      // 按采购单收货进总仓；急采进部门小仓
       for (const l of lines) await applyMove(tx, mats.get(l.materialId)!, l.qtyMilli, ref(l, 'receipt'));
       // 按采购单收货：跟着这张采购单的结算方式（第一张收货或已有的报销定下的，供应商改了设置也不变）
       if (doc.purchaseOrderId) settlement = await poSettlement(tx, doc.purchaseOrderId);
@@ -725,10 +954,18 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
       }
       break;
     }
-    case 'issue':
+    case 'issue': {
+      // 领料（#13、#17）：总仓出、部门小仓进；迁移前的领料（没有仓）只出总仓
+      assertEnoughStock(mats, lines);
+      for (const l of lines) {
+        await applyMove(tx, mats.get(l.materialId)!, -l.qtyMilli, ref(l, 'issue', CENTRAL_WAREHOUSE_ID));
+        if (wh) await applyMove(tx, mats.get(l.materialId)!, l.qtyMilli, ref(l, 'issue', wh.id));
+      }
+      break;
+    }
     case 'direct_use':
     case 'damage': {
-      assertEnoughStock(mats, lines);
+      await assertEnough(whId, lines);
       const moveType = doc.docType;
       for (const l of lines) await applyMove(tx, mats.get(l.materialId)!, -l.qtyMilli, ref(l, moveType));
       break;
@@ -752,9 +989,15 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
         }
       }
       if (doc.docType === 'issue_return') {
-        for (const l of lines) await applyMove(tx, mats.get(l.materialId)!, l.qtyMilli, ref(l, 'issue_return'));
+        // 退回：部门小仓出、总仓进；迁移前的领料没进部门小仓，退回只进总仓
+        if (wh) await assertEnough(wh.id, lines);
+        for (const l of lines) {
+          if (wh) await applyMove(tx, mats.get(l.materialId)!, -l.qtyMilli, ref(l, 'issue_return', wh.id));
+          await applyMove(tx, mats.get(l.materialId)!, l.qtyMilli, ref(l, 'issue_return', CENTRAL_WAREHOUSE_ID));
+        }
       } else {
-        assertEnoughStock(mats, lines);
+        // 退供应商：从原收货单的仓出（急采的从部门小仓出）
+        await assertEnough(whId, lines);
         for (const l of lines) await applyMove(tx, mats.get(l.materialId)!, -l.qtyMilli, ref(l, 'supplier_return'));
         // 退货跟着原收货单的结算方式：现付的收货没记应付，退货也不记应付扣款（供应商退款在 RQ-002 做）
         const [src] = await tx<{ settlement: SupplierSettlement | null }[]>`SELECT settlement FROM inv_docs WHERE id = ${doc.sourceDocId}`;
@@ -768,8 +1011,10 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
       break;
     }
     case 'count': {
-      // 记下账面数之后又有收发：不能用旧盘点结果覆盖新变动，需要重新核对
-      const stale = lines.filter((l) => l.bookMoveId !== mats.get(l.materialId)!.lastMoveId);
+      // 记下账面数之后又有收发：不能用旧盘点结果覆盖新变动，需要重新核对（按盘点的仓）
+      const dept = isDept ? await deptBalances(tx, whId, lines.map((l) => l.materialId)) : null;
+      const lastMove = (mid: number) => (dept ? dept.get(mid)!.lastMoveId : mats.get(mid)!.lastMoveId);
+      const stale = lines.filter((l) => l.bookMoveId !== lastMove(l.materialId));
       if (stale.length > 0) {
         throw conflict('COUNT_STALE', `盘点后又有收发：${stale.map((l) => mats.get(l.materialId)!.name).join('、')}，请重新核对账面数后再确认`, {
           materialIds: stale.map((l) => l.materialId),
@@ -777,7 +1022,8 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
       }
       for (const l of lines) {
         if (l.qtyMilli === 0) continue;
-        const reason = opts.countReasons?.[String(l.id)] ?? 'unknown';
+        // 部门小仓的差异默认算「耗用」（客用、日耗品用掉的），总仓默认「不明差异」
+        const reason = opts.countReasons?.[String(l.id)] ?? (isDept ? 'consumed' : 'unknown');
         await tx`UPDATE inv_doc_lines SET diff_reason = ${reason} WHERE id = ${l.id}`;
         await applyMove(tx, mats.get(l.materialId)!, l.qtyMilli, ref(l, 'count_adjust'));
       }
@@ -794,7 +1040,7 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
 async function lockDoc(tx: Tx, docId: number) {
   const [doc] = await tx<(DocRow & { docNo: string; amountCents: number })[]>`
     SELECT id, doc_no, doc_type, status, doc_date, supplier_id, purchase_order_id, department_id, source_doc_id,
-           amount_cents, created_by, submitted_by
+           warehouse_id, urgent, amount_cents, created_by, submitted_by
     FROM inv_docs WHERE id = ${docId} FOR UPDATE`;
   if (!doc) throw notFound('单据不存在');
   return doc;
@@ -805,20 +1051,24 @@ async function submitLocked(tx: Tx, doc: DocRow & { docNo: string; amountCents: 
   if (doc.status === 'submitted' || doc.status === 'confirmed') return; // 幂等
   if (doc.status !== 'draft' && doc.status !== 'returned') throw conflict('INVALID_STATE', '单据当前状态不能提交');
   if (doc.docType === 'count') {
+    const whId = doc.warehouseId ?? CENTRAL_WAREHOUSE_ID;
     const stale = await tx<{ name: string }[]>`
       SELECT m.name FROM inv_doc_lines l JOIN materials m ON m.id = l.material_id
-      WHERE l.doc_id = ${doc.id} AND l.book_move_id IS DISTINCT FROM m.last_move_id`;
+      LEFT JOIN warehouse_stock ws ON ws.warehouse_id = ${whId} AND ws.material_id = l.material_id
+      WHERE l.doc_id = ${doc.id}
+        AND l.book_move_id IS DISTINCT FROM CASE WHEN ${whId !== CENTRAL_WAREHOUSE_ID} THEN ws.last_move_id ELSE m.last_move_id END`;
     if (stale.length) {
       throw conflict('COUNT_STALE', `盘点后又有收发：${stale.map((s) => s.name).join('、')}。请先「按最新账面重新核对」，确认实盘数后再提交`);
     }
   }
-  const approval = await needsApproval(tx, doc.id, doc.docType);
+  const approval = await needsApproval(tx, doc.id, doc.docType, doc);
   await tx`UPDATE inv_docs SET status = 'submitted', submitted_by = ${actor.id}, submitted_at = now(), returned_reason = NULL, updated_at = now() WHERE id = ${doc.id}`;
   await logApproval(tx, 'inv_doc', doc.id, 'submit', actor.id);
   if (!approval) {
     await confirmDoc(tx, { ...doc, status: 'submitted' }, actor);
   } else if (approveNow) {
     if (!can(actor, 'inventory.approve')) throw forbidden('当前账号不能确认这类单据，请提交给负责人');
+    if (doc.urgent && actor.role !== 'owner') throw forbidden('急采要由另一个人（仓库）到部门验收后确认');
     await confirmDoc(tx, { ...doc, status: 'submitted' }, actor);
     await logApproval(tx, 'inv_doc', doc.id, 'approve', actor.id);
   }
@@ -831,7 +1081,7 @@ const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.strin
 export async function createDoc(deps: Deps, raw: CreateDocInput, actor: Actor, ip?: string): Promise<{ doc: InvDoc; replayed: boolean }> {
   const meta = parse(CreateInput, raw);
   const body = parse(DocBody, raw);
-  assertCanOperate(actor, body.docType);
+  await assertCanOperate(deps.sql, actor, body.docType, await warehouseOfBody(deps.sql, body));
   if (meta.approveNow && !can(actor, 'inventory.approve')) throw forbidden('当前账号不能确认这类单据，请提交给负责人');
   const requestHash = hashRequest({ ...body, action: meta.action, approveNow: meta.approveNow });
   const findExisting = async (db: Db) => {
@@ -851,15 +1101,19 @@ export async function createDoc(deps: Deps, raw: CreateDocInput, actor: Actor, i
       await lockOpKey(tx, meta.clientKey);
       const existing = await findExisting(tx);
       if (existing) return { id: existing, replayed: true };
-      const prepared = await prepare(tx, deps, body, null);
+      const wh = await warehouseOfBody(tx, body);
+      await assertCanOperate(tx, actor, body.docType, wh);
+      const prepared = await prepare(tx, deps, body, null, wh, actor);
       const meta2 = INV_DOC_META[body.docType];
       const docNo = await nextDocNo(tx, `inv_${body.docType}`, meta2.prefix, body.docDate);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO inv_docs (doc_no, doc_type, status, doc_date, supplier_id, purchase_order_id, department_id, handler,
-                              source_doc_id, note, amount_cents, no_po, price_basis, client_key, created_by)
+                              source_doc_id, note, amount_cents, no_po, price_basis, warehouse_id, urgent, urgent_cap_cents,
+                              co_acceptor_id, client_key, created_by)
         VALUES (${docNo}, ${body.docType}, 'draft', ${body.docDate}, ${prepared.supplierId}, ${prepared.purchaseOrderId},
                 ${prepared.departmentId}, ${prepared.handler}, ${prepared.sourceDocId}, ${body.note}, ${prepared.amountCents},
-                ${prepared.noPo}, ${prepared.priceBasis}, ${meta.clientKey}, ${actor.id})
+                ${prepared.noPo}, ${prepared.priceBasis}, ${prepared.warehouseId}, ${prepared.urgent}, ${prepared.urgentCapCents},
+                ${prepared.coAcceptorId}, ${meta.clientKey}, ${actor.id})
         RETURNING id`;
       const newId = row!.id;
       await insertLines(tx, newId, prepared.lines);
@@ -885,40 +1139,47 @@ export async function createDoc(deps: Deps, raw: CreateDocInput, actor: Actor, i
       throw error;
     }
   }
-  return { doc: await getDoc(deps.sql, docId), replayed };
+  return { doc: await getDoc(deps.sql, docId, deps.config.timezone), replayed };
 }
 
 export async function updateDoc(deps: Deps, docId: number, raw: DocBodyInput & { action?: 'save' | 'submit'; approveNow?: boolean }, actor: Actor) {
   const body = parse(DocBody, raw);
   const meta = parse(CreateInput.omit({ clientKey: true }), raw);
-  assertCanOperate(actor, body.docType);
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const doc = await lockDoc(tx, docId);
     if (doc.docType !== body.docType) throw badRequest('不能更改单据类型');
+    // 原单的仓与改后的仓都要有权限（不能借改单把单据挪到别的部门小仓）
+    await assertCanOperate(tx, actor, doc.docType, await warehouseRef(tx, doc.warehouseId));
+    const wh = await warehouseOfBody(tx, body);
+    await assertCanOperate(tx, actor, body.docType, wh);
     if (doc.status !== 'draft' && doc.status !== 'returned') throw conflict('INVALID_STATE', '只有草稿或退回修改的单据可以编辑');
     const existingLines = await tx<{ materialId: number; bookMilli: number | null; bookMoveId: number | null }[]>`
       SELECT material_id, book_milli, book_move_id FROM inv_doc_lines WHERE doc_id = ${docId}`;
-    const prepared = await prepare(tx, deps, body, { id: docId, lines: existingLines });
+    // 盘点换了仓：原来记下的账面不能沿用
+    const keepBook = (doc.warehouseId ?? CENTRAL_WAREHOUSE_ID) === (wh?.id ?? CENTRAL_WAREHOUSE_ID);
+    const prepared = await prepare(tx, deps, body, keepBook ? { id: docId, lines: existingLines } : { id: docId, lines: [] }, wh, actor);
     await tx`
       UPDATE inv_docs SET doc_date = ${body.docDate}, supplier_id = ${prepared.supplierId}, purchase_order_id = ${prepared.purchaseOrderId},
              department_id = ${prepared.departmentId}, handler = ${prepared.handler}, source_doc_id = ${prepared.sourceDocId},
-             note = ${body.note}, amount_cents = ${prepared.amountCents}, no_po = ${prepared.noPo}, price_basis = ${prepared.priceBasis}, updated_at = now()
+             note = ${body.note}, amount_cents = ${prepared.amountCents}, no_po = ${prepared.noPo}, price_basis = ${prepared.priceBasis},
+             warehouse_id = ${prepared.warehouseId}, urgent = ${prepared.urgent}, urgent_cap_cents = ${prepared.urgentCapCents},
+             co_acceptor_id = ${prepared.coAcceptorId}, updated_at = now()
       WHERE id = ${docId}`;
     await insertLines(tx, docId, prepared.lines);
     if (meta.action === 'submit') await submitLocked(tx, await lockDoc(tx, docId), actor, meta.approveNow);
   });
-  return getDoc(deps.sql, docId);
+  return getDoc(deps.sql, docId, deps.config.timezone);
 }
 
 export async function submitDoc(deps: Deps, docId: number, actor: Actor, approveNow = false) {
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const doc = await lockDoc(tx, docId);
-    assertCanOperate(actor, doc.docType);
+    await assertCanOperate(tx, actor, doc.docType, await warehouseRef(tx, doc.warehouseId));
     await submitLocked(tx, doc, actor, approveNow);
   });
-  return getDoc(deps.sql, docId);
+  return getDoc(deps.sql, docId, deps.config.timezone);
 }
 
 export async function approveDoc(deps: Deps, docId: number, raw: unknown, actor: Actor) {
@@ -928,10 +1189,11 @@ export async function approveDoc(deps: Deps, docId: number, raw: unknown, actor:
     const doc = await lockDoc(tx, docId);
     if (doc.status === 'confirmed') return; // 幂等
     if (doc.status !== 'submitted') throw conflict('INVALID_STATE', '只有待确认的单据可以确认');
+    if (doc.urgent && doc.createdBy === actor.id && actor.role !== 'owner') throw forbidden('急采要由另一个人（仓库）验收，不能自己确认');
     await confirmDoc(tx, doc, actor, { countReasons });
     await logApproval(tx, 'inv_doc', docId, 'approve', actor.id);
   });
-  return getDoc(deps.sql, docId);
+  return getDoc(deps.sql, docId, deps.config.timezone);
 }
 
 /** 负责人退回修改：说明原因，提交人改后可再提交 */
@@ -944,7 +1206,7 @@ export async function returnDoc(deps: Deps, docId: number, raw: unknown, actor: 
     await tx`UPDATE inv_docs SET status = 'returned', returned_reason = ${reason}, updated_at = now() WHERE id = ${docId}`;
     await logApproval(tx, 'inv_doc', docId, 'return', actor.id, reason);
   });
-  return getDoc(deps.sql, docId);
+  return getDoc(deps.sql, docId, deps.config.timezone);
 }
 
 /** 撤回（作废未生效的单据）：经办人或负责人 */
@@ -958,7 +1220,7 @@ export async function cancelDoc(deps: Deps, docId: number, raw: unknown, actor: 
     await tx`UPDATE inv_docs SET status = 'cancelled', returned_reason = ${reason}, updated_at = now() WHERE id = ${docId}`;
     await logApproval(tx, 'inv_doc', docId, 'cancel', actor.id, reason);
   });
-  return getDoc(deps.sql, docId);
+  return getDoc(deps.sql, docId, deps.config.timezone);
 }
 
 /** 冲销已生效的单据：按原流水反向记账，原单保留并标记已冲销 */
@@ -968,12 +1230,19 @@ export async function voidDoc(deps: Deps, docId: number, raw: unknown, actor: Ac
     await setTxTimeouts(tx);
     const doc = await lockDoc(tx, docId);
     if (doc.status === 'voided') return;
-    const check = await voidability(tx, await getDoc(tx, docId));
+    // #21：当月发生的当月冲销完，跨月不能冲销
+    assertSameMonth(doc.docDate, deps.config.timezone);
+    // 锁顺序：单据 → 采购单 → 物料；锁住采购单再查报销，与「按采购单报销」（采购单 → 报销单）串行
+    if (doc.purchaseOrderId) await tx`SELECT id FROM purchase_orders WHERE id = ${doc.purchaseOrderId} FOR UPDATE`;
+    const check = await voidability(tx, await getDoc(tx, docId), deps.config.timezone);
     if (!check.ok) throw conflict('NOT_VOIDABLE', check.reason ?? '这张单据不能冲销');
-    const moves = await tx<{ materialId: number; docLineId: number; qtyDeltaMilli: number }[]>`
-      SELECT material_id, doc_line_id, qty_delta_milli FROM stock_moves WHERE doc_id = ${docId} AND move_type <> 'void' ORDER BY id`;
+    const moves = await tx<{ materialId: number; docLineId: number; qtyDeltaMilli: number; warehouseId: number }[]>`
+      SELECT material_id, doc_line_id, qty_delta_milli, warehouse_id FROM stock_moves WHERE doc_id = ${docId} AND move_type <> 'void' ORDER BY id`;
     const mats = await lockMaterials(tx, moves.map((m) => m.materialId));
-    // 冲销流水记在冲销当天，原单日期不变；按日期汇总时原单与冲销分别出现在各自日期
+    const wh = await warehouseRef(tx, doc.warehouseId);
+    // 部门停用后它的小仓已清空，不能再冲回去
+    for (const w of [...new Set(moves.map((m) => m.warehouseId))].sort((a, b) => a - b)) await lockDeptWarehouse(tx, w);
+    // 冲销流水记在冲销当天，原单日期不变；按日期汇总时原单与冲销分别出现在各自日期；各仓按原流水反向记
     const voidDate = todayIn(deps.config.timezone);
     for (const mv of moves) {
       await applyMove(tx, mats.get(mv.materialId)!, -mv.qtyDeltaMilli, {
@@ -982,6 +1251,8 @@ export async function voidDoc(deps: Deps, docId: number, raw: unknown, actor: Ac
         lineId: mv.docLineId,
         docDate: voidDate,
         operatorId: actor.id,
+        warehouseId: mv.warehouseId,
+        warehouseName: mv.warehouseId === CENTRAL_WAREHOUSE_ID ? '总仓' : wh?.name,
       });
     }
     const ap = await tx<{ supplierId: number; amountDeltaCents: number }[]>`
@@ -994,23 +1265,72 @@ export async function voidDoc(deps: Deps, docId: number, raw: unknown, actor: Ac
     await tx`UPDATE inv_docs SET status = 'voided', voided_by = ${actor.id}, voided_at = now(), void_reason = ${reason}, updated_at = now() WHERE id = ${docId}`;
     await logApproval(tx, 'inv_doc', docId, 'void', actor.id, reason);
   });
-  return getDoc(deps.sql, docId);
+  return getDoc(deps.sql, docId, deps.config.timezone);
 }
 
 /** 盘点：对「账面已变动」的行，按最新账面重新记下账面数（实盘数保留，需员工再次核对） */
 export async function refreshCountBook(deps: Deps, docId: number, actor: Actor) {
   await deps.sql.begin(async (tx) => {
     const doc = await lockDoc(tx, docId);
-    assertCanOperate(actor, doc.docType);
+    await assertCanOperate(tx, actor, doc.docType, await warehouseRef(tx, doc.warehouseId));
     if (doc.docType !== 'count') throw badRequest('只有盘点单需要核对账面');
     if (doc.status !== 'draft' && doc.status !== 'returned') throw conflict('INVALID_STATE', '待确认的盘点单请由负责人退回后再重新核对');
-    await tx`
-      UPDATE inv_doc_lines l SET book_milli = m.stock_milli, book_move_id = m.last_move_id,
-             qty_milli = l.counted_milli - m.stock_milli
-      FROM materials m
-      WHERE l.doc_id = ${docId} AND m.id = l.material_id AND l.book_move_id IS DISTINCT FROM m.last_move_id`;
+    const whId = doc.warehouseId ?? CENTRAL_WAREHOUSE_ID;
+    if (whId === CENTRAL_WAREHOUSE_ID) {
+      await tx`
+        UPDATE inv_doc_lines l SET book_milli = m.stock_milli, book_move_id = m.last_move_id,
+               qty_milli = l.counted_milli - m.stock_milli
+        FROM materials m
+        WHERE l.doc_id = ${docId} AND m.id = l.material_id AND l.book_move_id IS DISTINCT FROM m.last_move_id`;
+    } else {
+      // 部门小仓的账面在 warehouse_stock（没有记录的算 0）
+      await tx`
+        UPDATE inv_doc_lines l SET book_milli = coalesce(ws.stock_milli, 0), book_move_id = ws.last_move_id,
+               qty_milli = l.counted_milli - coalesce(ws.stock_milli, 0)
+        FROM inv_doc_lines l2 LEFT JOIN warehouse_stock ws ON ws.warehouse_id = ${whId} AND ws.material_id = l2.material_id
+        WHERE l.id = l2.id AND l.doc_id = ${docId} AND l.book_move_id IS DISTINCT FROM ws.last_move_id`;
+    }
   });
-  return getDoc(deps.sql, docId);
+  return getDoc(deps.sql, docId, deps.config.timezone);
+}
+
+/**
+ * 部门签收领料（#17 第二次验收、确认签字）：本部门的部门申购（或店主）在自己的待办里签收；有差异写明，
+ * 仓库据此做退回或盘点。领料单仓库登记即生效，签收只是记下部门确认，只能签一次。
+ */
+export async function signIssue(deps: Deps, docId: number, raw: unknown, actor: Actor) {
+  const { note: signNote } = parse(z.object({ note: z.string().trim().max(200).default('') }), raw ?? {});
+  await deps.sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
+    const doc = await lockDoc(tx, docId);
+    if (doc.docType !== 'issue') throw badRequest('只有领料单需要部门签收');
+    const [cur] = await tx<{ signedAt: string | null }[]>`SELECT dept_signed_at AS signed_at FROM inv_docs WHERE id = ${docId}`;
+    if (cur?.signedAt) return; // 幂等
+    if (doc.status !== 'confirmed') throw conflict('INVALID_STATE', '领料单还没生效或已冲销，不能签收');
+    if (doc.warehouseId === null) throw conflict('INVALID_STATE', '迁移前的领料没有进部门小仓，不用签收');
+    if (!(await canOperateDept(tx, actor, doc.departmentId))) throw forbidden('只有领料部门的部门申购可以签收');
+    await tx`
+      UPDATE inv_docs SET dept_signed_by = ${actor.id}, dept_signed_at = now(), dept_sign_note = ${signNote}, updated_at = now()
+      WHERE id = ${docId}`;
+    await logApproval(tx, 'inv_doc', docId, 'sign', actor.id, signNote);
+  });
+  return getDoc(deps.sql, docId, deps.config.timezone);
+}
+
+/** 急采：仓库到部门验收、确认后才生效（#19）；物资经办或负责人确认，不能是登记的人 */
+export async function verifyUrgent(deps: Deps, docId: number, actor: Actor) {
+  await deps.sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
+    const doc = await lockDoc(tx, docId);
+    if (doc.docType !== 'receipt' || !doc.urgent) throw badRequest('只有急采需要仓库验收');
+    if (doc.status === 'confirmed') return; // 幂等
+    if (doc.status !== 'submitted') throw conflict('INVALID_STATE', '只有待验收的急采可以确认');
+    if (!can(actor, 'inventory.operate') && !can(actor, 'inventory.approve')) throw forbidden('急采要由仓库（物资经办）到部门验收后确认');
+    if (doc.createdBy === actor.id && actor.role !== 'owner') throw forbidden('急采要由另一个人（仓库）验收，不能自己确认');
+    await confirmDoc(tx, doc, actor);
+    await logApproval(tx, 'inv_doc', docId, 'approve', actor.id, '仓库到部门验收');
+  });
+  return getDoc(deps.sql, docId, deps.config.timezone);
 }
 
 /** 部门常用领用：近 60 天按次数排序，带上次领用数量，供领用单一键填入 */
@@ -1038,6 +1358,9 @@ const ListQuery = z.object({
   to: docDateSchema.optional(),
   materialId: z.coerce.number().int().positive().optional(),
   supplierId: z.coerce.number().int().positive().optional(),
+  warehouseId: z.coerce.number().int().positive().optional(),
+  unsigned: z.enum(['1']).optional(),
+  urgent: z.enum(['1', '0']).optional(),
   q: z.string().trim().max(32).optional(),
 });
 
@@ -1045,18 +1368,22 @@ export function registerDocRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
   const docId = (req: FastifyRequest) => parse(idParam, req.params).id;
   const typeOf = async (id: number) => {
-    const [row] = await sql<{ docType: InvDocType; createdBy: number }[]>`SELECT doc_type, created_by FROM inv_docs WHERE id = ${id}`;
+    const [row] = await sql<{ docType: InvDocType; createdBy: number; warehouseId: number | null }[]>`
+      SELECT doc_type, created_by, warehouse_id FROM inv_docs WHERE id = ${id}`;
     if (!row) throw notFound('单据不存在');
     return row;
   };
 
-  app.get('/api/inventory/docs', { preHandler: guard('inventory.read') }, async (req) => listDocs(sql, parse(ListQuery, req.query)));
+  app.get('/api/inventory/docs', { preHandler: guard('inventory.read') }, async (req) => {
+    const q = parse(ListQuery, req.query);
+    return listDocs(sql, { ...q, unsigned: q.unsigned === '1', urgent: q.urgent === undefined ? undefined : q.urgent === '1' });
+  });
   app.get('/api/inventory/docs/by-key/:key', { preHandler: guard('inventory.read') }, async (req) => {
     const { key } = parse(z.object({ key: z.uuid() }), req.params);
     const doc = await findDocByKey(sql, key);
     return doc ? { found: true, doc } : { found: false };
   });
-  app.get('/api/inventory/docs/:id', { preHandler: guard('inventory.read') }, async (req) => getDoc(sql, docId(req)));
+  app.get('/api/inventory/docs/:id', { preHandler: guard('inventory.read') }, async (req) => getDoc(sql, docId(req), deps.config.timezone));
   app.get('/api/inventory/departments/:id/usual', { preHandler: guard('inventory.read') }, async (req) =>
     usualIssues(sql, parse(idParam, req.params).id),
   );
@@ -1081,12 +1408,16 @@ export function registerDocRoutes(app: FastifyInstance, deps: Deps) {
   );
   app.post('/api/inventory/docs/:id/cancel', { preHandler: guard('inventory.read') }, async (req) => {
     const id = docId(req);
-    assertCanOperate(req.actor, (await typeOf(id)).docType);
+    const row = await typeOf(id);
+    await assertCanOperate(sql, req.actor, row.docType, await warehouseRef(sql, row.warehouseId));
     return cancelDoc(deps, id, req.body, req.actor);
   });
-  app.post('/api/inventory/docs/:id/void', { preHandler: guard('inventory.approve') }, async (req) =>
+  // #21：库存冲销由仓库或财务成本岗操作，只限当月（v0.7.11）
+  app.post('/api/inventory/docs/:id/void', { preHandler: guard('inventory.void') }, async (req) =>
     voidDoc(deps, docId(req), req.body, req.actor),
   );
+  // 急采：仓库到部门验收后确认（#19）
+  app.post('/api/inventory/docs/:id/verify-urgent', { preHandler: guard('inventory.read') }, async (req) => verifyUrgent(deps, docId(req), req.actor));
   app.post('/api/inventory/docs/:id/refresh-book', { preHandler: guard('inventory.operate') }, async (req) =>
     refreshCountBook(deps, docId(req), req.actor),
   );

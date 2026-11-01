@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, CircleAlert, CircleCheck, CloudOff, Eraser, ListPlus, RotateCw, Search, Trash2 } from 'lucide-react';
-import { COUNT_REASON_LABELS, INV_DOC_META, type InvDoc, type InvDocSummary, type InvDocType, type Material } from '@shared/inventory';
+import { COUNT_REASON_LABELS, INV_DOC_META, type DeptStockMeta, type InvDoc, type InvDocSummary, type InvDocType, type Material, type WarehouseStockRow } from '@shared/inventory';
 import { centsToInput, parseYuan } from '@shared/money';
 import { formatQty, lineAmountCents } from '@shared/quantity';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
@@ -17,14 +17,15 @@ import { emptyQty, MaterialPicker, qtyEntryFromMilli, QtyInput, resolveQty, type
 import { DOC_VISUAL, Qty, SimRule, StatusChip } from './parts';
 import type { PoLine } from '@shared/purchasing';
 import { usePo, usePos } from '../purchasing/queries';
-import { useDepartments, useInvDoc, useInvDocs, useInvSettings, useInvalidateInventory, useMaterials, useSuppliers, useUsual } from './queries';
+import { useDeptDoc, useDeptMeta, useDeptStock, useInvalidateDept } from '../dept-stock/queries';
+import { useCoAcceptors, useDepartments, useInvDoc, useInvDocs, useInvSettings, useInvalidateInventory, useMaterials, useSuppliers, useUsual } from './queries';
 
 // ───────────────────────── 表单状态 ─────────────────────────
 
 interface LineDraft {
   key: string;
   materialId: number;
-  /** 领用 / 耗用 / 报损 / 期初 / 退回数量；盘点为实盘数 */
+  /** 领料 / 耗用 / 报损 / 期初 / 退回数量；盘点为实盘数 */
   qty: QtyEntry;
   delivered: QtyEntry;
   accepted: QtyEntry;
@@ -49,6 +50,8 @@ interface FormState {
   departmentId: number | null;
   sourceDocId: number | null;
   purchaseOrderId: number | null;
+  /** 收货：一起验收的采购经办（#17，v0.7.11） */
+  coAcceptorId: number | null;
   handler: string;
   note: string;
   lines: LineDraft[];
@@ -78,24 +81,107 @@ const blankForm = (date: string): FormState => ({
   departmentId: null,
   sourceDocId: null,
   purchaseOrderId: null,
+  coAcceptorId: null,
   handler: '',
   note: '',
   lines: [],
 });
 
-const DRAFT_KEY = (type: InvDocType) => `yuzu.invDraft.v1.${type}`;
-function readDraft(type: InvDocType): FormState | null {
+// ───────────────────────── 入口：库存（总仓）或本部门小仓（v0.7.11） ─────────────────────────
+
+/** 表单服务于哪个入口：库存页（总仓、领料与退回、按采购单收货）或本部门小仓（部门的期初、耗用、报损、盘点、急采） */
+export interface FormScope {
+  kind: 'central' | 'dept';
+  dept: { id: number; name: string; warehouseId: number } | null;
+  /** 单据接口 */
+  api: string;
+  home: string;
+  docLink: (id: number) => string;
+  newLink: (type: InvDocType) => string;
+}
+
+const CENTRAL_SCOPE: FormScope = {
+  kind: 'central',
+  dept: null,
+  api: '/api/inventory/docs',
+  home: '/inventory',
+  docLink: (id) => `/inventory/docs?doc=${id}`,
+  newLink: (t) => `/inventory/new/${t}`,
+};
+
+export function deptScope(dept: { id: number; name: string; warehouseId: number }): FormScope {
+  return {
+    kind: 'dept',
+    dept,
+    api: '/api/erp/dept-stock/docs',
+    home: `/erp/dept-stock?dept=${dept.id}`,
+    docLink: (id) => `/erp/dept-stock?dept=${dept.id}&doc=${id}`,
+    newLink: (t) => `/erp/dept-stock/new/${t}?dept=${dept.id}`,
+  };
+}
+
+/** 部门小仓能登记的单据：急采、耗用、报损、盘点、期初（领料与退回由仓库登记） */
+export const DEPT_DOC_TYPES: InvDocType[] = ['receipt', 'direct_use', 'damage', 'count', 'opening'];
+
+/** 部门小仓的物料：部门的员工看不到总仓结存与参考价，库存按本部门小仓 */
+function deptMaterial(m: DeptStockMeta['materials'][number], row: WarehouseStockRow | undefined): Material {
+  return {
+    ...m,
+    refPriceCents: null,
+    defaultSupplierId: null,
+    defaultSupplierName: null,
+    lowStockMilli: null,
+    tracked: true,
+    active: true,
+    stockMilli: row?.stockMilli ?? 0,
+    deptStockMilli: 0,
+    isLow: false,
+    hasMoves: !!row,
+    anyMoves: !!row,
+    lastMoveAt: row?.lastMoveAt ?? null,
+    note: '',
+    isSynthetic: false,
+  };
+}
+
+/** 按入口取表单要的数据：总仓走库存接口；部门小仓走 /api/erp/dept-stock（部门的员工没有「查看库存」） */
+function useScopeData(scope: FormScope) {
+  const central = scope.kind === 'central';
+  const materialsQ = useMaterials(true, central);
+  const suppliersQ = useSuppliers(false, central);
+  const settingsQ = useInvSettings(central);
+  const meta = useDeptMeta(!central);
+  const stock = useDeptStock(central ? null : scope.dept!.id);
+  const deptMaterials = useMemo(() => {
+    if (central || !meta.data || !stock.data) return undefined;
+    const rows = new Map(stock.data.map((r) => [r.materialId, r]));
+    return meta.data.materials.map((m) => deptMaterial(m, rows.get(m.id)));
+  }, [central, meta.data, stock.data]);
+  return {
+    materials: central ? materialsQ.data : deptMaterials,
+    refetchMaterials: () => (central ? materialsQ.refetch() : stock.refetch()),
+    suppliers: central ? suppliersQ.data : meta.data?.suppliers,
+    approvalRules: central ? settingsQ.data?.approvalRules : meta.data?.approvalRules,
+    urgentCapCents: central ? settingsQ.data?.urgentCapCents : meta.data?.urgentCapCents,
+  };
+}
+
+const DRAFT_KEY = (type: InvDocType, scope: FormScope) => (scope.dept ? `yuzu.invDraft.v1.dept${scope.dept.id}.${type}` : `yuzu.invDraft.v1.${type}`);
+function readDraft(type: InvDocType, scope: FormScope): FormState | null {
   try {
-    const raw = localStorage.getItem(DRAFT_KEY(type));
-    return raw ? (JSON.parse(raw) as FormState) : null;
+    const raw = localStorage.getItem(DRAFT_KEY(type, scope));
+    if (!raw) return null;
+    // v0.7.11 以前存下的草稿没有「一起验收的采购」
+    const draft = JSON.parse(raw) as Partial<FormState>;
+    return { ...draft, coAcceptorId: draft.coAcceptorId ?? null } as FormState;
   } catch {
     return null;
   }
 }
-function writeDraft(type: InvDocType, form: FormState | null) {
+function writeDraft(type: InvDocType, scope: FormScope, form: FormState | null) {
   try {
-    if (form) localStorage.setItem(DRAFT_KEY(type), JSON.stringify(form));
-    else localStorage.removeItem(DRAFT_KEY(type));
+    if (form) localStorage.setItem(DRAFT_KEY(type, scope), JSON.stringify(form));
+    else localStorage.removeItem(DRAFT_KEY(type, scope));
   } catch {
     /* 不可写时忽略 */
   }
@@ -109,6 +195,7 @@ function formFromDoc(doc: InvDoc, materials: Map<number, Material>): FormState {
     departmentId: doc.department?.id ?? null,
     sourceDocId: doc.sourceDoc?.id ?? null,
     purchaseOrderId: doc.purchaseOrder?.id ?? null,
+    coAcceptorId: doc.coAcceptor?.id ?? null,
     handler: doc.handler,
     note: doc.note,
     lines: doc.lines.map((l) => {
@@ -136,17 +223,26 @@ function formFromDoc(doc: InvDoc, materials: Map<number, Material>): FormState {
 const INTRO: Record<InvDocType, string> = {
   opening: '经确认的期初数量，是这项物料库存流水的起点；每项物料只能建一次。',
   receipt: '按实际合格数量入库。拒收部分不入库、不形成货款；未到的货不能提前入库。',
-  issue: '记录领给哪个部门、谁来领。领用是出库，不等于实际耗用。',
-  issue_return: '部门把未用完的物资退回总库，关联原领用单，不重复制造入库。',
-  direct_use: '总库物资直接在本区域使用。已领给部门的物资不要再用这条流程扣库存。',
+  issue: '仓库登记领给哪个部门、谁来领：总仓出、进这个部门的小仓（当面交接即生效）；部门在「本部门小仓」签收，有差异写明。',
+  issue_return: '部门小仓把没用完的东西退回总仓，关联原领料单：部门小仓出、总仓进。',
+  direct_use: '总仓的东西直接在仓库区域用掉。领给部门的东西由部门在「本部门小仓」登记耗用。',
   damage: '已知损坏单独登记并注明原因；与盘点差异分开处理。',
   count: '先记下账面数，再填实盘数。差异先叫「待核差异」，负责人确认后才调整库存。',
   supplier_return: '已验收入库后退回供应商，关联原收货单，同时扣减库存与该批货款。',
 };
 
+/** 本部门小仓的说明（v0.7.11） */
+const DEPT_INTRO: Partial<Record<InvDocType, string>> = {
+  receipt: '急采：没有采购单、临时买的东西。合计不超过急采上限；提交后要仓库到部门验收、确认后才进本部门小仓，之后补采购单。',
+  direct_use: '本部门小仓里用掉的东西（客用、日耗品等），从本部门小仓扣。',
+  damage: '本部门小仓里已知损坏的东西，注明原因；报损要负责人确认。',
+  count: '本部门小仓的盘点：差异由部门自己管，提交即生效，差异原因默认「耗用」（客用、日耗品用掉的）。',
+  opening: '本部门小仓现有的存货：每项物料只能建一次期初，要负责人确认。',
+};
+
 const QTY_LABEL: Partial<Record<InvDocType, string>> = {
   opening: '期初数量',
-  issue: '领用数量',
+  issue: '领料数量',
   issue_return: '退回数量',
   direct_use: '耗用数量',
   damage: '报损数量',
@@ -169,28 +265,35 @@ const NOTE_SPAN: Record<InvDocType, string> = {
 
 // ───────────────────────── 页面 ─────────────────────────
 
-export function DocFormPage() {
+export function DocFormPage({ scope = CENTRAL_SCOPE }: { scope?: FormScope }) {
   const params = useParams();
   const editId = params.id ? Number(params.id) : null;
   const type = params.type as InvDocType | undefined;
   const can = useCan();
-  const doc = useInvDoc(editId);
-  const materials = useMaterials(true);
+  const central = scope.kind === 'central';
+  const invDoc = useInvDoc(central ? editId : null);
+  const deptDoc = useDeptDoc(central ? null : editId);
+  const doc = central ? invDoc : deptDoc;
+  const data = useScopeData(scope);
 
   if (editId) {
     if (doc.error) return <PageError error={doc.error} />;
-    if (!doc.data || !materials.data) return <FormSkeleton />;
-    if (doc.data.status !== 'draft' && doc.data.status !== 'returned') return <Navigate to={`/inventory/docs?doc=${editId}`} replace />;
-    const map = new Map(materials.data.map((m) => [m.id, m]));
-    return <DocForm key={editId} type={doc.data.docType} editing={doc.data} initial={formFromDoc(doc.data, map)} />;
+    if (!doc.data || !data.materials) return <FormSkeleton />;
+    if (doc.data.status !== 'draft' && doc.data.status !== 'returned') return <Navigate to={scope.docLink(editId)} replace />;
+    const map = new Map(data.materials.map((m) => [m.id, m]));
+    return <DocForm key={editId} scope={scope} type={doc.data.docType} editing={doc.data} initial={formFromDoc(doc.data, map)} />;
   }
-  if (!type || !(type in INV_DOC_META)) return <Navigate to="/inventory" replace />;
-  const perm = type === 'supplier_return' ? 'supplierReturn.create' : 'inventory.operate';
-  if (!can(perm)) return <Navigate to="/inventory" replace />;
-  return <NewDoc key={type} type={type} />;
+  if (!type || !(type in INV_DOC_META)) return <Navigate to={scope.home} replace />;
+  if (central) {
+    const perm = type === 'supplier_return' ? 'supplierReturn.create' : 'inventory.operate';
+    if (!can(perm)) return <Navigate to="/inventory" replace />;
+  } else if (!DEPT_DOC_TYPES.includes(type)) {
+    return <Navigate to={scope.home} replace />;
+  }
+  return <NewDoc key={type} type={type} scope={scope} />;
 }
 
-function NewDoc({ type }: { type: InvDocType }) {
+function NewDoc({ type, scope }: { type: InvDocType; scope: FormScope }) {
   const session = useSession();
   const [params] = useSearchParams();
   // 从库存卡或原单进入时带上物料 / 原单
@@ -200,16 +303,18 @@ function NewDoc({ type }: { type: InvDocType }) {
   // 「再录一张」时换一轮：清空表单、生成新的操作编号
   const [round, setRound] = useState(0);
   const initial = useMemo(() => {
-    const draft = round === 0 && !prefillSource && !prefillPo ? readDraft(type) : null;
+    const draft = round === 0 && !prefillSource && !prefillPo ? readDraft(type, scope) : null;
     if (draft) return { form: { ...draft, purchaseOrderId: draft.purchaseOrderId ?? null }, restored: true };
     return {
       form: { ...blankForm(session.calendarToday), sourceDocId: round === 0 ? prefillSource : null, purchaseOrderId: round === 0 ? prefillPo : null },
       restored: false,
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [round, type, session.calendarToday, prefillSource, prefillPo]);
   return (
     <DocForm
       key={round}
+      scope={scope}
       type={type}
       initial={initial.form}
       restored={initial.restored}
@@ -249,6 +354,7 @@ type Phase =
   | { kind: 'done'; doc: InvDoc; replayed: boolean };
 
 function DocForm({
+  scope,
   type,
   initial,
   editing,
@@ -256,6 +362,7 @@ function DocForm({
   onAgain,
   prefillMaterialId,
 }: {
+  scope: FormScope;
   type: InvDocType;
   initial: FormState;
   editing?: InvDoc;
@@ -267,11 +374,15 @@ function DocForm({
   const can = useCan();
   const toast = useToast();
   const navigate = useNavigate();
-  const invalidate = useInvalidateInventory();
-  const materialsQ = useMaterials(true);
-  const suppliers = useSuppliers();
-  const departments = useDepartments();
-  const settings = useInvSettings();
+  const invalidateInv = useInvalidateInventory();
+  const invalidateDept = useInvalidateDept();
+  const central = scope.kind === 'central';
+  const invalidate = () => (central ? invalidateInv() : invalidateDept());
+  const data = useScopeData(scope);
+  const departments = useDepartments(false, central && type === 'issue');
+  // 按采购单收货：一起验收的采购经办（#17）
+  const coAcceptors = useCoAcceptors(central && type === 'receipt');
+  const urgent = !central && type === 'receipt';
   const [form, setForm] = useState<FormState>(initial);
   const [phase, setPhase] = useState<Phase>({ kind: 'edit' });
   const [error, setError] = useState<ApiError | null>(null);
@@ -284,16 +395,17 @@ function DocForm({
   const Icon = visual.icon;
   const locked = phase.kind !== 'edit';
 
-  const materials = useMemo(() => new Map((materialsQ.data ?? []).map((m) => [m.id, m])), [materialsQ.data]);
+  const materials = useMemo(() => new Map((data.materials ?? []).map((m) => [m.id, m])), [data.materials]);
 
   // 新建单据的内容随手保存在本机：刷新或误关页面后可以接着填，操作编号不变
   useEffect(() => {
     if (editing || phase.kind === 'done') return;
     const t = setTimeout(() => {
       const empty = form.lines.length === 0 && !form.note && !form.handler && !form.supplierId && !form.departmentId && !form.sourceDocId;
-      writeDraft(type, empty ? null : form);
+      writeDraft(type, scope, empty ? null : form);
     }, 250);
     return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form, type, editing, phase.kind]);
 
   const patch = (p: Partial<FormState>) => setForm((f) => ({ ...f, ...p }));
@@ -322,16 +434,16 @@ function DocForm({
 
   const prefilled = useRef(false);
   useEffect(() => {
-    if (prefilled.current || !prefillMaterialId || !materialsQ.data) return;
+    if (prefilled.current || !prefillMaterialId || !data.materials) return;
     prefilled.current = true;
     const m = materials.get(prefillMaterialId);
     if (!m || !m.tracked || !m.active || form.lines.some((l) => l.materialId === m.id)) return;
     if (type === 'opening' && m.hasMoves) return;
     addMaterial(m);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefillMaterialId, materialsQ.data]);
+  }, [prefillMaterialId, data.materials]);
 
-  // ── 来源单据（领用退回 / 退供应商） ──
+  // ── 来源单据（领料退回 / 退供应商） ──
   const sourceType = type === 'issue_return' ? 'issue' : type === 'supplier_return' ? 'receipt' : null;
   const source = useInvDoc(sourceType ? form.sourceDocId : null);
   const chooseSource = (docId: number | null) => {
@@ -348,8 +460,8 @@ function DocForm({
   }, [source.data, sourceType, form.lines.length, form.sourceDocId]);
 
   // ── 按采购单收货 ──
-  const openPos = usePos({ open: '1', supplierId: form.supplierId ? String(form.supplierId) : undefined }, type === 'receipt' && !!form.supplierId);
-  const po = usePo(type === 'receipt' ? form.purchaseOrderId : null);
+  const openPos = usePos({ open: '1', supplierId: form.supplierId ? String(form.supplierId) : undefined }, central && type === 'receipt' && !!form.supplierId);
+  const po = usePo(central && type === 'receipt' ? form.purchaseOrderId : null);
   const poLines = useMemo(() => new Map((po.data?.lines ?? []).map((l) => [l.id, l])), [po.data]);
   const choosePo = (poId: number | null) => patch({ purchaseOrderId: poId, lines: [] });
   useEffect(() => {
@@ -466,6 +578,8 @@ function DocForm({
   });
 
   const isReturn = type === 'issue_return' || type === 'supplier_return';
+  // 总仓的收货一律按采购单（#19）：明细由采购单带出，不能另加物料
+  const poReceipt = type === 'receipt' && central;
   // 退回类单据：没填数量的行不提交
   const activeRows = isReturn ? rows.filter((r) => r.line.qty.text.trim() !== '') : rows;
   const lineErrors = activeRows.filter((r) => r.error);
@@ -473,22 +587,40 @@ function DocForm({
   const totalAmount = activeRows.reduce((sum, r) => sum + (r.amount ?? 0), 0);
   const countDiffs = type === 'count' ? rows.filter((r) => r.diff != null && r.diff !== 0).length : 0;
 
-  const rules = settings.data?.approvalRules;
-  const needsApproval =
-    type === 'count' ? countDiffs > 0 : type === 'opening' ? !!rules?.opening : type === 'damage' ? !!rules?.damage : type === 'supplier_return' ? !!rules?.supplier_return : false;
-  const canApprove = can('inventory.approve');
+  const rules = data.approvalRules;
+  // 部门小仓的盘点差异由部门自己管，提交即生效；急采要仓库到部门验收（v0.7.11）
+  const needsApproval = urgent
+    ? true
+    : type === 'count'
+      ? central && countDiffs > 0
+      : type === 'opening'
+        ? !!rules?.opening
+        : type === 'damage'
+          ? !!rules?.damage
+          : type === 'supplier_return'
+            ? !!rules?.supplier_return
+            : false;
+  // 急采不能一步确认（要另一个人验收；店主除外，也不在这里一步确认）
+  const canApprove = can('inventory.approve') && !urgent;
+  const urgentOver = urgent && data.urgentCapCents != null && totalAmount > data.urgentCapCents;
 
   // ── 表头校验 ──
   const headerError =
     type === 'receipt' && !form.supplierId
       ? '请选择供应商'
-      : type === 'issue' && !form.departmentId
-        ? '请选择领用部门'
+      : type === 'receipt' && central && !form.purchaseOrderId
+        ? '请选择采购单（没有采购单不能收货，急采由部门登记）'
+        : type === 'receipt' && central && !form.coAcceptorId
+          ? '请选一起验收的采购'
+          : urgentOver
+            ? `急采合计超过上限 ¥${((data.urgentCapCents ?? 0) / 100).toFixed(2)}，请先开采购单`
+            : type === 'issue' && !form.departmentId
+        ? '请选择领料部门'
         : type === 'issue' && !form.handler.trim()
-          ? '请填写领用人'
+          ? '请填写领料人'
           : isReturn && !form.sourceDocId
             ? type === 'issue_return'
-              ? '请选择原领用单'
+              ? '请选择原领料单'
               : '请选择原收货单'
             : (type === 'direct_use' || type === 'damage' || type === 'supplier_return') && form.note.trim().length < 2
               ? type === 'direct_use'
@@ -515,7 +647,9 @@ function DocForm({
           : null);
 
   const buildBody = (action: 'save' | 'submit') => {
-    const base = { docType: type, docDate: form.docDate, note: form.note.trim(), action };
+    // 部门小仓的期初、耗用、报损、盘点记在本部门小仓（v0.7.11）
+    const wh = scope.dept && type !== 'receipt' ? { warehouseId: scope.dept.warehouseId } : {};
+    const base = { docType: type, docDate: form.docDate, note: form.note.trim(), action, ...wh };
     const lines = activeRows;
     switch (type) {
       case 'opening':
@@ -556,7 +690,9 @@ function DocForm({
         return {
           ...base,
           supplierId: form.supplierId,
-          purchaseOrderId: form.purchaseOrderId,
+          purchaseOrderId: urgent ? null : form.purchaseOrderId,
+          coAcceptorId: urgent ? null : form.coAcceptorId,
+          ...(urgent ? { urgent: true, departmentId: scope.dept!.id } : {}),
           handler: form.handler.trim(),
           lines: lines.map((r) => ({
             materialId: r.line.materialId,
@@ -572,7 +708,7 @@ function DocForm({
   };
 
   const finish = (doc: InvDoc, replayed: boolean) => {
-    writeDraft(type, null);
+    writeDraft(type, scope, null);
     void invalidate();
     setPhase({ kind: 'done', doc, replayed });
   };
@@ -582,10 +718,10 @@ function DocForm({
     setPhase({ kind: 'submitting' });
     try {
       if (editing) {
-        const doc = await api.put<InvDoc>(`/api/inventory/docs/${editing.id}`, { ...(body as object), approveNow });
+        const doc = await api.put<InvDoc>(`${scope.api}/${editing.id}`, { ...(body as object), approveNow });
         finish(doc, false);
       } else {
-        const res = await api.post<{ doc: InvDoc; replayed: boolean }>('/api/inventory/docs', body, { timeoutMs: 20_000 });
+        const res = await api.post<{ doc: InvDoc; replayed: boolean }>(scope.api, body, { timeoutMs: 20_000 });
         finish(res.doc, res.replayed);
       }
     } catch (e) {
@@ -597,7 +733,7 @@ function DocForm({
       if (e instanceof ApiError) {
         setError(e);
         if (e.code === 'IDEMPOTENCY_CONFLICT') patch({ clientKey: uuid() });
-        if (e.code === 'COUNT_STALE' || e.code === 'INSUFFICIENT_STOCK') void materialsQ.refetch();
+        if (e.code === 'COUNT_STALE' || e.code === 'INSUFFICIENT_STOCK') void data.refetchMaterials();
       } else {
         toast({ tone: 'error', title: errorMessage(e) });
       }
@@ -613,7 +749,7 @@ function DocForm({
     if (phase.kind !== 'uncertain') return;
     setPhase({ ...phase, checking: true });
     try {
-      const res = await api.get<{ found: boolean; doc?: InvDoc }>(`/api/inventory/docs/by-key/${form.clientKey}`);
+      const res = await api.get<{ found: boolean; doc?: InvDoc }>(`${scope.api}/by-key/${form.clientKey}`);
       if (res.found && res.doc) finish(res.doc, true);
       else setPhase({ ...phase, checking: false, notFound: true });
     } catch {
@@ -625,7 +761,7 @@ function DocForm({
   const refreshBook = async () => {
     if (!editing) return;
     try {
-      const doc = await api.post<InvDoc>(`/api/inventory/docs/${editing.id}/refresh-book`);
+      const doc = await api.post<InvDoc>(`${scope.api}/${editing.id}/refresh-book`);
       const book = new Map(doc.lines.map((l) => [l.materialId, l.bookMilli]));
       setForm((f) => ({ ...f, lines: f.lines.map((l) => (book.has(l.materialId) ? { ...l, bookMilli: book.get(l.materialId) ?? null, stale: false } : l)) }));
       setError(null);
@@ -637,7 +773,7 @@ function DocForm({
   };
 
   if (phase.kind === 'done') {
-    return <DoneView type={type} doc={phase.doc} replayed={phase.replayed} onAgain={onAgain ?? (() => navigate(`/inventory/new/${type}`))} />;
+    return <DoneView scope={scope} type={type} doc={phase.doc} replayed={phase.replayed} onAgain={onAgain ?? (() => navigate(scope.newLink(type)))} />;
   }
 
   const takenMaterials = new Set(form.lines.map((l) => l.materialId));
@@ -649,16 +785,17 @@ function DocForm({
         dateMode="calendar"
         title={
           <span className="flex items-center gap-2.5">
-            <Link to="/inventory" className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回库存">
+            <Link to={scope.home} className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label={central ? '返回库存' : '返回本部门小仓'}>
               <ArrowLeft className="size-[18px]" />
             </Link>
             <span className={cn('flex size-8 items-center justify-center rounded-full', visual.tone)}>
               <Icon className="size-4" />
             </span>
-            {editing ? `修改${meta.title} · ${editing.docNo}` : `新建${meta.title}`}
+            {scope.dept && `${scope.dept.name}小仓 · `}
+            {editing ? `修改${urgent ? '急采' : meta.title} · ${editing.docNo}` : `新建${urgent ? '急采' : meta.title}`}
           </span>
         }
-        subtitle={INTRO[type]}
+        subtitle={(scope.dept && DEPT_INTRO[type]) || INTRO[type]}
       />
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
@@ -677,7 +814,7 @@ function DocForm({
                     variant="ghost"
                     icon={<Eraser className="size-4" />}
                     onClick={() => {
-                      writeDraft(type, null);
+                      writeDraft(type, scope, null);
                       setForm(blankForm(session.calendarToday));
                       setShowRestored(false);
                     }}
@@ -712,36 +849,52 @@ function DocForm({
                   onChange={(e) => patch({ supplierId: Number(e.target.value) || null, ...(form.purchaseOrderId ? { purchaseOrderId: null, lines: [] } : {}) })}
                 >
                     <option value="">选择供应商</option>
-                    {suppliers.data?.map((s) => (
+                    {data.suppliers?.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.code} · {s.name}
                       </option>
                     ))}
                   </Select>
                 </Field>
-                <Field label="采购单" htmlFor="po" hint={form.supplierId ? undefined : '先选供应商'}>
-                  <Select id="po" value={form.purchaseOrderId ?? ''} disabled={locked || !form.supplierId || !!editing} onChange={(e) => choosePo(Number(e.target.value) || null)}>
-                    <option value="">{settings.data?.allowDirectReceipt === false ? '请选择采购单' : '无采购单（直接收货）'}</option>
-                    {form.purchaseOrderId && !openPos.data?.some((p) => p.id === form.purchaseOrderId) && po.data && <option value={po.data.id}>{po.data.docNo}</option>}
-                    {openPos.data
-                      ?.filter((p) => p.receiving !== 'full')
-                      .map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.docNo} · {p.summary}
-                        </option>
-                      ))}
-                  </Select>
-                </Field>
-                <Field label="收货人" htmlFor="handler">
-                  <Input id="handler" value={form.handler} disabled={locked} onChange={(e) => patch({ handler: e.target.value })} placeholder="默认为当前账号" className="h-10" />
+                {central && (
+                  <Field label="采购单" htmlFor="po" hint={form.supplierId ? '没有采购单不能收货' : '先选供应商'}>
+                    <Select id="po" value={form.purchaseOrderId ?? ''} disabled={locked || !form.supplierId || !!editing} onChange={(e) => choosePo(Number(e.target.value) || null)}>
+                      <option value="">请选择采购单</option>
+                      {form.purchaseOrderId && !openPos.data?.some((p) => p.id === form.purchaseOrderId) && po.data && <option value={po.data.id}>{po.data.docNo}</option>}
+                      {openPos.data
+                        ?.filter((p) => p.receiving !== 'full')
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.docNo} · {p.summary}
+                          </option>
+                        ))}
+                    </Select>
+                  </Field>
+                )}
+                {central && (
+                  <Field label="一起验收的采购" htmlFor="coAcceptor" hint="采购和仓库一起第一次验收">
+                    <Select id="coAcceptor" value={form.coAcceptorId ?? ''} disabled={locked} onChange={(e) => patch({ coAcceptorId: Number(e.target.value) || null })}>
+                      <option value="">请选择</option>
+                      {coAcceptors.data
+                        ?.filter((c) => c.id !== session.staff.id)
+                        .map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.displayName}
+                          </option>
+                        ))}
+                    </Select>
+                  </Field>
+                )}
+                <Field label={urgent ? '经手人' : '收货人'} htmlFor="handler">
+                  <Input id="handler" value={form.handler} disabled={locked} onChange={(e) => patch({ handler: e.target.value })} placeholder={urgent ? '实际去买的人' : '默认为当前账号'} className="h-10" />
                 </Field>
               </>
             )}
 
             {type === 'issue' && (
               <>
-                <Field label="领用部门" className="sm:col-span-2 lg:col-span-2">
-                  <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="领用部门">
+                <Field label="领料部门" className="sm:col-span-2 lg:col-span-2" hint="领到这个部门的小仓">
+                  <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="领料部门">
                     {departments.data?.map((d) => (
                       <button
                         key={d.id}
@@ -760,7 +913,7 @@ function DocForm({
                     ))}
                   </div>
                 </Field>
-                <Field label="领用人" htmlFor="handler">
+                <Field label="领料人" htmlFor="handler">
                   <Input id="handler" value={form.handler} disabled={locked} onChange={(e) => patch({ handler: e.target.value })} placeholder="实际来领的人" className="h-10" />
                 </Field>
               </>
@@ -800,9 +953,9 @@ function DocForm({
             </Field>
           </section>
 
-          {type === 'receipt' && !form.purchaseOrderId && form.supplierId && (
-            <Notice tone="warning" title="无采购单直接收货" icon={<CircleAlert className="size-5" />}>
-              这张收货单会标记「缺少采购依据」。后续补采购单时关联本单，不会重复入库或计款。是否允许先收货后补单 <SimRule className="align-middle" />
+          {urgent && (
+            <Notice tone={urgentOver ? 'error' : 'warning'} title={`急采：合计不超过 ¥${((data.urgentCapCents ?? 0) / 100).toFixed(2)}`} icon={<CircleAlert className="size-5" />}>
+              没有采购单的收货只能登记急采。提交后要仓库到部门验收、确认后才进{scope.dept?.name}小仓；之后在本部门小仓里补采购单（部门自己确认）。上限 <SimRule className="align-middle" />
             </Notice>
           )}
           {type === 'receipt' && po.data && form.purchaseOrderId === po.data.id && (
@@ -820,7 +973,7 @@ function DocForm({
               {type === 'issue' && <UsualChips departmentId={form.departmentId} materials={materials} taken={takenMaterials} disabled={locked} onAdd={(m, qty) => addMaterial(m, { qty: qtyEntryFromMilli(qty, m) })} />}
               {type === 'count' && !locked && (
                 <CountFillMenu
-                  materials={materialsQ.data ?? []}
+                  materials={central ? (data.materials ?? []) : (data.materials ?? []).filter((m) => m.hasMoves)}
                   taken={takenMaterials}
                   onAdd={(list) => setForm((f) => ({ ...f, lines: [...f.lines, ...list.map((m) => blankLine(m.id))] }))}
                 />
@@ -837,8 +990,14 @@ function DocForm({
             {rows.length === 0 && (isReturn ? !form.sourceDocId : true) && (
               <EmptyState
                 art="leaf"
-                title={isReturn ? (type === 'issue_return' ? '先选择原领用单' : '先选择原收货单') : '还没有物料'}
-                description={isReturn ? '选好原单后，这里会列出可退的物料与数量上限。' : '在下方搜索框输入编码或名称，回车加入；可以连续录入多行。'}
+                title={isReturn ? (type === 'issue_return' ? '先选择原领料单' : '先选择原收货单') : poReceipt ? '先选择采购单' : '还没有物料'}
+                description={
+                  isReturn
+                    ? '选好原单后，这里会列出可退的物料与数量上限。'
+                    : poReceipt
+                      ? '收货必须按已确认的采购单；选好采购单后，这里会列出还没到齐的物料。'
+                      : '在下方搜索框输入编码或名称，回车加入；可以连续录入多行。'
+                }
                 className="py-8"
               />
             )}
@@ -862,11 +1021,11 @@ function DocForm({
               ))}
             </ul>
 
-            {!isReturn && !locked && !form.purchaseOrderId && (
+            {!isReturn && !locked && !poReceipt && (
               <div className="border-t border-line px-5 py-3.5">
                 <MaterialPicker
                   ref={pickerRef}
-                  materials={materialsQ.data ?? []}
+                  materials={data.materials ?? []}
                   taken={takenMaterials}
                   disabledReason={
                     type === 'opening'
@@ -931,7 +1090,9 @@ function DocForm({
               </span>
             )}
             <span className="flex items-center gap-2 text-[12.5px]">
-              {needsApproval ? (
+              {urgent ? (
+                <span className="font-semibold text-yuzu-deep">提交后由仓库到部门验收，确认后才进小仓</span>
+              ) : needsApproval ? (
                 <>
                   <span className="font-semibold text-yuzu-deep">提交后需负责人确认</span>
                   {type !== 'count' && <SimRule />}
@@ -961,7 +1122,7 @@ function DocForm({
             icon={<CircleCheck className="size-[18px]" />}
             onClick={() => submit('submit')}
           >
-            {needsApproval ? (approveNow ? '提交并确认' : '提交确认') : `确认${meta.verb}`}
+            {urgent ? '提交急采' : needsApproval ? (approveNow ? '提交并确认' : '提交确认') : `确认${meta.verb}`}
           </Button>
         </div>
       </footer>
@@ -1006,10 +1167,10 @@ const GRID: Record<InvDocType, string> = {
 
 const HEADERS: Record<InvDocType, string[]> = {
   opening: ['物料', '期初数量', '备注', ''],
-  issue: ['物料', '当前库存', '领用数量', '领用后', '备注', ''],
+  issue: ['物料', '总仓库存', '领料数量', '领料后', '备注', ''],
   direct_use: ['物料', '当前库存', '耗用数量', '耗用后', '备注', ''],
   damage: ['物料', '当前库存', '报损数量', '报损后', '备注', ''],
-  issue_return: ['物料（原领用）', '可退', '退回数量', '退回后库存', '备注', ''],
+  issue_return: ['物料（原领料）', '可退', '退回数量', '退回后总仓', '备注', ''],
   supplier_return: ['物料（原收货）', '可退', '退货数量', '退货后库存', '扣款', ''],
   count: ['物料', '账面数', '实盘数', '差异', '备注', ''],
   receipt: ['物料', '送达数量', '合格实收', '拒收', '单价', '金额', ''],
@@ -1289,7 +1450,7 @@ function SourcePicker({ type, value, onChange, disabled, className }: { type: 'i
   const [q, setQ] = useState('');
   const list = (docs.data ?? []).filter((d: InvDocSummary) => !q || `${d.docNo} ${d.partyName ?? ''} ${d.summary}`.includes(q.trim()));
   return (
-    <Field label={type === 'issue' ? '原领用单' : '原收货单'} className={className} hint={value ? undefined : '只列出已生效的单据'}>
+    <Field label={type === 'issue' ? '原领料单' : '原收货单'} className={className} hint={value ? undefined : '只列出已生效的单据'}>
       <div className="flex gap-2">
         <Input
           fullWidth={false}
@@ -1326,7 +1487,7 @@ function UsualChips({ departmentId, materials, taken, onAdd, disabled }: { depar
           type="button"
           disabled={disabled}
           onClick={() => onAdd(u.m!, u.lastQtyMilli)}
-          title={`上次领用 ${formatQty(u.lastQtyMilli)} ${u.m!.inventoryUnit}，点击按上次数量加入`}
+          title={`上次领料 ${formatQty(u.lastQtyMilli)} ${u.m!.inventoryUnit}，点击按上次数量加入`}
           className="flex h-7 items-center gap-1 rounded-full border border-line-strong bg-card px-2.5 text-[12.5px] font-semibold text-ink-2 hover:border-pine hover:text-pine"
         >
           <ListPlus className="size-3.5" />
@@ -1364,9 +1525,9 @@ function CountFillMenu({ materials, taken, onAdd }: { materials: Material[]; tak
 
 // ───────────────────────── 完成 ─────────────────────────
 
-function DoneView({ type, doc, replayed, onAgain }: { type: InvDocType; doc: InvDoc; replayed: boolean; onAgain: () => void }) {
+function DoneView({ scope, type, doc, replayed, onAgain }: { scope: FormScope; type: InvDocType; doc: InvDoc; replayed: boolean; onAgain: () => void }) {
   const navigate = useNavigate();
-  const meta = INV_DOC_META[type];
+  const meta = doc.urgent ? { ...INV_DOC_META[type], title: '急采' } : INV_DOC_META[type];
   const effective = doc.status === 'confirmed';
   return (
     <>
@@ -1379,7 +1540,7 @@ function DoneView({ type, doc, replayed, onAgain }: { type: InvDocType; doc: Inv
             </svg>
           </span>
           <h2 className="mt-5 text-[22px] font-bold">
-            {effective ? `${meta.title}已生效` : doc.status === 'draft' ? '草稿已保存' : '已提交，等待负责人确认'}
+            {effective ? `${meta.title}已生效` : doc.status === 'draft' ? '草稿已保存' : doc.urgent ? '已提交，等仓库到部门验收' : '已提交，等待负责人确认'}
           </h2>
           <p className="num mt-1 text-[15px] font-semibold text-ink-2">{doc.docNo}</p>
           <div className="mt-3">
@@ -1392,14 +1553,16 @@ function DoneView({ type, doc, replayed, onAgain }: { type: InvDocType; doc: Inv
                 ? '库存与库存卡已经更新。'
                 : doc.status === 'draft'
                   ? '草稿不影响库存，可以稍后继续修改再提交。'
-                  : '确认前不影响库存或货款。负责人可以在「待办」里确认或退回修改。'}
+                  : doc.urgent
+                    ? '仓库验收确认前不影响库存或货款；确认后进本部门小仓，再补采购单。'
+                    : '确认前不影响库存或货款。负责人可以在「待办」里确认或退回修改。'}
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-2.5">
-            <Button variant="secondary" onClick={() => navigate(`/inventory/docs?doc=${doc.id}`)}>
+            <Button variant="secondary" onClick={() => navigate(scope.docLink(doc.id))}>
               查看单据
             </Button>
-            <Button variant="secondary" onClick={() => navigate('/inventory')}>
-              回到库存
+            <Button variant="secondary" onClick={() => navigate(scope.home)}>
+              {scope.dept ? '回到本部门小仓' : '回到库存'}
             </Button>
             <Button variant="primary" onClick={onAgain}>
               再录一张{meta.title}
