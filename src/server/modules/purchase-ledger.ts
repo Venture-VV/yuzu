@@ -33,7 +33,7 @@ import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { toCsv } from '../lib/csv';
 import { badRequest, unprocessable } from '../lib/errors';
-import { parse } from '../lib/validate';
+import { dateSchema, parse } from '../lib/validate';
 import { buildXlsx, type XlsxImage } from '../lib/xlsx';
 import { advanceRows, loadExpenseRules, toAdvanceSummary } from './expenses';
 import { todayIn } from './inventory/common';
@@ -534,10 +534,10 @@ export async function ledgerAudit(db: Db, timezone: string): Promise<LedgerAudit
 // ───────────────────────── 路由 ─────────────────────────
 
 const optId = z.coerce.number().int().positive().optional();
-const LedgerQuery = z.object({ from: z.string(), to: z.string(), departmentId: optId, handlerId: optId });
+const LedgerQuery = z.object({ from: dateSchema('开始日期'), to: dateSchema('结束日期'), departmentId: optId, handlerId: optId });
 const OrderedQuery = z.object({
-  from: z.string(),
-  to: z.string(),
+  from: dateSchema('开始日期'),
+  to: dateSchema('结束日期'),
   supplierId: optId,
   state: z.enum(['open', 'overdue', 'received', 'all']).default('all'),
 });

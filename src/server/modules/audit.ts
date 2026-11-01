@@ -1,14 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { ISO_DATE } from '@shared/business-date';
 import type { AuditRecord } from '@shared/types';
 import { guard } from '../auth/guard';
 import type { Deps } from '../lib/context';
-import { parse } from '../lib/validate';
+import { dateSchema, parse } from '../lib/validate';
 
 const AuditQuery = z.object({
   /** 按自然日（门店时区）筛选 */
-  date: z.string().regex(ISO_DATE).optional(),
+  date: dateSchema().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
 

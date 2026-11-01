@@ -21,6 +21,7 @@ import { registerPayableRoutes } from './modules/inventory/payables';
 import { registerExpenseRoutes } from './modules/expenses';
 import { registerErpOpsRoutes } from './modules/erp-ops';
 import { registerPurchaseLedgerRoutes } from './modules/purchase-ledger';
+import { registerLegacyRoutes } from './modules/legacy';
 import { registerRequestRoutes } from './modules/requests';
 import { registerPurchasingRoutes } from './modules/inventory/purchasing';
 import { registerReportRoutes } from './modules/inventory/reports';
@@ -156,6 +157,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerRequestRoutes(app, deps);
   registerErpOpsRoutes(app, deps);
   registerPurchaseLedgerRoutes(app, deps);
+  registerLegacyRoutes(app, deps);
   registerFrontdeskRoutes(app, deps);
   registerTechnicianRoutes(app, deps);
   registerClockroomRoutes(app, deps);

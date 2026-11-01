@@ -6,6 +6,7 @@ import { frontdeskChecks } from '../modules/frontdesk/checks';
 import { inventoryChecks } from '../modules/inventory/reports';
 import { expenseChecks } from '../modules/expenses';
 import { requestChecks } from '../modules/requests';
+import { legacyChecks } from '../modules/legacy';
 import { computeSettlement } from '../modules/settlement';
 import { loadSettings } from '../modules/settings';
 
@@ -23,5 +24,7 @@ export async function consistencyChecks(sql: Sql, timezone: string): Promise<Che
   const expenses = await readSnapshot(sql, expenseChecks);
   const requests = await readSnapshot(sql, requestChecks);
   const frontdesk = await readSnapshot(sql, frontdeskChecks);
-  return [...summary.checks, ...inventory, ...expenses, ...requests, ...frontdesk].map(({ label, ok, detail }) => ({ label, ok, detail }));
+  // 旧账只读表与导入记录一致（v0.7.10；旧账不进正式账，这里只核对只读表没被动过）
+  const legacy = await readSnapshot(sql, legacyChecks);
+  return [...summary.checks, ...inventory, ...expenses, ...requests, ...frontdesk, legacy].map(({ label, ok, detail }) => ({ label, ok, detail }));
 }

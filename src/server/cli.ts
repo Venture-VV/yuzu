@@ -20,6 +20,13 @@
 //                                         导入旧系统（EBC）会员余额作为期初（真实业务数据，默认只预览，加 --apply 才写入）；
 //                                         本金、赠金分开记「期初导入」流水，不计入充值实收；同一位会员只能有一笔有效的期初；
 //                                         给了控制总数时核对「导入 + 排除清单 = 控制总数」，不一致不导入（正式环境必须给）
+//   import-legacy <文件.xlsx> --operator <店主账号> [--apply] [--replace 原因]
+//                                         8–10 月旧账只读对照（v0.7.10）：认出是四份原始 Excel 中的哪一份，默认只预览（行数与核验结果），
+//                                         加 --apply 才写进只读表（不进正式账）；这份表已导入过时要 --replace 写原因（旧的作废）
+//   void-legacy-import <导入编号> --operator <店主账号> --reason <原因>
+//                                         作废一次旧账导入（页面上不再显示）
+//   legacy-samples <目录>                 写出四份旧账的合成样例（结构与原表一致、内容是编的），演示与验收用
+//   seed-legacy-demo                      把旧账合成样例导入演示库（仅独立演示库；试用 / 正式环境拒绝）
 //   check                                 核对会员余额与流水、库存结存与库存流水、手牌账单与明细是否一致
 //   fingerprint [--json] [--expect 摘要]  当前数据库的数据指纹（逐表行数与内容摘要）；--expect 不一致时退出码为 1
 //   backup [--label 备注]                 立即备份一次：导出 → 临时库试恢复 → 自检与数据指纹，文件与 .json 说明写到 BACKUP_PATH
@@ -49,6 +56,10 @@ import { seedDemo, DEMO_PASSWORD } from './seed';
 import { seedInventoryDemo } from './seed-inventory';
 import { seedFrontdeskDemo } from './seed-frontdesk';
 import { seedBillingDemo } from './seed-billing';
+import { seedLegacyDemo } from './seed-legacy';
+import { applyLegacyImport, fileMeta, LegacyParseError, parseLegacyWorkbook, previewLegacyImport, voidLegacyImport } from './modules/legacy';
+import { legacySampleFiles } from './modules/legacy/samples';
+import { LEGACY_SOURCE_LABELS, type LegacyAudit } from '@shared/legacy';
 import { STORE_HAND_TAGS_CSV } from './demo/hand-tags-2026-10-27';
 import { TANGQI_PRICE_LIST_CSV } from './demo/price-list-tangqi-2026-10-27';
 import { importPriceList } from './modules/catalog';
@@ -92,6 +103,30 @@ function refuseLiveEnv(config: { env: string }, what: string) {
   if (config.env === 'production' || config.env === 'trial') {
     throw new Error(`当前是${config.env === 'trial' ? '试用' : '正式'}环境，禁止写入${what}演示数据。请另建独立的演示库（APP_ENV=development）再执行。`);
   }
+}
+
+/** 导入、作废旧账要用店主账号经办 */
+async function ownerOperator(sql: ReturnType<typeof createSql>, username: string, what: string) {
+  const [actor] = await sql<{ id: number; role: string; active: boolean }[]>`SELECT id, role, active FROM staff WHERE username = ${username}`;
+  if (!actor || !actor.active) throw new Error(`账号「${username}」不存在或已停用`);
+  if (actor.role !== 'owner') throw new Error(`${what}只能由店主账号经办`);
+  return { id: Number(actor.id) };
+}
+
+function printLegacyAudit(a: LegacyAudit) {
+  console.log('\n一、总览');
+  for (const o of a.overview) console.log(`  ${o.label}：${o.rows} 行，${o.period}，${o.amountText}；${o.problems}`);
+  console.log('二、三套账之间的差额');
+  for (const c of a.crossChecks) console.log(`  ${c.title}：${c.detail}`);
+  if (a.daily) {
+    console.log(`三、每日平账：${a.daily.days.length} 个付款日里 ${a.daily.unbalanced} 天不平（${a.daily.tail} 天尾差不到 1 元）；${a.daily.zeroAdvanceWithSpend.length} 天打款为 0 但当天有支出`);
+    const top = [...a.daily.days].filter((d) => d.state === 'unbalanced').sort((x, y) => Math.abs(y.diffCents) - Math.abs(x.diffCents)).slice(0, 5);
+    if (top.length) console.log(`  差额最大：${top.map((d) => `${d.date} ${d.diffCents > 0 ? '+' : ''}${formatYuan(d.diffCents)}`).join('、')}`);
+  }
+  console.log('四、字段与口径问题');
+  for (const f of a.fieldIssues) console.log(`  ${f.title}：${f.detail}`);
+  console.log('五、12 条规则在旧账上');
+  for (const r of a.rules) console.log(`  ${r.no}. ${r.title}：${r.result}`);
 }
 
 async function main() {
@@ -288,6 +323,68 @@ async function main() {
         );
         console.log(`✓ 已导入，批次 ${report.importNo}：${report.total} 位会员，本金 ${formatYuan(report.principalTotal)}，赠金 ${formatYuan(report.bonusTotal)}。`);
         console.log('请运行 check 核对：期初 + 本日变动 = 期末。');
+        break;
+      }
+      case 'import-legacy': {
+        const file = args.find((a, i) => !a.startsWith('--') && !['--operator', '--replace'].includes(args[i - 1] ?? ''));
+        const username = flag(args, 'operator')?.toLowerCase();
+        if (!file || !username) throw new Error('用法：import-legacy <文件.xlsx> --operator <店主账号> [--apply] [--replace 原因]');
+        await migrate(sql);
+        const actor = await ownerOperator(sql, username, '旧账导入');
+        const buf = await readFile(file);
+        let parsed;
+        try {
+          parsed = parseLegacyWorkbook(buf);
+        } catch (e) {
+          if (e instanceof LegacyParseError) throw new Error(`✗ ${e.message}`);
+          throw e;
+        }
+        const meta = fileMeta(basename(file), buf);
+        const { audit, existing } = await previewLegacyImport(sql, parsed, meta);
+        console.log(`文件：${meta.fileName}（${(meta.bytes / 1024).toFixed(0)} KB，摘要 ${meta.sha256.slice(0, 12)}）`);
+        console.log(`认出是「${LEGACY_SOURCE_LABELS[parsed.source]}」：${parsed.sheets.map((s) => `「${s.name}」${s.rows} 行`).join('、')}${parsed.images.size ? `；单元格图 ${parsed.images.size} 张` : ''}`);
+        for (const w of parsed.warnings) console.log(`· ${w}`);
+        for (const [k, v] of Object.entries(parsed.fileTotals)) console.log(`· 表里自带的合计「${k}」：${formatYuan(v)}`);
+        printLegacyAudit(audit);
+        if (existing) console.log(existing.sha256 === meta.sha256 ? '· 同一个文件已经导入过（再导入直接返回原来那次）' : `· 这份表已经导入过（第 ${existing.id} 次导入：${existing.fileName}）；换成这个文件要加 --replace "原因"`);
+        if (!args.includes('--apply')) {
+          console.log('\n以上是预览，没有写入。核对无误后加 --apply 写进只读表（不进正式账）。');
+          break;
+        }
+        const r = await applyLegacyImport(sql, parsed, meta, { operatorId: actor.id, replaceReason: flag(args, 'replace') ?? null });
+        console.log(r.replayed ? `同一个文件已经导入过：第 ${r.importId} 次导入，没有重复写入。` : `已写入只读表：第 ${r.importId} 次导入${r.voidedId ? `（第 ${r.voidedId} 次导入已作废）` : ''}。在 ERP「费用与备用金 → 旧账对照」查看。`);
+        break;
+      }
+      case 'void-legacy-import': {
+        const id = Number(args[0]);
+        const username = flag(args, 'operator')?.toLowerCase();
+        const reason = flag(args, 'reason');
+        if (!Number.isInteger(id) || id <= 0 || !username || !reason) throw new Error('用法：void-legacy-import <导入编号> --operator <店主账号> --reason <原因>');
+        const actor = await ownerOperator(sql, username, '作废旧账导入');
+        await voidLegacyImport(sql, id, reason, actor.id);
+        console.log(`已作废第 ${id} 次旧账导入。`);
+        break;
+      }
+      case 'legacy-samples': {
+        const dir = args[0];
+        if (!dir) throw new Error('用法：legacy-samples <目录>');
+        await mkdir(dir, { recursive: true });
+        for (const f of legacySampleFiles()) {
+          await writeFile(join(dir, f.name), f.data);
+          console.log(`已写出 ${join(dir, f.name)}`);
+        }
+        console.log('这四份是合成样例（内容是编的），导入后的核验结果见 src/server/demo/legacy-expected.json');
+        break;
+      }
+      case 'seed-legacy-demo': {
+        refuseLiveEnv(config, '旧账');
+        await migrate(sql);
+        const result = await seedLegacyDemo(sql, config);
+        if (result.skipped) console.log('已经有旧账导入，跳过。');
+        else {
+          for (const f of result.files) console.log(`已导入 ${f.name}：「${LEGACY_SOURCE_LABELS[f.source]}」${f.rows} 行（第 ${f.importId} 次导入）`);
+          console.log(`导入人：${result.operator}。预期结果见 src/server/demo/legacy-expected.json；在 ERP「费用与备用金 → 旧账对照」查看。`);
+        }
         break;
       }
       case 'check': {
