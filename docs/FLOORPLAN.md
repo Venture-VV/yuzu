@@ -33,9 +33,10 @@
 
 ## 3. 转换链路
 
-代码在 `src/server/floorplan/`：`read-dwg.ts`、`read-dxf.ts` 读图 → `model.ts` 中性图元 → `convert.ts` 转换 → `worker.ts` 转换进程 → `run.ts` 起进程。
+代码在 `src/server/floorplan/`：`read-dwg.ts`、`read-dxf.ts`、`read-pdf.ts` 读图 → `model.ts` 中性图元 → `convert.ts` 转换 → `worker.ts` 转换进程 → `run.ts` 起进程。
 
 1. **读图**：DWG 用 LibreDWG 的 WebAssembly 版（版本固定 0.8.1），ASCII DXF 自带解析（设计方另存的 DXF、测试与验收用的合成图纸；二进制 DXF 不收）。展开块参照（最多 6 层），块里画在 0 层的随块参照的图层，去掉外部参照绑定后的图层前缀（`…$0$`），多段线的凸度折成圆弧，镜像（拉伸方向 -Z）的图元翻过来，文字按对齐方式取位置；填充、标注等不转换，只计数。LibreDWG 报致命错误（错误码 ≥ 128）或读不出图元的，记「读不了这个文件」与错误码；非致命的错误码在报告里提示。
+   **矢量 PDF**用 pdf.js（`pdfjs-dist` 的 legacy 版，版本固定 6.4.299，只在转换进程里加载，不画图、不需要 canvas）：每页的路径（描边与填充都当轮廓，曲线折成纸上约 1 毫米一段，只做裁剪的路径不要）与文字（基线起点、字高按文字矩阵、旋转按文字方向）；图片、渐变只计数。尺寸按图纸比例 1:N 从纸上的点换成实际毫米：N 先认图上的比例文字（「1:100」「比例 1：150」「SCALE 1:200」，取出现最多的），认不出用上传时填的（命令行 `--scale`），都没有拒绝。按页面显示的方向（含旋转、裁剪框），y 朝上；每页一块图形，页与页横向隔开 50 米以上，按空隙分楼层时自然分开，页上的楼层标题给这一层定楼层；整个落在页面外的线与文字不要。图层：带可选内容组（CAD 导出时的图层）的按组的名字（白名单照用），不在组里的线算「PDF-墙」、文字算「PDF-区域文字」。没有矢量线条（扫描件）、没有文字（文字转成了曲线，认不出房号）的直接拒绝。
 2. **图层白名单**（按名字认，转换报告列出每个图层的用途与图元数）：
 
    | 用途 | 认法 |
@@ -74,21 +75,22 @@
 ## 5. 命令行
 
 ```bash
-node dist/server/cli.js floorplan-convert <图纸.dwg|.dxf> [--out 目录]   # 不碰数据库：每层 SVG、spaces.geojson、report.json
-node dist/server/cli.js floorplan-sample <文件.dxf>                      # 写出合成样例图纸（第一版）
+node dist/server/cli.js floorplan-convert <图纸.dwg|.dxf|.pdf> [--out 目录] [--scale 100]   # 不碰数据库：每层 SVG、spaces.geojson、report.json
+node dist/server/cli.js floorplan-sample <文件.dxf|.pdf>                                  # 写出合成样例图纸（第一版；.pdf 写 PDF 版，1:100）
 ```
 
-这两个命令不连数据库，不需要 `DATABASE_URL`。`floorplan-convert` 与后台走同一个转换进程，适合在测试服上量用时与内存、在本机核对图层归类（`report.json` 列出每个图层的用途与图元数），或在不想写进系统时先看结果。
+这两个命令不连数据库，不需要 `DATABASE_URL`。`floorplan-convert` 与后台走同一个转换进程，适合在测试服上量用时与内存、在本机核对图层归类（`report.json` 列出每个图层的用途与图元数），或在不想写进系统时先看结果。PDF 会打出页数与换算用的比例（图上的比例文字优先，`--scale` 只在图上认不出比例时用）。PDF 样例的预期在 `src/server/demo/floorplan-expected.json` 的 `pdf`（与 DXF 第一版只差 W306，原因写在那里的说明里）。
 
 ## 6. 部署与授权
 
 - 转换进程的入口打包成 `dist/server/floorplan-worker.js`，应用与命令行起子进程跑它（只带运行需要的环境变量，不带数据库地址）；开发与测试直接用 tsx 跑源码。
 - 读编码图那样大的 DWG 时，服务器要有约 1.5 GB 空闲内存、持续半分钟左右；内存不够时转换失败、写明原因，不影响前台。门店 Mac mini 上 Docker Desktop 的内存上限（设置 → Resources）要在平时用量之外留出这 1.5 GB；`compose.yaml` 没有给应用容器设内存上限。
+- `pdfjs-dist`（读 PDF）是 Apache-2.0，版本固定 6.4.299；它的可选依赖 `@napi-rs/canvas`（画图用，这里用不到，装不上也能读）在 `package.json` 的 overrides 里固定为 1.0.11。
 - `@mlightcad/libredwg-web` 是 GPL-3.0：只在店主自己的服务器上的转换进程里运行，不对外分发软件，不涉及 GPL 的分发义务；版本在 `package.json` 里固定为 0.8.1，升级要重新用编码图实测。以后要对外分发系统，或开源库读不了新图纸，再按需求文档评估 ODA 商业授权。
 
 ## 7. 不在本段
 
 - 房态图（按楼层渲染、颜色表示状态、点房间开房查房）与第一级实时位置：第三段，读 `/api/floorplans/active`。
 - 对客导览（区域色块、中英双语、图标）与图纸入库治理的完整流程（来源、版本、日期登记，旧底图留档回溯，保存原图纸）：第四段。本段只留转换批次与差异报告。
-- 品牌平面图 PDF 的文字抽取（对客名称）：品牌名已按 v0.7.14 进别名表、要现场核对后录入，本段不从 PDF 自动改别名。验收标准里的「或 PDF」：PDF 底图转换放在第四段与图纸治理一起做。
+- 品牌平面图 PDF 的文字抽取（对客名称）：品牌名已按 v0.7.14 进别名表、要现场核对后录入，本段不从 PDF 自动改别名。验收标准里的「或 PDF」：转换程序已能读矢量 PDF（命令行 `floorplan-convert`，见第 3、5 节）；后台上传 PDF（要能填写图纸比例，批次表的格式也要加 pdf）还没开放，后台照旧只收 DWG / DXF。
 - 例外房间的手工画轮廓：本段不做，按例外清单请设计方改图后重传；第三段房态图上例外的编码显示位置点。

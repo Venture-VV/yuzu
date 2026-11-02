@@ -35,10 +35,11 @@ export interface RunningConversion {
   kill: () => void;
 }
 
-/** 起一个转换进程：读 input，结果写到 output；超过 timeoutMs 强制停掉 */
-export function startConversion(input: string, output: string, timeoutMs: number): RunningConversion {
+/** 起一个转换进程：读 input，结果写到 output；超过 timeoutMs 强制停掉。opts.pdfScale：PDF 的图纸比例 1:N 的 N（图上认不出比例时用） */
+export function startConversion(input: string, output: string, timeoutMs: number, opts: { pdfScale?: number } = {}): RunningConversion {
   const { file, execArgv } = workerCommand();
-  const child = spawn(process.execPath, [...execArgv, `--max-old-space-size=${WORKER_HEAP_MB}`, file, input, output], {
+  const extra = opts.pdfScale === undefined ? [] : [String(opts.pdfScale)];
+  const child = spawn(process.execPath, [...execArgv, `--max-old-space-size=${WORKER_HEAP_MB}`, file, input, output, ...extra], {
     stdio: ['ignore', 'ignore', 'pipe'],
     env: workerEnv(),
   });

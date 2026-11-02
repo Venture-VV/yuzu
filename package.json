@@ -28,6 +28,7 @@
     "@fastify/static": "^10.1.7",
     "@mlightcad/libredwg-web": "0.8.1",
     "fastify": "^5.12.7",
+    "pdfjs-dist": "6.4.299",
     "postgres": "^3.4.9",
     "zod": "^4.6.7"
   },
@@ -56,6 +57,9 @@
   "overrides": {
     "@fastify/static": {
       "glob": "^14.0.3"
+    },
+    "pdfjs-dist": {
+      "@napi-rs/canvas": "1.0.11"
     }
   }
 }

@@ -393,6 +393,8 @@ export async function uploadFloorplan(
   if (bytes.length > MAX_FLOORPLAN_FILE_BYTES) throw unprocessable('FLOORPLAN_TOO_LARGE', `图纸超过 ${MAX_FLOORPLAN_FILE_BYTES / 1024 / 1024} MB`);
   const format = detectFormat(bytes);
   if (!format) throw unprocessable('FLOORPLAN_FORMAT', '只收 DWG 或 ASCII DXF 图纸（这个文件的开头不是 DWG / DXF 的格式）');
+  // 转换程序能读矢量 PDF 了，但后台上传还没开放（要先能填图纸比例，批次表的格式也只认 dwg / dxf）：照旧拒绝
+  if (format === 'pdf') throw unprocessable('FLOORPLAN_FORMAT', '后台暂时只收 DWG 或 ASCII DXF 图纸；PDF 图纸的上传（要填写图纸比例）还没开放');
   const sha = createHash('sha256').update(bytes).digest('hex');
   const same = await sameFileBatch(db, sha);
   if (same) return { batch: same, replayed: true };

@@ -89,11 +89,11 @@ describe('解析规则', () => {
     expect(polygonArea([[0, 0], [10, 0], [10, 5], [0, 5]])).toBe(50);
   });
 
-  it('认文件格式：DWG 看文件头版本号，DXF 看段落开头，其余拒绝', () => {
+  it('认文件格式：DWG 看文件头版本号，DXF 看段落开头，PDF 看文件头「%PDF-」（读法见 floorplan-pdf.test.ts），其余拒绝', () => {
     expect(detectFormat(enc('AC1032\0\0\0'))).toBe('dwg');
     expect(detectFormat(enc(floorplanSampleDxf()))).toBe('dxf');
     expect(detectFormat(enc('0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n'))).toBe('dxf');
-    expect(detectFormat(enc('%PDF-1.7'))).toBeNull();
+    expect(detectFormat(enc('%PDF-1.7'))).toBe('pdf');
     expect(detectFormat(enc('楼层,编码\nL3,S301'))).toBeNull();
   });
 });
@@ -360,7 +360,7 @@ describe('转换进程', () => {
   it('读不了的文件、超时：记失败原因', async () => {
     await writeFile(join(dir, 'b.bin'), 'hello');
     const bad = await startConversion(join(dir, 'b.bin'), join(dir, 'b.json'), 60_000).done;
-    expect(bad).toMatchObject({ ok: false, error: '只收 DWG 或 ASCII DXF 图纸' });
+    expect(bad).toMatchObject({ ok: false, error: '只收 DWG、ASCII DXF 或矢量 PDF 图纸' });
     const slow = await startConversion(join(dir, 'a.dxf'), join(dir, 'c.json'), 50).done;
     expect(slow).toMatchObject({ ok: false, error: '转换超过 1 秒 没完成，已停止' });
   }, 60_000);
