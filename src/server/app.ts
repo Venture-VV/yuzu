@@ -30,6 +30,7 @@ import { registerPurchasingRoutes } from './modules/inventory/purchasing';
 import { registerReportRoutes } from './modules/inventory/reports';
 import { registerLedgerRoutes } from './modules/ledger';
 import { registerMemberRoutes } from './modules/members';
+import { registerCouponRoutes } from './modules/coupons';
 import { registerOpeningRoutes } from './modules/opening';
 import { registerPrintRoutes } from './modules/print';
 import { registerShiftRoutes } from './modules/shifts';
@@ -146,6 +147,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerAuthRoutes(app, deps);
   registerGrantRoutes(app, deps);
   registerMemberRoutes(app, deps);
+  registerCouponRoutes(app, deps);
   registerWalletRoutes(app, deps);
   registerOpeningRoutes(app, deps);
   registerShiftRoutes(app, deps);

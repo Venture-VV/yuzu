@@ -10,10 +10,12 @@
 //   07-客房与押金.csv  当天的入住、房费、换房、退房、夜审与押金的收、退（S7，v0.7.4），供与客房登记、押金袋核对
 //   08-使用单.csv      派对房、宠物轰趴房、娱乐室当天开的使用单（v0.7.19）：房间、使用人手牌、开单与结束时刻、时长、经办人、撤单原因
 //   09-退款单.csv      当天开的退款单（v0.7.20，离店后部分退款，含当天作废的）：每项一行，原结账单、退款方式与退款单号、经办人、原因
+//   10-券.csv          当天的发券、用券、退回、作废（v0.7.20）：券码只显示后 4 位
 // 优惠 / 免单与降档 / 免票授权在资金轨 R1.2 合并后加入异常清单。
 
 import { businessDateOf, businessDayStart } from '@shared/business-date';
 import { businessBreakdown, CHECKOUT_METHOD_LABELS, CHECKOUT_METHODS, COUPON_PLATFORM_LABELS, type CheckoutMethod, type CouponPlatform, type ShiftRecord } from '@shared/checkout';
+import { maskStoreCouponCode } from '@shared/coupons';
 import { INSTANCE_LABELS } from '@shared/instance';
 import { formatYuan } from '@shared/money';
 import { CALL_TYPE_LABELS, gradeLabel } from '@shared/technicians';
@@ -262,7 +264,17 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     JOIN staff so ON so.id = u.opened_by LEFT JOIN staff sc ON sc.id = u.closed_by
     WHERE u.business_date = ${date} OR (u.closed_at >= ${from} AND u.closed_at < ${to})
     ORDER BY u.opened_at, u.id`;
-  return { summary, checkouts, departments, voidedLines, cancelled, ticketChanges, freeEntries, shifts, technicians, rooms, usages, refunds };
+  // 券（v0.7.20）：当天的发券记录与券的变动（用、退回、作废）
+  const couponIssues = await tx<{ at: string; issueNo: string; kind: string; template: string; member: string | null; quantity: number; staff: string | null; reason: string }[]>`
+    SELECT i.issued_at AS at, i.issue_no, i.kind, t.name AS template, m.name AS member, i.quantity, s.display_name AS staff, i.reason
+    FROM coupon_issues i JOIN coupon_templates t ON t.id = i.template_id LEFT JOIN members m ON m.id = i.member_id LEFT JOIN staff s ON s.id = i.issued_by
+    WHERE i.business_date = ${date} ORDER BY i.id`;
+  const couponEvents = await tx<{ at: string; kind: string; checkoutNo: string | null; template: string; code: string; member: string | null; amount: number | null; staff: string; reason: string }[]>`
+    SELECT e.at, e.kind, ck.checkout_no, t.name AS template, c.code, m.name AS member, e.amount, s.display_name AS staff, e.reason
+    FROM coupon_events e JOIN coupons c ON c.id = e.coupon_id JOIN coupon_templates t ON t.id = c.template_id JOIN staff s ON s.id = e.staff_id
+    LEFT JOIN members m ON m.id = c.member_id LEFT JOIN checkouts ck ON ck.id = e.checkout_id
+    WHERE e.business_date = ${date} ORDER BY e.id`;
+  return { summary, checkouts, departments, voidedLines, cancelled, ticketChanges, freeEntries, shifts, technicians, rooms, usages, refunds, couponIssues, couponEvents };
 }
 
 export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string, now = new Date()): Promise<DailyRecon> {
@@ -589,6 +601,40 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     ]),
   });
 
+  // 10 券（v0.7.20）：当天的发券与券的变动；券码只显示后 4 位（无记名券拿到券码就能用）
+  const issueKindLabel: Record<string, string> = { manual: '手动发', batch: '无记名券', open_card: '开卡礼', level_up: '升级礼', birthday: '生日礼', recharge: '充值赠券' };
+  const eventKindLabel: Record<string, string> = { use: '用券', return: '反结账退回', void: '作废' };
+  files.push({
+    name: '10-券.csv',
+    content: toCsv([
+      ['类别', '时间', '单号', '券', '券码（后 4 位）', '会员', '张数', '抵扣金额（元）', '经办人', '原因 / 说明'],
+      ...day.couponIssues.map((i) => [
+        `发券（${issueKindLabel[i.kind] ?? i.kind}）`,
+        stampOf(i.at),
+        i.issueNo,
+        i.template,
+        '',
+        i.member ?? (i.kind === 'batch' ? '无记名' : ''),
+        i.quantity,
+        '',
+        i.staff ?? '系统（定时任务）',
+        i.reason,
+      ]),
+      ...day.couponEvents.map((e) => [
+        eventKindLabel[e.kind] ?? e.kind,
+        stampOf(e.at),
+        e.checkoutNo ?? '',
+        e.template,
+        maskStoreCouponCode(e.code),
+        e.member ?? '无记名',
+        1,
+        e.amount === null ? '' : yuan(e.kind === 'return' ? -e.amount : e.amount),
+        e.staff,
+        e.reason,
+      ]),
+    ]),
+  });
+
   // 00 说明
   const failed = checks.filter((c: CheckLine) => !c.ok);
   const deptOk = deptTotal === biz.receivable && deptDiscount === biz.discount + biz.coupon && deptRefund === biz.refund;
@@ -606,6 +652,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     `技师：${tr.totals.clocks} 个钟（点钟 ${tr.totals.designated}、轮钟 ${tr.totals.rotation}），${formatYuan(tr.totals.amount)}${tr.unassigned.clocks ? `；未指定技师 ${tr.unassigned.clocks} 个钟` : ''}`,
     `客房押金：收 ${formatYuan(s.deposits.received.reduce((t, m) => t + m.amount, 0))}、退 ${formatYuan(s.deposits.refunded.reduce((t, m) => t + m.amount, 0))}；当天结束时在住押金 ${formatYuan(s.deposits.held)}`,
     `派对房等使用单：当天开 ${day.usages.filter((u) => u.businessDate === date).length} 张，撤单 ${day.usages.filter((u) => u.status === 'cancelled').length} 张，仍在使用 ${day.usages.filter((u) => u.status === 'open').length} 张`,
+    `券：发 ${day.couponIssues.reduce((t, i) => t + i.quantity, 0)} 张；用 ${day.couponEvents.filter((e) => e.kind === 'use').length} 张、反结账退回 ${day.couponEvents.filter((e) => e.kind === 'return').length} 张，券抵扣 ${formatYuan(biz.coupon)}；作废 ${day.couponEvents.filter((e) => e.kind === 'void').length} 张`,
     failed.length ? `自检：✗ ${failed.length} 项不一致：${failed.map((c) => c.label).join('、')}` : `自检：✓ ${checks.length} 项全部一致`,
   ];
   files.unshift({
@@ -628,6 +675,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
       '  07-客房与押金.csv   当天的入住、房费、换房、退房、夜审与押金的收、退（押金是负债，不算营业额；房费随手牌结账），与客房登记、押金袋核对',
       '  08-使用单.csv       派对房、宠物轰趴房、娱乐室当天开的与当天结束的使用单（房间、使用人手牌、开单与结束、时长、经办人、撤单原因）；场次费在结账单里',
       '  09-退款单.csv       当天开的退款单（离店后部分退款），每项一行：原结账单、退的份数与金额、退款方式与商户后台的退款单号、经办人、原因；当天作废的写明（不算营业额）',
+      '  10-券.csv           当天的发券（手动、无记名、开卡礼、升级礼、生日礼、充值赠券）与券的变动（用券、反结账退回、作废）；券码只显示后 4 位',
       '',
     ].join('\n'),
   });

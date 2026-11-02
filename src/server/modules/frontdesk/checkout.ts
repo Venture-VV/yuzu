@@ -65,6 +65,7 @@ import { closeUsagesOfVisits, openUsagesOf } from '../usages';
 import { unservedDishesOf } from '../dining';
 import { applyVisitTicket, resolveTicketType } from './tickets';
 import { assertNoRefunds, listRefundsOf } from './refunds';
+import { CouponCodeInput, couponLines, memberCouponOptions, redeemCoupon, returnCheckoutCoupons, withTicketLines } from '../coupon-checkout';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -97,7 +98,13 @@ const DiscountPayment = z.object({
   amount: positiveCents('优惠金额'),
   grantId: z.uuid('优惠 / 免单需要值班经理、店总或店主当场授权'),
 });
-export const Payment = z.union([CashPayment, WalletPayment, CouponPayment, DiscountPayment], '收款方式不正确');
+/** 券抵扣（v0.7.20）：会员的券或无记名券的券码；amount 是员工确认时看到的抵扣，与服务端此刻算的不一致时拒绝 */
+const StoreCouponPayment = z.object({
+  method: z.literal('store_coupon'),
+  code: CouponCodeInput,
+  amount: positiveCents('券抵扣'),
+});
+export const Payment = z.union([CashPayment, WalletPayment, CouponPayment, DiscountPayment, StoreCouponPayment], '收款方式不正确');
 
 export const CheckoutInput = z.object({
   clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
@@ -209,10 +216,18 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
         amount: r.linesAmount + (t?.amount ?? 0),
       };
     });
+    // 会员的券（v0.7.20）：按已挂的明细加上此刻的门票算能抵多少
+    const memberIds = members.map((m) => m.id);
+    const couponBase = withTicketLines(
+      await couponLines(tx, rows.map((r) => r.billId)),
+      visits.flatMap((v) => (v.ticket ? [{ visitId: v.visitId, typeId: v.ticket.typeId, name: v.ticket.name, amount: v.ticket.amount }] : [])),
+    );
+    const storeCoupons = await memberCouponOptions(tx, memberIds, couponBase, await businessDate(tx, deps, at));
     return {
       visits,
       totalAmount: visits.reduce((s, v) => s + v.amount, 0),
       members,
+      storeCoupons,
       graceMinutes: rules.overtimeGraceMinutes,
       pricedAt: at.toISOString(),
       sessions: await openSessionsOf(tx, ids),
@@ -243,7 +258,11 @@ export function splitPayments(payments: CheckoutPaymentInput[], actor: OpContext
   const wallets = payments.filter((p) => p.method === 'wallet');
   const coupons = payments.filter((p) => p.method === 'coupon');
   const discounts = payments.filter((p) => p.method === 'discount');
+  const storeCoupons = payments.filter((p) => p.method === 'store_coupon');
   if (discounts.length > 1) throw badRequest('优惠 / 免单最多登记一笔，请合并金额后重新授权');
+  // 券（v0.7.20）：每张结账单最多 1 张，不与优惠 / 免单同时用
+  if (storeCoupons.length > 1) throw badRequest('每张结账单最多用 1 张券');
+  if (storeCoupons.length && discounts.length) throw badRequest('券不能和优惠 / 免单同时用，请二选一');
   if (payments.some((p) => p.method === 'other' && !p.ref)) throw badRequest('「其他」收款请在备注里写明收的是什么');
   if (wallets.length && !can(actor, 'consume.create')) throw forbidden('当前岗位不能用会员储值收款');
   if (new Set(wallets.map((w) => w.memberId)).size !== wallets.length) throw badRequest('同一位会员的储值支付请合并为一笔');
@@ -290,6 +309,9 @@ export async function recordCheckoutPayments(
     /** 储值消费单备注里的手牌号；桌台结账时为桌号（tables） */
     tagCodes: string[];
     tables?: string[];
+    /** 这次结的账单（券按这些账单上的明细算抵扣）与客人里的会员（会员的券只能用在自己结账时） */
+    billIds: number[];
+    memberIds: number[];
     date: string;
     at: Date;
     ctx: OpContext;
@@ -330,8 +352,24 @@ export async function recordCheckoutPayments(
       INSERT INTO checkout_payments (checkout_id, method, amount, ref, coupon_id)
       VALUES (${a.checkoutId}, 'coupon', ${cp.amount}, ${cp.dealName}, ${g!.id})`;
   }
+  // 券抵扣（v0.7.20）：在会员储值、赠金批次之后锁券一行，按此刻的明细核对抵扣；记下适用的明细（部门快照按它们分摊）
+  for (const sc of a.payments.filter((p) => p.method === 'store_coupon')) {
+    const r = await redeemCoupon(tx, {
+      code: sc.code,
+      expectedAmount: sc.amount,
+      memberIds: a.memberIds,
+      billIds: a.billIds,
+      checkoutId: a.checkoutId,
+      date: a.date,
+      at: a.at,
+      staffId: a.ctx.actor.id,
+    });
+    await tx`
+      INSERT INTO checkout_payments (checkout_id, method, amount, ref, store_coupon_id, coupon_lines)
+      VALUES (${a.checkoutId}, 'store_coupon', ${r.amount}, ${r.ref}, ${r.couponId}, ${r.lineIds}::bigint[])`;
+  }
   for (const p of a.payments) {
-    if (p.method === 'wallet' || p.method === 'coupon' || p.method === 'discount') continue;
+    if (p.method === 'wallet' || p.method === 'coupon' || p.method === 'discount' || p.method === 'store_coupon') continue;
     await tx`
       INSERT INTO checkout_payments (checkout_id, method, amount, ref)
       VALUES (${a.checkoutId}, ${p.method}, ${p.amount}, ${p.ref})`;
@@ -458,7 +496,8 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
     }
 
     const tagCodes = priced.map((r) => r.tagCode);
-    await recordCheckoutPayments(tx, deps, { checkoutId, checkoutNo, payments: input.payments, discount, tagCodes, date, at, ctx });
+    const memberIds = [...guests].filter((m): m is number => m !== null);
+    await recordCheckoutPayments(tx, deps, { checkoutId, checkoutNo, payments: input.payments, discount, tagCodes, billIds, memberIds, date, at, ctx });
     await snapshotCheckoutItems(tx, checkoutId);
 
     // 结清：账单与来访结束，手牌释放；同行组没有在店客人时关闭
@@ -625,6 +664,8 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
     await tx`
       UPDATE group_buy_coupons SET status = 'voided', voided_at = ${at}, voided_by = ${ctx.actor.id}, void_reason = ${voidText}
       WHERE checkout_id = ${c.id} AND status = 'active'`;
+    // 用掉的券退回（v0.7.20；在会员之后锁券）
+    await returnCheckoutCoupons(tx, { checkoutId: c.id, reason: voidText, date, at, staffId: ctx.actor.id });
     // 退款记到反结账人的班次，或所选钱箱当班的班次（事务开头已加锁核对）
     await tx`
       UPDATE checkouts SET status = 'voided', voided_at = ${at}, voided_by = ${ctx.actor.id}, void_reason = ${reason}, void_business_date = ${date},

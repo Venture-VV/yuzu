@@ -40,8 +40,8 @@ beforeAll(async () => {
 afterAll(async () => ctx.close());
 
 describe('每日对账包', () => {
-  it('八个文件；自检全部一致，部门参考表合计 = 应收，再单列优惠 / 免单与净营业额', () => {
-    expect(recon.files.map((f) => f.name)).toEqual(['00-说明.txt', '01-日结汇总.csv', '02-结账单.csv', '03-部门参考表.csv', '04-异常清单.csv', '05-交班.csv', '06-技师业绩.csv', '07-客房与押金.csv', '08-使用单.csv']);
+  it('十一个文件；自检全部一致，部门参考表合计 = 应收，再单列优惠 / 免单、券抵扣、退款与净营业额', () => {
+    expect(recon.files.map((f) => f.name)).toEqual(['00-说明.txt', '01-日结汇总.csv', '02-结账单.csv', '03-部门参考表.csv', '04-异常清单.csv', '05-交班.csv', '06-技师业绩.csv', '07-客房与押金.csv', '08-使用单.csv', '09-退款单.csv', '10-券.csv']);
     expect(recon.ok).toBe(true);
     const dept = rowsOf(file('03-部门参考表.csv'));
     const total = dept.find((r) => r[0] === '合计')!;
@@ -53,12 +53,12 @@ describe('每日对账包', () => {
     expect(dept.find((r) => r[0] === '应收（结账 − 反结账）')![3]).toBe((expected.business.net / 100).toFixed(2));
     const discount = expected.business.byMethod.discount;
     expect(dept.find((r) => r[0] === '优惠 / 免单（不是收款）')![3]).toBe((-discount / 100).toFixed(2));
-    expect(dept.find((r) => r[0] === '净营业额（应收 − 优惠）')![3]).toBe(((expected.business.net - discount) / 100).toFixed(2));
+    expect(dept.find((r) => r[0] === '净营业额（应收 − 优惠 − 券抵扣 − 退款）')![3]).toBe(((expected.business.net - discount) / 100).toFixed(2));
     const readme = file('00-说明.txt');
-    expect(readme).toContain('✓ 与应收一致');
+    expect(readme).toContain('✓ 与应收、优惠与券抵扣、退款一致');
     // 与日结同一口径：应收、优惠 / 免单、净营业额、实收（现金类）
     expect(readme).toContain(`应收 ¥${(expected.business.net / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}`);
-    expect(readme).toMatch(/优惠 \/ 免单 ¥21\.00；净营业额 ¥[\d,]+\.\d{2}；实收（现金类）¥[\d,]+\.\d{2}/);
+    expect(readme).toMatch(/优惠 \/ 免单 ¥21\.00；券抵扣 ¥0\.00；退款 ¥0\.00（0 张）；净营业额 ¥[\d,]+\.\d{2}；实收（现金类）¥[\d,]+\.\d{2}/);
     expect(readme).toMatch(/异常：反结账 1、优惠 \/ 免单 1、/);
   });
 

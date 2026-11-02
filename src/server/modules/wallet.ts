@@ -16,6 +16,7 @@ import { bonusExpiryAt, businessDateOf } from '@shared/business-date';
 import { PRICE_TIERS, type PriceTier } from '@shared/catalog';
 import { splitDeduction, type DeductionRule } from '@shared/deduction';
 import { describeHours, PAYMENT_METHODS } from '@shared/labels';
+import { levelOf } from '@shared/frontdesk';
 import { formatYuan } from '@shared/money';
 import { can, type Permission } from '@shared/permissions';
 import type { ConsumptionDoc, OperationLookup, OperationResult, RechargeDoc, ReversalDoc } from '@shared/types';
@@ -28,6 +29,8 @@ import type { Deps, OpContext } from '../lib/context';
 import { AppError, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse, positiveCents, cents } from '../lib/validate';
 import { addRechargeLot, expireDueLots, expireMemberBonus, restoreToLots, takeFromLots } from './bonus';
+import { issueRechargeCoupons } from './coupons';
+import { loadFrontdeskRules } from './frontdesk/common';
 import { getMember } from './members';
 import { loadPricedItems, priceLine } from './pricing';
 import { loadSettings } from './settings';
@@ -548,6 +551,29 @@ export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContex
         entryType: 'recharge', docNo, rechargeId: id, businessDate, operatorId: ctx.actor.id, at,
       });
       await addRechargeLot(tx, { memberId: member.id, rechargeId: id, amount: input.bonusAmount, expiresAt: bonusExpiresAt, at });
+      // 充值赠券与升级礼（v0.7.20）：套餐上挂的券；这笔充值让等级升高时，新达到的每一级发升级礼（与 VIP 柜同一口径）
+      const rules = await loadFrontdeskRules(tx);
+      let levelAmount: { before: number; after: number };
+      if (rules.vipLevelBasis === 'balance') {
+        const was = member.principalBalance + member.bonusBalance;
+        levelAmount = { before: was, after: was + input.paidAmount + input.bonusAmount };
+      } else {
+        const [cum] = await tx<{ amount: number }[]>`
+          SELECT coalesce((SELECT sum(paid_amount) FROM recharges WHERE member_id = ${member.id}), 0)
+                 + coalesce((SELECT sum(legacy_recharged) FROM opening_balances WHERE member_id = ${member.id} AND status = 'active'), 0) AS amount`;
+        levelAmount = { before: Number(cum!.amount) - input.paidAmount, after: Number(cum!.amount) };
+      }
+      await issueRechargeCoupons(tx, {
+        memberId: member.id,
+        planId: input.planId,
+        rechargeId: id,
+        levelBefore: levelOf(levelAmount.before, rules.vipLevelThresholds),
+        levelAfter: levelOf(levelAmount.after, rules.vipLevelThresholds),
+        staffId: ctx.actor.id,
+        at,
+        date: businessDate,
+        ip: ctx.ip,
+      });
       await writeAudit(tx, {
         staffId: ctx.actor.id,
         action: 'recharge_created',

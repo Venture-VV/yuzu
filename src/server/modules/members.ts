@@ -10,6 +10,7 @@ import type { Deps, OpContext } from '../lib/context';
 import { badRequest, conflict, notFound } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
 import { expireMemberBonus, openLots } from './bonus';
+import { issueOpenCardCoupons } from './coupons';
 import { loadFrontdeskRules } from './frontdesk/common';
 import { listLedger } from './ledger';
 import { memberLevelInfo } from './member-levels';
@@ -150,6 +151,11 @@ interface InsertMemberOptions {
   audit?: boolean;
 }
 
+interface CreateMemberOptions extends InsertMemberOptions {
+  /** 发开卡礼（v0.7.20，按后台的发券规则）：建档页面建的会员发；演示数据、期初导入不带，不发 */
+  openCard?: Pick<Deps, 'config'>;
+}
+
 /** 在调用方的事务里建档，返回会员 id。手机号重复时抛出唯一约束错误（members_phone_key），由调用方处理 */
 export async function insertMember(tx: Tx, raw: MemberInputData, ctx: OpContext, options: InsertMemberOptions = {}): Promise<number> {
   const input = parse(MemberInput, raw);
@@ -173,11 +179,15 @@ export async function insertMember(tx: Tx, raw: MemberInputData, ctx: OpContext,
   return row!.id;
 }
 
-/** 建档 */
-export async function createMember(sql: Sql, raw: MemberInputData, ctx: OpContext, options: InsertMemberOptions = {}): Promise<MemberSummary> {
+/** 建档；带 openCard 时在同一事务里按发券规则发开卡礼 */
+export async function createMember(sql: Sql, raw: MemberInputData, ctx: OpContext, options: CreateMemberOptions = {}): Promise<MemberSummary> {
   const input = parse(MemberInput, raw);
   try {
-    const id = await sql.begin((tx) => insertMember(tx, raw, ctx, options));
+    const id = await sql.begin(async (tx) => {
+      const memberId = await insertMember(tx, raw, ctx, options);
+      if (options.openCard) await issueOpenCardCoupons(tx, options.openCard, memberId, ctx);
+      return memberId;
+    });
     return getMember(sql, id);
   } catch (error) {
     if (isUniqueViolation(error, 'members_phone_key')) {
@@ -209,7 +219,7 @@ export function registerMemberRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   app.post('/api/members', { preHandler: guard('member.write') }, async (req, reply) => {
-    const member = await createMember(sql, req.body as MemberInputData, { actor: req.actor, ip: req.ip });
+    const member = await createMember(sql, req.body as MemberInputData, { actor: req.actor, ip: req.ip }, { openCard: deps });
     reply.code(201);
     return member;
   });

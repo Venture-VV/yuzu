@@ -31,6 +31,7 @@ import { cents, idParam, parse, positiveCents } from '../lib/validate';
 import { expireMemberBonus } from './bonus';
 import { cancelKitchenItem, createKitchenItems, kitchenStationsOf, loadDiningRules, takeDishLimits, type KitchenLine } from './dining';
 import { assertSettled, getCheckout, Payment, recordCheckoutPayments, snapshotCheckoutItems, splitPayments } from './frontdesk/checkout';
+import { couponLines, memberCouponOptions } from './coupon-checkout';
 import { assertCanFix, businessDate, hashRequest, loadFrontdeskRules, nextDocNo, runIdempotent, saveKey, setTxTimeouts } from './frontdesk/common';
 import { loadPricedItems, priceLine } from './pricing';
 import { lockPaymentShift, openShiftOf } from './shifts';
@@ -491,7 +492,9 @@ export async function previewTableCheckout(deps: Deps, sessionIds: number[], at 
       lines: lines.filter((l) => l.billId === r.billId).map(({ billId: _b, ...l }) => l),
       amount: r.amount,
     }));
-    return { sessions, totalAmount: sessions.reduce((sum, x) => sum + x.amount, 0), members, pricedAt: at.toISOString(), dishes };
+    // 这几桌登记的会员的券（v0.7.20）
+    const storeCoupons = await memberCouponOptions(tx, members.map((m) => m.id), await couponLines(tx, rows.map((r) => r.billId)), await businessDate(tx, deps, at));
+    return { sessions, totalAmount: sessions.reduce((sum, x) => sum + x.amount, 0), members, storeCoupons, pricedAt: at.toISOString(), dishes };
   });
 }
 
@@ -559,7 +562,8 @@ export async function checkoutTables(deps: Deps, raw: unknown, ctx: OpContext): 
         VALUES (${checkoutId}, ${r.billId}, NULL, ${r.id}, ${r.amount}, ${minutesBetween(r.openedAt, at)}, ${r.guests})`;
     }
     const tables = rows.map((r) => r.tableName);
-    await recordCheckoutPayments(tx, deps, { checkoutId, checkoutNo, payments: input.payments, discount, tagCodes: [], tables, date, at, ctx });
+    const memberIds = [...guests].filter((m): m is number => m !== null);
+    await recordCheckoutPayments(tx, deps, { checkoutId, checkoutNo, payments: input.payments, discount, tagCodes: [], tables, billIds, memberIds, date, at, ctx });
     await snapshotCheckoutItems(tx, checkoutId);
     // 结清：账单与开台结束，桌台空出来
     await tx`UPDATE bills SET status = 'settled', closed_at = ${at} WHERE id IN ${tx(billIds)}`;

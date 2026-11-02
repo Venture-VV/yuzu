@@ -104,8 +104,8 @@ describe('部门营业额快照（结账时记下）', () => {
       { category: '门票', quantity: 1, amount: 49900, discount: 809 },
     ]);
     const dept = await departments();
-    expect(dept.find((d) => d.category === '快照洗浴')).toEqual({ category: '快照洗浴', quantity: 1, amount: 6800, discount: 110 });
-    expect(dept.find((d) => d.category === '快照足疗')).toEqual({ category: '快照足疗', quantity: 1, amount: 5000, discount: 81 });
+    expect(dept.find((d) => d.category === '快照洗浴')).toEqual({ category: '快照洗浴', quantity: 1, amount: 6800, discount: 110, refund: 0 });
+    expect(dept.find((d) => d.category === '快照足疗')).toEqual({ category: '快照足疗', quantity: 1, amount: 5000, discount: 81, refund: 0 });
     await checks();
   });
 
@@ -153,14 +153,14 @@ describe('部门营业额快照（结账时记下）', () => {
     expect(paid.status).toBe(200);
     const after = await departments();
     expect(after.find((d) => d.category === '快照洗浴')).toEqual(before.find((d) => d.category === '快照洗浴'));
-    expect(after.find((d) => d.category === '快照搓澡部')).toEqual({ category: '快照搓澡部', quantity: 2, amount: 13600, discount: 0 });
+    expect(after.find((d) => d.category === '快照搓澡部')).toEqual({ category: '快照搓澡部', quantity: 2, amount: 13600, discount: 0, refund: 0 });
     // 反结账第一张（有优惠的）：当天的部门营业额按它的快照冲回，优惠分摊一起冲回
     const voided = await api(ctx.app, duty, 'POST', `/api/frontdesk/checkouts/${checkoutId}/void`, { reason: '收款方式记错' });
     expect(voided.status, JSON.stringify(voided.body)).toBe(200);
     const back = await departments();
     expect(back.find((d) => d.category === '快照洗浴')).toBeUndefined();
     expect(back.find((d) => d.category === '快照足疗')).toBeUndefined();
-    expect(back.find((d) => d.category === '快照搓澡部')).toEqual({ category: '快照搓澡部', quantity: 2, amount: 13600, discount: 0 });
+    expect(back.find((d) => d.category === '快照搓澡部')).toEqual({ category: '快照搓澡部', quantity: 2, amount: 13600, discount: 0, refund: 0 });
     // 对账包的部门参考表：应收、优惠分摊合计与日结一致
     const { buildDailyRecon } = await import('../src/server/ops/recon');
     const recon = await buildDailyRecon(ctx.sql, ctx.config, today);
@@ -321,6 +321,6 @@ describe('代码审查的修正（v0.7.6）', () => {
     await ctx.sql`
       INSERT INTO checkout_items (checkout_id, category, name, quantity, amount, discount)
       VALUES (${old!.id}, '换优惠测试', '项目甲', 1, 10000, 500), (${fresh!.id}, '换优惠测试', '项目甲', 1, 10000, 800)`;
-    expect((await departments()).find((d) => d.category === '换优惠测试')).toEqual({ category: '换优惠测试', quantity: 0, amount: 0, discount: 300 });
+    expect((await departments()).find((d) => d.category === '换优惠测试')).toEqual({ category: '换优惠测试', quantity: 0, amount: 0, discount: 300, refund: 0 });
   });
 });

@@ -316,7 +316,50 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
     await usageCheck(db),
     // ⑱ 退款单（v0.7.20）
     await refundCheck(db),
+    // ⑲ 券（v0.7.20）
+    await couponCheck(db),
   ];
+}
+
+/**
+ * ⑲ 券与变动记录、结账收款一致（v0.7.20）：券的状态 = 最后一条变动的结果（用 → 已用在那张结账单，退回 → 可用，作废 → 已作废）；
+ * 有效结账单的券抵扣 = 券已用在这张结账单、使用记录的金额；反结账的结账单的券已退回；已用的券都对应有效结账单的券抵扣；
+ * 每次发券的张数 = 发出的券
+ */
+async function couponCheck(db: Db): Promise<FrontdeskCheck> {
+  const diff = await db<{ ref: string }[]>`
+    WITH last AS (SELECT DISTINCT ON (coupon_id) coupon_id, kind, checkout_id FROM coupon_events ORDER BY coupon_id, id DESC)
+    SELECT '券 …' || right(c.code, 4) AS ref FROM coupons c LEFT JOIN last l ON l.coupon_id = c.id
+    WHERE (l.kind IS NULL AND c.status <> 'available')
+       OR (l.kind = 'use' AND (c.status <> 'used' OR c.checkout_id IS DISTINCT FROM l.checkout_id))
+       OR (l.kind = 'return' AND (c.status <> 'available' OR c.checkout_id IS NOT NULL))
+       OR (l.kind = 'void' AND c.status <> 'voided')
+    UNION ALL
+    SELECT ck.checkout_no FROM checkout_payments p JOIN checkouts ck ON ck.id = p.checkout_id JOIN coupons c ON c.id = p.store_coupon_id
+    WHERE p.method = 'store_coupon'
+      AND ((ck.status = 'completed'
+            AND (c.status <> 'used' OR c.checkout_id <> ck.id
+                 OR p.amount IS DISTINCT FROM (SELECT e.amount FROM coupon_events e WHERE e.coupon_id = c.id AND e.kind = 'use' AND e.checkout_id = ck.id
+                                               ORDER BY e.id DESC LIMIT 1)))
+           OR (ck.status = 'voided' AND c.checkout_id IS NOT DISTINCT FROM ck.id))
+    UNION ALL
+    SELECT '券 …' || right(c.code, 4) FROM coupons c
+    WHERE c.status = 'used' AND NOT EXISTS (
+      SELECT 1 FROM checkout_payments p JOIN checkouts ck ON ck.id = p.checkout_id
+      WHERE p.method = 'store_coupon' AND p.store_coupon_id = c.id AND p.checkout_id = c.checkout_id AND ck.status = 'completed')
+    UNION ALL
+    SELECT i.issue_no FROM coupon_issues i WHERE i.quantity <> (SELECT count(*) FROM coupons c WHERE c.issue_id = i.id)
+    LIMIT 5`;
+  const [t] = await db<{ total: number; used: number; voided: number }[]>`
+    SELECT count(*)::int AS total, count(*) FILTER (WHERE status = 'used')::int AS used, count(*) FILTER (WHERE status = 'voided')::int AS voided FROM coupons`;
+  return {
+    key: 'coupons',
+    label: '券与使用记录、结账收款一致',
+    ok: diff.length === 0,
+    detail: diff.length
+      ? `${diff.length} 处券的状态与记录或结账单不符（如 ${diff.map((d) => d.ref).join('、')}）`
+      : `券 ${t!.total} 张（已用 ${t!.used}、作废 ${t!.voided}）：状态与变动记录一致，用券的结账单都对得上，反结账的已退回`,
+  };
 }
 
 /**

@@ -237,6 +237,8 @@ export interface CheckoutPreview {
   totalAmount: number;
   /** 这些手牌上的会员（可用储值支付），附余额 */
   members: { id: number; name: string; memberNo: string; status: 'active' | 'frozen'; principalBalance: number; bonusBalance: number }[];
+  /** 这些会员的券（v0.7.20）：能抵多少，不能用的写原因 */
+  storeCoupons?: import('./coupons').CheckoutCouponOption[];
   graceMinutes: number;
   pricedAt: string;
   /** 钟房里还没结束的钟单（v0.7.1）：结账时一起收尾，在钟上的下钟，还没上钟的按已做完记 */
