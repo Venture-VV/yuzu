@@ -431,7 +431,10 @@ function assetUrls() {
 
 const round2 = (v: number) => Math.round(v * 100) / 100 + 0;
 
-/** 读 PDF 文件内容；opts.scale 是上传时填的图纸比例 1:N 的 N（图上认不出比例时才用）。读不了或不能转换的抛错 */
+/**
+ * 读 PDF 文件内容；opts.scale 是上传时填的图纸比例 1:N 的 N。读不了或不能转换的抛错。
+ * 比例：上传时填了就按填的（v0.7.19：「按页面大小打印」的 PDF 上写的比例不准，要能改正，待确认）；没填按页面上的比例文字；都没有拒绝。
+ */
 export async function readPdf(bytes: Uint8Array, opts: { scale?: number } = {}): Promise<PlanDrawing> {
   if (opts.scale !== undefined && !validScale(opts.scale)) throw new Error(`图纸比例要在 1 到 ${MAX_PDF_SCALE} 之间（1:100 就填 100）`);
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
@@ -490,7 +493,7 @@ export async function readPdf(bytes: Uint8Array, opts: { scale?: number } = {}):
   }
   if (!textCount) throw new Error('PDF 里没有可读的文字（可能导出时把文字转成了曲线），认不出房号；请导出时保留文字，或直接上传 DWG / DXF');
   const fromText = scaleFromTexts(pages.flatMap((pg) => pg.texts.map((t) => t.text)));
-  const scale = fromText ?? opts.scale;
+  const scale = opts.scale ?? fromText ?? undefined;
   if (scale === undefined) throw new Error('PDF 上没有认出图纸比例（如 1:100），请在上传时填写比例');
 
   // 纸上的点 → 实际毫米；页与页横向排开
@@ -529,7 +532,7 @@ export async function readPdf(bytes: Uint8Array, opts: { scale?: number } = {}):
       layers: layerNames.size,
       inserts: 0,
       skipped: counts.skipped,
-      pdf: { pages: pages.length, scale, scaleFrom: fromText !== null ? 'text' : 'option' },
+      pdf: { pages: pages.length, scale, scaleFrom: opts.scale !== undefined ? 'option' : 'text', textScale: fromText },
     },
   };
 }

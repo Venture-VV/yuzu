@@ -196,8 +196,9 @@ async function offlineCommand(command: string | undefined, args: string[]): Prom
       console.log(`读图 ${((res.readMs ?? 0) / 1000).toFixed(1)} 秒，转换 ${(r.convertMs / 1000).toFixed(1)} 秒，共 ${((Date.now() - t0) / 1000).toFixed(1)} 秒；图元 ${r.source.entities} 个、图层 ${r.source.layers} 个`);
       if (res.pdf) {
         const from = res.pdf.scaleFrom === 'text' ? '图上的比例文字' : '--scale';
-        const unused = pdfScale !== undefined && res.pdf.scaleFrom === 'text' && pdfScale !== res.pdf.scale ? `；--scale ${pdfScale} 没用上，以图上的为准` : '';
-        console.log(`PDF ${res.pdf.pages} 页，按 1:${res.pdf.scale} 换算（${from}）${unused}`);
+        // 填的比例优先（v0.7.19）；与图上写的不同时提示
+        const differ = res.pdf.scaleFrom === 'option' && res.pdf.textScale !== null && res.pdf.textScale !== res.pdf.scale ? `；图上写的是 1:${res.pdf.textScale}，按 --scale 换算` : '';
+        console.log(`PDF ${res.pdf.pages} 页，按 1:${res.pdf.scale} 换算（${from}）${differ}`);
       }
       for (const f of r.floors) {
         const rooms = r.rooms.filter((x) => x.floor === f.code);

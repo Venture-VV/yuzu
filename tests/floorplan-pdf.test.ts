@@ -78,7 +78,7 @@ describe('读 PDF：合成样例', () => {
       layers: 2,
       inserts: 0,
       skipped: {},
-      pdf: { pages: 2, scale: 100, scaleFrom: 'text' },
+      pdf: { pages: 2, scale: 100, scaleFrom: 'text', textScale: 100 },
     });
   });
 
@@ -178,16 +178,22 @@ describe('转换：PDF 样例', () => {
   });
 });
 
-describe('图纸比例：图上的文字、上传时填的、都没有', () => {
-  it('图上认出比例时以图上的为准（填的不用）；认不出时用填的；都没有拒绝；填的比例不在 1–10000 之内拒绝', async () => {
+describe('图纸比例：上传时填的、图上的文字、都没有', () => {
+  it('上传时填了就按填的（「按页面大小打印」的 PDF 上写的比例不准，要能改正）、记下图上写的；没填按图上的；都没有拒绝；填的比例不在 1–10000 之内拒绝', async () => {
     const std = await readPdf(floorplanSamplePdf());
-    const filled = await readPdf(floorplanSamplePdf(), { scale: 50 });
-    expect(filled.stats.pdf).toEqual({ pages: 2, scale: 100, scaleFrom: 'text' });
-    expect(filled.paths).toEqual(std.paths);
+    const same = await readPdf(floorplanSamplePdf(), { scale: 100 });
+    expect(same.stats.pdf).toEqual({ pages: 2, scale: 100, scaleFrom: 'option', textScale: 100 });
+    expect(same.paths).toEqual(std.paths);
+    // 填 1:50：尺寸都减半，图上写的 1:100 照样记下（报告里提示两者不同）
+    const half = await readPdf(floorplanSamplePdf(), { scale: 50 });
+    expect(half.stats.pdf).toEqual({ pages: 2, scale: 50, scaleFrom: 'option', textScale: 100 });
+    const p0 = std.paths.find((p) => p.pts[0]![0] < 50_000 && p.pts.length > 1)!;
+    const h0 = half.paths[std.paths.indexOf(p0)]!;
+    expect(Math.abs(h0.pts[1]![0] - h0.pts[0]![0])).toBeCloseTo(Math.abs(p0.pts[1]![0] - p0.pts[0]![0]) / 2, 1);
 
     await expect(readPdf(floorplanSamplePdf('no-scale'))).rejects.toThrow('PDF 上没有认出图纸比例（如 1:100），请在上传时填写比例');
     const at100 = await readPdf(floorplanSamplePdf('no-scale'), { scale: 100 });
-    expect(at100.stats.pdf).toEqual({ pages: 2, scale: 100, scaleFrom: 'option' });
+    expect(at100.stats.pdf).toEqual({ pages: 2, scale: 100, scaleFrom: 'option', textScale: null });
     expect(at100.paths).toEqual(std.paths);
     expect(at100.texts).toEqual(std.texts.filter((t) => !t.text.includes('1:100')));
     // 1:200：第一页的尺寸都翻倍（坐标取到 0.01 毫米）
@@ -206,7 +212,7 @@ describe('图纸比例：图上的文字、上传时填的、都没有', () => {
   it('readDrawing 把上传时填的比例交给 PDF；DWG / DXF 不受影响', async () => {
     const viaRead = await readDrawing(floorplanSamplePdf('no-scale'), { pdfScale: 100 });
     expect(viaRead.format).toBe('pdf');
-    expect(viaRead.drawing.stats.pdf).toEqual({ pages: 2, scale: 100, scaleFrom: 'option' });
+    expect(viaRead.drawing.stats.pdf).toEqual({ pages: 2, scale: 100, scaleFrom: 'option', textScale: null });
     const dxf = await readDrawing(enc(floorplanSampleDxf()), { pdfScale: 100 });
     expect(dxf.format).toBe('dxf');
     expect(dxf.drawing).toEqual(readDxf(enc(floorplanSampleDxf())));
@@ -313,7 +319,7 @@ describe('转换进程', () => {
   });
   afterAll(async () => rm(dir, { recursive: true, force: true }));
 
-  it('单独的进程转换 PDF 样例：用图上的比例；没有比例文字的用传进去的比例，没传记失败原因', async () => {
+  it('单独的进程转换 PDF 样例：没传比例用图上的；没有比例文字的用传进去的比例，没传记失败原因', async () => {
     await writeFile(join(dir, 'a.pdf'), floorplanSamplePdf());
     await writeFile(join(dir, 'b.pdf'), floorplanSamplePdf('no-scale'));
     const [out, scaled, missing] = await Promise.all([
@@ -323,12 +329,12 @@ describe('转换进程', () => {
     ]);
     expect(out.ok, out.error).toBe(true);
     expect(out.format).toBe('pdf');
-    expect(out.pdf).toEqual({ pages: 2, scale: 100, scaleFrom: 'text' });
+    expect(out.pdf).toEqual({ pages: 2, scale: 100, scaleFrom: 'text', textScale: 100 });
     expect(out.result!.floors.map((f) => f.code)).toEqual(expected.pdf.floors);
     expect(statuses(out.result!, 'ok')).toEqual(expected.pdf.ok);
     expect(out.peakRssMb).toBeGreaterThan(0);
     expect(scaled.ok, scaled.error).toBe(true);
-    expect(scaled.pdf).toEqual({ pages: 2, scale: 100, scaleFrom: 'option' });
+    expect(scaled.pdf).toEqual({ pages: 2, scale: 100, scaleFrom: 'option', textScale: null });
     expect(statuses(scaled.result!, 'ok')).toEqual(expected.pdf.ok);
     expect(missing).toMatchObject({ ok: false, error: 'PDF 上没有认出图纸比例（如 1:100），请在上传时填写比例' });
   }, 120_000);

@@ -56,14 +56,7 @@ describe('上传与转换', () => {
     const bad = await upload('楼层,编码\nL3,S301', 'a.csv');
     expect(bad.status).toBe(422);
     expect(bad.body.error.code).toBe('FLOORPLAN_FORMAT');
-    // 转换程序能读矢量 PDF，但后台上传还没开放：照旧拒绝
-    const pdf = await api(ctx.app, ctx.owner, 'POST', '/api/admin/floorplans', {
-      fileName: 'sample.pdf',
-      contentBase64: Buffer.from(floorplanSamplePdf()).toString('base64'),
-      note: '',
-    });
-    expect(pdf.status).toBe(422);
-    expect(pdf.body.error).toMatchObject({ code: 'FLOORPLAN_FORMAT', message: expect.stringContaining('PDF') });
+    expect(bad.body.error.message).toContain('矢量 PDF');
     expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/floorplans', { fileName: 'a.dwg', contentBase64: '' })).status).toBe(400);
     expect(((await api(ctx.app, ctx.owner, 'GET', '/api/admin/floorplans')).body as FloorplanList).batches).toEqual([]);
   });
@@ -397,4 +390,50 @@ describe('例外房间补画轮廓（v0.7.19）', () => {
     const [audit] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'floorplan_outline'`;
     expect(audit!.n).toBe(3);
   }, 60_000);
+});
+
+describe('PDF 底图（v0.7.19）', () => {
+  it('后台收矢量 PDF：图上有比例按图上的；没比例的要填，不填转换失败写明原因；填了与图上不同按填的、报告提示；DXF 填比例不记', async () => {
+    const pdfB64 = (kind?: Parameters<typeof floorplanSamplePdf>[0], stamp = String(Date.now())) => {
+      // 每次加一段注释让摘要不同（不影响读图）
+      const bytes = Buffer.concat([Buffer.from(floorplanSamplePdf(kind)), Buffer.from(`\n%${stamp}\n`)]);
+      return bytes.toString('base64');
+    };
+    const send = (contentBase64: string, extra: Record<string, unknown> = {}) =>
+      api(ctx.app, ctx.owner, 'POST', '/api/admin/floorplans', { fileName: '样例.pdf', contentBase64, sourceKind: 'designer', receivedOn: RECEIVED_ON, ...extra });
+    const r = await send(pdfB64(undefined, 'a'));
+    expect(r.status, JSON.stringify(r.body)).toBe(202);
+    expect(r.body.batch).toMatchObject({ fileFormat: 'pdf', pdfScale: null });
+    const d = await waitReady(r.body.batch.id);
+    expect(d.batch.status, d.batch.error ?? '').toBe('ready');
+    expect(d.floors.map((f) => f.code)).toEqual(expected.pdf.floors);
+    expect(codes(d.rooms.filter((x) => x.status === 'ok'))).toEqual([...expected.pdf.ok].sort());
+    expect(d.report!.pdf).toEqual({ pages: 2, scale: 100, scaleFrom: 'text', textScale: 100 });
+    expect(d.report!.issues.some((i) => i.kind === 'pdf_scale')).toBe(false);
+    // 没有比例文字、上传时也没填：转换失败，写明要填比例
+    const noScale = await send(pdfB64('no-scale', 'b'));
+    expect(noScale.status).toBe(202);
+    const failed = await waitReady(noScale.body.batch.id);
+    expect(failed.batch).toMatchObject({ status: 'failed', fileFormat: 'pdf' });
+    expect(failed.batch.error).toContain('请在上传时填写比例');
+    // 填了比例：按填的
+    const filled = await send(pdfB64('no-scale', 'c'), { pdfScale: 100 });
+    const fd = await waitReady(filled.body.batch.id);
+    expect(fd.batch).toMatchObject({ status: 'ready', pdfScale: 100 });
+    expect(fd.report!.pdf).toEqual({ pages: 2, scale: 100, scaleFrom: 'option', textScale: null });
+    // 填的与图上写的不同：按填的，报告里提示核对
+    const differ = await send(pdfB64(undefined, 'd'), { pdfScale: 200 });
+    const dd = await waitReady(differ.body.batch.id);
+    expect(dd.batch.status, dd.batch.error ?? '').toBe('ready');
+    expect(dd.report!.pdf).toMatchObject({ scale: 200, scaleFrom: 'option', textScale: 100 });
+    expect(dd.report!.issues.find((i) => i.kind === 'pdf_scale')!.message).toContain('PDF 上写的比例是 1:100，按上传时填的 1:200 换算');
+    // 扫描件：没有矢量线条
+    const scanned = await send(pdfB64('scanned', 'e'));
+    const sd = await waitReady(scanned.body.batch.id);
+    expect(sd.batch.status).toBe('failed');
+    expect(sd.batch.error).toContain('没有矢量线条');
+    // 比例超出范围：400
+    expect((await send(pdfB64(undefined, 'f'), { pdfScale: 0 })).status).toBe(400);
+    expect((await send(pdfB64(undefined, 'g'), { pdfScale: 20000 })).status).toBe(400);
+  }, 120_000);
 });

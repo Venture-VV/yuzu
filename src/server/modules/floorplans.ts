@@ -360,12 +360,23 @@ async function markFailed(db: Db, batchId: number, error: string, extra: { repor
 export async function storeConversion(db: Sql, batchId: number, out: WorkerOutput): Promise<void> {
   if (!out.ok || !out.result) return markFailed(db, batchId, out.error ?? '转换失败');
   const r = out.result;
+  // PDF（v0.7.19）：上传时填的比例与页面上写的不同，提示核对；没有图层时所有线都参与围合
+  const pdfIssues: FloorplanReport['issues'] = [];
+  if (out.pdf) {
+    if (out.pdf.scaleFrom === 'option' && out.pdf.textScale !== null && out.pdf.textScale !== out.pdf.scale) {
+      pdfIssues.push({ kind: 'pdf_scale', message: `PDF 上写的比例是 1:${out.pdf.textScale}，按上传时填的 1:${out.pdf.scale} 换算；房间面积不对时核对一下比例` });
+    }
+    if (r.layers.every((l) => l.name.startsWith('PDF-'))) {
+      pdfIssues.push({ kind: 'pdf_no_layers', message: 'PDF 没有图层：所有线都当结构线参与围合（家具、标注线也算），例外可能偏多；能导出带图层的 PDF 或 DWG 更准' });
+    }
+  }
   const report: FloorplanReport = {
     source: r.source,
     layers: r.layers,
-    issues: r.issues,
+    issues: [...pdfIssues, ...r.issues],
     params: r.params as unknown as Record<string, unknown>,
     worker: { readMs: out.readMs ?? null, peakRssMb: out.peakRssMb ?? null },
+    ...(out.pdf ? { pdf: out.pdf } : {}),
   };
   if (!r.floors.length) {
     return markFailed(db, batchId, '图上没认出楼层：没有房号与楼层标题，或结构图层的名字不在白名单里（看转换报告里的图层清单）', {

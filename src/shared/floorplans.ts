@@ -160,6 +160,8 @@ export interface FloorplanReport {
   params: Record<string, unknown>;
   /** 转换进程：读图耗时、内存峰值 */
   worker?: { readMs: number | null; peakRssMb: number | null };
+  /** PDF（v0.7.19）：页数、换算用的比例、比例从哪来（上传时填的 / 页面上的比例文字）、页面上写的比例 */
+  pdf?: { pages: number; scale: number; scaleFrom: 'text' | 'option'; textScale: number | null };
 }
 
 /** 与空间台账比对（以台账为准，不按图纸自动改台账，D6） */
