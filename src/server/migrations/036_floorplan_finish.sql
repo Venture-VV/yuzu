@@ -97,7 +97,9 @@ CREATE TABLE guide_markers (
   version    integer NOT NULL DEFAULT 1 CHECK (version >= 1),
   created_by bigint REFERENCES staff (id),
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  -- 后台补加的操作编号（自动识别的没有）：同一次补加重提不会多出一个
+  client_key uuid UNIQUE
 );
 CREATE INDEX guide_markers_floor_idx ON guide_markers (floor_code);
 

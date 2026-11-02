@@ -119,7 +119,13 @@ describe('对客导览数据', () => {
     expect(res.body).not.toContain('class="labels"');
     expect(res.body).not.toContain('员工更衣');
     expect(res.body).toContain('class="wall"');
-    expect((await ctx.app.inject({ method: 'GET', url: '/api/guide/floors/L9/svg', headers: { cookie: ctx.clerk } })).statusCode).toBe(404);
+    expect(res.headers['cache-control']).toBe('private, max-age=86400');
+    expect((await ctx.app.inject({ method: 'GET', url: `/api/guide/floors/L9/svg?b=${batchId}`, headers: { cookie: ctx.clerk } })).statusCode).toBe(404);
+    // 地址上的批次不是在用的（页面还停在换底图之前）：不给，也不让浏览器缓存（Codex 复审 c0a1a7d）；不带批次 400
+    const stale = await ctx.app.inject({ method: 'GET', url: `/api/guide/floors/L3/svg?b=${batchId + 1000}`, headers: { cookie: ctx.clerk } });
+    expect(stale.statusCode).toBe(404);
+    expect(stale.headers['cache-control']).toBe('no-store');
+    expect((await ctx.app.inject({ method: 'GET', url: '/api/guide/floors/L3/svg', headers: { cookie: ctx.clerk } })).statusCode).toBe(400);
     // 岗位权限去掉「看对客导览」：后勤看不到了
     const perms = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/permissions')).body as { effective: Record<string, string[]> };
     expect(perms.effective.backoffice).toContain('guide.view');
@@ -174,11 +180,21 @@ describe('后台：设施图标', () => {
 
   it('手工补加、挪位置、隐藏、改中英文标签（版本号）；重新识别只替换自动识别的，手工加的不动', async () => {
     const floor = (await admin()).floors.find((f) => f.code === 'L3')!;
-    expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/guide/markers', { floorCode: 'L3', kind: 'smoking', x: -1, y: 10 })).body.error.code).toBe('MARKER_OUTSIDE');
-    expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/guide/markers', { floorCode: 'L9', kind: 'smoking', x: 10, y: 10 })).body.error.code).toBe('FLOOR_NOT_ON_PLAN');
-    const add = await api(ctx.app, ctx.owner, 'POST', '/api/admin/guide/markers', { floorCode: 'L3', kind: 'smoking', x: 100, y: 100, label: '室外吸烟区', labelEn: 'Outdoor Smoking' });
+    // 补加带操作编号（缺了 400）
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/guide/markers', { floorCode: 'L3', kind: 'smoking', x: 100, y: 100 })).status).toBe(400);
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/guide/markers', { clientKey: randomUUID(), floorCode: 'L3', kind: 'smoking', x: -1, y: 10 })).body.error.code).toBe('MARKER_OUTSIDE');
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/guide/markers', { clientKey: randomUUID(), floorCode: 'L9', kind: 'smoking', x: 10, y: 10 })).body.error.code).toBe('FLOOR_NOT_ON_PLAN');
+    const key = randomUUID();
+    const body = { clientKey: key, floorCode: 'L3', kind: 'smoking', x: 100, y: 100, label: '室外吸烟区', labelEn: 'Outdoor Smoking' };
+    const add = await api(ctx.app, ctx.owner, 'POST', '/api/admin/guide/markers', body);
     expect(add.status, JSON.stringify(add.body)).toBe(200);
     const manual = (add.body as GuideAdmin).markers.find((m) => m.source === 'manual')!;
+    // 没收到结果又点了一次（同一个操作编号，位置略有不同）：不再加一个（Codex 复审 c0a1a7d）
+    const again1 = await api(ctx.app, ctx.owner, 'POST', '/api/admin/guide/markers', { ...body, x: 120, y: 110 });
+    expect(again1.status).toBe(200);
+    expect((again1.body as GuideAdmin).markers.filter((m) => m.source === 'manual')).toHaveLength(1);
+    // 同一个编号用到另一种图标上：拒绝
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/guide/markers', { ...body, kind: 'toilet' })).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
     expect(manual).toMatchObject({ kind: 'smoking', x: 100, y: 100, label: '室外吸烟区', labelEn: 'Outdoor Smoking' });
     // 挪位置（存图纸坐标）
     const moved = await api(ctx.app, ctx.owner, 'PUT', `/api/admin/guide/markers/${manual.id}`, { kind: 'smoking', x: floor.width - 50, y: 60, hidden: false, label: '室外吸烟区', labelEn: 'Outdoor Smoking', version: manual.version });

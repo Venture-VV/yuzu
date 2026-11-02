@@ -7,7 +7,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { MAX_OUTLINE_POINTS } from '@shared/floorplans';
-import type { Tx } from '../db';
+import type { Db, Tx } from '../db';
 import type { guardAny } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
@@ -23,12 +23,24 @@ const OutlineParams = z.object({
   code: z.string().regex(/^[A-Z][0-9A-Z]{1,7}$/, '编码不正确'),
 });
 const point = z.tuple([z.number('坐标不正确').finite('坐标不正确'), z.number('坐标不正确').finite('坐标不正确')]);
+// 页面上看到的这一批补画的版本（详情的 outlineRev：补画、作废都让它变大，只增不减）。只比「这个编码现在的补画」不够：
+// 补画再作废以后又回到「没有补画」，迟到的第一次补画会把作废掉的轮廓画回来（Codex 复审 c0a1a7d）
+const expectedRev = z.number('缺少页面上的补画版本，请刷新后重试').int().nonnegative();
 const SaveSchema = z.object({
   polygon: z.array(point, '请画出轮廓').min(3, '轮廓至少 3 个点').max(MAX_OUTLINE_POINTS, `轮廓最多 ${MAX_OUTLINE_POINTS} 个点`),
   /** 页面上看到的这个编码现在的补画（没有为 null）：对不上说明刚被别人改过 */
   expectedOutlineId: z.number().int().positive().nullable(),
+  expectedRev,
 });
-const VoidSchema = z.object({ expectedOutlineId: z.number('缺少页面上的补画，请刷新后重试').int().positive() });
+const VoidSchema = z.object({ expectedOutlineId: z.number('缺少页面上的补画，请刷新后重试').int().positive(), expectedRev });
+
+/** 补画轮廓的版本：补画（新一行）、作废都会让它变大（页面据此重新取在用的底图，补画、作废时核对） */
+export async function outlineRev(db: Db, batchId: number | null): Promise<number> {
+  if (batchId === null) return 0;
+  const [r] = await db<{ rev: number }[]>`
+    SELECT (coalesce(max(id), 0) + count(*) FILTER (WHERE voided_at IS NOT NULL))::int AS rev FROM floorplan_room_outlines WHERE batch_id = ${batchId}`;
+  return Number(r!.rev);
+}
 
 /** 多边形的有向面积（本地单位²） */
 export function signedArea(poly: P[]): number {
@@ -102,7 +114,9 @@ export async function saveOutline(deps: Deps, batchId: number, code: string, raw
   return deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const t = await lockTarget(tx, batchId, code);
-    if (t.current !== input.expectedOutlineId) throw conflict('OUTLINE_STALE', `${code} 的补画刚被别人改过，请刷新后再画`);
+    if (t.current !== input.expectedOutlineId || (await outlineRev(tx, batchId)) !== input.expectedRev) {
+      throw conflict('OUTLINE_STALE', `${code} 的补画刚被改过（可能是刚才没收到结果的那次已经生效，或有人同时在改），请刷新后再画`);
+    }
     const [floor] = await tx<{ width: number; height: number }[]>`
       SELECT width, height FROM floorplan_floors WHERE batch_id = ${batchId} AND floor_code = ${t.floorCode}`;
     const poly = normalizeOutline(input.polygon as P[]);
@@ -134,7 +148,9 @@ export async function voidOutline(deps: Deps, batchId: number, code: string, raw
   return deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const t = await lockTarget(tx, batchId, code);
-    if (t.current === null || t.current !== input.expectedOutlineId) throw conflict('OUTLINE_STALE', `${code} 的补画刚被别人改过，请刷新后再看`);
+    if (t.current === null || t.current !== input.expectedOutlineId || (await outlineRev(tx, batchId)) !== input.expectedRev) {
+      throw conflict('OUTLINE_STALE', `${code} 的补画刚被改过，请刷新后再看`);
+    }
     await tx`UPDATE floorplan_room_outlines SET voided_by = ${actor.id}, voided_at = now() WHERE id = ${t.current}`;
     await writeAudit(tx, { staffId: actor.id, action: 'floorplan_outline', targetType: 'floorplan_batch', targetId: batchId, detail: { code, voided: t.current }, ip });
     return { voided: t.current };

@@ -373,8 +373,12 @@ describe('例外房间补画轮廓（v0.7.19）', () => {
       [x + h, y + h],
       [x - h, y + h],
     ];
-    const put = (code: string, body: Record<string, unknown>, cookie = ctx.owner, batch = activeId) =>
-      api(ctx.app, cookie, 'PUT', `/api/admin/floorplans/${batch}/outlines/${code}`, body);
+    // 补画、作废都带上页面看到的补画版本（不给时取现在的）
+    const revOf = async (batch: number) => (await detail(batch)).outlineRev;
+    const put = async (code: string, body: Record<string, unknown>, cookie = ctx.owner, batch = activeId) =>
+      api(ctx.app, cookie, 'PUT', `/api/admin/floorplans/${batch}/outlines/${code}`, { expectedRev: await revOf(batch), ...body });
+    const voidOne = async (code: string, body: Record<string, unknown>, batch = activeId) =>
+      api(ctx.app, ctx.owner, 'POST', `/api/admin/floorplans/${batch}/outlines/${code}/void`, { expectedRev: await revOf(batch), ...body });
     const map = async () => (await api(ctx.app, ctx.clerk, 'GET', '/api/floormap')).body as { floorplanRev: number };
     expect((await put('W306', { polygon: square(100), expectedOutlineId: null }, ctx.clerk)).status).toBe(403);
     expect((await put('T301', { polygon: square(100), expectedOutlineId: null })).body.error.code).toBe('OUTLINE_NOT_EXCEPTION');
@@ -413,15 +417,27 @@ describe('例外房间补画轮廓（v0.7.19）', () => {
     const g = (await ctx.app.inject({ method: 'GET', url: `/api/admin/floorplans/${activeId}/geojson`, headers: { cookie: ctx.owner } })).json();
     expect(g.features.find((f: { properties: { code: string } }) => f.properties.code === 'W306').geometry.type).toBe('Polygon');
     // 作废补画：回到只显示位置点
-    expect((await api(ctx.app, ctx.owner, 'POST', `/api/admin/floorplans/${activeId}/outlines/W306/void`, { expectedOutlineId: first })).body.error.code).toBe('OUTLINE_STALE');
-    const v = await api(ctx.app, ctx.owner, 'POST', `/api/admin/floorplans/${activeId}/outlines/W306/void`, { expectedOutlineId: r2.body.outlineId });
+    expect((await voidOne('W306', { expectedOutlineId: first })).body.error.code).toBe('OUTLINE_STALE');
+    // 缺了补画版本：拒绝（页面要带上）
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/admin/floorplans/${activeId}/outlines/W306/void`, { expectedOutlineId: r2.body.outlineId })).status).toBe(400);
+    const v = await voidOne('W306', { expectedOutlineId: r2.body.outlineId });
     expect(v.status, JSON.stringify(v.body)).toBe(200);
-    expect(((await api(ctx.app, ctx.clerk, 'GET', '/api/floorplans/active')).body as ActiveFloorplan).rooms.find((w) => w.code === 'W306')!.polygon).toBeNull();
+    const w306 = async () => ((await api(ctx.app, ctx.clerk, 'GET', '/api/floorplans/active')).body as ActiveFloorplan).rooms.find((w) => w.code === 'W306')!;
+    expect((await w306()).polygon).toBeNull();
+    // 迟到的第一次补画（Codex 复审 c0a1a7d）：补画后又作废，回到「没有补画」；按当时看到的版本重发的那次拒绝，作废掉的轮廓不会画回来
+    const s0 = await revOf(activeId);
+    const once = await put('W306', { polygon: square(150), expectedOutlineId: null, expectedRev: s0 });
+    expect(once.status, JSON.stringify(once.body)).toBe(200);
+    expect((await voidOne('W306', { expectedOutlineId: once.body.outlineId })).status).toBe(200);
+    const late = await put('W306', { polygon: square(150), expectedOutlineId: null, expectedRev: s0 });
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('OUTLINE_STALE');
+    expect((await w306()).polygon).toBeNull();
     // 已换下的批次只读
     const retired = (await list()).batches.find((b) => b.status === 'retired')!;
     expect((await put('W306', { polygon: square(150), expectedOutlineId: null }, ctx.owner, retired.id)).body.error.code).toBe('FLOORPLAN_READONLY');
     const [audit] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'floorplan_outline'`;
-    expect(audit!.n).toBe(3);
+    expect(audit!.n).toBe(5);
   }, 60_000);
 });
 

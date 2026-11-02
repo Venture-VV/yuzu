@@ -203,6 +203,8 @@ export interface FloorplanDetail {
   history: FloorplanActivation[];
   /** 最近一次启用或换回时与空间台账的比对（底图档案里看「当时的台账比对」；升级前启用的没有） */
   activationLedgerDiff: { at: string; kind: 'activate' | 'restore'; diff: FloorplanLedgerDiff } | null;
+  /** 这一批补画的版本（补画、作废都让它变大，只增不减）：补画、作废时带上，对不上说明刚被改过（v0.7.19） */
+  outlineRev: number;
 }
 
 export interface FloorplanList {

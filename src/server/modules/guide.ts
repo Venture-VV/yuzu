@@ -325,6 +325,8 @@ const markerText = {
 };
 const local = z.number('位置不正确').finite('位置不正确');
 const NewMarker = z.object({
+  /** 操作编号：同一次补加（含超时后重试）用同一个，重提得到原来那次的结果（Codex 复审 c0a1a7d） */
+  clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
   floorCode: z.string().regex(/^[A-Z][0-9A-Z]{0,3}$/, '楼层不正确'),
   kind: z.enum(GUIDE_MARKER_KINDS, '请选择图标'),
   x: local,
@@ -349,18 +351,31 @@ function requireFloor(plan: ActivePlan | null, floorCode: string, x: number, y: 
   return f;
 }
 
-async function addMarker(deps: Deps, raw: unknown, ctx: OpContext): Promise<{ id: number }> {
+async function addMarker(deps: Deps, raw: unknown, ctx: OpContext): Promise<{ id: number; replayed: boolean }> {
   const input = parse(NewMarker, raw);
+  // 同一个操作编号已经加过（上次没收到结果又点了一次）：返回原来那个，不再加一个
+  const replay = async () => {
+    const [seen] = await deps.sql<{ id: number; floorCode: string; kind: string }[]>`
+      SELECT id, floor_code, kind FROM guide_markers WHERE client_key = ${input.clientKey}`;
+    if (!seen) return null;
+    if (seen.floorCode !== input.floorCode || seen.kind !== input.kind) throw conflict('IDEMPOTENCY_CONFLICT', '这个操作编号已用于另一个图标，请刷新页面后重新补加');
+    return { id: Number(seen.id), replayed: true };
+  };
+  const before = await replay();
+  if (before) return before;
   const plan = await activePlan(deps.sql);
   const f = requireFloor(plan, input.floorCode, input.x, input.y);
   const [xMm, yMm] = localToMm(plan!, f, [input.x, input.y]);
   const [row] = await deps.sql<{ id: number }[]>`
-    INSERT INTO guide_markers (floor_code, kind, x_mm, y_mm, label, label_en, source, created_by)
-    VALUES (${input.floorCode}, ${input.kind}, ${xMm}, ${yMm}, ${input.label}, ${input.labelEn}, 'manual', ${ctx.actor.id})
+    INSERT INTO guide_markers (floor_code, kind, x_mm, y_mm, label, label_en, source, created_by, client_key)
+    VALUES (${input.floorCode}, ${input.kind}, ${xMm}, ${yMm}, ${input.label}, ${input.labelEn}, 'manual', ${ctx.actor.id}, ${input.clientKey})
+    ON CONFLICT (client_key) DO NOTHING
     RETURNING id`;
-  const id = Number(row!.id);
+  // 两次重提同时到：后到的那次落在唯一约束上，返回先到的那个
+  if (!row) return (await replay())!;
+  const id = Number(row.id);
   await writeAudit(deps.sql, { staffId: ctx.actor.id, action: 'guide_marker_saved', targetType: 'guide_marker', targetId: id, detail: { floor: input.floorCode, kind: input.kind, added: true }, ip: ctx.ip });
-  return { id };
+  return { id, replayed: false };
 }
 
 async function editMarker(deps: Deps, id: number, raw: unknown, ctx: OpContext): Promise<void> {
@@ -449,6 +464,7 @@ export async function detectMarkers(deps: Deps, ctx: OpContext): Promise<{ detec
 // ───────────────────────── 路由 ─────────────────────────
 
 const FloorParam = z.object({ floor: z.string().regex(/^[A-Z][0-9A-Z]{0,3}$/, '楼层不正确') });
+const SvgQuery = z.object({ b: z.coerce.number('缺少底图批次，请刷新页面').int('缺少底图批次，请刷新页面').positive('缺少底图批次，请刷新页面') });
 
 export function registerGuideRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
@@ -456,12 +472,19 @@ export function registerGuideRoutes(app: FastifyInstance, deps: Deps) {
   // 对客页面：所有岗位默认都能看（门店大屏用只有这项权限的账号）
   const view = guard('guide.view');
   app.get('/api/guide', { preHandler: view }, async () => guideData(sql));
-  // 在用底图的这一层，去掉图上的文字（对客不显示设计图上的标注、员工区名称）
+  // 在用底图的这一层，去掉图上的文字（对客不显示设计图上的标注、员工区名称）。
+  // 地址带批次号（?b=）：只给在用的那一批、可以缓存；批次号不是在用的（页面还停在换底图之前）不给、也不让浏览器缓存，
+  // 页面每分钟刷新后按新的批次号取（Codex 复审 c0a1a7d：原来不看批次号，换回旧底图后浏览器会把新一批的图当成旧一批的显示）
   app.get('/api/guide/floors/:floor/svg', { preHandler: view }, async (req, reply) => {
     const { floor } = parse(FloorParam, req.params);
+    const { b } = parse(SvgQuery, req.query);
     const [row] = await sql<{ svg: string }[]>`
-      SELECT f.svg FROM floorplan_floors f JOIN floorplan_batches b ON b.id = f.batch_id WHERE b.status = 'active' AND f.floor_code = ${floor}`;
-    if (!row) throw notFound('没有这一层的底图');
+      SELECT f.svg FROM floorplan_floors f JOIN floorplan_batches bt ON bt.id = f.batch_id
+      WHERE f.batch_id = ${b} AND bt.status = 'active' AND f.floor_code = ${floor}`;
+    if (!row) {
+      reply.header('cache-control', 'no-store');
+      throw notFound('这一层的底图已经换了或没有，请刷新页面');
+    }
     reply
       .header('content-type', 'image/svg+xml; charset=utf-8')
       .header('cache-control', 'private, max-age=86400')

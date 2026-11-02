@@ -345,7 +345,11 @@ function BatchDetail({ id }: { id: number }) {
     setOutlineBusy(true);
     setError(null);
     try {
-      await api.put(`/api/admin/floorplans/${b.id}/outlines/${drawing.room.code}`, { polygon: drawing.points, expectedOutlineId: drawing.room.drawn?.id ?? null });
+      await api.put(`/api/admin/floorplans/${b.id}/outlines/${drawing.room.code}`, {
+        polygon: drawing.points,
+        expectedOutlineId: drawing.room.drawn?.id ?? null,
+        expectedRev: d?.outlineRev ?? 0,
+      });
       toast({ tone: 'success', title: `${drawing.room.code} 已补画轮廓`, body: '房态图、对客导览用补画的轮廓（这一批）' });
       setDrawing(null);
       await invalidate();
@@ -361,7 +365,7 @@ function BatchDetail({ id }: { id: number }) {
     setOutlineBusy(true);
     setError(null);
     try {
-      await api.post(`/api/admin/floorplans/${b.id}/outlines/${room.code}/void`, { expectedOutlineId: room.drawn.id });
+      await api.post(`/api/admin/floorplans/${b.id}/outlines/${room.code}/void`, { expectedOutlineId: room.drawn.id, expectedRev: d?.outlineRev ?? 0 });
       toast({ tone: 'success', title: `${room.code} 的补画已作废`, body: '房态图上回到只显示位置点' });
       await invalidate();
     } catch (e) {

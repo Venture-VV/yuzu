@@ -19,9 +19,9 @@ import {
   type GuideKind,
   type GuideMarkerKind,
 } from '@shared/guide';
-import { api, errorMessage } from '../../lib/api';
+import { api, errorMessage, UncertainError } from '../../lib/api';
 import { useCan } from '../../lib/session';
-import { cn } from '../../lib/utils';
+import { cn, uuid } from '../../lib/utils';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Input, Notice, SectionTitle, Segmented, Select, Skeleton } from '../../components/ui';
 import { GUIDE_ICONS, GuideMap, useGuide } from '../guide/GuidePage';
@@ -37,6 +37,8 @@ export function GuideAdminCard() {
   const can = useCan();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // 补加图标的操作编号：没收到结果再补加时用同一个（服务端返回原来那个，不会多出一个），成功后才换新的（Codex 复审 c0a1a7d）
+  const addKey = useRef(uuid());
   const d = admin.data;
   const refresh = async (next?: GuideAdmin) => {
     if (next) qc.setQueryData(adminKey, next);
@@ -90,7 +92,19 @@ export function GuideAdminCard() {
             return r.admin;
           })
         }
-        onAdd={(floorCode, kind, x, y) => run(() => api.post<GuideAdmin>('/api/admin/guide/markers', { floorCode, kind, x, y }), `已加上${GUIDE_MARKER_LABELS[kind].zh}图标`)}
+        onAdd={(floorCode, kind, x, y) =>
+          run(async () => {
+            try {
+              const next = await api.post<GuideAdmin>('/api/admin/guide/markers', { clientKey: addKey.current, floorCode, kind, x, y });
+              addKey.current = uuid();
+              return next;
+            } catch (e) {
+              // 结果不明（超时、断网）才留着原编号给下一次补加；服务端明确回了的（含拒绝）换新的
+              if (!(e instanceof UncertainError)) addKey.current = uuid();
+              throw e;
+            }
+          }, `已加上${GUIDE_MARKER_LABELS[kind].zh}图标`)
+        }
         onEdit={(m, patch) =>
           run(() =>
             api.put<GuideAdmin>(`/api/admin/guide/markers/${m.id}`, {

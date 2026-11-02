@@ -48,7 +48,7 @@ import type { Pt } from '../floorplan/model';
 import { detectFormat, type DrawingFormat } from '../floorplan/read';
 import { startConversion, type RunningConversion, type WorkerOutput } from '../floorplan/run';
 import { setTxTimeouts, todayIn } from './inventory/common';
-import { registerOutlineRoutes } from './floorplan-outlines';
+import { outlineRev, registerOutlineRoutes } from './floorplan-outlines';
 
 /** 转换超过这么久停掉（需求：30 分钟内出新底图与差异报告） */
 export const FLOORPLAN_TIMEOUT_MS = 15 * 60_000;
@@ -275,7 +275,9 @@ export async function floorplanDetail(db: Db, id: number): Promise<FloorplanDeta
   const [meta] = await db<{ report: FloorplanReport | null }[]>`SELECT report FROM floorplan_batches WHERE id = ${id}`;
   const report = meta?.report ?? null;
   const history = await activations(db, id, 50);
-  if (batch.status === 'converting' || batch.status === 'failed') return { batch, floors: [], rooms: [], report, ledgerDiff: null, batchDiff: null, history, activationLedgerDiff: null };
+  if (batch.status === 'converting' || batch.status === 'failed') {
+    return { batch, floors: [], rooms: [], report, ledgerDiff: null, batchDiff: null, history, activationLedgerDiff: null, outlineRev: 0 };
+  }
   const [snap] = await db<{ at: string; kind: 'activate' | 'restore'; diff: FloorplanLedgerDiff }[]>`
     SELECT at, kind, ledger_diff AS diff FROM floorplan_activations
     WHERE batch_id = ${id} AND kind IN ('activate', 'restore') AND ledger_diff IS NOT NULL ORDER BY at DESC, id DESC LIMIT 1`;
@@ -295,17 +297,13 @@ export async function floorplanDetail(db: Db, id: number): Promise<FloorplanDeta
     batchDiff: await batchDiff(db, id, batch.status, rooms, new Map(floorRows.map((f) => [f.floor.code, f.frame as number[]])), unitMm),
     history,
     activationLedgerDiff: snap ? { at: new Date(snap.at).toISOString(), kind: snap.kind, diff: snap.diff } : null,
+    outlineRev: await outlineRev(db, id),
   };
 }
 
 /** 在用的底图（第三段房态图用）：房间按编码对上空间台账 */
-/** 补画轮廓的版本：补画（新一行）、作废都会让它变大（页面据此重新取在用的底图） */
-export async function outlineRev(db: Db, batchId: number | null): Promise<number> {
-  if (batchId === null) return 0;
-  const [r] = await db<{ rev: number }[]>`
-    SELECT (coalesce(max(id), 0) + count(*) FILTER (WHERE voided_at IS NOT NULL))::int AS rev FROM floorplan_room_outlines WHERE batch_id = ${batchId}`;
-  return Number(r!.rev);
-}
+/** 补画轮廓的版本（定义在 floorplan-outlines.ts，补画、作废时也核对） */
+export { outlineRev };
 
 export async function activeFloorplan(db: Db): Promise<ActiveFloorplan> {
   const [b] = await db<{ id: number; activatedAt: string }[]>`SELECT id, activated_at FROM floorplan_batches WHERE status = 'active'`;
