@@ -42,7 +42,7 @@ export function OverviewTab() {
         d && (
           <>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <Kpi icon={<TrendingUp className="size-4" />} label="净营业额（应收 − 优惠）" tone="pine" delta={{ now: d.kpis.net, prev: d.prev.net, format: yuan }} testId="overview-net">
+              <Kpi icon={<TrendingUp className="size-4" />} label="净营业额（应收 − 优惠 − 券抵扣 − 退款）" tone="pine" delta={{ now: d.kpis.net, prev: d.prev.net, format: yuan }} testId="overview-net">
                 <Money cents={d.kpis.net} />
               </Kpi>
               <Kpi icon={<UsersRound className="size-4" />} label="结账客人" delta={{ now: d.kpis.guests, prev: d.prev.guests, format: people }}>

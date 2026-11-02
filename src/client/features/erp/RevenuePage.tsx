@@ -46,7 +46,7 @@ export function RevenuePage() {
           d && (
             <>
               <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-                <Kpi icon={<TrendingUp className="size-4" />} label="净营业额（应收 − 优惠 − 退款）" tone="pine" testId="erp-revenue-net">
+                <Kpi icon={<TrendingUp className="size-4" />} label="净营业额（应收 − 优惠 − 券抵扣 − 退款）" tone="pine" testId="erp-revenue-net">
                   <Money cents={d.kpis.net} />
                 </Kpi>
                 <Kpi icon={<ReceiptText className="size-4" />} label="应收 / 优惠与券抵扣 / 退款">

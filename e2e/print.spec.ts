@@ -125,7 +125,8 @@ test.describe('打印', () => {
     await expect(sheet).toContainText('日结单');
     await expect(sheet).toContainText(`营业日 ${date}`);
     const business = page.getByTestId('print-settlement-business');
-    for (const label of ['应收（结账 − 反结账）', '优惠 / 免单（当场授权，不是收款）', '净营业额（应收 − 优惠）', '实收（现金、扫码、银行卡、其他）']) {
+    // v0.7.20 起净营业额还减券抵扣与退款，实收减去退款
+    for (const label of ['应收（结账 − 反结账）', '优惠 / 免单（当场授权，不是收款）', '净营业额（应收 − 优惠 − 券抵扣 − 退款）', '实收（现金、扫码、银行卡、其他，减去退款）']) {
       await expect(business).toContainText(label);
     }
     await expect(page.getByTestId('print-settlement-received')).toContainText('合计');

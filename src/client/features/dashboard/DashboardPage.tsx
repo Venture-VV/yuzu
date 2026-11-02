@@ -122,7 +122,7 @@ function TodayTab() {
             d && (
               <>
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                  <Kpi icon={<TrendingUp className="size-4" />} label="今日净营业额（应收 − 优惠 − 退款）" tone="pine">
+                  <Kpi icon={<TrendingUp className="size-4" />} label="今日净营业额（应收 − 优惠 − 券抵扣 − 退款）" tone="pine">
                     <Money cents={d.todayStats.net - d.todayStats.discount - (d.todayStats.coupon ?? 0) - (d.todayStats.refund ?? 0)} />
                     {(d.todayStats.discount !== 0 || !!d.todayStats.coupon || !!d.todayStats.refund) && (
                       <span className="block text-[12px] font-semibold text-ink-3" data-testid="dashboard-discount">
