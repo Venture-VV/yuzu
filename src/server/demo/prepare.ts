@@ -170,7 +170,8 @@ export async function demoCheck(sql: Sql, config: AppConfig): Promise<DemoCheckR
            (SELECT count(*) FROM checkouts WHERE note = '结账演示')::int AS checkouts,
            (SELECT count(*) FROM legacy_imports WHERE status = 'active')::int AS legacy`;
   for (const [label, value, unit] of [
-    ['会员演示数据', n!.members, '位合成会员'],
+    // 各块建的合成会员合计（会员块之外，前台、结账两块也建会员），与准备时会员块写的人数不同（main 定时测试报告）
+    ['会员演示数据', n!.members, '位合成会员（各块合计）'],
     ['库存演示数据', n!.materials, '项合成物料'],
     ['前台演示数据', n!.tags, '张合成手牌'],
     ['结账演示数据', n!.checkouts, '张演示结账单'],
