@@ -148,14 +148,15 @@ CREATE TABLE floorplan_originals (
 CREATE TRIGGER floorplan_originals_append_only BEFORE UPDATE OR DELETE ON floorplan_originals
   FOR EACH ROW EXECUTE FUNCTION yuzu_floorplan_append_only();
 
--- 在用历史：启用、换下、换回，每次一行（只追加）
+-- 在用历史：启用、换下、换回，每次一行（只追加）；启用、换回时记下当时与空间台账的比对（底图档案里看「当时的台账比对」）
 CREATE TABLE floorplan_activations (
-  id         bigserial PRIMARY KEY,
-  batch_id   bigint NOT NULL REFERENCES floorplan_batches (id),
-  kind       text NOT NULL CHECK (kind IN ('activate', 'retire', 'restore')),
-  at         timestamptz NOT NULL,
-  staff_id   bigint REFERENCES staff (id),
-  reason     text NOT NULL DEFAULT '' CHECK (char_length(reason) <= 200),
+  id          bigserial PRIMARY KEY,
+  batch_id    bigint NOT NULL REFERENCES floorplan_batches (id),
+  kind        text NOT NULL CHECK (kind IN ('activate', 'retire', 'restore')),
+  at          timestamptz NOT NULL,
+  staff_id    bigint REFERENCES staff (id),
+  reason      text NOT NULL DEFAULT '' CHECK (char_length(reason) <= 200),
+  ledger_diff jsonb,
   CHECK (kind <> 'restore' OR char_length(btrim(reason)) >= 2)
 );
 CREATE INDEX floorplan_activations_batch_idx ON floorplan_activations (batch_id, at, id);
@@ -184,3 +185,18 @@ CREATE TABLE floorplan_room_outlines (
   CHECK ((voided_at IS NULL) = (voided_by IS NULL))
 );
 CREATE UNIQUE INDEX floorplan_room_outlines_live ON floorplan_room_outlines (batch_id, code) WHERE voided_at IS NULL;
+-- 补画的轮廓只追加：不能删；只能作废一次（记作废的人和时刻），其他不能改
+CREATE FUNCTION yuzu_floorplan_outline_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION '补画的轮廓不能删除' USING ERRCODE = 'P0001';
+  END IF;
+  IF OLD.voided_at IS NOT NULL
+     OR (NEW.batch_id, NEW.floor_code, NEW.code, NEW.polygon, NEW.area_centi_m2, NEW.created_by, NEW.created_at)
+        IS DISTINCT FROM (OLD.batch_id, OLD.floor_code, OLD.code, OLD.polygon, OLD.area_centi_m2, OLD.created_by, OLD.created_at) THEN
+    RAISE EXCEPTION '补画的轮廓只能作废一次，不能修改' USING ERRCODE = 'P0001';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER floorplan_room_outlines_guard BEFORE UPDATE OR DELETE ON floorplan_room_outlines
+  FOR EACH ROW EXECUTE FUNCTION yuzu_floorplan_outline_guard();

@@ -34,6 +34,10 @@ test.describe('底图转换（v0.7.15）', () => {
     // 第一版：选文件 → 上传 → 转换中 → 待启用
     await choose(page, `样例图纸-${stamp}.dxf`, dxf(1, stamp));
     await expect(page.getByTestId('floorplan-file-name')).toContainText(`样例图纸-${stamp}.dxf`);
+    // 入库登记（v0.7.19）：来源必选（选了才能上传），版本或说明、收图日期（默认今天）
+    await expect(page.getByTestId('floorplan-upload-submit')).toBeDisabled();
+    await page.getByTestId('floorplan-intake').getByRole('radio', { name: '设计方' }).click();
+    await page.getByTestId('floorplan-source-note').fill(`E2E 第一版 ${stamp}`);
     await page.getByTestId('floorplan-upload-submit').click();
     await expect(page.getByText(/已上传，正在转换/)).toBeVisible();
     const detail = page.getByTestId('floorplan-detail');

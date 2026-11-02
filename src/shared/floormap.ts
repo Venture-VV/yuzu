@@ -100,6 +100,8 @@ export interface FloorMapData {
   serverTime: string;
   /** 在用的底图批次；换了一批时页面重新取楼层与轮廓 */
   floorplanBatchId: number | null;
+  /** 在用那一批补画轮廓的版本（v0.7.19）：补画、作废后变，页面重新取轮廓 */
+  floorplanRev: number;
   spaces: FloorMapSpace[];
   /** 记了房间、还没结束的钟单（客人在店） */
   sessions: FloorMapSession[];

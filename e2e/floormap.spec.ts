@@ -93,7 +93,13 @@ async function prepare(page: Page) {
   const active = await getJson<ActiveFloorplan>(page, '/api/floorplans/active');
   if (!active.rooms.some((r) => r.code === 'T301')) {
     const dxf = Buffer.from(`999\nE2E 平面图 ${Date.now()}\n${floorplanSampleDxf(1)}`, 'utf8');
-    const up = await send<FloorplanDetail>(page, 'post', '/api/admin/floorplans', { fileName: 'E2E 平面图样例.dxf', contentBase64: dxf.toString('base64'), note: 'E2E 房态图' });
+    const up = await send<FloorplanDetail>(page, 'post', '/api/admin/floorplans', {
+      fileName: 'E2E 平面图样例.dxf',
+      contentBase64: dxf.toString('base64'),
+      note: 'E2E 房态图',
+      sourceKind: 'other',
+      receivedOn: new Date().toISOString().slice(0, 10),
+    });
     await expect.poll(async () => (await getJson<FloorplanDetail>(page, `/api/admin/floorplans/${up.batch.id}`)).batch.status, { timeout: 60_000 }).toBe('ready');
     await send(page, 'post', `/api/admin/floorplans/${up.batch.id}/activate`, { expectedActiveId: active.batchId });
   }
@@ -367,8 +373,8 @@ function synthetic() {
   for (let c = 0; c <= COLS; c += 1) lines.push(`<path d="M${c * (CELL.w + CELL.gap) + CELL.gap / 2} 0V${H}"/>`);
   for (let r = 0; r <= ROWS; r += 1) lines.push(`<path d="M0 ${r * (CELL.h + CELL.gap) + CELL.gap / 2}H${W}"/>`);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}"><g fill="none" stroke="#333" stroke-width="12">${lines.join('')}</g></svg>`;
-  const plan: ActiveFloorplan = { batchId: 900001, activatedAt: now, floors: [{ code: 'L3', title: '三层', width: W, height: H, svgBytes: svg.length, pathCount: lines.length, svgUrl: '/api/floorplans/900001/floors/L3/svg' }], rooms: planRooms };
-  const fm: FloorMapData = { serverTime: now, floorplanBatchId: 900001, spaces, sessions, usageTypes: [], usages: [] };
+  const plan: ActiveFloorplan = { batchId: 900001, activatedAt: now, outlineRev: 0, floors: [{ code: 'L3', title: '三层', width: W, height: H, svgBytes: svg.length, pathCount: lines.length, svgUrl: '/api/floorplans/900001/floors/L3/svg' }], rooms: planRooms };
+  const fm: FloorMapData = { serverTime: now, floorplanBatchId: 900001, floorplanRev: 0, spaces, sessions, usageTypes: [], usages: [] };
   const board: RoomBoard = {
     rules: { enabled: true, checkoutMinute: 720, lateFullMinute: 1080, hourlyGraceMinutes: 15, defaultDeposit: 0 } as RoomBoard['rules'],
     rooms,

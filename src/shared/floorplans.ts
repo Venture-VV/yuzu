@@ -1,6 +1,8 @@
-// 底图转换（飞书需求 RQ-004 第二段，v0.7.15，见 docs/FLOORPLAN.md）：上传 DWG / DXF → 单独的进程转换 →
+// 底图转换（飞书需求 RQ-004 第二段，v0.7.15，见 docs/FLOORPLAN.md）：上传 DWG / DXF（v0.7.19 起也收矢量 PDF）→ 单独的进程转换 →
 // 每层一份简化 SVG 底图、房间轮廓（房号文字点所在的面）、例外清单 → 与空间台账、在用的上一批比对 → 店主或店总启用。
 // 第三段房态图用启用的那一批。
+// 图纸治理（v0.7.19，docs/FLOORPLAN_FINISH.md 第 4、5 节）：入库登记（来源、版本或说明、收图日期）、可选保存原图纸、
+// 底图档案（已换下的照样能打开）、在用历史（启用、换下、换回）、已换下的写原因换回；例外编码在这一批上补画轮廓。
 
 export const FLOORPLAN_BATCH_STATUSES = ['converting', 'ready', 'failed', 'active', 'retired'] as const;
 export type FloorplanBatchStatus = (typeof FLOORPLAN_BATCH_STATUSES)[number];
@@ -29,6 +31,30 @@ export const FLOORPLAN_ROOM_HINTS: Record<Exclude<FloorplanRoomStatus, 'ok'>, st
   duplicate: '同一个编码在图上出现在两处。请设计方核对编码后重新上传；启用后只显示位置点',
 };
 
+/** 图纸来源（入库登记，v0.7.19） */
+export const FLOORPLAN_SOURCE_KINDS = ['designer', 'store', 'other'] as const;
+export type FloorplanSourceKind = (typeof FLOORPLAN_SOURCE_KINDS)[number];
+export const FLOORPLAN_SOURCE_LABELS: Record<FloorplanSourceKind, string> = { designer: '设计方', store: '门店', other: '其他' };
+
+/** 在用历史的一条：启用、换下、换回 */
+export const FLOORPLAN_ACTIVATION_KINDS = ['activate', 'retire', 'restore'] as const;
+export type FloorplanActivationKind = (typeof FLOORPLAN_ACTIVATION_KINDS)[number];
+export const FLOORPLAN_ACTIVATION_LABELS: Record<FloorplanActivationKind, string> = { activate: '启用', retire: '换下', restore: '换回' };
+
+export interface FloorplanActivation {
+  id: number;
+  batchId: number;
+  fileName: string;
+  kind: FloorplanActivationKind;
+  at: string;
+  staffName: string | null;
+  reason: string;
+}
+
+/** PDF 的图纸比例（1:N）范围 */
+export const PDF_SCALE_MIN = 1;
+export const PDF_SCALE_MAX = 10000;
+
 /** 上传的图纸最大多少字节（编码图约 13 MB） */
 export const MAX_FLOORPLAN_FILE_BYTES = 30 * 1024 * 1024;
 /** 底图与轮廓的本地坐标：10 毫米一单位，原点在该层图框左上角，y 向下 */
@@ -39,7 +65,7 @@ export interface FloorplanBatch {
   fileName: string;
   fileBytes: number;
   fileSha256: string;
-  fileFormat: 'dwg' | 'dxf';
+  fileFormat: 'dwg' | 'dxf' | 'pdf';
   converter: string;
   status: FloorplanBatchStatus;
   error: string | null;
@@ -50,11 +76,24 @@ export interface FloorplanBatch {
   activatedAt: string | null;
   activatedByName: string | null;
   retiredAt: string | null;
+  retiredByName: string | null;
+  /** 换下的原因（换新一批时可选填写；换回旧底图时必填） */
+  retireReason: string | null;
   readMs: number | null;
   convertMs: number | null;
   floorCount: number;
   roomCount: number;
   okCount: number;
+  /** 入库登记（v0.7.19；升级前的批次为空） */
+  sourceKind: FloorplanSourceKind | null;
+  sourceNote: string;
+  receivedOn: string | null;
+  /** PDF 的图纸比例 1:N（上传时填的；没填为 null，按页面上的比例文字） */
+  pdfScale: number | null;
+  /** 上传时勾了「保存原图纸」 */
+  originalSaved: boolean;
+  /** 补画了轮廓的例外编码数（不含作废的） */
+  outlineCount: number;
 }
 
 export interface FloorplanFloor {
@@ -84,7 +123,12 @@ export interface FloorplanRoom {
   labelAt: [number, number];
   /** 平方米（轮廓围出的面积，含门洞的一半，不扣柱子） */
   areaM2: number | null;
+  /** 例外编码在这一批上补画的轮廓（v0.7.19）：有时 polygon、areaM2 用补画的 */
+  drawn?: { id: number; byName: string | null; at: string } | null;
 }
+
+/** 补画轮廓的点数上限 */
+export const MAX_OUTLINE_POINTS = 64;
 
 export interface FloorplanIssue {
   kind: string;
@@ -150,20 +194,29 @@ export interface FloorplanDetail {
   floors: FloorplanFloor[];
   rooms: FloorplanRoom[];
   report: FloorplanReport | null;
+  /** 与现在的空间台账比对 */
   ledgerDiff: FloorplanLedgerDiff | null;
   batchDiff: FloorplanBatchDiff | null;
+  /** 这一批的在用历史（v0.7.19） */
+  history: FloorplanActivation[];
+  /** 最近一次启用或换回时与空间台账的比对（底图档案里看「当时的台账比对」；升级前启用的没有） */
+  activationLedgerDiff: { at: string; kind: 'activate' | 'restore'; diff: FloorplanLedgerDiff } | null;
 }
 
 export interface FloorplanList {
   batches: FloorplanBatch[];
   activeId: number | null;
   converting: FloorplanBatch | null;
+  /** 在用历史（新的在前，最多 100 条） */
+  history: FloorplanActivation[];
 }
 
 /** 在用的底图（第三段房态图读这个） */
 export interface ActiveFloorplan {
   batchId: number | null;
   activatedAt: string | null;
+  /** 补画轮廓的版本（v0.7.19）：补画、作废后变，页面据此重新取 */
+  outlineRev: number;
   floors: FloorplanFloor[];
   rooms: (FloorplanRoom & { spaceId: number | null; displayName: string | null })[];
 }

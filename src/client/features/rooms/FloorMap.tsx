@@ -68,7 +68,7 @@ export function FloorMapView({
   onResumed?: () => void;
 }) {
   const fm = useFloorMap();
-  const plan = useActiveFloorplan(fm.data ? fm.data.floorplanBatchId : undefined);
+  const plan = useActiveFloorplan(fm.data ? fm.data.floorplanBatchId : undefined, fm.data?.floorplanRev ?? 0);
   const [floorCode, setFloorCode] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [types, setTypes] = useState<string[]>([]);

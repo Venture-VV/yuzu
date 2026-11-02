@@ -11,6 +11,7 @@ import type { Db } from '../db';
 import { guardAny } from '../auth/guard';
 import type { Deps } from '../lib/context';
 import { loadUsageRules } from './usages';
+import { outlineRev } from './floorplans';
 
 export async function floorMapData(db: Db): Promise<FloorMapData> {
   const [now] = await db<{ now: string }[]>`SELECT now() AS now`;
@@ -37,6 +38,7 @@ export async function floorMapData(db: Db): Promise<FloorMapData> {
   return {
     serverTime: new Date(now!.now).toISOString(),
     floorplanBatchId: batch?.id ?? null,
+    floorplanRev: await outlineRev(db, batch ? Number(batch.id) : null),
     usageTypes: (await loadUsageRules(db)).businessTypes,
     usages: usages.map((u) => ({ ...u, openedAt: new Date(u.openedAt).toISOString() })),
     spaces,

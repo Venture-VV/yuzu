@@ -307,7 +307,15 @@ export async function seedShowcaseDemo(sql: Sql, config: AppConfig): Promise<Sho
     } else {
       type Batch = { batch: { id: number; status: string; error: string | null } };
       const upload = (dxf: string) =>
-        owner<Batch>('POST', '/api/admin/floorplans', { fileName: 'floorplan-sample.dxf', contentBase64: Buffer.from(dxf).toString('base64'), note: `${NOTE}：合成样例底图` });
+        owner<Batch>('POST', '/api/admin/floorplans', {
+          fileName: 'floorplan-sample.dxf',
+          contentBase64: Buffer.from(dxf).toString('base64'),
+          note: `${NOTE}：合成样例底图`,
+          // 入库登记（v0.7.19）
+          sourceKind: 'other',
+          sourceNote: '合成样例（演示）',
+          receivedOn: new Date().toISOString().slice(0, 10),
+        });
       let batch = (await upload(floorplanSampleDxf())).body.batch;
       // 同一份图纸以前转换过、后来被换下：换下的批次不能再启用，加一行注释当成新文件重新转换
       if (batch.status === 'retired') batch = (await upload(`999\n${NOTE} ${new Date().toISOString()}\n${floorplanSampleDxf()}`)).body.batch;
