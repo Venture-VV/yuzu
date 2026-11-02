@@ -13,6 +13,7 @@
 
 import { z } from 'zod';
 import {
+  defaultRefundAmount,
   isCashLike,
   REFUND_METHODS,
   refundNeedsRef,
@@ -214,6 +215,18 @@ export async function createRefund(deps: Deps, checkoutId: number, raw: RefundIn
           `「${b.name}」最多还能退 ${formatYuan(Math.max(0, left.remainingAmount))}（实收 ${formatYuan(b.amount - b.discount)}，已退 ${formatYuan(b.refundedAmount)}）`,
           { name: b.name, remainingAmount: left.remainingAmount },
         );
+      }
+      // 退几份最多退这几份的实收：剩下的金额按剩下的份数比例算到分，尾差留给最后一份（与页面的默认金额同一算法）；
+      // 份数 0（只退钱，例如服务打折补偿）只受整项剩下的金额限制（Codex 预检 1c8b453 P2）
+      if (i.quantity > 0) {
+        const cap = defaultRefundAmount(left, i.quantity);
+        if (i.amount > cap) {
+          throw unprocessable('REFUND_EXCEEDS', `「${b.name}」退 ${i.quantity} 份最多退 ${formatYuan(cap)}（这几份的实收）；只退钱不退份数请把份数填 0`, {
+            name: b.name,
+            quantity: i.quantity,
+            maxAmount: cap,
+          });
+        }
       }
     }
     // 每种方式：原单收过、累计不超过原单这种方式收的钱

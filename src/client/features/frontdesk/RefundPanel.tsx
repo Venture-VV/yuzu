@@ -85,6 +85,10 @@ export function RefundPanel({ checkoutId, checkoutNo, onClose, DrawerPicker }: {
     if (!Number.isInteger(q) || q < 0 || q > i.remainingQuantity) problems.push(`「${i.name}」最多还能退 ${i.remainingQuantity} 份`);
     if (a === null || a <= 0) problems.push(`请填写「${i.name}」退的金额`);
     else if (a > i.remainingAmount) problems.push(`「${i.name}」最多还能退 ${formatYuan(i.remainingAmount)}`);
+    // 退几份最多退这几份的实收（服务端同样核对）；份数 0 只退钱，只受整项剩下的金额限制
+    else if (Number.isInteger(q) && q > 0 && q <= i.remainingQuantity && a > defaultRefundAmount(i, q)) {
+      problems.push(`「${i.name}」退 ${q} 份最多退 ${formatYuan(defaultRefundAmount(i, q))}；只退钱不退份数请把份数填 0`);
+    }
   }
   for (const m of methods) {
     const c = payCents(m.method);

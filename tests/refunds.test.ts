@@ -294,3 +294,42 @@ describe('钱箱、班次与作废', () => {
     expect(pack.ok).toBe(true);
   });
 });
+
+describe('按份数的金额上限（Codex 预检 1c8b453 P2）', () => {
+  it('2 份只退 1 份却传整项实收：拒绝；分次退按剩下的金额与份数比例算到分、尾差留给最后一份；份数 0 只受整项剩下的金额限制', async () => {
+    const wash = { category: '退款洗浴', name: '退款搓澡' };
+    const two = await sale((t) => [{ method: 'cash', amount: t }], [{ itemId: item['退款搓澡']!, quantity: 2 }]);
+    const code = async (checkoutId: number, quantity: number, amount: number) =>
+      (await refund(checkoutId, { items: [{ ...wash, quantity, amount }], payments: [{ method: 'cash', amount }] })).body.error?.code ?? 'OK';
+    // 2 份实收 136 元：退 1 份最多 68 元
+    expect(await code(two.id, 1, 13600)).toBe('REFUND_EXCEEDS');
+    expect(await code(two.id, 1, 6801)).toBe('REFUND_EXCEEDS');
+    expect((await refund(two.id, { items: [{ ...wash, quantity: 1, amount: 13600 }], payments: [{ method: 'cash', amount: 13600 }] })).body.error.details).toMatchObject({
+      quantity: 1,
+      maxAmount: 6800,
+    });
+    expect((await options(two.id)).refunds).toHaveLength(0);
+
+    // 3 份实收 204 元：先只退钱 1 元（份数 0），剩下 203 元 3 份——退 1 份最多 67.66（203 × 1/3 舍去分以下），
+    // 再退 1 份最多 67.67（135.34 的一半），最后 1 份是剩下的 67.67；合计正好 204 元
+    const three = await sale((t) => [{ method: 'cash', amount: t }], [{ itemId: item['退款搓澡']!, quantity: 3 }]);
+    expect(await code(three.id, 0, 100)).toBe('OK');
+    expect(await code(three.id, 1, 6767)).toBe('REFUND_EXCEEDS');
+    expect(await code(three.id, 1, 6766)).toBe('OK');
+    expect(await code(three.id, 1, 6768)).toBe('REFUND_EXCEEDS');
+    expect(await code(three.id, 1, 6767)).toBe('OK');
+    let left = (await options(three.id)).items.find((i) => i.name === '退款搓澡')!;
+    expect([left.remainingQuantity, left.remainingAmount]).toEqual([1, 6767]);
+    expect(await code(three.id, 1, 6767)).toBe('OK');
+    left = (await options(three.id)).items.find((i) => i.name === '退款搓澡')!;
+    expect([left.refundedQuantity, left.refundedAmount, left.remainingQuantity, left.remainingAmount]).toEqual([3, 20400, 0, 0]);
+    // 退完了：份数 0 只退钱也不能再退
+    expect(await code(three.id, 0, 1)).toBe('REFUND_EXCEEDS');
+
+    // 份数 0 只受整项剩下的金额限制：1 份实收 68 元可以一次只退钱 68 元，不能 68.01
+    const one = await sale((t) => [{ method: 'cash', amount: t }], [{ itemId: item['退款搓澡']!, quantity: 1 }]);
+    expect(await code(one.id, 0, 6801)).toBe('REFUND_EXCEEDS');
+    expect(await code(one.id, 0, 6800)).toBe('OK');
+    await checks();
+  });
+});
