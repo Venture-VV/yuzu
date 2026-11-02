@@ -314,6 +314,8 @@ const CHANGE_ACTIONS = [
   'space_saved',
   'space_zone_saved',
   'space_import',
+  'location_reader_saved',
+  'items_zone_updated',
 ];
 
 const SETTING_LABELS: Record<string, string> = {
@@ -342,6 +344,7 @@ function describeChange(action: string, detail: Record<string, unknown>): string
       if (detail.key === 'commission_rules') return '修改了技师提成规则';
       if (detail.key === 'dining_rules') return '修改了餐饮规则';
       if (detail.key === 'room_rules') return '修改了客房规则';
+      if (detail.key === 'location_rules') return '修改了实时位置的开关与区域';
       const after = (detail.after ?? {}) as Record<string, unknown>;
       const keys = Object.keys(after).map((x) => SETTING_LABELS[x] ?? x);
       return keys.length ? `修改了${keys.join('、')}` : '修改了经营规则';
@@ -386,6 +389,10 @@ function describeChange(action: string, detail: Record<string, unknown>): string
       return typeof detail.summary === 'string' ? detail.summary : '修改了楼层或区域';
     case 'space_import':
       return typeof detail.summary === 'string' ? detail.summary : '导入了空间台账';
+    case 'location_reader_saved':
+      return typeof detail.summary === 'string' ? detail.summary : '保存了刷卡点';
+    case 'items_zone_updated':
+      return '调整了项目所在区域（实时位置）';
     default:
       return action;
   }

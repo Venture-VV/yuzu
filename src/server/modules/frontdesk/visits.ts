@@ -57,6 +57,7 @@ import {
   recordBackfill,
   resolveBackfill,
 } from './backfill';
+import { locateCheckin, locateGone } from '../locations';
 import { getCheckout } from './checkout';
 import { getStay } from '../rooms';
 import { getTableSession } from '../tables';
@@ -213,6 +214,7 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
       : null;
 
     let firstId = 0;
+    const created: number[] = [];
     for (const [i, g] of input.guests.entries()) {
       const tag = tags.get(g.tagCode)!;
       const ticket = tickets[i]!;
@@ -228,6 +230,7 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
                 ${ticket?.id ?? null}, ${ticket?.price12h ?? null}, ${ticket?.price24h ?? null})
         RETURNING id`;
       if (!firstId) firstId = visit!.id;
+      created.push(visit!.id);
       // 免票：记一条改票种记录，留下授权人与原因
       if (ticket && ticketApproval && isFreeTicket(ticket)) {
         await tx`
@@ -242,6 +245,8 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
       }
       if (backfill) await recordBackfill(tx, backfill, { kind: 'checkin', opKey: key, visitId: visit!.id, businessDate: date, actor: ctx.actor });
     }
+    // 实时位置（v0.7.17）：发手牌后客人在接待区（后台没选接待区、补录的不记）
+    await locateCheckin(tx, created, { at, staffId: ctx.actor.id, backfill: !!backfill });
     await saveKey(tx, key, 'checkin', requestHash, firstId, ctx.actor.id);
     await writeAudit(tx, {
       staffId: ctx.actor.id,
@@ -494,6 +499,8 @@ export async function cancelVisit(deps: Deps, visitId: number, raw: unknown, ctx
       UPDATE visits SET status = 'cancelled', closed_at = ${at}, closed_by = ${ctx.actor.id}, close_reason = ${input.reason}
       WHERE id = ${visit.id}`;
     await closeGroupIfEmpty(tx, visit.groupId, at);
+    // 实时位置（v0.7.17）：撤销来访，当前位置清掉
+    await locateGone(tx, [visit.id], 'visit_cancel', null, { at, staffId: ctx.actor.id });
     await writeAudit(tx, {
       staffId: ctx.actor.id,
       action: 'frontdesk_cancel',

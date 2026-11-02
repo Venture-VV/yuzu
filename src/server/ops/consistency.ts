@@ -9,6 +9,7 @@ import { requestChecks } from '../modules/requests';
 import { legacyChecks } from '../modules/legacy';
 import { spaceChecks } from '../modules/spaces';
 import { floorplanChecks } from '../modules/floorplans';
+import { locationChecks } from '../modules/locations';
 import { computeSettlement } from '../modules/settlement';
 import { loadSettings } from '../modules/settings';
 
@@ -32,5 +33,7 @@ export async function consistencyChecks(sql: Sql, timezone: string): Promise<Che
   const spaces = await readSnapshot(sql, spaceChecks);
   // 底图批次与房间轮廓（v0.7.15）
   const floorplans = await readSnapshot(sql, floorplanChecks);
-  return [...summary.checks, ...inventory, ...expenses, ...requests, ...frontdesk, legacy, ...spaces, ...floorplans].map(({ label, ok, detail }) => ({ label, ok, detail }));
+  // 第一级实时位置（v0.7.17）：当前位置、轨迹段与位置事件一致
+  const locations = await readSnapshot(sql, locationChecks);
+  return [...summary.checks, ...inventory, ...expenses, ...requests, ...frontdesk, legacy, ...spaces, ...floorplans, ...locations].map(({ label, ok, detail }) => ({ label, ok, detail }));
 }

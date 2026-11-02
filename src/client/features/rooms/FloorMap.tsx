@@ -3,11 +3,13 @@
 // 客房与房态看板同一个口径，点开可开房、查房、续住、换房、收押金、退房、改房态（都用「客房」页原来的对话框）；
 // 技师房看钟单（派钟时选的房间），点开看这间房里的钟；其他业态只显示业态。
 // 缩放平移：滚轮、双指、拖动，「适应屏幕」回到整层；底图与轮廓只取一次，状态每 5 秒刷新（只刷颜色，不重画底图）。
+// 实时位置（v0.7.17）：「人员」图层在有人的房间写人数、区域写在场人数，侧栏「在场」列名单与轨迹（见 People.tsx）。
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { Minus, Plus, Scan, Search, X } from 'lucide-react';
 import type { FloorplanFloor } from '@shared/floorplans';
+import type { LocationPerson } from '@shared/locations';
 import { DASHED_STATES, FLOOR_MAP_LEGEND, FLOOR_MAP_STATES, spaceMatches, spaceStatus, type FloorMapSession, type FloorMapSpace, type FloorMapState, type SpaceStatus } from '@shared/floormap';
 import { ROOM_BOARD_LABELS, type RoomBoard, type RoomBoardRoom } from '@shared/rooms';
 import { areaText, spaceLabel } from '@shared/spaces';
@@ -18,7 +20,8 @@ import { Money } from '../../components/Money';
 import { Badge, Button, Input, Notice, Segmented, Skeleton } from '../../components/ui';
 import { guestOf } from './parts';
 import { dayText } from './queries';
-import { useActiveFloorplan, useFloorMap } from './floormap';
+import { useActiveFloorplan, useFloorMap, useLocations } from './floormap';
+import { PeopleLayer, PeoplePanel, personText, TrackDialog, usePeopleOnFloor, type ZoneBadge } from './People';
 import type { StayAction } from './StayDialog';
 
 export type MapAction =
@@ -40,6 +43,7 @@ interface Entry {
 }
 
 const MAX_ZOOM = 12;
+const NO_PEOPLE: LocationPerson[] = [];
 
 export function FloorMapView({ board, onAction }: { board: RoomBoard; onAction: (a: MapAction) => void }) {
   const fm = useFloorMap();
@@ -50,6 +54,15 @@ export function FloorMapView({ board, onAction }: { board: RoomBoard; onAction: 
   const [vacantOnly, setVacantOnly] = useState(false);
   const [query, setQuery] = useState('');
   const [focus, setFocus] = useState<{ code: string; n: number } | null>(null);
+  // 实时位置（v0.7.17）：有「看实时位置」权限、开关开着时才有人员图层
+  const can = useCan();
+  const canSeePeople = can('location.view');
+  const loc = useLocations(canSeePeople);
+  const [showPeople, setShowPeople] = useState(true);
+  const [zoneFilter, setZoneFilter] = useState<{ id: number; name: string } | null>(null);
+  const [trackOf, setTrackOf] = useState<LocationPerson | null>(null);
+  const peopleOn = canSeePeople && !!loc.data?.enabled;
+  const people = peopleOn && showPeople ? loc.data!.people : NO_PEOPLE;
 
   const data = fm.data;
   const p = plan.data;
@@ -78,6 +91,12 @@ export function FloorMapView({ board, onAction }: { board: RoomBoard; onAction: 
   }, [floors, entries]);
   const floor = floors.find((f) => f.code === floorCode) ?? floors.find((f) => f.code === busiest) ?? floors[0] ?? null;
   const here = useMemo(() => (floor ? entries.filter((e) => e.floorCode === floor.code) : []), [entries, floor]);
+  const onFloor = usePeopleOnFloor(people, floor?.code ?? null, here);
+  const peopleBySpace = useMemo(() => {
+    const m = new Map<number, LocationPerson[]>();
+    for (const x of people) if (x.spaceId !== null) m.set(x.spaceId, [...(m.get(x.spaceId) ?? []), x]);
+    return m;
+  }, [people]);
   const typeOptions = useMemo(() => [...new Set(here.flatMap((e) => (e.space ? [e.space.businessType] : [])))].sort(), [here]);
 
   const q = query.trim();
@@ -103,6 +122,20 @@ export function FloorMapView({ board, onAction }: { board: RoomBoard; onAction: 
     if (target && target.floorCode !== floor?.code) setFloorCode(target.floorCode);
     setSelected(code);
     setFocus((f) => ({ code, n: (f?.n ?? 0) + 1 }));
+  };
+  /** 点名单里的人：在图上的房间就定位到那一间；只到区域的换到那一层、描出那个区域 */
+  const locatePerson = (x: LocationPerson) => {
+    if (x.spaceCode && entries.some((e) => e.code === x.spaceCode)) {
+      setZoneFilter(null);
+      locate(x.spaceCode);
+      return;
+    }
+    if (x.floorCode !== floor?.code && floors.some((f) => f.code === x.floorCode)) setFloorCode(x.floorCode);
+    if (x.zoneId !== null) setZoneFilter({ id: x.zoneId, name: x.zoneName ?? '' });
+  };
+  const pickZone = (zoneId: number) => {
+    const z = onFloor.zones.find((b) => b.zoneId === zoneId);
+    setZoneFilter((cur) => (cur?.id === zoneId ? null : { id: zoneId, name: z?.name ?? '' }));
   };
   const searchGo = () => {
     if (!q) return;
@@ -160,6 +193,12 @@ export function FloorMapView({ board, onAction }: { board: RoomBoard; onAction: 
           <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={vacantOnly} onChange={(e) => setVacantOnly(e.target.checked)} data-testid="floormap-vacant-only" />
           只看空闲
         </label>
+        {peopleOn && (
+          <label className="flex h-9 items-center gap-1.5 rounded-md px-1 text-[13px] font-semibold text-ink-2">
+            <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={showPeople} onChange={(e) => setShowPeople(e.target.checked)} data-testid="floormap-show-people" />
+            人员
+          </label>
+        )}
       </div>
       {typeOptions.length > 1 && (
         <div className="flex flex-wrap items-center gap-1.5" data-testid="floormap-types">
@@ -189,7 +228,16 @@ export function FloorMapView({ board, onAction }: { board: RoomBoard; onAction: 
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0 space-y-2">
-          <PlanCanvas floor={floor} entries={here} selected={selected} dim={dim} focus={focus} onPick={(code) => setSelected(code)} />
+          <PlanCanvas
+            floor={floor}
+            entries={here}
+            selected={selected}
+            dim={dim}
+            focus={focus}
+            onPick={(code) => setSelected(code)}
+            people={people.length ? { bySpace: onFloor.bySpace, zones: onFloor.zones, highlightZone: zoneFilter?.id ?? null } : null}
+            onPickZone={pickZone}
+          />
           <Legend counts={counts} />
           {offDrawing.length > 0 && (
             <details className="rounded-lg border border-line bg-card px-3 py-2 text-[13px]" data-testid="floormap-off-drawing">
@@ -215,16 +263,24 @@ export function FloorMapView({ board, onAction }: { board: RoomBoard; onAction: 
             </details>
           )}
         </div>
-        <SpacePanel
-          entry={selectedEntry}
-          space={selectedSpace}
-          status={selectedSpace ? statusOf(selectedSpace) : null}
-          serverTime={data!.serverTime}
-          fetchedAt={fm.dataUpdatedAt}
-          onAction={onAction}
-          onClose={() => setSelected(null)}
-        />
+        <div className="min-w-0 space-y-3">
+          <SpacePanel
+            entry={selectedEntry}
+            space={selectedSpace}
+            status={selectedSpace ? statusOf(selectedSpace) : null}
+            serverTime={data!.serverTime}
+            fetchedAt={fm.dataUpdatedAt}
+            people={selectedSpace ? (peopleBySpace.get(selectedSpace.id) ?? NO_PEOPLE) : NO_PEOPLE}
+            onTrack={setTrackOf}
+            onAction={onAction}
+            onClose={() => setSelected(null)}
+          />
+          {peopleOn && showPeople && loc.data && (
+            <PeoplePanel data={loc.data} floorCode={floor.code} zoneFilter={zoneFilter} onClearZone={() => setZoneFilter(null)} onLocate={locatePerson} onTrack={setTrackOf} />
+          )}
+        </div>
       </div>
+      <TrackDialog person={trackOf} onClose={() => setTrackOf(null)} />
     </div>
   );
 }
@@ -244,6 +300,8 @@ function PlanCanvas({
   dim,
   focus,
   onPick,
+  people,
+  onPickZone,
 }: {
   floor: FloorplanFloor;
   entries: Entry[];
@@ -251,6 +309,9 @@ function PlanCanvas({
   dim: Set<string>;
   focus: { code: string; n: number } | null;
   onPick: (code: string) => void;
+  /** 人员图层（v0.7.17）：有人的房间、区域人数；没有时不画 */
+  people: { bySpace: Map<number, LocationPerson[]>; zones: ZoneBadge[]; highlightZone: number | null } | null;
+  onPickZone: (zoneId: number) => void;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -425,6 +486,8 @@ function PlanCanvas({
 
   const onClick = (e: React.MouseEvent<SVGSVGElement>) => {
     if (gesture.current.moved) return;
+    const zone = (e.target as Element).closest('[data-zone]');
+    if (zone) return onPickZone(Number(zone.getAttribute('data-zone')));
     const el = (e.target as Element).closest('[data-code]');
     if (el) onPick(el.getAttribute('data-code')!);
   };
@@ -482,6 +545,7 @@ function PlanCanvas({
         >
           <image href={floor.svgUrl} x={0} y={0} width={W} height={H} />
           <RoomsLayer entries={entries} selected={selected} dim={dim} labelK={labelK} zoom={k} W={W} H={H} flash={focus?.code ?? null} flashN={focus?.n ?? 0} />
+          {people && <PeopleLayer entries={entries} bySpace={people.bySpace} zones={people.zones} highlightZone={people.highlightZone} labelK={labelK} zoom={k} W={W} H={H} />}
         </svg>
       </div>
     </div>
@@ -611,6 +675,8 @@ function SpacePanel({
   status,
   serverTime,
   fetchedAt,
+  people,
+  onTrack,
   onAction,
   onClose,
 }: {
@@ -619,6 +685,9 @@ function SpacePanel({
   status: SpaceStatus | null;
   serverTime: string;
   fetchedAt: number;
+  /** 现在在这间的客人与技师（实时位置，v0.7.17） */
+  people: LocationPerson[];
+  onTrack: (p: LocationPerson) => void;
   onAction: (a: MapAction) => void;
   onClose: () => void;
 }) {
@@ -656,6 +725,20 @@ function SpacePanel({
         {FLOOR_MAP_LEGEND[state].label}
         {status?.occupancy && <span className="num font-semibold text-lake">{status.occupancy}</span>}
       </p>
+      {people.length > 0 && (
+        <div data-testid="floormap-panel-people">
+          <p className="text-[12.5px] font-semibold text-ink-3">在这里 {people.length} 人（实时位置）</p>
+          <ul className="mt-1 flex flex-wrap gap-1.5">
+            {people.map((x) => (
+              <li key={`${x.kind}-${x.id}`}>
+                <button type="button" onClick={() => onTrack(x)} className="h-7 rounded-full border border-line-strong px-2.5 text-[12px] font-semibold hover:border-lake" title="看轨迹">
+                  {personText(x)}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {!space ? (
         <Notice tone="warning" title="空间台账里没有这个编码">
           店主或店总在「后台 → 空间台账」补上（以台账为准，不按图纸改台账），这里就显示状态。

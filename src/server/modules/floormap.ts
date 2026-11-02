@@ -14,7 +14,7 @@ export async function floorMapData(db: Db): Promise<FloorMapData> {
   const [now] = await db<{ now: string }[]>`SELECT now() AS now`;
   const [batch] = await db<{ id: number }[]>`SELECT id FROM floorplan_batches WHERE status = 'active'`;
   const spaces = await db<FloorMapSpace[]>`
-    SELECT sp.id, sp.code, f.code AS floor_code, f.name AS floor_name, z.name AS zone_name, sp.business_type, sp.capacity, sp.area_centi_m2,
+    SELECT sp.id, sp.code, f.code AS floor_code, f.name AS floor_name, sp.zone_id, z.name AS zone_name, sp.business_type, sp.capacity, sp.area_centi_m2,
            sp.display_name, sp.sellable, sp.active,
            coalesce((SELECT array_agg(a.alias ORDER BY a.id) FROM space_aliases a WHERE a.space_id = sp.id AND a.active), '{}') AS aliases,
            (SELECT r.id FROM rooms r WHERE r.space_id = sp.id) AS room_id

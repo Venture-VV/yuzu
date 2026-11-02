@@ -9,6 +9,7 @@
 // v0.7.0 新增「维护技师名册」「看技师业绩」，默认值待确认。
 // v0.7.3 ERP 独立工作区：库存、采购、货款的权限归入「ERP」一组；新增「ERP：看营业数据（只读）」，
 // 默认店主与店总（职责不带：增加库存职责仍不会带来全店财务查看权限）。
+// v0.7.17 新增「看实时位置」「上报位置」（第一级实时位置），默认值待确认。
 
 export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice'] as const;
 export type Role = (typeof ROLES)[number];
@@ -150,6 +151,10 @@ export const PERMISSIONS = {
   'room.operate': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 客房：打扫、维修（房态）（S7，v0.7.4，待确认：前台岗位与后勤人员；客房服务员可以用后勤账号） */
   'room.housekeep': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk', 'backoffice'] },
+  /** 实时位置（v0.7.17，待确认：前台岗位）：平面图上的在场人员、区域人数、轨迹；只显示手牌号与技师，不显示会员姓名、手机号 */
+  'location.view': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
+  /** 上报位置（v0.7.17，待确认：店主、店总）：后台模拟刷卡；RQ-001 的设备桥用只有这项权限的账号登录上报 */
+  'location.report': { roles: ['owner', 'store_manager'] },
   'settings.manage': { roles: ['owner'] },
   'audit.read': { roles: ['owner', 'store_manager'] },
   // ── 数据看板（v0.6.0；当日看板仍按「查看当日流水与日结」）──
@@ -271,6 +276,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'dining.kitchen': '厨房出品屏：开始做、出餐、估清',
   'room.operate': '客房入住、续住、换房、退房、押金、夜审',
   'room.housekeep': '客房打扫、维修（房态）',
+  'location.view': '看实时位置（平面图上的在场人员与轨迹）',
+  'location.report': '上报位置（模拟刷卡、设备桥）',
   'settings.manage': '修改经营规则设置',
   'audit.read': '查看操作审计',
   'report.executive': '看经营总览（任选时段、环比）',
@@ -286,7 +293,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   },
   {
     title: '前台手牌与账单',
-    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen', 'room.operate', 'room.housekeep'],
+    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen', 'room.operate', 'room.housekeep', 'location.view', 'location.report'],
   },
   {
     title: 'ERP（库存、采购、货款、费用、营业数据）',

@@ -111,6 +111,7 @@ describe('状态口径（共用的纯函数）', () => {
     code: 'S301',
     floorCode: 'L3',
     floorName: '三层',
+    zoneId: null,
     zoneName: null,
     businessType: 'SPA',
     capacity: 2,

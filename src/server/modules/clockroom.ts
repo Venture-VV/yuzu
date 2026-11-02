@@ -34,6 +34,7 @@ import { conflict, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse, positiveCents } from '../lib/validate';
 import { assertCanFix, assertOpen, businessDate, loadFrontdeskRules, lockVisits, nextDocNo, setTxTimeouts } from './frontdesk/common';
 import { loadTechnicianRules, loadTechnicians } from './technicians';
+import { locateSession, locateSessionEnd, locateSignIn, locateSignOut } from './locations';
 
 export async function loadClockroomRules(db: Db): Promise<ClockroomRules> {
   const [row] = await db<{ value: Partial<ClockroomRules> }[]>`SELECT value FROM settings WHERE key = 'clockroom_rules'`;
@@ -299,12 +300,13 @@ interface SessionRow {
   status: 'waiting' | 'serving' | 'done' | 'cancelled' | 'rejected';
   queueKeyBefore: string | null;
   startedAt: string | null;
+  spaceId: number | null;
 }
 
 const lockSession = async (tx: Tx, id: number) =>
   (
     await tx<SessionRow[]>`
-      SELECT id, session_no, technician_id, visit_id, item_id, call_type, clocks, minutes, status, queue_key_before, started_at
+      SELECT id, session_no, technician_id, visit_id, item_id, call_type, clocks, minutes, status, queue_key_before, started_at, space_id
       FROM technician_sessions WHERE id = ${id} FOR UPDATE`
   )[0];
 
@@ -328,6 +330,8 @@ export async function syncSessionAfterVoid(tx: Tx, deps: Deps, sessionId: number
     UPDATE technician_sessions SET status = ${rejected ? 'rejected' : 'cancelled'}, ended_at = ${at}, ended_by = ${actor.id}, void_reason = ${reason}
     WHERE id = ${s.id}`;
   await logEvent(tx, { technicianId: s.technicianId, sessionId: s.id, kind: rejected ? 'reject' : 'cancel', detail: { reason }, staffId: actor.id, businessDate: today, at });
+  // 实时位置（v0.7.17）：上了钟被退钟，技师回休息区（没设的离开那间房）；没上钟的取消不动
+  if (rejected) await locateSessionEnd(tx, [{ id: s.id, technicianId: s.technicianId, spaceId: s.spaceId }], { at, staffId: actor.id });
 
   const rules = await loadClockroomRules(tx);
   const status = (await statusMap(tx, today)).get(s.technicianId) ?? offStatus;
@@ -375,6 +379,8 @@ export async function startSession(deps: Deps, id: number, ctx: OpContext) {
     if (other) throw conflict('TECHNICIAN_BUSY', `这位技师还在钟单 ${other.sessionNo} 上，请先下钟`);
     await tx`UPDATE technician_sessions SET status = 'serving', started_at = ${at}, started_by = ${ctx.actor.id} WHERE id = ${s.id}`;
     await logEvent(tx, { technicianId: s.technicianId, sessionId: s.id, kind: 'start', staffId: ctx.actor.id, businessDate: await businessDate(tx, deps, at), at });
+    // 实时位置（v0.7.17）：技师与客人在钟单记的房间
+    await locateSession(tx, s.id, 'session_start', { at, staffId: ctx.actor.id });
   });
   return clockroomBoard(deps.sql, deps);
 }
@@ -383,7 +389,7 @@ export async function startSession(deps: Deps, id: number, ctx: OpContext) {
  * 下钟（钟单已锁、已拿技师队列锁）：记实际时长；轮钟按规则排到队尾，连续被退钟的次数清零。
  * auto 为自动下钟的原因；还没上钟的（只有结账时一起收尾才会）上钟、下钟都记在这一刻，实际 0 分钟。
  */
-async function finishLocked(tx: Tx, deps: Deps, s: SessionRow, actor: Actor, at: Date, auto?: string) {
+async function finishLocked(tx: Tx, deps: Deps, s: SessionRow, actor: Actor, at: Date, auto?: string, locate = true) {
   const start = s.startedAt ? new Date(s.startedAt) : at;
   const end = new Date(Math.max(at.getTime(), start.getTime()));
   await tx`
@@ -400,6 +406,8 @@ async function finishLocked(tx: Tx, deps: Deps, s: SessionRow, actor: Actor, at:
     businessDate: today,
     at,
   });
+  // 实时位置（v0.7.17）：在钟上的下钟，技师回休息区（没设的离开那间房）；还没上钟的（结账时一起收尾）不动
+  if (locate && s.status === 'serving') await locateSessionEnd(tx, [{ id: s.id, technicianId: s.technicianId, spaceId: s.spaceId }], { at, staffId: actor.id });
   const rules = await loadClockroomRules(tx);
   const status = (await statusMap(tx, today)).get(s.technicianId) ?? offStatus;
   if (status.state !== 'off') {
@@ -435,14 +443,16 @@ export async function openSessionsOf(db: Db, visitIds: number[]) {
  * 还没上钟的按已做完记（明细已经结进账单；客人没做的应在结账前取消派钟，结账核对里会列出来提醒）。
  * 客人离店后不再占着技师，反结账重开账单也不会再冒出来。没有钟单时不拿技师队列锁，平时结账不受影响。
  */
-export async function settleSessionsAtCheckout(tx: Tx, deps: Deps, visitIds: number[], actor: Actor, at: Date) {
+export async function settleSessionsAtCheckout(tx: Tx, deps: Deps, visitIds: number[], actor: Actor, at: Date): Promise<{ id: number; technicianId: number; spaceId: number | null }[]> {
   const [any] = await tx<{ id: number }[]>`SELECT id FROM technician_sessions WHERE visit_id IN ${tx(visitIds)} AND status IN ('waiting', 'serving') LIMIT 1`;
-  if (!any) return;
+  if (!any) return [];
   await lockQueue(tx);
   const rows = await tx<SessionRow[]>`
-    SELECT id, session_no, technician_id, visit_id, item_id, call_type, clocks, minutes, status, queue_key_before, started_at
+    SELECT id, session_no, technician_id, visit_id, item_id, call_type, clocks, minutes, status, queue_key_before, started_at, space_id
     FROM technician_sessions WHERE visit_id IN ${tx(visitIds)} AND status IN ('waiting', 'serving') ORDER BY id FOR UPDATE`;
-  for (const r of rows) await finishLocked(tx, deps, r, actor, at, r.status === 'waiting' ? '结账时还没上钟，按已做完记' : '结账离店');
+  // 实时位置在结账最后一起记（先客人离店、再技师回休息区，按固定顺序锁当前位置）：这里只返回在钟上的
+  for (const r of rows) await finishLocked(tx, deps, r, actor, at, r.status === 'waiting' ? '结账时还没上钟，按已做完记' : '结账离店', false);
+  return rows.filter((r) => r.status === 'serving').map((r) => ({ id: r.id, technicianId: r.technicianId, spaceId: r.spaceId }));
 }
 
 export const VoidSessionInput = z.object({
@@ -520,6 +530,8 @@ export async function setSessionSpace(deps: Deps, id: number, raw: unknown, ctx:
     const to = spaceId === null ? null : await lockServiceSpace(tx, spaceId);
     const [from] = s.spaceId === null ? [] : await tx<{ code: string; displayName: string }[]>`SELECT code, display_name FROM spaces WHERE id = ${s.spaceId}`;
     await tx`UPDATE technician_sessions SET space_id = ${spaceId}, space_version = space_version + 1 WHERE id = ${s.id}`;
+    // 实时位置（v0.7.17）：在钟上换房间，技师与客人到新房间；还没上钟的、清掉房间的不动
+    if (s.status === 'serving' && spaceId !== null) await locateSession(tx, s.id, 'session_room', { at, staffId: ctx.actor.id });
     await logEvent(tx, {
       technicianId: s.technicianId,
       sessionId: s.id,
@@ -593,6 +605,9 @@ export async function changeState(deps: Deps, technicianId: number, raw: unknown
     }
     await writeStatus(tx, t.id, today, next, ctx.actor.id, at);
     await logEvent(tx, { technicianId: t.id, kind: action, detail: reason ? { reason } : {}, staffId: ctx.actor.id, businessDate: today, at });
+    // 实时位置（v0.7.17）：上牌（没上牌的才算到店）在技师休息区；下牌离店
+    if (action === 'sign_in' && s.state === 'off') await locateSignIn(tx, [t.id], { at, staffId: ctx.actor.id });
+    if (action === 'sign_out') await locateSignOut(tx, t.id, { at, staffId: ctx.actor.id });
   });
   return clockroomBoard(deps.sql, deps);
 }
@@ -606,12 +621,15 @@ export async function signInAll(deps: Deps, ctx: OpContext) {
     const today = await businessDate(tx, deps, at);
     const statuses = await statusMap(tx, today);
     let i = 0;
+    const signed: number[] = [];
     for (const t of (await loadTechnicians(tx)).values()) {
       if (!t.active || (statuses.get(t.id)?.state ?? 'off') !== 'off') continue;
       const key = new Date(at.getTime() + i++);
       await writeStatus(tx, t.id, today, { state: 'on', queueKey: key, rejectStreak: 0 }, ctx.actor.id, at);
       await logEvent(tx, { technicianId: t.id, kind: 'sign_in', detail: { all: true }, staffId: ctx.actor.id, businessDate: today, at });
+      signed.push(t.id);
     }
+    await locateSignIn(tx, signed, { at, staffId: ctx.actor.id });
   });
   return clockroomBoard(deps.sql, deps);
 }
