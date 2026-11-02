@@ -160,7 +160,8 @@ async function idOf(sql: Sql, query: Promise<{ id: number }[]>): Promise<number>
 }
 
 /** 只读核对：有冲突时一条都不写 */
-async function findConflicts(sql: Sql): Promise<string[]> {
+/** ownerId：演示店主 linlan——上次中途退出时由它建、还没来得及打演示标记的技师按这次演示场景自己的算 */
+export async function findConflicts(sql: Sql, ownerId: number): Promise<string[]> {
   const out: string[] = [];
   for (const s of SPACES) {
     const cur = await spaceOf(sql, s.code);
@@ -192,9 +193,13 @@ async function findConflicts(sql: Sql): Promise<string[]> {
     } else if (!room.active) out.push(`房间 ${code} 已停用`);
   }
   for (const t of TECHS) {
-    const [cur] = await sql<{ name: string; active: boolean; isSynthetic: boolean }[]>`SELECT name, active, is_synthetic FROM technicians WHERE tech_no = ${t.techNo}`;
+    const [cur] = await sql<{ name: string; active: boolean; isSynthetic: boolean; note: string; createdBy: number | null }[]>`
+      SELECT name, active, is_synthetic, note, created_by FROM technicians WHERE tech_no = ${t.techNo}`;
     if (!cur) continue;
-    if (!cur.isSynthetic) out.push(`工号 ${t.techNo} 是一位不带「演示」标记的技师（${cur.name}）`);
+    // 新建技师（正式接口）与打演示标记是两步：上次在两步之间中途退出时，技师已建好但还没有标记。
+    // 名字、备注都与演示场景相同、又是演示店主建的，就是这次演示场景自己的，写入时补上标记（Codex 复审 174fa29）
+    const ours = cur.name === t.name && cur.note === NOTE && Number(cur.createdBy) === ownerId;
+    if (!cur.isSynthetic && !ours) out.push(`工号 ${t.techNo} 是一位不带「演示」标记的技师（${cur.name}）`);
     else if (!cur.active) out.push(`演示技师 ${t.techNo} 已停用`);
   }
   const items = await sql<{ name: string; active: boolean; technicianRequired: boolean }[]>`
@@ -253,7 +258,7 @@ export async function seedShowcaseDemo(sql: Sql, config: AppConfig): Promise<Sho
   const [tags] = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM hand_tags WHERE is_synthetic`;
   if (!tags!.n) throw new Error('演示场景建在前台演示数据上，请先执行 seed-frontdesk-demo');
 
-  const conflicts = await findConflicts(sql);
+  const conflicts = await findConflicts(sql, Number(ownerId));
   if (conflicts.length) throw new ShowcaseConflictError(conflicts);
 
   const done: string[] = [];
@@ -366,11 +371,12 @@ export async function seedShowcaseDemo(sql: Sql, config: AppConfig): Promise<Sho
     const techs: Record<string, number> = {};
     for (const t of TECHS) {
       const find = () => sql<{ id: number }[]>`SELECT id FROM technicians WHERE tech_no = ${t.techNo}`;
-      if (!(await find())[0]) {
-        await owner('POST', '/api/admin/technicians', { techNo: t.techNo, name: t.name, gender: t.gender, grade: t.grade, note: NOTE });
-        await sql`UPDATE technicians SET is_synthetic = true WHERE tech_no = ${t.techNo}`;
-        done.push(`技师 ${t.techNo} ${t.name}`);
-      }
+      const created = !(await find())[0];
+      if (created) await owner('POST', '/api/admin/technicians', { techNo: t.techNo, name: t.name, gender: t.gender, grade: t.grade, note: NOTE });
+      // 新建的、或上次中途退出还没打上的（冲突核对已确认没有标记的只会是演示场景自己建的）：补上演示标记
+      const [marked] = await sql`UPDATE technicians SET is_synthetic = true WHERE tech_no = ${t.techNo} AND NOT is_synthetic RETURNING id`;
+      if (created) done.push(`技师 ${t.techNo} ${t.name}`);
+      else if (marked) done.push(`技师 ${t.techNo} 补上演示标记（上次中途退出时没来得及打）`);
       techs[t.techNo] = await idOf(sql, find());
     }
     const itemQuery = (name: string) => sql<{ id: number; price: number; zoneId: number | null; stationId: number | null }[]>`

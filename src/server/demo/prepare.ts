@@ -13,7 +13,7 @@ import { migrate } from '../migrate';
 import { loadSettings } from '../modules/settings';
 import { createBackup, type BackupManifest } from '../ops/backup';
 import { consistencyChecks } from '../ops/consistency';
-import { computeFingerprint } from '../ops/fingerprint';
+import { fingerprintIn } from '../ops/fingerprint';
 import { demoSeedTime, rememberDemoAnchor } from '../ops/demo-time';
 import { seedDemo } from '../seed';
 import { seedBillingDemo } from '../seed-billing';
@@ -212,19 +212,24 @@ export async function demoReset(
   const log = opts.log ?? (() => {});
   const [{ db } = { db: '' }] = await sql<{ db: string }[]>`SELECT current_database() AS db`;
   if (!opts.confirm || opts.confirm !== db) throw new Error(`demo-reset 会清空数据库「${db}」：确认无误后加 --confirm ${db}（库名写对才执行）`);
-  // 清库的前提（备份不成功就不清库）：pg_dump 成功写出文件（记下大小与摘要）、在临时库完整恢复并算出数据指纹，
-  // 且这个指纹与备份前现在这个库的指纹相同——备份里就是现在的数据；不同说明备份期间有写入（应用没停）或备份不完整
-  const before = (await computeFingerprint(sql)).digest;
+  // 清库的前提（备份不成功就不清库）：pg_dump 成功写出文件（记下大小与摘要），并在临时库完整恢复、算出数据指纹
   const backup = await (opts.backup ?? createBackup)(config, opts.backupDir, 'demo-reset');
   if (!backup.verified) throw new Error(`备份没有核验通过（${backup.verifyError ?? '原因不明'}），没有清库。备份文件：${backup.file}`);
-  if (backup.fingerprintDigest !== before) {
-    throw new Error(`备份恢复到临时库后的数据指纹与现在的库不同（备份期间有写入？应用没停？），没有清库。请停掉应用后再执行。备份文件：${backup.file}`);
-  }
-  log(`✓ 已备份（${(backup.bytes / 1024).toFixed(0)} KB），在临时库恢复核验，数据指纹与现在的库一致：${backup.file}`);
-  // 应用还连着这个库时，等锁 10 秒就放弃（整段回滚，库不变）：请先停掉应用
+  log(`✓ 已备份（${(backup.bytes / 1024).toFixed(0)} KB），在临时库恢复核验通过：${backup.file}`);
+  // 清库在一个事务里：先给 public 下所有表加共享锁（挡住写入；应用还在写、等锁 10 秒拿不到就放弃），再算一次数据指纹，
+  // 与备份恢复出来的指纹相同才删——备份里就是现在的全部数据。备份之后有过写入的指纹对不上，拒绝；
+  // 锁住之后再来的写入被挡在锁外，删库后失败，不会提交（Codex 复审 174fa29：原来只比对备份前的指纹，备份到删库之间的写入会悄悄丢掉）
   try {
     await sql.begin(async (tx) => {
       await tx`SET LOCAL lock_timeout = '10s'`;
+      const tables = await tx<{ name: string }[]>`
+        SELECT c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') ORDER BY c.relname COLLATE "C"`;
+      if (tables.length) await tx.unsafe(`LOCK TABLE ${tables.map((t) => `public."${t.name.replace(/"/g, '""')}"`).join(', ')} IN SHARE MODE`);
+      const now = await fingerprintIn(tx);
+      if (now.digest !== backup.fingerprintDigest) {
+        throw new Error(`备份之后库里又有写入（现在的数据指纹与备份恢复出来的不同，应用没停？），没有清库。请停掉应用后再执行。备份文件：${backup.file}`);
+      }
       await tx.unsafe('DROP SCHEMA public CASCADE');
       await tx.unsafe('CREATE SCHEMA public');
     });
@@ -233,6 +238,7 @@ export async function demoReset(
     if (code === '55P03') throw new Error('数据库正被别的连接使用（应用没停？），没有清库；请先停掉应用再执行。备份已做好。');
     throw error;
   }
+  log('清库前锁住所有表再核对：数据指纹与备份一致');
   log(`已清空数据库「${db}」，重新准备演示数据…`);
   return { backup, prepare: await demoPrepare(sql, config, { log }) };
 }

@@ -15,6 +15,8 @@ import expected from '../src/server/demo/showcase-expected.json' with { type: 'j
 import { seedShowcaseDemo, ShowcaseConflictError, SHOWCASE_KEY, showcaseState } from '../src/server/demo/showcase';
 import { SAMPLE_SPACES_CSV, SAMPLE_ZONES_CSV } from '../src/server/demo/space-sample';
 import { loadSettings } from '../src/server/modules/settings';
+import { createStaff } from '../src/server/modules/staff';
+import { DEMO_PASSWORD } from '../src/server/seed';
 import type { BackupManifest } from '../src/server/ops/backup';
 import { computeFingerprint } from '../src/server/ops/fingerprint';
 import { setup, type TestContext } from './helpers';
@@ -78,6 +80,10 @@ describe('演示数据准备', () => {
   });
 
   it('新库：第一次中途出错，再执行一次接着补（不重复接待、派钟、点单）；结果与预期一致，自检全过', async () => {
+    // 上次中途退出留下的技师：演示店主用正式接口建好了 D04、还没来得及打演示标记（Codex 复审 174fa29）——不当冲突，补上标记
+    const ownerId = await createStaff(ctx.sql, { username: 'linlan', displayName: '林岚', role: 'owner', password: DEMO_PASSWORD, mustChangePassword: false });
+    await ctx.sql`
+      INSERT INTO technicians (tech_no, name, gender, grade, note, created_by) VALUES ('D04', '演示技师·许', 'male', 'premium', '演示场景', ${ownerId})`;
     // 预先放一道已估清的「演示果汁」：场景块照常用它（按名称认已有的菜），桌台点单时被估清拦下、中途出错
     const [item] = await ctx.sql<{ id: number }[]>`
       INSERT INTO service_items (name, category, price) VALUES ('演示果汁', '餐饮', 2200) RETURNING id`;
@@ -130,9 +136,11 @@ describe('演示数据准备', () => {
     expect(bad[0]!.detail).toContain('期望 W301 occupied、W302 dirty');
     expect(bad[0]!.detail).toContain('实际 W301 occupied、W302 clean');
 
-    // 当成「还没准备场景块」的库：工号 D01 被改成不带演示标记的技师、T301 改成了别的业态、实时位置被关了
+    // 当成「还没准备场景块」的库：工号 D01 换成了一位不带演示标记的技师、T301 改成了别的业态、实时位置被关了；
+    // D02 只是没有演示标记（名字、备注、建的人都是演示场景的，像上次中途退出），不算冲突
     await ctx.sql`DELETE FROM settings WHERE key = ${SHOWCASE_KEY}`;
-    await ctx.sql`UPDATE technicians SET is_synthetic = false WHERE tech_no = 'D01'`;
+    await ctx.sql`UPDATE technicians SET is_synthetic = false, name = '张师傅' WHERE tech_no = 'D01'`;
+    await ctx.sql`UPDATE technicians SET is_synthetic = false WHERE tech_no = 'D02'`;
     await ctx.sql`UPDATE spaces SET business_type = '足浴' WHERE code = 'T301'`;
     await ctx.sql`UPDATE settings SET value = value || '{"enabled": false}'::jsonb WHERE key = 'location_rules'`;
     const before = await fingerprint();
@@ -140,7 +148,7 @@ describe('演示数据准备', () => {
     expect(error).toBeInstanceOf(ShowcaseConflictError);
     expect((error as ShowcaseConflictError).conflicts).toEqual([
       '台账里的 T301 是「足浴」业态（演示场景要「SPA」）',
-      '工号 D01 是一位不带「演示」标记的技师（演示技师·林）',
+      '工号 D01 是一位不带「演示」标记的技师（张师傅）',
       '后台把「实时位置」功能关了：演示场景要用它，请到后台打开',
     ]);
     expect((error as Error).message).toContain('demo-reset');
@@ -148,7 +156,7 @@ describe('演示数据准备', () => {
     expect((await demoCheck(ctx.sql, ctx.config)).lines.at(-1)).toEqual({ ok: false, label: '场景块', detail: '还没有准备：请执行 demo-prepare' });
   });
 
-  it('demo-reset：环境、实例标识、库名不对时拒绝；备份没核验通过、或恢复出来的数据与现在的库不同时不清库', async () => {
+  it('demo-reset：环境、实例标识、库名不对时拒绝；备份没核验通过、恢复出来的数据与现在的库不同、备份之后又有写入时都不清库', async () => {
     const before = await fingerprint();
     const db = await dbName();
     const opts = { backupDir: '/nonexistent', backup: fakeBackup(true) };
@@ -159,8 +167,18 @@ describe('演示数据准备', () => {
     await expect(demoReset(ctx.sql, dev, { ...opts, confirm: undefined })).rejects.toThrow(`--confirm ${db}`);
     await expect(demoReset(ctx.sql, dev, { ...opts, confirm: `${db}_x` })).rejects.toThrow(`--confirm ${db}`);
     await expect(demoReset(ctx.sql, dev, { ...opts, confirm: db, backup: fakeBackup(false) })).rejects.toThrow(/备份没有核验通过.*没有清库/);
-    // 备份恢复出来的数据与现在的库对不上（备份期间有写入）：也不清库
-    await expect(demoReset(ctx.sql, dev, { ...opts, confirm: db, backup: fakeBackup(true, 'f'.repeat(64)) })).rejects.toThrow(/数据指纹与现在的库不同.*没有清库/);
+    // 备份恢复出来的数据与现在的库对不上：不清库
+    await expect(demoReset(ctx.sql, dev, { ...opts, confirm: db, backup: fakeBackup(true, 'f'.repeat(64)) })).rejects.toThrow(/备份之后库里又有写入.*没有清库/);
+    expect(await fingerprint()).toBe(before);
+    // 备份（快照）之后、清库之前又有写入（应用没停）：锁住所有表后再算的指纹与备份不同，不清库，这笔写入还在（Codex 复审 174fa29）
+    const backupThenWrite = async (): Promise<BackupManifest> => {
+      const m = await fakeBackup(true)();
+      await ctx.sql`INSERT INTO settings (key, value) VALUES ('test_write_after_backup', '1'::jsonb)`;
+      return m;
+    };
+    await expect(demoReset(ctx.sql, dev, { ...opts, confirm: db, backup: backupThenWrite })).rejects.toThrow(/备份之后库里又有写入.*没有清库/);
+    expect(await ctx.sql`SELECT 1 FROM settings WHERE key = 'test_write_after_backup'`).toHaveLength(1);
+    await ctx.sql`DELETE FROM settings WHERE key = 'test_write_after_backup'`;
     expect(await fingerprint()).toBe(before);
   });
 
@@ -168,7 +186,8 @@ describe('演示数据准备', () => {
     const lines: string[] = [];
     const db = await dbName();
     const r = await demoReset(ctx.sql, dev, { confirm: db, backupDir: '/nonexistent', backup: fakeBackup(true), log: (l) => lines.push(l) });
-    expect(lines[0]).toContain('在临时库恢复核验，数据指纹与现在的库一致');
+    expect(lines[0]).toContain('在临时库恢复核验通过');
+    expect(lines[1]).toContain('清库前锁住所有表再核对：数据指纹与备份一致');
     expect(r.prepare.blocks.every((b) => b.written)).toBe(true);
     expect(r.prepare.check.ok).toBe(true);
     expect(await showcaseState(ctx.sql, ctx.config.timezone)).toEqual(want);
