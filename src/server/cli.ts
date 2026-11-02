@@ -27,6 +27,12 @@
 //                                         作废一次旧账导入（页面上不再显示）
 //   legacy-samples <目录>                 写出四份旧账的合成样例（结构与原表一致、内容是编的），演示与验收用
 //   seed-legacy-demo                      把旧账合成样例导入演示库（仅独立演示库；试用 / 正式环境拒绝）
+//   demo-prepare [--previous-day]         一条命令准备演示库（v0.7.18）：迁移 → 会员 → 库存 → 前台 → 结账 → 旧账 → 场景块（客房、技师与钟房、
+//                                         餐饮与厨房、空间台账与底图、实时位置）→ 一致性自检 → 演示核对；已有的块跳过、缺的补上，不改已有记录；
+//                                         场景块与已有记录对不上时整块不写并列出冲突；试用 / 正式环境拒绝
+//   demo-check                            核对演示库（只读）：一致性自检、五块都在、场景块与 src/server/demo/showcase-expected.json 一致
+//   demo-reset --confirm <数据库名>        重建演示库：只在 APP_ENV=development、实例标识不是 prod / shadow / test 时可用；先备份到 BACKUP_PATH
+//                                         并在临时库恢复核验，通过后才清空这个库、重新 demo-prepare（请先停掉应用）
 //   check                                 核对会员余额与流水、库存结存与库存流水、手牌账单与明细是否一致
 //   fingerprint [--json] [--expect 摘要]  当前数据库的数据指纹（逐表行数与内容摘要）；--expect 不一致时退出码为 1
 //   backup [--label 备注]                 立即备份一次：导出 → 临时库试恢复 → 自检与数据指纹，文件与 .json 说明写到 BACKUP_PATH
@@ -78,6 +84,8 @@ import { demoSeedTime, rememberDemoAnchor } from './ops/demo-time';
 import { computeFingerprint } from './ops/fingerprint';
 import { buildDailyRecon } from './ops/recon';
 import { FLOORPLAN_ROOM_LABELS } from '@shared/floorplans';
+import { assertResettable, demoCheck, demoPrepare, demoReset, refuseLiveDemo, type DemoCheckResult, type PrepareResult } from './demo/prepare';
+import { ShowcaseConflictError } from './demo/showcase';
 import { floorplanSampleDxf, FLOORPLAN_SAMPLE_EXPECTED } from './demo/floorplan-sample';
 import { spacesGeoJson } from './floorplan/geojson';
 import { startConversion } from './floorplan/run';
@@ -112,6 +120,23 @@ function refuseLiveEnv(config: { env: string }, what: string) {
   if (config.env === 'production' || config.env === 'trial') {
     throw new Error(`当前是${config.env === 'trial' ? '试用' : '正式'}环境，禁止写入${what}演示数据。请另建独立的演示库（APP_ENV=development）再执行。`);
   }
+}
+
+function printDemoCheck(r: DemoCheckResult) {
+  for (const l of r.lines) console.log(`${l.ok ? '✓' : '✗'} ${l.label}：${l.detail}`);
+  for (const n of r.notes) console.log(`· ${n}`);
+  console.log(r.ok ? '✓ 演示库核对通过' : '✗ 演示库与预期不一致（见上面标 ✗ 的项）');
+}
+
+function printPrepare(r: PrepareResult, startedAt: number) {
+  console.log('\n演示数据：');
+  for (const b of r.blocks) {
+    console.log(`  ${b.written ? '已写入' : '已存在'}  ${b.block}：${b.detail}`);
+    for (const item of b.items ?? []) console.log(`            · ${item}`);
+  }
+  for (const n of r.notes) console.log(`· ${n}`);
+  console.log(`用时 ${((Date.now() - startedAt) / 1000).toFixed(1)} 秒。演示账号：店主 linlan / 前台 xiaozhou / 值班经理 zhangjl，密码均为 ${DEMO_PASSWORD}\n`);
+  printDemoCheck(r.check);
 }
 
 /** 导入、作废旧账要用店主账号经办 */
@@ -439,6 +464,35 @@ async function main() {
         }
         break;
       }
+      case 'demo-prepare': {
+        refuseLiveDemo(config);
+        const startedAt = Date.now();
+        try {
+          const r = await demoPrepare(sql, config, { previousDay: args.includes('--previous-day'), log: (l) => console.log(l) });
+          printPrepare(r, startedAt);
+          if (!r.check.ok) process.exitCode = 1;
+        } catch (error) {
+          if (error instanceof ShowcaseConflictError) console.log('· 前面几块已按顺序准备（已有的跳过），只有场景块没写');
+          throw error;
+        }
+        break;
+      }
+      case 'demo-check': {
+        const r = await demoCheck(sql, config);
+        printDemoCheck(r);
+        if (!r.ok) process.exitCode = 1;
+        break;
+      }
+      case 'demo-reset': {
+        const startedAt = Date.now();
+        assertResettable(config);
+        const dir = backupDirFromEnv();
+        await assertBackupTarget(dir, backupPolicyFromEnv());
+        const r = await demoReset(sql, config, { confirm: flag(args, 'confirm'), backupDir: dir, log: (l) => console.log(l) });
+        printPrepare(r.prepare, startedAt);
+        if (!r.prepare.check.ok) process.exitCode = 1;
+        break;
+      }
       case 'check': {
         const all = await consistencyChecks(sql, config.timezone);
         for (const c of all) console.log(`${c.ok ? '✓' : '✗'} ${c.label}：${c.detail}`);
@@ -519,7 +573,7 @@ async function main() {
         break;
       }
       default:
-        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo [--previous-day] | seed-billing-demo [--previous-day] | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup | daily-recon | balance-changes | floorplan-convert | floorplan-sample');
+        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo [--previous-day] | seed-billing-demo [--previous-day] | seed-legacy-demo | demo-prepare [--previous-day] | demo-check | demo-reset --confirm <数据库名> | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup | daily-recon | balance-changes | floorplan-convert | floorplan-sample');
         process.exitCode = command ? 1 : 0;
     }
   } finally {

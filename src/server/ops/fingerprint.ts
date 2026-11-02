@@ -5,7 +5,7 @@
 // 不同机器、不同 PostgreSQL 镜像（Alpine / Debian）算出的结果相同。
 
 import { createHash } from 'node:crypto';
-import type { Sql } from '../db';
+import type { Sql, Tx } from '../db';
 
 export interface TableFingerprint {
   name: string;
@@ -25,7 +25,12 @@ export const FINGERPRINT_ALGORITHM = 'rows-md5-sorted-v1';
 const ident = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
 export async function computeFingerprint(sql: Sql): Promise<Fingerprint> {
-  const tables = (await sql.begin('isolation level repeatable read read only', async (tx) => {
+  return (await sql.begin('isolation level repeatable read read only', (tx) => fingerprintIn(tx))) as Fingerprint;
+}
+
+/** 在调用方的事务里算（demo-reset 先锁住所有表、挡住写入，再在同一个事务里算，与备份比对后才清库）；算法与 computeFingerprint 相同 */
+export async function fingerprintIn(tx: Tx): Promise<Fingerprint> {
+  const tables = await (async () => {
     await tx`SET LOCAL TIME ZONE 'UTC'`;
     await tx`SET LOCAL datestyle = 'ISO, YMD'`;
     await tx`SET LOCAL intervalstyle = 'postgres'`;
@@ -45,7 +50,7 @@ export async function computeFingerprint(sql: Sql): Promise<Fingerprint> {
       out.push({ name: t.name, rows: row!.rows, digest: row!.digest });
     }
     return out;
-  })) as TableFingerprint[];
+  })();
   const hash = createHash('sha256');
   for (const t of tables) hash.update(`${t.name}\t${t.rows}\t${t.digest}\n`);
   return { algorithm: FINGERPRINT_ALGORITHM, digest: hash.digest('hex'), tables };

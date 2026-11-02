@@ -13,6 +13,7 @@ import type { Actor } from '../src/server/lib/context';
 import { migrate } from '../src/server/migrate';
 import { consume, recharge } from '../src/server/modules/wallet';
 import { api, login, PASSWORD, TEST_DB } from './helpers';
+import { resetPublicSchema } from './test-db';
 
 let sql: Sql;
 let app: FastifyInstance;
@@ -23,7 +24,7 @@ let itemId: number;
 
 beforeAll(async () => {
   sql = createSql(TEST_DB, { max: 10 });
-  await sql.unsafe('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+  await resetPublicSchema(sql);
   // 只建到第一版结构（会员 MVP）
   await sql`CREATE TABLE schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`;
   await sql.unsafe(await readFile(new URL('../src/server/migrations/001_init.sql', import.meta.url), 'utf8'));

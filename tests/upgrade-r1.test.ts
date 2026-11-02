@@ -17,6 +17,7 @@ import { migrate } from '../src/server/migrate';
 import { loadFrontdeskRules } from '../src/server/modules/frontdesk/common';
 import { loadSettings } from '../src/server/modules/settings';
 import { api, login, PASSWORD, TEST_DB } from './helpers';
+import { resetPublicSchema } from './test-db';
 
 const MIGRATIONS = new URL('../src/server/migrations/', import.meta.url);
 const H = 3_600_000;
@@ -25,7 +26,7 @@ let app: FastifyInstance | undefined;
 
 /** 新建一个迁移到 016 的库 */
 async function schemaAt016() {
-  await sql.unsafe('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+  await resetPublicSchema(sql);
   await sql`CREATE TABLE schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`;
   for (const f of (await readdir(MIGRATIONS)).filter((x) => x.endsWith('.sql') && x < '017').sort()) {
     await sql.unsafe(await readFile(new URL(f, MIGRATIONS), 'utf8'));

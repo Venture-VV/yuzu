@@ -15,13 +15,14 @@ import { loadConfig } from '../src/server/config';
 import { createSql, type Sql } from '../src/server/db';
 import { migrate } from '../src/server/migrate';
 import { api, login, PASSWORD, TEST_DB } from './helpers';
+import { resetPublicSchema } from './test-db';
 
 const config = loadConfig({ databaseUrl: TEST_DB, env: 'test', logLevel: 'silent' });
 const MIGRATIONS = new URL('../src/server/migrations/', import.meta.url);
 
 /** 只执行到 007（S2 + Batch 2.1 的结构） */
 async function migrateThrough007(sql: Sql) {
-  await sql.unsafe('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+  await resetPublicSchema(sql);
   await sql`CREATE TABLE schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`;
   const files = (await readdir(MIGRATIONS)).filter((f) => f.endsWith('.sql') && f < '008').sort();
   for (const f of files) {

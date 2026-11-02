@@ -1,6 +1,11 @@
 # 自动测试：类型检查、后端集成测试（会员回归 + 库存 / 采购 / 应付 + 前台手牌核心校验 + 备份与恢复核验）、构建、
-# 从上一发布版本的演示库升级后自检，以及真实浏览器验收（含完整收银流程与五种视口）。
+# 从上一发布版本的演示库升级后自检、演示数据（demo-prepare）准备 / 重复执行 / 核对 / 环境保护 / 先备份再重建，
+# 以及真实浏览器验收（含完整收银流程与五种视口）。
 # 只使用合成数据与一次性的 CI 数据库，不连接任何门店环境。
+#
+# 提速（v0.7.18，RQ-008，见 docs/TESTING.md）：各 job 同时开始，浏览器验收不再等测试 job；浏览器验收按文件名拆成三组
+# 并行（门店电脑 a–l、门店电脑 m–z、其余四个尺寸），每组用自己的临时库与应用；「浏览器验收汇总」核对三组都跑完、
+# 合计跑过的用例 = 不拆分时的总数、没有失败。集成测试按文件并行，每个进程用自己的测试库。任何一个 job 失败整次 CI 失败。
 name: CI
 
 on:
@@ -52,10 +57,23 @@ jobs:
       - run: npm run build
 
   e2e:
-    name: 浏览器验收（合成演示库）
+    name: 浏览器验收（${{ matrix.name }}）
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: test
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 按文件名首字母分组：新加的用例文件一定落在某一组里，不会漏跑（汇总 job 再核对总数）
+          - group: store-a
+            name: 门店电脑 · a–l
+            args: "--project=门店电脑 'e2e/[a-l]'"
+          - group: store-b
+            name: 门店电脑 · m–z
+            args: "--project=门店电脑 'e2e/[m-z]'"
+          - group: others
+            name: 平板、小屏电脑、手机
+            args: --project=平板横屏 --project=平板竖屏 --project=小屏电脑 --project=手机
     services:
       postgres:
         image: postgres:16-alpine
@@ -92,15 +110,171 @@ jobs:
           node dist/server/index.js > app.log 2>&1 &
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/api/health && exit 0; sleep 1; done
           cat app.log; exit 1
+      - name: 缓存 Playwright 浏览器（按依赖版本）
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npx playwright install --with-deps chromium
-      - run: npx playwright test
+      - name: 浏览器验收（这一组）
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: e2e-results/${{ matrix.group }}.json
+        run: npx playwright test ${{ matrix.args }} --reporter=list,json
       - name: 浏览器验收改过数据之后再自检（会员、营业口径、库存、前台全部 ✓）
         run: node dist/server/cli.js check
+      - name: 交回这一组的结果（给汇总核对）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results-${{ matrix.group }}
+          path: e2e-results
+          if-no-files-found: ignore
+          retention-days: 7
       - name: 保留失败截图与日志
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-results
+          name: e2e-failure-${{ matrix.group }}
+          path: |
+            test-results
+            app.log
+          retention-days: 7
+
+  e2e-summary:
+    name: 浏览器验收汇总（三组都跑完、用例一项不少、没有失败）
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: e2e
+    # 有分组失败也要核对、写明哪一组；整次 CI 被取消（新的提交推上来）时不跑
+    if: ${{ !cancelled() }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 取回三组的结果
+        uses: actions/download-artifact@v4
+        with:
+          pattern: e2e-results-*
+          path: e2e-results
+          merge-multiple: true
+      - name: 核对
+        run: |
+          total=$(npx playwright test --list | tail -n 1 | sed -E 's/^Total: ([0-9]+) tests?.*/\1/')
+          echo "不拆分时的用例总数：$total"
+          node scripts/ci/e2e-summary.mjs e2e-results 3 "$total"
+
+  demo:
+    name: 演示数据：准备、重复执行与核对
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: yuzu
+          POSTGRES_PASSWORD: yuzu_ci_only
+          POSTGRES_DB: yuzu_demo
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U yuzu -d yuzu_demo"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://yuzu:yuzu_ci_only@127.0.0.1:5432/yuzu_demo
+      APP_ENV: development
+      PORT: 8080
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: 新库：demo-prepare 一次准备完（最后自带一致性自检与演示核对）
+        run: |
+          start=$(date +%s)
+          node dist/server/cli.js demo-prepare
+          echo "新库 demo-prepare 用时 $(( $(date +%s) - start )) 秒" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: 一致性自检、演示核对，记下数据指纹
+        id: fp
+        run: |
+          node dist/server/cli.js check
+          node dist/server/cli.js demo-check
+          echo "digest=$(node dist/server/cli.js fingerprint | tail -n 1)" >> "$GITHUB_OUTPUT"
+      - name: 再执行一次：全部跳过、数据指纹不变
+        run: |
+          node dist/server/cli.js demo-prepare | tee second.txt
+          if grep -q '已写入' second.txt; then echo "::error::第二次执行又写入了数据"; exit 1; fi
+          after=$(node dist/server/cli.js fingerprint | tail -n 1)
+          [ "${{ steps.fp.outputs.digest }}" = "$after" ] || { echo "::error::第二次执行改动了数据：${{ steps.fp.outputs.digest }} → $after"; exit 1; }
+      - name: 试用、正式环境：演示数据命令一律拒绝，什么都不写
+        run: |
+          before=$(node dist/server/cli.js fingerprint | tail -n 1)
+          for env in trial production; do
+            for cmd in demo-prepare demo-check demo-reset seed-demo seed-inventory-demo seed-frontdesk-demo seed-billing-demo seed-legacy-demo; do
+              if APP_ENV=$env node dist/server/cli.js $cmd --confirm yuzu_demo > refuse.txt 2>&1; then
+                echo "::error::APP_ENV=$env 时 $cmd 没有被拒绝"; cat refuse.txt; exit 1
+              fi
+              grep -q '禁止' refuse.txt || { echo "::error::APP_ENV=$env 时 $cmd 不是因为环境被拒绝"; cat refuse.txt; exit 1; }
+            done
+          done
+          after=$(node dist/server/cli.js fingerprint | tail -n 1)
+          [ "$before" = "$after" ] || { echo "::error::被拒绝的命令改动了数据：$before → $after"; exit 1; }
+      - name: demo-reset：不写对库名、实例标识是测试服时拒绝
+        run: |
+          before=$(node dist/server/cli.js fingerprint | tail -n 1)
+          if node dist/server/cli.js demo-reset > reset.txt 2>&1; then echo "::error::没写 --confirm 也执行了"; exit 1; fi
+          grep -q -- '--confirm yuzu_demo' reset.txt || { cat reset.txt; exit 1; }
+          if node dist/server/cli.js demo-reset --confirm yuzu_demo_x > reset.txt 2>&1; then echo "::error::库名写错也执行了"; exit 1; fi
+          if YUZU_INSTANCE=test node dist/server/cli.js demo-reset --confirm yuzu_demo > reset.txt 2>&1; then echo "::error::测试服实例也执行了"; exit 1; fi
+          grep -q 'YUZU_INSTANCE=test' reset.txt || { cat reset.txt; exit 1; }
+          after=$(node dist/server/cli.js fingerprint | tail -n 1)
+          [ "$before" = "$after" ] || { echo "::error::被拒绝的 demo-reset 改动了数据"; exit 1; }
+      - name: 启动应用
+        run: |
+          node dist/server/index.js > app.log 2>&1 &
+          echo $! > app.pid
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/api/health && exit 0; sleep 1; done
+          cat app.log; exit 1
+      - name: 缓存 Playwright 浏览器（按依赖版本）
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npx playwright install --with-deps chromium
+      - name: 浏览器打开关键页面（只读，门店电脑尺寸）
+        env:
+          E2E_DEMO_SHOWCASE: '1'
+        run: npx playwright test e2e/demo-showcase.spec.ts --project=门店电脑 --reporter=list
+      - name: 浏览器核对之后再自检、演示核对
+        run: |
+          node dist/server/cli.js check
+          node dist/server/cli.js demo-check
+      - name: pg_dump / pg_restore 用 16 版（demo-reset 先备份）
+        run: |
+          if [ ! -x /usr/lib/postgresql/16/bin/pg_dump ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16
+          fi
+          echo /usr/lib/postgresql/16/bin >> "$GITHUB_PATH"
+      - name: demo-reset：停掉应用，先备份并在临时库恢复核验，再清库从零重建
+        env:
+          BACKUP_PATH: ${{ runner.temp }}/demo-backups
+        run: |
+          pid=$(cat app.pid); kill "$pid"
+          for i in $(seq 1 20); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          start=$(date +%s)
+          node dist/server/cli.js demo-reset --confirm yuzu_demo
+          echo "demo-reset（备份 + 核验 + 重建）用时 $(( $(date +%s) - start )) 秒" | tee -a "$GITHUB_STEP_SUMMARY"
+          ls "$BACKUP_PATH"/*-demo-reset.dump
+          node dist/server/cli.js demo-check
+      - name: 保留失败截图与日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-failure
           path: |
             test-results
             app.log

@@ -17,6 +17,7 @@ import { checkout } from '../src/server/modules/frontdesk/checkout';
 import { checkin } from '../src/server/modules/frontdesk/visits';
 import { recharge } from '../src/server/modules/wallet';
 import { api, login, PASSWORD, TEST_DB } from './helpers';
+import { resetPublicSchema } from './test-db';
 
 const config = loadConfig({ databaseUrl: TEST_DB, env: 'test', logLevel: 'silent' });
 const MIGRATIONS = new URL('../src/server/migrations/', import.meta.url);
@@ -31,7 +32,7 @@ let memberId: number;
 
 beforeAll(async () => {
   sql = createSql(TEST_DB, { max: 10 });
-  await sql.unsafe('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+  await resetPublicSchema(sql);
   await sql`CREATE TABLE schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`;
   for (const f of (await readdir(MIGRATIONS)).filter((x) => x.endsWith('.sql') && x < '016').sort()) {
     await sql.unsafe(await readFile(new URL(f, MIGRATIONS), 'utf8'));
