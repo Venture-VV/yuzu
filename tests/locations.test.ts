@@ -526,6 +526,39 @@ describe('Codex 复审（PR #33）', () => {
     expect(await techAt(tech['01']!)).toMatchObject({ zoneName: '合成水吧区' });
   });
 
+  it('位置表不引用业务表：别的事务锁着来访、技师行（例如正在结账）时，刷卡上报与上钟的位置马上记上，不等业务锁', async () => {
+    const g = await enter();
+    const d = await dispatch({ visitId: g.visitId, technicianId: tech['02'], spaceId: await spaceId('F302'), startNow: false });
+    expect(d.status, JSON.stringify(d.body)).toBe(200);
+    const s = await sessionOf(g.visitId);
+    expect(s.status).toBe('waiting');
+    await ctx.sql.begin(async (tx) => {
+      // 模拟正在结账、正在改技师资料：别的事务锁着这位客人的来访、这位技师（FOR UPDATE）
+      await tx`SELECT id FROM visits WHERE id = ${g.visitId} FOR UPDATE`;
+      await tx`SELECT id FROM technicians WHERE id = ${tech['02']!} FOR UPDATE`;
+      const t0 = Date.now();
+      // 原来插入位置事件时外键检查要等这两行的锁，锁着当前位置等到锁超时
+      const guest = await report({ readerCode: 'R02', tagCode: g.tagCode });
+      expect(guest.status, JSON.stringify(guest.body)).toBe(200);
+      const techReport = await report({ source: 'position', zoneId: Z('合成水吧区'), technicianNo: '02' });
+      expect(techReport.status, JSON.stringify(techReport.body)).toBe(200);
+      expect(Date.now() - t0).toBeLessThan(1500);
+    });
+    await ctx.sql.begin(async (tx) => {
+      await tx`SELECT id FROM visits WHERE id = ${g.visitId} FOR UPDATE`;
+      const t0 = Date.now();
+      // 上钟推导客人那一条位置：原来要等来访行的锁，2 秒后放弃、不记
+      const start = await api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/sessions/${s.id}/start`, {});
+      expect(start.status, JSON.stringify(start.body)).toBe(200);
+      expect(Date.now() - t0).toBeLessThan(1500);
+    });
+    expect(await guestAt(g.visitId)).toMatchObject({ spaceCode: 'F302', lastSource: 'session_start' });
+    expect(await techAt(tech['02']!)).toMatchObject({ spaceCode: 'F302', lastSource: 'session_start' });
+    await pay(g.visitId);
+    expect(await guestAt(g.visitId)).toBeUndefined();
+    await allChecksOk();
+  });
+
   it('下钟、退钟：技师状态写好之后才记位置——等技师状态的锁时，没有占着这位技师的当前位置', async () => {
     for (const action of ['finish', 'reject'] as const) {
       const g = await enter();

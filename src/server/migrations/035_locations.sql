@@ -1,6 +1,11 @@
 -- v0.7.17 · 飞书需求 RQ-004 第一级实时位置（docs/ROOMMAP.md 第 3 节）：刷卡点登记、位置事件（只追加）、轨迹段、当前位置；
 -- 价目项目记「在哪个区消费」（用来推导挂账的客人在哪）。表结构按第二级精确定位预留：事件带坐标、精度、设备编号（第一级为空），
 -- 第二级只换数据源、走同一个上报接口。只加表、加列。
+--
+-- 位置事件、轨迹段、当前位置三张表不用外键引用业务表（来访、技师、楼层、区域、空间、刷卡点、员工），只在三张表之间引用
+-- （Codex 复审 PR #33）：外键检查会对被引用的业务行加共享锁，位置写在业务事务最后、锁着这个人的当前位置一行时再去等业务行的锁，
+-- 与锁顺序相反（例如结账先锁来访、最后等当前位置；上报先锁当前位置、插入事件时等来访），会互相等死。
+-- 引用的编号都来自刚读到的行，这些业务行也从不删除（楼层、区域、刷卡点有禁止删除的触发器）。
 
 -- ───────────── 刷卡点：读卡器装在哪（区域或空间，二选一） ─────────────
 CREATE TABLE location_readers (
@@ -26,22 +31,22 @@ CREATE TRIGGER location_readers_no_delete BEFORE DELETE ON location_readers FOR 
 CREATE TABLE location_events (
   id            bigserial PRIMARY KEY,
   -- 谁：在店客人（来访）或技师
-  visit_id      bigint REFERENCES visits (id),
-  technician_id bigint REFERENCES technicians (id),
+  visit_id      bigint,
+  technician_id bigint,
   -- 当时的手牌号（客人换牌后，旧事件里仍是当时那张）
   tag_code      text CHECK (char_length(tag_code) BETWEEN 1 AND 16),
   -- 在某处 / 离开某处、去向不明（退房、没设休息区时下钟）/ 离店（客人结账、撤销来访；技师下牌）
   kind          text NOT NULL CHECK (kind IN ('at', 'left', 'gone')),
-  floor_id      bigint REFERENCES floors (id),
-  zone_id       bigint REFERENCES zones (id),
-  space_id      bigint REFERENCES spaces (id),
+  floor_id      bigint,
+  zone_id       bigint,
+  space_id      bigint,
   -- 怎么知道的：刷卡、定位上报（第二级预留）、发牌、消费、开房、换房、退房、上钟、换服务的房间、下钟、技师上牌 / 下牌、结账、撤销来访
   source        text NOT NULL CHECK (source IN ('reader', 'position', 'checkin', 'consume', 'room_checkin', 'room_move', 'room_close',
                                                  'session_start', 'session_room', 'session_end', 'sign_in', 'sign_out', 'checkout', 'visit_cancel')),
   -- 哪条业务单据：来访、账单明细、入住单、钟单、结账单
   ref_type      text CHECK (ref_type IN ('visit', 'bill_line', 'room_stay', 'technician_session', 'checkout')),
   ref_id        bigint,
-  reader_id     bigint REFERENCES location_readers (id),
+  reader_id     bigint,
   -- 发生时刻（刷卡时刻、业务时刻）与写入时刻
   at            timestamptz NOT NULL,
   recorded_at   timestamptz NOT NULL DEFAULT now(),
@@ -56,7 +61,7 @@ CREATE TABLE location_events (
   accuracy_mm   integer CHECK (accuracy_mm >= 0),
   device_id     text CHECK (char_length(device_id) BETWEEN 1 AND 64),
   -- 经办人：业务动作的操作员、模拟刷卡的人或设备桥的账号
-  staff_id      bigint REFERENCES staff (id),
+  staff_id      bigint,
   CHECK ((visit_id IS NULL) <> (technician_id IS NULL)),
   CHECK (kind <> 'at' OR floor_id IS NOT NULL),
   CHECK (kind <> 'gone' OR (floor_id IS NULL AND zone_id IS NULL AND space_id IS NULL)),
@@ -74,11 +79,11 @@ CREATE TRIGGER location_events_append_only BEFORE UPDATE OR DELETE ON location_e
 -- ───────────── 轨迹段：同一个地方连续的事件并成一段（进入—离开）；每人最多一段没结束 ─────────────
 CREATE TABLE location_tracks (
   id             bigserial PRIMARY KEY,
-  visit_id       bigint REFERENCES visits (id),
-  technician_id  bigint REFERENCES technicians (id),
-  floor_id       bigint NOT NULL REFERENCES floors (id),
-  zone_id        bigint REFERENCES zones (id),
-  space_id       bigint REFERENCES spaces (id),
+  visit_id       bigint,
+  technician_id  bigint,
+  floor_id       bigint NOT NULL,
+  zone_id        bigint,
+  space_id       bigint,
   -- 进入：这一段的第一条事件
   entered_at     timestamptz NOT NULL,
   first_event_id bigint NOT NULL REFERENCES location_events (id),
@@ -118,13 +123,13 @@ CREATE TRIGGER location_tracks_guard BEFORE UPDATE OR DELETE ON location_tracks
 -- ───────────── 当前位置：每人一行（当前所在空间）；离店、下牌后清空位置，行留着作为这个人的写入锁 ─────────────
 CREATE TABLE current_locations (
   id            bigserial PRIMARY KEY,
-  visit_id      bigint UNIQUE REFERENCES visits (id),
-  technician_id bigint UNIQUE REFERENCES technicians (id),
+  visit_id      bigint UNIQUE,
+  technician_id bigint UNIQUE,
   -- 还没有事件 / 在某处 / 离开了某处（位置不明）/ 离店
   state         text NOT NULL DEFAULT 'none' CHECK (state IN ('none', 'at', 'left', 'gone')),
-  floor_id      bigint REFERENCES floors (id),
-  zone_id       bigint REFERENCES zones (id),
-  space_id      bigint REFERENCES spaces (id),
+  floor_id      bigint,
+  zone_id       bigint,
+  space_id      bigint,
   -- 进入这里的时刻与当前轨迹段
   since         timestamptz,
   track_id      bigint REFERENCES location_tracks (id),
