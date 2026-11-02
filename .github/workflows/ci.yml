@@ -1,6 +1,10 @@
 # 自动测试：类型检查、后端集成测试（会员回归 + 库存 / 采购 / 应付 + 前台手牌核心校验 + 备份与恢复核验）、构建、
 # 从上一发布版本的演示库升级后自检，以及真实浏览器验收（含完整收银流程与五种视口）。
 # 只使用合成数据与一次性的 CI 数据库，不连接任何门店环境。
+#
+# 提速（v0.7.18，RQ-008，见 docs/TESTING.md）：各 job 同时开始，浏览器验收不再等测试 job；浏览器验收按文件名拆成三组
+# 并行（门店电脑 a–l、门店电脑 m–z、其余四个尺寸），每组用自己的临时库与应用；「浏览器验收汇总」核对三组都跑完、
+# 合计跑过的用例 = 不拆分时的总数、没有失败。集成测试按文件并行，每个进程用自己的测试库。任何一个 job 失败整次 CI 失败。
 name: CI
 
 on:
@@ -52,10 +56,23 @@ jobs:
       - run: npm run build
 
   e2e:
-    name: 浏览器验收（合成演示库）
+    name: 浏览器验收（${{ matrix.name }}）
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: test
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 按文件名首字母分组：新加的用例文件一定落在某一组里，不会漏跑（汇总 job 再核对总数）
+          - group: store-a
+            name: 门店电脑 · a–l
+            args: "--project=门店电脑 'e2e/[a-l]'"
+          - group: store-b
+            name: 门店电脑 · m–z
+            args: "--project=门店电脑 'e2e/[m-z]'"
+          - group: others
+            name: 平板、小屏电脑、手机
+            args: --project=平板横屏 --project=平板竖屏 --project=小屏电脑 --project=手机
     services:
       postgres:
         image: postgres:16-alpine
@@ -92,19 +109,61 @@ jobs:
           node dist/server/index.js > app.log 2>&1 &
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/api/health && exit 0; sleep 1; done
           cat app.log; exit 1
+      - name: 缓存 Playwright 浏览器（按依赖版本）
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npx playwright install --with-deps chromium
-      - run: npx playwright test
+      - name: 浏览器验收（这一组）
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: e2e-results/${{ matrix.group }}.json
+        run: npx playwright test ${{ matrix.args }} --reporter=list,json
       - name: 浏览器验收改过数据之后再自检（会员、营业口径、库存、前台全部 ✓）
         run: node dist/server/cli.js check
+      - name: 交回这一组的结果（给汇总核对）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results-${{ matrix.group }}
+          path: e2e-results
+          if-no-files-found: ignore
+          retention-days: 7
       - name: 保留失败截图与日志
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-results
+          name: e2e-failure-${{ matrix.group }}
           path: |
             test-results
             app.log
           retention-days: 7
+
+  e2e-summary:
+    name: 浏览器验收汇总（三组都跑完、用例一项不少、没有失败）
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: e2e
+    # 有分组失败也要核对、写明哪一组；整次 CI 被取消（新的提交推上来）时不跑
+    if: ${{ !cancelled() }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 取回三组的结果
+        uses: actions/download-artifact@v4
+        with:
+          pattern: e2e-results-*
+          path: e2e-results
+          merge-multiple: true
+      - name: 核对
+        run: |
+          total=$(npx playwright test --list | tail -n 1 | sed -E 's/^Total: ([0-9]+) tests?.*/\1/')
+          echo "不拆分时的用例总数：$total"
+          node scripts/ci/e2e-summary.mjs e2e-results 3 "$total"
 
   upgrade:
     name: 从上一发布版本的演示库升级

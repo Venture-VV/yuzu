@@ -44,6 +44,8 @@
 
 日常改动先跑相关的集成测试与浏览器用例；交 PR 前跑全量的类型检查、集成测试、构建；浏览器的全量交给 CI。
 
+`npm test` 按文件并行（默认 4 个进程，或机器的核数，取小的）：每个进程用自己的测试库（`TEST_DATABASE_URL` 的库名加 `_w1`、`_w2`……），每个测试文件开始时从开跑前迁移好的模板库（库名加 `_tpl`）整库复制一份新的。这样不再整个删 public 模式：删一个迁移好的模式要拿约 3700 把锁，几个进程同时删会超出数据库默认的共享锁表。升级测试要从空库迁移，删模式时几个进程排队。所以测试库的账号要有建库权限；没有的话用 `TEST_WORKERS=1 npm test` 回到原来的单库串行。
+
 ```bash
 npx vitest run tests/locations.test.ts                          # 一个或几个集成测试文件
 E2E_BASE_URL=http://127.0.0.1:<端口> npx playwright test e2e/locations.spec.ts --project=门店电脑

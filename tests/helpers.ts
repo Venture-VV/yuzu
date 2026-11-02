@@ -7,8 +7,10 @@ import { migrate } from '../src/server/migrate';
 import { createStaff } from '../src/server/modules/staff';
 import { demoSeedWindow } from '../src/server/ops/demo-time';
 
-export const TEST_DB =
-  process.env.TEST_DATABASE_URL ?? 'postgres://yuzu:yuzu_dev_only@127.0.0.1:5432/yuzu_test';
+import { recreateFromTemplate, testDbUrl } from './test-db';
+
+/** 测试库：并行跑时每个进程一个库（见 tests/test-db.ts、vitest.config.ts） */
+export const TEST_DB = testDbUrl();
 export const PASSWORD = 'test-pass-2026';
 
 export interface TestContext {
@@ -26,8 +28,10 @@ export interface TestContext {
 export async function setup(): Promise<TestContext> {
   process.env.APP_ENV = 'test';
   const config = loadConfig({ databaseUrl: TEST_DB, env: 'test', logLevel: 'silent' });
+  // 并行时从迁移好的模板库整库复制一份新的；不并行时照旧清空、迁移（见 tests/test-db.ts）
+  const fresh = await recreateFromTemplate();
   const sql = createSql(TEST_DB, { max: 20 });
-  await sql.unsafe('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+  if (!fresh) await sql.unsafe('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
   await migrate(sql);
   // 「收款前必须先开班」（R1.2）默认开启；之前的用例按开班可选的口径编写，这里关闭，
   // 开启时的行为由 tests/r1-funds.test.ts 单独验证（openShiftRequired(ctx) 重新开启）

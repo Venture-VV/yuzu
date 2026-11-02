@@ -1,6 +1,7 @@
 // Batch 2.3 浏览器验收（门店电脑尺寸）：店主导入汤崎价目表（先预览再导入）→ 前台按「专业」档挂账、仅女宾项目对男宾不可选 →
 // 会员按档位消费。依赖 seed-demo 与 seed-frontdesk-demo（仅独立演示库）；可重复执行（再次导入时全部「未变」）。
 import { expect, test, type Page } from '@playwright/test';
+import { ensureShift } from './shift';
 
 const PASSWORD = 'yuzu2026';
 
@@ -58,6 +59,8 @@ test.describe('汤崎价目表与多档价格', () => {
     // ③ 会员消费：日式指压选「专业」档（先充值 500 元，保证可重复执行时余额足够）
     const name = '沈知夏';
     const [member] = (await (await page.request.get(`/api/members?q=${encodeURIComponent(name)}`)).json()) as { id: number }[];
+    // 收款前要先开班：自己开，不靠别的用例留下的班次（浏览器验收拆组并行后，这个文件可能在新库上单独跑）
+    await ensureShift(page);
     const topUp = await page.request.post('/api/recharges', {
       data: { idempotencyKey: crypto.randomUUID(), memberId: member!.id, planId: null, paidAmount: 50000, bonusAmount: 0, paymentMethod: 'wechat', paymentConfirmed: true },
     });

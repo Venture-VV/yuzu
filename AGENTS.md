@@ -21,7 +21,7 @@
 
 ```bash
 npm run typecheck && npm run build          # 仓库未配置 lint
-npm test                                   # TEST_DATABASE_URL 指向独立测试库
+npm test                                   # TEST_DATABASE_URL 指向独立测试库；按文件并行，另建 <库名>_w1…、<库名>_tpl（要建库权限；TEST_WORKERS=1 回到单库串行）
 node dist/server/cli.js migrate            # 应用启动时也会自动执行
 node dist/server/cli.js seed-demo          # 会员与项目
 node dist/server/cli.js seed-inventory-demo

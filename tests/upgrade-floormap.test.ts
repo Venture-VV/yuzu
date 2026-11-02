@@ -10,6 +10,7 @@ import { migrate } from '../src/server/migrate';
 import { loadLocationRules, locationChecks } from '../src/server/modules/locations';
 import { spaceChecks } from '../src/server/modules/spaces';
 import { PASSWORD, TEST_DB } from './helpers';
+import { resetPublicSchema } from './test-db';
 
 const MIGRATIONS = new URL('../src/server/migrations/', import.meta.url);
 let sql: Sql;
@@ -23,7 +24,7 @@ afterAll(async () => {
 
 /** 新建一个迁移到 033 的库 */
 async function schemaAt033() {
-  await sql.unsafe('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+  await resetPublicSchema(sql);
   await sql`CREATE TABLE schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`;
   for (const f of (await readdir(MIGRATIONS)).filter((x) => x.endsWith('.sql') && x < '034').sort()) {
     await sql.unsafe(await readFile(new URL(f, MIGRATIONS), 'utf8'));
