@@ -55,6 +55,8 @@ import { loadLocationRules } from './locations';
 import { DEFAULT_LOCATION_RULES } from '@shared/locations';
 import { loadUsageRules } from './usages';
 import { DEFAULT_USAGE_RULES } from '@shared/usages';
+import { loadGuideRules } from './guide';
+import { DEFAULT_GUIDE_RULES } from '@shared/guide';
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const onOff = (v: boolean, on: string, off: string) => (v ? on : off);
@@ -243,6 +245,11 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   add({
     key: 'usage_rules.businessTypes', group: 'floormap', label: '开单即占用的业态', value: usageText(ur.businessTypes), defaultValue: usageText(DEFAULT_USAGE_RULES.businessTypes),
     pending: true, section: 'spaces', hint: '这些业态的房间不派技师，开单即「使用中」，结束、使用人结账或撤单后空闲', current: ur.businessTypes, dflt: DEFAULT_USAGE_RULES.businessTypes, metaKey: 'usage_rules',
+  });
+  const gr = await loadGuideRules(db);
+  add({
+    key: 'guide_rules.carouselSeconds', group: 'floormap', label: '对客导览大屏轮播', value: `每层停 ${gr.carouselSeconds} 秒`, defaultValue: `每层停 ${DEFAULT_GUIDE_RULES.carouselSeconds} 秒`,
+    pending: true, section: 'spaces', hint: '门店大屏打开「对客导览 → 大屏模式」按楼层轮播', current: gr.carouselSeconds, dflt: DEFAULT_GUIDE_RULES.carouselSeconds, metaKey: 'guide_rules',
   });
   // ── 第一级实时位置（RQ-004，v0.7.17）──
   const lr = await loadLocationRules(db);

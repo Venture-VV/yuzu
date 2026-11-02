@@ -16,6 +16,7 @@ import { FrontdeskPage } from './features/frontdesk/FrontdeskPage';
 import { ClockroomPage } from './features/clockroom/ClockroomPage';
 import { DiningPage } from './features/dining/DiningPage';
 import { RoomsPage } from './features/rooms/RoomsPage';
+import { GuidePage, GuideScreenPage } from './features/guide/GuidePage';
 import { LedgerPage } from './features/ledger/LedgerPage';
 import { SettlementPage } from './features/settlement/SettlementPage';
 import { ShiftPage } from './features/shift/ShiftPage';
@@ -145,6 +146,8 @@ function Home() {
   if (dining && (can('dining.kitchen') || can('dining.order'))) return <Navigate to="/dining" replace />;
   if (session?.rooms && (can('room.operate') || can('room.housekeep'))) return <Navigate to="/rooms" replace />;
   if (erp.canEnter) return <Navigate to="/erp" replace />;
+  // 只有「看对客导览」的账号（门店大屏）：直接进大屏模式
+  if (can('guide.view')) return <Navigate to="/guide/screen" replace />;
   return <Navigate to="/password" replace />;
 }
 
@@ -159,6 +162,8 @@ const router = createBrowserRouter([
       { path: 'settlement/:date', element: <SettlementPrintPage /> },
     ],
   },
+  // 对客导览的大屏模式（v0.7.19）：没有导航与操作，适合门店大屏常开
+  { path: '/guide/screen', element: <AuthGate shell="bare" />, children: [{ index: true, element: <GuideScreenPage /> }] },
   { path: '/admin', element: <AuthGate shell="admin" />, children: adminRoutes },
   // ERP 工作区（v0.7.3）：首页、模块设置、营业数据，以及库存、采购、货款、待办（原来的地址不变，门店主导航里不再有）。
   // 页面属于哪个模块按注册表（@shared/erp）里的页面前缀认，模块关着时 ERP 外壳提示没有开启
@@ -209,6 +214,7 @@ const router = createBrowserRouter([
       { path: 'clockroom', element: <ClockroomPage /> },
       { path: 'dining/:tab?', element: <DiningPage /> },
       { path: 'rooms', element: <RoomsPage /> },
+      { path: 'guide', element: <GuidePage /> },
       { path: 'ledger', element: <LedgerPage /> },
       { path: 'settlement/:date?', element: <SettlementPage /> },
       { path: 'shift', element: <ShiftPage /> },

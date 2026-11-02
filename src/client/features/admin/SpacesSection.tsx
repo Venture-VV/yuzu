@@ -43,9 +43,10 @@ import { useInvalidateSpaces, useSpaceLedger } from '../spaces/queries';
 import { AdminPage } from './AdminShell';
 import { SpaceImportCard } from './SpaceImportCard';
 import { FloorplanCard } from './FloorplanCard';
+import { GuideAdminCard } from './GuideAdminCard';
 import { LocationsCard, useInvalidateLocations } from './LocationsCard';
 
-type Tab = 'spaces' | 'zones' | 'import' | 'plans' | 'locations';
+type Tab = 'spaces' | 'zones' | 'import' | 'plans' | 'guide' | 'locations';
 type VerifyFilter = '' | SpaceVerifyStatus | 'unverified';
 interface Filters {
   floorId: number;
@@ -103,11 +104,14 @@ export function SpacesSection() {
             { value: 'zones', label: '楼层与区域' },
             { value: 'import', label: '导入' },
             { value: 'plans', label: '底图' },
+            { value: 'guide', label: '对客导览' },
             { value: 'locations', label: '实时位置' },
           ]}
         />
         {tab === 'locations' ? (
           <LocationsCard />
+        ) : tab === 'guide' ? (
+          <GuideAdminCard />
         ) : tab === 'plans' ? (
           <FloorplanCard />
         ) : tab === 'import' ? (

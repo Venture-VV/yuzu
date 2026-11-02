@@ -87,7 +87,7 @@ const reasonText = (label: string) => z.string(`请填写${label}`).trim().min(2
 export const SPACE_IMPORT_MAX_ROWS = 2000;
 
 /** 空间台账的写入都先取这把锁（事务结束自动放），全部串行；等锁超过 5 秒按「正在被其他终端操作」拒绝 */
-async function lockLedger(tx: Tx) {
+export async function lockLedger(tx: Tx) {
   await setTxTimeouts(tx);
   await tx`SELECT pg_advisory_xact_lock(hashtextextended('space_ledger', 0))`;
 }
