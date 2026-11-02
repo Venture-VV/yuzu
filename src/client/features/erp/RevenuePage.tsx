@@ -46,11 +46,14 @@ export function RevenuePage() {
           d && (
             <>
               <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-                <Kpi icon={<TrendingUp className="size-4" />} label="净营业额（应收 − 优惠）" tone="pine" testId="erp-revenue-net">
+                <Kpi icon={<TrendingUp className="size-4" />} label="净营业额（应收 − 优惠 − 退款）" tone="pine" testId="erp-revenue-net">
                   <Money cents={d.kpis.net} />
                 </Kpi>
-                <Kpi icon={<ReceiptText className="size-4" />} label="应收 / 优惠">
-                  <Money cents={d.kpis.receivable} /> <span className="text-[13px] font-semibold text-ink-3">/ <Money cents={d.kpis.discount} /></span>
+                <Kpi icon={<ReceiptText className="size-4" />} label="应收 / 优惠与券抵扣 / 退款">
+                  <Money cents={d.kpis.receivable} />{' '}
+                  <span className="text-[13px] font-semibold text-ink-3">
+                    / <Money cents={d.kpis.discount + (d.kpis.coupon ?? 0)} /> / <Money cents={d.kpis.refund ?? 0} />
+                  </span>
                 </Kpi>
                 <Kpi icon={<UsersRound className="size-4" />} label="结账客人 / 结账单">
                   {d.kpis.guests} 位 <span className="text-[13px] font-semibold text-ink-3">/ {d.kpis.checkouts} 张</span>
@@ -124,7 +127,7 @@ export function RevenuePage() {
                     testId="erp-revenue-departments"
                     format={yuan}
                     empty="这段时间没有结账"
-                    rows={d.departments.map((x) => ({ key: x.category, label: x.category, value: x.amount, note: `${x.quantity} 项${x.discount ? ` · 优惠 ${yuan(x.discount)}` : ''}` }))}
+                    rows={d.departments.map((x) => ({ key: x.category, label: x.category, value: x.amount, note: `${x.quantity} 项${x.discount ? ` · 优惠 ${yuan(x.discount)}` : ''}${x.refund ? ` · 退款 ${yuan(x.refund)}` : ''}` }))}
                   />
                 </Card>
               </div>

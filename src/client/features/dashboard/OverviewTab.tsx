@@ -63,10 +63,22 @@ export function OverviewTab() {
               <Kpi icon={<UserPlus className="size-4" />} label="新增会员" delta={{ now: d.kpis.newMembers, prev: d.prev.newMembers, format: people }}>
                 {d.kpis.newMembers} 位
               </Kpi>
-              <Kpi icon={<Gift className="size-4" />} label="优惠 / 免单" delta={{ now: d.kpis.discount, prev: d.prev.discount, format: yuan }}>
-                <Money cents={d.kpis.discount} />
+              <Kpi icon={<Gift className="size-4" />} label="优惠 / 免单与券抵扣" delta={{ now: d.kpis.discount + (d.kpis.coupon ?? 0), prev: d.prev.discount + (d.prev.coupon ?? 0), format: yuan }}>
+                <Money cents={d.kpis.discount + (d.kpis.coupon ?? 0)} />
                 <span className="block text-[12px] font-semibold text-ink-3">
                   应收 <Money cents={d.kpis.receivable} />
+                  {!!d.kpis.coupon && (
+                    <>
+                      {' '}
+                      · 其中券抵扣 <Money cents={d.kpis.coupon} />
+                    </>
+                  )}
+                  {!!d.kpis.refund && (
+                    <>
+                      {' '}
+                      · 退款 <Money cents={d.kpis.refund} />
+                    </>
+                  )}
                 </span>
               </Kpi>
             </div>
@@ -92,7 +104,7 @@ export function OverviewTab() {
                   testId="overview-departments"
                   format={yuan}
                   empty="这段时间没有结账"
-                  rows={d.departments.map((x) => ({ key: x.category, label: x.category, value: x.amount, note: `${x.quantity} 项${x.discount ? ` · 优惠 ${yuan(x.discount)}` : ''}` }))}
+                  rows={d.departments.map((x) => ({ key: x.category, label: x.category, value: x.amount, note: `${x.quantity} 项${x.discount ? ` · 优惠 ${yuan(x.discount)}` : ''}${x.refund ? ` · 退款 ${yuan(x.refund)}` : ''}` }))}
                 />
               </Card>
               <Card className="p-5">

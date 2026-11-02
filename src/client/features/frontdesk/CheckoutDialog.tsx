@@ -10,7 +10,9 @@ import {
   type CheckoutDetail,
   type CheckoutPreview,
   type RefundShiftOptions,
+  type RefundSummary,
 } from '@shared/checkout';
+import type { CheckoutCouponOption } from '@shared/coupons';
 import { KITCHEN_STATUS_LABELS } from '@shared/dining';
 import { ZONE_LABELS, type BoardTag, type VisitDetail } from '@shared/frontdesk';
 import { discountGrantFits, sortedVisitIds, ticketGrantCovers, type TicketGrant, type TicketGrantRequest } from '@shared/grants';
@@ -33,7 +35,8 @@ import { SHIFT_ERRORS, shiftKeys, ShiftGate, StartShiftForm, useShiftReady } fro
 import { ZoneChip } from './parts';
 import { BackfillNotice, backfillBody, backfillSummary, useBackfill } from './backfill';
 import { PaymentsSection, usePayRows } from './payments';
-import { PendingPanel, useFrontdeskOp } from './pending';
+import { pendingFor, PendingPanel, useFrontdeskOp, useFrontdeskPending } from './pending';
+import { RefundPanel, RefundsList } from './RefundPanel';
 import { stayText, useCheckout, useCheckoutPreview, useCheckouts, useRefreshFrontdesk, useTicketTypes } from './queries';
 
 // 结账（S3）：勾选要一起结的手牌 → 核对门票与明细 → 登记收款（可组合）→ 确认结清。
@@ -90,7 +93,12 @@ export function CheckoutDialog({
 
   // 服务端拒绝（门票跳档、余额变化）后重新取一次核对数据；没有开班或班次刚交班时刷新当前班次，出现开班提示
   useEffect(() => {
-    if (op.state.phase === 'error' && ['PRICE_CHANGED', 'SPLIT_CHANGED', 'INSUFFICIENT_BALANCE', 'TICKET_CHANGED', 'ROOM_OPEN'].includes(op.state.code ?? '')) {
+    if (
+      op.state.phase === 'error' &&
+      ['PRICE_CHANGED', 'SPLIT_CHANGED', 'INSUFFICIENT_BALANCE', 'TICKET_CHANGED', 'ROOM_OPEN', 'COUPON_AMOUNT_CHANGED', 'COUPON_USED', 'COUPON_NOT_USABLE', 'COUPON_VOIDED'].includes(
+        op.state.code ?? '',
+      )
+    ) {
       void preview.refetch();
     }
     if (op.state.phase === 'error' && SHIFT_ERRORS.includes(op.state.code ?? '')) void qc.invalidateQueries({ queryKey: shiftKeys.all });
@@ -129,6 +137,7 @@ export function CheckoutDialog({
     scopeName: '手牌',
     locked,
     onEdit: op.clearError,
+    coupons: p?.storeCoupons ?? null,
   });
   const { remaining, problems } = pay;
   // 客房（S7）：还住着客房的客人要先退房（补齐房费挂到手牌账单、退押金），房费才都在账单上
@@ -291,6 +300,14 @@ export function CheckoutDialog({
           total={total}
           members={p?.members ?? []}
           canWallet={can('consume.create') && !backfill.state.active}
+          coupons={{
+            options: p?.storeCoupons ?? [],
+            // 无记名券码：按这次结账的手牌（含此刻的门票）核对能抵多少
+            check: async (code) => {
+              const r = await api.post<{ found: boolean; option?: CheckoutCouponOption }>('/api/frontdesk/checkout-coupon', { visitIds, code });
+              return r.found ? r.option! : null;
+            },
+          }}
           authorize={(amount, reason) => ({
             request: { purpose: 'checkout_discount', scope: { visitIds: sortedVisitIds(visitIds), amount, reason } },
             lines: [
@@ -644,6 +661,7 @@ export function CheckoutRecordsDialog({ open, onClose, focusId }: { open: boolea
                 </span>
                 <span className="flex-1" />
                 {c.backfillSlipNo && <Badge tone="lake">补录 · {c.backfillSlipNo}</Badge>}
+                {c.refundedAmount > 0 && <Badge tone="ember">已退 {formatYuan(c.refundedAmount)}</Badge>}
                 {c.status === 'voided' && <Badge tone="clay">已反结账</Badge>}
                 <Money cents={c.totalAmount} className={cn('font-bold', c.status === 'voided' && 'line-through opacity-60')} />
               </button>
@@ -651,7 +669,39 @@ export function CheckoutRecordsDialog({ open, onClose, focusId }: { open: boolea
           ))}
         </ul>
       )}
+      {!openId && <DayRefunds date={date} open={open} onOpen={setOpenId} />}
     </Dialog>
+  );
+}
+
+/** 这一天开的退款单（原单可能是之前的营业日）：点开回到原结账单 */
+function DayRefunds({ date, open, onOpen }: { date: string; open: boolean; onOpen: (checkoutId: number) => void }) {
+  const list = useQuery({
+    queryKey: ['frontdesk', 'refunds', date],
+    queryFn: () => api.get<RefundSummary[]>(`/api/frontdesk/refunds?date=${date}`),
+    enabled: open,
+  });
+  const rows = list.data ?? [];
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-4" data-testid="day-refunds">
+      <p className="mb-1.5 text-[13px] font-bold text-ink-2">这一天的退款单</p>
+      <ul className="divide-y divide-line rounded-lg border border-line">
+        {rows.map((r) => (
+          <li key={r.id}>
+            <button type="button" onClick={() => onOpen(r.checkoutId)} className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-left hover:bg-paper-2/60">
+              <span className="num font-bold">{r.refundNo}</span>
+              <span className="text-[12.5px] text-ink-3">
+                原单 {r.checkoutNo} · {formatTime(r.createdAt)} · {r.operatorName}
+              </span>
+              <span className="flex-1" />
+              {r.status === 'voided' && <Badge tone="clay">已作废</Badge>}
+              <Money cents={r.amount} className={cn('font-bold text-ember', r.status === 'voided' && 'line-through opacity-60')} />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -664,6 +714,10 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
   const refresh = useRefreshFrontdesk();
   const shiftReady = useShiftReady(true);
   const [voiding, setVoiding] = useState(false);
+  // 退款单（v0.7.20）：这张单上有结果待确认的退款时直接打开退款区处理
+  const pendingRefund = pendingFor(useFrontdeskPending(), 'checkout_refund', null, { checkoutId: id });
+  const [refunding, setRefunding] = useState(false);
+  const showRefund = refunding || !!pendingRefund;
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -673,6 +727,7 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
   const pastWindow = !!d && windowHours !== null && Date.now() - new Date(d.createdAt).getTime() > windowHours * 3_600_000;
   const blockedByWindow = pastWindow && session.staff.role !== 'owner';
   const cashRefund = d?.payments.filter((pm) => pm.method === 'cash').reduce((n, pm) => n + pm.amount, 0) ?? 0;
+  const hasRefund = (d?.refunds ?? []).some((r) => r.status === 'completed');
   // 跨钱箱退款（店主 2026-10-30 定）：原单收了现金时选从哪个钱箱退，退款记到那个钱箱当班的班次
   const drawers = useQuery({
     queryKey: ['frontdesk', 'refund-shifts', id],
@@ -725,12 +780,34 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
           <PrintButton path={`/print/checkout/${d.id}`} testId="checkout-reprint">
             打印结账单
           </PrintButton>
+          <RefundsList refunds={d.refunds ?? []} onChanged={() => void detail.refetch()} />
+          {d.status === 'completed' && can('frontdesk.refund') && !voiding && !showRefund && (
+            <Button variant="secondary" icon={<Undo2 className="size-4" />} onClick={() => setRefunding(true)} data-testid="checkout-refund">
+              部分退款（开退款单）
+            </Button>
+          )}
+          {showRefund && d.status === 'completed' && (
+            <RefundPanel
+              checkoutId={d.id}
+              checkoutNo={d.checkoutNo}
+              onClose={() => {
+                setRefunding(false);
+                void detail.refetch();
+              }}
+              DrawerPicker={({ options, value, onChange, onRefetch }) => (
+                <RefundDrawerPicker query={{ isPending: !options, error: null, data: options, refetch: onRefetch }} value={value} onChange={onChange} />
+              )}
+            />
+          )}
           {d.status === 'completed' && can('frontdesk.checkoutVoid') && blockedByWindow && (
             <Notice tone="warning" icon={<Undo2 className="size-4" />} title={`已超过反结账时限（结账后 ${describeHours(windowHours!)}内）`}>
               这张单只能由店主反结账；需要退款或更正时请联系店主。
             </Notice>
           )}
-          {d.status === 'completed' && can('frontdesk.checkoutVoid') && !blockedByWindow && !voiding && (
+          {d.status === 'completed' && can('frontdesk.checkoutVoid') && hasRefund && (
+            <Notice tone="info" title="这张单已有退款单，不能再反结账">还要退请继续开退款单；登记错的退款单当天、钱箱还没交班时可以先作废。</Notice>
+          )}
+          {d.status === 'completed' && can('frontdesk.checkoutVoid') && !blockedByWindow && !voiding && !showRefund && !hasRefund && (
             <Button variant="secondary" icon={<Undo2 className="size-4" />} onClick={() => setVoiding(true)} data-testid="checkout-void">
               反结账
             </Button>
@@ -771,7 +848,15 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
 }
 
 /** 跨钱箱退款：退给客人的现金从哪个钱箱出（此刻当班的班次）；默认原单收款的班次，已交班时是自己的班次 */
-function RefundDrawerPicker({ query, value, onChange }: { query: UseQueryResult<RefundShiftOptions>; value: number | null; onChange: (id: number) => void }) {
+function RefundDrawerPicker({
+  query,
+  value,
+  onChange,
+}: {
+  query: Pick<UseQueryResult<RefundShiftOptions>, 'isPending' | 'error' | 'data'> & { refetch: () => unknown };
+  value: number | null;
+  onChange: (id: number) => void;
+}) {
   if (query.isPending) return <Skeleton className="h-16" />;
   if (query.error) return <Notice tone="error" title={errorMessage(query.error)} />;
   const list = query.data!.shifts;

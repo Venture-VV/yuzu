@@ -7,10 +7,11 @@ import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Banknote, CircleCheck } from 'lucide-react';
 import { CHECKOUT_METHOD_LABELS, type CheckoutDetail } from '@shared/checkout';
+import type { CheckoutCouponOption } from '@shared/coupons';
 import { KITCHEN_STATUS_LABELS, MAX_TABLES_PER_CHECKOUT, type TableCheckoutPreview } from '@shared/dining';
 import { discountGrantFits, sortedVisitIds } from '@shared/grants';
 import { formatYuan } from '@shared/money';
-import { errorMessage } from '../../lib/api';
+import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
@@ -75,7 +76,10 @@ export function TableCheckoutDialog({
 
   // 服务端拒绝（这几桌刚点了菜或退了菜、余额变化）后重新取一次核对数据；没有开班或班次刚交班时刷新当前班次
   useEffect(() => {
-    if (op.state.phase === 'error' && ['PRICE_CHANGED', 'SPLIT_CHANGED', 'INSUFFICIENT_BALANCE', 'TABLE_CLOSED'].includes(op.state.code ?? '')) {
+    if (
+      op.state.phase === 'error' &&
+      ['PRICE_CHANGED', 'SPLIT_CHANGED', 'INSUFFICIENT_BALANCE', 'TABLE_CLOSED', 'COUPON_AMOUNT_CHANGED', 'COUPON_USED', 'COUPON_NOT_USABLE', 'COUPON_VOIDED'].includes(op.state.code ?? '')
+    ) {
       void preview.refetch();
     }
     if (op.state.phase === 'error' && SHIFT_ERRORS.includes(op.state.code ?? '')) void qc.invalidateQueries({ queryKey: shiftKeys.all });
@@ -103,6 +107,7 @@ export function TableCheckoutDialog({
     scopeName: '桌台',
     locked,
     onEdit: op.clearError,
+    coupons: p?.storeCoupons ?? null,
   });
   const { remaining, problems } = pay;
   const ready = total !== null && remaining === 0 && pay.ok && !preview.isFetching && shiftReady.ready;
@@ -254,6 +259,13 @@ export function TableCheckoutDialog({
           members={p?.members ?? []}
           canWallet={can('consume.create')}
           walletHint={TABLE_WALLET_HINT}
+          coupons={{
+            options: p?.storeCoupons ?? [],
+            check: async (code) => {
+              const r = await api.post<{ found: boolean; option?: CheckoutCouponOption }>('/api/frontdesk/checkout-coupon', { tableSessionIds: sessionIds, code });
+              return r.found ? r.option! : null;
+            },
+          }}
           authorize={(amount, reason) => ({
             request: { purpose: 'checkout_discount', scope: { visitIds: [], tableSessionIds: sortedVisitIds(sessionIds), amount, reason } },
             lines: [`桌台 ${names.join('、')} · 应收 ${total !== null ? formatYuan(total) : ''}`, `${CHECKOUT_METHOD_LABELS.discount} ${formatYuan(amount)}`, `原因：${reason}`],

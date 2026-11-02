@@ -86,6 +86,7 @@ function ShiftSlip({ s }: { s: ShiftRecord }) {
       <Row left="+ 充值现金" right={yuan(sum.cash.recharge)} />
       {!!sum.cash.refund && <Row left="− 反结账退现金" right={yuan(sum.cash.refund)} />}
       {!!sum.cash.deposit && <Row left={sum.cash.deposit > 0 ? '+ 押金现金（收 − 退）' : '− 押金现金（退 − 收）'} right={yuan(Math.abs(sum.cash.deposit))} />}
+      {!!sum.cash.refundSlip && <Row left="− 退款单退现金" right={yuan(sum.cash.refundSlip)} />}
       <Row left="= 应有现金" right={yuan(s.expectedCash ?? sum.cash.expected)} strong />
       {closed && s.countedCash !== null && (
         <>
@@ -120,6 +121,22 @@ function ShiftSlip({ s }: { s: ShiftRecord }) {
             <p className="text-[11px]">原单收过的现金不计入应有现金，请核对是否已退还或已重新收取。</p>
           )}
         </>
+      )}
+      {sum.refundSlips && (
+        <div data-testid="print-shift-refund-slips">
+          <Rule />
+          <p className="font-bold">
+            退款单 {sum.refundSlips.count} 张 · {yuan(sum.refundSlips.total)}
+          </p>
+          {sum.refundSlips.list.map((r) => (
+            <p key={r.refundNo} className="break-all">
+              {r.refundNo}（原单 {r.checkoutNo}）{yuan(r.amount)} · {r.reason}
+              {r.operatorName ? ` · ${r.operatorName}从本班钱箱退` : ''}
+              {r.refs.filter((x) => x.method !== 'cash').map((x) => ` · ${PAYMENT_METHOD_LABELS[x.method] ?? x.method} ${x.ref}`).join('')}
+            </p>
+          ))}
+          <p className="text-[11px]">现金从本班钱箱退，已从应有现金里扣掉；扫码、银行卡在商户后台原路退回。</p>
+        </div>
       )}
       {s.note && <p className="mt-1 break-all">备注：{s.note}</p>}
       <Rule />

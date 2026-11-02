@@ -79,6 +79,8 @@ export function FrontdeskPendingBanner() {
       navigate(`/rooms?${params}`);
       return;
     }
+    // 退款单（v0.7.20）回到前台「结账记录」里的原结账单
+    if (op.type === 'checkout_refund' && op.checkoutIds?.[0]) params.set('c', String(op.checkoutIds[0]));
     if (op.visitId) params.set('v', String(op.visitId));
     navigate(`/frontdesk?${params}`);
   };

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BadgePercent, Plus, ShieldCheck, Ticket, Trash2, UserRound, WalletCards } from 'lucide-react';
+import { BadgePercent, Plus, ShieldCheck, Ticket, TicketCheck, Trash2, UserRound, WalletCards } from 'lucide-react';
 import {
   CHECKOUT_METHOD_LABELS,
   COUPON_CODE_PATTERN,
@@ -9,10 +9,12 @@ import {
   type CheckoutMethod,
   type CouponPlatform,
 } from '@shared/checkout';
+import { formatStoreCouponCode, normalizeStoreCouponCode, STORE_COUPON_CODE_PATTERN, type CheckoutCouponOption } from '@shared/coupons';
 import { splitDeduction } from '@shared/deduction';
 import type { DiscountGrant, DiscountGrantRequest } from '@shared/grants';
 import { maskPhone, PAYMENT_METHODS } from '@shared/labels';
-import { centsToInput, parseYuan } from '@shared/money';
+import { centsToInput, formatYuan, parseYuan } from '@shared/money';
+import { errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
@@ -56,6 +58,9 @@ export interface PayRow {
   /** 优惠 / 免单：原因与当场授权（授权绑定这几张手牌或这几桌与金额，改了要重新授权） */
   reason: string;
   grant: DiscountGrant | null;
+  /** 券抵扣（v0.7.20）：选中的券（能抵多少由服务端按此刻的明细算好）；输入券码核对时的原文 */
+  coupon: CheckoutCouponOption | null;
+  couponInput: string;
 }
 
 let paySeq = 1;
@@ -71,16 +76,26 @@ export const newRow = (method: CheckoutMethod, amount: number): PayRow => ({
   tendered: '',
   reason: '',
   grant: null,
+  coupon: null,
+  couponInput: '',
 });
 
-export const QUICK_METHODS: CheckoutMethod[] = ['wechat', 'alipay', 'cash', 'bank_card', 'other', 'wallet', 'coupon', 'discount'];
+export const QUICK_METHODS: CheckoutMethod[] = ['wechat', 'alipay', 'cash', 'bank_card', 'other', 'wallet', 'coupon', 'store_coupon', 'discount'];
+
+/** 结账用券（v0.7.20）：会员的券（结账核对里列出）与输入券码核对；没有时不显示「券抵扣」 */
+export interface CouponSource {
+  options: CheckoutCouponOption[];
+  /** 按券码核对（这次结账的手牌或桌台）；没有这张券返回 null */
+  check: (code: string) => Promise<CheckoutCouponOption | null>;
+}
 
 /** 提交给服务端的一笔收款 */
 export type PaymentBody =
   | { method: 'wallet'; memberId: number; amount: number; expectedSplit: { principal: number; bonus: number } }
   | { method: 'coupon'; platform: CouponPlatform; code: string; dealName: string; amount: number }
   | { method: 'discount'; amount: number; grantId: string }
-  | { method: Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount'>; amount: number; ref: string };
+  | { method: 'store_coupon'; code: string; amount: number }
+  | { method: Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon'>; amount: number; ref: string };
 
 /**
  * 收款登记的状态与核对：每笔的金额、储值扣款构成（余额不足、会员不在本次结账里）、团购券码、「其他」备注、
@@ -98,6 +113,8 @@ export function usePayRows(opts: {
   scopeName: string;
   locked: boolean;
   onEdit: () => void;
+  /** 结账核对里最新的券（能抵多少）：选中的券金额变了时提示重新选 */
+  coupons?: CheckoutCouponOption[] | null;
 }) {
   const session = useSession();
   const [rows, setRows] = useState<PayRow[]>([]);
@@ -133,10 +150,22 @@ export function usePayRows(opts: {
     if (r.method === 'discount') {
       if (r.reason.trim().length < 2) return '请填写优惠原因（至少 2 个字），例如：抹零、投诉补偿';
       if (!opts.grantFits(r.grant, c)) return r.grant ? `${opts.scopeName}或金额改了，请按当前内容重新授权` : '请值班经理、店总或店主当场授权';
+      if (rows.some((x) => x.method === 'store_coupon')) return '券不能和优惠 / 免单同时用，请二选一';
     }
     return null;
   };
-  const problems = rows.map(rowProblem);
+  // 券抵扣（v0.7.20）：要先选券（金额由服务端算好、不能改）；每单最多 1 张；结账核对刷新后这张券能抵的变了要重新选
+  const couponProblem = (r: PayRow): string | null => {
+    if (!r.coupon) return '请选一张券，或输入券码核对';
+    if (!r.coupon.usable) return r.coupon.reason ?? '这张券现在不能用';
+    const latest = opts.coupons?.find((o) => o.code === r.coupon!.code);
+    if (latest && (latest.amount !== r.coupon.amount || !latest.usable)) {
+      return latest.usable ? `账单有变化，这张券现在能抵 ${formatYuan(latest.amount)}，请重新选一次` : (latest.reason ?? '这张券现在不能用');
+    }
+    if (rows.filter((x) => x.method === 'store_coupon').length > 1) return '每张结账单最多用 1 张券';
+    return null;
+  };
+  const problems = rows.map((r, i) => (r.method === 'store_coupon' ? couponProblem(r) : rowProblem(r, i)));
   const walletMembers = rows.filter((r) => r.method === 'wallet' && r.member).map((r) => r.member!.id);
   const dupWallet = new Set(walletMembers).size !== walletMembers.length;
 
@@ -147,7 +176,8 @@ export function usePayRows(opts: {
   };
   const addRow = (method: CheckoutMethod) =>
     edit(() => {
-      const row = newRow(method, Math.max(0, remaining ?? 0));
+      // 券抵扣的金额等选了券再定
+      const row = newRow(method, method === 'store_coupon' ? 0 : Math.max(0, remaining ?? 0));
       if (method === 'wallet') {
         const m = opts.members?.find((x) => !rows.some((r) => r.member?.id === x.id));
         if (m) row.member = m;
@@ -169,6 +199,7 @@ export function usePayRows(opts: {
       }
       if (r.method === 'coupon') return { method: 'coupon' as const, platform: r.platform, code: normalizeCouponCode(r.code), dealName: r.dealName.trim(), amount };
       if (r.method === 'discount') return { method: 'discount' as const, amount, grantId: r.grant!.grantId };
+      if (r.method === 'store_coupon') return { method: 'store_coupon' as const, code: r.coupon!.code, amount };
       return { method: r.method, amount, ref: r.ref.trim() };
     });
 
@@ -180,6 +211,7 @@ export function usePayRows(opts: {
     problems,
     dupWallet,
     hasDiscount: rows.some((r) => r.method === 'discount'),
+    hasStoreCoupon: rows.some((r) => r.method === 'store_coupon'),
     /** 每笔都填好了、没有重复的储值会员 */
     ok: problems.every((x) => x === null) && !dupWallet,
     methods: [...new Set(rows.map((r) => CHECKOUT_METHOD_LABELS[r.method]))],
@@ -202,6 +234,7 @@ export function PaymentsSection({
   canWallet,
   walletHint,
   authorize,
+  coupons,
 }: {
   pay: ReturnType<typeof usePayRows>;
   total: number | null;
@@ -211,6 +244,8 @@ export function PaymentsSection({
   walletHint?: WalletHint;
   /** 优惠授权：申请的对象与弹窗里的说明 */
   authorize: (amount: number, reason: string) => { request: DiscountGrantRequest; lines: string[] };
+  /** 结账用券（v0.7.20）；不传时不显示「券抵扣」 */
+  coupons?: CouponSource;
 }) {
   /** 正在请值班经理授权优惠的那一笔 */
   const [authorizing, setAuthorizing] = useState<number | null>(null);
@@ -221,14 +256,20 @@ export function PaymentsSection({
     <div className="rounded-lg border border-line bg-paper/50 p-3">
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="mr-1 text-[13px] font-bold text-ink-2">收款</span>
-        {QUICK_METHODS.filter((m) => m !== 'wallet' || canWallet).map((m) => (
+        {QUICK_METHODS.filter((m) => (m !== 'wallet' || canWallet) && (m !== 'store_coupon' || !!coupons)).map((m) => (
           <Button
             key={m}
             size="sm"
             variant="secondary"
-            icon={m === 'discount' ? <BadgePercent className="size-3.5" /> : <Plus className="size-3.5" />}
+            icon={m === 'discount' ? <BadgePercent className="size-3.5" /> : m === 'store_coupon' ? <TicketCheck className="size-3.5" /> : <Plus className="size-3.5" />}
             // 应收合计取回之前不能选（店主 2026-10-30 定）：网络慢时先点了，新加的一笔没有默认金额
-            disabled={pay.locked || total === null || (m === 'discount' && pay.hasDiscount)}
+            // 券（v0.7.20）：每单最多 1 张，不与优惠 / 免单同时用
+            disabled={
+              pay.locked ||
+              total === null ||
+              (m === 'discount' && (pay.hasDiscount || pay.hasStoreCoupon)) ||
+              (m === 'store_coupon' && (pay.hasStoreCoupon || pay.hasDiscount))
+            }
             onClick={() => pay.addRow(m)}
             data-testid={`pay-add-${m}`}
           >
@@ -260,6 +301,7 @@ export function PaymentsSection({
               onAuthorize={() => setAuthorizing(r.id)}
               onRemove={() => pay.remove(r.id)}
               walletHint={walletHint}
+              coupons={coupons}
             />
           ))}
         </ul>
@@ -293,6 +335,7 @@ export function PayRowEditor({
   onAuthorize,
   onRemove,
   walletHint = VISIT_WALLET_HINT,
+  coupons,
 }: {
   row: PayRow;
   cents: number | null;
@@ -307,23 +350,36 @@ export function PayRowEditor({
   onRemove: () => void;
   /** 选储值会员时的说明（手牌结账与桌台结账不同） */
   walletHint?: WalletHint;
+  coupons?: CouponSource;
 }) {
   const tendered = parseYuan(row.tendered);
   return (
     <li className={cn('rounded-lg border bg-card p-3', problem ? 'border-clay/40' : 'border-line')} data-testid={`pay-row-${row.method}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <Badge tone={row.method === 'wallet' ? 'pine' : row.method === 'coupon' || row.method === 'discount' ? 'yuzu' : 'neutral'} className="h-7 px-3 text-[13px]">
+        <Badge
+          tone={row.method === 'wallet' ? 'pine' : row.method === 'coupon' || row.method === 'discount' || row.method === 'store_coupon' ? 'yuzu' : 'neutral'}
+          className="h-7 px-3 text-[13px]"
+        >
           {row.method === 'wallet' ? (
             <WalletCards className="size-3.5" />
           ) : row.method === 'coupon' ? (
             <Ticket className="size-3.5" />
           ) : row.method === 'discount' ? (
             <BadgePercent className="size-3.5" />
+          ) : row.method === 'store_coupon' ? (
+            <TicketCheck className="size-3.5" />
           ) : null}
           {CHECKOUT_METHOD_LABELS[row.method]}
         </Badge>
         <div className="w-[150px]">
-          <MoneyInput value={row.amount} onChange={(e) => onChange({ amount: e.target.value })} disabled={locked} aria-label={`${CHECKOUT_METHOD_LABELS[row.method]}金额`} className="h-10" />
+          <MoneyInput
+            value={row.amount}
+            onChange={(e) => onChange({ amount: e.target.value })}
+            // 券抵扣的金额由服务端按此刻的明细算好，不能改
+            disabled={locked || row.method === 'store_coupon'}
+            aria-label={`${CHECKOUT_METHOD_LABELS[row.method]}金额`}
+            className="h-10"
+          />
         </div>
         {(PAYMENT_METHODS as readonly string[]).includes(row.method) && (
           <Input
@@ -367,6 +423,16 @@ export function PayRowEditor({
 
       {row.method === 'coupon' && (
         <Input value={row.dealName} onChange={(e) => onChange({ dealName: e.target.value })} placeholder="团购项目（选填，例如「不含餐 12 小时」）" maxLength={48} disabled={locked} className="mt-2 h-9 text-[13px]" aria-label="团购项目" />
+      )}
+
+      {row.method === 'store_coupon' && coupons && (
+        <StoreCouponPicker
+          row={row}
+          source={coupons}
+          locked={locked}
+          onPick={(c) => onChange({ coupon: c, amount: c && c.usable ? centsToInput(c.amount) : '' })}
+          onInput={(v) => onChange({ couponInput: v })}
+        />
       )}
 
       {row.method === 'discount' && (
@@ -485,5 +551,118 @@ function MemberPick({ m, onPick }: { m: { name: string; memberNo: string; princi
         </span>
       </button>
     </li>
+  );
+}
+
+/**
+ * 券抵扣（v0.7.20）：会员的券（本次结账客人里的会员，能用的在前、写明能抵多少；不能用的写原因），或输入无记名券的券码核对。
+ * 能抵多少由服务端按此刻的明细算好，结账时再核对一遍（变了会提示重新选）
+ */
+function StoreCouponPicker({
+  row,
+  source,
+  locked,
+  onPick,
+  onInput,
+}: {
+  row: PayRow;
+  source: CouponSource;
+  locked: boolean;
+  onPick: (c: CheckoutCouponOption | null) => void;
+  onInput: (v: string) => void;
+}) {
+  const [checking, setChecking] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const code = normalizeStoreCouponCode(row.couponInput);
+  const check = async () => {
+    setChecking(true);
+    setNote(null);
+    try {
+      const found = await source.check(code);
+      if (!found) setNote('没有这张券，请核对券码');
+      else if (!found.usable) setNote(found.reason ?? '这张券现在不能用');
+      else onPick(found);
+    } catch (e) {
+      setNote(errorMessage(e));
+    } finally {
+      setChecking(false);
+    }
+  };
+  if (row.coupon) {
+    const c = row.coupon;
+    return (
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-yuzu-tint px-3 py-2 text-[12.5px]" data-testid="store-coupon-picked">
+        <TicketCheck className="size-3.5 text-yuzu-deep" />
+        <span className="font-bold text-ink">{c.templateName}</span>
+        <span className="num text-ink-3">{formatStoreCouponCode(c.code)}</span>
+        <span className="text-ink-2">{c.summary}</span>
+        {c.memberName && <span className="text-ink-3">会员 {c.memberName}</span>}
+        <span className="text-ink-3">有效期到 {c.validTo}</span>
+        <span className="font-semibold text-pine">
+          抵 <Money cents={c.amount} />
+        </span>
+        <span className="flex-1" />
+        <Button size="sm" variant="ghost" disabled={locked} onClick={() => onPick(null)}>
+          换一张
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-2 space-y-2" data-testid="store-coupon-options">
+      {source.options.length > 0 ? (
+        <ul className="space-y-1">
+          {source.options.map((o) => (
+            <li key={o.couponId}>
+              <button
+                type="button"
+                disabled={locked || !o.usable}
+                onClick={() => onPick(o)}
+                className={cn(
+                  'flex w-full flex-wrap items-center gap-x-3 gap-y-0.5 rounded-md border px-3 py-1.5 text-left text-[12.5px]',
+                  o.usable ? 'border-line bg-card hover:border-line-strong' : 'cursor-not-allowed border-dashed border-line bg-paper-2/50 text-ink-3',
+                )}
+                data-testid={`store-coupon-${o.code}`}
+              >
+                <span className="font-bold">{o.templateName}</span>
+                <span className="min-w-0 flex-1 truncate text-ink-3">
+                  {o.summary}
+                  {o.memberName ? ` · ${o.memberName}` : ''} · 到 {o.validTo}
+                </span>
+                {o.usable ? (
+                  <span className="font-semibold text-pine">
+                    抵 <Money cents={o.amount} />
+                  </span>
+                ) : (
+                  <span className="text-[12px]">{o.reason}</span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-[12.5px] text-ink-3">本次结账的客人里没有可用的会员券；无记名券请输入券码。</p>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          fullWidth={false}
+          value={row.couponInput}
+          onChange={(e) => {
+            setNote(null);
+            onInput(e.target.value.toUpperCase());
+          }}
+          placeholder="无记名券：输入 12 位券码"
+          maxLength={20}
+          disabled={locked}
+          className="num h-9 min-w-0 flex-1 basis-44 font-semibold tracking-wide"
+          aria-label="券码"
+          data-testid="store-coupon-code"
+        />
+        <Button size="sm" variant="secondary" loading={checking} disabled={locked || !STORE_COUPON_CODE_PATTERN.test(code)} onClick={() => void check()} data-testid="store-coupon-check">
+          核对券码
+        </Button>
+      </div>
+      {note && <p className="text-[12.5px] font-semibold text-clay">{note}</p>}
+    </div>
   );
 }

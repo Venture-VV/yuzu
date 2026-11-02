@@ -52,7 +52,7 @@ function FrontdeskBoard() {
   const [ambiguous, setAmbiguous] = useState(false);
   const [zone, setZone] = useState<'all' | TagZone>('all');
   const [status, setStatus] = useState<StatusFilter>('all');
-  const [dialog, setDialog] = useState<null | { kind: 'checkin'; prefill: CheckinPrefill } | { kind: PanelAction; ids?: number[] }>(null);
+  const [dialog, setDialog] = useState<null | { kind: 'checkin'; prefill: CheckinPrefill } | { kind: PanelAction; ids?: number[]; checkoutId?: number }>(null);
   const [checksOpen, setChecksOpen] = useState(false);
   /** 找在店客人、锁牌 / 解锁 */
   const [tool, setTool] = useState<null | { kind: 'find' } | { kind: 'lock'; code?: string }>(null);
@@ -98,14 +98,17 @@ function FrontdeskBoard() {
   const resume = params.get('resume');
   useEffect(() => {
     if (!resume || !board.data) return;
-    if (resume !== 'checkin' && (!visit.data || visit.data.id !== selectedId)) return;
+    // 退款单（v0.7.20）：打开结账记录里的原结账单，不需要选中手牌
+    if (resume !== 'checkin' && resume !== 'checkout_refund' && (!visit.data || visit.data.id !== selectedId)) return;
     if (resume === 'checkin') setDialog({ kind: 'checkin', prefill: {} });
+    else if (resume === 'checkout_refund') setDialog({ kind: 'records', checkoutId: Number(params.get('c')) || undefined });
     else if (resume === 'bill_post') setDialog({ kind: 'add' });
     else if (resume === 'tag_swap') setDialog({ kind: 'swap' });
     else if (resume === 'checkout') setDialog({ kind: 'checkout' });
     else if (resume === 'line_move') setDialog({ kind: 'move' });
     const next = new URLSearchParams(params);
     next.delete('resume');
+    next.delete('c');
     setParams(next, { replace: true });
   }, [resume, board.data, visit.data, selectedId, params, setParams]);
 
@@ -525,7 +528,11 @@ function FrontdeskBoard() {
       {visit.data && dialog?.kind === 'ticket' && (
         <TicketDialog open visit={visit.data} onClose={() => setDialog(null)} onDone={(v) => afterChange(v, `${v.tag.code} 票种改为 ${v.ticket?.name ?? ''}`)} />
       )}
-      <CheckoutRecordsDialog open={dialog?.kind === 'records'} focusId={dialog?.kind === 'records' ? (visit.data?.checkout?.id ?? null) : null} onClose={() => setDialog(null)} />
+      <CheckoutRecordsDialog
+        open={dialog?.kind === 'records'}
+        focusId={dialog?.kind === 'records' ? ((dialog as { checkoutId?: number }).checkoutId ?? visit.data?.checkout?.id ?? null) : null}
+        onClose={() => setDialog(null)}
+      />
       <ChecksDialog open={checksOpen} onClose={() => setChecksOpen(false)} />
       <FindGuestDialog open={tool?.kind === 'find'} tags={tags} onClose={() => setTool(null)} onPick={select} />
       <TagLockDialog

@@ -20,12 +20,19 @@ export const ANOMALY_LABELS: Record<SettlementAnomaly['kind'], string> = {
   refund_void: '作废退款单',
 };
 
-/** 实收合计：充值实收 + 结账里的现金类收款（会员储值、团购券、优惠 / 免单不是本次实收），按收款方式核对抽屉与各收款账户 */
-export function receivedByMethod(s: SettlementSummary): { rows: { method: PaymentMethod; recharge: number; checkout: number; total: number }[]; total: number } {
+/**
+ * 实收合计：充值实收 + 结账里的现金类收款 − 当天的退款单（v0.7.20）（会员储值、团购券、优惠 / 免单、券抵扣不是本次实收），
+ * 按收款方式核对抽屉与各收款账户
+ */
+export function receivedByMethod(s: SettlementSummary): {
+  rows: { method: PaymentMethod; recharge: number; checkout: number; refund: number; total: number }[];
+  total: number;
+} {
   const rows = PAYMENT_METHODS.map((m) => {
     const recharge = s.recharge.byMethod.find((x) => x.method === m)?.amount ?? 0;
     const checkout = s.business.byMethod.find((x) => x.method === m)?.amount ?? 0;
-    return { method: m, recharge, checkout, total: recharge + checkout };
-  }).filter((r) => r.recharge || r.checkout);
+    const refund = s.business.refunds?.byMethod.find((x) => x.method === m)?.amount ?? 0;
+    return { method: m, recharge, checkout, refund, total: recharge + checkout - refund };
+  }).filter((r) => r.recharge || r.checkout || r.refund);
   return { rows, total: rows.reduce((sum, r) => sum + r.total, 0) };
 }

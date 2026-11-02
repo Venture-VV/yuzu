@@ -122,11 +122,29 @@ function TodayTab() {
             d && (
               <>
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                  <Kpi icon={<TrendingUp className="size-4" />} label="今日净营业额（应收 − 优惠）" tone="pine">
-                    <Money cents={d.todayStats.net - d.todayStats.discount} />
-                    {d.todayStats.discount !== 0 && (
+                  <Kpi icon={<TrendingUp className="size-4" />} label="今日净营业额（应收 − 优惠 − 退款）" tone="pine">
+                    <Money cents={d.todayStats.net - d.todayStats.discount - (d.todayStats.coupon ?? 0) - (d.todayStats.refund ?? 0)} />
+                    {(d.todayStats.discount !== 0 || !!d.todayStats.coupon || !!d.todayStats.refund) && (
                       <span className="block text-[12px] font-semibold text-ink-3" data-testid="dashboard-discount">
-                        应收 <Money cents={d.todayStats.net} /> · 优惠 <Money cents={-d.todayStats.discount} signed />
+                        应收 <Money cents={d.todayStats.net} />
+                        {d.todayStats.discount !== 0 && (
+                          <>
+                            {' '}
+                            · 优惠 <Money cents={-d.todayStats.discount} signed />
+                          </>
+                        )}
+                        {!!d.todayStats.coupon && (
+                          <>
+                            {' '}
+                            · 券抵扣 <Money cents={-d.todayStats.coupon} signed />
+                          </>
+                        )}
+                        {!!d.todayStats.refund && (
+                          <>
+                            {' '}
+                            · 退款 <Money cents={-d.todayStats.refund} signed />
+                          </>
+                        )}
                       </span>
                     )}
                   </Kpi>
@@ -238,7 +256,7 @@ function DutyCards({ duty, startHour }: { duty: DutyExtras; startHour: number })
         </Card>
         <Card className="p-5">
           <SectionTitle aside={<span className="text-[12px] text-ink-3">结账明细，反结账冲回</span>}>今日部门构成</SectionTitle>
-          <HBars testId="dashboard-departments" format={yuan} empty="今天还没有结账" rows={duty.departments.map((x) => ({ key: x.category, label: x.category, value: x.amount, note: `${x.quantity} 项${x.discount ? ` · 优惠 ${yuan(x.discount)}` : ''}` }))} />
+          <HBars testId="dashboard-departments" format={yuan} empty="今天还没有结账" rows={duty.departments.map((x) => ({ key: x.category, label: x.category, value: x.amount, note: `${x.quantity} 项${x.discount ? ` · 优惠 ${yuan(x.discount)}` : ''}${x.refund ? ` · 退款 ${yuan(x.refund)}` : ''}` }))} />
         </Card>
       </div>
       {duty.longStays && duty.longStays.length > 0 && (
