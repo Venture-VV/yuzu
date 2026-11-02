@@ -172,11 +172,12 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
   const [charges] = await db<{ n: number; amount: number }[]>`
     SELECT count(*)::int AS n, coalesce(sum(c.amount) FILTER (WHERE l.status = 'active'), 0) AS amount
     FROM room_stay_charges c JOIN bill_lines l ON l.id = c.line_id`;
-  // ⑮ 部门营业额快照（v0.7.6）：每张结账单的快照合计 = 结账金额，分摊的优惠合计 = 这张结账单的优惠 / 免单
+  // ⑮ 部门营业额快照（v0.7.6）：每张结账单的快照合计 = 结账金额，分摊的优惠合计 = 这张结账单的优惠 / 免单 + 券抵扣（v0.7.20）
   const itemDiff = await db<{ checkoutNo: string }[]>`
     SELECT c.checkout_no FROM checkouts c
     LEFT JOIN (SELECT checkout_id, sum(amount) AS amount, sum(discount) AS discount FROM checkout_items GROUP BY checkout_id) i ON i.checkout_id = c.id
-    LEFT JOIN (SELECT checkout_id, sum(amount) AS amount FROM checkout_payments WHERE method = 'discount' GROUP BY checkout_id) d ON d.checkout_id = c.id
+    LEFT JOIN (SELECT checkout_id, sum(amount) AS amount FROM checkout_payments WHERE method IN ('discount', 'store_coupon') GROUP BY checkout_id) d
+      ON d.checkout_id = c.id
     WHERE coalesce(i.amount, 0) <> c.total_amount OR coalesce(i.discount, 0) <> coalesce(d.amount, 0)
     LIMIT 5`;
   const [items] = await db<{ n: number }[]>`SELECT count(DISTINCT checkout_id)::int AS n FROM checkout_items`;
@@ -301,7 +302,7 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
       ok: itemDiff.length === 0,
       detail: itemDiff.length
         ? `${itemDiff.length} 张结账单的部门快照与结账金额或优惠不符（如 ${itemDiff.map((d) => d.checkoutNo).join('、')}）`
-        : `${items!.n} 张结账单有部门快照，每张的合计 = 结账金额，分摊的优惠 = 这张结账单的优惠 / 免单`,
+        : `${items!.n} 张结账单有部门快照，每张的合计 = 结账金额，分摊的优惠 = 这张结账单的优惠 / 免单与券抵扣`,
     },
     {
       key: 'line_moves',
@@ -313,5 +314,45 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
     },
     // ⑰ 派对房等的使用单（v0.7.19）
     await usageCheck(db),
+    // ⑱ 退款单（v0.7.20）
+    await refundCheck(db),
   ];
+}
+
+/**
+ * ⑱ 退款单与结账单一致（v0.7.20）：每张退款单的金额 = 退的项目合计 = 退款方式合计；生效的退款单累计——每项不超过份数与实收
+ * （应收 − 分摊的优惠），每种方式不超过原单这种方式收的钱、只退现金类方式；反结账过的结账单没有生效的退款单
+ */
+async function refundCheck(db: Db): Promise<FrontdeskCheck> {
+  const diff = await db<{ ref: string }[]>`
+    SELECT r.refund_no AS ref FROM refunds r
+    WHERE r.amount <> (SELECT coalesce(sum(amount), 0) FROM refund_items WHERE refund_id = r.id)
+       OR r.amount <> (SELECT coalesce(sum(amount), 0) FROM refund_payments WHERE refund_id = r.id)
+    UNION ALL
+    SELECT c.checkout_no || ' ' || ci.name FROM checkout_items ci JOIN checkouts c ON c.id = ci.checkout_id
+    JOIN (SELECT ri.checkout_id, ri.category, ri.name, sum(ri.quantity) AS q, sum(ri.amount) AS a
+          FROM refund_items ri JOIN refunds r ON r.id = ri.refund_id WHERE r.status = 'completed' GROUP BY 1, 2, 3) x
+      ON x.checkout_id = ci.checkout_id AND x.category = ci.category AND x.name = ci.name
+    WHERE x.q > ci.quantity OR x.a > ci.amount - ci.discount
+    UNION ALL
+    SELECT c.checkout_no || ' ' || x.method FROM checkouts c
+    JOIN (SELECT r.checkout_id, p.method, sum(p.amount) AS a FROM refund_payments p JOIN refunds r ON r.id = p.refund_id
+          WHERE r.status = 'completed' GROUP BY 1, 2) x ON x.checkout_id = c.id
+    WHERE x.a > (SELECT coalesce(sum(amount), 0) FROM checkout_payments WHERE checkout_id = c.id AND method = x.method)
+    UNION ALL
+    SELECT c.checkout_no || ' 已反结账' FROM checkouts c
+    WHERE c.status = 'voided' AND EXISTS (SELECT 1 FROM refunds r WHERE r.checkout_id = c.id AND r.status = 'completed')
+    LIMIT 5`;
+  const [t] = await db<{ n: number; amount: number; voided: number }[]>`
+    SELECT count(*) FILTER (WHERE status = 'completed')::int AS n, coalesce(sum(amount) FILTER (WHERE status = 'completed'), 0) AS amount,
+           count(*) FILTER (WHERE status = 'voided')::int AS voided
+    FROM refunds`;
+  return {
+    key: 'refunds',
+    label: '退款单与结账单一致',
+    ok: diff.length === 0,
+    detail: diff.length
+      ? `${diff.length} 处退款单与结账单不符（如 ${diff.map((d) => d.ref).join('、')}）`
+      : `生效的退款单 ${t!.n} 张共 ${formatYuan(t!.amount)}（作废 ${t!.voided} 张）：每张的项目合计 = 退款方式合计，每项、每种方式都没有超过原单，反结账过的结账单没有生效的退款单`,
+  };
 }

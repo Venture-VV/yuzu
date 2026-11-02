@@ -47,6 +47,8 @@ export const FENCED_OPS = [
   'usage_open',
   'usage_end',
   'usage_cancel',
+  // 退款单（v0.7.20，离店后部分退款）
+  'checkout_refund',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 

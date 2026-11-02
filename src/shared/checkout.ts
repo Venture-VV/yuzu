@@ -83,26 +83,108 @@ export function priceTicket(t: Pick<TicketType, 'price12h' | 'price24h'>, checke
  * 「优惠 / 免单」（R1.2，店主 2026-10-29 签认）由值班经理及以上当场授权并填原因，一张结账单最多一笔；
  * 店员不能自行抹零，抹零也走优惠。
  */
-export const CHECKOUT_METHODS = [...PAYMENT_METHODS, 'wallet', 'coupon', 'discount'] as const;
+export const CHECKOUT_METHODS = [...PAYMENT_METHODS, 'wallet', 'coupon', 'discount', 'store_coupon'] as const;
 export type CheckoutMethod = (typeof CHECKOUT_METHODS)[number];
 export const CHECKOUT_METHOD_LABELS: Record<CheckoutMethod, string> = {
   ...PAYMENT_METHOD_LABELS,
   wallet: '会员储值',
   coupon: '团购券',
   discount: '优惠 / 免单',
+  store_coupon: '券抵扣',
 };
-/** 实收（现金流入）的方式：会员储值是会员余额抵扣，团购券由平台结算，优惠 / 免单没有收钱，三者都不是本次实收 */
+/**
+ * 实收（现金流入）的方式：会员储值是会员余额抵扣，团购券由平台结算，优惠 / 免单没有收钱，券抵扣（v0.7.20）是优惠，
+ * 都不是本次实收
+ */
 export const isCashLike = (m: CheckoutMethod): m is PaymentMethod => (PAYMENT_METHODS as readonly string[]).includes(m);
+/** 不是收款、是让利的方式：优惠 / 免单与券抵扣（v0.7.20）；营业额要减去这两项 */
+export const isDiscountLike = (m: CheckoutMethod) => m === 'discount' || m === 'store_coupon';
 
 /**
  * 营业口径的分列（店主 2026-10-29 签认：日结分列应收、优惠、净营业额、实收）：
- * 应收 = 结账合计 − 反结账；优惠 = 「优惠 / 免单」收款；净营业额 = 应收 − 优惠；
- * 实收 = 现金类收款（现金、微信、支付宝、银行卡、其他），不含会员储值、团购券与优惠。
+ * 应收 = 结账合计 − 反结账；优惠 = 「优惠 / 免单」收款；券抵扣 = 结账用的券（v0.7.20，「优惠」下单列）；
+ * 退款 = 当天的退款单（v0.7.20，离店后部分退款，按原收款方式退）；
+ * 净营业额 = 应收 − 优惠 − 券抵扣 − 退款；
+ * 实收 = 现金类收款（现金、微信、支付宝、银行卡、其他）− 退款，不含会员储值、团购券、优惠与券抵扣。
  */
-export function businessBreakdown(b: { net: number; byMethod: readonly { method: CheckoutMethod; amount: number }[] }) {
-  const discount = b.byMethod.filter((m) => m.method === 'discount').reduce((sum, m) => sum + m.amount, 0);
-  const received = b.byMethod.filter((m) => isCashLike(m.method)).reduce((sum, m) => sum + m.amount, 0);
-  return { receivable: b.net, discount, netRevenue: b.net - discount, received };
+export function businessBreakdown(b: { net: number; byMethod: readonly { method: CheckoutMethod; amount: number }[]; refunds?: { total: number } }) {
+  const sum = (pick: (m: CheckoutMethod) => boolean) => b.byMethod.filter((m) => pick(m.method)).reduce((total, m) => total + m.amount, 0);
+  const discount = sum((m) => m === 'discount');
+  const coupon = sum((m) => m === 'store_coupon');
+  const refund = b.refunds?.total ?? 0;
+  return { receivable: b.net, discount, coupon, refund, netRevenue: b.net - discount - coupon - refund, received: sum(isCashLike) - refund };
+}
+
+// ───────────── 退款单（v0.7.20，飞书需求 RQ-006；docs/CASHIER.md 第 3 节）─────────────
+
+/** 退款能退到的方式：只退原单收过的现金、微信、支付宝、银行卡、其他；储值、团购券、优惠 / 免单、券抵扣不能部分退（用反结账） */
+export const REFUND_METHODS = PAYMENT_METHODS;
+export type RefundMethod = PaymentMethod;
+/** 扫码、银行卡、其他要登记退款单号或写明怎么退的；现金不用 */
+export const refundNeedsRef = (m: RefundMethod) => m !== 'cash';
+
+/** 某一项按份数算默认退多少：剩下的实收 × 退的份数 / 剩下的份数，算到分、舍去；全退时正好是剩下的实收 */
+export function defaultRefundAmount(item: { remainingQuantity: number; remainingAmount: number }, quantity: number): number {
+  if (item.remainingQuantity <= 0 || quantity >= item.remainingQuantity) return item.remainingAmount;
+  return Math.floor((item.remainingAmount * quantity) / item.remainingQuantity);
+}
+
+export interface RefundSummary {
+  id: number;
+  refundNo: string;
+  checkoutId: number;
+  checkoutNo: string;
+  amount: number;
+  reason: string;
+  status: 'completed' | 'voided';
+  businessDate: string;
+  createdAt: string;
+  operatorName: string;
+  /** 退款方式（现金、扫码……） */
+  methods: RefundMethod[];
+  /** 原结账单的手牌号 / 桌号 */
+  tagCodes: string[];
+  tableNames: string[];
+}
+
+export interface RefundDetail extends RefundSummary {
+  items: { category: string; name: string; quantity: number; amount: number }[];
+  payments: { method: RefundMethod; amount: number; ref: string }[];
+  /** 记到的班次（现金退款是所选钱箱当班的班次）；没有开班时为 null */
+  shift: { id: number; shiftNo: string; staffName: string; open: boolean } | null;
+  voidedAt: string | null;
+  voidedByName: string | null;
+  voidReason: string | null;
+}
+
+/** 开退款单前的核对：每项还能退多少、每种收款方式还能退多少 */
+export interface RefundOptions {
+  checkoutId: number;
+  checkoutNo: string;
+  checkoutStatus: 'completed' | 'voided';
+  createdAt: string;
+  totalAmount: number;
+  items: {
+    category: string;
+    name: string;
+    quantity: number;
+    /** 应收、分摊到这项的优惠（含券抵扣）、实收 = 应收 − 优惠 */
+    amount: number;
+    discount: number;
+    refundedQuantity: number;
+    refundedAmount: number;
+    remainingQuantity: number;
+    remainingAmount: number;
+  }[];
+  /** 原单收过的现金类方式：收了多少、退过多少、还能退多少 */
+  methods: { method: RefundMethod; paid: number; refunded: number; remaining: number }[];
+  /** 原单里不能部分退的方式（储值、团购券、优惠 / 免单、券抵扣）合计，提示用 */
+  nonRefundable: { method: CheckoutMethod; amount: number }[];
+  /** 不能开退款单的原因（已反结账、没有能退的方式、都退完了、超过时限只有店主……）；能开时为 null */
+  blocked: { code: string; message: string } | null;
+  refunds: RefundSummary[];
+  /** 退现金可以选的钱箱（与反结账同一套）；接口返回时附上 */
+  drawers?: RefundShiftOptions;
 }
 
 export const COUPON_PLATFORMS = ['meituan', 'dianping', 'douyin', 'other'] as const;
@@ -225,6 +307,8 @@ export interface CheckoutDetail {
   payments: CheckoutPayment[];
   /** 本次结账后同行组里仍在店的手牌 */
   remainingMates: string[];
+  /** 这张结账单的退款单（v0.7.20，含已作废的） */
+  refunds: RefundSummary[];
 }
 
 export interface CheckoutSummary {
@@ -241,6 +325,8 @@ export interface CheckoutSummary {
   businessDate: string;
   /** 补录的结账单的纸质单号（R1.9）；平时为 null */
   backfillSlipNo: string | null;
+  /** 生效的退款单合计（v0.7.20）；没有退款为 0 */
+  refundedAmount: number;
 }
 
 // ───────────── 交班（店主 #11） ─────────────
@@ -277,8 +363,28 @@ export interface ShiftSummary {
     received: { method: PaymentMethod; count: number; amount: number }[];
     refunded: { method: PaymentMethod; count: number; amount: number }[];
   };
-  /** 应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金 + 押金现金（收 − 退） */
-  cash: { opening: number; checkout: number; recharge: number; refund?: number; deposit?: number; expected: number };
+  /**
+   * 退款单（v0.7.20，离店后部分退款）：记到本班次的退款，按退款方式；现金从本班钱箱退、扣减应有现金，
+   * 微信、支付宝、银行卡、其他在商户后台退，列出退款单号只作提醒。别人从本班钱箱退的写明是谁。
+   * 本班次没有退款单、升级之前交班的快照都没有这一项（cash.refundSlip 同样没有）
+   */
+  refundSlips?: {
+    count: number;
+    total: number;
+    byMethod: { method: PaymentMethod; count: number; amount: number }[];
+    list: {
+      refundNo: string;
+      checkoutNo: string;
+      amount: number;
+      cash: number;
+      reason: string;
+      createdAt: string;
+      refs: { method: PaymentMethod; amount: number; ref: string }[];
+      operatorName?: string;
+    }[];
+  };
+  /** 应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金 + 押金现金（收 − 退）− 退款单退现金 */
+  cash: { opening: number; checkout: number; recharge: number; refund?: number; deposit?: number; refundSlip?: number; expected: number };
 }
 
 export interface ShiftRecord {
@@ -316,6 +422,10 @@ export interface DashboardData {
     byMethod: { method: CheckoutMethod; amount: number }[];
     /** 优惠 / 免单（已含在 net 里，单列）；与日结同一口径：当日结账的减去当日反结账的，可为负 */
     discount: number;
+    /** 券抵扣（v0.7.20，已含在 net 里，单列，口径同优惠） */
+    coupon: number;
+    /** 当天的退款单（v0.7.20，不在 net 里：净营业额 = net − 优惠 − 券抵扣 − 退款） */
+    refund: number;
     rechargePaid: number;
     rechargeCount: number;
   };

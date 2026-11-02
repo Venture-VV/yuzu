@@ -406,6 +406,8 @@ const ANOMALY_META: Record<
   visit_cancel: { label: ANOMALY_LABELS.visit_cancel, tone: 'lake', icon: CircleSlash, iconClass: 'bg-lake-soft text-lake' },
   line_void: { label: ANOMALY_LABELS.line_void, tone: 'lake', icon: CircleSlash, iconClass: 'bg-lake-soft text-lake' },
   backfill: { label: ANOMALY_LABELS.backfill, tone: 'lake', icon: FilePenLine, iconClass: 'bg-lake-soft text-lake' },
+  refund: { label: ANOMALY_LABELS.refund, tone: 'ember', icon: Undo2, iconClass: 'bg-ember-soft text-ember' },
+  refund_void: { label: ANOMALY_LABELS.refund_void, tone: 'clay', icon: CircleSlash, iconClass: 'bg-clay-soft text-clay' },
 };
 
 function AnomalyItem({ a }: { a: SettlementAnomaly }) {

@@ -9,6 +9,7 @@
 //   06-技师业绩.csv    每位技师的钟数、点钟 / 轮钟、金额与提成（v0.7.0 / v0.7.1，与部门参考表同一口径），供与钟房的钟单核对
 //   07-客房与押金.csv  当天的入住、房费、换房、退房、夜审与押金的收、退（S7，v0.7.4），供与客房登记、押金袋核对
 //   08-使用单.csv      派对房、宠物轰趴房、娱乐室当天开的使用单（v0.7.19）：房间、使用人手牌、开单与结束时刻、时长、经办人、撤单原因
+//   09-退款单.csv      当天开的退款单（v0.7.20，离店后部分退款，含当天作废的）：每项一行，原结账单、退款方式与退款单号、经办人、原因
 // 优惠 / 免单与降档 / 免票授权在资金轨 R1.2 合并后加入异常清单。
 
 import { businessDateOf, businessDayStart } from '@shared/business-date';
@@ -65,10 +66,12 @@ const ANOMALY_LABELS: Record<string, string> = {
   chain_break: '流水不连续',
   discount: '优惠 / 免单',
   backfill: '补录纸质单',
+  refund: '退款单',
+  refund_void: '作废退款单',
 };
 const COVERED = new Set(['checkout_void', 'line_void', 'visit_cancel', 'ticket_override']);
 /** 说明文件里分别计数的异常类别（按类别名开头匹配，「改票种」含降档与改为免票） */
-const EXCEPTION_KINDS = ['反结账', '优惠 / 免单', '作废明细', '撤销误开的牌', '改票种', '免票入场', '补录纸质单'];
+const EXCEPTION_KINDS = ['反结账', '优惠 / 免单', '作废明细', '撤销误开的牌', '改票种', '免票入场', '补录纸质单', '退款单', '作废退款单'];
 
 interface CheckoutRow {
   id: number;
@@ -119,18 +122,44 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     WHERE c.business_date = ${date} OR c.void_business_date = ${date}
     ORDER BY c.created_at, c.id`;
   // 部门参考表：结账时记下的快照（v0.7.6，以后改价目、改分类不影响已结的单）；当天结的计正数、当天反结账的计负数；
-  // discount 是按金额比例分摊到这一项的优惠 / 免单
-  const departments = await tx<{ category: string; name: string; quantity: number; amount: number; discount: number }[]>`
+  // discount 是按金额比例分摊到这一项的优惠 / 免单与券抵扣（v0.7.20 只分摊到券适用的明细）；
+  // refund 是当天的退款单退的金额（v0.7.20，作废的不算），数量减去退的份数
+  const departments = await tx<{ category: string; name: string; quantity: number; amount: number; discount: number; refund: number }[]>`
     WITH k AS (
       SELECT id, 1 AS sign FROM checkouts WHERE business_date = ${date}
       UNION ALL
       SELECT id, -1 FROM checkouts WHERE void_business_date = ${date}
+    ),
+    x AS (
+      SELECT ci.category, ci.name, k.sign * ci.quantity AS quantity, k.sign * ci.amount AS amount, k.sign * ci.discount AS discount, 0::bigint AS refund
+      FROM k JOIN checkout_items ci ON ci.checkout_id = k.id
+      UNION ALL
+      SELECT ri.category, ri.name, -ri.quantity, 0, 0, ri.amount
+      FROM refund_items ri JOIN refunds r ON r.id = ri.refund_id WHERE r.status = 'completed' AND r.business_date = ${date}
     )
-    SELECT ci.category, ci.name, sum(k.sign * ci.quantity)::int AS quantity, sum(k.sign * ci.amount)::bigint AS amount,
-           sum(k.sign * ci.discount)::bigint AS discount
-    FROM k JOIN checkout_items ci ON ci.checkout_id = k.id
+    SELECT category, name, sum(quantity)::int AS quantity, sum(amount)::bigint AS amount, sum(discount)::bigint AS discount, sum(refund)::bigint AS refund
+    FROM x
     GROUP BY 1, 2
-    HAVING sum(k.sign * ci.quantity) <> 0 OR sum(k.sign * ci.amount) <> 0 OR sum(k.sign * ci.discount) <> 0`;
+    HAVING sum(quantity) <> 0 OR sum(amount) <> 0 OR sum(discount) <> 0 OR sum(refund) <> 0`;
+  // 退款单（v0.7.20）：当天开的（含当天作废的），每项一行
+  const refunds = await tx<{
+    refundNo: string; status: string; createdAt: string; checkoutNo: string; checkoutDate: string; tags: string | null; operatorName: string; reason: string;
+    amount: number; category: string; name: string; quantity: number; itemAmount: number; pays: string; voidedAt: string | null; voidedByName: string | null; voidReason: string | null;
+  }[]>`
+    SELECT r.refund_no, r.status, r.created_at, c.checkout_no, c.business_date AS checkout_date, s.display_name AS operator_name, r.reason, r.amount,
+           ri.category, ri.name, ri.quantity, ri.amount AS item_amount, r.voided_at, vb.display_name AS voided_by_name, r.void_reason,
+           (SELECT string_agg(x.label, '、' ORDER BY x.label) FROM (
+              SELECT t.code AS label FROM checkout_bills cb JOIN visits v ON v.id = cb.visit_id JOIN hand_tags t ON t.id = v.tag_id WHERE cb.checkout_id = c.id
+              UNION ALL
+              SELECT '桌 ' || dt.name FROM checkout_bills cb JOIN table_sessions ts ON ts.id = cb.table_session_id
+              JOIN dining_tables dt ON dt.id = ts.table_id WHERE cb.checkout_id = c.id) x) AS tags,
+           (SELECT string_agg(CASE p.method WHEN 'cash' THEN '现金' WHEN 'wechat' THEN '微信' WHEN 'alipay' THEN '支付宝' WHEN 'bank_card' THEN '银行卡' ELSE '其他' END
+                              || ' ' || to_char(p.amount / 100.0, 'FM999999990.00') || CASE WHEN p.ref <> '' THEN '（' || p.ref || '）' ELSE '' END, '、' ORDER BY p.id)
+            FROM refund_payments p WHERE p.refund_id = r.id) AS pays
+    FROM refunds r JOIN checkouts c ON c.id = r.checkout_id JOIN staff s ON s.id = r.operator_id JOIN refund_items ri ON ri.refund_id = r.id
+    LEFT JOIN staff vb ON vb.id = r.voided_by
+    WHERE r.business_date = ${date}
+    ORDER BY r.id, ri.amount DESC, ri.category COLLATE "C", ri.name COLLATE "C"`;
   // 按分类、项目名排序（逐字符比较，结果与数据库的排序规则无关）
   departments.sort((a, b) => (a.category === b.category ? (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) : a.category < b.category ? -1 : 1));
   const voidedLines = await tx<{ at: string; visitNo: string; tag: string; guest: string; staff: string; name: string; quantity: number; amount: number; reason: string; postedByName: string; technician: string | null }[]>`
@@ -233,7 +262,7 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     JOIN staff so ON so.id = u.opened_by LEFT JOIN staff sc ON sc.id = u.closed_by
     WHERE u.business_date = ${date} OR (u.closed_at >= ${from} AND u.closed_at < ${to})
     ORDER BY u.opened_at, u.id`;
-  return { summary, checkouts, departments, voidedLines, cancelled, ticketChanges, freeEntries, shifts, technicians, rooms, usages };
+  return { summary, checkouts, departments, voidedLines, cancelled, ticketChanges, freeEntries, shifts, technicians, rooms, usages, refunds };
 }
 
 export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string, now = new Date()): Promise<DailyRecon> {
@@ -296,28 +325,40 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     ]),
   });
 
-  // 03 部门参考表：结账时记下的快照，应收合计应等于应收；优惠 / 免单按金额比例分摊到各项（v0.7.6），分摊合计应等于优惠
+  // 03 部门参考表：结账时记下的快照，应收合计应等于应收；优惠 / 免单按金额比例分摊到各项（v0.7.6），券抵扣只分摊到券适用的明细，
+  // 分摊合计应等于优惠 + 券抵扣；退款单（v0.7.20）按退的项目记到部门，合计应等于退款
   const biz = businessBreakdown(s.business);
   const deptTotal = day.departments.reduce((t, d) => t + d.amount, 0);
   const deptDiscount = day.departments.reduce((t, d) => t + d.discount, 0);
+  const deptRefund = day.departments.reduce((t, d) => t + d.refund, 0);
   const categories = [...new Set(day.departments.map((d) => d.category))];
-  const row = (cat: string, name: string, quantity: number | string, amount: number, discount: number) => [cat, name, quantity, yuan(amount), yuan(discount), yuan(amount - discount)];
+  const row = (cat: string, name: string, quantity: number | string, amount: number, discount: number, refund: number) => [
+    cat,
+    name,
+    quantity,
+    yuan(amount),
+    yuan(discount),
+    yuan(refund),
+    yuan(amount - discount - refund),
+  ];
   files.push({
     name: '03-部门参考表.csv',
     content: toCsv([
-      ['部门（项目分类）', '项目', '数量', '应收（元）', '优惠分摊（元）', '净额（元）'],
+      ['部门（项目分类）', '项目', '数量', '应收（元）', '优惠分摊（元）', '退款（元）', '净额（元）'],
       ...categories.flatMap((cat) => {
         const items = day.departments.filter((d) => d.category === cat);
         return [
-          ...items.map((d) => row(cat, d.name, d.quantity, d.amount, d.discount)),
-          row(cat, '小计', '', items.reduce((t, d) => t + d.amount, 0), items.reduce((t, d) => t + d.discount, 0)),
+          ...items.map((d) => row(cat, d.name, d.quantity, d.amount, d.discount, d.refund)),
+          row(cat, '小计', '', items.reduce((t, d) => t + d.amount, 0), items.reduce((t, d) => t + d.discount, 0), items.reduce((t, d) => t + d.refund, 0)),
         ];
       }),
-      row('合计', '', '', deptTotal, deptDiscount),
-      ['应收（结账 − 反结账）', '', '', yuan(biz.receivable), '', ''],
-      ['核对', deptTotal === biz.receivable && deptDiscount === biz.discount ? '一致' : '不一致', '', '', '', ''],
-      ['优惠 / 免单（不是收款）', '', '', yuan(-biz.discount), '', ''],
-      ['净营业额（应收 − 优惠）', '', '', yuan(biz.netRevenue), '', ''],
+      row('合计', '', '', deptTotal, deptDiscount, deptRefund),
+      ['应收（结账 − 反结账）', '', '', yuan(biz.receivable), '', '', ''],
+      ['核对', deptTotal === biz.receivable && deptDiscount === biz.discount + biz.coupon && deptRefund === biz.refund ? '一致' : '不一致', '', '', '', '', ''],
+      ['优惠 / 免单（不是收款）', '', '', yuan(-biz.discount), '', '', ''],
+      ['券抵扣（是优惠，不是收款）', '', '', yuan(-biz.coupon), '', '', ''],
+      ['退款（退款单）', '', '', yuan(-biz.refund), '', '', ''],
+      ['净营业额（应收 − 优惠 − 券抵扣 − 退款）', '', '', yuan(biz.netRevenue), '', '', ''],
     ]),
   });
 
@@ -393,7 +434,8 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
           tag: c?.tags ?? '',
           guest: c ? (c.payments ?? []).flatMap((p) => (p.member ? [p.member] : [])).join('、') : (a.memberName ?? ''),
           staff: c?.operatorName ?? '',
-          amount: a.kind === 'discount' && a.amount !== null ? -a.amount : a.amount,
+          // 退款单少了营业额，与优惠同向记负数；作废退款单冲回，记正数
+          amount: (a.kind === 'discount' || a.kind === 'refund') && a.amount !== null ? -a.amount : a.amount,
           description: a.description,
         };
       }),
@@ -413,7 +455,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     name: '05-交班.csv',
     content: toCsv([
       ['班次', '员工', '营业日', '状态', '开班', '交班', '备用金', '结账张数', '结账合计', ...methods.map((m) => `结账·${CHECKOUT_METHOD_LABELS[m]}`),
-        '充值实收', '赠金', '工作台储值消费', '反结账退现金', '押金现金（收 − 退）', '应有现金', '实点现金', '长短款', '反结账张数', '接班人', '备注'],
+        '充值实收', '赠金', '工作台储值消费', '反结账退现金', '押金现金（收 − 退）', '退款单退现金', '应有现金', '实点现金', '长短款', '反结账张数', '退款单张数', '接班人', '备注'],
       ...day.shifts.map((r) => [
         r.shiftNo,
         r.staffName,
@@ -430,10 +472,12 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
         yuan(r.summary.walletConsumes.total),
         yuan(cashRefund(r)),
         yuan(r.summary.cash.deposit ?? 0),
+        yuan(r.summary.cash.refundSlip ?? 0),
         yuan(r.expectedCash ?? r.summary.cash.expected),
         r.countedCash === null ? '' : yuan(r.countedCash),
         r.countedCash === null || r.expectedCash === null ? '' : yuan(r.countedCash - r.expectedCash),
         r.summary.voids.length,
+        r.summary.refundSlips?.count ?? 0,
         r.handedToName ?? '',
         r.note,
       ]),
@@ -517,18 +561,46 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     ]),
   });
 
+  // 09 退款单（v0.7.20）：当天开的，每项一行；作废的写明（作废只能在当天，日结与部门都不算）
+  files.push({
+    name: '09-退款单.csv',
+    content: toCsv([
+      ['退款单号', '状态', '退款时间', '原结账单', '原结账营业日', '手牌 / 桌台', '部门（项目分类）', '项目', '退的份数', '退的金额（元）', '退款单合计（元）',
+        '退款方式与退款单号', '经办人', '原因', '作废时间', '作废人', '作废原因'],
+      ...day.refunds.map((r) => [
+        r.refundNo,
+        r.status === 'voided' ? '已作废' : '生效',
+        stampOf(r.createdAt),
+        r.checkoutNo,
+        r.checkoutDate,
+        r.tags ?? '',
+        r.category,
+        r.name,
+        r.quantity,
+        yuan(r.itemAmount),
+        yuan(r.amount),
+        r.pays ?? '',
+        r.operatorName,
+        r.reason,
+        stampOf(r.voidedAt),
+        r.voidedByName ?? '',
+        r.voidReason ?? '',
+      ]),
+    ]),
+  });
+
   // 00 说明
   const failed = checks.filter((c: CheckLine) => !c.ok);
-  const deptOk = deptTotal === biz.receivable && deptDiscount === biz.discount;
+  const deptOk = deptTotal === biz.receivable && deptDiscount === biz.discount + biz.coupon && deptRefund === biz.refund;
   const byMethod = s.business.byMethod.map((m) => `${CHECKOUT_METHOD_LABELS[m.method]} ${formatYuan(m.amount)}`).join('、') || '无';
   const count = (kind: string) => exceptions.filter((e) => e.kind.startsWith(kind)).length;
   const summary = [
     `营业日 ${date}（${stampOf(from.toISOString()).slice(0, 16)} 至 ${stampOf(to.toISOString()).slice(0, 16)}）${date === today ? '，营业日尚未结束' : ''}`,
     `应收 ${formatYuan(biz.receivable)}：结账 ${s.business.checkouts.count} 张 ${formatYuan(s.business.checkouts.total)}，反结账 ${s.business.voids.count} 张 ${formatYuan(s.business.voids.total)}`,
-    `优惠 / 免单 ${formatYuan(biz.discount)}；净营业额 ${formatYuan(biz.netRevenue)}；实收（现金类）${formatYuan(biz.received)}`,
+    `优惠 / 免单 ${formatYuan(biz.discount)}；券抵扣 ${formatYuan(biz.coupon)}；退款 ${formatYuan(biz.refund)}（${s.business.refunds.count} 张）；净营业额 ${formatYuan(biz.netRevenue)}；实收（现金类）${formatYuan(biz.received)}`,
     `收款方式：${byMethod}`,
     `储值：充值实收 ${formatYuan(s.recharge.paid)}（${s.recharge.count} 笔），储值消费 ${formatYuan(s.consume.total)}（${s.consume.count} 笔）`,
-    `部门参考表合计 ${formatYuan(deptTotal)}、优惠分摊 ${formatYuan(deptDiscount)}：${deptOk ? '✓ 与应收一致' : '✗ 与应收或优惠不一致'}`,
+    `部门参考表合计 ${formatYuan(deptTotal)}、优惠分摊 ${formatYuan(deptDiscount)}、退款 ${formatYuan(deptRefund)}：${deptOk ? '✓ 与应收、优惠与券抵扣、退款一致' : '✗ 与应收、优惠或退款不一致'}`,
     `异常：${EXCEPTION_KINDS.map((k) => `${k} ${count(k)}`).join('、')}、其他 ${exceptions.length - EXCEPTION_KINDS.reduce((t, k) => t + count(k), 0)}`,
     `交班：${day.shifts.length} 个班次，已交班 ${day.shifts.filter((r) => r.status === 'closed').length} 个`,
     `技师：${tr.totals.clocks} 个钟（点钟 ${tr.totals.designated}、轮钟 ${tr.totals.rotation}），${formatYuan(tr.totals.amount)}${tr.unassigned.clocks ? `；未指定技师 ${tr.unassigned.clocks} 个钟` : ''}`,
@@ -549,12 +621,13 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
       '文件：',
       '  01-日结汇总.csv     与「日结」页导出的相同',
       '  02-结账单.csv       当天结账与当天反结账的结账单，按收款方式分列；「计入本日」两列分别合计 = 结账合计、反结账合计',
-      '  03-部门参考表.csv   结账时记下的部门快照按项目分类（部门）汇总，合计 = 应收；优惠 / 免单按金额比例分摊到各项（优惠分摊、净额两列），后面单列优惠 / 免单与净营业额',
-      '  04-异常清单.csv     反结账、优惠 / 免单、作废明细、撤销误开的牌（每一次都列，写明是否超过更正时限；日结异常清单只列超过时限的）、改票种（降档、改为免票写明授权人与原因）、免票入场、补录纸质单、会员撤销与其他异常',
+      '  03-部门参考表.csv   结账时记下的部门快照按项目分类（部门）汇总，合计 = 应收；优惠 / 免单按金额比例分摊到各项、券抵扣只分摊到券适用的项目（优惠分摊一列），当天的退款单按退的项目记（退款一列），后面单列优惠 / 免单、券抵扣、退款与净营业额',
+      '  04-异常清单.csv     反结账、优惠 / 免单、作废明细、撤销误开的牌（每一次都列，写明是否超过更正时限；日结异常清单只列超过时限的）、改票种（降档、改为免票写明授权人与原因）、免票入场、补录纸质单、退款单与作废的退款单、会员撤销与其他异常',
       '  05-交班.csv         当天的班次、反结账退现金与长短款',
       '  06-技师业绩.csv     每位技师的钟数、点钟 / 轮钟、金额与提成（与部门参考表同一口径，提成按结账时刻的提成规则），与钟房的钟单核对',
       '  07-客房与押金.csv   当天的入住、房费、换房、退房、夜审与押金的收、退（押金是负债，不算营业额；房费随手牌结账），与客房登记、押金袋核对',
       '  08-使用单.csv       派对房、宠物轰趴房、娱乐室当天开的与当天结束的使用单（房间、使用人手牌、开单与结束、时长、经办人、撤单原因）；场次费在结账单里',
+      '  09-退款单.csv       当天开的退款单（离店后部分退款），每项一行：原结账单、退的份数与金额、退款方式与商户后台的退款单号、经办人、原因；当天作废的写明（不算营业额）',
       '',
     ].join('\n'),
   });

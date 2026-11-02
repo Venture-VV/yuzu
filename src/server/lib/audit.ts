@@ -102,7 +102,16 @@ export type AuditAction =
   | 'floorplan_restore'
   | 'floorplan_outline'
   | 'guide_marker_saved'
-  | 'guide_markers_detected';
+  | 'guide_markers_detected'
+  // 收银完善（RQ-006，v0.7.20）：退款单与作废；券模板、发券规则、发券、无记名券、作废券
+  | 'checkout_refund'
+  | 'checkout_refund_void'
+  | 'coupon_template_saved'
+  | 'coupon_rule_saved'
+  | 'coupon_issued'
+  | 'coupon_batch_created'
+  | 'coupon_batch_exported'
+  | 'coupon_voided';
 
 export interface AuditEntry {
   staffId: number | null;

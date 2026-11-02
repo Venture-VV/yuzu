@@ -64,6 +64,7 @@ import { locateGone, locateSessionEnd } from '../locations';
 import { closeUsagesOfVisits, openUsagesOf } from '../usages';
 import { unservedDishesOf } from '../dining';
 import { applyVisitTicket, resolveTicketType } from './tickets';
+import { assertNoRefunds, listRefundsOf } from './refunds';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -525,6 +526,8 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
       SELECT id, checkout_no, client_key, status, created_at FROM checkouts WHERE id = ${checkoutId} FOR UPDATE`;
     if (!c) throw notFound('结账单不存在');
     if (c.status !== 'completed') throw conflict('ALREADY_VOIDED', `结账单 ${c.checkoutNo} 已反结账`);
+    // 退款单（v0.7.20）：有生效的退款单的结账单不能反结账（结账单已锁，开退款单要等这里提交）
+    await assertNoRefunds(tx, c);
     // 选钱箱只用于退现金（PR #17 复测 P2）：原单没收现金时，扫码等原路退回的提醒记到反结账人自己的班次，
     // 与页面一致要求先开班（R1.2），不能借别人的班次绕过；收款明细只追加不修改，在这里核对即可
     if (refundShiftId !== undefined) {
@@ -684,7 +687,7 @@ export async function getCheckout(db: Db, id: number): Promise<CheckoutDetail> {
       SELECT v2.group_id FROM checkout_bills cb JOIN visits v2 ON v2.id = cb.visit_id WHERE cb.checkout_id = ${id} AND v2.group_id IS NOT NULL)
       AND v.id NOT IN (SELECT visit_id FROM checkout_bills WHERE checkout_id = ${id} AND visit_id IS NOT NULL)
     ORDER BY t.code`;
-  return { ...c, backfill: normalizeMark(c.backfill), bills, payments, remainingMates: mates.map((m) => m.code) };
+  return { ...c, backfill: normalizeMark(c.backfill), bills, payments, remainingMates: mates.map((m) => m.code), refunds: await listRefundsOf(db, id) };
 }
 
 export async function listCheckouts(db: Db, date: string): Promise<CheckoutSummary[]> {
@@ -695,7 +698,8 @@ export async function listCheckouts(db: Db, date: string): Promise<CheckoutSumma
            coalesce((SELECT array_agg(dt.name ORDER BY dt.name) FROM checkout_bills cb JOIN table_sessions ts ON ts.id = cb.table_session_id
                      JOIN dining_tables dt ON dt.id = ts.table_id WHERE cb.checkout_id = c.id), '{}') AS table_names,
            (SELECT array_agg(DISTINCT p.method) FROM checkout_payments p WHERE p.checkout_id = c.id) AS methods,
-           (SELECT bf.slip_no FROM backfill_entries bf WHERE bf.op_key = c.client_key ORDER BY bf.id LIMIT 1) AS backfill_slip_no
+           (SELECT bf.slip_no FROM backfill_entries bf WHERE bf.op_key = c.client_key ORDER BY bf.id LIMIT 1) AS backfill_slip_no,
+           (SELECT coalesce(sum(r.amount), 0) FROM refunds r WHERE r.checkout_id = c.id AND r.status = 'completed')::bigint AS refunded_amount
     FROM checkouts c JOIN staff s ON s.id = c.operator_id
     WHERE c.business_date = ${date} OR c.void_business_date = ${date}
     ORDER BY c.id DESC`;

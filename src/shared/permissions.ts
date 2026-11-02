@@ -11,6 +11,7 @@
 // 默认店主与店总（职责不带：增加库存职责仍不会带来全店财务查看权限）。
 // v0.7.17 新增「看实时位置」「上报位置」（第一级实时位置），默认值待确认。
 // v0.7.19 新增「看对客导览」（区域导览图与大屏轮播，没有经营数据），默认所有岗位，待确认。
+// v0.7.20 新增「开退款单」（离店后部分退款）与券的三项权限（维护券模板与规则、发券给会员、作废券），默认值待确认。
 
 export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice'] as const;
 export type Role = (typeof ROLES)[number];
@@ -83,6 +84,15 @@ export const PERMISSIONS = {
   'frontdesk.checkoutVoid': { roles: ['owner', 'store_manager', 'duty_manager'] },
   /** 按纸质应急单上的实际时间补录接待、挂账与结账（R1.9，待确认：默认值班经理及以上；收银员不能，避免把时间往前填少收门票） */
   'frontdesk.backfill': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  /** 开退款单：结账后按项部分退款、作废当班登记错的退款单（v0.7.20，飞书 RQ-006，待确认：默认值班经理及以上；超过撤销时限只有店主） */
+  'frontdesk.refund': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  // ── 券与会员权益（v0.7.20，飞书 RQ-006；docs/COUPONS.md，默认值待确认）──
+  /** 维护券模板、发券规则（开卡礼、升级礼、生日礼、充值赠券），生成与导出无记名纸质券、按批次作废没用的 */
+  'coupon.manage': { roles: ['owner', 'store_manager'] },
+  /** 手动发券给会员 */
+  'coupon.issue': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager'] },
+  /** 作废会员没用过的券（含已过期的） */
+  'coupon.void': { roles: ['owner', 'store_manager'] },
   // ── 库存与采购 ──
   /** 查看库存数量、物料档案与库存单据 */
   'inventory.read': { roles: ['owner'], duties: ['stock', 'purchase', 'payable', 'approve', 'cost'] },
@@ -246,6 +256,10 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'frontdesk.checkout': '结账收款、登记团购券',
   'frontdesk.checkoutVoid': '反结账（撤销结账单）',
   'frontdesk.backfill': '按实际时间补录纸质单',
+  'frontdesk.refund': '开退款单（离店后部分退款）与作废当班的退款单',
+  'coupon.manage': '维护券模板、发券规则与无记名券',
+  'coupon.issue': '发券给会员',
+  'coupon.void': '作废会员没用过的券',
   'inventory.read': '查看库存与物资单据',
   'inventory.operate': '期初、收货、领料、退回、耗用、报损、盘点录入（总仓）',
   'inventory.master': '维护物料、供应商、部门档案',
@@ -297,8 +311,9 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   },
   {
     title: '前台手牌与账单',
-    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen', 'room.operate', 'room.housekeep', 'location.view', 'location.report', 'guide.view'],
+    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.refund', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen', 'room.operate', 'room.housekeep', 'location.view', 'location.report', 'guide.view'],
   },
+  { title: '券与会员权益', items: ['coupon.manage', 'coupon.issue', 'coupon.void'] },
   {
     title: 'ERP（库存、采购、货款、费用、营业数据）',
     items: [

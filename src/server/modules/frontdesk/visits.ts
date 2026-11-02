@@ -59,6 +59,7 @@ import {
 } from './backfill';
 import { locateCheckin, locateGone } from '../locations';
 import { getCheckout } from './checkout';
+import { getRefund } from './refunds';
 import { getStay } from '../rooms';
 import { getTableSession } from '../tables';
 import { closeUsagesOfVisits, getUsage } from '../usages';
@@ -803,6 +804,8 @@ export async function lookupFrontdeskOp(db: Db, key: string, expected?: Frontdes
   if (row.opType === 'usage_open' || row.opType === 'usage_end' || row.opType === 'usage_cancel') {
     return { found: true as const, type: row.opType as 'usage_open' | 'usage_end' | 'usage_cancel', usage: await getUsage(db, row.refId) };
   }
+  // 退款单（v0.7.20）：查回这张退款单
+  if (row.opType === 'checkout_refund') return { found: true as const, type: 'checkout_refund' as const, refund: await getRefund(db, row.refId) };
   const [c] = await db<{ visitId: number }[]>`SELECT visit_id FROM visit_tag_changes WHERE id = ${row.refId}`;
   return { found: true as const, type: 'tag_swap' as const, visit: await getVisit(db, c!.visitId) };
 }

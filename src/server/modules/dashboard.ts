@@ -46,20 +46,29 @@ export async function dashboard(db: Db, today: string, days: number, opts: { inS
            coalesce(sum(cb.ticket_amount) FILTER (WHERE c.business_date = ${today}), 0)
              - coalesce(sum(cb.ticket_amount) FILTER (WHERE c.void_business_date = ${today}), 0) AS ticket
     FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id WHERE c.business_date = ${today} OR c.void_business_date = ${today}`;
+  // 当天的退款单（v0.7.20）按退款方式冲减
   const byMethod = await db<{ method: CheckoutMethod; amount: number }[]>`
-    SELECT p.method,
-           coalesce(sum(p.amount) FILTER (WHERE c.business_date = ${today}), 0) - coalesce(sum(p.amount) FILTER (WHERE c.void_business_date = ${today}), 0) AS amount
-    FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
-    WHERE c.business_date = ${today} OR c.void_business_date = ${today}
-    GROUP BY p.method HAVING coalesce(sum(p.amount) FILTER (WHERE c.business_date = ${today}), 0) - coalesce(sum(p.amount) FILTER (WHERE c.void_business_date = ${today}), 0) <> 0
-    ORDER BY amount DESC`;
+    WITH x AS (
+      SELECT p.method,
+             coalesce(sum(p.amount) FILTER (WHERE c.business_date = ${today}), 0) - coalesce(sum(p.amount) FILTER (WHERE c.void_business_date = ${today}), 0) AS amount
+      FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
+      WHERE c.business_date = ${today} OR c.void_business_date = ${today}
+      GROUP BY p.method
+      UNION ALL
+      SELECT p.method, -sum(p.amount) FROM refund_payments p JOIN refunds r ON r.id = p.refund_id
+      WHERE r.status = 'completed' AND r.business_date = ${today} GROUP BY p.method
+    )
+    SELECT method, sum(amount)::bigint AS amount FROM x GROUP BY method HAVING sum(amount) <> 0 ORDER BY amount DESC`;
   // 优惠 / 免单与营业额同一口径（与日结 businessTotals 一致）：当日结账的加上、当日反结账的减去，
   // 前一营业日带优惠的单今天反结账时冲回优惠，净营业额只减「应收 − 优惠」
-  const [discount] = await db<{ amount: number }[]>`
-    SELECT coalesce(sum(p.amount) FILTER (WHERE c.business_date = ${today}), 0)
-             - coalesce(sum(p.amount) FILTER (WHERE c.void_business_date = ${today}), 0) AS amount
+  const [discount] = await db<{ amount: number; coupon: number; refund: number }[]>`
+    SELECT coalesce(sum(p.amount) FILTER (WHERE p.method = 'discount' AND c.business_date = ${today}), 0)
+             - coalesce(sum(p.amount) FILTER (WHERE p.method = 'discount' AND c.void_business_date = ${today}), 0) AS amount,
+           coalesce(sum(p.amount) FILTER (WHERE p.method = 'store_coupon' AND c.business_date = ${today}), 0)
+             - coalesce(sum(p.amount) FILTER (WHERE p.method = 'store_coupon' AND c.void_business_date = ${today}), 0) AS coupon,
+           (SELECT coalesce(sum(amount), 0) FROM refunds WHERE status = 'completed' AND business_date = ${today}) AS refund
     FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
-    WHERE p.method = 'discount' AND (c.business_date = ${today} OR c.void_business_date = ${today})`;
+    WHERE p.method IN ('discount', 'store_coupon') AND (c.business_date = ${today} OR c.void_business_date = ${today})`;
   const [rc] = await db<{ n: number }[]>`SELECT count(*)::int AS n FROM recharges WHERE business_date = ${today}`;
   const tickets = await db<DashboardData['tickets']>`
     SELECT cb.ticket_name AS name,
@@ -90,6 +99,8 @@ export async function dashboard(db: Db, today: string, days: number, opts: { inS
       ticket: guests!.ticket,
       byMethod,
       discount: discount!.amount,
+      coupon: discount!.coupon,
+      refund: discount!.refund,
       rechargePaid: t.rechargePaid,
       rechargeCount: rc!.n,
     },
