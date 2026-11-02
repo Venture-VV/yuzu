@@ -1,0 +1,29 @@
+{
+  "说明": "演示数据场景块（demo-prepare 的最后一块，v0.7.18 起）的固定预期：新建的演示库执行 demo-prepare 之后，demo-check 逐项核对，tests/demo-prepare.test.ts 与 CI「演示数据」job 也核对。场景块走正式接口、按执行当时的时间写；技师在岗（technicians）与估清（soldOut）按营业日清零，过了准备的那个营业日 demo-check 不再核对这两项。人员位置：客人按手牌上的称呼，技师按工号；空间写编码，区域写区域名。",
+  "guests": ["演示客人丙", "演示客人乙", "演示客人甲"],
+  "rooms": { "W301": "occupied", "W302": "dirty", "W303": "maintenance" },
+  "sessions": [
+    { "guest": "演示客人乙", "techNo": "D01", "status": "serving", "space": "T301" },
+    { "guest": "演示客人丙", "techNo": "D02", "status": "waiting", "space": "T302" },
+    { "guest": "演示客人甲", "techNo": "D03", "status": "done", "space": "T302" }
+  ],
+  "technicians": { "D01": "on", "D02": "on", "D03": "on", "D04": "off" },
+  "kitchen": [
+    { "target": "演示1号桌", "item": "演示果汁", "quantity": 1, "status": "queued" },
+    { "target": "演示1号桌", "item": "演示简餐", "quantity": 2, "status": "served" },
+    { "target": "演示客人丙", "item": "演示果汁", "quantity": 1, "status": "queued" }
+  ],
+  "soldOut": ["演示果汁"],
+  "table": { "name": "演示1号桌", "open": true, "guests": 2 },
+  "floorplan": { "active": true, "outlined": ["T301", "T302", "V312", "W301", "W302", "X201"] },
+  "locations": {
+    "演示客人甲": "W301",
+    "演示客人乙": "T301",
+    "演示客人丙": "V312",
+    "D01": "T301",
+    "D02": "样例接待区",
+    "D03": "样例技师休息区",
+    "D04": "没有位置"
+  },
+  "readers": ["DEMO-R1", "DEMO-R2"]
+}
