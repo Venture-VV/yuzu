@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ActiveFloorplan, FloorplanDetail, FloorplanList } from '../src/shared/floorplans';
 import expected from '../src/server/demo/floorplan-expected.json';
-import { floorplanSampleDxf, floorplanSampleFloorSwapDxf } from '../src/server/demo/floorplan-sample';
+import { floorplanSampleDxf, floorplanSampleFloorSwapDxf, floorplanSamplePdf } from '../src/server/demo/floorplan-sample';
 import { floorplanChecks } from '../src/server/modules/floorplans';
 import { createStaff } from '../src/server/modules/staff';
 import { buildApp } from '../src/server/app';
@@ -56,6 +56,14 @@ describe('上传与转换', () => {
     const bad = await upload('楼层,编码\nL3,S301', 'a.csv');
     expect(bad.status).toBe(422);
     expect(bad.body.error.code).toBe('FLOORPLAN_FORMAT');
+    // 转换程序能读矢量 PDF，但后台上传还没开放：照旧拒绝
+    const pdf = await api(ctx.app, ctx.owner, 'POST', '/api/admin/floorplans', {
+      fileName: 'sample.pdf',
+      contentBase64: Buffer.from(floorplanSamplePdf()).toString('base64'),
+      note: '',
+    });
+    expect(pdf.status).toBe(422);
+    expect(pdf.body.error).toMatchObject({ code: 'FLOORPLAN_FORMAT', message: expect.stringContaining('PDF') });
     expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/floorplans', { fileName: 'a.dwg', contentBase64: '' })).status).toBe(400);
     expect(((await api(ctx.app, ctx.owner, 'GET', '/api/admin/floorplans')).body as FloorplanList).batches).toEqual([]);
   });
