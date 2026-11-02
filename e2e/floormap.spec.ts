@@ -2,6 +2,7 @@
 //   ① 门店电脑（写数据，只跑一次）：样例空间台账（docs/data 的合成样例）+ 样例底图启用 + W301 挂客房房间 →
 //      钟房派钟选房间 T301 → 「客房 → 平面图」：各空间的状态色与图例、技师房的钟、业态筛选、搜索定位、缩放 →
 //      点 W301 开房 → 在住 → 查房 → 退房 → 待打扫 → 打扫好了 → 空闲；钟房换房间到 T302，平面图跟着变。
+//      v0.7.19：派对房 X201 开单即占用——开单（这位客人的手牌）→ 使用中 → 结束使用 → 空闲；再开一次撤单（写原因）。
 //      结束时收掉这次的钟单与客人、W301 取消挂接、停用 W301 / W302（台账里没有在用的「客房」时新建房间不要求选空间）、关闭客房与技师功能。
 //   ② 各尺寸（只读，接口用合成数据代替）：单层 300 个空间 2 秒内画完；滚轮、按钮缩放，拖动平移；点房间出侧栏；不出现横向滚动。
 // 依赖演示数据（仅独立演示库）；账号：店主 linlan、前台 xiaozhou，密码 yuzu2026。全部是合成数据。
@@ -88,6 +89,8 @@ async function prepare(page: Page) {
   }
   ledger = await getJson<SpaceLedger>(page, '/api/admin/spaces');
   const w301 = ledger.spaces.find((x) => x.code === 'W301')!;
+  // 上次中断留下的 X201 使用单（v0.7.19）：结束掉
+  await endUsages(page);
 
   // 样例底图：在用的那一批没有样例编码时上传第一版（带时间戳，摘要不同）、转换完启用
   const active = await getJson<ActiveFloorplan>(page, '/api/floorplans/active');
@@ -139,6 +142,15 @@ async function prepare(page: Page) {
   return { roomId: room.id };
 }
 
+/** 结束 X201 开着的使用单（v0.7.19，上次中断留下的） */
+async function endUsages(page: Page) {
+  const fm = await page.request.get('/api/floormap');
+  if (!fm.ok()) return;
+  const data = (await fm.json()) as FloorMapData;
+  const x201 = data.spaces.find((s) => s.code === 'X201');
+  for (const u of data.usages.filter((x) => x.spaceId === x201?.id)) await send(page, 'post', `/api/usages/${u.id}/end`, { clientKey: randomUUID() });
+}
+
 /** 收掉一张入住单（店主）：作废房费、退押金后撤销入住 */
 async function clearStay(page: Page, stayId: number, reason: string) {
   const s = await getJson<StayDetail>(page, `/api/rooms/stays/${stayId}`);
@@ -157,8 +169,9 @@ async function clearVisit(page: Page, visitId: number, reason: string) {
   await send(page, 'post', `/api/frontdesk/visits/${visitId}/cancel`, { reason });
 }
 
-/** 收尾（店主）：E7 下牌（不留在轮钟队列里）；W301 的房间取消挂接、停用；W301、W302 停用；关闭客房与技师功能 */
+/** 收尾（店主）：E7 下牌（不留在轮钟队列里）；X201 的使用单结束；W301 的房间取消挂接、停用；W301、W302 停用；关闭客房与技师功能 */
 async function cleanup(page: Page) {
+  await endUsages(page);
   const board = await page.request.get('/api/clockroom');
   const e7 = board.ok() ? ((await board.json()) as ClockroomBoard).technicians.find((t) => t.techNo === TECH.techNo) : undefined;
   if (e7 && e7.state !== 'off') await send(page, 'post', `/api/clockroom/technicians/${e7.id}/state`, { action: 'sign_out' });
@@ -237,7 +250,7 @@ test.describe('v0.7.16 房态图', () => {
       await expect(space(page, 'W302')).toHaveAttribute('data-state', 'unlinked');
       await expect(space(page, 'T303')).toHaveAttribute('data-state', 'missing');
       const legend = page.getByTestId('floormap-legend');
-      for (const label of ['空闲', '在住', '待上钟', '服务中', '待打扫', '维修', '未挂接', '其他业态', '停用 / 不可售', '台账里没有']) await expect(legend).toContainText(label);
+      for (const label of ['空闲', '在住', '使用中', '待上钟', '服务中', '待打扫', '维修', '未挂接', '其他业态', '停用 / 不可售', '台账里没有']) await expect(legend).toContainText(label);
       await expect(page.getByTestId('floormap-legend-serving')).toContainText('1');
       // 台账里有、图上没有：U310
       await expect(page.getByTestId('floormap-off-drawing')).toContainText('U310');
@@ -277,7 +290,40 @@ test.describe('v0.7.16 房态图', () => {
       await expect(space(page, 'X201')).toHaveAttribute('data-state', 'vacant');
       await space(page, 'X201').click();
       await expect(panel).toContainText('派对房');
-      await expect(panel.getByTestId('floormap-usage-open')).toBeVisible();
+      // 开单：这位在店客人的手牌、5 人、备注 → 使用中（侧栏写手牌、人数，能去前台挂账）→ 结束使用 → 空闲
+      const openUsage = async () => {
+        await panel.getByTestId('floormap-usage-open').click();
+        const dlg = page.getByRole('dialog').filter({ hasText: /开单 · X201/ });
+        await dlg.getByTestId('usage-open-tag').fill(tag);
+        await dlg.getByTestId('usage-open-guests').fill('5');
+        await dlg.getByTestId('usage-open-note').fill('E2E 生日会');
+        await dlg.getByTestId('usage-open-submit').click();
+        await expect(dlg).toBeHidden();
+        await expect(space(page, 'X201')).toHaveAttribute('data-state', 'in_use');
+      };
+      await openUsage();
+      await expect(page.getByText('X201 已开单，使用中')).toBeVisible();
+      await expect(panel).toHaveAttribute('data-state', 'in_use');
+      await expect(panel.getByTestId('floormap-usage-info')).toContainText(tag);
+      await expect(panel.getByTestId('floormap-usage-info')).toContainText('5 人');
+      await expect(panel.getByTestId('floormap-usage-post')).toBeVisible();
+      await expect(page.getByTestId('floormap-legend-in_use')).toContainText('1');
+      // 同一间房再开：侧栏只有结束、撤单（没有开单按钮）
+      await expect(panel.getByTestId('floormap-usage-open')).toHaveCount(0);
+      await panel.getByTestId('floormap-usage-end').click();
+      const endDlg = page.getByRole('dialog').filter({ hasText: /结束使用 · X201/ });
+      await endDlg.getByTestId('usage-close-submit').click();
+      await expect(endDlg).toBeHidden();
+      await expect(space(page, 'X201')).toHaveAttribute('data-state', 'vacant');
+      // 再开一次，开错了撤单：原因至少 2 个字
+      await openUsage();
+      await panel.getByTestId('floormap-usage-cancel').click();
+      const cancelDlg = page.getByRole('dialog').filter({ hasText: /撤单 · X201/ });
+      await expect(cancelDlg.getByTestId('usage-close-submit')).toBeDisabled();
+      await cancelDlg.getByTestId('usage-close-reason').fill('E2E 开错了');
+      await cancelDlg.getByTestId('usage-close-submit').click();
+      await expect(cancelDlg).toBeHidden();
+      await expect(space(page, 'X201')).toHaveAttribute('data-state', 'vacant');
       await map.getByRole('radiogroup', { name: '楼层' }).getByRole('radio', { name: 'L3 三层平面图' }).click();
 
       // ⑤ 客房 W301：开房（原来的入住对话框）→ 在住 → 查房 → 退房 → 待打扫 → 打扫好了 → 空闲

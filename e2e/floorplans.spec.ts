@@ -1,5 +1,7 @@
 // v0.7.15 底图转换浏览器验收（飞书需求 RQ-004 第二段）：后台「空间台账 → 底图」上传合成样例图纸 → 转换完成后看每层底图与房间轮廓、
 // 例外清单、与台账的比对 → 启用 → 上传第二版 → 与在用那一批比对出编码变更、房间减少 → 同一份图纸重传回到原来那一批。
+// v0.7.19 图纸治理：入库登记（来源必选、版本或说明）→ 启用第二版写换下原因 → 档案里打开已换下的第一版（只读）→ 写原因换回 →
+// 在用历史；例外 W306 在底图上点出轮廓补画、作废补画。
 // 图纸是合成样例（src/server/demo/floorplan-sample.ts），每次在开头加一行带时间戳的注释，文件摘要不同、可重复执行。
 // 依赖演示数据（仅独立演示库），账号店主 linlan，密码 yuzu2026。
 import { expect, test, type Page } from '@playwright/test';
@@ -102,5 +104,55 @@ test.describe('底图转换（v0.7.15）', () => {
 
     // 批次列表：第一版在用、第二版待启用
     await expect(page.getByTestId(`floorplan-batch-${v1}`)).toContainText('在用');
+
+    // ── v0.7.19 图纸治理 ──
+    const v2 = Number((await page.getByTestId('floorplan-detail-title').textContent())!.match(/#(\d+)/)![1]);
+    expect(v2).not.toBe(v1);
+    // 启用第二版，写第一版换下的原因
+    await page.getByTestId('floorplan-activate').click();
+    await page.getByTestId('floorplan-switch-reason').fill(`E2E 第二版 ${stamp}`);
+    await page.getByTestId('floorplan-activate-confirm').click();
+    await expect(page.getByText(`批次 #${v2} 已启用`)).toBeVisible();
+    // 档案：第一版已换下，照样能打开（只读），写着入库登记与换下的原因；换回要写原因
+    await page.getByTestId(`floorplan-batch-${v1}`).click();
+    await expect(detail).toContainText('已换下的批次只读');
+    await expect(detail).toContainText(`E2E 第二版 ${stamp}`);
+    await expect(page.getByTestId('floorplan-registration')).toContainText('设计方');
+    await expect(page.getByTestId('floorplan-registration')).toContainText(`E2E 第一版 ${stamp}`);
+    await expect(page.getByTestId('floorplan-exceptions')).toContainText('例外 3 个');
+    await expect(page.getByTestId('floorplan-draw-W306')).toHaveCount(0);
+    await page.getByTestId('floorplan-restore').click();
+    await expect(page.getByTestId('floorplan-activate-confirm')).toBeDisabled();
+    await page.getByTestId('floorplan-switch-reason').fill('E2E 第二版有误，换回第一版');
+    await page.getByTestId('floorplan-activate-confirm').click();
+    await expect(page.getByText(`批次 #${v1} 已换回`)).toBeVisible();
+    await expect(detail.getByText('在用', { exact: true })).toBeVisible();
+    const history = page.getByTestId('floorplan-history');
+    await expect(history).toContainText('换回');
+    await expect(history).toContainText('E2E 第二版有误，换回第一版');
+    await expect(page.getByTestId('floorplan-batch-history')).toContainText('换回');
+
+    // 例外 W306（连到走廊）补画轮廓：在底图上围着它点四个点 → 保存 → 已补画（虚线轮廓）→ 作废补画
+    await page.getByTestId('floorplan-draw-W306').click();
+    await expect(page.getByTestId('floorplan-outline-editor')).toContainText('补画 W306');
+    // 例外清单在底图下面：先把 W306 滚到看得见的地方再点
+    await page.getByTestId('floorplan-room-W306').scrollIntoViewIfNeeded();
+    const label = (await page.getByTestId('floorplan-room-W306').boundingBox())!;
+    const [cx, cy] = [label.x + label.width / 2, label.y + label.height / 2];
+    const corners: [number, number][] = [
+      [-30, -20],
+      [30, -20],
+      [30, 20],
+      [-30, 20],
+    ];
+    for (const [dx, dy] of corners) await page.mouse.click(cx + dx, cy + dy);
+    await expect(page.getByTestId('floorplan-outline-editor')).toContainText('已点 4 个');
+    await page.getByTestId('floorplan-outline-save').click();
+    await expect(page.getByText('W306 已补画轮廓')).toBeVisible();
+    await expect(page.getByTestId('floorplan-exception-W306')).toContainText('已补画');
+    await expect(page.getByTestId('floorplan-room-W306')).toHaveAttribute('data-drawn', 'true');
+    await page.getByTestId('floorplan-undraw-W306').click();
+    await expect(page.getByText('W306 的补画已作废')).toBeVisible();
+    await expect(page.getByTestId('floorplan-exception-W306')).not.toContainText('已补画');
   });
 });

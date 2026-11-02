@@ -15,6 +15,11 @@ export interface StoreNavItem {
   end?: boolean;
   /** 额外条件，例如「钟房」只在技师功能开启后显示、「餐饮」「客房」只在对应功能开启后显示 */
   when?: (session: ReturnType<typeof useSession>) => boolean;
+  /**
+   * 对客页面（导览）：不算门店的工作页面。ERP 顶栏的「返回门店」不按它显示——所有岗位都能看导览，
+   * 只用 ERP 的后勤照旧没有「返回门店」（v0.7.3 验收 E2）
+   */
+  guestFacing?: boolean;
 }
 
 // 前台与会员储值、管理后台是独立的业务组，导航中用分隔线区分
@@ -30,7 +35,7 @@ const STORE_NAV: StoreNavItem[][] = [
     { to: '/shift', label: '交班', icon: ClipboardCheck, perm: 'ledger.readToday' },
     { to: '/dashboard', label: '看板', icon: LayoutDashboard, perm: ['ledger.readToday', 'report.executive', 'report.members', 'report.technicians'] },
     // 对客导览（v0.7.19）：所有岗位默认能看（区域导览图、大屏轮播）
-    { to: '/guide', label: '导览', icon: MapPinned, perm: 'guide.view' },
+    { to: '/guide', label: '导览', icon: MapPinned, perm: 'guide.view', guestFacing: true },
   ],
   // 管理后台是单独的一套页面（规则、价目、手牌池、员工与权限）
   [{ to: '/admin', label: '后台', icon: Settings2, perm: [...ADMIN_PERMISSIONS] }],

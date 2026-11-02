@@ -29,8 +29,8 @@ export default defineConfig({
     { name: '平板横屏', use: { ...devices['Desktop Chrome'], viewport: { width: 1024, height: 768 }, hasTouch: true } },
     { name: '平板竖屏', use: { ...devices['Desktop Chrome'], viewport: { width: 820, height: 1180 }, hasTouch: true } },
     // 小屏电脑与手机只跑只读的视口冒烟（会改数据的流程按宽度 ≥ 1280 判断，不在这两个尺寸重复执行）；
-    // 房态图（v0.7.16）的各尺寸用例用合成数据代替接口、只读，也在这两个尺寸跑（写数据的那一条只在门店电脑跑）
-    { name: '小屏电脑', testMatch: ['viewports.spec.ts', 'floormap.spec.ts', 'locations.spec.ts'], use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 720 } } },
-    { name: '手机', testMatch: ['viewports.spec.ts', 'floormap.spec.ts', 'locations.spec.ts'], use: { ...devices['Pixel 5'] } },
+    // 房态图（v0.7.16）、对客导览（v0.7.19）的各尺寸用例用合成数据代替接口、只读，也在这两个尺寸跑（写数据的那一条只在门店电脑跑）
+    { name: '小屏电脑', testMatch: ['viewports.spec.ts', 'floormap.spec.ts', 'locations.spec.ts', 'guide.spec.ts'], use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 720 } } },
+    { name: '手机', testMatch: ['viewports.spec.ts', 'floormap.spec.ts', 'locations.spec.ts', 'guide.spec.ts'], use: { ...devices['Pixel 5'] } },
   ],
 });
