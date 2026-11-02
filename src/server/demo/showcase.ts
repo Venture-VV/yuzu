@@ -582,7 +582,8 @@ export async function showcaseState(sql: Sql, timeZone: string): Promise<Showcas
   const guests = (await sql<{ label: string }[]>`SELECT guest_label AS label FROM visits WHERE status = 'open' AND guest_label IN ${sql(labels)}`)
     .map((g) => g.label)
     .sort(cmp);
-  const rooms: Record<string, string> = {};
+  // 按固定顺序列（数据库读出来的顺序不固定）
+  const rooms: Record<string, string> = Object.fromEntries(ROOM_CODES.map((c) => [c, '没有这间房']));
   for (const r of await sql<{ code: string; housekeeping: string; occupied: boolean }[]>`
     SELECT sp.code, r.housekeeping, EXISTS (SELECT 1 FROM room_stays s WHERE s.room_id = r.id AND s.status = 'open') AS occupied
     FROM rooms r JOIN spaces sp ON sp.id = r.space_id WHERE sp.code IN ${sql(ROOM_CODES)}`) {

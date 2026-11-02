@@ -2,8 +2,14 @@ import { defineConfig, devices } from '@playwright/test';
 
 // 浏览器端验收：先启动应用并写入演示数据（npm run seed），再执行 npm run e2e。
 // E2E_BASE_URL 可指向已部署的环境；PW_CHROMIUM_PATH 可指定本机已有的 Chromium。
+// 演示数据场景块的核对（v0.7.18）只在 demo-prepare 准备好的演示库上跑：设了 E2E_DEMO_SHOWCASE 才收这个文件（CI「演示数据」job），
+// 平时的浏览器验收（只灌五块演示数据）不收，用例总数也不算它
+const DEMO_SHOWCASE = 'demo-showcase.spec.ts';
+const testIgnore = process.env.E2E_DEMO_SHOWCASE ? [] : [`**/${DEMO_SHOWCASE}`];
+
 export default defineConfig({
   testDir: 'e2e',
+  testIgnore,
   timeout: 60_000,
   // 与后端测试同时运行或机器较慢时，登录与提交结果可能超过默认 5 秒
   expect: { timeout: 10_000 },
