@@ -13,6 +13,7 @@ export function ReasonDialog({
   danger,
   busy,
   extra,
+  testId,
   onClose,
   onConfirm,
 }: {
@@ -24,6 +25,8 @@ export function ReasonDialog({
   danger?: boolean;
   busy?: boolean;
   extra?: ReactNode;
+  /** 浏览器用例用：原因输入框为 `${testId}-reason`，确认按钮为 `${testId}-confirm` */
+  testId?: string;
   onClose: () => void;
   onConfirm: (reason: string) => void;
 }) {
@@ -41,14 +44,14 @@ export function ReasonDialog({
           <Button variant="ghost" onClick={onClose}>
             取消
           </Button>
-          <Button variant={danger ? 'danger' : 'primary'} disabled={!ok} loading={busy} onClick={() => onConfirm(reason.trim())}>
+          <Button variant={danger ? 'danger' : 'primary'} disabled={!ok} loading={busy} onClick={() => onConfirm(reason.trim())} data-testid={testId ? `${testId}-confirm` : undefined}>
             {confirmLabel}
           </Button>
         </>
       }
     >
       <Field label={label} htmlFor="reason-text" hint="至少 2 个字，会记在经办记录里">
-        <Textarea id="reason-text" data-autofocus value={reason} onChange={(e) => setReason(e.target.value)} maxLength={200} />
+        <Textarea id="reason-text" data-autofocus value={reason} onChange={(e) => setReason(e.target.value)} maxLength={200} data-testid={testId ? `${testId}-reason` : undefined} />
       </Field>
       {extra}
     </Dialog>

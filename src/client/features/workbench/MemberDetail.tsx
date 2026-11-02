@@ -11,7 +11,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
 import { Badge, Button, Card, IconButton, SectionTitle, Skeleton } from '../../components/ui';
 import { ActivityRow } from './ActivityList';
-import { BonusLotsCard, MemberLevelCard } from './MemberExtras';
+import { BonusLotsCard, MemberCouponsCard, MemberLevelCard } from './MemberExtras';
 
 export function MemberDetail({
   member,
@@ -206,6 +206,9 @@ export function MemberDetail({
           <BonusLotsCard member={member} />
         </div>
       </div>
+
+      {/* 账户内券（v0.7.20）：换会员时整块重来（筛选、发券的操作编号都不带到下一位会员） */}
+      {can('member.read') && <MemberCouponsCard key={member.id} member={member} />}
 
       {/* 余额记录 */}
       <Card className="p-2">
