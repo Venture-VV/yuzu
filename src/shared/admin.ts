@@ -5,7 +5,7 @@ import type { EditableRole, Permission, Role, RoleOverrides } from './permission
 
 /** 后台分区：路径、名称、所需权限（有其一即可） */
 export const ADMIN_SECTIONS = {
-  home: { path: '/admin', label: '后台首页', perms: ['settings.manage', 'catalog.manage', 'staff.manage', 'audit.read', 'wallet.opening', 'frontdesk.tags', 'technician.manage'] },
+  home: { path: '/admin', label: '后台首页', perms: ['settings.manage', 'catalog.manage', 'staff.manage', 'audit.read', 'wallet.opening', 'frontdesk.tags', 'technician.manage', 'coupon.manage'] },
   settings: { path: '/admin/settings', label: '规则总表', perms: ['settings.manage', 'audit.read'] },
   rules: { path: '/admin/rules', label: '经营规则', perms: ['settings.manage'] },
   members: { path: '/admin/members', label: '会员与渠道', perms: ['settings.manage'] },

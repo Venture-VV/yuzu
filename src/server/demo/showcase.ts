@@ -512,7 +512,7 @@ export async function seedShowcaseDemo(sql: Sql, config: AppConfig): Promise<Sho
       if (!(await find())[0]) {
         const { exchangeItem, ...body } = t as typeof t & { exchangeItem?: string };
         const exchangeItemId = exchangeItem ? Number((await itemQuery(exchangeItem))[0]!.id) : null;
-        await owner('POST', '/api/coupons/templates', { ...body, exchangeItemId, note: NOTE });
+        await owner('POST', '/api/coupons/templates', { ...body, exchangeItemId, note: NOTE, clientKey: randomUUID() });
         done.push(`券模板「${t.name}」`);
       }
       templateIds[t.name] = await idOf(sql, find());

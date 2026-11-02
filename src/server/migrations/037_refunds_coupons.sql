@@ -107,6 +107,8 @@ CREATE TABLE coupon_templates (
   created_by              bigint NOT NULL REFERENCES staff (id),
   created_at              timestamptz NOT NULL DEFAULT now(),
   updated_at              timestamptz NOT NULL DEFAULT now(),
+  -- 新建时页面的操作编号（没收到结果再提交返回原来那个，不会多建一个）
+  client_key              uuid UNIQUE,
   CHECK ((kind = 'cash') = (face_value IS NOT NULL)),
   CHECK ((kind = 'discount') = (rate_percent IS NOT NULL)),
   CHECK (kind <> 'cash' OR max_off IS NULL),
@@ -126,7 +128,7 @@ BEGIN
   IF TG_OP = 'DELETE' THEN
     RAISE EXCEPTION '券模板不能删除，请停用' USING ERRCODE = 'P0001';
   END IF;
-  IF (NEW.id, NEW.created_by, NEW.created_at) IS DISTINCT FROM (OLD.id, OLD.created_by, OLD.created_at) THEN
+  IF (NEW.id, NEW.created_by, NEW.created_at, NEW.client_key) IS DISTINCT FROM (OLD.id, OLD.created_by, OLD.created_at, OLD.client_key) THEN
     RAISE EXCEPTION '券模板的建档信息不能改' USING ERRCODE = 'P0001';
   END IF;
   IF (NEW.kind, NEW.face_value, NEW.rate_percent, NEW.max_off, NEW.threshold, NEW.scope, NEW.scope_categories, NEW.scope_items,
@@ -154,6 +156,8 @@ CREATE TABLE coupon_rules (
   created_at     timestamptz NOT NULL DEFAULT now(),
   deactivated_by bigint REFERENCES staff (id),
   deactivated_at timestamptz,
+  -- 新建时页面的操作编号（没收到结果再提交返回原来那条：重复的规则会重复发券）
+  client_key     uuid UNIQUE,
   CHECK ((kind IN ('level_up', 'birthday')) = (level IS NOT NULL)),
   CHECK ((kind = 'recharge') = (plan_id IS NOT NULL)),
   CHECK (active = (deactivated_at IS NULL)),
@@ -167,8 +171,8 @@ BEGIN
     RAISE EXCEPTION '发券规则不能删除，请停用' USING ERRCODE = 'P0001';
   END IF;
   IF NOT OLD.active OR NEW.active
-     OR (NEW.kind, NEW.level, NEW.plan_id, NEW.template_id, NEW.quantity, NEW.created_by, NEW.created_at)
-        IS DISTINCT FROM (OLD.kind, OLD.level, OLD.plan_id, OLD.template_id, OLD.quantity, OLD.created_by, OLD.created_at) THEN
+     OR (NEW.kind, NEW.level, NEW.plan_id, NEW.template_id, NEW.quantity, NEW.created_by, NEW.created_at, NEW.client_key)
+        IS DISTINCT FROM (OLD.kind, OLD.level, OLD.plan_id, OLD.template_id, OLD.quantity, OLD.created_by, OLD.created_at, OLD.client_key) THEN
     RAISE EXCEPTION '发券规则不能改，只能停用后另加' USING ERRCODE = 'P0001';
   END IF;
   RETURN NEW;

@@ -173,6 +173,7 @@ test.describe('收银完善（v0.7.20）', () => {
     // ① 店主建模板、发券
     await login(page, 'linlan');
     const template = await postJson<{ id: number }>(page, '/api/coupons/templates', {
+      clientKey: randomUUID(),
       name: `E2E 满100减20 ${Date.now() % 10000}`,
       kind: 'cash',
       faceValue: 2000,

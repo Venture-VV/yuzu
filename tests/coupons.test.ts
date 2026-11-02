@@ -29,7 +29,7 @@ const checks = async () => {
   for (const c of st.checks as { ok: boolean; label: string; detail: string }[]) expect(c.ok, `${c.label}：${c.detail}`).toBe(true);
 };
 const template = async (body: Record<string, unknown>) => {
-  const r = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', { validity: 'days', validDays: 30, ...body });
+  const r = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', { clientKey: randomUUID(), validity: 'days', validDays: 30, ...body });
   expect(r.status, JSON.stringify(r.body)).toBe(200);
   return r.body as CouponTemplate;
 };
@@ -37,7 +37,7 @@ const issue = (memberId: number, templateId: number, quantity = 1, cookie = am, 
   api(ctx.app, cookie, 'POST', `/api/members/${memberId}/coupons`, { clientKey, templateId, quantity, reason: '老客人回馈' });
 const couponsOf = async (memberId: number) => (await api(ctx.app, ctx.owner, 'GET', `/api/members/${memberId}/coupons`)).body as MemberCoupons;
 const rule = async (body: Record<string, unknown>) => {
-  const r = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/rules', { quantity: 1, ...body });
+  const r = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/rules', { clientKey: randomUUID(), quantity: 1, ...body });
   expect(r.status, JSON.stringify(r.body)).toBe(200);
 };
 /** 接待一位客人（可带会员）、挂项目，返回来访 id 与结账前核对 */
@@ -99,11 +99,19 @@ describe('券模板', () => {
     tpl.anon = await template({ name: '无记名二十元', kind: 'cash', faceValue: 2000, validity: 'fixed', validFrom: today, validTo: '2099-12-31' });
     tpl.vip = await template({ name: '金卡专享', kind: 'cash', faceValue: 5000, levels: [3] });
 
-    const bad = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', { name: '缺面额', kind: 'cash', validity: 'days', validDays: 7 });
+    const bad = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', { clientKey: randomUUID(), name: '缺面额', kind: 'cash', validity: 'days', validDays: 7 });
     expect(bad.status).toBe(400);
-    const bad2 = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', { name: '日期反了', kind: 'cash', faceValue: 100, validity: 'fixed', validFrom: '2026-12-31', validTo: '2026-01-01' });
+    const bad2 = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', {
+      clientKey: randomUUID(),
+      name: '日期反了',
+      kind: 'cash',
+      faceValue: 100,
+      validity: 'fixed',
+      validFrom: '2026-12-31',
+      validTo: '2026-01-01',
+    });
     expect(bad2.status).toBe(400);
-    expect((await api(ctx.app, am, 'POST', '/api/coupons/templates', { name: 'x', kind: 'cash', faceValue: 100, validity: 'days', validDays: 1 })).status).toBe(403);
+    expect((await api(ctx.app, am, 'POST', '/api/coupons/templates', { clientKey: randomUUID(), name: 'x', kind: 'cash', faceValue: 100, validity: 'days', validDays: 1 })).status).toBe(403);
     // 发券的岗位能看到模板（选券），不能改
     expect((await api(ctx.app, am, 'GET', '/api/coupons/templates')).status).toBe(200);
     expect((await api(ctx.app, ctx.clerk, 'GET', '/api/coupons/templates')).status).toBe(403);
@@ -120,6 +128,35 @@ describe('券模板', () => {
     expect(renamed.status, JSON.stringify(renamed.body)).toBe(200);
     expect((await api(ctx.app, ctx.owner, 'PUT', `/api/coupons/templates/${t.id}`, { ...base, name: '又改' })).body.error.code).toBe('TEMPLATE_STALE');
     tpl.discount = renamed.body;
+  });
+
+  it('新建模板与发券规则带操作编号：没收到结果再提交返回原来那个、不多建；同一编号换了内容拒绝', async () => {
+    const before = ((await api(ctx.app, ctx.owner, 'GET', '/api/coupons/templates')).body as CouponTemplate[]).length;
+    const key = randomUUID();
+    const body = { clientKey: key, name: '重提测试', kind: 'cash', faceValue: 500, validity: 'days', validDays: 7 };
+    const [a, b] = await Promise.all([api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', body), api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', body)]);
+    expect([a.status, b.status], JSON.stringify([a.body, b.body])).toEqual([200, 200]);
+    expect(b.body.id).toBe(a.body.id);
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', body)).body.id).toBe(a.body.id);
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', { ...body, kind: 'discount', faceValue: null, ratePercent: 90 })).body.error.code).toBe(
+      'IDEMPOTENCY_CONFLICT',
+    );
+    expect(((await api(ctx.app, ctx.owner, 'GET', '/api/coupons/templates')).body as CouponTemplate[]).length).toBe(before + 1);
+    // 没带操作编号：拒绝
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', { ...body, clientKey: undefined })).status).toBe(400);
+
+    const rules = async () => ((await api(ctx.app, ctx.owner, 'GET', '/api/coupons/rules')).body as { id: number }[]).length;
+    const n = await rules();
+    const ruleBody = { clientKey: randomUUID(), kind: 'open_card', templateId: a.body.id, quantity: 1 };
+    const [r1, r2] = await Promise.all([api(ctx.app, ctx.owner, 'POST', '/api/coupons/rules', ruleBody), api(ctx.app, ctx.owner, 'POST', '/api/coupons/rules', ruleBody)]);
+    expect([r1.status, r2.status], JSON.stringify([r1.body, r2.body])).toEqual([200, 200]);
+    expect(await rules()).toBe(n + 1);
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/coupons/rules', { ...ruleBody, quantity: 2 })).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+    // 收尾：停用这条开卡礼（后面的用例按自己的规则核对开卡礼）
+    const added = ((await api(ctx.app, ctx.owner, 'GET', '/api/coupons/rules')).body as { id: number; templateId: number; active: boolean }[]).find(
+      (r) => r.templateId === a.body.id && r.active,
+    )!;
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/coupons/rules/${added.id}/deactivate`, {})).status).toBe(200);
   });
 });
 
@@ -171,6 +208,17 @@ describe('发券', () => {
     const m2 = await createMember(ctx, '跨两级', '19900008005');
     expect((await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m2.id, 500000, 0))).status).toBe(200);
     expect((await couponsOf(m2.id)).coupons.filter((c) => c.issueKind === 'level_up')).toHaveLength(2);
+
+    // 充值页的「另赠」：列出套餐挂的券与限定的等级；固定有效期已过的模板入账时不会发，也不列
+    const expired = await template({ name: '过期赠券', kind: 'cash', faceValue: 300, validity: 'fixed', validFrom: '2026-01-01', validTo: '2026-01-31' });
+    await ctx.sql`UPDATE coupon_templates SET valid_from = '2025-01-01', valid_to = '2025-01-31' WHERE id = ${expired.id}`;
+    await rule({ kind: 'recharge', planId: p!.id, templateId: expired.id });
+    await rule({ kind: 'recharge', planId: p!.id, templateId: tpl.vip!.id });
+    const gifts = (await api(ctx.app, ctx.clerk, 'GET', '/api/coupons/plan-gifts')).body as { planId: number; templateId: number; quantity: number; levels: number[] }[];
+    expect(gifts.filter((g) => g.planId === p!.id).map((g) => [g.templateId, g.quantity, g.levels])).toEqual([
+      [tpl.cash!.id, 2, []],
+      [tpl.vip!.id, 1, [3]],
+    ]);
   });
 
   it('生日礼：生日当月发，每年每条规则一次；没填生日、不是这个月的不发', async () => {

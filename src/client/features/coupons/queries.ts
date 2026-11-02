@@ -17,13 +17,18 @@ export const couponKeys = {
   member: (memberId: number) => ['member', memberId, 'coupons'] as const,
 };
 
-/** 充值套餐挂的券（只列启用的规则与启用的模板） */
+/** 充值套餐挂的券（只列启用的规则与启用的模板，固定有效期已过的不列） */
 export interface PlanGift {
   planId: number;
   templateId: number;
   templateName: string;
   quantity: number;
+  /** 模板限定的会员等级（空 = 不限）：入账时按充值后的等级发 */
+  levels: number[];
 }
+
+/** 「演示券 × 1（限第 2、3 级会员）」 */
+export const planGiftText = (g: PlanGift) => `${g.templateName} × ${g.quantity}${g.levels.length ? `（限第 ${g.levels.join('、')} 级会员）` : ''}`;
 
 /** 券模板：维护（coupon.manage）或发券（coupon.issue）的岗位能看 */
 export const useCouponTemplates = (enabled = true) =>

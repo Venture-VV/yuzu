@@ -5,7 +5,7 @@
 //     改模板加排他锁，两边不会交错（改模板时看得到刚发的券）；
 //   · 有效期按营业日算好写在券上：固定起止日期，或发券当天起 N 天；模板的固定有效期已过不能再发；
 //   · 自动发券按「规则 + 会员 + 年份 / 充值单」去重（coupon_issues.dedupe_key 唯一），几个进程同时跑也只发一次；
-//   · 手动发、批次带页面的操作编号（client_key 唯一），重复提交返回原记录；
+//   · 手动发、批次、新建模板与发券规则带页面的操作编号（client_key 唯一），重复提交返回原记录；
 //   · 券的状态是变动记录（coupon_events，只追加）的结果；过期不改数据，按有效期算。
 // 加锁顺序：会员（充值事务里已锁）→ 模板（共享）；结账用券在会员、赠金批次之后锁券一行；作废只锁券（id 升序）。
 
@@ -179,21 +179,42 @@ export async function getTemplate(db: Db, id: number): Promise<CouponTemplate> {
   return toTemplate(r);
 }
 
+const CreateKey = z.object({ clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试') });
+
 export async function createTemplate(deps: Deps, raw: unknown, ctx: OpContext): Promise<CouponTemplate> {
+  const { clientKey } = parse(CreateKey, raw);
   const t = normalizeTerms(parse(TemplateInput, raw));
-  const id = await deps.sql.begin(async (tx) => {
-    await assertRefs(tx, t);
-    const [row] = await tx<{ id: number }[]>`
-      INSERT INTO coupon_templates (name, kind, face_value, rate_percent, max_off, threshold, scope, scope_categories, scope_items,
-                                    exchange_item_id, exchange_ticket_type_id, validity, valid_from, valid_to, valid_days, levels, note, active, created_by)
-      VALUES (${t.name}, ${t.kind}, ${t.faceValue}, ${t.ratePercent}, ${t.maxOff}, ${t.threshold}, ${t.scope}, ${t.scopeCategories}::text[],
-              ${t.scopeItems}::bigint[], ${t.exchangeItemId}, ${t.exchangeTicketTypeId}, ${t.validity}, ${t.validFrom}, ${t.validTo}, ${t.validDays},
-              ${t.levels}::smallint[], ${t.note}, ${t.active}, ${ctx.actor.id})
-      RETURNING id`;
-    await writeAudit(tx, { staffId: ctx.actor.id, action: 'coupon_template_saved', targetType: 'coupon_template', targetId: row!.id, detail: { created: t }, ip: ctx.ip });
-    return row!.id;
-  });
-  return getTemplate(deps.sql, id);
+  // 同一操作编号已建过（没收到结果再提交）：同一个人、同一种券返回原来那个，否则拒绝（名称之后可能改过，不比）
+  const replay = async () => {
+    const [p] = await deps.sql<{ id: number; kind: string; createdBy: number }[]>`SELECT id, kind, created_by FROM coupon_templates WHERE client_key = ${clientKey}`;
+    if (!p) return null;
+    if (p.kind !== t.kind || Number(p.createdBy) !== ctx.actor.id) throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一个券模板，请刷新页面后重新填写');
+    return getTemplate(deps.sql, p.id);
+  };
+  const prior = await replay();
+  if (prior) return prior;
+  try {
+    const id = await deps.sql.begin(async (tx) => {
+      await assertRefs(tx, t);
+      const [row] = await tx<{ id: number }[]>`
+        INSERT INTO coupon_templates (name, kind, face_value, rate_percent, max_off, threshold, scope, scope_categories, scope_items,
+                                      exchange_item_id, exchange_ticket_type_id, validity, valid_from, valid_to, valid_days, levels, note, active, created_by, client_key)
+        VALUES (${t.name}, ${t.kind}, ${t.faceValue}, ${t.ratePercent}, ${t.maxOff}, ${t.threshold}, ${t.scope}, ${t.scopeCategories}::text[],
+                ${t.scopeItems}::bigint[], ${t.exchangeItemId}, ${t.exchangeTicketTypeId}, ${t.validity}, ${t.validFrom}, ${t.validTo}, ${t.validDays},
+                ${t.levels}::smallint[], ${t.note}, ${t.active}, ${ctx.actor.id}, ${clientKey})
+        RETURNING id`;
+      await writeAudit(tx, { staffId: ctx.actor.id, action: 'coupon_template_saved', targetType: 'coupon_template', targetId: row!.id, detail: { created: t }, ip: ctx.ip });
+      return row!.id;
+    });
+    return getTemplate(deps.sql, id);
+  } catch (error) {
+    // 同一编号的两次提交同时到：后到的一次等先到的提交后撞唯一约束，返回先到的那个
+    if (isUniqueViolation(error, 'coupon_templates_client_key_key')) {
+      const again = await replay();
+      if (again) return again;
+    }
+    throw error;
+  }
 }
 
 const TERM_KEYS = [
@@ -620,6 +641,7 @@ export async function voidBatch(deps: Deps, issueId: number, raw: unknown, ctx: 
 // ───────────────────────── 发券规则 ─────────────────────────
 
 const RuleInput = z.object({
+  clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
   kind: z.enum(COUPON_RULE_KINDS, '请选择规则的种类'),
   level: z.number().int().min(1).max(9).nullable().default(null),
   planId: z.number().int().positive().nullable().default(null),
@@ -647,22 +669,40 @@ export async function createRule(deps: Deps, raw: unknown, ctx: OpContext): Prom
   const needsLevel = input.kind === 'level_up' || input.kind === 'birthday';
   if (needsLevel && input.level === null) throw badRequest('升级礼、生日礼请选择会员等级', { field: 'level' });
   if (input.kind === 'recharge' && input.planId === null) throw badRequest('充值赠券请选择充值套餐', { field: 'planId' });
-  await deps.sql.begin(async (tx) => {
-    const template = await lockTemplate(tx, input.templateId);
-    if (!template) throw notFound('券模板不存在');
-    if (!template.active) throw unprocessable('TEMPLATE_INACTIVE', `券「${template.name}」已停用`);
-    const rules = await loadFrontdeskRules(tx);
-    if (needsLevel && input.level! > rules.vipLevelThresholds.length) throw badRequest(`会员等级只有 ${rules.vipLevelThresholds.length} 级`, { field: 'level' });
-    if (needsLevel && !levelAllowed(template, input.level!)) {
-      throw unprocessable('COUPON_LEVEL', `券「${template.name}」只发给第 ${template.levels.join('、')} 级会员，不能配给第 ${input.level} 级`);
-    }
-    if (input.kind === 'recharge' && !(await tx`SELECT 1 FROM recharge_plans WHERE id = ${input.planId}`).length) throw notFound('充值套餐不存在');
-    const [row] = await tx<{ id: number }[]>`
-      INSERT INTO coupon_rules (kind, level, plan_id, template_id, quantity, created_by)
-      VALUES (${input.kind}, ${needsLevel ? input.level : null}, ${input.kind === 'recharge' ? input.planId : null}, ${input.templateId}, ${input.quantity}, ${ctx.actor.id})
-      RETURNING id`;
-    await writeAudit(tx, { staffId: ctx.actor.id, action: 'coupon_rule_saved', targetType: 'coupon_rule', targetId: row!.id, detail: { created: input, template: template.name }, ip: ctx.ip });
-  });
+  const level = needsLevel ? input.level : null;
+  const planId = input.kind === 'recharge' ? input.planId : null;
+  // 同一操作编号已加过（没收到结果再提交）：同一条返回规则列表，不同的拒绝——重复的规则会重复发券
+  const replayed = async () => {
+    const [p] = await deps.sql<{ kind: string; level: number | null; planId: number | null; templateId: number; quantity: number }[]>`
+      SELECT kind, level, plan_id, template_id, quantity FROM coupon_rules WHERE client_key = ${input.clientKey}`;
+    if (!p) return false;
+    const same = p.kind === input.kind && p.level === level && (p.planId === null ? null : Number(p.planId)) === planId && Number(p.templateId) === input.templateId && p.quantity === input.quantity;
+    if (!same) throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一条发券规则，请刷新页面后重新填写');
+    return true;
+  };
+  if (await replayed()) return listRules(deps.sql);
+  try {
+    await deps.sql.begin(async (tx) => {
+      const template = await lockTemplate(tx, input.templateId);
+      if (!template) throw notFound('券模板不存在');
+      if (!template.active) throw unprocessable('TEMPLATE_INACTIVE', `券「${template.name}」已停用`);
+      const rules = await loadFrontdeskRules(tx);
+      if (needsLevel && input.level! > rules.vipLevelThresholds.length) throw badRequest(`会员等级只有 ${rules.vipLevelThresholds.length} 级`, { field: 'level' });
+      if (needsLevel && !levelAllowed(template, input.level!)) {
+        throw unprocessable('COUPON_LEVEL', `券「${template.name}」只发给第 ${template.levels.join('、')} 级会员，不能配给第 ${input.level} 级`);
+      }
+      if (input.kind === 'recharge' && !(await tx`SELECT 1 FROM recharge_plans WHERE id = ${input.planId}`).length) throw notFound('充值套餐不存在');
+      const [row] = await tx<{ id: number }[]>`
+        INSERT INTO coupon_rules (kind, level, plan_id, template_id, quantity, created_by, client_key)
+        VALUES (${input.kind}, ${level}, ${planId}, ${input.templateId}, ${input.quantity}, ${ctx.actor.id}, ${input.clientKey})
+        RETURNING id`;
+      const { clientKey: _key, ...created } = input;
+      await writeAudit(tx, { staffId: ctx.actor.id, action: 'coupon_rule_saved', targetType: 'coupon_rule', targetId: row!.id, detail: { created, template: template.name }, ip: ctx.ip });
+    });
+  } catch (error) {
+    // 同一编号的两次提交同时到：后到的一次撞唯一约束，按先到的那条返回
+    if (!(isUniqueViolation(error, 'coupon_rules_client_key_key') && (await replayed()))) throw error;
+  }
   return listRules(deps.sql);
 }
 
@@ -822,10 +862,17 @@ export async function couponStats(db: Db, from: string, to: string, today: strin
 }
 
 /** 充值套餐挂的券（充值页选套餐时显示「另赠」） */
-export async function planGifts(db: Db) {
-  return db<{ planId: number; templateId: number; templateName: string; quantity: number }[]>`
-    SELECT r.plan_id, r.template_id, t.name AS template_name, r.quantity FROM coupon_rules r JOIN coupon_templates t ON t.id = r.template_id
-    WHERE r.active AND r.kind = 'recharge' AND t.active ORDER BY r.plan_id, r.id`;
+/**
+ * 充值页的「另赠」：启用的充值赠券规则与模板；固定有效期已过的模板入账时不会发（自动发券跳过），这里也不列；
+ * 限定了等级的带上等级（入账时按充值后的等级发，页面写明）
+ */
+export async function planGifts(db: Db, today: string) {
+  const rows = await db<{ planId: number; templateId: number; templateName: string; quantity: number; levels: number[] }[]>`
+    SELECT r.plan_id, r.template_id, t.name AS template_name, r.quantity, t.levels
+    FROM coupon_rules r JOIN coupon_templates t ON t.id = r.template_id
+    WHERE r.active AND r.kind = 'recharge' AND t.active AND NOT (t.validity = 'fixed' AND t.valid_to < ${today})
+    ORDER BY r.plan_id, r.id`;
+  return rows.map((r) => ({ ...r, planId: Number(r.planId), templateId: Number(r.templateId), levels: r.levels.map(Number) }));
 }
 
 // ───────────────────────── 接口 ─────────────────────────
@@ -850,7 +897,7 @@ export function registerCouponRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/coupons/rules', { preHandler: guard('coupon.manage') }, async (req) => createRule(deps, req.body, ctxOf(req)));
   app.post('/api/coupons/rules/:id/deactivate', { preHandler: guard('coupon.manage') }, async (req) => deactivateRule(deps, parse(idParam, req.params).id, ctxOf(req)));
 
-  app.get('/api/coupons/plan-gifts', { preHandler: guard('recharge.create') }, async () => planGifts(sql));
+  app.get('/api/coupons/plan-gifts', { preHandler: guard('recharge.create') }, async () => planGifts(sql, await today()));
 
   // 会员的券（看会员的岗位都能看）；手动发券
   app.get('/api/members/:id/coupons', { preHandler: guard('member.read') }, async (req) => memberCoupons(sql, parse(idParam, req.params).id, await today()));

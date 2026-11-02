@@ -413,11 +413,16 @@ function TemplateDialog({
   const [draft, setDraft] = useState<Draft>(() => draftOf(null, session.today));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 新建的操作编号：没收到结果（超时、断网）时留着，再保存一次服务端返回原来那个、不会多建；成功或服务端明确回了之后才换新的
+  const key = useRef(uuid());
+  const [uncertain, setUncertain] = useState(false);
   if (target !== opened) {
     setOpened(target);
     setBase(target?.mode === 'edit' ? target.template : null);
     setDraft(draftOf(target && target.mode !== 'new' ? target.template : null, session.today, target?.mode === 'copy'));
     setError(null);
+    setUncertain(false);
+    key.current = uuid();
   }
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
   const editing = target?.mode === 'edit' && base !== null;
@@ -437,14 +442,23 @@ function TemplateDialog({
       const saved =
         editing && base
           ? await api.put<CouponTemplate>(`/api/coupons/templates/${base.id}`, { ...body, expectedVersion: base.version })
-          : await api.post<CouponTemplate>('/api/coupons/templates', body);
-      qc.setQueryData<CouponTemplate[]>(couponKeys.templates, (list) => list && (editing ? list.map((x) => (x.id === saved.id ? saved : x)) : [saved, ...list]));
+          : await api.post<CouponTemplate>('/api/coupons/templates', { ...body, clientKey: key.current });
+      key.current = uuid();
+      setUncertain(false);
+      qc.setQueryData<CouponTemplate[]>(couponKeys.templates, (list) => list && (editing ? list.map((x) => (x.id === saved.id ? saved : x)) : [saved, ...list.filter((x) => x.id !== saved.id)]));
       void invalidate();
       toast({ tone: 'success', title: editing ? `已保存「${saved.name}」` : `已新建券模板「${saved.name}」`, body: saved.summary });
       onClose();
     } catch (e) {
-      // 没收到结果：可能已经保存上了（新建没有操作编号，重复保存会多出一个模板），先看列表再决定
-      setError(e instanceof UncertainError ? `${e.message}，不确定有没有保存上：先关掉对话框看列表，再决定要不要重做` : errorMessage(e));
+      if (e instanceof UncertainError && !editing) {
+        // 新建没收到结果：留着操作编号，再保存一次返回原来那个
+        setUncertain(true);
+      } else {
+        // 改模板没收到结果：再保存时版本号对不上会被拒绝（不会改两次），载入最新内容核对即可
+        key.current = uuid();
+        setUncertain(false);
+        setError(e instanceof UncertainError ? `${e.message}，不确定有没有保存上：载入最新内容核对后再改` : errorMessage(e));
+      }
       void qc.invalidateQueries({ queryKey: couponKeys.templates });
     } finally {
       setBusy(false);
@@ -466,7 +480,7 @@ function TemplateDialog({
             取消
           </Button>
           <Button variant="primary" loading={busy} disabled={!!problem || outdated} onClick={save} data-testid="coupon-template-save">
-            保存
+            {uncertain ? '按原内容再保存' : '保存'}
           </Button>
         </>
       }
@@ -583,6 +597,13 @@ function TemplateDialog({
               ]}
             />
           </Field>
+        )}
+        {uncertain && (
+          <div data-testid="coupon-template-uncertain">
+            <Notice tone="warning" title="没收到结果：这个模板可能已经建好了">
+              点「按原内容再保存」：已经建好的会直接返回原来那个，不会多建。也可以先关掉，看列表里有没有。
+            </Notice>
+          </div>
         )}
         {error && <Notice tone="error" title={error} />}
       </div>
@@ -904,12 +925,18 @@ function RuleDialog({ open, meta, templates, rules, onClose }: { open: boolean; 
   const [quantity, setQuantity] = useState('1');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 操作编号：没收到结果时留着，按原内容再加一次服务端返回原来那条（重复的规则会重复发券）；成功或服务端明确回了之后才换新的
+  const key = useRef(uuid());
+  const [uncertain, setUncertain] = useState(false);
   useResetOnOpen(open, () => {
-    setKind('open_card');
-    setLevel(null);
-    setPlanId(null);
-    setTemplateId(null);
-    setQuantity('1');
+    // 上一次没收到结果：留着原内容与编号，方便按原内容再加
+    if (!uncertain) {
+      setKind('open_card');
+      setLevel(null);
+      setPlanId(null);
+      setTemplateId(null);
+      setQuantity('1');
+    }
     setError(null);
   });
   const leveled = needsLevel(kind);
@@ -943,19 +970,27 @@ function RuleDialog({ open, meta, templates, rules, onClose }: { open: boolean; 
     setError(null);
     try {
       const next = await api.post<CouponRule[]>('/api/coupons/rules', {
+        clientKey: key.current,
         kind,
         level: leveled ? level : null,
         planId: kind === 'recharge' ? planId : null,
         templateId: template.id,
         quantity: n,
       });
+      key.current = uuid();
+      setUncertain(false);
       qc.setQueryData(couponKeys.rules, next);
       void invalidate();
       toast({ tone: 'success', title: `已加上${COUPON_RULE_KIND_LABELS[kind]}：${template.name} × ${n}` });
       onClose();
     } catch (e) {
-      // 规则没有操作编号：没收到结果时先看列表，重复的规则会重复发券
-      setError(e instanceof UncertainError ? `${e.message}，不确定有没有加上：先关掉对话框看列表里有没有这条，没有再重新加（重复的规则会重复发券）` : errorMessage(e));
+      if (e instanceof UncertainError) {
+        setUncertain(true);
+      } else {
+        key.current = uuid();
+        setUncertain(false);
+        setError(errorMessage(e));
+      }
       void qc.invalidateQueries({ queryKey: couponKeys.rules });
       if (e instanceof ApiError && ['TEMPLATE_INACTIVE', 'COUPON_LEVEL'].includes(e.code)) void qc.invalidateQueries({ queryKey: couponKeys.templates });
     } finally {
@@ -976,7 +1011,7 @@ function RuleDialog({ open, meta, templates, rules, onClose }: { open: boolean; 
             取消
           </Button>
           <Button variant="primary" loading={busy} disabled={!!problem} onClick={save} data-testid="coupon-rule-save">
-            加上
+            {uncertain ? '按原内容再加' : '加上'}
           </Button>
         </>
       }
@@ -1058,6 +1093,13 @@ function RuleDialog({ open, meta, templates, rules, onClose }: { open: boolean; 
           <p className="text-[12.5px] text-ink-3" data-testid="coupon-rule-existing">
             这里已有：{same.map((r) => `${r.templateName} × ${r.quantity}`).join('、')}（加上后一起发）
           </p>
+        )}
+        {uncertain && (
+          <div data-testid="coupon-rule-uncertain">
+            <Notice tone="warning" title="没收到结果：这条规则可能已经加上了">
+              点「按原内容再加」：已经加上的会直接返回，不会多出一条（重复的规则会重复发券）。也可以先关掉，看列表里有没有这条。
+            </Notice>
+          </div>
         )}
         {error && <Notice tone="error" title={error} />}
       </div>

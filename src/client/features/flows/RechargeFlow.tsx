@@ -15,7 +15,7 @@ import { Button, ConfirmCheck, Field, Input, MoneyInput, Notice, PendingBadge, S
 import { BalanceChange, FlowFrame, OperationStatus, OverLimitCard, PendingRecovery, SuccessHeader, SummaryRow, type Step } from './parts';
 import { isBusy, isLocked, useOperation } from './useOperation';
 import { SHIFT_ERRORS, shiftKeys, ShiftGate, useShiftReady } from '../shift/ShiftGate';
-import { usePlanGifts } from '../coupons/queries';
+import { planGiftText, usePlanGifts } from '../coupons/queries';
 
 const METHOD_ICONS: Record<PaymentMethod, typeof Smartphone> = {
   wechat: Smartphone,
@@ -250,7 +250,7 @@ export function RechargeFlow({
             {bonus ? <SummaryRow label="赠金有效期">{bonusValidText}</SummaryRow> : null}
             {planGifts.length > 0 && (
               <SummaryRow label="另赠券">
-                <span data-testid="coupon-plan-gifts-confirm">{planGifts.map((g) => `${g.templateName} × ${g.quantity}`).join('、')}</span>
+                <span data-testid="coupon-plan-gifts-confirm">{planGifts.map(planGiftText).join('、')}</span>
               </SummaryRow>
             )}
             {paymentRef && <SummaryRow label="收款备注">{paymentRef}</SummaryRow>}
@@ -362,10 +362,10 @@ export function RechargeFlow({
           {planGifts.map((g, i) => (
             <p key={`${g.templateId}-${i}`} className="flex items-center gap-1.5 text-[13px] font-bold text-yuzu-deep">
               <Ticket className="size-4 shrink-0" />
-              另赠：{g.templateName} × {g.quantity}
+              另赠：{planGiftText(g)}
             </p>
           ))}
-          <p className="mt-0.5 text-[12px] text-ink-3">入账时发到会员账户，与赠金分开；限定了等级的券按会员等级发</p>
+          <p className="mt-0.5 text-[12px] text-ink-3">入账时发到会员账户，与赠金分开；限定了等级的券按充值后的会员等级发，等级不在里面的不发</p>
         </div>
       )}
 
