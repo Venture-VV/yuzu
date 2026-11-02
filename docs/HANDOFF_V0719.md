@@ -66,10 +66,11 @@
 
 ## 4. 已执行的验证
 
-- `npm run typecheck`、`npm run build`；`npm test` 本机 69 个文件、711 项全过（新增 `tests/usages.test.ts` 14 项、`tests/guide.test.ts` 7 项、`tests/floorplan-pdf.test.ts` 18 项、`tests/upgrade-floorplan-finish.test.ts` 1 项，`tests/floorplans-api.test.ts` 新增 4 项，`tests/demo-prepare.test.ts` 新增「应用开着时 `demo-reset` 不清库」1 项；并行跑时有一个文件在复制模板库时碰上本机非超级用户结束不了自动清理进程，单独重跑通过，属本机环境）。
+- `npm run typecheck`、`npm run build`；`npm test` 本机 69 个文件、711 项全过（新增 `tests/usages.test.ts` 14 项、`tests/guide.test.ts` 7 项、`tests/floorplan-pdf.test.ts` 18 项、`tests/upgrade-floorplan-finish.test.ts` 1 项，`tests/floorplans-api.test.ts` 新增 5 项（含 Codex 复审的 A → B → A 迟到换回），`tests/demo-prepare.test.ts` 新增「应用开着时 `demo-reset` 不清库」1 项；并行跑时有一个文件在复制模板库时碰上本机非超级用户结束不了自动清理进程，单独重跑通过，属本机环境）。
 - 本机新库 `demo-prepare`：六块都写入，`check` 50 项、`demo-check` 全 ✓（约 8 秒）。
 - 本机 `demo-reset`（真实进程）：应用开着、空闲 40 秒（业务连接池已经没有连接，库里只剩「应用在跑」的专用连接）时 1 秒内拒绝，没有备份、数据指纹不变；停掉应用后备份核验、清库重建，`check` 50 项、`demo-check` 全 ✓。
 - 本机完整浏览器验收（独立演示库，五块演示数据，`9a59ef6` 之前的构建）：400 项里 216 过、182 按尺寸跳过、2 项失败——只用 ERP 的物资经办多出「返回门店」、手机上「空间台账」的分页横向溢出，都是这一版引入的，已修正；修正后在新构建上重跑这几个文件（库存、ERP、视口冒烟、对客导览，五个尺寸）79 过、22 跳过、0 失败。CI 的完整结果见 PR。
+- Codex 复审（`0cf0505`）三项 P2 的修正（`a9e811e`）：本机相关集成测试 16 个文件 151 项全过（底图、导览、演示数据、全部升级测试、房态图、实时位置、使用单）；浏览器用例导览、底图、房态图、实时位置五个尺寸 20 过、18 跳过、0 失败。
 
 ## 5. 给测试 AI 的指令（可复制）
 
