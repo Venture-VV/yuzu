@@ -336,6 +336,31 @@ describe('逐条维护：新建、编辑、核对、别名、批量设区域', (
     expect((await space('P209')).zoneId).toBe(z.id);
     expect((await ledger()).zones.find((x) => x.id === z.id)!.note).toBe('并发改备注');
   });
+
+  it('台账被别的终端占着超过 5 秒：按「正在被其他终端操作」拒绝（BUSY），什么都没改（v0.7.15 验收报告的测试缺口）', async () => {
+    const z = (await ledger()).zones.find((x) => x.name === '合成派对区')!;
+    let release!: () => void;
+    const holding = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const ledgerLocked = new Promise<void>((r) => (locked = r));
+    // 另一个终端拿着台账的那把锁不放
+    const other = ctx.sql.begin(async (tx) => {
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended('space_ledger', 0))`;
+      locked();
+      await holding;
+    });
+    await ledgerLocked;
+    try {
+      const r = await api(ctx.app, boss, 'PUT', `/api/admin/spaces/zones/${z.id}`, { name: z.name, nameEn: z.nameEn, note: '等不到锁', sortOrder: z.sortOrder, active: z.active, version: z.version });
+      expect(r.status, JSON.stringify(r.body)).toBe(409);
+      expect(r.body.error.code).toBe('BUSY');
+      expect(r.body.error.message).toContain('空间台账正在被其他终端操作');
+    } finally {
+      release();
+      await other;
+    }
+    expect((await ledger()).zones.find((x) => x.id === z.id)).toMatchObject({ note: z.note, version: z.version });
+  }, 20_000);
 });
 
 describe('客房房间挂接空间（RQ-003 剩余项）', () => {

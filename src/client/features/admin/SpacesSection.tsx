@@ -43,8 +43,9 @@ import { useInvalidateSpaces, useSpaceLedger } from '../spaces/queries';
 import { AdminPage } from './AdminShell';
 import { SpaceImportCard } from './SpaceImportCard';
 import { FloorplanCard } from './FloorplanCard';
+import { LocationsCard } from './LocationsCard';
 
-type Tab = 'spaces' | 'zones' | 'import' | 'plans';
+type Tab = 'spaces' | 'zones' | 'import' | 'plans' | 'locations';
 type VerifyFilter = '' | SpaceVerifyStatus | 'unverified';
 interface Filters {
   floorId: number;
@@ -68,7 +69,7 @@ export function SpacesSection() {
     <AdminPage
       section="spaces"
       wide
-      description="楼层、区域与空间（编码图的编码，建好后不能改）、别名与核对状态；空间清单、区域清单的导入与导出；编码图转换成每层底图与房间轮廓。客房房间在「客房」里挂接空间。"
+      description="楼层、区域与空间（编码图的编码，建好后不能改）、别名与核对状态；空间清单、区域清单的导入与导出；编码图转换成每层底图与房间轮廓；实时位置的开关、刷卡点与项目所在区域。客房房间在「客房」里挂接空间。"
     >
       <div className="space-y-4">
         <ErpPendingPanel types={['space_import']} className="space-y-2" onFound={() => void invalidate()} />
@@ -96,9 +97,12 @@ export function SpacesSection() {
             { value: 'zones', label: '楼层与区域' },
             { value: 'import', label: '导入' },
             { value: 'plans', label: '底图' },
+            { value: 'locations', label: '实时位置' },
           ]}
         />
-        {tab === 'plans' ? (
+        {tab === 'locations' ? (
+          <LocationsCard />
+        ) : tab === 'plans' ? (
           <FloorplanCard />
         ) : tab === 'import' ? (
           <SpaceImportCard />
