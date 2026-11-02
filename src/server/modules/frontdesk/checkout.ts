@@ -61,6 +61,7 @@ import {
 import { assertAfterVisits, assertNotReused, backfillDetail, BackfillInput, backfillMarkSql, normalizeMark, recordBackfill, resolveBackfill } from './backfill';
 import { openSessionsOf, settleSessionsAtCheckout } from '../clockroom';
 import { locateGone, locateSessionEnd } from '../locations';
+import { closeUsagesOfVisits, openUsagesOf } from '../usages';
 import { unservedDishesOf } from '../dining';
 import { applyVisitTicket, resolveTicketType } from './tickets';
 
@@ -216,6 +217,7 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
       sessions: await openSessionsOf(tx, ids),
       dishes: await unservedDishesOf(tx, ids),
       rooms: await openRoomsOf(tx, ids),
+      usages: await openUsagesOf(tx, ids),
     };
   });
 }
@@ -462,6 +464,8 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
     await tx`UPDATE bills SET status = 'settled', closed_at = ${at} WHERE id IN ${tx(billIds)}`;
     await tx`UPDATE visits SET status = 'settled', closed_at = ${at}, closed_by = ${ctx.actor.id} WHERE id IN ${tx(ids)}`;
     for (const g of new Set(priced.map((r) => r.groupId))) await closeGroupIfEmpty(tx, g, at);
+    // 派对房等的使用单（v0.7.19）：使用人结账时一起结束（在结账已有的锁之后，按 id 升序锁）
+    const usages = await closeUsagesOfVisits(tx, ids, 'checkout', { at, staffId: ctx.actor.id });
     // 实时位置（v0.7.17）：客人离店、当前位置清掉；结账时一起下钟的技师回休息区（先客人、再技师，按固定顺序锁当前位置）
     await locateGone(tx, ids, 'checkout', { type: 'checkout', id: checkoutId }, { at, staffId: ctx.actor.id });
     await locateSessionEnd(tx, endedSessions, { at, staffId: ctx.actor.id });
@@ -480,6 +484,7 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
         payments: input.payments.map((p) => ({ method: p.method, amount: p.amount })),
         tickets: priced.map((r) => ({ tagCode: r.tagCode, ticket: r.ticketName, segments: r.ticket.segments, amount: r.ticket.amount })),
         ...(discount ? { discount: { amount: discounts[0]!.amount, reason: discount.reason, approverId: discount.approverId, approverName: discount.approverName } } : {}),
+        ...(usages.length ? { usages } : {}),
         ...backfillDetail(backfill),
       },
       ip: ctx.ip,

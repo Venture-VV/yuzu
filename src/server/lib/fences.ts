@@ -43,6 +43,10 @@ export const FENCED_OPS = [
   'space_import',
   // 模拟刷卡（v0.7.17）：编号记在位置事件上（location_events.op_key），不进 idempotency_keys
   'location_report',
+  // 派对房等的使用单（v0.7.19）：开单、结束、撤单
+  'usage_open',
+  'usage_end',
+  'usage_cancel',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 

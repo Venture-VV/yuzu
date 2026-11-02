@@ -1,6 +1,6 @@
 // v0.7.18 演示数据场景块的浏览器核对（飞书需求 RQ-007，docs/DEMO_DATA.md 第 3 节）：在 demo-prepare 准备好的演示库上，
 // 用店主账号只读打开关键页面，看得到场景块的业务——前台在店客人、房态看板、平面图的房态与人员、钟房服务中与待上钟、
-// 厨房待出品与估清、旧账对照。只读，不改数据（跑完 check、demo-check 照样通过）。
+// 厨房待出品与估清、旧账对照；v0.7.19 起还有派对房 X201 使用中、对客导览（区域色块与图标）。只读，不改数据（跑完 check、demo-check 照样通过）。
 // 只在准备好的演示库上跑：playwright.config.ts 默认不收这个文件，要设 E2E_DEMO_SHOWCASE=1（CI「演示数据」job 这样跑），只在门店电脑尺寸跑。
 // 账号：店主 linlan，密码 yuzu2026。全部是合成数据。
 import { expect, test, type Page } from '@playwright/test';
@@ -32,7 +32,7 @@ test('演示场景：前台、客房与平面图、钟房、厨房、旧账都�
   for (const t of board.tags) if (t.visit && (expected.guests as string[]).includes(t.visit.guestLabel)) tagOf[t.visit.guestLabel] = t.code;
   expect(Object.keys(tagOf).sort()).toEqual([...expected.guests].sort());
 
-  await test.step('前台：三位演示客人的手牌在用', async () => {
+  await test.step('前台：四位演示客人的手牌在用', async () => {
     await page.goto('/frontdesk');
     for (const code of Object.values(tagOf)) await expect(page.getByTestId(`tag-${code}`)).toHaveAttribute('data-state', 'in_use');
   });
@@ -58,6 +58,22 @@ test('演示场景：前台、客房与平面图、钟房、厨房、旧账都�
     await expect(people.getByTestId(`floormap-person-guest-${tagOf['演示客人丙']}`)).toBeVisible();
     await page.getByTestId('map-space-V312').click();
     await expect(page.getByTestId('floormap-panel-people')).toContainText(`手牌 ${tagOf['演示客人丙']}`);
+    // 二层：丁在派对房 X201 开了单（使用中、6 人），丁的位置在 X201
+    await page.getByTestId('floormap').getByRole('radiogroup', { name: '楼层' }).getByRole('radio', { name: 'L2 二层平面图' }).click();
+    await expect(page.getByTestId('map-space-X201')).toHaveAttribute('data-state', 'in_use');
+    await page.getByTestId('map-space-X201').click();
+    await expect(page.getByTestId('floormap-usage-info')).toContainText(`手牌 ${tagOf['演示客人丁']}`);
+    await expect(page.getByTestId('floormap-usage-info')).toContainText('6 人');
+    await expect(page.getByTestId('map-people-X201')).toHaveAttribute('data-count', '1');
+  });
+
+  await test.step('对客导览：区域色块（派对区是动区）、设施图标，不显示房号', async () => {
+    await page.goto('/guide');
+    const l2 = page.getByTestId('guide-map-L2');
+    await expect(l2.locator('[data-kind="active"]')).toHaveCount(1);
+    for (const k of ['reception', 'entrance', 'elevator']) await expect(l2.getByTestId(`guide-marker-${k}`)).toHaveCount(1);
+    await expect(page.getByTestId('guide-legend')).toContainText('样例派对区');
+    await expect(page.getByTestId('guide-page')).not.toContainText('X201');
   });
 
   await test.step('钟房：乙的钟服务中、丙的钟待上钟', async () => {

@@ -163,6 +163,8 @@ export interface CheckoutPreview {
   dishes: { tagCode: string; name: string; quantity: number; status: 'queued' | 'cooking' | 'done' | 'served' | 'cancelled' }[];
   /** 还在住的客房（S7）：要先退房（补齐房费挂到手牌账单、退押金）才能结账 */
   rooms?: { stayId: number; tagCode: string; roomNo: string; stayNo: string }[];
+  /** 派对房等开着的使用单（v0.7.19）：结账后自动结束 */
+  usages?: { usageId: number; usageNo: string; tagCode: string; spaceCode: string; spaceName: string }[];
 }
 
 /** 反结账退现金可以选的钱箱（v0.7.1，跨钱箱退款）：此刻当班的班次；original 原单收款的班次，mine 反结账人自己的班次 */

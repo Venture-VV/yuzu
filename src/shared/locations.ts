@@ -16,6 +16,8 @@ export const LOCATION_SOURCES = [
   'sign_out',
   'checkout',
   'visit_cancel',
+  'usage_open',
+  'usage_close',
 ] as const;
 export type LocationSource = (typeof LOCATION_SOURCES)[number];
 
@@ -34,6 +36,8 @@ export const LOCATION_SOURCE_LABELS: Record<LocationSource, string> = {
   sign_out: '技师下牌',
   checkout: '结账离场',
   visit_cancel: '撤销来访',
+  usage_open: '开单使用',
+  usage_close: '结束使用',
 };
 
 /** 事件：在某处 / 离开某处（去向不明）/ 离店（客人结账、撤销来访；技师下牌） */

@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ActiveFloorplan, FloorplanDetail, FloorplanList } from '../src/shared/floorplans';
 import expected from '../src/server/demo/floorplan-expected.json';
-import { floorplanSampleDxf, floorplanSampleFloorSwapDxf } from '../src/server/demo/floorplan-sample';
+import { floorplanSampleDxf, floorplanSampleFloorSwapDxf, floorplanSamplePdf } from '../src/server/demo/floorplan-sample';
 import { floorplanChecks } from '../src/server/modules/floorplans';
 import { createStaff } from '../src/server/modules/staff';
 import { buildApp } from '../src/server/app';
@@ -15,8 +15,10 @@ import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 let ctx: TestContext;
 let boss: string;
 const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64');
-const upload = (content: string, fileName = 'sample.dxf', cookie = ctx.owner) =>
-  api(ctx.app, cookie, 'POST', '/api/admin/floorplans', { fileName, contentBase64: b64(content), note: '' });
+/** 入库登记（v0.7.19）：来源、收图日期必填；UTC 日期不会晚于门店当地的今天 */
+const RECEIVED_ON = new Date().toISOString().slice(0, 10);
+const upload = (content: string, fileName = 'sample.dxf', cookie = ctx.owner, extra: Record<string, unknown> = {}) =>
+  api(ctx.app, cookie, 'POST', '/api/admin/floorplans', { fileName, contentBase64: b64(content), note: '', sourceKind: 'designer', receivedOn: RECEIVED_ON, ...extra });
 const detail = async (id: number, cookie = ctx.owner) => (await api(ctx.app, cookie, 'GET', `/api/admin/floorplans/${id}`)).body as FloorplanDetail;
 /** 等转换进程跑完 */
 async function waitReady(id: number): Promise<FloorplanDetail> {
@@ -28,8 +30,11 @@ async function waitReady(id: number): Promise<FloorplanDetail> {
   throw new Error('转换超时');
 }
 const codes = (list: { code: string }[]) => list.map((x) => x.code).sort();
-/** 启用：带上页面看到的在用批次 */
-const activate = (id: number, expectedActiveId: number | null, cookie = ctx.owner) => api(ctx.app, cookie, 'POST', `/api/admin/floorplans/${id}/activate`, { expectedActiveId });
+/** 在用历史的版本（页面上列表给的 activationSeq） */
+const seqNow = async () => ((await api(ctx.app, ctx.owner, 'GET', '/api/admin/floorplans')).body as FloorplanList).activationSeq;
+/** 启用：带上页面看到的在用批次与在用历史版本（不给版本时取现在的） */
+const activate = async (id: number, expectedActiveId: number | null, cookie = ctx.owner, expectedSeq?: number) =>
+  api(ctx.app, cookie, 'POST', `/api/admin/floorplans/${id}/activate`, { expectedActiveId, expectedSeq: expectedSeq ?? (await seqNow()) });
 const readCsv = (file: string) => readFileSync(file, 'utf8').replace(/^﻿/, '');
 
 beforeAll(async () => {
@@ -54,6 +59,7 @@ describe('上传与转换', () => {
     const bad = await upload('楼层,编码\nL3,S301', 'a.csv');
     expect(bad.status).toBe(422);
     expect(bad.body.error.code).toBe('FLOORPLAN_FORMAT');
+    expect(bad.body.error.message).toContain('矢量 PDF');
     expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/floorplans', { fileName: 'a.dwg', contentBase64: '' })).status).toBe(400);
     expect(((await api(ctx.app, ctx.owner, 'GET', '/api/admin/floorplans')).body as FloorplanList).batches).toEqual([]);
   });
@@ -158,9 +164,11 @@ describe('上传与转换', () => {
     const list = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/floorplans')).body as FloorplanList;
     expect(list.activeId).toBe(v2);
     expect(list.batches.find((b) => b.id === v1)!.status).toBe('retired');
+    // 已换下的不能「启用」，要写原因「换回」（v0.7.19）
     const again = await activate(v1, v2);
     expect(again.status).toBe(409);
     expect(again.body.error.code).toBe('FLOORPLAN_NOT_READY');
+    expect(again.body.error.message).toContain('换回这一批');
     // 第二版那次启用晚到地再发一次：已经在用，不报错，也不换下什么
     expect((await activate(v2, v1)).status).toBe(200);
     expect(((await api(ctx.app, ctx.owner, 'GET', '/api/admin/floorplans')).body as FloorplanList).activeId).toBe(v2);
@@ -248,4 +256,245 @@ describe('同时只转换一份；应用重启时没转完的记失败（v0.7.15
     const d = await waitReady(again.body.batch.id);
     expect(d.batch.status, d.batch.error ?? '').toBe('ready');
   }, 60_000);
+});
+
+// ───────────────────────── v0.7.19 图纸治理与补画轮廓（docs/FLOORPLAN_FINISH.md 第 4、5 节） ─────────────────────────
+
+const list = async () => (await api(ctx.app, ctx.owner, 'GET', '/api/admin/floorplans')).body as FloorplanList;
+const byName = async (name: string) => (await list()).batches.find((b) => b.fileName === name)!;
+/** 换回：不给在用历史版本时取现在的 */
+const restore = async (id: number, body: Record<string, unknown>, cookie = ctx.owner) =>
+  api(ctx.app, cookie, 'POST', `/api/admin/floorplans/${id}/restore`, { expectedSeq: await seqNow(), ...body });
+const original = (id: number, cookie = ctx.owner) => ctx.app.inject({ method: 'GET', url: `/api/admin/floorplans/${id}/original`, headers: { cookie } });
+
+describe('图纸治理（v0.7.19）：入库登记、原图纸、底图档案与在用历史、换回旧底图', () => {
+  it('上传要登记来源与收图日期，收图日期不能晚于今天；登记记在批次上、不能改；勾了「保存原图纸」的能下载（店员不能），没勾的 404', async () => {
+    const content = `999\n图纸治理 ${Date.now()}\n${floorplanSampleDxf(1)}`;
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/floorplans', { fileName: 'x.dxf', contentBase64: b64(content), receivedOn: RECEIVED_ON })).status).toBe(400);
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/floorplans', { fileName: 'x.dxf', contentBase64: b64(content), sourceKind: 'designer' })).status).toBe(400);
+    const future = await upload(content, 'x.dxf', ctx.owner, { receivedOn: '2999-01-01' });
+    expect(future.status).toBe(422);
+    expect(future.body.error.code).toBe('FUTURE_DATE');
+    const r = await upload(content, '登记样例.dxf', ctx.owner, { sourceKind: 'store', sourceNote: '门店自测第 3 版', saveOriginal: true, pdfScale: 100 });
+    expect(r.status, JSON.stringify(r.body)).toBe(202);
+    const d = await waitReady(r.body.batch.id);
+    expect(d.batch.status, d.batch.error ?? '').toBe('ready');
+    // DXF 不用比例：填了也不记
+    expect(d.batch).toMatchObject({ sourceKind: 'store', sourceNote: '门店自测第 3 版', receivedOn: RECEIVED_ON, originalSaved: true, pdfScale: null, outlineCount: 0 });
+    await expect(ctx.sql`UPDATE floorplan_batches SET source_note = 'x' WHERE id = ${d.batch.id}`).rejects.toThrow(/入库登记不能改/);
+    const res = await original(d.batch.id);
+    expect(res.statusCode).toBe(200);
+    expect(res.rawPayload.toString('utf8')).toBe(content);
+    expect(res.headers['content-disposition']).toContain(encodeURIComponent('登记样例.dxf'));
+    const [audit] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'export' AND target_type = 'floorplan_original'`;
+    expect(audit!.n).toBe(1);
+    expect((await original(d.batch.id, ctx.clerk)).statusCode).toBe(403);
+    expect((await original((await byName('样例图纸第二版.dxf')).id)).statusCode).toBe(404);
+    await expect(ctx.sql`DELETE FROM floorplan_originals WHERE batch_id = ${d.batch.id}`).rejects.toThrow(/只追加/);
+  }, 60_000);
+
+  it('换回旧底图：原因必填；页面看到的在用批次对不上拒绝；原来在用的换下（记原因）；在用历史记启用、换下、换回；记下当时的台账比对', async () => {
+    const v1b = await byName('样例图纸.dxf');
+    const v2b = await byName('样例图纸第二版.dxf');
+    expect([v1b.status, v2b.status]).toEqual(['retired', 'active']);
+    expect((await restore(v1b.id, { expectedActiveId: v2b.id })).status).toBe(400);
+    expect((await restore(v1b.id, { expectedActiveId: v2b.id, reason: '错' })).status).toBe(400);
+    expect((await restore(v1b.id, { expectedActiveId: null, reason: '第二版有误' })).body.error.code).toBe('FLOORPLAN_STALE');
+    expect((await restore(v1b.id, { expectedActiveId: v2b.id, reason: '第二版有误' }, ctx.clerk)).status).toBe(403);
+    const ready = (await byName('登记样例.dxf'))!;
+    expect((await restore(ready.id, { expectedActiveId: v2b.id, reason: '试一下' })).body.error.code).toBe('FLOORPLAN_NOT_RETIRED');
+    const reason = '第二版有误，先用回第一版';
+    const r = await restore(v1b.id, { expectedActiveId: v2b.id, reason });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const d = r.body as FloorplanDetail;
+    expect(d.batch).toMatchObject({ status: 'active', retiredAt: null, retireReason: null });
+    expect(d.activationLedgerDiff).toMatchObject({ kind: 'restore' });
+    expect(d.activationLedgerDiff!.diff.matched).toBe(d.ledgerDiff!.matched);
+    expect(d.history.map((h) => h.kind)).toEqual(['restore', 'retire', 'activate']);
+    const l = await list();
+    expect(l.activeId).toBe(v1b.id);
+    expect(l.batches.find((b) => b.id === v2b.id)).toMatchObject({ status: 'retired', retireReason: reason, retiredByName: '测试店主' });
+    expect(l.history.slice(0, 2).map((h) => [h.batchId, h.kind, h.reason])).toEqual([
+      [v1b.id, 'restore', reason],
+      [v2b.id, 'retire', reason],
+    ]);
+    // 迟到的重发：已经在用，不报错、不再换
+    expect((await restore(v1b.id, { expectedActiveId: v2b.id, reason })).status).toBe(200);
+    expect(((await api(ctx.app, ctx.clerk, 'GET', '/api/floorplans/active')).body as ActiveFloorplan).batchId).toBe(v1b.id);
+    // 缺了在用历史版本：拒绝（页面要带上）
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/admin/floorplans/${ready.id}/activate`, { expectedActiveId: v1b.id })).status).toBe(400);
+    // 启用另一批时写换下的原因
+    const act = await api(ctx.app, ctx.owner, 'POST', `/api/admin/floorplans/${ready.id}/activate`, { expectedActiveId: v1b.id, expectedSeq: await seqNow(), reason: '门店自测版更准' });
+    expect(act.status, JSON.stringify(act.body)).toBe(200);
+    expect((await byName('样例图纸.dxf')).retireReason).toBe('门店自测版更准');
+    expect((act.body as FloorplanDetail).activationLedgerDiff).toMatchObject({ kind: 'activate' });
+    const [audit] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'floorplan_restore'`;
+    expect(audit!.n).toBe(1);
+    for (const c of await floorplanChecks(ctx.sql)) expect(c.ok, `${c.label}：${c.detail}`).toBe(true);
+  }, 60_000);
+
+  it('迟到的换回、启用：在用批次 A → B → A 回到原样时，按当时看到的版本重发也拒绝，不把后来换回的那批换下（Codex 复审 0cf0505）', async () => {
+    const A = (await list()).activeId!;
+    const B = (await byName('样例图纸.dxf')).id;
+    expect((await detail(B)).batch.status).toBe('retired');
+    // 甲：换回 B（看到 A 在用、版本 s0）——生效了，但甲没收到结果
+    const s0 = await seqNow();
+    const first = await restore(B, { expectedActiveId: A, expectedSeq: s0, reason: '甲换回 B' });
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    // 乙：又换回 A
+    const second = await restore(A, { expectedActiveId: B, reason: '乙换回 A' });
+    expect(second.status, JSON.stringify(second.body)).toBe(200);
+    expect((await list()).activeId).toBe(A);
+    // 甲的请求迟到或重发：在用的又是 A（与甲当时看到的一样），但版本变了——拒绝，A 照旧在用
+    const late = await restore(B, { expectedActiveId: A, expectedSeq: s0, reason: '甲换回 B' });
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('FLOORPLAN_STALE');
+    expect((await list()).activeId).toBe(A);
+    // 迟到的启用同理：拿换回之前的版本启用一批新的，拒绝
+    const fresh = await upload(`999\n迟到的启用 ${Date.now()}\n${floorplanSampleDxf(1)}`, '迟到的启用.dxf');
+    expect((await waitReady(fresh.body.batch.id)).batch.status).toBe('ready');
+    const lateActivate = await activate(fresh.body.batch.id, A, ctx.owner, s0);
+    expect(lateActivate.body.error.code).toBe('FLOORPLAN_STALE');
+    expect((await list()).activeId).toBe(A);
+    for (const c of await floorplanChecks(ctx.sql)) expect(c.ok, `${c.label}：${c.detail}`).toBe(true);
+  }, 60_000);
+});
+
+describe('例外房间补画轮廓（v0.7.19）', () => {
+  it('在用（或待启用）的批次上给例外编码点出轮廓：房态图读到补画的轮廓与面积；重画旧的作废留历史；页面看到的对不上拒绝；作废回到位置点；换下的只读', async () => {
+    const activeId = (await list()).activeId!;
+    const d0 = await detail(activeId);
+    const leak = d0.rooms.find((r) => r.code === 'W306')!;
+    expect(leak).toMatchObject({ status: 'leak', polygon: null, drawn: null });
+    const [x, y] = leak.labelAt;
+    const square = (h: number): [number, number][] => [
+      [x - h, y - h],
+      [x + h, y - h],
+      [x + h, y + h],
+      [x - h, y + h],
+    ];
+    // 补画、作废都带上页面看到的补画版本（不给时取现在的）
+    const revOf = async (batch: number) => (await detail(batch)).outlineRev;
+    const put = async (code: string, body: Record<string, unknown>, cookie = ctx.owner, batch = activeId) =>
+      api(ctx.app, cookie, 'PUT', `/api/admin/floorplans/${batch}/outlines/${code}`, { expectedRev: await revOf(batch), ...body });
+    const voidOne = async (code: string, body: Record<string, unknown>, batch = activeId) =>
+      api(ctx.app, ctx.owner, 'POST', `/api/admin/floorplans/${batch}/outlines/${code}/void`, { expectedRev: await revOf(batch), ...body });
+    const map = async () => (await api(ctx.app, ctx.clerk, 'GET', '/api/floormap')).body as { floorplanRev: number };
+    expect((await put('W306', { polygon: square(100), expectedOutlineId: null }, ctx.clerk)).status).toBe(403);
+    expect((await put('T301', { polygon: square(100), expectedOutlineId: null })).body.error.code).toBe('OUTLINE_NOT_EXCEPTION');
+    expect((await put('Z999', { polygon: square(100), expectedOutlineId: null })).status).toBe(404);
+    expect((await put('W306', { polygon: [[-5, 0], [100, 0], [100, 100]], expectedOutlineId: null })).body.error.code).toBe('OUTLINE_OUTSIDE');
+    expect(
+      (await put('W306', { polygon: [[x - 100, y - 100], [x + 100, y + 100], [x + 100, y - 100], [x - 100, y + 100]], expectedOutlineId: null })).body.error.code,
+    ).toBe('OUTLINE_CROSSED');
+    expect((await put('W306', { polygon: square(3), expectedOutlineId: null })).body.error.code).toBe('OUTLINE_TOO_SMALL');
+    expect((await put('W306', { polygon: [[x, y], [x + 10, y]], expectedOutlineId: null })).status).toBe(400);
+
+    const rev0 = (await map()).floorplanRev;
+    const r = await put('W306', { polygon: square(150), expectedOutlineId: null });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const first = r.body.outlineId as number;
+    const active = (await api(ctx.app, ctx.clerk, 'GET', '/api/floorplans/active')).body as ActiveFloorplan;
+    const room = active.rooms.find((v) => v.code === 'W306')!;
+    // 转换结果不变（仍是例外），轮廓与面积用补画的：3 米 × 3 米
+    expect(room.status).toBe('leak');
+    expect(room.polygon).toEqual(square(150));
+    expect(room.areaM2).toBe(9);
+    expect(room.drawn).toMatchObject({ id: first, byName: '测试店主' });
+    expect(active.outlineRev).toBeGreaterThan(0);
+    expect((await map()).floorplanRev).toBeGreaterThan(rev0);
+    // 页面看到的补画对不上（别人刚画过）：拒绝
+    expect((await put('W306', { polygon: square(120), expectedOutlineId: null })).body.error.code).toBe('OUTLINE_STALE');
+    const r2 = await put('W306', { polygon: square(120), expectedOutlineId: first });
+    expect(r2.status).toBe(200);
+    const rows = await ctx.sql<{ voidedAt: string | null }[]>`SELECT voided_at FROM floorplan_room_outlines WHERE batch_id = ${activeId} AND code = 'W306' ORDER BY id`;
+    expect(rows.map((v) => v.voidedAt !== null)).toEqual([true, false]);
+    expect((await detail(activeId)).batch.outlineCount).toBe(1);
+    await expect(ctx.sql`DELETE FROM floorplan_room_outlines WHERE id = ${first}`).rejects.toThrow(/不能删除/);
+    await expect(ctx.sql`UPDATE floorplan_room_outlines SET area_centi_m2 = 1 WHERE id = ${first}`).rejects.toThrow(/只能作废一次/);
+    for (const c of await floorplanChecks(ctx.sql)) expect(c.ok, `${c.label}：${c.detail}`).toBe(true);
+    // geojson 里 W306 变成多边形
+    const g = (await ctx.app.inject({ method: 'GET', url: `/api/admin/floorplans/${activeId}/geojson`, headers: { cookie: ctx.owner } })).json();
+    expect(g.features.find((f: { properties: { code: string } }) => f.properties.code === 'W306').geometry.type).toBe('Polygon');
+    // 作废补画：回到只显示位置点
+    expect((await voidOne('W306', { expectedOutlineId: first })).body.error.code).toBe('OUTLINE_STALE');
+    // 缺了补画版本：拒绝（页面要带上）
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/admin/floorplans/${activeId}/outlines/W306/void`, { expectedOutlineId: r2.body.outlineId })).status).toBe(400);
+    const v = await voidOne('W306', { expectedOutlineId: r2.body.outlineId });
+    expect(v.status, JSON.stringify(v.body)).toBe(200);
+    const w306 = async () => ((await api(ctx.app, ctx.clerk, 'GET', '/api/floorplans/active')).body as ActiveFloorplan).rooms.find((w) => w.code === 'W306')!;
+    expect((await w306()).polygon).toBeNull();
+    // 迟到的第一次补画（Codex 复审 c0a1a7d）：补画后又作废，回到「没有补画」；按当时看到的版本重发的那次拒绝，作废掉的轮廓不会画回来
+    const s0 = await revOf(activeId);
+    const once = await put('W306', { polygon: square(150), expectedOutlineId: null, expectedRev: s0 });
+    expect(once.status, JSON.stringify(once.body)).toBe(200);
+    expect((await voidOne('W306', { expectedOutlineId: once.body.outlineId })).status).toBe(200);
+    const late = await put('W306', { polygon: square(150), expectedOutlineId: null, expectedRev: s0 });
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('OUTLINE_STALE');
+    expect((await w306()).polygon).toBeNull();
+    // 已换下的批次只读
+    const retired = (await list()).batches.find((b) => b.status === 'retired')!;
+    expect((await put('W306', { polygon: square(150), expectedOutlineId: null }, ctx.owner, retired.id)).body.error.code).toBe('FLOORPLAN_READONLY');
+    const [audit] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'floorplan_outline'`;
+    expect(audit!.n).toBe(5);
+  }, 60_000);
+});
+
+describe('PDF 底图（v0.7.19）', () => {
+  it('后台收矢量 PDF：图上有比例按图上的；没比例的要填，不填转换失败写明原因；填了与图上不同按填的、报告提示；DXF 填比例不记', async () => {
+    const pdfB64 = (kind?: Parameters<typeof floorplanSamplePdf>[0], stamp = String(Date.now())) => {
+      // 每次加一段注释让摘要不同（不影响读图）
+      const bytes = Buffer.concat([Buffer.from(floorplanSamplePdf(kind)), Buffer.from(`\n%${stamp}\n`)]);
+      return bytes.toString('base64');
+    };
+    const send = (contentBase64: string, extra: Record<string, unknown> = {}) =>
+      api(ctx.app, ctx.owner, 'POST', '/api/admin/floorplans', { fileName: '样例.pdf', contentBase64, sourceKind: 'designer', receivedOn: RECEIVED_ON, ...extra });
+    const r = await send(pdfB64(undefined, 'a'));
+    expect(r.status, JSON.stringify(r.body)).toBe(202);
+    expect(r.body.batch).toMatchObject({ fileFormat: 'pdf', pdfScale: null });
+    const d = await waitReady(r.body.batch.id);
+    expect(d.batch.status, d.batch.error ?? '').toBe('ready');
+    expect(d.floors.map((f) => f.code)).toEqual(expected.pdf.floors);
+    expect(codes(d.rooms.filter((x) => x.status === 'ok'))).toEqual([...expected.pdf.ok].sort());
+    expect(d.report!.pdf).toEqual({ pages: 2, scale: 100, scaleFrom: 'text', textScale: 100 });
+    expect(d.report!.issues.some((i) => i.kind === 'pdf_scale')).toBe(false);
+    // 没有比例文字、上传时也没填：转换失败，写明要填比例
+    const noScale = await send(pdfB64('no-scale', 'b'));
+    expect(noScale.status).toBe(202);
+    const failed = await waitReady(noScale.body.batch.id);
+    expect(failed.batch).toMatchObject({ status: 'failed', fileFormat: 'pdf' });
+    expect(failed.batch.error).toContain('请在上传时填写比例');
+    // 填了比例：按填的
+    const filled = await send(pdfB64('no-scale', 'c'), { pdfScale: 100 });
+    const fd = await waitReady(filled.body.batch.id);
+    expect(fd.batch).toMatchObject({ status: 'ready', pdfScale: 100 });
+    expect(fd.report!.pdf).toEqual({ pages: 2, scale: 100, scaleFrom: 'option', textScale: null });
+    // 填的与图上写的不同：按填的，报告里提示核对
+    const differ = await send(pdfB64(undefined, 'd'), { pdfScale: 200 });
+    const dd = await waitReady(differ.body.batch.id);
+    expect(dd.batch.status, dd.batch.error ?? '').toBe('ready');
+    expect(dd.report!.pdf).toMatchObject({ scale: 200, scaleFrom: 'option', textScale: 100 });
+    expect(dd.report!.issues.find((i) => i.kind === 'pdf_scale')!.message).toContain('PDF 上写的比例是 1:100，按上传时填的 1:200 换算');
+    // 同一份 PDF：比例相同不重复转换；改了比例（填错了改正）重新转换成新的一批（Codex 复审 0cf0505）
+    const same = await send(pdfB64(undefined, 'd'), { pdfScale: 200 });
+    expect(same.body).toMatchObject({ replayed: true, batch: { id: differ.body.batch.id } });
+    const corrected = await send(pdfB64(undefined, 'd'), { pdfScale: 100 });
+    expect(corrected.status, JSON.stringify(corrected.body)).toBe(202);
+    expect(corrected.body.replayed).toBe(false);
+    expect(corrected.body.batch.id).not.toBe(differ.body.batch.id);
+    const cd = await waitReady(corrected.body.batch.id);
+    expect(cd.batch).toMatchObject({ status: 'ready', pdfScale: 100 });
+    expect(cd.report!.pdf).toMatchObject({ scale: 100, scaleFrom: 'option', textScale: 100 });
+    // 没填比例的照旧按文件去重
+    expect((await send(pdfB64(undefined, 'a'))).body).toMatchObject({ replayed: true, batch: { id: r.body.batch.id } });
+    // 扫描件：没有矢量线条
+    const scanned = await send(pdfB64('scanned', 'e'));
+    const sd = await waitReady(scanned.body.batch.id);
+    expect(sd.batch.status).toBe('failed');
+    expect(sd.batch.error).toContain('没有矢量线条');
+    // 比例超出范围：400
+    expect((await send(pdfB64(undefined, 'f'), { pdfScale: 0 })).status).toBe(400);
+    expect((await send(pdfB64(undefined, 'g'), { pdfScale: 20000 })).status).toBe(400);
+  }, 120_000);
 });

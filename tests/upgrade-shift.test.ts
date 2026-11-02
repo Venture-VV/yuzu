@@ -82,6 +82,8 @@ beforeAll(async () => {
   await sql`CREATE TABLE rooms (id bigint, room_no text)`;
   // 现版本结账时记部门营业额快照（025 才有）：写入期间临时建一个什么都不做的函数，迁移前删掉（迁移 025 会给这张结账单补记）
   await sql.unsafe('CREATE FUNCTION yuzu_snapshot_checkout_items(p_checkout bigint, p_current boolean) RETURNS void LANGUAGE plpgsql AS $$ BEGIN END $$');
+  // 现版本结账时一起结束派对房等开着的使用单（036 才有）：写入期间临时建最小的表，迁移前删掉
+  await sql`CREATE TABLE space_usages (id bigint, usage_no text, visit_id bigint, status text)`;
   const deps = { sql, config };
   const as = (id: number, username: string): Actor => ({ id, username, displayName: username, role: username === 'owner' ? 'owner' : 'clerk', duties: [], mustChangePassword: false });
   const cash = (amount: number) => ({ idempotencyKey: randomUUID(), memberId, planId: null, paidAmount: amount, bonusAmount: 0, paymentMethod: 'cash' as const, paymentConfirmed: true as const });
@@ -106,8 +108,9 @@ beforeAll(async () => {
   await sql`DROP TABLE room_stays`;
   await sql`DROP TABLE rooms`;
   await sql`DROP FUNCTION yuzu_snapshot_checkout_items(bigint, boolean)`;
+  await sql`DROP TABLE space_usages`;
 
-  expect(await migrate(sql)).toEqual(['016_shift_boundary.sql', '017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql', '020_technicians.sql', '021_clockroom.sql', '022_dining.sql', '023_dining_tables.sql', '024_rooms.sql', '025_cashier.sql', '026_expenses.sql', '027_requisitions.sql', '028_legacy_ledger.sql', '029_warehouses.sql', '030_supplier_settlement.sql', '031_stock_cycles.sql', '032_spaces.sql', '033_floorplans.sql', '034_floormap.sql', '035_locations.sql']);
+  expect(await migrate(sql)).toEqual(['016_shift_boundary.sql', '017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql', '020_technicians.sql', '021_clockroom.sql', '022_dining.sql', '023_dining_tables.sql', '024_rooms.sql', '025_cashier.sql', '026_expenses.sql', '027_requisitions.sql', '028_legacy_ledger.sql', '029_warehouses.sql', '030_supplier_settlement.sql', '031_stock_cycles.sql', '032_spaces.sql', '033_floorplans.sql', '034_floormap.sql', '035_locations.sql', '036_floorplan_finish.sql']);
   app = await buildApp(sql, config);
 }, 60_000);
 

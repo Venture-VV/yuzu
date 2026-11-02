@@ -36,6 +36,7 @@ import { Badge, Button, Card, Field, Input, MoneyInput, Notice, PendingBadge, Se
 import { minuteText, roomsAdminKey as adminKey, useRoomsAdmin } from '../rooms/queries';
 import { rateText } from '../rooms/parts';
 import { AdminPage } from './AdminShell';
+import { UsageRulesCard } from './UsageRulesCard';
 
 
 export function RoomsSection() {
@@ -45,6 +46,7 @@ export function RoomsSection() {
         <RulesCard />
         <TypesCard />
         <RoomsCard />
+        <UsageRulesCard />
       </div>
     </AdminPage>
   );

@@ -71,6 +71,7 @@ import { readSheet, type Sheet } from '../lib/sheet-read';
 import { idParam, parse } from '../lib/validate';
 import { erpOpAbandoned } from './erp-ops';
 import { setTxTimeouts } from './inventory/common';
+import { openUsageIn } from './usages';
 
 const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 const text = (label: string, max: number) =>
@@ -86,7 +87,7 @@ const reasonText = (label: string) => z.string(`请填写${label}`).trim().min(2
 export const SPACE_IMPORT_MAX_ROWS = 2000;
 
 /** 空间台账的写入都先取这把锁（事务结束自动放），全部串行；等锁超过 5 秒按「正在被其他终端操作」拒绝 */
-async function lockLedger(tx: Tx) {
+export async function lockLedger(tx: Tx) {
   await setTxTimeouts(tx);
   await tx`SELECT pg_advisory_xact_lock(hashtextextended('space_ledger', 0))`;
 }
@@ -420,6 +421,13 @@ async function updateSpace(deps: Deps, id: number, raw: unknown, ctx: OpContext)
       const room = await linkedRoom(tx, id);
       if (room) {
         throw conflict('SPACE_HAS_ROOM', `空间 ${cur.code} 挂着客房房间「${room.roomNo}」，不能${s.active ? `改成「${s.businessType}」` : '停用'}；先在后台「客房 → 房间」里取消挂接`);
+      }
+    }
+    // 派对房等开着的使用单（v0.7.19）：不能停用、不能改业态（先结束使用单）；开单给空间一行加锁，与这里串行
+    if ((!s.active && cur.active) || s.businessType !== cur.businessType) {
+      const usage = await openUsageIn(tx, id);
+      if (usage) {
+        throw conflict('SPACE_HAS_USAGE', `空间 ${cur.code} 有开着的使用单 ${usage.usageNo}，不能${s.active ? `改成「${s.businessType}」` : '停用'}；先在平面图上结束使用`);
       }
     }
     if ((!s.active && cur.active) || (!isTechnicianBusinessType(s.businessType) && isTechnicianBusinessType(cur.businessType))) {

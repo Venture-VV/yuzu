@@ -1,7 +1,7 @@
 // 门店主导航的入口：主导航按它显示；ERP 顶栏的「返回门店」也按它判断门店那边有没有能用的页面、回到哪一页。
 // 库存、采购、货款、待办在 ERP 工作区（v0.7.3，用户菜单「进入 ERP」），不在这里。
 
-import { BedDouble, CalendarCheck2, ClipboardCheck, ConciergeBell, Hourglass, LayoutDashboard, ReceiptText, Settings2, UsersRound, UtensilsCrossed } from 'lucide-react';
+import { BedDouble, CalendarCheck2, ClipboardCheck, ConciergeBell, Hourglass, LayoutDashboard, MapPinned, ReceiptText, Settings2, UsersRound, UtensilsCrossed } from 'lucide-react';
 import { ADMIN_PERMISSIONS } from '@shared/admin';
 import type { Permission } from '@shared/permissions';
 import { useCan, useSession } from '../lib/session';
@@ -15,6 +15,11 @@ export interface StoreNavItem {
   end?: boolean;
   /** 额外条件，例如「钟房」只在技师功能开启后显示、「餐饮」「客房」只在对应功能开启后显示 */
   when?: (session: ReturnType<typeof useSession>) => boolean;
+  /**
+   * 对客页面（导览）：不算门店的工作页面。ERP 顶栏的「返回门店」不按它显示——所有岗位都能看导览，
+   * 只用 ERP 的后勤照旧没有「返回门店」（v0.7.3 验收 E2）
+   */
+  guestFacing?: boolean;
 }
 
 // 前台与会员储值、管理后台是独立的业务组，导航中用分隔线区分
@@ -29,6 +34,8 @@ const STORE_NAV: StoreNavItem[][] = [
     { to: '/settlement', label: '日结', icon: CalendarCheck2, perm: 'ledger.readToday' },
     { to: '/shift', label: '交班', icon: ClipboardCheck, perm: 'ledger.readToday' },
     { to: '/dashboard', label: '看板', icon: LayoutDashboard, perm: ['ledger.readToday', 'report.executive', 'report.members', 'report.technicians'] },
+    // 对客导览（v0.7.19）：所有岗位默认能看（区域导览图、大屏轮播）
+    { to: '/guide', label: '导览', icon: MapPinned, perm: 'guide.view', guestFacing: true },
   ],
   // 管理后台是单独的一套页面（规则、价目、手牌池、员工与权限）
   [{ to: '/admin', label: '后台', icon: Settings2, perm: [...ADMIN_PERMISSIONS] }],

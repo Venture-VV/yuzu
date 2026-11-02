@@ -42,10 +42,12 @@
 //                                         每日对账包（只读）：日结汇总、结账单、部门参考表、异常清单、交班、技师业绩、客房与押金，写到 <目录>/<营业日>/
 //   balance-changes --since "YYYY-MM-DD HH:MM" [--include-opening] [--out 文件.csv]
 //                                         某时刻之后有余额变动的会员（只读），退回旧系统时用于回写 EBC；不给 --out 时 CSV 打到标准输出
-//   floorplan-convert <图纸.dwg|.dxf> [--out 目录]
+//   floorplan-convert <图纸.dwg|.dxf|.pdf> [--out 目录] [--scale 比例]
 //                                         底图转换（RQ-004 第二段，不连数据库、不需要 DATABASE_URL）：每层 SVG 底图、spaces.geojson、
-//                                         转换报告（每个图层的用途与图元数）写到目录（默认 floorplan-<文件名>）
-//   floorplan-sample <文件.dxf>           写出合成的样例图纸（两层、与 docs/data/space-ledger-sample.csv 的编码对应），演示与验收用
+//                                         转换报告（每个图层的用途与图元数）写到目录（默认 floorplan-<文件名>）；
+//                                         矢量 PDF 给了 --scale（100 或 1:100 都行）按它换算尺寸，没给时按图上的比例文字（如 1:100）
+//   floorplan-sample <文件.dxf|.pdf>      写出合成的样例图纸（两层、与 docs/data/space-ledger-sample.csv 的编码对应），演示与验收用；
+//                                         文件名以 .pdf 结尾时写 PDF 版（1:100、每层一页、英文文字），否则写 DXF
 
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -86,8 +88,9 @@ import { buildDailyRecon } from './ops/recon';
 import { FLOORPLAN_ROOM_LABELS } from '@shared/floorplans';
 import { assertResettable, demoCheck, demoPrepare, demoReset, refuseLiveDemo, type DemoCheckResult, type PrepareResult } from './demo/prepare';
 import { ShowcaseConflictError } from './demo/showcase';
-import { floorplanSampleDxf, FLOORPLAN_SAMPLE_EXPECTED } from './demo/floorplan-sample';
+import { floorplanSampleDxf, floorplanSamplePdf, FLOORPLAN_SAMPLE_EXPECTED } from './demo/floorplan-sample';
 import { spacesGeoJson } from './floorplan/geojson';
+import { MAX_PDF_SCALE } from './floorplan/read-pdf';
 import { startConversion } from './floorplan/run';
 import { FLOORPLAN_TIMEOUT_MS } from './modules/floorplans';
 
@@ -168,20 +171,35 @@ async function offlineCommand(command: string | undefined, args: string[]): Prom
   switch (command) {
     case 'floorplan-convert': {
       const file = args[0];
-      if (!file || file.startsWith('--')) throw new Error('用法：floorplan-convert <图纸.dwg|.dxf> [--out 目录]');
+      if (!file || file.startsWith('--')) throw new Error('用法：floorplan-convert <图纸.dwg|.dxf|.pdf> [--out 目录] [--scale 比例]');
+      // PDF 的图纸比例 1:N：给了就按它换算（v0.7.19 起优先于图上的比例文字），没给按图上写的
+      const scaleText = flag(args, 'scale');
+      const pdfScale = scaleText === undefined ? undefined : Number(scaleText.trim().replace(/^1\s*[:：]\s*/, ''));
+      if (pdfScale !== undefined && !(Number.isFinite(pdfScale) && pdfScale >= 1 && pdfScale <= MAX_PDF_SCALE)) {
+        throw new Error(`--scale 是图纸比例 1:N 里的 N（1 到 ${MAX_PDF_SCALE}），例如 --scale 100`);
+      }
       const out = flag(args, 'out') ?? `floorplan-${basename(file).replace(/\.[^.]+$/, '')}`;
       await mkdir(out, { recursive: true });
       const resultFile = join(out, 'worker-result.json');
       console.log(`转换中（单独的进程，DWG 大约要半分钟）：${file}`);
       const t0 = Date.now();
-      const res = await startConversion(file, resultFile, FLOORPLAN_TIMEOUT_MS).done;
+      const res = await startConversion(file, resultFile, FLOORPLAN_TIMEOUT_MS, { pdfScale }).done;
       await rm(resultFile, { force: true });
-      if (!res.ok || !res.result) throw new Error(res.error ?? '转换失败');
+      if (!res.ok || !res.result) {
+        const reason = res.error ?? '转换失败';
+        throw new Error(/没有认出图纸比例/.test(reason) ? `${reason}（命令行加 --scale，例如 --scale 100 表示 1:100）` : reason);
+      }
       const r = res.result;
       for (const f of r.floors) await writeFile(join(out, `${f.code}.svg`), f.svg);
       await writeFile(join(out, 'spaces.geojson'), JSON.stringify(spacesGeoJson(r.rooms, { converter: r.converter, file: basename(file) }), null, 1));
       await writeFile(join(out, 'report.json'), JSON.stringify({ ...r, floors: r.floors.map((f) => ({ ...f, svg: undefined })) }, null, 1));
       console.log(`读图 ${((res.readMs ?? 0) / 1000).toFixed(1)} 秒，转换 ${(r.convertMs / 1000).toFixed(1)} 秒，共 ${((Date.now() - t0) / 1000).toFixed(1)} 秒；图元 ${r.source.entities} 个、图层 ${r.source.layers} 个`);
+      if (res.pdf) {
+        const from = res.pdf.scaleFrom === 'text' ? '图上的比例文字' : '--scale';
+        // 填的比例优先（v0.7.19）；与图上写的不同时提示
+        const differ = res.pdf.scaleFrom === 'option' && res.pdf.textScale !== null && res.pdf.textScale !== res.pdf.scale ? `；图上写的是 1:${res.pdf.textScale}，按 --scale 换算` : '';
+        console.log(`PDF ${res.pdf.pages} 页，按 1:${res.pdf.scale} 换算（${from}）${differ}`);
+      }
       for (const f of r.floors) {
         const rooms = r.rooms.filter((x) => x.floor === f.code);
         const ok = rooms.filter((x) => x.status === 'ok').length;
@@ -195,9 +213,12 @@ async function offlineCommand(command: string | undefined, args: string[]): Prom
     }
     case 'floorplan-sample': {
       const file = args[0];
-      if (!file) throw new Error('用法：floorplan-sample <文件.dxf>');
-      await writeFile(file, floorplanSampleDxf());
-      console.log(`已写出 ${file}（合成样例：两层、${FLOORPLAN_SAMPLE_EXPECTED.rooms} 个编码，预期结果见 src/server/demo/floorplan-expected.json）`);
+      if (!file) throw new Error('用法：floorplan-sample <文件.dxf|.pdf>');
+      const pdf = /\.pdf$/i.test(file);
+      await writeFile(file, pdf ? floorplanSamplePdf() : floorplanSampleDxf());
+      console.log(
+        `已写出 ${file}（合成样例${pdf ? ' PDF 版，1:100' : ''}：两层、${FLOORPLAN_SAMPLE_EXPECTED.rooms} 个编码，预期结果见 src/server/demo/floorplan-expected.json${pdf ? ' 的 pdf' : ''}）`,
+      );
       return true;
     }
     default:

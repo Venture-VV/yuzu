@@ -279,6 +279,7 @@ export function CheckoutDialog({
               {(p.sessions ?? []).length > 0 && <SessionsNotice sessions={p.sessions} />}
               {(p.dishes ?? []).length > 0 && <DishesNotice dishes={p.dishes} />}
               {(p.rooms ?? []).length > 0 && <RoomsNotice rooms={p.rooms!} onClosed={() => void preview.refetch()} />}
+              {(p.usages ?? []).length > 0 && <UsagesNotice usages={p.usages!} />}
               <ReviewTable preview={p} amounts={amounts} ticketPick={ticketPick} onPick={(id, t) => edit(() => setTicketPick((x) => ({ ...x, [id]: t })))} />
             </>
           )
@@ -368,6 +369,24 @@ function RoomsNotice({ rooms, onClosed }: { rooms: NonNullable<CheckoutPreview['
 }
 
 /** 餐饮（S5）：客人点的菜还没上齐时提醒（不拦结账；结账后厨房屏标出「客人已结账」） */
+/** 派对房等（v0.7.19）：客人开着的使用单结账后自动结束（房间变空闲）；场次费等要先挂到手牌账单上 */
+function UsagesNotice({ usages }: { usages: NonNullable<CheckoutPreview['usages']> }) {
+  return (
+    <div data-testid="checkout-usages">
+      <Notice tone="info" title="有客人开着派对房等的使用单：结账后自动结束">
+        <ul className="mt-1 space-y-0.5">
+          {usages.map((u) => (
+            <li key={u.usageId}>
+              <span className="num font-semibold">{u.tagCode}</span> · <span className="num font-semibold">{u.spaceCode}</span> {u.spaceName}（{u.usageNo}）
+            </li>
+          ))}
+        </ul>
+        <p className="mt-1">场次费请先挂到手牌账单上，再一起结账。</p>
+      </Notice>
+    </div>
+  );
+}
+
 function DishesNotice({ dishes }: { dishes: CheckoutPreview['dishes'] }) {
   return (
     <div data-testid="checkout-dishes">

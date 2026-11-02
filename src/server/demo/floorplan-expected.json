@@ -1,5 +1,5 @@
 {
-  "说明": "底图转换合成样例的固定预期（v0.7.15；v0.7.17 补上批次差异的「换了楼层」与 F22 换楼层样例）。图纸：docs/data/floorplan-sample.dxf（第一版）、floorplan-sample-v2.dxf（第二版）、floorplan-sample-v2-swap.dxf（第二版上把 T305 与 X201 对调，F22），也可以用 node dist/server/cli.js floorplan-sample <文件> 生成第一版。台账比对按 docs/data/space-zones-sample.csv 与 space-ledger-sample.csv 导入后的样例台账。",
+  "说明": "底图转换合成样例的固定预期（v0.7.15；v0.7.17 补上批次差异的「换了楼层」与 F22 换楼层样例）。图纸：docs/data/floorplan-sample.dxf（第一版）、floorplan-sample-v2.dxf（第二版）、floorplan-sample-v2-swap.dxf（第二版上把 T305 与 X201 对调，F22），也可以用 node dist/server/cli.js floorplan-sample <文件> 生成第一版。台账比对按 docs/data/space-zones-sample.csv 与 space-ledger-sample.csv 导入后的样例台账。PDF 输入的样例（floorplanSamplePdf，1:100，与第一版同样的两层）预期见 pdf，与 DXF 第一版的差异写在 pdf.说明。",
   "floors": [
     "L2",
     "L3"
@@ -95,5 +95,33 @@
         }
       ]
     }
+  },
+  "pdf": {
+    "说明": "PDF 样例：floorplan-sample <文件.pdf> 生成（每层一页、标准字体 Helvetica、没有图层；kind = layers 的一版按 DXF 的图层名分可选内容组，结果相同）。与 DXF 第一版只差 W306：转换按区域文字里的「走道」「大厅」认走廊，标准字体写不了中文，样例写的是 CORRIDOR、LOBBY，W306 朝走道的 3 米洞口连着整条走道却认不出那是走廊，就配上了轮廓（约 90 ㎡，含走道），不再列为「连到走廊」。楼层标题取图上的「L2」「L3」，比例取图上的 1:100。没有图层的 PDF 线都算墙，所以样例不画家具；其余房间的面积与 DXF 相差不到 0.5 ㎡（门的开启弧线是贝塞尔曲线，折法不同）。",
+    "floors": [
+      "L2",
+      "L3"
+    ],
+    "titles": [
+      "L2",
+      "L3"
+    ],
+    "scale": 100,
+    "ok": [
+      "T301",
+      "T302",
+      "T303",
+      "V312",
+      "W301",
+      "W302",
+      "W306",
+      "X201",
+      "X202"
+    ],
+    "merged": [
+      "W303",
+      "W305"
+    ],
+    "leak": []
   }
 }

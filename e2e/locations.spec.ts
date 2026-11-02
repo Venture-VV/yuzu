@@ -94,9 +94,16 @@ async function prepare(page: Page) {
   const plan = await getJson<ActiveFloorplan>(page, '/api/floorplans/active');
   if (!plan.rooms.some((r) => r.code === 'T301')) {
     const dxf = Buffer.from(`999\nE2E 实时位置 ${Date.now()}\n${floorplanSampleDxf(1)}`, 'utf8');
-    const up = await send<FloorplanDetail>(page, 'post', '/api/admin/floorplans', { fileName: 'E2E 实时位置样例.dxf', contentBase64: dxf.toString('base64'), note: 'E2E 实时位置' });
+    const up = await send<FloorplanDetail>(page, 'post', '/api/admin/floorplans', {
+      fileName: 'E2E 实时位置样例.dxf',
+      contentBase64: dxf.toString('base64'),
+      note: 'E2E 实时位置',
+      sourceKind: 'other',
+      receivedOn: new Date().toISOString().slice(0, 10),
+    });
     await expect.poll(async () => (await getJson<FloorplanDetail>(page, `/api/admin/floorplans/${up.batch.id}`)).batch.status, { timeout: 60_000 }).toBe('ready');
-    await send(page, 'post', `/api/admin/floorplans/${up.batch.id}/activate`, { expectedActiveId: plan.batchId });
+    const plans = await getJson<{ activeId: number | null; activationSeq: number }>(page, '/api/admin/floorplans');
+    await send(page, 'post', `/api/admin/floorplans/${up.batch.id}/activate`, { expectedActiveId: plans.activeId, expectedSeq: plans.activationSeq });
   }
   // 平面图在「客房」页：开启客房功能（收尾时关掉）
   await send(page, 'put', '/api/admin/rooms/rules', ROOM_RULES);
@@ -287,6 +294,7 @@ test.describe('v0.7.17 第一级实时位置', () => {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#fafafa"/></svg>`;
     const plan: ActiveFloorplan = {
       batchId: 900101,
+      outlineRev: 0,
       activatedAt: now,
       floors: [{ code: 'L3', title: '三层', width: W, height: H, svgBytes: svg.length, pathCount: 0, svgUrl: '/api/floorplans/900101/floors/L3/svg' }],
       rooms: spaces.map((s, i) => ({ floorCode: 'L3', code: s.code, label: `合成 ${s.code}`, status: 'ok', mergedWith: [], closeMm: 600, polygon: box(400 + i * 900, 600), labelAt: [700 + i * 900, 800], areaM2: 24, spaceId: s.id, displayName: s.displayName })) as ActiveFloorplan['rooms'],
@@ -315,7 +323,7 @@ test.describe('v0.7.17 第一级实时位置', () => {
       events: [],
       eventsTruncated: false,
     };
-    const map: FloorMapData = { serverTime: now, floorplanBatchId: 900101, spaces, sessions: [] };
+    const map: FloorMapData = { serverTime: now, floorplanBatchId: 900101, floorplanRev: 0, spaces, sessions: [], usageTypes: [], usages: [] };
     const board: RoomBoard = {
       rules: { enabled: true, checkoutMinute: 720, lateFullMinute: 1080, hourlyGraceMinutes: 15, defaultDeposit: 0 } as RoomBoard['rules'],
       rooms: [],

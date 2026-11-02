@@ -253,6 +253,17 @@ jobs:
         run: |
           node dist/server/cli.js check
           node dist/server/cli.js demo-check
+      - name: demo-reset：应用开着（空闲也算）时拒绝，不做备份，数据不变
+        env:
+          BACKUP_PATH: ${{ runner.temp }}/demo-backups-refused
+        run: |
+          mkdir -p "$BACKUP_PATH"
+          before=$(node dist/server/cli.js fingerprint | tail -n 1)
+          if node dist/server/cli.js demo-reset --confirm yuzu_demo > reset.txt 2>&1; then echo "::error::应用开着也清库了"; cat reset.txt; exit 1; fi
+          grep -q '应用还开着' reset.txt || { echo "::error::不是因为应用开着被拒绝"; cat reset.txt; exit 1; }
+          if ls "$BACKUP_PATH"/*.dump > /dev/null 2>&1; then echo "::error::应用开着时不该先做备份"; exit 1; fi
+          after=$(node dist/server/cli.js fingerprint | tail -n 1)
+          [ "$before" = "$after" ] || { echo "::error::被拒绝的 demo-reset 改动了数据"; exit 1; }
       - name: pg_dump / pg_restore 用 16 版（demo-reset 先备份）
         run: |
           if [ ! -x /usr/lib/postgresql/16/bin/pg_dump ]; then

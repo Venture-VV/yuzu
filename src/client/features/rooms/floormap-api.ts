@@ -17,10 +17,10 @@ export const useFloorMap = () =>
     placeholderData: keepPreviousData,
   });
 
-/** 在用的底图：按批次编号缓存，平面图状态里的批次变了（店主启用了新的一批）才重新取 */
-export const useActiveFloorplan = (batchId: number | null | undefined) =>
+/** 在用的底图：按批次编号（与补画轮廓的版本）缓存，平面图状态里的批次变了（店主启用了新的一批、补画了轮廓）才重新取 */
+export const useActiveFloorplan = (batchId: number | null | undefined, rev = 0) =>
   useQuery({
-    queryKey: ['floorplan', 'active', batchId ?? null],
+    queryKey: ['floorplan', 'active', batchId ?? null, rev],
     queryFn: () => api.get<ActiveFloorplan>('/api/floorplans/active'),
     enabled: batchId !== undefined,
     staleTime: Infinity,

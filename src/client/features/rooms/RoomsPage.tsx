@@ -39,7 +39,8 @@ import { SHIFT_ERRORS, shiftKeys, ShiftGate, useShiftReady } from '../shift/Shif
 import { DepositFields, depositProblem, guestOf, kindLabel, rateText, type DepositDraft } from './parts';
 import { dayText, minuteText, roomsKey, useRoomBoard } from './queries';
 import { StayDialog, type StayAction } from './StayDialog';
-import { FloorMapView, type MapAction } from './FloorMap';
+import { FloorMapView, type MapAction, type UsageResume } from './FloorMap';
+import { CloseUsageDialog, OpenUsageDialog } from './UsageDialogs';
 import { FLOOR_MAP_REFRESH_MS } from './floormap-api';
 
 export function RoomsPage() {
@@ -86,6 +87,9 @@ function RoomsBoardView() {
   const [stay, setStay] = useState<{ id: number; action?: StayAction | 'move' } | null>(null);
   const [housekeepRoom, setHousekeepRoom] = useState<RoomBoardRoom | null>(null);
   const [auditing, setAuditing] = useState(false);
+  // 派对房等的使用单（v0.7.19）：开单、结束、撤单的对话框；从顶部「结果待确认」进入时先交给平面图找到那间房
+  const [usageAction, setUsageAction] = useState<Extract<MapAction, { kind: 'usage_open' | 'usage_close' }> | null>(null);
+  const [usageResume, setUsageResume] = useState<UsageResume | null>(null);
   const canOperate = can('room.operate');
 
   // 顶部「结果待确认」的「去处理」：入住回到那间房的入住对话框，其余回到那张入住单的对应操作
@@ -99,9 +103,11 @@ function RoomsBoardView() {
       if (room) setCheckinRoomId(room.id);
     } else if (s && (resume === 'room_extend' || resume === 'room_deposit' || resume === 'room_refund' || resume === 'room_close')) {
       setStay({ id: s, action: resume === 'room_extend' ? 'extend' : resume === 'room_deposit' ? 'deposit' : resume === 'room_refund' ? 'refund' : 'close' });
+    } else if (resume === 'usage_open' || resume === 'usage_end' || resume === 'usage_cancel') {
+      setUsageResume({ type: resume, spaceId: Number(params.get('sp')) || null, usageId: Number(params.get('u')) || null });
     }
     const next = new URLSearchParams(params);
-    for (const k of ['resume', 'r', 's']) next.delete(k);
+    for (const k of ['resume', 'r', 's', 'sp', 'u']) next.delete(k);
     setParams(next, { replace: true });
   }, [resume, board.data, params, setParams]);
 
@@ -115,6 +121,7 @@ function RoomsBoardView() {
   const mapAction = (a: MapAction) => {
     if (a.kind === 'checkin') setCheckinRoomId(a.roomId);
     else if (a.kind === 'stay') setStay({ id: a.stayId, action: a.action });
+    else if (a.kind === 'usage_open' || a.kind === 'usage_close') setUsageAction(a);
     else setHousekeepRoom(a.room);
   };
 
@@ -171,7 +178,7 @@ function RoomsBoardView() {
       <AuditStrip board={b} onRun={canOperate ? () => setAuditing(true) : undefined} />
 
       {view === 'map' ? (
-        <FloorMapView board={b} onAction={mapAction} />
+        <FloorMapView board={b} onAction={mapAction} resume={usageResume} onResumed={() => setUsageResume(null)} />
       ) : rooms.length === 0 ? (
         <EmptyState art="calm" title="还没有房间" description="店主或能管理价目的岗位在「后台 → 客房」里建房型（全天房、钟点房与房价）和房间后，这里办入住、退房。" />
       ) : (
@@ -209,6 +216,10 @@ function RoomsBoardView() {
       )}
       {stay && <StayDialog id={stay.id} action={stay.action} board={b} onClose={() => setStay(null)} />}
       {housekeepRoom && <HousekeepingDialog room={housekeepRoom} onClose={() => setHousekeepRoom(null)} />}
+      {usageAction?.kind === 'usage_open' && <OpenUsageDialog space={usageAction.space} onClose={() => setUsageAction(null)} onDone={() => setUsageAction(null)} />}
+      {usageAction?.kind === 'usage_close' && (
+        <CloseUsageDialog usage={usageAction.usage} space={usageAction.space} mode={usageAction.mode} onClose={() => setUsageAction(null)} onDone={() => setUsageAction(null)} />
+      )}
       {auditing && <AuditDialog board={b} onClose={() => setAuditing(false)} />}
     </div>
   );

@@ -1,7 +1,7 @@
 // 房态图（飞书需求 RQ-004 第三段，v0.7.16，见 docs/ROOMMAP.md）：「客房」页的「平面图」视图。
 // 在用的底图按楼层画，空间台账里的每个空间按业态与状态着色（颜色与图例一一对应，口径见 @shared/floormap）：
 // 客房与房态看板同一个口径，点开可开房、查房、续住、换房、收押金、退房、改房态（都用「客房」页原来的对话框）；
-// 技师房看钟单（派钟时选的房间），点开看这间房里的钟；其他业态只显示业态。
+// 技师房看钟单（派钟时选的房间），点开看这间房里的钟；派对房等「开单即占用」（v0.7.19）点开可开单、结束使用、撤单；其他业态只显示业态。
 // 缩放平移：滚轮、双指、拖动，「适应屏幕」回到整层；底图与轮廓只取一次，状态每 5 秒刷新（只刷颜色，不重画底图）。
 // 实时位置（v0.7.17）：「人员」图层在有人的房间写人数、区域写在场人数，侧栏「在场」列名单与轨迹（见 People.tsx）。
 
@@ -10,10 +10,11 @@ import { Link } from 'react-router';
 import { Minus, Plus, Scan, Search, X } from 'lucide-react';
 import type { FloorplanFloor } from '@shared/floorplans';
 import type { LocationPerson } from '@shared/locations';
-import { DASHED_STATES, FLOOR_MAP_LEGEND, FLOOR_MAP_STATES, spaceMatches, spaceStatus, type FloorMapSession, type FloorMapSpace, type FloorMapState, type SpaceStatus } from '@shared/floormap';
+import { DASHED_STATES, FLOOR_MAP_LEGEND, FLOOR_MAP_STATES, spaceMatches, spaceStatus, type FloorMapSession, type FloorMapSpace, type FloorMapState, type FloorMapUsage, type SpaceStatus } from '@shared/floormap';
+import { durationText, usageMinutes, type UsageDetail } from '@shared/usages';
 import { ROOM_BOARD_LABELS, type RoomBoard, type RoomBoardRoom } from '@shared/rooms';
 import { areaText, spaceLabel } from '@shared/spaces';
-import { errorMessage } from '../../lib/api';
+import { api, errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
@@ -27,7 +28,10 @@ import type { StayAction } from './StayDialog';
 export type MapAction =
   | { kind: 'checkin'; roomId: number }
   | { kind: 'stay'; stayId: number; action?: StayAction | 'move' }
-  | { kind: 'housekeep'; room: RoomBoardRoom };
+  | { kind: 'housekeep'; room: RoomBoardRoom }
+  // 派对房等（v0.7.19）：开单、结束使用、撤单
+  | { kind: 'usage_open'; space: FloorMapSpace }
+  | { kind: 'usage_close'; space: FloorMapSpace; usage: FloorMapUsage; mode: 'end' | 'cancel' };
 
 interface Entry {
   key: string;
@@ -45,9 +49,26 @@ interface Entry {
 const MAX_ZOOM = 12;
 const NO_PEOPLE: LocationPerson[] = [];
 
-export function FloorMapView({ board, onAction }: { board: RoomBoard; onAction: (a: MapAction) => void }) {
+/** 从顶部「结果待确认」回到派对房等的使用单（v0.7.19）：开单回到那间房，结束、撤单回到那张使用单 */
+export interface UsageResume {
+  type: 'usage_open' | 'usage_end' | 'usage_cancel';
+  spaceId: number | null;
+  usageId: number | null;
+}
+
+export function FloorMapView({
+  board,
+  onAction,
+  resume = null,
+  onResumed,
+}: {
+  board: RoomBoard;
+  onAction: (a: MapAction) => void;
+  resume?: UsageResume | null;
+  onResumed?: () => void;
+}) {
   const fm = useFloorMap();
-  const plan = useActiveFloorplan(fm.data ? fm.data.floorplanBatchId : undefined);
+  const plan = useActiveFloorplan(fm.data ? fm.data.floorplanBatchId : undefined, fm.data?.floorplanRev ?? 0);
   const [floorCode, setFloorCode] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [types, setTypes] = useState<string[]>([]);
@@ -66,9 +87,41 @@ export function FloorMapView({ board, onAction }: { board: RoomBoard; onAction: 
 
   const data = fm.data;
   const p = plan.data;
+
+  // 结果待确认的使用单：找到那间房（结束、撤单时那张使用单已不在开着的列表里，就按编号取回）再打开对应的对话框
+  useEffect(() => {
+    if (!resume || !data) return;
+    let cancelled = false;
+    const done = () => onResumed?.();
+    void (async () => {
+      if (resume.type === 'usage_open') {
+        const space = data.spaces.find((s) => s.id === resume.spaceId);
+        if (space && !cancelled) onAction({ kind: 'usage_open', space });
+        done();
+        return;
+      }
+      if (!resume.usageId) return done();
+      let usage = data.usages.find((u) => u.id === resume.usageId) ?? null;
+      if (!usage) {
+        try {
+          const d = await api.get<UsageDetail>(`/api/usages/${resume.usageId}`);
+          usage = { id: d.id, usageNo: d.usageNo, spaceId: d.spaceId, visitId: d.visitId, tagCode: d.tagCode, guests: d.guests, note: d.note, openedAt: d.openedAt, openedByName: d.openedByName };
+        } catch {
+          usage = null;
+        }
+      }
+      const space = usage ? data.spaces.find((s) => s.id === usage.spaceId) : undefined;
+      if (usage && space && !cancelled) onAction({ kind: 'usage_close', space, usage, mode: resume.type === 'usage_end' ? 'end' : 'cancel' });
+      done();
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resume, data ? 1 : 0]);
   const spaceByCode = useMemo(() => new Map((data?.spaces ?? []).map((s) => [s.code, s])), [data]);
   const roomBySpace = useMemo(() => new Map(board.rooms.flatMap((r) => (r.spaceId ? [[r.spaceId, r] as const] : []))), [board]);
-  const statusOf = useCallback((s: FloorMapSpace) => spaceStatus(s, roomBySpace.get(s.id), data?.sessions ?? []), [roomBySpace, data]);
+  const statusOf = useCallback((s: FloorMapSpace) => spaceStatus(s, roomBySpace.get(s.id), data?.sessions ?? [], data?.usages ?? [], data?.usageTypes ?? []), [roomBySpace, data]);
 
   // 图上的每个编码：按编码对上空间台账（停用的也对上，画成灰色）
   const entries = useMemo<Entry[]>(
@@ -747,6 +800,8 @@ function SpacePanel({
         <RoomPart space={space} status={status} canOperate={can('room.operate')} canHousekeep={can('room.housekeep')} onAction={onAction} />
       ) : status?.kind === 'technician' ? (
         <SessionsPart sessions={status.sessions} now={now} canDispatch={can('technician.dispatch')} />
+      ) : status?.kind === 'usage' || status?.usage ? (
+        <UsagePart space={space} status={status} now={now} canOperate={can('room.operate')} canPost={can('frontdesk.operate')} onAction={onAction} />
       ) : (
         <p className="text-[13px] text-ink-3">{state === 'off' ? '空间台账里停用或不可售。' : `「${space.businessType}」目前没有对应的业务单据，房态图只显示业态。`}</p>
       )}
@@ -830,6 +885,72 @@ function RoomPart({ space, status, canOperate, canHousekeep, onAction }: { space
         <div className="flex flex-wrap gap-1.5">{buttons}</div>
       ) : (
         <p className="text-[12.5px] text-ink-3">{s ? '查看入住单要有「客房入住、退房」权限' : '入住要有「客房入住、退房」权限，改房态要有「客房打扫、维修」权限'}</p>
+      )}
+    </div>
+  );
+}
+
+/** 派对房等「开单即占用」（v0.7.19）：使用中显示使用单（手牌、开单时刻、已用时长、人数），可结束、撤单、去前台挂账；空闲可开单 */
+function UsagePart({
+  space,
+  status,
+  now,
+  canOperate,
+  canPost,
+  onAction,
+}: {
+  space: FloorMapSpace;
+  status: SpaceStatus;
+  now: number;
+  canOperate: boolean;
+  canPost: boolean;
+  onAction: (a: MapAction) => void;
+}) {
+  const u = status.usage;
+  if (!u) {
+    if (status.state === 'off') return <p className="text-[13px] text-ink-3">空间台账里停用或不可售，不能开单。</p>;
+    return canOperate ? (
+      <div className="space-y-2">
+        <p className="text-[13px] text-ink-3">「{space.businessType}」按开单即占用：开单后显示使用中，结束、使用人结账或撤单后空闲。</p>
+        <Button size="sm" variant="primary" onClick={() => onAction({ kind: 'usage_open', space })} data-testid="floormap-usage-open">
+          开单
+        </Button>
+      </div>
+    ) : (
+      <p className="text-[12.5px] text-ink-3">开单要有「客房入住、退房」权限</p>
+    );
+  }
+  const minutes = usageMinutes({ openedAt: u.openedAt, closedAt: null }, now);
+  return (
+    <div className="space-y-2.5">
+      <div className="space-y-1 rounded-md bg-yuzu-tint px-3 py-2 text-[13px]" data-testid="floormap-usage-info">
+        <p className="font-bold">
+          使用中 <Badge tone="lake">手牌 {u.tagCode}</Badge>
+        </p>
+        <p className="text-ink-2">
+          {formatTime(u.openedAt)} 开单 · 已用 {durationText(minutes)} · {u.guests} 人
+        </p>
+        <p className="text-[12px] text-ink-3">
+          {u.usageNo} · {u.openedByName}
+          {u.note ? ` · ${u.note}` : ''}
+        </p>
+      </div>
+      {canOperate ? (
+        <div className="flex flex-wrap gap-1.5">
+          <Button size="sm" variant="primary" onClick={() => onAction({ kind: 'usage_close', space, usage: u, mode: 'end' })} data-testid="floormap-usage-end">
+            结束使用
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => onAction({ kind: 'usage_close', space, usage: u, mode: 'cancel' })} data-testid="floormap-usage-cancel">
+            撤单
+          </Button>
+          {canPost && (
+            <Link to={`/frontdesk?v=${u.visitId}`} className="inline-flex h-8 items-center px-2 text-[13px] font-semibold text-pine hover:underline" data-testid="floormap-usage-post">
+              去前台挂账 →
+            </Link>
+          )}
+        </div>
+      ) : (
+        <p className="text-[12.5px] text-ink-3">结束、撤单要有「客房入住、退房」权限</p>
       )}
     </div>
   );

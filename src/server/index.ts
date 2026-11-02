@@ -5,6 +5,7 @@ import { loadConfig } from './config';
 import { createSql } from './db';
 import { migrate } from './migrate';
 import { sweepExpiredBonus } from './modules/bonus';
+import { holdAppPresence } from './presence';
 
 const config = loadConfig();
 const sql = createSql(config.databaseUrl);
@@ -24,6 +25,8 @@ async function waitForDatabase(retries = 30) {
 
 async function main() {
   await waitForDatabase();
+  // 应用在跑的标记（v0.7.19）：专用连接上的共享咨询锁，demo-reset 看到它就不清库（应用空闲、连接池没有连接时也看得到）
+  const presence = await holdAppPresence(config.databaseUrl);
   await migrate(sql, (msg) => console.log(msg));
   await ensureInitialOwner(sql, config, (msg) => console.log(msg));
   await purgeExpiredSessions(sql);
@@ -40,6 +43,12 @@ async function main() {
     } catch (error) {
       app.log.error({ err: error }, '赠金到期作废扫描失败，下一分钟重试');
     }
+    // 顺带检查应用在跑的标记（数据库重启过、专用连接断了就重新拿）
+    try {
+      await presence.ensure();
+    } catch (error) {
+      app.log.error({ err: error }, '应用在跑的标记没拿到，下一分钟重试');
+    }
   };
   await sweep();
   const sweeper = setInterval(() => void sweep(), 60_000);
@@ -48,6 +57,7 @@ async function main() {
     app.log.info(`收到 ${signal}，正在关闭…`);
     clearInterval(sweeper);
     await app.close();
+    await presence.release();
     await sql.end({ timeout: 5 });
     process.exit(0);
   };

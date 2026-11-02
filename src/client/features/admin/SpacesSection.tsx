@@ -43,9 +43,10 @@ import { useInvalidateSpaces, useSpaceLedger } from '../spaces/queries';
 import { AdminPage } from './AdminShell';
 import { SpaceImportCard } from './SpaceImportCard';
 import { FloorplanCard } from './FloorplanCard';
+import { GuideAdminCard } from './GuideAdminCard';
 import { LocationsCard, useInvalidateLocations } from './LocationsCard';
 
-type Tab = 'spaces' | 'zones' | 'import' | 'plans' | 'locations';
+type Tab = 'spaces' | 'zones' | 'import' | 'plans' | 'guide' | 'locations';
 type VerifyFilter = '' | SpaceVerifyStatus | 'unverified';
 interface Filters {
   floorId: number;
@@ -98,16 +99,21 @@ export function SpacesSection() {
           value={tab}
           onChange={setTab}
           ariaLabel="空间台账"
+          // 六个分页（v0.7.19 加「对客导览」）：手机上一行放不下就换行，不横向滚动
+          className="max-w-full flex-wrap"
           options={[
             { value: 'spaces', label: '空间' },
             { value: 'zones', label: '楼层与区域' },
             { value: 'import', label: '导入' },
             { value: 'plans', label: '底图' },
+            { value: 'guide', label: '对客导览' },
             { value: 'locations', label: '实时位置' },
           ]}
         />
         {tab === 'locations' ? (
           <LocationsCard />
+        ) : tab === 'guide' ? (
+          <GuideAdminCard />
         ) : tab === 'plans' ? (
           <FloorplanCard />
         ) : tab === 'import' ? (

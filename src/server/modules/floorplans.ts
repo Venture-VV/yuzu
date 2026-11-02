@@ -4,7 +4,11 @@
 //   · 同时只转换一份；转换超过 15 分钟停掉、记失败；应用重启时没转完的记失败（重新上传即可）；
 //   · 预览：每层底图 + 房间轮廓、例外清单、与空间台账比对（以台账为准，不按图纸改台账，D6）、与在用的那一批比对（房间增减、编码变更）；
 //   · 店主、店总「启用」一批（原来在用的换下）；第三段房态图读在用的那一批（/api/floorplans/active）。
-// 加锁：启用先取「底图」咨询锁（全部串行），再改批次；上传只靠唯一索引兜底（同一份文件、同时只转换一份）。
+// 图纸治理（v0.7.19，docs/FLOORPLAN_FINISH.md 第 4 节）：
+//   · 上传时登记图纸来源、版本或说明、收图日期；可勾「保存原图纸」（存进库，店主、店总能下载；默认只记摘要）；也收矢量 PDF（填比例或按页面上的比例文字）；
+//   · 底图档案：所有批次都能打开（已换下的只读）；在用历史（启用、换下、换回）每次一行；启用、换回时记下当时与空间台账的比对；
+//   · 已换下的批次可以「换回这一批」（写原因），原来在用的换下；与启用同一套确认与 FLOORPLAN_STALE 防护。
+// 加锁：启用、换回、补画轮廓先取「底图」咨询锁（全部串行），再改批次；上传只靠唯一索引兜底（同一份文件、同时只转换一份）。
 
 import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -13,8 +17,12 @@ import { join } from 'node:path';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
+  FLOORPLAN_SOURCE_KINDS,
   MAX_FLOORPLAN_FILE_BYTES,
+  PDF_SCALE_MAX,
+  PDF_SCALE_MIN,
   type ActiveFloorplan,
+  type FloorplanActivation,
   type FloorplanBatch,
   type FloorplanBatchDiff,
   type FloorplanBatchStatus,
@@ -27,19 +35,20 @@ import {
   type FloorplanRoomStatus,
 } from '@shared/floorplans';
 import { can } from '@shared/permissions';
-import type { Db, Sql } from '../db';
+import type { Db, Sql, Tx } from '../db';
 import { isUniqueViolation } from '../db';
 import { guardAny } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
 import { conflict, notFound, unprocessable } from '../lib/errors';
-import { idParam, parse } from '../lib/validate';
+import { dateSchema, idParam, parse } from '../lib/validate';
 import { CONVERTER_VERSION, LOCAL_UNIT_MM } from '../floorplan/convert';
 import { spacesGeoJson } from '../floorplan/geojson';
 import type { Pt } from '../floorplan/model';
 import { detectFormat, type DrawingFormat } from '../floorplan/read';
 import { startConversion, type RunningConversion, type WorkerOutput } from '../floorplan/run';
-import { setTxTimeouts } from './inventory/common';
+import { setTxTimeouts, todayIn } from './inventory/common';
+import { outlineRev, registerOutlineRoutes } from './floorplan-outlines';
 
 /** 转换超过这么久停掉（需求：30 分钟内出新底图与差异报告） */
 export const FLOORPLAN_TIMEOUT_MS = 15 * 60_000;
@@ -52,13 +61,16 @@ type BatchRow = FloorplanBatch;
 const batchSelect = (db: Db) => db`
   SELECT b.id, b.file_name, b.file_bytes, b.file_sha256, b.file_format, b.converter, b.status, b.error, b.note,
          b.created_at, cb.display_name AS created_by_name, b.finished_at, b.activated_at, ab.display_name AS activated_by_name,
-         b.retired_at, b.read_ms, b.convert_ms,
+         b.retired_at, rb.display_name AS retired_by_name, b.retire_reason, b.read_ms, b.convert_ms,
+         b.source_kind, b.source_note, b.received_on::text AS received_on, b.pdf_scale, b.original_saved,
          (SELECT count(*) FROM floorplan_floors f WHERE f.batch_id = b.id)::int AS floor_count,
          (SELECT count(*) FROM floorplan_rooms r WHERE r.batch_id = b.id)::int AS room_count,
-         (SELECT count(*) FROM floorplan_rooms r WHERE r.batch_id = b.id AND r.status = 'ok')::int AS ok_count
+         (SELECT count(*) FROM floorplan_rooms r WHERE r.batch_id = b.id AND r.status = 'ok')::int AS ok_count,
+         (SELECT count(*) FROM floorplan_room_outlines o WHERE o.batch_id = b.id AND o.voided_at IS NULL)::int AS outline_count
   FROM floorplan_batches b
   LEFT JOIN staff cb ON cb.id = b.created_by
-  LEFT JOIN staff ab ON ab.id = b.activated_by`;
+  LEFT JOIN staff ab ON ab.id = b.activated_by
+  LEFT JOIN staff rb ON rb.id = b.retired_by`;
 
 const toBatch = (r: BatchRow): FloorplanBatch => ({ ...r, id: Number(r.id), fileBytes: Number(r.fileBytes) });
 
@@ -66,6 +78,22 @@ async function getBatch(db: Db, id: number): Promise<FloorplanBatch> {
   const [row] = await db<BatchRow[]>`${batchSelect(db)} WHERE b.id = ${id}`;
   if (!row) throw notFound('没有这个底图批次');
   return toBatch(row);
+}
+
+/** 在用历史（启用、换下、换回）：新的在前 */
+async function activations(db: Db, batchId: number | null, limit: number): Promise<FloorplanActivation[]> {
+  const rows = await db<(Omit<FloorplanActivation, 'at'> & { at: string })[]>`
+    SELECT a.id, a.batch_id, b.file_name, a.kind, a.at, s.display_name AS staff_name, a.reason
+    FROM floorplan_activations a JOIN floorplan_batches b ON b.id = a.batch_id LEFT JOIN staff s ON s.id = a.staff_id
+    WHERE ${batchId === null ? db`true` : db`a.batch_id = ${batchId}`}
+    ORDER BY a.at DESC, a.id DESC LIMIT ${limit}`;
+  return rows.map((r) => ({ ...r, id: Number(r.id), batchId: Number(r.batchId), at: new Date(r.at).toISOString() }));
+}
+
+/** 在用历史的版本：最新一行的编号（启用、换下、换回各记一行，只增不减；没有记录为 0） */
+async function activationSeq(db: Db): Promise<number> {
+  const [row] = await db<{ n: number }[]>`SELECT coalesce(max(id), 0)::bigint AS n FROM floorplan_activations`;
+  return Number(row!.n);
 }
 
 export async function listFloorplans(db: Db): Promise<FloorplanList> {
@@ -78,6 +106,8 @@ export async function listFloorplans(db: Db): Promise<FloorplanList> {
     batches,
     activeId: active ? Number(active.id) : null,
     converting: batches.find((b) => b.status === 'converting') ?? null,
+    history: await activations(db, null, 100),
+    activationSeq: await activationSeq(db),
   };
 }
 
@@ -101,11 +131,14 @@ interface RoomRow {
   labelX: number;
   labelY: number;
   areaCentiM2: number | null;
+  drawnId: number | null;
+  drawnAt: string | null;
+  drawnByName: string | null;
 }
 
 const svgUrl = (batchId: number, floorCode: string) => `/api/floorplans/${batchId}/floors/${floorCode}/svg`;
 
-async function batchFloors(db: Db, batchId: number) {
+export async function batchFloors(db: Db, batchId: number) {
   const rows = await db<FloorRow[]>`
     SELECT floor_code, title, width, height, svg_bytes, path_count, frame FROM floorplan_floors WHERE batch_id = ${batchId} ORDER BY floor_code`;
   return rows.map((f) => ({
@@ -122,10 +155,15 @@ async function batchFloors(db: Db, batchId: number) {
   }));
 }
 
-async function batchRooms(db: Db, batchId: number): Promise<FloorplanRoom[]> {
+/** 这一批的房间：例外编码补画了轮廓的（v0.7.19），轮廓与面积用补画的 */
+export async function batchRooms(db: Db, batchId: number): Promise<FloorplanRoom[]> {
   const rows = await db<RoomRow[]>`
-    SELECT floor_code, code, label, status, merged_with, close_mm, polygon, label_x, label_y, area_centi_m2
-    FROM floorplan_rooms WHERE batch_id = ${batchId} ORDER BY floor_code, code`;
+    SELECT r.floor_code, r.code, r.label, r.status, r.merged_with, r.close_mm, coalesce(o.polygon, r.polygon) AS polygon, r.label_x, r.label_y,
+           coalesce(o.area_centi_m2, r.area_centi_m2) AS area_centi_m2, o.id AS drawn_id, o.created_at AS drawn_at, os.display_name AS drawn_by_name
+    FROM floorplan_rooms r
+    LEFT JOIN floorplan_room_outlines o ON o.batch_id = r.batch_id AND o.floor_code = r.floor_code AND o.code = r.code AND o.voided_at IS NULL
+    LEFT JOIN staff os ON os.id = o.created_by
+    WHERE r.batch_id = ${batchId} ORDER BY r.floor_code, r.code`;
   return rows.map((r) => ({
     floorCode: r.floorCode,
     code: r.code,
@@ -136,13 +174,14 @@ async function batchRooms(db: Db, batchId: number): Promise<FloorplanRoom[]> {
     polygon: r.polygon,
     labelAt: [r.labelX, r.labelY],
     areaM2: r.areaCentiM2 === null ? null : r.areaCentiM2 / 100,
+    drawn: r.drawnId === null ? null : { id: Number(r.drawnId), byName: r.drawnByName, at: new Date(r.drawnAt!).toISOString() },
   }));
 }
 
 const normLabel = (s: string) => s.replace(/\s+/g, '');
 
 /** 与空间台账比对：编码是主键；只比图上这几层的在用空间 */
-async function ledgerDiff(db: Db, floors: string[], rooms: FloorplanRoom[]): Promise<FloorplanLedgerDiff> {
+export async function ledgerDiff(db: Db, floors: string[], rooms: FloorplanRoom[]): Promise<FloorplanLedgerDiff> {
   const ledger = await db<{ code: string; displayName: string; sourceLabel: string; active: boolean; floorCode: string }[]>`
     SELECT s.code, s.display_name, s.source_label, s.active, f.code AS floor_code FROM spaces s JOIN floors f ON f.id = s.floor_id`;
   const byCode = new Map(ledger.map((s) => [s.code, s]));
@@ -235,7 +274,13 @@ export async function floorplanDetail(db: Db, id: number): Promise<FloorplanDeta
   const batch = await getBatch(db, id);
   const [meta] = await db<{ report: FloorplanReport | null }[]>`SELECT report FROM floorplan_batches WHERE id = ${id}`;
   const report = meta?.report ?? null;
-  if (batch.status === 'converting' || batch.status === 'failed') return { batch, floors: [], rooms: [], report, ledgerDiff: null, batchDiff: null };
+  const history = await activations(db, id, 50);
+  if (batch.status === 'converting' || batch.status === 'failed') {
+    return { batch, floors: [], rooms: [], report, ledgerDiff: null, batchDiff: null, history, activationLedgerDiff: null, outlineRev: 0 };
+  }
+  const [snap] = await db<{ at: string; kind: 'activate' | 'restore'; diff: FloorplanLedgerDiff }[]>`
+    SELECT at, kind, ledger_diff AS diff FROM floorplan_activations
+    WHERE batch_id = ${id} AND kind IN ('activate', 'restore') AND ledger_diff IS NOT NULL ORDER BY at DESC, id DESC LIMIT 1`;
   const floorRows = await batchFloors(db, id);
   const rooms = await batchRooms(db, id);
   const unitMm = Number((report?.params as { unitMm?: number } | undefined)?.unitMm ?? 1) || 1;
@@ -250,13 +295,19 @@ export async function floorplanDetail(db: Db, id: number): Promise<FloorplanDeta
       rooms,
     ),
     batchDiff: await batchDiff(db, id, batch.status, rooms, new Map(floorRows.map((f) => [f.floor.code, f.frame as number[]])), unitMm),
+    history,
+    activationLedgerDiff: snap ? { at: new Date(snap.at).toISOString(), kind: snap.kind, diff: snap.diff } : null,
+    outlineRev: await outlineRev(db, id),
   };
 }
 
 /** 在用的底图（第三段房态图用）：房间按编码对上空间台账 */
+/** 补画轮廓的版本（定义在 floorplan-outlines.ts，补画、作废时也核对） */
+export { outlineRev };
+
 export async function activeFloorplan(db: Db): Promise<ActiveFloorplan> {
   const [b] = await db<{ id: number; activatedAt: string }[]>`SELECT id, activated_at FROM floorplan_batches WHERE status = 'active'`;
-  if (!b) return { batchId: null, activatedAt: null, floors: [], rooms: [] };
+  if (!b) return { batchId: null, activatedAt: null, outlineRev: 0, floors: [], rooms: [] };
   const id = Number(b.id);
   const floors = (await batchFloors(db, id)).map((f) => f.floor);
   const rooms = await batchRooms(db, id);
@@ -266,6 +317,7 @@ export async function activeFloorplan(db: Db): Promise<ActiveFloorplan> {
   return {
     batchId: id,
     activatedAt: b.activatedAt,
+    outlineRev: await outlineRev(db, id),
     floors,
     rooms: rooms.map((r) => {
       const s = byCode.get(r.code);
@@ -280,10 +332,26 @@ const UploadSchema = z.object({
   fileName: z.string('请选择图纸文件').trim().min(1, '请选择图纸文件').max(200, '文件名太长（最多 200 个字）'),
   contentBase64: z.string('请选择图纸文件').min(1, '请选择图纸文件'),
   note: z.string().trim().max(200, '备注最多 200 字').default(''),
+  // 入库登记（v0.7.19）：图纸来源、版本或说明、收图日期
+  sourceKind: z.enum(FLOORPLAN_SOURCE_KINDS, '请选择图纸来源（设计方 / 门店 / 其他）'),
+  sourceNote: z.string().trim().max(100, '版本或说明最多 100 字').default(''),
+  receivedOn: dateSchema('收图日期'),
+  /** 勾了才把原图纸存进库（默认只记摘要） */
+  saveOriginal: z.boolean().default(false),
+  /** PDF 的图纸比例 1:N（不填按页面上的比例文字；DWG / DXF 不用） */
+  pdfScale: z
+    .number('比例不正确')
+    .int('比例要是整数（1:100 填 100）')
+    .min(PDF_SCALE_MIN, '比例不正确')
+    .max(PDF_SCALE_MAX, `比例最多 1:${PDF_SCALE_MAX}`)
+    .nullish()
+    .transform((v) => v ?? null),
 });
 
-async function sameFileBatch(db: Db, sha: string): Promise<FloorplanBatch | null> {
-  const [row] = await db<BatchRow[]>`${batchSelect(db)} WHERE b.file_sha256 = ${sha} AND b.converter = ${CONVERTER_VERSION} AND b.status <> 'failed'`;
+/** 同一份图纸（文件、转换器、上传时填的 PDF 比例都相同）已经转换过或正在转换：不重复转换（改了比例的重新转换） */
+async function sameFileBatch(db: Db, sha: string, pdfScale: number | null): Promise<FloorplanBatch | null> {
+  const [row] = await db<BatchRow[]>`
+    ${batchSelect(db)} WHERE b.file_sha256 = ${sha} AND b.converter = ${CONVERTER_VERSION} AND b.pdf_scale IS NOT DISTINCT FROM ${pdfScale}::int AND b.status <> 'failed'`;
   return row ? toBatch(row) : null;
 }
 
@@ -299,12 +367,23 @@ async function markFailed(db: Db, batchId: number, error: string, extra: { repor
 export async function storeConversion(db: Sql, batchId: number, out: WorkerOutput): Promise<void> {
   if (!out.ok || !out.result) return markFailed(db, batchId, out.error ?? '转换失败');
   const r = out.result;
+  // PDF（v0.7.19）：上传时填的比例与页面上写的不同，提示核对；没有图层时所有线都参与围合
+  const pdfIssues: FloorplanReport['issues'] = [];
+  if (out.pdf) {
+    if (out.pdf.scaleFrom === 'option' && out.pdf.textScale !== null && out.pdf.textScale !== out.pdf.scale) {
+      pdfIssues.push({ kind: 'pdf_scale', message: `PDF 上写的比例是 1:${out.pdf.textScale}，按上传时填的 1:${out.pdf.scale} 换算；房间面积不对时核对一下比例` });
+    }
+    if (r.layers.every((l) => l.name.startsWith('PDF-'))) {
+      pdfIssues.push({ kind: 'pdf_no_layers', message: 'PDF 没有图层：所有线都当结构线参与围合（家具、标注线也算），例外可能偏多；能导出带图层的 PDF 或 DWG 更准' });
+    }
+  }
   const report: FloorplanReport = {
     source: r.source,
     layers: r.layers,
-    issues: r.issues,
+    issues: [...pdfIssues, ...r.issues],
     params: r.params as unknown as Record<string, unknown>,
     worker: { readMs: out.readMs ?? null, peakRssMb: out.peakRssMb ?? null },
+    ...(out.pdf ? { pdf: out.pdf } : {}),
   };
   if (!r.floors.length) {
     return markFailed(db, batchId, '图上没认出楼层：没有房号与楼层标题，或结构图层的名字不在白名单里（看转换报告里的图层清单）', {
@@ -344,19 +423,19 @@ export class FloorplanJobs {
     private readonly log: (msg: string, err?: unknown) => void = () => {},
   ) {}
 
-  start(batchId: number, bytes: Buffer, format: DrawingFormat) {
-    const p = this.run(batchId, bytes, format).finally(() => this.pending.delete(p));
+  start(batchId: number, bytes: Buffer, format: DrawingFormat, opts: { pdfScale?: number | null } = {}) {
+    const p = this.run(batchId, bytes, format, opts).finally(() => this.pending.delete(p));
     this.pending.add(p);
   }
 
-  private async run(batchId: number, bytes: Buffer, format: DrawingFormat) {
+  private async run(batchId: number, bytes: Buffer, format: DrawingFormat, opts: { pdfScale?: number | null }) {
     let dir: string | null = null;
     try {
       dir = await mkdtemp(join(tmpdir(), 'yuzu-floorplan-'));
       const input = join(dir, `drawing.${format}`);
       const output = join(dir, 'result.json');
       await writeFile(input, bytes);
-      const conv = startConversion(input, output, this.timeoutMs);
+      const conv = startConversion(input, output, this.timeoutMs, opts.pdfScale ? { pdfScale: opts.pdfScale } : {});
       this.running.set(batchId, conv);
       const out = await conv.done;
       await storeConversion(this.db, batchId, out);
@@ -381,31 +460,41 @@ export class FloorplanJobs {
 }
 
 export async function uploadFloorplan(
-  db: Db,
+  db: Sql,
   jobs: FloorplanJobs,
   raw: unknown,
   actor: Actor,
   ip?: string,
+  timeZone = 'Asia/Shanghai',
 ): Promise<{ batch: FloorplanBatch; replayed: boolean }> {
   const input = parse(UploadSchema, raw);
+  if (input.receivedOn > todayIn(timeZone)) throw unprocessable('FUTURE_DATE', '收图日期不能晚于今天');
   const bytes = Buffer.from(input.contentBase64, 'base64');
   if (!bytes.length) throw unprocessable('FLOORPLAN_EMPTY', '文件是空的');
   if (bytes.length > MAX_FLOORPLAN_FILE_BYTES) throw unprocessable('FLOORPLAN_TOO_LARGE', `图纸超过 ${MAX_FLOORPLAN_FILE_BYTES / 1024 / 1024} MB`);
   const format = detectFormat(bytes);
-  if (!format) throw unprocessable('FLOORPLAN_FORMAT', '只收 DWG 或 ASCII DXF 图纸（这个文件的开头不是 DWG / DXF 的格式）');
+  if (!format) throw unprocessable('FLOORPLAN_FORMAT', '只收 DWG、ASCII DXF 或矢量 PDF 图纸（这个文件的开头不是这几种格式）');
+  const pdfScale = format === 'pdf' ? input.pdfScale : null;
   const sha = createHash('sha256').update(bytes).digest('hex');
-  const same = await sameFileBatch(db, sha);
+  const same = await sameFileBatch(db, sha, pdfScale);
   if (same) return { batch: same, replayed: true };
   let id: number;
   try {
-    const [row] = await db<{ id: number }[]>`
-      INSERT INTO floorplan_batches (file_name, file_sha256, file_bytes, file_format, converter, note, created_by)
-      VALUES (${input.fileName}, ${sha}, ${bytes.length}, ${format}, ${CONVERTER_VERSION}, ${input.note}, ${actor.id})
-      RETURNING id`;
-    id = Number(row!.id);
+    id = await db.begin(async (tx) => {
+      const [row] = await tx<{ id: number }[]>`
+        INSERT INTO floorplan_batches (file_name, file_sha256, file_bytes, file_format, converter, note, created_by,
+                                       source_kind, source_note, received_on, pdf_scale, original_saved)
+        VALUES (${input.fileName}, ${sha}, ${bytes.length}, ${format}, ${CONVERTER_VERSION}, ${input.note}, ${actor.id},
+                ${input.sourceKind}, ${input.sourceNote}, ${input.receivedOn}, ${pdfScale}, ${input.saveOriginal})
+        RETURNING id`;
+      const batchId = Number(row!.id);
+      // 原图纸与批次分表存（只追加），列表、详情都不读它
+      if (input.saveOriginal) await tx`INSERT INTO floorplan_originals (batch_id, content) VALUES (${batchId}, ${bytes})`;
+      return batchId;
+    });
   } catch (error) {
     if (!isUniqueViolation(error)) throw error;
-    const again = await sameFileBatch(db, sha);
+    const again = await sameFileBatch(db, sha, pdfScale);
     if (again) return { batch: again, replayed: true };
     const [busy] = await db<{ fileName: string }[]>`SELECT file_name FROM floorplan_batches WHERE status = 'converting'`;
     throw conflict('FLOORPLAN_BUSY', `正在转换另一份图纸${busy ? `（${busy.fileName}）` : ''}，等它转换完再上传`);
@@ -415,23 +504,49 @@ export async function uploadFloorplan(
     action: 'floorplan_upload',
     targetType: 'floorplan_batch',
     targetId: id,
-    detail: { fileName: input.fileName, bytes: bytes.length, sha256: sha, format },
+    detail: {
+      fileName: input.fileName,
+      bytes: bytes.length,
+      sha256: sha,
+      format,
+      source: input.sourceKind,
+      ...(input.sourceNote ? { sourceNote: input.sourceNote } : {}),
+      receivedOn: input.receivedOn,
+      ...(pdfScale ? { pdfScale } : {}),
+      originalSaved: input.saveOriginal,
+    },
     ip,
   });
-  jobs.start(id, bytes, format);
+  jobs.start(id, bytes, format, { pdfScale });
   return { batch: await getBatch(db, id), replayed: false };
 }
 
 // ───────────────────────── 启用 ─────────────────────────
 
+const expectedActiveId = z.number('缺少页面上的在用批次，请刷新后重试').int().positive().nullable();
+// 页面上看到的在用历史版本（列表的 activationSeq：在用历史最新一行的编号，只增不减）。换回让旧批次能再在用，
+// 在用批次会 A → B → A 回到原样，只比在用批次挡不住迟到的请求（Codex 复审 0cf0505）；历史版本每换一次都变，迟到的一律对不上
+const expectedSeq = z.number('缺少页面上的底图版本，请刷新后重试').int().nonnegative();
 const ActivateSchema = z.object({
   // 页面上看到的在用批次（没有为 null）：对不上说明刚被换过，这次不启用（v0.7.15 审查：超时后迟到的启用请求不能把后来启用的那批换下）
-  expectedActiveId: z.number('缺少页面上的在用批次，请刷新后重试').int().positive().nullable(),
+  expectedActiveId,
+  expectedSeq,
+  /** 原来在用的为什么换下（v0.7.19，选填，记进在用历史） */
+  reason: z.string().trim().max(200, '原因最多 200 字').default(''),
+});
+const RestoreSchema = z.object({
+  expectedActiveId,
+  expectedSeq,
+  reason: z.string('请写明换回这一批的原因（至少 2 个字）').trim().min(2, '请写明换回这一批的原因（至少 2 个字）').max(200, '原因最多 200 字'),
 });
 
-export async function activateFloorplan(deps: Deps, id: number, raw: unknown, actor: Actor, ip?: string): Promise<{ replayed: boolean }> {
+/**
+ * 启用（待启用 → 在用）或换回（已换下 → 在用，v0.7.19）：原来在用的换下；在用历史各记一行，启用、换回时记下当时与空间台账的比对。
+ * 页面上看到的在用批次或在用历史版本对不上（刚被换过）就拒绝（FLOORPLAN_STALE）。
+ */
+async function switchActive(deps: Deps, id: number, raw: unknown, actor: Actor, ip: string | undefined, mode: 'activate' | 'restore'): Promise<{ replayed: boolean }> {
   const { sql } = deps;
-  const { expectedActiveId } = parse(ActivateSchema, raw);
+  const input = parse(mode === 'activate' ? ActivateSchema : RestoreSchema, raw);
   try {
     return await sql.begin(async (tx) => {
       await setTxTimeouts(tx);
@@ -441,27 +556,47 @@ export async function activateFloorplan(deps: Deps, id: number, raw: unknown, ac
       const target = rows.find((r) => Number(r.id) === id);
       if (!target) throw notFound('没有这个底图批次');
       if (target.status === 'active') return { replayed: true };
-      if (target.status !== 'ready') {
+      if (mode === 'activate' && target.status !== 'ready') {
         throw conflict(
           'FLOORPLAN_NOT_READY',
-          target.status === 'converting' ? '还在转换，转换完成后才能启用' : target.status === 'failed' ? '转换失败的批次不能启用' : '已换下的批次不能再启用，请重新上传图纸',
+          target.status === 'converting' ? '还在转换，转换完成后才能启用' : target.status === 'failed' ? '转换失败的批次不能启用' : '这一批已换下，要用它请点「换回这一批」（写原因）',
         );
+      }
+      if (mode === 'restore' && target.status !== 'retired') {
+        throw conflict('FLOORPLAN_NOT_RETIRED', target.status === 'ready' ? '这一批还没启用过，请用「启用」' : '只有已换下的批次能换回');
       }
       const previous = rows.find((r) => r.status === 'active');
-      if ((previous ? Number(previous.id) : null) !== expectedActiveId) {
+      const seq = await activationSeq(tx);
+      if ((previous ? Number(previous.id) : null) !== input.expectedActiveId || seq !== input.expectedSeq) {
         throw conflict(
           'FLOORPLAN_STALE',
-          '在用的底图刚被换过（可能是刚才没收到结果的那次启用已经生效，或有人同时在操作），这次没有启用；请刷新后看一下再决定',
+          `在用的底图刚被换过（可能是刚才没收到结果的那次${mode === 'activate' ? '启用' : '换回'}已经生效，或有人同时在操作），这次没有${mode === 'activate' ? '启用' : '换回'}；请刷新后看一下再决定`,
         );
       }
-      if (previous) await tx`UPDATE floorplan_batches SET status = 'retired', retired_by = ${actor.id}, retired_at = now() WHERE id = ${previous.id}`;
-      await tx`UPDATE floorplan_batches SET status = 'active', activated_by = ${actor.id}, activated_at = now() WHERE id = ${id}`;
+      const [now] = await tx<{ at: Date }[]>`SELECT now() AS at`;
+      const at = now!.at;
+      const reason = input.reason;
+      if (previous) {
+        await tx`
+          UPDATE floorplan_batches SET status = 'retired', retired_by = ${actor.id}, retired_at = ${at}, retire_reason = ${reason || null}
+          WHERE id = ${previous.id}`;
+        await tx`INSERT INTO floorplan_activations (batch_id, kind, at, staff_id, reason) VALUES (${previous.id}, 'retire', ${at}, ${actor.id}, ${reason})`;
+      }
+      await tx`
+        UPDATE floorplan_batches SET status = 'active', activated_by = ${actor.id}, activated_at = ${at}, retired_at = NULL, retired_by = NULL, retire_reason = NULL
+        WHERE id = ${id}`;
+      // 当时与空间台账的比对（底图档案里看）
+      const floors = (await batchFloors(tx, id)).map((f) => f.floor.code);
+      const snapshot = await ledgerDiff(tx, floors, await batchRooms(tx, id));
+      await tx`
+        INSERT INTO floorplan_activations (batch_id, kind, at, staff_id, reason, ledger_diff)
+        VALUES (${id}, ${mode}, ${at}, ${actor.id}, ${reason}, ${tx.json(snapshot as never)})`;
       await writeAudit(tx, {
         staffId: actor.id,
-        action: 'floorplan_activate',
+        action: mode === 'activate' ? 'floorplan_activate' : 'floorplan_restore',
         targetType: 'floorplan_batch',
         targetId: id,
-        detail: { previous: previous ? Number(previous.id) : null },
+        detail: { previous: previous ? Number(previous.id) : null, ...(reason ? { reason } : {}) },
         ip,
       });
       return { replayed: false };
@@ -471,6 +606,10 @@ export async function activateFloorplan(deps: Deps, id: number, raw: unknown, ac
     throw error;
   }
 }
+
+export const activateFloorplan = (deps: Deps, id: number, raw: unknown, actor: Actor, ip?: string) => switchActive(deps, id, raw, actor, ip, 'activate');
+/** 换回旧底图（v0.7.19）：已换下的批次写原因换回，原来在用的换下 */
+export const restoreFloorplan = (deps: Deps, id: number, raw: unknown, actor: Actor, ip?: string) => switchActive(deps, id, raw, actor, ip, 'restore');
 
 // ───────────────────────── 自检 ─────────────────────────
 
@@ -488,8 +627,20 @@ export async function floorplanChecks(db: Db): Promise<{ label: string; ok: bool
        OR EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(r.polygon, '[]'::jsonb)) p
                   WHERE (p->>0)::numeric < 0 OR (p->>1)::numeric < 0 OR (p->>0)::numeric > f.width OR (p->>1)::numeric > f.height)
     LIMIT 5`;
-  const [counts] = await db<{ batches: number; converting: number }[]>`
-    SELECT count(*)::int AS batches, count(*) FILTER (WHERE status = 'converting')::int AS converting FROM floorplan_batches`;
+  // 补画的轮廓（v0.7.19）：只给例外编码（不是配上的、不是编码重复的）补画，点都在图框内
+  const badOutlines = await db<{ ref: string }[]>`
+    SELECT o.batch_id || '/' || o.code AS ref
+    FROM floorplan_room_outlines o JOIN floorplan_rooms r ON r.batch_id = o.batch_id AND r.floor_code = o.floor_code AND r.code = o.code
+    JOIN floorplan_floors f ON f.batch_id = o.batch_id AND f.floor_code = o.floor_code
+    WHERE o.voided_at IS NULL AND (r.status IN ('ok', 'duplicate')
+       OR EXISTS (SELECT 1 FROM jsonb_array_elements(o.polygon) p
+                  WHERE (p->>0)::numeric < 0 OR (p->>1)::numeric < 0 OR (p->>0)::numeric > f.width OR (p->>1)::numeric > f.height))
+    LIMIT 5`;
+  outside.push(...badOutlines);
+  const [counts] = await db<{ batches: number; converting: number; outlines: number }[]>`
+    SELECT count(*)::int AS batches, count(*) FILTER (WHERE status = 'converting')::int AS converting,
+           (SELECT count(*) FROM floorplan_room_outlines o JOIN floorplan_batches b ON b.id = o.batch_id WHERE o.voided_at IS NULL AND b.status = 'active')::int AS outlines
+    FROM floorplan_batches`;
   const emptyActive = active && active.floors === 0;
   return [
     {
@@ -498,9 +649,9 @@ export async function floorplanChecks(db: Db): Promise<{ label: string; ok: bool
       detail: emptyActive
         ? `在用的底图批次 #${active.id} 没有底图`
         : outside.length
-          ? `${outside.length} 个房间的位置或轮廓超出图框（如 ${outside.map((o) => o.ref).join('、')}）`
+          ? `${outside.length} 个房间的位置或轮廓超出图框，或补画的轮廓不在例外编码上（如 ${outside.map((o) => o.ref).join('、')}）`
           : active
-            ? `在用批次 #${active.id}：${active.floors} 层、编码 ${active.rooms} 个（配上轮廓 ${active.ok} 个）；共 ${counts!.batches} 批${counts!.converting ? `，转换中 ${counts!.converting} 批` : ''}`
+            ? `在用批次 #${active.id}：${active.floors} 层、编码 ${active.rooms} 个（配上轮廓 ${active.ok} 个${counts!.outlines ? `，补画 ${counts!.outlines} 个` : ''}）；共 ${counts!.batches} 批${counts!.converting ? `，转换中 ${counts!.converting} 批` : ''}`
             : `还没有启用的底图（共 ${counts!.batches} 批）`,
     },
   ];
@@ -532,7 +683,7 @@ export function registerFloorplanRoutes(app: FastifyInstance, deps: Deps, jobs =
 
   app.get('/api/admin/floorplans', { preHandler: admin }, async () => listFloorplans(sql));
   app.post('/api/admin/floorplans', { preHandler: admin, bodyLimit: Math.ceil((MAX_FLOORPLAN_FILE_BYTES * 4) / 3) + 64 * 1024 }, async (req, reply) => {
-    const r = await uploadFloorplan(sql, jobs, req.body, req.actor, req.ip);
+    const r = await uploadFloorplan(sql, jobs, req.body, req.actor, req.ip, deps.config.timezone);
     reply.code(r.replayed ? 200 : 202);
     return r;
   });
@@ -542,6 +693,27 @@ export function registerFloorplanRoutes(app: FastifyInstance, deps: Deps, jobs =
     await activateFloorplan(deps, id, req.body, req.actor, req.ip);
     return floorplanDetail(sql, id);
   });
+  // 换回旧底图（v0.7.19）
+  app.post('/api/admin/floorplans/:id/restore', { preHandler: admin }, async (req) => {
+    const id = parse(idParam, req.params).id;
+    await restoreFloorplan(deps, id, req.body, req.actor, req.ip);
+    return floorplanDetail(sql, id);
+  });
+  // 保存的原图纸（v0.7.19，上传时勾了才有）：店主、店总下载，记审计
+  app.get('/api/admin/floorplans/:id/original', { preHandler: admin }, async (req, reply) => {
+    const id = parse(idParam, req.params).id;
+    const batch = await getBatch(sql, id);
+    const [o] = await sql<{ content: Buffer }[]>`SELECT content FROM floorplan_originals WHERE batch_id = ${id}`;
+    if (!o) throw notFound('这一批没有保存原图纸（上传时没勾「保存原图纸」）');
+    await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'floorplan_original', targetId: id, ip: req.ip });
+    reply
+      .header('content-type', batch.fileFormat === 'pdf' ? 'application/pdf' : 'application/octet-stream')
+      .header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(batch.fileName)}`)
+      .header('cache-control', 'no-store');
+    return o.content;
+  });
+  // 例外编码补画轮廓（v0.7.19）
+  registerOutlineRoutes(app, deps, admin);
   // spaces.geojson：每个编码一个要素（配上的是多边形，例外是文字所在的点）
   app.get('/api/admin/floorplans/:id/geojson', { preHandler: admin }, async (req, reply) => {
     const id = parse(idParam, req.params).id;

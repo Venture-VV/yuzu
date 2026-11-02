@@ -33,7 +33,8 @@ export const hashRequest = (payload: unknown) => createHash('sha256').update(JSO
 
 /**
  * 前台的幂等业务类型；table_open / table_post / table_checkout 是餐饮第二步的开台、桌台点单与桌台结账；
- * room_* 是客房（S7）的入住、续住加段、收押金、退押金、退房；line_move 是转单（v0.7.6，明细转到另一张手牌）
+ * room_* 是客房（S7）的入住、续住加段、收押金、退押金、退房；line_move 是转单（v0.7.6，明细转到另一张手牌）；
+ * usage_* 是派对房等的使用单（v0.7.19）：开单、结束、撤单
  */
 export const FRONTDESK_OPS = [
   'checkin',
@@ -49,6 +50,9 @@ export const FRONTDESK_OPS = [
   'room_refund',
   'room_close',
   'line_move',
+  'usage_open',
+  'usage_end',
+  'usage_cancel',
 ] as const;
 export type FrontdeskOp = (typeof FRONTDESK_OPS)[number];
 
@@ -71,6 +75,9 @@ export const FRONTDESK_OP_PERMISSIONS: Record<FrontdeskOp, readonly Permission[]
   room_refund: ['room.operate'],
   room_close: ['room.operate'],
   line_move: ['frontdesk.operate'],
+  usage_open: ['room.operate'],
+  usage_end: ['room.operate'],
+  usage_cancel: ['room.operate'],
 };
 
 export const abandonedError = () =>
@@ -148,6 +155,9 @@ export function mapUniqueViolation(error: unknown): unknown {
   }
   if (isUniqueViolation(error, 'room_stays_room_open_uq')) {
     return conflict('ROOM_TAKEN', '这间房刚刚被其他终端入住，请换一间空房');
+  }
+  if (isUniqueViolation(error, 'space_usages_one_open')) {
+    return conflict('USAGE_TAKEN', '这间房刚刚被其他终端开单，先结束那张再开单');
   }
   if (isUniqueViolation(error, 'group_buy_coupons_code_uq')) {
     return conflict('COUPON_USED', '这张团购券刚刚已在其他终端登记，同一张券不能重复使用');

@@ -43,6 +43,9 @@ export interface PlanDrawing {
     skipped: Record<string, number>;
     /** 读图时的非致命错误码（LibreDWG，如 64 = 个别数值超出范围），没有为空 */
     readErrorCode?: number;
+    /** PDF 才有：页数、换算用的图纸比例 1:N，比例从哪来（图上的比例文字 / 上传时填的） */
+    /** PDF（v0.7.19）：页数、换算用的比例、比例从哪来（上传时填的 / 页面上的文字）、页面上写的比例（没有为 null） */
+    pdf?: { pages: number; scale: number; scaleFrom: 'text' | 'option'; textScale: number | null };
   };
 }
 

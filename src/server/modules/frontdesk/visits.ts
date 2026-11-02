@@ -61,6 +61,7 @@ import { locateCheckin, locateGone } from '../locations';
 import { getCheckout } from './checkout';
 import { getStay } from '../rooms';
 import { getTableSession } from '../tables';
+import { closeUsagesOfVisits, getUsage } from '../usages';
 import { resolveTicketType, ticketAuthRequired, visitTicket } from './tickets';
 import { lineTechnicianSql } from '../technicians';
 import { assertVipAllowed, consumeVipShortfalls, memberLevels, vipShortfalls } from './vip';
@@ -499,6 +500,8 @@ export async function cancelVisit(deps: Deps, visitId: number, raw: unknown, ctx
       UPDATE visits SET status = 'cancelled', closed_at = ${at}, closed_by = ${ctx.actor.id}, close_reason = ${input.reason}
       WHERE id = ${visit.id}`;
     await closeGroupIfEmpty(tx, visit.groupId, at);
+    // 派对房等的使用单（v0.7.19）：撤销来访时一起结束
+    const usages = await closeUsagesOfVisits(tx, [visit.id], 'visit_cancel', { at, staffId: ctx.actor.id });
     // 实时位置（v0.7.17）：撤销来访，当前位置清掉
     await locateGone(tx, [visit.id], 'visit_cancel', null, { at, staffId: ctx.actor.id });
     await writeAudit(tx, {
@@ -506,7 +509,7 @@ export async function cancelVisit(deps: Deps, visitId: number, raw: unknown, ctx
       action: 'frontdesk_cancel',
       targetType: 'visit',
       targetId: visit.id,
-      detail: { visitNo: visit.visitNo, reason: input.reason },
+      detail: { visitNo: visit.visitNo, reason: input.reason, ...(usages.length ? { usages } : {}) },
       ip: ctx.ip,
       businessDate: await businessDate(tx, deps, at),
     });
@@ -795,6 +798,10 @@ export async function lookupFrontdeskOp(db: Db, key: string, expected?: Frontdes
   // 客房（S7）：入住、续住加段、收退押金、退房查回这间房的入住单
   if (row.opType === 'room_checkin' || row.opType === 'room_extend' || row.opType === 'room_deposit' || row.opType === 'room_refund' || row.opType === 'room_close') {
     return { found: true as const, type: row.opType as 'room_checkin' | 'room_extend' | 'room_deposit' | 'room_refund' | 'room_close', stay: await getStay(db, row.refId) };
+  }
+  // 派对房等的使用单（v0.7.19）：开单、结束、撤单查回这张使用单
+  if (row.opType === 'usage_open' || row.opType === 'usage_end' || row.opType === 'usage_cancel') {
+    return { found: true as const, type: row.opType as 'usage_open' | 'usage_end' | 'usage_cancel', usage: await getUsage(db, row.refId) };
   }
   const [c] = await db<{ visitId: number }[]>`SELECT visit_id FROM visit_tag_changes WHERE id = ${row.refId}`;
   return { found: true as const, type: 'tag_swap' as const, visit: await getVisit(db, c!.visitId) };
