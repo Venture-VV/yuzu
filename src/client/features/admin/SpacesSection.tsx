@@ -43,7 +43,7 @@ import { useInvalidateSpaces, useSpaceLedger } from '../spaces/queries';
 import { AdminPage } from './AdminShell';
 import { SpaceImportCard } from './SpaceImportCard';
 import { FloorplanCard } from './FloorplanCard';
-import { LocationsCard } from './LocationsCard';
+import { LocationsCard, useInvalidateLocations } from './LocationsCard';
 
 type Tab = 'spaces' | 'zones' | 'import' | 'plans' | 'locations';
 type VerifyFilter = '' | SpaceVerifyStatus | 'unverified';
@@ -65,6 +65,7 @@ export function SpacesSection() {
   const [filters, setFilters] = useState<Filters>(NO_FILTER);
   const ledger = useSpaceLedger();
   const invalidate = useInvalidateSpaces();
+  const invalidateLocations = useInvalidateLocations();
   return (
     <AdminPage
       section="spaces"
@@ -72,7 +73,12 @@ export function SpacesSection() {
       description="楼层、区域与空间（编码图的编码，建好后不能改）、别名与核对状态；空间清单、区域清单的导入与导出；编码图转换成每层底图与房间轮廓；实时位置的开关、刷卡点与项目所在区域。客房房间在「客房」里挂接空间。"
     >
       <div className="space-y-4">
-        <ErpPendingPanel types={['space_import']} className="space-y-2" onFound={() => void invalidate()} />
+        {/* 导入与模拟刷卡的「结果待确认」：关掉对话框、刷新后在这里查回、按原内容重新提交或作废 */}
+        <ErpPendingPanel
+          types={['space_import', 'location_report']}
+          className="space-y-2"
+          onFound={(op) => (op.type === 'location_report' ? invalidateLocations() : void invalidate())}
+        />
         {!ledger.data ? (
           <Skeleton className="h-28" />
         ) : (

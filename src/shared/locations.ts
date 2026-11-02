@@ -116,6 +116,8 @@ export interface LocationZone {
 }
 
 export interface LocationAdmin {
+  /** 服务器时间：页面据此校正本机时钟，模拟刷卡按服务器时间记刷卡的时刻 */
+  serverTime: string;
   rules: LocationRules;
   readers: LocationReader[];
   zones: LocationZone[];

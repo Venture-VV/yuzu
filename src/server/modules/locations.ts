@@ -38,6 +38,7 @@ import { guard, guardAny } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps, OpContext } from '../lib/context';
 import { badRequest, conflict, notFound, unprocessable } from '../lib/errors';
+import { assertNotFenced, isFenced } from '../lib/fences';
 import { idParam, parse } from '../lib/validate';
 import { businessDate, setTxTimeouts } from './frontdesk/common';
 import { loadSettings } from './settings';
@@ -405,12 +406,19 @@ export const ReportInput = z
     }
   });
 
+const opKeyReused = () => conflict('OP_KEY_REUSED', '这个操作编号已经报过另一条位置，请换一个新的操作编号');
+const reportAbandoned = () => conflict('OP_ABANDONED', '这次刷卡已经确认作废，没有记；要记请重新刷卡');
+/** 来访拿到现在这张手牌的时刻：入场，或之后换到这张牌（换手牌记在 visit_tag_changes） */
+const TAG_SINCE = `greatest(v.checked_in_at, (SELECT max(c.created_at) FROM visit_tag_changes c WHERE c.visit_id = v.id AND c.to_tag_id = v.tag_id))`;
+
 export async function reportLocation(deps: Deps, raw: unknown, ctx: OpContext): Promise<LocationReportResult> {
   const input = parse(ReportInput, raw);
   const { opId, ...payload } = input;
   const hash = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
   const replay = await replayReport(deps, opId, hash);
   if (replay) return replay;
+  // 页面「结果待确认」后确认作废的编号（v0.7.17，Codex 复审）：原请求晚到也不记。这里先查一次给明确的提示，事务里取锁后再核对
+  if (await isFenced(deps.sql, opId, ['location_report'])) throw reportAbandoned();
   const rules = await loadLocationRules(deps.sql);
   if (!rules.enabled) throw conflict('LOCATION_OFF', '实时位置没有开启（后台「空间台账 → 实时位置」）');
   const [now] = await deps.sql<{ now: string }[]>`SELECT now() AS now`;
@@ -455,15 +463,29 @@ export async function reportLocation(deps: Deps, raw: unknown, ctx: OpContext): 
   }
 
   try {
-    const eventId = await deps.sql.begin(async (tx) => {
+    const done = await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
-      // 刷卡点、空间在上面查过之后被停用的极少，按查到时为准；客人在拿到当前位置的锁之后再核对还在店
-      const cur = await lockCurrent(tx, subject, true);
-      if (subject.visitId !== undefined) {
-        const [v] = await tx<{ status: string }[]>`SELECT status FROM visits WHERE id = ${subject.visitId}`;
-        if (v!.status !== 'open') throw unprocessable('TAG_NOT_IN_STORE', `手牌 ${input.tagCode} 的客人刚刚离店了`);
+      // 先取操作编号的锁，与确认作废串行：作废了的整笔不记；同一个编号已经记过的（连点、原样重发）返回原结果
+      await assertNotFenced(tx, opId, 'location_report', reportAbandoned);
+      const [prev] = await tx<{ id: number; opHash: string }[]>`SELECT id, op_hash FROM location_events WHERE op_key = ${opId}`;
+      if (prev) {
+        if (prev.opHash !== hash) throw opKeyReused();
+        return { eventId: prev.id, replayed: true };
       }
-      const [tag] = subject.visitId !== undefined ? await tx<{ code: string }[]>`SELECT h.code FROM visits v JOIN hand_tags h ON h.id = v.tag_id WHERE v.id = ${subject.visitId}` : [];
+      // 刷卡点、空间在上面查过之后被停用的极少，按查到时为准；客人在拿到当前位置的锁之后再核对还在店、还拿着这张手牌
+      const cur = await lockCurrent(tx, subject, true);
+      let tagCode: string | null = null;
+      if (subject.visitId !== undefined) {
+        const [v] = await tx<{ status: string; tagCode: string; tagSince: string }[]>`
+          SELECT v.status, h.code AS tag_code, ${tx.unsafe(TAG_SINCE)} AS tag_since
+          FROM visits v JOIN hand_tags h ON h.id = v.tag_id WHERE v.id = ${subject.visitId}`;
+        if (v!.status !== 'open' || v!.tagCode !== input.tagCode) throw unprocessable('TAG_NOT_IN_STORE', `手牌 ${input.tagCode} 的客人刚刚离店或换了手牌`);
+        // 手牌退回后又发给了别的客人：上一位客人迟到的刷卡不能算到现在这位头上（Codex 复审）
+        if (at.getTime() < new Date(v!.tagSince).getTime()) {
+          throw unprocessable('REPORT_BEFORE_TAG', `这次上报的时刻早于手牌 ${input.tagCode} 发给现在这位客人，不知道是哪位客人刷的，不记`);
+        }
+        tagCode = v!.tagCode;
+      }
       const r = await applyEvent(
         tx,
         cur!,
@@ -478,11 +500,11 @@ export async function reportLocation(deps: Deps, raw: unknown, ctx: OpContext): 
           op: { key: opId, hash },
           pos: input.source === 'position' ? { x: input.x ?? null, y: input.y ?? null, accuracy: input.accuracy ?? null, deviceId: input.deviceId ?? null } : null,
         },
-        tag?.code ?? null,
+        tagCode,
       );
-      return r!.eventId;
+      return { eventId: r!.eventId, replayed: false };
     });
-    return await reportResult(deps, eventId, false);
+    return await reportResult(deps, done.eventId, done.replayed);
   } catch (e) {
     // 同一个编号同时发了两次：后到的那次等先到的提交后撞上唯一索引，返回先到的结果
     if (isUniqueViolation(e, 'location_events_op_uq')) {
@@ -496,7 +518,7 @@ export async function reportLocation(deps: Deps, raw: unknown, ctx: OpContext): 
 async function replayReport(deps: Deps, opId: string, hash: string): Promise<LocationReportResult | null> {
   const [done] = await deps.sql<{ id: number; opHash: string }[]>`SELECT id, op_hash FROM location_events WHERE op_key = ${opId}`;
   if (!done) return null;
-  if (done.opHash !== hash) throw conflict('OP_KEY_REUSED', '这个操作编号已经报过另一条位置，请换一个新的操作编号');
+  if (done.opHash !== hash) throw opKeyReused();
   return reportResult(deps, done.id, true);
 }
 
@@ -518,7 +540,7 @@ async function today(db: Db, deps: Deps): Promise<string> {
   return businessDate(db, deps, new Date(now!.now));
 }
 
-/** 现在在某处的人：在店客人与今天在岗（上了牌、没下牌）的技师 */
+/** 现在在某处的人：在店客人与今天在岗（上了牌、没下牌）的技师；停用了的技师不列（与在岗人数同一口径） */
 async function peopleWhere(db: Db, deps: Deps, only?: Subject): Promise<LocationPerson[]> {
   const date = await today(db, deps);
   const visitFilter = only ? (only.visitId !== undefined ? db`AND c.visit_id = ${only.visitId}` : db`AND false`) : db``;
@@ -536,7 +558,7 @@ async function peopleWhere(db: Db, deps: Deps, only?: Subject): Promise<Location
     SELECT 'technician', c.technician_id, NULL, t.tech_no, t.name,
            ${db.unsafe(PLACE_COLUMNS('c'))}, c.since, c.last_at, e.source
     FROM current_locations c
-    JOIN technicians t ON t.id = c.technician_id
+    JOIN technicians t ON t.id = c.technician_id AND t.active
     JOIN technician_status ts ON ts.technician_id = t.id AND ts.business_date = ${date} AND ts.state <> 'off'
     JOIN floors f ON f.id = c.floor_id LEFT JOIN zones z ON z.id = c.zone_id LEFT JOIN spaces sp ON sp.id = c.space_id
     JOIN location_events e ON e.id = c.last_event_id
@@ -711,7 +733,9 @@ export async function locationAdmin(db: Db): Promise<LocationAdmin> {
     FROM zones z JOIN floors f ON f.id = z.floor_id ORDER BY f.sort_order, f.code, z.sort_order, z.name`;
   const items = await db<LocationItem[]>`
     SELECT id, name, category, active, zone_id FROM service_items ORDER BY active DESC, category, sort_order, name`;
+  const [now] = await db<{ now: string }[]>`SELECT now() AS now`;
   return {
+    serverTime: new Date(now!.now).toISOString(),
     rules,
     readers: readers.map((r) => ({
       id: r.id,
@@ -878,11 +902,13 @@ async function saveItemZones(deps: Deps, raw: unknown, ctx: OpContext) {
 // ───────────────────────── 自检（cli check） ─────────────────────────
 
 export async function locationChecks(db: Db): Promise<{ label: string; ok: boolean; detail: string }[]> {
-  // ① 当前位置 = 这个人最后一条生效的事件（状态、地方都一致）
+  // ① 当前位置 = 这个人最后一条生效的事件（状态、地方都一致）。「最后」按生效的先后（事件编号）：同一个人的事件都在
+  //   锁着他当前位置一行时写入，编号就是生效的先后；离开、离店总是生效，事件时刻可能早于前一条（设备时钟略快、
+  //   结账的时刻在并发的刷卡之前取的），不能按时刻排（Codex 复审）
   const lastDiff = await db<{ ref: string }[]>`
     WITH last AS (
       SELECT DISTINCT ON (coalesce(visit_id, 0), coalesce(technician_id, 0)) id, visit_id, technician_id, kind, floor_id, zone_id, space_id
-      FROM location_events WHERE applied ORDER BY coalesce(visit_id, 0), coalesce(technician_id, 0), at DESC, id DESC
+      FROM location_events WHERE applied ORDER BY coalesce(visit_id, 0), coalesce(technician_id, 0), id DESC
     )
     SELECT coalesce('来访 ' || c.visit_id, '技师 ' || c.technician_id) AS ref
     FROM current_locations c

@@ -41,6 +41,8 @@ export const FENCED_OPS = [
   'supplier_recon_void',
   // 空间台账导入（v0.7.14）
   'space_import',
+  // 模拟刷卡（v0.7.17）：编号记在位置事件上（location_events.op_key），不进 idempotency_keys
+  'location_report',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -78,6 +80,10 @@ export async function fenceKey(
   await lockKey(tx, key);
   const [existing] = await tx<{ opType: string }[]>`SELECT op_type FROM idempotency_keys WHERE key = ${key}`;
   if (existing) return { existingOpType: existing.opType };
+  if (opType === 'location_report') {
+    const [event] = await tx<{ id: number }[]>`SELECT id FROM location_events WHERE op_key = ${key}`;
+    if (event) return { existingOpType: opType };
+  }
   const rows = await tx`
     INSERT INTO op_fences (key, op_type, staff_id) VALUES (${key}, ${opType}, ${staffId})
     ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;

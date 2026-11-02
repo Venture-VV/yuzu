@@ -182,8 +182,9 @@ export const ERP_OP_TYPES = [
   'erp_import',
   'supplier_recon',
   'supplier_recon_void',
-  // 后台「空间台账」的导入（v0.7.14）：不属于 ERP 模块，借用同一套「结果待确认」
+  // 后台「空间台账」的导入（v0.7.14）与模拟刷卡（v0.7.17）：不属于 ERP 模块，借用同一套「结果待确认」
   'space_import',
+  'location_report',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -197,6 +198,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   supplier_recon: '对账登记',
   supplier_recon_void: '撤销对账登记',
   space_import: '空间台账导入',
+  location_report: '模拟刷卡',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

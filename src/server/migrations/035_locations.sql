@@ -144,3 +144,12 @@ CREATE INDEX current_locations_at_idx ON current_locations (floor_id, zone_id, s
 
 -- ───────────── 价目项目在哪个区消费（后台配；没配的项目不推导） ─────────────
 ALTER TABLE service_items ADD COLUMN zone_id bigint REFERENCES zones (id);
+
+-- ───────────── 模拟刷卡的「结果待确认」：确认作废登记加上刷卡上报（Codex 复审 PR #33） ─────────────
+-- 刷卡上报的操作编号记在位置事件上（location_events.op_key）；作废登记 = 编号 + location_report，原请求晚到也不记
+ALTER TABLE op_fences DROP CONSTRAINT op_fences_op_type_check;
+ALTER TABLE op_fences ADD CONSTRAINT op_fences_op_type_check
+  CHECK (op_type IN ('recharge', 'consume', 'reversal', 'checkin', 'bill_post', 'tag_swap', 'checkout', 'table_open', 'table_post', 'table_checkout',
+                     'room_checkin', 'room_extend', 'room_deposit', 'room_refund', 'room_close', 'line_move',
+                     'expense_claim', 'petty_advance', 'petty_settlement', 'purchase_request', 'ap_offset', 'supplier_refund', 'erp_import',
+                     'supplier_recon', 'supplier_recon_void', 'space_import', 'location_report'));

@@ -330,22 +330,24 @@ export async function syncSessionAfterVoid(tx: Tx, deps: Deps, sessionId: number
     UPDATE technician_sessions SET status = ${rejected ? 'rejected' : 'cancelled'}, ended_at = ${at}, ended_by = ${actor.id}, void_reason = ${reason}
     WHERE id = ${s.id}`;
   await logEvent(tx, { technicianId: s.technicianId, sessionId: s.id, kind: rejected ? 'reject' : 'cancel', detail: { reason }, staffId: actor.id, businessDate: today, at });
-  // 实时位置（v0.7.17）：上了钟被退钟，技师回休息区（没设的离开那间房）；没上钟的取消不动
-  if (rejected) await locateSessionEnd(tx, [{ id: s.id, technicianId: s.technicianId, spaceId: s.spaceId }], { at, staffId: actor.id });
 
   const rules = await loadClockroomRules(tx);
   const status = (await statusMap(tx, today)).get(s.technicianId) ?? offStatus;
-  if (status.state === 'off') return;
-  let next = { ...status };
-  if (rules.rejectKeepsPlace && s.queueKeyBefore) next.queueKey = new Date(s.queueKeyBefore);
-  if (rejected) {
-    next.rejectStreak = status.rejectStreak + 1;
-    if (rules.rejectEndAfter > 0 && next.rejectStreak >= rules.rejectEndAfter) {
-      next = { ...next, queueKey: at, rejectStreak: 0 };
-      await logEvent(tx, { technicianId: s.technicianId, kind: 'queue', detail: { reason: `连续被退钟 ${rules.rejectEndAfter} 次，排到队尾` }, staffId: actor.id, businessDate: today, at });
+  if (status.state !== 'off') {
+    let next = { ...status };
+    if (rules.rejectKeepsPlace && s.queueKeyBefore) next.queueKey = new Date(s.queueKeyBefore);
+    if (rejected) {
+      next.rejectStreak = status.rejectStreak + 1;
+      if (rules.rejectEndAfter > 0 && next.rejectStreak >= rules.rejectEndAfter) {
+        next = { ...next, queueKey: at, rejectStreak: 0 };
+        await logEvent(tx, { technicianId: s.technicianId, kind: 'queue', detail: { reason: `连续被退钟 ${rules.rejectEndAfter} 次，排到队尾` }, staffId: actor.id, businessDate: today, at });
+      }
     }
+    await writeStatus(tx, s.technicianId, today, next, actor.id, at);
   }
-  await writeStatus(tx, s.technicianId, today, next, actor.id, at);
+  // 实时位置（v0.7.17）：上了钟被退钟，技师回休息区（没设的离开那间房）；没上钟的取消不动。
+  // 业务行（钟单、技师状态）都锁好、写好之后最后记，之后不再等别的业务锁
+  if (rejected) await locateSessionEnd(tx, [{ id: s.id, technicianId: s.technicianId, spaceId: s.spaceId }], { at, staffId: actor.id });
 }
 
 // ───────────────────────── 上钟、下钟、退钟 / 取消 ─────────────────────────
@@ -406,14 +408,15 @@ async function finishLocked(tx: Tx, deps: Deps, s: SessionRow, actor: Actor, at:
     businessDate: today,
     at,
   });
-  // 实时位置（v0.7.17）：在钟上的下钟，技师回休息区（没设的离开那间房）；还没上钟的（结账时一起收尾）不动
-  if (locate && s.status === 'serving') await locateSessionEnd(tx, [{ id: s.id, technicianId: s.technicianId, spaceId: s.spaceId }], { at, staffId: actor.id });
   const rules = await loadClockroomRules(tx);
   const status = (await statusMap(tx, today)).get(s.technicianId) ?? offStatus;
   if (status.state !== 'off') {
     const toEnd = s.callType === 'rotation' && rules.afterRotation === 'finish';
     await writeStatus(tx, s.technicianId, today, { ...status, queueKey: toEnd ? at : status.queueKey, rejectStreak: 0 }, actor.id, at);
   }
+  // 实时位置（v0.7.17）：在钟上的下钟，技师回休息区（没设的离开那间房）；还没上钟的（结账时一起收尾）不动。
+  // 业务行（钟单、技师状态）都锁好、写好之后最后记，之后不再等别的业务锁
+  if (locate && s.status === 'serving') await locateSessionEnd(tx, [{ id: s.id, technicianId: s.technicianId, spaceId: s.spaceId }], { at, staffId: actor.id });
 }
 
 export async function finishSession(deps: Deps, id: number, ctx: OpContext) {
@@ -530,8 +533,6 @@ export async function setSessionSpace(deps: Deps, id: number, raw: unknown, ctx:
     const to = spaceId === null ? null : await lockServiceSpace(tx, spaceId);
     const [from] = s.spaceId === null ? [] : await tx<{ code: string; displayName: string }[]>`SELECT code, display_name FROM spaces WHERE id = ${s.spaceId}`;
     await tx`UPDATE technician_sessions SET space_id = ${spaceId}, space_version = space_version + 1 WHERE id = ${s.id}`;
-    // 实时位置（v0.7.17）：在钟上换房间，技师与客人到新房间；还没上钟的、清掉房间的不动
-    if (s.status === 'serving' && spaceId !== null) await locateSession(tx, s.id, 'session_room', { at, staffId: ctx.actor.id });
     await logEvent(tx, {
       technicianId: s.technicianId,
       sessionId: s.id,
@@ -541,6 +542,8 @@ export async function setSessionSpace(deps: Deps, id: number, raw: unknown, ctx:
       businessDate: await businessDate(tx, deps, at),
       at,
     });
+    // 实时位置（v0.7.17）：在钟上换房间，技师与客人到新房间；还没上钟的、清掉房间的不动（业务都写好之后最后记）
+    if (s.status === 'serving' && spaceId !== null) await locateSession(tx, s.id, 'session_room', { at, staffId: ctx.actor.id });
   });
   return clockroomBoard(deps.sql, deps);
 }

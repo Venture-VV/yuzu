@@ -2,13 +2,15 @@
 // 开关、接待区与技师休息区；刷卡点登记（装在哪个区域或空间，修改带版本号）与模拟刷卡（RQ-001 设备桥之前用它试）；
 // 项目所在区域（挂账的客人推到这里）。与空间台账同一组权限（店主、店总）；模拟刷卡要「上报位置」权限。
 
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { placeText, type LocationAdmin, type LocationReader, type LocationReportResult, type LocationRules, type LocationZone } from '@shared/locations';
 import type { SpaceLedger } from '@shared/spaces';
 import { api, errorMessage, UncertainError } from '../../lib/api';
-import { useCan } from '../../lib/session';
+import { sendErpOp, useErpPending } from '../../lib/erpPending';
+import { serverNowMs } from '../../lib/serverClock';
+import { useCan, useSession } from '../../lib/session';
 import { formatDateTime, uuid } from '../../lib/utils';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Dialog } from '../../components/Overlay';
@@ -18,6 +20,15 @@ import { useSpaceLedger } from '../spaces/queries';
 
 const adminKey = ['admin', 'locations'] as const;
 const useLocationAdmin = () => useQuery({ queryKey: adminKey, queryFn: () => api.get<LocationAdmin>('/api/admin/locations') });
+
+/** 刷卡记上之后：刷卡点的「最近刷卡」与平面图人员图层重新取 */
+export function useInvalidateLocations() {
+  const qc = useQueryClient();
+  return useCallback(() => {
+    void qc.invalidateQueries({ queryKey: adminKey });
+    void qc.invalidateQueries({ queryKey: ['rooms', 'locations'] });
+  }, [qc]);
+}
 
 export function LocationsCard() {
   const admin = useLocationAdmin();
@@ -275,49 +286,64 @@ function ReaderDialog({ reader, zones, ledger, onClose }: { reader: LocationRead
   );
 }
 
-/** 模拟刷卡：输手牌号或技师工号，按这个刷卡点上报一次；同一次提交的操作编号不变，结果不明时原样重发不会重复记 */
+/**
+ * 模拟刷卡：输手牌号或技师工号，按这个刷卡点上报一次。与其他登记一样走「结果待确认」（AGENTS.md；Codex 复审 PR #33）：
+ * 每次刷卡用新的操作编号，发出前把编号与原请求（含刷卡的时刻，按服务器时间）存在本机并读回核对，存不了就不发；
+ * 结果不明时记录留在本机（关掉对话框、刷新都在），在「空间台账」页面上方查回、按原内容重新提交（同一编号不会重复记；
+ * 晚到的只记事件、不改当前位置）或确认作废（原请求晚到也不记）。有待确认的不能再刷，免得同一次刷卡记两遍。
+ */
 function SwipeDialog({ reader, onClose }: { reader: LocationReader | null; onClose: () => void }) {
   const open = !!reader;
-  const qc = useQueryClient();
+  const session = useSession();
+  const invalidate = useInvalidateLocations();
+  const pending = useErpPending(['location_report']);
   const [who, setWho] = useState<'guest' | 'technician'>('guest');
   const [value, setValue] = useState('');
-  const [opId, setOpId] = useState(() => uuid());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
+  // 连按回车：上一次还没返回时不发第二次（每次刷卡是新的操作编号，发两次就记两次）
+  const sending = useRef(false);
   useResetOnOpen(open, () => {
     setValue('');
     setError(null);
     setResult(null);
-    setOpId(uuid());
   });
   if (!reader) return null;
+  const blocked = pending.length > 0;
   const submit = async () => {
+    const code = value.trim();
+    if (!code || blocked || sending.current) return;
+    sending.current = true;
+    const opId = uuid();
+    const label = who === 'guest' ? `手牌 ${code.toUpperCase()}` : `技师 ${code}`;
     setBusy(true);
     setError(null);
     setResult(null);
     try {
-      const r = await api.post<LocationReportResult>('/api/locations/report', {
-        opId,
-        source: 'reader',
-        readerCode: reader.code,
-        ...(who === 'guest' ? { tagCode: value.trim() } : { technicianNo: value.trim() }),
+      const r = await sendErpOp<LocationReportResult>({
+        key: opId,
+        type: 'location_report',
+        url: '/api/locations/report',
+        body: {
+          opId,
+          source: 'reader',
+          readerCode: reader.code,
+          ...(who === 'guest' ? { tagCode: code } : { technicianNo: code }),
+          // 刷卡的时刻写进原请求：之后原样重发时，期间这个人去了别处的，这次刷卡只记事件、不会把人拉回这里
+          at: new Date(serverNowMs()).toISOString(),
+        },
+        summary: `${reader.code} ${reader.name} · ${label}`,
+        staffName: session.staff.displayName,
       });
-      setResult(
-        !r.applied
-          ? '已记下，但比这个人最近一次位置还早，只记事件、不改当前位置'
-          : r.current
-            ? `已记：${who === 'guest' ? `手牌 ${value.trim().toUpperCase()}` : `技师 ${value.trim()}`} 现在在 ${placeText(r.current)}`
-            : '已记',
-      );
+      setResult(!r.applied ? '已记下，但比这个人最近一次位置还早，只记事件、不改当前位置' : r.current ? `已记：${label} 现在在 ${placeText(r.current)}` : '已记');
       setValue('');
-      setOpId(uuid());
-      void qc.invalidateQueries({ queryKey: ['rooms', 'locations'] });
-      void qc.invalidateQueries({ queryKey: adminKey });
+      invalidate();
     } catch (e) {
-      // 结果不明：保留这次的操作编号，原样再点一次不会重复记
-      setError(e instanceof UncertainError ? `${e.message}，不确定记上没有：原样再点一次「刷卡」不会重复记` : errorMessage(e));
+      // 结果不明：记录留在本机，下面提示关掉对话框到页面上方处理；被明确拒绝的写原因；本机存不了的这笔没有发出
+      if (!(e instanceof UncertainError)) setError(errorMessage(e));
     } finally {
+      sending.current = false;
       setBusy(false);
     }
   };
@@ -332,31 +358,32 @@ function SwipeDialog({ reader, onClose }: { reader: LocationReader | null; onClo
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             关闭
           </Button>
-          <Button variant="primary" loading={busy} disabled={!value.trim()} onClick={() => void submit()} data-testid="swipe-submit">
+          <Button variant="primary" loading={busy} disabled={!value.trim() || blocked} onClick={() => void submit()} data-testid="swipe-submit">
             刷卡
           </Button>
         </>
       }
     >
       <div className="space-y-3">
+        {blocked && (
+          <div data-testid="swipe-pending">
+            <Notice tone="warning" title="上一次模拟刷卡结果待确认">
+              连不上服务器时不确定记上没有，已记在本机。请关掉这个窗口，在页面上方查回、按原内容重新提交或作废，再刷下一次，免得同一次刷卡记两遍。
+            </Notice>
+          </div>
+        )}
         <Segmented<'guest' | 'technician'>
           size="sm"
           value={who}
-          onChange={(v) => {
-            setWho(v);
-            setOpId(uuid());
-          }}
+          onChange={setWho}
           ariaLabel="谁刷卡"
           options={[{ value: 'guest', label: '客人（手牌号）' }, { value: 'technician', label: '技师（工号）' }]}
         />
         <Input
           value={value}
-          onChange={(e) => {
-            setValue(e.target.value);
-            setOpId(uuid());
-          }}
+          onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && value.trim() && !busy) void submit();
+            if (e.key === 'Enter') void submit();
           }}
           placeholder={who === 'guest' ? '手牌号，例如 A023' : '技师工号，例如 07'}
           aria-label={who === 'guest' ? '手牌号' : '技师工号'}

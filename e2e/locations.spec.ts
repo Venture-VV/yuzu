@@ -1,7 +1,8 @@
 // v0.7.17 第一级实时位置浏览器验收（飞书需求 RQ-004，docs/ROOMMAP.md 第 3 节）。
 //   ① 门店电脑（写数据，只跑一次）：样例空间台账与底图（docs/data 的合成样例）→ 后台「空间台账 → 实时位置」打开开关、
 //      选接待区、登记刷卡点、设项目所在区域 → 前台发手牌（客人在接待区）→ 平面图区域人数、在场名单、轨迹 →
-//      后台模拟刷卡（客人到刷卡点装的房间）→ 平面图房间人数、房间侧栏「在这里」→ 挂账（客人到项目的区域）。
+//      后台模拟刷卡（客人到刷卡点装的房间；结果不明时自动查回、按原内容重新提交、确认作废）→ 平面图房间人数、
+//      房间侧栏「在这里」→ 挂账（客人到项目的区域）。
 //      结束时撤销这位客人、关掉开关、停用这次的刷卡点、清掉项目的区域。
 //   ② 各尺寸（只读，接口用合成数据代替）：人员图层与「在场」名单能看、点人出轨迹、不出现横向滚动。
 // 依赖演示数据（仅独立演示库）；账号：店主 linlan、前台 xiaozhou，密码 yuzu2026。全部是合成数据。
@@ -203,7 +204,56 @@ test.describe('v0.7.17 第一级实时位置', () => {
       await swipe.getByTestId('swipe-submit').click();
       await expect(swipe).toContainText(`手牌 ${tag} 现在在`);
       await expect(swipe).toContainText('V312');
+
+      // ③b 模拟刷卡的「结果待确认」（Codex 复审 PR #33）
+      const events = async () => (await getJson<LocationTrackData>(page, `/api/locations/tracks?visitId=${visit}`)).events.length;
+      const before = await events();
+      const REPORT = '**/api/locations/report';
+      // 回应丢了（服务器其实记上了）：页面上方自动查回，只记一次
+      await page.route(REPORT, async (route) => {
+        await route.fetch();
+        await route.abort('failed');
+      });
+      await swipe.getByTestId('swipe-value').fill(tag);
+      await swipe.getByTestId('swipe-submit').click();
+      await expect(page.getByText('已查回：模拟刷卡已登记')).toBeVisible();
+      expect(await events()).toBe(before + 1);
+      await page.unroute(REPORT);
+      // 请求没到服务器：记在本机待确认——对话框里不能再刷；刷新后还在；按原内容重新提交只记一次
+      await page.route(REPORT, (route) => route.abort('failed'));
+      await swipe.getByTestId('swipe-value').fill(tag);
+      await swipe.getByTestId('swipe-submit').click();
+      await expect(swipe.getByTestId('swipe-pending')).toBeVisible();
+      await expect(swipe.getByTestId('swipe-submit')).toBeDisabled();
+      await page.unroute(REPORT);
       await page.keyboard.press('Escape');
+      await page.reload();
+      const pending = page.getByTestId('erp-pending');
+      await expect(pending).toContainText('模拟刷卡结果待确认');
+      await expect(pending).toContainText(`${READER.code} ${READER.name} · 手牌 ${tag}`);
+      await pending.getByTestId('erp-pending-resend').click();
+      await expect(page.getByText('模拟刷卡已登记', { exact: true })).toBeVisible();
+      await expect(pending).toHaveCount(0);
+      expect(await events()).toBe(before + 2);
+      // 再一次没到服务器的：确认作废，之后原请求晚到也不记
+      await page.getByRole('radiogroup', { name: '空间台账' }).getByRole('radio', { name: '实时位置' }).click();
+      await page.getByTestId(`reader-${READER.code}`).getByTestId('reader-swipe').click();
+      await page.route(REPORT, (route) => route.abort('failed'));
+      await swipe.getByTestId('swipe-value').fill(tag);
+      await swipe.getByTestId('swipe-submit').click();
+      await expect(swipe.getByTestId('swipe-pending')).toBeVisible();
+      await page.unroute(REPORT);
+      const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('yuzu.erpPending.v1') ?? '[]') as { type: string; body: unknown }[]);
+      const lost = stored.find((x) => x.type === 'location_report')!;
+      await page.keyboard.press('Escape');
+      await pending.getByTestId('erp-pending-abandon').click();
+      await pending.getByTestId('erp-pending-abandon-confirm').click();
+      await expect(page.getByText('模拟刷卡已作废', { exact: true })).toBeVisible();
+      await expect(pending).toHaveCount(0);
+      const late = await page.request.post('/api/locations/report', { data: lost.body });
+      expect(late.status()).toBe(409);
+      expect(((await late.json()) as { error: { code: string } }).error.code).toBe('OP_ABANDONED');
+      expect(await events()).toBe(before + 2);
 
       await page.goto('/rooms?view=map');
       await expect(page.getByTestId('map-people-V312')).toHaveAttribute('data-count', '1');

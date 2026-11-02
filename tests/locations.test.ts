@@ -348,8 +348,11 @@ describe('上报即定位', () => {
 
   it('迟到的刷卡（比最近一次位置还早）只记事件、不改当前位置与轨迹；时刻超出时间窗拒绝', async () => {
     const g = await enter();
+    // 迟到的这一下刷在发牌之后、刷 R03 之前（早于发牌的不知道是谁刷的，直接拒绝，见「Codex 复审」）
+    const between = new Date().toISOString();
+    await new Promise((r) => setTimeout(r, 20));
     expect((await report({ readerCode: 'R03', tagCode: g.tagCode })).body.current!.zoneName).toBe('合成餐厅区');
-    const late = await report({ readerCode: 'R02', tagCode: g.tagCode, at: new Date(Date.now() - 10 * 60_000).toISOString() });
+    const late = await report({ readerCode: 'R02', tagCode: g.tagCode, at: between });
     expect(late.body).toMatchObject({ applied: false });
     expect(late.body.current!.zoneName).toBe('合成餐厅区');
     const t = await track(`visitId=${g.visitId}`);
@@ -415,6 +418,136 @@ describe('上报即定位', () => {
     expect((await track(`visitId=${g.visitId}`)).events).toHaveLength(2);
     await allChecksOk();
     await rules({ checkinZoneId: Z('合成接待区') });
+  });
+});
+
+describe('Codex 复审（PR #33）', () => {
+  const abandon = (key: string, cookie = ctx.owner) => api(ctx.app, cookie, 'POST', `/api/erp/ops/${key}/abandon`, { type: 'location_report', summary: '合成刷卡' });
+  const lookup = (key: string, cookie = ctx.owner) => api(ctx.app, cookie, 'GET', `/api/erp/ops/${key}?type=location_report`);
+  /** 等到有会话卡在匹配的语句上等锁 */
+  const waitForLockWait = async (pattern: string) => {
+    for (let i = 0; i < 100; i++) {
+      const rows = await ctx.sql`SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE ${pattern}`;
+      if (rows.length > 0) return;
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    throw new Error(`等待锁超时：${pattern}`);
+  };
+
+  it('模拟刷卡的结果待确认：作废后原请求晚到也不记；已经记上的作废返回原结果；作废与上报同时到只成一个', async () => {
+    const g = await enter();
+    const lost = randomUUID();
+    expect((await lookup(lost)).body).toEqual({ found: false, abandoned: false });
+    expect((await abandon(lost)).body).toEqual({ found: false, abandoned: true });
+    const before = await eventCount();
+    const late = await report({ opId: lost, readerCode: 'R02', tagCode: g.tagCode });
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('OP_ABANDONED');
+    expect(await eventCount()).toBe(before);
+    expect((await abandon(lost)).body).toEqual({ found: false, abandoned: true });
+    expect((await lookup(lost)).body).toEqual({ found: false, abandoned: true });
+    // 原请求其实已经记上（回应丢了）：查回找到那条事件；作废不作废、返回原结果；原样重发也是原结果
+    const done = randomUUID();
+    const r = await report({ opId: done, readerCode: 'R02', tagCode: g.tagCode });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect((await lookup(done)).body).toEqual({ found: true, abandoned: false, refId: r.body.eventId });
+    expect((await abandon(done)).body).toEqual({ found: true, abandoned: false, refId: r.body.eventId });
+    expect((await report({ opId: done, readerCode: 'R02', tagCode: g.tagCode })).body).toMatchObject({ eventId: r.body.eventId, replayed: true });
+    // 同一个编号的作废与上报同时到：要么记上、作废返回原结果，要么作废、上报被拒
+    for (let i = 0; i < 3; i++) {
+      const k = randomUUID();
+      const [rep, ab] = await Promise.all([report({ opId: k, readerCode: 'R01', tagCode: g.tagCode }), abandon(k)]);
+      if (rep.status === 200) expect(ab.body).toEqual({ found: true, abandoned: false, refId: rep.body.eventId });
+      else {
+        expect(rep.body.error.code).toBe('OP_ABANDONED');
+        expect(ab.body).toEqual({ found: false, abandoned: true });
+      }
+    }
+    // 要「上报位置」才能查回、作废（店员没有，店总有）
+    expect((await abandon(randomUUID(), ctx.clerk)).status).toBe(403);
+    expect((await lookup(done, ctx.clerk)).status).toBe(403);
+    expect((await abandon(randomUUID(), boss)).status).toBe(200);
+    await allChecksOk();
+  });
+
+  it('手牌退回后又发给别人：上一位客人迟到的刷卡不算到现在这位头上；换到这张牌之前的刷卡也不算', async () => {
+    // 没有接待区：新客人发牌后没有位置，迟到的刷卡原来会被当成他的第一条位置
+    await rules({ checkinZoneId: null });
+    try {
+      const a = await enter();
+      const swipedAt = new Date().toISOString();
+      await pay(a.visitId);
+      const again = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: a.tagCode, zone: 'male' }] });
+      expect(again.status, JSON.stringify(again.body)).toBe(201);
+      const b = again.body.visits[0].id as number;
+      const late = await report({ readerCode: 'R02', tagCode: a.tagCode, at: swipedAt });
+      expect(late.status).toBe(422);
+      expect(late.body.error.code).toBe('REPORT_BEFORE_TAG');
+      expect(await guestAt(b)).toBeUndefined();
+      expect((await report({ readerCode: 'R02', tagCode: a.tagCode })).body.current).toMatchObject({ kind: 'guest', id: b, spaceCode: 'W101' });
+      // 换手牌：换到这张牌之前的刷卡不算；换下的牌已经不在这位客人手上
+      const c = await enter();
+      const beforeSwap = new Date().toISOString();
+      tagNo += 1;
+      const to = `L${String(tagNo).padStart(3, '0')}`;
+      const swap = await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${c.visitId}/swap`, { clientKey: randomUUID(), toTagCode: to, reason: '测试换牌' });
+      expect(swap.status, JSON.stringify(swap.body)).toBe(200);
+      expect((await report({ readerCode: 'R01', tagCode: to, at: beforeSwap })).body.error.code).toBe('REPORT_BEFORE_TAG');
+      expect((await report({ readerCode: 'R01', tagCode: c.tagCode, at: beforeSwap })).body.error.code).toBe('TAG_NOT_IN_STORE');
+      expect((await report({ readerCode: 'R01', tagCode: to })).body.current).toMatchObject({ kind: 'guest', id: c.visitId, zoneName: '合成接待区' });
+      await allChecksOk();
+    } finally {
+      await rules({ checkinZoneId: Z('合成接待区') });
+    }
+  });
+
+  it('设备时钟略快的刷卡之后马上结账：离店照样生效，自检按生效的先后比对（全 ✓）', async () => {
+    const g = await enter();
+    const ahead = await report({ readerCode: 'R02', tagCode: g.tagCode, at: new Date(Date.now() + 60_000).toISOString() });
+    expect(ahead.body).toMatchObject({ applied: true });
+    await pay(g.visitId);
+    expect(await guestAt(g.visitId)).toBeUndefined();
+    const [cur] = await ctx.sql<{ state: string; lastEventId: number }[]>`SELECT state, last_event_id FROM current_locations WHERE visit_id = ${g.visitId}`;
+    const [last] = await ctx.sql<{ id: number; kind: string }[]>`SELECT id, kind FROM location_events WHERE visit_id = ${g.visitId} ORDER BY id DESC LIMIT 1`;
+    expect(last!.kind).toBe('gone');
+    expect(cur).toEqual({ state: 'gone', lastEventId: last!.id });
+    await allChecksOk();
+  });
+
+  it('在岗、有位置的技师被停用：平面图不再列（与在岗人数同一口径），启用后照常', async () => {
+    expect((await report({ source: 'position', zoneId: Z('合成水吧区'), technicianNo: '01' })).status).toBe(200);
+    expect(await techAt(tech['01']!)).toBeDefined();
+    const save = (active: boolean) => api(ctx.app, ctx.owner, 'PUT', `/api/admin/technicians/${tech['01']}`, { name: '技师01', gender: 'female', grade: 'standard', active });
+    expect((await save(false)).status).toBe(200);
+    const cur = await current();
+    expect(cur.people.some((p) => p.kind === 'technician' && p.id === tech['01'])).toBe(false);
+    expect(cur.people.filter((p) => p.kind === 'technician').length).toBeLessThanOrEqual(cur.techniciansOnDuty);
+    expect((await save(true)).status).toBe(200);
+    expect(await techAt(tech['01']!)).toMatchObject({ zoneName: '合成水吧区' });
+  });
+
+  it('下钟、退钟：技师状态写好之后才记位置——等技师状态的锁时，没有占着这位技师的当前位置', async () => {
+    for (const action of ['finish', 'reject'] as const) {
+      const g = await enter();
+      expect((await dispatch({ visitId: g.visitId, technicianId: tech['01'], spaceId: await spaceId('F301') })).status).toBe(200);
+      const s = await sessionOf(g.visitId);
+      let call: Promise<{ status: number; body: unknown }> | undefined;
+      await ctx.sql.begin(async (tx) => {
+        await tx`SELECT 1 FROM technician_status WHERE technician_id = ${tech['01']!} FOR UPDATE`;
+        call =
+          action === 'finish'
+            ? api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/sessions/${s.id}/finish`, {})
+            : api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/sessions/${s.id}/void`, { reason: '客人要求换人' });
+        await waitForLockWait('%INSERT INTO technician_status%');
+        // 另一个会话马上锁得到这位技师的当前位置：下钟 / 退钟在等技师状态时还没碰位置（原来先锁了位置再等状态）
+        await ctx.sql.begin((other) => other`SELECT id FROM current_locations WHERE technician_id = ${tech['01']!} FOR UPDATE NOWAIT`);
+      });
+      const r = await call!;
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(await techAt(tech['01']!)).toMatchObject({ zoneName: '合成技师休息区', lastSource: 'session_end' });
+      await pay(g.visitId);
+    }
+    await allChecksOk();
   });
 });
 
