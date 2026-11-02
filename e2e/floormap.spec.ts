@@ -352,7 +352,7 @@ function synthetic() {
     const y = CELL.gap + row * (CELL.h + CELL.gap);
     const code = codeOf(i);
     const businessType = TYPES[i % TYPES.length]!;
-    spaces.push({ id: i + 1, code, floorCode: 'L3', floorName: '三层', zoneName: null, businessType, capacity: businessType === '足浴' ? 4 : 1, areaCentiM2: 2400, displayName: `合成${businessType}${i + 1}`, sellable: true, active: i % 37 !== 0, aliases: [], roomId: businessType === '客房' ? 1000 + i : null });
+    spaces.push({ id: i + 1, code, floorCode: 'L3', floorName: '三层', zoneId: null, zoneName: null, businessType, capacity: businessType === '足浴' ? 4 : 1, areaCentiM2: 2400, displayName: `合成${businessType}${i + 1}`, sellable: true, active: i % 37 !== 0, aliases: [], roomId: businessType === '客房' ? 1000 + i : null });
     planRooms.push({ floorCode: 'L3', code, label: `合成 ${code}`, status: 'ok', mergedWith: [], closeMm: 600, polygon: [[x, y], [x + CELL.w, y], [x + CELL.w, y + CELL.h], [x, y + CELL.h]], labelAt: [x + CELL.w / 2, y + CELL.h / 2], areaM2: 24, spaceId: i + 1, displayName: `合成${businessType}${i + 1}` });
     if (businessType === '客房') {
       const status = (['vacant', 'occupied', 'dirty', 'maintenance'] as const)[Math.floor(i / 5) % 4]!;

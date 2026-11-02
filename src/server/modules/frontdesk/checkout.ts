@@ -60,6 +60,7 @@ import {
 } from './common';
 import { assertAfterVisits, assertNotReused, backfillDetail, BackfillInput, backfillMarkSql, normalizeMark, recordBackfill, resolveBackfill } from './backfill';
 import { openSessionsOf, settleSessionsAtCheckout } from '../clockroom';
+import { locateGone, locateSessionEnd } from '../locations';
 import { unservedDishesOf } from '../dining';
 import { applyVisitTicket, resolveTicketType } from './tickets';
 
@@ -390,7 +391,7 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
     if (backfill) await assertAfterVisits(tx, at, ids, 'checkout', deps.config.timezone);
     await assertNotReused(tx, at, ids, deps.config.timezone);
     // 钟房（v0.7.1，账单之后、会员之前加锁）：还没结束的钟单一起收尾，在钟上的按结账时刻下钟
-    await settleSessionsAtCheckout(tx, deps, ids, ctx.actor, at);
+    const endedSessions = await settleSessionsAtCheckout(tx, deps, ids, ctx.actor, at);
 
     // 补选票种（来访已锁）；免票要当场授权，请先在手牌详情里改票种并授权
     for (const t of input.tickets) {
@@ -461,6 +462,9 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
     await tx`UPDATE bills SET status = 'settled', closed_at = ${at} WHERE id IN ${tx(billIds)}`;
     await tx`UPDATE visits SET status = 'settled', closed_at = ${at}, closed_by = ${ctx.actor.id} WHERE id IN ${tx(ids)}`;
     for (const g of new Set(priced.map((r) => r.groupId))) await closeGroupIfEmpty(tx, g, at);
+    // 实时位置（v0.7.17）：客人离店、当前位置清掉；结账时一起下钟的技师回休息区（先客人、再技师，按固定顺序锁当前位置）
+    await locateGone(tx, ids, 'checkout', { type: 'checkout', id: checkoutId }, { at, staffId: ctx.actor.id });
+    await locateSessionEnd(tx, endedSessions, { at, staffId: ctx.actor.id });
 
     if (backfill) await recordBackfill(tx, backfill, { kind: 'checkout', opKey: key, checkoutId, businessDate: date, actor: ctx.actor });
     await saveKey(tx, key, 'checkout', requestHash, checkoutId, ctx.actor.id);

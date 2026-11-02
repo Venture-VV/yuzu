@@ -1,5 +1,5 @@
 // ERP 单据「结果待确认」的查回与确认作废（v0.7.8，修正 v0.7.7）：费用报销、备用金打款与退回补付、部门需求单；
-// v0.7.12 起还有核销、供应商退款、批量导入；v0.7.13 起还有对账登记。
+// v0.7.12 起还有核销、供应商退款、批量导入；v0.7.13 起还有对账登记；后台的空间台账导入（v0.7.14）、模拟刷卡（v0.7.17）也借用这一套。
 //
 // 页面提交前把操作编号和原请求存在本机（读回核对，存不了就不发请求）；断网或超时后：
 //   · 查回：按编号只读查询。查不到不能断定没有登记（原请求可能还在路上或在等锁）；
@@ -35,6 +35,8 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   supplier_recon_void: ['payable.manage', 'purchase.manage'],
   // 空间台账导入（v0.7.14）：店主、店总（与后台「客房」同一组权限）
   space_import: ['settings.manage', 'catalog.manage'],
+  // 模拟刷卡（v0.7.17）：与上报接口一致
+  location_report: ['location.report'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -48,6 +50,7 @@ const READ: Record<ErpOpType, Permission[]> = {
   supplier_recon: ['payable.read'],
   supplier_recon_void: ['payable.read'],
   space_import: ['settings.manage', 'catalog.manage'],
+  location_report: ['location.report'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {
@@ -60,6 +63,11 @@ export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise
       return { found: true, abandoned: false, refId, advanceId: s ? Number(s.advanceId) : undefined };
     }
     return { found: true, abandoned: false, refId };
+  }
+  // 模拟刷卡（v0.7.17）的编号记在位置事件上：refId 是那条位置事件
+  if (type === 'location_report') {
+    const [event] = await db<{ id: number }[]>`SELECT id FROM location_events WHERE op_key = ${key}`;
+    if (event) return { found: true, abandoned: false, refId: Number(event.id) };
   }
   return { found: false, abandoned: await isFenced(db, key, [type]) };
 }

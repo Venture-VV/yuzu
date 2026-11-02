@@ -234,3 +234,11 @@ export const FLOORPLAN_SAMPLE_EXPECTED = {
   merged: ['W303', 'W305'],
   leak: ['W306'],
 };
+
+/**
+ * 第二版上把三层的 T305 与二层的 X201 对调：同一个编码换了楼层（v0.7.15 验收的 F22 场景），
+ * 与第二版比对只列在「换了楼层」里，不算增减、不算挪动。图纸在 docs/data/floorplan-sample-v2-swap.dxf。
+ */
+export function floorplanSampleFloorSwapDxf(): string {
+  return floorplanSampleDxf(2).replace('样例 SPA T305 2人间', '样例 SPA X201 2人间').replace('样例派对房X201', '样例派对房T305');
+}

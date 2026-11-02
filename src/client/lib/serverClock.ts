@@ -18,6 +18,9 @@ export function noteServerTime(serverTime: string, receivedAt: number) {
   for (const l of listeners) l();
 }
 
+/** 以服务器时间为准的「现在」（毫秒，不订阅）：还没有接口带回服务器时间时按本机时间 */
+export const serverNowMs = () => Date.now() + (offsetMs ?? 0);
+
 const subscribe = (l: () => void) => {
   listeners.add(l);
   return () => {

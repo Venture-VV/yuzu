@@ -91,7 +91,10 @@ export type AuditAction =
   | 'space_import'
   // 底图转换（RQ-004 第二段，v0.7.15）：上传图纸、启用一批底图
   | 'floorplan_upload'
-  | 'floorplan_activate';
+  | 'floorplan_activate'
+  // 第一级实时位置（RQ-004，v0.7.17）：刷卡点、项目所在区域
+  | 'location_reader_saved'
+  | 'items_zone_updated';
 
 export interface AuditEntry {
   staffId: number | null;

@@ -19,6 +19,7 @@ import { attachSessions, lockQueue, syncSessionAfterVoid, type SessionPostOption
 import { cancelKitchenItem, createKitchenItems, kitchenStationsOf, takeDishLimits } from '../dining';
 import { assertAfterVisits, backfillDetail, BackfillInput, recordBackfill, resolveBackfill } from './backfill';
 import { getVisit } from './visits';
+import { locateCharges, locateSession } from '../locations';
 
 export const PostInput = z
   .object({
@@ -188,6 +189,10 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
     });
     await tx`
       UPDATE bills SET amount_cents = amount_cents + ${total}, line_count = line_count + ${lines.length} WHERE id = ${bill!.id}`;
+    // 实时位置（v0.7.17）：客人在项目配的区域（几个不同区域按项目多的；补录的不记）
+    await locateCharges(tx, visit.id, lines.map((l) => ({ lineId: lineIds.get(l)!, itemId: l.itemId })), { at, staffId: ctx.actor.id, backfill: !!backfill });
+    // 派钟马上上钟（或加钟）的钟单：技师与客人在钟单记的房间（记在消费之后，房间比项目的区域更准）
+    for (const id of new Set(sessionIds.values())) await locateSession(tx, id, 'session_start', { at, staffId: ctx.actor.id, backfill: !!backfill });
     if (backfill) await recordBackfill(tx, backfill, { kind: 'charges', opKey: key, visitId: visit.id, businessDate: date, actor: ctx.actor });
     await saveKey(tx, key, 'bill_post', requestHash, visit.id, ctx.actor.id);
     await writeAudit(tx, {

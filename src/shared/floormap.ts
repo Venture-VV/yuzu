@@ -64,6 +64,8 @@ export interface FloorMapSpace {
   code: string;
   floorCode: string;
   floorName: string;
+  /** 区域（v0.7.17 实时位置：区域人数标在它的空间轮廓中间） */
+  zoneId: number | null;
   zoneName: string | null;
   businessType: string;
   capacity: number | null;

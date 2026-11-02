@@ -34,6 +34,7 @@ export const RULE_GROUPS = {
   technicians: '技师',
   dining: '餐饮',
   rooms: '客房',
+  locations: '实时位置',
   inventory: '库存与采购',
   staff: '岗位与权限',
 } as const;

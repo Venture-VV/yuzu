@@ -51,6 +51,8 @@ import { loadClockroomRules } from './clockroom';
 import { commissionSettings } from './commission';
 import { loadDiningRules } from './dining';
 import { loadRoomRules } from './rooms';
+import { loadLocationRules } from './locations';
+import { DEFAULT_LOCATION_RULES } from '@shared/locations';
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const onOff = (v: boolean, on: string, off: string) => (v ? on : off);
@@ -233,6 +235,15 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   });
   add({ key: 'room_rules.hourlyGraceMinutes', group: 'rooms', label: '钟点房超时宽限', value: `${rm.hourlyGraceMinutes} 分钟`, defaultValue: `${rmd.hourlyGraceMinutes} 分钟`, pending: true, section: 'rooms', hint: '超过已付时段加宽限才按段补', current: rm.hourlyGraceMinutes, dflt: rmd.hourlyGraceMinutes, metaKey: 'room_rules' });
   add({ key: 'room_rules.defaultDeposit', group: 'rooms', label: '入住默认押金', value: rm.defaultDeposit ? `默认收 ${formatYuan(rm.defaultDeposit)}` : '默认不收', defaultValue: '默认不收', pending: true, section: 'rooms', hint: '住客都有手牌、离店前在前台结清；入住时可以改', current: rm.defaultDeposit, dflt: rmd.defaultDeposit, metaKey: 'room_rules' });
+  // ── 第一级实时位置（RQ-004，v0.7.17）──
+  const lr = await loadLocationRules(db);
+  const zoneNames = new Map(
+    (await db<{ id: number; name: string }[]>`SELECT id, name FROM zones WHERE id IN ${db([lr.checkinZoneId ?? 0, lr.restZoneId ?? 0])}`).map((z) => [z.id, z.name]),
+  );
+  const zoneText = (r: typeof lr) =>
+    `接待区：${r.checkinZoneId ? (zoneNames.get(r.checkinZoneId) ?? '已删除的区域') : '不推导'}；技师休息区：${r.restZoneId ? (zoneNames.get(r.restZoneId) ?? '已删除的区域') : '不推导（下钟后位置不明）'}`;
+  add({ key: 'location_rules.enabled', group: 'locations', label: '实时位置', value: onOff(lr.enabled, '开启（刷卡与业务动作推导客人、技师在哪）', '关闭'), defaultValue: '关闭', pending: true, section: 'spaces', hint: '关着时不推导、刷卡上报拒绝；离店照样清掉已有的位置', current: lr.enabled, dflt: DEFAULT_LOCATION_RULES.enabled, metaKey: 'location_rules' });
+  add({ key: 'location_rules.zones', group: 'locations', label: '接待区与技师休息区', value: zoneText(lr), defaultValue: zoneText(DEFAULT_LOCATION_RULES), pending: true, section: 'spaces', hint: '发手牌后客人在接待区；技师上牌、下钟后在休息区', current: [lr.checkinZoneId, lr.restZoneId], dflt: [null, null], metaKey: 'location_rules' });
   // ── 库存与采购 ──
   add({ key: 'inventory_scope_name', group: 'inventory', label: '库存范围', value: inv.scopeName, defaultValue: '后勤总库', pending: true, section: 'rules', current: inv.scopeName, dflt: '后勤总库', metaKey: 'inventory_scope_name' });
   // 迁移 002 写入的初始口径
@@ -314,6 +325,8 @@ const CHANGE_ACTIONS = [
   'space_saved',
   'space_zone_saved',
   'space_import',
+  'location_reader_saved',
+  'items_zone_updated',
 ];
 
 const SETTING_LABELS: Record<string, string> = {
@@ -342,6 +355,7 @@ function describeChange(action: string, detail: Record<string, unknown>): string
       if (detail.key === 'commission_rules') return '修改了技师提成规则';
       if (detail.key === 'dining_rules') return '修改了餐饮规则';
       if (detail.key === 'room_rules') return '修改了客房规则';
+      if (detail.key === 'location_rules') return '修改了实时位置的开关与区域';
       const after = (detail.after ?? {}) as Record<string, unknown>;
       const keys = Object.keys(after).map((x) => SETTING_LABELS[x] ?? x);
       return keys.length ? `修改了${keys.join('、')}` : '修改了经营规则';
@@ -386,6 +400,10 @@ function describeChange(action: string, detail: Record<string, unknown>): string
       return typeof detail.summary === 'string' ? detail.summary : '修改了楼层或区域';
     case 'space_import':
       return typeof detail.summary === 'string' ? detail.summary : '导入了空间台账';
+    case 'location_reader_saved':
+      return typeof detail.summary === 'string' ? detail.summary : '保存了刷卡点';
+    case 'items_zone_updated':
+      return '调整了项目所在区域（实时位置）';
     default:
       return action;
   }

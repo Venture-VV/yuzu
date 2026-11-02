@@ -10,7 +10,7 @@ import { api, errorMessage, UncertainError } from '../../lib/api';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Dialog } from '../../components/Overlay';
 import { Button, Field, Notice, Select } from '../../components/ui';
-import { useClockSpaces } from '../rooms/floormap';
+import { useClockSpaces } from '../rooms/floormap-api';
 
 export function occupancyText(s: ClockSpace): string {
   const used = s.serving + s.waiting;

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import expected from '../src/server/demo/floorplan-expected.json';
-import { FLOORPLAN_SAMPLE_EXPECTED, floorplanSampleDxf } from '../src/server/demo/floorplan-sample';
+import { FLOORPLAN_SAMPLE_EXPECTED, floorplanSampleDxf, floorplanSampleFloorSwapDxf } from '../src/server/demo/floorplan-sample';
 import { classifyLayer, codesIn, convertDrawing, polygonArea, simplifyLine, textCenter, type ConvertResult } from '../src/server/floorplan/convert';
 import type { PlanDrawing, PlanPath, PlanText, Pt } from '../src/server/floorplan/model';
 import { detectFormat } from '../src/server/floorplan/read';
@@ -203,6 +203,7 @@ describe('读 DXF', () => {
   it('docs/data 里的样例图纸与生成器一致', () => {
     expect(readFileSync('docs/data/floorplan-sample.dxf', 'utf8')).toBe(floorplanSampleDxf(1));
     expect(readFileSync('docs/data/floorplan-sample-v2.dxf', 'utf8')).toBe(floorplanSampleDxf(2));
+    expect(readFileSync('docs/data/floorplan-sample-v2-swap.dxf', 'utf8')).toBe(floorplanSampleFloorSwapDxf());
   });
 });
 

@@ -46,6 +46,7 @@ import { cents, idParam, parse, positiveCents } from '../lib/validate';
 import { assertCanFix, assertOpen, businessDate, hashRequest, loadFrontdeskRules, lockVisits, nextDocNo, runIdempotent, saveKey, setTxTimeouts } from './frontdesk/common';
 import { loadSettings } from './settings';
 import { lockPaymentShift, openShiftOf } from './shifts';
+import { leaveRoomStay, locateRoomStay } from './locations';
 
 // ───────────────────────── 规则 ─────────────────────────
 
@@ -644,6 +645,8 @@ export async function checkinRoom(deps: Deps, raw: unknown, ctx: OpContext): Pro
         INSERT INTO room_deposits (stay_id, kind, method, amount, ref, shift_id, business_date, operator_id, created_at)
         VALUES (${stayId}, 'receive', ${input.deposit.method}, ${input.deposit.amount}, ${input.deposit.ref}, ${shiftId}, ${date}, ${ctx.actor.id}, ${at})`;
     }
+    // 实时位置（v0.7.17）：客人在那间房（房间挂了空间才记）
+    await locateRoomStay(tx, visitId, room.id, stayId, 'room_checkin', { at, staffId: ctx.actor.id });
     await saveKey(tx, key, 'room_checkin', requestHash, stayId, ctx.actor.id);
     await writeAudit(tx, {
       staffId: ctx.actor.id,
@@ -769,6 +772,8 @@ export async function moveStay(deps: Deps, id: number, raw: unknown, ctx: OpCont
     await tx`
       INSERT INTO room_moves (stay_id, from_room_id, to_room_id, reason, operator_id, created_at)
       VALUES (${id}, ${from.id}, ${to.id}, ${input.reason}, ${ctx.actor.id}, ${at})`;
+    // 实时位置（v0.7.17）：客人到新房间
+    await locateRoomStay(tx, s.visitId, to.id, id, 'room_move', { at, staffId: ctx.actor.id });
     await writeAudit(tx, {
       staffId: ctx.actor.id,
       action: 'room_move',
@@ -803,6 +808,8 @@ export async function cancelStay(deps: Deps, id: number, raw: unknown, ctx: OpCo
     assertCanFix(ctx.actor, s.checkedInBy, s.checkedInAt, await loadFrontdeskRules(tx), at, '这次入住');
     await tx`UPDATE room_stays SET status = 'cancelled', closed_at = ${at}, closed_by = ${ctx.actor.id}, close_reason = ${reason} WHERE id = ${id}`;
     await tx`UPDATE rooms SET housekeeping = 'dirty', maintenance_note = NULL, updated_at = now() WHERE id = ${s.roomId}`;
+    // 实时位置（v0.7.17）：客人离开那间房，位置不明
+    await leaveRoomStay(tx, s.visitId, s.roomId, id, { at, staffId: ctx.actor.id });
     await writeAudit(tx, {
       staffId: ctx.actor.id,
       action: 'room_cancel',
@@ -975,6 +982,8 @@ export async function closeStay(deps: Deps, id: number, raw: unknown, ctx: OpCon
     const refunded = await refundAllDeposits(tx, [id], { shiftId, actorId: ctx.actor.id, date, at, reason: '退房，押金原路退回' });
     await tx`UPDATE room_stays SET status = 'checked_out', closed_at = ${at}, closed_by = ${ctx.actor.id} WHERE id = ${id}`;
     await tx`UPDATE rooms SET housekeeping = 'dirty', maintenance_note = NULL, updated_at = now() WHERE id = ${s.roomId}`;
+    // 实时位置（v0.7.17）：客人离开那间房，位置不明
+    await leaveRoomStay(tx, s.visitId, s.roomId, id, { at, staffId: ctx.actor.id });
     await saveKey(tx, key, 'room_close', requestHash, id, ctx.actor.id);
     await writeAudit(tx, {
       staffId: ctx.actor.id,

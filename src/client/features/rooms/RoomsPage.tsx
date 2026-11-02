@@ -40,7 +40,7 @@ import { DepositFields, depositProblem, guestOf, kindLabel, rateText, type Depos
 import { dayText, minuteText, roomsKey, useRoomBoard } from './queries';
 import { StayDialog, type StayAction } from './StayDialog';
 import { FloorMapView, type MapAction } from './FloorMap';
-import { FLOOR_MAP_REFRESH_MS } from './floormap';
+import { FLOOR_MAP_REFRESH_MS } from './floormap-api';
 
 export function RoomsPage() {
   const session = useSession();

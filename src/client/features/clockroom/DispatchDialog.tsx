@@ -19,7 +19,7 @@ import { Button, Field, Input, Notice, Segmented, Skeleton } from '../../compone
 import { PendingPanel, useFrontdeskOp } from '../frontdesk/pending';
 import { useQuery } from '@tanstack/react-query';
 import { spaceLabel } from '@shared/spaces';
-import { useClockSpaces } from '../rooms/floormap';
+import { useClockSpaces } from '../rooms/floormap-api';
 import { RoomSelect } from './RoomPicker';
 
 const doneOnFound = (found: { found: true } | { found: false }) => (found.found && 'visit' in found ? true : null);
