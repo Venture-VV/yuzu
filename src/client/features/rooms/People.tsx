@@ -17,7 +17,7 @@ import { errorMessage } from '../../lib/api';
 import { cn, formatTime } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { Badge, Button, Input, Notice, Skeleton } from '../../components/ui';
-import { useLocationTrack } from './floormap';
+import { useLocationTrack } from './floormap-api';
 
 export interface PeopleEntry {
   key: string;

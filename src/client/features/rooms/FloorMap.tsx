@@ -20,7 +20,7 @@ import { Money } from '../../components/Money';
 import { Badge, Button, Input, Notice, Segmented, Skeleton } from '../../components/ui';
 import { guestOf } from './parts';
 import { dayText } from './queries';
-import { useActiveFloorplan, useFloorMap, useLocations } from './floormap';
+import { useActiveFloorplan, useFloorMap, useLocations } from './floormap-api';
 import { PeopleLayer, PeoplePanel, personText, TrackDialog, usePeopleOnFloor, type ZoneBadge } from './People';
 import type { StayAction } from './StayDialog';
 

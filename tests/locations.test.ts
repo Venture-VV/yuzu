@@ -459,5 +459,14 @@ describe('开关关着、写不进去、自检', () => {
     expect(bad[1]!.ok).toBe(false);
     await ctx.sql`UPDATE current_locations SET zone_id = ${row!.zoneId}, floor_id = (SELECT floor_id FROM zones WHERE id = ${row!.zoneId}) WHERE id = ${row!.id}`;
     await allChecksOk();
+    // 技师下牌了、位置却没清掉（模拟下牌时位置没记上）：第三项查得出
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/technicians/${tech['02']}/state`, { action: 'sign_out' })).status).toBe(200);
+    const [t2] = await ctx.sql<{ id: number }[]>`SELECT id FROM current_locations WHERE technician_id = ${tech['02']!}`;
+    const [track] = await ctx.sql<{ id: number }[]>`SELECT id FROM location_tracks WHERE technician_id = ${tech['02']!} ORDER BY id DESC LIMIT 1`;
+    await ctx.sql`UPDATE current_locations SET state = 'at', floor_id = (SELECT floor_id FROM zones WHERE id = ${Z('合成技师休息区')}), zone_id = ${Z('合成技师休息区')},
+             since = now() - interval '1 hour', track_id = ${track!.id}, last_at = now() - interval '1 hour' WHERE id = ${t2!.id}`;
+    const stale = await locationChecks(ctx.sql);
+    expect(stale[2]).toMatchObject({ ok: false });
+    expect(stale[2]!.detail).toContain('技师 02');
   });
 });

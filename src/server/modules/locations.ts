@@ -902,9 +902,14 @@ export async function locationChecks(db: Db): Promise<{ label: string; ok: boole
     SELECT coalesce('来访 ' || t.visit_id, '技师 ' || t.technician_id) FROM location_tracks t
     WHERE t.left_at IS NULL AND NOT EXISTS (SELECT 1 FROM current_locations c WHERE c.track_id = t.id)
     LIMIT 5`;
-  // ③ 离店的客人没有当前位置
+  // ③ 离店的客人、下了牌的技师没有当前位置（下牌之后又刷卡的照样记，只看下牌那一刻之前的位置有没有清掉）
   const goneDiff = await db<{ ref: string }[]>`
-    SELECT v.visit_no AS ref FROM current_locations c JOIN visits v ON v.id = c.visit_id WHERE c.state = 'at' AND v.status <> 'open' LIMIT 5`;
+    SELECT v.visit_no AS ref FROM current_locations c JOIN visits v ON v.id = c.visit_id WHERE c.state = 'at' AND v.status <> 'open'
+    UNION ALL
+    SELECT '技师 ' || t.tech_no FROM current_locations c JOIN technicians t ON t.id = c.technician_id
+    JOIN technician_status ts ON ts.technician_id = t.id
+    WHERE c.state = 'at' AND ts.state = 'off' AND c.last_at < ts.updated_at
+    LIMIT 5`;
   const [stats] = await db<{ events: number; located: number; tracks: number }[]>`
     SELECT (SELECT count(*) FROM location_events)::int AS events,
            (SELECT count(*) FROM current_locations c JOIN visits v ON v.id = c.visit_id WHERE c.state = 'at' AND v.status = 'open')::int AS located,
@@ -922,9 +927,11 @@ export async function locationChecks(db: Db): Promise<{ label: string; ok: boole
       detail: trackDiff.length ? `${trackDiff.length} 处轨迹段与当前位置不符（如 ${refs(trackDiff)}）` : `轨迹段 ${stats!.tracks} 段，每人最多一段没结束，且就是当前位置那一段`,
     },
     {
-      label: '实时位置：离店的客人没有当前位置',
+      label: '实时位置：离店的客人、下了牌的技师没有当前位置',
       ok: goneDiff.length === 0,
-      detail: goneDiff.length ? `${goneDiff.length} 位已离店的客人还记着位置（如 ${refs(goneDiff)}）` : `在店、有位置的客人 ${stats!.located} 位；离店的客人都没有当前位置`,
+      detail: goneDiff.length
+        ? `${goneDiff.length} 位已离店的客人或下了牌的技师还记着位置（如 ${refs(goneDiff)}）`
+        : `在店、有位置的客人 ${stats!.located} 位；离店的客人、下了牌的技师都没有当前位置`,
     },
   ];
 }
