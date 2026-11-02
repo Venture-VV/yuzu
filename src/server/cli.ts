@@ -45,7 +45,7 @@
 //   floorplan-convert <图纸.dwg|.dxf|.pdf> [--out 目录] [--scale 比例]
 //                                         底图转换（RQ-004 第二段，不连数据库、不需要 DATABASE_URL）：每层 SVG 底图、spaces.geojson、
 //                                         转换报告（每个图层的用途与图元数）写到目录（默认 floorplan-<文件名>）；
-//                                         矢量 PDF 按图上的比例文字（如 1:100）换算尺寸，图上没有时用 --scale（100 或 1:100 都行）
+//                                         矢量 PDF 给了 --scale（100 或 1:100 都行）按它换算尺寸，没给时按图上的比例文字（如 1:100）
 //   floorplan-sample <文件.dxf|.pdf>      写出合成的样例图纸（两层、与 docs/data/space-ledger-sample.csv 的编码对应），演示与验收用；
 //                                         文件名以 .pdf 结尾时写 PDF 版（1:100、每层一页、英文文字），否则写 DXF
 
@@ -172,7 +172,7 @@ async function offlineCommand(command: string | undefined, args: string[]): Prom
     case 'floorplan-convert': {
       const file = args[0];
       if (!file || file.startsWith('--')) throw new Error('用法：floorplan-convert <图纸.dwg|.dxf|.pdf> [--out 目录] [--scale 比例]');
-      // PDF 的图纸比例 1:N：图上认不出比例时才用
+      // PDF 的图纸比例 1:N：给了就按它换算（v0.7.19 起优先于图上的比例文字），没给按图上写的
       const scaleText = flag(args, 'scale');
       const pdfScale = scaleText === undefined ? undefined : Number(scaleText.trim().replace(/^1\s*[:：]\s*/, ''));
       if (pdfScale !== undefined && !(Number.isFinite(pdfScale) && pdfScale >= 1 && pdfScale <= MAX_PDF_SCALE)) {

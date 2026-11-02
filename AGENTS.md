@@ -29,7 +29,7 @@ node dist/server/cli.js seed-frontdesk-demo
 node dist/server/cli.js seed-billing-demo  # 结账、反结账与交班（建在前台演示数据上）
 node dist/server/cli.js seed-legacy-demo   # 8–10 月旧账的合成样例导入只读表（不进正式账）
                                            # 营业日切换后 5 个半小时内执行会提示跨营业日；两条都加 --previous-day 整体放到前一个营业日
-node dist/server/cli.js demo-prepare       # 一条命令准备演示库（v0.7.18）：上面五块 + 场景块（客房、技师与钟房、餐饮与厨房、空间台账与底图、实时位置），
+node dist/server/cli.js demo-prepare       # 一条命令准备演示库（v0.7.18）：上面五块 + 场景块（客房、技师与钟房、餐饮与厨房、空间台账与底图、实时位置，v0.7.19 起加派对房使用单与对客导览），
                                            # 已有的跳过、不改已有记录，场景块有冲突时一条不写并列出；最后自带 check 与 demo-check
 node dist/server/cli.js demo-check         # 核对演示库（只读）：check、五块都在、场景块与 src/server/demo/showcase-expected.json 一致
 node dist/server/cli.js demo-reset --confirm <库名>   # 只在独立演示库（development，实例不是 prod/shadow/test）：先备份核验，再清库从零准备（先停应用）
@@ -44,7 +44,8 @@ node dist/server/cli.js balance-changes --since "YYYY-MM-DD HH:MM"   # 某时刻
 node dist/server/cli.js import-hand-tags --store-list   # 预览导入店主 747 个真实柜号；--apply 才写入（真实业务数据，门店环境须店主同意）
 node dist/server/cli.js import-price-list --tangqi      # 预览导入汤崎价目表（29 个项目、多档价格）；--apply 才写入（同上）
 node dist/server/cli.js import-legacy <原始.xlsx> --operator <店主账号>   # 预览导入 8–10 月旧账（四份原始 Excel 之一）的只读对照；--apply 才写入（真实业务数据，门店环境须店主同意；不进正式账）
-node dist/server/cli.js floorplan-convert <图纸.dwg>   # 底图转换（不碰数据库）：每层 SVG、spaces.geojson、报告写到 floorplan-<文件名>/；floorplan-sample <文件.dxf> 写出合成样例图纸
+node dist/server/cli.js floorplan-convert <图纸.dwg|.dxf|.pdf> [--scale N]   # 底图转换（不碰数据库）：每层 SVG、spaces.geojson、报告写到 floorplan-<文件名>/；
+                                           # 矢量 PDF 给了 --scale 按 1:N 换算，没给按图上的比例文字；floorplan-sample <文件.dxf|.pdf> 写出合成样例图纸
 node dist/server/cli.js import-opening <余额.csv> --operator <店主账号> --control 人数,本金,赠金,累计充值 [--exclude <排除清单.csv>]
                                           # 预览导入旧系统会员余额期初并与 EBC 控制总数比对；--apply 才写入（同上；正式环境必须给控制总数）
 E2E_BASE_URL=http://127.0.0.1:<端口> npm run e2e   # 1440×900 / 1024×768 / 820×1180，另有 1280×720 与手机只跑视口冒烟（CI 拆三组并行，见 docs/TESTING.md）

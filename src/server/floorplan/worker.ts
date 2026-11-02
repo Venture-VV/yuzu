@@ -1,7 +1,7 @@
 // 转换进程（RQ-004 第二段，v0.7.15）：node floorplan-worker.js <图纸文件> <结果 JSON 文件> [PDF 比例]
 // 读一份 13 MB 的编码图要 20 多秒、约 1.3 GB 内存，所以不在应用主进程里做；GPL 的 LibreDWG、PDF 用的 pdf.js 也只在这个进程里加载。
 // 结果写进文件（几 MB 的 SVG 不走进程间消息），退出码 0 成功、1 失败（失败原因也写在结果文件里）。
-// 第三个参数是 PDF 的图纸比例 1:N 的 N（上传时填的，图上认不出比例时才用），DWG / DXF 不用。
+// 第三个参数是 PDF 的图纸比例 1:N 的 N（上传时或命令行填的，填了就按它换算，没填按图上的比例文字），DWG / DXF 不用。
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { convertDrawing } from './convert';
