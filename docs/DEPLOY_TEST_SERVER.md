@@ -166,15 +166,22 @@ docker compose exec app node dist/server/cli.js check
 - 把跳档宽限改成 15 分钟（「手牌 → 前台规则」；R1.2 发布后会自动改）；
 - 给员工建测试账号（「员工」）。
 
-**演示库写入演示数据**：
+**演示库写入演示数据**（v0.7.18 起一条命令：会员、库存、前台、结账、旧账五块，加客房、技师与钟房、餐饮与厨房、空间台账与底图、实时位置的场景块；已有的跳过、不改已有记录，最后自带 `check` 与 `demo-check`，说明见 [演示数据](DEMO_DATA.md)）：
 
 ```bash
 cd ~/yuzu-demo
-for c in seed-demo seed-inventory-demo seed-frontdesk-demo seed-billing-demo; do
-  docker compose exec app node dist/server/cli.js "$c"
-done
-docker compose exec app node dist/server/cli.js check
+docker compose exec app node dist/server/cli.js demo-prepare
 ```
+
+要把演示库重建回准备好的样子（只在演示库：`APP_ENV=development`、`YUZU_INSTANCE=demo`）：`demo-reset` 先备份并在临时库恢复核验、数据指纹与现在的库一致才清库重建。先停掉应用与定时备份（备份进行中会占着表），用备份服务的容器执行——它挂着宿主机的备份目录（`BACKUP_DIR`），这份备份留在宿主机上：
+
+```bash
+docker compose stop app backup
+docker compose run --rm backup node dist/server/cli.js demo-reset --confirm yuzu
+docker compose start app backup
+```
+
+演练库（`APP_ENV=production`）不执行任何演示数据命令，执行了也会被拒绝。
 
 **看门狗**（v0.3.3 起，只给演练库装）：每 5 分钟检查应用健康（连续 3 次失败自动重启）、备份新鲜度与核验结果、磁盘空间，异常推到 `WECOM_WEBHOOK_URL` 的企业微信群，说明见 [Mac mini 部署手册](DEPLOY_MAC_MINI.md) 第 3.2 节。先 `./scripts/watchdog.sh --test` 确认群里收到测试消息，再加定时任务（`crontab -e`）：
 

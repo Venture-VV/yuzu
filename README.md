@@ -177,6 +177,14 @@ npm run cli -- seed-billing-demo     # 在前台演示数据上写入结账、�
 
 结账与交班的固定预期结果见 [`src/server/demo/billing-expected.json`](src/server/demo/billing-expected.json)（请在营业日切换时刻之后 1 小时以上执行）。
 
+v0.7.18 起可以一条命令准备完整的演示库（上面几块加客房、技师与钟房、餐饮与厨房、空间台账与底图、实时位置的场景块；已有的跳过、不改已有记录，有冲突时场景块一条不写并列出），说明见 [`docs/DEMO_DATA.md`](docs/DEMO_DATA.md)：
+
+```bash
+npm run cli -- demo-prepare            # 准备演示库，最后自带一致性自检与演示核对
+npm run cli -- demo-check              # 只读核对演示库与固定预期（src/server/demo/showcase-expected.json）
+npm run cli -- demo-reset --confirm <数据库名>   # 只在独立演示库：先备份并核验，再清库从零准备
+```
+
 常用命令：
 
 | 命令 | 作用 |
@@ -189,6 +197,9 @@ npm run cli -- seed-billing-demo     # 在前台演示数据上写入结账、�
 | `npm run cli -- seed-inventory-demo` | 写入库存与采购演示数据（仅独立演示库） |
 | `npm run cli -- seed-frontdesk-demo` | 写入前台手牌演示数据（仅独立演示库） |
 | `npm run cli -- seed-billing-demo` | 在前台演示数据上写入结账、反结账与交班演示数据（仅独立演示库） |
+| `npm run cli -- demo-prepare` | 一条命令准备完整演示库（五块 + 场景块，已有的跳过；仅独立演示库） |
+| `npm run cli -- demo-check` | 核对演示库与固定预期（只读） |
+| `npm run cli -- demo-reset --confirm <数据库名>` | 重建演示库：先备份并核验，再清库从零准备（仅 `APP_ENV=development` 的演示库） |
 | `npm run cli -- import-hand-tags --store-list` | 预览按店主 747 个真实柜号导入手牌池（加 `--apply` 才写入；也可传自己的 CSV；`--deactivate-missing` 同时停用清单外的空闲手牌）。这是真实业务数据，门店环境需店主同意后执行 |
 | `npm run cli -- import-opening <余额.csv> --operator <店主账号>` | 预览导入旧系统（EBC）会员余额作为期初（本金、赠金分开，不计入充值实收；加 `--apply` 才写入；`--source` 默认 EBC）。真实业务数据，门店环境需店主同意后执行；余额文件不要放进仓库 |
 | `npm run cli -- import-price-list --tangqi` | 预览按店主的汤崎价目表（29 个项目、多档价格）导入消费项目（加 `--apply` 才写入；也可传自己的 CSV；`--deactivate-missing` 同时停用价目表外的项目）。同为真实业务数据，门店环境需店主同意后执行 |
@@ -316,7 +327,7 @@ src/
       inventory/   master 档案 · docs 库存单据 · reports 库存卡/汇总/自检
                    purchasing 采购单与比价 · payables 期初未付/付款/对账
       frontdesk/   visits 接待/换牌/同行/状态板 · bills 挂账与作废 · tags 手牌池 · checks 自检
-    cli.ts         运维命令：migrate / create-owner / reset-password / seed-demo / seed-inventory-demo / seed-frontdesk-demo / seed-billing-demo / import-hand-tags / import-price-list / import-opening / check / fingerprint / backup / backup-loop / verify-backup / daily-recon / balance-changes
+    cli.ts         运维命令：migrate / create-owner / reset-password / seed-demo / seed-inventory-demo / seed-frontdesk-demo / seed-billing-demo / demo-prepare / demo-check / demo-reset / import-hand-tags / import-price-list / import-opening / check / fingerprint / backup / backup-loop / verify-backup / daily-recon / balance-changes
     ops/           自检汇总、数据指纹、备份与核验、每日对账包、余额变动清单
     seed.ts        会员合成演示数据
     seed-inventory.ts  库存与采购合成演示数据（demo/inventory-demo.json，仅独立演示库）
