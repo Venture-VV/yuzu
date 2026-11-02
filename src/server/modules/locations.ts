@@ -88,7 +88,7 @@ const isAt = (cur: Place, p: Place) => (p.spaceId !== null ? cur.spaceId === p.s
 // ───────────────────────── 写入：事件 → 轨迹段 → 当前位置 ─────────────────────────
 
 type Subject = { visitId: number; technicianId?: undefined } | { technicianId: number; visitId?: undefined };
-type RefType = 'visit' | 'bill_line' | 'room_stay' | 'technician_session' | 'checkout';
+type RefType = 'visit' | 'bill_line' | 'room_stay' | 'technician_session' | 'checkout' | 'space_usage';
 
 interface NewEvent {
   subject: Subject;
@@ -304,6 +304,31 @@ export async function leaveRoomStay(tx: Tx, visitId: number, roomId: number, sta
     const place = room?.spaceId ? await spacePlaceAny(sp, room.spaceId) : null;
     if (!place) return;
     await writeEvents(sp, [{ subject: { visitId }, kind: 'left', place, source: 'room_close', ref: { type: 'room_stay', id: stayId }, at: c.at, staffId: c.staffId }]);
+  });
+}
+
+/** 派对房等开单（D39，v0.7.19）：使用人在那间房 */
+export async function locateUsage(tx: Tx, visitId: number, spaceId: number, usageId: number, c: LocateContext) {
+  if (c.backfill) return;
+  await quietly(tx, '开单使用', async (sp) => {
+    const rules = await loadLocationRules(sp);
+    if (!rules.enabled) return;
+    const place = await spacePlace(sp, spaceId);
+    if (!place) return;
+    await writeEvents(sp, [{ subject: { visitId }, kind: 'at', place, source: 'usage_open', ref: { type: 'space_usage', id: usageId }, at: c.at, staffId: c.staffId }]);
+  });
+}
+
+/** 使用单结束、撤单：使用人离开那间房，位置不明（只在他现在就在那间房时；开关关着也照样清） */
+export async function leaveUsages(tx: Tx, usages: { id: number; visitId: number; spaceId: number }[], c: LocateContext) {
+  if (usages.length === 0) return;
+  await quietly(tx, '结束使用', async (sp) => {
+    const events: NewEvent[] = [];
+    for (const u of [...usages].sort((a, b) => a.visitId - b.visitId || a.id - b.id)) {
+      const place = await spacePlaceAny(sp, u.spaceId);
+      if (place) events.push({ subject: { visitId: u.visitId }, kind: 'left', place, source: 'usage_close', ref: { type: 'space_usage', id: u.id }, at: c.at, staffId: c.staffId });
+    }
+    await writeEvents(sp, events);
   });
 }
 

@@ -53,6 +53,8 @@ import { loadDiningRules } from './dining';
 import { loadRoomRules } from './rooms';
 import { loadLocationRules } from './locations';
 import { DEFAULT_LOCATION_RULES } from '@shared/locations';
+import { loadUsageRules } from './usages';
+import { DEFAULT_USAGE_RULES } from '@shared/usages';
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const onOff = (v: boolean, on: string, off: string) => (v ? on : off);
@@ -235,6 +237,13 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   });
   add({ key: 'room_rules.hourlyGraceMinutes', group: 'rooms', label: '钟点房超时宽限', value: `${rm.hourlyGraceMinutes} 分钟`, defaultValue: `${rmd.hourlyGraceMinutes} 分钟`, pending: true, section: 'rooms', hint: '超过已付时段加宽限才按段补', current: rm.hourlyGraceMinutes, dflt: rmd.hourlyGraceMinutes, metaKey: 'room_rules' });
   add({ key: 'room_rules.defaultDeposit', group: 'rooms', label: '入住默认押金', value: rm.defaultDeposit ? `默认收 ${formatYuan(rm.defaultDeposit)}` : '默认不收', defaultValue: '默认不收', pending: true, section: 'rooms', hint: '住客都有手牌、离店前在前台结清；入住时可以改', current: rm.defaultDeposit, dflt: rmd.defaultDeposit, metaKey: 'room_rules' });
+  // ── 平面图收尾（v0.7.19）：开单即占用的业态 ──
+  const ur = await loadUsageRules(db);
+  const usageText = (types: string[]) => (types.length ? `${types.join('、')}：有开着的使用单算使用中` : '没有（派对房等只显示业态）');
+  add({
+    key: 'usage_rules.businessTypes', group: 'floormap', label: '开单即占用的业态', value: usageText(ur.businessTypes), defaultValue: usageText(DEFAULT_USAGE_RULES.businessTypes),
+    pending: true, section: 'spaces', hint: '这些业态的房间不派技师，开单即「使用中」，结束、使用人结账或撤单后空闲', current: ur.businessTypes, dflt: DEFAULT_USAGE_RULES.businessTypes, metaKey: 'usage_rules',
+  });
   // ── 第一级实时位置（RQ-004，v0.7.17）──
   const lr = await loadLocationRules(db);
   const zoneNames = new Map(
@@ -356,6 +365,8 @@ function describeChange(action: string, detail: Record<string, unknown>): string
       if (detail.key === 'dining_rules') return '修改了餐饮规则';
       if (detail.key === 'room_rules') return '修改了客房规则';
       if (detail.key === 'location_rules') return '修改了实时位置的开关与区域';
+      if (detail.key === 'usage_rules') return '修改了开单即占用的业态';
+      if (detail.key === 'guide_rules') return '修改了对客导览的设置';
       const after = (detail.after ?? {}) as Record<string, unknown>;
       const keys = Object.keys(after).map((x) => SETTING_LABELS[x] ?? x);
       return keys.length ? `修改了${keys.join('、')}` : '修改了经营规则';

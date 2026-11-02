@@ -315,7 +315,7 @@ test.describe('v0.7.17 第一级实时位置', () => {
       events: [],
       eventsTruncated: false,
     };
-    const map: FloorMapData = { serverTime: now, floorplanBatchId: 900101, spaces, sessions: [] };
+    const map: FloorMapData = { serverTime: now, floorplanBatchId: 900101, spaces, sessions: [], usageTypes: [], usages: [] };
     const board: RoomBoard = {
       rules: { enabled: true, checkoutMinute: 720, lateFullMinute: 1080, hourlyGraceMinutes: 15, defaultDeposit: 0 } as RoomBoard['rules'],
       rooms: [],

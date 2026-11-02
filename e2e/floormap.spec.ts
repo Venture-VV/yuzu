@@ -266,11 +266,12 @@ test.describe('v0.7.16 房态图', () => {
       await expect(page.getByTestId('floormap-zoom')).toHaveAttribute('data-zoom', '1.50');
       await page.getByTestId('floormap-fit').click();
       await page.getByTestId('floormap-search').fill('');
-      // 二层：派对房只显示业态
+      // 二层：派对房开单即占用（v0.7.19）：没有开着的使用单为空闲，侧栏可以开单
       await map.getByRole('radiogroup', { name: '楼层' }).getByRole('radio', { name: 'L2 二层平面图' }).click();
-      await expect(space(page, 'X201')).toHaveAttribute('data-state', 'other');
+      await expect(space(page, 'X201')).toHaveAttribute('data-state', 'vacant');
       await space(page, 'X201').click();
       await expect(panel).toContainText('派对房');
+      await expect(panel.getByTestId('floormap-usage-open')).toBeVisible();
       await map.getByRole('radiogroup', { name: '楼层' }).getByRole('radio', { name: 'L3 三层平面图' }).click();
 
       // ⑤ 客房 W301：开房（原来的入住对话框）→ 在住 → 查房 → 退房 → 待打扫 → 打扫好了 → 空闲
@@ -367,7 +368,7 @@ function synthetic() {
   for (let r = 0; r <= ROWS; r += 1) lines.push(`<path d="M0 ${r * (CELL.h + CELL.gap) + CELL.gap / 2}H${W}"/>`);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}"><g fill="none" stroke="#333" stroke-width="12">${lines.join('')}</g></svg>`;
   const plan: ActiveFloorplan = { batchId: 900001, activatedAt: now, floors: [{ code: 'L3', title: '三层', width: W, height: H, svgBytes: svg.length, pathCount: lines.length, svgUrl: '/api/floorplans/900001/floors/L3/svg' }], rooms: planRooms };
-  const fm: FloorMapData = { serverTime: now, floorplanBatchId: 900001, spaces, sessions };
+  const fm: FloorMapData = { serverTime: now, floorplanBatchId: 900001, spaces, sessions, usageTypes: [], usages: [] };
   const board: RoomBoard = {
     rules: { enabled: true, checkoutMinute: 720, lateFullMinute: 1080, hourlyGraceMinutes: 15, defaultDeposit: 0 } as RoomBoard['rules'],
     rooms,

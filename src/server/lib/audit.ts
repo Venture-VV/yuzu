@@ -94,7 +94,15 @@ export type AuditAction =
   | 'floorplan_activate'
   // 第一级实时位置（RQ-004，v0.7.17）：刷卡点、项目所在区域
   | 'location_reader_saved'
-  | 'items_zone_updated';
+  | 'items_zone_updated'
+  // 平面图收尾（v0.7.19）：派对房等的使用单；换回旧底图、补画轮廓；对客导览的图标
+  | 'usage_open'
+  | 'usage_end'
+  | 'usage_cancel'
+  | 'floorplan_restore'
+  | 'floorplan_outline'
+  | 'guide_marker_saved'
+  | 'guide_markers_detected';
 
 export interface AuditEntry {
   staffId: number | null;

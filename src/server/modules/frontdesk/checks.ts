@@ -4,6 +4,7 @@
 import type { FrontdeskCheck } from '@shared/frontdesk';
 import { formatYuan } from '@shared/money';
 import type { Db } from '../../db';
+import { usageCheck } from '../usages';
 
 export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
   // ① 每张账单的合计 / 行数 = 其有效明细之和（未结明细合计 == 未结账单总额）
@@ -310,5 +311,7 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
         ? `${moveDiff.length} 条转单记录与明细不符（如 ${moveDiff.map((d) => d.ref).join('、')}）`
         : `转单 ${moves!.n} 条：原明细都已作废，目标手牌上的明细与原明细一致`,
     },
+    // ⑰ 派对房等的使用单（v0.7.19）
+    await usageCheck(db),
   ];
 }

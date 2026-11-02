@@ -1,14 +1,16 @@
 // 房态图（飞书需求 RQ-004 第三段，v0.7.16，见 docs/ROOMMAP.md）：只读接口。
 //   · 楼层与房间轮廓：在用的底图（floorplans.ts 的 GET /api/floorplans/active，页面只取一次，换了一批再取）；
 //   · 客房的房态：「客房」房态看板（rooms.ts 的 GET /api/rooms），与看板同一个口径；
-//   · 这里给空间台账里的空间（着色、点开看信息）与记了房间、还没结束的钟单（技师房的空闲、服务中），页面每 5 秒取一次。
+//   · 这里给空间台账里的空间（着色、点开看信息）、记了房间且还没结束的钟单（技师房的空闲、服务中）、
+//     派对房等开着的使用单（v0.7.19，开单即占用），页面每 5 秒取一次。
 // 谁能看：看得到「客房」的岗位（客房入住、客房打扫、收银）；只显示手牌号与技师，不显示会员姓名、手机号。
 
 import type { FastifyInstance } from 'fastify';
-import type { FloorMapData, FloorMapSession, FloorMapSpace } from '@shared/floormap';
+import type { FloorMapData, FloorMapSession, FloorMapSpace, FloorMapUsage } from '@shared/floormap';
 import type { Db } from '../db';
 import { guardAny } from '../auth/guard';
 import type { Deps } from '../lib/context';
+import { loadUsageRules } from './usages';
 
 export async function floorMapData(db: Db): Promise<FloorMapData> {
   const [now] = await db<{ now: string }[]>`SELECT now() AS now`;
@@ -27,9 +29,16 @@ export async function floorMapData(db: Db): Promise<FloorMapData> {
     JOIN hand_tags h ON h.id = v.tag_id JOIN service_items i ON i.id = s.item_id
     WHERE s.space_id IS NOT NULL AND s.status IN ('waiting', 'serving') AND v.status = 'open'
     ORDER BY s.space_id, (s.status = 'serving') DESC, coalesce(s.started_at, s.created_at), s.id`;
+  const usages = await db<(Omit<FloorMapUsage, 'openedAt'> & { openedAt: string })[]>`
+    SELECT u.id, u.usage_no, u.space_id, u.visit_id, h.code AS tag_code, u.guests, u.note, u.opened_at, st.display_name AS opened_by_name
+    FROM space_usages u JOIN visits v ON v.id = u.visit_id JOIN hand_tags h ON h.id = v.tag_id JOIN staff st ON st.id = u.opened_by
+    WHERE u.status = 'open'
+    ORDER BY u.space_id`;
   return {
     serverTime: new Date(now!.now).toISOString(),
     floorplanBatchId: batch?.id ?? null,
+    usageTypes: (await loadUsageRules(db)).businessTypes,
+    usages: usages.map((u) => ({ ...u, openedAt: new Date(u.openedAt).toISOString() })),
     spaces,
     sessions: sessions.map((s) => ({
       ...s,

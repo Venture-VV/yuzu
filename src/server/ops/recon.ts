@@ -8,6 +8,7 @@
 //   05-交班.csv        当天的班次：备用金、各收款方式、应有现金、实点、长短款
 //   06-技师业绩.csv    每位技师的钟数、点钟 / 轮钟、金额与提成（v0.7.0 / v0.7.1，与部门参考表同一口径），供与钟房的钟单核对
 //   07-客房与押金.csv  当天的入住、房费、换房、退房、夜审与押金的收、退（S7，v0.7.4），供与客房登记、押金袋核对
+//   08-使用单.csv      派对房、宠物轰趴房、娱乐室当天开的使用单（v0.7.19）：房间、使用人手牌、开单与结束时刻、时长、经办人、撤单原因
 // 优惠 / 免单与降档 / 免票授权在资金轨 R1.2 合并后加入异常清单。
 
 import { businessDateOf, businessDayStart } from '@shared/business-date';
@@ -223,7 +224,16 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     SELECT a.run_at, '夜审', '', '', '', NULL, NULL, a.amount, st.display_name, '挂了 ' || a.nights || ' 晚房费'
     FROM room_audits a JOIN staff st ON st.id = a.run_by WHERE a.business_date = ${date}
     ORDER BY 1, 3`;
-  return { summary, checkouts, departments, voidedLines, cancelled, ticketChanges, freeEntries, shifts, technicians, rooms };
+  // 派对房等的使用单（v0.7.19）：当天开的（营业日），以及当天结束的、前一天开的
+  const usages = await tx<{ usageNo: string; spaceCode: string; spaceName: string; businessType: string; tagCode: string; guests: number; openedAt: string; openedBy: string; closedAt: string | null; closedBy: string | null; status: string; closeKind: string | null; closeReason: string | null; note: string; businessDate: string }[]>`
+    SELECT u.usage_no, sp.code AS space_code, sp.display_name AS space_name, sp.business_type, ht.code AS tag_code, u.guests,
+           u.opened_at, so.display_name AS opened_by, u.closed_at, sc.display_name AS closed_by, u.status, u.close_kind, u.close_reason, u.note,
+           u.business_date::text AS business_date
+    FROM space_usages u JOIN spaces sp ON sp.id = u.space_id JOIN visits v ON v.id = u.visit_id JOIN hand_tags ht ON ht.id = v.tag_id
+    JOIN staff so ON so.id = u.opened_by LEFT JOIN staff sc ON sc.id = u.closed_by
+    WHERE u.business_date = ${date} OR (u.closed_at >= ${from} AND u.closed_at < ${to})
+    ORDER BY u.opened_at, u.id`;
+  return { summary, checkouts, departments, voidedLines, cancelled, ticketChanges, freeEntries, shifts, technicians, rooms, usages };
 }
 
 export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string, now = new Date()): Promise<DailyRecon> {
@@ -480,6 +490,33 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     ]),
   });
 
+  // 08 使用单（v0.7.19）：派对房等「开单即占用」，费用是手牌账单上的普通明细（在结账单与部门参考表里），这里只核对占用
+  const closeLabel: Record<string, string> = { end: '结束使用', checkout: '使用人结账', visit_cancel: '撤销来访', cancel: '撤单' };
+  const minutesOf = (a: string, b: string | null) => (b ? Math.max(0, Math.floor((new Date(b).getTime() - new Date(a).getTime()) / 60_000)) : null);
+  files.push({
+    name: '08-使用单.csv',
+    content: toCsv([
+      ['使用单', '房间', '名称', '业态', '使用人手牌', '人数', '开单时刻', '开单人', '结束时刻', '结束方式', '经办人', '时长（分钟）', '撤单原因', '备注', '开单营业日'],
+      ...day.usages.map((u) => [
+        u.usageNo,
+        u.spaceCode,
+        u.spaceName,
+        u.businessType,
+        u.tagCode,
+        u.guests,
+        stampOf(u.openedAt),
+        u.openedBy,
+        u.closedAt ? stampOf(u.closedAt) : '使用中',
+        u.closeKind ? (closeLabel[u.closeKind] ?? u.closeKind) : '',
+        u.closedBy ?? '',
+        minutesOf(u.openedAt, u.closedAt) ?? '',
+        u.closeReason ?? '',
+        u.note,
+        u.businessDate,
+      ]),
+    ]),
+  });
+
   // 00 说明
   const failed = checks.filter((c: CheckLine) => !c.ok);
   const deptOk = deptTotal === biz.receivable && deptDiscount === biz.discount;
@@ -496,6 +533,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     `交班：${day.shifts.length} 个班次，已交班 ${day.shifts.filter((r) => r.status === 'closed').length} 个`,
     `技师：${tr.totals.clocks} 个钟（点钟 ${tr.totals.designated}、轮钟 ${tr.totals.rotation}），${formatYuan(tr.totals.amount)}${tr.unassigned.clocks ? `；未指定技师 ${tr.unassigned.clocks} 个钟` : ''}`,
     `客房押金：收 ${formatYuan(s.deposits.received.reduce((t, m) => t + m.amount, 0))}、退 ${formatYuan(s.deposits.refunded.reduce((t, m) => t + m.amount, 0))}；当天结束时在住押金 ${formatYuan(s.deposits.held)}`,
+    `派对房等使用单：当天开 ${day.usages.filter((u) => u.businessDate === date).length} 张，撤单 ${day.usages.filter((u) => u.status === 'cancelled').length} 张，仍在使用 ${day.usages.filter((u) => u.status === 'open').length} 张`,
     failed.length ? `自检：✗ ${failed.length} 项不一致：${failed.map((c) => c.label).join('、')}` : `自检：✓ ${checks.length} 项全部一致`,
   ];
   files.unshift({
@@ -516,6 +554,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
       '  05-交班.csv         当天的班次、反结账退现金与长短款',
       '  06-技师业绩.csv     每位技师的钟数、点钟 / 轮钟、金额与提成（与部门参考表同一口径，提成按结账时刻的提成规则），与钟房的钟单核对',
       '  07-客房与押金.csv   当天的入住、房费、换房、退房、夜审与押金的收、退（押金是负债，不算营业额；房费随手牌结账），与客房登记、押金袋核对',
+      '  08-使用单.csv       派对房、宠物轰趴房、娱乐室当天开的与当天结束的使用单（房间、使用人手牌、开单与结束、时长、经办人、撤单原因）；场次费在结账单里',
       '',
     ].join('\n'),
   });
