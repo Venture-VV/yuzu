@@ -6,9 +6,10 @@ import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ActiveFloorplan, FloorplanDetail, FloorplanList } from '../src/shared/floorplans';
 import expected from '../src/server/demo/floorplan-expected.json';
-import { floorplanSampleDxf } from '../src/server/demo/floorplan-sample';
+import { floorplanSampleDxf, floorplanSampleFloorSwapDxf } from '../src/server/demo/floorplan-sample';
 import { floorplanChecks } from '../src/server/modules/floorplans';
 import { createStaff } from '../src/server/modules/staff';
+import { buildApp } from '../src/server/app';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
@@ -145,8 +146,8 @@ describe('上传与转换', () => {
     expect(diff.added).toEqual([]);
     expect(diff.removed.map((x) => x.code)).toEqual(expected.v2.batchDiffAgainstV1.removed);
     expect(diff.renamed.map((x) => [x.from, x.to])).toEqual(expected.v2.batchDiffAgainstV1.renamed);
-    expect(diff.moved).toEqual([]);
-    expect(diff.floorChanged).toEqual([]);
+    expect(diff.moved).toEqual(expected.v2.batchDiffAgainstV1.moved);
+    expect(diff.floorChanged).toEqual(expected.v2.batchDiffAgainstV1.floorChanged);
     // 页面还以为没有在用的（例如超时后迟到的请求、另一个标签页）：在用的已经是第一版，拒绝，第一版不被换下
     const stale = await activate(v2, null);
     expect(stale.status).toBe(409);
@@ -170,19 +171,19 @@ describe('上传与转换', () => {
   }, 60_000);
 
   it('与在用的那一批比对：同一个编码换了楼层单独列出（不算增减、不算挪动）', async () => {
-    // 第二版上把三层的 T305 与二层的 X201 对调
-    const swapped = floorplanSampleDxf(2).replace('样例 SPA T305 2人间', '样例 SPA X201 2人间').replace('样例派对房X201', '样例派对房T305');
-    const r = await upload(swapped, '编码对调.dxf');
+    // 第二版上把三层的 T305 与二层的 X201 对调（docs/data/floorplan-sample-v2-swap.dxf）
+    const r = await upload(floorplanSampleFloorSwapDxf(), '编码对调.dxf');
     expect(r.status).toBe(202);
     const d = await waitReady(r.body.batch.id);
     expect(d.batch.status, d.batch.error ?? '').toBe('ready');
     // 楼层按图上的标题定，不因为编码的楼层位对不上而认错
-    expect(d.floors.map((f) => f.code)).toEqual(['L2', 'L3']);
-    expect(d.batchDiff!.floorChanged).toEqual([
-      { code: 'T305', from: 'L3', to: 'L2' },
-      { code: 'X201', from: 'L2', to: 'L3' },
-    ]);
-    expect(d.batchDiff).toMatchObject({ added: [], removed: [], renamed: [], moved: [] });
+    expect(d.floors.map((f) => f.code)).toEqual(expected.v2swap.floors);
+    const want = expected.v2swap.batchDiffAgainstV2;
+    expect(d.batchDiff!.floorChanged).toEqual(want.floorChanged);
+    expect(d.batchDiff!.added).toEqual(want.added);
+    expect(d.batchDiff!.removed.map((x) => x.code)).toEqual(want.removed);
+    expect(d.batchDiff!.renamed.map((x) => [x.from, x.to])).toEqual(want.renamed);
+    expect(d.batchDiff!.moved).toEqual(want.moved);
   }, 60_000);
 
   it('spaces.geojson：每个编码一个要素，配上的是多边形、例外是点', async () => {
@@ -217,4 +218,34 @@ describe('上传与转换', () => {
     await expect(ctx.sql`DELETE FROM floorplan_batches WHERE id = ${v1}`).rejects.toThrow(/不能删除/);
     await expect(ctx.sql`UPDATE floorplan_batches SET status = 'ready' WHERE id = ${v1}`).rejects.toThrow(/状态不能/);
   });
+});
+
+describe('同时只转换一份；应用重启时没转完的记失败（v0.7.15 验收报告的测试缺口）', () => {
+  it('有一份在转换时再上传另一份：409 FLOORPLAN_BUSY、写明是哪一份、不留批次；重启后那一份记「转换中断」，再上传就能转', async () => {
+    // 占住转换：直接放一批「转换中」（代替一个还没跑完的转换进程）
+    const [busy] = await ctx.sql<{ id: number }[]>`
+      INSERT INTO floorplan_batches (file_name, file_sha256, file_bytes, file_format, converter, created_by)
+      VALUES ('占着转换的图纸.dwg', ${'a'.repeat(64)}, 1024, 'dwg', 'yuzu-floorplan/1', ${ctx.ownerId}) RETURNING id`;
+    const count = async () => (await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM floorplan_batches`)[0]!.n;
+    const before = await count();
+    const content = `999\n测试：占着转换时上传 ${Date.now()}\n${floorplanSampleDxf(1)}`;
+    const r = await upload(content, '另一份.dxf');
+    expect(r.status, JSON.stringify(r.body)).toBe(409);
+    expect(r.body.error.code).toBe('FLOORPLAN_BUSY');
+    expect(r.body.error.message).toContain('占着转换的图纸.dwg');
+    expect(await count()).toBe(before);
+    // 应用重启（新起一个实例）：启动时把没转完的记失败
+    const restarted = await buildApp(ctx.sql, ctx.config);
+    await restarted.ready();
+    await restarted.close();
+    const [after] = await ctx.sql<{ status: string; error: string | null; finishedAt: string | null }[]>`
+      SELECT status, error, finished_at FROM floorplan_batches WHERE id = ${busy!.id}`;
+    expect(after).toMatchObject({ status: 'failed', error: '转换中断（系统重启），请重新上传' });
+    expect(after!.finishedAt).not.toBeNull();
+    // 不再占着：再上传就接下来转换
+    const again = await upload(content, '另一份.dxf');
+    expect(again.status, JSON.stringify(again.body)).toBe(202);
+    const d = await waitReady(again.body.batch.id);
+    expect(d.batch.status, d.batch.error ?? '').toBe('ready');
+  }, 60_000);
 });

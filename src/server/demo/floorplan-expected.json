@@ -1,27 +1,99 @@
 {
-  "说明": "底图转换合成样例的固定预期（v0.7.15）。图纸：docs/data/floorplan-sample.dxf（第一版）、floorplan-sample-v2.dxf（第二版），也可以用 node dist/server/cli.js floorplan-sample <文件> 生成第一版。台账比对按 docs/data/space-zones-sample.csv 与 space-ledger-sample.csv 导入后的样例台账。",
-  "floors": ["L2", "L3"],
+  "说明": "底图转换合成样例的固定预期（v0.7.15；v0.7.17 补上批次差异的「换了楼层」与 F22 换楼层样例）。图纸：docs/data/floorplan-sample.dxf（第一版）、floorplan-sample-v2.dxf（第二版）、floorplan-sample-v2-swap.dxf（第二版上把 T305 与 X201 对调，F22），也可以用 node dist/server/cli.js floorplan-sample <文件> 生成第一版。台账比对按 docs/data/space-zones-sample.csv 与 space-ledger-sample.csv 导入后的样例台账。",
+  "floors": [
+    "L2",
+    "L3"
+  ],
   "v1": {
-    "ok": ["T301", "T302", "T303", "V312", "W301", "W302", "X201", "X202"],
-    "merged": ["W303", "W305"],
-    "leak": ["W306"],
+    "ok": [
+      "T301",
+      "T302",
+      "T303",
+      "V312",
+      "W301",
+      "W302",
+      "X201",
+      "X202"
+    ],
+    "merged": [
+      "W303",
+      "W305"
+    ],
+    "leak": [
+      "W306"
+    ],
     "ledgerDiff": {
-      "onlyDrawing": ["T303", "W303", "W305", "W306", "X202"],
-      "onlyLedger": ["U310"],
+      "onlyDrawing": [
+        "T303",
+        "W303",
+        "W305",
+        "W306",
+        "X202"
+      ],
+      "onlyLedger": [
+        "U310"
+      ],
       "floorMismatch": [],
-      "labelChanged": ["T302"],
+      "labelChanged": [
+        "T302"
+      ],
       "matched": 6
     }
   },
   "v2": {
-    "ok": ["T301", "T302", "T305", "V312", "W301", "W302", "W306", "X201"],
-    "merged": ["W303", "W305"],
+    "ok": [
+      "T301",
+      "T302",
+      "T305",
+      "V312",
+      "W301",
+      "W302",
+      "W306",
+      "X201"
+    ],
+    "merged": [
+      "W303",
+      "W305"
+    ],
     "leak": [],
     "batchDiffAgainstV1": {
       "added": [],
-      "removed": ["X202"],
-      "renamed": [["T303", "T305"]],
-      "moved": []
+      "removed": [
+        "X202"
+      ],
+      "renamed": [
+        [
+          "T303",
+          "T305"
+        ]
+      ],
+      "moved": [],
+      "floorChanged": []
+    }
+  },
+  "v2swap": {
+    "说明": "第二版在用时上传：同一个编码换了楼层只列在 floorChanged，不算增减、编码变更、挪动；楼层按图上的标题定",
+    "floors": [
+      "L2",
+      "L3"
+    ],
+    "batchDiffAgainstV2": {
+      "added": [],
+      "removed": [],
+      "renamed": [],
+      "moved": [],
+      "floorChanged": [
+        {
+          "code": "T305",
+          "from": "L3",
+          "to": "L2"
+        },
+        {
+          "code": "X201",
+          "from": "L2",
+          "to": "L3"
+        }
+      ]
     }
   }
 }

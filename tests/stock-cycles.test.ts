@@ -137,6 +137,25 @@ beforeAll(async () => {
 afterAll(async () => ctx.close());
 
 describe('台面日耗品（#14）', () => {
+  it('迁移前的领料（没有仓）的台面日耗品：只出总仓、不算自动耗用；退回只进总仓，不受「不能退回」的限制（v0.7.15 验收报告的测试缺口）', async () => {
+    const m = await material('LG01', { counterUse: true });
+    await stockIn(m.id, 2); // 20 个
+    const draft = (await ok(doc(keeper, { docType: 'issue', action: 'save', departmentId: bathId, handler: '旧领用', lines: [{ materialId: m.id, qtyMilli: q(6) }] }))).doc as { id: number };
+    // 模拟迁移 029 以前生效的领料：没有仓
+    await ctx.sql`UPDATE inv_docs SET warehouse_id = NULL WHERE id = ${draft.id}`;
+    const legacy = (await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${draft.id}/submit`, {})).body as { id: number; status: string; warehouse: unknown; lines: { id: number; autoConsumed: boolean }[] };
+    expect(legacy).toMatchObject({ status: 'confirmed', warehouse: null });
+    expect(legacy.lines[0]!.autoConsumed).toBe(false);
+    expect(await centralStock(m.id)).toBe(q(14));
+    expect(await deptStock(m.id)).toBe(0);
+    // 退回：照常生效，回到总仓
+    const back = await ok(doc(keeper, { docType: 'issue_return', sourceDocId: legacy.id, handler: '旧领用', lines: [{ sourceLineId: legacy.lines[0]!.id, qtyMilli: q(2) }] }));
+    expect(back.doc).toMatchObject({ status: 'confirmed', warehouse: null });
+    expect(await centralStock(m.id)).toBe(q(16));
+    expect(await deptStock(m.id)).toBe(0);
+    await checksOk();
+  });
+
   it('领到部门即算耗用：部门小仓不留结存，领料单标出自动耗用；冲销整张领料单都回去', async () => {
     const m = await material('CU01', { counterUse: true });
     expect(m.counterUse).toBe(true);
