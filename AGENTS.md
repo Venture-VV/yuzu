@@ -29,6 +29,10 @@ node dist/server/cli.js seed-frontdesk-demo
 node dist/server/cli.js seed-billing-demo  # 结账、反结账与交班（建在前台演示数据上）
 node dist/server/cli.js seed-legacy-demo   # 8–10 月旧账的合成样例导入只读表（不进正式账）
                                            # 营业日切换后 5 个半小时内执行会提示跨营业日；两条都加 --previous-day 整体放到前一个营业日
+node dist/server/cli.js demo-prepare       # 一条命令准备演示库（v0.7.18）：上面五块 + 场景块（客房、技师与钟房、餐饮与厨房、空间台账与底图、实时位置），
+                                           # 已有的跳过、不改已有记录，场景块有冲突时一条不写并列出；最后自带 check 与 demo-check
+node dist/server/cli.js demo-check         # 核对演示库（只读）：check、五块都在、场景块与 src/server/demo/showcase-expected.json 一致
+node dist/server/cli.js demo-reset --confirm <库名>   # 只在独立演示库（development，实例不是 prod/shadow/test）：先备份核验，再清库从零准备（先停应用）
 node dist/server/cli.js check              # 会员（含营业口径）、库存、前台自检，全部 ✓ 才算一致
 node dist/server/cli.js fingerprint        # 数据指纹（只读）；--expect <摘要> 比对，不一致退出码为 1
 ./scripts/backup.sh                        # 立即备份：临时库试恢复、自检并记下指纹（写 BACKUP_DIR，含 .json 说明）
@@ -43,7 +47,8 @@ node dist/server/cli.js import-legacy <原始.xlsx> --operator <店主账号>   
 node dist/server/cli.js floorplan-convert <图纸.dwg>   # 底图转换（不碰数据库）：每层 SVG、spaces.geojson、报告写到 floorplan-<文件名>/；floorplan-sample <文件.dxf> 写出合成样例图纸
 node dist/server/cli.js import-opening <余额.csv> --operator <店主账号> --control 人数,本金,赠金,累计充值 [--exclude <排除清单.csv>]
                                           # 预览导入旧系统会员余额期初并与 EBC 控制总数比对；--apply 才写入（同上；正式环境必须给控制总数）
-E2E_BASE_URL=http://127.0.0.1:<端口> npm run e2e   # 1440×900 / 1024×768 / 820×1180，另有 1280×720 与手机只跑视口冒烟
+E2E_BASE_URL=http://127.0.0.1:<端口> npm run e2e   # 1440×900 / 1024×768 / 820×1180，另有 1280×720 与手机只跑视口冒烟（CI 拆三组并行，见 docs/TESTING.md）
+E2E_DEMO_SHOWCASE=1 E2E_BASE_URL=… npx playwright test e2e/demo-showcase.spec.ts --project=门店电脑   # demo-prepare 准备好的库上核对演示场景
 ```
 
 演示数据的固定预期结果在 `src/server/demo/*-expected.json`。
