@@ -14,6 +14,7 @@ import { loadSettings } from '../modules/settings';
 import { createBackup, type BackupManifest } from '../ops/backup';
 import { consistencyChecks } from '../ops/consistency';
 import { fingerprintIn } from '../ops/fingerprint';
+import { noAppRunning } from '../presence';
 import { demoSeedTime, rememberDemoAnchor } from '../ops/demo-time';
 import { seedDemo } from '../seed';
 import { seedBillingDemo } from '../seed-billing';
@@ -214,15 +215,21 @@ export async function demoReset(
   const log = opts.log ?? (() => {});
   const [{ db } = { db: '' }] = await sql<{ db: string }[]>`SELECT current_database() AS db`;
   if (!opts.confirm || opts.confirm !== db) throw new Error(`demo-reset 会清空数据库「${db}」：确认无误后加 --confirm ${db}（库名写对才执行）`);
+  // 应用还开着就不清库（v0.7.19，main 定时测试报告 P2：原来只靠锁表，应用开着但空闲时照样清库）：
+  // 应用进程一直拿着「应用在跑」的共享锁（src/server/presence.ts），这里先查一次、免得白做备份，清库的事务里再查一次
+  const APP_RUNNING = '应用还开着（有应用进程连着这个库），没有清库；请先停掉应用再执行';
+  if (!(await sql.begin((tx) => noAppRunning(tx)))) throw new Error(`${APP_RUNNING}。还没有备份。`);
   // 清库的前提（备份不成功就不清库）：pg_dump 成功写出文件（记下大小与摘要），并在临时库完整恢复、算出数据指纹
   const backup = await (opts.backup ?? createBackup)(config, opts.backupDir, 'demo-reset');
   if (!backup.verified) throw new Error(`备份没有核验通过（${backup.verifyError ?? '原因不明'}），没有清库。备份文件：${backup.file}`);
   log(`✓ 已备份（${(backup.bytes / 1024).toFixed(0)} KB），在临时库恢复核验通过：${backup.file}`);
-  // 清库在一个事务里：先给 public 下所有表加共享锁（挡住写入；应用还在写、等锁 10 秒拿不到就放弃），再算一次数据指纹，
+  // 清库在一个事务里：先确认没有应用开着，再给 public 下所有表加共享锁（挡住写入；别的连接还在写、等锁 10 秒拿不到就放弃），再算一次数据指纹，
   // 与备份恢复出来的指纹相同才删——备份里就是现在的全部数据。备份之后有过写入的指纹对不上，拒绝；
   // 锁住之后再来的写入被挡在锁外，删库后失败，不会提交（Codex 复审 174fa29：原来只比对备份前的指纹，备份到删库之间的写入会悄悄丢掉）
   try {
     await sql.begin(async (tx) => {
+      // 备份期间启动了应用：不清库；拿到锁之后（到事务结束）新启动的应用等在拿锁那一步
+      if (!(await noAppRunning(tx))) throw new Error(`${APP_RUNNING}。备份已做好：${backup.file}`);
       await tx`SET LOCAL lock_timeout = '10s'`;
       const tables = await tx<{ name: string }[]>`
         SELECT c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -237,7 +244,7 @@ export async function demoReset(
     });
   } catch (error) {
     const code = (error as { code?: string }).code;
-    if (code === '55P03') throw new Error('数据库正被别的连接使用（应用没停？），没有清库；请先停掉应用再执行。备份已做好。');
+    if (code === '55P03') throw new Error(`数据库正被别的连接使用（有连接正在写），没有清库；等它写完或断开后再执行。备份已做好：${backup.file}`);
     throw error;
   }
   log('清库前锁住所有表再核对：数据指纹与备份一致');

@@ -4,7 +4,7 @@
 //   · 新库准备：中途出错再执行一次接着补（操作编号原样重发，不重复接待、派钟、点单），结果与 showcase-expected.json 一致，自检全过；
 //   · 再执行一次全部跳过，数据指纹不变；
 //   · demo-check 发现与预期不同的地方；场景块与已有记录冲突时整块不写、列出冲突；
-//   · demo-reset：环境、实例标识、库名不对时拒绝，备份没核验通过时不清库；通过时清库重建。
+//   · demo-reset：环境、实例标识、库名不对时拒绝，备份没核验通过时不清库；应用开着（空闲也算）时不清库；通过时清库重建。
 
 import { readFile } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -19,6 +19,7 @@ import { createStaff } from '../src/server/modules/staff';
 import { DEMO_PASSWORD } from '../src/server/seed';
 import type { BackupManifest } from '../src/server/ops/backup';
 import { computeFingerprint } from '../src/server/ops/fingerprint';
+import { APP_PRESENCE_LOCK, holdAppPresence, type AppPresence } from '../src/server/presence';
 import { setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
@@ -183,6 +184,63 @@ describe('演示数据准备', () => {
     await expect(demoReset(ctx.sql, dev, { ...opts, confirm: db, backup: backupThenWrite })).rejects.toThrow(/备份之后库里又有写入.*没有清库/);
     expect(await ctx.sql`SELECT 1 FROM settings WHERE key = 'test_write_after_backup'`).toHaveLength(1);
     await ctx.sql`DELETE FROM settings WHERE key = 'test_write_after_backup'`;
+    expect(await fingerprint()).toBe(before);
+  });
+
+  it('demo-reset：应用开着（只拿着「应用在跑」的标记、什么都不写）时备份前就拒绝；备份期间才启动的应用在清库的事务里拦下；标记的连接断了会重新拿（main 定时测试报告 P2）', async () => {
+    const before = await fingerprint();
+    const db = await dbName();
+    let backups = 0;
+    const counted = async () => {
+      backups++;
+      return fakeBackup(true)();
+    };
+    /** 这个库里拿着标记（共享锁）的会话数 */
+    const holders = async () =>
+      (
+        await ctx.sql<{ n: number }[]>`
+          WITH k AS (SELECT hashtextextended(${APP_PRESENCE_LOCK}, 0) AS v)
+          SELECT count(*)::int AS n FROM pg_locks l, k
+          WHERE l.locktype = 'advisory' AND l.granted AND l.mode = 'ShareLock' AND l.objsubid = 1
+            AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
+            AND l.classid = ((k.v >> 32) & 4294967295)::oid AND l.objid = (k.v & 4294967295)::oid`
+      )[0]!.n;
+    // 开着、空闲的应用：业务连接池里没有在写的连接（原来只靠锁表，这时照样清库），只有标记
+    // 每次检查最多等 3 秒（默认 60 秒）：连接断的那一刻发出的查询可能等不到回应，换新连接再拿
+    const app = await holdAppPresence(ctx.config.databaseUrl, { attemptMs: 3000 });
+    try {
+      expect(await holders()).toBe(1);
+      await expect(demoReset(ctx.sql, dev, { confirm: db, backupDir: '/nonexistent', backup: counted })).rejects.toThrow(/应用还开着.*没有清库.*还没有备份/);
+      expect(backups).toBe(0);
+      // 标记的专用连接断了（数据库重启的效果）：锁跟着没了，下一次检查在新连接上重新拿
+      const [conn] = await ctx.sql<{ pid: number }[]>`
+        SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND application_name = 'yuzu-app-presence'`;
+      await ctx.sql`SELECT pg_terminate_backend(${conn!.pid})`;
+      for (let i = 0; i < 50 && (await holders()) > 0; i++) await new Promise((r) => setTimeout(r, 100));
+      expect(await holders()).toBe(0);
+      await app.ensure();
+      expect(await holders()).toBe(1);
+      await expect(demoReset(ctx.sql, dev, { confirm: db, backupDir: '/nonexistent', backup: counted })).rejects.toThrow(/应用还开着/);
+      expect(backups).toBe(0);
+    } finally {
+      await app.release();
+    }
+    expect(await holders()).toBe(0);
+    // 备份期间启动了应用：清库的事务里再查一次，不清库，备份已做好
+    let late: AppPresence | undefined;
+    const appStartsDuringBackup = async () => {
+      const m = await counted();
+      late = await holdAppPresence(ctx.config.databaseUrl);
+      return m;
+    };
+    try {
+      await expect(demoReset(ctx.sql, dev, { confirm: db, backupDir: '/nonexistent', backup: appStartsDuringBackup })).rejects.toThrow(
+        /应用还开着.*没有清库.*备份已做好/,
+      );
+      expect(backups).toBe(1);
+    } finally {
+      await late?.release();
+    }
     expect(await fingerprint()).toBe(before);
   });
 

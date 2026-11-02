@@ -59,14 +59,16 @@
 | D5 | 两个页面都停在旧的在用批次，先后换回 / 启用 | 后一个拒绝（`FLOORPLAN_STALE`），在用的不被换掉 |
 | O1 | 在用批次的例外 W306「补画轮廓」，在底图上点四个点保存 | 例外清单写「已补画」；预览里虚线轮廓；「客房 → 平面图」W306 有了轮廓 |
 | O2 | 重画、作废补画；给配上轮廓的编码、已换下的批次补画 | 重画旧的作废；作废后回到位置点；配上的提示不用补画；已换下的只读 |
+| R1 | 演示库上应用开着、空闲超过半分钟（业务连接池里没有连接）时执行 `demo-reset --confirm <库名>`；停掉应用再执行 | 开着时 1 秒内拒绝「应用还开着……还没有备份」，备份目录里没有新文件，数据指纹不变；停掉后照常备份核验、清库重建，`check`、`demo-check` 全 ✓（main 定时测试报告 P2 的修正） |
 | M1 | 从 v0.7.18 的演示库升级（`./scripts/update.sh`） | 迁移 036 自动执行；`check` 全 ✓；原有的底图、区域、来访不变；在用历史有升级前的启用与换下 |
 | C1 | 看 PR 的 CI | 全部 job 通过；浏览器验收汇总合计 = 不拆分时的用例总数，没有失败或重试后才通过 |
 
 ## 4. 已执行的验证
 
-- `npm run typecheck`、`npm run build`；`npm test` 本机 70 个文件、全过（新增 `tests/usages.test.ts` 14 项、`tests/guide.test.ts` 7 项、`tests/floorplan-pdf.test.ts` 18 项、`tests/upgrade-floorplan-finish.test.ts` 1 项，`tests/floorplans-api.test.ts` 新增 4 项）。
+- `npm run typecheck`、`npm run build`；`npm test` 本机 69 个文件、711 项全过（新增 `tests/usages.test.ts` 14 项、`tests/guide.test.ts` 7 项、`tests/floorplan-pdf.test.ts` 18 项、`tests/upgrade-floorplan-finish.test.ts` 1 项，`tests/floorplans-api.test.ts` 新增 4 项，`tests/demo-prepare.test.ts` 新增「应用开着时 `demo-reset` 不清库」1 项；并行跑时有一个文件在复制模板库时碰上本机非超级用户结束不了自动清理进程，单独重跑通过，属本机环境）。
 - 本机新库 `demo-prepare`：六块都写入，`check` 50 项、`demo-check` 全 ✓（约 8 秒）。
-- 本机浏览器（独立演示库，五块演示数据）：`e2e/floormap.spec.ts`（含派对房开单 / 结束 / 撤单）、`e2e/floorplans.spec.ts`（含登记、换回、补画）、`e2e/guide.spec.ts`（门店电脑写数据；五个尺寸与 1920×1080 只读）全过；完整浏览器验收结果见 PR。
+- 本机 `demo-reset`（真实进程）：应用开着、空闲 40 秒（业务连接池已经没有连接，库里只剩「应用在跑」的专用连接）时 1 秒内拒绝，没有备份、数据指纹不变；停掉应用后备份核验、清库重建，`check` 50 项、`demo-check` 全 ✓。
+- 本机完整浏览器验收（独立演示库，五块演示数据，`9a59ef6` 之前的构建）：400 项里 216 过、182 按尺寸跳过、2 项失败——只用 ERP 的物资经办多出「返回门店」、手机上「空间台账」的分页横向溢出，都是这一版引入的，已修正；修正后在新构建上重跑这几个文件（库存、ERP、视口冒烟、对客导览，五个尺寸）79 过、22 跳过、0 失败。CI 的完整结果见 PR。
 
 ## 5. 给测试 AI 的指令（可复制）
 
@@ -77,7 +79,8 @@
    U1–U9（派对房开单即占用：开单、并发、结束、撤单与更正时限、结账自动结束、断网待确认、台账拦截、业态规则、对账包）；
    G1–G6（对客导览：识别图标、分类与颜色、导览页不带房号、大屏轮播、权限、各尺寸不横向滚动）；
    P1–P4（PDF 底图：node dist/server/cli.js floorplan-sample sample.pdf 生成合成 PDF，再按需要改出没比例 / 扫描件的样例或用 tests/floorplan-pdf.test.ts 的做法）；
-   D1–D5（图纸治理：登记、原图纸、档案与换回、在用历史、FLOORPLAN_STALE）；O1–O2（补画轮廓）。
+   D1–D5（图纸治理：登记、原图纸、档案与换回、在用历史、FLOORPLAN_STALE）；O1–O2（补画轮廓）；
+   R1（应用开着、空闲时 demo-reset 拒绝，停掉应用后照常重建）。
 3. 从 v0.7.18 的演示库升级到这个 SHA，check 全 ✓、原有数据不变（M1）。
 4. 跑一次完整的 npm test 与浏览器验收（E2E_BASE_URL=… npm run e2e），看 PR 上 CI 的浏览器验收汇总。
 报告写明测试 SHA、环境、未测项（受阻未测不记通过）、问题清单（P1 / P2 附复现步骤）。

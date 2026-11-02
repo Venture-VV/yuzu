@@ -32,7 +32,7 @@ node dist/server/cli.js seed-legacy-demo   # 8–10 月旧账的合成样例导�
 node dist/server/cli.js demo-prepare       # 一条命令准备演示库（v0.7.18）：上面五块 + 场景块（客房、技师与钟房、餐饮与厨房、空间台账与底图、实时位置，v0.7.19 起加派对房使用单与对客导览），
                                            # 已有的跳过、不改已有记录，场景块有冲突时一条不写并列出；最后自带 check 与 demo-check
 node dist/server/cli.js demo-check         # 核对演示库（只读）：check、五块都在、场景块与 src/server/demo/showcase-expected.json 一致
-node dist/server/cli.js demo-reset --confirm <库名>   # 只在独立演示库（development，实例不是 prod/shadow/test）：先备份核验，再清库从零准备（先停应用）
+node dist/server/cli.js demo-reset --confirm <库名>   # 只在独立演示库（development，实例不是 prod/shadow/test）：先备份核验，再清库从零准备（先停应用；应用开着时拒绝）
 node dist/server/cli.js check              # 会员（含营业口径）、库存、前台自检，全部 ✓ 才算一致
 node dist/server/cli.js fingerprint        # 数据指纹（只读）；--expect <摘要> 比对，不一致退出码为 1
 ./scripts/backup.sh                        # 立即备份：临时库试恢复、自检并记下指纹（写 BACKUP_DIR，含 .json 说明）

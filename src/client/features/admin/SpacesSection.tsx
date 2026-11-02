@@ -99,6 +99,8 @@ export function SpacesSection() {
           value={tab}
           onChange={setTab}
           ariaLabel="空间台账"
+          // 六个分页（v0.7.19 加「对客导览」）：手机上一行放不下就换行，不横向滚动
+          className="max-w-full flex-wrap"
           options={[
             { value: 'spaces', label: '空间' },
             { value: 'zones', label: '楼层与区域' },
