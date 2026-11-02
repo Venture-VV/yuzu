@@ -111,6 +111,9 @@ ALTER TABLE floorplan_batches ADD COLUMN received_on date;
 ALTER TABLE floorplan_batches ADD COLUMN pdf_scale integer CHECK (pdf_scale BETWEEN 1 AND 10000);
 ALTER TABLE floorplan_batches ADD COLUMN original_saved boolean NOT NULL DEFAULT false;
 ALTER TABLE floorplan_batches ADD COLUMN retire_reason text CHECK (char_length(retire_reason) <= 200);
+-- 同一份图纸的去重加上上传时填的 PDF 比例：比例填错了，用同一份 PDF 改比例重传要能重新转换（没填比例的、DWG / DXF 照旧按文件去重）
+DROP INDEX floorplan_batches_same_file;
+CREATE UNIQUE INDEX floorplan_batches_same_file ON floorplan_batches (file_sha256, converter, (coalesce(pdf_scale, 0))) WHERE status <> 'failed';
 
 -- 批次守护：文件信息与入库登记不能改；状态多一条「已换下 → 在用」（写原因换回旧底图）；不能删
 CREATE OR REPLACE FUNCTION yuzu_floorplan_batch_guard() RETURNS trigger LANGUAGE plpgsql AS $$

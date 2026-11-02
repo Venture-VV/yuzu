@@ -348,7 +348,9 @@ export async function seedShowcaseDemo(sql: Sql, config: AppConfig): Promise<Sho
         batch = (await owner<Batch>('GET', `/api/admin/floorplans/${batch.id}`)).body.batch;
       }
       if (batch.status !== 'ready' && batch.status !== 'active') throw new Error(`演示场景：样例底图转换失败：${batch.error ?? batch.status}`);
-      await owner('POST', `/api/admin/floorplans/${batch.id}/activate`, { expectedActiveId: null });
+      // 启用时带上页面上看到的在用批次与在用历史版本（v0.7.19）
+      const plans = (await owner<{ activeId: number | null; activationSeq: number }>('GET', '/api/admin/floorplans')).body;
+      await owner('POST', `/api/admin/floorplans/${batch.id}/activate`, { expectedActiveId: plans.activeId, expectedSeq: plans.activationSeq });
       done.push(`样例底图转换并启用（第 ${batch.id} 批）`);
     }
 

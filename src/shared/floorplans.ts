@@ -211,6 +211,8 @@ export interface FloorplanList {
   converting: FloorplanBatch | null;
   /** 在用历史（新的在前，最多 100 条） */
   history: FloorplanActivation[];
+  /** 在用历史的版本（最新一行的编号，只增不减）：启用、换回时带上，对不上说明刚被换过（v0.7.19） */
+  activationSeq: number;
 }
 
 /** 在用的底图（第三段房态图读这个） */

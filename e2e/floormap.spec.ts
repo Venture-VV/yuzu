@@ -104,7 +104,9 @@ async function prepare(page: Page) {
       receivedOn: new Date().toISOString().slice(0, 10),
     });
     await expect.poll(async () => (await getJson<FloorplanDetail>(page, `/api/admin/floorplans/${up.batch.id}`)).batch.status, { timeout: 60_000 }).toBe('ready');
-    await send(page, 'post', `/api/admin/floorplans/${up.batch.id}/activate`, { expectedActiveId: active.batchId });
+    // 启用时带上页面上看到的在用批次与在用历史版本（v0.7.19）
+    const plans = await getJson<{ activeId: number | null; activationSeq: number }>(page, '/api/admin/floorplans');
+    await send(page, 'post', `/api/admin/floorplans/${up.batch.id}/activate`, { expectedActiveId: plans.activeId, expectedSeq: plans.activationSeq });
   }
 
   // 客房：开启；专用房型；W301 挂一间房（上次收尾取消挂接、停用的那一间重新挂上）

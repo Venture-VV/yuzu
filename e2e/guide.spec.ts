@@ -6,7 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page, type Route } from '@playwright/test';
-import type { ActiveFloorplan, FloorplanDetail } from '../src/shared/floorplans';
+import type { FloorplanDetail } from '../src/shared/floorplans';
 import type { GuideAdmin, GuideData } from '../src/shared/guide';
 import type { SpaceLedger } from '../src/shared/spaces';
 import { floorplanSampleDxf } from '../src/server/demo/floorplan-sample';
@@ -53,7 +53,6 @@ async function prepare(page: Page) {
     if (spaces.length) await send(page, 'post', '/api/admin/spaces/bulk-zone', { spaces, zoneId: zoneId(zone) });
   }
   // 在用底图换成带设施文字的样例（每次带时间戳，摘要不同）
-  const active = await getJson<ActiveFloorplan>(page, '/api/floorplans/active');
   const dxf = Buffer.from(`999\nE2E 对客导览 ${Date.now()}\n${floorplanSampleDxf(1, { facilities: true })}`, 'utf8');
   const up = await send<FloorplanDetail>(page, 'post', '/api/admin/floorplans', {
     fileName: 'E2E 对客导览样例.dxf',
@@ -63,7 +62,8 @@ async function prepare(page: Page) {
     receivedOn: new Date().toISOString().slice(0, 10),
   });
   await expect.poll(async () => (await getJson<FloorplanDetail>(page, `/api/admin/floorplans/${up.batch.id}`)).batch.status, { timeout: 60_000 }).toBe('ready');
-  await send(page, 'post', `/api/admin/floorplans/${up.batch.id}/activate`, { expectedActiveId: active.batchId, reason: 'E2E 对客导览' });
+  const plans = await getJson<{ activeId: number | null; activationSeq: number }>(page, '/api/admin/floorplans');
+  await send(page, 'post', `/api/admin/floorplans/${up.batch.id}/activate`, { expectedActiveId: plans.activeId, expectedSeq: plans.activationSeq, reason: 'E2E 对客导览' });
 }
 
 test.describe('v0.7.19 对客导览', () => {
@@ -158,6 +158,8 @@ test.describe('v0.7.19 对客导览', () => {
     markers: [
       { id: 1, floorCode: 'L1', kind: 'toilet', x: 1500, y: 200, label: '卫生间', labelEn: 'Restroom' },
       { id: 2, floorCode: 'L1', kind: 'elevator', x: 1500, y: 1300, label: '电梯', labelEn: 'Elevator' },
+      // 后台改过文字的图标：图上图标下写出来，图例单独一项（Codex 复审 0cf0505）
+      { id: 4, floorCode: 'L1', kind: 'elevator', x: 2800, y: 1300, label: 'VIP 电梯', labelEn: 'VIP Lift' },
       { id: 3, floorCode: 'L2', kind: 'reception', x: 400, y: 400, label: '前台', labelEn: 'Reception' },
     ],
   };
@@ -175,6 +177,10 @@ test.describe('v0.7.19 对客导览', () => {
     await expect(page.getByTestId('guide-map-L1')).toBeVisible();
     await expect(page.getByTestId('guide-legend')).toContainText('合成水区');
     await expect(page.getByTestId('guide-legend')).toContainText('Restroom');
+    // 改过文字的图标：图上只有它写出文字（默认文字的不写，图例里有）；图例里默认的「电梯」与「VIP 电梯」各一项
+    await expect(page.getByTestId('guide-map-L1').getByTestId('guide-marker-label')).toHaveText(['VIP 电梯']);
+    await expect(page.getByTestId('guide-legend')).toContainText('VIP Lift');
+    await expect(page.getByTestId('guide-legend')).toContainText('Elevator');
     await noHorizontalScroll(page);
     await page.goto('/guide/screen');
     await expect(page.getByTestId('guide-screen-page')).toHaveAttribute('data-floor', 'L1');

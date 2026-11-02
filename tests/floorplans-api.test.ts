@@ -30,8 +30,11 @@ async function waitReady(id: number): Promise<FloorplanDetail> {
   throw new Error('转换超时');
 }
 const codes = (list: { code: string }[]) => list.map((x) => x.code).sort();
-/** 启用：带上页面看到的在用批次 */
-const activate = (id: number, expectedActiveId: number | null, cookie = ctx.owner) => api(ctx.app, cookie, 'POST', `/api/admin/floorplans/${id}/activate`, { expectedActiveId });
+/** 在用历史的版本（页面上列表给的 activationSeq） */
+const seqNow = async () => ((await api(ctx.app, ctx.owner, 'GET', '/api/admin/floorplans')).body as FloorplanList).activationSeq;
+/** 启用：带上页面看到的在用批次与在用历史版本（不给版本时取现在的） */
+const activate = async (id: number, expectedActiveId: number | null, cookie = ctx.owner, expectedSeq?: number) =>
+  api(ctx.app, cookie, 'POST', `/api/admin/floorplans/${id}/activate`, { expectedActiveId, expectedSeq: expectedSeq ?? (await seqNow()) });
 const readCsv = (file: string) => readFileSync(file, 'utf8').replace(/^﻿/, '');
 
 beforeAll(async () => {
@@ -259,7 +262,9 @@ describe('同时只转换一份；应用重启时没转完的记失败（v0.7.15
 
 const list = async () => (await api(ctx.app, ctx.owner, 'GET', '/api/admin/floorplans')).body as FloorplanList;
 const byName = async (name: string) => (await list()).batches.find((b) => b.fileName === name)!;
-const restore = (id: number, body: Record<string, unknown>, cookie = ctx.owner) => api(ctx.app, cookie, 'POST', `/api/admin/floorplans/${id}/restore`, body);
+/** 换回：不给在用历史版本时取现在的 */
+const restore = async (id: number, body: Record<string, unknown>, cookie = ctx.owner) =>
+  api(ctx.app, cookie, 'POST', `/api/admin/floorplans/${id}/restore`, { expectedSeq: await seqNow(), ...body });
 const original = (id: number, cookie = ctx.owner) => ctx.app.inject({ method: 'GET', url: `/api/admin/floorplans/${id}/original`, headers: { cookie } });
 
 describe('图纸治理（v0.7.19）：入库登记、原图纸、底图档案与在用历史、换回旧底图', () => {
@@ -316,13 +321,41 @@ describe('图纸治理（v0.7.19）：入库登记、原图纸、底图档案与
     // 迟到的重发：已经在用，不报错、不再换
     expect((await restore(v1b.id, { expectedActiveId: v2b.id, reason })).status).toBe(200);
     expect(((await api(ctx.app, ctx.clerk, 'GET', '/api/floorplans/active')).body as ActiveFloorplan).batchId).toBe(v1b.id);
+    // 缺了在用历史版本：拒绝（页面要带上）
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/admin/floorplans/${ready.id}/activate`, { expectedActiveId: v1b.id })).status).toBe(400);
     // 启用另一批时写换下的原因
-    const act = await api(ctx.app, ctx.owner, 'POST', `/api/admin/floorplans/${ready.id}/activate`, { expectedActiveId: v1b.id, reason: '门店自测版更准' });
+    const act = await api(ctx.app, ctx.owner, 'POST', `/api/admin/floorplans/${ready.id}/activate`, { expectedActiveId: v1b.id, expectedSeq: await seqNow(), reason: '门店自测版更准' });
     expect(act.status, JSON.stringify(act.body)).toBe(200);
     expect((await byName('样例图纸.dxf')).retireReason).toBe('门店自测版更准');
     expect((act.body as FloorplanDetail).activationLedgerDiff).toMatchObject({ kind: 'activate' });
     const [audit] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'floorplan_restore'`;
     expect(audit!.n).toBe(1);
+    for (const c of await floorplanChecks(ctx.sql)) expect(c.ok, `${c.label}：${c.detail}`).toBe(true);
+  }, 60_000);
+
+  it('迟到的换回、启用：在用批次 A → B → A 回到原样时，按当时看到的版本重发也拒绝，不把后来换回的那批换下（Codex 复审 0cf0505）', async () => {
+    const A = (await list()).activeId!;
+    const B = (await byName('样例图纸.dxf')).id;
+    expect((await detail(B)).batch.status).toBe('retired');
+    // 甲：换回 B（看到 A 在用、版本 s0）——生效了，但甲没收到结果
+    const s0 = await seqNow();
+    const first = await restore(B, { expectedActiveId: A, expectedSeq: s0, reason: '甲换回 B' });
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    // 乙：又换回 A
+    const second = await restore(A, { expectedActiveId: B, reason: '乙换回 A' });
+    expect(second.status, JSON.stringify(second.body)).toBe(200);
+    expect((await list()).activeId).toBe(A);
+    // 甲的请求迟到或重发：在用的又是 A（与甲当时看到的一样），但版本变了——拒绝，A 照旧在用
+    const late = await restore(B, { expectedActiveId: A, expectedSeq: s0, reason: '甲换回 B' });
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('FLOORPLAN_STALE');
+    expect((await list()).activeId).toBe(A);
+    // 迟到的启用同理：拿换回之前的版本启用一批新的，拒绝
+    const fresh = await upload(`999\n迟到的启用 ${Date.now()}\n${floorplanSampleDxf(1)}`, '迟到的启用.dxf');
+    expect((await waitReady(fresh.body.batch.id)).batch.status).toBe('ready');
+    const lateActivate = await activate(fresh.body.batch.id, A, ctx.owner, s0);
+    expect(lateActivate.body.error.code).toBe('FLOORPLAN_STALE');
+    expect((await list()).activeId).toBe(A);
     for (const c of await floorplanChecks(ctx.sql)) expect(c.ok, `${c.label}：${c.detail}`).toBe(true);
   }, 60_000);
 });
@@ -427,6 +460,18 @@ describe('PDF 底图（v0.7.19）', () => {
     expect(dd.batch.status, dd.batch.error ?? '').toBe('ready');
     expect(dd.report!.pdf).toMatchObject({ scale: 200, scaleFrom: 'option', textScale: 100 });
     expect(dd.report!.issues.find((i) => i.kind === 'pdf_scale')!.message).toContain('PDF 上写的比例是 1:100，按上传时填的 1:200 换算');
+    // 同一份 PDF：比例相同不重复转换；改了比例（填错了改正）重新转换成新的一批（Codex 复审 0cf0505）
+    const same = await send(pdfB64(undefined, 'd'), { pdfScale: 200 });
+    expect(same.body).toMatchObject({ replayed: true, batch: { id: differ.body.batch.id } });
+    const corrected = await send(pdfB64(undefined, 'd'), { pdfScale: 100 });
+    expect(corrected.status, JSON.stringify(corrected.body)).toBe(202);
+    expect(corrected.body.replayed).toBe(false);
+    expect(corrected.body.batch.id).not.toBe(differ.body.batch.id);
+    const cd = await waitReady(corrected.body.batch.id);
+    expect(cd.batch).toMatchObject({ status: 'ready', pdfScale: 100 });
+    expect(cd.report!.pdf).toMatchObject({ scale: 100, scaleFrom: 'option', textScale: 100 });
+    // 没填比例的照旧按文件去重
+    expect((await send(pdfB64(undefined, 'a'))).body).toMatchObject({ replayed: true, batch: { id: r.body.batch.id } });
     // 扫描件：没有矢量线条
     const scanned = await send(pdfB64('scanned', 'e'));
     const sd = await waitReady(scanned.body.batch.id);

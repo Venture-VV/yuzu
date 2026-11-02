@@ -90,6 +90,12 @@ async function activations(db: Db, batchId: number | null, limit: number): Promi
   return rows.map((r) => ({ ...r, id: Number(r.id), batchId: Number(r.batchId), at: new Date(r.at).toISOString() }));
 }
 
+/** 在用历史的版本：最新一行的编号（启用、换下、换回各记一行，只增不减；没有记录为 0） */
+async function activationSeq(db: Db): Promise<number> {
+  const [row] = await db<{ n: number }[]>`SELECT coalesce(max(id), 0)::bigint AS n FROM floorplan_activations`;
+  return Number(row!.n);
+}
+
 export async function listFloorplans(db: Db): Promise<FloorplanList> {
   const rows = await db<BatchRow[]>`${batchSelect(db)} ORDER BY b.id DESC LIMIT 50`;
   const batches = rows.map(toBatch);
@@ -101,6 +107,7 @@ export async function listFloorplans(db: Db): Promise<FloorplanList> {
     activeId: active ? Number(active.id) : null,
     converting: batches.find((b) => b.status === 'converting') ?? null,
     history: await activations(db, null, 100),
+    activationSeq: await activationSeq(db),
   };
 }
 
@@ -343,8 +350,10 @@ const UploadSchema = z.object({
     .transform((v) => v ?? null),
 });
 
-async function sameFileBatch(db: Db, sha: string): Promise<FloorplanBatch | null> {
-  const [row] = await db<BatchRow[]>`${batchSelect(db)} WHERE b.file_sha256 = ${sha} AND b.converter = ${CONVERTER_VERSION} AND b.status <> 'failed'`;
+/** 同一份图纸（文件、转换器、上传时填的 PDF 比例都相同）已经转换过或正在转换：不重复转换（改了比例的重新转换） */
+async function sameFileBatch(db: Db, sha: string, pdfScale: number | null): Promise<FloorplanBatch | null> {
+  const [row] = await db<BatchRow[]>`
+    ${batchSelect(db)} WHERE b.file_sha256 = ${sha} AND b.converter = ${CONVERTER_VERSION} AND b.pdf_scale IS NOT DISTINCT FROM ${pdfScale}::int AND b.status <> 'failed'`;
   return row ? toBatch(row) : null;
 }
 
@@ -469,7 +478,7 @@ export async function uploadFloorplan(
   if (!format) throw unprocessable('FLOORPLAN_FORMAT', '只收 DWG、ASCII DXF 或矢量 PDF 图纸（这个文件的开头不是这几种格式）');
   const pdfScale = format === 'pdf' ? input.pdfScale : null;
   const sha = createHash('sha256').update(bytes).digest('hex');
-  const same = await sameFileBatch(db, sha);
+  const same = await sameFileBatch(db, sha, pdfScale);
   if (same) return { batch: same, replayed: true };
   let id: number;
   try {
@@ -487,7 +496,7 @@ export async function uploadFloorplan(
     });
   } catch (error) {
     if (!isUniqueViolation(error)) throw error;
-    const again = await sameFileBatch(db, sha);
+    const again = await sameFileBatch(db, sha, pdfScale);
     if (again) return { batch: again, replayed: true };
     const [busy] = await db<{ fileName: string }[]>`SELECT file_name FROM floorplan_batches WHERE status = 'converting'`;
     throw conflict('FLOORPLAN_BUSY', `正在转换另一份图纸${busy ? `（${busy.fileName}）` : ''}，等它转换完再上传`);
@@ -517,20 +526,25 @@ export async function uploadFloorplan(
 // ───────────────────────── 启用 ─────────────────────────
 
 const expectedActiveId = z.number('缺少页面上的在用批次，请刷新后重试').int().positive().nullable();
+// 页面上看到的在用历史版本（列表的 activationSeq：在用历史最新一行的编号，只增不减）。换回让旧批次能再在用，
+// 在用批次会 A → B → A 回到原样，只比在用批次挡不住迟到的请求（Codex 复审 0cf0505）；历史版本每换一次都变，迟到的一律对不上
+const expectedSeq = z.number('缺少页面上的底图版本，请刷新后重试').int().nonnegative();
 const ActivateSchema = z.object({
   // 页面上看到的在用批次（没有为 null）：对不上说明刚被换过，这次不启用（v0.7.15 审查：超时后迟到的启用请求不能把后来启用的那批换下）
   expectedActiveId,
+  expectedSeq,
   /** 原来在用的为什么换下（v0.7.19，选填，记进在用历史） */
   reason: z.string().trim().max(200, '原因最多 200 字').default(''),
 });
 const RestoreSchema = z.object({
   expectedActiveId,
+  expectedSeq,
   reason: z.string('请写明换回这一批的原因（至少 2 个字）').trim().min(2, '请写明换回这一批的原因（至少 2 个字）').max(200, '原因最多 200 字'),
 });
 
 /**
  * 启用（待启用 → 在用）或换回（已换下 → 在用，v0.7.19）：原来在用的换下；在用历史各记一行，启用、换回时记下当时与空间台账的比对。
- * 页面上看到的在用批次对不上（刚被换过）就拒绝（FLOORPLAN_STALE）。
+ * 页面上看到的在用批次或在用历史版本对不上（刚被换过）就拒绝（FLOORPLAN_STALE）。
  */
 async function switchActive(deps: Deps, id: number, raw: unknown, actor: Actor, ip: string | undefined, mode: 'activate' | 'restore'): Promise<{ replayed: boolean }> {
   const { sql } = deps;
@@ -554,7 +568,8 @@ async function switchActive(deps: Deps, id: number, raw: unknown, actor: Actor, 
         throw conflict('FLOORPLAN_NOT_RETIRED', target.status === 'ready' ? '这一批还没启用过，请用「启用」' : '只有已换下的批次能换回');
       }
       const previous = rows.find((r) => r.status === 'active');
-      if ((previous ? Number(previous.id) : null) !== input.expectedActiveId) {
+      const seq = await activationSeq(tx);
+      if ((previous ? Number(previous.id) : null) !== input.expectedActiveId || seq !== input.expectedSeq) {
         throw conflict(
           'FLOORPLAN_STALE',
           `在用的底图刚被换过（可能是刚才没收到结果的那次${mode === 'activate' ? '启用' : '换回'}已经生效，或有人同时在操作），这次没有${mode === 'activate' ? '启用' : '换回'}；请刷新后看一下再决定`,

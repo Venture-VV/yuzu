@@ -318,7 +318,11 @@ function BatchDetail({ id }: { id: number }) {
     setBusy(true);
     setError(null);
     try {
-      const next = await api.post<FloorplanDetail>(`/api/admin/floorplans/${b.id}/${mode}`, { expectedActiveId: activeId, reason: reason.trim() });
+      const next = await api.post<FloorplanDetail>(`/api/admin/floorplans/${b.id}/${mode}`, {
+        expectedActiveId: activeId,
+        expectedSeq: list.data?.activationSeq ?? 0,
+        reason: reason.trim(),
+      });
       await invalidate(next);
       setSwitching(null);
       setReason('');

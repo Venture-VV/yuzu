@@ -62,7 +62,8 @@ beforeAll(async () => {
     if (d.batch.status !== 'converting') break;
     await new Promise((r) => setTimeout(r, 100));
   }
-  const act = await api(ctx.app, ctx.owner, 'POST', `/api/admin/floorplans/${batchId}/activate`, { expectedActiveId: null });
+  const plans = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/floorplans')).body as { activeId: number | null; activationSeq: number };
+  const act = await api(ctx.app, ctx.owner, 'POST', `/api/admin/floorplans/${batchId}/activate`, { expectedActiveId: plans.activeId, expectedSeq: plans.activationSeq });
   expect(act.status, JSON.stringify(act.body)).toBe(200);
 }, 60_000);
 afterAll(async () => ctx.close());

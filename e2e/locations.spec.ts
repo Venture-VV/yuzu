@@ -102,7 +102,8 @@ async function prepare(page: Page) {
       receivedOn: new Date().toISOString().slice(0, 10),
     });
     await expect.poll(async () => (await getJson<FloorplanDetail>(page, `/api/admin/floorplans/${up.batch.id}`)).batch.status, { timeout: 60_000 }).toBe('ready');
-    await send(page, 'post', `/api/admin/floorplans/${up.batch.id}/activate`, { expectedActiveId: plan.batchId });
+    const plans = await getJson<{ activeId: number | null; activationSeq: number }>(page, '/api/admin/floorplans');
+    await send(page, 'post', `/api/admin/floorplans/${up.batch.id}/activate`, { expectedActiveId: plans.activeId, expectedSeq: plans.activationSeq });
   }
   // 平面图在「客房」页：开启客房功能（收尾时关掉）
   await send(page, 'put', '/api/admin/rooms/rules', ROOM_RULES);

@@ -26,6 +26,10 @@ export const GUIDE_ICONS: Record<GuideMarkerKind, ComponentType<{ x?: number; y?
 /** 设施图标的底色 */
 const MARKER_FILL = '#2f4b5c';
 
+/** 后台改过文字的图标（与这种图标默认的中英文不同）：图上在图标下写出来，图例按文字分开列（Codex 复审 0cf0505） */
+const customLabel = (m: Pick<GuideMarker, 'kind' | 'label' | 'labelEn'>) =>
+  m.label !== GUIDE_MARKER_LABELS[m.kind].zh || m.labelEn !== GUIDE_MARKER_LABELS[m.kind].en;
+
 export const useGuide = () => useQuery({ queryKey: ['guide'], queryFn: () => api.get<GuideData>('/api/guide'), refetchInterval: 60_000 });
 
 /** 楼层按编码排（L1、L2、L3……） */
@@ -133,10 +137,23 @@ export function GuideMap({ floor, zones, markers, big = false }: { floor: GuideF
       {markers.map((m) => {
         const Icon = GUIDE_ICONS[m.kind];
         const r = base * (big ? 0.95 : 0.8);
+        const caption = customLabel(m);
+        const text = { textAnchor: 'middle' as const, fill: MARKER_FILL, style: { paintOrder: 'stroke' as const, stroke: 'rgba(255,255,255,0.9)', strokeWidth: r * 0.18 } };
         return (
           <g key={m.id} data-testid={`guide-marker-${m.kind}`} className="pointer-events-none">
+            <title>{[m.label, m.labelEn].filter(Boolean).join(' ')}</title>
             <circle cx={m.x} cy={m.y} r={r} fill={MARKER_FILL} stroke="#ffffff" strokeWidth={r * 0.14} />
             <Icon x={m.x - r * 0.6} y={m.y - r * 0.6} width={r * 1.2} height={r * 1.2} color="#ffffff" strokeWidth={2.2} />
+            {caption && (
+              <text x={m.x} y={m.y + r * 1.9} fontSize={r * 0.85} fontWeight={600} {...text} data-testid="guide-marker-label">
+                {m.label}
+              </text>
+            )}
+            {caption && m.labelEn && (
+              <text x={m.x} y={m.y + r * 2.75} fontSize={r * 0.62} {...text}>
+                {m.labelEn}
+              </text>
+            )}
           </g>
         );
       })}
@@ -145,7 +162,8 @@ export function GuideMap({ floor, zones, markers, big = false }: { floor: GuideF
 }
 
 export function GuideLegend({ zones, markers, big = false }: { zones: GuideZone[]; markers: GuideMarker[]; big?: boolean }) {
-  const kinds = [...new Set(markers.map((m) => m.kind))];
+  // 图例按图标种类与文字分开列：后台改过文字的（如「VIP 电梯」）单独一项，写改过的中英文
+  const entries = [...new Map(markers.map((m) => [`${m.kind}\u0000${m.label}\u0000${m.labelEn}`, m] as const)).values()];
   return (
     <div className={cn('flex flex-wrap items-center gap-x-5 gap-y-2', big ? 'text-[18px]' : 'text-[13px]')} data-testid="guide-legend">
       {zones.map((z) => (
@@ -158,14 +176,14 @@ export function GuideLegend({ zones, markers, big = false }: { zones: GuideZone[
           </span>
         </span>
       ))}
-      {kinds.map((k) => {
-        const Icon = GUIDE_ICONS[k];
+      {entries.map((m) => {
+        const Icon = GUIDE_ICONS[m.kind];
         return (
-          <span key={k} className="flex items-center gap-1.5">
+          <span key={`${m.kind}-${m.label}-${m.labelEn}`} className="flex items-center gap-1.5">
             <span className={cn('flex items-center justify-center rounded-full', big ? 'size-7' : 'size-5')} style={{ background: MARKER_FILL }}>
               <Icon className={big ? 'size-4' : 'size-3'} color="#ffffff" />
             </span>
-            {GUIDE_MARKER_LABELS[k].zh} <span className="text-ink-3">{GUIDE_MARKER_LABELS[k].en}</span>
+            {m.label} {m.labelEn && <span className="text-ink-3">{m.labelEn}</span>}
           </span>
         );
       })}
