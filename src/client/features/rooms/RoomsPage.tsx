@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { BedDouble, MoonStar, Sparkles, Users, Wrench } from 'lucide-react';
+import { BedDouble, LayoutGrid, Map as MapIcon, MoonStar, Sparkles, Users, Wrench } from 'lucide-react';
 import { normalizeTagCode, TAG_CODE_PATTERN } from '@shared/frontdesk';
 import { PAYMENT_METHOD_LABELS, shiftDate } from '@shared/labels';
 import { centsToInput, formatYuan, parseYuan } from '@shared/money';
@@ -39,6 +39,8 @@ import { SHIFT_ERRORS, shiftKeys, ShiftGate, useShiftReady } from '../shift/Shif
 import { DepositFields, depositProblem, guestOf, kindLabel, rateText, type DepositDraft } from './parts';
 import { dayText, minuteText, roomsKey, useRoomBoard } from './queries';
 import { StayDialog, type StayAction } from './StayDialog';
+import { FloorMapView, type MapAction } from './FloorMap';
+import { FLOOR_MAP_REFRESH_MS } from './floormap';
 
 export function RoomsPage() {
   const session = useSession();
@@ -56,7 +58,7 @@ export function RoomsPage() {
   }
   return (
     <>
-      <PageHeader title="客房" subtitle="住客先在前台接待、买门票，再点空闲的房入住；点在住的房看房费与押金、续住、换房、退房；点待打扫、维修的房改房态" />
+      <PageHeader title="客房" subtitle="住客先在前台接待、买门票，再点空闲的房入住；点在住的房看房费与押金、续住、换房、退房；点待打扫、维修的房改房态；「平面图」按楼层看全店房态" />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <RoomsBoardView />
       </div>
@@ -76,10 +78,12 @@ function RoomsBoardView() {
   const qc = useQueryClient();
   const toast = useToast();
   const [params, setParams] = useSearchParams();
-  const board = useRoomBoard();
+  // 房态看板 / 平面图（v0.7.16）：记在地址里，刷新、返回都还在原来的视图
+  const view = params.get('view') === 'map' ? 'map' : 'board';
+  const board = useRoomBoard(true, view === 'map' ? FLOOR_MAP_REFRESH_MS : 15_000);
   // 入住对话框按房间 id 取看板上最新的房间：房价刚改过被拒绝后，看板刷新，对话框里的房价跟着更新
   const [checkinRoomId, setCheckinRoomId] = useState<number | null>(null);
-  const [stay, setStay] = useState<{ id: number; action?: StayAction } | null>(null);
+  const [stay, setStay] = useState<{ id: number; action?: StayAction | 'move' } | null>(null);
   const [housekeepRoom, setHousekeepRoom] = useState<RoomBoardRoom | null>(null);
   const [auditing, setAuditing] = useState(false);
   const canOperate = can('room.operate');
@@ -100,6 +104,19 @@ function RoomsBoardView() {
     for (const k of ['resume', 'r', 's']) next.delete(k);
     setParams(next, { replace: true });
   }, [resume, board.data, params, setParams]);
+
+  const setView = (v: 'board' | 'map') => {
+    const next = new URLSearchParams(params);
+    if (v === 'map') next.set('view', 'map');
+    else next.delete('view');
+    setParams(next, { replace: true });
+  };
+  // 平面图上点房间：都用这一页原来的对话框（入住、入住单、改房态）
+  const mapAction = (a: MapAction) => {
+    if (a.kind === 'checkin') setCheckinRoomId(a.roomId);
+    else if (a.kind === 'stay') setStay({ id: a.stayId, action: a.action });
+    else setHousekeepRoom(a.room);
+  };
 
   const rooms = useMemo(() => board.data?.rooms ?? [], [board.data]);
   const checkinRoom = checkinRoomId == null ? null : (rooms.find((r) => r.id === checkinRoomId) ?? null);
@@ -126,6 +143,16 @@ function RoomsBoardView() {
   return (
     <div className="mx-auto max-w-[1280px] space-y-4 px-5 py-5 md:px-7" data-testid="rooms-board">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <Segmented<'board' | 'map'>
+          size="sm"
+          ariaLabel="视图"
+          value={view}
+          onChange={setView}
+          options={[
+            { value: 'board', label: <span className="flex items-center gap-1"><LayoutGrid className="size-3.5" />房态看板</span> },
+            { value: 'map', label: <span className="flex items-center gap-1"><MapIcon className="size-3.5" />平面图</span> },
+          ]}
+        />
         <span className="flex flex-wrap gap-x-3 gap-y-1 text-[13.5px] text-ink-2" data-testid="rooms-counts">
           {(['vacant', 'occupied', 'dirty', 'maintenance'] as const).map((k) => (
             <span key={k}>
@@ -143,7 +170,9 @@ function RoomsBoardView() {
 
       <AuditStrip board={b} onRun={canOperate ? () => setAuditing(true) : undefined} />
 
-      {rooms.length === 0 ? (
+      {view === 'map' ? (
+        <FloorMapView board={b} onAction={mapAction} />
+      ) : rooms.length === 0 ? (
         <EmptyState art="calm" title="还没有房间" description="店主或能管理价目的岗位在「后台 → 客房」里建房型（全天房、钟点房与房价）和房间后，这里办入住、退房。" />
       ) : (
         floors.map(([floor, list]) => (

@@ -22,6 +22,12 @@ export const SPACE_ALIAS_LABELS: Record<SpaceAliasKind, string> = {
 export const SPACE_BUSINESS_TYPES = ['SPA', '按摩', '踩背', '头疗', '足浴', '投影足浴', '客房', '娱乐室', '派对房', '宠物轰趴房'] as const;
 /** 客房的房间只能挂这个业态的空间 */
 export const ROOM_BUSINESS_TYPE = '客房';
+/**
+ * 技师服务类业态（v0.7.16 房态图）：钟房派钟时可以选这些业态的空间做「服务的房间」，房态图按钟单显示空闲、服务中。
+ * 台账里新写的业态默认不算（待确认，见 docs/PENDING_DECISIONS.md「房态图」）。
+ */
+export const TECHNICIAN_BUSINESS_TYPES = ['SPA', '按摩', '踩背', '头疗', '足浴', '投影足浴'] as const;
+export const isTechnicianBusinessType = (t: string) => (TECHNICIAN_BUSINESS_TYPES as readonly string[]).includes(t);
 
 /** 空间编码：区域字母 + 楼层 + 序号（如 S301），大写，最多 8 位（客房挂接后房号就是编码，房号最多 8 位） */
 export const SPACE_CODE_RE = /^[A-Z][0-9A-Z]{1,7}$/;

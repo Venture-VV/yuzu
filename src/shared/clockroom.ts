@@ -66,7 +66,7 @@ export const SESSION_STATUS_LABELS: Record<SessionStatus, string> = {
   rejected: '被退钟',
 };
 
-export const EVENT_KINDS = ['sign_in', 'rest', 'back', 'sign_out', 'to_end', 'dispatch', 'skip', 'start', 'extend', 'finish', 'cancel', 'reject', 'queue'] as const;
+export const EVENT_KINDS = ['sign_in', 'rest', 'back', 'sign_out', 'to_end', 'dispatch', 'skip', 'start', 'extend', 'finish', 'cancel', 'reject', 'queue', 'room'] as const;
 export type ClockEventKind = (typeof EVENT_KINDS)[number];
 export const EVENT_KIND_LABELS: Record<ClockEventKind, string> = {
   sign_in: '上牌',
@@ -82,6 +82,7 @@ export const EVENT_KIND_LABELS: Record<ClockEventKind, string> = {
   cancel: '取消派钟',
   reject: '退钟',
   queue: '调整排位',
+  room: '换房间',
 };
 
 /** 钟房看板上的技师 */
@@ -117,6 +118,10 @@ export interface BoardSession {
   startedAt: string | null;
   /** 计划下钟时刻（上钟后才有） */
   plannedEnd: string | null;
+  /** 服务的房间（v0.7.16，空间台账里的技师服务类空间；没选为 null） */
+  space: { id: number; code: string; displayName: string } | null;
+  /** 房间的版本号（每换一次加 1）：换房间时原样带回，对不上（刚被改过）就拒绝 */
+  spaceVersion: number;
 }
 
 export interface ClockroomBoard {

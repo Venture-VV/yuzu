@@ -83,7 +83,7 @@ describe('迁移 030 · 迁移前已生效的退货', () => {
     // 还没生效的退货不动
     const r4 = await docAt('supplier_return', credit, 300, 'credit', b, 'submitted');
 
-    expect(await migrate(sql)).toEqual(['030_supplier_settlement.sql', '031_stock_cycles.sql', '032_spaces.sql', '033_floorplans.sql']);
+    expect(await migrate(sql)).toEqual(['030_supplier_settlement.sql', '031_stock_cycles.sql', '032_spaces.sql', '033_floorplans.sql', '034_floormap.sql']);
     const applied = new Map(
       (await sql<{ id: number; returnAppliedCents: number | null }[]>`SELECT id, return_applied_cents FROM inv_docs WHERE doc_type = 'supplier_return'`).map((r) => [
         r.id,

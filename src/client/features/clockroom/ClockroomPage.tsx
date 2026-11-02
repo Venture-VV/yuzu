@@ -3,9 +3,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowDownToLine, Coffee, Hourglass, ListOrdered, LogIn, LogOut, Play, Plus, ScrollText, Square, Undo2, UsersRound } from 'lucide-react';
+import { ArrowDownToLine, Coffee, DoorOpen, Hourglass, ListOrdered, LogIn, LogOut, Play, Plus, ScrollText, Square, Undo2, UsersRound } from 'lucide-react';
 import { EVENT_KIND_LABELS, type BoardSession, type BoardTechnician, type ClockEvent, type ClockroomBoard } from '@shared/clockroom';
 import { CALL_TYPE_LABELS, gradeLabel } from '@shared/technicians';
+import { spaceLabel } from '@shared/spaces';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
@@ -15,6 +16,7 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { DispatchDialog, ExtendDialog } from './DispatchDialog';
+import { RoomDialog } from './RoomPicker';
 
 export const clockKey = ['clockroom'] as const;
 
@@ -54,6 +56,7 @@ export function ClockroomPage() {
   const [dispatching, setDispatching] = useState(false);
   const [extending, setExtending] = useState<BoardSession | null>(null);
   const [voiding, setVoiding] = useState<BoardSession | null>(null);
+  const [rooming, setRooming] = useState<BoardSession | null>(null);
   const [toEnd, setToEnd] = useState<BoardTechnician | null>(null);
   const [showLog, setShowLog] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -215,6 +218,7 @@ export function ClockroomPage() {
                         onFinish={() => run(`finish-${s.id}`, () => api.post(`/api/clockroom/sessions/${s.id}/finish`), `${s.techNo} 号下钟`)}
                         onExtend={() => setExtending(s)}
                         onVoid={() => setVoiding(s)}
+                        onRoom={() => setRooming(s)}
                       />
                     ))}
                   </div>
@@ -240,6 +244,7 @@ export function ClockroomPage() {
                             <span className="num font-bold">{s.tagCode}</span> {s.guest} · {s.itemName} × {s.clocks}
                           </span>
                           <span className="text-[12px] text-ink-3">{formatTime(s.createdAt)} 派{queued ? ' · 在等上一钟' : ''}</span>
+                          <RoomChip s={s} onClick={() => setRooming(s)} />
                           <div className="flex gap-1.5">
                             <Button size="sm" variant="primary" icon={<Play className="size-3.5" />} disabled={queued} loading={busy === `start-${s.id}`} onClick={() => run(`start-${s.id}`, () => api.post(`/api/clockroom/sessions/${s.id}/start`), `${s.techNo} 号上钟`)} data-testid={`clock-start-${s.sessionNo}`}>
                               上钟
@@ -261,6 +266,18 @@ export function ClockroomPage() {
 
       {d && <DispatchDialog open={dispatching} board={d} onClose={() => setDispatching(false)} onDone={() => { setDispatching(false); void qc.invalidateQueries({ queryKey: clockKey }); }} />}
       {d && extending && <ExtendDialog session={extending} onClose={() => setExtending(null)} onDone={() => { setExtending(null); void qc.invalidateQueries({ queryKey: clockKey }); }} />}
+      <RoomDialog
+        session={rooming}
+        onClose={() => setRooming(null)}
+        onSaved={(b) => {
+          const s = rooming!;
+          qc.setQueryData(clockKey, b);
+          void qc.invalidateQueries({ queryKey: ['clockroom', 'spaces'] });
+          setRooming(null);
+          const now = b.sessions.find((x) => x.id === s.id)?.space;
+          toast({ tone: 'success', title: now ? `${s.techNo} 号：房间 ${spaceLabel(now.code, now.displayName)}` : `${s.techNo} 号：已清掉房间` });
+        }}
+      />
       <ReasonDialog
         open={!!voiding}
         title={voiding?.status === 'serving' ? `退钟 · ${voiding.techNo} 号 ${voiding.techName}` : `取消派钟 · ${voiding?.techNo ?? ''} 号 ${voiding?.techName ?? ''}`}
@@ -357,6 +374,7 @@ function ServingCard({
   onFinish,
   onExtend,
   onVoid,
+  onRoom,
 }: {
   s: BoardSession;
   now: number;
@@ -366,6 +384,7 @@ function ServingCard({
   onFinish: () => void;
   onExtend: () => void;
   onVoid: () => void;
+  onRoom: () => void;
 }) {
   const start = new Date(s.startedAt!).getTime();
   const end = new Date(s.plannedEnd!).getTime();
@@ -383,6 +402,9 @@ function ServingCard({
       <p className="mt-1 truncate text-[13px] text-ink-2">
         <span className="num font-bold">{s.tagCode}</span> {s.guest} · {s.itemName} × {s.clocks}
       </p>
+      <div className="mt-1.5">
+        <RoomChip s={s} onClick={onRoom} />
+      </div>
       <div className="mt-3 flex items-baseline justify-between">
         <span className={cn('num text-[26px] font-bold', over ? 'text-clay' : soon ? 'text-yuzu-deep' : 'text-pine')} data-testid={`clock-timer-${s.sessionNo}`}>
           {over ? `+${mmss(left)}` : mmss(left)}
@@ -407,6 +429,24 @@ function ServingCard({
         </Button>
       </div>
     </Card>
+  );
+}
+
+/** 钟单的房间（v0.7.16）：点开换房间、补选、清掉 */
+function RoomChip({ s, onClick }: { s: BoardSession; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'inline-flex h-7 max-w-full items-center gap-1 rounded-full border px-2.5 text-[12px] font-semibold',
+        s.space ? 'border-lake/40 bg-lake-soft text-lake hover:border-lake' : 'border-dashed border-line-strong text-ink-3 hover:border-ink-4 hover:text-ink-2',
+      )}
+      data-testid={`clock-room-${s.sessionNo}`}
+    >
+      <DoorOpen className="size-3.5 shrink-0" />
+      <span className="truncate">{s.space ? spaceLabel(s.space.code, s.space.displayName) : '选房间'}</span>
+    </button>
   );
 }
 

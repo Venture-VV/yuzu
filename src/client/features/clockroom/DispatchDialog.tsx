@@ -18,6 +18,9 @@ import { Dialog } from '../../components/Overlay';
 import { Button, Field, Input, Notice, Segmented, Skeleton } from '../../components/ui';
 import { PendingPanel, useFrontdeskOp } from '../frontdesk/pending';
 import { useQuery } from '@tanstack/react-query';
+import { spaceLabel } from '@shared/spaces';
+import { useClockSpaces } from '../rooms/floormap';
+import { RoomSelect } from './RoomPicker';
 
 const doneOnFound = (found: { found: true } | { found: false }) => (found.found && 'visit' in found ? true : null);
 
@@ -34,6 +37,9 @@ export function DispatchDialog({ open, board, onClose, onDone }: { open: boolean
   const [skipReason, setSkipReason] = useState('');
   const [startNow, setStartNow] = useState(true);
   const [gender, setGender] = useState<'all' | 'male' | 'female'>('all');
+  // 服务的房间（v0.7.16，可不选）：房态图按它显示技师房的服务中
+  const [spaceId, setSpaceId] = useState<number | null>(null);
+  const spaces = useClockSpaces(open);
 
   // 每次打开清空上一次的填写（在打开的这一次渲染里就清空，手快时不会把刚输入的手牌号又清掉）
   useResetOnOpen(open, () => {
@@ -46,6 +52,7 @@ export function DispatchDialog({ open, board, onClose, onDone }: { open: boolean
     setSkipReason('');
     setStartNow(true);
     setGender('all');
+    setSpaceId(null);
   });
 
   const inStore = (tags.data?.tags ?? []).filter((t) => t.visit);
@@ -87,6 +94,7 @@ export function DispatchDialog({ open, board, onClose, onDone }: { open: boolean
               ? '这个项目没有这一档价格'
               : null;
 
+  const room = spaces.data?.find((x) => x.id === spaceId) ?? null;
   const submit = async () => {
     if (problem || !visit || !item || !tech) return;
     const ok = await op.submit((key) => ({
@@ -101,10 +109,11 @@ export function DispatchDialog({ open, board, onClose, onDone }: { open: boolean
         callType,
         startNow: startNow && !tech.busy,
         skipReason: skipping ? skipReason.trim() : undefined,
+        spaceId: spaceId ?? undefined,
         expectedTotal: total,
       },
       tagCodes: [tag!.code],
-      summary: `派钟 ${item.name} × ${quantity}（${tech.techNo} 号 ${tech.name} · ${CALL_TYPE_LABELS[callType]}）`,
+      summary: `派钟 ${item.name} × ${quantity}（${tech.techNo} 号 ${tech.name} · ${CALL_TYPE_LABELS[callType]}${room ? ` · 房间 ${spaceLabel(room.code, room.displayName)}` : ''}）`,
       amount: total,
     }));
     if (ok) onDone();
@@ -161,6 +170,11 @@ export function DispatchDialog({ open, board, onClose, onDone }: { open: boolean
               ]}
             />
           </Field>
+          {(spaces.data?.length ?? 0) > 0 && (
+            <Field label="房间（可不选）" htmlFor="dispatch-room" hint="房态图按这里显示服务中；以后也能在钟单上换">
+              <RoomSelect id="dispatch-room" value={spaceId} onChange={setSpaceId} spaces={spaces.data} testId="dispatch-room" />
+            </Field>
+          )}
           <label className="flex items-center gap-2 text-[13px] font-semibold text-ink-2">
             <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={startNow} onChange={(e) => setStartNow(e.target.checked)} />
             技师到了，立即上钟

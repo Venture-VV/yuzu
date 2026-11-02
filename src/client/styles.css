@@ -68,6 +68,8 @@
   --animate-fade: fade 0.2s ease-out both;
   --animate-slide-in: slide-in 0.34s var(--ease-out-soft) both;
   --animate-pop: pop 0.42s var(--ease-out-soft) both;
+  /* 房态图搜索定位时那一间闪几下（v0.7.16） */
+  --animate-flash: flash 0.6s ease-in-out 4 both;
 
   @keyframes rise {
     from { opacity: 0; transform: translateY(6px); }
@@ -85,6 +87,10 @@
     0% { opacity: 0; transform: scale(0.6); }
     60% { opacity: 1; transform: scale(1.06); }
     100% { transform: scale(1); }
+  }
+  @keyframes flash {
+    0%, 100% { opacity: 0; }
+    50% { opacity: 1; }
   }
 }
 

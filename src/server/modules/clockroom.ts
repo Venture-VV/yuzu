@@ -5,6 +5,8 @@
 //
 // 并发：所有改排位的操作先拿同一把「技师队列」咨询锁，再锁钟单与技师状态行；挂账、作废时排在「来访 → 账单 → 明细」之后
 // （前台的加锁顺序：手牌 → 同行组 → 来访 → 账单 → 钟单与技师状态 → 会员），不会反向加锁。
+// 服务的房间（v0.7.16 房态图）：派钟在技师队列之后、建钟单之前给房间（空间台账的一行）加共享锁；换房间只锁钟单一行、再给房间加共享锁。
+// 空间台账停用空间、改业态时锁空间一行（排他）再查里面还没结束的钟单，不锁钟单，不会反向加锁。
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -22,6 +24,8 @@ import {
   type TechState,
 } from '@shared/clockroom';
 import { ISO_DATE } from '@shared/business-date';
+import type { ClockSpace } from '@shared/floormap';
+import { isTechnicianBusinessType, spaceLabel, TECHNICIAN_BUSINESS_TYPES } from '@shared/spaces';
 import type { Db, Tx } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
@@ -98,8 +102,8 @@ function queueOrder(statuses: Map<number, Status>) {
 export interface SessionPostOptions {
   /** 加钟：明细挂到这张上钟中的钟单 */
   extendId?: number;
-  /** 钟房派钟：立即上钟；轮钟不派给第一位时的原因 */
-  dispatch?: { startNow: boolean; skipReason?: string };
+  /** 钟房派钟：立即上钟；轮钟不派给第一位时的原因；服务的房间（v0.7.16，可不选） */
+  dispatch?: { startNow: boolean; skipReason?: string; spaceId?: number };
   /** 按实际时间补录的纸质单：钟单直接记为已下钟，不动排位 */
   backfill?: boolean;
 }
@@ -109,6 +113,29 @@ export interface SessionLine {
   quantity: number;
   technicianId: number;
   callType: CallType;
+}
+
+interface ServiceSpace {
+  id: number;
+  code: string;
+  displayName: string;
+}
+
+/**
+ * 服务的房间（v0.7.16）：空间台账里在用、可售的技师服务类空间。加共享锁：与空间台账停用空间、改业态（排他锁）串行，
+ * 停用时就看得到刚派进这间的钟单。房间满了不拦（容量只是参考，待确认），选房间时页面上显示占用。
+ */
+export async function lockServiceSpace(tx: Tx, spaceId: number): Promise<ServiceSpace> {
+  const [sp] = await tx<(ServiceSpace & { businessType: string; active: boolean; sellable: boolean })[]>`
+    SELECT id, code, display_name, business_type, active, sellable FROM spaces WHERE id = ${spaceId} FOR SHARE`;
+  if (!sp) throw notFound('房间不存在，请刷新后重新选择');
+  const name = spaceLabel(sp.code, sp.displayName);
+  if (!sp.active) throw conflict('SPACE_INACTIVE', `房间 ${name} 已停用，请换一间`);
+  if (!isTechnicianBusinessType(sp.businessType)) {
+    throw unprocessable('SPACE_NOT_SERVICE', `${name} 是「${sp.businessType}」，不是技师服务的房间（${TECHNICIAN_BUSINESS_TYPES.join('、')}），请换一间`);
+  }
+  if (!sp.sellable) throw conflict('SPACE_NOT_SELLABLE', `房间 ${name} 在空间台账里不可售，请换一间`);
+  return { id: sp.id, code: sp.code, displayName: sp.displayName };
 }
 
 /**
@@ -123,6 +150,7 @@ export async function attachSessions(
   if (args.lines.length === 0) return [];
   const { at, actor, date, options = {} } = args;
   await lockQueue(tx);
+  const space = options.dispatch?.spaceId !== undefined && options.extendId === undefined && !options.backfill ? await lockServiceSpace(tx, options.dispatch.spaceId) : null;
   const rules = await loadClockroomRules(tx);
   const today = await businessDate(tx, deps, at);
   const durations = new Map(
@@ -230,15 +258,22 @@ export async function attachSessions(
     const sessionNo = await nextDocNo(tx, 'technician_session', 'ZD', date);
     const [row] = await tx<{ id: number }[]>`
       INSERT INTO technician_sessions (session_no, technician_id, visit_id, item_id, call_type, clocks, minutes, status, business_date,
-                                       queue_key_before, created_by, created_at, started_by, started_at)
+                                       queue_key_before, created_by, created_at, started_by, started_at, space_id)
       VALUES (${sessionNo}, ${t.id}, ${args.visitId}, ${l.itemId}, ${l.callType}, ${l.quantity}, ${minutes}, ${start ? 'serving' : 'waiting'}, ${date},
-              ${before}, ${actor.id}, ${at}, ${start ? actor.id : null}, ${start ? at : null})
+              ${before}, ${actor.id}, ${at}, ${start ? actor.id : null}, ${start ? at : null}, ${space?.id ?? null})
       RETURNING id`;
     await logEvent(tx, {
       technicianId: t.id,
       sessionId: row!.id,
       kind: 'dispatch',
-      detail: { item: item.name, clocks: l.quantity, callType: l.callType, tag: args.tagCode, via: options.dispatch ? 'clockroom' : 'frontdesk' },
+      detail: {
+        item: item.name,
+        clocks: l.quantity,
+        callType: l.callType,
+        tag: args.tagCode,
+        via: options.dispatch ? 'clockroom' : 'frontdesk',
+        ...(space ? { room: spaceLabel(space.code, space.displayName) } : {}),
+      },
       staffId: actor.id,
       businessDate: today,
       at,
@@ -455,6 +490,63 @@ export async function voidSession(deps: Deps, id: number, raw: unknown, ctx: OpC
   return clockroomBoard(deps.sql, deps);
 }
 
+// ───────────────────────── 换房间（v0.7.16） ─────────────────────────
+
+export const SessionSpaceInput = z.object({
+  /** 换到的房间；null 为清掉房间 */
+  spaceId: z.number().int().positive().nullable(),
+  /**
+   * 页面上看到的房间版本号（每换一次加 1）：对不上就拒绝，不悄悄覆盖。只比房间会漏掉「A 换成 C 又换回 A」，
+   * 超时后迟到的「A → B」旧请求就会盖掉后来的修改；版本号只增不减，中间有过任何修改都对不上
+   */
+  expectedVersion: z.number().int().min(0),
+});
+
+/** 派钟后改服务的房间、补选房间（前台挂账建的钟单没有房间）、清掉房间：只锁钟单一行，再给新房间加共享锁 */
+export async function setSessionSpace(deps: Deps, id: number, raw: unknown, ctx: OpContext) {
+  const { spaceId, expectedVersion } = parse(SessionSpaceInput, raw);
+  await deps.sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
+    const at = ctx.at ?? new Date();
+    const [s] = await tx<{ id: number; sessionNo: string; technicianId: number; status: string; spaceId: number | null; spaceVersion: number; visitStatus: string }[]>`
+      SELECT s.id, s.session_no, s.technician_id, s.status, s.space_id, s.space_version, v.status AS visit_status
+      FROM technician_sessions s JOIN visits v ON v.id = s.visit_id WHERE s.id = ${id} FOR UPDATE OF s`;
+    if (!s) throw notFound('钟单不存在');
+    if (s.status !== 'waiting' && s.status !== 'serving') throw conflict('SESSION_CLOSED', `钟单 ${s.sessionNo} 已结束，不能再换房间`);
+    if (s.visitStatus !== 'open') throw conflict('VISIT_CLOSED', `钟单 ${s.sessionNo} 的客人已离店，不能再换房间`);
+    // 已经是这间：重发、两个人同时选了同一间都照常返回（不改、不记日志）
+    if (s.spaceId === spaceId) return;
+    if (s.spaceVersion !== expectedVersion) throw conflict('SESSION_SPACE_STALE', `钟单 ${s.sessionNo} 的房间刚被改过，请刷新后再选`);
+    const to = spaceId === null ? null : await lockServiceSpace(tx, spaceId);
+    const [from] = s.spaceId === null ? [] : await tx<{ code: string; displayName: string }[]>`SELECT code, display_name FROM spaces WHERE id = ${s.spaceId}`;
+    await tx`UPDATE technician_sessions SET space_id = ${spaceId}, space_version = space_version + 1 WHERE id = ${s.id}`;
+    await logEvent(tx, {
+      technicianId: s.technicianId,
+      sessionId: s.id,
+      kind: 'room',
+      detail: { from: from ? spaceLabel(from.code, from.displayName) : null, to: to ? spaceLabel(to.code, to.displayName) : null },
+      staffId: ctx.actor.id,
+      businessDate: await businessDate(tx, deps, at),
+      at,
+    });
+  });
+  return clockroomBoard(deps.sql, deps);
+}
+
+/** 派钟、换房间时可选的技师房：在用、可售的技师服务类空间，带现在的占用（客人在店、还没结束的钟单） */
+export async function clockSpaces(db: Db): Promise<ClockSpace[]> {
+  return db<ClockSpace[]>`
+    SELECT sp.id, sp.code, sp.display_name, f.code AS floor_code, z.name AS zone_name, sp.business_type, sp.capacity,
+           count(s.id) FILTER (WHERE s.status = 'serving')::int AS serving,
+           count(s.id) FILTER (WHERE s.status = 'waiting')::int AS waiting
+    FROM spaces sp JOIN floors f ON f.id = sp.floor_id LEFT JOIN zones z ON z.id = sp.zone_id
+    LEFT JOIN technician_sessions s ON s.space_id = sp.id AND s.status IN ('waiting', 'serving')
+      AND EXISTS (SELECT 1 FROM visits v WHERE v.id = s.visit_id AND v.status = 'open')
+    WHERE sp.active AND sp.sellable AND sp.business_type IN ${db([...TECHNICIAN_BUSINESS_TYPES])}
+    GROUP BY sp.id, f.code, f.sort_order, z.name
+    ORDER BY f.sort_order, f.code, sp.code`;
+}
+
 // ───────────────────────── 上牌、休息、下牌、排到队尾 ─────────────────────────
 
 export const StateInput = z.object({
@@ -535,11 +627,15 @@ export async function clockroomBoard(db: Db, deps: Deps): Promise<ClockroomBoard
   const statuses = await statusMap(db, today);
   const order = queueOrder(statuses);
   const techs = await loadTechnicians(db);
-  const sessions = await db<(Omit<BoardSession, 'plannedEnd' | 'guest'> & { memberName: string | null; guestLabel: string })[]>`
+  const sessions = await db<
+    (Omit<BoardSession, 'plannedEnd' | 'guest' | 'space'> & { memberName: string | null; guestLabel: string; spaceId: number | null; spaceCode: string | null; spaceName: string | null })[]
+  >`
     SELECT s.id, s.session_no, s.technician_id, t.tech_no, t.name AS tech_name, s.visit_id, h.code AS tag_code, v.zone,
-           m.name AS member_name, v.guest_label, s.item_id, i.name AS item_name, s.call_type, s.clocks, s.minutes, s.status, s.created_at, s.started_at
+           m.name AS member_name, v.guest_label, s.item_id, i.name AS item_name, s.call_type, s.clocks, s.minutes, s.status, s.created_at, s.started_at,
+           s.space_id, s.space_version, sp.code AS space_code, sp.display_name AS space_name
     FROM technician_sessions s JOIN technicians t ON t.id = s.technician_id JOIN visits v ON v.id = s.visit_id
     JOIN hand_tags h ON h.id = v.tag_id JOIN service_items i ON i.id = s.item_id LEFT JOIN members m ON m.id = v.member_id
+    LEFT JOIN spaces sp ON sp.id = s.space_id
     WHERE s.status IN ('waiting', 'serving') AND v.status = 'open'
     ORDER BY (s.status = 'serving') DESC, coalesce(s.started_at, s.created_at), s.id`;
   const clocks = await db<{ technicianId: number; callType: CallType; clocks: number }[]>`
@@ -569,8 +665,9 @@ export async function clockroomBoard(db: Db, deps: Deps): Promise<ClockroomBoard
     rules,
     techRules,
     technicians: board,
-    sessions: sessions.map(({ memberName, guestLabel, ...s }) => ({
+    sessions: sessions.map(({ memberName, guestLabel, spaceId, spaceCode, spaceName, ...s }) => ({
       ...s,
+      space: spaceId !== null ? { id: spaceId, code: spaceCode!, displayName: spaceName! } : null,
       createdAt: new Date(s.createdAt).toISOString(),
       startedAt: s.startedAt ? new Date(s.startedAt).toISOString() : null,
       plannedEnd: s.startedAt ? new Date(new Date(s.startedAt).getTime() + s.minutes * 60_000).toISOString() : null,
@@ -590,7 +687,9 @@ function eventText(kind: ClockEventKind, d: Record<string, unknown>): string {
   const s = (k: string) => (typeof d[k] === 'string' ? (d[k] as string) : '');
   switch (kind) {
     case 'dispatch':
-      return `${s('tag')} ${s('item')} × ${d.clocks ?? 1}（${CALL[d.callType as CallType] ?? ''}）${d.via === 'frontdesk' ? '，前台挂账' : ''}${d.backfill ? '，补录纸质单' : ''}`;
+      return `${s('tag')} ${s('item')} × ${d.clocks ?? 1}（${CALL[d.callType as CallType] ?? ''}）${s('room') ? `，房间 ${s('room')}` : ''}${d.via === 'frontdesk' ? '，前台挂账' : ''}${d.backfill ? '，补录纸质单' : ''}`;
+    case 'room':
+      return d.to ? `${d.from ? `房间 ${s('from')} → ` : '选房间 '}${s('to')}` : `清掉房间 ${s('from')}`;
     case 'skip':
       return `轮到时跳过，派给 ${s('to')}${s('reason') ? `：${s('reason')}` : ''}`;
     case 'extend':
@@ -632,6 +731,8 @@ export const DispatchInput = z.object({
   callType: z.enum(['designated', 'rotation']),
   startNow: z.boolean().default(true),
   skipReason: z.string().trim().max(100, '原因最多 100 字').optional(),
+  /** 服务的房间（v0.7.16，可不选）；不带时与升级前的请求完全相同（幂等摘要不变） */
+  spaceId: z.number().int().positive().nullish().transform((v) => v ?? undefined),
   expectedTotal: positiveCents('本次合计'),
 });
 
@@ -662,10 +763,15 @@ export function registerClockroomRoutes(app: FastifyInstance, deps: Deps) {
       d.visitId,
       { clientKey: d.clientKey, lines: [{ itemId: d.itemId, quantity: d.quantity, tier: d.tier, technicianId: d.technicianId, callType: d.callType }], expectedTotal: d.expectedTotal },
       ctxOf(req),
-      { session: { dispatch: { startNow: d.startNow, skipReason: d.skipReason } } },
+      { session: { dispatch: { startNow: d.startNow, skipReason: d.skipReason, spaceId: d.spaceId } } },
     );
     return clockroomBoard(sql, deps);
   });
+
+  app.get('/api/clockroom/spaces', { preHandler: guard('technician.dispatch') }, async () => clockSpaces(sql));
+  app.post('/api/clockroom/sessions/:id/space', { preHandler: guard('technician.dispatch') }, async (req) =>
+    setSessionSpace(deps, parse(idParam, req.params).id, req.body, ctxOf(req)),
+  );
 
   app.post('/api/clockroom/sessions/:id/start', { preHandler: guard('technician.dispatch') }, async (req) => startSession(deps, parse(idParam, req.params).id, ctxOf(req)));
   app.post('/api/clockroom/sessions/:id/finish', { preHandler: guard('technician.dispatch') }, async (req) => finishSession(deps, parse(idParam, req.params).id, ctxOf(req)));

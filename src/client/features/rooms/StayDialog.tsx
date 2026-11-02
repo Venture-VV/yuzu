@@ -30,12 +30,17 @@ export type StayAction = 'extend' | 'deposit' | 'refund' | 'close';
 
 const SOURCE_LABELS: Record<StayCharge['source'], string> = { checkin: '入住', audit: '夜审', checkout: '退房', extend: '续住' };
 
-export function StayDialog({ id, action, board, onClose }: { id: number; action?: StayAction; board: RoomBoard; onClose: () => void }) {
+export function StayDialog({ id, action, board, onClose }: { id: number; action?: StayAction | 'move'; board: RoomBoard; onClose: () => void }) {
   const can = useCan();
   const qc = useQueryClient();
   const toast = useToast();
   const detail = useStay(id);
-  const [sub, setSub] = useState<StayAction | 'move' | 'edit' | null>(action ?? null);
+  // 一打开就要做的操作（续住、换房、押金、退房）：等入住单的对话框先挂上再打开。两个对话框在同一次渲染里一起挂上时，
+  // 子对话框会先插进页面、被入住单压在下面点不到（入住单已经缓存过时就是这样，例如平面图上点「退房」、「去处理」回来）
+  const [sub, setSub] = useState<StayAction | 'move' | 'edit' | null>(null);
+  useEffect(() => {
+    if (action) setSub(action);
+  }, [action]);
   const [cancelling, setCancelling] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const d = detail.data;
