@@ -13,6 +13,7 @@ import { migrate } from '../migrate';
 import { loadSettings } from '../modules/settings';
 import { createBackup, type BackupManifest } from '../ops/backup';
 import { consistencyChecks } from '../ops/consistency';
+import { computeFingerprint } from '../ops/fingerprint';
 import { demoSeedTime, rememberDemoAnchor } from '../ops/demo-time';
 import { seedDemo } from '../seed';
 import { seedBillingDemo } from '../seed-billing';
@@ -211,9 +212,15 @@ export async function demoReset(
   const log = opts.log ?? (() => {});
   const [{ db } = { db: '' }] = await sql<{ db: string }[]>`SELECT current_database() AS db`;
   if (!opts.confirm || opts.confirm !== db) throw new Error(`demo-reset 会清空数据库「${db}」：确认无误后加 --confirm ${db}（库名写对才执行）`);
+  // 清库的前提（备份不成功就不清库）：pg_dump 成功写出文件（记下大小与摘要）、在临时库完整恢复并算出数据指纹，
+  // 且这个指纹与备份前现在这个库的指纹相同——备份里就是现在的数据；不同说明备份期间有写入（应用没停）或备份不完整
+  const before = (await computeFingerprint(sql)).digest;
   const backup = await (opts.backup ?? createBackup)(config, opts.backupDir, 'demo-reset');
   if (!backup.verified) throw new Error(`备份没有核验通过（${backup.verifyError ?? '原因不明'}），没有清库。备份文件：${backup.file}`);
-  log(`✓ 已备份并在临时库恢复核验：${backup.file}（指纹 ${backup.fingerprintDigest}）`);
+  if (backup.fingerprintDigest !== before) {
+    throw new Error(`备份恢复到临时库后的数据指纹与现在的库不同（备份期间有写入？应用没停？），没有清库。请停掉应用后再执行。备份文件：${backup.file}`);
+  }
+  log(`✓ 已备份（${(backup.bytes / 1024).toFixed(0)} KB），在临时库恢复核验，数据指纹与现在的库一致：${backup.file}`);
   // 应用还连着这个库时，等锁 10 秒就放弃（整段回滚，库不变）：请先停掉应用
   try {
     await sql.begin(async (tx) => {

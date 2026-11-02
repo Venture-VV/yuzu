@@ -30,16 +30,17 @@ afterAll(async () => ctx.close());
 const fingerprint = async () => (await computeFingerprint(ctx.sql)).digest;
 const dbName = async () => (await ctx.sql<{ db: string }[]>`SELECT current_database() AS db`)[0]!.db;
 const { 说明: _note, ...want } = expected;
-const fakeBackup = (verified: boolean) => async (): Promise<BackupManifest> => ({
+/** 代替真实备份（真实备份的恢复核验见 tests/backup.test.ts 与 CI「演示数据」job）：指纹默认按备份那一刻的库算 */
+const fakeBackup = (verified: boolean, digest?: string) => async (): Promise<BackupManifest> => ({
   file: '/backups/yuzu-demo-reset.dump',
   label: 'demo-reset',
   createdAt: new Date().toISOString(),
-  bytes: 1,
+  bytes: 1024,
   sha256: '0',
   app: { version: 'test', commit: 'test', instance: 'dev' },
   verified,
   verifyError: verified ? undefined : '临时库恢复失败（测试）',
-  fingerprintDigest: verified ? 'ok' : null,
+  fingerprintDigest: verified ? (digest ?? (await fingerprint())) : null,
 });
 
 describe('内置的样例台账', () => {
@@ -147,7 +148,7 @@ describe('演示数据准备', () => {
     expect((await demoCheck(ctx.sql, ctx.config)).lines.at(-1)).toEqual({ ok: false, label: '场景块', detail: '还没有准备：请执行 demo-prepare' });
   });
 
-  it('demo-reset：环境、实例标识、库名不对时拒绝；备份没核验通过时不清库', async () => {
+  it('demo-reset：环境、实例标识、库名不对时拒绝；备份没核验通过、或恢复出来的数据与现在的库不同时不清库', async () => {
     const before = await fingerprint();
     const db = await dbName();
     const opts = { backupDir: '/nonexistent', backup: fakeBackup(true) };
@@ -158,6 +159,8 @@ describe('演示数据准备', () => {
     await expect(demoReset(ctx.sql, dev, { ...opts, confirm: undefined })).rejects.toThrow(`--confirm ${db}`);
     await expect(demoReset(ctx.sql, dev, { ...opts, confirm: `${db}_x` })).rejects.toThrow(`--confirm ${db}`);
     await expect(demoReset(ctx.sql, dev, { ...opts, confirm: db, backup: fakeBackup(false) })).rejects.toThrow(/备份没有核验通过.*没有清库/);
+    // 备份恢复出来的数据与现在的库对不上（备份期间有写入）：也不清库
+    await expect(demoReset(ctx.sql, dev, { ...opts, confirm: db, backup: fakeBackup(true, 'f'.repeat(64)) })).rejects.toThrow(/数据指纹与现在的库不同.*没有清库/);
     expect(await fingerprint()).toBe(before);
   });
 
@@ -165,7 +168,7 @@ describe('演示数据准备', () => {
     const lines: string[] = [];
     const db = await dbName();
     const r = await demoReset(ctx.sql, dev, { confirm: db, backupDir: '/nonexistent', backup: fakeBackup(true), log: (l) => lines.push(l) });
-    expect(lines[0]).toContain('已备份并在临时库恢复核验');
+    expect(lines[0]).toContain('在临时库恢复核验，数据指纹与现在的库一致');
     expect(r.prepare.blocks.every((b) => b.written)).toBe(true);
     expect(r.prepare.check.ok).toBe(true);
     expect(await showcaseState(ctx.sql, ctx.config.timezone)).toEqual(want);
