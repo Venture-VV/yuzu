@@ -69,6 +69,17 @@ const DISHES = [
   { name: '演示果汁', category: '餐饮', price: 2200, station: '演示水吧' },
 ];
 const TABLE = { name: '演示1号桌', area: '样例派对区', seats: 4 };
+/**
+ * 券与会员权益（v0.7.20）：三个券模板（代金、兑换、折扣）；发给演示会员沈先生（seed-billing-demo 建的，手机号 19900008811）
+ * 满 200 减 30、足疗兑换券各一张；印一批 5 张满 200 减 30 的无记名券。只发券、不结账，不影响结账块的日结固定预期
+ */
+const COUPON_TEMPLATES = [
+  { name: '演示·满200减30', kind: 'cash', faceValue: 3000, threshold: 20000, validity: 'days', validDays: 30 },
+  { name: '演示·足疗兑换券', kind: 'exchange', exchangeItem: TECH_ITEM.name, validity: 'days', validDays: 60 },
+  { name: '演示·餐饮88折', kind: 'discount', ratePercent: 88, maxOff: 5000, scope: 'categories', scopeCategories: ['餐饮'], validity: 'days', validDays: 90 },
+] as const;
+const COUPON_MEMBER = { phone: '19900008811', name: '沈先生（演示）', templates: ['演示·满200减30', '演示·足疗兑换券'] } as const;
+const COUPON_BATCH = { template: '演示·满200减30', quantity: 5, note: '演示：无记名纸质券' } as const;
 const READERS = [
   { code: 'DEMO-R1', name: '演示·接待台', zone: '样例接待区', space: null },
   { code: 'DEMO-R2', name: '演示·足浴 V312', zone: null, space: 'V312' },
@@ -244,6 +255,11 @@ export async function findConflicts(sql: Sql, ownerId: number): Promise<string[]
   for (const m of MODULES) {
     const [row] = await sql<{ value: { enabled?: boolean } }[]>`SELECT value FROM settings WHERE key = ${m.key}`;
     if (row && row.value?.enabled === false) out.push(`后台把「${m.label}」功能关了：演示场景要用它，请到后台打开`);
+  }
+  // 券模板（v0.7.20）：同名的模板停用了就不能再发券
+  for (const t of await sql<{ name: string }[]>`
+    SELECT name FROM coupon_templates WHERE name IN ${sql(COUPON_TEMPLATES.map((t) => t.name))} AND NOT active`) {
+    out.push(`券模板「${t.name}」已停用`);
   }
   const [busy] = await sql<{ id: number; fileName: string }[]>`SELECT id, file_name FROM floorplan_batches WHERE status = 'converting'`;
   if (busy) out.push(`有一份底图正在转换（第 ${busy.id} 批，${busy.fileName}）：等它转换完再执行；如果是之前中途退出留下的，重启一次应用会把它记成失败`);
@@ -489,6 +505,19 @@ export async function seedShowcaseDemo(sql: Sql, config: AppConfig): Promise<Sho
       done.push(`对客导览：按底图文字认出 ${r.body.detected} 个设施图标`);
     }
 
+    // ── 券与会员权益（v0.7.20）：券模板按名称认已有的（不改）；发券与无记名券在后面的业务里（带操作编号） ──
+    const templateIds: Record<string, number> = {};
+    for (const t of COUPON_TEMPLATES) {
+      const find = () => sql<{ id: number }[]>`SELECT id FROM coupon_templates WHERE name = ${t.name} ORDER BY id LIMIT 1`;
+      if (!(await find())[0]) {
+        const { exchangeItem, ...body } = t as typeof t & { exchangeItem?: string };
+        const exchangeItemId = exchangeItem ? Number((await itemQuery(exchangeItem))[0]!.id) : null;
+        await owner('POST', '/api/coupons/templates', { ...body, exchangeItemId, note: NOTE });
+        done.push(`券模板「${t.name}」`);
+      }
+      templateIds[t.name] = await idOf(sql, find());
+    }
+
     // ── 业务：操作编号与选中的手牌先记下来，中途出错再执行一次原样重发 ──
     const progress = await loadProgress(sql);
     const key = (name: string) => (progress.keys[name] ??= randomUUID());
@@ -503,6 +532,7 @@ export async function seedShowcaseDemo(sql: Sql, config: AppConfig): Promise<Sho
     }
     for (const name of [
       'checkin0', 'checkin1', 'checkin2', 'checkin3', 'dispatchA', 'stay', 'dispatchB', 'dispatchC', 'table', 'tableOrder', 'dishC', 'swipeC', 'swipeD02', 'usageD',
+      'coupon0', 'coupon1', 'couponBatch',
     ]) key(name);
     await saveProgress(sql, progress);
     const k = progress.keys as Record<string, string>;
@@ -603,6 +633,19 @@ export async function seedShowcaseDemo(sql: Sql, config: AppConfig): Promise<Sho
     await clerk('POST', '/api/usages', { clientKey: k.usageD, spaceId: await space(USAGE.space), tagCode: tagD, guests: USAGE.guests, note: USAGE.note });
     done.push(`派对房 ${USAGE.space}：丁开单使用中（${USAGE.guests} 人）`);
 
+    // 券（v0.7.20）：发给演示会员沈先生两张券；印一批无记名券
+    const [couponMember] = await sql<{ id: number }[]>`SELECT id FROM members WHERE phone = ${COUPON_MEMBER.phone}`;
+    if (couponMember) {
+      for (const [i, name] of COUPON_MEMBER.templates.entries()) {
+        await owner('POST', `/api/members/${couponMember.id}/coupons`, { clientKey: k[`coupon${i}`], templateId: templateIds[name], quantity: 1, reason: '演示：发给会员的券' });
+      }
+      done.push(`券：发给${COUPON_MEMBER.name} ${COUPON_MEMBER.templates.join('、')}各一张`);
+    } else {
+      notes.push(`没有找到演示会员${COUPON_MEMBER.name}（seed-billing-demo 建的），没发会员的券`);
+    }
+    await owner('POST', '/api/coupons/batches', { clientKey: k.couponBatch, templateId: templateIds[COUPON_BATCH.template], quantity: COUPON_BATCH.quantity, note: COUPON_BATCH.note });
+    done.push(`无记名券：${COUPON_BATCH.template} 一批 ${COUPON_BATCH.quantity} 张`);
+
     const { businessDayStartHour } = await loadSettings(sql);
     const businessDate = businessDateOf(new Date(), config.timezone, businessDayStartHour);
     await sql.begin(async (tx) => {
@@ -635,6 +678,11 @@ export interface ShowcaseState {
   usages: { space: string; guest: string; guests: number }[];
   /** 对客导览（v0.7.19）：场景用到的区域的导览分类；导览图上的设施图标（楼层:种类） */
   guide: { kinds: Record<string, string>; markers: string[] };
+  /**
+   * 券（v0.7.20）：在用的演示券模板；演示会员沈先生的演示券（模板 → 状态：可用 / 已用 / 已作废，按记下的状态，不按日期算过期）；
+   * 演示无记名券的批次（张数、可用张数）
+   */
+  coupons: { templates: string[]; member: Record<string, string>; batches: { template: string; quantity: number; available: number }[] };
 }
 
 /** 场景块现在的样子（与 showcase-expected.json 同一个形状）；按天的状态（在岗、估清）按今天的营业日取 */
@@ -730,6 +778,22 @@ export async function showcaseState(sql: Sql, timeZone: string): Promise<Showcas
     if (ZONES.some((x) => x.name === z.name && x.floor === z.floor)) kinds[z.name] = z.kind;
   }
   const markers = (await sql<{ m: string }[]>`SELECT floor_code || ':' || kind AS m FROM guide_markers WHERE NOT hidden`).map((r) => r.m).sort(cmp);
+  const couponNames = COUPON_TEMPLATES.map((t) => t.name as string);
+  const couponTemplates = (await sql<{ name: string }[]>`SELECT name FROM coupon_templates WHERE active AND name IN ${sql(couponNames)}`)
+    .map((r) => r.name)
+    .sort(cmp);
+  const memberCoupons: Record<string, string> = {};
+  for (const r of await sql<{ name: string; status: string }[]>`
+    SELECT t.name, c.status FROM coupons c JOIN coupon_templates t ON t.id = c.template_id JOIN members m ON m.id = c.member_id
+    WHERE m.phone = ${COUPON_MEMBER.phone} AND t.name IN ${sql(couponNames)} ORDER BY c.id`) {
+    memberCoupons[r.name] = memberCoupons[r.name] ? `${memberCoupons[r.name]}、${r.status}` : r.status;
+  }
+  const batches = (
+    await sql<{ template: string; quantity: number; available: number }[]>`
+      SELECT t.name AS template, i.quantity, (SELECT count(*)::int FROM coupons c WHERE c.issue_id = i.id AND c.status = 'available') AS available
+      FROM coupon_issues i JOIN coupon_templates t ON t.id = i.template_id
+      WHERE i.kind = 'batch' AND i.reason = ${COUPON_BATCH.note} AND t.name IN ${sql(couponNames)} ORDER BY i.id`
+  ).map((b) => ({ template: b.template, quantity: Number(b.quantity), available: Number(b.available) }));
   return {
     guests,
     rooms,
@@ -743,6 +807,7 @@ export async function showcaseState(sql: Sql, timeZone: string): Promise<Showcas
     readers,
     usages,
     guide: { kinds, markers },
+    coupons: { templates: couponTemplates, member: memberCoupons, batches },
   };
 }
 

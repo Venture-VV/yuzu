@@ -149,6 +149,7 @@ const SHOWCASE_FIELDS: [keyof ShowcaseState, string][] = [
   ['readers', '刷卡点'],
   ['usages', '派对房使用单'],
   ['guide', '对客导览的区域分类与图标'],
+  ['coupons', '券模板、会员的券与无记名券'],
 ];
 
 /** 只读核对：任何一项不一致都 ok = false，写明哪一项、期望与实际 */
