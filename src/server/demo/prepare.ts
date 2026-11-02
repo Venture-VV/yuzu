@@ -146,6 +146,8 @@ const SHOWCASE_FIELDS: [keyof ShowcaseState, string][] = [
   ['floorplan', '在用底图与样例房间轮廓'],
   ['locations', '平面图上的人员位置'],
   ['readers', '刷卡点'],
+  ['usages', '派对房使用单'],
+  ['guide', '对客导览的区域分类与图标'],
 ];
 
 /** 只读核对：任何一项不一致都 ok = false，写明哪一项、期望与实际 */

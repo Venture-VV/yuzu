@@ -75,8 +75,21 @@ const READERS = [
 ] as const;
 const CHECKIN_ZONE = '样例接待区';
 const REST_ZONE = '样例技师休息区';
-/** 三位在店客人（甲：做完足疗、入住 W301；乙：D01 在 T301 服务中；丙：D02 待上钟、点了果汁、在 V312 刷了卡） */
-export const SHOWCASE_GUESTS = ['演示客人甲', '演示客人乙', '演示客人丙'] as const;
+/**
+ * 四位在店客人（甲：做完足疗、入住 W301；乙：D01 在 T301 服务中；丙：D02 待上钟、点了果汁、在 V312 刷了卡；
+ * 丁（v0.7.19）：在派对房 X201 开了单（使用中）
+ */
+export const SHOWCASE_GUESTS = ['演示客人甲', '演示客人乙', '演示客人丙', '演示客人丁'] as const;
+/** 派对房的使用单（v0.7.19 开单即占用）：丁在 X201，6 人 */
+const USAGE = { space: 'X201', guests: 6, note: '演示：生日会' };
+/** 对客导览（v0.7.19）：区域的导览分类（只改还是默认「公共」、没单独指定颜色的） */
+const GUIDE_KINDS: Record<string, 'active' | 'quiet' | 'public' | 'back'> = {
+  样例SPA区: 'quiet',
+  样例客房区: 'quiet',
+  样例派对区: 'active',
+  样例接待区: 'public',
+  样例技师休息区: 'back',
+};
 const TABLE_GUEST = '演示桌客';
 const MODULES = [
   { key: 'room_rules', label: '客房' },
@@ -213,6 +226,13 @@ export async function findConflicts(sql: Sql, ownerId: number): Promise<string[]
   for (const s of stations) out.push(`出品档口「${s.name}」已停用`);
   const [table] = await sql<{ active: boolean }[]>`SELECT active FROM dining_tables WHERE name = ${TABLE.name}`;
   if (table && !table.active) out.push(`桌台「${TABLE.name}」已停用`);
+  // 派对房 X201（v0.7.19）：别人开着的使用单（不是演示客人的）挡住演示开单
+  const [usageBusy] = await sql<{ usageNo: string; label: string }[]>`
+    SELECT u.usage_no, v.guest_label AS label FROM space_usages u JOIN spaces sp ON sp.id = u.space_id JOIN visits v ON v.id = u.visit_id
+    WHERE sp.code = ${USAGE.space} AND u.status = 'open'`;
+  if (usageBusy && usageBusy.label !== SHOWCASE_GUESTS[3]) out.push(`派对房 ${USAGE.space} 有开着的使用单 ${usageBusy.usageNo}（不是演示客人的）`);
+  const [usageRules] = await sql<{ value: { businessTypes?: string[] } }[]>`SELECT value FROM settings WHERE key = 'usage_rules'`;
+  if (usageRules?.value.businessTypes && !usageRules.value.businessTypes.includes('派对房')) out.push('后台「客房 → 开单即占用」里没有选派对房');
   for (const r of READERS) {
     const [cur] = await sql<{ active: boolean; zoneName: string | null; spaceCode: string | null }[]>`
       SELECT r.active, z.name AS zone_name, sp.code AS space_code
@@ -316,9 +336,11 @@ export async function seedShowcaseDemo(sql: Sql, config: AppConfig): Promise<Sho
           sourceNote: '合成样例（演示）',
           receivedOn: new Date().toISOString().slice(0, 10),
         });
-      let batch = (await upload(floorplanSampleDxf())).body.batch;
-      // 同一份图纸以前转换过、后来被换下：换下的批次不能再启用，加一行注释当成新文件重新转换
-      if (batch.status === 'retired') batch = (await upload(`999\n${NOTE} ${new Date().toISOString()}\n${floorplanSampleDxf()}`)).body.batch;
+      // 带设施文字的样例（v0.7.19：对客导览按文字识别卫生间、电梯等图标）
+      const sample = floorplanSampleDxf(1, { facilities: true });
+      let batch = (await upload(sample)).body.batch;
+      // 同一份图纸以前转换过、后来被换下：换下的批次照样能换回，但演示场景不替店主做决定，加一行注释当成新文件重新转换
+      if (batch.status === 'retired') batch = (await upload(`999\n${NOTE} ${new Date().toISOString()}\n${sample}`)).body.batch;
       const deadline = Date.now() + 120_000;
       while (batch.status === 'converting') {
         if (Date.now() > deadline) throw new Error('演示场景：样例底图两分钟还没转换完，请稍后再执行一次');
@@ -448,6 +470,23 @@ export async function seedShowcaseDemo(sql: Sql, config: AppConfig): Promise<Sho
       done.push(`项目所在区域（${itemZones.length} 个）`);
     }
 
+    // ── 对客导览（v0.7.19）：区域的导览分类（还是默认「公共」、没单独指定颜色的才改）；在用底图上还没有图标时按底图文字识别 ──
+    type GuideAdminBody = { batchId: number | null; markers: unknown[]; zones: { id: number; name: string; floorCode: string; kind: string; color: string | null; version: number }[] };
+    const guideAdmin = (await owner<GuideAdminBody>('GET', '/api/admin/guide')).body;
+    let guideChanged = 0;
+    for (const z of ZONES) {
+      const want = GUIDE_KINDS[z.name];
+      const cur = guideAdmin.zones.find((x) => x.name === z.name && x.floorCode === z.floor);
+      if (!want || want === 'public' || !cur || cur.kind !== 'public' || cur.color !== null) continue;
+      await owner('PUT', `/api/admin/guide/zones/${cur.id}`, { kind: want, color: null, version: cur.version });
+      guideChanged++;
+    }
+    if (guideChanged) done.push(`对客导览：${guideChanged} 个区域设了导览分类（SPA、客房为静区，派对为动区，技师休息区为后场不显示）`);
+    if (guideAdmin.batchId !== null && guideAdmin.markers.length === 0) {
+      const r = await owner<{ detected: number }>('POST', '/api/admin/guide/markers/detect', {});
+      done.push(`对客导览：按底图文字认出 ${r.body.detected} 个设施图标`);
+    }
+
     // ── 业务：操作编号与选中的手牌先记下来，中途出错再执行一次原样重发 ──
     const progress = await loadProgress(sql);
     const key = (name: string) => (progress.keys[name] ??= randomUUID());
@@ -457,15 +496,15 @@ export async function seedShowcaseDemo(sql: Sql, config: AppConfig): Promise<Sho
         WHERE t.is_synthetic AND t.active AND NOT t.locked AND t.kind = 'normal' AND t.zone = 'male'
           AND NOT EXISTS (SELECT 1 FROM visits v WHERE v.tag_id = t.id AND v.status = 'open')
         ORDER BY t.code LIMIT ${SHOWCASE_GUESTS.length}`;
-      if (free.length < SHOWCASE_GUESTS.length) throw new Error('演示场景：空闲的合成男宾普通柜不够 3 张');
+      if (free.length < SHOWCASE_GUESTS.length) throw new Error(`演示场景：空闲的合成男宾普通柜不够 ${SHOWCASE_GUESTS.length} 张`);
       progress.tags = free.map((f) => f.code);
     }
     for (const name of [
-      'checkin0', 'checkin1', 'checkin2', 'dispatchA', 'stay', 'dispatchB', 'dispatchC', 'table', 'tableOrder', 'dishC', 'swipeC', 'swipeD02',
+      'checkin0', 'checkin1', 'checkin2', 'checkin3', 'dispatchA', 'stay', 'dispatchB', 'dispatchC', 'table', 'tableOrder', 'dishC', 'swipeC', 'swipeD02', 'usageD',
     ]) key(name);
     await saveProgress(sql, progress);
     const k = progress.keys as Record<string, string>;
-    const [tagA, tagB, tagC] = progress.tags as [string, string, string];
+    const [tagA, tagB, tagC, tagD] = progress.tags as [string, string, string, string];
 
     // 前台小舟开班（入住收押金要在班上）；已经在班上就沿用
     const shift = await clerk('POST', '/api/shifts', { openingCash: 50000 }, ['SHIFT_OPEN']);
@@ -558,6 +597,10 @@ export async function seedShowcaseDemo(sql: Sql, config: AppConfig): Promise<Sho
     await owner('POST', '/api/locations/report', { opId: k.swipeD02, source: 'reader', readerCode: 'DEMO-R1', technicianNo: 'D02' });
     done.push('模拟刷卡：丙在 V312（DEMO-R2）、D02 在接待台（DEMO-R1）');
 
+    // 派对房开单即占用（v0.7.19）：丁在 X201 开单，6 人（使用中，丁的位置在 X201）
+    await clerk('POST', '/api/usages', { clientKey: k.usageD, spaceId: await space(USAGE.space), tagCode: tagD, guests: USAGE.guests, note: USAGE.note });
+    done.push(`派对房 ${USAGE.space}：丁开单使用中（${USAGE.guests} 人）`);
+
     const { businessDayStartHour } = await loadSettings(sql);
     const businessDate = businessDateOf(new Date(), config.timezone, businessDayStartHour);
     await sql.begin(async (tx) => {
@@ -586,6 +629,10 @@ export interface ShowcaseState {
   floorplan: { active: boolean; outlined: string[] };
   locations: Record<string, string>;
   readers: string[];
+  /** 派对房等开着的使用单（v0.7.19） */
+  usages: { space: string; guest: string; guests: number }[];
+  /** 对客导览（v0.7.19）：场景用到的区域的导览分类；导览图上的设施图标（楼层:种类） */
+  guide: { kinds: Record<string, string>; markers: string[] };
 }
 
 /** 场景块现在的样子（与 showcase-expected.json 同一个形状）；按天的状态（在岗、估清）按今天的营业日取 */
@@ -666,6 +713,21 @@ export async function showcaseState(sql: Sql, timeZone: string): Promise<Showcas
   const readers = (await sql<{ code: string }[]>`SELECT code FROM location_readers WHERE active AND code IN ${sql(READERS.map((r) => r.code))}`)
     .map((r) => r.code)
     .sort(cmp);
+  const usages = (
+    await sql<{ space: string; guest: string; guests: number }[]>`
+      SELECT sp.code AS space, v.guest_label AS guest, u.guests
+      FROM space_usages u JOIN spaces sp ON sp.id = u.space_id JOIN visits v ON v.id = u.visit_id
+      WHERE u.status = 'open' AND sp.code IN ${sql(SPACES.map((x) => x.code))}`
+  )
+    .map((u) => ({ space: u.space, guest: u.guest, guests: Number(u.guests) }))
+    .sort((a, b) => cmp(a.space, b.space));
+  const kinds: Record<string, string> = {};
+  for (const z of ZONES) kinds[z.name] = '没有这个区域';
+  for (const z of await sql<{ name: string; floor: string; kind: string }[]>`
+    SELECT z.name, f.code AS floor, z.guide_kind AS kind FROM zones z JOIN floors f ON f.id = z.floor_id WHERE z.active AND z.name IN ${sql(ZONES.map((x) => x.name))}`) {
+    if (ZONES.some((x) => x.name === z.name && x.floor === z.floor)) kinds[z.name] = z.kind;
+  }
+  const markers = (await sql<{ m: string }[]>`SELECT floor_code || ':' || kind AS m FROM guide_markers WHERE NOT hidden`).map((r) => r.m).sort(cmp);
   return {
     guests,
     rooms,
@@ -677,6 +739,8 @@ export async function showcaseState(sql: Sql, timeZone: string): Promise<Showcas
     floorplan: { active: !!active, outlined },
     locations,
     readers,
+    usages,
+    guide: { kinds, markers },
   };
 }
 

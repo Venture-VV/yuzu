@@ -93,8 +93,10 @@ describe('演示数据准备', () => {
     const [marker] = await ctx.sql`SELECT 1 FROM settings WHERE key = ${SHOWCASE_KEY}`;
     expect(marker).toBeUndefined();
     const partial = await showcaseState(ctx.sql, ctx.config.timezone);
-    expect(partial.guests).toHaveLength(3);
+    expect(partial.guests).toHaveLength(4);
     expect(partial.sessions).toHaveLength(3);
+    // 派对房的开单在桌台点单之后：还没开
+    expect(partial.usages).toEqual([]);
 
     await ctx.sql`DELETE FROM dish_limits WHERE item_id = ${item!.id}`;
     const r = await demoPrepare(ctx.sql, ctx.config);
@@ -108,7 +110,9 @@ describe('演示数据准备', () => {
              (SELECT count(*) FROM technician_sessions s JOIN technicians t ON t.id = s.technician_id WHERE t.tech_no LIKE 'D0%')::int AS sessions,
              (SELECT count(*) FROM room_stays)::int AS stays,
              (SELECT count(*) FROM table_sessions)::int AS tables`;
-    expect(dup).toEqual({ visits: 3, sessions: 3, stays: 1, tables: 1 });
+    expect(dup).toEqual({ visits: 4, sessions: 3, stays: 1, tables: 1 });
+    const [usages] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM space_usages`;
+    expect(usages!.n).toBe(1);
     // 临时会话用完就删；中途的进度记录清掉
     const [left] = await ctx.sql<{ n: number }[]>`
       SELECT count(*)::int AS n FROM sessions s JOIN staff st ON st.id = s.staff_id WHERE st.username IN ('linlan', 'xiaozhou')`;

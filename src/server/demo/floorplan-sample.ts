@@ -196,8 +196,23 @@ function floor2(w: SampleSink, variant: 1 | 2) {
   w.text('W-文字', ox + 10000, -3000, 800, '二层平面图');
 }
 
-/** 合成样例图纸（ASCII DXF 文本） */
-export function floorplanSampleDxf(variant: 1 | 2 = 1): string {
+/**
+ * 设施的文字（v0.7.19 对客导览的图标识别用；只在 facilities 时加，默认的样例与 docs/data 里的文件不变）：
+ * 卫生间、楼梯、电梯、前台、出入口；「员工更衣」是员工区，不认
+ */
+function facilities(w: SampleSink) {
+  w.text(LABEL, 17500, 12800, 300, '卫生间');
+  w.text(LABEL, 22000, 11700, 300, '楼梯');
+  w.text(LABEL, 28500, 7000, 300, '电梯');
+  w.text(LABEL, 27000, 12800, 300, '员工更衣');
+  const ox = 80000;
+  w.text(LABEL, ox + 6000, 10500, 350, '前台');
+  w.text(LABEL, ox + 10000, 11300, 350, '出入口');
+  w.text(LABEL, ox + 17000, 9500, 350, '电梯');
+}
+
+/** 合成样例图纸（ASCII DXF 文本）；opts.facilities 加上设施文字（卫生间、电梯……，对客导览识别图标用） */
+export function floorplanSampleDxf(variant: 1 | 2 = 1, opts: { facilities?: boolean } = {}): string {
   const w = new DxfWriter();
   w.raw(999, '浴族 yuzu 底图转换合成样例（不是门店图纸）');
   w.raw(0, 'SECTION');
@@ -235,6 +250,7 @@ export function floorplanSampleDxf(variant: 1 | 2 = 1): string {
   w.raw(2, 'ENTITIES');
   floor3(w, variant);
   floor2(w, variant);
+  if (opts.facilities) facilities(w);
   w.raw(0, 'ENDSEC');
   w.raw(0, 'EOF');
   return w.toString();
