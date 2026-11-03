@@ -12,6 +12,7 @@ import { badRequest, conflict, notFound } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
 import { expireMemberBonus, openLots } from './bonus';
 import { issueOpenCardCoupons } from './coupons';
+import { onMemberCreated } from './benefits';
 import { listLedger } from './ledger';
 import { memberGradeInfo } from './membership';
 import { loadSettings } from './settings';
@@ -187,7 +188,11 @@ export async function createMember(sql: Sql, raw: MemberInputData, ctx: OpContex
   try {
     const id = await sql.begin(async (tx) => {
       const memberId = await insertMember(tx, raw, ctx, options);
-      if (options.openCard) await issueOpenCardCoupons(tx, options.openCard, memberId, ctx);
+      if (options.openCard) {
+        await issueOpenCardCoupons(tx, options.openCard, memberId, ctx);
+        // 会员权益（v0.7.24）：「L0·会员」起点的券类当场发本期的，生日在这个月的发生日礼
+        await onMemberCreated(tx, options.openCard, memberId, ctx);
+      }
       return memberId;
     });
     return getMember(sql, id);

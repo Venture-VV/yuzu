@@ -8,6 +8,7 @@ import { sweepExpiredBonus } from './modules/bonus';
 import { issueBirthdayCoupons } from './modules/coupons';
 import { checkDevicesOnce, recoverJobs } from './modules/devices';
 import { ensureMembershipLive, runMembershipDaily } from './modules/membership';
+import { runBenefitsDaily } from './modules/benefits';
 import { HEARTBEAT_INTERVAL_MS } from '@shared/devices';
 import { holdAppPresence } from './presence';
 
@@ -63,6 +64,14 @@ async function main() {
       if (run?.error) app.log.error(`会员到期处理有出错的：${run.error}`);
     } catch (error) {
       app.log.error({ err: error }, '会员到期处理失败，下一分钟重试');
+    }
+    // 会员权益（v0.7.24）：到期处理之后按新的档阶发本期的券类、生日礼、节日关怀（今天跑过、权益清单没改过就什么都不做）
+    try {
+      const run = await runBenefitsDaily({ sql, config });
+      if (run?.coupons) app.log.info(`会员权益自动发放：${run.processed} 位会员、${run.coupons} 张券`);
+      if (run?.error) app.log.error(`会员权益自动发放有出错的：${run.error}`);
+    } catch (error) {
+      app.log.error({ err: error }, '会员权益自动发放失败，下一分钟重试');
     }
     // 生日礼（v0.7.20）：每 10 分钟检查一次生日当月还没发的会员（去重键兜底，几个进程同时跑也只发一次）
     if (Date.now() - lastBirthday >= 10 * 60_000) {

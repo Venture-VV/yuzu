@@ -62,6 +62,7 @@ import { dateSchema, idParam, parse } from '../lib/validate';
 import { lockSettings, sameJson, saveRuleSetting } from '../lib/rule-settings';
 import { setTxTimeouts } from '../lib/tx';
 import { assertNotFenced } from '../lib/fences';
+import { onGradeChanged, onMembersGraded } from './benefits';
 import { erpOpAbandoned } from './erp-ops';
 import { loadSettings } from './settings';
 
@@ -184,18 +185,23 @@ interface EventExtra {
   clientKey?: string | null;
 }
 
-/** 写会员一行的新状态（版本号加一）并记一条状态变化；调用方已锁会员 */
+/**
+ * 写会员一行的新状态（版本号加一）并记一条状态变化；调用方已锁会员。
+ * 之后在同一事务里按新档阶发会员权益（v0.7.24：补发本期券类差额，升档、升阶、保级的事件礼，生日礼）
+ */
 async function changeState(tx: Tx, memberId: number, kind: GradeEventKind, businessDate: string, from: GradeState, to: GradeState, extra: EventExtra = {}) {
   await tx`
     UPDATE members SET grade = ${to.grade}, tier = ${to.tier}, cycle_start = ${to.cycleStart}, cycle_end = ${to.cycleEnd},
            grace_until = ${to.graceUntil}, grade_version = grade_version + 1
     WHERE id = ${memberId}`;
-  await tx`
+  const [event] = await tx<{ id: number }[]>`
     INSERT INTO member_grade_events (member_id, kind, business_date, from_grade, from_tier, to_grade, to_tier, cycle_start, cycle_end, grace_until,
                                      cycle_spend, rolling_recharge, recharge_id, consumption_id, staff_id, reason, client_key)
     VALUES (${memberId}, ${kind}, ${businessDate}, ${from.grade}, ${from.tier}, ${to.grade}, ${to.tier}, ${to.cycleStart}, ${to.cycleEnd}, ${to.graceUntil},
             ${extra.cycleSpend ?? 0}, ${extra.rollingRecharge ?? null}, ${extra.rechargeId ?? null}, ${extra.consumptionId ?? null},
-            ${extra.staffId ?? null}, ${extra.reason ?? ''}, ${extra.clientKey ?? null})`;
+            ${extra.staffId ?? null}, ${extra.reason ?? ''}, ${extra.clientKey ?? null})
+    RETURNING id`;
+  await onGradeChanged(tx, { memberId, kind, eventId: Number(event!.id), date: businessDate, to, staffId: extra.staffId ?? null });
 }
 
 interface DueStep {
@@ -329,6 +335,8 @@ async function gradeByCumulative(tx: Tx, memberIds: number[] | 'all', o: { kind:
       FROM unnest(${ids}::bigint[], ${changes.map((c) => c.from.grade)}::smallint[], ${changes.map((c) => c.from.tier)}::smallint[],
                   ${grades}::smallint[], ${changes.map((c) => c.amount)}::bigint[]) AS x (id, from_grade, from_tier, grade, amount)
       ORDER BY x.id`;
+    // 会员权益（v0.7.24）：定了档的当场补发本期券类（不发升级礼）
+    await onMembersGraded(tx, ids, o.today, o.staffId);
   }
   return { members: rows.length, graded: changes.length };
 }

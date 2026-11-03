@@ -31,6 +31,7 @@ import { addRechargeLot, expireDueLots, expireMemberBonus, restoreToLots, takeFr
 import { issueRechargeCoupons } from './coupons';
 import { getMember } from './members';
 import { applyRechargeGrade, onStoredValueSpend, planRechargeGrade } from './membership';
+import { onRecharge } from './benefits';
 import { loadPricedItems, priceLine } from './pricing';
 import { loadSettings } from './settings';
 import { lockPaymentShift, openShiftOf } from './shifts';
@@ -595,6 +596,8 @@ export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContex
         date: businessDate,
         ip: ctx.ip,
       });
+      // 会员权益（v0.7.24）：首笔充值发首充礼（按充完以后的档阶；升档的升级礼、券类补发在记升档时已发）
+      await onRecharge(tx, { memberId: member.id, first: grade.first, date: businessDate, staffId: ctx.actor.id });
       await writeAudit(tx, {
         staffId: ctx.actor.id,
         action: 'recharge_created',

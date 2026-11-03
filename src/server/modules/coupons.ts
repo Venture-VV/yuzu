@@ -310,6 +310,8 @@ interface IssueSpec {
   staffId: number | null;
   at: Date;
   date: string;
+  /** 指定有效期（会员权益的券类：到本期最后一天）；不给按模板算 */
+  range?: { from: string; to: string };
 }
 
 /**
@@ -317,7 +319,7 @@ interface IssueSpec {
  * 模板固定有效期已过：手动、批次报错，自动的跳过（返回 null）
  */
 async function writeIssue(tx: Tx, o: IssueSpec): Promise<{ issueId: number; issueNo: string; couponIds: number[] } | null> {
-  const range = validRange(o.template, o.date);
+  const range = o.range ?? validRange(o.template, o.date);
   if (!range) {
     if (o.dedupeKey) return null;
     throw unprocessable('TEMPLATE_EXPIRED', `券模板「${o.template.name}」的有效期到 ${o.template.validTo} 已经过了，不能再发；请另建模板`);
@@ -448,6 +450,40 @@ export async function issueRechargeCoupons(
     });
   }
   return issued;
+}
+
+/**
+ * 会员权益发券（v0.7.24，docs/BENEFITS.md；在调用方的事务里，会员已锁）：种类「会员权益」，不挂发券规则，
+ * 不看模板的限定等级（谁能领由权益的配置起点决定）。
+ * 有效期：券类（periodEnd 给了）从发券当天到本期最后一天，不看模板的有效天数，模板是固定起止日期的取两段重叠的部分；
+ * 事件礼（periodEnd 为空）按模板的有效期。模板停用、固定有效期已过（或与本期不重叠）的不发，去重键已有的不发，都返回 null
+ */
+export async function issueBenefitCoupons(
+  tx: Tx,
+  o: { templateId: number; memberId: number; quantity: number; level: number; reason: string; dedupeKey: string; staffId: number | null; at: Date; date: string; periodEnd: string | null },
+): Promise<{ issueId: number; issueNo: string; couponIds: number[] } | null> {
+  const template = await lockTemplate(tx, o.templateId);
+  if (!template?.active) return null;
+  let range = validRange(template, o.date);
+  if (range && o.periodEnd) {
+    const from = template.validity === 'fixed' && template.validFrom! > o.date ? template.validFrom! : o.date;
+    const to = template.validity === 'fixed' && template.validTo! < o.periodEnd ? template.validTo! : o.periodEnd;
+    range = from <= to ? { from, to } : null;
+  }
+  if (!range) return null;
+  return writeIssue(tx, {
+    kind: 'benefit',
+    template,
+    memberId: o.memberId,
+    quantity: o.quantity,
+    level: o.level,
+    reason: o.reason.slice(0, 200),
+    dedupeKey: o.dedupeKey,
+    staffId: o.staffId,
+    at: o.at,
+    date: o.date,
+    range,
+  });
 }
 
 /** 生日礼一次查多少位候选会员（按会员编号翻页，查完为止） */
