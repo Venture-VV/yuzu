@@ -15,7 +15,7 @@ import { bonusExpiryAt, businessDateOf } from '@shared/business-date';
 import { PRICE_TIERS, type PriceTier } from '@shared/catalog';
 import { splitDeduction, type DeductionRule } from '@shared/deduction';
 import { describeHours, PAYMENT_METHODS } from '@shared/labels';
-import { levelOf } from '@shared/frontdesk';
+import { gradeLabel } from '@shared/membership';
 import { formatYuan } from '@shared/money';
 import { can, type Permission } from '@shared/permissions';
 import type { ConsumptionDoc, OperationLookup, OperationResult, RechargeDoc, ReversalDoc } from '@shared/types';
@@ -29,8 +29,8 @@ import { AppError, conflict, forbidden, notFound, unprocessable } from '../lib/e
 import { idParam, parse, positiveCents, cents } from '../lib/validate';
 import { addRechargeLot, expireDueLots, expireMemberBonus, restoreToLots, takeFromLots } from './bonus';
 import { issueRechargeCoupons } from './coupons';
-import { loadFrontdeskRules } from './frontdesk/common';
 import { getMember } from './members';
+import { applyRechargeGrade, onStoredValueSpend, planRechargeGrade } from './membership';
 import { loadPricedItems, priceLine } from './pricing';
 import { loadSettings } from './settings';
 import { lockPaymentShift, openShiftOf } from './shifts';
@@ -63,6 +63,12 @@ export const RechargeInput = z.object({
   overLimitGrantId,
   /** 页面确认时看到的赠金有效期（天，null 为长期有效）；与当前规则不一致时拒绝。不带时不核对 */
   bonusValidDays: z.number().int().positive().nullable().optional(),
+  /**
+   * 赠金怎么定（会员体系 v2，v0.7.23）：auto = 按充值后所在档的比例（与页面预览的不一致时拒绝，BONUS_CHANGED）；
+   * custom = 手动填写（要「自定义赠金」权限）。不带时（升级前留下的请求、测试与演示数据）：等于按档的赠金算 auto，
+   * 不等且有「自定义赠金」权限算 custom，否则按 auto 拒绝。不带时不进入请求摘要，旧请求重提不受影响
+   */
+  bonusMode: z.enum(['auto', 'custom'], '赠金方式不正确').optional(),
 });
 export type RechargeInputData = z.input<typeof RechargeInput>;
 
@@ -361,6 +367,8 @@ async function insertConsumption(
   });
   // 扣用的赠金先用最早到期的批次
   await takeFromLots(tx, { memberId: member.id, consumptionId: id, amount: o.split.bonus, at: o.at });
+  // 会员体系 v2：周期净储值消费到 30% / 60% 升享阶 / 尊阶，补充期内到 60% 当场保级
+  await onStoredValueSpend(tx, { memberId: member.id, consumptionId: id, today: o.businessDate });
   return { id, docNo };
 }
 
@@ -492,7 +500,11 @@ export async function reverseForCheckout(
 
 // ───────────────────────── 充值 ─────────────────────────
 
-export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContext): Promise<OperationResult> {
+/**
+ * 充值入账。options.history 只给演示数据（seed，补的是会员体系 v2 之前的历史充值）用：不受首充 / 续充最低限制，
+ * 赠金按给定的（原来套餐上的赠金），升档照常；接口不会带
+ */
+export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContext, options: { history?: boolean } = {}): Promise<OperationResult> {
   const input = parse(RechargeInput, raw);
   const { idempotencyKey: key, ...payload } = input;
   // 收款开始处理时经办人所在的班次：入账前这个班次已交班则整笔拒绝（见 shifts.ts lockPaymentShift）
@@ -509,20 +521,39 @@ export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContex
       // 先作废到期的赠金（通常已由记账前的单独事务处理），入账后余额从最新余额算起
       const member = await expireDueLots(tx, deps, locked, at);
       if (member.status !== 'active') throw unprocessable('MEMBER_FROZEN', '该会员已停用，不能充值');
+      const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
 
+      // 会员体系 v2：先把到期没处理的处理掉，再算这笔充完的档级、按档的赠金与首充 / 续充最低
+      const grade = await planRechargeGrade(tx, member.id, input.paidAmount, businessDate);
+      if (!options.history && grade.minimum > 0 && input.paidAmount < grade.minimum) {
+        throw unprocessable(
+          'RECHARGE_BELOW_MIN',
+          `${grade.first ? '首充' : '续充'}单笔最低 ${formatYuan(grade.minimum)}，这笔 ${formatYuan(input.paidAmount)} 不够`,
+          { minimum: grade.minimum, first: grade.first },
+        );
+      }
+      const autoBonus = grade.outcome.bonusCents;
+      const canCustom = can(ctx.actor, 'recharge.customBonus');
+      const bonusMode = options.history ? 'custom' : (input.bonusMode ?? (input.bonusAmount === autoBonus || !canCustom ? 'auto' : 'custom'));
+      if (bonusMode === 'custom' && !canCustom && !options.history) throw forbidden('当前岗位不能自定义赠金，赠金按充值后所在档的比例自动算');
+      if (bonusMode === 'auto' && input.bonusAmount !== autoBonus) {
+        const after = gradeLabel(grade.rules, grade.outcome.gradeAfter, grade.outcome.upgraded ? 0 : grade.state.tier);
+        throw conflict('BONUS_CHANGED', `赠金按充值后所在档的比例自动算：这笔充完是「${after}」，应赠 ${formatYuan(autoBonus)}，请核对后重新确认`, {
+          bonusCents: autoBonus,
+          gradeAfter: grade.outcome.gradeAfter,
+        });
+      }
+
+      // 充值套餐只是常用金额的快捷按钮（会员体系 v2），赠金不再按套餐
       let planName: string | null = null;
       let bonusValidDays = settings.customBonusValidDays;
       if (input.planId) {
-        const [plan] = await tx<{ name: string; payAmount: number; bonusAmount: number; active: boolean; bonusValidDays: number | null }[]>`
-          SELECT name, pay_amount, bonus_amount, active, bonus_valid_days FROM recharge_plans WHERE id = ${input.planId}`;
+        const [plan] = await tx<{ name: string; payAmount: number; active: boolean; bonusValidDays: number | null }[]>`
+          SELECT name, pay_amount, active, bonus_valid_days FROM recharge_plans WHERE id = ${input.planId}`;
         if (!plan || !plan.active) throw conflict('PLAN_UNAVAILABLE', '该充值套餐已停用，请重新选择');
-        if (plan.payAmount !== input.paidAmount || plan.bonusAmount !== input.bonusAmount) {
-          throw conflict('PLAN_CHANGED', '充值套餐金额刚刚有调整，请核对后重新确认');
-        }
+        if (plan.payAmount !== input.paidAmount) throw conflict('PLAN_CHANGED', '充值套餐金额刚刚有调整，请核对后重新确认');
         planName = plan.name;
         bonusValidDays = plan.bonusValidDays;
-      } else if (input.bonusAmount > 0 && !can(ctx.actor, 'recharge.customBonus')) {
-        throw forbidden('当前岗位不能自定义赠金，请选择充值套餐');
       }
       // 赠金有效期以员工确认时看到的为准：期间店主调整了有效期时拒绝，按新的有效期重新确认
       if (input.bonusAmount > 0 && input.bonusValidDays !== undefined && input.bonusValidDays !== bonusValidDays) {
@@ -537,7 +568,6 @@ export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContex
         ? await approveOverLimit(tx, input.overLimitGrantId, ctx, { kind: 'recharge', memberId: member.id, amount: input.paidAmount, limit: settings.maxRechargeCents, key })
         : null;
 
-      const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
       const docNo = await nextDocNo(tx, 'recharge', businessDate);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO recharges (doc_no, member_id, plan_id, plan_name, paid_amount, bonus_amount, payment_method,
@@ -551,24 +581,15 @@ export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContex
         entryType: 'recharge', docNo, rechargeId: id, businessDate, operatorId: ctx.actor.id, at,
       });
       await addRechargeLot(tx, { memberId: member.id, rechargeId: id, amount: input.bonusAmount, expiresAt: bonusExpiresAt, at });
-      // 充值赠券与升级礼（v0.7.20）：套餐上挂的券；这笔充值让等级升高时，新达到的每一级发升级礼（与 VIP 柜同一口径）
-      const rules = await loadFrontdeskRules(tx);
-      let levelAmount: { before: number; after: number };
-      if (rules.vipLevelBasis === 'balance') {
-        const was = member.principalBalance + member.bonusBalance;
-        levelAmount = { before: was, after: was + input.paidAmount + input.bonusAmount };
-      } else {
-        const [cum] = await tx<{ amount: number }[]>`
-          SELECT coalesce((SELECT sum(paid_amount) FROM recharges WHERE member_id = ${member.id}), 0)
-                 + coalesce((SELECT sum(legacy_recharged) FROM opening_balances WHERE member_id = ${member.id} AND status = 'active'), 0) AS amount`;
-        levelAmount = { before: Number(cum!.amount) - input.paidAmount, after: Number(cum!.amount) };
-      }
+      // 升档：进新档的初阶，会籍周期从今天起算（会员体系 v2）
+      await applyRechargeGrade(tx, grade, { memberId: member.id, rechargeId: id, today: businessDate });
+      // 充值赠券与升级礼（v0.7.20）：套餐上挂的券；这笔充值升档时，新达到的每一档发升级礼
       await issueRechargeCoupons(tx, {
         memberId: member.id,
         planId: input.planId,
         rechargeId: id,
-        levelBefore: levelOf(levelAmount.before, rules.vipLevelThresholds),
-        levelAfter: levelOf(levelAmount.after, rules.vipLevelThresholds),
+        levelBefore: grade.state.grade,
+        levelAfter: grade.outcome.gradeAfter,
         staffId: ctx.actor.id,
         at,
         date: businessDate,
@@ -581,6 +602,7 @@ export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContex
         targetId: id,
         detail: {
           docNo, memberId: member.id, paid: input.paidAmount, bonus: input.bonusAmount, method: input.paymentMethod,
+          bonusMode, autoBonus, gradeBefore: grade.state.grade, gradeAfter: grade.outcome.gradeAfter,
           ...(overLimit ? { overLimitApprovedBy: overLimit.approverId, overLimitApproverName: overLimit.approverName } : {}),
         },
         ip: ctx.ip,

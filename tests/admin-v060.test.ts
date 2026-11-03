@@ -143,35 +143,24 @@ describe('会员渠道来源', () => {
 });
 
 describe('会员等级与赠金明细', () => {
-  it('按累计充值：达到门槛的时间、到下一级还差多少、升级记录；改为余额口径时消费会降级', async () => {
-    const rules = await api(ctx.app, ctx.owner, 'PUT', '/api/frontdesk/rules', {
-      vipLevelBasis: 'recharge',
-      vipLevelThresholds: [0, 100_000, 300_000],
-      vipLevelNames: ['普通', '银卡', '金卡'],
-    });
-    expect(rules.status).toBe(200);
-    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/frontdesk/rules', { vipLevelNames: ['普通', '普通'] })).status).toBe(400);
+  it('会员体系 v2：等级卡写明档阶、下一档还差多少、按档赠送比例；升档留状态变化记录（v0.7.23 起替代原来的等级）', async () => {
+    const mr = (await api(ctx.app, ctx.owner, 'GET', '/api/membership/rules')).body;
+    const thresholds = [0, 100_000, 300_000, 1_000_000, 2_000_000, 5_000_000, 10_000_000];
+    const saved = await api(ctx.app, ctx.owner, 'PUT', '/api/membership/rules', { ...mr, grades: mr.grades.map((g: object, i: number) => ({ ...g, thresholdCents: thresholds[i], bonusBp: 0 })) });
+    expect(saved.status).toBe(200);
 
     const m = await createMember(ctx, '升级会员', '19900060005');
     let d = (await api(ctx.app, ctx.clerk, 'GET', `/api/members/${m.id}`)).body;
-    expect(d.level).toMatchObject({ level: 1, name: '普通', amountCents: 0, next: { level: 2, name: '银卡', thresholdCents: 100_000, gapCents: 100_000 }, history: [] });
-    expect(d.level.since).toBe(new Date(d.createdAt).toISOString());
+    expect(d).toMatchObject({ grade: 0, tier: null, cycleEnd: null });
+    expect(d.gradeInfo).toMatchObject({ label: 'L0 青溪', next: { grade: 1, needCents: 100_000 }, events: [] });
 
     await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, 50_000));
     await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, 60_000));
     d = (await api(ctx.app, ctx.clerk, 'GET', `/api/members/${m.id}`)).body;
-    expect(d.level).toMatchObject({ level: 2, name: '银卡', amountCents: 110_000, next: { level: 3, name: '金卡', gapCents: 190_000 } });
-    expect(d.level.history).toHaveLength(1);
-    expect(d.level.history[0]).toMatchObject({ from: 1, to: 2, fromName: '普通', toName: '银卡' });
-    expect(d.level.validity).toContain('不降级');
-
-    // 余额口径：消费 ¥700 后余额 ¥400，降回普通
-    await api(ctx.app, ctx.owner, 'PUT', '/api/frontdesk/rules', { vipLevelBasis: 'balance' });
-    await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', consumeBody(m.id, 70_000));
-    d = (await api(ctx.app, ctx.clerk, 'GET', `/api/members/${m.id}`)).body;
-    expect(d.level).toMatchObject({ basis: 'balance', level: 1, amountCents: 40_000 });
-    expect(d.level.history.map((h: { from: number; to: number }) => `${h.from}→${h.to}`)).toEqual(['2→1', '1→2']);
-    await api(ctx.app, ctx.owner, 'PUT', '/api/frontdesk/rules', { vipLevelBasis: 'recharge' });
+    expect(d).toMatchObject({ grade: 1, tier: 0 });
+    expect(d.gradeInfo).toMatchObject({ rollingRechargeCents: 110_000, next: { grade: 2, needCents: 190_000 } });
+    expect(d.gradeInfo.events.map((e: { kind: string; fromGrade: number; toGrade: number }) => [e.kind, e.fromGrade, e.toGrade])).toEqual([['recharge_up', 0, 1]]);
+    await api(ctx.app, ctx.owner, 'PUT', '/api/membership/rules', mr);
   });
 
   it('赠金明细列出每笔赠送：可用（含已用部分）、已用完', async () => {
@@ -256,7 +245,7 @@ describe('后台首页与规则总表', () => {
     await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { storeName: '浴族 · 测试店' });
     rules = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/rules')).body;
     expect(rules.find((r) => r.key === 'store_name')).toMatchObject({ isDefault: false, updatedBy: '测试店主', value: '浴族 · 测试店' });
-    expect(rules.find((r) => r.key === 'frontdesk_rules.vipLevelNames')).toBeTruthy();
+    expect(rules.find((r) => r.key === 'membership_rules.grades')).toMatchObject({ section: 'membership', isDefault: true });
     expect(rules.find((r) => r.key === 'role_permissions')).toMatchObject({ value: '按默认' });
 
     const o = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/overview')).body;

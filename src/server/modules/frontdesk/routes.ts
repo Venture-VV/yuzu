@@ -2,8 +2,6 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { COUPON_PLATFORMS } from '@shared/checkout';
 import { ISO_DATE } from '@shared/business-date';
-import { MAX_VIP_LEVEL, VIP_LEVEL_BASES } from '@shared/frontdesk';
-import { MAX_LEVEL_NAME_LENGTH } from '@shared/members';
 import { can } from '@shared/permissions';
 import { guard } from '../../auth/guard';
 import { readSnapshot } from '../../db';
@@ -22,7 +20,7 @@ import { listTicketTypes, saveTicketType, setVisitTicket, type TicketTypeInputDa
 import { frontdeskChecks } from './checks';
 import { businessDate, FRONTDESK_OP_PERMISSIONS, FRONTDESK_OPS, loadFrontdeskRules } from './common';
 import { batchCreate, importHandTags, listTags, lockHandTag, unlockHandTag, updateHandTag, type ImportInputData } from './tags';
-import { memberLevels } from './vip';
+import { memberLockerGrades } from './vip';
 import {
   abandonFrontdeskOp,
   cancelVisit,
@@ -40,24 +38,12 @@ import {
 import { ctxOf } from '../../lib/context';
 import { saveRuleSetting } from '../../lib/rule-settings';
 
+// 会员等级的口径、门槛与名称 v0.7.23 起归「会员规则」（membership.ts）；旧页面带来的这几项不再保存（zod 去掉多余的字段）
 const RulesInput = z.object({
   selfVoidMinutes: z.number().int().min(0, '分钟数不能为负').max(120, '最多 120 分钟'),
   lostTagFeeCents: z.number().int().min(0, '赔偿金额不能为负').max(10_000_00, '赔偿金额最多 10,000 元'),
-  vipLevelBasis: z.enum(VIP_LEVEL_BASES, '请选择等级口径'),
-  vipLevelThresholds: z
-    .array(z.number().int().min(0, '门槛不能为负').max(1_000_000_000_00, '门槛过大'))
-    .min(1, '至少设置第 1 级')
-    .max(MAX_VIP_LEVEL, `最多 ${MAX_VIP_LEVEL} 级`)
-    .refine((t) => t.every((v, i) => i === 0 || v > t[i - 1]!), '各级门槛必须逐级递增'),
   vipOverrideEnabled: z.boolean(),
   overtimeGraceMinutes: z.number().int().min(0, '宽限分钟数不能为负').max(120, '宽限最多 120 分钟'),
-  vipLevelNames: z
-    .array(z.string().trim().max(MAX_LEVEL_NAME_LENGTH, `等级名称最多 ${MAX_LEVEL_NAME_LENGTH} 个字`))
-    .max(MAX_VIP_LEVEL, `最多 ${MAX_VIP_LEVEL} 级`)
-    .refine((names) => {
-      const used = names.filter(Boolean);
-      return new Set(used).size === used.length;
-    }, '各级名称不能重复'),
 });
 
 export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
@@ -266,12 +252,12 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
     return findCoupon(sql, platform, code);
   });
 
-  // 会员按当前规则口径的等级（发牌时核对 VIP 柜）
-  app.get('/api/frontdesk/members/:id/level', { preHandler: guard('frontdesk.read') }, async (req) => {
+  // 会员的档阶与能用几级 VIP 柜（发牌时核对 VIP 柜）
+  app.get('/api/frontdesk/members/:id/grade', { preHandler: guard('frontdesk.read') }, async (req) => {
     const { id } = parse(idParam, req.params);
-    const level = (await memberLevels(sql, [id], await loadFrontdeskRules(sql))).get(id);
-    if (!level) throw notFound('会员不存在');
-    return level;
+    const grade = (await memberLockerGrades(sql, [id], await businessDate(sql, deps, new Date()))).get(id);
+    if (!grade) throw notFound('会员不存在');
+    return grade;
   });
 
   // ── 手牌池 ──

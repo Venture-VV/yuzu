@@ -9,8 +9,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { lastUsableDate } from '../src/shared/business-date';
 import { shiftDate } from '../src/shared/labels';
 import { parseOpeningCsv } from '../src/shared/opening-import';
-import { DEFAULT_FRONTDESK_RULES } from '../src/shared/frontdesk';
-import { memberLevels } from '../src/server/modules/frontdesk/vip';
 import { sweepExpiredBonus } from '../src/server/modules/bonus';
 import { api, balanceOf, consumeBody, createMember, setup, type TestContext } from './helpers';
 
@@ -168,13 +166,15 @@ describe('预览与导入', () => {
     expect((await api(ctx.app, ctx.owner, 'GET', `/api/opening-imports/by-key/${randomUUID()}`)).body.found).toBe(false);
   });
 
-  it('VIP 柜等级（累计充值口径）计入期初的旧系统累计充值', async () => {
+  it('会员体系 v2：期初导入按累计充值（含旧系统累计）定档、进初阶，周期从导入日起，记一条「期初导入定档」', async () => {
     const jia = (await memberByPhone('13900000001'))!;
-    const levels = await memberLevels(ctx.sql, [jia.id], { ...DEFAULT_FRONTDESK_RULES, vipLevelBasis: 'recharge' });
-    expect(levels.get(jia.id)!.amountCents).toBe(500000);
-    // 会员详情的等级（v0.6.0）同一口径：期初按导入时间计入累计充值
     const detail = (await api(ctx.app, ctx.owner, 'GET', `/api/members/${jia.id}`)).body;
-    expect(detail.level).toMatchObject({ basis: 'recharge', amountCents: 500000, level: levels.get(jia.id)!.level });
+    // 旧系统累计充值 5,000 元 → L1 云涧（VIP 柜按会员规则的对应表）
+    expect(detail).toMatchObject({ grade: 1, tier: 0 });
+    expect(detail.gradeInfo).toMatchObject({ label: 'L1 云涧 · 初', lockerLevel: 1, state: { cycleStart: detail.gradeInfo.today } });
+    expect(detail.gradeInfo.events.map((e: { kind: string; rollingRecharge: number; staffName: string }) => [e.kind, e.rollingRecharge, e.staffName])).toEqual([
+      ['import', 500000, '测试店主'],
+    ]);
   });
 });
 

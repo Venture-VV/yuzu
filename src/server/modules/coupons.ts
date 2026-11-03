@@ -37,9 +37,8 @@ import {
   type CouponTerms,
   type MemberCoupons,
 } from '@shared/coupons';
-import { levelOf } from '@shared/frontdesk';
 import { shiftDate } from '@shared/labels';
-import { levelName } from '@shared/members';
+import { MAX_GRADE } from '@shared/membership';
 import { can } from '@shared/permissions';
 import { isUniqueViolation, readSnapshot, type Db, type Tx } from '../db';
 import { assertNotFenced } from '../lib/fences';
@@ -50,8 +49,7 @@ import { toCsv, CSV_TYPE, attachment } from '../lib/csv';
 import type { Deps, OpContext } from '../lib/context';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { cents, idParam, parse, positiveCents } from '../lib/validate';
-import { loadFrontdeskRules } from './frontdesk/common';
-import { memberLevels } from './frontdesk/vip';
+import { loadMembershipRules } from './membership';
 import { nextDocNo } from '../lib/tx';
 import { loadSettings } from './settings';
 import { ctxOf } from '../lib/context';
@@ -74,7 +72,8 @@ const TemplateFields = z.object({
   validFrom: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD').nullable().default(null),
   validTo: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD').nullable().default(null),
   validDays: z.number('有效天数必须是整数').int('有效天数必须是整数').min(1, '至少 1 天').max(3650, '最多 3650 天').nullable().default(null),
-  levels: z.array(z.number().int().min(1).max(9)).max(9).default([]),
+  // 限定发放的档级 L0–L6（会员体系 v2，v0.7.23）；空 = 不限
+  levels: z.array(z.number().int().min(0, '档级是 L0–L6').max(MAX_GRADE, '档级是 L0–L6')).max(MAX_GRADE + 1).default([]),
   note: z.string().trim().max(200, '备注最多 200 字').default(''),
   active: z.boolean().default(true),
 });
@@ -128,8 +127,6 @@ async function assertRefs(db: Db, t: Normalized) {
   if (t.exchangeTicketTypeId !== null && !(await db`SELECT 1 FROM ticket_types WHERE id = ${t.exchangeTicketTypeId}`).length) {
     throw badRequest('兑换的票种不存在，请刷新后重选', { field: 'exchangeTicketTypeId' });
   }
-  const rules = await loadFrontdeskRules(db);
-  if (t.levels.some((l) => l > rules.vipLevelThresholds.length)) throw badRequest(`会员等级只有 ${rules.vipLevelThresholds.length} 级`, { field: 'levels' });
 }
 
 const TEMPLATE_SELECT = (db: Db) => db`
@@ -354,6 +351,8 @@ async function writeIssue(tx: Tx, o: IssueSpec): Promise<{ issueId: number; issu
 }
 
 const levelAllowed = (t: Pick<LockedTemplate, 'levels'>, level: number) => t.levels.length === 0 || t.levels.includes(level);
+/** 「L0、L1、L2」 */
+const gradeList = (levels: number[]) => levels.map((l) => `L${l}`).join('、');
 
 async function issueDate(db: Db, deps: Pick<Deps, 'config'>, at: Date) {
   const settings = await loadSettings(db);
@@ -408,11 +407,11 @@ export async function issueByRules(
 /** 开卡礼：会员建档的事务里调用（期初导入的会员不走这里） */
 export async function issueOpenCardCoupons(tx: Tx, deps: Pick<Deps, 'config'>, memberId: number, ctx: OpContext) {
   const at = ctx.at ?? new Date();
-  const rules = await loadFrontdeskRules(tx);
   const issued = await issueByRules(tx, {
     kind: 'open_card',
     memberId,
-    memberLevel: levelOf(0, rules.vipLevelThresholds),
+    // 新建档的会员都是 L0
+    memberLevel: 0,
     staffId: ctx.actor.id,
     at,
     date: await issueDate(tx, deps, at),
@@ -472,7 +471,6 @@ export async function issueBirthdayCoupons(deps: Pick<Deps, 'sql' | 'config'>, n
   const date = await issueDate(sql, deps, now);
   const year = date.slice(0, 4);
   const month = date.slice(5, 7);
-  const frontdesk = await loadFrontdeskRules(sql);
   let members = 0;
   for (let after = 0; ; ) {
     // 每位候选会员带上今年还没发的生日规则（只算启用的规则、启用的模板）
@@ -488,10 +486,11 @@ export async function issueBirthdayCoupons(deps: Pick<Deps, 'sql' | 'config'>, n
       LIMIT ${pageSize}`;
     if (!candidates.length) break;
     after = Number(candidates[candidates.length - 1]!.id);
-    const levels = await memberLevels(sql, candidates.map((c) => Number(c.id)), frontdesk);
+    const grades = await sql<{ id: number; grade: number }[]>`SELECT id, grade FROM members WHERE id IN ${sql(candidates.map((c) => Number(c.id)))}`;
+    const levels = new Map(grades.map((g) => [Number(g.id), g.grade]));
     for (const c of candidates) {
       const memberId = Number(c.id);
-      const level = levels.get(memberId)?.level ?? 0;
+      const level = levels.get(memberId) ?? 0;
       const missing = new Set(c.missing.map(Number));
       // 自己这一级的规则都发过了（或没有这一级的规则）：不开事务
       if (!rules.some((r) => r.level === level && missing.has(Number(r.id)))) continue;
@@ -550,9 +549,10 @@ export async function issueToMember(deps: Deps, memberId: number, raw: unknown, 
       const template = await lockTemplate(tx, input.templateId);
       if (!template) throw notFound('券模板不存在');
       if (!template.active) throw unprocessable('TEMPLATE_INACTIVE', `券「${template.name}」已停用，不能再发`);
-      const level = (await memberLevels(tx, [memberId], await loadFrontdeskRules(tx))).get(memberId)?.level ?? 0;
+      const [g] = await tx<{ grade: number }[]>`SELECT grade FROM members WHERE id = ${memberId}`;
+      const level = g!.grade;
       if (!levelAllowed(template, level)) {
-        throw unprocessable('COUPON_LEVEL', `券「${template.name}」只发给第 ${template.levels.join('、')} 级会员，这位会员现在是第 ${level} 级`);
+        throw unprocessable('COUPON_LEVEL', `券「${template.name}」只发给 ${gradeList(template.levels)} 的会员，这位会员现在是 L${level}`);
       }
       const at = ctx.at ?? new Date();
       const date = await issueDate(tx, deps, at);
@@ -671,7 +671,8 @@ export async function voidBatch(deps: Deps, issueId: number, raw: unknown, ctx: 
 const RuleInput = z.object({
   clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
   kind: z.enum(COUPON_RULE_KINDS, '请选择规则的种类'),
-  level: z.number().int().min(1).max(9).nullable().default(null),
+  // 升级礼：升到的档级 L1–L6；生日礼：发券时的档级 L0–L6（会员体系 v2，v0.7.23）
+  level: z.number().int().min(0, '档级是 L0–L6').max(MAX_GRADE, '档级是 L0–L6').nullable().default(null),
   planId: z.number().int().positive().nullable().default(null),
   templateId: z.number('请选择券').int().positive('请选择券'),
   quantity: z.number('张数必须是整数').int('张数必须是整数').min(1, '至少 1 张').max(MAX_MANUAL_COUPONS, `最多 ${MAX_MANUAL_COUPONS} 张`),
@@ -695,7 +696,8 @@ export async function listRules(db: Db): Promise<CouponRule[]> {
 export async function createRule(deps: Deps, raw: unknown, ctx: OpContext): Promise<{ ruleId: number; rules: CouponRule[] }> {
   const input = parse(RuleInput, raw);
   const needsLevel = input.kind === 'level_up' || input.kind === 'birthday';
-  if (needsLevel && input.level === null) throw badRequest('升级礼、生日礼请选择会员等级', { field: 'level' });
+  if (needsLevel && input.level === null) throw badRequest('升级礼、生日礼请选择会员档级', { field: 'level' });
+  if (input.kind === 'level_up' && input.level === 0) throw badRequest('升级礼请选择升到的档级（L1–L6）', { field: 'level' });
   if (input.kind === 'recharge' && input.planId === null) throw badRequest('充值赠券请选择充值套餐', { field: 'planId' });
   const level = needsLevel ? input.level : null;
   const planId = input.kind === 'recharge' ? input.planId : null;
@@ -720,10 +722,8 @@ export async function createRule(deps: Deps, raw: unknown, ctx: OpContext): Prom
       const template = await lockTemplate(tx, input.templateId);
       if (!template) throw notFound('券模板不存在');
       if (!template.active) throw unprocessable('TEMPLATE_INACTIVE', `券「${template.name}」已停用`);
-      const rules = await loadFrontdeskRules(tx);
-      if (needsLevel && input.level! > rules.vipLevelThresholds.length) throw badRequest(`会员等级只有 ${rules.vipLevelThresholds.length} 级`, { field: 'level' });
       if (needsLevel && !levelAllowed(template, input.level!)) {
-        throw unprocessable('COUPON_LEVEL', `券「${template.name}」只发给第 ${template.levels.join('、')} 级会员，不能配给第 ${input.level} 级`);
+        throw unprocessable('COUPON_LEVEL', `券「${template.name}」只发给 ${gradeList(template.levels)} 的会员，不能配给 L${input.level}`);
       }
       if (input.kind === 'recharge' && !(await tx`SELECT 1 FROM recharge_plans WHERE id = ${input.planId}`).length) throw notFound('充值套餐不存在');
       const [row] = await tx<{ id: number }[]>`
@@ -859,14 +859,15 @@ export async function couponMeta(db: Db): Promise<CouponMeta> {
   const items = await db<CouponMeta['items']>`SELECT id, name, coalesce(nullif(category, ''), '未分类') AS category, active FROM service_items ORDER BY active DESC, category, name`;
   const ticketTypes = await db<CouponMeta['ticketTypes']>`SELECT id, name, active FROM ticket_types ORDER BY active DESC, sort_order, id`;
   const plans = await db<CouponMeta['plans']>`SELECT id, name, pay_amount, bonus_amount, active FROM recharge_plans ORDER BY active DESC, sort_order, id`;
-  const rules = await loadFrontdeskRules(db);
+  const rules = await loadMembershipRules(db);
   const categories = ['门票', '客房', ...new Set(items.map((i) => i.category).filter((c) => c !== '未分类')), '未分类', '其他（手动金额、赔偿等）'];
   return {
     categories: [...new Set(categories)],
     items,
     ticketTypes,
     plans,
-    levels: rules.vipLevelThresholds.map((_, i) => ({ level: i + 1, name: levelName(i + 1, rules.vipLevelNames) })),
+    // 会员体系 v2 的档级 L0–L6（升级礼不能选 L0）
+    levels: rules.grades.map((g, i) => ({ level: i, name: `L${i} ${g.name}` })),
   };
 }
 

@@ -68,6 +68,7 @@ export interface MemberBrief {
   name: string;
   phoneTail: string;
   balance: number;
+  /** 档阶，例如「L3 观澜 · 享」 */
   levelName: string;
   lastActivityAt: string | null;
 }
@@ -81,6 +82,7 @@ export interface MembersReport {
   period: { newMembers: number; rechargePaid: number; rechargeCount: number; rechargeMembers: number; walletConsumed: number; consumeMembers: number };
   newByChannel: { channel: string | null; label: string; count: number }[];
   allByChannel: { channel: string | null; label: string; count: number }[];
+  /** 档级分布 L0–L6（会员体系 v2；19 个状态的分布见后台「会员体系」看板） */
   levels: { level: number; name: string; count: number; balance: number }[];
   topBalance: MemberBrief[];
   topRecharge: (MemberBrief & { paid: number })[];

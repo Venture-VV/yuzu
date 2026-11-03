@@ -33,8 +33,13 @@ export interface MembershipRules {
   topUpMinCents: number;
   /** 到期前几天进提醒名单（从大到小） */
   reminderDays: number[];
-  /** 已有会员上线、老卡迁移最高定到几档（会员文档：最高档要新充值达到门槛） */
+  /** 已有会员上线、期初导入（老卡迁移）最高定到几档（会员文档：最高档要新充值达到门槛） */
   onboardMaxGrade: number;
+  /**
+   * 手牌 VIP 柜：下标 0–6 对应 L0–L6，值是这一档能用到几级 VIP 柜（0 = 不能用）。
+   * 柜子的 1–5 级沿用店主的柜号清单（2026-10-27：3 万以下、5 万、10 万、20 万、30 万以上），换算到新档级待确认
+   */
+  vipLockerLevels: number[];
 }
 
 /** 默认值按会员文档（2026-11-02）与 PENDING_DECISIONS「会员体系 v2」（待确认，后台「会员规则」可改） */
@@ -56,6 +61,8 @@ export const DEFAULT_MEMBERSHIP_RULES: MembershipRules = {
   topUpMinCents: 5_000_00,
   reminderDays: [90, 60, 30, 7],
   onboardMaxGrade: 5,
+  // L0–L3 → 1 级柜（原来所有会员都能用 1 级柜）；L4（5 万）→ 2 级；L5（10 万）→ 4 级；L6（30 万）→ 5 级
+  vipLockerLevels: [1, 1, 1, 1, 2, 4, 5],
 };
 
 /** 会员当前的档阶与会籍（存在会员一行上） */
@@ -155,8 +162,8 @@ export function rechargeOutcome(rules: MembershipRules, gradeBefore: Grade, roll
 /** 状态变化的种类（状态变化记录只追加） */
 export const GRADE_EVENT_KINDS = [
   'go_live',
+  'import',
   'recharge_up',
-  'recharge_reversed',
   'spend_up',
   'retain',
   'grace_start',
@@ -167,8 +174,8 @@ export const GRADE_EVENT_KINDS = [
 export type GradeEventKind = (typeof GRADE_EVENT_KINDS)[number];
 export const GRADE_EVENT_LABELS: Record<GradeEventKind, string> = {
   go_live: '上线定档',
+  import: '期初导入定档',
   recharge_up: '充值升档',
-  recharge_reversed: '撤销充值退回原档',
   spend_up: '消费升阶',
   retain: '到期保级',
   grace_start: '进入补充期',
@@ -224,5 +231,183 @@ export function daysToExpiry(state: GradeState, today: string): number | null {
   return Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
 }
 
-/** 手牌 VIP 柜原来的 1–5 级（店主 2026-10-27 答复：3 万以下、5 万、10 万、20 万、30 万以上）对应的新档级（待确认） */
-export const LEGACY_VIP_LEVEL_TO_GRADE: Record<number, Grade> = { 1: 1, 2: 4, 3: 5, 4: 5, 5: 6 };
+/** 这一档能用到几级 VIP 柜（散客为 0） */
+export const lockerLevelOf = (rules: MembershipRules, grade: number): number => rules.vipLockerLevels[grade] ?? 0;
+
+/** 单笔最低充值：首充（没有充值、没有期初的会员）或续充；0 = 不限 */
+export const rechargeMinimum = (rules: MembershipRules, first: boolean): number => (first ? rules.firstRechargeMinCents : rules.topUpMinCents);
+
+/** 还有 daysLeft 天到期时落在哪一档提醒（到期前 90 / 60 / 30 / 7 天）；不在提醒范围为空 */
+export function reminderBucket(rules: MembershipRules, daysLeft: number | null): number | null {
+  if (daysLeft === null || daysLeft < 0) return null;
+  for (const d of [...rules.reminderDays].sort((a, b) => a - b)) if (daysLeft <= d) return d;
+  return null;
+}
+
+/** 19 个状态：L0 一个，L1–L6 各分初、享、尊 */
+export const GRADE_STATES: { grade: Grade; tier: Tier | null }[] = [
+  { grade: 0, tier: null },
+  ...([1, 2, 3, 4, 5, 6] as Grade[]).flatMap((grade) => ([0, 1, 2] as Tier[]).map((tier) => ({ grade, tier }))),
+];
+
+/** 他店查询：姓名中间遮住（两个字遮后一个） */
+export function maskName(name: string): string {
+  const chars = [...name.trim()];
+  if (chars.length <= 1) return '*';
+  if (chars.length === 2) return `${chars[0]}*`;
+  return `${chars[0]}${'*'.repeat(chars.length - 2)}${chars[chars.length - 1]}`;
+}
+
+export const maskPhone = (phone: string): string => (phone.length === 11 ? `${phone.slice(0, 3)}****${phone.slice(7)}` : '****');
+
+// ───────────────────────── 接口的数据 ─────────────────────────
+
+/** 会员一行上的档阶（会员一览、工作台、前台显示徽标） */
+export interface MemberGradeFields {
+  grade: Grade;
+  tier: Tier | null;
+  cycleEnd: string | null;
+  graceUntil: string | null;
+}
+
+/** 一条状态变化记录 */
+export interface GradeEventRow {
+  id: number;
+  kind: GradeEventKind;
+  businessDate: string;
+  fromGrade: Grade;
+  fromTier: Tier | null;
+  toGrade: Grade;
+  toTier: Tier | null;
+  cycleStart: string | null;
+  cycleEnd: string | null;
+  graceUntil: string | null;
+  /** 当时的周期净储值消费（分） */
+  cycleSpend: number;
+  /** 上线定档、期初导入、充值升档时的累计充值（分） */
+  rollingRecharge: number | null;
+  rechargeDocNo: string | null;
+  consumptionDocNo: string | null;
+  /** 经办人；系统自动为空 */
+  staffName: string | null;
+  reason: string;
+  createdAt: string;
+}
+
+/** 会员详情的等级卡 */
+export interface MemberGradeInfo {
+  memberId: number;
+  /** 当前状态（到期没处理的已按规则推算到今天） */
+  state: GradeState;
+  /** 会员档阶的版本号（手动调整时核对） */
+  version: number;
+  today: string;
+  label: string;
+  /** 周期开始到今天的净储值消费（分）；L0 为 0 */
+  cycleSpendCents: number;
+  /** 本档升享阶、尊阶（也是保级）要的周期消费；L0 为空 */
+  targets: { enjoy: number; honor: number } | null;
+  inGrace: boolean;
+  /** 离周期（补充期）结束还有几天；L0 为空 */
+  daysLeft: number | null;
+  /** 落在到期提醒的哪一档（90 / 60 / 30 / 7） */
+  reminder: number | null;
+  /** 滚动 365 天累计充值（含今天，分） */
+  rollingRechargeCents: number;
+  /** 还没有充值、没有期初：下一笔按首充最低 */
+  firstRecharge: boolean;
+  /** 下一档：门槛、按滚动累计还差多少、赠送比例；已是最高档为空 */
+  next: { grade: Grade; name: string; thresholdCents: number; needCents: number; bonusBp: number } | null;
+  /** 能用到几级 VIP 柜 */
+  lockerLevel: number;
+  /** 状态变化记录，最近的在前（最多 50 条） */
+  events: GradeEventRow[];
+}
+
+/** 前台、VIP 柜核对用的档阶 */
+export interface MemberGradeBadge {
+  memberId: number;
+  grade: Grade;
+  tier: Tier | null;
+  label: string;
+  cycleEnd: string | null;
+  graceUntil: string | null;
+  daysLeft: number | null;
+  reminder: number | null;
+  lockerLevel: number;
+}
+
+/** 每天自动任务的运行记录 */
+export interface MembershipJobRun {
+  businessDate: string;
+  startedAt: string;
+  finishedAt: string | null;
+  processed: number;
+  retained: number;
+  grace: number;
+  downgraded: number;
+  error: string | null;
+}
+
+/** 后台「会员体系」看板 */
+export interface MembershipOverview {
+  today: string;
+  /** 已有会员上线定档（启用会员体系 v2 的那一天） */
+  live: { businessDate: string; at: string; graded: number } | null;
+  /** 19 个状态各多少人（状态与余额都按会员一行） */
+  states: { grade: Grade; tier: Tier | null; count: number; balance: number }[];
+  /** 本月（营业日所在的自然月）各种状态变化的人次 */
+  month: { from: string; to: string; counts: Record<GradeEventKind, number> };
+  /** 未来 N 天到期（不含补充期）的人数，按提醒天数 */
+  expiring: { within: number; count: number }[];
+  /** 在补充期的人数 */
+  grace: number;
+  /** 过了到期日还没处理的人数（自动任务没跑或出错，应为 0） */
+  overdue: number;
+  /** 今天的自动任务；最近 14 天的运行记录 */
+  jobToday: MembershipJobRun | null;
+  jobs: MembershipJobRun[];
+}
+
+/** 到期提醒名单、补充期名单的一行 */
+export interface RetentionRow {
+  memberId: number;
+  memberNo: string;
+  name: string;
+  phone: string;
+  grade: Grade;
+  tier: Tier | null;
+  cycleStart: string;
+  cycleEnd: string;
+  graceUntil: string | null;
+  daysLeft: number;
+  reminder: number | null;
+  /** 周期开始到今天的净储值消费 */
+  spendCents: number;
+  /** 保级要的周期消费、还差多少 */
+  honorCents: number;
+  needCents: number;
+  balance: number;
+  lastActivityAt: string | null;
+}
+
+/** 看板里的状态变化（今天处理了谁、为什么） */
+export interface GradeEventListRow extends GradeEventRow {
+  memberId: number;
+  memberNo: string;
+  memberName: string;
+}
+
+/** 他店查询的结果：不含余额与流水 */
+export interface MemberLookupResult {
+  memberNo: string;
+  maskedName: string;
+  maskedPhone: string;
+  grade: Grade;
+  tier: Tier | null;
+  label: string;
+  cycleEnd: string | null;
+  inGrace: boolean;
+  graceUntil: string | null;
+  status: 'active' | 'frozen';
+}

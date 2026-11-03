@@ -14,7 +14,7 @@ export const COUPON_SCOPE_LABELS: Record<CouponScope, string> = { all: '整单',
 export const COUPON_VALIDITIES = ['fixed', 'days'] as const;
 export type CouponValidity = (typeof COUPON_VALIDITIES)[number];
 
-/** 发券规则的种类：开卡礼（建档时）、升级礼（充值让等级升高时）、生日礼（生日当月）、充值赠券（充值套餐上挂的券） */
+/** 发券规则的种类：开卡礼（建档时）、升级礼（充值升档时，每升到一档发一次）、生日礼（生日当月，按当时的档级）、充值赠券（充值套餐上挂的券） */
 export const COUPON_RULE_KINDS = ['open_card', 'level_up', 'birthday', 'recharge'] as const;
 export type CouponRuleKind = (typeof COUPON_RULE_KINDS)[number];
 export const COUPON_RULE_KIND_LABELS: Record<CouponRuleKind, string> = {
@@ -165,7 +165,7 @@ export interface CouponTemplate extends CouponTerms {
   validFrom: string | null;
   validTo: string | null;
   validDays: number | null;
-  /** 限定发放等级（空 = 不限） */
+  /** 限定发放的档级 L0–L6（会员体系 v2；空 = 不限） */
   levels: number[];
   note: string;
   active: boolean;

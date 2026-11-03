@@ -65,7 +65,7 @@ import { getTableSession } from '../tables';
 import { closeUsagesOfVisits, getUsage } from '../usages';
 import { resolveTicketType, ticketAuthRequired, visitTicket } from './tickets';
 import { lineTechnicianSql } from '../technicians';
-import { assertVipAllowed, consumeVipShortfalls, memberLevels, vipShortfalls } from './vip';
+import { assertVipAllowed, consumeVipShortfalls, memberLockerGrades, vipShortfalls } from './vip';
 
 const clientKey = z.uuid('缺少有效的操作编号，请刷新页面后重试');
 const tagCode = z
@@ -157,8 +157,8 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
       }
     }
 
-    // VIP 柜：会员等级不低于柜子等级；不够时需当场授权（规则开启时）
-    const levels = await memberLevels(tx, memberIds, rules);
+    // VIP 柜：会员档级能用的柜子等级不低于柜子等级；不够时需当场授权（规则开启时）
+    const levels = await memberLockerGrades(tx, memberIds, await businessDate(tx, deps, at));
     const shortfalls = vipShortfalls(
       input.guests.map((g) => ({ tag: tags.get(g.tagCode)!, memberId: g.memberId, memberName: g.memberId ? (names.get(g.memberId) ?? null) : null })),
       levels,
@@ -323,10 +323,10 @@ export async function swapTag(deps: Deps, visitId: number, raw: SwapInputData, c
     const busy = await openVisitsOnTags(tx, [to.id]);
     if (busy.length) throw conflict('TAG_OCCUPIED', `手牌 ${to.code} 已在店（来访 ${busy[0]!.visitNo}），请换一张空闲手牌`);
 
-    // VIP 柜：按这位客人的会员等级核对
+    // VIP 柜：按这位客人的会员档级核对
     let shortfalls: ReturnType<typeof vipShortfalls> = [];
     if (to.kind === 'vip') {
-      const levels = await memberLevels(tx, visit.memberId ? [visit.memberId] : [], rules);
+      const levels = await memberLockerGrades(tx, visit.memberId ? [visit.memberId] : [], await businessDate(tx, deps, at));
       const [m] = visit.memberId ? await tx<{ name: string }[]>`SELECT name FROM members WHERE id = ${visit.memberId}` : [];
       shortfalls = vipShortfalls([{ tag: to, memberId: visit.memberId, memberName: m?.name ?? null }], levels);
       assertVipAllowed(shortfalls, levels, rules, input.vipGrantId);
@@ -613,7 +613,8 @@ export async function getVisit(db: Db, id: number): Promise<VisitDetail> {
     ? await db<NonNullable<VisitDetail['member']>[]>`
         SELECT id, member_no, name, phone, gender, status, principal_balance, bonus_balance FROM members WHERE id = ${v.memberId}`
     : [];
-  const memberLevel = v.memberId ? ((await memberLevels(db, [v.memberId], await loadFrontdeskRules(db))).get(v.memberId) ?? null) : null;
+  // 档阶的到期天数按这次来访的营业日算
+  const memberGrade = v.memberId ? ((await memberLockerGrades(db, [v.memberId], v.businessDate)).get(v.memberId) ?? null) : null;
 
   const lines = (
     await db<VisitDetail['lines']>`
@@ -732,7 +733,7 @@ export async function getVisit(db: Db, id: number): Promise<VisitDetail> {
       isSynthetic: v.tagSynthetic,
     },
     member: member ?? null,
-    memberLevel,
+    memberGrade,
     vipOverrideByName: v.vipOverrideByName,
     backfill,
     ticket: await visitTicket(db, v.id, v.closedAt ? new Date(v.closedAt) : new Date(now!.now)),

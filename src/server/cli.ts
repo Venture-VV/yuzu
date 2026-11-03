@@ -73,10 +73,11 @@ import { runDeviceSelftest } from './devices/selftest';
 import { importDevices, importPreview } from './modules/devices';
 import { checkPasswordStrength, generateTempPassword, hashPassword } from './auth/password';
 import { destroyStaffSessions } from './auth/session';
-import { loadConfig } from './config';
-import { createSql } from './db';
+import { loadConfig, type AppConfig } from './config';
+import { createSql, type Sql } from './db';
 import { writeAudit } from './lib/audit';
 import { migrate } from './migrate';
+import { ensureMembershipLive, runMembershipDaily } from './modules/membership';
 import { seedDemo, DEMO_PASSWORD } from './seed';
 import { seedInventoryDemo } from './seed-inventory';
 import { seedFrontdeskDemo } from './seed-frontdesk';
@@ -311,6 +312,14 @@ async function offlineCommand(command: string | undefined, args: string[]): Prom
   }
 }
 
+/** 迁移，并做只做一次的上线处理（会员体系 v2：已有会员按累计充值定档，v0.7.23）；应用启动时同样先做 */
+async function prepareDb(sql: Sql, config: AppConfig, log?: (msg: string) => void): Promise<string[]> {
+  const applied = await migrate(sql, log);
+  const live = await ensureMembershipLive({ sql, config });
+  if (live) (log ?? console.log)(`会员体系 v2 上线：${live.graded} 位已有会员按累计充值定档（营业日 ${live.businessDate}）`);
+  return applied;
+}
+
 async function main() {
   const [command, ...args] = process.argv.slice(2);
   if (await offlineCommand(command, args)) return;
@@ -319,14 +328,14 @@ async function main() {
   try {
     switch (command) {
       case 'migrate': {
-        const applied = await migrate(sql, console.log);
+        const applied = await prepareDb(sql, config, console.log);
         console.log(applied.length ? `完成，共应用 ${applied.length} 个迁移。` : '数据库已是最新结构。');
         break;
       }
       case 'create-owner': {
         const username = args[0]?.toLowerCase();
         if (!username) throw new Error('用法：create-owner <账号> [--name 姓名] [--password 密码]');
-        await migrate(sql);
+        await prepareDb(sql, config);
         const password = flag(args, 'password') ?? generateTempPassword();
         const weak = checkPasswordStrength(password);
         if (weak) throw new Error(weak);
@@ -355,7 +364,7 @@ async function main() {
         break;
       }
       case 'seed-demo': {
-        await migrate(sql);
+        await prepareDb(sql, config);
         const result = await seedDemo(sql, config, { force: args.includes('--force') });
         if (result.skipped) {
           console.log('已存在演示数据，跳过。');
@@ -366,7 +375,7 @@ async function main() {
         break;
       }
       case 'seed-inventory-demo': {
-        await migrate(sql);
+        await prepareDb(sql, config);
         const result = await seedInventoryDemo(sql, config);
         if (result.skipped) {
           console.log('已存在库存演示数据，跳过。');
@@ -378,7 +387,7 @@ async function main() {
       }
       case 'seed-frontdesk-demo': {
         refuseLiveEnv(config, '前台');
-        await migrate(sql);
+        await prepareDb(sql, config);
         // 营业日切换后不久灌数据会跨营业日（PR #13 复核 P2-3）：提示，或按 --previous-day 整体放到前一个营业日
         const t = await demoSeedTime(sql, { timeZone: config.timezone, kind: 'frontdesk', previousDay: args.includes('--previous-day') });
         if (t.warning) console.warn(`⚠ ${t.warning}`);
@@ -395,7 +404,7 @@ async function main() {
       }
       case 'seed-billing-demo': {
         refuseLiveEnv(config, '结账');
-        await migrate(sql);
+        await prepareDb(sql, config);
         const t = await demoSeedTime(sql, { timeZone: config.timezone, kind: 'billing', previousDay: args.includes('--previous-day') });
         if (t.warning) console.warn(`⚠ ${t.warning}`);
         const result = await seedBillingDemo(sql, config, { now: t.now });
@@ -410,7 +419,7 @@ async function main() {
       }
       case 'import-devices': {
         if (!args.includes('--quote')) throw new Error('用法：import-devices --quote [--apply]（按需求文档里的采购清单登记设备，默认只预览）');
-        await migrate(sql);
+        await prepareDb(sql, config);
         const preview = await importPreview(sql);
         console.log(`采购清单共 ${preview.total} 台：会新建 ${preview.create.length} 台，编号已有、跳过 ${preview.skipped.length} 台`);
         for (const d of preview.create.slice(0, 200)) console.log(`  ${d.code}  ${d.name}（${d.area}）`);
@@ -426,7 +435,7 @@ async function main() {
         const storeList = args.includes('--store-list');
         const file = args.find((a) => !a.startsWith('--'));
         if (!storeList && !file) throw new Error('用法：import-hand-tags <清单.csv> | --store-list [--apply] [--deactivate-missing]');
-        await migrate(sql);
+        await prepareDb(sql, config);
         const parsed = parseHandTagCsv(storeList ? STORE_HAND_TAGS_CSV : await readImportFile(file!));
         if (parsed.errors.length) {
           for (const e of parsed.errors.slice(0, 20)) console.log(`✗ 第 ${e.line} 行：${e.message}`);
@@ -451,7 +460,7 @@ async function main() {
         const tangqi = args.includes('--tangqi');
         const file = args.find((a) => !a.startsWith('--'));
         if (!tangqi && !file) throw new Error('用法：import-price-list <价目表.csv> | --tangqi [--apply] [--deactivate-missing]');
-        await migrate(sql);
+        await prepareDb(sql, config);
         const parsed = parsePriceListCsv(tangqi ? TANGQI_PRICE_LIST_CSV : await readImportFile(file!));
         if (parsed.errors.length) {
           for (const e of parsed.errors.slice(0, 20)) console.log(`✗ 第 ${e.line} 行：${e.message}`);
@@ -475,7 +484,7 @@ async function main() {
         if (!file || !username) {
           throw new Error('用法：import-opening <余额.csv> --operator <店主账号> [--control 人数,本金,赠金,累计充值] [--exclude <排除清单.csv>] [--source EBC] [--note 备注] [--apply]');
         }
-        await migrate(sql);
+        await prepareDb(sql, config);
         const [actor] = await sql<{ id: number; username: string; displayName: string; role: string; active: boolean }[]>`
           SELECT id, username, display_name, role, active FROM staff WHERE username = ${username}`;
         if (!actor || !actor.active) throw new Error(`账号「${username}」不存在或已停用`);
@@ -526,7 +535,7 @@ async function main() {
         const file = args.find((a, i) => !a.startsWith('--') && !['--operator', '--replace'].includes(args[i - 1] ?? ''));
         const username = flag(args, 'operator')?.toLowerCase();
         if (!file || !username) throw new Error('用法：import-legacy <文件.xlsx> --operator <店主账号> [--apply] [--replace 原因]');
-        await migrate(sql);
+        await prepareDb(sql, config);
         const actor = await ownerOperator(sql, username, '旧账导入');
         const buf = await readFile(file);
         let parsed;
@@ -575,7 +584,7 @@ async function main() {
       }
       case 'seed-legacy-demo': {
         refuseLiveEnv(config, '旧账');
-        await migrate(sql);
+        await prepareDb(sql, config);
         const result = await seedLegacyDemo(sql, config);
         if (result.skipped) console.log('已经有旧账导入，跳过。');
         else {
@@ -692,8 +701,20 @@ async function main() {
         if (!result.ok) process.exitCode = 1;
         break;
       }
+      case 'membership-daily': {
+        // 会员到期处理（应用每分钟自己会跑；应用停着、要马上补跑时用）
+        await prepareDb(sql, config);
+        const run = await runMembershipDaily({ sql, config });
+        console.log(
+          run
+            ? `会员到期处理（营业日 ${run.businessDate}）：处理 ${run.processed} 位，保级 ${run.retained}、进补充期 ${run.grace}、降档 ${run.downgraded}${run.error ? `；出错：${run.error}` : ''}`
+            : '今天已经处理过，没有到期的会员',
+        );
+        if (run?.error) process.exitCode = 1;
+        break;
+      }
       default:
-        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo [--previous-day] | seed-billing-demo [--previous-day] | seed-legacy-demo | demo-prepare [--previous-day] | demo-check | demo-reset --confirm <数据库名> | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup | daily-recon | balance-changes | floorplan-convert | floorplan-sample | import-devices | device-selftest | device-printer-mock | device-bridge-mock');
+        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo [--previous-day] | seed-billing-demo [--previous-day] | seed-legacy-demo | demo-prepare [--previous-day] | demo-check | demo-reset --confirm <数据库名> | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup | daily-recon | balance-changes | floorplan-convert | floorplan-sample | import-devices | device-selftest | device-printer-mock | device-bridge-mock | membership-daily');
         process.exitCode = command ? 1 : 0;
     }
   } finally {

@@ -19,15 +19,17 @@ export const ROLE_LABELS: Record<Role, string> = {
   account_manager: '客户经理',
   clerk: '前台店员',
   backoffice: '后勤人员',
+  other_store: '他店查询',
 };
 
 export const ROLE_HINTS: Record<Role, string> = {
   owner: '全部权限',
   store_manager: '值班经理的全部权限，另可自定赠金、管理套餐与项目、查看审计、当场授权超过单笔上限（待确认）',
   duty_manager: '店员权限，另可撤销消费、更正他人或超时的前台录入、维护手牌、看历史与导出、确认日结（待确认）',
-  account_manager: '会员建档与充值、当日流水、会员总览看板；不做前台收银（待确认）',
+  account_manager: '会员建档与充值、当日流水、会员总览看板、会员体系看板与到期提醒名单；不做前台收银（待确认）',
   clerk: '会员查找、充值、消费、当日流水、前台接待与挂账',
   backoffice: '没有会员与储值权限，只按职责处理库存与采购',
+  other_store: '另一家店的同事：只能按手机号或会员号查会员的档阶与会籍到期日，看不到余额与流水（会员体系 v2，待确认）',
 };
 
 export const DUTY_LABELS: Record<Duty, { title: string; hint: string }> = {

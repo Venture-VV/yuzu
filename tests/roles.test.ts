@@ -57,7 +57,7 @@ describe('值班经理', () => {
     expect((await api(ctx.app, dutyManager, 'GET', `/api/settlements/${today}/export`)).status).toBe(200);
     expect((await api(ctx.app, dutyManager, 'POST', `/api/settlements/${today}/close`, { note: '值班经理日结' })).status).toBe(200);
 
-    expect((await api(ctx.app, dutyManager, 'POST', '/api/recharges', rechargeBody(m.id, 10000, 500))).status).toBe(403);
+    expect((await api(ctx.app, dutyManager, 'POST', '/api/recharges', rechargeBody(m.id, 10000, 500, { bonusMode: 'custom' }))).status).toBe(403);
     expect((await api(ctx.app, dutyManager, 'POST', '/api/staff', { username: 'nope', displayName: 'x', role: 'clerk', duties: [] })).status).toBe(403);
   });
 

@@ -10,6 +10,7 @@ import { INSTANCE_LABELS } from '@shared/instance';
 import type { AppConfig } from '../config';
 import type { Sql } from '../db';
 import { migrate } from '../migrate';
+import { ensureMembershipLive } from '../modules/membership';
 import { loadSettings } from '../modules/settings';
 import { createBackup, type BackupManifest } from '../ops/backup';
 import { consistencyChecks } from '../ops/consistency';
@@ -69,6 +70,8 @@ export async function demoPrepare(
   const log = opts.log ?? (() => {});
   const previousDay = !!opts.previousDay;
   await migrate(sql);
+  // 会员体系 v2 的已有会员上线定档（只做一次；新库没有会员，只记下上线日）
+  await ensureMembershipLive({ sql, config }, opts.now);
   const blocks: BlockResult[] = [];
   const notes: string[] = [];
   const skip = (block: string) => blocks.push({ block, written: false, detail: '已存在，跳过' });

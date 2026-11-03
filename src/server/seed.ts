@@ -146,6 +146,8 @@ async function seedMemberDemo(sql: Sql, config: AppConfig, options: { force?: bo
         paymentConfirmed: true,
       },
       { actor, at },
+      // 演示数据补的是历史充值：不受会员体系 v2 的首充 / 续充最低限制，赠金按套餐原来的
+      { history: true },
     );
   };
 

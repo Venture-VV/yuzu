@@ -33,6 +33,7 @@ import { conflict, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
 import { expireDueLots } from './bonus';
 import { insertMember } from './members';
+import { gradeImportedMembers } from './membership';
 import { loadSettings } from './settings';
 import { applyBalance, lockMember, nextDocNo } from './wallet-core';
 import { ctxOf } from '../lib/context';
@@ -270,6 +271,7 @@ export async function applyOpeningImport(
                 ${createdCount}, ${totals.principal}, ${totals.bonus}, ${businessDate}, ${ctx.actor.id}, ${at})
         RETURNING id`;
       let seq = 0;
+      const importedIds: number[] = [];
       for (const row of planned) {
         seq += 1;
         const memberId =
@@ -280,6 +282,7 @@ export async function applyOpeningImport(
             ctx,
             { enforceRequired: false, audit: false },
           ));
+        importedIds.push(memberId);
         const docNo = `${importNo}-${String(seq).padStart(4, '0')}`;
         const [ob] = await tx<{ id: number }[]>`
           INSERT INTO opening_balances (import_id, member_id, doc_no, line_no, source_row, legacy_no, principal, bonus,
@@ -300,6 +303,8 @@ export async function applyOpeningImport(
             VALUES (${memberId}, 'opening', ${ob!.id}, ${row.bonus}, ${row.bonus}, ${row.expiresAt}, ${at})`;
         }
       }
+      // 会员体系 v2：按累计充值（含这次导入的旧系统累计充值）定档、进初阶（最高到上线定档的最高档；已在这一档或更高的不动）
+      const graded = await gradeImportedMembers(tx, importedIds, businessDate, ctx.actor.id);
       await writeAudit(tx, {
         staffId: ctx.actor.id,
         action: 'opening_imported',
@@ -313,6 +318,7 @@ export async function applyOpeningImport(
           createdMembers: createdCount,
           principal: totals.principal,
           bonus: totals.bonus,
+          graded,
           summary: `${input.source} 期初 ${planned.length} 位会员（新建 ${createdCount}），本金 ${formatYuan(totals.principal)}，赠金 ${formatYuan(totals.bonus)}`,
           ...(control.check ? { control: control.check.expected, excluded: control.check.excluded } : {}),
           ...(options.via ? { via: options.via } : {}),
