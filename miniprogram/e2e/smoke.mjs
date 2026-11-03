@@ -7,12 +7,15 @@
 //   · 本机网关：MP_MOCK_WECHAT=true，默认 http://127.0.0.1:8300（与 src/config/env.ts 的 DEV_GATEWAY 一致）；
 //   · 开发者工具已登录、「设置 → 安全设置」打开了服务端口；「详情 → 本地设置」勾了「不校验合法域名」。
 // 运行（在 miniprogram/ 下）：
-//   WECHAT_CLI=<开发者工具的 cli> YUZU_URL=http://127.0.0.1:8080 npm run e2e
+//   MP_APPID=<测试号的 AppID> WECHAT_CLI=<开发者工具的 cli> YUZU_URL=http://127.0.0.1:8080 npm run e2e
+//   开发者工具稳定版（2.02）用命令行打开时不认仓库里占位的 touristappid（报「不存在此 AppID」）：
+//   给了 MP_APPID 时脚本把它写进 project.private.config.json（按人存、不进仓库），顺带关掉合法域名校验（本机网关是 http）。
+//   测试号在 https://developers.weixin.qq.com/sandbox 扫码领取，只用 AppID，AppSecret 不用给。
 //   macOS 的 cli 一般在 /Applications/wechatwebdevtools.app/Contents/MacOS/cli，
 //   Windows 在 C:\Program Files (x86)\Tencent\微信web开发者工具\cli.bat。
 // 截图写到 miniprogram/e2e/screenshots/（不进仓库）。
 
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import automator from 'miniprogram-automator';
@@ -26,6 +29,16 @@ const OWNER = process.env.OWNER_USER || 'linlan';
 const PASSWORD = process.env.OWNER_PASSWORD || 'yuzu2026';
 // 演示库里的会员（seed-demo）：YZ01004 沈知夏
 const PHONE = process.env.MEMBER_PHONE || '19900001004';
+
+/** 测试号的 AppID 写进按人存的 project.private.config.json（不进仓库），并关掉合法域名校验 */
+function usePrivateAppid(appid) {
+  if (!/^wx[0-9a-f]{16}$/.test(appid)) throw new Error(`MP_APPID 不像小程序的 AppID：${appid}`);
+  const file = join(PROJECT, 'project.private.config.json');
+  const cfg = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
+  cfg.appid = appid;
+  cfg.setting = { ...(cfg.setting || {}), urlCheck: false };
+  writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n');
+}
 
 const results = [];
 const check = (label, ok, detail = '') => {
@@ -84,12 +97,15 @@ async function main() {
   if (!memberId) throw new Error(`演示库里找不到手机号 ${PHONE} 的会员（先执行 demo-prepare）`);
   await unbindAll(staff, memberId, '小程序自动化测试开始前解绑');
 
-  const mp = await automator.launch({ cliPath: process.env.WECHAT_CLI, projectPath: PROJECT });
+  if (process.env.MP_APPID) usePrivateAppid(process.env.MP_APPID.trim());
+  let mp = null;
+  let bound = false;
   const shot = async (name) => {
     await sleep(500);
     await mp.screenshot({ path: join(SHOTS, `${name}.png`) });
   };
   try {
+    mp = await automator.launch({ cliPath: process.env.WECHAT_CLI, projectPath: PROJECT, trustProject: true });
     // 首页
     let page = await mp.reLaunch('/pages/home/index');
     let d = await waitData(page, (x) => x.status !== 'loading');
@@ -119,7 +135,8 @@ async function main() {
     await page.setData({ mockPhone: PHONE });
     await page.callMethod('onMockBind');
     d = await waitData(page, (x) => x.state === 'bound' && !!x.card);
-    check('绑定后显示会员卡', d.state === 'bound' && !!d.card, d.card ? `${d.card.name} ${d.card.code} ${d.card.gradeName}` : d.state);
+    bound = d.state === 'bound';
+    check('绑定后显示会员卡', bound && !!d.card, d.card ? `${d.card.name} ${d.card.code} ${d.card.gradeName}` : d.state);
     await shot('05-me-card');
 
     // 会员码
@@ -152,10 +169,11 @@ async function main() {
   } finally {
     // 收尾：解绑（写原因）、关上开关，演示库恢复原样
     try {
-      check('员工端口解绑', (await unbindAll(staff, memberId, '小程序自动化测试后解绑')) >= 1);
+      const n = await unbindAll(staff, memberId, '小程序自动化测试后解绑');
+      if (bound) check('员工端口解绑', n >= 1);
       await staff('PUT', '/api/admin/mp/rules', { enabled: false });
     } finally {
-      await mp.close();
+      if (mp) await mp.close();
     }
   }
   const failed = results.filter((r) => !r.ok).length;
