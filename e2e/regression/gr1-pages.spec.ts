@@ -8,8 +8,12 @@
 //   D9 日结营业口径分列应收、优惠、净营业额、实收；看板写明应收与优惠。
 // 依赖四套演示数据（仅独立演示库）；会改数据，只在门店电脑尺寸执行；每次自动挑空闲手牌、先交掉上次留下的班次，可重复执行。
 import { expect, test, type Page } from '@playwright/test';
+import { relaxRechargeMinimum } from '../membership';
 
 const PASSWORD = 'yuzu2026';
+
+// 用例按常泡 500 的小额充值（v0.7.23 起默认首充 / 续充最低 5,000）：开始前放开最低，结束恢复
+relaxRechargeMinimum();
 
 async function login(page: Page, username: string) {
   await page.goto('/login');

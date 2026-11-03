@@ -3,9 +3,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf } from '@shared/business-date';
-import { levelOf } from '@shared/frontdesk';
 import { shiftDate } from '@shared/labels';
-import { channelLabel, levelName } from '@shared/members';
+import { channelLabel } from '@shared/members';
+import { gradeLabel } from '@shared/membership';
 import { can } from '@shared/permissions';
 import { MAX_REPORT_DAYS, type DepartmentRevenue, type DutyExtras, type ExecutiveReport, type MemberBrief, type MembersReport, type PeriodKpis } from '@shared/reports';
 import type { RoomBoardStatus, RoomsReport } from '@shared/rooms';
@@ -16,7 +16,7 @@ import { toCsv, CSV_TYPE, attachment } from '../lib/csv';
 import type { Deps } from '../lib/context';
 import { badRequest } from '../lib/errors';
 import { dateSchema, parse } from '../lib/validate';
-import { loadFrontdeskRules } from './frontdesk/common';
+import { loadMembershipRules } from './membership';
 import { loadSettings } from './settings';
 import { loadTechnicians, technicianReport, withoutCommission } from './technicians';
 import { settledTechnicianLines, withCommission } from './commission';
@@ -193,7 +193,7 @@ const MEMBER_BRIEF = (db: Db) => db`
 
 export async function membersReport(db: Db, from: string, to: string, c: Clock): Promise<MembersReport> {
   const settings = await loadSettings(db);
-  const rules = await loadFrontdeskRules(db);
+  const rules = await loadMembershipRules(db);
   const [t] = await db<MembersReport['totals'][]>`
     SELECT count(*)::int AS members, count(*) FILTER (WHERE principal_balance + bonus_balance > 0)::int AS with_balance,
            coalesce(sum(principal_balance), 0) AS principal, coalesce(sum(bonus_balance), 0) AS bonus,
@@ -227,34 +227,18 @@ export async function membersReport(db: Db, from: string, to: string, c: Clock):
       .map((r) => ({ channel: r.channel, label: label(r.channel), count: r[pick] }))
       .sort((x, y) => y.count - x.count);
 
-  // 等级分布：口径与 VIP 柜相同
-  const amounts =
-    rules.vipLevelBasis === 'balance'
-      ? await db<{ amount: number; balance: number }[]>`SELECT principal_balance + bonus_balance AS amount, principal_balance + bonus_balance AS balance FROM members`
-      : await db<{ amount: number; balance: number }[]>`
-          SELECT coalesce((SELECT sum(r.paid_amount) FROM recharges r WHERE r.member_id = m.id), 0)
-                 + coalesce((SELECT sum(o.legacy_recharged) FROM opening_balances o WHERE o.member_id = m.id AND o.status = 'active'), 0) AS amount,
-                 m.principal_balance + m.bonus_balance AS balance
-          FROM members m`;
-  const levels = new Map<number, { level: number; name: string; count: number; balance: number }>();
-  for (let i = 0; i <= rules.vipLevelThresholds.length; i++) levels.set(i, { level: i, name: levelName(i, rules.vipLevelNames), count: 0, balance: 0 });
-  for (const m of amounts) {
-    const l = levels.get(levelOf(Number(m.amount), rules.vipLevelThresholds))!;
-    l.count += 1;
-    l.balance += Number(m.balance);
-  }
+  // 档级分布（会员体系 v2：档级存在会员一行上；19 个状态的分布见后台「会员体系」看板）
+  const gradeRows = await db<{ grade: number; count: number; balance: number }[]>`
+    SELECT grade, count(*)::int AS count, coalesce(sum(principal_balance + bonus_balance), 0) AS balance FROM members GROUP BY grade`;
+  const levels = rules.grades.map((g, i) => {
+    const r = gradeRows.find((x) => x.grade === i);
+    return { level: i, name: `L${i} ${g.name}`, count: r?.count ?? 0, balance: Number(r?.balance ?? 0) };
+  });
 
   const withLevel = async (rows: (Omit<MemberBrief, 'levelName'> & Record<string, unknown>)[]) => {
     if (!rows.length) return [];
-    const ids = rows.map((r) => r.id);
-    const lv =
-      rules.vipLevelBasis === 'balance'
-        ? await db<{ id: number; amount: number }[]>`SELECT id, principal_balance + bonus_balance AS amount FROM members WHERE id IN ${db(ids)}`
-        : await db<{ id: number; amount: number }[]>`
-            SELECT m.id, coalesce((SELECT sum(r.paid_amount) FROM recharges r WHERE r.member_id = m.id), 0)
-                   + coalesce((SELECT sum(o.legacy_recharged) FROM opening_balances o WHERE o.member_id = m.id AND o.status = 'active'), 0) AS amount
-            FROM members m WHERE m.id IN ${db(ids)}`;
-    const map = new Map(lv.map((x) => [x.id, levelName(levelOf(Number(x.amount), rules.vipLevelThresholds), rules.vipLevelNames)]));
+    const lv = await db<{ id: number; grade: number; tier: number | null }[]>`SELECT id, grade, tier FROM members WHERE id IN ${db(rows.map((r) => r.id))}`;
+    const map = new Map(lv.map((x) => [x.id, gradeLabel(rules, x.grade, x.tier)]));
     return rows.map((r) => ({ ...r, levelName: map.get(r.id) ?? '' }));
   };
   const topBalance = await withLevel(

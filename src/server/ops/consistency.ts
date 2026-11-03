@@ -1,4 +1,4 @@
-// 一致性自检：会员（含营业口径）、库存、前台。cli check 与备份核验共用同一套。
+// 一致性自检：会员（含营业口径、会员档阶）、库存、前台。cli check 与备份核验共用同一套。
 
 import { businessDateOf } from '@shared/business-date';
 import { readSnapshot, type Sql } from '../db';
@@ -10,6 +10,7 @@ import { legacyChecks } from '../modules/legacy';
 import { spaceChecks } from '../modules/spaces';
 import { floorplanChecks } from '../modules/floorplans';
 import { locationChecks } from '../modules/locations';
+import { membershipChecks } from '../modules/membership';
 import { computeSettlement } from '../modules/settlement';
 import { loadSettings } from '../modules/settings';
 
@@ -35,5 +36,7 @@ export async function consistencyChecks(sql: Sql, timezone: string): Promise<Che
   const floorplans = await readSnapshot(sql, floorplanChecks);
   // 第一级实时位置（v0.7.17）：当前位置、轨迹段与位置事件一致
   const locations = await readSnapshot(sql, locationChecks);
-  return [...summary.checks, ...inventory, ...expenses, ...requests, ...frontdesk, legacy, ...spaces, ...floorplans, ...locations].map(({ label, ok, detail }) => ({ label, ok, detail }));
+  // 会员体系 v2（v0.7.23）：档阶与状态变化记录一致、前后相接，到期都处理了
+  const membership = await readSnapshot(sql, membershipChecks);
+  return [...summary.checks, ...inventory, ...expenses, ...requests, ...frontdesk, legacy, ...spaces, ...floorplans, ...locations, ...membership].map(({ label, ok, detail }) => ({ label, ok, detail }));
 }

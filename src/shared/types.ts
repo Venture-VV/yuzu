@@ -7,7 +7,8 @@ import type { DeductionRule, WalletBalance } from './deduction';
 import type { InstanceKind } from './instance';
 import type { EntryType, PaymentMethod } from './labels';
 import type { MemberCustomValues, MemberFieldDef } from './member-fields';
-import type { BonusLotRow, MemberChannel, MemberLevelInfo } from './members';
+import type { BonusLotRow, MemberChannel } from './members';
+import type { MemberGradeFields, MemberGradeInfo } from './membership';
 import type { Duty, Permission, Role } from './permissions';
 
 export type AppEnv = 'development' | 'trial' | 'production' | 'test';
@@ -75,7 +76,7 @@ export interface SessionInfo {
   erpModules: import('./erp').ErpModuleKey[];
 }
 
-export interface MemberSummary {
+export interface MemberSummary extends MemberGradeFields {
   id: number;
   memberNo: string;
   name: string;
@@ -97,8 +98,8 @@ export interface MemberSummary {
 
 export interface MemberDetail extends MemberSummary {
   createdByName: string | null;
-  /** 当前等级、到下一级还差多少、升降级记录（v0.6.0） */
-  level: MemberLevelInfo;
+  /** 会员体系 v2 的等级卡：档阶、周期消费与保级、下一档、状态变化记录（v0.7.23） */
+  gradeInfo: MemberGradeInfo;
   /** 全部赠金批次（可用、已用完、已过期），最近的在前（v0.6.0） */
   bonusLotHistory: BonusLotRow[];
   /** 有剩余的赠金批次，先到期的在前（expiresAt 为 null 表示长期有效） */

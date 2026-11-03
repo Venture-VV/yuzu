@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { businessDateOf } from '@shared/business-date';
 import { checkCustomValues, type MemberCustomValues } from '@shared/member-fields';
 import { MEMBER_CHANNEL_KEY, type BonusLotRow } from '@shared/members';
 import type { LedgerRow, MemberDetail, MemberSummary } from '@shared/types';
@@ -11,14 +12,14 @@ import { badRequest, conflict, notFound } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
 import { expireMemberBonus, openLots } from './bonus';
 import { issueOpenCardCoupons } from './coupons';
-import { loadFrontdeskRules } from './frontdesk/common';
 import { listLedger } from './ledger';
-import { memberLevelInfo } from './member-levels';
+import { memberGradeInfo } from './membership';
 import { loadSettings } from './settings';
 
 const MEMBER_COLUMNS = (db: Db) => db`
   m.id, m.member_no, m.name, m.phone, m.gender, m.birthday::text AS birthday, m.note,
   m.principal_balance, m.bonus_balance, m.status, m.is_synthetic, m.created_at, m.custom_fields, m.channel,
+  m.grade, m.tier, m.cycle_end, m.grace_until,
   (SELECT max(le.created_at) FROM ledger_entries le WHERE le.member_id = m.id) AS last_activity_at`;
 
 const MemberInput = z.object({
@@ -70,7 +71,8 @@ export async function searchMembers(db: Db, q: string, limit: number): Promise<M
     LIMIT ${limit}`;
 }
 
-export async function getMemberDetail(db: Db, id: number): Promise<MemberDetail> {
+/** today 是门店当前的营业日（等级卡按它推算到期与提醒） */
+export async function getMemberDetail(db: Db, id: number, today: string): Promise<MemberDetail> {
   const member = await getMember(db, id);
   const [extra] = await db<{ createdByName: string | null; stats: MemberDetail['stats'] }[]>`
     SELECT
@@ -112,7 +114,7 @@ export async function getMemberDetail(db: Db, id: number): Promise<MemberDetail>
   return {
     ...member,
     createdByName: extra?.createdByName ?? null,
-    level: await memberLevelInfo(db, member, await loadFrontdeskRules(db)),
+    gradeInfo: await memberGradeInfo(db, id, today),
     bonusLotHistory,
     stats: extra!.stats,
     bonusLots: lots.map((l) => ({ remaining: l.remaining, expiresAt: l.expiresAt ? new Date(l.expiresAt).toISOString() : null })),
@@ -200,6 +202,7 @@ export async function createMember(sql: Sql, raw: MemberInputData, ctx: OpContex
 
 export function registerMemberRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
+  const todayOf = async () => businessDateOf(new Date(), deps.config.timezone, (await loadSettings(sql)).businessDayStartHour);
   app.get('/api/members', { preHandler: guard('member.read') }, async (req) => {
     const { q, limit } = parse(SearchQuery, req.query);
     return searchMembers(sql, q, limit);
@@ -209,7 +212,7 @@ export function registerMemberRoutes(app: FastifyInstance, deps: Deps) {
     const { id } = parse(idParam, req.params);
     // 先作废这位会员到期的赠金，员工看到的余额才是可用余额
     await expireMemberBonus(deps, id);
-    return getMemberDetail(sql, id);
+    return getMemberDetail(sql, id, await todayOf());
   });
 
   app.get('/api/members/:id/activity', { preHandler: guard('member.read') }, async (req): Promise<LedgerRow[]> => {
@@ -271,6 +274,6 @@ export function registerMemberRoutes(app: FastifyInstance, deps: Deps) {
       }
       throw error;
     }
-    return getMemberDetail(sql, id);
+    return getMemberDetail(sql, id, await todayOf());
   });
 }

@@ -13,8 +13,10 @@
 // v0.7.19 新增「看对客导览」（区域导览图与大屏轮播，没有经营数据），默认所有岗位，待确认。
 // v0.7.20 新增「开退款单」（离店后部分退款）与券的三项权限（维护券模板与规则、发券给会员、作废券），默认值待确认。
 // v0.7.21 新增设备的三项权限（看设备状态、测试打印、维护设备；飞书需求 RQ-001），默认值待确认。
+// v0.7.23 会员体系 v2 第一期：新增「修改会员规则」「手动调整会员档阶」「看会员体系看板与到期提醒」「他店查询」，
+// 以及岗位「他店查询」（另一家店的同事只读查会员档阶，docs/MEMBERSHIP.md 第 8、11 节），默认值待确认。
 
-export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice'] as const;
+export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice', 'other_store'] as const;
 export type Role = (typeof ROLES)[number];
 
 export const DUTIES = ['stock', 'purchase', 'payable', 'approve', 'cost', 'request'] as const;
@@ -56,7 +58,7 @@ export const PERMISSIONS = {
   'member.read': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk'] },
   'member.write': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk'] },
   'recharge.create': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk'] },
-  /** 不按套餐、手动填写赠金 */
+  /** 不按档级比例、手动填写赠金（会员体系 v2 起赠金按充值后所在档的比例自动算） */
   'recharge.customBonus': { roles: ['owner', 'store_manager'] },
   'consume.create': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 不在项目列表里的手动金额 */
@@ -70,6 +72,15 @@ export const PERMISSIONS = {
   'settlement.close': { roles: ['owner', 'store_manager', 'duty_manager'] },
   /** 导入旧系统（EBC）的会员余额作为期初，作废导入错误的期初 */
   'wallet.opening': { roles: ['owner'] },
+  // ── 会员体系（v0.7.23，docs/MEMBERSHIP.md 第 11 节，默认值待确认）──
+  /** 修改会员规则：档名、充值门槛、赠送比例、享 / 尊阶比例、会籍周期与补充期、首充 / 续充最低、到期提醒、VIP 柜对应 */
+  'member.rules': { roles: ['owner', 'store_manager'] },
+  /** 手动调整会员档阶（写原因，留记录） */
+  'member.adjust': { roles: ['owner'] },
+  /** 看会员体系看板、到期提醒名单与补充期名单（客户经理按名单联系客人） */
+  'member.retention': { roles: ['owner', 'store_manager', 'account_manager'] },
+  /** 他店查询：按手机号或会员号查一位会员的档阶与会籍（只读，不含余额与流水） */
+  'member.lookup': { roles: ['other_store'] },
   // ── 前台手牌与共同账单 ──
   /** 查看在店手牌状态板与手牌账单 */
   'frontdesk.read': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
@@ -250,7 +261,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'member.read': '查找与查看会员',
   'member.write': '新建与编辑会员',
   'recharge.create': '确认充值入账',
-  'recharge.customBonus': '自定义赠金（不按套餐）',
+  'recharge.customBonus': '自定义赠金（不按档级比例）',
   'consume.create': '登记消费扣款',
   'consume.customAmount': '手动输入消费金额',
   'consume.reverse': '撤销消费（整单）',
@@ -259,6 +270,10 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'ledger.export': '导出流水与日结',
   'settlement.close': '确认日结',
   'wallet.opening': '导入旧系统会员余额（期初）与作废期初',
+  'member.rules': '修改会员规则（档级门槛、赠送比例、周期）',
+  'member.adjust': '手动调整会员档阶（写原因）',
+  'member.retention': '看会员体系看板与到期提醒名单',
+  'member.lookup': '他店查询（按手机号查会员档阶，只读）',
   'frontdesk.read': '查看在店手牌与手牌账单',
   'frontdesk.operate': '接待发牌、同行绑牌、挂账、换牌',
   'frontdesk.correct': '作废他人或超时明细、撤销来访',
@@ -326,6 +341,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
     title: '前台手牌与账单',
     items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.refund', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen', 'room.operate', 'room.housekeep', 'location.view', 'location.report', 'guide.view'],
   },
+  { title: '会员体系', items: ['member.rules', 'member.adjust', 'member.retention', 'member.lookup'] },
   { title: '券与会员权益', items: ['coupon.manage', 'coupon.issue', 'coupon.void'] },
   { title: '设备', items: ['device.view', 'device.test', 'device.manage'] },
   {

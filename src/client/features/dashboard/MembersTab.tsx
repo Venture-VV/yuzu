@@ -90,14 +90,14 @@ export function MembersTab() {
                 />
               </Card>
               <Card className="p-5">
-                <SectionTitle aside={<span className="text-[12px] text-ink-3">口径与 VIP 柜相同</span>}>会员等级</SectionTitle>
+                <SectionTitle aside={<span className="text-[12px] text-ink-3">各档阶的人数见「会员体系」</span>}>会员档级</SectionTitle>
                 <HBars
                   testId="members-levels"
                   format={(n) => `${n} 位`}
                   empty="还没有会员"
                   rows={d.levels
                     .filter((l) => l.level > 0 || l.count > 0)
-                    .map((l) => ({ key: String(l.level), label: l.level ? `${l.name}（第 ${l.level} 级）` : l.name, value: l.count, note: <>余额 <Money cents={l.balance} /></> }))}
+                    .map((l) => ({ key: String(l.level), label: l.name, value: l.count, note: <>余额 <Money cents={l.balance} /></> }))}
                 />
               </Card>
             </div>

@@ -36,6 +36,9 @@ export async function setup(): Promise<TestContext> {
   // 「收款前必须先开班」（R1.2）默认开启；之前的用例按开班可选的口径编写，这里关闭，
   // 开启时的行为由 tests/r1-funds.test.ts 单独验证（openShiftRequired(ctx) 重新开启）
   await sql`INSERT INTO settings (key, value) VALUES ('require_open_shift', 'false'::jsonb)`;
+  // 会员体系 v2（v0.7.23）的首充 / 续充最低默认 5,000 元；之前的用例按小额充值编写，这里设成不限，
+  // 最低充值的行为由 tests/membership.test.ts 单独验证（那里按需改回）
+  await sql`INSERT INTO settings (key, value) VALUES ('membership_rules', ${sql.json({ firstRechargeMinCents: 0, topUpMinCents: 0 })})`;
   const ownerId = await createStaff(sql, { username: 'owner', displayName: '测试店主', role: 'owner', password: PASSWORD, mustChangePassword: false });
   const clerkId = await createStaff(sql, { username: 'clerk', displayName: '测试店员', role: 'clerk', password: PASSWORD, mustChangePassword: false });
   const app = await buildApp(sql, config);

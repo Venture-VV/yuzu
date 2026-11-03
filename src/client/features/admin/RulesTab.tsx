@@ -288,7 +288,7 @@ export function RulesTab() {
         </div>
       )}
 
-      <Notice tone="info" title="会员资料字段、渠道来源与会员等级在「会员与渠道」设置；各岗位的权限在「岗位权限」设置" />
+      <Notice tone="info" title="会员资料字段、渠道来源在「会员与渠道」设置，档级与会籍在「会员规则」设置；各岗位的权限在「岗位权限」设置" />
     </div>
   );
 }

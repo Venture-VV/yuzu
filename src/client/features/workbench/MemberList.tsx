@@ -129,7 +129,14 @@ export const MemberList = forwardRef<
                   {m.name.slice(0, 1)}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[14.5px] font-bold text-ink">{m.name}</span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="truncate text-[14.5px] font-bold text-ink">{m.name}</span>
+                    {m.grade > 0 && (
+                      <span className={cn('shrink-0 rounded px-1 text-[11px] font-bold', m.graceUntil ? 'bg-ember-soft text-ember' : 'bg-yuzu-soft text-yuzu-deep')} title="会员档级">
+                        L{m.grade}
+                      </span>
+                    )}
+                  </span>
                   <span className="num block truncate text-[12.5px] text-ink-3">
                     {maskPhone(m.phone)} · {relativeTime(m.lastActivityAt)}
                   </span>

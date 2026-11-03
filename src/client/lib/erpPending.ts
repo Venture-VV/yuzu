@@ -135,7 +135,8 @@ export function useErpPending(types: readonly ErpOpType[]): ErpPendingOp[] {
 
 /**
  * 提交一笔 ERP 登记：先存本机并读回核对（存不了就不发请求），再发请求。
- * 成功、或第一次提交就被明确拒绝时删除记录；超时 / 断网保留（页面上可以查回、重提或作废）；
+ * 成功、或第一次提交就被明确拒绝（4xx）时删除记录；超时、断网、服务器出错（5xx，可能已经登记、只是读结果时出错）保留
+ * （页面上可以查回、重提或作废，不另起一笔）；
  * 曾经结果不明的编号重提被明确拒绝时也保留：之前那次请求可能随后登记，要先查回或作废再下结论。
  */
 export async function sendErpOp<T>(op: Omit<ErpPendingOp, 'createdAt' | 'uncertain'> & { createdAt?: string }): Promise<T> {

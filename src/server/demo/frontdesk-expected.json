@@ -15,7 +15,7 @@
     "groups": 2
   },
   "visits": [
-    { "tag": "8001", "zone": "male", "guest": "", "member": "韩松（演示）", "amountCents": 34600, "lines": ["精油按摩 60 分钟 ×1", "山野简餐 ×1"], "scenario": "第 1 级会员用第 1 级 VIP 柜；会员挂账只显示余额，不扣款" },
+    { "tag": "8001", "zone": "male", "guest": "", "member": "韩松（演示）", "amountCents": 34600, "lines": ["精油按摩 60 分钟 ×1", "山野简餐 ×1"], "scenario": "L0 会员（能用 1 级柜）用第 1 级 VIP 柜；会员挂账只显示余额，不扣款" },
     { "tag": "A8062", "zone": "male", "guest": "王先生", "member": null, "amountCents": 17200, "lines": ["汤泉入场 · 成人 ×1", "柚子气泡水 ×2"], "scenario": "散客单人挂账" },
     { "tag": "A8075", "zone": "male", "guest": "爸爸", "member": null, "group": "family", "amountCents": 12800, "lines": ["汤泉入场 · 成人 ×1"], "scenario": "一家三口一次接待，自动建同行组" },
     { "tag": "A6010", "zone": "female", "guest": "妈妈", "member": null, "group": "family", "amountCents": 18600, "lines": ["汤泉入场 · 成人 ×1", "搓背 ×1"] },
@@ -26,8 +26,8 @@
     { "tag": "A8100", "zone": "male", "guest": "赵先生", "member": null, "amountCents": 2200, "lines": ["柚子气泡水 ×1"], "voided": ["搓背 ×1（项目选错）"], "scenario": "店员在 15 分钟时限内作废自己登记错的明细" },
     { "tag": "B6215", "zone": "female", "guest": "夜场客", "member": null, "amountCents": 9800, "lines": ["夜场入场 ×1"], "scenario": "在店超过 6 小时，状态板柚黄提示" },
     { "tag": "B6216", "zone": "female", "guest": "刚到的客人", "member": null, "amountCents": 0, "lines": [], "scenario": "刚开牌、未挂账" },
-    { "tag": "9058", "zone": "male", "guest": "", "member": "周董（演示）", "amountCents": 35600, "lines": ["精油按摩 60 分钟 ×1", "搓背 ×1"], "scenario": "累计充值 12 万的第 3 级会员用第 3 级 VIP 柜" },
-    { "tag": "9001", "zone": "female", "guest": "", "member": "林女士（演示）", "amountCents": 16800, "lines": ["足疗 45 分钟 ×1"], "scenario": "累计充值正好 5 万（第 2 级门槛）的会员用女宾第 2 级 VIP 柜" }
+    { "tag": "9058", "zone": "male", "guest": "", "member": "周董（演示）", "amountCents": 35600, "lines": ["精油按摩 60 分钟 ×1", "搓背 ×1"], "scenario": "三次各充 4 万、升到 L5 山海（能用 4 级柜）的会员用第 3 级 VIP 柜" },
+    { "tag": "9001", "zone": "female", "guest": "", "member": "林女士（演示）", "amountCents": 16800, "lines": ["足疗 45 分钟 ×1"], "scenario": "两次各充 2.5 万、滚动累计正好 5 万升到 L4 望岳（能用 2 级柜）的会员用女宾第 2 级 VIP 柜" }
   ],
   "groups": {
     "family": { "tags": ["A8075", "A6010", "A8076"], "openAmountCents": 38200 },
@@ -36,22 +36,19 @@
   "swap": { "from": "A8090", "to": "A8091", "reason": "手牌丢失", "lostFeeCents": 20000, "oldTagLocked": true },
   "cancelled": [{ "tag": "A8095", "reason": "开错手牌", "note": "撤销后 A8095 恢复空闲，来访记录保留" }],
   "members": {
-    "韩松（演示）": { "phone": "19900008801", "principalBalance": 100000, "bonusBalance": 15000, "cumulativeRechargeCents": 100000, "level": 1 },
-    "乔木（演示）": { "phone": "19900008802", "principalBalance": 50000, "bonusBalance": 5000, "cumulativeRechargeCents": 50000, "level": 1 },
-    "周董（演示）": { "phone": "19900008803", "principalBalance": 12000000, "bonusBalance": 0, "cumulativeRechargeCents": 12000000, "level": 3 },
-    "林女士（演示）": { "phone": "19900008804", "principalBalance": 5000000, "bonusBalance": 0, "cumulativeRechargeCents": 5000000, "level": 2 }
+    "韩松（演示）": { "phone": "19900008801", "principalBalance": 100000, "bonusBalance": 15000, "grade": 0, "tier": null, "label": "L0 青溪", "lockerLevel": 1 },
+    "乔木（演示）": { "phone": "19900008802", "principalBalance": 50000, "bonusBalance": 5000, "grade": 0, "tier": null, "label": "L0 青溪", "lockerLevel": 1 },
+    "周董（演示）": { "phone": "19900008803", "principalBalance": 12000000, "bonusBalance": 0, "grade": 5, "tier": 0, "label": "L5 山海 · 初", "lockerLevel": 4 },
+    "林女士（演示）": { "phone": "19900008804", "principalBalance": 5000000, "bonusBalance": 0, "grade": 4, "tier": 0, "label": "L4 望岳 · 初", "lockerLevel": 2 }
   },
   "vip": [
-    { "tag": "8001", "zone": "male", "tagLevel": 1, "member": "韩松（演示）", "memberLevel": 1 },
-    { "tag": "9058", "zone": "male", "tagLevel": 3, "member": "周董（演示）", "memberLevel": 3 },
-    { "tag": "9001", "zone": "female", "tagLevel": 2, "member": "林女士（演示）", "memberLevel": 2 }
+    { "tag": "8001", "zone": "male", "tagLevel": 1, "member": "韩松（演示）", "memberLockerLevel": 1 },
+    { "tag": "9058", "zone": "male", "tagLevel": 3, "member": "周董（演示）", "memberLockerLevel": 4 },
+    { "tag": "9001", "zone": "female", "tagLevel": 2, "member": "林女士（演示）", "memberLockerLevel": 2 }
   ],
   "rules": {
     "selfVoidMinutes": 15,
     "lostTagFeeCents": 20000,
-    "vipLevelBasis": "recharge",
-    "vipLevelThresholds": [0, 5000000, 10000000, 20000000, 30000000],
-    "vipLevelNames": ["普通会员", "银卡会员", "金卡会员", "铂金会员", "钻石会员"],
     "vipOverrideEnabled": false,
     "overtimeGraceMinutes": 15
   },

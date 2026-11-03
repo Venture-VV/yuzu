@@ -95,7 +95,7 @@ describe('前台演示数据', () => {
       expect(t, v.tag).toMatchObject({ zone: v.zone, kind: 'vip', vipLevel: v.tagLevel });
       expect(t.visit?.memberName).toBe(v.member);
       const detail = (await api(ctx.app, owner, 'GET', `/api/frontdesk/visits/${t.visit!.id}`)).body;
-      expect(detail.memberLevel.level).toBe(v.memberLevel);
+      expect(detail.memberGrade.lockerLevel).toBe(v.memberLockerLevel);
       expect(detail.vipOverrideByName).toBeNull();
     }
   });
@@ -105,8 +105,9 @@ describe('前台演示数据', () => {
     for (const [name, m] of Object.entries(expected.members)) {
       const [row] = await ctx.sql<{ id: number; principalBalance: number; bonusBalance: number }[]>`SELECT id, principal_balance, bonus_balance FROM members WHERE phone = ${m.phone}`;
       expect(row, name).toMatchObject({ principalBalance: m.principalBalance, bonusBalance: m.bonusBalance });
-      const level = (await api(ctx.app, owner, 'GET', `/api/frontdesk/members/${row!.id}/level`)).body;
-      expect(level, name).toEqual({ memberId: row!.id, level: m.level, basis: 'recharge', amountCents: m.cumulativeRechargeCents });
+      // 会员体系 v2（v0.7.23）：演示充值按滚动累计升档，VIP 柜按档级对应
+      const grade = (await api(ctx.app, owner, 'GET', `/api/frontdesk/members/${row!.id}/grade`)).body;
+      expect(grade, name).toMatchObject({ memberId: row!.id, grade: m.grade, tier: m.tier, label: m.label, lockerLevel: m.lockerLevel });
     }
     const { n } = (await ctx.sql<{ n: number }[]>`SELECT (SELECT count(*) FROM consumptions) + (SELECT count(*) FROM reversals) AS n`)[0]!;
     expect(n).toBe(0);

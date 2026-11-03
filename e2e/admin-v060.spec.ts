@@ -68,8 +68,10 @@ test.describe('v0.6.0 管理后台', () => {
       await expect(page.getByText(/已为「渠道演示会员」建档/)).toBeVisible();
       await expect(page.getByTestId('member-registered')).toContainText(`渠道 ${label}`);
       await expect(page.getByTestId('member-no')).toContainText('会员号');
-      await expect(page.getByTestId('member-level')).toBeVisible();
-      await expect(page.getByTestId('member-level-next')).toContainText('再充值');
+      // 会员体系 v2（v0.7.23）的等级卡：新会员 L0，写明再充多少升 L1
+      await expect(page.getByTestId('member-grade')).toBeVisible();
+      await expect(page.getByTestId('member-grade-label')).toHaveText('L0 青溪');
+      await expect(page.getByTestId('member-grade-next')).toContainText('升到「L1 云涧」');
     } finally {
       await page.request.post('/api/auth/logout');
       await login(page, 'linlan');
@@ -118,7 +120,7 @@ test.describe('v0.6.0 管理后台', () => {
     await expect(page.getByTestId('dashboard-overview')).toContainText('30 个营业日');
     await page.getByTestId('dashboard-tab-members').click();
     await expect(page.getByTestId('members-total')).toContainText('位');
-    await expect(page.getByTestId('members-levels')).toContainText('第 1 级');
+    await expect(page.getByTestId('members-levels')).toContainText('L0 青溪');
     await page.request.post('/api/auth/logout');
 
     await login(page, 'xiaozhou');

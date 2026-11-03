@@ -23,6 +23,8 @@ let plan30: number;
 let today: string;
 
 const at = (days: number, base = Date.now()) => new Date(base + days * DAY);
+// 会员体系 v2（v0.7.23）起赠金按充值后所在档的比例自动算，小额充值的 L0、L1 没有赠金；
+// 这里要的是有赠金的批次，用店主自定义赠金（套餐只定赠金有效期）
 const planRecharge = (memberId: number, planId: number, pay: number, bonus: number, extra: Partial<RechargeInputData> = {}): RechargeInputData => ({
   idempotencyKey: randomUUID(),
   memberId,
@@ -31,6 +33,7 @@ const planRecharge = (memberId: number, planId: number, pay: number, bonus: numb
   bonusAmount: bonus,
   paymentMethod: 'cash',
   paymentConfirmed: true,
+  bonusMode: 'custom',
   ...extra,
 });
 const customRecharge = (memberId: number, pay: number, bonus: number): RechargeInputData => ({
@@ -41,6 +44,7 @@ const customRecharge = (memberId: number, pay: number, bonus: number): RechargeI
   bonusAmount: bonus,
   paymentMethod: 'cash',
   paymentConfirmed: true,
+  bonusMode: 'custom',
 });
 const spend = (memberId: number, amount: number, extra: Partial<ConsumeInputData> = {}): ConsumeInputData => ({
   idempotencyKey: randomUUID(),
@@ -76,7 +80,7 @@ describe('有效期的设置与计算', () => {
     const m = await createMember(ctx, '三十天', '19900007001');
     const catalog = (await api(ctx.app, ctx.clerk, 'GET', '/api/catalog')).body;
     expect(catalog.plans.find((p: { id: number }) => p.id === plan30)).toMatchObject({ bonusValidDays: 30 });
-    const r = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', planRecharge(m.id, plan30, 50000, 5000, { bonusValidDays: 30 }));
+    const r = await api(ctx.app, ctx.owner, 'POST', '/api/recharges', planRecharge(m.id, plan30, 50000, 5000, { bonusValidDays: 30 }));
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     const expected = businessDayStart(shiftDate(today, 30), TZ, 6);
     expect(new Date(r.body.recharge.bonusExpiresAt).getTime()).toBe(expected.getTime());
@@ -87,10 +91,10 @@ describe('有效期的设置与计算', () => {
 
   it('员工确认时看到的有效期与当前不一致时拒绝；不带有效期的旧请求不核对', async () => {
     const m = await createMember(ctx, '有效期变动', '19900007002');
-    const stale = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', planRecharge(m.id, plan30, 50000, 5000, { bonusValidDays: null }));
+    const stale = await api(ctx.app, ctx.owner, 'POST', '/api/recharges', planRecharge(m.id, plan30, 50000, 5000, { bonusValidDays: null }));
     expect(stale.status).toBe(409);
     expect(stale.body.error).toMatchObject({ code: 'PLAN_CHANGED', details: { bonusValidDays: 30 } });
-    expect((await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', planRecharge(m.id, plan30, 50000, 5000))).status).toBe(200);
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/recharges', planRecharge(m.id, plan30, 50000, 5000))).status).toBe(200);
   });
 
   it('自定义赠金按经营规则的默认有效期；默认长期有效；无赠金的充值不建批次', async () => {
@@ -172,7 +176,7 @@ describe('先用最早到期的批次；到期作废', () => {
   it('到期作废在记账前先处理：员工按含到期赠金的余额确认时要求重新确认，按新余额确认后入账', async () => {
     const m = await createMember(ctx, '记账前作废', '19900007102');
     const base = Date.now() - 40 * DAY;
-    await recharge(deps, planRecharge(m.id, plan30, 50000, 5000), { actor: clerk, at: at(0, base) });
+    await recharge(deps, planRecharge(m.id, plan30, 50000, 5000), { actor: owner, at: at(0, base) });
     // 员工看到的还是 50000 + 5000（到期的赠金尚未作废）
     const stale = await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', spend(m.id, 1000, {
       expectedBalance: { principal: 50000, bonus: 5000 },
@@ -194,7 +198,7 @@ describe('先用最早到期的批次；到期作废', () => {
     const a = await createMember(ctx, '详情触发', '19900007103');
     const b = await createMember(ctx, '扫描触发一', '19900007104');
     const c = await createMember(ctx, '扫描触发二', '19900007105');
-    for (const m of [a, b, c]) await recharge(deps, planRecharge(m.id, plan30, 50000, 5000), { actor: clerk, at: at(0, base) });
+    for (const m of [a, b, c]) await recharge(deps, planRecharge(m.id, plan30, 50000, 5000), { actor: owner, at: at(0, base) });
     const detail = (await api(ctx.app, ctx.clerk, 'GET', `/api/members/${a.id}`)).body;
     expect(detail).toMatchObject({ bonusBalance: 0, bonusLots: [] });
     expect(await sweepExpiredBonus(deps)).toBe(2);
@@ -207,7 +211,7 @@ describe('先用最早到期的批次；到期作废', () => {
 
   it('并发：扫描、打开详情与消费同时处理同一位会员，只作废一次，余额与批次一致', async () => {
     const m = await createMember(ctx, '并发作废', '19900007106');
-    await recharge(deps, planRecharge(m.id, plan30, 50000, 5000), { actor: clerk, at: at(-35) });
+    await recharge(deps, planRecharge(m.id, plan30, 50000, 5000), { actor: owner, at: at(-35) });
     await Promise.all([
       sweepExpiredBonus(deps),
       api(ctx.app, ctx.clerk, 'GET', `/api/members/${m.id}`),
@@ -224,7 +228,7 @@ describe('先用最早到期的批次；到期作废', () => {
 describe('撤销消费时赠金回到原批次', () => {
   it('批次未到期：赠金回到原批次，剩余恢复', async () => {
     const m = await createMember(ctx, '撤销回批次', '19900007201');
-    await recharge(deps, planRecharge(m.id, plan30, 50000, 5000), { actor: clerk });
+    await recharge(deps, planRecharge(m.id, plan30, 50000, 5000), { actor: owner });
     const c = await consume(deps, spend(m.id, 3000, { expectedSplit: { principal: 0, bonus: 3000 } }), { actor: clerk });
     if (c.type !== 'consume') throw new Error('unexpected');
     expect((await lotsOf(m.id))[0]!.remaining).toBe(2000);
@@ -239,7 +243,7 @@ describe('撤销消费时赠金回到原批次', () => {
   it('批次已到期：撤销恢复的赠金随即作废，回执说明并显示作废后的余额；本金照常恢复', async () => {
     const m = await createMember(ctx, '撤销遇到期', '19900007202');
     const base = Date.now() - 31 * DAY;
-    await recharge(deps, planRecharge(m.id, plan30, 50000, 5000), { actor: clerk, at: at(0, base) });
+    await recharge(deps, planRecharge(m.id, plan30, 50000, 5000), { actor: owner, at: at(0, base) });
     // 先赠金后本金：消费 6000 = 赠金 5000 + 本金 1000
     const c = await consume(deps, spend(m.id, 6000, { expectedSplit: { principal: 1000, bonus: 5000 } }), { actor: clerk, at: at(1, base) });
     if (c.type !== 'consume') throw new Error('unexpected');
@@ -281,7 +285,7 @@ describe('撤销消费时赠金回到原批次', () => {
 describe('数据库兜底与日结快照', () => {
   it('批次只能改剩余、不能删除；批次变动与过期单只追加', async () => {
     const m = await createMember(ctx, '兜底', '19900007301');
-    await recharge(deps, planRecharge(m.id, plan30, 50000, 5000), { actor: clerk });
+    await recharge(deps, planRecharge(m.id, plan30, 50000, 5000), { actor: owner });
     const [lot] = await ctx.sql<{ id: number }[]>`SELECT id FROM bonus_lots WHERE member_id = ${m.id}`;
     await expect(ctx.sql`UPDATE bonus_lots SET amount = 9999 WHERE id = ${lot!.id}`).rejects.toThrow(/只能修改剩余金额/);
     await expect(ctx.sql`UPDATE bonus_lots SET expires_at = NULL WHERE id = ${lot!.id}`).rejects.toThrow(/只能修改剩余金额/);

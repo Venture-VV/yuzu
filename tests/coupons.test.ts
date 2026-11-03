@@ -81,8 +81,11 @@ beforeAll(async () => {
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     item[name] = r.body.items.find((i: { name: string }) => i.name === name).id;
   }
-  // 等级门槛调低：第 1 级 0、第 2 级 ¥1,000、第 3 级 ¥3,000
-  expect((await api(ctx.app, ctx.owner, 'PUT', '/api/frontdesk/rules', { vipLevelThresholds: [0, 100000, 300000] })).status).toBe(200);
+  // 档级门槛调低（会员体系 v2）：L1 ¥1,000、L2 ¥3,000，更高的档往上；赠送比例都设 0（这里只看发券）
+  const mr = (await api(ctx.app, ctx.owner, 'GET', '/api/membership/rules')).body;
+  const thresholds = [0, 100000, 300000, 1_000_000, 2_000_000, 5_000_000, 10_000_000];
+  const saved = await api(ctx.app, ctx.owner, 'PUT', '/api/membership/rules', { ...mr, grades: mr.grades.map((g: object, i: number) => ({ ...g, thresholdCents: thresholds[i], bonusBp: 0 })) });
+  expect(saved.status, JSON.stringify(saved.body)).toBe(200);
 });
 afterAll(async () => ctx.close());
 
@@ -97,7 +100,7 @@ describe('券模板', () => {
     tpl.ticket = await template({ name: '门票兑换券', kind: 'exchange', exchangeTicketTypeId: ticket.id, maxOff: 39900 });
     expect(tpl.ticket.summary).toContain('兑换');
     tpl.anon = await template({ name: '无记名二十元', kind: 'cash', faceValue: 2000, validity: 'fixed', validFrom: today, validTo: '2099-12-31' });
-    tpl.vip = await template({ name: '金卡专享', kind: 'cash', faceValue: 5000, levels: [3] });
+    tpl.vip = await template({ name: '金卡专享', kind: 'cash', faceValue: 5000, levels: [2] });
 
     const bad = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', { clientKey: randomUUID(), name: '缺面额', kind: 'cash', validity: 'days', validDays: 7 });
     expect(bad.status).toBe(400);
@@ -186,25 +189,28 @@ describe('发券', () => {
     expect(mine.coupons.map((c) => [c.templateName, c.issueKind, c.state])).toEqual([['八八折（老客）', 'open_card', 'available']]);
   });
 
-  it('充值赠券与升级礼：套餐挂的券随充值发；新达到的每一级发一次升级礼，不重复', async () => {
+  it('充值赠券与升级礼：套餐挂的券随充值发；新升到的每一档发一次升级礼，不重复', async () => {
     const plan = await api(ctx.app, ctx.owner, 'POST', '/api/plans', { name: '充一千', payAmount: 100000, bonusAmount: 10000 });
     expect(plan.status, JSON.stringify(plan.body)).toBe(200);
     const [p] = await ctx.sql<{ id: number }[]>`SELECT id FROM recharge_plans WHERE name = '充一千'`;
     await rule({ kind: 'recharge', planId: p!.id, templateId: tpl.cash!.id, quantity: 2 });
-    await rule({ kind: 'level_up', level: 2, templateId: tpl.discount!.id });
-    await rule({ kind: 'level_up', level: 3, templateId: tpl.vip!.id });
+    await rule({ kind: 'level_up', level: 1, templateId: tpl.discount!.id });
+    await rule({ kind: 'level_up', level: 2, templateId: tpl.vip!.id });
+    // 升级礼不能配给 L0
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/coupons/rules', { clientKey: randomUUID(), kind: 'level_up', level: 0, templateId: tpl.cash!.id, quantity: 1 })).status).toBe(400);
     const m = await createMember(ctx, '升级会员', '19900008004');
     const before = (await couponsOf(m.id)).coupons.length;
-    expect((await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, 100000, 10000, { planId: p!.id }))).status).toBe(200);
+    // 套餐上写的赠金不再用（会员体系 v2 按档级比例，这里都是 0）
+    expect((await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, 100000, 0, { planId: p!.id }))).status).toBe(200);
     let mine = (await couponsOf(m.id)).coupons;
     expect(mine.length - before).toBe(3);
     expect(mine.filter((c) => c.issueKind === 'recharge')).toHaveLength(2);
     expect(mine.filter((c) => c.issueKind === 'level_up').map((c) => c.templateId)).toEqual([tpl.discount!.id]);
-    // 再充 ¥2,500：累计 ¥3,500 到第 3 级，发第 3 级的升级礼；第 2 级不再发
+    // 再充 ¥2,500：滚动累计 ¥3,500 升到 L2，发 L2 的升级礼；L1 不再发
     expect((await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, 250000, 0))).status).toBe(200);
     mine = (await couponsOf(m.id)).coupons;
     expect(mine.filter((c) => c.issueKind === 'level_up').map((c) => c.templateId).sort()).toEqual([tpl.discount!.id, tpl.vip!.id].sort());
-    // 一次跨两级：两级的升级礼都发
+    // 一笔连跳两档：两档的升级礼都发
     const m2 = await createMember(ctx, '跨两级', '19900008005');
     expect((await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m2.id, 500000, 0))).status).toBe(200);
     expect((await couponsOf(m2.id)).coupons.filter((c) => c.issueKind === 'level_up')).toHaveLength(2);
@@ -217,12 +223,12 @@ describe('发券', () => {
     const gifts = (await api(ctx.app, ctx.clerk, 'GET', '/api/coupons/plan-gifts')).body as { planId: number; templateId: number; quantity: number; levels: number[] }[];
     expect(gifts.filter((g) => g.planId === p!.id).map((g) => [g.templateId, g.quantity, g.levels])).toEqual([
       [tpl.cash!.id, 2, []],
-      [tpl.vip!.id, 1, [3]],
+      [tpl.vip!.id, 1, [2]],
     ]);
   });
 
   it('生日礼：生日当月发，每年每条规则一次；没填生日、不是这个月的不发', async () => {
-    await rule({ kind: 'birthday', level: 1, templateId: tpl.cash!.id });
+    await rule({ kind: 'birthday', level: 0, templateId: tpl.cash!.id });
     const month = today.slice(5, 7);
     const other = String((Number(month) % 12) + 1).padStart(2, '0');
     const yes = await api(ctx.app, ctx.clerk, 'POST', '/api/members', { name: '寿星', phone: '19900008006', birthday: `1990-${month}-15` });
@@ -237,8 +243,8 @@ describe('发券', () => {
   });
 
   it('生日礼：发不出的候选会员不占名额，编号靠后的寿星照样发到（Codex 审查 8e4472a）', async () => {
-    // 再加一条 3 级的生日规则（这两位寿星都是 1 级）：上一条用例的「寿星」已拿到 1 级的礼，却一直缺这一条，永远算候选
-    const added = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/rules', { clientKey: randomUUID(), kind: 'birthday', level: 3, templateId: tpl.cash!.id, quantity: 1 });
+    // 再加一条 L2 的生日规则（这两位寿星都是 L0）：上一条用例的「寿星」已拿到 L0 的礼，却一直缺这一条，永远算候选
+    const added = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/rules', { clientKey: randomUUID(), kind: 'birthday', level: 2, templateId: tpl.cash!.id, quantity: 1 });
     expect(added.status, JSON.stringify(added.body)).toBe(200);
     const month = today.slice(5, 7);
     const later = await api(ctx.app, ctx.clerk, 'POST', '/api/members', { name: '后来的寿星', phone: '19900008008', birthday: `1991-${month}-20` });

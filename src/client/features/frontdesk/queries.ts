@@ -1,6 +1,7 @@
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { CheckoutDetail, CheckoutPreview, CheckoutSummary, TicketType } from '@shared/checkout';
-import type { FrontdeskBoard, FrontdeskCheck, MemberLevel, PreviewBill, VisitDetail } from '@shared/frontdesk';
+import type { FrontdeskBoard, FrontdeskCheck, PreviewBill, VisitDetail } from '@shared/frontdesk';
+import type { MemberGradeBadge } from '@shared/membership';
 import type { FrontdeskTechnicians } from '@shared/technicians';
 import { api } from '../../lib/api';
 import { useServerNow as useServerNowAt } from '../../lib/serverClock';
@@ -69,11 +70,11 @@ export const usePreview = (ids: number[], enabled: boolean) =>
     placeholderData: keepPreviousData,
   });
 
-/** 会员按当前规则口径的等级（发牌、换牌到 VIP 柜时核对） */
-export const useMemberLevel = (memberId: number | null) =>
+/** 会员的档阶与能用几级 VIP 柜（发牌、换牌到 VIP 柜时核对；会员体系 v2，v0.7.23） */
+export const useMemberGrade = (memberId: number | null) =>
   useQuery({
-    queryKey: ['frontdesk', 'member-level', memberId ?? 0],
-    queryFn: () => api.get<MemberLevel>(`/api/frontdesk/members/${memberId}/level`),
+    queryKey: ['frontdesk', 'member-grade', memberId ?? 0],
+    queryFn: () => api.get<MemberGradeBadge>(`/api/frontdesk/members/${memberId}/grade`),
     enabled: !!memberId,
   });
 

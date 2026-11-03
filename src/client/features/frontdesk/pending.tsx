@@ -336,7 +336,7 @@ export function useFrontdeskOp<T>(opts: {
           removeFrontdeskPending(op.key);
           setState({ phase: 'error', message: error.message, code: error.code });
         } else {
-          const reason = error instanceof UncertainError ? error.message : '服务器出了点问题';
+          const reason = error instanceof UncertainError && error.reason !== 'server' ? error.message : '服务器出了点问题';
           setState({ phase: 'uncertain', message: `${reason}，这次${FRONTDESK_OP_LABELS[op.type]}是否已生效暂不确定` });
         }
         return null;

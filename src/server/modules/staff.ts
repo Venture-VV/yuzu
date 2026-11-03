@@ -50,6 +50,8 @@ const uniqueDuties = (duties: Duty[] = []) => [...new Set(duties)].sort();
 
 /** 分岗不兼任（#17，v0.7.12）：仓库、采购、部门、财务（含成本）、负责人五组，职责只能在一组里；店主不受限 */
 function assertDutiesCompatible(role: Role, duties: readonly Duty[]) {
+  // 他店查询（v0.7.23）只查会员档阶，不带库存与采购职责（带了就会多出 ERP 的权限）
+  if (role === 'other_store' && duties.length) throw unprocessable('DUTY_CONFLICT', '「他店查询」只查会员档阶，不能带库存与采购职责', { field: 'duties' });
   const groups = dutyConflict(role, duties);
   if (groups) {
     throw unprocessable('DUTY_CONFLICT', `仓库、采购、部门、财务（含成本）、负责人不兼任：这名员工的职责跨了「${groups}」，请只保留其中一组`, { field: 'duties' });

@@ -5,6 +5,7 @@
 import type { BackfillMark } from './backfill';
 import type { PriceTier } from './catalog';
 import type { CheckoutDetail } from './checkout';
+import type { MemberGradeBadge } from './membership';
 import type { LineTechnician } from './technicians';
 
 /** 宾客与手牌的分区：只分男宾、女宾（店主 2026-10-27 #27：儿童跟同性别家长用男宾或女宾的牌） */
@@ -54,58 +55,27 @@ export const SWAP_REASONS = ['手牌丢失', '手牌损坏', '柜锁故障', '�
 export const CANCEL_REASONS = ['开错手牌', '顾客未入场', '重复开牌'] as const;
 export const LOCK_REASONS = ['手牌丢失', '手牌损坏', '柜锁故障', '暂停使用'] as const;
 
-/** VIP 柜的会员等级口径（店主 ❓1：后台可切换，默认累计充值） */
-export const VIP_LEVEL_BASES = ['recharge', 'balance'] as const;
-export type VipLevelBasis = (typeof VIP_LEVEL_BASES)[number];
-export const VIP_LEVEL_BASIS_LABELS: Record<VipLevelBasis, string> = {
-  recharge: '累计充值实收',
-  balance: '当前余额（本金 + 赠金）',
-};
-
-/** 前台规则（店主 2026-10-27 已确认 15 分钟与丢牌 200 元；VIP 等级口径、门槛与当场授权开关为默认值，待确认） */
+/**
+ * 前台规则（店主 2026-10-27 已确认 15 分钟与丢牌 200 元；当场授权开关为默认值，待确认）。
+ * 会员等级（原来的等级口径、各级门槛与名称）v0.7.23 起改由会员体系 v2 的「会员规则」管（档级 L0–L6，VIP 柜按档级对应，见 membership.ts）
+ */
 export interface FrontdeskRules {
   /** 店员可在多少分钟内自行作废本人刚登记的明细、撤销本人刚开的牌 */
   selfVoidMinutes: number;
   /** 丢牌赔偿（分），换牌时挂到客人账单；0 表示不收 */
   lostTagFeeCents: number;
-  vipLevelBasis: VipLevelBasis;
-  /** 第 1、2、3… 级会员的门槛（分），严格递增；第 1 级门槛为 0 时所有会员至少第 1 级，散客为 0 级 */
-  vipLevelThresholds: number[];
-  /** 允许值班经理 / 店总当场授权散客或等级不够的会员使用 VIP 柜（店主 ❓2：默认关闭） */
+  /** 允许值班经理 / 店总当场授权散客或档级不够的会员使用 VIP 柜（店主 ❓2：默认关闭） */
   vipOverrideEnabled: boolean;
   /** 门票跳档宽限分钟数（店主 ❓6，2026-10-29 签认 15 分钟：12 小时分界点之后 15 分钟内不跳档） */
   overtimeGraceMinutes: number;
-  /** 各级会员的名称（v0.6.0，第 1 级起；没填的显示「第 N 级」，待确认） */
-  vipLevelNames: string[];
 }
 
 export const DEFAULT_FRONTDESK_RULES: FrontdeskRules = {
   selfVoidMinutes: 15,
   lostTagFeeCents: 20000,
-  vipLevelBasis: 'recharge',
-  vipLevelThresholds: [0, 5_000_000, 10_000_000, 20_000_000, 30_000_000],
   vipOverrideEnabled: false,
   overtimeGraceMinutes: 15,
-  vipLevelNames: ['普通会员', '银卡会员', '金卡会员', '铂金会员', '钻石会员'],
 };
-
-/** 会员等级：达到第 i 档门槛即为第 i + 1 级；一档都没达到为 0 级（与散客相同） */
-export function levelOf(amountCents: number, thresholds: readonly number[]): number {
-  let level = 0;
-  thresholds.forEach((t, i) => {
-    if (amountCents >= t) level = i + 1;
-  });
-  return level;
-}
-
-/** 会员当前等级（按规则口径计算） */
-export interface MemberLevel {
-  memberId: number;
-  level: number;
-  basis: VipLevelBasis;
-  /** 口径金额：累计充值实收或当前余额（分） */
-  amountCents: number;
-}
 
 /** 牌号：0–2 位大写字母前缀 + 1–5 位数字 */
 /** 转单（v0.7.6）：一次最多把几条明细转到另一张手牌 */
@@ -302,9 +272,9 @@ export interface VisitDetail {
   closeReason: string | null;
   tag: HandTag;
   member: VisitMember | null;
-  /** 会员按当前规则口径的等级（散客为 null），用于换牌到 VIP 柜时核对 */
-  memberLevel: MemberLevel | null;
-  /** 开牌时等级不够、经当场授权使用 VIP 柜的授权人 */
+  /** 会员的档阶与能用几级 VIP 柜（散客为 null），用于换牌到 VIP 柜时核对 */
+  memberGrade: MemberGradeBadge | null;
+  /** 开牌时档级不够、经当场授权使用 VIP 柜的授权人 */
   vipOverrideByName: string | null;
   /** 按实际时间补录的接待（R1.9）：纸质单号、实际时间与补录人；平时为 null */
   backfill: BackfillMark | null;

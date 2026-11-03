@@ -13,6 +13,7 @@ import { Money } from '../../components/Money';
 import { Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { Columns, HBars, yuan } from './charts';
 import { MembersTab } from './MembersTab';
+import { MembershipTab } from '../membership/MembershipTab';
 import { OverviewTab } from './OverviewTab';
 import { RoomsTab } from './RoomsTab';
 import { TechniciansTab } from './TechniciansTab';
@@ -24,6 +25,8 @@ const TABS = [
   { key: 'today', label: '今日', perm: 'ledger.readToday' },
   { key: 'overview', label: '经营总览', perm: 'report.executive' },
   { key: 'members', label: '会员总览', perm: 'report.members' },
+  // 会员体系 v2（v0.7.23）：各档阶人数、到期提醒名单、补充期、今天的状态变化与每天的自动任务（客户经理、店总、店主）
+  { key: 'membership', label: '会员体系', perm: 'member.retention' },
   { key: 'technicians', label: '技师业绩', perm: 'report.technicians' },
   { key: 'rooms', label: '客房', perm: 'report.executive' },
 ] as const satisfies readonly { key: string; label: string; perm: Permission }[];
@@ -93,6 +96,8 @@ export function DashboardPage() {
             <OverviewTab />
           ) : current.key === 'members' ? (
             <MembersTab />
+          ) : current.key === 'membership' ? (
+            <MembershipTab />
           ) : current.key === 'technicians' ? (
             <TechniciansTab />
           ) : current.key === 'rooms' ? (

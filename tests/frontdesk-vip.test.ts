@@ -1,5 +1,5 @@
 // Batch 2.2：真实柜池的 VIP 柜等级校验、当场授权、丢牌赔偿、按清单导入与前台规则。
-//   · 会员等级不低于柜子等级才能使用该 VIP 柜（店主 #26）；口径默认累计充值实收，可切换为当前余额（❓1）；
+//   · 会员能用的柜子等级不低于柜子等级才能使用该 VIP 柜（店主 #26）；会员体系 v2（v0.7.23）起按档级对应（会员规则里的「VIP 柜」）；
 //   · 当场授权默认关闭；开启后由值班经理 / 店总 / 店主输入账号密码签发一次性授权（❓2）：
 //     绑定申请人、柜与客人，5 分钟有效，只能用一次，业务回滚时核销一起回滚；密码错误与登录共用限流；
 //   · 丢牌赔偿 200 元作为挂账明细，和换牌同一事务、同一操作编号（#30）；
@@ -72,7 +72,7 @@ const openOn = async (code: string) =>
   (await ctx.sql<{ id: number; vipOverrideBy: number | null }[]>`
     SELECT v.id, v.vip_override_by FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${code} AND v.status = 'open'`)[0] ?? null;
 const cancel = (cookie: string, visitId: number) => api(ctx.app, cookie, 'POST', `/api/frontdesk/visits/${visitId}/cancel`, { reason: '开错手牌' });
-const levelOf = async (memberId: number) => (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/members/${memberId}/level`)).body;
+const gradeOf = async (memberId: number) => (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/members/${memberId}/grade`)).body;
 const memberWith = async (name: string, phone: string, recharges: number[]) => {
   const m = await createMember(ctx, name, phone);
   for (const paid of recharges) {
@@ -82,41 +82,28 @@ const memberWith = async (name: string, phone: string, recharges: number[]) => {
   return m.id;
 };
 
-describe('会员等级', () => {
-  it('默认按累计充值实收：≥0 第 1 级、≥5 万第 2 级、≥10 万第 3 级；新会员第 1 级', async () => {
+describe('会员档级与 VIP 柜（会员体系 v2，v0.7.23）', () => {
+  it('档级按滚动累计充值升；VIP 柜按档级对应：L0–L3 能用 1 级柜、L4 2 级、L5 4 级、L6 5 级', async () => {
     const fresh = await memberWith('新会员', '19900007001', []);
-    expect(await levelOf(fresh)).toMatchObject({ level: 1, basis: 'recharge', amountCents: 0 });
+    expect(await gradeOf(fresh)).toMatchObject({ grade: 0, tier: null, label: 'L0 青溪', lockerLevel: 1 });
     const almost = await memberWith('差一分', '19900007002', [4_999_999]);
-    expect((await levelOf(almost)).level).toBe(1);
+    expect(await gradeOf(almost)).toMatchObject({ grade: 3, lockerLevel: 1 });
     const exact = await memberWith('正好五万', '19900007003', [5_000_000]);
-    expect((await levelOf(exact)).level).toBe(2);
+    expect(await gradeOf(exact)).toMatchObject({ grade: 4, tier: 0, label: 'L4 望岳 · 初', lockerLevel: 2 });
     const big = await memberWith('十二万', '19900007004', [5_000_000, 5_000_000, 2_000_000]);
-    expect(await levelOf(big)).toMatchObject({ level: 3, amountCents: 12_000_000 });
+    expect(await gradeOf(big)).toMatchObject({ grade: 5, lockerLevel: 4 });
   });
 
-  it('消费不降低累计充值口径的等级；切换为当前余额口径后按余额计算', async () => {
+  it('消费不降档（同一周期只升不降）', async () => {
     const m = await memberWith('消费会员', '19900007005', [5_000_000]);
     expect((await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', consumeBody(m, 1_000_000))).status).toBe(200);
-    expect((await levelOf(m)).level).toBe(2);
-    await setRules({ vipLevelBasis: 'balance' });
-    expect(await levelOf(m)).toMatchObject({ level: 1, basis: 'balance', amountCents: 4_000_000 });
-    await setRules({ vipLevelBasis: 'recharge' });
+    expect(await gradeOf(m)).toMatchObject({ grade: 4, lockerLevel: 2 });
   });
 
-  it('规则校验：门槛必须逐级递增；只改提交的字段；店员不能改规则', async () => {
-    const bad = await api(ctx.app, ctx.owner, 'PUT', '/api/frontdesk/rules', { vipLevelThresholds: [0, 5_000_000, 5_000_000] });
-    expect(bad.status).toBe(400);
-    expect(bad.body.error.message).toContain('递增');
+  it('前台规则只剩手牌与授权的几项：旧页面带来的等级门槛不再保存；只改提交的字段；店员不能改规则', async () => {
     const before = (await api(ctx.app, ctx.owner, 'GET', '/api/frontdesk/rules')).body;
-    expect(before).toEqual({
-      selfVoidMinutes: 15,
-      lostTagFeeCents: 20000,
-      vipLevelBasis: 'recharge',
-      vipLevelThresholds: [0, 5_000_000, 10_000_000, 20_000_000, 30_000_000],
-      vipOverrideEnabled: false,
-      overtimeGraceMinutes: 15,
-      vipLevelNames: ['普通会员', '银卡会员', '金卡会员', '铂金会员', '钻石会员'],
-    });
+    expect(before).toEqual({ selfVoidMinutes: 15, lostTagFeeCents: 20000, vipOverrideEnabled: false, overtimeGraceMinutes: 15 });
+    expect(await setRules({ vipLevelThresholds: [0, 5_000_000, 5_000_000] })).toEqual(before);
     expect(await setRules({ selfVoidMinutes: 20 })).toEqual({ ...before, selfVoidMinutes: 20 });
     await setRules({ selfVoidMinutes: 15 });
     expect((await api(ctx.app, ctx.clerk, 'PUT', '/api/frontdesk/rules', { selfVoidMinutes: 30 })).status).toBe(403);
@@ -135,7 +122,7 @@ describe('VIP 柜等级校验（当场授权关闭，默认）', () => {
     const m = await memberWith('一级会员', '19900007101', [100_000]);
     const high = await checkin(ctx.clerk, [{ tagCode: '9033', zone: 'male', memberId: m }]);
     expect(high.body.error).toMatchObject({ code: 'VIP_LEVEL_TOO_LOW', details: { shortfalls: [{ code: '9033', memberId: m, tagLevel: 2, memberLevel: 1 }] } });
-    expect(high.body.error.message).toContain('当前第 1 级');
+    expect(high.body.error.message).toContain('现在是「L0 青溪」，只能用第 1 级及以下的 VIP 柜');
     const ok = await checkin(ctx.clerk, [{ tagCode: '8001', zone: 'male', memberId: m }]);
     expect(ok.status).toBe(201);
     expect((await openOn('8001'))!.vipOverrideBy).toBeNull();
@@ -303,7 +290,7 @@ describe('当场授权（开关开启）', () => {
     const ok = await swap({ vipGrantId: g });
     expect(ok.status).toBe(200);
     expect(ok.body.tag).toMatchObject({ code: '9058', kind: 'vip', vipLevel: 3 });
-    expect(ok.body.memberLevel.level).toBe(2);
+    expect(ok.body.memberGrade).toMatchObject({ grade: 4, lockerLevel: 2 });
     expect(ok.body.history.find((h: { kind: string }) => h.kind === 'swap').text).toContain('王经理当场授权');
     const [change] = await ctx.sql<{ vipOverrideBy: number }[]>`SELECT vip_override_by FROM visit_tag_changes WHERE visit_id = ${v}`;
     expect(change!.vipOverrideBy).toBe(dutyId);

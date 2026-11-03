@@ -1,4 +1,4 @@
-import { ArrowLeft, Award, Bath, CirclePlus, PencilLine, StickyNote } from 'lucide-react';
+import { ArrowLeft, Bath, CirclePlus, PencilLine, StickyNote } from 'lucide-react';
 import { formatPhone } from '@shared/labels';
 import { lastUsableDate } from '@shared/business-date';
 import { displayFieldValue } from '@shared/member-fields';
@@ -11,7 +11,9 @@ import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
 import { Badge, Button, Card, IconButton, SectionTitle, Skeleton } from '../../components/ui';
 import { ActivityRow } from './ActivityList';
-import { BonusLotsCard, MemberCouponsCard, MemberLevelCard } from './MemberExtras';
+import { BonusLotsCard, MemberCouponsCard } from './MemberExtras';
+import { GradeBadge } from '../membership/GradeBadge';
+import { GradeCard } from '../membership/GradeCard';
 
 export function MemberDetail({
   member,
@@ -59,11 +61,7 @@ export function MemberDetail({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-[22px] leading-tight font-bold tracking-tight break-all text-ink">{member.name}</h2>
-              {member.level && member.level.level > 0 && (
-                <Badge tone="yuzu" icon={<Award className="size-3.5" />}>
-                  {member.level.name}
-                </Badge>
-              )}
+              <GradeBadge member={member} withExpiry />
               {member.status === 'frozen' && <Badge tone="clay">已停用</Badge>}
               {member.isSynthetic && <Badge tone="ember">合成数据</Badge>}
             </div>
@@ -202,7 +200,7 @@ export function MemberDetail({
       {/* 会员详情所在的栏宽随工作台布局变化，按卡片容器宽度决定是否并排 */}
       <div className="@container">
         <div className="grid gap-4 @3xl:grid-cols-2">
-          <MemberLevelCard member={member} />
+          <GradeCard member={member} />
           <BonusLotsCard member={member} />
         </div>
       </div>

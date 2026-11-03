@@ -7,6 +7,7 @@ import { migrate } from './migrate';
 import { sweepExpiredBonus } from './modules/bonus';
 import { issueBirthdayCoupons } from './modules/coupons';
 import { checkDevicesOnce, recoverJobs } from './modules/devices';
+import { ensureMembershipLive, runMembershipDaily } from './modules/membership';
 import { HEARTBEAT_INTERVAL_MS } from '@shared/devices';
 import { holdAppPresence } from './presence';
 
@@ -31,6 +32,9 @@ async function main() {
   // 应用在跑的标记（v0.7.19）：专用连接上的共享咨询锁，demo-reset 看到它就不清库（应用空闲、连接池没有连接时也看得到）
   const presence = await holdAppPresence(config.databaseUrl);
   await migrate(sql, (msg) => console.log(msg));
+  // 会员体系 v2 上线（v0.7.23，只做一次）：已有会员按累计充值（含旧系统累计）定档、进初阶，周期从今天起
+  const live = await ensureMembershipLive({ sql, config });
+  if (live) console.log(`会员体系 v2 上线：${live.graded} 位已有会员按累计充值定档（营业日 ${live.businessDate}）`);
   await ensureInitialOwner(sql, config, (msg) => console.log(msg));
   await purgeExpiredSessions(sql);
 
@@ -50,6 +54,15 @@ async function main() {
       if (n > 0) app.log.info(`赠金到期作废：${n} 位会员`);
     } catch (error) {
       app.log.error({ err: error }, '赠金到期作废扫描失败，下一分钟重试');
+    }
+    // 会员到期处理（v0.7.23）：营业日开始后处理周期、补充期已结束的会员（今天跑过、没有到期的就什么都不做）。
+    // 放在生日礼之前：生日礼按会员现在的档阶发，到期该降的先降，不按过期的档阶发（Codex 自动审查 43d53e9）
+    try {
+      const run = await runMembershipDaily({ sql, config });
+      if (run?.processed) app.log.info(`会员到期处理：${run.processed} 位（保级 ${run.retained}、进补充期 ${run.grace}、降档 ${run.downgraded}）`);
+      if (run?.error) app.log.error(`会员到期处理有出错的：${run.error}`);
+    } catch (error) {
+      app.log.error({ err: error }, '会员到期处理失败，下一分钟重试');
     }
     // 生日礼（v0.7.20）：每 10 分钟检查一次生日当月还没发的会员（去重键兜底，几个进程同时跑也只发一次）
     if (Date.now() - lastBirthday >= 10 * 60_000) {

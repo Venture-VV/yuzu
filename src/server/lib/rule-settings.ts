@@ -8,6 +8,13 @@ import type { Sql, Tx } from '../db';
 import { writeAudit } from './audit';
 import type { OpContext } from './context';
 
+/** 两份规则（JSON）是否相同：不看对象里键的先后（jsonb 存进去会重排键） */
+export function sameJson(a: unknown, b: unknown): boolean {
+  const sorted = (v: unknown): unknown =>
+    Array.isArray(v) ? v.map(sorted) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sorted((v as Record<string, unknown>)[k])])) : v;
+  return JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
+}
+
 /** 规则保存之间串行（店铺设置、岗位权限等多键保存也用这一把） */
 export const lockSettings = (tx: Tx) => tx`SELECT pg_advisory_xact_lock(hashtext('settings'))`;
 

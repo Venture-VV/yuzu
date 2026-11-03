@@ -59,6 +59,9 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
       return d.payment && typeof d.payment === 'object' ? { refId: d.payment.id } : null;
     case 'opening_payable':
       return d.opening && typeof d.opening === 'object' ? { refId: d.opening.id } : null;
+    // 手动调整会员档阶（v0.7.23）：返回那位会员的等级卡
+    case 'grade_adjust':
+      return typeof d.memberId === 'number' ? { refId: d.memberId } : null;
   }
 }
 
@@ -160,7 +163,9 @@ function PendingRow({ op, onFound }: { op: ErpPendingOp; onFound?: (op: ErpPendi
       const data = await sendErpOp<unknown>(op);
       settle(null, refOfResponse(op.type, data));
     } catch (e) {
-      if (e instanceof UncertainError) setMessage('仍然连不上服务器，结果待确认。稍后再查回或重新提交。');
+      if (e instanceof UncertainError) {
+        setMessage(e.reason === 'server' ? '服务器还是出错，结果待确认。稍后再查回或重新提交（同一编号只登记一次）。' : '仍然连不上服务器，结果待确认。稍后再查回或重新提交。');
+      }
       else if (e instanceof ApiError && e.code === 'OP_ABANDONED') settle({ found: false, abandoned: true }, null);
       else setMessage(`${errorMessage(e)}（之前那次提交可能仍会登记：请先查回，确认没有登记时再确认作废）`);
     } finally {

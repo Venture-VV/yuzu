@@ -1,6 +1,9 @@
 // 浏览器实操验收：依赖演示数据（店主 linlan / 店员 xiaozhou，密码 yuzu2026）。
 import { expect, test, type Page } from '@playwright/test';
+import { relaxRechargeMinimum } from './membership';
 import { ensureShift } from './shift';
+
+relaxRechargeMinimum();
 
 const PASSWORD = 'yuzu2026';
 
@@ -14,6 +17,13 @@ async function login(page: Page, username: string) {
 }
 
 const nav = (page: Page, name: string) => page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name, exact: true });
+
+/** 点「确认入账」，返回这笔的赠金（会员体系 v2：按充值后所在档的比例自动算） */
+async function confirmRecharge(page: Page): Promise<number> {
+  const res = page.waitForResponse((r) => r.url().endsWith('/api/recharges') && r.request().method() === 'POST');
+  await page.getByRole('button', { name: /确认入账/ }).click();
+  return ((await (await res).json()) as { recharge: { bonusAmount: number } }).recharge.bonusAmount;
+}
 
 async function openMember(page: Page, query: string) {
   await page.getByLabel('搜索会员').fill(query);
@@ -40,7 +50,7 @@ test('店员：查找会员 → 套餐充值 → 消费扣款，余额变化清�
   // 未勾选确认收款时不能入账
   await expect(page.getByRole('button', { name: /确认入账/ })).toBeDisabled();
   await page.getByText('我已核实').click();
-  await page.getByRole('button', { name: /确认入账/ }).click();
+  const bonus = await confirmRecharge(page);
   await expect(page.getByText('充值已入账')).toBeVisible();
   await expect(page.getByText(/单号 CZ\d{8}-\d{4}/)).toBeVisible();
 
@@ -53,7 +63,7 @@ test('店员：查找会员 → 套餐充值 → 消费扣款，余额变化清�
   await expect(page.getByText('扣款完成')).toBeVisible();
   await page.getByRole('button', { name: '完成' }).click();
 
-  await expect.poll(() => availableCents(page)).toBe(before + 50000 + 5000 - 15000);
+  await expect.poll(() => availableCents(page)).toBe(before + 50000 + bonus - 15000);
   // 店员看不到撤销按钮
   await expect(page.locator('main').getByRole('button', { name: '撤销' })).toHaveCount(0);
 });
@@ -75,7 +85,7 @@ test('充值后马上接着消费：会员资料的重新读取还没回来时�
   await page.getByRole('button', { name: '支付宝' }).click();
   await page.getByRole('button', { name: '下一步：核对收款' }).click();
   await page.getByText('我已核实').click();
-  await page.getByRole('button', { name: /确认入账/ }).click();
+  const bonus = await confirmRecharge(page);
   await expect(page.getByText('充值已入账')).toBeVisible();
 
   // 不等重新读取，马上接着登记消费
@@ -87,7 +97,7 @@ test('充值后马上接着消费：会员资料的重新读取还没回来时�
   await expect(page.getByText('会员余额刚刚有变化')).toHaveCount(0);
   await page.getByRole('button', { name: '完成' }).click();
   await page.unroute(memberUrl);
-  await expect.poll(() => availableCents(page)).toBe(before + 50000 + 5000 - 2200);
+  await expect.poll(() => availableCents(page)).toBe(before + 50000 + bonus - 2200);
 });
 
 test('店主：整单撤销后按原构成恢复余额，日结核对一致', async ({ page }) => {

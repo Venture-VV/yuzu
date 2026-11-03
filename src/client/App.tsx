@@ -29,6 +29,7 @@ const LedgerPage = lazyPage(() => import('./features/ledger/LedgerPage').then((m
 const SettlementPage = lazyPage(() => import('./features/settlement/SettlementPage').then((m) => m.SettlementPage));
 const ShiftPage = lazyPage(() => import('./features/shift/ShiftPage').then((m) => m.ShiftPage));
 const DashboardPage = lazyPage(() => import('./features/dashboard/DashboardPage').then((m) => m.DashboardPage));
+const LookupPage = lazyPage(() => import('./features/membership/LookupPage').then((m) => m.LookupPage));
 const AdminShell = lazyPage(() => import('./features/admin/AdminShell').then((m) => m.AdminShell));
 const CheckoutPrintPage = lazyPage(() => import('./features/print/CheckoutPrintPage').then((m) => m.CheckoutPrintPage));
 const RefundPrintPage = lazyPage(() => import('./features/print/RefundPrintPage').then((m) => m.RefundPrintPage));
@@ -149,6 +150,8 @@ function Home() {
   const session = useOptionalSession();
   const dining = session?.dining ?? false;
   if (can('member.read')) return <WorkbenchPage />;
+  // 他店查询（v0.7.23）：另一家店的同事只能查会员档阶
+  if (can('member.lookup')) return <Navigate to="/lookup" replace />;
   if (erp.landing) return <Navigate to={erp.landing} replace />;
   if (dining && (can('dining.kitchen') || can('dining.order'))) return <Navigate to="/dining" replace />;
   if (session?.rooms && (can('room.operate') || can('room.housekeep'))) return <Navigate to="/rooms" replace />;
@@ -228,6 +231,7 @@ const router = createBrowserRouter([
       { path: 'settlement/:date?', element: <SettlementPage /> },
       { path: 'shift', element: <ShiftPage /> },
       { path: 'dashboard/:tab?', element: <DashboardPage /> },
+      { path: 'lookup', element: <LookupPage /> },
       { path: 'password', element: <ChangePasswordPage /> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],

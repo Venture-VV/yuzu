@@ -16,7 +16,7 @@ import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { conflict, forbidden } from '../lib/errors';
-import { couponOpRef, deviceOpRef, fenceKey, isCouponOp, isDeviceOp, isFenced } from '../lib/fences';
+import { couponOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isDeviceOp, isFenced } from '../lib/fences';
 import { parse } from '../lib/validate';
 import { setTxTimeouts } from '../lib/tx';
 
@@ -49,6 +49,8 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   // 供应商付款、期初未付登记（v0.7.22）
   payment: ['payable.manage'],
   opening_payable: ['payable.manage'],
+  // 手动调整会员档阶（v0.7.23）：只有店主
+  grade_adjust: ['member.adjust'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -71,6 +73,7 @@ const READ: Record<ErpOpType, Permission[]> = {
   device_job: ['device.test'],
   payment: ['payable.read'],
   opening_payable: ['payable.read'],
+  grade_adjust: ['member.adjust'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {
@@ -97,6 +100,11 @@ export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise
   // 硬件连接（v0.7.21）的编号记在设备、打印任务上
   if (isDeviceOp(type)) {
     const refId = await deviceOpRef(db, key, type);
+    if (refId !== null) return { found: true, abandoned: false, refId };
+  }
+  // 手动调整会员档阶（v0.7.23）的编号记在状态变化记录上：refId 是那位会员
+  if (type === 'grade_adjust') {
+    const refId = await gradeOpRef(db, key);
     if (refId !== null) return { found: true, abandoned: false, refId };
   }
   return { found: false, abandoned: await isFenced(db, key, [type]) };

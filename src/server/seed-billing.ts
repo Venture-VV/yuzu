@@ -83,7 +83,7 @@ async function seedBilling(sql: Sql, config: AppConfig, options: { now?: Date })
   if (!memberId) {
     memberId = (await createMember(sql, { name: MEMBER.name, phone: MEMBER.phone, gender: 'male', birthday: null, note: '结账演示会员' }, { actor: owner }, { enforceRequired: false })).id;
     await sql`UPDATE members SET is_synthetic = true WHERE id = ${memberId}`;
-    await recharge(deps, { idempotencyKey: randomUUID(), memberId, planId: null, paidAmount: MEMBER.paid, bonusAmount: MEMBER.bonus, paymentMethod: 'wechat', paymentConfirmed: true }, { actor: owner });
+    await recharge(deps, { idempotencyKey: randomUUID(), memberId, planId: null, paidAmount: MEMBER.paid, bonusAmount: MEMBER.bonus, paymentMethod: 'wechat', paymentConfirmed: true }, { actor: owner }, { history: true });
   }
 
   const now = options.now ?? new Date();

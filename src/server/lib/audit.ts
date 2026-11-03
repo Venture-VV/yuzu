@@ -117,7 +117,11 @@ export type AuditAction =
   | 'device_updated'
   | 'device_enabled'
   | 'devices_imported'
-  | 'device_job_created';
+  | 'device_job_created'
+  // 会员体系 v2（v0.7.23）：已有会员上线定档、手动调整档阶、他店查询
+  | 'membership_live'
+  | 'member_grade_adjusted'
+  | 'member_lookup';
 
 export interface AuditEntry {
   staffId: number | null;

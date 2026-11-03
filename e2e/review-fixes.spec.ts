@@ -1,6 +1,10 @@
 // 首版审查问题的回归验证（依赖演示数据：店主 linlan / 店员 xiaozhou，密码 yuzu2026）。
 import { expect, test, type Page } from '@playwright/test';
 import { ensureShift } from './shift';
+import { relaxRechargeMinimum } from './membership';
+
+// 会员体系 v2 的最低充值（默认 5,000 元）在这个文件里设成不限，结束后恢复
+relaxRechargeMinimum();
 
 const PASSWORD = 'yuzu2026';
 
@@ -129,7 +133,8 @@ test.describe('待确认操作在关闭、刷新、重新登录后仍可处理',
     await page.getByRole('button', { name: '按原内容重新提交充值' }).click();
     await expect(page.getByText('充值已入账')).toBeVisible();
     await expect(pendingBanner(page)).toHaveCount(0);
-    expect(await balance(page, '秦朗')).toEqual({ principal: before.principal + 50000, bonus: before.bonus + 5000 });
+    // 会员体系 v2：赠金按充值后所在档的比例（演示会员累计不到 1 万，L0 / L1 不赠），套餐上原来的赠金不再用
+    expect(await balance(page, '秦朗')).toEqual({ principal: before.principal + 50000, bonus: before.bonus });
     expect(await rechargeCount(page, '秦朗')).toBe(countBefore + 1);
   });
 

@@ -6,10 +6,10 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ADMIN_PERMISSIONS, type AdminOverview, type RolePermissionMatrix, type RuleEntry } from '@shared/admin';
 import { describeBusinessHours } from '@shared/business-date';
-import { DEFAULT_FRONTDESK_RULES, VIP_LEVEL_BASIS_LABELS, type FrontdeskRules } from '@shared/frontdesk';
+import { DEFAULT_FRONTDESK_RULES, type FrontdeskRules } from '@shared/frontdesk';
 import { APPROVAL_RULE_LABELS, type ApprovalRules } from '@shared/inventory';
 import { DEDUCTION_RULE_LABELS, describeHours, ROLE_LABELS } from '@shared/labels';
-import { levelName } from '@shared/members';
+import { DEFAULT_MEMBERSHIP_RULES, type MembershipRules } from '@shared/membership';
 import { CALL_TYPE_LABELS, DEFAULT_TECHNICIAN_RULES } from '@shared/technicians';
 import { AFTER_DESIGNATED_LABELS, AFTER_ROTATION_LABELS, DEFAULT_CLOCKROOM_RULES, DEFAULT_COMMISSION_RULES, describeCommissionBase } from '@shared/clockroom';
 import { DEFAULT_DINING_RULES } from '@shared/dining';
@@ -35,8 +35,10 @@ import { loadRoleOverrides } from '../auth/role-permissions';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
 import { badRequest } from '../lib/errors';
+import { sameJson } from '../lib/rule-settings';
 import { parse } from '../lib/validate';
 import { loadFrontdeskRules } from './frontdesk/common';
+import { loadMembershipRules } from './membership';
 import {
   DEFAULT_APPROVAL_RULES,
   DEFAULT_APPROVAL_THRESHOLD_CENTS,
@@ -59,9 +61,9 @@ import { loadGuideRules } from './guide';
 import { DEFAULT_GUIDE_RULES } from '@shared/guide';
 import { lockSettings } from '../lib/rule-settings';
 
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+// 存进 jsonb 的对象键会重新排序（例如会员规则的各档），比较前按键名排好
+const same = sameJson;
 const onOff = (v: boolean, on: string, off: string) => (v ? on : off);
-const yuanList = (cents: number[]) => cents.map((c, i) => `第 ${i + 1} 级 ≥ ${formatYuan(c)}`).join('，');
 const approvals = (r: ApprovalRules) => {
   const on = (Object.keys(APPROVAL_RULE_LABELS) as (keyof ApprovalRules)[]).filter((k) => r[k]).map((k) => APPROVAL_RULE_LABELS[k]);
   return on.length ? `${on.join('、')}（盘点调整固定需要）` : '只有盘点调整需要';
@@ -109,7 +111,6 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
     const on = list.filter((c) => c.active).map((c) => c.label);
     return `${on.join('、') || '没有启用的渠道'}${list.length > on.length ? `（另有 ${list.length - on.length} 个已停用）` : ''}`;
   };
-  const names = (r: FrontdeskRules) => r.vipLevelThresholds.map((_, i) => levelName(i + 1, r.vipLevelNames)).join('、');
 
   // ── 门店与营业 ──
   add({ key: 'store_name', group: 'store', label: '门店名称', value: s.storeName, defaultValue: d.storeName, pending: false, section: 'rules', current: s.storeName, dflt: d.storeName, metaKey: sk('storeName') });
@@ -153,15 +154,18 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   // ── 会员与渠道 ──
   add({ key: 'member_channels', group: 'members', label: '渠道来源', value: channels(s.memberChannels), defaultValue: channels(d.memberChannels), pending: true, section: 'members', current: s.memberChannels, dflt: d.memberChannels, metaKey: sk('memberChannels') });
   add({ key: 'member_fields', group: 'members', label: '会员自定义字段', value: fields(s.memberFields), defaultValue: fields(d.memberFields), pending: false, section: 'members', current: s.memberFields, dflt: d.memberFields, metaKey: sk('memberFields') });
-  add({
-    key: 'frontdesk_rules.vipLevelBasis', group: 'members', label: '会员等级口径', value: VIP_LEVEL_BASIS_LABELS[fd.vipLevelBasis], defaultValue: VIP_LEVEL_BASIS_LABELS[fdd.vipLevelBasis],
-    pending: true, section: 'members', hint: 'VIP 柜也按它核对', current: fd.vipLevelBasis, dflt: fdd.vipLevelBasis, metaKey: 'frontdesk_rules',
-  });
-  add({
-    key: 'frontdesk_rules.vipLevelThresholds', group: 'members', label: '各级门槛', value: yuanList(fd.vipLevelThresholds), defaultValue: yuanList(fdd.vipLevelThresholds),
-    pending: true, section: 'members', current: fd.vipLevelThresholds, dflt: fdd.vipLevelThresholds, metaKey: 'frontdesk_rules',
-  });
-  add({ key: 'frontdesk_rules.vipLevelNames', group: 'members', label: '各级名称', value: names(fd), defaultValue: names(fdd), pending: true, section: 'members', current: names(fd), dflt: names({ ...fdd, vipLevelThresholds: fd.vipLevelThresholds }), metaKey: 'frontdesk_rules' });
+  // ── 会员体系 v2（v0.7.23，后台「会员体系 → 会员规则」）──
+  const mr = await loadMembershipRules(db);
+  const mrd = DEFAULT_MEMBERSHIP_RULES;
+  const ladder = (r: MembershipRules) => r.grades.slice(1).map((g, i) => `L${i + 1} ${g.name} ${formatYuan(g.thresholdCents)} / ${g.bonusBp / 100}%`).join('，');
+  const cycle = (r: MembershipRules) => `周期 ${r.cycleDays} 天；享阶 ${r.enjoyPct}%、尊阶（保级）${r.honorPct}%；补充期 ${r.graceDays} 天`;
+  const mins = (r: MembershipRules) => `首充 ${r.firstRechargeMinCents ? formatYuan(r.firstRechargeMinCents) : '不限'}，续充 ${r.topUpMinCents ? formatYuan(r.topUpMinCents) : '不限'}`;
+  const lockers = (r: MembershipRules) => r.vipLockerLevels.map((v, i) => `L${i}→${v ? `${v} 级` : '不能用'}`).join('，');
+  add({ key: 'membership_rules.grades', group: 'members', label: '档级：门槛 / 赠送比例', value: ladder(mr), defaultValue: ladder(mrd), pending: true, section: 'membership', hint: '按滚动 365 天累计充值升档', current: mr.grades, dflt: mrd.grades, metaKey: 'membership_rules' });
+  add({ key: 'membership_rules.cycle', group: 'members', label: '阶位与会籍周期', value: cycle(mr), defaultValue: cycle(mrd), pending: true, section: 'membership', current: [mr.cycleDays, mr.enjoyPct, mr.honorPct, mr.graceDays], dflt: [mrd.cycleDays, mrd.enjoyPct, mrd.honorPct, mrd.graceDays], metaKey: 'membership_rules' });
+  add({ key: 'membership_rules.minimum', group: 'members', label: '单笔最低充值', value: mins(mr), defaultValue: mins(mrd), pending: true, section: 'membership', hint: '建议续充改成 1,000 或不限（M4）', current: [mr.firstRechargeMinCents, mr.topUpMinCents], dflt: [mrd.firstRechargeMinCents, mrd.topUpMinCents], metaKey: 'membership_rules' });
+  add({ key: 'membership_rules.reminderDays', group: 'members', label: '到期提醒', value: mr.reminderDays.map((d) => `${d} 天`).join('、'), defaultValue: mrd.reminderDays.map((d) => `${d} 天`).join('、'), pending: true, section: 'membership', current: mr.reminderDays, dflt: mrd.reminderDays, metaKey: 'membership_rules' });
+  add({ key: 'membership_rules.vipLockerLevels', group: 'members', label: 'VIP 柜（各档能用到几级柜）', value: lockers(mr), defaultValue: lockers(mrd), pending: true, section: 'membership', current: mr.vipLockerLevels, dflt: mrd.vipLockerLevels, metaKey: 'membership_rules' });
   // ── 前台与结账 ──
   add({
     key: 'frontdesk_rules.selfVoidMinutes', group: 'frontdesk', label: '店员自行更正时限', value: `${fd.selfVoidMinutes} 分钟`, defaultValue: `${fdd.selfVoidMinutes} 分钟`,

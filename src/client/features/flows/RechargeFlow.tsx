@@ -16,6 +16,8 @@ import { BalanceChange, FlowFrame, OperationStatus, OverLimitCard, PendingRecove
 import { isBusy, isLocked, useOperation } from './useOperation';
 import { SHIFT_ERRORS, shiftKeys, ShiftGate, useShiftReady } from '../shift/ShiftGate';
 import { planGiftText, usePlanGifts } from '../coupons/queries';
+import { gradeLabel, rechargeMinimum, rechargeOutcome } from '@shared/membership';
+import { membershipKeys, useMemberGrade, useMembershipRules } from '../membership/queries';
 
 const METHOD_ICONS: Record<PaymentMethod, typeof Smartphone> = {
   wechat: Smartphone,
@@ -45,6 +47,8 @@ export function RechargeFlow({
   const [planId, setPlanId] = useState<number | 'custom' | null>(null);
   const [paidText, setPaidText] = useState('');
   const [bonusText, setBonusText] = useState('');
+  /** 自定义赠金（要「自定义赠金」权限）；不勾时赠金按充值后所在档的比例自动算（会员体系 v2） */
+  const [customBonus, setCustomBonus] = useState(false);
   const [method, setMethod] = useState<PaymentMethod | null>(null);
   const [paymentRef, setPaymentRef] = useState('');
   const [note, setNote] = useState('');
@@ -58,7 +62,18 @@ export function RechargeFlow({
   const gifts = usePlanGifts(can('recharge.create'));
   const planGifts = plan ? (gifts.data ?? []).filter((g) => g.planId === plan.id) : [];
   const paid = plan ? plan.payAmount : parseYuan(paidText);
-  const bonus = plan ? plan.bonusAmount : bonusText.trim() ? parseYuan(bonusText) : 0;
+  // 会员体系 v2（v0.7.23）：赠金按充值后所在档的比例；充完是哪一档、赠多少、最低充多少，与服务端同一算法
+  const rules = useMembershipRules().data;
+  const gradeInfo = useMemberGrade(member.id);
+  const g = gradeInfo.data;
+  const outcomeOf = (amount: number) => (rules && g ? rechargeOutcome(rules, g.state.grade, g.rollingRechargeCents, amount) : null);
+  const outcome = paid && paid > 0 ? outcomeOf(paid) : null;
+  const minimum = rules && g ? rechargeMinimum(rules, g.firstRecharge) : 0;
+  const belowMin = !!paid && minimum > 0 && paid < minimum;
+  const useCustom = canCustomBonus && customBonus;
+  const bonus = useCustom ? (bonusText.trim() ? parseYuan(bonusText) : 0) : (outcome?.bonusCents ?? 0);
+  const afterLabel = rules && outcome ? gradeLabel(rules, outcome.gradeAfter, outcome.upgraded ? 0 : (g?.state.tier ?? null)) : null;
+  const bonusRate = rules && outcome ? rules.grades[outcome.gradeAfter]!.bonusBp / 100 : 0;
 
   const before = { principal: member.principalBalance, bonus: member.bonusBalance };
   const after = { principal: before.principal + (paid ?? 0), bonus: before.bonus + (bonus ?? 0) };
@@ -87,6 +102,8 @@ export function RechargeFlow({
         overLimitGrantId: overLimit ? grant?.grantId : undefined,
         // 员工确认时看到的赠金有效期；期间店主调整了有效期时服务端拒绝，按新的重新确认
         bonusValidDays: bonus ? bonusValidDays : undefined,
+        // 赠金按档自动算（与预览不一致时服务端拒绝）或手动填写（要权限）
+        bonusMode: useCustom ? 'custom' : 'auto',
       },
       meta: {
         memberId: member.id,
@@ -115,6 +132,13 @@ export function RechargeFlow({
       setStep('form');
       setFormError(op.state.error.message);
     }
+    // 档阶刚有变化（别的终端刚充了值、到期处理）或最低充值：刷新这位会员的档阶，回到填写页按新的预览重新确认
+    if (op.state.status === 'error' && ['BONUS_CHANGED', 'RECHARGE_BELOW_MIN'].includes(op.state.error.code)) {
+      void qc.invalidateQueries({ queryKey: membershipKeys.grade(member.id) });
+      void qc.invalidateQueries({ queryKey: membershipKeys.rules });
+      setStep('form');
+      setFormError(op.state.error.message);
+    }
     // 没有开班或班次刚交班（R1.2 收款前必须先开班）：刷新当前班次，页面上出现开班提示
     if (op.state.status === 'error' && SHIFT_ERRORS.includes(op.state.error.code)) void qc.invalidateQueries({ queryKey: shiftKeys.all });
     // 授权过期、已用过或与金额不符：作废这次授权，重新请店主或店总授权；上限刚被调整时刷新规则
@@ -127,6 +151,8 @@ export function RechargeFlow({
   const toConfirm = () => {
     if (planId === null) return setFormError('请选择充值套餐或自定义金额');
     if (!paid || paid <= 0) return setFormError('请填写正确的实收金额（最多两位小数）');
+    if (!g || !rules) return setFormError('正在读取会员的档阶，请稍候');
+    if (belowMin) return setFormError(`${g.firstRecharge ? '首充' : '续充'}单笔最低 ${formatYuan(minimum)}`);
     if (bonus === null) return setFormError('赠金格式不正确');
     if (!method) return setFormError('请选择收款方式');
     setFormError(null);
@@ -183,6 +209,10 @@ export function RechargeFlow({
               {r.recharge.bonusExpiresAt ? `至 ${lastUsableDate(r.recharge.bonusExpiresAt, session.timezone, session.rules.businessDayStartHour)}` : '长期有效'}
             </SummaryRow>
           )}
+          <SummaryRow label="会员档阶">
+            <span data-testid="recharge-result-grade">{rules ? gradeLabel(rules, r.member.grade, r.member.tier) : `L${r.member.grade}`}</span>
+            {g && r.member.grade > g.state.grade && <span className="ml-1.5 font-bold text-pine">升档</span>}
+          </SummaryRow>
           <SummaryRow label="经办">{r.recharge.operatorName}</SummaryRow>
           {r.recharge.overLimitApproverName && <SummaryRow label="超限授权">{r.recharge.overLimitApproverName}</SummaryRow>}
         </div>
@@ -244,7 +274,15 @@ export function RechargeFlow({
             <SummaryRow label="计入本金">
               <Money cents={paid ?? 0} className="text-pine" signed />
             </SummaryRow>
-            <SummaryRow label="赠金">
+            {afterLabel && (
+              <SummaryRow label="充完档阶">
+                <span data-testid="recharge-confirm-grade">
+                  {afterLabel}
+                  {outcome?.upgraded && <span className="ml-1.5 font-bold text-pine">升档（周期从今天起算）</span>}
+                </span>
+              </SummaryRow>
+            )}
+            <SummaryRow label={useCustom ? '赠金（自定义）' : `赠金（按档 ${bonusRate}%）`}>
               <Money cents={bonus ?? 0} className={bonus ? 'text-yuzu-deep' : 'text-ink-4'} signed />
             </SummaryRow>
             {bonus ? <SummaryRow label="赠金有效期">{bonusValidText}</SummaryRow> : null}
@@ -307,7 +345,7 @@ export function RechargeFlow({
       </div>
       <div className="flex items-center justify-between">
         <p className="text-[13px] font-bold text-ink-2">充值方案</p>
-        <PendingBadge title="实际充值与赠送方案待店主确认，当前为模拟方案" />
+        <PendingBadge title="赠金按会员体系 v2 充值后所在档的比例自动算；门槛、比例与最低充值待店主确认（后台「会员规则」可改）" />
       </div>
       {catalog.isPending ? (
         <div className="mt-3 grid grid-cols-2 gap-2.5">
@@ -330,15 +368,15 @@ export function RechargeFlow({
             >
               <span className="text-[13px] font-semibold text-ink-2">{p.name}</span>
               <Money cents={p.payAmount} className="mt-1 text-[20px] font-bold text-ink" />
-              {p.bonusAmount > 0 ? (
+              {(outcomeOf(p.payAmount)?.bonusCents ?? 0) > 0 ? (
                 <span className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                   <span className="inline-flex items-center gap-1 rounded-full bg-yuzu-soft px-2 py-0.5 text-[12px] font-bold text-yuzu-deep">
-                    <Gift className="size-3" />送 <Money cents={p.bonusAmount} />
+                    <Gift className="size-3" />送 <Money cents={outcomeOf(p.payAmount)!.bonusCents} />
                   </span>
                   {p.bonusValidDays && <span className="text-[11.5px] font-semibold text-ink-3">{p.bonusValidDays} 天有效</span>}
                 </span>
               ) : (
-                <span className="mt-1 text-[12px] text-ink-3">无赠送</span>
+                <span className="mt-1 text-[12px] text-ink-3">{g ? '这一档不赠送' : '　'}</span>
               )}
             </button>
           ))}
@@ -352,7 +390,7 @@ export function RechargeFlow({
             )}
           >
             <span className="text-[14px] font-bold text-ink">自定义金额</span>
-            <span className="mt-0.5 text-[12px] text-ink-3">{canCustomBonus ? '手动填写实收与赠金' : '只计本金，不含赠金'}</span>
+            <span className="mt-0.5 text-[12px] text-ink-3">手动填写实收，赠金按档自动算</span>
           </button>
         </div>
       )}
@@ -365,7 +403,7 @@ export function RechargeFlow({
               另赠：{planGiftText(g)}
             </p>
           ))}
-          <p className="mt-0.5 text-[12px] text-ink-3">入账时发到会员账户，与赠金分开；限定了等级的券按充值后的会员等级发，等级不在里面的不发</p>
+          <p className="mt-0.5 text-[12px] text-ink-3">入账时发到会员账户，与赠金分开；限定了档级的券按充值后的档级发，不在里面的不发</p>
         </div>
       )}
 
@@ -374,12 +412,17 @@ export function RechargeFlow({
           <Field label="实收金额" htmlFor="paid" hint="实际收到的钱，等额计入本金">
             <MoneyInput id="paid" large value={paidText} onChange={(e) => setPaidText(e.target.value)} placeholder="0.00" autoFocus />
           </Field>
-          {canCustomBonus ? (
-            <Field label="赠金" htmlFor="bonus" hint="不填即为 0">
-              <MoneyInput id="bonus" value={bonusText} onChange={(e) => setBonusText(e.target.value)} placeholder="0.00" />
-            </Field>
-          ) : (
-            <p className="text-[12.5px] text-ink-3">自定义赠金需店主操作；有赠送请选择上方套餐。</p>
+          {canCustomBonus && (
+            <div className="grid gap-2">
+              <ConfirmCheck checked={customBonus} onChange={setCustomBonus}>
+                不按档级比例，手动填写赠金
+              </ConfirmCheck>
+              {customBonus && (
+                <Field label="赠金" htmlFor="bonus" hint="不填即为 0；记作自定义赠金">
+                  <MoneyInput id="bonus" value={bonusText} onChange={(e) => setBonusText(e.target.value)} placeholder="0.00" />
+                </Field>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -416,6 +459,34 @@ export function RechargeFlow({
         </Field>
       </div>
 
+      {g && rules && (
+        <div className="mt-5 rounded-lg border border-line bg-card px-4 py-3 text-[13px]" data-testid="recharge-grade-preview">
+          <p className="text-ink-3">
+            现在「{gradeLabel(rules, g.state.grade, g.state.tier)}」 · 近 {rules.cycleDays} 天累计充值 <Money cents={g.rollingRechargeCents} />
+            {minimum > 0 && ` · ${g.firstRecharge ? '首充' : '续充'}最低 ${formatYuan(minimum)}`}
+          </p>
+          {outcome && planId !== null && (
+            <>
+              <p className={cn('mt-1 font-semibold', belowMin ? 'text-clay' : 'text-ink')}>
+                {belowMin ? (
+                  `这笔不到${g.firstRecharge ? '首充' : '续充'}最低 ${formatYuan(minimum)}`
+                ) : (
+                  <>
+                    充完是「{afterLabel}」{outcome.upgraded && <span className="text-pine">（升档）</span>}，
+                    {useCustom ? '赠金自定义' : <>按 {bonusRate}% 赠 <Money cents={outcome.bonusCents} className="text-yuzu-deep" /></>}
+                  </>
+                )}
+              </p>
+              {outcome.next && !belowMin && (
+                <p className="mt-0.5 text-ink-3" data-testid="recharge-grade-next">
+                  这笔再加 <Money cents={outcome.next.needCents} className="font-semibold text-ink-2" />（共 <Money cents={(paid ?? 0) + outcome.next.needCents} />）就升到「L
+                  {outcome.next.grade} {outcome.next.name}」，整笔按 {outcome.next.bonusBp / 100}% 赠送（一次到位赠得更多）
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
       {paid != null && paid > 0 && planId !== null && (
         <div className="mt-5 flex items-center justify-between rounded-lg bg-pine-tint px-4 py-3 text-[13px]">
           <span className="font-semibold text-ink-2">充值后可用余额</span>

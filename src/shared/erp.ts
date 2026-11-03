@@ -196,6 +196,8 @@ export const ERP_OP_TYPES = [
   // 供应商付款、期初未付登记（v0.7.22）：原来只放在页面内存里，刷新就丢、服务端也不能作废
   'payment',
   'opening_payable',
+  // 会员体系 v2（v0.7.23）：店主手动调整档阶（Codex 自动审查 43d53e9：超时、回复 500 后也要能查回、重提或作废）
+  'grade_adjust',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -218,6 +220,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   device_job: '测试打印',
   payment: '供应商付款',
   opening_payable: '期初未付登记',
+  grade_adjust: '手动调整会员档阶',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

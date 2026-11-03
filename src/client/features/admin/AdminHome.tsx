@@ -16,7 +16,8 @@ import { AdminPage, useAdminSections } from './AdminShell';
 const SECTION_HINTS: Partial<Record<AdminSection, string>> = {
   settings: '所有规则一张表：当前值、默认值、谁改的',
   rules: '营业日、扣款顺序、上限与时限、开班、库存规则',
-  members: '自定义字段、渠道来源、会员等级与名称',
+  members: '自定义字段、渠道来源',
+  membership: '档级门槛与赠送比例、享 / 尊阶、会籍周期与补充期、最低充值、到期提醒',
   coupons: '券模板、开卡 / 升级 / 生日 / 充值赠券规则、无记名券、统计',
   catalog: '充值套餐、消费项目与价目表、票种票价',
   tags: '手牌池、柜号导入、前台规则',

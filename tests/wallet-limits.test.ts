@@ -28,6 +28,10 @@ beforeAll(async () => {
   duty = await login(ctx.app, 'duty');
   clerk2 = await login(ctx.app, 'clerk2');
   backoffice = await login(ctx.app, 'back');
+  // 会员体系 v2（v0.7.23）的赠金按充值后所在档的比例自动算（50 万到 L6，18%）；这里只核对单笔上限，各档比例设成 0，余额只有本金
+  const rules = (await api(ctx.app, ctx.owner, 'GET', '/api/membership/rules')).body;
+  const saved = await api(ctx.app, ctx.owner, 'PUT', '/api/membership/rules', { ...rules, grades: rules.grades.map((g: object) => ({ ...g, bonusBp: 0 })) });
+  expect(saved.status).toBe(200);
 });
 afterAll(async () => ctx.close());
 

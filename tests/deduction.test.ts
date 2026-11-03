@@ -65,19 +65,24 @@ describe('接口：本金 + 赠金', () => {
     });
   }
 
-  it('店员不能自定义赠金，但可以选套餐', async () => {
+  it('店员不能自定义赠金；套餐只是常用金额，赠金按充值后所在档的比例（会员体系 v2）', async () => {
     const member = await createMember(ctx, '套餐会员', '19900002001');
-    const denied = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(member.id, 50000, 5000));
+    const denied = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(member.id, 50000, 5000, { bonusMode: 'custom' }));
     expect(denied.status).toBe(403);
+    // 不说明赠金方式的旧请求：与按档的赠金（500 元在 L0，没有赠金）不一致，要求重新确认
+    const stale = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(member.id, 50000, 5000));
+    expect(stale.body.error).toMatchObject({ code: 'BONUS_CHANGED', details: { bonusCents: 0 } });
 
     const [plan] = await ctx.sql<{ id: number }[]>`
       INSERT INTO recharge_plans (name, pay_amount, bonus_amount) VALUES ('常泡 500', 50000, 5000) RETURNING id`;
-    const ok = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(member.id, 50000, 5000, { planId: plan!.id }));
+    // 套餐上原来写的赠金不再用
+    expect((await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(member.id, 50000, 5000, { planId: plan!.id, bonusMode: 'auto' }))).body.error.code).toBe('BONUS_CHANGED');
+    const ok = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(member.id, 50000, 0, { planId: plan!.id, bonusMode: 'auto' }));
     expect(ok.status).toBe(200);
-    expect(ok.body.recharge.planName).toBe('常泡 500');
+    expect(ok.body.recharge).toMatchObject({ planName: '常泡 500', bonusAmount: 0 });
 
     // 套餐金额与提交不一致（例如刚被修改）时拒绝
-    const mismatch = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(member.id, 50000, 6000, { planId: plan!.id }));
+    const mismatch = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(member.id, 60000, 0, { planId: plan!.id, bonusMode: 'auto' }));
     expect(mismatch.status).toBe(409);
     expect(mismatch.body.error.code).toBe('PLAN_CHANGED');
   });
