@@ -78,7 +78,7 @@ E2E_DEMO_SHOWCASE=1 E2E_BASE_URL=… npx playwright test e2e/demo-showcase.spec.
 
 - Claude 只在指定的 `claude/*` 分支开发并推送；PR 由店主决定是否合并，AI 不合并、不打标签。
 - **店主合并开发会话的 PR 后，开发会话马上从最新 `main` 重开分支、推送第一个提交（通常是排期或设计文档）并建草稿 PR**（店主 2026-10-31），方便测试会话、Codex 等往里提交报告和评论；做完、CI 全绿后改成待审交店主合并。
-- 业务代码只由开发会话改；测试会话只改 `tests/`、`e2e/`、CI 的测试步骤、演示数据（`src/server/seed*.ts`、`src/server/demo/`）与测试文档，评论开头写「测试会话」。
+- 业务代码只由开发会话改（店主 2026-11-03 起分两条线：主线管 yuzu 本体，会员、钱包、券、结账、前台的核心只由主线改；小程序线只写 `miniprogram/`、`src/gateway/`、`src/server/modules/mp/`、`src/client/features/mp/`、`src/shared/mp.ts`，登记处只加挂接的几行，不改 yuzu 的版本号；见 ROADMAP 第 7 节与 `docs/MINIPROGRAM.md` 第 8 节）；测试会话只改 `tests/`、`e2e/`、CI 的测试步骤、演示数据（`src/server/seed*.ts`、`src/server/demo/`）与测试文档，评论开头写「测试会话」。
 - 版本标签由 CI 自动创建：main 上的 CI 通过后，`.github/workflows/release-tag.yml` 按 `package.json` 的版本号打 `vX.Y.Z`（已有则跳过）。发版时在 PR 里同时改 `package.json`、`package-lock.json`、`Dockerfile`、`compose.yaml` 与 `src/server/config.ts` 里的版本号。正式切换用 1.0.0；在那之前每次发布只加最后一位（v0.7.1、v0.7.2……，店主 2026-10-30 定，见 ROADMAP 第 7 节）。
 - 部署（测试服、门店实例、正式服）只用 `main` 上的版本标签或完整 SHA（`./scripts/update.sh <标签或 SHA>`），不部署 `claude/*` 等开发分支或未合并的 PR。PR 合并后开发分支可以删除，后续开发从最新 `main` 重新拉分支。
 - 提交信息写清阶段与内容；生成内容不写具体模型版本号。
