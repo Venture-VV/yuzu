@@ -2,16 +2,17 @@
 // 标签栏图标存在且不超过 40KB、开发者工具的 TypeScript 编译认得的写法（不用 import 里的 type 修饰、不用 flex 的 gap）。
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const SRC = join(__dirname, '..', 'src');
+const SRC = fileURLToPath(new URL('../src', import.meta.url));
 const app = JSON.parse(readFileSync(join(SRC, 'app.json'), 'utf8')) as {
   pages: string[];
   tabBar: { list: { pagePath: string; iconPath: string; selectedIconPath: string }[] };
 };
 
 function walk(dir: string): string[] {
-  return readdirSync(dir).flatMap((f) => {
+  return readdirSync(dir).flatMap((f: string) => {
     const p = join(dir, f);
     return statSync(p).isDirectory() ? walk(p) : [p];
   });

@@ -64,6 +64,7 @@ npm run check      # 类型检查 + 单元测试；CI 的「小程序：类型�
 
 ## 写法上的约定
 
+- 类型检查分两份：`tsconfig.json` 只查 `src/`，不带 Node 的类型（页面里用不了 Node 的东西）；`tests/tsconfig.json` 查测试，带 Node 的类型。
 - 开发者工具自带的 TypeScript 编译版本不一定新：`import type` 单独写，不用 `import { a, type B }`；不用数字分隔符（`1_000`）。
 - 样式不用 flex 的 `gap`（老 iOS 不认），间距用外边距或 grid 的 `grid-gap`。
 - 金额一律整数「分」，显示用 `utils/format.ts`，不用浮点数算钱。

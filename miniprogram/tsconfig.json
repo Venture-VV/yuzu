@@ -1,5 +1,6 @@
 {
-  // 只做类型检查（npm run typecheck）；编译由微信开发者工具的 TypeScript 插件做（project.config.json 的 useCompilerPlugins）
+  // 只做类型检查（npm run typecheck）；编译由微信开发者工具的 TypeScript 插件做（project.config.json 的 useCompilerPlugins）。
+  // 这一份只查小程序的代码（src/），不带 Node 的类型：页面里用不了 Node 的东西；测试用 tests/tsconfig.json
   "compilerOptions": {
     "target": "ES2020",
     "lib": ["ES2020"],
@@ -14,5 +15,5 @@
     "noEmit": true,
     "types": ["miniprogram-api-typings"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "vitest.config.ts"]
+  "include": ["src/**/*.ts"]
 }
