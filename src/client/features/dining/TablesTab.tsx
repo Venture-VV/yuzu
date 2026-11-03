@@ -334,7 +334,11 @@ export function MemberField({
               </li>
             ))}
             {members.data?.length === 0 && <li className="px-3 py-1.5 text-[13px] text-ink-3">没有找到会员，可以不登记</li>}
-            {memberCodeOf(q) && members.error && <li className="px-3 py-1.5 text-[13px] font-semibold text-clay">{errorMessage(members.error)}</li>}
+            {memberCodeOf(q) && members.error && (
+              <li className="px-3 py-1.5 text-[13px] font-semibold text-clay" data-testid={`${testPrefix}-member-code-error`}>
+                {errorMessage(members.error)}
+              </li>
+            )}
           </ul>
         )}
       </div>

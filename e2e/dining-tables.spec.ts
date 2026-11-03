@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 import type { DiningAdmin, KitchenBoard, TableSessionDetail, TablesAdmin, TablesBoard } from '../src/shared/dining';
 import type { CheckoutDetail } from '../src/shared/checkout';
+import type { MemberSummary } from '../src/shared/types';
 import { ensureShift } from './shift';
 
 const PASSWORD = 'yuzu2026';
@@ -21,6 +22,8 @@ const TABLES = ['E2E-A1', 'E2E-A2', 'E2E-B1', 'E2E-B2'] as const;
 const [A1, A2, B1, B2] = TABLES;
 /** 演示会员（seed-frontdesk-demo）：登记到桌上，结账时用储值付一部分 */
 const MEMBER_PHONE = '19900008802';
+/** 会员码过期时服务端的原话（src/server/modules/mp/member.ts） */
+const CODE_EXPIRED = '会员码过期或不对（或微信已解绑），请让客人刷新后再扫';
 
 async function login(page: Page, username: string) {
   await page.goto('/login');
@@ -294,6 +297,63 @@ test.describe('S5 餐饮第二步 · 桌台', () => {
       await expect(banner).toHaveCount(0);
       const board = await getJson<TablesBoard>(page, '/api/dining/tables');
       expect(board.tables.filter((t) => t.name === B2 && t.session).map((t) => t.session!.guests)).toEqual([2]);
+    } finally {
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+      await relogin(page, 'linlan');
+      await cleanup(page);
+    }
+  });
+
+  // 测试会话预检 a040d79：同一个会员码先认出过、之后失效（过期、解绑）再扫时，不能拿上一次成功的结果登记会员、清空查找框。
+  // 会员码的校验结果用 page.route 模拟（浏览器验收的环境没配会员码）：第一次认出演示会员，之后都是过期
+  test('开台对话框扫会员码：同一个码先登记上、「不登记」后失效再扫，写明原因、保留查找框，不登记回上一次的会员；第一次就过期的写明原因', async ({ page }) => {
+    await login(page, 'linlan');
+    try {
+      await prepare(page);
+      await relogin(page, 'xiaozhou');
+      const [qiao] = await getJson<MemberSummary[]>(page, `/api/members?q=${MEMBER_PHONE}`);
+      expect(qiao, `演示会员 ${MEMBER_PHONE}`).toBeTruthy();
+      const code = '8000004468135792';
+      const expiredFirst = '9000000005357924681';
+      const expired = { status: 410, contentType: 'application/json', body: JSON.stringify({ error: { code: 'CODE_EXPIRED', message: CODE_EXPIRED } }) };
+      let calls = 0;
+      await page.route(`**/api/mp-codes/${code}`, (route) => {
+        calls += 1;
+        return calls === 1
+          ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ memberId: qiao!.id, memberNo: qiao!.memberNo, name: qiao!.name }) })
+          : route.fulfill(expired);
+      });
+      let expiredCalls = 0;
+      await page.route(`**/api/mp-codes/${expiredFirst}`, (route) => {
+        expiredCalls += 1;
+        return route.fulfill(expired);
+      });
+
+      await page.goto('/dining/tables');
+      await page.getByTestId(`table-tile-${B1}`).click();
+      const openDialog = page.getByRole('dialog').filter({ hasText: `开台 · 桌 ${B1}` });
+      const search = openDialog.getByTestId('table-member-search');
+      // ① 第一次扫：直接登记上乔木
+      await search.fill(code);
+      await expect(openDialog.getByTestId('table-member')).toContainText('乔木');
+      // ② 不登记，再扫同一个码（这次过期）：写明原因、查找框留着码、没有登记会员
+      await openDialog.getByTestId('table-member').getByRole('button', { name: '不登记' }).click();
+      await expect(openDialog.getByTestId('table-member')).toHaveCount(0);
+      await search.fill(code);
+      await expect(openDialog.getByTestId('table-member-code-error')).toHaveText(CODE_EXPIRED);
+      await expect(search).toHaveValue(code);
+      await expect(openDialog.getByTestId('table-member')).toHaveCount(0);
+      expect(calls).toBe(2);
+      // ③ 对照：第一次就过期的码
+      await search.fill(expiredFirst);
+      await expect(openDialog.getByTestId('table-member-code-error')).toHaveText(CODE_EXPIRED);
+      await expect(search).toHaveValue(expiredFirst);
+      await expect(openDialog.getByTestId('table-member')).toHaveCount(0);
+      expect(expiredCalls).toBe(1);
+      // 没有开台
+      await openDialog.getByRole('button', { name: '取消' }).click();
+      await expect(openDialog).toHaveCount(0);
+      expect(await sessionOf(page, B1)).toBeNull();
     } finally {
       await page.unrouteAll({ behavior: 'ignoreErrors' });
       await relogin(page, 'linlan');

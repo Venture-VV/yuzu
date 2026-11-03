@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import type {
   AuditRecord,
@@ -46,12 +47,18 @@ export const memberCodeOf = (q: string): string | null => {
 
 /**
  * 查找会员：手机号、后四位、姓名、会员号；扫到会员码时由 yuzu 校验（签名、时间、绑定、会员状态），查到就是那一位
- * （过期、解绑、没配会员码时是出错，页面写明原因，让客人刷新或报手机号）
+ * （过期、解绑、没配会员码时是出错，页面写明原因，让客人刷新或报手机号）。
+ * 会员码每扫进查找框一次就重新校验一次：查询键带上「第几次扫」、不留缓存，校验完成之前没有结果。
+ * 同一个码先认出过、之后失效（过期、解绑）再扫时，页面不会先拿上次成功的结果选人、清空查找框（测试会话预检 a040d79）
  */
 export const useMembers = (q: string) => {
   const code = memberCodeOf(q);
+  // 第几次把会员码扫进来：查找框里从别的内容变成会员码时加一（按 React「记住上一次渲染的值」的写法在渲染里更新）
+  const [scan, setScan] = useState<{ code: string | null; n: number }>({ code: null, n: 0 });
+  const n = code === scan.code ? scan.n : code ? scan.n + 1 : scan.n;
+  if (code !== scan.code) setScan({ code, n });
   return useQuery({
-    queryKey: code ? (['members', 'code', code] as const) : qk.members(q),
+    queryKey: code ? (['members', 'code', code, n] as const) : qk.members(q),
     queryFn: async () => {
       if (!code) return api.get<MemberSummary[]>(`/api/members?q=${encodeURIComponent(q)}`);
       const found = await api.get<MpCodeLookup>(`/api/mp-codes/${code}`);
@@ -59,6 +66,8 @@ export const useMembers = (q: string) => {
     },
     placeholderData: code ? undefined : keepPreviousData,
     staleTime: code ? 0 : 10_000,
+    // 会员码的结果不留缓存：离开查找框就丢掉
+    gcTime: code ? 0 : undefined,
     retry: code ? false : undefined,
   });
 };
