@@ -5,7 +5,7 @@ import type { EditableRole, Permission, Role, RoleOverrides } from './permission
 
 /** 后台分区：路径、名称、所需权限（有其一即可） */
 export const ADMIN_SECTIONS = {
-  home: { path: '/admin', label: '后台首页', perms: ['settings.manage', 'catalog.manage', 'staff.manage', 'audit.read', 'wallet.opening', 'frontdesk.tags', 'technician.manage', 'coupon.manage'] },
+  home: { path: '/admin', label: '后台首页', perms: ['settings.manage', 'catalog.manage', 'staff.manage', 'audit.read', 'wallet.opening', 'frontdesk.tags', 'technician.manage', 'coupon.manage', 'device.manage'] },
   settings: { path: '/admin/settings', label: '规则总表', perms: ['settings.manage', 'audit.read'] },
   rules: { path: '/admin/rules', label: '经营规则', perms: ['settings.manage'] },
   members: { path: '/admin/members', label: '会员与渠道', perms: ['settings.manage'] },
@@ -18,6 +18,8 @@ export const ADMIN_SECTIONS = {
   rooms: { path: '/admin/rooms', label: '客房', perms: ['settings.manage', 'catalog.manage'] },
   // 空间台账（RQ-004 第一段，v0.7.14）：店主、店总，与「客房」同一组权限
   spaces: { path: '/admin/spaces', label: '空间台账', perms: ['settings.manage', 'catalog.manage'] },
+  // 设备（RQ-001，v0.7.21，见 docs/HARDWARE.md）：设备登记、按采购清单导入、打印任务与设备事件；默认店主、店总
+  devices: { path: '/admin/devices', label: '设备', perms: ['device.manage'] },
   staff: { path: '/admin/staff', label: '员工账号', perms: ['staff.manage'] },
   permissions: { path: '/admin/permissions', label: '岗位权限', perms: ['settings.manage', 'audit.read'] },
   opening: { path: '/admin/opening', label: '期初导入', perms: ['wallet.opening'] },

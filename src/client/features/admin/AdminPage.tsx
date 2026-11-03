@@ -7,6 +7,7 @@ import { AdminPage } from './AdminShell';
 import { AuditTab } from './AuditTab';
 import { CatalogTab } from './CatalogTab';
 import { CouponsSection } from './CouponsSection';
+import { DevicesSection } from './DevicesSection';
 import { DiningSection } from './DiningSection';
 import { MembersSection } from './MembersSection';
 import { OpeningTab } from './OpeningTab';
@@ -52,6 +53,7 @@ export const adminRoutes: RouteObject[] = [
   { path: 'dining', element: <DiningSection /> },
   { path: 'rooms', element: <RoomsSection /> },
   { path: 'spaces', element: <SpacesSection /> },
+  { path: 'devices', element: <DevicesSection /> },
   {
     path: 'staff',
     element: (

@@ -7,7 +7,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { SpaceLedger } from '../src/shared/spaces';
 import expected from '../src/server/demo/floorplan-expected.json' with { type: 'json' };
-import { floorplanSampleDxf } from '../src/server/demo/floorplan-sample';
+import { floorplanSampleDxf, floorplanSamplePdf } from '../src/server/demo/floorplan-sample';
 
 const PASSWORD = 'yuzu2026';
 
@@ -154,5 +154,42 @@ test.describe('底图转换（v0.7.15）', () => {
     await page.getByTestId('floorplan-undraw-W306').click();
     await expect(page.getByText('W306 的补画已作废')).toBeVisible();
     await expect(page.getByTestId('floorplan-exception-W306')).not.toContainText('已补画');
+  });
+
+  test('PDF 底图（测试报告建议补的浏览器用例）：页面上的比例文字自动认出；没有比例文字的不填比例转换失败，填上比例重传能转换', async ({ page }) => {
+    const stamp = String(Date.now());
+    // 文件末尾加一行注释：每次跑内容都不同，不会命中「这份图纸已经转换过」
+    const pdf = (kind: 'standard' | 'no-scale') => Buffer.concat([Buffer.from(floorplanSamplePdf(kind)), Buffer.from(`\n% e2e ${stamp}\n`)]);
+    const choosePdf = (name: string, buffer: Buffer) => page.getByTestId('floorplan-file').setInputFiles({ name, mimeType: 'application/pdf', buffer });
+    await login(page, 'linlan');
+    await page.goto('/admin/spaces');
+    await page.getByRole('radio', { name: '底图' }).click();
+    const detail = page.getByTestId('floorplan-detail');
+
+    // 页面上写了 1:100：不填比例也能转换，入库登记里不记填的比例
+    await choosePdf(`样例PDF-${stamp}.pdf`, pdf('standard'));
+    await expect(page.getByTestId('floorplan-pdf-scale')).toBeVisible();
+    await page.getByTestId('floorplan-intake').getByRole('radio', { name: '设计方' }).click();
+    await page.getByTestId('floorplan-upload-submit').click();
+    await expect(detail).toContainText(`样例PDF-${stamp}.pdf`);
+    await expect(detail).toContainText('待启用', { timeout: 30_000 });
+    await expect(detail).toContainText('PDF');
+    await expect(page.getByTestId('floorplan-registration')).not.toContainText('PDF 比例');
+
+    // 页面上没有比例文字、也没填：转换失败，提示要填比例
+    const noScale = pdf('no-scale');
+    await choosePdf(`无比例PDF-${stamp}.pdf`, noScale);
+    await page.getByTestId('floorplan-intake').getByRole('radio', { name: '设计方' }).click();
+    await page.getByTestId('floorplan-upload-submit').click();
+    await expect(detail).toContainText(`无比例PDF-${stamp}.pdf`);
+    await expect(detail).toContainText('没有认出图纸比例', { timeout: 30_000 });
+
+    // 填上 1:100 重传同一份：按填的比例转换（比例不同算另一批，不会回到失败的那一批）
+    await choosePdf(`无比例PDF-${stamp}.pdf`, noScale);
+    await page.getByTestId('floorplan-intake').getByRole('radio', { name: '设计方' }).click();
+    await page.getByTestId('floorplan-pdf-scale').fill('100');
+    await page.getByTestId('floorplan-upload-submit').click();
+    await expect(page.getByTestId('floorplan-registration')).toContainText('PDF 比例 1:100', { timeout: 30_000 });
+    await expect(detail).toContainText('待启用', { timeout: 30_000 });
   });
 });

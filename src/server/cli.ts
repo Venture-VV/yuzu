@@ -48,6 +48,13 @@
 //                                         矢量 PDF 给了 --scale（100 或 1:100 都行）按它换算尺寸，没给时按图上的比例文字（如 1:100）
 //   floorplan-sample <文件.dxf|.pdf>      写出合成的样例图纸（两层、与 docs/data/space-ledger-sample.csv 的编码对应），演示与验收用；
 //                                         文件名以 .pdf 结尾时写 PDF 版（1:100、每层一页、英文文字），否则写 DXF
+//   import-devices --quote [--apply]      按采购清单（12 类 81 台）登记设备（RQ-001，v0.7.21；真实门店数据，默认只预览，加 --apply 才写入，编号已有的跳过）
+//   device-selftest                       硬件连接一键自检（不连数据库、不要真机）：模拟打印机与模拟桥走一遍打印、状态、拔线恢复、读卡、扫码
+//   device-printer-mock [--port 9100] [--mode normal|paper_out|cover_open|fault|silent|drop]
+//                                         模拟网口打印机（不连数据库）：收到的打印内容打到屏幕上；输入 mode <模式>、stop、start、quit
+//   device-bridge-mock [--port 17890] [--terminal 终端编号] [--auto 秒]
+//                                         模拟终端上的设备服务（桥，不连数据库）：输入 card <卡号>、scan <条码>、nfc <卡号>、unplug <键>、plug <键>、
+//                                         fail、quit；--auto 每隔几秒自动发一次读卡与扫码
 
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -58,6 +65,12 @@ import { parseHandTagCsv } from '@shared/hand-tag-import';
 import { formatYuan, parseYuan } from '@shared/money';
 import { parsePriceListCsv } from '@shared/price-list-import';
 import { decodeImportFile, encodingNote } from '@shared/text-decode';
+import { DEFAULT_BRIDGE_PORT } from '@shared/devices';
+import { decodePrintedText } from './devices/escpos';
+import { startMockBridge } from './devices/mock-bridge';
+import { MOCK_PRINTER_MODES, startMockPrinter, type MockPrinterMode } from './devices/mock-printer';
+import { runDeviceSelftest } from './devices/selftest';
+import { importDevices, importPreview } from './modules/devices';
 import { checkPasswordStrength, generateTempPassword, hashPassword } from './auth/password';
 import { destroyStaffSessions } from './auth/session';
 import { loadConfig } from './config';
@@ -167,8 +180,79 @@ function printLegacyAudit(a: LegacyAudit) {
 }
 
 /** 不连数据库的命令（底图转换）：不需要 DATABASE_URL；处理了返回 true */
+/** 逐行读标准输入（模拟设备的命令行） */
+function onStdinLines(handle: (line: string) => void | Promise<void>) {
+  process.stdin.setEncoding('utf8');
+  let buf = '';
+  process.stdin.on('data', (chunk: string) => {
+    buf += chunk;
+    let i: number;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i).trim();
+      buf = buf.slice(i + 1);
+      if (line) void handle(line);
+    }
+  });
+}
+
 async function offlineCommand(command: string | undefined, args: string[]): Promise<boolean> {
   switch (command) {
+    case 'device-selftest': {
+      const r = await runDeviceSelftest((line) => console.log(line));
+      console.log(r.ok ? `✓ 硬件连接自检 ${r.checks.length} 项全部通过（模拟打印机、模拟桥，不连数据库、不要真机）` : `✗ 有 ${r.checks.filter((c) => !c.ok).length} 项没通过`);
+      if (!r.ok) process.exitCode = 1;
+      return true;
+    }
+    case 'device-printer-mock': {
+      const mode = (flag(args, 'mode') ?? 'normal') as MockPrinterMode;
+      if (!MOCK_PRINTER_MODES.includes(mode)) throw new Error(`--mode 只能是 ${MOCK_PRINTER_MODES.join(' / ')}`);
+      const printer = await startMockPrinter({ host: flag(args, 'host') ?? '127.0.0.1', port: Number(flag(args, 'port') ?? 9100), mode });
+      printer.onJob = (job) => console.log(`── 收到打印内容 ${job.length} 字节 ──\n${decodePrintedText(job)}\n──────────`);
+      console.log(`模拟打印机在 ${printer.host}:${printer.port}（${mode}）。输入 mode <${MOCK_PRINTER_MODES.join('|')}>、stop（拔线）、start（插回）、quit`);
+      onStdinLines(async (line) => {
+        const [cmd, arg] = line.split(/\s+/);
+        if (cmd === 'mode' && MOCK_PRINTER_MODES.includes(arg as MockPrinterMode)) printer.setMode(arg as MockPrinterMode);
+        else if (cmd === 'stop') await printer.stop();
+        else if (cmd === 'start') await printer.start();
+        else if (cmd === 'quit') {
+          await printer.close();
+          process.exit(0);
+        } else return console.log('不认识的命令');
+        console.log('✓');
+      });
+      await new Promise(() => {});
+      return true;
+    }
+    case 'device-bridge-mock': {
+      const bridge = await startMockBridge({ host: '127.0.0.1', port: Number(flag(args, 'port') ?? DEFAULT_BRIDGE_PORT), terminal: (flag(args, 'terminal') ?? 'TRM-MOCK-01').toUpperCase() });
+      console.log(`模拟设备服务在 ${bridge.url}（终端 ${bridge.terminal}；设备 ${bridge.devices.map((d) => d.key).join('、')}）`);
+      console.log('输入 card <卡号>、scan <条码>、nfc <卡号>、unplug <键>、plug <键>、fail、quit');
+      const auto = Number(flag(args, 'auto') ?? 0);
+      if (auto > 0) {
+        let n = 0;
+        setInterval(() => {
+          n += 1;
+          bridge.sendCard(`00${String(10000000 + n)}`);
+          bridge.sendScan(`690${String(1000000000 + n)}`);
+        }, auto * 1000);
+      }
+      onStdinLines(async (line) => {
+        const [cmd, arg] = line.split(/\s+/);
+        if (cmd === 'card' && arg) bridge.sendCard(arg);
+        else if (cmd === 'scan' && arg) bridge.sendScan(arg);
+        else if (cmd === 'nfc' && arg) bridge.sendCard(arg, 'nfc');
+        else if (cmd === 'unplug' && arg) bridge.setDevice(arg, 'offline', 'DEVICE_OFFLINE');
+        else if (cmd === 'plug' && arg) bridge.setDevice(arg, 'online');
+        else if (cmd === 'fail') bridge.failRead();
+        else if (cmd === 'quit') {
+          await bridge.close();
+          process.exit(0);
+        } else return console.log('不认识的命令');
+        console.log(`✓（${bridge.clients()} 个页面连着）`);
+      });
+      await new Promise(() => {});
+      return true;
+    }
     case 'floorplan-convert': {
       const file = args[0];
       if (!file || file.startsWith('--')) throw new Error('用法：floorplan-convert <图纸.dwg|.dxf|.pdf> [--out 目录] [--scale 比例]');
@@ -322,6 +406,20 @@ async function main() {
           console.log(`已写入结账演示数据：${result.checkouts} 张结账单、${result.voided} 张反结账，以及一个已交班的班次。预期结果见 src/server/demo/billing-expected.json`);
           console.log(`演示账号：收银员 chenyin / 值班经理 zhangjl / 店主 linlan，密码均为 ${DEMO_PASSWORD}`);
         }
+        break;
+      }
+      case 'import-devices': {
+        if (!args.includes('--quote')) throw new Error('用法：import-devices --quote [--apply]（按需求文档里的采购清单登记设备，默认只预览）');
+        await migrate(sql);
+        const preview = await importPreview(sql);
+        console.log(`采购清单共 ${preview.total} 台：会新建 ${preview.create.length} 台，编号已有、跳过 ${preview.skipped.length} 台`);
+        for (const d of preview.create.slice(0, 200)) console.log(`  ${d.code}  ${d.name}（${d.area}）`);
+        if (!args.includes('--apply')) {
+          console.log('以上为预览，没有写入。确认无误后加 --apply 执行导入（真实门店数据，门店环境须店主同意）；IP、端口、所属终端由现场在后台「设备」填。');
+          break;
+        }
+        const r = await importDevices(sql, null);
+        console.log(`✓ 已导入：新建 ${r.created} 台，跳过 ${r.skipped} 台。`);
         break;
       }
       case 'import-hand-tags': {
@@ -595,7 +693,7 @@ async function main() {
         break;
       }
       default:
-        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo [--previous-day] | seed-billing-demo [--previous-day] | seed-legacy-demo | demo-prepare [--previous-day] | demo-check | demo-reset --confirm <数据库名> | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup | daily-recon | balance-changes | floorplan-convert | floorplan-sample');
+        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo [--previous-day] | seed-billing-demo [--previous-day] | seed-legacy-demo | demo-prepare [--previous-day] | demo-check | demo-reset --confirm <数据库名> | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup | daily-recon | balance-changes | floorplan-convert | floorplan-sample | import-devices | device-selftest | device-printer-mock | device-bridge-mock');
         process.exitCode = command ? 1 : 0;
     }
   } finally {

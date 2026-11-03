@@ -6,6 +6,8 @@ import { createSql } from './db';
 import { migrate } from './migrate';
 import { sweepExpiredBonus } from './modules/bonus';
 import { issueBirthdayCoupons } from './modules/coupons';
+import { checkDevicesOnce, recoverJobs } from './modules/devices';
+import { HEARTBEAT_INTERVAL_MS } from '@shared/devices';
 import { holdAppPresence } from './presence';
 
 const config = loadConfig();
@@ -33,6 +35,10 @@ async function main() {
   await purgeExpiredSessions(sql);
 
   const app = await buildApp(sql, config);
+  // 硬件连接（v0.7.21）：开端口之前先处理上次进程留下的打印任务——还在发送的记失败、排队的接着打。
+  // 开端口之后才处理的话，刚提交、正在发的新任务也会被当成上次留下的记失败（Codex 自动审查 9ca8a95）
+  const deviceLog = (msg: string, err: unknown) => app.log.error({ err }, msg);
+  await recoverJobs({ sql, config }, deviceLog).catch((error) => app.log.error({ err: error }, '打印任务恢复失败'));
   await app.listen({ host: config.host, port: config.port });
   app.log.info(`浴族 yuzu 已启动：http://${config.host}:${config.port}（${config.env}）`);
 
@@ -65,9 +71,21 @@ async function main() {
   await sweep();
   const sweeper = setInterval(() => void sweep(), 60_000);
 
+  // 硬件连接（v0.7.21）：每 2 秒查一次设备（网口心跳、终端上报超时）；打印任务的恢复在开端口之前做过了
+  let deviceCheck: Promise<void> | null = null;
+  const deviceTimer = setInterval(() => {
+    if (deviceCheck) return;
+    deviceCheck = checkDevicesOnce({ sql })
+      .catch((error) => app.log.error({ err: error }, '设备心跳失败，2 秒后重试'))
+      .finally(() => {
+        deviceCheck = null;
+      });
+  }, HEARTBEAT_INTERVAL_MS);
+
   const shutdown = async (signal: string) => {
     app.log.info(`收到 ${signal}，正在关闭…`);
     clearInterval(sweeper);
+    clearInterval(deviceTimer);
     await app.close();
     await presence.release();
     await sql.end({ timeout: 5 });

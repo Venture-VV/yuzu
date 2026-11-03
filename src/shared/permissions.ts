@@ -12,6 +12,7 @@
 // v0.7.17 新增「看实时位置」「上报位置」（第一级实时位置），默认值待确认。
 // v0.7.19 新增「看对客导览」（区域导览图与大屏轮播，没有经营数据），默认所有岗位，待确认。
 // v0.7.20 新增「开退款单」（离店后部分退款）与券的三项权限（维护券模板与规则、发券给会员、作废券），默认值待确认。
+// v0.7.21 新增设备的三项权限（看设备状态、测试打印、维护设备；飞书需求 RQ-001），默认值待确认。
 
 export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice'] as const;
 export type Role = (typeof ROLES)[number];
@@ -168,6 +169,15 @@ export const PERMISSIONS = {
   'location.report': { roles: ['owner', 'store_manager'] },
   /** 对客导览（v0.7.19，待确认：所有岗位）：区域色块、中英双语、设施图标的导览图与大屏轮播；不显示房号、房态、人员，没有经营数据 */
   'guide.view': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice'] },
+  /**
+   * 看设备状态（v0.7.21，待确认：前台岗位）：门店主导航「设备」一屏看全部设备；开着页面的终端替桥上报状态也用这项。
+   * 后勤默认没有：只用 ERP 的后勤照旧没有「返回门店」（v0.7.3 验收 E2）；库房要上报扫码枪时在「岗位权限」给后勤加上
+   */
+  'device.view': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
+  /** 测试打印（v0.7.21，待确认：值班经理及以上） */
+  'device.test': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  /** 维护设备（v0.7.21，待确认：店主、店总）：设备登记、按采购清单导入、启用停用 */
+  'device.manage': { roles: ['owner', 'store_manager'] },
   'settings.manage': { roles: ['owner'] },
   'audit.read': { roles: ['owner', 'store_manager'] },
   // ── 数据看板（v0.6.0；当日看板仍按「查看当日流水与日结」）──
@@ -296,6 +306,9 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'location.view': '看实时位置（平面图上的在场人员与轨迹）',
   'location.report': '上报位置（模拟刷卡、设备桥）',
   'guide.view': '看对客导览（区域导览图、门店大屏轮播）',
+  'device.view': '看设备状态（一屏看全部设备、终端上报）',
+  'device.test': '测试打印（打印机、标签机）',
+  'device.manage': '维护设备（登记、按采购清单导入、启用停用）',
   'settings.manage': '修改经营规则设置',
   'audit.read': '查看操作审计',
   'report.executive': '看经营总览（任选时段、环比）',
@@ -314,6 +327,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
     items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.refund', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen', 'room.operate', 'room.housekeep', 'location.view', 'location.report', 'guide.view'],
   },
   { title: '券与会员权益', items: ['coupon.manage', 'coupon.issue', 'coupon.void'] },
+  { title: '设备', items: ['device.view', 'device.test', 'device.manage'] },
   {
     title: 'ERP（库存、采购、货款、费用、营业数据）',
     items: [

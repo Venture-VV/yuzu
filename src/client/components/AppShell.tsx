@@ -13,6 +13,7 @@ import { storePageOf, useStoreNav } from './storeNav';
 import { PendingOpsBanner } from './PendingOpsBanner';
 import { FrontdeskPendingBanner } from '../features/frontdesk/PendingBanner';
 import { useErpAccess } from '../features/erp/access';
+import { TerminalBridgeRunner } from '../features/devices/terminal';
 import { Badge } from './ui';
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -27,6 +28,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (page && !(Array.isArray(page.perm) ? page.perm : [page.perm]).some((p) => can(p))) return <Navigate to="/" replace />;
   return (
     <div className="flex h-dvh min-h-0 bg-paper">
+      {/* 设备（v0.7.21）：选了「这台终端」的设备常连本机的设备服务、替它上报（不在设备页也照常） */}
+      <TerminalBridgeRunner />
       <nav
         aria-label="主导航"
         className="flex w-[76px] shrink-0 flex-col items-center gap-1 bg-[#1d3f31] pt-4 pb-4 text-paper short:gap-0.5 short:pt-2.5 short:pb-2.5 md:w-[84px]"
