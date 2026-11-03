@@ -20,6 +20,7 @@ import { idParam, parse } from '../lib/validate';
 import { businessDate, nextDocNo, setTxTimeouts } from './frontdesk/common';
 import { pricesColumn } from './pricing';
 import { ctxOf } from '../lib/context';
+import { saveRuleSetting } from '../lib/rule-settings';
 
 export async function loadDiningRules(db: Db): Promise<DiningRules> {
   const [row] = await db<{ value: Partial<DiningRules> }[]>`SELECT value FROM settings WHERE key = 'dining_rules'`;
@@ -344,15 +345,7 @@ export function registerDiningRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/admin/dining', { preHandler: guardAny('settings.manage', 'catalog.manage') }, async () => diningAdmin(sql));
 
   app.put('/api/admin/dining/rules', { preHandler: guard('settings.manage') }, async (req) => {
-    await sql.begin(async (tx) => {
-      await tx`SELECT pg_advisory_xact_lock(hashtext('settings'))`;
-      const before = await loadDiningRules(tx);
-      const after = parse(RulesInput, { ...before, ...parse(RulesInput.partial(), req.body) });
-      await tx`
-        INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('dining_rules', ${tx.json(after as never)}, now(), ${req.actor.id})
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`;
-      await writeAudit(tx, { staffId: req.actor.id, action: 'settings_updated', targetType: 'settings', detail: { key: 'dining_rules', before, after }, ip: req.ip });
-    });
+    await saveRuleSetting(sql, 'dining_rules', loadDiningRules, (before) => parse(RulesInput, { ...before, ...parse(RulesInput.partial(), req.body) }), ctxOf(req));
     return diningAdmin(sql);
   });
 

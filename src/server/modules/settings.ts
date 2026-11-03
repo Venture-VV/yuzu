@@ -11,6 +11,7 @@ import { badRequest } from '../lib/errors';
 import type { Deps } from '../lib/context';
 import { parse } from '../lib/validate';
 import { guard } from '../auth/guard';
+import { lockSettings } from '../lib/rule-settings';
 
 export interface StoreSettings extends StoreRules {
   storeName: string;
@@ -169,7 +170,7 @@ export function registerSettingsRoutes(app: FastifyInstance, { sql }: Deps) {
     const parsed = parse(SettingsInput, req.body);
     await sql.begin(async (tx) => {
       // 同时保存规则时串行执行，避免新字段编号冲突或互相覆盖
-      await tx`SELECT pg_advisory_xact_lock(hashtext('settings'))`;
+      await lockSettings(tx);
       const before = await loadSettings(tx);
       const input: Partial<StoreSettings> = {
         ...parsed,

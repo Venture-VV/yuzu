@@ -12,6 +12,7 @@ import { conflict, notFound, unprocessable } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { CENTRAL_WAREHOUSE_ID } from '@shared/inventory';
 import { coverFor, loadInventorySettings, todayIn, usageByMaterial, usageSince } from './common';
+import { lockSettings } from '../../lib/rule-settings';
 
 const MATERIAL_COLUMNS = (db: Db) => db`
   m.id, m.code, m.name, m.category, m.specification, m.inventory_unit, m.decimals, m.purchase_unit,
@@ -262,8 +263,10 @@ export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps
   app.get('/api/inventory/settings', { preHandler: guard('inventory.read') }, async () => loadInventorySettings(sql));
   app.put('/api/inventory/settings', { preHandler: guard('settings.manage') }, async (req) => {
     const s = parse(SettingsInput, req.body);
-    const before = await loadInventorySettings(sql);
     await sql.begin(async (tx) => {
+      // 与其他规则保存串行，在锁里读当前值（没提交的周期规则沿用它；v0.7.22 修正：原来在锁外读，两人同时保存会互相覆盖）
+      await lockSettings(tx);
+      const before = await loadInventorySettings(tx);
       const entries: [string, unknown][] = [
         ['inventory_scope_name', s.scopeName],
         ['inventory_price_basis', s.priceBasis],

@@ -22,6 +22,7 @@ import { docDateSchema } from './inventory/common';
 import { assertCanFix, businessDate, hashRequest, loadFrontdeskRules, nextDocNo, runIdempotent, saveKey } from './frontdesk/common';
 import { leaveUsages, locateUsage } from './locations';
 import { ctxOf } from '../lib/context';
+import { saveRuleSetting } from '../lib/rule-settings';
 
 // ───────────────────────── 规则 ─────────────────────────
 
@@ -42,14 +43,7 @@ const RulesInput = z.object({
 
 async function saveUsageRules(deps: Deps, raw: unknown, ctx: OpContext) {
   const next = parse(RulesInput, raw);
-  await deps.sql.begin(async (tx) => {
-    await tx`SELECT pg_advisory_xact_lock(hashtext('settings'))`;
-    const before = await loadUsageRules(tx);
-    await tx`
-      INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('usage_rules', ${tx.json(next as never)}, now(), ${ctx.actor.id})
-      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`;
-    await writeAudit(tx, { staffId: ctx.actor.id, action: 'settings_updated', targetType: 'settings', detail: { key: 'usage_rules', before, after: next }, ip: ctx.ip });
-  });
+  await saveRuleSetting(deps.sql, 'usage_rules', loadUsageRules, () => next, ctx);
   return loadUsageRules(deps.sql);
 }
 

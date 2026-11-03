@@ -41,6 +41,7 @@ import { batchFloors, batchRooms } from './floorplans';
 import { loadSettings } from './settings';
 import { lockLedger } from './spaces';
 import { ctxOf } from '../lib/context';
+import { saveRuleSetting } from '../lib/rule-settings';
 
 // ───────────────────────── 规则 ─────────────────────────
 
@@ -59,14 +60,7 @@ const RulesInput = z.object({
 
 async function saveGuideRules(deps: Deps, raw: unknown, ctx: OpContext) {
   const next = parse(RulesInput, raw);
-  await deps.sql.begin(async (tx) => {
-    await tx`SELECT pg_advisory_xact_lock(hashtext('settings'))`;
-    const before = await loadGuideRules(tx);
-    await tx`
-      INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('guide_rules', ${tx.json(next as never)}, now(), ${ctx.actor.id})
-      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`;
-    await writeAudit(tx, { staffId: ctx.actor.id, action: 'settings_updated', targetType: 'settings', detail: { key: 'guide_rules', before, after: next }, ip: ctx.ip });
-  });
+  await saveRuleSetting(deps.sql, 'guide_rules', loadGuideRules, () => next, ctx);
 }
 
 // ───────────────────────── 坐标：本地（10 毫米一单位，图框左上角为原点、y 向下）↔ 图纸（毫米） ─────────────────────────

@@ -39,6 +39,7 @@ import { isUniqueViolation, readSnapshot, type Db, type Tx } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
+import { ctxOf } from '../lib/context';
 import { toCsv, csvReply } from '../lib/csv';
 import { assertNotFenced, lockOpKey } from '../lib/fences';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
@@ -48,6 +49,7 @@ import { assertNotFuture, assertSameMonth, docDateSchema, logApproval, poSettlem
 import { checkDateRange, daysBetween, todayIn } from '../lib/dates';
 import { nextDocNo, setTxTimeouts } from '../lib/tx';
 import { hashRequest } from '../lib/idempotency';
+import { saveRuleSetting } from '../lib/rule-settings';
 
 const id = z.number().int().positive();
 const yuan = (cents: number) => (cents < 0 ? '-' : '') + formatAmount(Math.abs(cents)).replace(/,/g, '');
@@ -937,13 +939,7 @@ export function registerExpenseRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/erp/expenses/rules', { preHandler: guard('expense.read') }, async () => loadExpenseRules(sql));
   app.put('/api/erp/expenses/rules', { preHandler: guard('settings.manage') }, async (req) => {
     const rules = parse(RulesInput, req.body);
-    await sql.begin(async (tx) => {
-      const before = await loadExpenseRules(tx);
-      await tx`
-        INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('expense_rules', ${tx.json(rules as never)}, now(), ${req.actor.id})
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`;
-      await writeAudit(tx, { staffId: req.actor.id, action: 'settings_updated', targetType: 'settings', detail: { key: 'expense_rules', before, after: rules }, ip: req.ip });
-    });
+    await saveRuleSetting(sql, 'expense_rules', loadExpenseRules, () => rules, ctxOf(req));
     return loadExpenseRules(sql);
   });
 

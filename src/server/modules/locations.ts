@@ -43,6 +43,7 @@ import { businessDate, setTxTimeouts } from './frontdesk/common';
 import { loadSettings } from './settings';
 import { ctxOf } from '../lib/context';
 import { hashRequest } from '../lib/idempotency';
+import { saveRuleSetting } from '../lib/rule-settings';
 
 // ───────────────────────── 规则 ─────────────────────────
 
@@ -797,19 +798,20 @@ const RulesInput = z.object({
 });
 
 async function saveRules(deps: Deps, raw: unknown, ctx: OpContext) {
-  await deps.sql.begin(async (tx) => {
-    await tx`SELECT pg_advisory_xact_lock(hashtext('settings'))`;
-    const before = await loadLocationRules(tx);
-    const after = parse(RulesInput, { ...before, ...parse(RulesInput.partial(), raw) });
-    for (const [label, id] of [['接待区', after.checkinZoneId], ['技师休息区', after.restZoneId]] as const) {
-      if (id === null || id === before[label === '接待区' ? 'checkinZoneId' : 'restZoneId']) continue;
-      if (!(await zonePlace(tx, id))) throw unprocessable('ZONE_INACTIVE', `${label}选的区域不存在或已停用`);
-    }
-    await tx`
-      INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('location_rules', ${tx.json(after as never)}, now(), ${ctx.actor.id})
-      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`;
-    await writeAudit(tx, { staffId: ctx.actor.id, action: 'settings_updated', targetType: 'settings', detail: { key: 'location_rules', before, after }, ip: ctx.ip });
-  });
+  await saveRuleSetting(
+    deps.sql,
+    'location_rules',
+    loadLocationRules,
+    async (before, tx) => {
+      const after = parse(RulesInput, { ...before, ...parse(RulesInput.partial(), raw) });
+      for (const [label, id] of [['接待区', after.checkinZoneId], ['技师休息区', after.restZoneId]] as const) {
+        if (id === null || id === before[label === '接待区' ? 'checkinZoneId' : 'restZoneId']) continue;
+        if (!(await zonePlace(tx, id))) throw unprocessable('ZONE_INACTIVE', `${label}选的区域不存在或已停用`);
+      }
+      return after;
+    },
+    ctx,
+  );
 }
 
 const ReaderFields = {

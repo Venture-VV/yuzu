@@ -48,6 +48,7 @@ import { loadSettings } from './settings';
 import { lockPaymentShift, openShiftOf } from './shifts';
 import { leaveRoomStay, locateRoomStay } from './locations';
 import { ctxOf } from '../lib/context';
+import { saveRuleSetting } from '../lib/rule-settings';
 
 // ───────────────────────── 规则 ─────────────────────────
 
@@ -111,14 +112,7 @@ export async function roomsAdmin(db: Db): Promise<RoomsAdmin> {
 
 async function saveRoomRules(deps: Deps, raw: unknown, ctx: OpContext) {
   const next = parse(RulesInput, raw);
-  await deps.sql.begin(async (tx) => {
-    await tx`SELECT pg_advisory_xact_lock(hashtext('settings'))`;
-    const before = await loadRoomRules(tx);
-    await tx`
-      INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('room_rules', ${tx.json(next as never)}, now(), ${ctx.actor.id})
-      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`;
-    await writeAudit(tx, { staffId: ctx.actor.id, action: 'settings_updated', targetType: 'settings', detail: { key: 'room_rules', before, after: next }, ip: ctx.ip });
-  });
+  await saveRuleSetting(deps.sql, 'room_rules', loadRoomRules, () => next, ctx);
 }
 
 const RoomTypeInput = z

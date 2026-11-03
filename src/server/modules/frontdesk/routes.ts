@@ -7,8 +7,7 @@ import { MAX_LEVEL_NAME_LENGTH } from '@shared/members';
 import { can } from '@shared/permissions';
 import { guard } from '../../auth/guard';
 import { readSnapshot } from '../../db';
-import { writeAudit } from '../../lib/audit';
-import type { Deps, OpContext } from '../../lib/context';
+import type { Deps } from '../../lib/context';
 import { badRequest, forbidden, notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { checkBackfillAt } from './backfill';
@@ -39,7 +38,7 @@ import {
   type SwapInputData,
 } from './visits';
 import { ctxOf } from '../../lib/context';
-
+import { saveRuleSetting } from '../../lib/rule-settings';
 
 const RulesInput = z.object({
   selfVoidMinutes: z.number().int().min(0, '分钟数不能为负').max(120, '最多 120 分钟'),
@@ -305,16 +304,9 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
   // ── 规则与自检 ──
   app.get('/api/frontdesk/rules', { preHandler: guard('frontdesk.read') }, async () => loadFrontdeskRules(sql));
 
-  // 只改提交的字段，其余沿用当前规则；合并后整体校验
+  // 只改提交的字段，其余沿用当前规则；合并后整体校验（v0.7.22：在锁里读当前规则再合并，两人同时改不同字段不会互相覆盖）
   app.put('/api/frontdesk/rules', { preHandler: guard('settings.manage') }, async (req) => {
-    const before = await loadFrontdeskRules(sql);
-    const input = parse(RulesInput, { ...before, ...parse(RulesInput.partial(), req.body) });
-    await sql.begin(async (tx) => {
-      await tx`
-        INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('frontdesk_rules', ${tx.json(input)}, now(), ${req.actor.id})
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`;
-      await writeAudit(tx, { staffId: req.actor.id, action: 'settings_updated', targetType: 'settings', detail: { key: 'frontdesk_rules', before, after: input }, ip: req.ip });
-    });
+    await saveRuleSetting(sql, 'frontdesk_rules', loadFrontdeskRules, (before) => parse(RulesInput, { ...before, ...parse(RulesInput.partial(), req.body) }), ctxOf(req));
     return loadFrontdeskRules(sql);
   });
 
