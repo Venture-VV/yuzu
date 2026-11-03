@@ -11,6 +11,7 @@ import { ensureMembershipLive, runMembershipDaily } from './modules/membership';
 import { runBenefitsDaily } from './modules/benefits';
 import { HEARTBEAT_INTERVAL_MS } from '@shared/devices';
 import { holdAppPresence } from './presence';
+import { buildMpApp } from './modules/mp/app';
 
 const config = loadConfig();
 const sql = createSql(config.databaseUrl);
@@ -46,6 +47,12 @@ async function main() {
   await recoverJobs({ sql, config }, deviceLog).catch((error) => app.log.error({ err: error }, '打印任务恢复失败'));
   await app.listen({ host: config.host, port: config.port });
   app.log.info(`浴族 yuzu 已启动：http://${config.host}:${config.port}（${config.env}）`);
+  // 微信小程序（小程序线）：单开的小程序端口，只挂给网关的 /api/mp/*；没设 MP_PORT 不开
+  const mpApp = config.mp.port ? await buildMpApp(sql, config) : null;
+  if (mpApp) {
+    await mpApp.listen({ host: config.mp.host, port: config.mp.port! });
+    app.log.info(`小程序端口已开：${config.mp.host}:${config.mp.port}（只给网关）`);
+  }
 
   // 赠金到期作废：启动时先扫描一次，之后每分钟一次（会员记账、打开会员详情时也会先处理这位会员）
   let lastBirthday = 0;
@@ -109,6 +116,7 @@ async function main() {
     clearInterval(sweeper);
     clearInterval(deviceTimer);
     await app.close();
+    await mpApp?.close();
     await presence.release();
     await sql.end({ timeout: 5 });
     process.exit(0);

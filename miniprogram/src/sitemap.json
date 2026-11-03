@@ -1,0 +1,9 @@
+{
+  "desc": "微信搜一搜只收录门店信息、价目与导览；会员页面不收录",
+  "rules": [
+    { "action": "allow", "page": "pages/home/index" },
+    { "action": "allow", "page": "pages/prices/index" },
+    { "action": "allow", "page": "pages/guide/index" },
+    { "action": "disallow", "page": "*" }
+  ]
+}

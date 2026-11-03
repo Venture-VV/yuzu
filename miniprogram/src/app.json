@@ -1,0 +1,36 @@
+{
+  "pages": [
+    "pages/home/index",
+    "pages/prices/index",
+    "pages/guide/index",
+    "pages/me/index",
+    "pages/code/index",
+    "pages/ledger/index",
+    "pages/coupons/index",
+    "pages/unbind/index"
+  ],
+  "window": {
+    "navigationBarBackgroundColor": "#F5F1EA",
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "汤崎 TOUCHILL",
+    "backgroundColor": "#F5F1EA",
+    "backgroundColorTop": "#F5F1EA",
+    "backgroundColorBottom": "#F5F1EA",
+    "backgroundTextStyle": "dark"
+  },
+  "tabBar": {
+    "color": "#776C60",
+    "selectedColor": "#1C1A17",
+    "backgroundColor": "#F5F1EA",
+    "borderStyle": "black",
+    "list": [
+      { "pagePath": "pages/home/index", "text": "首页", "iconPath": "assets/tab/home.png", "selectedIconPath": "assets/tab/home-on.png" },
+      { "pagePath": "pages/prices/index", "text": "价目", "iconPath": "assets/tab/prices.png", "selectedIconPath": "assets/tab/prices-on.png" },
+      { "pagePath": "pages/guide/index", "text": "导览", "iconPath": "assets/tab/guide.png", "selectedIconPath": "assets/tab/guide-on.png" },
+      { "pagePath": "pages/me/index", "text": "我的", "iconPath": "assets/tab/me.png", "selectedIconPath": "assets/tab/me-on.png" }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

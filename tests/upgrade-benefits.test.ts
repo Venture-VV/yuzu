@@ -64,7 +64,7 @@ describe('迁移 041 · 会员体系 v2 第二期', () => {
     await sql`INSERT INTO membership_job_runs (job, business_date, finished_at, processed) VALUES ('daily', '2026-11-01', now(), 3)`;
     await sql`INSERT INTO op_fences (key, op_type, staff_id) VALUES (${randomUUID()}, 'grade_adjust', ${owner!.id})`;
 
-    expect(await migrate(sql)).toEqual(['041_benefits.sql']);
+    expect(await migrate(sql)).toEqual(['041_benefits.sql', '043_miniprogram.sql', '044_miniprogram_fences.sql']);
 
     const [counts] = await sql<{ issues: number; benefits: number; grants: number; uses: number }[]>`
       SELECT (SELECT count(*) FROM coupon_issues)::int AS issues, (SELECT count(*) FROM benefits)::int AS benefits,

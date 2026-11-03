@@ -1,0 +1,38 @@
+<view wx:if="{{stale}}" class="offline">门店系统连接中，显示的是之前的价目</view>
+<view class="view">
+  <view class="sec-h">
+    <view><text class="eyebrow">Price List</text><text class="h3">价目表</text></view>
+  </view>
+  <view wx:if="{{status === 'loading'}}" class="wait">正在打开…</view>
+  <view wx:elif="{{status === 'error'}}" class="wait">
+    <text class="h3">{{message}}</text>
+    <button class="btn ghost" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+  <block wx:else>
+    <scroll-view class="chips" scroll-x show-scrollbar="{{false}}" enhanced>
+      <view wx:for="{{tabs}}" wx:key="key" class="chip {{item.key === tab ? 'on' : ''}}" data-key="{{item.key}}" bindtap="onTab">{{item.label}}</view>
+    </scroll-view>
+
+    <view class="cat-h">
+      <text class="cat-t">{{title}}</text>
+      <text wx:if="{{tiers}}" class="sub">{{tiers}}</text>
+    </view>
+    <view class="rows">
+      <view wx:for="{{rows}}" wx:key="key" class="item">
+        <image wx:if="{{item.image}}" class="item-img" src="{{item.image}}" mode="aspectFill" data-src="{{item.image}}" bindtap="onImage" />
+        <view class="item-main">
+          <text class="item-name">{{item.name}}</text>
+          <text wx:if="{{item.meta}}" class="item-meta">{{item.meta}}</text>
+          <text wx:if="{{item.intro}}" class="item-intro">{{item.intro}}</text>
+        </view>
+        <view class="item-prices">
+          <view wx:for="{{item.cells}}" wx:for-item="c" wx:key="label" class="cell">
+            <text wx:if="{{c.label}}" class="cell-k">{{c.label}}</text>
+            <text class="cell-v {{c.value === '—' ? 'none' : ''}}">{{c.value}}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+    <text class="sub foot">价格以门店公示为准。技师档位：标准、专业、优选。</text>
+  </block>
+</view>

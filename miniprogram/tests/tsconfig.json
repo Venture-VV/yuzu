@@ -1,0 +1,8 @@
+{
+  // 单元测试的类型检查：在 Node 里跑（vitest），带 Node 的类型
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["miniprogram-api-typings", "node"]
+  },
+  "include": ["./**/*.ts", "../src/**/*.ts", "../vitest.config.ts"]
+}
