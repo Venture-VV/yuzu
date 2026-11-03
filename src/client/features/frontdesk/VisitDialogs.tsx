@@ -93,14 +93,14 @@ export function SwapDialog({
                 : null;
   // 只输了末位且对上多张空闲牌时，列出候选让员工点选，不自动取第一张
   const candidates = c && !target ? matchTags(free, c).slice(0, 8) : [];
-  // VIP 柜：按这位客人的会员等级（散客为 0 级）
-  const guestLevel = visit.memberLevel?.level ?? 0;
+  // VIP 柜：按这位客人的档级能用的柜子等级（散客为 0）
+  const guestLevel = visit.memberGrade?.lockerLevel ?? 0;
   const vipShort = !!target && !problem && target.kind === 'vip' && guestLevel < target.vipLevel!;
   const overrideOn = !!rules?.vipOverrideEnabled;
   const needs = vipShort ? [{ code: target!.code, memberId: visit.member?.id ?? null }] : [];
   const grantOk = needs.length === 0 || (!!grant && grantCovers(grant.scope, needs) && new Date(grant.expiresAt).getTime() > Date.now());
   const ready = !!target && !problem && reason.trim().length >= 2 && (!vipShort || (overrideOn && grantOk)) && (!chargeFee || lockOld);
-  const guestText = visit.member ? `会员「${visit.member.name}」（第 ${guestLevel} 级）` : '散客';
+  const guestText = visit.member ? `会员「${visit.member.name}」（${visit.memberGrade?.label ?? ''}，能用 ${guestLevel} 级柜）` : '散客';
   const locked = op.locked;
   const edit = (fn: () => void) => {
     if (locked) return;

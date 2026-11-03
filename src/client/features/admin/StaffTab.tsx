@@ -67,7 +67,7 @@ export function StaffTab() {
                   </p>
                 </div>
                 <span className="flex flex-wrap gap-1">
-                  <Badge tone={s.role === 'owner' ? 'pine' : s.role === 'backoffice' ? 'lake' : s.role === 'clerk' ? 'neutral' : 'yuzu'}>{ROLE_LABELS[s.role]}</Badge>
+                  <Badge tone={s.role === 'owner' ? 'pine' : s.role === 'backoffice' || s.role === 'other_store' ? 'lake' : s.role === 'clerk' ? 'neutral' : 'yuzu'}>{ROLE_LABELS[s.role]}</Badge>
                   {s.role !== 'owner' &&
                     s.duties.map((d) => (
                       <Badge key={d} tone="moss">
@@ -181,7 +181,7 @@ function StaffDialog({
           username,
           displayName: name,
           role,
-          duties: role === 'owner' ? [] : duties,
+          duties: role === 'owner' || role === 'other_store' ? [] : duties,
           departmentId: departments.data ? departmentId : null,
         });
         onCreated(name, r.temporaryPassword);
@@ -189,7 +189,7 @@ function StaffDialog({
         await api.put(`/api/staff/${existing.id}`, {
           displayName: name,
           role,
-          duties: role === 'owner' ? [] : duties,
+          duties: role === 'owner' || role === 'other_store' ? [] : duties,
           active,
           ...(departments.data ? { departmentId } : {}),
         });
@@ -241,6 +241,7 @@ function StaffDialog({
               { value: 'account_manager', label: '客户经理' },
               { value: 'store_manager', label: '店总' },
               { value: 'backoffice', label: '后勤人员' },
+              { value: 'other_store', label: '他店查询' },
               { value: 'owner', label: '店主' },
             ]}
           />
@@ -249,6 +250,8 @@ function StaffDialog({
         <Field label="库存与采购职责" aside={<span className="text-[12px] text-ink-3">仓库、采购、部门、财务（含成本）、负责人不兼任</span>}>
           {role === 'owner' ? (
             <p className="rounded-md bg-paper-2/70 px-3 py-2.5 text-[13px] text-ink-2">店主默认拥有全部库存与采购权限。</p>
+          ) : role === 'other_store' ? (
+            <p className="rounded-md bg-paper-2/70 px-3 py-2.5 text-[13px] text-ink-2">他店查询只查会员档阶，没有库存与采购职责。</p>
           ) : (
             <div className="grid gap-2 sm:grid-cols-2">
               {DUTIES.map((d) => {

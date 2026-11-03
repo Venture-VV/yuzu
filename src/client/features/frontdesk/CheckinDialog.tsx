@@ -4,7 +4,6 @@ import {
   matchTags,
   normalizeTagCode,
   uniqueTagMatch,
-  VIP_LEVEL_BASIS_LABELS,
   ZONE_LABELS,
   ZONES,
   type BoardTag,
@@ -27,7 +26,7 @@ import { AuthorizeDialog } from '../../components/AuthorizeDialog';
 import { GroupMark, VipChip, ZONE_STYLE } from './parts';
 import { BackfillNotice, backfillBody, backfillSummary, useBackfill } from './backfill';
 import { PendingPanel, useFrontdeskOp } from './pending';
-import { useMemberLevel, useTicketTypes } from './queries';
+import { useMemberGrade, useTicketTypes } from './queries';
 
 export interface CheckinPrefill {
   tagCode?: string;
@@ -138,9 +137,9 @@ export function CheckinDialog({
     const others = new Set(rows.filter((x) => x.id !== r.id).map((x) => normalizeTagCode(x.code)).filter(Boolean));
     return statusOf(tags, r.code, r.zone, others);
   });
-  // VIP 柜：会员本人（第 1 位）按会员等级，其他同行与散客为 0 级
-  const level = useMemberLevel(guestType === 'member' && member ? member.id : null);
-  const guestLevelOf = (i: number): number | null => (i === 0 && guestType === 'member' && member ? (level.data?.level ?? null) : 0);
+  // VIP 柜：会员本人（第 1 位）按档级能用的柜子等级（会员规则里的对应表），其他同行与散客为 0
+  const level = useMemberGrade(guestType === 'member' && member ? member.id : null);
+  const guestLevelOf = (i: number): number | null => (i === 0 && guestType === 'member' && member ? (level.data?.lockerLevel ?? null) : 0);
   const vipRows = rows.map((r, i) => {
     const s = statuses[i];
     if (!s?.ok || s.tag.kind !== 'vip') return null;
@@ -168,7 +167,7 @@ export function CheckinDialog({
     (needs.length === 0 || (overrideOn && grantOk)) &&
     ticketGrantOk;
   const guestText = (v: { memberId: number | null; guestLevel: number | null }) =>
-    v.memberId && member ? `会员「${member.name}」（第 ${v.guestLevel} 级）` : '散客 / 同行客人';
+    v.memberId && member ? `会员「${member.name}」（${level.data?.label ?? ''}，能用 ${v.guestLevel} 级柜）` : '散客 / 同行客人';
   const authLines = short.map((v) => `${guestText(v)} · VIP 柜 ${v.code}（第 ${v.tagLevel} 级）`);
 
   useEffect(() => {
@@ -293,7 +292,8 @@ export function CheckinDialog({
                 </p>
                 {level.data && (
                   <p className="num flex items-center gap-1 text-[12px] font-semibold text-ink-2" data-testid="checkin-member-level">
-                    <Crown className="size-3.5 text-yuzu-deep" /> 会员第 {level.data.level} 级 · {VIP_LEVEL_BASIS_LABELS[level.data.basis]} <Money cents={level.data.amountCents} />
+                    <Crown className="size-3.5 text-yuzu-deep" /> {level.data.label} · 能用 {level.data.lockerLevel} 级及以下的 VIP 柜
+                    {level.data.graceUntil && <span className="text-ember">· 补充期至 {level.data.graceUntil}</span>}
                   </p>
                 )}
               </div>

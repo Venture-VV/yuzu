@@ -1,7 +1,7 @@
 // 后台「券与会员权益」（v0.7.20，飞书 RQ-006 后半，见 docs/COUPONS.md 第 1、2、5、6 节）：
 //   · 券模板：代金券、折扣券、兑换券；门槛、适用范围（整单 / 指定部门 / 指定项目）、有效期（发券后 N 天 / 固定日期，按营业日）、
-//     限定发放等级。发过券的模板只能改名称、备注、停用（带版本号；服务端 TEMPLATE_LOCKED / TEMPLATE_STALE 兜底），要改条件另建；
-//   · 发券规则：开卡礼、升级礼（按等级）、生日礼（按等级）、充值赠券（按充值套餐）。规则不能改，只能停用后另加；
+//     限定发放档级（会员体系 v2 的 L0–L6）。发过券的模板只能改名称、备注、停用（带版本号；服务端 TEMPLATE_LOCKED / TEMPLATE_STALE 兜底），要改条件另建；
+//   · 发券规则：开卡礼、升级礼（按档级）、生日礼（按档级）、充值赠券（按充值套餐）。规则不能改，只能停用后另加；
 //   · 无记名券：按模板生成一批券码（带操作编号，没收到结果时按原内容再提交不会多生成）、导出券码交印刷、按批次作废没用的；
 //   · 统计：按模板列发券、用券（张数、抵扣金额）、过期、作废。
 // 默认店主、店总（「维护券模板、发券规则与无记名券」）；按批次作废还要「作废券」。会员的券在会员详情里看、发、作废。
@@ -104,13 +104,12 @@ export function CouponsSection() {
 
 // ───────────────────────── 共用 ─────────────────────────
 
-/** 「银卡会员（第 2 级）」；没起名的级别就是「第 2 级」 */
+/** 「L3 观澜」：会员体系 v2 的档级（v0.7.23；名称按会员规则） */
 function levelLabel(levels: CouponMeta['levels'] | undefined, level: number) {
-  const name = levels?.find((l) => l.level === level)?.name;
-  return !name || name === `第 ${level} 级` ? `第 ${level} 级` : `${name}（第 ${level} 级）`;
+  return levels?.find((l) => l.level === level)?.name ?? `L${level}`;
 }
 const levelsText = (levels: CouponMeta['levels'] | undefined, picked: number[]) =>
-  picked.length ? `限 ${picked.map((l) => levelLabel(levels, l)).join('、')}` : '不限等级';
+  picked.length ? `限 ${picked.map((l) => levelLabel(levels, l)).join('、')}` : '不限档级';
 
 /** 张数输入：只留数字 */
 const digits = (v: string) => v.replace(/[^0-9]/g, '');
@@ -545,7 +544,7 @@ function TemplateDialog({
               </Button>
             }
           >
-            面额、折扣、门槛、范围、有效期、限定等级都不能改：已发的券始终按发券时的条件算。要改条件请另建模板，再把这个停用。
+            面额、折扣、门槛、范围、有效期、限定档级都不能改：已发的券始终按发券时的条件算。要改条件请另建模板，再把这个停用。
           </Notice>
         )}
         <Field label="名称" htmlFor="coupon-name" hint={`最多 ${MAX_NAME} 字，会员详情和结账时都显示，例如「洗浴代金券」「生日八八折」`}>
@@ -592,7 +591,7 @@ function TemplateDialog({
               {fixedPassed && <p className="text-[12.5px] font-semibold text-ember">结束日期已经过了：这个模板发不出券（自动规则也会跳过）</p>}
             </div>
           )}
-          <Field label="限定发放等级" hint="不选 = 不限。限定后只发给这些等级的会员（发出去以后等级变了照样能用）；无记名券不能用限定了等级的模板">
+          <Field label="限定发放档级" hint="不选 = 不限。限定后只发给这些档级的会员（发出去以后档级变了照样能用）；无记名券不能用限定了档级的模板">
             <div className="flex flex-wrap gap-2">
               {[...new Set([...meta.levels.map((l) => l.level), ...draft.levels])]
                 .sort((a, b) => a - b)
@@ -834,8 +833,8 @@ function ItemPicker({ items, value, onChange }: { items: CouponMeta['items']; va
 
 const RULE_HINTS: Record<CouponRuleKind, string> = {
   open_card: '会员建档时发（期初导入的会员不发）',
-  level_up: '某次充值让会员升到这一级时发；每位会员每条规则只发一次（降级后再升不再发），期初导入不发',
-  birthday: '会员生日当月发，每年每条规则一次，按发券时的等级；没填生日的不发',
+  level_up: '某次充值让会员升到这一档时发（连跳几档的每一档都发）；每位会员每条规则只发一次（降档后再升不再发），上线定档、期初导入不发',
+  birthday: '会员生日当月发，每年每条规则一次，按发券时的档级；没填生日的不发',
   recharge: '用这个套餐充值时在同一笔里发，与赠金并存、互不替代；充值页选套餐时显示「另赠」',
 };
 const needsLevel = (kind: CouponRuleKind) => kind === 'level_up' || kind === 'birthday';
@@ -856,7 +855,7 @@ function RulesCard() {
   const all = rules.data;
   const inactiveCount = all.filter((r) => !r.active).length;
   const targetText = (r: CouponRule) => (needsLevel(r.kind) ? levelLabel(levels, r.level ?? 0) : r.kind === 'recharge' ? (r.planName ?? '充值套餐') : null);
-  // 同一种类里：升级礼、生日礼按等级，充值赠券按套餐排在一起；启用的在前
+  // 同一种类里：升级礼、生日礼按档级，充值赠券按套餐排在一起；启用的在前
   const order = (a: CouponRule, b: CouponRule) =>
     (a.level ?? 0) - (b.level ?? 0) || (a.planId ?? 0) - (b.planId ?? 0) || Number(b.active) - Number(a.active) || a.id - b.id;
   return (
@@ -882,8 +881,8 @@ function RulesCard() {
           </span>
         </SectionTitle>
         <p className="mt-1 text-[12.5px] leading-relaxed text-ink-3">
-          一条规则 = 种类 + 等级（或充值套餐）+ 券 + 张数，同一等级可以配几条。<b className="font-semibold text-ink-2">规则不能改</b>
-          ：要换券或张数，先停用这条，再加一条新的（以发券时的规则为准）。模板停用或固定有效期已过时自动跳过；限定了等级的模板只发给对应等级的会员。
+          一条规则 = 种类 + 档级（或充值套餐）+ 券 + 张数，同一档级可以配几条。<b className="font-semibold text-ink-2">规则不能改</b>
+          ：要换券或张数，先停用这条，再加一条新的（以发券时的规则为准）。模板停用或固定有效期已过时自动跳过；限定了档级的模板只发给对应档级的会员。
         </p>
       </div>
       {COUPON_RULE_KINDS.map((kind) => {
@@ -964,10 +963,10 @@ function RuleDialog({ open, meta, templates, rules, onClose }: { open: boolean; 
     setError(null);
   });
   const leveled = needsLevel(kind);
-  /** 这张模板为什么不能配：限定的等级里没有选的这一级、固定有效期已过 */
+  /** 这张模板为什么不能配：限定的档级里没有选的这一档、固定有效期已过 */
   const blocked = (t: CouponTemplate) =>
     leveled && level !== null && t.levels.length > 0 && !t.levels.includes(level)
-      ? `只发给第 ${t.levels.join('、')} 级`
+      ? `只发给 ${t.levels.map((l) => `L${l}`).join('、')}`
       : templateExpired(t, session.today)
         ? '有效期已过'
         : null;
@@ -977,7 +976,7 @@ function RuleDialog({ open, meta, templates, rules, onClose }: { open: boolean; 
   const same = rules.filter((r) => r.active && r.kind === kind && (leveled ? r.level === level : kind === 'recharge' ? r.planId === planId : true));
   const problem =
     leveled && level === null
-      ? '请选择会员等级'
+      ? '请选择会员档级'
       : kind === 'recharge' && planId === null
         ? '请选择充值套餐'
         : !template
@@ -995,7 +994,7 @@ function RuleDialog({ open, meta, templates, rules, onClose }: { open: boolean; 
     // 发出前把操作编号与原请求存在本机并读回核对（存不了就不发）：没收到结果时关掉对话框、刷新、重新登录后，
     // 在页面上方查回、按原内容重新提交（同一编号，不会多出一条规则、重复发券）或确认作废（Codex 复审 6c3765c）
     const key = uuid();
-    const target = leveled ? `第 ${level} 级` : kind === 'recharge' ? (meta.plans.find((p) => p.id === planId)?.name ?? '充值套餐') : '';
+    const target = leveled ? levelLabel(meta.levels, level ?? 0) : kind === 'recharge' ? (meta.plans.find((p) => p.id === planId)?.name ?? '充值套餐') : '';
     try {
       const next = await sendErpOp<{ ruleId: number; rules: CouponRule[] }>({
         key,
@@ -1055,10 +1054,10 @@ function RuleDialog({ open, meta, templates, rules, onClose }: { open: boolean; 
           />
         </Field>
         {leveled && (
-          <Field label="会员等级" htmlFor="coupon-rule-level" hint={kind === 'level_up' ? '会员升到这一级时发' : '生日当月按会员当时的等级发'}>
+          <Field label="会员档级" htmlFor="coupon-rule-level" hint={kind === 'level_up' ? '充值升到这一档时发（连跳几档的每一档都发）' : '生日当月按会员当时的档级发'}>
             <Select id="coupon-rule-level" value={level ?? ''} onChange={(e) => setLevel(e.target.value ? Number(e.target.value) : null)} disabled={busy} className="h-11" data-testid="coupon-rule-level">
-              <option value="">选择等级</option>
-              {meta.levels.map((l) => (
+              <option value="">选择档级</option>
+              {meta.levels.filter((l) => kind !== 'level_up' || l.level > 0).map((l) => (
                 <option key={l.level} value={l.level}>
                   {levelLabel(meta.levels, l.level)}
                 </option>
@@ -1223,7 +1222,7 @@ function BatchesCard() {
       </SectionTitle>
       <p className="mt-1 text-[12.5px] leading-relaxed text-ink-3">
         按模板生成一批纸质券的券码（一批 1–{MAX_BATCH_COUPONS} 张；券码 12 位，去掉易混的 0、O、1、I），导出清单交印刷。结账时在收款里输入券码使用，一码一次；没用的可以按批次作废
-        {canVoid ? '' : '（要「作废券」权限）'}。限定了会员等级的模板不能用。
+        {canVoid ? '' : '（要「作废券」权限）'}。限定了会员档级的模板不能用。
       </p>
       {batches.data.length === 0 ? (
         <p className={EMPTY_BOX}>还没有生成过无记名券。</p>
@@ -1291,7 +1290,7 @@ function BatchDialog({ open, templates, onClose }: { open: boolean; templates: C
     setNote('');
     setError(null);
   });
-  const blocked = (t: CouponTemplate) => (t.levels.length ? '限定了会员等级' : templateExpired(t, session.today) ? '有效期已过' : null);
+  const blocked = (t: CouponTemplate) => (t.levels.length ? '限定了会员档级' : templateExpired(t, session.today) ? '有效期已过' : null);
   const choices = templates.filter((t) => t.active);
   const template = choices.find((t) => t.id === templateId) ?? null;
   const n = Number(quantity);
@@ -1356,7 +1355,7 @@ function BatchDialog({ open, templates, onClose }: { open: boolean; templates: C
       }
     >
       <div className="space-y-4" data-testid="coupon-batch-dialog">
-        <Field label="券" htmlFor="coupon-batch-template" hint={choices.length === 0 ? '还没有启用的券模板，先在「券模板」里建一个' : '限定了会员等级的模板不能做无记名券'}>
+        <Field label="券" htmlFor="coupon-batch-template" hint={choices.length === 0 ? '还没有启用的券模板，先在「券模板」里建一个' : '限定了会员档级的模板不能做无记名券'}>
           <Select id="coupon-batch-template" value={templateId ?? ''} onChange={(e) => setTemplateId(e.target.value ? Number(e.target.value) : null)} disabled={busy} className="h-11" data-testid="coupon-batch-template">
             <option value="">选择券模板</option>
             {choices.map((t) => {

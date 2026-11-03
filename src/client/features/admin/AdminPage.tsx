@@ -13,6 +13,7 @@ const CouponsSection = lazyPage(() => import('./CouponsSection').then((m) => m.C
 const DevicesSection = lazyPage(() => import('./DevicesSection').then((m) => m.DevicesSection));
 const DiningSection = lazyPage(() => import('./DiningSection').then((m) => m.DiningSection));
 const MembersSection = lazyPage(() => import('./MembersSection').then((m) => m.MembersSection));
+const MembershipRulesSection = lazyPage(() => import('../membership/RulesSection').then((m) => m.MembershipRulesSection));
 const OpeningTab = lazyPage(() => import('./OpeningTab').then((m) => m.OpeningTab));
 const PermissionsSection = lazyPage(() => import('./PermissionsSection').then((m) => m.PermissionsSection));
 const RoomsSection = lazyPage(() => import('./RoomsSection').then((m) => m.RoomsSection));
@@ -35,6 +36,7 @@ export const adminRoutes: RouteObject[] = [
     ),
   },
   { path: 'members', element: <MembersSection /> },
+  { path: 'membership', element: <MembershipRulesSection /> },
   { path: 'coupons', element: <CouponsSection /> },
   {
     path: 'catalog',

@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   BedDouble,
   ClipboardList,
+  Crown,
   Gift,
   HandHeart,
   IdCard,
@@ -36,6 +37,7 @@ const ICONS: Record<AdminSection, LucideIcon> = {
   settings: ListChecks,
   rules: Scale,
   members: IdCard,
+  membership: Crown,
   coupons: Ticket,
   catalog: Gift,
   tags: Tags,
@@ -52,7 +54,7 @@ const ICONS: Record<AdminSection, LucideIcon> = {
 
 const GROUPS: { title: string; items: AdminSection[] }[] = [
   { title: '概览', items: ['home', 'settings'] },
-  { title: '经营设置', items: ['rules', 'members', 'coupons', 'catalog', 'tags', 'technicians', 'dining', 'rooms', 'spaces'] },
+  { title: '经营设置', items: ['rules', 'members', 'membership', 'coupons', 'catalog', 'tags', 'technicians', 'dining', 'rooms', 'spaces'] },
   { title: '人员与权限', items: ['staff', 'permissions'] },
   { title: '数据', items: ['opening', 'audit'] },
 ];

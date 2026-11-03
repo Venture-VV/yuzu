@@ -1,25 +1,22 @@
-// 后台「会员与渠道」：会员资料字段、渠道来源、会员等级（口径、门槛、名称）。
+// 后台「会员与渠道」：会员资料字段、渠道来源。会员等级 v0.7.23 起归后台「会员规则」（会员体系 v2 的档级、阶位与会籍）。
 
-import { useEffect, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, Plus } from 'lucide-react';
-import { levelOf, MAX_VIP_LEVEL, VIP_LEVEL_BASES, VIP_LEVEL_BASIS_LABELS, type FrontdeskRules, type VipLevelBasis } from '@shared/frontdesk';
-import { LEVEL_VALIDITY, levelName, MAX_LEVEL_NAME_LENGTH, MAX_MEMBER_CHANNELS, type MemberChannel } from '@shared/members';
-import { formatYuan, parseYuan } from '@shared/money';
+import { MAX_MEMBER_CHANNELS, type MemberChannel } from '@shared/members';
 import { api, errorMessage } from '../../lib/api';
 import { qk, useSettings } from '../../lib/queries';
 import { cn } from '../../lib/utils';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, Card, Field, IconButton, Input, Notice, PendingBadge, SectionTitle, Segmented, Skeleton } from '../../components/ui';
+import { Badge, Button, Card, IconButton, Input, Notice, PendingBadge, SectionTitle, Segmented, Skeleton } from '../../components/ui';
 import { AdminPage } from './AdminShell';
 import { MemberFieldsCard } from './MemberFieldsCard';
 
 export function MembersSection() {
   return (
-    <AdminPage section="members" description="会员资料要登记哪些内容、从哪些渠道来、按什么口径分等级。改动只影响之后的建档与显示。">
+    <AdminPage section="members" description="会员资料要登记哪些内容、从哪些渠道来。改动只影响之后的建档与显示；档级、赠送比例与会籍在「会员规则」。">
       <div className="space-y-5">
         <ChannelsCard />
-        <LevelsCard />
         <MemberFieldsCard />
       </div>
     </AdminPage>
@@ -127,137 +124,6 @@ function ChannelsCard() {
         {dirty && !problem && <span className="text-[12.5px] text-ink-3">有未保存的修改</span>}
         <Button variant="primary" loading={saving} disabled={!dirty || !!problem} onClick={save} data-testid="channels-save">
           保存渠道
-        </Button>
-      </div>
-    </Card>
-  );
-}
-
-const yuan = (cents: number) => String(cents / 100);
-
-/** 会员等级：口径、各级门槛与名称（VIP 柜也按它核对） */
-function LevelsCard() {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const rules = useQuery({ queryKey: ['frontdesk', 'rules'], queryFn: () => api.get<FrontdeskRules>('/api/frontdesk/rules') });
-  const [basis, setBasis] = useState<VipLevelBasis>('recharge');
-  const [levels, setLevels] = useState<{ threshold: string; name: string }[]>([]);
-  const [sample, setSample] = useState('20000');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!rules.data) return;
-    setBasis(rules.data.vipLevelBasis);
-    setLevels(rules.data.vipLevelThresholds.map((t, i) => ({ threshold: yuan(t), name: rules.data!.vipLevelNames[i] ?? '' })));
-  }, [rules.data]);
-  if (!rules.data) return <Skeleton className="h-56" />;
-
-  // 金额按整数分解析（不用浮点数，v0.7.22）；填得不对的为 null
-  const parsed = levels.map((l) => parseYuan(l.threshold));
-  const cents = parsed.map((c) => c ?? 0);
-  const names = levels.map((l) => l.name.trim());
-  const problem = parsed.some((c) => c === null)
-    ? '各级门槛请填金额（元）'
-    : cents.some((c, i) => i > 0 && c <= cents[i - 1]!)
-      ? '各级门槛必须逐级递增'
-      : names.some((n) => n.length > MAX_LEVEL_NAME_LENGTH)
-        ? `等级名称最多 ${MAX_LEVEL_NAME_LENGTH} 个字`
-        : new Set(names.filter(Boolean)).size !== names.filter(Boolean).length
-          ? '各级名称不能重复'
-          : null;
-  const dirty =
-    basis !== rules.data.vipLevelBasis ||
-    JSON.stringify(cents) !== JSON.stringify(rules.data.vipLevelThresholds) ||
-    JSON.stringify(names) !== JSON.stringify(rules.data.vipLevelThresholds.map((_, i) => (rules.data!.vipLevelNames[i] ?? '').trim()));
-  const sampleCents = parseYuan(sample);
-  const sampleLevel = !problem && sampleCents !== null ? levelOf(sampleCents, cents) : null;
-
-  const save = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.put('/api/frontdesk/rules', { vipLevelBasis: basis, vipLevelThresholds: cents, vipLevelNames: names });
-      await qc.invalidateQueries({ queryKey: ['frontdesk', 'rules'] });
-      toast({ tone: 'success', title: '会员等级已保存', body: '会员详情、会员总览与 VIP 柜核对都按新的等级。' });
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Card className="p-5" data-testid="levels-card">
-      <SectionTitle aside={<PendingBadge title="等级口径、各级门槛与名称是默认做法，待店主确认" />}>会员等级</SectionTitle>
-      <p className="mt-1 text-[12.5px] text-ink-3">
-        会员详情显示当前等级、升级时间与「再充多少到下一级」；VIP 柜按同一等级核对（会员等级不低于柜子等级才能使用）。散客为 0 级。
-      </p>
-      <Field label="等级口径" className="mt-4" hint={LEVEL_VALIDITY[basis]}>
-        <Segmented ariaLabel="等级口径" value={basis} onChange={setBasis} options={VIP_LEVEL_BASES.map((b) => ({ value: b, label: VIP_LEVEL_BASIS_LABELS[b] }))} />
-      </Field>
-      <div className="mt-4 overflow-x-auto rounded-lg border border-line">
-        <table className="w-full min-w-[480px] text-[13px]">
-          <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
-            <tr>
-              <th className="w-20 px-3 py-2 text-left">级别</th>
-              <th className="px-3 py-2 text-left">门槛（{basis === 'recharge' ? '累计充值' : '余额'}达到，元）</th>
-              <th className="px-3 py-2 text-left">名称</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line/70">
-            {levels.map((l, i) => (
-              <tr key={i}>
-                <td className="px-3 py-2 font-semibold">第 {i + 1} 级</td>
-                <td className="px-3 py-1.5">
-                  <Input
-                    value={l.threshold}
-                    inputMode="decimal"
-                    className="num h-9"
-                    aria-label={`第 ${i + 1} 级门槛`}
-                    onChange={(e) => setLevels(levels.map((x, j) => (j === i ? { ...x, threshold: e.target.value } : x)))}
-                  />
-                </td>
-                <td className="px-3 py-1.5">
-                  <Input
-                    value={l.name}
-                    maxLength={MAX_LEVEL_NAME_LENGTH}
-                    placeholder={`第 ${i + 1} 级`}
-                    className="h-9"
-                    aria-label={`第 ${i + 1} 级名称`}
-                    data-testid={`level-name-${i}`}
-                    onChange={(e) => setLevels(levels.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="ghost" disabled={levels.length >= MAX_VIP_LEVEL} onClick={() => setLevels([...levels, { threshold: '', name: '' }])}>
-          加一级
-        </Button>
-        <Button size="sm" variant="ghost" disabled={levels.length <= 1} onClick={() => setLevels(levels.slice(0, -1))}>
-          减一级
-        </Button>
-        <span className="flex-1" />
-        <label className="flex items-center gap-2 text-[12.5px] text-ink-3">
-          试算：{basis === 'recharge' ? '累计充值' : '余额'}
-          <Input value={sample} onChange={(e) => setSample(e.target.value)} inputMode="decimal" fullWidth={false} className="num h-8 w-28" aria-label="试算金额" />
-          元 →
-          <b className="text-ink">{sampleLevel === null ? '—' : `${levelName(sampleLevel, names)}${sampleLevel ? `（第 ${sampleLevel} 级）` : ''}`}</b>
-        </label>
-      </div>
-      {error && <Notice tone="error" title={error} className="mt-3" />}
-      <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
-        {problem && <span className="text-[13px] text-clay">{problem}</span>}
-        {!problem && (
-          <span className="text-[12.5px] text-ink-3">
-            {cents.length} 级，第 1 级 ≥ {formatYuan(cents[0] ?? 0)}
-          </span>
-        )}
-        <Button variant="primary" loading={busy} disabled={!dirty || !!problem} onClick={save} data-testid="levels-save">
-          保存会员等级
         </Button>
       </div>
     </Card>
