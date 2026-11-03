@@ -55,6 +55,15 @@ async function main() {
     } catch (error) {
       app.log.error({ err: error }, '赠金到期作废扫描失败，下一分钟重试');
     }
+    // 会员到期处理（v0.7.23）：营业日开始后处理周期、补充期已结束的会员（今天跑过、没有到期的就什么都不做）。
+    // 放在生日礼之前：生日礼按会员现在的档阶发，到期该降的先降，不按过期的档阶发（Codex 自动审查 43d53e9）
+    try {
+      const run = await runMembershipDaily({ sql, config });
+      if (run?.processed) app.log.info(`会员到期处理：${run.processed} 位（保级 ${run.retained}、进补充期 ${run.grace}、降档 ${run.downgraded}）`);
+      if (run?.error) app.log.error(`会员到期处理有出错的：${run.error}`);
+    } catch (error) {
+      app.log.error({ err: error }, '会员到期处理失败，下一分钟重试');
+    }
     // 生日礼（v0.7.20）：每 10 分钟检查一次生日当月还没发的会员（去重键兜底，几个进程同时跑也只发一次）
     if (Date.now() - lastBirthday >= 10 * 60_000) {
       lastBirthday = Date.now();
@@ -64,14 +73,6 @@ async function main() {
       } catch (error) {
         app.log.error({ err: error }, '生日礼发券失败，10 分钟后重试');
       }
-    }
-    // 会员到期处理（v0.7.23）：营业日开始后处理周期、补充期已结束的会员（今天跑过、没有到期的就什么都不做）
-    try {
-      const run = await runMembershipDaily({ sql, config });
-      if (run?.processed) app.log.info(`会员到期处理：${run.processed} 位（保级 ${run.retained}、进补充期 ${run.grace}、降档 ${run.downgraded}）`);
-      if (run?.error) app.log.error(`会员到期处理有出错的：${run.error}`);
-    } catch (error) {
-      app.log.error({ err: error }, '会员到期处理失败，下一分钟重试');
     }
     // 顺带检查应用在跑的标记（数据库重启过、专用连接断了就重新拿）
     try {

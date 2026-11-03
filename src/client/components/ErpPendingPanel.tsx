@@ -59,6 +59,9 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
       return d.payment && typeof d.payment === 'object' ? { refId: d.payment.id } : null;
     case 'opening_payable':
       return d.opening && typeof d.opening === 'object' ? { refId: d.opening.id } : null;
+    // 手动调整会员档阶（v0.7.23）：返回那位会员的等级卡
+    case 'grade_adjust':
+      return typeof d.memberId === 'number' ? { refId: d.memberId } : null;
   }
 }
 

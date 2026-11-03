@@ -290,3 +290,71 @@ describe('手动调整与他店查询', () => {
     await allChecksOk();
   });
 });
+
+describe('Codex 自动审查 43d53e9', () => {
+  it('手动调整的结果待确认：按编号查回；确认作废后原请求晚到也不调整；已调整的不能作废；查回、作废只有店主', async () => {
+    const m = (await createMember(ctx, '调整待确认', '19911110010')).id;
+    const body = async (key: string) => ({ clientKey: key, grade: 2, tier: 0, reason: '回复丢了再核对', expectedVersion: (await gradeOf(m)).version });
+    // 已经调整的：查回得到这位会员；不能作废
+    const applied = randomUUID();
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/members/${m}/grade`, await body(applied))).status).toBe(200);
+    expect((await api(ctx.app, ctx.owner, 'GET', `/api/erp/ops/${applied}?type=grade_adjust`)).body).toMatchObject({ found: true, refId: m });
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/erp/ops/${applied}/abandon`, { type: 'grade_adjust' })).body).toMatchObject({ found: true, abandoned: false });
+    // 没有到达的：查不到；店总、店员不能查回、作废
+    const lost = randomUUID();
+    expect((await api(ctx.app, ctx.owner, 'GET', `/api/erp/ops/${lost}?type=grade_adjust`)).body).toMatchObject({ found: false, abandoned: false });
+    expect((await api(ctx.app, ctx.clerk, 'GET', `/api/erp/ops/${lost}?type=grade_adjust`)).status).toBe(403);
+    expect((await api(ctx.app, manager, 'POST', `/api/erp/ops/${lost}/abandon`, { type: 'grade_adjust' })).status).toBe(403);
+    // 店主确认作废：原请求（同一编号、版本号也对）晚到整笔拒绝，不记状态变化
+    const fenced = await api(ctx.app, ctx.owner, 'POST', `/api/erp/ops/${lost}/abandon`, { type: 'grade_adjust', summary: '调整待确认：调到 L2' });
+    expect(fenced.body).toMatchObject({ found: false, abandoned: true });
+    const late = await api(ctx.app, ctx.owner, 'POST', `/api/members/${m}/grade`, await body(lost));
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('OP_ABANDONED');
+    expect((await gradeOf(m)).events.filter((e) => e.kind === 'manual')).toHaveLength(1);
+    await allChecksOk();
+  });
+
+  it('下一档按现在的档阶算：滚动累计已经够更高档时（如手动调低），下一笔充值即升到够得上的那一档、还差 0，不显示「已是最高档」', async () => {
+    const m = (await createMember(ctx, '下一档会员', '19911110011')).id;
+    expect((await recharge(m, yuan(300000))).status).toBe(200);
+    expect((await gradeOf(m)).state).toMatchObject({ grade: 6 });
+    const adjust = async (grade: number) => {
+      const r = await api(ctx.app, ctx.owner, 'POST', `/api/members/${m}/grade`, {
+        clientKey: randomUUID(),
+        grade,
+        tier: 0,
+        reason: '核对后调低',
+        expectedVersion: (await gradeOf(m)).version,
+      });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      return r.body as MemberGradeInfo;
+    };
+    // 原来：按「充 0 元」推演先升到 L6，再取 L6 的下一档 → null，等级卡显示「已是最高档」
+    expect((await adjust(5)).next).toMatchObject({ grade: 6, needCents: 0, thresholdCents: yuan(300000) });
+    // 调到 L2：滚动累计已够 L6，下一笔充值直接升到 L6（不是 L3）
+    expect((await adjust(2)).next).toMatchObject({ grade: 6, needCents: 0 });
+    await allChecksOk();
+  });
+
+  it('今天的运行记录没跑完（进程中途停了）或出过错、又已经没有到期的会员：下一次照样补完记录，自检恢复', async () => {
+    const now = new Date();
+    const date = businessDateOf(now, 'Asia/Shanghai', 6);
+    await ctx.sql`DELETE FROM membership_job_runs WHERE job = 'daily' AND business_date >= ${date}`;
+    await ctx.sql`INSERT INTO membership_job_runs (job, business_date) VALUES ('daily', ${date})`;
+    const jobCheck = async () => (await membershipChecks(ctx.sql)).find((c) => c.label.includes('会员到期处理'))!;
+    expect((await jobCheck()).ok).toBe(false);
+    const run = await runMembershipDaily({ sql: ctx.sql, config: ctx.config }, now);
+    expect(run).toMatchObject({ businessDate: date, processed: 0, error: null });
+    expect(run!.finishedAt).not.toBeNull();
+    expect((await jobCheck()).ok).toBe(true);
+    // 出过错的那位后来在充值、消费时被处理了：下一次清掉出错，不一直报
+    await ctx.sql`UPDATE membership_job_runs SET error = '会员 #1：模拟出错' WHERE job = 'daily' AND business_date = ${date}`;
+    expect((await jobCheck()).ok).toBe(false);
+    expect(await runMembershipDaily({ sql: ctx.sql, config: ctx.config }, now)).toMatchObject({ error: null });
+    expect((await jobCheck()).ok).toBe(true);
+    // 已经跑完、没出错、没有到期的：什么都不做
+    expect(await runMembershipDaily({ sql: ctx.sql, config: ctx.config }, now)).toBeNull();
+    await allChecksOk();
+  });
+});

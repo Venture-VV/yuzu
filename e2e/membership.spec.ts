@@ -72,6 +72,43 @@ test.describe('会员体系 v2', () => {
     await expect(page.getByTestId('membership-rules-save')).toBeDisabled();
   });
 
+  test('手动调整已经生效、回复却是 500：等级卡上方结果待确认、不能另起一笔；查回就是那一次（Codex 自动审查 43d53e9）', async ({ page }) => {
+    await login(page, 'linlan');
+    const phone = `196${String(Date.now()).slice(-8)}`;
+    const created = await page.request.post('/api/members', { data: { name: '调整待确认验收', phone } });
+    expect(created.ok()).toBe(true);
+    const member = (await created.json()) as { id: number };
+    await page.goto(`/?m=${member.id}`);
+    await expect(page.getByTestId('member-grade-label')).toHaveText('L0 青溪');
+
+    // 请求真的到服务端、调整成功，回到页面的却是 500；查回暂时也连不上
+    const isAdjust = (url: URL) => url.pathname === `/api/members/${member.id}/grade`;
+    const isLookup = (url: URL) => url.pathname.startsWith('/api/erp/ops/');
+    await page.route(isAdjust, async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      const res = await route.fetch();
+      expect(res.status()).toBe(200);
+      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL', message: '服务器出了点问题' } }) });
+    });
+    await page.route(isLookup, (route) => route.abort('internetdisconnected'));
+    await page.getByTestId('grade-adjust-open').click();
+    await page.getByTestId('grade-adjust-grade').selectOption('3');
+    await page.getByTestId('grade-adjust-reason').fill('E2E 回复丢了');
+    await page.getByTestId('grade-adjust-submit').click();
+    const pending = page.getByTestId('erp-pending');
+    await expect(pending).toContainText('手动调整会员档阶');
+    await expect(page.getByTestId('grade-adjust-open')).toBeDisabled();
+
+    await page.unroute(isLookup);
+    await page.unroute(isAdjust);
+    await page.getByTestId('erp-pending-check').click();
+    await expect(pending).toHaveCount(0);
+    await expect(page.getByTestId('member-grade-label')).toHaveText('L3 观澜 · 初');
+    await expect(page.getByTestId('grade-adjust-open')).toBeEnabled();
+    const info = (await (await page.request.get(`/api/members/${member.id}/grade`)).json()) as { events: { kind: string }[] };
+    expect(info.events.filter((e) => e.kind === 'manual')).toHaveLength(1);
+  });
+
   test('他店查询：只进会员查询页，遮姓名与手机号、不含余额；会员接口 403', async ({ page }) => {
     await login(page, 'linlan');
     const username = `fukuda${String(Date.now()).slice(-6)}`;

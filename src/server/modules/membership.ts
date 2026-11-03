@@ -36,6 +36,7 @@ import {
   tierForSpend,
   tierTargets,
   type ExpiryStep,
+  type Grade,
   type GradeEventKind,
   type GradeEventListRow,
   type GradeEventRow,
@@ -60,6 +61,8 @@ import { conflict, notFound } from '../lib/errors';
 import { dateSchema, idParam, parse } from '../lib/validate';
 import { lockSettings, sameJson, saveRuleSetting } from '../lib/rule-settings';
 import { setTxTimeouts } from '../lib/tx';
+import { assertNotFenced } from '../lib/fences';
+import { erpOpAbandoned } from './erp-ops';
 import { loadSettings } from './settings';
 
 const RULES_KEY = 'membership_rules';
@@ -374,8 +377,11 @@ export async function runMembershipDaily(deps: Pick<Deps, 'sql' | 'config'>, now
     WHERE grade > 0 AND ((grace_until IS NULL AND cycle_end < ${today}) OR grace_until < ${today}) AND id > ${after}
     ORDER BY id LIMIT ${DAILY_PAGE}`;
   const first = await dueIds(0);
-  const [run] = await sql<{ id: number }[]>`SELECT id FROM membership_job_runs WHERE job = 'daily' AND business_date = ${today}`;
-  if (run && first.length === 0) return null;
+  const [run] = await sql<{ finishedAt: string | null; error: string | null }[]>`
+    SELECT finished_at, error FROM membership_job_runs WHERE job = 'daily' AND business_date = ${today}`;
+  // 今天已经跑完、没出错、也没有到期的会员：什么都不做。没跑完（进程在中途停了）或出过错的，就算已经没有到期的会员
+  // （例如出错的那位后来充值、消费时被处理了），也要走到最后把运行记录补完，否则自检一整天都报（Codex 自动审查 43d53e9）
+  if (run && run.finishedAt && !run.error && first.length === 0) return null;
   await sql`
     INSERT INTO membership_job_runs (job, business_date) VALUES ('daily', ${today})
     ON CONFLICT (job, business_date) DO NOTHING`;
@@ -437,7 +443,15 @@ export async function memberGradeInfo(db: Db, memberId: number, todayDate: strin
   const { state } = await projectDue(db, rules, memberId, current.state, todayDate);
   const spend = state.grade > 0 && state.cycleStart ? await spendSince(db, memberId, state.cycleStart) : 0;
   const rolling = await rollingRecharge(db, rules, memberId, todayDate);
-  const next = rechargeOutcome(rules, state.grade, rolling, 0).next;
+  // 下一档按现在的档阶算（Codex 自动审查 43d53e9）：滚动累计已经够得上更高档时（上线定档封顶、手动调低、门槛改低），
+  // 下一笔充值就升到够得上的那一档，还差 0；不按「充 0 元」推演，否则会跳过这一档、甚至显示「已是最高档」
+  const reached = gradeForAmount(rules, rolling);
+  const nextGrade = reached > state.grade ? reached : state.grade < MAX_GRADE ? ((state.grade + 1) as Grade) : null;
+  const nextRule = nextGrade === null ? undefined : rules.grades[nextGrade];
+  const next =
+    nextGrade === null || !nextRule
+      ? null
+      : { grade: nextGrade, name: nextRule.name, needCents: Math.max(0, nextRule.thresholdCents - rolling), bonusBp: nextRule.bonusBp };
   const daysLeft = state.grade > 0 ? daysToExpiry(state, todayDate) : null;
   return {
     memberId,
@@ -617,6 +631,8 @@ export async function adjustMemberGrade(deps: Deps, memberId: number, raw: unkno
   try {
     await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
+      // 先取操作编号的咨询锁、核对没有被「确认作废」（与作废串行；结果待确认时作废了，原请求晚到也不生效）
+      await assertNotFenced(tx, input.clientKey, 'grade_adjust', erpOpAbandoned);
       const [m] = await tx<{ id: number }[]>`SELECT id FROM members WHERE id = ${memberId} FOR UPDATE`;
       if (!m) throw notFound('会员不存在');
       if (await replayed(tx)) return;

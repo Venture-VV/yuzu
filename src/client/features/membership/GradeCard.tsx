@@ -19,25 +19,35 @@ import {
   type MembershipRules,
 } from '@shared/membership';
 import type { MemberDetail } from '@shared/types';
-import { api, errorMessage } from '../../lib/api';
+import { errorMessage, UncertainError } from '../../lib/api';
+import { sendErpOp, useErpPending, type ErpPendingOp } from '../../lib/erpPending';
 import { qk } from '../../lib/queries';
-import { useCan } from '../../lib/session';
+import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { cn, uuid } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
+import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton, Textarea } from '../../components/ui';
 import { membershipKeys, useMembershipRules } from './queries';
 
 const pctOf = (bp: number) => `${bp % 100 === 0 ? bp / 100 : (bp / 100).toFixed(2).replace(/0$/, '')}%`;
 
+/** 这位会员的手动调整（提交地址带会员编号） */
+const adjustUrl = (memberId: number) => `/api/members/${memberId}/grade`;
+
 export function GradeCard({ member }: { member: MemberDetail }) {
   const info = member.gradeInfo;
   const rules = useMembershipRules().data;
   const can = useCan();
+  const qc = useQueryClient();
   const [all, setAll] = useState(false);
   const [adjusting, setAdjusting] = useState(false);
+  // 结果待确认的手动调整（超时、断网、回复 500）：先在这里查回、按原内容重新提交或作废，不能另起一笔（Codex 自动审查 43d53e9）
+  const ofMember = (op: ErpPendingOp) => op.url === adjustUrl(member.id);
+  const pendingAdjust = useErpPending(['grade_adjust']).some(ofMember);
+  const refresh = () => Promise.all([qc.invalidateQueries({ queryKey: qk.member(member.id) }), qc.invalidateQueries({ queryKey: membershipKeys.grade(member.id) })]);
   if (!info) return null;
   if (!rules) return <Skeleton className="h-56" />;
   const s = info.state;
@@ -49,7 +59,15 @@ export function GradeCard({ member }: { member: MemberDetail }) {
           <span className="flex items-center gap-2">
             <PendingBadge title="会员体系 v2 的门槛、比例、周期与补充期按会员文档与默认做法，待店主确认（后台「会员规则」可改）" />
             {can('member.adjust') && (
-              <Button size="sm" variant="ghost" icon={<PencilLine className="size-3.5" />} onClick={() => setAdjusting(true)} data-testid="grade-adjust-open">
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<PencilLine className="size-3.5" />}
+                onClick={() => setAdjusting(true)}
+                disabled={pendingAdjust}
+                title={pendingAdjust ? '上一笔调整结果待确认，请先在下方查回、按原内容重新提交或作废' : undefined}
+                data-testid="grade-adjust-open"
+              >
                 手动调整
               </Button>
             )}
@@ -60,6 +78,7 @@ export function GradeCard({ member }: { member: MemberDetail }) {
           <Award className="size-4 text-yuzu-deep" /> 会员档阶
         </span>
       </SectionTitle>
+      {can('member.adjust') && <ErpPendingPanel types={['grade_adjust']} filter={ofMember} className="mt-3 space-y-2" onFound={() => void refresh()} />}
 
       <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-1">
         <p className="text-[22px] leading-none font-bold text-ink" data-testid="member-grade-label">
@@ -265,6 +284,7 @@ function EventLine({ rules, e }: { rules: MembershipRules; e: GradeEventRow }) {
 function AdjustDialog({ open, onClose, member, rules }: { open: boolean; onClose: () => void; member: MemberDetail; rules: MembershipRules }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const session = useSession();
   const [grade, setGrade] = useState(member.grade);
   const [tier, setTier] = useState<'0' | '1' | '2'>('0');
   const [reason, setReason] = useState('');
@@ -281,18 +301,27 @@ function AdjustDialog({ open, onClose, member, rules }: { open: boolean; onClose
   const submit = async () => {
     setBusy(true);
     setError(null);
+    const target = gradeLabel(rules, grade, grade === 0 ? null : Number(tier));
     try {
-      await api.post(`/api/members/${member.id}/grade`, {
-        clientKey: key,
-        grade,
-        tier: grade === 0 ? null : Number(tier),
-        reason: reason.trim(),
-        expectedVersion: member.gradeInfo.version,
+      // 先把编号和原请求存在本机并读回核对（存不了就不发请求）；超时、断网、回复 500 时记录留在本机，
+      // 等级卡上方可以查回、按原内容重新提交（同一编号只调整一次）或确认作废
+      await sendErpOp({
+        key,
+        type: 'grade_adjust',
+        url: adjustUrl(member.id),
+        body: { clientKey: key, grade, tier: grade === 0 ? null : Number(tier), reason: reason.trim(), expectedVersion: member.gradeInfo.version },
+        summary: `${member.name}：调到「${target}」（${reason.trim()}）`,
+        staffName: session.staff.displayName,
       });
       await Promise.all([qc.invalidateQueries({ queryKey: qk.member(member.id) }), qc.invalidateQueries({ queryKey: membershipKeys.grade(member.id) })]);
-      toast({ tone: 'success', title: '档阶已调整', body: `${member.name}：${gradeLabel(rules, grade, grade === 0 ? null : Number(tier))}` });
+      toast({ tone: 'success', title: '档阶已调整', body: `${member.name}：${target}` });
       onClose();
     } catch (e) {
+      if (e instanceof UncertainError) {
+        toast({ tone: 'info', title: '调整结果待确认', body: '已记在本机：请在等级卡上方查回、按原内容重新提交或作废，不要另起一笔。' });
+        onClose();
+        return;
+      }
       setError(errorMessage(e));
       // 档阶刚有变化：刷新会员，按最新的再调
       void qc.invalidateQueries({ queryKey: qk.member(member.id) });
