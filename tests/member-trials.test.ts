@@ -230,8 +230,8 @@ describe('受邀人的限制', () => {
     // 到期：一条 20 天前开始、14 天前结束的（直接写库），每天的到期处理记「体验到期」（结束日的下一天）
     const old = await member('早先受邀', 0);
     await ctx.sql`
-      INSERT INTO member_trials (member_id, kind, grade, tier, starts_on, ends_on, inviter_id, business_date, staff_id, client_key)
-      VALUES (${old}, 'invite', 2, 0, ${shiftDate(today, -20)}, ${shiftDate(today, -14)}, ${l2}, ${shiftDate(today, -20)}, ${ctx.ownerId}, ${randomUUID()})`;
+      INSERT INTO member_trials (member_id, kind, grade, tier, starts_on, ends_on, inviter_id, business_date, staff_id, client_key, request_hash)
+      VALUES (${old}, 'invite', 2, 0, ${shiftDate(today, -20)}, ${shiftDate(today, -14)}, ${l2}, ${shiftDate(today, -20)}, ${ctx.ownerId}, ${randomUUID()}, ${'a'.repeat(64)})`;
     expect((await benefitsOf(old)).state.grade).toBe(0);
     const run = await runMembershipDaily({ sql: ctx.sql, config: ctx.config });
     expect(run?.trialsExpired).toBe(1);
@@ -328,6 +328,41 @@ describe('转正、结果待确认', () => {
     expect(late.status).toBe(409);
     expect(late.body.error.code).toBe('OP_ABANDONED');
     expect((await trialsOf(q)).received).toEqual([]);
+  });
+
+  it('发起后受邀人改了手机号：原编号、原请求原样重提仍返回原来那条；手机号或别的内容不同的拒绝（按原请求的摘要核对）', async () => {
+    const inviter = await member('潭影邀请人五', 10000);
+    const p = await member('改手机号的客人', 0);
+    const key = randomUUID();
+    const original = { clientKey: key, kind: 'invite' as const, phone: phoneOf(p) };
+    const c = await create(inviter, original);
+    expect(c.status, JSON.stringify(c.body)).toBe(201);
+    const id = (c.body.trial as TrialRow).id;
+
+    // 正常编辑会员档案更正手机号
+    const corrected = '19966660001';
+    const edit = await api(ctx.app, ctx.owner, 'PUT', `/api/members/${p}`, { name: '改手机号的客人', phone: corrected });
+    expect(edit.status, JSON.stringify(edit.body)).toBe(200);
+
+    // 结果待确认时原样重提：返回原来那条，不看档案此刻的手机号
+    const again = await create(inviter, original);
+    expect(again.status, JSON.stringify(again.body)).toBe(200);
+    expect(again.body).toMatchObject({ replayed: true, trial: { id, memberId: p } });
+    // 同一编号、内容不同（换成新手机号、补了姓名、换了类型、换了邀请人）的不当作原来那次
+    const other = await member('潭影邀请人六', 10000);
+    for (const [who, body] of [
+      [inviter, { ...original, phone: corrected }],
+      [inviter, { ...original, name: '改手机号的客人' }],
+      [inviter, { ...original, kind: 'gift' as const }],
+      [other, original],
+    ] as const) {
+      const r = await create(who, body);
+      expect(r.status, JSON.stringify(r.body)).toBe(409);
+      expect(r.body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+    }
+    expect((await trialsOf(p)).received.map((t) => t.id)).toEqual([id]);
+    expect((await api(ctx.app, ctx.clerk, 'GET', `/api/erp/ops/${key}?type=member_trial`)).body).toMatchObject({ found: true, refId: id });
+    await allChecksOk();
   });
 
   it('看板：体验中、本月发起、到期、转正、撤销', async () => {

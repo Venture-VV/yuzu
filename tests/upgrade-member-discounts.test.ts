@@ -15,6 +15,9 @@ import { trialChecks } from '../src/server/modules/member-trials';
 import { PASSWORD, TEST_DB, migrationsFrom } from './helpers';
 import { resetPublicSchema } from './test-db';
 
+/** 原请求的摘要（直接写库时随便给一个合规的） */
+const HASH = 'a'.repeat(64);
+
 const MIGRATIONS = new URL('../src/server/migrations/', import.meta.url);
 let sql: Sql;
 
@@ -89,18 +92,19 @@ describe('迁移 042 · 会员体系 v2 第三期', () => {
     const [a] = await sql<{ id: number }[]>`INSERT INTO members (member_no, name, phone) VALUES ('UP201', '邀请人', '13800000201') RETURNING id`;
     const [b] = await sql<{ id: number }[]>`INSERT INTO members (member_no, name, phone) VALUES ('UP202', '受邀人', '13800000202') RETURNING id`;
     const [t] = await sql<{ id: number }[]>`
-      INSERT INTO member_trials (member_id, kind, grade, starts_on, ends_on, inviter_id, business_date, staff_id, client_key)
-      VALUES (${b!.id}, 'invite', 1, '2026-11-03', '2026-11-09', ${a!.id}, '2026-11-03', ${owner!.id}, ${randomUUID()}) RETURNING id`;
+      INSERT INTO member_trials (member_id, kind, grade, starts_on, ends_on, inviter_id, business_date, staff_id, client_key, request_hash)
+      VALUES (${b!.id}, 'invite', 1, '2026-11-03', '2026-11-09', ${a!.id}, '2026-11-03', ${owner!.id}, ${randomUUID()}, ${HASH}) RETURNING id`;
     await expect(
-      sql`INSERT INTO member_trials (member_id, kind, grade, starts_on, ends_on, inviter_id, business_date, staff_id, client_key)
-          VALUES (${b!.id}, 'invite', 1, '2026-11-03', '2026-11-09', ${a!.id}, '2026-11-03', ${owner!.id}, ${randomUUID()})`,
+      sql`INSERT INTO member_trials (member_id, kind, grade, starts_on, ends_on, inviter_id, business_date, staff_id, client_key, request_hash)
+          VALUES (${b!.id}, 'invite', 1, '2026-11-03', '2026-11-09', ${a!.id}, '2026-11-03', ${owner!.id}, ${randomUUID()}, ${HASH})`,
     ).rejects.toThrow(/member_trials_active_uq/);
     await expect(sql`UPDATE member_trials SET ends_on = '2026-12-31' WHERE id = ${t!.id}`).rejects.toThrow(/只能结束/);
+    await expect(sql`UPDATE member_trials SET request_hash = ${'0'.repeat(64)} WHERE id = ${t!.id}`).rejects.toThrow(/只能结束/);
     await expect(sql`DELETE FROM member_trials WHERE id = ${t!.id}`).rejects.toThrow(/不能删除/);
     // 赠送会籍要有那次使用登记
     await expect(
-      sql`INSERT INTO member_trials (member_id, kind, grade, starts_on, ends_on, inviter_id, business_date, staff_id, client_key)
-          VALUES (${a!.id}, 'gift', 1, '2026-11-03', '2026-12-02', ${b!.id}, '2026-11-03', ${owner!.id}, ${randomUUID()})`,
+      sql`INSERT INTO member_trials (member_id, kind, grade, starts_on, ends_on, inviter_id, business_date, staff_id, client_key, request_hash)
+          VALUES (${a!.id}, 'gift', 1, '2026-11-03', '2026-12-02', ${b!.id}, '2026-11-03', ${owner!.id}, ${randomUUID()}, ${HASH})`,
     ).rejects.toThrow(/member_trials_check/);
     await sql`UPDATE member_trials SET status = 'cancelled', ended_on = '2026-11-03', ended_by = ${owner!.id}, end_reason = '登记错了' WHERE id = ${t!.id}`;
     await expect(sql`UPDATE member_trials SET status = 'active', ended_on = NULL, ended_by = NULL, end_reason = NULL WHERE id = ${t!.id}`).rejects.toThrow(/已经结束/);

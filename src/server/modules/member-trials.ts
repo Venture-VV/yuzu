@@ -54,6 +54,7 @@ import { writeAudit } from '../lib/audit';
 import { ctxOf, type Deps, type OpContext } from '../lib/context';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { assertNotFenced } from '../lib/fences';
+import { hashRequest } from '../lib/idempotency';
 import { idParam, parse } from '../lib/validate';
 import { setTxTimeouts } from '../lib/tx';
 import { onMemberSaved } from './benefits';
@@ -357,13 +358,12 @@ async function expireOverdue(tx: Tx, memberIds: number[], date: string): Promise
  */
 export async function createTrial(deps: Deps, inviterId: number, raw: unknown, ctx: OpContext): Promise<{ trial: TrialRow; replayed: boolean }> {
   const input = parse(TrialInput, raw);
+  // 原请求的摘要（按校验整理后的内容）：重提按它核对，不看受邀人档案此刻的手机号——发起后改了手机号，原样重提仍返回原来那条
+  const requestHash = hashRequest({ inviterId, kind: input.kind, phone: input.phone, name: input.name, channel: input.channel ?? null });
   const replay = async (db: Db) => {
-    const [p] = await db<{ id: number; inviterId: number; kind: TrialKind; phone: string }[]>`
-      SELECT t.id, t.inviter_id, t.kind, m.phone FROM member_trials t JOIN members m ON m.id = t.member_id WHERE t.client_key = ${input.clientKey}`;
+    const [p] = await db<{ id: number; requestHash: string }[]>`SELECT id, request_hash FROM member_trials WHERE client_key = ${input.clientKey}`;
     if (!p) return null;
-    if (Number(p.inviterId) !== inviterId || p.kind !== input.kind || p.phone !== input.phone) {
-      throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一次邀请，请刷新页面后重新发起');
-    }
+    if (p.requestHash !== requestHash) throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一次邀请，请刷新页面后重新发起');
     return Number(p.id);
   };
   const date = await today(deps.sql, deps.config.timezone, ctx.at);
@@ -429,8 +429,8 @@ export async function createTrial(deps: Deps, inviterId: number, raw: unknown, c
       }
       const endsOn = option.endsOn!;
       const [row] = await tx<{ id: number }[]>`
-        INSERT INTO member_trials (member_id, kind, grade, tier, starts_on, ends_on, inviter_id, benefit_use_id, business_date, staff_id, client_key)
-        VALUES (${inviteeId}, ${input.kind}, ${grade}, 0, ${date}, ${endsOn}, ${inviterId}, ${use?.id ?? null}, ${date}, ${ctx.actor.id}, ${input.clientKey})
+        INSERT INTO member_trials (member_id, kind, grade, tier, starts_on, ends_on, inviter_id, benefit_use_id, business_date, staff_id, client_key, request_hash)
+        VALUES (${inviteeId}, ${input.kind}, ${grade}, 0, ${date}, ${endsOn}, ${inviterId}, ${use?.id ?? null}, ${date}, ${ctx.actor.id}, ${input.clientKey}, ${requestHash})
         RETURNING id`;
       const trialId = Number(row!.id);
       if (use) {

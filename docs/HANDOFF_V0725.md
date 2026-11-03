@@ -56,7 +56,7 @@
 | T4 | 赠送会籍 | QY-042 没发布时「赠送会籍」灰着；发布并设「每年 1 次」：L3·初 的会员不能赠送（起点 L3·尊），L4 会员赠送后对方体验 L3·初 1 个月，赠送人的「本月可享」QY-042 用了 1 次、今年不能再送；「登记使用」里没有 QY-042 的按钮，接口单独登记被拒；那条登记不能单独作废 |
 | T5 | 撤销 | 店员看不到「撤销」（接口 403）；店主撤销写原因：对方不再体验中，赠送会籍那次 QY-042 的使用登记作废、次数腾出来；邀请体验的每月次数不退 |
 | T6 | 转正与到期 | 体验 L1·初 的会员自己充值 5,000 升到 L1：临时身份记「转正」；到期的由每天的到期处理结束（`membership-daily` 立即补跑，「体验到期 N 位」）。到期要等 7 天，手工验收不能快进时间的记「受阻未测」（`tests/member-trials.test.ts` 覆盖） |
-| T7 | 结果待确认 | 发起时断网、超时或回复 500：卡片上方「邀请体验 / 赠送会籍」结果待确认，发起按钮灰着；查回、按原内容重新提交只发起一次；确认作废后原请求晚到被拒 `OP_ABANDONED` |
+| T7 | 结果待确认 | 发起时断网、超时或回复 500：卡片上方「邀请体验 / 赠送会籍」结果待确认，发起按钮灰着；查回、按原内容重新提交只发起一次（发起后受邀人档案改了手机号，原样重提照样返回原来那条：按原请求的摘要核对）；确认作废后原请求晚到被拒 `OP_ABANDONED` |
 | T8 | 看板与规则 | 看板「会员体系」的「邀请体验 / 赠送会籍」数字与名单；后台「会员规则」改邀请天数、每月次数、受邀间隔，保存前列出影响，改了以后发起的按新规则 |
 | M1 | 前台扫会员码 | 门店配了会员码（`MP_CODE_SECRET`）且会员在小程序绑定过：扫码盒把会员码扫进会员工作台、接待对话框或桌台的查找框，直接打开 / 选上那位会员；一分钟以前的码写明「会员码过期或不对」；没配会员码的环境写明「门店系统没有配会员码，请让客人报手机号」。真扫码盒与真手机由店主安排的真机测试做 |
 | P1 | 打印用例的时段 | 营业日切换后 5 个半小时内（06:00–11:30）新建演示库、灌演示数据：结账演示的班次、结账、反结账、交班都在当天营业日；`e2e/print.spec.ts` 全部通过、不跳过 |
@@ -65,7 +65,7 @@
 ## 4. 已执行的验证
 
 - `npm run typecheck`、`npm run build` 通过。
-- `npm test`（本机，独立测试库）：88 个文件 884 项全部通过。新增 `tests/member-discounts.test.ts`（10 项，含折后的分的半分边界）、`tests/member-trials.test.ts`（9 项：邀请体验、重提与编号冲突、本月次数、享与不享与 VIP 柜、受邀人的限制、当场建档、撤销、到期与 12 个月、赠送会籍与 QY-042 次数、不能单独登记与作废、转正、查回与确认作废、看板）、`tests/upgrade-member-discounts.test.ts`（从 041 升级）、`tests/billing-seed-window.test.ts`（切换后 70 分钟灌结账演示都在当天）、`tests/migrations-list.test.ts`；改了 `tests/demo-prepare.test.ts`、`tests/demo-time.test.ts`、`tests/erp.test.ts`、`tests/benefits.test.ts`、`tests/recon.test.ts` 与几份升级用例。
+- `npm test`（本机，独立测试库）：88 个文件 885 项全部通过。新增 `tests/member-discounts.test.ts`（10 项，含折后的分的半分边界）、`tests/member-trials.test.ts`（10 项：邀请体验、重提与编号冲突（含发起后改了受邀人的手机号再原样重提）、本月次数、享与不享与 VIP 柜、受邀人的限制、当场建档、撤销、到期与 12 个月、赠送会籍与 QY-042 次数、不能单独登记与作废、转正、查回与确认作废、看板）、`tests/upgrade-member-discounts.test.ts`（从 041 升级）、`tests/billing-seed-window.test.ts`（切换后 70 分钟灌结账演示都在当天）、`tests/migrations-list.test.ts`；改了 `tests/demo-prepare.test.ts`、`tests/demo-time.test.ts`、`tests/erp.test.ts`、`tests/benefits.test.ts`、`tests/recon.test.ts` 与几份升级用例。
 - 浏览器（本机按 CI 的方式灌演示数据，门店电脑尺寸）：新增 `e2e/member-trials.spec.ts`（邀请还不是会员的朋友、体验中、前台标「体验」、撤销；结账自动带会员折扣、加优惠时不用、按会员折扣结清）、`e2e/member-code.spec.ts`（没配会员码时写明原因）；改了 `e2e/benefits.spec.ts`（QY-011 预填折扣、仍是草稿）；`benefits`、`membership`、`member-trials`、`member-code`、`frontdesk`、`dining-tables` 几份本机全部通过。
 - 配了会员码的路径本机手动核对过：有效的码直接打开那位会员并清空查找框，一分钟以前的码写明过期。
 - `check` 63 项全 ✓（本机跑完浏览器用例的库）；`demo-prepare` 后 `demo-check` 通过（`tests/demo-prepare.test.ts`）。

@@ -142,6 +142,8 @@ CREATE TABLE member_trials (
   created_at     timestamptz NOT NULL DEFAULT now(),
   -- 页面的操作编号（没收到结果再提交返回原来那条；结果待确认时可以确认作废）
   client_key     uuid NOT NULL UNIQUE,
+  -- 原请求的摘要（邀请人、类型、手机号、姓名、渠道）：同一编号重提按它核对，不看受邀人档案此刻的手机号（之后改了手机号，原样重提仍返回原来那条）
+  request_hash   text NOT NULL CHECK (request_hash ~ '^[0-9a-f]{64}$'),
   status         text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'expired', 'converted', 'cancelled')),
   ended_on       date,
   ended_by       bigint REFERENCES staff (id),
@@ -164,10 +166,10 @@ BEGIN
   IF TG_OP = 'DELETE' THEN RAISE EXCEPTION '临时身份不能删除'; END IF;
   IF OLD.status <> 'active' THEN RAISE EXCEPTION '临时身份已经结束，不能再改'; END IF;
   IF (NEW.member_id, NEW.kind, NEW.grade, NEW.tier, NEW.starts_on, NEW.ends_on, NEW.inviter_id, NEW.benefit_use_id, NEW.business_date,
-      NEW.staff_id, NEW.created_at, NEW.client_key)
+      NEW.staff_id, NEW.created_at, NEW.client_key, NEW.request_hash)
      IS DISTINCT FROM
      (OLD.member_id, OLD.kind, OLD.grade, OLD.tier, OLD.starts_on, OLD.ends_on, OLD.inviter_id, OLD.benefit_use_id, OLD.business_date,
-      OLD.staff_id, OLD.created_at, OLD.client_key) THEN
+      OLD.staff_id, OLD.created_at, OLD.client_key, OLD.request_hash) THEN
     RAISE EXCEPTION '临时身份只能结束（到期、转正、撤销），不能改内容';
   END IF;
   RETURN NEW;
