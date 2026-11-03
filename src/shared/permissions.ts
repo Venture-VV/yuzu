@@ -15,6 +15,7 @@
 // v0.7.21 新增设备的三项权限（看设备状态、测试打印、维护设备；飞书需求 RQ-001），默认值待确认。
 // v0.7.23 会员体系 v2 第一期：新增「修改会员规则」「手动调整会员档阶」「看会员体系看板与到期提醒」「他店查询」，
 // 以及岗位「他店查询」（另一家店的同事只读查会员档阶，docs/MEMBERSHIP.md 第 8、11 节），默认值待确认。
+// 2026-11-03 微信小程序（小程序线）新增「维护小程序内容」「解绑会员的微信」（MP7，docs/MINIPROGRAM.md 第 5 节），默认值待确认。
 
 export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice', 'other_store'] as const;
 export type Role = (typeof ROLES)[number];
@@ -189,6 +190,10 @@ export const PERMISSIONS = {
   'device.test': { roles: ['owner', 'store_manager', 'duty_manager'] },
   /** 维护设备（v0.7.21，待确认：店主、店总）：设备登记、按采购清单导入、启用停用 */
   'device.manage': { roles: ['owner', 'store_manager'] },
+  /** 维护小程序内容（小程序线，MP7，待确认：店主、店总、客户经理）：门店信息、首页轮播、项目介绍、对顾客开放的开关 */
+  'mp.content': { roles: ['owner', 'store_manager', 'account_manager'] },
+  /** 解绑会员的微信（小程序线，MP6、MP7，待确认：值班经理及以上）：换手机号、换微信时在前台解绑，写原因、记经办人 */
+  'mp.unbind': { roles: ['owner', 'store_manager', 'duty_manager'] },
   'settings.manage': { roles: ['owner'] },
   'audit.read': { roles: ['owner', 'store_manager'] },
   // ── 数据看板（v0.6.0；当日看板仍按「查看当日流水与日结」）──
@@ -324,6 +329,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'device.view': '看设备状态（一屏看全部设备、终端上报）',
   'device.test': '测试打印（打印机、标签机）',
   'device.manage': '维护设备（登记、按采购清单导入、启用停用）',
+  'mp.content': '维护小程序内容（门店信息、首页轮播、项目介绍、开关）',
+  'mp.unbind': '解绑会员的微信（换手机号、换微信）',
   'settings.manage': '修改经营规则设置',
   'audit.read': '查看操作审计',
   'report.executive': '看经营总览（任选时段、环比）',
@@ -344,6 +351,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   { title: '会员体系', items: ['member.rules', 'member.adjust', 'member.retention', 'member.lookup'] },
   { title: '券与会员权益', items: ['coupon.manage', 'coupon.issue', 'coupon.void'] },
   { title: '设备', items: ['device.view', 'device.test', 'device.manage'] },
+  { title: '微信小程序', items: ['mp.content', 'mp.unbind'] },
   {
     title: 'ERP（库存、采购、货款、费用、营业数据）',
     items: [

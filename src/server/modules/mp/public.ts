@@ -1,18 +1,18 @@
 // 小程序端口的公开只读接口（不需要绑定会员）：门店信息与轮播、价目、对客导览、图片。
 // 只读，不加锁；对客导览只到区域（v0.7.19 的 guideData：没有房号、房态、人员）。
 
-import type { FastifyInstance, preHandlerAsyncHookHandler } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf } from '@shared/business-date';
 import type { MpBanner, MpHome, MpPriceItem, MpPrices, MpStore, MpTicket } from '@shared/mp';
 import type { Db } from '../../db';
 import type { Deps } from '../../lib/context';
-import { AppError, notFound } from '../../lib/errors';
+import { notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { loadItems } from '../catalog';
 import { guideData } from '../guide';
 import { loadSettings } from '../settings';
-import { loadMpRules } from './rules';
+import { requireMpEnabled } from './rules';
 
 /** 门店当前的营业日（轮播按营业日显示） */
 export async function mpToday(db: Db, timezone: string): Promise<string> {
@@ -57,10 +57,7 @@ const SvgQuery = z.object({ b: z.coerce.number().int().positive('底图批次不
 
 export function registerMpPublicRoutes(app: FastifyInstance, deps: Deps) {
   const { sql, config } = deps;
-  // 店主在后台「小程序」里开了才对顾客开放（默认关闭）
-  const enabled: preHandlerAsyncHookHandler = async () => {
-    if (!(await loadMpRules(sql)).enabled) throw new AppError(403, 'MP_DISABLED', '小程序还没开放，请到前台咨询');
-  };
+  const enabled = requireMpEnabled(sql);
 
   // 网关查看门店系统是否连得上（不看开关）
   app.get('/api/mp/health', async () => {

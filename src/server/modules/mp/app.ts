@@ -9,6 +9,7 @@ import type { AppConfig } from '../../config';
 import type { Sql } from '../../db';
 import { AppError } from '../../lib/errors';
 import { registerMpPublicRoutes } from './public';
+import { registerMpMemberRoutes } from './routes';
 
 const digest = (s: string) => createHash('sha256').update(s, 'utf8').digest();
 
@@ -49,5 +50,6 @@ export async function buildMpApp(sql: Sql, config: AppConfig): Promise<FastifyIn
   });
 
   registerMpPublicRoutes(app, { sql, config });
+  registerMpMemberRoutes(app, { sql, config });
   return app;
 }

@@ -80,3 +80,97 @@ export type MpErrorCode =
   | 'NOT_FOUND'
   | 'BAD_REQUEST'
   | 'INTERNAL';
+
+// ── 会员（要先绑定；网关带 openid）──
+
+export interface MpMemberBrief {
+  memberNo: string;
+  name: string;
+  /** 冻结的会员能看不能用：会员码不可用（MP6） */
+  frozen: boolean;
+}
+
+export interface MpBindResult {
+  status: 'bound';
+  member: MpMemberBrief;
+  /** 同一个操作编号重提、或这个微信已经绑定了同一位会员 */
+  replayed: boolean;
+}
+
+/** 会员卡上的档阶（会员体系 v2，数字全由 yuzu 算好，小程序只显示） */
+export interface MpGrade {
+  /** 「L3 观澜 · 享」 */
+  label: string;
+  grade: number;
+  gradeName: string;
+  /** 0 初、1 享、2 尊；L0 没有 */
+  tier: number | null;
+  tierName: string | null;
+  cycleEnd: string | null;
+  daysLeft: number | null;
+  inGrace: boolean;
+  /** 周期内的净储值消费（分）与升享阶、尊阶（也是保级）要的数 */
+  cycleSpendCents: number;
+  targets: { enjoy: number; honor: number } | null;
+  /** 下一档：按滚动累计还差多少、赠送比例（万分比）；已是最高档为空 */
+  next: { grade: number; name: string; needCents: number; bonusBp: number } | null;
+}
+
+export interface MpMe {
+  bound: boolean;
+  member: (MpMemberBrief & { principalBalance: number; bonusBalance: number; grade: MpGrade; availableCoupons: number }) | null;
+}
+
+export interface MpLedgerRow {
+  id: number;
+  /** 充值、消费、撤销、赠金过期、期初导入、期初作废 */
+  kind: string;
+  kindLabel: string;
+  principalDelta: number;
+  bonusDelta: number;
+  principalAfter: number;
+  bonusAfter: number;
+  businessDate: string;
+  createdAt: string;
+  /** 消费项目摘要、充值套餐 */
+  summary: string;
+}
+
+export interface MpCoupon {
+  code: string;
+  name: string;
+  kind: string;
+  summary: string;
+  validFrom: string;
+  validTo: string;
+  /** available 可用、pending 还没生效、expired、used、voided */
+  state: string;
+}
+
+/** 会员码（MP9）：由 yuzu 签发，每 60 秒换一次；前台扫码盒扫进会员查找框，yuzu 在本机校验 */
+export interface MpMemberCode {
+  code: string;
+  expiresAt: string;
+  refreshSeconds: number;
+}
+export const MP_CODE = /^(8\d{6}|9\d{9})\d{9}$/;
+export const MP_CODE_SECONDS = 60;
+
+/** 前台扫到会员码后查到的会员 */
+export interface MpCodeLookup {
+  memberId: number;
+  memberNo: string;
+  name: string;
+}
+
+/** 后台看某位会员的绑定记录（openid 只显示后 6 位） */
+export interface MpBindingRow {
+  id: number;
+  openidTail: string;
+  phone: string;
+  mock: boolean;
+  boundAt: string;
+  unboundAt: string | null;
+  unboundByName: string | null;
+  unbindReason: string | null;
+}

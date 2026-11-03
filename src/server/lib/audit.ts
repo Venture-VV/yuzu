@@ -121,7 +121,10 @@ export type AuditAction =
   // 会员体系 v2（v0.7.23）：已有会员上线定档、手动调整档阶、他店查询
   | 'membership_live'
   | 'member_grade_adjusted'
-  | 'member_lookup';
+  | 'member_lookup'
+  // 微信小程序（小程序线）：解绑会员的微信、维护小程序内容
+  | 'mp_unbind'
+  | 'mp_content_saved';
 
 export interface AuditEntry {
   staffId: number | null;

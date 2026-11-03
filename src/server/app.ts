@@ -55,6 +55,7 @@ import { registerLocationRoutes } from './modules/locations';
 import { registerCommissionRoutes } from './modules/commission';
 import { registerWalletRoutes } from './modules/wallet';
 import { registerErpModuleGate, registerErpRoutes } from './modules/erp';
+import { registerMpStaffRoutes } from './modules/mp/staff';
 
 function originHost(origin: string): string | null {
   try {
@@ -194,6 +195,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerLocationRoutes(app, deps);
   registerCommissionRoutes(app, deps);
   registerErpRoutes(app, deps);
+  // 微信小程序（小程序线）：前台用会员码查会员、解绑会员的微信、后台「小程序」
+  registerMpStaffRoutes(app, deps);
 
   // 前端静态资源（构建产物），全部从本机提供，外网中断不影响使用。
   const staticDir = resolve(process.env.STATIC_DIR ?? 'dist/client');
