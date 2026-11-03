@@ -217,23 +217,36 @@ async function grantFestivals(tx: Tx, g: Grantee, benefits: BenefitDef[]): Promi
 
 const festivalOpen = (festival: string, date: string) => festival <= date && date <= shiftDate(festival, FESTIVAL_WINDOW_DAYS - 1);
 
-/** 会员一行（调用方已锁）：在册的才发 */
-async function granteeOf(tx: Tx, memberId: number, date: string, staffId: number | null): Promise<Grantee | null> {
-  const [m] = await tx<{ grade: number; tier: number | null; birthday: string | null; status: string }[]>`
-    SELECT grade, tier, birthday, status FROM members WHERE id = ${memberId}`;
+/**
+ * 会员一行（调用方已锁）：在册的才发。
+ * settled：要求到期已经处理——周期或补充期已经结束、还没按规则处理的会员档阶还是旧的（到期处理出错、锁等超时，或还没轮到），
+ * 不按它发；等到期处理完由 onDueSettled 按处理完的状态发（Codex 自动审查 32d3f31）。档阶变化、到期处理调用时状态都是处理过的
+ */
+async function granteeOf(tx: Tx, memberId: number, date: string, staffId: number | null, opts: { settled?: boolean } = {}): Promise<Grantee | null> {
+  const [m] = await tx<{ grade: number; tier: number | null; birthday: string | null; status: string; cycleEnd: string | null; graceUntil: string | null }[]>`
+    SELECT grade, tier, birthday, status, cycle_end, grace_until FROM members WHERE id = ${memberId}`;
   if (!m || m.status !== 'active') return null;
+  if (opts.settled && m.grade > 0 && (m.graceUntil ?? m.cycleEnd ?? date) < date) return null;
   return { memberId, grade: m.grade, tier: m.tier, birthday: m.birthday, date, staffId, at: new Date() };
+}
+
+/**
+ * 会员现在该有的：本期券类补齐、生日月的生日礼、节日当周的节日关怀。每天的自动发放与档阶变化、建档、改生日、到期处理完时都按这一套——
+ * 自动发放当天跑完以后不再翻会员，之后才够格的当场补，不会错过只剩当天的节日（Codex 自动审查 32d3f31）
+ */
+async function grantDue(tx: Tx, g: Grantee, reason: 'monthly' | 'top_up', benefits: BenefitDef[]): Promise<number> {
+  return (await topUpPeriodic(tx, g, reason, benefits)) + (await grantBirthday(tx, g, benefits)) + (await grantFestivals(tx, g, benefits));
 }
 
 const EVENT_OF_KIND: Partial<Record<GradeEventKind, BenefitEvent>> = { recharge_up: 'grade_up', spend_up: 'tier_up', retain: 'retain', grace_retain: 'retain' };
 
 /**
- * 档阶变化之后（会员一行已锁，membership.ts 记状态变化的同一事务）：按新档阶补发本期券类的差额；
- * 充值升档发升级礼（升档）、消费升阶发升级礼（升阶）、到期保级与补充期内保级发保级礼（每次状态变化各一次）；
- * 新档阶够格了、这个月是生日月的补发生日礼。手动调整、上线与期初导入定档只补发券类，不发升级礼；降档不收回。
+ * 档阶变化之后（会员一行已锁，membership.ts 记状态变化的同一事务）：充值升档发升级礼（升档）、消费升阶发升级礼（升阶）、
+ * 到期保级与补充期内保级发保级礼（每次状态变化各一次）；再按新档阶补现在该有的（grantDue：本期券类差额、生日礼、节日关怀）。
+ * 手动调整、上线与期初导入定档不发升级礼；降档不收回。
  *
  * deferPeriodic：停机后补跑到期、一次连走几步时（例如补充期开始、接着降档），中间那几步只发事件礼（保级礼按那次保级），
- * 本期券类与生日礼留到最后一步之后按处理完的状态补（onDueSettled）：中间的档阶早就过去了，按它发的券降档后也收不回
+ * 其余留到最后一步之后按处理完的状态补（onDueSettled）：中间的档阶早就过去了，按它发的券降档后也收不回
  * （Codex 自动审查 98806a3）
  */
 export async function onGradeChanged(
@@ -244,32 +257,27 @@ export async function onGradeChanged(
   if (!benefits.length) return;
   const g = await granteeOf(tx, o.memberId, o.date, o.staffId);
   if (!g) return;
-  if (!o.deferPeriodic) await topUpPeriodic(tx, g, 'top_up', benefits);
   const event = EVENT_OF_KIND[o.kind];
   if (event) await grantEvent(tx, g, event, `${event}:e${o.eventId}`, benefits);
-  if (!o.deferPeriodic) await grantBirthday(tx, g, benefits);
+  if (!o.deferPeriodic) await grantDue(tx, g, 'top_up', benefits);
 }
 
-/** 补跑的到期处理走完以后（会员一行已锁）：按处理完的状态补发本期券类与生日礼 */
+/** 补跑的到期处理走完以后（会员一行已锁）：按处理完的状态补现在该有的 */
 export async function onDueSettled(tx: Tx, memberId: number, date: string) {
   const benefits = await publishedForGrants(tx);
   if (!benefits.length) return;
   const g = await granteeOf(tx, memberId, date, null);
-  if (!g) return;
-  await topUpPeriodic(tx, g, 'top_up', benefits);
-  await grantBirthday(tx, g, benefits);
+  if (g) await grantDue(tx, g, 'top_up', benefits);
 }
 
-/** 上线定档、期初导入定档之后（会员已按 id 升序锁住）：定了档的补发本期券类与生日礼 */
+/** 上线定档、期初导入定档之后（会员已按 id 升序锁住）：定了档的补现在该有的 */
 export async function onMembersGraded(tx: Tx, memberIds: number[], date: string, staffId: number | null) {
   if (!memberIds.length) return;
   const benefits = await publishedForGrants(tx);
   if (!benefits.length) return;
   for (const id of [...memberIds].sort((a, b) => a - b)) {
     const g = await granteeOf(tx, id, date, staffId);
-    if (!g) continue;
-    await topUpPeriodic(tx, g, 'top_up', benefits);
-    await grantBirthday(tx, g, benefits);
+    if (g) await grantDue(tx, g, 'top_up', benefits);
   }
 }
 
@@ -283,18 +291,17 @@ export async function onRecharge(tx: Tx, o: { memberId: number; first: boolean; 
 }
 
 /**
- * 新会员建档、修改会员时改了生日（建档、修改的事务里，会员一行刚建或已锁）：「L0·会员」起点的券类当场发本期的；生日在这个月的发生日礼。
- * 改生日也要当场看：每天的自动发放当天跑完以后不再翻会员，月底最后一天补填的生日会错过（Codex 自动审查 98806a3）
+ * 新会员建档、修改会员时改了生日（建档、修改的事务里，会员一行刚建或已锁）：补现在该有的（「L0·会员」起点的本期券类、生日月的生日礼、节日关怀）。
+ * 改生日也要当场看：每天的自动发放当天跑完以后不再翻会员，月底最后一天补填的生日会错过（Codex 自动审查 98806a3）。
+ * 到期还没处理的会员不按旧档阶发，等到期处理完再发
  */
 export async function onMemberSaved(tx: Tx, deps: Pick<Deps, 'config'>, memberId: number, ctx: OpContext) {
   const benefits = await publishedForGrants(tx);
   if (!benefits.length) return;
   const at = ctx.at ?? new Date();
   const date = businessDateOf(at, deps.config.timezone, (await loadSettings(tx)).businessDayStartHour);
-  const g = await granteeOf(tx, memberId, date, ctx.actor.id);
-  if (!g) return;
-  await topUpPeriodic(tx, g, 'top_up', benefits);
-  await grantBirthday(tx, g, benefits);
+  const g = await granteeOf(tx, memberId, date, ctx.actor.id, { settled: true });
+  if (g) await grantDue(tx, g, 'top_up', benefits);
 }
 
 // ───────────────────────── 每天的自动任务 ─────────────────────────
@@ -334,9 +341,10 @@ export async function runBenefitsDaily(deps: Pick<Deps, 'sql' | 'config'>, now =
           const n = await sql.begin(async (tx) => {
             await setTxTimeouts(tx);
             await tx`SELECT id FROM members WHERE id = ${id} FOR UPDATE`;
-            const g = await granteeOf(tx, id, today, null);
+            // 到期还没处理的（到期处理这一位出错、锁等超时）跳过：处理完由 onDueSettled 按新的档阶发（命令行补跑同样）
+            const g = await granteeOf(tx, id, today, null, { settled: true });
             if (!g) return 0;
-            const issued = (await topUpPeriodic(tx, g, 'monthly', benefits)) + (await grantBirthday(tx, g, benefits)) + (await grantFestivals(tx, g, benefits));
+            const issued = await grantDue(tx, g, 'monthly', benefits);
             if (issued) {
               await writeAudit(tx, { staffId: null, action: 'benefit_granted', targetType: 'member', targetId: id, detail: { coupons: issued }, businessDate: today });
             }

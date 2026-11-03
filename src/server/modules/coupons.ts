@@ -516,6 +516,8 @@ export async function issueBirthdayCoupons(deps: Pick<Deps, 'sql' | 'config'>, n
       JOIN coupon_rules r ON r.active AND r.kind = 'birthday'
       JOIN coupon_templates t ON t.id = r.template_id AND t.active
       WHERE m.status = 'active' AND m.birthday IS NOT NULL AND to_char(m.birthday, 'MM') = ${month} AND m.id > ${after}
+        -- 到期还没处理的（到期处理这一位出错、锁等超时）不按旧的等级发，处理完以后下一次检查再发（Codex 自动审查 32d3f31）
+        AND NOT (m.grade > 0 AND coalesce(m.grace_until, m.cycle_end, ${date}::date) < ${date}::date)
         AND NOT EXISTS (SELECT 1 FROM coupon_issues i WHERE i.dedupe_key = 'birthday:r' || r.id || ':m' || m.id || ':y' || ${year})
       GROUP BY m.id
       ORDER BY m.id

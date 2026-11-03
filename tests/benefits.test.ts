@@ -13,6 +13,7 @@ import type { CouponTemplate, MemberCoupons } from '../src/shared/coupons';
 import { shiftDate } from '../src/shared/labels';
 import { rechargeOutcome, tierTargets, type MemberGradeInfo, type MembershipRules } from '../src/shared/membership';
 import { benefitChecks, runBenefitsDaily } from '../src/server/modules/benefits';
+import { issueBirthdayCoupons } from '../src/server/modules/coupons';
 import { membershipChecks, runMembershipDaily } from '../src/server/modules/membership';
 import { createStaff } from '../src/server/modules/staff';
 import { api, consumeBody, login, PASSWORD, setup, type TestContext } from './helpers';
@@ -389,9 +390,9 @@ describe('服务类：登记使用', () => {
   });
 });
 
-// Codex 自动审查 98806a3：每天的自动发放当天跑完以后不再翻会员——补填的生日要当场看；
-// 停机后补跑到期、一次连走几步时，本期券类与生日礼按走完以后的状态发，中间早已过去的档阶不发
-describe('当天改了生日、补跑多步到期', () => {
+// Codex 自动审查 98806a3、32d3f31：每天的自动发放当天跑完以后不再翻会员——补填的生日、当周才够格的节日关怀要当场看；
+// 停机后补跑到期、一次连走几步时，本期券类与生日礼按走完以后的状态发，中间早已过去的档阶不发；到期还没处理的会员不按旧档阶发
+describe('当天改了生日、节日当周才够格、补跑多步到期', () => {
   const profileOf = async (memberId: number) => (await api(ctx.app, ctx.owner, 'GET', `/api/members/${memberId}`)).body as { name: string; phone: string };
   const setBirthday = async (memberId: number, birthday: string | null) => {
     const { name, phone } = await profileOf(memberId);
@@ -416,7 +417,23 @@ describe('当天改了生日、补跑多步到期', () => {
     await allChecksOk();
   });
 
-  it('L2 会员周期与补充期都过了才处理（先进补充期、再降到 L1）：本月券与生日礼按 L1 发，不按中间的 L2', async () => {
+  it('节日关怀的那一周里升档才够格：当场发，不等第二天（自动发放当天已跑完，节日只剩当天也不错过）', async () => {
+    const b = await byCode('QY-055');
+    expect((await edit('QY-055', { festivalDates: [...b.festivalDates, today] })).status).toBe(200);
+    await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(today));
+    expect(await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(today))).toBeNull();
+    const festivalGrants = async (memberId: number) => (await grantsOf(memberId)).filter((g) => g.code === 'QY-055');
+    const m = await newMember('节日当周升档');
+    expect(await festivalGrants(m)).toEqual([]);
+    await recharge(m, yuan(5000));
+    expect(await festivalGrants(m)).toEqual([expect.objectContaining({ reason: 'event', eventKey: `festival:${today}`, quantity: 1 })]);
+    expect(await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(today))).toBeNull();
+    await recharge(m, yuan(5000));
+    expect(await festivalGrants(m)).toHaveLength(1);
+    await allChecksOk();
+  });
+
+  it('L2 会员周期与补充期都过了才处理（先进补充期、再降到 L1）：处理之前的自动发放与生日礼都跳过这位；本月券与生日礼按 L1 发，不按中间的 L2', async () => {
     // L2·初 起的月度券、生日礼改成 L2·初 起；L1·尊 起的月度券作对照（L1·尊 够格，处理完当场补发）
     await publish('QY-038', { templateId: massage.id, startGrade: 2, startTier: 0, period: 'month', quantity: 1 });
     await publish('QY-036', { templateId: massage.id, startGrade: 1, startTier: 2, period: 'month', quantity: 1 });
@@ -433,6 +450,13 @@ describe('当天改了生日、补跑多步到期', () => {
     const day = shiftDate(graceEnd, 1);
     // 生日在处理的那个月
     await setBirthday(m, `1990-${day.slice(5, 7)}-10`);
+    // 那天到期处理还没轮到这一位（或这一位出错、锁等超时）：会员权益的自动发放、发券规则的 L2 生日礼都先跳过，不按过期的 L2 发
+    const rule = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/rules', { clientKey: randomUUID(), kind: 'birthday', level: 2, templateId: gift.id, quantity: 1 });
+    expect(rule.status, JSON.stringify(rule.body)).toBe(200);
+    await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(day));
+    await issueBirthdayCoupons({ sql: ctx.sql, config: ctx.config }, noonOf(day));
+    expect((await grantsOf(m)).filter((g) => g.periodKey === day.slice(0, 7) || g.eventKey === `birthday:${day.slice(0, 4)}`)).toEqual([]);
+    expect(await ctx.sql`SELECT id FROM coupon_issues WHERE member_id = ${m} AND kind = 'birthday'`).toHaveLength(0);
     const run = await runMembershipDaily({ sql: ctx.sql, config: ctx.config }, noonOf(day));
     expect(run).toMatchObject({ error: null });
     const events = await ctx.sql<{ kind: string; toGrade: number; toTier: number | null }[]>`
