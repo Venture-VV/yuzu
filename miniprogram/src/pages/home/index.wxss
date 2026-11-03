@@ -1,0 +1,241 @@
+/* 导航栏 */
+.nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 10;
+  background-color: transparent;
+  transition: background-color 0.2s;
+}
+.nav.solid {
+  background-color: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.nav-bar {
+  display: flex;
+  align-items: center;
+  padding-left: 32rpx;
+  box-sizing: border-box;
+}
+.nav-mark {
+  display: flex;
+  align-items: baseline;
+}
+.nm-zh {
+  font-size: 32rpx;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+.nm-en {
+  margin-left: 14rpx;
+  font-family: var(--font-en);
+  font-size: 18rpx;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+}
+
+/* 版头 */
+.hero {
+  position: relative;
+  height: 600rpx;
+  overflow: hidden;
+  color: var(--card-ink);
+  background: radial-gradient(90% 70% at 78% 18%, rgba(235, 222, 202, 0.42) 0%, rgba(235, 222, 202, 0) 62%), linear-gradient(168deg, #8e6c4f 0%, #54402f 100%);
+}
+.hero-media {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+}
+.hero-img {
+  width: 100%;
+  height: 100%;
+}
+.hero-shade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(28, 26, 23, 0.4) 0%, rgba(28, 26, 23, 0) 34%, rgba(28, 26, 23, 0) 50%, rgba(28, 26, 23, 0.55) 100%);
+}
+.hero-body {
+  position: absolute;
+  left: 36rpx;
+  right: 36rpx;
+  bottom: 44rpx;
+  pointer-events: none;
+}
+.wordmark {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.wm-zh {
+  font-size: 60rpx;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  line-height: 1.2;
+}
+.wm-en {
+  margin-top: 6rpx;
+  font-family: var(--font-en);
+  font-size: 20rpx;
+  font-weight: 700;
+  letter-spacing: 0.5em;
+}
+.hero-line {
+  width: 64rpx;
+  height: 1px;
+  margin: 28rpx 0 22rpx;
+  background-color: var(--card-muted);
+}
+.hero-tag {
+  display: block;
+  font-size: 34rpx;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+}
+.hero-en {
+  display: block;
+  margin-top: 6rpx;
+  font-family: var(--font-en);
+  font-size: 18rpx;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  color: var(--card-muted);
+}
+.hero-foot {
+  position: absolute;
+  right: 36rpx;
+  top: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  pointer-events: none;
+}
+.hero-cap {
+  font-size: 22rpx;
+  letter-spacing: 0.06em;
+  color: var(--card-ink);
+  opacity: 0.9;
+}
+.dots {
+  display: flex;
+  margin-top: 12rpx;
+}
+.dot {
+  width: 20rpx;
+  height: 2px;
+  margin-left: 8rpx;
+  background-color: rgba(251, 246, 238, 0.4);
+}
+.dot.on {
+  background-color: var(--card-ink);
+}
+
+/* 门店信息 */
+.facts {
+  margin-bottom: 28rpx;
+}
+.fact {
+  display: flex;
+  align-items: baseline;
+  padding: 20rpx 0;
+  border-bottom: 1px solid var(--line);
+}
+.fk {
+  flex: none;
+  width: 136rpx;
+  font-size: 26rpx;
+  color: var(--muted);
+}
+.fv {
+  flex: 1;
+  min-width: 0;
+}
+.acts {
+  display: grid;
+  grid-gap: 16rpx;
+}
+.notice {
+  margin-top: 28rpx;
+  padding: 24rpx 28rpx;
+  background-color: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--wood);
+  border-radius: 6rpx;
+}
+.notice-t {
+  display: block;
+  margin-top: 8rpx;
+  white-space: pre-wrap;
+}
+.note {
+  display: block;
+  margin-top: 24rpx;
+}
+
+/* 三块业务：上沿取品牌书的概念色 */
+.pillars {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-gap: 16rpx;
+}
+.pillar {
+  padding: 24rpx 20rpx 22rpx;
+  background-color: var(--surface);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--wood);
+  border-radius: 6rpx;
+}
+.pillar.taste {
+  border-top-color: var(--organic);
+}
+.pillar.experience {
+  border-top-color: var(--energy);
+}
+.pl-en {
+  display: block;
+  font-family: var(--font-en);
+  font-size: 22rpx;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+.pl-zh {
+  display: block;
+  margin-top: 4rpx;
+  font-size: 26rpx;
+  color: var(--muted);
+}
+
+/* 服务入口 */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 8rpx 0;
+}
+.gi {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.ic {
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 50%;
+  border: 1px solid var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32rpx;
+  font-weight: 600;
+}
+.lb {
+  margin-top: 12rpx;
+  font-size: 24rpx;
+}

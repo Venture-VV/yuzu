@@ -79,7 +79,7 @@ E2E_DEMO_SHOWCASE=1 E2E_BASE_URL=… npx playwright test e2e/demo-showcase.spec.
 
 - Claude 只在指定的 `claude/*` 分支开发并推送；PR 由店主决定是否合并，AI 不合并、不打标签。
 - **店主合并开发会话的 PR 后，开发会话马上从最新 `main` 重开分支、推送第一个提交（通常是排期或设计文档）并建草稿 PR**（店主 2026-10-31），方便测试会话、Codex 等往里提交报告和评论；做完、CI 全绿后改成待审交店主合并。
-- 业务代码只由开发会话改（店主 2026-11-03 起分两条线：主线管 yuzu 本体，会员、钱包、券、结账、前台的核心只由主线改；小程序线只写 `miniprogram/`、`src/gateway/`、`src/server/modules/mp/`、`src/client/features/mp/`、`src/shared/mp.ts`，登记处只加挂接的几行，不改 yuzu 的版本号；见 ROADMAP 第 7 节与 `docs/MINIPROGRAM.md` 第 8 节）；测试会话只改 `tests/`、`e2e/`、CI 的测试步骤、演示数据（`src/server/seed*.ts`、`src/server/demo/`）与测试文档，评论开头写「测试会话」。
+- 业务代码只由开发会话改（店主 2026-11-03 起分两条线：主线管 yuzu 本体，会员、钱包、券、结账、前台的核心只由主线改；小程序线只写 `miniprogram/`、`src/gateway/`、`src/server/modules/mp/`、`src/client/features/mp/`、`src/shared/mp.ts`，登记处只加挂接的几行，不改 yuzu 的版本号；见 ROADMAP 第 7 节与 `docs/MINIPROGRAM.md` 第 8 节）；测试会话只改 `tests/`、`e2e/`、`miniprogram/tests/`、`miniprogram/e2e/`、CI 的测试步骤、演示数据（`src/server/seed*.ts`、`src/server/demo/`）与测试文档，评论开头写「测试会话」。
 - **四个 AI 按线协作（店主 2026-11-03）**：主线 = Claude 主线开发会话 + Codex「yuzu测试开发助手」（总协调与主线验收）；小程序线 = Claude 小程序开发会话 + Codex「小程序助手」（小程序专项测试）。为了报告与评论不发错地方：
   - **一条线一个 PR**：每条线同时只开一个 PR，标题以【主线】/【小程序线】开头、带同名标签；PR 说明开头写这条线管哪些目录、报告第一行怎么写。
   - **报告第一行**：`【主线·测试】→ 主线 · PR #<号> · <完整 SHA>`（小程序线写 `【小程序线·测试】→ 小程序线 · PR #<号> · <完整 SHA>`）；测的是 `main` 时写 `→ 主线 · main <版本标签> · <完整 SHA>`，发在那条线当前开着的 PR 上（草稿也算）。测 PR 的提交时，发之前核对这个 SHA 在该 PR 的提交列表里。

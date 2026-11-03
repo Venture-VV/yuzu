@@ -383,3 +383,23 @@ jobs:
             app.log
             recon
           retention-days: 7
+
+  # 微信小程序（小程序线，docs/MINIPROGRAM.md 第 11 节）：miniprogram/ 自己的依赖；类型检查连同 src/shared/mp.ts 等共用类型，
+  # 接口改了小程序这边会报错。单元测试不要微信开发者工具（页面在开发者工具与真机上测，见第 11 节）。
+  miniprogram:
+    name: 小程序：类型检查 · 单元测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: miniprogram
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: miniprogram/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test

@@ -1,0 +1,236 @@
+/*
+ * 汤崎 TOUCHILL：照品牌书与 VI（docs/MINIPROGRAM.md 第 13 节）。
+ * 米白、亚麻底；主色是木与麻的木色 #937051（六个色阶）；五个概念色只做点缀；细线、规则网格、留白；
+ * 英文小标题大写、加字距。正文用手机的系统字体（iOS 苹方，鸿蒙手机自带鸿蒙字体），英文用 Helvetica。
+ * 不用 flex 的 gap（老 iOS 不认），间距用外边距。
+ */
+page {
+  --bg: #F5F1EA;
+  --surface: #FCFAF6;
+  --ink: #1C1A17;
+  --muted: #776C60;
+  --line: #E0D7C9;
+  --wood: #937051;
+  --wood-2: #AD8E69;
+  --wood-3: #C4A67E;
+  --wood-4: #D2B993;
+  --wood-5: #E4D0B3;
+  --wood-6: #EBDECA;
+  --organic: #5D6B3B;
+  --relax: #4E6B82;
+  --energy: #B5532F;
+  --danger: #A6452F;
+  --card-a: #5B4432;
+  --card-b: #937051;
+  --card-ink: #FBF6EE;
+  --card-muted: #E2CFB2;
+  --card-track: rgba(251, 246, 238, 0.24);
+  --font-zh: "HarmonyOS Sans SC", "HarmonyOS Sans", "PingFang SC", -apple-system, "Helvetica Neue", "Microsoft YaHei", sans-serif;
+  --font-en: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  background-color: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-zh);
+  font-size: 28rpx;
+  line-height: 1.6;
+}
+
+/* ── 按钮：去掉微信按钮的默认样式 ── */
+button {
+  margin: 0;
+  padding: 0;
+  background: none;
+  border-radius: 0;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  text-align: inherit;
+}
+button::after {
+  border: none;
+}
+.btn {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  width: auto !important;
+  height: 84rpx;
+  margin: 0 !important;
+  padding: 0 32rpx !important;
+  border-radius: 8rpx;
+  font-size: 28rpx;
+  font-weight: 600 !important;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  box-sizing: border-box;
+}
+.btn.primary {
+  background-color: var(--wood);
+  color: #FFFFFF;
+}
+.btn.ghost {
+  border: 1px solid var(--ink);
+  color: var(--ink);
+}
+.btn.quiet {
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.btn.block {
+  width: 100% !important;
+}
+.btn[disabled] {
+  opacity: 0.5;
+}
+.btn-hover {
+  opacity: 0.75;
+}
+.tap {
+  opacity: 0.6;
+}
+
+/* ── 字 ── */
+.eyebrow {
+  display: block;
+  font-family: var(--font-en);
+  font-size: 20rpx;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.h3 {
+  display: block;
+  font-size: 34rpx;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+}
+.sub {
+  font-size: 24rpx;
+  color: var(--muted);
+}
+.num,
+.en {
+  font-family: var(--font-en);
+  font-variant-numeric: tabular-nums;
+}
+.center {
+  text-align: center;
+}
+
+/* ── 版面 ── */
+.view {
+  padding: 36rpx 36rpx 64rpx;
+}
+.sec {
+  margin-bottom: 52rpx;
+}
+.sec-h {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 20rpx;
+}
+.sec-h .sub {
+  margin-left: 16rpx;
+  white-space: nowrap;
+}
+.panel {
+  background-color: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8rpx;
+  padding: 28rpx;
+}
+.rule {
+  height: 1px;
+  background-color: var(--line);
+}
+
+/* 下划线标签：门店、楼层 */
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 8rpx;
+}
+.tabs .tab {
+  padding: 20rpx 0 18rpx;
+  margin-right: 48rpx;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tabs .tab.on {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+/* 方块标签：价目分类 */
+.chips {
+  white-space: nowrap;
+  margin: 0 -36rpx 28rpx;
+  padding: 0 36rpx;
+  width: calc(100% + 72rpx);
+  box-sizing: border-box;
+}
+.chip {
+  display: inline-block;
+  height: 60rpx;
+  line-height: 58rpx;
+  padding: 0 24rpx;
+  margin-right: 12rpx;
+  border-radius: 6rpx;
+  border: 1px solid var(--line);
+  background-color: var(--surface);
+  font-size: 26rpx;
+  box-sizing: border-box;
+}
+.chip.on {
+  background-color: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg);
+}
+
+/* 门店系统连接中 */
+.offline {
+  background-color: var(--wood-6);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 24rpx;
+  padding: 14rpx 36rpx;
+}
+.wait {
+  color: var(--muted);
+  text-align: center;
+  padding: 48rpx 16rpx;
+}
+.wait .h3 {
+  color: var(--ink);
+  margin-bottom: 12rpx;
+}
+.wait .btn {
+  width: 360rpx !important;
+  margin: 32rpx auto 0 !important;
+}
+
+/* 带细线的行 */
+.rows {
+  border-top: 1px solid var(--ink);
+}
+.row-line {
+  border-bottom: 1px solid var(--line);
+  padding: 24rpx 0;
+}
+
+/* 标「待开放」「演示」等的小框 */
+.tag {
+  display: inline-block;
+  font-size: 20rpx;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 0 10rpx;
+  border-radius: 4rpx;
+  border: 1px solid currentColor;
+  line-height: 1.5;
+  vertical-align: 2rpx;
+}

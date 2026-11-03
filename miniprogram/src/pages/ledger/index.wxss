@@ -1,0 +1,75 @@
+.bal {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 48rpx;
+}
+.k {
+  display: block;
+  font-size: 24rpx;
+  color: var(--muted);
+}
+.v {
+  display: block;
+  font-size: 52rpx;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.bal-split {
+  display: flex;
+}
+.bs {
+  margin-left: 36rpx;
+  text-align: right;
+}
+.nv {
+  display: block;
+  font-weight: 700;
+}
+.lg {
+  display: flex;
+  justify-content: space-between;
+  padding: 24rpx 0;
+  border-bottom: 1px solid var(--line);
+}
+.lg-main {
+  flex: 1;
+  min-width: 0;
+  padding-right: 20rpx;
+}
+.lg-t {
+  display: block;
+  font-weight: 600;
+}
+.lg-d {
+  display: block;
+  font-size: 22rpx;
+  color: var(--muted);
+}
+.lg-s {
+  display: block;
+  margin-top: 4rpx;
+  font-size: 24rpx;
+  color: var(--muted);
+}
+.lg-a {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.amt {
+  font-weight: 700;
+  font-size: 30rpx;
+}
+.amt.pos {
+  color: var(--wood);
+}
+.lg-x {
+  font-size: 22rpx;
+  color: var(--muted);
+}
+.foot {
+  display: block;
+  margin-top: 28rpx;
+}

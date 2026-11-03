@@ -17,5 +17,7 @@ await build({ ...common, entryPoints: ['src/server/index.ts'], outfile: 'dist/se
 await build({ ...common, entryPoints: ['src/server/cli.ts'], outfile: 'dist/server/cli.js' });
 // 底图转换进程（RQ-004 第二段）：单独的入口，应用与命令行起子进程跑它
 await build({ ...common, entryPoints: ['src/server/floorplan/worker.ts'], outfile: 'dist/server/floorplan-worker.js' });
+// 微信小程序网关（小程序线，docs/MINIPROGRAM.md）：只在网关服务器上跑，门店 Mac mini 不跑
+await build({ ...common, entryPoints: ['src/gateway/index.ts'], outfile: 'dist/gateway/index.js' });
 await mkdir('dist/server/migrations', { recursive: true });
 await cp('src/server/migrations', 'dist/server/migrations', { recursive: true });

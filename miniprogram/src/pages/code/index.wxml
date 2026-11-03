@@ -1,0 +1,26 @@
+<view class="view">
+  <view wx:if="{{state === 'loading'}}" class="wait">正在打开…</view>
+
+  <view wx:elif="{{state === 'unbound'}}" class="panel wait">
+    <text class="h3">先绑定会员</text>
+    <text>绑定后就能用会员码，到前台不用报手机号</text>
+    <button class="btn primary" hover-class="btn-hover" bindtap="onBind">去绑定</button>
+  </view>
+
+  <view wx:elif="{{state === 'offline' || state === 'error'}}" class="panel wait">
+    <text class="h3">{{state === 'offline' ? '门店系统连接中' : message}}</text>
+    <text>会员码暂时用不了，请到前台报手机号</text>
+    <button class="btn ghost" hover-class="btn-hover" bindtap="refresh">再试一次</button>
+  </view>
+
+  <block wx:else>
+    <view class="panel code-card">
+      <text class="eyebrow">Member Code</text>
+      <text wx:if="{{who}}" class="who">{{who}}</text>
+      <canvas id="qr" type="2d" class="qr" style="width: {{qrPx}}px; height: {{qrPx}}px;" aria-label="会员码二维码"></canvas>
+      <text class="digits">{{digits}}</text>
+      <text class="timer">每 60 秒自动更换 · 还有 {{left}} 秒</text>
+    </view>
+    <text class="sub hint">到前台出示，扫码盒扫一下就能认出你，不用报手机号。截图过一会儿就失效。</text>
+  </block>
+</view>

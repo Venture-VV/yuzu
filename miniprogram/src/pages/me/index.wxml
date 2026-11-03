@@ -1,0 +1,112 @@
+<view class="view">
+  <view wx:if="{{state === 'loading'}}" class="wait">正在打开…</view>
+
+  <view wx:elif="{{state === 'offline' || state === 'error'}}" class="panel wait">
+    <text class="h3">{{state === 'offline' ? '门店系统连接中' : message}}</text>
+    <text wx:if="{{state === 'offline'}}">会员信息暂时看不到，店里网络恢复后就能看</text>
+    <button class="btn ghost" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+
+  <!-- 绑定结果待确认：上次点绑定时网络不好，确认之前不能再绑定 -->
+  <view wx:elif="{{state === 'pending'}}" class="panel bindcard">
+    <text class="h3">绑定结果待确认</text>
+    <text class="lede">上次点绑定时网络不好，还不知道绑上没有。网络好了点「再确认一次」，门店系统会告诉我们结果；确认之前先不要换手机号重新绑。</text>
+    <button class="btn primary block" hover-class="btn-hover" bindtap="onConfirmPending" loading="{{binding}}" disabled="{{binding}}">再确认一次</button>
+    <text wx:if="{{message}}" class="sub fine">{{message}}</text>
+  </view>
+
+  <!-- 手机上的绑定记录读不出来：不知道有没有没确认的绑定，先不能绑定（不删原来的记录） -->
+  <view wx:elif="{{state === 'unreadable'}}" class="panel bindcard">
+    <text class="h3">绑定记录暂时读不出来</text>
+    <text class="lede">手机上保存的绑定记录读不出来，为防止绑错，先不能绑定。请稍后点「再试一次」；一直这样，请清理微信的存储空间后再打开小程序。</text>
+    <button class="btn primary block" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+
+  <!-- 没绑定 -->
+  <view wx:elif="{{state === 'unbound'}}" class="panel bindcard">
+    <view class="ghostcard"><text class="gc-zh">汤崎</text><text class="gc-en">TOUCHILL</text></view>
+    <text class="h3">绑定会员，看余额、券和会员码</text>
+    <text class="lede">用微信验证过的手机号，自动找到你在门店的会员档案。</text>
+    <button wx:if="{{!mock}}" class="btn primary block" hover-class="btn-hover" open-type="getPhoneNumber" bindgetphonenumber="onPhone" loading="{{binding}}" disabled="{{binding}}">用微信手机号绑定</button>
+    <view wx:else class="mock">
+      <text class="mock-t">开发版 · 模拟微信（{{mockUser}}）</text>
+      <input class="mock-in" type="number" maxlength="11" placeholder="填演示库里会员的手机号" value="{{mockPhone}}" bindinput="onMockPhone" />
+      <view class="pair">
+        <button class="btn ghost" hover-class="btn-hover" bindtap="onMockSwitch">换一个微信</button>
+        <button class="btn primary" hover-class="btn-hover" bindtap="onMockBind" loading="{{binding}}" disabled="{{binding}}">模拟绑定</button>
+      </view>
+    </view>
+    <text class="sub fine">会员功能目前只支持{{homeName}}的会员；还不是会员请到前台开卡</text>
+  </view>
+
+  <!-- 手机号对不上会员（MP3：小程序不能开卡） -->
+  <view wx:elif="{{state === 'notmember'}}" class="panel bindcard">
+    <text class="h3">这个手机号还不是会员</text>
+    <text class="lede">小程序不能自己开卡。请到前台开卡，开卡后回来再绑定一次就行。</text>
+    <view class="pair">
+      <button class="btn ghost" hover-class="btn-hover" bindtap="onHome">先看看门店</button>
+      <button wx:if="{{!mock}}" class="btn primary" hover-class="btn-hover" open-type="getPhoneNumber" bindgetphonenumber="onPhone" loading="{{binding}}" disabled="{{binding}}">换个手机号</button>
+      <button wx:else class="btn primary" hover-class="btn-hover" bindtap="onRetryBind">换个手机号</button>
+    </view>
+  </view>
+
+  <!-- 会员卡 -->
+  <block wx:else>
+    <view class="mcard">
+      <view class="mc-top">
+        <view>
+          <text class="mc-eye">MEMBERSHIP</text>
+          <text class="mc-name">{{card.name}}</text>
+          <text class="mc-no">NO. {{card.memberNo}}</text>
+        </view>
+        <view class="mc-mark"><text class="mm-zh">汤崎</text><text class="mm-en">TOUCHILL</text></view>
+      </view>
+      <view class="mc-level">
+        <text class="lv-code">{{card.code}}</text>
+        <text class="lv-name">{{card.gradeName}}</text>
+        <text wx:if="{{card.tierName}}" class="lv-tier">{{card.tierName}}</text>
+        <text wx:if="{{card.frozen}}" class="lv-tier">已冻结</text>
+      </view>
+      <view class="ladder" aria-label="会员档级">
+        <view wx:for="{{card.ladder}}" wx:key="name" class="step {{item.state}}">
+          <view class="pip" />
+          <text class="step-t">{{item.name}}</text>
+        </view>
+      </view>
+      <view wx:if="{{card.bar}}" class="prog">
+        <view class="bar" aria-label="本周期储值消费进度">
+          <view class="fill" style="width: {{card.bar.fill}}%;" />
+          <view class="mark" style="left: {{card.bar.mark}}%;" />
+        </view>
+        <view class="bar-legend">
+          <text class="bl-enjoy" style="left: {{card.bar.mark}}%;">{{card.bar.enjoy}}</text>
+          <text class="bl-honor">{{card.bar.honor}}</text>
+        </view>
+        <text class="mc-text">{{card.bar.text}}，{{card.bar.hint}}</text>
+      </view>
+      <text wx:if="{{card.cycle}}" class="mc-muted">{{card.cycle}}</text>
+    </view>
+
+    <view class="bal">
+      <view class="bal-main">
+        <text class="k">可用余额</text>
+        <text class="v num">{{card.total}}</text>
+      </view>
+      <view class="bal-split">
+        <view class="bs"><text class="k">本金</text><text class="nv num">{{card.principal}}</text></view>
+        <view class="bs"><text class="k">赠金</text><text class="nv num">{{card.bonus}}</text></view>
+      </view>
+    </view>
+    <text class="sub fine">扣款：{{card.deduction}}</text>
+    <text wx:if="{{card.next}}" class="upsell">{{card.next}}。充值请到前台。</text>
+
+    <view class="menu">
+      <view class="mi" hover-class="tap" bindtap="onCode"><text>会员码</text><text class="mv">{{card.frozen ? '已冻结' : '到前台出示'}}</text></view>
+      <view class="mi" hover-class="tap" bindtap="onLedger"><text>余额与流水</text><text class="mv"></text></view>
+      <view class="mi" hover-class="tap" bindtap="onCoupons"><text>我的券</text><text class="mv">{{card.coupons}} 张可用</text></view>
+      <view class="mi" hover-class="tap" bindtap="onUnbind"><text>解绑与换号</text><text class="mv"></text></view>
+    </view>
+  </block>
+
+  <text class="ver">汤崎 TOUCHILL{{version ? ' · ' + version : ''}}</text>
+</view>
