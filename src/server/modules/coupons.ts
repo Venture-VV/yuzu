@@ -41,7 +41,9 @@ import { levelOf } from '@shared/frontdesk';
 import { shiftDate } from '@shared/labels';
 import { levelName } from '@shared/members';
 import { can } from '@shared/permissions';
-import { isUniqueViolation, readSnapshot, type Db, type Sql, type Tx } from '../db';
+import { isUniqueViolation, readSnapshot, type Db, type Tx } from '../db';
+import { assertNotFenced } from '../lib/fences';
+import { erpOpAbandoned } from './erp-ops';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import { toCsv } from '../lib/csv';
@@ -195,6 +197,8 @@ export async function createTemplate(deps: Deps, raw: unknown, ctx: OpContext): 
   if (prior) return prior;
   try {
     const id = await deps.sql.begin(async (tx) => {
+      // 与「确认作废」串行：已作废的编号整笔拒绝（结果待确认，Codex 复审 6c3765c）
+      await assertNotFenced(tx, clientKey, 'coupon_template', erpOpAbandoned);
       await assertRefs(tx, t);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO coupon_templates (name, kind, face_value, rate_percent, max_off, threshold, scope, scope_categories, scope_items,
@@ -514,9 +518,10 @@ export async function issueToMember(deps: Deps, memberId: number, raw: unknown, 
   const expect = { kind: 'manual' as const, templateId: input.templateId, memberId, quantity: input.quantity };
   const prior = await replayIssue(deps.sql, input.clientKey, expect);
   const now = async () => issueDate(deps.sql, deps, new Date());
-  if (prior) return { issueNo: prior.issueNo, replayed: true, coupons: await couponsOfIssue(deps.sql, prior.id, await now()) };
+  if (prior) return { issueId: prior.id, issueNo: prior.issueNo, replayed: true, coupons: await couponsOfIssue(deps.sql, prior.id, await now()) };
   try {
     const issue = await deps.sql.begin(async (tx) => {
+      await assertNotFenced(tx, input.clientKey, 'coupon_issue', erpOpAbandoned);
       const [m] = await tx<{ id: number; name: string; status: string }[]>`SELECT id, name, status FROM members WHERE id = ${memberId}`;
       if (!m) throw notFound('会员不存在');
       if (m.status !== 'active') throw unprocessable('MEMBER_FROZEN', `会员「${m.name}」已停用，不能发券`);
@@ -551,12 +556,12 @@ export async function issueToMember(deps: Deps, memberId: number, raw: unknown, 
       });
       return { ...done, date };
     });
-    return { issueNo: issue.issueNo, replayed: false, coupons: await couponsOfIssue(deps.sql, issue.issueId, issue.date) };
+    return { issueId: issue.issueId, issueNo: issue.issueNo, replayed: false, coupons: await couponsOfIssue(deps.sql, issue.issueId, issue.date) };
   } catch (error) {
     // 同一编号并发提交：后到的撞上唯一约束，查回第一次的结果
     if (isUniqueViolation(error, 'coupon_issues_client_key_key')) {
       const again = await replayIssue(deps.sql, input.clientKey, expect);
-      if (again) return { issueNo: again.issueNo, replayed: true, coupons: await couponsOfIssue(deps.sql, again.id, await now()) };
+      if (again) return { issueId: again.id, issueNo: again.issueNo, replayed: true, coupons: await couponsOfIssue(deps.sql, again.id, await now()) };
     }
     throw error;
   }
@@ -570,6 +575,7 @@ export async function createBatch(deps: Deps, raw: unknown, ctx: OpContext): Pro
   if (prior) return { id: prior.id, replayed: true };
   try {
     const id = await deps.sql.begin(async (tx) => {
+      await assertNotFenced(tx, input.clientKey, 'coupon_batch', erpOpAbandoned);
       const template = await lockTemplate(tx, input.templateId);
       if (!template) throw notFound('券模板不存在');
       if (!template.active) throw unprocessable('TEMPLATE_INACTIVE', `券「${template.name}」已停用，不能再发`);
@@ -664,25 +670,31 @@ export async function listRules(db: Db): Promise<CouponRule[]> {
   }));
 }
 
-export async function createRule(deps: Deps, raw: unknown, ctx: OpContext): Promise<CouponRule[]> {
+export async function createRule(deps: Deps, raw: unknown, ctx: OpContext): Promise<{ ruleId: number; rules: CouponRule[] }> {
   const input = parse(RuleInput, raw);
   const needsLevel = input.kind === 'level_up' || input.kind === 'birthday';
   if (needsLevel && input.level === null) throw badRequest('升级礼、生日礼请选择会员等级', { field: 'level' });
   if (input.kind === 'recharge' && input.planId === null) throw badRequest('充值赠券请选择充值套餐', { field: 'planId' });
   const level = needsLevel ? input.level : null;
   const planId = input.kind === 'recharge' ? input.planId : null;
-  // 同一操作编号已加过（没收到结果再提交）：同一条返回规则列表，不同的拒绝——重复的规则会重复发券
-  const replayed = async () => {
-    const [p] = await deps.sql<{ kind: string; level: number | null; planId: number | null; templateId: number; quantity: number }[]>`
-      SELECT kind, level, plan_id, template_id, quantity FROM coupon_rules WHERE client_key = ${input.clientKey}`;
-    if (!p) return false;
+  // 同一操作编号已加过（没收到结果再提交）：同一条返回那条规则，不同的拒绝——重复的规则会重复发券
+  const replayed = async (db: Db) => {
+    const [p] = await db<{ id: number; kind: string; level: number | null; planId: number | null; templateId: number; quantity: number }[]>`
+      SELECT id, kind, level, plan_id, template_id, quantity FROM coupon_rules WHERE client_key = ${input.clientKey}`;
+    if (!p) return null;
     const same = p.kind === input.kind && p.level === level && (p.planId === null ? null : Number(p.planId)) === planId && Number(p.templateId) === input.templateId && p.quantity === input.quantity;
     if (!same) throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一条发券规则，请刷新页面后重新填写');
-    return true;
+    return Number(p.id);
   };
-  if (await replayed()) return listRules(deps.sql);
+  const prior = await replayed(deps.sql);
+  if (prior !== null) return { ruleId: prior, rules: await listRules(deps.sql) };
+  let ruleId: number;
   try {
-    await deps.sql.begin(async (tx) => {
+    ruleId = await deps.sql.begin(async (tx) => {
+      // 与「确认作废」串行：已作废的编号整笔拒绝；同一编号的两次提交排队，后到的返回先到的那条
+      await assertNotFenced(tx, input.clientKey, 'coupon_rule', erpOpAbandoned);
+      const again = await replayed(tx);
+      if (again !== null) return again;
       const template = await lockTemplate(tx, input.templateId);
       if (!template) throw notFound('券模板不存在');
       if (!template.active) throw unprocessable('TEMPLATE_INACTIVE', `券「${template.name}」已停用`);
@@ -698,12 +710,15 @@ export async function createRule(deps: Deps, raw: unknown, ctx: OpContext): Prom
         RETURNING id`;
       const { clientKey: _key, ...created } = input;
       await writeAudit(tx, { staffId: ctx.actor.id, action: 'coupon_rule_saved', targetType: 'coupon_rule', targetId: row!.id, detail: { created, template: template.name }, ip: ctx.ip });
+      return Number(row!.id);
     });
   } catch (error) {
     // 同一编号的两次提交同时到：后到的一次撞唯一约束，按先到的那条返回
-    if (!(isUniqueViolation(error, 'coupon_rules_client_key_key') && (await replayed()))) throw error;
+    const again = isUniqueViolation(error, 'coupon_rules_client_key_key') ? await replayed(deps.sql) : null;
+    if (again === null) throw error;
+    ruleId = again;
   }
-  return listRules(deps.sql);
+  return { ruleId, rules: await listRules(deps.sql) };
 }
 
 export async function deactivateRule(deps: Deps, id: number, ctx: OpContext): Promise<CouponRule[]> {

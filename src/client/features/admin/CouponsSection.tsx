@@ -6,7 +6,7 @@
 //   · 统计：按模板列发券、用券（张数、抵扣金额）、过期、作废。
 // 默认店主、店总（「维护券模板、发券规则与无记名券」）；按批次作废还要「作废券」。会员的券在会员详情里看、发、作废。
 
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Ban, CopyPlus, Download, Plus, Search } from 'lucide-react';
 import { ISO_DATE } from '@shared/business-date';
@@ -32,6 +32,8 @@ import {
 import { shiftDate } from '@shared/labels';
 import { centsToInput, formatYuan, parseYuan } from '@shared/money';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { sendErpOp, useErpPending } from '../../lib/erpPending';
+import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
@@ -65,14 +67,27 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'stats', label: '统计' },
 ];
 
+/** 后台页面上方列出的「结果待确认」：后台的三种，另加发券给会员（店主在这里也能处理） */
+const COUPON_PENDING_TYPES = ['coupon_template', 'coupon_rule', 'coupon_batch', 'coupon_issue'] as const;
+
+/** 没收到结果时的提示：记录留在本机，到页面上方处理 */
+const pendingToast = (label: string) => ({
+  tone: 'info' as const,
+  title: `${label}：没收到结果`,
+  body: '可能已经办好，也可能没有。这笔记在页面上方「结果待确认」里（刷新、重新登录也在）：先查回；查不到就按原内容重新提交（同一操作编号，不会多出一条）或确认作废后再重新填写。',
+});
+
 export function CouponsSection() {
   const [tab, setTab] = useState<Tab>('templates');
+  const invalidateCoupons = useInvalidateCoupons();
   return (
     <AdminPage
       section="coupons"
       description="券模板（代金券、折扣券、兑换券）、自动发券的规则（开卡礼、升级礼、生日礼、充值赠券）、无记名纸质券与统计。会员的券在会员详情里看、发、作废；结账时在收款里用券。"
     >
       <div className="space-y-4" data-testid="coupon-admin">
+        {/* 新建模板、加规则、生成无记名券、发券时断网：关掉对话框、刷新、重新登录后在这里查回、按原内容重新提交或作废（Codex 复审 6c3765c） */}
+        <ErpPendingPanel types={COUPON_PENDING_TYPES} className="space-y-2" onFound={() => void invalidateCoupons()} />
         <Segmented<Tab>
           value={tab}
           onChange={setTab}
@@ -124,6 +139,8 @@ function TemplatesCard() {
   const session = useSession();
   const templates = useCouponTemplates();
   const meta = useCouponMeta();
+  // 新建的结果待确认时先处理那一笔（查回、重提或作废），免得同一个模板建两个
+  const pendingNew = useErpPending(['coupon_template']).length > 0;
   const [target, setTarget] = useState<TemplateTarget>(null);
   const [showInactive, setShowInactive] = useState(false);
   const failed = templates.error ?? meta.error;
@@ -136,7 +153,15 @@ function TemplatesCard() {
     <Card className="p-5" data-testid="coupon-templates">
       <SectionTitle
         aside={
-          <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => setTarget({ mode: 'new' })} data-testid="coupon-template-new">
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<Plus className="size-4" />}
+            disabled={pendingNew}
+            title={pendingNew ? '上一次新建的结果待确认：先在页面上方查回、重提或作废' : undefined}
+            onClick={() => setTarget({ mode: 'new' })}
+            data-testid="coupon-template-new"
+          >
             新建券模板
           </Button>
         }
@@ -413,16 +438,11 @@ function TemplateDialog({
   const [draft, setDraft] = useState<Draft>(() => draftOf(null, session.today));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // 新建的操作编号：没收到结果（超时、断网）时留着，再保存一次服务端返回原来那个、不会多建；成功或服务端明确回了之后才换新的
-  const key = useRef(uuid());
-  const [uncertain, setUncertain] = useState(false);
   if (target !== opened) {
     setOpened(target);
     setBase(target?.mode === 'edit' ? target.template : null);
     setDraft(draftOf(target && target.mode !== 'new' ? target.template : null, session.today, target?.mode === 'copy'));
     setError(null);
-    setUncertain(false);
-    key.current = uuid();
   }
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
   const editing = target?.mode === 'edit' && base !== null;
@@ -439,24 +459,31 @@ function TemplateDialog({
     setBusy(true);
     setError(null);
     try {
+      // 新建：发出前把操作编号与原请求存在本机并读回核对（存不了就不发），没收到结果时记录留着，刷新后也能查回、重提或作废；
+      // 改模板带版本号，没收到结果再保存会因版本号对不上被拒绝，不会改两次
+      const key = uuid();
       const saved =
         editing && base
           ? await api.put<CouponTemplate>(`/api/coupons/templates/${base.id}`, { ...body, expectedVersion: base.version })
-          : await api.post<CouponTemplate>('/api/coupons/templates', { ...body, clientKey: key.current });
-      key.current = uuid();
-      setUncertain(false);
+          : await sendErpOp<CouponTemplate>({
+              key,
+              type: 'coupon_template',
+              url: '/api/coupons/templates',
+              body: { ...body, clientKey: key },
+              summary: `券模板「${draft.name.trim()}」`,
+              staffName: session.staff.displayName,
+            });
       qc.setQueryData<CouponTemplate[]>(couponKeys.templates, (list) => list && (editing ? list.map((x) => (x.id === saved.id ? saved : x)) : [saved, ...list.filter((x) => x.id !== saved.id)]));
       void invalidate();
       toast({ tone: 'success', title: editing ? `已保存「${saved.name}」` : `已新建券模板「${saved.name}」`, body: saved.summary });
       onClose();
     } catch (e) {
       if (e instanceof UncertainError && !editing) {
-        // 新建没收到结果：留着操作编号，再保存一次返回原来那个
-        setUncertain(true);
+        // 新建没收到结果：记录在本机，到页面上方处理
+        toast(pendingToast('新建券模板'));
+        onClose();
       } else {
         // 改模板没收到结果：再保存时版本号对不上会被拒绝（不会改两次），载入最新内容核对即可
-        key.current = uuid();
-        setUncertain(false);
         setError(e instanceof UncertainError ? `${e.message}，不确定有没有保存上：载入最新内容核对后再改` : errorMessage(e));
       }
       void qc.invalidateQueries({ queryKey: couponKeys.templates });
@@ -480,7 +507,7 @@ function TemplateDialog({
             取消
           </Button>
           <Button variant="primary" loading={busy} disabled={!!problem || outdated} onClick={save} data-testid="coupon-template-save">
-            {uncertain ? '按原内容再保存' : '保存'}
+            保存
           </Button>
         </>
       }
@@ -597,13 +624,6 @@ function TemplateDialog({
               ]}
             />
           </Field>
-        )}
-        {uncertain && (
-          <div data-testid="coupon-template-uncertain">
-            <Notice tone="warning" title="没收到结果：这个模板可能已经建好了">
-              点「按原内容再保存」：已经建好的会直接返回原来那个，不会多建。也可以先关掉，看列表里有没有。
-            </Notice>
-          </div>
         )}
         {error && <Notice tone="error" title={error} />}
       </div>
@@ -824,6 +844,8 @@ function RulesCard() {
   const rules = useCouponRules();
   const meta = useCouponMeta();
   const templates = useCouponTemplates();
+  // 上一次加规则的结果待确认时先处理那一笔：再加一条可能多出一条规则、重复发券
+  const pendingAdd = useErpPending(['coupon_rule']).length > 0;
   const [adding, setAdding] = useState(false);
   const [stopping, setStopping] = useState<CouponRule | null>(null);
   const [showInactive, setShowInactive] = useState(false);
@@ -842,7 +864,15 @@ function RulesCard() {
       <div>
         <SectionTitle
           aside={
-            <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => setAdding(true)} data-testid="coupon-rule-new">
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<Plus className="size-4" />}
+              disabled={pendingAdd}
+              title={pendingAdd ? '上一次加规则的结果待确认：先在页面上方查回、重提或作废' : undefined}
+              onClick={() => setAdding(true)}
+              data-testid="coupon-rule-new"
+            >
               加一条规则
             </Button>
           }
@@ -925,18 +955,12 @@ function RuleDialog({ open, meta, templates, rules, onClose }: { open: boolean; 
   const [quantity, setQuantity] = useState('1');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // 操作编号：没收到结果时留着，按原内容再加一次服务端返回原来那条（重复的规则会重复发券）；成功或服务端明确回了之后才换新的
-  const key = useRef(uuid());
-  const [uncertain, setUncertain] = useState(false);
   useResetOnOpen(open, () => {
-    // 上一次没收到结果：留着原内容与编号，方便按原内容再加
-    if (!uncertain) {
-      setKind('open_card');
-      setLevel(null);
-      setPlanId(null);
-      setTemplateId(null);
-      setQuantity('1');
-    }
+    setKind('open_card');
+    setLevel(null);
+    setPlanId(null);
+    setTemplateId(null);
+    setQuantity('1');
     setError(null);
   });
   const leveled = needsLevel(kind);
@@ -968,27 +992,28 @@ function RuleDialog({ open, meta, templates, rules, onClose }: { open: boolean; 
     if (problem || !template) return;
     setBusy(true);
     setError(null);
+    // 发出前把操作编号与原请求存在本机并读回核对（存不了就不发）：没收到结果时关掉对话框、刷新、重新登录后，
+    // 在页面上方查回、按原内容重新提交（同一编号，不会多出一条规则、重复发券）或确认作废（Codex 复审 6c3765c）
+    const key = uuid();
+    const target = leveled ? `第 ${level} 级` : kind === 'recharge' ? (meta.plans.find((p) => p.id === planId)?.name ?? '充值套餐') : '';
     try {
-      const next = await api.post<CouponRule[]>('/api/coupons/rules', {
-        clientKey: key.current,
-        kind,
-        level: leveled ? level : null,
-        planId: kind === 'recharge' ? planId : null,
-        templateId: template.id,
-        quantity: n,
+      const next = await sendErpOp<{ ruleId: number; rules: CouponRule[] }>({
+        key,
+        type: 'coupon_rule',
+        url: '/api/coupons/rules',
+        body: { clientKey: key, kind, level: leveled ? level : null, planId: kind === 'recharge' ? planId : null, templateId: template.id, quantity: n },
+        summary: `${COUPON_RULE_KIND_LABELS[kind]}${target ? ` · ${target}` : ''}：${template.name} × ${n}`,
+        staffName: session.staff.displayName,
       });
-      key.current = uuid();
-      setUncertain(false);
-      qc.setQueryData(couponKeys.rules, next);
+      qc.setQueryData(couponKeys.rules, next.rules);
       void invalidate();
       toast({ tone: 'success', title: `已加上${COUPON_RULE_KIND_LABELS[kind]}：${template.name} × ${n}` });
       onClose();
     } catch (e) {
       if (e instanceof UncertainError) {
-        setUncertain(true);
+        toast(pendingToast('加发券规则'));
+        onClose();
       } else {
-        key.current = uuid();
-        setUncertain(false);
         setError(errorMessage(e));
       }
       void qc.invalidateQueries({ queryKey: couponKeys.rules });
@@ -1011,7 +1036,7 @@ function RuleDialog({ open, meta, templates, rules, onClose }: { open: boolean; 
             取消
           </Button>
           <Button variant="primary" loading={busy} disabled={!!problem} onClick={save} data-testid="coupon-rule-save">
-            {uncertain ? '按原内容再加' : '加上'}
+            加上
           </Button>
         </>
       }
@@ -1094,13 +1119,6 @@ function RuleDialog({ open, meta, templates, rules, onClose }: { open: boolean; 
             这里已有：{same.map((r) => `${r.templateName} × ${r.quantity}`).join('、')}（加上后一起发）
           </p>
         )}
-        {uncertain && (
-          <div data-testid="coupon-rule-uncertain">
-            <Notice tone="warning" title="没收到结果：这条规则可能已经加上了">
-              点「按原内容再加」：已经加上的会直接返回，不会多出一条（重复的规则会重复发券）。也可以先关掉，看列表里有没有这条。
-            </Notice>
-          </div>
-        )}
         {error && <Notice tone="error" title={error} />}
       </div>
     </Dialog>
@@ -1174,6 +1192,8 @@ function BatchesCard() {
   const can = useCan();
   const batches = useCouponBatches();
   const templates = useCouponTemplates();
+  // 上一次生成的结果待确认时先处理那一笔，免得多生成一批
+  const pendingNew = useErpPending(['coupon_batch']).length > 0;
   const [creating, setCreating] = useState(false);
   const [voiding, setVoiding] = useState<CouponBatch | null>(null);
   const failed = batches.error ?? templates.error;
@@ -1184,7 +1204,15 @@ function BatchesCard() {
     <Card className="p-5" data-testid="coupon-batches">
       <SectionTitle
         aside={
-          <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => setCreating(true)} data-testid="coupon-batch-new">
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<Plus className="size-4" />}
+            disabled={pendingNew}
+            title={pendingNew ? '上一次生成的结果待确认：先在页面上方查回、重提或作废' : undefined}
+            onClick={() => setCreating(true)}
+            data-testid="coupon-batch-new"
+          >
             生成一批
           </Button>
         }
@@ -1252,22 +1280,15 @@ function BatchDialog({ open, templates, onClose }: { open: boolean; templates: C
   const qc = useQueryClient();
   const toast = useToast();
   const invalidate = useInvalidateCoupons();
-  // 生成的操作编号：没收到结果（超时、断网）时留着，按原内容再提交时服务端返回原来那一批、不会多生成；
-  // 成功或服务端明确回了（含拒绝）之后才换新的
-  const key = useRef(uuid());
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [quantity, setQuantity] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [uncertain, setUncertain] = useState(false);
   useResetOnOpen(open, () => {
-    // 上一次没收到结果：留着原内容，方便按原内容再提交
-    if (!uncertain) {
-      setTemplateId(null);
-      setQuantity('');
-      setNote('');
-    }
+    setTemplateId(null);
+    setQuantity('');
+    setNote('');
     setError(null);
   });
   const blocked = (t: CouponTemplate) => (t.levels.length ? '限定了会员等级' : templateExpired(t, session.today) ? '有效期已过' : null);
@@ -1286,20 +1307,26 @@ function BatchDialog({ open, templates, onClose }: { open: boolean; templates: C
     if (problem || !template) return;
     setBusy(true);
     setError(null);
+    // 发出前把操作编号与原请求存在本机并读回核对（存不了就不发）：没收到结果时到页面上方查回、按原内容重新提交（不会多生成一批）或作废
+    const key = uuid();
     try {
-      const batch = await api.post<CouponBatch>('/api/coupons/batches', { clientKey: key.current, templateId: template.id, quantity: n, note: note.trim() });
-      key.current = uuid();
-      setUncertain(false);
+      const batch = await sendErpOp<CouponBatch>({
+        key,
+        type: 'coupon_batch',
+        url: '/api/coupons/batches',
+        body: { clientKey: key, templateId: template.id, quantity: n, note: note.trim() },
+        summary: `${template.name} × ${n} 张`,
+        staffName: session.staff.displayName,
+      });
       qc.setQueryData<CouponBatch[]>(couponKeys.batches, (list) => list && [batch, ...list.filter((b) => b.id !== batch.id)]);
       void invalidate();
       toast({ tone: 'success', title: `已生成 ${batch.quantity} 张「${batch.templateName}」`, body: `批次 ${batch.issueNo}：点「导出券码」交印刷` });
       onClose();
     } catch (e) {
       if (e instanceof UncertainError) {
-        setUncertain(true);
+        toast(pendingToast('生成无记名券'));
+        onClose();
       } else {
-        key.current = uuid();
-        setUncertain(false);
         setError(errorMessage(e));
         if (e instanceof ApiError && ['TEMPLATE_INACTIVE', 'TEMPLATE_EXPIRED', 'COUPON_LEVEL'].includes(e.code)) void qc.invalidateQueries({ queryKey: couponKeys.templates });
       }
@@ -1323,7 +1350,7 @@ function BatchDialog({ open, templates, onClose }: { open: boolean; templates: C
             取消
           </Button>
           <Button variant="primary" loading={busy} disabled={!!problem} onClick={submit} data-testid="coupon-batch-submit">
-            {uncertain ? '按原内容再提交' : n >= 1 && n <= MAX_BATCH_COUPONS ? `生成 ${n} 张` : '生成'}
+            {n >= 1 && n <= MAX_BATCH_COUPONS ? `生成 ${n} 张` : '生成'}
           </Button>
         </>
       }
@@ -1367,11 +1394,6 @@ function BatchDialog({ open, templates, onClose }: { open: boolean; templates: C
         <Field label="备注" htmlFor="coupon-batch-note" hint="选填，例如用途、印刷批次，最多 200 字">
           <Textarea id="coupon-batch-note" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} disabled={busy} data-testid="coupon-batch-note" />
         </Field>
-        {uncertain && (
-          <Notice tone="warning" title="没收到结果：这一批可能已经生成了">
-            点「按原内容再提交」：已经生成的会直接返回原来那一批，不会多生成。也可以先关掉，看列表里有没有这一批。
-          </Notice>
-        )}
         {error && <Notice tone="error" title={error} />}
       </div>
     </Dialog>

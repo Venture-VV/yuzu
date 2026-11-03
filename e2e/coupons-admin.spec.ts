@@ -22,6 +22,12 @@ async function getJson<T>(page: Page, url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function postJson<T>(page: Page, url: string, data: unknown): Promise<T> {
+  const res = await page.request.post(url, { data });
+  expect(res.ok(), `${url} → ${res.status()} ${await res.text()}`).toBe(true);
+  return (await res.json()) as T;
+}
+
 interface Template {
   id: number;
   name: string;
@@ -145,11 +151,65 @@ test.describe('券与会员权益（v0.7.20）', () => {
     }
   });
 
-  test('没收到结果再保存：同一个操作编号只建一个模板', async ({ page }) => {
+  // Codex 复审 6c3765c：加规则时服务端已提交、回复丢了，刷新后原编号与原请求还在（本机「结果待确认」），
+  // 按原内容重新提交只有一条规则，新会员只拿到一张开卡礼；处理完之前不能再加规则
+  test('加发券规则：回复丢了刷新页面，「结果待确认」还在，按原内容重新提交只有一条规则、新会员只拿一张开卡礼', async ({ page }) => {
+    await login(page, 'linlan');
+    const name = `E2E开卡礼-${Date.now() % 100000}`;
+    const template = await postJson<Template>(page, '/api/coupons/templates', { clientKey: randomUUID(), name, kind: 'cash', faceValue: 500, validity: 'days', validDays: 7 });
+    const rulesOf = async () => (await getJson<Rule[]>(page, '/api/coupons/rules')).filter((r) => r.templateId === template.id && r.active);
+    try {
+      await page.goto('/admin/coupons');
+      await page.getByTestId('coupon-tab-rules').click();
+      // 第一次：请求到了服务端（已提交），回复丢了；网络一直不好，页面的查回也发不出去（刷新之后才恢复）
+      let dropped = false;
+      await page.route('**/api/coupons/rules', async (route) => {
+        if (route.request().method() !== 'POST' || dropped) return route.continue();
+        dropped = true;
+        await route.fetch();
+        await route.abort('connectionreset');
+      });
+      await page.route('**/api/erp/ops/**', (route) => route.abort('connectionreset'));
+      await page.getByTestId('coupon-rule-new').click();
+      const dialog = page.getByTestId('coupon-rule-dialog');
+      await dialog.getByTestId('coupon-rule-kind-open_card').click();
+      await dialog.getByTestId('coupon-rule-template').selectOption(String(template.id));
+      await page.getByTestId('coupon-rule-save').click();
+      await expect(page.getByText('加发券规则：没收到结果')).toBeVisible();
+      const pending = page.getByTestId('erp-pending');
+      await expect(pending).toContainText('加发券规则结果待确认');
+      await expect(pending).toContainText(name);
+      expect(await rulesOf()).toHaveLength(1); // 服务端其实已经加上了
+      await page.unroute('**/api/coupons/rules');
+
+      // 刷新：原编号与原请求还在本机，处理完之前不能再加规则
+      await page.reload();
+      await page.getByTestId('coupon-tab-rules').click();
+      await expect(page.getByTestId('erp-pending')).toContainText(name);
+      await expect(page.getByTestId('coupon-rule-new')).toBeDisabled();
+      // 网络恢复后按原内容重新提交：同一编号，服务端返回原来那条
+      await page.unroute('**/api/erp/ops/**');
+      await page.getByTestId('erp-pending-resend').click();
+      await expect(page.getByText('加发券规则已登记')).toBeVisible();
+      await expect(page.getByTestId('erp-pending')).toHaveCount(0);
+      await expect(page.getByTestId('coupon-rule-new')).toBeEnabled();
+      const rules = await rulesOf();
+      expect(rules).toHaveLength(1);
+
+      // 新会员只拿到一张这条规则的开卡礼
+      // 手机号用 198 开头：不撞演示会员（199 开头）
+      const member = await postJson<{ id: number }>(page, '/api/members', { name: 'E2E开卡礼会员', phone: `198${String(Date.now()).slice(-8)}`, gender: 'male' });
+      const mine = await getJson<{ coupons: { templateId: number }[] }>(page, `/api/members/${member.id}/coupons`);
+      expect(mine.coupons.filter((c) => c.templateId === template.id)).toHaveLength(1);
+    } finally {
+      for (const r of await rulesOf()) await page.request.post(`/api/coupons/rules/${r.id}/deactivate`, { data: {} });
+    }
+  });
+
+  test('新建券模板：回复丢了，页面马上查回——已经建好的只有一个，不用重新填写', async ({ page }) => {
     await login(page, 'linlan');
     await page.goto('/admin/coupons');
     const name = `E2E重提-${Date.now() % 100000}`;
-    // 第一次保存：请求到了服务端、回复丢了（页面当成断网）
     let dropped = false;
     await page.route('**/api/coupons/templates', async (route) => {
       if (route.request().method() !== 'POST' || dropped) return route.continue();
@@ -162,16 +222,66 @@ test.describe('券与会员权益（v0.7.20）', () => {
     await dialog.getByTestId('coupon-template-name').fill(name);
     await dialog.getByTestId('coupon-template-face').fill('3');
     await page.getByTestId('coupon-template-save').click();
-    await expect(page.getByTestId('coupon-template-uncertain')).toBeVisible();
-    await expect(page.getByTestId('coupon-template-save')).toHaveText('按原内容再保存');
-    await page.getByTestId('coupon-template-save').click();
-    await expect(page.getByText(`已新建券模板「${name}」`)).toBeVisible();
+    await expect(page.getByText('新建券模板：没收到结果')).toBeVisible();
+    // 页面上方的「结果待确认」马上按原编号查回：已经建好的直接移除并提示，不用员工再处理
+    await expect(page.getByText('已查回：新建券模板已登记')).toBeVisible();
+    await expect(page.getByTestId('erp-pending')).toHaveCount(0);
     await page.unroute('**/api/coupons/templates');
+    await page.reload();
+    await expect(page.getByTestId('erp-pending')).toHaveCount(0);
+    await expect(page.getByTestId('coupon-template-new')).toBeEnabled();
     expect((await getJson<Template[]>(page, '/api/coupons/templates')).filter((t) => t.name === name)).toHaveLength(1);
-    // 再新建一个：换了新的操作编号
-    const again = await page.request.post('/api/coupons/templates', {
-      data: { clientKey: randomUUID(), name: `${name}b`, kind: 'cash', faceValue: 300, validity: 'days', validDays: 7 },
+  });
+
+  test('发券给会员：回复丢了刷新页面，「账户内券」上方的待确认还在，按原内容重新提交只发一次', async ({ page }) => {
+    await login(page, 'linlan');
+    const template = await postJson<Template>(page, '/api/coupons/templates', {
+      clientKey: randomUUID(),
+      name: `E2E发券重提-${Date.now() % 100000}`,
+      kind: 'cash',
+      faceValue: 200,
+      validity: 'days',
+      validDays: 7,
     });
-    expect(again.ok(), await again.text()).toBe(true);
+    const members = await getJson<{ id: number; name: string; phone: string; status: string }[]>(page, '/api/members?q=19900001&limit=50');
+    const member = members.filter((m) => m.status === 'active').at(-2)!;
+    const mine = async () => (await getJson<{ coupons: { templateId: number }[] }>(page, `/api/members/${member.id}/coupons`)).coupons.filter((c) => c.templateId === template.id);
+    const openMember = async () => {
+      await page.goto('/');
+      await page.getByLabel('搜索会员').fill(member.phone);
+      await page.getByRole('option').filter({ hasText: member.name }).first().click();
+      await expect(page.getByTestId('coupon-member')).toBeVisible();
+    };
+    await openMember();
+    let dropped = false;
+    await page.route(`**/api/members/${member.id}/coupons`, async (route) => {
+      if (route.request().method() !== 'POST' || dropped) return route.continue();
+      dropped = true;
+      await route.fetch(); // 服务端已经发出
+      await route.abort('connectionreset');
+    });
+    await page.route('**/api/erp/ops/**', (route) => route.abort('connectionreset'));
+    const card = page.getByTestId('coupon-member');
+    await card.getByTestId('coupon-member-issue').click();
+    const dialog = page.getByTestId('coupon-issue-dialog');
+    await dialog.getByTestId('coupon-issue-template').selectOption(String(template.id));
+    await dialog.getByTestId('coupon-issue-reason').fill('E2E：断网重提');
+    await page.getByTestId('coupon-issue-submit').click();
+    await expect(page.getByText('发券：没收到结果')).toBeVisible();
+    await expect(card.getByTestId('erp-pending')).toContainText(template.name);
+    expect(await mine()).toHaveLength(1); // 服务端其实已经发出
+    await page.unroute(`**/api/members/${member.id}/coupons`);
+
+    // 刷新、重新打开这位会员：待确认还在，处理完之前不能再发
+    await page.reload();
+    await openMember();
+    await expect(card.getByTestId('erp-pending')).toContainText(template.name);
+    await expect(card.getByTestId('coupon-member-issue')).toBeDisabled();
+    await page.unroute('**/api/erp/ops/**');
+    await card.getByTestId('erp-pending-resend').click();
+    await expect(page.getByText('发券给会员已登记')).toBeVisible();
+    await expect(card.getByTestId('erp-pending')).toHaveCount(0);
+    await expect(card.getByTestId('coupon-member-issue')).toBeEnabled();
+    expect(await mine()).toHaveLength(1);
   });
 });

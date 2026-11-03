@@ -365,4 +365,4 @@ ALTER TABLE op_fences ADD CONSTRAINT op_fences_op_type_check
                      'room_checkin', 'room_extend', 'room_deposit', 'room_refund', 'room_close', 'line_move',
                      'expense_claim', 'petty_advance', 'petty_settlement', 'purchase_request', 'ap_offset', 'supplier_refund', 'erp_import',
                      'supplier_recon', 'supplier_recon_void', 'space_import', 'location_report', 'usage_open', 'usage_end', 'usage_cancel',
-                     'checkout_refund'));
+                     'checkout_refund', 'coupon_template', 'coupon_rule', 'coupon_batch', 'coupon_issue'));

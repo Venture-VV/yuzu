@@ -376,6 +376,73 @@ describe('结账用券', () => {
   });
 });
 
+describe('结果待确认：查回与确认作废（Codex 复审 6c3765c）', () => {
+  const abandon = (key: string, type: string, cookie = ctx.owner) => api(ctx.app, cookie, 'POST', `/api/erp/ops/${key}/abandon`, { type, summary: '测试' });
+  const lookup = (key: string, type: string, cookie = ctx.owner) => api(ctx.app, cookie, 'GET', `/api/erp/ops/${key}?type=${type}`);
+  const activeRules = async () => ((await api(ctx.app, ctx.owner, 'GET', '/api/coupons/rules')).body as { active: boolean }[]).filter((r) => r.active).length;
+
+  it('加规则：先确认作废的编号，原请求晚到整笔拒绝、不多出规则；已加上的编号查回那条规则，作废不了，重提返回同一条', async () => {
+    const t = await template({ name: '待确认规则券', kind: 'cash', faceValue: 800 });
+    const before = await activeRules();
+    const late = randomUUID();
+    expect((await abandon(late, 'coupon_rule')).body).toEqual({ found: false, abandoned: true });
+    const rejected = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/rules', { clientKey: late, kind: 'open_card', templateId: t.id, quantity: 1 });
+    expect(rejected.status).toBe(409);
+    expect(rejected.body.error.code).toBe('OP_ABANDONED');
+    expect(await activeRules()).toBe(before);
+
+    const key = randomUUID();
+    const body = { clientKey: key, kind: 'open_card', templateId: t.id, quantity: 1 };
+    const added = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/rules', body);
+    expect(added.status, JSON.stringify(added.body)).toBe(200);
+    const ruleId = added.body.ruleId as number;
+    expect(added.body.rules.some((r: { id: number }) => r.id === ruleId)).toBe(true);
+    expect((await lookup(key, 'coupon_rule')).body).toEqual({ found: true, abandoned: false, refId: ruleId });
+    // 已经加上的：作废返回查回的结果，不登记作废；按原内容重提返回同一条
+    expect((await abandon(key, 'coupon_rule')).body).toEqual({ found: true, abandoned: false, refId: ruleId });
+    const again = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/rules', body);
+    expect(again.body.ruleId).toBe(ruleId);
+    expect(await activeRules()).toBe(before + 1);
+    // 新会员只拿到一张开卡礼
+    const m = await createMember(ctx, '待确认开卡', '19900008101');
+    expect((await couponsOf(m.id)).coupons.filter((c) => c.templateId === t.id)).toHaveLength(1);
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/coupons/rules/${ruleId}/deactivate`, {})).status).toBe(200);
+  });
+
+  it('发券、新建模板、生成无记名券：作废后原请求晚到都拒绝；发券的编号查回发券记录；没有对应权限的不能查回、作废', async () => {
+    const m = await createMember(ctx, '待确认发券', '19900008102');
+    // 前面的用例加过开卡礼规则：建档时可能已经有券，按前后差核对
+    const before = (await couponsOf(m.id)).coupons.length;
+    const late = randomUUID();
+    expect((await abandon(late, 'coupon_issue', am)).body).toMatchObject({ found: false, abandoned: true });
+    const rejected = await issue(m.id, tpl.cash!.id, 1, am, late);
+    expect(rejected.body.error.code).toBe('OP_ABANDONED');
+    expect((await couponsOf(m.id)).coupons).toHaveLength(before);
+
+    const key = randomUUID();
+    const done = await issue(m.id, tpl.cash!.id, 2, am, key);
+    expect(done.status, JSON.stringify(done.body)).toBe(201);
+    expect((await lookup(key, 'coupon_issue', am)).body).toEqual({ found: true, abandoned: false, refId: done.body.issueId });
+    expect((await issue(m.id, tpl.cash!.id, 2, am, key)).body.issueId).toBe(done.body.issueId);
+    expect((await couponsOf(m.id)).coupons).toHaveLength(before + 2);
+
+    const tKey = randomUUID();
+    await abandon(tKey, 'coupon_template');
+    const tRejected = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', { clientKey: tKey, name: '作废后晚到', kind: 'cash', faceValue: 100, validity: 'days', validDays: 7 });
+    expect(tRejected.body.error.code).toBe('OP_ABANDONED');
+    const bKey = randomUUID();
+    await abandon(bKey, 'coupon_batch');
+    const bRejected = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/batches', { clientKey: bKey, templateId: tpl.anon!.id, quantity: 2, note: '' });
+    expect(bRejected.body.error.code).toBe('OP_ABANDONED');
+
+    // 权限：查回、作废按原业务的权限——前台什么都不行，客户经理只能处理发券
+    expect((await lookup(key, 'coupon_issue', ctx.clerk)).status).toBe(403);
+    expect((await lookup(randomUUID(), 'coupon_rule', am)).status).toBe(403);
+    expect((await abandon(randomUUID(), 'coupon_rule', am)).status).toBe(403);
+    await checks();
+  });
+});
+
 describe('作废与统计', () => {
   it('店主、店总可以作废没用的券；客户经理不能；统计按模板列发券、用券、作废', async () => {
     const m = await createMember(ctx, '作废券', '19900008020');

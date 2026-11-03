@@ -16,7 +16,7 @@ import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { conflict, forbidden } from '../lib/errors';
-import { fenceKey, isFenced } from '../lib/fences';
+import { couponOpRef, fenceKey, isCouponOp, isFenced } from '../lib/fences';
 import { parse } from '../lib/validate';
 
 export const erpOpAbandoned = () => conflict('OP_ABANDONED', '这笔已确认作废，没有登记；如仍需办理，请重新填写后提交');
@@ -37,6 +37,11 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   space_import: ['settings.manage', 'catalog.manage'],
   // 模拟刷卡（v0.7.17）：与上报接口一致
   location_report: ['location.report'],
+  // 券与会员权益（v0.7.20）：与各自的提交接口一致
+  coupon_template: ['coupon.manage'],
+  coupon_rule: ['coupon.manage'],
+  coupon_batch: ['coupon.manage'],
+  coupon_issue: ['coupon.issue'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -51,6 +56,10 @@ const READ: Record<ErpOpType, Permission[]> = {
   supplier_recon_void: ['payable.read'],
   space_import: ['settings.manage', 'catalog.manage'],
   location_report: ['location.report'],
+  coupon_template: ['coupon.manage'],
+  coupon_rule: ['coupon.manage'],
+  coupon_batch: ['coupon.manage'],
+  coupon_issue: ['coupon.issue'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {
@@ -68,6 +77,11 @@ export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise
   if (type === 'location_report') {
     const [event] = await db<{ id: number }[]>`SELECT id FROM location_events WHERE op_key = ${key}`;
     if (event) return { found: true, abandoned: false, refId: Number(event.id) };
+  }
+  // 券与会员权益（v0.7.20）的编号记在模板、规则、发券记录上：refId 是那条记录
+  if (isCouponOp(type)) {
+    const refId = await couponOpRef(db, key, type);
+    if (refId !== null) return { found: true, abandoned: false, refId };
   }
   return { found: false, abandoned: await isFenced(db, key, [type]) };
 }

@@ -49,6 +49,11 @@ export const FENCED_OPS = [
   'usage_cancel',
   // 退款单（v0.7.20，离店后部分退款）
   'checkout_refund',
+  // 券与会员权益（v0.7.20）：编号记在各自的表上（client_key），不进 idempotency_keys
+  'coupon_template',
+  'coupon_rule',
+  'coupon_batch',
+  'coupon_issue',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -90,8 +95,24 @@ export async function fenceKey(
     const [event] = await tx<{ id: number }[]>`SELECT id FROM location_events WHERE op_key = ${key}`;
     if (event) return { existingOpType: opType };
   }
+  if (isCouponOp(opType) && (await couponOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   const rows = await tx`
     INSERT INTO op_fences (key, op_type, staff_id) VALUES (${key}, ${opType}, ${staffId})
     ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;
   return { inserted: rows.length > 0 };
+}
+
+const COUPON_OPS = ['coupon_template', 'coupon_rule', 'coupon_batch', 'coupon_issue'] as const;
+type CouponOp = (typeof COUPON_OPS)[number];
+export const isCouponOp = (op: string): op is CouponOp => (COUPON_OPS as readonly string[]).includes(op);
+
+/** 券与会员权益（v0.7.20）的操作编号记在各自的表上：查到时返回那条记录的编号（模板、规则、发券记录） */
+export async function couponOpRef(db: Db, key: string, opType: CouponOp): Promise<number | null> {
+  const rows =
+    opType === 'coupon_template'
+      ? await db<{ id: number }[]>`SELECT id FROM coupon_templates WHERE client_key = ${key}`
+      : opType === 'coupon_rule'
+        ? await db<{ id: number }[]>`SELECT id FROM coupon_rules WHERE client_key = ${key}`
+        : await db<{ id: number }[]>`SELECT id FROM coupon_issues WHERE client_key = ${key} AND kind = ${opType === 'coupon_batch' ? 'batch' : 'manual'}`;
+  return rows[0] ? Number(rows[0].id) : null;
 }

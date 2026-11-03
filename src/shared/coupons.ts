@@ -226,6 +226,8 @@ export interface MemberCoupons {
 }
 
 export interface CouponIssueResult {
+  /** 发券记录（「结果待确认」查回用） */
+  issueId: number;
   issueNo: string;
   replayed: boolean;
   coupons: CouponRow[];

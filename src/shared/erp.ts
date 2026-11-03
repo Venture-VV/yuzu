@@ -185,6 +185,11 @@ export const ERP_OP_TYPES = [
   // 后台「空间台账」的导入（v0.7.14）与模拟刷卡（v0.7.17）：不属于 ERP 模块，借用同一套「结果待确认」
   'space_import',
   'location_report',
+  // 券与会员权益（v0.7.20）：新建券模板、发券规则，生成无记名券，发券给会员（Codex 复审 6c3765c：断网后刷新也要能查回、重提或作废）
+  'coupon_template',
+  'coupon_rule',
+  'coupon_batch',
+  'coupon_issue',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -199,6 +204,10 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   supplier_recon_void: '撤销对账登记',
   space_import: '空间台账导入',
   location_report: '模拟刷卡',
+  coupon_template: '新建券模板',
+  coupon_rule: '加发券规则',
+  coupon_batch: '生成无记名券',
+  coupon_issue: '发券给会员',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

@@ -1,7 +1,7 @@
 // 会员详情的等级与赠金明细（v0.6.0，同事在测试服的反馈：要看到升级时间、差多少到下一级、赠送额度的使用情况）；
 // 账户内券（v0.7.20，飞书 RQ-006 后半，docs/COUPONS.md 第 6 节）：按状态看券、手动发券、作废没用过的券。
 
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Award, Gift, Ticket, TicketPlus, TrendingUp } from 'lucide-react';
 import { lastUsableDate } from '@shared/business-date';
@@ -20,6 +20,8 @@ import { shiftDate } from '@shared/labels';
 import { BONUS_LOT_STATUS_LABELS, type BonusLotStatus } from '@shared/members';
 import type { MemberDetail } from '@shared/types';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { sendErpOp, useErpPending } from '../../lib/erpPending';
+import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { cn, formatDate, formatDateTime, uuid } from '../../lib/utils';
@@ -183,6 +185,9 @@ export function MemberCouponsCard({ member }: { member: MemberDetail }) {
   const canIssue = can('coupon.issue');
   const canVoid = can('coupon.void');
   const data = coupons.data;
+  // 发给这位会员的券结果待确认（断网、超时）：刷新、重新登录后也在，先查回、按原内容重新提交或作废，处理完才能再发（Codex 复审 6c3765c）
+  const issueUrl = `/api/members/${member.id}/coupons`;
+  const pendingIssue = useErpPending(['coupon_issue']).some((op) => op.url === issueUrl);
   // 没选过时：先看有可用的，没有就看第一个有券的状态
   const tab: CouponState = picked ?? (data ? (COUPON_STATE_ORDER.find((s) => data.counts[s] > 0) ?? 'available') : 'available');
   const rows = (data?.coupons ?? []).filter((c) => c.state === tab);
@@ -215,8 +220,8 @@ export function MemberCouponsCard({ member }: { member: MemberDetail }) {
               variant="secondary"
               icon={<TicketPlus className="size-4" />}
               onClick={() => setIssuing(true)}
-              disabled={frozen}
-              title={frozen ? '会员已停用，不能发券' : undefined}
+              disabled={frozen || pendingIssue}
+              title={frozen ? '会员已停用，不能发券' : pendingIssue ? '上一次发券的结果待确认：先在下面查回、重提或作废' : undefined}
               data-testid="coupon-member-issue"
             >
               发券
@@ -228,6 +233,17 @@ export function MemberCouponsCard({ member }: { member: MemberDetail }) {
           <Ticket className="size-4 text-yuzu-deep" /> 账户内券
         </span>
       </SectionTitle>
+      {canIssue && (
+        <ErpPendingPanel
+          types={['coupon_issue']}
+          filter={(op) => op.url === issueUrl}
+          className="mt-3 space-y-2"
+          onFound={() => {
+            void qc.invalidateQueries({ queryKey: couponKeys.member(member.id) });
+            void qc.invalidateQueries({ queryKey: couponKeys.all });
+          }}
+        />
+      )}
       {coupons.error ? (
         <Notice tone="error" className="mt-3" title={errorMessage(coupons.error)} />
       ) : !data ? (
@@ -333,22 +349,15 @@ function IssueCouponDialog({ open, member, onClose }: { open: boolean; member: M
   const qc = useQueryClient();
   const toast = useToast();
   const templates = useCouponTemplates(open);
-  // 发券的操作编号：没收到结果（超时、断网）时留着，按原内容再提交时服务端返回原来那一笔、不会重复发；
-  // 成功或服务端明确回了（含拒绝）之后才换新的（与「对客导览」补加图标同一做法）
-  const key = useRef(uuid());
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [quantity, setQuantity] = useState('1');
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [uncertain, setUncertain] = useState(false);
   useResetOnOpen(open, () => {
-    // 上一次没收到结果：留着原内容，方便按原内容再提交
-    if (!uncertain) {
-      setTemplateId(null);
-      setQuantity('1');
-      setReason('');
-    }
+    setTemplateId(null);
+    setQuantity('1');
+    setReason('');
     setError(null);
   });
   const level = member.level?.level ?? 0;
@@ -371,10 +380,18 @@ function IssueCouponDialog({ open, member, onClose }: { open: boolean; member: M
     if (problem || !template) return;
     setBusy(true);
     setError(null);
+    // 发出前把操作编号与原请求存在本机并读回核对（存不了就不发）：没收到结果时关掉对话框、刷新、重新登录后，
+    // 在「账户内券」上方查回、按原内容重新提交（同一编号，不会重复发）或确认作废（Codex 复审 6c3765c）
+    const key = uuid();
     try {
-      const r = await api.post<CouponIssueResult>(`/api/members/${member.id}/coupons`, { clientKey: key.current, templateId: template.id, quantity: n, reason: reason.trim() });
-      key.current = uuid();
-      setUncertain(false);
+      const r = await sendErpOp<CouponIssueResult>({
+        key,
+        type: 'coupon_issue',
+        url: `/api/members/${member.id}/coupons`,
+        body: { clientKey: key, templateId: template.id, quantity: n, reason: reason.trim() },
+        summary: `${member.name}：${template.name} × ${n} 张`,
+        staffName: session.staff.displayName,
+      });
       toast(
         r.replayed
           ? { tone: 'info', title: '这笔券之前已经发出', body: `发券记录 ${r.issueNo}，没有重复发` }
@@ -383,10 +400,13 @@ function IssueCouponDialog({ open, member, onClose }: { open: boolean; member: M
       onClose();
     } catch (e) {
       if (e instanceof UncertainError) {
-        setUncertain(true);
+        toast({
+          tone: 'info',
+          title: '发券：没收到结果',
+          body: '可能已经发出，也可能没有。这笔记在「账户内券」上方（刷新、重新登录也在）：先查回；查不到就按原内容重新提交（同一操作编号，不会重复发）或确认作废后再重新发。',
+        });
+        onClose();
       } else {
-        key.current = uuid();
-        setUncertain(false);
         setError(errorMessage(e));
         if (e instanceof ApiError && ['TEMPLATE_INACTIVE', 'TEMPLATE_EXPIRED', 'COUPON_LEVEL'].includes(e.code)) void qc.invalidateQueries({ queryKey: couponKeys.templates });
       }
@@ -412,7 +432,7 @@ function IssueCouponDialog({ open, member, onClose }: { open: boolean; member: M
             取消
           </Button>
           <Button variant="primary" loading={busy} disabled={!!problem} onClick={submit} data-testid="coupon-issue-submit">
-            {uncertain ? '按原内容再提交' : '发券'}
+            发券
           </Button>
         </>
       }
@@ -462,11 +482,6 @@ function IssueCouponDialog({ open, member, onClose }: { open: boolean; member: M
         <Field label="发券原因" htmlFor="coupon-issue-reason" hint="至少 2 个字，会记在发券记录里，例如「老客人回馈」「投诉补偿」">
           <Textarea id="coupon-issue-reason" value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} disabled={busy} data-testid="coupon-issue-reason" />
         </Field>
-        {uncertain && (
-          <Notice tone="warning" title="没收到结果：券可能已经发出了">
-            点「按原内容再提交」：已经发出的会直接返回原来那一笔，不会重复发。也可以先关掉，看「账户内券」里有没有。
-          </Notice>
-        )}
         {error && <Notice tone="error" title={error} />}
       </div>
     </Dialog>
