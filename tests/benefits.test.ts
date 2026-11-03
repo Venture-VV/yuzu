@@ -12,7 +12,7 @@ import { businessDateOf } from '../src/shared/business-date';
 import type { CouponTemplate, MemberCoupons } from '../src/shared/coupons';
 import { shiftDate } from '../src/shared/labels';
 import { rechargeOutcome, tierTargets, type MemberGradeInfo, type MembershipRules } from '../src/shared/membership';
-import { benefitChecks, runBenefitsDaily } from '../src/server/modules/benefits';
+import { benefitChecks, memberBenefits, registerBenefitUse, runBenefitsDaily } from '../src/server/modules/benefits';
 import { issueBirthdayCoupons } from '../src/server/modules/coupons';
 import { membershipChecks, runMembershipDaily } from '../src/server/modules/membership';
 import { createStaff } from '../src/server/modules/staff';
@@ -472,5 +472,26 @@ describe('当天改了生日、节日当周才够格、补跑多步到期', () =
     await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(day));
     expect((await grantsOf(m)).filter((g) => g.periodKey === day.slice(0, 7)).map((g) => g.code)).toEqual(['QY-036']);
     await allChecksOk();
+  });
+
+  it('到期还没处理的会员：「本月可享」按推算到当天的档阶列；登记服务类先处理到期，不按应该已经降掉的 L2 判断够格', async () => {
+    const m = await newMember('到期未处理登记');
+    await recharge(m, yuan(5000));
+    await recharge(m, yuan(5000));
+    const st = (await gradeOf(m)).state;
+    expect(st.grade).toBe(2);
+    // 周期内没有消费：周期结束的下一天应该降到 L1·尊；那天到期处理还没处理这一位（出错、锁等超时）
+    const day = shiftDate(st.cycleEnd!, 1);
+    const card = await memberBenefits(ctx.sql, m, day);
+    expect(card.state).toMatchObject({ grade: 1, tier: 2 });
+    expect(card.items.map((i) => i.code)).not.toContain('QY-001');
+    expect(card.upcoming.map((u) => u.code)).toContain('QY-001');
+    // 会员专属通道 L2·初 起（服务类那一组发布的，每月 2 次）
+    const channel = await byCode('QY-001');
+    const actor = { id: ctx.clerkId, username: 'clerk', displayName: '测试店员', role: 'clerk' as const, duties: [], mustChangePassword: false };
+    await expect(
+      registerBenefitUse({ sql: ctx.sql, config: ctx.config }, m, { clientKey: randomUUID(), benefitId: channel.id, quantity: 1, note: '' }, { actor, at: noonOf(day) }),
+    ).rejects.toMatchObject({ code: 'BENEFIT_NOT_ELIGIBLE', message: expect.stringContaining('L1') });
+    expect(await ctx.sql`SELECT id FROM benefit_uses WHERE member_id = ${m}`).toHaveLength(0);
   });
 });

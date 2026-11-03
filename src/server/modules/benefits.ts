@@ -61,7 +61,7 @@ import { sameJson } from '../lib/rule-settings';
 import { setTxTimeouts } from '../lib/tx';
 import { issueBenefitCoupons, listTemplates } from './coupons';
 import { erpOpAbandoned } from './erp-ops';
-import { loadMembershipRules } from './membership';
+import { loadMembershipRules, projectedGrade, settleMemberDue } from './membership';
 import { loadSettings } from './settings';
 
 // ───────────────────────── 读权益 ─────────────────────────
@@ -729,7 +729,8 @@ const toUse = (r: BenefitUseRow): BenefitUseRow => ({
 
 /** 会员详情「本月可享」：现在够格的已发布权益、本期发了几张 / 用了几次、还没够格的、最近的发放与登记 */
 export async function memberBenefits(db: Db, memberId: number, date: string): Promise<MemberBenefits> {
-  const [m] = await db<{ grade: number; tier: number | null }[]>`SELECT grade, tier FROM members WHERE id = ${memberId}`;
+  // 按推算到今天的档阶列（与等级卡一样）：到期还没处理的不按应该已经降掉的档阶列，登记时也按处理完的判断
+  const m = await projectedGrade(db, memberId, date);
   if (!m) throw notFound('会员不存在');
   const rules = await loadMembershipRules(db);
   const defs = await db<(BenefitDef & { templateName: string | null })[]>`
@@ -836,10 +837,11 @@ export async function registerBenefitUse(deps: Deps, memberId: number, raw: unkn
       await assertNotFenced(tx, input.clientKey, 'benefit_use', erpOpAbandoned);
       const prior = await replay(tx);
       if (prior !== null) return { id: prior, replayed: true };
-      const [m] = await tx<{ status: string; grade: number; tier: number | null; name: string }[]>`
-        SELECT status, grade, tier, name FROM members WHERE id = ${memberId} FOR UPDATE`;
-      if (!m) throw notFound('会员不存在');
-      if (m.status !== 'active') throw unprocessable('MEMBER_FROZEN', '该会员已停用，不能登记权益使用');
+      const [locked] = await tx<{ status: string }[]>`SELECT status FROM members WHERE id = ${memberId} FOR UPDATE`;
+      if (!locked) throw notFound('会员不存在');
+      if (locked.status !== 'active') throw unprocessable('MEMBER_FROZEN', '该会员已停用，不能登记权益使用');
+      // 到期没处理的（到期处理这一位出错、锁等超时）先按规则处理掉，再按处理完的档阶判断够不够格、上限几次（Codex 自动审查 825e248）
+      const m = (await settleMemberDue(tx, memberId, date))!;
       const [b] = await tx<BenefitDef[]>`SELECT ${DEF_COLUMNS(tx)} FROM benefits b WHERE b.id = ${input.benefitId} FOR SHARE`;
       if (!b) throw notFound('权益不存在');
       if (b.status !== 'published') throw unprocessable('BENEFIT_UNAVAILABLE', `「${b.code} ${b.name}」${b.status === 'paused' ? '已暂缓' : '还没发布'}，不能登记`);

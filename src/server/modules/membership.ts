@@ -246,6 +246,23 @@ async function settleDue(tx: Tx, rules: MembershipRules, memberId: number, state
   return projected;
 }
 
+/**
+ * 按档阶判断的写操作之前（会员一行已锁，调用方的事务里）：到期没处理的先处理掉，返回处理后的档阶（会员不存在为空）。
+ * 与充值、消费一样，不按应该已经降掉的档阶判断（例如登记权益使用，Codex 自动审查 825e248）
+ */
+export async function settleMemberDue(tx: Tx, memberId: number, today: string): Promise<GradeState | null> {
+  const current = await readGrade(tx, memberId);
+  if (!current) return null;
+  return (await settleDue(tx, await loadMembershipRules(tx), memberId, current.state, today)).state;
+}
+
+/** 只读：到期没处理的按规则推算到 today 的档阶（与等级卡一样；会员不存在为空） */
+export async function projectedGrade(db: Db, memberId: number, today: string): Promise<GradeState | null> {
+  const current = await readGrade(db, memberId);
+  if (!current) return null;
+  return (await projectDue(db, await loadMembershipRules(db), memberId, current.state, today)).state;
+}
+
 // ───────────────────────── 充值与消费（钱包的事务里调用） ─────────────────────────
 
 export interface RechargeGrade {
