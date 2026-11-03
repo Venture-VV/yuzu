@@ -9,13 +9,16 @@ import { guard } from '../../auth/guard';
 import { readSnapshot } from '../../db';
 import { writeAudit } from '../../lib/audit';
 import type { Deps, OpContext } from '../../lib/context';
-import { forbidden, notFound } from '../../lib/errors';
+import { badRequest, forbidden, notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { checkBackfillAt } from './backfill';
 import { moveLines, postCharges, voidLine, type PostInputData } from './bills';
 import { resolveReadableDate } from '../ledger';
 import { refundShiftOptions } from '../shifts';
 import { checkout, findCoupon, getCheckout, listCheckouts, previewCheckout, voidCheckout, type CheckoutInputData } from './checkout';
+import { createRefund, getRefund, listRefunds, refundOptions, voidRefund, type RefundInputData } from './refunds';
+import { couponByCode, couponLines, withTicketLines } from '../coupon-checkout';
+import { previewTableCheckout } from '../tables';
 import { listTicketTypes, saveTicketType, setVisitTicket, type TicketTypeInputData } from './tickets';
 import { frontdeskChecks } from './checks';
 import { businessDate, FRONTDESK_OP_PERMISSIONS, FRONTDESK_OPS, loadFrontdeskRules } from './common';
@@ -172,6 +175,39 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
     checkout(deps, req.body as CheckoutInputData, ctxOf(req)),
   );
 
+  // 结账时输入券码核对（v0.7.20）：手牌结账按所选手牌（含此刻的门票），桌台结账按所选的桌；能不能用、能抵多少
+  app.post('/api/frontdesk/checkout-coupon', { preHandler: guard('frontdesk.checkout') }, async (req) => {
+    const input = parse(
+      z.object({
+        visitIds: z.array(z.number().int().positive()).max(30).default([]),
+        tableSessionIds: z.array(z.number().int().positive()).max(30).default([]),
+        code: z.string('请填写券码').max(40, '券码不正确'),
+      }),
+      req.body ?? {},
+    );
+    if ((input.visitIds.length > 0) === (input.tableSessionIds.length > 0)) throw badRequest('请选择要结账的手牌或桌台');
+    const at = new Date();
+    let billIds: number[];
+    let memberIds: number[];
+    let lines;
+    if (input.visitIds.length) {
+      const pre = await previewCheckout(deps, input.visitIds, at);
+      billIds = pre.visits.map((v) => v.billId);
+      memberIds = pre.members.map((m) => m.id);
+      lines = withTicketLines(
+        await couponLines(sql, billIds),
+        pre.visits.flatMap((v) => (v.ticket ? [{ visitId: v.visitId, typeId: v.ticket.typeId, name: v.ticket.name, amount: v.ticket.amount }] : [])),
+      );
+    } else {
+      const pre = await previewTableCheckout(deps, input.tableSessionIds, at);
+      billIds = pre.sessions.map((x) => x.billId);
+      memberIds = pre.members.map((m) => m.id);
+      lines = await couponLines(sql, billIds);
+    }
+    const option = await couponByCode(sql, input.code, memberIds, lines, await businessDate(sql, deps, at));
+    return option ? { found: true, option } : { found: false };
+  });
+
   // 结账记录可以切换营业日（过了营业日切换点仍能找到前一晚的单来反结账）；查看之前的营业日需要历史营业日权限
   app.get('/api/frontdesk/checkouts', { preHandler: guard('frontdesk.read') }, async (req) => {
     const { date } = parse(z.object({ date: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD').optional() }), req.query ?? {});
@@ -192,6 +228,37 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/frontdesk/checkouts/:id/void', { preHandler: guard('frontdesk.checkoutVoid') }, async (req) => {
     const { id } = parse(idParam, req.params);
     return voidCheckout(deps, id, req.body, ctxOf(req));
+  });
+
+  // ── 退款单（v0.7.20，离店后部分退款）──
+  // 开退款单前的核对：每项、每种方式还能退多少，退现金可以选的钱箱
+  app.get('/api/frontdesk/checkouts/:id/refund-options', { preHandler: guard('frontdesk.refund') }, async (req) => {
+    const { id } = parse(idParam, req.params);
+    const options = await readSnapshot(sql, (tx) => refundOptions(tx, id, req.actor));
+    return { ...options, drawers: await refundShiftOptions(sql, id, req.actor.id) };
+  });
+
+  app.post('/api/frontdesk/checkouts/:id/refunds', { preHandler: guard('frontdesk.refund') }, async (req, reply) => {
+    const { id } = parse(idParam, req.params);
+    const refund = await createRefund(deps, id, req.body as RefundInputData, ctxOf(req));
+    reply.status(201);
+    return refund;
+  });
+
+  // 某个营业日开的退款单（结账记录页），查看之前的营业日需要历史营业日权限
+  app.get('/api/frontdesk/refunds', { preHandler: guard('frontdesk.read') }, async (req) => {
+    const { date } = parse(z.object({ date: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD').optional() }), req.query ?? {});
+    return listRefunds(sql, await resolveReadableDate(deps, req, date));
+  });
+
+  app.get('/api/frontdesk/refunds/:id', { preHandler: guard('frontdesk.read') }, async (req) => {
+    const { id } = parse(idParam, req.params);
+    return getRefund(sql, id);
+  });
+
+  app.post('/api/frontdesk/refunds/:id/void', { preHandler: guard('frontdesk.refund') }, async (req) => {
+    const { id } = parse(idParam, req.params);
+    return voidRefund(deps, id, req.body, ctxOf(req));
   });
 
   // 按完整券码核对一张团购券有没有登记过

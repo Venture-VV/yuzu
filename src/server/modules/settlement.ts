@@ -112,6 +112,13 @@ async function businessTotals(db: Db, date: string): Promise<BusinessTotals> {
     WHERE c.business_date = ${date} OR c.void_business_date = ${date}
     GROUP BY g.platform ORDER BY g.platform`;
   const net = co!.total - co!.voidTotal;
+  // 退款单（v0.7.20）：当天开的、生效的（作废只能在当天，作废了就不算）
+  const [rf] = await db<{ count: number; total: number }[]>`
+    SELECT count(*)::int AS count, coalesce(sum(amount), 0)::bigint AS total FROM refunds WHERE business_date = ${date} AND status = 'completed'`;
+  const refundByMethod = await db<BusinessTotals['refunds']['byMethod']>`
+    SELECT p.method, count(*)::int AS count, sum(p.amount)::bigint AS amount
+    FROM refund_payments p JOIN refunds r ON r.id = p.refund_id
+    WHERE r.business_date = ${date} AND r.status = 'completed' GROUP BY p.method ORDER BY p.method`;
   return {
     checkouts: { count: co!.count, total: co!.total },
     voids: { count: co!.voidCount, total: co!.voidTotal },
@@ -120,10 +127,21 @@ async function businessTotals(db: Db, date: string): Promise<BusinessTotals> {
     items: net - co!.ticket,
     byMethod,
     coupons,
+    refunds: { count: rf!.count, total: rf!.total, byMethod: refundByMethod },
   };
 }
 
-const EMPTY_BUSINESS: BusinessTotals = { checkouts: { count: 0, total: 0 }, voids: { count: 0, total: 0 }, net: 0, ticket: 0, items: 0, byMethod: [], coupons: [] };
+const EMPTY_REFUNDS: BusinessTotals['refunds'] = { count: 0, total: 0, byMethod: [] };
+const EMPTY_BUSINESS: BusinessTotals = {
+  checkouts: { count: 0, total: 0 },
+  voids: { count: 0, total: 0 },
+  net: 0,
+  ticket: 0,
+  items: 0,
+  byMethod: [],
+  coupons: [],
+  refunds: EMPTY_REFUNDS,
+};
 
 // jsonb 不保留键顺序，比较前先按键排序
 function canonical(value: unknown): string {
@@ -139,7 +157,8 @@ const withNewSections = (t: SettlementTotals): SettlementTotals => ({
   ...t,
   expiry: t.expiry ?? { count: 0, bonus: 0 },
   opening: t.opening ?? { count: 0, voidCount: 0, principal: 0, bonus: 0 },
-  business: t.business ?? EMPTY_BUSINESS,
+  // 退款单（v0.7.20）之前确认的快照没有 refunds
+  business: t.business ? { ...t.business, refunds: t.business.refunds ?? EMPTY_REFUNDS } : EMPTY_BUSINESS,
   backfill: t.backfill ?? { count: 0 },
   deposits: t.deposits ?? EMPTY_DEPOSITS,
 });
@@ -159,6 +178,8 @@ const ANOMALY_LABELS: Record<SettlementAnomaly['kind'], string> = {
   visit_cancel: '撤销误开的牌',
   line_void: '作废明细',
   backfill: '补录',
+  refund: '退款单',
+  refund_void: '作废退款单',
 };
 const pairText = (p: Pair) => `本金 ${formatYuan(p.principal)} / 赠金 ${formatYuan(p.bonus)}`;
 /** 补录隔了多久：90 → 1.5 小时 */
@@ -223,6 +244,11 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
        FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id
        WHERE c.business_date = ${date} OR c.void_business_date = ${date}) AS bills`;
   const receiptsNet = totals.business.byMethod.reduce((s, m) => s + m.amount, 0);
+  const [refundCheck] = await db<{ bad: number }[]>`
+    SELECT count(*)::int AS bad FROM refunds r
+    WHERE r.business_date = ${date}
+      AND (r.amount <> (SELECT coalesce(sum(amount), 0) FROM refund_items WHERE refund_id = r.id)
+           OR r.amount <> (SELECT coalesce(sum(amount), 0) FROM refund_payments WHERE refund_id = r.id))`;
 
   const docDelta = {
     principal: totals.recharge.paid - totals.consume.principal + totals.reversal.principal + totals.opening.principal,
@@ -268,6 +294,15 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
       label: '结账储值支付 = 储值消费（营业口径与会员口径的桥）',
       ok: bridge!.payments === bridge!.consumed - bridge!.reversed,
       detail: `结账储值支付（净额）${formatYuan(bridge!.payments)}；结账产生的储值消费 ${formatYuan(bridge!.consumed)}，其中当天撤销 ${formatYuan(bridge!.reversed)}`,
+    },
+    {
+      // 退款单（v0.7.20）：当天的退款单，退的项目合计 = 退款方式合计 = 退款单金额
+      key: 'refunds_balanced',
+      label: '退款单：退的项目 = 退款方式 = 退款金额',
+      ok: refundCheck!.bad === 0,
+      detail: refundCheck!.bad
+        ? `${refundCheck!.bad} 张退款单的项目、退款方式与金额对不上`
+        : `当天退款单 ${totals.business.refunds.count} 张，合计 ${formatYuan(totals.business.refunds.total)}`,
     },
     {
       key: 'bonus_lots',
@@ -351,6 +386,37 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
       amount: v.total,
       description: `反结账${v.createdDate !== date ? `（原单营业日 ${v.createdDate}）` : ''} · ${v.reason} · ${v.staffName}；储值已按原单撤销，现金等请核对是否已退还或重新收取`,
     });
+  }
+  // 退款单（v0.7.20）：当天开的（含当天作废的），写明原结账单、退款方式与退款单号、经办人与原因
+  const refundRows = await db<{
+    refundNo: string; createdAt: string; amount: number; reason: string; staffName: string; checkoutNo: string; checkoutDate: string;
+    status: string; voidedAt: string | null; voidReason: string | null; voidedByName: string | null; pays: { method: PaymentMethod; amount: number; ref: string }[];
+  }[]>`
+    SELECT r.refund_no, r.created_at, r.amount, r.reason, s.display_name AS staff_name, c.checkout_no, c.business_date AS checkout_date,
+           r.status, r.voided_at, r.void_reason, vb.display_name AS voided_by_name,
+           (SELECT json_agg(json_build_object('method', p.method, 'amount', p.amount, 'ref', p.ref) ORDER BY p.id) FROM refund_payments p WHERE p.refund_id = r.id) AS pays
+    FROM refunds r JOIN staff s ON s.id = r.operator_id JOIN checkouts c ON c.id = r.checkout_id LEFT JOIN staff vb ON vb.id = r.voided_by
+    WHERE r.business_date = ${date} ORDER BY r.id`;
+  for (const r of refundRows) {
+    const pays = r.pays.map((p) => `${PAYMENT_METHOD_LABELS[p.method]} ${formatYuan(p.amount)}${p.ref ? `（${p.ref}）` : ''}`).join('、');
+    anomalies.push({
+      kind: 'refund',
+      at: r.createdAt,
+      docNo: r.refundNo,
+      memberName: null,
+      amount: r.amount,
+      description: `退款单 · 原结账单 ${r.checkoutNo}${r.checkoutDate !== date ? `（营业日 ${r.checkoutDate}）` : ''} · ${pays} · ${r.reason} · ${r.staffName}${r.status === 'voided' ? '（已作废）' : ''}`,
+    });
+    if (r.status === 'voided') {
+      anomalies.push({
+        kind: 'refund_void',
+        at: r.voidedAt,
+        docNo: r.refundNo,
+        memberName: null,
+        amount: r.amount,
+        description: `作废退款单 · ${r.voidReason ?? ''} · ${r.voidedByName ?? ''}；钱已退出去的请核对是否收回`,
+      });
+    }
   }
   // 前台少收与更正（R1.2，店主 2026-10-29 签认）：优惠 / 免单、降低票种或免票、接待超过时限后撤销误开的牌、作废明细
   const discounts = await db<{ checkoutNo: string; createdAt: string; amount: number; reason: string; operatorName: string; approverName: string; status: string }[]>`
@@ -524,13 +590,22 @@ export function settlementCsv(s: SettlementSummary): string {
     ['反结账', s.business.voids.count, (s.business.voids.total ? '-' : '') + y(s.business.voids.total), '当天反结账的结账单（原单可能在之前的营业日）'],
     ['应收（结账 − 反结账）', '', signed(biz.receivable), `门票 ${y(s.business.ticket)}，项目与其他 ${y(s.business.items)}`],
     ['优惠 / 免单', '', signed(biz.discount), '值班经理及以上当场授权，不是收款'],
-    ['净营业额', '', signed(biz.netRevenue), '应收 − 优惠'],
-    ['实收（现金类）', '', signed(biz.received), '现金、微信、支付宝、银行卡、其他；不含会员储值、团购券、优惠'],
+    ['券抵扣', '', signed(biz.coupon), '结账用的券，是优惠，不是收款'],
+    ['退款', s.business.refunds.count, (s.business.refunds.total ? '-' : '') + y(s.business.refunds.total), '当天的退款单（离店后部分退款，按原收款方式退）'],
+    ...s.business.refunds.byMethod.map((m) => [`  · 退${PAYMENT_METHOD_LABELS[m.method]}`, m.count, '-' + y(m.amount), m.method === 'cash' ? '现金从钱箱退' : '商户后台原路退回']),
+    ['净营业额', '', signed(biz.netRevenue), '应收 − 优惠 − 券抵扣 − 退款'],
+    ['实收（现金类）', '', signed(biz.received), '现金、微信、支付宝、银行卡、其他，减去退款；不含会员储值、团购券、优惠、券抵扣'],
     ...s.business.byMethod.map((m) => [
       `  · ${CHECKOUT_METHOD_LABELS[m.method]}`,
       m.count,
       signed(m.amount),
-      m.method === 'wallet' ? '会员余额抵扣，同时计入储值消费' : m.method === 'coupon' ? '平台团购核销，由平台结算' : m.method === 'discount' ? '优惠，不是收款' : '',
+      m.method === 'wallet'
+        ? '会员余额抵扣，同时计入储值消费'
+        : m.method === 'coupon'
+          ? '平台团购核销，由平台结算'
+          : m.method === 'discount' || m.method === 'store_coupon'
+            ? '优惠，不是收款'
+            : '',
     ]),
     ...s.business.coupons.map((c) => [`  · 团购 ${COUPON_PLATFORM_LABELS[c.platform]}`, c.count, (c.amount < 0 ? '-' : '') + y(c.amount), c.voidCount ? `作废 ${c.voidCount} 张` : '']),
     [],

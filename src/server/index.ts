@@ -5,6 +5,7 @@ import { loadConfig } from './config';
 import { createSql } from './db';
 import { migrate } from './migrate';
 import { sweepExpiredBonus } from './modules/bonus';
+import { issueBirthdayCoupons } from './modules/coupons';
 import { holdAppPresence } from './presence';
 
 const config = loadConfig();
@@ -36,12 +37,23 @@ async function main() {
   app.log.info(`浴族 yuzu 已启动：http://${config.host}:${config.port}（${config.env}）`);
 
   // 赠金到期作废：启动时先扫描一次，之后每分钟一次（会员记账、打开会员详情时也会先处理这位会员）
+  let lastBirthday = 0;
   const sweep = async () => {
     try {
       const n = await sweepExpiredBonus({ sql, config });
       if (n > 0) app.log.info(`赠金到期作废：${n} 位会员`);
     } catch (error) {
       app.log.error({ err: error }, '赠金到期作废扫描失败，下一分钟重试');
+    }
+    // 生日礼（v0.7.20）：每 10 分钟检查一次生日当月还没发的会员（去重键兜底，几个进程同时跑也只发一次）
+    if (Date.now() - lastBirthday >= 10 * 60_000) {
+      lastBirthday = Date.now();
+      try {
+        const n = await issueBirthdayCoupons({ sql, config });
+        if (n > 0) app.log.info(`生日礼：发给 ${n} 位会员`);
+      } catch (error) {
+        app.log.error({ err: error }, '生日礼发券失败，10 分钟后重试');
+      }
     }
     // 顺带检查应用在跑的标记（数据库重启过、专用连接断了就重新拿）
     try {

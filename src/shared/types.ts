@@ -307,7 +307,10 @@ export interface SettlementAnomaly {
     | 'visit_cancel'
     | 'line_void'
     // R1.9：按实际时间补录纸质单
-    | 'backfill';
+    | 'backfill'
+    // v0.7.20：退款单（离店后部分退款）与当天作废的退款单
+    | 'refund'
+    | 'refund_void';
   at: string | null;
   docNo: string | null;
   memberName: string | null;
@@ -362,6 +365,11 @@ export interface BusinessTotals {
   byMethod: { method: CheckoutMethod; amount: number; count: number; voidCount: number }[];
   /** 平台团购核销（净额） */
   coupons: { platform: CouponPlatform; amount: number; count: number; voidCount: number }[];
+  /**
+   * 当天开的退款单（v0.7.20，离店后部分退款，不含当天作废的）：合计与按退款方式。净营业额与实收都要减去它；
+   * 应收、门票与项目的构成不变。升级之前确认的日结快照没有这一项，按 0 补齐
+   */
+  refunds: { count: number; total: number; byMethod: { method: PaymentMethod; count: number; amount: number }[] };
 }
 
 export interface SettlementSummary extends SettlementTotals {

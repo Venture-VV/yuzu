@@ -192,7 +192,8 @@ async function offlineCommand(command: string | undefined, args: string[]): Prom
       const r = res.result;
       for (const f of r.floors) await writeFile(join(out, `${f.code}.svg`), f.svg);
       await writeFile(join(out, 'spaces.geojson'), JSON.stringify(spacesGeoJson(r.rooms, { converter: r.converter, file: basename(file) }), null, 1));
-      await writeFile(join(out, 'report.json'), JSON.stringify({ ...r, floors: r.floors.map((f) => ({ ...f, svg: undefined })) }, null, 1));
+      // PDF 另写页数、换算比例与比例来源（main 定时测试报告建议：原来只打在屏幕上）
+      await writeFile(join(out, 'report.json'), JSON.stringify({ ...r, ...(res.pdf ? { pdf: res.pdf } : {}), floors: r.floors.map((f) => ({ ...f, svg: undefined })) }, null, 1));
       console.log(`读图 ${((res.readMs ?? 0) / 1000).toFixed(1)} 秒，转换 ${(r.convertMs / 1000).toFixed(1)} 秒，共 ${((Date.now() - t0) / 1000).toFixed(1)} 秒；图元 ${r.source.entities} 个、图层 ${r.source.layers} 个`);
       if (res.pdf) {
         const from = res.pdf.scaleFrom === 'text' ? '图上的比例文字' : '--scale';

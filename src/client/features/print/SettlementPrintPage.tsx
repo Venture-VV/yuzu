@@ -85,8 +85,10 @@ function SettlementSheet({ s }: { s: SettlementSummary }) {
           {b.voids.count > 0 && <Row left={`反结账 ${b.voids.count} 张`} right={yuan(-b.voids.total)} />}
           <Row left="应收（结账 − 反结账）" right={yuan(biz.receivable)} strong />
           <Row left="优惠 / 免单（当场授权，不是收款）" right={yuan(-biz.discount)} />
-          <Row left="净营业额（应收 − 优惠）" right={yuan(biz.netRevenue)} strong />
-          <Row left="实收（现金、扫码、银行卡、其他）" right={yuan(biz.received)} />
+          {biz.coupon !== 0 && <Row left="券抵扣（不是收款）" right={yuan(-biz.coupon)} />}
+          {biz.refund !== 0 && <Row left={`退款（退款单 ${b.refunds?.count ?? 0} 张）`} right={yuan(-biz.refund)} />}
+          <Row left="净营业额（应收 − 优惠 − 券抵扣 − 退款）" right={yuan(biz.netRevenue)} strong />
+          <Row left="实收（现金、扫码、银行卡、其他，减去退款）" right={yuan(biz.received)} />
           <Row left="其中门票" right={yuan(b.ticket)} />
           <Row left="其中项目与其他" right={yuan(b.items)} />
           <p className="mt-1.5 font-bold">收款方式</p>
@@ -113,6 +115,7 @@ function SettlementSheet({ s }: { s: SettlementSummary }) {
                 <th className={th}>方式</th>
                 <th className={thNum}>充值</th>
                 <th className={thNum}>结账</th>
+                <th className={thNum}>退款</th>
                 <th className={thNum}>合计</th>
               </tr>
             </thead>
@@ -122,6 +125,7 @@ function SettlementSheet({ s }: { s: SettlementSummary }) {
                   <td className={td}>{PAYMENT_METHOD_LABELS[r.method]}</td>
                   <td className={tdNum}>{yuan(r.recharge)}</td>
                   <td className={tdNum}>{yuan(r.checkout)}</td>
+                  <td className={tdNum}>{r.refund ? yuan(-r.refund) : ''}</td>
                   <td className={tdNum}>{yuan(r.total)}</td>
                 </tr>
               ))}
@@ -129,11 +133,12 @@ function SettlementSheet({ s }: { s: SettlementSummary }) {
                 <td className={`${td} border-t border-black`}>合计</td>
                 <td className={`${tdNum} border-t border-black`} />
                 <td className={`${tdNum} border-t border-black`} />
+                <td className={`${tdNum} border-t border-black`} />
                 <td className={`${tdNum} border-t border-black`}>{yuan(received.total)}</td>
               </tr>
             </tbody>
           </table>
-          <p className="mt-1 text-[11px]">按收款方式核对抽屉现金与各收款账户；会员储值、团购券、优惠 / 免单不计入。</p>
+          <p className="mt-1 text-[11px]">按收款方式核对抽屉现金与各收款账户（已减去当天的退款单）；会员储值、团购券、优惠 / 免单、券抵扣不计入。</p>
         </Section>
 
         {s.deposits && (s.deposits.received.length > 0 || s.deposits.refunded.length > 0 || s.deposits.held !== 0) && (

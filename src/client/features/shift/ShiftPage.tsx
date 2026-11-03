@@ -139,7 +139,7 @@ function OpenShift({ shift }: { shift: ShiftRecord }) {
   );
 }
 
-/** 应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金 + 客房押金现金（收 − 退）（之前交班的快照没有退款、押金两项） */
+/** 应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金 + 客房押金现金（收 − 退）− 退款单退现金（之前交班的快照没有退款、押金、退款单） */
 function CashFormula({ cash }: { cash: ShiftSummary['cash'] }) {
   return (
     <p className="text-[12px] text-ink-3" data-testid="shift-cash-formula">
@@ -156,7 +156,35 @@ function CashFormula({ cash }: { cash: ShiftSummary['cash'] }) {
           {cash.deposit > 0 ? '+' : '−'} 押金现金（收 − 退） <Money cents={Math.abs(cash.deposit)} />
         </>
       ) : null}
+      {cash.refundSlip ? (
+        <>
+          {' '}
+          − 退款单退现金 <Money cents={cash.refundSlip} />
+        </>
+      ) : null}
     </p>
+  );
+}
+
+/** 退款单（v0.7.20）：记到本班次的离店后部分退款；现金已从应有现金里扣，扫码、银行卡、其他列出退款单号 */
+function RefundSlipsView({ slips }: { slips: NonNullable<ShiftSummary['refundSlips']> }) {
+  return (
+    <div className="rounded-lg border border-ember/30 bg-ember-soft/20 p-4 md:col-span-2" data-testid="shift-refund-slips">
+      <p className="text-[13px] font-bold text-ink-2">
+        退款单 {slips.count} 张 · <Money cents={slips.total} className="font-bold text-ember" />
+        <span className="ml-2 font-normal text-ink-3">{slips.byMethod.map((m) => `${PAYMENT_METHOD_LABELS[m.method]} ¥${(m.amount / 100).toFixed(2)}`).join('、')}</span>
+      </p>
+      <ul className="mt-2 space-y-1 text-[12.5px] text-ink-2">
+        {slips.list.map((r) => (
+          <li key={r.refundNo}>
+            {r.refundNo}（原单 {r.checkoutNo}，¥{(r.amount / 100).toFixed(2)}，{r.reason}
+            {r.operatorName ? `，${r.operatorName}从本班钱箱退` : ''}
+            {r.refs.filter((x) => x.method !== 'cash').map((x) => `；${PAYMENT_METHOD_LABELS[x.method]}${x.method === 'other' ? '：' : '退款单号 '}${x.ref}`).join('')}）
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1.5 text-[12px] text-ink-3">现金从你的钱箱退给客人，已从应有现金里扣掉；扫码、银行卡请核对已在商户后台原路退回。</p>
+    </div>
   );
 }
 
@@ -205,6 +233,7 @@ function SummaryView({ summary }: { summary: ShiftSummary }) {
         </p>
       </div>
       {summary.deposits && <DepositsView deposits={summary.deposits} />}
+      {summary.refundSlips && <RefundSlipsView slips={summary.refundSlips} />}
       {summary.voids.length > 0 &&
         (refunds ? (
           <Notice tone="warning" icon={<Undo2 className="size-4" />} title={`本班次反结账 ${summary.voids.length} 张 · 退款 ¥${(refunds.total / 100).toFixed(2)}`} className="md:col-span-2">

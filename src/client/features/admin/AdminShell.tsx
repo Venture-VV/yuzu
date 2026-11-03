@@ -17,6 +17,7 @@ import {
   Scale,
   ShieldCheck,
   Tags,
+  Ticket,
   UsersRound,
   UtensilsCrossed,
   type LucideIcon,
@@ -34,6 +35,7 @@ const ICONS: Record<AdminSection, LucideIcon> = {
   settings: ListChecks,
   rules: Scale,
   members: IdCard,
+  coupons: Ticket,
   catalog: Gift,
   tags: Tags,
   technicians: HandHeart,
@@ -48,7 +50,7 @@ const ICONS: Record<AdminSection, LucideIcon> = {
 
 const GROUPS: { title: string; items: AdminSection[] }[] = [
   { title: '概览', items: ['home', 'settings'] },
-  { title: '经营设置', items: ['rules', 'members', 'catalog', 'tags', 'technicians', 'dining', 'rooms', 'spaces'] },
+  { title: '经营设置', items: ['rules', 'members', 'coupons', 'catalog', 'tags', 'technicians', 'dining', 'rooms', 'spaces'] },
   { title: '人员与权限', items: ['staff', 'permissions'] },
   { title: '数据', items: ['opening', 'audit'] },
 ];

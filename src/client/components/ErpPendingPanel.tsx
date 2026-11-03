@@ -42,13 +42,33 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
       return d.reconciliation && typeof d.reconciliation === 'object' ? { refId: d.reconciliation.id } : null;
     case 'location_report':
       return typeof d.eventId === 'number' ? { refId: d.eventId } : null;
+    // 券与会员权益（v0.7.20）：模板、无记名券返回自己（id），规则返回 ruleId，发券返回 issueId
+    case 'coupon_template':
+    case 'coupon_batch':
+      return typeof d.id === 'number' ? { refId: d.id } : null;
+    case 'coupon_rule':
+      return typeof d.ruleId === 'number' ? { refId: d.ruleId } : null;
+    case 'coupon_issue':
+      return typeof d.issueId === 'number' ? { refId: d.issueId } : null;
   }
 }
 
 const refOfLookup = (r: ErpOpLookup): ErpOpRef | null => (r.found && r.refId ? { refId: r.refId, advanceId: r.advanceId } : null);
 
-export function ErpPendingPanel({ types, onFound, className }: { types: readonly ErpOpType[]; onFound?: (op: ErpPendingOp, ref: ErpOpRef) => void; className?: string }) {
-  const ops = useErpPending(types);
+export function ErpPendingPanel({
+  types,
+  onFound,
+  className,
+  filter,
+}: {
+  types: readonly ErpOpType[];
+  onFound?: (op: ErpPendingOp, ref: ErpOpRef) => void;
+  className?: string;
+  /** 只列其中一部分（例如会员详情只列发给这位会员的券） */
+  filter?: (op: ErpPendingOp) => boolean;
+}) {
+  const all = useErpPending(types);
+  const ops = filter ? all.filter(filter) : all;
   const qc = useQueryClient();
   const toast = useToast();
   const checked = useRef(new Set<string>());

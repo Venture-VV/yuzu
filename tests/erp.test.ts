@@ -141,6 +141,8 @@ describe('营业数据（只读）', () => {
     expect(r.body.kpis).toEqual({
       receivable: exec.kpis.receivable,
       discount: exec.kpis.discount,
+      coupon: exec.kpis.coupon,
+      refund: exec.kpis.refund,
       net: exec.kpis.net,
       guests: exec.kpis.guests,
       checkouts: exec.kpis.checkouts,

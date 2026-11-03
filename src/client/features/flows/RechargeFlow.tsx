@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Banknote, CreditCard, Ellipsis, Gift, Smartphone, WalletCards } from 'lucide-react';
+import { ArrowLeft, Banknote, CreditCard, Ellipsis, Gift, Smartphone, Ticket, WalletCards } from 'lucide-react';
 import { overLimitGrantFits, type OverLimitGrant } from '@shared/grants';
 import { lastUsableDate } from '@shared/business-date';
 import { PAYMENT_METHOD_LABELS, PAYMENT_METHODS, shiftDate, type PaymentMethod } from '@shared/labels';
@@ -15,6 +15,7 @@ import { Button, ConfirmCheck, Field, Input, MoneyInput, Notice, PendingBadge, S
 import { BalanceChange, FlowFrame, OperationStatus, OverLimitCard, PendingRecovery, SuccessHeader, SummaryRow, type Step } from './parts';
 import { isBusy, isLocked, useOperation } from './useOperation';
 import { SHIFT_ERRORS, shiftKeys, ShiftGate, useShiftReady } from '../shift/ShiftGate';
+import { planGiftText, usePlanGifts } from '../coupons/queries';
 
 const METHOD_ICONS: Record<PaymentMethod, typeof Smartphone> = {
   wechat: Smartphone,
@@ -53,6 +54,9 @@ export function RechargeFlow({
   const [grant, setGrant] = useState<OverLimitGrant | null>(null);
 
   const plan = typeof planId === 'number' ? plans.find((p) => p.id === planId) : undefined;
+  // 充值赠券（v0.7.20）：套餐上挂的券，入账时与赠金一起发；接口要「会员充值」权限
+  const gifts = usePlanGifts(can('recharge.create'));
+  const planGifts = plan ? (gifts.data ?? []).filter((g) => g.planId === plan.id) : [];
   const paid = plan ? plan.payAmount : parseYuan(paidText);
   const bonus = plan ? plan.bonusAmount : bonusText.trim() ? parseYuan(bonusText) : 0;
 
@@ -244,6 +248,11 @@ export function RechargeFlow({
               <Money cents={bonus ?? 0} className={bonus ? 'text-yuzu-deep' : 'text-ink-4'} signed />
             </SummaryRow>
             {bonus ? <SummaryRow label="赠金有效期">{bonusValidText}</SummaryRow> : null}
+            {planGifts.length > 0 && (
+              <SummaryRow label="另赠券">
+                <span data-testid="coupon-plan-gifts-confirm">{planGifts.map(planGiftText).join('、')}</span>
+              </SummaryRow>
+            )}
             {paymentRef && <SummaryRow label="收款备注">{paymentRef}</SummaryRow>}
             {note && <SummaryRow label="备注">{note}</SummaryRow>}
           </div>
@@ -345,6 +354,18 @@ export function RechargeFlow({
             <span className="text-[14px] font-bold text-ink">自定义金额</span>
             <span className="mt-0.5 text-[12px] text-ink-3">{canCustomBonus ? '手动填写实收与赠金' : '只计本金，不含赠金'}</span>
           </button>
+        </div>
+      )}
+
+      {planGifts.length > 0 && (
+        <div className="mt-3 animate-rise rounded-lg border border-dashed border-yuzu-deep/35 bg-yuzu-tint px-3.5 py-2.5" data-testid="coupon-plan-gifts">
+          {planGifts.map((g, i) => (
+            <p key={`${g.templateId}-${i}`} className="flex items-center gap-1.5 text-[13px] font-bold text-yuzu-deep">
+              <Ticket className="size-4 shrink-0" />
+              另赠：{planGiftText(g)}
+            </p>
+          ))}
+          <p className="mt-0.5 text-[12px] text-ink-3">入账时发到会员账户，与赠金分开；限定了等级的券按充值后的会员等级发，等级不在里面的不发</p>
         </div>
       )}
 

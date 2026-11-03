@@ -41,6 +41,12 @@ async function periodKpis(db: Db, from: string, to: string, c: Clock): Promise<P
               - coalesce(sum(p.amount) FILTER (WHERE c.void_business_date BETWEEN ${from} AND ${to}), 0)
        FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
        WHERE p.method = 'discount' AND (c.business_date BETWEEN ${from} AND ${to} OR c.void_business_date BETWEEN ${from} AND ${to})) AS discount,
+      -- 券抵扣与退款单（v0.7.20）：券抵扣随结账单（反结账冲回），退款单按退款的营业日（作废的不算）
+      (SELECT coalesce(sum(p.amount) FILTER (WHERE c.business_date BETWEEN ${from} AND ${to}), 0)
+              - coalesce(sum(p.amount) FILTER (WHERE c.void_business_date BETWEEN ${from} AND ${to}), 0)
+       FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
+       WHERE p.method = 'store_coupon' AND (c.business_date BETWEEN ${from} AND ${to} OR c.void_business_date BETWEEN ${from} AND ${to})) AS coupon,
+      (SELECT coalesce(sum(amount), 0) FROM refunds WHERE status = 'completed' AND business_date BETWEEN ${from} AND ${to}) AS refund,
       -- 结账客人、结账单、储值消费与日结同一营业口径（v0.7.1）：时段内结的计正数、时段内反结账 / 撤销的计负数
       -- 结账客人按人数：手牌每位 1 人，桌台按开台人数（餐饮第二步）
       (SELECT coalesce(sum(cb.guests) FILTER (WHERE c.business_date BETWEEN ${from} AND ${to}), 0)
@@ -54,35 +60,44 @@ async function periodKpis(db: Db, from: string, to: string, c: Clock): Promise<P
       ((SELECT coalesce(sum(total_amount), 0) FROM consumptions WHERE business_date BETWEEN ${from} AND ${to})
         - (SELECT coalesce(sum(principal_amount + bonus_amount), 0) FROM reversals WHERE business_date BETWEEN ${from} AND ${to})) AS wallet_consumed,
       (SELECT count(*) FROM members WHERE ${bizDate(db, 'created_at', c)} BETWEEN ${from} AND ${to})::int AS new_members`;
-  const net = r!.receivable - r!.discount;
+  const net = r!.receivable - r!.discount - r!.coupon - r!.refund;
   return { ...r!, net, perGuest: r!.guests ? Math.round(net / r!.guests) : 0 };
 }
 
 /**
  * 部门（项目分类）与项目：结账时记下的快照（v0.7.6，与对账包的部门参考表同一口径；以后改价目、改分类不影响已结的单），
- * 时段内结的计正数、反结账的计负数。discount 是分摊到这一项的优惠 / 免单
+ * 时段内结的计正数、反结账的计负数。discount 是分摊到这一项的优惠 / 免单与券抵扣；
+ * refund 是时段内退款单退的金额（v0.7.20，按退款的营业日，作废的不算），份数减去退的份数
  */
 async function itemLines(db: Db, from: string, to: string) {
-  return db<{ category: string; name: string; quantity: number; amount: number; discount: number }[]>`
+  return db<{ category: string; name: string; quantity: number; amount: number; discount: number; refund: number }[]>`
     WITH k AS (
       SELECT id, 1 AS sign FROM checkouts WHERE business_date BETWEEN ${from} AND ${to}
       UNION ALL
       SELECT id, -1 FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to}
+    ),
+    x AS (
+      SELECT ci.category, ci.name, k.sign * ci.quantity AS quantity, k.sign * ci.amount AS amount, k.sign * ci.discount AS discount, 0::bigint AS refund
+      FROM k JOIN checkout_items ci ON ci.checkout_id = k.id
+      UNION ALL
+      SELECT ri.category, ri.name, -ri.quantity, 0, 0, ri.amount
+      FROM refund_items ri JOIN refunds r ON r.id = ri.refund_id
+      WHERE r.status = 'completed' AND r.business_date BETWEEN ${from} AND ${to}
     )
-    SELECT ci.category, ci.name, sum(k.sign * ci.quantity)::int AS quantity, sum(k.sign * ci.amount)::bigint AS amount,
-           sum(k.sign * ci.discount)::bigint AS discount
-    FROM k JOIN checkout_items ci ON ci.checkout_id = k.id
+    SELECT category, name, sum(quantity)::int AS quantity, sum(amount)::bigint AS amount, sum(discount)::bigint AS discount, sum(refund)::bigint AS refund
+    FROM x
     GROUP BY 1, 2
-    HAVING sum(k.sign * ci.quantity) <> 0 OR sum(k.sign * ci.amount) <> 0 OR sum(k.sign * ci.discount) <> 0`;
+    HAVING sum(quantity) <> 0 OR sum(amount) <> 0 OR sum(discount) <> 0 OR sum(refund) <> 0`;
 }
 
-function byCategory(lines: { category: string; quantity: number; amount: number; discount: number }[]) {
+function byCategory(lines: { category: string; quantity: number; amount: number; discount: number; refund: number }[]) {
   const map = new Map<string, DepartmentRevenue>();
   for (const l of lines) {
-    const x = map.get(l.category) ?? { category: l.category, quantity: 0, amount: 0, discount: 0 };
+    const x = map.get(l.category) ?? { category: l.category, quantity: 0, amount: 0, discount: 0, refund: 0 };
     x.quantity += l.quantity;
     x.amount += l.amount;
     x.discount += l.discount;
+    x.refund += l.refund;
     map.set(l.category, x);
   }
   return [...map.values()].sort((a, b) => b.amount - a.amount);
@@ -102,11 +117,14 @@ export async function executiveReport(db: Db, from: string, to: string, c: Clock
       SELECT void_business_date, -sum(total_amount) FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to} GROUP BY 1
     ),
     dis AS (
+      -- 优惠 / 免单与券抵扣（v0.7.20），以及退款单（按退款的营业日）都从净营业额里减
       SELECT c.business_date AS date, sum(p.amount) AS amount FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
-      WHERE p.method = 'discount' AND c.business_date BETWEEN ${from} AND ${to} GROUP BY 1
+      WHERE p.method IN ('discount', 'store_coupon') AND c.business_date BETWEEN ${from} AND ${to} GROUP BY 1
       UNION ALL
       SELECT c.void_business_date, -sum(p.amount) FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
-      WHERE p.method = 'discount' AND c.void_business_date BETWEEN ${from} AND ${to} GROUP BY 1
+      WHERE p.method IN ('discount', 'store_coupon') AND c.void_business_date BETWEEN ${from} AND ${to} GROUP BY 1
+      UNION ALL
+      SELECT business_date, sum(amount) FROM refunds WHERE status = 'completed' AND business_date BETWEEN ${from} AND ${to} GROUP BY 1
     ),
     g AS (
       SELECT c.business_date AS date, sum(cb.guests) AS n FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id
@@ -123,14 +141,19 @@ export async function executiveReport(db: Db, from: string, to: string, c: Clock
     FROM d ORDER BY d.date`;
   // 收款构成、门票与日结同一营业口径：时段内结的计正数、时段内反结账的计负数（v0.7.1，测试会话 PR #15 问题 2）
   const inRange = (col: string) => db`${db(col)} BETWEEN ${from} AND ${to}`;
+  // 退款单（v0.7.20）按退款方式冲减（按退款的营业日）
   const byMethod = await db<ExecutiveReport['byMethod']>`
-    SELECT p.method, (coalesce(sum(p.amount) FILTER (WHERE ${inRange('c.business_date')}), 0)
-                      - coalesce(sum(p.amount) FILTER (WHERE ${inRange('c.void_business_date')}), 0))::bigint AS amount
-    FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
-    WHERE ${inRange('c.business_date')} OR ${inRange('c.void_business_date')}
-    GROUP BY p.method
-    HAVING coalesce(sum(p.amount) FILTER (WHERE ${inRange('c.business_date')}), 0) <> coalesce(sum(p.amount) FILTER (WHERE ${inRange('c.void_business_date')}), 0)
-    ORDER BY amount DESC`;
+    WITH x AS (
+      SELECT p.method, (coalesce(sum(p.amount) FILTER (WHERE ${inRange('c.business_date')}), 0)
+                        - coalesce(sum(p.amount) FILTER (WHERE ${inRange('c.void_business_date')}), 0))::bigint AS amount
+      FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
+      WHERE ${inRange('c.business_date')} OR ${inRange('c.void_business_date')}
+      GROUP BY p.method
+      UNION ALL
+      SELECT p.method, -sum(p.amount)::bigint FROM refund_payments p JOIN refunds r ON r.id = p.refund_id
+      WHERE r.status = 'completed' AND ${inRange('r.business_date')} GROUP BY p.method
+    )
+    SELECT method, sum(amount)::bigint AS amount FROM x GROUP BY method HAVING sum(amount) <> 0 ORDER BY amount DESC`;
   const tickets = await db<ExecutiveReport['tickets']>`
     SELECT cb.ticket_name AS name,
            (count(*) FILTER (WHERE ${inRange('c.business_date')}) - count(*) FILTER (WHERE ${inRange('c.void_business_date')}))::int AS count,

@@ -34,7 +34,7 @@ export const hashRequest = (payload: unknown) => createHash('sha256').update(JSO
 /**
  * 前台的幂等业务类型；table_open / table_post / table_checkout 是餐饮第二步的开台、桌台点单与桌台结账；
  * room_* 是客房（S7）的入住、续住加段、收押金、退押金、退房；line_move 是转单（v0.7.6，明细转到另一张手牌）；
- * usage_* 是派对房等的使用单（v0.7.19）：开单、结束、撤单
+ * usage_* 是派对房等的使用单（v0.7.19）：开单、结束、撤单；checkout_refund 是退款单（v0.7.20，离店后部分退款）
  */
 export const FRONTDESK_OPS = [
   'checkin',
@@ -53,6 +53,7 @@ export const FRONTDESK_OPS = [
   'usage_open',
   'usage_end',
   'usage_cancel',
+  'checkout_refund',
 ] as const;
 export type FrontdeskOp = (typeof FRONTDESK_OPS)[number];
 
@@ -78,6 +79,7 @@ export const FRONTDESK_OP_PERMISSIONS: Record<FrontdeskOp, readonly Permission[]
   usage_open: ['room.operate'],
   usage_end: ['room.operate'],
   usage_cancel: ['room.operate'],
+  checkout_refund: ['frontdesk.refund'],
 };
 
 export const abandonedError = () =>

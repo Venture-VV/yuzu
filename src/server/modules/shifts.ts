@@ -9,6 +9,8 @@
 //     原单也不计入收款时的班次；反结账时没有开班的（规则关闭时）同样不计入原单的班次——退款没有记到任何班次；
 //   · 跨钱箱退款（店主 2026-10-30 定，方案 A）：反结账退现金时可以选从哪个钱箱退——此刻当班的任一班次（默认原单收款的班次，
 //     已交班时是反结账人自己的班次）；退款（含其他方式的退款提醒）记到所选班次，扣减它的应有现金，各人交班不再出现负数；
+//   · 退款单（v0.7.20，离店后部分退款）：记到办理时的班次（退现金时是所选钱箱当班的班次），现金退款扣减应有现金，
+//     微信、支付宝、银行卡、其他列出退款单号只作提醒；当班作废的退款单不算；
 //   · 收款前必须先开班（经营规则开关，默认开）：没有开班时充值、结账、反结账整笔拒绝（SHIFT_REQUIRED）；
 //   · 交班：员工实点现金，系统记下应有现金、差额与汇总快照；员工确认时看到的应有现金与此刻不一致（期间又有收款）时拒绝；
 //   · 本人交本人的班；值班经理及以上可以替别人交班（例如员工忘了交班就下班）。
@@ -144,6 +146,9 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
       refundByMethod: NonNullable<ShiftSummary['refunds']>['byMethod'];
       depositReceived: NonNullable<ShiftSummary['deposits']>['received'];
       depositRefunded: NonNullable<ShiftSummary['deposits']>['refunded'];
+      refundSlipTotals: { count: number; total: number };
+      refundSlipByMethod: NonNullable<ShiftSummary['refundSlips']>['byMethod'];
+      refundSlipList: NonNullable<ShiftSummary['refundSlips']>['list'];
     })[]
   >`
     WITH co AS (
@@ -177,6 +182,14 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
       -- 客房押金（S7）：收、退都记在经办人当班的班次
       SELECT kind, method, count(*) AS count, sum(amount) AS amount FROM room_deposits
       WHERE shift_id = ${s.id} AND kind IN ('receive', 'refund') GROUP BY kind, method
+    ), rs AS (
+      -- 退款单（v0.7.20）：记到本班次的、生效的（作废只能在班次交班前，作废后不算）；别人从本班钱箱退的写明是谁
+      SELECT r.id, r.refund_no, r.amount, r.reason, r.created_at, c.checkout_no,
+             CASE WHEN r.operator_id <> ${s.staffId} THEN ob.display_name END AS operator_name
+      FROM refunds r JOIN checkouts c ON c.id = r.checkout_id JOIN staff ob ON ob.id = r.operator_id
+      WHERE r.shift_id = ${s.id} AND r.status = 'completed'
+    ), rsp AS (
+      SELECT p.refund_id, p.method, p.amount, p.ref FROM refund_payments p JOIN rs ON rs.id = p.refund_id
     )
     SELECT
       (SELECT json_build_object('count', count(*), 'total', coalesce(sum(total_amount), 0)) FROM co) AS checkouts,
@@ -197,8 +210,19 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
       (SELECT coalesce(json_agg(json_build_object('method', method, 'count', count, 'amount', amount) ORDER BY method), '[]'::json)
        FROM dp WHERE kind = 'receive') AS deposit_received,
       (SELECT coalesce(json_agg(json_build_object('method', method, 'count', count, 'amount', amount) ORDER BY method), '[]'::json)
-       FROM dp WHERE kind = 'refund') AS deposit_refunded`;
+       FROM dp WHERE kind = 'refund') AS deposit_refunded,
+      (SELECT json_build_object('count', count(*), 'total', coalesce(sum(amount), 0)) FROM rs) AS refund_slip_totals,
+      (SELECT coalesce(json_agg(json_build_object('method', method, 'count', count, 'amount', amount) ORDER BY method), '[]'::json)
+       FROM (SELECT method, count(*) AS count, sum(amount) AS amount FROM rsp GROUP BY method) x) AS refund_slip_by_method,
+      (SELECT coalesce(json_agg(json_build_object(
+                'refundNo', rs.refund_no, 'checkoutNo', rs.checkout_no, 'amount', rs.amount, 'reason', rs.reason, 'createdAt', rs.created_at,
+                'operatorName', rs.operator_name,
+                'cash', coalesce((SELECT sum(rsp.amount) FROM rsp WHERE rsp.refund_id = rs.id AND rsp.method = 'cash'), 0),
+                'refs', coalesce((SELECT json_agg(json_build_object('method', rsp.method, 'amount', rsp.amount, 'ref', rsp.ref) ORDER BY rsp.method)
+                                  FROM rsp WHERE rsp.refund_id = rs.id), '[]'::json))
+              ORDER BY rs.created_at, rs.id), '[]'::json) FROM rs) AS refund_slip_list`;
   const { checkouts, checkoutByMethod, recharges, rechargeByMethod, walletConsumes, coupons, refunds, refundByMethod, depositReceived, depositRefunded } = row!;
+  const { refundSlipTotals, refundSlipByMethod, refundSlipList } = row!;
   const cashCheckout = checkoutByMethod.find((m) => m.method === 'cash')?.amount ?? 0;
   const cashRecharge = rechargeByMethod.find((m) => m.method === 'cash')?.amount ?? 0;
   // 升级时已有的班次：反结账按原口径只列提醒（与 v0.3 的交班表相同），不列退款、不扣现金
@@ -207,6 +231,9 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
   const hasDeposits = depositReceived.length > 0 || depositRefunded.length > 0;
   const hasCashDeposit = [...depositReceived, ...depositRefunded].some((m) => m.method === 'cash');
   const cashDeposit = (depositReceived.find((m) => m.method === 'cash')?.amount ?? 0) - (depositRefunded.find((m) => m.method === 'cash')?.amount ?? 0);
+  // 退款单（v0.7.20）：现金从本班钱箱退，扣减应有现金；本班次没有退款单时不列这一项
+  const hasSlips = refundSlipTotals.count > 0;
+  const cashSlip = refundSlipByMethod.find((m) => m.method === 'cash')?.amount ?? 0;
   return {
     from: new Date(from).toISOString(),
     to: new Date(to).toISOString(),
@@ -224,13 +251,27 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
     })),
     ...(s.legacyRefund ? {} : { refunds: { ...refunds, byMethod: refundByMethod } }),
     ...(hasDeposits ? { deposits: { received: depositReceived, refunded: depositRefunded } } : {}),
+    ...(hasSlips
+      ? {
+          refundSlips: {
+            ...refundSlipTotals,
+            byMethod: refundSlipByMethod,
+            list: refundSlipList.map(({ operatorName, ...r }) => ({
+              ...r,
+              createdAt: new Date(r.createdAt).toISOString(),
+              ...(operatorName ? { operatorName } : {}),
+            })),
+          },
+        }
+      : {}),
     cash: {
       opening: s.openingCash,
       checkout: cashCheckout,
       recharge: cashRecharge,
       ...(s.legacyRefund ? {} : { refund: cashRefund }),
       ...(hasCashDeposit ? { deposit: cashDeposit } : {}),
-      expected: s.openingCash + cashCheckout + cashRecharge - cashRefund + cashDeposit,
+      ...(hasSlips ? { refundSlip: cashSlip } : {}),
+      expected: s.openingCash + cashCheckout + cashRecharge - cashRefund + cashDeposit - cashSlip,
     },
   };
 }

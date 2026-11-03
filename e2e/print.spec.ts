@@ -31,7 +31,7 @@ interface Summary {
 const dayBefore = (date: string) => new Date(Date.parse(`${date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
 
 /**
- * 演示单据所在的营业日：演示数据按执行时刻生成，在营业日切换（06:00）后一小时内执行时会落在前一个营业日。
+ * 演示单据所在的营业日：演示数据按执行时刻生成，结账单在灌数据前 30 分钟以内，营业日切换（06:00）后半小时内执行时部分或全部落在前一个营业日。
  * 按演示手牌 A8066 认：今天可能已有其他用例（如完整收银）新建的结账单
  */
 async function checkouts(page: Page) {
@@ -51,6 +51,21 @@ function demoCheckout(list: Summary[], tag: string, status: Summary['status']) {
   const found = list.find((c) => c.status === status && c.tagCodes.includes(tag));
   expect(found, `演示单据 ${tag}（${status}）`).toBeTruthy();
   return found!;
+}
+
+/**
+ * 演示单据可能分在两个营业日：⑤ 的原单在灌数据前 30 分钟结账、25 分钟前反结账，② A8066 在 15 分钟前结账，
+ * 营业日切换后半小时内灌的数据，⑤ 落在前一个营业日、② 落在当天（main 定时测试报告，2026-11-03 06:12 起的复测）。
+ * 每张单据各自在今天与前一个营业日里找
+ */
+async function demoCheckoutAnyDay(page: Page, today: string, tag: string, status: Summary['status']) {
+  for (const date of [today, dayBefore(today)]) {
+    const res = await page.request.get(`/api/frontdesk/checkouts?date=${date}`);
+    if (!res.ok()) continue;
+    const found = ((await res.json()) as Summary[]).find((c) => c.status === status && c.tagCodes.includes(tag));
+    if (found) return found;
+  }
+  return demoCheckout([], tag, status);
 }
 
 /** 打印样式下：工具栏隐藏，纸宽 72mm（272px），内容不横向溢出 */
@@ -86,7 +101,7 @@ test.describe('打印', () => {
     await expect(page.getByTestId('print-instance')).toBeVisible();
     await expectPrintLayout(page);
 
-    const voided = demoCheckout(list, 'A8071', 'voided');
+    const voided = await demoCheckoutAnyDay(page, me.today, 'A8071', 'voided');
     await page.goto(`/print/checkout/${voided.id}`);
     await expect(page.getByTestId('print-voided')).toContainText('已反结账（本单作废）');
     await expect(page.getByTestId('print-voided')).toContainText('收款方式记错');
@@ -119,13 +134,24 @@ test.describe('打印', () => {
 
   test('日结单（A4）：营业口径分列应收、优惠、净营业额、实收，核对一致，签字栏；打印样式下不横向溢出', async ({ page }) => {
     await login(page, 'linlan');
-    const { date } = await checkouts(page);
+    const found = await checkouts(page);
+    // 异常栏要列出「反结账」：演示的反结账（⑤ A8071，灌数据前 25 分钟）可能落在 A8066 的前一个营业日（见 demoCheckoutAnyDay），
+    // 按实际有反结账的那个营业日打开日结单（其余核对每个营业日都成立）
+    let date = found.date;
+    for (const d of [found.date, dayBefore(found.date)]) {
+      const s = (await (await page.request.get(`/api/settlements/${d}`)).json()) as { business?: { voids: { count: number } } };
+      if ((s.business?.voids.count ?? 0) > 0) {
+        date = d;
+        break;
+      }
+    }
     await page.goto(`/print/settlement/${date}`);
     const sheet = page.getByTestId('print-settlement');
     await expect(sheet).toContainText('日结单');
     await expect(sheet).toContainText(`营业日 ${date}`);
     const business = page.getByTestId('print-settlement-business');
-    for (const label of ['应收（结账 − 反结账）', '优惠 / 免单（当场授权，不是收款）', '净营业额（应收 − 优惠）', '实收（现金、扫码、银行卡、其他）']) {
+    // v0.7.20 起净营业额还减券抵扣与退款，实收减去退款
+    for (const label of ['应收（结账 − 反结账）', '优惠 / 免单（当场授权，不是收款）', '净营业额（应收 − 优惠 − 券抵扣 − 退款）', '实收（现金、扫码、银行卡、其他，减去退款）']) {
       await expect(business).toContainText(label);
     }
     await expect(page.getByTestId('print-settlement-received')).toContainText('合计');

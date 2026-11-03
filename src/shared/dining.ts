@@ -230,6 +230,8 @@ export interface TableCheckoutPreview {
   totalAmount: number;
   /** 这几桌登记的会员（可用储值支付），附余额 */
   members: { id: number; name: string; memberNo: string; status: 'active' | 'frozen'; principalBalance: number; bonusBalance: number }[];
+  /** 这些会员的券（v0.7.20）：能抵多少，不能用的写原因 */
+  storeCoupons?: import('./coupons').CheckoutCouponOption[];
   pricedAt: string;
   /** 还没上的菜：结账时只提醒 */
   dishes: { tableName: string; name: string; quantity: number; status: KitchenStatus }[];

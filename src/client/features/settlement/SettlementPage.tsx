@@ -406,6 +406,8 @@ const ANOMALY_META: Record<
   visit_cancel: { label: ANOMALY_LABELS.visit_cancel, tone: 'lake', icon: CircleSlash, iconClass: 'bg-lake-soft text-lake' },
   line_void: { label: ANOMALY_LABELS.line_void, tone: 'lake', icon: CircleSlash, iconClass: 'bg-lake-soft text-lake' },
   backfill: { label: ANOMALY_LABELS.backfill, tone: 'lake', icon: FilePenLine, iconClass: 'bg-lake-soft text-lake' },
+  refund: { label: ANOMALY_LABELS.refund, tone: 'ember', icon: Undo2, iconClass: 'bg-ember-soft text-ember' },
+  refund_void: { label: ANOMALY_LABELS.refund_void, tone: 'clay', icon: CircleSlash, iconClass: 'bg-clay-soft text-clay' },
 };
 
 function AnomalyItem({ a }: { a: SettlementAnomaly }) {
@@ -569,6 +571,18 @@ function BusinessCard({ s }: { s: SettlementSummary }) {
                 · 优惠 <Money cents={-biz.discount} signed />
               </>
             )}
+            {biz.coupon !== 0 && (
+              <>
+                {' '}
+                · 券抵扣 <Money cents={-biz.coupon} signed />
+              </>
+            )}
+            {(b.refunds?.count ?? 0) > 0 && (
+              <>
+                {' '}
+                · 退款 {b.refunds!.count} 张 −<Money cents={b.refunds!.total} />
+              </>
+            )}
           </p>
         </div>
         <div className="space-y-2 px-5 py-4 text-[13px]" data-testid="settlement-breakdown">
@@ -576,8 +590,10 @@ function BusinessCard({ s }: { s: SettlementSummary }) {
           <Row label="项目与其他" cents={b.items} className="text-ink" />
           <Row label="应收（结账 − 反结账）" cents={biz.receivable} className="font-bold text-ink" />
           <Row label="优惠 / 免单（当场授权）" cents={-biz.discount} className="text-yuzu-deep" />
-          <Row label="净营业额（应收 − 优惠）" cents={biz.netRevenue} className="font-bold text-pine" />
-          <Row label="实收（现金、扫码、银行卡、其他）" cents={biz.received} className="text-lake" />
+          {biz.coupon !== 0 && <Row label="券抵扣（结账用的券）" cents={-biz.coupon} className="text-yuzu-deep" />}
+          {biz.refund !== 0 && <Row label="退款（退款单，离店后部分退款）" cents={-biz.refund} className="text-ember" />}
+          <Row label="净营业额（应收 − 优惠 − 券抵扣 − 退款）" cents={biz.netRevenue} className="font-bold text-pine" />
+          <Row label="实收（现金、扫码、银行卡、其他，减去退款）" cents={biz.received} className="text-lake" />
           <div className="my-1 border-t border-dashed border-line" />
           {b.byMethod.map((m) => (
             <div key={m.method} className="flex items-center justify-between">
@@ -586,7 +602,7 @@ function BusinessCard({ s }: { s: SettlementSummary }) {
                 <span className="ml-1 text-[12px]">· {m.count} 笔{m.voidCount ? `，反结账 ${m.voidCount}` : ''}</span>
                 {m.method === 'wallet' && <span className="ml-1 text-[11.5px] text-ink-4">（会员余额抵扣，同时计入储值消费）</span>}
                 {m.method === 'coupon' && <span className="ml-1 text-[11.5px] text-ink-4">（平台团购核销）</span>}
-                {m.method === 'discount' && <span className="ml-1 text-[11.5px] text-ink-4">（不是收款）</span>}
+                {(m.method === 'discount' || m.method === 'store_coupon') && <span className="ml-1 text-[11.5px] text-ink-4">（不是收款）</span>}
               </span>
               <Money cents={m.amount} className="font-bold" />
             </div>
@@ -606,7 +622,7 @@ function BusinessCard({ s }: { s: SettlementSummary }) {
             实收合计 · 充值 + 结账
           </p>
           <Money cents={cashTotal} className="mt-1.5 text-[32px] leading-none font-bold text-lake" />
-          <p className="mt-1.5 text-[12.5px] text-ink-3">按收款方式核对抽屉现金与各收款账户；会员储值、团购券、优惠 / 免单不计入</p>
+          <p className="mt-1.5 text-[12.5px] text-ink-3">按收款方式核对抽屉现金与各收款账户（已减去当天的退款单）；会员储值、团购券、优惠 / 免单、券抵扣不计入</p>
         </div>
         <div className="px-5 py-4">
           <table className="w-full text-[13px]">
@@ -615,6 +631,7 @@ function BusinessCard({ s }: { s: SettlementSummary }) {
                 <th className="pb-1.5 text-left font-semibold">方式</th>
                 <th className="pb-1.5 text-right font-semibold">充值</th>
                 <th className="pb-1.5 text-right font-semibold">结账</th>
+                <th className="pb-1.5 text-right font-semibold">退款</th>
                 <th className="pb-1.5 text-right font-semibold">合计</th>
               </tr>
             </thead>
@@ -628,6 +645,7 @@ function BusinessCard({ s }: { s: SettlementSummary }) {
                   <td className="py-1.5 text-right">
                     <Money cents={r.checkout} className="text-ink-3" />
                   </td>
+                  <td className="py-1.5 text-right">{r.refund ? <Money cents={-r.refund} signed className="text-ember" /> : <span className="text-ink-4">—</span>}</td>
                   <td className="py-1.5 text-right">
                     <Money cents={r.total} className="font-bold" />
                   </td>

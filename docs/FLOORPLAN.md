@@ -79,7 +79,7 @@ node dist/server/cli.js floorplan-convert <图纸.dwg|.dxf|.pdf> [--out 目录] 
 node dist/server/cli.js floorplan-sample <文件.dxf|.pdf>                                  # 写出合成样例图纸（第一版；.pdf 写 PDF 版，1:100）
 ```
 
-这两个命令不连数据库，不需要 `DATABASE_URL`。`floorplan-convert` 与后台走同一个转换进程，适合在测试服上量用时与内存、在本机核对图层归类（`report.json` 列出每个图层的用途与图元数），或在不想写进系统时先看结果。PDF 会打出页数与换算用的比例（给了 `--scale` 按它换算，与图上写的不同时一并打出；没给按图上的比例文字）。PDF 样例的预期在 `src/server/demo/floorplan-expected.json` 的 `pdf`（与 DXF 第一版只差 W306，原因写在那里的说明里）。
+这两个命令不连数据库，不需要 `DATABASE_URL`。`floorplan-convert` 与后台走同一个转换进程，适合在测试服上量用时与内存、在本机核对图层归类（`report.json` 列出每个图层的用途与图元数，PDF 另有页数、换算比例与比例来源 `pdf`），或在不想写进系统时先看结果。PDF 会打出页数与换算用的比例（给了 `--scale` 按它换算，与图上写的不同时一并打出；没给按图上的比例文字）。PDF 样例的预期在 `src/server/demo/floorplan-expected.json` 的 `pdf`（与 DXF 第一版只差 W306，原因写在那里的说明里）。
 
 ## 6. 部署与授权
 

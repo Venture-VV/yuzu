@@ -33,6 +33,7 @@ import { OrderedPage } from './features/purchasing/OrderedPage';
 import { PoFormPage } from './features/purchasing/PoFormPage';
 import { PurchasingPage } from './features/purchasing/PurchasingPage';
 import { CheckoutPrintPage } from './features/print/CheckoutPrintPage';
+import { RefundPrintPage } from './features/print/RefundPrintPage';
 import { SettlementPrintPage } from './features/print/SettlementPrintPage';
 import { ShiftPrintPage } from './features/print/ShiftPrintPage';
 import { useCan, useOptionalSession } from './lib/session';
@@ -158,6 +159,7 @@ const router = createBrowserRouter([
     element: <AuthGate shell="bare" />,
     children: [
       { path: 'checkout/:id', element: <CheckoutPrintPage /> },
+      { path: 'refund/:id', element: <RefundPrintPage /> },
       { path: 'shift/:id', element: <ShiftPrintPage /> },
       { path: 'settlement/:date', element: <SettlementPrintPage /> },
     ],

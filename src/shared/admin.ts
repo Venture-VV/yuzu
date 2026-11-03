@@ -5,10 +5,12 @@ import type { EditableRole, Permission, Role, RoleOverrides } from './permission
 
 /** 后台分区：路径、名称、所需权限（有其一即可） */
 export const ADMIN_SECTIONS = {
-  home: { path: '/admin', label: '后台首页', perms: ['settings.manage', 'catalog.manage', 'staff.manage', 'audit.read', 'wallet.opening', 'frontdesk.tags', 'technician.manage'] },
+  home: { path: '/admin', label: '后台首页', perms: ['settings.manage', 'catalog.manage', 'staff.manage', 'audit.read', 'wallet.opening', 'frontdesk.tags', 'technician.manage', 'coupon.manage'] },
   settings: { path: '/admin/settings', label: '规则总表', perms: ['settings.manage', 'audit.read'] },
   rules: { path: '/admin/rules', label: '经营规则', perms: ['settings.manage'] },
   members: { path: '/admin/members', label: '会员与渠道', perms: ['settings.manage'] },
+  // 券与会员权益（v0.7.20，飞书 RQ-006 后半，见 docs/COUPONS.md）：券模板、发券规则、无记名券、统计；默认店主、店总
+  coupons: { path: '/admin/coupons', label: '券与会员权益', perms: ['coupon.manage'] },
   catalog: { path: '/admin/catalog', label: '价目与套餐', perms: ['catalog.manage'] },
   tags: { path: '/admin/tags', label: '手牌与前台', perms: ['frontdesk.tags', 'settings.manage'] },
   technicians: { path: '/admin/technicians', label: '技师', perms: ['technician.manage', 'settings.manage', 'catalog.manage', 'audit.read'] },

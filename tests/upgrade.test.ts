@@ -59,6 +59,9 @@ beforeAll(async () => {
   await sql`CREATE TABLE hand_tags (id bigserial PRIMARY KEY, code text)`;
   await sql`CREATE TABLE visits (id bigserial PRIMARY KEY, member_id bigint, tag_id bigint, status text)`;
   await sql`INSERT INTO settings (key, value) VALUES ('require_open_shift', 'false'::jsonb)`;
+  // 现版本充值时按发券规则发充值赠券、升级礼（037 才有），升级礼按累计充值（含期初，013 才有）算等级：写入期间临时建最小的表，迁移前删掉
+  await sql`CREATE TABLE coupon_rules (id bigint, kind text, level smallint, plan_id bigint, template_id bigint, quantity integer, active boolean)`;
+  await sql`CREATE TABLE opening_balances (member_id bigint, legacy_recharged bigint, status text)`;
   // 升级前已有的消费项目（只有一个价格）
   const [item] = await sql<{ id: number }[]>`INSERT INTO service_items (name, category, price) VALUES ('升级前项目', '护理', 6800) RETURNING id`;
   itemId = item!.id;
@@ -85,10 +88,12 @@ beforeAll(async () => {
   await sql`DELETE FROM settings WHERE key = 'require_open_shift'`;
   await sql`DROP TABLE shifts`;
   await sql`ALTER TABLE recharges DROP COLUMN shift_id`;
+  await sql`DROP TABLE coupon_rules`;
+  await sql`DROP TABLE opening_balances`;
 
   // 升级：增量执行 002 之后的全部迁移
   const applied = await migrate(sql);
-  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql', '005_frontdesk_g2.sql', '006_op_fences.sql', '007_manager_roles.sql', '008_locker_pool.sql', '009_price_tiers.sql', '010_wallet_limits.sql', '011_member_fields.sql', '012_bonus_expiry.sql', '013_opening_balances.sql', '014_checkout.sql', '015_shifts.sql', '016_shift_boundary.sql', '017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql', '020_technicians.sql', '021_clockroom.sql', '022_dining.sql', '023_dining_tables.sql', '024_rooms.sql', '025_cashier.sql', '026_expenses.sql', '027_requisitions.sql', '028_legacy_ledger.sql', '029_warehouses.sql', '030_supplier_settlement.sql', '031_stock_cycles.sql', '032_spaces.sql', '033_floorplans.sql', '034_floormap.sql', '035_locations.sql', '036_floorplan_finish.sql']);
+  expect(applied).toEqual(['002_inventory.sql', '003_purchasing.sql', '004_frontdesk.sql', '005_frontdesk_g2.sql', '006_op_fences.sql', '007_manager_roles.sql', '008_locker_pool.sql', '009_price_tiers.sql', '010_wallet_limits.sql', '011_member_fields.sql', '012_bonus_expiry.sql', '013_opening_balances.sql', '014_checkout.sql', '015_shifts.sql', '016_shift_boundary.sql', '017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql', '020_technicians.sql', '021_clockroom.sql', '022_dining.sql', '023_dining_tables.sql', '024_rooms.sql', '025_cashier.sql', '026_expenses.sql', '027_requisitions.sql', '028_legacy_ledger.sql', '029_warehouses.sql', '030_supplier_settlement.sql', '031_stock_cycles.sql', '032_spaces.sql', '033_floorplans.sql', '034_floormap.sql', '035_locations.sql', '036_floorplan_finish.sql', '037_refunds_coupons.sql']);
   app = await buildApp(sql, config);
 }, 60_000);
 
