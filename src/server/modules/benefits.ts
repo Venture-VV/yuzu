@@ -98,9 +98,18 @@ async function publishedForGrants(db: Db): Promise<BenefitDef[]> {
     ORDER BY b.sort_order, b.id`;
 }
 
-/** 权益清单的版本合计：有人修改、发布、暂缓、导入都会变（每天的自动任务据此判断要不要再跑一次） */
+/**
+ * 权益清单的版本指纹（每天的自动任务据此判断要不要再跑一次）：每项权益的编号与版本，加上权益用到的券模板的编号与版本——
+ * 有人修改、发布、暂缓、导入权益，或停用、启用、改了用到的券模板（例如跑的时候模板停着、发不出，之后又启用），同一天都会再跑
+ * （Codex 自动审查 1648cd0）。取摘要的前 52 位（JS 数字能精确表示）；用指纹不用版本合计，两处改动不会互相抵消
+ */
 async function catalogStamp(db: Db): Promise<number> {
-  const [r] = await db<{ stamp: number }[]>`SELECT coalesce(sum(version), 0)::bigint AS stamp FROM benefits`;
+  const [r] = await db<{ stamp: number }[]>`
+    SELECT ('x' || substr(md5(
+             coalesce((SELECT string_agg(id || ':' || version, ',' ORDER BY id) FROM benefits), '') || '|' ||
+             coalesce((SELECT string_agg(t.id || ':' || t.version, ',' ORDER BY t.id) FROM coupon_templates t
+                       WHERE t.id IN (SELECT template_id FROM benefits WHERE template_id IS NOT NULL)), '')
+           ), 1, 13))::bit(52)::bigint AS stamp`;
   return Number(r!.stamp);
 }
 

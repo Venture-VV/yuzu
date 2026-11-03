@@ -494,4 +494,35 @@ describe('当天改了生日、节日当周才够格、补跑多步到期', () =
     ).rejects.toMatchObject({ code: 'BENEFIT_NOT_ELIGIBLE', message: expect.stringContaining('L1') });
     expect(await ctx.sql`SELECT id FROM benefit_uses WHERE member_id = ${m}`).toHaveLength(0);
   });
+
+  it('自动发放跑的时候券模板停着、发不出；同一天又启用了，再跑一次补上（用到的券模板也算清单版本）', async () => {
+    const tpl = await template('停用验证券');
+    await publish('QY-039', { templateId: tpl.id, startGrade: 0, startTier: null, period: 'month', quantity: 1 });
+    const m = await newMember('模板停用验证');
+    const setActive = async (active: boolean) => {
+      const [cur] = await ctx.sql<{ version: number }[]>`SELECT version FROM coupon_templates WHERE id = ${tpl.id}`;
+      const r = await api(ctx.app, ctx.owner, 'PUT', `/api/coupons/templates/${tpl.id}`, {
+        name: tpl.name,
+        kind: 'cash',
+        faceValue: 5000,
+        validity: 'days',
+        validDays: 30,
+        active,
+        expectedVersion: cur!.version,
+      });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+    };
+    // 以后某个营业日（这一天还没跑过）
+    const day = shiftDate(today, 800);
+    const monthGrants = async () => (await grantsOf(m)).filter((g) => g.code === 'QY-039' && g.periodKey === day.slice(0, 7));
+    await setActive(false);
+    expect(await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(day))).toMatchObject({ error: null });
+    expect(await monthGrants()).toEqual([]);
+    expect(await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(day))).toBeNull();
+    await setActive(true);
+    expect(await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(day))).not.toBeNull();
+    expect(await monthGrants()).toEqual([expect.objectContaining({ reason: 'monthly', quantity: 1, target: 1 })]);
+    expect(await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(day))).toBeNull();
+    await allChecksOk();
+  });
 });
