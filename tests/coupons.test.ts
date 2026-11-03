@@ -236,6 +236,25 @@ describe('发券', () => {
     expect((await couponsOf(no.body.id)).coupons.filter((c) => c.issueKind === 'birthday')).toHaveLength(0);
   });
 
+  it('生日礼：发不出的候选会员不占名额，编号靠后的寿星照样发到（Codex 审查 8e4472a）', async () => {
+    // 再加一条 3 级的生日规则（这两位寿星都是 1 级）：上一条用例的「寿星」已拿到 1 级的礼，却一直缺这一条，永远算候选
+    const added = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/rules', { clientKey: randomUUID(), kind: 'birthday', level: 3, templateId: tpl.cash!.id, quantity: 1 });
+    expect(added.status, JSON.stringify(added.body)).toBe(200);
+    const month = today.slice(5, 7);
+    const later = await api(ctx.app, ctx.clerk, 'POST', '/api/members', { name: '后来的寿星', phone: '19900008008', birthday: `1991-${month}-20` });
+    expect(later.status).toBe(201);
+    const deps = { sql: ctx.sql, config: ctx.config };
+    // 每页 1 位：第一页是发不出的「寿星」，原来只看这一页，后来的寿星永远轮不到
+    expect(await issueBirthdayCoupons(deps, new Date(), { pageSize: 1 })).toBe(1);
+    expect((await couponsOf(later.body.id)).coupons.filter((c) => c.issueKind === 'birthday')).toHaveLength(1);
+    // 再查一遍：谁都不再发，已发的不重复
+    expect(await issueBirthdayCoupons(deps, new Date(), { pageSize: 1 })).toBe(0);
+    expect(await issueBirthdayCoupons(deps)).toBe(0);
+    expect((await couponsOf(later.body.id)).coupons.filter((c) => c.issueKind === 'birthday')).toHaveLength(1);
+    const off = await api(ctx.app, ctx.owner, 'POST', `/api/coupons/rules/${added.body.ruleId}/deactivate`);
+    expect(off.status, JSON.stringify(off.body)).toBe(200);
+  });
+
   it('无记名券：生成一批、导出券码、按批作废没用的；限定等级的模板不能做无记名券', async () => {
     const r = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/batches', { clientKey: randomUUID(), templateId: tpl.anon!.id, quantity: 3, note: '开业派发' });
     expect(r.status, JSON.stringify(r.body)).toBe(201);

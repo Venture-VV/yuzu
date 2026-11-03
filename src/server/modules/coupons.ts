@@ -450,12 +450,20 @@ export async function issueRechargeCoupons(
   return issued;
 }
 
+/** 生日礼一次查多少位候选会员（按会员编号翻页，查完为止） */
+const BIRTHDAY_PAGE = 500;
+
 /**
  * 生日礼：会员生日当月发（营业日的月份），每年每条规则一次，按此刻的等级选规则；当月才建档、才补填生日的下一次检查时补发。
- * 由应用的定时任务每 10 分钟调用；返回这次发了几位会员
+ * 由应用的定时任务每 10 分钟调用；返回这次发了几位会员。
+ *
+ * 候选会员按编号翻页查完（Codex 审查 8e4472a）：有几级的生日规则时，已经拿到自己这一级的会员还缺别的等级的规则，
+ * 会一直算候选（模板限定了等级、固定有效期已过的也一样发不出）；原来只取编号最小的 500 位，这些人一直占着名额，
+ * 编号靠后的寿星永远轮不到。现在每页都只给「自己这一级还有没发的规则」的会员开事务，其余跳过、接着查下一页。
  */
-export async function issueBirthdayCoupons(deps: Pick<Deps, 'sql' | 'config'>, now = new Date()): Promise<number> {
+export async function issueBirthdayCoupons(deps: Pick<Deps, 'sql' | 'config'>, now = new Date(), opts: { pageSize?: number } = {}): Promise<number> {
   const { sql } = deps;
+  const pageSize = opts.pageSize ?? BIRTHDAY_PAGE;
   const rules = await sql<{ id: number; level: number }[]>`
     SELECT r.id, r.level FROM coupon_rules r JOIN coupon_templates t ON t.id = r.template_id
     WHERE r.active AND r.kind = 'birthday' AND t.active`;
@@ -463,26 +471,39 @@ export async function issueBirthdayCoupons(deps: Pick<Deps, 'sql' | 'config'>, n
   const date = await issueDate(sql, deps, now);
   const year = date.slice(0, 4);
   const month = date.slice(5, 7);
-  const candidates = await sql<{ id: number }[]>`
-    SELECT m.id FROM members m
-    WHERE m.status = 'active' AND m.birthday IS NOT NULL AND to_char(m.birthday, 'MM') = ${month}
-      AND EXISTS (SELECT 1 FROM coupon_rules r WHERE r.active AND r.kind = 'birthday'
-                  AND NOT EXISTS (SELECT 1 FROM coupon_issues i WHERE i.dedupe_key = 'birthday:r' || r.id || ':m' || m.id || ':y' || ${year}))
-    ORDER BY m.id LIMIT 500`;
-  if (!candidates.length) return 0;
-  const levels = await memberLevels(sql, candidates.map((c) => c.id), await loadFrontdeskRules(sql));
+  const frontdesk = await loadFrontdeskRules(sql);
   let members = 0;
-  for (const c of candidates) {
-    const level = levels.get(c.id)?.level ?? 0;
-    if (!rules.some((r) => r.level === level)) continue;
-    const issued = await sql.begin(async (tx) => {
-      const out = await issueByRules(tx, { kind: 'birthday', memberId: c.id, memberLevel: level, ruleLevel: level, year, staffId: null, at: now, date });
-      if (out.length) {
-        await writeAudit(tx, { staffId: null, action: 'coupon_issued', targetType: 'member', targetId: c.id, detail: { kind: 'birthday', year, level, issued: out }, businessDate: date });
-      }
-      return out.length;
-    });
-    if (issued) members += 1;
+  for (let after = 0; ; ) {
+    // 每位候选会员带上今年还没发的生日规则（只算启用的规则、启用的模板）
+    const candidates = await sql<{ id: number; missing: (number | string)[] }[]>`
+      SELECT m.id, array_agg(r.id ORDER BY r.id) AS missing
+      FROM members m
+      JOIN coupon_rules r ON r.active AND r.kind = 'birthday'
+      JOIN coupon_templates t ON t.id = r.template_id AND t.active
+      WHERE m.status = 'active' AND m.birthday IS NOT NULL AND to_char(m.birthday, 'MM') = ${month} AND m.id > ${after}
+        AND NOT EXISTS (SELECT 1 FROM coupon_issues i WHERE i.dedupe_key = 'birthday:r' || r.id || ':m' || m.id || ':y' || ${year})
+      GROUP BY m.id
+      ORDER BY m.id
+      LIMIT ${pageSize}`;
+    if (!candidates.length) break;
+    after = Number(candidates[candidates.length - 1]!.id);
+    const levels = await memberLevels(sql, candidates.map((c) => Number(c.id)), frontdesk);
+    for (const c of candidates) {
+      const memberId = Number(c.id);
+      const level = levels.get(memberId)?.level ?? 0;
+      const missing = new Set(c.missing.map(Number));
+      // 自己这一级的规则都发过了（或没有这一级的规则）：不开事务
+      if (!rules.some((r) => r.level === level && missing.has(Number(r.id)))) continue;
+      const issued = await sql.begin(async (tx) => {
+        const out = await issueByRules(tx, { kind: 'birthday', memberId, memberLevel: level, ruleLevel: level, year, staffId: null, at: now, date });
+        if (out.length) {
+          await writeAudit(tx, { staffId: null, action: 'coupon_issued', targetType: 'member', targetId: memberId, detail: { kind: 'birthday', year, level, issued: out }, businessDate: date });
+        }
+        return out.length;
+      });
+      if (issued) members += 1;
+    }
+    if (candidates.length < pageSize) break;
   }
   return members;
 }
