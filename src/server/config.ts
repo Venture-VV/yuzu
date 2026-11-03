@@ -20,6 +20,32 @@ export interface AppConfig {
   /** 实例标识（YUZU_INSTANCE） */
   instance: InstanceKind;
   initOwner: { username: string; password: string; displayName: string } | null;
+  /** 微信小程序（小程序线，docs/MINIPROGRAM.md 第 12 节）：单开的小程序端口，只挂给网关的 /api/mp/*；没设 MP_PORT 就不开 */
+  mp: MpConfig;
+}
+
+export interface MpConfig {
+  port: number | null;
+  host: string;
+  /** 网关的服务密钥（MP_GATEWAY_KEY）：小程序端口只认它 */
+  gatewayKey: string | null;
+  /** 会员码的签名密钥（MP_CODE_SECRET）：只在 yuzu，网关不存 */
+  codeSecret: string | null;
+}
+
+/** 小程序端口只有配了足够长的网关密钥才开；端口不能与员工用的 PORT 相同 */
+export function loadMpConfig(env: NodeJS.ProcessEnv, mainPort: number): MpConfig {
+  const host = env.MP_HOST?.trim() || env.HOST || '0.0.0.0';
+  const gatewayKey = env.MP_GATEWAY_KEY?.trim() || null;
+  const codeSecret = env.MP_CODE_SECRET?.trim() || null;
+  if (codeSecret && codeSecret.length < 32) throw new Error('MP_CODE_SECRET 至少 32 个字符（可以用 openssl rand -hex 32 生成）');
+  const raw = env.MP_PORT?.trim();
+  if (!raw) return { port: null, host, gatewayKey, codeSecret };
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`MP_PORT 应为 1–65535 的端口号，当前是「${raw}」`);
+  if (port === mainPort) throw new Error('MP_PORT 不能与 PORT 相同：小程序端口只挂给网关的接口');
+  if (!gatewayKey || gatewayKey.length < 32) throw new Error('开了 MP_PORT 就要配 MP_GATEWAY_KEY（至少 32 个字符，可以用 openssl rand -hex 32 生成）');
+  return { port, host, gatewayKey, codeSecret };
 }
 
 function readEnvFile() {
@@ -70,6 +96,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       ownerUser && ownerPass
         ? { username: ownerUser, password: ownerPass, displayName: process.env.INIT_OWNER_NAME?.trim() || '店主' }
         : null,
+    mp: loadMpConfig(process.env, Number(process.env.PORT ?? 8080)),
     ...overrides,
   };
 }

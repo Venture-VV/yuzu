@@ -91,7 +91,7 @@ describe('迁移 040 · 会员体系 v2 第一期', () => {
       Number((await sql<{ id: number }[]>`INSERT INTO coupon_rules (kind, level, template_id, quantity, created_by) VALUES (${kind}, ${level}, ${t4}, 1, ${owner!.id}) RETURNING id`)[0]!.id);
     const rules = [await rule('level_up', 1), await rule('level_up', 2), await rule('birthday', 1), await rule('birthday', 4), await rule('level_up', 7)];
 
-    expect(await migrate(sql)).toEqual(['040_membership_v2.sql']);
+    expect(await migrate(sql)).toEqual(['040_membership_v2.sql', '043_miniprogram.sql']);
 
     // 券：模板的限定等级、规则的等级换成档级
     const levelsOf = async (id: number) => (await sql<{ levels: number[] }[]>`SELECT levels FROM coupon_templates WHERE id = ${id}`)[0]!.levels.map(Number);
