@@ -101,8 +101,8 @@ describe('演示数据准备', () => {
 
     await ctx.sql`DELETE FROM dish_limits WHERE item_id = ${item!.id}`;
     const r = await demoPrepare(ctx.sql, ctx.config);
-    // 场景块第一次中途出错，会员体系块（在它之后）也没有执行：这次两块都写
-    expect(r.blocks.map((b) => b.written)).toEqual([false, false, false, false, false, true, true]);
+    // 场景块第一次中途出错，会员体系块、会员折扣与邀请体验（在它之后）也没有执行：这次三块都写
+    expect(r.blocks.map((b) => b.written)).toEqual([false, false, false, false, false, true, true, true]);
     expect(r.check.lines.filter((l) => !l.ok)).toEqual([]);
     expect(r.check.ok).toBe(true);
     expect(await showcaseState(ctx.sql, ctx.config.timezone)).toEqual(want);
