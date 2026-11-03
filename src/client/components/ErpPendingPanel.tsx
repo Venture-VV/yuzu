@@ -1,5 +1,5 @@
 // ERP 单据「结果待确认」的提醒（v0.7.8）：费用报销、备用金打款与退回补付、部门需求单；v0.7.12 起还有核销、供应商退款、批量导入；
-// v0.7.13 起还有对账登记；后台的空间台账导入（v0.7.14）、模拟刷卡（v0.7.17）也用它。
+// v0.7.13 起还有对账登记；后台的空间台账导入（v0.7.14）、模拟刷卡（v0.7.17）也用它；v0.7.22 起还有供应商付款与期初未付登记。
 // 进入页面时按原编号只读查回：已登记或已作废的直接移除；查不到的保留，由员工选择
 // 「按原内容重新提交」（同一编号，不会重复登记）或「确认作废」（服务端登记作废，原请求晚到也不会登记）。
 
@@ -54,6 +54,11 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
       return typeof d.id === 'number' ? { refId: d.id } : null;
     case 'coupon_issue':
       return typeof d.issueId === 'number' ? { refId: d.issueId } : null;
+    // 供应商付款、期初未付登记（v0.7.22）
+    case 'payment':
+      return d.payment && typeof d.payment === 'object' ? { refId: d.payment.id } : null;
+    case 'opening_payable':
+      return d.opening && typeof d.opening === 'object' ? { refId: d.opening.id } : null;
   }
 }
 
@@ -79,7 +84,11 @@ export function ErpPendingPanel({
   const onFoundRef = useRef(onFound);
   onFoundRef.current = onFound;
 
-  // 进入页面先查回一次：已登记、已作废的不用员工再处理
+  // 进入页面先查回一次：已登记、已作废的不用员工再处理。
+  // 按「有哪些编号」触发，不按数组本身（v0.7.22）：传了 filter 时每次渲染都是新数组，原来每次重新渲染都会把查回失败的再查一次——
+  // 断网时页面一刷新数据就再发一遍查回；网络一恢复，又会抢在员工点「按原内容重新提交」之前把这一行处理掉。
+  // 没传 filter 的页面本来就只在列表变了时查。查不回的由员工点「查回」或重新提交、作废。
+  const opKeys = ops.map((op) => op.key).join('\n');
   useEffect(() => {
     for (const op of ops) {
       if (checked.current.has(op.key)) continue;
@@ -97,7 +106,9 @@ export function ErpPendingPanel({
         })
         .catch(() => checked.current.delete(op.key));
     }
-  }, [ops, qc, toast]);
+    // ops 只在 opKeys 变了时读：同一组编号的新数组不再触发
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opKeys, qc, toast]);
 
   if (ops.length === 0) return null;
   return (

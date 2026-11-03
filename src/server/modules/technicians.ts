@@ -23,11 +23,13 @@ import { isUniqueViolation, type Db } from '../db';
 import { guard, guardAny } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
+import { ctxOf } from '../lib/context';
 import { badRequest, conflict, notFound } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
 import { businessDate } from './frontdesk/common';
 import { settledTechnicianLines, withCommission } from './commission';
 import { loadClockroomRules } from './clockroom';
+import { saveRuleSetting } from '../lib/rule-settings';
 
 export async function loadTechnicianRules(db: Db): Promise<TechnicianRules> {
   const [row] = await db<{ value: Partial<TechnicianRules> }[]>`SELECT value FROM settings WHERE key = 'technician_rules'`;
@@ -263,29 +265,19 @@ export function registerTechnicianRoutes(app: FastifyInstance, deps: Deps) {
 
   // 技师规则：只改提交的字段，其余沿用当前规则（与前台规则相同的做法）
   app.put('/api/admin/technicians/rules', { preHandler: guard('settings.manage') }, async (req) => {
-    await sql.begin(async (tx) => {
-      await tx`SELECT pg_advisory_xact_lock(hashtext('settings'))`;
-      const before = await loadTechnicianRules(tx);
-      const after = parse(RulesInput, { ...before, ...parse(RulesInput.partial(), req.body) });
-      await tx`
-        INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('technician_rules', ${tx.json(after as never)}, now(), ${req.actor.id})
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`;
-      await writeAudit(tx, { staffId: req.actor.id, action: 'settings_updated', targetType: 'settings', detail: { key: 'technician_rules', before, after }, ip: req.ip });
-    });
+    await saveRuleSetting(sql, 'technician_rules', loadTechnicianRules, (before) => parse(RulesInput, { ...before, ...parse(RulesInput.partial(), req.body) }), ctxOf(req));
     return technicianAdmin(sql);
   });
 
   // 钟房与轮钟规则：只改提交的字段（与技师规则相同的做法）
   app.put('/api/admin/technicians/clockroom-rules', { preHandler: guard('settings.manage') }, async (req) => {
-    await sql.begin(async (tx) => {
-      await tx`SELECT pg_advisory_xact_lock(hashtext('settings'))`;
-      const before = await loadClockroomRules(tx);
-      const after = parse(ClockroomRulesInput, { ...before, ...parse(ClockroomRulesInput.partial(), req.body) });
-      await tx`
-        INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('clockroom_rules', ${tx.json(after as never)}, now(), ${req.actor.id})
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`;
-      await writeAudit(tx, { staffId: req.actor.id, action: 'settings_updated', targetType: 'settings', detail: { key: 'clockroom_rules', before, after }, ip: req.ip });
-    });
+    await saveRuleSetting(
+      sql,
+      'clockroom_rules',
+      loadClockroomRules,
+      (before) => parse(ClockroomRulesInput, { ...before, ...parse(ClockroomRulesInput.partial(), req.body) }),
+      ctxOf(req),
+    );
     return technicianAdmin(sql);
   });
 

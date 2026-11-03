@@ -54,6 +54,21 @@ describe('CSV 解析', () => {
     expect(r.errors[0]!.message).toContain('手机号');
     expect(parseOpeningCsv('姓名,手机号\n张三,13800000001').errors[0]!.message).toContain('本金');
   });
+
+  it('备注里带换行（Excel 导出的多行备注）不拆成两行：后半截像一位会员也不会多导一笔；行号按记录开始的行（v0.7.22）', () => {
+    // 原来先按换行切再拆单元格，引号里的「陈九,13800000009,,500」会被当成第三位会员、多导 ¥500
+    const r = parseOpeningCsv(csvOf('张三,13800000001,,100,,,,,,"老客\n陈九,13800000009,,500,,,,,,"', '李四,13800000002,,0,,,,,,'));
+    expect(r.errors).toEqual([]);
+    expect(r.rows.map((row) => [row.line, row.name, row.principal])).toEqual([
+      [2, '张三', 10000],
+      [4, '李四', 0],
+    ]);
+    expect(r.rows[0]!.raw['备注']).toBe('老客\n陈九,13800000009,,500,,,,,,');
+    // 引号没有配对：整份报错，不导入
+    expect(parseOpeningCsv(csvOf('张三,13800000001,,100,,,,,,"老客')).errors[0]!.message).toContain('引号没有配对');
+    // 只有逗号的行当空行跳过
+    expect(parseOpeningCsv(csvOf('张三,13800000001,,100,,,,,,', ',,,,,,,,,')).rows).toHaveLength(1);
+  });
 });
 
 describe('预览与导入', () => {

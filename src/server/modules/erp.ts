@@ -20,12 +20,13 @@ import {
 } from '@shared/erp';
 import { readSnapshot, type Db } from '../db';
 import { guard, guardAny } from '../auth/guard';
-import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
+import { ctxOf } from '../lib/context';
 import { AppError } from '../lib/errors';
 import { routePath } from '../lib/paths';
 import { parse } from '../lib/validate';
 import { executiveReport, reportClock, reportPeriod } from './reports';
+import { saveRuleSetting } from '../lib/rule-settings';
 
 /** 店主保存的模块开关（不认识的键忽略） */
 export async function loadErpSwitches(db: Db): Promise<ErpModuleSwitches> {
@@ -93,15 +94,7 @@ export function registerErpRoutes(app: FastifyInstance, deps: Deps) {
 
   app.put('/api/erp/modules', { preHandler: guard('settings.manage') }, async (req) => {
     const { modules } = parse(SwitchesInput, req.body);
-    await sql.begin(async (tx) => {
-      await tx`SELECT pg_advisory_xact_lock(hashtext('settings'))`;
-      const before = await loadErpSwitches(tx);
-      const after: ErpModuleSwitches = { ...before, ...modules };
-      await tx`
-        INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('erp_modules', ${tx.json(after as never)}, now(), ${req.actor.id})
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`;
-      await writeAudit(tx, { staffId: req.actor.id, action: 'settings_updated', targetType: 'settings', detail: { key: 'erp_modules', before, after }, ip: req.ip });
-    });
+    await saveRuleSetting(sql, 'erp_modules', loadErpSwitches, (before): ErpModuleSwitches => ({ ...before, ...modules }), ctxOf(req));
     return erpModulesInfo(sql);
   });
 

@@ -57,8 +57,6 @@ export const PDF_SCALE_MAX = 10000;
 
 /** 上传的图纸最大多少字节（编码图约 13 MB） */
 export const MAX_FLOORPLAN_FILE_BYTES = 30 * 1024 * 1024;
-/** 底图与轮廓的本地坐标：10 毫米一单位，原点在该层图框左上角，y 向下 */
-export const FLOORPLAN_LOCAL_UNIT_MM = 10;
 
 export interface FloorplanBatch {
   id: number;

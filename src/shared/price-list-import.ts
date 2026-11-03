@@ -9,6 +9,7 @@
 
 import { parseYuan } from './money';
 import { PRICE_TIERS, STRENGTHS, type Strength, type TierPrice } from './catalog';
+import { readCsvTable, unclosedQuoteMessage } from './csv-read';
 
 export interface PriceListRow {
   category: string;
@@ -73,52 +74,27 @@ const TRUE_VALUES = ['是', 'y', 'yes', 'true', '1', '✓', '√'];
 const FALSE_VALUES = ['否', 'n', 'no', 'false', '0', '无', '-'];
 const NOT_OFFERED = ['', '—', '-', '–', '无'];
 
-function splitLine(line: string): string[] {
-  const cells: string[] = [];
-  let cur = '';
-  let quoted = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]!;
-    if (quoted) {
-      if (ch === '"' && line[i + 1] === '"') {
-        cur += '"';
-        i++;
-      } else if (ch === '"') quoted = false;
-      else cur += ch;
-    } else if (ch === '"') quoted = true;
-    else if (ch === ',') {
-      cells.push(cur);
-      cur = '';
-    } else cur += ch;
-  }
-  cells.push(cur);
-  return cells.map((c) => c.trim());
-}
-
 export function parsePriceListCsv(text: string): PriceListCsvResult {
-  const lines = text.replace(/^﻿/, '').split(/\r?\n/);
+  const table = readCsvTable(text);
   const errors: PriceListCsvResult['errors'] = [];
   const rows: PriceListRow[] = [];
-  const headerIndex = lines.findIndex((l) => l.trim() !== '');
-  if (headerIndex < 0) return { rows, errors: [{ line: 1, message: '文件是空的' }] };
-  const header = splitLine(lines[headerIndex]!).map((h) => h.toLowerCase().replace(/\s+/g, ''));
+  if (table.unclosedQuoteLine !== null) return { rows, errors: [{ line: table.unclosedQuoteLine, message: unclosedQuoteMessage(table.unclosedQuoteLine) }] };
+  if (!table.header) return { rows, errors: [{ line: 1, message: '文件是空的' }] };
+  const headerLine = table.header.line;
+  const header = table.header.cells.map((h) => h.toLowerCase().replace(/\s+/g, ''));
   const col: Record<string, number> = {};
   for (const [key, aliases] of Object.entries(HEADER_ALIASES)) {
     const i = header.findIndex((h) => aliases.includes(h));
     if (i >= 0) col[key] = i;
   }
-  if (col.name === undefined) errors.push({ line: headerIndex + 1, message: '表头缺少「name」（项目）列' });
+  if (col.name === undefined) errors.push({ line: headerLine, message: '表头缺少「name」（项目）列' });
   if (col.standard === undefined && col.professional === undefined && col.premium === undefined) {
-    errors.push({ line: headerIndex + 1, message: '表头缺少价格列（standard / professional / premium，或 标准 / 专业 / 优选）' });
+    errors.push({ line: headerLine, message: '表头缺少价格列（standard / professional / premium，或 标准 / 专业 / 优选）' });
   }
   if (errors.length) return { rows, errors };
 
   const seen = new Map<string, number>();
-  for (let i = headerIndex + 1; i < lines.length; i++) {
-    const raw = lines[i]!;
-    if (raw.trim() === '') continue;
-    const line = i + 1;
-    const cells = splitLine(raw);
+  for (const { line, cells } of table.rows) {
     const has = (key: string) => col[key] !== undefined;
     const cell = (key: string) => (has(key) ? (cells[col[key]!] ?? '') : '');
     const problems: string[] = [];
@@ -182,7 +158,7 @@ export function parsePriceListCsv(text: string): PriceListCsvResult {
     seen.set(name, line);
     rows.push(row);
   }
-  if (rows.length === 0 && errors.length === 0) errors.push({ line: headerIndex + 1, message: '文件里没有项目' });
+  if (rows.length === 0 && errors.length === 0) errors.push({ line: headerLine, message: '文件里没有项目' });
   if (rows.length > PRICE_LIST_MAX_ROWS) errors.push({ line: 1, message: `一次最多导入 ${PRICE_LIST_MAX_ROWS} 个项目` });
   return { rows, errors };
 }

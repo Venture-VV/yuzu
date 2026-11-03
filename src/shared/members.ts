@@ -32,8 +32,6 @@ export function channelLabel(channels: readonly MemberChannel[], key: string | n
   return channels.find((c) => c.key === key)?.label ?? `已删除的渠道（${key}）`;
 }
 
-/** 各级会员的默认名称（待确认）：第 1 级起；没起名的级别显示「第 N 级」 */
-export const DEFAULT_LEVEL_NAMES = ['普通会员', '银卡会员', '金卡会员', '铂金会员', '钻石会员'];
 export const MAX_LEVEL_NAME_LENGTH = 8;
 
 export function levelName(level: number, names: readonly string[]): string {

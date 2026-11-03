@@ -54,17 +54,9 @@ export const AFTER_DESIGNATED_LABELS: Record<ClockroomRules['afterDesignated'], 
 
 export const TECH_STATES = ['on', 'rest', 'off'] as const;
 export type TechState = (typeof TECH_STATES)[number];
-export const TECH_STATE_LABELS: Record<TechState, string> = { on: '在岗', rest: '休息', off: '未上牌' };
 
 export const SESSION_STATUSES = ['waiting', 'serving', 'done', 'cancelled', 'rejected'] as const;
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
-export const SESSION_STATUS_LABELS: Record<SessionStatus, string> = {
-  waiting: '待上钟',
-  serving: '上钟中',
-  done: '已下钟',
-  cancelled: '已取消',
-  rejected: '被退钟',
-};
 
 export const EVENT_KINDS = ['sign_in', 'rest', 'back', 'sign_out', 'to_end', 'dispatch', 'skip', 'start', 'extend', 'finish', 'cancel', 'reject', 'queue', 'room'] as const;
 export type ClockEventKind = (typeof EVENT_KINDS)[number];

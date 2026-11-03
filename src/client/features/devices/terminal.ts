@@ -14,6 +14,7 @@ import {
   DEFAULT_BRIDGE_PORT,
   parseBridgeMessage,
   type BridgeDeviceKind,
+  type BridgeReport,
   type BridgeReportResult,
   type DeviceErrorCode,
   type DeviceStatus,
@@ -194,12 +195,14 @@ async function report() {
   reporting = true;
   const events = unsent.filter((e) => e.terminal === terminal).slice(0, 50);
   try {
-    const result = await api.post<BridgeReportResult>('/api/devices/bridge-report', {
+    // 报文按协议里的 BridgeReport 写（@shared/devices），字段对不上时类型检查就会报错
+    const body: BridgeReport = {
       terminal,
       bridge: { connected: state.connected, ...(state.bridgeVersion ? { version: state.bridgeVersion } : {}) },
       devices: state.devices.map((d) => ({ key: d.key, status: d.status, code: d.code ?? null })),
       events: events.map(({ id, key, type, value, at }) => ({ id, key, type, value, at })),
-    });
+    };
+    const result = await api.post<BridgeReportResult>('/api/devices/bridge-report', body);
     const sent = new Set(events.map((e) => e.id));
     unsent = unsent.filter((e) => !sent.has(e.id));
     set({ lastReport: { at: new Date().toISOString(), ok: true, result } });

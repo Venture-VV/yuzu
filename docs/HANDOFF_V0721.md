@@ -75,12 +75,12 @@
 ## 5. 给测试 AI 的指令（可复制）
 
 ```
-请在独立演示库上验收 yuzu v0.7.21（完整 SHA 见 PR #37 最新提交）：
+请在独立演示库上验收 yuzu v0.7.21（main 上的 v0.7.21 标签；PR #37 的合并提交 0befbeb1348e8b1683c9b1ae9703bd3e37b7a34d，以标签指向的完整 SHA 为准）：
 1. npm ci && npm run typecheck && npm run build && npm test（TEST_DATABASE_URL 指向独立测试库）。
 2. 新建演示库：demo-prepare、check（53 项）、demo-check；从 v0.7.20 升级只应用 038、check 全 ✓。
 3. node dist/server/cli.js device-selftest（24 项）。
 4. 按 docs/HANDOFF_V0721.md 第 3 节 H1–H14、T1–T3、U1 逐条核对（模拟打印机、模拟桥按 docs/HARDWARE.md 第 10 节开）。
 5. 浏览器：E2E_BASE_URL=… npm run e2e（含 e2e/devices.spec.ts）。
 6. 真机项（网口打印机、USB 经华科 G4、RC300、小闪2、商米 NFC）记「受阻未测」，真机到货后补验。
-结论评论在 PR #37，写明 SHA、环境、实际范围、未测项与 P1 / P2。
+结论评论在开发会话当前开着的 PR 上（PR #37 已合并；之后的是 v0.7.22 的草稿 PR），写明 SHA、环境、实际范围、未测项与 P1 / P2。
 ```

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router';
 import { ArrowRightLeft, HandCoins, RotateCcw, X } from 'lucide-react';
 import { formatAmount, parseYuan } from '@shared/money';
@@ -20,7 +20,7 @@ import { Money } from '../../components/Money';
 import { Dialog, Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, Field, IconButton, Input, MoneyInput, Notice, Select, Spinner } from '../../components/ui';
+import { Badge, Button, Field, IconButton, Input, MoneyInput, Notice, Select, Spinner, InfoItem as Info } from '../../components/ui';
 import { useCredits, useInvalidateAll, useOffset, useOffsets, useOpenItems, useRefund, useRefunds } from '../purchasing/queries';
 
 // 可抵扣（预付款、退货余额）的核销与供应商退款（v0.7.12，#25、#20）
@@ -561,11 +561,3 @@ function RefundBody({ r, onClose, onVoid }: { r: SupplierRefundDoc; onClose: () 
   );
 }
 
-function Info({ label, children, wide }: { label: string; children: ReactNode; wide?: boolean }) {
-  return (
-    <div className={cn('min-w-0', wide && 'col-span-2')}>
-      <dt className="text-[11.5px] font-semibold text-ink-3">{label}</dt>
-      <dd className="truncate font-semibold text-ink">{children}</dd>
-    </div>
-  );
-}

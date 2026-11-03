@@ -36,7 +36,8 @@ import { conflict, forbidden, notFound } from '../lib/errors';
 import { cents, idParam, parse } from '../lib/validate';
 import { resolveReadableDate } from './ledger';
 import { loadSettings } from './settings';
-import { nextDocNo } from './inventory/common';
+import { nextDocNo } from '../lib/tx';
+import { ctxOf } from '../lib/context';
 
 /** 收款开始处理时经办人未交班的班次（不加锁，没有开班时为 null）；入账事务里交给 lockPaymentShift 核对 */
 export async function openShiftOf(db: Db, staffId: number): Promise<number | null> {
@@ -382,7 +383,6 @@ export async function closeShift(deps: Deps, id: number, raw: unknown, ctx: OpCo
 
 export function registerShiftRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
-  const ctxOf = (req: import('fastify').FastifyRequest): OpContext => ({ actor: req.actor, ip: req.ip });
 
   // today：此刻的营业日（与 /api/auth/me 同一算法）。页面每 30 秒轮询这个接口，过了营业日切换时间不用刷新页面也能提醒跨营业日的班次
   app.get('/api/shifts/current', { preHandler: guard('ledger.readToday') }, async (req) => {

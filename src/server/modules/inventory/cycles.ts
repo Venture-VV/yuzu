@@ -6,7 +6,6 @@
 //   按批次：改成按批次那天以后生效的每张收货单，没登记对账的。登记以后数字又变了的另列「登记后有变动」。
 // 对账登记只追加，撤销写原因、留经办人。锁顺序：供应商（与付款、核销同一个方向）→ 收货单（id 升序，按批次时）/ 对账登记。
 
-import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type {
@@ -31,6 +30,7 @@ import { erpOpAbandoned } from '../erp-ops';
 import { loadInventorySettings, setTxTimeouts, todayIn } from './common';
 import { lockSupplier, statementTotals } from './payables';
 import { listWarehouses } from './reports';
+import { hashRequest } from '../../lib/idempotency';
 
 // ───────────────────────── 日期 ─────────────────────────
 
@@ -289,7 +289,6 @@ const VoidInput = z.object({
   clientKey: z.uuid('操作编号格式不正确'),
   reason: z.string().trim().min(2, '请填写撤销原因（至少 2 个字）').max(200),
 });
-const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 
 async function findByKey(db: Db, key: string, requestHash: string, opType: 'supplier_recon' | 'supplier_recon_void' = 'supplier_recon'): Promise<number | null> {
   const [row] = await db<{ opType: string; requestHash: string; refId: number }[]>`

@@ -1,5 +1,5 @@
 // ERP 单据「结果待确认」的查回与确认作废（v0.7.8，修正 v0.7.7）：费用报销、备用金打款与退回补付、部门需求单；
-// v0.7.12 起还有核销、供应商退款、批量导入；v0.7.13 起还有对账登记；后台的空间台账导入（v0.7.14）、模拟刷卡（v0.7.17）也借用这一套。
+// v0.7.12 起还有核销、供应商退款、批量导入；v0.7.13 起还有对账登记；v0.7.22 起还有供应商付款与期初未付登记；后台的空间台账导入（v0.7.14）、模拟刷卡（v0.7.17）也借用这一套。
 //
 // 页面提交前把操作编号和原请求存在本机（读回核对，存不了就不发请求）；断网或超时后：
 //   · 查回：按编号只读查询。查不到不能断定没有登记（原请求可能还在路上或在等锁）；
@@ -18,6 +18,7 @@ import type { Deps } from '../lib/context';
 import { conflict, forbidden } from '../lib/errors';
 import { couponOpRef, deviceOpRef, fenceKey, isCouponOp, isDeviceOp, isFenced } from '../lib/fences';
 import { parse } from '../lib/validate';
+import { setTxTimeouts } from '../lib/tx';
 
 export const erpOpAbandoned = () => conflict('OP_ABANDONED', '这笔已确认作废，没有登记；如仍需办理，请重新填写后提交');
 
@@ -45,6 +46,9 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   // 硬件连接（v0.7.21）
   device_create: ['device.manage'],
   device_job: ['device.test'],
+  // 供应商付款、期初未付登记（v0.7.22）
+  payment: ['payable.manage'],
+  opening_payable: ['payable.manage'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -65,6 +69,8 @@ const READ: Record<ErpOpType, Permission[]> = {
   coupon_issue: ['coupon.issue'],
   device_create: ['device.manage'],
   device_job: ['device.test'],
+  payment: ['payable.read'],
+  opening_payable: ['payable.read'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {
@@ -116,7 +122,7 @@ export function registerErpOpsRoutes(app: FastifyInstance, deps: Deps) {
     const input = parse(AbandonInput, req.body ?? {});
     if (!allowed(req.actor, WRITE[input.type])) throw forbidden();
     const outcome = await sql.begin(async (tx) => {
-      await tx.unsafe("SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '10s'");
+      await setTxTimeouts(tx);
       const result = await fenceKey(tx, key, input.type, req.actor.id);
       if ('inserted' in result && result.inserted) {
         await writeAudit(tx, {

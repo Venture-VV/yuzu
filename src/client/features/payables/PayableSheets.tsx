@@ -1,16 +1,17 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router';
 import { Ban, CircleCheck, CornerUpLeft, RotateCcw, Send, X } from 'lucide-react';
 import { PAY_METHOD_LABELS, type OpeningPayableDoc, type PaymentDoc } from '@shared/purchasing';
-import { parseYuan } from '@shared/money';
+import { formatAmount, parseYuan } from '@shared/money';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Dialog, Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, Field, IconButton, Input, MoneyInput, Notice, Select, Spinner } from '../../components/ui';
+import { Badge, Button, Field, IconButton, Input, MoneyInput, Notice, Select, Spinner, InfoItem as Info } from '../../components/ui';
 import { SimRule } from '../inventory/parts';
 import { useInvSettings, useSuppliers } from '../inventory/queries';
 import { PayableStatusChip } from '../purchasing/parts';
@@ -316,40 +317,55 @@ export function OpeningDialog({ open, onClose, supplierId }: { open: boolean; on
   const settings = useInvSettings();
   const [form, setForm] = useState({ supplierId: '', amount: '', date: session.calendarToday, note: '' });
   const [approveNow, setApproveNow] = useState(false);
-  const [key, setKey] = useState(uuid);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 结果待确认的登记记在本机（AGENTS.md，v0.7.22；原来只提示「再点一次保存」，关掉对话框或刷新就丢）：
+  // 在货款页上方查回、按原内容重新提交或作废之前，不能再登记新的一笔
+  const pending = useErpPending(['opening_payable']);
   const [last, setLast] = useState(false);
   if (open !== last) {
     setLast(open);
     if (open) {
       setForm({ supplierId: supplierId ? String(supplierId) : '', amount: '', date: session.calendarToday, note: '' });
-      setKey(uuid());
       setError(null);
     }
   }
   const cents = parseYuan(form.amount);
   const needsApproval = !!settings.data?.approvalRules.opening;
   const save = async () => {
+    if (pending.length > 0) return setError('上一笔期初未付结果待确认：请先在货款页上方查回、按原内容重新提交或作废');
     if (!form.supplierId) return setError('请选择供应商');
     if (!cents) return setError('请填写正确的金额');
+    // 每次提交用新的操作编号：先记在本机并读回核对（记不下就不发请求），结果不明的那一笔由货款页上方按原编号处理
+    const body = {
+      clientKey: uuid(),
+      supplierId: Number(form.supplierId),
+      amountCents: cents,
+      asOfDate: form.date,
+      note: form.note.trim(),
+      approveNow: needsApproval && approveNow,
+    };
+    const supplier = suppliers.data?.find((s) => s.id === body.supplierId);
     setBusy(true);
     setError(null);
     try {
-      await api.post('/api/payables/openings', {
-        clientKey: key,
-        supplierId: Number(form.supplierId),
-        amountCents: cents,
-        asOfDate: form.date,
-        note: form.note.trim(),
-        approveNow: needsApproval && approveNow,
+      const r = await sendErpOp<{ opening: OpeningPayableDoc }>({
+        key: body.clientKey,
+        type: 'opening_payable',
+        url: '/api/payables/openings',
+        body,
+        summary: `${supplier?.name ?? '供应商'} 期初未付 ¥${formatAmount(cents)}（截至 ${form.date}）`,
+        staffName: session.staff.displayName,
       });
       await invalidate();
-      toast({ tone: 'success', title: needsApproval && !approveNow ? '已提交，等待负责人确认' : '期初未付已确认' });
+      // 按服务端的结果说（不超过免确认门槛的登记即确认）
+      toast({ tone: 'success', title: r.opening.status === 'confirmed' ? '期初未付已确认' : '已提交，等待负责人确认', body: `${r.opening.docNo} · ¥${formatAmount(r.opening.amountCents)}` });
       onClose();
     } catch (e) {
-      // 同一操作编号重提不会重复登记
-      setError(e instanceof UncertainError ? '结果待确认：请再点一次「保存」核对（不会重复登记）' : e instanceof ApiError ? e.message : errorMessage(e));
+      if (e instanceof UncertainError) {
+        toast({ tone: 'info', title: '期初未付结果待确认', body: '已记在本机：请在货款页上方查回、按原内容重新提交或作废，不要重新填写。' });
+        onClose();
+      } else setError(e instanceof ApiError ? e.message : errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -357,7 +373,7 @@ export function OpeningDialog({ open, onClose, supplierId }: { open: boolean; on
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={busy ? () => {} : onClose}
       title="登记期初未付"
       description="只登记已与供应商对账确认的上期欠款；不计入本期采购。"
       footer={
@@ -368,16 +384,21 @@ export function OpeningDialog({ open, onClose, supplierId }: { open: boolean; on
               同时确认
             </label>
           )}
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose} disabled={busy}>
             取消
           </Button>
-          <Button variant="primary" loading={busy} onClick={save}>
+          <Button variant="primary" loading={busy} disabled={pending.length > 0} onClick={save} data-testid="opening-submit">
             保存
           </Button>
         </>
       }
     >
       <div className="grid gap-4 sm:grid-cols-2">
+        {pending.length > 0 && (
+          <Notice tone="warning" title="上一笔期初未付结果待确认" className="sm:col-span-2">
+            请先在货款页上方查回、按原内容重新提交或作废，再登记新的一笔。
+          </Notice>
+        )}
         <Field label="供应商" htmlFor="op-sup" className="sm:col-span-2">
           <Select id="op-sup" value={form.supplierId} onChange={(e) => setForm({ ...form, supplierId: e.target.value })}>
             <option value="">选择供应商</option>
@@ -408,11 +429,3 @@ export function OpeningDialog({ open, onClose, supplierId }: { open: boolean; on
   );
 }
 
-function Info({ label, children, wide }: { label: string; children: ReactNode; wide?: boolean }) {
-  return (
-    <div className={cn('min-w-0', wide && 'col-span-2')}>
-      <dt className="text-[11.5px] font-semibold text-ink-3">{label}</dt>
-      <dd className="truncate font-semibold text-ink">{children}</dd>
-    </div>
-  );
-}

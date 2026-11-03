@@ -35,6 +35,7 @@ import { idParam, parse, positiveCents } from '../lib/validate';
 import { assertCanFix, assertOpen, businessDate, loadFrontdeskRules, lockVisits, nextDocNo, setTxTimeouts } from './frontdesk/common';
 import { loadTechnicianRules, loadTechnicians } from './technicians';
 import { locateSession, locateSessionEnd, locateSignIn, locateSignOut } from './locations';
+import { ctxOf } from '../lib/context';
 
 export async function loadClockroomRules(db: Db): Promise<ClockroomRules> {
   const [row] = await db<{ value: Partial<ClockroomRules> }[]>`SELECT value FROM settings WHERE key = 'clockroom_rules'`;
@@ -765,7 +766,6 @@ export const ExtendInput = z.object({
 
 export function registerClockroomRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
-  const ctxOf = (req: import('fastify').FastifyRequest): OpContext => ({ actor: req.actor, ip: req.ip });
   // 派钟、加钟要挂账：与前台挂账同一个入口（价格、技师、幂等的核对都在那里）
   const post = async () => (await import('./frontdesk/bills')).postCharges;
 

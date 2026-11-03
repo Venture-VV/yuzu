@@ -57,6 +57,7 @@ import { loadUsageRules } from './usages';
 import { DEFAULT_USAGE_RULES } from '@shared/usages';
 import { loadGuideRules } from './guide';
 import { DEFAULT_GUIDE_RULES } from '@shared/guide';
+import { lockSettings } from '../lib/rule-settings';
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const onOff = (v: boolean, on: string, off: string) => (v ? on : off);
@@ -514,7 +515,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: Deps) {
       if (locked) throw badRequest(`「${PERMISSION_LABELS[locked]}」只属于店主，不能授给${ROLE_LABELS[role as Role]}`);
     }
     await sql.begin(async (tx) => {
-      await tx`SELECT pg_advisory_xact_lock(hashtext('settings'))`;
+      await lockSettings(tx);
       const before = await loadRoleOverrides(tx);
       const target = Object.fromEntries(
         EDITABLE_ROLES.map((r) => [r, roles[r] ?? ALL_PERMISSIONS.filter((p) => roleHas(r, p, before))]),

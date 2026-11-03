@@ -47,7 +47,6 @@ export const LOCATION_EVENT_KIND_LABELS: Record<LocationEventKind, string> = { a
 
 /** 上报接口的数据来源：刷卡点（第一级）/ 定位上报（第二级预留：UWB、蓝牙信标的网关直接报空间或区域，可带坐标） */
 export const REPORT_SOURCES = ['reader', 'position'] as const;
-export type ReportSource = (typeof REPORT_SOURCES)[number];
 
 export interface LocationRules {
   /** 开关：关着时不推导、刷卡上报拒绝；离开、离店照样清掉已有的位置 */

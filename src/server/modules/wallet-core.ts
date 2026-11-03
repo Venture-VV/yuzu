@@ -4,6 +4,7 @@
 import type { WalletBalance } from '@shared/deduction';
 import type { Tx } from '../db';
 import { AppError, notFound } from '../lib/errors';
+import { nextDocNo as nextNo } from '../lib/tx';
 
 export type WalletDocType = 'recharge' | 'consume' | 'reversal' | 'expire' | 'opening';
 /** 流水类型：单据类型之外还有「期初作废」（沿用期初明细的单号） */
@@ -27,12 +28,8 @@ export async function lockMember(tx: Tx, id: number): Promise<LockedMember> {
   return m;
 }
 
-export async function nextDocNo(tx: Tx, type: WalletDocType, businessDate: string): Promise<string> {
-  const [row] = await tx<{ lastNo: number }[]>`
-    INSERT INTO doc_counters (doc_type, business_date, last_no) VALUES (${type}, ${businessDate}, 1)
-    ON CONFLICT (doc_type, business_date) DO UPDATE SET last_no = doc_counters.last_no + 1
-    RETURNING last_no`;
-  return `${DOC_PREFIX[type]}${businessDate.replaceAll('-', '')}-${String(row!.lastNo).padStart(4, '0')}`;
+export function nextDocNo(tx: Tx, type: WalletDocType, businessDate: string): Promise<string> {
+  return nextNo(tx, type, DOC_PREFIX[type], businessDate);
 }
 
 /** 写一笔余额变动：更新会员余额并追加一条流水，返回变动后的余额 */

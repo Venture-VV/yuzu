@@ -6,7 +6,6 @@
 // 只有「已生效」才写库存流水和应付流水；草稿、待确认、已退回都不影响库存或货款。
 // 新建单据带操作编号（幂等键），重复提交只得到同一张单；提交、确认、退回、冲销按状态幂等。
 
-import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
@@ -51,6 +50,7 @@ import {
   warehouseInfo,
   weighedCapMilli,
 } from './common';
+import { hashRequest } from '../../lib/idempotency';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -1234,7 +1234,6 @@ async function afterApproval(tx: Tx, doc: DocRow & { docNo: string; amountCents:
 
 // ───────────────────────── 对外操作 ─────────────────────────
 
-const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 
 export async function createDoc(deps: Deps, raw: CreateDocInput, actor: Actor, ip?: string): Promise<{ doc: InvDoc; replayed: boolean }> {
   const meta = parse(CreateInput, raw);

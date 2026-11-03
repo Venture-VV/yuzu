@@ -9,7 +9,6 @@
 //      原请求写编号前与作废串行检查，同一类型已作废则整笔回滚；
 //   5. 赠金按批次记账（bonus.ts）：记账前先作废这位会员到期的赠金，消费先用最早到期的批次，撤销回到原批次。
 
-import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { bonusExpiryAt, businessDateOf } from '@shared/business-date';
@@ -36,6 +35,9 @@ import { loadPricedItems, priceLine } from './pricing';
 import { loadSettings } from './settings';
 import { lockPaymentShift, openShiftOf } from './shifts';
 import { applyBalance, lockMember, nextDocNo, type LockedMember } from './wallet-core';
+import { hashRequest } from '../lib/idempotency';
+import { ctxOf } from '../lib/context';
+import { setTxTimeouts } from '../lib/tx';
 
 type OpType = 'recharge' | 'consume' | 'reversal';
 const OP_TYPES = ['recharge', 'consume', 'reversal'] as const satisfies readonly OpType[];
@@ -113,12 +115,10 @@ export const AbandonInput = z.object({
   amount: z.number().int().min(0).optional(),
   summary: z.string().trim().max(200, '摘要最多 200 字').default(''),
 });
-export type AbandonInputData = z.input<typeof AbandonInput>;
 type AbandonInputParsed = z.output<typeof AbandonInput>;
 
 // ───────────────────────── 基础工具 ─────────────────────────
 
-const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 
 interface KeyRow {
   /** 会员记账之外，还可能是作废登记（abandoned）或其他模块的编号 */
@@ -153,7 +153,7 @@ async function runIdempotent(
   try {
     return await sql.begin(async (tx) => {
       // 限制等待时间：页面 15 秒超时之前，这笔操作要么已提交、要么已回滚，查询结果才可信
-      await tx.unsafe("SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '10s'");
+      await setTxTimeouts(tx);
       const member = await lockMember(tx, opts.memberId);
       const existing = await findKey(tx, opts.key);
       if (existing) {
@@ -779,7 +779,7 @@ export async function lookupOperation(sql: Sql, key: string, expected?: OpType):
  */
 export async function abandonOperation(deps: Deps, key: string, input: AbandonInputParsed, ctx: OpContext): Promise<OperationLookup> {
   const outcome = await deps.sql.begin(async (tx) => {
-    await tx.unsafe("SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '10s'");
+    await setTxTimeouts(tx);
     const result = await fenceKey(tx, key, input.type, ctx.actor.id);
     if ('inserted' in result && result.inserted) {
       const settings = await loadSettings(tx);
@@ -812,7 +812,6 @@ const OP_PERMISSION: Record<OpType, Permission> = { recharge: 'recharge.create',
 
 export function registerWalletRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
-  const ctxOf = (req: import('fastify').FastifyRequest): OpContext => ({ actor: req.actor, ip: req.ip });
 
   app.post('/api/recharges', { preHandler: guard('recharge.create') }, async (req) =>
     recharge(deps, req.body as RechargeInputData, ctxOf(req)),
