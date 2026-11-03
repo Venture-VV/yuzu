@@ -355,7 +355,7 @@ function FormSkeleton() {
 type Phase =
   | { kind: 'edit' }
   | { kind: 'submitting' }
-  | { kind: 'uncertain'; reason: 'timeout' | 'network'; body: unknown; checking?: boolean; notFound?: boolean }
+  | { kind: 'uncertain'; reason: UncertainError['reason']; body: unknown; checking?: boolean; notFound?: boolean }
   | { kind: 'done'; doc: InvDoc; replayed: boolean };
 
 function DocForm({
@@ -1067,7 +1067,7 @@ function DocForm({
           {phase.kind === 'uncertain' && (
             <Notice
               tone="warning"
-              title={phase.reason === 'timeout' ? '服务器长时间没有响应，结果待确认' : '网络中断，结果待确认'}
+              title={phase.reason === 'timeout' ? '服务器长时间没有响应，结果待确认' : phase.reason === 'server' ? '服务器出了点问题，结果待确认' : '网络中断，结果待确认'}
               icon={<CloudOff className="size-5" />}
               action={
                 <>

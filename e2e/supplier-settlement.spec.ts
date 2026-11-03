@@ -240,6 +240,51 @@ test.describe('供应商结算：退货待供应商确认、退货余额核销�
     for (const c of checks) expect(c.ok, `${c.key} ${c.detail}`).toBe(true);
   });
 
+  test('登记付款已经提交、回复却是服务器出错（500）：按结果待确认处理、不能另起一笔，查回就是已登记的那一笔（v0.7.23，Codex 在 main v0.7.22 上报的 P1）', async ({ page }) => {
+    await login(page, 'linlan', '会员工作台');
+    const { sup, receive } = await ownerSetup(page);
+    const doc = await receive(4_300);
+    await logout(page);
+
+    await login(page, 'qianfen', '库存');
+    const paymentsOf = async (docNo: string) =>
+      (await getJson<{ status: string; allocations: { docNo: string }[] }[]>(page, `/api/payables/payments?supplierId=${sup.id}`)).filter(
+        (p) => p.status !== 'voided' && p.allocations.some((a) => a.docNo === docNo),
+      ).length;
+    const isPost = (url: URL) => url.pathname === '/api/payables/payments';
+    const isLookup = (url: URL) => url.pathname.startsWith('/api/erp/ops/');
+    await page.goto(`/payables/pay?supplier=${sup.id}`);
+    await page.getByLabel(`核销 ${doc.docNo}`).check();
+    await page.fill('#pay-ev', '流水尾号 7023');
+    // 请求真的发到服务端、登记成功（201），回到页面的却是 500（例如登记后读结果时出错）；查回暂时也连不上
+    await page.route(isPost, async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      const res = await route.fetch();
+      expect(res.status()).toBe(201);
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 'INTERNAL', message: '服务器出了点问题，操作可能未完成，请通过单号或流水核对结果' } }),
+      });
+    });
+    await page.route(isLookup, (route) => route.abort('internetdisconnected'));
+    const submit = page.getByRole('button', { name: '登记付款', exact: true });
+    await submit.click();
+    await expect(page.getByTestId('erp-pending')).toContainText('供应商付款结果待确认');
+    await expect(page.getByText('付款没有登记')).toHaveCount(0);
+    expect(await paymentsOf(doc.docNo)).toBe(1);
+    // 原来这时记录被删、按钮可用，再点一次就用新编号又登记一笔
+    await expect(page.getByText('上一笔付款结果待确认，请先在上方查回、按原内容重新提交或作废')).toBeVisible();
+    await expect(submit).toBeDisabled();
+    // 查回：就是已经登记的那一笔，只登记了一次
+    await page.unroute(isLookup);
+    await page.unroute(isPost);
+    await page.getByTestId('erp-pending-check').click();
+    await expect(page).toHaveURL(/view=payments/);
+    await expect(page.getByTestId('erp-pending')).toHaveCount(0);
+    expect(await paymentsOf(doc.docNo)).toBe(1);
+  });
+
   test('批量导入供应商：预览 → 写入；同一个文件不能再写', async ({ page }) => {
     await login(page, 'linlan', '会员工作台');
     await page.goto('/payables/import');

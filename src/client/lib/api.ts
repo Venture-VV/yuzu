@@ -12,10 +12,19 @@ export class ApiError extends Error {
   }
 }
 
-/** 请求超时或断网：服务端是否已处理未知，需要按操作编号查回结果。 */
+/**
+ * 结果不确定：请求超时、断网，或写请求遇到服务器出错（5xx）——服务端可能已经提交了事务、只是读结果或回复时出错，
+ * 是否已处理未知，需要按操作编号查回结果，不能当作被拒绝（v0.7.23：Codex 在 main v0.7.22 上报的 P1）。
+ */
 export class UncertainError extends Error {
-  constructor(readonly reason: 'timeout' | 'network') {
-    super(reason === 'timeout' ? '服务器长时间没有响应' : '网络连接中断');
+  constructor(readonly reason: 'timeout' | 'network' | 'server') {
+    super(
+      reason === 'timeout'
+        ? '服务器长时间没有响应'
+        : reason === 'network'
+          ? '网络连接中断'
+          : '服务器出了点问题，这次提交可能已经生效，请刷新核对后再决定是否重做',
+    );
   }
 }
 
@@ -67,6 +76,9 @@ export async function request<T>(
     /* 非 JSON 响应 */
   }
   if (res.status === 502 || res.status === 503 || res.status === 504) throw new UncertainError('network');
+  // 写请求遇到服务器出错（500 等）：事务可能已经提交（例如登记后读结果失败），不能当作被拒绝。
+  // 带操作编号的页面按「结果待确认」处理：保留原编号与原请求，查回、按原内容重新提交或确认作废
+  if (method !== 'GET' && res.status >= 500) throw new UncertainError('server');
   const error = new ApiError(
     res.status,
     payload?.error.code ?? 'HTTP_ERROR',
