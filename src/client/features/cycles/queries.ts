@@ -28,14 +28,6 @@ export const useDeptStocktake = (deptId: number | null) =>
 export const useReconReminders = (enabled = true) =>
   useQuery({ queryKey: cyclesKeys.recon, queryFn: () => api.get<ReconReminders>('/api/payables/cycles'), enabled });
 
-/** 对账登记记录（可按供应商） */
-export const useReconciliations = (supplierId: number | null, enabled = true) =>
-  useQuery({
-    queryKey: cyclesKeys.recons(supplierId ?? 0),
-    queryFn: () => api.get<SupplierReconciliation[]>(`/api/payables/reconciliations${supplierId ? `?supplierId=${supplierId}` : ''}`),
-    enabled,
-  });
-
 const RECON_PAGE = 50;
 /** 对账登记记录按页往前翻（新的在前；v0.7.14：超过一页的也能找到并撤销） */
 export const useReconciliationPages = (enabled = true) =>

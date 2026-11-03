@@ -47,8 +47,10 @@ import { spacesGeoJson } from '../floorplan/geojson';
 import type { Pt } from '../floorplan/model';
 import { detectFormat, type DrawingFormat } from '../floorplan/read';
 import { startConversion, type RunningConversion, type WorkerOutput } from '../floorplan/run';
-import { setTxTimeouts, todayIn } from './inventory/common';
+import { todayIn } from '../lib/dates';
+import { setTxTimeouts } from '../lib/tx';
 import { outlineRev, registerOutlineRoutes } from './floorplan-outlines';
+import { attachment } from '../lib/csv';
 
 /** 转换超过这么久停掉（需求：30 分钟内出新底图与差异报告） */
 export const FLOORPLAN_TIMEOUT_MS = 15 * 60_000;
@@ -706,10 +708,7 @@ export function registerFloorplanRoutes(app: FastifyInstance, deps: Deps, jobs =
     const [o] = await sql<{ content: Buffer }[]>`SELECT content FROM floorplan_originals WHERE batch_id = ${id}`;
     if (!o) throw notFound('这一批没有保存原图纸（上传时没勾「保存原图纸」）');
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'floorplan_original', targetId: id, ip: req.ip });
-    reply
-      .header('content-type', batch.fileFormat === 'pdf' ? 'application/pdf' : 'application/octet-stream')
-      .header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(batch.fileName)}`)
-      .header('cache-control', 'no-store');
+    attachment(reply, batch.fileName, batch.fileFormat === 'pdf' ? 'application/pdf' : 'application/octet-stream').header('cache-control', 'no-store');
     return o.content;
   });
   // 例外编码补画轮廓（v0.7.19）
@@ -724,9 +723,7 @@ export function registerFloorplanRoutes(app: FastifyInstance, deps: Deps, jobs =
       rooms.map((r) => ({ floor: r.floorCode, code: r.code, label: r.label, status: r.status, with: r.mergedWith, closeMm: r.closeMm, polygon: r.polygon, labelAt: r.labelAt, areaM2: r.areaM2 })),
       { batchId: id, file: batch.fileName, converter: batch.converter },
     );
-    reply
-      .header('content-type', 'application/geo+json; charset=utf-8')
-      .header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`spaces-${id}.geojson`)}`);
+    attachment(reply, `spaces-${id}.geojson`, 'application/geo+json; charset=utf-8');
     return JSON.stringify(body);
   });
 

@@ -5,7 +5,6 @@
 //   · 先按 id 升序锁定涉及的物料行（SELECT … FOR UPDATE），同一物料的收发严格串行；
 //   · 结存字段有 CHECK (>= 0) 兜底，任何情况下都不会出现负库存。
 
-import { businessDateOf } from '@shared/business-date';
 import { CENTRAL_WAREHOUSE_ID, type ApprovalRules, type InventorySettings, type MoveType } from '@shared/inventory';
 import { shiftDate } from '@shared/labels';
 import { formatQty } from '@shared/quantity';
@@ -15,6 +14,11 @@ import type { Db, Tx } from '../../db';
 import type { Actor } from '../../lib/context';
 import { AppError, unprocessable } from '../../lib/errors';
 import { dateSchema } from '../../lib/validate';
+import { dateIn, todayIn } from '../../lib/dates';
+import { nextDocNo, setTxTimeouts } from '../../lib/tx';
+
+// 通用的日期与事务小工具已移到 lib（v0.7.22）；库存模块内部照旧从这里取
+export { dateIn, nextDocNo, setTxTimeouts, todayIn };
 
 export const DEFAULT_APPROVAL_RULES: ApprovalRules = {
   purchase_order: true,
@@ -184,10 +188,6 @@ export async function warehouseInfo(db: Db, warehouseId: number) {
   return row ?? null;
 }
 
-/** 门店时区的自然日（库存与采购按自然日统计，不沿用会员营业日切换规则） */
-export const todayIn = (timeZone: string) => businessDateOf(new Date(), timeZone, 0);
-/** 某个时刻在门店时区是哪一天 */
-export const dateIn = (at: string | Date, timeZone: string) => businessDateOf(new Date(at), timeZone, 0);
 
 export const docDateSchema = dateSchema();
 
@@ -195,14 +195,6 @@ export function assertNotFuture(date: string, timeZone: string) {
   if (date > todayIn(timeZone)) throw unprocessable('FUTURE_DATE', '单据日期不能晚于今天');
 }
 
-/** 单号：前缀 + 单据日期 + 当日流水号，例如 RK20261020-0001 */
-export async function nextDocNo(tx: Tx, kind: string, prefix: string, date: string): Promise<string> {
-  const [row] = await tx<{ lastNo: number }[]>`
-    INSERT INTO doc_counters (doc_type, business_date, last_no) VALUES (${kind}, ${date}, 1)
-    ON CONFLICT (doc_type, business_date) DO UPDATE SET last_no = doc_counters.last_no + 1
-    RETURNING last_no`;
-  return `${prefix}${date.replaceAll('-', '')}-${String(row!.lastNo).padStart(4, '0')}`;
-}
 
 export interface LockedMaterial {
   id: number;
@@ -359,9 +351,6 @@ export async function poSettlement(db: Db, poId: number): Promise<'credit' | 'ca
   return row?.settlement ?? 'credit';
 }
 
-export async function setTxTimeouts(tx: Tx) {
-  await tx.unsafe("SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '10s'");
-}
 
 /**
  * 同口径的最近一次成交价：同一物料（即同规格）、同采购单位与换算、同价格口径的已生效收货。

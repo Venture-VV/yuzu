@@ -30,16 +30,18 @@ import { isUniqueViolation, readSnapshot, type Db } from '../db';
 import { guard, guardAny } from '../auth/guard';
 import { assertNotFenced, lockOpKey } from '../lib/fences';
 import { writeAudit } from '../lib/audit';
-import { toCsv } from '../lib/csv';
+import { toCsv, CSV_TYPE, attachment } from '../lib/csv';
 import type { Actor, Deps } from '../lib/context';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
 import { erpOpAbandoned } from './erp-ops';
 import { loadExpenseRules } from './expenses';
-import { docDateSchema, logApproval, nextDocNo, setTxTimeouts, todayIn } from './inventory/common';
+import { docDateSchema, logApproval } from './inventory/common';
+import { todayIn } from '../lib/dates';
+import { nextDocNo, setTxTimeouts } from '../lib/tx';
+import { hashRequest } from '../lib/idempotency';
 
 const id = z.number().int().positive();
-const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 const ReasonInput = z.object({ reason: z.string().trim().min(2, '请填写原因（至少 2 个字）').max(200) });
 
 // ───────────────────────── 谁在看 ─────────────────────────
@@ -562,7 +564,7 @@ export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
     if (f.from > f.to) throw badRequest('开始日期不能晚于结束日期');
     const csv = await readSnapshot(sql, (tx) => requestsCsv(tx, deps.config.timezone, f));
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'purchase_requests', detail: f, ip: req.ip });
-    reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`采购需求单_${f.from}_${f.to}.csv`)}`);
+    attachment(reply, `采购需求单_${f.from}_${f.to}.csv`, CSV_TYPE);
     return csv;
   });
   app.get('/api/erp/requests/meta', { preHandler: anyRequest }, async (req) => readSnapshot(sql, (tx) => requestMeta(tx, req.actor)));

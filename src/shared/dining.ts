@@ -74,12 +74,6 @@ export interface KitchenItem {
   visitClosed: boolean;
 }
 
-/** 估清：某道菜今天还剩几份；null 为不限量，0 为估清 */
-export interface DishLimit {
-  itemId: number;
-  remaining: number | null;
-}
-
 export interface KitchenBoard {
   serverTime: string;
   businessDate: string;

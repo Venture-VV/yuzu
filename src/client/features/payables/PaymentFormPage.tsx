@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
-import { ArrowLeft, CircleAlert, CircleCheck, CloudOff, RotateCw, Wallet } from 'lucide-react';
+import { ArrowLeft, CircleAlert, CircleCheck, Wallet } from 'lucide-react';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { PAY_METHOD_LABELS, PAYMENT_METHODS, type PaymentDoc, type PayMethod } from '@shared/purchasing';
-import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { cn, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
+import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Button, Field, Input, MoneyInput, Notice, Select, Skeleton } from '../../components/ui';
@@ -36,10 +38,11 @@ export function PaymentFormPage() {
   // 预付款（#25，v0.7.12）：核销之外多付的部分
   const [prepay, setPrepay] = useState(false);
   const [prepayText, setPrepayText] = useState('');
-  const [clientKey, setClientKey] = useState(uuid);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [uncertain, setUncertain] = useState<unknown>(null);
+  // 结果待确认的付款记在本机（AGENTS.md，v0.7.22；原来只放在页面内存里，刷新就丢）：
+  // 在页面上方查回、按原内容重新提交或作废之前，不能再登记新的一笔
+  const pending = useErpPending(['payment']);
 
   const open = useMemo(() => (items.data ?? []).filter((i) => i.openCents > 0 || alloc[`${i.kind}:${i.id}`]), [items.data, alloc]);
   const rows = open.map((i) => {
@@ -54,37 +57,38 @@ export function PaymentFormPage() {
   const total = chosen.reduce((s, r) => s + (r.cents ?? 0), 0) + (prepayCents ?? 0);
   // #18：金额不超过免确认门槛的登记即确认
   const needsApproval = !!settings.data?.approvalRules.payment && total > (settings.data?.approvalThresholdCents ?? 0);
-  const blocking = !supplierId
-    ? '请选择供应商'
-    : prepay && !prepayCents
-      ? '请填写预付金额'
-      : chosen.length === 0 && !prepay
-        ? '请勾选这笔付款对应的货款；先付款、货还没到的勾选「含预付款」'
-        : rows.some((r) => r.err)
-          ? '有核销金额需要修改'
-          : evidence.trim().length < 2
-            ? '请填写凭据说明'
-            : prepay && note.trim().length < 2
-              ? '预付款请在备注里写明用途'
-              : null;
+  const blocking =
+    pending.length > 0
+      ? '上一笔付款结果待确认，请先在上方查回、按原内容重新提交或作废'
+      : !supplierId
+        ? '请选择供应商'
+        : prepay && !prepayCents
+          ? '请填写预付金额'
+          : chosen.length === 0 && !prepay
+            ? '请勾选这笔付款对应的货款；先付款、货还没到的勾选「含预付款」'
+            : rows.some((r) => r.err)
+              ? '有核销金额需要修改'
+              : evidence.trim().length < 2
+                ? '请填写凭据说明'
+                : prepay && note.trim().length < 2
+                  ? '预付款请在备注里写明用途'
+                  : null;
 
   if (!can('payable.manage')) return <Navigate to="/payables" replace />;
 
-  const send = async (body: unknown) => {
+  const send = async (body: { clientKey: string } & Record<string, unknown>, summary: string) => {
     setBusy(true);
     setError(null);
     try {
-      const r = await api.post<{ payment: PaymentDoc }>('/api/payables/payments', body, { timeoutMs: 20_000 });
-      setUncertain(null);
+      // 先把编号和原请求存在本机并读回核对（存不了就不发请求）；超时、断网后记录留在本机，页面上方可以查回、重提或作废
+      const r = await sendErpOp<{ payment: PaymentDoc }>({ key: body.clientKey, type: 'payment', url: '/api/payables/payments', body, summary, staffName: session.staff.displayName });
       await invalidate();
       toast({ tone: 'success', title: r.payment.status === 'confirmed' ? '付款已确认' : '已提交，等待负责人确认', body: `${r.payment.docNo} · ¥${formatAmount(r.payment.amountCents)}` });
       navigate(`/payables?view=payments&payment=${r.payment.id}`);
     } catch (e) {
-      if (e instanceof UncertainError) {
-        setUncertain(body);
-      } else {
+      // 结果待确认：记录留在本机，页面上方可以查回、按原内容重新提交或作废（这里不另起一笔）
+      if (!(e instanceof UncertainError)) {
         setError(e instanceof ApiError ? e.message : errorMessage(e));
-        if (e instanceof ApiError && e.code === 'IDEMPOTENCY_CONFLICT') setClientKey(uuid());
         void items.refetch();
       }
     } finally {
@@ -94,21 +98,26 @@ export function PaymentFormPage() {
 
   const submit = () => {
     if (blocking) return;
-    void send({
-      clientKey,
-      supplierId,
-      payDate,
-      amountCents: total,
-      method,
-      evidence: evidence.trim(),
-      note: note.trim(),
-      approveNow: needsApproval && approveNow,
-      prepay: prepay && !!prepayCents,
-      allocations: chosen.map((r) => ({ kind: r.i.kind, targetId: r.i.id, amountCents: r.cents })),
-    });
+    const supplier = suppliers.data?.find((s) => s.id === supplierId);
+    const docs = chosen.map((r) => r.i.docNo).join('、');
+    const summary = `${supplier?.name ?? '供应商'} 付款 ¥${formatAmount(total)}${docs ? ` → ${docs}` : ''}${prepay && prepayCents ? `（含预付 ¥${formatAmount(prepayCents)}）` : ''}`;
+    // 每次提交用新的操作编号：结果不明的那一笔留在本机，由页面上方按原编号处理
+    void send(
+      {
+        clientKey: uuid(),
+        supplierId,
+        payDate,
+        amountCents: total,
+        method,
+        evidence: evidence.trim(),
+        note: note.trim(),
+        approveNow: needsApproval && approveNow,
+        prepay: prepay && !!prepayCents,
+        allocations: chosen.map((r) => ({ kind: r.i.kind, targetId: r.i.id, amountCents: r.cents })),
+      },
+      summary,
+    );
   };
-
-  const locked = busy || !!uncertain;
 
   return (
     <>
@@ -129,12 +138,13 @@ export function PaymentFormPage() {
       />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1080px] space-y-4 px-5 py-5 md:px-7">
+          <ErpPendingPanel types={['payment']} className="space-y-2" onFound={(_, ref) => navigate(`/payables?view=payments&payment=${ref.refId}`)} />
           <section className="grid gap-4 rounded-lg border border-line bg-card p-5 shadow-card sm:grid-cols-2 lg:grid-cols-4">
             <Field label="供应商" htmlFor="pay-sup">
               <Select
                 id="pay-sup"
                 value={supplierId ?? ''}
-                disabled={locked}
+                disabled={busy}
                 onChange={(e) => {
                   setSupplierId(Number(e.target.value) || null);
                   setAlloc({});
@@ -149,10 +159,10 @@ export function PaymentFormPage() {
               </Select>
             </Field>
             <Field label="付款日期" htmlFor="pay-date">
-              <Input id="pay-date" type="date" value={payDate} max={session.calendarToday} disabled={locked} onChange={(e) => setPayDate(e.target.value)} className="h-10" />
+              <Input id="pay-date" type="date" value={payDate} max={session.calendarToday} disabled={busy} onChange={(e) => setPayDate(e.target.value)} className="h-10" />
             </Field>
             <Field label="付款方式" htmlFor="pay-method">
-              <Select id="pay-method" value={method} disabled={locked} onChange={(e) => setMethod(e.target.value as PayMethod)}>
+              <Select id="pay-method" value={method} disabled={busy} onChange={(e) => setMethod(e.target.value as PayMethod)}>
                 {PAYMENT_METHODS.map((m) => (
                   <option key={m} value={m}>
                     {PAY_METHOD_LABELS[m]}
@@ -161,17 +171,17 @@ export function PaymentFormPage() {
               </Select>
             </Field>
             <Field label="凭据说明" htmlFor="pay-ev" hint="如转账流水号后四位、收据编号">
-              <Input id="pay-ev" value={evidence} maxLength={200} disabled={locked} onChange={(e) => setEvidence(e.target.value)} className="h-10" />
+              <Input id="pay-ev" value={evidence} maxLength={200} disabled={busy} onChange={(e) => setEvidence(e.target.value)} className="h-10" />
             </Field>
             <Field label="备注" htmlFor="pay-note" className="sm:col-span-2 lg:col-span-3">
-              <Input id="pay-note" value={note} maxLength={200} disabled={locked} onChange={(e) => setNote(e.target.value)} placeholder={prepay ? '预付款的用途（必填）' : '可选'} className="h-10" />
+              <Input id="pay-note" value={note} maxLength={200} disabled={busy} onChange={(e) => setNote(e.target.value)} placeholder={prepay ? '预付款的用途（必填）' : '可选'} className="h-10" />
             </Field>
             <div className="flex flex-col gap-1.5">
               <label className="flex cursor-pointer items-center gap-2 text-[13px] font-semibold text-ink-2">
-                <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={prepay} disabled={locked} onChange={(e) => setPrepay(e.target.checked)} data-testid="pay-prepay" />
+                <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={prepay} disabled={busy} onChange={(e) => setPrepay(e.target.checked)} data-testid="pay-prepay" />
                 含预付款（其余记为预付款）
               </label>
-              {prepay && <MoneyInput value={prepayText} disabled={locked} onChange={(e) => setPrepayText(e.target.value)} aria-label="预付金额" className="h-10" />}
+              {prepay && <MoneyInput value={prepayText} disabled={busy} onChange={(e) => setPrepayText(e.target.value)} aria-label="预付金额" className="h-10" />}
             </div>
           </section>
 
@@ -197,7 +207,7 @@ export function PaymentFormPage() {
                         aria-label={`核销 ${i.docNo}`}
                         className="size-4 accent-[var(--color-pine)]"
                         checked={checked}
-                        disabled={locked}
+                        disabled={busy}
                         onChange={(e) => setAlloc((a) => ({ ...a, [key]: e.target.checked ? centsToInput(i.openCents) : '' }))}
                       />
                       <span className="min-w-0">
@@ -223,7 +233,7 @@ export function PaymentFormPage() {
                         {i.pendingCents > 0 && <span className="block text-[11px] text-yuzu-deep">另有待确认 ¥{formatAmount(i.pendingCents)}</span>}
                       </span>
                       <span>
-                        <MoneyInput value={text} disabled={locked} onChange={(e) => setAlloc((a) => ({ ...a, [key]: e.target.value }))} aria-label={`${i.docNo} 本次核销`} invalid={!!err} className="h-10 text-right" />
+                        <MoneyInput value={text} disabled={busy} onChange={(e) => setAlloc((a) => ({ ...a, [key]: e.target.value }))} aria-label={`${i.docNo} 本次核销`} invalid={!!err} className="h-10 text-right" />
                         {err && <span className="mt-1 block text-right text-[11.5px] font-semibold text-clay">{err}</span>}
                       </span>
                     </li>
@@ -234,20 +244,6 @@ export function PaymentFormPage() {
           </section>
 
           {error && <Notice tone="error" title={error} icon={<CircleAlert className="size-5" />}>付款没有登记，内容仍保留在页面上。</Notice>}
-          {uncertain != null && (
-            <Notice
-              tone="warning"
-              title="结果待确认"
-              icon={<CloudOff className="size-5" />}
-              action={
-                <Button size="sm" variant="primary" loading={busy} icon={<RotateCw className="size-4" />} onClick={() => void send(uncertain)}>
-                  按原内容重新提交（不会重复登记）
-                </Button>
-              }
-            >
-              付款可能已经登记。重新提交使用同一操作编号：已登记的会直接返回原记录。
-            </Notice>
-          )}
         </div>
       </div>
       <footer className="shrink-0 border-t border-line bg-card/95 px-5 py-3 backdrop-blur md:px-7">
@@ -270,11 +266,11 @@ export function PaymentFormPage() {
           </div>
           {needsApproval && can('inventory.approve') && (
             <label className="flex cursor-pointer items-center gap-2 text-[13px] font-semibold text-ink-2">
-              <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={approveNow} disabled={locked} onChange={(e) => setApproveNow(e.target.checked)} />
+              <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={approveNow} disabled={busy} onChange={(e) => setApproveNow(e.target.checked)} />
               同时以负责人身份确认
             </label>
           )}
-          <Button variant="primary" size="lg" disabled={locked || !!blocking} loading={busy} icon={<CircleCheck className="size-[18px]" />} onClick={submit}>
+          <Button variant="primary" size="lg" disabled={busy || !!blocking} loading={busy} icon={<CircleCheck className="size-[18px]" />} onClick={submit}>
             登记付款
           </Button>
         </div>

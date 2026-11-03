@@ -15,6 +15,7 @@ import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { badRequest } from '../lib/errors';
 import { cents, parse } from '../lib/validate';
+import { lockSettings } from '../lib/rule-settings';
 
 interface VersionRow {
   id: number;
@@ -130,7 +131,7 @@ export function registerCommissionRoutes(app: FastifyInstance, deps: Deps) {
       if (found.length !== itemIds.length) throw badRequest('有项目不存在，请刷新后重试');
     }
     await sql.begin(async (tx) => {
-      await tx`SELECT pg_advisory_xact_lock(hashtext('settings'))`;
+      await lockSettings(tx);
       const before = (await commissionSettings(tx)).current.rules;
       // 生效时间用应用的时钟：结账时刻（checkouts.created_at）也是应用的时钟记的，按它取规则。原来用数据库的 now()，
       // 数据库的时钟比应用慢时（例如跑在时钟漂移的虚拟机里），刚结的钟会被算成改规则之后结的（Codex 在 main v0.7.20 复测首轮）

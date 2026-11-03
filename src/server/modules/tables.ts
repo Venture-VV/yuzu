@@ -5,7 +5,7 @@
 // 反结账在 frontdesk/checkout.ts 的 voidCheckout 里一起处理（恢复开台与账单）。
 // 加锁顺序：经办人的班次（结账，共享锁）→ 桌台（开台、转台，id 升序）→ 开台（id 升序）→ 账单 → 明细 → 估清 → 出品单 → 会员。
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { CheckoutDetail } from '@shared/checkout';
 import {
@@ -35,6 +35,7 @@ import { couponLines, memberCouponOptions } from './coupon-checkout';
 import { assertCanFix, businessDate, hashRequest, loadFrontdeskRules, nextDocNo, runIdempotent, saveKey, setTxTimeouts } from './frontdesk/common';
 import { loadPricedItems, priceLine } from './pricing';
 import { lockPaymentShift, openShiftOf } from './shifts';
+import { ctxOf } from '../lib/context';
 
 // ───────────────────────── 后台：桌台 ─────────────────────────
 
@@ -594,7 +595,6 @@ export async function checkoutTables(deps: Deps, raw: unknown, ctx: OpContext): 
 
 export function registerTableRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
-  const ctxOf = (req: FastifyRequest): OpContext => ({ actor: req.actor, ip: req.ip });
 
   // 后台「餐饮」：桌台（能管理价目的岗位）
   app.get('/api/admin/dining/tables', { preHandler: guardAny('settings.manage', 'catalog.manage') }, async () => tablesAdmin(sql));

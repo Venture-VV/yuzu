@@ -28,17 +28,7 @@ export function formatYuan(cents: Cents): string {
   return `${cents < 0 ? '-' : ''}¥${formatAmount(cents)}`;
 }
 
-/** 分 → 带正负号的变动金额："+¥100.00" / "−¥30.00" / "¥0.00"。 */
-export function formatDelta(cents: Cents): string {
-  if (cents === 0) return '¥0.00';
-  return `${cents > 0 ? '+' : '−'}¥${formatAmount(cents)}`;
-}
-
 /** 分 → 输入框里使用的元字符串（"128" / "99.50"）。 */
 export function centsToInput(cents: Cents): string {
   return cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2);
-}
-
-export function isSafeCents(value: unknown): value is Cents {
-  return typeof value === 'number' && Number.isSafeInteger(value);
 }

@@ -10,7 +10,7 @@ import { Dialog, Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, IconButton, Notice, Select, Spinner } from '../../components/ui';
+import { Badge, Button, IconButton, Notice, Select, Spinner, InfoItem as Info } from '../../components/ui';
 import { DOC_VISUAL, DocTypeChip, PackHint, Qty, SimRule, StatusChip } from './parts';
 import { CompareChip } from '../purchasing/parts';
 import { useInvDoc, useInvalidateInventory } from './queries';
@@ -606,15 +606,6 @@ function AgreeDialog({ open, doc, busy, onClose, onConfirm }: { open: boolean; d
         </label>
       </div>
     </Dialog>
-  );
-}
-
-function Info({ label, children, wide }: { label: string; children: ReactNode; wide?: boolean }) {
-  return (
-    <div className={cn('min-w-0', wide && 'col-span-2')}>
-      <dt className="text-[11.5px] font-semibold text-ink-3">{label}</dt>
-      <dd className="truncate font-semibold text-ink">{children}</dd>
-    </div>
   );
 }
 

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { HHMM } from '@shared/business-date';
-import { DEDUCTION_RULES, type DeductionRule } from '@shared/deduction';
+import { DEDUCTION_RULES } from '@shared/deduction';
 import { MAX_MEMBER_FIELDS, MEMBER_FIELD_KEY, MEMBER_FIELD_TYPES, type MemberFieldDef } from '@shared/member-fields';
 import { DEFAULT_MEMBER_CHANNELS, MAX_MEMBER_CHANNELS, MEMBER_CHANNEL_KEY, type MemberChannel } from '@shared/members';
 import type { StoreRules } from '@shared/types';
@@ -11,6 +11,7 @@ import { badRequest } from '../lib/errors';
 import type { Deps } from '../lib/context';
 import { parse } from '../lib/validate';
 import { guard } from '../auth/guard';
+import { lockSettings } from '../lib/rule-settings';
 
 export interface StoreSettings extends StoreRules {
   storeName: string;
@@ -169,7 +170,7 @@ export function registerSettingsRoutes(app: FastifyInstance, { sql }: Deps) {
     const parsed = parse(SettingsInput, req.body);
     await sql.begin(async (tx) => {
       // 同时保存规则时串行执行，避免新字段编号冲突或互相覆盖
-      await tx`SELECT pg_advisory_xact_lock(hashtext('settings'))`;
+      await lockSettings(tx);
       const before = await loadSettings(tx);
       const input: Partial<StoreSettings> = {
         ...parsed,
@@ -195,8 +196,4 @@ export function registerSettingsRoutes(app: FastifyInstance, { sql }: Deps) {
     });
     return loadSettings(sql);
   });
-}
-
-export function isDeductionRule(value: unknown): value is DeductionRule {
-  return typeof value === 'string' && (DEDUCTION_RULES as readonly string[]).includes(value);
 }

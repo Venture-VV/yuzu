@@ -78,13 +78,6 @@ export function tierFor(t: Pick<Technician, 'grade'>, item: { prices: { tier: Pr
   return tierByGrade && item.prices.length > 1 ? t.grade : chosen;
 }
 
-export const TECHNICIAN_RULE_LABELS: Record<keyof TechnicianRules, string> = {
-  enabled: '技师功能',
-  requireTechnician: '挂技师项目必须选技师',
-  tierByGrade: '价格跟技师等级',
-  defaultCallType: '默认上钟方式',
-};
-
 /** 前台选技师用：规则与在职技师（含今日已上的钟数，帮助排轮钟） */
 export interface FrontdeskTechnicians {
   rules: TechnicianRules;

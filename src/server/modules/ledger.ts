@@ -10,7 +10,7 @@ import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { forbidden } from '../lib/errors';
-import { toCsv } from '../lib/csv';
+import { toCsv, CSV_TYPE, attachment } from '../lib/csv';
 import { parse } from '../lib/validate';
 import { loadSettings } from './settings';
 
@@ -125,9 +125,7 @@ export function registerLedgerRoutes(app: FastifyInstance, deps: Deps) {
     const date = await resolveReadableDate(deps, req, query.date);
     const rows = await listLedger(sql, { date });
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'ledger', targetId: date, ip: req.ip });
-    reply
-      .header('content-type', 'text/csv; charset=utf-8')
-      .header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`浴族流水-${date}.csv`)}`);
+    attachment(reply, `浴族流水-${date}.csv`, CSV_TYPE);
     return ledgerCsv(rows, deps.config.timezone);
   });
 }

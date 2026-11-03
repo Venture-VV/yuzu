@@ -12,7 +12,7 @@ import type { RoomBoardStatus, RoomsReport } from '@shared/rooms';
 import { readSnapshot, type Db } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
-import { toCsv } from '../lib/csv';
+import { toCsv, CSV_TYPE, attachment } from '../lib/csv';
 import type { Deps } from '../lib/context';
 import { badRequest } from '../lib/errors';
 import { dateSchema, parse } from '../lib/validate';
@@ -438,9 +438,7 @@ export function registerDashboardReportRoutes(app: FastifyInstance, deps: Deps) 
     }));
     const yuan = (c: number) => `${c < 0 ? '-' : ''}${Math.trunc(Math.abs(c) / 100)}.${String(Math.abs(c) % 100).padStart(2, '0')}`;
     await writeAudit(deps.sql, { staffId: req.actor.id, action: 'export', targetType: 'technician_commission', targetId: `${from}~${to}`, ip: req.ip });
-    reply
-      .header('content-type', 'text/csv; charset=utf-8')
-      .header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`技师提成明细_${from}_${to}.csv`)}`);
+    attachment(reply, `技师提成明细_${from}_${to}.csv`, CSV_TYPE);
     return toCsv([
       ['营业日', '结账单号', '计入', '手牌', '工号', '技师', '项目', '钟数', '上钟方式', '金额（元）', '基本提成（元）', '点钟奖励（元）', '提成合计（元）', '提成规则'],
       ...lines.map((l) => {

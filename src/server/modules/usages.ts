@@ -7,7 +7,7 @@
 // 加锁顺序：开单：来访（共享锁，挡住同时结账、撤销）→ 空间一行（与空间台账的编辑串行）→ 当前位置；
 //          结束、撤单：使用单一行 → 当前位置；结账、撤销来访：在各自已有的锁之后，锁这几位客人开着的使用单（id 升序）。
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { normalizeTagCode, TAG_CODE_PATTERN } from '@shared/frontdesk';
 import { isTechnicianBusinessType, ROOM_BUSINESS_TYPE } from '@shared/spaces';
@@ -21,6 +21,8 @@ import { idParam, parse } from '../lib/validate';
 import { docDateSchema } from './inventory/common';
 import { assertCanFix, businessDate, hashRequest, loadFrontdeskRules, nextDocNo, runIdempotent, saveKey } from './frontdesk/common';
 import { leaveUsages, locateUsage } from './locations';
+import { ctxOf } from '../lib/context';
+import { saveRuleSetting } from '../lib/rule-settings';
 
 // ───────────────────────── 规则 ─────────────────────────
 
@@ -41,14 +43,7 @@ const RulesInput = z.object({
 
 async function saveUsageRules(deps: Deps, raw: unknown, ctx: OpContext) {
   const next = parse(RulesInput, raw);
-  await deps.sql.begin(async (tx) => {
-    await tx`SELECT pg_advisory_xact_lock(hashtext('settings'))`;
-    const before = await loadUsageRules(tx);
-    await tx`
-      INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('usage_rules', ${tx.json(next as never)}, now(), ${ctx.actor.id})
-      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`;
-    await writeAudit(tx, { staffId: ctx.actor.id, action: 'settings_updated', targetType: 'settings', detail: { key: 'usage_rules', before, after: next }, ip: ctx.ip });
-  });
+  await saveRuleSetting(deps.sql, 'usage_rules', loadUsageRules, () => next, ctx);
   return loadUsageRules(deps.sql);
 }
 
@@ -289,7 +284,6 @@ const ListQuery = z.object({ date: docDateSchema, spaceId: z.coerce.number().int
 
 export function registerUsageRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
-  const ctxOf = (req: FastifyRequest): OpContext => ({ actor: req.actor, ip: req.ip });
   // 与「客房」页（房态看板、平面图）同一组岗位能看；开单、结束、撤单沿用「客房入住、退房」
   const read = guardAny('room.operate', 'room.housekeep', 'frontdesk.checkout');
   app.get('/api/usages', { preHandler: read }, async (req) => {

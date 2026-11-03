@@ -8,6 +8,7 @@
 //   · 本金和赠金都为 0 的行只建档、不记余额。
 
 import { formatYuan, parseYuan } from './money';
+import { readCsvTable, unclosedQuoteMessage } from './csv-read';
 
 export interface OpeningRow {
   /** 文件里的行号（含表头，从 1 开始） */
@@ -50,28 +51,6 @@ const HEADER_ALIASES: Record<string, string[]> = {
 
 const GENDERS: Record<string, 'female' | 'male' | null> = { '': null, 男: 'male', male: 'male', m: 'male', 女: 'female', female: 'female', f: 'female' };
 
-function splitLine(line: string): string[] {
-  const cells: string[] = [];
-  let cur = '';
-  let quoted = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]!;
-    if (quoted) {
-      if (ch === '"' && line[i + 1] === '"') {
-        cur += '"';
-        i++;
-      } else if (ch === '"') quoted = false;
-      else cur += ch;
-    } else if (ch === '"') quoted = true;
-    else if (ch === ',') {
-      cells.push(cur);
-      cur = '';
-    } else cur += ch;
-  }
-  cells.push(cur);
-  return cells.map((c) => c.trim());
-}
-
 /** 2026/1/5、2026-01-05 → 2026-01-05；不是有效日期时返回 null */
 export function normalizeDate(text: string): string | null {
   const m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(text.trim());
@@ -89,12 +68,13 @@ const money = (text: string): number | null => {
 };
 
 export function parseOpeningCsv(text: string): OpeningCsvResult {
-  const lines = text.replace(/^﻿/, '').split(/\r?\n/);
+  const table = readCsvTable(text);
   const errors: OpeningCsvResult['errors'] = [];
   const rows: OpeningRow[] = [];
-  const headerIndex = lines.findIndex((l) => l.trim() !== '');
-  if (headerIndex < 0) return { rows, errors: [{ line: 1, message: '文件是空的' }] };
-  const headerCells = splitLine(lines[headerIndex]!);
+  if (table.unclosedQuoteLine !== null) return { rows, errors: [{ line: table.unclosedQuoteLine, message: unclosedQuoteMessage(table.unclosedQuoteLine) }] };
+  if (!table.header) return { rows, errors: [{ line: 1, message: '文件是空的' }] };
+  const headerLine = table.header.line;
+  const headerCells = table.header.cells;
   const header = headerCells.map((h) => h.toLowerCase().replace(/\s+/g, ''));
   const col: Record<string, number> = {};
   for (const [key, aliases] of Object.entries(HEADER_ALIASES)) {
@@ -106,16 +86,12 @@ export function parseOpeningCsv(text: string): OpeningCsvResult {
     ['phone', '手机号'],
     ['principal', '本金'],
   ] as const) {
-    if (col[key] === undefined) errors.push({ line: headerIndex + 1, message: `表头缺少「${label}」列` });
+    if (col[key] === undefined) errors.push({ line: headerLine, message: `表头缺少「${label}」列` });
   }
   if (errors.length) return { rows, errors };
 
   const seen = new Map<string, number>();
-  for (let i = headerIndex + 1; i < lines.length; i++) {
-    const rawLine = lines[i]!;
-    if (rawLine.trim() === '') continue;
-    const line = i + 1;
-    const cells = splitLine(rawLine);
+  for (const { line, cells } of table.rows) {
     const cell = (key: string) => (col[key] !== undefined ? (cells[col[key]!] ?? '') : '');
     const problems: string[] = [];
 
@@ -177,7 +153,7 @@ export function parseOpeningCsv(text: string): OpeningCsvResult {
       raw,
     });
   }
-  if (rows.length + errors.length === 0) errors.push({ line: headerIndex + 2, message: '文件里没有会员' });
+  if (rows.length + errors.length === 0) errors.push({ line: headerLine + 1, message: '文件里没有会员' });
   if (rows.length > OPENING_MAX_ROWS) errors.push({ line: 0, message: `一次最多导入 ${OPENING_MAX_ROWS} 位会员，请分批` });
   return { rows, errors };
 }
@@ -207,21 +183,20 @@ const ZERO: OpeningTotals = { count: 0, principal: 0, bonus: 0, legacyRecharged:
  * 表头与导入文件相同，逐行累计人数与本金、赠金、累计充值；不核对姓名与手机号，金额写错的行报错。
  */
 export function sumOpeningCsv(text: string): { totals: OpeningTotals; errors: { line: number; message: string }[] } {
-  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
+  const table = readCsvTable(text);
   const errors: { line: number; message: string }[] = [];
   const totals = { ...ZERO };
-  const headerIndex = lines.findIndex((l) => l.trim() !== '');
-  if (headerIndex < 0) return { totals, errors };
-  const header = splitLine(lines[headerIndex]!).map((h) => h.toLowerCase().replace(/\s+/g, ''));
+  if (table.unclosedQuoteLine !== null) return { totals, errors: [{ line: table.unclosedQuoteLine, message: unclosedQuoteMessage(table.unclosedQuoteLine) }] };
+  if (!table.header) return { totals, errors };
+  const headerLine = table.header.line;
+  const header = table.header.cells.map((h) => h.toLowerCase().replace(/\s+/g, ''));
   const col = (key: string) => header.findIndex((h) => HEADER_ALIASES[key]!.includes(h));
   const [principalCol, bonusCol, rechargedCol] = [col('principal'), col('bonus'), col('total_recharged')];
-  if (principalCol < 0) return { totals, errors: [{ line: headerIndex + 1, message: '表头缺少「本金」列' }] };
-  for (let i = headerIndex + 1; i < lines.length; i++) {
-    if (lines[i]!.trim() === '') continue;
-    const cells = splitLine(lines[i]!);
+  if (principalCol < 0) return { totals, errors: [{ line: headerLine, message: '表头缺少「本金」列' }] };
+  for (const { line, cells } of table.rows) {
     const amounts = [principalCol, bonusCol, rechargedCol].map((c) => (c < 0 ? 0 : money(cells[c] ?? '')));
     if (amounts.some((v) => v === null)) {
-      errors.push({ line: i + 1, message: '本金、赠金或累计充值不正确（单位元，最多两位小数，不能为负）' });
+      errors.push({ line, message: '本金、赠金或累计充值不正确（单位元，最多两位小数，不能为负）' });
       continue;
     }
     totals.count += 1;

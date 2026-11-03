@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, Plus } from 'lucide-react';
 import { levelOf, MAX_VIP_LEVEL, VIP_LEVEL_BASES, VIP_LEVEL_BASIS_LABELS, type FrontdeskRules, type VipLevelBasis } from '@shared/frontdesk';
 import { LEVEL_VALIDITY, levelName, MAX_LEVEL_NAME_LENGTH, MAX_MEMBER_CHANNELS, type MemberChannel } from '@shared/members';
-import { formatYuan } from '@shared/money';
+import { formatYuan, parseYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
 import { qk, useSettings } from '../../lib/queries';
 import { cn } from '../../lib/utils';
@@ -134,8 +134,6 @@ function ChannelsCard() {
 }
 
 const yuan = (cents: number) => String(cents / 100);
-const centsOf = (s: string) => Math.round(Number(s) * 100);
-const MONEY = /^\d+(\.\d{1,2})?$/;
 
 /** 会员等级：口径、各级门槛与名称（VIP 柜也按它核对） */
 function LevelsCard() {
@@ -154,9 +152,11 @@ function LevelsCard() {
   }, [rules.data]);
   if (!rules.data) return <Skeleton className="h-56" />;
 
-  const cents = levels.map((l) => centsOf(l.threshold));
+  // 金额按整数分解析（不用浮点数，v0.7.22）；填得不对的为 null
+  const parsed = levels.map((l) => parseYuan(l.threshold));
+  const cents = parsed.map((c) => c ?? 0);
   const names = levels.map((l) => l.name.trim());
-  const problem = levels.some((l) => !MONEY.test(l.threshold))
+  const problem = parsed.some((c) => c === null)
     ? '各级门槛请填金额（元）'
     : cents.some((c, i) => i > 0 && c <= cents[i - 1]!)
       ? '各级门槛必须逐级递增'
@@ -169,7 +169,8 @@ function LevelsCard() {
     basis !== rules.data.vipLevelBasis ||
     JSON.stringify(cents) !== JSON.stringify(rules.data.vipLevelThresholds) ||
     JSON.stringify(names) !== JSON.stringify(rules.data.vipLevelThresholds.map((_, i) => (rules.data!.vipLevelNames[i] ?? '').trim()));
-  const sampleLevel = !problem && MONEY.test(sample) ? levelOf(centsOf(sample), cents) : null;
+  const sampleCents = parseYuan(sample);
+  const sampleLevel = !problem && sampleCents !== null ? levelOf(sampleCents, cents) : null;
 
   const save = async () => {
     setBusy(true);

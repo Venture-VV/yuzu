@@ -12,7 +12,7 @@ import {
 } from '@shared/purchasing';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { ErpPendingStoreError, sendErpOp, useErpPending } from '../../lib/erpPending';
-import { readImportFile } from '../../lib/import-file';
+import { bytesToBase64, readImportFile } from '../../lib/import-file';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
@@ -39,13 +39,6 @@ const TEMPLATES: Record<ErpImportKind, { columns: readonly string[]; sample: str
 };
 
 type Loaded = { fileName: string; csv?: string; xlsxBase64?: string; encoding: string };
-
-function toBase64(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf);
-  let s = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(s);
-}
 
 function downloadTemplate(kind: ErpImportKind) {
   const t = TEMPLATES[kind];
@@ -94,7 +87,7 @@ export function ImportPage() {
     setBusy('read');
     try {
       if (/\.xlsx$/i.test(f.name)) {
-        const xlsxBase64 = toBase64(await f.arrayBuffer());
+        const xlsxBase64 = bytesToBase64(await f.arrayBuffer());
         if (current()) setFile({ fileName: f.name, xlsxBase64, encoding: 'Excel' });
       } else if (/\.csv$/i.test(f.name) || f.type === 'text/csv') {
         const loaded = await readImportFile(f);

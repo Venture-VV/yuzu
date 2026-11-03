@@ -57,6 +57,9 @@ export const FENCED_OPS = [
   // 硬件连接（v0.7.21）：编号记在设备、打印任务上（client_key）
   'device_create',
   'device_job',
+  // 供应商付款、期初未付登记（v0.7.22，迁移 039）
+  'payment',
+  'opening_payable',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 

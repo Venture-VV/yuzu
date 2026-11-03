@@ -2,23 +2,26 @@
 
 import type { RouteObject } from 'react-router';
 import { Navigate } from 'react-router';
-import { AdminHome } from './AdminHome';
-import { AdminPage } from './AdminShell';
-import { AuditTab } from './AuditTab';
-import { CatalogTab } from './CatalogTab';
-import { CouponsSection } from './CouponsSection';
-import { DevicesSection } from './DevicesSection';
-import { DiningSection } from './DiningSection';
-import { MembersSection } from './MembersSection';
-import { OpeningTab } from './OpeningTab';
-import { PermissionsSection } from './PermissionsSection';
-import { RoomsSection } from './RoomsSection';
-import { RuleCatalog } from './RuleCatalog';
-import { RulesTab } from './RulesTab';
-import { SpacesSection } from './SpacesSection';
-import { StaffTab } from './StaffTab';
-import { TagsTab } from './TagsTab';
-import { TechniciansSection } from './TechniciansSection';
+import { lazyPage } from '../../lib/lazyPage';
+
+// 各分区第一次打开时再下载（v0.7.22）；门店前台用不到这些代码
+const AdminHome = lazyPage(() => import('./AdminHome').then((m) => m.AdminHome));
+const AdminPage = lazyPage(() => import('./AdminShell').then((m) => m.AdminPage));
+const AuditTab = lazyPage(() => import('./AuditTab').then((m) => m.AuditTab));
+const CatalogTab = lazyPage(() => import('./CatalogTab').then((m) => m.CatalogTab));
+const CouponsSection = lazyPage(() => import('./CouponsSection').then((m) => m.CouponsSection));
+const DevicesSection = lazyPage(() => import('./DevicesSection').then((m) => m.DevicesSection));
+const DiningSection = lazyPage(() => import('./DiningSection').then((m) => m.DiningSection));
+const MembersSection = lazyPage(() => import('./MembersSection').then((m) => m.MembersSection));
+const OpeningTab = lazyPage(() => import('./OpeningTab').then((m) => m.OpeningTab));
+const PermissionsSection = lazyPage(() => import('./PermissionsSection').then((m) => m.PermissionsSection));
+const RoomsSection = lazyPage(() => import('./RoomsSection').then((m) => m.RoomsSection));
+const RuleCatalog = lazyPage(() => import('./RuleCatalog').then((m) => m.RuleCatalog));
+const RulesTab = lazyPage(() => import('./RulesTab').then((m) => m.RulesTab));
+const SpacesSection = lazyPage(() => import('./SpacesSection').then((m) => m.SpacesSection));
+const StaffTab = lazyPage(() => import('./StaffTab').then((m) => m.StaffTab));
+const TagsTab = lazyPage(() => import('./TagsTab').then((m) => m.TagsTab));
+const TechniciansSection = lazyPage(() => import('./TechniciansSection').then((m) => m.TechniciansSection));
 
 export const adminRoutes: RouteObject[] = [
   { index: true, element: <AdminHome /> },

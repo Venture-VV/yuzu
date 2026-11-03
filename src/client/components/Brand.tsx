@@ -25,15 +25,6 @@ export function LogoMark({ className }: { className?: string }) {
   );
 }
 
-export function Wordmark({ className }: { className?: string }) {
-  return (
-    <span className={cn('inline-flex items-baseline gap-1.5', className)}>
-      <span className="font-display text-[1.35em] leading-none tracking-tight italic">yuzu</span>
-      <span className="text-[0.82em] font-bold tracking-[0.3em] text-ink-2">浴族</span>
-    </span>
-  );
-}
-
 /**
  * 登录页插画：远山层叠、松林剪影、柚黄的日，以及温泉水面上缓慢升起的蒸汽。
  * 纯 SVG，随应用一起打包，离线可用。

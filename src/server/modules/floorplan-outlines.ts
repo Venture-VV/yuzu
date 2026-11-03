@@ -14,7 +14,7 @@ import type { Actor, Deps } from '../lib/context';
 import { conflict, notFound, unprocessable } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { LOCAL_UNIT_MM } from '../floorplan/convert';
-import { setTxTimeouts } from './inventory/common';
+import { setTxTimeouts } from '../lib/tx';
 
 type P = [number, number];
 

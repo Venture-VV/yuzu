@@ -9,7 +9,7 @@
 //   · 押金是负债，不算营业额：按收款方式记收、退，退房时原路退回；现金押金计入交班应有现金。
 
 import { businessDateOf, businessDayStart } from './business-date';
-import { PAYMENT_METHODS, shiftDate, type PaymentMethod } from './labels';
+import { shiftDate, type PaymentMethod } from './labels';
 
 export interface RoomRules {
   /** 客房功能：关闭时主导航没有「客房」，前台、结账与升级前完全一样（默认关闭） */
@@ -56,8 +56,6 @@ export const STAY_STATUS_LABELS: Record<StayStatus, string> = { open: '在住', 
 export const DEPOSIT_KINDS = ['receive', 'refund'] as const;
 export type DepositKind = (typeof DEPOSIT_KINDS)[number];
 export const DEPOSIT_KIND_LABELS: Record<DepositKind, string> = { receive: '收押金', refund: '退押金' };
-/** 押金的收款方式：现金、微信、支付宝、银行卡、其他（储值、团购券不能当押金） */
-export const DEPOSIT_METHODS = PAYMENT_METHODS;
 
 export const CHARGE_KINDS = ['night', 'half_day', 'block'] as const;
 export type ChargeKind = (typeof CHARGE_KINDS)[number];

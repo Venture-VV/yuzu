@@ -15,7 +15,7 @@ import {
   type Zone,
 } from '@shared/frontdesk';
 import { parseHandTagCsv, type HandTagCsvResult, type HandTagImportReport } from '@shared/hand-tag-import';
-import { formatYuan } from '@shared/money';
+import { formatYuan, parseYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
 import { readImportFile } from '../../lib/import-file';
 import { useCan } from '../../lib/session';
@@ -375,7 +375,6 @@ function BatchCard({ onCreated }: { onCreated: () => void }) {
 // ───────────────────────── 前台规则 ─────────────────────────
 
 const yuan = (cents: number) => String(cents / 100);
-const centsOf = (text: string) => Math.round(Number(text) * 100);
 
 function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSaved: () => void }) {
   const [minutes, setMinutes] = useState('');
@@ -394,12 +393,12 @@ function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSa
 
   const n = Number(minutes);
   const g = Number(grace);
-  const feeCents = centsOf(fee);
+  const feeCents = parseYuan(fee);
   const problem = !Number.isInteger(n) || n < 0 || n > 120
     ? '更正时限应为 0–120 分钟'
     : !Number.isInteger(g) || g < 0 || g > 120
       ? '跳档宽限应为 0–120 分钟'
-    : !Number.isInteger(feeCents) || feeCents < 0 || !/^\d+(\.\d{1,2})?$/.test(fee)
+    : feeCents === null
       ? '丢牌赔偿金额不正确'
       : null;
 

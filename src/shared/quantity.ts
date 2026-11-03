@@ -27,11 +27,6 @@ export function formatQty(milli: Milli): string {
   return `${sign}${int.toLocaleString('en-US')}${frac ? `.${frac}` : ''}`;
 }
 
-/** milli → 输入框里的文本（不带千分位）。 */
-export function qtyToInput(milli: Milli): string {
-  return formatQty(milli).replace(/,/g, '');
-}
-
 /** 数量是否符合物料允许的小数位 */
 export function fitsDecimals(milli: Milli, decimals: number): boolean {
   return milli % 10 ** (3 - decimals) === 0;

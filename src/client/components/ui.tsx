@@ -397,3 +397,13 @@ export function Notice({
     </div>
   );
 }
+
+/** 单据详情里的一项「标签：值」（放在 dl 里）；wide 占两列，full 占满一行。ERP 各单据详情原来各写一份（v0.7.22） */
+export function InfoItem({ label, children, wide, full }: { label: string; children: ReactNode; wide?: boolean; full?: boolean }) {
+  return (
+    <div className={cn('min-w-0', wide && 'col-span-2', full && 'col-span-full')}>
+      <dt className="text-[11.5px] font-semibold text-ink-3">{label}</dt>
+      <dd className="truncate font-semibold text-ink">{children}</dd>
+    </div>
+  );
+}

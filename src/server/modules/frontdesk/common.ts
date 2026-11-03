@@ -5,7 +5,6 @@
 //   · 「一牌一人」「一位会员只持一张在店手牌」由部分唯一索引兜底，即使漏锁也不会出现双占；
 //   · 账单合计与明细在同一事务内更新，自检核对二者一致。
 
-import { createHash } from 'node:crypto';
 import { businessDateOf } from '@shared/business-date';
 import { DEFAULT_FRONTDESK_RULES, type FrontdeskRules, type TagKind, type TagZone, ZONE_LABELS } from '@shared/frontdesk';
 import { can, type Permission } from '@shared/permissions';
@@ -13,7 +12,7 @@ import { isUniqueViolation, type Db, type Tx } from '../../db';
 import type { Actor, Deps } from '../../lib/context';
 import { AppError, conflict, forbidden, unprocessable } from '../../lib/errors';
 import { assertNotFenced, isFenced } from '../../lib/fences';
-import { nextDocNo, setTxTimeouts } from '../inventory/common';
+import { nextDocNo, setTxTimeouts } from '../../lib/tx';
 import { loadSettings } from '../settings';
 
 export { nextDocNo, setTxTimeouts };
@@ -29,7 +28,7 @@ export async function businessDate(db: Db, deps: Deps, at: Date): Promise<string
   return businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
 }
 
-export const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+export { hashRequest } from '../../lib/idempotency';
 
 /**
  * 前台的幂等业务类型；table_open / table_post / table_checkout 是餐饮第二步的开台、桌台点单与桌台结账；

@@ -1,3 +1,4 @@
+import type { FastifyRequest } from 'fastify';
 import type { Duty, Permission, Role } from '@shared/permissions';
 import type { AppConfig } from '../config';
 import type { Sql } from '../db';
@@ -25,3 +26,6 @@ export interface OpContext {
   ip?: string;
   at?: Date;
 }
+
+/** 路由里取这次请求的经办人与来源 IP（各模块原来各写一份，v0.7.22 合到这里） */
+export const ctxOf = (req: FastifyRequest): OpContext => ({ actor: req.actor, ip: req.ip });

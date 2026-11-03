@@ -13,7 +13,7 @@ import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { unprocessable } from '../lib/errors';
-import { toCsv } from '../lib/csv';
+import { toCsv, CSV_TYPE, attachment } from '../lib/csv';
 import { dateSchema, parse } from '../lib/validate';
 import { resolveReadableDate } from './ledger';
 import { loadFrontdeskRules } from './frontdesk/common';
@@ -678,9 +678,7 @@ export function registerSettlementRoutes(app: FastifyInstance, deps: Deps) {
     const today = await todayNow();
     const summary = await readSnapshot(sql, (tx) => computeSettlement(tx, target, today));
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'settlement', targetId: target, ip: req.ip });
-    reply
-      .header('content-type', 'text/csv; charset=utf-8')
-      .header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`浴族日结-${target}.csv`)}`);
+    attachment(reply, `浴族日结-${target}.csv`, CSV_TYPE);
     return settlementCsv(summary);
   });
 }
