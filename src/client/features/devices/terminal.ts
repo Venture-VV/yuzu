@@ -2,13 +2,15 @@
 //
 // · 这台终端是哪一台、桥的地址记在本机（localStorage，存不了就只在这次打开时有效）；没选终端不上报。
 // · 桥的报文按协议 v1 解析，不对的不认（页面上提示 BRIDGE_PROTOCOL）；断开后每 2 秒重连。
-// · 读卡、扫码事件带编号，上报失败下次再报，服务端按编号去重。
+// · 读卡、扫码事件带编号，上报失败下次再报，服务端按编号去重。桥发来的事件按内容算编号（同一台电脑开着几个门店页面时，
+//   同一次读卡各页面算出同一个编号，只记一次）；事件只按收到时选的那台终端上报，换了终端不改记到新选的那台。
 // · 模拟键盘（扫码盒、读卡器的键盘模式）在设备页上收，也作为这台终端的事件上报（设备键 keyboard）。
 
 import { useEffect, useSyncExternalStore } from 'react';
 import {
   BRIDGE_REPORT_INTERVAL_MS,
   bridgeErrorEventValue,
+  bridgeEventId,
   DEFAULT_BRIDGE_PORT,
   parseBridgeMessage,
   type BridgeDeviceKind,
@@ -83,14 +85,34 @@ const subscribe = (l: () => void) => {
   return () => listeners.delete(l);
 };
 
-/** 还没报给服务端的事件 */
-let unsent: TerminalEvent[] = [];
+/** 还没报给服务端的事件，带着收到时选的是哪台终端：只按那台上报 */
+let unsent: (TerminalEvent & { terminal: string })[] = [];
 const MAX_EVENTS = 30;
 
 function addEvent(e: Omit<TerminalEvent, 'id'>) {
-  const event = { ...e, id: uuid() };
+  const terminal = state.terminal;
+  // 桥发来的按内容算编号：同一台电脑开着几个门店页面时，桥把同一次读卡发给每个页面，各页面算出同一个编号，服务端只记一次；
+  // 同一条报文这个页面又收到一次（桥重发）也是同一个编号，不再记（Codex 自动审查 8a20a54）
+  const id = e.source === 'bridge' ? bridgeEventId({ terminal: terminal ?? '', key: e.key, type: e.type, value: e.value, at: e.at }) : uuid();
+  if (e.source === 'bridge' && state.events.some((x) => x.id === id)) return;
+  const event = { ...e, id };
   set({ events: [event, ...state.events].slice(0, MAX_EVENTS) });
-  if (e.type !== 'error' || e.source === 'bridge') unsent = [...unsent, event].slice(-50);
+  // 没选终端不上报；换了终端，之前收到、还没报出去的不改记到新选的那台（见 applyTerminal）
+  if (terminal && (e.type !== 'error' || e.source === 'bridge')) unsent = [...unsent, { ...event, terminal }].slice(-50);
+}
+
+/** 换「这台终端是」：之前收到、还没报出去的事件属于原来那台，不改记到新选的这台（Codex 自动审查 8a20a54） */
+function applyTerminal(code: string | null) {
+  if (code === state.terminal) return;
+  unsent = [];
+  set({ terminal: code, lastReport: null });
+}
+
+// 选的是哪台记在本机：同一台电脑上别的页面改了，这个页面跟着改（几个页面按同一台上报，算出的事件编号才一样）
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (ev) => {
+    if (ev.key === TERMINAL_KEY) applyTerminal(ev.newValue);
+  });
 }
 
 let socket: WebSocket | null = null;
@@ -134,7 +156,8 @@ function connect() {
       });
     } else if (m.type === 'card') addEvent({ key: m.key, type: 'card', value: m.cardNo, at: m.at, source: 'bridge' });
     else if (m.type === 'scan') addEvent({ key: m.key, type: 'scan', value: m.code, at: m.at, source: 'bridge' });
-    else if (m.type === 'error') addEvent({ key: m.key ?? 'bridge', type: 'error', value: bridgeErrorEventValue(m.code, m.message), at: new Date().toISOString(), source: 'bridge' });
+    // 错误报文带了桥的时间就用它（几个页面算出同一个编号）；没带的按收到的时间
+    else if (m.type === 'error') addEvent({ key: m.key ?? 'bridge', type: 'error', value: bridgeErrorEventValue(m.code, m.message), at: m.at ?? new Date().toISOString(), source: 'bridge' });
   };
   ws.onclose = () => {
     if (socket !== ws) return;
@@ -166,12 +189,13 @@ function disconnect() {
 
 let reporting = false;
 async function report() {
-  if (!state.terminal || reporting) return;
+  const terminal = state.terminal;
+  if (!terminal || reporting) return;
   reporting = true;
-  const events = unsent.slice(0, 50);
+  const events = unsent.filter((e) => e.terminal === terminal).slice(0, 50);
   try {
     const result = await api.post<BridgeReportResult>('/api/devices/bridge-report', {
-      terminal: state.terminal,
+      terminal,
       bridge: { connected: state.connected, ...(state.bridgeVersion ? { version: state.bridgeVersion } : {}) },
       devices: state.devices.map((d) => ({ key: d.key, status: d.status, code: d.code ?? null })),
       events: events.map(({ id, key, type, value, at }) => ({ id, key, type, value, at })),
@@ -189,7 +213,7 @@ async function report() {
 export const terminalActions = {
   setTerminal(code: string | null) {
     write(TERMINAL_KEY, code);
-    set({ terminal: code, lastReport: null });
+    applyTerminal(code);
   },
   setBridgeUrl(url: string) {
     const next = url.trim() || DEFAULT_BRIDGE_URL;

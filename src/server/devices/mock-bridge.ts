@@ -172,7 +172,7 @@ export async function startMockBridge(
       }
       broadcast({ v: 1, type: 'status', key, status, ...(code ? { code } : {}) });
     },
-    failRead: (key = 'rc300') => broadcast({ v: 1, type: 'error', key, code: 'READ_FAILED', message: '模拟：读卡失败' }),
+    failRead: (key = 'rc300') => broadcast({ v: 1, type: 'error', key, code: 'READ_FAILED', message: '模拟：读卡失败', at: now() }),
     sendRaw: (text) => {
       for (const s of sockets) send(s, text);
     },

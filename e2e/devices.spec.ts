@@ -50,6 +50,24 @@ test.describe('设备', () => {
       await expect(page.getByText(`测试小票机 ${run}：已打出测试页`)).toBeVisible({ timeout: 15_000 });
       await expect.poll(() => printer.texts().some((t) => t.includes('打印测试页') && t.includes(code))).toBe(true);
 
+      // 任务建好之后查结果失败（Codex 自动审查 8a20a54）：断网的接着查、查到照常提示打出；
+      // 服务端拒绝了查询的给出任务编号，不说没发出（本机的待确认记录在任务建好时已经删了）
+      const pages = () => printer.texts().filter((t) => t.includes('打印测试页')).length;
+      await expect(page.getByText(`测试小票机 ${run}：已打出测试页`)).toHaveCount(0, { timeout: 10_000 });
+      await page.route('**/api/devices/jobs/*', (route) => route.abort(), { times: 1 });
+      await row.getByTestId(`device-${code}-test`).click();
+      await expect(page.getByText(`测试小票机 ${run}：已打出测试页`)).toBeVisible({ timeout: 15_000 });
+      await expect.poll(pages).toBe(2);
+      await page.route('**/api/devices/jobs/*', (route) =>
+        route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL', message: '模拟：查询失败' } }) }),
+      );
+      await row.getByTestId(`device-${code}-test`).click();
+      await expect(page.getByText(`测试小票机 ${run}：已提交，查不到结果`)).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText(/打印任务 #\d+（模拟：查询失败）/)).toBeVisible();
+      await expect(page.getByText('测试打印没发出')).toHaveCount(0);
+      await page.unroute('**/api/devices/jobs/*');
+      await expect.poll(pages).toBe(3);
+
       // 拔线：10 秒内变离线（心跳 2 秒、5 秒没联系上记离线、页面 2 秒刷新）
       await printer.stop();
       const unplugged = Date.now();
@@ -68,6 +86,7 @@ test.describe('设备', () => {
   test('本机终端：模拟桥读卡、扫码、模拟键盘；选了终端后替桥上报，读卡器拔掉、桥断开都记离线', async ({ page }, info) => {
     test.skip(info.project.name !== '门店电脑', '写数据的只在门店电脑尺寸执行一次');
     const terminal = `TRM-E2E-${run}`;
+    const other = `TRM-E2E-${run}B`;
     const reader = `RDR-E2E-${run}`;
     const bridge = await startMockBridge({ terminal });
     try {
@@ -104,6 +123,39 @@ test.describe('设备', () => {
       await expect(page.getByTestId(`device-${reader}`)).toHaveAttribute('data-status', 'offline', { timeout: 10_000 });
       bridge.setDevice('rc300', 'online');
       await expect(page.getByTestId(`device-${reader}`)).toHaveAttribute('data-status', 'online', { timeout: 10_000 });
+
+      // 同一台电脑开着两个门店页面（Codex 自动审查 8a20a54）：桥把同一次读卡发给两个页面，两个页面都上报，服务端只记一次
+      const cardEvents = async (value: string) =>
+        ((await (await page.request.get('/api/devices/events?type=card&limit=50')).json()) as { deviceCode: string; data: { value: string } }[]).filter((e) => e.data.value === value);
+      const second = await page.context().newPage();
+      try {
+        await second.goto('/devices');
+        const panel2 = second.getByTestId('terminal-panel');
+        await expect(panel2.getByTestId('terminal-bridge-state')).toContainText('设备服务已连上');
+        await expect.poll(() => bridge.clients()).toBe(2);
+        bridge.sendCard('0055667788');
+        await expect(panel.getByTestId('terminal-events')).toContainText('0055667788');
+        await expect(panel2.getByTestId('terminal-events')).toContainText('0055667788');
+        await expect.poll(async () => (await cardEvents('0055667788')).length, { timeout: 10_000 }).toBe(1);
+        // 两个页面都又报过两轮（每 2 秒一次）：仍然只有一条
+        await second.waitForTimeout(4_500);
+        expect((await cardEvents('0055667788')).map((e) => e.deviceCode)).toEqual([reader]);
+      } finally {
+        await second.close();
+      }
+
+      // 换「这台终端是」：之前收到、还没报出去的读卡不改记到新选的那台（Codex 自动审查 8a20a54）
+      await postJson(page.request, '/api/devices', { clientKey: randomUUID(), code: other, name: `测试终端 B ${run}`, kind: 'terminal', area: '收银', connection: 'none' });
+      await page.route('**/api/devices/bridge-report', (route) => route.abort());
+      bridge.sendCard('0011223344');
+      await expect(panel.getByTestId('terminal-events')).toContainText('0011223344');
+      await panel.getByTestId('terminal-select').selectOption(other);
+      await page.unroute('**/api/devices/bridge-report');
+      await expect(page.getByTestId(`device-${other}`)).toHaveAttribute('data-status', 'online', { timeout: 10_000 });
+      expect(await cardEvents('0011223344')).toEqual([]);
+      await panel.getByTestId('terminal-select').selectOption(terminal);
+      await expect(page.getByTestId(`device-${reader}`)).toHaveAttribute('data-status', 'online', { timeout: 10_000 });
+
       // 设备服务断开：读卡器记离线（终端还开着页面，终端在线）
       await bridge.close();
       await expect(panel.getByTestId('terminal-bridge-state')).toContainText('设备服务没连上');
@@ -113,6 +165,7 @@ test.describe('设备', () => {
     } finally {
       await disable(page.request, reader);
       await disable(page.request, terminal);
+      await disable(page.request, other);
       await bridge.close().catch(() => {});
     }
   });

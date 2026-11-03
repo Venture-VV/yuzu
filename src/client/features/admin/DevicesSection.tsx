@@ -425,9 +425,9 @@ function JobsAndEvents() {
         ) : (
           <ul className="space-y-1.5 text-[13px]">
             {jobs.data!.map((j) => (
-              <li key={j.id} className="flex flex-wrap items-baseline justify-between gap-2">
+              <li key={j.id} className="flex flex-wrap items-baseline justify-between gap-2" data-testid={`device-job-${j.id}`}>
                 <span>
-                  {j.deviceName} · {DEVICE_JOB_KIND_LABELS[j.kind]}
+                  <span className="font-mono text-[12px] text-ink-3">#{j.id}</span> {j.deviceName} · {DEVICE_JOB_KIND_LABELS[j.kind]}
                   {j.errorCode && <span className="text-clay"> · {DEVICE_ERROR_LABELS[j.errorCode]}</span>}
                 </span>
                 <span className="text-[12px] text-ink-3">

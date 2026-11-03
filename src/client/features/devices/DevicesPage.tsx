@@ -181,25 +181,40 @@ function TestPrintButton({ device }: { device: Device }) {
     setBusy(true);
     try {
       const key = uuid();
-      let job = await sendErpOp<DeviceJob>({
-        key,
-        type: 'device_job',
-        url: `/api/devices/${device.id}/jobs`,
-        body: { clientKey: key, kind },
-        summary: `${device.name}（${device.code}）· ${kind === 'label_test' ? '测试标签' : '测试页'}`,
-        staffName: session.staff.displayName,
-      });
+      let job: DeviceJob;
+      try {
+        job = await sendErpOp<DeviceJob>({
+          key,
+          type: 'device_job',
+          url: `/api/devices/${device.id}/jobs`,
+          body: { clientKey: key, kind },
+          summary: `${device.name}（${device.code}）· ${kind === 'label_test' ? '测试标签' : '测试页'}`,
+          staffName: session.staff.displayName,
+        });
+      } catch (e) {
+        if (e instanceof UncertainError) toast({ tone: 'info', title: '测试打印：没收到结果', body: '记录留在本机，到页面上方查回、按原内容重新提交或确认作废' });
+        else toast({ tone: 'error', title: '测试打印没发出', body: errorMessage(e) });
+        return;
+      }
+      // 到这里任务已经建好（本机的待确认记录随之删了）：之后查结果没成功，不能说没发出，也没有待确认的记录可查回——
+      // 断网、超时的接着查；服务端明确拒绝了查询的不再查；到时还查不到就给出任务编号，去后台的打印任务里看（Codex 自动审查 8a20a54）
+      let lookupError: unknown = null;
       const end = Date.now() + 20_000;
       while ((job.status === 'queued' || job.status === 'sending') && Date.now() < end) {
         await new Promise((r) => setTimeout(r, 700));
-        job = await api.get<DeviceJob>(`/api/devices/jobs/${job.id}`);
+        try {
+          job = await api.get<DeviceJob>(`/api/devices/jobs/${job.id}`);
+          lookupError = null;
+        } catch (e) {
+          lookupError = e;
+          if (!(e instanceof UncertainError)) break;
+        }
       }
       if (job.status === 'done') toast({ tone: 'success', title: `${device.name}：已打出${kind === 'label_test' ? '测试标签' : '测试页'}` });
       else if (job.status === 'failed') toast({ tone: 'error', title: `${device.name}：没打出来`, body: `${job.errorCode ? DEVICE_ERROR_LABELS[job.errorCode] : ''}${job.errorMessage ? `（${job.errorMessage}）` : ''}` });
-      else toast({ tone: 'info', title: `${device.name}：还在排队`, body: '稍后在后台「设备」的打印任务里看结果' });
-    } catch (e) {
-      if (e instanceof UncertainError) toast({ tone: 'info', title: '测试打印：没收到结果', body: '记录留在本机，到页面上方查回、按原内容重新提交或确认作废' });
-      else toast({ tone: 'error', title: '测试打印没发出', body: errorMessage(e) });
+      else if (lookupError)
+        toast({ tone: 'info', title: `${device.name}：已提交，查不到结果`, body: `打印任务 #${job.id}（${errorMessage(lookupError)}）。稍后在后台「设备」的打印任务里看结果，先别重复提交` });
+      else toast({ tone: 'info', title: `${device.name}：还在排队`, body: `打印任务 #${job.id}：稍后在后台「设备」的打印任务里看结果` });
     } finally {
       setBusy(false);
     }

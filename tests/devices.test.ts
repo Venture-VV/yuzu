@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto';
 import net from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { bridgeErrorEventValue, DEVICE_EVENT_VALUE_MAX, type Device, type DeviceJob, type DeviceOverview } from '../src/shared/devices';
+import { bridgeErrorEventValue, bridgeEventId, DEVICE_EVENT_VALUE_MAX, parseBridgeMessage, type Device, type DeviceJob, type DeviceOverview } from '../src/shared/devices';
 import { checkDevicesOnce, waitForDeviceJobs } from '../src/server/modules/devices';
 import { startMockPrinter, type MockPrinter } from '../src/server/devices/mock-printer';
 import { sendToPrinter } from '../src/server/devices/netprint';
@@ -477,6 +477,34 @@ describe('终端替桥上报', () => {
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(r.body.recorded).toBe(1);
     expect(await device('RDR-SY-01')).toMatchObject({ status: 'online', statusCode: null });
+  });
+
+  it('桥发来的同一条报文：几个页面按内容算出同一个编号，只记一次；终端、设备键、类型、内容、时间不同的编号不同（Codex 自动审查 8a20a54）', async () => {
+    const at = '2026-11-03T12:00:00.123Z';
+    const msg = { terminal: 'TRM-SY-01', key: 'rc300', type: 'card' as const, value: '0099887766', at };
+    const id = bridgeEventId(msg);
+    expect(bridgeEventId({ ...msg })).toBe(id);
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    const others = [{ terminal: 'TRM-SY-02' }, { key: 'nfc' }, { type: 'scan' as const }, { value: '0099887767' }, { at: '2026-11-03T12:00:00.124Z' }].map((d) => bridgeEventId({ ...msg, ...d }));
+    expect(new Set([id, ...others]).size).toBe(6);
+    // 同一台终端开着两个页面，各报一次同一次读卡：只记一次
+    const report = () =>
+      api(ctx.app, ctx.clerk, 'POST', '/api/devices/bridge-report', {
+        terminal: 'TRM-SY-01',
+        bridge: { connected: true },
+        devices: [{ key: 'rc300', status: 'online' }],
+        events: [{ id, key: 'rc300', type: 'card', value: '0099887766', at }],
+      });
+    const first = await report();
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    expect(first.body.recorded).toBe(1);
+    expect((await report()).body.recorded).toBe(0);
+    const cards = (await api(ctx.app, ctx.owner, 'GET', '/api/devices/events?type=card')).body as { deviceCode: string; data: { value: string } }[];
+    expect(cards.filter((e) => e.data.value === '0099887766').map((e) => e.deviceCode)).toEqual(['RDR-SY-01']);
+    // 协议：错误报文带了桥的时间就留着（页面拿它算编号）；没带的照常认
+    expect(parseBridgeMessage(JSON.stringify({ v: 1, type: 'error', key: 'rc300', code: 'READ_FAILED', message: '读卡失败', at }))).toMatchObject({ ok: true, message: { type: 'error', at } });
+    const noAt = parseBridgeMessage(JSON.stringify({ v: 1, type: 'error', code: 'READ_FAILED', message: '读卡失败' }));
+    expect(noAt.ok && 'at' in noAt.message).toBe(false);
   });
 });
 

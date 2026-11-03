@@ -247,7 +247,7 @@ export type BridgeMessage =
   | { v: 1; type: 'status'; key: string; status: DeviceStatus; code?: DeviceErrorCode }
   | { v: 1; type: 'card'; key: string; cardNo: string; at: string }
   | { v: 1; type: 'scan'; key: string; code: string; at: string }
-  | { v: 1; type: 'error'; key?: string; code: DeviceErrorCode; message: string }
+  | { v: 1; type: 'error'; key?: string; code: DeviceErrorCode; message: string; at?: string }
   | { v: 1; type: 'pong' };
 
 /** 终端上报的一条事件的内容（卡号、条码、错误说明）最长多少字：页面按它截，服务端按它校验 */
@@ -259,6 +259,43 @@ export const DEVICE_EVENT_VALUE_MAX = 200;
  */
 export function bridgeErrorEventValue(code: DeviceErrorCode, message: string): string {
   return `${code}：${message}`.slice(0, DEVICE_EVENT_VALUE_MAX);
+}
+
+/**
+ * 桥发来的一条事件的编号：按「终端 + 设备键 + 类型 + 内容 + 桥给的时间」算出来，同一条报文算出同一个编号。
+ * 同一台电脑开着几个门店页面时，桥把同一次读卡发给每个页面，各页面算出的编号相同，服务端按编号只记一次（Codex 自动审查 8a20a54）。
+ * 写成 UUID 的样子（版本号 8：自定的算法）；只用来去重，不是密码学摘要（页面可能不在 HTTPS 下，用不了 crypto.subtle）。
+ */
+export function bridgeEventId(e: { terminal: string; key: string; type: 'card' | 'scan' | 'error'; value: string; at: string }): string {
+  const hex = hash128(JSON.stringify([e.terminal, e.key, e.type, e.value, e.at]))
+    .map((n) => n.toString(16).padStart(8, '0'))
+    .join('');
+  const variant = ((parseInt(hex[16]!, 16) & 0x3) | 0x8).toString(16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+/** 128 位的字符串散列（cyrb128，公有领域）：四个 32 位整数 */
+function hash128(s: string): [number, number, number, number] {
+  let h1 = 1779033703;
+  let h2 = 3144134277;
+  let h3 = 1013904242;
+  let h4 = 2773480762;
+  for (let i = 0; i < s.length; i++) {
+    const k = s.charCodeAt(i);
+    h1 = h2 ^ Math.imul(h1 ^ k, 597399067);
+    h2 = h3 ^ Math.imul(h2 ^ k, 2869860233);
+    h3 = h4 ^ Math.imul(h3 ^ k, 951274213);
+    h4 = h1 ^ Math.imul(h4 ^ k, 2716044179);
+  }
+  h1 = Math.imul(h3 ^ (h1 >>> 18), 597399067);
+  h2 = Math.imul(h4 ^ (h2 >>> 22), 2869860233);
+  h3 = Math.imul(h1 ^ (h3 >>> 17), 951274213);
+  h4 = Math.imul(h2 ^ (h4 >>> 19), 2716044179);
+  h1 ^= h2 ^ h3 ^ h4;
+  h2 ^= h1;
+  h3 ^= h1;
+  h4 ^= h1;
+  return [h1 >>> 0, h2 >>> 0, h3 >>> 0, h4 >>> 0];
 }
 
 export type BridgeParse = { ok: true; message: BridgeMessage } | { ok: false; code: 'BRIDGE_PROTOCOL'; reason: string };
@@ -304,7 +341,10 @@ export function parseBridgeMessage(raw: string): BridgeParse {
       return { ok: true, message: { v: 1, type: 'scan', key: data.key, code: data.code, at: data.at } };
     case 'error':
       if (!isDeviceErrorCode(data.code) || typeof data.message !== 'string') return bad('error 缺少 code 或 message');
-      return { ok: true, message: { v: 1, type: 'error', ...(str(data.key, 40) ? { key: data.key } : {}), code: data.code, message: data.message.slice(0, 200) } };
+      return {
+        ok: true,
+        message: { v: 1, type: 'error', ...(str(data.key, 40) ? { key: data.key } : {}), code: data.code, message: data.message.slice(0, 200), ...(isIso(data.at) ? { at: data.at } : {}) },
+      };
     case 'pong':
       return { ok: true, message: { v: 1, type: 'pong' } };
     default:
