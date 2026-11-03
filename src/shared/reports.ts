@@ -27,9 +27,11 @@ export interface PeriodKpis {
   discount: number;
   /** 券抵扣（v0.7.20，结账用的券；是优惠，在「优惠」下单列） */
   coupon: number;
+  /** 会员折扣（v0.7.25，结账时自动算；口径同券抵扣） */
+  memberDiscount: number;
   /** 退款单（v0.7.20，离店后部分退款，按退款的营业日） */
   refund: number;
-  /** 净营业额 = 应收 − 优惠 − 券抵扣 − 退款 */
+  /** 净营业额 = 应收 − 优惠 − 券抵扣 − 会员折扣 − 退款 */
   net: number;
   /** 结账客人（手牌每位 1 人，桌台按开台人数） */
   guests: number;

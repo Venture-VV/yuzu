@@ -49,10 +49,10 @@ export function RevenuePage() {
                 <Kpi icon={<TrendingUp className="size-4" />} label="净营业额（应收 − 优惠 − 券抵扣 − 退款）" tone="pine" testId="erp-revenue-net">
                   <Money cents={d.kpis.net} />
                 </Kpi>
-                <Kpi icon={<ReceiptText className="size-4" />} label="应收 / 优惠与券抵扣 / 退款">
+                <Kpi icon={<ReceiptText className="size-4" />} label="应收 / 优惠、券抵扣与会员折扣 / 退款">
                   <Money cents={d.kpis.receivable} />{' '}
                   <span className="text-[13px] font-semibold text-ink-3">
-                    / <Money cents={d.kpis.discount + (d.kpis.coupon ?? 0)} /> / <Money cents={d.kpis.refund ?? 0} />
+                    / <Money cents={d.kpis.discount + (d.kpis.coupon ?? 0) + (d.kpis.memberDiscount ?? 0)} /> / <Money cents={d.kpis.refund ?? 0} />
                   </span>
                 </Kpi>
                 <Kpi icon={<UsersRound className="size-4" />} label="结账客人 / 结账单">

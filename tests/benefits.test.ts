@@ -1,5 +1,5 @@
 // 会员体系 v2 第二期（v0.7.24，docs/BENEFITS.md）：本店权益自动发放。
-//   · 权益清单：一键导入（编号已有的跳过、导入为草稿、文档写明暂缓的为暂缓）、权限、改（版本号）、发布的条件、折扣类不能发布；
+//   · 权益清单：一键导入（编号已有的跳过、导入为草稿、文档写明暂缓的为暂缓）、权限、改（版本号）、发布的条件（折扣类要适用明细与折扣，v0.7.25）；
 //   · 券类：升档当场补发本期差额（按档阶取数量、不相加），每天的自动任务发下一期的、有效到期末；降档不收回；清单改了同一天再跑；
 //   · 事件礼：首充礼一次、升档 / 升阶的升级礼、保级礼、生日礼、节日关怀；
 //   · 服务类：登记使用数次数、到上限拒绝、作废后可以再登记、同一编号重提、确认作废后原请求晚到不生效；
@@ -150,12 +150,27 @@ describe('权益清单', () => {
     expect(c.items.find((b) => b.code === 'QY-004')).toMatchObject({ startGrade: 1, startTier: 2, content: '浴票延迟：初阶30分钟、享阶1小时、尊阶1.5—2小时。' });
   });
 
-  it('发布要条件齐全：券类要券模板；折扣类这一期不能发布；没配置起点的不能发布；版本号对不上拒绝', async () => {
+  it('发布要条件齐全：券类要券模板；折扣类要适用明细与折扣（QY-011 按会员文档预填）；没配置起点的不能发布；版本号对不上拒绝', async () => {
     const noTemplate = await setStatus('QY-040', 'published');
     expect(noTemplate.status).toBe(422);
     expect(noTemplate.body.error.code).toBe('BENEFIT_NOT_PUBLISHABLE');
     expect(noTemplate.body.error.message).toContain('请选择发哪张券');
-    expect((await setStatus('QY-011', 'published')).body.error.message).toContain('第三期');
+    // 折扣类（v0.7.25）：会员日没填适用明细与折扣不能发布；QY-011 导入时按会员文档预填了客房房费 7.5 / 6.5 / 5.5 / 5 折
+    const memberDay = (await setStatus('QY-054', 'published')).body.error.message;
+    expect(memberDay).toContain('请选择打哪些明细');
+    expect(memberDay).toContain('请填写起点的折扣');
+    const qy011 = await byCode('QY-011');
+    expect([qy011.discountTarget, qy011.quantity, qy011.tierQuantities, qy011.status]).toEqual([
+      'room',
+      75,
+      [
+        { grade: 4, tier: 0, quantity: 65 },
+        { grade: 5, tier: 0, quantity: 55 },
+        { grade: 6, tier: 0, quantity: 50 },
+      ],
+      'draft',
+    ]);
+    expect((await edit('QY-011', { quantity: 5 })).body.error.message).toContain('付几成');
     expect((await setStatus('P021', 'published')).body.error.message).toContain('请先设配置起点');
     const b = await byCode('QY-040');
     const stale = await api(ctx.app, ctx.owner, 'PUT', `/api/benefits/${b.id}`, { ...b, expectedVersion: b.version + 5 });

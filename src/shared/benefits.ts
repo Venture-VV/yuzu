@@ -1,6 +1,7 @@
 // 会员体系 v2 第二期（v0.7.24，docs/BENEFITS.md）：本店权益清单、谁能用、每期几张 / 几次。前后端共用。
 // 档阶按 19 个状态排序（L0 < L1·初 < L1·享 < L1·尊 < L2·初 … < L6·尊），会员现在的状态不低于配置起点就能用；
 // 同一项在不同档阶数量不同时按会员现在的档阶取那一行，不相加（PENDING_DECISIONS M30）。日期是营业日 YYYY-MM-DD。
+// 第三期（v0.7.25，docs/MEMBERSHIP_P3.md）：折扣类结账时自动算，「付几成」放在数量与各档阶表里（75 = 7.5 折）。
 
 import { shiftDate } from './labels';
 import { TIER_LABELS, type Grade, type Tier } from './membership';
@@ -19,7 +20,7 @@ export const BENEFIT_CATEGORY_HINTS: Record<BenefitCategory, string> = {
   coupon: '每月（每年）第一天给够格的会员发本期的券，有效到本期最后一天；月中入会、升档、升阶当场补发差额',
   event: '首充、升档、升阶、保级、生日月、节日时自动发券，每项去重',
   service: '会员详情列在「本月可享」；设了次数的由服务的同事登记使用，到上限拒绝',
-  discount: '第三期（v0.7.25）结账时自动算，这一期只在清单里',
+  discount: '结账时自动算：一张结账单只享一种会员折扣、不与券同用，自动用对客人最省的一种',
   info: '只在清单里显示，不发放',
 };
 
@@ -27,6 +28,16 @@ export const BENEFIT_CATEGORY_HINTS: Record<BenefitCategory, string> = {
 export const BENEFIT_PERIODS = ['none', 'day', 'month', 'year'] as const;
 export type BenefitPeriod = (typeof BENEFIT_PERIODS)[number];
 export const BENEFIT_PERIOD_LABELS: Record<BenefitPeriod, string> = { none: '不计次', day: '每天', month: '每月', year: '每年' };
+
+/** 折扣类打哪些明细（v0.7.25）：客房房费（全天房、超时半天、钟点房）、门票、整张账单 */
+export const DISCOUNT_TARGETS = ['room', 'ticket', 'bill'] as const;
+export type DiscountTarget = (typeof DISCOUNT_TARGETS)[number];
+export const DISCOUNT_TARGET_LABELS: Record<DiscountTarget, string> = { room: '客房房费', ticket: '门票', bill: '整张账单' };
+/** 折扣「付几成」：10 = 1 折 … 99 = 9.9 折 */
+export const MIN_DISCOUNT_RATE = 10;
+export const MAX_DISCOUNT_RATE = 99;
+/** 每周几：1 = 周一 … 7 = 周日 */
+export const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] as const;
 
 /** 事件礼的触发事件 */
 export const BENEFIT_EVENTS = ['first_recharge', 'grade_up', 'tier_up', 'retain', 'birthday', 'festival'] as const;
@@ -124,7 +135,45 @@ export function quantityText(category: BenefitCategory, period: BenefitPeriod, q
   if (category === 'coupon') return quantity === null ? '—' : `${BENEFIT_PERIOD_LABELS[period]} ${quantity} 张`;
   if (category === 'event') return quantity === null ? '—' : `每次 ${quantity} 张`;
   if (category === 'service') return period === 'none' || quantity === null ? '不限次' : `${BENEFIT_PERIOD_LABELS[period]} ${quantity} 次`;
+  if (category === 'discount') return quantity === null ? '未填折扣' : rateText(quantity);
   return '—';
+}
+
+// ───────────────────────── 折扣类（v0.7.25，docs/MEMBERSHIP_P3.md 第 2 节） ─────────────────────────
+
+/** 75 →「7.5 折」，80 →「8 折」 */
+export function rateText(rate: number): string {
+  return `${rate % 10 === 0 ? rate / 10 : (rate / 10).toFixed(1)} 折`;
+}
+
+/** 「每天」「每周一、周四」「每月 8 日」「每月 8 日（周一至周日都行）」 */
+export function discountDaysText(weekdays: readonly number[], monthDays: readonly number[]): string {
+  const parts: string[] = [];
+  if (weekdays.length) parts.push(`每${[...weekdays].sort((a, b) => a - b).map((d) => WEEKDAY_LABELS[d - 1]).join('、')}`);
+  if (monthDays.length) parts.push(`每月 ${[...monthDays].sort((a, b) => a - b).join('、')} 日`);
+  return parts.length ? parts.join('，且') : '每天';
+}
+
+/** 这一天（营业日 YYYY-MM-DD）能不能享：每周几、每月几号；都填时两样都要满足，都不填是每天 */
+export function discountDayMatches(d: { weekdays: readonly number[]; monthDays: readonly number[] }, date: string): boolean {
+  const [y, m, day] = date.split('-').map(Number) as [number, number, number];
+  const weekday = ((new Date(Date.UTC(y, m - 1, day)).getUTCDay() + 6) % 7) + 1;
+  if (d.weekdays.length && !d.weekdays.includes(weekday)) return false;
+  if (d.monthDays.length && !d.monthDays.includes(day)) return false;
+  return true;
+}
+
+/** 适用的明细：客房房费按部门「客房」、门票按「门票」（与部门营业额快照同一口径），整张账单是全部明细 */
+export function discountLines<L extends { category: string }>(target: DiscountTarget, lines: readonly L[]): L[] {
+  if (target === 'bill') return [...lines];
+  const category = target === 'room' ? '客房' : '门票';
+  return lines.filter((l) => l.category === category);
+}
+
+/** 省下多少（分）：合计 − 合计 × 付几成 ÷ 100，四舍五入到分；按合计算、不逐项算（M47） */
+export function discountOff(base: number, rate: number): number {
+  if (base <= 0) return 0;
+  return base - Math.floor((base * rate + 50) / 100);
 }
 
 // ───────────────────────── 本店权益清单（导入用） ─────────────────────────
@@ -141,6 +190,8 @@ interface CatalogEntry {
   quantity: number | null;
   events: BenefitEvent[];
   status: 'draft' | 'paused';
+  /** 折扣类按会员文档预填的折扣（仍是草稿，店主核对后发布；v0.7.25） */
+  discount?: { target: DiscountTarget; tierQuantities: TierQuantity[] };
 }
 
 /** 「L2·初」→ { grade: 2, tier: 0 }；「L0·会员」→ { grade: 0, tier: null }；其余（未配置）→ null */
@@ -181,7 +232,19 @@ export const BENEFIT_CATALOG: readonly CatalogEntry[] = [
   service('QY-008', '携友进VIP区', 'L4·初', '会员可携朋友进入VIP更衣区。', '已决策5万元起；同行人数待明确，不能套用同行折扣人数。'),
   service('QY-009', 'VIP专属浴服', 'L4·初', 'VIP专属版型浴服。', '款式、领用次数和适用场景待明确。'),
   service('QY-010', '一次性浴衣拖鞋', 'L2·初', '设计款一次性浴衣、拖鞋。', '须与所有客人基础用品区分；使用次数待明确。'),
-  listed('discount', 'QY-011', '派对房及包房折扣', 'L3·初', '包房房费折扣：3万7.5折、5万6.5折、10万5.5折、30万5折。', '不含开台费及其他消费；派对房仅周一至周四。'),
+  {
+    ...listed('discount', 'QY-011', '派对房及包房折扣', 'L3·初', '包房房费折扣：3万7.5折、5万6.5折、10万5.5折、30万5折。', '不含开台费及其他消费；派对房仅周一至周四。'),
+    // M44：客房房费；L3·初 7.5 折（起点）、L4·初 6.5 折、L5·初 5.5 折、L6·初 5 折
+    quantity: 75,
+    discount: {
+      target: 'room',
+      tierQuantities: [
+        { grade: 4, tier: 0, quantity: 65 },
+        { grade: 5, tier: 0, quantity: 55 },
+        { grade: 6, tier: 0, quantity: 50 },
+      ],
+    },
+  },
   service('QY-012', '宠物友好轰趴SKU', 'L3·尊', '宠物友好轰趴体验候选。', '独立项目；是否纳入权益及适用条件待明确。'),
   service('QY-013', '房型升级', 'L4·初', '消费客房时免费房型升级。', '视房态；适用房型和日期待明确。'),
   service('QY-014', '客房赠送', 'L4·初', '高卡赠送客房房晚。', '仅周一至周四，节假日禁用；按房态，次日14:00退房；次数待定。'),
@@ -254,6 +317,10 @@ export interface Benefit {
   events: BenefitEvent[];
   /** 节日关怀的日期（YYYY-MM-DD，农历节日每年由店主填当年的日期） */
   festivalDates: string[];
+  /** 折扣类（v0.7.25）：打哪些明细、每周几、每月几号（空 = 每天）；「付几成」在 quantity 与各档阶表里 */
+  discountTarget: DiscountTarget | null;
+  weekdays: number[];
+  monthDays: number[];
   content: string;
   conditions: string;
   status: BenefitStatus;
@@ -313,6 +380,8 @@ export interface MemberBenefitItem {
   lastGrantDate: string | null;
   templateName: string | null;
   events: BenefitEvent[];
+  /** 折扣类（v0.7.25）：这位会员的折扣与适用说明（「结账时自动 · 6.5 折 · 客房房费 · 每天」） */
+  discount: { rate: number; text: string } | null;
 }
 
 export interface BenefitGrantRow {

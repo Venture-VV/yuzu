@@ -86,8 +86,9 @@ function SettlementSheet({ s }: { s: SettlementSummary }) {
           <Row left="应收（结账 − 反结账）" right={yuan(biz.receivable)} strong />
           <Row left="优惠 / 免单（当场授权，不是收款）" right={yuan(-biz.discount)} />
           {biz.coupon !== 0 && <Row left="券抵扣（不是收款）" right={yuan(-biz.coupon)} />}
+          {biz.memberDiscount !== 0 && <Row left="会员折扣（不是收款）" right={yuan(-biz.memberDiscount)} />}
           {biz.refund !== 0 && <Row left={`退款（退款单 ${b.refunds?.count ?? 0} 张）`} right={yuan(-biz.refund)} />}
-          <Row left="净营业额（应收 − 优惠 − 券抵扣 − 退款）" right={yuan(biz.netRevenue)} strong />
+          <Row left="净营业额（应收 − 优惠 − 券抵扣 − 会员折扣 − 退款）" right={yuan(biz.netRevenue)} strong />
           <Row left="实收（现金、扫码、银行卡、其他，减去退款）" right={yuan(biz.received)} />
           <Row left="其中门票" right={yuan(b.ticket)} />
           <Row left="其中项目与其他" right={yuan(b.items)} />

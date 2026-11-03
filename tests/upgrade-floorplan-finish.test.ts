@@ -10,7 +10,7 @@ import { migrate } from '../src/server/migrate';
 import { floorplanChecks } from '../src/server/modules/floorplans';
 import { frontdeskChecks } from '../src/server/modules/frontdesk/checks';
 import { spaceChecks } from '../src/server/modules/spaces';
-import { PASSWORD, TEST_DB } from './helpers';
+import { PASSWORD, TEST_DB, migrationsFrom } from './helpers';
 import { resetPublicSchema } from './test-db';
 
 const MIGRATIONS = new URL('../src/server/migrations/', import.meta.url);
@@ -61,7 +61,7 @@ describe('迁移 036 · 升级前已有的底图批次、区域与来访', () =>
     const [zone] = await sql<{ id: number }[]>`INSERT INTO zones (floor_id, name, name_en) VALUES (${floor!.id}, '升级派对区', 'Party') RETURNING id`;
     await sql`INSERT INTO spaces (code, floor_id, zone_id, business_type, display_name) VALUES ('X201', ${floor!.id}, ${zone!.id}, '派对房', '升级派对房')`;
 
-    expect(await migrate(sql)).toEqual(['036_floorplan_finish.sql', '037_refunds_coupons.sql', '038_devices.sql', '039_payment_fences.sql', '040_membership_v2.sql', '041_benefits.sql', '043_miniprogram.sql', '044_miniprogram_fences.sql']);
+    expect(await migrate(sql)).toEqual(migrationsFrom('036_floorplan_finish.sql'));
 
     const batches = await sql<{ id: number; sourceKind: string | null; sourceNote: string; receivedOn: string | null; pdfScale: number | null; originalSaved: boolean; retireReason: string | null }[]>`
       SELECT id, source_kind, source_note, received_on, pdf_scale, original_saved, retire_reason FROM floorplan_batches ORDER BY id`;

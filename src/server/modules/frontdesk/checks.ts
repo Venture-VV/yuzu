@@ -172,11 +172,11 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
   const [charges] = await db<{ n: number; amount: number }[]>`
     SELECT count(*)::int AS n, coalesce(sum(c.amount) FILTER (WHERE l.status = 'active'), 0) AS amount
     FROM room_stay_charges c JOIN bill_lines l ON l.id = c.line_id`;
-  // ⑮ 部门营业额快照（v0.7.6）：每张结账单的快照合计 = 结账金额，分摊的优惠合计 = 这张结账单的优惠 / 免单 + 券抵扣（v0.7.20）
+  // ⑮ 部门营业额快照（v0.7.6）：每张结账单的快照合计 = 结账金额，分摊的优惠合计 = 这张结账单的优惠 / 免单 + 券抵扣（v0.7.20）+ 会员折扣（v0.7.25）
   const itemDiff = await db<{ checkoutNo: string }[]>`
     SELECT c.checkout_no FROM checkouts c
     LEFT JOIN (SELECT checkout_id, sum(amount) AS amount, sum(discount) AS discount FROM checkout_items GROUP BY checkout_id) i ON i.checkout_id = c.id
-    LEFT JOIN (SELECT checkout_id, sum(amount) AS amount FROM checkout_payments WHERE method IN ('discount', 'store_coupon') GROUP BY checkout_id) d
+    LEFT JOIN (SELECT checkout_id, sum(amount) AS amount FROM checkout_payments WHERE method IN ('discount', 'store_coupon', 'member_discount') GROUP BY checkout_id) d
       ON d.checkout_id = c.id
     WHERE coalesce(i.amount, 0) <> c.total_amount OR coalesce(i.discount, 0) <> coalesce(d.amount, 0)
     LIMIT 5`;

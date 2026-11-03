@@ -2,11 +2,12 @@
 //   · 券类：本期发了几张、能用几张（券在「账户内券」里，结账时用）；
 //   · 事件礼：什么时候发、收到过几次；
 //   · 服务与资格：本期用了几次 / 上限，「登记使用」（数次数、到上限拒绝；超时、断网、回复 500 时结果待确认）；
+//   · 折扣类（v0.7.25）：几折、打哪些明细、哪几天——手牌结账时自动算；
 //   · 升档以后还能享的；最近的使用登记（登记错的作废，写原因）。
 
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarHeart, CheckCircle2, ChevronDown, Gift, Sparkles, Ticket } from 'lucide-react';
+import { BadgePercent, CalendarHeart, CheckCircle2, ChevronDown, Gift, Sparkles, Ticket } from 'lucide-react';
 import {
   BENEFIT_CATEGORY_LABELS,
   BENEFIT_EVENT_LABELS,
@@ -55,6 +56,7 @@ export function BenefitsCard({ member }: { member: MemberDetail }) {
   const events = group('event');
   const services = group('service');
   const infos = group('info');
+  const discounts = group('discount');
   const canVoid = (u: BenefitUseRow) => u.status === 'active' && (can('benefit.publish') || (u.staffId === session.staff.id && u.businessDate === session.today));
   const voidUse = async (reason: string) => {
     if (!voiding) return;
@@ -143,6 +145,16 @@ export function BenefitsCard({ member }: { member: MemberDetail }) {
                   </Row>
                 );
               })}
+            </Group>
+          )}
+          {discounts.length > 0 && (
+            <Group icon={<BadgePercent className="size-4 text-yuzu-deep" />} title={BENEFIT_CATEGORY_LABELS.discount} hint="手牌结账时自动算：一张结账单只享一种、不与券同用">
+              {discounts.map((i) => (
+                <div key={i.benefitId} className="py-1.5" data-testid={`member-benefit-${i.code}`}>
+                  <p className="text-[13.5px] font-semibold text-ink">{i.name}</p>
+                  <p className="text-[12.5px] text-ink-3">{i.discount?.text ?? '结账时自动'}</p>
+                </div>
+              ))}
             </Group>
           )}
           {infos.length > 0 && (

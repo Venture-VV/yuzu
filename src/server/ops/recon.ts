@@ -366,11 +366,12 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
       }),
       row('合计', '', '', deptTotal, deptDiscount, deptRefund),
       ['应收（结账 − 反结账）', '', '', yuan(biz.receivable), '', '', ''],
-      ['核对', deptTotal === biz.receivable && deptDiscount === biz.discount + biz.coupon && deptRefund === biz.refund ? '一致' : '不一致', '', '', '', '', ''],
+      ['核对', deptTotal === biz.receivable && deptDiscount === biz.discount + biz.coupon + biz.memberDiscount && deptRefund === biz.refund ? '一致' : '不一致', '', '', '', '', ''],
       ['优惠 / 免单（不是收款）', '', '', yuan(-biz.discount), '', '', ''],
       ['券抵扣（是优惠，不是收款）', '', '', yuan(-biz.coupon), '', '', ''],
+      ['会员折扣（是优惠，不是收款）', '', '', yuan(-biz.memberDiscount), '', '', ''],
       ['退款（退款单）', '', '', yuan(-biz.refund), '', '', ''],
-      ['净营业额（应收 − 优惠 − 券抵扣 − 退款）', '', '', yuan(biz.netRevenue), '', '', ''],
+      ['净营业额（应收 − 优惠 − 券抵扣 − 会员折扣 − 退款）', '', '', yuan(biz.netRevenue), '', '', ''],
     ]),
   });
 
@@ -637,16 +638,16 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
 
   // 00 说明
   const failed = checks.filter((c: CheckLine) => !c.ok);
-  const deptOk = deptTotal === biz.receivable && deptDiscount === biz.discount + biz.coupon && deptRefund === biz.refund;
+  const deptOk = deptTotal === biz.receivable && deptDiscount === biz.discount + biz.coupon + biz.memberDiscount && deptRefund === biz.refund;
   const byMethod = s.business.byMethod.map((m) => `${CHECKOUT_METHOD_LABELS[m.method]} ${formatYuan(m.amount)}`).join('、') || '无';
   const count = (kind: string) => exceptions.filter((e) => e.kind.startsWith(kind)).length;
   const summary = [
     `营业日 ${date}（${stampOf(from.toISOString()).slice(0, 16)} 至 ${stampOf(to.toISOString()).slice(0, 16)}）${date === today ? '，营业日尚未结束' : ''}`,
     `应收 ${formatYuan(biz.receivable)}：结账 ${s.business.checkouts.count} 张 ${formatYuan(s.business.checkouts.total)}，反结账 ${s.business.voids.count} 张 ${formatYuan(s.business.voids.total)}`,
-    `优惠 / 免单 ${formatYuan(biz.discount)}；券抵扣 ${formatYuan(biz.coupon)}；退款 ${formatYuan(biz.refund)}（${s.business.refunds.count} 张）；净营业额 ${formatYuan(biz.netRevenue)}；实收（现金类）${formatYuan(biz.received)}`,
+    `优惠 / 免单 ${formatYuan(biz.discount)}；券抵扣 ${formatYuan(biz.coupon)}；会员折扣 ${formatYuan(biz.memberDiscount)}；退款 ${formatYuan(biz.refund)}（${s.business.refunds.count} 张）；净营业额 ${formatYuan(biz.netRevenue)}；实收（现金类）${formatYuan(biz.received)}`,
     `收款方式：${byMethod}`,
     `储值：充值实收 ${formatYuan(s.recharge.paid)}（${s.recharge.count} 笔），储值消费 ${formatYuan(s.consume.total)}（${s.consume.count} 笔）`,
-    `部门参考表合计 ${formatYuan(deptTotal)}、优惠分摊 ${formatYuan(deptDiscount)}、退款 ${formatYuan(deptRefund)}：${deptOk ? '✓ 与应收、优惠与券抵扣、退款一致' : '✗ 与应收、优惠或退款不一致'}`,
+    `部门参考表合计 ${formatYuan(deptTotal)}、优惠分摊 ${formatYuan(deptDiscount)}、退款 ${formatYuan(deptRefund)}：${deptOk ? '✓ 与应收、优惠（含券抵扣、会员折扣）、退款一致' : '✗ 与应收、优惠或退款不一致'}`,
     `异常：${EXCEPTION_KINDS.map((k) => `${k} ${count(k)}`).join('、')}、其他 ${exceptions.length - EXCEPTION_KINDS.reduce((t, k) => t + count(k), 0)}`,
     `交班：${day.shifts.length} 个班次，已交班 ${day.shifts.filter((r) => r.status === 'closed').length} 个`,
     `技师：${tr.totals.clocks} 个钟（点钟 ${tr.totals.designated}、轮钟 ${tr.totals.rotation}），${formatYuan(tr.totals.amount)}${tr.unassigned.clocks ? `；未指定技师 ${tr.unassigned.clocks} 个钟` : ''}`,

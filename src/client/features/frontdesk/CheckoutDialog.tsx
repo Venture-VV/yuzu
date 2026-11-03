@@ -138,6 +138,8 @@ export function CheckoutDialog({
     locked,
     onEdit: op.clearError,
     coupons: p?.storeCoupons ?? null,
+    // 会员折扣（v0.7.25）：结账核对给出的省得最多的一种，自动带上；选了券、优惠 / 免单就不用
+    memberDiscount: p?.memberDiscounts?.[0] ?? null,
   });
   const { remaining, problems } = pay;
   // 客房（S7）：还住着客房的客人要先退房（补齐房费挂到手牌账单、退押金），房费才都在账单上

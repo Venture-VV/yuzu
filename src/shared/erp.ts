@@ -240,7 +240,7 @@ export interface ErpRevenue {
   to: string;
   days: number;
   /** 净营业额 = 应收 − 优惠；结账客人、客单价、充值收款（与经营总览同一口径） */
-  kpis: { receivable: number; discount: number; coupon: number; refund: number; net: number; guests: number; checkouts: number; perGuest: number; rechargePaid: number };
+  kpis: { receivable: number; discount: number; coupon: number; memberDiscount: number; refund: number; net: number; guests: number; checkouts: number; perGuest: number; rechargePaid: number };
   trend: { date: string; net: number; guests: number; rechargePaid: number }[];
   byMethod: { method: import('./checkout').CheckoutMethod; amount: number }[];
   departments: import('./reports').DepartmentRevenue[];

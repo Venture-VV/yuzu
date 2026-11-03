@@ -83,7 +83,7 @@ export function priceTicket(t: Pick<TicketType, 'price12h' | 'price24h'>, checke
  * 「优惠 / 免单」（R1.2，店主 2026-10-29 签认）由值班经理及以上当场授权并填原因，一张结账单最多一笔；
  * 店员不能自行抹零，抹零也走优惠。
  */
-export const CHECKOUT_METHODS = [...PAYMENT_METHODS, 'wallet', 'coupon', 'discount', 'store_coupon'] as const;
+export const CHECKOUT_METHODS = [...PAYMENT_METHODS, 'wallet', 'coupon', 'discount', 'store_coupon', 'member_discount'] as const;
 export type CheckoutMethod = (typeof CHECKOUT_METHODS)[number];
 export const CHECKOUT_METHOD_LABELS: Record<CheckoutMethod, string> = {
   ...PAYMENT_METHOD_LABELS,
@@ -91,26 +91,55 @@ export const CHECKOUT_METHOD_LABELS: Record<CheckoutMethod, string> = {
   coupon: '团购券',
   discount: '优惠 / 免单',
   store_coupon: '券抵扣',
+  member_discount: '会员折扣',
 };
 /**
- * 实收（现金流入）的方式：会员储值是会员余额抵扣，团购券由平台结算，优惠 / 免单没有收钱，券抵扣（v0.7.20）是优惠，
- * 都不是本次实收
+ * 实收（现金流入）的方式：会员储值是会员余额抵扣，团购券由平台结算，优惠 / 免单没有收钱，券抵扣（v0.7.20）、
+ * 会员折扣（v0.7.25）是优惠，都不是本次实收
  */
 export const isCashLike = (m: CheckoutMethod): m is PaymentMethod => (PAYMENT_METHODS as readonly string[]).includes(m);
 
 /**
  * 营业口径的分列（店主 2026-10-29 签认：日结分列应收、优惠、净营业额、实收）：
  * 应收 = 结账合计 − 反结账；优惠 = 「优惠 / 免单」收款；券抵扣 = 结账用的券（v0.7.20，「优惠」下单列）；
+ * 会员折扣 = 结账时自动算的会员折扣（v0.7.25，「优惠」下单列，口径同券抵扣）；
  * 退款 = 当天的退款单（v0.7.20，离店后部分退款，按原收款方式退）；
- * 净营业额 = 应收 − 优惠 − 券抵扣 − 退款；
- * 实收 = 现金类收款（现金、微信、支付宝、银行卡、其他）− 退款，不含会员储值、团购券、优惠与券抵扣。
+ * 净营业额 = 应收 − 优惠 − 券抵扣 − 会员折扣 − 退款；
+ * 实收 = 现金类收款（现金、微信、支付宝、银行卡、其他）− 退款，不含会员储值、团购券、优惠、券抵扣与会员折扣。
  */
 export function businessBreakdown(b: { net: number; byMethod: readonly { method: CheckoutMethod; amount: number }[]; refunds?: { total: number } }) {
   const sum = (pick: (m: CheckoutMethod) => boolean) => b.byMethod.filter((m) => pick(m.method)).reduce((total, m) => total + m.amount, 0);
   const discount = sum((m) => m === 'discount');
   const coupon = sum((m) => m === 'store_coupon');
+  const memberDiscount = sum((m) => m === 'member_discount');
   const refund = b.refunds?.total ?? 0;
-  return { receivable: b.net, discount, coupon, refund, netRevenue: b.net - discount - coupon - refund, received: sum(isCashLike) - refund };
+  return {
+    receivable: b.net,
+    discount,
+    coupon,
+    memberDiscount,
+    refund,
+    netRevenue: b.net - discount - coupon - memberDiscount - refund,
+    received: sum(isCashLike) - refund,
+  };
+}
+
+/** 结账时能享的会员折扣（v0.7.25，docs/MEMBERSHIP_P3.md 第 2 节）：第一项是自动用的（省得最多） */
+export interface MemberDiscountOption {
+  memberId: number;
+  memberName: string;
+  tagCode: string;
+  benefitId: number;
+  code: string;
+  name: string;
+  version: number;
+  /** 付几成（75 = 7.5 折）与会员此刻的档阶 */
+  rate: number;
+  stateLabel: string;
+  target: import('./benefits').DiscountTarget;
+  /** 适用明细的合计、省下多少（分） */
+  base: number;
+  amount: number;
 }
 
 // ───────────── 退款单（v0.7.20，飞书需求 RQ-006；docs/CASHIER.md 第 3 节）─────────────
@@ -237,6 +266,8 @@ export interface CheckoutPreview {
   members: { id: number; name: string; memberNo: string; status: 'active' | 'frozen'; principalBalance: number; bonusBalance: number }[];
   /** 这些会员的券（v0.7.20）：能抵多少，不能用的写原因 */
   storeCoupons?: import('./coupons').CheckoutCouponOption[];
+  /** 能享的会员折扣（v0.7.25），省得多的在前；没选券、优惠时第一项必须带上 */
+  memberDiscounts?: MemberDiscountOption[];
   graceMinutes: number;
   pricedAt: string;
   /** 钟房里还没结束的钟单（v0.7.1）：结账时一起收尾，在钟上的下钟，还没上钟的按已做完记 */
@@ -424,7 +455,9 @@ export interface DashboardData {
     discount: number;
     /** 券抵扣（v0.7.20，已含在 net 里，单列，口径同优惠） */
     coupon: number;
-    /** 当天的退款单（v0.7.20，不在 net 里：净营业额 = net − 优惠 − 券抵扣 − 退款） */
+    /** 会员折扣（v0.7.25，已含在 net 里，单列，口径同券抵扣） */
+    memberDiscount?: number;
+    /** 当天的退款单（v0.7.20，不在 net 里：净营业额 = net − 优惠 − 券抵扣 − 会员折扣 − 退款） */
     refund: number;
     rechargePaid: number;
     rechargeCount: number;

@@ -127,9 +127,9 @@ function TodayTab() {
             d && (
               <>
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                  <Kpi icon={<TrendingUp className="size-4" />} label="今日净营业额（应收 − 优惠 − 券抵扣 − 退款）" tone="pine">
-                    <Money cents={d.todayStats.net - d.todayStats.discount - (d.todayStats.coupon ?? 0) - (d.todayStats.refund ?? 0)} />
-                    {(d.todayStats.discount !== 0 || !!d.todayStats.coupon || !!d.todayStats.refund) && (
+                  <Kpi icon={<TrendingUp className="size-4" />} label="今日净营业额（应收 − 优惠 − 券抵扣 − 会员折扣 − 退款）" tone="pine">
+                    <Money cents={d.todayStats.net - d.todayStats.discount - (d.todayStats.coupon ?? 0) - (d.todayStats.memberDiscount ?? 0) - (d.todayStats.refund ?? 0)} />
+                    {(d.todayStats.discount !== 0 || !!d.todayStats.coupon || !!d.todayStats.memberDiscount || !!d.todayStats.refund) && (
                       <span className="block text-[12px] font-semibold text-ink-3" data-testid="dashboard-discount">
                         应收 <Money cents={d.todayStats.net} />
                         {d.todayStats.discount !== 0 && (
@@ -142,6 +142,12 @@ function TodayTab() {
                           <>
                             {' '}
                             · 券抵扣 <Money cents={-d.todayStats.coupon} signed />
+                          </>
+                        )}
+                        {!!d.todayStats.memberDiscount && (
+                          <>
+                            {' '}
+                            · 会员折扣 <Money cents={-d.todayStats.memberDiscount} signed />
                           </>
                         )}
                         {!!d.todayStats.refund && (

@@ -46,6 +46,11 @@ async function periodKpis(db: Db, from: string, to: string, c: Clock): Promise<P
               - coalesce(sum(p.amount) FILTER (WHERE c.void_business_date BETWEEN ${from} AND ${to}), 0)
        FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
        WHERE p.method = 'store_coupon' AND (c.business_date BETWEEN ${from} AND ${to} OR c.void_business_date BETWEEN ${from} AND ${to})) AS coupon,
+      -- 会员折扣（v0.7.25）：口径同券抵扣
+      (SELECT coalesce(sum(p.amount) FILTER (WHERE c.business_date BETWEEN ${from} AND ${to}), 0)
+              - coalesce(sum(p.amount) FILTER (WHERE c.void_business_date BETWEEN ${from} AND ${to}), 0)
+       FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
+       WHERE p.method = 'member_discount' AND (c.business_date BETWEEN ${from} AND ${to} OR c.void_business_date BETWEEN ${from} AND ${to})) AS member_discount,
       (SELECT coalesce(sum(amount), 0) FROM refunds WHERE status = 'completed' AND business_date BETWEEN ${from} AND ${to}) AS refund,
       -- 结账客人、结账单、储值消费与日结同一营业口径（v0.7.1）：时段内结的计正数、时段内反结账 / 撤销的计负数
       -- 结账客人按人数：手牌每位 1 人，桌台按开台人数（餐饮第二步）
@@ -60,7 +65,7 @@ async function periodKpis(db: Db, from: string, to: string, c: Clock): Promise<P
       ((SELECT coalesce(sum(total_amount), 0) FROM consumptions WHERE business_date BETWEEN ${from} AND ${to})
         - (SELECT coalesce(sum(principal_amount + bonus_amount), 0) FROM reversals WHERE business_date BETWEEN ${from} AND ${to})) AS wallet_consumed,
       (SELECT count(*) FROM members WHERE ${bizDate(db, 'created_at', c)} BETWEEN ${from} AND ${to})::int AS new_members`;
-  const net = r!.receivable - r!.discount - r!.coupon - r!.refund;
+  const net = r!.receivable - r!.discount - r!.coupon - r!.memberDiscount - r!.refund;
   return { ...r!, net, perGuest: r!.guests ? Math.round(net / r!.guests) : 0 };
 }
 
@@ -117,12 +122,12 @@ export async function executiveReport(db: Db, from: string, to: string, c: Clock
       SELECT void_business_date, -sum(total_amount) FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to} GROUP BY 1
     ),
     dis AS (
-      -- 优惠 / 免单与券抵扣（v0.7.20），以及退款单（按退款的营业日）都从净营业额里减
+      -- 优惠 / 免单、券抵扣（v0.7.20）、会员折扣（v0.7.25），以及退款单（按退款的营业日）都从净营业额里减
       SELECT c.business_date AS date, sum(p.amount) AS amount FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
-      WHERE p.method IN ('discount', 'store_coupon') AND c.business_date BETWEEN ${from} AND ${to} GROUP BY 1
+      WHERE p.method IN ('discount', 'store_coupon', 'member_discount') AND c.business_date BETWEEN ${from} AND ${to} GROUP BY 1
       UNION ALL
       SELECT c.void_business_date, -sum(p.amount) FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
-      WHERE p.method IN ('discount', 'store_coupon') AND c.void_business_date BETWEEN ${from} AND ${to} GROUP BY 1
+      WHERE p.method IN ('discount', 'store_coupon', 'member_discount') AND c.void_business_date BETWEEN ${from} AND ${to} GROUP BY 1
       UNION ALL
       SELECT business_date, sum(amount) FROM refunds WHERE status = 'completed' AND business_date BETWEEN ${from} AND ${to} GROUP BY 1
     ),

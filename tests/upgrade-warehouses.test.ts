@@ -12,7 +12,7 @@ import { createSql, type Sql } from '../src/server/db';
 import { migrate } from '../src/server/migrate';
 import { todayIn } from '../src/server/modules/inventory/common';
 import { inventoryChecks } from '../src/server/modules/inventory/reports';
-import { api, login, PASSWORD, TEST_DB } from './helpers';
+import { api, login, PASSWORD, TEST_DB, migrationsFrom } from './helpers';
 import { resetPublicSchema } from './test-db';
 
 const MIGRATIONS = new URL('../src/server/migrations/', import.meta.url);
@@ -74,7 +74,7 @@ describe('迁移 029 · 原有库存与还没生效的领料、退回', () => {
     const pendingIssue = await docAt('LY-U2', 'issue', 'draft', { departmentId: dept!.id });
     await lineOf(pendingIssue, 1_000);
 
-    expect(await migrate(sql)).toEqual(['029_warehouses.sql', '030_supplier_settlement.sql', '031_stock_cycles.sql', '032_spaces.sql', '033_floorplans.sql', '034_floormap.sql', '035_locations.sql', '036_floorplan_finish.sql', '037_refunds_coupons.sql', '038_devices.sql', '039_payment_fences.sql', '040_membership_v2.sql', '041_benefits.sql', '043_miniprogram.sql', '044_miniprogram_fences.sql']);
+    expect(await migrate(sql)).toEqual(migrationsFrom('029_warehouses.sql'));
     const docs = await sql<{ id: number; warehouseId: number | null }[]>`SELECT id, warehouse_id FROM inv_docs ORDER BY id`;
     const whOf = (id: number) => docs.find((d) => d.id === id)!.warehouseId;
     const [bathWh] = await sql<{ id: number }[]>`SELECT id FROM warehouses WHERE department_id = ${dept!.id}`;
