@@ -8,6 +8,7 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import {
   BRIDGE_REPORT_INTERVAL_MS,
+  bridgeErrorEventValue,
   DEFAULT_BRIDGE_PORT,
   parseBridgeMessage,
   type BridgeDeviceKind,
@@ -106,11 +107,17 @@ function connect() {
     return;
   }
   socket = ws;
+  // 换了地址或重连后，旧连接晚到的回调一律不管：不能把新连接的状态清掉（Codex 自动审查 9ca8a95）
   ws.onopen = () => {
+    if (socket !== ws) {
+      ws.close();
+      return;
+    }
     set({ connected: true, protocolError: null });
     ws.send(JSON.stringify({ v: 1, type: 'hello', page: 'yuzu' }));
   };
   ws.onmessage = (ev) => {
+    if (socket !== ws) return;
     const r = parseBridgeMessage(String(ev.data));
     if (!r.ok) {
       set({ protocolError: r.reason });
@@ -127,10 +134,11 @@ function connect() {
       });
     } else if (m.type === 'card') addEvent({ key: m.key, type: 'card', value: m.cardNo, at: m.at, source: 'bridge' });
     else if (m.type === 'scan') addEvent({ key: m.key, type: 'scan', value: m.code, at: m.at, source: 'bridge' });
-    else if (m.type === 'error') addEvent({ key: m.key ?? 'bridge', type: 'error', value: `${m.code}：${m.message}`, at: new Date().toISOString(), source: 'bridge' });
+    else if (m.type === 'error') addEvent({ key: m.key ?? 'bridge', type: 'error', value: bridgeErrorEventValue(m.code, m.message), at: new Date().toISOString(), source: 'bridge' });
   };
   ws.onclose = () => {
-    if (socket === ws) socket = null;
+    if (socket !== ws) return;
+    socket = null;
     set({ connected: false, devices: [] });
     scheduleRetry();
   };

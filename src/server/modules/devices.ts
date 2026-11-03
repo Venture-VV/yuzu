@@ -14,11 +14,13 @@ import {
   DEVICE_CONNECTIONS,
   DEVICE_ERROR_LABELS,
   DEVICE_EVENT_TYPES,
+  DEVICE_EVENT_VALUE_MAX,
   DEVICE_JOB_KINDS,
   DEVICE_KIND_CONNECTIONS,
   DEVICE_KINDS,
   DEVICE_QUOTE,
   DEVICE_STATUSES,
+  isDeviceErrorCode,
   NETWORK_CONNECTIONS,
   OFFLINE_AFTER_MS,
   plannedQuoteDevices,
@@ -376,8 +378,8 @@ export async function recordStatus(db: Sql, id: number, status: DeviceStatus, co
 
 /** 正在打印的设备：心跳跳过它（多数打印机网口同时只接一个连接） */
 const busy = new Set<number>();
-/** 上一次心跳还没回来的设备：不重复发起 */
-const probing = new Set<number>();
+/** 上一次心跳还没回来的设备（与它占着的连接）：不重复发起；打印要等它放开连接再连（Codex 自动审查 9ca8a95） */
+const probing = new Map<number, Promise<unknown>>();
 
 /**
  * 心跳一轮：查所有启用的网口设备（连上就在线或故障，连不上且最近一次联系上已超过 5 秒记离线）；
@@ -409,10 +411,12 @@ export async function checkDevicesOnce(deps: Pick<Deps, 'sql'>, now = new Date()
           return;
         }
         if (busy.has(d.id) || probing.has(d.id)) return;
-        probing.add(d.id);
+        const mode = d.kind === 'print_server' ? 'connect' : d.kind === 'label_printer' && d.options.labelLanguage !== 'escpos' ? 'tspl' : 'escpos';
+        // 查与登记在同一拍里（中间没有 await）：打印那边看到 busy 或等这个承诺，两边不会同时占连接
+        const pending = probe({ host: d.host, port: d.port }, mode);
+        probing.set(d.id, pending);
         try {
-          const mode = d.kind === 'print_server' ? 'connect' : d.kind === 'label_printer' && d.options.labelLanguage !== 'escpos' ? 'tspl' : 'escpos';
-          const r = await probe({ host: d.host, port: d.port }, mode);
+          const r = await pending;
           if (r.reachable) await recordStatus(sql, d.id, r.code ? 'error' : 'online', r.code, { seen: true, now: new Date(), expectVersion: d.version });
           else if (stale(d.lastSeenAt) && (d.status !== 'offline' || d.statusCode !== (r.code ?? 'DEVICE_OFFLINE'))) {
             await recordStatus(sql, d.id, 'offline', r.code ?? 'DEVICE_OFFLINE', { seen: false, now, expectVersion: d.version });
@@ -446,7 +450,7 @@ const ReportInput = z.object({
         id: z.uuid('事件编号不正确'),
         key: z.string().min(1).max(40),
         type: z.enum(['card', 'scan', 'error']),
-        value: z.string().min(1).max(200),
+        value: z.string().min(1).max(DEVICE_EVENT_VALUE_MAX),
         at: z.string().refine((v) => !Number.isNaN(Date.parse(v)), '时间格式不对'),
       }),
     )
@@ -483,7 +487,8 @@ export async function reportBridge(deps: Deps, raw: unknown, ctx: OpContext): Pr
       if (!input.bridge.connected) await setStatus(c, 'offline', 'BRIDGE_OFFLINE', false);
       else if (!r) await setStatus(c, 'offline', 'DEVICE_OFFLINE', false);
       else {
-        const code = r.code && (DEVICE_ERROR_LABELS as Record<string, string>)[r.code] ? (r.code as DeviceErrorCode) : null;
+        // 只认协议里的错误码：按对象取值会把 __proto__ 之类继承来的属性也当成有，写进去后设备页渲染出错（Codex 自动审查 9ca8a95）
+        const code = isDeviceErrorCode(r.code) ? r.code : null;
         await setStatus(c, r.status, r.status === 'online' ? null : code, r.status === 'online' || r.status === 'error');
       }
     }
@@ -554,7 +559,10 @@ async function runJob(deps: Deps, jobId: number) {
   });
   if (!claimed) return;
   const { job, device } = claimed;
+  // 先挡住之后的心跳，再等正在进行的那次心跳放开连接：多数打印机网口同时只接一个连接，
+  // 不回状态的型号一次心跳要占满 1.5 秒，不等的话打印的几次连接都会被拒（Codex 自动审查 9ca8a95）
   busy.add(device.id);
+  await probing.get(device.id)?.catch(() => {});
   try {
     await sendJob(deps, jobId, job.kind, device);
   } catch (error) {

@@ -250,6 +250,17 @@ export type BridgeMessage =
   | { v: 1; type: 'error'; key?: string; code: DeviceErrorCode; message: string }
   | { v: 1; type: 'pong' };
 
+/** 终端上报的一条事件的内容（卡号、条码、错误说明）最长多少字：页面按它截，服务端按它校验 */
+export const DEVICE_EVENT_VALUE_MAX = 200;
+
+/**
+ * 桥报的错误拼成一条事件内容「错误码：说明」，整条截到 DEVICE_EVENT_VALUE_MAX。
+ * 说明本身最多 200 字，拼上错误码会超过服务端的上限，整份上报都会被拒（Codex 自动审查 9ca8a95）
+ */
+export function bridgeErrorEventValue(code: DeviceErrorCode, message: string): string {
+  return `${code}：${message}`.slice(0, DEVICE_EVENT_VALUE_MAX);
+}
+
 export type BridgeParse = { ok: true; message: BridgeMessage } | { ok: false; code: 'BRIDGE_PROTOCOL'; reason: string };
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);

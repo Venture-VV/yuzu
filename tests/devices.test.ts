@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto';
 import net from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Device, DeviceJob, DeviceOverview } from '../src/shared/devices';
+import { bridgeErrorEventValue, DEVICE_EVENT_VALUE_MAX, type Device, type DeviceJob, type DeviceOverview } from '../src/shared/devices';
 import { checkDevicesOnce, waitForDeviceJobs } from '../src/server/modules/devices';
 import { startMockPrinter, type MockPrinter } from '../src/server/devices/mock-printer';
 import { sendToPrinter } from '../src/server/devices/netprint';
@@ -304,6 +304,55 @@ describe('打印任务', () => {
 });
 
 describe('心跳与修改交错', () => {
+  it('心跳占着连接时打印：等这次心跳放开连接再连，打得出来（同时只接一个连接、不回状态的打印机；Codex 自动审查 9ca8a95）', async () => {
+    // 同时只接一个连接、不回状态查询的打印机：一次心跳要占满 1.5 秒，这期间来的连接直接断开
+    let active: net.Socket | null = null;
+    let refused = 0;
+    const printed: Buffer[] = [];
+    const server = net.createServer((socket) => {
+      socket.on('error', () => {});
+      if (active) {
+        refused += 1;
+        socket.destroy();
+        return;
+      }
+      active = socket;
+      const chunks: Buffer[] = [];
+      socket.on('data', (d) => chunks.push(d));
+      socket.on('end', () => {
+        const all = Buffer.concat(chunks);
+        // 状态查询只有几个字节；打印内容才记成打出的一张
+        if (all.length > 16) printed.push(all);
+        socket.end();
+      });
+      socket.on('close', () => {
+        if (active === socket) active = null;
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    const port = (server.address() as net.AddressInfo).port;
+    try {
+      const d = await create({ code: 'PRN-CX-04', name: '单连接测试机', kind: 'printer', connection: 'network', host: '127.0.0.1', port });
+      expect(d.status, JSON.stringify(d.body)).toBe(200);
+      const round = checkDevicesOnce(ctx);
+      await until(() => active !== null, '心跳已经连上、占着连接');
+      const r = await job(d.body.id);
+      expect(r.body.status).toBe('queued');
+      await round;
+      await waitForDeviceJobs();
+      expect(await getJob(r.body.id)).toMatchObject({ status: 'done', attempts: 1, errorCode: null });
+      expect(printed).toHaveLength(1);
+      expect(refused).toBe(0);
+      await api(ctx.app, ctx.owner, 'POST', `/api/devices/${d.body.id}/enabled`, { enabled: false, expectedVersion: (await device('PRN-CX-04')).version });
+    } finally {
+      await new Promise<void>((r) => {
+        (active as net.Socket | null)?.destroy();
+        server.close(() => r());
+      });
+    }
+  });
+
+
   it('探测期间改了设置：旧地址的结果作废，不覆盖新设置的状态（Codex 预检 3efa3fe P3）', async () => {
     // 模拟打印机 1 秒后才回状态：探测还在等回复时，把地址清空
     const slow = await startMockPrinter({ delayMs: 1_000 });
@@ -405,6 +454,29 @@ describe('终端替桥上报', () => {
     expect((await report({ terminal: 'TRM-SY-01', bridge: { connected: true } }, am)).status).toBe(403);
     // 报文不对：400
     expect((await report({ terminal: 'TRM-SY-01', bridge: { connected: true }, events: [{ id: 'x', key: 'rc300', type: 'card', value: '1', at: 'now' }] })).status).toBe(400);
+  });
+
+  it('桥报的错误码只认协议里的（__proto__ 之类不写进去）；拼上错误码的长说明截到上限，整份上报照常收下（Codex 自动审查 9ca8a95）', async () => {
+    const report = (body: Record<string, unknown>) => api(ctx.app, ctx.clerk, 'POST', '/api/devices/bridge-report', body);
+    // 对象继承来的属性名当错误码：状态照记，错误码不写（原来会把 __proto__ 写进去，设备页渲染出错）
+    for (const code of ['__proto__', 'constructor', 'toString']) {
+      const r = await report({ terminal: 'TRM-SY-01', bridge: { connected: true }, devices: [{ key: 'rc300', status: 'error', code }] });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(await device('RDR-SY-01')).toMatchObject({ status: 'error', statusCode: null });
+    }
+    // 说明 200 字的读卡失败：拼成「错误码：说明」后截到上限，这份上报（连同设备状态）照常收下
+    const value = bridgeErrorEventValue('READ_FAILED', '读'.repeat(200));
+    expect(value).toHaveLength(DEVICE_EVENT_VALUE_MAX);
+    expect(value.startsWith('READ_FAILED：')).toBe(true);
+    const r = await report({
+      terminal: 'TRM-SY-01',
+      bridge: { connected: true },
+      devices: [{ key: 'rc300', status: 'online' }],
+      events: [{ id: randomUUID(), key: 'rc300', type: 'error', value, at: new Date().toISOString() }],
+    });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.recorded).toBe(1);
+    expect(await device('RDR-SY-01')).toMatchObject({ status: 'online', statusCode: null });
   });
 });
 
