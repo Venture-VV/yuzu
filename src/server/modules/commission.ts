@@ -132,8 +132,12 @@ export function registerCommissionRoutes(app: FastifyInstance, deps: Deps) {
     await sql.begin(async (tx) => {
       await tx`SELECT pg_advisory_xact_lock(hashtext('settings'))`;
       const before = (await commissionSettings(tx)).current.rules;
+      // 生效时间用应用的时钟：结账时刻（checkouts.created_at）也是应用的时钟记的，按它取规则。原来用数据库的 now()，
+      // 数据库的时钟比应用慢时（例如跑在时钟漂移的虚拟机里），刚结的钟会被算成改规则之后结的（Codex 在 main v0.7.20 复测首轮）
+      const effectiveAt = new Date();
       const [row] = await tx<{ id: number }[]>`
-        INSERT INTO commission_rule_versions (rules, note, created_by) VALUES (${tx.json(rules as never)}, ${note}, ${req.actor.id}) RETURNING id`;
+        INSERT INTO commission_rule_versions (rules, note, created_by, effective_at)
+        VALUES (${tx.json(rules as never)}, ${note}, ${req.actor.id}, ${effectiveAt}) RETURNING id`;
       await writeAudit(tx, {
         staffId: req.actor.id,
         action: 'settings_updated',

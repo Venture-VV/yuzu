@@ -1,7 +1,8 @@
 // v0.7.1 S6 技师第二步：钟房（上牌与轮钟队列、派钟、上钟 / 下钟、加钟、退钟与取消、钟房日志）与技师提成（规则版本、按结账时刻）。
 
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { settledTechnicianLines, withCommission } from '../src/server/modules/commission';
 import { createStaff } from '../src/server/modules/staff';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
@@ -309,5 +310,40 @@ describe('提成', () => {
     expect(csv.body).toContain('营业日,结账单号,计入,手牌,工号,技师,项目,钟数,上钟方式,金额（元）,基本提成（元）,点钟奖励（元）,提成合计（元）,提成规则');
     expect(csv.body).toContain('反结账冲回');
     expect((await ctx.app.inject({ method: 'GET', url: `/api/reports/technicians/commission.csv?from=${date}&to=${date}`, headers: { cookie: duty } })).statusCode).toBe(403);
+  });
+
+  it('数据库的时钟比应用慢：改规则之后，已结的钟仍按旧规则、新结的按新规则（Codex 在 main v0.7.20 复测首轮的提成差异）', async () => {
+    // 结账时刻按应用的时钟记；规则生效时间原来取数据库的 now()。数据库跑在时钟漂移的虚拟机里、比应用慢时，
+    // 刚结的钟会被算成改规则之后结的。这里让应用的时钟比数据库快 60 秒；应用时钟按步骤手动拨（不随机器快慢走），
+    // 结账、改规则、再结账各差 1 秒，顺序确定
+    const appNow = Date.now() + 60_000;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(appNow);
+    try {
+      const linesOf = async (checkoutId: number) =>
+        (await withCommission(ctx.sql, await settledTechnicianLines(ctx.sql, '2000-01-01', '2999-12-31'))).filter((l) => l.checkoutId === checkoutId && l.sign === 1).map((l) => ({ versionId: l.versionId, total: l.base + l.bonus }));
+      const v = await enter();
+      expect((await dispatch({ visitId: v, itemId: foot, technicianId: tech['02'], callType: 'designated', expectedTotal: 23800 })).status).toBe(200);
+      const first = await pay(v);
+      const before = await linesOf(first.id);
+      // 现行规则（上一条用例改的）：足疗专业档每钟 70、点钟奖励 15
+      expect(before.map((l) => l.total)).toEqual([8500]);
+      vi.setSystemTime(appNow + 1_000);
+      const put = await api(ctx.app, ctx.owner, 'PUT', '/api/admin/technicians/commission', {
+        rules: { base: { kind: 'percent', rateBp: 4500 }, designatedBonus: 2000, items: { [foot]: { kind: 'fixed', perClock: { standard: 6000, professional: 9000, premium: 8500 } } } },
+        note: '时钟不一致',
+      });
+      expect(put.status).toBe(200);
+      // 已结的这一钟仍按旧规则
+      expect(await linesOf(first.id)).toEqual(before);
+      // 改规则之后新结的按新规则：90 + 20
+      vi.setSystemTime(appNow + 2_000);
+      const v2 = await enter();
+      expect((await dispatch({ visitId: v2, itemId: foot, technicianId: tech['02'], callType: 'designated', expectedTotal: 23800 })).status).toBe(200);
+      const second = await pay(v2);
+      expect((await linesOf(second.id)).map((l) => l.total)).toEqual([11000]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
