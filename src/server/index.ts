@@ -68,6 +68,7 @@ async function main() {
     try {
       const run = await runMembershipDaily({ sql, config });
       if (run?.processed) app.log.info(`会员到期处理：${run.processed} 位（保级 ${run.retained}、进补充期 ${run.grace}、降档 ${run.downgraded}）`);
+      if (run?.trialsExpired) app.log.info(`临时身份到期：${run.trialsExpired} 位`);
       if (run?.error) app.log.error(`会员到期处理有出错的：${run.error}`);
     } catch (error) {
       app.log.error({ err: error }, '会员到期处理失败，下一分钟重试');

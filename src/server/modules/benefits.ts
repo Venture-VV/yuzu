@@ -70,6 +70,7 @@ import { issueBenefitCoupons, listTemplates } from './coupons';
 import { erpOpAbandoned } from './erp-ops';
 import { loadMembershipRules, projectedGrade, settleMemberDue } from './membership';
 import { benefitState } from './member-trials';
+import { GIFT_BENEFIT_CODE } from '@shared/trials';
 import { loadSettings } from './settings';
 
 // ───────────────────────── 读权益 ─────────────────────────
@@ -905,11 +906,17 @@ export async function registerBenefitUse(deps: Deps, memberId: number, raw: unkn
       if (b.category !== 'service') {
         throw unprocessable('BENEFIT_NOT_SERVICE', `「${b.name}」是${BENEFIT_CATEGORY_LABELS[b.category]}，不用登记：${b.category === 'coupon' || b.category === 'event' ? '发的券在结账时用' : '只在清单里显示'}`);
       }
-      const rules = await loadMembershipRules(tx);
-      if (!benefitEligible(b, m.grade, m.tier)) {
-        throw unprocessable('BENEFIT_NOT_ELIGIBLE', `这位会员现在是「${gradeLabel(rules, m.grade, m.tier)}」，「${b.name}」从「${startLabel(b.startGrade, b.startTier)}」起才能享`);
+      // 赠送会籍（v0.7.25）：在会员详情的「邀请体验 / 赠送会籍」里赠送，同时登记一次使用；不单独登记（否则占了次数却没有给对方会籍）
+      if (b.code === GIFT_BENEFIT_CODE) {
+        throw unprocessable('BENEFIT_VIA_TRIAL', `「${b.name}」请在会员详情的「邀请体验 / 赠送会籍」里赠送（同时登记一次使用），不在这里单独登记`);
       }
-      const limit = b.period === 'none' ? null : benefitQuantity(b, m.grade, m.tier);
+      const rules = await loadMembershipRules(tx);
+      // 临时身份（v0.7.25，M51）：服务类按自己的与临时身份的取高的
+      const st = await benefitState(tx, memberId, m, date);
+      if (!benefitEligible(b, st.grade, st.tier)) {
+        throw unprocessable('BENEFIT_NOT_ELIGIBLE', `这位会员现在是「${gradeLabel(rules, st.grade, st.tier)}」${st.trial ? '（含体验中的）' : ''}，「${b.name}」从「${startLabel(b.startGrade, b.startTier)}」起才能享`);
+      }
+      const limit = b.period === 'none' ? null : benefitQuantity(b, st.grade, st.tier);
       const pk = limit === null ? null : periodKey(b.period, date);
       if (limit !== null) {
         const [used] = await tx<{ n: number }[]>`
@@ -961,6 +968,9 @@ export async function voidBenefitUse(deps: Deps, id: number, raw: unknown, ctx: 
       SELECT status, staff_id, business_date, member_id, benefit_id, quantity FROM benefit_uses WHERE id = ${id} FOR UPDATE`;
     if (!u) throw notFound('使用登记不存在');
     if (u.status === 'voided') return;
+    // 赠送会籍时记的（v0.7.25）：在受邀会员的详情里撤销那次赠送，一并作废这条登记（只作废登记会留下没有占次数的会籍）
+    const [trial] = await tx<{ memberId: number }[]>`SELECT member_id FROM member_trials WHERE benefit_use_id = ${id}`;
+    if (trial) throw unprocessable('USE_OF_TRIAL', '这条登记是赠送会籍时记的：请在受邀会员的详情里撤销那次赠送（会一并作废这条登记）', { memberId: Number(trial.memberId) });
     if ((Number(u.staffId) !== ctx.actor.id || u.businessDate !== date) && !can(ctx.actor, 'benefit.publish')) {
       throw forbidden('只能作废自己今天登记的；其他的请店主或店总作废');
     }

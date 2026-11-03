@@ -129,6 +129,9 @@ export type AuditAction =
   | 'benefit_used'
   | 'benefit_use_voided'
   | 'member_lookup'
+  // 会员体系 v2 第三期（v0.7.25）：邀请体验、赠送会籍的发起与撤销
+  | 'member_trial_created'
+  | 'member_trial_cancelled'
   // 微信小程序（小程序线）：解绑会员的微信、维护小程序内容、作废结果不确定的操作
   | 'mp_unbind'
   | 'mp_content_saved'

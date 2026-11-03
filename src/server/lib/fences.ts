@@ -64,6 +64,8 @@ export const FENCED_OPS = [
   'grade_adjust',
   // 登记会员权益使用（v0.7.24，迁移 041）：编号记在使用登记上（benefit_uses.client_key）
   'benefit_use',
+  // 邀请体验、赠送会籍（v0.7.25，迁移 042）：编号记在临时身份上（member_trials.client_key）
+  'member_trial',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -109,6 +111,7 @@ export async function fenceKey(
   if (isDeviceOp(opType) && (await deviceOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   if (opType === 'grade_adjust' && (await gradeOpRef(tx, key)) !== null) return { existingOpType: opType };
   if (opType === 'benefit_use' && (await benefitUseOpRef(tx, key)) !== null) return { existingOpType: opType };
+  if (opType === 'member_trial' && (await trialOpRef(tx, key)) !== null) return { existingOpType: opType };
   const rows = await tx`
     INSERT INTO op_fences (key, op_type, staff_id) VALUES (${key}, ${opType}, ${staffId})
     ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;
@@ -152,5 +155,11 @@ export async function gradeOpRef(db: Db, key: string): Promise<number | null> {
 /** 登记会员权益使用（v0.7.24）的操作编号记在使用登记上：查到时返回那条登记的编号 */
 export async function benefitUseOpRef(db: Db, key: string): Promise<number | null> {
   const [row] = await db<{ id: number }[]>`SELECT id FROM benefit_uses WHERE client_key = ${key}`;
+  return row ? Number(row.id) : null;
+}
+
+/** 邀请体验、赠送会籍（v0.7.25）的操作编号记在临时身份上：查到时返回那条临时身份的编号 */
+export async function trialOpRef(db: Db, key: string): Promise<number | null> {
+  const [row] = await db<{ id: number }[]>`SELECT id FROM member_trials WHERE client_key = ${key}`;
   return row ? Number(row.id) : null;
 }

@@ -709,7 +709,7 @@ async function main() {
         const run = await runMembershipDaily({ sql, config });
         console.log(
           run
-            ? `会员到期处理（营业日 ${run.businessDate}）：处理 ${run.processed} 位，保级 ${run.retained}、进补充期 ${run.grace}、降档 ${run.downgraded}${run.error ? `；出错：${run.error}` : ''}`
+            ? `会员到期处理（营业日 ${run.businessDate}）：处理 ${run.processed} 位，保级 ${run.retained}、进补充期 ${run.grace}、降档 ${run.downgraded}${run.trialsExpired ? `；体验到期 ${run.trialsExpired} 位` : ''}${run.error ? `；出错：${run.error}` : ''}`
             : '今天已经处理过，没有到期的会员',
         );
         const benefits = await runBenefitsDaily({ sql, config });

@@ -64,6 +64,7 @@ import { setTxTimeouts } from '../lib/tx';
 import { assertNotFenced } from '../lib/fences';
 import { onDueSettled, onGradeChanged, onMembersGraded } from './benefits';
 import { erpOpAbandoned } from './erp-ops';
+import { activeTrialsOf, convertTrials, expireTrials, hasOverdueTrials, trialSummary } from './member-trials';
 import { loadSettings } from './settings';
 
 const RULES_KEY = 'membership_rules';
@@ -102,6 +103,10 @@ const RulesInput = z
     vipLockerLevels: z
       .array(z.number('请填写 VIP 柜等级').int('VIP 柜等级取整数').min(0, 'VIP 柜等级不能为负').max(MAX_VIP_LEVEL, `VIP 柜最多 ${MAX_VIP_LEVEL} 级`))
       .length(MAX_GRADE + 1, '每一档都要填能用几级 VIP 柜'),
+    // 低一档邀请体验（v0.7.25，M52）
+    trialInviteDays: z.number('请填写邀请体验的天数').int('邀请体验按天').min(1, '邀请体验至少 1 天').max(90, '邀请体验最多 90 天'),
+    trialInvitesPerMonth: z.number('请填写每月能邀请几次').int('次数要是整数').min(0, '次数不能为负').max(10, '每月最多 10 次'),
+    trialInviteeMonths: z.number('请填写受邀间隔').int('受邀间隔按月').min(1, '受邀间隔至少 1 个月').max(36, '受邀间隔最多 36 个月'),
   })
   .superRefine((r, ctx) => {
     const issue = (path: (string | number)[], message: string) => ctx.addIssue({ code: 'custom', path, message });
@@ -203,6 +208,8 @@ async function changeState(tx: Tx, memberId: number, kind: GradeEventKind, busin
             ${extra.cycleSpend ?? 0}, ${extra.rollingRecharge ?? null}, ${extra.rechargeId ?? null}, ${extra.consumptionId ?? null},
             ${extra.staffId ?? null}, ${extra.reason ?? ''}, ${extra.clientKey ?? null})
     RETURNING id`;
+  // 临时身份（v0.7.25，M53）：自己的档级升到体验的档级或更高时转正
+  if (to.grade > from.grade) await convertTrials(tx, [memberId], businessDate);
   await onGradeChanged(tx, { memberId, kind, eventId: Number(event!.id), date: businessDate, to, staffId: extra.staffId ?? null, deferPeriodic: extra.deferPeriodic });
 }
 
@@ -360,6 +367,8 @@ async function gradeByCumulative(tx: Tx, memberIds: number[] | 'all', o: { kind:
       FROM unnest(${ids}::bigint[], ${changes.map((c) => c.from.grade)}::smallint[], ${changes.map((c) => c.from.tier)}::smallint[],
                   ${grades}::smallint[], ${changes.map((c) => c.amount)}::bigint[]) AS x (id, from_grade, from_tier, grade, amount)
       ORDER BY x.id`;
+    // 临时身份（v0.7.25）：定档到了体验的档级或更高的转正
+    await convertTrials(tx, ids, o.today);
     // 会员权益（v0.7.24）：定了档的当场补发本期券类（不发升级礼）
     await onMembersGraded(tx, ids, o.today, o.staffId);
   }
@@ -414,7 +423,9 @@ export async function runMembershipDaily(deps: Pick<Deps, 'sql' | 'config'>, now
     SELECT finished_at, error FROM membership_job_runs WHERE job = 'daily' AND business_date = ${today}`;
   // 今天已经跑完、没出错、也没有到期的会员：什么都不做。没跑完（进程在中途停了）或出过错的，就算已经没有到期的会员
   // （例如出错的那位后来充值、消费时被处理了），也要走到最后把运行记录补完，否则自检一整天都报（Codex 自动审查 43d53e9）
-  if (run && run.finishedAt && !run.error && first.length === 0) return null;
+  // 临时身份（v0.7.25）：过了结束日还生效的也在这里结束
+  const trialsDue = await hasOverdueTrials(sql, today);
+  if (run && run.finishedAt && !run.error && first.length === 0 && !trialsDue) return null;
   await sql`
     INSERT INTO membership_job_runs (job, business_date) VALUES ('daily', ${today})
     ON CONFLICT (job, business_date) DO NOTHING`;
@@ -443,13 +454,16 @@ export async function runMembershipDaily(deps: Pick<Deps, 'sql' | 'config'>, now
     }
     page = page.length < DAILY_PAGE ? [] : await dueIds(Number(page[page.length - 1]!.id));
   }
+  // 临时身份到期（会员到期处理之后：处理中升了档的已经转正，不再记到期）
+  const trials = trialsDue ? await expireTrials(sql, today) : { expired: 0, error: null };
+  error ??= trials.error;
   const [saved] = await sql<MembershipJobRun[]>`
     UPDATE membership_job_runs
        SET processed = processed + ${counts.processed}, retained = retained + ${counts.retained}, grace = grace + ${counts.grace},
            downgraded = downgraded + ${counts.downgraded}, finished_at = now(), error = ${error}
      WHERE job = 'daily' AND business_date = ${today}
     RETURNING business_date, started_at, finished_at, processed, retained, grace, downgraded, error`;
-  return saved ?? null;
+  return saved ? { ...saved, trialsExpired: trials.expired } : null;
 }
 
 // ───────────────────────── 读：等级卡、徽标、看板、名单 ─────────────────────────
@@ -512,10 +526,13 @@ export async function memberGradeBadges(db: Db, memberIds: number[], todayDate: 
   const rules = await loadMembershipRules(db);
   const rows = await db<(GradeRow & { id: number })[]>`
     SELECT id, grade, tier, cycle_start, cycle_end, grace_until, grade_version FROM members WHERE id IN ${db(ids)}`;
+  // 临时身份（v0.7.25，M51）：VIP 柜按自己的与临时身份的取高的；徽标仍显示自己的档阶，另外标「体验中」
+  const trials = await activeTrialsOf(db, ids, todayDate);
   return new Map(
     rows.map((r) => {
       const s = stateOf(r);
       const daysLeft = s.grade > 0 ? daysToExpiry(s, todayDate) : null;
+      const trial = trials.get(Number(r.id)) ?? null;
       return [
         Number(r.id),
         {
@@ -527,7 +544,8 @@ export async function memberGradeBadges(db: Db, memberIds: number[], todayDate: 
           graceUntil: s.graceUntil,
           daysLeft,
           reminder: s.graceUntil === null ? reminderBucket(rules, daysLeft) : null,
-          lockerLevel: lockerLevelOf(rules, s.grade),
+          lockerLevel: Math.max(lockerLevelOf(rules, s.grade), trial ? lockerLevelOf(rules, trial.grade) : 0),
+          trial: trial ? { grade: trial.grade, label: gradeLabel(rules, trial.grade, trial.tier), endsOn: trial.endsOn, kind: trial.kind } : null,
         },
       ];
     }),
@@ -564,6 +582,7 @@ export async function membershipOverview(db: Db, todayDate: string): Promise<Mem
     SELECT ${JOB_COLUMNS(db)} FROM membership_job_runs WHERE job = 'daily' ORDER BY business_date DESC LIMIT 14`;
   const [live] = await db<{ value: MembershipOverview['live'] }[]>`SELECT value FROM settings WHERE key = ${LIVE_KEY}`;
   return {
+    trials: await trialSummary(db, todayDate),
     today: todayDate,
     live: live?.value ?? null,
     states,
@@ -817,7 +836,8 @@ export function registerMembershipRoutes(app: FastifyInstance, deps: Deps) {
         if (based !== undefined && !sameJson(based, before)) {
           throw conflict('RULES_CHANGED', '会员规则刚被别人改过，页面已换成最新的规则，请核对后重新修改、保存');
         }
-        return parse(RulesInput, req.body);
+        // 页面没带的项（例如更新前打开的页面没有邀请体验的三项）保留现在的值
+        return parse(RulesInput, { ...before, ...(req.body as object) });
       },
       ctxOf(req),
     );
