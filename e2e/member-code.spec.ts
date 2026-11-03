@@ -34,17 +34,20 @@ async function demoMember(page: Page, phone: string): Promise<MemberSummary> {
 
 /**
  * 模拟会员码的校验：member 给了时第一次认出这位会员，之后（以及没给 member 时的每一次）都是过期（410）；
- * laterDelayMs 让过期的结果晚一点回来，核对校验期间回车不会选人。返回「校验了几次」
+ * firstDelayMs 让认出的结果晚一点回来（门店网络慢、超过查找框防抖的 0.18 秒），laterDelayMs 让过期的结果晚一点回来
+ * （核对校验期间回车不会选人）。返回「校验了几次」
  */
-async function mockCode(page: Page, code: string, member: MemberSummary | null, laterDelayMs = 0) {
+async function mockCode(page: Page, code: string, member: MemberSummary | null, { firstDelayMs = 0, laterDelayMs = 0 } = {}) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
   let calls = 0;
   await page.route(`**/api/mp-codes/${code}`, async (route) => {
     calls += 1;
     if (calls === 1 && member) {
+      if (firstDelayMs) await wait(firstDelayMs);
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ memberId: member.id, memberNo: member.memberNo, name: member.name }) });
       return;
     }
-    if (laterDelayMs) await new Promise((r) => setTimeout(r, laterDelayMs));
+    if (laterDelayMs) await wait(laterDelayMs);
     await route.fulfill({ status: 410, contentType: 'application/json', body: JSON.stringify({ error: { code: 'CODE_EXPIRED', message: EXPIRED } }) });
   });
   return () => calls;
@@ -70,7 +73,7 @@ test.describe('会员码', () => {
     const han = await demoMember(page, HAN_PHONE);
     const code = '8000002246813579';
     const expiredFirst = '9000000003135792468';
-    const calls = await mockCode(page, code, qiao, 800);
+    const calls = await mockCode(page, code, qiao, { firstDelayMs: 400, laterDelayMs: 800 });
     const expiredCalls = await mockCode(page, expiredFirst, null);
     const selected = (id: number) => new RegExp(`[?&]m=${id}(&|$)`);
     try {
@@ -78,10 +81,28 @@ test.describe('会员码', () => {
       const search = page.getByRole('textbox', { name: '搜索会员' });
       const status = page.getByTestId('member-search-status');
 
-      // ① 第一次扫：认出乔木，直接打开、清空查找框
+      // ① 第一次扫：0.4 秒后认出乔木（超过查找框防抖的 0.18 秒），直接打开、清空查找框；
+      //    扫码盒在清空后 5 毫秒内又扫进同一个码（这次过期）：也重新校验，写明原因、查找框留着码，不沿用刚才那次的结果
+      await expect(search).toBeVisible();
+      await page.evaluate((c) => {
+        const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+        let scanned = false;
+        const timer = setInterval(() => {
+          const input = document.querySelector<HTMLInputElement>('input[aria-label="搜索会员"]');
+          if (!input) return;
+          if (input.value === c) scanned = true;
+          else if (scanned && input.value === '') {
+            clearInterval(timer);
+            setValue.call(input, c);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        }, 5);
+      }, code);
       await search.fill(code);
       await expect(page).toHaveURL(selected(qiao.id));
-      await expect(search).toHaveValue('');
+      await expect(status).toHaveText(EXPIRED);
+      await expect(search).toHaveValue(code);
+      expect(calls()).toBe(2);
 
       // ② 改看韩松；查找框留着乔木的手机号（列表里只有乔木：之后回车若用旧列表就会选到乔木）
       await search.fill(HAN_PHONE);
@@ -100,7 +121,7 @@ test.describe('会员码', () => {
       await expect(page).toHaveURL(selected(han.id));
       await search.press('Enter');
       await expect(page).toHaveURL(selected(han.id));
-      expect(calls()).toBe(2);
+      expect(calls()).toBe(3);
 
       // ④ 对照：第一次就过期的码，同样写明原因、保留查找框
       await search.fill(expiredFirst);

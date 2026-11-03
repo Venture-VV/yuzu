@@ -27,8 +27,9 @@ export const MemberList = forwardRef<
   const [q, setQ] = useState('');
   const debounced = useDebounced(q.trim(), 180);
   // 会员码扫进来就校验、不等防抖：扫码盒常在码后面跟一个回车，回车不能选中防抖之前的旧列表；
-  // 校验完成之前列表是空的，回车、点选都选不到人（测试会话预检 a040d79）
-  const query = memberCodeOf(q) ? q.trim() : debounced;
+  // 校验完成之前列表是空的，回车、点选都选不到人（测试会话预检 a040d79）。
+  // 清空查找框也立刻生效：认出会员、自动清空后马上再扫同一个码，同样重新校验，不沿用刚才那次的结果
+  const query = memberCodeOf(q) || !q.trim() ? q.trim() : debounced;
   const members = useMembers(query);
   const [cursor, setCursor] = useState(0);
   const list = members.data ?? [];
