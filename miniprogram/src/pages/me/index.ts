@@ -162,6 +162,9 @@ Page({
   onLedger() {
     wx.navigateTo({ url: '/pages/ledger/index' });
   },
+  onBenefits() {
+    wx.navigateTo({ url: '/pages/benefits/index' });
+  },
   onCoupons() {
     wx.navigateTo({ url: '/pages/coupons/index' });
   },

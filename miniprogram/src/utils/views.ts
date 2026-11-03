@@ -1,5 +1,5 @@
-// 列表上一行显示的字：流水、券。数字由门店系统给，这里只排版。
-import type { MpCoupon, MpLedgerRow } from '../../../src/shared/mp';
+// 列表上一行显示的字：流水、券、本月可享。数字由门店系统给，这里只排版。
+import type { MpBenefitItem, MpBenefits, MpCoupon, MpLedgerRow } from '../../../src/shared/mp';
 import { shopDateTime, yuan } from './format';
 
 export interface LedgerView {
@@ -80,5 +80,60 @@ export function couponView(c: MpCoupon): CouponView {
     state: c.state,
     stateLabel: STATE_LABELS[c.state] || c.state,
     usable: c.state === 'available',
+  };
+}
+
+// ── 本月可享 ──
+
+export interface BenefitItemView {
+  code: string;
+  name: string;
+  /** 次数与张数：「每月 2 次 · 本月已用 1 次」「每月 1 张 · 能用 1 张」「不限次」 */
+  meta: string;
+  content: string;
+  conditions: string;
+}
+
+export interface BenefitsView {
+  /** 「11 月」 */
+  month: string;
+  label: string;
+  groups: { key: string; title: string; en: string; items: BenefitItemView[] }[];
+  upcoming: { name: string; start: string }[];
+  /** 有券类或礼遇：页面上给「我的券」的入口 */
+  hasCoupons: boolean;
+}
+
+const BENEFIT_GROUPS: [MpBenefitItem['category'], string, string][] = [
+  ['service', '服务与资格', 'Services'],
+  ['coupon', '每期的券', 'Coupons'],
+  ['event', '礼遇', 'Gifts'],
+  ['discount', '折扣', 'Discounts'],
+  ['info', '说明', 'Notes'],
+];
+const PERIOD_NOW: Record<string, string> = { day: '今天', month: '本月', year: '今年' };
+
+export function benefitMeta(i: MpBenefitItem): string {
+  if (i.category === 'service') {
+    if (i.limit !== null && PERIOD_NOW[i.period]) return `${i.allowance} · ${PERIOD_NOW[i.period]}已用 ${i.used || 0} 次`;
+    return i.used ? `${i.allowance} · 本月用了 ${i.used} 次` : i.allowance;
+  }
+  if (i.category === 'coupon' || i.category === 'event') return i.available > 0 ? `${i.allowance} · 能用 ${i.available} 张` : i.allowance;
+  return i.allowance;
+}
+
+export function benefitsView(b: MpBenefits): BenefitsView {
+  const groups = BENEFIT_GROUPS.map(([key, title, en]) => ({
+    key,
+    title,
+    en,
+    items: b.items.filter((i) => i.category === key).map((i) => ({ code: i.code, name: i.name, meta: benefitMeta(i), content: i.content, conditions: i.conditions })),
+  })).filter((g) => g.items.length > 0);
+  return {
+    month: `${Number(b.month.slice(5, 7))} 月`,
+    label: b.label,
+    groups,
+    upcoming: b.upcoming.map((u) => ({ name: u.name, start: `${u.startLabel} 起` })),
+    hasCoupons: b.items.some((i) => i.category === 'coupon' || i.category === 'event'),
   };
 }

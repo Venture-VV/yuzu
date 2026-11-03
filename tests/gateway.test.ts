@@ -113,6 +113,8 @@ describe('整条链路：小程序 → 网关 → yuzu', () => {
     expect((await authed(gw, token, 'GET', '/v1/me')).json().member).toMatchObject({ name: '演示·网关会员', principalBalance: 0 });
     expect((await authed(gw, token, 'GET', '/v1/ledger?limit=10')).json()).toEqual([]);
     expect((await authed(gw, token, 'GET', '/v1/coupons')).json()).toEqual([]);
+    // 本月可享：清单还没导入时什么都没有，档阶照给
+    expect((await authed(gw, token, 'GET', '/v1/benefits')).json()).toMatchObject({ items: [], upcoming: [], label: expect.stringMatching(/^L0/) });
     const code = await authed(gw, token, 'POST', '/v1/code');
     expect(code.statusCode).toBe(200);
     expect(code.json().code).toMatch(/^8\d{15}$/);
@@ -135,7 +137,7 @@ describe('整条链路：小程序 → 网关 → yuzu', () => {
   });
 
   it('会员接口要会话；伪造、过期的会话拒绝', async () => {
-    for (const [method, url] of [['GET', '/v1/me'], ['GET', '/v1/ledger'], ['GET', '/v1/coupons'], ['POST', '/v1/code'], ['POST', '/v1/bind']] as const) {
+    for (const [method, url] of [['GET', '/v1/me'], ['GET', '/v1/ledger'], ['GET', '/v1/coupons'], ['GET', '/v1/benefits'], ['POST', '/v1/code'], ['POST', '/v1/bind']] as const) {
       const res = await authed(gw, null, method, url, method === 'POST' ? {} : undefined);
       expect(res.statusCode).toBe(401);
       expect(res.json().error.code).toBe('SESSION_REQUIRED');

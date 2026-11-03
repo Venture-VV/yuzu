@@ -9,6 +9,8 @@ import { buildApp } from '../src/server/app';
 import { buildMpApp } from '../src/server/modules/mp/app';
 import { makeMemberCode } from '../src/server/modules/mp/member';
 import { createStaff } from '../src/server/modules/staff';
+import type { Benefit, BenefitCatalog } from '../src/shared/benefits';
+import { rechargeOutcome, type MemberGradeInfo, type MembershipRules } from '../src/shared/membership';
 import { MP_CODE, MP_GATEWAY_HEADER, MP_OPENID_HEADER } from '../src/shared/mp';
 import { api, createMember, login, PASSWORD, rechargeBody, setup, type TestContext } from './helpers';
 
@@ -231,6 +233,80 @@ describe('流水先作废到期的赠金（Codex 审查 PR #42）', () => {
     expect(rows.filter((r: { kind: string }) => r.kind === 'expire')).toHaveLength(1);
     const [n] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM bonus_expiries WHERE member_id = ${memberId}`;
     expect(n!.n).toBe(1);
+  });
+});
+
+describe('本月可享（第一期 ⑥，接主线 v0.7.24 的会员权益）', () => {
+  // 会员专属通道（QY-001）：L2·初 起每月 2 次；一次性浴衣拖鞋（QY-010）改成 L4·初 起，这位 L2 会员看到的是「升档以后」
+  let openid: string;
+  let memberId: number;
+  const benefit = async (code: string) => ((await api(ctx.app, ctx.owner, 'GET', '/api/benefits')).body as BenefitCatalog).items.find((b) => b.code === code)!;
+  const publish = async (code: string, patch: Partial<Benefit>) => {
+    const b = await benefit(code);
+    const { id, version, name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, content, conditions } = b;
+    const e = await api(ctx.app, ctx.owner, 'PUT', `/api/benefits/${id}`, {
+      expectedVersion: version,
+      ...{ name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, content, conditions },
+      ...patch,
+    });
+    expect(e.status, JSON.stringify(e.body)).toBe(200);
+    const fresh = await benefit(code);
+    const p = await api(ctx.app, ctx.owner, 'POST', `/api/benefits/${fresh.id}/status`, { expectedVersion: fresh.version, status: 'published' });
+    expect(p.status, JSON.stringify(p.body)).toBe(200);
+    return fresh;
+  };
+  beforeAll(async () => {
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/benefits/import')).status).toBe(200);
+    const m = await createMember(ctx, '演示·本月可享', phoneOf(80));
+    memberId = m.id;
+    openid = newOpenid();
+    expect((await bind(openid, phoneOf(80))).statusCode).toBe(200);
+    // 充 1 万升到 L2（赠金按规则算）
+    const rules = (await api(ctx.app, ctx.clerk, 'GET', '/api/membership/rules')).body as MembershipRules;
+    const info = (await api(ctx.app, ctx.owner, 'GET', `/api/members/${m.id}/grade`)).body as MemberGradeInfo;
+    const paid = 1_000_000;
+    const bonus = rechargeOutcome(rules, info.state.grade, info.rollingRechargeCents, paid).bonusCents;
+    const r = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, paid, bonus, { bonusMode: 'auto' }));
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+  });
+
+  it('列出够格的服务与次数，升档以后能享的只给名字与起点；不带经办人、单号、备注', async () => {
+    const channel = await publish('QY-001', { period: 'month', quantity: 2 });
+    await publish('QY-010', { startGrade: 4, startTier: 0 });
+    const used = await api(ctx.app, ctx.clerk, 'POST', `/api/members/${memberId}/benefit-uses`, { clientKey: randomUUID(), benefitId: channel.id, quantity: 1, note: '前台的备注' });
+    expect(used.status, JSON.stringify(used.body)).toBe(201);
+
+    const res = await call(mp, 'GET', '/api/mp/benefits', openid);
+    expect(res.statusCode, res.body).toBe(200);
+    const b = res.json();
+    expect(b.month).toMatch(/^\d{4}-\d{2}$/);
+    expect(b.label).toMatch(/^L2 /);
+    const item = b.items.find((i: { code: string }) => i.code === 'QY-001');
+    expect(item).toEqual({
+      code: 'QY-001',
+      name: '会员专属通道',
+      category: 'service',
+      period: 'month',
+      allowance: '每月 2 次',
+      content: channel.content,
+      conditions: channel.conditions,
+      used: 1,
+      limit: 2,
+      available: 0,
+    });
+    expect(b.items.some((i: { code: string }) => i.code === 'QY-010')).toBe(false);
+    expect(b.upcoming).toContainEqual({ name: '一次性浴衣拖鞋', startLabel: expect.stringMatching(/^L4/) });
+    // 员工看的「本月可享」里有登记记录（经办人、备注），小程序里没有
+    expect(JSON.stringify(b)).not.toContain('前台的备注');
+    expect(b).not.toHaveProperty('uses');
+    expect(b).not.toHaveProperty('grants');
+    expect(b).not.toHaveProperty('memberId');
+  });
+
+  it('没绑定的拒绝', async () => {
+    const res = await call(mp, 'GET', '/api/mp/benefits', newOpenid());
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe('MP_NOT_BOUND');
   });
 });
 

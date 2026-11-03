@@ -2,7 +2,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { Deps } from '../../lib/context';
-import { abandonBind, bindMember, getCoupons, getLedger, getMe, issueMemberCode, openidOf } from './member';
+import { abandonBind, bindMember, getBenefits, getCoupons, getLedger, getMe, issueMemberCode, openidOf } from './member';
 import { requireMpEnabled } from './rules';
 
 export function registerMpMemberRoutes(app: FastifyInstance, deps: Deps) {
@@ -12,5 +12,6 @@ export function registerMpMemberRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/mp/me', { preHandler: enabled }, async (req) => getMe(deps, openidOf(req)));
   app.get('/api/mp/ledger', { preHandler: enabled }, async (req) => getLedger(deps, openidOf(req), req.query));
   app.get('/api/mp/coupons', { preHandler: enabled }, async (req) => getCoupons(deps, openidOf(req)));
+  app.get('/api/mp/benefits', { preHandler: enabled }, async (req) => getBenefits(deps, openidOf(req)));
   app.post('/api/mp/code', { preHandler: enabled }, async (req) => issueMemberCode(deps, openidOf(req)));
 }

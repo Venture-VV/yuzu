@@ -9,6 +9,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { quantityText } from '@shared/benefits';
 import { DEDUCTION_RULE_LABELS, ENTRY_TYPE_LABELS } from '@shared/labels';
 import { TIER_LABELS } from '@shared/membership';
 import {
@@ -18,6 +19,7 @@ import {
   MP_OPENID_HEADER,
   type MpBindAbandonResult,
   type MpBindingRow,
+  type MpBenefits,
   type MpBindResult,
   type MpCodeLookup,
   type MpCoupon,
@@ -33,6 +35,7 @@ import type { Deps, OpContext } from '../../lib/context';
 import { AppError, badRequest, conflict, notFound } from '../../lib/errors';
 import { setTxTimeouts } from '../../lib/tx';
 import { parse } from '../../lib/validate';
+import { memberBenefits } from '../benefits';
 import { expireMemberBonus } from '../bonus';
 import { memberCoupons } from '../coupons';
 import { listLedger } from '../ledger';
@@ -218,6 +221,32 @@ export async function getCoupons(deps: Deps, openid: string): Promise<MpCoupon[]
   return coupons
     .map((c) => ({ code: c.code, name: c.templateName, kind: c.kind, summary: c.summary, validFrom: c.validFrom, validTo: c.validTo, state: c.state }))
     .sort((a, b) => (order[a.state] ?? 9) - (order[b.state] ?? 9));
+}
+
+// ── 本月可享 ──
+
+/** 本月可享：主线的 memberBenefits（与员工打开会员详情看到的「本月可享」同一套），只给顾客该看的字段 */
+export async function getBenefits(deps: Deps, openid: string): Promise<MpBenefits> {
+  const memberId = await boundMemberId(deps.sql, openid);
+  const today = await mpToday(deps.sql, deps.config.timezone);
+  const b = await memberBenefits(deps.sql, memberId, today);
+  return {
+    month: b.month,
+    label: b.state.label,
+    items: b.items.map((i) => ({
+      code: i.code,
+      name: i.name,
+      category: i.category,
+      period: i.period,
+      allowance: i.category === 'discount' || i.category === 'info' ? '' : quantityText(i.category, i.period, i.quantity),
+      content: i.content,
+      conditions: i.conditions,
+      used: i.category === 'service' ? i.used : null,
+      limit: i.category === 'service' ? i.quantity : null,
+      available: i.available,
+    })),
+    upcoming: b.upcoming.map((u) => ({ name: u.name, startLabel: u.startLabel })),
+  };
 }
 
 // ── 会员码 ──

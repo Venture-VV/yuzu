@@ -1,0 +1,49 @@
+<view class="view">
+  <view wx:if="{{state === 'loading'}}" class="wait">正在打开…</view>
+  <view wx:elif="{{state === 'unbound'}}" class="panel wait">
+    <text class="h3">先绑定会员</text>
+    <button class="btn primary" hover-class="btn-hover" bindtap="onBind">去绑定</button>
+  </view>
+  <view wx:elif="{{state === 'offline' || state === 'error'}}" class="panel wait">
+    <text class="h3">{{state === 'offline' ? '门店系统连接中' : message}}</text>
+    <text wx:if="{{state === 'offline'}}">本月可享暂时看不到，店里网络恢复后就能看</text>
+    <button class="btn ghost" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+  <block wx:else>
+    <view class="head">
+      <text class="eyebrow">Member Benefits</text>
+      <text class="title">{{view.month}}可享</text>
+      <text class="sub">{{view.label}}</text>
+    </view>
+    <view wx:if="{{!view.groups.length}}" class="wait">这个月还没有可享的权益</view>
+
+    <block wx:for="{{view.groups}}" wx:key="key" wx:for-item="g">
+      <view class="sec-h"><view><text class="eyebrow">{{g.en}}</text><text class="h3">{{g.title}}</text></view></view>
+      <view wx:for="{{g.items}}" wx:key="code" class="bf">
+        <view class="bf-top">
+          <text class="bf-name">{{item.name}}</text>
+          <text wx:if="{{item.meta}}" class="bf-meta">{{item.meta}}</text>
+        </view>
+        <text wx:if="{{item.content}}" class="bf-text">{{item.content}}</text>
+        <text wx:if="{{item.conditions}}" class="bf-cond">{{item.conditions}}</text>
+      </view>
+    </block>
+
+    <view wx:if="{{view.hasCoupons}}" class="bf-go" hover-class="tap" bindtap="onCoupons">
+      <text>每期的券和礼遇发的券都在「我的券」</text>
+      <text class="go">去看看</text>
+    </view>
+
+    <block wx:if="{{view.upcoming.length}}">
+      <view class="sec-h later"><view><text class="eyebrow">Next Level</text><text class="h3">升档以后能享</text></view></view>
+      <view class="up">
+        <view wx:for="{{view.upcoming}}" wx:key="name" class="up-row">
+          <text class="up-name">{{item.name}}</text>
+          <text class="up-start">{{item.start}}</text>
+        </view>
+      </view>
+    </block>
+
+    <text class="sub use-note">服务与资格在前台使用：出示会员码，店员登记次数。以门店系统为准。</text>
+  </block>
+</view>

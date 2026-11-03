@@ -237,6 +237,11 @@ async function main() {
     check('我的券', d.state === 'ready', `可用 ${d.usable ? d.usable.length : 0} 张`);
     await shot('08-coupons');
     await mp.navigateBack();
+    page = await mp.navigateTo('/pages/benefits/index');
+    d = await waitData(page, (x) => x.state !== 'loading');
+    check('本月可享', d.state === 'ready' && !!d.view, d.view ? `${d.view.groups.reduce((n, g) => n + g.items.length, 0)} 项，升档以后 ${d.view.upcoming.length} 项` : d.message);
+    await shot('08b-benefits');
+    await mp.navigateBack();
     page = await mp.navigateTo('/pages/unbind/index');
     check('解绑与换号：到前台办理', (await textOf(page, '.panel')).includes('前台'));
     await shot('09-unbind');

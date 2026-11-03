@@ -198,6 +198,7 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
     return member(reply, 'GET', `/api/mp/ledger?limit=${limit}`, openid);
   });
   app.get('/v1/coupons', async (req, reply) => member(reply, 'GET', '/api/mp/coupons', openidOf(req)));
+  app.get('/v1/benefits', async (req, reply) => member(reply, 'GET', '/api/mp/benefits', openidOf(req)));
   app.post('/v1/code', async (req, reply) => {
     const openid = openidOf(req);
     if (!codeLimit.take(`code:${openid}`)) throw TOO_MANY();
