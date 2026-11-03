@@ -4,12 +4,16 @@
 //   · 打印任务：测试页与测试标签真的发到模拟打印机、同一编号只打一张、离线直接失败、不支持与没配好的拒绝、确认作废；
 //   · 按采购清单导入（81 台）、对数、重复导入跳过；
 //   · 终端替桥上报：状态、读卡事件去重、桥断开记离线、终端超时离线；权限；一键自检。
+//   · Codex 预检（3efa3fe）：发完后打印机复位或不确认的记中断、不当成打出；停用、修改设备时排着的任务不发、不改投；
+//     心跳按探测前的设置写回，探测期间设置改了的旧结果作废。
 
 import { randomUUID } from 'node:crypto';
+import net from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Device, DeviceJob, DeviceOverview } from '../src/shared/devices';
 import { checkDevicesOnce, waitForDeviceJobs } from '../src/server/modules/devices';
 import { startMockPrinter, type MockPrinter } from '../src/server/devices/mock-printer';
+import { sendToPrinter } from '../src/server/devices/netprint';
 import { runDeviceSelftest } from '../src/server/devices/selftest';
 import { createStaff } from '../src/server/modules/staff';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
@@ -26,6 +30,34 @@ const overview = async () => (await api(ctx.app, ctx.owner, 'GET', '/api/devices
 const device = async (code: string) => (await overview()).devices.find((d) => d.code === code)!;
 const job = (id: number, kind = 'test_page', cookie = duty, clientKey = randomUUID()) => api(ctx.app, cookie, 'POST', `/api/devices/${id}/jobs`, { clientKey, kind });
 const later = (ms: number) => new Date(Date.now() + ms);
+const getJob = async (id: number) => (await api(ctx.app, duty, 'GET', `/api/devices/jobs/${id}`)).body as DeviceJob;
+const until = async (ok: () => boolean, what: string) => {
+  for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 20));
+  expect(ok(), what).toBe(true);
+};
+
+/** 收下打印内容后先不关连接的「打印机」：占住连接，测试放行（release）后才正常关 */
+async function holdingPrinter() {
+  const conns: { bytes: number; socket: net.Socket }[] = [];
+  // 对方半关闭后不自动关回去（allowHalfOpen），这张就一直「发送中」
+  const server = net.createServer({ allowHalfOpen: true }, (socket) => {
+    const c = { bytes: 0, socket };
+    conns.push(c);
+    socket.on('data', (d) => (c.bytes += d.length));
+    socket.on('error', () => {});
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+  return {
+    port: (server.address() as net.AddressInfo).port,
+    conns,
+    release: (i: number) => conns[i]?.socket.end(),
+    close: () =>
+      new Promise<void>((r) => {
+        for (const c of conns) c.socket.destroy();
+        server.close(() => r());
+      }),
+  };
+}
 
 beforeAll(async () => {
   ctx = await setup();
@@ -182,6 +214,129 @@ describe('打印任务', () => {
     const nd = await api(ctx.app, ctx.owner, 'POST', '/api/devices', { clientKey: dk, code: 'SCN-SY-01', name: '收银扫码 1', kind: 'scanner', area: '收银', connection: 'keyboard' });
     expect((await api(ctx.app, ctx.owner, 'GET', `/api/erp/ops/${dk}?type=device_create`)).body).toEqual({ found: true, abandoned: false, refId: nd.body.id });
     expect((await api(ctx.app, ctx.clerk, 'POST', `/api/erp/ops/${randomUUID()}/abandon`, { type: 'device_job' })).status).toBe(403);
+  });
+
+  it('发完后打印机复位连接、或一直不确认收完：记中断、不重发、不当成打出，也不报在线（Codex 预检 3efa3fe P2）', async () => {
+    const drop = await startMockPrinter({ mode: 'drop' });
+    const hold = await holdingPrinter();
+    try {
+      // 一张测试页很快就写完；模拟打印机收下后复位连接、没打完
+      const direct = await sendToPrinter({ host: drop.host, port: drop.port }, Buffer.from('一张很短的小票\n'), { retryDelayMs: 10 });
+      expect(direct).toMatchObject({ ok: false, attempts: 1, errorCode: 'DEVICE_INTERRUPTED' });
+      expect(drop.jobs).toHaveLength(0);
+      // 写完了、打印机一直不关连接：到时记中断（可能已打出），不重发
+      const silent = await sendToPrinter({ host: '127.0.0.1', port: hold.port }, Buffer.from('x'), { confirmTimeoutMs: 300, retryDelayMs: 10 });
+      expect(silent).toMatchObject({ ok: false, attempts: 1, errorCode: 'DEVICE_INTERRUPTED' });
+      expect(silent.errorMessage).toContain('没有确认收完');
+      expect(hold.conns).toHaveLength(1);
+
+      // 走打印任务：记失败、发了一次；设备不因为这张变「在线」
+      const d = await create({ code: 'PRN-CX-01', name: '复位测试机', kind: 'printer', connection: 'network', host: drop.host, port: drop.port });
+      expect(d.status, JSON.stringify(d.body)).toBe(200);
+      const r = await job(d.body.id);
+      await waitForDeviceJobs();
+      expect(await getJob(r.body.id)).toMatchObject({ status: 'failed', attempts: 1, errorCode: 'DEVICE_INTERRUPTED' });
+      expect(drop.jobs).toHaveLength(0);
+      expect((await device('PRN-CX-01')).status).toBe('unknown');
+      const v = (await device('PRN-CX-01')).version;
+      await api(ctx.app, ctx.owner, 'POST', `/api/devices/${d.body.id}/enabled`, { enabled: false, expectedVersion: v });
+    } finally {
+      await drop.close();
+      await hold.close();
+    }
+  });
+
+  it('停用、修改设备：排着还没发的记失败、不发也不改投新地址；已经在发的照常发完（Codex 预检 3efa3fe P2）', async () => {
+    const hold = await holdingPrinter();
+    const other = await holdingPrinter();
+    try {
+      const d = await create({ code: 'PRN-CX-02', name: '排队测试机', kind: 'printer', connection: 'network', host: '127.0.0.1', port: hold.port });
+      expect(d.status, JSON.stringify(d.body)).toBe(200);
+      const id = d.body.id as number;
+
+      // 第一张发出去、打印机占着连接；第二张只能排着
+      const j1 = await job(id);
+      await until(() => (hold.conns[0]?.bytes ?? 0) > 0, '第一张已经发到打印机');
+      const j2 = await job(id);
+      expect(j2.body.status).toBe('queued');
+      // 停用：排着的第二张记失败
+      const off = await api(ctx.app, ctx.owner, 'POST', `/api/devices/${id}/enabled`, { enabled: false, expectedVersion: (await device('PRN-CX-02')).version });
+      expect(off.status, JSON.stringify(off.body)).toBe(200);
+      expect(await getJob(j2.body.id)).toMatchObject({ status: 'failed', errorCode: 'DEVICE_DISABLED', attempts: 0 });
+      // 放行第一张：照常发完；第二张没有再连打印机
+      hold.release(0);
+      await waitForDeviceJobs();
+      expect(await getJob(j1.body.id)).toMatchObject({ status: 'done', attempts: 1 });
+      expect(await getJob(j2.body.id)).toMatchObject({ status: 'failed', errorCode: 'DEVICE_DISABLED' });
+      expect(hold.conns).toHaveLength(1);
+
+      // 重新启用；第三张占着连接时把地址改到另一台：排着的第四张记失败，不发到新地址
+      const on = await api(ctx.app, ctx.owner, 'POST', `/api/devices/${id}/enabled`, { enabled: true, expectedVersion: (await device('PRN-CX-02')).version });
+      expect(on.status).toBe(200);
+      const j3 = await job(id);
+      await until(() => (hold.conns[1]?.bytes ?? 0) > 0, '第三张已经发到打印机');
+      const j4 = await job(id);
+      expect(j4.body.status).toBe('queued');
+      const cur = await device('PRN-CX-02');
+      const moved = await api(ctx.app, ctx.owner, 'PUT', `/api/devices/${id}`, {
+        name: cur.name,
+        kind: cur.kind,
+        area: cur.area,
+        connection: cur.connection,
+        host: '127.0.0.1',
+        port: other.port,
+        expectedVersion: cur.version,
+      });
+      expect(moved.status, JSON.stringify(moved.body)).toBe(200);
+      expect(await getJob(j4.body.id)).toMatchObject({ status: 'failed', errorCode: 'DEVICE_CHANGED', attempts: 0 });
+      hold.release(1);
+      await waitForDeviceJobs();
+      expect(await getJob(j3.body.id)).toMatchObject({ status: 'done' });
+      expect(other.conns).toHaveLength(0);
+      // 第三张是按旧地址发的：发完不把改了地址的设备记成在线
+      expect((await device('PRN-CX-02')).status).toBe('unknown');
+      await api(ctx.app, ctx.owner, 'POST', `/api/devices/${id}/enabled`, { enabled: false, expectedVersion: (await device('PRN-CX-02')).version });
+    } finally {
+      await hold.close();
+      await other.close();
+    }
+  });
+});
+
+describe('心跳与修改交错', () => {
+  it('探测期间改了设置：旧地址的结果作废，不覆盖新设置的状态（Codex 预检 3efa3fe P3）', async () => {
+    // 模拟打印机 1 秒后才回状态：探测还在等回复时，把地址清空
+    const slow = await startMockPrinter({ delayMs: 1_000 });
+    try {
+      const d = await create({ code: 'PRN-CX-03', name: '慢回复测试机', kind: 'printer', connection: 'network', host: slow.host, port: slow.port });
+      expect(d.status, JSON.stringify(d.body)).toBe(200);
+      let probedAt = 0;
+      const round = checkDevicesOnce(ctx).then(() => (probedAt = Date.now()));
+      await new Promise((r) => setTimeout(r, 150));
+      const cur = await device('PRN-CX-03');
+      const cleared = await api(ctx.app, ctx.owner, 'PUT', `/api/devices/${cur.id}`, {
+        name: cur.name,
+        kind: cur.kind,
+        area: cur.area,
+        connection: cur.connection,
+        host: null,
+        port: null,
+        expectedVersion: cur.version,
+      });
+      expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
+      const clearedAt = Date.now();
+      expect(cleared.body).toMatchObject({ host: null, port: null, status: 'unknown', version: cur.version + 1 });
+      await round;
+      // 修改在探测回来之前完成（这一轮确实交错了）；探测回来的「在线」作废
+      expect(clearedAt).toBeLessThan(probedAt);
+      expect(await device('PRN-CX-03')).toMatchObject({ host: null, port: null, status: 'unknown', version: cur.version + 1 });
+      // 下一轮按新设置：没填 IP 的「还没配好」
+      await checkDevicesOnce(ctx);
+      expect(await device('PRN-CX-03')).toMatchObject({ status: 'unknown', statusCode: 'DEVICE_NOT_CONFIGURED' });
+      await api(ctx.app, ctx.owner, 'POST', `/api/devices/${cur.id}/enabled`, { enabled: false, expectedVersion: (await device('PRN-CX-03')).version });
+    } finally {
+      await slow.close();
+    }
   });
 });
 

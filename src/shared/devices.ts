@@ -64,6 +64,7 @@ export const DEVICE_ERROR_CODES = [
   'DEVICE_FAULT',
   'DEVICE_BUSY',
   'DEVICE_DISABLED',
+  'DEVICE_CHANGED',
   'DEVICE_UNSUPPORTED',
   'DEVICE_NOT_CONFIGURED',
   'BRIDGE_OFFLINE',
@@ -76,12 +77,13 @@ export const DEVICE_ERROR_LABELS: Record<DeviceErrorCode, string> = {
   DEVICE_TIMEOUT: '连接或回复超时',
   DEVICE_REFUSED: '连接被拒（端口没开或设备拒绝）',
   DEVICE_UNREACHABLE: '网络不通（地址不对或没有路由）',
-  DEVICE_INTERRUPTED: '发送到一半断开（可能已打出一部分，没有自动重发）',
+  DEVICE_INTERRUPTED: '发送中断或打印机没确认收完（可能已打出一部分，没有自动重发）',
   DEVICE_PAPER_OUT: '缺纸',
   DEVICE_COVER_OPEN: '开盖',
   DEVICE_FAULT: '打印机报错（切刀、过热等）',
   DEVICE_BUSY: '正在打别的，排队超时',
   DEVICE_DISABLED: '设备已停用',
+  DEVICE_CHANGED: '设备设置刚改过，排着的这张没有按新设置发送（请重新提交）',
   DEVICE_UNSUPPORTED: '这种设备不接这条指令',
   DEVICE_NOT_CONFIGURED: '还没配好（没填 IP 与端口，或没指定挂在哪台终端）',
   BRIDGE_OFFLINE: '终端的设备服务没连上',
@@ -115,6 +117,8 @@ export const PROBE_TIMEOUT_MS = 1_500;
 /** 打印任务每次连接与发送的限时、没开始发就连不上时的重试次数 */
 export const JOB_ATTEMPT_TIMEOUT_MS = 5_000;
 export const JOB_RETRIES = 2;
+/** 发完之后等打印机正常关连接（收完）的限时：对方复位、出错或到时没关的记「中断」，不重发 */
+export const JOB_CONFIRM_TIMEOUT_MS = 10_000;
 /** 开着页面的终端替桥上报的间隔 */
 export const BRIDGE_REPORT_INTERVAL_MS = 2_000;
 /** 终端设备服务（桥）默认的本机端口 */

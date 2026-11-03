@@ -1,11 +1,13 @@
 // 网口直连（v0.7.21，docs/HARDWARE.md 第 2 节）：服务端按 IP 与端口建 TCP 连接发指令、查实时状态，门店不装程序。
 //
-// 打印：每次连接与发送限时；**还没开始发**就连不上的可以重试，**已经开始发**中途断开的记 DEVICE_INTERRUPTED、不重发
-// （可能已打出一半，由人看过再打）。心跳：连上后发实时状态查询，按回复判断缺纸、开盖、故障；连上但不回状态的按在线处理。
+// 打印：每次连接与发送限时；**还没开始发**就连不上的可以重试，**已经开始发**的不重发：发完后打印机正常关连接（收完）才算打出，
+// 中途断开、发完后对方复位或出错、到时没确认的都记 DEVICE_INTERRUPTED（可能已打出一部分，由人看过再打）。写入回调成功只说明
+// 数据交给了本机网络，不说明打印机收下了（Codex 预检 3efa3fe）。心跳：连上后发实时状态查询，按回复判断缺纸、开盖、故障；
+// 连上但不回状态的按在线处理。
 
 import net from 'node:net';
 import type { DeviceErrorCode } from '@shared/devices';
-import { JOB_ATTEMPT_TIMEOUT_MS, JOB_RETRIES, PROBE_TIMEOUT_MS } from '@shared/devices';
+import { JOB_ATTEMPT_TIMEOUT_MS, JOB_CONFIRM_TIMEOUT_MS, JOB_RETRIES, PROBE_TIMEOUT_MS } from '@shared/devices';
 import { parseEscPosStatus, parseTsplStatus, STATUS_QUERY, TSPL_STATUS_QUERY } from './escpos';
 
 export interface Endpoint {
@@ -33,11 +35,14 @@ class DeviceIoError extends Error {
   }
 }
 
-/** 一次连接发完数据：连上后写入、等对方收下再关；超时、拒绝、中途断开都给出错误码 */
-function sendOnce(ep: Endpoint, data: Buffer, timeoutMs: number): Promise<void> {
+/**
+ * 一次连接发完数据：连上后写入、半关闭，等打印机收完关连接。
+ * 打印机正常关连接（对方 FIN、没有错误）才算打出；写完之后对方复位、出错，或 confirmMs 内没关的，记「中断」（不重发）。
+ */
+function sendOnce(ep: Endpoint, data: Buffer, timeoutMs: number, confirmMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
     let started = false;
-    // 全部数据已交给网络（写入回调成功）：之后对方直接断开（不少打印机收完就复位连接）也算发完
+    // 全部数据已交给本机网络（写入回调成功）：只说明本机写完了，还要等打印机正常关连接
     let written = false;
     let settled = false;
     const socket = net.connect({ host: ep.host, port: ep.port });
@@ -49,25 +54,29 @@ function sendOnce(ep: Endpoint, data: Buffer, timeoutMs: number): Promise<void> 
       if (error) reject(error);
       else resolve();
     };
-    const timer = setTimeout(() => {
-      if (written) return finish();
+    const onTimeout = () => {
+      if (written) return finish(new DeviceIoError('DEVICE_INTERRUPTED', `已发出，打印机 ${confirmMs / 1000} 秒内没有确认收完（可能已打出），没有自动重发`, true));
       finish(new DeviceIoError(started ? 'DEVICE_INTERRUPTED' : 'DEVICE_TIMEOUT', started ? '发送超时（可能已打出一部分）' : `连接超时（${timeoutMs / 1000} 秒）`, started));
-    }, timeoutMs);
+    };
+    let timer = setTimeout(onTimeout, timeoutMs);
     socket.on('connect', () => {
       started = true;
       socket.write(data, (err) => {
         if (err) return finish(new DeviceIoError('DEVICE_INTERRUPTED', `发送到一半断开：${err.message}`, true));
         written = true;
-        // 写完后半关闭，等对方收下关连接；对方不关，超时时也算发完
+        // 写完后半关闭，等打印机收完、关连接
+        clearTimeout(timer);
+        timer = setTimeout(onTimeout, confirmMs);
         socket.end();
       });
     });
-    socket.on('close', () => {
-      if (written) return finish();
+    socket.on('close', (hadError) => {
+      if (written && !hadError) return finish();
+      if (written) return finish(new DeviceIoError('DEVICE_INTERRUPTED', '发出后连接被对方异常关闭（可能没打完），没有自动重发', true));
       finish(new DeviceIoError(started ? 'DEVICE_INTERRUPTED' : 'DEVICE_REFUSED', started ? '发送到一半连接被关闭' : '连接被关闭', started));
     });
     socket.on('error', (err) => {
-      if (written) return finish();
+      if (written) return finish(new DeviceIoError('DEVICE_INTERRUPTED', `发出后连接被对方复位或出错（可能没打完），没有自动重发：${err.message}`, true));
       if (started) finish(new DeviceIoError('DEVICE_INTERRUPTED', `发送到一半断开：${err.message}`, true));
       else finish(new DeviceIoError(errorCodeOf(err), err.message, false));
     });
@@ -81,15 +90,20 @@ export interface SendResult {
   errorMessage?: string;
 }
 
-/** 发一个打印任务：没开始发就连不上的重试 JOB_RETRIES 次，开始发了中途断开的不重试 */
-export async function sendToPrinter(ep: Endpoint, data: Buffer, opts: { timeoutMs?: number; retries?: number; retryDelayMs?: number } = {}): Promise<SendResult> {
+/** 发一个打印任务：没开始发就连不上的重试 JOB_RETRIES 次；开始发了的（中途断开、发完没确认）不重试 */
+export async function sendToPrinter(
+  ep: Endpoint,
+  data: Buffer,
+  opts: { timeoutMs?: number; confirmTimeoutMs?: number; retries?: number; retryDelayMs?: number } = {},
+): Promise<SendResult> {
   const timeoutMs = opts.timeoutMs ?? JOB_ATTEMPT_TIMEOUT_MS;
+  const confirmMs = opts.confirmTimeoutMs ?? JOB_CONFIRM_TIMEOUT_MS;
   const retries = opts.retries ?? JOB_RETRIES;
   let attempts = 0;
   for (;;) {
     attempts += 1;
     try {
-      await sendOnce(ep, data, timeoutMs);
+      await sendOnce(ep, data, timeoutMs, confirmMs);
       return { ok: true, attempts };
     } catch (e) {
       const err = e instanceof DeviceIoError ? e : new DeviceIoError(errorCodeOf(e), (e as Error).message, false);

@@ -71,6 +71,14 @@ export async function runDeviceSelftest(log: (line: string) => void = () => {}):
     const big = Buffer.alloc(8 * 1024 * 1024, 0x41);
     const dropped = await sendToPrinter(ep, big, { timeoutMs: 3000 });
     check('发送到一半断开：不重发', !dropped.ok && dropped.errorCode === 'DEVICE_INTERRUPTED' && dropped.attempts === 1, `${dropped.errorCode}，共试 ${dropped.attempts} 次`);
+    // 一张测试页很快就写完：打印机收下后复位连接、没打完，也不能当成打出（Codex 预检 3efa3fe）
+    const jobsBefore = printer.jobs.length;
+    const reset = await sendToPrinter(ep, buildTestPage(info('PRN-SELF-01')), { timeoutMs: 3000 });
+    check(
+      '发完后打印机复位连接：记中断、不当成打出',
+      !reset.ok && reset.errorCode === 'DEVICE_INTERRUPTED' && reset.attempts === 1 && printer.jobs.length === jobsBefore,
+      `${reset.ok ? '当成打出了' : reset.errorCode}，共试 ${reset.attempts} 次，模拟打印机完成 ${printer.jobs.length - jobsBefore} 张`,
+    );
     printer.setMode('normal');
 
     const label = await sendToPrinter(ep, buildTestLabel({ ...info('LBL-SELF-01'), labelLanguage: 'tspl', labelWidthMm: 40, labelHeightMm: 30 }), { timeoutMs: 3000 });

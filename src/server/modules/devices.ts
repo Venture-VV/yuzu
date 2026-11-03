@@ -272,6 +272,10 @@ export async function updateDevice(deps: Deps, id: number, raw: unknown, ctx: Op
                status_code = CASE WHEN ${moved} THEN NULL ELSE status_code END,
                status_changed_at = CASE WHEN ${moved} THEN now() ELSE status_changed_at END
         WHERE id = ${id}`;
+      // 排着还没发的打印任务是按旧设置提交的：记失败、不按新设置改投（已经在发的照常发完）（Codex 预检 3efa3fe）
+      await tx`
+        UPDATE device_jobs SET status = 'failed', error_code = 'DEVICE_CHANGED', error_message = '设备设置改了，这张排着还没发，没有按新设置发送，请重新提交', finished_at = now()
+        WHERE device_id = ${id} AND status = 'queued'`;
       const { expectedVersion: _v, ...after } = input;
       await writeAudit(tx, {
         staffId: ctx.actor.id,
@@ -298,6 +302,12 @@ export async function setDeviceEnabled(deps: Deps, id: number, raw: unknown, ctx
       UPDATE devices SET enabled = ${input.enabled}, version = version + 1, updated_at = now(),
              status = 'unknown', status_code = NULL, status_changed_at = now()
       WHERE id = ${id}`;
+    // 停用：排着还没发的打印任务记失败、不再发（已经在发的照常发完）（Codex 预检 3efa3fe）
+    if (!input.enabled) {
+      await tx`
+        UPDATE device_jobs SET status = 'failed', error_code = 'DEVICE_DISABLED', error_message = '设备已停用，这张排着还没发，没有发送', finished_at = now()
+        WHERE device_id = ${id} AND status = 'queued'`;
+    }
     await statusEvent(tx, id, { enabled: input.enabled }, ctx.actor.id);
     await writeAudit(tx, { staffId: ctx.actor.id, action: 'device_enabled', targetType: 'device', targetId: id, detail: { code: cur.code, enabled: input.enabled }, ip: ctx.ip });
   });
@@ -343,14 +353,16 @@ export async function importDevices(db: Sql, actor: { id: number } | null, ip?: 
 
 /**
  * 记一次状态（心跳或终端上报）：联系上了（seen）就更新最近联系时间；状态或原因变了记一条设备事件。
- * 只锁这台设备一行，不等业务锁。
+ * 只锁这台设备一行，不等业务锁。expectVersion：按探测前读到的设置写回——探测期间设备被修改、停用（版本变了），
+ * 这次结果是旧地址、旧设置的，作废不写（Codex 预检 3efa3fe）。
  */
-export async function recordStatus(db: Sql, id: number, status: DeviceStatus, code: DeviceErrorCode | null, opts: { seen: boolean; now?: Date }) {
+export async function recordStatus(db: Sql, id: number, status: DeviceStatus, code: DeviceErrorCode | null, opts: { seen: boolean; now?: Date; expectVersion?: number }) {
   const now = opts.now ?? new Date();
   await db.begin(async (tx) => {
-    const [cur] = await tx<{ status: DeviceStatus; statusCode: string | null; enabled: boolean }[]>`
-      SELECT status, status_code, enabled FROM devices WHERE id = ${id} FOR UPDATE`;
+    const [cur] = await tx<{ status: DeviceStatus; statusCode: string | null; enabled: boolean; version: number }[]>`
+      SELECT status, status_code, enabled, version FROM devices WHERE id = ${id} FOR UPDATE`;
     if (!cur || !cur.enabled) return;
+    if (opts.expectVersion !== undefined && cur.version !== opts.expectVersion) return;
     const changed = cur.status !== status || (cur.statusCode ?? null) !== code;
     if (!changed && !opts.seen) return;
     await tx`
@@ -374,14 +386,26 @@ const probing = new Set<number>();
 export async function checkDevicesOnce(deps: Pick<Deps, 'sql'>, now = new Date()): Promise<void> {
   const { sql } = deps;
   const rows = await sql<
-    { id: number; kind: DeviceKind; connection: string; host: string | null; port: number | null; hostDeviceId: number | null; options: { labelLanguage?: string }; status: DeviceStatus; statusCode: string | null; lastSeenAt: string | null }[]
-  >`SELECT id, kind, connection, host, port, host_device_id, options, status, status_code, last_seen_at FROM devices WHERE enabled`;
+    {
+      id: number;
+      kind: DeviceKind;
+      connection: string;
+      host: string | null;
+      port: number | null;
+      hostDeviceId: number | null;
+      options: { labelLanguage?: string };
+      status: DeviceStatus;
+      statusCode: string | null;
+      lastSeenAt: string | null;
+      version: number;
+    }[]
+  >`SELECT id, kind, connection, host, port, host_device_id, options, status, status_code, last_seen_at, version FROM devices WHERE enabled`;
   const stale = (seen: string | null) => !seen || now.getTime() - Date.parse(seen) > OFFLINE_AFTER_MS;
   await Promise.all(
     rows.map(async (d) => {
       if (NETWORK_CONNECTIONS.includes(d.connection as never)) {
         if (!d.host || !d.port) {
-          if (d.status !== 'unknown' || d.statusCode !== 'DEVICE_NOT_CONFIGURED') await recordStatus(sql, d.id, 'unknown', 'DEVICE_NOT_CONFIGURED', { seen: false, now });
+          if (d.status !== 'unknown' || d.statusCode !== 'DEVICE_NOT_CONFIGURED') await recordStatus(sql, d.id, 'unknown', 'DEVICE_NOT_CONFIGURED', { seen: false, now, expectVersion: d.version });
           return;
         }
         if (busy.has(d.id) || probing.has(d.id)) return;
@@ -389,9 +413,9 @@ export async function checkDevicesOnce(deps: Pick<Deps, 'sql'>, now = new Date()
         try {
           const mode = d.kind === 'print_server' ? 'connect' : d.kind === 'label_printer' && d.options.labelLanguage !== 'escpos' ? 'tspl' : 'escpos';
           const r = await probe({ host: d.host, port: d.port }, mode);
-          if (r.reachable) await recordStatus(sql, d.id, r.code ? 'error' : 'online', r.code, { seen: true, now: new Date() });
+          if (r.reachable) await recordStatus(sql, d.id, r.code ? 'error' : 'online', r.code, { seen: true, now: new Date(), expectVersion: d.version });
           else if (stale(d.lastSeenAt) && (d.status !== 'offline' || d.statusCode !== (r.code ?? 'DEVICE_OFFLINE'))) {
-            await recordStatus(sql, d.id, 'offline', r.code ?? 'DEVICE_OFFLINE', { seen: false, now });
+            await recordStatus(sql, d.id, 'offline', r.code ?? 'DEVICE_OFFLINE', { seen: false, now, expectVersion: d.version });
           }
         } finally {
           probing.delete(d.id);
@@ -399,12 +423,12 @@ export async function checkDevicesOnce(deps: Pick<Deps, 'sql'>, now = new Date()
         return;
       }
       if (d.connection === 'bridge' && d.hostDeviceId === null) {
-        if (d.status !== 'unknown' || d.statusCode !== 'DEVICE_NOT_CONFIGURED') await recordStatus(sql, d.id, 'unknown', 'DEVICE_NOT_CONFIGURED', { seen: false, now });
+        if (d.status !== 'unknown' || d.statusCode !== 'DEVICE_NOT_CONFIGURED') await recordStatus(sql, d.id, 'unknown', 'DEVICE_NOT_CONFIGURED', { seen: false, now, expectVersion: d.version });
         return;
       }
       // 终端、挂在终端下的设备：靠开着页面的终端上报；联系过、超过 5 秒没上报记离线（没联系过的保持「未知」）
       if ((d.kind === 'terminal' || d.connection === 'bridge') && d.lastSeenAt && stale(d.lastSeenAt) && d.status !== 'offline') {
-        await recordStatus(sql, d.id, 'offline', d.kind === 'terminal' ? 'DEVICE_OFFLINE' : 'BRIDGE_OFFLINE', { seen: false, now });
+        await recordStatus(sql, d.id, 'offline', d.kind === 'terminal' ? 'DEVICE_OFFLINE' : 'BRIDGE_OFFLINE', { seen: false, now, expectVersion: d.version });
       }
     }),
   );
@@ -510,11 +534,26 @@ const formatTime = (at: Date, timeZone: string) =>
     .replace(/\//g, '-');
 
 async function runJob(deps: Deps, jobId: number) {
-  const { sql, config } = deps;
-  const [job] = await sql<{ id: number; deviceId: number; kind: DeviceJobKind }[]>`
-    UPDATE device_jobs SET status = 'sending', started_at = now() WHERE id = ${jobId} AND status = 'queued' RETURNING id, device_id, kind`;
-  if (!job) return;
-  const device = await getDevice(sql, job.deviceId);
+  const { sql } = deps;
+  const [ref] = await sql<{ deviceId: number }[]>`SELECT device_id FROM device_jobs WHERE id = ${jobId} AND status = 'queued'`;
+  if (!ref) return;
+  // 领取：先锁设备一行（共享锁，与修改、停用的排他锁串行），再领任务。发送用这时读到的设置：领取之后设备被改了地址也不改投；
+  // 设备停用了不发（停用、修改时已把排着的记失败，这里再核对一次）（Codex 预检 3efa3fe）
+  const claimed = await sql.begin(async (tx) => {
+    await tx`SELECT 1 FROM devices WHERE id = ${ref.deviceId} FOR SHARE`;
+    const device = await getDevice(tx, ref.deviceId);
+    if (!device.enabled) {
+      await tx`
+        UPDATE device_jobs SET status = 'failed', error_code = 'DEVICE_DISABLED', error_message = '设备已停用，这张排着还没发，没有发送', finished_at = now()
+        WHERE id = ${jobId} AND status = 'queued'`;
+      return null;
+    }
+    const [job] = await tx<{ id: number; kind: DeviceJobKind }[]>`
+      UPDATE device_jobs SET status = 'sending', started_at = now() WHERE id = ${jobId} AND status = 'queued' RETURNING id, kind`;
+    return job ? { job, device } : null;
+  });
+  if (!claimed) return;
+  const { job, device } = claimed;
   busy.add(device.id);
   try {
     await sendJob(deps, jobId, job.kind, device);
@@ -552,8 +591,8 @@ async function sendJob(deps: Deps, jobId: number, kind: DeviceJobKind, device: D
       UPDATE device_jobs SET status = ${res.ok ? 'done' : 'failed'}, attempts = ${res.attempts}, error_code = ${res.ok ? null : (res.errorCode ?? 'DEVICE_TIMEOUT')},
              error_message = ${res.ok ? null : (res.errorMessage ?? '').slice(0, 300) || DEVICE_ERROR_LABELS[res.errorCode ?? 'DEVICE_TIMEOUT']}, finished_at = now()
       WHERE id = ${jobId}`;
-    // 打成了就是联系上了（打印时心跳跳过这台）
-    if (res.ok) await recordStatus(sql, device.id, 'online', null, { seen: true });
+    // 打成了就是联系上了（打印时心跳跳过这台）；发送期间设备被改了的不记（按领取时的设置）
+    if (res.ok) await recordStatus(sql, device.id, 'online', null, { seen: true, expectVersion: device.version });
   }
 }
 
