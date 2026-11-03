@@ -6,7 +6,7 @@
 // · 终端上报：开着页面的终端用登录身份每 2 秒替桥上报（锁顺序：终端一行 → 它下面的设备 id 升序），读卡、扫码事件按编号去重。
 // 状态变化、读卡、扫码记设备事件（只追加）；读到的卡号只在这里，不进会员与手牌。
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   DEFAULT_PRINTER_PORT,
@@ -47,6 +47,7 @@ import { buildTestLabel, buildTestPage } from '../devices/escpos';
 import { probe, sendToPrinter } from '../devices/netprint';
 import { erpOpAbandoned } from './erp-ops';
 import { loadSettings } from './settings';
+import { ctxOf } from '../lib/context';
 
 // ───────────────────────── 读 ─────────────────────────
 
@@ -663,7 +664,6 @@ const EventsQuery = JobsQuery.extend({ type: z.enum(DEVICE_EVENT_TYPES).optional
 
 export function registerDeviceRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
-  const ctxOf = (req: FastifyRequest): OpContext => ({ actor: req.actor, ip: req.ip });
   const log = (msg: string, err: unknown) => app.log.error({ err }, msg);
 
   app.get('/api/devices/overview', { preHandler: guard('device.view') }, async () => deviceOverview(sql));

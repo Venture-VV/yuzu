@@ -4,9 +4,8 @@
 // · 账目自检是经营预警，不进 `check`（`check` 只管数据一致性，必须全 ✓）；
 // · 下单物料导出带图片的 Excel（lib/xlsx.ts）：每行嵌入第一张图片，图片总量有上限，超过的行写明没嵌入。
 
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { ISO_DATE } from '@shared/business-date';
 import { EXPENSE_CATEGORY_LABELS, PAY_SOURCE_LABELS, type ExpenseCategory, type PaySource } from '@shared/expenses';
 import {
   AUDIT_KIND_LABELS,
@@ -31,12 +30,13 @@ import { readSnapshot, type Db } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
-import { toCsv } from '../lib/csv';
-import { badRequest, unprocessable } from '../lib/errors';
+import { toCsv, attachment, csvReply } from '../lib/csv';
+import { unprocessable } from '../lib/errors';
 import { dateSchema, parse } from '../lib/validate';
 import { buildXlsx, type XlsxImage } from '../lib/xlsx';
 import { advanceRows, loadExpenseRules, toAdvanceSummary } from './expenses';
-import { todayIn } from './inventory/common';
+import { checkDateRange, daysBetween, todayIn } from '../lib/dates';
+import { shiftDate } from '@shared/labels';
 
 /** 页面最多显示多少笔；合计与导出不受这个限制 */
 const LEDGER_LIST_LIMIT = 3000;
@@ -45,19 +45,6 @@ const EXPORT_LIMIT = 20_000;
 const ORDERED_EXPORT_ROWS = 3000;
 const ORDERED_IMAGE_BUDGET = 60 * 1024 * 1024;
 const AUDIT_ITEMS = 50;
-
-const daysBetween = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
-const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
-
-function checkRange(from: string, to: string) {
-  if (!ISO_DATE.test(from) || !ISO_DATE.test(to) || from > to) throw badRequest('开始日期不能晚于结束日期');
-  if (daysBetween(from, to) > 366) throw badRequest('一次最多查 366 天');
-}
-
-function csvReply(reply: FastifyReply, name: string, csv: string) {
-  reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(name)}`);
-  return csv;
-}
 
 // ───────────────────────── 采购台账 ─────────────────────────
 
@@ -285,7 +272,7 @@ export async function orderedLines(db: Db, timezone: string, f: OrderedFilter, l
   const today = todayIn(timezone);
   const all = (await orderedRows(db, f)).map(({ poStatus, ...r }): OrderedLine => {
     const state = orderedState({ poStatus, receivedMilli: r.receivedMilli, baseQtyMilli: r.baseQtyMilli });
-    const dueDate = r.expectedDate ?? addDays(r.orderDate, rules.arrivalOverdueDays);
+    const dueDate = r.expectedDate ?? shiftDate(r.orderDate, rules.arrivalOverdueDays);
     return {
       ...r,
       poId: Number(r.poId),
@@ -547,12 +534,12 @@ export function registerPurchaseLedgerRoutes(app: FastifyInstance, deps: Deps) {
 
   app.get('/api/erp/ledger', { preHandler: guard('expense.read') }, async (req) => {
     const f = parse(LedgerQuery, req.query);
-    checkRange(f.from, f.to);
+    checkDateRange(f.from, f.to);
     return readSnapshot(sql, (tx) => buildLedger(tx, f));
   });
   app.get('/api/erp/ledger/export', { preHandler: guard('expense.export') }, async (req, reply) => {
     const f = parse(LedgerQuery, req.query);
-    checkRange(f.from, f.to);
+    checkDateRange(f.from, f.to);
     const csv = await readSnapshot(sql, (tx) => ledgerCsv(tx, f));
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'purchase_ledger', detail: f, ip: req.ip });
     return csvReply(reply, `采购台账_${f.from}_${f.to}.csv`, csv);
@@ -561,24 +548,22 @@ export function registerPurchaseLedgerRoutes(app: FastifyInstance, deps: Deps) {
 
   app.get('/api/purchase-orders/ordered-lines', { preHandler: guard('inventory.read') }, async (req) => {
     const f = parse(OrderedQuery, req.query);
-    checkRange(f.from, f.to);
+    checkDateRange(f.from, f.to);
     return readSnapshot(sql, (tx) => orderedLines(tx, config.timezone, f));
   });
   app.get('/api/purchase-orders/ordered-lines/export.csv', { preHandler: guard('inventory.read') }, async (req, reply) => {
     const f = parse(OrderedQuery, req.query);
-    checkRange(f.from, f.to);
+    checkDateRange(f.from, f.to);
     const csv = await readSnapshot(sql, (tx) => orderedCsv(tx, config.timezone, f));
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'ordered_lines', detail: { ...f, format: 'csv' }, ip: req.ip });
     return csvReply(reply, `下单物料_${f.from}_${f.to}.csv`, csv);
   });
   app.get('/api/purchase-orders/ordered-lines/export.xlsx', { preHandler: guard('inventory.read') }, async (req, reply) => {
     const f = parse(OrderedQuery, req.query);
-    checkRange(f.from, f.to);
+    checkDateRange(f.from, f.to);
     const buf = await readSnapshot(sql, (tx) => orderedXlsx(tx, config.timezone, f));
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'ordered_lines', detail: { ...f, format: 'xlsx' }, ip: req.ip });
-    reply
-      .header('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-      .header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`下单物料_${f.from}_${f.to}.xlsx`)}`);
+    attachment(reply, `下单物料_${f.from}_${f.to}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     return reply.send(buf);
   });
 }

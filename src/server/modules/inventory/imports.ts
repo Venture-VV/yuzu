@@ -6,7 +6,6 @@
 // 期初未付写入后按「期初」规则走确认（免确认门槛以内的直接确认，超过的进负责人待办，可以一次确认整批）。
 // 真实业务数据：门店环境须店主同意才执行（同其他导入，AGENTS.md）。
 
-import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
@@ -31,8 +30,8 @@ import { readSheet, type Sheet } from '../../lib/sheet-read';
 import { loadInventorySettings, logApproval, nextDocNo, overThreshold, setTxTimeouts, todayIn } from './common';
 import { erpOpAbandoned } from '../erp-ops';
 import { actOnOpening, confirmOpening, lockSupplier } from './payables';
+import { hashRequest } from '../../lib/idempotency';
 
-const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 
 /** 一份文件最多多少行 */
 export const IMPORT_MAX_ROWS = 2000;

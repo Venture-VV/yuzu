@@ -6,7 +6,7 @@
 // 加锁：区域的导览分类与颜色走空间台账的咨询锁（与台账的其他写入串行）、带版本号；图标修改只锁那一行、带版本号；
 // 重新识别先取「导览图标」咨询锁，只替换自动识别的，手工加的不动。
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   DEFAULT_GUIDE_RULES,
@@ -36,10 +36,11 @@ import type { Deps, OpContext } from '../lib/context';
 import { conflict, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
 import { LOCAL_UNIT_MM } from '../floorplan/convert';
-import { setTxTimeouts } from './inventory/common';
+import { setTxTimeouts } from '../lib/tx';
 import { batchFloors, batchRooms } from './floorplans';
 import { loadSettings } from './settings';
 import { lockLedger } from './spaces';
+import { ctxOf } from '../lib/context';
 
 // ───────────────────────── 规则 ─────────────────────────
 
@@ -468,7 +469,6 @@ const SvgQuery = z.object({ b: z.coerce.number('缺少底图批次，请刷新�
 
 export function registerGuideRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
-  const ctxOf = (req: FastifyRequest): OpContext => ({ actor: req.actor, ip: req.ip });
   // 对客页面：所有岗位默认都能看（门店大屏用只有这项权限的账号）
   const view = guard('guide.view');
   app.get('/api/guide', { preHandler: view }, async () => guideData(sql));

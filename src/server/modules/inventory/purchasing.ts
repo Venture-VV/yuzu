@@ -4,7 +4,6 @@
 // 已确认的采购单改供应商、数量或价格时，先存一份旧版本，再回到待确认。
 // 先收货后补单：补单采购单确认后只关联原收货单，不再入库、不再形成应付。
 
-import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { can } from '@shared/permissions';
@@ -31,6 +30,7 @@ import {
   todayIn,
   weighedCapMilli,
 } from './common';
+import { hashRequest } from '../../lib/idempotency';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -471,7 +471,6 @@ async function submitLocked(tx: Tx, po: PoRow, actor: Actor, approveNow: boolean
   }
 }
 
-const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 
 export async function createPo(deps: Deps, raw: unknown, actor: Actor, opts: { backfillReceiptId?: number; ip?: string; deptConfirm?: boolean } = {}) {
   const meta = parse(CreateInput, raw);

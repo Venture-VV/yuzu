@@ -8,8 +8,7 @@
 // 业务动作推导的位置用存档点隔开：写不进去（例如等锁超时）只是这一次不推导，业务照常生效。
 // 开关关着时不推导、刷卡上报拒绝；离开、离店照样清掉已有的位置（不留下离店客人的位置）。
 
-import { createHash } from 'node:crypto';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDayStart, ISO_DATE } from '@shared/business-date';
 import {
@@ -42,6 +41,8 @@ import { assertNotFenced, isFenced } from '../lib/fences';
 import { idParam, parse } from '../lib/validate';
 import { businessDate, setTxTimeouts } from './frontdesk/common';
 import { loadSettings } from './settings';
+import { ctxOf } from '../lib/context';
+import { hashRequest } from '../lib/idempotency';
 
 // ───────────────────────── 规则 ─────────────────────────
 
@@ -439,7 +440,7 @@ const TAG_SINCE = `greatest(v.checked_in_at, (SELECT max(c.created_at) FROM visi
 export async function reportLocation(deps: Deps, raw: unknown, ctx: OpContext): Promise<LocationReportResult> {
   const input = parse(ReportInput, raw);
   const { opId, ...payload } = input;
-  const hash = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  const hash = hashRequest(payload);
   const replay = await replayReport(deps, opId, hash);
   if (replay) return replay;
   // 页面「结果待确认」后确认作废的编号（v0.7.17，Codex 复审）：原请求晚到也不记。这里先查一次给明确的提示，事务里取锁后再核对
@@ -991,7 +992,6 @@ export async function locationChecks(db: Db): Promise<{ label: string; ok: boole
 
 export function registerLocationRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
-  const ctxOf = (req: FastifyRequest): OpContext => ({ actor: req.actor, ip: req.ip });
   // 后台：与空间台账同一组权限（店主、店总）
   const admin = guardAny('settings.manage', 'catalog.manage');
 

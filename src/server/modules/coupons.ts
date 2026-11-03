@@ -46,14 +46,15 @@ import { assertNotFenced } from '../lib/fences';
 import { erpOpAbandoned } from './erp-ops';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
-import { toCsv } from '../lib/csv';
+import { toCsv, CSV_TYPE, attachment } from '../lib/csv';
 import type { Deps, OpContext } from '../lib/context';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { cents, idParam, parse, positiveCents } from '../lib/validate';
 import { loadFrontdeskRules } from './frontdesk/common';
 import { memberLevels } from './frontdesk/vip';
-import { nextDocNo } from './inventory/common';
+import { nextDocNo } from '../lib/tx';
 import { loadSettings } from './settings';
+import { ctxOf } from '../lib/context';
 
 // ───────────────────────── 模板 ─────────────────────────
 
@@ -915,7 +916,6 @@ export async function planGifts(db: Db, today: string) {
 
 export function registerCouponRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
-  const ctxOf = (req: import('fastify').FastifyRequest): OpContext => ({ actor: req.actor, ip: req.ip });
   const today = () => issueDate(sql, deps, new Date());
   const Range = z.object({ from: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD'), to: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD') });
 
@@ -966,9 +966,7 @@ export function registerCouponRoutes(app: FastifyInstance, deps: Deps) {
       ['券码', '券', '说明', '有效期', '状态'],
       ...rows.map((r) => [formatStoreCouponCode(r.code), batch.templateName, batch.summary, `${r.validFrom} 至 ${r.validTo}`, couponStateLabel(couponState(r, d))]),
     ]);
-    reply.header('content-type', 'text/csv; charset=utf-8');
-    reply.header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`无记名券-${batch.issueNo}.csv`)}`);
-    reply.header('cache-control', 'no-store');
+    attachment(reply, `无记名券-${batch.issueNo}.csv`, CSV_TYPE).header('cache-control', 'no-store');
     return csv;
   });
   app.post('/api/coupons/batches/:id/void', { preHandler: guard('coupon.void') }, async (req) => {

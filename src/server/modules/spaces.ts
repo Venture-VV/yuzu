@@ -11,8 +11,7 @@
 // 别名：空间一行 → 别名一行；批量设区域：空间（id 升序）→ 区域一行（共享）。客房挂接（rooms.ts）：房间 → 空间，不取台账锁。
 // 修改带版本号（楼层、区域、空间）：页面提交读到的版本号，对不上就拒绝——超时后迟到的旧请求、别人同时修改都不会悄悄覆盖新的修改。
 
-import { createHash } from 'node:crypto';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   FLOOR_CODE_RE,
@@ -64,16 +63,17 @@ import { isUniqueViolation } from '../db';
 import { guardAny } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps, OpContext } from '../lib/context';
-import { toCsv } from '../lib/csv';
+import { toCsv, CSV_TYPE, attachment } from '../lib/csv';
 import { conflict, notFound, unprocessable } from '../lib/errors';
 import { assertNotFenced, lockOpKey } from '../lib/fences';
 import { readSheet, type Sheet } from '../lib/sheet-read';
 import { idParam, parse } from '../lib/validate';
 import { erpOpAbandoned } from './erp-ops';
-import { setTxTimeouts } from './inventory/common';
+import { setTxTimeouts } from '../lib/tx';
 import { openUsageIn } from './usages';
+import { hashRequest } from '../lib/idempotency';
+import { ctxOf } from '../lib/context';
 
-const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 const text = (label: string, max: number) =>
   z
     .string(`请填写${label}`)
@@ -1025,7 +1025,6 @@ export async function spaceChecks(db: Db): Promise<{ label: string; ok: boolean;
 
 export function registerSpaceRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
-  const ctxOf = (req: FastifyRequest): OpContext => ({ actor: req.actor, ip: req.ip });
   // 店主、店总：与后台「客房」同一组权限
   const admin = guardAny('settings.manage', 'catalog.manage');
   const bodyLimit = 4 * 1024 * 1024;
@@ -1087,7 +1086,7 @@ export function registerSpaceRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/admin/spaces/export', { preHandler: admin }, async (req, reply) => {
     const csv = await spacesCsv(sql);
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'spaces', ip: req.ip });
-    reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent('空间台账.csv')}`);
+    attachment(reply, '空间台账.csv', CSV_TYPE);
     return csv;
   });
 

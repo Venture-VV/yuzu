@@ -7,10 +7,8 @@
 //   · 打款、退回、补付登记即生效，错了由负责人冲销。
 // 加锁顺序：备用金打款 → 采购单 → 报销单 / 退回补付单。
 
-import { createHash } from 'node:crypto';
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { ISO_DATE } from '@shared/business-date';
 import {
   CLAIM_STATUS_LABELS,
   DEFAULT_EXPENSE_RULES,
@@ -41,15 +39,17 @@ import { isUniqueViolation, readSnapshot, type Db, type Tx } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
-import { toCsv } from '../lib/csv';
+import { toCsv, csvReply } from '../lib/csv';
 import { assertNotFenced, lockOpKey } from '../lib/fences';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse, positiveCents } from '../lib/validate';
 import { erpOpAbandoned } from './erp-ops';
-import { assertNotFuture, assertSameMonth, docDateSchema, logApproval, nextDocNo, poSettlement, setTxTimeouts, todayIn } from './inventory/common';
+import { assertNotFuture, assertSameMonth, docDateSchema, logApproval, poSettlement } from './inventory/common';
+import { checkDateRange, daysBetween, todayIn } from '../lib/dates';
+import { nextDocNo, setTxTimeouts } from '../lib/tx';
+import { hashRequest } from '../lib/idempotency';
 
 const id = z.number().int().positive();
-const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 const yuan = (cents: number) => (cents < 0 ? '-' : '') + formatAmount(Math.abs(cents)).replace(/,/g, '');
 const ReasonInput = z.object({ reason: z.string().trim().min(2, '请填写原因（至少 2 个字）').max(200) });
 const ACTIVE_CLAIM = ['submitted', 'returned', 'confirmed'] as const;
@@ -90,8 +90,6 @@ export async function loadExpenseRules(db: Db): Promise<ExpenseRules> {
 }
 
 // ───────────────────────── 平账 ─────────────────────────
-
-const daysBetween = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 
 export function pettyBalance(
   a: { amountCents: number; advanceDate: string; spentCents: number; pendingCents: number; returnedCents: number; toppedUpCents: number },
@@ -831,11 +829,6 @@ export async function expenseChecks(db: Db): Promise<ExpenseCheck[]> {
 
 // ───────────────────────── 导出 ─────────────────────────
 
-function csvReply(reply: FastifyReply, name: string, csv: string) {
-  reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(name)}`);
-  return csv;
-}
-
 async function claimsCsv(db: Db, f: ClaimFilter & { from: string; to: string }) {
   // 导出要完整：不截断；太多时整份拒绝，不给出看起来完整、其实少了的报表
   const { count } = await claimTotals(db, f);
@@ -937,11 +930,6 @@ const AdvanceQuery = z.object({
 });
 const keyParam = z.object({ key: z.uuid('操作编号格式不正确') });
 
-const checkRange = (from: string, to: string) => {
-  if (!ISO_DATE.test(from) || !ISO_DATE.test(to) || from > to) throw badRequest('开始日期不能晚于结束日期');
-  if (daysBetween(from, to) > 366) throw badRequest('一次最多查 366 天');
-};
-
 export function registerExpenseRoutes(app: FastifyInstance, deps: Deps) {
   const { sql, config } = deps;
   const docId = (req: { params: unknown }) => parse(idParam, req.params).id;
@@ -962,12 +950,12 @@ export function registerExpenseRoutes(app: FastifyInstance, deps: Deps) {
   // 报销
   app.get('/api/erp/expenses', { preHandler: guard('expense.read') }, async (req) => {
     const f = parse(ClaimQuery, req.query);
-    if (f.from && f.to) checkRange(f.from, f.to);
+    if (f.from && f.to) checkDateRange(f.from, f.to);
     return readSnapshot(sql, (tx) => listClaims(tx, f));
   });
   app.get('/api/erp/expenses/export', { preHandler: guard('expense.export') }, async (req, reply) => {
     const f = parse(ClaimQuery.extend({ from: docDateSchema, to: docDateSchema }), req.query);
-    checkRange(f.from, f.to);
+    checkDateRange(f.from, f.to);
     const csv = await readSnapshot(sql, (tx) => claimsCsv(tx, f));
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'expense_claims', detail: f, ip: req.ip });
     return csvReply(reply, `费用报销明细_${f.from}_${f.to}.csv`, csv);
@@ -1046,12 +1034,12 @@ export function registerExpenseRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/erp/petty/settlements/:id/void', { preHandler: guard('finance.void') }, async (req) => voidSettlement(deps, docId(req), req.body, req.actor));
   app.get('/api/erp/petty/daily', { preHandler: guard('expense.read') }, async (req) => {
     const f = parse(RangeQuery, req.query);
-    checkRange(f.from, f.to);
+    checkDateRange(f.from, f.to);
     return readSnapshot(sql, (tx) => pettyDaily(tx, config.timezone, f));
   });
   app.get('/api/erp/petty/daily/export', { preHandler: guard('expense.export') }, async (req, reply) => {
     const f = parse(RangeQuery, req.query);
-    checkRange(f.from, f.to);
+    checkDateRange(f.from, f.to);
     const d = await readSnapshot(sql, (tx) => pettyDaily(tx, config.timezone, f));
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'petty_daily', detail: f, ip: req.ip });
     return csvReply(reply, `备用金每日平账_${f.from}_${f.to}.csv`, dailyCsv(d));

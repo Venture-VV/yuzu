@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { COUPON_PLATFORMS } from '@shared/checkout';
 import { ISO_DATE } from '@shared/business-date';
@@ -38,8 +38,8 @@ import {
   type GroupInputData,
   type SwapInputData,
 } from './visits';
+import { ctxOf } from '../../lib/context';
 
-const ctxOf = (req: FastifyRequest): OpContext => ({ actor: req.actor, ip: req.ip });
 
 const RulesInput = z.object({
   selfVoidMinutes: z.number().int().min(0, '分钟数不能为负').max(120, '最多 120 分钟'),

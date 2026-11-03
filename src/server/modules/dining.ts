@@ -33,6 +33,7 @@ import { AppError, conflict, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
 import { businessDate, nextDocNo, setTxTimeouts } from './frontdesk/common';
 import { pricesColumn } from './pricing';
+import { ctxOf } from '../lib/context';
 
 export async function loadDiningRules(db: Db): Promise<DiningRules> {
   const [row] = await db<{ value: Partial<DiningRules> }[]>`SELECT value FROM settings WHERE key = 'dining_rules'`;
@@ -354,7 +355,6 @@ export const DishNote = z.string().trim().max(MAX_DISH_NOTE, `口味备注最多
 
 export function registerDiningRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
-  const ctxOf = (req: import('fastify').FastifyRequest): OpContext => ({ actor: req.actor, ip: req.ip });
 
   // 后台「餐饮」：规则（只有店主）、出品档口与菜品的档口（能管理价目的岗位）
   app.get('/api/admin/dining', { preHandler: guardAny('settings.manage', 'catalog.manage') }, async () => diningAdmin(sql));

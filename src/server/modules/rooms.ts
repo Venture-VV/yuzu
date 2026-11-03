@@ -7,7 +7,7 @@
 // 加锁顺序：经办人的班次（收退押金、退房，共享锁）→ 房间（id 升序）→ 入住单（id 升序）→ 来访 → 账单 → 明细。
 
 import { randomUUID } from 'node:crypto';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf } from '@shared/business-date';
 import { normalizeTagCode, TAG_CODE_PATTERN } from '@shared/frontdesk';
@@ -47,6 +47,7 @@ import { assertCanFix, assertOpen, businessDate, hashRequest, loadFrontdeskRules
 import { loadSettings } from './settings';
 import { lockPaymentShift, openShiftOf } from './shifts';
 import { leaveRoomStay, locateRoomStay } from './locations';
+import { ctxOf } from '../lib/context';
 
 // ───────────────────────── 规则 ─────────────────────────
 
@@ -1089,7 +1090,6 @@ export async function runNightAudit(deps: Deps, ctx: OpContext): Promise<RoomAud
 
 export function registerRoomRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
-  const ctxOf = (req: FastifyRequest): OpContext => ({ actor: req.actor, ip: req.ip });
 
   // 后台「客房」：规则（店主）、房型与房间（能管理价目的岗位）
   app.get('/api/admin/rooms', { preHandler: guardAny('settings.manage', 'catalog.manage') }, async () => roomsAdmin(sql));

@@ -22,7 +22,7 @@ import { readSnapshot, type Db } from '../../db';
 import { guard } from '../../auth/guard';
 import { writeAudit } from '../../lib/audit';
 import type { Deps } from '../../lib/context';
-import { toCsv } from '../../lib/csv';
+import { toCsv, CSV_TYPE, attachment } from '../../lib/csv';
 import { badRequest, notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { coverFor, docDateSchema, loadInventorySettings, todayIn, usageByMaterial, usageSince, warehouseInfo } from './common';
@@ -525,9 +525,7 @@ export function registerReportRoutes(app: FastifyInstance, deps: Deps) {
       ]),
     ]);
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'inventory_summary', detail: { from, to, warehouse }, ip: req.ip });
-    reply
-      .header('content-type', 'text/csv; charset=utf-8')
-      .header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`收发汇总_${dept ? `${scope}_` : ''}${from}_${to}.csv`)}`);
+    attachment(reply, `收发汇总_${dept ? `${scope}_` : ''}${from}_${to}.csv`, CSV_TYPE);
     return csv;
   });
 
@@ -552,9 +550,7 @@ export function registerReportRoutes(app: FastifyInstance, deps: Deps) {
       ]),
     ]);
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'stock_card', targetId: id, detail: { ...f, warehouseId: card.warehouse.id }, ip: req.ip });
-    reply
-      .header('content-type', 'text/csv; charset=utf-8')
-      .header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`库存卡_${m.code}.csv`)}`);
+    attachment(reply, `库存卡_${m.code}.csv`, CSV_TYPE);
     return csv;
   });
 }

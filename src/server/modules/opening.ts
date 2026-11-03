@@ -35,6 +35,7 @@ import { expireDueLots } from './bonus';
 import { insertMember } from './members';
 import { loadSettings } from './settings';
 import { applyBalance, lockMember, nextDocNo } from './wallet-core';
+import { ctxOf } from '../lib/context';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -508,7 +509,6 @@ export async function findOpeningImportByKey(db: Db, clientKey: string): Promise
 
 export function registerOpeningRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
-  const ctxOf = (req: import('fastify').FastifyRequest): OpContext => ({ actor: req.actor, ip: req.ip });
   // 文件内容随请求提交（最多 OPENING_MAX_ROWS 行）
   const bodyLimit = 4 * 1024 * 1024;
 

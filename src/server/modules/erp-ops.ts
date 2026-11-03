@@ -18,6 +18,7 @@ import type { Deps } from '../lib/context';
 import { conflict, forbidden } from '../lib/errors';
 import { couponOpRef, deviceOpRef, fenceKey, isCouponOp, isDeviceOp, isFenced } from '../lib/fences';
 import { parse } from '../lib/validate';
+import { setTxTimeouts } from '../lib/tx';
 
 export const erpOpAbandoned = () => conflict('OP_ABANDONED', '这笔已确认作废，没有登记；如仍需办理，请重新填写后提交');
 
@@ -116,7 +117,7 @@ export function registerErpOpsRoutes(app: FastifyInstance, deps: Deps) {
     const input = parse(AbandonInput, req.body ?? {});
     if (!allowed(req.actor, WRITE[input.type])) throw forbidden();
     const outcome = await sql.begin(async (tx) => {
-      await tx.unsafe("SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '10s'");
+      await setTxTimeouts(tx);
       const result = await fenceKey(tx, key, input.type, req.actor.id);
       if ('inserted' in result && result.inserted) {
         await writeAudit(tx, {

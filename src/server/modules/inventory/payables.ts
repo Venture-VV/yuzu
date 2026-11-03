@@ -7,7 +7,6 @@
 // 锁顺序（v0.7.12）：供应商（FOR NO KEY UPDATE）→ 可抵扣的一方（付款、退货单）→ 应付的收货单（id 升序）→ 期初未付（id 升序）。
 // 退货生效走库存单据：退货单 → 原收货单（与上面同样是「退货单在收货单之前」）。
 
-import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { can } from '@shared/permissions';
@@ -29,7 +28,7 @@ import { isUniqueViolation, readSnapshot, type Db, type Tx } from '../../db';
 import { guard } from '../../auth/guard';
 import { writeAudit } from '../../lib/audit';
 import type { Actor, Deps } from '../../lib/context';
-import { toCsv } from '../../lib/csv';
+import { toCsv, CSV_TYPE, attachment } from '../../lib/csv';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
 import { assertNotFenced, lockOpKey } from '../../lib/fences';
 import { erpOpAbandoned } from '../erp-ops';
@@ -46,10 +45,10 @@ import {
   setTxTimeouts,
   todayIn,
 } from './common';
+import { hashRequest } from '../../lib/idempotency';
 
 const id = z.number().int().positive();
 const ReasonInput = z.object({ reason: z.string().trim().min(2, '请填写原因（至少 2 个字）').max(200) });
-const hashRequest = (payload: unknown) => createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 
 export async function lockSupplier(tx: Tx, supplierId: number) {
   // 不修改供应商主键；允许库存应付流水的外键校验取得 KEY SHARE，避免与收货冲销互相等待。
@@ -913,9 +912,7 @@ export function registerPayableRoutes(app: FastifyInstance, deps: Deps) {
       ...st.credits.map((c) => [c.docNo, c.date, c.kind === 'prepayment' ? '预付款' : c.canOffset ? '退货余额' : '现付退货待退款', yuan(c.amountCents), yuan(c.usedCents), yuan(c.offsetCents), yuan(c.refundedCents), yuan(c.availableCents)]),
     ]);
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'supplier_statement', targetId: q.supplierId, detail: q, ip: req.ip });
-    reply
-      .header('content-type', 'text/csv; charset=utf-8')
-      .header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`对账单_${st.supplier.code}_${q.from}_${q.to}.csv`)}`);
+    attachment(reply, `对账单_${st.supplier.code}_${q.from}_${q.to}.csv`, CSV_TYPE);
     return csv;
   });
 
