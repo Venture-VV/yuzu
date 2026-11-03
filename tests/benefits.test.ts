@@ -11,7 +11,7 @@ import { BENEFIT_CATALOG, periodEnd, type Benefit, type BenefitCatalog, type Mem
 import { businessDateOf } from '../src/shared/business-date';
 import type { CouponTemplate, MemberCoupons } from '../src/shared/coupons';
 import { shiftDate } from '../src/shared/labels';
-import { rechargeOutcome, type MemberGradeInfo, type MembershipRules } from '../src/shared/membership';
+import { rechargeOutcome, tierTargets, type MemberGradeInfo, type MembershipRules } from '../src/shared/membership';
 import { benefitChecks, runBenefitsDaily } from '../src/server/modules/benefits';
 import { membershipChecks, runMembershipDaily } from '../src/server/modules/membership';
 import { createStaff } from '../src/server/modules/staff';
@@ -385,6 +385,68 @@ describe('服务类：登记使用', () => {
     const l0 = await benefitsOf(fresh);
     expect(l0.items.map((i) => i.code)).toEqual(expect.arrayContaining(['QY-051', 'QY-052', 'QY-053']));
     expect(l0.upcoming.map((u) => u.code)).toContain('QY-001');
+    await allChecksOk();
+  });
+});
+
+// Codex 自动审查 98806a3：每天的自动发放当天跑完以后不再翻会员——补填的生日要当场看；
+// 停机后补跑到期、一次连走几步时，本期券类与生日礼按走完以后的状态发，中间早已过去的档阶不发
+describe('当天改了生日、补跑多步到期', () => {
+  const profileOf = async (memberId: number) => (await api(ctx.app, ctx.owner, 'GET', `/api/members/${memberId}`)).body as { name: string; phone: string };
+  const setBirthday = async (memberId: number, birthday: string | null) => {
+    const { name, phone } = await profileOf(memberId);
+    const r = await api(ctx.app, ctx.clerk, 'PUT', `/api/members/${memberId}`, { name, phone, birthday });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+  };
+  const birthdayGrants = async (memberId: number) => (await grantsOf(memberId)).filter((g) => g.code === 'QY-020');
+
+  it('自动发放今天已经跑完，再补填生日月的生日：当场发生日礼，再改同月的日期、改到别的月都不再发', async () => {
+    const m = await newMember('补填生日');
+    await recharge(m, yuan(5000));
+    expect(await birthdayGrants(m)).toEqual([]);
+    await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(today));
+    expect(await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(today))).toBeNull();
+    await setBirthday(m, `1991-${today.slice(5, 7)}-20`);
+    expect(await birthdayGrants(m)).toEqual([expect.objectContaining({ reason: 'event', eventKey: `birthday:${today.slice(0, 4)}`, quantity: 1 })]);
+    await setBirthday(m, `1991-${today.slice(5, 7)}-01`);
+    const otherMonth = String((Number(today.slice(5, 7)) % 12) + 1).padStart(2, '0');
+    await setBirthday(m, `1991-${otherMonth}-01`);
+    expect(await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(today))).toBeNull();
+    expect(await birthdayGrants(m)).toHaveLength(1);
+    await allChecksOk();
+  });
+
+  it('L2 会员周期与补充期都过了才处理（先进补充期、再降到 L1）：本月券与生日礼按 L1 发，不按中间的 L2', async () => {
+    // L2·初 起的月度券、生日礼改成 L2·初 起；L1·尊 起的月度券作对照（L1·尊 够格，处理完当场补发）
+    await publish('QY-038', { templateId: massage.id, startGrade: 2, startTier: 0, period: 'month', quantity: 1 });
+    await publish('QY-036', { templateId: massage.id, startGrade: 1, startTier: 2, period: 'month', quantity: 1 });
+    expect((await edit('QY-020', { startGrade: 2, startTier: 0 })).status).toBe(200);
+    const r = await rules();
+    const m = await newMember('停机补跑');
+    await recharge(m, yuan(5000));
+    await recharge(m, yuan(5000));
+    const before = (await gradeOf(m)).state;
+    expect(before.grade).toBe(2);
+    // 周期内只消费到享阶（不到尊阶）：到期进补充期，补充期结束仍不够 → 降档
+    await spend(m, tierTargets(r, 2).enjoy);
+    const graceEnd = shiftDate(before.cycleEnd!, r.graceDays);
+    const day = shiftDate(graceEnd, 1);
+    // 生日在处理的那个月
+    await setBirthday(m, `1990-${day.slice(5, 7)}-10`);
+    const run = await runMembershipDaily({ sql: ctx.sql, config: ctx.config }, noonOf(day));
+    expect(run).toMatchObject({ error: null });
+    const events = await ctx.sql<{ kind: string; toGrade: number; toTier: number | null }[]>`
+      SELECT kind, to_grade, to_tier FROM member_grade_events WHERE member_id = ${m} AND business_date = ${day} ORDER BY id`;
+    expect(events).toEqual([
+      { kind: 'grace_start', toGrade: 2, toTier: 1 },
+      { kind: 'downgrade', toGrade: 1, toTier: 2 },
+    ]);
+    const month = (await grantsOf(m)).filter((g) => g.periodKey === day.slice(0, 7));
+    expect(month).toEqual([expect.objectContaining({ code: 'QY-036', reason: 'top_up', quantity: 1, target: 1 })]);
+    expect((await birthdayGrants(m)).filter((g) => g.eventKey === `birthday:${day.slice(0, 4)}`)).toEqual([]);
+    // 当天的自动发放也不按 L2 补
+    await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(day));
+    expect((await grantsOf(m)).filter((g) => g.periodKey === day.slice(0, 7)).map((g) => g.code)).toEqual(['QY-036']);
     await allChecksOk();
   });
 });

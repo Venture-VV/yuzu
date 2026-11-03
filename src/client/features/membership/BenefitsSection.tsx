@@ -75,7 +75,8 @@ function BenefitsEditor() {
   if (q.isPending) return <Skeleton className="h-96" />;
   if (q.error || !d) return <Notice tone="error" title={q.error?.message ?? '权益清单没有加载出来'} />;
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ['benefits'] });
+  // 清单、看板汇总，连同已经打开过的会员「本月可享」（挂在 ['member', id, 'benefits']）
+  const refresh = () => qc.invalidateQueries({ predicate: ({ queryKey: k }) => k[0] === 'benefits' || (k[0] === 'member' && k[2] === 'benefits') });
   const importAll = async () => {
     setBusy('import');
     try {

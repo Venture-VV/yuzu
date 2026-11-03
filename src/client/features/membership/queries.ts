@@ -4,10 +4,11 @@ import { useQuery } from '@tanstack/react-query';
 import type { GradeEventKind, GradeEventListRow, MemberGradeInfo, MembershipOverview, MembershipRules, RetentionRow } from '@shared/membership';
 import { api } from '../../lib/api';
 
-/** 会员权益（v0.7.24）：后台清单、会员的「本月可享」、看板汇总 */
+/** 会员权益（v0.7.24）：后台清单、会员的「本月可享」、看板汇总。
+ *  会员的「本月可享」挂在 ['member', id] 下面（同会员的券）：充值、消费、结账、调档阶、改资料后刷新会员时一起刷新 */
 export const benefitKeys = {
   catalog: ['benefits', 'catalog'] as const,
-  member: (memberId: number) => ['benefits', 'member', memberId] as const,
+  member: (memberId: number) => ['member', memberId, 'benefits'] as const,
   summary: ['benefits', 'summary'] as const,
 };
 

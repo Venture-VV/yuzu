@@ -78,18 +78,27 @@ test.describe('会员权益', () => {
       if (await page.getByTestId('benefit-publish-QY-051').isVisible()) await page.getByTestId('benefit-publish-QY-051').click();
       await expect(firstGift).toContainText('已发布');
 
-      // 新会员首充 1 万（升到 L2，按 5% 赠送）
+      // 新会员：会员详情开着，在页面上首充 1 万（升到 L2，按 5% 赠送）；不刷新页面，「本月可享」随之更新（Codex 自动审查 98806a3）
       const phone = `195${String(Date.now()).slice(-8)}`;
       const created = await page.request.post('/api/members', { data: { name: '权益验收', phone } });
       expect(created.ok()).toBe(true);
       const member = (await created.json()) as { id: number };
-      const recharged = await page.request.post('/api/recharges', {
-        data: { idempotencyKey: crypto.randomUUID(), memberId: member.id, planId: null, paidAmount: 1_000_000, bonusAmount: 50_000, paymentMethod: 'cash', paymentConfirmed: true, bonusMode: 'auto' },
-      });
-      expect(recharged.ok(), await recharged.text()).toBe(true);
-
       await page.goto(`/?m=${member.id}`);
       const card = page.getByTestId('member-benefits');
+      await expect(card).toContainText('L0 青溪');
+      await expect(page.getByTestId('member-benefits-upcoming')).toContainText('会员专属通道（L2·初）');
+      await expect(page.getByTestId('member-benefit-QY-001')).toHaveCount(0);
+
+      await page.getByRole('button', { name: /^充值/ }).first().click();
+      await page.getByText('自定义金额').click();
+      await page.fill('#paid', '10000');
+      await page.getByRole('button', { name: '现金' }).click();
+      await page.getByRole('button', { name: '下一步：核对收款' }).click();
+      await page.getByText('我已核实').click();
+      await page.getByRole('button', { name: /确认入账/ }).click();
+      await expect(page.getByTestId('recharge-result-grade')).toHaveText('L2 潭影 · 初');
+      await page.getByRole('button', { name: '完成' }).click();
+
       await expect(card).toContainText('L2 潭影 · 初');
       await expect(page.getByTestId('member-benefit-QY-051')).toContainText('收到过 1 次');
       const row = page.getByTestId('member-benefit-QY-001');

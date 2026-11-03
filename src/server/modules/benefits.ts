@@ -230,16 +230,33 @@ const EVENT_OF_KIND: Partial<Record<GradeEventKind, BenefitEvent>> = { recharge_
 /**
  * 档阶变化之后（会员一行已锁，membership.ts 记状态变化的同一事务）：按新档阶补发本期券类的差额；
  * 充值升档发升级礼（升档）、消费升阶发升级礼（升阶）、到期保级与补充期内保级发保级礼（每次状态变化各一次）；
- * 新档阶够格了、这个月是生日月的补发生日礼。手动调整、上线与期初导入定档只补发券类，不发升级礼；降档不收回
+ * 新档阶够格了、这个月是生日月的补发生日礼。手动调整、上线与期初导入定档只补发券类，不发升级礼；降档不收回。
+ *
+ * deferPeriodic：停机后补跑到期、一次连走几步时（例如补充期开始、接着降档），中间那几步只发事件礼（保级礼按那次保级），
+ * 本期券类与生日礼留到最后一步之后按处理完的状态补（onDueSettled）：中间的档阶早就过去了，按它发的券降档后也收不回
+ * （Codex 自动审查 98806a3）
  */
-export async function onGradeChanged(tx: Tx, o: { memberId: number; kind: GradeEventKind; eventId: number; date: string; to: GradeState; staffId: number | null }) {
+export async function onGradeChanged(
+  tx: Tx,
+  o: { memberId: number; kind: GradeEventKind; eventId: number; date: string; to: GradeState; staffId: number | null; deferPeriodic?: boolean },
+) {
   const benefits = await publishedForGrants(tx);
   if (!benefits.length) return;
   const g = await granteeOf(tx, o.memberId, o.date, o.staffId);
   if (!g) return;
-  await topUpPeriodic(tx, g, 'top_up', benefits);
+  if (!o.deferPeriodic) await topUpPeriodic(tx, g, 'top_up', benefits);
   const event = EVENT_OF_KIND[o.kind];
   if (event) await grantEvent(tx, g, event, `${event}:e${o.eventId}`, benefits);
+  if (!o.deferPeriodic) await grantBirthday(tx, g, benefits);
+}
+
+/** 补跑的到期处理走完以后（会员一行已锁）：按处理完的状态补发本期券类与生日礼 */
+export async function onDueSettled(tx: Tx, memberId: number, date: string) {
+  const benefits = await publishedForGrants(tx);
+  if (!benefits.length) return;
+  const g = await granteeOf(tx, memberId, date, null);
+  if (!g) return;
+  await topUpPeriodic(tx, g, 'top_up', benefits);
   await grantBirthday(tx, g, benefits);
 }
 
@@ -265,8 +282,11 @@ export async function onRecharge(tx: Tx, o: { memberId: number; first: boolean; 
   if (g) await grantEvent(tx, g, 'first_recharge', 'first', benefits);
 }
 
-/** 新会员建档（建档的事务里）：「L0·会员」起点的券类当场发本期的；生日在这个月的发生日礼 */
-export async function onMemberCreated(tx: Tx, deps: Pick<Deps, 'config'>, memberId: number, ctx: OpContext) {
+/**
+ * 新会员建档、修改会员时改了生日（建档、修改的事务里，会员一行刚建或已锁）：「L0·会员」起点的券类当场发本期的；生日在这个月的发生日礼。
+ * 改生日也要当场看：每天的自动发放当天跑完以后不再翻会员，月底最后一天补填的生日会错过（Codex 自动审查 98806a3）
+ */
+export async function onMemberSaved(tx: Tx, deps: Pick<Deps, 'config'>, memberId: number, ctx: OpContext) {
   const benefits = await publishedForGrants(tx);
   if (!benefits.length) return;
   const at = ctx.at ?? new Date();

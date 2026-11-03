@@ -62,7 +62,7 @@ import { dateSchema, idParam, parse } from '../lib/validate';
 import { lockSettings, sameJson, saveRuleSetting } from '../lib/rule-settings';
 import { setTxTimeouts } from '../lib/tx';
 import { assertNotFenced } from '../lib/fences';
-import { onGradeChanged, onMembersGraded } from './benefits';
+import { onDueSettled, onGradeChanged, onMembersGraded } from './benefits';
 import { erpOpAbandoned } from './erp-ops';
 import { loadSettings } from './settings';
 
@@ -183,6 +183,8 @@ interface EventExtra {
   staffId?: number | null;
   reason?: string;
   clientKey?: string | null;
+  /** 补跑到期的中间几步：只发事件礼，本期券类与生日礼等走完再按最后的状态发（settleDue） */
+  deferPeriodic?: boolean;
 }
 
 /**
@@ -201,7 +203,7 @@ async function changeState(tx: Tx, memberId: number, kind: GradeEventKind, busin
             ${extra.cycleSpend ?? 0}, ${extra.rollingRecharge ?? null}, ${extra.rechargeId ?? null}, ${extra.consumptionId ?? null},
             ${extra.staffId ?? null}, ${extra.reason ?? ''}, ${extra.clientKey ?? null})
     RETURNING id`;
-  await onGradeChanged(tx, { memberId, kind, eventId: Number(event!.id), date: businessDate, to, staffId: extra.staffId ?? null });
+  await onGradeChanged(tx, { memberId, kind, eventId: Number(event!.id), date: businessDate, to, staffId: extra.staffId ?? null, deferPeriodic: extra.deferPeriodic });
 }
 
 interface DueStep {
@@ -231,10 +233,16 @@ async function projectDue(db: Db, rules: MembershipRules, memberId: number, stat
   return { steps, state: cur };
 }
 
-/** 把到期没处理的处理掉（会员一行已锁）；返回处理后的状态与各步 */
+/**
+ * 把到期没处理的处理掉（会员一行已锁）；返回处理后的状态与各步。
+ * 会员权益：每一步的事件礼（保级礼）照发；本期券类与生日礼走完以后按处理完的状态发一次——停机后补跑、一次连走几步时
+ * （例如 6 月 30 日到期、补充期也过了，11 月 3 日才处理：先进补充期、再降档），中间那几步的档阶早已过去，
+ * 按它发的本月券降档后收不回（Codex 自动审查 98806a3）。与每天按时处理的结果一样
+ */
 async function settleDue(tx: Tx, rules: MembershipRules, memberId: number, state: GradeState, today: string) {
   const projected = await projectDue(tx, rules, memberId, state, today);
-  for (const s of projected.steps) await changeState(tx, memberId, s.kind, today, s.from, s.next, { cycleSpend: s.spend });
+  for (const s of projected.steps) await changeState(tx, memberId, s.kind, today, s.from, s.next, { cycleSpend: s.spend, deferPeriodic: true });
+  if (projected.steps.length) await onDueSettled(tx, memberId, today);
   return projected;
 }
 
