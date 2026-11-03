@@ -138,6 +138,11 @@ export interface MpGrade {
 
 export interface MpMe {
   bound: boolean;
+  /**
+   * 这个微信的绑定状态版本号：绑定、解绑各加一，只增不减（绑定记录只追加）。点绑定时带上看到的这个数，
+   * 门店系统对不上就拒绝（BIND_STALE）：解绑之后，之前没确认的旧请求晚到也不会再绑上（小程序线测试预检 #44 的 P1）
+   */
+  bindVersion: number;
   member:
     | (MpMemberBrief & {
         principalBalance: number;

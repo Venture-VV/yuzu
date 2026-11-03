@@ -103,13 +103,13 @@ describe('整条链路：小程序 → 网关 → yuzu', () => {
   it('绑定（模拟手机号验证）、会员卡、流水、券、会员码', async () => {
     await createMember(ctx, '演示·网关会员', '13700002001');
     const token = await login(gw, 'bob');
-    expect((await authed(gw, token, 'GET', '/v1/me')).json()).toEqual({ bound: false, member: null });
-    const bad = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'not-a-mock-code', clientKey: randomUUID() });
+    expect((await authed(gw, token, 'GET', '/v1/me')).json()).toEqual({ bound: false, bindVersion: 0, member: null });
+    const bad = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'not-a-mock-code', clientKey: randomUUID(), bindVersion: 0 });
     expect(bad.json().error.code).toBe('WX_PHONE_FAILED');
-    const notMember = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13900000000', clientKey: randomUUID() });
+    const notMember = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13900000000', clientKey: randomUUID(), bindVersion: 0 });
     expect(notMember.statusCode).toBe(404);
     expect(notMember.json().error).toEqual({ code: 'NOT_MEMBER', message: '这个手机号还不是会员，请到前台开卡' });
-    const bound = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700002001', clientKey: randomUUID() });
+    const bound = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700002001', clientKey: randomUUID(), bindVersion: 0 });
     expect(bound.statusCode).toBe(200);
     expect(bound.json()).toMatchObject({ status: 'bound', member: { name: '演示·网关会员' } });
     // 网关转给 yuzu 时标了模拟微信
@@ -134,11 +134,34 @@ describe('整条链路：小程序 → 网关 → yuzu', () => {
     expect(a.json()).toEqual({ status: 'abandoned' });
     const [fence] = await ctx.sql<{ openid: string }[]>`SELECT openid FROM mp_op_fences WHERE key = ${clientKey}`;
     expect(fence).toEqual({ openid: 'mock_carol' });
-    const late = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700002002', clientKey });
+    const late = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700002002', clientKey, bindVersion: 0 });
     expect(late.statusCode).toBe(409);
     expect(late.json().error.code).toBe('OP_ABANDONED');
     expect((await authed(gw, token, 'POST', '/v1/bind/abandon', { clientKey: 'not-a-uuid' })).statusCode).toBe(400);
     expect((await authed(gw, null, 'POST', '/v1/bind/abandon', { clientKey })).statusCode).toBe(401);
+  });
+
+  it('解绑之后，之前没确认的绑定晚到不生效（BIND_STALE，小程序线测试预检 #44 的 P1）；不带版本号在用手机号验证之前就拒绝', async () => {
+    await createMember(ctx, '演示·网关晚到甲', '13700002003');
+    await createMember(ctx, '演示·网关晚到乙', '13700002004');
+    const token = await login(gw, 'dora');
+    const v0 = (await authed(gw, token, 'GET', '/v1/me')).json().bindVersion as number;
+    // 这次请求在路上耽搁了（手机上的记录后来读不出来、被删了）
+    const late = { phoneCode: 'mock-phone-13700002003', clientKey: randomUUID(), bindVersion: v0 };
+    // 同一个微信在另一处先绑上了乙，员工随后在后台解绑乙
+    expect((await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700002004', clientKey: randomUUID(), bindVersion: v0 })).statusCode).toBe(200);
+    const [staff] = await ctx.sql<{ id: number }[]>`SELECT id FROM staff ORDER BY id LIMIT 1`;
+    await ctx.sql`
+      UPDATE mp_bindings SET unbound_at = now(), unbound_by = ${staff!.id}, unbind_reason = '顾客要求解绑', unbind_client_key = ${randomUUID()}
+      WHERE openid = 'mock_dora' AND unbound_at IS NULL`;
+    // 耽搁的那次这时才到：经网关转给 yuzu，版本号对不上，不绑定
+    const res = await authed(gw, token, 'POST', '/v1/bind', late);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toEqual({ code: 'BIND_STALE', message: '绑定状态刚刚变过，请刷新后再绑定' });
+    expect((await authed(gw, token, 'GET', '/v1/me')).json()).toEqual({ bound: false, bindVersion: 2, member: null });
+    const missing = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700002003', clientKey: randomUUID() });
+    expect(missing.statusCode).toBe(400);
+    expect(missing.json().error).toEqual({ code: 'BAD_REQUEST', message: '请刷新小程序后再绑定' });
   });
 
   it('会员接口要会话；伪造、过期的会话拒绝', async () => {
@@ -203,7 +226,7 @@ describe('门店断外网', () => {
     const url = `http://127.0.0.1:${(prod.server.address() as AddressInfo).port}`;
     const g = await buildGateway({ config: gatewayConfig({ upstreamUrl: url }), wechat: createMockWechat(), upstream: createUpstream(url, KEY) });
     const token = await login(g, 'dave');
-    const res = await authed(g, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700002001', clientKey: randomUUID() });
+    const res = await authed(g, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700002001', clientKey: randomUUID(), bindVersion: 0 });
     expect(res.statusCode).toBe(403);
     expect(res.json().error.code).toBe('MP_MOCK_REFUSED');
     await g.close();

@@ -53,6 +53,8 @@ export function openidOf(req: FastifyRequest): string {
 const BindInput = z.object({
   clientKey: z.uuid('操作编号不正确'),
   phone: z.string().regex(/^1\d{10}$/, '手机号不正确'),
+  /** 点绑定时小程序看到的绑定状态版本号（MpMe.bindVersion） */
+  bindVersion: z.number('请刷新小程序后再绑定').int('请刷新小程序后再绑定').min(0, '请刷新小程序后再绑定'),
   /** 模拟微信（假手机号）：只在 development、test 实例允许 */
   mock: z.boolean().default(false),
 });
@@ -69,6 +71,15 @@ async function memberBrief(db: Db, memberId: number): Promise<MpMemberBrief> {
 export async function activeBinding(db: Db, openid: string): Promise<{ id: number; memberId: number } | null> {
   const [row] = await db<{ id: number; memberId: number }[]>`SELECT id, member_id FROM mp_bindings WHERE openid = ${openid} AND unbound_at IS NULL`;
   return row ?? null;
+}
+
+/**
+ * 这个微信的绑定状态版本号：绑定记录的条数加上已解绑的条数。绑定记录只追加、解绑只能填一次（迁移 043 的触发器），
+ * 所以每次绑定、解绑都加一、不会回到以前的数。
+ */
+export async function bindVersionOf(db: Db, openid: string): Promise<number> {
+  const [row] = await db<{ v: number }[]>`SELECT (count(*) + count(unbound_at))::int AS v FROM mp_bindings WHERE openid = ${openid}`;
+  return row?.v ?? 0;
 }
 
 async function boundMemberId(db: Db, openid: string): Promise<number> {
@@ -96,6 +107,10 @@ export async function bindMember(deps: Deps, openid: string, raw: unknown): Prom
         if (prev.openid !== openid || prev.phone !== input.phone) throw conflict('CLIENT_KEY_REUSED', '这次绑定的编号已经用过，请重新绑定');
         return { status: 'bound' as const, member: await memberBrief(tx, prev.memberId), replayed: true };
       }
+      // 点绑定之后这个微信绑过或解绑过（版本号变了）：这是之前的请求，不再生效。例如手机上读不出来的旧编号，
+      // 在换绑、解绑之后才晚到（小程序线测试预检 #44 的 P1）。在这个微信的咨询锁里比，与别的绑定不交错；
+      // 员工解绑不取这把锁也没关系：解绑提交前那位会员还绑着（晚到的被 OPENID_BOUND 拒），提交后版本号就变了
+      if ((await bindVersionOf(tx, openid)) !== input.bindVersion) throw conflict('BIND_STALE', '绑定状态刚刚变过，请刷新后再绑定');
       const [m] = await tx<{ id: number; memberNo: string; name: string; status: string }[]>`
         SELECT id, member_no, name, status FROM members WHERE phone = ${input.phone} FOR SHARE`;
       const current = await activeBinding(tx, openid);
@@ -147,7 +162,8 @@ export async function abandonBind(deps: Deps, openid: string, raw: unknown): Pro
 
 export async function getMe(deps: Deps, openid: string): Promise<MpMe> {
   const b = await activeBinding(deps.sql, openid);
-  if (!b) return { bound: false, member: null };
+  const bindVersion = await bindVersionOf(deps.sql, openid);
+  if (!b) return { bound: false, bindVersion, member: null };
   // 与员工打开会员详情一样：先作废这位会员到期的赠金，看到的余额才是可用余额
   await expireMemberBonus(deps, b.memberId);
   const today = await mpToday(deps.sql, deps.config.timezone);
@@ -177,6 +193,7 @@ export async function getMe(deps: Deps, openid: string): Promise<MpMe> {
   };
   return {
     bound: true,
+    bindVersion,
     member: {
       ...brief(m),
       principalBalance: m.principalBalance,

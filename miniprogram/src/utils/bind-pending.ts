@@ -5,7 +5,11 @@
 //     已经绑上了门店系统就回「已绑定」；还没有就登记作废，原来那次请求之后即使到达也不会绑定。以这个回答为准；
 //   · 确认之前「我的」页显示「绑定结果待确认」，不能再点绑定（换一个编号再绑，原来那次晚到就可能绑上另一位会员）；
 //   · 手机上的记录读不出来（读存储出错，或存着的内容认不出）不当作没有（本地 AI 预检 PR #42 的 P1）：不能绑定、不改写记录，
-//     「我的」页提示稍后再试，读得出来才继续确认；已经绑定的不受影响（这个微信已经有绑定，晚到的原请求绑不上别的会员）。
+//     「我的」页提示稍后再试，读得出来才继续确认；
+//   · 已经绑定时，读不出来的记录可以删：每次绑定都带着点绑定时看到的绑定状态版本号（/v1/me 的 bindVersion），
+//     门店系统对不上就拒绝（BIND_STALE）。那条记录的请求是没绑定时发的，现在已经绑定，要么就是它绑上的，要么之后
+//     有过绑定（版本号变了）——它晚到时，还绑着就被拒（这个微信已经有绑定），解绑之后也因为版本号对不上被拒
+//     （小程序线测试预检 #44 的 P1：只靠「已经有绑定」不够，解绑之后旧请求曾经还能绑上）。
 
 import type { MpBindAbandonResult } from '../../../src/shared/mp';
 import { isApiError, member, messageOf } from './api';
@@ -88,13 +92,16 @@ export async function resolveBindPending(): Promise<BindOutcome | null> {
   }
 }
 
-/** 已经绑定了：手机上读不出来的记录不再要紧（这个微信只能有一条有效绑定，晚到的原请求绑不上别的会员），能删就删 */
+/** 已经绑定了：手机上读不出来的记录不再要紧（它的请求带的绑定版本号已经过时，晚到也不会生效，见文件开头），能删就删 */
 export function dropUnreadableWhenBound(): void {
   if (readBindPending().state === 'unreadable') clearBindPending();
 }
 
-/** 绑定：先确认手机上没有没确认的绑定、再存操作编号（读不出来、存不了都不发），再发请求；结果不确定时马上确认一次 */
-export async function sendBind(phoneCode: string, clientKey: string): Promise<BindOutcome> {
+/**
+ * 绑定：先确认手机上没有没确认的绑定、再存操作编号（读不出来、存不了都不发），再发请求；结果不确定时马上确认一次。
+ * bindVersion 是点绑定时页面上的绑定状态版本号（/v1/me 给的）：期间绑定状态变过，门店系统拒绝（BIND_STALE），页面刷新后再绑
+ */
+export async function sendBind(phoneCode: string, clientKey: string, bindVersion: number): Promise<BindOutcome> {
   const before = readBindPending();
   // 读不出来：不能拿新的编号盖掉原来那条（原来那次晚到就可能绑上）
   if (before.state === 'unreadable') return { kind: 'unreadable' };
@@ -104,7 +111,7 @@ export async function sendBind(phoneCode: string, clientKey: string): Promise<Bi
     return { kind: 'rejected', code: 'PENDING_STORE_FAILED', message: '手机存储空间不够，这次没有提交，请清理微信的存储空间后再绑定' };
   }
   try {
-    await member('POST', '/v1/bind', { phoneCode, clientKey });
+    await member('POST', '/v1/bind', { phoneCode, clientKey, bindVersion });
     clearBindPending();
     return { kind: 'bound' };
   } catch (e) {

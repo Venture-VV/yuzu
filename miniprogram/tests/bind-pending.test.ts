@@ -48,7 +48,7 @@ describe('绑定的结果待确认', () => {
   it('手机存不下操作编号：不发请求', async () => {
     const { sent } = installWx({}, { storageBroken: true });
     const m = await load();
-    const r = await m.sendBind('code-1', KEY);
+    const r = await m.sendBind('code-1', KEY, 3);
     expect(r).toMatchObject({ kind: 'rejected', code: 'PENDING_STORE_FAILED' });
     expect(sent).toEqual([]);
   });
@@ -56,20 +56,20 @@ describe('绑定的结果待确认', () => {
   it('绑上了、门店系统明确拒绝：删掉待确认记录', async () => {
     let env = installWx({ '/v1/bind': { status: 200, data: { status: 'bound', member: { name: '沈先生' }, replayed: false } } });
     let m = await load();
-    expect(await m.sendBind('code-1', KEY)).toEqual({ kind: 'bound' });
+    expect(await m.sendBind('code-1', KEY, 3)).toEqual({ kind: 'bound' });
     expect(env.storage.tq_bind_pending).toBeUndefined();
-    expect(env.sent).toEqual([{ path: '/v1/bind', data: { phoneCode: 'code-1', clientKey: KEY } }]);
+    expect(env.sent).toEqual([{ path: '/v1/bind', data: { phoneCode: 'code-1', clientKey: KEY, bindVersion: 3 } }]);
 
     env = installWx({ '/v1/bind': { status: 404, data: { error: { code: 'NOT_MEMBER', message: '这个手机号还不是会员，请到前台开卡' } } } });
     m = await load();
-    expect(await m.sendBind('code-2', KEY)).toEqual({ kind: 'rejected', code: 'NOT_MEMBER', message: '这个手机号还不是会员，请到前台开卡' });
+    expect(await m.sendBind('code-2', KEY, 3)).toEqual({ kind: 'rejected', code: 'NOT_MEMBER', message: '这个手机号还不是会员，请到前台开卡' });
     expect(env.storage.tq_bind_pending).toBeUndefined();
   });
 
   it('断网：请门店系统作废这个编号；没绑上就是没绑上（作废了），绑上了就是绑上', async () => {
     let env = installWx({ '/v1/bind': 'fail', '/v1/bind/abandon': { status: 200, data: { status: 'abandoned' } } });
     let m = await load();
-    expect(await m.sendBind('code-1', KEY)).toEqual({ kind: 'abandoned' });
+    expect(await m.sendBind('code-1', KEY, 3)).toEqual({ kind: 'abandoned' });
     expect(env.sent.map((s) => s.path)).toEqual(['/v1/bind', '/v1/bind/abandon']);
     expect(env.sent[1]!.data).toEqual({ clientKey: KEY });
     expect(env.storage.tq_bind_pending).toBeUndefined();
@@ -80,7 +80,7 @@ describe('绑定的结果待确认', () => {
       '/v1/bind/abandon': { status: 200, data: { status: 'bound', member: { name: '沈先生' }, replayed: true } },
     });
     m = await load();
-    expect(await m.sendBind('code-1', KEY)).toEqual({ kind: 'bound' });
+    expect(await m.sendBind('code-1', KEY, 3)).toEqual({ kind: 'bound' });
     expect(env.storage.tq_bind_pending).toBeUndefined();
   });
 
@@ -91,10 +91,10 @@ describe('绑定的结果待确认', () => {
       '/v1/bind/abandon': () => (online ? { status: 200, data: { status: 'abandoned' } } : { status: 503, data: { error: { code: 'STORE_OFFLINE', message: '门店系统连接中，请稍后再试' } } }),
     });
     const m = await load();
-    expect(await m.sendBind('code-1', KEY)).toEqual({ kind: 'pending', message: '门店系统连接中，请稍后再试' });
+    expect(await m.sendBind('code-1', KEY, 3)).toEqual({ kind: 'pending', message: '门店系统连接中，请稍后再试' });
     expect(m.readBindPending()).toMatchObject({ state: 'pending', pending: { clientKey: KEY } });
     // 还没确认：再点绑定不发新的，先确认原来那次
-    expect(await m.sendBind('code-2', 'another-key')).toEqual({ kind: 'pending', message: '门店系统连接中，请稍后再试' });
+    expect(await m.sendBind('code-2', 'another-key', 3)).toEqual({ kind: 'pending', message: '门店系统连接中，请稍后再试' });
     expect(env.sent.some((s) => s.path === '/v1/bind' && (s.data as { clientKey: string }).clientKey === 'another-key')).toBe(false);
     online = true;
     expect(await m.resolveBindPending()).toEqual({ kind: 'abandoned' });
@@ -111,7 +111,7 @@ describe('绑定的结果待确认', () => {
     const m = await load();
     readFails.on = true;
     expect(m.readBindPending()).toEqual({ state: 'unreadable' });
-    expect(await m.sendBind('code-2', 'new-key')).toEqual({ kind: 'unreadable' });
+    expect(await m.sendBind('code-2', 'new-key', 3)).toEqual({ kind: 'unreadable' });
     expect(await m.resolveBindPending()).toEqual({ kind: 'unreadable' });
     expect(env.sent).toEqual([]);
     expect(storage.tq_bind_pending).toEqual({ clientKey: KEY, at: 1 });
@@ -126,7 +126,7 @@ describe('绑定的结果待确认', () => {
       const env = installWx({ '/v1/bind': { status: 200, data: { status: 'bound', member: { name: '沈先生' }, replayed: false } } }, { storage });
       const m = await load();
       expect(m.readBindPending()).toEqual({ state: 'unreadable' });
-      expect(await m.sendBind('code-1', KEY)).toEqual({ kind: 'unreadable' });
+      expect(await m.sendBind('code-1', KEY, 3)).toEqual({ kind: 'unreadable' });
       expect(env.sent).toEqual([]);
       expect(storage.tq_bind_pending).toEqual(bad);
       // 这个微信已经有绑定：晚到的原请求绑不上别的会员，记录可以删

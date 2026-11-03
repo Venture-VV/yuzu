@@ -37,6 +37,8 @@ const LoginInput = z.object({ code: z.string('缺少微信登录的 code').min(1
 const BindInput = z.object({
   phoneCode: z.string('请先验证手机号').min(1, '请先验证手机号').max(256),
   clientKey: z.uuid('操作编号不正确'),
+  // 点绑定时看到的绑定状态版本号（/v1/me 给的），原样转给门店系统比对
+  bindVersion: z.number('请刷新小程序后再绑定').int('请刷新小程序后再绑定').min(0, '请刷新小程序后再绑定'),
 });
 const AbandonInput = z.object({ clientKey: z.uuid('操作编号不正确') });
 const LedgerQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) });
@@ -183,7 +185,7 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
   app.post('/v1/bind', async (req, reply) => {
     const openid = openidOf(req);
     if (!bindLimit.take(`bind:${openid}`)) throw TOO_MANY();
-    const { phoneCode, clientKey } = parse(BindInput, req.body);
+    const { phoneCode, clientKey, bindVersion } = parse(BindInput, req.body);
     let phone: string;
     try {
       ({ phone } = await wechat.phoneNumber(phoneCode));
@@ -191,7 +193,7 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
       if (error instanceof WechatError) throw new GatewayError(400, error.code, error.message);
       throw error;
     }
-    return member(reply, 'POST', '/api/mp/bind', openid, { clientKey, phone, mock: wechat.mock });
+    return member(reply, 'POST', '/api/mp/bind', openid, { clientKey, phone, mock: wechat.mock, bindVersion });
   });
   // 绑定结果不确定（超时、断网、门店出错）时，小程序请门店系统作废这个编号：已经绑上了返回绑定的结果
   app.post('/v1/bind/abandon', async (req, reply) => {
