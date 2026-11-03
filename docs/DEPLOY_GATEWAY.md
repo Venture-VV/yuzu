@@ -167,7 +167,7 @@ src/gateway/deploy/update.sh <版本标签>    # 核对版本、构建网关镜�
 
 ```bash
 cd ~/yuzu-gateway
-src/gateway/deploy/upload-miniprogram.sh --dry-run    # 先在本机编译一遍：不要密钥、不连微信，看能不能编过、包多大
+src/gateway/deploy/upload-miniprogram.sh --dry-run    # 先在本机编译一遍：不要密钥、不上传，看能不能编过、包多大
 src/gateway/deploy/upload-miniprogram.sh              # 上传为「ci 机器人 1」的开发版本（版本号是 miniprogram/package.json 的 version）
 ```
 

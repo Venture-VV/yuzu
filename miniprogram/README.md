@@ -76,7 +76,7 @@ npm run check      # 类型检查 + 单元测试；CI 的「小程序：类型�
 体验版连测试网关，在网关服务器上从 `main` 上已部署的版本上传（与测试网关同一个 SHA），步骤见 `docs/DEPLOY_GATEWAY.md` 第 7 节。版本号是本目录 `package.json` 的 `version`（第一期从 `0.1.0` 起；一批改动发给大家试用时加一位），版本说明里带提交的 SHA。
 
 ```bash
-npm run upload:dry-run    # 本机先编译一遍：不要密钥、不连微信，看能不能编过、包多大（主包上限 2MB）
+npm run upload:dry-run    # 本机先编译一遍：不要密钥、不上传，看能不能编过、包多大（主包上限 2MB）
 ```
 
 真上传要 AppID 与代码上传密钥（只放网关服务器，不进 GitHub），由 `src/gateway/deploy/upload-miniprogram.sh` 调 `tools/upload/upload.mjs`；`src/config/env.ts` 里体验版、正式版的地址还是占位的 `domain.invalid` 时拒绝上传。

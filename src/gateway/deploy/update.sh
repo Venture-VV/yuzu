@@ -81,11 +81,13 @@ if [[ -n "$domain" ]] && command -v curl >/dev/null 2>&1; then
   if health=$(curl -fsS --max-time 15 --resolve "$domain:443:127.0.0.1" "https://$domain/v1/health" 2>&1); then
     echo "✓ https://$domain/v1/health：$health"
   else
-    echo "· 经 Caddy 还没有连通 https://$domain（第一次要等证书）：$health" >&2
+    echo "· 经 Caddy 还没有连通 https://$domain（第一次要等证书，过几分钟再打开看看）：${health%%$'\n'*}" >&2
   fi
 fi
 
-echo "上一版：${prev}（要回去：src/gateway/deploy/update.sh $prev）"
+if [[ "$prev" != "$commit" ]]; then
+  echo "上一版：${prev}（要回去：src/gateway/deploy/update.sh $prev）"
+fi
 if $ok; then
   echo "✓ 网关已更新到 $target（$commit）"
   exit 0

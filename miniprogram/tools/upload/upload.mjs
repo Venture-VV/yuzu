@@ -1,7 +1,8 @@
 // 上传小程序体验版（docs/DEPLOY_GATEWAY.md 第 7 节）：用微信官方的 miniprogram-ci 把 miniprogram/ 编译后传到小程序后台，
 // 成为「ci 机器人 N」的开发版本；店主在后台把它选为体验版（之后同一个机器人再传，体验版跟着换）。
 //   node upload.mjs              上传：要 MP_APPID 与 MP_UPLOAD_KEY
-//   node upload.mjs --dry-run    只在本机编译一遍：不要密钥、不连微信，看能不能编过、包多大
+//   node upload.mjs --dry-run    只在本机编译一遍：不要密钥、不上传，看能不能编过、包多大
+//                                （miniprogram-ci 会顺手向微信取一次允许的文件类型，取不到不影响编译）
 // 环境变量：
 //   MP_APPID        小程序的 AppID（与网关的 WX_APPID 相同）
 //   MP_UPLOAD_KEY   代码上传密钥文件的路径（小程序后台「开发管理 → 开发设置 → 小程序代码上传」下载；只放上传的那台机器，不进 GitHub）
@@ -54,7 +55,7 @@ const desc = [version, commit.slice(0, 7), subject].filter(Boolean).join(' · ')
 // 只传小程序本身（project.config.json 的 miniprogramRoot 是 src/）；这些目录不扫
 const ignores = ['node_modules/**', 'tools/**', 'tests/**', 'e2e/**', 'assets-src/**', 'scripts/**'];
 const project = dryRun
-  ? // 本机编译不连微信：项目属性（包大小上限等）用 miniprogram-ci 自带的默认值
+  ? // 本机编译不用密钥：项目属性（包大小上限等）不向微信要，用 miniprogram-ci 自带的默认值
     new ci.Project({
       appid: process.env.MP_APPID?.trim() || 'wx0000000000000000',
       type: 'miniProgram',
