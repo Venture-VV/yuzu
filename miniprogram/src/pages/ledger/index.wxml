@@ -1,0 +1,42 @@
+<view class="view">
+  <view wx:if="{{state === 'loading'}}" class="wait">正在打开…</view>
+  <view wx:elif="{{state === 'unbound'}}" class="panel wait">
+    <text class="h3">先绑定会员</text>
+    <button class="btn primary" hover-class="btn-hover" bindtap="onBind">去绑定</button>
+  </view>
+  <view wx:elif="{{state === 'offline' || state === 'error'}}" class="panel wait">
+    <text class="h3">{{state === 'offline' ? '门店系统连接中' : message}}</text>
+    <text wx:if="{{state === 'offline'}}">余额和流水暂时看不到，店里网络恢复后就能看</text>
+    <button class="btn ghost" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+  <block wx:else>
+    <view class="bal">
+      <view>
+        <text class="k">可用余额</text>
+        <text class="v num">{{total}}</text>
+      </view>
+      <view class="bal-split">
+        <view class="bs"><text class="k">本金</text><text class="nv num">{{principal}}</text></view>
+        <view class="bs"><text class="k">赠金</text><text class="nv num">{{bonus}}</text></view>
+      </view>
+    </view>
+
+    <view class="sec-h"><view><text class="eyebrow">Statement</text><text class="h3">最近的流水</text></view></view>
+    <view wx:if="{{!rows.length}}" class="wait">还没有流水</view>
+    <view wx:else class="rows">
+      <view wx:for="{{rows}}" wx:key="id" class="lg">
+        <view class="lg-main">
+          <text class="lg-t">{{item.title}}</text>
+          <text class="lg-d num">{{item.when}}</text>
+          <text wx:if="{{item.summary}}" class="lg-s">{{item.summary}}</text>
+        </view>
+        <view class="lg-a">
+          <text class="amt num {{item.pos ? 'pos' : ''}}">{{item.amount}}</text>
+          <text wx:if="{{item.split}}" class="lg-x">{{item.split}}</text>
+          <text class="lg-x">{{item.after}}</text>
+        </view>
+      </view>
+    </view>
+    <text class="sub foot">只显示最近 50 条；更早的记录请到前台查。</text>
+  </block>
+</view>

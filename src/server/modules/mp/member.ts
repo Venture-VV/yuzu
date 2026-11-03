@@ -9,7 +9,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { ENTRY_TYPE_LABELS } from '@shared/labels';
+import { DEDUCTION_RULE_LABELS, ENTRY_TYPE_LABELS } from '@shared/labels';
 import { TIER_LABELS } from '@shared/membership';
 import {
   MP_CODE,
@@ -36,6 +36,7 @@ import { expireMemberBonus } from '../bonus';
 import { memberCoupons } from '../coupons';
 import { listLedger } from '../ledger';
 import { loadMembershipRules, memberGradeInfo } from '../membership';
+import { loadSettings } from '../settings';
 import { mpToday } from './public';
 
 /** 网关验证过的小程序用户 */
@@ -121,10 +122,11 @@ export async function getMe(deps: Deps, openid: string): Promise<MpMe> {
   const [m] = await deps.sql<{ memberNo: string; name: string; status: string; principalBalance: number; bonusBalance: number }[]>`
     SELECT member_no, name, status, principal_balance, bonus_balance FROM members WHERE id = ${b.memberId}`;
   if (!m) throw notFound('会员不存在');
-  const [info, rules, coupons] = await Promise.all([
+  const [info, rules, coupons, settings] = await Promise.all([
     memberGradeInfo(deps.sql, b.memberId, today),
     loadMembershipRules(deps.sql),
     memberCoupons(deps.sql, b.memberId, today),
+    loadSettings(deps.sql),
   ]);
   const { grade, tier, cycleEnd } = info.state;
   const g: MpGrade = {
@@ -139,10 +141,18 @@ export async function getMe(deps: Deps, openid: string): Promise<MpMe> {
     cycleSpendCents: info.cycleSpendCents,
     targets: info.targets,
     next: info.next ? { grade: info.next.grade, name: info.next.name, needCents: info.next.needCents, bonusBp: info.next.bonusBp } : null,
+    ladder: rules.grades.map((r) => r.name),
   };
   return {
     bound: true,
-    member: { ...brief(m), principalBalance: m.principalBalance, bonusBalance: m.bonusBalance, grade: g, availableCoupons: coupons.counts.available ?? 0 },
+    member: {
+      ...brief(m),
+      principalBalance: m.principalBalance,
+      bonusBalance: m.bonusBalance,
+      deductionRule: DEDUCTION_RULE_LABELS[settings.deductionRule].title,
+      grade: g,
+      availableCoupons: coupons.counts.available ?? 0,
+    },
   };
 }
 

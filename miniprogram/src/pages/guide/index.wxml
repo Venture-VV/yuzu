@@ -1,0 +1,36 @@
+<view wx:if="{{stale}}" class="offline">门店系统连接中，显示的是之前的导览图</view>
+<view class="view">
+  <view class="sec-h">
+    <view><text class="eyebrow">Floor Guide</text><text class="h3">楼层导览</text></view>
+    <text wx:if="{{status === 'ready'}}" class="zoom" hover-class="tap" bindtap="onZoom">看大图</text>
+  </view>
+  <view wx:if="{{status === 'loading'}}" class="wait">正在打开…</view>
+  <view wx:elif="{{status === 'error'}}" class="wait">
+    <text class="h3">{{message}}</text>
+    <button class="btn ghost" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+  <view wx:elif="{{status === 'empty'}}" class="wait">
+    <text class="h3">导览图还在准备</text>
+    <text>到店请看现场的指示牌，或问一下前台</text>
+  </view>
+  <block wx:else>
+    <view wx:if="{{floors.length > 1}}" class="tabs">
+      <view wx:for="{{floors}}" wx:key="code" class="tab {{item.code === floor ? 'on' : ''}}" data-code="{{item.code}}" bindtap="onFloor">{{item.title}}</view>
+    </view>
+    <canvas id="map" type="2d" class="map" style="height: {{mapHeight}}px;" aria-label="{{floor}} 楼层导览图" bindtap="onZoom"></canvas>
+
+    <view class="legend">
+      <view wx:for="{{legend.zones}}" wx:key="id" class="lg">
+        <view class="sw" style="background-color: {{item.color}};" />
+        <text class="lg-t">{{item.name}}</text>
+        <text wx:if="{{item.nameEn}}" class="lg-en">{{item.nameEn}}</text>
+      </view>
+      <view wx:for="{{legend.facilities}}" wx:key="key" class="lg">
+        <view class="glyph">{{item.glyph}}</view>
+        <text class="lg-t">{{item.label}}</text>
+        <text wx:if="{{item.labelEn}}" class="lg-en">{{item.labelEn}}</text>
+      </view>
+    </view>
+    <text class="sub foot">示意图，只到区域；以现场指示为准。点图可放大。</text>
+  </block>
+</view>

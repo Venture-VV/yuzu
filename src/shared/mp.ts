@@ -114,11 +114,22 @@ export interface MpGrade {
   targets: { enjoy: number; honor: number } | null;
   /** 下一档：按滚动累计还差多少、赠送比例（万分比）；已是最高档为空 */
   next: { grade: number; name: string; needCents: number; bonusBp: number } | null;
+  /** 各档的名字，下标 0–6 对应 L0–L6（会员卡上的档级阶梯） */
+  ladder: string[];
 }
 
 export interface MpMe {
   bound: boolean;
-  member: (MpMemberBrief & { principalBalance: number; bonusBalance: number; grade: MpGrade; availableCoupons: number }) | null;
+  member:
+    | (MpMemberBrief & {
+        principalBalance: number;
+        bonusBalance: number;
+        /** 门店的扣款规则：「先本金，后赠金」等 */
+        deductionRule: string;
+        grade: MpGrade;
+        availableCoupons: number;
+      })
+    | null;
 }
 
 export interface MpLedgerRow {

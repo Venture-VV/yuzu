@@ -1,0 +1,9 @@
+<view class="view">
+  <view class="sec-h"><view><text class="eyebrow">Account</text><text class="h3">换手机号、换微信或解绑</text></view></view>
+  <view class="panel">
+    <text class="p">请到前台办理。前台核对身份后解绑，你再用新的微信或手机号重新绑定。</text>
+    <text class="p sub">一位会员只绑一个微信，一个微信只绑一位会员。</text>
+    <text class="p sub">换了手机号：请前台把会员档案上的手机号改成新的；已经绑定的微信不受影响。</text>
+  </view>
+  <button class="btn ghost block" hover-class="btn-hover" bindtap="onHome">看门店电话和地址</button>
+</view>

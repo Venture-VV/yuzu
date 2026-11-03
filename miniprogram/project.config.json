@@ -1,0 +1,27 @@
+{
+  "description": "汤崎 TOUCHILL 微信小程序（docs/MINIPROGRAM.md）。AppID 用自己的：在微信开发者工具里改，存在 project.private.config.json（不进仓库）",
+  "projectname": "tangqi-miniprogram",
+  "compileType": "miniprogram",
+  "miniprogramRoot": "src/",
+  "srcMiniprogramRoot": "src/",
+  "appid": "touristappid",
+  "setting": {
+    "useCompilerPlugins": ["typescript"],
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": true,
+    "urlCheck": true,
+    "coverView": true,
+    "showShadowRootInWxmlPanel": true,
+    "ignoreUploadUnusedFiles": true
+  },
+  "packOptions": {
+    "ignore": [],
+    "include": []
+  },
+  "editorSetting": {
+    "tabIndent": "insertSpaces",
+    "tabSize": 2
+  }
+}

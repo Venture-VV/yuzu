@@ -151,6 +151,8 @@ describe('会员卡、余额、流水、券（只读）', () => {
     expect(me.member).toMatchObject({ name: '演示·沈先生', frozen: false, principalBalance: 500000, bonusBalance: 0, availableCoupons: 1 });
     expect(me.member.grade).toMatchObject({ grade: 1, gradeName: '云涧', tier: 0, tierName: '初', label: 'L1 云涧 · 初' });
     expect(me.member.grade.next).toMatchObject({ grade: 2, name: '潭影' });
+    expect(me.member.grade.ladder).toEqual(['青溪', '云涧', '潭影', '观澜', '望岳', '山海', '归墟']);
+    expect(me.member.deductionRule).toBe('先本金，后赠金');
     // 不给员工用的字段
     expect(me.member).not.toHaveProperty('phone');
     expect(me.member.grade).not.toHaveProperty('events');

@@ -1,0 +1,74 @@
+.cat-h {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 16rpx;
+}
+.cat-t {
+  font-size: 32rpx;
+  font-weight: 700;
+}
+.item {
+  display: flex;
+  align-items: flex-start;
+  padding: 26rpx 0;
+  border-bottom: 1px solid var(--line);
+}
+.item-img {
+  flex: none;
+  width: 128rpx;
+  height: 128rpx;
+  margin-right: 24rpx;
+  border-radius: 6rpx;
+  background-color: var(--wood-6);
+}
+.item-main {
+  flex: 1;
+  min-width: 0;
+  padding-right: 24rpx;
+}
+.item-name {
+  display: block;
+  font-weight: 500;
+}
+.item-meta {
+  display: block;
+  font-size: 24rpx;
+  color: var(--muted);
+}
+.item-intro {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.item-prices {
+  flex: none;
+  display: flex;
+}
+.cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 92rpx;
+  margin-left: 20rpx;
+}
+.cell-k {
+  font-size: 22rpx;
+  color: var(--muted);
+}
+.cell-v {
+  font-family: var(--font-en);
+  font-size: 30rpx;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.cell-v.none {
+  color: var(--muted);
+  font-weight: 400;
+}
+.foot {
+  display: block;
+  margin-top: 32rpx;
+}
