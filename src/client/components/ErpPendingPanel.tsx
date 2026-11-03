@@ -84,7 +84,11 @@ export function ErpPendingPanel({
   const onFoundRef = useRef(onFound);
   onFoundRef.current = onFound;
 
-  // 进入页面先查回一次：已登记、已作废的不用员工再处理
+  // 进入页面先查回一次：已登记、已作废的不用员工再处理。
+  // 按「有哪些编号」触发，不按数组本身（v0.7.22）：传了 filter 时每次渲染都是新数组，原来每次重新渲染都会把查回失败的再查一次——
+  // 断网时页面一刷新数据就再发一遍查回；网络一恢复，又会抢在员工点「按原内容重新提交」之前把这一行处理掉。
+  // 没传 filter 的页面本来就只在列表变了时查。查不回的由员工点「查回」或重新提交、作废。
+  const opKeys = ops.map((op) => op.key).join('\n');
   useEffect(() => {
     for (const op of ops) {
       if (checked.current.has(op.key)) continue;
@@ -102,7 +106,9 @@ export function ErpPendingPanel({
         })
         .catch(() => checked.current.delete(op.key));
     }
-  }, [ops, qc, toast]);
+    // ops 只在 opKeys 变了时读：同一组编号的新数组不再触发
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opKeys, qc, toast]);
 
   if (ops.length === 0) return null;
   return (

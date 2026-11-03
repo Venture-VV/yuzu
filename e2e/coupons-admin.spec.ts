@@ -278,6 +278,17 @@ test.describe('券与会员权益（v0.7.20）', () => {
     await expect(card.getByTestId('erp-pending')).toContainText(template.name);
     await expect(card.getByTestId('coupon-member-issue')).toBeDisabled();
     await page.unroute('**/api/erp/ops/**');
+    // 网络恢复后页面重新渲染（这里切换券的状态），也不会自己再查回、抢在员工点「重新提交」之前把这一行处理掉（v0.7.22：
+    // 原来带 filter 的面板每次渲染都把查回失败的再查一次，CI 上偶发这一行在点击前消失）
+    let lookups = 0;
+    page.on('request', (r) => {
+      if (r.url().includes('/api/erp/ops/')) lookups += 1;
+    });
+    await card.getByTestId('coupon-member-filter-used').click();
+    await card.getByTestId('coupon-member-filter-available').click();
+    await page.waitForTimeout(800); // 等一会儿：原来的写法这时已经发出查回
+    await expect(card.getByTestId('erp-pending')).toContainText(template.name);
+    expect(lookups).toBe(0);
     await card.getByTestId('erp-pending-resend').click();
     await expect(page.getByText('发券给会员已登记')).toBeVisible();
     await expect(card.getByTestId('erp-pending')).toHaveCount(0);
