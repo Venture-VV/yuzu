@@ -60,6 +60,29 @@ test.describe('会员体系 v2', () => {
     await expect(page.getByTestId('membership-today-events')).toContainText('会员体系验收');
   });
 
+  test('会员的档阶还没读出来时「下一步」先灰着，读完再进核对页（不停在「正在读取」）', async ({ page }) => {
+    await login(page, 'linlan');
+    await ensureShift(page);
+    const phone = `198${String(Date.now()).slice(-8)}`;
+    const created = await page.request.post('/api/members', { data: { name: '档阶慢读', phone } });
+    expect(created.ok()).toBe(true);
+    const member = (await created.json()) as { id: number };
+    // 档阶接口慢 3 秒：充值对话框打开、选好金额与收款方式时还没读完
+    await page.route(`**/api/members/${member.id}/grade`, async (route) => {
+      await new Promise((r) => setTimeout(r, 3000));
+      await route.continue();
+    });
+    await page.goto(`/?m=${member.id}`);
+    await page.getByRole('button', { name: /^充值/ }).first().click();
+    await page.getByText('自定义金额').click();
+    await page.fill('#paid', '10000');
+    await page.getByRole('button', { name: '现金' }).click();
+    await page.getByRole('button', { name: '下一步：核对收款' }).click();
+    await expect(page.getByText('我已核实')).toBeVisible();
+    await expect(page.getByText('正在读取会员的档阶')).toHaveCount(0);
+    await page.getByRole('button', { name: '返回修改' }).click();
+  });
+
   test('后台「会员规则」：改续充最低时列出影响；不保存就放弃', async ({ page }) => {
     await login(page, 'linlan');
     await page.goto('/admin/membership');

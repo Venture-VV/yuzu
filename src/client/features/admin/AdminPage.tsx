@@ -16,6 +16,7 @@ const MembersSection = lazyPage(() => import('./MembersSection').then((m) => m.M
 // 微信小程序（小程序线）
 const MpAdminSection = lazyPage(() => import('../mp/MpAdminSection').then((m) => m.MpAdminSection));
 const MembershipRulesSection = lazyPage(() => import('../membership/RulesSection').then((m) => m.MembershipRulesSection));
+const BenefitsSection = lazyPage(() => import('../membership/BenefitsSection').then((m) => m.BenefitsSection));
 const OpeningTab = lazyPage(() => import('./OpeningTab').then((m) => m.OpeningTab));
 const PermissionsSection = lazyPage(() => import('./PermissionsSection').then((m) => m.PermissionsSection));
 const RoomsSection = lazyPage(() => import('./RoomsSection').then((m) => m.RoomsSection));
@@ -39,6 +40,7 @@ export const adminRoutes: RouteObject[] = [
   },
   { path: 'members', element: <MembersSection /> },
   { path: 'membership', element: <MembershipRulesSection /> },
+  { path: 'benefits', element: <BenefitsSection /> },
   { path: 'coupons', element: <CouponsSection /> },
   {
     path: 'catalog',

@@ -63,9 +63,12 @@ export function RechargeFlow({
   const planGifts = plan ? (gifts.data ?? []).filter((g) => g.planId === plan.id) : [];
   const paid = plan ? plan.payAmount : parseYuan(paidText);
   // 会员体系 v2（v0.7.23）：赠金按充值后所在档的比例；充完是哪一档、赠多少、最低充多少，与服务端同一算法
-  const rules = useMembershipRules().data;
+  const rulesInfo = useMembershipRules();
+  const rules = rulesInfo.data;
   const gradeInfo = useMemberGrade(member.id);
   const g = gradeInfo.data;
+  // 规则与档阶读完之前不能进核对页（最低充值、赠金都按它们算）：原来按钮不灰，点得快就停在「正在读取」不往下走
+  const gradeLoading = rulesInfo.isPending || gradeInfo.isPending;
   const outcomeOf = (amount: number) => (rules && g ? rechargeOutcome(rules, g.state.grade, g.rollingRechargeCents, amount) : null);
   const outcome = paid && paid > 0 ? outcomeOf(paid) : null;
   const minimum = rules && g ? rechargeMinimum(rules, g.firstRecharge) : 0;
@@ -151,7 +154,7 @@ export function RechargeFlow({
   const toConfirm = () => {
     if (planId === null) return setFormError('请选择充值套餐或自定义金额');
     if (!paid || paid <= 0) return setFormError('请填写正确的实收金额（最多两位小数）');
-    if (!g || !rules) return setFormError('正在读取会员的档阶，请稍候');
+    if (!g || !rules) return setFormError(gradeLoading ? '正在读取会员的档阶，请稍候' : '会员的档阶没有读出来，请关闭后重新打开');
     if (belowMin) return setFormError(`${g.firstRecharge ? '首充' : '续充'}单笔最低 ${formatYuan(minimum)}`);
     if (bonus === null) return setFormError('赠金格式不正确');
     if (!method) return setFormError('请选择收款方式');
@@ -335,7 +338,7 @@ export function RechargeFlow({
       step="form"
       onClose={onClose}
       footer={
-        <Button variant="primary" size="lg" className="w-full" onClick={toConfirm} disabled={catalog.isPending}>
+        <Button variant="primary" size="lg" className="w-full" onClick={toConfirm} disabled={catalog.isPending || gradeLoading}>
           下一步：核对收款
         </Button>
       }

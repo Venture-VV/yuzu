@@ -62,6 +62,8 @@ export const FENCED_OPS = [
   'opening_payable',
   // 手动调整会员档阶（v0.7.23，迁移 040）：编号记在状态变化记录上（member_grade_events.client_key）
   'grade_adjust',
+  // 登记会员权益使用（v0.7.24，迁移 041）：编号记在使用登记上（benefit_uses.client_key）
+  'benefit_use',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -106,6 +108,7 @@ export async function fenceKey(
   if (isCouponOp(opType) && (await couponOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   if (isDeviceOp(opType) && (await deviceOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   if (opType === 'grade_adjust' && (await gradeOpRef(tx, key)) !== null) return { existingOpType: opType };
+  if (opType === 'benefit_use' && (await benefitUseOpRef(tx, key)) !== null) return { existingOpType: opType };
   const rows = await tx`
     INSERT INTO op_fences (key, op_type, staff_id) VALUES (${key}, ${opType}, ${staffId})
     ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;
@@ -144,4 +147,10 @@ export async function deviceOpRef(db: Db, key: string, opType: DeviceOp): Promis
 export async function gradeOpRef(db: Db, key: string): Promise<number | null> {
   const [row] = await db<{ memberId: number }[]>`SELECT member_id FROM member_grade_events WHERE client_key = ${key}`;
   return row ? Number(row.memberId) : null;
+}
+
+/** 登记会员权益使用（v0.7.24）的操作编号记在使用登记上：查到时返回那条登记的编号 */
+export async function benefitUseOpRef(db: Db, key: string): Promise<number | null> {
+  const [row] = await db<{ id: number }[]>`SELECT id FROM benefit_uses WHERE client_key = ${key}`;
+  return row ? Number(row.id) : null;
 }

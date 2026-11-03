@@ -61,7 +61,7 @@ describe('迁移 034、035 · 迁移前已有的钟单与项目', () => {
     const before = await sql<{ sessionNo: string; status: string; clocks: number; minutes: number; callType: string }[]>`
       SELECT session_no, status, clocks, minutes, call_type FROM technician_sessions ORDER BY id`;
 
-    expect(await migrate(sql)).toEqual(['034_floormap.sql', '035_locations.sql', '036_floorplan_finish.sql', '037_refunds_coupons.sql', '038_devices.sql', '039_payment_fences.sql', '040_membership_v2.sql', '043_miniprogram.sql', '044_miniprogram_fences.sql']);
+    expect(await migrate(sql)).toEqual(['034_floormap.sql', '035_locations.sql', '036_floorplan_finish.sql', '037_refunds_coupons.sql', '038_devices.sql', '039_payment_fences.sql', '040_membership_v2.sql', '041_benefits.sql', '043_miniprogram.sql', '044_miniprogram_fences.sql']);
 
     const after = await sql<{ sessionNo: string; status: string; clocks: number; minutes: number; callType: string; spaceId: number | null; spaceVersion: number }[]>`
       SELECT session_no, status, clocks, minutes, call_type, space_id, space_version FROM technician_sessions ORDER BY id`;

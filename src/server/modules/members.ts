@@ -12,6 +12,7 @@ import { badRequest, conflict, notFound } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
 import { expireMemberBonus, openLots } from './bonus';
 import { issueOpenCardCoupons } from './coupons';
+import { onMemberSaved } from './benefits';
 import { listLedger } from './ledger';
 import { memberGradeInfo } from './membership';
 import { loadSettings } from './settings';
@@ -187,7 +188,11 @@ export async function createMember(sql: Sql, raw: MemberInputData, ctx: OpContex
   try {
     const id = await sql.begin(async (tx) => {
       const memberId = await insertMember(tx, raw, ctx, options);
-      if (options.openCard) await issueOpenCardCoupons(tx, options.openCard, memberId, ctx);
+      if (options.openCard) {
+        await issueOpenCardCoupons(tx, options.openCard, memberId, ctx);
+        // 会员权益（v0.7.24）：「L0·会员」起点的券类当场发本期的，生日在这个月的发生日礼
+        await onMemberSaved(tx, options.openCard, memberId, ctx);
+      }
       return memberId;
     });
     return getMember(sql, id);
@@ -234,8 +239,8 @@ export function registerMemberRoutes(app: FastifyInstance, deps: Deps) {
     try {
       await sql.begin(async (tx) => {
         // 自定义字段在会员行锁内按最新的字段定义核对；没带时保持原值（停用字段的值始终保留）
-        const [locked] = await tx<{ customFields: MemberCustomValues; channel: string | null }[]>`
-          SELECT custom_fields, channel FROM members WHERE id = ${id} FOR UPDATE`;
+        const [locked] = await tx<{ customFields: MemberCustomValues; channel: string | null; birthday: string | null }[]>`
+          SELECT custom_fields, channel, birthday::text AS birthday FROM members WHERE id = ${id} FOR UPDATE`;
         const customFields = input.customFields === undefined ? locked!.customFields : await customValuesFor(tx, input.customFields, locked!.customFields, true);
         const channel = await channelFor(tx, input.channel, locked!.channel);
         await tx`
@@ -267,6 +272,8 @@ export function registerMemberRoutes(app: FastifyInstance, deps: Deps) {
           },
           ip: req.ip,
         });
+        // 会员权益（v0.7.24）：补填、改了生日的当场看生日礼（Codex 自动审查 98806a3）
+        if (input.birthday !== locked!.birthday) await onMemberSaved(tx, deps, id, { actor: req.actor, ip: req.ip });
       });
     } catch (error) {
       if (isUniqueViolation(error, 'members_phone_key')) {

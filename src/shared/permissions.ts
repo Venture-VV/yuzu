@@ -15,7 +15,9 @@
 // v0.7.21 新增设备的三项权限（看设备状态、测试打印、维护设备；飞书需求 RQ-001），默认值待确认。
 // v0.7.23 会员体系 v2 第一期：新增「修改会员规则」「手动调整会员档阶」「看会员体系看板与到期提醒」「他店查询」，
 // 以及岗位「他店查询」（另一家店的同事只读查会员档阶，docs/MEMBERSHIP.md 第 8、11 节），默认值待确认。
-// 2026-11-03 微信小程序（小程序线）新增「维护小程序内容」「解绑会员的微信」（MP7，docs/MINIPROGRAM.md 第 5 节），默认值待确认。
+// v0.7.24 会员体系 v2 第二期：新增「维护会员权益」（导入本店权益清单、修改、发布、暂缓）与「登记权益使用」（docs/BENEFITS.md），默认值待确认。
+// 2026-11-03 微信小程序（小程序线）新增「维护小程序内容」「解绑会员的微信」（MP7，docs/MINIPROGRAM.md 第 5 节）；
+// 店主 11-03 已定：维护小程序内容只给店主、店总（客户经理不给）。
 
 export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice', 'other_store'] as const;
 export type Role = (typeof ROLES)[number];
@@ -82,6 +84,11 @@ export const PERMISSIONS = {
   'member.retention': { roles: ['owner', 'store_manager', 'account_manager'] },
   /** 他店查询：按手机号或会员号查一位会员的档阶与会籍（只读，不含余额与流水） */
   'member.lookup': { roles: ['other_store'] },
+  // ── 会员权益（v0.7.24，docs/BENEFITS.md，默认值待确认）──
+  /** 维护会员权益：导入本店权益清单，改起点、数量、券模板，发布、暂缓；作废别人登记的使用 */
+  'benefit.publish': { roles: ['owner', 'store_manager'] },
+  /** 登记服务类权益的使用（会员详情「本月可享」），作废自己当天登记错的 */
+  'benefit.use': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk'] },
   // ── 前台手牌与共同账单 ──
   /** 查看在店手牌状态板与手牌账单 */
   'frontdesk.read': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
@@ -282,6 +289,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'member.adjust': '手动调整会员档阶（写原因）',
   'member.retention': '看会员体系看板与到期提醒名单',
   'member.lookup': '他店查询（按手机号查会员档阶，只读）',
+  'benefit.publish': '维护会员权益（导入清单、修改、发布、暂缓）',
+  'benefit.use': '登记会员权益使用（服务类，数次数）',
   'frontdesk.read': '查看在店手牌与手牌账单',
   'frontdesk.operate': '接待发牌、同行绑牌、挂账、换牌',
   'frontdesk.correct': '作废他人或超时明细、撤销来访',
@@ -351,7 +360,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
     title: '前台手牌与账单',
     items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.refund', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen', 'room.operate', 'room.housekeep', 'location.view', 'location.report', 'guide.view'],
   },
-  { title: '会员体系', items: ['member.rules', 'member.adjust', 'member.retention', 'member.lookup'] },
+  { title: '会员体系', items: ['member.rules', 'member.adjust', 'member.retention', 'member.lookup', 'benefit.publish', 'benefit.use'] },
   { title: '券与会员权益', items: ['coupon.manage', 'coupon.issue', 'coupon.void'] },
   { title: '设备', items: ['device.view', 'device.test', 'device.manage'] },
   { title: '微信小程序', items: ['mp.content', 'mp.unbind'] },

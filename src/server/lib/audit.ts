@@ -121,8 +121,15 @@ export type AuditAction =
   // 会员体系 v2（v0.7.23）：已有会员上线定档、手动调整档阶、他店查询
   | 'membership_live'
   | 'member_grade_adjusted'
+  // 会员权益（v0.7.24）：导入清单、修改、发布 / 暂缓、自动发放、登记使用、作废登记
+  | 'benefits_imported'
+  | 'benefit_saved'
+  | 'benefit_status'
+  | 'benefit_granted'
+  | 'benefit_used'
+  | 'benefit_use_voided'
   | 'member_lookup'
-  // 微信小程序（小程序线）：解绑会员的微信、维护小程序内容
+  // 微信小程序（小程序线）：解绑会员的微信、维护小程序内容、作废结果不确定的操作
   | 'mp_unbind'
   | 'mp_content_saved'
   | 'mp_op_abandoned';
