@@ -62,6 +62,7 @@ import { dateSchema, idParam, parse } from '../lib/validate';
 import { lockSettings, sameJson, saveRuleSetting } from '../lib/rule-settings';
 import { setTxTimeouts } from '../lib/tx';
 import { assertNotFenced } from '../lib/fences';
+import { onDueSettled, onGradeChanged, onMembersGraded } from './benefits';
 import { erpOpAbandoned } from './erp-ops';
 import { loadSettings } from './settings';
 
@@ -182,20 +183,27 @@ interface EventExtra {
   staffId?: number | null;
   reason?: string;
   clientKey?: string | null;
+  /** 补跑到期的中间几步：只发事件礼，本期券类与生日礼等走完再按最后的状态发（settleDue） */
+  deferPeriodic?: boolean;
 }
 
-/** 写会员一行的新状态（版本号加一）并记一条状态变化；调用方已锁会员 */
+/**
+ * 写会员一行的新状态（版本号加一）并记一条状态变化；调用方已锁会员。
+ * 之后在同一事务里按新档阶发会员权益（v0.7.24：补发本期券类差额，升档、升阶、保级的事件礼，生日礼）
+ */
 async function changeState(tx: Tx, memberId: number, kind: GradeEventKind, businessDate: string, from: GradeState, to: GradeState, extra: EventExtra = {}) {
   await tx`
     UPDATE members SET grade = ${to.grade}, tier = ${to.tier}, cycle_start = ${to.cycleStart}, cycle_end = ${to.cycleEnd},
            grace_until = ${to.graceUntil}, grade_version = grade_version + 1
     WHERE id = ${memberId}`;
-  await tx`
+  const [event] = await tx<{ id: number }[]>`
     INSERT INTO member_grade_events (member_id, kind, business_date, from_grade, from_tier, to_grade, to_tier, cycle_start, cycle_end, grace_until,
                                      cycle_spend, rolling_recharge, recharge_id, consumption_id, staff_id, reason, client_key)
     VALUES (${memberId}, ${kind}, ${businessDate}, ${from.grade}, ${from.tier}, ${to.grade}, ${to.tier}, ${to.cycleStart}, ${to.cycleEnd}, ${to.graceUntil},
             ${extra.cycleSpend ?? 0}, ${extra.rollingRecharge ?? null}, ${extra.rechargeId ?? null}, ${extra.consumptionId ?? null},
-            ${extra.staffId ?? null}, ${extra.reason ?? ''}, ${extra.clientKey ?? null})`;
+            ${extra.staffId ?? null}, ${extra.reason ?? ''}, ${extra.clientKey ?? null})
+    RETURNING id`;
+  await onGradeChanged(tx, { memberId, kind, eventId: Number(event!.id), date: businessDate, to, staffId: extra.staffId ?? null, deferPeriodic: extra.deferPeriodic });
 }
 
 interface DueStep {
@@ -225,11 +233,34 @@ async function projectDue(db: Db, rules: MembershipRules, memberId: number, stat
   return { steps, state: cur };
 }
 
-/** 把到期没处理的处理掉（会员一行已锁）；返回处理后的状态与各步 */
+/**
+ * 把到期没处理的处理掉（会员一行已锁）；返回处理后的状态与各步。
+ * 会员权益：每一步的事件礼（保级礼）照发；本期券类与生日礼走完以后按处理完的状态发一次——停机后补跑、一次连走几步时
+ * （例如 6 月 30 日到期、补充期也过了，11 月 3 日才处理：先进补充期、再降档），中间那几步的档阶早已过去，
+ * 按它发的本月券降档后收不回（Codex 自动审查 98806a3）。与每天按时处理的结果一样
+ */
 async function settleDue(tx: Tx, rules: MembershipRules, memberId: number, state: GradeState, today: string) {
   const projected = await projectDue(tx, rules, memberId, state, today);
-  for (const s of projected.steps) await changeState(tx, memberId, s.kind, today, s.from, s.next, { cycleSpend: s.spend });
+  for (const s of projected.steps) await changeState(tx, memberId, s.kind, today, s.from, s.next, { cycleSpend: s.spend, deferPeriodic: true });
+  if (projected.steps.length) await onDueSettled(tx, memberId, today);
   return projected;
+}
+
+/**
+ * 按档阶判断的写操作之前（会员一行已锁，调用方的事务里）：到期没处理的先处理掉，返回处理后的档阶（会员不存在为空）。
+ * 与充值、消费一样，不按应该已经降掉的档阶判断（例如登记权益使用，Codex 自动审查 825e248）
+ */
+export async function settleMemberDue(tx: Tx, memberId: number, today: string): Promise<GradeState | null> {
+  const current = await readGrade(tx, memberId);
+  if (!current) return null;
+  return (await settleDue(tx, await loadMembershipRules(tx), memberId, current.state, today)).state;
+}
+
+/** 只读：到期没处理的按规则推算到 today 的档阶（与等级卡一样；会员不存在为空） */
+export async function projectedGrade(db: Db, memberId: number, today: string): Promise<GradeState | null> {
+  const current = await readGrade(db, memberId);
+  if (!current) return null;
+  return (await projectDue(db, await loadMembershipRules(db), memberId, current.state, today)).state;
 }
 
 // ───────────────────────── 充值与消费（钱包的事务里调用） ─────────────────────────
@@ -329,6 +360,8 @@ async function gradeByCumulative(tx: Tx, memberIds: number[] | 'all', o: { kind:
       FROM unnest(${ids}::bigint[], ${changes.map((c) => c.from.grade)}::smallint[], ${changes.map((c) => c.from.tier)}::smallint[],
                   ${grades}::smallint[], ${changes.map((c) => c.amount)}::bigint[]) AS x (id, from_grade, from_tier, grade, amount)
       ORDER BY x.id`;
+    // 会员权益（v0.7.24）：定了档的当场补发本期券类（不发升级礼）
+    await onMembersGraded(tx, ids, o.today, o.staffId);
   }
   return { members: rows.length, graded: changes.length };
 }

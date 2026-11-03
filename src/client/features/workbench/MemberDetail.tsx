@@ -14,6 +14,7 @@ import { ActivityRow } from './ActivityList';
 import { BonusLotsCard, MemberCouponsCard } from './MemberExtras';
 import { GradeBadge } from '../membership/GradeBadge';
 import { GradeCard } from '../membership/GradeCard';
+import { BenefitsCard } from '../membership/BenefitsCard';
 
 export function MemberDetail({
   member,
@@ -204,6 +205,9 @@ export function MemberDetail({
           <BonusLotsCard member={member} />
         </div>
       </div>
+
+      {/* 本月可享（会员体系 v2 第二期，v0.7.24）：换会员时整块重来（登记使用的操作编号不带到下一位会员） */}
+      <BenefitsCard key={`benefits-${member.id}`} member={member} />
 
       {/* 账户内券（v0.7.20）：换会员时整块重来（筛选、发券的操作编号都不带到下一位会员） */}
       {can('member.read') && <MemberCouponsCard key={member.id} member={member} />}

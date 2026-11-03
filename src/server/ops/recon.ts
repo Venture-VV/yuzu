@@ -15,7 +15,7 @@
 
 import { businessDateOf, businessDayStart } from '@shared/business-date';
 import { businessBreakdown, CHECKOUT_METHOD_LABELS, CHECKOUT_METHODS, COUPON_PLATFORM_LABELS, type CheckoutMethod, type CouponPlatform, type ShiftRecord } from '@shared/checkout';
-import { maskStoreCouponCode } from '@shared/coupons';
+import { COUPON_ISSUE_KIND_LABELS, maskStoreCouponCode } from '@shared/coupons';
 import { INSTANCE_LABELS } from '@shared/instance';
 import { formatYuan } from '@shared/money';
 import { CALL_TYPE_LABELS, gradeLabel } from '@shared/technicians';
@@ -602,7 +602,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
   });
 
   // 10 券（v0.7.20）：当天的发券与券的变动；券码只显示后 4 位（无记名券拿到券码就能用）
-  const issueKindLabel: Record<string, string> = { manual: '手动发', batch: '无记名券', open_card: '开卡礼', level_up: '升级礼', birthday: '生日礼', recharge: '充值赠券' };
+  const issueKindLabel: Record<string, string> = COUPON_ISSUE_KIND_LABELS;
   const eventKindLabel: Record<string, string> = { use: '用券', return: '反结账退回', void: '作废' };
   files.push({
     name: '10-券.csv',

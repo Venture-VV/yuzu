@@ -93,6 +93,8 @@ beforeAll(async () => {
   await sql`ALTER TABLE members ADD COLUMN grade smallint NOT NULL DEFAULT 0, ADD COLUMN tier smallint, ADD COLUMN cycle_start date, ADD COLUMN cycle_end date, ADD COLUMN grace_until date, ADD COLUMN grade_version integer NOT NULL DEFAULT 0`;
   await sql`CREATE TABLE member_grade_events (id bigserial PRIMARY KEY, member_id bigint, kind text, business_date date, from_grade smallint, from_tier smallint, to_grade smallint, to_tier smallint, cycle_start date, cycle_end date, grace_until date, cycle_spend bigint, rolling_recharge bigint, recharge_id bigint, consumption_id bigint, staff_id bigint, reason text, client_key uuid)`;
   await sql`INSERT INTO settings (key, value) VALUES ('membership_rules', '{"firstRechargeMinCents": 0, "topUpMinCents": 0}'::jsonb)`;
+  // 现版本首笔充值时按会员权益发首充礼（041 才有）：写入期间临时建空的权益表，迁移前删掉
+  await sql`CREATE TABLE benefits (id bigint, code text, name text, category text, start_grade smallint, start_tier smallint, period text, quantity smallint, tier_quantities jsonb, template_id bigint, events text[], festival_dates date[], content text, conditions text, status text, version integer, sort_order integer)`;
   const deps = { sql, config };
   const as = (id: number, username: string): Actor => ({ id, username, displayName: username, role: username === 'owner' ? 'owner' : 'clerk', duties: [], mustChangePassword: false });
   const cash = (amount: number) => ({ idempotencyKey: randomUUID(), memberId, planId: null, paidAmount: amount, bonusAmount: 0, paymentMethod: 'cash' as const, paymentConfirmed: true as const });
@@ -124,8 +126,9 @@ beforeAll(async () => {
   await sql`ALTER TABLE members DROP COLUMN grade, DROP COLUMN tier, DROP COLUMN cycle_start, DROP COLUMN cycle_end, DROP COLUMN grace_until, DROP COLUMN grade_version`;
   await sql`DROP TABLE member_grade_events`;
   await sql`DELETE FROM settings WHERE key = 'membership_rules'`;
+  await sql`DROP TABLE benefits`;
 
-  expect(await migrate(sql)).toEqual(['016_shift_boundary.sql', '017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql', '020_technicians.sql', '021_clockroom.sql', '022_dining.sql', '023_dining_tables.sql', '024_rooms.sql', '025_cashier.sql', '026_expenses.sql', '027_requisitions.sql', '028_legacy_ledger.sql', '029_warehouses.sql', '030_supplier_settlement.sql', '031_stock_cycles.sql', '032_spaces.sql', '033_floorplans.sql', '034_floormap.sql', '035_locations.sql', '036_floorplan_finish.sql', '037_refunds_coupons.sql', '038_devices.sql', '039_payment_fences.sql', '040_membership_v2.sql']);
+  expect(await migrate(sql)).toEqual(['016_shift_boundary.sql', '017_r1_funds.sql', '018_backfill.sql', '019_admin_members.sql', '020_technicians.sql', '021_clockroom.sql', '022_dining.sql', '023_dining_tables.sql', '024_rooms.sql', '025_cashier.sql', '026_expenses.sql', '027_requisitions.sql', '028_legacy_ledger.sql', '029_warehouses.sql', '030_supplier_settlement.sql', '031_stock_cycles.sql', '032_spaces.sql', '033_floorplans.sql', '034_floormap.sql', '035_locations.sql', '036_floorplan_finish.sql', '037_refunds_coupons.sql', '038_devices.sql', '039_payment_fences.sql', '040_membership_v2.sql', '041_benefits.sql']);
   // 升级后的收款这里按小额核对班次；会员体系 v2 的首充 / 续充最低（默认 5,000 元）设成不限
   await sql`INSERT INTO settings (key, value) VALUES ('membership_rules', '{"firstRechargeMinCents": 0, "topUpMinCents": 0}'::jsonb)`;
   app = await buildApp(sql, config);

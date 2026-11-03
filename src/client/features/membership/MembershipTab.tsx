@@ -5,14 +5,17 @@
 
 import { useState } from 'react';
 import { Link } from 'react-router';
-import { CalendarClock, Download, ListChecks, TriangleAlert } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { CalendarClock, Download, ListChecks, Sparkles, TriangleAlert } from 'lucide-react';
+import { BENEFIT_CATEGORY_LABELS, type BenefitSummary } from '@shared/benefits';
 import { GRADE_EVENT_LABELS, gradeLabel, TIER_LABELS, type GradeEventKind, type MembershipRules } from '@shared/membership';
 import { formatPhone } from '@shared/labels';
+import { api } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { cn, formatTime, relativeTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Badge, Card, Notice, SectionTitle, Segmented, Skeleton } from '../../components/ui';
-import { useGradeEvents, useMembershipOverview, useMembershipRules, useRetention } from './queries';
+import { benefitKeys, useGradeEvents, useMembershipOverview, useMembershipRules, useRetention } from './queries';
 
 export function MembershipTab() {
   const session = useSession();
@@ -58,6 +61,7 @@ export function MembershipTab() {
       </Card>
 
       <RetentionCard rules={rules} expiring={d.expiring} grace={d.grace} />
+      <BenefitsSummaryCard />
       <TodayEvents rules={rules} today={session.today} />
 
       <Card className="p-5">
@@ -259,6 +263,73 @@ function TodayEvents({ rules, today }: { rules: MembershipRules; today: string }
             </li>
           ))}
         </ul>
+      )}
+    </Card>
+  );
+}
+
+/** 本月会员权益（v0.7.24，docs/BENEFITS.md）：发了多少张券、发给几位会员，按原因；服务类登记了几次；每项的本月数字 */
+function BenefitsSummaryCard() {
+  const q = useQuery({ queryKey: benefitKeys.summary, queryFn: () => api.get<BenefitSummary>('/api/benefits/summary'), refetchInterval: 60_000 });
+  const s = q.data;
+  if (q.isPending) return <Skeleton className="h-32" />;
+  if (q.error || !s) return <Notice tone="error" title={q.error?.message ?? '本月会员权益没有加载出来'} />;
+  const tiles: [string, number, string?][] = [
+    ['已发布的权益', s.published, '项'],
+    ['本月发券', s.coupons, `张 · ${s.members} 位`],
+    ['每期发放', s.byReason.monthly, '张'],
+    ['当场补发', s.byReason.top_up, '张'],
+    ['事件礼', s.byReason.event, '张'],
+    ['登记使用', s.uses, `次 · ${s.useMembers} 位`],
+  ];
+  return (
+    <Card className="p-5" data-testid="membership-benefits">
+      <SectionTitle
+        aside={
+          <span className={cn('text-[12px]', s.job?.error ? 'text-clay' : 'text-ink-3')}>
+            {s.job ? `自动发放 ${s.job.businessDate}：${s.job.error ? `出错（${s.job.error}）` : s.job.finishedAt ? '正常' : '进行中'}` : '自动发放还没有运行记录'}
+          </span>
+        }
+      >
+        <span className="flex items-center gap-2">
+          <Sparkles className="size-4 text-yuzu-deep" /> 本月会员权益（{s.from} 起）
+        </span>
+      </SectionTitle>
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        {tiles.map(([label, n, unit]) => (
+          <div key={label} className="rounded-lg border border-line bg-card px-3 py-2">
+            <p className="text-[12px] font-semibold text-ink-3">{label}</p>
+            <p className="text-[13px] text-ink-3">
+              <span className="num text-[20px] font-bold text-ink">{n}</span> {unit}
+            </p>
+          </div>
+        ))}
+      </div>
+      {s.rows.length > 0 && (
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[480px] text-[13px]">
+            <thead className="text-left text-[12px] text-ink-3">
+              <tr>
+                <th className="py-1.5 pr-3">权益</th>
+                <th className="py-1.5 pr-3">类别</th>
+                <th className="py-1.5 pr-3">发券</th>
+                <th className="py-1.5">登记使用</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line/70">
+              {s.rows.map((r) => (
+                <tr key={r.benefitId}>
+                  <td className="py-1.5 pr-3">
+                    <span className="font-semibold text-ink">{r.name}</span> <span className="text-[12px] text-ink-4">{r.code}</span>
+                  </td>
+                  <td className="py-1.5 pr-3 text-ink-3">{BENEFIT_CATEGORY_LABELS[r.category]}</td>
+                  <td className="num py-1.5 pr-3">{r.coupons ? `${r.coupons} 张 · ${r.members} 位` : '—'}</td>
+                  <td className="num py-1.5">{r.uses ? `${r.uses} 次` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </Card>
   );

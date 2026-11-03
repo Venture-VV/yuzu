@@ -23,13 +23,14 @@ export const COUPON_RULE_KIND_LABELS: Record<CouponRuleKind, string> = {
   birthday: '生日礼',
   recharge: '充值赠券',
 };
-/** 发券记录的种类：手动发给会员、无记名批次，加上四种自动规则 */
-export const COUPON_ISSUE_KINDS = ['manual', 'batch', ...COUPON_RULE_KINDS] as const;
+/** 发券记录的种类：手动发给会员、无记名批次、四种自动规则，加上会员权益（v0.7.24，每期发放与事件礼，docs/BENEFITS.md） */
+export const COUPON_ISSUE_KINDS = ['manual', 'batch', ...COUPON_RULE_KINDS, 'benefit'] as const;
 export type CouponIssueKind = (typeof COUPON_ISSUE_KINDS)[number];
 export const COUPON_ISSUE_KIND_LABELS: Record<CouponIssueKind, string> = {
   manual: '手动发',
   batch: '无记名券',
   ...COUPON_RULE_KIND_LABELS,
+  benefit: '会员权益',
 };
 
 /** 手动发券一次最多几张；无记名券一批最多几张 */

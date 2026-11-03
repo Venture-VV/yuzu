@@ -11,6 +11,7 @@ import { spaceChecks } from '../modules/spaces';
 import { floorplanChecks } from '../modules/floorplans';
 import { locationChecks } from '../modules/locations';
 import { membershipChecks } from '../modules/membership';
+import { benefitChecks } from '../modules/benefits';
 import { computeSettlement } from '../modules/settlement';
 import { loadSettings } from '../modules/settings';
 
@@ -38,5 +39,6 @@ export async function consistencyChecks(sql: Sql, timezone: string): Promise<Che
   const locations = await readSnapshot(sql, locationChecks);
   // 会员体系 v2（v0.7.23）：档阶与状态变化记录一致、前后相接，到期都处理了
   const membership = await readSnapshot(sql, membershipChecks);
-  return [...summary.checks, ...inventory, ...expenses, ...requests, ...frontdesk, legacy, ...spaces, ...floorplans, ...locations, ...membership].map(({ label, ok, detail }) => ({ label, ok, detail }));
+  const benefits = await readSnapshot(sql, benefitChecks);
+  return [...summary.checks, ...inventory, ...expenses, ...requests, ...frontdesk, legacy, ...spaces, ...floorplans, ...locations, ...membership, ...benefits].map(({ label, ok, detail }) => ({ label, ok, detail }));
 }

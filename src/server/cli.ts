@@ -49,6 +49,7 @@
 //   floorplan-sample <文件.dxf|.pdf>      写出合成的样例图纸（两层、与 docs/data/space-ledger-sample.csv 的编码对应），演示与验收用；
 //                                         文件名以 .pdf 结尾时写 PDF 版（1:100、每层一页、英文文字），否则写 DXF
 //   import-devices --quote [--apply]      按采购清单（12 类 81 台）登记设备（RQ-001，v0.7.21；真实门店数据，默认只预览，加 --apply 才写入，编号已有的跳过）
+//   import-benefits --quote [--apply]     导入本店权益清单（会员体系 v2 第二期，v0.7.24：会员文档附录三 A 57 项与补充 2 项，导入为草稿；默认只预览，编号已有的跳过）
 //   device-selftest                       硬件连接一键自检（不连数据库、不要真机）：模拟打印机与模拟桥走一遍打印、状态、拔线恢复、读卡、扫码
 //   device-printer-mock [--port 9100] [--mode normal|paper_out|cover_open|fault|silent|drop]
 //                                         模拟网口打印机（不连数据库）：收到的打印内容打到屏幕上；输入 mode <模式>、stop、start、quit
@@ -78,6 +79,7 @@ import { createSql, type Sql } from './db';
 import { writeAudit } from './lib/audit';
 import { migrate } from './migrate';
 import { ensureMembershipLive, runMembershipDaily } from './modules/membership';
+import { catalogImportPreview, importCatalog, runBenefitsDaily } from './modules/benefits';
 import { seedDemo, DEMO_PASSWORD } from './seed';
 import { seedInventoryDemo } from './seed-inventory';
 import { seedFrontdeskDemo } from './seed-frontdesk';
@@ -702,7 +704,7 @@ async function main() {
         break;
       }
       case 'membership-daily': {
-        // 会员到期处理（应用每分钟自己会跑；应用停着、要马上补跑时用）
+        // 会员到期处理与会员权益自动发放（应用每分钟自己会跑；应用停着、要马上补跑时用）
         await prepareDb(sql, config);
         const run = await runMembershipDaily({ sql, config });
         console.log(
@@ -710,11 +712,31 @@ async function main() {
             ? `会员到期处理（营业日 ${run.businessDate}）：处理 ${run.processed} 位，保级 ${run.retained}、进补充期 ${run.grace}、降档 ${run.downgraded}${run.error ? `；出错：${run.error}` : ''}`
             : '今天已经处理过，没有到期的会员',
         );
-        if (run?.error) process.exitCode = 1;
+        const benefits = await runBenefitsDaily({ sql, config });
+        console.log(
+          benefits
+            ? `会员权益自动发放（营业日 ${benefits.businessDate}）：${benefits.processed} 位会员、${benefits.coupons} 张券${benefits.error ? `；出错：${benefits.error}` : ''}`
+            : '会员权益今天已经发过，权益清单之后没有改过',
+        );
+        if (run?.error || benefits?.error) process.exitCode = 1;
+        break;
+      }
+      case 'import-benefits': {
+        if (!args.includes('--quote')) throw new Error('用法：import-benefits --quote [--apply]（导入本店权益清单，默认只预览）');
+        await prepareDb(sql, config);
+        const preview = await catalogImportPreview(sql);
+        console.log(`本店权益清单共 ${preview.total} 项：会新建 ${preview.create.length} 项（草稿，文档写明暂缓的为暂缓），编号已有、跳过 ${preview.skipped.length} 项`);
+        for (const e of preview.create) console.log(`  ${e.code}  ${e.name}（${e.start}）${e.status === 'paused' ? '  暂缓' : ''}`);
+        if (!args.includes('--apply')) {
+          console.log('以上为预览，没有写入。确认无误后加 --apply 执行导入（门店环境须店主同意）；导入后在后台「会员权益」逐项改好、发布。');
+          break;
+        }
+        const r = await importCatalog(sql, null);
+        console.log(`✓ 已导入：新建 ${r.created} 项，跳过 ${r.skipped} 项。`);
         break;
       }
       default:
-        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo [--previous-day] | seed-billing-demo [--previous-day] | seed-legacy-demo | demo-prepare [--previous-day] | demo-check | demo-reset --confirm <数据库名> | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup | daily-recon | balance-changes | floorplan-convert | floorplan-sample | import-devices | device-selftest | device-printer-mock | device-bridge-mock | membership-daily');
+        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo [--previous-day] | seed-billing-demo [--previous-day] | seed-legacy-demo | demo-prepare [--previous-day] | demo-check | demo-reset --confirm <数据库名> | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup | daily-recon | balance-changes | floorplan-convert | floorplan-sample | import-devices | device-selftest | device-printer-mock | device-bridge-mock | membership-daily | import-benefits');
         process.exitCode = command ? 1 : 0;
     }
   } finally {

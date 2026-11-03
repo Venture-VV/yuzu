@@ -16,7 +16,7 @@ import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { conflict, forbidden } from '../lib/errors';
-import { couponOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isDeviceOp, isFenced } from '../lib/fences';
+import { benefitUseOpRef, couponOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isDeviceOp, isFenced } from '../lib/fences';
 import { parse } from '../lib/validate';
 import { setTxTimeouts } from '../lib/tx';
 
@@ -51,6 +51,8 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   opening_payable: ['payable.manage'],
   // 手动调整会员档阶（v0.7.23）：只有店主
   grade_adjust: ['member.adjust'],
+  // 登记会员权益使用（v0.7.24）
+  benefit_use: ['benefit.use'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -74,6 +76,7 @@ const READ: Record<ErpOpType, Permission[]> = {
   payment: ['payable.read'],
   opening_payable: ['payable.read'],
   grade_adjust: ['member.adjust'],
+  benefit_use: ['benefit.use'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {
@@ -105,6 +108,11 @@ export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise
   // 手动调整会员档阶（v0.7.23）的编号记在状态变化记录上：refId 是那位会员
   if (type === 'grade_adjust') {
     const refId = await gradeOpRef(db, key);
+    if (refId !== null) return { found: true, abandoned: false, refId };
+  }
+  // 登记会员权益使用（v0.7.24）的编号记在使用登记上：refId 是那条登记
+  if (type === 'benefit_use') {
+    const refId = await benefitUseOpRef(db, key);
     if (refId !== null) return { found: true, abandoned: false, refId };
   }
   return { found: false, abandoned: await isFenced(db, key, [type]) };

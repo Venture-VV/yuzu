@@ -8,13 +8,15 @@ export const ADMIN_SECTIONS = {
   home: {
     path: '/admin',
     label: '后台首页',
-    perms: ['settings.manage', 'catalog.manage', 'staff.manage', 'audit.read', 'wallet.opening', 'frontdesk.tags', 'technician.manage', 'coupon.manage', 'device.manage', 'member.rules'],
+    perms: ['settings.manage', 'catalog.manage', 'staff.manage', 'audit.read', 'wallet.opening', 'frontdesk.tags', 'technician.manage', 'coupon.manage', 'device.manage', 'member.rules', 'benefit.publish'],
   },
   settings: { path: '/admin/settings', label: '规则总表', perms: ['settings.manage', 'audit.read'] },
   rules: { path: '/admin/rules', label: '经营规则', perms: ['settings.manage'] },
   members: { path: '/admin/members', label: '会员与渠道', perms: ['settings.manage'] },
   // 会员体系 v2（v0.7.23，docs/MEMBERSHIP.md）：会员规则（店主、店总）；看板与到期提醒名单在「数据看板 → 会员体系」（客户经理不进后台）
   membership: { path: '/admin/membership', label: '会员规则', perms: ['member.rules'] },
+  // 会员体系 v2 第二期（v0.7.24，docs/BENEFITS.md）：本店权益清单的导入、修改、发布与暂缓，本月发放与使用
+  benefits: { path: '/admin/benefits', label: '会员权益', perms: ['benefit.publish'] },
   // 券与会员权益（v0.7.20，飞书 RQ-006 后半，见 docs/COUPONS.md）：券模板、发券规则、无记名券、统计；默认店主、店总
   coupons: { path: '/admin/coupons', label: '券与会员权益', perms: ['coupon.manage'] },
   catalog: { path: '/admin/catalog', label: '价目与套餐', perms: ['catalog.manage'] },
