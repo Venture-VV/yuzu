@@ -131,20 +131,29 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
     }
   };
 
+  // 门店连没连上：10 秒内问过就用上次的；正在问的时候后来的请求等同一个结果，门店连不上时不会每个请求各等一次超时
   let health = { online: false, at: 0 };
-  const storeOnline = async () => {
-    if (Date.now() - health.at < 10_000) return health.online;
-    let online = false;
-    try {
-      online = (await upstream.call('GET', '/api/mp/health')).status === 200;
-    } catch {
-      online = false;
-    }
-    health = { online, at: Date.now() };
-    return online;
+  let probing: Promise<boolean> | null = null;
+  const storeOnline = (): Promise<boolean> => {
+    if (Date.now() - health.at < 10_000) return Promise.resolve(health.online);
+    probing ??= (async () => {
+      let online = false;
+      try {
+        online = (await upstream.call('GET', '/api/mp/health')).status === 200;
+      } catch {
+        online = false;
+      }
+      health = { online, at: Date.now() };
+      return online;
+    })().finally(() => {
+      probing = null;
+    });
+    return probing;
   };
 
   app.get('/v1/health', async () => ({ ok: true, mockWechat: wechat.mock, store: (await storeOnline()) ? 'online' : 'offline' }));
+  // 网关进程本身活着没有（容器的健康检查用）：不问门店，门店断外网时网关照样算健康
+  app.get('/v1/live', async () => ({ ok: true }));
 
   app.post('/v1/login', async (req) => {
     if (!loginLimit.take(`login:${req.ip}`)) throw TOO_MANY();

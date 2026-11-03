@@ -1,15 +1,20 @@
 // 小程序网关（小程序线，docs/MINIPROGRAM.md 第 1、12 节）：网关 → 真实的 yuzu 小程序端口（测试库）整条链路，模拟微信；
-// 会话（签名、过期、篡改）；展示内容缓存与门店断外网时给旧的；会员接口要会话、连不上 503；微信真接口的请求格式（替身 fetch）；配置。
+// 会话（签名、过期、篡改）；展示内容缓存与门店断外网时给旧的；会员接口要会话、连不上 503；健康检查（/v1/live 不问门店、门店状态只问一次）；
+// 网关小镜像用的单文件打包在空目录里能跑；微信真接口的请求格式（替身 fetch）；配置。
 
+import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { AddressInfo } from 'node:net';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer, type AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildGateway } from '../src/gateway/app';
 import { ShowCache } from '../src/gateway/cache';
 import { loadGatewayConfig, type GatewayConfig } from '../src/gateway/config';
 import { issueSession, verifySession } from '../src/gateway/session';
-import { createUpstream } from '../src/gateway/upstream';
+import { createUpstream, UpstreamDown, type Upstream } from '../src/gateway/upstream';
 import { createMockWechat, createWechat, WechatError } from '../src/gateway/wechat';
 import { buildMpApp } from '../src/server/modules/mp/app';
 import { createMember, setup, type TestContext } from './helpers';
@@ -204,6 +209,77 @@ describe('门店断外网', () => {
     await g.close();
     await prod.close();
   });
+});
+
+describe('健康检查', () => {
+  it('/v1/live 不问门店；门店状态同一时间只问一次，10 秒内用上次的', async () => {
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const slow: Upstream = {
+      async call() {
+        calls++;
+        await gate;
+        throw new UpstreamDown('门店系统连不上');
+      },
+    };
+    const g = await buildGateway({ config: gatewayConfig(), wechat: createMockWechat(), upstream: slow });
+    // 门店那边卡住时，网关进程照样报活着
+    const live = await g.inject({ method: 'GET', url: '/v1/live' });
+    expect(live.statusCode).toBe(200);
+    expect(live.json()).toEqual({ ok: true });
+    expect(calls).toBe(0);
+    const pending = [1, 2, 3].map(() => g.inject({ method: 'GET', url: '/v1/health' }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls).toBe(1);
+    release();
+    for (const res of await Promise.all(pending)) expect(res.json()).toMatchObject({ ok: true, store: 'offline' });
+    expect((await g.inject({ method: 'GET', url: '/v1/health' })).json().store).toBe('offline');
+    expect(calls).toBe(1);
+    await g.close();
+  });
+});
+
+describe('网关的小镜像：打成一个文件（src/gateway/deploy/build.mjs）', () => {
+  it('打出来的文件不靠 node_modules，在空目录里照样起来、连得上 yuzu', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'yuzu-gateway-'));
+    try {
+      execFileSync(process.execPath, ['src/gateway/deploy/build.mjs', join(dir, 'gateway.mjs')], { stdio: 'pipe' });
+      const code = readFileSync(join(dir, 'gateway.mjs'), 'utf8');
+      // 只引 Node 自带的模块：Fastify、zod 都打进来了
+      expect([...code.matchAll(/^import [^;]* from ["']([^"']+)["']/gm)].map((m) => m[1]).filter((m) => !m!.startsWith('node:'))).toEqual([]);
+      const port = await new Promise<number>((done) => {
+        const s = createServer().listen(0, '127.0.0.1', () => {
+          const p = (s.address() as AddressInfo).port;
+          s.close(() => done(p));
+        });
+      });
+      const child = spawn(process.execPath, [join(dir, 'gateway.mjs')], {
+        cwd: dir,
+        env: { PATH: process.env.PATH, MP_UPSTREAM_URL: upstreamUrl, MP_GATEWAY_KEY: KEY, MP_SESSION_SECRET: SESSION, MP_MOCK_WECHAT: 'true', GATEWAY_PORT: String(port), LOG_LEVEL: 'warn' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      let stderr = '';
+      child.stderr!.on('data', (d: Buffer) => (stderr += d.toString()));
+      try {
+        const base = `http://127.0.0.1:${port}`;
+        let live: Response | null = null;
+        for (let i = 0; i < 50 && !live; i++) {
+          live = await fetch(`${base}/v1/live`).catch(() => null);
+          if (!live) await new Promise((r) => setTimeout(r, 100));
+        }
+        expect(live?.status, stderr).toBe(200);
+        expect(await (await fetch(`${base}/v1/health`)).json()).toMatchObject({ ok: true, mockWechat: true, store: 'online' });
+        const home = await fetch(`${base}/v1/home`);
+        expect(home.status).toBe(200);
+        expect(home.headers.get('x-cache')).toBe('miss');
+      } finally {
+        child.kill('SIGTERM');
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 
 describe('微信真接口（替身 fetch）', () => {

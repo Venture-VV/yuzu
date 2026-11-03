@@ -680,4 +680,5 @@ TAILSCALE_BE_CLI=1 /Applications/Tailscale.app/Contents/MacOS/Tailscale status
 - 这台服务器加入第 10 节的同一个 Tailscale 网络。它收到回调后，通过 Tailscale 转发给 Mac mini。不要把 Mac mini 的 8080 映射到公网，也不要在云服务器上开放管理后台。
 - 安全组对公网只放行 HTTPS 443。登录这台服务器走 Tailscale，不要把 22 端口对所有地址开放。
 - 管理后台的访问方式保持不变：店内走局域网，店外走 Tailscale，都不经过这台公网服务器。
+- 微信小程序的网关就放在这台上，部署见 [小程序网关部署手册](DEPLOY_GATEWAY.md)；门店正式服的小程序端口等 yuzu 正式切换时再开（那份手册第 8 节）。
 

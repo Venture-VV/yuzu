@@ -20,6 +20,7 @@
 | `src/config/env.ts` | 按小程序的版本（开发版、体验版、正式版）选网关 |
 | `tests/` | 单元测试（不要微信开发者工具） |
 | `scripts/render-icons.mjs` | 生成底部标签栏的图标 |
+| `tools/upload/` | 上传体验版（微信官方的 miniprogram-ci，一千多个依赖，单独装、不进 CI；见下「上传体验版」） |
 | `assets-src/brand/*.svg`、`src/assets/brand/*.png` | 汤崎标志（店主 11-03 定用品牌书 / VI 的几何字）：竖版方形主标志、横版、英文字标 TOUCHILL。SVG 是从品牌书 / VI 的 PDF 里按区域取出的原矢量路径（不是截图），放在 `src/` 外面、不进小程序包；页面用 `scripts/render-logo.mjs` 生成的 PNG（按用到的地方换颜色、透明底） |
 
 接口的类型直接用 yuzu 的 `src/shared/mp.ts`、`src/shared/guide.ts`（只引类型，编译后不留引用），接口改了这里的类型检查会报错。
@@ -69,6 +70,16 @@ npm run check      # 类型检查 + 单元测试；CI 的「小程序：类型�
 | 正式版 | `https://api.<域名>` | 一律用真的微信登录与手机号验证 |
 
 两个域名等备案下来再填进 `src/config/env.ts`，并在小程序后台加进 request、downloadFile 合法域名（导览图的底图用画布加载，要 downloadFile 域名）。
+
+## 上传体验版
+
+体验版连测试网关，在网关服务器上从 `main` 上已部署的版本上传（与测试网关同一个 SHA），步骤见 `docs/DEPLOY_GATEWAY.md` 第 7 节。版本号是本目录 `package.json` 的 `version`（第一期从 `0.1.0` 起；一批改动发给大家试用时加一位），版本说明里带提交的 SHA。
+
+```bash
+npm run upload:dry-run    # 本机先编译一遍：不要密钥、不连微信，看能不能编过、包多大（主包上限 2MB）
+```
+
+真上传要 AppID 与代码上传密钥（只放网关服务器，不进 GitHub），由 `src/gateway/deploy/upload-miniprogram.sh` 调 `tools/upload/upload.mjs`；`src/config/env.ts` 里体验版、正式版的地址还是占位的 `domain.invalid` 时拒绝上传。
 
 ## 写法上的约定
 

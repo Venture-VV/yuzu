@@ -1,0 +1,15 @@
+# 接微信小程序的 yuzu 实例才叠加这个文件（docs/DEPLOY_GATEWAY.md 第 2 节；小程序线）：在那台的 .env 里写
+#   COMPOSE_FILE=compose.yaml:compose.mp.yaml
+# 之后 update.sh、rollback.sh、看门狗照常用（docker compose 自己把两个文件合起来）；没写这一行的实例不开小程序端口。
+# 小程序端口只挂网关的 /api/mp/*，每个请求都要带网关密钥；只让网关服务器经 Tailscale 连（Tailscale 规则只放行它到这个端口），
+# 不做端口转发、不对公网开放。现在只给测试服 A 的演示库（yuzu-demo）用；门店正式服等正式切换时再定（见手册第 8 节）。
+services:
+  app:
+    environment:
+      # 容器里固定用 8081；宿主机上的端口是 .env 的 MP_PORT
+      MP_PORT: "8081"
+      MP_GATEWAY_KEY: ${MP_GATEWAY_KEY:?接小程序要在 .env 设置 MP_GATEWAY_KEY（至少 32 个字符，openssl rand -hex 32）}
+      # 会员码的签名密钥：只在 yuzu，网关不存；不设时会员码不可用（请顾客到前台报手机号），其余照常
+      MP_CODE_SECRET: ${MP_CODE_SECRET:-}
+    ports:
+      - "${MP_BIND:-0.0.0.0}:${MP_PORT:-8081}:8081"
