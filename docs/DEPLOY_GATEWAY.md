@@ -26,9 +26,9 @@
 | `compose.mp.yaml` | 叠加在 yuzu 的 `compose.yaml` 上：开小程序端口（只给接小程序的实例） |
 | `src/gateway/deploy/compose.yaml` | 网关服务器上的 Caddy 与两个网关进程 |
 | `src/gateway/deploy/Dockerfile`、`build.mjs` | 网关的小镜像：只有打包好的网关一个文件，不带 yuzu 的后端、管理后台、数据库工具和 node_modules |
-| `src/gateway/deploy/Caddyfile` | 两个域名各转给自己的网关；网关没起来时回「门店系统连接中」 |
+| `src/gateway/deploy/caddy/Caddyfile` | 两个域名各转给自己的网关；网关没起来时回「门店系统连接中」。`caddy/` 整个目录只读挂进 Caddy 的容器（单挂文件的话，切换版本后容器里还是旧文件），旁边的 `.env`、`gateway-*.env` 不进去，这个目录里不要放别的文件 |
 | `src/gateway/deploy/.env.example`、`gateway.env.example` | 配置样例（真的 `.env`、`gateway-test.env`、`gateway-prod.env` 不进 Git） |
-| `src/gateway/deploy/update.sh` | 更新到 `main` 上的某个版本（回退就是用上一版的 SHA 再执行一次） |
+| `src/gateway/deploy/update.sh` | 更新到 `main` 上的某个版本（回退就是用上一版的 SHA 再执行一次）。按 `COMPOSE_PROFILES` 算出应该开着的服务逐个核对：网关起来了、Caddy 加载了这一版的配置、经 Caddy 连得通，有一项不通过就返回失败 |
 | `src/gateway/deploy/upload-miniprogram.sh` | 上传小程序体验版（第 7 节） |
 
 ## 1. 先要有的（店主办，`MINIPROGRAM.md` 第 7 节）
@@ -133,7 +133,7 @@ cd ~/yuzu-gateway
 src/gateway/deploy/update.sh <版本标签>    # 核对版本、构建网关镜像、起 Caddy 与测试网关、经 Caddy 核对
 ```
 
-第一次启动时 Caddy 申请证书要一两分钟（经 443 验证，不用开 80）；脚本最后一行的经 Caddy 核对没通过时，过一会儿再打开下面的地址。
+第一次启动时 Caddy 申请证书要一两分钟（经 443 验证，不用开 80）。脚本经 Caddy 核对最多等 60 秒；证书还没下来时脚本返回失败，过几分钟用同一个版本再执行一次（镜像已经有了，不会重新构建）。
 
 验证清单：
 

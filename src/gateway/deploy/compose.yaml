@@ -43,7 +43,9 @@ services:
       GATEWAY_PROD_DOMAIN: ${GATEWAY_PROD_DOMAIN:?请在 .env 设置 GATEWAY_PROD_DOMAIN（正式网关的域名，例如 api.example.com）}
       ACME_EMAIL: ${ACME_EMAIL:?请在 .env 设置 ACME_EMAIL（证书到期提醒发到这个邮箱）}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # 挂整个 caddy/ 目录，不单挂文件：git 切换版本时 Caddyfile 换了一个新文件，单挂的文件容器里还是旧的
+      # （小程序线测试预检 3ab3ab5 的 P2）；这个目录里只有 Caddyfile，旁边的 .env、gateway-*.env（密钥）不进 Caddy 的容器
+      - ./caddy:/etc/caddy:ro
       - caddy_data:/data
       - caddy_config:/config
     logging: *logging

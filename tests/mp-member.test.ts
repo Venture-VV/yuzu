@@ -7,7 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/server/app';
 import { buildMpApp } from '../src/server/modules/mp/app';
-import { makeMemberCode } from '../src/server/modules/mp/member';
+import { getMe, makeMemberCode } from '../src/server/modules/mp/member';
 import { createStaff } from '../src/server/modules/staff';
 import type { Benefit, BenefitCatalog } from '../src/shared/benefits';
 import { rechargeOutcome, type MemberGradeInfo, type MembershipRules } from '../src/shared/membership';
@@ -446,6 +446,91 @@ describe('绑定状态版本号：解绑之后，晚到的旧请求不再绑上�
     const missing = await call(mp, 'POST', '/api/mp/bind', newOpenid(), { clientKey: randomUUID(), phone: phoneOf(92) });
     expect(missing.statusCode).toBe(400);
     expect(missing.json().error.message).toBe('请刷新小程序后再绑定');
+  });
+});
+
+describe('绑定与解绑交错（小程序线测试预检 3ab3ab5 的 P1）', () => {
+  const waitFor = async (check: () => Promise<boolean>, what: string) => {
+    const until = Date.now() + 5_000;
+    while (Date.now() < until) {
+      if (await check()) return;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    throw new Error(`等不到：${what}`);
+  };
+  /** 这个测试库里正在等锁的语句：等会员行（绑定停在锁会员一行）、等咨询锁（解绑排在绑定后面） */
+  const lockWaits = async (on: 'member' | 'advisory') =>
+    Number(
+      (
+        await ctx.sql<{ n: number }[]>`
+          SELECT count(*)::int AS n FROM pg_stat_activity
+          WHERE datname = current_database() AND wait_event_type = 'Lock'
+            AND ${on === 'advisory' ? ctx.sql`wait_event = 'advisory'` : ctx.sql`query LIKE '%FROM members WHERE phone%FOR SHARE%'`}`
+      )[0]!.n,
+    );
+
+  it('绑定比完版本号、还没写入时员工解绑：解绑排在绑定后面，绑定按「还绑着」被拒，不出现新的绑定', async () => {
+    const a = await createMember(ctx, '演示·交错甲', phoneOf(93));
+    const b = await createMember(ctx, '演示·交错乙', phoneOf(94));
+    const openid = newOpenid();
+    expect((await bind(openid, phoneOf(94))).statusCode).toBe(200);
+    const v1 = await versionOf(openid);
+    // 另一个事务锁住甲的会员行：绑定甲会停在「锁会员一行（共享锁）」，这时它已经比完了版本号（版本号对得上）
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const lockedNow = new Promise<void>((r) => (locked = r));
+    const holder = ctx.sql.begin(async (tx) => {
+      await tx`SELECT id FROM members WHERE id = ${a.id} FOR UPDATE`;
+      locked();
+      await held;
+    });
+    await lockedNow;
+    let bindA: Promise<Awaited<ReturnType<typeof call>>>;
+    let unbindB: ReturnType<typeof api>;
+    try {
+      bindA = Promise.resolve(call(mp, 'POST', '/api/mp/bind', openid, { clientKey: randomUUID(), phone: phoneOf(93), bindVersion: v1 }));
+      await waitFor(async () => (await lockWaits('member')) > 0, '绑定停在会员行上');
+      // 员工这时解绑乙：要等同一把咨询锁（原来不取这把锁，会先提交，绑定接着写入就绑上了甲）
+      unbindB = api(ctx.app, duty, 'POST', `/api/admin/mp/bindings/${await bindingOf(b.id)}/unbind`, { clientKey: randomUUID(), reason: '顾客要求解绑' });
+      await waitFor(async () => (await lockWaits('advisory')) > 0, '解绑排在绑定后面');
+    } finally {
+      // 不论成败都放开甲的会员行，不让测试库留着锁
+      release();
+      await holder;
+    }
+    const [rb, ru] = await Promise.all([bindA, unbindB]);
+    expect(rb.statusCode).toBe(409);
+    expect(rb.json().error.code).toBe('OPENID_BOUND');
+    expect(ru.status).toBe(200);
+    expect(await activeBindings(a.id)).toBe(0);
+    expect((await call(mp, 'GET', '/api/mp/me', openid)).json()).toEqual({ bound: false, bindVersion: 2, member: null });
+  });
+
+  it('/me 的绑定状态与版本号来自同一个快照：读的中途别处绑上，也不会拼成「没绑定、版本号 1」', async () => {
+    await createMember(ctx, '演示·快照', phoneOf(95));
+    const openid = newOpenid();
+    let fired = false;
+    // 包一层 sql：读这个微信绑定记录的第一条语句一返回，就在别处绑上（已提交）；之后再有语句读绑定记录就会读到新的状态
+    const sql = new Proxy(ctx.sql, {
+      apply(target, self, args: unknown[]) {
+        const q = Reflect.apply(target as unknown as (...a: unknown[]) => unknown, self, args);
+        const text = Array.isArray(args[0]) && 'raw' in (args[0] as object) ? (args[0] as string[]).join('?') : '';
+        if (!fired && text.includes('mp_bindings')) {
+          fired = true;
+          return Promise.resolve(q).then(async (rows) => {
+            expect((await bind(openid, phoneOf(95))).statusCode).toBe(200);
+            return rows;
+          });
+        }
+        return q;
+      },
+    });
+    const me = await getMe({ sql, config: ctx.config }, openid);
+    expect(fired).toBe(true);
+    // 读的时候还没绑定：版本号也是绑定之前的 0（原来分两条读，拿到的是「没绑定、版本号 1」，按 1 去绑就能绕过版本号）
+    expect(me).toEqual({ bound: false, bindVersion: 0, member: null });
+    expect((await call(mp, 'GET', '/api/mp/me', openid)).json()).toMatchObject({ bound: true, bindVersion: 1 });
   });
 });
 

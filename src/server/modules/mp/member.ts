@@ -74,13 +74,20 @@ export async function activeBinding(db: Db, openid: string): Promise<{ id: numbe
 }
 
 /**
- * 这个微信的绑定状态版本号：绑定记录的条数加上已解绑的条数。绑定记录只追加、解绑只能填一次（迁移 043 的触发器），
- * 所以每次绑定、解绑都加一、不会回到以前的数。
+ * 这个微信现在的有效绑定与绑定状态版本号，用一条语句读（同一个快照：不会把绑定前的「没绑定」和绑定后的版本号拼在一起，
+ * 小程序线测试预检 3ab3ab5 的 P1）。版本号是绑定记录的条数加上已解绑的条数：绑定记录只追加、解绑只能填一次
+ * （迁移 043 的触发器），所以每次绑定、解绑都加一、不会回到以前的数。
  */
-export async function bindVersionOf(db: Db, openid: string): Promise<number> {
-  const [row] = await db<{ v: number }[]>`SELECT (count(*) + count(unbound_at))::int AS v FROM mp_bindings WHERE openid = ${openid}`;
-  return row?.v ?? 0;
+export async function bindingStateOf(db: Db, openid: string): Promise<{ binding: { id: number; memberId: number } | null; version: number }> {
+  const [row] = await db<{ id: number | null; memberId: number | null; version: number }[]>`
+    SELECT b.id, b.member_id, v.version
+    FROM (SELECT (count(*) + count(unbound_at))::int AS version FROM mp_bindings WHERE openid = ${openid}) v
+    LEFT JOIN mp_bindings b ON b.openid = ${openid} AND b.unbound_at IS NULL`;
+  return { binding: row?.id ? { id: Number(row.id), memberId: Number(row.memberId) } : null, version: row?.version ?? 0 };
 }
+
+/** 绑定、解绑、确认作废都先取这个微信的这把咨询锁：同一个微信的绑定状态（与版本号）在这把锁里只有一个在改 */
+const lockOpenid = (tx: Db, openid: string) => tx`SELECT pg_advisory_xact_lock(hashtext(${`mp_bind:${openid}`}))`;
 
 async function boundMemberId(db: Db, openid: string): Promise<number> {
   const b = await activeBinding(db, openid);
@@ -96,7 +103,7 @@ export async function bindMember(deps: Deps, openid: string, raw: unknown): Prom
   try {
     return await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
-      await tx`SELECT pg_advisory_xact_lock(hashtext(${`mp_bind:${openid}`}))`;
+      await lockOpenid(tx, openid);
       // 这个编号已经确认作废（结果不确定时小程序请门店系统作废的）：晚到的原请求不再生效
       const [fenced] = await tx`SELECT 1 FROM mp_op_fences WHERE key = ${input.clientKey} AND op_type = 'mp_bind' AND openid = ${openid}`;
       if (fenced) throw conflict('OP_ABANDONED', '这次绑定已经放弃，请重新绑定');
@@ -108,12 +115,13 @@ export async function bindMember(deps: Deps, openid: string, raw: unknown): Prom
         return { status: 'bound' as const, member: await memberBrief(tx, prev.memberId), replayed: true };
       }
       // 点绑定之后这个微信绑过或解绑过（版本号变了）：这是之前的请求，不再生效。例如手机上读不出来的旧编号，
-      // 在换绑、解绑之后才晚到（小程序线测试预检 #44 的 P1）。在这个微信的咨询锁里比，与别的绑定不交错；
-      // 员工解绑不取这把锁也没关系：解绑提交前那位会员还绑着（晚到的被 OPENID_BOUND 拒），提交后版本号就变了
-      if ((await bindVersionOf(tx, openid)) !== input.bindVersion) throw conflict('BIND_STALE', '绑定状态刚刚变过，请刷新后再绑定');
+      // 在换绑、解绑之后才晚到（小程序线测试预检 #44 的 P1）。绑定与员工解绑都在这个微信的咨询锁里改绑定记录，
+      // 这里读到的绑定与版本号到写入、提交之前都不会变（3ab3ab5 的 P1：原来解绑不取这把锁，能插在比对与写入之间）
+      const state = await bindingStateOf(tx, openid);
+      if (state.version !== input.bindVersion) throw conflict('BIND_STALE', '绑定状态刚刚变过，请刷新后再绑定');
       const [m] = await tx<{ id: number; memberNo: string; name: string; status: string }[]>`
         SELECT id, member_no, name, status FROM members WHERE phone = ${input.phone} FOR SHARE`;
-      const current = await activeBinding(tx, openid);
+      const current = state.binding;
       if (current) {
         // 这个微信已经绑定了这位会员：照旧返回；绑定的是别人就要先到前台解绑
         if (m && current.memberId === m.id) return { status: 'bound' as const, member: brief(m), replayed: true };
@@ -145,7 +153,7 @@ export async function abandonBind(deps: Deps, openid: string, raw: unknown): Pro
   const { clientKey } = parse(AbandonInput, raw);
   return deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
-    await tx`SELECT pg_advisory_xact_lock(hashtext(${`mp_bind:${openid}`}))`;
+    await lockOpenid(tx, openid);
     const [prev] = await tx<{ openid: string; memberId: number }[]>`SELECT openid, member_id FROM mp_bindings WHERE client_key = ${clientKey}`;
     if (prev) {
       if (prev.openid !== openid) throw conflict('CLIENT_KEY_REUSED', '这次绑定的编号已经用过，请重新绑定');
@@ -161,8 +169,7 @@ export async function abandonBind(deps: Deps, openid: string, raw: unknown): Pro
 }
 
 export async function getMe(deps: Deps, openid: string): Promise<MpMe> {
-  const b = await activeBinding(deps.sql, openid);
-  const bindVersion = await bindVersionOf(deps.sql, openid);
+  const { binding: b, version: bindVersion } = await bindingStateOf(deps.sql, openid);
   if (!b) return { bound: false, bindVersion, member: null };
   // 与员工打开会员详情一样：先作废这位会员到期的赠金，看到的余额才是可用余额
   await expireMemberBonus(deps, b.memberId);
@@ -334,11 +341,16 @@ const UnbindInput = z.object({
   reason: z.string().trim().min(1, '请写解绑原因').max(200, '原因最多 200 字'),
 });
 
-/** 解绑（MP6）：只锁绑定记录一行；同一个操作编号重提返回原来那次的结果 */
+/** 解绑（MP6）：先取这个微信的咨询锁、再锁绑定记录一行；同一个操作编号重提返回原来那次的结果 */
 export async function unbindMember(deps: Deps, bindingId: number, raw: unknown, ctx: OpContext): Promise<MpBindingRow> {
   const input = parse(UnbindInput, raw);
   const memberId = await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
+    // 先取这个微信的咨询锁（与绑定、确认作废同一把），再锁绑定记录一行：解绑不会插在绑定比对版本号与写入之间
+    // （小程序线测试预检 3ab3ab5 的 P1）。绑定记录的 openid 不能改（迁移 043 的触发器），先不加锁读出来没关系
+    const [who] = await tx<{ openid: string }[]>`SELECT openid FROM mp_bindings WHERE id = ${bindingId}`;
+    if (!who) throw notFound('绑定记录不存在');
+    await lockOpenid(tx, who.openid);
     const [b] = await tx<{ memberId: number; unboundAt: string | null; unbindClientKey: string | null }[]>`
       SELECT member_id, unbound_at, unbind_client_key FROM mp_bindings WHERE id = ${bindingId} FOR UPDATE`;
     if (!b) throw notFound('绑定记录不存在');

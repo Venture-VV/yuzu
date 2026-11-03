@@ -31,5 +31,5 @@ USER node
 EXPOSE 8300
 # 只看网关进程活着没有（/v1/live 不问门店）：门店断外网时网关照样健康，小程序照样拿得到旧的展示内容
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:8300/v1/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.GATEWAY_PORT||8300)+'/v1/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "--enable-source-maps", "gateway.mjs"]

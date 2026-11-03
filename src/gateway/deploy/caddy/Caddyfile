@@ -1,6 +1,7 @@
 # 小程序网关服务器的 HTTPS（docs/DEPLOY_GATEWAY.md）：两个域名各转给自己的网关进程。
 # 证书由 Caddy 自己申请、续期（Let's Encrypt，经 443 端口验证：安全组不用开 80）。
-# 域名与邮箱来自 .env（compose.yaml 传进来）；改了这个文件之后：docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+# 域名与邮箱来自 .env（compose.yaml 传进来）。这个目录整个只读挂进 Caddy 的容器（不要往这里放别的文件）；
+# update.sh 每次都会重新加载；手改之后：docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
 {
 	email {$ACME_EMAIL}
 	# 公网只开 443，不在 80 上做跳转
