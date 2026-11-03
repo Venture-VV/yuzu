@@ -17,6 +17,7 @@ import { ClockroomPage } from './features/clockroom/ClockroomPage';
 import { DiningPage } from './features/dining/DiningPage';
 import { RoomsPage } from './features/rooms/RoomsPage';
 import { GuidePage, GuideScreenPage } from './features/guide/GuidePage';
+import { DevicesPage } from './features/devices/DevicesPage';
 import { LedgerPage } from './features/ledger/LedgerPage';
 import { SettlementPage } from './features/settlement/SettlementPage';
 import { ShiftPage } from './features/shift/ShiftPage';
@@ -217,6 +218,7 @@ const router = createBrowserRouter([
       { path: 'dining/:tab?', element: <DiningPage /> },
       { path: 'rooms', element: <RoomsPage /> },
       { path: 'guide', element: <GuidePage /> },
+      { path: 'devices', element: <DevicesPage /> },
       { path: 'ledger', element: <LedgerPage /> },
       { path: 'settlement/:date?', element: <SettlementPage /> },
       { path: 'shift', element: <ShiftPage /> },

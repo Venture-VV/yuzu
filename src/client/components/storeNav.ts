@@ -1,7 +1,7 @@
 // 门店主导航的入口：主导航按它显示；ERP 顶栏的「返回门店」也按它判断门店那边有没有能用的页面、回到哪一页。
 // 库存、采购、货款、待办在 ERP 工作区（v0.7.3，用户菜单「进入 ERP」），不在这里。
 
-import { BedDouble, CalendarCheck2, ClipboardCheck, ConciergeBell, Hourglass, LayoutDashboard, MapPinned, ReceiptText, Settings2, UsersRound, UtensilsCrossed } from 'lucide-react';
+import { BedDouble, CalendarCheck2, ClipboardCheck, ConciergeBell, Hourglass, LayoutDashboard, MapPinned, Printer, ReceiptText, Settings2, UsersRound, UtensilsCrossed } from 'lucide-react';
 import { ADMIN_PERMISSIONS } from '@shared/admin';
 import type { Permission } from '@shared/permissions';
 import { useCan, useSession } from '../lib/session';
@@ -36,6 +36,8 @@ const STORE_NAV: StoreNavItem[][] = [
     { to: '/dashboard', label: '看板', icon: LayoutDashboard, perm: ['ledger.readToday', 'report.executive', 'report.members', 'report.technicians'] },
     // 对客导览（v0.7.19）：所有岗位默认能看（区域导览图、大屏轮播）
     { to: '/guide', label: '导览', icon: MapPinned, perm: 'guide.view', guestFacing: true },
+    // 设备（v0.7.21，RQ-001）：一屏看全部设备、本机终端
+    { to: '/devices', label: '设备', icon: Printer, perm: 'device.view' },
   ],
   // 管理后台是单独的一套页面（规则、价目、手牌池、员工与权限）
   [{ to: '/admin', label: '后台', icon: Settings2, perm: [...ADMIN_PERMISSIONS] }],

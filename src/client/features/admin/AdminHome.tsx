@@ -24,6 +24,7 @@ const SECTION_HINTS: Partial<Record<AdminSection, string>> = {
   dining: '餐饮开关、出品档口、菜品送到哪个档口',
   rooms: '客房开关、退房与押金规则、房型房价、房间',
   spaces: '楼层、区域、空间编码与别名，核对状态，导入导出',
+  devices: '打印机、标签机、读卡器、扫码、终端的登记，按采购清单导入，打印任务与设备事件',
   staff: '账号、岗位、库存职责、重置密码',
   permissions: '各岗位能做什么，店主可以勾选调整',
   opening: '旧系统会员余额导入与作废',

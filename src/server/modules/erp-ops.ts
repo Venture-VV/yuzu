@@ -16,7 +16,7 @@ import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { conflict, forbidden } from '../lib/errors';
-import { couponOpRef, fenceKey, isCouponOp, isFenced } from '../lib/fences';
+import { couponOpRef, deviceOpRef, fenceKey, isCouponOp, isDeviceOp, isFenced } from '../lib/fences';
 import { parse } from '../lib/validate';
 
 export const erpOpAbandoned = () => conflict('OP_ABANDONED', '这笔已确认作废，没有登记；如仍需办理，请重新填写后提交');
@@ -42,6 +42,9 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   coupon_rule: ['coupon.manage'],
   coupon_batch: ['coupon.manage'],
   coupon_issue: ['coupon.issue'],
+  // 硬件连接（v0.7.21）
+  device_create: ['device.manage'],
+  device_job: ['device.test'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -60,6 +63,8 @@ const READ: Record<ErpOpType, Permission[]> = {
   coupon_rule: ['coupon.manage'],
   coupon_batch: ['coupon.manage'],
   coupon_issue: ['coupon.issue'],
+  device_create: ['device.manage'],
+  device_job: ['device.test'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {
@@ -81,6 +86,11 @@ export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise
   // 券与会员权益（v0.7.20）的编号记在模板、规则、发券记录上：refId 是那条记录
   if (isCouponOp(type)) {
     const refId = await couponOpRef(db, key, type);
+    if (refId !== null) return { found: true, abandoned: false, refId };
+  }
+  // 硬件连接（v0.7.21）的编号记在设备、打印任务上
+  if (isDeviceOp(type)) {
+    const refId = await deviceOpRef(db, key, type);
     if (refId !== null) return { found: true, abandoned: false, refId };
   }
   return { found: false, abandoned: await isFenced(db, key, [type]) };

@@ -190,6 +190,9 @@ export const ERP_OP_TYPES = [
   'coupon_rule',
   'coupon_batch',
   'coupon_issue',
+  // 硬件连接（v0.7.21）：登记设备、打印任务（断网后刷新也要能查回、重提或作废）
+  'device_create',
+  'device_job',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -208,6 +211,8 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   coupon_rule: '加发券规则',
   coupon_batch: '生成无记名券',
   coupon_issue: '发券给会员',
+  device_create: '登记设备',
+  device_job: '测试打印',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

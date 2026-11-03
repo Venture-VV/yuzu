@@ -54,6 +54,9 @@ export const FENCED_OPS = [
   'coupon_rule',
   'coupon_batch',
   'coupon_issue',
+  // 硬件连接（v0.7.21）：编号记在设备、打印任务上（client_key）
+  'device_create',
+  'device_job',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -96,6 +99,7 @@ export async function fenceKey(
     if (event) return { existingOpType: opType };
   }
   if (isCouponOp(opType) && (await couponOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
+  if (isDeviceOp(opType) && (await deviceOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   const rows = await tx`
     INSERT INTO op_fences (key, op_type, staff_id) VALUES (${key}, ${opType}, ${staffId})
     ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;
@@ -114,5 +118,18 @@ export async function couponOpRef(db: Db, key: string, opType: CouponOp): Promis
       : opType === 'coupon_rule'
         ? await db<{ id: number }[]>`SELECT id FROM coupon_rules WHERE client_key = ${key}`
         : await db<{ id: number }[]>`SELECT id FROM coupon_issues WHERE client_key = ${key} AND kind = ${opType === 'coupon_batch' ? 'batch' : 'manual'}`;
+  return rows[0] ? Number(rows[0].id) : null;
+}
+
+const DEVICE_OPS = ['device_create', 'device_job'] as const;
+type DeviceOp = (typeof DEVICE_OPS)[number];
+export const isDeviceOp = (op: string): op is DeviceOp => (DEVICE_OPS as readonly string[]).includes(op);
+
+/** 硬件连接（v0.7.21）的操作编号记在设备、打印任务上：查到时返回那一台设备、那个任务的编号 */
+export async function deviceOpRef(db: Db, key: string, opType: DeviceOp): Promise<number | null> {
+  const rows =
+    opType === 'device_create'
+      ? await db<{ id: number }[]>`SELECT id FROM devices WHERE client_key = ${key}`
+      : await db<{ id: number }[]>`SELECT id FROM device_jobs WHERE client_key = ${key}`;
   return rows[0] ? Number(rows[0].id) : null;
 }

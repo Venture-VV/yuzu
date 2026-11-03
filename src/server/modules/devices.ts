@@ -1,0 +1,634 @@
+// 硬件连接（飞书需求 RQ-001，v0.7.21，docs/HARDWARE.md）：设备登记与采购清单、网口打印任务、心跳与状态、终端替桥上报。
+//
+// · 设备登记：每台一行；修改带版本号，对不上拒绝；不能删除，只能停用。新建带操作编号（「结果待确认」同 ERP 一套）。
+// · 打印任务：先锁设备一行（同一台串行）再建任务，发送在事务外、由进程内的按台队列执行；同一操作编号只打一张。
+// · 心跳：每 2 秒查一次网口设备（连上发实时状态查询）；最近一次联系上超过 5 秒记离线；终端 5 秒没上报，它与它下面的设备记离线。
+// · 终端上报：开着页面的终端用登录身份每 2 秒替桥上报（锁顺序：终端一行 → 它下面的设备 id 升序），读卡、扫码事件按编号去重。
+// 状态变化、读卡、扫码记设备事件（只追加）；读到的卡号只在这里，不进会员与手牌。
+
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+import {
+  DEFAULT_PRINTER_PORT,
+  DEVICE_AREAS,
+  DEVICE_CONNECTIONS,
+  DEVICE_ERROR_LABELS,
+  DEVICE_EVENT_TYPES,
+  DEVICE_JOB_KINDS,
+  DEVICE_KIND_CONNECTIONS,
+  DEVICE_KINDS,
+  DEVICE_QUOTE,
+  DEVICE_STATUSES,
+  NETWORK_CONNECTIONS,
+  OFFLINE_AFTER_MS,
+  plannedQuoteDevices,
+  type Device,
+  type DeviceErrorCode,
+  type DeviceEvent,
+  type DeviceImportPreview,
+  type DeviceJob,
+  type DeviceJobKind,
+  type DeviceKind,
+  type DeviceOverview,
+  type DeviceStatus,
+  type BridgeReportResult,
+} from '@shared/devices';
+import { INSTANCE_LABELS } from '@shared/instance';
+import { isUniqueViolation, type Db, type Sql, type Tx } from '../db';
+import { guard } from '../auth/guard';
+import { writeAudit } from '../lib/audit';
+import type { Deps, OpContext } from '../lib/context';
+import { badRequest, conflict, notFound, unprocessable } from '../lib/errors';
+import { assertNotFenced } from '../lib/fences';
+import { idParam, parse } from '../lib/validate';
+import { buildTestLabel, buildTestPage } from '../devices/escpos';
+import { probe, sendToPrinter } from '../devices/netprint';
+import { erpOpAbandoned } from './erp-ops';
+import { loadSettings } from './settings';
+
+// ───────────────────────── 读 ─────────────────────────
+
+const AREA_ORDER = new Map<string, number>(DEVICE_AREAS.map((a, i) => [a.name, i]));
+const KIND_ORDER = new Map<string, number>(DEVICE_KINDS.map((k, i) => [k, i]));
+
+const deviceColumns = (db: Db) => db`
+  d.id, d.code, d.name, d.kind, d.brand, d.model, d.area, d.connection, d.host, d.port, d.host_device_id, h.code AS host_device_code,
+  d.bridge_key, d.options, d.enabled, d.status, d.status_code, d.last_seen_at, d.status_changed_at, d.catalog_key, d.note, d.version,
+  d.created_at, d.updated_at`;
+
+const sortDevices = (list: Device[]) =>
+  list.sort(
+    (a, b) =>
+      (AREA_ORDER.get(a.area) ?? 99) - (AREA_ORDER.get(b.area) ?? 99) ||
+      a.area.localeCompare(b.area, 'zh') ||
+      (KIND_ORDER.get(a.kind) ?? 9) - (KIND_ORDER.get(b.kind) ?? 9) ||
+      a.code.localeCompare(b.code),
+  );
+
+export async function listDevices(db: Db): Promise<Device[]> {
+  const rows = await db<Device[]>`SELECT ${deviceColumns(db)} FROM devices d LEFT JOIN devices h ON h.id = d.host_device_id`;
+  return sortDevices(rows);
+}
+
+export async function getDevice(db: Db, id: number): Promise<Device> {
+  const [row] = await db<Device[]>`SELECT ${deviceColumns(db)} FROM devices d LEFT JOIN devices h ON h.id = d.host_device_id WHERE d.id = ${id}`;
+  if (!row) throw notFound('设备不存在');
+  return row;
+}
+
+/** 一屏看全部设备：设备、各状态台数、采购清单对数（采购 / 已登记 / 在线） */
+export async function deviceOverview(db: Db): Promise<DeviceOverview> {
+  const devices = await listDevices(db);
+  const counts = { total: devices.length, disabled: 0, unknown: 0, online: 0, offline: 0, error: 0 };
+  for (const d of devices) {
+    if (!d.enabled) counts.disabled += 1;
+    else counts[d.status] += 1;
+  }
+  const catalog = DEVICE_QUOTE.map((line) => {
+    const mine = devices.filter((d) => d.catalogKey === line.key && d.enabled);
+    return {
+      key: line.key,
+      category: line.category,
+      brand: line.brand,
+      model: line.model,
+      kind: line.kind,
+      purchased: line.quantity,
+      registered: mine.length,
+      online: mine.filter((d) => d.status === 'online').length,
+    };
+  });
+  return { devices, counts, catalog, checkedAt: new Date().toISOString() };
+}
+
+const jobColumns = (db: Db) => db`
+  j.id, j.device_id, d.code AS device_code, d.name AS device_name, j.kind, j.status, j.attempts, j.error_code, j.error_message,
+  s.display_name AS created_by_name, j.created_at, j.finished_at`;
+
+export async function getJob(db: Db, id: number): Promise<DeviceJob> {
+  const [row] = await db<DeviceJob[]>`
+    SELECT ${jobColumns(db)} FROM device_jobs j JOIN devices d ON d.id = j.device_id JOIN staff s ON s.id = j.created_by WHERE j.id = ${id}`;
+  if (!row) throw notFound('打印任务不存在');
+  return row;
+}
+
+export async function listJobs(db: Db, f: { deviceId?: number; limit?: number }): Promise<DeviceJob[]> {
+  return db<DeviceJob[]>`
+    SELECT ${jobColumns(db)} FROM device_jobs j JOIN devices d ON d.id = j.device_id JOIN staff s ON s.id = j.created_by
+    WHERE ${f.deviceId ? db`j.device_id = ${f.deviceId}` : db`true`}
+    ORDER BY j.id DESC LIMIT ${f.limit ?? 50}`;
+}
+
+export async function listEvents(db: Db, f: { deviceId?: number; type?: string; limit?: number }): Promise<DeviceEvent[]> {
+  return db<DeviceEvent[]>`
+    SELECT e.id, e.device_id, d.code AS device_code, e.type, e.data, s.display_name AS staff_name, e.created_at
+    FROM device_events e LEFT JOIN devices d ON d.id = e.device_id LEFT JOIN staff s ON s.id = e.staff_id
+    WHERE ${f.deviceId ? db`e.device_id = ${f.deviceId}` : db`true`} AND ${f.type ? db`e.type = ${f.type}` : db`true`}
+    ORDER BY e.id DESC LIMIT ${f.limit ?? 100}`;
+}
+
+// ───────────────────────── 设备登记 ─────────────────────────
+
+const HOST_RE = /^[A-Za-z0-9.:-]{1,253}$/;
+const optionalText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .nullish()
+    .transform((v) => (v ? v : null));
+
+const DeviceFields = z.object({
+  name: z.string('请填写设备名称').trim().min(1, '请填写设备名称').max(40, '名称最多 40 个字'),
+  kind: z.enum(DEVICE_KINDS, '请选择设备种类'),
+  brand: z.string().trim().max(40, '品牌最多 40 个字').default(''),
+  model: z.string().trim().max(60, '型号最多 60 个字').default(''),
+  area: z.string('请选择区域').trim().min(1, '请选择区域').max(20, '区域最多 20 个字'),
+  connection: z.enum(DEVICE_CONNECTIONS, '请选择接法'),
+  host: optionalText(253).refine((v) => v === null || HOST_RE.test(v), 'IP 或主机名只能用字母、数字、「.」「-」「:」'),
+  port: z.number('端口必须是整数').int('端口必须是整数').min(1, '端口在 1 到 65535 之间').max(65535, '端口在 1 到 65535 之间').nullish().transform((v) => v ?? null),
+  /** 挂在哪台终端或打印服务器下（设备编号） */
+  hostDeviceCode: optionalText(32),
+  bridgeKey: optionalText(40).refine((v) => v === null || /^[a-z0-9][a-z0-9_-]{0,39}$/.test(v), '设备键用小写字母、数字、「_」「-」'),
+  options: z
+    .object({
+      paperWidth: z.union([z.literal(58), z.literal(80)]).optional(),
+      labelLanguage: z.enum(['tspl', 'escpos']).optional(),
+      labelWidthMm: z.number().int().min(10).max(120).optional(),
+      labelHeightMm: z.number().int().min(10).max(200).optional(),
+    })
+    .default({}),
+  note: z.string().trim().max(200, '备注最多 200 字').default(''),
+});
+const CreateInput = DeviceFields.extend({
+  clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
+  code: z
+    .string('请填写设备编号')
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z0-9][A-Z0-9-]{1,31}$/, '编号用大写字母、数字与「-」，2–32 位'),
+});
+const UpdateInput = DeviceFields.extend({ expectedVersion: z.number().int().positive() });
+const EnabledInput = z.object({ expectedVersion: z.number().int().positive(), enabled: z.boolean() });
+
+type Fields = z.infer<typeof DeviceFields>;
+
+/** 按种类与接法整理字段：用不上的清空；接法、所属设备、设备键对得上 */
+async function normalizeFields(db: Db, f: Fields, selfId: number | null) {
+  if (!DEVICE_KIND_CONNECTIONS[f.kind].includes(f.connection)) {
+    throw badRequest(`这种设备不能选「${f.connection}」接法`, { field: 'connection' });
+  }
+  const network = NETWORK_CONNECTIONS.includes(f.connection);
+  const host = network ? f.host : null;
+  const port = network ? (f.port ?? (host ? DEFAULT_PRINTER_PORT : null)) : null;
+  const bridgeKey = f.connection === 'bridge' ? (f.bridgeKey ?? (f.kind === 'scanner' ? 'scanner' : 'reader')) : null;
+  let hostDeviceId: number | null = null;
+  const wantsHost = f.connection === 'bridge' || f.connection === 'keyboard' || f.connection === 'print_server';
+  if (wantsHost && f.hostDeviceCode) {
+    const [h] = await db<{ id: number; kind: DeviceKind }[]>`SELECT id, kind FROM devices WHERE code = ${f.hostDeviceCode.toUpperCase()}`;
+    if (!h) throw badRequest(`没有编号为「${f.hostDeviceCode}」的设备`, { field: 'hostDeviceCode' });
+    const need: DeviceKind = f.connection === 'print_server' ? 'print_server' : 'terminal';
+    if (h.kind !== need) throw badRequest(f.connection === 'print_server' ? '「经打印服务器」要挂在打印服务器下' : '读卡、扫码要挂在终端下', { field: 'hostDeviceCode' });
+    if (selfId !== null && h.id === selfId) throw badRequest('不能挂在自己下面', { field: 'hostDeviceCode' });
+    hostDeviceId = h.id;
+  }
+  const options =
+    f.kind === 'printer' ? { paperWidth: f.options.paperWidth ?? 80 } : f.kind === 'label_printer' ? { labelLanguage: f.options.labelLanguage ?? 'tspl', labelWidthMm: f.options.labelWidthMm ?? 40, labelHeightMm: f.options.labelHeightMm ?? 30 } : {};
+  return { host, port, bridgeKey, hostDeviceId, options };
+}
+
+const uniqueToConflict = (error: unknown) => {
+  if (isUniqueViolation(error, 'devices_code_key')) return conflict('DEVICE_CODE_TAKEN', '这个设备编号已经有了，请换一个');
+  if (isUniqueViolation(error, 'devices_bridge_key_uq')) return conflict('BRIDGE_KEY_TAKEN', '这台终端下已经有同一个设备键，请换一个（如 rc300-2）');
+  return null;
+};
+
+async function statusEvent(tx: Tx, deviceId: number, data: Record<string, unknown>, staffId: number | null = null) {
+  await tx`INSERT INTO device_events (device_id, type, data, staff_id) VALUES (${deviceId}, 'status', ${tx.json(data as never)}, ${staffId})`;
+}
+
+export async function createDevice(deps: Deps, raw: unknown, ctx: OpContext): Promise<Device> {
+  const input = parse(CreateInput, raw);
+  const replay = async (db: Db) => {
+    const [p] = await db<{ id: number; code: string; kind: string }[]>`SELECT id, code, kind FROM devices WHERE client_key = ${input.clientKey}`;
+    if (!p) return null;
+    if (p.code !== input.code || p.kind !== input.kind) throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于登记另一台设备，请刷新页面后重新填写');
+    return Number(p.id);
+  };
+  const prior = await replay(deps.sql);
+  if (prior !== null) return getDevice(deps.sql, prior);
+  let id: number;
+  try {
+    id = await deps.sql.begin(async (tx) => {
+      // 与「确认作废」串行：已作废的编号整笔拒绝；同一编号的两次提交排队，后到的返回先到的那台
+      await assertNotFenced(tx, input.clientKey, 'device_create', erpOpAbandoned);
+      const again = await replay(tx);
+      if (again !== null) return again;
+      const n = await normalizeFields(tx, input, null);
+      const [row] = await tx<{ id: number }[]>`
+        INSERT INTO devices (code, name, kind, brand, model, area, connection, host, port, host_device_id, bridge_key, options, note, client_key, created_by)
+        VALUES (${input.code}, ${input.name}, ${input.kind}, ${input.brand}, ${input.model}, ${input.area}, ${input.connection}, ${n.host}, ${n.port},
+                ${n.hostDeviceId}, ${n.bridgeKey}, ${tx.json(n.options as never)}, ${input.note}, ${input.clientKey}, ${ctx.actor.id})
+        RETURNING id`;
+      const { clientKey: _k, ...created } = input;
+      await writeAudit(tx, { staffId: ctx.actor.id, action: 'device_created', targetType: 'device', targetId: row!.id, detail: { created }, ip: ctx.ip });
+      return Number(row!.id);
+    });
+  } catch (error) {
+    const c = uniqueToConflict(error);
+    if (isUniqueViolation(error, 'devices_client_key_key')) {
+      const again = await replay(deps.sql);
+      if (again !== null) return getDevice(deps.sql, again);
+    }
+    throw c ?? error;
+  }
+  return getDevice(deps.sql, id);
+}
+
+async function lockDevice(tx: Tx, id: number) {
+  const [row] = await tx<{ id: number; code: string; kind: DeviceKind; version: number; enabled: boolean; connection: string; host: string | null; port: number | null }[]>`
+    SELECT id, code, kind, version, enabled, connection, host, port FROM devices WHERE id = ${id} FOR UPDATE`;
+  if (!row) throw notFound('设备不存在');
+  return row;
+}
+
+const versionConflict = () => conflict('VERSION_CONFLICT', '这台设备刚被别人改过，请刷新后再改');
+
+export async function updateDevice(deps: Deps, id: number, raw: unknown, ctx: OpContext): Promise<Device> {
+  const input = parse(UpdateInput, raw);
+  try {
+    await deps.sql.begin(async (tx) => {
+      const cur = await lockDevice(tx, id);
+      if (cur.version !== input.expectedVersion) throw versionConflict();
+      if (cur.kind !== input.kind) throw badRequest('设备种类登记后不能改；登记错了请停用后另登记一台', { field: 'kind' });
+      const before = await getDevice(tx, id);
+      const n = await normalizeFields(tx, input, id);
+      // 接法、地址、所属终端变了：状态回到「未知」，等下一次心跳或上报
+      const moved = before.connection !== input.connection || before.host !== n.host || before.port !== n.port || before.hostDeviceId !== n.hostDeviceId || before.bridgeKey !== n.bridgeKey;
+      await tx`
+        UPDATE devices SET name = ${input.name}, brand = ${input.brand}, model = ${input.model}, area = ${input.area}, connection = ${input.connection},
+               host = ${n.host}, port = ${n.port}, host_device_id = ${n.hostDeviceId}, bridge_key = ${n.bridgeKey}, options = ${tx.json(n.options as never)},
+               note = ${input.note}, version = version + 1, updated_at = now(),
+               status = CASE WHEN ${moved} THEN 'unknown' ELSE status END,
+               status_code = CASE WHEN ${moved} THEN NULL ELSE status_code END,
+               status_changed_at = CASE WHEN ${moved} THEN now() ELSE status_changed_at END
+        WHERE id = ${id}`;
+      const { expectedVersion: _v, ...after } = input;
+      await writeAudit(tx, {
+        staffId: ctx.actor.id,
+        action: 'device_updated',
+        targetType: 'device',
+        targetId: id,
+        detail: { code: cur.code, before: { name: before.name, area: before.area, connection: before.connection, host: before.host, port: before.port, hostDeviceCode: before.hostDeviceCode, bridgeKey: before.bridgeKey, note: before.note }, after },
+        ip: ctx.ip,
+      });
+    });
+  } catch (error) {
+    throw uniqueToConflict(error) ?? error;
+  }
+  return getDevice(deps.sql, id);
+}
+
+export async function setDeviceEnabled(deps: Deps, id: number, raw: unknown, ctx: OpContext): Promise<Device> {
+  const input = parse(EnabledInput, raw);
+  await deps.sql.begin(async (tx) => {
+    const cur = await lockDevice(tx, id);
+    if (cur.version !== input.expectedVersion) throw versionConflict();
+    if (cur.enabled === input.enabled) return;
+    await tx`
+      UPDATE devices SET enabled = ${input.enabled}, version = version + 1, updated_at = now(),
+             status = 'unknown', status_code = NULL, status_changed_at = now()
+      WHERE id = ${id}`;
+    await statusEvent(tx, id, { enabled: input.enabled }, ctx.actor.id);
+    await writeAudit(tx, { staffId: ctx.actor.id, action: 'device_enabled', targetType: 'device', targetId: id, detail: { code: cur.code, enabled: input.enabled }, ip: ctx.ip });
+  });
+  return getDevice(deps.sql, id);
+}
+
+// ───────────────────────── 按采购清单导入 ─────────────────────────
+
+export async function importPreview(db: Db): Promise<DeviceImportPreview> {
+  const planned = plannedQuoteDevices();
+  const existing = new Set((await db<{ code: string }[]>`SELECT code FROM devices`).map((r) => r.code));
+  return {
+    create: planned.filter((p) => !existing.has(p.code)).map((p) => ({ code: p.code, name: p.name, kind: p.line.kind, model: p.line.model, area: p.area, catalogKey: p.line.key })),
+    skipped: planned.filter((p) => existing.has(p.code)).map((p) => p.code),
+    total: planned.length,
+  };
+}
+
+/**
+ * 按采购清单写入设备（编号已有的跳过，所以重复执行、没收到结果再点都只会补上缺的）。IP、端口、所属终端由现场在后台填。
+ * 全部导入串行（咨询锁）。
+ */
+export async function importDevices(db: Sql, actor: { id: number } | null, ip?: string): Promise<{ created: number; skipped: number }> {
+  return db.begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended('yuzu.devices.import', 0))`;
+    const planned = plannedQuoteDevices();
+    let created = 0;
+    for (const p of planned) {
+      const options = p.line.options ?? {};
+      const rows = await tx`
+        INSERT INTO devices (code, name, kind, brand, model, area, connection, bridge_key, options, catalog_key, note, created_by)
+        VALUES (${p.code}, ${p.name}, ${p.line.kind}, ${p.line.brand}, ${p.line.model}, ${p.area}, ${p.line.connection},
+                ${p.line.connection === 'bridge' ? (p.line.bridgeKey ?? 'reader') : null}, ${tx.json(options as never)}, ${p.line.key}, ${p.line.note ?? ''}, ${actor?.id ?? null})
+        ON CONFLICT (code) DO NOTHING RETURNING id`;
+      created += rows.length;
+    }
+    await writeAudit(tx, { staffId: actor?.id ?? null, action: 'devices_imported', targetType: 'device', detail: { created, skipped: planned.length - created, source: '采购清单 2025-12-17' }, ip });
+    return { created, skipped: planned.length - created };
+  }) as Promise<{ created: number; skipped: number }>;
+}
+
+// ───────────────────────── 状态 ─────────────────────────
+
+/**
+ * 记一次状态（心跳或终端上报）：联系上了（seen）就更新最近联系时间；状态或原因变了记一条设备事件。
+ * 只锁这台设备一行，不等业务锁。
+ */
+export async function recordStatus(db: Sql, id: number, status: DeviceStatus, code: DeviceErrorCode | null, opts: { seen: boolean; now?: Date }) {
+  const now = opts.now ?? new Date();
+  await db.begin(async (tx) => {
+    const [cur] = await tx<{ status: DeviceStatus; statusCode: string | null; enabled: boolean }[]>`
+      SELECT status, status_code, enabled FROM devices WHERE id = ${id} FOR UPDATE`;
+    if (!cur || !cur.enabled) return;
+    const changed = cur.status !== status || (cur.statusCode ?? null) !== code;
+    if (!changed && !opts.seen) return;
+    await tx`
+      UPDATE devices SET status = ${status}, status_code = ${code},
+             last_seen_at = CASE WHEN ${opts.seen} THEN ${now} ELSE last_seen_at END,
+             status_changed_at = CASE WHEN ${changed} THEN ${now} ELSE status_changed_at END
+      WHERE id = ${id}`;
+    if (changed) await statusEvent(tx, id, { from: cur.status, to: status, code, reason: code ? DEVICE_ERROR_LABELS[code] : null });
+  });
+}
+
+/** 正在打印的设备：心跳跳过它（多数打印机网口同时只接一个连接） */
+const busy = new Set<number>();
+/** 上一次心跳还没回来的设备：不重复发起 */
+const probing = new Set<number>();
+
+/**
+ * 心跳一轮：查所有启用的网口设备（连上就在线或故障，连不上且最近一次联系上已超过 5 秒记离线）；
+ * 终端与挂在终端下的设备超过 5 秒没上报记离线；没配好（没填 IP、没指定终端）的记「还没配好」。
+ */
+export async function checkDevicesOnce(deps: Pick<Deps, 'sql'>, now = new Date()): Promise<void> {
+  const { sql } = deps;
+  const rows = await sql<
+    { id: number; kind: DeviceKind; connection: string; host: string | null; port: number | null; hostDeviceId: number | null; options: { labelLanguage?: string }; status: DeviceStatus; statusCode: string | null; lastSeenAt: string | null }[]
+  >`SELECT id, kind, connection, host, port, host_device_id, options, status, status_code, last_seen_at FROM devices WHERE enabled`;
+  const stale = (seen: string | null) => !seen || now.getTime() - Date.parse(seen) > OFFLINE_AFTER_MS;
+  await Promise.all(
+    rows.map(async (d) => {
+      if (NETWORK_CONNECTIONS.includes(d.connection as never)) {
+        if (!d.host || !d.port) {
+          if (d.status !== 'unknown' || d.statusCode !== 'DEVICE_NOT_CONFIGURED') await recordStatus(sql, d.id, 'unknown', 'DEVICE_NOT_CONFIGURED', { seen: false, now });
+          return;
+        }
+        if (busy.has(d.id) || probing.has(d.id)) return;
+        probing.add(d.id);
+        try {
+          const mode = d.kind === 'print_server' ? 'connect' : d.kind === 'label_printer' && d.options.labelLanguage !== 'escpos' ? 'tspl' : 'escpos';
+          const r = await probe({ host: d.host, port: d.port }, mode);
+          if (r.reachable) await recordStatus(sql, d.id, r.code ? 'error' : 'online', r.code, { seen: true, now: new Date() });
+          else if (stale(d.lastSeenAt) && (d.status !== 'offline' || d.statusCode !== (r.code ?? 'DEVICE_OFFLINE'))) {
+            await recordStatus(sql, d.id, 'offline', r.code ?? 'DEVICE_OFFLINE', { seen: false, now });
+          }
+        } finally {
+          probing.delete(d.id);
+        }
+        return;
+      }
+      if (d.connection === 'bridge' && d.hostDeviceId === null) {
+        if (d.status !== 'unknown' || d.statusCode !== 'DEVICE_NOT_CONFIGURED') await recordStatus(sql, d.id, 'unknown', 'DEVICE_NOT_CONFIGURED', { seen: false, now });
+        return;
+      }
+      // 终端、挂在终端下的设备：靠开着页面的终端上报；联系过、超过 5 秒没上报记离线（没联系过的保持「未知」）
+      if ((d.kind === 'terminal' || d.connection === 'bridge') && d.lastSeenAt && stale(d.lastSeenAt) && d.status !== 'offline') {
+        await recordStatus(sql, d.id, 'offline', d.kind === 'terminal' ? 'DEVICE_OFFLINE' : 'BRIDGE_OFFLINE', { seen: false, now });
+      }
+    }),
+  );
+}
+
+// ───────────────────────── 终端替桥上报 ─────────────────────────
+
+const ReportInput = z.object({
+  terminal: z.string('缺少终端编号').trim().toUpperCase().min(1).max(32),
+  bridge: z.object({ connected: z.boolean(), version: z.string().max(32).optional() }),
+  devices: z.array(z.object({ key: z.string().min(1).max(40), status: z.enum(DEVICE_STATUSES), code: z.string().max(40).nullish() })).max(32).default([]),
+  events: z
+    .array(
+      z.object({
+        id: z.uuid('事件编号不正确'),
+        key: z.string().min(1).max(40),
+        type: z.enum(['card', 'scan', 'error']),
+        value: z.string().min(1).max(200),
+        at: z.string().refine((v) => !Number.isNaN(Date.parse(v)), '时间格式不对'),
+      }),
+    )
+    .max(50)
+    .default([]),
+});
+
+export async function reportBridge(deps: Deps, raw: unknown, ctx: OpContext): Promise<BridgeReportResult> {
+  const input = parse(ReportInput, raw);
+  const now = new Date();
+  return deps.sql.begin(async (tx) => {
+    // 锁顺序：终端一行 → 它下面的设备（id 升序）
+    const [terminal] = await tx<{ id: number; code: string; name: string; enabled: boolean; status: DeviceStatus; statusCode: string | null }[]>`
+      SELECT id, code, name, enabled, status, status_code FROM devices WHERE code = ${input.terminal} AND kind = 'terminal' FOR UPDATE`;
+    if (!terminal) throw notFound(`没有登记编号为「${input.terminal}」的终端`);
+    if (!terminal.enabled) throw unprocessable('DEVICE_DISABLED', `终端「${terminal.name}」已停用`);
+    const children = await tx<{ id: number; code: string; name: string; bridgeKey: string | null; enabled: boolean; status: DeviceStatus; statusCode: string | null }[]>`
+      SELECT id, code, name, bridge_key, enabled, status, status_code FROM devices WHERE host_device_id = ${terminal.id} AND connection = 'bridge' ORDER BY id FOR UPDATE`;
+    const setStatus = async (d: { id: number; status: DeviceStatus; statusCode: string | null }, status: DeviceStatus, code: DeviceErrorCode | null, seen: boolean) => {
+      const changed = d.status !== status || (d.statusCode ?? null) !== code;
+      await tx`
+        UPDATE devices SET status = ${status}, status_code = ${code},
+               last_seen_at = CASE WHEN ${seen} THEN ${now} ELSE last_seen_at END,
+               status_changed_at = CASE WHEN ${changed} THEN ${now} ELSE status_changed_at END
+        WHERE id = ${d.id}`;
+      if (changed) await statusEvent(tx, d.id, { from: d.status, to: status, code, reason: code ? DEVICE_ERROR_LABELS[code] : null, via: terminal.code }, ctx.actor.id);
+    };
+    await setStatus(terminal, 'online', null, true);
+    const matched: BridgeReportResult['matched'] = [];
+    for (const c of children) {
+      if (!c.enabled) continue;
+      const r = input.devices.find((x) => x.key === c.bridgeKey);
+      if (r) matched.push({ key: r.key, code: c.code, name: c.name });
+      if (!input.bridge.connected) await setStatus(c, 'offline', 'BRIDGE_OFFLINE', false);
+      else if (!r) await setStatus(c, 'offline', 'DEVICE_OFFLINE', false);
+      else {
+        const code = r.code && (DEVICE_ERROR_LABELS as Record<string, string>)[r.code] ? (r.code as DeviceErrorCode) : null;
+        await setStatus(c, r.status, r.status === 'online' ? null : code, r.status === 'online' || r.status === 'error');
+      }
+    }
+    const byKey = new Map(children.map((c) => [c.bridgeKey, c]));
+    const unknownKeys = [...new Set(input.devices.map((d) => d.key).filter((k) => !byKey.has(k)))];
+    let recorded = 0;
+    for (const e of input.events) {
+      // 登记里没有这个设备键的（如终端自带的 NFC）记在终端名下
+      const target = byKey.get(e.key) ?? terminal;
+      const rows = await tx`
+        INSERT INTO device_events (device_id, type, data, event_key, staff_id)
+        VALUES (${target.id}, ${e.type}, ${tx.json({ key: e.key, value: e.value, at: e.at, terminal: terminal.code } as never)}, ${e.id}, ${ctx.actor.id})
+        ON CONFLICT (event_key) DO NOTHING RETURNING id`;
+      recorded += rows.length;
+    }
+    return { terminal: { code: terminal.code, name: terminal.name }, matched, unknownKeys, recorded };
+  }) as Promise<BridgeReportResult>;
+}
+
+// ───────────────────────── 打印任务 ─────────────────────────
+
+const JobInput = z.object({ clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'), kind: z.enum(DEVICE_JOB_KINDS, '请选择打印内容') });
+
+const JOB_FOR_KIND: Partial<Record<DeviceKind, DeviceJobKind>> = { printer: 'test_page', label_printer: 'label_test' };
+
+/** 按台排队：同一台一次打一张（进程内的队列；应用只有一个进程） */
+const chains = new Map<number, Promise<void>>();
+
+export function enqueueJob(deps: Deps, jobId: number, deviceId: number, log?: (msg: string, err: unknown) => void) {
+  const prev = chains.get(deviceId) ?? Promise.resolve();
+  const next = prev
+    .then(() => runJob(deps, jobId))
+    .catch((err) => log?.(`打印任务 ${jobId} 出错`, err))
+    .finally(() => {
+      if (chains.get(deviceId) === next) chains.delete(deviceId);
+    });
+  chains.set(deviceId, next);
+}
+
+/** 等进程里排着的打印任务都处理完（测试与关闭应用时用） */
+export async function waitForDeviceJobs(): Promise<void> {
+  while (chains.size > 0) await Promise.all([...chains.values()]);
+}
+
+const formatTime = (at: Date, timeZone: string) =>
+  new Intl.DateTimeFormat('zh-CN', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+    .format(at)
+    .replace(/\//g, '-');
+
+async function runJob(deps: Deps, jobId: number) {
+  const { sql, config } = deps;
+  const [job] = await sql<{ id: number; deviceId: number; kind: DeviceJobKind }[]>`
+    UPDATE device_jobs SET status = 'sending', started_at = now() WHERE id = ${jobId} AND status = 'queued' RETURNING id, device_id, kind`;
+  if (!job) return;
+  const device = await getDevice(sql, job.deviceId);
+  busy.add(device.id);
+  try {
+    await sendJob(deps, jobId, job.kind, device);
+  } catch (error) {
+    // 拼指令、读设置出错（没开始发）：记失败，不留在「发送中」
+    await sql`
+      UPDATE device_jobs SET status = 'failed', error_code = 'DEVICE_FAULT', error_message = ${`打印任务出错：${(error as Error).message}`.slice(0, 300)}, finished_at = now()
+      WHERE id = ${jobId} AND status = 'sending'`;
+    throw error;
+  } finally {
+    busy.delete(device.id);
+  }
+}
+
+async function sendJob(deps: Deps, jobId: number, kind: DeviceJobKind, device: Device) {
+  const { sql, config } = deps;
+  {
+    const settings = await loadSettings(sql);
+    const info = {
+      storeName: settings.storeName,
+      instanceLabel: INSTANCE_LABELS[config.instance],
+      production: config.instance === 'prod',
+      version: config.version,
+      device: { code: device.code, name: device.name, area: device.area, model: device.model, host: device.host, port: device.port },
+      paperWidth: device.options.paperWidth,
+      printedAt: formatTime(new Date(), config.timezone),
+      jobId,
+    };
+    const data = kind === 'label_test' ? buildTestLabel({ ...info, ...device.options }) : buildTestPage(info);
+    const res =
+      device.host && device.port
+        ? await sendToPrinter({ host: device.host, port: device.port }, data)
+        : { ok: false, attempts: 0, errorCode: 'DEVICE_NOT_CONFIGURED' as DeviceErrorCode, errorMessage: DEVICE_ERROR_LABELS.DEVICE_NOT_CONFIGURED };
+    await sql`
+      UPDATE device_jobs SET status = ${res.ok ? 'done' : 'failed'}, attempts = ${res.attempts}, error_code = ${res.ok ? null : (res.errorCode ?? 'DEVICE_TIMEOUT')},
+             error_message = ${res.ok ? null : (res.errorMessage ?? '').slice(0, 300) || DEVICE_ERROR_LABELS[res.errorCode ?? 'DEVICE_TIMEOUT']}, finished_at = now()
+      WHERE id = ${jobId}`;
+    // 打成了就是联系上了（打印时心跳跳过这台）
+    if (res.ok) await recordStatus(sql, device.id, 'online', null, { seen: true });
+  }
+}
+
+/** 应用启动时：重启前还在发送的记失败（不自动重发，可能已打出一半），还在排队的接着打 */
+export async function recoverJobs(deps: Deps, log?: (msg: string, err: unknown) => void) {
+  await deps.sql`
+    UPDATE device_jobs SET status = 'failed', error_code = 'DEVICE_INTERRUPTED', error_message = '应用重启时这张还在发送，没有自动重发', finished_at = now()
+    WHERE status = 'sending'`;
+  const queued = await deps.sql<{ id: number; deviceId: number }[]>`SELECT id, device_id FROM device_jobs WHERE status = 'queued' ORDER BY id`;
+  for (const j of queued) enqueueJob(deps, j.id, j.deviceId, log);
+}
+
+export async function createJob(deps: Deps, deviceId: number, raw: unknown, ctx: OpContext, log?: (msg: string, err: unknown) => void): Promise<DeviceJob> {
+  const input = parse(JobInput, raw);
+  const replay = async (db: Db) => {
+    const [p] = await db<{ id: number; deviceId: number; kind: string }[]>`SELECT id, device_id, kind FROM device_jobs WHERE client_key = ${input.clientKey}`;
+    if (!p) return null;
+    if (Number(p.deviceId) !== deviceId || p.kind !== input.kind) throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一个打印任务，请刷新页面后重试');
+    return Number(p.id);
+  };
+  const prior = await replay(deps.sql);
+  if (prior !== null) return getJob(deps.sql, prior);
+  let created: { id: number; queued: boolean };
+  try {
+    created = await deps.sql.begin(async (tx) => {
+      await assertNotFenced(tx, input.clientKey, 'device_job', erpOpAbandoned);
+      const again = await replay(tx);
+      if (again !== null) return { id: again, queued: false };
+      // 先锁设备一行：同一台的任务串行登记
+      const d = await lockDevice(tx, deviceId);
+      if (!d.enabled) throw unprocessable('DEVICE_DISABLED', DEVICE_ERROR_LABELS.DEVICE_DISABLED);
+      if (JOB_FOR_KIND[d.kind] !== input.kind) throw unprocessable('DEVICE_UNSUPPORTED', DEVICE_ERROR_LABELS.DEVICE_UNSUPPORTED);
+      if (!NETWORK_CONNECTIONS.includes(d.connection as never) || !d.host || !d.port) throw unprocessable('DEVICE_NOT_CONFIGURED', DEVICE_ERROR_LABELS.DEVICE_NOT_CONFIGURED);
+      const [cur] = await tx<{ status: DeviceStatus }[]>`SELECT status FROM devices WHERE id = ${deviceId}`;
+      // 离线时不攒着等它恢复（断网打印队列在 v0.2）：直接记失败
+      const offline = cur!.status === 'offline';
+      const [row] = await tx<{ id: number }[]>`
+        INSERT INTO device_jobs (device_id, kind, status, client_key, created_by, error_code, error_message, finished_at)
+        VALUES (${deviceId}, ${input.kind}, ${offline ? 'failed' : 'queued'}, ${input.clientKey}, ${ctx.actor.id},
+                ${offline ? 'DEVICE_OFFLINE' : null}, ${offline ? `${DEVICE_ERROR_LABELS.DEVICE_OFFLINE}，没有发送` : null}, ${offline ? tx`now()` : null})
+        RETURNING id`;
+      await writeAudit(tx, { staffId: ctx.actor.id, action: 'device_job_created', targetType: 'device', targetId: deviceId, detail: { code: d.code, kind: input.kind, jobId: row!.id, offline }, ip: ctx.ip });
+      return { id: Number(row!.id), queued: !offline };
+    });
+  } catch (error) {
+    if (isUniqueViolation(error, 'device_jobs_client_key_key')) {
+      const again = await replay(deps.sql);
+      if (again !== null) return getJob(deps.sql, again);
+    }
+    throw error;
+  }
+  if (created.queued) enqueueJob(deps, created.id, deviceId, log);
+  return getJob(deps.sql, created.id);
+}
+
+// ───────────────────────── 接口 ─────────────────────────
+
+const JobsQuery = z.object({ deviceId: z.coerce.number().int().positive().optional(), limit: z.coerce.number().int().min(1).max(200).optional() });
+const EventsQuery = JobsQuery.extend({ type: z.enum(DEVICE_EVENT_TYPES).optional() });
+
+export function registerDeviceRoutes(app: FastifyInstance, deps: Deps) {
+  const { sql } = deps;
+  const ctxOf = (req: FastifyRequest): OpContext => ({ actor: req.actor, ip: req.ip });
+  const log = (msg: string, err: unknown) => app.log.error({ err }, msg);
+
+  app.get('/api/devices/overview', { preHandler: guard('device.view') }, async () => deviceOverview(sql));
+  app.get('/api/devices', { preHandler: guard('device.manage') }, async () => listDevices(sql));
+  app.post('/api/devices', { preHandler: guard('device.manage') }, async (req) => createDevice(deps, req.body, ctxOf(req)));
+  app.put('/api/devices/:id', { preHandler: guard('device.manage') }, async (req) => updateDevice(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
+  app.post('/api/devices/:id/enabled', { preHandler: guard('device.manage') }, async (req) => setDeviceEnabled(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
+  app.get('/api/devices/import', { preHandler: guard('device.manage') }, async () => importPreview(sql));
+  app.post('/api/devices/import', { preHandler: guard('device.manage') }, async (req) => importDevices(sql, req.actor, req.ip));
+  app.post('/api/devices/:id/jobs', { preHandler: guard('device.test') }, async (req) => createJob(deps, parse(idParam, req.params).id, req.body, ctxOf(req), log));
+  app.get('/api/devices/jobs', { preHandler: guard('device.view') }, async (req) => listJobs(sql, parse(JobsQuery, req.query ?? {})));
+  app.get('/api/devices/jobs/:id', { preHandler: guard('device.view') }, async (req) => getJob(sql, parse(idParam, req.params).id));
+  app.get('/api/devices/events', { preHandler: guard('device.manage') }, async (req) => listEvents(sql, parse(EventsQuery, req.query ?? {})));
+  app.post('/api/devices/bridge-report', { preHandler: guard('device.view') }, async (req) => reportBridge(deps, req.body, ctxOf(req)));
+}

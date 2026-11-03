@@ -111,7 +111,13 @@ export type AuditAction =
   | 'coupon_issued'
   | 'coupon_batch_created'
   | 'coupon_batch_exported'
-  | 'coupon_voided';
+  | 'coupon_voided'
+  // 硬件连接（RQ-001，v0.7.21）：设备登记、启用停用、按采购清单导入、打印任务
+  | 'device_created'
+  | 'device_updated'
+  | 'device_enabled'
+  | 'devices_imported'
+  | 'device_job_created';
 
 export interface AuditEntry {
   staffId: number | null;
