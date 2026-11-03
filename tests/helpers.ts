@@ -187,6 +187,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '042_member_discounts_trials.sql',
   '043_miniprogram.sql',
   '044_miniprogram_fences.sql',
+  '045_ticket_extension.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

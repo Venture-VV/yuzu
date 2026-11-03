@@ -28,7 +28,10 @@ import {
   discountDaysText,
   FESTIVAL_WINDOW_DAYS,
   MAX_DISCOUNT_RATE,
+  MAX_EXTENSION_MINUTES,
+  minutesText,
   MIN_DISCOUNT_RATE,
+  MIN_EXTENSION_MINUTES,
   rateText,
   MAX_BENEFIT_COUPONS,
   MAX_BENEFIT_LIMIT,
@@ -463,9 +466,10 @@ const BenefitInput = z.object({
   startGrade: gradeField.nullable(),
   startTier: tierField,
   period: z.enum(BENEFIT_PERIODS, '请选择周期'),
-  quantity: z.number('数量要是整数').int('数量要是整数').min(1, '数量至少 1').max(MAX_BENEFIT_LIMIT, `数量最多 ${MAX_BENEFIT_LIMIT}`).nullable(),
+  // 浴票延迟的分钟数最多 240，其余类别最多 99（按类别在 normalize 里核对）
+  quantity: z.number('数量要是整数').int('数量要是整数').min(1, '数量至少 1').max(MAX_EXTENSION_MINUTES, `数量最多 ${MAX_EXTENSION_MINUTES}`).nullable(),
   tierQuantities: z
-    .array(z.object({ grade: gradeField, tier: tierField, quantity: z.number('数量要是整数').int().min(1, '数量至少 1').max(MAX_BENEFIT_LIMIT, `数量最多 ${MAX_BENEFIT_LIMIT}`) }))
+    .array(z.object({ grade: gradeField, tier: tierField, quantity: z.number('数量要是整数').int().min(1, '数量至少 1').max(MAX_EXTENSION_MINUTES, `数量最多 ${MAX_EXTENSION_MINUTES}`) }))
     .max(18, '各档阶数量最多 18 行')
     .default([]),
   templateId: z.number().int().positive().nullable().default(null),
@@ -513,6 +517,16 @@ function normalize(input: BenefitInputData): Normalized {
     out.period = 'none';
     out.quantity = null;
     out.tierQuantities = [];
+  }
+  // 浴票延迟（v0.7.25 续）：起点与各档阶的分钟数（1–240），不计次；别的类别数量最多 99
+  if (b.category === 'extension') {
+    out.period = 'none';
+    const bad = (q: number) => q < MIN_EXTENSION_MINUTES || q > MAX_EXTENSION_MINUTES;
+    if (b.quantity !== null && bad(b.quantity)) throw issue(`浴票延迟填分钟数：${MIN_EXTENSION_MINUTES}–${MAX_EXTENSION_MINUTES}`, 'quantity');
+    if (b.tierQuantities.some((q) => bad(q.quantity))) throw issue(`各档阶的浴票延迟填分钟数：${MIN_EXTENSION_MINUTES}–${MAX_EXTENSION_MINUTES}`, 'tierQuantities');
+  } else {
+    if (b.quantity !== null && b.quantity > MAX_BENEFIT_LIMIT) throw issue(`数量最多 ${MAX_BENEFIT_LIMIT}`, 'quantity');
+    if (b.tierQuantities.some((q) => q.quantity > MAX_BENEFIT_LIMIT)) throw issue(`各档阶数量最多 ${MAX_BENEFIT_LIMIT}`, 'tierQuantities');
   }
   // 折扣类：「付几成」在数量与各档阶表里（10–99），打哪些明细、每周几、每月几号；别的类别没有这几项
   if (b.category === 'discount') {
@@ -564,6 +578,7 @@ async function publishProblems(db: Db, b: Normalized, today: string): Promise<st
     }
   }
   if (b.category === 'service' && b.period !== 'none' && b.quantity === null) problems.push('请填写每期几次');
+  if (b.category === 'extension' && b.quantity === null) problems.push('请填写起点多给几分钟不跳档（浴票延迟）');
   return problems;
 }
 
@@ -838,6 +853,7 @@ export async function memberBenefits(db: Db, memberId: number, date: string): Pr
         b.category === 'discount' && quantity !== null && b.discountTarget
           ? { rate: quantity, text: `结账时自动 · ${rateText(quantity)} · ${DISCOUNT_TARGET_LABELS[b.discountTarget]} · ${discountDaysText(b.weekdays, b.monthDays)}` }
           : null,
+      extension: b.category === 'extension' && quantity !== null ? { minutes: quantity, text: `结账时自动 · 门票多 ${minutesText(quantity)}不跳档` } : null,
     });
   }
   upcoming.sort((x, y) => {
@@ -904,7 +920,8 @@ export async function registerBenefitUse(deps: Deps, memberId: number, raw: unkn
       if (!b) throw notFound('权益不存在');
       if (b.status !== 'published') throw unprocessable('BENEFIT_UNAVAILABLE', `「${b.code} ${b.name}」${b.status === 'paused' ? '已暂缓' : '还没发布'}，不能登记`);
       if (b.category !== 'service') {
-        throw unprocessable('BENEFIT_NOT_SERVICE', `「${b.name}」是${BENEFIT_CATEGORY_LABELS[b.category]}，不用登记：${b.category === 'coupon' || b.category === 'event' ? '发的券在结账时用' : '只在清单里显示'}`);
+        const why = b.category === 'coupon' || b.category === 'event' ? '发的券在结账时用' : b.category === 'discount' || b.category === 'extension' ? '结账时自动算' : '只在清单里显示';
+        throw unprocessable('BENEFIT_NOT_SERVICE', `「${b.name}」是${BENEFIT_CATEGORY_LABELS[b.category]}，不用登记：${why}`);
       }
       // 赠送会籍（v0.7.25）：在会员详情的「邀请体验 / 赠送会籍」里赠送，同时登记一次使用；不单独登记（否则占了次数却没有给对方会籍）
       if (b.code === GIFT_BENEFIT_CODE) {

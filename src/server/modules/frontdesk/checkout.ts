@@ -67,6 +67,7 @@ import { applyVisitTicket, resolveTicketType } from './tickets';
 import { assertNoRefunds, listRefundsOf } from './refunds';
 import { CouponCodeInput, couponLines, memberCouponOptions, redeemCoupon, returnCheckoutCoupons, withTicketLines } from '../coupon-checkout';
 import { memberDiscountPreview, settleMemberDiscount, type MemberDiscountEntry } from '../member-discounts';
+import { memberTicketExtensions } from '../ticket-extensions';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -195,8 +196,13 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
           SELECT id, name, member_no, status, principal_balance, bonus_balance FROM members
           WHERE id IN ${tx(rows.flatMap((r) => (r.memberId ? [r.memberId] : [])))} ORDER BY id`
       : [];
+    const date = await businessDate(tx, deps, at);
+    // 浴票延迟（v0.7.25 续）：会员的门票在跳档宽限之上多给几分钟（按此刻推算的档阶，与结账时同一算法）
+    const extensions = await memberTicketExtensions(tx, rows.map((r) => r.memberId), date);
     const visits = rows.map((r) => {
-      const t = r.ticketTypeId !== null ? priceTicket({ price12h: r.price12h!, price24h: r.price24h! }, r.checkedInAt, ticketEnd(r, at), rules.overtimeGraceMinutes) : null;
+      const extension = r.memberId ? (extensions.get(Number(r.memberId)) ?? null) : null;
+      const graceMinutes = rules.overtimeGraceMinutes + (extension?.minutes ?? 0);
+      const t = r.ticketTypeId !== null ? priceTicket({ price12h: r.price12h!, price24h: r.price24h! }, r.checkedInAt, ticketEnd(r, at), graceMinutes) : null;
       return {
         visitId: r.id,
         visitNo: r.visitNo,
@@ -223,6 +229,8 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
               endAt: r.ticketEndAt ? new Date(r.ticketEndAt).toISOString() : null,
             }
           : null,
+        graceMinutes,
+        extension,
         needsTicket: r.ticketTypeId === null,
         amount: r.linesAmount + (t?.amount ?? 0),
       };
@@ -233,7 +241,6 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
       await couponLines(tx, rows.map((r) => r.billId)),
       visits.flatMap((v) => (v.ticket ? [{ visitId: v.visitId, typeId: v.ticket.typeId, name: v.ticket.name, amount: v.ticket.amount }] : [])),
     );
-    const date = await businessDate(tx, deps, at);
     const storeCoupons = await memberCouponOptions(tx, memberIds, couponBase, date);
     // 会员折扣（v0.7.25）：按会员本人账单上的明细加上此刻的门票算，省得最多的在前（没选券、优惠时第一项要带上）
     const memberDiscounts = await memberDiscountPreview(
@@ -497,9 +504,13 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
         tagCodes: missing.map((r) => r.tagCode),
       });
     }
+    const date = await businessDate(tx, deps, at);
+    // 浴票延迟（v0.7.25 续）：会员此刻的档阶多给几分钟不跳档（只读、不加锁；会员一行仍在下面的会员折扣里按 id 升序锁）
+    const extensions = await memberTicketExtensions(tx, rows.map((r) => r.memberId), date);
     const priced = rows.map((r) => {
-      const t = priceTicket({ price12h: r.price12h!, price24h: r.price24h! }, r.checkedInAt, ticketEnd(r, at), rules.overtimeGraceMinutes);
-      return { ...r, ticket: t, amount: r.linesAmount + t.amount };
+      const extension = r.memberId ? (extensions.get(Number(r.memberId)) ?? null) : null;
+      const t = priceTicket({ price12h: r.price12h!, price24h: r.price24h! }, r.checkedInAt, ticketEnd(r, at), rules.overtimeGraceMinutes + (extension?.minutes ?? 0));
+      return { ...r, ticket: t, extension, amount: r.linesAmount + t.amount };
     });
     const total = priced.reduce((s, r) => s + r.amount, 0);
     if (total !== input.expectedTotal) {
@@ -515,7 +526,6 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
       ? await consumeDiscountGrant(tx, { grantId: discounts[0].grantId, actor: ctx.actor, visitIds: ids, amount: discounts[0].amount, usedRef: `checkout:${key}` })
       : null;
 
-    const date = await businessDate(tx, deps, at);
     const checkoutNo = await nextDocNo(tx, 'checkout', 'JZ', date);
     const [c] = await tx<{ id: number }[]>`
       INSERT INTO checkouts (checkout_no, client_key, total_amount, paid_amount, note, business_date, operator_id, created_at, shift_id)
@@ -535,9 +545,10 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
         await tx`UPDATE bills SET amount_cents = amount_cents + ${r.ticket.amount}, line_count = line_count + 1 WHERE id = ${r.billId}`;
       }
       await tx`
-        INSERT INTO checkout_bills (checkout_id, bill_id, visit_id, amount, stay_minutes, ticket_type_id, ticket_name, ticket_segments, ticket_amount)
+        INSERT INTO checkout_bills (checkout_id, bill_id, visit_id, amount, stay_minutes, ticket_type_id, ticket_name, ticket_segments, ticket_amount,
+                                    ticket_extension_minutes, ticket_extension_benefit_id)
         VALUES (${checkoutId}, ${r.billId}, ${r.id}, ${r.amount}, ${r.ticket.stayMinutes}, ${r.ticketTypeId}, ${r.ticketName}, ${r.ticket.segments},
-                ${r.ticket.amount})`;
+                ${r.ticket.amount}, ${r.extension?.minutes ?? 0}, ${r.extension?.benefitId ?? null})`;
     }
 
     const tagCodes = priced.map((r) => r.tagCode);
@@ -575,7 +586,13 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
         tags: tagCodes,
         total,
         payments: input.payments.map((p) => ({ method: p.method, amount: p.amount })),
-        tickets: priced.map((r) => ({ tagCode: r.tagCode, ticket: r.ticketName, segments: r.ticket.segments, amount: r.ticket.amount })),
+        tickets: priced.map((r) => ({
+          tagCode: r.tagCode,
+          ticket: r.ticketName,
+          segments: r.ticket.segments,
+          amount: r.ticket.amount,
+          ...(r.extension ? { extension: { minutes: r.extension.minutes, benefitId: r.extension.benefitId, version: r.extension.version } } : {}),
+        })),
         ...(discount ? { discount: { amount: discounts[0]!.amount, reason: discount.reason, approverId: discount.approverId, approverName: discount.approverName } } : {}),
         ...(memberDiscount ? { memberDiscount: { memberId: memberDiscount.memberId, benefitId: memberDiscount.benefitId, rate: memberDiscount.rate, amount: memberDiscount.amount } } : {}),
         ...(usages.length ? { usages } : {}),
@@ -761,7 +778,7 @@ export async function getCheckout(db: Db, id: number): Promise<CheckoutDetail> {
   const bills = await db<CheckoutDetail['bills']>`
     SELECT cb.bill_id, b.bill_no, cb.visit_id, v.visit_no, t.code AS tag_code, cb.table_session_id, dt.name AS table_name, cb.guests,
            coalesce(m.name, tm.name) AS member_name, coalesce(v.guest_label, ts.guest_label, '') AS guest_label, cb.amount,
-           cb.stay_minutes, cb.ticket_name, cb.ticket_segments, cb.ticket_amount
+           cb.stay_minutes, cb.ticket_name, cb.ticket_segments, cb.ticket_amount, cb.ticket_extension_minutes
     FROM checkout_bills cb JOIN bills b ON b.id = cb.bill_id
     LEFT JOIN visits v ON v.id = cb.visit_id LEFT JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id
     LEFT JOIN table_sessions ts ON ts.id = cb.table_session_id LEFT JOIN dining_tables dt ON dt.id = ts.table_id

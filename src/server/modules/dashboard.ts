@@ -10,6 +10,7 @@ import { guard } from '../auth/guard';
 import type { Deps } from '../lib/context';
 import { loadFrontdeskRules } from './frontdesk/common';
 import { loadSettings } from './settings';
+import { memberTicketExtensions } from './ticket-extensions';
 
 async function dayNet(db: Db, date: string) {
   const [row] = await db<{ net: number; checkouts: number; rechargePaid: number }[]>`
@@ -26,16 +27,18 @@ export async function dashboard(db: Db, today: string, days: number, opts: { inS
   const [store] = await db<{ count: number; unsettled: number }[]>`
     SELECT count(*)::int AS count, coalesce(sum(b.amount_cents), 0) AS unsettled
     FROM visits v JOIN bills b ON b.id = v.bill_id WHERE v.status = 'open'`;
-  // 在店客人的门票按此刻（反结账后重结的按第一次结账的时刻）估算，与结账前核对同一算法；没选票种的不计入
+  // 在店客人的门票按此刻（反结账后重结的按第一次结账的时刻）估算，与结账前核对同一算法（含会员的浴票延迟，v0.7.25 续）；没选票种的不计入
   const { overtimeGraceMinutes } = await loadFrontdeskRules(db);
-  const open = await db<{ checkedInAt: string; price12h: number | null; price24h: number | null; ticketEndAt: string | null; now: string }[]>`
-    SELECT checked_in_at, ticket_price_12h AS price12h, ticket_price_24h AS price24h, ticket_end_at, now() AS now
+  const open = await db<{ checkedInAt: string; price12h: number | null; price24h: number | null; ticketEndAt: string | null; memberId: number | null; now: string }[]>`
+    SELECT checked_in_at, ticket_price_12h AS price12h, ticket_price_24h AS price24h, ticket_end_at, member_id, now() AS now
     FROM visits WHERE status = 'open'`;
+  const extensions = await memberTicketExtensions(db, open.map((v) => v.memberId), today);
   let ticketEstimate = 0;
   for (const v of open) {
     if (v.price12h === null || v.price24h === null) continue;
     const end = new Date(v.ticketEndAt ?? v.now);
-    ticketEstimate += priceTicket({ price12h: v.price12h, price24h: v.price24h }, v.checkedInAt, end, overtimeGraceMinutes).amount;
+    const extra = v.memberId ? (extensions.get(Number(v.memberId))?.minutes ?? 0) : 0;
+    ticketEstimate += priceTicket({ price12h: v.price12h, price24h: v.price24h }, v.checkedInAt, end, overtimeGraceMinutes + extra).amount;
   }
   const noTicket = open.filter((v) => v.price12h === null).length;
   const t = await dayNet(db, today);

@@ -1,18 +1,20 @@
 // 会员体系 v2 第二期（v0.7.24，docs/BENEFITS.md）：本店权益清单、谁能用、每期几张 / 几次。前后端共用。
 // 档阶按 19 个状态排序（L0 < L1·初 < L1·享 < L1·尊 < L2·初 … < L6·尊），会员现在的状态不低于配置起点就能用；
 // 同一项在不同档阶数量不同时按会员现在的档阶取那一行，不相加（PENDING_DECISIONS M30）。日期是营业日 YYYY-MM-DD。
-// 第三期（v0.7.25，docs/MEMBERSHIP_P3.md）：折扣类结账时自动算，「付几成」放在数量与各档阶表里（75 = 7.5 折）。
+// 第三期（v0.7.25，docs/MEMBERSHIP_P3.md）：折扣类结账时自动算，「付几成」放在数量与各档阶表里（75 = 7.5 折）；
+// 浴票延迟（第 4 节，迁移 045）结账时门票多给几分钟不跳档，分钟数也放在数量与各档阶表里。
 
 import { shiftDate } from './labels';
 import { TIER_LABELS, type Grade, type Tier } from './membership';
 
-export const BENEFIT_CATEGORIES = ['coupon', 'event', 'service', 'discount', 'info'] as const;
+export const BENEFIT_CATEGORIES = ['coupon', 'event', 'service', 'discount', 'extension', 'info'] as const;
 export type BenefitCategory = (typeof BENEFIT_CATEGORIES)[number];
 export const BENEFIT_CATEGORY_LABELS: Record<BenefitCategory, string> = {
   coupon: '券类',
   event: '事件礼',
   service: '服务与资格',
   discount: '折扣类',
+  extension: '浴票延迟',
   info: '制度说明',
 };
 /** 每类系统怎么做（后台、会员详情的说明） */
@@ -21,6 +23,7 @@ export const BENEFIT_CATEGORY_HINTS: Record<BenefitCategory, string> = {
   event: '首充、升档、升阶、保级、生日月、节日时自动发券，每项去重',
   service: '会员详情列在「本月可享」；设了次数的由服务的同事登记使用，到上限拒绝',
   discount: '结账时自动算：一张结账单只享一种会员折扣、不与券同用，自动用对客人最省的一种',
+  extension: '结账时自动算：会员的门票在「门票跳档宽限」之上再多给几分钟不跳档（按会员此刻的档阶，每个 12 小时的分界点都多给）',
   info: '只在清单里显示，不发放',
 };
 
@@ -36,6 +39,9 @@ export const DISCOUNT_TARGET_LABELS: Record<DiscountTarget, string> = { room: '�
 /** 折扣「付几成」：10 = 1 折 … 99 = 9.9 折 */
 export const MIN_DISCOUNT_RATE = 10;
 export const MAX_DISCOUNT_RATE = 99;
+/** 浴票延迟的分钟数（v0.7.25 续，迁移 045）：1–240 */
+export const MIN_EXTENSION_MINUTES = 1;
+export const MAX_EXTENSION_MINUTES = 240;
 /** 每周几：1 = 周一 … 7 = 周日 */
 export const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] as const;
 
@@ -136,7 +142,37 @@ export function quantityText(category: BenefitCategory, period: BenefitPeriod, q
   if (category === 'event') return quantity === null ? '—' : `每次 ${quantity} 张`;
   if (category === 'service') return period === 'none' || quantity === null ? '不限次' : `${BENEFIT_PERIOD_LABELS[period]} ${quantity} 次`;
   if (category === 'discount') return quantity === null ? '未填折扣' : rateText(quantity);
+  if (category === 'extension') return quantity === null ? '未填分钟数' : `多 ${minutesText(quantity)}不跳档`;
   return '—';
+}
+
+/** 30 →「30 分钟」，60 →「1 小时」，90 →「1 小时 30 分钟」 */
+export function minutesText(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m} 分钟`;
+  return m === 0 ? `${h} 小时` : `${h} 小时 ${m} 分钟`;
+}
+
+/**
+ * 浴票延迟（v0.7.25 续，MEMBERSHIP_P3 第 4 节）：这位会员（档阶已取自己的与临时身份高的）能享的几项里分钟数最多的一项（不相加，M64）；
+ * 分钟数相同时按清单顺序。不享的为空
+ */
+export function ticketExtensionFor<B extends BenefitTerms & { id: number; sortOrder: number }>(
+  defs: readonly B[],
+  grade: number,
+  tier: number | null,
+): { benefit: B; minutes: number } | null {
+  let best: { benefit: B; minutes: number } | null = null;
+  for (const d of defs) {
+    if (!benefitEligible(d, grade, tier)) continue;
+    const minutes = benefitQuantity(d, grade, tier);
+    if (minutes === null || minutes < MIN_EXTENSION_MINUTES || minutes > MAX_EXTENSION_MINUTES) continue;
+    if (best === null || minutes > best.minutes || (minutes === best.minutes && (d.sortOrder < best.benefit.sortOrder || (d.sortOrder === best.benefit.sortOrder && d.id < best.benefit.id)))) {
+      best = { benefit: d, minutes };
+    }
+  }
+  return best;
 }
 
 // ───────────────────────── 折扣类（v0.7.25，docs/MEMBERSHIP_P3.md 第 2 节） ─────────────────────────
@@ -216,7 +252,7 @@ const monthlyCoupon = (code: string, name: string, start: string, content: strin
 const eventGift = (code: string, name: string, start: string, content: string, conditions: string, events: BenefitEvent[]): CatalogEntry => ({
   code, name, start, content, conditions, category: 'event', period: 'none', quantity: 1, events, status: 'draft',
 });
-const listed = (category: 'discount' | 'info', code: string, name: string, start: string, content: string, conditions: string): CatalogEntry => ({
+const listed = (category: 'discount' | 'extension' | 'info', code: string, name: string, start: string, content: string, conditions: string): CatalogEntry => ({
   code, name, start, content, conditions, category, period: 'none', quantity: null, events: [], status: 'draft',
 });
 
@@ -228,7 +264,8 @@ export const BENEFIT_CATALOG: readonly CatalogEntry[] = [
   service('QY-001', '会员专属通道', 'L2·初', '入场、领手牌及结账会员专属通道。', '实际开放和适用节点待明确。'),
   service('QY-002', '高峰优先入场', 'L3·初', '高峰、节假日优先入场。', '按会员档位及现场可用资源，具体规则待公布。'),
   service('QY-003', '免预约入场', 'L2·初', '入场及部分服务优先排号。', '包房、技师等仍受资源限制，不能推定所有项目免预约。'),
-  service('QY-004', '浴票延迟', 'L1·尊', '浴票延迟：初阶30分钟、享阶1小时、尊阶1.5—2小时。', '档位与延迟梯度需最终确认；不能使用福田8小时规则替代。'),
+  // 浴票延迟（v0.7.25 续，M50）：结账时自动算；文档的起点与梯度对不上，不预填分钟数，店主填好各档阶的分钟数再发布
+  listed('extension', 'QY-004', '浴票延迟', 'L1·尊', '浴票延迟：初阶30分钟、享阶1小时、尊阶1.5—2小时。', '档位与延迟梯度需最终确认；不能使用福田8小时规则替代。'),
   monthlyCoupon('QY-005', '免费浴资次数', 'L1·初', '年度免费浴资券。', '各档张数、券种、是否含餐及期限待明确。', 'year'),
   service('QY-006', '通用VIP柜（VIP更衣区）', 'L3·初', '通用VIP更衣柜及配套更衣、淋浴、梳妆使用权。', '已决策3万元起；高峰排队，不预约。'),
   service('QY-007', 'VIP固定专属专柜', 'L6·初', '固定编号专属柜及姓名牌。', '资料存在10万元可申请与30万元L6专属冲突；限量，门槛和期限待确认。'),
@@ -385,6 +422,8 @@ export interface MemberBenefitItem {
   events: BenefitEvent[];
   /** 折扣类（v0.7.25）：这位会员的折扣与适用说明（「结账时自动 · 6.5 折 · 客房房费 · 每天」） */
   discount: { rate: number; text: string } | null;
+  /** 浴票延迟（v0.7.25 续）：这位会员此刻多给几分钟不跳档 */
+  extension: { minutes: number; text: string } | null;
 }
 
 export interface BenefitGrantRow {

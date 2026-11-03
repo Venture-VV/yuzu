@@ -20,7 +20,10 @@ import {
   MAX_BENEFIT_COUPONS,
   MAX_BENEFIT_LIMIT,
   MAX_DISCOUNT_RATE,
+  MAX_EXTENSION_MINUTES,
+  minutesText,
   MIN_DISCOUNT_RATE,
+  MIN_EXTENSION_MINUTES,
   quantityText,
   rateText,
   WEEKDAY_LABELS,
@@ -194,7 +197,9 @@ function BenefitsEditor() {
                         <span className="whitespace-nowrap">{quantityText(b.category, b.period, b.quantity)}</span>
                         {b.tierQuantities.length > 0 && (
                           <span className="block text-[12px] text-ink-3">
-                            {b.tierQuantities.map((t) => `${startLabel(t.grade, t.tier)} 起 ${cat === 'discount' ? rateText(t.quantity) : t.quantity}`).join('；')}
+                            {b.tierQuantities
+                              .map((t) => `${startLabel(t.grade, t.tier)} 起 ${cat === 'discount' ? rateText(t.quantity) : cat === 'extension' ? minutesText(t.quantity) : t.quantity}`)
+                              .join('；')}
                           </span>
                         )}
                       </td>
@@ -319,10 +324,12 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
   const set = (patch: Partial<Draft>) => setDraft({ ...draft, ...patch });
   const couponLike = draft.category === 'coupon' || draft.category === 'event';
   const isDiscount = draft.category === 'discount';
+  // 浴票延迟（v0.7.25 续）的「数量」是多给的分钟数：起点的与各档阶的
+  const isExtension = draft.category === 'extension';
   // 折扣类的「数量」是付几成（v0.7.25）：起点的折扣与各档阶的折扣
-  const counted = couponLike || isDiscount || (draft.category === 'service' && draft.period !== 'none');
-  const minQty = isDiscount ? MIN_DISCOUNT_RATE : 1;
-  const maxQty = couponLike ? MAX_BENEFIT_COUPONS : isDiscount ? MAX_DISCOUNT_RATE : MAX_BENEFIT_LIMIT;
+  const counted = couponLike || isDiscount || isExtension || (draft.category === 'service' && draft.period !== 'none');
+  const minQty = isDiscount ? MIN_DISCOUNT_RATE : isExtension ? MIN_EXTENSION_MINUTES : 1;
+  const maxQty = couponLike ? MAX_BENEFIT_COUPONS : isDiscount ? MAX_DISCOUNT_RATE : isExtension ? MAX_EXTENSION_MINUTES : MAX_BENEFIT_LIMIT;
   // 选得到的券：启用的、没过期的，加上现在用的那张（停用了也列出来，方便看清）
   const templates = [...catalog.templates];
   if (benefit.templateId !== null && !templates.some((t) => t.id === benefit.templateId)) {
@@ -335,13 +342,21 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
     const start = draft.start ? parseState(draft.start) : null;
     const quantity = counted ? (draft.quantity.trim() ? intOf(draft.quantity) : null) : null;
     if (quantity !== null && (Number.isNaN(quantity) || quantity < minQty || quantity > maxQty)) {
-      return setError(isDiscount ? `折扣填「付几成」：${minQty}–${maxQty} 的整数（75 = 7.5 折）` : `数量要是 1–${maxQty} 的整数`);
+      return setError(
+        isDiscount ? `折扣填「付几成」：${minQty}–${maxQty} 的整数（75 = 7.5 折）` : isExtension ? `浴票延迟填分钟数：${minQty}–${maxQty} 的整数` : `数量要是 1–${maxQty} 的整数`,
+      );
     }
     const tierQuantities: TierQuantity[] = [];
     for (const t of counted ? draft.tiers : []) {
       const n = intOf(t.quantity);
       if (!t.state || Number.isNaN(n) || n < minQty || n > maxQty) {
-        return setError(isDiscount ? `各档阶的折扣：请选档阶，折扣是 ${minQty}–${maxQty} 的整数（75 = 7.5 折）` : `各档阶数量：请选档阶，数量是 1–${maxQty} 的整数`);
+        return setError(
+          isDiscount
+            ? `各档阶的折扣：请选档阶，折扣是 ${minQty}–${maxQty} 的整数（75 = 7.5 折）`
+            : isExtension
+              ? `各档阶的浴票延迟：请选档阶，分钟数是 ${minQty}–${maxQty} 的整数`
+              : `各档阶数量：请选档阶，数量是 1–${maxQty} 的整数`,
+        );
       }
       tierQuantities.push({ ...parseState(t.state), quantity: n });
     }
@@ -453,18 +468,32 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
         )}
         {counted && (
           <Field
-            label={draft.category === 'coupon' ? '每期几张' : draft.category === 'event' ? '每次几张' : isDiscount ? '起点的折扣（付几成）' : '每期几次'}
+            label={
+              draft.category === 'coupon' ? '每期几张' : draft.category === 'event' ? '每次几张' : isDiscount ? '起点的折扣（付几成）' : isExtension ? '起点多给几分钟（不跳档）' : '每期几次'
+            }
             htmlFor="benefit-quantity"
-            hint={draft.category === 'service' ? '到上限后不能再登记' : isDiscount ? `${MIN_DISCOUNT_RATE}–${MAX_DISCOUNT_RATE}：75 = 7.5 折，50 = 5 折` : `最多 ${MAX_BENEFIT_COUPONS} 张`}
+            hint={
+              draft.category === 'service'
+                ? '到上限后不能再登记'
+                : isDiscount
+                  ? `${MIN_DISCOUNT_RATE}–${MAX_DISCOUNT_RATE}：75 = 7.5 折，50 = 5 折`
+                  : isExtension
+                    ? `${MIN_EXTENSION_MINUTES}–${MAX_EXTENSION_MINUTES} 分钟，在「门票跳档宽限」之上多给；每个 12 小时的分界点都多给`
+                    : `最多 ${MAX_BENEFIT_COUPONS} 张`
+            }
           >
             <Input id="benefit-quantity" inputMode="numeric" value={draft.quantity} onChange={(e) => set({ quantity: e.target.value })} data-testid="benefit-quantity" />
           </Field>
         )}
         {counted && (
           <div className="sm:col-span-2">
-            <p className="text-[13px] font-semibold text-ink-2">{isDiscount ? '各档阶的折扣（可选）' : '各档阶数量（可选）'}</p>
+            <p className="text-[13px] font-semibold text-ink-2">{isDiscount ? '各档阶的折扣（可选）' : isExtension ? '各档阶多给几分钟（可选）' : '各档阶数量（可选）'}</p>
             <p className="text-[12.5px] text-ink-3">
-              {isDiscount ? '高档阶折扣更低：从这个档阶起按这一行（付几成），按会员现在的档阶取一行。' : '高档阶多给：从这个档阶起按这一行，按会员现在的档阶取一行、不相加。'}
+              {isDiscount
+                ? '高档阶折扣更低：从这个档阶起按这一行（付几成），按会员现在的档阶取一行。'
+                : isExtension
+                  ? '从这个档阶起按这一行的分钟数，按会员现在的档阶（含体验中的临时身份）取一行、不相加。'
+                  : '高档阶多给：从这个档阶起按这一行，按会员现在的档阶取一行、不相加。'}
             </p>
             <div className="mt-2 space-y-2">
               {draft.tiers.map((t, i) => (

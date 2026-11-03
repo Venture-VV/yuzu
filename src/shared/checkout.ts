@@ -230,6 +230,15 @@ export const COUPON_CODE_PATTERN = /^[0-9A-Z]{6,64}$/;
 // ───────────── 接口返回 ─────────────
 
 /** 结账前核对：所选手牌的账单与按当前时刻计算的门票 */
+/** 浴票延迟（v0.7.25 续，MEMBERSHIP_P3 第 4 节）：会员的门票在「门票跳档宽限」之上多给的分钟数与按哪一项权益 */
+export interface TicketExtension {
+  minutes: number;
+  benefitId: number;
+  code: string;
+  name: string;
+  version: number;
+}
+
 export interface CheckoutPreview {
   visits: {
     visitId: number;
@@ -257,6 +266,10 @@ export interface CheckoutPreview {
       /** 反结账后重结：门票按第一次结账的时刻计算，不再随时间跳档；平时为 null */
       endAt: string | null;
     } | null;
+    /** 这位客人跳档用的宽限（分钟）：「门票跳档宽限」+ 会员的浴票延迟（v0.7.25 续）；还没选票种时页面按它先算 */
+    graceMinutes: number;
+    /** 会员的浴票延迟（v0.7.25 续）：多给几分钟不跳档、按哪一项；没有为 null */
+    extension: TicketExtension | null;
     /** 还没有选票种（Batch 3 之前开的牌） */
     needsTicket: boolean;
     amount: number;
@@ -268,6 +281,7 @@ export interface CheckoutPreview {
   storeCoupons?: import('./coupons').CheckoutCouponOption[];
   /** 能享的会员折扣（v0.7.25），省得多的在前；没选券、优惠时第一项必须带上 */
   memberDiscounts?: MemberDiscountOption[];
+  /** 「门票跳档宽限」（不含会员的浴票延迟；每位客人用的见 visits[].graceMinutes） */
   graceMinutes: number;
   pricedAt: string;
   /** 钟房里还没结束的钟单（v0.7.1）：结账时一起收尾，在钟上的下钟，还没上钟的按已做完记 */
@@ -334,6 +348,8 @@ export interface CheckoutDetail {
     ticketName: string | null;
     ticketSegments: number | null;
     ticketAmount: number | null;
+    /** 会员的浴票延迟（v0.7.25 续）：门票多给了几分钟不跳档（没有为 0） */
+    ticketExtensionMinutes: number;
   }[];
   payments: CheckoutPayment[];
   /** 本次结账后同行组里仍在店的手牌 */

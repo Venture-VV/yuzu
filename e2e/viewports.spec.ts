@@ -56,7 +56,7 @@ test.describe('视口冒烟', () => {
     await page.goto('/dashboard');
     await expect(page.getByRole('heading', { name: '经营看板' })).toBeVisible();
     const board = page.getByTestId('dashboard');
-    // R1.2 起指标卡是「今日净营业额（应收 − 优惠）」，v0.7.20 起「今日净营业额（应收 − 优惠 − 券抵扣 − 退款）」
+    // R1.2 起指标卡是「今日净营业额（应收 − 优惠）」，v0.7.20 起「…− 券抵扣 − 退款）」，v0.7.25 起「今日净营业额（应收 − 优惠 − 券抵扣 − 会员折扣 − 退款）」
     await expect(board).toContainText('今日净营业额');
     await expect(board).toContainText('今日收款构成');
     await expect(board).toContainText('当班中');

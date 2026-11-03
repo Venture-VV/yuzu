@@ -15,6 +15,7 @@ import type { Deps, OpContext } from '../../lib/context';
 import { badRequest, conflict, notFound, unprocessable } from '../../lib/errors';
 import { cents, parse } from '../../lib/validate';
 import { assertOpen, businessDate, loadFrontdeskRules, lockVisits, setTxTimeouts } from './common';
+import { memberTicketExtensions } from '../ticket-extensions';
 
 export async function listTicketTypes(db: Db, all = false): Promise<TicketType[]> {
   return db<TicketType[]>`
@@ -167,16 +168,20 @@ export async function applyVisitTicket(
             ${approval?.approverId ?? null}, ${approval?.reason ?? null})`;
 }
 
-/** 来访详情里的门票：按留存的票价与当前时刻计算 */
-export async function visitTicket(db: Db, visitId: number, at: Date): Promise<VisitDetail['ticket']> {
-  const [v] = await db<{ typeId: number | null; name: string | null; price12h: number | null; price24h: number | null; checkedInAt: string; ticketEndAt: string | null }[]>`
-    SELECT v.ticket_type_id AS type_id, t.name, v.ticket_price_12h AS price12h, v.ticket_price_24h AS price24h, v.checked_in_at, v.ticket_end_at
+/**
+ * 来访详情里的门票：按留存的票价与当前时刻计算。
+ * 会员的浴票延迟（v0.7.25 续）按营业日 date 的档阶（来访详情用接待那一天，与档阶徽标一致）；结账时按结账那一刻重新算
+ */
+export async function visitTicket(db: Db, visitId: number, at: Date, date: string): Promise<VisitDetail['ticket']> {
+  const [v] = await db<{ typeId: number | null; name: string | null; price12h: number | null; price24h: number | null; checkedInAt: string; ticketEndAt: string | null; memberId: number | null }[]>`
+    SELECT v.ticket_type_id AS type_id, t.name, v.ticket_price_12h AS price12h, v.ticket_price_24h AS price24h, v.checked_in_at, v.ticket_end_at, v.member_id
     FROM visits v LEFT JOIN ticket_types t ON t.id = v.ticket_type_id WHERE v.id = ${visitId}`;
   if (!v || v.typeId === null) return null;
   const rules = await loadFrontdeskRules(db);
   const prices = { price12h: v.price12h!, price24h: v.price24h! };
+  const extension = v.memberId ? ((await memberTicketExtensions(db, [Number(v.memberId)], date)).get(Number(v.memberId)) ?? null) : null;
   // 反结账后重结：门票计到第一次结账的时刻
-  const p = priceTicket(prices, v.checkedInAt, v.ticketEndAt ? new Date(v.ticketEndAt) : at, rules.overtimeGraceMinutes);
+  const p = priceTicket(prices, v.checkedInAt, v.ticketEndAt ? new Date(v.ticketEndAt) : at, rules.overtimeGraceMinutes + (extension?.minutes ?? 0));
   return {
     typeId: v.typeId,
     name: v.name!,
@@ -187,5 +192,6 @@ export async function visitTicket(db: Db, visitId: number, at: Date): Promise<Vi
     nextJumpAt: p.nextJumpAt,
     nextAmount: p.nextAmount,
     endAt: v.ticketEndAt ? new Date(v.ticketEndAt).toISOString() : null,
+    extension,
   };
 }

@@ -7,7 +7,7 @@
 
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BadgePercent, CalendarHeart, CheckCircle2, ChevronDown, Gift, Sparkles, Ticket } from 'lucide-react';
+import { BadgePercent, CalendarHeart, CheckCircle2, ChevronDown, Gift, Sparkles, Ticket, Timer } from 'lucide-react';
 import {
   BENEFIT_CATEGORY_LABELS,
   BENEFIT_EVENT_LABELS,
@@ -58,6 +58,7 @@ export function BenefitsCard({ member }: { member: MemberDetail }) {
   const services = group('service');
   const infos = group('info');
   const discounts = group('discount');
+  const extensions = group('extension');
   const canVoid = (u: BenefitUseRow) => u.status === 'active' && (can('benefit.publish') || (u.staffId === session.staff.id && u.businessDate === session.today));
   const voidUse = async (reason: string) => {
     if (!voiding) return;
@@ -158,6 +159,16 @@ export function BenefitsCard({ member }: { member: MemberDetail }) {
                 <div key={i.benefitId} className="py-1.5" data-testid={`member-benefit-${i.code}`}>
                   <p className="text-[13.5px] font-semibold text-ink">{i.name}</p>
                   <p className="text-[12.5px] text-ink-3">{i.discount?.text ?? '结账时自动'}</p>
+                </div>
+              ))}
+            </Group>
+          )}
+          {extensions.length > 0 && (
+            <Group icon={<Timer className="size-4 text-lake" />} title={BENEFIT_CATEGORY_LABELS.extension} hint="手牌结账时自动算：门票在跳档宽限之上多给几分钟不跳档">
+              {extensions.map((i) => (
+                <div key={i.benefitId} className="py-1.5" data-testid={`member-benefit-${i.code}`}>
+                  <p className="text-[13.5px] font-semibold text-ink">{i.name}</p>
+                  <p className="text-[12.5px] text-ink-3">{i.extension?.text ?? '结账时自动'}</p>
                 </div>
               ))}
             </Group>

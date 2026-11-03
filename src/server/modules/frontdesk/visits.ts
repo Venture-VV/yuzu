@@ -736,7 +736,7 @@ export async function getVisit(db: Db, id: number): Promise<VisitDetail> {
     memberGrade,
     vipOverrideByName: v.vipOverrideByName,
     backfill,
-    ticket: await visitTicket(db, v.id, v.closedAt ? new Date(v.closedAt) : new Date(now!.now)),
+    ticket: await visitTicket(db, v.id, v.closedAt ? new Date(v.closedAt) : new Date(now!.now), v.businessDate),
     checkout: lastCheckout ? { id: lastCheckout.id, checkoutNo: lastCheckout.checkoutNo, status: lastCheckout.status } : null,
     bill: { id: v.billId, billNo: v.billNo, status: v.billStatus, amountCents: v.amountCents, lineCount: v.lineCount },
     lines,

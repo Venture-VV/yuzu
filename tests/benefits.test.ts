@@ -137,17 +137,19 @@ describe('权益清单', () => {
     expect(c.items.filter((b) => b.status === 'paused').map((b) => b.code).sort()).toEqual(['QY-035', 'QY-048', 'QY-050', 'QY-057']);
     expect(c.items.filter((b) => b.status === 'published')).toHaveLength(0);
     const count = (cat: string) => c.items.filter((b) => b.category === cat).length;
-    expect({ coupon: count('coupon'), event: count('event'), discount: count('discount'), info: count('info'), service: count('service') }).toEqual({
+    // QY-004 浴票延迟（v0.7.25 续，迁移 045）归「浴票延迟」类，不再是服务与资格
+    expect({ coupon: count('coupon'), event: count('event'), discount: count('discount'), extension: count('extension'), info: count('info'), service: count('service') }).toEqual({
       coupon: 11,
       event: 5,
       discount: 4,
+      extension: 1,
       info: 1,
-      service: 38,
+      service: 37,
     });
     expect(c.items.find((b) => b.code === 'QY-005')).toMatchObject({ category: 'coupon', period: 'year', quantity: 1, startLabel: 'L1·初' });
     expect(c.items.find((b) => b.code === 'QY-052')).toMatchObject({ category: 'event', events: ['grade_up', 'tier_up'], startLabel: 'L0·会员' });
     expect(c.items.find((b) => b.code === 'P021')).toMatchObject({ startGrade: null, startLabel: '未配置' });
-    expect(c.items.find((b) => b.code === 'QY-004')).toMatchObject({ startGrade: 1, startTier: 2, content: '浴票延迟：初阶30分钟、享阶1小时、尊阶1.5—2小时。' });
+    expect(c.items.find((b) => b.code === 'QY-004')).toMatchObject({ category: 'extension', quantity: null, startGrade: 1, startTier: 2, content: '浴票延迟：初阶30分钟、享阶1小时、尊阶1.5—2小时。' });
   });
 
   it('发布要条件齐全：券类要券模板；折扣类要适用明细与折扣（QY-011 按会员文档预填）；没配置起点的不能发布；版本号对不上拒绝', async () => {
