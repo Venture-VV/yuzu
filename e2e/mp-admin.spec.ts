@@ -1,7 +1,8 @@
 // 后台「微信小程序」（小程序线，docs/MINIPROGRAM.md 第 5 节）浏览器验收：
 //   ① 对顾客开放的开关（打开再关上）；② 改宝安店的营业时间；③ 新建一张首页轮播（上传图片）再停用；
 //   ④ 给一个价目项目写介绍；⑤ 找会员看微信绑定（演示库里没有绑定，只核对空状态）；
-//   ⑥ 新建轮播结果待确认：回复丢了自动查回、没送到时确认作废或按原内容重新提交（都只建一张）。
+//   ⑥ 新建轮播结果待确认：回复丢了自动查回、没送到时确认作废或按原内容重新提交（都只建一张）；
+//   ⑦ 解绑结果待确认（拦下接口、用假的绑定，只测页面的处理）。
 // 依赖 seed-demo（仅独立演示库）。账号：店主 linlan，密码 yuzu2026。每次的标题带时间，结束时把开关关上、轮播停用，可重复执行。
 import { expect, test, type Page } from '@playwright/test';
 
@@ -153,6 +154,68 @@ test.describe('后台「微信小程序」（小程序线）', () => {
         });
       }
     }
+  });
+
+  test('解绑结果待确认：没收到结果时保留（刷新后也在）、按原内容重新提交、查回已解绑后移除', async ({ page }) => {
+    // 演示库里没有真的绑定（CI 不开小程序端口）：拦下绑定记录与解绑接口，用一条假的绑定只测页面的处理，不碰数据
+    await login(page, 'linlan');
+    const [m] = (await (await page.request.get(`/api/members?q=${encodeURIComponent('沈')}&limit=1`)).json()) as { id: number; phone: string }[];
+    const state: Record<number, boolean> = { 990001: false, 990002: false };
+    const row = (id: number) => ({
+      id,
+      openidTail: `e2e${id % 1000}`,
+      phone: m!.phone,
+      mock: true,
+      boundAt: new Date().toISOString(),
+      unboundAt: state[id] ? new Date().toISOString() : null,
+      unboundByName: state[id] ? '林岚' : null,
+      unbindReason: state[id] ? 'E2E 换手机号' : null,
+    });
+    await page.route(`**/api/admin/mp/members/${m!.id}/bindings`, (route) => route.fulfill({ json: [row(990001), row(990002)] }));
+    let unbindReply: 'lost' | 'ok' = 'lost';
+    await page.route('**/api/admin/mp/bindings/*/unbind', async (route) => {
+      const id = Number(new URL(route.request().url()).pathname.split('/')[5]);
+      if (unbindReply === 'lost') return route.abort('connectionreset');
+      state[id] = true;
+      return route.fulfill({ json: row(id) });
+    });
+    const openBindings = async () => {
+      await page.getByRole('radio', { name: '会员的微信' }).click();
+      await page.getByTestId('mp-bindings-search').fill('沈');
+      await page.getByRole('button', { name: '找会员' }).click();
+      await page.getByRole('button', { name: /沈/ }).first().click();
+    };
+    const unbind = async (index: number) => {
+      await page.getByRole('button', { name: '解绑', exact: true }).nth(index).click();
+      await page.getByTestId('mp-unbind-reason').fill('E2E 换手机号');
+      await page.getByRole('dialog', { name: '解绑这个微信' }).getByRole('button', { name: '解绑' }).click();
+    };
+    const pending = page.getByTestId('mp-unbind-pending');
+    await page.goto('/admin/mp');
+    await openBindings();
+
+    // ① 没收到结果：待确认，这个微信的「解绑」先不能点；刷新后还在；按原内容重新提交后移除
+    await unbind(0);
+    await expect(page.getByText('解绑结果待确认', { exact: true })).toBeVisible();
+    await expect(pending).toHaveCount(1);
+    await page.reload();
+    await openBindings();
+    await expect(pending).toHaveCount(1);
+    await expect(page.getByRole('button', { name: '解绑', exact: true }).first()).toBeDisabled();
+    unbindReply = 'ok';
+    await pending.getByRole('button', { name: '按原内容重新提交' }).click();
+    await expect(page.getByText('已解绑', { exact: true }).first()).toBeVisible();
+    await expect(pending).toHaveCount(0);
+
+    // ② 没收到结果、其实已经生效：进页面查回看到已解绑，自动移除
+    unbindReply = 'lost';
+    await unbind(0);
+    await expect(pending).toHaveCount(1);
+    state[990002] = true;
+    await page.reload();
+    await openBindings();
+    await expect(page.getByText('已查回：已解绑')).toBeVisible();
+    await expect(pending).toHaveCount(0);
   });
 
   test('店员进不了后台「微信小程序」', async ({ page }) => {

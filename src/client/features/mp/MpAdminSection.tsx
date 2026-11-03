@@ -17,14 +17,25 @@ import {
 } from '@shared/mp';
 import { IMAGE_MAX_EDGE, IMAGE_QUALITY, MAX_IMAGE_BYTES } from '@shared/requests';
 import type { MemberSummary } from '@shared/types';
-import { api, errorMessage, UncertainError } from '../../lib/api';
+import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, Segmented, Select, Skeleton, Textarea } from '../../components/ui';
 import { AdminPage } from '../admin/AdminShell';
-import { abandonBannerOp, lookupBannerOp, MpPendingStoreError, removeMpPending, sendBannerCreate, useMpPendingBanners, type MpPendingBanner } from './mpPending';
+import {
+  abandonBannerOp,
+  lookupBannerOp,
+  lookupUnbindOp,
+  MpPendingStoreError,
+  removeMpPending,
+  sendBannerCreate,
+  sendMpOp,
+  sendUnbind,
+  useMpPending,
+  type MpPendingOp,
+} from './mpPending';
 
 type Tab = 'store' | 'banners' | 'items' | 'bindings';
 const key = ['mp', 'admin'] as const;
@@ -279,7 +290,7 @@ function StoreForm({ store }: { store: MpStoreAdmin }) {
 
 function BannersTab({ banners }: { banners: MpBannerAdmin[] }) {
   const [target, setTarget] = useState<{ mode: 'new' } | { mode: 'edit'; banner: MpBannerAdmin } | null>(null);
-  const pending = useMpPendingBanners();
+  const pending = useMpPending('banner_create');
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
@@ -325,12 +336,12 @@ function BannersTab({ banners }: { banners: MpBannerAdmin[] }) {
  * 新建轮播「结果待确认」（Codex 审查 PR #42 的 P1）：进页面先按编号只读查回，建了或作废了的直接移除；
  * 查不到的由员工「按原内容重新提交」（同一编号，不会多建）或「确认作废」（之后原请求晚到也不会新建）。
  */
-function PendingBanners({ ops }: { ops: MpPendingBanner[] }) {
+function PendingBanners({ ops }: { ops: MpPendingOp[] }) {
   const qc = useQueryClient();
   const toast = useToast();
   const checked = useRef(new Set<string>());
   const [busy, setBusy] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState<MpPendingBanner | null>(null);
+  const [confirming, setConfirming] = useState<MpPendingOp | null>(null);
   const opKeys = ops.map((op) => op.key).join('\n');
   useEffect(() => {
     for (const op of ops) {
@@ -348,7 +359,7 @@ function PendingBanners({ ops }: { ops: MpPendingBanner[] }) {
     // 按「有哪些编号」触发：断网时不反复查回
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opKeys]);
-  const resubmit = async (op: MpPendingBanner) => {
+  const resubmit = async (op: MpPendingOp) => {
     setBusy(op.key);
     try {
       const b = await sendBannerCreate({ key: op.key, body: op.body, summary: op.summary, staffName: op.staffName });
@@ -360,7 +371,7 @@ function PendingBanners({ ops }: { ops: MpPendingBanner[] }) {
       setBusy(null);
     }
   };
-  const abandon = async (op: MpPendingBanner) => {
+  const abandon = async (op: MpPendingOp) => {
     setBusy(op.key);
     try {
       const r = await abandonBannerOp(op);
@@ -606,9 +617,11 @@ function BindingsTab() {
   });
   const [unbinding, setUnbinding] = useState<MpBindingRow | null>(null);
   useEffect(() => setUnbinding(null), [member?.id]);
+  const pendingUnbinds = useMpPending('unbind');
   return (
     <div className="space-y-3">
       <Notice tone="info">会员用微信验证过的手机号自己绑定。换手机号、换微信时，核对本人后在这里解绑，再让客人用新的微信或手机号重新绑定。</Notice>
+      {pendingUnbinds.length > 0 && <PendingUnbinds ops={pendingUnbinds} />}
       <form
         className="flex max-w-md gap-2"
         onSubmit={(e) => {
@@ -665,7 +678,14 @@ function BindingsTab() {
                   {b.unboundAt ? (
                     <Badge>已解绑</Badge>
                   ) : can('mp.unbind') ? (
-                    <Button variant="secondary" size="sm" icon={<Link2Off className="size-4" />} onClick={() => setUnbinding(b)}>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon={<Link2Off className="size-4" />}
+                      onClick={() => setUnbinding(b)}
+                      disabled={pendingUnbinds.some((p) => p.bindingId === b.id)}
+                      title={pendingUnbinds.some((p) => p.bindingId === b.id) ? '这个微信的解绑结果待确认，先在上方处理' : undefined}
+                    >
                       解绑
                     </Button>
                   ) : (
@@ -677,27 +697,102 @@ function BindingsTab() {
           )}
         </Card>
       )}
-      {unbinding && member && <UnbindDialog binding={unbinding} memberId={member.id} onClose={() => setUnbinding(null)} />}
+      {unbinding && member && <UnbindDialog binding={unbinding} memberId={member.id} memberName={member.name} onClose={() => setUnbinding(null)} />}
     </div>
   );
 }
 
-function UnbindDialog({ binding, memberId, onClose }: { binding: MpBindingRow; memberId: number; onClose: () => void }) {
+/**
+ * 解绑「结果待确认」（Codex 审查 PR #42 的 P1）：进页面先看那条绑定是不是已经解绑，解绑了就移除；
+ * 没有的「按原内容重新提交」（同一编号，只解绑一次）。解绑只做一次，晚到的原请求不会再动别的；
+ * 其实不想解绑了，重提后请客人在小程序里重新绑定。
+ */
+function PendingUnbinds({ ops }: { ops: MpPendingOp[] }) {
   const qc = useQueryClient();
   const toast = useToast();
-  // 这次解绑一直用同一个操作编号：没收到结果再提交，返回原来那次
+  const checked = useRef(new Set<string>());
+  const [busy, setBusy] = useState<string | null>(null);
+  const opKeys = ops.map((op) => op.key).join('\n');
+  const settled = (op: MpPendingOp, title: string) => {
+    removeMpPending(op.key);
+    void qc.invalidateQueries({ queryKey: ['mp', 'bindings', op.memberId] });
+    toast({ tone: 'success', title, body: op.summary });
+  };
+  useEffect(() => {
+    for (const op of ops) {
+      if (checked.current.has(op.key)) continue;
+      checked.current.add(op.key);
+      lookupUnbindOp(op)
+        .then((r) => {
+          if (r.done) settled(op, '已查回：已解绑');
+        })
+        .catch(() => checked.current.delete(op.key));
+    }
+    // 按「有哪些编号」触发：断网时不反复查回
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opKeys]);
+  const resubmit = async (op: MpPendingOp) => {
+    setBusy(op.key);
+    try {
+      await sendMpOp(op);
+      settled(op, '已解绑');
+    } catch (error) {
+      // 别人已经解绑了这个微信：结果一样，晚到的原请求也不会再动它
+      if (error instanceof ApiError && error.code === 'ALREADY_UNBOUND') settled(op, '这个微信已经解绑了');
+      else toast({ tone: 'error', title: '还没确认', body: saveError(error) });
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <Notice tone="warning" title={`${ops.length} 个解绑结果待确认`}>
+      <p>上次解绑时网络断了或没收到结果，不知道解绑没有。查不到时请按原内容重新提交（同一编号，只解绑一次）；如果其实不想解绑了，重提后请客人在小程序里重新绑定。</p>
+      <ul className="mt-2 space-y-2">
+        {ops.map((op) => (
+          <li key={op.key} className="flex flex-wrap items-center gap-2" data-testid="mp-unbind-pending">
+            <span className="font-semibold text-ink">{op.summary}</span>
+            <span className="text-[12.5px] text-ink-3">
+              {op.staffName} · {formatDateTime(op.createdAt)}
+            </span>
+            <Button size="sm" variant="secondary" loading={busy === op.key} onClick={() => void resubmit(op)}>
+              按原内容重新提交
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </Notice>
+  );
+}
+
+function UnbindDialog({ binding, memberId, memberName, onClose }: { binding: MpBindingRow; memberId: number; memberName: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const session = useSession();
+  // 这次解绑一直用同一个操作编号；提交前存在本机，没收到结果时在上方查回或按原内容重新提交，只解绑一次
   const [clientKey] = useState(uuid);
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const save = async () => {
     setSaving(true);
     try {
-      await api.post(`/api/admin/mp/bindings/${binding.id}/unbind`, { clientKey, reason });
+      await sendUnbind({
+        key: clientKey,
+        memberId,
+        bindingId: binding.id,
+        reason,
+        summary: `${memberName} 的微信 …${binding.openidTail}（${reason.trim()}）`,
+        staffName: session.staff.displayName,
+      });
       await qc.invalidateQueries({ queryKey: ['mp', 'bindings', memberId] });
       toast({ tone: 'success', title: '已解绑' });
       onClose();
     } catch (error) {
-      toast({ tone: 'error', title: '没有解绑', body: saveError(error) });
+      if (error instanceof UncertainError) {
+        toast({ tone: 'error', title: '解绑结果待确认', body: '没收到结果，不知道解绑没有。请在上方按原内容重新提交，不要另起一笔。' });
+        onClose();
+      } else {
+        toast({ tone: 'error', title: '没有解绑', body: error instanceof MpPendingStoreError ? error.message : saveError(error) });
+      }
     } finally {
       setSaving(false);
     }

@@ -20,6 +20,8 @@ Page({
   refreshAt: 0,
   busy: false,
   brightness: -1,
+  /** 页面在前台：离开以后才回来的亮度回调不再调亮（否则离开后屏幕一直最亮） */
+  visible: false,
 
   onLoad() {
     let width = 375;
@@ -37,6 +39,7 @@ Page({
   },
 
   onShow() {
+    this.visible = true;
     this.screen(true);
     this.refresh();
     if (!this.timer) this.timer = setInterval(() => this.tick(), 1000);
@@ -51,6 +54,7 @@ Page({
   },
 
   stop() {
+    this.visible = false;
     if (this.timer) clearInterval(this.timer);
     this.timer = 0;
     this.screen(false);
@@ -62,6 +66,8 @@ Page({
     if (on) {
       wx.getScreenBrightness({
         success: (r) => {
+          // 读到亮度时已经离开了页面：不调亮（这时也没有要恢复的）
+          if (!this.visible) return;
           if (this.brightness < 0) this.brightness = r.value;
           wx.setScreenBrightness({ value: 1 }).catch(() => undefined);
         },

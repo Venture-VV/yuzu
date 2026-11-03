@@ -89,9 +89,11 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
     reply.status(404).send({ error: { code: 'NOT_FOUND', message: '接口不存在' } });
   });
 
-  const relay = (reply: FastifyReply, r: UpstreamResponse, cacheState?: 'fresh' | 'stale' | 'miss') => {
+  const relay = (reply: FastifyReply, r: UpstreamResponse, cacheState?: 'fresh' | 'stale' | 'miss', fetchedAt?: number) => {
     reply.status(r.status).header('content-type', r.contentType);
     if (cacheState) reply.header('x-cache', cacheState);
+    // 这份内容是什么时候从门店取到的：给旧的时小程序照这个算还能用多久（最多 7 天），不重新计时
+    if (fetchedAt) reply.header('x-fetched-at', new Date(fetchedAt).toISOString());
     if (r.status === 200 && r.cacheControl) reply.header('cache-control', r.cacheControl);
     return reply.send(r.body);
   };
@@ -99,17 +101,18 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
   /** 展示内容：新鲜的直接给；过期了去 yuzu 取；连不上时给旧的，没有旧的就提示门店系统连接中 */
   const show = async (reply: FastifyReply, key: string, path: string, freshMs: number) => {
     const hit = cache.get(key);
-    if (hit?.fresh) return relay(reply, hit.value, 'fresh');
+    if (hit?.fresh) return relay(reply, hit.value, 'fresh', hit.fetchedAt);
     let r: UpstreamResponse;
     try {
       r = await upstream.call('GET', path);
     } catch (error) {
       if (!(error instanceof UpstreamDown)) throw error;
-      if (hit) return relay(reply, hit.value, 'stale');
+      if (hit) return relay(reply, hit.value, 'stale', hit.fetchedAt);
       throw OFFLINE();
     }
-    if (r.status === 200) cache.set(key, r, freshMs);
-    return relay(reply, r, 'miss');
+    const now = Date.now();
+    if (r.status === 200) cache.set(key, r, freshMs, undefined, now);
+    return relay(reply, r, 'miss', r.status === 200 ? now : undefined);
   };
 
   const openidOf = (req: FastifyRequest): string => {

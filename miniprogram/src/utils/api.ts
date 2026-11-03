@@ -38,6 +38,8 @@ interface Raw {
   status: number;
   data: unknown;
   cache: string;
+  /** 网关从门店取到这份内容的时刻（展示内容才有） */
+  fetchedAt: string;
 }
 
 function send(method: 'GET' | 'POST', path: string, body: Record<string, unknown> | undefined, token: string | null): Promise<Raw> {
@@ -53,7 +55,7 @@ function send(method: 'GET' | 'POST', path: string, body: Record<string, unknown
       timeout: 10000,
       success: (res) => {
         const h = (res.header || {}) as Record<string, string>;
-        resolve({ status: res.statusCode, data: res.data, cache: h['x-cache'] || h['X-Cache'] || '' });
+        resolve({ status: res.statusCode, data: res.data, cache: h['x-cache'] || h['X-Cache'] || '', fetchedAt: h['x-fetched-at'] || h['X-Fetched-At'] || '' });
       },
       fail: () => reject(apiError('NETWORK', '网络不太好，请稍后再试', 0)),
     });
@@ -230,8 +232,11 @@ export async function show<T>(path: string): Promise<Shown<T>> {
   try {
     const r = await send('GET', path, undefined, null);
     if (!ok(r)) throw errorOf(r);
+    // 按网关从门店取到的时刻存：网关给的是旧内容时，本机不重新计时，前后加起来最多用 7 天
+    const fetched = Date.parse(r.fetchedAt);
+    const at = isFinite(fetched) ? Math.min(fetched, Date.now()) : Date.now();
     try {
-      wx.setStorageSync(CACHE_PREFIX + path, { at: Date.now(), data: r.data });
+      wx.setStorageSync(CACHE_PREFIX + path, { at, data: r.data });
     } catch {
       // 太大或存不了：只是下次断网时没有旧的
     }

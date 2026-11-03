@@ -147,6 +147,30 @@ describe('展示内容', () => {
     await expect(api.show('/v1/home')).rejects.toMatchObject({ code: 'NETWORK' });
   });
 
+  it('网关给的是旧内容：本机按网关从门店取到的时刻存，前后加起来最多用 7 天', async () => {
+    const sixDaysAgo = new Date(Date.now() - 6 * 86400 * 1000).toISOString();
+    let mode: 'stale' | 'down' = 'stale';
+    const fake = installWx(() =>
+      mode === 'down' ? 'fail' : { status: 200, data: { tickets: [], items: [] }, header: { 'x-cache': 'stale', 'x-fetched-at': sixDaysAgo } },
+    );
+    const api = await loadApi();
+    expect((await api.show('/v1/prices')).stale).toBe(true);
+    expect((fake.storage['tq_show:/v1/prices'] as { at: number }).at).toBe(Date.parse(sixDaysAgo));
+    // 门店和网关都连不上：还在 7 天里，照样用；再过两天就不用了
+    mode = 'down';
+    expect((await api.show('/v1/prices')).stale).toBe(true);
+    (fake.storage['tq_show:/v1/prices'] as { at: number }).at -= 2 * 86400 * 1000;
+    await expect(api.show('/v1/prices')).rejects.toMatchObject({ code: 'NETWORK' });
+  });
+
+  it('网关报的取到时刻比手机时间还晚（手机时间不准）：按手机的现在存', async () => {
+    const future = new Date(Date.now() + 3600 * 1000).toISOString();
+    const fake = installWx(() => ({ status: 200, data: { stores: [], banners: [] }, header: { 'x-cache': 'miss', 'x-fetched-at': future } }));
+    const api = await loadApi();
+    await api.show('/v1/home');
+    expect((fake.storage['tq_show:/v1/home'] as { at: number }).at).toBeLessThanOrEqual(Date.now());
+  });
+
   it('门店明确拒绝（如小程序还没开放）不拿旧内容顶', async () => {
     let open = true;
     installWx(() => (open ? { status: 200, data: { tickets: [], items: [] } } : { status: 403, data: { error: { code: 'MP_DISABLED', message: '小程序还没开放，请到前台咨询' } } }));

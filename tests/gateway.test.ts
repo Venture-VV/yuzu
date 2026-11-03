@@ -165,15 +165,22 @@ describe('门店断外网', () => {
     const g = await buildGateway({ config: gatewayConfig({ upstreamUrl: url2 }), wechat: createMockWechat(), upstream: createUpstream(url2, KEY, 1_000), cache });
     const first = await g.inject({ method: 'GET', url: '/v1/prices' });
     expect(first.headers['x-cache']).toBe('miss');
-    expect((await g.inject({ method: 'GET', url: '/v1/prices' })).headers['x-cache']).toBe('fresh');
+    // 告诉小程序这份内容是什么时候从门店取到的
+    expect(Math.abs(Date.parse(String(first.headers['x-fetched-at'])) - Date.now())).toBeLessThan(5_000);
+    const fresh = await g.inject({ method: 'GET', url: '/v1/prices' });
+    expect(fresh.headers['x-cache']).toBe('fresh');
+    expect(fresh.headers['x-fetched-at']).toBe(first.headers['x-fetched-at']);
     await mp2.close();
-    // 让缓存过期但还在保留期内
+    // 让缓存过期但还在保留期内：6 天前取到的
     const hit = cache.get('prices')!;
-    cache.set('prices', hit.value, 1, 7 * 86_400_000, Date.now() - 10);
+    const sixDaysAgo = Date.now() - 6 * 86_400_000;
+    cache.set('prices', hit.value, 1, 7 * 86_400_000, sixDaysAgo);
     const stale = await g.inject({ method: 'GET', url: '/v1/prices' });
     expect(stale.statusCode).toBe(200);
     expect(stale.headers['x-cache']).toBe('stale');
     expect(stale.json()).toEqual(first.json());
+    // 给旧的时照实给取到的时刻（不是现在），小程序存本机时按它算 7 天（Codex 审查 PR #42）
+    expect(stale.headers['x-fetched-at']).toBe(new Date(sixDaysAgo).toISOString());
     const token = await login(g, 'carol');
     const me = await authed(g, token, 'GET', '/v1/me');
     expect(me.statusCode).toBe(503);
