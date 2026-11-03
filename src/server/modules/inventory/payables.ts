@@ -158,6 +158,8 @@ export async function createOpening(deps: Deps, raw: unknown, actor: Actor, ip?:
       await lockOpKey(tx, input.clientKey);
       const existing = await findExisting(tx);
       if (existing) return { id: existing, replayed: true };
+      // 页面上确认作废过的编号（结果待确认后作废，v0.7.22）：原请求晚到也不登记
+      await assertNotFenced(tx, input.clientKey, 'opening_payable', erpOpAbandoned);
       const sup = await lockSupplier(tx, input.supplierId);
       if (!sup.active) throw unprocessable('SUPPLIER_INACTIVE', '供应商已停用');
       const docNo = await nextDocNo(tx, 'opening_payable', 'QF', input.asOfDate);
@@ -378,6 +380,8 @@ export async function createPayment(deps: Deps, raw: unknown, actor: Actor, ip?:
       await lockOpKey(tx, input.clientKey);
       const existing = await findExisting(tx);
       if (existing) return { id: existing, replayed: true };
+      // 页面上确认作废过的编号（结果待确认后作废，v0.7.22）：原请求晚到也不登记
+      await assertNotFenced(tx, input.clientKey, 'payment', erpOpAbandoned);
       await lockSupplier(tx, input.supplierId);
       await checkAllocations(tx, input.supplierId, input.allocations, null);
       const docNo = await nextDocNo(tx, 'payment', 'FK', input.payDate);

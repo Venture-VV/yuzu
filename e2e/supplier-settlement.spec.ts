@@ -177,6 +177,69 @@ test.describe('供应商结算：退货待供应商确认、退货余额核销�
     for (const c of checks) expect(c.ok, `${c.key} ${c.detail}`).toBe(true);
   });
 
+  test('登记付款结果待确认（v0.7.22）：刷新后仍在、不能另起一笔；按原内容重新提交只登记一次；作废后原请求晚到也不登记', async ({ page }) => {
+    await login(page, 'linlan', '会员工作台');
+    const { sup, receive } = await ownerSetup(page);
+    const first = await receive(4_100);
+    const second = await receive(4_200);
+    await logout(page);
+
+    await login(page, 'qianfen', '库存');
+    const paymentsOf = async (docNo: string) =>
+      (await getJson<{ status: string; allocations: { docNo: string }[] }[]>(page, `/api/payables/payments?supplierId=${sup.id}`)).filter(
+        (p) => p.status !== 'voided' && p.allocations.some((a) => a.docNo === docNo),
+      ).length;
+    const isPost = (url: URL) => url.pathname === '/api/payables/payments';
+    const fillPayment = async (docNo: string) => {
+      await page.goto(`/payables/pay?supplier=${sup.id}`);
+      await page.getByLabel(`核销 ${docNo}`).check();
+      await page.fill('#pay-ev', '流水尾号 7022');
+    };
+    const submit = page.getByRole('button', { name: '登记付款', exact: true });
+
+    // ① 请求没发出去：结果待确认记在本机，刷新后仍在；这时不能另起一笔；按原内容重新提交只登记一次
+    await fillPayment(first.docNo);
+    await page.route(isPost, (route) => (route.request().method() === 'POST' ? route.abort('internetdisconnected') : route.continue()));
+    await submit.click();
+    await expect(page.getByTestId('erp-pending')).toContainText('供应商付款结果待确认');
+    await page.unroute(isPost);
+    await page.reload();
+    await expect(page.getByTestId('erp-pending')).toContainText(first.docNo);
+    await page.getByLabel(`核销 ${second.docNo}`).check();
+    await page.fill('#pay-ev', '流水尾号 7023');
+    await expect(page.getByText('上一笔付款结果待确认，请先在上方查回、按原内容重新提交或作废')).toBeVisible();
+    await expect(submit).toBeDisabled();
+    await page.getByTestId('erp-pending-resend').click();
+    await expect(page).toHaveURL(/view=payments/);
+    await expect(page.getByTestId('erp-pending')).toHaveCount(0);
+    expect(await paymentsOf(first.docNo)).toBe(1);
+
+    // ② 请求没发出去、之后确认作废：原请求（同一编号、同样内容）晚到也不登记
+    await fillPayment(second.docNo);
+    await page.route(isPost, (route) => (route.request().method() === 'POST' ? route.abort('internetdisconnected') : route.continue()));
+    await submit.click();
+    await expect(page.getByTestId('erp-pending')).toContainText(second.docNo);
+    await page.unroute(isPost);
+    const original = await page.evaluate(() => {
+      const list = JSON.parse(localStorage.getItem('yuzu.erpPending.v1') ?? '[]') as { type: string; url: string; body: unknown }[];
+      return list.find((op) => op.type === 'payment')!;
+    });
+    await page.getByTestId('erp-pending-abandon').click();
+    await page.getByTestId('erp-pending-abandon-confirm').click();
+    await expect(page.getByTestId('erp-pending')).toHaveCount(0);
+    const late = await page.request.post(original.url, { data: original.body });
+    expect(late.status()).toBe(409);
+    expect(((await late.json()) as { error: { code: string } }).error.code).toBe('OP_ABANDONED');
+    expect(await paymentsOf(second.docNo)).toBe(0);
+    // 作废后可以重新填写登记（新的操作编号）
+    await expect(submit).toBeEnabled();
+    await submit.click();
+    await expect(page).toHaveURL(/view=payments/);
+    expect(await paymentsOf(second.docNo)).toBe(1);
+    const checks = await getJson<{ key: string; ok: boolean; detail: string }[]>(page, '/api/inventory/checks');
+    for (const c of checks) expect(c.ok, `${c.key} ${c.detail}`).toBe(true);
+  });
+
   test('批量导入供应商：预览 → 写入；同一个文件不能再写', async ({ page }) => {
     await login(page, 'linlan', '会员工作台');
     await page.goto('/payables/import');

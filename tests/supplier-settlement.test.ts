@@ -335,7 +335,7 @@ describe('退货余额、预付款、核销与供应商退款（#25、#20）', (
   });
 });
 
-describe('核销、供应商退款的「结果待确认」（AGENTS.md：断网后按编号查回或确认作废）', () => {
+describe('核销、供应商退款、付款与期初未付的「结果待确认」（AGENTS.md：断网后按编号查回或确认作废）', () => {
   it('按编号查回；登记过的不能作废；作废后原请求晚到也不登记；只有能登记的人能作废', async () => {
     const m = await material('SP01');
     const rc = await receive(m.id, 5, 1_000); // 50 元，还没付
@@ -390,6 +390,45 @@ describe('核销、供应商退款的「结果待确认」（AGENTS.md：断网�
     expect((await lookup(k4, 'supplier_refund')).body).toEqual({ found: true, abandoned: false, refId: r4.refund.id });
     expect((await lookup(k4, 'ap_offset')).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
     expect((await creditsOf()).find((c) => c.kind === 'prepayment' && c.id === p.payment.id)).toMatchObject({ availableCents: 2_500 });
+    await checksOk();
+  });
+
+  it('供应商付款、期初未付登记（v0.7.22）：按编号查回；登记过的不能作废；作废后原请求晚到也不登记', async () => {
+    const m = await material('SP03');
+    const rc = await receive(m.id, 5, 1_000); // 50 元，还没付
+    const lookup = (key: string, type: string, cookie = payer) => api(ctx.app, cookie, 'GET', `/api/erp/ops/${key}?type=${type}`);
+    const abandon = (key: string, type: string, cookie = payer) => api(ctx.app, cookie, 'POST', `/api/erp/ops/${key}/abandon`, { type, summary: '测试作废' });
+    const payOn = (key: string) => pay(1_000, [{ kind: 'receipt', targetId: rc.id, amountCents: 1_000 }], { clientKey: key });
+    const opening = (key: string) =>
+      api(ctx.app, payer, 'POST', '/api/payables/openings', { clientKey: key, supplierId, amountCents: 2_000, asOfDate: today, note: '截至上月对账单' });
+
+    // ① 付款登记了、响应丢了：按编号查回到这笔付款；已经登记的不能作废（作废返回查回的结果）
+    const k1 = randomUUID();
+    const p1 = await ok(payOn(k1));
+    expect((await lookup(k1, 'payment')).body).toEqual({ found: true, abandoned: false, refId: p1.payment.id });
+    expect((await abandon(k1, 'payment')).body).toEqual({ found: true, abandoned: false, refId: p1.payment.id });
+
+    // ② 请求没到：物资经办不能查回、不能作废付款；对账付款确认作废后，原请求晚到也不登记（不会多付一笔）
+    const k2 = randomUUID();
+    expect((await lookup(k2, 'payment', keeper)).status).toBe(403);
+    expect((await abandon(k2, 'payment', keeper)).status).toBe(403);
+    expect((await abandon(k2, 'payment')).body).toEqual({ found: false, abandoned: true });
+    const late = await payOn(k2);
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('OP_ABANDONED');
+    expect((await lookup(k2, 'payment')).body).toEqual({ found: false, abandoned: true });
+    expect(await ctx.sql`SELECT 1 FROM payments WHERE client_key = ${k2}`).toHaveLength(0);
+    expect((await openOf(rc.id)).openCents).toBe(4_000);
+
+    // ③ 期初未付同样；编号的业务类型对不上不能当付款查回
+    const k3 = randomUUID();
+    const o3 = await ok(opening(k3));
+    expect((await lookup(k3, 'opening_payable')).body).toEqual({ found: true, abandoned: false, refId: o3.opening.id });
+    expect((await lookup(k3, 'payment')).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+    const k4 = randomUUID();
+    expect((await abandon(k4, 'opening_payable')).body).toEqual({ found: false, abandoned: true });
+    expect((await opening(k4)).body.error.code).toBe('OP_ABANDONED');
+    expect(await ctx.sql`SELECT 1 FROM opening_payables WHERE client_key = ${k4}`).toHaveLength(0);
     await checksOk();
   });
 });
