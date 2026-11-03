@@ -3,6 +3,10 @@
 // 依赖 seed-demo 与 seed-frontdesk-demo（仅独立演示库）；可重复执行。
 import { expect, test, type Page } from '@playwright/test';
 import { ensureShift } from './shift';
+import { relaxRechargeMinimum } from './membership';
+
+// 会员体系 v2 的最低充值（默认 5,000 元）在这个文件里设成不限，结束后恢复
+relaxRechargeMinimum();
 
 const PASSWORD = 'yuzu2026';
 const WALLET_KEY = 'yuzu.pendingOps.v1';
