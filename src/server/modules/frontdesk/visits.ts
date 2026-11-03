@@ -16,6 +16,7 @@ import {
   type VisitHistoryEvent,
   ZONE_LABELS,
 } from '@shared/frontdesk';
+import { businessDateOf } from '@shared/business-date';
 import { backfillText, type BackfillMark } from '@shared/backfill';
 import { isFreeTicket } from '@shared/checkout';
 import { formatYuan } from '@shared/money';
@@ -58,6 +59,7 @@ import {
   resolveBackfill,
 } from './backfill';
 import { locateCheckin, locateGone } from '../locations';
+import { loadSettings } from '../settings';
 import { getCheckout } from './checkout';
 import { getRefund } from './refunds';
 import { getStay } from '../rooms';
@@ -379,7 +381,7 @@ export async function swapTag(deps: Deps, visitId: number, raw: SwapInputData, c
     });
     return change!.id;
   });
-  return getVisit(deps.sql, visitId);
+  return getVisit(deps.sql, visitId, deps.config.timezone);
 }
 
 // ───────────────────────── 同行组 ─────────────────────────
@@ -461,7 +463,7 @@ export async function changeGroup(deps: Deps, visitId: number, raw: GroupInputDa
       businessDate: date,
     });
   });
-  return getVisit(deps.sql, visitId);
+  return getVisit(deps.sql, visitId, deps.config.timezone);
 }
 
 // ───────────────────────── 撤销误开的牌 ─────────────────────────
@@ -515,7 +517,7 @@ export async function cancelVisit(deps: Deps, visitId: number, raw: unknown, ctx
       businessDate: await businessDate(tx, deps, at),
     });
   });
-  return getVisit(deps.sql, visitId);
+  return getVisit(deps.sql, visitId, deps.config.timezone);
 }
 
 // ───────────────────────── 读取 ─────────────────────────
@@ -587,7 +589,8 @@ export async function getBoard(db: Db): Promise<FrontdeskBoard> {
   };
 }
 
-export async function getVisit(db: Db, id: number): Promise<VisitDetail> {
+/** 来访详情。timezone 是门店时区（算门店当前营业日：在店客人的门票按它推算会员的浴票延迟，与结账核对一致） */
+export async function getVisit(db: Db, id: number, timezone: string): Promise<VisitDetail> {
   const [v] = await db<{
     id: number; visitNo: string; status: VisitDetail['status']; zone: TagZone; guestLabel: string; businessDate: string;
     checkedInAt: string; checkedInById: number; checkedInByName: string; closedAt: string | null; closeReason: string | null;
@@ -708,6 +711,7 @@ export async function getVisit(db: Db, id: number): Promise<VisitDetail> {
   history.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
 
   const [now] = await db<{ now: string }[]>`SELECT now() AS now`;
+  const today = businessDateOf(new Date(now!.now), timezone, (await loadSettings(db)).businessDayStartHour);
   const lastCheckout = checkouts.at(-1);
   return {
     id: v.id,
@@ -736,7 +740,7 @@ export async function getVisit(db: Db, id: number): Promise<VisitDetail> {
     memberGrade,
     vipOverrideByName: v.vipOverrideByName,
     backfill,
-    ticket: await visitTicket(db, v.id, v.closedAt ? new Date(v.closedAt) : new Date(now!.now), v.businessDate),
+    ticket: await visitTicket(db, v.id, v.closedAt ? new Date(v.closedAt) : new Date(now!.now), today),
     checkout: lastCheckout ? { id: lastCheckout.id, checkoutNo: lastCheckout.checkoutNo, status: lastCheckout.status } : null,
     bill: { id: v.billId, billNo: v.billNo, status: v.billStatus, amountCents: v.amountCents, lineCount: v.lineCount },
     lines,
@@ -782,15 +786,15 @@ export async function previewBills(db: Db, visitIds: number[]): Promise<PreviewB
  * 要放弃这笔，必须调用 abandonFrontdeskOp。
  * expected 是页面记录的原业务类型：只有同一类型的作废登记才算「已作废」。
  */
-export async function lookupFrontdeskOp(db: Db, key: string, expected?: FrontdeskOp) {
+export async function lookupFrontdeskOp(db: Db, key: string, timezone: string, expected?: FrontdeskOp) {
   const [row] = await db<{ opType: string; refId: number }[]>`SELECT op_type, ref_id FROM idempotency_keys WHERE key = ${key}`;
   if (row?.opType === 'abandoned') return { found: false as const, abandoned: true };
   if (!row) return { found: false as const, abandoned: await isFenced(db, key, expected ? [expected] : FRONTDESK_OPS) };
   if (!(FRONTDESK_OPS as readonly string[]).includes(row.opType)) return { found: false as const, abandoned: false };
   if (row.opType === 'checkin') return { found: true as const, type: 'checkin' as const, checkin: await loadCheckin(db, key, true) };
-  if (row.opType === 'bill_post') return { found: true as const, type: 'bill_post' as const, visit: await getVisit(db, row.refId) };
+  if (row.opType === 'bill_post') return { found: true as const, type: 'bill_post' as const, visit: await getVisit(db, row.refId, timezone) };
   // 转单（v0.7.6）：查回原客人（明细转出的那位）
-  if (row.opType === 'line_move') return { found: true as const, type: 'line_move' as const, visit: await getVisit(db, row.refId) };
+  if (row.opType === 'line_move') return { found: true as const, type: 'line_move' as const, visit: await getVisit(db, row.refId, timezone) };
   if (row.opType === 'checkout') return { found: true as const, type: 'checkout' as const, checkout: await getCheckout(db, row.refId) };
   // 餐饮第二步：开台、桌台点单查回这一桌；桌台结账查回结账单
   if (row.opType === 'table_open' || row.opType === 'table_post') {
@@ -808,7 +812,7 @@ export async function lookupFrontdeskOp(db: Db, key: string, expected?: Frontdes
   // 退款单（v0.7.20）：查回这张退款单
   if (row.opType === 'checkout_refund') return { found: true as const, type: 'checkout_refund' as const, refund: await getRefund(db, row.refId) };
   const [c] = await db<{ visitId: number }[]>`SELECT visit_id FROM visit_tag_changes WHERE id = ${row.refId}`;
-  return { found: true as const, type: 'tag_swap' as const, visit: await getVisit(db, c!.visitId) };
+  return { found: true as const, type: 'tag_swap' as const, visit: await getVisit(db, c!.visitId, timezone) };
 }
 
 /**
@@ -839,5 +843,5 @@ export async function abandonFrontdeskOp(deps: Deps, key: string, opType: Frontd
   if (!(FRONTDESK_OPS as readonly string[]).includes(outcome.existingOpType)) {
     throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号属于其他业务，不能在前台作废');
   }
-  return lookupFrontdeskOp(deps.sql, key, opType);
+  return lookupFrontdeskOp(deps.sql, key, deps.config.timezone, opType);
 }

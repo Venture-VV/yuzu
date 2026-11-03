@@ -54,7 +54,7 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
 
   app.get('/api/frontdesk/visits/:id', { preHandler: guard('frontdesk.read') }, async (req) => {
     const { id } = parse(idParam, req.params);
-    return readSnapshot(sql, (tx) => getVisit(tx, id));
+    return readSnapshot(sql, (tx) => getVisit(tx, id, deps.config.timezone));
   });
 
   app.get('/api/frontdesk/preview', { preHandler: guard('frontdesk.read') }, async (req) => {
@@ -75,7 +75,7 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/frontdesk/ops/:key', { preHandler: guard('frontdesk.read') }, async (req) => {
     const { key } = parse(OpKey, req.params);
     const { type } = parse(z.object({ type: z.enum(FRONTDESK_OPS).optional() }), req.query ?? {});
-    return lookupFrontdeskOp(sql, key, type);
+    return lookupFrontdeskOp(sql, key, deps.config.timezone, type);
   });
 
   // 作废要有原业务本身的权限（与原接口一致），例如没有结账收款权限的人不能作废别人正在进行的结账
@@ -140,7 +140,7 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/frontdesk/visits/:id/ticket', { preHandler: guard('frontdesk.operate') }, async (req) => {
     const { id } = parse(idParam, req.params);
     await setVisitTicket(deps, id, req.body, ctxOf(req));
-    return getVisit(sql, id);
+    return getVisit(sql, id, deps.config.timezone);
   });
 
   // ── 结账 ──

@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { minutesText, quantityText, ticketExtensionFor, type Benefit, type BenefitCatalog, type MemberBenefits } from '../src/shared/benefits';
 import type { CheckoutPreview } from '../src/shared/checkout';
 import type { VisitDetail } from '../src/shared/frontdesk';
+import { shiftDate } from '../src/shared/labels';
 import { rechargeOutcome, type MemberGradeInfo, type MembershipRules } from '../src/shared/membership';
 import type { Actor } from '../src/server/lib/context';
 import { benefitChecks } from '../src/server/modules/benefits';
@@ -23,6 +24,8 @@ const MIN = 60_000;
 let ctx: TestContext;
 let clerk: Actor;
 let deps: { sql: TestContext['sql']; config: TestContext['config'] };
+/** 结过账、享了 30 分钟浴票延迟的来访（之后核对手牌详情按结账单的快照显示） */
+let settledWithExtension: number;
 
 const yuan = (n: number) => Math.round(n * 100);
 const catalog = async () => (await api(ctx.app, ctx.owner, 'GET', '/api/benefits')).body as BenefitCatalog;
@@ -187,6 +190,7 @@ describe('结账时自动多给（宽限 15 分钟、在店 12 小时 40 分）'
 
     // 结账：会员的门票按延迟后的段数入账，结账单记下分钟数与权益
     const done = await pay([l1.visitId], by(l1.tagCode).amount);
+    settledWithExtension = l1.visitId;
     expect(done.bills[0]).toMatchObject({ ticketSegments: 1, ticketAmount: 49900, ticketExtensionMinutes: 30 });
     const qy004 = await byCode('QY-004');
     const [row] = await ctx.sql<{ minutes: number; benefitId: number }[]>`
@@ -226,6 +230,29 @@ describe('结账时自动多给（宽限 15 分钟、在店 12 小时 40 分）'
     expect(p.visits[0]).toMatchObject({ extension: { minutes: 60 }, ticket: { segments: 1 } });
   });
 
+  it('跨营业日：体验已到期、每天的到期处理还没跑——手牌详情与结账核对都按门店当前营业日算（测试会话预检 46009c2）', async () => {
+    const today = (await api(ctx.app, ctx.owner, 'GET', '/api/auth/me')).body.today as string;
+    const inviter = await member('跨日邀请人', { grade: 3, tier: 0 });
+    const guestId = await member('体验昨天到期的客人');
+    // 体验 L2·初、昨天结束，还记着「生效中」（到期处理没跑）；直接写库模拟
+    await ctx.sql`
+      INSERT INTO member_trials (member_id, kind, grade, tier, starts_on, ends_on, inviter_id, business_date, staff_id, client_key, request_hash)
+      VALUES (${guestId}, 'invite', 2, 0, ${shiftDate(today, -7)}, ${shiftDate(today, -1)}, ${inviter}, ${shiftDate(today, -7)}, ${ctx.ownerId},
+              ${randomUUID()}, ${'b'.repeat(64)})`;
+    // 在店 24 小时 30 分：接待在前一个营业日（或更早）
+    const v = await enter(guestId, 24 * H + 30 * MIN);
+    const [row] = await ctx.sql<{ businessDate: string }[]>`SELECT business_date::text AS business_date FROM visits WHERE id = ${v.visitId}`;
+    expect(row!.businessDate < today).toBe(true);
+
+    const p = await preview([v.visitId]);
+    // 今天体验已到期：不享延迟，宽限 15 分钟，24 小时 30 分是 3 段（24 小时档 + 12 小时档）
+    expect(p.visits[0]).toMatchObject({ graceMinutes: 15, extension: null, ticket: { segments: 3, amount: 109800 } });
+    const detail = (await visitOf(v.visitId)).ticket!;
+    // 原来按接待那一天算：体验还生效、多 60 分钟、2 段 599——与核对不一致
+    expect(detail).toMatchObject({ segments: 3, amount: 109800, extension: null });
+    expect(detail.nextJumpAt).toBe(p.visits[0]!.ticket!.nextJumpAt);
+  });
+
   it('核对之后浴票延迟没了（暂缓）：门票跟着跳档，按原合计结账被拒 PRICE_CHANGED；重新核对后照常结', async () => {
     const v = await enter(await member('核对后暂缓的会员', { grade: 1, tier: 2 }), STAY);
     const before = await preview([v.visitId]);
@@ -240,6 +267,8 @@ describe('结账时自动多给（宽限 15 分钟、在店 12 小时 40 分）'
     const m = (await ctx.sql<{ memberId: number }[]>`SELECT member_id FROM visits WHERE id = ${v.visitId}`)[0]!.memberId;
     const mine = (await api(ctx.app, ctx.clerk, 'GET', `/api/members/${m}/benefits`)).body as MemberBenefits;
     expect(mine.items.find((i) => i.code === 'QY-004')).toBeUndefined();
+    // 已结账的来访按结账单记下的延迟显示（快照），暂缓之后也不变：与当时收的门票一致
+    expect((await visitOf(settledWithExtension)).ticket).toMatchObject({ segments: 1, amount: 49900, extension: { minutes: 30, code: 'QY-004' } });
     await allChecksOk();
   });
 });
