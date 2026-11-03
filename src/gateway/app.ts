@@ -2,7 +2,7 @@
 //   · 登录：wx.login 的 code 换 openid，发网关会话（7 天，只有 openid，MP11）；
 //   · 展示内容（门店信息、价目、导览、图片）：缓存，门店断外网时给旧的（最多 7 天）；
 //   · 会员相关（绑定、会员卡、流水、券、会员码）：带会话里的 openid 原样转给 yuzu，门店连不上时 503 STORE_OFFLINE；
-//   · 绑定：先用手机号快速验证的 code 换手机号，再转给 yuzu（手机号对上会员才绑）。
+//   · 绑定：先用手机号快速验证的 code 换手机号，再转给 yuzu（手机号对上会员才绑）；结果不确定时小程序经 /v1/bind/abandon 确认作废。
 // 网关不存会员、余额、券、订单；yuzu 返回的错误文字面向顾客，原样转给小程序。
 
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
@@ -38,6 +38,7 @@ const BindInput = z.object({
   phoneCode: z.string('请先验证手机号').min(1, '请先验证手机号').max(256),
   clientKey: z.uuid('操作编号不正确'),
 });
+const AbandonInput = z.object({ clientKey: z.uuid('操作编号不正确') });
 const LedgerQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) });
 const FloorParams = z.object({ floor: z.string().regex(/^[A-Za-z0-9-]{1,10}$/, '楼层不正确') });
 const SvgQuery = z.object({ b: z.coerce.number().int().positive('底图批次不正确') });
@@ -179,6 +180,13 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
       throw error;
     }
     return member(reply, 'POST', '/api/mp/bind', openid, { clientKey, phone, mock: wechat.mock });
+  });
+  // 绑定结果不确定（超时、断网、门店出错）时，小程序请门店系统作废这个编号：已经绑上了返回绑定的结果
+  app.post('/v1/bind/abandon', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!bindLimit.take(`bind:${openid}`)) throw TOO_MANY();
+    const { clientKey } = parse(AbandonInput, req.body);
+    return member(reply, 'POST', '/api/mp/bind/abandon', openid, { clientKey });
   });
   app.get('/v1/me', async (req, reply) => member(reply, 'GET', '/api/mp/me', openidOf(req)));
   app.get('/v1/ledger', async (req, reply) => {

@@ -36,6 +36,12 @@ describe('流水', () => {
     });
     expect(ledgerRow(row({ kind: 'expire', kindLabel: '赠金过期', principalDelta: 0, bonusDelta: -5000 }))).toMatchObject({ amount: '−¥50.00', split: '赠金' });
   });
+
+  it('营业日切换之前记的：日期按记账时刻，营业日另外写（不会早显示一天）', () => {
+    // 北京时间 2026-11-03 02:00 记的，营业日是 11-02
+    expect(ledgerRow(row({ businessDate: '2026-11-02', createdAt: '2026-11-02T18:00:00.000Z' })).when).toBe('2026-11-03 02:00（营业日 11-02）');
+    expect(ledgerRow(row({ businessDate: '2026-11-03', createdAt: '2026-11-03T06:30:00.000Z' })).when).toBe('2026-11-03 14:30');
+  });
 });
 
 describe('券', () => {

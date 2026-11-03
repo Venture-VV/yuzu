@@ -7,6 +7,14 @@
     <button class="btn ghost" hover-class="btn-hover" bindtap="load">再试一次</button>
   </view>
 
+  <!-- 绑定结果待确认：上次点绑定时网络不好，确认之前不能再绑定 -->
+  <view wx:elif="{{state === 'pending'}}" class="panel bindcard">
+    <text class="h3">绑定结果待确认</text>
+    <text class="lede">上次点绑定时网络不好，还不知道绑上没有。网络好了点「再确认一次」，门店系统会告诉我们结果；确认之前先不要换手机号重新绑。</text>
+    <button class="btn primary block" hover-class="btn-hover" bindtap="onConfirmPending" loading="{{binding}}" disabled="{{binding}}">再确认一次</button>
+    <text wx:if="{{message}}" class="sub fine">{{message}}</text>
+  </view>
+
   <!-- 没绑定 -->
   <view wx:elif="{{state === 'unbound'}}" class="panel bindcard">
     <view class="ghostcard"><text class="gc-zh">汤崎</text><text class="gc-en">TOUCHILL</text></view>

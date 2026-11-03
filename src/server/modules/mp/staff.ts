@@ -8,7 +8,7 @@ import { ctxOf, type Deps } from '../../lib/context';
 import { notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { getMember } from '../members';
-import { createBanner, mpAdminData, saveItemIntro, saveMpImage, saveMpRules, saveStore, updateBanner } from './admin';
+import { abandonBannerCreate, createBanner, lookupBannerOp, mpAdminData, saveItemIntro, saveMpImage, saveMpRules, saveStore, updateBanner } from './admin';
 import { memberBindings, resolveMemberCode, unbindMember } from './member';
 
 const CodeParam = z.object({ code: z.string().trim().max(32) });
@@ -45,6 +45,9 @@ export function registerMpStaffRoutes(app: FastifyInstance, deps: Deps) {
     reply.code(banner.replayed ? 200 : 201);
     return banner;
   });
+  // 新建结果不确定时：按编号查回（只读），或确认作废这个编号（已经建了就返回那一条）
+  app.get('/api/admin/mp/banners/ops/:key', { preHandler: content }, async (req) => lookupBannerOp(sql, (req.params as { key?: unknown }).key));
+  app.post('/api/admin/mp/banners/abandon', { preHandler: content }, async (req) => abandonBannerCreate(deps, req.body, ctxOf(req)));
   app.put('/api/admin/mp/banners/:id', { preHandler: content }, async (req) => updateBanner(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
   app.put('/api/admin/mp/items/:id/intro', { preHandler: content }, async (req) => saveItemIntro(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
 }

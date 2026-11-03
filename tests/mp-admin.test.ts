@@ -124,6 +124,39 @@ describe('首页轮播', () => {
   });
 });
 
+describe('首页轮播：新建结果不确定时确认作废（迁移 044）', () => {
+  it('还没建就登记作废：原请求晚到也不新建、记审计；已经建了作废只返回那一条；只有能改内容的人能作废', async () => {
+    const img = (await upload(JPEG, 'image/jpeg')).body.id as number;
+    const clientKey = randomUUID();
+    expect((await api(ctx.app, duty, 'POST', '/api/admin/mp/banners/abandon', { clientKey })).status).toBe(403);
+    const a = await api(ctx.app, am, 'POST', '/api/admin/mp/banners/abandon', { clientKey });
+    expect(a.status, JSON.stringify(a.body)).toBe(200);
+    expect(a.body).toEqual({ state: 'abandoned' });
+    const before = (await admin()).banners.length;
+    const late = await api(ctx.app, am, 'POST', '/api/admin/mp/banners', { clientKey, title: '晚到的', imageId: img, link: 'none', startsOn: null, endsOn: null, sortOrder: 9 });
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('OP_ABANDONED');
+    expect((await admin()).banners.length).toBe(before);
+    const [audit] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'mp_op_abandoned' AND target_id = ${clientKey}`;
+    expect(audit!.n).toBe(1);
+    // 只读查回：登记了作废
+    expect((await api(ctx.app, am, 'GET', `/api/admin/mp/banners/ops/${clientKey}`)).body).toEqual({ found: false, abandoned: true, banner: null });
+    expect((await api(ctx.app, am, 'GET', `/api/admin/mp/banners/ops/${randomUUID()}`)).body).toEqual({ found: false, abandoned: false, banner: null });
+    expect((await api(ctx.app, am, 'GET', '/api/admin/mp/banners/ops/not-a-key')).status).toBe(400);
+    // 再作废一次：照样是作废，不重复记审计
+    expect((await api(ctx.app, am, 'POST', '/api/admin/mp/banners/abandon', { clientKey })).body).toEqual({ state: 'abandoned' });
+
+    const done = randomUUID();
+    const created = await api(ctx.app, am, 'POST', '/api/admin/mp/banners', { clientKey: done, title: '已经建了', imageId: img, link: 'none', startsOn: null, endsOn: null, sortOrder: 9 });
+    expect(created.status).toBe(201);
+    expect((await api(ctx.app, am, 'GET', `/api/admin/mp/banners/ops/${done}`)).body).toMatchObject({ found: true, abandoned: false, banner: { id: created.body.id } });
+    const b = await api(ctx.app, am, 'POST', '/api/admin/mp/banners/abandon', { clientKey: done });
+    expect(b.body).toMatchObject({ state: 'done', banner: { id: created.body.id, title: '已经建了' } });
+    const [fence] = await ctx.sql`SELECT 1 FROM mp_op_fences WHERE key = ${done}`;
+    expect(fence).toBeUndefined();
+  });
+});
+
 describe('项目介绍', () => {
   it('第一次写版本号是 0；之后带版本号改；对不上拒绝；小程序价目跟着变', async () => {
     const [item] = await ctx.sql<{ id: number }[]>`INSERT INTO service_items (name, category, price) VALUES ('演示·扬州搓澡', '沐浴', 18900) RETURNING id`;

@@ -23,6 +23,7 @@ Page({
   },
   guide: null as GuideData | null,
   canvas: null as WechatMiniprogram.Canvas | null,
+  /** 底图按「批次:楼层」缓存：后台换了底图批次，下拉刷新后不再垫着旧图 */
   bases: {} as Record<string, Base | 'loading' | 'failed'>,
   width: 343,
   maxHeight: 480,
@@ -47,6 +48,8 @@ Page({
     if (!this.guide) this.setData({ status: 'loading' });
     try {
       const { data, stale } = await show<GuideData>('/v1/guide');
+      // 换了底图批次：旧批次的底图都不要了（还在加载的，回来时按批次核对、不会写进来）
+      if (!this.guide || this.guide.batchId !== data.batchId) this.bases = {};
       this.guide = data;
       const floors = sortFloorCodes(data.floors).map((f) => ({ code: f.code, title: f.title || f.code }));
       if (!floors.length || data.batchId === null) {
@@ -104,7 +107,7 @@ Page({
         canvas.height = Math.round(fit.height * ratio);
         const ctx = canvas.getContext('2d');
         ctx.scale(ratio, ratio);
-        const base = this.bases[code];
+        const base = this.bases[g.batchId + ':' + code];
         drawFloor(
           ctx as unknown as Parameters<typeof drawFloor>[0],
           fit,
@@ -118,15 +121,19 @@ Page({
 
   loadBase(canvas: WechatMiniprogram.Canvas, code: string, width: number, height: number, batchId: number | null) {
     if (batchId === null) return;
-    this.bases[code] = 'loading';
+    const key = batchId + ':' + code;
+    this.bases[key] = 'loading';
+    // 图回来时底图批次已经换了：不写进缓存、不重画
+    const current = () => !!this.guide && this.guide.batchId === batchId;
     const img = canvas.createImage();
     img.onload = () => {
-      this.bases[code] = { image: img, width, height };
+      if (!current()) return;
+      this.bases[key] = { image: img, width, height };
       if (this.data.floor === code) this.draw();
     };
     img.onerror = () => {
       // 有的手机画布不认 SVG：只画色块
-      this.bases[code] = 'failed';
+      if (current()) this.bases[key] = 'failed';
     };
     img.src = gatewayBase() + '/v1/guide/floors/' + encodeURIComponent(code) + '/svg?b=' + batchId;
   },

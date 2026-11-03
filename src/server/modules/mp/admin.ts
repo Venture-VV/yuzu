@@ -9,7 +9,9 @@ import {
   DEFAULT_MP_RULES,
   MP_RULES_KEY,
   type MpAdminData,
+  type MpBannerAbandonResult,
   type MpBannerAdmin,
+  type MpBannerOpLookup,
   type MpItemIntroAdmin,
   type MpRules,
   type MpStoreAdmin,
@@ -145,6 +147,9 @@ export async function createBanner(deps: Deps, raw: unknown, ctx: OpContext): Pr
     await tx`SELECT pg_advisory_xact_lock(hashtext(${`mp_banner:${v.clientKey}`}))`;
     const [prev] = await tx<{ id: number }[]>`SELECT id FROM mp_banners WHERE client_key = ${v.clientKey}`;
     if (prev) return { id: prev.id, replayed: true };
+    // 这个编号已经确认作废（结果不确定时后台作废的）：晚到的原请求不再新建
+    const [fenced] = await tx`SELECT 1 FROM mp_op_fences WHERE key = ${v.clientKey} AND op_type = 'mp_banner'`;
+    if (fenced) throw conflict('OP_ABANDONED', '这次新建已经作废，请重新填写');
     const [img] = await tx`SELECT 1 FROM mp_images WHERE id = ${v.imageId}`;
     if (!img) throw badRequest('图片不存在，请重新上传');
     const [row] = await tx<{ id: number }[]>`
@@ -154,6 +159,39 @@ export async function createBanner(deps: Deps, raw: unknown, ctx: OpContext): Pr
     return { id: row!.id, replayed: false };
   });
   return { ...(await bannerOf(deps.sql, result.id)), replayed: result.replayed };
+}
+
+const AbandonInput = z.object({ clientKey: z.uuid('操作编号不正确') });
+
+/** 按操作编号查回新建轮播（只读、不加锁）：建了返回那一条；登记了作废返回作废；都没有不能断定没新建 */
+export async function lookupBannerOp(db: Db, rawKey: unknown): Promise<MpBannerOpLookup> {
+  const { clientKey } = parse(AbandonInput, { clientKey: rawKey });
+  const [prev] = await db<{ id: number }[]>`SELECT id FROM mp_banners WHERE client_key = ${clientKey}`;
+  if (prev) return { found: true, abandoned: false, banner: await bannerOf(db, prev.id) };
+  const [fenced] = await db`SELECT 1 FROM mp_op_fences WHERE key = ${clientKey} AND op_type = 'mp_banner'`;
+  return { found: false, abandoned: !!fenced, banner: null };
+}
+
+/**
+ * 新建轮播结果不确定时确认作废这个编号（迁移 044）：与新建取同一把咨询锁（这个编号），二者不交错。
+ * 已经建了返回那一条；还没有就登记作废，之后原请求即使到达也不会新建（OP_ABANDONED）。
+ */
+export async function abandonBannerCreate(deps: Deps, raw: unknown, ctx: OpContext): Promise<MpBannerAbandonResult> {
+  const { clientKey } = parse(AbandonInput, raw);
+  const result = await deps.sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${`mp_banner:${clientKey}`}))`;
+    const [prev] = await tx<{ id: number }[]>`SELECT id FROM mp_banners WHERE client_key = ${clientKey}`;
+    if (prev) return { id: prev.id };
+    const inserted = await tx`
+      INSERT INTO mp_op_fences (key, op_type, staff_id) VALUES (${clientKey}, 'mp_banner', ${ctx.actor.id})
+      ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;
+    if (inserted.length) {
+      await writeAudit(tx, { staffId: ctx.actor.id, action: 'mp_op_abandoned', targetType: 'mp_banner', targetId: clientKey, detail: { clientKey }, ip: ctx.ip });
+    }
+    return { id: null };
+  });
+  return result.id === null ? { state: 'abandoned' } : { state: 'done', banner: await bannerOf(deps.sql, result.id) };
 }
 
 export async function updateBanner(deps: Deps, id: number, raw: unknown, ctx: OpContext): Promise<MpBannerAdmin> {

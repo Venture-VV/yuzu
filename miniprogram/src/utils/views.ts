@@ -1,6 +1,6 @@
 // 列表上一行显示的字：流水、券。数字由门店系统给，这里只排版。
 import type { MpCoupon, MpLedgerRow } from '../../../src/shared/mp';
-import { shopTime, yuan } from './format';
+import { shopDateTime, yuan } from './format';
 
 export interface LedgerView {
   id: number;
@@ -13,6 +13,12 @@ export interface LedgerView {
   after: string;
 }
 
+function whenOf(r: MpLedgerRow): string {
+  const at = shopDateTime(r.createdAt);
+  if (!at) return r.businessDate;
+  return at.slice(0, 10) === r.businessDate ? at : at + '（营业日 ' + r.businessDate.slice(5) + '）';
+}
+
 export function ledgerRow(r: MpLedgerRow): LedgerView {
   const total = r.principalDelta + r.bonusDelta;
   let split = '';
@@ -21,7 +27,8 @@ export function ledgerRow(r: MpLedgerRow): LedgerView {
   return {
     id: r.id,
     title: r.kindLabel,
-    when: r.businessDate + ' ' + shopTime(r.createdAt),
+    // 记账的日期与时刻都按 createdAt（北京时间）；营业日切换（默认早上 6 点）之前记的，营业日是前一天，另外写出来
+    when: whenOf(r),
     summary: r.summary,
     amount: yuan(total, true),
     pos: total > 0,

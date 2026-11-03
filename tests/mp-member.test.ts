@@ -49,6 +49,9 @@ const bind = (openid: string, phone: string, extra: Record<string, unknown> = {}
 const phoneOf = (i: number) => `1370000${String(1000 + i)}`;
 const activeBindings = async (memberId: number) =>
   Number((await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM mp_bindings WHERE member_id = ${memberId} AND unbound_at IS NULL`)[0]!.n);
+/** 这位会员当前有效的绑定记录编号（会员码的签名里有它） */
+const bindingOf = async (memberId: number) =>
+  Number((await ctx.sql<{ id: number }[]>`SELECT id FROM mp_bindings WHERE member_id = ${memberId} AND unbound_at IS NULL`)[0]!.id);
 
 describe('绑定会员', () => {
   it('手机号不是会员：不绑、不建会员', async () => {
@@ -210,11 +213,14 @@ describe('会员码', () => {
     const ok = await resolve(code);
     expect(ok.statusCode).toBe(200);
     expect(ok.json()).toMatchObject({ memberId, name: '演示·会员码' });
-    expect((await resolve(makeMemberCode(SECRET, memberId, Date.now() - 60_000))).statusCode).toBe(200);
-    expect((await resolve(makeMemberCode(SECRET, memberId, Date.now() - 3 * 60_000))).json().error.code).toBe('CODE_EXPIRED');
+    const bindingId = await bindingOf(memberId);
+    expect((await resolve(makeMemberCode(SECRET, memberId, bindingId, Date.now() - 60_000))).statusCode).toBe(200);
+    expect((await resolve(makeMemberCode(SECRET, memberId, bindingId, Date.now() - 3 * 60_000))).json().error.code).toBe('CODE_EXPIRED');
     const tampered = `${code.slice(0, -1)}${code.endsWith('0') ? '1' : '0'}`;
     expect((await resolve(tampered)).json().error.code).toBe('CODE_EXPIRED');
-    expect((await resolve(makeMemberCode('another-secret-0123456789abcdef-0123', memberId))).json().error.code).toBe('CODE_EXPIRED');
+    expect((await resolve(makeMemberCode('another-secret-0123456789abcdef-0123', memberId, bindingId))).json().error.code).toBe('CODE_EXPIRED');
+    // 签名里有绑定记录的编号：别的绑定编号算出来的码不认
+    expect((await resolve(makeMemberCode(SECRET, memberId, bindingId + 1000))).json().error.code).toBe('CODE_EXPIRED');
     expect((await resolve('13700001020')).statusCode).toBe(400);
     expect((await resolve(code, null)).statusCode).toBe(401);
   });
@@ -223,7 +229,7 @@ describe('会员码', () => {
     const m = await createMember(ctx, '演示·冻结', phoneOf(21));
     const o = newOpenid();
     expect((await bind(o, phoneOf(21))).statusCode).toBe(200);
-    const code = makeMemberCode(SECRET, m.id);
+    const code = makeMemberCode(SECRET, m.id, await bindingOf(m.id));
     await ctx.sql`UPDATE members SET status = 'frozen' WHERE id = ${m.id}`;
     expect((await call(mp, 'POST', '/api/mp/code', o)).json().error.code).toBe('MEMBER_FROZEN');
     expect((await resolve(code)).json().error.code).toBe('MEMBER_FROZEN');
@@ -242,7 +248,7 @@ describe('解绑', () => {
     const m = await createMember(ctx, '演示·换绑', phoneOf(30));
     const openid = newOpenid();
     expect((await bind(openid, phoneOf(30))).statusCode).toBe(200);
-    const code = makeMemberCode(SECRET, m.id);
+    const code = makeMemberCode(SECRET, m.id, await bindingOf(m.id));
     const list = await api(ctx.app, ctx.clerk, 'GET', `/api/admin/mp/members/${m.id}/bindings`);
     expect(list.status).toBe(200);
     expect(list.body).toHaveLength(1);
@@ -266,5 +272,65 @@ describe('解绑', () => {
     expect((await call(mp, 'GET', '/api/mp/me', openid)).json().bound).toBe(false);
     expect((await staffApp.inject({ method: 'GET', url: `/api/mp-codes/${code}`, headers: { cookie: ctx.clerk } })).json().error.code).toBe('CODE_EXPIRED');
     expect((await bind(newOpenid(), phoneOf(30))).statusCode).toBe(200);
+    // 换绑到别的微信后，旧微信在这一分钟里拿到的码照样认不出（Codex 审查 PR #42）
+    expect((await staffApp.inject({ method: 'GET', url: `/api/mp-codes/${code}`, headers: { cookie: ctx.clerk } })).json().error.code).toBe('CODE_EXPIRED');
+    const fresh = makeMemberCode(SECRET, m.id, await bindingOf(m.id));
+    expect((await staffApp.inject({ method: 'GET', url: `/api/mp-codes/${fresh}`, headers: { cookie: ctx.clerk } })).statusCode).toBe(200);
+  });
+});
+
+describe('绑定结果不确定：确认作废（迁移 044）', () => {
+  const abandon = (openid: string, clientKey: string) => call(mp, 'POST', '/api/mp/bind/abandon', openid, { clientKey });
+
+  it('还没绑上就登记作废：原请求晚到也不绑定；同一个编号再作废照样是作废', async () => {
+    const m = await createMember(ctx, '演示·作废绑定', phoneOf(40));
+    const openid = newOpenid();
+    const clientKey = randomUUID();
+    const a = await abandon(openid, clientKey);
+    expect(a.statusCode, a.body).toBe(200);
+    expect(a.json()).toEqual({ status: 'abandoned' });
+    const late = await call(mp, 'POST', '/api/mp/bind', openid, { clientKey, phone: phoneOf(40) });
+    expect(late.statusCode).toBe(409);
+    expect(late.json().error.code).toBe('OP_ABANDONED');
+    expect(await activeBindings(m.id)).toBe(0);
+    expect((await call(mp, 'GET', '/api/mp/me', openid)).json().bound).toBe(false);
+    expect((await abandon(openid, clientKey)).json()).toEqual({ status: 'abandoned' });
+    // 换一个新的编号照常能绑
+    expect((await bind(openid, phoneOf(40))).statusCode).toBe(200);
+  });
+
+  it('已经绑上了：作废只返回绑定的结果，不作废；别的微信不能作废这个编号', async () => {
+    await createMember(ctx, '演示·已绑上', phoneOf(41));
+    const openid = newOpenid();
+    const clientKey = randomUUID();
+    expect((await call(mp, 'POST', '/api/mp/bind', openid, { clientKey, phone: phoneOf(41) })).statusCode).toBe(200);
+    const a = await abandon(openid, clientKey);
+    expect(a.json()).toMatchObject({ status: 'bound', member: { name: '演示·已绑上' }, replayed: true });
+    const [fence] = await ctx.sql`SELECT 1 FROM mp_op_fences WHERE key = ${clientKey}`;
+    expect(fence).toBeUndefined();
+    expect((await abandon(newOpenid(), clientKey)).json().error.code).toBe('CLIENT_KEY_REUSED');
+  });
+
+  it('绑定与作废同时到：只有一个结果（绑上了作废就返回绑上；作废了绑定就被拒）', async () => {
+    for (let i = 0; i < 6; i++) {
+      const m = await createMember(ctx, `演示·同时${i}`, phoneOf(50 + i));
+      const openid = newOpenid();
+      const clientKey = randomUUID();
+      const [b, a] = await Promise.all([call(mp, 'POST', '/api/mp/bind', openid, { clientKey, phone: phoneOf(50 + i) }), abandon(openid, clientKey)]);
+      if (b.statusCode === 200) expect(a.json().status).toBe('bound');
+      else {
+        expect(b.json().error.code).toBe('OP_ABANDONED');
+        expect(a.json().status).toBe('abandoned');
+      }
+      expect(await activeBindings(m.id)).toBe(b.statusCode === 200 ? 1 : 0);
+    }
+  });
+
+  it('作废登记只追加：不能改、不能删', async () => {
+    const openid = newOpenid();
+    const clientKey = randomUUID();
+    await abandon(openid, clientKey);
+    await expect(ctx.sql`DELETE FROM mp_op_fences WHERE key = ${clientKey}`).rejects.toThrow();
+    await expect(ctx.sql`UPDATE mp_op_fences SET openid = 'someone-else' WHERE key = ${clientKey}`).rejects.toThrow();
   });
 });

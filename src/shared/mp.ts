@@ -97,6 +97,19 @@ export interface MpBindResult {
   replayed: boolean;
 }
 
+/** 绑定结果不确定时确认作废：已经绑上了返回绑定的结果，否则登记作废（原请求之后到达也不会绑定） */
+export type MpBindAbandonResult = MpBindResult | { status: 'abandoned' };
+
+/** 后台新建轮播结果不确定时确认作废：已经建了返回那一条，否则登记作废 */
+export type MpBannerAbandonResult = { state: 'done'; banner: MpBannerAdmin } | { state: 'abandoned' };
+
+/** 后台按操作编号查回新建轮播（只读）：查不到不能断定没新建，要重新提交或确认作废 */
+export interface MpBannerOpLookup {
+  found: boolean;
+  abandoned: boolean;
+  banner: MpBannerAdmin | null;
+}
+
 /** 会员卡上的档阶（会员体系 v2，数字全由 yuzu 算好，小程序只显示） */
 export interface MpGrade {
   /** 「L3 观澜 · 享」 */

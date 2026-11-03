@@ -124,7 +124,8 @@ export type AuditAction =
   | 'member_lookup'
   // 微信小程序（小程序线）：解绑会员的微信、维护小程序内容
   | 'mp_unbind'
-  | 'mp_content_saved';
+  | 'mp_content_saved'
+  | 'mp_op_abandoned';
 
 export interface AuditEntry {
   staffId: number | null;

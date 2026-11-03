@@ -3,7 +3,7 @@
 // 修改都带版本号：没收到结果再保存，会因为版本号对不上被拒绝，不会改两次；新建轮播、解绑带操作编号，重提返回原来那次。
 // 维护内容要「维护小程序内容」；只有「解绑会员的微信」的（值班经理）只看到绑定这一页。
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ImagePlus, Link2Off, Pencil, Plus, Search, X } from 'lucide-react';
 import {
@@ -18,12 +18,13 @@ import {
 import { IMAGE_MAX_EDGE, IMAGE_QUALITY, MAX_IMAGE_BYTES } from '@shared/requests';
 import type { MemberSummary } from '@shared/types';
 import { api, errorMessage, UncertainError } from '../../lib/api';
-import { useCan } from '../../lib/session';
+import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, Segmented, Select, Skeleton, Textarea } from '../../components/ui';
 import { AdminPage } from '../admin/AdminShell';
+import { abandonBannerOp, lookupBannerOp, MpPendingStoreError, removeMpPending, sendBannerCreate, useMpPendingBanners, type MpPendingBanner } from './mpPending';
 
 type Tab = 'store' | 'banners' | 'items' | 'bindings';
 const key = ['mp', 'admin'] as const;
@@ -278,13 +279,22 @@ function StoreForm({ store }: { store: MpStoreAdmin }) {
 
 function BannersTab({ banners }: { banners: MpBannerAdmin[] }) {
   const [target, setTarget] = useState<{ mode: 'new' } | { mode: 'edit'; banner: MpBannerAdmin } | null>(null);
+  const pending = useMpPendingBanners();
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
-        <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setTarget({ mode: 'new' })} data-testid="mp-banner-new">
+        <Button
+          variant="primary"
+          icon={<Plus className="size-4" />}
+          onClick={() => setTarget({ mode: 'new' })}
+          disabled={pending.length > 0}
+          title={pending.length > 0 ? '先处理上面结果待确认的轮播' : undefined}
+          data-testid="mp-banner-new"
+        >
           新建轮播
         </Button>
       </div>
+      {pending.length > 0 && <PendingBanners ops={pending} />}
       {banners.length === 0 ? (
         <Notice tone="info" title="还没有轮播">首页版头照 VI 用门店的氛围实拍图加标志；活动图也放在这里，按日期自动上下架。</Notice>
       ) : (
@@ -311,11 +321,110 @@ function BannersTab({ banners }: { banners: MpBannerAdmin[] }) {
   );
 }
 
+/**
+ * 新建轮播「结果待确认」（Codex 审查 PR #42 的 P1）：进页面先按编号只读查回，建了或作废了的直接移除；
+ * 查不到的由员工「按原内容重新提交」（同一编号，不会多建）或「确认作废」（之后原请求晚到也不会新建）。
+ */
+function PendingBanners({ ops }: { ops: MpPendingBanner[] }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const checked = useRef(new Set<string>());
+  const [busy, setBusy] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<MpPendingBanner | null>(null);
+  const opKeys = ops.map((op) => op.key).join('\n');
+  useEffect(() => {
+    for (const op of ops) {
+      if (checked.current.has(op.key)) continue;
+      checked.current.add(op.key);
+      lookupBannerOp(op)
+        .then((r) => {
+          if (!r.found && !r.abandoned) return;
+          removeMpPending(op.key);
+          void qc.invalidateQueries({ queryKey: key });
+          if (r.found) toast({ tone: 'success', title: '已查回：轮播已新建', body: `「${op.summary}」只建了一张，不用重新填写。` });
+        })
+        .catch(() => checked.current.delete(op.key));
+    }
+    // 按「有哪些编号」触发：断网时不反复查回
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opKeys]);
+  const resubmit = async (op: MpPendingBanner) => {
+    setBusy(op.key);
+    try {
+      const b = await sendBannerCreate({ key: op.key, body: op.body, summary: op.summary, staffName: op.staffName });
+      await qc.invalidateQueries({ queryKey: key });
+      toast({ tone: 'success', title: b.replayed ? '已查回：轮播已新建' : '轮播已新建', body: `「${op.summary}」只建了一张。` });
+    } catch (error) {
+      toast({ tone: 'error', title: '还没确认', body: saveError(error) });
+    } finally {
+      setBusy(null);
+    }
+  };
+  const abandon = async (op: MpPendingBanner) => {
+    setBusy(op.key);
+    try {
+      const r = await abandonBannerOp(op);
+      removeMpPending(op.key);
+      await qc.invalidateQueries({ queryKey: key });
+      if (r.state === 'done') toast({ tone: 'success', title: '原来那次已经建好了', body: `「${op.summary}」已在列表里，不用重新填写。` });
+      else toast({ tone: 'success', title: '已作废', body: '原来那次请求即使晚到也不会新建，可以重新填写。' });
+      setConfirming(null);
+    } catch (error) {
+      toast({ tone: 'error', title: '没有作废', body: saveError(error) });
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <Notice tone="warning" title={`${ops.length} 张轮播的新建结果待确认`}>
+      <p>上次新建时网络断了或没收到结果，不知道建上没有。先查回；查不到时按原内容重新提交（同一编号，不会多建），或确认作废后再重新填写。处理完之前不能新建。</p>
+      <ul className="mt-2 space-y-2">
+        {ops.map((op) => (
+          <li key={op.key} className="flex flex-wrap items-center gap-2" data-testid="mp-banner-pending">
+            <span className="font-semibold text-ink">{op.summary}</span>
+            <span className="text-[12.5px] text-ink-3">
+              {op.staffName} · {formatDateTime(op.createdAt)}
+            </span>
+            <Button size="sm" variant="secondary" loading={busy === op.key} onClick={() => void resubmit(op)}>
+              按原内容重新提交
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy === op.key} onClick={() => setConfirming(op)}>
+              确认作废
+            </Button>
+          </li>
+        ))}
+      </ul>
+      {confirming && (
+        <Dialog
+          open
+          onClose={() => setConfirming(null)}
+          title="确认作废这次新建"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setConfirming(null)}>
+                先不作废
+              </Button>
+              <Button variant="danger" loading={busy === confirming.key} onClick={() => void abandon(confirming)}>
+                确认作废
+              </Button>
+            </>
+          }
+        >
+          <p className="text-[13.5px]">
+            作废「{confirming.summary}」这次新建：门店系统登记作废后，原来那次请求即使晚到也不会新建；如果其实已经建好了，会直接显示那一张。
+          </p>
+        </Dialog>
+      )}
+    </Notice>
+  );
+}
+
 function BannerDialog({ target, onClose }: { target: { mode: 'new' } | { mode: 'edit'; banner: MpBannerAdmin }; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const session = useSession();
   const b = target.mode === 'edit' ? target.banner : null;
-  // 新建的操作编号在这次弹窗里一直用同一个：没收到结果再提交，返回原来那条，不会多建
+  // 新建的操作编号在这次弹窗里一直用同一个；提交前存在本机，没收到结果时在列表上方查回、重提或作废，不会多建
   const [clientKey] = useState(uuid);
   const [f, setF] = useState({
     title: b?.title ?? '',
@@ -333,12 +442,18 @@ function BannerDialog({ target, onClose }: { target: { mode: 'new' } | { mode: '
     const body = { title: f.title, imageId: f.imageId, link: f.link, startsOn: f.startsOn || null, endsOn: f.endsOn || null, sortOrder: Number(f.sortOrder) || 0 };
     try {
       if (b) await api.put(`/api/admin/mp/banners/${b.id}`, { ...body, version: b.version, active: f.active });
-      else await api.post('/api/admin/mp/banners', { ...body, clientKey });
+      else await sendBannerCreate({ key: clientKey, body: { ...body, clientKey }, summary: f.title.trim(), staffName: session.staff.displayName });
       await qc.invalidateQueries({ queryKey: key });
       toast({ tone: 'success', title: b ? '轮播已保存' : '轮播已新建' });
       onClose();
     } catch (error) {
-      toast({ tone: 'error', title: '没有保存', body: saveError(error) });
+      if (!b && error instanceof UncertainError) {
+        // 结果不确定：关掉弹窗，列表上方显示「结果待确认」，在那里查回、重提或作废
+        toast({ tone: 'error', title: '新建结果待确认', body: '没收到结果，不知道建上没有。请在列表上方按原内容重新提交或确认作废，不要重新填一张。' });
+        onClose();
+      } else {
+        toast({ tone: 'error', title: '没有保存', body: error instanceof MpPendingStoreError ? error.message : saveError(error) });
+      }
     } finally {
       setSaving(false);
     }

@@ -118,6 +118,22 @@ describe('整条链路：小程序 → 网关 → yuzu', () => {
     expect(code.json().code).toMatch(/^8\d{15}$/);
   });
 
+  it('绑定结果不确定时确认作废：网关带上会话里的微信转给 yuzu', async () => {
+    await createMember(ctx, '演示·网关作废', '13700002002');
+    const token = await login(gw, 'carol');
+    const clientKey = randomUUID();
+    const a = await authed(gw, token, 'POST', '/v1/bind/abandon', { clientKey });
+    expect(a.statusCode, a.body).toBe(200);
+    expect(a.json()).toEqual({ status: 'abandoned' });
+    const [fence] = await ctx.sql<{ openid: string }[]>`SELECT openid FROM mp_op_fences WHERE key = ${clientKey}`;
+    expect(fence).toEqual({ openid: 'mock_carol' });
+    const late = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700002002', clientKey });
+    expect(late.statusCode).toBe(409);
+    expect(late.json().error.code).toBe('OP_ABANDONED');
+    expect((await authed(gw, token, 'POST', '/v1/bind/abandon', { clientKey: 'not-a-uuid' })).statusCode).toBe(400);
+    expect((await authed(gw, null, 'POST', '/v1/bind/abandon', { clientKey })).statusCode).toBe(401);
+  });
+
   it('会员接口要会话；伪造、过期的会话拒绝', async () => {
     for (const [method, url] of [['GET', '/v1/me'], ['GET', '/v1/ledger'], ['GET', '/v1/coupons'], ['POST', '/v1/code'], ['POST', '/v1/bind']] as const) {
       const res = await authed(gw, null, method, url, method === 'POST' ? {} : undefined);

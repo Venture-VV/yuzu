@@ -16,6 +16,7 @@ import {
   MP_CODE_SECONDS,
   MP_OPENID,
   MP_OPENID_HEADER,
+  type MpBindAbandonResult,
   type MpBindingRow,
   type MpBindResult,
   type MpCodeLookup,
@@ -82,6 +83,9 @@ export async function bindMember(deps: Deps, openid: string, raw: unknown): Prom
     return await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
       await tx`SELECT pg_advisory_xact_lock(hashtext(${`mp_bind:${openid}`}))`;
+      // 这个编号已经确认作废（结果不确定时小程序请门店系统作废的）：晚到的原请求不再生效
+      const [fenced] = await tx`SELECT 1 FROM mp_op_fences WHERE key = ${input.clientKey} AND op_type = 'mp_bind' AND openid = ${openid}`;
+      if (fenced) throw conflict('OP_ABANDONED', '这次绑定已经放弃，请重新绑定');
       // 同一个操作编号重提：内容一样返回原来那次的结果
       const [prev] = await tx<{ openid: string; phone: string; memberId: number }[]>`
         SELECT openid, phone, member_id FROM mp_bindings WHERE client_key = ${input.clientKey}`;
@@ -111,6 +115,31 @@ export async function bindMember(deps: Deps, openid: string, raw: unknown): Prom
     if (isUniqueViolation(error, 'mp_bindings_client_key_key')) throw conflict('CLIENT_KEY_REUSED', '这次绑定的编号已经用过，请重新绑定');
     throw error;
   }
+}
+
+const AbandonInput = z.object({ clientKey: z.uuid('操作编号不正确') });
+
+/**
+ * 绑定结果不确定时确认作废这个编号（小程序线，迁移 044）：与绑定取同一把咨询锁（这个微信），二者不交错。
+ * 已经绑上了只返回查回的结果；还没有就登记作废，之后原请求即使到达也不会绑定（OP_ABANDONED）。
+ */
+export async function abandonBind(deps: Deps, openid: string, raw: unknown): Promise<MpBindAbandonResult> {
+  const { clientKey } = parse(AbandonInput, raw);
+  return deps.sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${`mp_bind:${openid}`}))`;
+    const [prev] = await tx<{ openid: string; memberId: number }[]>`SELECT openid, member_id FROM mp_bindings WHERE client_key = ${clientKey}`;
+    if (prev) {
+      if (prev.openid !== openid) throw conflict('CLIENT_KEY_REUSED', '这次绑定的编号已经用过，请重新绑定');
+      return { status: 'bound' as const, member: await memberBrief(tx, prev.memberId), replayed: true };
+    }
+    await tx`
+      INSERT INTO mp_op_fences (key, op_type, openid) VALUES (${clientKey}, 'mp_bind', ${openid})
+      ON CONFLICT (key, op_type) DO NOTHING`;
+    const [fence] = await tx<{ openid: string }[]>`SELECT openid FROM mp_op_fences WHERE key = ${clientKey} AND op_type = 'mp_bind'`;
+    if (fence?.openid !== openid) throw conflict('CLIENT_KEY_REUSED', '这次绑定的编号已经用过，请重新绑定');
+    return { status: 'abandoned' as const };
+  });
 }
 
 export async function getMe(deps: Deps, openid: string): Promise<MpMe> {
@@ -190,24 +219,33 @@ export async function getCoupons(deps: Deps, openid: string): Promise<MpCoupon[]
 // ── 会员码 ──
 
 const codeWindow = (at = Date.now()) => Math.floor(at / (MP_CODE_SECONDS * 1000));
-const codeMac = (secret: string, memberId: number, window: number) =>
-  String(createHmac('sha256', secret).update(`mpcode:v1:${memberId}:${window}`).digest().readUInt32BE(0) % 1_000_000).padStart(6, '0');
+// 签名连同绑定记录的编号：解绑后再绑到别的微信，旧微信上一分钟内的码也认不出（Codex 审查 PR #42）
+const codeMac = (secret: string, memberId: number, bindingId: number, window: number) =>
+  String(createHmac('sha256', secret).update(`mpcode:v2:${memberId}:${bindingId}:${window}`).digest().readUInt32BE(0) % 1_000_000).padStart(6, '0');
 const memberPart = (memberId: number) => (memberId <= 999_999 ? `8${String(memberId).padStart(6, '0')}` : `9${String(memberId).padStart(9, '0')}`);
 
-/** 会员码：8 + 会员编号（6 位）或 9 + 会员编号（9 位），再接时间窗的后 3 位与 6 位签名；不会与 11 位手机号混淆 */
-export function makeMemberCode(secret: string, memberId: number, at = Date.now()): string {
+/**
+ * 会员码：8 + 会员编号（6 位）或 9 + 会员编号（9 位），再接时间窗的后 3 位与 6 位签名；不会与 11 位手机号混淆。
+ * 签名里有这位会员当前有效的绑定记录编号（码里不带），校验时按当前有效的绑定算。
+ */
+export function makeMemberCode(secret: string, memberId: number, bindingId: number, at = Date.now()): string {
   const w = codeWindow(at);
-  return `${memberPart(memberId)}${String(w % 1000).padStart(3, '0')}${codeMac(secret, memberId, w)}`;
+  return `${memberPart(memberId)}${String(w % 1000).padStart(3, '0')}${codeMac(secret, memberId, bindingId, w)}`;
 }
 
 export async function issueMemberCode(deps: Deps, openid: string): Promise<MpMemberCode> {
   const secret = deps.config.mp.codeSecret;
   if (!secret) throw new AppError(503, 'MP_CODE_UNAVAILABLE', '会员码暂时用不了，请到前台报手机号');
-  const memberId = await boundMemberId(deps.sql, openid);
-  const m = await memberBrief(deps.sql, memberId);
+  const binding = await activeBinding(deps.sql, openid);
+  if (!binding) throw new AppError(403, 'MP_NOT_BOUND', '请先绑定会员');
+  const m = await memberBrief(deps.sql, binding.memberId);
   if (m.frozen) throw new AppError(403, 'MEMBER_FROZEN', '会员已冻结，会员码用不了，请到前台咨询');
   const now = Date.now();
-  return { code: makeMemberCode(secret, memberId, now), expiresAt: new Date((codeWindow(now) + 1) * MP_CODE_SECONDS * 1000).toISOString(), refreshSeconds: MP_CODE_SECONDS };
+  return {
+    code: makeMemberCode(secret, binding.memberId, binding.id, now),
+    expiresAt: new Date((codeWindow(now) + 1) * MP_CODE_SECONDS * 1000).toISOString(),
+    refreshSeconds: MP_CODE_SECONDS,
+  };
 }
 
 /** 前台扫到会员码：签名对、时间窗是这一分钟或上一分钟、会员没冻结、绑定还有效，才认出会员 */
@@ -221,14 +259,15 @@ export async function resolveMemberCode(deps: Deps, code: string, at = Date.now(
   const mac = code.slice(4 + idLen);
   const now = codeWindow(at);
   const window = [now, now - 1].find((w) => w % 1000 === w3);
-  const ok = window !== undefined && timingSafeEqual(Buffer.from(codeMac(secret, memberId, window)), Buffer.from(mac));
-  if (!ok) throw new AppError(410, 'CODE_EXPIRED', '会员码过期或不对，请让客人刷新后再扫');
-  const [m] = await deps.sql<{ id: number; memberNo: string; name: string; status: string }[]>`
-    SELECT m.id, m.member_no, m.name, m.status FROM members m
-    WHERE m.id = ${memberId} AND EXISTS (SELECT 1 FROM mp_bindings b WHERE b.member_id = m.id AND b.unbound_at IS NULL)`;
-  if (!m) throw new AppError(410, 'CODE_EXPIRED', '会员码已失效（微信已解绑），请让客人报手机号');
-  if (m.status === 'frozen') throw new AppError(403, 'MEMBER_FROZEN', '这位会员已冻结');
-  return { memberId: m.id, memberNo: m.memberNo, name: m.name };
+  // 按这位会员当前有效的绑定校验签名：解绑了认不出；换绑到别的微信后，旧微信的码也认不出
+  const [m] = await deps.sql<{ id: number; memberNo: string; name: string; status: string; bindingId: number }[]>`
+    SELECT m.id, m.member_no, m.name, m.status, b.id AS binding_id
+    FROM members m JOIN mp_bindings b ON b.member_id = m.id AND b.unbound_at IS NULL
+    WHERE m.id = ${memberId}`;
+  const ok = !!m && window !== undefined && timingSafeEqual(Buffer.from(codeMac(secret, memberId, m.bindingId, window)), Buffer.from(mac));
+  if (!ok) throw new AppError(410, 'CODE_EXPIRED', '会员码过期或不对（或微信已解绑），请让客人刷新后再扫');
+  if (m!.status === 'frozen') throw new AppError(403, 'MEMBER_FROZEN', '这位会员已冻结');
+  return { memberId: m!.id, memberNo: m!.memberNo, name: m!.name };
 }
 
 // ── 前台：绑定记录与解绑 ──
