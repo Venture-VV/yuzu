@@ -169,8 +169,11 @@ export const PERMISSIONS = {
   'location.report': { roles: ['owner', 'store_manager'] },
   /** 对客导览（v0.7.19，待确认：所有岗位）：区域色块、中英双语、设施图标的导览图与大屏轮播；不显示房号、房态、人员，没有经营数据 */
   'guide.view': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice'] },
-  /** 看设备状态（v0.7.21，待确认：前台岗位与后勤）：门店主导航「设备」一屏看全部设备；开着页面的终端替桥上报状态也用这项 */
-  'device.view': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk', 'backoffice'] },
+  /**
+   * 看设备状态（v0.7.21，待确认：前台岗位）：门店主导航「设备」一屏看全部设备；开着页面的终端替桥上报状态也用这项。
+   * 后勤默认没有：只用 ERP 的后勤照旧没有「返回门店」（v0.7.3 验收 E2）；库房要上报扫码枪时在「岗位权限」给后勤加上
+   */
+  'device.view': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 测试打印（v0.7.21，待确认：值班经理及以上） */
   'device.test': { roles: ['owner', 'store_manager', 'duty_manager'] },
   /** 维护设备（v0.7.21，待确认：店主、店总）：设备登记、按采购清单导入、启用停用 */

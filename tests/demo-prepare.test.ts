@@ -122,7 +122,8 @@ describe('演示数据准备', () => {
     // 技师打上合成标记；场景块的业务都按正式流程记了审计
     const synth = await ctx.sql<{ techNo: string }[]>`SELECT tech_no FROM technicians WHERE is_synthetic ORDER BY tech_no`;
     expect(synth.map((t) => t.techNo)).toEqual(['D01', 'D02', 'D03', 'D04']);
-  });
+    // 从零准备两遍：本机约 6 秒，慢的电脑整套串行跑时会超过默认的 30 秒（Codex 在 main v0.7.20 上的首轮），单独放宽
+  }, 120_000);
 
   it('再执行一次全部跳过，数据指纹不变', async () => {
     const before = await fingerprint();
@@ -256,5 +257,6 @@ describe('演示数据准备', () => {
     // 冲突造的改动都没了：清库重建
     const [t301] = await ctx.sql<{ businessType: string }[]>`SELECT business_type FROM spaces WHERE code = 'T301'`;
     expect(t301!.businessType).toBe('SPA');
-  });
+    // 清库、跑全部迁移、从零准备：本机约 7 秒，慢的电脑整套串行跑时会超过默认的 30 秒（Codex 在 main v0.7.20 上的首轮），单独放宽
+  }, 120_000);
 });
