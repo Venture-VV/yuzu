@@ -170,10 +170,13 @@ export function discountLines<L extends { category: string }>(target: DiscountTa
   return lines.filter((l) => l.category === category);
 }
 
-/** 省下多少（分）：合计 − 合计 × 付几成 ÷ 100，四舍五入到分；按合计算、不逐项算（M47） */
+/**
+ * 省下多少（分）：合计 × (100 − 付几成) ÷ 100，对**省下的金额**四舍五入到分（M47）；按合计算、不逐项算。
+ * 例：1.01 元打 5 折省 0.51 元、收 0.50 元（原来对折后应付取整，半分时少省 1 分；测试会话预检 b49f23b）
+ */
 export function discountOff(base: number, rate: number): number {
   if (base <= 0) return 0;
-  return base - Math.floor((base * rate + 50) / 100);
+  return Math.floor((base * (100 - rate) + 50) / 100);
 }
 
 // ───────────────────────── 本店权益清单（导入用） ─────────────────────────

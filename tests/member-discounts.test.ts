@@ -7,7 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Benefit, BenefitCatalog } from '../src/shared/benefits';
+import { discountOff, type Benefit, type BenefitCatalog } from '../src/shared/benefits';
 import type { CheckoutPreview } from '../src/shared/checkout';
 import { shiftDate } from '../src/shared/labels';
 import { rechargeOutcome, type MemberGradeInfo, type MembershipRules } from '../src/shared/membership';
@@ -21,7 +21,8 @@ let today: string;
 let roomId: number;
 
 const yuan = (n: number) => Math.round(n * 100);
-const off = (base: number, rate: number) => base - Math.floor((base * rate + 50) / 100);
+/** 省下的 = 合计 × (100 − 付几成) ÷ 100，对省下的金额四舍五入到分（M47） */
+const off = (base: number, rate: number) => Math.floor((base * (100 - rate) + 50) / 100);
 
 const catalog = async () => (await api(ctx.app, ctx.owner, 'GET', '/api/benefits')).body as BenefitCatalog;
 const byCode = async (code: string) => (await catalog()).items.find((b) => b.code === code)!;
@@ -86,7 +87,7 @@ const enter = async (memberId: number | null, groupWith?: number) => {
 };
 /** 入住钟点房、马上退房：房费挂到这位客人的手牌账单上；返回房费合计 */
 const roomFee = async (tagCode: string, billId: number) => {
-  const s = await api(ctx.app, ctx.clerk, 'POST', '/api/rooms/checkin', { clientKey: randomUUID(), roomId, expectedRate: 12800, tagCode, guests: 1 });
+  const s = await api(ctx.app, ctx.clerk, 'POST', '/api/rooms/checkin', { clientKey: randomUUID(), roomId, expectedRate: 12810, tagCode, guests: 1 });
   expect(s.status, JSON.stringify(s.body)).toBe(200);
   const pre = (await api(ctx.app, ctx.clerk, 'GET', `/api/rooms/stays/${s.body.id}/checkout-preview`)).body as { dueAmount: number; depositByMethod: unknown[] };
   const c = await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${s.body.id}/close`, {
@@ -138,7 +139,8 @@ beforeAll(async () => {
   expect((await api(ctx.app, ctx.owner, 'POST', '/api/benefits/import')).status).toBe(200);
   // 客房：开启、一间钟点房（128 元 / 3 小时）
   expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/rooms/rules', { enabled: true, checkoutMinute: 720, lateFullMinute: 1080, hourlyGraceMinutes: 15, defaultDeposit: 0 })).status).toBe(200);
-  const t = await api(ctx.app, ctx.owner, 'POST', '/api/admin/rooms/types', { name: '钟点包房', kind: 'hourly', price: 12800, blockMinutes: 180 });
+  // 房费 128.10 元：7.5 折省 32.025 元、6.5 折省 44.835 元——都落在半分上，核对对省下的金额四舍五入（M47）
+  const t = await api(ctx.app, ctx.owner, 'POST', '/api/admin/rooms/types', { name: '钟点包房', kind: 'hourly', price: 12810, blockMinutes: 180 });
   expect(t.status, JSON.stringify(t.body)).toBe(200);
   const rm = await api(ctx.app, ctx.owner, 'POST', '/api/admin/rooms/rooms', { roomNo: '901', floor: '9', roomTypeId: t.body.types.find((x: { name: string }) => x.name === '钟点包房').id });
   expect(rm.status, JSON.stringify(rm.body)).toBe(200);
@@ -147,6 +149,21 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await ctx?.close();
+});
+
+describe('折后的分（M47）：对省下的金额四舍五入到分', () => {
+  it('半分进一（1.01 元 5 折省 0.51 元；1.26 元、0.30 元 7.5 折各省 0.32、0.08 元）；整数分不变；没有金额为 0', () => {
+    expect([discountOff(101, 50), discountOff(126, 75), discountOff(30, 75), discountOff(400, 75), discountOff(1, 50), discountOff(1, 99)]).toEqual([51, 32, 8, 100, 1, 0]);
+    expect([discountOff(0, 75), discountOff(-10, 75)]).toEqual([0, 0]);
+    // 逐个核对：省下的 r 满足 100r − 50 ≤ 合计 × (100 − 折扣) < 100r + 50（四舍五入、半分进一）
+    for (let base = 1; base <= 600; base++) {
+      for (let rate = 10; rate <= 99; rate++) {
+        const exact = base * (100 - rate);
+        const r = discountOff(base, rate);
+        if (!(100 * r - 50 <= exact && exact < 100 * r + 50)) throw new Error(`合计 ${base} 分、付 ${rate} 成：省 ${r} 分不对`);
+      }
+    }
+  });
 });
 
 describe('包房房费折扣（QY-011）', () => {
@@ -172,6 +189,8 @@ describe('包房房费折扣（QY-011）', () => {
     expect(p.memberDiscounts).toEqual([
       expect.objectContaining({ memberId: l3, code: 'QY-011', rate: 75, target: 'room', base, amount: off(base, 75), tagCode: b.tagCode }),
     ]);
+    // 半分：128.10 元 × 25% = 32.025 元 → 省 32.03 元（对折后应付取整会只省 32.02 元）
+    expect([base, p.memberDiscounts![0]!.amount]).toEqual([12810, 3203]);
     open = { ...b, base };
   });
 
@@ -206,6 +225,17 @@ describe('包房房费折扣（QY-011）', () => {
     const items = await ctx.sql<{ category: string; discount: number }[]>`
       SELECT category, sum(discount)::int AS discount FROM checkout_items WHERE checkout_id = ${c.id} GROUP BY 1 ORDER BY 1`;
     expect(items).toEqual(expect.arrayContaining([{ category: '客房', discount: off(base, 75) }, { category: '门票', discount: 0 }]));
+    // ERP「营业数据」与经营总览同一口径：今天的会员折扣 = 今天结了的会员折扣合计（测试会话预检 b49f23b）
+    const today = (await api(ctx.app, ctx.owner, 'GET', '/api/auth/me')).body.today as string;
+    const q = `?from=${today}&to=${today}`;
+    const erp = (await api(ctx.app, ctx.owner, 'GET', `/api/erp/revenue${q}`)).body as { kpis: { memberDiscount: number; net: number } };
+    const exec = (await api(ctx.app, ctx.owner, 'GET', `/api/reports/executive${q}`)).body as { kpis: { memberDiscount: number; net: number } };
+    const [sum] = await ctx.sql<{ n: number }[]>`
+      SELECT coalesce(sum(p.amount), 0)::int AS n FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
+      WHERE p.method = 'member_discount' AND c.status = 'completed' AND c.business_date = ${today}`;
+    expect(sum!.n).toBe(off(base, 75));
+    expect([erp.kpis.memberDiscount, exec.kpis.memberDiscount]).toEqual([sum!.n, sum!.n]);
+    expect(erp.kpis.net).toBe(exec.kpis.net);
     await allChecksOk();
   });
 
