@@ -3,10 +3,12 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { guard } from '../../auth/guard';
+import { guard, guardAny } from '../../auth/guard';
 import { ctxOf, type Deps } from '../../lib/context';
+import { notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { getMember } from '../members';
+import { createBanner, mpAdminData, saveItemIntro, saveMpImage, saveMpRules, saveStore, updateBanner } from './admin';
 import { memberBindings, resolveMemberCode, unbindMember } from './member';
 
 const CodeParam = z.object({ code: z.string().trim().max(32) });
@@ -21,4 +23,28 @@ export function registerMpStaffRoutes(app: FastifyInstance, deps: Deps) {
     return memberBindings(sql, id);
   });
   app.post('/api/admin/mp/bindings/:id/unbind', { preHandler: guard('mp.unbind') }, async (req) => unbindMember(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
+
+  // 后台「小程序」：维护内容要 mp.content；只管解绑的（值班经理）也能打开看
+  const content = guard('mp.content');
+  app.get('/api/admin/mp', { preHandler: guardAny('mp.content', 'mp.unbind') }, async () => mpAdminData(sql));
+  app.put('/api/admin/mp/rules', { preHandler: content }, async (req) => saveMpRules(deps, req.body, ctxOf(req)));
+  app.put('/api/admin/mp/stores/:code', { preHandler: content }, async (req) => saveStore(deps, req.params, req.body, ctxOf(req)));
+  app.post('/api/admin/mp/images', { preHandler: content, bodyLimit: 1_600_000 }, async (req, reply) => {
+    const img = await saveMpImage(sql, req.body, req.actor);
+    reply.code(201);
+    return img;
+  });
+  app.get('/api/admin/mp/images/:id', { preHandler: guardAny('mp.content', 'mp.unbind') }, async (req, reply) => {
+    const [img] = await sql<{ mime: string; data: Buffer }[]>`SELECT mime, data FROM mp_images WHERE id = ${parse(idParam, req.params).id}`;
+    if (!img) throw notFound('图片不存在');
+    reply.header('content-type', img.mime).header('cache-control', 'private, max-age=31536000, immutable');
+    return reply.send(img.data);
+  });
+  app.post('/api/admin/mp/banners', { preHandler: content }, async (req, reply) => {
+    const banner = await createBanner(deps, req.body, ctxOf(req));
+    reply.code(banner.replayed ? 200 : 201);
+    return banner;
+  });
+  app.put('/api/admin/mp/banners/:id', { preHandler: content }, async (req) => updateBanner(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
+  app.put('/api/admin/mp/items/:id/intro', { preHandler: content }, async (req) => saveItemIntro(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
 }

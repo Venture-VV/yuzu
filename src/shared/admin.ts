@@ -26,6 +26,9 @@ export const ADMIN_SECTIONS = {
   spaces: { path: '/admin/spaces', label: '空间台账', perms: ['settings.manage', 'catalog.manage'] },
   // 设备（RQ-001，v0.7.21，见 docs/HARDWARE.md）：设备登记、按采购清单导入、打印任务与设备事件；默认店主、店总
   devices: { path: '/admin/devices', label: '设备', perms: ['device.manage'] },
+  // 微信小程序（小程序线，docs/MINIPROGRAM.md 第 5 节）：开关、门店信息、首页轮播、项目介绍、会员的微信绑定与解绑。
+  // 进后台的权限不变（客户经理照旧不进后台，v0.6.0）：能进后台、又有这两项之一的才看得到
+  mp: { path: '/admin/mp', label: '微信小程序', perms: ['mp.content', 'mp.unbind'] },
   staff: { path: '/admin/staff', label: '员工账号', perms: ['staff.manage'] },
   permissions: { path: '/admin/permissions', label: '岗位权限', perms: ['settings.manage', 'audit.read'] },
   opening: { path: '/admin/opening', label: '期初导入', perms: ['wallet.opening'] },

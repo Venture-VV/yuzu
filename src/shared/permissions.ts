@@ -190,8 +190,11 @@ export const PERMISSIONS = {
   'device.test': { roles: ['owner', 'store_manager', 'duty_manager'] },
   /** 维护设备（v0.7.21，待确认：店主、店总）：设备登记、按采购清单导入、启用停用 */
   'device.manage': { roles: ['owner', 'store_manager'] },
-  /** 维护小程序内容（小程序线，MP7，待确认：店主、店总、客户经理）：门店信息、首页轮播、项目介绍、对顾客开放的开关 */
-  'mp.content': { roles: ['owner', 'store_manager', 'account_manager'] },
+  /**
+   * 维护小程序内容（小程序线，MP7，待确认：店主、店总）：门店信息、首页轮播、项目介绍、对顾客开放的开关。
+   * 原定也给客户经理，但客户经理不进后台（v0.6.0），先不给；要给客户经理须先让他们能进后台只看这一项（MP7 待店主定）
+   */
+  'mp.content': { roles: ['owner', 'store_manager'] },
   /** 解绑会员的微信（小程序线，MP6、MP7，待确认：值班经理及以上）：换手机号、换微信时在前台解绑，写原因、记经办人 */
   'mp.unbind': { roles: ['owner', 'store_manager', 'duty_manager'] },
   'settings.manage': { roles: ['owner'] },

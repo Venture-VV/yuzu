@@ -18,6 +18,7 @@ import {
   Printer,
   Scale,
   ShieldCheck,
+  Smartphone,
   Tags,
   Ticket,
   UsersRound,
@@ -46,6 +47,7 @@ const ICONS: Record<AdminSection, LucideIcon> = {
   rooms: BedDouble,
   spaces: Layers,
   devices: Printer,
+  mp: Smartphone,
   staff: UsersRound,
   permissions: ShieldCheck,
   opening: ArchiveRestore,
@@ -54,7 +56,7 @@ const ICONS: Record<AdminSection, LucideIcon> = {
 
 const GROUPS: { title: string; items: AdminSection[] }[] = [
   { title: '概览', items: ['home', 'settings'] },
-  { title: '经营设置', items: ['rules', 'members', 'membership', 'coupons', 'catalog', 'tags', 'technicians', 'dining', 'rooms', 'spaces'] },
+  { title: '经营设置', items: ['rules', 'members', 'membership', 'coupons', 'catalog', 'tags', 'technicians', 'dining', 'rooms', 'spaces', 'mp'] },
   { title: '人员与权限', items: ['staff', 'permissions'] },
   { title: '数据', items: ['opening', 'audit'] },
 ];

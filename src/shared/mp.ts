@@ -174,3 +174,46 @@ export interface MpBindingRow {
   unboundByName: string | null;
   unbindReason: string | null;
 }
+
+// ── 后台「小程序」模块（员工端口，权限 mp.content；绑定记录另要 mp.unbind）──
+
+export interface MpStoreAdmin extends MpStore {
+  id: number;
+  visible: boolean;
+  sortOrder: number;
+  version: number;
+  updatedAt: string;
+}
+
+export interface MpBannerAdmin extends MpBanner {
+  startsOn: string | null;
+  endsOn: string | null;
+  sortOrder: number;
+  active: boolean;
+  version: number;
+}
+
+export interface MpItemIntroAdmin {
+  itemId: number;
+  name: string;
+  category: string;
+  active: boolean;
+  intro: string;
+  imageId: number | null;
+  /** 还没写过介绍时为 0 */
+  version: number;
+}
+
+export interface MpAdminData {
+  rules: MpRules;
+  stores: MpStoreAdmin[];
+  banners: MpBannerAdmin[];
+  items: MpItemIntroAdmin[];
+}
+
+export const MP_BANNER_LINKS: { value: MpBannerLink; label: string }[] = [
+  { value: 'none', label: '不跳转' },
+  { value: 'prices', label: '价目表' },
+  { value: 'guide', label: '楼层导览' },
+  { value: 'store', label: '门店信息' },
+];
