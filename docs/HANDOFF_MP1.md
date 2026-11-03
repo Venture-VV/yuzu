@@ -56,7 +56,7 @@ yuzu 的 `.env`（只在要接小程序的实例上加，见 `.env.example`）�
 - `npm run typecheck`、`npm run build`（含 `dist/gateway/index.js`）通过。
 - `npm test`：见 PR 上提测评论里的数字。小程序线新增 `tests/mp-public.test.ts` 13 项、`tests/mp-member.test.ts` 16 项、`tests/mp-admin.test.ts` 6 项、`tests/gateway.test.ts` 10 项；8 个升级测试的迁移清单加了 `043`。
 - 浏览器用例 `e2e/mp-admin.spec.ts`（门店电脑尺寸）通过、重跑一次照样过；受影响的 `admin-v060`、`review-v060`、`viewports`、`pending-marks` 在门店电脑与手机尺寸全过。
-- 小程序 `miniprogram/`：`npm run check`（类型检查连同 `src/shared/mp.ts` 等共用类型 + 36 项单元测试）。会员码二维码用独立的解码器（jsQR）读回核对：16 位、19 位会员码各 60 个，以及 1–101 位各种长度（版本 1–3）。
+- 小程序 `miniprogram/`：`npm run check`（类型检查连同 `src/shared/mp.ts` 等共用类型 + 41 项单元测试，其中 5 项用本机假服务核对自动化脚本的保护：实例标识不是 demo、参数不对、网关不是模拟微信时不登录不写数据，开发者工具起不来时关上开关）。会员码二维码用独立的解码器（jsQR）读回核对：16 位、19 位会员码各 60 个，以及 1–101 位各种长度（版本 1–3）。
 - 本机整条链路（独立演示库 + yuzu 小程序端口 + 本机网关「模拟微信」，用小程序真实的接口代码调用）17 项全过：开关关着时 403 `MP_DISABLED`；首页两家门店；价目；没绑定；不是会员的手机号 `NOT_MEMBER`；绑定成功、同一个操作编号重提返回原来那次；会员卡（L0、下一档还差多少、扣款规则）；流水；券；会员码 16 位；前台用会员码查到这位会员；改一位就认不出；另一个微信绑同一位会员 `MEMBER_BOUND`；员工端口解绑。跑完解绑、开关关上。
 - 页面的近似预览：把 WXML 套上演示数据在浏览器里渲染、截图，核对版式（不能代替开发者工具）。
 
@@ -78,7 +78,7 @@ yuzu 的 `.env`（只在要接小程序的实例上加，见 `.env.example`）�
 
 ## 7. 可复制给本地 AI（装了微信开发者工具的电脑）的指令
 
-> 本地 AI：测试小程序 PR #42 的完整 SHA。① 按这个 SHA 拉代码，新建独立演示库并执行 `demo-prepare`，不得指向门店库、测试服或正式服；② yuzu 的 `.env` 加 `MP_PORT=8081`、`MP_GATEWAY_KEY`、`MP_CODE_SECRET`（各 32 位以上的随机串），`npm ci && npm run build` 后启动 yuzu；③ 启动本机网关：`MP_UPSTREAM_URL=http://127.0.0.1:8081 MP_GATEWAY_KEY=<同上> MP_SESSION_SECRET=<随机串> MP_MOCK_WECHAT=true node dist/gateway/index.js`；④ 在 https://developers.weixin.qq.com/sandbox 扫码领一个测试号（只用 AppID；开发者工具稳定版 2.02 用命令行打开时不认仓库里占位的 `touristappid`），微信开发者工具导入 `miniprogram/` 目录时填测试号的 AppID，「设置 → 安全设置」打开服务端口；⑤ 在 `miniprogram/` 下 `npm ci`，`MP_APPID=<测试号的 AppID> WECHAT_CLI=<开发者工具的 cli> YUZU_URL=http://127.0.0.1:<yuzu 端口> npm run e2e`（脚本把 AppID 写进不进仓库的 `project.private.config.json`、关掉合法域名校验、以「信任项目」打开）（脚本会打开小程序开关、用模拟微信绑定演示会员 YZ01004、逐页核对与截图，最后解绑、关上开关）；⑥ 在开发者工具里换 iPhone SE、iPhone 15 Pro Max、一款安卓的尺寸各看一遍首页、我的、会员码，截图；⑦ 按 AGENTS.md 的验收评论格式发在 PR #42：完整 SHA、环境（开发者工具与基础库版本）、实际验证范围、未测项、P1 / P2 问题与截图。`e2e/smoke.mjs` 第一次在真开发者工具上跑，脚本本身的问题也请记下来。
+> 本地 AI：测试小程序 PR #42 的完整 SHA。① 按这个 SHA 拉代码，新建独立演示库并执行 `demo-prepare`，不得指向门店库、测试服或正式服；② yuzu 的 `.env` 加 `YUZU_INSTANCE=demo`、`MP_PORT=8081`、`MP_GATEWAY_KEY`、`MP_CODE_SECRET`（后两个各 32 位以上的随机串），`npm ci && npm run build` 后启动 yuzu；③ 启动本机网关：`MP_UPSTREAM_URL=http://127.0.0.1:8081 MP_GATEWAY_KEY=<同上> MP_SESSION_SECRET=<随机串> MP_MOCK_WECHAT=true node dist/gateway/index.js`；④ 在 https://developers.weixin.qq.com/sandbox 扫码领一个测试号（只用 AppID；开发者工具稳定版 2.02 用命令行打开时不认仓库里占位的 `touristappid`），微信开发者工具导入 `miniprogram/` 目录时填测试号的 AppID，「设置 → 安全设置」打开服务端口；⑤ 在 `miniprogram/` 下 `npm ci`，`MP_APPID=<测试号的 AppID> WECHAT_CLI=<开发者工具的 cli> YUZU_URL=http://127.0.0.1:<yuzu 端口> npm run e2e`（`YUZU_URL` 必须写明；实例标识不是 `demo` 时脚本只读了健康检查就拒绝。脚本把 AppID 写进不进仓库的 `project.private.config.json`、关掉合法域名校验、以「信任项目」打开）（脚本会打开小程序开关、用模拟微信绑定演示会员 YZ01004、逐页核对与截图，最后解绑、关上开关）；⑥ 在开发者工具里换 iPhone SE、iPhone 15 Pro Max、一款安卓的尺寸各看一遍首页、我的、会员码，截图；⑦ 按 AGENTS.md 的验收评论格式发在 PR #42：完整 SHA、环境（开发者工具与基础库版本）、实际验证范围、未测项、P1 / P2 问题与截图。`e2e/smoke.mjs` 第一次在真开发者工具上跑，脚本本身的问题也请记下来。
 
 ## 8. 店主要做的
 
