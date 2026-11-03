@@ -19,6 +19,7 @@
 | `src/config/env.ts` | 按小程序的版本（开发版、体验版、正式版）选网关 |
 | `tests/` | 单元测试（不要微信开发者工具） |
 | `scripts/render-icons.mjs` | 生成底部标签栏的图标 |
+| `assets-src/brand/*.svg`、`src/assets/brand/*.png` | 汤崎标志（店主 11-03 定用品牌书 / VI 的几何字）：竖版方形主标志、横版、英文字标 TOUCHILL。SVG 是从品牌书 / VI 的 PDF 里按区域取出的原矢量路径（不是截图），放在 `src/` 外面、不进小程序包；页面用 `scripts/render-logo.mjs` 生成的 PNG（按用到的地方换颜色、透明底） |
 
 接口的类型直接用 yuzu 的 `src/shared/mp.ts`、`src/shared/guide.ts`（只引类型，编译后不留引用），接口改了这里的类型检查会报错。
 
@@ -75,4 +76,5 @@ npm run check      # 类型检查 + 单元测试；CI 的「小程序：类型�
 - 样式不用 flex 的 `gap`（老 iOS 不认），间距用外边距或 grid 的 `grid-gap`。
 - 金额一律整数「分」，显示用 `utils/format.ts`，不用浮点数算钱。
 - 会员相关的数字不存本机；展示内容（门店信息、价目、导览）存一份，门店连不上时标「之前的信息」。
-- `tests/pages.test.ts` 会查：页面四个文件齐全、页面上绑的事件在代码里有、标签栏图标不超过 40KB、上面这几条写法。
+- 标志用图片，不用文字拼：首页版头与会员卡用竖版主标志，滚过版头的导航栏用横版（VI 说横版只在特定情况用），英文字标与主标志同宽。改了源文件或颜色后在仓库根目录执行 `node miniprogram/scripts/render-logo.mjs`。
+- `tests/pages.test.ts` 会查：页面四个文件齐全、页面上绑的事件在代码里有、标签栏图标不超过 40KB、页面用到的本地图片都在且不超过 60KB、上面这几条写法。

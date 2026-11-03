@@ -179,7 +179,9 @@ async function main() {
     let page = await mp.reLaunch('/pages/home/index');
     let d = await waitData(page, (x) => x.status !== 'loading');
     check('首页：门店信息', d.status === 'ready' && d.stores.length >= 1, d.stores.map((s) => s.name).join('、'));
-    check('首页：版头的字标', (await textOf(page, '.wordmark')).includes('TOUCHILL'));
+    // 版头的标志是图片（品牌书 / VI 的几何字，miniprogram/src/assets/brand）
+    const logo = await page.$('.wordmark .wm-logo');
+    check('首页：版头的标志', !!logo && String(await logo.attribute('src')).includes('/assets/brand/logo-stacked'));
     await shot('01-home');
 
     // 价目表

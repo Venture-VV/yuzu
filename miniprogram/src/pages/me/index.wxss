@@ -26,17 +26,15 @@
   justify-content: center;
   color: var(--wood);
 }
-.gc-zh {
-  font-size: 44rpx;
-  letter-spacing: 0.3em;
-  margin-right: -0.3em;
+/* 主标志与英文字标（木色），宽高按原图比例 */
+.gc-logo {
+  width: 96rpx;
+  height: 94rpx;
 }
 .gc-en {
-  font-family: var(--font-en);
-  font-size: 18rpx;
-  font-weight: 700;
-  letter-spacing: 0.5em;
-  margin-right: -0.5em;
+  width: 96rpx;
+  height: 14rpx;
+  margin-top: 14rpx;
 }
 .fine {
   display: block;
@@ -106,23 +104,12 @@
   letter-spacing: 0.08em;
   color: var(--card-muted);
 }
+/* 卡面右上角的主标志 */
 .mc-mark {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
+  flex-shrink: 0;
+  width: 72rpx;
+  height: 71rpx;
   opacity: 0.85;
-}
-.mm-zh {
-  font-size: 30rpx;
-  letter-spacing: 0.24em;
-  margin-right: -0.24em;
-}
-.mm-en {
-  font-family: var(--font-en);
-  font-size: 14rpx;
-  font-weight: 700;
-  letter-spacing: 0.42em;
-  margin-right: -0.42em;
 }
 .mc-level {
   display: flex;
