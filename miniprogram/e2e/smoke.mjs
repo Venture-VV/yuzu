@@ -35,12 +35,16 @@ const PASSWORD = process.env.OWNER_PASSWORD || 'yuzu2026';
 // 演示库里的会员（seed-demo）：YZ01004 沈知夏
 const PHONE = (process.env.MEMBER_PHONE || '19900001004').trim();
 
+// 开发者工具第一次没连上时等多久再试一次（毫秒；单元测试里设成 0）
+const RETRY_MS = Number(process.env.MP_E2E_RETRY_MS ?? 5000);
+
 const results = [];
 const check = (label, ok, detail = '') => {
   results.push({ label, ok });
   console.log(`${ok ? '✓' : '✗'} ${label}${detail ? `  ${detail}` : ''}`);
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const msg = (e) => (e && e.message ? String(e.message).split('\n')[0] : String(e));
 
 async function getJson(url) {
   const res = await fetch(url);
@@ -80,15 +84,55 @@ function usePrivateAppid(appid) {
   writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n');
 }
 
-/** 这位演示会员现在有效的微信绑定都解掉（上次中途退出时可能留着） */
+/** 员工端口的请求：不是 2xx 就报错（收尾时据此记「收尾未确认」） */
+async function okJson(res) {
+  const r = await res;
+  if (!r.ok) throw new Error(`员工端口返回 ${r.status}`);
+  return r.json();
+}
+
+/** 这位演示会员现在有效的微信绑定（上次中途退出时可能留着） */
+async function activeBindings(staff, memberId) {
+  const rows = await okJson(staff('GET', `/api/admin/mp/members/${memberId}/bindings`));
+  if (!Array.isArray(rows)) throw new Error('绑定记录的格式不对');
+  return rows.filter((x) => !x.unboundAt);
+}
+
+/** 把这位演示会员有效的微信绑定都解掉，返回解掉了几条；有一条没解掉就报错 */
 async function unbindAll(staff, memberId, reason) {
-  const rows = await (await staff('GET', `/api/admin/mp/members/${memberId}/bindings`)).json();
   let n = 0;
-  for (const r of rows.filter((x) => !x.unboundAt)) {
-    const u = await staff('POST', `/api/admin/mp/bindings/${r.id}/unbind`, { clientKey: crypto.randomUUID(), reason });
-    if (u.ok) n++;
+  for (const r of await activeBindings(staff, memberId)) {
+    await okJson(staff('POST', `/api/admin/mp/bindings/${r.id}/unbind`, { clientKey: crypto.randomUUID(), reason }));
+    n++;
   }
   return n;
+}
+
+/** 关上小程序开关：失败时隔一会儿再试，最多三次 */
+async function closeSwitch(staff) {
+  let last = null;
+  for (const wait of [0, 1000, 3000]) {
+    if (wait && RETRY_MS) await sleep(Math.min(wait, RETRY_MS));
+    try {
+      await okJson(staff('PUT', '/api/admin/mp/rules', { enabled: false }));
+      return;
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
+/** 启动开发者工具：新项目第一次打开时它要初始化，自动化常常等不到，等一会儿再试一次 */
+async function launchTool() {
+  const options = { cliPath: process.env.WECHAT_CLI, projectPath: PROJECT, trustProject: true, timeout: 90000 };
+  try {
+    return await automator.launch(options);
+  } catch (e) {
+    console.log(`… 开发者工具没连上（${msg(e)}），${RETRY_MS / 1000} 秒后再试一次`);
+    await sleep(RETRY_MS);
+    return automator.launch(options);
+  }
 }
 
 async function textOf(page, selector) {
@@ -130,8 +174,7 @@ async function main() {
     const opened = await staff('PUT', '/api/admin/mp/rules', { enabled: true });
     check('员工端口：打开小程序开关', opened.ok);
     if (APPID) usePrivateAppid(APPID);
-    // 开发者工具第一次启动、初始化要一会儿
-    mp = await automator.launch({ cliPath: process.env.WECHAT_CLI, projectPath: PROJECT, trustProject: true, timeout: 90000 });
+    mp = await launchTool();
     // 首页
     let page = await mp.reLaunch('/pages/home/index');
     let d = await waitData(page, (x) => x.status !== 'loading');
@@ -196,18 +239,31 @@ async function main() {
     check('解绑与换号：到前台办理', (await textOf(page, '.panel')).includes('前台'));
     await shot('09-unbind');
   } finally {
-    // ③ 收尾：解绑（写原因）、关上开关，再回读核对，演示库恢复原样
-    try {
+    // ③ 收尾：解绑（写原因）、关上开关、回读核对，演示库恢复原样。
+    // 几步互不影响：哪一步出错只记下「收尾未确认」，后面的照做（解绑出错也照样关开关）
+    const step = async (label, fn) => {
+      try {
+        await fn();
+      } catch (e) {
+        check(label, false, `收尾未确认：${msg(e)}`);
+      }
+    };
+    await step('收尾：解绑', async () => {
       const n = await unbindAll(staff, memberId, '小程序自动化测试后解绑');
       if (bound) check('员工端口解绑', n >= 1);
-      if (switched) await staff('PUT', '/api/admin/mp/rules', { enabled: false });
-      const admin = await (await staff('GET', '/api/admin/mp')).json();
+    });
+    if (switched) await step('收尾：关上小程序开关', () => closeSwitch(staff));
+    await step('收尾：回读小程序开关', async () => {
+      const admin = await okJson(staff('GET', '/api/admin/mp'));
       check('收尾：小程序开关已关上', !!admin && !!admin.rules && admin.rules.enabled === false);
-      const rows = await (await staff('GET', `/api/admin/mp/members/${memberId}/bindings`)).json();
-      check('收尾：没有留下有效绑定', Array.isArray(rows) && rows.filter((x) => !x.unboundAt).length === 0);
-    } finally {
-      if (mp) await mp.close();
+    });
+    await step('收尾：回读绑定', async () => {
+      check('收尾：没有留下有效绑定', (await activeBindings(staff, memberId)).length === 0);
+    });
+    if (results.some((r) => !r.ok && r.label.startsWith('收尾'))) {
+      console.log('！收尾没有确认完：请在后台「微信小程序」确认开关已关上、这位演示会员没有有效绑定，或恢复后重跑本脚本');
     }
+    if (mp) await step('收尾：关闭开发者工具的自动化', () => mp.close());
   }
   const failed = results.filter((r) => !r.ok).length;
   console.log(`\n${results.length - failed} 项通过，${failed} 项没过；截图在 ${SHOTS}`);

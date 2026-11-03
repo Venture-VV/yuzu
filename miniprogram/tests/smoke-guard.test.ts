@@ -21,6 +21,9 @@ let instance: string | null = 'demo';
 let mockWechat = true;
 let enabled = false;
 let seen: Seen[] = [];
+/** 收尾时查绑定记录返回 500（第一次查是开始前的清理，照常） */
+let failCleanupBindings = false;
+let bindingQueries = 0;
 
 const read = (req: IncomingMessage) =>
   new Promise<string>((resolve) => {
@@ -42,7 +45,11 @@ beforeAll(async () => {
     if (req.method === 'GET' && url === '/gw/v1/health') return json(200, { ok: true, mockWechat, store: 'online' });
     if (req.method === 'POST' && url === '/api/auth/login') return json(200, { ok: true }, { 'set-cookie': 'yuzu_session=fake; Path=/' });
     if (req.method === 'GET' && url.startsWith('/api/members?')) return json(200, [{ id: 7 }]);
-    if (req.method === 'GET' && url === '/api/admin/mp/members/7/bindings') return json(200, []);
+    if (req.method === 'GET' && url === '/api/admin/mp/members/7/bindings') {
+      bindingQueries += 1;
+      if (failCleanupBindings && bindingQueries > 1) return json(500, { error: { code: 'INTERNAL' } });
+      return json(200, []);
+    }
     if (req.method === 'PUT' && url === '/api/admin/mp/rules') {
       enabled = (JSON.parse(body) as { enabled: boolean }).enabled;
       return json(200, { enabled });
@@ -62,9 +69,10 @@ afterAll(async () => {
 function run(env: Record<string, string>): Promise<{ code: number | null; out: string; seen: Seen[] }> {
   seen = [];
   enabled = false;
+  bindingQueries = 0;
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [SCRIPT], {
-      env: { PATH: process.env.PATH ?? '', GATEWAY_URL: `${base}/gw`, WECHAT_CLI: '/nonexistent/wechat-cli', ...env },
+      env: { PATH: process.env.PATH ?? '', GATEWAY_URL: `${base}/gw`, WECHAT_CLI: '/nonexistent/wechat-cli', MP_E2E_RETRY_MS: '0', ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let out = '';
@@ -116,5 +124,20 @@ describe('自动化冒烟脚本只在独立演示库上跑', () => {
     expect(enabled).toBe(false);
     expect(r.out).toContain('✓ 收尾：小程序开关已关上');
     expect(r.out).toContain('✓ 收尾：没有留下有效绑定');
+    // 开发者工具第一次没连上时再试一次
+    expect(r.out).toContain('再试一次');
+  });
+
+  it('收尾时查绑定出错：照样关上开关，并明确记「收尾未确认」', async () => {
+    failCleanupBindings = true;
+    const r = await run({ YUZU_URL: base });
+    failCleanupBindings = false;
+    expect(r.code).not.toBe(0);
+    expect(writes(r.seen).map((s) => `${s.method} ${s.url} ${s.body}`)).toContain('PUT /api/admin/mp/rules {"enabled":false}');
+    expect(enabled).toBe(false);
+    expect(r.out).toContain('✗ 收尾：解绑  收尾未确认');
+    expect(r.out).toContain('✓ 收尾：小程序开关已关上');
+    expect(r.out).toContain('✗ 收尾：回读绑定  收尾未确认');
+    expect(r.out).toContain('收尾没有确认完');
   });
 });
