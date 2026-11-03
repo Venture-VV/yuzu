@@ -8,21 +8,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import {
-  DEFAULT_DINING_RULES,
-  KITCHEN_STATUSES,
-  MAX_DISH_NOTE,
-  MAX_STATION_NAME,
-  type DiningAdmin,
-  type DiningGuest,
-  type DiningMenu,
-  type DiningRules,
-  type KitchenBoard,
-  type KitchenItem,
-  type KitchenStation,
-  type KitchenStatus,
-  type MenuDish,
-} from '@shared/dining';
+import { DEFAULT_DINING_RULES, KITCHEN_STATUSES, MAX_STATION_NAME, type DiningAdmin, type DiningGuest, type DiningMenu, type DiningRules, type KitchenBoard, type KitchenItem, type KitchenStation, type KitchenStatus, type MenuDish } from '@shared/dining';
 import { defaultTier, type TierPrice } from '@shared/catalog';
 import { can } from '@shared/permissions';
 import type { Db, Tx } from '../db';
@@ -350,8 +336,6 @@ const ItemsInput = z.object({
     .min(1, '没有要调整的菜品')
     .max(500),
 });
-
-export const DishNote = z.string().trim().max(MAX_DISH_NOTE, `口味备注最多 ${MAX_DISH_NOTE} 字`);
 
 export function registerDiningRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;

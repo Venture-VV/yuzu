@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { HHMM } from '@shared/business-date';
-import { DEDUCTION_RULES, type DeductionRule } from '@shared/deduction';
+import { DEDUCTION_RULES } from '@shared/deduction';
 import { MAX_MEMBER_FIELDS, MEMBER_FIELD_KEY, MEMBER_FIELD_TYPES, type MemberFieldDef } from '@shared/member-fields';
 import { DEFAULT_MEMBER_CHANNELS, MAX_MEMBER_CHANNELS, MEMBER_CHANNEL_KEY, type MemberChannel } from '@shared/members';
 import type { StoreRules } from '@shared/types';
@@ -195,8 +195,4 @@ export function registerSettingsRoutes(app: FastifyInstance, { sql }: Deps) {
     });
     return loadSettings(sql);
   });
-}
-
-export function isDeductionRule(value: unknown): value is DeductionRule {
-  return typeof value === 'string' && (DEDUCTION_RULES as readonly string[]).includes(value);
 }

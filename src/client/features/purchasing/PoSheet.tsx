@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { Ban, CircleCheck, CornerUpLeft, FilePen, Lock, PackagePlus, Pencil, Send, X } from 'lucide-react';
 import { INV_STATUS_LABELS } from '@shared/inventory';
@@ -12,7 +12,7 @@ import { Money } from '../../components/Money';
 import { Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, IconButton, Notice, Spinner } from '../../components/ui';
+import { Badge, Button, IconButton, Notice, Spinner, InfoItem as Info } from '../../components/ui';
 import { Qty, SimRule } from '../inventory/parts';
 import { CompareChip, PoStatusChip, ReceivingChip } from './parts';
 import { useInvalidateAll, usePo } from './queries';
@@ -144,7 +144,7 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
           <Info label="编制">{po.createdByName}</Info>
           <Info label="确认">{po.approvedByName ? `${po.approvedByName} · ${formatDateTime(po.approvedAt!)}` : '—'}</Info>
           {po.note && (
-            <Info label="备注" wide>
+            <Info label="备注" full>
               {po.note}
             </Info>
           )}
@@ -348,11 +348,3 @@ function MoneyTile({ label, cents, hint, tone = 'ink' }: { label: string; cents:
   );
 }
 
-function Info({ label, children, wide }: { label: string; children: ReactNode; wide?: boolean }) {
-  return (
-    <div className={cn('min-w-0', wide && 'col-span-full')}>
-      <dt className="text-[11.5px] font-semibold text-ink-3">{label}</dt>
-      <dd className="truncate font-semibold text-ink">{children}</dd>
-    </div>
-  );
-}

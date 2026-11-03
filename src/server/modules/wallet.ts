@@ -115,7 +115,6 @@ export const AbandonInput = z.object({
   amount: z.number().int().min(0).optional(),
   summary: z.string().trim().max(200, '摘要最多 200 字').default(''),
 });
-export type AbandonInputData = z.input<typeof AbandonInput>;
 type AbandonInputParsed = z.output<typeof AbandonInput>;
 
 // ───────────────────────── 基础工具 ─────────────────────────

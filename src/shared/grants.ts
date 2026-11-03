@@ -9,13 +9,6 @@
 export const GRANT_PURPOSES = ['vip_tag', 'over_limit', 'checkout_discount', 'ticket_discount'] as const;
 export type GrantPurpose = (typeof GRANT_PURPOSES)[number];
 
-export const GRANT_PURPOSE_LABELS: Record<GrantPurpose, string> = {
-  vip_tag: '使用 VIP 柜',
-  over_limit: '超过单笔上限',
-  checkout_discount: '优惠 / 免单',
-  ticket_discount: '降低票种 / 免票',
-};
-
 export const GRANT_TTL_MINUTES = 5;
 
 /** VIP 柜授权的对象：哪位客人（会员编号；散客为 null）用哪张柜 */

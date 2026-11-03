@@ -16,17 +16,10 @@ export const MAX_USAGE_NOTE = 100;
 
 export const USAGE_STATUSES = ['open', 'closed', 'cancelled'] as const;
 export type UsageStatus = (typeof USAGE_STATUSES)[number];
-export const USAGE_STATUS_LABELS: Record<UsageStatus, string> = { open: '使用中', closed: '已结束', cancelled: '已撤单' };
 
 /** 怎么结束的：手动结束 / 使用人结账 / 撤销来访 / 开错了撤单 */
 export const USAGE_CLOSE_KINDS = ['end', 'checkout', 'visit_cancel', 'cancel'] as const;
 export type UsageCloseKind = (typeof USAGE_CLOSE_KINDS)[number];
-export const USAGE_CLOSE_KIND_LABELS: Record<UsageCloseKind, string> = {
-  end: '结束使用',
-  checkout: '使用人结账',
-  visit_cancel: '撤销来访',
-  cancel: '撤单',
-};
 
 /** 一张使用单（只带手牌号，不带会员姓名、手机号） */
 export interface UsageDetail {

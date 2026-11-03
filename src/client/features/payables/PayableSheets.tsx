@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router';
 import { Ban, CircleCheck, CornerUpLeft, RotateCcw, Send, X } from 'lucide-react';
 import { PAY_METHOD_LABELS, type OpeningPayableDoc, type PaymentDoc } from '@shared/purchasing';
@@ -10,7 +10,7 @@ import { Money } from '../../components/Money';
 import { Dialog, Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, Field, IconButton, Input, MoneyInput, Notice, Select, Spinner } from '../../components/ui';
+import { Badge, Button, Field, IconButton, Input, MoneyInput, Notice, Select, Spinner, InfoItem as Info } from '../../components/ui';
 import { SimRule } from '../inventory/parts';
 import { useInvSettings, useSuppliers } from '../inventory/queries';
 import { PayableStatusChip } from '../purchasing/parts';
@@ -408,11 +408,3 @@ export function OpeningDialog({ open, onClose, supplierId }: { open: boolean; on
   );
 }
 
-function Info({ label, children, wide }: { label: string; children: ReactNode; wide?: boolean }) {
-  return (
-    <div className={cn('min-w-0', wide && 'col-span-2')}>
-      <dt className="text-[11.5px] font-semibold text-ink-3">{label}</dt>
-      <dd className="truncate font-semibold text-ink">{children}</dd>
-    </div>
-  );
-}

@@ -97,8 +97,6 @@ export const CHECKOUT_METHOD_LABELS: Record<CheckoutMethod, string> = {
  * 都不是本次实收
  */
 export const isCashLike = (m: CheckoutMethod): m is PaymentMethod => (PAYMENT_METHODS as readonly string[]).includes(m);
-/** 不是收款、是让利的方式：优惠 / 免单与券抵扣（v0.7.20）；营业额要减去这两项 */
-export const isDiscountLike = (m: CheckoutMethod) => m === 'discount' || m === 'store_coupon';
 
 /**
  * 营业口径的分列（店主 2026-10-29 签认：日结分列应收、优惠、净营业额、实收）：
