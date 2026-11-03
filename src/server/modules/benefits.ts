@@ -1004,7 +1004,13 @@ export async function benefitSummary(db: Db, date: string): Promise<BenefitSumma
     FROM benefit_uses WHERE status = 'active' AND business_date BETWEEN ${from} AND ${to}`;
   const rows = await db<CatalogRow[]>`${CATALOG_SELECT(db, from, to)} ORDER BY b.sort_order, b.id`;
   const [job] = await db<BenefitJobRun[]>`SELECT ${JOB_COLUMNS(db)} FROM membership_job_runs WHERE job = 'benefits' ORDER BY business_date DESC LIMIT 1`;
+  // 会员折扣（v0.7.25）：本月结账、没有反结账的
+  const [md] = await db<{ count: number; amount: number; members: number }[]>`
+    SELECT count(*)::int AS count, coalesce(sum(p.amount), 0)::bigint AS amount, count(DISTINCT p.discount_member_id)::int AS members
+    FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
+    WHERE p.method = 'member_discount' AND c.status = 'completed' AND c.business_date BETWEEN ${from} AND ${to}`;
   return {
+    memberDiscount: md!,
     from,
     to,
     published: rows.filter((r) => r.status === 'published').length,

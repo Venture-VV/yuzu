@@ -1,12 +1,14 @@
 // 数据看板 →「会员体系」（会员体系 v2，v0.7.23；docs/MEMBERSHIP.md 第 4 节）：客户经理、店总、店主看。
 //   · 19 个状态各多少人；本月升档、升阶、保级、补充期、降档人次；
 //   · 到期提醒名单（未来 7 / 30 / 60 / 90 天）与补充期名单，可导出给客户经理逐个联系；
-//   · 今天自动处理了谁、为什么；每天的自动任务有没有跑、有没有出错。
+//   · 今天自动处理了谁、为什么；每天的自动任务有没有跑、有没有出错；
+//   · 临时身份（v0.7.25）：体验中的、本月发起、到期、转正、撤销，体验中的名单。
 
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { CalendarClock, Download, ListChecks, Sparkles, TriangleAlert } from 'lucide-react';
+import { CalendarClock, Download, ListChecks, Sparkles, TriangleAlert, UserPlus } from 'lucide-react';
+import { TRIAL_KIND_LABELS, type TrialRow, type TrialSummary } from '@shared/trials';
 import { BENEFIT_CATEGORY_LABELS, type BenefitSummary } from '@shared/benefits';
 import { GRADE_EVENT_LABELS, gradeLabel, TIER_LABELS, type GradeEventKind, type MembershipRules } from '@shared/membership';
 import { formatPhone } from '@shared/labels';
@@ -15,7 +17,7 @@ import { useSession } from '../../lib/session';
 import { cn, formatTime, relativeTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Badge, Card, Notice, SectionTitle, Segmented, Skeleton } from '../../components/ui';
-import { benefitKeys, useGradeEvents, useMembershipOverview, useMembershipRules, useRetention } from './queries';
+import { benefitKeys, trialKeys, useGradeEvents, useMembershipOverview, useMembershipRules, useRetention } from './queries';
 
 export function MembershipTab() {
   const session = useSession();
@@ -62,6 +64,7 @@ export function MembershipTab() {
 
       <RetentionCard rules={rules} expiring={d.expiring} grace={d.grace} />
       <BenefitsSummaryCard />
+      <TrialsSummaryCard summary={d.trials} />
       <TodayEvents rules={rules} today={session.today} />
 
       <Card className="p-5">
@@ -102,6 +105,89 @@ export function MembershipTab() {
         )}
       </Card>
     </div>
+  );
+}
+
+/** 临时身份（邀请体验、赠送会籍）：汇总与体验中的名单（最先到期的在前） */
+function TrialsSummaryCard({ summary: t }: { summary: TrialSummary }) {
+  const [open, setOpen] = useState(false);
+  const list = useQuery({
+    queryKey: trialKeys.list('active'),
+    queryFn: () => api.get<{ summary: TrialSummary; rows: TrialRow[] }>('/api/membership/trials?scope=active'),
+    enabled: open,
+  });
+  const tiles: [string, number, string?][] = [
+    ['体验中', t.active, `位 · 邀请 ${t.activeInvite} · 赠送 ${t.activeGift}`],
+    ['7 天内到期', t.endingSoon, '位'],
+    ['本月发起', t.started, '位'],
+    ['本月到期', t.expired, '位'],
+    ['本月转正', t.converted, '位'],
+    ['本月撤销', t.cancelled, '位'],
+  ];
+  return (
+    <Card className="p-5" data-testid="membership-trials">
+      <SectionTitle
+        aside={
+          t.active > 0 && (
+            <button type="button" className="text-[12.5px] font-semibold text-pine" onClick={() => setOpen((v) => !v)} aria-expanded={open} data-testid="membership-trials-toggle">
+              {open ? '收起名单' : '看体验中的名单'}
+            </button>
+          )
+        }
+      >
+        <span className="flex items-center gap-2">
+          <UserPlus className="size-4 text-yuzu-deep" /> 邀请体验 / 赠送会籍（{t.from} 起）
+        </span>
+      </SectionTitle>
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        {tiles.map(([label, n, unit]) => (
+          <div key={label} className="rounded-lg border border-line bg-card px-3 py-2">
+            <p className="text-[12px] font-semibold text-ink-3">{label}</p>
+            <p className="text-[13px] text-ink-3">
+              <span className="num text-[20px] font-bold text-ink">{n}</span> {unit}
+            </p>
+          </div>
+        ))}
+      </div>
+      {open &&
+        (list.isPending ? (
+          <Skeleton className="mt-3 h-24" />
+        ) : list.error || !list.data ? (
+          <Notice tone="error" className="mt-3" title={list.error?.message ?? '名单没有加载出来'} />
+        ) : (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[560px] text-[13px]" data-testid="membership-trials-list">
+              <thead className="text-left text-[12px] text-ink-3">
+                <tr>
+                  <th className="py-1.5 pr-3">受邀人</th>
+                  <th className="py-1.5 pr-3">体验</th>
+                  <th className="py-1.5 pr-3">方式</th>
+                  <th className="py-1.5 pr-3">邀请人</th>
+                  <th className="py-1.5">起止</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line/70">
+                {list.data.rows.map((r) => (
+                  <tr key={r.id}>
+                    <td className="py-1.5 pr-3">
+                      <Link to={`/?m=${r.memberId}`} className="font-semibold text-ink hover:text-pine hover:underline">
+                        {r.memberName}
+                      </Link>{' '}
+                      <span className="num text-[12px] text-ink-4">{r.memberNo}</span>
+                    </td>
+                    <td className="py-1.5 pr-3">{r.label}</td>
+                    <td className="py-1.5 pr-3 text-ink-3">{TRIAL_KIND_LABELS[r.kind]}</td>
+                    <td className="py-1.5 pr-3">{r.inviterName}</td>
+                    <td className="num py-1.5 text-ink-3">
+                      {r.startsOn} 至 {r.endsOn}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+    </Card>
   );
 }
 
@@ -282,6 +368,7 @@ function BenefitsSummaryCard() {
     ['事件礼', s.byReason.event, '张'],
     ['登记使用', s.uses, `次 · ${s.useMembers} 位`],
   ];
+  const md = s.memberDiscount;
   return (
     <Card className="p-5" data-testid="membership-benefits">
       <SectionTitle
@@ -305,6 +392,16 @@ function BenefitsSummaryCard() {
           </div>
         ))}
       </div>
+      <p className="mt-2 text-[12.5px] text-ink-3" data-testid="membership-member-discount">
+        会员折扣（结账时自动算，不含已反结账的）：
+        {md.count ? (
+          <>
+            {md.count} 笔 · <Money cents={md.amount} /> · {md.members} 位会员
+          </>
+        ) : (
+          '本月还没有'
+        )}
+      </p>
       {s.rows.length > 0 && (
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[480px] text-[13px]">

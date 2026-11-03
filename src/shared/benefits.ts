@@ -442,4 +442,6 @@ export interface BenefitSummary {
   useMembers: number;
   rows: { benefitId: number; code: string; name: string; category: BenefitCategory; coupons: number; members: number; uses: number }[];
   job: BenefitJobRun | null;
+  /** 会员折扣（v0.7.25）：本月结账的（不含已反结账的）笔数、金额（分）、几位会员 */
+  memberDiscount: { count: number; amount: number; members: number };
 }

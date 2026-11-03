@@ -17,6 +17,7 @@ import {
   type MemberBenefitItem,
   type MemberBenefits,
 } from '@shared/benefits';
+import { GIFT_BENEFIT_CODE } from '@shared/trials';
 import type { MemberDetail } from '@shared/types';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending, type ErpPendingOp } from '../../lib/erpPending';
@@ -119,7 +120,10 @@ export function BenefitsCard({ member }: { member: MemberDetail }) {
                     item={i}
                     testId={`member-benefit-${i.code}`}
                     action={
-                      can('benefit.use') && (
+                      i.code === GIFT_BENEFIT_CODE ? (
+                        <span className="text-[12px] text-ink-3">在下方「邀请体验 / 赠送会籍」里赠送</span>
+                      ) : (
+                        can('benefit.use') && (
                         <Button
                           size="sm"
                           variant="secondary"
@@ -136,6 +140,7 @@ export function BenefitsCard({ member }: { member: MemberDetail }) {
                         >
                           登记使用
                         </Button>
+                        )
                       )
                     }
                   >

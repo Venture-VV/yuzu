@@ -294,6 +294,11 @@ export function CheckinDialog({
                   <p className="num flex items-center gap-1 text-[12px] font-semibold text-ink-2" data-testid="checkin-member-level">
                     <Crown className="size-3.5 text-yuzu-deep" /> {level.data.label} · 能用 {level.data.lockerLevel} 级及以下的 VIP 柜
                     {level.data.graceUntil && <span className="text-ember">· 补充期至 {level.data.graceUntil}</span>}
+                    {level.data.trial && (
+                      <span className="text-lake">
+                        · 体验 {level.data.trial.label}（至 {level.data.trial.endsOn}，VIP 柜按体验的）
+                      </span>
+                    )}
                   </p>
                 )}
               </div>

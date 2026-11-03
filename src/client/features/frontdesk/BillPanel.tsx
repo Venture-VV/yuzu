@@ -158,6 +158,11 @@ export function BillPanel({
                   <span className={cn('ml-1 text-[12px] font-semibold', visit.memberGrade.graceUntil ? 'text-ember' : 'text-yuzu-deep')} data-testid="bill-member-grade">
                     {visit.memberGrade.label}
                   </span>
+                )}
+                {visit.memberGrade?.trial && (
+                  <span className="ml-1 text-[12px] font-semibold text-lake" data-testid="bill-member-trial">
+                    体验 {visit.memberGrade.trial.label}
+                  </span>
                 )}{' '}
                 <span className="num text-[12px] font-semibold text-ink-3">{visit.member.memberNo} · {maskPhone(visit.member.phone)}</span>
               </p>
