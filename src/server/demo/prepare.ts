@@ -23,6 +23,8 @@ import { seedFrontdeskDemo } from '../seed-frontdesk';
 import { seedInventoryDemo } from '../seed-inventory';
 import { seedLegacyDemo } from '../seed-legacy';
 import expected from './showcase-expected.json' with { type: 'json' };
+import membershipExpected from './membership-expected.json' with { type: 'json' };
+import { MEMBERSHIP_DEMO_KEY, membershipDemoState, seedMembershipDemo, type MembershipDemoState } from './membership-demo';
 import { seedShowcaseDemo, SHOWCASE_DAILY_FIELDS, SHOWCASE_KEY, showcaseState, type ShowcaseState } from './showcase';
 
 
@@ -123,8 +125,18 @@ export async function demoPrepare(
     if (previousDay) notes.push('场景块走正式接口、按执行当时的时间写，不随 --previous-day 前移');
   }
 
+  // 会员体系（v0.7.24）：单独一个标记，已经准备过场景块的演示库也会补上
+  const membership = await seedMembershipDemo(sql, config, { now: opts.now });
+  if (membership.skipped) skip(MEMBERSHIP_BLOCK);
+  else {
+    blocks.push({ block: MEMBERSHIP_BLOCK, written: true, detail: `${membership.done.length} 步`, items: membership.done });
+    notes.push(...membership.notes);
+  }
+
   return { blocks, notes, check: await demoCheck(sql, config) };
 }
+
+const MEMBERSHIP_BLOCK = '会员体系（到期提醒、补充期、降档的演示会员，本店权益清单与本月的券）';
 
 /** 对象按键排序后再比（数据库读出来的顺序不固定） */
 function canon(v: unknown): unknown {
@@ -153,6 +165,12 @@ const SHOWCASE_FIELDS: [keyof ShowcaseState, string][] = [
   ['usages', '派对房使用单'],
   ['guide', '对客导览的区域分类与图标'],
   ['coupons', '券模板、会员的券与无记名券'],
+];
+
+const MEMBERSHIP_FIELDS: [keyof MembershipDemoState, string][] = [
+  ['members', '演示会员的档阶与状态'],
+  ['published', '发布的本店权益'],
+  ['monthCoupons', '演示会员本月的项目券'],
 ];
 
 /** 只读核对：任何一项不一致都 ok = false，写明哪一项、期望与实际 */
@@ -198,6 +216,20 @@ export async function demoCheck(sql: Sql, config: AppConfig): Promise<DemoCheckR
     if (!sameDay && (SHOWCASE_DAILY_FIELDS as readonly string[]).includes(field)) continue;
     const same = JSON.stringify(canon(want[field])) === JSON.stringify(canon(state[field]));
     lines.push({ ok: same, label: `场景块 · ${label}`, detail: same ? fmt(state[field]) : `期望 ${fmt(want[field])}；实际 ${fmt(state[field])}` });
+  }
+  // 会员体系（v0.7.24）：到期、补充期按日期往前走，只在准备的那个营业日核对
+  const [membershipMarker] = await sql<{ value: { businessDate?: string } }[]>`SELECT value FROM settings WHERE key = ${MEMBERSHIP_DEMO_KEY}`;
+  if (!membershipMarker) {
+    lines.push({ ok: false, label: '会员体系演示', detail: '还没有准备：请执行 demo-prepare' });
+  } else if (membershipMarker.value.businessDate !== today) {
+    notes.push(`会员体系演示是 ${membershipMarker.value.businessDate} 营业日准备的：到期、补充期按日期往前走，今天不核对这一块（要当天的新状态用 demo-reset 重建）`);
+  } else {
+    const mState = await membershipDemoState(sql, config.timezone);
+    const mWant = membershipExpected as unknown as MembershipDemoState;
+    for (const [field, label] of MEMBERSHIP_FIELDS) {
+      const same = JSON.stringify(canon(mWant[field])) === JSON.stringify(canon(mState[field]));
+      lines.push({ ok: same, label: `会员体系演示 · ${label}`, detail: same ? fmt(mState[field]) : `期望 ${fmt(mWant[field])}；实际 ${fmt(mState[field])}` });
+    }
   }
   return { ok: lines.every((l) => l.ok), lines, notes };
 }
