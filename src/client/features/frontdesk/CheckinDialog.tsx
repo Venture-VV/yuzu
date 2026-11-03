@@ -15,7 +15,8 @@ import { grantCovers, ticketGrantCovers, type TicketGrant, type TicketGrantItem,
 import { isFreeTicket } from '@shared/checkout';
 import { maskPhone } from '@shared/labels';
 import type { MemberSummary } from '@shared/types';
-import { useMembers } from '../../lib/queries';
+import { errorMessage } from '../../lib/api';
+import { memberCodeOf, useMembers } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
@@ -202,6 +203,14 @@ export function CheckinDialog({
     if (m.gender) setRows((list) => list.map((r, i) => (i === 0 && !normalizeTagCode(r.code) ? { ...r, zone: m.gender! } : r)));
     setTimeout(() => firstInput.current?.focus(), 30);
   };
+  // 扫到会员码（v0.7.25，小程序 MP9）：校验通过就直接选上这位会员（不用再点一下）
+  useEffect(() => {
+    if (memberCodeOf(memberQ) && members.isSuccess && members.data.length === 1) {
+      pickMember(members.data[0]!);
+      setMemberQ('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [members.isSuccess, members.data]);
 
   const submit = async () => {
     if (!ready || backfillBlocked) return;
@@ -332,6 +341,11 @@ export function CheckinDialog({
                   </li>
                 ))}
               {memberQ.trim() && members.data?.length === 0 && <li className="px-3 py-2 text-[13px] text-ink-3">没有找到会员，可先按散客接待</li>}
+              {memberCodeOf(memberQ) && members.error && (
+                <li className="px-3 py-2 text-[13px] font-semibold text-clay" data-testid="checkin-member-code-error">
+                  {errorMessage(members.error)}
+                </li>
+              )}
             </ul>
           </div>
         )}

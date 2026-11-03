@@ -10,6 +10,7 @@ import type {
   StaffRecord,
 } from '@shared/types';
 import type { StoreRules } from '@shared/types';
+import { MP_CODE, type MpCodeLookup } from '@shared/mp';
 import { api, ApiError } from './api';
 
 export const qk = {
@@ -34,13 +35,33 @@ export const useSessionQuery = () =>
     staleTime: 60_000,
   });
 
-export const useMembers = (q: string) =>
-  useQuery({
-    queryKey: qk.members(q),
-    queryFn: () => api.get<MemberSummary[]>(`/api/members?q=${encodeURIComponent(q)}`),
-    placeholderData: keepPreviousData,
-    staleTime: 10_000,
+/**
+ * 前台扫码盒扫进查找框的会员码（v0.7.25，小程序 MP9）：去掉空格、横线后整串是会员码时返回码，否则为空。
+ * 会员码 16 或 19 位、以 8 或 9 开头，不会与 11 位手机号、会员号混淆
+ */
+export const memberCodeOf = (q: string): string | null => {
+  const s = q.replace(/[\s-]/g, '');
+  return MP_CODE.test(s) ? s : null;
+};
+
+/**
+ * 查找会员：手机号、后四位、姓名、会员号；扫到会员码时由 yuzu 校验（签名、时间、绑定、会员状态），查到就是那一位
+ * （过期、解绑、没配会员码时是出错，页面写明原因，让客人刷新或报手机号）
+ */
+export const useMembers = (q: string) => {
+  const code = memberCodeOf(q);
+  return useQuery({
+    queryKey: code ? (['members', 'code', code] as const) : qk.members(q),
+    queryFn: async () => {
+      if (!code) return api.get<MemberSummary[]>(`/api/members?q=${encodeURIComponent(q)}`);
+      const found = await api.get<MpCodeLookup>(`/api/mp-codes/${code}`);
+      return [await api.get<MemberDetail>(`/api/members/${found.memberId}`)] as MemberSummary[];
+    },
+    placeholderData: code ? undefined : keepPreviousData,
+    staleTime: code ? 0 : 10_000,
+    retry: code ? false : undefined,
   });
+};
 
 export const useMember = (id: number | null) =>
   useQuery({

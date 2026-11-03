@@ -2,7 +2,8 @@ import { forwardRef, useEffect, useState, type KeyboardEvent } from 'react';
 import { Search, UserPlus, X } from 'lucide-react';
 import { maskPhone } from '@shared/labels';
 import type { MemberSummary } from '@shared/types';
-import { useMembers } from '../../lib/queries';
+import { errorMessage } from '../../lib/api';
+import { memberCodeOf, useMembers } from '../../lib/queries';
 import { useCan } from '../../lib/session';
 import { avatarTone, cn, relativeTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
@@ -28,6 +29,15 @@ export const MemberList = forwardRef<
   const members = useMembers(query);
   const [cursor, setCursor] = useState(0);
   const list = members.data ?? [];
+  // 扫到会员码（v0.7.25）：校验通过就直接打开这位会员，清空查找框（码 60 秒就换）
+  const code = memberCodeOf(query);
+  useEffect(() => {
+    if (code && members.isSuccess && members.data.length === 1) {
+      onSelect(members.data[0]!);
+      setQ('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code, members.isSuccess, members.data]);
 
   // 结果变化时高亮回到第一位，避免回车选中旧列表里鼠标悬停的位置
   useEffect(() => setCursor(0), [query, members.data]);
@@ -77,8 +87,16 @@ export const MemberList = forwardRef<
           )}
         </div>
         <div className="flex items-center justify-between">
-          <p className="text-[12.5px] font-semibold text-ink-3">
-            {query ? (members.isFetching ? '搜索中…' : `找到 ${list.length} 位会员`) : '最近到店'}
+          <p className={cn('text-[12.5px] font-semibold', code && members.error ? 'text-clay' : 'text-ink-3')} data-testid="member-search-status">
+            {code
+              ? members.error
+                ? errorMessage(members.error)
+                : '核对会员码…'
+              : query
+                ? members.isFetching
+                  ? '搜索中…'
+                  : `找到 ${list.length} 位会员`
+                : '最近到店'}
           </p>
           {can('member.write') && (
             <Button size="sm" variant="quiet" icon={<UserPlus className="size-4" />} onClick={() => onCreate(q.trim())}>

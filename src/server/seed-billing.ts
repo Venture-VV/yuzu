@@ -10,9 +10,10 @@
 //
 // 只用于独立的演示 / 开发库：试用与正式环境一律拒绝；需要先执行 seed-frontdesk-demo；已经灌过则跳过。
 // 所有业务都走正式的接待、挂账、结账、反结账、开班交班流程，账单、收款与会员钱包天然一致。
-// 时间相对执行时刻生成：请在营业日切换时刻（默认 06:00）之后 1 小时以上执行，演示单据才都落在同一个营业日。
+// 时间相对执行时刻生成；营业日切换（默认 06:00）后 5 个半小时内执行时，开班到交班这一段按比例压进当天（v0.7.25），单据都落在同一个营业日。
 
 import { randomUUID } from 'node:crypto';
+import { businessDateOf, businessDayStart } from '@shared/business-date';
 import { splitDeduction } from '@shared/deduction';
 import type { Zone } from '@shared/frontdesk';
 import type { AppConfig } from './config';
@@ -87,7 +88,16 @@ async function seedBilling(sql: Sql, config: AppConfig, options: { now?: Date })
   }
 
   const now = options.now ?? new Date();
-  const ago = (min: number) => new Date(now.getTime() - min * 60_000);
+  // 营业日切换后 5 个半小时内灌数据（v0.7.25）：收银班次在 5 小时前开班、结账在半小时内，按原来的时刻会跨两个营业日
+  // （班次在前一个营业日、结账在当天，打印与日结的浏览器用例找不全）。这时把「5 小时前」到现在这一段按比例压进当天营业日开始
+  // 到现在之间（先后顺序不变），班次、结账、反结账、交班都落在当天；更早的接待（在店 12 小时多、过夜客）照原来的时刻。
+  // 压缩只会让在店时长多出不到半小时（结账更晚），不跨门票的档，金额与固定预期不变；--previous-day 放到前一个营业日时不压
+  const { businessDayStartHour } = settings;
+  const dayStart = businessDayStart(businessDateOf(now, config.timezone, businessDayStartHour), config.timezone, businessDayStartHour).getTime();
+  const span = 300;
+  const squeeze = now.getTime() - span * 60_000 < dayStart;
+  const ago = (min: number) =>
+    squeeze && min <= span ? new Date(dayStart + (now.getTime() - dayStart) * (1 - min / (span + 1))) : new Date(now.getTime() - min * 60_000);
   const as = (a: Actor, minAgo: number): OpContext => ({ actor: a, at: ago(minAgo) });
   const items = new Map((await sql<{ id: number; name: string }[]>`SELECT id, name FROM service_items`).map((r) => [r.name, r.id]));
   const price = (name: string) => DEMO_ITEMS.find((i) => i.name === name)!.price;

@@ -39,12 +39,13 @@ describe('命令行用的时间', () => {
     expect(await demoSeedTime(ctx.sql, { timeZone: TZ, kind: 'frontdesk', previousDay: true, now: at('14:00') })).toEqual({ anchored: false });
   });
 
-  it('在那段时间、没加 --previous-day：按实际时间照常灌，但醒目提示原因与办法', async () => {
+  it('在那段时间、没加 --previous-day：按实际时间照常灌，说明结账演示压进当天（v0.7.25 起不再跨营业日）', async () => {
     const t = await demoSeedTime(ctx.sql, { timeZone: TZ, kind: 'frontdesk', previousDay: false, now: at('07:10') });
     expect(t.now).toBeUndefined();
-    expect(t.warning).toContain('切换（06:00）后 70 分钟');
-    expect(t.warning).toContain('11:30 之后');
-    expect(t.warning).toContain('--previous-day');
+    expect(t.warning).toBeUndefined();
+    expect(t.notice).toContain('切换（06:00）后 70 分钟');
+    expect(t.notice).toContain('压进当天营业日');
+    expect(t.notice).toContain('--previous-day');
   });
 
   it('加了 --previous-day：前台演示放到前一个营业日并记下时间，结账演示沿用；前台没放时结账不能单独放', async () => {

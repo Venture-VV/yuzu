@@ -1,8 +1,9 @@
 // 灌前台、结账演示数据用的「当前时间」（PR #13 Codex 复核 P2-3）。
 //
-// 结账演示的收银班次在灌数据前 5 小时开班、结账在之后：营业日切换后 5 个半小时内灌数据时，班次落在前一个营业日、
+// 结账演示的收银班次在灌数据前 5 小时开班、结账在之后：营业日切换后 5 个半小时内灌数据时，原来班次落在前一个营业日、
 // 结账落在当天，日结金额与 billing-expected.json 的固定预期对不上（check 照样通过，不容易察觉）。
-// 这个时段里命令行醒目提示；加 --previous-day 时把前台与结账演示整体放到前一个营业日（时间截至切换前 30 分钟），
+// v0.7.25 起结账演示在这个时段把开班到交班这一段按比例压进当天（seed-billing.ts），命令行只作说明；
+// 加 --previous-day 时把前台与结账演示整体放到前一个营业日（时间截至切换前 30 分钟），
 // 前台演示用的时间记在 settings.demo_seed_anchor，结账演示沿用它，两条命令前后隔多久执行都对得上。
 // 只影响合成演示数据（试用 / 正式环境本来就拒绝灌演示数据），不改演示数据的内容与固定预期。
 
@@ -57,12 +58,12 @@ export async function demoSeedTime(
   const start = businessDayStartHour * 60;
   const safe = hhmm(start + DEMO_SPLIT_MINUTES);
   if (!opts.previousDay) {
+    // v0.7.25 起结账演示自己把开班到交班这一段压进当天（seed-billing.ts），单据都落在当天营业日，不再跨营业日
     return {
       anchored: false,
-      warning:
-        `现在是营业日切换（${hhmm(start)}）后 ${w.since} 分钟：演示单据会跨两个营业日（结账演示的收银班次在前一个营业日、结账在当天），` +
-        `日结金额与 billing-expected.json 的固定预期对不上（check 照样通过）。请在 ${safe} 之后执行，` +
-        `或两条演示命令（seed-frontdesk-demo、seed-billing-demo）都加 --previous-day，把这两套演示整体放到前一个营业日。`,
+      notice:
+        `现在是营业日切换（${hhmm(start)}）后 ${w.since} 分钟：结账演示的收银班次、结账与交班按比例压进当天营业日（先后顺序与金额不变），` +
+        `单据都落在当天。要整体放到前一个营业日，两条演示命令（seed-frontdesk-demo、seed-billing-demo）都加 --previous-day（${safe} 之后执行不用加）。`,
     };
   }
   if (opts.kind === 'billing') {
