@@ -54,15 +54,32 @@ describe('权限', () => {
 
 describe('对顾客开放的开关', () => {
   it('默认关闭；打开后小程序端口能用；记审计', async () => {
-    expect((await admin()).rules).toEqual({ enabled: false });
+    expect((await admin()).rules).toEqual({ enabled: false, version: 0 });
     expect((await mpGet('/api/mp/home')).statusCode).toBe(403);
-    const res = await api(ctx.app, am, 'PUT', '/api/admin/mp/rules', { enabled: true });
+    const res = await api(ctx.app, am, 'PUT', '/api/admin/mp/rules', { enabled: true, version: 0 });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ enabled: true });
+    expect(res.body).toEqual({ enabled: true, version: 1 });
     expect((await mpGet('/api/mp/home')).statusCode).toBe(200);
     expect((await api(ctx.app, am, 'PUT', '/api/admin/mp/rules', {})).status).toBe(400);
     const [audit] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'settings_updated' AND detail->>'key' = 'mp_rules'`;
     expect(audit!.n).toBe(1);
+  });
+
+  it('带版本号改（Codex 审查 PR #42）：版本号对不上拒绝，晚到的原请求盖不掉之后的改动；内容没变也加一；没带版本号的不核对', async () => {
+    const v = (await admin()).rules.version as number;
+    // 打开（v）没收到结果，又在别处关上（v → v+1）；原来那次「打开」晚到：版本号对不上，开关还是关的
+    expect((await api(ctx.app, am, 'PUT', '/api/admin/mp/rules', { enabled: false, version: v })).body).toEqual({ enabled: false, version: v + 1 });
+    const late = await api(ctx.app, am, 'PUT', '/api/admin/mp/rules', { enabled: true, version: v });
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('VERSION_CONFLICT');
+    expect((await admin()).rules).toEqual({ enabled: false, version: v + 1 });
+    // 「放弃这次修改」：按现在的内容保存一次，版本号照样加一
+    expect((await api(ctx.app, am, 'PUT', '/api/admin/mp/rules', { enabled: false, version: v + 1 })).body).toEqual({ enabled: false, version: v + 2 });
+    // 自动化脚本收尾不带版本号：不管现在是什么都关上
+    expect((await api(ctx.app, am, 'PUT', '/api/admin/mp/rules', { enabled: false })).body).toEqual({ enabled: false, version: v + 3 });
+    expect((await api(ctx.app, am, 'PUT', '/api/admin/mp/rules', { enabled: true, version: -1 })).status).toBe(400);
+    // 后面的用例要开着
+    expect((await api(ctx.app, am, 'PUT', '/api/admin/mp/rules', { enabled: true, version: v + 3 })).status).toBe(200);
   });
 });
 
@@ -80,6 +97,10 @@ describe('门店信息', () => {
     expect((await api(ctx.app, am, 'PUT', '/api/admin/mp/stores/nowhere', body)).status).toBe(404);
     const home = (await mpGet('/api/mp/home')).json();
     expect(home.stores[0]).toMatchObject({ code: 'baoan', hours: '全天营业', notice: '演示公告' });
+    // 后台「放弃这次修改」靠的：内容没变的保存版本号照样加一，原来那次（带旧版本号）晚到会被拒绝
+    const same = await api(ctx.app, am, 'PUT', '/api/admin/mp/stores/baoan', { ...body, version: baoan.version + 1 });
+    expect(same.body).toMatchObject({ hours: '全天营业', version: baoan.version + 2 });
+    expect((await api(ctx.app, am, 'PUT', '/api/admin/mp/stores/baoan', { ...body, version: baoan.version + 1, hours: '晚到的' })).status).toBe(409);
   });
 });
 

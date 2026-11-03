@@ -1,6 +1,7 @@
 // 后台「微信小程序」（小程序线，docs/MINIPROGRAM.md 第 5 节）：对顾客开放的开关、两家店的门店信息、首页轮播、
 // 价目项目的对外介绍、会员的微信绑定与解绑。
-// 修改都带版本号：没收到结果再保存，会因为版本号对不上被拒绝，不会改两次；新建轮播、解绑带操作编号，重提返回原来那次。
+// 写操作都按「结果待确认」处理（mpPending.ts）：提交前存在本机，没收到结果时在这一页上方查回、按原内容重新提交或作废 / 放弃。
+// 修改都带版本号（重提不会改两次）；新建轮播、解绑带操作编号（重提返回原来那次）。
 // 维护内容要「维护小程序内容」；只有「解绑会员的微信」的（值班经理）只看到绑定这一页。
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -26,15 +27,21 @@ import { Badge, Button, Card, Field, Input, Notice, Segmented, Select, Skeleton,
 import { AdminPage } from '../admin/AdminShell';
 import {
   abandonBannerOp,
+  abandonUpdate,
   lookupBannerOp,
   lookupUnbindOp,
-  MpPendingStoreError,
+  lookupUpdate,
+  recheckMpPending,
   removeMpPending,
   sendBannerCreate,
   sendMpOp,
   sendUnbind,
+  sendUpdate,
+  updateOutcome,
   useMpPending,
+  useMpPendingUnreadable,
   type MpPendingOp,
+  type MpUpdateOutcome,
 } from './mpPending';
 
 type Tab = 'store' | 'banners' | 'items' | 'bindings';
@@ -77,9 +84,19 @@ async function uploadMpImage(file: File): Promise<number> {
   return (await api.post<{ id: number }>('/api/admin/mp/images', { mime, data: await toBase64(blob) }, { timeoutMs: 30_000 })).id;
 }
 
-/** 没收到结果时的统一提示：带版本号 / 操作编号，刷新后核对，重提不会改两次 */
+/** 待确认的记录重新提交、作废时又没收到结果：记录还留在本机，稍后再处理 */
 function saveError(error: unknown): string {
-  return error instanceof UncertainError ? '没收到结果，请刷新后核对；再保存不会改两次' : errorMessage(error);
+  return error instanceof UncertainError ? '还是没收到结果，记录留在本机，稍后再处理；重新提交不会多做一次' : errorMessage(error);
+}
+
+type ToastFn = ReturnType<typeof useToast>;
+/** 修改内容没保存成：没收到结果的记在本机（这一页上方处理），被明确拒绝的写原因 */
+function updateFailed(toast: ToastFn, error: unknown) {
+  if (error instanceof UncertainError) {
+    toast({ tone: 'info', title: '保存结果待确认', body: '没收到结果，不知道改上没有。已记在本机：请在这一页上方查回、按原内容重新提交或放弃这次修改，不要另改一次。' });
+  } else {
+    toast({ tone: 'error', title: '没有保存', body: errorMessage(error) });
+  }
 }
 
 export function MpAdminSection() {
@@ -97,6 +114,7 @@ export function MpAdminSection() {
     [canContent],
   );
   const [tab, setTab] = useState<Tab>(tabs[0]!.value);
+  const unreadable = useMpPendingUnreadable();
   return (
     <AdminPage
       section="mp"
@@ -105,14 +123,28 @@ export function MpAdminSection() {
     >
       <div className="space-y-4">
         {tabs.length > 1 && <Segmented value={tab} onChange={setTab} options={tabs} ariaLabel="小程序后台分页" />}
+        {unreadable && (
+          <Notice
+            tone="error"
+            title="本机的「结果待确认」记录读不出来"
+            action={
+              <Button size="sm" variant="secondary" onClick={recheckMpPending}>
+                再读一次
+              </Button>
+            }
+          >
+            浏览器存储读不了，或记录认不出来，不知道之前有没有没确认的。为防止重复办理，这一页先不能新建、修改或解绑；原来的记录照原样留着，没有删除。
+            请稍后点「再读一次」；一直读不出来，请换一台电脑办，并请管理员检查这台电脑的浏览器。
+          </Notice>
+        )}
         {!q.data ? (
           <Skeleton className="h-48" />
         ) : tab === 'store' ? (
           <StoresTab data={q.data} />
         ) : tab === 'banners' ? (
-          <BannersTab banners={q.data.banners} />
+          <BannersTab data={q.data} />
         ) : tab === 'items' ? (
-          <ItemsTab items={q.data.items} />
+          <ItemsTab data={q.data} />
         ) : (
           <BindingsTab />
         )}
@@ -172,40 +204,56 @@ function ImagePicker({ imageId, onChange, label = '图片' }: { imageId: number 
 function StoresTab({ data }: { data: MpAdminData }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const session = useSession();
   const [busy, setBusy] = useState(false);
+  const pendingRules = useMpPending('rules_update');
+  const pendingStores = useMpPending('store_update');
+  const pending = useMemo(() => [...pendingRules, ...pendingStores], [pendingRules, pendingStores]);
   const enabled = data.rules.enabled;
+  const rulesPending = pendingRules.length > 0;
   return (
     <div className="space-y-4">
+      {pending.length > 0 && <PendingUpdates ops={pending} data={data} />}
       <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
         <div>
           <p className="text-[15px] font-semibold text-ink">对顾客开放</p>
           <p className="text-[13px] text-ink-3">{enabled ? '已开放：顾客能在小程序里看到门店信息、价目、导览，绑定会员。' : '没开放：小程序只显示「还没开放」。网关与门店系统接好、内容填好后再开。'}</p>
+          {rulesPending && <p className="text-[12.5px] text-ember">开关的修改结果待确认，先在上方处理</p>}
         </div>
         <Segmented
           value={enabled ? 'on' : 'off'}
           ariaLabel="对顾客开放"
           onChange={async (v) => {
-            if (busy || (v === 'on') === enabled) return;
+            if (busy || rulesPending || (v === 'on') === enabled) return;
             setBusy(true);
             try {
-              await api.put('/api/admin/mp/rules', { enabled: v === 'on' });
+              await sendUpdate({
+                type: 'rules_update',
+                url: '/api/admin/mp/rules',
+                target: 'rules',
+                body: { enabled: v === 'on', version: data.rules.version },
+                summary: `开关改成「${v === 'on' ? '开放' : '关闭'}」`,
+                staffName: session.staff.displayName,
+              });
               await qc.invalidateQueries({ queryKey: key });
               toast({ tone: 'success', title: v === 'on' ? '小程序已对顾客开放' : '小程序已关闭' });
             } catch (error) {
-              toast({ tone: 'error', title: '没有保存', body: saveError(error) });
+              updateFailed(toast, error);
+              // 别人刚改过（版本号对不上）：刷新后按最新的再改
+              void qc.invalidateQueries({ queryKey: key });
             } finally {
               setBusy(false);
             }
           }}
           options={[
-            { value: 'off', label: '关闭' },
-            { value: 'on', label: '开放' },
+            { value: 'off', label: '关闭', disabled: rulesPending },
+            { value: 'on', label: '开放', disabled: rulesPending },
           ]}
         />
       </Card>
       <div className="grid gap-4 lg:grid-cols-2">
         {data.stores.map((s) => (
-          <StoreForm key={`${s.code}-${s.version}`} store={s} />
+          <StoreForm key={`${s.code}-${s.version}`} store={s} pending={pendingStores.some((p) => p.target === s.code)} />
         ))}
       </div>
     </div>
@@ -214,9 +262,10 @@ function StoresTab({ data }: { data: MpAdminData }) {
 
 const coord = (v: string): number | null => (v.trim() === '' ? null : Number(v));
 
-function StoreForm({ store }: { store: MpStoreAdmin }) {
+function StoreForm({ store, pending }: { store: MpStoreAdmin; pending: boolean }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const session = useSession();
   const [f, setF] = useState({
     name: store.name,
     hours: store.hours,
@@ -234,11 +283,18 @@ function StoreForm({ store }: { store: MpStoreAdmin }) {
   const save = async () => {
     setSaving(true);
     try {
-      await api.put(`/api/admin/mp/stores/${store.code}`, { ...f, version: store.version, latitude: coord(f.latitude), longitude: coord(f.longitude) });
+      await sendUpdate({
+        type: 'store_update',
+        url: `/api/admin/mp/stores/${store.code}`,
+        target: store.code,
+        body: { ...f, version: store.version, latitude: coord(f.latitude), longitude: coord(f.longitude) },
+        summary: `${store.name}的门店信息`,
+        staffName: session.staff.displayName,
+      });
       await qc.invalidateQueries({ queryKey: key });
       toast({ tone: 'success', title: `${f.name}的门店信息已保存` });
     } catch (error) {
-      toast({ tone: 'error', title: '没有保存', body: saveError(error) });
+      updateFailed(toast, error);
     } finally {
       setSaving(false);
     }
@@ -277,8 +333,9 @@ function StoreForm({ store }: { store: MpStoreAdmin }) {
         <input type="checkbox" checked={f.visible} onChange={(e) => set('visible', e.target.checked)} className="size-4 accent-[var(--color-pine)]" />
         在小程序里显示这家店
       </label>
-      <div className="flex justify-end">
-        <Button variant="primary" loading={saving} onClick={save}>
+      <div className="flex items-center justify-end gap-3">
+        {pending && <span className="text-[12.5px] text-ember">这家店的修改结果待确认，先在上方处理</span>}
+        <Button variant="primary" loading={saving} disabled={pending} onClick={save}>
           保存
         </Button>
       </div>
@@ -288,9 +345,11 @@ function StoreForm({ store }: { store: MpStoreAdmin }) {
 
 // ── 首页轮播 ──
 
-function BannersTab({ banners }: { banners: MpBannerAdmin[] }) {
+function BannersTab({ data }: { data: MpAdminData }) {
+  const banners = data.banners;
   const [target, setTarget] = useState<{ mode: 'new' } | { mode: 'edit'; banner: MpBannerAdmin } | null>(null);
   const pending = useMpPending('banner_create');
+  const pendingEdits = useMpPending('banner_update');
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
@@ -306,6 +365,7 @@ function BannersTab({ banners }: { banners: MpBannerAdmin[] }) {
         </Button>
       </div>
       {pending.length > 0 && <PendingBanners ops={pending} />}
+      {pendingEdits.length > 0 && <PendingUpdates ops={pendingEdits} data={data} />}
       {banners.length === 0 ? (
         <Notice tone="info" title="还没有轮播">首页版头照 VI 用门店的氛围实拍图加标志；活动图也放在这里，按日期自动上下架。</Notice>
       ) : (
@@ -320,7 +380,14 @@ function BannersTab({ banners }: { banners: MpBannerAdmin[] }) {
                 </p>
               </div>
               {b.active ? <Badge tone="pine">显示中</Badge> : <Badge>已停用</Badge>}
-              <Button variant="secondary" size="sm" icon={<Pencil className="size-4" />} onClick={() => setTarget({ mode: 'edit', banner: b })}>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<Pencil className="size-4" />}
+                onClick={() => setTarget({ mode: 'edit', banner: b })}
+                disabled={pendingEdits.some((p) => p.target === String(b.id))}
+                title={pendingEdits.some((p) => p.target === String(b.id)) ? '这张轮播的修改结果待确认，先在上方处理' : undefined}
+              >
                 修改
               </Button>
             </div>
@@ -381,7 +448,7 @@ function PendingBanners({ ops }: { ops: MpPendingOp[] }) {
       else toast({ tone: 'success', title: '已作废', body: '原来那次请求即使晚到也不会新建，可以重新填写。' });
       setConfirming(null);
     } catch (error) {
-      toast({ tone: 'error', title: '没有作废', body: saveError(error) });
+      toast({ tone: 'error', title: error instanceof UncertainError ? '还没确认' : '没有作废', body: saveError(error) });
     } finally {
       setBusy(null);
     }
@@ -430,6 +497,117 @@ function PendingBanners({ ops }: { ops: MpPendingOp[] }) {
   );
 }
 
+/**
+ * 修改内容「结果待确认」（Codex 审查 PR #42 的 P1）：对顾客开放的开关、门店信息、轮播、项目介绍。
+ * 按门店系统现在的版本号查回：变了就移除（改上了；或这期间被改过，原请求因为版本号对不上不会再生效）。
+ * 没变的由员工「按原内容重新提交」（同一版本号，不会改两次）或「放弃这次修改」（按现在的内容、用原来的版本号保存一次，
+ * 内容不变，原请求晚到也会被拒绝）。处理完之前这一处不能再改。
+ */
+function PendingUpdates({ ops, data }: { ops: MpPendingOp[]; data: MpAdminData }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<MpPendingOp | null>(null);
+  const done = useRef(new Set<string>());
+  const settle = (op: MpPendingOp, outcome: MpUpdateOutcome | 'abandoned' | 'resubmitted') => {
+    if (done.current.has(op.key)) return;
+    done.current.add(op.key);
+    removeMpPending(op.key);
+    void qc.invalidateQueries({ queryKey: key });
+    if (outcome === 'resubmitted') toast({ tone: 'success', title: '已保存', body: op.summary });
+    else if (outcome === 'saved') toast({ tone: 'success', title: '已查回：已经改上了', body: `${op.summary}只改了一次，不用重新改。` });
+    else if (outcome === 'abandoned') toast({ tone: 'success', title: '已放弃这次修改', body: `${op.summary}：内容没改，原来那次请求即使晚到也不会生效。` });
+    else toast({ tone: 'info', title: '已有结论：以现在的内容为准', body: `${op.summary}：这期间这一处被改过，原来那次不会再生效。请看现在的内容，需要的话再改。` });
+  };
+  // 有新的待确认时取一次门店系统现在的内容（页面上的可能是提交之前取的）
+  const opKeys = ops.map((op) => op.key).join('\n');
+  useEffect(() => {
+    void qc.invalidateQueries({ queryKey: key });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opKeys]);
+  // 版本号变了就有结论；正在重提、放弃的那条由按钮的结果下结论
+  useEffect(() => {
+    for (const op of ops) {
+      if (op.key === busy) continue;
+      const outcome = updateOutcome(op, data);
+      if (outcome) settle(op, outcome);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ops, data, busy]);
+  const resubmit = async (op: MpPendingOp) => {
+    setBusy(op.key);
+    try {
+      await sendMpOp(op);
+      settle(op, 'resubmitted');
+    } catch (error) {
+      // 版本号已经变了：原来那次改上了，或这期间被改过；查回下结论
+      if (error instanceof ApiError && error.code === 'VERSION_CONFLICT') {
+        const outcome = await lookupUpdate(op).catch(() => null);
+        if (outcome) {
+          settle(op, outcome);
+          return;
+        }
+      }
+      toast({ tone: 'error', title: '还没确认', body: saveError(error) });
+    } finally {
+      setBusy(null);
+    }
+  };
+  const abandon = async (op: MpPendingOp) => {
+    setBusy(op.key);
+    try {
+      settle(op, await abandonUpdate(op));
+      setConfirming(null);
+    } catch (error) {
+      toast({ tone: 'error', title: error instanceof UncertainError ? '还没确认' : '没有放弃', body: saveError(error) });
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <Notice tone="warning" title={`${ops.length} 处修改的结果待确认`}>
+      <p>上次保存时网络断了或没收到结果，不知道改上没有。查不到时按原内容重新提交（带着原来的版本号，不会改两次），或放弃这次修改。处理完之前这一处先不能再改。</p>
+      <ul className="mt-2 space-y-2">
+        {ops.map((op) => (
+          <li key={op.key} className="flex flex-wrap items-center gap-2" data-testid="mp-update-pending">
+            <span className="font-semibold text-ink">{op.summary}</span>
+            <span className="text-[12.5px] text-ink-3">
+              {op.staffName} · {formatDateTime(op.createdAt)}
+            </span>
+            <Button size="sm" variant="secondary" loading={busy === op.key} disabled={busy !== null && busy !== op.key} onClick={() => void resubmit(op)}>
+              按原内容重新提交
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setConfirming(op)}>
+              放弃这次修改
+            </Button>
+          </li>
+        ))}
+      </ul>
+      {confirming && (
+        <Dialog
+          open
+          onClose={() => setConfirming(null)}
+          title="放弃这次修改"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setConfirming(null)}>
+                先不放弃
+              </Button>
+              <Button variant="danger" loading={busy === confirming.key} onClick={() => void abandon(confirming)}>
+                确认放弃
+              </Button>
+            </>
+          }
+        >
+          <p className="text-[13.5px]">
+            放弃这次修改（{confirming.summary}）：门店系统按现在的内容保存一次（内容不变），原来那次请求即使晚到也不会生效；如果其实已经改上了，会直接告诉你。
+          </p>
+        </Dialog>
+      )}
+    </Notice>
+  );
+}
+
 function BannerDialog({ target, onClose }: { target: { mode: 'new' } | { mode: 'edit'; banner: MpBannerAdmin }; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -452,18 +630,30 @@ function BannerDialog({ target, onClose }: { target: { mode: 'new' } | { mode: '
     setSaving(true);
     const body = { title: f.title, imageId: f.imageId, link: f.link, startsOn: f.startsOn || null, endsOn: f.endsOn || null, sortOrder: Number(f.sortOrder) || 0 };
     try {
-      if (b) await api.put(`/api/admin/mp/banners/${b.id}`, { ...body, version: b.version, active: f.active });
-      else await sendBannerCreate({ key: clientKey, body: { ...body, clientKey }, summary: f.title.trim(), staffName: session.staff.displayName });
+      if (b) {
+        await sendUpdate({
+          type: 'banner_update',
+          url: `/api/admin/mp/banners/${b.id}`,
+          target: String(b.id),
+          body: { ...body, version: b.version, active: f.active },
+          summary: `轮播「${b.title}」的修改`,
+          staffName: session.staff.displayName,
+        });
+      } else {
+        await sendBannerCreate({ key: clientKey, body: { ...body, clientKey }, summary: f.title.trim(), staffName: session.staff.displayName });
+      }
       await qc.invalidateQueries({ queryKey: key });
       toast({ tone: 'success', title: b ? '轮播已保存' : '轮播已新建' });
       onClose();
     } catch (error) {
-      if (!b && error instanceof UncertainError) {
-        // 结果不确定：关掉弹窗，列表上方显示「结果待确认」，在那里查回、重提或作废
-        toast({ tone: 'error', title: '新建结果待确认', body: '没收到结果，不知道建上没有。请在列表上方按原内容重新提交或确认作废，不要重新填一张。' });
+      if (error instanceof UncertainError) {
+        // 结果不确定：关掉弹窗，列表上方显示「结果待确认」，在那里查回、重提或作废 / 放弃
+        if (b) updateFailed(toast, error);
+        else toast({ tone: 'error', title: '新建结果待确认', body: '没收到结果，不知道建上没有。请在列表上方按原内容重新提交或确认作废，不要重新填一张。' });
         onClose();
       } else {
-        toast({ tone: 'error', title: '没有保存', body: error instanceof MpPendingStoreError ? error.message : saveError(error) });
+        toast({ tone: 'error', title: '没有保存', body: saveError(error) });
+        if (b) void qc.invalidateQueries({ queryKey: key });
       }
     } finally {
       setSaving(false);
@@ -523,12 +713,15 @@ function BannerDialog({ target, onClose }: { target: { mode: 'new' } | { mode: '
 
 // ── 项目介绍 ──
 
-function ItemsTab({ items }: { items: MpItemIntroAdmin[] }) {
+function ItemsTab({ data }: { data: MpAdminData }) {
+  const items = data.items;
   const [editing, setEditing] = useState<MpItemIntroAdmin | null>(null);
   const [q, setQ] = useState('');
+  const pending = useMpPending('intro_update');
   const shown = items.filter((i) => i.active && (!q.trim() || i.name.includes(q.trim()) || i.category.includes(q.trim())));
   return (
     <div className="space-y-3">
+      {pending.length > 0 && <PendingUpdates ops={pending} data={data} />}
       <Notice tone="info">价格读「价目与套餐」，这里只写顾客看到的介绍与图片。停用的项目小程序里不显示。</Notice>
       <Input placeholder="按项目名或分类找" value={q} onChange={(e) => setQ(e.target.value)} className="max-w-xs" />
       <Card className="divide-y divide-line p-0">
@@ -545,7 +738,14 @@ function ItemsTab({ items }: { items: MpItemIntroAdmin[] }) {
               </p>
               <p className="truncate text-[12.5px] text-ink-3">{i.intro || '还没写介绍'}</p>
             </div>
-            <Button variant="secondary" size="sm" icon={<Pencil className="size-4" />} onClick={() => setEditing(i)}>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Pencil className="size-4" />}
+              onClick={() => setEditing(i)}
+              disabled={pending.some((p) => p.target === String(i.itemId))}
+              title={pending.some((p) => p.target === String(i.itemId)) ? '这个项目的介绍修改结果待确认，先在上方处理' : undefined}
+            >
               写介绍
             </Button>
           </div>
@@ -560,18 +760,29 @@ function ItemsTab({ items }: { items: MpItemIntroAdmin[] }) {
 function IntroDialog({ item, onClose }: { item: MpItemIntroAdmin; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const session = useSession();
   const [intro, setIntro] = useState(item.intro);
   const [imageId, setImageId] = useState(item.imageId);
   const [saving, setSaving] = useState(false);
   const save = async () => {
     setSaving(true);
     try {
-      await api.put(`/api/admin/mp/items/${item.itemId}/intro`, { version: item.version, intro, imageId });
+      await sendUpdate({
+        type: 'intro_update',
+        url: `/api/admin/mp/items/${item.itemId}/intro`,
+        target: String(item.itemId),
+        body: { version: item.version, intro, imageId },
+        summary: `「${item.name}」的介绍`,
+        staffName: session.staff.displayName,
+      });
       await qc.invalidateQueries({ queryKey: key });
       toast({ tone: 'success', title: `「${item.name}」的介绍已保存` });
       onClose();
     } catch (error) {
-      toast({ tone: 'error', title: '没有保存', body: saveError(error) });
+      updateFailed(toast, error);
+      // 没收到结果：关掉弹窗，到上方处理；别人刚改过：刷新后按最新的再写
+      if (error instanceof UncertainError) onClose();
+      else void qc.invalidateQueries({ queryKey: key });
     } finally {
       setSaving(false);
     }
@@ -791,7 +1002,7 @@ function UnbindDialog({ binding, memberId, memberName, onClose }: { binding: MpB
         toast({ tone: 'error', title: '解绑结果待确认', body: '没收到结果，不知道解绑没有。请在上方按原内容重新提交，不要另起一笔。' });
         onClose();
       } else {
-        toast({ tone: 'error', title: '没有解绑', body: error instanceof MpPendingStoreError ? error.message : saveError(error) });
+        toast({ tone: 'error', title: '没有解绑', body: saveError(error) });
       }
     } finally {
       setSaving(false);

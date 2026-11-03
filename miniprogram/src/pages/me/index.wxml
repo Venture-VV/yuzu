@@ -15,6 +15,13 @@
     <text wx:if="{{message}}" class="sub fine">{{message}}</text>
   </view>
 
+  <!-- 手机上的绑定记录读不出来：不知道有没有没确认的绑定，先不能绑定（不删原来的记录） -->
+  <view wx:elif="{{state === 'unreadable'}}" class="panel bindcard">
+    <text class="h3">绑定记录暂时读不出来</text>
+    <text class="lede">手机上保存的绑定记录读不出来，为防止绑错，先不能绑定。请稍后点「再试一次」；一直这样，请清理微信的存储空间后再打开小程序。</text>
+    <button class="btn primary block" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+
   <!-- 没绑定 -->
   <view wx:elif="{{state === 'unbound'}}" class="panel bindcard">
     <view class="ghostcard"><text class="gc-zh">汤崎</text><text class="gc-en">TOUCHILL</text></view>

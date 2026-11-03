@@ -12,8 +12,13 @@ export const MP_OPENID = /^[A-Za-z0-9_-]{6,64}$/;
 /** 小程序的开关与规则（settings 的 mp_rules）：默认关闭，店主在后台「小程序」里开 */
 export interface MpRules {
   enabled: boolean;
+  /**
+   * 每保存一次加一。后台改开关时带上看到的版本号：没收到结果再提交、晚到的原请求，都不会盖掉之后的改动
+   * （与门店信息、轮播、项目介绍的版本号一样）
+   */
+  version: number;
 }
-export const DEFAULT_MP_RULES: MpRules = { enabled: false };
+export const DEFAULT_MP_RULES: MpRules = { enabled: false, version: 0 };
 export const MP_RULES_KEY = 'mp_rules';
 
 export type MpBannerLink = 'none' | 'prices' | 'guide' | 'store';

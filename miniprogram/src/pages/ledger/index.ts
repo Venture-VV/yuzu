@@ -25,6 +25,7 @@ Page({
 
   async load() {
     try {
+      // 可以同时取：门店系统的会员卡和流水都先作废到期的赠金，流水总在作废提交之后才读，结尾余额与会员卡一致
       const [me, rows] = await Promise.all([member<MpMe>('GET', '/v1/me'), member<MpLedgerRow[]>('GET', '/v1/ledger?limit=50')]);
       if (!me.member) {
         this.setData({ state: 'unbound' });

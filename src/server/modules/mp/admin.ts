@@ -44,11 +44,26 @@ export async function mpAdminData(db: Db): Promise<MpAdminData> {
 
 // ── 开关 ──
 
-const RulesInput = z.object({ enabled: z.boolean('请选择是否对顾客开放') });
+const RulesInput = z.object({
+  enabled: z.boolean('请选择是否对顾客开放'),
+  /** 后台看到的版本号（后台都带）；没带的不核对：自动化脚本收尾时不管现在是什么都关上 */
+  version: z.number().int().min(0).optional(),
+});
 
 export async function saveMpRules(deps: Deps, raw: unknown, ctx: OpContext): Promise<MpRules> {
   const input = parse(RulesInput, raw);
-  return saveRuleSetting(deps.sql, MP_RULES_KEY, loadMpRules, (before) => ({ ...DEFAULT_MP_RULES, ...before, ...input }), ctx);
+  return saveRuleSetting(
+    deps.sql,
+    MP_RULES_KEY,
+    loadMpRules,
+    (before) => {
+      const current = { ...DEFAULT_MP_RULES, ...before };
+      if (input.version !== undefined && input.version !== current.version) throw conflict('VERSION_CONFLICT', '开关刚被别人改过，请刷新后再改');
+      // 内容没变也加一：后台「放弃这次修改」靠它让原来那次请求的版本号对不上
+      return { ...current, enabled: input.enabled, version: current.version + 1 };
+    },
+    ctx,
+  );
 }
 
 // ── 门店信息 ──

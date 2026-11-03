@@ -3,13 +3,13 @@
 import type { MpHome, MpMe } from '../../../../src/shared/mp';
 import { appVersion } from '../../config/env';
 import { isOffline, member, messageOf, mockUser, mockWechat, show, switchMockUser } from '../../utils/api';
-import { clearBindPending, readBindPending, resolveBindPending, sendBind } from '../../utils/bind-pending';
+import { clearBindPending, dropUnreadableWhenBound, readBindPending, resolveBindPending, sendBind } from '../../utils/bind-pending';
 import type { BindOutcome } from '../../utils/bind-pending';
 import { cardView } from '../../utils/member-card';
 import type { CardView } from '../../utils/member-card';
 import { uuid } from '../../utils/uuid';
 
-type State = 'loading' | 'unbound' | 'notmember' | 'pending' | 'bound' | 'offline' | 'error';
+type State = 'loading' | 'unbound' | 'notmember' | 'pending' | 'unreadable' | 'bound' | 'offline' | 'error';
 
 Page({
   data: {
@@ -48,7 +48,7 @@ Page({
     const mock = await mockWechat();
     if (mock !== this.data.mock) this.setData({ mock, mockUser: mock ? mockUser() : '' });
     // 上次点绑定时结果不确定：先请门店系统确认，确认之前不显示绑定按钮
-    if (readBindPending()) {
+    if (readBindPending().state === 'pending') {
       const outcome = await resolveBindPending();
       if (outcome && outcome.kind === 'pending') {
         this.setData({ state: 'pending', message: outcome.message, card: null });
@@ -58,7 +58,15 @@ Page({
     }
     try {
       const me = await member<MpMe>('GET', '/v1/me');
-      if (me.bound && me.member) this.setData({ state: 'bound', card: cardView(me.member) });
+      if (me.bound && me.member) {
+        dropUnreadableWhenBound();
+        this.setData({ state: 'bound', card: cardView(me.member) });
+        return;
+      }
+      // 没绑定：手机上的记录读不出来（或又有了没确认的）时先不能绑定，读得出来、确认之后才显示绑定按钮
+      const now = readBindPending();
+      if (now.state === 'unreadable') this.setData({ state: 'unreadable', card: null });
+      else if (now.state === 'pending') this.setData({ state: 'pending', message: '', card: null });
       else this.setData({ state: this.data.state === 'notmember' ? 'notmember' : 'unbound', card: null });
     } catch (e) {
       this.setData({ state: isOffline(e) ? 'offline' : 'error', message: messageOf(e), card: null });
@@ -77,7 +85,8 @@ Page({
   },
 
   async bind(phoneCode: string) {
-    if (this.data.binding || readBindPending()) return;
+    if (this.data.binding) return;
+    // 手机上还有没确认的、或记录读不出来：sendBind 不发新的请求，按它的回答显示
     this.setData({ binding: true });
     // 每次点绑定用新的操作编号（手机号验证的 code 只能用一次）；编号先存在手机上，结果不确定时请门店系统确认
     const outcome = await sendBind(phoneCode, uuid());
@@ -93,6 +102,8 @@ Page({
       await this.load();
     } else if (outcome.kind === 'pending') {
       this.setData({ state: 'pending', message: outcome.message, card: null });
+    } else if (outcome.kind === 'unreadable') {
+      this.setData({ state: 'unreadable', card: null });
     } else if (outcome.kind === 'abandoned') {
       this.setData({ state: 'unbound' });
       wx.showModal({ title: '这次没有绑定', content: '刚才网络不好，门店系统确认这次没有绑上，请再点一次绑定。', showCancel: false });

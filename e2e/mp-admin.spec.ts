@@ -2,9 +2,11 @@
 //   ① 对顾客开放的开关（打开再关上）；② 改宝安店的营业时间；③ 新建一张首页轮播（上传图片）再停用；
 //   ④ 给一个价目项目写介绍；⑤ 找会员看微信绑定（演示库里没有绑定，只核对空状态）；
 //   ⑥ 新建轮播结果待确认：回复丢了自动查回、没送到时确认作废或按原内容重新提交（都只建一张）；
-//   ⑦ 解绑结果待确认（拦下接口、用假的绑定，只测页面的处理）。
+//   ⑦ 解绑结果待确认（拦下接口、用假的绑定，只测页面的处理）；
+//   ⑧ 修改内容结果待确认（门店信息、开关）：回复丢了自动查回；没送到时放弃这次修改或按原内容重新提交（都只改一次）；
+//   ⑨ 本机的待确认记录读不出来（读存储出错、记录认不出）：不发新的请求、不盖掉原来的记录，读得出来后照常处理。
 // 依赖 seed-demo（仅独立演示库）。账号：店主 linlan，密码 yuzu2026。每次的标题带时间，结束时把开关关上、轮播停用，可重复执行。
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Route } from '@playwright/test';
 
 const PASSWORD = 'yuzu2026';
 // 1×1 的 PNG：页面会压缩成 JPEG 再上传
@@ -216,6 +218,166 @@ test.describe('后台「微信小程序」（小程序线）', () => {
     await openBindings();
     await expect(page.getByText('已查回：已解绑')).toBeVisible();
     await expect(pending).toHaveCount(0);
+  });
+
+  test('修改内容结果待确认：回复丢了自动查回；没送到时放弃这次修改、按原内容重新提交（只改一次）；开关也一样', async ({ page }) => {
+    await login(page, 'linlan');
+    const stamp = String(Date.now() % 100000);
+    type Store = { code: string; name: string; hours: string; address: string; phone: string; latitude: number | null; longitude: number | null; notice: string; imageId: number | null; visible: boolean; version: number };
+    const adminData = async () => (await page.request.get('/api/admin/mp')).json();
+    const store = async () => ((await adminData()).stores as Store[]).find((s) => s.code === 'baoan')!;
+    const bodyOf = (s: Store) => ({ version: s.version, name: s.name, hours: s.hours, address: s.address, phone: s.phone, latitude: s.latitude, longitude: s.longitude, notice: s.notice, imageId: s.imageId, visible: s.visible });
+    const STORE = '**/api/admin/mp/stores/baoan';
+    const RULES = '**/api/admin/mp/rules';
+    const lose = (route: Route) => (route.request().method() === 'PUT' ? route.abort('connectionreset') : route.fallback());
+    const pending = page.getByTestId('mp-update-pending');
+    const baoan = page.getByTestId('mp-store-baoan');
+    const saveHours = async (hours: string) => {
+      await baoan.getByLabel('营业时间').fill(hours);
+      await baoan.getByRole('button', { name: '保存' }).click();
+    };
+    const abandon = async () => {
+      await pending.getByRole('button', { name: '放弃这次修改' }).click();
+      await page.getByRole('dialog', { name: '放弃这次修改' }).getByRole('button', { name: '确认放弃' }).click();
+      await expect(pending).toHaveCount(0);
+    };
+    expect((await page.request.put('/api/admin/mp/rules', { data: { enabled: false } })).ok()).toBe(true);
+    await page.goto('/admin/mp');
+    try {
+      // ① 请求到了门店系统、回复丢了：显示待确认；查回版本号变了、内容是这次的，自动移除
+      const h1 = `E2E 回复丢了 ${stamp}`;
+      await page.route(STORE, async (route) => {
+        if (route.request().method() !== 'PUT') return route.fallback();
+        await route.fetch();
+        await route.abort('connectionreset');
+      });
+      await saveHours(h1);
+      await expect(page.getByText('保存结果待确认', { exact: true })).toBeVisible();
+      await expect(page.getByText('已查回：已经改上了')).toBeVisible();
+      await expect(pending).toHaveCount(0);
+      await page.unroute(STORE);
+      expect((await store()).hours).toBe(h1);
+
+      // ② 没送到：待确认，刷新后还在，这家店先不能保存；放弃这次修改后内容没变，原来那次晚到也被拒绝
+      const before = await store();
+      await page.route(STORE, lose);
+      await saveHours(`E2E 没送到 ${stamp}`);
+      await expect(pending.filter({ hasText: '宝安店的门店信息' })).toBeVisible();
+      await page.unroute(STORE);
+      await page.reload();
+      await expect(pending).toHaveCount(1);
+      await expect(baoan.getByRole('button', { name: '保存' })).toBeDisabled();
+      await abandon();
+      await expect(page.getByText('已放弃这次修改')).toBeVisible();
+      const after = await store();
+      expect(after.hours).toBe(before.hours);
+      expect(after.version).toBe(before.version + 1);
+      const late = await page.request.put('/api/admin/mp/stores/baoan', { data: { ...bodyOf(before), hours: `E2E 没送到 ${stamp}` } });
+      expect(late.status()).toBe(409);
+      await expect(baoan.getByRole('button', { name: '保存' })).toBeEnabled();
+
+      // ③ 没送到，按原内容重新提交：改上，只改一次
+      const h3 = `E2E 重新提交 ${stamp}`;
+      await page.route(STORE, lose);
+      await saveHours(h3);
+      await expect(pending).toHaveCount(1);
+      await page.unroute(STORE);
+      await pending.getByRole('button', { name: '按原内容重新提交' }).click();
+      await expect(page.getByText('已保存', { exact: true })).toBeVisible();
+      await expect(pending).toHaveCount(0);
+      expect(await store()).toMatchObject({ hours: h3, version: after.version + 1 });
+
+      // ④ 开关：「开放」没送到，先不能再拨；放弃后还是关着，原来那次晚到也打不开
+      const rulesBefore = (await adminData()).rules as { enabled: boolean; version: number };
+      await page.route(RULES, lose);
+      await page.getByRole('radio', { name: '开放' }).click();
+      await expect(pending.filter({ hasText: '开关改成「开放」' })).toBeVisible();
+      await page.unroute(RULES);
+      await expect(page.getByRole('radio', { name: '开放' })).toBeDisabled();
+      await abandon();
+      expect((await adminData()).rules).toEqual({ enabled: false, version: rulesBefore.version + 1 });
+      expect((await page.request.put('/api/admin/mp/rules', { data: { enabled: true, version: rulesBefore.version } })).status()).toBe(409);
+      await expect(page.getByText('没开放：小程序只显示')).toBeVisible();
+      await expect(page.getByRole('radio', { name: '开放' })).toBeEnabled();
+    } finally {
+      await page.unroute(STORE).catch(() => undefined);
+      await page.unroute(RULES).catch(() => undefined);
+      expect((await page.request.put('/api/admin/mp/rules', { data: { enabled: false } })).ok()).toBe(true);
+    }
+  });
+
+  test('本机的待确认记录读不出来：不发新的请求、不盖掉原来的记录；读得出来后照常处理', async ({ page }) => {
+    // 让这个页面读「结果待确认」记录时出错（window.__mpReadFail 打开时），写入照常：本地 AI 预检 PR #42 的复现方法
+    await page.addInitScript(() => {
+      const read = Storage.prototype.getItem;
+      Storage.prototype.getItem = function (k: string) {
+        if (k === 'yuzu.mpPending.v1' && (window as unknown as { __mpReadFail?: boolean }).__mpReadFail) throw new DOMException('读存储出错（测试注入）');
+        return read.call(this, k);
+      };
+    });
+    await login(page, 'linlan');
+    const stamp = String(Date.now() % 100000);
+    const setFail = (on: boolean) => page.evaluate((v) => ((window as unknown as { __mpReadFail?: boolean }).__mpReadFail = v), on);
+    const raw = () => page.evaluate(() => localStorage.getItem('yuzu.mpPending.v1'));
+    const unreadable = page.getByText('本机的「结果待确认」记录读不出来', { exact: true });
+    const pending = page.getByTestId('mp-banner-pending');
+    const puts: string[] = [];
+    page.on('request', (r) => {
+      if (r.method() !== 'GET' && r.url().includes('/api/admin/mp/')) puts.push(`${r.method()} ${new URL(r.url()).pathname}`);
+    });
+    const title = `E2E 读不出来 ${stamp}`;
+    await page.goto('/admin/mp');
+    try {
+      // 新建轮播没送到：列表上方待确认
+      await page.getByRole('radio', { name: '首页轮播' }).click();
+      await page.route('**/api/admin/mp/banners', (route) => (route.request().method() === 'POST' ? route.abort('connectionreset') : route.fallback()));
+      await page.getByTestId('mp-banner-new').click();
+      const dialog = page.getByRole('dialog', { name: '新建轮播' });
+      await dialog.getByTestId('mp-banner-title').fill(title);
+      await dialog.getByTestId('mp-image-input').setInputFiles({ name: 'banner.png', mimeType: 'image/png', buffer: PNG_1PX });
+      await expect(dialog.getByRole('button', { name: '换一张' })).toBeVisible();
+      await dialog.getByRole('button', { name: '保存' }).click();
+      await expect(pending.filter({ hasText: title })).toBeVisible();
+      await page.unroute('**/api/admin/mp/banners');
+      const before = await raw();
+      expect(before).toContain(title);
+
+      // ① 读存储出错：页面提示读不出来；改门店信息不发请求、不改写记录
+      await setFail(true);
+      await page.getByRole('radio', { name: '开关与门店' }).click();
+      await expect(unreadable).toBeVisible();
+      const sentBefore = puts.length;
+      await page.getByTestId('mp-store-baoan').getByLabel('营业时间').fill(`E2E 读不出来 ${stamp}`);
+      await page.getByTestId('mp-store-baoan').getByRole('button', { name: '保存' }).click();
+      await expect(page.getByText(/记录读不出来，不知道之前有没有没确认的/).first()).toBeVisible();
+      expect(puts.slice(sentBefore)).toEqual([]);
+      await setFail(false);
+      expect(await raw()).toBe(before);
+
+      // ② 读得出来了：「再读一次」后提示消失，原来的待确认照旧，确认作废后才能再新建
+      await page.getByRole('button', { name: '再读一次' }).click();
+      await expect(unreadable).toHaveCount(0);
+      await page.getByRole('radio', { name: '首页轮播' }).click();
+      await expect(pending.filter({ hasText: title })).toBeVisible();
+      await pending.filter({ hasText: title }).getByRole('button', { name: '确认作废' }).click();
+      await page.getByRole('dialog', { name: '确认作废这次新建' }).getByRole('button', { name: '确认作废' }).click();
+      await expect(pending).toHaveCount(0);
+
+      // ③ 记录认不出（不是空的）：一样不发、不改写；记录原样留着
+      await page.evaluate(() => localStorage.setItem('yuzu.mpPending.v1', '{认不出的记录'));
+      await page.reload();
+      await expect(unreadable).toBeVisible();
+      const sentBefore2 = puts.length;
+      await page.getByTestId('mp-store-baoan').getByLabel('营业时间').fill(`E2E 认不出 ${stamp}`);
+      await page.getByTestId('mp-store-baoan').getByRole('button', { name: '保存' }).click();
+      await expect(page.getByText(/记录读不出来，不知道之前有没有没确认的/).first()).toBeVisible();
+      expect(puts.slice(sentBefore2)).toEqual([]);
+      expect(await raw()).toBe('{认不出的记录');
+    } finally {
+      await page.unroute('**/api/admin/mp/banners').catch(() => undefined);
+      await setFail(false).catch(() => undefined);
+      await page.evaluate(() => localStorage.removeItem('yuzu.mpPending.v1')).catch(() => undefined);
+    }
   });
 
   test('店员进不了后台「微信小程序」', async ({ page }) => {

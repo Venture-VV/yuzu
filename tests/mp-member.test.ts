@@ -4,7 +4,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/server/app';
 import { buildMpApp } from '../src/server/modules/mp/app';
 import { makeMemberCode } from '../src/server/modules/mp/member';
@@ -182,6 +182,55 @@ describe('会员卡、余额、流水、券（只读）', () => {
       expect(res.statusCode).toBe(403);
       expect(res.json().error.code).toBe('MP_NOT_BOUND');
     }
+  });
+});
+
+describe('流水先作废到期的赠金（Codex 审查 PR #42）', () => {
+  // 赠金有效 1 天：应用的时钟拨到 3 天后，批次就到期了；后台的全店扫描还没跑，要靠打开时作废
+  let planId: number;
+  beforeAll(async () => {
+    const created = await api(ctx.app, ctx.owner, 'POST', '/api/plans', { name: '演示·一天赠金', payAmount: 50000, bonusAmount: 5000, bonusValidDays: 1 });
+    expect(created.status, JSON.stringify(created.body)).toBe(200);
+    planId = created.body.plans.find((p: { name: string }) => p.name === '演示·一天赠金').id;
+  });
+  const memberWithBonus = async (i: number) => {
+    const m = await createMember(ctx, `演示·赠金${i}`, phoneOf(i));
+    const openid = newOpenid();
+    expect((await bind(openid, phoneOf(i))).statusCode).toBe(200);
+    const r = await api(ctx.app, ctx.owner, 'POST', '/api/recharges', rechargeBody(m.id, 50000, 5000, { planId, bonusMode: 'custom', bonusValidDays: 1, paymentMethod: 'cash' }));
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    return { memberId: m.id, openid };
+  };
+  const later = async <T>(fn: () => Promise<T>) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 3 * 86_400_000);
+    try {
+      return await fn();
+    } finally {
+      vi.useRealTimers();
+    }
+  };
+
+  it('只看流水（没先打开会员卡）：流水里就有这笔过期，结尾的余额是作废之后的', async () => {
+    const { memberId, openid } = await memberWithBonus(70);
+    const rows = await later(async () => (await call(mp, 'GET', '/api/mp/ledger', openid)).json());
+    expect(rows[0]).toMatchObject({ kind: 'expire', principalDelta: 0, bonusDelta: -5000, principalAfter: 50000, bonusAfter: 0 });
+    expect(rows[1]).toMatchObject({ kind: 'recharge', principalAfter: 50000, bonusAfter: 5000 });
+    const [m] = await ctx.sql<{ bonusBalance: number }[]>`SELECT bonus_balance FROM members WHERE id = ${memberId}`;
+    expect(m!.bonusBalance).toBe(0);
+  });
+
+  it('会员卡与流水同时取：两边都作废也只过期一次，流水结尾的余额与会员卡一致', async () => {
+    const { memberId, openid } = await memberWithBonus(71);
+    const [me, rows] = await later(async () => {
+      const [a, b] = await Promise.all([call(mp, 'GET', '/api/mp/me', openid), call(mp, 'GET', '/api/mp/ledger', openid)]);
+      return [a.json(), b.json()];
+    });
+    expect(me.member).toMatchObject({ principalBalance: 50000, bonusBalance: 0 });
+    expect(rows[0]).toMatchObject({ kind: 'expire', bonusDelta: -5000, principalAfter: me.member.principalBalance, bonusAfter: me.member.bonusBalance });
+    expect(rows.filter((r: { kind: string }) => r.kind === 'expire')).toHaveLength(1);
+    const [n] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM bonus_expiries WHERE member_id = ${memberId}`;
+    expect(n!.n).toBe(1);
   });
 });
 

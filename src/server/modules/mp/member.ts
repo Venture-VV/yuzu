@@ -190,6 +190,10 @@ const LedgerQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).de
 export async function getLedger(deps: Deps, openid: string, query: unknown): Promise<MpLedgerRow[]> {
   const memberId = await boundMemberId(deps.sql, openid);
   const { limit } = parse(LedgerQuery, query);
+  // 与会员卡一样先作废到期的赠金，流水里才有这笔过期、结尾余额与会员卡对得上（Codex 审查 PR #42）。
+  // 小程序同时取会员卡和流水时两边都会作废：先到的锁住会员一行作废，后到的等它提交后再查、已经没有要作废的，
+  // 所以流水总在作废提交之后才读
+  await expireMemberBonus(deps, memberId);
   const rows = await listLedger(deps.sql, { memberId, limit });
   // 只给顾客看得懂、该看的：不带经办人、单号与内部字段
   return rows.map((r) => ({
