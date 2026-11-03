@@ -35,6 +35,7 @@ import { loadRoleOverrides } from '../auth/role-permissions';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
 import { badRequest } from '../lib/errors';
+import { sameJson } from '../lib/rule-settings';
 import { parse } from '../lib/validate';
 import { loadFrontdeskRules } from './frontdesk/common';
 import { loadMembershipRules } from './membership';
@@ -61,9 +62,7 @@ import { DEFAULT_GUIDE_RULES } from '@shared/guide';
 import { lockSettings } from '../lib/rule-settings';
 
 // 存进 jsonb 的对象键会重新排序（例如会员规则的各档），比较前按键名排好
-const sorted = (v: unknown): unknown =>
-  Array.isArray(v) ? v.map(sorted) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sorted((v as Record<string, unknown>)[k])])) : v;
-const same = (a: unknown, b: unknown) => JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
+const same = sameJson;
 const onOff = (v: boolean, on: string, off: string) => (v ? on : off);
 const approvals = (r: ApprovalRules) => {
   const on = (Object.keys(APPROVAL_RULE_LABELS) as (keyof ApprovalRules)[]).filter((k) => r[k]).map((k) => APPROVAL_RULE_LABELS[k]);

@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DEFAULT_MEMBERSHIP_RULES, MAX_GRADE, type MembershipRules } from '@shared/membership';
 import { formatYuan, parseYuan } from '@shared/money';
-import { api, errorMessage } from '../../lib/api';
+import { api, ApiError, errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { useToast } from '../../components/Toast';
 import { Button, Card, Field, Input, Notice, PendingBadge, SectionTitle, Select, Skeleton } from '../../components/ui';
@@ -137,12 +137,14 @@ function RulesEditor() {
     setBusy(true);
     setError(null);
     try {
-      await api.put<MembershipRules>('/api/membership/rules', parsed);
+      // 带上打开时读到的规则：这期间别人保存过，服务端整页拒绝（RULES_CHANGED），页面换成最新的规则
+      await api.put<MembershipRules>('/api/membership/rules', { ...parsed, based: rules.data });
       await qc.invalidateQueries({ queryKey: membershipKeys.rules });
       await qc.invalidateQueries({ queryKey: ['membership'] });
       toast({ tone: 'success', title: '会员规则已保存', body: '以后的充值、消费与到期判断按新规则；已经记下的档阶不重算。' });
     } catch (e) {
       setError(errorMessage(e));
+      if (e instanceof ApiError && e.code === 'RULES_CHANGED') await qc.invalidateQueries({ queryKey: membershipKeys.rules });
     } finally {
       setBusy(false);
     }

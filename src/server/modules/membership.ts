@@ -58,7 +58,7 @@ import { ctxOf, type Deps, type OpContext } from '../lib/context';
 import { toCsv, csvReply } from '../lib/csv';
 import { conflict, notFound } from '../lib/errors';
 import { dateSchema, idParam, parse } from '../lib/validate';
-import { lockSettings, saveRuleSetting } from '../lib/rule-settings';
+import { lockSettings, sameJson, saveRuleSetting } from '../lib/rule-settings';
 import { setTxTimeouts } from '../lib/tx';
 import { loadSettings } from './settings';
 
@@ -757,9 +757,22 @@ export function registerMembershipRoutes(app: FastifyInstance, deps: Deps) {
 
   // 会员规则：前台、充值页、会员详情都要（档名、门槛、比例），登录即可读；改要「修改会员规则」
   app.get('/api/membership/rules', { preHandler: sessionOnly }, async () => loadMembershipRules(sql));
-  app.put('/api/membership/rules', { preHandler: guard('member.rules') }, async (req) =>
-    saveRuleSetting(sql, RULES_KEY, loadMembershipRules, () => parse(RulesInput, req.body), ctxOf(req)),
-  );
+  // 整页保存：页面带上打开时读到的规则（based），这期间别人保存过就整页拒绝、让页面换成最新的再改，不悄悄改回别人的修改
+  app.put('/api/membership/rules', { preHandler: guard('member.rules') }, async (req) => {
+    const based = (req.body as { based?: unknown } | null)?.based;
+    return saveRuleSetting(
+      sql,
+      RULES_KEY,
+      loadMembershipRules,
+      (before) => {
+        if (based !== undefined && !sameJson(based, before)) {
+          throw conflict('RULES_CHANGED', '会员规则刚被别人改过，页面已换成最新的规则，请核对后重新修改、保存');
+        }
+        return parse(RulesInput, req.body);
+      },
+      ctxOf(req),
+    );
+  });
 
   app.get('/api/membership/overview', { preHandler: guard('member.retention') }, async () => {
     const date = await todayNow();

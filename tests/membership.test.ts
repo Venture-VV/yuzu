@@ -87,6 +87,25 @@ describe('会员规则', () => {
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     expect(ok.body.reminderDays).toEqual([90, 30, 7]);
   });
+
+  it('整页保存带上打开时的规则：这期间别人保存过就拒绝（RULES_CHANGED），不悄悄改回别人的修改', async () => {
+    const opened = await rules();
+    // 店总先保存（改续充最低）
+    const first = await api(ctx.app, manager, 'PUT', '/api/membership/rules', { ...opened, topUpMinCents: yuan(2000), based: opened });
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    // 店主按打开时的规则改补充期：被拒，续充最低还是店总改的
+    const stale = await api(ctx.app, ctx.owner, 'PUT', '/api/membership/rules', { ...opened, graceDays: 60, based: opened });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error.code).toBe('RULES_CHANGED');
+    expect(await rules()).toMatchObject({ topUpMinCents: yuan(2000), graceDays: opened.graceDays });
+    // 换成最新的再改：jsonb 里键的先后不同也认作同一份
+    const latest = await rules();
+    const reordered = Object.fromEntries(Object.entries(latest).reverse());
+    const again = await api(ctx.app, ctx.owner, 'PUT', '/api/membership/rules', { ...latest, graceDays: 60, based: reordered });
+    expect(again.status, JSON.stringify(again.body)).toBe(200);
+    expect(again.body).toMatchObject({ topUpMinCents: yuan(2000), graceDays: 60 });
+    await setRules({ topUpMinCents: opened.topUpMinCents, graceDays: opened.graceDays });
+  });
 });
 
 describe('充值：最低、赠金、升档', () => {
