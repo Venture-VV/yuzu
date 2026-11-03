@@ -366,6 +366,21 @@ test.describe('v0.7.16 房态图', () => {
       await roomDialog.getByTestId('room-dialog-select').selectOption({ label: 'T302 · 样例 SPA 2人间 · 空闲' });
       await roomDialog.getByTestId('room-dialog-save').click();
       await expect(page.getByTestId(/^clock-serving-/).filter({ hasText: tag }).getByTestId(/^clock-room-/)).toHaveText('T302 · 样例 SPA 2人间');
+      // 换房间的版本号（测试报告建议补的浏览器用例）：对话框打开后房间被别人改过（这里改到 T301 再改回 T302），
+      // 再按打开时的内容保存被拒绝（SESSION_SPACE_STALE），提示刷新后再选；房间还在 T302
+      await page.getByTestId(/^clock-serving-/).filter({ hasText: tag }).getByTestId(/^clock-room-/).click();
+      const staleDialog = page.getByRole('dialog').filter({ hasText: '换房间' });
+      const mapNow = await getJson<FloorMapData>(page, '/api/floormap');
+      const spaceIdOf = (code: string) => mapNow.spaces.find((x) => x.code === code)!.id;
+      const servingNow = (await getJson<ClockroomBoard>(page, '/api/clockroom')).sessions.find((x) => x.visitId === visit)!;
+      await send(page, 'post', `/api/clockroom/sessions/${servingNow.id}/space`, { spaceId: spaceIdOf('T301'), expectedVersion: servingNow.spaceVersion });
+      const moved = (await getJson<ClockroomBoard>(page, '/api/clockroom')).sessions.find((x) => x.visitId === visit)!;
+      await send(page, 'post', `/api/clockroom/sessions/${moved.id}/space`, { spaceId: spaceIdOf('T302'), expectedVersion: moved.spaceVersion });
+      await staleDialog.getByTestId('room-dialog-select').selectOption({ label: 'T301 · 样例 SPA 1人间 · 空闲' });
+      await staleDialog.getByTestId('room-dialog-save').click();
+      await expect(staleDialog).toContainText('房间刚被改过');
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId(/^clock-serving-/).filter({ hasText: tag }).getByTestId(/^clock-room-/)).toHaveText('T302 · 样例 SPA 2人间');
       await page.goto(rooms);
       await expect(space(page, 'T302')).toHaveAttribute('data-state', 'serving');
       await expect(space(page, 'T302')).toContainText('1/2');
@@ -448,6 +463,47 @@ async function mockMap(page: Page) {
 }
 
 test.describe('v0.7.16 房态图 · 各尺寸', () => {
+  test('双指捏合缩放（触屏平板；测试报告建议补的浏览器用例）：两指分开放大、并拢缩小', async ({ page }) => {
+    await login(page, 'xiaozhou');
+    await mockMap(page);
+    await page.goto('/rooms');
+    await page.getByRole('radiogroup', { name: '视图' }).getByRole('radio', { name: '平面图' }).click();
+    await expect(page.locator('[data-testid^="map-space-"]')).toHaveCount(COLS * ROWS);
+    const zoom = page.getByTestId('floormap-zoom');
+    await expect(zoom).toHaveAttribute('data-zoom', '1.00');
+    // 两个触点：按下 → 分开（或并拢）→ 抬起；地图按两指间距的变化缩放
+    const pinch = (from: number, to: number) =>
+      page.evaluate(
+        async ({ from, to }) => {
+          const box = document.querySelector('[data-testid="floormap-canvas"]')!;
+          const r = box.getBoundingClientRect();
+          const cx = r.x + r.width / 2;
+          const cy = r.y + r.height / 2;
+          const fire = (type: string, id: number, x: number) =>
+            (type === 'pointerdown' ? box : window).dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', isPrimary: id === 1, clientX: x, clientY: cy, bubbles: true, cancelable: true }));
+          fire('pointerdown', 1, cx - from);
+          fire('pointerdown', 2, cx + from);
+          const frame = () => new Promise((done) => requestAnimationFrame(done));
+          for (let i = 1; i <= 8; i += 1) {
+            const half = from + ((to - from) * i) / 8;
+            fire('pointermove', 1, cx - half);
+            fire('pointermove', 2, cx + half);
+            await frame();
+          }
+          fire('pointerup', 1, cx - to);
+          fire('pointerup', 2, cx + to);
+        },
+        { from, to },
+      );
+    await pinch(40, 120);
+    await expect.poll(async () => Number(await zoom.getAttribute('data-zoom'))).toBeGreaterThan(1.5);
+    const zoomed = Number(await zoom.getAttribute('data-zoom'));
+    await pinch(120, 60);
+    await expect.poll(async () => Number(await zoom.getAttribute('data-zoom'))).toBeLessThan(zoomed);
+    // 捏合不算点击：没有打开房间侧栏
+    await expect(page.getByTestId('floormap-panel')).toHaveCount(0);
+  });
+
   test('单层 300 个空间 2 秒内画完；缩放平移；点房间出侧栏；不横向滚动', async ({ page }) => {
     await login(page, 'xiaozhou');
     await mockMap(page);

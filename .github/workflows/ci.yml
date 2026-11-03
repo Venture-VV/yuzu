@@ -204,6 +204,13 @@ jobs:
           node dist/server/cli.js check
           node dist/server/cli.js demo-check
           echo "digest=$(node dist/server/cli.js fingerprint | tail -n 1)" >> "$GITHUB_OUTPUT"
+      - name: 每日对账包（只读）：08-使用单.csv 带上演示的派对房使用单，数据指纹不变
+        run: |
+          node dist/server/cli.js daily-recon --out recon-demo
+          f=$(ls recon-demo/*/08-使用单.csv | head -n 1)
+          echo "对账包：$f"
+          grep -q 'X201' "$f" || { echo "::error::08-使用单.csv 里没有演示的 X201 使用单"; cat "$f"; exit 1; }
+          test "$(node dist/server/cli.js fingerprint | tail -n 1)" = "${{ steps.fp.outputs.digest }}" || { echo "::error::生成对账包改了数据"; exit 1; }
       - name: 再执行一次：全部跳过、数据指纹不变
         run: |
           node dist/server/cli.js demo-prepare | tee second.txt
