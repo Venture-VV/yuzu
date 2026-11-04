@@ -11,7 +11,7 @@ import { cn, formatTime } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { Money } from '../../components/Money';
 import { Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
-import { Columns, HBars, yuan } from './charts';
+import { Columns, FitText, HBars, yuan } from './charts';
 import { MembersTab } from './MembersTab';
 import { MembershipTab } from '../membership/MembershipTab';
 import { OverviewTab } from './OverviewTab';
@@ -315,7 +315,9 @@ function Kpi({ icon, label, children, tone }: { icon: React.ReactNode; label: st
         {icon}
         {label}
       </p>
-      <p className={cn('mt-1.5 text-[22px] leading-tight font-bold', tone === 'pine' ? 'text-pine' : tone === 'lake' ? 'text-lake' : 'text-ink')}>{children}</p>
+      <FitText as="p" className={cn('mt-1.5 leading-tight font-bold', tone === 'pine' ? 'text-pine' : tone === 'lake' ? 'text-lake' : 'text-ink')}>
+        {children}
+      </FitText>
     </Card>
   );
 }
