@@ -55,8 +55,13 @@ Page({
   polls: 0,
 
   onShow() {
-    // 正在付款、等入账时回到页面不打断（微信支付的界面关掉也会触发 onShow）
-    if (this.data.state === 'paying' || this.data.state === 'waiting') return;
+    // 正在付款时回到页面不打断（微信支付的界面关掉也会触发 onShow）
+    if (this.data.state === 'paying') return;
+    if (this.data.state === 'waiting') {
+      // 等入账时切到后台再回来：onHide 停了查询，这里接着查（审查 2a 的 P3）
+      if (!this.timer && this.data.order) this.startPoll(this.data.order.orderNo);
+      return;
+    }
     this.load();
   },
 

@@ -142,6 +142,10 @@ function resolveTx(deps: Deps, orderId: number, memberId: number, input: z.infer
     const o = await lockOrder(tx, orderId);
     if (o.resolveClientKey === input.clientKey) return;
     if (o.status !== 'held') throw conflict('NOT_HELD', '这张单已经不是「已付款待处理」了，请刷新');
+    // 在锁住的这一行上再核对一次（锁之前读的可能已经变了：例如那时还是待支付，等锁期间到了一条对不上的通知；审查 2a 的 P2）
+    if (input.action !== 'handled' && o.holdCode && NO_REBOOK.has(o.holdCode)) {
+      throw unprocessable('REBOOK_REFUSED', '这张单的到账与单子对不上（或已退款、已入过别的账），不能直接入账；请核对后记「已另行处理」');
+    }
     if (input.action === 'handled') {
       await tx`
           UPDATE mp_recharge_orders

@@ -29,11 +29,13 @@ const PEMS = [
 ] as const;
 
 /** 按环境变量建门店系统的微信支付；没配返回 null，配错抛错（buildMpApp 接住：不开线上充值、日志与后台写原因） */
-export function loadPayRuntime(env: NodeJS.ProcessEnv, appEnv: AppEnv): PayRuntime | null {
+export function loadPayRuntime(env: NodeJS.ProcessEnv, appEnv: AppEnv, instance?: string): PayRuntime | null {
   const v = (k: string) => env[k]?.trim() ?? '';
   const present = [...KEYS, ...PEMS.flat()].filter((k) => v(k));
   if (v('MP_PAY_MOCK') === 'true') {
     if (appEnv !== 'development' && appEnv !== 'test') throw new Error(`MP_PAY_MOCK=true 只能在 development、test 实例用（这里是 ${appEnv}）`);
+    // 实例标识是正式服、影子运行、测试服（演练库）的也不开：只在演示库、本机开发
+    if (instance && ['prod', 'shadow', 'test'].includes(instance)) throw new Error(`MP_PAY_MOCK=true 不能开在 ${instance} 实例上（只给演示库、本机开发）`);
     if (present.length) throw new Error('开了模拟微信支付（MP_PAY_MOCK=true）就不要再配 WXPAY_*');
     const mock = createMockWxPay();
     return { mode: 'mock', config: mock.config, client: mock.client, mock };

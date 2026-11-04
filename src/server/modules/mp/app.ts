@@ -70,7 +70,7 @@ export async function buildMpApp(sql: Sql, config: AppConfig, opts: MpAppOptions
     setActivePay(pay);
   } else {
     try {
-      pay = loadPayRuntime(process.env, config.env);
+      pay = loadPayRuntime(process.env, config.env, config.instance);
       setActivePay(pay);
       if (pay) app.log.info(pay.mode === 'mock' ? '线上充值用模拟微信支付（只在 development、test）' : `线上充值的微信支付已配好（商户号 ${pay.config.mchId}）`);
     } catch (error) {

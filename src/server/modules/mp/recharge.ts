@@ -408,7 +408,20 @@ async function ensurePayment(deps: Deps, pay: PayRuntime, o: OrderRow): Promise<
       }
       return null;
     }
-    await deps.sql`UPDATE mp_recharge_orders SET prepay_id = ${prepayId}, updated_at = now() WHERE id = ${o.id} AND prepay_id IS NULL`;
+    // 下单期间这张单可能被取消、关掉了（「继续支付」与「取消」同时点）：只有还是待支付才记下 prepay_id、给支付参数；
+    // 已经不是待支付的，刚才在微信下的这一单要关掉，不能留着能付（审查 2a 的 P2）
+    const [kept] = await deps.sql<{ prepayId: string }[]>`
+      UPDATE mp_recharge_orders SET prepay_id = coalesce(prepay_id, ${prepayId}), updated_at = now()
+      WHERE id = ${o.id} AND status = 'pending'
+      RETURNING prepay_id`;
+    if (!kept) {
+      await pay.client.closeOrder(o.orderNo).catch(async (error: unknown) => {
+        if (error instanceof WxPayError && error.code === 'ORDERPAID') await syncFromWechat(deps, pay, o, 'order');
+      });
+      await recordEvent(deps.sql, o.id, 'wx_order', false, 'ORDER_NOT_PENDING', { message: '下单期间这张单已经不是待支付，已请微信关单' });
+      throw conflict('ORDER_NOT_PENDING', '这张单已经关闭，请重新下单');
+    }
+    prepayId = kept.prepayId;
     await recordEvent(deps.sql, o.id, 'wx_order', true, null, {});
   }
   return paymentParams(pay.config, prepayId);
@@ -479,7 +492,7 @@ export async function abandonRechargeCreate(deps: Deps, openid: string, raw: unk
 
 /** 模拟支付（只在 development、test 的模拟微信支付）：造一条照真的签名、加密的到账通知，走同一条路入账 */
 export async function mockPayRechargeOrder(deps: Deps, pay: PayRuntime | null, openid: string, orderNo: string): Promise<MpRechargeOrder> {
-  if (!pay?.mock || (deps.config.env !== 'development' && deps.config.env !== 'test')) {
+  if (!pay?.mock || (deps.config.env !== 'development' && deps.config.env !== 'test') || ['prod', 'shadow', 'test'].includes(deps.config.instance)) {
     throw new AppError(403, 'MP_MOCK_REFUSED', '这个门店系统不接受模拟支付');
   }
   const o = await myOrder(deps.sql, openid, orderNo);
@@ -580,7 +593,8 @@ async function syncFromWechat(deps: Deps, pay: PayRuntime, o: OrderRow, source: 
     if (t.transactionId) await hold(deps.sql, o.id, t, 'WX_REFUND', '微信支付那边这一单已转入退款，没有入账', source);
     return;
   }
-  if (t.tradeState === 'CLOSED' || t.tradeState === 'REVOKED' || t.tradeState === 'PAYERROR') {
+  // PAYERROR（这一次付款失败，例如银行拒了）不是最终结果：微信那边这一单还能再付，按没付处理、到期再请微信关单
+  if (t.tradeState === 'CLOSED' || t.tradeState === 'REVOKED') {
     await closeLocally(deps.sql, o.id, 'wx_closed', {
       tradeState: t.tradeState,
     });
@@ -593,6 +607,7 @@ async function syncFromWechat(deps: Deps, pay: PayRuntime, o: OrderRow, source: 
 /** 到账的内容与单子对不上的地方（对上返回 null） */
 function mismatchOf(pay: PayRuntime, o: OrderRow, t: WxTransaction): string | null {
   const wrong: string[] = [];
+  if (t.outTradeNo !== o.orderNo) wrong.push(`商户单号 ${t.outTradeNo}`);
   if (t.appId !== pay.config.appId) wrong.push(`AppID ${t.appId}`);
   if (t.mchId !== pay.config.mchId) wrong.push(`商户号 ${t.mchId}`);
   if (t.amountTotal !== o.amount) wrong.push(`金额 ${t.amountTotal === null ? '没有' : formatYuan(t.amountTotal)}（单子是 ${formatYuan(o.amount)}）`);
@@ -688,6 +703,17 @@ async function acceptPayment(deps: Deps, pay: PayRuntime, orderId: number, t: Wx
       await hold(deps.sql, orderId, t, error.code, error.message, source);
       return;
     }
+    // 门店这边出错（锁超时、系统账号被占用……）：记一笔；一直入不了的转「已付款待处理」给店主看，钱已经付了，不能一直挂在待支付、
+    // 也挡着顾客下新单（审查 2a 的 P2）。店主之后「重新入账」按同一个交易单号去重，不会入两次
+    await recordEvent(deps.sql, orderId, 'booked', false, codeOf(error), { source, message: messageOf(error), transactionId: t.transactionId }).catch(() => {});
+    const [f] = await deps.sql<{ n: number; first: string | null }[]>`
+      SELECT count(*)::int AS n, min(created_at) AS first FROM mp_recharge_events WHERE order_id = ${orderId} AND kind = 'booked' AND NOT ok`.catch(() => []);
+    if (f && f.first && f.n >= BOOK_FAIL_TIMES && Date.now() - Date.parse(f.first) >= BOOK_FAIL_MS) {
+      const held = await hold(deps.sql, orderId, t, 'BOOK_FAILED', `门店系统入账一直出错（${messageOf(error)}），请核对后重新入账`, source)
+        .then(() => true)
+        .catch(() => false);
+      if (held) return;
+    }
     throw error;
   }
 }
@@ -740,8 +766,36 @@ export async function handlePayNotify(deps: Deps, pay: PayRuntime | null, raw: u
     transactionId: t.transactionId,
     amount: t.amountTotal,
   });
+  // 晚到的通知（微信在重发，例如门店断过网）：这期间店里可能已在商户平台把这笔退了。还没入账的，先去微信查这一单现在的状态，
+  // 按查单的结果处理（已转入退款的记已付款待处理、不入账）；查不了回失败，等微信重发或每分钟补查（审查 2a 的 P2）
+  const age = t.successTime ? Date.now() - Date.parse(t.successTime) : 0;
+  if ((o.status === 'pending' || o.status === 'closed') && age > LATE_NOTIFY_MS && sameMode(pay, o)) {
+    let current: WxTransaction | null;
+    try {
+      current = await pay.client.queryOrder(o.orderNo);
+    } catch (error) {
+      await recordEvent(deps.sql, o.id, 'query', false, codeOf(error), { source: 'notify', message: messageOf(error) });
+      throw new AppError(503, 'WXPAY_UNAVAILABLE', '晚到的到账通知要先去微信查单，现在查不了，等重发');
+    }
+    await recordEvent(deps.sql, o.id, 'query', true, null, { source: 'notify', tradeState: current?.tradeState ?? null, transactionId: current?.transactionId ?? null });
+    if (current?.tradeState === 'REFUND' && current.transactionId) {
+      await hold(deps.sql, o.id, current, 'WX_REFUND', '微信支付那边这一单已转入退款，没有入账', 'notify');
+      return;
+    }
+    if (current?.tradeState !== 'SUCCESS') {
+      throw new AppError(503, 'WXPAY_STATE_UNCLEAR', `到账通知说已付，查单却是 ${current?.tradeState ?? '没有这一单'}，先不入账`);
+    }
+    await acceptPayment(deps, pay, o.id, current, 'notify');
+    return;
+  }
   await acceptPayment(deps, pay, o.id, t, 'notify');
 }
+
+/** 到账通知比付款时间晚这么久就算晚到（微信在重发）：先查单再入账 */
+const LATE_NOTIFY_MS = 5 * 60_000;
+/** 门店这边入账一直出错：出错 3 次以上、头一次出错已过 10 分钟，记已付款待处理给店主看 */
+const BOOK_FAIL_TIMES = 3;
+const BOOK_FAIL_MS = 10 * 60_000;
 
 // ── 每分钟：补查、关单 ──
 

@@ -25,7 +25,7 @@ interface MockOrder {
     payer: { openid: string };
   };
   prepayId: string;
-  state: 'NOTPAY' | 'SUCCESS' | 'CLOSED';
+  state: 'NOTPAY' | 'SUCCESS' | 'CLOSED' | 'REFUND' | 'PAYERROR';
   transactionId: string | null;
   successTime: string | null;
 }
@@ -41,6 +41,12 @@ export interface MockWxPay {
   state(outTradeNo: string): MockOrder['state'] | null;
   /** 模拟连不上微信支付（测试用） */
   setDown(down: boolean): void;
+  /** 店里在商户平台把这一单退了（测试用）：之后查单是 REFUND */
+  refund(outTradeNo: string): void;
+  /** 这一次付款失败（例如银行拒了，测试用）：查单是 PAYERROR，之后还能再付 */
+  payError(outTradeNo: string): void;
+  /** 交易账单里不出现这一单（测试用：模拟「门店记了、微信账单里没有」） */
+  hideFromBill(outTradeNo: string): void;
   /** 往某一天的交易账单里加一行（测试用：例如门店系统没有的一笔、金额不一样的一笔） */
   addBillRow(billDate: string, row: { outTradeNo: string; transactionId: string; amount: number; openid?: string; tradeState?: string; time?: string }): void;
 }
@@ -74,6 +80,7 @@ export function createMockWxPay(o: { appId?: string; mchId?: string; notifyUrl?:
   };
   const orders = new Map<string, MockOrder>();
   const extraBillRows = new Map<string, string[][]>();
+  const hiddenFromBill = new Set<string>();
   const bills = new Map<string, string>();
   let down = false;
 
@@ -111,12 +118,12 @@ export function createMockWxPay(o: { appId?: string; mchId?: string; notifyUrl?:
     ...(x.transactionId ? { transaction_id: x.transactionId } : {}),
     trade_type: 'JSAPI',
     trade_state: x.state,
-    trade_state_desc: x.state === 'SUCCESS' ? '支付成功' : x.state === 'CLOSED' ? '订单已关闭' : '订单未支付',
+    trade_state_desc: x.state === 'SUCCESS' ? '支付成功' : x.state === 'CLOSED' ? '订单已关闭' : x.state === 'REFUND' ? '转入退款' : '订单未支付',
     ...(x.successTime ? { success_time: x.successTime, bank_type: 'OTHERS' } : {}),
     payer: { openid: x.request.payer.openid },
     amount: {
       total: x.request.amount.total,
-      payer_total: x.state === 'SUCCESS' ? x.request.amount.total : 0,
+      payer_total: x.state === 'SUCCESS' || x.state === 'REFUND' ? x.request.amount.total : 0,
       currency: 'CNY',
       payer_currency: 'CNY',
     },
@@ -135,7 +142,7 @@ export function createMockWxPay(o: { appId?: string; mchId?: string; notifyUrl?:
       if (parseTime(req.time_expire) <= Date.now()) return error(400, 'PARAM_ERROR', '订单已过期');
       const had = orders.get(req.out_trade_no);
       if (had) {
-        if (had.state === 'SUCCESS') return error(400, 'ORDERPAID', '该订单已支付');
+        if (had.state === 'SUCCESS' || had.state === 'REFUND') return error(400, 'ORDERPAID', '该订单已支付');
         if (had.state === 'CLOSED') return error(400, 'ORDER_CLOSED', '订单已关闭');
         const same = JSON.stringify({ ...had.request, notify_url: undefined }) === JSON.stringify({ ...req, notify_url: undefined });
         if (!same) return error(400, 'INVALID_REQUEST', '201 商户订单号重复');
@@ -162,7 +169,7 @@ export function createMockWxPay(o: { appId?: string; mchId?: string; notifyUrl?:
     if (init.method === 'POST' && c) {
       const x = orders.get(decodeURIComponent(c[1]!));
       if (!x) return error(404, 'ORDER_NOT_EXIST', '订单不存在');
-      if (x.state === 'SUCCESS') return error(400, 'ORDERPAID', '订单已支付');
+      if (x.state === 'SUCCESS' || x.state === 'REFUND') return error(400, 'ORDERPAID', '订单已支付');
       x.state = 'CLOSED';
       return signed(204);
     }
@@ -170,7 +177,7 @@ export function createMockWxPay(o: { appId?: string; mchId?: string; notifyUrl?:
       const date = u.searchParams.get('bill_date') ?? '';
       const rows: string[][] = [];
       for (const [no, x] of orders) {
-        if (x.state !== 'SUCCESS' || !x.successTime || x.successTime.slice(0, 10) !== date) continue;
+        if (x.state !== 'SUCCESS' || !x.successTime || x.successTime.slice(0, 10) !== date || hiddenFromBill.has(no)) continue;
         const total = billYuan(x.request.amount.total);
         rows.push([
           x.successTime.slice(0, 19).replace('T', ' '), x.request.appid, x.request.mchid, '0', '', x.transactionId!, no, x.request.payer.openid,
@@ -232,7 +239,7 @@ export function createMockWxPay(o: { appId?: string; mchId?: string; notifyUrl?:
       const x = orders.get(outTradeNo);
       if (!x) throw new Error(`模拟的微信支付里没有这一单：${outTradeNo}`);
       if (x.state === 'CLOSED') throw new Error('这一单已经关了，付不了');
-      if (x.state === 'NOTPAY') {
+      if (x.state === 'NOTPAY' || x.state === 'PAYERROR') {
         if (parseTime(x.request.time_expire) <= now.getTime()) throw new Error('这一单已经过期，付不了');
         x.state = 'SUCCESS';
         x.transactionId = `4200${digits(24)}`;
@@ -244,6 +251,19 @@ export function createMockWxPay(o: { appId?: string; mchId?: string; notifyUrl?:
     state: (no) => orders.get(no)?.state ?? null,
     setDown(v) {
       down = v;
+    },
+    hideFromBill(no) {
+      hiddenFromBill.add(no);
+    },
+    payError(no) {
+      const x = orders.get(no);
+      if (!x || x.state !== 'NOTPAY') throw new Error(`模拟的微信支付里这一单不是待支付：${no}`);
+      x.state = 'PAYERROR';
+    },
+    refund(no) {
+      const x = orders.get(no);
+      if (!x || x.state !== 'SUCCESS') throw new Error(`模拟的微信支付里这一单没付，退不了：${no}`);
+      x.state = 'REFUND';
     },
     addBillRow(billDate, r) {
       const yuan = billYuan(r.amount);

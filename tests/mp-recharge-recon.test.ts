@@ -108,6 +108,14 @@ describe('逐笔核对', () => {
     expect(r.issues).toEqual([]);
     const [o] = await ctx.sql<{ status: string }[]>`SELECT status FROM mp_recharge_orders WHERE order_no = ${no}`;
     expect(o!.status).toBe('paid');
+    // 再对一次、与到账通知同时到：都只入账一次（走 2a 同一条路，按微信交易单号去重）
+    const late = wx.pay(no);
+    await Promise.all([
+      reconcileDay(deps, pay, today(), { source: 'manual', staffId: ctx.ownerId }),
+      call('POST', '/api/mp/pay/notify', '', { headers: late.headers, body: Buffer.from(late.body).toString('base64') }),
+    ]);
+    const [n] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM recharges WHERE member_id = ${c.memberId} AND channel = 'mp'`;
+    expect(n!.n).toBe(1);
   });
 
   it('门店没有这张单、金额对不上、门店记了微信账单里没有：标红；不是小程序的交易不核对', async () => {
@@ -121,20 +129,11 @@ describe('逐笔核对', () => {
     wx.addBillRow(today(), { outTradeNo: 'MPR20261104ZZZZZZZZZZ', transactionId: '4200000000000000000000009999', amount: yuan(50) });
     // 前台扫码收款等别的交易：不是 MPR 开头的单号，不核对
     wx.addBillRow(today(), { outTradeNo: 'POS20261104000001', transactionId: '4200000000000000000000008888', amount: yuan(30) });
-    // 门店记了、微信这天的账单里没有：到账通知里的付款时间是另一天（例如跨零点）
+    // 门店记了、微信这天的账单里没有
     const e = await bound('演示·对账戊');
     const no2 = await order(e.openid, yuan(100));
-    const notice = wx.notification({
-      appid: wx.config.appId,
-      mchid: wx.config.mchId,
-      out_trade_no: no2,
-      transaction_id: '4200000000000000000000007777',
-      trade_state: 'SUCCESS',
-      success_time: `${today()}T00:03:00+08:00`,
-      payer: { openid: e.openid },
-      amount: { total: yuan(100) },
-    });
-    expect((await call('POST', '/api/mp/pay/notify', '', { headers: notice.headers, body: Buffer.from(notice.body).toString('base64') })).statusCode).toBe(204);
+    expect((await call('POST', `/api/mp/recharge/orders/${no2}/mock-pay`, e.openid, {})).json().status).toBe('paid');
+    wx.hideFromBill(no2);
     const r = await reconcileDay(deps, pay, today(), { source: 'auto' });
     expect(r.ok).toBe(false);
     const kinds = r.issues.map((i) => [i.kind, i.outTradeNo]);
@@ -146,7 +145,7 @@ describe('逐笔核对', () => {
       ]),
     );
     expect(kinds.some(([, o]) => o === 'POS20261104000001')).toBe(false);
-    expect(r.issues.find((i) => i.kind === 'NOT_IN_BILL')!.note).toContain('零点前后');
+    expect(r.issues.find((i) => i.kind === 'NOT_IN_BILL')).toMatchObject({ storeAmount: yuan(100), wxAmount: null });
   });
 
   it('那天没有交易：按 0 笔算、都对上；结论只追加，后台每天取最后一次', async () => {

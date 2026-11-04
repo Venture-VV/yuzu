@@ -18,13 +18,15 @@ import { MP_GATEWAY_HEADER, MP_OPENID_HEADER, type MpRechargeAdminData, type MpR
 import type { Deps } from '../src/server/lib/context';
 import { buildMpApp } from '../src/server/modules/mp/app';
 import { loadPayRuntime, type PayRuntime } from '../src/server/modules/mp/pay';
-import { sweepRechargeOrders } from '../src/server/modules/mp/recharge';
+import { payRechargeOrder, sweepRechargeOrders } from '../src/server/modules/mp/recharge';
 import { createMockWxPay, type MockWxPay } from '../src/server/modules/mp/wxpay-mock';
 import { consistencyChecks } from '../src/server/ops/consistency';
 import { api, balanceOf, createMember, setup, type TestContext } from './helpers';
 
 const KEY = 'test-gateway-key-0123456789abcdef-0123';
 const yuan = (n: number) => n * 100;
+/** 北京时间 m 分钟前（RFC 3339，带 +08:00）：合成到账通知的付款时间；超过 5 分钟的算晚到（门店先去微信查单） */
+const beijingIso = (m: number) => `${new Date(Date.now() - m * 60_000 + 8 * 3_600_000).toISOString().slice(0, 19)}+08:00`;
 let ctx: TestContext;
 let deps: Deps;
 let mp: FastifyInstance;
@@ -326,7 +328,7 @@ describe('到账通知', () => {
   });
 
   it('找不到单子的真付款（例如从备份恢复过）：记下来给店主看，同一笔只记一次，回收到', async () => {
-    const t = { appid: wx.config.appId, mchid: wx.config.mchId, out_trade_no: 'MPR20260101AAAAAAAAAA', transaction_id: '4200000000000000000000000001', trade_state: 'SUCCESS', success_time: '2026-11-04T10:00:00+08:00', payer: { openid: 'openid-gone-000001' }, amount: { total: 50000 } };
+    const t = { appid: wx.config.appId, mchid: wx.config.mchId, out_trade_no: 'MPR20260101AAAAAAAAAA', transaction_id: '4200000000000000000000000001', trade_state: 'SUCCESS', success_time: beijingIso(1), payer: { openid: 'openid-gone-000001' }, amount: { total: 50000 } };
     expect((await notify(wx.notification(t))).statusCode).toBe(204);
     expect((await notify(wx.notification(t))).statusCode).toBe(204);
     const orphans = (await adminData()).orphans.filter((o) => o.outTradeNo === 'MPR20260101AAAAAAAAAA');
@@ -411,16 +413,158 @@ describe('已付款待处理', () => {
   it('通知与单子对不上（金额）：记已付款待处理，不能直接入账，只能记已另行处理', async () => {
     const { memberId, openid } = await bound('演示·对不上');
     const c = (await createOrder(openid, { amount: yuan(600) })).json();
-    const t = { appid: wx.config.appId, mchid: wx.config.mchId, out_trade_no: c.order.orderNo, transaction_id: '4200000000000000000000000099', trade_state: 'SUCCESS', success_time: '2026-11-04T10:00:00+08:00', payer: { openid }, amount: { total: yuan(6) } };
+    const t = { appid: wx.config.appId, mchid: wx.config.mchId, out_trade_no: c.order.orderNo, transaction_id: '4200000000000000000000000099', trade_state: 'SUCCESS', success_time: beijingIso(1), payer: { openid }, amount: { total: yuan(6) } };
     expect((await notify(wx.notification(t))).statusCode).toBe(204);
     expect(await row(c.order.orderNo)).toMatchObject({ status: 'held', holdCode: 'MISMATCH' });
     const id = (await row(c.order.orderNo)).id;
-    const r = await api(ctx.app, ctx.owner, 'POST', `/api/admin/mp/recharge/orders/${id}/resolve`, { clientKey: randomUUID(), action: 'rebook', note: '试试' });
-    expect(r.body.error.code).toBe('REBOOK_REFUSED');
+    // 两种入账都拒（MP24 第二类：只能记已另行处理）
+    for (const action of ['rebook', 'rebook_amount']) {
+      const r = await api(ctx.app, ctx.owner, 'POST', `/api/admin/mp/recharge/orders/${id}/resolve`, { clientKey: randomUUID(), action, note: '试试' });
+      expect(r.body.error.code, action).toBe('REBOOK_REFUSED');
+    }
     const h = await api(ctx.app, ctx.owner, 'POST', `/api/admin/mp/recharge/orders/${id}/resolve`, { clientKey: randomUUID(), action: 'handled', note: '商户平台已原路退回' });
     expect(h.body).toMatchObject({ status: 'handled', resolution: 'handled', resolutionNote: '商户平台已原路退回' });
     expect(await rechargesOf(memberId)).toEqual([]);
     expect((await orderOf(openid, c.order.orderNo)).status).toBe('handled');
+  });
+
+  it('付款的微信不是下单的微信：同样记已付款待处理（对不上），两种入账都拒，只能记已另行处理', async () => {
+    const { memberId, openid } = await bound('演示·付款人对不上');
+    const c = (await createOrder(openid, { amount: yuan(600) })).json();
+    const t = { appid: wx.config.appId, mchid: wx.config.mchId, out_trade_no: c.order.orderNo, transaction_id: '4200000000000000000000000098', trade_state: 'SUCCESS', success_time: beijingIso(1), payer: { openid: 'openid-someone-else-01' }, amount: { total: yuan(600) } };
+    expect((await notify(wx.notification(t))).statusCode).toBe(204);
+    const held = await row(c.order.orderNo);
+    expect(held).toMatchObject({ status: 'held', holdCode: 'MISMATCH' });
+    for (const action of ['rebook', 'rebook_amount']) {
+      const r = await api(ctx.app, ctx.owner, 'POST', `/api/admin/mp/recharge/orders/${held.id}/resolve`, { clientKey: randomUUID(), action, note: '试试' });
+      expect(r.body.error.code, action).toBe('REBOOK_REFUSED');
+    }
+    expect(await rechargesOf(memberId)).toEqual([]);
+  });
+});
+
+describe('审查 2a 的修正', () => {
+  const minutesAgo = beijingIso;
+  /** 微信那边这一单现在的样子，拼成一条付款时间是 m 分钟前的到账通知（微信在重发） */
+  const lateNotice = async (no: string, m: number) => {
+    const t = (await wx.client.queryOrder(no))!;
+    return wx.notification({
+      appid: t.appId,
+      mchid: t.mchId,
+      out_trade_no: no,
+      transaction_id: t.transactionId,
+      trade_state: 'SUCCESS',
+      success_time: minutesAgo(m),
+      payer: { openid: t.payerOpenid },
+      amount: { total: t.amountTotal },
+    });
+  };
+
+  it('晚到的通知（微信在重发）：先查单——已在商户平台退了的不入账、记已付款待处理；查得到已付的照常入账；查不了回失败等重发', async () => {
+    const a = await bound('演示·晚到已退款');
+    const ca = (await createOrder(a.openid, { amount: yuan(600) })).json();
+    wx.pay(ca.order.orderNo);
+    wx.refund(ca.order.orderNo);
+    expect((await notify(await lateNotice(ca.order.orderNo, 30))).statusCode).toBe(204);
+    expect(await row(ca.order.orderNo)).toMatchObject({ status: 'held', holdCode: 'WX_REFUND' });
+    expect(await rechargesOf(a.memberId)).toEqual([]);
+
+    const b = await bound('演示·晚到照常');
+    const cb = (await createOrder(b.openid, { amount: yuan(600) })).json();
+    wx.pay(cb.order.orderNo);
+    const late = await lateNotice(cb.order.orderNo, 30);
+    wx.setDown(true);
+    expect((await notify(late)).statusCode).toBe(503);
+    expect((await row(cb.order.orderNo)).status).toBe('pending');
+    wx.setDown(false);
+    expect((await notify(late)).statusCode).toBe(204);
+    expect((await row(cb.order.orderNo)).status).toBe('paid');
+    expect(await rechargesOf(b.memberId)).toHaveLength(1);
+  });
+
+  it('这一次付款失败（PAYERROR）不是最终结果：单子不关，之后付了照常入账', async () => {
+    const { memberId, openid } = await bound('演示·付款失败再付');
+    const c = (await createOrder(openid, { amount: yuan(600) })).json();
+    wx.payError(c.order.orderNo);
+    await sweepRechargeOrders(deps, pay, new Date(Date.now() + 3 * 60_000));
+    expect((await row(c.order.orderNo)).status).toBe('pending');
+    wx.pay(c.order.orderNo);
+    await sweepRechargeOrders(deps, pay, new Date(Date.now() + 5 * 60_000));
+    expect((await row(c.order.orderNo)).status).toBe('paid');
+    expect(await rechargesOf(memberId)).toHaveLength(1);
+  });
+
+  it('「继续支付」向微信下单期间这张单被取消了：不给支付参数，刚下的微信单也关掉', async () => {
+    const { openid } = await bound('演示·继续支付与取消');
+    wx.setDown(true);
+    const c = (await createOrder(openid, { amount: yuan(600) })).json();
+    wx.setDown(false);
+    const racing: PayRuntime = {
+      ...pay,
+      client: {
+        ...pay.client,
+        async jsapiOrder(o) {
+          const r = await pay.client.jsapiOrder(o);
+          // 下单的应答回来之前，顾客在另一处把这张单取消了（微信那边当时还没有这一单，只在本地关）
+          await ctx.sql`UPDATE mp_recharge_orders SET status = 'closed', closed_at = now(), close_reason = 'cancelled' WHERE order_no = ${o.outTradeNo}`;
+          return r;
+        },
+      },
+    };
+    await expect(payRechargeOrder(deps, racing, openid, c.order.orderNo)).rejects.toMatchObject({ code: 'ORDER_NOT_PENDING' });
+    expect(wx.state(c.order.orderNo)).toBe('CLOSED');
+    const [o] = await ctx.sql<{ prepayId: string | null }[]>`SELECT prepay_id FROM mp_recharge_orders WHERE order_no = ${c.order.orderNo}`;
+    expect(o!.prepayId).toBeNull();
+  });
+
+  it('店主处理在锁住的单子上再核对：等锁期间变成「对不上」的，入账照样拒', async () => {
+    const { memberId, openid } = await bound('演示·处理时变了');
+    const c = (await createOrder(openid, { amount: yuan(600) })).json();
+    const id = (await row(c.order.orderNo)).id;
+    // 先让这张单成为已付款待处理（套餐、规则都没问题，这里直接造一条第一类的待处理记录不现实，改用：先占住会员一行）
+    let release!: () => void;
+    const holding = ctx.sql.begin(async (tx) => {
+      await tx`SELECT id FROM members WHERE id = ${memberId} FOR UPDATE`;
+      await new Promise<void>((r) => (release = r));
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    // 这时店主发「重新入账」（单子还在待支付；手工拼的请求），在会员一行上等着
+    const resolving = api(ctx.app, ctx.owner, 'POST', `/api/admin/mp/recharge/orders/${id}/resolve`, { clientKey: randomUUID(), action: 'rebook', note: '试试' });
+    await new Promise((r) => setTimeout(r, 300));
+    // 等的这段时间到了一条金额对不上的通知：只锁单子一行，记成已付款待处理（对不上）
+    const t = { appid: wx.config.appId, mchid: wx.config.mchId, out_trade_no: c.order.orderNo, transaction_id: '4200000000000000000000000097', trade_state: 'SUCCESS', success_time: minutesAgo(1), payer: { openid }, amount: { total: yuan(6) } };
+    expect((await notify(wx.notification(t))).statusCode).toBe(204);
+    release();
+    await holding;
+    const r = await resolving;
+    expect(r.body.error.code).toBe('REBOOK_REFUSED');
+    expect(await rechargesOf(memberId)).toEqual([]);
+  });
+
+  it('门店这边入账一直出错：出错 3 次以上、头一次过了 10 分钟，记已付款待处理（BOOK_FAILED）给店主；修好后重新入账只入一次', async () => {
+    const a = await bound('演示·一直出错');
+    const ca = (await createOrder(a.openid, { amount: yuan(600) })).json();
+    const ida = (await row(ca.order.orderNo)).id;
+    await ctx.sql`
+      CREATE FUNCTION test_fail_recharge() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION '模拟门店系统出错'; END $$`;
+    await ctx.sql.unsafe(`CREATE TRIGGER test_fail_recharge BEFORE INSERT ON recharges FOR EACH ROW WHEN (NEW.member_id = ${a.memberId}) EXECUTE FUNCTION test_fail_recharge()`);
+    try {
+      // 刚出错：回失败（微信会重发），单子还是待支付
+      const msg = wx.pay(ca.order.orderNo);
+      expect((await notify(msg)).statusCode).toBe(500);
+      expect((await row(ca.order.orderNo)).status).toBe('pending');
+      // 之前已经出错过两次、头一次在 15 分钟前
+      await ctx.sql`INSERT INTO mp_recharge_events (order_id, kind, ok, code, created_at) VALUES (${ida}, 'booked', false, 'ERROR', now() - interval '15 minutes')`;
+      expect((await notify(msg)).statusCode).toBe(204);
+      expect(await row(ca.order.orderNo)).toMatchObject({ status: 'held', holdCode: 'BOOK_FAILED' });
+    } finally {
+      await ctx.sql`DROP TRIGGER test_fail_recharge ON recharges`;
+      await ctx.sql`DROP FUNCTION test_fail_recharge()`;
+    }
+    const done = await api(ctx.app, ctx.owner, 'POST', `/api/admin/mp/recharge/orders/${ida}/resolve`, { clientKey: randomUUID(), action: 'rebook', note: '系统修好了' });
+    expect(done.status, JSON.stringify(done.body)).toBe(200);
+    expect(await rechargesOf(a.memberId)).toHaveLength(1);
   });
 });
 
@@ -470,5 +614,8 @@ describe('模拟支付与微信支付的配置', () => {
     expect(() => loadPayRuntime({ ...env, WXPAY_PUBLIC_KEY_FILE: '' }, 'production')).toThrow('WXPAY_PUBLIC_KEY_FILE（或 WXPAY_PUBLIC_KEY_BASE64）');
     expect(() => loadPayRuntime({ ...env, WXPAY_NOTIFY_URL: 'http://mp.example.com/v1/pay/notify' }, 'production')).toThrow('https');
     expect(() => loadPayRuntime({ ...env, MP_PAY_MOCK: 'true' }, 'development')).toThrow('不要再配');
+    // 实例标识是正式服、影子运行、测试服的也不开模拟
+    expect(() => loadPayRuntime({ MP_PAY_MOCK: 'true' }, 'development', 'test')).toThrow('不能开在 test 实例上');
+    expect(loadPayRuntime({ MP_PAY_MOCK: 'true' }, 'development', 'demo')?.mode).toBe('mock');
   });
 });
