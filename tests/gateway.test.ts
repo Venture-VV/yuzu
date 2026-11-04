@@ -1,15 +1,20 @@
 // 小程序网关（小程序线，docs/MINIPROGRAM.md 第 1、12 节）：网关 → 真实的 yuzu 小程序端口（测试库）整条链路，模拟微信；
-// 会话（签名、过期、篡改）；展示内容缓存与门店断外网时给旧的；会员接口要会话、连不上 503；微信真接口的请求格式（替身 fetch）；配置。
+// 会话（签名、过期、篡改）；展示内容缓存与门店断外网时给旧的；会员接口要会话、连不上 503；健康检查（/v1/live 不问门店、门店状态只问一次）；
+// 网关小镜像用的单文件打包在空目录里能跑；微信真接口的请求格式（替身 fetch）；配置。
 
+import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { AddressInfo } from 'node:net';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer, type AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildGateway } from '../src/gateway/app';
 import { ShowCache } from '../src/gateway/cache';
 import { loadGatewayConfig, type GatewayConfig } from '../src/gateway/config';
 import { issueSession, verifySession } from '../src/gateway/session';
-import { createUpstream } from '../src/gateway/upstream';
+import { createUpstream, UpstreamDown, type Upstream } from '../src/gateway/upstream';
 import { createMockWechat, createWechat, WechatError } from '../src/gateway/wechat';
 import { buildMpApp } from '../src/server/modules/mp/app';
 import { createMember, setup, type TestContext } from './helpers';
@@ -98,13 +103,13 @@ describe('整条链路：小程序 → 网关 → yuzu', () => {
   it('绑定（模拟手机号验证）、会员卡、流水、券、会员码', async () => {
     await createMember(ctx, '演示·网关会员', '13700002001');
     const token = await login(gw, 'bob');
-    expect((await authed(gw, token, 'GET', '/v1/me')).json()).toEqual({ bound: false, member: null });
-    const bad = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'not-a-mock-code', clientKey: randomUUID() });
+    expect((await authed(gw, token, 'GET', '/v1/me')).json()).toEqual({ bound: false, bindVersion: 0, member: null });
+    const bad = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'not-a-mock-code', clientKey: randomUUID(), bindVersion: 0 });
     expect(bad.json().error.code).toBe('WX_PHONE_FAILED');
-    const notMember = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13900000000', clientKey: randomUUID() });
+    const notMember = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13900000000', clientKey: randomUUID(), bindVersion: 0 });
     expect(notMember.statusCode).toBe(404);
     expect(notMember.json().error).toEqual({ code: 'NOT_MEMBER', message: '这个手机号还不是会员，请到前台开卡' });
-    const bound = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700002001', clientKey: randomUUID() });
+    const bound = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700002001', clientKey: randomUUID(), bindVersion: 0 });
     expect(bound.statusCode).toBe(200);
     expect(bound.json()).toMatchObject({ status: 'bound', member: { name: '演示·网关会员' } });
     // 网关转给 yuzu 时标了模拟微信
@@ -113,6 +118,8 @@ describe('整条链路：小程序 → 网关 → yuzu', () => {
     expect((await authed(gw, token, 'GET', '/v1/me')).json().member).toMatchObject({ name: '演示·网关会员', principalBalance: 0 });
     expect((await authed(gw, token, 'GET', '/v1/ledger?limit=10')).json()).toEqual([]);
     expect((await authed(gw, token, 'GET', '/v1/coupons')).json()).toEqual([]);
+    // 本月可享：清单还没导入时什么都没有，档阶照给
+    expect((await authed(gw, token, 'GET', '/v1/benefits')).json()).toMatchObject({ items: [], upcoming: [], label: expect.stringMatching(/^L0/) });
     const code = await authed(gw, token, 'POST', '/v1/code');
     expect(code.statusCode).toBe(200);
     expect(code.json().code).toMatch(/^8\d{15}$/);
@@ -127,15 +134,38 @@ describe('整条链路：小程序 → 网关 → yuzu', () => {
     expect(a.json()).toEqual({ status: 'abandoned' });
     const [fence] = await ctx.sql<{ openid: string }[]>`SELECT openid FROM mp_op_fences WHERE key = ${clientKey}`;
     expect(fence).toEqual({ openid: 'mock_carol' });
-    const late = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700002002', clientKey });
+    const late = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700002002', clientKey, bindVersion: 0 });
     expect(late.statusCode).toBe(409);
     expect(late.json().error.code).toBe('OP_ABANDONED');
     expect((await authed(gw, token, 'POST', '/v1/bind/abandon', { clientKey: 'not-a-uuid' })).statusCode).toBe(400);
     expect((await authed(gw, null, 'POST', '/v1/bind/abandon', { clientKey })).statusCode).toBe(401);
   });
 
+  it('解绑之后，之前没确认的绑定晚到不生效（BIND_STALE，小程序线测试预检 #44 的 P1）；不带版本号在用手机号验证之前就拒绝', async () => {
+    await createMember(ctx, '演示·网关晚到甲', '13700002003');
+    await createMember(ctx, '演示·网关晚到乙', '13700002004');
+    const token = await login(gw, 'dora');
+    const v0 = (await authed(gw, token, 'GET', '/v1/me')).json().bindVersion as number;
+    // 这次请求在路上耽搁了（手机上的记录后来读不出来、被删了）
+    const late = { phoneCode: 'mock-phone-13700002003', clientKey: randomUUID(), bindVersion: v0 };
+    // 同一个微信在另一处先绑上了乙，员工随后在后台解绑乙
+    expect((await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700002004', clientKey: randomUUID(), bindVersion: v0 })).statusCode).toBe(200);
+    const [staff] = await ctx.sql<{ id: number }[]>`SELECT id FROM staff ORDER BY id LIMIT 1`;
+    await ctx.sql`
+      UPDATE mp_bindings SET unbound_at = now(), unbound_by = ${staff!.id}, unbind_reason = '顾客要求解绑', unbind_client_key = ${randomUUID()}
+      WHERE openid = 'mock_dora' AND unbound_at IS NULL`;
+    // 耽搁的那次这时才到：经网关转给 yuzu，版本号对不上，不绑定
+    const res = await authed(gw, token, 'POST', '/v1/bind', late);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toEqual({ code: 'BIND_STALE', message: '绑定状态刚刚变过，请刷新后再绑定' });
+    expect((await authed(gw, token, 'GET', '/v1/me')).json()).toEqual({ bound: false, bindVersion: 2, member: null });
+    const missing = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700002003', clientKey: randomUUID() });
+    expect(missing.statusCode).toBe(400);
+    expect(missing.json().error).toEqual({ code: 'BAD_REQUEST', message: '请刷新小程序后再绑定' });
+  });
+
   it('会员接口要会话；伪造、过期的会话拒绝', async () => {
-    for (const [method, url] of [['GET', '/v1/me'], ['GET', '/v1/ledger'], ['GET', '/v1/coupons'], ['POST', '/v1/code'], ['POST', '/v1/bind']] as const) {
+    for (const [method, url] of [['GET', '/v1/me'], ['GET', '/v1/ledger'], ['GET', '/v1/coupons'], ['GET', '/v1/benefits'], ['POST', '/v1/code'], ['POST', '/v1/bind']] as const) {
       const res = await authed(gw, null, method, url, method === 'POST' ? {} : undefined);
       expect(res.statusCode).toBe(401);
       expect(res.json().error.code).toBe('SESSION_REQUIRED');
@@ -196,12 +226,83 @@ describe('门店断外网', () => {
     const url = `http://127.0.0.1:${(prod.server.address() as AddressInfo).port}`;
     const g = await buildGateway({ config: gatewayConfig({ upstreamUrl: url }), wechat: createMockWechat(), upstream: createUpstream(url, KEY) });
     const token = await login(g, 'dave');
-    const res = await authed(g, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700002001', clientKey: randomUUID() });
+    const res = await authed(g, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700002001', clientKey: randomUUID(), bindVersion: 0 });
     expect(res.statusCode).toBe(403);
     expect(res.json().error.code).toBe('MP_MOCK_REFUSED');
     await g.close();
     await prod.close();
   });
+});
+
+describe('健康检查', () => {
+  it('/v1/live 不问门店；门店状态同一时间只问一次，10 秒内用上次的', async () => {
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const slow: Upstream = {
+      async call() {
+        calls++;
+        await gate;
+        throw new UpstreamDown('门店系统连不上');
+      },
+    };
+    const g = await buildGateway({ config: gatewayConfig(), wechat: createMockWechat(), upstream: slow });
+    // 门店那边卡住时，网关进程照样报活着
+    const live = await g.inject({ method: 'GET', url: '/v1/live' });
+    expect(live.statusCode).toBe(200);
+    expect(live.json()).toEqual({ ok: true });
+    expect(calls).toBe(0);
+    const pending = [1, 2, 3].map(() => g.inject({ method: 'GET', url: '/v1/health' }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls).toBe(1);
+    release();
+    for (const res of await Promise.all(pending)) expect(res.json()).toMatchObject({ ok: true, store: 'offline' });
+    expect((await g.inject({ method: 'GET', url: '/v1/health' })).json().store).toBe('offline');
+    expect(calls).toBe(1);
+    await g.close();
+  });
+});
+
+describe('网关的小镜像：打成一个文件（src/gateway/deploy/build.mjs）', () => {
+  it('打出来的文件不靠 node_modules，在空目录里照样起来、连得上 yuzu', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'yuzu-gateway-'));
+    try {
+      execFileSync(process.execPath, ['src/gateway/deploy/build.mjs', join(dir, 'gateway.mjs')], { stdio: 'pipe' });
+      const code = readFileSync(join(dir, 'gateway.mjs'), 'utf8');
+      // 只引 Node 自带的模块：Fastify、zod 都打进来了
+      expect([...code.matchAll(/^import [^;]* from ["']([^"']+)["']/gm)].map((m) => m[1]).filter((m) => !m!.startsWith('node:'))).toEqual([]);
+      const port = await new Promise<number>((done) => {
+        const s = createServer().listen(0, '127.0.0.1', () => {
+          const p = (s.address() as AddressInfo).port;
+          s.close(() => done(p));
+        });
+      });
+      const child = spawn(process.execPath, [join(dir, 'gateway.mjs')], {
+        cwd: dir,
+        env: { PATH: process.env.PATH, MP_UPSTREAM_URL: upstreamUrl, MP_GATEWAY_KEY: KEY, MP_SESSION_SECRET: SESSION, MP_MOCK_WECHAT: 'true', GATEWAY_PORT: String(port), LOG_LEVEL: 'warn' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      let stderr = '';
+      child.stderr!.on('data', (d: Buffer) => (stderr += d.toString()));
+      try {
+        const base = `http://127.0.0.1:${port}`;
+        let live: Response | null = null;
+        for (let i = 0; i < 50 && !live; i++) {
+          live = await fetch(`${base}/v1/live`).catch(() => null);
+          if (!live) await new Promise((r) => setTimeout(r, 100));
+        }
+        expect(live?.status, stderr).toBe(200);
+        expect(await (await fetch(`${base}/v1/health`)).json()).toMatchObject({ ok: true, mockWechat: true, store: 'online' });
+        const home = await fetch(`${base}/v1/home`);
+        expect(home.status).toBe(200);
+        expect(home.headers.get('x-cache')).toBe('miss');
+      } finally {
+        child.kill('SIGTERM');
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 
 describe('微信真接口（替身 fetch）', () => {

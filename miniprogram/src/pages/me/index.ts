@@ -22,6 +22,8 @@ Page({
     mockUser: '',
     mockPhone: '',
     version: '',
+    /** 绑定状态版本号（/v1/me 给的，点绑定时带上）；没读到之前是 -1 */
+    bindVersion: -1,
   },
 
   onLoad() {
@@ -58,6 +60,7 @@ Page({
     }
     try {
       const me = await member<MpMe>('GET', '/v1/me');
+      this.setData({ bindVersion: typeof me.bindVersion === 'number' ? me.bindVersion : -1 });
       if (me.bound && me.member) {
         dropUnreadableWhenBound();
         this.setData({ state: 'bound', card: cardView(me.member) });
@@ -86,10 +89,18 @@ Page({
 
   async bind(phoneCode: string) {
     if (this.data.binding) return;
+    // 还没读到绑定状态（页面刚打开、门店连不上）：先读一次，读不到就不发
+    if (this.data.bindVersion < 0) {
+      await this.load();
+      if (this.data.bindVersion < 0) {
+        wx.showToast({ title: '门店系统连接中，请稍后再试', icon: 'none' });
+        return;
+      }
+    }
     // 手机上还有没确认的、或记录读不出来：sendBind 不发新的请求，按它的回答显示
     this.setData({ binding: true });
     // 每次点绑定用新的操作编号（手机号验证的 code 只能用一次）；编号先存在手机上，结果不确定时请门店系统确认
-    const outcome = await sendBind(phoneCode, uuid());
+    const outcome = await sendBind(phoneCode, uuid(), this.data.bindVersion);
     this.setData({ binding: false });
     await this.after(outcome);
   },
@@ -109,6 +120,11 @@ Page({
       wx.showModal({ title: '这次没有绑定', content: '刚才网络不好，门店系统确认这次没有绑上，请再点一次绑定。', showCancel: false });
     } else if (outcome.code === 'NOT_MEMBER') {
       this.setData({ state: 'notmember' });
+    } else if (outcome.code === 'BIND_STALE') {
+      // 打开页面之后在别处绑过或解绑过：按门店系统现在的样子刷新，要绑再点一次
+      wx.showToast({ title: '绑定状态刚刚变过，已刷新', icon: 'none' });
+      this.setData({ state: 'loading' });
+      await this.load();
     } else {
       wx.showModal({ title: '没有绑定', content: outcome.message, showCancel: false });
     }
@@ -161,6 +177,9 @@ Page({
   },
   onLedger() {
     wx.navigateTo({ url: '/pages/ledger/index' });
+  },
+  onBenefits() {
+    wx.navigateTo({ url: '/pages/benefits/index' });
   },
   onCoupons() {
     wx.navigateTo({ url: '/pages/coupons/index' });

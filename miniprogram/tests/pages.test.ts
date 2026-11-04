@@ -45,6 +45,23 @@ describe('页面', () => {
     }
   });
 
+  it('页面里用到的本地图片都在、是 PNG、每张不超过 60KB（标志由 scripts/render-logo.mjs 从 assets-src 生成）', () => {
+    for (const page of app.pages) {
+      const wxml = readFileSync(join(SRC, `${page}.wxml`), 'utf8');
+      for (const m of wxml.matchAll(/\bsrc="(\/assets\/[^"{}]+)"/g)) {
+        const p = join(SRC, m[1]!);
+        expect(existsSync(p), `${page}: ${m[1]}`).toBe(true);
+        expect(readFileSync(p).subarray(1, 4).toString('ascii'), m[1]).toBe('PNG');
+        expect(statSync(p).size, m[1]).toBeLessThan(60 * 1024);
+      }
+    }
+    // 每个标志的源文件都生成了图片
+    const brand = join(SRC, 'assets', 'brand');
+    for (const f of readdirSync(join(SRC, '..', 'assets-src', 'brand'))) {
+      expect(readdirSync(brand).some((png) => png.startsWith(f.replace(/\.svg$/, '-'))), f).toBe(true);
+    }
+  });
+
   it('只用开发者工具认得的写法', () => {
     for (const f of walk(SRC)) {
       const text = readFileSync(f, 'utf8');

@@ -95,6 +95,8 @@ sudo tailscale up --hostname=yuzu-test
 
 最后一条让门店 Mac mini 把备份的异地副本传到这台服务器（第 9 节）；那把钥匙只能登录只能 SFTP 的 `yuzubackup` 账号。
 
+接了微信小程序的网关之后，改用 [小程序网关部署手册](DEPLOY_GATEWAY.md) 第 3 节的策略：它包含这一份，另加店主 SSH 到网关服务器、网关只连这台演示库的小程序端口（TCP 8081）。
+
 要接入测试服的设备：店主的手机和电脑、Codex 所在的 Mac、门店那 1 台前台电脑和 1 台 iPad。它们都装 Tailscale，并用店主的账号登录。
 
 最后改阿里云**安全组入方向**：

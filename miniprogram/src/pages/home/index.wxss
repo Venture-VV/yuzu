@@ -20,19 +20,17 @@
 }
 .nav-mark {
   display: flex;
-  align-items: baseline;
+  align-items: center;
 }
-.nm-zh {
-  font-size: 32rpx;
-  font-weight: 600;
-  letter-spacing: 0.12em;
+/* 横版字标（VI 第 61 页加大字距的版本，导航栏这类特定情况用）与英文字标；宽高按原图比例 */
+.nm-logo {
+  width: 171rpx;
+  height: 32rpx;
 }
 .nm-en {
-  margin-left: 14rpx;
-  font-family: var(--font-en);
-  font-size: 18rpx;
-  font-weight: 700;
-  letter-spacing: 0.32em;
+  width: 89rpx;
+  height: 13rpx;
+  margin-left: 18rpx;
 }
 
 /* 版头 */
@@ -75,18 +73,15 @@
   flex-direction: column;
   align-items: flex-start;
 }
-.wm-zh {
-  font-size: 60rpx;
-  font-weight: 500;
-  letter-spacing: 0.3em;
-  line-height: 1.2;
+/* 主标志：竖版方形「汤 / 崎」（VI 第 59 页）；英文字标与它同宽 */
+.wm-logo {
+  width: 128rpx;
+  height: 125rpx;
 }
 .wm-en {
-  margin-top: 6rpx;
-  font-family: var(--font-en);
-  font-size: 20rpx;
-  font-weight: 700;
-  letter-spacing: 0.5em;
+  width: 128rpx;
+  height: 19rpx;
+  margin-top: 18rpx;
 }
 .hero-line {
   width: 64rpx;

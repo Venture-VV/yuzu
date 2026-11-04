@@ -1,0 +1,2 @@
+# 网关服务器上的配置与密钥：只放服务器，不进 Git（样例是 .env.example、gateway.env.example）
+*.env

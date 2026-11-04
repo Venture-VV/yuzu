@@ -1,0 +1,80 @@
+# 小程序网关服务器（阿里云最低配，深圳；docs/DEPLOY_GATEWAY.md）：Caddy 管 HTTPS（备案域名，证书自动申请、续期），
+# 后面是测试、正式两个网关进程。只在网关服务器上用；门店 Mac mini、测试服 A 不跑这个文件。
+#   第一次：cd src/gateway/deploy && docker compose up -d --build
+#   更新：./update.sh <版本标签或完整 SHA>（只部署 main 上的版本）
+#   查看：docker compose ps / docker compose logs -f gateway-test
+# 测试网关（连测试服 A 的演示库）一直开；正式网关（连门店正式服）等 yuzu 正式切换后，在 .env 写 COMPOSE_PROFILES=prod 再开。
+
+# 每个服务的日志最多保留 5 个 10 MB 文件
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+# 两个网关进程共用的设置：同一个镜像，只读文件系统、不提权；不对外开端口，只有 Caddy 经内部网络连得到
+x-gateway: &gateway
+  image: yuzu-gateway:${GATEWAY_TAG:-current}
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - "no-new-privileges:true"
+  environment:
+    GATEWAY_HOST: 0.0.0.0
+    GATEWAY_PORT: "8300"
+    # 前面是 Caddy：按它带的 X-Forwarded-For 认顾客的 IP 限流（Caddy 不信顾客自己带的）
+    GATEWAY_TRUST_PROXY: "true"
+    TZ: Asia/Shanghai
+  logging: *logging
+
+services:
+  caddy:
+    image: ${CADDY_IMAGE:-caddy:2.10-alpine}
+    restart: unless-stopped
+    # 公网只开 443（阿里云安全组同样只放行 443）；证书经 443 验证，不用开 80
+    ports:
+      - "443:443"
+    environment:
+      GATEWAY_TEST_DOMAIN: ${GATEWAY_TEST_DOMAIN:?请在 .env 设置 GATEWAY_TEST_DOMAIN（测试网关的域名，例如 api-test.example.com）}
+      GATEWAY_PROD_DOMAIN: ${GATEWAY_PROD_DOMAIN:?请在 .env 设置 GATEWAY_PROD_DOMAIN（正式网关的域名，例如 api.example.com）}
+      ACME_EMAIL: ${ACME_EMAIL:?请在 .env 设置 ACME_EMAIL（证书到期提醒发到这个邮箱）}
+    volumes:
+      # 挂整个 caddy/ 目录，不单挂文件：git 切换版本时 Caddyfile 换了一个新文件，单挂的文件容器里还是旧的
+      # （小程序线测试预检 3ab3ab5 的 P2）；这个目录里只有 Caddyfile，旁边的 .env、gateway-*.env（密钥）不进 Caddy 的容器
+      - ./caddy:/etc/caddy:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging: *logging
+
+  # 测试网关：连测试服 A 的演示库（开发版、体验版用）
+  gateway-test:
+    <<: *gateway
+    build:
+      context: ../../..
+      dockerfile: src/gateway/deploy/Dockerfile
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+        GATEWAY_COMMIT: ${GATEWAY_COMMIT:-}
+    env_file:
+      - path: gateway-test.env
+        required: true
+
+  # 正式网关：连门店 Mac mini 正式服（正式版用）。yuzu 正式切换之前不开
+  gateway-prod:
+    <<: *gateway
+    profiles:
+      - prod
+    pull_policy: never
+    env_file:
+      - path: gateway-prod.env
+        required: false
+
+volumes:
+  # Caddy 申请到的证书与账号：删了要重新申请（Let's Encrypt 有次数限制）
+  caddy_data:
+  caddy_config:

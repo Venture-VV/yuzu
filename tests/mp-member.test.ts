@@ -1,14 +1,16 @@
 // 微信小程序第一期 ②（小程序线，docs/MINIPROGRAM.md 第 4、12 节）：绑定会员（手机号对上才绑、不建会员；
 // 同一个微信、同一位会员各只有一条有效绑定；操作编号重提返回原结果；模拟微信只在 development / test）；
-// 会员卡、余额、流水、券（只读，只给顾客该看的字段）；会员码（yuzu 签发、前台本机校验、过期与篡改拒绝）；解绑（权限、原因、重提）。
+// 绑定状态版本号（解绑之后晚到的旧请求不生效）；会员卡、余额、流水、券（只读，只给顾客该看的字段）；会员码（yuzu 签发、前台本机校验、过期与篡改拒绝）；解绑（权限、原因、重提）。
 
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/server/app';
 import { buildMpApp } from '../src/server/modules/mp/app';
-import { makeMemberCode } from '../src/server/modules/mp/member';
+import { getMe, makeMemberCode } from '../src/server/modules/mp/member';
 import { createStaff } from '../src/server/modules/staff';
+import type { Benefit, BenefitCatalog } from '../src/shared/benefits';
+import { rechargeOutcome, type MemberGradeInfo, type MembershipRules } from '../src/shared/membership';
 import { MP_CODE, MP_GATEWAY_HEADER, MP_OPENID_HEADER } from '../src/shared/mp';
 import { api, createMember, login, PASSWORD, rechargeBody, setup, type TestContext } from './helpers';
 
@@ -44,8 +46,10 @@ const call = (app: FastifyInstance, method: 'GET' | 'POST', url: string, openid:
     headers: { [MP_GATEWAY_HEADER]: KEY, ...(openid ? { [MP_OPENID_HEADER]: openid } : {}) },
     ...(payload === undefined ? {} : { payload: payload as object }),
   });
-const bind = (openid: string, phone: string, extra: Record<string, unknown> = {}) =>
-  call(mp, 'POST', '/api/mp/bind', openid, { clientKey: randomUUID(), phone, ...extra });
+/** 这个微信现在的绑定状态版本号（小程序点绑定时带的就是 /v1/me 给的这个） */
+const versionOf = async (openid: string) => (await call(mp, 'GET', '/api/mp/me', openid)).json().bindVersion as number;
+const bind = async (openid: string, phone: string, extra: Record<string, unknown> = {}) =>
+  call(mp, 'POST', '/api/mp/bind', openid, { clientKey: randomUUID(), phone, bindVersion: await versionOf(openid), ...extra });
 const phoneOf = (i: number) => `1370000${String(1000 + i)}`;
 const activeBindings = async (memberId: number) =>
   Number((await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM mp_bindings WHERE member_id = ${memberId} AND unbound_at IS NULL`)[0]!.n);
@@ -67,12 +71,12 @@ describe('绑定会员', () => {
     const m = await createMember(ctx, '演示·绑定甲', phoneOf(1));
     const openid = newOpenid();
     const clientKey = randomUUID();
-    const first = await call(mp, 'POST', '/api/mp/bind', openid, { clientKey, phone: phoneOf(1) });
+    const first = await call(mp, 'POST', '/api/mp/bind', openid, { clientKey, phone: phoneOf(1), bindVersion: 0 });
     expect(first.statusCode).toBe(200);
     expect(first.json()).toMatchObject({ status: 'bound', replayed: false, member: { name: '演示·绑定甲', frozen: false } });
-    const again = await call(mp, 'POST', '/api/mp/bind', openid, { clientKey, phone: phoneOf(1) });
+    const again = await call(mp, 'POST', '/api/mp/bind', openid, { clientKey, phone: phoneOf(1), bindVersion: 0 });
     expect(again.json()).toMatchObject({ status: 'bound', replayed: true });
-    const reused = await call(mp, 'POST', '/api/mp/bind', openid, { clientKey, phone: phoneOf(2) });
+    const reused = await call(mp, 'POST', '/api/mp/bind', openid, { clientKey, phone: phoneOf(2), bindVersion: 0 });
     expect(reused.statusCode).toBe(409);
     expect(reused.json().error.code).toBe('CLIENT_KEY_REUSED');
     // 新编号、同一个微信、同一位会员：照旧返回已绑定，不多一条
@@ -103,10 +107,10 @@ describe('绑定会员', () => {
   });
 
   it('没带 openid 拒绝；小程序没开时拒绝', async () => {
-    const res = await call(mp, 'POST', '/api/mp/bind', null, { clientKey: randomUUID(), phone: phoneOf(1) });
+    const res = await call(mp, 'POST', '/api/mp/bind', null, { clientKey: randomUUID(), phone: phoneOf(1), bindVersion: 0 });
     expect(res.statusCode).toBe(400);
     expect(res.json().error.code).toBe('MP_OPENID_REQUIRED');
-    const bad = await call(mp, 'POST', '/api/mp/bind', 'bad openid!', { clientKey: randomUUID(), phone: phoneOf(1) });
+    const bad = await call(mp, 'POST', '/api/mp/bind', 'bad openid!', { clientKey: randomUUID(), phone: phoneOf(1), bindVersion: 0 });
     expect(bad.json().error.code).toBe('MP_OPENID_REQUIRED');
     await ctx.sql`UPDATE settings SET value = ${ctx.sql.json({ enabled: false })} WHERE key = 'mp_rules'`;
     expect((await bind(newOpenid(), phoneOf(1))).json().error.code).toBe('MP_DISABLED');
@@ -120,7 +124,7 @@ describe('绑定会员', () => {
     expect((await ctx.sql<{ mock: boolean }[]>`SELECT mock FROM mp_bindings WHERE member_id = ${m.id}`)[0]!.mock).toBe(true);
     for (const env of ['production', 'trial'] as const) {
       const prod = await buildMpApp(ctx.sql, { ...ctx.config, env, mp: { ...ctx.config.mp, gatewayKey: KEY, codeSecret: SECRET } });
-      const res = await call(prod, 'POST', '/api/mp/bind', newOpenid(), { clientKey: randomUUID(), phone: phoneOf(1), mock: true });
+      const res = await call(prod, 'POST', '/api/mp/bind', newOpenid(), { clientKey: randomUUID(), phone: phoneOf(1), mock: true, bindVersion: 0 });
       expect(res.statusCode).toBe(403);
       expect(res.json().error.code).toBe('MP_MOCK_REFUSED');
       await prod.close();
@@ -145,7 +149,7 @@ describe('会员卡、余额、流水、券（只读）', () => {
   });
 
   it('没绑定：bound 为 false', async () => {
-    expect((await call(mp, 'GET', '/api/mp/me', newOpenid())).json()).toEqual({ bound: false, member: null });
+    expect((await call(mp, 'GET', '/api/mp/me', newOpenid())).json()).toEqual({ bound: false, bindVersion: 0, member: null });
   });
 
   it('会员卡：余额、档阶（会员体系 v2）、可用券数', async () => {
@@ -231,6 +235,80 @@ describe('流水先作废到期的赠金（Codex 审查 PR #42）', () => {
     expect(rows.filter((r: { kind: string }) => r.kind === 'expire')).toHaveLength(1);
     const [n] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM bonus_expiries WHERE member_id = ${memberId}`;
     expect(n!.n).toBe(1);
+  });
+});
+
+describe('本月可享（第一期 ⑥，接主线 v0.7.24 的会员权益）', () => {
+  // 会员专属通道（QY-001）：L2·初 起每月 2 次；一次性浴衣拖鞋（QY-010）改成 L4·初 起，这位 L2 会员看到的是「升档以后」
+  let openid: string;
+  let memberId: number;
+  const benefit = async (code: string) => ((await api(ctx.app, ctx.owner, 'GET', '/api/benefits')).body as BenefitCatalog).items.find((b) => b.code === code)!;
+  const publish = async (code: string, patch: Partial<Benefit>) => {
+    const b = await benefit(code);
+    const { id, version, name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, content, conditions } = b;
+    const e = await api(ctx.app, ctx.owner, 'PUT', `/api/benefits/${id}`, {
+      expectedVersion: version,
+      ...{ name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, content, conditions },
+      ...patch,
+    });
+    expect(e.status, JSON.stringify(e.body)).toBe(200);
+    const fresh = await benefit(code);
+    const p = await api(ctx.app, ctx.owner, 'POST', `/api/benefits/${fresh.id}/status`, { expectedVersion: fresh.version, status: 'published' });
+    expect(p.status, JSON.stringify(p.body)).toBe(200);
+    return fresh;
+  };
+  beforeAll(async () => {
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/benefits/import')).status).toBe(200);
+    const m = await createMember(ctx, '演示·本月可享', phoneOf(80));
+    memberId = m.id;
+    openid = newOpenid();
+    expect((await bind(openid, phoneOf(80))).statusCode).toBe(200);
+    // 充 1 万升到 L2（赠金按规则算）
+    const rules = (await api(ctx.app, ctx.clerk, 'GET', '/api/membership/rules')).body as MembershipRules;
+    const info = (await api(ctx.app, ctx.owner, 'GET', `/api/members/${m.id}/grade`)).body as MemberGradeInfo;
+    const paid = 1_000_000;
+    const bonus = rechargeOutcome(rules, info.state.grade, info.rollingRechargeCents, paid).bonusCents;
+    const r = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, paid, bonus, { bonusMode: 'auto' }));
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+  });
+
+  it('列出够格的服务与次数，升档以后能享的只给名字与起点；不带经办人、单号、备注', async () => {
+    const channel = await publish('QY-001', { period: 'month', quantity: 2 });
+    await publish('QY-010', { startGrade: 4, startTier: 0 });
+    const used = await api(ctx.app, ctx.clerk, 'POST', `/api/members/${memberId}/benefit-uses`, { clientKey: randomUUID(), benefitId: channel.id, quantity: 1, note: '前台的备注' });
+    expect(used.status, JSON.stringify(used.body)).toBe(201);
+
+    const res = await call(mp, 'GET', '/api/mp/benefits', openid);
+    expect(res.statusCode, res.body).toBe(200);
+    const b = res.json();
+    expect(b.month).toMatch(/^\d{4}-\d{2}$/);
+    expect(b.label).toMatch(/^L2 /);
+    const item = b.items.find((i: { code: string }) => i.code === 'QY-001');
+    expect(item).toEqual({
+      code: 'QY-001',
+      name: '会员专属通道',
+      category: 'service',
+      period: 'month',
+      allowance: '每月 2 次',
+      content: channel.content,
+      conditions: channel.conditions,
+      used: 1,
+      limit: 2,
+      available: 0,
+    });
+    expect(b.items.some((i: { code: string }) => i.code === 'QY-010')).toBe(false);
+    expect(b.upcoming).toContainEqual({ name: '一次性浴衣拖鞋', startLabel: expect.stringMatching(/^L4/) });
+    // 员工看的「本月可享」里有登记记录（经办人、备注），小程序里没有
+    expect(JSON.stringify(b)).not.toContain('前台的备注');
+    expect(b).not.toHaveProperty('uses');
+    expect(b).not.toHaveProperty('grants');
+    expect(b).not.toHaveProperty('memberId');
+  });
+
+  it('没绑定的拒绝', async () => {
+    const res = await call(mp, 'GET', '/api/mp/benefits', newOpenid());
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe('MP_NOT_BOUND');
   });
 });
 
@@ -328,6 +406,134 @@ describe('解绑', () => {
   });
 });
 
+describe('绑定状态版本号：解绑之后，晚到的旧请求不再绑上（小程序线测试预检 #44 的 P1）', () => {
+  it('另一边先绑定、员工解绑之后，之前没确认的请求晚到被拒（BIND_STALE），不出现新的绑定', async () => {
+    const a = await createMember(ctx, '演示·晚到甲', phoneOf(90));
+    const b = await createMember(ctx, '演示·晚到乙', phoneOf(91));
+    const openid = newOpenid();
+    // ① 这个微信点绑定（会员甲）时看到的版本号是 0；这次请求在路上耽搁了，手机上的记录后来也读不出来、被删了
+    const v0 = await versionOf(openid);
+    expect(v0).toBe(0);
+    const late = { clientKey: randomUUID(), phone: phoneOf(90), bindVersion: v0 };
+    // ② 同一个微信在另一处先绑上了会员乙
+    expect((await bind(openid, phoneOf(91))).statusCode).toBe(200);
+    expect(await versionOf(openid)).toBe(1);
+    // 还绑着乙的时候晚到：照旧被拒
+    expect((await call(mp, 'POST', '/api/mp/bind', openid, late)).json().error.code).toBe('BIND_STALE');
+    // ③ 员工在后台解绑乙
+    const id = await bindingOf(b.id);
+    expect((await api(ctx.app, duty, 'POST', `/api/admin/mp/bindings/${id}/unbind`, { clientKey: randomUUID(), reason: '顾客要求解绑' })).status).toBe(200);
+    expect(await versionOf(openid)).toBe(2);
+    // ④ 第一步那次请求这时才到：版本号对不上，不绑定
+    const res = await call(mp, 'POST', '/api/mp/bind', openid, late);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe('BIND_STALE');
+    expect(await activeBindings(a.id)).toBe(0);
+    expect((await call(mp, 'GET', '/api/mp/me', openid)).json()).toEqual({ bound: false, bindVersion: 2, member: null });
+    // 顾客按现在的样子重新点绑定（新的编号、现在的版本号）：照常绑上
+    expect((await bind(openid, phoneOf(90))).statusCode).toBe(200);
+    expect(await activeBindings(a.id)).toBe(1);
+    expect(await versionOf(openid)).toBe(3);
+  });
+
+  it('同一个编号重提照旧返回原来那次（先认编号，再比版本号）；不带版本号拒绝', async () => {
+    await createMember(ctx, '演示·版本号', phoneOf(92));
+    const openid = newOpenid();
+    const body = { clientKey: randomUUID(), phone: phoneOf(92), bindVersion: 0 };
+    expect((await call(mp, 'POST', '/api/mp/bind', openid, body)).json()).toMatchObject({ status: 'bound', replayed: false });
+    // 绑上之后版本号是 1，原样重提（带的还是 0）返回原来那次的结果
+    expect((await call(mp, 'POST', '/api/mp/bind', openid, body)).json()).toMatchObject({ status: 'bound', replayed: true });
+    const missing = await call(mp, 'POST', '/api/mp/bind', newOpenid(), { clientKey: randomUUID(), phone: phoneOf(92) });
+    expect(missing.statusCode).toBe(400);
+    expect(missing.json().error.message).toBe('请刷新小程序后再绑定');
+  });
+});
+
+describe('绑定与解绑交错（小程序线测试预检 3ab3ab5 的 P1）', () => {
+  const waitFor = async (check: () => Promise<boolean>, what: string) => {
+    const until = Date.now() + 5_000;
+    while (Date.now() < until) {
+      if (await check()) return;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    throw new Error(`等不到：${what}`);
+  };
+  /** 这个测试库里正在等锁的语句：等会员行（绑定停在锁会员一行）、等咨询锁（解绑排在绑定后面） */
+  const lockWaits = async (on: 'member' | 'advisory') =>
+    Number(
+      (
+        await ctx.sql<{ n: number }[]>`
+          SELECT count(*)::int AS n FROM pg_stat_activity
+          WHERE datname = current_database() AND wait_event_type = 'Lock'
+            AND ${on === 'advisory' ? ctx.sql`wait_event = 'advisory'` : ctx.sql`query LIKE '%FROM members WHERE phone%FOR SHARE%'`}`
+      )[0]!.n,
+    );
+
+  it('绑定比完版本号、还没写入时员工解绑：解绑排在绑定后面，绑定按「还绑着」被拒，不出现新的绑定', async () => {
+    const a = await createMember(ctx, '演示·交错甲', phoneOf(93));
+    const b = await createMember(ctx, '演示·交错乙', phoneOf(94));
+    const openid = newOpenid();
+    expect((await bind(openid, phoneOf(94))).statusCode).toBe(200);
+    const v1 = await versionOf(openid);
+    // 另一个事务锁住甲的会员行：绑定甲会停在「锁会员一行（共享锁）」，这时它已经比完了版本号（版本号对得上）
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const lockedNow = new Promise<void>((r) => (locked = r));
+    const holder = ctx.sql.begin(async (tx) => {
+      await tx`SELECT id FROM members WHERE id = ${a.id} FOR UPDATE`;
+      locked();
+      await held;
+    });
+    await lockedNow;
+    let bindA: Promise<Awaited<ReturnType<typeof call>>>;
+    let unbindB: ReturnType<typeof api>;
+    try {
+      bindA = Promise.resolve(call(mp, 'POST', '/api/mp/bind', openid, { clientKey: randomUUID(), phone: phoneOf(93), bindVersion: v1 }));
+      await waitFor(async () => (await lockWaits('member')) > 0, '绑定停在会员行上');
+      // 员工这时解绑乙：要等同一把咨询锁（原来不取这把锁，会先提交，绑定接着写入就绑上了甲）
+      unbindB = api(ctx.app, duty, 'POST', `/api/admin/mp/bindings/${await bindingOf(b.id)}/unbind`, { clientKey: randomUUID(), reason: '顾客要求解绑' });
+      await waitFor(async () => (await lockWaits('advisory')) > 0, '解绑排在绑定后面');
+    } finally {
+      // 不论成败都放开甲的会员行，不让测试库留着锁
+      release();
+      await holder;
+    }
+    const [rb, ru] = await Promise.all([bindA, unbindB]);
+    expect(rb.statusCode).toBe(409);
+    expect(rb.json().error.code).toBe('OPENID_BOUND');
+    expect(ru.status).toBe(200);
+    expect(await activeBindings(a.id)).toBe(0);
+    expect((await call(mp, 'GET', '/api/mp/me', openid)).json()).toEqual({ bound: false, bindVersion: 2, member: null });
+  });
+
+  it('/me 的绑定状态与版本号来自同一个快照：读的中途别处绑上，也不会拼成「没绑定、版本号 1」', async () => {
+    await createMember(ctx, '演示·快照', phoneOf(95));
+    const openid = newOpenid();
+    let fired = false;
+    // 包一层 sql：读这个微信绑定记录的第一条语句一返回，就在别处绑上（已提交）；之后再有语句读绑定记录就会读到新的状态
+    const sql = new Proxy(ctx.sql, {
+      apply(target, self, args: unknown[]) {
+        const q = Reflect.apply(target as unknown as (...a: unknown[]) => unknown, self, args);
+        const text = Array.isArray(args[0]) && 'raw' in (args[0] as object) ? (args[0] as string[]).join('?') : '';
+        if (!fired && text.includes('mp_bindings')) {
+          fired = true;
+          return Promise.resolve(q).then(async (rows) => {
+            expect((await bind(openid, phoneOf(95))).statusCode).toBe(200);
+            return rows;
+          });
+        }
+        return q;
+      },
+    });
+    const me = await getMe({ sql, config: ctx.config }, openid);
+    expect(fired).toBe(true);
+    // 读的时候还没绑定：版本号也是绑定之前的 0（原来分两条读，拿到的是「没绑定、版本号 1」，按 1 去绑就能绕过版本号）
+    expect(me).toEqual({ bound: false, bindVersion: 0, member: null });
+    expect((await call(mp, 'GET', '/api/mp/me', openid)).json()).toMatchObject({ bound: true, bindVersion: 1 });
+  });
+});
+
 describe('绑定结果不确定：确认作废（迁移 044）', () => {
   const abandon = (openid: string, clientKey: string) => call(mp, 'POST', '/api/mp/bind/abandon', openid, { clientKey });
 
@@ -338,7 +544,7 @@ describe('绑定结果不确定：确认作废（迁移 044）', () => {
     const a = await abandon(openid, clientKey);
     expect(a.statusCode, a.body).toBe(200);
     expect(a.json()).toEqual({ status: 'abandoned' });
-    const late = await call(mp, 'POST', '/api/mp/bind', openid, { clientKey, phone: phoneOf(40) });
+    const late = await call(mp, 'POST', '/api/mp/bind', openid, { clientKey, phone: phoneOf(40), bindVersion: 0 });
     expect(late.statusCode).toBe(409);
     expect(late.json().error.code).toBe('OP_ABANDONED');
     expect(await activeBindings(m.id)).toBe(0);
@@ -352,7 +558,7 @@ describe('绑定结果不确定：确认作废（迁移 044）', () => {
     await createMember(ctx, '演示·已绑上', phoneOf(41));
     const openid = newOpenid();
     const clientKey = randomUUID();
-    expect((await call(mp, 'POST', '/api/mp/bind', openid, { clientKey, phone: phoneOf(41) })).statusCode).toBe(200);
+    expect((await call(mp, 'POST', '/api/mp/bind', openid, { clientKey, phone: phoneOf(41), bindVersion: 0 })).statusCode).toBe(200);
     const a = await abandon(openid, clientKey);
     expect(a.json()).toMatchObject({ status: 'bound', member: { name: '演示·已绑上' }, replayed: true });
     const [fence] = await ctx.sql`SELECT 1 FROM mp_op_fences WHERE key = ${clientKey}`;
@@ -365,7 +571,7 @@ describe('绑定结果不确定：确认作废（迁移 044）', () => {
       const m = await createMember(ctx, `演示·同时${i}`, phoneOf(50 + i));
       const openid = newOpenid();
       const clientKey = randomUUID();
-      const [b, a] = await Promise.all([call(mp, 'POST', '/api/mp/bind', openid, { clientKey, phone: phoneOf(50 + i) }), abandon(openid, clientKey)]);
+      const [b, a] = await Promise.all([call(mp, 'POST', '/api/mp/bind', openid, { clientKey, phone: phoneOf(50 + i), bindVersion: 0 }), abandon(openid, clientKey)]);
       if (b.statusCode === 200) expect(a.json().status).toBe('bound');
       else {
         expect(b.json().error.code).toBe('OP_ABANDONED');

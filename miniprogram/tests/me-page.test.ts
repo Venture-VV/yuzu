@@ -84,7 +84,7 @@ describe('「我的」页：绑定记录读不出来', () => {
     const { page, failReads, sent, storage } = await loadPage({
       storage: { tq_bind_pending: { clientKey: ORIGINAL, at: 1 } },
       routes: {
-        '/v1/me': { status: 200, data: { bound: false, member: null } },
+        '/v1/me': { status: 200, data: { bound: false, bindVersion: 0, member: null } },
         '/v1/bind': { status: 404, data: { error: { code: 'NOT_MEMBER', message: '这个手机号还不是会员，请到前台开卡' } } },
         '/v1/bind/abandon': () => (abandonOnline ? { status: 200, data: { status: 'abandoned' } } : { status: 503, data: { error: { code: 'STORE_OFFLINE', message: '门店系统连接中，请稍后再试' } } }),
       },
@@ -119,7 +119,7 @@ describe('「我的」页：绑定记录读不出来', () => {
     let bound = false;
     const { page, sent, storage } = await loadPage({
       storage: { tq_bind_pending: 'garbled' },
-      routes: { '/v1/me': () => ({ status: 200, data: bound ? { bound: true, member: MEMBER } : { bound: false, member: null } }) },
+      routes: { '/v1/me': () => ({ status: 200, data: bound ? { bound: true, bindVersion: 1, member: MEMBER } : { bound: false, bindVersion: 0, member: null } }) },
     });
     await page.load!();
     expect(page.data.state).toBe('unreadable');
@@ -130,5 +130,56 @@ describe('「我的」页：绑定记录读不出来', () => {
     await page.load!();
     expect(page.data.state).toBe('bound');
     expect(storage.tq_bind_pending).toBeUndefined();
+  });
+});
+
+describe('「我的」页：绑定状态版本号（小程序线测试预检 #44 的 P1）', () => {
+  it('点绑定带上 /v1/me 给的版本号；期间绑定状态变过被拒（BIND_STALE）时刷新、用新的版本号再绑', async () => {
+    let version = 2;
+    let stale = true;
+    const toasts: string[] = [];
+    const { page, sent, storage } = await loadPage({
+      storage: {},
+      routes: {
+        '/v1/me': () => ({ status: 200, data: { bound: false, bindVersion: version, member: null } }),
+        '/v1/bind': () => (stale ? { status: 409, data: { error: { code: 'BIND_STALE', message: '绑定状态刚刚变过，请刷新后再绑定' } } } : { status: 200, data: { status: 'bound', member: { name: '沈先生' }, replayed: false } }),
+      },
+    });
+    (globalThis as unknown as { wx: { showToast: (o: { title: string }) => void } }).wx.showToast = (o) => toasts.push(o.title);
+    await page.load!();
+    expect(page.data.state).toBe('unbound');
+    expect(page.data.bindVersion).toBe(2);
+    // 打开页面之后别处解绑过一次：门店系统已经是 3，这次带的 2 被拒
+    version = 3;
+    await page.bind!('code-1');
+    const binds = () => sent.filter((s) => s.path === '/v1/bind').map((s) => s.data as { bindVersion: number; clientKey: string });
+    expect(binds()).toHaveLength(1);
+    expect(binds()[0]!.bindVersion).toBe(2);
+    expect(toasts).toContain('绑定状态刚刚变过，已刷新');
+    expect(page.data.state).toBe('unbound');
+    expect(page.data.bindVersion).toBe(3);
+    // 明确被拒：手机上不留待确认的记录
+    expect(storage.tq_bind_pending).toBeUndefined();
+    // 再点一次：带新的版本号、新的编号
+    stale = false;
+    await page.bind!('code-2');
+    expect(binds()).toHaveLength(2);
+    expect(binds()[1]!.bindVersion).toBe(3);
+    expect(binds()[1]!.clientKey).not.toBe(binds()[0]!.clientKey);
+  });
+
+  it('还没读到版本号（门店连不上）时不发绑定', async () => {
+    let online = false;
+    const { page, sent } = await loadPage({
+      storage: {},
+      routes: { '/v1/me': () => (online ? { status: 200, data: { bound: false, bindVersion: 0, member: null } } : { status: 503, data: { error: { code: 'STORE_OFFLINE', message: '门店系统连接中，请稍后再试' } } }) },
+    });
+    await page.load!();
+    expect(page.data.state).toBe('offline');
+    await page.bind!('code-1');
+    expect(sent.filter((s) => s.path === '/v1/bind')).toEqual([]);
+    online = true;
+    await page.load!();
+    expect(page.data.bindVersion).toBe(0);
   });
 });

@@ -179,7 +179,9 @@ async function main() {
     let page = await mp.reLaunch('/pages/home/index');
     let d = await waitData(page, (x) => x.status !== 'loading');
     check('首页：门店信息', d.status === 'ready' && d.stores.length >= 1, d.stores.map((s) => s.name).join('、'));
-    check('首页：版头的字标', (await textOf(page, '.wordmark')).includes('TOUCHILL'));
+    // 版头的标志是图片（品牌书 / VI 的几何字，miniprogram/src/assets/brand）
+    const logo = await page.$('.wordmark .wm-logo');
+    check('首页：版头的标志', !!logo && String(await logo.attribute('src')).includes('/assets/brand/logo-stacked'));
     await shot('01-home');
 
     // 价目表
@@ -234,6 +236,11 @@ async function main() {
     d = await waitData(page, (x) => x.state !== 'loading');
     check('我的券', d.state === 'ready', `可用 ${d.usable ? d.usable.length : 0} 张`);
     await shot('08-coupons');
+    await mp.navigateBack();
+    page = await mp.navigateTo('/pages/benefits/index');
+    d = await waitData(page, (x) => x.state !== 'loading');
+    check('本月可享', d.state === 'ready' && !!d.view, d.view ? `${d.view.groups.reduce((n, g) => n + g.items.length, 0)} 项，升档以后 ${d.view.upcoming.length} 项` : d.message);
+    await shot('08b-benefits');
     await mp.navigateBack();
     page = await mp.navigateTo('/pages/unbind/index');
     check('解绑与换号：到前台办理', (await textOf(page, '.panel')).includes('前台'));

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { MpCoupon, MpLedgerRow } from '../../src/shared/mp';
-import { couponCode, couponView, ledgerRow } from '../src/utils/views';
+import type { MpBenefitItem, MpBenefits, MpCoupon, MpLedgerRow } from '../../src/shared/mp';
+import { benefitMeta, benefitsView, couponCode, couponView, ledgerRow } from '../src/utils/views';
 
 const row = (over: Partial<MpLedgerRow>): MpLedgerRow => ({
   id: 1,
@@ -54,5 +54,54 @@ describe('券', () => {
   it('有角分的金额照写', () => {
     expect(couponView(coupon({ summary: '代金券 ¥30.50 · 满 ¥200.00 可用' })).big).toBe('¥30.50');
     expect(couponCode('ABCD1234')).toBe('ABCD-1234');
+  });
+});
+
+const benefit = (over: Partial<MpBenefitItem>): MpBenefitItem => ({
+  code: 'QY-001',
+  name: '会员专属通道',
+  category: 'service',
+  period: 'month',
+  allowance: '每月 2 次',
+  content: '入场、领手牌及结账会员专属通道。',
+  conditions: '',
+  used: 1,
+  limit: 2,
+  available: 0,
+  ...over,
+});
+
+describe('本月可享', () => {
+  it('次数与张数：设了次数的写这一期已用几次；不限次的写本月用了几次；券写能用几张；说明不写', () => {
+    expect(benefitMeta(benefit({}))).toBe('每月 2 次 · 本月已用 1 次');
+    expect(benefitMeta(benefit({ period: 'day', allowance: '每天 1 次', used: 0, limit: 1 }))).toBe('每天 1 次 · 今天已用 0 次');
+    expect(benefitMeta(benefit({ period: 'year', allowance: '每年 4 次', used: 3, limit: 4 }))).toBe('每年 4 次 · 今年已用 3 次');
+    expect(benefitMeta(benefit({ period: 'none', allowance: '不限次', used: 0, limit: null }))).toBe('不限次');
+    expect(benefitMeta(benefit({ period: 'none', allowance: '不限次', used: 3, limit: null }))).toBe('不限次 · 本月用了 3 次');
+    expect(benefitMeta(benefit({ category: 'coupon', allowance: '每月 1 张', used: null, limit: null, available: 1 }))).toBe('每月 1 张 · 能用 1 张');
+    expect(benefitMeta(benefit({ category: 'event', allowance: '每次 1 张', used: null, limit: null, available: 0 }))).toBe('每次 1 张');
+    expect(benefitMeta(benefit({ category: 'info', allowance: '', used: null, limit: null }))).toBe('');
+  });
+
+  it('按服务、券、礼遇、折扣、说明分组（没有的组不显示）；月份、升档以后、我的券入口', () => {
+    const b: MpBenefits = {
+      month: '2026-11',
+      label: 'L2 潭影 · 初',
+      items: [
+        benefit({ code: 'QY-060', name: '跨店余额通用', category: 'info', allowance: '', used: null, limit: null }),
+        benefit({}),
+        benefit({ code: 'QY-051', name: '首充礼', category: 'event', allowance: '每次 1 张', used: null, limit: null, available: 1 }),
+      ],
+      upcoming: [{ name: '一次性浴衣拖鞋', startLabel: 'L4·初' }],
+    };
+    const v = benefitsView(b);
+    expect(v.month).toBe('11 月');
+    expect(v.label).toBe('L2 潭影 · 初');
+    expect(v.groups.map((g) => g.title)).toEqual(['服务与资格', '礼遇', '说明']);
+    expect(v.groups[0]!.items[0]).toEqual({ code: 'QY-001', name: '会员专属通道', meta: '每月 2 次 · 本月已用 1 次', content: '入场、领手牌及结账会员专属通道。', conditions: '' });
+    expect(v.upcoming).toEqual([{ name: '一次性浴衣拖鞋', start: 'L4·初 起' }]);
+    expect(v.hasCoupons).toBe(true);
+    const empty = benefitsView({ month: '2026-01', label: 'L0 青溪', items: [], upcoming: [] });
+    expect(empty).toMatchObject({ month: '1 月', groups: [], hasCoupons: false });
   });
 });

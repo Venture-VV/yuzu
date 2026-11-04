@@ -1,0 +1,45 @@
+# 小程序网关服务器的 HTTPS（docs/DEPLOY_GATEWAY.md）：两个域名各转给自己的网关进程。
+# 证书由 Caddy 自己申请、续期（Let's Encrypt，经 443 端口验证：安全组不用开 80）。
+# 域名与邮箱来自 .env（compose.yaml 传进来）。这个目录整个只读挂进 Caddy 的容器（不要往这里放别的文件）；
+# update.sh 每次都会重新加载；手改之后：docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+{
+	email {$ACME_EMAIL}
+	# 公网只开 443，不在 80 上做跳转
+	auto_https disable_redirects
+}
+
+(gateway) {
+	tls {
+		issuer acme {
+			disable_http_challenge
+		}
+	}
+	# 网关的请求都很小（登录、绑定几百字节）；大的直接拒绝
+	request_body {
+		max_size 64KB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	reverse_proxy {args[0]}:8300 {
+		# 网关正在重启（更新）时稍等再转
+		lb_try_duration 5s
+	}
+	# 网关没起来（更新中、出错）时回小程序认得的「门店系统连接中」，不回空白的 502
+	handle_errors 502 503 504 {
+		header Content-Type "application/json; charset=utf-8"
+		header Cache-Control "no-store"
+		respond `{"error":{"code":"STORE_OFFLINE","message":"门店系统连接中，请稍后再试"}}` 503
+	}
+}
+
+# 测试网关：开发版、体验版连这里（测试服 A 的演示库）
+{$GATEWAY_TEST_DOMAIN} {
+	import gateway gateway-test
+}
+
+# 正式网关：正式版连这里（门店正式服）。正式网关没开之前，这个域名回「门店系统连接中」
+{$GATEWAY_PROD_DOMAIN} {
+	import gateway gateway-prod
+}

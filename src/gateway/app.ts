@@ -37,6 +37,8 @@ const LoginInput = z.object({ code: z.string('缺少微信登录的 code').min(1
 const BindInput = z.object({
   phoneCode: z.string('请先验证手机号').min(1, '请先验证手机号').max(256),
   clientKey: z.uuid('操作编号不正确'),
+  // 点绑定时看到的绑定状态版本号（/v1/me 给的），原样转给门店系统比对
+  bindVersion: z.number('请刷新小程序后再绑定').int('请刷新小程序后再绑定').min(0, '请刷新小程序后再绑定'),
 });
 const AbandonInput = z.object({ clientKey: z.uuid('操作编号不正确') });
 const LedgerQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) });
@@ -131,20 +133,29 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
     }
   };
 
+  // 门店连没连上：10 秒内问过就用上次的；正在问的时候后来的请求等同一个结果，门店连不上时不会每个请求各等一次超时
   let health = { online: false, at: 0 };
-  const storeOnline = async () => {
-    if (Date.now() - health.at < 10_000) return health.online;
-    let online = false;
-    try {
-      online = (await upstream.call('GET', '/api/mp/health')).status === 200;
-    } catch {
-      online = false;
-    }
-    health = { online, at: Date.now() };
-    return online;
+  let probing: Promise<boolean> | null = null;
+  const storeOnline = (): Promise<boolean> => {
+    if (Date.now() - health.at < 10_000) return Promise.resolve(health.online);
+    probing ??= (async () => {
+      let online = false;
+      try {
+        online = (await upstream.call('GET', '/api/mp/health')).status === 200;
+      } catch {
+        online = false;
+      }
+      health = { online, at: Date.now() };
+      return online;
+    })().finally(() => {
+      probing = null;
+    });
+    return probing;
   };
 
   app.get('/v1/health', async () => ({ ok: true, mockWechat: wechat.mock, store: (await storeOnline()) ? 'online' : 'offline' }));
+  // 网关进程本身活着没有（容器的健康检查用）：不问门店，门店断外网时网关照样算健康
+  app.get('/v1/live', async () => ({ ok: true }));
 
   app.post('/v1/login', async (req) => {
     if (!loginLimit.take(`login:${req.ip}`)) throw TOO_MANY();
@@ -174,7 +185,7 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
   app.post('/v1/bind', async (req, reply) => {
     const openid = openidOf(req);
     if (!bindLimit.take(`bind:${openid}`)) throw TOO_MANY();
-    const { phoneCode, clientKey } = parse(BindInput, req.body);
+    const { phoneCode, clientKey, bindVersion } = parse(BindInput, req.body);
     let phone: string;
     try {
       ({ phone } = await wechat.phoneNumber(phoneCode));
@@ -182,7 +193,7 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
       if (error instanceof WechatError) throw new GatewayError(400, error.code, error.message);
       throw error;
     }
-    return member(reply, 'POST', '/api/mp/bind', openid, { clientKey, phone, mock: wechat.mock });
+    return member(reply, 'POST', '/api/mp/bind', openid, { clientKey, phone, mock: wechat.mock, bindVersion });
   });
   // 绑定结果不确定（超时、断网、门店出错）时，小程序请门店系统作废这个编号：已经绑上了返回绑定的结果
   app.post('/v1/bind/abandon', async (req, reply) => {
@@ -198,6 +209,7 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
     return member(reply, 'GET', `/api/mp/ledger?limit=${limit}`, openid);
   });
   app.get('/v1/coupons', async (req, reply) => member(reply, 'GET', '/api/mp/coupons', openidOf(req)));
+  app.get('/v1/benefits', async (req, reply) => member(reply, 'GET', '/api/mp/benefits', openidOf(req)));
   app.post('/v1/code', async (req, reply) => {
     const openid = openidOf(req);
     if (!codeLimit.take(`code:${openid}`)) throw TOO_MANY();

@@ -1,5 +1,6 @@
 {
   "name": "tangqi-miniprogram",
+  "version": "0.1.0",
   "private": true,
   "description": "汤崎 TOUCHILL 微信小程序（小程序线，docs/MINIPROGRAM.md）：原生小程序 + TypeScript，只连小程序网关",
   "type": "module",
@@ -8,7 +9,8 @@
     "test": "vitest run",
     "check": "npm run typecheck && npm test",
     "e2e": "node e2e/smoke.mjs",
-    "icons": "node scripts/render-icons.mjs"
+    "icons": "node scripts/render-icons.mjs",
+    "upload:dry-run": "cd tools/upload && npm ci --no-audit --no-fund && node upload.mjs --dry-run"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

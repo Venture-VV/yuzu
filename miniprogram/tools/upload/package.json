@@ -1,0 +1,13 @@
+{
+  "name": "tangqi-miniprogram-upload",
+  "private": true,
+  "description": "上传小程序体验版（微信官方 miniprogram-ci；docs/DEPLOY_GATEWAY.md 第 7 节）。依赖多，单独一个目录，不进 CI 的安装",
+  "type": "module",
+  "scripts": {
+    "upload": "node upload.mjs",
+    "dry-run": "node upload.mjs --dry-run"
+  },
+  "dependencies": {
+    "miniprogram-ci": "2.1.31"
+  }
+}

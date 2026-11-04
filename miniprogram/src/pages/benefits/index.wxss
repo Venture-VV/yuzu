@@ -1,0 +1,95 @@
+.head {
+  padding: 8rpx 0 36rpx;
+}
+.title {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 44rpx;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.bf {
+  margin-bottom: 20rpx;
+  padding: 26rpx 28rpx;
+  background-color: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8rpx;
+}
+.bf-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.bf-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+}
+.bf-meta {
+  flex: none;
+  margin-left: 20rpx;
+  font-size: 24rpx;
+  color: var(--wood);
+}
+.bf-text {
+  display: block;
+  margin-top: 10rpx;
+  font-size: 26rpx;
+  line-height: 1.6;
+}
+.bf-cond {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.bf-go {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8rpx;
+  padding: 26rpx 4rpx;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  font-size: 26rpx;
+}
+.go {
+  color: var(--muted);
+}
+.go::after {
+  content: "›";
+  margin-left: 12rpx;
+  font-size: 34rpx;
+  line-height: 1;
+}
+.later {
+  margin-top: 56rpx;
+}
+.up {
+  border-top: 1px solid var(--line);
+}
+.up-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 22rpx 4rpx;
+  border-bottom: 1px solid var(--line);
+  font-size: 26rpx;
+}
+.up-name {
+  flex: 1;
+  min-width: 0;
+}
+.up-start {
+  flex: none;
+  margin-left: 20rpx;
+  font-family: var(--font-en);
+  font-size: 22rpx;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.use-note {
+  display: block;
+  margin-top: 28rpx;
+}

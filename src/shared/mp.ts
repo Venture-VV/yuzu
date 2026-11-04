@@ -138,6 +138,11 @@ export interface MpGrade {
 
 export interface MpMe {
   bound: boolean;
+  /**
+   * 这个微信的绑定状态版本号：绑定、解绑各加一，只增不减（绑定记录只追加）。点绑定时带上看到的这个数，
+   * 门店系统对不上就拒绝（BIND_STALE）：解绑之后，之前没确认的旧请求晚到也不会再绑上（小程序线测试预检 #44 的 P1）
+   */
+  bindVersion: number;
   member:
     | (MpMemberBrief & {
         principalBalance: number;
@@ -174,6 +179,39 @@ export interface MpCoupon {
   validTo: string;
   /** available 可用、pending 还没生效、expired、used、voided */
   state: string;
+}
+
+/**
+ * 本月可享（第一期 ⑥，接主线 v0.7.24 的 memberBenefits）：按会员推算到今天的档阶，列出已发布、够格的本店权益。
+ * 只给顾客该看的：不带发放与使用的记录（里面有经办人、单号、备注）、内部编号与券模板。
+ */
+export interface MpBenefitItem {
+  code: string;
+  name: string;
+  /** coupon 券类、event 事件礼、service 服务与资格、discount 折扣（第三期）、info 制度说明 */
+  category: 'coupon' | 'event' | 'service' | 'discount' | 'info';
+  /** 次数、张数按什么算：none 不计次、day 每天、month 每月、year 每年 */
+  period: 'none' | 'day' | 'month' | 'year';
+  /** 「每月 2 次」「每月 1 张」「每次 1 张」「不限次」；折扣、制度说明为空 */
+  allowance: string;
+  content: string;
+  conditions: string;
+  /** 服务类：这一期已登记的次数（不计次的是本月登记了几次）；其余为 null */
+  used: number | null;
+  /** 服务类：这一期的上限，不限次为 null；其余为 null */
+  limit: number | null;
+  /** 券类、事件礼：这一项发的券里现在能用的张数 */
+  available: number;
+}
+
+export interface MpBenefits {
+  /** 营业日所在的月份 YYYY-MM */
+  month: string;
+  /** 现在的档阶，例如「L2 潭影 · 初」 */
+  label: string;
+  items: MpBenefitItem[];
+  /** 升档以后能享的（按起点从低到高，最多 8 项）：只给名字与起点 */
+  upcoming: { name: string; startLabel: string }[];
 }
 
 /** 会员码（MP9）：由 yuzu 签发，每 60 秒换一次；前台扫码盒扫进会员查找框，yuzu 在本机校验 */
