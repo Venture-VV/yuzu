@@ -192,7 +192,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '047_membership_finish.sql',
   '048_mp_coupons_refunds.sql',
   '049_mp_claim_refund_route.sql',
-  '050_mp_reminders.sql',
+  '050_mp_reminders_retention.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

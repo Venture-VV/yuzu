@@ -774,15 +774,23 @@ function BindingsTab() {
                 <div key={b.id} className="flex flex-wrap items-center gap-3 py-2.5">
                   <div className="min-w-0 flex-1 text-[13.5px]">
                     <p>
-                      微信 …{b.openidTail} · 手机号 {b.phone} {b.mock && <Badge tone="ember">模拟微信</Badge>}
+                      {b.purgedAt ? (
+                        '微信与手机号已清除（解绑满 3 年）'
+                      ) : (
+                        <>
+                          微信 …{b.openidTail} · 手机号 {b.phone}
+                        </>
+                      )}{' '}
+                      {b.mock && <Badge tone="ember">模拟微信</Badge>}
                     </p>
                     <p className="text-[12.5px] text-ink-3">
                       {formatDateTime(b.boundAt)} 绑定
                       {b.unboundAt && ` · ${formatDateTime(b.unboundAt)} ${b.unboundByName ?? ''}解绑（${b.unbindReason}）`}
+                      {b.purgedAt && ` · ${formatDateTime(b.purgedAt)} 清除`}
                     </p>
                   </div>
                   {b.unboundAt ? (
-                    <Badge>已解绑</Badge>
+                    <Badge>{b.purgedAt ? '已清除' : '已解绑'}</Badge>
                   ) : can('mp.unbind') ? (
                     <Button
                       variant="secondary"

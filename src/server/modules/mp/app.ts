@@ -17,6 +17,7 @@ import { maybeReconcileYesterday } from './recharge-recon';
 import { registerMpRechargeRoutes } from './recharge-routes';
 import { registerMpReminderRoutes } from './reminder-routes';
 import { planReminders } from './reminders';
+import { purgeOldBindings } from './retention';
 import { registerMpMemberRoutes } from './routes';
 
 const digest = (s: string) => createHash('sha256').update(s, 'utf8').digest();
@@ -97,8 +98,18 @@ export async function buildMpApp(sql: Sql, config: AppConfig, opts: MpAppOptions
     let timer: NodeJS.Timeout | undefined;
     let running = false;
     let planning = false;
+    // 解绑满 3 年清除（MP16）：每小时看一次
+    let purgedAt = 0;
     app.addHook('onReady', async () => {
       timer = setInterval(() => {
+        if (Date.now() - purgedAt >= 3_600_000) {
+          purgedAt = Date.now();
+          purgeOldBindings({ sql, config })
+            .then((r) => {
+              if (r.bindings || r.fences) app.log.info(`解绑满 3 年清除：绑定记录 ${r.bindings} 条，作废登记 ${r.fences} 条`);
+            })
+            .catch((error: unknown) => app.log.error({ err: error }, '解绑满 3 年清除出错，一小时后再试'));
+        }
         // 到期提醒（第三期 3a）：到点的同意排成消息、网关没回报的记结果不明；与线上充值的补查互不等
         if (!planning) {
           planning = true;

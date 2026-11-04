@@ -347,7 +347,8 @@ export async function resolveMemberCode(deps: Deps, code: string, at = Date.now(
 
 export async function memberBindings(db: Db, memberId: number): Promise<MpBindingRow[]> {
   return db<MpBindingRow[]>`
-    SELECT b.id, right(b.openid, 6) AS openid_tail, b.phone, b.mock, b.bound_at, b.unbound_at, s.display_name AS unbound_by_name, b.unbind_reason
+    SELECT b.id, right(b.openid, 6) AS openid_tail, b.phone, b.mock, b.bound_at, b.unbound_at, s.display_name AS unbound_by_name, b.unbind_reason,
+           b.purged_at
     FROM mp_bindings b LEFT JOIN staff s ON s.id = b.unbound_by
     WHERE b.member_id = ${memberId} ORDER BY b.id DESC`;
 }

@@ -240,13 +240,16 @@ export interface MpCodeLookup {
 /** 后台看某位会员的绑定记录（openid 只显示后 6 位） */
 export interface MpBindingRow {
   id: number;
-  openidTail: string;
-  phone: string;
+  /** 解绑满 3 年清除以后为空（MP16） */
+  openidTail: string | null;
+  phone: string | null;
   mock: boolean;
   boundAt: string;
   unboundAt: string | null;
   unboundByName: string | null;
   unbindReason: string | null;
+  /** 解绑满 3 年、清除了手机号与微信标识的时间 */
+  purgedAt: string | null;
 }
 
 // ── 后台「小程序」模块（员工端口，权限 mp.content；绑定记录另要 mp.unbind）──
