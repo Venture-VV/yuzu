@@ -54,6 +54,8 @@ const RechargeCreate = z.object({
   clientKey: z.uuid('操作编号不正确'),
   planId: z.number().int().positive().nullable().optional(),
   amount: z.number().int().positive().nullable().optional(),
+  /** 顾客确认时看到的绑定状态版本号：门店系统比对，换绑过的拒绝 */
+  bindVersion: z.number('请刷新充值页后再下单').int().min(0),
 });
 const RechargePreview = z.object({ amount: z.coerce.number('请填写金额').int('金额请填整元').positive('请填写金额') });
 /** 微信支付的到账通知：报文主体原样转（门店系统要用原文验签），最多 8 KB */

@@ -90,6 +90,11 @@ export async function bindingStateOf(db: Db, openid: string): Promise<{ binding:
 
 /** 绑定、解绑、确认作废都先取这个微信的这把咨询锁：同一个微信的绑定状态（与版本号）在这把锁里只有一个在改 */
 const lockOpenid = (tx: Db, openid: string) => tx`SELECT pg_advisory_xact_lock(hashtext(${`mp_bind:${openid}`}))`;
+/**
+ * 同一把锁的共享模式：线上充值建单读这个微信的有效绑定、写单子时拿着，解绑（排他）插不进来——
+ * 解绑之后再扫这条绑定没付的单去关，不会漏掉刚好同时建的那一张（小程序线测试 866ccfa 的 P1）
+ */
+export const lockOpenidShared = (tx: Db, openid: string) => tx`SELECT pg_advisory_xact_lock_shared(hashtext(${`mp_bind:${openid}`}))`;
 
 async function boundMemberId(db: Db, openid: string): Promise<number> {
   const b = await activeBinding(db, openid);

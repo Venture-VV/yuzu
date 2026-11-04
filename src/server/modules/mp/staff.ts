@@ -10,6 +10,8 @@ import { idParam, parse } from '../../lib/validate';
 import { getMember } from '../members';
 import { abandonBannerCreate, createBanner, lookupBannerOp, mpAdminData, saveItemIntro, saveMpImage, saveMpRules, saveStore, updateBanner } from './admin';
 import { memberBindings, resolveMemberCode, unbindMember } from './member';
+import { activePay } from './pay';
+import { closeUnboundOrders } from './recharge';
 import { rechargeAdminData, resolveHeldOrder, runRecon, saveRechargeRules } from './recharge-admin';
 
 const CodeParam = z.object({ code: z.string().trim().max(32) });
@@ -23,7 +25,14 @@ export function registerMpStaffRoutes(app: FastifyInstance, deps: Deps) {
     await getMember(sql, id);
     return memberBindings(sql, id);
   });
-  app.post('/api/admin/mp/bindings/:id/unbind', { preHandler: guard('mp.unbind') }, async (req) => unbindMember(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
+  app.post('/api/admin/mp/bindings/:id/unbind', { preHandler: guard('mp.unbind') }, async (req) => {
+    const { id } = parse(idParam, req.params);
+    const row = await unbindMember(deps, id, req.body, ctxOf(req));
+    // 解绑提交之后：这条绑定还没付的线上充值单马上请微信关掉，旧微信不能再付（小程序线测试 866ccfa 的 P1）。
+    // 关不上的（微信连不上）每分钟的补查接着关，不影响解绑的结果；同一个操作编号重提时这里没有可关的
+    await closeUnboundOrders(deps, activePay(), id).catch(() => {});
+    return row;
+  });
 
   // 后台「小程序」：维护内容要 mp.content；只管解绑的（值班经理）也能打开看
   const content = guard('mp.content');

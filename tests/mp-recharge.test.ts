@@ -86,15 +86,19 @@ const call = (method: 'GET' | 'POST', url: string, openid: string | null, payloa
   );
 let n = 0;
 /** 建一位会员并用模拟微信绑定，返回会员编号与这个微信 */
-async function bound(name: string): Promise<{ memberId: number; openid: string }> {
+async function bound(name: string): Promise<{ memberId: number; openid: string; phone: string }> {
   n += 1;
   const phone = `1366600${String(1000 + n)}`;
   const m = await createMember(ctx, name, phone);
   const openid = `openid-recharge-${n}-${randomUUID().slice(0, 8)}`;
+  await bindPhone(openid, phone);
+  return { memberId: m.id, openid, phone };
+}
+/** 这个微信（用模拟的验证）绑定手机号是 phone 的会员 */
+async function bindPhone(openid: string, phone: string): Promise<void> {
   const version = (await call('GET', '/api/mp/me', openid)).json().bindVersion as number;
   const b = await call('POST', '/api/mp/bind', openid, { clientKey: randomUUID(), phone, bindVersion: version, mock: true });
   expect(b.statusCode, b.body).toBe(200);
-  return { memberId: m.id, openid };
 }
 const rules = (patch: Record<string, unknown> = {}) =>
   api(ctx.app, ctx.owner, 'PUT', '/api/admin/mp/recharge/rules', {
@@ -110,7 +114,11 @@ const options = async (openid: string) => {
   expect(r.statusCode, r.body).toBe(200);
   return r.json() as MpRechargeOptions;
 };
-const createOrder = (openid: string, body: Record<string, unknown>, clientKey = randomUUID()) => call('POST', '/api/mp/recharge/orders', openid, { clientKey, ...body });
+/** 这个微信现在的绑定状态版本号（充值页上带回来的那个数） */
+const versionOf = async (openid: string) => (await call('GET', '/api/mp/me', openid)).json().bindVersion as number;
+/** 建单：默认带这个微信现在的绑定版本号（body 里给了 bindVersion 的用给的） */
+const createOrder = async (openid: string, body: Record<string, unknown>, clientKey = randomUUID()) =>
+  call('POST', '/api/mp/recharge/orders', openid, { clientKey, bindVersion: await versionOf(openid), ...body });
 const orderOf = async (openid: string, no: string) => (await call('GET', `/api/mp/recharge/orders/${no}`, openid)).json() as MpRechargeOrder;
 const notify = (msg: { headers: unknown; body: string }) =>
   call('POST', '/api/mp/pay/notify', null, { headers: msg.headers, body: Buffer.from(msg.body, 'utf8').toString('base64') });
@@ -280,6 +288,275 @@ describe('建单结果待确认', () => {
     expect(late.json().error.code).toBe('OP_ABANDONED');
     const other = await bound('演示·作废别人');
     expect((await call('POST', '/api/mp/recharge/abandon', other.openid, { clientKey: lost })).json().error.code).toBe('CLIENT_KEY_REUSED');
+  });
+});
+
+describe('解绑、换绑之后的旧充值单（小程序线测试 866ccfa 的 P1）', () => {
+  const bindingOf = async (openid: string) =>
+    (await ctx.sql<{ id: number }[]>`SELECT id FROM mp_bindings WHERE openid = ${openid} AND unbound_at IS NULL`)[0]!.id;
+  const unbind = async (openid: string) => {
+    const r = await api(ctx.app, ctx.owner, 'POST', `/api/admin/mp/bindings/${await bindingOf(openid)}/unbind`, { clientKey: randomUUID(), reason: '换手机号' });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+  };
+  /** 顾客对这张单能做的四件事：查单、继续支付、取消、模拟支付 */
+  const touches = (openid: string, no: string) =>
+    Promise.all([
+      call('GET', `/api/mp/recharge/orders/${no}`, openid),
+      call('POST', `/api/mp/recharge/orders/${no}/pay`, openid, {}),
+      call('POST', `/api/mp/recharge/orders/${no}/cancel`, openid, {}),
+      call('POST', `/api/mp/recharge/orders/${no}/mock-pay`, openid, {}),
+    ]);
+  const expectAll = async (openid: string, no: string, status: number, code: string) => {
+    for (const r of await touches(openid, no)) {
+      expect(r.statusCode, r.body).toBe(status);
+      expect(r.json().error.code).toBe(code);
+    }
+  };
+  const closeEvents = async (no: string) =>
+    ctx.sql<{ detail: Record<string, unknown> }[]>`
+      SELECT e.detail FROM mp_recharge_events e JOIN mp_recharge_orders o ON o.id = e.order_id WHERE o.order_no = ${no} AND e.kind = 'close' AND e.ok`;
+
+  it('解绑当场请微信关掉还没付的单；旧微信查单、继续支付、取消、模拟支付都不认；换绑到别的会员后也一样，谁的余额都不变', async () => {
+    await rules();
+    const a = await bound('演示·解绑前下单');
+    const c = (await createOrder(a.openid, { amount: yuan(600) })).json();
+    expect(wx.state(c.order.orderNo)).toBe('NOTPAY');
+    await unbind(a.openid);
+    expect(wx.state(c.order.orderNo)).toBe('CLOSED');
+    expect(await row(c.order.orderNo)).toMatchObject({ status: 'closed', closeReason: 'cancelled' });
+    expect((await closeEvents(c.order.orderNo))[0]!.detail).toMatchObject({ reason: 'cancelled', unbound: true });
+    await expectAll(a.openid, c.order.orderNo, 403, 'MP_NOT_BOUND');
+    // 同一个微信换绑到会员 B（B 原来绑的微信先解绑）
+    const b = await bound('演示·换绑到的会员');
+    await unbind(b.openid);
+    await bindPhone(a.openid, b.phone);
+    await expectAll(a.openid, c.order.orderNo, 404, 'NOT_FOUND');
+    expect((await options(a.openid)).pending).toBeNull();
+    expect(await rechargesOf(a.memberId)).toHaveLength(0);
+    expect(await rechargesOf(b.memberId)).toHaveLength(0);
+  });
+
+  it('解绑时微信支付连不上：解绑照样成功；换绑后旧单不能再看、再付（测试报告的复现）；每分钟的补查接着关掉', async () => {
+    const a = await bound('演示·解绑时连不上');
+    const c = (await createOrder(a.openid, { amount: yuan(600) })).json();
+    wx.setDown(true);
+    await unbind(a.openid);
+    wx.setDown(false);
+    expect(await row(c.order.orderNo)).toMatchObject({ status: 'pending' });
+    expect(wx.state(c.order.orderNo)).toBe('NOTPAY');
+    await expectAll(a.openid, c.order.orderNo, 403, 'MP_NOT_BOUND');
+    // 同一个微信换绑到会员 B：旧单是 A 的、付款人是这个微信，照样不认；B 的可充项里也没有
+    n += 1;
+    const phoneB = `1366600${String(1000 + n)}`;
+    const memberB = await createMember(ctx, '演示·换绑到 B', phoneB);
+    await bindPhone(a.openid, phoneB);
+    await expectAll(a.openid, c.order.orderNo, 404, 'NOT_FOUND');
+    expect((await options(a.openid)).pending).toBeNull();
+    expect(wx.state(c.order.orderNo)).toBe('NOTPAY');
+    // 补查：已解绑的待支付单请微信关掉
+    expect(await sweepRechargeOrders(deps, pay)).toMatchObject({ errors: 0 });
+    expect(wx.state(c.order.orderNo)).toBe('CLOSED');
+    expect(await row(c.order.orderNo)).toMatchObject({ status: 'closed', closeReason: 'cancelled' });
+    expect(await rechargesOf(a.memberId)).toHaveLength(0);
+    expect(await rechargesOf(memberB.id)).toHaveLength(0);
+  });
+
+  it('换绑回同一位会员：之前那条绑定下的单也不认；那张单还没关上时下新单提示稍后再试，关上后照常下单', async () => {
+    const a = await bound('演示·换绑回自己');
+    const c = (await createOrder(a.openid, { amount: yuan(600) })).json();
+    wx.setDown(true);
+    await unbind(a.openid);
+    wx.setDown(false);
+    await bindPhone(a.openid, a.phone);
+    await expectAll(a.openid, c.order.orderNo, 404, 'NOT_FOUND');
+    expect((await options(a.openid)).pending).toBeNull();
+    const blocked = await createOrder(a.openid, { amount: yuan(600) });
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.json().error).toMatchObject({ code: 'ORDER_PENDING', message: '换绑之前下的那张充值单还在关闭，请过一分钟再试' });
+    await sweepRechargeOrders(deps, pay);
+    expect(await row(c.order.orderNo)).toMatchObject({ status: 'closed' });
+    const again = await createOrder(a.openid, { amount: yuan(600) });
+    expect(again.statusCode, again.body).toBe(201);
+    expect((await options(a.openid)).pending?.orderNo).toBe(again.json().order.orderNo);
+    await call('POST', `/api/mp/recharge/orders/${again.json().order.orderNo}/cancel`, a.openid, {});
+  });
+
+  it('换绑完成以后才到的建单请求（确认时还绑着 A）：门店系统拒绝、不建单，钱不会记到 B 身上；按 B 的版本号重新确认才建单（小程序线测试 #52 的 P1）', async () => {
+    const a = await bound('演示·确认时是 A');
+    // 充值页打开时：这个微信绑着 A，页面拿到的版本号
+    const seen = (await options(a.openid)).bindVersion;
+    expect(seen).toBe(await versionOf(a.openid));
+    // 请求在路上：员工解绑 A，这个微信换绑会员 B
+    await unbind(a.openid);
+    n += 1;
+    const phoneB = `1366600${String(1000 + n)}`;
+    const memberB = await createMember(ctx, '演示·后来换绑的 B', phoneB);
+    await bindPhone(a.openid, phoneB);
+    // 旧请求这时才到：带的是确认时的版本号
+    const key = randomUUID();
+    const late = await createOrder(a.openid, { amount: yuan(600), bindVersion: seen }, key);
+    expect(late.statusCode).toBe(409);
+    expect(late.json().error.code).toBe('BIND_STALE');
+    const [count] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM mp_recharge_orders WHERE client_key = ${key}`;
+    expect(count!.n).toBe(0);
+    expect((await options(a.openid)).pending).toBeNull();
+    // 同一个编号再提一次（原样重提）也一样拒绝
+    expect((await createOrder(a.openid, { amount: yuan(600), bindVersion: seen }, key)).json().error.code).toBe('BIND_STALE');
+    expect(await rechargesOf(a.memberId)).toHaveLength(0);
+    expect(await rechargesOf(memberB.id)).toHaveLength(0);
+    // 顾客回到充值页（看到的是 B）重新确认：按 B 的版本号建单
+    const fresh = await options(a.openid);
+    expect(fresh.bindVersion).toBeGreaterThan(seen);
+    const ok = await createOrder(a.openid, { amount: yuan(600), bindVersion: fresh.bindVersion });
+    expect(ok.statusCode, ok.body).toBe(201);
+    const [o] = await ctx.sql<{ memberId: number }[]>`SELECT member_id FROM mp_recharge_orders WHERE order_no = ${ok.json().order.orderNo}`;
+    expect(o!.memberId).toBe(memberB.id);
+    await call('POST', `/api/mp/recharge/orders/${ok.json().order.orderNo}/cancel`, a.openid, {});
+  });
+
+  it('解绑以后、换绑以前到的旧请求：没绑定，不建单；版本号不对的请求（例如页面没刷新）也不建单', async () => {
+    const a = await bound('演示·解绑后才到');
+    const seen = await versionOf(a.openid);
+    await unbind(a.openid);
+    const r = await createOrder(a.openid, { amount: yuan(600), bindVersion: seen });
+    expect(r.statusCode).toBe(403);
+    expect(r.json().error.code).toBe('MP_NOT_BOUND');
+    const b = await bound('演示·版本号不对');
+    const wrong = await createOrder(b.openid, { amount: yuan(600), bindVersion: (await versionOf(b.openid)) + 1 });
+    expect(wrong.json().error.code).toBe('BIND_STALE');
+    const missing = await call('POST', '/api/mp/recharge/orders', b.openid, { clientKey: randomUUID(), amount: yuan(600) });
+    expect(missing.statusCode).toBe(400);
+    expect(await rechargesOf(a.memberId)).toHaveLength(0);
+  });
+
+  it('建单的编号在解绑、换绑之后重提或确认作废：不给旧单、不另建单，提示重新选择', async () => {
+    const a = await bound('演示·换绑后重提');
+    const key = randomUUID();
+    const v0 = await versionOf(a.openid);
+    const c = (await createOrder(a.openid, { amount: yuan(600) }, key)).json();
+    await unbind(a.openid);
+    const unboundReplay = await createOrder(a.openid, { amount: yuan(600) }, key);
+    expect(unboundReplay.statusCode).toBe(403);
+    expect(unboundReplay.json().error.code).toBe('MP_NOT_BOUND');
+    expect((await call('POST', '/api/mp/recharge/abandon', a.openid, { clientKey: key })).json()).toEqual({ status: 'abandoned' });
+    n += 1;
+    const phoneB = `1366600${String(1000 + n)}`;
+    await createMember(ctx, '演示·重提时的 B', phoneB);
+    await bindPhone(a.openid, phoneB);
+    // 原样重提（带当初的版本号）：绑定变过，拒绝；带现在的版本号：编号是之前那条绑定用过的，也拒绝
+    expect((await createOrder(a.openid, { amount: yuan(600), bindVersion: v0 }, key)).json().error.code).toBe('BIND_STALE');
+    const reboundReplay = await createOrder(a.openid, { amount: yuan(600) }, key);
+    expect(reboundReplay.statusCode).toBe(409);
+    expect(reboundReplay.json().error.code).toBe('CLIENT_KEY_REUSED');
+    expect((await call('POST', '/api/mp/recharge/abandon', a.openid, { clientKey: key })).json()).toEqual({ status: 'abandoned' });
+    const [count] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM mp_recharge_orders WHERE client_key = ${key}`;
+    expect(count!.n).toBe(1);
+    expect(await row(c.order.orderNo)).toMatchObject({ status: 'closed' });
+  });
+
+  it('解绑前已经付了：解绑时请微信关单得知已付，当场按原单入账到原来的会员；之后到账通知再到不重复入账', async () => {
+    const a = await bound('演示·解绑前付了');
+    const c = (await createOrder(a.openid, { amount: yuan(600) })).json();
+    const msg = wx.pay(c.order.orderNo);
+    await unbind(a.openid);
+    expect(await row(c.order.orderNo)).toMatchObject({ status: 'paid' });
+    expect((await notify(msg)).statusCode).toBe(204);
+    const rs = await rechargesOf(a.memberId);
+    expect(rs).toHaveLength(1);
+    expect(rs[0]).toMatchObject({ paidAmount: yuan(600), channel: 'mp' });
+  });
+
+  it('解绑前已经付了、解绑时微信连不上、换绑之后到账通知才到：照样按原单入账到原来的会员，只入账一次；新绑的会员不变', async () => {
+    const a = await bound('演示·通知晚到');
+    const c = (await createOrder(a.openid, { amount: yuan(600) })).json();
+    const msg = wx.pay(c.order.orderNo);
+    wx.setDown(true);
+    await unbind(a.openid);
+    wx.setDown(false);
+    n += 1;
+    const phoneB = `1366600${String(1000 + n)}`;
+    const memberB = await createMember(ctx, '演示·通知晚到时的 B', phoneB);
+    await bindPhone(a.openid, phoneB);
+    expect(await row(c.order.orderNo)).toMatchObject({ status: 'pending' });
+    const [r1, r2] = await Promise.all([notify(msg), notify(msg)]);
+    expect([r1.statusCode, r2.statusCode]).toEqual([204, 204]);
+    expect(await row(c.order.orderNo)).toMatchObject({ status: 'paid' });
+    expect(await rechargesOf(a.memberId)).toHaveLength(1);
+    expect(await rechargesOf(memberB.id)).toHaveLength(0);
+    // 补查不再动它
+    await sweepRechargeOrders(deps, pay);
+    expect(await rechargesOf(a.memberId)).toHaveLength(1);
+  });
+
+  it('继续支付与解绑交错（这张单已经有 prepay_id、解绑时微信关单失败）：解绑先提交的，继续支付不再签出支付参数；之前拿到参数付了的照样按原单入账（测试会话 #52 的补充）', async () => {
+    const a = await bound('演示·继续支付与解绑');
+    const c = (await createOrder(a.openid, { amount: yuan(600) })).json();
+    expect(c.payment).not.toBeNull();
+    const id = await bindingOf(a.openid);
+    /** 等到有 n 个请求在排这把咨询锁 */
+    const waiters = async (count: number) => {
+      for (let i = 0; i < 200; i++) {
+        const [w] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`;
+        if (w!.n >= count) return;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      throw new Error('没有排上队');
+    };
+    // 先拿住这个微信绑定锁的排他模式，让解绑、继续支付按先后排队：解绑在前
+    let release!: () => void;
+    const released = new Promise<void>((r) => (release = r));
+    let held!: () => void;
+    const holding = new Promise<void>((r) => (held = r));
+    const holder = ctx.sql.begin(async (tx) => {
+      await tx`SELECT pg_advisory_xact_lock(hashtext(${`mp_bind:${a.openid}`}))`;
+      held();
+      await released;
+    });
+    await holding;
+    wx.setDown(true);
+    const unbinding = api(ctx.app, ctx.owner, 'POST', `/api/admin/mp/bindings/${id}/unbind`, { clientKey: randomUUID(), reason: '换手机号' });
+    await waiters(1);
+    const paying = call('POST', `/api/mp/recharge/orders/${c.order.orderNo}/pay`, a.openid, {});
+    await waiters(2);
+    release();
+    await holder;
+    const [u, p] = await Promise.all([unbinding, paying]);
+    wx.setDown(false);
+    expect(u.status, JSON.stringify(u.body)).toBe(200);
+    expect(p.statusCode, p.body).toBe(403);
+    expect(p.json().error.code).toBe('MP_NOT_BOUND');
+    expect(p.json().payment).toBeUndefined();
+    // 关单没成功，建单时拿到的参数还能付：付了照样按原单入账到原来的会员，只入一次；之后补查不再动它
+    expect(await row(c.order.orderNo)).toMatchObject({ status: 'pending' });
+    const msg = wx.pay(c.order.orderNo);
+    expect((await notify(msg)).statusCode).toBe(204);
+    expect((await notify(msg)).statusCode).toBe(204);
+    await sweepRechargeOrders(deps, pay);
+    expect(await row(c.order.orderNo)).toMatchObject({ status: 'paid' });
+    expect(await rechargesOf(a.memberId)).toHaveLength(1);
+  });
+
+  it('建单与解绑同时：要么没建成（已解绑），要么建好的单在解绑后马上关掉；不会留下解绑之后还能付的单', async () => {
+    await rules();
+    for (let i = 0; i < 6; i++) {
+      const a = await bound(`演示·同时解绑${i}`);
+      const id = await bindingOf(a.openid);
+      const [c, u] = await Promise.all([
+        createOrder(a.openid, { amount: yuan(600) }),
+        api(ctx.app, ctx.owner, 'POST', `/api/admin/mp/bindings/${id}/unbind`, { clientKey: randomUUID(), reason: '同时解绑' }),
+      ]);
+      expect(u.status, JSON.stringify(u.body)).toBe(200);
+      if (c.statusCode !== 201) expect(['MP_NOT_BOUND', 'ORDER_NOT_PENDING'], c.body).toContain(c.json().error.code);
+      const left = await ctx.sql<{ orderNo: string; status: string }[]>`SELECT order_no, status FROM mp_recharge_orders WHERE binding_id = ${id}`;
+      for (const o of left) {
+        expect(o.status).toBe('closed');
+        expect(wx.state(o.orderNo)).not.toBe('NOTPAY');
+      }
+      expect(await rechargesOf(a.memberId)).toHaveLength(0);
+    }
+    const [open] = await ctx.sql<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM mp_recharge_orders o JOIN mp_bindings b ON b.id = o.binding_id WHERE o.status = 'pending' AND b.unbound_at IS NOT NULL`;
+    expect(open!.n).toBe(0);
   });
 });
 

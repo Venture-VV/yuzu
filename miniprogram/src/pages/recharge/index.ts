@@ -164,7 +164,8 @@ Page({
     const c = this.data.choice;
     if (!c || this.data.busy) return;
     this.setData({ busy: true });
-    const outcome = await sendCreate({ planId: c.planId, amount: c.planId === null ? c.amount : null }, uuid());
+    // 带上这一页显示时的绑定版本号：确认之后才解绑、换绑的，门店系统不建单（不会记到换绑以后的会员上）
+    const outcome = await sendCreate({ planId: c.planId, amount: c.planId === null ? c.amount : null, bindVersion: this.loaded ? this.loaded.bindVersion : -1 }, uuid());
     this.setData({ busy: false });
     await this.afterCreate(outcome);
   },
