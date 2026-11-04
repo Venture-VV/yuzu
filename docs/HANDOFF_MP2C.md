@@ -1,6 +1,6 @@
 # 交接：小程序第二期 2c 线上领券、2d 原路退回（小程序线）
 
-**合并顺序**：两块都接主线 v0.7.27（#51，迁移 `049`）的入口——2c 用发券入口 `issueMpClaimCoupon` 与只读判断 `mpClaimEligibility`，2d 用退储值的 `registerOnlineRefundRoute` 与 `listOnlineRefundLines`。**#51 先合并**，小程序线再把 `main` 合进来、CI 全绿后交店主。
+**合并顺序**：两块都接主线 v0.7.27（#51，迁移 `049`）的入口——2c 用发券入口 `issueMpClaimCoupon` 与只读判断 `mpClaimEligibility`，2d 用退储值的 `registerOnlineRefundRoute` 与 `listOnlineRefundLines`。#51 已于 2026-11-04 合并；小程序线从合并后的 `main`（`2a2eb8d`）重开分支，在 PR #55。
 
 2d 动的是真钱（退款），按资金候选版本走：CI 全绿后店主合并，独立验收在合并后补做。对顾客开放要等 yuzu 正式切换（ROADMAP 第 3 节 M5）；在那之前只在演示库上用模拟微信支付联调。
 
@@ -55,7 +55,13 @@
 
 ## 4. 已执行的验证（云端开发会话）
 
-见本 PR 的说明（在本机临时合入主线 #51 跑）。
+在 `49fd44a`（`main` 2a2eb8d + 2c、2d、第三期设计稿）上：
+
+- `npm run typecheck`、`npm run build` 通过；
+- 全量 `npm test`：103 个文件、1046 项全过；
+- 小程序 `npm run check`：13 个文件、78 项全过。
+
+**受阻未测**：真的微信支付、开发者工具与真手机。
 
 ## 5. 验收要点
 
