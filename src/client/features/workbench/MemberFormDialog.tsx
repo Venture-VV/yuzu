@@ -114,6 +114,8 @@ export function MemberFormDialog({
         : await api.post<MemberSummary>('/api/members', body);
       void qc.invalidateQueries({ queryKey: ['members'] });
       void qc.invalidateQueries({ queryKey: ['member', saved.id] });
+      // 换手机号的记录列在「储值与账户」里（v0.7.26）
+      if (phoneChanged) void qc.invalidateQueries({ queryKey: ['member-account-history', saved.id] });
       toast({ tone: 'success', title: member ? '会员资料已更新' : `已为「${saved.name}」建档`, body: member ? undefined : `会员号 ${saved.memberNo}` });
       onSaved(saved);
     } catch (err) {

@@ -198,7 +198,7 @@
 | --- | --- |
 | QY-004 | 没人动过的草稿补上默认分钟数（第 0 节） |
 | 储值退回 | `member_refunds`（单号、会员、本金、扣回的赠金、原因、经办人、授权人、班次、营业日、操作编号）与 `member_refund_lines`（哪一笔充值、方式、金额、退款单号），只追加；余额流水类型「储值退回」；赠金批次变动「扣回」；作废登记的业务类型加「退储值」；权限「退储值」 |
-| 线上收款 | `recharges.channel`（`counter` / `mp`）、`(channel, payment_ref)` 唯一；系统账号「小程序」；交班只算 `shift_id` 不为空的 |
+| 线上收款 | `recharges.channel`（`counter` / `mp`）；`mp` 的不记班次、方式是微信、必须有交易单号，交易单号唯一（部分唯一索引）；系统账号「小程序」；交班只算 `shift_id` 不为空的 |
 | 停用 / 换号 | `member_status_events`、`member_phone_changes`，只追加；权限「停用、启用会员」「改会员手机号」 |
 | 合并 | `member_merges`；`members.merged_into_id`；余额流水「合并转出」「合并转入」；赠金批次来源「合并」；状态变化「合并」「储值退回」 |
 | 同行优惠 | `benefits.discount_target` 加 `companion_ticket`、`companion_bill`；`benefits.companion_count` 与 `companion_counts`（各档阶几位）；QY-041 没人动过的草稿补上起点与人数 |
