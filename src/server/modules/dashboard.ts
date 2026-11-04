@@ -76,6 +76,9 @@ export async function dashboard(db: Db, today: string, days: number, opts: { inS
     FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
     WHERE p.method IN ('discount', 'store_coupon', 'member_discount') AND (c.business_date = ${today} OR c.void_business_date = ${today})`;
   const [rc] = await db<{ n: number }[]>`SELECT count(*)::int AS n FROM recharges WHERE business_date = ${today}`;
+  // 储值退回（v0.7.26）：退的本金，与充值并列（不是营业额）
+  const [mr] = await db<{ n: number; amount: number }[]>`
+    SELECT count(*)::int AS n, coalesce(sum(principal), 0)::bigint AS amount FROM member_refunds WHERE business_date = ${today}`;
   const tickets = await db<DashboardData['tickets']>`
     SELECT cb.ticket_name AS name,
            (count(*) FILTER (WHERE c.business_date = ${today}) - count(*) FILTER (WHERE c.void_business_date = ${today}))::int AS count,
@@ -110,6 +113,8 @@ export async function dashboard(db: Db, today: string, days: number, opts: { inS
       refund: discount!.refund,
       rechargePaid: t.rechargePaid,
       rechargeCount: rc!.n,
+      memberRefund: Number(mr!.amount),
+      memberRefundCount: mr!.n,
     },
     tickets,
     days: history,

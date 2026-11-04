@@ -3,10 +3,12 @@
 //   · vip_tag：散客或等级不够的会员使用 VIP 柜（值班经理、店总、店主可授权，经营规则开启后才可用）；
 //   · over_limit：超过单笔上限的充值 / 消费（店总、店主可授权）；
 //   · checkout_discount：结账时的「优惠 / 免单」（值班经理、店总、店主可授权，R1.2）；
-//   · ticket_discount：改成更便宜的票种或儿童免票，接待时直接选免票也算（值班经理、店总、店主可授权，R1.2）。
+//   · ticket_discount：改成更便宜的票种或儿童免票，接待时直接选免票也算（值班经理、店总、店主可授权，R1.2）；
+//   · member_refund：退储值（店总、店主可授权，v0.7.26，M69），绑定会员与退的本金；
+//   · member_phone：店员、客户经理改会员手机号（值班经理、店总、店主可授权，v0.7.26，M77），绑定会员与新号码。
 // 优惠与降档的原因由申请的员工在弹窗里填写，随授权一起签发、核销后记到单据上。
 
-export const GRANT_PURPOSES = ['vip_tag', 'over_limit', 'checkout_discount', 'ticket_discount'] as const;
+export const GRANT_PURPOSES = ['vip_tag', 'over_limit', 'checkout_discount', 'ticket_discount', 'member_refund', 'member_phone'] as const;
 export type GrantPurpose = (typeof GRANT_PURPOSES)[number];
 
 export const GRANT_TTL_MINUTES = 5;
@@ -47,11 +49,31 @@ export interface TicketDiscountScope {
   reason: string;
 }
 
+/** 退储值的授权对象：哪位会员、退多少本金（与办理时完全一致） */
+export interface MemberRefundScope {
+  memberId: number;
+  amount: number;
+}
+
+/** 改会员手机号的授权对象：哪位会员改成哪个号码 */
+export interface MemberPhoneScope {
+  memberId: number;
+  phone: string;
+}
+
 export type VipGrantRequest = { purpose: 'vip_tag'; scope: VipTagScope };
 export type OverLimitGrantRequest = { purpose: 'over_limit'; scope: OverLimitScope };
 export type DiscountGrantRequest = { purpose: 'checkout_discount'; scope: DiscountScope };
 export type TicketGrantRequest = { purpose: 'ticket_discount'; scope: TicketDiscountScope };
-export type GrantRequest = VipGrantRequest | OverLimitGrantRequest | DiscountGrantRequest | TicketGrantRequest;
+export type MemberRefundGrantRequest = { purpose: 'member_refund'; scope: MemberRefundScope };
+export type MemberPhoneGrantRequest = { purpose: 'member_phone'; scope: MemberPhoneScope };
+export type GrantRequest =
+  | VipGrantRequest
+  | OverLimitGrantRequest
+  | DiscountGrantRequest
+  | TicketGrantRequest
+  | MemberRefundGrantRequest
+  | MemberPhoneGrantRequest;
 
 /** 签发的授权：授权编号、授权人与有效期，连同申请时的用途与对象 */
 export type Granted<R extends GrantRequest = GrantRequest> = R & {
@@ -64,6 +86,8 @@ export type VipGrant = Granted<VipGrantRequest>;
 export type OverLimitGrant = Granted<OverLimitGrantRequest>;
 export type DiscountGrant = Granted<DiscountGrantRequest>;
 export type TicketGrant = Granted<TicketGrantRequest>;
+export type MemberRefundGrant = Granted<MemberRefundGrantRequest>;
+export type MemberPhoneGrant = Granted<MemberPhoneGrantRequest>;
 
 /** 来访编号按升序去重，授权与结账按同一顺序比较 */
 export const sortedVisitIds = (ids: readonly number[]) => [...new Set(ids)].sort((a, b) => a - b);

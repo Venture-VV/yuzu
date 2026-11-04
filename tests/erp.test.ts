@@ -149,6 +149,7 @@ describe('营业数据（只读）', () => {
       checkouts: exec.kpis.checkouts,
       perGuest: exec.kpis.perGuest,
       rechargePaid: exec.kpis.rechargePaid,
+      memberRefund: exec.kpis.memberRefund,
     });
     expect(r.body.trend).toEqual(exec.trend);
     expect(r.body.settlements).toEqual([]);

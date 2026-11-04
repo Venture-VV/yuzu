@@ -11,13 +11,16 @@
 //   08-使用单.csv      派对房、宠物轰趴房、娱乐室当天开的使用单（v0.7.19）：房间、使用人手牌、开单与结束时刻、时长、经办人、撤单原因
 //   09-退款单.csv      当天开的退款单（v0.7.20，离店后部分退款，含当天作废的）：每项一行，原结账单、退款方式与退款单号、经办人、原因
 //   10-券.csv          当天的发券、用券、退回、作废（v0.7.20）：券码只显示后 4 位
+//   11-储值退回.csv    当天的退储值单（v0.7.26）：每一行一笔原收款，退款方式与退款单号、扣回的赠金、经办人与授权人、原因
 // 优惠 / 免单与降档 / 免票授权在资金轨 R1.2 合并后加入异常清单。
 
 import { businessDateOf, businessDayStart } from '@shared/business-date';
 import { businessBreakdown, CHECKOUT_METHOD_LABELS, CHECKOUT_METHODS, COUPON_PLATFORM_LABELS, type CheckoutMethod, type CouponPlatform, type ShiftRecord } from '@shared/checkout';
 import { COUPON_ISSUE_KIND_LABELS, maskStoreCouponCode } from '@shared/coupons';
 import { INSTANCE_LABELS } from '@shared/instance';
+import { REFUND_SOURCE_LABELS } from '@shared/member-refunds';
 import { formatYuan } from '@shared/money';
+import { PAYMENT_METHOD_LABELS } from '@shared/labels';
 import { CALL_TYPE_LABELS, gradeLabel } from '@shared/technicians';
 import type { SettlementSummary } from '@shared/types';
 import type { AppConfig } from '../config';
@@ -25,6 +28,7 @@ import { readSnapshot, type Sql, type Tx } from '../db';
 import { toCsv } from '../lib/csv';
 import { computeSettlement, settlementCsv } from '../modules/settlement';
 import { loadFrontdeskRules } from '../modules/frontdesk/common';
+import { memberRefundsOfDate } from '../modules/member-refunds';
 import { loadSettings } from '../modules/settings';
 import { listShifts } from '../modules/shifts';
 import { technicianReport, technicianTextSql } from '../modules/technicians';
@@ -274,7 +278,8 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     FROM coupon_events e JOIN coupons c ON c.id = e.coupon_id JOIN coupon_templates t ON t.id = c.template_id JOIN staff s ON s.id = e.staff_id
     LEFT JOIN members m ON m.id = c.member_id LEFT JOIN checkouts ck ON ck.id = e.checkout_id
     WHERE e.business_date = ${date} ORDER BY e.id`;
-  return { summary, checkouts, departments, voidedLines, cancelled, ticketChanges, freeEntries, shifts, technicians, rooms, usages, refunds, couponIssues, couponEvents };
+  const memberRefunds = await memberRefundsOfDate(tx, date);
+  return { summary, checkouts, departments, voidedLines, cancelled, ticketChanges, freeEntries, shifts, technicians, rooms, usages, refunds, couponIssues, couponEvents, memberRefunds };
 }
 
 export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string, now = new Date()): Promise<DailyRecon> {
@@ -636,6 +641,35 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     ]),
   });
 
+  // 11 储值退回（v0.7.26）：每一行一笔原收款（按原收款方式退）；赠金扣回、经办人、授权人写在每张单的第一行
+  files.push({
+    name: '11-储值退回.csv',
+    content: toCsv([
+      ['退储值单号', '退回时间', '会员号', '会员', '原收款', '原单号', '原营业日', '退款方式', '退回本金（元）', '退款单号 / 说明', '本单退回本金（元）', '本单扣回赠金（元）', '记到的班次', '经办人', '授权人', '原因', '降档'],
+      ...day.memberRefunds.flatMap((r) =>
+        r.lines.map((l, i) => [
+          r.refundNo,
+          stampOf(r.createdAt),
+          r.memberNo,
+          r.memberName,
+          REFUND_SOURCE_LABELS[l.source],
+          l.docNo,
+          l.date,
+          PAYMENT_METHOD_LABELS[l.method],
+          yuan(l.amount),
+          l.ref,
+          i === 0 ? yuan(r.principal) : '',
+          i === 0 ? yuan(r.bonus) : '',
+          i === 0 ? (r.shiftNo ?? '') : '',
+          i === 0 ? r.operatorName : '',
+          i === 0 ? r.approverName : '',
+          i === 0 ? r.reason : '',
+          i === 0 && r.grade ? `${r.grade.from} → ${r.grade.to}` : '',
+        ]),
+      ),
+    ]),
+  });
+
   // 00 说明
   const failed = checks.filter((c: CheckLine) => !c.ok);
   const deptOk = deptTotal === biz.receivable && deptDiscount === biz.discount + biz.coupon + biz.memberDiscount && deptRefund === biz.refund;
@@ -646,7 +680,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     `应收 ${formatYuan(biz.receivable)}：结账 ${s.business.checkouts.count} 张 ${formatYuan(s.business.checkouts.total)}，反结账 ${s.business.voids.count} 张 ${formatYuan(s.business.voids.total)}`,
     `优惠 / 免单 ${formatYuan(biz.discount)}；券抵扣 ${formatYuan(biz.coupon)}；会员折扣 ${formatYuan(biz.memberDiscount)}；退款 ${formatYuan(biz.refund)}（${s.business.refunds.count} 张）；净营业额 ${formatYuan(biz.netRevenue)}；实收（现金类）${formatYuan(biz.received)}`,
     `收款方式：${byMethod}`,
-    `储值：充值实收 ${formatYuan(s.recharge.paid)}（${s.recharge.count} 笔），储值消费 ${formatYuan(s.consume.total)}（${s.consume.count} 笔）`,
+    `储值：充值实收 ${formatYuan(s.recharge.paid)}（${s.recharge.count} 笔），储值消费 ${formatYuan(s.consume.total)}（${s.consume.count} 笔）；储值退回 ${formatYuan(s.memberRefund.principal)}（${s.memberRefund.count} 张，扣回赠金 ${formatYuan(s.memberRefund.bonus)}），净充值 ${formatYuan(s.recharge.paid - s.memberRefund.principal)}`,
     `部门参考表合计 ${formatYuan(deptTotal)}、优惠分摊 ${formatYuan(deptDiscount)}、退款 ${formatYuan(deptRefund)}：${deptOk ? '✓ 与应收、优惠（含券抵扣、会员折扣）、退款一致' : '✗ 与应收、优惠或退款不一致'}`,
     `异常：${EXCEPTION_KINDS.map((k) => `${k} ${count(k)}`).join('、')}、其他 ${exceptions.length - EXCEPTION_KINDS.reduce((t, k) => t + count(k), 0)}`,
     `交班：${day.shifts.length} 个班次，已交班 ${day.shifts.filter((r) => r.status === 'closed').length} 个`,
@@ -677,6 +711,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
       '  08-使用单.csv       派对房、宠物轰趴房、娱乐室当天开的与当天结束的使用单（房间、使用人手牌、开单与结束、时长、经办人、撤单原因）；场次费在结账单里',
       '  09-退款单.csv       当天开的退款单（离店后部分退款），每项一行：原结账单、退的份数与金额、退款方式与商户后台的退款单号、经办人、原因；当天作废的写明（不算营业额）',
       '  10-券.csv           当天的发券（手动、无记名、开卡礼、升级礼、生日礼、充值赠券）与券的变动（用券、反结账退回、作废）；券码只显示后 4 位',
+      '  11-储值退回.csv     当天的退储值单：每一行一笔原收款（充值按原收款方式退，期初余额与合并转入按员工选的方式），退款方式与商户后台的退款单号、扣回的赠金、经办人与授权人、原因；退的现金记在所选钱箱当班的班次',
       '',
     ].join('\n'),
   });

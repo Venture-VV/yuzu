@@ -47,9 +47,10 @@ export const DEDUCTION_RULE_LABELS: Record<DeductionRule, { title: string; descr
   proportional: { title: '按比例扣除', description: '按当前本金与赠金的比例同时扣除，零头计入本金。' },
 };
 
-export type EntryType = 'recharge' | 'consume' | 'reversal' | 'expire' | 'opening' | 'opening_void';
+/** 余额流水的类型；v0.7.26 起还有储值退回、合并转出、合并转入 */
+export type EntryType = 'recharge' | 'consume' | 'reversal' | 'expire' | 'opening' | 'opening_void' | 'refund' | 'merge_out' | 'merge_in';
 
-export const ENTRY_TYPES = ['recharge', 'consume', 'reversal', 'expire', 'opening', 'opening_void'] as const satisfies readonly EntryType[];
+export const ENTRY_TYPES = ['recharge', 'consume', 'reversal', 'expire', 'opening', 'opening_void', 'refund', 'merge_out', 'merge_in'] as const satisfies readonly EntryType[];
 
 export const ENTRY_TYPE_LABELS: Record<EntryType, string> = {
   recharge: '充值',
@@ -58,6 +59,9 @@ export const ENTRY_TYPE_LABELS: Record<EntryType, string> = {
   expire: '赠金过期',
   opening: '期初导入',
   opening_void: '期初作废',
+  refund: '储值退回',
+  merge_out: '合并转出',
+  merge_in: '合并转入',
 };
 
 /** 时长：整天按「N 天」，其余按「N 小时」 */

@@ -62,6 +62,9 @@ async function periodKpis(db: Db, from: string, to: string, c: Clock): Promise<P
        FROM checkouts WHERE business_date BETWEEN ${from} AND ${to} OR void_business_date BETWEEN ${from} AND ${to})::int AS checkouts,
       (SELECT coalesce(sum(paid_amount), 0) FROM recharges WHERE business_date BETWEEN ${from} AND ${to}) AS recharge_paid,
       (SELECT count(*) FROM recharges WHERE business_date BETWEEN ${from} AND ${to})::int AS recharge_count,
+      -- 储值退回（v0.7.26）：退的本金，与充值并列（不是营业额）
+      (SELECT coalesce(sum(principal), 0) FROM member_refunds WHERE business_date BETWEEN ${from} AND ${to})::bigint AS member_refund,
+      (SELECT count(*) FROM member_refunds WHERE business_date BETWEEN ${from} AND ${to})::int AS member_refund_count,
       ((SELECT coalesce(sum(total_amount), 0) FROM consumptions WHERE business_date BETWEEN ${from} AND ${to})
         - (SELECT coalesce(sum(principal_amount + bonus_amount), 0) FROM reversals WHERE business_date BETWEEN ${from} AND ${to})) AS wallet_consumed,
       (SELECT count(*) FROM members WHERE ${bizDate(db, 'created_at', c)} BETWEEN ${from} AND ${to})::int AS new_members`;
@@ -219,6 +222,8 @@ export async function membersReport(db: Db, from: string, to: string, c: Clock):
            (SELECT coalesce(sum(paid_amount), 0) FROM recharges WHERE business_date BETWEEN ${from} AND ${to}) AS recharge_paid,
            (SELECT count(*) FROM recharges WHERE business_date BETWEEN ${from} AND ${to})::int AS recharge_count,
            (SELECT count(DISTINCT member_id) FROM recharges WHERE business_date BETWEEN ${from} AND ${to})::int AS recharge_members,
+           (SELECT coalesce(sum(principal), 0) FROM member_refunds WHERE business_date BETWEEN ${from} AND ${to})::bigint AS member_refund,
+           (SELECT count(*) FROM member_refunds WHERE business_date BETWEEN ${from} AND ${to})::int AS member_refund_count,
            (SELECT coalesce(sum(total_amount), 0) FROM consumptions WHERE business_date BETWEEN ${from} AND ${to} AND status = 'completed') AS wallet_consumed,
            (SELECT count(DISTINCT member_id) FROM consumptions WHERE business_date BETWEEN ${from} AND ${to} AND status = 'completed')::int AS consume_members`;
   const channelRows = await db<{ channel: string | null; total: number; fresh: number }[]>`

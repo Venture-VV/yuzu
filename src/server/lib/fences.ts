@@ -66,6 +66,10 @@ export const FENCED_OPS = [
   'benefit_use',
   // 邀请体验、赠送会籍（v0.7.25，迁移 042）：编号记在临时身份上（member_trials.client_key）
   'member_trial',
+  // 会员体系收尾（v0.7.26，迁移 047）：退储值、停用 / 启用、合并会员；编号记在各自的单子上（client_key）
+  'member_refund',
+  'member_status',
+  'member_merge',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -112,6 +116,7 @@ export async function fenceKey(
   if (opType === 'grade_adjust' && (await gradeOpRef(tx, key)) !== null) return { existingOpType: opType };
   if (opType === 'benefit_use' && (await benefitUseOpRef(tx, key)) !== null) return { existingOpType: opType };
   if (opType === 'member_trial' && (await trialOpRef(tx, key)) !== null) return { existingOpType: opType };
+  if (isMemberOp(opType) && (await memberOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   const rows = await tx`
     INSERT INTO op_fences (key, op_type, staff_id) VALUES (${key}, ${opType}, ${staffId})
     ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;
@@ -161,5 +166,26 @@ export async function benefitUseOpRef(db: Db, key: string): Promise<number | nul
 /** 邀请体验、赠送会籍（v0.7.25）的操作编号记在临时身份上：查到时返回那条临时身份的编号 */
 export async function trialOpRef(db: Db, key: string): Promise<number | null> {
   const [row] = await db<{ id: number }[]>`SELECT id FROM member_trials WHERE client_key = ${key}`;
+  return row ? Number(row.id) : null;
+}
+
+const MEMBER_OPS = ['member_refund', 'member_status', 'member_merge'] as const;
+type MemberOp = (typeof MEMBER_OPS)[number];
+export const isMemberOp = (op: string): op is MemberOp => (MEMBER_OPS as readonly string[]).includes(op);
+
+/**
+ * 会员体系收尾（v0.7.26）的操作编号记在各自的单子上：退储值单、停用 / 启用记录、合并单。
+ * 查到时返回那张单子的编号（停用 / 启用返回那位会员，页面据此刷新会员详情）
+ */
+export async function memberOpRef(db: Db, key: string, op: MemberOp): Promise<number | null> {
+  if (op === 'member_refund') {
+    const [row] = await db<{ id: number }[]>`SELECT id FROM member_refunds WHERE client_key = ${key}`;
+    return row ? Number(row.id) : null;
+  }
+  if (op === 'member_status') {
+    const [row] = await db<{ memberId: number }[]>`SELECT member_id FROM member_status_events WHERE client_key = ${key}`;
+    return row ? Number(row.memberId) : null;
+  }
+  const [row] = await db<{ id: number }[]>`SELECT id FROM member_merges WHERE client_key = ${key}`;
   return row ? Number(row.id) : null;
 }

@@ -71,6 +71,29 @@ export async function restoreToLots(tx: Tx, o: { memberId: number; consumptionId
   }
 }
 
+/**
+ * 储值退回扣回赠金（v0.7.26，M70）：先扣退的这几笔充值自己的批次，不够再按最早到期的扣（长期有效的最后）；
+ * 只扣没到期的（到期的由调用方之前处理掉）。批次合计不够说明账不一致，拒绝记账
+ */
+export async function takeForRefund(tx: Tx, o: { memberId: number; refundId: number; amount: number; rechargeIds: number[]; at: Date }) {
+  if (o.amount <= 0) return;
+  const ids = o.rechargeIds.length ? o.rechargeIds : [0];
+  const lots = await tx<{ id: number; remaining: number }[]>`
+    SELECT id, remaining FROM bonus_lots
+    WHERE member_id = ${o.memberId} AND remaining > 0 AND (expires_at IS NULL OR expires_at > ${o.at})
+    ORDER BY (recharge_id IN ${tx(ids)}) DESC NULLS LAST, expires_at ASC NULLS LAST, id
+    FOR UPDATE`;
+  let left = o.amount;
+  for (const lot of lots) {
+    if (left === 0) break;
+    const take = Math.min(left, lot.remaining);
+    await tx`UPDATE bonus_lots SET remaining = remaining - ${take} WHERE id = ${lot.id}`;
+    await tx`INSERT INTO bonus_lot_moves (lot_id, kind, amount, member_refund_id, created_at) VALUES (${lot.id}, 'refund', ${-take}, ${o.refundId}, ${o.at})`;
+    left -= take;
+  }
+  if (left > 0) throw mismatch();
+}
+
 /** 会员当前有剩余的批次（先到期的在前）：会员详情显示「¥50 有效至 11-26」 */
 export async function openLots(db: Db, memberId: number) {
   return db<{ remaining: number; expiresAt: Date | null }[]>`

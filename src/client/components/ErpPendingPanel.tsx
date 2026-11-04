@@ -68,6 +68,13 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     // 邀请体验、赠送会籍（v0.7.25）：返回那条临时身份
     case 'member_trial':
       return d.trial && typeof d.trial === 'object' ? { refId: d.trial.id } : null;
+    // 会员体系收尾（v0.7.26）：退储值返回那张退储值单，停用 / 启用返回那位会员，合并返回那张合并单
+    case 'member_refund':
+      return d.refund && typeof d.refund === 'object' ? { refId: d.refund.id } : null;
+    case 'member_status':
+      return typeof d.memberId === 'number' ? { refId: d.memberId } : null;
+    case 'member_merge':
+      return d.merge && typeof d.merge === 'object' ? { refId: d.merge.id } : null;
   }
 }
 

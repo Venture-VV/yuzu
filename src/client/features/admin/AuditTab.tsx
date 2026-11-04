@@ -51,6 +51,11 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   hand_tag_updated: { label: '修改手牌', tone: 'neutral' },
   technician_saved: { label: '保存技师', tone: 'neutral' },
   items_technician_updated: { label: '调整需要技师的项目', tone: 'neutral' },
+  member_refund: { label: '退储值', tone: 'clay' },
+  recharge_online: { label: '线上充值', tone: 'lake' },
+  member_status_changed: { label: '停用 / 启用会员', tone: 'ember' },
+  member_phone_changed: { label: '改会员手机号', tone: 'ember' },
+  member_merged: { label: '合并会员', tone: 'ember' },
 };
 
 function describe(detail: Record<string, unknown>): string {

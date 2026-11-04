@@ -181,6 +181,9 @@ export const GRADE_EVENT_KINDS = [
   'grace_retain',
   'downgrade',
   'manual',
+  // 会员体系收尾（v0.7.26）：储值退回后够不上这一档（M73）、合并取两位里高的状态（M79）
+  'refund_down',
+  'merge',
 ] as const;
 export type GradeEventKind = (typeof GRADE_EVENT_KINDS)[number];
 export const GRADE_EVENT_LABELS: Record<GradeEventKind, string> = {
@@ -193,6 +196,8 @@ export const GRADE_EVENT_LABELS: Record<GradeEventKind, string> = {
   grace_retain: '补充期内保级',
   downgrade: '降档',
   manual: '手动调整',
+  refund_down: '储值退回降档',
+  merge: '合并会员',
 };
 
 export interface ExpiryStep {

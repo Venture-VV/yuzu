@@ -7,8 +7,11 @@ import { AppError, notFound } from '../lib/errors';
 import { nextDocNo as nextNo } from '../lib/tx';
 
 export type WalletDocType = 'recharge' | 'consume' | 'reversal' | 'expire' | 'opening';
-/** 流水类型：单据类型之外还有「期初作废」（沿用期初明细的单号） */
-export type WalletEntryType = WalletDocType | 'opening_void';
+/**
+ * 流水类型：单据类型之外还有「期初作废」（沿用期初明细的单号）；v0.7.26 起还有「储值退回」（退储值单）、
+ * 「合并转出」「合并转入」（合并单，单号在 member-refunds / member-admin 里取）
+ */
+export type WalletEntryType = WalletDocType | 'opening_void' | 'refund' | 'merge_out' | 'merge_in';
 
 /** 单号前缀：充值 CZ、消费 XF、撤销 CX、赠金过期 GQ、期初导入批次 QC */
 const DOC_PREFIX: Record<WalletDocType, string> = { recharge: 'CZ', consume: 'XF', reversal: 'CX', expire: 'GQ', opening: 'QC' };
@@ -45,6 +48,8 @@ export async function applyBalance(
     reversalId?: number;
     expiryId?: number;
     openingId?: number;
+    memberRefundId?: number;
+    memberMergeId?: number;
     businessDate: string;
     /** 赠金到期作废由系统处理，没有经办员工 */
     operatorId: number | null;
@@ -59,11 +64,12 @@ export async function applyBalance(
     UPDATE members SET principal_balance = ${after.principal}, bonus_balance = ${after.bonus}, updated_at = now()
     WHERE id = ${member.id}`;
   await tx`
-    INSERT INTO ledger_entries (member_id, entry_type, recharge_id, consumption_id, reversal_id, expiry_id, opening_id, doc_no,
-                                principal_delta, bonus_delta, principal_after, bonus_after,
+    INSERT INTO ledger_entries (member_id, entry_type, recharge_id, consumption_id, reversal_id, expiry_id, opening_id, member_refund_id,
+                                member_merge_id, doc_no, principal_delta, bonus_delta, principal_after, bonus_after,
                                 business_date, operator_id, created_at)
     VALUES (${member.id}, ${entry.entryType}, ${entry.rechargeId ?? null}, ${entry.consumptionId ?? null},
-            ${entry.reversalId ?? null}, ${entry.expiryId ?? null}, ${entry.openingId ?? null}, ${entry.docNo}, ${delta.principal}, ${delta.bonus},
+            ${entry.reversalId ?? null}, ${entry.expiryId ?? null}, ${entry.openingId ?? null}, ${entry.memberRefundId ?? null},
+            ${entry.memberMergeId ?? null}, ${entry.docNo}, ${delta.principal}, ${delta.bonus},
             ${after.principal}, ${after.bonus}, ${entry.businessDate}, ${entry.operatorId}, ${entry.at})`;
   return { ...member, principalBalance: after.principal, bonusBalance: after.bonus };
 }

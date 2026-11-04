@@ -5,6 +5,8 @@
 //     用途 checkout_discount：结账时的「优惠 / 免单」，绑定一起结账的来访与金额（值班经理及以上，R1.2）；
 //     用途 ticket_discount：改成更便宜的票种或免票（接待时直接选免票也算），绑定手牌与票种（值班经理及以上，R1.2）；
 //     优惠与降档的原因由申请的员工在弹窗里填写，随授权签发，核销后记到单据上；
+//     用途 member_refund：退储值（店总、店主，v0.7.26，M69），绑定会员与退的本金；
+//     用途 member_phone：店员、客户经理改会员手机号（值班经理及以上，v0.7.26，M77），绑定会员与新号码；
 //   · 授权绑定用途、申请的员工和授权对象（哪位客人用哪张柜 / 哪位会员的哪类业务、多少金额），5 分钟内有效，只能用一次；
 //   · 业务请求只带授权编号，在同一事务里核销：业务回滚时核销一起回滚，授权仍可在有效期内再用；
 //   · 授权人的密码错误与登录共用限流计数；失败返回 403 而不是 401，不会把前台员工自己登出；
@@ -22,6 +24,8 @@ import {
   ticketGrantCovers,
   type DiscountScope,
   type GrantPurpose,
+  type MemberPhoneScope,
+  type MemberRefundScope,
   type IssuedGrant,
   type OverLimitScope,
   type TicketDiscountScope,
@@ -77,6 +81,16 @@ const DiscountScopeInput = z
   })
   .refine((d) => (d.visitIds.length > 0) !== (d.tableSessionIds.length > 0), '请说明授权哪次结账');
 
+const MemberRefundScopeInput = z.object({
+  memberId: z.number().int().positive('请说明授权哪位会员'),
+  amount: positiveCents('退的本金'),
+});
+
+const MemberPhoneScopeInput = z.object({
+  memberId: z.number().int().positive('请说明授权哪位会员'),
+  phone: z.string('请填写新手机号').trim().regex(/^1\d{10}$/, '手机号应为 11 位数字'),
+});
+
 const TicketScopeInput = z.object({
   items: z
     .array(z.object({ tagCode, ticketTypeId: z.number().int().positive('请选择票种') }), '请说明授权哪张手牌改哪个票种')
@@ -91,6 +105,8 @@ const PURPOSE_RULES: Record<GrantPurpose, { approver: Permission; approverText: 
   over_limit: { approver: 'auth.overLimit', approverText: '超过单笔上限，请店总或店主授权' },
   checkout_discount: { approver: 'auth.discount', approverText: '优惠 / 免单，请值班经理、店总或店主授权' },
   ticket_discount: { approver: 'auth.discount', approverText: '降低票种或免票，请值班经理、店总或店主授权' },
+  member_refund: { approver: 'auth.memberRefund', approverText: '退储值，请店总或店主授权' },
+  member_phone: { approver: 'auth.memberPhone', approverText: '改会员手机号，请值班经理、店总或店主授权' },
 };
 const KIND_PERMISSION: Record<OverLimitScope['kind'], Permission> = { recharge: 'recharge.create', consume: 'consume.create' };
 const KIND_LABEL: Record<OverLimitScope['kind'], string> = { recharge: '充值', consume: '消费' };
@@ -103,7 +119,7 @@ export function registerGrantRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/auth/authorize', { preHandler: guard() }, async (req): Promise<IssuedGrant> => {
     const input = parse(Credentials, req.body);
     // 先核对申请人能不能办这项业务、这项授权现在需不需要，再核对授权人的密码
-    let scope: VipTagScope | OverLimitScope | DiscountScope | TicketDiscountScope;
+    let scope: VipTagScope | OverLimitScope | DiscountScope | TicketDiscountScope | MemberRefundScope | MemberPhoneScope;
     const rawScope = (req.body as { scope?: unknown }).scope;
     if (input.purpose === 'vip_tag') {
       if (!can(req.actor, 'frontdesk.operate')) throw forbidden();
@@ -121,6 +137,14 @@ export function registerGrantRoutes(app: FastifyInstance, deps: Deps) {
     } else if (input.purpose === 'ticket_discount') {
       if (!can(req.actor, 'frontdesk.operate')) throw forbidden();
       scope = parse(TicketScopeInput, rawScope);
+    } else if (input.purpose === 'member_refund') {
+      if (!can(req.actor, 'member.refund')) throw forbidden();
+      scope = parse(MemberRefundScopeInput, rawScope);
+    } else if (input.purpose === 'member_phone') {
+      if (!can(req.actor, 'member.write')) throw forbidden();
+      // 自己能改手机号的不用授权
+      if (can(req.actor, 'member.phone')) throw conflict('GRANT_NOT_NEEDED', '你的岗位可以直接改会员手机号，不需要授权');
+      scope = parse(MemberPhoneScopeInput, rawScope);
     } else {
       const s = parse(OverLimitScopeInput, rawScope);
       if (!can(req.actor, KIND_PERMISSION[s.kind])) throw forbidden();
@@ -295,4 +319,35 @@ export async function consumeTicketGrant(
   }
   await tx`UPDATE auth_grants SET used_at = now(), used_ref = ${opts.usedRef} WHERE id = ${opts.grantId}`;
   return { approverId: g.approvedBy, approverName: g.approverName, reason: s.reason };
+}
+
+/**
+ * 在退储值的事务里核销一次授权（会员一行锁住之后）：授权必须覆盖这位会员、这个本金（金额改了要重新授权）。
+ * 店主、店总自己办时，授权人可以就是本人（再输一次自己的密码确认）
+ */
+export async function consumeMemberRefundGrant(
+  tx: Tx,
+  opts: { grantId: string; actor: Actor; scope: MemberRefundScope; usedRef: string },
+): Promise<{ approverId: number; approverName: string }> {
+  const g = await lockGrant(tx, opts.grantId, 'member_refund', opts.actor);
+  const s = g.scope as MemberRefundScope;
+  if (s.memberId !== opts.scope.memberId || s.amount !== opts.scope.amount) {
+    throw unprocessable('GRANT_SCOPE', `授权的是退储值 ${formatYuan(s.amount)}，与这次退的 ${formatYuan(opts.scope.amount)}（或会员）不一致，请按当前内容重新授权`);
+  }
+  await tx`UPDATE auth_grants SET used_at = now(), used_ref = ${opts.usedRef} WHERE id = ${opts.grantId}`;
+  return { approverId: g.approvedBy, approverName: g.approverName };
+}
+
+/** 在改会员手机号的事务里核销一次授权（会员一行锁住之后）：授权必须覆盖这位会员、这个新号码 */
+export async function consumeMemberPhoneGrant(
+  tx: Tx,
+  opts: { grantId: string; actor: Actor; scope: MemberPhoneScope; usedRef: string },
+): Promise<{ approverId: number; approverName: string }> {
+  const g = await lockGrant(tx, opts.grantId, 'member_phone', opts.actor);
+  const s = g.scope as MemberPhoneScope;
+  if (s.memberId !== opts.scope.memberId || s.phone !== opts.scope.phone) {
+    throw unprocessable('GRANT_SCOPE', `授权的是改成 ${s.phone}，与这次要改的号码（或会员）不一致，请按当前内容重新授权`);
+  }
+  await tx`UPDATE auth_grants SET used_at = now(), used_ref = ${opts.usedRef} WHERE id = ${opts.grantId}`;
+  return { approverId: g.approvedBy, approverName: g.approverName };
 }

@@ -91,7 +91,7 @@ export async function getMemberDetail(db: Db, id: number, today: string): Promis
   // 全部赠金批次（可用、已用完、已过期）：消费扣用与撤销恢复相抵为「已用」，到期作废为「已过期」
   const lotRows = await db<(Omit<BonusLotRow, 'status' | 'used' | 'expired'> & { used: string; expired: string })[]>`
     SELECT l.id, l.source, r.doc_no, l.amount, l.remaining, l.expires_at, l.created_at,
-           -coalesce(sum(mv.amount) FILTER (WHERE mv.kind IN ('consume', 'restore')), 0) AS used,
+           -coalesce(sum(mv.amount) FILTER (WHERE mv.kind IN ('consume', 'restore', 'refund', 'merge_out')), 0) AS used,
            -coalesce(sum(mv.amount) FILTER (WHERE mv.kind = 'expire'), 0) AS expired
     FROM bonus_lots l LEFT JOIN recharges r ON r.id = l.recharge_id LEFT JOIN bonus_lot_moves mv ON mv.lot_id = l.id
     WHERE l.member_id = ${id}
@@ -112,6 +112,9 @@ export async function getMemberDetail(db: Db, id: number, today: string): Promis
     SELECT i.import_no, b.doc_no, i.source, b.legacy_no, b.principal, b.bonus, b.legacy_recharged, i.created_at AS imported_at
     FROM opening_balances b JOIN opening_imports i ON i.id = b.import_id
     WHERE b.member_id = ${id} AND b.status = 'active'`;
+  // 合并（v0.7.26）：被并到了谁
+  const [mergedInto] = await db<{ id: number; memberNo: string; name: string }[]>`
+    SELECT t.id, t.member_no, t.name FROM members m JOIN members t ON t.id = m.merged_into_id WHERE m.id = ${id}`;
   return {
     ...member,
     createdByName: extra?.createdByName ?? null,
@@ -120,6 +123,7 @@ export async function getMemberDetail(db: Db, id: number, today: string): Promis
     stats: extra!.stats,
     bonusLots: lots.map((l) => ({ remaining: l.remaining, expiresAt: l.expiresAt ? new Date(l.expiresAt).toISOString() : null })),
     opening: opening ?? null,
+    mergedInto: mergedInto ? { ...mergedInto, id: Number(mergedInto.id) } : null,
   };
 }
 

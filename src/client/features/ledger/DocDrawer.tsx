@@ -86,6 +86,12 @@ export function DocDrawer({
           <Notice tone={row.entryType === 'opening' ? 'info' : 'warning'} title={row.entryType === 'opening' ? '旧系统余额期初导入' : '期初作废'}>
             {row.summary}。期初是从旧系统迁入的余额，不是收款，也不计入充值实收。
           </Notice>
+        ) : row.entryType === 'refund' || row.entryType === 'merge_out' || row.entryType === 'merge_in' ? (
+          <Notice tone={row.entryType === 'merge_in' ? 'info' : 'warning'} title={row.summary || ENTRY_TYPE_LABELS[row.entryType]}>
+            {row.entryType === 'refund'
+              ? '会员退储值：本金按原收款方式退回、赠金按比例扣回，不是营业额。退回的明细、授权人在会员详情「储值与账户」里。'
+              : '两份会员档案合并：余额与赠金批次从来源会员转到目标会员，不是收款或退款。'}
+          </Notice>
         ) : row.entryType === 'expire' ? (
           <Notice tone="info" title="赠金到期作废">
             到期未用完的赠金由系统作废，只减赠金、不动本金，不是收款或退款。{row.summary.includes('撤销') ? '这笔是撤销消费时恢复到了已到期的赠金批次，随即作废。' : ''}

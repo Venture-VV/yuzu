@@ -47,7 +47,7 @@ describe('迁移 047 · 浴票延迟的默认分钟数', () => {
   it('没动过的 QY-004 补上默认：L1·初 起 30 分钟，每一档初 30、享 60、尊 90；仍是草稿、版本 1', async () => {
     await schemaBefore047();
     await insertQy004(1);
-    expect(await migrate(sql)).toEqual(migrationsFrom('047_ticket_extension_defaults.sql'));
+    expect(await migrate(sql)).toEqual(migrationsFrom('047_membership_finish.sql'));
 
     const q = await qy004();
     expect(q).toMatchObject({ status: 'draft', version: 1, startGrade: 1, startTier: 0, quantity: 30 });

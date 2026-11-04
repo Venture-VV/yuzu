@@ -40,6 +40,9 @@ export interface PeriodKpis {
   perGuest: number;
   rechargePaid: number;
   rechargeCount: number;
+  /** 储值退回（v0.7.26）：退的本金与张数；净充值 = 充值实收 − 储值退回 */
+  memberRefund: number;
+  memberRefundCount: number;
   /** 储值消费（会员工作台与结账用储值，撤销的不计） */
   walletConsumed: number;
   newMembers: number;
@@ -81,7 +84,7 @@ export interface MembersReport {
   totals: { members: number; withBalance: number; principal: number; bonus: number; frozen: number };
   /** 有余额的会员按最近一次余额变动分：30 天内、31–90 天、90 天以上没来（沉睡） */
   activity: { active30: number; active90: number; dormant: number; dormantBalance: number };
-  period: { newMembers: number; rechargePaid: number; rechargeCount: number; rechargeMembers: number; walletConsumed: number; consumeMembers: number };
+  period: { newMembers: number; rechargePaid: number; rechargeCount: number; rechargeMembers: number; memberRefund: number; memberRefundCount: number; walletConsumed: number; consumeMembers: number };
   newByChannel: { channel: string | null; label: string; count: number }[];
   allByChannel: { channel: string | null; label: string; count: number }[];
   /** 档级分布 L0–L6（会员体系 v2；19 个状态的分布见后台「会员体系」看板） */

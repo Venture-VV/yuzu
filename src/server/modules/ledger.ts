@@ -43,6 +43,9 @@ export async function listLedger(db: Db, f: LedgerFilter): Promise<LedgerRow[]> 
              WHEN 'expire' THEN '赠金到期作废' || CASE WHEN ex.reversal_id IS NOT NULL THEN '（撤销恢复时已过期）' ELSE '' END
              WHEN 'opening' THEN oi.source || ' 期初余额' || CASE WHEN ob.legacy_no <> '' THEN ' · 旧卡号 ' || ob.legacy_no ELSE '' END
              WHEN 'opening_void' THEN '作废期初：' || ob.void_reason
+             WHEN 'refund' THEN '储值退回：' || mr.reason
+             WHEN 'merge_out' THEN '合并到 ' || mt.name || '（' || mt.member_no || '）'
+             WHEN 'merge_in' THEN '合并转入：' || ms.name || '（' || ms.member_no || '）'
            END, '') AS summary
     FROM ledger_entries le
     JOIN members m ON m.id = le.member_id
@@ -54,6 +57,10 @@ export async function listLedger(db: Db, f: LedgerFilter): Promise<LedgerRow[]> 
     LEFT JOIN consumptions c ON c.id = le.consumption_id
     LEFT JOIN checkouts k ON k.id = c.checkout_id
     LEFT JOIN reversals rv ON rv.consumption_id = le.consumption_id
+    LEFT JOIN member_refunds mr ON mr.id = le.member_refund_id
+    LEFT JOIN member_merges mg ON mg.id = le.member_merge_id
+    LEFT JOIN members ms ON ms.id = mg.source_id
+    LEFT JOIN members mt ON mt.id = mg.target_id
     WHERE true
       ${f.date ? db`AND le.business_date = ${f.date}` : db``}
       ${f.memberId ? db`AND le.member_id = ${f.memberId}` : db``}
