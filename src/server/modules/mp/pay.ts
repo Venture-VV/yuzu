@@ -1,7 +1,8 @@
 // 门店 yuzu 里的微信支付（小程序线第二期 2a，docs/MP_RECHARGE.md 第 4 节）：凭据只放门店 yuzu 的 .env（MP17），网关一样都不放。
-//   WXPAY_APPID、WXPAY_MCHID、WXPAY_SERIAL_NO（商户 API 证书序列号）、WXPAY_PRIVATE_KEY_FILE（商户 API 证书私钥 apiclient_key.pem 的路径）、
-//   WXPAY_APIV3_KEY（32 个字符）、WXPAY_PUBLIC_KEY_ID（PUB_KEY_ID_ 开头）、WXPAY_PUBLIC_KEY_FILE（微信支付公钥 pub_key.pem 的路径）、
-//   WXPAY_NOTIFY_URL（网关的 https://<域名>/v1/pay/notify）。
+//   WXPAY_APPID、WXPAY_MCHID、WXPAY_SERIAL_NO（商户 API 证书序列号）、WXPAY_APIV3_KEY（32 个字符）、
+//   WXPAY_PUBLIC_KEY_ID（PUB_KEY_ID_ 开头）、WXPAY_NOTIFY_URL（网关的 https://<域名>/v1/pay/notify），
+//   以及两个证书文件：商户 API 证书私钥（apiclient_key.pem）、微信支付公钥（pub_key.pem），各给一种——
+//   文件路径 WXPAY_PRIVATE_KEY_FILE / WXPAY_PUBLIC_KEY_FILE，或文件内容的 Base64（一行，放进 .env）WXPAY_PRIVATE_KEY_BASE64 / WXPAY_PUBLIC_KEY_BASE64。
 // 一样都没配：线上充值不开（后台写「微信支付没有配好」）。配错了（只配了一部分、文件读不了、模拟开在别的环境）：线上充值也不开，
 // 启动日志与后台都写原因；门店系统照常启动（不因为线上充值的配置停掉前台）。
 // 模拟微信支付 MP_PAY_MOCK=true：只在 development、test 实例，其他环境不开，没有绕过开关；开了模拟就不能再配 WXPAY_*。
@@ -20,21 +21,17 @@ export interface PayRuntime {
   mock: MockWxPay | null;
 }
 
-const KEYS = [
-  'WXPAY_APPID',
-  'WXPAY_MCHID',
-  'WXPAY_SERIAL_NO',
-  'WXPAY_PRIVATE_KEY_FILE',
-  'WXPAY_APIV3_KEY',
-  'WXPAY_PUBLIC_KEY_ID',
-  'WXPAY_PUBLIC_KEY_FILE',
-  'WXPAY_NOTIFY_URL',
+const KEYS = ['WXPAY_APPID', 'WXPAY_MCHID', 'WXPAY_SERIAL_NO', 'WXPAY_APIV3_KEY', 'WXPAY_PUBLIC_KEY_ID', 'WXPAY_NOTIFY_URL'] as const;
+/** 两个证书文件：给路径或给内容的 Base64，二选一 */
+const PEMS = [
+  ['WXPAY_PRIVATE_KEY_FILE', 'WXPAY_PRIVATE_KEY_BASE64'],
+  ['WXPAY_PUBLIC_KEY_FILE', 'WXPAY_PUBLIC_KEY_BASE64'],
 ] as const;
 
 /** 按环境变量建门店系统的微信支付；没配返回 null，配错抛错（buildMpApp 接住：不开线上充值、日志与后台写原因） */
 export function loadPayRuntime(env: NodeJS.ProcessEnv, appEnv: AppEnv): PayRuntime | null {
   const v = (k: string) => env[k]?.trim() ?? '';
-  const present = KEYS.filter((k) => v(k));
+  const present = [...KEYS, ...PEMS.flat()].filter((k) => v(k));
   if (v('MP_PAY_MOCK') === 'true') {
     if (appEnv !== 'development' && appEnv !== 'test') throw new Error(`MP_PAY_MOCK=true 只能在 development、test 实例用（这里是 ${appEnv}）`);
     if (present.length) throw new Error('开了模拟微信支付（MP_PAY_MOCK=true）就不要再配 WXPAY_*');
@@ -42,7 +39,7 @@ export function loadPayRuntime(env: NodeJS.ProcessEnv, appEnv: AppEnv): PayRunti
     return { mode: 'mock', config: mock.config, client: mock.client, mock };
   }
   if (present.length === 0) return null;
-  const missing = KEYS.filter((k) => !v(k));
+  const missing = [...KEYS.filter((k) => !v(k)), ...PEMS.filter(([f, b]) => !v(f) && !v(b)).map(([f]) => `${f}（或 ${f.replace('_FILE', '_BASE64')}）`)];
   if (missing.length) throw new Error(`微信支付的配置不全，还缺 ${missing.join('、')}（一样都不配就是不开线上充值）`);
   if (!/^wx[0-9a-f]{16}$/.test(v('WXPAY_APPID'))) throw new Error('WXPAY_APPID 应为小程序的 AppID（wx 开头，18 个字符）');
   if (!/^[0-9]{6,12}$/.test(v('WXPAY_MCHID'))) throw new Error('WXPAY_MCHID 应为微信支付商户号（数字）');
@@ -50,24 +47,30 @@ export function loadPayRuntime(env: NodeJS.ProcessEnv, appEnv: AppEnv): PayRunti
   if (Buffer.byteLength(v('WXPAY_APIV3_KEY'), 'utf8') !== 32) throw new Error('WXPAY_APIV3_KEY 应为 32 个字符（商户平台设置的 APIv3 密钥）');
   if (!/^PUB_KEY_ID_[0-9A-Za-z]+$/.test(v('WXPAY_PUBLIC_KEY_ID'))) throw new Error('WXPAY_PUBLIC_KEY_ID 应为 PUB_KEY_ID_ 开头的微信支付公钥编号');
   if (!/^https:\/\/[^/]+\/v1\/pay\/notify$/.test(v('WXPAY_NOTIFY_URL'))) throw new Error('WXPAY_NOTIFY_URL 应为网关的 https://<域名>/v1/pay/notify');
-  const read = (key: string) => {
-    try {
-      return readFileSync(v(key), 'utf8');
-    } catch {
-      throw new Error(`${key} 指的文件读不了：${v(key)}`);
+  /** 证书文件的内容：给了路径读文件，给了 Base64 就解出来；返回内容与用的是哪个变量 */
+  const pem = ([file, b64]: readonly [string, string]): { text: string; key: string } => {
+    if (v(file)) {
+      try {
+        return { text: readFileSync(v(file), 'utf8'), key: file };
+      } catch {
+        throw new Error(`${file} 指的文件读不了：${v(file)}`);
+      }
     }
+    return { text: Buffer.from(v(b64), 'base64').toString('utf8'), key: b64 };
   };
+  const priv = pem(PEMS[0]);
+  const pub = pem(PEMS[1]);
   let merchantPrivateKey;
   let wechatPayPublicKey;
   try {
-    merchantPrivateKey = createPrivateKey(read('WXPAY_PRIVATE_KEY_FILE'));
-  } catch (error) {
-    throw error instanceof Error && error.message.includes('读不了') ? error : new Error('WXPAY_PRIVATE_KEY_FILE 不是商户 API 证书的私钥（PEM）');
+    merchantPrivateKey = createPrivateKey(priv.text);
+  } catch {
+    throw new Error(`${priv.key} 不是商户 API 证书的私钥（apiclient_key.pem）`);
   }
   try {
-    wechatPayPublicKey = createPublicKey(read('WXPAY_PUBLIC_KEY_FILE'));
-  } catch (error) {
-    throw error instanceof Error && error.message.includes('读不了') ? error : new Error('WXPAY_PUBLIC_KEY_FILE 不是微信支付公钥（PEM）');
+    wechatPayPublicKey = createPublicKey(pub.text);
+  } catch {
+    throw new Error(`${pub.key} 不是微信支付公钥（pub_key.pem）`);
   }
   const config: WxPayConfig = {
     appId: v('WXPAY_APPID'),

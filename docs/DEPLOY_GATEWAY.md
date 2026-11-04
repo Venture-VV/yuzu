@@ -67,6 +67,39 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8081/api/mp/health    
 
 然后用店主账号登录演示库后台「微信小程序」，打开开关、填门店信息（演示库的内容不作数）。安全组不用改：公网照旧全关。Docker 发布的端口会绕过 ufw，挡公网靠的是云安全组（`DEPLOY_TEST_SERVER.md` 第 4 节）。
 
+## 2.1 线上充值（第二期 2a，`MP_RECHARGE.md`）：演示库用模拟微信支付
+
+**微信支付的凭据只放门店 yuzu（这台机器的 `.env`），网关上一样都不放**（MP17）：网关只把到账通知原样转进来，验签、解密、入账都在 yuzu。凭据不进 GitHub、不发给云端会话。
+
+演示库先用**模拟微信支付**（不走真钱；只在 `APP_ENV=development` 认，演练、正式的实例不开，没有绕过开关）。在 `~/yuzu-demo/.env` 末尾加一行，然后 `docker compose up -d`（或照常 `update.sh` 到含这个功能的版本）：
+
+```bash
+MP_PAY_MOCK=true
+```
+
+核对：
+
+```bash
+docker compose logs app | grep 线上充值    # 「线上充值用模拟微信支付（只在 development、test）」
+```
+
+再用店主账号登录演示库后台「微信小程序 → 线上充值」：看到「模拟微信支付」，打开开关、勾几个套餐。小程序（连测试网关的开发版、体验版）里「我的 → 充值」点「模拟支付」就算付了。
+
+**以后接真的商户号**（店主办好商户号、拿到凭据以后；先在演示库用 0.01 元试，`MP_RECHARGE.md` 第 6 节）：去掉 `MP_PAY_MOCK`，在这台的 `.env` 里填下面这些。两个证书文件给内容的 Base64（一行），不用挂文件：
+
+```bash
+WXPAY_APPID=<小程序的 AppID>
+WXPAY_MCHID=<商户号>
+WXPAY_SERIAL_NO=<商户 API 证书的序列号>
+WXPAY_APIV3_KEY=<商户平台设置的 APIv3 密钥，32 个字符>
+WXPAY_PUBLIC_KEY_ID=<微信支付公钥的编号，PUB_KEY_ID_ 开头>
+WXPAY_NOTIFY_URL=https://api-test.<域名>/v1/pay/notify
+WXPAY_PRIVATE_KEY_BASE64=<base64 < apiclient_key.pem | tr -d '\n' 的结果>
+WXPAY_PUBLIC_KEY_BASE64=<base64 < pub_key.pem | tr -d '\n' 的结果>
+```
+
+一样都不配就不开线上充值；配了一部分、证书读不出来，线上充值也不开，门店系统照常启动，日志与后台「线上充值」写原因。配好了日志里是「线上充值的微信支付已配好（商户号 …）」。网关这边不用加配置，更新到含 `/v1/pay/notify` 的版本就行（Caddy 原样转给网关）。
+
 ## 3. Tailscale：网关只连得到 8081
 
 网关服务器安装 Tailscale、用店主的账号登录（同 `DEPLOY_TEST_SERVER.md` 第 4 节）：
@@ -191,5 +224,6 @@ src/gateway/deploy/upload-miniprogram.sh              # 上传为「ci 机器人
 - 网关服务器只放网关：不放 yuzu 的后端、数据库与备份，不跑 seed 等任何命令；网关不存会员、余额、券、订单。
 - 测试网关只连演示库，不连门店试用库、演练库、正式服；正式网关不开模拟微信（正式、演练的 yuzu 也会拒绝模拟绑定）。
 - 密钥（`MP_GATEWAY_KEY`、`MP_SESSION_SECRET`、`WX_APPSECRET`、代码上传密钥）只放服务器上的 `.env`、`gateway-*.env` 与 `secrets` 目录，权限 600，不进 GitHub，不发给云端会话。
+- 微信支付的凭据（`WXPAY_*`：商户私钥、APIv3 密钥、微信支付公钥）只放门店 yuzu 那台的 `.env`（第 2.1 节），**网关服务器上一样都不放**；模拟微信支付（`MP_PAY_MOCK`）只开在演示库。
 - 只部署、只上传 `main` 上的版本标签或完整 SHA；网关服务器上不改代码。
 - 公网只开 443；SSH 只走 Tailscale。
