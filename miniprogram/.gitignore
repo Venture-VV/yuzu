@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 miniprogram_npm/
 # 微信开发者工具按人存的设置（AppID、本机路径等），不进仓库
 project.private.config.json
