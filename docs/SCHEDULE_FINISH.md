@@ -195,7 +195,7 @@
 | `bookingSlots(db, deps, { kind, date, itemId?, technicianId?, spaceId?, durationMinutes? })` | 只读：可约时段（与前台相同）。技师给每格空着几位、哪几位；派对房给空不空 |
 | `createBookingFromMp(tx, deps, { memberId, kind: 'technician' \| 'space', itemId?, technicianId?, spaceId?, startsAt, durationMinutes?, guests?, note?, claimKey, at? })` | 新建「待确认」的预约，返回 `{ booking, replayed }`。小程序不能约客房 |
 | `cancelBookingFromMp(tx, deps, { memberId, bookingId, claimKey, at? })` | 顾客自己取消，原因「顾客在小程序取消」 |
-| `memberBookings(db, memberId, now?)` | 只读：「我的预约」（最近 30 天起，新的在前），类型 `MpBooking`，带 `cancellable`；不带门店内部信息 |
+| `memberBookings(db, memberId, now?)` | 只读：「我的预约」（最近 30 天起，新的在前），类型 `MpBooking`，带 `cancellable` 与指定技师的工号 `techNo`（不指定为 null；小程序线 2026-11-04 要的）；不带门店内部信息 |
 | `mpBookingBan(db, memberId, now?)` | 只读：能不能约（`banned`、到哪天、爽约几次） |
 
 拒绝码：

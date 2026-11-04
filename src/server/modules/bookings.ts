@@ -103,6 +103,11 @@ type BookingRow = Omit<BookingDetail, 'startsAt' | 'endsAt' | 'holdUntil' | 'cre
 };
 
 async function readBookings(db: Db, where: { id?: number; date?: string; memberId?: number }): Promise<BookingDetail[]> {
+  return (await readBookingRows(db, where)).map(({ techNo: _techNo, ...d }) => d);
+}
+
+/** 同 readBookings，另带技师的工号（小程序「我的预约」要；前台看板、单张预约的形状不变） */
+async function readBookingRows(db: Db, where: { id?: number; date?: string; memberId?: number }): Promise<(BookingDetail & { techNo: string | null })[]> {
   const rows = await db<BookingRow[]>`
     SELECT b.id, b.booking_no, b.kind, b.source, b.status, b.member_id, m.name AS member_name, b.guest_name, b.guest_phone, b.guests,
            b.item_id, i.name AS item_name, b.technician_id, t.tech_no, t.name AS tech_name,
@@ -119,6 +124,7 @@ async function readBookings(db: Db, where: { id?: number; date?: string; memberI
     ORDER BY b.starts_at, b.id`;
   return rows.map(({ techNo, techName, ...r }) => ({
     ...r,
+    techNo,
     id: Number(r.id),
     memberId: r.memberId === null ? null : Number(r.memberId),
     itemId: r.itemId === null ? null : Number(r.itemId),
@@ -689,6 +695,8 @@ export interface MpBooking {
   status: BookingDetail['status'];
   itemName: string | null;
   technicianText: string | null;
+  /** 指定的技师的工号（不指定、不是技师预约时为 null；小程序线 2026-11-04 要的，显示用 technicianText 也行） */
+  techNo: string | null;
   spaceName: string | null;
   startsAt: string;
   endsAt: string;
@@ -712,7 +720,7 @@ export async function mpBookingBan(db: Db, memberId: number, now = new Date()): 
 /** 「我的预约」：这位会员最近 30 天起的预约（新的在前） */
 export async function memberBookings(db: Db, memberId: number, now = new Date()): Promise<MpBooking[]> {
   const rules = await loadBookingRules(db);
-  const rows = (await readBookings(db, { memberId })).filter((b) => Date.parse(b.startsAt) >= now.getTime() - 30 * 86_400_000);
+  const rows = (await readBookingRows(db, { memberId })).filter((b) => Date.parse(b.startsAt) >= now.getTime() - 30 * 86_400_000);
   return rows
     .map((b) => ({
       id: b.id,
@@ -721,6 +729,7 @@ export async function memberBookings(db: Db, memberId: number, now = new Date())
       status: b.status,
       itemName: b.itemName,
       technicianText: b.technicianText,
+      techNo: b.techNo,
       spaceName: b.spaceName,
       startsAt: b.startsAt,
       endsAt: b.endsAt,

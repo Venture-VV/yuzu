@@ -203,6 +203,21 @@ describe('小程序（3d）', () => {
     const s = (await slots({ kind: 'technician', date: tomorrow, itemId })).filter((x) => x.free > 0);
     expect((await errorOf(mp({ memberId: m, kind: 'technician', itemId, startsAt: s[0]!.startsAt, claimKey: 'ns-x' }))).code).toBe('BOOKING_BANNED');
   });
+
+  it('「我的预约」带指定技师的工号 techNo（不指定的为 null；小程序线 2026-11-04 要的）', async () => {
+    // 用三天以后的一天，不占别的用例要用的明天、后天
+    const day = new Date(Date.parse(`${tomorrow}T12:00:00Z`) + 3 * 86_400_000).toISOString().slice(0, 10);
+    const m = await member('看工号的会员');
+    const s = (await slots({ kind: 'technician', date: day, itemId })).filter((x) => x.technicianIds?.includes(tech['B2']!));
+    const named = await mp({ memberId: m, kind: 'technician', itemId, technicianId: tech['B2']!, startsAt: s[0]!.startsAt, claimKey: 'tn-1' });
+    const any = await mp({ memberId: m, kind: 'technician', itemId, technicianId: null, startsAt: s[4]!.startsAt, claimKey: 'tn-2' });
+    const mine = await memberBookings(ctx.sql, m);
+    expect(mine.find((x) => x.id === named.booking.id)).toMatchObject({ techNo: 'B2', technicianText: 'B2 号 乙' });
+    expect(mine.find((x) => x.id === any.booking.id)).toMatchObject({ techNo: null, technicianText: '不指定' });
+    // 前台看板、单张预约的形状不变（不带 techNo）
+    expect(named.booking).not.toHaveProperty('techNo');
+    expect((await board(day)).bookings.find((x) => x.id === named.booking.id)).not.toHaveProperty('techNo');
+  });
 });
 
 describe('每分钟的自动处理', () => {
