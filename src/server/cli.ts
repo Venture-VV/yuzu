@@ -726,7 +726,7 @@ async function main() {
         await prepareDb(sql, config);
         const preview = await catalogImportPreview(sql);
         console.log(`本店权益清单共 ${preview.total} 项：会新建 ${preview.create.length} 项（草稿，文档写明暂缓的为暂缓），编号已有、跳过 ${preview.skipped.length} 项`);
-        for (const e of preview.create) console.log(`  ${e.code}  ${e.name}（${e.start}）${e.status === 'paused' ? '  暂缓' : ''}`);
+        for (const e of preview.create) console.log(`  ${e.code}  ${e.name}（${e.startDefault ?? e.start}）${e.status === 'paused' ? '  暂缓' : ''}`);
         if (!args.includes('--apply')) {
           console.log('以上为预览，没有写入。确认无误后加 --apply 执行导入（门店环境须店主同意）；导入后在后台「会员权益」逐项改好、发布。');
           break;

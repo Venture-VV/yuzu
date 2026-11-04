@@ -440,13 +440,13 @@ export async function importCatalog(sql: Sql, staffId: number | null, ip?: strin
   return sql.begin(async (tx) => {
     let created = 0;
     for (const [i, e] of BENEFIT_CATALOG.entries()) {
-      const start = parseStart(e.start);
-      // 折扣类按会员文档预填的折扣（v0.7.25，M44；仍是草稿）
+      const start = parseStart(e.startDefault ?? e.start);
+      // 按默认做法预填的（仍是草稿）：折扣类的折扣（v0.7.25，M44）、浴票延迟的起点与分钟数（v0.7.26，M50）
       const rows = await tx`
         INSERT INTO benefits (code, name, category, start_grade, start_tier, period, quantity, tier_quantities, discount_target, events, content,
                               conditions, status, sort_order, created_by, updated_by)
         VALUES (${e.code}, ${e.name}, ${e.category}, ${start?.grade ?? null}, ${start?.tier ?? null}, ${e.period}, ${e.quantity},
-                ${tx.json((e.discount?.tierQuantities ?? []) as unknown as Parameters<typeof tx.json>[0])}, ${e.discount?.target ?? null}, ${e.events}::text[], ${e.content}, ${e.conditions},
+                ${tx.json((e.tierQuantities ?? []) as unknown as Parameters<typeof tx.json>[0])}, ${e.discountTarget ?? null}, ${e.events}::text[], ${e.content}, ${e.conditions},
                 ${e.status}, ${(i + 1) * 10}, ${staffId}, ${staffId})
         ON CONFLICT (code) DO NOTHING RETURNING id`;
       created += rows.length;
