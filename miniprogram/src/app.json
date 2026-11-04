@@ -12,6 +12,8 @@
     "pages/coupon-center/index",
     "pages/invite/index",
     "pages/invite-claim/index",
+    "pages/food/index",
+    "pages/bill/index",
     "pages/unbind/index"
   ],
   "window": {

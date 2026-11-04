@@ -159,6 +159,8 @@ export interface MpMe {
         couponCenterOpen: boolean;
         /** 邀请好友开着（第三期 3b）：「我的」页显示「邀请好友」 */
         inviteOpen: boolean;
+        /** 扫码点餐开着（第三期 3c：后台开了、餐饮功能开着）：「我的」页显示「点餐」「我的账单」 */
+        foodOpen: boolean;
       })
     | null;
 }
@@ -293,6 +295,8 @@ export interface MpAdminData {
   reminderRules: MpReminderRules;
   /** 邀请好友的设置（第三期 3b）：同上 */
   inviteRules: MpInviteRules;
+  /** 扫码点餐的设置（第三期 3c） */
+  foodRules: MpFoodRules;
   stores: MpStoreAdmin[];
   banners: MpBannerAdmin[];
   items: MpItemIntroAdmin[];
@@ -952,4 +956,143 @@ export interface MpInviteAdminData {
   stats: Record<MpInviteState, number>;
   /** 最近 50 份 */
   recent: MpInviteAdmin[];
+}
+
+// ── 扫码点餐（第三期 3c，docs/MP_PHASE3.md 第 3 节，MP32、MP33；接主线 v0.7.28 的 orderFoodFromMp）──
+
+/** 扫码点餐的设置（settings 的 mp_food_rules，后台「微信小程序」→「扫码点餐」，权限 mp.food）：默认关、没有可点的菜 */
+export interface MpFoodRules {
+  enabled: boolean;
+  /** 小程序可点的菜（进厨房的菜品编号）；不在这里的请服务员点 */
+  itemIds: number[];
+  version: number;
+}
+export const DEFAULT_MP_FOOD_RULES: MpFoodRules = { enabled: false, itemIds: [], version: 0 };
+export const MP_FOOD_RULES_KEY = 'mp_food_rules';
+/** 最多勾多少道菜 */
+export const MP_FOOD_MAX_ITEMS = 300;
+/** 桌码：71 + 桌台编号（6 位）+ 签名（10 位），共 18 位数字；与会员码（8、9 开头，16、19 位）、手机号（11 位）不会混 */
+export const MP_TABLE_CODE = /^71\d{16}$/;
+/** 一道菜的口味备注最多几个字（与主线的点单一样） */
+export const MP_FOOD_NOTE_MAX = 40;
+
+/** 小程序菜单上的一道菜 */
+export interface MpFoodDish {
+  id: number;
+  name: string;
+  /** 分组：出品档口的名字（热菜、凉菜、水吧……），按档口的顺序 */
+  group: string;
+  /** 单价（分） */
+  price: number;
+  /** null 不限量；0 今天没有了；其他为今天还剩几份 */
+  remaining: number | null;
+}
+
+/** 点餐页：能不能点、在店手牌、扫到的桌、菜单 */
+export interface MpFoodMenu {
+  /** 扫码点餐开着（后台开了、餐饮功能开着） */
+  open: boolean;
+  /** 现在能不能下单；不能时 notice 写原因（没开放、没绑定、没有在店手牌、会员卡停用……） */
+  canOrder: boolean;
+  notice: string | null;
+  /** 这个微信此刻的绑定状态版本号：下单时带上 */
+  bindVersion: number;
+  /** 这个微信绑定了会员（没绑定的显示「去绑定会员」） */
+  bound: boolean;
+  /** 在店手牌的牌号（没有为空） */
+  tagCode: string | null;
+  /** 扫到的桌（桌码对、桌台启用中）；扫了但不对时 tableNotice 写原因 */
+  table: { code: string; name: string } | null;
+  tableNotice: string | null;
+  dishes: MpFoodDish[];
+  /** 一单的上限：份数、金额（分），MP33 */
+  limits: { maxQuantity: number; maxTotal: number };
+}
+
+export interface MpFoodLine {
+  name: string;
+  quantity: number;
+  /** 这一行的金额（分） */
+  amount: number;
+  note: string;
+}
+
+/** 下单的结果 */
+export interface MpFoodOrdered {
+  /** 厨房出品单号 */
+  orderNo: string | null;
+  /** 挂在哪个手牌的账单上 */
+  tagCode: string;
+  /** 送到哪张桌（没扫桌码为空：服务员按手牌送） */
+  deliverTo: string;
+  total: number;
+  lines: MpFoodLine[];
+  createdAt: string;
+  /** 同一个编号重提：返回第一次那一单 */
+  replayed: boolean;
+}
+
+/** 下单结果不确定时确认作废：已经下了返回那一单；还没有就登记作废（原请求之后到达也不会生效），可以重新下 */
+export type MpFoodAbandonResult = { status: 'ordered'; ordered: MpFoodOrdered } | { status: 'abandoned' };
+
+/** 「我的账单」：在店手牌的账单（结账照旧在前台） */
+export interface MpFoodBill {
+  /** 有在店手牌 */
+  open: boolean;
+  /** 没绑定、没有在店手牌时的说明 */
+  notice: string | null;
+  tagCode: string | null;
+  checkedInAt: string | null;
+  /** 还有效的明细（退了的不列）；status：进厨房的菜现在的出品状态（queued 待做、cooking 制作中、done 已出餐、served 已上菜） */
+  lines: { name: string; quantity: number; amount: number; postedAt: string; status: string | null }[];
+  /** 明细合计（分）：会员折扣、券在前台结账时算，以前台结账为准 */
+  total: number;
+}
+
+// ── 后台：扫码点餐（权限 mp.food）──
+
+export interface MpFoodAdminDish {
+  id: number;
+  name: string;
+  group: string;
+  price: number;
+  remaining: number | null;
+  /** 小程序可点 */
+  open: boolean;
+}
+
+export interface MpFoodAdminTable {
+  id: number;
+  name: string;
+  area: string;
+  /** 桌码（门店系统没配签名密钥 MP_CODE_SECRET 时为空） */
+  code: string | null;
+}
+
+export interface MpFoodAdminOrder {
+  id: number;
+  createdAt: string;
+  memberId: number;
+  memberName: string;
+  tagCode: string;
+  orderNo: string | null;
+  deliverTo: string;
+  total: number;
+  lines: MpFoodLine[];
+}
+
+export interface MpFoodAdminData {
+  rules: MpFoodRules;
+  /** 餐饮功能开着（后台「餐饮」里开；关着时小程序点不了） */
+  diningEnabled: boolean;
+  /** 门店系统配了签名密钥（MP_CODE_SECRET）才能生成桌码 */
+  tableCodeReady: boolean;
+  /** 进厨房的菜（餐饮里挂了档口的） */
+  dishes: MpFoodAdminDish[];
+  /** 启用的桌台与桌码 */
+  tables: MpFoodAdminTable[];
+  /** 今天（营业日）小程序下了几单、合计（分） */
+  today: { orders: number; total: number };
+  /** 最近 50 单 */
+  recent: MpFoodAdminOrder[];
 }

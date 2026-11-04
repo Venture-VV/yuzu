@@ -32,6 +32,8 @@ export interface CardView {
   couponCenter: boolean;
   /** 邀请好友开着（第三期 3b） */
   invite: boolean;
+  /** 扫码点餐开着（第三期 3c）：「我的」显示「点餐」「我的账单」 */
+  food: boolean;
 }
 
 const pct = (part: number, whole: number) => (whole > 0 ? Math.max(0, Math.min(100, Math.floor((part * 100) / whole))) : 0);
@@ -87,5 +89,6 @@ export function cardView(m: MeMember): CardView {
     merged: m.merged === true,
     couponCenter: m.couponCenterOpen === true && m.merged !== true,
     invite: m.inviteOpen === true && m.merged !== true,
+    food: m.foodOpen === true && m.merged !== true,
   };
 }

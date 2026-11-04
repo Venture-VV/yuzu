@@ -9,11 +9,12 @@
 //   · 线上领券（第二期 2c，docs/MP_COUPONS.md）：/v1/coupon-center、/v1/coupon-claims… 带会话里的 openid 转给 yuzu（发券在 yuzu）。
 //   · 到期提醒（第三期 3a）：/v1/reminders 带会话转发；每隔一会儿向门店取待发的订阅消息、发、回报（src/gateway/reminders.ts）。
 //   · 邀请好友（第三期 3b）：/v1/invites…；好友领取先用手机号快速验证的 code 换手机号，再转给 yuzu（与绑定一样）。
+//   · 扫码点餐（第三期 3c）：/v1/food…；桌码的签名在 yuzu 核对（密钥不在网关），下单挂在顾客自己的手牌账单上。
 // 网关不存会员、余额、券、订单；yuzu 返回的错误文字面向顾客，原样转给小程序。
 
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { MP_RECHARGE_ORDER_NO } from '@shared/mp';
+import { MP_RECHARGE_ORDER_NO, MP_TABLE_CODE } from '@shared/mp';
 import type { GatewayConfig } from './config';
 import { ShowCache } from './cache';
 import { RateLimiter } from './ratelimit';
@@ -86,6 +87,25 @@ const InviteClaim = z.object({
   bindVersion: z.number('请刷新后再领取').int().min(0),
 });
 const INVITE_CODE = /^[2-9A-HJ-NP-Z]{10}$/;
+/** 扫码点餐（第三期 3c）：扫到的桌码（签名在门店系统核对）；下单（门店系统核对可点的菜、价格、绑定版本号） */
+const FoodQuery = z.object({ table: z.string().regex(MP_TABLE_CODE, '桌码不对，请重新扫桌上的码').optional() });
+const FoodOrder = z.object({
+  clientKey: z.uuid('操作编号不正确'),
+  items: z
+    .array(
+      z.object({
+        itemId: z.number('菜品不对').int('菜品不对').positive('菜品不对'),
+        quantity: z.number('份数不对').int('份数不对').min(1, '份数至少为 1').max(20, '一单最多 20 份'),
+        note: z.string().max(40, '口味备注最多 40 字').optional(),
+      }),
+      '请选择菜品',
+    )
+    .min(1, '请至少选一道菜')
+    .max(20, '一单最多 20 份'),
+  table: z.string().regex(MP_TABLE_CODE, '桌码不对，请重新扫桌上的码').optional(),
+  expectedTotal: z.number('请刷新后再下单').int().nonnegative(),
+  bindVersion: z.number('请刷新后再下单').int().min(0),
+});
 /** 微信支付的到账通知：报文主体原样转（门店系统要用原文验签），最多 8 KB */
 const NOTIFY_MAX_BYTES = 8 * 1024;
 
@@ -119,6 +139,8 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
   const reminderLimit = new RateLimiter(20);
   // 邀请好友：发起、收回每个微信每分钟 20 次；领取要验证手机号，与绑定一样每分钟 10 次
   const inviteLimit = new RateLimiter(20);
+  // 扫码点餐：下单、确认作废每个微信每分钟 20 次
+  const foodLimit = new RateLimiter(20);
 
   app.addHook('onRequest', async (req) => {
     if (!perIp.take(`ip:${req.ip}`)) throw TOO_MANY();
@@ -360,6 +382,24 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
     }
     return member(reply, 'POST', `/api/mp/invites/${code}/claim`, openid, { clientKey, phone, ...(name ? { name } : {}), bindVersion, mock: wechat.mock });
   });
+
+  // 扫码点餐（第三期 3c）：点餐页（扫到的桌码带上）、下单、结果不确定时确认作废、我的账单
+  app.get('/v1/food/menu', async (req, reply) => {
+    const openid = openidOf(req);
+    const { table } = parse(FoodQuery, req.query);
+    return member(reply, 'GET', `/api/mp/food/menu${table ? `?table=${table}` : ''}`, openid);
+  });
+  app.post('/v1/food/orders', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!foodLimit.take(`food:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/food/orders', openid, parse(FoodOrder, req.body));
+  });
+  app.post('/v1/food/orders/abandon', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!foodLimit.take(`food:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/food/orders/abandon', openid, parse(AbandonInput, req.body));
+  });
+  app.get('/v1/food/bill', async (req, reply) => member(reply, 'GET', '/api/mp/food/bill', openidOf(req)));
 
   // 到期提醒（第三期 3a）：能设哪几种、已经设了哪些；设一条（顾客在微信的弹窗里同意以后）
   app.get('/v1/reminders', async (req, reply) => member(reply, 'GET', '/api/mp/reminders', openidOf(req)));

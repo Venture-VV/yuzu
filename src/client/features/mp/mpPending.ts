@@ -28,7 +28,7 @@ import { uuid } from '../../lib/utils';
 //     这时一律不发新的请求、不改写记录（原来的记录原样留着），页面提示恢复后再读一次，读得出来才继续。
 // 作废用小程序线自己的登记（迁移 044），不进共用的 op_fences，所以不用 ERP 的面板。
 
-export type MpUpdateType = 'rules_update' | 'store_update' | 'banner_update' | 'intro_update' | 'recharge_rules_update' | 'coupon_rules_update' | 'reminder_rules_update' | 'invite_rules_update';
+export type MpUpdateType = 'rules_update' | 'store_update' | 'banner_update' | 'intro_update' | 'recharge_rules_update' | 'coupon_rules_update' | 'reminder_rules_update' | 'invite_rules_update' | 'food_rules_update';
 export type MpOpType = 'banner_create' | 'unbind' | 'recharge_resolve' | 'refund_retry' | 'refund_handle' | MpUpdateType;
 
 export interface MpPendingOp {
@@ -294,6 +294,7 @@ const CONTENT_FIELDS: Record<MpUpdateType, string[]> = {
   coupon_rules_update: ['enabled', 'offers'],
   reminder_rules_update: ['enabled', 'coupon', 'membership', 'bonus'],
   invite_rules_update: ['enabled'],
+  food_rules_update: ['enabled', 'itemIds'],
 };
 
 const isUpdate = (op: MpPendingOp): op is MpPendingOp & { type: MpUpdateType } => op.type in CONTENT_FIELDS;
@@ -311,6 +312,8 @@ function currentOf(op: MpPendingOp, data: MpAdminData): { version: number; conte
             ? { ...data.reminderRules }
             : op.type === 'invite_rules_update'
               ? { ...data.inviteRules }
+              : op.type === 'food_rules_update'
+                ? { ...data.foodRules }
           : op.type === 'store_update'
           ? data.stores.find((s) => s.code === op.target)
           : op.type === 'banner_update'

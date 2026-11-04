@@ -16,6 +16,7 @@ const member = (grade: Partial<MpGrade>, over: Partial<MeMember> = {}): MeMember
   merged: false,
   couponCenterOpen: false,
   inviteOpen: false,
+  foodOpen: false,
   grade: {
     label: 'L3 观澜 · 享',
     grade: 3,

@@ -19,6 +19,7 @@ import { createUpstream, UpstreamDown, type Upstream } from '../src/gateway/upst
 import { sendDueReminders } from '../src/gateway/reminders';
 import { createMockWechat, createWechat, WechatError } from '../src/gateway/wechat';
 import { buildMpApp } from '../src/server/modules/mp/app';
+import { makeTableCode } from '../src/server/modules/mp/food';
 import { mpToday } from '../src/server/modules/mp/public';
 import { planReminders } from '../src/server/modules/mp/reminders';
 import type { PayRuntime } from '../src/server/modules/mp/pay';
@@ -407,6 +408,47 @@ describe('邀请好友（第三期 3b）', () => {
     const ab = await authed(gw, t2, 'POST', '/v1/invites/claim/abandon', { clientKey: randomUUID() });
     expect(ab.json()).toEqual({ status: 'abandoned' });
     expect((await authed(gw, null, 'GET', '/v1/invites')).statusCode).toBe(401);
+  });
+});
+
+describe('扫码点餐（第三期 3c）', () => {
+  it('点餐页、下单、确认作废、我的账单：网关带会话里的微信转给 yuzu，桌码原样带上、在 yuzu 核对签名；格式不对网关先拒', async () => {
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/rules', { enabled: true })).status).toBe(200);
+    const ri = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '网关柠檬茶', category: '水吧', price: 1500 });
+    expect(ri.status, JSON.stringify(ri.body)).toBe(200);
+    const itemId = ri.body.items.find((i: { name: string }) => i.name === '网关柠檬茶').id as number;
+    const st = await api(ctx.app, ctx.owner, 'POST', '/api/admin/dining/stations', { name: '网关水吧' });
+    const stationId = st.body.stations.find((s: { name: string }) => s.name === '网关水吧').id as number;
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/items', { items: [{ id: itemId, stationId }] })).status).toBe(200);
+    const tb = await api(ctx.app, ctx.owner, 'POST', '/api/admin/dining/tables', { name: 'G1', area: '餐厅', seats: 2 });
+    const tableId = tb.body.tables.find((t: { name: string }) => t.name === 'G1').id as number;
+    const rules = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/mp/food')).body.rules as { version: number };
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/mp/food/rules', { enabled: true, itemIds: [itemId], version: rules.version })).status).toBe(200);
+    const m = await createMember(ctx, '演示·gw-food', '13700007001');
+    const t = await login(gw, 'gw-food');
+    expect((await authed(gw, t, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700007001', clientKey: randomUUID(), bindVersion: 0 })).statusCode).toBe(200);
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/frontdesk/tags/batch', { prefix: 'GF', from: 1, to: 2, width: 2, zone: 'male' })).status).toBe(200);
+    const ci = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: 'GF01', zone: 'male', memberId: m.id }] });
+    expect(ci.status, JSON.stringify(ci.body)).toBe(201);
+    const table = makeTableCode(CODE_SECRET, tableId)!;
+    const menu = await authed(gw, t, 'GET', `/v1/food/menu?table=${table}`);
+    expect(menu.statusCode, menu.body).toBe(200);
+    expect(menu.json()).toMatchObject({ open: true, canOrder: true, tagCode: 'GF01', table: { name: 'G1' } });
+    expect(menu.json().dishes.map((d: { name: string }) => d.name)).toContain('网关柠檬茶');
+    // 不是桌码：网关先拒
+    expect((await authed(gw, t, 'GET', '/v1/food/menu?table=hello')).statusCode).toBe(400);
+    const clientKey = randomUUID();
+    const body = { clientKey, items: [{ itemId, quantity: 2, note: '少冰' }], table, expectedTotal: 3000, bindVersion: menu.json().bindVersion };
+    const o = await authed(gw, t, 'POST', '/v1/food/orders', body);
+    expect(o.statusCode, o.body).toBe(201);
+    expect(o.json()).toMatchObject({ tagCode: 'GF01', deliverTo: 'G1', total: 3000, lines: [{ name: '网关柠檬茶', quantity: 2, amount: 3000, note: '少冰' }] });
+    expect((await authed(gw, t, 'POST', '/v1/food/orders', body)).statusCode).toBe(200);
+    expect((await authed(gw, t, 'POST', '/v1/food/orders', { ...body, items: [] })).statusCode).toBe(400);
+    const ab = await authed(gw, t, 'POST', '/v1/food/orders/abandon', { clientKey });
+    expect(ab.json()).toMatchObject({ status: 'ordered', ordered: { total: 3000 } });
+    const bill = await authed(gw, t, 'GET', '/v1/food/bill');
+    expect(bill.json()).toMatchObject({ open: true, tagCode: 'GF01', total: 3000 });
+    expect((await authed(gw, null, 'GET', '/v1/food/bill')).statusCode).toBe(401);
   });
 });
 

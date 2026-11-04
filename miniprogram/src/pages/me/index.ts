@@ -220,6 +220,14 @@ Page({
     wx.navigateTo({ url: '/pages/invite/index' });
   },
 
+  onFood() {
+    wx.navigateTo({ url: '/pages/food/index' });
+  },
+
+  onBill() {
+    wx.navigateTo({ url: '/pages/bill/index' });
+  },
+
   onCouponCenter() {
     wx.navigateTo({ url: '/pages/coupon-center/index' });
   },

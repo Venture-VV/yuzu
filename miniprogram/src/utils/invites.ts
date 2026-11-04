@@ -11,6 +11,7 @@
 
 import type { MpInviteAbandonResult, MpInviteClaimed, MpInviteCreated, MpInviteItem, MpInviteState } from '../../../src/shared/mp';
 import { isApiError, member, messageOf } from './api';
+import { clearStored, readStored, saveStored, uncertain } from './pending-store';
 
 // ── 显示 ──
 
@@ -50,39 +51,6 @@ export function inviteItemView(i: MpInviteItem): InviteItemView {
 /** 领到了的提示：「L1 云涧 · 初，体验到 11月11日」 */
 export function claimedText(c: MpInviteClaimed): string {
   return c.trial.label + '，体验到 ' + shortDate(c.trial.endsOn);
-}
-
-/** 结果不确定：连不上网关、超时、网关或门店出错（5xx）、门店连不上 */
-export const uncertain = (e: unknown) => !isApiError(e) || e.status === 0 || e.status >= 500 || e.code === 'STORE_OFFLINE';
-
-function readStored(key: string): { state: 'none' } | { state: 'ok'; value: Record<string, unknown> } | { state: 'unreadable' } {
-  let raw: unknown;
-  try {
-    raw = wx.getStorageSync(key);
-  } catch {
-    return { state: 'unreadable' };
-  }
-  if (raw === '' || raw === undefined || raw === null) return { state: 'none' };
-  if (typeof raw !== 'object') return { state: 'unreadable' };
-  return { state: 'ok', value: raw as Record<string, unknown> };
-}
-
-function saveStored(key: string, value: Record<string, unknown> & { clientKey: string }): boolean {
-  try {
-    wx.setStorageSync(key, value);
-    const back = wx.getStorageSync(key) as { clientKey?: string } | '';
-    return !!back && back.clientKey === value.clientKey;
-  } catch {
-    return false;
-  }
-}
-
-function clearStored(key: string): void {
-  try {
-    wx.removeStorageSync(key);
-  } catch {
-    // 删不掉：下次照样按门店系统的回答处理
-  }
 }
 
 // ── 发邀请码 ──

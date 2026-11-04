@@ -119,6 +119,8 @@
       <view class="mi" hover-class="tap" bindtap="onBenefits"><text>本月可享</text><text class="mv">{{card.code}} 能享的权益</text></view>
       <view class="mi" hover-class="tap" bindtap="onCoupons"><text>我的券</text><text class="mv">{{card.coupons}} 张可用</text></view>
       <view wx:if="{{card.couponCenter && !card.frozen}}" class="mi" hover-class="tap" bindtap="onCouponCenter"><text>领券中心</text><text class="mv">领门店放出的券</text></view>
+      <view wx:if="{{card.food && !card.frozen}}" class="mi" hover-class="tap" bindtap="onFood"><text>点餐</text><text class="mv">在店里扫桌码点菜</text></view>
+      <view wx:if="{{card.food}}" class="mi" hover-class="tap" bindtap="onBill"><text>我的账单</text><text class="mv">在店手牌上点了什么</text></view>
       <view wx:if="{{card.invite && !card.frozen}}" class="mi" hover-class="tap" bindtap="onInvite"><text>邀请好友</text><text class="mv">请好友来体验</text></view>
       <view class="mi" hover-class="tap" bindtap="onUnbind"><text>解绑与换号</text><text class="mv"></text></view>
     </view>

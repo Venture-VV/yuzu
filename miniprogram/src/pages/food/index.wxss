@@ -1,0 +1,184 @@
+/* 扫码点餐：照品牌书与 VI（米白底、木色主色、细线、留白）；不用 flex 的 gap */
+.view.with-bar {
+  padding-bottom: calc(180rpx + env(safe-area-inset-bottom));
+}
+.lede {
+  display: block;
+  margin: 12rpx 0;
+  line-height: 1.6;
+}
+.why {
+  display: block;
+  margin-top: 12rpx;
+  font-size: 26rpx;
+  color: var(--wood);
+}
+.head {
+  margin-bottom: 44rpx;
+}
+.where {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16rpx;
+}
+.where-t {
+  flex: 1;
+  min-width: 0;
+  margin-right: 20rpx;
+}
+.scan {
+  height: 64rpx;
+  padding: 0 24rpx !important;
+  font-size: 24rpx;
+  white-space: nowrap;
+}
+.cant {
+  margin-top: 20rpx;
+  padding-top: 20rpx;
+  border-top: 1px solid var(--line);
+  color: var(--ink);
+}
+.bind {
+  margin-top: 20rpx !important;
+}
+.group {
+  margin-bottom: 40rpx;
+}
+.g-h {
+  margin-bottom: 12rpx;
+}
+.dish {
+  display: flex;
+  align-items: center;
+}
+.dish.out .d-name,
+.dish.out .d-price {
+  color: var(--muted);
+}
+.d-main {
+  flex: 1;
+  min-width: 0;
+  margin-right: 20rpx;
+}
+.d-name {
+  display: block;
+  font-size: 30rpx;
+  font-weight: 600;
+}
+.d-meta {
+  margin-top: 4rpx;
+}
+.d-price {
+  font-size: 28rpx;
+}
+.d-stock {
+  margin-left: 16rpx;
+}
+.dish.out .d-stock {
+  color: var(--danger);
+}
+.d-note {
+  display: inline-block;
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: var(--wood);
+  border-bottom: 1px solid var(--wood-4);
+}
+.stepper {
+  display: flex;
+  align-items: center;
+}
+.st-btn {
+  width: 56rpx;
+  height: 56rpx;
+  line-height: 52rpx;
+  text-align: center;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  font-size: 34rpx;
+  box-sizing: border-box;
+}
+.st-btn.add {
+  background-color: var(--wood);
+  border-color: var(--wood);
+  color: #FFFFFF;
+}
+.st-n {
+  min-width: 56rpx;
+  text-align: center;
+  font-size: 30rpx;
+}
+.foot {
+  display: block;
+  margin-top: 8rpx;
+  line-height: 1.6;
+}
+.foot-link {
+  margin-top: 28rpx;
+  text-align: center;
+  color: var(--wood);
+  font-size: 26rpx;
+}
+.done-rows {
+  margin-top: 24rpx;
+}
+.done-row {
+  display: flex;
+  align-items: flex-start;
+}
+.dr-main {
+  flex: 1;
+  min-width: 0;
+}
+.dr-note {
+  display: block;
+}
+.dr-qty {
+  width: 72rpx;
+  text-align: right;
+}
+.dr-amt {
+  width: 170rpx;
+  text-align: right;
+}
+.done-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 20rpx 0 32rpx;
+  font-size: 32rpx;
+  font-weight: 700;
+}
+.pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-gap: 20rpx;
+}
+
+/* 底部的已选与下单 */
+.bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding: 20rpx 36rpx calc(20rpx + env(safe-area-inset-bottom));
+  background-color: var(--surface);
+  border-top: 1px solid var(--line);
+}
+.bar-sum {
+  flex: 1;
+  min-width: 0;
+}
+.bar-sum .sub {
+  display: block;
+}
+.bar-total {
+  font-size: 36rpx;
+  font-weight: 700;
+}
+.bar-go {
+  width: 260rpx !important;
+}

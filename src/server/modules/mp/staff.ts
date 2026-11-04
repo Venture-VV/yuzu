@@ -10,6 +10,7 @@ import { idParam, parse } from '../../lib/validate';
 import { getMember } from '../members';
 import { abandonBannerCreate, createBanner, lookupBannerOp, mpAdminData, saveItemIntro, saveMpImage, saveMpRules, saveStore, updateBanner } from './admin';
 import { couponAdminData, saveCouponRules } from './coupon-center';
+import { foodAdminData, saveFoodRules } from './food';
 import { memberBindings, resolveMemberCode, unbindMember } from './member';
 import { activePay } from './pay';
 import { closeUnboundOrders } from './recharge';
@@ -40,7 +41,7 @@ export function registerMpStaffRoutes(app: FastifyInstance, deps: Deps) {
 
   // 后台「小程序」：维护内容要 mp.content；只管解绑的（值班经理）也能打开看
   const content = guard('mp.content');
-  app.get('/api/admin/mp', { preHandler: guardAny('mp.content', 'mp.unbind', 'mp.recharge', 'mp.coupon', 'mp.reminder', 'mp.invite') }, async () => mpAdminData(sql));
+  app.get('/api/admin/mp', { preHandler: guardAny('mp.content', 'mp.unbind', 'mp.recharge', 'mp.coupon', 'mp.reminder', 'mp.invite', 'mp.food') }, async () => mpAdminData(sql));
   app.put('/api/admin/mp/rules', { preHandler: content }, async (req) => saveMpRules(deps, req.body, ctxOf(req)));
   app.put('/api/admin/mp/stores/:code', { preHandler: content }, async (req) => saveStore(deps, req.params, req.body, ctxOf(req)));
   app.post('/api/admin/mp/images', { preHandler: content, bodyLimit: 1_600_000 }, async (req, reply) => {
@@ -90,4 +91,8 @@ export function registerMpStaffRoutes(app: FastifyInstance, deps: Deps) {
   const invite = guard('mp.invite');
   app.get('/api/admin/mp/invites', { preHandler: invite }, async () => inviteAdminData(deps));
   app.put('/api/admin/mp/invites/rules', { preHandler: invite }, async (req) => saveInviteRules(deps, req.body, ctxOf(req)));
+  // 扫码点餐（第三期 3c）：开关、小程序可点的菜、桌码，最近的点单（mp.food：店主、店总）
+  const food = guard('mp.food');
+  app.get('/api/admin/mp/food', { preHandler: food }, async () => foodAdminData(deps));
+  app.put('/api/admin/mp/food/rules', { preHandler: food }, async (req) => saveFoodRules(deps, req.body, ctxOf(req)));
 }
