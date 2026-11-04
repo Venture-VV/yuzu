@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { formatYuan } from '@shared/money';
 import type { MpRefundOrderAdmin, MpRefundStatus } from '@shared/mp';
+import { UncertainError } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { formatDateTime, uuid } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
@@ -28,6 +29,9 @@ const STATUS: Record<MpRefundStatus, { label: string; tone: 'neutral' | 'pine' |
 const needsOwner = (r: MpRefundOrderAdmin) => r.status === 'failed' || r.status === 'closed' || r.status === 'abnormal' || (r.status === 'new' && r.failCode !== null);
 const canRetry = (r: MpRefundOrderAdmin) => r.status === 'new' || ((r.status === 'failed' || r.status === 'closed') && r.outTradeNo !== null);
 const canHandle = (r: MpRefundOrderAdmin) => r.status === 'failed' || r.status === 'closed' || r.status === 'abnormal';
+
+/** 第一次重试、记另行处理就没收到结果：不知道办了没有，记录已经在本机（这一笔先不能再点），在上方查回或按原内容重新提交 */
+const UNCERTAIN_BODY = '没收到结果，不知道办了没有。已记在本机：请在这一张卡片上方查回或按原内容重新提交（带同一个退款单号，不会做两次），不要另点一次。';
 
 export function RefundsCard({ refunds, refundAuto }: { refunds: MpRefundOrderAdmin[]; refundAuto: boolean }) {
   const retries = useMpPending('refund_retry');
@@ -111,7 +115,9 @@ function RefundRow({ r, busy, onHandle }: { r: MpRefundOrderAdmin; busy: boolean
       });
       toast({ tone: after.status === 'success' || after.status === 'processing' ? 'success' : 'info', title: `重试了：${STATUS[after.status].label}`, body: after.failMessage ?? undefined });
     } catch (error) {
-      toast({ tone: 'error', title: '没有重试', body: saveError(error) });
+      // 没收到结果不是「没有重试」：结果待确认（独立的浏览器用例发现的写法不一致，其他几页都写「结果待确认」）
+      if (error instanceof UncertainError) toast({ tone: 'info', title: '重试的结果待确认', body: UNCERTAIN_BODY });
+      else toast({ tone: 'error', title: '没有重试', body: saveError(error) });
     } finally {
       setRetrying(false);
       void qc.invalidateQueries({ queryKey: ['mp', 'recharge'] });
@@ -178,7 +184,13 @@ function HandleDialog({ r, onClose }: { r: MpRefundOrderAdmin; onClose: () => vo
         toast({ tone: 'error', title: '没有记上', body: `这一笔现在是「${STATUS[after.status].label}」，请刷新后再看` });
       }
     } catch (error) {
-      toast({ tone: 'error', title: '没有记上', body: saveError(error) });
+      if (error instanceof UncertainError) {
+        // 记录已经在本机、这一笔的按钮也锁住了：关掉对话框，免得再点一次又记一条待确认
+        toast({ tone: 'info', title: '记另行处理的结果待确认', body: UNCERTAIN_BODY });
+        onClose();
+      } else {
+        toast({ tone: 'error', title: '没有记上', body: saveError(error) });
+      }
     } finally {
       setSaving(false);
       void qc.invalidateQueries({ queryKey: ['mp', 'recharge'] });
