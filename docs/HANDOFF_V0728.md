@@ -46,7 +46,7 @@
 
 ## 4. 已执行的验证
 
-见 PR 说明「验证」一节（本机 typecheck、build、全量 vitest、全量浏览器用例；CI 因 GitHub Actions 额度用完没有运行）。
+见 PR 说明「验证」一节（本机 typecheck、build、全量 vitest、全量浏览器用例）。CI 在门店 Mac mini 的自托管 runner（`yuzu-mini-ci-isolated`）上跑，结果以 PR 最新提交的检查为准；同一个分支推新提交会取消上一次还没跑完的 CI（`cancel-in-progress`）。只有 main 上打版本标签的 `release-tag.yml` 还在 GitHub 托管的 runner 上，受 Actions 额度影响。
 
 ## 5. 给测试 AI 的指令（可复制）
 
