@@ -6,11 +6,18 @@
 
 import { z } from 'zod';
 import { formatYuan } from '@shared/money';
-import { MP_RECHARGE_RULES_KEY, type MpRechargeAdminData, type MpRechargeFlag, type MpRechargeOrderAdmin, type MpRechargeRules } from '@shared/mp';
+import {
+  MP_RECHARGE_RULES_KEY,
+  type MpRechargeAdminData,
+  type MpRechargeFlag,
+  type MpRechargeOrderAdmin,
+  type MpRechargeRecon,
+  type MpRechargeRules,
+} from '@shared/mp';
 import { isUniqueViolation, type Db } from '../../db';
 import { writeAudit } from '../../lib/audit';
 import type { Deps, OpContext } from '../../lib/context';
-import { badRequest, conflict, notFound, unprocessable } from '../../lib/errors';
+import { AppError, badRequest, conflict, notFound, unprocessable } from '../../lib/errors';
 import { saveRuleSetting } from '../../lib/rule-settings';
 import { setTxTimeouts } from '../../lib/tx';
 import { parse } from '../../lib/validate';
@@ -18,6 +25,8 @@ import { loadSettings } from '../settings';
 import { rechargeOnline } from '../wallet-online';
 import { activePay, payProblem } from './pay';
 import { labelNow, loadRechargeRules, lockOrder, orderById, recordEvent } from './recharge';
+import { reconcileDay, recentRecons } from './recharge-recon';
+import { WxPayError } from './wxpay';
 
 const adminOrders = (db: Db, where: 'held' | 'recent' | number) => db<MpRechargeOrderAdmin[]>`
   SELECT o.id, o.order_no, o.status, o.member_id, m.member_no, m.name AS member_name, o.credited_member_id, o.plan_id, o.plan_name,
@@ -52,6 +61,7 @@ export async function rechargeAdminData(db: Db): Promise<MpRechargeAdminData> {
     held,
     recent,
     orphans,
+    recons: await recentRecons(db, 30),
   };
 }
 
@@ -188,4 +198,21 @@ function resolveTx(deps: Deps, orderId: number, memberId: number, input: z.infer
       ip: ctx.ip,
     });
   });
+}
+
+const ReconInput = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '请选择账单日') });
+
+/** 店主在后台按天「重新核对」（2b）：只追加一条核对结论，不改单子；微信「账单不存在」按 0 笔算 */
+export async function runRecon(deps: Deps, raw: unknown, ctx: OpContext): Promise<MpRechargeRecon> {
+  const { date } = parse(ReconInput, raw);
+  const pay = activePay();
+  if (!pay) throw new AppError(503, 'MP_PAY_UNAVAILABLE', '门店系统没有配好微信支付，下不了账单');
+  const today = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
+  if (date >= today) throw unprocessable('BILL_NOT_READY', '只能核对昨天及以前的账单（微信支付第二天上午 10 点以后才出前一天的账单）');
+  try {
+    return await reconcileDay(deps, pay, date, { source: 'manual', staffId: ctx.actor.id });
+  } catch (error) {
+    if (error instanceof WxPayError) throw new AppError(502, 'WXPAY_BILL_FAILED', `下载微信支付账单没成功：${error.message}`);
+    throw error;
+  }
 }

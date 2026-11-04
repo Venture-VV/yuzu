@@ -452,4 +452,40 @@ export interface MpRechargeAdminData {
   recent: MpRechargeOrderAdmin[];
   /** 验过签、但门店系统里找不到单子的到账通知（例如从备份恢复过） */
   orphans: { id: number; createdAt: string; outTradeNo: string; transactionId: string | null; amount: number | null }[];
+  /** 对账（2b）：最近 30 个账单日，每天取最后一次核对 */
+  recons: MpRechargeRecon[];
+}
+
+// ── 2b 对账（docs/MP_RECHARGE.md 第 8 节）──
+
+/**
+ * 没对上的一笔：NOT_BOOKED 微信有、门店没入账（查单也没补上）；UNKNOWN_ORDER 微信有、门店系统里没有这张单；
+ * NOT_IN_BILL 门店入了账、微信那天的账单里没有；AMOUNT_MISMATCH 金额对不上；TX_MISMATCH 交易单号对不上
+ */
+export type MpReconIssueKind = 'NOT_BOOKED' | 'UNKNOWN_ORDER' | 'NOT_IN_BILL' | 'AMOUNT_MISMATCH' | 'TX_MISMATCH';
+
+export interface MpReconIssue {
+  kind: MpReconIssueKind;
+  outTradeNo: string | null;
+  transactionId: string | null;
+  /** 两边的金额（分）；没有的一边为 null */
+  wxAmount: number | null;
+  storeAmount: number | null;
+  note: string;
+}
+
+export interface MpRechargeRecon {
+  id: number;
+  billDate: string;
+  ok: boolean;
+  wxCount: number;
+  wxAmount: number;
+  storeCount: number;
+  storeAmount: number;
+  issues: MpReconIssue[];
+  /** 账单里的退款（商户平台手动退的；2d 以后自动退的）：交易单号、退款单号、金额、状态 */
+  refunds: { transactionId: string; refundId: string | null; amount: number | null; status: string | null }[];
+  source: 'auto' | 'manual';
+  staffName: string | null;
+  createdAt: string;
 }

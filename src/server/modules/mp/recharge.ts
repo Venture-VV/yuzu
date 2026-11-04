@@ -292,7 +292,8 @@ const CreateInput = z
 /** 微信账单里顾客看到的商品描述 */
 async function description(db: Db, o: OrderRow): Promise<string> {
   const [s] = await db<{ name: string }[]>`SELECT name FROM mp_stores WHERE is_home`;
-  return `汤崎${s?.name ?? ''} 会员充值 ${formatYuan(o.amount).replace('¥', '')}元`;
+  // 不带千分位逗号：微信的交易账单是逗号分隔的，描述里少一个逗号就少一处出错的可能
+  return `汤崎${s?.name ?? ''} 会员充值 ${Math.floor(o.amount / 100)}.${String(o.amount % 100).padStart(2, '0')}元`;
 }
 
 export async function createRechargeOrder(deps: Deps, pay: PayRuntime | null, openid: string, raw: unknown): Promise<MpRechargeCreated> {
@@ -527,7 +528,15 @@ async function closeAtWechat(deps: Deps, pay: PayRuntime, o: OrderRow, reason: '
 
 // ── 到账：查单、到账通知、入账 ──
 
-type Source = 'notify' | 'query' | 'sweep' | 'close' | 'order';
+type Source = 'notify' | 'query' | 'sweep' | 'close' | 'order' | 'recon';
+
+/** 去微信查这一单、按微信那边的状态处理（2b 对账发现「微信有、门店没记」时用，与每分钟补查同一条路） */
+export async function syncOrderFromWechat(deps: Deps, pay: PayRuntime, orderId: number, source: Source = 'recon'): Promise<OrderRow> {
+  const o = await orderById(deps.sql, orderId);
+  if (!o) throw notFound('线上充值单不存在');
+  if ((o.status === 'pending' || o.status === 'closed') && sameMode(pay, o)) await syncFromWechat(deps, pay, o, source);
+  return (await orderById(deps.sql, orderId))!;
+}
 
 /** 去微信查这一单（事务外），按微信那边的状态处理：已付入账、已关关单、过期没付的请微信关单 */
 async function syncFromWechat(deps: Deps, pay: PayRuntime, o: OrderRow, source: Source, now = new Date()): Promise<void> {

@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatYuan, parseYuan } from '@shared/money';
-import type { MpAdminData, MpRechargeAdminData, MpRechargeOrderAdmin, MpRechargeResolution, MpRechargeStatus } from '@shared/mp';
+import type { MpAdminData, MpRechargeAdminData, MpRechargeOrderAdmin, MpRechargeRecon, MpRechargeResolution, MpRechargeStatus, MpReconIssueKind } from '@shared/mp';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { formatDateTime, uuid } from '../../lib/utils';
@@ -50,6 +50,7 @@ export function RechargeTab({ data }: { data: MpAdminData }) {
       <RulesForm key={data.rechargeRules.version} d={d} rules={data.rechargeRules} pending={pendingRules.length > 0} />
       <HeldOrders orders={d.held} pending={pendingResolves} />
       <RecentOrders orders={d.recent} />
+      <Recons recons={d.recons} canRun={d.payMode !== null} />
       {d.orphans.length > 0 && (
         <Notice tone="error" title={`${d.orphans.length} 笔到账找不到单子`}>
           <p>微信支付验过签的真付款，门店系统里却没有这张单（例如门店系统从备份恢复过）。钱在商户号里，请在商户平台按交易单号核对后原路退回，或在前台另记。</p>
@@ -350,6 +351,86 @@ function PendingResolves({ ops }: { ops: MpPendingOp[] }) {
         ))}
       </ul>
     </Notice>
+  );
+}
+
+const ISSUE_LABELS: Record<MpReconIssueKind, string> = {
+  NOT_BOOKED: '微信已收款、门店没入账',
+  UNKNOWN_ORDER: '微信已收款、门店没有这张单',
+  NOT_IN_BILL: '门店入了账、微信账单里没有',
+  AMOUNT_MISMATCH: '金额对不上',
+  TX_MISMATCH: '交易单号对不上',
+};
+
+/** 2b 对账：每天自动对前一天的微信支付交易账单；没对上的标红，可以按天重新核对（只追加一条结论） */
+function Recons({ recons, canRun }: { recons: MpRechargeRecon[]; canRun: boolean }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const yesterday = new Date(Date.now() - 16 * 3_600_000).toISOString().slice(0, 10);
+  const [date, setDate] = useState(yesterday);
+  const [busy, setBusy] = useState(false);
+  const bad = recons.filter((r) => !r.ok);
+  const run = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post<MpRechargeRecon>('/api/admin/mp/recharge/recon', { date });
+      await qc.invalidateQueries({ queryKey: rechargeKey });
+      toast({ tone: r.ok ? 'success' : 'error', title: r.ok ? `${r.billDate} 都对上了` : `${r.billDate} 有 ${r.issues.length} 笔没对上` });
+    } catch (error) {
+      toast({ tone: 'error', title: '没有核对', body: errorMessage(error) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card className="p-0">
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line px-4 py-3">
+        <div>
+          <p className={bad.length ? 'text-[15px] font-semibold text-ember' : 'text-[15px] font-semibold text-ink'}>
+            对账{bad.length ? `（${bad.length} 天有没对上的）` : ''}
+          </p>
+          <p className="text-[13px] text-ink-3">每天上午 10 点半以后自动下前一天的微信支付交易账单，与线上充值单逐笔核对；只看、只记，不改单子。</p>
+        </div>
+        {canRun && (
+          <div className="flex items-end gap-2">
+            <Field label="账单日" htmlFor="mp-recon-date">
+              <Input id="mp-recon-date" type="date" value={date} max={yesterday} onChange={(e) => setDate(e.target.value)} />
+            </Field>
+            <Button size="sm" variant="secondary" loading={busy} disabled={!date} onClick={() => void run()}>
+              重新核对
+            </Button>
+          </div>
+        )}
+      </div>
+      <div className="divide-y divide-line">
+        {recons.map((r) => (
+          <div key={r.id} className="px-4 py-2.5 text-[13px]" data-testid="mp-recharge-recon">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="num font-semibold text-ink">{r.billDate}</span>
+              <Badge tone={r.ok ? 'pine' : 'ember'}>{r.ok ? '对上了' : `${r.issues.length} 笔没对上`}</Badge>
+              <span className="text-ink-3">
+                微信 {r.wxCount} 笔 <span className="num">{formatYuan(r.wxAmount)}</span> · 门店 {r.storeCount} 笔 <span className="num">{formatYuan(r.storeAmount)}</span>
+              </span>
+              {r.refunds.length > 0 && <span className="text-ink-3">退款 {r.refunds.length} 笔</span>}
+              <span className="ml-auto text-[12px] text-ink-4">
+                {r.source === 'manual' ? `${r.staffName ?? ''}重新核对` : '自动'} · {formatDateTime(r.createdAt)}
+              </span>
+            </div>
+            {r.issues.length > 0 && (
+              <ul className="mt-1.5 space-y-0.5 text-[12.5px] text-ember">
+                {r.issues.map((i, k) => (
+                  <li key={k} className="num">
+                    {ISSUE_LABELS[i.kind]} · {i.outTradeNo ?? '—'} · 交易单号 {i.transactionId ?? '—'} · 微信 {i.wxAmount === null ? '—' : formatYuan(i.wxAmount)} / 门店{' '}
+                    {i.storeAmount === null ? '—' : formatYuan(i.storeAmount)} · {i.note}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+        {recons.length === 0 && <p className="px-4 py-6 text-center text-[13px] text-ink-3">还没有对过账（配好微信支付以后，每天上午 10 点半以后自动对前一天的）</p>}
+      </div>
+    </Card>
   );
 }
 

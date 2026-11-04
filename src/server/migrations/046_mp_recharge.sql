@@ -5,6 +5,7 @@
 --      一位会员同时只有一张待支付的（唯一索引）。入账走主线钱包的线上收款入口（recharges 的 channel = 'mp'），这里只记入账的充值单。
 --   ② mp_recharge_events：单子的记录，只追加：建单、微信下单、到账通知（验过签的）、查单、关单、入账、待处理、店主处理。
 --   ③ mp_op_fences 加一类 mp_recharge：建单结果不确定时确认作废这个编号（与绑定一样只认同一个微信）。
+--   ④ mp_recharge_recons（2b 对账）：每天下前一天的微信支付交易账单，与线上充值单逐笔核对的结论，只追加。
 -- 只建新表、只给小程序线自己的作废登记加一类；只用外键引用会员、绑定记录、充值套餐、充值单与员工。
 -- 046 登记给小程序第二期（ROADMAP 第 7 节）；主线的 047 可能先跑，所以这里只引用 045 以前就有的表与列。
 
@@ -139,6 +140,33 @@ CREATE TABLE mp_recharge_events (
 CREATE INDEX mp_recharge_events_order_idx ON mp_recharge_events (order_id, id);
 CREATE INDEX mp_recharge_events_orphan_idx ON mp_recharge_events (id) WHERE order_id IS NULL;
 CREATE TRIGGER mp_recharge_events_append_only BEFORE UPDATE OR DELETE ON mp_recharge_events
+  FOR EACH ROW EXECUTE FUNCTION yuzu_forbid_mutation();
+
+-- 2b 对账：每天下前一天的微信支付交易账单，与线上充值单逐笔核对的结论（只追加：重新核对再记一条，不改旧的）
+CREATE TABLE mp_recharge_recons (
+  id            bigserial PRIMARY KEY,
+  -- 账单日（北京时间的自然日）
+  bill_date     date NOT NULL,
+  -- 都对上了；没对上的写在 issues 里（标红给店主看）
+  ok            boolean NOT NULL,
+  -- 微信账单里这一天的成功交易：笔数、金额（分）
+  wx_count      integer NOT NULL CHECK (wx_count >= 0),
+  wx_amount     bigint NOT NULL CHECK (wx_amount >= 0),
+  -- 门店系统里这一天付款的单子（已入账、已付款待处理、已处理）：笔数、金额（分）
+  store_count   integer NOT NULL CHECK (store_count >= 0),
+  store_amount  bigint NOT NULL CHECK (store_amount >= 0),
+  -- 没对上的（种类、商户单号、交易单号、两边的金额、说明）与账单里的退款
+  issues        jsonb NOT NULL DEFAULT '[]'::jsonb,
+  refunds       jsonb NOT NULL DEFAULT '[]'::jsonb,
+  -- auto 每天自动；manual 店主在后台点「重新核对」（记经办人）
+  source        text NOT NULL CHECK (source IN ('auto', 'manual')),
+  staff_id      bigint REFERENCES staff (id),
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  CHECK ((source = 'manual') = (staff_id IS NOT NULL)),
+  CHECK (ok = (jsonb_array_length(issues) = 0))
+);
+CREATE INDEX mp_recharge_recons_date_idx ON mp_recharge_recons (bill_date, id);
+CREATE TRIGGER mp_recharge_recons_append_only BEFORE UPDATE OR DELETE ON mp_recharge_recons
   FOR EACH ROW EXECUTE FUNCTION yuzu_forbid_mutation();
 
 -- 建单的确认作废：与绑定一样只认同一个微信
