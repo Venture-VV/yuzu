@@ -3,10 +3,14 @@
 //   · 展示内容（门店信息、价目、导览、图片）：缓存，门店断外网时给旧的（最多 7 天）；
 //   · 会员相关（绑定、会员卡、流水、券、会员码）：带会话里的 openid 原样转给 yuzu，门店连不上时 503 STORE_OFFLINE；
 //   · 绑定：先用手机号快速验证的 code 换手机号，再转给 yuzu（手机号对上会员才绑）；结果不确定时小程序经 /v1/bind/abandon 确认作废。
+//   · 线上充值（第二期 2a，docs/MP_RECHARGE.md）：/v1/recharge… 带会话里的 openid 转给 yuzu（建单、支付参数都在 yuzu 签）；
+//     到账通知 /v1/pay/notify 不要会话、不解析内容，连同微信的四个签名头原样转给 yuzu，按 yuzu 的结果回微信。
+//     网关不放任何支付凭据（MP17）：验签、解密、入账都在 yuzu，网关被攻破也伪造不了到账。
 // 网关不存会员、余额、券、订单；yuzu 返回的错误文字面向顾客，原样转给小程序。
 
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { MP_RECHARGE_ORDER_NO } from '@shared/mp';
 import type { GatewayConfig } from './config';
 import { ShowCache } from './cache';
 import { RateLimiter } from './ratelimit';
@@ -45,6 +49,15 @@ const LedgerQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).de
 const FloorParams = z.object({ floor: z.string().regex(/^[A-Za-z0-9-]{1,10}$/, '楼层不正确') });
 const SvgQuery = z.object({ b: z.coerce.number().int().positive('底图批次不正确') });
 const IdParams = z.object({ id: z.coerce.number().int().positive('编号不正确') });
+const RechargeNo = z.object({ no: z.string().regex(MP_RECHARGE_ORDER_NO, '充值单号不正确') });
+const RechargeCreate = z.object({
+  clientKey: z.uuid('操作编号不正确'),
+  planId: z.number().int().positive().nullable().optional(),
+  amount: z.number().int().positive().nullable().optional(),
+});
+const RechargePreview = z.object({ amount: z.coerce.number('请填写金额').int('金额请填整元').positive('请填写金额') });
+/** 微信支付的到账通知：报文主体原样转（门店系统要用原文验签），最多 8 KB */
+const NOTIFY_MAX_BYTES = 8 * 1024;
 
 export interface GatewayDeps {
   config: GatewayConfig;
@@ -65,6 +78,9 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
   const loginLimit = new RateLimiter(20);
   const bindLimit = new RateLimiter(10);
   const codeLimit = new RateLimiter(60);
+  // 线上充值：建单、继续支付、取消、作废每个微信每分钟 20 次；查单（付完等结果每 2 秒一次）每分钟 60 次
+  const rechargeLimit = new RateLimiter(20);
+  const rechargeQueryLimit = new RateLimiter(60);
 
   app.addHook('onRequest', async (req) => {
     if (!perIp.take(`ip:${req.ip}`)) throw TOO_MANY();
@@ -214,6 +230,71 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
     const openid = openidOf(req);
     if (!codeLimit.take(`code:${openid}`)) throw TOO_MANY();
     return member(reply, 'POST', '/api/mp/code', openid, {});
+  });
+
+  // ── 线上充值（第二期 2a）──
+  const rechargeWrite = (req: FastifyRequest) => {
+    const openid = openidOf(req);
+    if (!rechargeLimit.take(`recharge:${openid}`)) throw TOO_MANY();
+    return openid;
+  };
+  app.get('/v1/recharge', async (req, reply) => member(reply, 'GET', '/api/mp/recharge', openidOf(req)));
+  app.get('/v1/recharge/preview', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!rechargeQueryLimit.take(`recharge-q:${openid}`)) throw TOO_MANY();
+    const { amount } = parse(RechargePreview, req.query);
+    return member(reply, 'GET', `/api/mp/recharge/preview?amount=${amount}`, openid);
+  });
+  app.post('/v1/recharge/orders', async (req, reply) => {
+    const openid = rechargeWrite(req);
+    return member(reply, 'POST', '/api/mp/recharge/orders', openid, parse(RechargeCreate, req.body));
+  });
+  // 建单结果不确定（超时、断网、门店出错）时，小程序请门店系统作废这个编号：已经建了返回那张单
+  app.post('/v1/recharge/abandon', async (req, reply) => {
+    const openid = rechargeWrite(req);
+    return member(reply, 'POST', '/api/mp/recharge/abandon', openid, parse(AbandonInput, req.body));
+  });
+  app.get('/v1/recharge/orders/:no', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!rechargeQueryLimit.take(`recharge-q:${openid}`)) throw TOO_MANY();
+    return member(reply, 'GET', `/api/mp/recharge/orders/${parse(RechargeNo, req.params).no}`, openid);
+  });
+  for (const action of ['pay', 'cancel', 'mock-pay'] as const) {
+    app.post(`/v1/recharge/orders/:no/${action}`, async (req, reply) => {
+      // 模拟支付只在模拟微信的网关上有（本机与测试服的演示库）；门店系统另外只在 development、test 认
+      if (action === 'mock-pay' && !wechat.mock) throw new GatewayError(404, 'NOT_FOUND', '接口不存在');
+      const openid = rechargeWrite(req);
+      return member(reply, 'POST', `/api/mp/recharge/orders/${parse(RechargeNo, req.params).no}/${action}`, openid, {});
+    });
+  }
+
+  // 微信支付的到账通知：不要会话、不解析内容，报文主体与四个签名头原样转给门店系统（Base64 包一层，一个字节不改）。
+  // 门店收下了（入账、记成已付款待处理）回 204；门店没收下、连不上回失败，微信按它的节奏重发
+  await app.register(async (scope) => {
+    scope.removeAllContentTypeParsers();
+    scope.addContentTypeParser('*', { parseAs: 'buffer', bodyLimit: NOTIFY_MAX_BYTES }, (_req, body, done) => done(null, body));
+    scope.post('/v1/pay/notify', async (req, reply) => {
+      const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      const h = (name: string) => {
+        const v = req.headers[name];
+        return typeof v === 'string' ? v : null;
+      };
+      const payload = {
+        headers: { timestamp: h('wechatpay-timestamp'), nonce: h('wechatpay-nonce'), signature: h('wechatpay-signature'), serial: h('wechatpay-serial') },
+        body: raw.toString('base64'),
+      };
+      let r: UpstreamResponse;
+      try {
+        r = await upstream.call('POST', '/api/mp/pay/notify', { body: payload });
+      } catch (error) {
+        if (!(error instanceof UpstreamDown)) throw error;
+        req.log.warn('到账通知：门店系统连不上，回微信失败（微信会重发）');
+        return reply.status(503).send({ code: 'FAIL', message: '门店系统连不上' });
+      }
+      if (r.status >= 200 && r.status < 300) return reply.status(204).send();
+      req.log.warn({ status: r.status }, '到账通知：门店系统没收下');
+      return reply.status(r.status >= 400 && r.status < 600 ? r.status : 500).send({ code: 'FAIL', message: '失败' });
+    });
   });
 
   return app;

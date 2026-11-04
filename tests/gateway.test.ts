@@ -1,6 +1,7 @@
 // 小程序网关（小程序线，docs/MINIPROGRAM.md 第 1、12 节）：网关 → 真实的 yuzu 小程序端口（测试库）整条链路，模拟微信；
 // 会话（签名、过期、篡改）；展示内容缓存与门店断外网时给旧的；会员接口要会话、连不上 503；健康检查（/v1/live 不问门店、门店状态只问一次）；
 // 网关小镜像用的单文件打包在空目录里能跑；微信真接口的请求格式（替身 fetch）；配置。
+// 线上充值（第二期 2a）：充值接口带会话转发；到账通知不要会话、报文主体与签名头一个字节不改地转给 yuzu，按 yuzu 的结果回微信。
 
 import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -17,6 +18,8 @@ import { issueSession, verifySession } from '../src/gateway/session';
 import { createUpstream, UpstreamDown, type Upstream } from '../src/gateway/upstream';
 import { createMockWechat, createWechat, WechatError } from '../src/gateway/wechat';
 import { buildMpApp } from '../src/server/modules/mp/app';
+import type { PayRuntime } from '../src/server/modules/mp/pay';
+import { createMockWxPay, type MockWxPay } from '../src/server/modules/mp/wxpay-mock';
 import { createMember, setup, type TestContext } from './helpers';
 
 const KEY = 'test-gateway-key-0123456789abcdef-0123';
@@ -26,6 +29,8 @@ let ctx: TestContext;
 let yuzuMp: FastifyInstance;
 let upstreamUrl: string;
 let gw: FastifyInstance;
+let wx: MockWxPay;
+let pay: PayRuntime;
 
 const gatewayConfig = (over: Partial<GatewayConfig> = {}): GatewayConfig => ({
   host: '127.0.0.1',
@@ -43,7 +48,9 @@ const gatewayConfig = (over: Partial<GatewayConfig> = {}): GatewayConfig => ({
 
 beforeAll(async () => {
   ctx = await setup();
-  yuzuMp = await buildMpApp(ctx.sql, { ...ctx.config, mp: { ...ctx.config.mp, gatewayKey: KEY, codeSecret: CODE_SECRET } });
+  wx = createMockWxPay();
+  pay = { mode: 'mock', config: wx.config, client: wx.client, mock: wx };
+  yuzuMp = await buildMpApp(ctx.sql, { ...ctx.config, mp: { ...ctx.config.mp, gatewayKey: KEY, codeSecret: CODE_SECRET } }, { pay, sweepMs: 0 });
   await yuzuMp.listen({ host: '127.0.0.1', port: 0 });
   upstreamUrl = `http://127.0.0.1:${(yuzuMp.server.address() as AddressInfo).port}`;
   await ctx.sql`INSERT INTO settings (key, value) VALUES ('mp_rules', ${ctx.sql.json({ enabled: true })})`;
@@ -231,6 +238,93 @@ describe('门店断外网', () => {
     expect(res.json().error.code).toBe('MP_MOCK_REFUSED');
     await g.close();
     await prod.close();
+  });
+});
+
+describe('线上充值（第二期 2a）', () => {
+  const bindFor = async (name: string, phone: string) => {
+    await createMember(ctx, `演示·${name}`, phone);
+    const token = await login(gw, name);
+    const b = await authed(gw, token, 'POST', '/v1/bind', { phoneCode: `mock-phone-${phone}`, clientKey: randomUUID(), bindVersion: 0 });
+    expect(b.statusCode, b.body).toBe(200);
+    return token;
+  };
+  const notifyRaw = (app: FastifyInstance, headers: { timestamp: string; nonce: string; signature: string; serial: string }, body: string) =>
+    app.inject({
+      method: 'POST',
+      url: '/v1/pay/notify',
+      headers: {
+        'content-type': 'application/json',
+        'wechatpay-timestamp': headers.timestamp,
+        'wechatpay-nonce': headers.nonce,
+        'wechatpay-signature': headers.signature,
+        'wechatpay-serial': headers.serial,
+      },
+      payload: body,
+    });
+
+  beforeAll(async () => {
+    await ctx.sql`
+      INSERT INTO settings (key, value) VALUES ('mp_recharge_rules', ${ctx.sql.json({ enabled: true, planIds: [], customEnabled: true, maxCents: 1_000_000, dailyLimit: 5, version: 1 })})`;
+  });
+
+  it('可充的项、建单、模拟支付、查单：网关带会话里的微信转给 yuzu；没会话拒绝', async () => {
+    const token = await bindFor('recharge-a', '13700003001');
+    const opts = await authed(gw, token, 'GET', '/v1/recharge');
+    expect(opts.statusCode, opts.body).toBe(200);
+    expect(opts.json()).toMatchObject({ open: true, mock: true, custom: { maxCents: 1_000_000 } });
+    const min = opts.json().custom.minCents as number;
+    expect((await authed(gw, token, 'GET', `/v1/recharge/preview?amount=${min}`)).json()).toMatchObject({ amount: min });
+    const created = await authed(gw, token, 'POST', '/v1/recharge/orders', { clientKey: randomUUID(), amount: min });
+    expect(created.statusCode, created.body).toBe(201);
+    const no = created.json().order.orderNo as string;
+    const [row] = await ctx.sql<{ openid: string }[]>`SELECT openid FROM mp_recharge_orders WHERE order_no = ${no}`;
+    expect(row).toEqual({ openid: 'mock_recharge-a' });
+    const paid = await authed(gw, token, 'POST', `/v1/recharge/orders/${no}/mock-pay`);
+    expect(paid.statusCode, paid.body).toBe(200);
+    expect(paid.json()).toMatchObject({ status: 'paid', result: { principal: min } });
+    expect((await authed(gw, token, 'GET', `/v1/recharge/orders/${no}`)).json().status).toBe('paid');
+    expect((await authed(gw, null, 'GET', '/v1/recharge')).statusCode).toBe(401);
+    expect((await authed(gw, token, 'GET', '/v1/recharge/orders/not-an-order')).statusCode).toBe(400);
+  });
+
+  it('到账通知：不要会话，报文主体与签名头原样转给 yuzu；yuzu 收下回 204，改过一个字的回失败', async () => {
+    const token = await bindFor('recharge-b', '13700003002');
+    const min = (await authed(gw, token, 'GET', '/v1/recharge')).json().custom.minCents as number;
+    const no = (await authed(gw, token, 'POST', '/v1/recharge/orders', { clientKey: randomUUID(), amount: min })).json().order.orderNo as string;
+    const msg = wx.pay(no);
+    const tampered = await notifyRaw(gw, msg.headers as never, msg.body.replace('支付成功', '支付成功了'));
+    expect(tampered.statusCode).toBe(401);
+    expect(tampered.json()).toEqual({ code: 'FAIL', message: '失败' });
+    const ok = await notifyRaw(gw, msg.headers as never, msg.body);
+    expect(ok.statusCode, ok.body).toBe(204);
+    expect(ok.body).toBe('');
+    expect((await authed(gw, token, 'GET', `/v1/recharge/orders/${no}`)).json().status).toBe('paid');
+    // 重发照样回 204、不重复入账
+    expect((await notifyRaw(gw, msg.headers as never, msg.body)).statusCode).toBe(204);
+    const [n] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM recharges WHERE payment_ref = (SELECT transaction_id FROM mp_recharge_orders WHERE order_no = ${no})`;
+    expect(n!.n).toBe(1);
+  });
+
+  it('门店连不上：到账通知回微信失败（503，微信会重发）；不是模拟微信的网关没有模拟支付', async () => {
+    const down = await buildGateway({
+      config: gatewayConfig(),
+      wechat: createMockWechat(),
+      upstream: {
+        call: async () => {
+          throw new UpstreamDown('门店系统连不上');
+        },
+      },
+    });
+    const r = await notifyRaw(down, { timestamp: '1', nonce: 'n', signature: 's', serial: 'x' }, '{}');
+    expect(r.statusCode).toBe(503);
+    expect(r.json()).toEqual({ code: 'FAIL', message: '门店系统连不上' });
+    await down.close();
+    const real = await buildGateway({ config: gatewayConfig({ mockWechat: false }), wechat: { ...createMockWechat(), mock: false }, upstream: createUpstream(upstreamUrl, KEY) });
+    const token = await login(gw, 'recharge-c');
+    const res = await real.inject({ method: 'POST', url: '/v1/recharge/orders/MPR20261104AAAAAAAAAA/mock-pay', headers: { authorization: `Bearer ${token}` } });
+    expect(res.statusCode).toBe(404);
+    await real.close();
   });
 });
 

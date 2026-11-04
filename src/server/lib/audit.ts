@@ -141,7 +141,9 @@ export type AuditAction =
   // 微信小程序（小程序线）：解绑会员的微信、维护小程序内容、作废结果不确定的操作
   | 'mp_unbind'
   | 'mp_content_saved'
-  | 'mp_op_abandoned';
+  | 'mp_op_abandoned'
+  // 小程序线第二期：店主处理「已付款待处理」的线上充值单
+  | 'mp_recharge_resolved';
 
 export interface AuditEntry {
   staffId: number | null;
