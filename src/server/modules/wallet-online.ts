@@ -22,7 +22,7 @@ import type { RechargeDoc } from '@shared/types';
 import type { Db, Tx } from '../db';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
-import { AppError, conflict, notFound, unprocessable } from '../lib/errors';
+import { conflict, notFound, unprocessable } from '../lib/errors';
 import { parse, positiveCents } from '../lib/validate';
 import { addRechargeLot, expireDueLots } from './bonus';
 import { issueRechargeCoupons } from './coupons';
@@ -30,11 +30,10 @@ import { onRecharge } from './benefits';
 import { applyRechargeGrade, planRechargeGrade, previewRechargeGrade } from './membership';
 import { loadSettings } from './settings';
 import { getRecharge } from './wallet';
+import { systemStaffId } from './system-staff';
 import { applyBalance, lockMember, nextDocNo, type LockedMember } from './wallet-core';
 
-/** 系统账号「小程序」：线上收款的经办人 */
-export const SYSTEM_MP_USERNAME = 'system.mp';
-const SYSTEM_MP_NAME = '小程序';
+export { SYSTEM_MP_USERNAME, systemStaffId } from './system-staff';
 
 const OnlineRechargeInput = z.object({
   memberId: z.number().int().positive('会员编号不对'),
@@ -58,23 +57,6 @@ export interface OnlineRechargeResult {
   frozen: boolean;
   /** 这次入账前后的档级（L0–L6）；重复调用（replayed）时为空 */
   grade: { before: number; after: number } | null;
-}
-
-/** 系统账号「小程序」的编号：第一次线上入账时建（不能登录：停用、没有能对上的密码；员工名单里不显示） */
-export async function systemStaffId(tx: Tx): Promise<number> {
-  const [row] = await tx<{ id: number; system: boolean }[]>`SELECT id, system FROM staff WHERE username = ${SYSTEM_MP_USERNAME}`;
-  if (row?.system) return row.id;
-  if (!row) {
-    const [made] = await tx<{ id: number }[]>`
-      INSERT INTO staff (username, display_name, role, password_hash, active, must_change_password, system)
-      VALUES (${SYSTEM_MP_USERNAME}, ${SYSTEM_MP_NAME}, 'clerk', 'system:no-login', false, false, true)
-      ON CONFLICT (username) DO NOTHING RETURNING id`;
-    if (made) return made.id;
-    // 同时有另一笔在建：它提交以后再读
-    const [again] = await tx<{ id: number; system: boolean }[]>`SELECT id, system FROM staff WHERE username = ${SYSTEM_MP_USERNAME}`;
-    if (again?.system) return again.id;
-  }
-  throw new AppError(500, 'SYSTEM_ACCOUNT_TAKEN', `员工账号 ${SYSTEM_MP_USERNAME} 被占用了，线上收款要用这个系统账号；请店主改掉那位员工的账号`);
 }
 
 /**

@@ -6,7 +6,10 @@
 //     期初余额与合并转入的没有原收款方式，按员工选的方式退；页面先列出分配，提交时重新分配、不一致拒绝；
 //   · 现金从选定的钱箱退（与退款单同一套，lockRefundShift），不选就是自己的班次（lockPaymentShift）；扫码、银行卡登记退款单号（M72）；
 //   · 一张退储值单 + 每一行 + 一条余额流水「储值退回」+ 赠金批次的扣回；不能作废（M74）；
-//   · 靠充值升上来、扣完够不上这一档的当场降档（M73，membership.onRefundGrade）；券不收回。
+//   · 靠充值升上来、扣完够不上这一档的当场降档（M73，membership.onRefundGrade）；券不收回；
+//   · 线上充值的那一行（v0.7.27，MP21，docs/MP_RECHARGE.md 第 9 节）：小程序线的原路退回注册并打开时（registerOnlineRefundRoute），
+//     可以交给门店系统原路退回（route = mp_auto，不填退款单号），小程序线用 listOnlineRefundLines 按行取、调微信支付的退款接口；
+//     没注册或没打开时与 v0.7.26 一样要在商户平台退、填退款单号，免得钱没退出去，或者退两次。
 // 加锁顺序：操作编号的咨询锁（与「确认作废」串行）→ 经办人或所选钱箱的班次（共享锁）→ 会员一行（到期没处理的赠金先作废）→ 授权一行
 // → 赠金批次（id 升序）；之后按到期没处理的档阶先处理、再判断降档（会员一行已锁）。与充值、消费锁的是同一把会员锁。
 
@@ -17,12 +20,15 @@ import { PAYMENT_METHOD_LABELS, PAYMENT_METHODS, type PaymentMethod } from '@sha
 import {
   allocateRefund,
   attributeBalance,
+  onlineRoutable,
+  REFUND_ROUTES,
   REFUND_SOURCES,
   refundBonus,
   refundRefRequired,
   type MemberRefundDetail,
   type MemberRefundPlan,
   type RefundPlanLine,
+  type RefundRoute,
   type RefundSourceRow,
 } from '@shared/member-refunds';
 import type { RefundShiftOptions } from '@shared/checkout';
@@ -43,6 +49,68 @@ import { onRefundGrade, previewRefundGrade } from './membership';
 import { loadSettings } from './settings';
 import { lockPaymentShift, lockRefundShift, openShiftOf } from './shifts';
 import { applyBalance, lockMember } from './wallet-core';
+
+// ───────────────────────── 线上充值的原路退回（v0.7.27） ─────────────────────────
+
+/** 小程序线的原路退回（docs/MP_RECHARGE.md 第 9 节）：接上、微信支付配好并打开时，由小程序线在启动时注册 */
+export interface OnlineRefundRoute {
+  /** 此刻能不能接新的原路退回（出错按不能处理） */
+  available(db: Db): Promise<boolean>;
+}
+
+let onlineRefundRoute: OnlineRefundRoute | null = null;
+
+/** 小程序线注册原路退回（传 null 撤掉）。没注册时线上充值的那一行与 v0.7.26 一样，要在商户平台退、填退款单号 */
+export function registerOnlineRefundRoute(route: OnlineRefundRoute | null): void {
+  onlineRefundRoute = route;
+}
+
+async function onlineRouteAvailable(db: Db): Promise<boolean> {
+  if (!onlineRefundRoute) return false;
+  try {
+    return (await onlineRefundRoute.available(db)) === true;
+  } catch {
+    return false;
+  }
+}
+
+/** 交给门店系统原路退回的一行（小程序线按 lineId 唯一建原路退回单） */
+export interface OnlineRefundLine {
+  lineId: number;
+  refundId: number;
+  refundNo: string;
+  memberId: number;
+  rechargeId: number;
+  rechargeDocNo: string;
+  /** 充值单上的微信支付交易单号 */
+  paymentRef: string;
+  /** 这一行退的本金（分） */
+  amount: number;
+  createdAt: string;
+}
+
+/** 交给门店系统原路退回的行（只读）：行号大于 afterId 的，按行号升序，最多 limit 行（1–500，默认 100） */
+export async function listOnlineRefundLines(db: Db, opts: { afterId?: number; limit?: number } = {}): Promise<OnlineRefundLine[]> {
+  const afterId = Math.max(0, Math.trunc(opts.afterId ?? 0));
+  const limit = Math.min(500, Math.max(1, Math.trunc(opts.limit ?? 100)));
+  const rows = await db<{ lineId: number; refundId: number; refundNo: string; memberId: number; rechargeId: number; rechargeDocNo: string; paymentRef: string; amount: number; createdAt: Date }[]>`
+    SELECT l.id AS line_id, r.id AS refund_id, r.refund_no, r.member_id, rc.id AS recharge_id, rc.doc_no AS recharge_doc_no,
+           rc.payment_ref, l.amount, r.created_at
+    FROM member_refund_lines l JOIN member_refunds r ON r.id = l.refund_id JOIN recharges rc ON rc.id = l.recharge_id
+    WHERE l.route = 'mp_auto' AND l.id > ${afterId}
+    ORDER BY l.id LIMIT ${limit}`;
+  return rows.map((r) => ({
+    lineId: Number(r.lineId),
+    refundId: Number(r.refundId),
+    refundNo: r.refundNo,
+    memberId: Number(r.memberId),
+    rechargeId: Number(r.rechargeId),
+    rechargeDocNo: r.rechargeDocNo,
+    paymentRef: r.paymentRef,
+    amount: Number(r.amount),
+    createdAt: new Date(r.createdAt).toISOString(),
+  }));
+}
 
 // ───────────────────────── 可退的各笔 ─────────────────────────
 
@@ -121,6 +189,7 @@ export async function memberRefundPlan(deps: Deps, memberId: number, amount: num
     sources,
     grade: blocked || want <= 0 ? null : await previewRefundGrade(db, memberId, refundedByRecharge(lines), date),
     blocked,
+    onlineRoute: await onlineRouteAvailable(db),
   };
 }
 
@@ -143,6 +212,8 @@ const LineInput = z.object({
   amount: positiveCents('退的金额'),
   /** 微信、支付宝、银行卡：商户后台的退款单号；其他：写明怎么退的 */
   ref: z.string().trim().max(64, '退款单号最多 64 字').default(''),
+  /** 怎么退（v0.7.27）：员工退；或线上充值的那一行交给门店系统原路退回（不填退款单号） */
+  route: z.enum(REFUND_ROUTES, '退款方式不正确，请刷新后重试').default('manual'),
 });
 export const MemberRefundInput = z.object({
   clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
@@ -169,7 +240,14 @@ export async function createMemberRefund(deps: Deps, memberId: number, raw: Memb
   if (total !== input.amount) {
     throw unprocessable('REFUND_NOT_BALANCED', `退回的明细合计 ${formatYuan(total)}，退的本金 ${formatYuan(input.amount)}，两者要相等`);
   }
-  const missingRef = input.lines.find((l) => refundRefRequired(l.method) && l.ref.length < 2);
+  const autoLine = input.lines.find((l) => l.route === 'mp_auto');
+  if (input.lines.some((l) => l.route === 'mp_auto' && !(l.source === 'recharge' && l.method === 'wechat'))) {
+    throw badRequest('只有线上充值（小程序）微信付的那一行能交给门店系统原路退回');
+  }
+  if (input.lines.some((l) => l.route === 'mp_auto' && l.ref !== '')) {
+    throw badRequest('交给门店系统原路退回的那一行不用填退款单号；已经在商户平台退过的，请选「已在商户平台退过」再填单号');
+  }
+  const missingRef = input.lines.find((l) => l.route === 'manual' && refundRefRequired(l.method) && l.ref.length < 2);
   if (missingRef) {
     throw badRequest(
       missingRef.method === 'other'
@@ -182,7 +260,9 @@ export async function createMemberRefund(deps: Deps, memberId: number, raw: Memb
     throw unprocessable('REFUND_SHIFT_NOT_CASH', '这次没有退现金，不用选钱箱；扫码、银行卡退的记到你当班的交班表');
   }
   const { clientKey: key, grantId: _grant, ...payload } = input;
-  const requestHash = hashRequest({ memberId, ...payload });
+  // 员工退的行不带 route 进摘要：v0.7.26 提交、升级后原样重提的仍是同一笔
+  const hashLines = payload.lines.map(({ route, ...l }) => (route === 'manual' ? l : { ...l, route }));
+  const requestHash = hashRequest({ memberId, ...payload, lines: hashLines });
   const replay = async (db: Db) => {
     const [p] = await db<{ id: number; requestHash: string }[]>`SELECT id, request_hash FROM member_refunds WHERE client_key = ${key}`;
     if (!p) return null;
@@ -220,6 +300,15 @@ export async function createMemberRefund(deps: Deps, memberId: number, raw: Memb
           lines: plan,
         });
       }
+      // 交给门店系统原路退回的行：必须是线上充值的那一行，而且小程序线的原路退回此刻开着
+      if (autoLine) {
+        if (input.lines.some((l, i) => l.route === 'mp_auto' && !onlineRoutable(plan[i]!))) {
+          throw unprocessable('ONLINE_ROUTE_NOT_ALLOWED', '只有线上充值（小程序）微信付的那一行能交给门店系统原路退回，请重新核对');
+        }
+        if (!(await onlineRouteAvailable(tx))) {
+          throw unprocessable('ONLINE_REFUND_UNAVAILABLE', '线上充值的原路退回现在没开：请在微信支付商户平台原路退回后，选「已在商户平台退过」并填退款单号');
+        }
+      }
       const bonus = refundBonus(locked.principalBalance, locked.bonusBalance, input.amount);
       if (bonus !== input.expectedBonus) {
         throw conflict('REFUND_BONUS_CHANGED', `扣回的赠金现在是 ${formatYuan(bonus)}（余额刚刚有变化），请重新核对`, { bonus });
@@ -242,9 +331,9 @@ export async function createMemberRefund(deps: Deps, memberId: number, raw: Memb
       const refundId = Number(row!.id);
       for (const l of input.lines) {
         await tx`
-          INSERT INTO member_refund_lines (refund_id, source, recharge_id, opening_id, member_merge_id, method, amount, ref)
+          INSERT INTO member_refund_lines (refund_id, source, recharge_id, opening_id, member_merge_id, method, amount, ref, route)
           VALUES (${refundId}, ${l.source}, ${l.source === 'recharge' ? l.id : null}, ${l.source === 'opening' ? l.id : null},
-                  ${l.source === 'merge' ? l.id : null}, ${l.method}, ${l.amount}, ${l.ref})`;
+                  ${l.source === 'merge' ? l.id : null}, ${l.method}, ${l.amount}, ${l.ref}, ${l.route})`;
       }
       await applyBalance(tx, locked, { principal: -input.amount, bonus: -bonus }, {
         entryType: 'refund', docNo: refundNo, memberRefundId: refundId, businessDate: date, operatorId: ctx.actor.id, at,
@@ -275,7 +364,7 @@ export async function createMemberRefund(deps: Deps, memberId: number, raw: Memb
           reason: input.reason,
           approverId: approval.approverId,
           approverName: approval.approverName,
-          lines: input.lines.map((l) => ({ source: l.source, id: l.id, method: l.method, amount: l.amount, ref: l.ref })),
+          lines: input.lines.map((l) => ({ source: l.source, id: l.id, method: l.method, amount: l.amount, ref: l.ref, ...(l.route === 'mp_auto' ? { route: l.route } : {}) })),
           ...(grade ? { grade } : {}),
           ...(drawer && Number(drawer.staffId) !== ctx.actor.id ? { refundShift: drawer.shiftNo, refundDrawer: drawer.staffName } : {}),
         },
@@ -312,11 +401,11 @@ type DetailRow = Omit<MemberRefundDetail, 'lines' | 'grade' | 'createdAt'> & {
 };
 
 async function toDetail(db: Db, r: DetailRow): Promise<MemberRefundDetail> {
-  const lines = await db<{ source: RefundPlanLine['source']; id: number; docNo: string; date: string; method: PaymentMethod; channel: 'counter' | 'mp' | null; amount: number; ref: string }[]>`
+  const lines = await db<{ source: RefundPlanLine['source']; id: number; docNo: string; date: string; method: PaymentMethod; channel: 'counter' | 'mp' | null; amount: number; ref: string; route: RefundRoute }[]>`
     SELECT l.source, coalesce(l.recharge_id, l.opening_id, l.member_merge_id) AS id,
            coalesce(rc.doc_no, ob.doc_no, mg.merge_no) AS doc_no,
            to_char(coalesce(rc.business_date, oi.business_date, mg.business_date), 'YYYY-MM-DD') AS date,
-           l.method, rc.channel, l.amount, l.ref
+           l.method, rc.channel, l.amount, l.ref, l.route
     FROM member_refund_lines l
     LEFT JOIN recharges rc ON rc.id = l.recharge_id
     LEFT JOIN opening_balances ob ON ob.id = l.opening_id LEFT JOIN opening_imports oi ON oi.id = ob.import_id

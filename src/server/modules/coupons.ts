@@ -7,7 +7,8 @@
 //   · 自动发券按「规则 + 会员 + 年份 / 充值单」去重（coupon_issues.dedupe_key 唯一），几个进程同时跑也只发一次；
 //   · 手动发、批次、新建模板与发券规则带页面的操作编号（client_key 唯一），重复提交返回原记录；
 //   · 券的状态是变动记录（coupon_events，只追加）的结果；过期不改数据，按有效期算。
-// 加锁顺序：会员（充值事务里已锁）→ 模板（共享）；结账用券在会员、赠金批次之后锁券一行；作废只锁券（id 升序）。
+//   · 小程序领取（v0.7.27）：小程序线在自己的事务里调用 issueMpClaimCoupon，按领取记录去重，经办人是系统账号「小程序」。
+// 加锁顺序：会员（充值事务里已锁；小程序领取在入口里锁）→ 模板（共享）；结账用券在会员、赠金批次之后锁券一行；作废只锁券（id 升序）。
 
 import { randomInt } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
@@ -52,6 +53,7 @@ import { cents, idParam, parse, positiveCents } from '../lib/validate';
 import { loadMembershipRules } from './membership';
 import { nextDocNo } from '../lib/tx';
 import { loadSettings } from './settings';
+import { systemStaffId } from './system-staff';
 import { ctxOf } from '../lib/context';
 
 // ───────────────────────── 模板 ─────────────────────────
@@ -275,13 +277,18 @@ interface LockedTemplate extends CouponTerms {
   active: boolean;
 }
 
-/** 发券前对模板加共享锁（改模板加排他锁，两边串行） */
-async function lockTemplate(tx: Tx, id: number): Promise<LockedTemplate | null> {
-  const [t] = await tx<LockedTemplate[]>`
+/** 读模板；lock 时加共享锁（发券前加，改模板加排他锁，两边串行），不加锁的只用于只读判断 */
+async function readTemplate(db: Db, id: number, lock: boolean): Promise<LockedTemplate | null> {
+  const [t] = await db<LockedTemplate[]>`
     SELECT id, name, kind, face_value, rate_percent, max_off, threshold, scope, scope_categories, scope_items, exchange_item_id, exchange_ticket_type_id,
            validity, valid_from, valid_to, valid_days, levels, active
-    FROM coupon_templates WHERE id = ${id} FOR SHARE`;
+    FROM coupon_templates WHERE id = ${id} ${lock ? db`FOR SHARE` : db``}`;
   return t ? { ...t, ...termsOf(t), levels: t.levels.map(Number) } : null;
+}
+
+/** 发券前对模板加共享锁（改模板加排他锁，两边串行） */
+async function lockTemplate(tx: Tx, id: number): Promise<LockedTemplate | null> {
+  return readTemplate(tx, id, true);
 }
 
 /** 这张模板在营业日 date 发的券的有效期；固定有效期已过返回 null */
@@ -484,6 +491,134 @@ export async function issueBenefitCoupons(
     date: o.date,
     range,
   });
+}
+
+// ───────────────────────── 小程序领取（v0.7.27） ─────────────────────────
+
+const MpClaimInput = z.object({
+  templateId: z.number('券模板编号不对').int('券模板编号不对').positive('券模板编号不对'),
+  memberId: z.number('会员编号不对').int('会员编号不对').positive('会员编号不对'),
+  /** 小程序线的领取记录：正整数，或 64 字以内的字母、数字、_、-（去重键 mp_claim:<claimId>） */
+  claimId: z.union(
+    [z.number().int().positive().max(Number.MAX_SAFE_INTEGER), z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)],
+    '领取记录编号不对',
+  ),
+  at: z.date().optional(),
+});
+export type MpClaimInput = z.input<typeof MpClaimInput>;
+
+export interface MpClaimResult {
+  issueId: number;
+  issueNo: string;
+  /** 同一个领取记录已经发过：返回第一次发的那张，这次没有再发 */
+  replayed: boolean;
+  coupon: CouponRow;
+}
+
+type MpClaimMember = { id: number; name: string; status: string; grade: number; mergedIntoId: number | null };
+
+/** 小程序领取的规则（发券与只读判断共用一套）：不能领时给出原因 */
+function mpClaimProblem(m: MpClaimMember, t: LockedTemplate | null, date: string): { code: string; message: string } | null {
+  if (m.mergedIntoId !== null) return { code: 'MEMBER_MERGED', message: `会员「${m.name}」已合并到另一位会员，不能领券` };
+  if (m.status !== 'active') return { code: 'MEMBER_FROZEN', message: `会员「${m.name}」已停用，不能领券` };
+  if (!t) return { code: 'NOT_FOUND', message: '券模板不存在' };
+  if (!t.active) return { code: 'TEMPLATE_INACTIVE', message: `券「${t.name}」已停用，不能再领` };
+  if (!validRange(t, date)) return { code: 'TEMPLATE_EXPIRED', message: `券「${t.name}」的有效期到 ${t.validTo} 已经过了，不能再领` };
+  if (!levelAllowed(t, m.grade)) {
+    return { code: 'COUPON_LEVEL', message: `券「${t.name}」只发给 ${gradeList(t.levels)} 的会员，这位会员现在是 L${m.grade}` };
+  }
+  return null;
+}
+
+export interface MpClaimEligibility {
+  ok: boolean;
+  /** 不能领时：MEMBER_MERGED、MEMBER_FROZEN、NOT_FOUND、TEMPLATE_INACTIVE、TEMPLATE_EXPIRED、COUPON_LEVEL（与发券入口的拒绝码一样） */
+  code?: string;
+  message?: string;
+}
+
+/**
+ * 小程序领券中心的列表用（只读、不加锁、不发券）：这位会员此刻能不能领这张模板，与 issueMpClaimCoupon 同一套规则
+ * （会员停用 / 已合并、模板停用 / 过期、档级不在模板限定里）。领没领满是小程序线自己的领取记录，这里不管；
+ * 列表与真正领取之间规则可能刚好变了，以领取时 issueMpClaimCoupon 的结果为准
+ */
+export async function mpClaimEligibility(
+  db: Db,
+  deps: Pick<Deps, 'config'>,
+  o: { templateId: number; memberId: number; at?: Date },
+): Promise<MpClaimEligibility> {
+  const date = await issueDate(db, deps, o.at ?? new Date());
+  const [m] = await db<MpClaimMember[]>`SELECT id, name, status, grade, merged_into_id FROM members WHERE id = ${o.memberId}`;
+  if (!m) return { ok: false, code: 'NOT_FOUND', message: '会员不存在' };
+  const problem = mpClaimProblem(m, await readTemplate(db, o.templateId, false), date);
+  return problem ? { ok: false, ...problem } : { ok: true };
+}
+
+/** 这个领取记录已经发过：同一位会员、同一张模板返回原来那张；对不上的拒绝 */
+async function mpClaimReplay(db: Db, input: z.infer<typeof MpClaimInput>, date: string): Promise<MpClaimResult | null> {
+  const [r] = await db<{ id: number; issueNo: string; kind: string; templateId: number; memberId: number | null }[]>`
+    SELECT id, issue_no, kind, template_id, member_id FROM coupon_issues WHERE dedupe_key = ${`mp_claim:${input.claimId}`}`;
+  if (!r) return null;
+  if (r.kind !== 'mp_claim' || Number(r.templateId) !== input.templateId || Number(r.memberId) !== input.memberId) {
+    throw conflict('MP_CLAIM_CONFLICT', `领取记录 ${input.claimId} 已经发过另一张券（${r.issueNo}），请核对`, { issueId: Number(r.id) });
+  }
+  const [coupon] = await couponsOfIssue(db, Number(r.id), date);
+  return { issueId: Number(r.id), issueNo: r.issueNo, replayed: true, coupon: coupon! };
+}
+
+/**
+ * 小程序领取（v0.7.27，docs/MP_COUPONS.md 第 3 节，MP22）：小程序线在自己的事务里调用，与领取记录一起提交。
+ *   · 发券记录的种类「小程序领取」，经办人是系统账号「小程序」，一次发 1 张；有效期、门槛、范围照模板；
+ *   · 同一个领取记录只发一次（去重键 mp_claim:<claimId>）：再调用返回第一次发的那张（replayed）；
+ *   · 拒绝（抛 AppError，调用方的事务跟着回滚）：NOT_FOUND 会员或模板不存在、MEMBER_MERGED 会员已合并到另一位、MEMBER_FROZEN 已停用、
+ *     TEMPLATE_INACTIVE 模板停用、TEMPLATE_EXPIRED 模板的固定有效期已过、COUPON_LEVEL 会员的档级不在模板限定的里面（与手动发券一样看会员一行上的档级）、
+ *     MP_CLAIM_CONFLICT 这个领取记录已经发给别的模板或会员；
+ *   · 哪些模板小程序可领、每人限领几张是小程序线自己的（领取记录、可领的券），这里不管。
+ * 加锁：会员一行（FOR UPDATE；调用方已经锁过就不会再等，与停用、合并串行）→ 模板（共享锁，与改模板串行）。
+ */
+export async function issueMpClaimCoupon(tx: Tx, deps: Pick<Deps, 'config'>, raw: MpClaimInput): Promise<MpClaimResult> {
+  const input = parse(MpClaimInput, raw);
+  const at = input.at ?? new Date();
+  const date = await issueDate(tx, deps, at);
+  const [m] = await tx<MpClaimMember[]>`
+    SELECT id, name, status, grade, merged_into_id FROM members WHERE id = ${input.memberId} FOR UPDATE`;
+  if (!m) throw notFound('会员不存在');
+  const prior = await mpClaimReplay(tx, input, date);
+  if (prior) return prior;
+  const template = await lockTemplate(tx, input.templateId);
+  const problem = mpClaimProblem(m, template, date);
+  if (problem || !template) {
+    const { code, message } = problem ?? { code: 'NOT_FOUND', message: '券模板不存在' };
+    throw code === 'NOT_FOUND' ? notFound(message) : unprocessable(code, message);
+  }
+  const staffId = await systemStaffId(tx);
+  const done = await writeIssue(tx, {
+    kind: 'mp_claim',
+    template,
+    memberId: m.id,
+    quantity: 1,
+    reason: '小程序领取',
+    dedupeKey: `mp_claim:${input.claimId}`,
+    staffId,
+    at,
+    date,
+  });
+  if (!done) {
+    // 同一个领取记录在另一个事务里刚发过（它先提交了）：按那一次返回
+    const again = await mpClaimReplay(tx, input, date);
+    if (again) return again;
+    throw conflict('MP_CLAIM_CONFLICT', `领取记录 ${input.claimId} 正在另一笔里发券，请稍后再试`);
+  }
+  await writeAudit(tx, {
+    staffId,
+    action: 'coupon_issued',
+    targetType: 'member',
+    targetId: m.id,
+    detail: { kind: 'mp_claim', claimId: String(input.claimId), issueNo: done.issueNo, template: template.name },
+    businessDate: date,
+  });
+  const [coupon] = await couponsOfIssue(tx, done.issueId, date);
+  return { issueId: done.issueId, issueNo: done.issueNo, replayed: false, coupon: coupon! };
 }
 
 /** 生日礼一次查多少位候选会员（按会员编号翻页，查完为止） */
