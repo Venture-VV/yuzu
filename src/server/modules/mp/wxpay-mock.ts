@@ -2,7 +2,7 @@
 // 本机生成「商户」与「微信支付」的两对密钥和 APIv3 密钥，照真的协议回应下单、查单、关单：核对商户的签名、给应答签名。
 // 顾客「付款」时造一条照真的签名、加密的到账通知，交给门店系统同一条验签、解密、入账的路。不连外网。
 
-import { createCipheriv, createVerify, generateKeyPairSync, randomBytes, randomInt, randomUUID } from 'node:crypto';
+import { createCipheriv, createVerify, generateKeyPairSync, randomInt, randomUUID } from 'node:crypto';
 import {
   createWxPayClient,
   rfc3339Beijing,

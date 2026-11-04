@@ -1,5 +1,5 @@
 // 我的：绑定会员（MP6：用微信验证过的手机号，对上门店的会员档案才绑；对不上不建会员，MP3）、会员卡（会员体系 v2 的档阶与进度）、
-// 余额（本金、赠金）、会员码、流水、券、解绑与换号。会员相关的数字不存本机，门店连不上时显示「门店系统连接中」。
+// 余额（本金、赠金）、会员码、充值（线上充值开着时，第二期 2a）、流水、券、解绑与换号。会员相关的数字不存本机，门店连不上时显示「门店系统连接中」。
 import type { MpHome, MpMe } from '../../../../src/shared/mp';
 import { appVersion } from '../../config/env';
 import { isOffline, member, messageOf, mockUser, mockWechat, show, switchMockUser } from '../../utils/api';
@@ -174,6 +174,9 @@ Page({
       return;
     }
     wx.navigateTo({ url: '/pages/code/index' });
+  },
+  onRecharge() {
+    wx.navigateTo({ url: '/pages/recharge/index' });
   },
   onLedger() {
     wx.navigateTo({ url: '/pages/ledger/index' });
