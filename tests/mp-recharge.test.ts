@@ -488,6 +488,54 @@ describe('解绑、换绑之后的旧充值单（小程序线测试 866ccfa 的 
     expect(await rechargesOf(a.memberId)).toHaveLength(1);
   });
 
+  it('继续支付与解绑交错（这张单已经有 prepay_id、解绑时微信关单失败）：解绑先提交的，继续支付不再签出支付参数；之前拿到参数付了的照样按原单入账（测试会话 #52 的补充）', async () => {
+    const a = await bound('演示·继续支付与解绑');
+    const c = (await createOrder(a.openid, { amount: yuan(600) })).json();
+    expect(c.payment).not.toBeNull();
+    const id = await bindingOf(a.openid);
+    /** 等到有 n 个请求在排这把咨询锁 */
+    const waiters = async (count: number) => {
+      for (let i = 0; i < 200; i++) {
+        const [w] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`;
+        if (w!.n >= count) return;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      throw new Error('没有排上队');
+    };
+    // 先拿住这个微信绑定锁的排他模式，让解绑、继续支付按先后排队：解绑在前
+    let release!: () => void;
+    const released = new Promise<void>((r) => (release = r));
+    let held!: () => void;
+    const holding = new Promise<void>((r) => (held = r));
+    const holder = ctx.sql.begin(async (tx) => {
+      await tx`SELECT pg_advisory_xact_lock(hashtext(${`mp_bind:${a.openid}`}))`;
+      held();
+      await released;
+    });
+    await holding;
+    wx.setDown(true);
+    const unbinding = api(ctx.app, ctx.owner, 'POST', `/api/admin/mp/bindings/${id}/unbind`, { clientKey: randomUUID(), reason: '换手机号' });
+    await waiters(1);
+    const paying = call('POST', `/api/mp/recharge/orders/${c.order.orderNo}/pay`, a.openid, {});
+    await waiters(2);
+    release();
+    await holder;
+    const [u, p] = await Promise.all([unbinding, paying]);
+    wx.setDown(false);
+    expect(u.status, JSON.stringify(u.body)).toBe(200);
+    expect(p.statusCode, p.body).toBe(403);
+    expect(p.json().error.code).toBe('MP_NOT_BOUND');
+    expect(p.json().payment).toBeUndefined();
+    // 关单没成功，建单时拿到的参数还能付：付了照样按原单入账到原来的会员，只入一次；之后补查不再动它
+    expect(await row(c.order.orderNo)).toMatchObject({ status: 'pending' });
+    const msg = wx.pay(c.order.orderNo);
+    expect((await notify(msg)).statusCode).toBe(204);
+    expect((await notify(msg)).statusCode).toBe(204);
+    await sweepRechargeOrders(deps, pay);
+    expect(await row(c.order.orderNo)).toMatchObject({ status: 'paid' });
+    expect(await rechargesOf(a.memberId)).toHaveLength(1);
+  });
+
   it('建单与解绑同时：要么没建成（已解绑），要么建好的单在解绑后马上关掉；不会留下解绑之后还能付的单', async () => {
     await rules();
     for (let i = 0; i < 6; i++) {

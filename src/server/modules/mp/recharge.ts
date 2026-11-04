@@ -439,11 +439,16 @@ async function ensurePayment(deps: Deps, pay: PayRuntime, o: OrderRow): Promise<
     // 下单期间这张单可能被取消、关掉了（「继续支付」与「取消」同时点）：只有还是待支付才记下 prepay_id、给支付参数；
     // 已经不是待支付的，刚才在微信下的这一单要关掉，不能留着能付（审查 2a 的 P2）。
     // 下单期间这条绑定被解除了的也一样：解绑之后不再给支付参数（小程序线测试 866ccfa 的 P1）
-    const [kept] = await deps.sql<{ prepayId: string }[]>`
-      UPDATE mp_recharge_orders o SET prepay_id = coalesce(o.prepay_id, ${prepayId}), updated_at = now()
-      WHERE o.id = ${o.id} AND o.status = 'pending'
-        AND EXISTS (SELECT 1 FROM mp_bindings b WHERE b.id = o.binding_id AND b.unbound_at IS NULL)
-      RETURNING o.prepay_id`;
+    // 在这个微信绑定锁的共享模式里核对、记下（解绑拿排他的）：解绑提交之后不会再记下、签出支付参数（小程序线测试 #52 的补充）
+    const [kept] = await deps.sql.begin(async (tx) => {
+      await setTxTimeouts(tx);
+      await lockOpenidShared(tx, o.openid);
+      return tx<{ prepayId: string }[]>`
+        UPDATE mp_recharge_orders o SET prepay_id = coalesce(o.prepay_id, ${prepayId}), updated_at = now()
+        WHERE o.id = ${o.id} AND o.status = 'pending'
+          AND EXISTS (SELECT 1 FROM mp_bindings b WHERE b.id = o.binding_id AND b.unbound_at IS NULL)
+        RETURNING o.prepay_id`;
+    });
     if (!kept) {
       await pay.client.closeOrder(o.orderNo).then(
         // 微信关上了：解绑的那种这里还是待支付，一起记已关闭（已经不是待支付的不动）；关不上的由每分钟的补查接着关
@@ -478,8 +483,18 @@ export async function getRechargeOrder(deps: Deps, pay: PayRuntime | null, openi
 
 export async function payRechargeOrder(deps: Deps, pay: PayRuntime | null, openid: string, orderNo: string): Promise<MpRechargeCreated> {
   if (!pay) throw payUnavailable();
-  const o = await myOrder(deps.sql, openid, orderNo);
-  const payment = o.status === 'pending' ? await ensurePayment(deps, pay, o) : null;
+  // 已经向微信下过单（有 prepay_id）的：在这个微信绑定锁的共享模式里核对现在这条绑定、签支付参数。解绑拿排他的，
+  // 所以解绑提交之后不会再签出支付参数——继续支付与解绑交错时，要么先签（解绑等它，之后请微信关单），要么解绑先提交、这里不认
+  // （小程序线测试 #52 的补充）。还没下过单的走 ensurePayment：向微信下单在事务外，记下 prepay_id 时同样在这把锁里核对
+  const first = await deps.sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
+    await lockOpenidShared(tx, openid);
+    const order = await myOrder(tx, openid, orderNo);
+    const signed = order.status === 'pending' && order.prepayId && sameMode(pay, order) ? paymentParams(pay.config, order.prepayId) : null;
+    return { order, signed };
+  });
+  const o = first.order;
+  const payment = first.signed ?? (o.status === 'pending' ? await ensurePayment(deps, pay, o) : null);
   return {
     order: await orderView(deps.sql, (await orderById(deps.sql, o.id))!),
     payment,
@@ -532,14 +547,23 @@ export async function mockPayRechargeOrder(deps: Deps, pay: PayRuntime | null, o
   if (!pay?.mock || (deps.config.env !== 'development' && deps.config.env !== 'test') || ['prod', 'shadow', 'test'].includes(deps.config.instance)) {
     throw new AppError(403, 'MP_MOCK_REFUSED', '这个门店系统不接受模拟支付');
   }
+  const mock = pay.mock;
   const o = await myOrder(deps.sql, openid, orderNo);
   if (o.status === 'pending') {
     if (!o.prepayId) await ensurePayment(deps, pay, o);
-    const n = pay.mock.pay(o.orderNo);
-    await handlePayNotify(deps, pay, {
-      headers: n.headers,
-      body: Buffer.from(n.body, 'utf8').toString('base64'),
+    // 模拟「付款」也在绑定锁的共享模式里核对这条绑定：解绑提交之后不再付（与继续支付一样）
+    const n = await deps.sql.begin(async (tx) => {
+      await setTxTimeouts(tx);
+      await lockOpenidShared(tx, openid);
+      const again = await myOrder(tx, openid, orderNo);
+      return again.status === 'pending' ? mock.pay(again.orderNo) : null;
     });
+    if (n) {
+      await handlePayNotify(deps, pay, {
+        headers: n.headers,
+        body: Buffer.from(n.body, 'utf8').toString('base64'),
+      });
+    }
   }
   return orderView(deps.sql, (await orderById(deps.sql, o.id))!);
 }
