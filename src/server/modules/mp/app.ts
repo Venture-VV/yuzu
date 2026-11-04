@@ -12,6 +12,7 @@ import { registerMpCouponRoutes } from './coupon-routes';
 import { loadPayRuntime, setActivePay, type PayRuntime } from './pay';
 import { registerMpPublicRoutes } from './public';
 import { sweepRechargeOrders } from './recharge';
+import { processRefunds, registerRefundRoute } from './refund';
 import { maybeReconcileYesterday } from './recharge-recon';
 import { registerMpRechargeRoutes } from './recharge-routes';
 import { registerMpMemberRoutes } from './routes';
@@ -83,6 +84,8 @@ export async function buildMpApp(sql: Sql, config: AppConfig, opts: MpAppOptions
     }
   }
   registerMpRechargeRoutes(app, { sql, config }, pay);
+  // 原路退回（2d）：向主线报能不能接（门店系统的微信支付配好、店主开着才能接）
+  registerRefundRoute();
   const sweepMs = opts.sweepMs ?? 60_000;
   if (sweepMs > 0) {
     let timer: NodeJS.Timeout | undefined;
@@ -94,6 +97,8 @@ export async function buildMpApp(sql: Sql, config: AppConfig, opts: MpAppOptions
         sweepRechargeOrders({ sql, config }, pay)
           .then(async (r) => {
             if (r.errors) app.log.error(`线上充值单补查：${r.checked} 张里 ${r.errors} 张出错，下一分钟再查`);
+            // 原路退回（2d）：取新的行、申请退款、查处理中的
+            await processRefunds({ sql, config }, pay).catch((error: unknown) => app.log.error({ err: error }, '原路退回出错，下一分钟再试'));
             // 2b 对账：北京时间 10 点半以后对前一天的账（一天一次，没对上的标红给店主看）
             const recon = await maybeReconcileYesterday({ sql, config }, pay).catch((error: unknown) => {
               app.log.error(error instanceof Error ? error.message : String(error));

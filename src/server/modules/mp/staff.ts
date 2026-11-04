@@ -14,6 +14,7 @@ import { memberBindings, resolveMemberCode, unbindMember } from './member';
 import { activePay } from './pay';
 import { closeUnboundOrders } from './recharge';
 import { rechargeAdminData, resolveHeldOrder, runRecon, saveRechargeRules } from './recharge-admin';
+import { handleRefund, retryRefund } from './refund';
 
 const CodeParam = z.object({ code: z.string().trim().max(32) });
 
@@ -71,6 +72,9 @@ export function registerMpStaffRoutes(app: FastifyInstance, deps: Deps) {
   );
   // 2b 对账：按天重新核对（只追加一条结论）
   app.post('/api/admin/mp/recharge/recon', { preHandler: recharge }, async (req) => runRecon(deps, req.body, ctxOf(req)));
+  // 2d 原路退回：没退成的重试、已另行处理
+  app.post('/api/admin/mp/refunds/:id/retry', { preHandler: recharge }, async (req) => retryRefund(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
+  app.post('/api/admin/mp/refunds/:id/handle', { preHandler: recharge }, async (req) => handleRefund(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
 
   // 领券中心（第二期 2c）：哪些券可领、每人限领几张、停领，领取记录（mp.coupon：店主、店总，MP27）
   const coupon = guard('mp.coupon');

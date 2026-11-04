@@ -2,7 +2,8 @@
 //   · 微信支付配没配好（凭据只在门店 yuzu 的 .env）；
 //   · 设置：开关（默认关）、线上可充的套餐、自定义金额的开关（默认开）、线上单笔上限、每人每天笔数（带版本号保存，结果待确认照其他开关）；
 //   · 已付款待处理的单：重新入账、按金额入账（不发套餐券）、已另行处理，都要写原因（带操作编号，结果待确认时查回或按原内容重新提交）；
-//   · 最近的单子与验过签、门店系统里找不到单子的到账通知。
+//   · 最近的单子与验过签、门店系统里找不到单子的到账通知；
+//   · 原路退回（2d）：开关在设置里；没退成的重试、已另行处理（RefundsCard.tsx）。
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -16,6 +17,7 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, ConfirmCheck, Field, Input, MoneyInput, Notice, Segmented, Skeleton, Textarea } from '../../components/ui';
 import { mpAdminKey, PendingUpdates, saveError, updateFailed } from './mpAdminShared';
 import { lookupResolveOp, removeMpPending, sendMpOp, sendResolve, sendUpdate, useMpPending, type MpPendingOp } from './mpPending';
+import { RefundsCard } from './RefundsCard';
 
 const rechargeKey = ['mp', 'recharge'] as const;
 
@@ -49,6 +51,7 @@ export function RechargeTab({ data }: { data: MpAdminData }) {
       <PayStatus d={d} />
       <RulesForm key={data.rechargeRules.version} d={d} rules={data.rechargeRules} pending={pendingRules.length > 0} />
       <HeldOrders orders={d.held} pending={pendingResolves} />
+      <RefundsCard refunds={d.refunds} refundAuto={data.rechargeRules.refundAuto} />
       <RecentOrders orders={d.recent} />
       <Recons recons={d.recons} canRun={d.payMode !== null} />
       {d.orphans.length > 0 && (
@@ -89,6 +92,7 @@ function RulesForm({ d, rules, pending }: { d: MpRechargeAdminData; rules: MpAdm
   const [enabled, setEnabled] = useState(rules.enabled);
   const [planIds, setPlanIds] = useState<number[]>(rules.planIds);
   const [customEnabled, setCustomEnabled] = useState(rules.customEnabled);
+  const [refundAuto, setRefundAuto] = useState(rules.refundAuto);
   const [max, setMax] = useState(String(rules.maxCents / 100));
   const [daily, setDaily] = useState(String(rules.dailyLimit));
   const [saving, setSaving] = useState(false);
@@ -108,7 +112,7 @@ function RulesForm({ d, rules, pending }: { d: MpRechargeAdminData; rules: MpAdm
         type: 'recharge_rules_update',
         url: '/api/admin/mp/recharge/rules',
         target: 'recharge_rules',
-        body: { enabled, planIds, customEnabled, maxCents: maxCents!, dailyLimit, version: rules.version },
+        body: { enabled, planIds, customEnabled, maxCents: maxCents!, dailyLimit, refundAuto, version: rules.version },
         summary: '线上充值的设置',
         staffName: session.staff.displayName,
       });
@@ -157,6 +161,9 @@ function RulesForm({ d, rules, pending }: { d: MpRechargeAdminData; rules: MpAdm
       </Field>
       <ConfirmCheck checked={customEnabled} onChange={setCustomEnabled}>
         允许顾客自己填金额（整元，最少是 1 元与首充 / 续充最低里大的，最多是线上单笔上限）
+      </ConfirmCheck>
+      <ConfirmCheck checked={refundAuto} onChange={setRefundAuto}>
+        原路退回：退储值时，线上充值的那一行可以选「门店系统原路退回」，门店系统自己退回到顾客付款的微信，店里不用再去商户平台（关掉只影响以后的退储值）
       </ConfirmCheck>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="线上单笔上限" hint={`不超过前台的单笔上限 ${formatYuan(d.counterMaxCents)}；超过的请顾客到前台`} htmlFor="mp-recharge-max">
@@ -360,6 +367,10 @@ const ISSUE_LABELS: Record<MpReconIssueKind, string> = {
   NOT_IN_BILL: '门店入了账、微信账单里没有',
   AMOUNT_MISMATCH: '金额对不上',
   TX_MISMATCH: '交易单号对不上',
+  REFUND_UNKNOWN: '微信退了、门店没有这张原路退回单',
+  REFUND_NOT_RECORDED: '微信已退、门店还没记已退到',
+  REFUND_NOT_IN_BILL: '门店记了已退到、微信账单里没有',
+  REFUND_AMOUNT_MISMATCH: '退款金额对不上',
 };
 
 /** 2b 对账：每天自动对前一天的微信支付交易账单；没对上的标红，可以按天重新核对（只追加一条结论） */

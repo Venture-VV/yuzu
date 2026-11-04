@@ -143,7 +143,10 @@ export type AuditAction =
   | 'mp_content_saved'
   | 'mp_op_abandoned'
   // 小程序线第二期：店主处理「已付款待处理」的线上充值单
-  | 'mp_recharge_resolved';
+  | 'mp_recharge_resolved'
+  // 小程序线第二期 2d：原路退回没退成的，店主重试、已另行处理
+  | 'mp_refund_retried'
+  | 'mp_refund_handled';
 
 export interface AuditEntry {
   staffId: number | null;

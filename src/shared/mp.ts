@@ -311,15 +311,30 @@ export interface MpRechargeRules {
   maxCents: number;
   /** 每人每天最多几笔（按下单的营业日，没付关掉的不算） */
   dailyLimit: number;
+  /**
+   * 原路退回（2d）：开着、门店系统的微信支付也配好时，主线退储值里线上充值那一行可以交给门店系统原路退回到顾客的微信。
+   * 关掉只影响以后的退储值，已经交给门店系统的照样退完。默认开
+   */
+  refundAuto: boolean;
   /** 每保存一次加一；后台保存时带上看到的版本号 */
   version: number;
 }
-export const DEFAULT_MP_RECHARGE_RULES: MpRechargeRules = { enabled: false, planIds: [], customEnabled: true, maxCents: 1_000_000, dailyLimit: 3, version: 0 };
+export const DEFAULT_MP_RECHARGE_RULES: MpRechargeRules = {
+  enabled: false,
+  planIds: [],
+  customEnabled: true,
+  maxCents: 1_000_000,
+  dailyLimit: 3,
+  refundAuto: true,
+  version: 0,
+};
 export const MP_RECHARGE_RULES_KEY = 'mp_recharge_rules';
 /** 一张单从下单到微信支付过期：15 分钟（MP19） */
 export const MP_RECHARGE_EXPIRE_MINUTES = 15;
 /** 商户单号：MPR + 下单的营业日 + 10 位随机 */
 export const MP_RECHARGE_ORDER_NO = /^MPR[0-9]{8}[0-9A-Z]{10}$/;
+/** 原路退回（2d）的商户退款单号：MPRF + 北京时间的日期 + 10 位随机 */
+export const MP_REFUND_NO = /^MPRF[0-9]{8}[0-9A-Z]{10}$/;
 
 /** pending 待支付、paid 已入账、closed 已关闭、held 已付款待处理（门店没能自动入账）、handled 已处理（店主另行处理了） */
 export type MpRechargeStatus = 'pending' | 'paid' | 'closed' | 'held' | 'handled';
@@ -463,6 +478,44 @@ export interface MpRechargeAdminData {
   orphans: { id: number; createdAt: string; outTradeNo: string; transactionId: string | null; amount: number | null }[];
   /** 对账（2b）：最近 30 个账单日，每天取最后一次核对 */
   recons: MpRechargeRecon[];
+  /** 原路退回（2d）：没退成的、处理中的全部，加最近 30 张退到了的 */
+  refunds: MpRefundOrderAdmin[];
+}
+
+// ── 2d 原路退回（docs/MP_RECHARGE.md 第 9 节）──
+
+/**
+ * new 待申请（连不上、余额不够时隔一会儿再试）、processing 微信处理中、success 已退到、abnormal 退款异常（要到商户平台处理）、
+ * closed 退款关闭、failed 没能退（微信拒绝、找不到原单）、handled 店主已另行处理
+ */
+export type MpRefundStatus = 'new' | 'processing' | 'success' | 'abnormal' | 'closed' | 'failed' | 'handled';
+
+export interface MpRefundOrderAdmin {
+  id: number;
+  createdAt: string;
+  status: MpRefundStatus;
+  memberId: number;
+  memberName: string;
+  memberNo: string;
+  /** 主线的退储值单号 */
+  memberRefundNo: string;
+  rechargeDocNo: string;
+  outTradeNo: string | null;
+  transactionId: string;
+  outRefundNo: string;
+  /** 这一行退多少（分） */
+  amount: number;
+  wxRefundId: string | null;
+  /** 退到哪（「支付用户零钱」「招商银行信用卡0403」） */
+  receivedAccount: string | null;
+  succeededAt: string | null;
+  failCode: string | null;
+  failMessage: string | null;
+  attempts: number;
+  nextTryAt: string | null;
+  handledNote: string | null;
+  handledByName: string | null;
+  handledAt: string | null;
 }
 
 // ── 2b 对账（docs/MP_RECHARGE.md 第 8 节）──
@@ -471,7 +524,18 @@ export interface MpRechargeAdminData {
  * 没对上的一笔：NOT_BOOKED 微信有、门店没入账（查单也没补上）；UNKNOWN_ORDER 微信有、门店系统里没有这张单；
  * NOT_IN_BILL 门店入了账、微信那天的账单里没有；AMOUNT_MISMATCH 金额对不上；TX_MISMATCH 交易单号对不上
  */
-export type MpReconIssueKind = 'NOT_BOOKED' | 'UNKNOWN_ORDER' | 'NOT_IN_BILL' | 'AMOUNT_MISMATCH' | 'TX_MISMATCH';
+export type MpReconIssueKind =
+  | 'NOT_BOOKED'
+  | 'UNKNOWN_ORDER'
+  | 'NOT_IN_BILL'
+  | 'AMOUNT_MISMATCH'
+  | 'TX_MISMATCH'
+  // 2d 原路退回（账单里商户退款单号是 MPRF 开头的退款行）：门店系统里没有这张原路退回单、微信退了门店还没记已退到、
+  // 门店记了已退到微信那天的账单里没有、退款金额对不上
+  | 'REFUND_UNKNOWN'
+  | 'REFUND_NOT_RECORDED'
+  | 'REFUND_NOT_IN_BILL'
+  | 'REFUND_AMOUNT_MISMATCH';
 
 export interface MpReconIssue {
   kind: MpReconIssueKind;

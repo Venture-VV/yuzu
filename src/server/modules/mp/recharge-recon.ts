@@ -3,11 +3,12 @@
 // 只看、只记：不改单子、不动钱。唯一会动的是「微信有、门店还没记」的那一笔：先按商户单号去微信查单（与每分钟补查同一条路），
 // 补上了就不算没对上。同一个商户号下不是小程序的交易（例如前台扫码收款，商户单号不是 MPR 开头）不核对，只数一下。
 
-import { MP_RECHARGE_ORDER_NO, type MpRechargeRecon, type MpReconIssue } from '@shared/mp';
+import { MP_RECHARGE_ORDER_NO, MP_REFUND_NO, type MpRechargeRecon, type MpReconIssue } from '@shared/mp';
 import type { Db } from '../../db';
 import type { Deps } from '../../lib/context';
 import type { PayRuntime } from './pay';
 import { syncOrderFromWechat, type OrderRow } from './recharge';
+import { syncRefundOrder } from './refund';
 import { WxPayError } from './wxpay';
 
 /** 微信支付的账单按北京时间的自然日 */
@@ -101,6 +102,8 @@ export async function reconcileDay(deps: Deps, pay: PayRuntime, billDate: string
     });
   }
 
+  issues.push(...(await reconcileRefunds(deps, pay, billDate, mine)));
+
   const [row] = await deps.sql<{ id: number }[]>`
     INSERT INTO mp_recharge_recons (bill_date, ok, wx_count, wx_amount, store_count, store_amount, issues, refunds, source, staff_id)
     VALUES (${billDate}, ${issues.length === 0}, ${success.length}, ${success.reduce((a, r) => a + r.amount, 0)},
@@ -108,6 +111,79 @@ export async function reconcileDay(deps: Deps, pay: PayRuntime, billDate: string
             ${who.source}, ${who.source === 'manual' ? who.staffId : null})
     RETURNING id`;
   return (await recentRecons(deps.sql, 1, row!.id))[0]!;
+}
+
+type RefundRecon = { id: number; outRefundNo: string; outTradeNo: string | null; transactionId: string; amount: number; status: string; succeededAt: string | null };
+
+/**
+ * 2d 原路退回：账单里商户退款单号是 MPRF 开头的退款行（门店系统自己申请的）与原路退回单逐笔核对；
+ * 微信说退到了、门店还没记的，先按现在的单号去微信查一次（与每分钟的查退款同一条路），补上了就不算没对上。
+ * 同一个商户号下在商户平台手动退的（单号不是 MPRF 开头）只列在退款里，不核对
+ */
+async function reconcileRefunds(deps: Deps, pay: PayRuntime, billDate: string, mine: { tradeState: string; outTradeNo: string; transactionId: string; refundAmount: number | null; refundStatus: string | null; outRefundNo: string | null }[]): Promise<MpReconIssue[]> {
+  const issues: MpReconIssue[] = [];
+  const matched = new Set<string>();
+  const rows = mine.filter((r) => r.tradeState === 'REFUND' && r.outRefundNo && MP_REFUND_NO.test(r.outRefundNo));
+  const load = async (no: string) =>
+    (await deps.sql<RefundRecon[]>`SELECT id, out_refund_no, out_trade_no, transaction_id, amount, status, succeeded_at FROM mp_refund_orders WHERE out_refund_no = ${no}`)[0] ?? null;
+  for (const r of rows) {
+    let ro = await load(r.outRefundNo!);
+    if (!ro) {
+      issues.push({
+        kind: 'REFUND_UNKNOWN',
+        outTradeNo: r.outTradeNo,
+        transactionId: r.transactionId,
+        wxAmount: r.refundAmount,
+        storeAmount: null,
+        note: `微信支付退了一笔（商户退款单号 ${r.outRefundNo}），门店系统里没有这张原路退回单（例如门店系统从备份恢复过）`,
+      });
+      continue;
+    }
+    if (ro.status !== 'success' && (r.refundStatus === 'SUCCESS' || r.refundStatus === null)) {
+      await syncRefundOrder(deps, pay, Number(ro.id));
+      ro = (await load(r.outRefundNo!))!;
+    }
+    if (ro.status !== 'success') {
+      issues.push({
+        kind: 'REFUND_NOT_RECORDED',
+        outTradeNo: r.outTradeNo,
+        transactionId: r.transactionId,
+        wxAmount: r.refundAmount,
+        storeAmount: Number(ro.amount),
+        note: `微信支付已经退了（商户退款单号 ${r.outRefundNo}），门店系统还没记已退到（查退款也没补上）`,
+      });
+      continue;
+    }
+    matched.add(ro.outRefundNo);
+    if (r.refundAmount !== Number(ro.amount)) {
+      issues.push({
+        kind: 'REFUND_AMOUNT_MISMATCH',
+        outTradeNo: r.outTradeNo,
+        transactionId: r.transactionId,
+        wxAmount: r.refundAmount,
+        storeAmount: Number(ro.amount),
+        note: `同一笔退款（商户退款单号 ${r.outRefundNo}）两边的金额不一样`,
+      });
+    }
+  }
+  // 门店系统里这一天（北京时间）退到的原路退回单，微信那天的账单里都要有
+  const ours = await deps.sql<RefundRecon[]>`
+    SELECT id, out_refund_no, out_trade_no, transaction_id, amount, status, succeeded_at FROM mp_refund_orders
+    WHERE status = 'success' AND (succeeded_at AT TIME ZONE ${WX_TZ})::date = ${billDate}::date ORDER BY id`;
+  for (const ro of ours) {
+    if (matched.has(ro.outRefundNo)) continue;
+    const t = Date.parse(ro.succeededAt!);
+    const nearMidnight = Math.min(...[0, 1].map((k) => Math.abs(t - Date.parse(`${billDate}T00:00:00+08:00`) - k * 86_400_000))) < 10 * 60_000;
+    issues.push({
+      kind: 'REFUND_NOT_IN_BILL',
+      outTradeNo: ro.outTradeNo,
+      transactionId: ro.transactionId,
+      wxAmount: null,
+      storeAmount: Number(ro.amount),
+      note: `门店记了已退到（商户退款单号 ${ro.outRefundNo}），微信这一天的账单里没有${nearMidnight ? '；退到的时间在零点前后，请看前后一天的对账' : ''}`,
+    });
+  }
+  return issues;
 }
 
 /** 门店系统里那一天（北京时间）付款的单子 */

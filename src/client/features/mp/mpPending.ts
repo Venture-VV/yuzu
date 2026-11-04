@@ -1,5 +1,14 @@
 import { useMemo, useSyncExternalStore } from 'react';
-import type { MpAdminData, MpBannerAbandonResult, MpBannerAdmin, MpBannerOpLookup, MpBindingRow, MpRechargeAdminData, MpRechargeOrderAdmin } from '@shared/mp';
+import type {
+  MpAdminData,
+  MpBannerAbandonResult,
+  MpBannerAdmin,
+  MpBannerOpLookup,
+  MpBindingRow,
+  MpRechargeAdminData,
+  MpRechargeOrderAdmin,
+  MpRefundOrderAdmin,
+} from '@shared/mp';
 import { api, ApiError, UncertainError } from '../../lib/api';
 import { uuid } from '../../lib/utils';
 
@@ -20,7 +29,7 @@ import { uuid } from '../../lib/utils';
 // 作废用小程序线自己的登记（迁移 044），不进共用的 op_fences，所以不用 ERP 的面板。
 
 export type MpUpdateType = 'rules_update' | 'store_update' | 'banner_update' | 'intro_update' | 'recharge_rules_update' | 'coupon_rules_update';
-export type MpOpType = 'banner_create' | 'unbind' | 'recharge_resolve' | MpUpdateType;
+export type MpOpType = 'banner_create' | 'unbind' | 'recharge_resolve' | 'refund_retry' | 'refund_handle' | MpUpdateType;
 
 export interface MpPendingOp {
   /** 操作编号（就是请求里的 clientKey） */
@@ -41,6 +50,8 @@ export interface MpPendingOp {
   /** 修改内容：改的是哪一条（门店编号、轮播编号、项目编号；开关为 rules）与提交时带的版本号 */
   target?: string;
   baseVersion?: number;
+  /** 原路退回的重试：提交时那张原路退回单的状态（查回时比对） */
+  seen?: string;
 }
 
 const STORAGE_KEY = 'yuzu.mpPending.v1';
@@ -229,6 +240,31 @@ export async function lookupResolveOp(op: MpPendingOp): Promise<{ done: boolean 
   return { done: !data.held.some((o) => String(o.id) === op.target) };
 }
 
+/**
+ * 原路退回（2d）：重试、已另行处理。都带店主看到的商户退款单号：单号变了（别人刚重试过）门店系统就不再动它，
+ * 所以按原内容重新提交不会退两次、不会换两次单号
+ */
+export const sendRefundAct = (op: { key: string; refundId: number; act: 'retry' | 'handle'; outRefundNo: string; status: string; note?: string; summary: string; staffName: string }) =>
+  sendMpOp<MpRefundOrderAdmin>({
+    key: op.key,
+    type: op.act === 'retry' ? 'refund_retry' : 'refund_handle',
+    url: `/api/admin/mp/refunds/${op.refundId}/${op.act}`,
+    body: { outRefundNo: op.outRefundNo, ...(op.note ? { note: op.note } : {}) },
+    summary: op.summary,
+    staffName: op.staffName,
+    target: String(op.refundId),
+    seen: op.status,
+  });
+
+/** 原路退回的操作查回（只读）：另行处理看是不是已经「已另行处理」；重试看单号或状态是不是变了 */
+export async function lookupRefundOp(op: MpPendingOp): Promise<{ done: boolean }> {
+  const data = await api.get<MpRechargeAdminData>('/api/admin/mp/recharge');
+  const r = data.refunds.find((x) => String(x.id) === op.target);
+  if (!r) return { done: true };
+  if (op.type === 'refund_handle') return { done: r.status === 'handled' };
+  return { done: r.outRefundNo !== op.body.outRefundNo || r.status !== op.seen };
+}
+
 /** 新建轮播按编号查回（只读）：查不到不能断定没新建 */
 export const lookupBannerOp = (op: MpPendingOp) => api.get<MpBannerOpLookup>(`/api/admin/mp/banners/ops/${op.key}`);
 
@@ -254,7 +290,7 @@ const CONTENT_FIELDS: Record<MpUpdateType, string[]> = {
   store_update: ['name', 'hours', 'address', 'phone', 'latitude', 'longitude', 'notice', 'imageId', 'visible'],
   banner_update: ['title', 'imageId', 'link', 'startsOn', 'endsOn', 'sortOrder', 'active'],
   intro_update: ['intro', 'imageId'],
-  recharge_rules_update: ['enabled', 'planIds', 'customEnabled', 'maxCents', 'dailyLimit'],
+  recharge_rules_update: ['enabled', 'planIds', 'customEnabled', 'maxCents', 'dailyLimit', 'refundAuto'],
   coupon_rules_update: ['enabled', 'offers'],
 };
 
