@@ -16,6 +16,7 @@ import { GradeBadge } from '../membership/GradeBadge';
 import { GradeCard } from '../membership/GradeCard';
 import { BenefitsCard } from '../membership/BenefitsCard';
 import { TrialsCard } from '../membership/TrialsCard';
+import { CountCardsCard } from '../membership/CountCardsCard';
 import { AccountCard } from '../membership/AccountCard';
 
 export function MemberDetail({
@@ -220,6 +221,9 @@ export function MemberDetail({
 
       {/* 储值与账户（会员体系收尾，v0.7.26）：退储值、停用 / 启用、合并；换会员时整块重来（操作编号不带到下一位会员） */}
       <AccountCard key={`account-${member.id}`} member={member} />
+
+      {/* 次卡（v0.7.28）：换会员时整块重来（售卡、退卡的操作编号不带到下一位会员） */}
+      <CountCardsCard key={`count-cards-${member.id}`} member={member} />
 
       {/* 账户内券（v0.7.20）：换会员时整块重来（筛选、发券的操作编号都不带到下一位会员） */}
       {can('member.read') && <MemberCouponsCard key={member.id} member={member} />}

@@ -85,7 +85,7 @@ beforeAll(async () => {
   // 现版本结账时记部门营业额快照（025 才有）：写入期间临时建一个什么都不做的函数，迁移前删掉（迁移 025 会给这张结账单补记）
   await sql.unsafe('CREATE FUNCTION yuzu_snapshot_checkout_items(p_checkout bigint, p_current boolean) RETURNS void LANGUAGE plpgsql AS $$ BEGIN END $$');
   // 现版本结账时一起结束派对房等开着的使用单（036 才有）：写入期间临时建最小的表，迁移前删掉
-  await sql`CREATE TABLE space_usages (id bigint, usage_no text, visit_id bigint, status text)`;
+  await sql`CREATE TABLE space_usages (id bigint, usage_no text, visit_id bigint, status text, space_id bigint)`;
   // 现版本充值时按发券规则发券、读结账单时列出退款单（037 才有）：写入期间临时建最小的表，迁移前删掉
   await sql`CREATE TABLE coupon_rules (id bigint, kind text, level smallint, plan_id bigint, template_id bigint, quantity integer, active boolean)`;
   await sql`CREATE TABLE refunds (id bigint, refund_no text, checkout_id bigint, amount bigint, reason text, status text, business_date date, created_at timestamptz, operator_id bigint)`;

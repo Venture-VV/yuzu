@@ -105,6 +105,12 @@ export type AuditAction =
   | 'booking_cancel'
   | 'booking_no_show'
   | 'booking_arrive'
+  // 次卡（v0.7.28 ④）
+  | 'count_card_type_saved'
+  | 'count_card_sale'
+  | 'count_card_refund'
+  | 'count_card_expire'
+  | 'count_card_opening'
   | 'floorplan_restore'
   | 'floorplan_outline'
   | 'guide_marker_saved'

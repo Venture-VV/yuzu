@@ -73,6 +73,9 @@ export const FENCED_OPS = [
   // 预约（v0.7.28，迁移 053）：新建、改动（确认、改时间、到店、取消、爽约）
   'booking_create',
   'booking_change',
+  // 次卡（v0.7.28，迁移 054）：售卡、退卡；编号记在卡、退卡单上（client_key）
+  'count_card_sale',
+  'count_card_refund',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -120,6 +123,7 @@ export async function fenceKey(
   if (opType === 'benefit_use' && (await benefitUseOpRef(tx, key)) !== null) return { existingOpType: opType };
   if (opType === 'member_trial' && (await trialOpRef(tx, key)) !== null) return { existingOpType: opType };
   if (isMemberOp(opType) && (await memberOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
+  if (isCountCardOp(opType) && (await countCardOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   const rows = await tx`
     INSERT INTO op_fences (key, op_type, staff_id) VALUES (${key}, ${opType}, ${staffId})
     ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;
@@ -190,5 +194,18 @@ export async function memberOpRef(db: Db, key: string, op: MemberOp): Promise<nu
     return row ? Number(row.memberId) : null;
   }
   const [row] = await db<{ id: number }[]>`SELECT id FROM member_merges WHERE client_key = ${key}`;
+  return row ? Number(row.id) : null;
+}
+
+const COUNT_CARD_OPS = ['count_card_sale', 'count_card_refund'] as const;
+type CountCardOp = (typeof COUNT_CARD_OPS)[number];
+export const isCountCardOp = (op: string): op is CountCardOp => (COUNT_CARD_OPS as readonly string[]).includes(op);
+
+/** 次卡（v0.7.28）的操作编号记在卡（售卡）、退卡单上：查到时返回那张卡的编号 */
+export async function countCardOpRef(db: Db, key: string, op: CountCardOp): Promise<number | null> {
+  const [row] =
+    op === 'count_card_sale'
+      ? await db<{ id: number }[]>`SELECT id FROM count_cards WHERE client_key = ${key}`
+      : await db<{ id: number }[]>`SELECT card_id AS id FROM count_card_refunds WHERE client_key = ${key}`;
   return row ? Number(row.id) : null;
 }

@@ -27,6 +27,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf, ISO_DATE } from '@shared/business-date';
 import type { RefundShiftOptions, ShiftRecord, ShiftSummary } from '@shared/checkout';
+import type { PaymentMethod } from '@shared/labels';
 import { can } from '@shared/permissions';
 import type { Db, Tx } from '../db';
 import { guard } from '../auth/guard';
@@ -153,6 +154,8 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
       memberRefundTotals: { count: number; total: number };
       memberRefundByMethod: NonNullable<ShiftSummary['memberRefunds']>['byMethod'];
       memberRefundList: NonNullable<ShiftSummary['memberRefunds']>['list'];
+      countCardSales: { method: PaymentMethod; count: number; amount: number }[];
+      countCardRefunds: { method: PaymentMethod; count: number; amount: number }[];
     })[]
   >`
     WITH co AS (
@@ -202,6 +205,13 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
       WHERE r.shift_id = ${s.id}
     ), mrl AS (
       SELECT l.refund_id, l.method, l.amount, l.ref FROM member_refund_lines l JOIN mr ON mr.id = l.refund_id
+    ), ccs AS (
+      -- 次卡（v0.7.28）：本班次卖的卡（售价按收款方式）
+      SELECT payment_method AS method, count(*)::int AS count, sum(price)::bigint AS amount FROM count_cards
+      WHERE shift_id = ${s.id} AND source = 'sale' GROUP BY payment_method
+    ), ccr AS (
+      -- 次卡（v0.7.28）：本班次退的卡（不能作废）
+      SELECT method, count(*)::int AS count, sum(amount)::bigint AS amount FROM count_card_refunds WHERE shift_id = ${s.id} GROUP BY method
     )
     SELECT
       (SELECT json_build_object('count', count(*), 'total', coalesce(sum(total_amount), 0)) FROM co) AS checkouts,
@@ -242,9 +252,11 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
                 'cash', coalesce((SELECT sum(mrl.amount) FROM mrl WHERE mrl.refund_id = mr.id AND mrl.method = 'cash'), 0),
                 'refs', coalesce((SELECT json_agg(json_build_object('method', mrl.method, 'amount', mrl.amount, 'ref', mrl.ref) ORDER BY mrl.method)
                                   FROM mrl WHERE mrl.refund_id = mr.id), '[]'::json))
-              ORDER BY mr.created_at, mr.id), '[]'::json) FROM mr) AS member_refund_list`;
+              ORDER BY mr.created_at, mr.id), '[]'::json) FROM mr) AS member_refund_list,
+      (SELECT coalesce(json_agg(json_build_object('method', method, 'count', count, 'amount', amount) ORDER BY method), '[]'::json) FROM ccs) AS count_card_sales,
+      (SELECT coalesce(json_agg(json_build_object('method', method, 'count', count, 'amount', amount) ORDER BY method), '[]'::json) FROM ccr) AS count_card_refunds`;
   const { checkouts, checkoutByMethod, recharges, rechargeByMethod, walletConsumes, coupons, refunds, refundByMethod, depositReceived, depositRefunded } = row!;
-  const { refundSlipTotals, refundSlipByMethod, refundSlipList, memberRefundTotals, memberRefundByMethod, memberRefundList } = row!;
+  const { refundSlipTotals, refundSlipByMethod, refundSlipList, memberRefundTotals, memberRefundByMethod, memberRefundList, countCardSales, countCardRefunds } = row!;
   const cashCheckout = checkoutByMethod.find((m) => m.method === 'cash')?.amount ?? 0;
   const cashRecharge = rechargeByMethod.find((m) => m.method === 'cash')?.amount ?? 0;
   // 升级时已有的班次：反结账按原口径只列提醒（与 v0.3 的交班表相同），不列退款、不扣现金
@@ -259,6 +271,11 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
   // 储值退回（v0.7.26）：现金从本班钱箱退，扣减应有现金；本班次没有退储值时不列这一项
   const hasMemberRefunds = memberRefundTotals.count > 0;
   const cashMemberRefund = Number(memberRefundByMethod.find((m) => m.method === 'cash')?.amount ?? 0);
+  // 次卡（v0.7.28）：卖卡收的现金计入、退卡退的现金扣减；本班次没有次卡往来时不列这一项
+  const hasCountCards = countCardSales.length > 0 || countCardRefunds.length > 0;
+  const cashCountCard = Number(countCardSales.find((m) => m.method === 'cash')?.amount ?? 0) - Number(countCardRefunds.find((m) => m.method === 'cash')?.amount ?? 0);
+  const cardRows = (rows: { method: PaymentMethod; count: number; amount: number }[]) => rows.map((m) => ({ ...m, amount: Number(m.amount) }));
+  const cardSum = (rows: { count: number; amount: number }[]) => ({ count: rows.reduce((t, m) => t + m.count, 0), total: rows.reduce((t, m) => t + Number(m.amount), 0) });
   return {
     from: new Date(from).toISOString(),
     to: new Date(to).toISOString(),
@@ -305,6 +322,14 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
           },
         }
       : {}),
+    ...(hasCountCards
+      ? {
+          countCards: {
+            sales: { ...cardSum(countCardSales), byMethod: cardRows(countCardSales) },
+            refunds: { ...cardSum(countCardRefunds), byMethod: cardRows(countCardRefunds) },
+          },
+        }
+      : {}),
     cash: {
       opening: s.openingCash,
       checkout: cashCheckout,
@@ -313,7 +338,8 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
       ...(hasCashDeposit ? { deposit: cashDeposit } : {}),
       ...(hasSlips ? { refundSlip: cashSlip } : {}),
       ...(hasMemberRefunds ? { memberRefund: cashMemberRefund } : {}),
-      expected: s.openingCash + cashCheckout + cashRecharge - cashRefund + cashDeposit - cashSlip - cashMemberRefund,
+      ...(hasCountCards ? { countCard: cashCountCard } : {}),
+      expected: s.openingCash + cashCheckout + cashRecharge - cashRefund + cashDeposit - cashSlip - cashMemberRefund + cashCountCard,
     },
   };
 }

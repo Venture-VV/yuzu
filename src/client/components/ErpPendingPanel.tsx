@@ -75,6 +75,10 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
       return typeof d.memberId === 'number' ? { refId: d.memberId } : null;
     case 'member_merge':
       return d.merge && typeof d.merge === 'object' ? { refId: d.merge.id } : null;
+    // 次卡（v0.7.28）：售卡、退卡都返回那张卡
+    case 'count_card_sale':
+    case 'count_card_refund':
+      return d.card && typeof d.card === 'object' ? { refId: d.card.id } : null;
   }
 }
 

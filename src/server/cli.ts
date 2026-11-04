@@ -20,6 +20,9 @@
 //                                         导入旧系统（EBC）会员余额作为期初（真实业务数据，默认只预览，加 --apply 才写入）；
 //                                         本金、赠金分开记「期初导入」流水，不计入充值实收；同一位会员只能有一笔有效的期初；
 //                                         给了控制总数时核对「导入 + 排除清单 = 控制总数」，不一致不导入（正式环境必须给）
+//   import-count-cards <旧次卡.csv> --operator <店主账号> [--batch 批次备注] [--apply]
+//                                         旧次卡期初（v0.7.28）：每行一位会员的一张卡（手机号或会员号、卡名、能抵的项目与票种、总次数、剩余次数、
+//                                         原售价、到期日），只记次数、不是收款；默认只预览，有一行不对整批不写，加 --apply 才写入
 //   import-legacy <文件.xlsx> --operator <店主账号> [--apply] [--replace 原因]
 //                                         8–10 月旧账只读对照（v0.7.10）：认出是四份原始 Excel 中的哪一份，默认只预览（行数与核验结果），
 //                                         加 --apply 才写进只读表（不进正式账）；这份表已导入过时要 --replace 写原因（旧的作废）
@@ -57,6 +60,7 @@
 //                                         模拟终端上的设备服务（桥，不连数据库）：输入 card <卡号>、scan <条码>、nfc <卡号>、unplug <键>、plug <键>、
 //                                         fail、quit；--auto 每隔几秒自动发一次读卡与扫码
 
+import { importOpeningCountCards, OPENING_COUNT_CARD_HEADER, parseOpeningCountCardsCsv } from './modules/count-cards';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -721,6 +725,22 @@ async function main() {
         if (run?.error || benefits?.error) process.exitCode = 1;
         break;
       }
+      case 'import-count-cards': {
+        const file = args.find((a, i) => !a.startsWith('--') && !['--operator', '--batch'].includes(args[i - 1] ?? ''));
+        const username = flag(args, 'operator')?.toLowerCase();
+        if (!file || !username) throw new Error('用法：import-count-cards <旧次卡.csv> --operator <店主账号> [--batch 批次备注] [--apply]');
+        await prepareDb(sql, config);
+        const actor = await ownerOperator(sql, username, '旧次卡期初导入');
+        const parsed = parseOpeningCountCardsCsv(await readImportFile(file));
+        for (const e of parsed.errors.slice(0, 30)) console.log(`✗ 第 ${e.line} 行：${e.message}`);
+        if (parsed.errors.length) throw new Error(`有 ${parsed.errors.length} 处格式不对，未导入（表头：${OPENING_COUNT_CARD_HEADER.join('、')}）`);
+        const apply = args.includes('--apply');
+        const r = await importOpeningCountCards({ sql, config }, parsed.rows, { operatorId: actor.id, apply, batch: flag(args, 'batch') ?? basename(file) });
+        for (const row of r.rows) console.log(`${row.ok ? '✓' : '✗'} 第 ${row.line} 行 ${row.memberName ?? '（找不到会员）'} · ${row.name} · 剩 ${row.remaining} 次${row.problem ? `：${row.problem}` : ''}`);
+        if (r.bad) throw new Error(`有 ${r.bad} 行不对，整批没有写入；改好后重新预览`);
+        console.log(apply ? `✓ 已导入 ${r.ok} 张旧次卡（只记次数，不是收款）。请运行 check 核对。` : `以上为预览（${r.ok} 张），没有写入。确认无误后加 --apply 执行导入（门店环境须店主同意）。`);
+        break;
+      }
       case 'import-benefits': {
         if (!args.includes('--quote')) throw new Error('用法：import-benefits --quote [--apply]（导入本店权益清单，默认只预览）');
         await prepareDb(sql, config);
@@ -736,7 +756,7 @@ async function main() {
         break;
       }
       default:
-        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo [--previous-day] | seed-billing-demo [--previous-day] | seed-legacy-demo | demo-prepare [--previous-day] | demo-check | demo-reset --confirm <数据库名> | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup | daily-recon | balance-changes | floorplan-convert | floorplan-sample | import-devices | device-selftest | device-printer-mock | device-bridge-mock | membership-daily | import-benefits');
+        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo [--previous-day] | seed-billing-demo [--previous-day] | seed-legacy-demo | demo-prepare [--previous-day] | demo-check | demo-reset --confirm <数据库名> | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup | daily-recon | balance-changes | floorplan-convert | floorplan-sample | import-devices | device-selftest | device-printer-mock | device-bridge-mock | membership-daily | import-benefits | import-count-cards');
         process.exitCode = command ? 1 : 0;
     }
   } finally {

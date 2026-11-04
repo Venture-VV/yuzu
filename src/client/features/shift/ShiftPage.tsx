@@ -162,6 +162,18 @@ function CashFormula({ cash }: { cash: ShiftSummary['cash'] }) {
           − 退款单退现金 <Money cents={cash.refundSlip} />
         </>
       ) : null}
+      {cash.memberRefund ? (
+        <>
+          {' '}
+          − 储值退回的现金 <Money cents={cash.memberRefund} />
+        </>
+      ) : null}
+      {cash.countCard ? (
+        <>
+          {' '}
+          {cash.countCard > 0 ? '+' : '−'} 次卡现金（卖 − 退） <Money cents={Math.abs(cash.countCard)} />
+        </>
+      ) : null}
     </p>
   );
 }
@@ -234,6 +246,7 @@ function SummaryView({ summary }: { summary: ShiftSummary }) {
       </div>
       {summary.deposits && <DepositsView deposits={summary.deposits} />}
       {summary.refundSlips && <RefundSlipsView slips={summary.refundSlips} />}
+      {summary.countCards && <CountCardsView cards={summary.countCards} />}
       {summary.voids.length > 0 &&
         (refunds ? (
           <Notice tone="warning" icon={<Undo2 className="size-4" />} title={`本班次反结账 ${summary.voids.length} 张 · 退款 ¥${(refunds.total / 100).toFixed(2)}`} className="md:col-span-2">
@@ -248,6 +261,20 @@ function SummaryView({ summary }: { summary: ShiftSummary }) {
             {summary.voids.map((v) => `${v.checkoutNo}（¥${(v.amount / 100).toFixed(2)}，${v.reason}${v.voidedByName ? `，${v.voidedByName}反结账、从本班钱箱退` : ''}）`).join('；')}。原单收过的现金不计入应有现金，请核对是否已退还或已重新收取。
           </Notice>
         ))}
+    </div>
+  );
+}
+
+/** 次卡（v0.7.28）：本班次卖的卡、退的卡，按方式；售卡是预收、不是营业额，现金计入应有现金 */
+function CountCardsView({ cards }: { cards: NonNullable<ShiftSummary['countCards']> }) {
+  const line = (list: typeof cards.sales.byMethod) =>
+    list.length ? list.map((m) => `${PAYMENT_METHOD_LABELS[m.method]} ${m.count} 张 ¥${(m.amount / 100).toFixed(2)}`).join('、') : '无';
+  return (
+    <div className="rounded-lg border border-line p-4 md:col-span-2" data-testid="shift-count-cards">
+      <p className="text-[13px] font-bold text-ink-2">次卡（售卡是预收，不算营业额）</p>
+      <p className="mt-1.5 text-[13px] text-ink-2">卖：{line(cards.sales.byMethod)}</p>
+      <p className="mt-0.5 text-[13px] text-ink-2">退：{line(cards.refunds.byMethod)}</p>
+      <p className="mt-1.5 text-[12px] text-ink-3">现金计入应有现金（卖的加、退的减）；扫码、银行卡退的在商户后台原路退。</p>
     </div>
   );
 }

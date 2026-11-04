@@ -374,6 +374,11 @@ export interface SettlementTotals {
    * held 是当天结束时的在住押金余额。升级之前确认的日结快照没有这一项，按 0 补齐
    */
   deposits: SettlementDeposits;
+  /**
+   * 次卡（v0.7.28）：售卡、退卡（按方式，现金进出钱箱）、结账使用、过期作废、期初导入与当天结束时还剩的次数。
+   * 升级之前确认的日结快照没有这一项，按 0 补齐
+   */
+  countCards: import('./count-cards').CountCardDayTotals;
 }
 
 export interface SettlementDeposits {

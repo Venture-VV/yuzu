@@ -6,6 +6,7 @@ import { createSql } from './db';
 import { migrate } from './migrate';
 import { sweepExpiredBonus } from './modules/bonus';
 import { sweepBookings } from './modules/bookings';
+import { expireCountCards } from './modules/count-cards';
 import { issueBirthdayCoupons } from './modules/coupons';
 import { checkDevicesOnce, recoverJobs } from './modules/devices';
 import { ensureMembershipLive, runMembershipDaily } from './modules/membership';
@@ -98,6 +99,13 @@ async function main() {
       if (run.cancelled || run.noShow) app.log.info(`预约：自动取消 ${run.cancelled} 张、记爽约 ${run.noShow} 张`);
     } catch (error) {
       app.log.error({ err: error }, '预约的自动处理失败，下一分钟重试');
+    }
+    // 次卡（v0.7.28）：过了有效期没用完的次数作废
+    try {
+      const n = await expireCountCards(sql, { config });
+      if (n > 0) app.log.info(`次卡：${n} 张过期作废`);
+    } catch (error) {
+      app.log.error({ err: error }, '次卡的过期处理失败，下一分钟重试');
     }
     // 顺带检查应用在跑的标记（数据库重启过、专用连接断了就重新拿）
     try {

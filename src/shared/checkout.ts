@@ -83,7 +83,7 @@ export function priceTicket(t: Pick<TicketType, 'price12h' | 'price24h'>, checke
  * 「优惠 / 免单」（R1.2，店主 2026-10-29 签认）由值班经理及以上当场授权并填原因，一张结账单最多一笔；
  * 店员不能自行抹零，抹零也走优惠。
  */
-export const CHECKOUT_METHODS = [...PAYMENT_METHODS, 'wallet', 'coupon', 'discount', 'store_coupon', 'member_discount'] as const;
+export const CHECKOUT_METHODS = [...PAYMENT_METHODS, 'wallet', 'coupon', 'discount', 'store_coupon', 'member_discount', 'count_card'] as const;
 export type CheckoutMethod = (typeof CHECKOUT_METHODS)[number];
 export const CHECKOUT_METHOD_LABELS: Record<CheckoutMethod, string> = {
   ...PAYMENT_METHOD_LABELS,
@@ -92,10 +92,11 @@ export const CHECKOUT_METHOD_LABELS: Record<CheckoutMethod, string> = {
   discount: '优惠 / 免单',
   store_coupon: '券抵扣',
   member_discount: '会员折扣',
+  count_card: '次卡',
 };
 /**
  * 实收（现金流入）的方式：会员储值是会员余额抵扣，团购券由平台结算，优惠 / 免单没有收钱，券抵扣（v0.7.20）、
- * 会员折扣（v0.7.25）是优惠，都不是本次实收
+ * 会员折扣（v0.7.25）是优惠，次卡（v0.7.28）是会员预付的次数，都不是本次实收
  */
 export const isCashLike = (m: CheckoutMethod): m is PaymentMethod => (PAYMENT_METHODS as readonly string[]).includes(m);
 
@@ -106,6 +107,7 @@ export const isCashLike = (m: CheckoutMethod): m is PaymentMethod => (PAYMENT_ME
  * 退款 = 当天的退款单（v0.7.20，离店后部分退款，按原收款方式退）；
  * 净营业额 = 应收 − 优惠 − 券抵扣 − 会员折扣 − 退款；
  * 实收 = 现金类收款（现金、微信、支付宝、银行卡、其他）− 退款，不含会员储值、团购券、优惠、券抵扣与会员折扣。
+ * 次卡（v0.7.28）与会员储值一样是会员的预付消费：算营业额（应收、净营业额里都有），不算实收；售卡的钱在售卡当天算收款。
  */
 export function businessBreakdown(b: { net: number; byMethod: readonly { method: CheckoutMethod; amount: number }[]; refunds?: { total: number } }) {
   const sum = (pick: (m: CheckoutMethod) => boolean) => b.byMethod.filter((m) => pick(m.method)).reduce((total, m) => total + m.amount, 0);
@@ -283,6 +285,10 @@ export interface CheckoutPreview {
   storeCoupons?: import('./coupons').CheckoutCouponOption[];
   /** 能享的会员折扣（v0.7.25），省得多的在前；没选券、优惠时第一项必须带上 */
   memberDiscounts?: MemberDiscountOption[];
+  /** 这些会员能用的次卡（v0.7.28），与每张卡这次最多能抵几份；用了次卡就不打会员折扣、不用券与优惠 */
+  countCards?: import('./count-cards').CheckoutCountCardOption[];
+  /** 次卡按份抵扣用的明细（已挂的明细加上此刻的门票，门票用负数编号），页面与服务端用同一个算法分配 */
+  countCardLines?: import('./count-cards').CountCardLine[];
   /** 「门票跳档宽限」（不含会员的浴票延迟；每位客人用的见 visits[].graceMinutes） */
   graceMinutes: number;
   pricedAt: string;
@@ -447,8 +453,16 @@ export interface ShiftSummary {
     byMethod: { method: PaymentMethod; count: number; amount: number }[];
     list: { refundNo: string; memberName: string; amount: number; cash: number; reason: string; createdAt: string; refs: { method: PaymentMethod; amount: number; ref: string }[]; operatorName?: string }[];
   };
-  /** 应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金 + 押金现金（收 − 退）− 退款单退现金 − 储值退回的现金 */
-  cash: { opening: number; checkout: number; recharge: number; refund?: number; deposit?: number; refundSlip?: number; memberRefund?: number; expected: number };
+  /**
+   * 次卡（v0.7.28）：本班次卖的卡与退的卡，按方式；现金进出本班钱箱。本班次没有次卡往来、升级之前交班的快照都没有这一项
+   * （cash.countCard 同样没有）
+   */
+  countCards?: {
+    sales: { count: number; total: number; byMethod: { method: PaymentMethod; count: number; amount: number }[] };
+    refunds: { count: number; total: number; byMethod: { method: PaymentMethod; count: number; amount: number }[] };
+  };
+  /** 应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金 + 押金现金（收 − 退）− 退款单退现金 − 储值退回的现金 + 次卡现金（卖 − 退） */
+  cash: { opening: number; checkout: number; recharge: number; refund?: number; deposit?: number; refundSlip?: number; memberRefund?: number; countCard?: number; expected: number };
 }
 
 export interface ShiftRecord {

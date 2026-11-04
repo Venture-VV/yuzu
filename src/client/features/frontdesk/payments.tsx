@@ -98,7 +98,8 @@ export type PaymentBody =
   | { method: 'discount'; amount: number; grantId: string }
   | { method: 'store_coupon'; code: string; amount: number }
   | { method: 'member_discount'; memberId: number; benefitId: number; amount: number }
-  | { method: Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon' | 'member_discount'>; amount: number; ref: string };
+  | { method: 'count_card'; cardId: number; uses: number; amount: number }
+  | { method: Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon' | 'member_discount' | 'count_card'>; amount: number; ref: string };
 
 /**
  * 收款登记的状态与核对：每笔的金额、储值扣款构成（余额不足、会员不在本次结账里）、团购券码、「其他」备注、
@@ -123,15 +124,21 @@ export function usePayRows(opts: {
    * 选了券或优惠 / 免单就不用（二选一，M45）
    */
   memberDiscount?: MemberDiscountOption | null;
+  /**
+   * 次卡（v0.7.28，只有手牌结账）：结账对话框里选的几张卡这次抵多少（同一个算法分配好的）；用了次卡就不打会员折扣、
+   * 不能再用券与优惠 / 免单（二选一）。problem 是分配不下（例如选的次数多于能抵的份数）
+   */
+  countCard?: { amount: number; payments: Extract<PaymentBody, { method: 'count_card' }>[]; problem: string | null } | null;
 }) {
   const session = useSession();
   const [rows, setRows] = useState<PayRow[]>([]);
   useResetOnOpen(opts.open, () => setRows([]));
 
   const rowCents = rows.map((r) => parseYuan(r.amount));
-  const otherReduction = rows.some((r) => r.method === 'store_coupon' || r.method === 'discount');
+  const countCard = opts.countCard && opts.countCard.payments.length > 0 ? opts.countCard : null;
+  const otherReduction = rows.some((r) => r.method === 'store_coupon' || r.method === 'discount') || countCard !== null;
   const memberDiscount = opts.memberDiscount && !otherReduction ? opts.memberDiscount : null;
-  const paid = rowCents.reduce<number>((s, c) => s + (c ?? 0), 0) + (memberDiscount?.amount ?? 0);
+  const paid = rowCents.reduce<number>((s, c) => s + (c ?? 0), 0) + (memberDiscount?.amount ?? 0) + (countCard?.amount ?? 0);
   const remaining = opts.total === null ? null : opts.total - paid;
   const splitOf = (r: PayRow, cents: number | null) =>
     r.member && cents && cents > 0
@@ -161,6 +168,7 @@ export function usePayRows(opts: {
       if (r.reason.trim().length < 2) return '请填写优惠原因（至少 2 个字），例如：抹零、投诉补偿';
       if (!opts.grantFits(r.grant, c)) return r.grant ? `${opts.scopeName}或金额改了，请按当前内容重新授权` : '请值班经理、店总或店主当场授权';
       if (rows.some((x) => x.method === 'store_coupon')) return '券不能和优惠 / 免单同时用，请二选一';
+      if (countCard) return '次卡不能和优惠 / 免单同时用，请二选一';
     }
     return null;
   };
@@ -173,6 +181,7 @@ export function usePayRows(opts: {
       return latest.usable ? `账单有变化，这张券现在能抵 ${formatYuan(latest.amount)}，请重新选一次` : (latest.reason ?? '这张券现在不能用');
     }
     if (rows.filter((x) => x.method === 'store_coupon').length > 1) return '每张结账单最多用 1 张券';
+    if (countCard) return '次卡不能和券同时用，请二选一';
     return null;
   };
   const problems = rows.map((r, i) => (r.method === 'store_coupon' ? couponProblem(r) : rowProblem(r, i)));
@@ -204,6 +213,7 @@ export function usePayRows(opts: {
     ...(memberDiscount
       ? [{ method: 'member_discount' as const, memberId: memberDiscount.memberId, benefitId: memberDiscount.benefitId, amount: memberDiscount.amount }]
       : []),
+    ...(countCard?.payments ?? []),
     ...rows.map((r, i): PaymentBody => {
       const amount = rowCents[i]!;
       if (r.method === 'wallet') {
@@ -213,7 +223,7 @@ export function usePayRows(opts: {
       if (r.method === 'coupon') return { method: 'coupon' as const, platform: r.platform, code: normalizeCouponCode(r.code), dealName: r.dealName.trim(), amount };
       if (r.method === 'discount') return { method: 'discount' as const, amount, grantId: r.grant!.grantId };
       if (r.method === 'store_coupon') return { method: 'store_coupon' as const, code: r.coupon!.code, amount };
-      return { method: r.method as Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon' | 'member_discount'>, amount, ref: r.ref.trim() };
+      return { method: r.method as Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon' | 'member_discount' | 'count_card'>, amount, ref: r.ref.trim() };
     }),
   ];
 
@@ -229,9 +239,17 @@ export function usePayRows(opts: {
     /** 自动带上的会员折扣（选了券、优惠时为空）与能享的那一种 */
     memberDiscount,
     memberDiscountOffered: opts.memberDiscount ?? null,
-    /** 每笔都填好了、没有重复的储值会员 */
-    ok: problems.every((x) => x === null) && !dupWallet,
-    methods: [...new Set([...(memberDiscount ? [CHECKOUT_METHOD_LABELS.member_discount] : []), ...rows.map((r) => CHECKOUT_METHOD_LABELS[r.method])])],
+    /** 用了次卡（v0.7.28）：不能再加券、优惠 / 免单 */
+    hasCountCard: countCard !== null,
+    /** 每笔都填好了、没有重复的储值会员，次卡分配得下 */
+    ok: problems.every((x) => x === null) && !dupWallet && !countCard?.problem,
+    methods: [
+      ...new Set([
+        ...(memberDiscount ? [CHECKOUT_METHOD_LABELS.member_discount] : []),
+        ...(countCard ? [CHECKOUT_METHOD_LABELS.count_card] : []),
+        ...rows.map((r) => CHECKOUT_METHOD_LABELS[r.method]),
+      ]),
+    ],
     splitOf,
     grantFits: opts.grantFits,
     locked: opts.locked,
@@ -284,8 +302,8 @@ export function PaymentsSection({
             disabled={
               pay.locked ||
               total === null ||
-              (m === 'discount' && (pay.hasDiscount || pay.hasStoreCoupon)) ||
-              (m === 'store_coupon' && (pay.hasStoreCoupon || pay.hasDiscount))
+              (m === 'discount' && (pay.hasDiscount || pay.hasStoreCoupon || pay.hasCountCard)) ||
+              (m === 'store_coupon' && (pay.hasStoreCoupon || pay.hasDiscount || pay.hasCountCard))
             }
             onClick={() => pay.addRow(m)}
             data-testid={`pay-add-${m}`}

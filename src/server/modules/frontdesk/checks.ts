@@ -6,6 +6,7 @@ import { formatYuan } from '@shared/money';
 import type { Db } from '../../db';
 import { usageCheck } from '../usages';
 import { bookingChecks } from '../bookings';
+import { countCardChecks } from '../count-cards';
 
 export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
   // ① 每张账单的合计 / 行数 = 其有效明细之和（未结明细合计 == 未结账单总额）
@@ -320,6 +321,8 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
     await refundCheck(db),
     // ⑲ 券（v0.7.20）
     await couponCheck(db),
+    // ⑳ 次卡（v0.7.28）
+    ...(await countCardChecks(db)),
   ];
 }
 

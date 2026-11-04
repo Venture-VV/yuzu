@@ -431,11 +431,17 @@ export async function cancelUsage(deps: Deps, id: number, raw: unknown, ctx: OpC
  */
 export async function closeUsagesOfVisits(tx: Tx, visitIds: number[], kind: 'checkout' | 'visit_cancel', c: { at: Date; staffId: number }): Promise<string[]> {
   if (visitIds.length === 0) return [];
-  const rows = await tx<{ id: number; usageNo: string; spaceCode: string; businessType: string }[]>`
-    SELECT u.id, u.usage_no, sp.code AS space_code, sp.business_type
-    FROM space_usages u JOIN spaces sp ON sp.id = u.space_id
-    WHERE u.visit_id IN ${tx(visitIds)} AND u.status = 'open' ORDER BY u.id FOR UPDATE OF u`;
-  if (rows.length === 0) return [];
+  // 先只锁使用单（id 升序）；没有开着的就不再读房间（大多数结账没有使用单）
+  const open = await tx<{ id: number; usageNo: string; spaceId: number }[]>`
+    SELECT id, usage_no, space_id FROM space_usages WHERE visit_id IN ${tx(visitIds)} AND status = 'open' ORDER BY id FOR UPDATE`;
+  if (open.length === 0) return [];
+  const spaces = new Map(
+    (await tx<{ id: number; code: string; businessType: string }[]>`SELECT id, code, business_type FROM spaces WHERE id IN ${tx(open.map((u) => u.spaceId))}`).map((x) => [
+      Number(x.id),
+      x,
+    ]),
+  );
+  const rows = open.map((u) => ({ id: u.id, usageNo: u.usageNo, spaceCode: spaces.get(Number(u.spaceId))?.code ?? '', businessType: spaces.get(Number(u.spaceId))?.businessType ?? '' }));
   if (kind === 'checkout') {
     // 计费的业态（v0.7.28）：结账前要先「结束使用」把房费挂上（不在这里自动结束，免得漏收）；撤销来访照旧直接结束、不收
     const rules = await loadUsageRules(tx);

@@ -19,6 +19,7 @@ import { businessBreakdown, CHECKOUT_METHOD_LABELS, CHECKOUT_METHODS, COUPON_PLA
 import { COUPON_ISSUE_KIND_LABELS, maskStoreCouponCode } from '@shared/coupons';
 import { INSTANCE_LABELS } from '@shared/instance';
 import { REFUND_SOURCE_LABELS } from '@shared/member-refunds';
+import { COUNT_CARD_MOVE_LABELS, type CountCardMoveKind } from '@shared/count-cards';
 import { formatYuan } from '@shared/money';
 import { PAYMENT_METHOD_LABELS } from '@shared/labels';
 import { CALL_TYPE_LABELS, gradeLabel } from '@shared/technicians';
@@ -279,7 +280,16 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     LEFT JOIN members m ON m.id = c.member_id LEFT JOIN checkouts ck ON ck.id = e.checkout_id
     WHERE e.business_date = ${date} ORDER BY e.id`;
   const memberRefunds = await memberRefundsOfDate(tx, date);
-  return { summary, checkouts, departments, voidedLines, cancelled, ticketChanges, freeEntries, shifts, technicians, rooms, usages, refunds, couponIssues, couponEvents, memberRefunds };
+  // 次卡（v0.7.28）：当天次数的变动（售卡、期初、结账使用、反结账退回、退卡、过期）
+  const countCardMoves = await tx<{ at: string; kind: CountCardMoveKind; cardNo: string; member: string; name: string; delta: number; amount: number; checkoutNo: string | null; method: string | null; ref: string; staff: string; note: string }[]>`
+    SELECT mv.at, mv.kind, c.card_no, m.name AS member, c.name, mv.delta, mv.amount, ck.checkout_no,
+           CASE WHEN mv.kind = 'sale' THEN c.payment_method WHEN mv.kind = 'refund' THEN r.method END AS method,
+           coalesce(CASE WHEN mv.kind = 'sale' THEN c.payment_ref WHEN mv.kind = 'refund' THEN r.ref END, '') AS ref,
+           s.display_name AS staff, mv.note
+    FROM count_card_moves mv JOIN count_cards c ON c.id = mv.card_id JOIN members m ON m.id = c.member_id JOIN staff s ON s.id = mv.staff_id
+    LEFT JOIN checkouts ck ON ck.id = mv.checkout_id LEFT JOIN count_card_refunds r ON r.id = mv.refund_id
+    WHERE mv.business_date = ${date} ORDER BY mv.id`;
+  return { summary, checkouts, departments, voidedLines, cancelled, ticketChanges, freeEntries, shifts, technicians, rooms, usages, refunds, couponIssues, couponEvents, memberRefunds, countCardMoves };
 }
 
 export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string, now = new Date()): Promise<DailyRecon> {
@@ -670,6 +680,28 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     ]),
   });
 
+  // 12 次卡（v0.7.28）：当天次数的每一笔变动；售卡、退卡的钱按方式（现金进出钱箱），结账使用按项目价算营业额
+  files.push({
+    name: '12-次卡.csv',
+    content: toCsv([
+      ['时间', '卡号', '会员', '卡名', '变动', '次数', '金额（元）', '结账单', '收 / 退款方式', '单号 / 备注', '经办人', '说明'],
+      ...day.countCardMoves.map((m) => [
+        stampOf(m.at),
+        m.cardNo,
+        m.member,
+        m.name,
+        COUNT_CARD_MOVE_LABELS[m.kind],
+        m.delta > 0 ? `+${m.delta}` : String(m.delta),
+        m.kind === 'sale' || m.kind === 'use' || m.kind === 'return' || m.kind === 'refund' ? yuan(Number(m.amount)) : '',
+        m.checkoutNo ?? '',
+        m.method ? PAYMENT_METHOD_LABELS[m.method as keyof typeof PAYMENT_METHOD_LABELS] : '',
+        m.ref,
+        m.staff,
+        m.note,
+      ]),
+    ]),
+  });
+
   // 00 说明
   const failed = checks.filter((c: CheckLine) => !c.ok);
   const deptOk = deptTotal === biz.receivable && deptDiscount === biz.discount + biz.coupon + biz.memberDiscount && deptRefund === biz.refund;
@@ -687,6 +719,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     `技师：${tr.totals.clocks} 个钟（点钟 ${tr.totals.designated}、轮钟 ${tr.totals.rotation}），${formatYuan(tr.totals.amount)}${tr.unassigned.clocks ? `；未指定技师 ${tr.unassigned.clocks} 个钟` : ''}`,
     `客房押金：收 ${formatYuan(s.deposits.received.reduce((t, m) => t + m.amount, 0))}、退 ${formatYuan(s.deposits.refunded.reduce((t, m) => t + m.amount, 0))}；当天结束时在住押金 ${formatYuan(s.deposits.held)}`,
     `派对房等使用单：当天开 ${day.usages.filter((u) => u.businessDate === date).length} 张，撤单 ${day.usages.filter((u) => u.status === 'cancelled').length} 张，仍在使用 ${day.usages.filter((u) => u.status === 'open').length} 张`,
+    `次卡：售卡 ${s.countCards.sales.count} 张 ${formatYuan(s.countCards.sales.amount)}；退卡 ${s.countCards.refunds.count} 张 ${formatYuan(s.countCards.refunds.amount)}；结账使用净 ${s.countCards.uses.count} 次 ${formatYuan(s.countCards.uses.amount)}；过期作废 ${s.countCards.expired.uses} 次；当天结束时还剩 ${s.countCards.outstanding.uses} 次`,
     `券：发 ${day.couponIssues.reduce((t, i) => t + i.quantity, 0)} 张；用 ${day.couponEvents.filter((e) => e.kind === 'use').length} 张、反结账退回 ${day.couponEvents.filter((e) => e.kind === 'return').length} 张，券抵扣 ${formatYuan(biz.coupon)}；作废 ${day.couponEvents.filter((e) => e.kind === 'void').length} 张`,
     failed.length ? `自检：✗ ${failed.length} 项不一致：${failed.map((c) => c.label).join('、')}` : `自检：✓ ${checks.length} 项全部一致`,
   ];
@@ -712,6 +745,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
       '  09-退款单.csv       当天开的退款单（离店后部分退款），每项一行：原结账单、退的份数与金额、退款方式与商户后台的退款单号、经办人、原因；当天作废的写明（不算营业额）',
       '  10-券.csv           当天的发券（手动、无记名、开卡礼、升级礼、生日礼、充值赠券）与券的变动（用券、反结账退回、作废）；券码只显示后 4 位',
       '  11-储值退回.csv     当天的退储值单：每一行一笔原收款（充值按原收款方式退，期初余额与合并转入按员工选的方式），退款方式与商户后台的退款单号（线上充值交给门店系统原路退回的写明）、扣回的赠金、经办人与授权人、原因；退的现金记在所选钱箱当班的班次',
+      '  12-次卡.csv         当天次卡次数的每一笔变动：售卡（收款方式）、旧次卡期初、结账使用（结账单、按项目价）、反结账退回、退卡（退款方式与单号）、过期作废',
       '',
     ].join('\n'),
   });

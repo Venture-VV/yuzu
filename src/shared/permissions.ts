@@ -85,6 +85,9 @@ export const PERMISSIONS = {
   'member.status': { roles: ['owner', 'store_manager'] },
   'member.phone': { roles: ['owner', 'store_manager', 'duty_manager'] },
   'member.merge': { roles: ['owner', 'store_manager'] },
+  /** 次卡（v0.7.28，N5 待确认）：售卡是收款，前台岗位都能做（与充值一样）；退卡退钱，店主、店总、值班经理 */
+  'countcard.sell': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk'] },
+  'countcard.refund': { roles: ['owner', 'store_manager', 'duty_manager'] },
   /** 看会员体系看板、到期提醒名单与补充期名单（客户经理按名单联系客人） */
   'member.retention': { roles: ['owner', 'store_manager', 'account_manager'] },
   /** 他店查询：按手机号或会员号查一位会员的档阶与会籍（只读，不含余额与流水） */
@@ -303,6 +306,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'member.status': '停用、启用会员（写原因）',
   'member.phone': '改会员手机号（不用授权；没有这一项的要当场授权）',
   'member.merge': '合并会员（同一个人的两份档案，写原因）',
+  'countcard.sell': '售次卡（现金类收款，记到当班）',
+  'countcard.refund': '退次卡（退剩下的次数，按售价折算）',
   'member.retention': '看会员体系看板与到期提醒名单',
   'member.lookup': '他店查询（按手机号查会员档阶，只读）',
   'benefit.publish': '维护会员权益（导入清单、修改、发布、暂缓）',
@@ -382,7 +387,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   },
   {
     title: '会员体系',
-    items: ['member.rules', 'member.adjust', 'member.retention', 'member.lookup', 'benefit.publish', 'benefit.use', 'member.refund', 'member.status', 'member.phone', 'member.merge'],
+    items: ['member.rules', 'member.adjust', 'member.retention', 'member.lookup', 'benefit.publish', 'benefit.use', 'member.refund', 'member.status', 'member.phone', 'member.merge', 'countcard.sell', 'countcard.refund'],
   },
   { title: '券与会员权益', items: ['coupon.manage', 'coupon.issue', 'coupon.void'] },
   { title: '设备', items: ['device.view', 'device.test', 'device.manage'] },
