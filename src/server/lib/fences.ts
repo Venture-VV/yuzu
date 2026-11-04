@@ -81,6 +81,8 @@ export const FENCED_OPS = [
   'platform_settlement',
   // 业务单据打到小票机（v0.7.28，迁移 056）：编号记在打印任务上（device_jobs.client_key）
   'doc_print',
+  // 会员实体卡（v0.7.28，迁移 057）：发卡、补卡；编号记在卡上（member_cards.client_key）
+  'member_card',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -226,5 +228,11 @@ export async function platformOpRef(db: Db, key: string, op: PlatformOp): Promis
     op === 'platform_redemption'
       ? await db<{ id: number }[]>`SELECT id FROM platform_redemptions WHERE client_key = ${key}`
       : await db<{ id: number }[]>`SELECT id FROM platform_settlements WHERE client_key = ${key}`;
+  return row ? Number(row.id) : null;
+}
+
+/** 会员实体卡（v0.7.28）的发卡、补卡编号记在卡上：查到时返回那张卡的编号 */
+export async function memberCardOpRef(db: Db, key: string): Promise<number | null> {
+  const [row] = await db<{ id: number }[]>`SELECT id FROM member_cards WHERE client_key = ${key}`;
   return row ? Number(row.id) : null;
 }

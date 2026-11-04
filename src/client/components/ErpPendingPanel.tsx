@@ -69,6 +69,9 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     // 邀请体验、赠送会籍（v0.7.25）：返回那条临时身份
     case 'member_trial':
       return d.trial && typeof d.trial === 'object' ? { refId: d.trial.id } : null;
+    // 会员实体卡（v0.7.28）：发卡、补卡返回那张卡
+    case 'member_card':
+      return d.card && typeof d.card === 'object' ? { refId: d.card.id } : null;
     // 会员体系收尾（v0.7.26）：退储值返回那张退储值单，停用 / 启用返回那位会员，合并返回那张合并单
     case 'member_refund':
       return d.refund && typeof d.refund === 'object' ? { refId: d.refund.id } : null;

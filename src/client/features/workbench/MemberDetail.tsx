@@ -17,6 +17,7 @@ import { GradeCard } from '../membership/GradeCard';
 import { BenefitsCard } from '../membership/BenefitsCard';
 import { TrialsCard } from '../membership/TrialsCard';
 import { CountCardsCard } from '../membership/CountCardsCard';
+import { MemberCardsCard } from '../membership/MemberCardsCard';
 import { AccountCard } from '../membership/AccountCard';
 
 export function MemberDetail({
@@ -224,6 +225,9 @@ export function MemberDetail({
 
       {/* 次卡（v0.7.28）：换会员时整块重来（售卡、退卡的操作编号不带到下一位会员） */}
       <CountCardsCard key={`count-cards-${member.id}`} member={member} />
+
+      {/* 会员实体卡（v0.7.28）：发卡、挂失、补卡；换会员时整块重来 */}
+      <MemberCardsCard key={`member-cards-${member.id}`} member={member} />
 
       {/* 账户内券（v0.7.20）：换会员时整块重来（筛选、发券的操作编号都不带到下一位会员） */}
       {can('member.read') && <MemberCouponsCard key={member.id} member={member} />}

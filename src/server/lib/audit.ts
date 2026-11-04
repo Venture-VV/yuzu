@@ -137,6 +137,9 @@ export type AuditAction =
   | 'device_job_created'
   // 取消排队、等打印机恢复的打印任务（v0.7.28）
   | 'device_job_canceled'
+  // 会员实体卡（v0.7.28）：发卡、补卡；挂失
+  | 'member_card_issued'
+  | 'member_card_lost'
   // 会员体系 v2（v0.7.23）：已有会员上线定档、手动调整档阶、他店查询
   | 'membership_live'
   | 'member_grade_adjusted'

@@ -89,6 +89,8 @@ export const PERMISSIONS = {
   /** 次卡（v0.7.28，N5 待确认）：售卡是收款，前台岗位都能做（与充值一样）；退卡退钱，店主、店总、值班经理 */
   'countcard.sell': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk'] },
   'countcard.refund': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  /** 会员实体卡（v0.7.28，N8 待确认：前台岗位与客户经理）：发卡、挂失、补卡 */
+  'member.card': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk'] },
   /** 平台核销补录（v0.7.28，N6 待确认）：前台岗位都能补登记；作废要值班经理以上；平台打款与对账店主、店总 */
   'platform.redeem': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   'platform.void': { roles: ['owner', 'store_manager', 'duty_manager'] },
@@ -318,6 +320,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'member.merge': '合并会员（同一个人的两份档案，写原因）',
   'countcard.sell': '售次卡（现金类收款，记到当班）',
   'countcard.refund': '退次卡（退剩下的次数，按售价折算）',
+  'member.card': '会员实体卡：发卡、挂失、补卡',
   'platform.redeem': '平台核销补登记（已在平台 App 核销、没有结账的券）',
   'platform.void': '作废平台核销补登记',
   'platform.settle': '平台打款登记与对账',
@@ -401,7 +404,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   },
   {
     title: '会员体系',
-    items: ['member.rules', 'member.adjust', 'member.retention', 'member.lookup', 'benefit.publish', 'benefit.use', 'member.refund', 'member.status', 'member.phone', 'member.merge', 'countcard.sell', 'countcard.refund'],
+    items: ['member.rules', 'member.adjust', 'member.retention', 'member.lookup', 'benefit.publish', 'benefit.use', 'member.refund', 'member.status', 'member.phone', 'member.merge', 'countcard.sell', 'countcard.refund', 'member.card'],
   },
   { title: '券与会员权益', items: ['coupon.manage', 'coupon.issue', 'coupon.void'] },
   { title: '设备', items: ['device.view', 'device.test', 'device.manage', 'print.network'] },

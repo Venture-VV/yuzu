@@ -1,14 +1,16 @@
 import { forwardRef, useEffect, useState, type KeyboardEvent } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Search, UserPlus, X } from 'lucide-react';
 import { maskPhone } from '@shared/labels';
+import { looksLikeCardNo, type MemberCardLookup } from '@shared/member-cards';
 import type { MemberSummary } from '@shared/types';
-import { errorMessage } from '../../lib/api';
+import { api, errorMessage } from '../../lib/api';
 import { memberCodeOf, useMembers } from '../../lib/queries';
 import { useCan } from '../../lib/session';
 import { avatarTone, cn, relativeTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
-import { Button, Kbd, Skeleton } from '../../components/ui';
+import { Button, Kbd, Notice, Skeleton } from '../../components/ui';
 
 function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value);
@@ -72,7 +74,7 @@ export const MemberList = forwardRef<
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="手机号 / 后四位 / 姓名 / 会员号"
+            placeholder="手机号 / 后四位 / 姓名 / 会员号 / 刷卡"
             aria-label="搜索会员"
             inputMode="search"
             className="h-12 w-full rounded-lg border border-line-strong bg-card pr-10 pl-10 text-[15px] shadow-card outline-none transition-[border-color,box-shadow] placeholder:text-ink-4 focus:border-pine focus:shadow-[0_0_0_3px_rgb(36_73_58/0.12)]"
@@ -118,6 +120,8 @@ export const MemberList = forwardRef<
             ))}
           </div>
         ) : list.length === 0 ? (
+          <>
+          {query && looksLikeCardNo(query) && <LostCardNotice cardNo={query} />}
           <EmptyState
             art="search"
             title={query ? '没有找到这位会员' : '还没有会员'}
@@ -130,6 +134,7 @@ export const MemberList = forwardRef<
               )
             }
           />
+          </>
         ) : (
           list.map((m, i) => {
             const selected = m.id === selectedId;
@@ -189,3 +194,25 @@ export const MemberList = forwardRef<
     </div>
   );
 });
+
+/**
+ * 刷到的卡号查不到人（v0.7.28 ⑦）：挂失的卡提醒扣下卡、核对身份（卡主是谁），换下的卡提醒已经不用了。
+ * 在用的卡号查找框直接找到会员，不走这里
+ */
+function LostCardNotice({ cardNo }: { cardNo: string }) {
+  const found = useQuery({
+    queryKey: ['member-cards', 'lookup', cardNo],
+    queryFn: () => api.get<MemberCardLookup>(`/api/member-cards/lookup?cardNo=${encodeURIComponent(cardNo)}`),
+    staleTime: 0,
+    retry: false,
+  });
+  const d = found.data;
+  if (!d || d.status === 'unknown' || d.status === 'active' || !d.member) return null;
+  return (
+    <div className="px-1.5 pb-2" data-testid="member-card-alert">
+      <Notice tone={d.status === 'lost' ? 'error' : 'warning'} title={d.status === 'lost' ? `这张卡已挂失（卡主 ${d.member.name} · ${d.member.memberNo}）` : `这张卡已换下（原卡主 ${d.member.name}）`}>
+        {d.status === 'lost' ? '请扣下这张卡，核对客人身份后按手机号找会员办理；补卡在会员详情「会员卡」里。' : '这张卡已经不用了，请让客人出示新卡或报手机号。'}
+      </Notice>
+    </div>
+  );
+}
