@@ -159,6 +159,9 @@ function SettlementSheet({ s }: { s: SettlementSummary }) {
           {s.recharge.byMethod.map((m) => (
             <Row key={m.method} left={<span className="pl-3">{`${PAYMENT_METHOD_LABELS[m.method]} · ${m.count} 笔`}</span>} right={yuan(m.amount)} />
           ))}
+          {!!s.recharge.online?.count && (
+            <Row left={<span className="pl-3">{`其中线上（小程序）· ${s.recharge.online.count} 笔，不进交班`}</span>} right={yuan(s.recharge.online.paid)} />
+          )}
           <Row left="赠送赠金（不是收款）" right={yuan(s.recharge.bonus)} />
           <Row left={`储值消费 · ${s.consume.count} 笔${s.consume.reversedCount ? `（已撤销 ${s.consume.reversedCount}）` : ''}`} right={yuan(s.consume.total)} strong />
           <Row left={<span className="pl-3">扣本金 / 扣赠金</span>} right={`${yuan(s.consume.principal)} / ${yuan(s.consume.bonus)}`} />
@@ -169,6 +172,14 @@ function SettlementSheet({ s }: { s: SettlementSummary }) {
               left={`旧系统期初迁入 ${s.opening.count} 位${s.opening.voidCount ? `，作废 ${s.opening.voidCount} 位` : ''}（本金 / 赠金）`}
               right={`${yuan(s.opening.principal)} / ${yuan(s.opening.bonus)}`}
             />
+          )}
+          {s.memberRefund.count > 0 && (
+            <>
+              <Row left={`储值退回 · ${s.memberRefund.count} 张（退本金 / 扣回赠金）`} right={`-${yuan(s.memberRefund.principal)} / -${yuan(s.memberRefund.bonus)}`} />
+              {s.memberRefund.byMethod.map((m) => (
+                <Row key={m.method} left={<span className="pl-3">{`退${PAYMENT_METHOD_LABELS[m.method]} · ${m.count} 笔`}</span>} right={`-${yuan(m.amount)}`} />
+              ))}
+            </>
           )}
         </Section>
 

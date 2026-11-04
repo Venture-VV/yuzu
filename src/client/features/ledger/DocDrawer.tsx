@@ -140,6 +140,7 @@ function RechargeBody({ d }: { d: RechargeDoc }) {
         <Money cents={d.paidAmount} className="text-[16px] text-lake" />
       </SummaryRow>
       <SummaryRow label="收款方式">{PAYMENT_METHOD_LABELS[d.paymentMethod]}</SummaryRow>
+      {d.channel === 'mp' && <SummaryRow label="渠道">线上（小程序）· 微信支付到账，不进交班</SummaryRow>}
       <SummaryRow label="充值方案">{d.planName ?? '自定义金额'}</SummaryRow>
       <SummaryRow label="赠金">
         <Money cents={d.bonusAmount} className="text-yuzu-deep" signed />
@@ -150,7 +151,7 @@ function RechargeBody({ d }: { d: RechargeDoc }) {
         </SummaryRow>
       )}
       {d.overLimitApproverName && <SummaryRow label="超限授权">{d.overLimitApproverName}</SummaryRow>}
-      {d.paymentRef && <SummaryRow label="收款备注">{d.paymentRef}</SummaryRow>}
+      {d.paymentRef && <SummaryRow label={d.channel === 'mp' ? '微信支付交易单号' : '收款备注'}>{d.paymentRef}</SummaryRow>}
       {d.note && <SummaryRow label="备注">{d.note}</SummaryRow>}
     </div>
   );

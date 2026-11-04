@@ -322,6 +322,20 @@ export async function planRechargeGrade(tx: Tx, memberId: number, paidCents: num
   return { rules, state, first, minimum: rechargeMinimum(rules, first), rollingBeforeCents, outcome: rechargeOutcome(rules, state.grade, rollingBeforeCents, paidCents) };
 }
 
+/**
+ * 只读预估（小程序线上下单页，v0.7.26）：与 planRechargeGrade 同一套算法，到期没处理的按规则推算、不写任何东西。
+ * 到账时按那一刻的规则重新算（以到账时为准）
+ */
+export async function previewRechargeGrade(db: Db, memberId: number, paidCents: number, today: string): Promise<RechargeGrade> {
+  const rules = await loadMembershipRules(db);
+  const current = await readGrade(db, memberId);
+  if (!current) throw notFound('会员不存在');
+  const { state } = await projectDue(db, rules, memberId, current.state, today);
+  const rollingBeforeCents = await rollingRecharge(db, rules, memberId, today);
+  const first = await isFirstRecharge(db, memberId);
+  return { rules, state, first, minimum: rechargeMinimum(rules, first), rollingBeforeCents, outcome: rechargeOutcome(rules, state.grade, rollingBeforeCents, paidCents) };
+}
+
 // ───────────────────────── 储值退回（v0.7.26，M73） ─────────────────────────
 
 /**

@@ -28,6 +28,10 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
   const byMethod = await db<{ method: PaymentMethod; count: number; amount: number }[]>`
     SELECT payment_method AS method, count(*) AS count, sum(paid_amount) AS amount
     FROM recharges WHERE business_date = ${date} GROUP BY payment_method ORDER BY payment_method`;
+  // 线上（小程序，v0.7.26）：已含在上面，单列；不进交班
+  const [online] = await db<{ count: number; paid: number; bonus: number }[]>`
+    SELECT count(*)::int AS count, coalesce(sum(paid_amount), 0)::bigint AS paid, coalesce(sum(bonus_amount), 0)::bigint AS bonus
+    FROM recharges WHERE business_date = ${date} AND channel = 'mp'`;
   const [cs] = await db<SettlementTotals['consume'][]>`
     SELECT count(*) AS count, coalesce(sum(total_amount), 0) AS total,
            coalesce(sum(principal_amount), 0) AS principal, coalesce(sum(bonus_amount), 0) AS bonus,
@@ -62,7 +66,7 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
     SELECT coalesce(sum(principal_delta), 0) AS principal, coalesce(sum(bonus_delta), 0) AS bonus
     FROM ledger_entries WHERE business_date = ${date}`;
   return {
-    recharge: { count: rc!.count, paid: rc!.paid, bonus: rc!.bonus, byMethod },
+    recharge: { count: rc!.count, paid: rc!.paid, bonus: rc!.bonus, byMethod, online: online! },
     consume: cs!,
     reversal: rv!,
     expiry: ex!,
@@ -164,6 +168,8 @@ function canonical(value: unknown): string {
 /** 确认日结时保存的快照可能早于新的口径（例如赠金过期，Batch 2.4c）：缺少的口径按 0 补齐再比较，不误报「日结后有变动」 */
 const withNewSections = (t: SettlementTotals): SettlementTotals => ({
   ...t,
+  // 线上（小程序，v0.7.26）之前确认的快照没有这一项
+  recharge: { ...t.recharge, online: t.recharge.online ?? { count: 0, paid: 0, bonus: 0 } },
   expiry: t.expiry ?? { count: 0, bonus: 0 },
   opening: t.opening ?? { count: 0, voidCount: 0, principal: 0, bonus: 0 },
   // 储值退回（v0.7.26）之前确认的快照没有这一项
@@ -605,6 +611,7 @@ export function settlementCsv(s: SettlementSummary): string {
     ['项目', '笔数', '金额（元）', '说明'],
     ['充值实收', s.recharge.count, y(s.recharge.paid), '实际收款，等额计入本金'],
     ...s.recharge.byMethod.map((m) => [`  · ${PAYMENT_METHOD_LABELS[m.method]}`, m.count, y(m.amount), '']),
+    ...(s.recharge.online?.count ? [['  · 其中线上（小程序）', s.recharge.online.count, y(s.recharge.online.paid), '微信支付到账，不进交班、不算哪个钱箱']] : []),
     ['赠金发放', s.recharge.count, y(s.recharge.bonus), '随充值赠送，不是收款'],
     ['储值消费合计', s.consume.count, y(s.consume.total), `其中已撤销 ${s.consume.reversedCount} 笔`],
     ['  · 扣本金', '', y(s.consume.principal), ''],

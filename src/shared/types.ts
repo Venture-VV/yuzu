@@ -175,6 +175,8 @@ export interface RechargeDoc {
   overLimitApproverName: string | null;
   /** 赠金到期时刻（那个营业日开始时作废）；没有赠金或长期有效时为 null */
   bonusExpiresAt: string | null;
+  /** 渠道（v0.7.26）：前台 / 小程序线上充值（微信支付到账，不进交班） */
+  channel: 'counter' | 'mp';
 }
 
 export interface ConsumptionLine {
@@ -324,7 +326,14 @@ export interface SettlementAnomaly {
 }
 
 export interface SettlementTotals {
-  recharge: { count: number; paid: number; bonus: number; byMethod: { method: PaymentMethod; count: number; amount: number }[] };
+  recharge: {
+    count: number;
+    paid: number;
+    bonus: number;
+    byMethod: { method: PaymentMethod; count: number; amount: number }[];
+    /** 其中线上（小程序，v0.7.26）：微信支付到账，不进交班；之前确认的快照没有 */
+    online?: { count: number; paid: number; bonus: number };
+  };
   consume: { count: number; total: number; principal: number; bonus: number; reversedCount: number };
   reversal: { count: number; principal: number; bonus: number; crossDayCount: number };
   /** 赠金到期作废（Batch 2.4c）：不是收款，也不是退款 */

@@ -488,6 +488,9 @@ export interface DashboardData {
     refund: number;
     rechargePaid: number;
     rechargeCount: number;
+    /** 其中线上（小程序，v0.7.26）：微信支付到账，不进交班 */
+    rechargeOnline?: number;
+    rechargeOnlineCount?: number;
     /** 当天的储值退回（v0.7.26，退的本金；不是营业额，净充值 = 充值实收 − 储值退回） */
     memberRefund?: number;
     memberRefundCount?: number;

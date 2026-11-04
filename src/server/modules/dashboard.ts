@@ -75,7 +75,10 @@ export async function dashboard(db: Db, today: string, days: number, opts: { inS
            (SELECT coalesce(sum(amount), 0) FROM refunds WHERE status = 'completed' AND business_date = ${today}) AS refund
     FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
     WHERE p.method IN ('discount', 'store_coupon', 'member_discount') AND (c.business_date = ${today} OR c.void_business_date = ${today})`;
-  const [rc] = await db<{ n: number }[]>`SELECT count(*)::int AS n FROM recharges WHERE business_date = ${today}`;
+  const [rc] = await db<{ n: number; online: number; onlineN: number }[]>`
+    SELECT count(*)::int AS n, coalesce(sum(paid_amount) FILTER (WHERE channel = 'mp'), 0)::bigint AS online,
+           (count(*) FILTER (WHERE channel = 'mp'))::int AS online_n
+    FROM recharges WHERE business_date = ${today}`;
   // 储值退回（v0.7.26）：退的本金，与充值并列（不是营业额）
   const [mr] = await db<{ n: number; amount: number }[]>`
     SELECT count(*)::int AS n, coalesce(sum(principal), 0)::bigint AS amount FROM member_refunds WHERE business_date = ${today}`;
@@ -113,6 +116,8 @@ export async function dashboard(db: Db, today: string, days: number, opts: { inS
       refund: discount!.refund,
       rechargePaid: t.rechargePaid,
       rechargeCount: rc!.n,
+      rechargeOnline: Number(rc!.online),
+      rechargeOnlineCount: rc!.onlineN,
       memberRefund: Number(mr!.amount),
       memberRefundCount: mr!.n,
     },

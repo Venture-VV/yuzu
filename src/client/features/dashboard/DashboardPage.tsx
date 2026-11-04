@@ -179,6 +179,11 @@ function TodayTab() {
                   )}
                   <Kpi icon={<Banknote className="size-4" />} label="会员充值实收" tone="lake">
                     <Money cents={d.todayStats.rechargePaid} /> <span className="text-[13px] font-semibold text-ink-3">· {d.todayStats.rechargeCount} 笔</span>
+                    {!!d.todayStats.rechargeOnlineCount && (
+                      <span className="block text-[12px] font-semibold text-ink-3" data-testid="dashboard-recharge-online">
+                        其中线上（小程序）<Money cents={d.todayStats.rechargeOnline ?? 0} /> · {d.todayStats.rechargeOnlineCount} 笔
+                      </span>
+                    )}
                     {!!d.todayStats.memberRefundCount && (
                       <span className="block text-[12px] font-semibold text-ink-3" data-testid="dashboard-member-refund">
                         退储值 −<Money cents={d.todayStats.memberRefund ?? 0} /> · {d.todayStats.memberRefundCount} 张
