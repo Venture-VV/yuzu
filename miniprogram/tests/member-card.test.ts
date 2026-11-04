@@ -12,6 +12,7 @@ const member = (grade: Partial<MpGrade>, over: Partial<MeMember> = {}): MeMember
   bonusBalance: 240000,
   deductionRule: '先本金，后赠金',
   availableCoupons: 2,
+  rechargeOpen: false,
   grade: {
     label: 'L3 观澜 · 享',
     grade: 3,

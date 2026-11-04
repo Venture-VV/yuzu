@@ -13,10 +13,8 @@ import { z } from 'zod';
 import { businessDateOf } from '@shared/business-date';
 import { formatYuan } from '@shared/money';
 import {
-  DEFAULT_MP_RECHARGE_RULES,
   MP_RECHARGE_EXPIRE_MINUTES,
   MP_RECHARGE_ORDER_NO,
-  MP_RECHARGE_RULES_KEY,
   type MpPayParams,
   type MpRechargeAbandonResult,
   type MpRechargeCreated,
@@ -25,7 +23,6 @@ import {
   type MpRechargeOptions,
   type MpRechargeOrder,
   type MpRechargePlan,
-  type MpRechargeRules,
   type MpRechargeStatus,
 } from '@shared/mp';
 import { isUniqueViolation, type Db, type Sql, type Tx } from '../../db';
@@ -37,15 +34,11 @@ import { memberGradeInfo } from '../membership';
 import { loadSettings } from '../settings';
 import { previewOnlineRecharge, rechargeOnline } from '../wallet-online';
 import { activeBinding } from './member';
+import { loadRechargeRules } from './rules';
 import type { PayRuntime } from './pay';
 import { parseNotification, paymentParams, WxPayError, type WxTransaction } from './wxpay';
 
-// ── 设置 ──
-
-export async function loadRechargeRules(db: Db): Promise<MpRechargeRules> {
-  const [row] = await db<{ value: Partial<MpRechargeRules> | null }[]>`SELECT value FROM settings WHERE key = ${MP_RECHARGE_RULES_KEY}`;
-  return { ...DEFAULT_MP_RECHARGE_RULES, ...(row?.value ?? {}) };
-}
+export { loadRechargeRules };
 
 // ── 单子 ──
 

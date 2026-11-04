@@ -151,6 +151,8 @@ export interface MpMe {
         deductionRule: string;
         grade: MpGrade;
         availableCoupons: number;
+        /** 线上充值开着（第二期 2a）：「我的」页显示「充值」 */
+        rechargeOpen: boolean;
       })
     | null;
 }

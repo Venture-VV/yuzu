@@ -101,10 +101,11 @@
       </view>
     </view>
     <text class="sub fine">扣款：{{card.deduction}}</text>
-    <text wx:if="{{card.next}}" class="upsell">{{card.next}}。充值请到前台。</text>
+    <text wx:if="{{card.next}}" class="upsell">{{card.next}}。{{card.recharge ? '可以在下面在线充值，也可以到前台。' : '充值请到前台。'}}</text>
 
     <view class="menu">
       <view class="mi" hover-class="tap" bindtap="onCode"><text>会员码</text><text class="mv">{{card.frozen ? '已冻结' : '到前台出示'}}</text></view>
+      <view wx:if="{{card.recharge && !card.frozen}}" class="mi" hover-class="tap" bindtap="onRecharge"><text>充值</text><text class="mv">微信支付，与前台同一本账</text></view>
       <view class="mi" hover-class="tap" bindtap="onLedger"><text>余额与流水</text><text class="mv"></text></view>
       <view class="mi" hover-class="tap" bindtap="onBenefits"><text>本月可享</text><text class="mv">{{card.code}} 能享的权益</text></view>
       <view class="mi" hover-class="tap" bindtap="onCoupons"><text>我的券</text><text class="mv">{{card.coupons}} 张可用</text></view>

@@ -24,6 +24,8 @@ export interface CardView {
   bonus: string;
   deduction: string;
   coupons: number;
+  /** 线上充值开着（第二期 2a）：菜单里有「充值」 */
+  recharge: boolean;
 }
 
 const pct = (part: number, whole: number) => (whole > 0 ? Math.max(0, Math.min(100, Math.floor((part * 100) / whole))) : 0);
@@ -75,5 +77,6 @@ export function cardView(m: MeMember): CardView {
     bonus: yuan(m.bonusBalance),
     deduction: m.deductionRule,
     coupons: m.availableCoupons,
+    recharge: m.rechargeOpen === true,
   };
 }
