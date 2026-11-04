@@ -1,7 +1,8 @@
-// 系统账号「小程序」（v0.7.26 起）：线上收款入账、小程序领券（v0.7.27）的经办人。
+// 系统账号「小程序」（v0.7.26 起）：线上收款入账、小程序领券（v0.7.27）、邀请好友与扫码点餐（v0.7.28）的经办人。
 // 第一次用到时建：不能登录（停用、没有能对上的密码），员工名单里不显示。
 
 import type { Tx } from '../db';
+import type { Actor } from '../lib/context';
 import { AppError } from '../lib/errors';
 
 export const SYSTEM_MP_USERNAME = 'system.mp';
@@ -22,4 +23,17 @@ export async function systemStaffId(tx: Tx): Promise<number> {
     if (again?.system) return again.id;
   }
   throw new AppError(500, 'SYSTEM_ACCOUNT_TAKEN', `员工账号 ${SYSTEM_MP_USERNAME} 被占用了，小程序的入账与领券要用这个系统账号；请店主改掉那位员工的账号`);
+}
+
+/** 系统账号「小程序」当经办人（小程序线调主线入口时；没有岗位权限，只按入口自己的规则办） */
+export async function systemActor(tx: Tx): Promise<Actor> {
+  return {
+    id: await systemStaffId(tx),
+    username: SYSTEM_MP_USERNAME,
+    displayName: SYSTEM_MP_NAME,
+    role: 'clerk',
+    duties: [],
+    mustChangePassword: false,
+    permissions: [],
+  };
 }

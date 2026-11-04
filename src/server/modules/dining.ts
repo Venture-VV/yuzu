@@ -82,10 +82,13 @@ export interface KitchenLine {
   limitTaken: boolean;
 }
 
-/** 一次下单建一张出品单（同一个出品单号）：手牌客人的（visitId）或桌台的（tableSessionId）；补录纸质单的菜早已上过，直接记为已上菜 */
+/**
+ * 一次下单建一张出品单（同一个出品单号）：手牌客人的（visitId）或桌台的（tableSessionId）；补录纸质单的菜早已上过，直接记为已上菜。
+ * deliverTo：小程序扫了桌上的码点的菜送到哪张桌（v0.7.28，桌台名称；空为送到客人手里）
+ */
 export async function createKitchenItems(
   tx: Tx,
-  args: { visitId: number | null; tableSessionId?: number | null; lines: KitchenLine[]; date: string; at: Date; actor: Actor; backfill: boolean },
+  args: { visitId: number | null; tableSessionId?: number | null; deliverTo?: string; lines: KitchenLine[]; date: string; at: Date; actor: Actor; backfill: boolean },
 ): Promise<string | null> {
   if (args.lines.length === 0) return null;
   const orderNo = await nextDocNo(tx, 'kitchen_order', 'CD', args.date);
@@ -93,10 +96,10 @@ export async function createKitchenItems(
   for (const l of args.lines) {
     await tx`
       INSERT INTO kitchen_items (order_no, bill_line_id, visit_id, table_session_id, item_id, station_id, quantity, note, status, business_date,
-                                 limit_taken, created_by, created_at, done_by, done_at, served_by, served_at)
+                                 limit_taken, created_by, created_at, done_by, done_at, served_by, served_at, deliver_to)
       VALUES (${orderNo}, ${l.billLineId}, ${args.visitId}, ${args.tableSessionId ?? null}, ${l.itemId}, ${l.stationId}, ${l.quantity}, ${l.note},
               ${args.backfill ? 'served' : 'queued'}, ${args.date}, ${l.limitTaken}, ${args.actor.id}, ${args.at},
-              ${done ? args.actor.id : null}, ${done}, ${done ? args.actor.id : null}, ${done})`;
+              ${done ? args.actor.id : null}, ${done}, ${done ? args.actor.id : null}, ${done}, ${args.deliverTo ?? ''})`;
   }
   return orderNo;
 }
@@ -152,7 +155,7 @@ async function kitchenDishes(db: Db, today: string): Promise<MenuDish[]> {
 const ITEM_COLUMNS = (db: Db) => db`
   k.id, k.order_no, k.visit_id, h.code AS tag_code, v.zone, k.table_session_id, dt.name AS table_name,
   coalesce(m.name, nullif(v.guest_label, ''), tm.name, nullif(ts.guest_label, ''), '散客') AS guest, k.item_id, i.name,
-  k.quantity, k.note, k.status, k.station_id, s.name AS station_name, k.rush_count, k.created_at, k.started_at, k.done_at, k.served_at,
+  k.quantity, k.note, k.deliver_to, k.status, k.station_id, s.name AS station_name, k.rush_count, k.created_at, k.started_at, k.done_at, k.served_at,
   p.display_name AS posted_by_name, coalesce(v.status, ts.status) <> 'open' AS visit_closed`;
 const ITEM_FROM = (db: Db) => db`
   kitchen_items k JOIN service_items i ON i.id = k.item_id JOIN kitchen_stations s ON s.id = k.station_id

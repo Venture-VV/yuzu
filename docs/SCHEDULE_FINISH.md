@@ -64,3 +64,54 @@
 | N12 | 旧 EBC 逐笔流水 | 见第 10 节 |
 
 （第 2 节起各块的设计，做到哪一块写到哪一块。）
+
+## 2. ① 小程序第三期的入口（迁移 `051`）
+
+小程序线在自己的事务里调用，代码在 `src/server/modules/mp-entries.ts`。
+
+**共同的约定**
+- 每次调用带 `claimKey`：小程序线自己的记录编号，正整数或 64 字以内的字母、数字、`_`、`-`。
+- 同一个 `claimKey` 只生效一次：再调用返回第一次的结果，`replayed: true`；内容不同的拒绝，`MP_CLAIM_CONFLICT`。去重记在新表 `entry_claims`（只追加），预约那一块也用。
+- 经办人是系统账号「小程序」。
+- 锁：先取 `claimKey` 的咨询锁（同一个 `claimKey` 的两次调用排队），之后与前台同一套。
+
+### 2.1 3b 邀请好友：`createTrialInviteFromMp(tx, deps, { inviterId, invitee: { phone, name? }, claimKey, at? })`
+
+- 规则、拒绝码与前台 v0.7.25 的「邀请体验」相同，用的是同一段代码（`member-trials.ts` 的 `createTrialTx`）：
+  - `TRIAL_SELF`；
+  - `TRIAL_NOT_ALLOWED`：邀请人不够档、本月次数用完、已停用；
+  - `TRIAL_INVITEE`：好友不够条件；
+  - `MEMBER_CHANGED`、`PHONE_EXISTS`、`TRIAL_ACTIVE`。
+- 好友还不是会员：当场建档、发开卡礼，渠道「老带新」（店里的渠道来源里有这一项、启用中时）。没给姓名回 400（`field: name`）。
+- 建档、开卡礼、临时身份在一个存档点里：拒绝时一起撤回，调用方的事务还能接着用。
+- 返回 `{ trial, replayed }`，`trial` 与前台会员详情里的一样。
+- 「这个月还能邀请几次、好友能体验什么」：用只读的 `trialOptions(db, inviterId, date, phone?)`（`member-trials.ts`）。
+
+### 2.2 3c 扫码点餐：`orderFoodFromMp(tx, deps, { memberId, items: [{ itemId, quantity, note? }], tableCode?, expectedTotal?, claimKey, at? })`
+
+- 与服务员在点单页下单同一条路径（`frontdesk/bills.ts` 的 `postChargesTx`）：挂在这位会员在店手牌的账单上、扣估清、进厨房出品单、记实时位置。
+- 只能点进厨房的菜。会员同时只有一张在店手牌（已有的唯一索引）。
+- 一单最多 20 份、¥500（N1，`MP_FOOD_ORDER_LIMITS`）。
+- `tableCode` 是桌台名称（不分大小写）。出品单写「送 X 桌」，厨房屏上显示，并标「小程序点单」。
+- `expectedTotal`：带了就核对，价格刚改过时拒绝。
+- 拒绝码：
+  - `NO_OPEN_VISIT`、`DINING_DISABLED`；
+  - `DISH_NOT_KITCHEN`、`DISH_SOLD_OUT`、`ITEM_GENDER`；
+  - `PRICE_CHANGED`、`MP_ORDER_LIMIT`；
+  - `TABLE_NOT_FOUND`、`VISIT_CHANGED`。
+- 返回 `{ visitId, tagCode, orderNo, deliverTo, total, lines, replayed }`。
+- 退菜照旧请服务员作废明细；结账照旧在前台。
+
+### 2.3 只读
+
+| 函数 | 给什么 |
+| --- | --- |
+| `diningMenu(db, deps)`（`dining.ts`） | 进厨房的在售菜品、默认价格、今天的估清。小程序可点哪些由小程序线自己挑 |
+| `mpDiningTables(db)` | 启用的桌台（编号、名称、区域），生成桌码用 |
+| `mpOpenBill(db, memberId)` | 「我的账单」：在店手牌的有效明细（名称、份数、金额、出品状态）与合计；没有在店手牌为空 |
+
+### 2.4 迁移 `051`
+
+- 新表 `entry_claims`（只追加）。
+- `kitchen_items.deliver_to`（默认空）。
+- 不改已有的行。

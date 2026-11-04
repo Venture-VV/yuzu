@@ -229,6 +229,9 @@ function Ticket({ k, now, warnMinutes, showStation, children }: { k: KitchenItem
         <span className="min-w-0 truncate">{k.guest}</span>
         {showStation && <span>· {k.stationName}</span>}
         <span className="num text-ink-4">· {k.orderNo}</span>
+        {/* 小程序扫了桌上的码点的菜（v0.7.28）：送到这张桌 */}
+        {k.deliverTo && <span className="font-bold text-pine">· 送 {k.deliverTo} 桌</span>}
+        {k.postedByName === '小程序' && <span className="text-ink-4">· 小程序点单</span>}
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <span className={cn('num text-[13px] font-bold', late ? 'text-clay' : 'text-ink-2')}>

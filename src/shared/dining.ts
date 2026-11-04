@@ -61,6 +61,8 @@ export interface KitchenItem {
   name: string;
   quantity: number;
   note: string;
+  /** 小程序扫了桌上的码点的菜送到哪张桌（v0.7.28；空为送到客人手里） */
+  deliverTo: string;
   status: KitchenStatus;
   stationId: number;
   stationName: string;
@@ -234,3 +236,6 @@ export interface TableCheckoutPreview {
 export interface TablesAdmin {
   tables: (DiningTable & { sessionCount: number })[];
 }
+
+/** 小程序扫码点餐（第三期 3c）主线这一端的兜底：一单的份数与金额上限（N1，与 MP33 相同，待确认） */
+export const MP_FOOD_ORDER_LIMITS = { maxQuantity: 20, maxTotalCents: 50_000 } as const;
