@@ -119,7 +119,7 @@ describe('小程序领取', () => {
   });
 
   it('只读判断与发券同一套规则：能领的 ok，领不了的给同样的原因；不写任何东西', async () => {
-    const [{ n: before }] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM coupon_issues`;
+    const [b] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM coupon_issues`;
     expect(await eligible(cash.id, memberId)).toEqual({ ok: true });
     const off = await template({ name: '停用的券二', kind: 'cash', faceValue: 500, active: false });
     const expired = await template({ name: '过期的券二', kind: 'cash', faceValue: 500, validity: 'fixed', validFrom: '2026-01-01', validTo: '2026-01-31' });
@@ -140,8 +140,8 @@ describe('小程序领取', () => {
     expect(await eligible(cash.id, frozen!.id)).toMatchObject({ ok: false, code: 'MEMBER_FROZEN' });
     const [merged] = await ctx.sql<{ id: number }[]>`SELECT id FROM members WHERE name = '并走的会员'`;
     expect(await eligible(cash.id, merged!.id)).toMatchObject({ ok: false, code: 'MEMBER_MERGED' });
-    const [{ n: after }] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM coupon_issues`;
-    expect(after).toBe(before);
+    const [a] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM coupon_issues`;
+    expect(a!.n).toBe(b!.n);
   });
 
   it('自检照常全过；发券记录的约束：小程序领取只能 1 张、要有会员和去重键', async () => {
