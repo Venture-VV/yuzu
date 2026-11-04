@@ -13,7 +13,7 @@
 
 import type { MpInviteAbandonResult, MpInviteClaimed, MpInviteCreated, MpInviteItem, MpInviteState } from '../../../src/shared/mp';
 import { isApiError, member, messageOf } from './api';
-import { beginFlight, clearStored, endFlight, inFlight, readStored, saveStored, uncertain } from './pending-store';
+import { beginFlight, clearStoredIf, endFlight, inFlight, readStored, saveStored, uncertain } from './pending-store';
 
 // ── 显示 ──
 
@@ -67,11 +67,11 @@ export type CreateOutcome =
 async function postCreate(clientKey: string, bindVersion: number): Promise<CreateOutcome> {
   try {
     const created = await member<MpInviteCreated>('POST', '/v1/invites', { clientKey, bindVersion });
-    clearStored(CREATE_KEY);
+    clearStoredIf(CREATE_KEY, clientKey);
     return { kind: 'created', created };
   } catch (e) {
     if (!uncertain(e) && isApiError(e)) {
-      clearStored(CREATE_KEY);
+      clearStoredIf(CREATE_KEY, clientKey);
       return { kind: 'rejected', code: e.code, message: e.message };
     }
     return { kind: 'pending', message: messageOf(e) };
@@ -138,11 +138,11 @@ export async function resolveClaimPending(): Promise<ClaimOutcome | null> {
   if (inFlight(r0.clientKey)) return { kind: 'pending', message: '这次领取还在提交，请稍候再点「再确认一次」' };
   try {
     const r = await member<MpInviteAbandonResult>('POST', '/v1/invites/claim/abandon', { clientKey: r0.clientKey });
-    clearStored(CLAIM_KEY);
+    clearStoredIf(CLAIM_KEY, r0.clientKey);
     return r.status === 'claimed' ? { kind: 'claimed', claimed: r.claimed } : { kind: 'abandoned' };
   } catch (e) {
     if (isApiError(e) && e.code === 'CLIENT_KEY_REUSED') {
-      clearStored(CLAIM_KEY);
+      clearStoredIf(CLAIM_KEY, r0.clientKey);
       return { kind: 'abandoned' };
     }
     return { kind: 'pending', message: messageOf(e) };
@@ -169,11 +169,11 @@ export async function sendClaim(code: string, phoneCode: string, name: string, c
     const body: Record<string, unknown> = { clientKey, phoneCode, bindVersion };
     if (name.trim()) body.name = name.trim();
     const claimed = await member<MpInviteClaimed>('POST', '/v1/invites/' + code + '/claim', body);
-    clearStored(CLAIM_KEY);
+    clearStoredIf(CLAIM_KEY, clientKey);
     return { kind: 'claimed', claimed };
   } catch (e) {
     if (!uncertain(e) && isApiError(e)) {
-      clearStored(CLAIM_KEY);
+      clearStoredIf(CLAIM_KEY, clientKey);
       return { kind: 'rejected', code: e.code, message: e.message };
     }
     // 请求回来了、结果不确定：先拿掉「正在发」，再确认作废

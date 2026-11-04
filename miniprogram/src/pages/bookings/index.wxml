@@ -10,7 +10,8 @@
   <!-- 预约或取消的结果待确认 -->
   <view wx:elif="{{state === 'pending'}}" class="panel">
     <text class="h3">结果待确认</text>
-    <text class="lede">上次预约或取消时网络不好，还不知道办好没有。网络好了点「再确认一次」，门店系统会告诉我们结果；确认之前先不要重新约或取消。</text>
+    <text wx:if="{{flying}}" class="lede">刚才的预约或取消还在提交，等它回来就知道办好没有。稍候点「再确认一次」；确认之前先不要重新约或取消。</text>
+    <text wx:else class="lede">上次预约或取消时网络不好，还不知道办好没有。网络好了点「再确认一次」，门店系统会告诉我们结果；确认之前先不要重新约或取消。</text>
     <button class="btn primary block" hover-class="btn-hover" bindtap="onConfirmPending">再确认一次</button>
     <text wx:if="{{message}}" class="sub">{{message}}</text>
   </view>

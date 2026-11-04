@@ -14,6 +14,7 @@ import { ISO_DATE } from '@shared/business-date';
 import type { BookingDetail } from '@shared/bookings';
 import { shiftDate } from '@shared/labels';
 import {
+  MP_BOOKING_CONFIRM_WINDOW_MINUTES,
   MP_BOOKING_MAX_GUESTS,
   MP_BOOKING_MAX_OPTIONS,
   MP_BOOKING_NOTE_MAX,
@@ -31,6 +32,7 @@ import {
 import { isUniqueViolation, type Db, type Tx } from '../../db';
 import type { Deps, OpContext } from '../../lib/context';
 import { AppError, badRequest, conflict, unprocessable } from '../../lib/errors';
+import { hashRequest } from '../../lib/idempotency';
 import { saveRuleSetting } from '../../lib/rule-settings';
 import { setTxTimeouts } from '../../lib/tx';
 import { parse } from '../../lib/validate';
@@ -93,6 +95,22 @@ async function memberProblem(db: Db, memberId: number): Promise<string | null> {
   return null;
 }
 
+/**
+ * 小程序最早能约开始前多少分钟的时段（独立审查 3d 的 P2）：开始前 confirmLeadMinutes 还没确认的每分钟自动取消（主线 sweepBookings），
+ * 再留 MP_BOOKING_CONFIRM_WINDOW_MINUTES 给前台确认；更近的不给、不收，请打电话给门店
+ */
+const minLeadOf = (rules: { confirmLeadMinutes: number }) => rules.confirmLeadMinutes + MP_BOOKING_CONFIRM_WINDOW_MINUTES;
+
+/** 门店时间的「11月6日 14:00」 */
+function shopText(iso: string, timeZone: string): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', { timeZone, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+      .formatToParts(new Date(iso))
+      .map((p) => [p.type, p.value]),
+  );
+  return `${parts.month}月${parts.day}日 ${parts.hour}:${parts.minute}`;
+}
+
 /** 能约的营业日：今天到最远几天后 */
 const datesFrom = (today: string, maxDaysAhead: number) => Array.from({ length: maxDaysAhead + 1 }, (_, i) => shiftDate(today, i));
 
@@ -110,6 +128,8 @@ interface OpRow {
   bindingId: number;
   memberId: number;
   bookingId: number;
+  /** 这次请求的摘要：同一个编号重提时核对内容一样（独立审查 3d 的 P3） */
+  requestHash: string;
   createdAt: string;
 }
 
@@ -158,7 +178,13 @@ export async function bookingHome(deps: Deps, openid: string): Promise<MpBooking
     spaces: open ? spaces : [],
     durations: rules.spaceDurations,
     dates: datesFrom(today, rules.maxDaysAhead),
-    rules: { maxOpen: rules.mpMaxOpen, cancelLeadMinutes: rules.mpCancelLeadMinutes, confirmLeadMinutes: rules.confirmLeadMinutes, noShowMinutes: rules.noShowMinutes },
+    rules: {
+      maxOpen: rules.mpMaxOpen,
+      cancelLeadMinutes: rules.mpCancelLeadMinutes,
+      confirmLeadMinutes: rules.confirmLeadMinutes,
+      noShowMinutes: rules.noShowMinutes,
+      minLeadMinutes: minLeadOf(rules),
+    },
   };
   // 自己的预约：绑定了就给看（小程序预约关了也看得到、能取消）
   let bookings: MpBookingView[] = [];
@@ -174,7 +200,8 @@ export async function bookingHome(deps: Deps, openid: string): Promise<MpBooking
     if (!notice) {
       const ban = await mpBookingBan(deps.sql, memberId, now);
       const openCount = bookings.filter((b) => (b.status === 'pending' || b.status === 'confirmed') && Date.parse(b.startsAt) > now.getTime()).length;
-      if (ban.banned) bookNotice = `${rules.noShowWindowDays} 天内爽约 ${ban.noShows} 次，${ban.until!.slice(0, 10)} 前不能在小程序预约，请打电话给门店`;
+      // 限制到那一刻为止：按门店时间写到几点（独立审查 3d 的 P3：原来写的是 UTC 的日子）
+      if (ban.banned) bookNotice = `${rules.noShowWindowDays} 天内爽约 ${ban.noShows} 次，${shopText(ban.until!, deps.config.timezone)} 以后才能在小程序预约；现在请打电话给门店`;
       else if (openCount >= rules.mpMaxOpen) bookNotice = `每人同时最多 ${rules.mpMaxOpen} 个没到店的预约：到店或取消以后才能再约`;
     }
   }
@@ -211,7 +238,9 @@ export async function bookingSlotsMp(deps: Deps, query: unknown): Promise<MpBook
   const nos = ids.length
     ? new Map((await deps.sql<{ id: number; techNo: string }[]>`SELECT id, tech_no FROM technicians WHERE id IN ${deps.sql(ids)}`).map((t) => [Number(t.id), t.techNo]))
     : new Map<number, string>();
-  return slots.map((s) => ({
+  // 离开始不到 minLead 的不给（约上了也来不及确认，会被自动取消）
+  const earliest = Date.now() + minLeadOf(rules) * 60_000;
+  return slots.filter((s) => Date.parse(s.startsAt) >= earliest).map((s) => ({
     startsAt: s.startsAt,
     endsAt: s.endsAt,
     free: s.free,
@@ -234,10 +263,25 @@ const CreateInput = z.object({
   bindVersion: z.number('请刷新后再预约').int().min(0),
 });
 
+/** 这次预约请求的摘要（同一个编号重提时核对内容一样）：只取会影响预约的字段，时间统一成 ISO */
+const createHashOf = (i: z.infer<typeof CreateInput>) =>
+  hashRequest({
+    action: 'create',
+    kind: i.kind,
+    itemId: i.kind === 'technician' ? (i.itemId ?? null) : null,
+    technicianId: i.kind === 'technician' ? (i.technicianId ?? null) : null,
+    spaceId: i.kind === 'space' ? (i.spaceId ?? null) : null,
+    durationMinutes: i.kind === 'space' ? (i.durationMinutes ?? null) : null,
+    startsAt: new Date(i.startsAt).toISOString(),
+    guests: i.guests,
+    note: i.note,
+  });
+
 export async function createBookingMp(deps: Deps, openid: string, raw: unknown): Promise<MpBookingDone> {
   const input = parse(CreateInput, raw);
   if (input.kind === 'technician' && !input.itemId) throw badRequest('请选择项目');
   if (input.kind === 'space' && !input.spaceId) throw badRequest('请选择房间');
+  const requestHash = createHashOf(input);
   try {
     return await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
@@ -248,8 +292,10 @@ export async function createBookingMp(deps: Deps, openid: string, raw: unknown):
       const state = await bindingStateOf(tx, openid);
       const [prev] = await tx<OpRow[]>`SELECT * FROM mp_booking_ops WHERE client_key = ${input.clientKey}`;
       if (prev) {
-        // 同一个编号重提：只认同一条绑定的预约
-        if (prev.action !== 'create' || !state.binding || Number(prev.bindingId) !== state.binding.id) throw conflict('CLIENT_KEY_REUSED', '这次预约的编号已经用过，请重新点');
+        // 同一个编号重提：只认同一条绑定、内容一样的预约
+        if (prev.action !== 'create' || !state.binding || Number(prev.bindingId) !== state.binding.id || prev.requestHash !== requestHash) {
+          throw conflict('CLIENT_KEY_REUSED', '这次预约的编号已经用过，请重新点');
+        }
         return { booking: await bookingView(tx, Number(prev.bookingId)), replayed: true };
       }
       if (!state.binding) throw new AppError(403, 'MP_NOT_BOUND', '请先绑定会员');
@@ -262,6 +308,10 @@ export async function createBookingMp(deps: Deps, openid: string, raw: unknown):
       if (input.kind === 'technician' ? !mpRules.itemIds.includes(input.itemId!) : !mpRules.spaceIds.includes(input.spaceId!)) {
         throw unprocessable('BOOKING_NOT_OPEN', input.kind === 'technician' ? '这个项目不能在小程序预约，请打电话给门店' : '这间房不能在小程序预约，请打电话给门店');
       }
+      const rules = await loadBookingRules(tx);
+      if (Date.parse(input.startsAt) < Date.now() + minLeadOf(rules) * 60_000) {
+        throw unprocessable('BOOKING_TOO_SOON', `开始前 ${minLeadOf(rules)} 分钟以内的时段来不及等门店确认，请打电话给门店预约`);
+      }
       const r = await createBookingFromMp(tx, deps, {
         memberId,
         kind: input.kind,
@@ -272,9 +322,8 @@ export async function createBookingMp(deps: Deps, openid: string, raw: unknown):
         claimKey: input.clientKey,
       });
       await tx`
-        INSERT INTO mp_booking_ops (client_key, action, binding_id, member_id, booking_id)
-        VALUES (${input.clientKey}, 'create', ${state.binding.id}, ${memberId}, ${r.booking.id})`;
-      const rules = await loadBookingRules(tx);
+        INSERT INTO mp_booking_ops (client_key, action, binding_id, member_id, booking_id, request_hash)
+        VALUES (${input.clientKey}, 'create', ${state.binding.id}, ${memberId}, ${r.booking.id}, ${requestHash})`;
       return { booking: await detailView(tx, r.booking, rules.mpCancelLeadMinutes), replayed: false };
     });
   } catch (error) {
@@ -288,6 +337,7 @@ const CancelInput = z.object({ clientKey: z.uuid('操作编号不正确'), bindV
 /** 顾客自己取消（开始前 2 小时以前；小程序预约关着也能取消） */
 export async function cancelBookingMp(deps: Deps, openid: string, bookingId: number, raw: unknown): Promise<MpBookingDone> {
   const input = parse(CancelInput, raw);
+  const requestHash = hashRequest({ action: 'cancel', bookingId });
   try {
     return await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
@@ -298,7 +348,7 @@ export async function cancelBookingMp(deps: Deps, openid: string, bookingId: num
       const state = await bindingStateOf(tx, openid);
       const [prev] = await tx<OpRow[]>`SELECT * FROM mp_booking_ops WHERE client_key = ${input.clientKey}`;
       if (prev) {
-        if (prev.action !== 'cancel' || Number(prev.bookingId) !== bookingId || !state.binding || Number(prev.bindingId) !== state.binding.id) {
+        if (prev.action !== 'cancel' || prev.requestHash !== requestHash || !state.binding || Number(prev.bindingId) !== state.binding.id) {
           throw conflict('CLIENT_KEY_REUSED', '这次取消的编号已经用过，请重新点');
         }
         return { booking: await bookingView(tx, bookingId), replayed: true };
@@ -308,8 +358,8 @@ export async function cancelBookingMp(deps: Deps, openid: string, bookingId: num
       const memberId = state.binding.memberId;
       const r = await cancelBookingFromMp(tx, deps, { memberId, bookingId, claimKey: input.clientKey });
       await tx`
-        INSERT INTO mp_booking_ops (client_key, action, binding_id, member_id, booking_id)
-        VALUES (${input.clientKey}, 'cancel', ${state.binding.id}, ${memberId}, ${bookingId})`;
+        INSERT INTO mp_booking_ops (client_key, action, binding_id, member_id, booking_id, request_hash)
+        VALUES (${input.clientKey}, 'cancel', ${state.binding.id}, ${memberId}, ${bookingId}, ${requestHash})`;
       const rules = await loadBookingRules(tx);
       return { booking: await detailView(tx, r.booking, rules.mpCancelLeadMinutes), replayed: false };
     });

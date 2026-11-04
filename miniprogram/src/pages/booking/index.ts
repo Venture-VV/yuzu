@@ -2,7 +2,7 @@
 // 提交后是「待门店确认」，前台确认；不收订金（MP36）。能不能约、空着的时段都由门店系统算。预约的「结果待确认」见 utils/bookings.ts。
 import type { MpBookingHome, MpBookingSlot, MpReminderOptions } from '../../../../src/shared/mp';
 import { isOffline, member, messageOf } from '../../utils/api';
-import { bookingItemView, dayChips, durationText, readBookingPending, resolveBookingPending, sendBooking, slotViews } from '../../utils/bookings';
+import { bookingItemView, dayChips, doneTitle, durationText, readBookingPending, resolveBookingPending, sendBooking, slotViews, slotWhen } from '../../utils/bookings';
 import type { BookingItemView, BookingOutcome, SlotView } from '../../utils/bookings';
 import { loadReminders, remindButton, remindHint, remindTap } from '../../utils/reminders';
 import { uuid } from '../../utils/uuid';
@@ -10,13 +10,31 @@ import { uuid } from '../../utils/uuid';
 type State = 'loading' | 'ready' | 'done' | 'pending' | 'unreadable' | 'offline' | 'error';
 type Kind = 'technician' | 'space';
 
-/** 这几种拒绝说明时段或规则变了：重新取一次（选的东西留着） */
-const RELOAD = ['BOOKING_TAKEN', 'BOOKING_TIME', 'BOOKING_PAST', 'BOOKING_RANGE', 'BOOKING_LIMIT', 'BOOKING_BANNED', 'BOOKING_NOT_OPEN', 'BIND_STALE'];
+/** 这几种拒绝说明时段、可约的项目或规则变了：重新取一次（选的东西还在的留着） */
+const RELOAD = [
+  'BOOKING_TAKEN',
+  'BOOKING_TIME',
+  'BOOKING_PAST',
+  'BOOKING_TOO_SOON',
+  'BOOKING_RANGE',
+  'BOOKING_LIMIT',
+  'BOOKING_BANNED',
+  'BOOKING_NOT_OPEN',
+  'BOOKING_TECHNICIAN',
+  'BOOKING_ITEM',
+  'BOOKING_SPACE',
+  'BOOKING_DURATION',
+  'MEMBER_UNAVAILABLE',
+  'MP_BOOKING_DISABLED',
+  'BIND_STALE',
+];
 
 Page({
   data: {
     state: 'loading' as State,
     message: '',
+    /** 结果待确认是因为这一次还在发（不是网络不好） */
+    flying: false,
     home: null as MpBookingHome | null,
     kind: 'technician' as Kind,
     kinds: [] as { kind: Kind; label: string }[],
@@ -37,10 +55,13 @@ Page({
     note: '',
     busy: false,
     done: null as BookingItemView | null,
+    doneTitle: '',
     reminders: null as MpReminderOptions | null,
     remind: { show: false, set: false, text: '' },
     remindHintText: '',
   },
+  /** 取时段的第几次：后到的旧回答不用（独立审查 3d 的 P2：换了日子以后旧日子的时段晚到，会盖掉新日子的） */
+  slotSeq: 0,
 
   onLoad(query: Record<string, string | undefined>) {
     if (query.kind === 'space') this.setData({ kind: 'space' });
@@ -88,15 +109,24 @@ Page({
 
   async loadSlots() {
     const d = this.data;
-    if (!d.date || (d.kind === 'technician' ? !d.itemId : !d.spaceId)) return;
-    this.setData({ slotsLoading: true, slotsMessage: '', slot: '', techs: [], technicianId: 0 });
-    const q = d.kind === 'technician' ? 'kind=technician&date=' + d.date + '&itemId=' + d.itemId : 'kind=space&date=' + d.date + '&spaceId=' + d.spaceId + '&durationMinutes=' + d.duration;
+    const seq = ++this.slotSeq;
+    // 换了项目、房间、时长、日子：先清掉选好的时段与旧的列表
+    this.setData({ slotsLoading: true, slotsMessage: '', slot: '', slots: [], rawSlots: [], techs: [], technicianId: 0 });
+    if (!d.date || (d.kind === 'technician' ? !d.itemId : !d.spaceId)) {
+      this.setData({ slotsLoading: false });
+      return;
+    }
+    const date = d.date;
+    const q = d.kind === 'technician' ? 'kind=technician&date=' + date + '&itemId=' + d.itemId : 'kind=space&date=' + date + '&spaceId=' + d.spaceId + '&durationMinutes=' + d.duration;
     try {
       const raw = await member<MpBookingSlot[]>('GET', '/v1/bookings/slots?' + q);
-      const slots = slotViews(d.kind, raw);
-      this.setData({ rawSlots: raw, slots, slotsLoading: false, slotsMessage: slots.length ? '' : '这一天没有能约的时段了，换一天看看' });
+      // 这期间又换过选择：这个回答是旧的，不用
+      if (seq !== this.slotSeq) return;
+      const slots = slotViews(d.kind, raw, date);
+      this.setData({ rawSlots: raw, slots, slot: '', slotsLoading: false, slotsMessage: slots.length ? '' : '这一天没有能约的时段了，换一天看看' });
     } catch (e) {
-      this.setData({ rawSlots: [], slots: [], slotsLoading: false, slotsMessage: messageOf(e) });
+      if (seq !== this.slotSeq) return;
+      this.setData({ rawSlots: [], slots: [], slot: '', slotsLoading: false, slotsMessage: messageOf(e) });
     }
   },
 
@@ -150,16 +180,20 @@ Page({
   onSubmit() {
     const d = this.data;
     const home = d.home;
-    if (!home || !home.canBook || !d.slot || d.busy) return;
-    const slot = d.slots.find((s) => s.startsAt === d.slot);
-    const day = d.days.find((x) => x.date === d.date);
+    if (!home || !home.canBook || !d.slot || d.busy || d.slotsLoading) return;
+    // 选的时段要在现在这张列表里（换了日子、列表刷新以后旧的不算）
+    if (!d.rawSlots.some((s) => s.startsAt === d.slot && s.free > 0)) {
+      this.setData({ slot: '', techs: [], technicianId: 0 });
+      return;
+    }
     const what =
       d.kind === 'technician'
         ? (home.items.find((i) => i.id === d.itemId) || { name: '' }).name + ' · ' + (d.technicianId ? (d.techs.find((t) => t.id === d.technicianId) || { label: '' }).label + '技师' : '不指定技师')
         : (home.spaces.find((s) => s.id === d.spaceId) || { name: '' }).name + ' · ' + durationText(d.duration) + ' · ' + d.guests + ' 位';
     wx.showModal({
       title: '确认预约',
-      content: what + '，' + (day ? day.label + ' ' : '') + (slot ? slot.time : '') + '。提交后等门店确认；开始前 ' + Math.round(home.rules.cancelLeadMinutes / 60) + ' 小时以前可以自己取消，过了开始时间 ' + home.rules.noShowMinutes + ' 分钟没到店记爽约。',
+      // 日子写时段在日历上的那一天（过了半夜的是第二天），不写选的营业日
+      content: what + '，' + slotWhen(d.slot) + '。提交后等门店确认；开始前 ' + Math.round(home.rules.cancelLeadMinutes / 60) + ' 小时以前可以自己取消，过了开始时间 ' + home.rules.noShowMinutes + ' 分钟没到店记爽约。',
       confirmText: '提交',
       success: (r) => {
         if (r.confirm) this.submit();
@@ -185,7 +219,7 @@ Page({
   after(out: BookingOutcome): boolean {
     if (out.kind === 'done') {
       if (out.action === 'create') {
-        this.setData({ state: 'done', done: bookingItemView(out.booking), note: '' });
+        this.setData({ state: 'done', done: bookingItemView(out.booking), doneTitle: doneTitle(out.booking.status), note: '' });
         this.loadRemind(out.booking.id);
         return true;
       }
@@ -194,7 +228,7 @@ Page({
       return false;
     }
     if (out.kind === 'pending') {
-      this.setData({ state: 'pending', message: out.message });
+      this.setData({ state: 'pending', message: out.message, flying: !!out.flying });
       return true;
     }
     if (out.kind === 'unreadable') {

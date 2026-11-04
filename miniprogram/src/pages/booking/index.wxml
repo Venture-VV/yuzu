@@ -10,7 +10,8 @@
   <!-- 预约结果待确认：上次提交时网络不好，确认之前不能再约 -->
   <view wx:elif="{{state === 'pending'}}" class="panel">
     <text class="h3">预约结果待确认</text>
-    <text class="lede">上次提交时网络不好，还不知道约上没有。网络好了点「再确认一次」，门店系统会告诉我们结果；确认之前先不要重新约，免得约重。</text>
+    <text wx:if="{{flying}}" class="lede">刚才的提交还在进行，等它回来就知道约上没有。稍候点「再确认一次」；确认之前先不要重新约，免得约重。</text>
+    <text wx:else class="lede">上次提交时网络不好，还不知道约上没有。网络好了点「再确认一次」，门店系统会告诉我们结果；确认之前先不要重新约，免得约重。</text>
     <button class="btn primary block" hover-class="btn-hover" bindtap="onConfirmPending">再确认一次</button>
     <text wx:if="{{message}}" class="sub">{{message}}</text>
   </view>
@@ -24,10 +25,11 @@
   <!-- 约好了 -->
   <view wx:elif="{{state === 'done'}}" class="panel hero">
     <text class="eyebrow">Booked</text>
-    <text class="h3">提交好了，等门店确认</text>
+    <text class="h3">{{doneTitle}}</text>
     <text class="lede">{{done.title}}</text>
     <text class="num when">{{done.when}}<text wx:if="{{done.guests}}"> · {{done.guests}}</text></text>
-    <text class="sub fine">门店确认后在「我的预约」里写「已预约」；开始前 {{home.rules.confirmLeadMinutes}} 分钟还没确认的会自动取消。不收订金。</text>
+    <text wx:if="{{done.status === 'pending'}}" class="sub fine">门店确认后在「我的预约」里写「已预约」；开始前 {{home.rules.confirmLeadMinutes}} 分钟还没确认的会自动取消。不收订金。</text>
+    <text wx:elif="{{done.reason}}" class="sub fine">{{done.reason}}</text>
     <view wx:if="{{remind.show}}" class="remind-row">
       <view class="remind {{remind.set ? 'on' : ''}}" bindtap="onRemind">{{remind.text}}</view>
       <text class="sub">{{remindHintText}}</text>
@@ -126,7 +128,7 @@
         <input class="note-in" value="{{note}}" maxlength="100" placeholder="备注（选填）：比如力道、同行的人" bindinput="onNote" />
       </view>
 
-      <text class="sub foot">每人同时最多 {{home.rules.maxOpen}} 个没到店的预约；开始前 {{home.rules.cancelLeadMinutes / 60}} 小时以前可以在「我的预约」里自己取消，之后请打电话给门店；过了开始时间 {{home.rules.noShowMinutes}} 分钟没到店记爽约。</text>
+      <text class="sub foot">每人同时最多 {{home.rules.maxOpen}} 个没到店的预约；开始前 {{home.rules.minLeadMinutes}} 分钟以内的时段来不及等门店确认，请打电话给门店约；开始前 {{home.rules.cancelLeadMinutes / 60}} 小时以前可以在「我的预约」里自己取消，之后请打电话给门店；过了开始时间 {{home.rules.noShowMinutes}} 分钟没到店记爽约。</text>
     </block>
   </block>
 </view>

@@ -17,6 +17,8 @@ Page({
   data: {
     state: 'loading' as State,
     message: '',
+    /** 结果待确认是因为这一次还在发（不是网络不好） */
+    flying: false,
     open: false,
     bound: false,
     canBook: false,
@@ -52,7 +54,8 @@ Page({
         open: h.open,
         bound: h.bound,
         canBook: h.canBook,
-        notice: (h.bound ? h.bookNotice : h.notice) || '',
+        // 已绑定的也写说明：会员卡停用、合并、小程序预约没开放（notice），或爽约限制、同时预约满了（bookNotice）
+        notice: (h.bound ? h.notice || h.bookNotice : h.notice) || '',
         cancelHours: Math.round(h.rules.cancelLeadMinutes / 60),
         rows: h.bookings.map((b) => {
           const v = bookingItemView(b);
@@ -94,7 +97,7 @@ Page({
       return false;
     }
     if (out.kind === 'pending') {
-      this.setData({ state: 'pending', message: out.message });
+      this.setData({ state: 'pending', message: out.message, flying: !!out.flying });
       return true;
     }
     if (out.kind === 'unreadable') {

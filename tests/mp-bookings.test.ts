@@ -363,4 +363,102 @@ describe('小程序预约', () => {
     const lease = await leaseReminders(deps, {}, at);
     expect(lease.messages.find((x) => x.templateId === tpl)).toMatchObject({ page: 'pages/bookings/index' });
   });
+
+  it('独立审查 3d：离开始不到 90 分钟的时段不给、不收；同一个编号内容不一样的拒绝；爽约限制写门店的日子与钟点', async () => {
+    expect((await saveRules(true, [itemId], [spaceId])).status).toBe(200);
+    const a = await member('演示·太近的时段');
+    const h = await home(a.openid);
+    expect(h.rules).toMatchObject({ confirmLeadMinutes: 60, minLeadMinutes: 90 });
+    // 今天的时段：离现在不到 90 分钟的一个都不给
+    const r = await slots(a.openid, { kind: 'technician', date: h.dates[0]!, itemId });
+    expect(r.statusCode, r.body).toBe(200);
+    const earliest = Date.now() + 90 * 60_000;
+    for (const s of r.json() as MpBookingSlot[]) expect(Date.parse(s.startsAt)).toBeGreaterThanOrEqual(earliest - 5_000);
+    // 直接提交 30–60 分钟以后的：拒绝，什么都不留
+    const soon = new Date(Math.ceil((Date.now() + 30 * 60_000) / 1_800_000) * 1_800_000).toISOString();
+    const count = async () => (await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM bookings`)[0]!.n;
+    const before = await count();
+    const tooSoon = await book(a.openid, { kind: 'technician', itemId, technicianId: null, startsAt: soon });
+    expect([tooSoon.statusCode, tooSoon.json().error.code]).toEqual([422, 'BOOKING_TOO_SOON']);
+    expect(await count()).toBe(before);
+    // 同一个编号：内容一样的返回第一次，换了技师的拒绝
+    const dayAfter = shiftDay(tomorrow, 1);
+    const late = await techSlots(a.openid, dayAfter);
+    const k = randomUUID();
+    const body = { kind: 'technician', itemId, technicianId: null, startsAt: late[late.length - 1]!.startsAt };
+    const first = await book(a.openid, body, k);
+    expect(first.statusCode, first.body).toBe(201);
+    expect((await book(a.openid, body, k)).json()).toMatchObject({ replayed: true, booking: { id: first.json().booking.id } });
+    const other = await book(a.openid, { ...body, technicianId: tech.B1 }, k);
+    expect([other.statusCode, other.json().error.code]).toEqual([409, 'CLIENT_KEY_REUSED']);
+    // 爽约 3 次：限制到第三次爽约后 30 天的那一刻，按门店时间写日子与钟点
+    const noShow = async (id: number) =>
+      expect((await api(ctx.app, ctx.clerk, 'POST', `/api/bookings/${id}/change`, { clientKey: randomUUID(), action: 'no_show' })).status).toBe(200);
+    await noShow(first.json().booking.id);
+    for (const i of [3, 5]) {
+      const made = await book(a.openid, { kind: 'technician', itemId, technicianId: null, startsAt: late[late.length - 1 - i]!.startsAt });
+      expect(made.statusCode, made.body).toBe(201);
+      await noShow(made.json().booking.id);
+    }
+    const [last] = await ctx.sql<{ at: string }[]>`SELECT max(no_show_at) AS at FROM bookings WHERE member_id = ${a.id} AND status = 'no_show'`;
+    const until = new Date(Date.parse(String(last!.at)) + 30 * 86_400_000);
+    const p = Object.fromEntries(
+      new Intl.DateTimeFormat('en-CA', { timeZone: ctx.config.timezone, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+        .formatToParts(until)
+        .map((x) => [x.type, x.value]),
+    );
+    expect((await home(a.openid)).bookNotice).toBe(`90 天内爽约 3 次，${p.month}月${p.day}日 ${p.hour}:${p.minute} 以后才能在小程序预约；现在请打电话给门店`);
+  });
+
+  it('独立审查 3d：前台改了预约的日子，到店提醒跟着改到新的那天发', async () => {
+    const tpl = 'tplBookingArrive-0123456789';
+    expect((await saveRules(true, [itemId], [spaceId])).status).toBe(200);
+    const a = await member('演示·改了日子的提醒');
+    const dayAfter = shiftDay(tomorrow, 1);
+    const late = await techSlots(a.openid, dayAfter);
+    const lateTomorrow = await techSlots(a.openid, tomorrow);
+    const msgOf = async (id: number) =>
+      (await ctx.sql<{ status: string; validUntil: string | null }[]>`
+        SELECT m.status, m.valid_until::text AS valid_until FROM mp_reminder_messages m JOIN mp_reminder_consents c ON c.id = m.consent_id WHERE c.booking_id = ${id}`)[0] ?? null;
+    const remindAndConfirm = async (startsAt: string) => {
+      const made = await book(a.openid, { kind: 'technician', itemId, technicianId: null, startsAt });
+      expect(made.statusCode, made.body).toBe(201);
+      const id = made.json().booking.id as number;
+      const c = await call('POST', '/api/mp/reminders', a.openid, { clientKey: randomUUID(), kind: 'booking', bookingId: id, templateId: tpl, bindVersion: await versionOf(a.openid) });
+      expect(c.statusCode, c.body).toBe(201);
+      const d = (await api(ctx.app, ctx.clerk, 'GET', `/api/bookings/${id}`)).body as BookingDetail;
+      expect((await api(ctx.app, ctx.clerk, 'POST', `/api/bookings/${id}/change`, { clientKey: randomUUID(), action: 'confirm', expectedVersion: d.version })).status).toBe(200);
+      return id;
+    };
+    const reschedule = async (id: number, startsAt: string) => {
+      const d = (await api(ctx.app, ctx.clerk, 'GET', `/api/bookings/${id}`)).body as BookingDetail;
+      const r = await api(ctx.app, ctx.clerk, 'POST', `/api/bookings/${id}/change`, { clientKey: randomUUID(), action: 'reschedule', expectedVersion: d.version, startsAt });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+    };
+    // 明天的改到后天：明天不发，后天发，消息过了后天不用发
+    const later = await remindAndConfirm(lateTomorrow[lateTomorrow.length - 1]!.startsAt);
+    await reschedule(later, late[late.length - 3]!.startsAt);
+    await planReminders(deps, new Date(`${tomorrow}T10:05:00+08:00`));
+    expect(await msgOf(later)).toBeNull();
+    // 后天的改到明天：明天就发（同意时记的是后天）
+    const earlier = await remindAndConfirm(late[late.length - 5]!.startsAt);
+    await reschedule(earlier, lateTomorrow[lateTomorrow.length - 3]!.startsAt);
+    await planReminders(deps, new Date(`${tomorrow}T10:05:00+08:00`));
+    expect(await msgOf(earlier)).toEqual({ status: 'queued', validUntil: tomorrow });
+    expect(await msgOf(later)).toBeNull();
+    await planReminders(deps, new Date(`${dayAfter}T10:05:00+08:00`));
+    expect(await msgOf(later)).toEqual({ status: 'queued', validUntil: dayAfter });
+    // 改过日子以后再点一次「到店提醒我」：返回原来那条，不记第二条
+    const again = await call('POST', '/api/mp/reminders', a.openid, { clientKey: randomUUID(), kind: 'booking', bookingId: earlier, templateId: tpl, bindVersion: await versionOf(a.openid) });
+    expect(again.json()).toMatchObject({ replayed: true });
+    expect((await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM mp_reminder_consents WHERE booking_id = ${earlier}`)[0]!.n).toBe(1);
+    // 小程序里两张都还写「已设」
+    const set = ((await call('GET', '/api/mp/reminders', a.openid)).json().set as { bookingId: number | null }[]).map((x) => x.bookingId);
+    expect(set).toEqual(expect.arrayContaining([earlier, later]));
+  });
 });
+
+/** 日历上的第几天以后 */
+function shiftDay(date: string, days: number): string {
+  return new Date(Date.parse(`${date}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+}

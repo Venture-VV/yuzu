@@ -65,11 +65,24 @@ describe('预约页与「我的预约」的字', () => {
   it('日子写今天、明天、月/日与周几；时段写钟点与空几位；一张预约写日子、钟点、状态、人数与取消的原因', async () => {
     installWx({});
     const b = await load();
-    expect(b.dayChips(['2026-11-04', '2026-11-05', '2026-11-06'])).toEqual([
+    // 北京时间 11-04 14:00
+    expect(b.dayChips(['2026-11-04', '2026-11-05', '2026-11-06'], Date.parse('2026-11-04T06:00:00Z'))).toEqual([
       { date: '2026-11-04', label: '今天', sub: '周三' },
       { date: '2026-11-05', label: '明天', sub: '周四' },
       { date: '2026-11-06', label: '11/6', sub: '周五' },
     ]);
+    // 北京时间 11-05 02:00，营业日还是 11-04：按日历写，营业日 11-05 是「今天」（独立审查 3d 的 P3）
+    expect(b.dayChips(['2026-11-04', '2026-11-05', '2026-11-06'], Date.parse('2026-11-04T18:00:00Z')).map((d) => d.label)).toEqual(['11/4', '今天', '明天']);
+    // 过了半夜的时段：格子写「次日」，确认时写日历上的那一天
+    expect(b.slotViews('technician', [{ startsAt: '2026-11-06T16:30:00.000Z', endsAt: '2026-11-06T17:30:00.000Z', free: 1, technicians: [] }], '2026-11-06')[0]).toEqual({
+      startsAt: '2026-11-06T16:30:00.000Z',
+      time: '00:30',
+      full: false,
+      text: '次日 · 空 1 位',
+    });
+    expect(b.slotWhen('2026-11-06T16:30:00.000Z')).toBe('11月7日 周六 00:30');
+    expect(b.doneTitle('pending')).toBe('提交好了，等门店确认');
+    expect(b.doneTitle('cancelled')).toBe('这张预约已经取消了');
     expect(b.dateText('2026-11-08')).toBe('11月8日 周日');
     expect(
       b.slotViews('technician', [
@@ -160,7 +173,7 @@ describe('预约与取消的「结果待确认」', () => {
     const b = await load();
     const p = b.sendBooking(BODY, KEY);
     await new Promise((ok) => setTimeout(ok, 5));
-    expect(await b.resolveBookingPending()).toMatchObject({ kind: 'pending', action: 'create' });
+    expect(await b.resolveBookingPending()).toMatchObject({ kind: 'pending', action: 'create', flying: true });
     expect(w.sent.map((s) => s.path)).toEqual(['POST /v1/bookings']);
     release();
     expect(await p).toEqual({ kind: 'done', action: 'create', booking: BOOKING });
@@ -175,5 +188,22 @@ describe('预约与取消的「结果待确认」', () => {
     expect(b3.readBookingPending()).toEqual({ state: 'unreadable' });
     expect(await b3.sendCancel(7, 2, KEY)).toEqual({ kind: 'unreadable' });
     expect(w3.sent).toEqual([]);
+  });
+
+  it('两处同时确认同一个编号：后回来的那处不删之后新存的记录（独立审查 3d 的 P2）', async () => {
+    let release: () => void = () => undefined;
+    const K2 = 'd0d0d0d0-9b8a-4c7d-8e6f-5a4b3c2d1e0f';
+    const w = installWx(
+      { 'POST /v1/bookings/abandon': { hold: { status: 200, data: { status: 'abandoned' } }, onHold: (go) => (release = go) } },
+      { storage: { tq_booking_pending: { clientKey: KEY, action: 'create', at: 1 } } },
+    );
+    const b = await load();
+    const late = b.resolveBookingPending();
+    await new Promise((ok) => setTimeout(ok, 5));
+    // 这期间另一处已经确认完上一次、顾客又提交了一次（新的编号还没回来）
+    w.storage.tq_booking_pending = { clientKey: K2, action: 'create', at: 2 };
+    release();
+    expect(await late).toEqual({ kind: 'abandoned', action: 'create' });
+    expect(w.storage.tq_booking_pending).toMatchObject({ clientKey: K2 });
   });
 });

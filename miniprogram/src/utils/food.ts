@@ -14,7 +14,7 @@
 import type { MpFoodAbandonResult, MpFoodBill, MpFoodDish, MpFoodMenu, MpFoodOrdered } from '../../../src/shared/mp';
 import { isApiError, member, messageOf } from './api';
 import { price, yuan } from './format';
-import { beginFlight, clearStored, endFlight, inFlight, readStored, saveStored, uncertain } from './pending-store';
+import { beginFlight, clearStoredIf, endFlight, inFlight, readStored, saveStored, uncertain } from './pending-store';
 
 // ── 桌码 ──
 
@@ -225,11 +225,11 @@ export async function resolveOrderPending(): Promise<OrderOutcome | null> {
   if (inFlight(r0.clientKey)) return { kind: 'pending', message: '这一单还在提交，请稍候再点「再确认一次」' };
   try {
     const r = await member<MpFoodAbandonResult>('POST', '/v1/food/orders/abandon', { clientKey: r0.clientKey });
-    clearStored(ORDER_KEY);
+    clearStoredIf(ORDER_KEY, r0.clientKey);
     return r.status === 'ordered' ? { kind: 'ordered', ordered: r.ordered } : { kind: 'abandoned' };
   } catch (e) {
     if (isApiError(e) && e.code === 'CLIENT_KEY_REUSED') {
-      clearStored(ORDER_KEY);
+      clearStoredIf(ORDER_KEY, r0.clientKey);
       return { kind: 'abandoned' };
     }
     return { kind: 'pending', message: messageOf(e) };
@@ -266,11 +266,11 @@ export async function sendOrder(body: OrderBody, clientKey: string): Promise<Ord
     const req: Record<string, unknown> = { clientKey, items: body.items, expectedTotal: body.expectedTotal, bindVersion: body.bindVersion };
     if (body.table) req.table = body.table;
     const ordered = await member<MpFoodOrdered>('POST', '/v1/food/orders', req);
-    clearStored(ORDER_KEY);
+    clearStoredIf(ORDER_KEY, clientKey);
     return { kind: 'ordered', ordered };
   } catch (e) {
     if (!uncertain(e) && isApiError(e)) {
-      clearStored(ORDER_KEY);
+      clearStoredIf(ORDER_KEY, clientKey);
       return { kind: 'rejected', code: e.code, message: e.message };
     }
     // 请求回来了、结果不确定：先拿掉「正在发」，再确认作废

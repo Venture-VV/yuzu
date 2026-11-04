@@ -16,6 +16,8 @@ CREATE TABLE mp_booking_ops (
   binding_id  bigint NOT NULL REFERENCES mp_bindings (id),
   member_id   bigint NOT NULL,
   booking_id  bigint NOT NULL REFERENCES bookings (id),
+  -- 这次请求的摘要（项目或房间、时段、技师、人数、备注；取消是哪一张）：同一个编号重提时核对内容一样，不一样的拒绝
+  request_hash text NOT NULL CHECK (request_hash ~ '^[0-9a-f]{64}$'),
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 -- 一张预约单只有一次小程序预约（主线同一个编号只建一次）

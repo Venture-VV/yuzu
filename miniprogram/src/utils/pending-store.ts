@@ -42,6 +42,15 @@ export function clearStored(key: string): void {
   }
 }
 
+/**
+ * 办完了：只在存着的仍是这个编号时才删（独立审查 3d 的 P2）。两处同时在确认同一个编号（页面回到前台、点「提交」先确认上一次），
+ * 先回来的那处删了、顾客又提交了新的一次，后回来的这处不能把新的那次的记录删掉
+ */
+export function clearStoredIf(key: string, clientKey: string): void {
+  const r = readStored(key);
+  if (r.state === 'ok' && r.value.clientKey === clientKey) clearStored(key);
+}
+
 const flying = new Set<string>();
 /** 开始发这个编号的请求 */
 export function beginFlight(clientKey: string): void {

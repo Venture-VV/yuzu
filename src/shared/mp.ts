@@ -1126,6 +1126,11 @@ export const MP_BOOKING_MAX_OPTIONS = 100;
 export const MP_BOOKING_MAX_GUESTS = 30;
 /** 备注最多几个字（与主线的预约一样） */
 export const MP_BOOKING_NOTE_MAX = 100;
+/**
+ * 小程序只给、只收开始时间离现在至少「确认的提前分钟 + 这么多分钟」的时段（独立审查 3d 的 P2）：开始前 confirmLeadMinutes
+ * 还没确认的会被自动取消（MP35），再留这么久给前台确认；更近的请打电话给门店。默认 30 分钟，待确认（MP35）
+ */
+export const MP_BOOKING_CONFIRM_WINDOW_MINUTES = 30;
 
 /** technician 预约技师、space 预约派对房等；room 客房（只能电话预订，「我的预约」里看得到） */
 export type MpBookingKind = 'technician' | 'space' | 'room';
@@ -1174,6 +1179,8 @@ export interface MpBookingHome {
     confirmLeadMinutes: number;
     /** 过了开始多少分钟没到店记爽约（MP37） */
     noShowMinutes: number;
+    /** 开始前多少分钟以内的时段小程序不给约（确认的提前分钟 + 留给前台确认的时间），请打电话给门店 */
+    minLeadMinutes: number;
   };
   bookings: MpBookingView[];
 }

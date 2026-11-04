@@ -11,7 +11,7 @@
 import type { MpBookingAbandonResult, MpBookingDone, MpBookingSlot, MpBookingStatus, MpBookingView } from '../../../src/shared/mp';
 import { isApiError, member, messageOf } from './api';
 import { shopDateTime } from './format';
-import { beginFlight, clearStored, endFlight, inFlight, readStored, saveStored, uncertain } from './pending-store';
+import { beginFlight, clearStoredIf, endFlight, inFlight, readStored, saveStored, uncertain } from './pending-store';
 
 // ── 显示 ──
 
@@ -31,16 +31,33 @@ export function dateText(date: string): string {
   return m + '月' + d + '日 ' + WEEK[w];
 }
 
-/** 能约的日子：今天、明天，之后写月日与周几（营业日） */
-export function dayChips(dates: string[]): { date: string; label: string; sub: string }[] {
-  return dates.map((date, i) => {
+/** 日历上的第二天 */
+function nextDate(date: string): string {
+  const [y, m, d] = date.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+}
+
+/**
+ * 能约的日子（营业日）：按顾客手机上的日历写今天、明天，其余写月日；都带周几（独立审查 3d 的 P3：半夜到早上营业日切换之前，
+ * 营业日的「第二天」其实是日历上的今天，按排第几个写会把「明天」写成今天）
+ */
+export function dayChips(dates: string[], now = Date.now()): { date: string; label: string; sub: string }[] {
+  const today = shopDateTime(new Date(now).toISOString()).slice(0, 10);
+  const tomorrow = nextDate(today);
+  return dates.map((date) => {
     const [, m, d] = date.split('-').map(Number) as [number, number, number];
-    return { date, label: i === 0 ? '今天' : i === 1 ? '明天' : m + '/' + d, sub: dateText(date).split(' ')[1]! };
+    return { date, label: date === today ? '今天' : date === tomorrow ? '明天' : m + '/' + d, sub: dateText(date).split(' ')[1]! };
   });
 }
 
 /** 门店时间的钟点：「14:00」 */
 export const clock = (iso: string) => shopDateTime(iso).slice(11);
+
+/** 一个时段在日历上是哪天几点：「11月7日 周六 00:30」（过了半夜的时段写第二天） */
+export function slotWhen(iso: string): string {
+  const t = shopDateTime(iso);
+  return dateText(t.slice(0, 10)) + ' ' + t.slice(11);
+}
 
 export interface SlotView {
   startsAt: string;
@@ -50,13 +67,13 @@ export interface SlotView {
   text: string;
 }
 
-export function slotViews(kind: 'technician' | 'space', slots: MpBookingSlot[]): SlotView[] {
-  return slots.map((s) => ({
-    startsAt: s.startsAt,
-    time: clock(s.startsAt),
-    full: s.free < 1,
-    text: s.free < 1 ? '约满' : kind === 'technician' ? '空 ' + s.free + ' 位' : '可约',
-  }));
+/** 时段格子；给了营业日的，过了半夜（日历上是第二天）的写「次日」 */
+export function slotViews(kind: 'technician' | 'space', slots: MpBookingSlot[], date?: string): SlotView[] {
+  return slots.map((s) => {
+    const text = s.free < 1 ? '约满' : kind === 'technician' ? '空 ' + s.free + ' 位' : '可约';
+    const next = !!date && shopDateTime(s.startsAt).slice(0, 10) !== date;
+    return { startsAt: s.startsAt, time: clock(s.startsAt), full: s.free < 1, text: next ? '次日 · ' + text : text };
+  });
 }
 
 /** 「2 小时」「90 分钟」 */
@@ -95,6 +112,19 @@ export function bookingItemView(b: MpBookingView): BookingItemView {
   };
 }
 
+/** 结果页的标题：按那张预约现在的状态写（确认出上一次已经办了的，可能已经确认、取消或爽约了） */
+export function doneTitle(status: MpBookingStatus): string {
+  return status === 'pending'
+    ? '提交好了，等门店确认'
+    : status === 'confirmed'
+      ? '约好了'
+      : status === 'arrived'
+        ? '已经到店了'
+        : status === 'cancelled'
+          ? '这张预约已经取消了'
+          : '这张预约没有到店';
+}
+
 // ── 预约、取消的「结果待确认」──
 
 const KEY = 'tq_booking_pending';
@@ -108,8 +138,8 @@ export type BookingOutcome =
   | { kind: 'rejected'; code: string; message: string }
   /** 手机上的记录读不出来：不知道有没有没确认的，先不能约、不能取消 */
   | { kind: 'unreadable' }
-  /** 还确认不了（多半是断网）：记录保留，网络好了再确认 */
-  | { kind: 'pending'; action: 'create' | 'cancel'; message: string }
+  /** 还确认不了（多半是断网；flying：这一次还在发，等它回来）：记录保留，网络好了再确认 */
+  | { kind: 'pending'; action: 'create' | 'cancel'; message: string; flying?: boolean }
   /** 点的时候手机上还有上一次没确认的：确认了上一次（message 写结果），这一次没有办 */
   | { kind: 'earlier'; message: string };
 
@@ -128,14 +158,14 @@ export async function resolveBookingPending(): Promise<BookingOutcome | null> {
   if (r0.state === 'none') return null;
   if (r0.state === 'unreadable') return { kind: 'unreadable' };
   // 这一次还在发（页面刚回到前台）：不去作废它，等它回来
-  if (inFlight(r0.clientKey)) return { kind: 'pending', action: r0.action, message: '还在提交，请稍候再点「再确认一次」' };
+  if (inFlight(r0.clientKey)) return { kind: 'pending', action: r0.action, message: '还在提交，请稍候再点「再确认一次」', flying: true };
   try {
     const r = await member<MpBookingAbandonResult>('POST', '/v1/bookings/abandon', { clientKey: r0.clientKey });
-    clearStored(KEY);
+    clearStoredIf(KEY, r0.clientKey);
     return r.status === 'done' ? { kind: 'done', action: r.action, booking: r.booking } : { kind: 'abandoned', action: r0.action };
   } catch (e) {
     if (isApiError(e) && e.code === 'CLIENT_KEY_REUSED') {
-      clearStored(KEY);
+      clearStoredIf(KEY, r0.clientKey);
       return { kind: 'abandoned', action: r0.action };
     }
     return { kind: 'pending', action: r0.action, message: messageOf(e) };
@@ -161,11 +191,11 @@ async function send(action: 'create' | 'cancel', path: string, body: Record<stri
   beginFlight(clientKey);
   try {
     const r = await member<MpBookingDone>('POST', path, { clientKey, ...body });
-    clearStored(KEY);
+    clearStoredIf(KEY, clientKey);
     return { kind: 'done', action, booking: r.booking };
   } catch (e) {
     if (!uncertain(e) && isApiError(e)) {
-      clearStored(KEY);
+      clearStoredIf(KEY, clientKey);
       return { kind: 'rejected', code: e.code, message: e.message };
     }
     // 请求回来了、结果不确定：先拿掉「正在发」，再确认作废

@@ -211,8 +211,9 @@ export async function reminderOptions(deps: Deps, openid: string): Promise<MpRem
       SELECT c.kind, cp.code AS coupon_code, c.booking_id, c.target_date::text AS target_date, c.due_date::text AS due_date, c.template_id, msg.status
       FROM mp_reminder_consents c
       LEFT JOIN coupons cp ON cp.id = c.coupon_id
+      LEFT JOIN bookings bk ON bk.id = c.booking_id
       LEFT JOIN mp_reminder_messages msg ON msg.consent_id = c.id
-      WHERE c.binding_id = ${bindingId} AND c.target_date >= ${shiftDate(today, -1)}
+      WHERE c.binding_id = ${bindingId} AND coalesce(bk.business_date, c.target_date) >= ${shiftDate(today, -1)}
       ORDER BY c.id DESC LIMIT 200`,
   ]);
   // 店主换了模板的：按旧模板同意的不会再发（排期时记不发），算「不用发了」，小程序里可以按新的模板再设
@@ -356,7 +357,7 @@ export async function consentReminder(deps: Deps, openid: string, raw: unknown):
         FROM mp_reminder_consents c LEFT JOIN mp_reminder_messages m ON m.consent_id = c.id
         WHERE c.binding_id = ${bindingId} AND c.kind = ${input.kind} AND coalesce(c.coupon_id, 0) = ${target.couponId ?? 0}
           AND coalesce(c.booking_id, 0) = ${target.bookingId ?? 0}
-          AND c.target_date = ${target.targetDate} AND c.template_id = ${input.templateId}
+          AND (c.kind = 'booking' OR c.target_date = ${target.targetDate}) AND c.template_id = ${input.templateId}
           AND (m.status IS NULL OR m.status IN ('queued', 'leased', 'sent'))
         ORDER BY c.id DESC LIMIT 1`;
       if (same) return consentView(same, true);
@@ -454,13 +455,18 @@ async function buildMessage(deps: Deps, rules: MpReminderRules, c: ConsentRow, t
   let time: string | undefined;
   let cents: number | undefined;
   let tip = '';
+  /** 预约单现在的营业日（前台可能改过时间，不用同意时记下的那天） */
+  let bookingDay = c.targetDate;
   if (c.kind === 'booking') {
-    const [bk] = await deps.sql<{ status: string; startsAt: string; kind: string; itemName: string | null; techNo: string | null; spaceName: string | null; spaceCode: string | null; roomTypeName: string | null }[]>`
-      SELECT b.status, b.starts_at, b.kind, i.name AS item_name, t.tech_no, sp.display_name AS space_name, sp.code AS space_code, rt.name AS room_type_name
+    const [bk] = await deps.sql<{ status: string; startsAt: string; businessDate: string; kind: string; itemName: string | null; techNo: string | null; spaceName: string | null; spaceCode: string | null; roomTypeName: string | null }[]>`
+      SELECT b.status, b.starts_at, b.business_date::text AS business_date, b.kind, i.name AS item_name, t.tech_no, sp.display_name AS space_name, sp.code AS space_code, rt.name AS room_type_name
       FROM bookings b LEFT JOIN service_items i ON i.id = b.item_id LEFT JOIN technicians t ON t.id = b.technician_id LEFT JOIN spaces sp ON sp.id = b.space_id
       LEFT JOIN room_types rt ON rt.id = b.room_type_id
       WHERE b.id = ${c.bookingId}`;
     if (!bk) return { skip: '预约不存在' };
+    // 前台把预约改到了以后的日子：等到那天再发（改早了的，排期按预约单现在的营业日取，当天就会到这里）
+    if (bk.businessDate > today) return { wait: true };
+    bookingDay = bk.businessDate;
     // 门店还没确认：等确认了再排（没确认的开始前会自动取消，到时候记不发）
     if (bk.status === 'pending' && Date.parse(bk.startsAt) > at.getTime()) return { wait: true };
     if (bk.status !== 'confirmed') return { skip: bk.status === 'cancelled' ? '预约已经取消' : bk.status === 'arrived' ? '已经到店' : '预约已经过了' };
@@ -525,7 +531,7 @@ async function buildMessage(deps: Deps, rules: MpReminderRules, c: ConsentRow, t
   const data: Record<string, { value: string }> = {};
   for (const f of tpl.fields) data[f.key] = { value: formatField(f.key, value(f.source)) };
   // 预约：过了开始那个营业日就不用发了（开始时间过了半夜，日期写第二天）
-  return { page: PAGES[c.kind], data, validUntil: c.kind === 'booking' ? c.targetDate : date };
+  return { page: PAGES[c.kind], data, validUntil: c.kind === 'booking' ? bookingDay : date };
 }
 
 /**
@@ -563,8 +569,9 @@ export async function planReminders(
   const due = await deps.sql<ConsentRow[]>`
     SELECT c.id, c.client_key, c.openid, c.binding_id, c.member_id, c.kind, c.coupon_id, c.booking_id, c.target_date::text AS target_date,
            c.template_id, c.due_date::text AS due_date, c.created_at
-    FROM mp_reminder_consents c
-    WHERE c.due_date <= ${today} AND NOT EXISTS (SELECT 1 FROM mp_reminder_messages m WHERE m.consent_id = c.id)
+    FROM mp_reminder_consents c LEFT JOIN bookings bk ON bk.id = c.booking_id
+    WHERE ((c.kind <> 'booking' AND c.due_date <= ${today}) OR (c.kind = 'booking' AND bk.business_date <= ${today}))
+      AND NOT EXISTS (SELECT 1 FROM mp_reminder_messages m WHERE m.consent_id = c.id)
     ORDER BY c.due_date, c.id LIMIT ${limit}`;
   let queued = 0;
   let skipped = 0;
@@ -781,8 +788,8 @@ export async function reminderAdminData(deps: Deps): Promise<MpReminderAdminData
     deps.sql<{ status: MpReminderStatus; n: number }[]>`
       SELECT status, count(*)::int AS n FROM mp_reminder_messages WHERE created_at > now() - interval '30 days' GROUP BY status`,
     deps.sql<{ waiting: number; overdue: number }[]>`
-      SELECT (count(*) FILTER (WHERE c.due_date > ${today} OR bk.status = 'pending'))::int AS waiting,
-             (count(*) FILTER (WHERE c.due_date <= ${today} AND bk.status IS DISTINCT FROM 'pending'))::int AS overdue
+      SELECT (count(*) FILTER (WHERE coalesce(bk.business_date, c.due_date) > ${today} OR bk.status = 'pending'))::int AS waiting,
+             (count(*) FILTER (WHERE coalesce(bk.business_date, c.due_date) <= ${today} AND bk.status IS DISTINCT FROM 'pending'))::int AS overdue
       FROM mp_reminder_consents c LEFT JOIN bookings bk ON bk.id = c.booking_id
       WHERE NOT EXISTS (SELECT 1 FROM mp_reminder_messages m WHERE m.consent_id = c.id)`,
     deps.sql<(Omit<MpReminderMessageAdmin, 'createdAt' | 'finishedAt'> & { createdAt: string; finishedAt: string | null })[]>`
