@@ -9,6 +9,7 @@
     "pages/coupons/index",
     "pages/benefits/index",
     "pages/recharge/index",
+    "pages/coupon-center/index",
     "pages/unbind/index"
   ],
   "window": {

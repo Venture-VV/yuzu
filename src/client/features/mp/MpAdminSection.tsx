@@ -3,7 +3,8 @@
 // 写操作都按「结果待确认」处理（mpPending.ts）：提交前存在本机，没收到结果时在这一页上方查回、按原内容重新提交或作废 / 放弃。
 // 修改都带版本号（重提不会改两次）；新建轮播、解绑带操作编号（重提返回原来那次）。
 // 维护内容要「维护小程序内容」；只有「解绑会员的微信」的（值班经理）只看到绑定这一页；
-// 线上充值（第二期 2a：设置、处理已付款待处理的单）要「小程序线上充值」（RechargeTab.tsx）。
+// 线上充值（第二期 2a：设置、处理已付款待处理的单）要「小程序线上充值」（RechargeTab.tsx）；
+// 领券中心（第二期 2c：哪些券可领、领取限制、停领）要「小程序领券中心」（CouponTab.tsx）。
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -41,9 +42,10 @@ import {
   type MpPendingOp,
 } from './mpPending';
 import { mpAdminKey, PendingUpdates, saveError, updateFailed } from './mpAdminShared';
+import { CouponTab } from './CouponTab';
 import { RechargeTab } from './RechargeTab';
 
-type Tab = 'store' | 'banners' | 'items' | 'recharge' | 'bindings';
+type Tab = 'store' | 'banners' | 'items' | 'recharge' | 'coupons' | 'bindings';
 const key = mpAdminKey;
 const imageUrl = (id: number) => `/api/admin/mp/images/${id}`;
 
@@ -87,6 +89,7 @@ export function MpAdminSection() {
   const can = useCan();
   const canContent = can('mp.content');
   const canRecharge = can('mp.recharge');
+  const canCoupon = can('mp.coupon');
   const q = useQuery({ queryKey: key, queryFn: () => api.get<MpAdminData>('/api/admin/mp') });
   const tabs = useMemo(
     () =>
@@ -95,9 +98,10 @@ export function MpAdminSection() {
         { value: 'banners' as const, label: '首页轮播', show: canContent },
         { value: 'items' as const, label: '项目介绍', show: canContent },
         { value: 'recharge' as const, label: '线上充值', show: canRecharge },
+        { value: 'coupons' as const, label: '领券中心', show: canCoupon },
         { value: 'bindings' as const, label: '会员的微信', show: true },
       ].filter((t) => t.show),
-    [canContent, canRecharge],
+    [canContent, canRecharge, canCoupon],
   );
   const [tab, setTab] = useState<Tab>(tabs[0]!.value);
   const unreadable = useMpPendingUnreadable();
@@ -133,6 +137,8 @@ export function MpAdminSection() {
           <ItemsTab data={q.data} />
         ) : tab === 'recharge' ? (
           <RechargeTab data={q.data} />
+        ) : tab === 'coupons' ? (
+          <CouponTab data={q.data} />
         ) : (
           <BindingsTab />
         )}

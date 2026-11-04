@@ -155,6 +155,8 @@ export interface MpMe {
         rechargeOpen: boolean;
         /** 这张会员卡已合并到另一张（主线 v0.7.26）：请到前台换绑，不显示目标会员（MP25） */
         merged: boolean;
+        /** 领券中心开着、有可领的券（第二期 2c）：「我的」页显示「领券中心」 */
+        couponCenterOpen: boolean;
       })
     | null;
 }
@@ -280,6 +282,8 @@ export interface MpAdminData {
   rules: MpRules;
   /** 线上充值的设置（第二期 2a）：放在这里，「结果待确认」查回修改结论时与其他开关同一份数据 */
   rechargeRules: MpRechargeRules;
+  /** 领券中心的设置（第二期 2c）：同上 */
+  couponRules: MpCouponRules;
   stores: MpStoreAdmin[];
   banners: MpBannerAdmin[];
   items: MpItemIntroAdmin[];
@@ -493,4 +497,107 @@ export interface MpRechargeRecon {
   source: 'auto' | 'manual';
   staffName: string | null;
   createdAt: string;
+}
+
+// ── 线上领券（第二期 2c，docs/MP_COUPONS.md，MP22、MP27）──
+
+/** 一张可领的券：哪个券模板、领取限制（不限领 / 每人限领 N 张）、可领还是停领 */
+export interface MpCouponOffer {
+  templateId: number;
+  limit: 'unlimited' | 'per_member';
+  /** 每人限领几张（1–99）；不限领时不看 */
+  perMember: number;
+  /** false = 停领：小程序不再列出、不能领，已经领到的不受影响 */
+  active: boolean;
+}
+
+/**
+ * 领券中心的设置（settings 的 mp_coupon_rules，后台「微信小程序」→「领券中心」，权限 mp.coupon）：
+ * 开关、可领的券（按列表的先后显示）。默认关、没有可领的券；新加的券默认每人限领 1 张（MP22）。
+ */
+export interface MpCouponRules {
+  enabled: boolean;
+  offers: MpCouponOffer[];
+  /** 每保存一次加一；后台保存时带上看到的版本号 */
+  version: number;
+}
+export const DEFAULT_MP_COUPON_RULES: MpCouponRules = { enabled: false, offers: [], version: 0 };
+export const MP_COUPON_RULES_KEY = 'mp_coupon_rules';
+export const MP_COUPON_PER_MEMBER_DEFAULT = 1;
+export const MP_COUPON_PER_MEMBER_MAX = 99;
+/** 领券中心最多放几张可领的券 */
+export const MP_COUPON_OFFERS_MAX = 30;
+
+/** 领券中心的一张券（按这位会员此刻算好：领过几张、能不能领、为什么不能） */
+export interface MpCouponCenterItem {
+  templateId: number;
+  name: string;
+  /** cash 代金券、discount 折扣券、exchange 兑换券 */
+  kind: string;
+  /** 「代金券 ¥30.00 · 满 ¥50.00 可用」 */
+  summary: string;
+  /** 「领取后 30 天内有效」「2026-11-01 至 2026-12-31 有效」 */
+  validity: string;
+  /** 「每人限领 1 张」「不限领」 */
+  limitText: string;
+  /** 这位会员已经领了几张（换绑过微信、合并进来的会员卡领的也算） */
+  claimed: number;
+  canClaim: boolean;
+  /** 不能领的原因：已经领满、会员已停用、档级不够、券停了或过了期 */
+  reason: string | null;
+}
+
+export interface MpCouponCenter {
+  open: boolean;
+  /** 领券中心没开、会员卡合并或停用时的说明 */
+  notice: string | null;
+  items: MpCouponCenterItem[];
+  /** 这个微信此刻的绑定状态版本号：领取时带上，之后解绑、换绑过的领取请求门店系统拒绝（BIND_STALE），与充值建单一样 */
+  bindVersion: number;
+}
+
+/** 领到的一张券（券码、有效期），去「我的券」能看到 */
+export interface MpCouponClaimed {
+  claimId: number;
+  templateId: number;
+  /** 同一个操作编号重提：返回第一次领到的那张，这次没有再发 */
+  replayed: boolean;
+  coupon: { code: string; name: string; summary: string; validFrom: string; validTo: string };
+}
+
+/** 领取结果不确定时确认作废：已经领到了返回那一张，否则登记作废（原请求之后到达也不会发券） */
+export type MpCouponAbandonResult = { status: 'claimed'; claimed: MpCouponClaimed } | { status: 'abandoned' };
+
+// ── 后台：领券中心（权限 mp.coupon）──
+
+/** 启用的券模板（勾选用） */
+export interface MpCouponTemplateOption {
+  id: number;
+  name: string;
+  summary: string;
+  validity: string;
+  /** 限定发放的档级（空 = 不限） */
+  levels: number[];
+}
+
+export interface MpCouponClaimAdmin {
+  id: number;
+  createdAt: string;
+  memberId: number;
+  memberName: string;
+  templateId: number;
+  templateName: string;
+  couponCode: string;
+  issueNo: string;
+  /** 这位会员领这张券的第几张 */
+  seq: number;
+}
+
+export interface MpCouponAdminData {
+  rules: MpCouponRules;
+  templates: MpCouponTemplateOption[];
+  /** 每张可领的券一共领了多少、最近 7 天领了多少（按券模板） */
+  stats: { templateId: number; total: number; last7Days: number }[];
+  /** 最近 50 条领取记录 */
+  recent: MpCouponClaimAdmin[];
 }

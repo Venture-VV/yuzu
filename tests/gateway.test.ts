@@ -20,7 +20,7 @@ import { createMockWechat, createWechat, WechatError } from '../src/gateway/wech
 import { buildMpApp } from '../src/server/modules/mp/app';
 import type { PayRuntime } from '../src/server/modules/mp/pay';
 import { createMockWxPay, type MockWxPay } from '../src/server/modules/mp/wxpay-mock';
-import { createMember, setup, type TestContext } from './helpers';
+import { api, createMember, setup, type TestContext } from './helpers';
 
 const KEY = 'test-gateway-key-0123456789abcdef-0123';
 const SESSION = 'test-session-secret-0123456789abcdef-0123';
@@ -328,6 +328,39 @@ describe('线上充值（第二期 2a）', () => {
     const res = await real.inject({ method: 'POST', url: '/v1/recharge/orders/MPR20261104AAAAAAAAAA/mock-pay', headers: { authorization: `Bearer ${token}` } });
     expect(res.statusCode).toBe(404);
     await real.close();
+  });
+});
+
+describe('线上领券（第二期 2c）', () => {
+  it('领券中心、领取、确认作废：网关带会话里的微信转给 yuzu；没会话拒绝；领取每个微信每分钟最多 20 次', async () => {
+    await createMember(ctx, '演示·gw-coupon', '13700004001');
+    const token = await login(gw, 'gw-coupon');
+    expect((await authed(gw, token, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700004001', clientKey: randomUUID(), bindVersion: 0 })).statusCode).toBe(200);
+    const tpl = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', { clientKey: randomUUID(), name: '网关领的券', kind: 'cash', faceValue: 1000, validity: 'days', validDays: 7 });
+    expect(tpl.status, JSON.stringify(tpl.body)).toBe(200);
+    const saved = await api(ctx.app, ctx.owner, 'PUT', '/api/admin/mp/coupons/rules', {
+      enabled: true,
+      offers: [{ templateId: tpl.body.id, limit: 'unlimited', perMember: 1, active: true }],
+    });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    const c = await authed(gw, token, 'GET', '/v1/coupon-center');
+    expect(c.statusCode, c.body).toBe(200);
+    expect(c.json().items).toMatchObject([{ templateId: tpl.body.id, name: '网关领的券', canClaim: true, limitText: '不限领' }]);
+    const key = randomUUID();
+    const bindVersion = c.json().bindVersion as number;
+    expect((await authed(gw, token, 'POST', '/v1/coupon-claims', { clientKey: randomUUID(), templateId: tpl.body.id })).statusCode).toBe(400);
+    const r = await authed(gw, token, 'POST', '/v1/coupon-claims', { clientKey: key, templateId: tpl.body.id, bindVersion });
+    expect(r.statusCode, r.body).toBe(201);
+    const [row] = await ctx.sql<{ openid: string }[]>`SELECT openid FROM mp_coupon_claims WHERE client_key = ${key}`;
+    expect(row).toEqual({ openid: 'mock_gw-coupon' });
+    const ab = await authed(gw, token, 'POST', '/v1/coupon-claims/abandon', { clientKey: key });
+    expect(ab.json()).toMatchObject({ status: 'claimed', claimed: { coupon: { code: r.json().coupon.code } } });
+    expect((await authed(gw, null, 'GET', '/v1/coupon-center')).statusCode).toBe(401);
+    expect((await authed(gw, token, 'POST', '/v1/coupon-claims', { clientKey: 'not-a-uuid', templateId: tpl.body.id, bindVersion })).statusCode).toBe(400);
+    // 每分钟最多 20 次（领取与确认作废一起算）：已经用了 4 次
+    let last = 0;
+    for (let i = 0; i < 17; i++) last = (await authed(gw, token, 'POST', '/v1/coupon-claims', { clientKey: randomUUID(), templateId: tpl.body.id, bindVersion })).statusCode;
+    expect(last).toBe(429);
   });
 });
 

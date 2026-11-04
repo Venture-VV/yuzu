@@ -190,6 +190,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '045_ticket_extension.sql',
   '046_mp_recharge.sql',
   '047_membership_finish.sql',
+  '048_mp_coupons_refunds.sql',
   '049_mp_claim_refund_route.sql',
 ];
 

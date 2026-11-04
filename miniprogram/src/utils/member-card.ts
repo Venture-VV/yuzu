@@ -28,6 +28,8 @@ export interface CardView {
   recharge: boolean;
   /** 这张会员卡已合并到另一张：请到前台换绑（MP25） */
   merged: boolean;
+  /** 领券中心开着、有可领的券（第二期 2c）：菜单里有「领券中心」 */
+  couponCenter: boolean;
 }
 
 const pct = (part: number, whole: number) => (whole > 0 ? Math.max(0, Math.min(100, Math.floor((part * 100) / whole))) : 0);
@@ -81,5 +83,6 @@ export function cardView(m: MeMember): CardView {
     coupons: m.availableCoupons,
     recharge: m.rechargeOpen === true && m.merged !== true,
     merged: m.merged === true,
+    couponCenter: m.couponCenterOpen === true && m.merged !== true,
   };
 }

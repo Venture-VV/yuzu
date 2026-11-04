@@ -1,0 +1,61 @@
+<view class="view">
+  <view wx:if="{{state === 'loading'}}" class="wait">正在打开…</view>
+
+  <view wx:elif="{{state === 'unbound'}}" class="panel wait">
+    <text class="h3">先绑定会员</text>
+    <button class="btn primary" hover-class="btn-hover" bindtap="onBind">去绑定</button>
+  </view>
+
+  <view wx:elif="{{state === 'offline' || state === 'error'}}" class="panel wait">
+    <text class="h3">{{state === 'offline' ? '门店系统连接中' : message}}</text>
+    <text wx:if="{{state === 'offline'}}">暂时领不了，店里网络恢复后再来</text>
+    <button class="btn ghost" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+
+  <!-- 领取结果待确认：上次点「领取」时网络不好，确认之前不能再领 -->
+  <view wx:elif="{{state === 'pending'}}" class="panel">
+    <text class="h3">领取结果待确认</text>
+    <text class="lede">上次领券时网络不好，还不知道领到没有。网络好了点「再确认一次」，门店系统会告诉我们结果；确认之前先不要重新领。</text>
+    <button class="btn primary block" hover-class="btn-hover" bindtap="onConfirmPending" loading="{{busy === -1}}" disabled="{{busy !== 0}}">再确认一次</button>
+    <text wx:if="{{message}}" class="sub fine">{{message}}</text>
+  </view>
+
+  <view wx:elif="{{state === 'unreadable'}}" class="panel">
+    <text class="h3">领取记录暂时读不出来</text>
+    <text class="lede">手机上保存的领取记录读不出来，为防止领重，先不能领。请稍后点「再试一次」；一直这样，请清理微信的存储空间后再打开小程序。</text>
+    <button class="btn primary block" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+
+  <block wx:else>
+    <view wx:if="{{!view.open}}" class="panel wait">
+      <text class="h3">{{view.notice || '领券中心还没开放'}}</text>
+    </view>
+    <block wx:else>
+      <view wx:if="{{view.notice}}" class="panel note"><text>{{view.notice}}</text></view>
+      <view class="sec-h"><view><text class="eyebrow">Coupons</text><text class="h3">可以领的券</text></view></view>
+      <view wx:if="{{!view.items.length}}" class="wait">现在没有可以领的券</view>
+      <view wx:for="{{view.items}}" wx:key="templateId" class="coupon {{item.canClaim ? '' : 'off'}}">
+        <view class="cp-left"><text class="cp-big num">{{item.big}}</text><text class="cp-kind">{{item.kind}}</text></view>
+        <view class="cp-right">
+          <text class="cp-name">{{item.name}}</text>
+          <text wx:if="{{item.terms}}" class="cp-meta">{{item.terms}}</text>
+          <text class="cp-meta">{{item.validity}}</text>
+          <text class="cp-meta">{{item.limit}}</text>
+          <text wx:if="{{item.reason}}" class="cp-why">{{item.reason}}</text>
+        </view>
+        <view class="cp-act">
+          <button
+            class="btn {{item.canClaim ? 'primary' : 'ghost'}} mini"
+            hover-class="btn-hover"
+            data-id="{{item.templateId}}"
+            bindtap="onClaim"
+            loading="{{busy === item.templateId}}"
+            disabled="{{busy !== 0}}"
+          >{{item.button}}</button>
+        </view>
+      </view>
+      <text class="sub use-note">领到的券在「我的券」里，结账时告诉前台用哪张。限领按会员算，换了微信也不能多领。</text>
+      <button class="btn ghost block mine" hover-class="btn-hover" bindtap="onMine">看我的券</button>
+    </block>
+  </block>
+</view>

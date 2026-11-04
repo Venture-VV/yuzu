@@ -4,7 +4,7 @@ import { api, ApiError, UncertainError } from '../../lib/api';
 import { uuid } from '../../lib/utils';
 
 // 后台「微信小程序」写操作的「结果待确认」（小程序线；Codex 审查 PR #42 的 P1）：新建首页轮播、解绑会员的微信，
-// 修改内容（对顾客开放的开关、门店信息、轮播、项目介绍、线上充值的设置），以及处理「已付款待处理」的线上充值单（第二期 2a）。
+// 修改内容（对顾客开放的开关、门店信息、轮播、项目介绍、线上充值的设置、领券中心的设置），以及处理「已付款待处理」的线上充值单（第二期 2a）。
 // 与 ERP 单据的做法一样（src/client/lib/erpPending.ts）：
 //   · 提交前把操作编号和原请求存在本机并读回核对，存不了就不发请求；
 //   · 成功、或第一次提交就被明确拒绝（4xx）才删；超时、断网、服务器出错（5xx）保留，关掉弹窗、刷新后页面上照样能处理：
@@ -19,7 +19,7 @@ import { uuid } from '../../lib/utils';
 //     这时一律不发新的请求、不改写记录（原来的记录原样留着），页面提示恢复后再读一次，读得出来才继续。
 // 作废用小程序线自己的登记（迁移 044），不进共用的 op_fences，所以不用 ERP 的面板。
 
-export type MpUpdateType = 'rules_update' | 'store_update' | 'banner_update' | 'intro_update' | 'recharge_rules_update';
+export type MpUpdateType = 'rules_update' | 'store_update' | 'banner_update' | 'intro_update' | 'recharge_rules_update' | 'coupon_rules_update';
 export type MpOpType = 'banner_create' | 'unbind' | 'recharge_resolve' | MpUpdateType;
 
 export interface MpPendingOp {
@@ -255,6 +255,7 @@ const CONTENT_FIELDS: Record<MpUpdateType, string[]> = {
   banner_update: ['title', 'imageId', 'link', 'startsOn', 'endsOn', 'sortOrder', 'active'],
   intro_update: ['intro', 'imageId'],
   recharge_rules_update: ['enabled', 'planIds', 'customEnabled', 'maxCents', 'dailyLimit'],
+  coupon_rules_update: ['enabled', 'offers'],
 };
 
 const isUpdate = (op: MpPendingOp): op is MpPendingOp & { type: MpUpdateType } => op.type in CONTENT_FIELDS;
@@ -266,7 +267,9 @@ function currentOf(op: MpPendingOp, data: MpAdminData): { version: number; conte
       ? { ...data.rules }
       : op.type === 'recharge_rules_update'
         ? { ...data.rechargeRules }
-        : op.type === 'store_update'
+        : op.type === 'coupon_rules_update'
+          ? { ...data.couponRules }
+          : op.type === 'store_update'
           ? data.stores.find((s) => s.code === op.target)
           : op.type === 'banner_update'
             ? data.banners.find((b) => String(b.id) === op.target)
@@ -278,9 +281,23 @@ function currentOf(op: MpPendingOp, data: MpAdminData): { version: number; conte
   return { version: found.version, content: Object.fromEntries(CONTENT_FIELDS[op.type].map((k) => [k, row[k] ?? null])) };
 }
 
-/** 比内容用：服务端会去掉首尾空格，定位存到小数点后 6 位；勾选的套餐不看先后、去重 */
+/** 对象按键排好（服务端存成 jsonb 会重排键） */
+const sortKeys = (v: unknown): unknown =>
+  Array.isArray(v) ? v.map(sortKeys) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys((v as Record<string, unknown>)[k])])) : v;
+/**
+ * 比内容用：服务端会去掉首尾空格，定位存到小数点后 6 位；勾选的套餐不看先后、去重；
+ * 领券中心可领的券是一串对象，先后就是顾客看到的先后，按原来的先后比、对象里不看键的先后
+ */
 const norm = (v: unknown) =>
-  Array.isArray(v) ? JSON.stringify([...new Set(v)].sort()) : typeof v === 'string' ? v.trim() : typeof v === 'number' ? Math.round(v * 1e6) / 1e6 : (v ?? null);
+  Array.isArray(v)
+    ? v.some((x) => x !== null && typeof x === 'object')
+      ? JSON.stringify(sortKeys(v))
+      : JSON.stringify([...new Set(v)].sort())
+    : typeof v === 'string'
+      ? v.trim()
+      : typeof v === 'number'
+        ? Math.round(v * 1e6) / 1e6
+        : (v ?? null);
 function sameContent(op: MpPendingOp & { type: MpUpdateType }, content: Record<string, unknown>): boolean {
   return CONTENT_FIELDS[op.type].every((k) => norm(op.body[k]) === norm(content[k]));
 }

@@ -58,24 +58,32 @@ export interface CouponView {
 /** 券码每 4 位一段（与前台打印的一样） */
 export const couponCode = (code: string) => code.replace(/(.{4})(?=.)/g, '$1-');
 
-export function couponView(c: MpCoupon): CouponView {
-  // 门店系统给的一句话说明：「代金券 ¥50.00 · 满 ¥200.00 可用 · 限门票」「8.8 折 · 最多减 ¥30.00」「兑换 搓澡 1 份」
-  const parts = c.summary.split(' · ');
+/**
+ * 券面左边的大字与说明：门店系统给的一句话说明「代金券 ¥50.00 · 满 ¥200.00 可用 · 限门票」「8.8 折 · 最多减 ¥30.00」「兑换 搓澡 1 份」
+ * 拆成大字（¥50、8.8 折、兑换）与其余的说明（我的券、领券中心共用）
+ */
+export function couponFace(kind: string, summary: string): { big: string; kind: string; terms: string } {
+  const parts = summary.split(' · ');
   const head = parts[0] || '';
-  let big = KIND_LABELS[c.kind] || '券';
+  let big = KIND_LABELS[kind] || '券';
   let terms = parts.slice(1);
-  if (c.kind === 'cash' && /^代金券 /.test(head)) big = head.replace(/^代金券 /, '').replace(/\.00$/, '');
-  else if (c.kind === 'discount' && /折$/.test(head)) big = head;
-  else if (c.kind === 'exchange') {
+  if (kind === 'cash' && /^代金券 /.test(head)) big = head.replace(/^代金券 /, '').replace(/\.00$/, '');
+  else if (kind === 'discount' && /折$/.test(head)) big = head;
+  else if (kind === 'exchange') {
     big = '兑换';
     terms = [head].concat(terms);
   }
+  return { big, kind: KIND_LABELS[kind] || '', terms: terms.join(' · ').replace(/\.00(?=\D|$)/g, '') };
+}
+
+export function couponView(c: MpCoupon): CouponView {
+  const face = couponFace(c.kind, c.summary);
   return {
     code: couponCode(c.code),
     name: c.name,
-    big,
-    kind: KIND_LABELS[c.kind] || '',
-    terms: terms.join(' · ').replace(/\.00(?=\D|$)/g, ''),
+    big: face.big,
+    kind: face.kind,
+    terms: face.terms,
     valid: c.validFrom === c.validTo ? c.validTo + ' 当天有效' : c.validFrom + ' 至 ' + c.validTo,
     state: c.state,
     stateLabel: STATE_LABELS[c.state] || c.state,

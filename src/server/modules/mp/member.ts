@@ -43,6 +43,7 @@ import { loadMembershipRules, memberGradeInfo } from '../membership';
 import { loadSettings } from '../settings';
 import { activePay } from './pay';
 import { mpToday } from './public';
+import { couponCenterOpen } from './coupon-center';
 import { loadRechargeRules } from './rules';
 
 /** 网关验证过的小程序用户 */
@@ -184,12 +185,13 @@ export async function getMe(deps: Deps, openid: string): Promise<MpMe> {
   const [m] = await deps.sql<{ memberNo: string; name: string; status: string; principalBalance: number; bonusBalance: number; mergedIntoId: number | null }[]>`
     SELECT member_no, name, status, principal_balance, bonus_balance, merged_into_id FROM members WHERE id = ${b.memberId}`;
   if (!m) throw notFound('会员不存在');
-  const [info, rules, coupons, settings, rechargeRules] = await Promise.all([
+  const [info, rules, coupons, settings, rechargeRules, couponOpen] = await Promise.all([
     memberGradeInfo(deps.sql, b.memberId, today),
     loadMembershipRules(deps.sql),
     memberCoupons(deps.sql, b.memberId, today),
     loadSettings(deps.sql),
     loadRechargeRules(deps.sql),
+    couponCenterOpen(deps.sql),
   ]);
   const { grade, tier, cycleEnd } = info.state;
   const g: MpGrade = {
@@ -220,6 +222,8 @@ export async function getMe(deps: Deps, openid: string): Promise<MpMe> {
       rechargeOpen: rechargeRules.enabled && activePay() !== null,
       // 合并掉的会员卡（主线 v0.7.26）：只说已合并、请到前台换绑，不给目标会员的信息（MP25）
       merged: m.mergedIntoId !== null,
+      // 领券中心（第二期 2c）开着、有可领的券：「我的」页显示「领券中心」
+      couponCenterOpen: couponOpen,
     },
   };
 }

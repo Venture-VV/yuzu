@@ -9,6 +9,7 @@ import { notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { getMember } from '../members';
 import { abandonBannerCreate, createBanner, lookupBannerOp, mpAdminData, saveItemIntro, saveMpImage, saveMpRules, saveStore, updateBanner } from './admin';
+import { couponAdminData, saveCouponRules } from './coupon-center';
 import { memberBindings, resolveMemberCode, unbindMember } from './member';
 import { activePay } from './pay';
 import { closeUnboundOrders } from './recharge';
@@ -36,7 +37,7 @@ export function registerMpStaffRoutes(app: FastifyInstance, deps: Deps) {
 
   // 后台「小程序」：维护内容要 mp.content；只管解绑的（值班经理）也能打开看
   const content = guard('mp.content');
-  app.get('/api/admin/mp', { preHandler: guardAny('mp.content', 'mp.unbind', 'mp.recharge') }, async () => mpAdminData(sql));
+  app.get('/api/admin/mp', { preHandler: guardAny('mp.content', 'mp.unbind', 'mp.recharge', 'mp.coupon') }, async () => mpAdminData(sql));
   app.put('/api/admin/mp/rules', { preHandler: content }, async (req) => saveMpRules(deps, req.body, ctxOf(req)));
   app.put('/api/admin/mp/stores/:code', { preHandler: content }, async (req) => saveStore(deps, req.params, req.body, ctxOf(req)));
   app.post('/api/admin/mp/images', { preHandler: content, bodyLimit: 1_600_000 }, async (req, reply) => {
@@ -70,4 +71,9 @@ export function registerMpStaffRoutes(app: FastifyInstance, deps: Deps) {
   );
   // 2b 对账：按天重新核对（只追加一条结论）
   app.post('/api/admin/mp/recharge/recon', { preHandler: recharge }, async (req) => runRecon(deps, req.body, ctxOf(req)));
+
+  // 领券中心（第二期 2c）：哪些券可领、每人限领几张、停领，领取记录（mp.coupon：店主、店总，MP27）
+  const coupon = guard('mp.coupon');
+  app.get('/api/admin/mp/coupons', { preHandler: coupon }, async () => couponAdminData(deps));
+  app.put('/api/admin/mp/coupons/rules', { preHandler: coupon }, async (req) => saveCouponRules(deps, req.body, ctxOf(req)));
 }

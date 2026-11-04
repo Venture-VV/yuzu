@@ -8,6 +8,7 @@ import { MP_GATEWAY_HEADER } from '@shared/mp';
 import type { AppConfig } from '../../config';
 import type { Sql } from '../../db';
 import { AppError } from '../../lib/errors';
+import { registerMpCouponRoutes } from './coupon-routes';
 import { loadPayRuntime, setActivePay, type PayRuntime } from './pay';
 import { registerMpPublicRoutes } from './public';
 import { sweepRechargeOrders } from './recharge';
@@ -62,6 +63,8 @@ export async function buildMpApp(sql: Sql, config: AppConfig, opts: MpAppOptions
 
   registerMpPublicRoutes(app, { sql, config });
   registerMpMemberRoutes(app, { sql, config });
+  // 线上领券（第二期 2c）
+  registerMpCouponRoutes(app, { sql, config });
 
   // 线上充值（第二期 2a）：微信支付的凭据只在门店 yuzu（MP17）；配错了不开线上充值、写日志，门店系统照常启动
   let pay: PayRuntime | null = null;

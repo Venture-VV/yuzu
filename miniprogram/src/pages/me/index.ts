@@ -178,6 +178,9 @@ Page({
   onRecharge() {
     wx.navigateTo({ url: '/pages/recharge/index' });
   },
+  onCouponCenter() {
+    wx.navigateTo({ url: '/pages/coupon-center/index' });
+  },
   onLedger() {
     wx.navigateTo({ url: '/pages/ledger/index' });
   },

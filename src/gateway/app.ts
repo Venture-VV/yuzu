@@ -6,6 +6,7 @@
 //   · 线上充值（第二期 2a，docs/MP_RECHARGE.md）：/v1/recharge… 带会话里的 openid 转给 yuzu（建单、支付参数都在 yuzu 签）；
 //     到账通知 /v1/pay/notify 不要会话、不解析内容，连同微信的四个签名头原样转给 yuzu，按 yuzu 的结果回微信。
 //     网关不放任何支付凭据（MP17）：验签、解密、入账都在 yuzu，网关被攻破也伪造不了到账。
+//   · 线上领券（第二期 2c，docs/MP_COUPONS.md）：/v1/coupon-center、/v1/coupon-claims… 带会话里的 openid 转给 yuzu（发券在 yuzu）。
 // 网关不存会员、余额、券、订单；yuzu 返回的错误文字面向顾客，原样转给小程序。
 
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
@@ -58,6 +59,12 @@ const RechargeCreate = z.object({
   bindVersion: z.number('请刷新充值页后再下单').int().min(0),
 });
 const RechargePreview = z.object({ amount: z.coerce.number('请填写金额').int('金额请填整元').positive('请填写金额') });
+const CouponClaim = z.object({
+  clientKey: z.uuid('操作编号不正确'),
+  templateId: z.number('请选择要领的券').int().positive('请选择要领的券'),
+  /** 顾客点领取时看到的绑定状态版本号：门店系统比对，换绑过的拒绝 */
+  bindVersion: z.number('请刷新领券中心后再领').int().min(0),
+});
 /** 微信支付的到账通知：报文主体原样转（门店系统要用原文验签），最多 8 KB */
 const NOTIFY_MAX_BYTES = 8 * 1024;
 
@@ -83,6 +90,8 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
   // 线上充值：建单、继续支付、取消、作废每个微信每分钟 20 次；查单（付完等结果每 2 秒一次）每分钟 60 次
   const rechargeLimit = new RateLimiter(20);
   const rechargeQueryLimit = new RateLimiter(60);
+  // 线上领券：领取、确认作废每个微信每分钟 20 次（不限领的券也一样，MP_COUPONS.md 第 2 节）
+  const couponLimit = new RateLimiter(20);
 
   app.addHook('onRequest', async (req) => {
     if (!perIp.take(`ip:${req.ip}`)) throw TOO_MANY();
@@ -269,6 +278,20 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
       return member(reply, 'POST', `/api/mp/recharge/orders/${parse(RechargeNo, req.params).no}/${action}`, openid, {});
     });
   }
+
+  // ── 线上领券（第二期 2c）──
+  app.get('/v1/coupon-center', async (req, reply) => member(reply, 'GET', '/api/mp/coupon-center', openidOf(req)));
+  app.post('/v1/coupon-claims', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!couponLimit.take(`coupon:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/coupon-claims', openid, parse(CouponClaim, req.body));
+  });
+  // 领取结果不确定（超时、断网、门店出错）时，小程序请门店系统作废这个编号：已经领到了返回那一张
+  app.post('/v1/coupon-claims/abandon', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!couponLimit.take(`coupon:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/coupon-claims/abandon', openid, parse(AbandonInput, req.body));
+  });
 
   // 微信支付的到账通知：不要会话、不解析内容，报文主体与四个签名头原样转给门店系统（Base64 包一层，一个字节不改）。
   // 门店收下了（入账、记成已付款待处理）回 204；门店没收下、连不上回失败，微信按它的节奏重发

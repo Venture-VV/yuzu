@@ -113,6 +113,7 @@
       <view class="mi" hover-class="tap" bindtap="onLedger"><text>余额与流水</text><text class="mv"></text></view>
       <view class="mi" hover-class="tap" bindtap="onBenefits"><text>本月可享</text><text class="mv">{{card.code}} 能享的权益</text></view>
       <view class="mi" hover-class="tap" bindtap="onCoupons"><text>我的券</text><text class="mv">{{card.coupons}} 张可用</text></view>
+      <view wx:if="{{card.couponCenter && !card.frozen}}" class="mi" hover-class="tap" bindtap="onCouponCenter"><text>领券中心</text><text class="mv">领门店放出的券</text></view>
       <view class="mi" hover-class="tap" bindtap="onUnbind"><text>解绑与换号</text><text class="mv"></text></view>
     </view>
   </block>
