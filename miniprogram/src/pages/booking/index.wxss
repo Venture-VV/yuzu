@@ -1,0 +1,212 @@
+/* 预约：照品牌书与 VI（米白底、木色主色、细线、留白）；不用 flex 的 gap */
+.view.with-bar {
+  padding-bottom: calc(180rpx + env(safe-area-inset-bottom));
+}
+.lede {
+  display: block;
+  margin: 12rpx 0;
+  line-height: 1.6;
+}
+.when {
+  display: block;
+  font-size: 30rpx;
+  font-weight: 600;
+}
+.fine {
+  display: block;
+  margin-top: 16rpx;
+  line-height: 1.6;
+}
+.head {
+  margin-bottom: 36rpx;
+}
+.head .sub {
+  display: block;
+  margin-top: 8rpx;
+}
+.cant {
+  margin-top: 20rpx;
+  padding-top: 20rpx;
+  border-top: 1px solid var(--line);
+}
+.bind {
+  margin-top: 20rpx !important;
+}
+.sec {
+  margin-bottom: 40rpx;
+}
+.sec .eyebrow {
+  margin-bottom: 14rpx;
+}
+.sub-h {
+  margin-top: 28rpx;
+}
+.opts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-gap: 16rpx;
+}
+.opt {
+  padding: 22rpx 20rpx;
+  background-color: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8rpx;
+}
+.opt.on {
+  border-color: var(--wood);
+  background-color: var(--wood-6);
+}
+.opt-t {
+  display: block;
+  font-weight: 600;
+}
+.chips-row {
+  display: flex;
+  flex-wrap: wrap;
+}
+.chips-row .chip {
+  margin-bottom: 12rpx;
+}
+.days {
+  white-space: nowrap;
+  margin: 0 -36rpx;
+  padding: 0 36rpx;
+  width: calc(100% + 72rpx);
+  box-sizing: border-box;
+}
+.day {
+  display: inline-block;
+  width: 116rpx;
+  padding: 14rpx 0;
+  margin-right: 12rpx;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 8rpx;
+  background-color: var(--surface);
+}
+.day.on {
+  background-color: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg);
+}
+.day-t {
+  display: block;
+  font-weight: 600;
+}
+.day-s {
+  display: block;
+  font-size: 22rpx;
+  color: var(--muted);
+}
+.day.on .day-s {
+  color: var(--wood-5);
+}
+.slots {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  grid-gap: 12rpx;
+}
+.slot {
+  padding: 14rpx 0;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 8rpx;
+  background-color: var(--surface);
+}
+.slot.on {
+  border-color: var(--wood);
+  background-color: var(--wood);
+  color: #FFFFFF;
+}
+.slot.full {
+  color: var(--muted);
+  background-color: transparent;
+}
+.slot-t {
+  display: block;
+  font-size: 30rpx;
+  font-weight: 600;
+}
+.slot-s {
+  display: block;
+  font-size: 20rpx;
+}
+.slot-msg {
+  display: block;
+  padding: 20rpx 0;
+}
+.stepper {
+  display: flex;
+  align-items: center;
+}
+.st-btn {
+  width: 60rpx;
+  height: 60rpx;
+  line-height: 56rpx;
+  text-align: center;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  font-size: 34rpx;
+  box-sizing: border-box;
+}
+.st-n {
+  min-width: 120rpx;
+  text-align: center;
+  font-size: 30rpx;
+}
+.note-in {
+  height: 84rpx;
+  padding: 0 20rpx;
+  background-color: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8rpx;
+  font-size: 28rpx;
+}
+.foot {
+  display: block;
+  line-height: 1.6;
+}
+.remind-row {
+  margin-top: 24rpx;
+}
+.remind {
+  display: inline-block;
+  padding: 10rpx 24rpx;
+  margin-bottom: 8rpx;
+  border: 1px solid var(--wood);
+  border-radius: 999rpx;
+  color: var(--wood);
+  font-size: 26rpx;
+}
+.remind.on {
+  background-color: var(--wood-6);
+}
+.remind-row .sub {
+  display: block;
+}
+.pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-gap: 20rpx;
+  margin-top: 32rpx;
+}
+
+/* 底部的提交 */
+.bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding: 20rpx 36rpx calc(20rpx + env(safe-area-inset-bottom));
+  background-color: var(--surface);
+  border-top: 1px solid var(--line);
+}
+.bar-t {
+  flex: 1;
+  min-width: 0;
+}
+.bar-go {
+  width: 260rpx !important;
+}

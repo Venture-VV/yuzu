@@ -1,0 +1,50 @@
+<view class="view">
+  <view wx:if="{{state === 'loading'}}" class="wait">正在打开…</view>
+
+  <view wx:elif="{{state === 'offline' || state === 'error'}}" class="panel wait">
+    <text class="h3">{{state === 'offline' ? '门店系统连接中' : message}}</text>
+    <text wx:if="{{state === 'offline'}}">暂时领不了，店里网络恢复后再来</text>
+    <button class="btn ghost" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+
+  <!-- 领取结果待确认：上次点领取时网络不好，确认之前不能再领 -->
+  <view wx:elif="{{state === 'pending'}}" class="panel">
+    <text class="h3">领取结果待确认</text>
+    <text class="lede">上次领取时网络不好，还不知道领到没有。网络好了点「再确认一次」，门店系统会告诉我们结果；确认之前先不要重新领。</text>
+    <button class="btn primary block" hover-class="btn-hover" bindtap="onConfirmPending">再确认一次</button>
+    <text wx:if="{{message}}" class="sub">{{message}}</text>
+  </view>
+
+  <view wx:elif="{{state === 'unreadable'}}" class="panel">
+    <text class="h3">领取记录暂时读不出来</text>
+    <text class="lede">手机上保存的领取记录读不出来，为防止领重，先不能领。请稍后点「再试一次」；一直这样，请清理微信的存储空间后再打开小程序。</text>
+    <button class="btn primary block" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+
+  <view wx:elif="{{state === 'claimed'}}" class="panel hero">
+    <text class="eyebrow">Welcome</text>
+    <text class="h3">领到了</text>
+    <text class="lede">{{claimed.text}}</text>
+    <text wx:if="{{claimed.notice}}" class="why">{{claimed.notice}}</text>
+    <button wx:if="{{claimed.bound}}" class="btn primary block go" hover-class="btn-hover" bindtap="onCard">看我的会员卡</button>
+  </view>
+
+  <block wx:else>
+    <view class="panel hero">
+      <text class="eyebrow">Invite</text>
+      <text class="h3">{{view.inviterName}} 请你来汤崎体验</text>
+      <text class="lede">领了就有「{{view.label}}」的体验身份；还不是会员的，填个姓名当场开卡。</text>
+      <text class="sub num">{{expires}}前有效，只能领一次</text>
+    </view>
+    <view wx:if="{{view.mine}}" class="panel note"><text>这是你自己发的邀请：回到「邀请好友」点「发给好友」。</text></view>
+    <view wx:elif="{{view.state !== 'open'}}" class="panel note"><text>{{closedText}}</text></view>
+    <view wx:else class="panel">
+      <view wx:if="{{!view.bound}}" class="field">
+        <text class="k">姓名（还不是会员时要填）</text>
+        <input class="name-in {{needName ? 'want' : ''}}" value="{{name}}" maxlength="32" placeholder="你的姓名" bindinput="onName" />
+      </view>
+      <text class="sub">{{view.bound ? '用这个微信绑定的会员的手机号快速验证领取。' : '用微信手机号快速验证领取，领了顺带绑上这个微信。'}}</text>
+      <button class="btn primary block go" hover-class="btn-hover" open-type="getPhoneNumber" bindgetphonenumber="onPhone" loading="{{busy}}" disabled="{{busy}}">验证手机号领取</button>
+    </view>
+  </block>
+</view>

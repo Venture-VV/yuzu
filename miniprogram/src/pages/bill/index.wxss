@@ -1,0 +1,55 @@
+/* 我的账单：细线的行，金额右对齐；不用 flex 的 gap */
+.head {
+  margin-bottom: 36rpx;
+}
+.head .sub {
+  display: block;
+  margin-top: 4rpx;
+}
+.line {
+  display: flex;
+  align-items: flex-start;
+}
+.l-main {
+  flex: 1;
+  min-width: 0;
+}
+.st {
+  display: inline-block;
+  margin-left: 14rpx;
+  padding: 0 10rpx;
+  font-size: 20rpx;
+  font-weight: 600;
+  line-height: 1.6;
+  border: 1px solid var(--line);
+  border-radius: 4rpx;
+  color: var(--muted);
+  vertical-align: 2rpx;
+}
+.st.wait-on {
+  border-color: var(--wood);
+  color: var(--wood);
+}
+.l-qty {
+  width: 72rpx;
+  text-align: right;
+}
+.l-amt {
+  width: 180rpx;
+  text-align: right;
+}
+.total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 24rpx 0 12rpx;
+  font-size: 34rpx;
+  font-weight: 700;
+}
+.fine {
+  display: block;
+  line-height: 1.6;
+}
+.more {
+  margin-top: 40rpx !important;
+}

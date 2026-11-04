@@ -43,7 +43,8 @@ import { loadMembershipRules, memberGradeInfo } from '../membership';
 import { loadSettings } from '../settings';
 import { activePay } from './pay';
 import { mpToday } from './public';
-import { loadRechargeRules } from './rules';
+import { couponCenterOpen } from './coupon-center';
+import { bookingOpenOf, foodOpenOf, loadInviteRules, loadRechargeRules } from './rules';
 
 /** 网关验证过的小程序用户 */
 export function openidOf(req: FastifyRequest): string {
@@ -89,7 +90,7 @@ export async function bindingStateOf(db: Db, openid: string): Promise<{ binding:
 }
 
 /** 绑定、解绑、确认作废都先取这个微信的这把咨询锁：同一个微信的绑定状态（与版本号）在这把锁里只有一个在改 */
-const lockOpenid = (tx: Db, openid: string) => tx`SELECT pg_advisory_xact_lock(hashtext(${`mp_bind:${openid}`}))`;
+export const lockOpenid = (tx: Db, openid: string) => tx`SELECT pg_advisory_xact_lock(hashtext(${`mp_bind:${openid}`}))`;
 /**
  * 同一把锁的共享模式：线上充值建单读这个微信的有效绑定、写单子时拿着，解绑（排他）插不进来——
  * 解绑之后再扫这条绑定没付的单去关，不会漏掉刚好同时建的那一张（小程序线测试 866ccfa 的 P1）
@@ -184,12 +185,16 @@ export async function getMe(deps: Deps, openid: string): Promise<MpMe> {
   const [m] = await deps.sql<{ memberNo: string; name: string; status: string; principalBalance: number; bonusBalance: number; mergedIntoId: number | null }[]>`
     SELECT member_no, name, status, principal_balance, bonus_balance, merged_into_id FROM members WHERE id = ${b.memberId}`;
   if (!m) throw notFound('会员不存在');
-  const [info, rules, coupons, settings, rechargeRules] = await Promise.all([
+  const [info, rules, coupons, settings, rechargeRules, couponOpen, inviteRules, foodOpen, bookingOpen] = await Promise.all([
     memberGradeInfo(deps.sql, b.memberId, today),
     loadMembershipRules(deps.sql),
     memberCoupons(deps.sql, b.memberId, today),
     loadSettings(deps.sql),
     loadRechargeRules(deps.sql),
+    couponCenterOpen(deps.sql),
+    loadInviteRules(deps.sql),
+    foodOpenOf(deps.sql),
+    bookingOpenOf(deps.sql),
   ]);
   const { grade, tier, cycleEnd } = info.state;
   const g: MpGrade = {
@@ -220,6 +225,14 @@ export async function getMe(deps: Deps, openid: string): Promise<MpMe> {
       rechargeOpen: rechargeRules.enabled && activePay() !== null,
       // 合并掉的会员卡（主线 v0.7.26）：只说已合并、请到前台换绑，不给目标会员的信息（MP25）
       merged: m.mergedIntoId !== null,
+      // 领券中心（第二期 2c）开着、有可领的券：「我的」页显示「领券中心」
+      couponCenterOpen: couponOpen,
+      // 邀请好友（第三期 3b）开着：「我的」页显示「邀请好友」（能不能邀请到邀请页再看）
+      inviteOpen: inviteRules.enabled,
+      // 扫码点餐（第三期 3c）开着：「我的」页显示「点餐」「我的账单」（能不能点到点餐页再看：要有在店手牌）
+      foodOpen,
+      // 小程序预约（第三期 3d）开着、有可约的：「我的」页显示「预约」
+      bookingOpen,
     },
   };
 }
@@ -343,7 +356,8 @@ export async function resolveMemberCode(deps: Deps, code: string, at = Date.now(
 
 export async function memberBindings(db: Db, memberId: number): Promise<MpBindingRow[]> {
   return db<MpBindingRow[]>`
-    SELECT b.id, right(b.openid, 6) AS openid_tail, b.phone, b.mock, b.bound_at, b.unbound_at, s.display_name AS unbound_by_name, b.unbind_reason
+    SELECT b.id, right(b.openid, 6) AS openid_tail, b.phone, b.mock, b.bound_at, b.unbound_at, s.display_name AS unbound_by_name, b.unbind_reason,
+           b.purged_at
     FROM mp_bindings b LEFT JOIN staff s ON s.id = b.unbound_by
     WHERE b.member_id = ${memberId} ORDER BY b.id DESC`;
 }

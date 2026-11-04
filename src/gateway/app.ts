@@ -6,14 +6,20 @@
 //   · 线上充值（第二期 2a，docs/MP_RECHARGE.md）：/v1/recharge… 带会话里的 openid 转给 yuzu（建单、支付参数都在 yuzu 签）；
 //     到账通知 /v1/pay/notify 不要会话、不解析内容，连同微信的四个签名头原样转给 yuzu，按 yuzu 的结果回微信。
 //     网关不放任何支付凭据（MP17）：验签、解密、入账都在 yuzu，网关被攻破也伪造不了到账。
+//   · 线上领券（第二期 2c，docs/MP_COUPONS.md）：/v1/coupon-center、/v1/coupon-claims… 带会话里的 openid 转给 yuzu（发券在 yuzu）。
+//   · 到期提醒（第三期 3a）：/v1/reminders 带会话转发；每隔一会儿向门店取待发的订阅消息、发、回报（src/gateway/reminders.ts）。
+//   · 邀请好友（第三期 3b）：/v1/invites…；好友领取先用手机号快速验证的 code 换手机号，再转给 yuzu（与绑定一样）。
+//   · 扫码点餐（第三期 3c）：/v1/food…；桌码的签名在 yuzu 核对（密钥不在网关），下单挂在顾客自己的手牌账单上。
+//   · 预约（第三期 3d）：/v1/bookings…；可约时段、预约、取消都在 yuzu 算与办，网关只转发。
 // 网关不存会员、余额、券、订单；yuzu 返回的错误文字面向顾客，原样转给小程序。
 
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { MP_RECHARGE_ORDER_NO } from '@shared/mp';
+import { MP_RECHARGE_ORDER_NO, MP_TABLE_CODE } from '@shared/mp';
 import type { GatewayConfig } from './config';
 import { ShowCache } from './cache';
 import { RateLimiter } from './ratelimit';
+import { sendDueReminders } from './reminders';
 import { issueSession, verifySession } from './session';
 import { UpstreamDown, type Upstream, type UpstreamResponse } from './upstream';
 import { WechatError, type WechatClient } from './wechat';
@@ -58,6 +64,72 @@ const RechargeCreate = z.object({
   bindVersion: z.number('请刷新充值页后再下单').int().min(0),
 });
 const RechargePreview = z.object({ amount: z.coerce.number('请填写金额').int('金额请填整元').positive('请填写金额') });
+const CouponClaim = z.object({
+  clientKey: z.uuid('操作编号不正确'),
+  templateId: z.number('请选择要领的券').int().positive('请选择要领的券'),
+  /** 顾客点领取时看到的绑定状态版本号：门店系统比对，换绑过的拒绝 */
+  bindVersion: z.number('请刷新领券中心后再领').int().min(0),
+});
+/** 设一条到期提醒（第三期 3a）：顾客在微信的弹窗里同意以后；门店系统核对模板、绑定版本号与要提醒的东西 */
+const ReminderConsent = z.object({
+  clientKey: z.uuid('操作编号不正确'),
+  kind: z.enum(['coupon', 'membership', 'grace', 'bonus', 'booking'], '提醒的种类不对'),
+  couponCode: z.string().regex(/^[2-9A-HJ-NP-Z]{12}$/, '券码不对').optional(),
+  bookingId: z.number().int().positive().optional(),
+  targetDate: z.iso.date('到期日不对').optional(),
+  templateId: z.string().regex(/^[A-Za-z0-9_-]{10,64}$/, '模板编号不对'),
+  bindVersion: z.number('请刷新后再设提醒').int().min(0),
+});
+/** 邀请好友（第三期 3b）：发一个邀请码；好友领取（先用手机号快速验证的 code 换手机号，与绑定一样） */
+const InviteCreate = z.object({ clientKey: z.uuid('操作编号不正确'), bindVersion: z.number('请刷新后再邀请').int().min(0) });
+const InviteClaim = z.object({
+  clientKey: z.uuid('操作编号不正确'),
+  phoneCode: z.string().min(1, '请先验证手机号').max(256),
+  name: z.string().trim().max(32, '姓名最多 32 个字').optional(),
+  bindVersion: z.number('请刷新后再领取').int().min(0),
+});
+const INVITE_CODE = /^[2-9A-HJ-NP-Z]{10}$/;
+/** 扫码点餐（第三期 3c）：扫到的桌码（签名在门店系统核对）；下单（门店系统核对可点的菜、价格、绑定版本号） */
+const FoodQuery = z.object({ table: z.string().regex(MP_TABLE_CODE, '桌码不对，请重新扫桌上的码').optional() });
+const FoodOrder = z.object({
+  clientKey: z.uuid('操作编号不正确'),
+  items: z
+    .array(
+      z.object({
+        itemId: z.number('菜品不对').int('菜品不对').positive('菜品不对'),
+        quantity: z.number('份数不对').int('份数不对').min(1, '份数至少为 1').max(20, '一单最多 20 份'),
+        note: z.string().max(40, '口味备注最多 40 字').optional(),
+      }),
+      '请选择菜品',
+    )
+    .min(1, '请至少选一道菜')
+    .max(20, '一单最多 20 份'),
+  table: z.string().regex(MP_TABLE_CODE, '桌码不对，请重新扫桌上的码').optional(),
+  expectedTotal: z.number('请刷新后再下单').int().nonnegative(),
+  bindVersion: z.number('请刷新后再下单').int().min(0),
+});
+/** 预约（第三期 3d）：可约时段的查询、预约、取消（门店系统核对可约的、时段、绑定版本号） */
+const BookingSlotQuery = z.object({
+  kind: z.enum(['technician', 'space'], '请选择预约什么'),
+  date: z.iso.date('日期不对'),
+  itemId: z.coerce.number().int().positive().optional(),
+  spaceId: z.coerce.number().int().positive().optional(),
+  durationMinutes: z.coerce.number().int().min(30).max(720).optional(),
+});
+const BookingCreate = z.object({
+  clientKey: z.uuid('操作编号不正确'),
+  kind: z.enum(['technician', 'space'], '请选择预约什么'),
+  itemId: z.number().int().positive().optional(),
+  technicianId: z.number().int().positive().nullable().optional(),
+  spaceId: z.number().int().positive().optional(),
+  startsAt: z.iso.datetime({ offset: true, message: '请选择时段' }),
+  durationMinutes: z.number().int().min(30).max(720).optional(),
+  guests: z.number().int().min(1).max(30).optional(),
+  note: z.string().max(100, '备注最多 100 字').optional(),
+  bindVersion: z.number('请刷新后再预约').int().min(0),
+});
+const BookingCancel = z.object({ clientKey: z.uuid('操作编号不正确'), bindVersion: z.number('请刷新后再取消').int().min(0) });
+const BookingId = z.object({ id: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER) });
 /** 微信支付的到账通知：报文主体原样转（门店系统要用原文验签），最多 8 KB */
 const NOTIFY_MAX_BYTES = 8 * 1024;
 
@@ -66,6 +138,8 @@ export interface GatewayDeps {
   wechat: WechatClient;
   upstream: Upstream;
   cache?: ShowCache;
+  /** 到期提醒多少毫秒取一次（不给按配置；测试给 0 不开，直接调 sendDueReminders） */
+  reminderMs?: number;
 }
 
 export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> {
@@ -83,6 +157,17 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
   // 线上充值：建单、继续支付、取消、作废每个微信每分钟 20 次；查单（付完等结果每 2 秒一次）每分钟 60 次
   const rechargeLimit = new RateLimiter(20);
   const rechargeQueryLimit = new RateLimiter(60);
+  // 线上领券：领取、确认作废每个微信每分钟 20 次（不限领的券也一样，MP_COUPONS.md 第 2 节）
+  const couponLimit = new RateLimiter(20);
+  // 到期提醒：设提醒每个微信每分钟 20 次
+  const reminderLimit = new RateLimiter(20);
+  // 邀请好友：发起、收回每个微信每分钟 20 次；领取要验证手机号，与绑定一样每分钟 10 次
+  const inviteLimit = new RateLimiter(20);
+  // 扫码点餐：下单、确认作废每个微信每分钟 20 次
+  const foodLimit = new RateLimiter(20);
+  // 预约：预约、取消、确认作废每个微信每分钟 20 次；查时段每分钟 60 次（换日子、换项目都要查）
+  const bookingLimit = new RateLimiter(20);
+  const slotLimit = new RateLimiter(60);
 
   app.addHook('onRequest', async (req) => {
     if (!perIp.take(`ip:${req.ip}`)) throw TOO_MANY();
@@ -270,6 +355,116 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
     });
   }
 
+  // ── 线上领券（第二期 2c）──
+  app.get('/v1/coupon-center', async (req, reply) => member(reply, 'GET', '/api/mp/coupon-center', openidOf(req)));
+  app.post('/v1/coupon-claims', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!couponLimit.take(`coupon:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/coupon-claims', openid, parse(CouponClaim, req.body));
+  });
+  // 领取结果不确定（超时、断网、门店出错）时，小程序请门店系统作废这个编号：已经领到了返回那一张
+  app.post('/v1/coupon-claims/abandon', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!couponLimit.take(`coupon:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/coupon-claims/abandon', openid, parse(AbandonInput, req.body));
+  });
+
+  // 邀请好友（第三期 3b）：邀请人看、发、收回；好友看、领取（网关换手机号）、确认作废
+  const inviteCode = (req: FastifyRequest) => {
+    const code = (req.params as { code?: string }).code ?? '';
+    if (!INVITE_CODE.test(code)) throw new GatewayError(404, 'NOT_FOUND', '邀请不存在');
+    return code;
+  };
+  app.get('/v1/invites', async (req, reply) => member(reply, 'GET', '/api/mp/invites', openidOf(req)));
+  app.post('/v1/invites', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!inviteLimit.take(`invite:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/invites', openid, parse(InviteCreate, req.body));
+  });
+  app.post('/v1/invites/claim/abandon', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!bindLimit.take(`bind:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/invites/claim/abandon', openid, parse(AbandonInput, req.body));
+  });
+  app.get('/v1/invites/:code', async (req, reply) => {
+    const openid = openidOf(req);
+    return member(reply, 'GET', `/api/mp/invites/${inviteCode(req)}`, openid);
+  });
+  app.post('/v1/invites/:code/revoke', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!inviteLimit.take(`invite:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', `/api/mp/invites/${inviteCode(req)}/revoke`, openid, {});
+  });
+  app.post('/v1/invites/:code/claim', async (req, reply) => {
+    const openid = openidOf(req);
+    const code = inviteCode(req);
+    if (!bindLimit.take(`bind:${openid}`)) throw TOO_MANY();
+    const { phoneCode, clientKey, name, bindVersion } = parse(InviteClaim, req.body);
+    let phone: string;
+    try {
+      ({ phone } = await wechat.phoneNumber(phoneCode));
+    } catch (error) {
+      if (error instanceof WechatError) throw new GatewayError(400, error.code, error.message);
+      throw error;
+    }
+    return member(reply, 'POST', `/api/mp/invites/${code}/claim`, openid, { clientKey, phone, ...(name ? { name } : {}), bindVersion, mock: wechat.mock });
+  });
+
+  // 扫码点餐（第三期 3c）：点餐页（扫到的桌码带上）、下单、结果不确定时确认作废、我的账单
+  app.get('/v1/food/menu', async (req, reply) => {
+    const openid = openidOf(req);
+    const { table } = parse(FoodQuery, req.query);
+    return member(reply, 'GET', `/api/mp/food/menu${table ? `?table=${table}` : ''}`, openid);
+  });
+  app.post('/v1/food/orders', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!foodLimit.take(`food:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/food/orders', openid, parse(FoodOrder, req.body));
+  });
+  app.post('/v1/food/orders/abandon', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!foodLimit.take(`food:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/food/orders/abandon', openid, parse(AbandonInput, req.body));
+  });
+  app.get('/v1/food/bill', async (req, reply) => member(reply, 'GET', '/api/mp/food/bill', openidOf(req)));
+
+  // 预约（第三期 3d）：预约页与我的预约、可约时段、预约、结果不确定时确认作废、自己取消
+  app.get('/v1/bookings', async (req, reply) => member(reply, 'GET', '/api/mp/bookings', openidOf(req)));
+  app.get('/v1/bookings/slots', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!slotLimit.take(`slot:${openid}`)) throw TOO_MANY();
+    const q = parse(BookingSlotQuery, req.query);
+    const qs = new URLSearchParams({ kind: q.kind, date: q.date });
+    if (q.itemId !== undefined) qs.set('itemId', String(q.itemId));
+    if (q.spaceId !== undefined) qs.set('spaceId', String(q.spaceId));
+    if (q.durationMinutes !== undefined) qs.set('durationMinutes', String(q.durationMinutes));
+    return member(reply, 'GET', `/api/mp/bookings/slots?${qs.toString()}`, openid);
+  });
+  app.post('/v1/bookings', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!bookingLimit.take(`booking:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/bookings', openid, parse(BookingCreate, req.body));
+  });
+  app.post('/v1/bookings/abandon', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!bookingLimit.take(`booking:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/bookings/abandon', openid, parse(AbandonInput, req.body));
+  });
+  app.post('/v1/bookings/:id/cancel', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!bookingLimit.take(`booking:${openid}`)) throw TOO_MANY();
+    const { id } = parse(BookingId, req.params);
+    return member(reply, 'POST', `/api/mp/bookings/${id}/cancel`, openid, parse(BookingCancel, req.body));
+  });
+
+  // 到期提醒（第三期 3a）：能设哪几种、已经设了哪些；设一条（顾客在微信的弹窗里同意以后）
+  app.get('/v1/reminders', async (req, reply) => member(reply, 'GET', '/api/mp/reminders', openidOf(req)));
+  app.post('/v1/reminders', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!reminderLimit.take(`reminder:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/reminders', openid, parse(ReminderConsent, req.body));
+  });
+
   // 微信支付的到账通知：不要会话、不解析内容，报文主体与四个签名头原样转给门店系统（Base64 包一层，一个字节不改）。
   // 门店收下了（入账、记成已付款待处理）回 204；门店没收下、连不上回失败，微信按它的节奏重发
   await app.register(async (scope) => {
@@ -299,5 +494,31 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
     });
   });
 
+  // 到期提醒的发送：每隔一会儿向门店取一批待发的消息、发、回报（上一轮没完不开下一轮）
+  const reminderMs = deps.reminderMs ?? config.reminderSeconds * 1000;
+  if (reminderMs > 0) {
+    let timer: NodeJS.Timeout | undefined;
+    let running = false;
+    const memo = {};
+    app.addHook('onReady', async () => {
+      timer = setInterval(() => {
+        if (running) return;
+        running = true;
+        sendDueReminders({ upstream, wechat, state: config.subscribeState, memo })
+          .then((t) => {
+            if (t && t.leased) {
+              app.log.info(
+                `到期提醒：取了 ${t.leased} 条，发出 ${t.sent}、没发出 ${t.failed}、再试 ${t.retry}（其中没轮到发 ${t.notStarted}）、结果不明 ${t.unknown}${t.reportLost ? '；回报没送到门店' : ''}`,
+              );
+            }
+          })
+          .catch((error: unknown) => app.log.error({ err: error }, '到期提醒发送出错，下一轮再试'))
+          .finally(() => {
+            running = false;
+          });
+      }, reminderMs);
+    });
+    app.addHook('onClose', async () => clearInterval(timer));
+  }
   return app;
 }

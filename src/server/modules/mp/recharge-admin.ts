@@ -24,6 +24,7 @@ import { parse } from '../../lib/validate';
 import { loadSettings } from '../settings';
 import { rechargeOnline } from '../wallet-online';
 import { activePay, payProblem } from './pay';
+import { refundAdminList } from './refund';
 import { labelNow, loadRechargeRules, lockOrder, orderById, recordEvent } from './recharge';
 import { reconcileDay, recentRecons } from './recharge-recon';
 import { WxPayError } from './wxpay';
@@ -62,6 +63,7 @@ export async function rechargeAdminData(db: Db): Promise<MpRechargeAdminData> {
     recent,
     orphans,
     recons: await recentRecons(db, 30),
+    refunds: await refundAdminList(db),
   };
 }
 
@@ -71,6 +73,8 @@ const RulesInput = z.object({
   customEnabled: z.boolean('请选择是否允许自定义金额'),
   maxCents: z.number('请填写线上单笔上限').int('线上单笔上限请填整元').min(100, '线上单笔上限至少 1 元'),
   dailyLimit: z.number('请填写每人每天最多几笔').int('每天笔数请填整数').min(1, '每天至少 1 笔').max(50, '每天最多 50 笔'),
+  /** 原路退回（2d）；没带的照旧（2d 以前的后台页面不会把它改掉） */
+  refundAuto: z.boolean().optional(),
   /** 后台看到的版本号（后台都带）；没带的不核对：自动化脚本收尾时不管现在是什么都关上 */
   version: z.number().int().min(0).optional(),
 });
@@ -101,6 +105,7 @@ export async function saveRechargeRules(deps: Deps, raw: unknown, ctx: OpContext
         customEnabled: input.customEnabled,
         maxCents: input.maxCents,
         dailyLimit: input.dailyLimit,
+        refundAuto: input.refundAuto ?? before.refundAuto,
         version: before.version + 1,
       };
     },

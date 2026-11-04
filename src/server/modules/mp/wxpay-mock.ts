@@ -1,6 +1,7 @@
 // 模拟微信支付（小程序线第二期 2a，docs/MP_RECHARGE.md 第 4 节）：只在 development、test 实例用（MP_PAY_MOCK=true）。
-// 本机生成「商户」与「微信支付」的两对密钥和 APIv3 密钥，照真的协议回应下单、查单、关单：核对商户的签名、给应答签名。
-// 顾客「付款」时造一条照真的签名、加密的到账通知，交给门店系统同一条验签、解密、入账的路。不连外网。
+// 本机生成「商户」与「微信支付」的两对密钥和 APIv3 密钥，照真的协议回应下单、查单、关单、交易账单、申请退款与查退款：
+// 核对商户的签名、给应答签名。顾客「付款」时造一条照真的签名、加密的到账通知，交给门店系统同一条验签、解密、入账的路；
+// 退款有了结果时同样造一条退款通知（2d）。不连外网。
 
 import { createCipheriv, createHash, createVerify, generateKeyPairSync, randomInt, randomUUID } from 'node:crypto';
 import {
@@ -30,6 +31,17 @@ interface MockOrder {
   successTime: string | null;
 }
 
+interface MockRefund {
+  outTradeNo: string;
+  refundId: string;
+  outRefundNo: string;
+  refund: number;
+  total: number;
+  status: 'PROCESSING' | 'SUCCESS' | 'ABNORMAL' | 'CLOSED';
+  createTime: string;
+  successTime: string | null;
+}
+
 export interface MockWxPay {
   config: WxPayConfig;
   client: WxPayClient;
@@ -49,6 +61,14 @@ export interface MockWxPay {
   hideFromBill(outTradeNo: string): void;
   /** 往某一天的交易账单里加一行（测试用：例如门店系统没有的一笔、金额不一样的一笔） */
   addBillRow(billDate: string, row: { outTradeNo: string; transactionId: string; amount: number; openid?: string; tradeState?: string; time?: string }): void;
+  /** 申请退款时新的退款先「处理中」（默认，与真的一样多半先处理中）还是马上「成功」（测试用） */
+  setRefundMode(mode: 'processing' | 'success'): void;
+  /** 商户号的余额不够（测试用）：申请退款回 NOT_ENOUGH，退款不建 */
+  setNotEnough(v: boolean): void;
+  /** 处理中的退款有了结果（测试用）：成功、异常或关闭，返回一条退款通知 */
+  settleRefund(outRefundNo: string, status: 'SUCCESS' | 'ABNORMAL' | 'CLOSED', now?: Date): { headers: WxSignedHeaders; body: string };
+  /** 微信那边这笔退款的状态（测试用）；没有这一笔为 null */
+  refundState(outRefundNo: string): MockRefund['status'] | null;
 }
 
 /** 交易账单的表头（微信支付「全部」账单的 27 列） */
@@ -79,6 +99,9 @@ export function createMockWxPay(o: { appId?: string; mchId?: string; notifyUrl?:
     baseUrl: 'https://mock-wxpay.invalid',
   };
   const orders = new Map<string, MockOrder>();
+  const refunds = new Map<string, MockRefund>();
+  let refundMode: 'processing' | 'success' = 'processing';
+  let notEnough = false;
   const extraBillRows = new Map<string, string[][]>();
   const hiddenFromBill = new Set<string>();
   const bills = new Map<string, string>();
@@ -129,6 +152,20 @@ export function createMockWxPay(o: { appId?: string; mchId?: string; notifyUrl?:
     },
   });
 
+  const refundOf = (r: MockRefund) => ({
+    refund_id: r.refundId,
+    out_refund_no: r.outRefundNo,
+    transaction_id: orders.get(r.outTradeNo)?.transactionId ?? undefined,
+    out_trade_no: r.outTradeNo,
+    channel: 'ORIGINAL',
+    user_received_account: '支付用户零钱',
+    ...(r.successTime ? { success_time: r.successTime } : {}),
+    create_time: r.createTime,
+    status: r.status,
+    funds_account: 'AVAILABLE',
+    amount: { total: r.total, refund: r.refund, payer_total: r.total, payer_refund: r.refund, settlement_total: r.total, settlement_refund: r.refund, discount_refund: 0, currency: 'CNY', refund_fee: 0, from: [] },
+  });
+
   const fetchImpl: WxFetch = async (url, init) => {
     if (down) throw new Error('模拟的微信支付连不上');
     const u = new URL(url);
@@ -173,15 +210,62 @@ export function createMockWxPay(o: { appId?: string; mchId?: string; notifyUrl?:
       x.state = 'CLOSED';
       return signed(204);
     }
+    if (init.method === 'POST' && u.pathname === '/v3/refund/domestic/refunds') {
+      const req = JSON.parse(body) as { out_trade_no?: string; transaction_id?: string; out_refund_no: string; amount: { refund: number; total: number } };
+      const no = req.out_trade_no ?? [...orders].find(([, x]) => x.transactionId === req.transaction_id)?.[0];
+      const x = no === undefined ? undefined : orders.get(no);
+      if (no === undefined || !x) return error(404, 'RESOURCE_NOT_EXISTS', '订单不存在');
+      const had = refunds.get(req.out_refund_no);
+      if (had) {
+        // 同一个商户退款单号：内容一样回同一笔，不一样拒绝
+        if (had.outTradeNo !== no || had.refund !== req.amount.refund || had.total !== req.amount.total) return error(400, 'INVALID_REQUEST', '商户退款单号重复，退款内容不一致');
+        return signed(200, refundOf(had));
+      }
+      if (x.state !== 'SUCCESS' && x.state !== 'REFUND') return error(400, 'INVALID_REQUEST', '订单未支付，不能退款');
+      if (req.amount.total !== x.request.amount.total) return error(400, 'PARAM_ERROR', '订单金额与原订单不一致');
+      const refunded = [...refunds.values()].filter((r) => r.outTradeNo === no && r.status !== 'CLOSED').reduce((a, r) => a + r.refund, 0);
+      if (refunded + req.amount.refund > x.request.amount.total) return error(400, 'INVALID_REQUEST', '申请退款金额超过订单可退金额');
+      if (notEnough) return error(403, 'NOT_ENOUGH', '基本账户余额不足，请充值后重新发起');
+      const at = rfc3339Beijing(new Date());
+      const r: MockRefund = {
+        outTradeNo: no,
+        refundId: `50${digits(27)}`,
+        outRefundNo: req.out_refund_no,
+        refund: req.amount.refund,
+        total: req.amount.total,
+        status: refundMode === 'success' ? 'SUCCESS' : 'PROCESSING',
+        createTime: at,
+        successTime: refundMode === 'success' ? at : null,
+      };
+      refunds.set(r.outRefundNo, r);
+      x.state = 'REFUND';
+      return signed(200, refundOf(r));
+    }
+    const rq = /^\/v3\/refund\/domestic\/refunds\/([^/]+)$/.exec(u.pathname);
+    if (init.method === 'GET' && rq) {
+      const r = refunds.get(decodeURIComponent(rq[1]!));
+      if (!r) return error(404, 'RESOURCE_NOT_EXISTS', '退款单不存在');
+      return signed(200, refundOf(r));
+    }
     if (init.method === 'GET' && u.pathname === '/v3/bill/tradebill') {
       const date = u.searchParams.get('bill_date') ?? '';
       const rows: string[][] = [];
       for (const [no, x] of orders) {
-        if (x.state !== 'SUCCESS' || !x.successTime || x.successTime.slice(0, 10) !== date || hiddenFromBill.has(no)) continue;
+        // 付款那天记一行「支付成功」（之后退了的也照样有这一行）；退款成功那天另记一行「转入退款」
+        if ((x.state !== 'SUCCESS' && x.state !== 'REFUND') || !x.successTime || x.successTime.slice(0, 10) !== date || hiddenFromBill.has(no)) continue;
         const total = billYuan(x.request.amount.total);
         rows.push([
           x.successTime.slice(0, 19).replace('T', ' '), x.request.appid, x.request.mchid, '0', '', x.transactionId!, no, x.request.payer.openid,
           'JSAPI', 'SUCCESS', 'OTHERS', 'CNY', total, '0.00', '0', '0', '0.00', '0.00', '', '', x.request.description, '', '0.00', '0.60%', total, '0.00', '',
+        ]);
+      }
+      for (const r of refunds.values()) {
+        const x = orders.get(r.outTradeNo)!;
+        if (r.status !== 'SUCCESS' || !r.successTime || r.successTime.slice(0, 10) !== date) continue;
+        rows.push([
+          r.successTime.slice(0, 19).replace('T', ' '), x.request.appid, x.request.mchid, '0', '', x.transactionId!, r.outTradeNo, x.request.payer.openid,
+          'JSAPI', 'REFUND', 'OTHERS', 'CNY', '0.00', '0.00', r.refundId, r.outRefundNo, billYuan(r.refund), '0.00', 'ORIGINAL', 'SUCCESS', x.request.description, '', '0.00', '0.60%',
+          billYuan(r.total), billYuan(r.refund), '',
         ]);
       }
       rows.push(...(extraBillRows.get(date) ?? []));
@@ -200,22 +284,23 @@ export function createMockWxPay(o: { appId?: string; mchId?: string; notifyUrl?:
     return error(404, 'NOT_FOUND', '接口不存在');
   };
 
-  const notification = (transaction: Record<string, unknown>, now = new Date()) => {
+  /** 照真的签名、加密一条通知：支付的 original_type 是 transaction，退款的是 refund（解密时的附加数据也是它） */
+  const signedNotice = (eventType: string, summary: string, originalType: 'transaction' | 'refund', payload: Record<string, unknown>, now: Date) => {
     const nonce = randomText(12);
     const cipher = createCipheriv('aes-256-gcm', Buffer.from(config.apiV3Key, 'utf8'), Buffer.from(nonce, 'utf8'));
-    cipher.setAAD(Buffer.from('transaction', 'utf8'));
-    const ciphertext = Buffer.concat([cipher.update(JSON.stringify(transaction), 'utf8'), cipher.final(), cipher.getAuthTag()]).toString('base64');
+    cipher.setAAD(Buffer.from(originalType, 'utf8'));
+    const ciphertext = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final(), cipher.getAuthTag()]).toString('base64');
     const body = JSON.stringify({
       id: randomUUID(),
       create_time: rfc3339Beijing(now),
       resource_type: 'encrypt-resource',
-      event_type: 'TRANSACTION.SUCCESS',
-      summary: '支付成功',
+      event_type: eventType,
+      summary,
       resource: {
-        original_type: 'transaction',
+        original_type: originalType,
         algorithm: 'AEAD_AES_256_GCM',
         ciphertext,
-        associated_data: 'transaction',
+        associated_data: originalType,
         nonce,
       },
     });
@@ -230,6 +315,22 @@ export function createMockWxPay(o: { appId?: string; mchId?: string; notifyUrl?:
       },
       body,
     };
+  };
+  const notification = (transaction: Record<string, unknown>, now = new Date()) => signedNotice('TRANSACTION.SUCCESS', '支付成功', 'transaction', transaction, now);
+  /** 退款通知的内容（解密后）：与查退款的应答不一样，状态字段叫 refund_status */
+  const refundNotice = (r: MockRefund, now: Date) => {
+    const x = orders.get(r.outTradeNo)!;
+    return signedNotice(`REFUND.${r.status}`, r.status === 'SUCCESS' ? '退款成功' : r.status === 'ABNORMAL' ? '退款异常' : '退款关闭', 'refund', {
+      mchid: config.mchId,
+      transaction_id: x.transactionId,
+      out_trade_no: r.outTradeNo,
+      refund_id: r.refundId,
+      out_refund_no: r.outRefundNo,
+      refund_status: r.status,
+      ...(r.successTime ? { success_time: r.successTime } : {}),
+      user_received_account: '支付用户零钱',
+      amount: { total: r.total, refund: r.refund, payer_total: r.total, payer_refund: r.refund },
+    }, now);
   };
 
   return {
@@ -265,6 +366,21 @@ export function createMockWxPay(o: { appId?: string; mchId?: string; notifyUrl?:
       if (!x || x.state !== 'SUCCESS') throw new Error(`模拟的微信支付里这一单没付，退不了：${no}`);
       x.state = 'REFUND';
     },
+    setRefundMode(mode) {
+      refundMode = mode;
+    },
+    setNotEnough(v) {
+      notEnough = v;
+    },
+    settleRefund(outRefundNo, status, now = new Date()) {
+      const r = refunds.get(outRefundNo);
+      if (!r) throw new Error(`模拟的微信支付里没有这笔退款：${outRefundNo}`);
+      if (r.status !== 'PROCESSING') throw new Error(`这笔退款已经有结果了：${r.status}`);
+      r.status = status;
+      if (status === 'SUCCESS') r.successTime = rfc3339Beijing(now);
+      return refundNotice(r, now);
+    },
+    refundState: (no) => refunds.get(no)?.status ?? null,
     addBillRow(billDate, r) {
       const yuan = billYuan(r.amount);
       const row = [

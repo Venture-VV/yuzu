@@ -1,0 +1,50 @@
+<view class="view">
+  <view wx:if="{{state === 'loading'}}" class="wait">正在打开…</view>
+
+  <view wx:elif="{{state === 'offline' || state === 'error'}}" class="panel wait">
+    <text class="h3">{{state === 'offline' ? '门店系统连接中' : message}}</text>
+    <text wx:if="{{state === 'offline'}}">预约暂时看不到，店里网络恢复后就能看</text>
+    <button class="btn ghost" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+
+  <!-- 预约或取消的结果待确认 -->
+  <view wx:elif="{{state === 'pending'}}" class="panel">
+    <text class="h3">结果待确认</text>
+    <text wx:if="{{flying}}" class="lede">刚才的预约或取消还在提交，等它回来就知道办好没有。稍候点「再确认一次」；确认之前先不要重新约或取消。</text>
+    <text wx:else class="lede">上次预约或取消时网络不好，还不知道办好没有。网络好了点「再确认一次」，门店系统会告诉我们结果；确认之前先不要重新约或取消。</text>
+    <button class="btn primary block" hover-class="btn-hover" bindtap="onConfirmPending">再确认一次</button>
+    <text wx:if="{{message}}" class="sub">{{message}}</text>
+  </view>
+
+  <view wx:elif="{{state === 'unreadable'}}" class="panel">
+    <text class="h3">预约记录暂时读不出来</text>
+    <text class="lede">手机上保存的预约记录读不出来，为防止办重，先不能预约、取消。请稍后点「再试一次」；一直这样，请清理微信的存储空间后再打开小程序，或打电话给门店。</text>
+    <button class="btn primary block" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+
+  <block wx:else>
+    <view class="panel head">
+      <text class="eyebrow">My bookings</text>
+      <text class="h3">我的预约</text>
+      <text wx:if="{{notice}}" class="sub">{{notice}}</text>
+      <button wx:if="{{open && !bound}}" class="btn ghost new" hover-class="btn-hover" bindtap="onBind">去绑定会员</button>
+      <button wx:elif="{{canBook}}" class="btn primary new" hover-class="btn-hover" bindtap="onNew">新的预约</button>
+    </view>
+
+    <view wx:if="{{!rows.length}}" class="panel empty"><text class="sub">最近 30 天没有预约</text></view>
+    <view wx:for="{{rows}}" wx:key="id" class="panel item">
+      <view class="it-top">
+        <text class="it-t">{{item.title}}</text>
+        <text class="st st-{{item.status}}">{{item.statusText}}</text>
+      </view>
+      <text class="num it-when">{{item.when}}<text wx:if="{{item.guests}}"> · {{item.guests}}</text></text>
+      <text class="sub num">预约号 {{item.bookingNo}}</text>
+      <text wx:if="{{item.reason}}" class="sub why">{{item.reason}}</text>
+      <view wx:if="{{item.open}}" class="it-acts">
+        <view wx:if="{{item.remind.show}}" class="remind {{item.remind.set ? 'on' : ''}}" data-id="{{item.id}}" bindtap="onRemind">{{item.remind.text}}</view>
+        <view wx:if="{{item.cancellable}}" class="act" hover-class="tap" data-id="{{item.id}}" bindtap="onCancel">取消预约</view>
+        <text wx:else class="sub">开始前 {{cancelHours}} 小时以内不能在这里取消，请打电话给门店</text>
+      </view>
+    </view>
+  </block>
+</view>

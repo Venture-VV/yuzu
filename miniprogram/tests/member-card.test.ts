@@ -14,6 +14,10 @@ const member = (grade: Partial<MpGrade>, over: Partial<MeMember> = {}): MeMember
   availableCoupons: 2,
   rechargeOpen: false,
   merged: false,
+  couponCenterOpen: false,
+  inviteOpen: false,
+  foodOpen: false,
+  bookingOpen: false,
   grade: {
     label: 'L3 观澜 · 享',
     grade: 3,
@@ -76,5 +80,12 @@ describe('会员卡', () => {
     expect(cardView(member({}, { rechargeOpen: true })).recharge).toBe(true);
     const merged = cardView(member({}, { rechargeOpen: true, frozen: true, merged: true }));
     expect(merged).toMatchObject({ merged: true, frozen: true, recharge: false });
+    // 领券中心（第二期 2c）：开着才有入口，合并掉的会员卡没有
+    expect(cardView(member({})).couponCenter).toBe(false);
+    expect(cardView(member({}, { couponCenterOpen: true })).couponCenter).toBe(true);
+    expect(cardView(member({}, { couponCenterOpen: true, frozen: true, merged: true })).couponCenter).toBe(false);
+    // 邀请好友（第三期 3b）：开着才显示，合并掉的不显示
+    expect(cardView(member({}, { inviteOpen: true })).invite).toBe(true);
+    expect(cardView(member({}, { inviteOpen: true, merged: true })).invite).toBe(false);
   });
 });

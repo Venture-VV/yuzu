@@ -1,6 +1,7 @@
 // 会员码的二维码：自己写的编码器，用独立的解码器（jsQR）读回来核对
 import jsQR from 'jsqr';
 import { describe, expect, it } from 'vitest';
+import { encodeDigits as encodeForAdmin, qrSvgPath } from '../../src/client/features/mp/qr';
 import { drawQr, encodeDigits, type QrMatrix } from '../src/utils/qr';
 
 /** 画成 RGBA 位图（四周留 4 格空白，每格 4 像素），交给解码器 */
@@ -79,5 +80,21 @@ describe('会员码二维码', () => {
     expect(dark.length).toBe(qr.modules.flat().filter(Boolean).length);
     const cell = 290 / (21 + 8);
     expect(Math.min(...dark.map((c) => c.rect[0]!))).toBeCloseTo(4 * cell);
+  });
+});
+
+// 后台打印桌码（第三期 3c）用的是门店系统里的一份（src/client/features/mp/qr.ts；小程序的目录不进门店系统的构建）
+describe('后台打印的桌码：与这里同一份编码器', () => {
+  it('桌码（71 开头、18 位）、会员码编出来一模一样、读得回来；SVG 路径每个深色格子一个方块', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      for (const code of ['71' + digits(16, seed), '8' + digits(15, seed), '9' + digits(18, seed)]) {
+        const a = encodeDigits(code);
+        const b = encodeForAdmin(code);
+        expect(b).toEqual(a);
+        expect(decode(b)).toBe(code);
+        const dark = b.modules.flat().filter(Boolean).length;
+        expect(qrSvgPath(b).split('z').length - 1).toBe(dark);
+      }
+    }
   });
 });

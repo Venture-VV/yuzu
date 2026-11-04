@@ -13,6 +13,7 @@
 
 import type { MpBindAbandonResult } from '../../../src/shared/mp';
 import { isApiError, member, messageOf } from './api';
+import { beginFlight, endFlight, inFlight } from './pending-store';
 
 const KEY = 'tq_bind_pending';
 
@@ -78,6 +79,8 @@ export async function resolveBindPending(): Promise<BindOutcome | null> {
   if (r0.state === 'none') return null;
   if (r0.state === 'unreadable') return { kind: 'unreadable' };
   const p = r0.pending;
+  // 这次绑定还在发（手机号验证的弹窗刚关掉、切到聊天再回来时页面会重新打开）：不去作废它，等它回来（独立审查 3b/3c 的 P2 同一类）
+  if (inFlight(p.clientKey)) return { kind: 'pending', message: '绑定还在提交，请稍候再点「再确认一次」' };
   try {
     const r = await member<MpBindAbandonResult>('POST', '/v1/bind/abandon', { clientKey: p.clientKey });
     clearBindPending();
@@ -110,6 +113,7 @@ export async function sendBind(phoneCode: string, clientKey: string, bindVersion
   if (!savePending({ clientKey, at: Date.now() })) {
     return { kind: 'rejected', code: 'PENDING_STORE_FAILED', message: '手机存储空间不够，这次没有提交，请清理微信的存储空间后再绑定' };
   }
+  beginFlight(clientKey);
   try {
     await member('POST', '/v1/bind', { phoneCode, clientKey, bindVersion });
     clearBindPending();
@@ -119,6 +123,10 @@ export async function sendBind(phoneCode: string, clientKey: string, bindVersion
       clearBindPending();
       return { kind: 'rejected', code: e.code, message: e.message };
     }
+    // 请求回来了、结果不确定：先拿掉「正在发」，再确认作废
+    endFlight(clientKey);
     return (await resolveBindPending()) ?? { kind: 'pending', message: messageOf(e) };
+  } finally {
+    endFlight(clientKey);
   }
 }

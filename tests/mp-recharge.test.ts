@@ -581,6 +581,19 @@ describe('到账通知', () => {
     expect((await row(c.order.orderNo)).status).toBe('paid');
   });
 
+  it('退款等别的事件的通知：验过签就回收到、不动单子（免得微信一直重发）；改过的照样不认', async () => {
+    const { memberId, openid } = await bound('演示·退款通知');
+    const c = (await createOrder(openid, { amount: yuan(600) })).json();
+    expect((await notify(wx.pay(c.order.orderNo))).statusCode).toBe(204);
+    // 例如店里在商户平台把这笔退了、商户平台的退款通知也配到了这个地址（这里用模拟的退款接口造一条退款通知）
+    await wx.client.refund({ outTradeNo: c.order.orderNo, outRefundNo: `RF${c.order.orderNo}`, reason: '', refundCents: yuan(600), totalCents: yuan(600) });
+    const n = wx.settleRefund(`RF${c.order.orderNo}`, 'SUCCESS');
+    expect((await notify(n)).statusCode).toBe(204);
+    expect((await notify({ headers: n.headers, body: n.body.replace('"REFUND.SUCCESS"', '"REFUND.SUCCESs"') })).statusCode).toBe(401);
+    expect(await row(c.order.orderNo)).toMatchObject({ status: 'paid' });
+    expect(await rechargesOf(memberId)).toHaveLength(1);
+  });
+
   it('同一笔的通知重复到、同时到：只入账一次', async () => {
     const { memberId, openid } = await bound('演示·重复通知');
     const c = (await createOrder(openid, { amount: yuan(1000) })).json();

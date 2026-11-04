@@ -19,9 +19,11 @@
         <text wx:if="{{item.terms}}" class="cp-meta">{{item.terms}}</text>
         <text class="cp-meta">{{item.valid}}</text>
         <text class="cp-code num">{{item.code}}</text>
+        <view wx:if="{{item.remind.show}}" class="cp-remind {{item.remind.set ? 'on' : ''}}" data-code="{{item.raw}}" data-set="{{item.remind.set}}" bindtap="onRemind">{{item.remind.text}}</view>
       </view>
     </view>
     <text class="sub use-note">结账时告诉前台用哪张。每张结账单最多用 1 张，不找零，不和优惠、免单同时用。</text>
+    <text wx:if="{{remindHint}}" class="sub use-note">到期提醒：{{remindHint}}。</text>
 
     <block wx:if="{{others.length}}">
       <view class="sec-h later"><view><text class="eyebrow">History</text><text class="h3">其他的券</text></view></view>

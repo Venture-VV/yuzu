@@ -73,3 +73,32 @@
   display: block;
   margin-top: 28rpx;
 }
+
+/* 到期提醒（第三期 3a）：赠金快到期 */
+.bal-exp {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 20rpx;
+  padding-top: 16rpx;
+  border-top: 1px solid var(--line);
+  font-size: 26rpx;
+}
+.bal-hint {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  color: var(--muted);
+}
+.remind {
+  flex: none;
+  padding: 6rpx 18rpx;
+  font-size: 24rpx;
+  color: var(--wood);
+  border: 1px solid var(--wood-3);
+  border-radius: 999rpx;
+}
+.remind.on {
+  color: var(--muted);
+  border-color: var(--line);
+}

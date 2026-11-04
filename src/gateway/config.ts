@@ -17,6 +17,10 @@ export interface GatewayConfig {
   /** 模拟微信：假登录、假手机号（只给本机与测试服的演示库用；正式、演练的 yuzu 会拒绝模拟绑定） */
   mockWechat: boolean;
   wechat: { appId: string; appSecret: string } | null;
+  /** 到期提醒（第三期 3a）：多少秒向门店取一次待发的消息（默认 30；0 不发） */
+  reminderSeconds: number;
+  /** 点开订阅消息跳到哪一版小程序：formal 正式版（默认）、trial 体验版、developer 开发版 */
+  subscribeState: 'formal' | 'trial' | 'developer';
   logLevel: string;
 }
 
@@ -34,6 +38,10 @@ export function loadGatewayConfig(env: NodeJS.ProcessEnv = process.env): Gateway
   if (!mockWechat && (!appId || !appSecret)) throw new Error('网关要配 WX_APPID、WX_APPSECRET（或本机测试用 MP_MOCK_WECHAT=true）');
   const sessionDays = Number(env.MP_SESSION_DAYS ?? 7);
   if (!Number.isInteger(sessionDays) || sessionDays < 1 || sessionDays > 30) throw new Error('MP_SESSION_DAYS 应为 1–30 天');
+  const reminderSeconds = Number(env.MP_REMINDER_SECONDS ?? 30);
+  if (!Number.isInteger(reminderSeconds) || reminderSeconds < 0 || reminderSeconds > 3600) throw new Error('MP_REMINDER_SECONDS 应为 0–3600 秒（0 不发到期提醒）');
+  const subscribeState = (env.MP_SUBSCRIBE_STATE?.trim() || 'formal') as GatewayConfig['subscribeState'];
+  if (!['formal', 'trial', 'developer'].includes(subscribeState)) throw new Error('MP_SUBSCRIBE_STATE 应为 formal、trial 或 developer');
   const port = Number(env.GATEWAY_PORT ?? 8300);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('GATEWAY_PORT 应为 1–65535 的端口号');
   return {
@@ -46,6 +54,8 @@ export function loadGatewayConfig(env: NodeJS.ProcessEnv = process.env): Gateway
     sessionDays,
     mockWechat,
     wechat: appId && appSecret ? { appId, appSecret } : null,
+    reminderSeconds,
+    subscribeState,
     logLevel: env.LOG_LEVEL ?? 'info',
   };
 }
