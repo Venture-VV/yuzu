@@ -277,13 +277,18 @@ interface LockedTemplate extends CouponTerms {
   active: boolean;
 }
 
-/** 发券前对模板加共享锁（改模板加排他锁，两边串行） */
-async function lockTemplate(tx: Tx, id: number): Promise<LockedTemplate | null> {
-  const [t] = await tx<LockedTemplate[]>`
+/** 读模板；lock 时加共享锁（发券前加，改模板加排他锁，两边串行），不加锁的只用于只读判断 */
+async function readTemplate(db: Db, id: number, lock: boolean): Promise<LockedTemplate | null> {
+  const [t] = await db<LockedTemplate[]>`
     SELECT id, name, kind, face_value, rate_percent, max_off, threshold, scope, scope_categories, scope_items, exchange_item_id, exchange_ticket_type_id,
            validity, valid_from, valid_to, valid_days, levels, active
-    FROM coupon_templates WHERE id = ${id} FOR SHARE`;
+    FROM coupon_templates WHERE id = ${id} ${lock ? db`FOR SHARE` : db``}`;
   return t ? { ...t, ...termsOf(t), levels: t.levels.map(Number) } : null;
+}
+
+/** 发券前对模板加共享锁（改模板加排他锁，两边串行） */
+async function lockTemplate(tx: Tx, id: number): Promise<LockedTemplate | null> {
+  return readTemplate(tx, id, true);
 }
 
 /** 这张模板在营业日 date 发的券的有效期；固定有效期已过返回 null */
@@ -510,6 +515,45 @@ export interface MpClaimResult {
   coupon: CouponRow;
 }
 
+type MpClaimMember = { id: number; name: string; status: string; grade: number; mergedIntoId: number | null };
+
+/** 小程序领取的规则（发券与只读判断共用一套）：不能领时给出原因 */
+function mpClaimProblem(m: MpClaimMember, t: LockedTemplate | null, date: string): { code: string; message: string } | null {
+  if (m.mergedIntoId !== null) return { code: 'MEMBER_MERGED', message: `会员「${m.name}」已合并到另一位会员，不能领券` };
+  if (m.status !== 'active') return { code: 'MEMBER_FROZEN', message: `会员「${m.name}」已停用，不能领券` };
+  if (!t) return { code: 'NOT_FOUND', message: '券模板不存在' };
+  if (!t.active) return { code: 'TEMPLATE_INACTIVE', message: `券「${t.name}」已停用，不能再领` };
+  if (!validRange(t, date)) return { code: 'TEMPLATE_EXPIRED', message: `券「${t.name}」的有效期到 ${t.validTo} 已经过了，不能再领` };
+  if (!levelAllowed(t, m.grade)) {
+    return { code: 'COUPON_LEVEL', message: `券「${t.name}」只发给 ${gradeList(t.levels)} 的会员，这位会员现在是 L${m.grade}` };
+  }
+  return null;
+}
+
+export interface MpClaimEligibility {
+  ok: boolean;
+  /** 不能领时：MEMBER_MERGED、MEMBER_FROZEN、NOT_FOUND、TEMPLATE_INACTIVE、TEMPLATE_EXPIRED、COUPON_LEVEL（与发券入口的拒绝码一样） */
+  code?: string;
+  message?: string;
+}
+
+/**
+ * 小程序领券中心的列表用（只读、不加锁、不发券）：这位会员此刻能不能领这张模板，与 issueMpClaimCoupon 同一套规则
+ * （会员停用 / 已合并、模板停用 / 过期、档级不在模板限定里）。领没领满是小程序线自己的领取记录，这里不管；
+ * 列表与真正领取之间规则可能刚好变了，以领取时 issueMpClaimCoupon 的结果为准
+ */
+export async function mpClaimEligibility(
+  db: Db,
+  deps: Pick<Deps, 'config'>,
+  o: { templateId: number; memberId: number; at?: Date },
+): Promise<MpClaimEligibility> {
+  const date = await issueDate(db, deps, o.at ?? new Date());
+  const [m] = await db<MpClaimMember[]>`SELECT id, name, status, grade, merged_into_id FROM members WHERE id = ${o.memberId}`;
+  if (!m) return { ok: false, code: 'NOT_FOUND', message: '会员不存在' };
+  const problem = mpClaimProblem(m, await readTemplate(db, o.templateId, false), date);
+  return problem ? { ok: false, ...problem } : { ok: true };
+}
+
 /** 这个领取记录已经发过：同一位会员、同一张模板返回原来那张；对不上的拒绝 */
 async function mpClaimReplay(db: Db, input: z.infer<typeof MpClaimInput>, date: string): Promise<MpClaimResult | null> {
   const [r] = await db<{ id: number; issueNo: string; kind: string; templateId: number; memberId: number | null }[]>`
@@ -536,21 +580,16 @@ export async function issueMpClaimCoupon(tx: Tx, deps: Pick<Deps, 'config'>, raw
   const input = parse(MpClaimInput, raw);
   const at = input.at ?? new Date();
   const date = await issueDate(tx, deps, at);
-  const [m] = await tx<{ id: number; name: string; status: string; grade: number; mergedIntoId: number | null }[]>`
+  const [m] = await tx<MpClaimMember[]>`
     SELECT id, name, status, grade, merged_into_id FROM members WHERE id = ${input.memberId} FOR UPDATE`;
   if (!m) throw notFound('会员不存在');
   const prior = await mpClaimReplay(tx, input, date);
   if (prior) return prior;
-  if (m.mergedIntoId !== null) throw unprocessable('MEMBER_MERGED', `会员「${m.name}」已合并到另一位会员，不能领券`);
-  if (m.status !== 'active') throw unprocessable('MEMBER_FROZEN', `会员「${m.name}」已停用，不能领券`);
   const template = await lockTemplate(tx, input.templateId);
-  if (!template) throw notFound('券模板不存在');
-  if (!template.active) throw unprocessable('TEMPLATE_INACTIVE', `券「${template.name}」已停用，不能再领`);
-  if (!validRange(template, date)) {
-    throw unprocessable('TEMPLATE_EXPIRED', `券「${template.name}」的有效期到 ${template.validTo} 已经过了，不能再领`);
-  }
-  if (!levelAllowed(template, m.grade)) {
-    throw unprocessable('COUPON_LEVEL', `券「${template.name}」只发给 ${gradeList(template.levels)} 的会员，这位会员现在是 L${m.grade}`);
+  const problem = mpClaimProblem(m, template, date);
+  if (problem || !template) {
+    const { code, message } = problem ?? { code: 'NOT_FOUND', message: '券模板不存在' };
+    throw code === 'NOT_FOUND' ? notFound(message) : unprocessable(code, message);
   }
   const staffId = await systemStaffId(tx);
   const done = await writeIssue(tx, {

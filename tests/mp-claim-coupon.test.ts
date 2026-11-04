@@ -2,13 +2,14 @@
 //   · 小程序线在自己的事务里调用 issueMpClaimCoupon：发券记录种类「小程序领取」、经办人系统账号「小程序」、一次 1 张、有效期照模板；
 //   · 同一个领取记录只发一次：再调用返回第一次那张（replayed）；同一个领取记录发给别的模板或会员拒绝；两个事务同时发也只出一张；
 //   · 会员停用、已合并，模板停用、固定有效期已过，档级不在模板限定里，都拒绝，调用方的事务跟着回滚、什么都不留；
+//   · 只读判断 mpClaimEligibility（领券中心的列表用）与发券同一套规则：能领的、各种领不了的原因一样，不写任何东西；
 //   · 会员的券里照常显示、标「小程序领取」；自检照常全过。
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { CouponTemplate, MemberCoupons } from '../src/shared/coupons';
 import type { Deps } from '../src/server/lib/context';
-import { issueMpClaimCoupon, type MpClaimInput } from '../src/server/modules/coupons';
+import { issueMpClaimCoupon, mpClaimEligibility, type MpClaimInput } from '../src/server/modules/coupons';
 import { consistencyChecks } from '../src/server/ops/consistency';
 import { api, createMember, setup, type TestContext } from './helpers';
 
@@ -35,6 +36,7 @@ const errorOf = async (p: Promise<unknown>) => {
   }
   throw new Error('应该拒绝');
 };
+const eligible = (templateId: number, memberId: number) => mpClaimEligibility(ctx.sql, deps, { templateId, memberId });
 const couponsOf = async (memberId: number) => (await api(ctx.app, ctx.owner, 'GET', `/api/members/${memberId}/coupons`)).body as MemberCoupons;
 const issuesOf = (memberId: number) =>
   ctx.sql<{ kind: string; quantity: number; dedupeKey: string; issuedBy: string; reason: string }[]>`
@@ -114,6 +116,32 @@ describe('小程序领取', () => {
     await ctx.sql`UPDATE members SET status = 'frozen', merged_into_id = ${memberId} WHERE id = ${merged}`;
     expect((await errorOf(claim({ templateId: cash.id, memberId: merged, claimId: 208 }))).code).toBe('MEMBER_MERGED');
     expect((await couponsOf(memberId)).coupons).toHaveLength(before);
+  });
+
+  it('只读判断与发券同一套规则：能领的 ok，领不了的给同样的原因；不写任何东西', async () => {
+    const [{ n: before }] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM coupon_issues`;
+    expect(await eligible(cash.id, memberId)).toEqual({ ok: true });
+    const off = await template({ name: '停用的券二', kind: 'cash', faceValue: 500, active: false });
+    const expired = await template({ name: '过期的券二', kind: 'cash', faceValue: 500, validity: 'fixed', validFrom: '2026-01-01', validTo: '2026-01-31' });
+    const vip = await template({ name: '只给 L3 起二', kind: 'cash', faceValue: 500, levels: [3, 4, 5, 6] });
+    for (const [t, code] of [
+      [off.id, 'TEMPLATE_INACTIVE'],
+      [expired.id, 'TEMPLATE_EXPIRED'],
+      [vip.id, 'COUPON_LEVEL'],
+      [999_999, 'NOT_FOUND'],
+    ] as const) {
+      const r = await eligible(t, memberId);
+      expect(r, String(code)).toMatchObject({ ok: false, code });
+      // 真正领取时拒绝码一样
+      expect((await errorOf(claim({ templateId: t, memberId, claimId: `elig-${t}` }))).code).toBe(code);
+    }
+    expect(await eligible(cash.id, 999_999)).toMatchObject({ ok: false, code: 'NOT_FOUND' });
+    const [frozen] = await ctx.sql<{ id: number }[]>`SELECT id FROM members WHERE name = '停用的会员'`;
+    expect(await eligible(cash.id, frozen!.id)).toMatchObject({ ok: false, code: 'MEMBER_FROZEN' });
+    const [merged] = await ctx.sql<{ id: number }[]>`SELECT id FROM members WHERE name = '并走的会员'`;
+    expect(await eligible(cash.id, merged!.id)).toMatchObject({ ok: false, code: 'MEMBER_MERGED' });
+    const [{ n: after }] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM coupon_issues`;
+    expect(after).toBe(before);
   });
 
   it('自检照常全过；发券记录的约束：小程序领取只能 1 张、要有会员和去重键', async () => {

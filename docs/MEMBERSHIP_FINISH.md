@@ -235,7 +235,8 @@ issueMpClaimCoupon(tx, deps, { templateId, memberId, claimId, at? })
 - 拒绝：`NOT_FOUND`（会员或模板不存在）、`MEMBER_MERGED`、`MEMBER_FROZEN`、`TEMPLATE_INACTIVE`、`TEMPLATE_EXPIRED`（固定有效期已过）、`COUPON_LEVEL`（档级不在模板限定的里面，与手动发券一样看会员一行上的档级）；
 - 哪些模板小程序可领、每人限领几张、领取记录，是小程序线自己的（迁移 `048`），这里不管；
 - 锁：入口里对会员一行 `FOR UPDATE`（调用方已经锁过就不会再等；与停用、合并串行）→ 模板共享锁（与改模板串行）。两个事务同时发同一个领取记录也只出一张；
-- 会员详情的券、发券记录里照常显示，种类写「小程序领取」。
+- 会员详情的券、发券记录里照常显示，种类写「小程序领取」；
+- 领券中心的列表用只读判断 `mpClaimEligibility(db, deps, { templateId, memberId, at? }) → { ok, code?, message? }`（小程序线 11-04 要的）：与发券同一套规则、同样的拒绝码，不加锁、不发券；领没领满是小程序线自己的领取记录。列表与真正领取之间规则可能刚好变了，以领取时的结果为准。
 
 ### 8.2 退储值：线上充值那一行交给门店系统原路退回（2d，`MP_RECHARGE.md` 第 9 节，MP21）
 
