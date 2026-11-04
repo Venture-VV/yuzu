@@ -8,12 +8,23 @@ import { MP_GATEWAY_HEADER } from '@shared/mp';
 import type { AppConfig } from '../../config';
 import type { Sql } from '../../db';
 import { AppError } from '../../lib/errors';
+import { loadPayRuntime, setActivePay, type PayRuntime } from './pay';
 import { registerMpPublicRoutes } from './public';
+import { sweepRechargeOrders } from './recharge';
+import { maybeReconcileYesterday } from './recharge-recon';
+import { registerMpRechargeRoutes } from './recharge-routes';
 import { registerMpMemberRoutes } from './routes';
 
 const digest = (s: string) => createHash('sha256').update(s, 'utf8').digest();
 
-export async function buildMpApp(sql: Sql, config: AppConfig): Promise<FastifyInstance> {
+export interface MpAppOptions {
+  /** 门店系统的微信支付（第二期）：不给就按环境变量建（没配为 null）；测试传模拟的 */
+  pay?: PayRuntime | null;
+  /** 补查、关单的间隔（毫秒，默认每分钟）；0 不开（测试里直接调 sweepRechargeOrders） */
+  sweepMs?: number;
+}
+
+export async function buildMpApp(sql: Sql, config: AppConfig, opts: MpAppOptions = {}): Promise<FastifyInstance> {
   const key = config.mp.gatewayKey;
   if (!key || key.length < 32) throw new Error('小程序端口没有配网关密钥（MP_GATEWAY_KEY，至少 32 个字符），不开');
   const expected = digest(key);
@@ -51,5 +62,49 @@ export async function buildMpApp(sql: Sql, config: AppConfig): Promise<FastifyIn
 
   registerMpPublicRoutes(app, { sql, config });
   registerMpMemberRoutes(app, { sql, config });
+
+  // 线上充值（第二期 2a）：微信支付的凭据只在门店 yuzu（MP17）；配错了不开线上充值、写日志，门店系统照常启动
+  let pay: PayRuntime | null = null;
+  if ('pay' in opts) {
+    pay = opts.pay ?? null;
+    setActivePay(pay);
+  } else {
+    try {
+      pay = loadPayRuntime(process.env, config.env, config.instance);
+      setActivePay(pay);
+      if (pay) app.log.info(pay.mode === 'mock' ? '线上充值用模拟微信支付（只在 development、test）' : `线上充值的微信支付已配好（商户号 ${pay.config.mchId}）`);
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      setActivePay(null, why);
+      app.log.error(`微信支付的配置不对，线上充值不开：${why}`);
+    }
+  }
+  registerMpRechargeRoutes(app, { sql, config }, pay);
+  const sweepMs = opts.sweepMs ?? 60_000;
+  if (sweepMs > 0) {
+    let timer: NodeJS.Timeout | undefined;
+    let running = false;
+    app.addHook('onReady', async () => {
+      timer = setInterval(() => {
+        if (running) return;
+        running = true;
+        sweepRechargeOrders({ sql, config }, pay)
+          .then(async (r) => {
+            if (r.errors) app.log.error(`线上充值单补查：${r.checked} 张里 ${r.errors} 张出错，下一分钟再查`);
+            // 2b 对账：北京时间 10 点半以后对前一天的账（一天一次，没对上的标红给店主看）
+            const recon = await maybeReconcileYesterday({ sql, config }, pay).catch((error: unknown) => {
+              app.log.error(error instanceof Error ? error.message : String(error));
+              return null;
+            });
+            if (recon) app.log.info(`线上充值对账 ${recon.billDate}：${recon.ok ? '都对上了' : `${recon.issues.length} 笔没对上`}`);
+          })
+          .catch((error) => app.log.error({ err: error }, '线上充值单补查失败，下一分钟重试'))
+          .finally(() => {
+            running = false;
+          });
+      }, sweepMs);
+    });
+    app.addHook('onClose', async () => clearInterval(timer));
+  }
   return app;
 }

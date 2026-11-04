@@ -24,6 +24,7 @@ import { badRequest, conflict, notFound, unprocessable } from '../../lib/errors'
 import { saveRuleSetting } from '../../lib/rule-settings';
 import { setTxTimeouts } from '../../lib/tx';
 import { parse } from '../../lib/validate';
+import { loadRechargeRules } from './recharge';
 import { loadMpRules } from './rules';
 
 type StoreRow = Omit<MpStoreAdmin, 'latitude' | 'longitude'> & { latitude: string | null; longitude: string | null };
@@ -39,7 +40,7 @@ export async function mpAdminData(db: Db): Promise<MpAdminData> {
     SELECT i.id AS item_id, i.name, i.category, i.active, coalesce(x.intro, '') AS intro, x.image_id, coalesce(x.version, 0) AS version
     FROM service_items i LEFT JOIN mp_item_intros x ON x.item_id = i.id
     ORDER BY i.active DESC, i.sort_order, i.id`;
-  return { rules: await loadMpRules(db), stores: stores.map(toStore), banners, items };
+  return { rules: await loadMpRules(db), rechargeRules: await loadRechargeRules(db), stores: stores.map(toStore), banners, items };
 }
 
 // ── 开关 ──

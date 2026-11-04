@@ -41,7 +41,9 @@ import { memberCoupons } from '../coupons';
 import { listLedger } from '../ledger';
 import { loadMembershipRules, memberGradeInfo } from '../membership';
 import { loadSettings } from '../settings';
+import { activePay } from './pay';
 import { mpToday } from './public';
+import { loadRechargeRules } from './rules';
 
 /** 网关验证过的小程序用户 */
 export function openidOf(req: FastifyRequest): string {
@@ -174,14 +176,15 @@ export async function getMe(deps: Deps, openid: string): Promise<MpMe> {
   // 与员工打开会员详情一样：先作废这位会员到期的赠金，看到的余额才是可用余额
   await expireMemberBonus(deps, b.memberId);
   const today = await mpToday(deps.sql, deps.config.timezone);
-  const [m] = await deps.sql<{ memberNo: string; name: string; status: string; principalBalance: number; bonusBalance: number }[]>`
-    SELECT member_no, name, status, principal_balance, bonus_balance FROM members WHERE id = ${b.memberId}`;
+  const [m] = await deps.sql<{ memberNo: string; name: string; status: string; principalBalance: number; bonusBalance: number; mergedIntoId: number | null }[]>`
+    SELECT member_no, name, status, principal_balance, bonus_balance, merged_into_id FROM members WHERE id = ${b.memberId}`;
   if (!m) throw notFound('会员不存在');
-  const [info, rules, coupons, settings] = await Promise.all([
+  const [info, rules, coupons, settings, rechargeRules] = await Promise.all([
     memberGradeInfo(deps.sql, b.memberId, today),
     loadMembershipRules(deps.sql),
     memberCoupons(deps.sql, b.memberId, today),
     loadSettings(deps.sql),
+    loadRechargeRules(deps.sql),
   ]);
   const { grade, tier, cycleEnd } = info.state;
   const g: MpGrade = {
@@ -208,6 +211,10 @@ export async function getMe(deps: Deps, openid: string): Promise<MpMe> {
       deductionRule: DEDUCTION_RULE_LABELS[settings.deductionRule].title,
       grade: g,
       availableCoupons: coupons.counts.available ?? 0,
+      // 线上充值（第二期 2a）开着、门店系统的微信支付配好了：「我的」页显示「充值」
+      rechargeOpen: rechargeRules.enabled && activePay() !== null,
+      // 合并掉的会员卡（主线 v0.7.26）：只说已合并、请到前台换绑，不给目标会员的信息（MP25）
+      merged: m.mergedIntoId !== null,
     },
   };
 }
