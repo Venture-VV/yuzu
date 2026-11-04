@@ -188,6 +188,8 @@ export const PERMISSIONS = {
   'dining.kitchen': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk', 'backoffice'] },
   /** 客房：入住、续住、换房、退房、收退押金、撤销入住、夜审（S7，v0.7.4，待确认：前台岗位都能做） */
   'room.operate': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
+  /** 预约（v0.7.28，待确认：前台岗位都能做）：预约技师、派对房、客房电话预订；确认、改时间、到店、取消、记爽约 */
+  'booking.manage': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 客房：打扫、维修（房态）（S7，v0.7.4，待确认：前台岗位与后勤人员；客房服务员可以用后勤账号） */
   'room.housekeep': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk', 'backoffice'] },
   /** 实时位置（v0.7.17，待确认：前台岗位）：平面图上的在场人员、区域人数、轨迹；只显示手牌号与技师，不显示会员姓名、手机号 */
@@ -350,6 +352,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'dining.order': '餐饮点单、催单、上菜',
   'dining.kitchen': '厨房出品屏：开始做、出餐、估清',
   'room.operate': '客房入住、续住、换房、退房、押金、夜审',
+  'booking.manage': '预约：新建、确认、改时间、到店、取消、记爽约',
   'room.housekeep': '客房打扫、维修（房态）',
   'location.view': '看实时位置（平面图上的在场人员与轨迹）',
   'location.report': '上报位置（模拟刷卡、设备桥）',
@@ -375,7 +378,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   },
   {
     title: '前台手牌与账单',
-    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.refund', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen', 'room.operate', 'room.housekeep', 'location.view', 'location.report', 'guide.view'],
+    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.refund', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen', 'room.operate', 'room.housekeep', 'booking.manage', 'location.view', 'location.report', 'guide.view'],
   },
   {
     title: '会员体系',

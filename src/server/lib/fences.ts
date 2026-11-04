@@ -70,6 +70,9 @@ export const FENCED_OPS = [
   'member_refund',
   'member_status',
   'member_merge',
+  // 预约（v0.7.28，迁移 053）：新建、改动（确认、改时间、到店、取消、爽约）
+  'booking_create',
+  'booking_change',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 

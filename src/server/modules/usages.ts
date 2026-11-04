@@ -202,52 +202,67 @@ export async function openUsage(deps: Deps, raw: unknown, ctx: OpContext): Promi
   const { clientKey: key, ...payload } = input;
   const requestHash = hashRequest(payload);
   const run = await runIdempotent(deps, { key, opType: 'usage_open', requestHash }, async (tx) => {
-    const at = ctx.at ?? new Date();
-    const rules = await loadUsageRules(tx);
-    // ① 来访（共享锁：开单不改来访，但要挡住同时结账、撤销）
-    const [peek] = await tx<{ id: number }[]>`
-      SELECT v.id FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${input.tagCode} AND v.status = 'open'`;
-    if (!peek) throw conflict('TAG_NOT_IN_STORE', `手牌 ${input.tagCode} 没有在店客人，请核对牌号；使用人要先在前台接待、买门票，再开单`);
-    const [visit] = await tx<{ id: number; visitNo: string; billId: number; status: string }[]>`
-      SELECT id, visit_no, bill_id, status FROM visits WHERE id = ${peek.id} FOR SHARE`;
-    if (visit!.status !== 'open') throw conflict('VISIT_CLOSED', `来访 ${visit!.visitNo} 已${visit!.status === 'settled' ? '结账离店' : '撤销'}，不能开单`);
-    // ② 空间一行（与空间台账的停用、改业态串行；不挡外键检查）
-    const [space] = await tx<{ id: number; code: string; displayName: string; businessType: string; active: boolean; sellable: boolean }[]>`
-      SELECT id, code, display_name, business_type, active, sellable FROM spaces WHERE id = ${input.spaceId} FOR NO KEY UPDATE`;
-    if (!space) throw notFound('空间不存在，请刷新后重试');
-    if (!rules.businessTypes.includes(space.businessType)) {
-      throw unprocessable(
-        'USAGE_NOT_ALLOWED',
-        `${space.code}（${space.businessType}）不按「开单即占用」算${rules.businessTypes.length ? `，能开单的业态：${rules.businessTypes.join('、')}` : '；后台还没设能开单的业态'}`,
-      );
-    }
-    if (!space.active || !space.sellable) throw conflict('SPACE_INACTIVE', `${space.code} 在空间台账里停用或不可售，不能开单，请换一间`);
-    const [busy] = await tx<{ usageNo: string; tagCode: string }[]>`
-      SELECT u.usage_no, h.code AS tag_code FROM space_usages u JOIN visits v ON v.id = u.visit_id JOIN hand_tags h ON h.id = v.tag_id
-      WHERE u.space_id = ${space.id} AND u.status = 'open'`;
-    if (busy) throw conflict('USAGE_TAKEN', `${space.code} 正在使用（${busy.usageNo}，手牌 ${busy.tagCode}），先结束这张再开单`);
-    const date = await businessDate(tx, deps, at);
-    const usageNo = await nextDocNo(tx, 'space_usage', 'SY', date);
-    const [row] = await tx<{ id: number }[]>`
-      INSERT INTO space_usages (usage_no, space_id, visit_id, bill_id, guests, note, business_date, opened_at, opened_by, open_key)
-      VALUES (${usageNo}, ${space.id}, ${visit!.id}, ${visit!.billId}, ${input.guests}, ${input.note}, ${date}, ${at}, ${ctx.actor.id}, ${key})
-      RETURNING id`;
-    const usageId = row!.id;
-    // 实时位置：使用人在那间房
-    await locateUsage(tx, visit!.id, space.id, usageId, { at, staffId: ctx.actor.id });
+    const usageId = await openUsageTx(tx, deps, payload, key, ctx);
     await saveKey(tx, key, 'usage_open', requestHash, usageId, ctx.actor.id);
-    await writeAudit(tx, {
-      staffId: ctx.actor.id,
-      action: 'usage_open',
-      targetType: 'space_usage',
-      targetId: usageId,
-      detail: { usageNo, space: space.code, tagCode: input.tagCode, guests: input.guests, ...(input.note ? { note: input.note } : {}) },
-      ip: ctx.ip,
-      businessDate: date,
-    });
     return usageId;
   });
   return getUsage(deps.sql, run.refId);
+}
+
+/**
+ * 开单（调用方的事务里；前台开单经 openUsage 的幂等外壳，预约到店经 bookings.ts）：返回使用单编号。
+ * 锁：来访（共享锁）→ 空间一行 → 当前位置
+ */
+export async function openUsageTx(
+  tx: Tx,
+  deps: Deps,
+  input: { spaceId: number; tagCode: string; guests: number; note: string },
+  key: string,
+  ctx: OpContext,
+): Promise<number> {
+  const at = ctx.at ?? new Date();
+  const rules = await loadUsageRules(tx);
+  // ① 来访（共享锁：开单不改来访，但要挡住同时结账、撤销）
+  const [peek] = await tx<{ id: number }[]>`
+    SELECT v.id FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${input.tagCode} AND v.status = 'open'`;
+  if (!peek) throw conflict('TAG_NOT_IN_STORE', `手牌 ${input.tagCode} 没有在店客人，请核对牌号；使用人要先在前台接待、买门票，再开单`);
+  const [visit] = await tx<{ id: number; visitNo: string; billId: number; status: string }[]>`
+    SELECT id, visit_no, bill_id, status FROM visits WHERE id = ${peek.id} FOR SHARE`;
+  if (visit!.status !== 'open') throw conflict('VISIT_CLOSED', `来访 ${visit!.visitNo} 已${visit!.status === 'settled' ? '结账离店' : '撤销'}，不能开单`);
+  // ② 空间一行（与空间台账的停用、改业态串行；不挡外键检查）
+  const [space] = await tx<{ id: number; code: string; displayName: string; businessType: string; active: boolean; sellable: boolean }[]>`
+    SELECT id, code, display_name, business_type, active, sellable FROM spaces WHERE id = ${input.spaceId} FOR NO KEY UPDATE`;
+  if (!space) throw notFound('空间不存在，请刷新后重试');
+  if (!rules.businessTypes.includes(space.businessType)) {
+    throw unprocessable(
+      'USAGE_NOT_ALLOWED',
+      `${space.code}（${space.businessType}）不按「开单即占用」算${rules.businessTypes.length ? `，能开单的业态：${rules.businessTypes.join('、')}` : '；后台还没设能开单的业态'}`,
+    );
+  }
+  if (!space.active || !space.sellable) throw conflict('SPACE_INACTIVE', `${space.code} 在空间台账里停用或不可售，不能开单，请换一间`);
+  const [busy] = await tx<{ usageNo: string; tagCode: string }[]>`
+    SELECT u.usage_no, h.code AS tag_code FROM space_usages u JOIN visits v ON v.id = u.visit_id JOIN hand_tags h ON h.id = v.tag_id
+    WHERE u.space_id = ${space.id} AND u.status = 'open'`;
+  if (busy) throw conflict('USAGE_TAKEN', `${space.code} 正在使用（${busy.usageNo}，手牌 ${busy.tagCode}），先结束这张再开单`);
+  const date = await businessDate(tx, deps, at);
+  const usageNo = await nextDocNo(tx, 'space_usage', 'SY', date);
+  const [row] = await tx<{ id: number }[]>`
+    INSERT INTO space_usages (usage_no, space_id, visit_id, bill_id, guests, note, business_date, opened_at, opened_by, open_key)
+    VALUES (${usageNo}, ${space.id}, ${visit!.id}, ${visit!.billId}, ${input.guests}, ${input.note}, ${date}, ${at}, ${ctx.actor.id}, ${key})
+    RETURNING id`;
+  const usageId = row!.id;
+  // 实时位置：使用人在那间房
+  await locateUsage(tx, visit!.id, space.id, usageId, { at, staffId: ctx.actor.id });
+  await writeAudit(tx, {
+    staffId: ctx.actor.id,
+    action: 'usage_open',
+    targetType: 'space_usage',
+    targetId: usageId,
+    detail: { usageNo, space: space.code, tagCode: input.tagCode, guests: input.guests, ...(input.note ? { note: input.note } : {}) },
+    ip: ctx.ip,
+    businessDate: date,
+  });
+  return usageId;
 }
 
 // ───────────────────────── 结束、撤单 ─────────────────────────

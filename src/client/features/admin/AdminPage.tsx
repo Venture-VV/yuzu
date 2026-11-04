@@ -20,6 +20,7 @@ const BenefitsSection = lazyPage(() => import('../membership/BenefitsSection').t
 const OpeningTab = lazyPage(() => import('./OpeningTab').then((m) => m.OpeningTab));
 const PermissionsSection = lazyPage(() => import('./PermissionsSection').then((m) => m.PermissionsSection));
 const RoomsSection = lazyPage(() => import('./RoomsSection').then((m) => m.RoomsSection));
+const BookingsSection = lazyPage(() => import('./BookingsSection').then((m) => m.BookingsSection));
 const RuleCatalog = lazyPage(() => import('./RuleCatalog').then((m) => m.RuleCatalog));
 const RulesTab = lazyPage(() => import('./RulesTab').then((m) => m.RulesTab));
 const SpacesSection = lazyPage(() => import('./SpacesSection').then((m) => m.SpacesSection));
@@ -61,6 +62,7 @@ export const adminRoutes: RouteObject[] = [
   { path: 'technicians', element: <TechniciansSection /> },
   { path: 'dining', element: <DiningSection /> },
   { path: 'rooms', element: <RoomsSection /> },
+  { path: 'bookings', element: <BookingsSection /> },
   { path: 'spaces', element: <SpacesSection /> },
   { path: 'devices', element: <DevicesSection /> },
   { path: 'mp', element: <MpAdminSection /> },

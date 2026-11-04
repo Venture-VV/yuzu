@@ -5,6 +5,7 @@ import { loadConfig } from './config';
 import { createSql } from './db';
 import { migrate } from './migrate';
 import { sweepExpiredBonus } from './modules/bonus';
+import { sweepBookings } from './modules/bookings';
 import { issueBirthdayCoupons } from './modules/coupons';
 import { checkDevicesOnce, recoverJobs } from './modules/devices';
 import { ensureMembershipLive, runMembershipDaily } from './modules/membership';
@@ -90,6 +91,13 @@ async function main() {
       } catch (error) {
         app.log.error({ err: error }, '生日礼发券失败，10 分钟后重试');
       }
+    }
+    // 预约（v0.7.28）：小程序预约开始前还没确认的自动取消、过了时间没到店的记爽约、客房过了保留时间释放
+    try {
+      const run = await sweepBookings(sql);
+      if (run.cancelled || run.noShow) app.log.info(`预约：自动取消 ${run.cancelled} 张、记爽约 ${run.noShow} 张`);
+    } catch (error) {
+      app.log.error({ err: error }, '预约的自动处理失败，下一分钟重试');
     }
     // 顺带检查应用在跑的标记（数据库重启过、专用连接断了就重新拿）
     try {

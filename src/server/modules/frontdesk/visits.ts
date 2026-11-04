@@ -837,6 +837,11 @@ export async function lookupFrontdeskOp(db: Db, key: string, timezone: string, e
   }
   // 退款单（v0.7.20）：查回这张退款单
   if (row.opType === 'checkout_refund') return { found: true as const, type: 'checkout_refund' as const, refund: await getRefund(db, row.refId) };
+  // 预约（v0.7.28）：新建、改动查回这张预约单
+  if (row.opType === 'booking_create' || row.opType === 'booking_change') {
+    const { getBooking } = await import('../bookings');
+    return { found: true as const, type: row.opType as 'booking_create' | 'booking_change', booking: await getBooking(db, row.refId) };
+  }
   const [c] = await db<{ visitId: number }[]>`SELECT visit_id FROM visit_tag_changes WHERE id = ${row.refId}`;
   return { found: true as const, type: 'tag_swap' as const, visit: await getVisit(db, c!.visitId, timezone) };
 }
