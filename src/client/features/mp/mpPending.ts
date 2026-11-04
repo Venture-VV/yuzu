@@ -1,15 +1,16 @@
 import { useMemo, useSyncExternalStore } from 'react';
-import type { MpAdminData, MpBannerAbandonResult, MpBannerAdmin, MpBannerOpLookup, MpBindingRow } from '@shared/mp';
+import type { MpAdminData, MpBannerAbandonResult, MpBannerAdmin, MpBannerOpLookup, MpBindingRow, MpRechargeAdminData, MpRechargeOrderAdmin } from '@shared/mp';
 import { api, ApiError, UncertainError } from '../../lib/api';
 import { uuid } from '../../lib/utils';
 
 // 后台「微信小程序」写操作的「结果待确认」（小程序线；Codex 审查 PR #42 的 P1）：新建首页轮播、解绑会员的微信，
-// 以及修改内容（对顾客开放的开关、门店信息、轮播、项目介绍）。
+// 修改内容（对顾客开放的开关、门店信息、轮播、项目介绍、线上充值的设置），以及处理「已付款待处理」的线上充值单（第二期 2a）。
 // 与 ERP 单据的做法一样（src/client/lib/erpPending.ts）：
 //   · 提交前把操作编号和原请求存在本机并读回核对，存不了就不发请求；
 //   · 成功、或第一次提交就被明确拒绝（4xx）才删；超时、断网、服务器出错（5xx）保留，关掉弹窗、刷新后页面上照样能处理：
 //     新建轮播按编号查回，查不到的「按原内容重新提交」（同一编号，不会多建）或「确认作废」（之后原请求晚到也不会新建）；
 //     解绑看那条绑定是不是已经解绑，没有就「按原内容重新提交」（同一编号，只解绑一次；解绑只做一次，晚到的原请求不会再动别的）；
+//     处理线上充值单看那张单是不是已经不是「已付款待处理」，还是的话「按原内容重新提交」（同一编号只处理一次）；
 //     修改内容都带打开时的版本号：版本号变了就有结论（原请求要么已经生效，要么因为版本号对不上永远不会生效）；
 //     没变的「按原内容重新提交」（同一版本号，不会改两次），或「放弃这次修改」（门店系统按现在的内容、用原来的版本号保存一次，
 //     内容不变、版本号加一，原请求晚到也会被拒绝）；
@@ -18,8 +19,8 @@ import { uuid } from '../../lib/utils';
 //     这时一律不发新的请求、不改写记录（原来的记录原样留着），页面提示恢复后再读一次，读得出来才继续。
 // 作废用小程序线自己的登记（迁移 044），不进共用的 op_fences，所以不用 ERP 的面板。
 
-export type MpUpdateType = 'rules_update' | 'store_update' | 'banner_update' | 'intro_update';
-export type MpOpType = 'banner_create' | 'unbind' | MpUpdateType;
+export type MpUpdateType = 'rules_update' | 'store_update' | 'banner_update' | 'intro_update' | 'recharge_rules_update';
+export type MpOpType = 'banner_create' | 'unbind' | 'recharge_resolve' | MpUpdateType;
 
 export interface MpPendingOp {
   /** 操作编号（就是请求里的 clientKey） */
@@ -210,6 +211,24 @@ export const sendUnbind = (op: { key: string; memberId: number; bindingId: numbe
     bindingId: op.bindingId,
   });
 
+/** 处理「已付款待处理」的线上充值单（重新入账、按金额入账、已另行处理） */
+export const sendResolve = (op: { key: string; orderId: number; action: string; note: string; summary: string; staffName: string }) =>
+  sendMpOp<MpRechargeOrderAdmin>({
+    key: op.key,
+    type: 'recharge_resolve',
+    url: `/api/admin/mp/recharge/orders/${op.orderId}/resolve`,
+    body: { clientKey: op.key, action: op.action, note: op.note },
+    summary: op.summary,
+    staffName: op.staffName,
+    target: String(op.orderId),
+  });
+
+/** 处理线上充值单查回（只读）：那张单已经不是「已付款待处理」就有结论（同一张单只处理一次，晚到的原请求不会再动它） */
+export async function lookupResolveOp(op: MpPendingOp): Promise<{ done: boolean }> {
+  const data = await api.get<MpRechargeAdminData>('/api/admin/mp/recharge');
+  return { done: !data.held.some((o) => String(o.id) === op.target) };
+}
+
 /** 新建轮播按编号查回（只读）：查不到不能断定没新建 */
 export const lookupBannerOp = (op: MpPendingOp) => api.get<MpBannerOpLookup>(`/api/admin/mp/banners/ops/${op.key}`);
 
@@ -235,6 +254,7 @@ const CONTENT_FIELDS: Record<MpUpdateType, string[]> = {
   store_update: ['name', 'hours', 'address', 'phone', 'latitude', 'longitude', 'notice', 'imageId', 'visible'],
   banner_update: ['title', 'imageId', 'link', 'startsOn', 'endsOn', 'sortOrder', 'active'],
   intro_update: ['intro', 'imageId'],
+  recharge_rules_update: ['enabled', 'planIds', 'customEnabled', 'maxCents', 'dailyLimit'],
 };
 
 const isUpdate = (op: MpPendingOp): op is MpPendingOp & { type: MpUpdateType } => op.type in CONTENT_FIELDS;
@@ -244,20 +264,23 @@ function currentOf(op: MpPendingOp, data: MpAdminData): { version: number; conte
   const found: { version: number } | undefined =
     op.type === 'rules_update'
       ? { ...data.rules }
-      : op.type === 'store_update'
-        ? data.stores.find((s) => s.code === op.target)
-        : op.type === 'banner_update'
-          ? data.banners.find((b) => String(b.id) === op.target)
-          : op.type === 'intro_update'
-            ? data.items.find((i) => String(i.itemId) === op.target)
-            : undefined;
+      : op.type === 'recharge_rules_update'
+        ? { ...data.rechargeRules }
+        : op.type === 'store_update'
+          ? data.stores.find((s) => s.code === op.target)
+          : op.type === 'banner_update'
+            ? data.banners.find((b) => String(b.id) === op.target)
+            : op.type === 'intro_update'
+              ? data.items.find((i) => String(i.itemId) === op.target)
+              : undefined;
   if (!found || !isUpdate(op)) return null;
   const row = found as Record<string, unknown>;
   return { version: found.version, content: Object.fromEntries(CONTENT_FIELDS[op.type].map((k) => [k, row[k] ?? null])) };
 }
 
-/** 比内容用：服务端会去掉首尾空格，定位存到小数点后 6 位 */
-const norm = (v: unknown) => (typeof v === 'string' ? v.trim() : typeof v === 'number' ? Math.round(v * 1e6) / 1e6 : (v ?? null));
+/** 比内容用：服务端会去掉首尾空格，定位存到小数点后 6 位；勾选的套餐不看先后、去重 */
+const norm = (v: unknown) =>
+  Array.isArray(v) ? JSON.stringify([...new Set(v)].sort()) : typeof v === 'string' ? v.trim() : typeof v === 'number' ? Math.round(v * 1e6) / 1e6 : (v ?? null);
 function sameContent(op: MpPendingOp & { type: MpUpdateType }, content: Record<string, unknown>): boolean {
   return CONTENT_FIELDS[op.type].every((k) => norm(op.body[k]) === norm(content[k]));
 }

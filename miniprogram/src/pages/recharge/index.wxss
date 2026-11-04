@@ -1,0 +1,157 @@
+/* 充值：照品牌书与 VI（app.wxss 的色、字、按钮）；不用 flex 的 gap */
+.head {
+  padding: 8rpx 0 32rpx;
+}
+.title {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 44rpx;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.lede {
+  display: block;
+  margin: 16rpx 0 28rpx;
+  font-size: 26rpx;
+  line-height: 1.7;
+}
+.fine {
+  display: block;
+  margin-top: 20rpx;
+  line-height: 1.6;
+}
+.wait {
+  padding: 80rpx 0;
+  text-align: center;
+  color: var(--muted);
+}
+.panel.wait .btn {
+  margin-top: 28rpx !important;
+}
+.pair {
+  display: flex;
+  margin-top: 32rpx;
+}
+.pair .btn {
+  flex: 1;
+}
+.pair .btn + .btn {
+  margin-left: 20rpx !important;
+}
+.closed,
+.pend {
+  margin-bottom: 28rpx;
+}
+.pend {
+  border-color: var(--wood-4);
+}
+.est {
+  display: block;
+  margin-top: 10rpx;
+  font-size: 26rpx;
+  color: var(--wood);
+}
+
+/* 套餐 */
+.plan {
+  margin-bottom: 20rpx;
+  padding: 28rpx;
+  background-color: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8rpx;
+}
+.plan.off {
+  opacity: 0.55;
+}
+.plan-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.plan-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+}
+.plan-amt {
+  flex: none;
+  margin-left: 20rpx;
+  font-size: 36rpx;
+  font-weight: 700;
+}
+.plan-meta {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: var(--wood);
+}
+.plan.off .plan-meta {
+  color: var(--muted);
+}
+
+/* 自定义金额 */
+.custom {
+  margin-top: 36rpx;
+  padding-top: 28rpx;
+  border-top: 1px solid var(--line);
+}
+.custom-row {
+  display: flex;
+  align-items: center;
+  margin-top: 16rpx;
+}
+.cur {
+  flex: none;
+  margin-right: 12rpx;
+  font-size: 36rpx;
+  font-weight: 700;
+}
+.custom-in {
+  flex: 1;
+  min-width: 0;
+  height: 84rpx;
+  margin-right: 20rpx;
+  padding: 0 20rpx;
+  background-color: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8rpx;
+  font-size: 32rpx;
+}
+.err {
+  display: block;
+  margin-top: 12rpx;
+  font-size: 24rpx;
+  color: var(--danger);
+}
+
+/* 确认与结果 */
+.amount {
+  display: block;
+  margin-top: 16rpx;
+  font-size: 64rpx;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+.res {
+  display: flex;
+  margin-top: 24rpx;
+}
+.rs {
+  flex: 1;
+}
+.k {
+  display: block;
+  font-size: 24rpx;
+  color: var(--muted);
+}
+.nv {
+  display: block;
+  font-size: 40rpx;
+  font-weight: 700;
+}
+.note {
+  display: block;
+  margin-top: 36rpx;
+  line-height: 1.6;
+}

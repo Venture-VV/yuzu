@@ -11,5 +11,17 @@ services:
       MP_GATEWAY_KEY: ${MP_GATEWAY_KEY:?接小程序要在 .env 设置 MP_GATEWAY_KEY（至少 32 个字符，openssl rand -hex 32）}
       # 会员码的签名密钥：只在 yuzu，网关不存；不设时会员码不可用（请顾客到前台报手机号），其余照常
       MP_CODE_SECRET: ${MP_CODE_SECRET:-}
+      # 线上充值（第二期，docs/MP_RECHARGE.md 第 4 节）：微信支付的凭据只在门店 yuzu（MP17），网关一样都不放。
+      # 一样都不配就不开线上充值；两个证书文件用 _BASE64 给内容（一行），不用挂文件。配错了不开线上充值，门店系统照常启动
+      WXPAY_APPID: ${WXPAY_APPID:-}
+      WXPAY_MCHID: ${WXPAY_MCHID:-}
+      WXPAY_SERIAL_NO: ${WXPAY_SERIAL_NO:-}
+      WXPAY_APIV3_KEY: ${WXPAY_APIV3_KEY:-}
+      WXPAY_PUBLIC_KEY_ID: ${WXPAY_PUBLIC_KEY_ID:-}
+      WXPAY_NOTIFY_URL: ${WXPAY_NOTIFY_URL:-}
+      WXPAY_PRIVATE_KEY_BASE64: ${WXPAY_PRIVATE_KEY_BASE64:-}
+      WXPAY_PUBLIC_KEY_BASE64: ${WXPAY_PUBLIC_KEY_BASE64:-}
+      # 模拟微信支付：只在演示库（APP_ENV=development）认，别的环境不开
+      MP_PAY_MOCK: ${MP_PAY_MOCK:-}
     ports:
       - "${MP_BIND:-0.0.0.0}:${MP_PORT:-8081}:8081"

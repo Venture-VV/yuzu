@@ -8,6 +8,7 @@
     "pages/ledger/index",
     "pages/coupons/index",
     "pages/benefits/index",
+    "pages/recharge/index",
     "pages/unbind/index"
   ],
   "window": {

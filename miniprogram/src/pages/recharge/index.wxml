@@ -1,0 +1,126 @@
+<view class="view">
+  <view wx:if="{{state === 'loading'}}" class="wait">正在打开…</view>
+
+  <view wx:elif="{{state === 'unbound'}}" class="panel wait">
+    <text class="h3">先绑定会员</text>
+    <button class="btn primary" hover-class="btn-hover" bindtap="onBind">去绑定</button>
+  </view>
+
+  <view wx:elif="{{state === 'offline' || state === 'error'}}" class="panel wait">
+    <text class="h3">{{state === 'offline' ? '门店系统连接中' : message}}</text>
+    <text wx:if="{{state === 'offline'}}">暂时充不了，店里网络恢复后再来；也可以到前台充值</text>
+    <button class="btn ghost" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+
+  <!-- 下单结果待确认：上次点「去支付」时网络不好，确认之前不能再下单 -->
+  <view wx:elif="{{state === 'pending'}}" class="panel">
+    <text class="h3">下单结果待确认</text>
+    <text class="lede">上次下单时网络不好，还不知道单子建好没有。网络好了点「再确认一次」，门店系统会告诉我们结果；确认之前先不要重新下单。</text>
+    <button class="btn primary block" hover-class="btn-hover" bindtap="onConfirmPending" loading="{{busy}}" disabled="{{busy}}">再确认一次</button>
+    <text wx:if="{{message}}" class="sub fine">{{message}}</text>
+  </view>
+
+  <view wx:elif="{{state === 'unreadable'}}" class="panel">
+    <text class="h3">下单记录暂时读不出来</text>
+    <text class="lede">手机上保存的下单记录读不出来，为防止付两次，先不能下单。请稍后点「再试一次」；一直这样，请清理微信的存储空间后再打开小程序。</text>
+    <button class="btn primary block" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+
+  <!-- 确认 -->
+  <view wx:elif="{{state === 'confirm'}}" class="panel">
+    <text class="eyebrow">Confirm</text>
+    <text class="h3">{{choice.title}}</text>
+    <text class="amount num">{{choice.amountText}}</text>
+    <text class="est">{{choice.estimate}}</text>
+    <text wx:if="{{choice.coupons}}" class="est">{{choice.coupons}}</text>
+    <text class="sub fine">赠金、档阶按到账那一刻的规则算，以到账时为准。线上充值不能在小程序里退，有疑问请到前台。</text>
+    <view class="pair">
+      <button class="btn ghost" hover-class="btn-hover" bindtap="onBack">再想想</button>
+      <button class="btn primary" hover-class="btn-hover" bindtap="onConfirm" loading="{{busy}}" disabled="{{busy}}">去支付 {{choice.amountText}}</button>
+    </view>
+  </view>
+
+  <view wx:elif="{{state === 'paying'}}" class="wait">正在打开微信支付…</view>
+
+  <!-- 付完：等门店系统入账 / 结果 -->
+  <view wx:elif="{{state === 'waiting' || state === 'done'}}" class="panel result">
+    <block wx:if="{{state === 'waiting'}}">
+      <text class="eyebrow">Processing</text>
+      <text class="h3">已支付，门店系统入账中</text>
+      <text class="lede">一般几秒就好，请稍等。</text>
+    </block>
+    <block wx:elif="{{order && order.result}}">
+      <text class="eyebrow">Done</text>
+      <text class="h3">充值成功</text>
+      <view class="res">
+        <view class="rs"><text class="k">本金</text><text class="nv num">{{order.result.principal}}</text></view>
+        <view class="rs"><text class="k">赠金</text><text class="nv num">{{order.result.bonus}}</text></view>
+      </view>
+      <text wx:if="{{order.result.label}}" class="est">现在是 {{order.result.label}}</text>
+    </block>
+    <block wx:elif="{{order && order.notice}}">
+      <text class="h3">{{order.status}}</text>
+      <text class="lede">{{order.notice}}</text>
+    </block>
+    <block wx:else>
+      <text class="h3">已支付，门店系统还在入账</text>
+      <text class="lede">到账通知在路上，可以先离开；入账以后在「余额与流水」里能看到。</text>
+    </block>
+    <text wx:if="{{order}}" class="sub fine">充值单号 {{order.orderNo}}</text>
+    <view class="pair" wx:if="{{state === 'done'}}">
+      <button class="btn ghost" hover-class="btn-hover" bindtap="onLedger">看余额与流水</button>
+      <button class="btn primary" hover-class="btn-hover" bindtap="onDone">好的</button>
+    </view>
+  </view>
+
+  <!-- 选 -->
+  <block wx:else>
+    <view class="head">
+      <text class="eyebrow">Top Up</text>
+      <text class="title">会员充值</text>
+      <text wx:if="{{view.rules}}" class="sub">{{view.rules}}</text>
+    </view>
+
+    <view wx:if="{{!view.open}}" class="panel closed">
+      <text class="lede">{{view.notice}}</text>
+    </view>
+
+    <view wx:if="{{view.pending}}" class="panel pend">
+      <text class="eyebrow">Unpaid</text>
+      <text class="h3">有一张待支付的充值单</text>
+      <text class="est"><text class="num">{{view.pending.amount}}</text> · {{view.pending.what}} · {{view.pending.expires}}</text>
+      <view class="pair">
+        <button class="btn ghost" hover-class="btn-hover" bindtap="onCancelPending" disabled="{{busy}}">取消这张单</button>
+        <button class="btn primary" hover-class="btn-hover" bindtap="onContinue" loading="{{busy}}" disabled="{{busy}}">接着付</button>
+      </view>
+    </view>
+
+    <block wx:if="{{view.open && !view.pending}}">
+      <view wx:for="{{view.plans}}" wx:key="planId" class="plan {{item.blocked ? 'off' : ''}}" hover-class="tap" data-id="{{item.planId}}" bindtap="onPlan">
+        <view class="plan-top">
+          <text class="plan-name">{{item.name}}</text>
+          <text class="plan-amt num">{{item.amount}}</text>
+        </view>
+        <text wx:if="{{item.blocked}}" class="plan-meta">{{item.blocked}}</text>
+        <block wx:else>
+          <text class="plan-meta">{{item.bonus}}{{item.bonus && item.label ? ' · ' : ''}}{{item.label}}</text>
+          <text wx:if="{{item.coupons}}" class="plan-meta">{{item.coupons}}</text>
+        </block>
+      </view>
+
+      <view wx:if="{{view.custom}}" class="custom">
+        <text class="eyebrow">Other Amount</text>
+        <view class="custom-row">
+          <text class="cur num">¥</text>
+          <input class="custom-in num" type="number" maxlength="7" placeholder="{{view.custom.hint}}" value="{{customInput}}" bindinput="onCustomInput" />
+          <button class="btn primary" hover-class="btn-hover" bindtap="onCustom" loading="{{busy}}" disabled="{{busy}}">下一步</button>
+        </view>
+        <text wx:if="{{customError}}" class="err">{{customError}}</text>
+      </view>
+
+      <view wx:if="{{!view.plans.length && !view.custom}}" class="wait">店里还没有开放线上可充的金额，请到前台充值</view>
+    </block>
+
+    <text class="sub note">与前台充值同一本账：赠金按充完以后所在档自动算，以到账时为准。{{view.mock ? '这是演示库，付款是模拟的。' : ''}}</text>
+  </block>
+</view>
