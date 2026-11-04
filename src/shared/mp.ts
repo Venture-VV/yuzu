@@ -153,6 +153,8 @@ export interface MpMe {
         availableCoupons: number;
         /** 线上充值开着（第二期 2a）：「我的」页显示「充值」 */
         rechargeOpen: boolean;
+        /** 这张会员卡已合并到另一张（主线 v0.7.26）：请到前台换绑，不显示目标会员（MP25） */
+        merged: boolean;
       })
     | null;
 }

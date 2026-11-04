@@ -296,3 +296,7 @@
   letter-spacing: 0.16em;
   color: var(--muted);
 }
+.merged {
+  margin-top: 28rpx;
+  border-color: var(--wood-4);
+}
