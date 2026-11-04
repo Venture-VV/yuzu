@@ -209,6 +209,9 @@ export const ERP_OP_TYPES = [
   // 次卡（v0.7.28）：售卡、退卡（动的是钱）
   'count_card_sale',
   'count_card_refund',
+  // 平台核销补录（v0.7.28）：补登记、平台打款登记
+  'platform_redemption',
+  'platform_settlement',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -239,6 +242,8 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   member_merge: '合并会员',
   count_card_sale: '售次卡',
   count_card_refund: '退次卡',
+  platform_redemption: '平台核销补登记',
+  platform_settlement: '平台打款登记',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

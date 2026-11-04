@@ -54,6 +54,7 @@ import { registerFloorMapRoutes } from './modules/floormap';
 import { registerUsageRoutes } from './modules/usages';
 import { registerBookingRoutes } from './modules/bookings';
 import { registerCountCardRoutes } from './modules/count-cards';
+import { registerPlatformRoutes } from './modules/platform-redemptions';
 import { registerGuideRoutes } from './modules/guide';
 import { registerLocationRoutes } from './modules/locations';
 import { registerCommissionRoutes } from './modules/commission';
@@ -203,6 +204,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerUsageRoutes(app, deps);
   registerBookingRoutes(app, deps);
   registerCountCardRoutes(app, deps);
+  registerPlatformRoutes(app, deps);
   // 对客导览（v0.7.19）
   registerGuideRoutes(app, deps);
   registerLocationRoutes(app, deps);

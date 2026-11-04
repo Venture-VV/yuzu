@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router';
-import { FilePenLine, Hash, Keyboard, Lock, ReceiptText, Search, ShieldCheck, UserPlus, X } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router';
+import { FilePenLine, Hash, Keyboard, Lock, ReceiptText, Search, ShieldCheck, Store, UserPlus, X } from 'lucide-react';
 import { matchTags, normalizeTagCode, TAG_ZONES, uniqueTagMatch, ZONE_LABELS, type BoardTag, type CheckinResult, type TagZone, type VisitDetail } from '@shared/frontdesk';
 import { useCan, useSession } from '../../lib/session';
 import { CrossDayShiftNotice } from '../shift/ShiftGate';
@@ -36,6 +36,7 @@ export function FrontdeskPage() {
 function FrontdeskBoard() {
   const session = useSession();
   const can = useCan();
+  const navigate = useNavigate();
   const toast = useToast();
   const board = useBoard();
   const refresh = useRefreshFrontdesk();
@@ -250,6 +251,11 @@ function FrontdeskBoard() {
               <Button size="sm" variant="ghost" icon={<ReceiptText className="size-4" />} onClick={() => setDialog({ kind: 'records' })} data-testid="open-checkouts">
                 结账记录
               </Button>
+              {(can('platform.redeem') || can('platform.settle')) && (
+                <Button size="sm" variant="ghost" icon={<Store className="size-4" />} onClick={() => navigate('/platform')} data-testid="open-platform">
+                  平台核销
+                </Button>
+              )}
               <Button size="sm" variant="ghost" icon={<ShieldCheck className="size-4" />} onClick={() => setChecksOpen(true)}>
                 自检
               </Button>

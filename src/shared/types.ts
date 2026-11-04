@@ -379,6 +379,11 @@ export interface SettlementTotals {
    * 升级之前确认的日结快照没有这一项，按 0 补齐
    */
   countCards: import('./count-cards').CountCardDayTotals;
+  /**
+   * 平台核销补录（v0.7.28）：已在平台 App 核销、没有经过前台结账的券（按核销的营业日）。不结账、不算营业额，单列；
+   * 升级之前确认的日结快照没有这一项，按 0 补齐
+   */
+  platformRedemptions: import('./platform').PlatformDayTotals;
 }
 
 export interface SettlementDeposits {

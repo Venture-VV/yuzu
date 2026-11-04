@@ -111,6 +111,11 @@ export type AuditAction =
   | 'count_card_refund'
   | 'count_card_expire'
   | 'count_card_opening'
+  // 平台核销补录（v0.7.28 ⑤）
+  | 'platform_redemption'
+  | 'platform_redemption_void'
+  | 'platform_settlement'
+  | 'platform_settlement_void'
   | 'floorplan_restore'
   | 'floorplan_outline'
   | 'guide_marker_saved'

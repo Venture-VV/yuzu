@@ -79,6 +79,11 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     case 'count_card_sale':
     case 'count_card_refund':
       return d.card && typeof d.card === 'object' ? { refId: d.card.id } : null;
+    // 平台核销补录（v0.7.28）
+    case 'platform_redemption':
+      return d.redemption && typeof d.redemption === 'object' ? { refId: d.redemption.id } : null;
+    case 'platform_settlement':
+      return d.settlement && typeof d.settlement === 'object' ? { refId: d.settlement.id } : null;
   }
 }
 

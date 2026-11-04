@@ -69,6 +69,7 @@ import { CouponCodeInput, couponLines, memberCouponOptions, redeemCoupon, return
 import { memberDiscountPreview, settleMemberDiscount, type MemberDiscountEntry } from '../member-discounts';
 import { memberTicketExtensions } from '../ticket-extensions';
 import { countCardOptions, redeemCountCards, returnCheckoutCountCards } from '../count-cards';
+import { lockPlatformCode, redemptionOfCode } from '../platform-redemptions';
 import { MAX_COUNT_CARD_USES, MAX_COUNT_CARDS_PER_CHECKOUT } from '@shared/count-cards';
 
 // ───────────────────────── 输入 ─────────────────────────
@@ -416,8 +417,13 @@ export async function recordCheckoutPayments(
       INSERT INTO checkout_payments (checkout_id, method, amount, member_id, consumption_id)
       VALUES (${a.checkoutId}, 'wallet', ${w.amount}, ${w.memberId}, ${r.consumptionId})`;
   }
-  // 团购券：同一平台同一券码只能有一笔有效登记
+  // 团购券：同一平台同一券码只能有一笔有效登记；也不能是已在平台核销补登记过的（v0.7.28，先取「平台 + 券码」的咨询锁，与补登记串行）
   for (const cp of coupons) {
+    await lockPlatformCode(tx, cp.platform, cp.code);
+    const registered = await redemptionOfCode(tx, cp.platform, cp.code);
+    if (registered) {
+      throw conflict('COUPON_USED', `${COUPON_PLATFORM_LABELS[cp.platform]}券码 ${cp.code} 已在平台核销补登记过（${registered}），同一张券不能重复使用`, { platform: cp.platform, code: cp.code });
+    }
     const [used] = await tx<{ checkoutNo: string; registeredAt: string }[]>`
       SELECT c.checkout_no, g.registered_at FROM group_buy_coupons g JOIN checkouts c ON c.id = g.checkout_id
       WHERE g.platform = ${cp.platform} AND g.code = ${cp.code} AND g.status = 'active'`;

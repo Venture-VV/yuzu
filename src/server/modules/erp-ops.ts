@@ -16,7 +16,7 @@ import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { conflict, forbidden } from '../lib/errors';
-import { benefitUseOpRef, countCardOpRef, couponOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isCountCardOp, isDeviceOp, isFenced, isMemberOp, memberOpRef, trialOpRef } from '../lib/fences';
+import { benefitUseOpRef, countCardOpRef, couponOpRef, platformOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isCountCardOp, isDeviceOp, isFenced, isMemberOp, isPlatformOp, memberOpRef, trialOpRef } from '../lib/fences';
 import { parse } from '../lib/validate';
 import { setTxTimeouts } from '../lib/tx';
 
@@ -62,6 +62,9 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   // 次卡（v0.7.28）
   count_card_sale: ['countcard.sell'],
   count_card_refund: ['countcard.refund'],
+  // 平台核销补录（v0.7.28）
+  platform_redemption: ['platform.redeem'],
+  platform_settlement: ['platform.settle'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -92,6 +95,8 @@ const READ: Record<ErpOpType, Permission[]> = {
   member_merge: ['member.merge'],
   count_card_sale: ['countcard.sell', 'member.read'],
   count_card_refund: ['countcard.refund'],
+  platform_redemption: ['platform.redeem', 'platform.settle'],
+  platform_settlement: ['platform.settle'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {
@@ -143,6 +148,11 @@ export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise
   // 次卡（v0.7.28）：售卡、退卡的编号记在卡、退卡单上：refId 是那张卡
   if (isCountCardOp(type)) {
     const refId = await countCardOpRef(db, key, type);
+    if (refId !== null) return { found: true, abandoned: false, refId };
+  }
+  // 平台核销补录（v0.7.28）：refId 是那笔补登记、那笔打款登记
+  if (isPlatformOp(type)) {
+    const refId = await platformOpRef(db, key, type);
     if (refId !== null) return { found: true, abandoned: false, refId };
   }
   return { found: false, abandoned: await isFenced(db, key, [type]) };

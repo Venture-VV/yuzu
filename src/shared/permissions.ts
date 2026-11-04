@@ -88,6 +88,10 @@ export const PERMISSIONS = {
   /** 次卡（v0.7.28，N5 待确认）：售卡是收款，前台岗位都能做（与充值一样）；退卡退钱，店主、店总、值班经理 */
   'countcard.sell': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk'] },
   'countcard.refund': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  /** 平台核销补录（v0.7.28，N6 待确认）：前台岗位都能补登记；作废要值班经理以上；平台打款与对账店主、店总 */
+  'platform.redeem': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
+  'platform.void': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  'platform.settle': { roles: ['owner', 'store_manager'] },
   /** 看会员体系看板、到期提醒名单与补充期名单（客户经理按名单联系客人） */
   'member.retention': { roles: ['owner', 'store_manager', 'account_manager'] },
   /** 他店查询：按手机号或会员号查一位会员的档阶与会籍（只读，不含余额与流水） */
@@ -308,6 +312,9 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'member.merge': '合并会员（同一个人的两份档案，写原因）',
   'countcard.sell': '售次卡（现金类收款，记到当班）',
   'countcard.refund': '退次卡（退剩下的次数，按售价折算）',
+  'platform.redeem': '平台核销补登记（已在平台 App 核销、没有结账的券）',
+  'platform.void': '作废平台核销补登记',
+  'platform.settle': '平台打款登记与对账',
   'member.retention': '看会员体系看板与到期提醒名单',
   'member.lookup': '他店查询（按手机号查会员档阶，只读）',
   'benefit.publish': '维护会员权益（导入清单、修改、发布、暂缓）',
@@ -383,7 +390,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   },
   {
     title: '前台手牌与账单',
-    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.refund', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen', 'room.operate', 'room.housekeep', 'booking.manage', 'location.view', 'location.report', 'guide.view'],
+    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.refund', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen', 'room.operate', 'room.housekeep', 'booking.manage', 'platform.redeem', 'platform.void', 'platform.settle', 'location.view', 'location.report', 'guide.view'],
   },
   {
     title: '会员体系',

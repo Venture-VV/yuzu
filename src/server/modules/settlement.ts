@@ -20,6 +20,8 @@ import { loadFrontdeskRules } from './frontdesk/common';
 import { loadSettings } from './settings';
 import { countCardDayTotals } from './count-cards';
 import { EMPTY_COUNT_CARD_TOTALS } from '@shared/count-cards';
+import { platformDayTotals } from './platform-redemptions';
+import { EMPTY_PLATFORM_DAY_TOTALS } from '@shared/platform';
 
 type Pair = { principal: number; bonus: number };
 
@@ -91,6 +93,7 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
     backfill: (await db<{ count: number }[]>`SELECT count(*)::int AS count FROM backfill_entries WHERE business_date = ${date}`)[0]!,
     deposits: await depositTotals(db, date),
     countCards: await countCardDayTotals(db, date),
+    platformRedemptions: await platformDayTotals(db, date),
   };
 }
 
@@ -197,6 +200,8 @@ const withNewSections = (t: SettlementTotals): SettlementTotals => ({
   deposits: t.deposits ?? EMPTY_DEPOSITS,
   // 次卡（v0.7.28）之前确认的快照没有这一项
   countCards: t.countCards ?? EMPTY_COUNT_CARD_TOTALS,
+  // 平台核销补录（v0.7.28）之前确认的快照没有这一项
+  platformRedemptions: t.platformRedemptions ?? EMPTY_PLATFORM_DAY_TOTALS,
 });
 /**
  * 比较「日结后有变动」：快照按 withNewSections 补齐后与此刻的口径比。
@@ -703,6 +708,11 @@ export function settlementCsv(s: SettlementSummary): string {
     ['过期作废', s.countCards.expired.uses, '', `${s.countCards.expired.cards} 张卡过期，没用完的次数作废，不退钱`],
     ...(s.countCards.opening.cards ? [['旧次卡期初', s.countCards.opening.uses, '', `${s.countCards.opening.cards} 张，只记次数，不是收款`]] : []),
     ['当天结束时还剩', s.countCards.outstanding.uses, '', `${s.countCards.outstanding.cards} 张卡`],
+    [],
+    ['平台核销补录（不结账，不算营业额）', '张数', '金额（元）', '说明'],
+    ['补登记（面值）', s.platformRedemptions.count, y(s.platformRedemptions.face), s.platformRedemptions.voidCount ? `另有作废 ${s.platformRedemptions.voidCount} 笔` : '已在平台 App 核销、没有经过前台结账的券'],
+    ...s.platformRedemptions.byPlatform.map((p) => [`  · ${COUPON_PLATFORM_LABELS[p.platform]}`, p.count, y(p.face), `平台应结 ${y(p.settle)}`]),
+    ['平台应结合计', '', y(s.platformRedemptions.settle), '扣佣金后平台应打给门店的，与平台打款对账'],
     [],
     ['余额核对', '本金（元）', '赠金（元）'],
     ['期初余额', y(s.balances.opening.principal), y(s.balances.opening.bonus)],
