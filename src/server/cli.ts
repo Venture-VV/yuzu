@@ -23,6 +23,9 @@
 //   import-count-cards <旧次卡.csv> --operator <店主账号> [--batch 批次备注] [--apply]
 //                                         旧次卡期初（v0.7.28）：每行一位会员的一张卡（手机号或会员号、卡名、能抵的项目与票种、总次数、剩余次数、
 //                                         原售价、到期日），只记次数、不是收款；默认只预览，有一行不对整批不写，加 --apply 才写入
+//   import-member-history <流水.csv> --operator <店主账号> [--source EBC] [--note 备注] [--apply]
+//                                         旧 EBC 逐笔流水只读导入（v0.7.28）：按旧卡号或手机号认会员，认不出的行不导入；默认只预览，
+//                                         加 --apply 才写进只读表（不进正式账），会员详情「旧系统流水」里看；同一份文件只能有一批有效导入
 //   import-legacy <文件.xlsx> --operator <店主账号> [--apply] [--replace 原因]
 //                                         8–10 月旧账只读对照（v0.7.10）：认出是四份原始 Excel 中的哪一份，默认只预览（行数与核验结果），
 //                                         加 --apply 才写进只读表（不进正式账）；这份表已导入过时要 --replace 写原因（旧的作废）
@@ -97,6 +100,8 @@ import { TANGQI_PRICE_LIST_CSV } from './demo/price-list-tangqi-2026-10-27';
 import { importPriceList } from './modules/catalog';
 import { importHandTags } from './modules/frontdesk/tags';
 import { applyOpeningImport, previewOpeningImport } from './modules/opening';
+import { importMemberHistory, previewMemberHistory } from './modules/member-history';
+import { describeHistoryAmount, MEMBER_HISTORY_KIND_LABELS } from '@shared/member-history';
 import { loadSettings } from './modules/settings';
 import { createStaff } from './modules/staff';
 import { assertBackupTarget, backupDirFromEnv, backupLoop, backupPolicyFromEnv, createBackup, verifyBackup } from './ops/backup';
@@ -535,6 +540,40 @@ async function main() {
         );
         console.log(`✓ 已导入，批次 ${report.importNo}：${report.total} 位会员，本金 ${formatYuan(report.principalTotal)}，赠金 ${formatYuan(report.bonusTotal)}。`);
         console.log('请运行 check 核对：期初 + 本日变动 = 期末。');
+        break;
+      }
+      case 'import-member-history': {
+        // 旧 EBC 逐笔流水只读导入（v0.7.28 ⑩）：默认只预览，加 --apply 才写入（真实业务数据，门店环境须店主同意）
+        const file = args.find((a, i) => !a.startsWith('--') && !args[i - 1]?.startsWith('--'));
+        const username = flag(args, 'operator')?.toLowerCase();
+        if (!file || !username) throw new Error('用法：import-member-history <流水.csv> --operator <店主账号> [--source EBC] [--note 备注] [--apply]');
+        await prepareDb(sql, config);
+        const [actor] = await sql<{ id: number; username: string; displayName: string; role: string; active: boolean }[]>`
+          SELECT id, username, display_name, role, active FROM staff WHERE username = ${username}`;
+        if (!actor || !actor.active) throw new Error(`账号「${username}」不存在或已停用`);
+        if (actor.role !== 'owner') throw new Error('旧系统流水导入只能由店主账号经办');
+        const body = { source: flag(args, 'source') ?? 'EBC', fileName: basename(file), note: flag(args, 'note') ?? '', csv: await readImportFile(file) };
+        const deps = { sql, config };
+        const p = await previewMemberHistory(deps, body);
+        console.log(`文件共 ${p.totalRows} 行：认出会员 ${p.matchedRows} 行（${p.memberCount} 位会员；按旧卡号 ${p.byLegacyNo}、按手机号 ${p.byPhone}）· 认不出会员 ${p.unmatched.count} 行（不导入）`);
+        if (p.firstAt) console.log(`时间从 ${p.firstAt.slice(0, 10)} 到 ${p.lastAt!.slice(0, 10)}；${p.byKind.map((k) => `${MEMBER_HISTORY_KIND_LABELS[k.kind]} ${k.count} 笔 ${describeHistoryAmount(k.amount)}`).join('，')}`);
+        for (const u of p.unmatched.lines.slice(0, 20)) console.log(`· 第 ${u.line} 行认不出会员（手机号 ${u.phone || '—'}，旧卡号 ${u.legacyNo || '—'}）`);
+        if (p.duplicateOf) console.log(`✗ 这份文件已经导入过（批次 ${p.duplicateOf}），要重新导入请先在页面上作废那一批`);
+        if (p.errors.length) {
+          for (const e of p.errors.slice(0, 30)) console.log(`✗ 第 ${e.line} 行：${e.message}`);
+          throw new Error(`有 ${p.errors.length} 行格式不对，未导入`);
+        }
+        if (p.duplicateOf) throw new Error('同一份文件不能重复导入');
+        if (!args.includes('--apply')) {
+          console.log('以上为预览，没有写入。确认无误后加 --apply 执行导入（只读，不进正式账）。');
+          break;
+        }
+        const report = await importMemberHistory(
+          deps,
+          { ...body, clientKey: randomUUID() },
+          { actor: { id: actor.id, username: actor.username, displayName: actor.displayName, role: 'owner', duties: [], mustChangePassword: false } },
+        );
+        console.log(`✓ 已导入，批次 ${report.importNo}：${report.matchedRows} 行、${report.memberCount} 位会员；会员详情「旧系统流水」里看。`);
         break;
       }
       case 'import-legacy': {

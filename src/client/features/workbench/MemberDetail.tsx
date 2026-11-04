@@ -18,6 +18,7 @@ import { BenefitsCard } from '../membership/BenefitsCard';
 import { TrialsCard } from '../membership/TrialsCard';
 import { CountCardsCard } from '../membership/CountCardsCard';
 import { MemberCardsCard } from '../membership/MemberCardsCard';
+import { MemberHistoryCard } from '../membership/MemberHistoryCard';
 import { AccountCard } from '../membership/AccountCard';
 
 export function MemberDetail({
@@ -231,6 +232,9 @@ export function MemberDetail({
 
       {/* 账户内券（v0.7.20）：换会员时整块重来（筛选、发券的操作编号都不带到下一位会员） */}
       {can('member.read') && <MemberCouponsCard key={member.id} member={member} />}
+
+      {/* 旧系统流水（v0.7.28）：从旧 EBC 导入的逐笔记录，只读；没有的会员不显示 */}
+      <MemberHistoryCard key={`legacy-history-${member.id}`} member={member} />
 
       {/* 余额记录 */}
       <Card className="p-2">

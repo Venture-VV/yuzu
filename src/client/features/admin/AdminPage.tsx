@@ -78,7 +78,7 @@ export const adminRoutes: RouteObject[] = [
   {
     path: 'opening',
     element: (
-      <AdminPage section="opening" description="旧系统（EBC）会员余额导入为期初，与控制总数比对；导入错误时整批作废。">
+      <AdminPage section="opening" description="旧系统（EBC）会员余额导入为期初，与控制总数比对；导入错误时整批作废。旧系统逐笔流水只读导入，会员详情里看。">
         <OpeningTab />
       </AdminPage>
     ),

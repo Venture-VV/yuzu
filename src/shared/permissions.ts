@@ -311,7 +311,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'ledger.readHistory': '查看历史营业日',
   'ledger.export': '导出流水与日结',
   'settlement.close': '确认日结',
-  'wallet.opening': '导入旧系统会员余额（期初）与作废期初',
+  'wallet.opening': '导入旧系统会员余额（期初）、旧系统逐笔流水，与作废',
   'member.rules': '修改会员规则（档级门槛、赠送比例、周期）',
   'member.adjust': '手动调整会员档阶（写原因）',
   'member.refund': '退储值（要店主或店总当场授权）',

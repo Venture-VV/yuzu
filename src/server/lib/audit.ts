@@ -26,6 +26,8 @@ export type AuditAction =
   | 'bonus_expired'
   | 'opening_imported'
   | 'opening_voided'
+  | 'member_history_imported'
+  | 'member_history_voided'
   | 'export'
   | 'inventory_master_saved'
   | 'inventory_doc'
