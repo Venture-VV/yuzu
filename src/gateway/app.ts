@@ -7,6 +7,8 @@
 //     到账通知 /v1/pay/notify 不要会话、不解析内容，连同微信的四个签名头原样转给 yuzu，按 yuzu 的结果回微信。
 //     网关不放任何支付凭据（MP17）：验签、解密、入账都在 yuzu，网关被攻破也伪造不了到账。
 //   · 线上领券（第二期 2c，docs/MP_COUPONS.md）：/v1/coupon-center、/v1/coupon-claims… 带会话里的 openid 转给 yuzu（发券在 yuzu）。
+//   · 到期提醒（第三期 3a）：/v1/reminders 带会话转发；每隔一会儿向门店取待发的订阅消息、发、回报（src/gateway/reminders.ts）。
+//   · 邀请好友（第三期 3b）：/v1/invites…；好友领取先用手机号快速验证的 code 换手机号，再转给 yuzu（与绑定一样）。
 // 网关不存会员、余额、券、订单；yuzu 返回的错误文字面向顾客，原样转给小程序。
 
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
@@ -75,6 +77,15 @@ const ReminderConsent = z.object({
   templateId: z.string().regex(/^[A-Za-z0-9_-]{10,64}$/, '模板编号不对'),
   bindVersion: z.number('请刷新后再设提醒').int().min(0),
 });
+/** 邀请好友（第三期 3b）：发一个邀请码；好友领取（先用手机号快速验证的 code 换手机号，与绑定一样） */
+const InviteCreate = z.object({ clientKey: z.uuid('操作编号不正确'), bindVersion: z.number('请刷新后再邀请').int().min(0) });
+const InviteClaim = z.object({
+  clientKey: z.uuid('操作编号不正确'),
+  phoneCode: z.string().min(1, '请先验证手机号').max(256),
+  name: z.string().trim().max(32, '姓名最多 32 个字').optional(),
+  bindVersion: z.number('请刷新后再领取').int().min(0),
+});
+const INVITE_CODE = /^[2-9A-HJ-NP-Z]{10}$/;
 /** 微信支付的到账通知：报文主体原样转（门店系统要用原文验签），最多 8 KB */
 const NOTIFY_MAX_BYTES = 8 * 1024;
 
@@ -106,6 +117,8 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
   const couponLimit = new RateLimiter(20);
   // 到期提醒：设提醒每个微信每分钟 20 次
   const reminderLimit = new RateLimiter(20);
+  // 邀请好友：发起、收回每个微信每分钟 20 次；领取要验证手机号，与绑定一样每分钟 10 次
+  const inviteLimit = new RateLimiter(20);
 
   app.addHook('onRequest', async (req) => {
     if (!perIp.take(`ip:${req.ip}`)) throw TOO_MANY();
@@ -305,6 +318,47 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
     const openid = openidOf(req);
     if (!couponLimit.take(`coupon:${openid}`)) throw TOO_MANY();
     return member(reply, 'POST', '/api/mp/coupon-claims/abandon', openid, parse(AbandonInput, req.body));
+  });
+
+  // 邀请好友（第三期 3b）：邀请人看、发、收回；好友看、领取（网关换手机号）、确认作废
+  const inviteCode = (req: FastifyRequest) => {
+    const code = (req.params as { code?: string }).code ?? '';
+    if (!INVITE_CODE.test(code)) throw new GatewayError(404, 'NOT_FOUND', '邀请不存在');
+    return code;
+  };
+  app.get('/v1/invites', async (req, reply) => member(reply, 'GET', '/api/mp/invites', openidOf(req)));
+  app.post('/v1/invites', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!inviteLimit.take(`invite:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/invites', openid, parse(InviteCreate, req.body));
+  });
+  app.post('/v1/invites/claim/abandon', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!bindLimit.take(`bind:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/invites/claim/abandon', openid, parse(AbandonInput, req.body));
+  });
+  app.get('/v1/invites/:code', async (req, reply) => {
+    const openid = openidOf(req);
+    return member(reply, 'GET', `/api/mp/invites/${inviteCode(req)}`, openid);
+  });
+  app.post('/v1/invites/:code/revoke', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!inviteLimit.take(`invite:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', `/api/mp/invites/${inviteCode(req)}/revoke`, openid, {});
+  });
+  app.post('/v1/invites/:code/claim', async (req, reply) => {
+    const openid = openidOf(req);
+    const code = inviteCode(req);
+    if (!bindLimit.take(`bind:${openid}`)) throw TOO_MANY();
+    const { phoneCode, clientKey, name, bindVersion } = parse(InviteClaim, req.body);
+    let phone: string;
+    try {
+      ({ phone } = await wechat.phoneNumber(phoneCode));
+    } catch (error) {
+      if (error instanceof WechatError) throw new GatewayError(400, error.code, error.message);
+      throw error;
+    }
+    return member(reply, 'POST', `/api/mp/invites/${code}/claim`, openid, { clientKey, phone, ...(name ? { name } : {}), bindVersion, mock: wechat.mock });
   });
 
   // 到期提醒（第三期 3a）：能设哪几种、已经设了哪些；设一条（顾客在微信的弹窗里同意以后）

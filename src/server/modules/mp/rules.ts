@@ -3,14 +3,17 @@
 import type { preHandlerAsyncHookHandler } from 'fastify';
 import {
   DEFAULT_MP_COUPON_RULES,
+  DEFAULT_MP_INVITE_RULES,
   DEFAULT_MP_RECHARGE_RULES,
   DEFAULT_MP_REMINDER_RULES,
   DEFAULT_MP_RULES,
   MP_COUPON_RULES_KEY,
+  MP_INVITE_RULES_KEY,
   MP_RECHARGE_RULES_KEY,
   MP_REMINDER_RULES_KEY,
   MP_RULES_KEY,
   type MpCouponRules,
+  type MpInviteRules,
   type MpRechargeRules,
   type MpReminderRules,
   type MpRules,
@@ -39,6 +42,12 @@ export async function loadCouponRules(db: Db): Promise<MpCouponRules> {
 export async function loadReminderRules(db: Db): Promise<MpReminderRules> {
   const [row] = await db<{ value: Partial<MpReminderRules> | null }[]>`SELECT value FROM settings WHERE key = ${MP_REMINDER_RULES_KEY}`;
   return { ...DEFAULT_MP_REMINDER_RULES, ...(row?.value ?? {}) };
+}
+
+/** 邀请好友的设置（第三期 3b，settings 的 mp_invite_rules）：默认关 */
+export async function loadInviteRules(db: Db): Promise<MpInviteRules> {
+  const [row] = await db<{ value: Partial<MpInviteRules> | null }[]>`SELECT value FROM settings WHERE key = ${MP_INVITE_RULES_KEY}`;
+  return { ...DEFAULT_MP_INVITE_RULES, ...(row?.value ?? {}) };
 }
 
 /** 店主在后台「小程序」里开了才对顾客开放（默认关闭）；health 不看开关 */

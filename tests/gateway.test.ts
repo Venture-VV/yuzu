@@ -369,6 +369,47 @@ describe('线上领券（第二期 2c）', () => {
   });
 });
 
+describe('邀请好友（第三期 3b）', () => {
+  it('邀请人发码、好友用手机号快速验证领取：网关换手机号、带会话里的微信转给 yuzu；码不对网关先拒；确认作废照样转', async () => {
+    const saved = await api(ctx.app, ctx.owner, 'PUT', '/api/admin/mp/invites/rules', { enabled: true });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    const inviter = await createMember(ctx, '演示·gw-inviter', '13700006001');
+    const rc = await api(ctx.app, ctx.owner, 'POST', '/api/recharges', {
+      idempotencyKey: randomUUID(),
+      memberId: inviter.id,
+      planId: null,
+      paidAmount: 1_000_000,
+      bonusAmount: 0,
+      paymentMethod: 'cash',
+      paymentConfirmed: true,
+      bonusMode: 'custom',
+    });
+    expect(rc.status, JSON.stringify(rc.body)).toBe(200);
+    const t1 = await login(gw, 'gw-inviter');
+    expect((await authed(gw, t1, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700006001', clientKey: randomUUID(), bindVersion: 0 })).statusCode).toBe(200);
+    const home = await authed(gw, t1, 'GET', '/v1/invites');
+    expect(home.statusCode, home.body).toBe(200);
+    expect(home.json()).toMatchObject({ open: true, option: { allowed: true } });
+    const created = await authed(gw, t1, 'POST', '/v1/invites', { clientKey: randomUUID(), bindVersion: home.json().bindVersion });
+    expect(created.statusCode, created.body).toBe(201);
+    const code = created.json().code as string;
+    expect((await authed(gw, t1, 'GET', '/v1/invites/not-a-code')).statusCode).toBe(404);
+    // 好友：还不是会员，填了姓名领取
+    const t2 = await login(gw, 'gw-friend');
+    const v = await authed(gw, t2, 'GET', `/v1/invites/${code}`);
+    expect(v.statusCode, v.body).toBe(200);
+    expect(v.json()).toMatchObject({ state: 'open', bound: false, mine: false });
+    const claimed = await authed(gw, t2, 'POST', `/v1/invites/${code}/claim`, { clientKey: randomUUID(), phoneCode: 'mock-phone-13700006002', name: '网关好友', bindVersion: v.json().bindVersion });
+    expect(claimed.statusCode, claimed.body).toBe(201);
+    expect(claimed.json()).toMatchObject({ code, bound: true, trial: { status: 'active' } });
+    const [b] = await ctx.sql<{ openid: string; phone: string }[]>`SELECT openid, phone FROM mp_bindings WHERE phone = '13700006002' AND unbound_at IS NULL`;
+    expect(b).toEqual({ openid: 'mock_gw-friend', phone: '13700006002' });
+    const ab = await authed(gw, t2, 'POST', '/v1/invites/claim/abandon', { clientKey: randomUUID() });
+    expect(ab.json()).toEqual({ status: 'abandoned' });
+    expect((await authed(gw, null, 'GET', '/v1/invites')).statusCode).toBe(401);
+  });
+});
+
 describe('到期提醒（第三期 3a）', () => {
   const TPL = 'tplGwCoupon-0123456789abcdefABCD';
   it('能设哪些、设一条：网关带会话里的微信转给 yuzu；没会话拒绝；格式不对网关先拒', async () => {

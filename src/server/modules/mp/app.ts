@@ -9,6 +9,7 @@ import type { AppConfig } from '../../config';
 import type { Sql } from '../../db';
 import { AppError } from '../../lib/errors';
 import { registerMpCouponRoutes } from './coupon-routes';
+import { registerMpInviteRoutes } from './invite-routes';
 import { loadPayRuntime, setActivePay, type PayRuntime } from './pay';
 import { registerMpPublicRoutes } from './public';
 import { sweepRechargeOrders } from './recharge';
@@ -73,6 +74,8 @@ export async function buildMpApp(sql: Sql, config: AppConfig, opts: MpAppOptions
   registerMpCouponRoutes(app, { sql, config });
   // 到期提醒（第三期 3a）：顾客设提醒；网关取待发的消息、回报结果
   registerMpReminderRoutes(app, { sql, config }, opts.clock);
+  // 邀请好友（第三期 3b）：邀请人发邀请码、收回；好友领取（主线的 createTrialInviteFromMp 建临时身份）
+  registerMpInviteRoutes(app, { sql, config });
 
   // 线上充值（第二期 2a）：微信支付的凭据只在门店 yuzu（MP17）；配错了不开线上充值、写日志，门店系统照常启动
   let pay: PayRuntime | null = null;

@@ -157,6 +157,8 @@ export interface MpMe {
         merged: boolean;
         /** 领券中心开着、有可领的券（第二期 2c）：「我的」页显示「领券中心」 */
         couponCenterOpen: boolean;
+        /** 邀请好友开着（第三期 3b）：「我的」页显示「邀请好友」 */
+        inviteOpen: boolean;
       })
     | null;
 }
@@ -289,6 +291,8 @@ export interface MpAdminData {
   couponRules: MpCouponRules;
   /** 到期提醒的设置（第三期 3a）：同上 */
   reminderRules: MpReminderRules;
+  /** 邀请好友的设置（第三期 3b）：同上 */
+  inviteRules: MpInviteRules;
   stores: MpStoreAdmin[];
   banners: MpBannerAdmin[];
   items: MpItemIntroAdmin[];
@@ -825,4 +829,127 @@ export interface MpReminderAdminData {
   lastLeaseAt: string | null;
   /** 最近 50 条消息 */
   recent: MpReminderMessageAdmin[];
+}
+
+// ── 邀请好友（第三期 3b，docs/MP_PHASE3.md 第 2 节，MP30、MP31；接主线 v0.7.28 的 createTrialInviteFromMp）──
+
+/** 邀请好友的设置（settings 的 mp_invite_rules，后台「微信小程序」→「邀请好友」，权限 mp.invite）：默认关 */
+export interface MpInviteRules {
+  enabled: boolean;
+  version: number;
+}
+export const DEFAULT_MP_INVITE_RULES: MpInviteRules = { enabled: false, version: 0 };
+export const MP_INVITE_RULES_KEY = 'mp_invite_rules';
+/** 邀请码几天内有效（MP30） */
+export const MP_INVITE_VALID_DAYS = 7;
+export const MP_INVITE_CODE = /^[2-9A-HJ-NP-Z]{10}$/;
+
+/** open 待领取、used 已领取、revoked 已收回、expired 过期了（7 天没人领） */
+export type MpInviteState = 'open' | 'used' | 'revoked' | 'expired';
+
+/** 好友领到的临时身份（与主线的临时身份一致） */
+export interface MpInviteTrial {
+  label: string;
+  startsOn: string;
+  endsOn: string;
+  /** active 体验中、expired 到期了、converted 转正了、cancelled 撤销了 */
+  status: string;
+}
+
+/** 邀请人看的一份邀请 */
+export interface MpInviteItem {
+  code: string;
+  state: MpInviteState;
+  /** 发起时好友能体验的档阶 */
+  label: string;
+  createdAt: string;
+  expiresAt: string;
+  /** 领了的：好友的名字只露第一个字（「王*」）与体验的情况 */
+  friend: { name: string; trial: MpInviteTrial } | null;
+}
+
+/** 「我的 → 邀请好友」：能不能邀请、好友能体验什么、发出去的邀请 */
+export interface MpInviteHome {
+  open: boolean;
+  /** 没开放、没绑定、会员卡合并或停用时的说明 */
+  notice: string | null;
+  bindVersion: number;
+  option: {
+    allowed: boolean;
+    /** 不能邀请的原因：档级不够、本月次数用完、邀请已经发出去还没人领… */
+    reason: string | null;
+    /** 好友能体验的档阶（「L2 云涧 · 初」）与今天领的话到哪天 */
+    label: string | null;
+    endsOn: string | null;
+    /** 本月已邀请几次、每月几次（不限次数为空）、怎么算（「本月」） */
+    used: number;
+    limit: number | null;
+    limitText: string;
+    /** 发出去还没人领、还在有效期里的（占着本月的次数） */
+    pending: number;
+  } | null;
+  invites: MpInviteItem[];
+}
+
+export interface MpInviteCreated {
+  code: string;
+  label: string;
+  expiresAt: string;
+  /** 同一个编号重提：返回原来那个码 */
+  replayed: boolean;
+}
+
+/** 好友打开分享卡片看到的 */
+export interface MpInviteView {
+  code: string;
+  state: MpInviteState;
+  /** 邀请人的名字只露第一个字 */
+  inviterName: string;
+  label: string;
+  expiresAt: string;
+  /** 打开的是邀请人自己的微信 */
+  mine: boolean;
+  /** 这个微信已经绑定了会员（领的时候验证的手机号要是这位会员的） */
+  bound: boolean;
+  /** 这个微信此刻的绑定状态版本号：领取时带上 */
+  bindVersion: number;
+}
+
+/** 好友领到了 */
+export interface MpInviteClaimed {
+  code: string;
+  trial: MpInviteTrial;
+  /** 这个微信绑上了这位会员（之前绑着的也算）；会员已经绑了别的微信时没绑上 */
+  bound: boolean;
+  /** 没绑上等情况的说明 */
+  notice: string | null;
+  /** 同一个编号重提：返回第一次的结果 */
+  replayed: boolean;
+}
+
+/** 领取结果不确定时确认作废：已经领到了返回那一次，否则登记作废（原请求之后到达也不会生效） */
+export type MpInviteAbandonResult = { status: 'claimed'; claimed: MpInviteClaimed } | { status: 'abandoned' };
+
+// ── 后台：邀请好友（权限 mp.invite）──
+
+export interface MpInviteAdmin {
+  id: number;
+  code: string;
+  state: MpInviteState;
+  createdAt: string;
+  expiresAt: string;
+  inviterId: number;
+  inviterName: string;
+  inviteeId: number | null;
+  inviteeName: string | null;
+  trial: MpInviteTrial | null;
+  usedAt: string | null;
+}
+
+export interface MpInviteAdminData {
+  rules: MpInviteRules;
+  /** 最近 30 天发起的：各状态多少 */
+  stats: Record<MpInviteState, number>;
+  /** 最近 50 份 */
+  recent: MpInviteAdmin[];
 }

@@ -25,7 +25,7 @@ import { saveRuleSetting } from '../../lib/rule-settings';
 import { setTxTimeouts } from '../../lib/tx';
 import { parse } from '../../lib/validate';
 import { loadRechargeRules } from './recharge';
-import { loadCouponRules, loadMpRules, loadReminderRules } from './rules';
+import { loadCouponRules, loadInviteRules, loadMpRules, loadReminderRules } from './rules';
 
 type StoreRow = Omit<MpStoreAdmin, 'latitude' | 'longitude'> & { latitude: string | null; longitude: string | null };
 const toStore = (s: StoreRow): MpStoreAdmin => ({ ...s, latitude: s.latitude === null ? null : Number(s.latitude), longitude: s.longitude === null ? null : Number(s.longitude) });
@@ -45,6 +45,7 @@ export async function mpAdminData(db: Db): Promise<MpAdminData> {
     rechargeRules: await loadRechargeRules(db),
     couponRules: await loadCouponRules(db),
     reminderRules: await loadReminderRules(db),
+    inviteRules: await loadInviteRules(db),
     stores: stores.map(toStore),
     banners,
     items,

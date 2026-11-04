@@ -203,6 +203,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '058_challenge_parking.sql',
   '059_shift_drawers.sql',
   '060_member_history.sql',
+  '061_mp_invites.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

@@ -44,7 +44,7 @@ import { loadSettings } from '../settings';
 import { activePay } from './pay';
 import { mpToday } from './public';
 import { couponCenterOpen } from './coupon-center';
-import { loadRechargeRules } from './rules';
+import { loadInviteRules, loadRechargeRules } from './rules';
 
 /** 网关验证过的小程序用户 */
 export function openidOf(req: FastifyRequest): string {
@@ -90,7 +90,7 @@ export async function bindingStateOf(db: Db, openid: string): Promise<{ binding:
 }
 
 /** 绑定、解绑、确认作废都先取这个微信的这把咨询锁：同一个微信的绑定状态（与版本号）在这把锁里只有一个在改 */
-const lockOpenid = (tx: Db, openid: string) => tx`SELECT pg_advisory_xact_lock(hashtext(${`mp_bind:${openid}`}))`;
+export const lockOpenid = (tx: Db, openid: string) => tx`SELECT pg_advisory_xact_lock(hashtext(${`mp_bind:${openid}`}))`;
 /**
  * 同一把锁的共享模式：线上充值建单读这个微信的有效绑定、写单子时拿着，解绑（排他）插不进来——
  * 解绑之后再扫这条绑定没付的单去关，不会漏掉刚好同时建的那一张（小程序线测试 866ccfa 的 P1）
@@ -185,13 +185,14 @@ export async function getMe(deps: Deps, openid: string): Promise<MpMe> {
   const [m] = await deps.sql<{ memberNo: string; name: string; status: string; principalBalance: number; bonusBalance: number; mergedIntoId: number | null }[]>`
     SELECT member_no, name, status, principal_balance, bonus_balance, merged_into_id FROM members WHERE id = ${b.memberId}`;
   if (!m) throw notFound('会员不存在');
-  const [info, rules, coupons, settings, rechargeRules, couponOpen] = await Promise.all([
+  const [info, rules, coupons, settings, rechargeRules, couponOpen, inviteRules] = await Promise.all([
     memberGradeInfo(deps.sql, b.memberId, today),
     loadMembershipRules(deps.sql),
     memberCoupons(deps.sql, b.memberId, today),
     loadSettings(deps.sql),
     loadRechargeRules(deps.sql),
     couponCenterOpen(deps.sql),
+    loadInviteRules(deps.sql),
   ]);
   const { grade, tier, cycleEnd } = info.state;
   const g: MpGrade = {
@@ -224,6 +225,8 @@ export async function getMe(deps: Deps, openid: string): Promise<MpMe> {
       merged: m.mergedIntoId !== null,
       // 领券中心（第二期 2c）开着、有可领的券：「我的」页显示「领券中心」
       couponCenterOpen: couponOpen,
+      // 邀请好友（第三期 3b）开着：「我的」页显示「邀请好友」（能不能邀请到邀请页再看）
+      inviteOpen: inviteRules.enabled,
     },
   };
 }

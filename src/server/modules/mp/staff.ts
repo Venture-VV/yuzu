@@ -15,6 +15,7 @@ import { activePay } from './pay';
 import { closeUnboundOrders } from './recharge';
 import { rechargeAdminData, resolveHeldOrder, runRecon, saveRechargeRules } from './recharge-admin';
 import { handleRefund, retryRefund } from './refund';
+import { inviteAdminData, saveInviteRules } from './invites';
 import { reminderAdminData, saveReminderRules } from './reminders';
 
 const CodeParam = z.object({ code: z.string().trim().max(32) });
@@ -39,7 +40,7 @@ export function registerMpStaffRoutes(app: FastifyInstance, deps: Deps) {
 
   // 后台「小程序」：维护内容要 mp.content；只管解绑的（值班经理）也能打开看
   const content = guard('mp.content');
-  app.get('/api/admin/mp', { preHandler: guardAny('mp.content', 'mp.unbind', 'mp.recharge', 'mp.coupon', 'mp.reminder') }, async () => mpAdminData(sql));
+  app.get('/api/admin/mp', { preHandler: guardAny('mp.content', 'mp.unbind', 'mp.recharge', 'mp.coupon', 'mp.reminder', 'mp.invite') }, async () => mpAdminData(sql));
   app.put('/api/admin/mp/rules', { preHandler: content }, async (req) => saveMpRules(deps, req.body, ctxOf(req)));
   app.put('/api/admin/mp/stores/:code', { preHandler: content }, async (req) => saveStore(deps, req.params, req.body, ctxOf(req)));
   app.post('/api/admin/mp/images', { preHandler: content, bodyLimit: 1_600_000 }, async (req, reply) => {
@@ -85,4 +86,8 @@ export function registerMpStaffRoutes(app: FastifyInstance, deps: Deps) {
   const reminder = guard('mp.reminder');
   app.get('/api/admin/mp/reminders', { preHandler: reminder }, async () => reminderAdminData(deps));
   app.put('/api/admin/mp/reminders/rules', { preHandler: reminder }, async (req) => saveReminderRules(deps, req.body, ctxOf(req)));
+  // 邀请好友（第三期 3b）：开关，最近的邀请（mp.invite：店主、店总）
+  const invite = guard('mp.invite');
+  app.get('/api/admin/mp/invites', { preHandler: invite }, async () => inviteAdminData(deps));
+  app.put('/api/admin/mp/invites/rules', { preHandler: invite }, async (req) => saveInviteRules(deps, req.body, ctxOf(req)));
 }
