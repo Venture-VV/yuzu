@@ -40,7 +40,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
       - run: npm ci
       - name: pg_dump / pg_restore 用 16 版（与数据库同一大版本，备份测试用）
         run: |
@@ -94,7 +93,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
       - run: npm ci
       - run: npm run build
       - name: 写入合成演示数据（会员 + 库存采购 + 前台手牌 + 结账交班 + 旧账合成样例）
@@ -163,7 +161,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
       - run: npm ci
       - name: 取回三组的结果
         uses: actions/download-artifact@v4
@@ -201,7 +198,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
       - run: npm ci
       - run: npm run build
       - name: 新库：demo-prepare 一次准备完（最后自带一致性自检与演示核对）
@@ -346,7 +342,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
       - name: 找上一发布版本（目标分支上最新的版本标签）
         id: prev
         run: |
@@ -420,8 +415,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: miniprogram/package-lock.json
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
