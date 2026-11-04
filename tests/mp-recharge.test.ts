@@ -114,7 +114,11 @@ const options = async (openid: string) => {
   expect(r.statusCode, r.body).toBe(200);
   return r.json() as MpRechargeOptions;
 };
-const createOrder = (openid: string, body: Record<string, unknown>, clientKey = randomUUID()) => call('POST', '/api/mp/recharge/orders', openid, { clientKey, ...body });
+/** 这个微信现在的绑定状态版本号（充值页上带回来的那个数） */
+const versionOf = async (openid: string) => (await call('GET', '/api/mp/me', openid)).json().bindVersion as number;
+/** 建单：默认带这个微信现在的绑定版本号（body 里给了 bindVersion 的用给的） */
+const createOrder = async (openid: string, body: Record<string, unknown>, clientKey = randomUUID()) =>
+  call('POST', '/api/mp/recharge/orders', openid, { clientKey, bindVersion: await versionOf(openid), ...body });
 const orderOf = async (openid: string, no: string) => (await call('GET', `/api/mp/recharge/orders/${no}`, openid)).json() as MpRechargeOrder;
 const notify = (msg: { headers: unknown; body: string }) =>
   call('POST', '/api/mp/pay/notify', null, { headers: msg.headers, body: Buffer.from(msg.body, 'utf8').toString('base64') });
@@ -377,9 +381,58 @@ describe('解绑、换绑之后的旧充值单（小程序线测试 866ccfa 的 
     await call('POST', `/api/mp/recharge/orders/${again.json().order.orderNo}/cancel`, a.openid, {});
   });
 
+  it('换绑完成以后才到的建单请求（确认时还绑着 A）：门店系统拒绝、不建单，钱不会记到 B 身上；按 B 的版本号重新确认才建单（小程序线测试 #52 的 P1）', async () => {
+    const a = await bound('演示·确认时是 A');
+    // 充值页打开时：这个微信绑着 A，页面拿到的版本号
+    const seen = (await options(a.openid)).bindVersion;
+    expect(seen).toBe(await versionOf(a.openid));
+    // 请求在路上：员工解绑 A，这个微信换绑会员 B
+    await unbind(a.openid);
+    n += 1;
+    const phoneB = `1366600${String(1000 + n)}`;
+    const memberB = await createMember(ctx, '演示·后来换绑的 B', phoneB);
+    await bindPhone(a.openid, phoneB);
+    // 旧请求这时才到：带的是确认时的版本号
+    const key = randomUUID();
+    const late = await createOrder(a.openid, { amount: yuan(600), bindVersion: seen }, key);
+    expect(late.statusCode).toBe(409);
+    expect(late.json().error.code).toBe('BIND_STALE');
+    const [count] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM mp_recharge_orders WHERE client_key = ${key}`;
+    expect(count!.n).toBe(0);
+    expect((await options(a.openid)).pending).toBeNull();
+    // 同一个编号再提一次（原样重提）也一样拒绝
+    expect((await createOrder(a.openid, { amount: yuan(600), bindVersion: seen }, key)).json().error.code).toBe('BIND_STALE');
+    expect(await rechargesOf(a.memberId)).toHaveLength(0);
+    expect(await rechargesOf(memberB.id)).toHaveLength(0);
+    // 顾客回到充值页（看到的是 B）重新确认：按 B 的版本号建单
+    const fresh = await options(a.openid);
+    expect(fresh.bindVersion).toBeGreaterThan(seen);
+    const ok = await createOrder(a.openid, { amount: yuan(600), bindVersion: fresh.bindVersion });
+    expect(ok.statusCode, ok.body).toBe(201);
+    const [o] = await ctx.sql<{ memberId: number }[]>`SELECT member_id FROM mp_recharge_orders WHERE order_no = ${ok.json().order.orderNo}`;
+    expect(o!.memberId).toBe(memberB.id);
+    await call('POST', `/api/mp/recharge/orders/${ok.json().order.orderNo}/cancel`, a.openid, {});
+  });
+
+  it('解绑以后、换绑以前到的旧请求：没绑定，不建单；版本号不对的请求（例如页面没刷新）也不建单', async () => {
+    const a = await bound('演示·解绑后才到');
+    const seen = await versionOf(a.openid);
+    await unbind(a.openid);
+    const r = await createOrder(a.openid, { amount: yuan(600), bindVersion: seen });
+    expect(r.statusCode).toBe(403);
+    expect(r.json().error.code).toBe('MP_NOT_BOUND');
+    const b = await bound('演示·版本号不对');
+    const wrong = await createOrder(b.openid, { amount: yuan(600), bindVersion: (await versionOf(b.openid)) + 1 });
+    expect(wrong.json().error.code).toBe('BIND_STALE');
+    const missing = await call('POST', '/api/mp/recharge/orders', b.openid, { clientKey: randomUUID(), amount: yuan(600) });
+    expect(missing.statusCode).toBe(400);
+    expect(await rechargesOf(a.memberId)).toHaveLength(0);
+  });
+
   it('建单的编号在解绑、换绑之后重提或确认作废：不给旧单、不另建单，提示重新选择', async () => {
     const a = await bound('演示·换绑后重提');
     const key = randomUUID();
+    const v0 = await versionOf(a.openid);
     const c = (await createOrder(a.openid, { amount: yuan(600) }, key)).json();
     await unbind(a.openid);
     const unboundReplay = await createOrder(a.openid, { amount: yuan(600) }, key);
@@ -390,6 +443,8 @@ describe('解绑、换绑之后的旧充值单（小程序线测试 866ccfa 的 
     const phoneB = `1366600${String(1000 + n)}`;
     await createMember(ctx, '演示·重提时的 B', phoneB);
     await bindPhone(a.openid, phoneB);
+    // 原样重提（带当初的版本号）：绑定变过，拒绝；带现在的版本号：编号是之前那条绑定用过的，也拒绝
+    expect((await createOrder(a.openid, { amount: yuan(600), bindVersion: v0 }, key)).json().error.code).toBe('BIND_STALE');
     const reboundReplay = await createOrder(a.openid, { amount: yuan(600) }, key);
     expect(reboundReplay.statusCode).toBe(409);
     expect(reboundReplay.json().error.code).toBe('CLIENT_KEY_REUSED');

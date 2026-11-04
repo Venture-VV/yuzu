@@ -33,7 +33,7 @@ import { parse } from '../../lib/validate';
 import { memberGradeInfo } from '../membership';
 import { loadSettings } from '../settings';
 import { previewOnlineRecharge, rechargeOnline } from '../wallet-online';
-import { activeBinding, lockOpenidShared } from './member';
+import { activeBinding, bindingStateOf, lockOpenidShared } from './member';
 import { loadRechargeRules } from './rules';
 import type { PayRuntime } from './pay';
 import { parseNotification, paymentParams, WxPayError, type WxTransaction } from './wxpay';
@@ -205,7 +205,10 @@ async function usedToday(db: Db, memberId: number, today: string): Promise<numbe
 }
 
 export async function rechargeOptions(deps: Deps, pay: PayRuntime | null, openid: string): Promise<MpRechargeOptions> {
-  const { bindingId, memberId } = await boundMember(deps.sql, openid);
+  // 绑定与版本号用一条语句读（同一个快照）：建单时带回来的版本号与这里看到的会员是同一条绑定
+  const { binding, version: bindVersion } = await bindingStateOf(deps.sql, openid);
+  if (!binding) throw new AppError(403, 'MP_NOT_BOUND', '请先绑定会员');
+  const { id: bindingId, memberId } = binding;
   const rules = await loadRechargeRules(deps.sql);
   const settings = await loadSettings(deps.sql);
   const now = new Date();
@@ -269,6 +272,7 @@ export async function rechargeOptions(deps: Deps, pay: PayRuntime | null, openid
     usedToday: used,
     pending: pendingRow ? await orderView(deps.sql, pendingRow) : null,
     mock: pay?.mode === 'mock',
+    bindVersion,
   };
 }
 
@@ -292,6 +296,8 @@ const CreateInput = z
     planId: z.number().int().positive().nullable().default(null),
     /** 自定义金额（分，整元） */
     amount: z.number().int().positive().nullable().default(null),
+    /** 顾客确认时看到的绑定状态版本号（可充项里的 bindVersion） */
+    bindVersion: z.number('请刷新充值页后再下单').int('请刷新充值页后再下单').min(0, '请刷新充值页后再下单'),
   })
   .refine((v) => (v.planId === null) !== (v.amount === null), '请选择充值套餐或填写金额');
 
@@ -317,7 +323,12 @@ export async function createRechargeOrder(deps: Deps, pay: PayRuntime | null, op
       // 这个微信绑定状态的共享锁（解绑拿排他的）：这里读到的有效绑定到写单、提交之前不会被解绑；
       // 解绑提交之后再扫这条绑定没付的单去关，不会漏掉同时建的这一张（小程序线测试 866ccfa 的 P1）
       await lockOpenidShared(tx, openid);
-      const { bindingId, memberId } = await boundMember(tx, openid);
+      const state = await bindingStateOf(tx, openid);
+      if (!state.binding) throw new AppError(403, 'MP_NOT_BOUND', '请先绑定会员');
+      // 顾客确认时看到的是哪一条绑定：之后解绑、换绑过（版本号变了），这是之前的请求，不再建单——
+      // 否则换绑以后才到的旧请求会给换绑以后的会员建单、付款记到他身上（小程序线测试 #52 的 P1）
+      if (state.version !== input.bindVersion) throw conflict('BIND_STALE', '会员绑定刚变过，这次没有下单，请回到充值页重新确认');
+      const { id: bindingId, memberId } = state.binding;
       const [prev] = await tx<OrderRow[]>`SELECT * FROM mp_recharge_orders WHERE client_key = ${input.clientKey}`;
       if (prev) {
         // 同一个编号重提：只认同一个微信、同一条绑定、同样的内容；解绑、换绑之前下的单不再给这个微信

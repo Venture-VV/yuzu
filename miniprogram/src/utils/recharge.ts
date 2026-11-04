@@ -107,6 +107,11 @@ export interface RechargeChoice {
   planId: number | null;
   /** 自定义金额（分） */
   amount: number | null;
+  /**
+   * 顾客确认时充值页上的绑定状态版本号（可充项里的 bindVersion）：之后解绑、换绑过的，门店系统拒绝这次建单（BIND_STALE），
+   * 不会记到换绑以后的会员上（小程序线测试 #52 的 P1）
+   */
+  bindVersion: number;
 }
 
 export interface RechargePending extends RechargeChoice {
@@ -139,7 +144,16 @@ export function readRechargePending(): PendingRead {
   if (raw === '' || raw === undefined || raw === null) return { state: 'none' };
   const p = raw as Partial<RechargePending>;
   if (typeof p === 'object' && typeof p.clientKey === 'string' && p.clientKey) {
-    return { state: 'pending', pending: { clientKey: p.clientKey, planId: typeof p.planId === 'number' ? p.planId : null, amount: typeof p.amount === 'number' ? p.amount : null, at: Number(p.at) || 0 } };
+    return {
+      state: 'pending',
+      pending: {
+        clientKey: p.clientKey,
+        planId: typeof p.planId === 'number' ? p.planId : null,
+        amount: typeof p.amount === 'number' ? p.amount : null,
+        bindVersion: typeof p.bindVersion === 'number' ? p.bindVersion : -1,
+        at: Number(p.at) || 0,
+      },
+    };
   }
   return { state: 'unreadable' };
 }
@@ -188,11 +202,11 @@ export async function sendCreate(choice: RechargeChoice, clientKey: string): Pro
   const before = readRechargePending();
   if (before.state === 'unreadable') return { kind: 'unreadable' };
   if (before.state === 'pending') return (await resolveRechargePending()) || { kind: 'pending', message: '' };
-  if (!savePending({ clientKey, planId: choice.planId, amount: choice.amount, at: Date.now() })) {
+  if (!savePending({ clientKey, planId: choice.planId, amount: choice.amount, bindVersion: choice.bindVersion, at: Date.now() })) {
     return { kind: 'rejected', code: 'PENDING_STORE_FAILED', message: '手机存储空间不够，这次没有下单，请清理微信的存储空间后再试' };
   }
   try {
-    const created = await member<MpRechargeCreated>('POST', '/v1/recharge/orders', { clientKey, planId: choice.planId, amount: choice.amount });
+    const created = await member<MpRechargeCreated>('POST', '/v1/recharge/orders', { clientKey, planId: choice.planId, amount: choice.amount, bindVersion: choice.bindVersion });
     clearRechargePending();
     return { kind: 'created', created };
   } catch (e) {

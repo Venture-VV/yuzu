@@ -70,6 +70,7 @@ const OPTIONS: MpRechargeOptions = {
   usedToday: 1,
   pending: null,
   mock: false,
+  bindVersion: 1,
 };
 
 describe('充值页的字', () => {
@@ -128,27 +129,39 @@ describe('建单的结果待确认', () => {
   it('手机存不下操作编号：不发请求', async () => {
     const { sent } = installWx({}, { storageBroken: true });
     const m = await load();
-    expect(await m.sendCreate({ planId: 2, amount: null }, KEY)).toMatchObject({ kind: 'rejected', code: 'PENDING_STORE_FAILED' });
+    expect(await m.sendCreate({ planId: 2, amount: null, bindVersion: 1 }, KEY)).toMatchObject({ kind: 'rejected', code: 'PENDING_STORE_FAILED' });
     expect(sent).toEqual([]);
   });
 
   it('建好了、门店系统明确拒绝：删掉待确认记录', async () => {
     let env = installWx({ '/v1/recharge/orders': { status: 201, data: created } });
     let m = await load();
-    expect(await m.sendCreate({ planId: 2, amount: null }, KEY)).toEqual({ kind: 'created', created });
-    expect(env.sent).toEqual([{ path: '/v1/recharge/orders', data: { clientKey: KEY, planId: 2, amount: null } }]);
+    expect(await m.sendCreate({ planId: 2, amount: null, bindVersion: 1 }, KEY)).toEqual({ kind: 'created', created });
+    expect(env.sent).toEqual([{ path: '/v1/recharge/orders', data: { clientKey: KEY, planId: 2, amount: null, bindVersion: 1 } }]);
     expect(env.storage.tq_recharge_pending).toBeUndefined();
 
     env = installWx({ '/v1/recharge/orders': { status: 409, data: { error: { code: 'ORDER_PENDING', message: '还有一张待支付的充值单，请先付完或取消' } } } });
     m = await load();
-    expect(await m.sendCreate({ planId: null, amount: 80000 }, KEY)).toEqual({ kind: 'rejected', code: 'ORDER_PENDING', message: '还有一张待支付的充值单，请先付完或取消' });
+    expect(await m.sendCreate({ planId: null, amount: 80000, bindVersion: 1 }, KEY)).toEqual({ kind: 'rejected', code: 'ORDER_PENDING', message: '还有一张待支付的充值单，请先付完或取消' });
+    expect(env.storage.tq_recharge_pending).toBeUndefined();
+  });
+
+  it('确认之后才解绑、换绑（门店系统回 BIND_STALE）：明确拒绝，删掉待确认记录，回到充值页按现在的会员重新确认', async () => {
+    const env = installWx({ '/v1/recharge/orders': { status: 409, data: { error: { code: 'BIND_STALE', message: '会员绑定刚变过，这次没有下单，请回到充值页重新确认' } } } });
+    const m = await load();
+    expect(await m.sendCreate({ planId: 2, amount: null, bindVersion: 3 }, KEY)).toEqual({
+      kind: 'rejected',
+      code: 'BIND_STALE',
+      message: '会员绑定刚变过，这次没有下单，请回到充值页重新确认',
+    });
+    expect(env.sent).toEqual([{ path: '/v1/recharge/orders', data: { clientKey: KEY, planId: 2, amount: null, bindVersion: 3 } }]);
     expect(env.storage.tq_recharge_pending).toBeUndefined();
   });
 
   it('断网、门店出错：请门店系统作废这个编号；没建就是没建，建了就接着付那张', async () => {
     let env = installWx({ '/v1/recharge/orders': 'fail', '/v1/recharge/abandon': { status: 200, data: { status: 'abandoned' } } });
     let m = await load();
-    expect(await m.sendCreate({ planId: 2, amount: null }, KEY)).toEqual({ kind: 'abandoned' });
+    expect(await m.sendCreate({ planId: 2, amount: null, bindVersion: 1 }, KEY)).toEqual({ kind: 'abandoned' });
     expect(env.sent.map((s) => s.path)).toEqual(['/v1/recharge/orders', '/v1/recharge/abandon']);
     expect(env.sent[1]!.data).toEqual({ clientKey: KEY });
     expect(env.storage.tq_recharge_pending).toBeUndefined();
@@ -158,7 +171,7 @@ describe('建单的结果待确认', () => {
       '/v1/recharge/abandon': { status: 200, data: { status: 'created', order: ORDER } },
     });
     m = await load();
-    expect(await m.sendCreate({ planId: 2, amount: null }, KEY)).toEqual({ kind: 'existing', order: ORDER });
+    expect(await m.sendCreate({ planId: 2, amount: null, bindVersion: 1 }, KEY)).toEqual({ kind: 'existing', order: ORDER });
     expect(env.storage.tq_recharge_pending).toBeUndefined();
   });
 
@@ -166,12 +179,12 @@ describe('建单的结果待确认', () => {
     const storage: Record<string, unknown> = {};
     let env = installWx({ '/v1/recharge/orders': 'fail', '/v1/recharge/abandon': 'fail' }, { storage });
     let m = await load();
-    expect(await m.sendCreate({ planId: 2, amount: null }, KEY)).toMatchObject({ kind: 'pending' });
-    expect(storage.tq_recharge_pending).toMatchObject({ clientKey: KEY, planId: 2, amount: null });
+    expect(await m.sendCreate({ planId: 2, amount: null, bindVersion: 1 }, KEY)).toMatchObject({ kind: 'pending' });
+    expect(storage.tq_recharge_pending).toMatchObject({ clientKey: KEY, planId: 2, amount: null, bindVersion: 1 });
     // 再点下单：不发新的，先确认原来那次
     env = installWx({ '/v1/recharge/orders': { status: 201, data: created }, '/v1/recharge/abandon': 'fail' }, { storage });
     m = await load();
-    expect(await m.sendCreate({ planId: null, amount: 80000 }, 'another-key')).toMatchObject({ kind: 'pending' });
+    expect(await m.sendCreate({ planId: null, amount: 80000, bindVersion: 1 }, 'another-key')).toMatchObject({ kind: 'pending' });
     expect(env.sent.map((s) => s.path)).toEqual(['/v1/recharge/abandon']);
     env = installWx({ '/v1/recharge/abandon': { status: 200, data: { status: 'abandoned' } } }, { storage });
     m = await load();
@@ -185,7 +198,7 @@ describe('建单的结果待确认', () => {
     const readFails = { on: true };
     const env = installWx({ '/v1/recharge/orders': { status: 201, data: created } }, { storage, readFails });
     const m = await load();
-    expect(await m.sendCreate({ planId: 2, amount: null }, 'another-key')).toEqual({ kind: 'unreadable' });
+    expect(await m.sendCreate({ planId: 2, amount: null, bindVersion: 1 }, 'another-key')).toEqual({ kind: 'unreadable' });
     expect(await m.resolveRechargePending()).toEqual({ kind: 'unreadable' });
     expect(env.sent).toEqual([]);
     expect(storage.tq_recharge_pending).toMatchObject({ clientKey: KEY });

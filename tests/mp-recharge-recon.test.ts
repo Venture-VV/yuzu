@@ -70,7 +70,8 @@ async function bound(name: string) {
 }
 /** 下一张单（自定义金额），返回单号 */
 async function order(openid: string, amount: number): Promise<string> {
-  const r = await call('POST', '/api/mp/recharge/orders', openid, { clientKey: randomUUID(), amount });
+  const bindVersion = (await call('GET', '/api/mp/me', openid)).json().bindVersion as number;
+  const r = await call('POST', '/api/mp/recharge/orders', openid, { clientKey: randomUUID(), amount, bindVersion });
   expect(r.statusCode, r.body).toBe(201);
   return r.json().order.orderNo as string;
 }

@@ -275,7 +275,7 @@ describe('线上充值（第二期 2a）', () => {
     expect(opts.json()).toMatchObject({ open: true, mock: true, custom: { maxCents: 1_000_000 } });
     const min = opts.json().custom.minCents as number;
     expect((await authed(gw, token, 'GET', `/v1/recharge/preview?amount=${min}`)).json()).toMatchObject({ amount: min });
-    const created = await authed(gw, token, 'POST', '/v1/recharge/orders', { clientKey: randomUUID(), amount: min });
+    const created = await authed(gw, token, 'POST', '/v1/recharge/orders', { clientKey: randomUUID(), amount: min, bindVersion: opts.json().bindVersion });
     expect(created.statusCode, created.body).toBe(201);
     const no = created.json().order.orderNo as string;
     const [row] = await ctx.sql<{ openid: string }[]>`SELECT openid FROM mp_recharge_orders WHERE order_no = ${no}`;
@@ -285,13 +285,16 @@ describe('线上充值（第二期 2a）', () => {
     expect(paid.json()).toMatchObject({ status: 'paid', result: { principal: min } });
     expect((await authed(gw, token, 'GET', `/v1/recharge/orders/${no}`)).json().status).toBe('paid');
     expect((await authed(gw, null, 'GET', '/v1/recharge')).statusCode).toBe(401);
+    // 不带绑定版本号的建单网关就拒绝（门店系统要比对确认时的绑定）
+    expect((await authed(gw, token, 'POST', '/v1/recharge/orders', { clientKey: randomUUID(), amount: min })).statusCode).toBe(400);
     expect((await authed(gw, token, 'GET', '/v1/recharge/orders/not-an-order')).statusCode).toBe(400);
   });
 
   it('到账通知：不要会话，报文主体与签名头原样转给 yuzu；yuzu 收下回 204，改过一个字的回失败', async () => {
     const token = await bindFor('recharge-b', '13700003002');
-    const min = (await authed(gw, token, 'GET', '/v1/recharge')).json().custom.minCents as number;
-    const no = (await authed(gw, token, 'POST', '/v1/recharge/orders', { clientKey: randomUUID(), amount: min })).json().order.orderNo as string;
+    const opts = (await authed(gw, token, 'GET', '/v1/recharge')).json();
+    const min = opts.custom.minCents as number;
+    const no = (await authed(gw, token, 'POST', '/v1/recharge/orders', { clientKey: randomUUID(), amount: min, bindVersion: opts.bindVersion })).json().order.orderNo as string;
     const msg = wx.pay(no);
     const tampered = await notifyRaw(gw, msg.headers as never, msg.body.replace('支付成功', '支付成功了'));
     expect(tampered.statusCode).toBe(401);

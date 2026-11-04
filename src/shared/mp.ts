@@ -373,6 +373,11 @@ export interface MpRechargeOptions {
   pending: MpRechargeOrder | null;
   /** 模拟微信支付（只在演示库）：小程序点「模拟支付」，不调 wx.requestPayment */
   mock: boolean;
+  /**
+   * 这个微信此刻的绑定状态版本号（与 MpMe.bindVersion 同一个数）：建单时带上。顾客在这一页看到、确认的是这一条绑定下的会员；
+   * 之后解绑、换绑过（版本号变了），晚到的建单请求门店系统拒绝（BIND_STALE），不会记到换绑以后的会员上（小程序线测试 #52 的 P1）
+   */
+  bindVersion: number;
 }
 
 /** wx.requestPayment 的参数 */
