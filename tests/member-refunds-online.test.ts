@@ -155,6 +155,32 @@ describe('线上充值那一行的原路退回', () => {
     expect((await listOnlineRefundLines(ctx.sql)).map((x) => x.memberId)).not.toContain(m);
   });
 
+  it('升级前已有线上退储值、已日结：旧快照没有「其中退线上充值」，升级后不误报「有变动」；真实变化照样报（测试会话 fa2dc12 的 P2）', async () => {
+    const m = (await createMember(ctx, '旧日结的线上会员', '19988880003')).id;
+    await online(m, yuan(100), 'WX4200000001202611049003');
+    const q = await plan(m);
+    const g = await grant(m, q.amount);
+    const r = await refund(m, body(q, g, [{ ref: 'WXR-OLD-1' }]));
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const date = (r.body.refund as MemberRefundDetail).businessDate;
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/settlements/${date}/close`, { note: '升级前确认' })).status).toBe(200);
+    const read = async () => (await api(ctx.app, ctx.owner, 'GET', `/api/settlements/${date}`)).body;
+    expect((await read()).closed.changedSinceClose).toBe(false);
+
+    // 做成 v0.7.26 确认时的快照：没有 memberRefund.online（此刻按同一批单据算出来的不是 0）
+    await ctx.sql`UPDATE daily_settlements SET snapshot = snapshot #- '{memberRefund,online}' WHERE business_date = ${date}`;
+    const [snap] = await ctx.sql<{ hasOnline: boolean }[]>`
+      SELECT (snapshot -> 'memberRefund') ? 'online' AS has_online FROM daily_settlements WHERE business_date = ${date}`;
+    expect(snap!.hasOnline).toBe(false);
+    const now = await read();
+    expect(now.memberRefund.online.count).toBeGreaterThan(0);
+    expect(now.closed.changedSinceClose).toBe(false);
+
+    // 真实的账务变化照样报「有变动」
+    await counter(m, yuan(200), 'wechat');
+    expect((await read()).closed.changedSinceClose).toBe(true);
+  });
+
   it('数据库兜底：交给门店系统的行只能是充值、微信、不带单号；自检照常全过', async () => {
     const checks = await consistencyChecks(ctx.sql, ctx.config.timezone);
     expect(checks.filter((c) => !c.ok)).toEqual([]);

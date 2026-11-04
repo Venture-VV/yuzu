@@ -11,7 +11,8 @@
 - **退储值的页面与账**：会员详情「退储值」线上那一行可选「门店系统原路退回 / 已在商户平台退过」，没开时提示去小程序的商户平台退；退过的储值写明。日结「储值退回」单列「其中退线上充值（小程序）」（从小程序的商户号退，其中交给门店系统的多少），之前确认的日结快照按 0 补齐、不误报；异常清单与对账包 `11-储值退回.csv` 写明「门店系统原路退回（小程序）」。
 - **仓库**：#49 带进 main 的 `node_modules` 软链接（`../yuzu/node_modules`，在目录名是 yuzu 的检出里指向自己）拿掉，`.gitignore` 改成 `node_modules`（连软链接一起忽略）。Docker 构建与 CI 不受影响。
 - **其他**：系统账号「小程序」挪到 `src/server/modules/system-staff.ts`（`wallet-online` 照旧导出）。
-- **测试**：新增 `tests/mp-claim-coupon.test.ts`（6 项）、`tests/member-refunds-online.test.ts`（5 项）、`tests/upgrade-mp-claim-refund-route.test.ts`（1 项）；升级用例的迁移清单加 `049`。
+- **测试会话预检的修正**（`fa2dc12` 的 P2）：v0.7.26 已经日结、当天有线上充值退储值的，升级后不再误报「日结后有变动」——旧快照没有「其中退线上充值」这一分项时两边都不比（它只是已有数字的拆分，真实变化照样体现在张数、合计与按方式的分项上）；加了回归用例。
+- **测试**：新增 `tests/mp-claim-coupon.test.ts`（6 项）、`tests/member-refunds-online.test.ts`（6 项）、`tests/upgrade-mp-claim-refund-route.test.ts`（1 项）；升级用例的迁移清单加 `049`。
 
 ## v0.7.26 · 会员体系收尾：储值退回、线上收款入口、停用 / 换号 / 合并、同行优惠
 

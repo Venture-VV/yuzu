@@ -193,7 +193,17 @@ const withNewSections = (t: SettlementTotals): SettlementTotals => ({
   backfill: t.backfill ?? { count: 0 },
   deposits: t.deposits ?? EMPTY_DEPOSITS,
 });
-const sameTotals = (snapshot: SettlementTotals, now: SettlementTotals) => canonical(withNewSections(snapshot)) === canonical(now);
+/**
+ * 比较「日结后有变动」：快照按 withNewSections 补齐后与此刻的口径比。
+ * 只是把已有数字拆出来的分项，旧快照里没有时两边都不比（拿此刻的值补上），免得升级后误报；真实的账务变化照样体现在
+ * 张数、合计与按方式的分项上。目前是储值退回里的「其中退线上充值」（v0.7.27）：v0.7.26 就有线上充值的退储值，
+ * 补 0 会与按同一批单据重新算出的数字对不上（测试会话在 fa2dc12 上报的 P2）
+ */
+const sameTotals = (snapshot: SettlementTotals, now: SettlementTotals) => {
+  const old = withNewSections(snapshot);
+  if (!snapshot.memberRefund?.online && now.memberRefund.online) old.memberRefund = { ...old.memberRefund, online: now.memberRefund.online };
+  return canonical(old) === canonical(now);
+};
 
 const ANOMALY_LABELS: Record<SettlementAnomaly['kind'], string> = {
   reversal: '撤销',
