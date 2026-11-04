@@ -1,6 +1,8 @@
 // 浴票延迟（v0.7.25 续，docs/MEMBERSHIP_P3.md 第 4 节，迁移 045）：会员的门票在「门票跳档宽限」之上多给几分钟不跳档。
-//   · QY-004 导入为「浴票延迟」类、草稿、没有分钟数：不填分钟数不能发布；分钟数 1–240；不能登记使用（结账时自动算）；
-//   · 起点 L1·尊（会员文档），按会员现在的档阶取一行（不相加）；体验中的临时身份取高的；非会员、档阶不够的、暂缓后都不算；
+//   · QY-004 导入为「浴票延迟」类、草稿，按默认预填（v0.7.26，M50：L1·初 起，初阶 30、享阶 60、尊阶 90 分钟）；
+//     起点的分钟数清空就不能发布；分钟数 1–240；不能登记使用（结账时自动算）；
+//   · 这个文件按自己的梯度测：起点 L1·尊（会员文档原文）30 分钟、L2·初 起 60、L3·初 起 90；按会员现在的档阶取一行（不相加）；
+//     体验中的临时身份取高的；非会员、档阶不够的、暂缓后都不算；
 //   · 结账核对、结账、手牌详情、看板的门票估算同一算法；结账单记下延迟的分钟数与权益，结账记录显示；
 //   · 结账核对之后浴票延迟变了（暂缓、档阶变了），门票金额跟着变，按 PRICE_CHANGED 请员工重新核对；
 //   · 合并结账只给会员本人的手牌；自检照常全过。
@@ -8,7 +10,15 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { minutesText, quantityText, ticketExtensionFor, type Benefit, type BenefitCatalog, type MemberBenefits } from '../src/shared/benefits';
+import {
+  minutesText,
+  quantityText,
+  TICKET_EXTENSION_DEFAULT_ROWS,
+  ticketExtensionFor,
+  type Benefit,
+  type BenefitCatalog,
+  type MemberBenefits,
+} from '../src/shared/benefits';
 import type { CheckoutPreview } from '../src/shared/checkout';
 import type { VisitDetail } from '../src/shared/frontdesk';
 import { shiftDate } from '../src/shared/labels';
@@ -130,23 +140,28 @@ describe('浴票延迟的规则（共用）', () => {
 });
 
 describe('QY-004 浴票延迟（后台「会员权益」）', () => {
-  it('导入为浴票延迟、草稿、不预填分钟数；不填分钟数不能发布；分钟数 1–240；不能登记使用', async () => {
+  it('导入为浴票延迟、草稿，按默认预填（L1·初 起，初阶 30、享阶 60、尊阶 90 分钟）；起点没有分钟数不能发布；分钟数 1–240；不能登记使用', async () => {
     const q = await byCode('QY-004');
-    expect(q).toMatchObject({ category: 'extension', status: 'draft', quantity: null, startLabel: 'L1·尊', period: 'none', tierQuantities: [] });
+    expect(q).toMatchObject({ category: 'extension', status: 'draft', quantity: 30, startLabel: 'L1·初', period: 'none' });
+    expect(q.tierQuantities).toEqual([...TICKET_EXTENSION_DEFAULT_ROWS]);
+    // 起点的分钟数清空（各档阶表还在）就不能发布
+    await edit('QY-004', { quantity: null });
     const no = await setStatus('QY-004', 'published');
     expect(no.status).toBe(422);
     expect(no.body.error.message).toContain('请填写起点多给几分钟不跳档');
     for (const bad of [0, 241]) expect((await editRaw('QY-004', { quantity: bad })).status, String(bad)).toBe(400);
     expect((await editRaw('QY-004', { quantity: 30, tierQuantities: [{ grade: 2, tier: 0, quantity: 241 }] })).status).toBe(400);
-    // 起点 L1·尊 30 分钟、L2·初 起 60 分钟、L3·初 起 90 分钟（演示用的梯度，店主另定）
+    // 这个文件按自己的梯度测：起点改回会员文档的 L1·尊 30 分钟、L2·初 起 60 分钟、L3·初 起 90 分钟
     const saved = await edit('QY-004', {
+      startGrade: 1,
+      startTier: 2,
       quantity: 30,
       tierQuantities: [
         { grade: 2, tier: 0, quantity: 60 },
         { grade: 3, tier: 0, quantity: 90 },
       ],
     });
-    expect(saved).toMatchObject({ category: 'extension', quantity: 30, period: 'none' });
+    expect(saved).toMatchObject({ category: 'extension', quantity: 30, period: 'none', startLabel: 'L1·尊' });
     expect((await setStatus('QY-004', 'published')).status).toBe(200);
 
     const m = await member('能享延迟的会员', { grade: 1, tier: 2 });

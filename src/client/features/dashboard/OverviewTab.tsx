@@ -56,6 +56,11 @@ export function OverviewTab() {
               </Kpi>
               <Kpi icon={<Banknote className="size-4" />} label="会员充值实收" tone="lake" delta={{ now: d.kpis.rechargePaid, prev: d.prev.rechargePaid, format: yuan }}>
                 <Money cents={d.kpis.rechargePaid} /> <span className="text-[13px] font-semibold text-ink-3">· {d.kpis.rechargeCount} 笔</span>
+                {d.kpis.memberRefundCount > 0 && (
+                  <span className="block text-[12px] font-semibold text-ink-3">
+                    退储值 −<Money cents={d.kpis.memberRefund} /> · {d.kpis.memberRefundCount} 张
+                  </span>
+                )}
               </Kpi>
               <Kpi icon={<Wallet className="size-4" />} label="储值消费" delta={{ now: d.kpis.walletConsumed, prev: d.prev.walletConsumed, format: yuan }}>
                 <Money cents={d.kpis.walletConsumed} />

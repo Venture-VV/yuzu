@@ -18,6 +18,7 @@ export const ANOMALY_LABELS: Record<SettlementAnomaly['kind'], string> = {
   backfill: '补录',
   refund: '退款单',
   refund_void: '作废退款单',
+  member_refund: '储值退回',
 };
 
 /**

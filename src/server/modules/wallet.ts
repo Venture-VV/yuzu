@@ -195,7 +195,7 @@ export async function getRecharge(db: Db, id: number): Promise<RechargeDoc> {
   const [row] = await db<RechargeDoc[]>`
     SELECT r.id, r.doc_no, r.member_id, r.plan_id, r.plan_name, r.paid_amount, r.bonus_amount, r.payment_method,
            r.payment_ref, r.note, r.business_date, s.display_name AS operator_name, r.created_at,
-           a.display_name AS over_limit_approver_name, r.bonus_expires_at
+           a.display_name AS over_limit_approver_name, r.bonus_expires_at, r.channel
     FROM recharges r JOIN staff s ON s.id = r.operator_id LEFT JOIN staff a ON a.id = r.over_limit_approved_by
     WHERE r.id = ${id}`;
   if (!row) throw notFound('充值单不存在');

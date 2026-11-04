@@ -113,7 +113,7 @@ export function registerErpRoutes(app: FastifyInstance, deps: Deps) {
         from: r.from,
         to: r.to,
         days: r.days,
-        kpis: { receivable: k.receivable, discount: k.discount, coupon: k.coupon, memberDiscount: k.memberDiscount, refund: k.refund, net: k.net, guests: k.guests, checkouts: k.checkouts, perGuest: k.perGuest, rechargePaid: k.rechargePaid },
+        kpis: { receivable: k.receivable, discount: k.discount, coupon: k.coupon, memberDiscount: k.memberDiscount, refund: k.refund, net: k.net, guests: k.guests, checkouts: k.checkouts, perGuest: k.perGuest, rechargePaid: k.rechargePaid, memberRefund: k.memberRefund },
         trend: r.trend,
         byMethod: r.byMethod,
         departments: r.departments,

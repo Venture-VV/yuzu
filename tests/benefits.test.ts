@@ -7,7 +7,16 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { BENEFIT_CATALOG, periodEnd, type Benefit, type BenefitCatalog, type MemberBenefits } from '../src/shared/benefits';
+import {
+  BENEFIT_CATALOG,
+  benefitEligible,
+  benefitQuantity,
+  periodEnd,
+  TICKET_EXTENSION_DEFAULT_ROWS,
+  type Benefit,
+  type BenefitCatalog,
+  type MemberBenefits,
+} from '../src/shared/benefits';
 import { businessDateOf } from '../src/shared/business-date';
 import type { CouponTemplate, MemberCoupons } from '../src/shared/coupons';
 import { shiftDate } from '../src/shared/labels';
@@ -149,7 +158,28 @@ describe('权益清单', () => {
     expect(c.items.find((b) => b.code === 'QY-005')).toMatchObject({ category: 'coupon', period: 'year', quantity: 1, startLabel: 'L1·初' });
     expect(c.items.find((b) => b.code === 'QY-052')).toMatchObject({ category: 'event', events: ['grade_up', 'tier_up'], startLabel: 'L0·会员' });
     expect(c.items.find((b) => b.code === 'P021')).toMatchObject({ startGrade: null, startLabel: '未配置' });
-    expect(c.items.find((b) => b.code === 'QY-004')).toMatchObject({ category: 'extension', quantity: null, startGrade: 1, startTier: 2, content: '浴票延迟：初阶30分钟、享阶1小时、尊阶1.5—2小时。' });
+    // QY-004 浴票延迟（v0.7.26，M50 店主 11-04 定按默认）：从 L1·初 起 30 分钟，每一档初阶 30、享阶 60、尊阶 90 分钟；内容按原文，仍是草稿
+    const qy004 = c.items.find((b) => b.code === 'QY-004')!;
+    expect(qy004).toMatchObject({
+      category: 'extension',
+      status: 'draft',
+      version: 1,
+      quantity: 30,
+      startGrade: 1,
+      startTier: 0,
+      startLabel: 'L1·初',
+      content: '浴票延迟：初阶30分钟、享阶1小时、尊阶1.5—2小时。',
+    });
+    expect(qy004.tierQuantities).toEqual([...TICKET_EXTENSION_DEFAULT_ROWS]);
+    expect(qy004.tierQuantities).toHaveLength(17);
+    // 按会员现在的档阶取一行（不相加）：L0 不享；L1–L6 每一档 初 30、享 60、尊 90
+    expect(benefitEligible(qy004, 0, null)).toBe(false);
+    for (let grade = 1; grade <= 6; grade += 1) {
+      for (const [tier, minutes] of [30, 60, 90].entries()) {
+        expect(benefitEligible(qy004, grade, tier), `L${grade}·${tier}`).toBe(true);
+        expect(benefitQuantity(qy004, grade, tier), `L${grade}·${tier}`).toBe(minutes);
+      }
+    }
   });
 
   it('发布要条件齐全：券类要券模板；折扣类要适用明细与折扣（QY-011 按会员文档预填）；没配置起点的不能发布；版本号对不上拒绝', async () => {

@@ -28,6 +28,10 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
   const byMethod = await db<{ method: PaymentMethod; count: number; amount: number }[]>`
     SELECT payment_method AS method, count(*) AS count, sum(paid_amount) AS amount
     FROM recharges WHERE business_date = ${date} GROUP BY payment_method ORDER BY payment_method`;
+  // 线上（小程序，v0.7.26）：已含在上面，单列；不进交班
+  const [online] = await db<{ count: number; paid: number; bonus: number }[]>`
+    SELECT count(*)::int AS count, coalesce(sum(paid_amount), 0)::bigint AS paid, coalesce(sum(bonus_amount), 0)::bigint AS bonus
+    FROM recharges WHERE business_date = ${date} AND channel = 'mp'`;
   const [cs] = await db<SettlementTotals['consume'][]>`
     SELECT count(*) AS count, coalesce(sum(total_amount), 0) AS total,
            coalesce(sum(principal_amount), 0) AS principal, coalesce(sum(bonus_amount), 0) AS bonus,
@@ -50,15 +54,24 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
         - coalesce(sum(b.bonus) FILTER (WHERE b.void_business_date = ${date}), 0) AS bonus
     FROM opening_balances b JOIN opening_imports i ON i.id = b.import_id
     WHERE b.principal + b.bonus > 0 AND (i.business_date = ${date} OR b.void_business_date = ${date})`;
+  // 储值退回（v0.7.26）：当天的退储值单，退的本金按退款方式、扣回的赠金（不能作废，没有作废的）
+  const [mr] = await db<{ count: number; principal: number; bonus: number }[]>`
+    SELECT count(*)::int AS count, coalesce(sum(principal), 0)::bigint AS principal, coalesce(sum(bonus), 0)::bigint AS bonus
+    FROM member_refunds WHERE business_date = ${date}`;
+  const mrByMethod = await db<{ method: PaymentMethod; count: number; amount: number }[]>`
+    SELECT l.method, count(DISTINCT r.id)::int AS count, sum(l.amount)::bigint AS amount
+    FROM member_refund_lines l JOIN member_refunds r ON r.id = l.refund_id
+    WHERE r.business_date = ${date} GROUP BY l.method ORDER BY l.method`;
   const [net] = await db<Pair[]>`
     SELECT coalesce(sum(principal_delta), 0) AS principal, coalesce(sum(bonus_delta), 0) AS bonus
     FROM ledger_entries WHERE business_date = ${date}`;
   return {
-    recharge: { count: rc!.count, paid: rc!.paid, bonus: rc!.bonus, byMethod },
+    recharge: { count: rc!.count, paid: rc!.paid, bonus: rc!.bonus, byMethod, online: online! },
     consume: cs!,
     reversal: rv!,
     expiry: ex!,
     opening: op!,
+    memberRefund: { count: mr!.count, principal: Number(mr!.principal), bonus: Number(mr!.bonus), byMethod: mrByMethod.map((m) => ({ ...m, amount: Number(m.amount) })) },
     net: net!,
     business: await businessTotals(db, date),
     backfill: (await db<{ count: number }[]>`SELECT count(*)::int AS count FROM backfill_entries WHERE business_date = ${date}`)[0]!,
@@ -155,8 +168,12 @@ function canonical(value: unknown): string {
 /** 确认日结时保存的快照可能早于新的口径（例如赠金过期，Batch 2.4c）：缺少的口径按 0 补齐再比较，不误报「日结后有变动」 */
 const withNewSections = (t: SettlementTotals): SettlementTotals => ({
   ...t,
+  // 线上（小程序，v0.7.26）之前确认的快照没有这一项
+  recharge: { ...t.recharge, online: t.recharge.online ?? { count: 0, paid: 0, bonus: 0 } },
   expiry: t.expiry ?? { count: 0, bonus: 0 },
   opening: t.opening ?? { count: 0, voidCount: 0, principal: 0, bonus: 0 },
+  // 储值退回（v0.7.26）之前确认的快照没有这一项
+  memberRefund: t.memberRefund ?? { count: 0, principal: 0, bonus: 0, byMethod: [] },
   // 退款单（v0.7.20）之前确认的快照没有 refunds
   business: t.business ? { ...t.business, refunds: t.business.refunds ?? EMPTY_REFUNDS } : EMPTY_BUSINESS,
   backfill: t.backfill ?? { count: 0 },
@@ -180,6 +197,7 @@ const ANOMALY_LABELS: Record<SettlementAnomaly['kind'], string> = {
   backfill: '补录',
   refund: '退款单',
   refund_void: '作废退款单',
+  member_refund: '储值退回',
 };
 const pairText = (p: Pair) => `本金 ${formatYuan(p.principal)} / 赠金 ${formatYuan(p.bonus)}`;
 /** 补录隔了多久：90 → 1.5 小时 */
@@ -251,8 +269,8 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
            OR r.amount <> (SELECT coalesce(sum(amount), 0) FROM refund_payments WHERE refund_id = r.id))`;
 
   const docDelta = {
-    principal: totals.recharge.paid - totals.consume.principal + totals.reversal.principal + totals.opening.principal,
-    bonus: totals.recharge.bonus - totals.consume.bonus + totals.reversal.bonus - totals.expiry.bonus + totals.opening.bonus,
+    principal: totals.recharge.paid - totals.consume.principal + totals.reversal.principal + totals.opening.principal - totals.memberRefund.principal,
+    bonus: totals.recharge.bonus - totals.consume.bonus + totals.reversal.bonus - totals.expiry.bonus + totals.opening.bonus - totals.memberRefund.bonus,
   };
   const checks: SettlementCheck[] = [
     {
@@ -418,6 +436,26 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
       });
     }
   }
+  // 储值退回（v0.7.26）：每一张都列出来（退的本金、扣回的赠金、按什么方式退、谁办谁批）
+  const memberRefunds = await db<{
+    refundNo: string; createdAt: string; memberName: string; principal: number; bonus: number; reason: string; staffName: string; approverName: string;
+    pays: { method: PaymentMethod; amount: number; ref: string }[];
+  }[]>`
+    SELECT r.refund_no, r.created_at, m.name AS member_name, r.principal, r.bonus, r.reason, s.display_name AS staff_name, a.display_name AS approver_name,
+           (SELECT json_agg(json_build_object('method', l.method, 'amount', l.amount, 'ref', l.ref) ORDER BY l.id) FROM member_refund_lines l WHERE l.refund_id = r.id) AS pays
+    FROM member_refunds r JOIN members m ON m.id = r.member_id JOIN staff s ON s.id = r.operator_id JOIN staff a ON a.id = r.approved_by
+    WHERE r.business_date = ${date} ORDER BY r.id`;
+  for (const r of memberRefunds) {
+    const pays = r.pays.map((p) => `${PAYMENT_METHOD_LABELS[p.method]} ${formatYuan(p.amount)}${p.ref ? `（${p.ref}）` : ''}`).join('、');
+    anomalies.push({
+      kind: 'member_refund',
+      at: r.createdAt,
+      docNo: r.refundNo,
+      memberName: r.memberName,
+      amount: Number(r.principal),
+      description: `储值退回 · ${pays}${Number(r.bonus) ? ` · 扣回赠金 ${formatYuan(Number(r.bonus))}` : ''} · ${r.reason} · 经办 ${r.staffName}，${r.approverName}当场授权`,
+    });
+  }
   // 前台少收与更正（R1.2，店主 2026-10-29 签认）：优惠 / 免单、降低票种或免票、接待超过时限后撤销误开的牌、作废明细
   const discounts = await db<{ checkoutNo: string; createdAt: string; amount: number; reason: string; operatorName: string; approverName: string; status: string }[]>`
     SELECT c.checkout_no, c.created_at, p.amount, p.ref AS reason, s.display_name AS operator_name, ap.display_name AS approver_name, c.status
@@ -573,6 +611,7 @@ export function settlementCsv(s: SettlementSummary): string {
     ['项目', '笔数', '金额（元）', '说明'],
     ['充值实收', s.recharge.count, y(s.recharge.paid), '实际收款，等额计入本金'],
     ...s.recharge.byMethod.map((m) => [`  · ${PAYMENT_METHOD_LABELS[m.method]}`, m.count, y(m.amount), '']),
+    ...(s.recharge.online?.count ? [['  · 其中线上（小程序）', s.recharge.online.count, y(s.recharge.online.paid), '微信支付到账，不进交班、不算哪个钱箱']] : []),
     ['赠金发放', s.recharge.count, y(s.recharge.bonus), '随充值赠送，不是收款'],
     ['储值消费合计', s.consume.count, y(s.consume.total), `其中已撤销 ${s.consume.reversedCount} 笔`],
     ['  · 扣本金', '', y(s.consume.principal), ''],
@@ -584,6 +623,9 @@ export function settlementCsv(s: SettlementSummary): string {
     ['期初导入（净额）', s.opening.count, y(s.opening.principal + s.opening.bonus), `旧系统余额迁入，不是收款；作废 ${s.opening.voidCount} 笔`],
     ['  · 期初本金', '', y(s.opening.principal), ''],
     ['  · 期初赠金', '', y(s.opening.bonus), ''],
+    ['储值退回（本金）', s.memberRefund.count, s.memberRefund.principal ? '-' + y(s.memberRefund.principal) : y(0), '会员退储值，按原收款方式退回，不是营业额'],
+    ...s.memberRefund.byMethod.map((m) => [`  · 退${PAYMENT_METHOD_LABELS[m.method]}`, m.count, '-' + y(m.amount), m.method === 'cash' ? '现金从钱箱退' : '商户后台原路退回']),
+    ['  · 扣回赠金', '', s.memberRefund.bonus ? '-' + y(s.memberRefund.bonus) : y(0), '赠金扣回，不退钱'],
     [],
     ['营业口径（前台结账）', '笔数', '金额（元）', '说明'],
     ['结账', s.business.checkouts.count, y(s.business.checkouts.total), '当天结账的账单合计（含门票）'],
