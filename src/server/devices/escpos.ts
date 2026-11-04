@@ -1,7 +1,7 @@
 // 网口打印的指令（v0.7.21，docs/HARDWARE.md 第 2 节）：ESC/POS（小票机、爱普生标签机）与 TSPL（芯烨标签机）。
 //
 // 中文按 GB18030 编码：用 Node 自带的 GB18030 解码表反查（不加依赖）；表里没有的字（四字节区的生僻字、表情）打「?」。
-// 只做测试页、测试标签需要的指令；业务单据的版式后置（见设计稿「这一版不做」）。
+// v0.7.21 做了测试页、测试标签需要的指令；业务单据（结账单、退款单、交班表、日结单）的版式在 slips.ts（v0.7.28）。
 
 import type { DeviceErrorCode } from '@shared/devices';
 
@@ -32,7 +32,13 @@ function gb18030Table(): Map<string, [number, number]> {
   return table;
 }
 
-/** 文字按 GB18030 编码：ASCII 原样，汉字与全角标点两个字节，表里没有的打「?」 */
+/**
+ * 双字节区里没有、单据上常用的符号，换成双字节区里长得一样的（v0.7.28）：中文版打印机按 GBK 打汉字、不认 GB18030 的四字节编码，
+ * 「¥」（半角人民币符号）、「−」（减号）、「✓」「✗」原样编码都会打成「?」。显示宽度不变（都按全角算）。
+ */
+const GB_SUBSTITUTES: Record<string, string> = { '¥': '￥', '−': '－', '✓': '√', '✔': '√', '✗': '×', '✘': '×' };
+
+/** 文字按 GB18030 编码：ASCII 原样，汉字与全角标点两个字节，表里没有的换成长得一样的、还没有的打「?」 */
 export function encodeGb18030(text: string): number[] {
   const table = gb18030Table();
   const out: number[] = [];
@@ -42,7 +48,8 @@ export function encodeGb18030(text: string): number[] {
       out.push(code);
       continue;
     }
-    const pair = table.get(ch);
+    const sub = GB_SUBSTITUTES[ch];
+    const pair = table.get(ch) ?? (sub ? table.get(sub) : undefined);
     if (pair) out.push(pair[0], pair[1]);
     else out.push(0x3f);
   }

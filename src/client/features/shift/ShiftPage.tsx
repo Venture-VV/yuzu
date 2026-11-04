@@ -13,6 +13,7 @@ import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, MoneyInput, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { PrintButton } from '../print/PrintButton';
+import { NetPrintButton } from '../print/NetPrintButton';
 import { CrossDayShiftNotice, shiftKeys, StartShiftForm, useCurrentShift } from './ShiftGate';
 
 // 交班（店主 #11，2026-10-29 签认）：开班登记备用金 → 当班期间系统按本人经办的结账与充值汇总 → 交班时实点现金，记下长款 / 短款。
@@ -331,6 +332,7 @@ function ShiftRow({ s }: { s: ShiftRecord }) {
           <PrintButton path={`/print/shift/${s.id}`} size="sm" testId="shift-print">
             {s.status === 'closed' ? '打印交班表' : '打印预览'}
           </PrintButton>
+          <NetPrintButton doc={{ type: 'shift', id: s.id }} docName={s.status === 'closed' ? '交班表' : '交班表（预览）'} size="sm" testId="shift-netprint" />
         </div>
       )}
     </li>

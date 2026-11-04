@@ -8,7 +8,7 @@ import { sweepExpiredBonus } from './modules/bonus';
 import { sweepBookings } from './modules/bookings';
 import { expireCountCards } from './modules/count-cards';
 import { issueBirthdayCoupons } from './modules/coupons';
-import { checkDevicesOnce, recoverJobs } from './modules/devices';
+import { checkDevicesOnce, recoverJobs, resumeWaitingJobs } from './modules/devices';
 import { ensureMembershipLive, runMembershipDaily } from './modules/membership';
 import { runBenefitsDaily } from './modules/benefits';
 import { HEARTBEAT_INTERVAL_MS } from '@shared/devices';
@@ -117,11 +117,14 @@ async function main() {
   await sweep();
   const sweeper = setInterval(() => void sweep(), 60_000);
 
-  // 硬件连接（v0.7.21）：每 2 秒查一次设备（网口心跳、终端上报超时）；打印任务的恢复在开端口之前做过了
+  // 硬件连接（v0.7.21）：每 2 秒查一次设备（网口心跳、终端上报超时）；打印任务的恢复在开端口之前做过了。
+  // 断网打印队列（v0.7.28）：每轮心跳之后，恢复在线的打印机把等它的单子改回排队补打，等太久的不再打
   let deviceCheck: Promise<void> | null = null;
   const deviceTimer = setInterval(() => {
     if (deviceCheck) return;
     deviceCheck = checkDevicesOnce({ sql })
+      .then(() => resumeWaitingJobs({ sql, config }, { log: deviceLog }))
+      .then(() => undefined)
       .catch((error) => app.log.error({ err: error }, '设备心跳失败，2 秒后重试'))
       .finally(() => {
         deviceCheck = null;

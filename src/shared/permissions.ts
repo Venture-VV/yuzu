@@ -13,6 +13,7 @@
 // v0.7.19 新增「看对客导览」（区域导览图与大屏轮播，没有经营数据），默认所有岗位，待确认。
 // v0.7.20 新增「开退款单」（离店后部分退款）与券的三项权限（维护券模板与规则、发券给会员、作废券），默认值待确认。
 // v0.7.21 新增设备的三项权限（看设备状态、测试打印、维护设备；飞书需求 RQ-001），默认值待确认。
+// v0.7.28 新增「打印单据到小票机」（业务单据网口打印与断网打印队列，N7），默认前台岗位，待确认。
 // v0.7.23 会员体系 v2 第一期：新增「修改会员规则」「手动调整会员档阶」「看会员体系看板与到期提醒」「他店查询」，
 // 以及岗位「他店查询」（另一家店的同事只读查会员档阶，docs/MEMBERSHIP.md 第 8、11 节），默认值待确认。
 // v0.7.24 会员体系 v2 第二期：新增「维护会员权益」（导入本店权益清单、修改、发布、暂缓）与「登记权益使用」（docs/BENEFITS.md），默认值待确认。
@@ -215,6 +216,11 @@ export const PERMISSIONS = {
   /** 维护设备（v0.7.21，待确认：店主、店总）：设备登记、按采购清单导入、启用停用 */
   'device.manage': { roles: ['owner', 'store_manager'] },
   /**
+   * 打印单据到小票机（v0.7.28，N7 待确认：前台岗位）：结账单、退款单、交班表、日结单直接打到网口小票机，断网时排队、恢复后补打；
+   * 还要能看那张单据（与浏览器打印同一套权限）
+   */
+  'print.network': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
+  /**
    * 维护小程序内容（小程序线，MP7，待确认：店主、店总）：门店信息、首页轮播、项目介绍、对顾客开放的开关。
    * 原定也给客户经理，但客户经理不进后台（v0.6.0），先不给；要给客户经理须先让他们能进后台只看这一项（MP7 待店主定）
    */
@@ -372,6 +378,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'device.view': '看设备状态（一屏看全部设备、终端上报）',
   'device.test': '测试打印（打印机、标签机）',
   'device.manage': '维护设备（登记、按采购清单导入、启用停用）',
+  'print.network': '打印单据到小票机（结账单、退款单、交班表、日结单；断网时排队，恢复后补打）',
   'mp.content': '维护小程序内容（门店信息、首页轮播、项目介绍、开关）',
   'mp.unbind': '解绑会员的微信（换手机号、换微信）',
   'mp.recharge': '小程序线上充值：设置，处理已付款没能自动入账的单子',
@@ -397,7 +404,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
     items: ['member.rules', 'member.adjust', 'member.retention', 'member.lookup', 'benefit.publish', 'benefit.use', 'member.refund', 'member.status', 'member.phone', 'member.merge', 'countcard.sell', 'countcard.refund'],
   },
   { title: '券与会员权益', items: ['coupon.manage', 'coupon.issue', 'coupon.void'] },
-  { title: '设备', items: ['device.view', 'device.test', 'device.manage'] },
+  { title: '设备', items: ['device.view', 'device.test', 'device.manage', 'print.network'] },
   { title: '微信小程序', items: ['mp.content', 'mp.unbind', 'mp.recharge'] },
   {
     title: 'ERP（库存、采购、货款、费用、营业数据）',

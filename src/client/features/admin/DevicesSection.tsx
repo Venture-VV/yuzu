@@ -427,11 +427,14 @@ function JobsAndEvents() {
             {jobs.data!.map((j) => (
               <li key={j.id} className="flex flex-wrap items-baseline justify-between gap-2" data-testid={`device-job-${j.id}`}>
                 <span>
-                  <span className="font-mono text-[12px] text-ink-3">#{j.id}</span> {j.deviceName} · {DEVICE_JOB_KIND_LABELS[j.kind]}
+                  <span className="font-mono text-[12px] text-ink-3">#{j.id}</span> {j.deviceName} · {j.docLabel ?? DEVICE_JOB_KIND_LABELS[j.kind]}
                   {j.errorCode && <span className="text-clay"> · {DEVICE_ERROR_LABELS[j.errorCode]}</span>}
+                  {j.status === 'waiting' && j.waitCode && <span className="text-ink-3"> · {DEVICE_ERROR_LABELS[j.waitCode]}</span>}
+                  {j.firstWaitedAt && j.status === 'done' && <span className="text-ink-3"> · 恢复后补打</span>}
                 </span>
                 <span className="text-[12px] text-ink-3">
-                  {DEVICE_JOB_STATUS_LABELS[j.status]} · {j.createdByName} · {formatDateTime(j.createdAt)}
+                  {DEVICE_JOB_STATUS_LABELS[j.status]}
+                  {j.canceledByName ? `（${j.canceledByName}）` : ''} · {j.createdByName} · {formatDateTime(j.createdAt)}
                 </span>
               </li>
             ))}

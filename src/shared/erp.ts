@@ -212,6 +212,8 @@ export const ERP_OP_TYPES = [
   // 平台核销补录（v0.7.28）：补登记、平台打款登记
   'platform_redemption',
   'platform_settlement',
+  // 业务单据打到小票机（v0.7.28）
+  'doc_print',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -244,6 +246,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   count_card_refund: '退次卡',
   platform_redemption: '平台核销补登记',
   platform_settlement: '平台打款登记',
+  doc_print: '打印单据',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

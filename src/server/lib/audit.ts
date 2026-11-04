@@ -135,6 +135,8 @@ export type AuditAction =
   | 'device_enabled'
   | 'devices_imported'
   | 'device_job_created'
+  // 取消排队、等打印机恢复的打印任务（v0.7.28）
+  | 'device_job_canceled'
   // 会员体系 v2（v0.7.23）：已有会员上线定档、手动调整档阶、他店查询
   | 'membership_live'
   | 'member_grade_adjusted'

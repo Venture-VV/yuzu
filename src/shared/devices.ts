@@ -70,6 +70,8 @@ export const DEVICE_ERROR_CODES = [
   'BRIDGE_OFFLINE',
   'BRIDGE_PROTOCOL',
   'READ_FAILED',
+  // v0.7.28 断网打印队列：等打印机恢复超过时限，不再打
+  'DEVICE_WAIT_EXPIRED',
 ] as const;
 export type DeviceErrorCode = (typeof DEVICE_ERROR_CODES)[number];
 export const DEVICE_ERROR_LABELS: Record<DeviceErrorCode, string> = {
@@ -89,6 +91,7 @@ export const DEVICE_ERROR_LABELS: Record<DeviceErrorCode, string> = {
   BRIDGE_OFFLINE: '终端的设备服务没连上',
   BRIDGE_PROTOCOL: '设备服务的报文不对（版本不符或字段缺失）',
   READ_FAILED: '读卡或扫码失败',
+  DEVICE_WAIT_EXPIRED: '等打印机恢复超过 30 分钟还没恢复，没有再打（恢复后请重新打印）',
 };
 export const isDeviceErrorCode = (v: unknown): v is DeviceErrorCode => typeof v === 'string' && (DEVICE_ERROR_CODES as readonly string[]).includes(v);
 
@@ -185,12 +188,37 @@ export interface DeviceOverview {
   checkedAt: string;
 }
 
-export const DEVICE_JOB_KINDS = ['test_page', 'label_test'] as const;
+/** 打印任务的内容：测试页、测试标签（v0.7.21），业务单据（v0.7.28：结账单、退款单、交班表、日结单） */
+export const DEVICE_JOB_KINDS = ['test_page', 'label_test', 'checkout_slip', 'refund_slip', 'shift_slip', 'settlement_slip'] as const;
 export type DeviceJobKind = (typeof DEVICE_JOB_KINDS)[number];
-export const DEVICE_JOB_KIND_LABELS: Record<DeviceJobKind, string> = { test_page: '测试页', label_test: '测试标签' };
-export const DEVICE_JOB_STATUSES = ['queued', 'sending', 'done', 'failed'] as const;
+/** 业务单据（v0.7.28）：提交时排好内容；打印机离线、故障或连不上时进「等打印机恢复」，恢复后自动补打 */
+export const DOC_JOB_KINDS = ['checkout_slip', 'refund_slip', 'shift_slip', 'settlement_slip'] as const;
+export type DocJobKind = (typeof DOC_JOB_KINDS)[number];
+export const isDocJobKind = (k: string): k is DocJobKind => (DOC_JOB_KINDS as readonly string[]).includes(k);
+export const DEVICE_JOB_KIND_LABELS: Record<DeviceJobKind, string> = {
+  test_page: '测试页',
+  label_test: '测试标签',
+  checkout_slip: '结账单',
+  refund_slip: '退款单',
+  shift_slip: '交班表',
+  settlement_slip: '日结单',
+};
+export const DEVICE_JOB_STATUSES = ['queued', 'sending', 'done', 'failed', 'waiting', 'canceled'] as const;
 export type DeviceJobStatus = (typeof DEVICE_JOB_STATUSES)[number];
-export const DEVICE_JOB_STATUS_LABELS: Record<DeviceJobStatus, string> = { queued: '排队', sending: '发送中', done: '完成', failed: '失败' };
+export const DEVICE_JOB_STATUS_LABELS: Record<DeviceJobStatus, string> = {
+  queued: '排队',
+  sending: '发送中',
+  done: '完成',
+  failed: '失败',
+  waiting: '等打印机恢复',
+  canceled: '已取消',
+};
+/** 还没结束的打印任务（可以取消的是排队与等打印机恢复的） */
+export const OPEN_JOB_STATUSES: readonly DeviceJobStatus[] = ['queued', 'sending', 'waiting'];
+/** 断网打印队列（v0.7.28，N7 待确认）：业务单据等打印机恢复最多这么久，过了不再打（免得几个小时后突然打出一堆旧单） */
+export const PRINT_WAIT_MAX_MS = 30 * 60_000;
+/** 业务单据内容的上限（字节） */
+export const PRINT_PAYLOAD_MAX_BYTES = 65_536;
 
 export interface DeviceJob {
   id: number;
@@ -202,7 +230,15 @@ export interface DeviceJob {
   attempts: number;
   errorCode: DeviceErrorCode | null;
   errorMessage: string | null;
+  /** 业务单据（v0.7.28）：哪张单据（如「结账单 A8071」）；测试页、测试标签为 null */
+  docLabel: string | null;
+  /** 第一次进「等打印机恢复」的时间（之后补打的单子末尾注明补打）；没等过为 null */
+  firstWaitedAt: string | null;
+  /** 在等什么（最近一次：离线、缺纸、开盖、连不上……） */
+  waitCode: DeviceErrorCode | null;
+  createdById: number;
   createdByName: string;
+  canceledByName: string | null;
   createdAt: string;
   finishedAt: string | null;
 }

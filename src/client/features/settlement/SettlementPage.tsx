@@ -34,6 +34,7 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, ConfirmCheck, Field, Notice, PendingBadge, SectionTitle, Skeleton, Textarea } from '../../components/ui';
 import { PrintButton } from '../print/PrintButton';
+import { NetPrintButton } from '../print/NetPrintButton';
 import { ANOMALY_LABELS, receivedByMethod } from './summary';
 
 export function SettlementPage() {
@@ -59,6 +60,7 @@ export function SettlementPage() {
                 打印
               </PrintButton>
             )}
+            {s.data && <NetPrintButton doc={{ type: 'settlement', date }} docName="日结单（80mm 汇总）" size="sm" testId="settlement-netprint" />}
             {can('ledger.export') && (
               <Button size="sm" variant="secondary" icon={<Download className="size-4" />} onClick={() => downloadUrl(`/api/settlements/${date}/export`)}>
                 导出

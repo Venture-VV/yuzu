@@ -79,6 +79,8 @@ export const FENCED_OPS = [
   // 平台核销补录（v0.7.28，迁移 055）：补登记、打款登记；编号记在各自的行上（client_key）
   'platform_redemption',
   'platform_settlement',
+  // 业务单据打到小票机（v0.7.28，迁移 056）：编号记在打印任务上（device_jobs.client_key）
+  'doc_print',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -149,11 +151,11 @@ export async function couponOpRef(db: Db, key: string, opType: CouponOp): Promis
   return rows[0] ? Number(rows[0].id) : null;
 }
 
-const DEVICE_OPS = ['device_create', 'device_job'] as const;
+const DEVICE_OPS = ['device_create', 'device_job', 'doc_print'] as const;
 type DeviceOp = (typeof DEVICE_OPS)[number];
 export const isDeviceOp = (op: string): op is DeviceOp => (DEVICE_OPS as readonly string[]).includes(op);
 
-/** 硬件连接（v0.7.21）的操作编号记在设备、打印任务上：查到时返回那一台设备、那个任务的编号 */
+/** 硬件连接（v0.7.21）的操作编号记在设备、打印任务上（v0.7.28 起打印单据也是打印任务）：查到时返回那一台设备、那个任务的编号 */
 export async function deviceOpRef(db: Db, key: string, opType: DeviceOp): Promise<number | null> {
   const rows =
     opType === 'device_create'

@@ -31,6 +31,7 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Input, Notice, Select, Skeleton, Textarea } from '../../components/ui';
 import { PrintButton } from '../print/PrintButton';
+import { NetPrintButton } from '../print/NetPrintButton';
 import { CloseStayById } from '../rooms/CloseStayDialog';
 import { EndUsageById } from '../rooms/UsageDialogs';
 import { SHIFT_ERRORS, shiftKeys, ShiftGate, StartShiftForm, useShiftReady } from '../shift/ShiftGate';
@@ -217,6 +218,7 @@ export function CheckoutDialog({
             <PrintButton path={`/print/checkout/${result.id}`} size="lg" testId="checkout-print">
               打印结账单
             </PrintButton>
+            <NetPrintButton doc={{ type: 'checkout', id: result.id }} size="lg" testId="checkout-netprint" />
             <Button variant="primary" size="lg" onClick={() => onDone(result)} data-testid="checkout-finish">
               完成
             </Button>
@@ -863,9 +865,12 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
       ) : (
         <>
           <CheckoutReceipt detail={d} />
-          <PrintButton path={`/print/checkout/${d.id}`} testId="checkout-reprint">
-            打印结账单
-          </PrintButton>
+          <div className="flex flex-wrap gap-2">
+            <PrintButton path={`/print/checkout/${d.id}`} testId="checkout-reprint">
+              打印结账单
+            </PrintButton>
+            <NetPrintButton doc={{ type: 'checkout', id: d.id }} testId="checkout-renetprint" />
+          </div>
           <RefundsList refunds={d.refunds ?? []} onChanged={() => void detail.refetch()} />
           {d.status === 'completed' && can('frontdesk.refund') && !voiding && !showRefund && (
             <Button variant="secondary" icon={<Undo2 className="size-4" />} onClick={() => setRefunding(true)} data-testid="checkout-refund">

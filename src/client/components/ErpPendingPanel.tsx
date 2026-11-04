@@ -51,6 +51,7 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     // 硬件连接（v0.7.21）：登记设备返回那台设备，打印任务返回那个任务
     case 'device_create':
     case 'device_job':
+    case 'doc_print':
       return typeof d.id === 'number' ? { refId: d.id } : null;
     case 'coupon_issue':
       return typeof d.issueId === 'number' ? { refId: d.issueId } : null;

@@ -65,6 +65,8 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   // 平台核销补录（v0.7.28）
   platform_redemption: ['platform.redeem'],
   platform_settlement: ['platform.settle'],
+  // 业务单据打到小票机（v0.7.28）
+  doc_print: ['print.network'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -97,6 +99,7 @@ const READ: Record<ErpOpType, Permission[]> = {
   count_card_refund: ['countcard.refund'],
   platform_redemption: ['platform.redeem', 'platform.settle'],
   platform_settlement: ['platform.settle'],
+  doc_print: ['print.network'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {
