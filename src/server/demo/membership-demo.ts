@@ -4,6 +4,10 @@
 //     得到「将到期（30 天内，进到期提醒名单）」「在补充期」「刚降档」三种状态（状态变化记录完整，自检一致）；
 //   · 本店权益清单：导入（编号已有的跳过）；还没人动过的（草稿、版本 1）发布 4 项——按摩/足浴项目券（每月 1 张，L3 起 2 张）、
 //     首充礼、会员专属通道（每月 4 次）、跨店余额通用；然后跑一次自动发放，够格的会员收到本月的券。
+// v0.7.25 起另有一步「会员折扣与邀请体验」（单独一个标记，已经准备过会员体系块的演示库也会补上）：
+//   · 发布 QY-011「派对房及包房折扣」（导入时预填的客房房费 L3 7.5 折、L4 6.5 折、L5 5.5 折、L6 5 折；还没人动过的才发布）；
+//   · 「演示会员·邀请人」今天充值 5 万到 L4，邀请「演示会员·体验中」（还不是会员，当场建档）体验 L3·初 7 天。
+//   会员折扣的结账单不预先做（会改动场景块客房的房态）：用「演示会员·邀请人」开牌、入住客房再结账，结账对话框自动带上 6.5 折。
 // 试用、正式环境拒绝（红线），没有绕过开关；已有的会员（手机号已登记）、改过的权益都不动。
 
 import { randomUUID } from 'node:crypto';
@@ -14,6 +18,7 @@ import type { AppConfig } from '../config';
 import type { Sql } from '../db';
 import type { Actor } from '../lib/context';
 import { importCatalog, runBenefitsDaily, setBenefitStatus, updateBenefit } from '../modules/benefits';
+import { createTrial } from '../modules/member-trials';
 import { createTemplate } from '../modules/coupons';
 import { createMember } from '../modules/members';
 import { loadMembershipRules, runMembershipDaily } from '../modules/membership';
@@ -183,4 +188,120 @@ export async function membershipDemoState(sql: Sql, timeZone: string): Promise<M
   }
   const published = (await sql<{ code: string }[]>`SELECT code FROM benefits WHERE status = 'published' AND code IN ${sql(PUBLISH.map((p) => p.code))} ORDER BY code`).map((r) => r.code);
   return { members, published, monthCoupons };
+}
+
+// ───────────────────────── 会员折扣与邀请体验（v0.7.25） ─────────────────────────
+
+export const MEMBERSHIP_P3_DEMO_KEY = 'demo_membership_p3';
+
+/** 邀请人（今天充值到 L4）与受邀人（还不是会员，邀请时当场建档） */
+export const TRIAL_DEMO = {
+  inviter: { name: '演示会员·邀请人', phone: '19900009004', paid: 50_000_00 },
+  invitee: { name: '演示会员·体验中', phone: '19900009005' },
+} as const;
+
+export async function seedMembershipTrialDemo(sql: Sql, config: AppConfig, opts: { now?: Date } = {}): Promise<MembershipDemoResult> {
+  if (config.env === 'production' || config.env === 'trial') {
+    throw new Error(`当前是${config.env === 'trial' ? '试用' : '正式'}环境，禁止写入会员体系演示数据。请另建独立的演示库（APP_ENV=development）再执行。`);
+  }
+  const [marker] = await sql`SELECT 1 FROM settings WHERE key = ${MEMBERSHIP_P3_DEMO_KEY}`;
+  if (marker) return { skipped: true, done: [], notes: [] };
+  const staff = await sql<{ id: number; username: string; displayName: string; active: boolean }[]>`
+    SELECT id, username, display_name, active FROM staff WHERE username IN ('linlan', 'xiaozhou')`;
+  const ownerRow = staff.find((s) => s.username === 'linlan' && s.active);
+  const clerkRow = staff.find((s) => s.username === 'xiaozhou' && s.active);
+  if (!ownerRow || !clerkRow) throw new Error('会员体系演示要用演示账号 linlan（店主）与 xiaozhou（前台），请先执行 seed-demo 与 seed-frontdesk-demo');
+  const actor = (r: typeof ownerRow, role: 'owner' | 'clerk'): Actor => ({ id: Number(r.id), username: r.username, displayName: r.displayName, role, duties: [], mustChangePassword: false });
+  const owner = actor(ownerRow, 'owner');
+  const clerk = actor(clerkRow, 'clerk');
+  const deps = { sql, config };
+  const now = opts.now ?? new Date();
+  const { businessDayStartHour } = await loadSettings(sql);
+  const today = businessDateOf(now, config.timezone, businessDayStartHour);
+  const done: string[] = [];
+  const notes: string[] = [];
+
+  // ── QY-011 包房折扣：还没人动过的（草稿、版本 1）按导入时预填的折扣发布 ──
+  await importCatalog(sql, owner.id);
+  const [qy011] = await sql<{ id: number; name: string; status: string; version: number }[]>`SELECT id, name, status, version FROM benefits WHERE code = 'QY-011'`;
+  if (qy011 && qy011.status === 'draft' && qy011.version === 1) {
+    await setBenefitStatus(deps, Number(qy011.id), { expectedVersion: qy011.version, status: 'published' }, { actor: owner, at: now });
+    done.push(`发布 QY-011 ${qy011.name}（客房房费 L3 7.5 折、L4 6.5 折、L5 5.5 折、L6 5 折）`);
+  } else if (qy011) {
+    notes.push(`QY-011 ${qy011.name} 已经有人改过或发布过，没有动`);
+  }
+
+  // ── 邀请人：今天充值 5 万到 L4 ──
+  const rules = await loadMembershipRules(sql);
+  let inviterId: number | null = null;
+  const [existingInviter] = await sql<{ id: number }[]>`SELECT id FROM members WHERE phone = ${TRIAL_DEMO.inviter.phone}`;
+  if (existingInviter) notes.push(`手机号 ${TRIAL_DEMO.inviter.phone} 已经有会员，没有建「${TRIAL_DEMO.inviter.name}」`);
+  else {
+    await withShiftOptional(sql, config, async () => {
+      const created = await createMember(sql, { name: TRIAL_DEMO.inviter.name, phone: TRIAL_DEMO.inviter.phone }, { actor: clerk }, { enforceRequired: false });
+      await sql`UPDATE members SET is_synthetic = true WHERE id = ${created.id}`;
+      const outcome = rechargeOutcome(rules, 0 as Grade, 0, TRIAL_DEMO.inviter.paid);
+      await recharge(
+        deps,
+        {
+          idempotencyKey: randomUUID(),
+          memberId: created.id,
+          planId: null,
+          paidAmount: TRIAL_DEMO.inviter.paid,
+          bonusAmount: outcome.bonusCents,
+          paymentMethod: 'wechat',
+          paymentRef: '演示',
+          note: '会员体系演示：邀请人充值',
+          paymentConfirmed: true,
+        },
+        { actor: clerk, at: now },
+      );
+      inviterId = created.id;
+    });
+    done.push(`${TRIAL_DEMO.inviter.name}：今天充值 ${TRIAL_DEMO.inviter.paid / 100} 元（L4）`);
+  }
+
+  // ── 邀请体验：受邀人还不是会员，当场建档 ──
+  const [existingInvitee] = await sql<{ id: number }[]>`SELECT id FROM members WHERE phone = ${TRIAL_DEMO.invitee.phone}`;
+  if (existingInvitee) notes.push(`手机号 ${TRIAL_DEMO.invitee.phone} 已经有会员，没有邀请「${TRIAL_DEMO.invitee.name}」`);
+  else if (inviterId !== null) {
+    const { memberChannels } = await loadSettings(sql);
+    const channel = memberChannels.find((c) => c.active && c.label === '老带新')?.key ?? null;
+    const { trial } = await createTrial(
+      deps,
+      inviterId,
+      { clientKey: randomUUID(), kind: 'invite', phone: TRIAL_DEMO.invitee.phone, name: TRIAL_DEMO.invitee.name, channel },
+      { actor: clerk, at: now },
+    );
+    await sql`UPDATE members SET is_synthetic = true WHERE id = ${trial.memberId}`;
+    done.push(`${TRIAL_DEMO.inviter.name}邀请${TRIAL_DEMO.invitee.name}体验 ${trial.label}（${trial.startsOn} 至 ${trial.endsOn}）`);
+  }
+
+  await sql`
+    INSERT INTO settings (key, value) VALUES (${MEMBERSHIP_P3_DEMO_KEY}, ${sql.json({ version: 1, preparedAt: now.toISOString(), businessDate: today })})
+    ON CONFLICT (key) DO NOTHING`;
+  return { skipped: false, done, notes };
+}
+
+export interface MembershipTrialDemoState {
+  /** 发布的折扣类（只看 QY-011） */
+  discounts: string[];
+  /** 邀请人的档级 */
+  inviterGrade: number;
+  /** 体验中的会员：方式、体验的档级、邀请人、状态 */
+  trials: Record<string, { kind: string; grade: number; inviter: string; status: string }>;
+}
+
+export async function membershipTrialDemoState(sql: Sql): Promise<MembershipTrialDemoState> {
+  const discounts = (await sql<{ code: string }[]>`SELECT code FROM benefits WHERE status = 'published' AND code = 'QY-011'`).map((r) => r.code);
+  const [inviter] = await sql<{ grade: number }[]>`SELECT grade FROM members WHERE phone = ${TRIAL_DEMO.inviter.phone}`;
+  const rows = await sql<{ name: string; kind: string; grade: number; inviter: string; status: string }[]>`
+    SELECT m.name, t.kind, t.grade, i.name AS inviter, t.status
+    FROM member_trials t JOIN members m ON m.id = t.member_id JOIN members i ON i.id = t.inviter_id
+    WHERE m.phone = ${TRIAL_DEMO.invitee.phone} ORDER BY t.id`;
+  return {
+    discounts,
+    inviterGrade: inviter?.grade ?? -1,
+    trials: Object.fromEntries(rows.map((r) => [r.name, { kind: r.kind, grade: r.grade, inviter: r.inviter, status: r.status }])),
+  };
 }

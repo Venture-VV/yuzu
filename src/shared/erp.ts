@@ -200,6 +200,8 @@ export const ERP_OP_TYPES = [
   'grade_adjust',
   // 会员体系 v2 第二期（v0.7.24）：登记服务类权益的使用（数次数，重复登记会多占次数）
   'benefit_use',
+  // 会员体系 v2 第三期（v0.7.25）：邀请体验、赠送会籍（占每月次数、QY-042 的次数，重复发起会被拒）
+  'member_trial',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -224,6 +226,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   opening_payable: '期初未付登记',
   grade_adjust: '手动调整会员档阶',
   benefit_use: '登记权益使用',
+  member_trial: '邀请体验 / 赠送会籍',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */
@@ -240,7 +243,7 @@ export interface ErpRevenue {
   to: string;
   days: number;
   /** 净营业额 = 应收 − 优惠；结账客人、客单价、充值收款（与经营总览同一口径） */
-  kpis: { receivable: number; discount: number; coupon: number; refund: number; net: number; guests: number; checkouts: number; perGuest: number; rechargePaid: number };
+  kpis: { receivable: number; discount: number; coupon: number; memberDiscount: number; refund: number; net: number; guests: number; checkouts: number; perGuest: number; rechargePaid: number };
   trend: { date: string; net: number; guests: number; rechargePaid: number }[];
   byMethod: { method: import('./checkout').CheckoutMethod; amount: number }[];
   departments: import('./reports').DepartmentRevenue[];

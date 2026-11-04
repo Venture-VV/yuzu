@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router';
 import { CHECKOUT_METHOD_LABELS, COUPON_PLATFORM_LABELS, ticketTierLabel } from '@shared/checkout';
+import { minutesText } from '@shared/benefits';
 import type { CheckoutPrint } from '@shared/print';
 import { api, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
@@ -62,6 +63,7 @@ function CheckoutSlip({ d }: { d: CheckoutPrint }) {
             {b.tableName !== null ? `用餐 ${b.guests} 人 · ` : '在店 '}
             {Math.floor(b.stayMinutes / 60)} 小时 {b.stayMinutes % 60} 分
             {b.ticketAmount === 0 && b.ticketSegments !== null && ` · ${b.ticketName}（${ticketTierLabel(b.ticketSegments)}，免票）`}
+            {b.ticketExtensionMinutes > 0 && ` · 会员浴票延迟 ${minutesText(b.ticketExtensionMinutes)}`}
           </p>
           <div className="mt-1 space-y-0.5">
             {b.lines.map((l, j) => (

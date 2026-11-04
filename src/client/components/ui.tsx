@@ -372,6 +372,7 @@ export function Notice({
   icon,
   action,
   className,
+  'data-testid': testId,
 }: {
   tone: 'info' | 'success' | 'warning' | 'error';
   title?: ReactNode;
@@ -379,6 +380,8 @@ export function Notice({
   icon?: ReactNode;
   action?: ReactNode;
   className?: string;
+  /** 浏览器用例用（原来写在 Notice 上的 data-testid 没有传到页面上） */
+  'data-testid'?: string;
 }) {
   const styles = {
     info: 'border-lake/20 bg-lake-soft/60 text-lake',
@@ -387,7 +390,7 @@ export function Notice({
     error: 'border-clay/25 bg-clay-soft/60 text-clay',
   }[tone];
   return (
-    <div role={tone === 'error' ? 'alert' : 'status'} className={cn('flex gap-3 rounded-lg border px-4 py-3', styles, className)}>
+    <div role={tone === 'error' ? 'alert' : 'status'} className={cn('flex gap-3 rounded-lg border px-4 py-3', styles, className)} data-testid={testId}>
       {icon && <span className="mt-0.5 shrink-0">{icon}</span>}
       <div className="min-w-0 flex-1">
         {title && <p className="text-[14px] font-bold">{title}</p>}

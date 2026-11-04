@@ -24,7 +24,16 @@ import { seedInventoryDemo } from '../seed-inventory';
 import { seedLegacyDemo } from '../seed-legacy';
 import expected from './showcase-expected.json' with { type: 'json' };
 import membershipExpected from './membership-expected.json' with { type: 'json' };
-import { MEMBERSHIP_DEMO_KEY, membershipDemoState, seedMembershipDemo, type MembershipDemoState } from './membership-demo';
+import {
+  MEMBERSHIP_DEMO_KEY,
+  MEMBERSHIP_P3_DEMO_KEY,
+  membershipDemoState,
+  membershipTrialDemoState,
+  seedMembershipDemo,
+  seedMembershipTrialDemo,
+  type MembershipDemoState,
+  type MembershipTrialDemoState,
+} from './membership-demo';
 import { seedShowcaseDemo, SHOWCASE_DAILY_FIELDS, SHOWCASE_KEY, showcaseState, type ShowcaseState } from './showcase';
 
 
@@ -132,11 +141,19 @@ export async function demoPrepare(
     blocks.push({ block: MEMBERSHIP_BLOCK, written: true, detail: `${membership.done.length} 步`, items: membership.done });
     notes.push(...membership.notes);
   }
+  // 会员折扣与邀请体验（v0.7.25）：单独一个标记，已经准备过会员体系块的演示库也会补上
+  const trialDemo = await seedMembershipTrialDemo(sql, config, { now: opts.now });
+  if (trialDemo.skipped) skip(MEMBERSHIP_P3_BLOCK);
+  else {
+    blocks.push({ block: MEMBERSHIP_P3_BLOCK, written: true, detail: `${trialDemo.done.length} 步`, items: trialDemo.done });
+    notes.push(...trialDemo.notes);
+  }
 
   return { blocks, notes, check: await demoCheck(sql, config) };
 }
 
 const MEMBERSHIP_BLOCK = '会员体系（到期提醒、补充期、降档的演示会员，本店权益清单与本月的券）';
+const MEMBERSHIP_P3_BLOCK = '会员折扣与邀请体验（发布包房折扣 QY-011，邀请人与体验中的会员）';
 
 /** 对象按键排序后再比（数据库读出来的顺序不固定） */
 function canon(v: unknown): unknown {
@@ -171,6 +188,12 @@ const MEMBERSHIP_FIELDS: [keyof MembershipDemoState, string][] = [
   ['members', '演示会员的档阶与状态'],
   ['published', '发布的本店权益'],
   ['monthCoupons', '演示会员本月的项目券'],
+];
+
+const MEMBERSHIP_P3_FIELDS: [keyof MembershipTrialDemoState, string][] = [
+  ['discounts', '发布的会员折扣'],
+  ['inviterGrade', '邀请人的档级'],
+  ['trials', '体验中的会员'],
 ];
 
 /** 只读核对：任何一项不一致都 ok = false，写明哪一项、期望与实际 */
@@ -229,6 +252,20 @@ export async function demoCheck(sql: Sql, config: AppConfig): Promise<DemoCheckR
     for (const [field, label] of MEMBERSHIP_FIELDS) {
       const same = JSON.stringify(canon(mWant[field])) === JSON.stringify(canon(mState[field]));
       lines.push({ ok: same, label: `会员体系演示 · ${label}`, detail: same ? fmt(mState[field]) : `期望 ${fmt(mWant[field])}；实际 ${fmt(mState[field])}` });
+    }
+  }
+  // 会员折扣与邀请体验（v0.7.25）：体验 7 天后到期，只在准备的那个营业日核对
+  const [p3Marker] = await sql<{ value: { businessDate?: string } }[]>`SELECT value FROM settings WHERE key = ${MEMBERSHIP_P3_DEMO_KEY}`;
+  if (!p3Marker) {
+    lines.push({ ok: false, label: '会员折扣与邀请体验演示', detail: '还没有准备：请执行 demo-prepare' });
+  } else if (p3Marker.value.businessDate !== today) {
+    notes.push(`会员折扣与邀请体验演示是 ${p3Marker.value.businessDate} 营业日准备的：体验按日期到期，今天不核对这一块`);
+  } else {
+    const pState = await membershipTrialDemoState(sql);
+    const pWant = (membershipExpected as unknown as { p3: MembershipTrialDemoState }).p3;
+    for (const [field, label] of MEMBERSHIP_P3_FIELDS) {
+      const same = JSON.stringify(canon(pWant[field])) === JSON.stringify(canon(pState[field]));
+      lines.push({ ok: same, label: `会员折扣与邀请体验 · ${label}`, detail: same ? fmt(pState[field]) : `期望 ${fmt(pWant[field])}；实际 ${fmt(pState[field])}` });
     }
   }
   return { ok: lines.every((l) => l.ok), lines, notes };

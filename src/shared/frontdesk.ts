@@ -291,6 +291,8 @@ export interface VisitDetail {
     nextAmount: number;
     /** 反结账后重结：门票计到第一次结账的时刻，不再随时间跳档；平时为 null */
     endAt: string | null;
+    /** 会员的浴票延迟（v0.7.25 续）：多给几分钟不跳档（在店的按门店当前营业日，已结账的按结账单记下的）；没有为 null */
+    extension: Omit<import('./checkout').TicketExtension, 'version'> | null;
   } | null;
   /** 已结账离店时的结账单 */
   checkout: { id: number; checkoutNo: string; status: 'completed' | 'voided' } | null;

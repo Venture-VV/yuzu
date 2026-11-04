@@ -15,6 +15,7 @@ import type { Deps, OpContext } from '../../lib/context';
 import { badRequest, conflict, notFound, unprocessable } from '../../lib/errors';
 import { cents, parse } from '../../lib/validate';
 import { assertOpen, businessDate, loadFrontdeskRules, lockVisits, setTxTimeouts } from './common';
+import { memberTicketExtensions } from '../ticket-extensions';
 
 export async function listTicketTypes(db: Db, all = false): Promise<TicketType[]> {
   return db<TicketType[]>`
@@ -167,16 +168,26 @@ export async function applyVisitTicket(
             ${approval?.approverId ?? null}, ${approval?.reason ?? null})`;
 }
 
-/** 来访详情里的门票：按留存的票价与当前时刻计算 */
-export async function visitTicket(db: Db, visitId: number, at: Date): Promise<VisitDetail['ticket']> {
-  const [v] = await db<{ typeId: number | null; name: string | null; price12h: number | null; price24h: number | null; checkedInAt: string; ticketEndAt: string | null }[]>`
-    SELECT v.ticket_type_id AS type_id, t.name, v.ticket_price_12h AS price12h, v.ticket_price_24h AS price24h, v.checked_in_at, v.ticket_end_at
+/**
+ * 来访详情里的门票：按留存的票价与当前时刻计算。
+ * 会员的浴票延迟（v0.7.25 续）：在店的按门店当前营业日 today 推算会员的档阶，与结账核对、看板同一算法
+ * （测试会话预检 46009c2：原来用接待那一天，跨营业日时体验已到期、到期处理还没跑的会员，详情与核对的门票不一致）；
+ * 已结账离店的按结账单记下的（快照），不再按现在的档阶重算
+ */
+export async function visitTicket(db: Db, visitId: number, at: Date, today: string): Promise<VisitDetail['ticket']> {
+  const [v] = await db<{
+    typeId: number | null; name: string | null; price12h: number | null; price24h: number | null; checkedInAt: string; ticketEndAt: string | null;
+    memberId: number | null; status: string;
+  }[]>`
+    SELECT v.ticket_type_id AS type_id, t.name, v.ticket_price_12h AS price12h, v.ticket_price_24h AS price24h, v.checked_in_at, v.ticket_end_at,
+           v.member_id, v.status
     FROM visits v LEFT JOIN ticket_types t ON t.id = v.ticket_type_id WHERE v.id = ${visitId}`;
   if (!v || v.typeId === null) return null;
   const rules = await loadFrontdeskRules(db);
   const prices = { price12h: v.price12h!, price24h: v.price24h! };
+  const extension = v.status === 'open' ? await currentExtension(db, v.memberId, today) : await checkoutExtension(db, visitId);
   // 反结账后重结：门票计到第一次结账的时刻
-  const p = priceTicket(prices, v.checkedInAt, v.ticketEndAt ? new Date(v.ticketEndAt) : at, rules.overtimeGraceMinutes);
+  const p = priceTicket(prices, v.checkedInAt, v.ticketEndAt ? new Date(v.ticketEndAt) : at, rules.overtimeGraceMinutes + (extension?.minutes ?? 0));
   return {
     typeId: v.typeId,
     name: v.name!,
@@ -187,5 +198,25 @@ export async function visitTicket(db: Db, visitId: number, at: Date): Promise<Vi
     nextJumpAt: p.nextJumpAt,
     nextAmount: p.nextAmount,
     endAt: v.ticketEndAt ? new Date(v.ticketEndAt).toISOString() : null,
+    extension,
   };
+}
+
+type VisitExtension = NonNullable<VisitDetail['ticket']>['extension'];
+
+/** 在店客人：会员此刻（门店当前营业日）的浴票延迟 */
+async function currentExtension(db: Db, memberId: number | null, today: string): Promise<VisitExtension> {
+  if (!memberId) return null;
+  const e = (await memberTicketExtensions(db, [Number(memberId)], today)).get(Number(memberId));
+  return e ? { minutes: e.minutes, benefitId: e.benefitId, code: e.code, name: e.name } : null;
+}
+
+/** 已结账的客人：最近一张有效结账单记下的浴票延迟 */
+async function checkoutExtension(db: Db, visitId: number): Promise<VisitExtension> {
+  const [r] = await db<{ minutes: number; benefitId: number | null; code: string | null; name: string | null }[]>`
+    SELECT cb.ticket_extension_minutes AS minutes, cb.ticket_extension_benefit_id AS benefit_id, be.code, be.name
+    FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id LEFT JOIN benefits be ON be.id = cb.ticket_extension_benefit_id
+    WHERE cb.visit_id = ${visitId} AND c.status = 'completed' ORDER BY c.id DESC LIMIT 1`;
+  if (!r || r.minutes <= 0 || r.benefitId === null) return null;
+  return { minutes: r.minutes, benefitId: Number(r.benefitId), code: r.code ?? '', name: r.name ?? '' };
 }

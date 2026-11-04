@@ -33,6 +33,7 @@ import { registerMemberRoutes } from './modules/members';
 import { registerCouponRoutes } from './modules/coupons';
 import { registerMembershipRoutes } from './modules/membership';
 import { registerBenefitRoutes } from './modules/benefits';
+import { registerTrialRoutes } from './modules/member-trials';
 import { registerDeviceRoutes } from './modules/devices';
 import { registerOpeningRoutes } from './modules/opening';
 import { registerPrintRoutes } from './modules/print';
@@ -154,6 +155,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerCouponRoutes(app, deps);
   registerMembershipRoutes(app, deps);
   registerBenefitRoutes(app, deps);
+  registerTrialRoutes(app, deps);
   registerDeviceRoutes(app, deps);
   registerWalletRoutes(app, deps);
   registerOpeningRoutes(app, deps);

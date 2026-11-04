@@ -53,12 +53,12 @@ describe('每日对账包', () => {
     expect(dept.find((r) => r[0] === '应收（结账 − 反结账）')![3]).toBe((expected.business.net / 100).toFixed(2));
     const discount = expected.business.byMethod.discount;
     expect(dept.find((r) => r[0] === '优惠 / 免单（不是收款）')![3]).toBe((-discount / 100).toFixed(2));
-    expect(dept.find((r) => r[0] === '净营业额（应收 − 优惠 − 券抵扣 − 退款）')![3]).toBe(((expected.business.net - discount) / 100).toFixed(2));
+    expect(dept.find((r) => r[0] === '净营业额（应收 − 优惠 − 券抵扣 − 会员折扣 − 退款）')![3]).toBe(((expected.business.net - discount) / 100).toFixed(2));
     const readme = file('00-说明.txt');
-    expect(readme).toContain('✓ 与应收、优惠与券抵扣、退款一致');
+    expect(readme).toContain('✓ 与应收、优惠（含券抵扣、会员折扣）、退款一致');
     // 与日结同一口径：应收、优惠 / 免单、净营业额、实收（现金类）
     expect(readme).toContain(`应收 ¥${(expected.business.net / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}`);
-    expect(readme).toMatch(/优惠 \/ 免单 ¥21\.00；券抵扣 ¥0\.00；退款 ¥0\.00（0 张）；净营业额 ¥[\d,]+\.\d{2}；实收（现金类）¥[\d,]+\.\d{2}/);
+    expect(readme).toMatch(/优惠 \/ 免单 ¥21\.00；券抵扣 ¥0\.00；会员折扣 ¥0\.00；退款 ¥0\.00（0 张）；净营业额 ¥[\d,]+\.\d{2}；实收（现金类）¥[\d,]+\.\d{2}/);
     expect(readme).toMatch(/异常：反结账 1、优惠 \/ 免单 1、/);
   });
 

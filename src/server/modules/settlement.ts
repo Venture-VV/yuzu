@@ -591,9 +591,10 @@ export function settlementCsv(s: SettlementSummary): string {
     ['应收（结账 − 反结账）', '', signed(biz.receivable), `门票 ${y(s.business.ticket)}，项目与其他 ${y(s.business.items)}`],
     ['优惠 / 免单', '', signed(biz.discount), '值班经理及以上当场授权，不是收款'],
     ['券抵扣', '', signed(biz.coupon), '结账用的券，是优惠，不是收款'],
+    ['会员折扣', '', signed(biz.memberDiscount), '结账时自动算的会员折扣，是优惠，不是收款'],
     ['退款', s.business.refunds.count, (s.business.refunds.total ? '-' : '') + y(s.business.refunds.total), '当天的退款单（离店后部分退款，按原收款方式退）'],
     ...s.business.refunds.byMethod.map((m) => [`  · 退${PAYMENT_METHOD_LABELS[m.method]}`, m.count, '-' + y(m.amount), m.method === 'cash' ? '现金从钱箱退' : '商户后台原路退回']),
-    ['净营业额', '', signed(biz.netRevenue), '应收 − 优惠 − 券抵扣 − 退款'],
+    ['净营业额', '', signed(biz.netRevenue), '应收 − 优惠 − 券抵扣 − 会员折扣 − 退款'],
     ['实收（现金类）', '', signed(biz.received), '现金、微信、支付宝、银行卡、其他，减去退款；不含会员储值、团购券、优惠、券抵扣'],
     ...s.business.byMethod.map((m) => [
       `  · ${CHECKOUT_METHOD_LABELS[m.method]}`,
@@ -603,7 +604,7 @@ export function settlementCsv(s: SettlementSummary): string {
         ? '会员余额抵扣，同时计入储值消费'
         : m.method === 'coupon'
           ? '平台团购核销，由平台结算'
-          : m.method === 'discount' || m.method === 'store_coupon'
+          : m.method === 'discount' || m.method === 'store_coupon' || m.method === 'member_discount'
             ? '优惠，不是收款'
             : '',
     ]),

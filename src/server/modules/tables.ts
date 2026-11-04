@@ -516,7 +516,9 @@ export async function checkoutTables(deps: Deps, raw: unknown, ctx: OpContext): 
   const input = parse(TableCheckoutInput, raw);
   const ids = [...new Set(input.sessionIds)];
   if (ids.length !== input.sessionIds.length) throw badRequest('同一桌不能重复结账');
-  const { wallets, discounts } = splitPayments(input.payments, ctx.actor);
+  const { wallets, discounts, memberDiscounts } = splitPayments(input.payments, ctx.actor);
+  // 会员折扣（v0.7.25）只在手牌结账时自动算，桌台结账不算（M48）
+  if (memberDiscounts.length) throw badRequest('桌台结账不算会员折扣（会员折扣只在手牌结账时自动算）');
   const { clientKey: key, ...payload } = input;
   const requestHash = hashRequest(payload);
   // 收款开始处理时经办人所在的班次：入账前这个班次已交班则整笔拒绝（见 shifts.ts lockPaymentShift）

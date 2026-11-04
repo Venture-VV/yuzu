@@ -2,7 +2,8 @@ import { forwardRef, useEffect, useState, type KeyboardEvent } from 'react';
 import { Search, UserPlus, X } from 'lucide-react';
 import { maskPhone } from '@shared/labels';
 import type { MemberSummary } from '@shared/types';
-import { useMembers } from '../../lib/queries';
+import { errorMessage } from '../../lib/api';
+import { memberCodeOf, useMembers } from '../../lib/queries';
 import { useCan } from '../../lib/session';
 import { avatarTone, cn, relativeTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
@@ -24,10 +25,23 @@ export const MemberList = forwardRef<
 >(function MemberList({ selectedId, onSelect, onCreate }, inputRef) {
   const can = useCan();
   const [q, setQ] = useState('');
-  const query = useDebounced(q.trim(), 180);
+  const debounced = useDebounced(q.trim(), 180);
+  // 会员码扫进来就校验、不等防抖：扫码盒常在码后面跟一个回车，回车不能选中防抖之前的旧列表；
+  // 校验完成之前列表是空的，回车、点选都选不到人（测试会话预检 a040d79）。
+  // 清空查找框也立刻生效：认出会员、自动清空后马上再扫同一个码，同样重新校验，不沿用刚才那次的结果
+  const query = memberCodeOf(q) || !q.trim() ? q.trim() : debounced;
   const members = useMembers(query);
   const [cursor, setCursor] = useState(0);
   const list = members.data ?? [];
+  // 扫到会员码（v0.7.25）：校验通过就直接打开这位会员，清空查找框（码 60 秒就换）
+  const code = memberCodeOf(query);
+  useEffect(() => {
+    if (code && members.isSuccess && members.data.length === 1) {
+      onSelect(members.data[0]!);
+      setQ('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code, members.isSuccess, members.data]);
 
   // 结果变化时高亮回到第一位，避免回车选中旧列表里鼠标悬停的位置
   useEffect(() => setCursor(0), [query, members.data]);
@@ -77,8 +91,16 @@ export const MemberList = forwardRef<
           )}
         </div>
         <div className="flex items-center justify-between">
-          <p className="text-[12.5px] font-semibold text-ink-3">
-            {query ? (members.isFetching ? '搜索中…' : `找到 ${list.length} 位会员`) : '最近到店'}
+          <p className={cn('text-[12.5px] font-semibold', code && members.error ? 'text-clay' : 'text-ink-3')} data-testid="member-search-status">
+            {code
+              ? members.error
+                ? errorMessage(members.error)
+                : '核对会员码…'
+              : query
+                ? members.isFetching
+                  ? '搜索中…'
+                  : `找到 ${list.length} 位会员`
+                : '最近到店'}
           </p>
           {can('member.write') && (
             <Button size="sm" variant="quiet" icon={<UserPlus className="size-4" />} onClick={() => onCreate(q.trim())}>

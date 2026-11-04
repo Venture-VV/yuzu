@@ -14,6 +14,25 @@ async function login(page: Page, username: string) {
 }
 
 /** 页面在当前视口内放得下：列出前几处横向滚动或超出屏幕右边的元素 */
+const dayBefore = (date: string) => new Date(Date.parse(`${date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+
+/**
+ * 有营业数据（结账、反结账或充值）的营业日：今天，否则前一个营业日；都没有时为今天。
+ * 演示数据在营业日切换（06:00）之前灌、用例跑到切换之后时，今天还没有营业数据，日结页不显示营业口径这一块
+ * （CI 在 fbb63dc 上跨过 06:00 时「平板横屏」的日结冒烟因此失败）
+ */
+async function businessDay(page: Page): Promise<{ date: string; today: boolean }> {
+  const me = (await (await page.request.get('/api/auth/me')).json()) as { today: string };
+  for (const date of [me.today, dayBefore(me.today)]) {
+    const s = (await (await page.request.get(`/api/settlements/${date}`)).json()) as {
+      business?: { checkouts: { count: number }; voids: { count: number } };
+      recharge?: { count: number };
+    };
+    if ((s.business?.checkouts.count ?? 0) + (s.business?.voids.count ?? 0) + (s.recharge?.count ?? 0) > 0) return { date, today: date === me.today };
+  }
+  return { date: me.today, today: true };
+}
+
 async function expectFits(page: Page) {
   // 等弹出、滑入等动画结束再量（循环播放的加载动画除外），量到一半会差一两个像素
   await page.evaluate(() =>
@@ -56,7 +75,7 @@ test.describe('视口冒烟', () => {
     await page.goto('/dashboard');
     await expect(page.getByRole('heading', { name: '经营看板' })).toBeVisible();
     const board = page.getByTestId('dashboard');
-    // R1.2 起指标卡是「今日净营业额（应收 − 优惠）」，v0.7.20 起「今日净营业额（应收 − 优惠 − 券抵扣 − 退款）」
+    // R1.2 起指标卡是「今日净营业额（应收 − 优惠）」，v0.7.20 起「…− 券抵扣 − 退款）」，v0.7.25 起「今日净营业额（应收 − 优惠 − 券抵扣 − 会员折扣 − 退款）」
     await expect(board).toContainText('今日净营业额');
     await expect(board).toContainText('今日收款构成');
     await expect(board).toContainText('当班中');
@@ -318,7 +337,8 @@ test.describe('视口冒烟', () => {
 
   test('日结：营业口径、余额核对与异常', async ({ page }) => {
     await login(page, 'linlan');
-    await page.goto('/settlement');
+    const day = await businessDay(page);
+    await page.goto(day.today ? '/settlement' : `/settlement/${day.date}`);
     await expect(page.getByRole('heading', { name: '日结' })).toBeVisible();
     await expect(page.getByTestId('settlement-business')).toBeVisible();
     await expectFits(page);

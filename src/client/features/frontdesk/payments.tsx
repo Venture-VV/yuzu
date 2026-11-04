@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { BadgePercent, Plus, ShieldCheck, Ticket, TicketCheck, Trash2, UserRound, WalletCards } from 'lucide-react';
+import { DISCOUNT_TARGET_LABELS, rateText } from '@shared/benefits';
 import {
   CHECKOUT_METHOD_LABELS,
   COUPON_CODE_PATTERN,
@@ -8,6 +9,7 @@ import {
   normalizeCouponCode,
   type CheckoutMethod,
   type CouponPlatform,
+  type MemberDiscountOption,
 } from '@shared/checkout';
 import { formatStoreCouponCode, normalizeStoreCouponCode, STORE_COUPON_CODE_PATTERN, type CheckoutCouponOption } from '@shared/coupons';
 import { splitDeduction } from '@shared/deduction';
@@ -95,7 +97,8 @@ export type PaymentBody =
   | { method: 'coupon'; platform: CouponPlatform; code: string; dealName: string; amount: number }
   | { method: 'discount'; amount: number; grantId: string }
   | { method: 'store_coupon'; code: string; amount: number }
-  | { method: Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon'>; amount: number; ref: string };
+  | { method: 'member_discount'; memberId: number; benefitId: number; amount: number }
+  | { method: Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon' | 'member_discount'>; amount: number; ref: string };
 
 /**
  * 收款登记的状态与核对：每笔的金额、储值扣款构成（余额不足、会员不在本次结账里）、团购券码、「其他」备注、
@@ -115,13 +118,20 @@ export function usePayRows(opts: {
   onEdit: () => void;
   /** 结账核对里最新的券（能抵多少）：选中的券金额变了时提示重新选 */
   coupons?: CheckoutCouponOption[] | null;
+  /**
+   * 会员折扣（v0.7.25，只有手牌结账）：结账核对给出的省得最多的一种。没选券、优惠 / 免单时自动带上（算进已收、不能单独去掉）；
+   * 选了券或优惠 / 免单就不用（二选一，M45）
+   */
+  memberDiscount?: MemberDiscountOption | null;
 }) {
   const session = useSession();
   const [rows, setRows] = useState<PayRow[]>([]);
   useResetOnOpen(opts.open, () => setRows([]));
 
   const rowCents = rows.map((r) => parseYuan(r.amount));
-  const paid = rowCents.reduce<number>((s, c) => s + (c ?? 0), 0);
+  const otherReduction = rows.some((r) => r.method === 'store_coupon' || r.method === 'discount');
+  const memberDiscount = opts.memberDiscount && !otherReduction ? opts.memberDiscount : null;
+  const paid = rowCents.reduce<number>((s, c) => s + (c ?? 0), 0) + (memberDiscount?.amount ?? 0);
   const remaining = opts.total === null ? null : opts.total - paid;
   const splitOf = (r: PayRow, cents: number | null) =>
     r.member && cents && cents > 0
@@ -190,8 +200,11 @@ export function usePayRows(opts: {
   const setGrant = (id: number, grant: DiscountGrant) => setRows((list) => list.map((r) => (r.id === id ? { ...r, grant } : r)));
 
   /** 按登记的收款生成提交内容（调用前 ok 必须为 true） */
-  const payments = (): PaymentBody[] =>
-    rows.map((r, i) => {
+  const payments = (): PaymentBody[] => [
+    ...(memberDiscount
+      ? [{ method: 'member_discount' as const, memberId: memberDiscount.memberId, benefitId: memberDiscount.benefitId, amount: memberDiscount.amount }]
+      : []),
+    ...rows.map((r, i): PaymentBody => {
       const amount = rowCents[i]!;
       if (r.method === 'wallet') {
         const s = splitOf(r, amount);
@@ -200,8 +213,9 @@ export function usePayRows(opts: {
       if (r.method === 'coupon') return { method: 'coupon' as const, platform: r.platform, code: normalizeCouponCode(r.code), dealName: r.dealName.trim(), amount };
       if (r.method === 'discount') return { method: 'discount' as const, amount, grantId: r.grant!.grantId };
       if (r.method === 'store_coupon') return { method: 'store_coupon' as const, code: r.coupon!.code, amount };
-      return { method: r.method, amount, ref: r.ref.trim() };
-    });
+      return { method: r.method as Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon' | 'member_discount'>, amount, ref: r.ref.trim() };
+    }),
+  ];
 
   return {
     rows,
@@ -212,9 +226,12 @@ export function usePayRows(opts: {
     dupWallet,
     hasDiscount: rows.some((r) => r.method === 'discount'),
     hasStoreCoupon: rows.some((r) => r.method === 'store_coupon'),
+    /** 自动带上的会员折扣（选了券、优惠时为空）与能享的那一种 */
+    memberDiscount,
+    memberDiscountOffered: opts.memberDiscount ?? null,
     /** 每笔都填好了、没有重复的储值会员 */
     ok: problems.every((x) => x === null) && !dupWallet,
-    methods: [...new Set(rows.map((r) => CHECKOUT_METHOD_LABELS[r.method]))],
+    methods: [...new Set([...(memberDiscount ? [CHECKOUT_METHOD_LABELS.member_discount] : []), ...rows.map((r) => CHECKOUT_METHOD_LABELS[r.method])])],
     splitOf,
     grantFits: opts.grantFits,
     locked: opts.locked,
@@ -277,6 +294,7 @@ export function PaymentsSection({
           </Button>
         ))}
       </div>
+      {pay.memberDiscountOffered && <MemberDiscountRow offered={pay.memberDiscountOffered} applied={!!pay.memberDiscount} />}
       {pay.rows.length === 0 ? (
         <p className="mt-3 text-[13px] text-ink-3" data-testid="pay-hint">
           {total === null
@@ -320,6 +338,25 @@ export function PaymentsSection({
       ) : null}
       {pay.dupWallet && <p className="mt-2 text-[12.5px] font-semibold text-clay">同一位会员的储值支付请合并为一笔</p>}
     </div>
+  );
+}
+
+/**
+ * 会员折扣（v0.7.25）：自动带上、不能单独去掉；选了券或优惠 / 免单就不用（二选一），这里写明两边的取舍
+ */
+function MemberDiscountRow({ offered, applied }: { offered: MemberDiscountOption; applied: boolean }) {
+  const what = `${offered.memberName} · ${offered.stateLabel} ${rateText(offered.rate)} · ${offered.name}（${DISCOUNT_TARGET_LABELS[offered.target]}）`;
+  return applied ? (
+    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-yuzu/40 bg-yuzu-soft/40 px-3 py-2" data-testid="member-discount">
+      <Badge tone="yuzu">会员折扣</Badge>
+      <span className="text-[13px] font-semibold text-ink-2">{what}</span>
+      <Money cents={-offered.amount} signed className="ml-auto text-[15px] font-bold text-yuzu-deep" />
+      <p className="w-full text-[12px] text-ink-3">结账时自动用省得最多的一种；客人要用券或经理授权优惠时二选一（会员折扣就不用了）。</p>
+    </div>
+  ) : (
+    <p className="mt-3 rounded-lg bg-paper px-3 py-2 text-[12.5px] text-ink-3" data-testid="member-discount-off">
+      已改用券或优惠 / 免单，会员折扣「{what}」省 {formatYuan(offered.amount)} 不用了（二选一）；去掉券或优惠就恢复会员折扣。
+    </p>
   );
 }
 

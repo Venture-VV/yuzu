@@ -12,6 +12,7 @@ import {
   type RefundShiftOptions,
   type RefundSummary,
 } from '@shared/checkout';
+import { minutesText } from '@shared/benefits';
 import type { CheckoutCouponOption } from '@shared/coupons';
 import { KITCHEN_STATUS_LABELS } from '@shared/dining';
 import { ZONE_LABELS, type BoardTag, type VisitDetail } from '@shared/frontdesk';
@@ -123,7 +124,8 @@ export function CheckoutDialog({
   const amounts = (p?.visits ?? []).map((v) => {
     if (!v.needsTicket) return v.amount;
     const t = ticketTypes.data?.find((x) => x.id === ticketPick[v.visitId]);
-    return t ? v.linesAmount + priceTicket(t, v.checkedInAt, pricedAt, p!.graceMinutes).amount : null;
+    // 跳档宽限按这位客人的（含会员的浴票延迟，v0.7.25 续）
+    return t ? v.linesAmount + priceTicket(t, v.checkedInAt, pricedAt, v.graceMinutes ?? p!.graceMinutes).amount : null;
   });
   const total = p && amounts.every((a) => a !== null) ? amounts.reduce<number>((s, a) => s + a!, 0) : null;
 
@@ -138,6 +140,8 @@ export function CheckoutDialog({
     locked,
     onEdit: op.clearError,
     coupons: p?.storeCoupons ?? null,
+    // 会员折扣（v0.7.25）：结账核对给出的省得最多的一种，自动带上；选了券、优惠 / 免单就不用
+    memberDiscount: p?.memberDiscounts?.[0] ?? null,
   });
   const { remaining, problems } = pay;
   // 客房（S7）：还住着客房的客人要先退房（补齐房费挂到手牌账单、退押金），房费才都在账单上
@@ -465,6 +469,11 @@ function ReviewTable({
                       {formatTime(v.ticket.nextJumpAt)} 后跳到 <Money cents={v.ticket.nextAmount} />
                     </span>
                   )}
+                  {v.extension && (
+                    <span className="text-lake" data-testid={`checkout-extension-${v.tagCode}`}>
+                      会员浴票延迟 {minutesText(v.extension.minutes)}
+                    </span>
+                  )}
                 </p>
               ) : (
                 <p className="flex flex-wrap items-center gap-2">
@@ -574,6 +583,7 @@ export function CheckoutReceipt({ detail }: { detail: CheckoutDetail }) {
                   )}
                   <span className="block text-[11.5px] text-ink-3">
                     {b.tableName !== null ? '用餐' : '在店'} {Math.floor(b.stayMinutes / 60)} 时 {b.stayMinutes % 60} 分
+                    {b.ticketExtensionMinutes > 0 && ` · 会员浴票延迟 ${minutesText(b.ticketExtensionMinutes)}`}
                   </span>
                 </td>
                 <td className="px-3 py-2 text-right">

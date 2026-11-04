@@ -1,6 +1,7 @@
 // 会员体系 v2（v0.7.23 第一期，docs/MEMBERSHIP.md 第 2 节）：档级、阶位、会籍周期的规则与纯计算。
 // 页面预览与服务端记账用同一份算法。金额一律整数分；赠送比例用万分比（500 = 5%）；日期是营业日 YYYY-MM-DD。
 
+import type { TrialSummary } from './trials';
 import { shiftDate } from './labels';
 
 export const MAX_GRADE = 6;
@@ -40,6 +41,13 @@ export interface MembershipRules {
    * 柜子的 1–5 级沿用店主的柜号清单（2026-10-27：3 万以下、5 万、10 万、20 万、30 万以上），换算到新档级待确认
    */
   vipLockerLevels: number[];
+  /**
+   * 低一档邀请体验（v0.7.25，M52）：体验几天、每位会员每月能邀请几次（0 = 不开放）、
+   * 受邀人多少个月内只能被邀请或赠送一次（撤销的不算）
+   */
+  trialInviteDays: number;
+  trialInvitesPerMonth: number;
+  trialInviteeMonths: number;
 }
 
 /** 默认值按会员文档（2026-11-02）与 PENDING_DECISIONS「会员体系 v2」（待确认，后台「会员规则」可改） */
@@ -63,6 +71,9 @@ export const DEFAULT_MEMBERSHIP_RULES: MembershipRules = {
   onboardMaxGrade: 5,
   // L0–L3 → 1 级柜（原来所有会员都能用 1 级柜）；L4（5 万）→ 2 级；L5（10 万）→ 4 级；L6（30 万）→ 5 级
   vipLockerLevels: [1, 1, 1, 1, 2, 4, 5],
+  trialInviteDays: 7,
+  trialInvitesPerMonth: 1,
+  trialInviteeMonths: 12,
 };
 
 /** 会员当前的档阶与会籍（存在会员一行上） */
@@ -334,7 +345,10 @@ export interface MemberGradeBadge {
   graceUntil: string | null;
   daysLeft: number | null;
   reminder: number | null;
+  /** 能用到几级 VIP 柜：自己的与生效中的临时身份取高的（v0.7.25，M51） */
   lockerLevel: number;
+  /** 生效中的临时身份（v0.7.25）：「L3 观澜 · 初」、到哪天 */
+  trial: { grade: Grade; label: string; endsOn: string; kind: 'invite' | 'gift' } | null;
 }
 
 /** 每天自动任务的运行记录 */
@@ -347,6 +361,8 @@ export interface MembershipJobRun {
   grace: number;
   downgraded: number;
   error: string | null;
+  /** 这一次把到期的临时身份结束了几条（v0.7.25；只在当次的结果里，不存运行记录） */
+  trialsExpired?: number;
 }
 
 /** 后台「会员体系」看板 */
@@ -367,6 +383,8 @@ export interface MembershipOverview {
   /** 今天的自动任务；最近 14 天的运行记录 */
   jobToday: MembershipJobRun | null;
   jobs: MembershipJobRun[];
+  /** 临时身份（v0.7.25）：体验中、本月发起、到期、转正、撤销 */
+  trials: TrialSummary;
 }
 
 /** 到期提醒名单、补充期名单的一行 */

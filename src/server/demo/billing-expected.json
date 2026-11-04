@@ -85,7 +85,7 @@
     "items": 49600,
     "byMethod": { "alipay": 49900, "bank_card": 119400, "cash": 102100, "coupon": 89900, "discount": 2100, "wallet": 120000, "wechat": 85400 },
     "coupons": { "meituan": 89900 },
-    "breakdown": { "receivable": 568800, "discount": 2100, "coupon": 0, "refund": 0, "netRevenue": 566700, "received": 356800 }
+    "breakdown": { "receivable": 568800, "discount": 2100, "coupon": 0, "memberDiscount": 0, "refund": 0, "netRevenue": 566700, "received": 356800 }
   },
   "shift": {
     "staff": "chenyin",

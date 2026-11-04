@@ -12,6 +12,13 @@ export const benefitKeys = {
   summary: ['benefits', 'summary'] as const,
 };
 
+/** 临时身份（v0.7.25）：会员的临时身份挂在 ['member', id] 下面（充值转正、撤销后刷新会员时一起刷新）；看板的名单 */
+export const trialKeys = {
+  member: (memberId: number) => ['member', memberId, 'trials'] as const,
+  options: (memberId: number, phone: string) => ['member', memberId, 'trial-options', phone] as const,
+  list: (scope: 'active' | 'month') => ['membership', 'trials', scope] as const,
+};
+
 export const membershipKeys = {
   rules: ['membership', 'rules'] as const,
   grade: (memberId: number) => ['membership', 'grade', memberId] as const,

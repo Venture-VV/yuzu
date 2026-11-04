@@ -16,7 +16,7 @@ import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { conflict, forbidden } from '../lib/errors';
-import { benefitUseOpRef, couponOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isDeviceOp, isFenced } from '../lib/fences';
+import { benefitUseOpRef, couponOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isDeviceOp, isFenced, trialOpRef } from '../lib/fences';
 import { parse } from '../lib/validate';
 import { setTxTimeouts } from '../lib/tx';
 
@@ -53,6 +53,8 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   grade_adjust: ['member.adjust'],
   // 登记会员权益使用（v0.7.24）
   benefit_use: ['benefit.use'],
+  // 邀请体验、赠送会籍（v0.7.25）：与登记权益使用同一个权限（M56）
+  member_trial: ['benefit.use'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -77,6 +79,7 @@ const READ: Record<ErpOpType, Permission[]> = {
   opening_payable: ['payable.read'],
   grade_adjust: ['member.adjust'],
   benefit_use: ['benefit.use'],
+  member_trial: ['benefit.use'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {
@@ -113,6 +116,11 @@ export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise
   // 登记会员权益使用（v0.7.24）的编号记在使用登记上：refId 是那条登记
   if (type === 'benefit_use') {
     const refId = await benefitUseOpRef(db, key);
+    if (refId !== null) return { found: true, abandoned: false, refId };
+  }
+  // 邀请体验、赠送会籍（v0.7.25）的编号记在临时身份上：refId 是那条临时身份
+  if (type === 'member_trial') {
+    const refId = await trialOpRef(db, key);
     if (refId !== null) return { found: true, abandoned: false, refId };
   }
   return { found: false, abandoned: await isFenced(db, key, [type]) };

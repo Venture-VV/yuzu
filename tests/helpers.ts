@@ -137,3 +137,62 @@ export function demoSeedTime(now = new Date()): Date {
   // 与命令行 --previous-day 同一规则（src/server/ops/demo-time.ts）
   return demoSeedWindow(now, 'Asia/Shanghai', 6)?.anchor ?? now;
 }
+
+/**
+ * 全部迁移（按号排好；v0.7.25 起只维护这一处）：两条开发线各加迁移时只在这里加一行，升级用例用 migrationsFrom 取
+ * 「从某个迁移起应该应用哪些」，不再各写一份。tests/migrations-list.test.ts 核对这份清单与 src/server/migrations 一致、编号不撞。
+ */
+export const ALL_MIGRATIONS: readonly string[] = [
+  '001_init.sql',
+  '002_inventory.sql',
+  '003_purchasing.sql',
+  '004_frontdesk.sql',
+  '005_frontdesk_g2.sql',
+  '006_op_fences.sql',
+  '007_manager_roles.sql',
+  '008_locker_pool.sql',
+  '009_price_tiers.sql',
+  '010_wallet_limits.sql',
+  '011_member_fields.sql',
+  '012_bonus_expiry.sql',
+  '013_opening_balances.sql',
+  '014_checkout.sql',
+  '015_shifts.sql',
+  '016_shift_boundary.sql',
+  '017_r1_funds.sql',
+  '018_backfill.sql',
+  '019_admin_members.sql',
+  '020_technicians.sql',
+  '021_clockroom.sql',
+  '022_dining.sql',
+  '023_dining_tables.sql',
+  '024_rooms.sql',
+  '025_cashier.sql',
+  '026_expenses.sql',
+  '027_requisitions.sql',
+  '028_legacy_ledger.sql',
+  '029_warehouses.sql',
+  '030_supplier_settlement.sql',
+  '031_stock_cycles.sql',
+  '032_spaces.sql',
+  '033_floorplans.sql',
+  '034_floormap.sql',
+  '035_locations.sql',
+  '036_floorplan_finish.sql',
+  '037_refunds_coupons.sql',
+  '038_devices.sql',
+  '039_payment_fences.sql',
+  '040_membership_v2.sql',
+  '041_benefits.sql',
+  '042_member_discounts_trials.sql',
+  '043_miniprogram.sql',
+  '044_miniprogram_fences.sql',
+  '045_ticket_extension.sql',
+];
+
+/** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */
+export function migrationsFrom(first: string): string[] {
+  const i = ALL_MIGRATIONS.indexOf(first);
+  if (i < 0) throw new Error(`迁移清单里没有 ${first}`);
+  return ALL_MIGRATIONS.slice(i);
+}

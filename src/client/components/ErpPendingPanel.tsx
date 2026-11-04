@@ -65,6 +65,9 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     // 登记会员权益使用（v0.7.24）：返回那条登记
     case 'benefit_use':
       return d.use && typeof d.use === 'object' ? { refId: d.use.id } : null;
+    // 邀请体验、赠送会籍（v0.7.25）：返回那条临时身份
+    case 'member_trial':
+      return d.trial && typeof d.trial === 'object' ? { refId: d.trial.id } : null;
   }
 }
 

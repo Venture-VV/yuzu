@@ -577,6 +577,12 @@ function BusinessCard({ s }: { s: SettlementSummary }) {
                 · 券抵扣 <Money cents={-biz.coupon} signed />
               </>
             )}
+            {biz.memberDiscount !== 0 && (
+              <>
+                {' '}
+                · 会员折扣 <Money cents={-biz.memberDiscount} signed />
+              </>
+            )}
             {(b.refunds?.count ?? 0) > 0 && (
               <>
                 {' '}
@@ -591,8 +597,9 @@ function BusinessCard({ s }: { s: SettlementSummary }) {
           <Row label="应收（结账 − 反结账）" cents={biz.receivable} className="font-bold text-ink" />
           <Row label="优惠 / 免单（当场授权）" cents={-biz.discount} className="text-yuzu-deep" />
           {biz.coupon !== 0 && <Row label="券抵扣（结账用的券）" cents={-biz.coupon} className="text-yuzu-deep" />}
+          {biz.memberDiscount !== 0 && <Row label="会员折扣（结账时自动算）" cents={-biz.memberDiscount} className="text-yuzu-deep" />}
           {biz.refund !== 0 && <Row label="退款（退款单，离店后部分退款）" cents={-biz.refund} className="text-ember" />}
-          <Row label="净营业额（应收 − 优惠 − 券抵扣 − 退款）" cents={biz.netRevenue} className="font-bold text-pine" />
+          <Row label="净营业额（应收 − 优惠 − 券抵扣 − 会员折扣 − 退款）" cents={biz.netRevenue} className="font-bold text-pine" />
           <Row label="实收（现金、扫码、银行卡、其他，减去退款）" cents={biz.received} className="text-lake" />
           <div className="my-1 border-t border-dashed border-line" />
           {b.byMethod.map((m) => (
@@ -602,7 +609,7 @@ function BusinessCard({ s }: { s: SettlementSummary }) {
                 <span className="ml-1 text-[12px]">· {m.count} 笔{m.voidCount ? `，反结账 ${m.voidCount}` : ''}</span>
                 {m.method === 'wallet' && <span className="ml-1 text-[11.5px] text-ink-4">（会员余额抵扣，同时计入储值消费）</span>}
                 {m.method === 'coupon' && <span className="ml-1 text-[11.5px] text-ink-4">（平台团购核销）</span>}
-                {(m.method === 'discount' || m.method === 'store_coupon') && <span className="ml-1 text-[11.5px] text-ink-4">（不是收款）</span>}
+                {(m.method === 'discount' || m.method === 'store_coupon' || m.method === 'member_discount') && <span className="ml-1 text-[11.5px] text-ink-4">（不是收款）</span>}
               </span>
               <Money cents={m.amount} className="font-bold" />
             </div>

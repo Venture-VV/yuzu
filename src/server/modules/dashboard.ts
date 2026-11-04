@@ -10,6 +10,7 @@ import { guard } from '../auth/guard';
 import type { Deps } from '../lib/context';
 import { loadFrontdeskRules } from './frontdesk/common';
 import { loadSettings } from './settings';
+import { memberTicketExtensions } from './ticket-extensions';
 
 async function dayNet(db: Db, date: string) {
   const [row] = await db<{ net: number; checkouts: number; rechargePaid: number }[]>`
@@ -26,16 +27,18 @@ export async function dashboard(db: Db, today: string, days: number, opts: { inS
   const [store] = await db<{ count: number; unsettled: number }[]>`
     SELECT count(*)::int AS count, coalesce(sum(b.amount_cents), 0) AS unsettled
     FROM visits v JOIN bills b ON b.id = v.bill_id WHERE v.status = 'open'`;
-  // 在店客人的门票按此刻（反结账后重结的按第一次结账的时刻）估算，与结账前核对同一算法；没选票种的不计入
+  // 在店客人的门票按此刻（反结账后重结的按第一次结账的时刻）估算，与结账前核对同一算法（含会员的浴票延迟，v0.7.25 续）；没选票种的不计入
   const { overtimeGraceMinutes } = await loadFrontdeskRules(db);
-  const open = await db<{ checkedInAt: string; price12h: number | null; price24h: number | null; ticketEndAt: string | null; now: string }[]>`
-    SELECT checked_in_at, ticket_price_12h AS price12h, ticket_price_24h AS price24h, ticket_end_at, now() AS now
+  const open = await db<{ checkedInAt: string; price12h: number | null; price24h: number | null; ticketEndAt: string | null; memberId: number | null; now: string }[]>`
+    SELECT checked_in_at, ticket_price_12h AS price12h, ticket_price_24h AS price24h, ticket_end_at, member_id, now() AS now
     FROM visits WHERE status = 'open'`;
+  const extensions = await memberTicketExtensions(db, open.map((v) => v.memberId), today);
   let ticketEstimate = 0;
   for (const v of open) {
     if (v.price12h === null || v.price24h === null) continue;
     const end = new Date(v.ticketEndAt ?? v.now);
-    ticketEstimate += priceTicket({ price12h: v.price12h, price24h: v.price24h }, v.checkedInAt, end, overtimeGraceMinutes).amount;
+    const extra = v.memberId ? (extensions.get(Number(v.memberId))?.minutes ?? 0) : 0;
+    ticketEstimate += priceTicket({ price12h: v.price12h, price24h: v.price24h }, v.checkedInAt, end, overtimeGraceMinutes + extra).amount;
   }
   const noTicket = open.filter((v) => v.price12h === null).length;
   const t = await dayNet(db, today);
@@ -61,14 +64,17 @@ export async function dashboard(db: Db, today: string, days: number, opts: { inS
     SELECT method, sum(amount)::bigint AS amount FROM x GROUP BY method HAVING sum(amount) <> 0 ORDER BY amount DESC`;
   // 优惠 / 免单与营业额同一口径（与日结 businessTotals 一致）：当日结账的加上、当日反结账的减去，
   // 前一营业日带优惠的单今天反结账时冲回优惠，净营业额只减「应收 − 优惠」
-  const [discount] = await db<{ amount: number; coupon: number; refund: number }[]>`
+  const [discount] = await db<{ amount: number; coupon: number; memberDiscount: number; refund: number }[]>`
     SELECT coalesce(sum(p.amount) FILTER (WHERE p.method = 'discount' AND c.business_date = ${today}), 0)
              - coalesce(sum(p.amount) FILTER (WHERE p.method = 'discount' AND c.void_business_date = ${today}), 0) AS amount,
            coalesce(sum(p.amount) FILTER (WHERE p.method = 'store_coupon' AND c.business_date = ${today}), 0)
              - coalesce(sum(p.amount) FILTER (WHERE p.method = 'store_coupon' AND c.void_business_date = ${today}), 0) AS coupon,
+           -- 会员折扣（v0.7.25）：口径同券抵扣
+           coalesce(sum(p.amount) FILTER (WHERE p.method = 'member_discount' AND c.business_date = ${today}), 0)
+             - coalesce(sum(p.amount) FILTER (WHERE p.method = 'member_discount' AND c.void_business_date = ${today}), 0) AS member_discount,
            (SELECT coalesce(sum(amount), 0) FROM refunds WHERE status = 'completed' AND business_date = ${today}) AS refund
     FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
-    WHERE p.method IN ('discount', 'store_coupon') AND (c.business_date = ${today} OR c.void_business_date = ${today})`;
+    WHERE p.method IN ('discount', 'store_coupon', 'member_discount') AND (c.business_date = ${today} OR c.void_business_date = ${today})`;
   const [rc] = await db<{ n: number }[]>`SELECT count(*)::int AS n FROM recharges WHERE business_date = ${today}`;
   const tickets = await db<DashboardData['tickets']>`
     SELECT cb.ticket_name AS name,
@@ -100,6 +106,7 @@ export async function dashboard(db: Db, today: string, days: number, opts: { inS
       byMethod,
       discount: discount!.amount,
       coupon: discount!.coupon,
+      memberDiscount: discount!.memberDiscount,
       refund: discount!.refund,
       rechargePaid: t.rechargePaid,
       rechargeCount: rc!.n,

@@ -206,7 +206,7 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
     });
     return visit.id;
   });
-  return getVisit(deps.sql, visitId);
+  return getVisit(deps.sql, visitId, deps.config.timezone);
 }
 
 export const VoidInput = z.object({
@@ -253,7 +253,7 @@ export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: Op
       businessDate: await businessDate(tx, deps, at),
     });
   });
-  return getVisit(deps.sql, peek.visitId);
+  return getVisit(deps.sql, peek.visitId, deps.config.timezone);
 }
 
 export const MoveLinesInput = z.object({
@@ -371,5 +371,5 @@ export async function moveLines(deps: Deps, raw: unknown, ctx: OpContext) {
     });
     return from.id;
   });
-  return getVisit(deps.sql, fromVisitId);
+  return getVisit(deps.sql, fromVisitId, deps.config.timezone);
 }

@@ -1,5 +1,6 @@
 // 会员体系 v2 第二期（v0.7.24，docs/BENEFITS.md）浏览器验收：
-//   · 后台「会员权益」：一键导入本店权益清单（导入为草稿）；编辑服务类「会员专属通道」为每月 2 次、发布；首充礼选券后发布；折扣类不能发布；
+//   · 后台「会员权益」：一键导入本店权益清单（导入为草稿）；编辑服务类「会员专属通道」为每月 2 次、发布；首充礼选券后发布；折扣类 QY-011 预填了折扣；
+//     浴票延迟 QY-004 填起点的分钟数（v0.7.25 续）；
 //   · 会员详情「本月可享」：首笔充值后收到首充礼；登记使用数次数、到上限不能再登记；登记错的作废后腾出次数；
 //   · 登记已经生效、回复却是 500：卡片上方结果待确认、不能另起一笔，查回就是那一次；
 //   · 看板「会员体系」的本月会员权益。
@@ -57,8 +58,21 @@ test.describe('会员权益', () => {
       const channel = page.getByTestId('benefit-row-QY-001');
       await expect(channel).toContainText('会员专属通道');
       await expect(channel).toContainText('L2·初');
-      // 折扣类这一期不能发布
-      await expect(page.getByTestId('benefit-publish-QY-011')).toBeDisabled();
+      // 折扣类（v0.7.25）：QY-011 导入时按会员文档预填客房房费 7.5 折起，仍是草稿（这个用例不发布：发布后结账会自动打折）
+      const roomDiscount = page.getByTestId('benefit-row-QY-011');
+      await expect(roomDiscount).toContainText('7.5 折');
+      await expect(roomDiscount).toContainText('客房房费');
+      await expect(roomDiscount).toContainText('草稿');
+
+      // 浴票延迟（v0.7.25 续）：QY-004 归「浴票延迟」类、导入时不预填分钟数；填起点多给 30 分钟保存
+      // （这个用例不发布：发布后会员门票的跳档会推后，结账的浴票延迟由 tests/ticket-extension.test.ts 覆盖）
+      const extension = page.getByTestId('benefit-row-QY-004');
+      await expect(extension).toContainText('L1·尊');
+      await expect(extension).toContainText('草稿');
+      await page.getByTestId('benefit-edit-QY-004').click();
+      await page.getByTestId('benefit-quantity').fill('30');
+      await page.getByTestId('benefit-save').click();
+      await expect(extension).toContainText('多 30 分钟不跳档');
 
       // 服务类：每月 2 次，发布
       await page.getByTestId('benefit-edit-QY-001').click();

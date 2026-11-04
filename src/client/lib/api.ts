@@ -75,7 +75,8 @@ export async function request<T>(
   } catch {
     /* 非 JSON 响应 */
   }
-  if (res.status === 502 || res.status === 503 || res.status === 504) throw new UncertainError('network');
+  // 网关、断网的 502 / 503 / 504 算网络问题；读请求遇到 yuzu 自己回的 503（带错误码，例如门店没配会员码）按错误显示原因（v0.7.25）
+  if ((res.status === 502 || res.status === 503 || res.status === 504) && !(method === 'GET' && payload?.error?.code)) throw new UncertainError('network');
   // 写请求遇到服务器出错（500 等）：事务可能已经提交（例如登记后读结果失败），不能当作被拒绝。
   // 带操作编号的页面按「结果待确认」处理：保留原编号与原请求，查回、按原内容重新提交或确认作废
   if (method !== 'GET' && res.status >= 500) throw new UncertainError('server');

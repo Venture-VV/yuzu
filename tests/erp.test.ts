@@ -142,6 +142,7 @@ describe('营业数据（只读）', () => {
       receivable: exec.kpis.receivable,
       discount: exec.kpis.discount,
       coupon: exec.kpis.coupon,
+      memberDiscount: exec.kpis.memberDiscount,
       refund: exec.kpis.refund,
       net: exec.kpis.net,
       guests: exec.kpis.guests,

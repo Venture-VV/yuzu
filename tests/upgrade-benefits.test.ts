@@ -11,7 +11,7 @@ import { hashPassword } from '../src/server/auth/password';
 import { createSql, type Sql } from '../src/server/db';
 import { migrate } from '../src/server/migrate';
 import { benefitChecks } from '../src/server/modules/benefits';
-import { PASSWORD, TEST_DB } from './helpers';
+import { PASSWORD, TEST_DB, migrationsFrom } from './helpers';
 import { resetPublicSchema } from './test-db';
 
 const MIGRATIONS = new URL('../src/server/migrations/', import.meta.url);
@@ -64,7 +64,7 @@ describe('迁移 041 · 会员体系 v2 第二期', () => {
     await sql`INSERT INTO membership_job_runs (job, business_date, finished_at, processed) VALUES ('daily', '2026-11-01', now(), 3)`;
     await sql`INSERT INTO op_fences (key, op_type, staff_id) VALUES (${randomUUID()}, 'grade_adjust', ${owner!.id})`;
 
-    expect(await migrate(sql)).toEqual(['041_benefits.sql', '043_miniprogram.sql', '044_miniprogram_fences.sql']);
+    expect(await migrate(sql)).toEqual(migrationsFrom('041_benefits.sql'));
 
     const [counts] = await sql<{ issues: number; benefits: number; grants: number; uses: number }[]>`
       SELECT (SELECT count(*) FROM coupon_issues)::int AS issues, (SELECT count(*) FROM benefits)::int AS benefits,

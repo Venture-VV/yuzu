@@ -12,7 +12,7 @@ import { KITCHEN_STATUS_LABELS, type KitchenStatus, type PendingDish, type Table
 import { maskPhone } from '@shared/labels';
 import type { MemberSummary } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
-import { useMembers } from '../../lib/queries';
+import { memberCodeOf, useMembers } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, formatTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
@@ -292,6 +292,14 @@ export function MemberField({
 }) {
   const [q, setQ] = useState('');
   const members = useMembers(value ? '' : q.trim());
+  // 扫到会员码（v0.7.25，小程序 MP9）：校验通过就直接登记这位会员
+  useEffect(() => {
+    if (!value && memberCodeOf(q) && members.isSuccess && members.data.length === 1) {
+      onChange(members.data[0]!);
+      setQ('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [members.isSuccess, members.data]);
   if (value) {
     return (
       <Field label="会员" hint="结账时可以用这位会员的储值支付">
@@ -326,6 +334,11 @@ export function MemberField({
               </li>
             ))}
             {members.data?.length === 0 && <li className="px-3 py-1.5 text-[13px] text-ink-3">没有找到会员，可以不登记</li>}
+            {memberCodeOf(q) && members.error && (
+              <li className="px-3 py-1.5 text-[13px] font-semibold text-clay" data-testid={`${testPrefix}-member-code-error`}>
+                {errorMessage(members.error)}
+              </li>
+            )}
           </ul>
         )}
       </div>

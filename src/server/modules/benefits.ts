@@ -23,7 +23,16 @@ import {
   BENEFIT_STATUS_LABELS,
   benefitEligible,
   benefitQuantity,
+  DISCOUNT_TARGET_LABELS,
+  DISCOUNT_TARGETS,
+  discountDaysText,
   FESTIVAL_WINDOW_DAYS,
+  MAX_DISCOUNT_RATE,
+  MAX_EXTENSION_MINUTES,
+  minutesText,
+  MIN_DISCOUNT_RATE,
+  MIN_EXTENSION_MINUTES,
+  rateText,
   MAX_BENEFIT_COUPONS,
   MAX_BENEFIT_LIMIT,
   MAX_FESTIVAL_DATES,
@@ -43,6 +52,7 @@ import {
   type BenefitStatus,
   type BenefitSummary,
   type BenefitUseRow,
+  type DiscountTarget,
   type MemberBenefitItem,
   type MemberBenefits,
   type TierQuantity,
@@ -62,6 +72,8 @@ import { setTxTimeouts } from '../lib/tx';
 import { issueBenefitCoupons, listTemplates } from './coupons';
 import { erpOpAbandoned } from './erp-ops';
 import { loadMembershipRules, projectedGrade, settleMemberDue } from './membership';
+import { benefitState } from './member-trials';
+import { GIFT_BENEFIT_CODE } from '@shared/trials';
 import { loadSettings } from './settings';
 
 // ───────────────────────── 读权益 ─────────────────────────
@@ -79,6 +91,9 @@ interface BenefitDef {
   templateId: number | null;
   events: BenefitEvent[];
   festivalDates: string[];
+  discountTarget: DiscountTarget | null;
+  weekdays: number[];
+  monthDays: number[];
   content: string;
   conditions: string;
   status: BenefitStatus;
@@ -88,7 +103,8 @@ interface BenefitDef {
 
 const DEF_COLUMNS = (db: Db) => db`
   b.id, b.code, b.name, b.category, b.start_grade, b.start_tier, b.period, b.quantity, b.tier_quantities, b.template_id, b.events,
-  b.festival_dates::text[] AS festival_dates, b.content, b.conditions, b.status, b.version, b.sort_order`;
+  b.festival_dates::text[] AS festival_dates, b.discount_target, b.weekdays::int[] AS weekdays, b.month_days::int[] AS month_days,
+  b.content, b.conditions, b.status, b.version, b.sort_order`;
 
 /** 已发布的券类、事件礼（自动发放用；不加锁，读已提交的） */
 async function publishedForGrants(db: Db): Promise<BenefitDef[]> {
@@ -425,11 +441,13 @@ export async function importCatalog(sql: Sql, staffId: number | null, ip?: strin
     let created = 0;
     for (const [i, e] of BENEFIT_CATALOG.entries()) {
       const start = parseStart(e.start);
+      // 折扣类按会员文档预填的折扣（v0.7.25，M44；仍是草稿）
       const rows = await tx`
-        INSERT INTO benefits (code, name, category, start_grade, start_tier, period, quantity, events, content, conditions, status, sort_order,
-                              created_by, updated_by)
+        INSERT INTO benefits (code, name, category, start_grade, start_tier, period, quantity, tier_quantities, discount_target, events, content,
+                              conditions, status, sort_order, created_by, updated_by)
         VALUES (${e.code}, ${e.name}, ${e.category}, ${start?.grade ?? null}, ${start?.tier ?? null}, ${e.period}, ${e.quantity},
-                ${e.events}::text[], ${e.content}, ${e.conditions}, ${e.status}, ${(i + 1) * 10}, ${staffId}, ${staffId})
+                ${tx.json((e.discount?.tierQuantities ?? []) as unknown as Parameters<typeof tx.json>[0])}, ${e.discount?.target ?? null}, ${e.events}::text[], ${e.content}, ${e.conditions},
+                ${e.status}, ${(i + 1) * 10}, ${staffId}, ${staffId})
         ON CONFLICT (code) DO NOTHING RETURNING id`;
       created += rows.length;
     }
@@ -448,14 +466,19 @@ const BenefitInput = z.object({
   startGrade: gradeField.nullable(),
   startTier: tierField,
   period: z.enum(BENEFIT_PERIODS, '请选择周期'),
-  quantity: z.number('数量要是整数').int('数量要是整数').min(1, '数量至少 1').max(MAX_BENEFIT_LIMIT, `数量最多 ${MAX_BENEFIT_LIMIT}`).nullable(),
+  // 浴票延迟的分钟数最多 240，其余类别最多 99（按类别在 normalize 里核对）
+  quantity: z.number('数量要是整数').int('数量要是整数').min(1, '数量至少 1').max(MAX_EXTENSION_MINUTES, `数量最多 ${MAX_EXTENSION_MINUTES}`).nullable(),
   tierQuantities: z
-    .array(z.object({ grade: gradeField, tier: tierField, quantity: z.number('数量要是整数').int().min(1, '数量至少 1').max(MAX_BENEFIT_LIMIT, `数量最多 ${MAX_BENEFIT_LIMIT}`) }))
+    .array(z.object({ grade: gradeField, tier: tierField, quantity: z.number('数量要是整数').int().min(1, '数量至少 1').max(MAX_EXTENSION_MINUTES, `数量最多 ${MAX_EXTENSION_MINUTES}`) }))
     .max(18, '各档阶数量最多 18 行')
     .default([]),
   templateId: z.number().int().positive().nullable().default(null),
   events: z.array(z.enum(BENEFIT_EVENTS, '事件不正确')).max(BENEFIT_EVENTS.length).default([]),
   festivalDates: z.array(z.string().regex(ISO_DATE, '节日日期格式应为 YYYY-MM-DD')).max(MAX_FESTIVAL_DATES, `节日最多 ${MAX_FESTIVAL_DATES} 个`).default([]),
+  // 折扣类（v0.7.25）：打哪些明细、每周几（1 = 周一）、每月几号；空 = 每天
+  discountTarget: z.enum(DISCOUNT_TARGETS, '请选择打哪些明细').nullable().default(null),
+  weekdays: z.array(z.number('星期不正确').int().min(1, '星期不正确').max(7, '星期不正确')).max(7).default([]),
+  monthDays: z.array(z.number('日期不正确').int().min(1, '每月几号是 1–31').max(31, '每月几号是 1–31')).max(31).default([]),
   content: z.string().trim().max(500, '内容最多 500 字').default(''),
   conditions: z.string().trim().max(500, '使用条件最多 500 字').default(''),
 });
@@ -490,10 +513,33 @@ function normalize(input: BenefitInputData): Normalized {
       throw issue(`设了${b.period === 'day' ? '每天' : b.period === 'month' ? '每月' : '每年'}就要填几次（不限次请选「不计次」）`, 'quantity');
     }
   }
-  if (b.category === 'discount' || b.category === 'info') {
+  if (b.category === 'info') {
     out.period = 'none';
     out.quantity = null;
     out.tierQuantities = [];
+  }
+  // 浴票延迟（v0.7.25 续）：起点与各档阶的分钟数（1–240），不计次；别的类别数量最多 99
+  if (b.category === 'extension') {
+    out.period = 'none';
+    const bad = (q: number) => q < MIN_EXTENSION_MINUTES || q > MAX_EXTENSION_MINUTES;
+    if (b.quantity !== null && bad(b.quantity)) throw issue(`浴票延迟填分钟数：${MIN_EXTENSION_MINUTES}–${MAX_EXTENSION_MINUTES}`, 'quantity');
+    if (b.tierQuantities.some((q) => bad(q.quantity))) throw issue(`各档阶的浴票延迟填分钟数：${MIN_EXTENSION_MINUTES}–${MAX_EXTENSION_MINUTES}`, 'tierQuantities');
+  } else {
+    if (b.quantity !== null && b.quantity > MAX_BENEFIT_LIMIT) throw issue(`数量最多 ${MAX_BENEFIT_LIMIT}`, 'quantity');
+    if (b.tierQuantities.some((q) => q.quantity > MAX_BENEFIT_LIMIT)) throw issue(`各档阶数量最多 ${MAX_BENEFIT_LIMIT}`, 'tierQuantities');
+  }
+  // 折扣类：「付几成」在数量与各档阶表里（10–99），打哪些明细、每周几、每月几号；别的类别没有这几项
+  if (b.category === 'discount') {
+    out.period = 'none';
+    const bad = (q: number) => q < MIN_DISCOUNT_RATE || q > MAX_DISCOUNT_RATE;
+    if (b.quantity !== null && bad(b.quantity)) throw issue(`折扣填「付几成」：${MIN_DISCOUNT_RATE}–${MAX_DISCOUNT_RATE}（75 = 7.5 折）`, 'quantity');
+    if (b.tierQuantities.some((q) => bad(q.quantity))) throw issue(`各档阶的折扣填「付几成」：${MIN_DISCOUNT_RATE}–${MAX_DISCOUNT_RATE}（75 = 7.5 折）`, 'tierQuantities');
+    out.weekdays = [...new Set(b.weekdays)].sort((x, y) => x - y);
+    out.monthDays = [...new Set(b.monthDays)].sort((x, y) => x - y);
+  } else {
+    out.discountTarget = null;
+    out.weekdays = [];
+    out.monthDays = [];
   }
   if (couponLike && b.quantity !== null && b.quantity > MAX_BENEFIT_COUPONS) throw issue(`券每期（每次）最多 ${MAX_BENEFIT_COUPONS} 张`, 'quantity');
   // 各档阶数量：每行一个状态（L0 不分阶），不重复，按从低到高排；起点以下的行没有意义
@@ -514,7 +560,10 @@ function normalize(input: BenefitInputData): Normalized {
 async function publishProblems(db: Db, b: Normalized, today: string): Promise<string[]> {
   const problems: string[] = [];
   if (b.startGrade === null) problems.push('请先设配置起点');
-  if (b.category === 'discount') problems.push('折扣类在第三期（v0.7.25）结账时自动算，这一期不能发布');
+  if (b.category === 'discount') {
+    if (b.discountTarget === null) problems.push('请选择打哪些明细（客房房费、门票、整张账单）');
+    if (b.quantity === null) problems.push('请填写起点的折扣（付几成，75 = 7.5 折）');
+  }
   if (b.category === 'coupon' || b.category === 'event') {
     if (b.quantity === null) problems.push(b.category === 'coupon' ? '请填写每期几张' : '请填写每次几张');
     if (b.category === 'event' && b.events.length === 0) problems.push('请选择什么时候发（首笔充值、升档、升阶、保级、生日月、节日）');
@@ -529,6 +578,7 @@ async function publishProblems(db: Db, b: Normalized, today: string): Promise<st
     }
   }
   if (b.category === 'service' && b.period !== 'none' && b.quantity === null) problems.push('请填写每期几次');
+  if (b.category === 'extension' && b.quantity === null) problems.push('请填写起点多给几分钟不跳档（浴票延迟）');
   return problems;
 }
 
@@ -572,6 +622,9 @@ function toBenefit(r: CatalogRow, summaries: Map<number, string>): Benefit {
     templateSummary: r.templateId === null ? null : (summaries.get(Number(r.templateId)) ?? null),
     events: r.events,
     festivalDates: r.festivalDates,
+    discountTarget: r.discountTarget,
+    weekdays: r.weekdays,
+    monthDays: r.monthDays,
     content: r.content,
     conditions: r.conditions,
     status: r.status,
@@ -645,7 +698,10 @@ async function lockBenefit(tx: Tx, id: number, expectedVersion: number): Promise
   return cur;
 }
 
-const FIELDS = ['name', 'category', 'startGrade', 'startTier', 'period', 'quantity', 'tierQuantities', 'templateId', 'events', 'festivalDates', 'content', 'conditions'] as const;
+const FIELDS = [
+  'name', 'category', 'startGrade', 'startTier', 'period', 'quantity', 'tierQuantities', 'templateId', 'events', 'festivalDates',
+  'discountTarget', 'weekdays', 'monthDays', 'content', 'conditions',
+] as const;
 
 /** 改一项（带版本号，对不上拒绝）；已发布的改完还要能发布。已经发出的券、登记的使用不变 */
 export async function updateBenefit(deps: Deps, id: number, raw: unknown, ctx: OpContext): Promise<Benefit> {
@@ -662,6 +718,20 @@ export async function updateBenefit(deps: Deps, id: number, raw: unknown, ctx: O
       const problems = await publishProblems(tx, b, date);
       if (problems.length) throw unprocessable('BENEFIT_NOT_PUBLISHABLE', `这一项已发布，改完要还能发布：${problems.join('；')}（不再提供请先暂缓）`, { problems });
     }
+    // 结账里用过的会员折扣、浴票延迟不能再改类别（Codex 评审 24f6862）：结账单记的是这一项与当时的版本，
+    // 自检按类别核对每一笔会员折扣；改成别的类别，以前的结账单就对不上了（作废的结账单也算）。不再提供请暂缓
+    if (b.category !== cur.category && (cur.category === 'discount' || cur.category === 'extension')) {
+      const [used] = await tx<{ n: number }[]>`
+        SELECT (SELECT count(*) FROM checkout_payments WHERE benefit_id = ${id})::int
+             + (SELECT count(*) FROM checkout_bills WHERE ticket_extension_benefit_id = ${id})::int AS n`;
+      if (used!.n) {
+        throw unprocessable(
+          'BENEFIT_CATEGORY_LOCKED',
+          `「${cur.code} ${cur.name}」已经在结账里算过 ${used!.n} 次${cur.category === 'discount' ? '会员折扣' : '浴票延迟'}，不能再改类别；不再提供请暂缓`,
+          { field: 'category' },
+        );
+      }
+    }
     const before: Record<string, unknown> = { ...cur };
     // 各档阶数量存成 jsonb，读回来的键顺序不同：按键排序后比
     const changed = FIELDS.filter((k) => !sameJson(before[k], b[k]));
@@ -669,7 +739,8 @@ export async function updateBenefit(deps: Deps, id: number, raw: unknown, ctx: O
     await tx`
       UPDATE benefits SET name = ${b.name}, category = ${b.category}, start_grade = ${b.startGrade}, start_tier = ${b.startTier}, period = ${b.period},
              quantity = ${b.quantity}, tier_quantities = ${tx.json(b.tierQuantities)}, template_id = ${b.templateId}, events = ${b.events}::text[],
-             festival_dates = ${b.festivalDates}::date[], content = ${b.content}, conditions = ${b.conditions},
+             festival_dates = ${b.festivalDates}::date[], discount_target = ${b.discountTarget}, weekdays = ${b.weekdays}::smallint[],
+             month_days = ${b.monthDays}::smallint[], content = ${b.content}, conditions = ${b.conditions},
              version = version + 1, updated_by = ${ctx.actor.id}, updated_at = now()
       WHERE id = ${id}`;
     await writeAudit(tx, {
@@ -739,8 +810,10 @@ const toUse = (r: BenefitUseRow): BenefitUseRow => ({
 /** 会员详情「本月可享」：现在够格的已发布权益、本期发了几张 / 用了几次、还没够格的、最近的发放与登记 */
 export async function memberBenefits(db: Db, memberId: number, date: string): Promise<MemberBenefits> {
   // 按推算到今天的档阶列（与等级卡一样）：到期还没处理的不按应该已经降掉的档阶列，登记时也按处理完的判断
-  const m = await projectedGrade(db, memberId, date);
-  if (!m) throw notFound('会员不存在');
+  const own = await projectedGrade(db, memberId, date);
+  if (!own) throw notFound('会员不存在');
+  // 临时身份（v0.7.25，M51）：服务类、折扣类、制度说明按自己的与临时身份的取高的；券类、事件礼只按自己的（临时身份不发券）
+  const m = await benefitState(db, memberId, own, date);
   const rules = await loadMembershipRules(db);
   const defs = await db<(BenefitDef & { templateName: string | null })[]>`
     SELECT ${DEF_COLUMNS(db)}, t.name AS template_name FROM benefits b LEFT JOIN coupon_templates t ON t.id = b.template_id
@@ -759,13 +832,14 @@ export async function memberBenefits(db: Db, memberId: number, date: string): Pr
   const upcoming: MemberBenefits['upcoming'] = [];
   for (const b of defs) {
     const id = Number(b.id);
-    if (!benefitEligible(b, m.grade, m.tier)) {
+    const st = b.category === 'coupon' || b.category === 'event' ? own : m;
+    if (!benefitEligible(b, st.grade, st.tier)) {
       if (b.startGrade !== null) upcoming.push({ benefitId: id, code: b.code, name: b.name, category: b.category, startLabel: startLabel(b.startGrade, b.startTier) });
       continue;
     }
     const mine = grants.filter((g) => Number(g.benefitId) === id);
     const pk = b.category === 'service' && b.period === 'none' ? null : b.category === 'event' ? null : periodKey(b.period, date);
-    const quantity = b.category === 'service' && b.period === 'none' ? null : benefitQuantity(b, m.grade, m.tier);
+    const quantity = b.category === 'service' && b.period === 'none' ? null : benefitQuantity(b, st.grade, st.tier);
     const inPeriod = b.category === 'coupon' ? mine.filter((g) => g.reason !== 'event' && g.periodKey === pk) : mine;
     items.push({
       benefitId: id,
@@ -789,6 +863,11 @@ export async function memberBenefits(db: Db, memberId: number, date: string): Pr
       lastGrantDate: mine.length ? mine.map((g) => g.businessDate).sort().at(-1)! : null,
       templateName: b.templateName,
       events: b.events,
+      discount:
+        b.category === 'discount' && quantity !== null && b.discountTarget
+          ? { rate: quantity, text: `结账时自动 · ${rateText(quantity)} · ${DISCOUNT_TARGET_LABELS[b.discountTarget]} · ${discountDaysText(b.weekdays, b.monthDays)}` }
+          : null,
+      extension: b.category === 'extension' && quantity !== null ? { minutes: quantity, text: `结账时自动 · 门票多 ${minutesText(quantity)}不跳档` } : null,
     });
   }
   upcoming.sort((x, y) => {
@@ -855,13 +934,20 @@ export async function registerBenefitUse(deps: Deps, memberId: number, raw: unkn
       if (!b) throw notFound('权益不存在');
       if (b.status !== 'published') throw unprocessable('BENEFIT_UNAVAILABLE', `「${b.code} ${b.name}」${b.status === 'paused' ? '已暂缓' : '还没发布'}，不能登记`);
       if (b.category !== 'service') {
-        throw unprocessable('BENEFIT_NOT_SERVICE', `「${b.name}」是${BENEFIT_CATEGORY_LABELS[b.category]}，不用登记：${b.category === 'coupon' || b.category === 'event' ? '发的券在结账时用' : '只在清单里显示'}`);
+        const why = b.category === 'coupon' || b.category === 'event' ? '发的券在结账时用' : b.category === 'discount' || b.category === 'extension' ? '结账时自动算' : '只在清单里显示';
+        throw unprocessable('BENEFIT_NOT_SERVICE', `「${b.name}」是${BENEFIT_CATEGORY_LABELS[b.category]}，不用登记：${why}`);
+      }
+      // 赠送会籍（v0.7.25）：在会员详情的「邀请体验 / 赠送会籍」里赠送，同时登记一次使用；不单独登记（否则占了次数却没有给对方会籍）
+      if (b.code === GIFT_BENEFIT_CODE) {
+        throw unprocessable('BENEFIT_VIA_TRIAL', `「${b.name}」请在会员详情的「邀请体验 / 赠送会籍」里赠送（同时登记一次使用），不在这里单独登记`);
       }
       const rules = await loadMembershipRules(tx);
-      if (!benefitEligible(b, m.grade, m.tier)) {
-        throw unprocessable('BENEFIT_NOT_ELIGIBLE', `这位会员现在是「${gradeLabel(rules, m.grade, m.tier)}」，「${b.name}」从「${startLabel(b.startGrade, b.startTier)}」起才能享`);
+      // 临时身份（v0.7.25，M51）：服务类按自己的与临时身份的取高的
+      const st = await benefitState(tx, memberId, m, date);
+      if (!benefitEligible(b, st.grade, st.tier)) {
+        throw unprocessable('BENEFIT_NOT_ELIGIBLE', `这位会员现在是「${gradeLabel(rules, st.grade, st.tier)}」${st.trial ? '（含体验中的）' : ''}，「${b.name}」从「${startLabel(b.startGrade, b.startTier)}」起才能享`);
       }
-      const limit = b.period === 'none' ? null : benefitQuantity(b, m.grade, m.tier);
+      const limit = b.period === 'none' ? null : benefitQuantity(b, st.grade, st.tier);
       const pk = limit === null ? null : periodKey(b.period, date);
       if (limit !== null) {
         const [used] = await tx<{ n: number }[]>`
@@ -913,6 +999,9 @@ export async function voidBenefitUse(deps: Deps, id: number, raw: unknown, ctx: 
       SELECT status, staff_id, business_date, member_id, benefit_id, quantity FROM benefit_uses WHERE id = ${id} FOR UPDATE`;
     if (!u) throw notFound('使用登记不存在');
     if (u.status === 'voided') return;
+    // 赠送会籍时记的（v0.7.25）：在受邀会员的详情里撤销那次赠送，一并作废这条登记（只作废登记会留下没有占次数的会籍）
+    const [trial] = await tx<{ memberId: number }[]>`SELECT member_id FROM member_trials WHERE benefit_use_id = ${id}`;
+    if (trial) throw unprocessable('USE_OF_TRIAL', '这条登记是赠送会籍时记的：请在受邀会员的详情里撤销那次赠送（会一并作废这条登记）', { memberId: Number(trial.memberId) });
     if ((Number(u.staffId) !== ctx.actor.id || u.businessDate !== date) && !can(ctx.actor, 'benefit.publish')) {
       throw forbidden('只能作废自己今天登记的；其他的请店主或店总作废');
     }
@@ -946,7 +1035,13 @@ export async function benefitSummary(db: Db, date: string): Promise<BenefitSumma
     FROM benefit_uses WHERE status = 'active' AND business_date BETWEEN ${from} AND ${to}`;
   const rows = await db<CatalogRow[]>`${CATALOG_SELECT(db, from, to)} ORDER BY b.sort_order, b.id`;
   const [job] = await db<BenefitJobRun[]>`SELECT ${JOB_COLUMNS(db)} FROM membership_job_runs WHERE job = 'benefits' ORDER BY business_date DESC LIMIT 1`;
+  // 会员折扣（v0.7.25）：本月结账、没有反结账的
+  const [md] = await db<{ count: number; amount: number; members: number }[]>`
+    SELECT count(*)::int AS count, coalesce(sum(p.amount), 0)::bigint AS amount, count(DISTINCT p.discount_member_id)::int AS members
+    FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
+    WHERE p.method = 'member_discount' AND c.status = 'completed' AND c.business_date BETWEEN ${from} AND ${to}`;
   return {
+    memberDiscount: md!,
     from,
     to,
     published: rows.filter((r) => r.status === 'published').length,
@@ -987,6 +1082,14 @@ export async function benefitChecks(db: Db): Promise<{ label: string; ok: boolea
   const [last] = await db<{ businessDate: string; finishedAt: string | null; error: string | null }[]>`
     SELECT business_date, finished_at, error FROM membership_job_runs WHERE job = 'benefits' ORDER BY business_date DESC LIMIT 1`;
   const jobOk = !last || (!!last.finishedAt && !last.error);
+  // 会员折扣（v0.7.25）：每笔对应一项折扣类权益，记了版本与折扣、有适用明细；一张结账单最多一笔，不与券抵扣、「优惠 / 免单」同在
+  const [md] = await db<{ n: number; total: number }[]>`
+    SELECT count(*) FILTER (WHERE b.id IS NULL OR b.category <> 'discount' OR p.benefit_version > b.version
+                              OR p.coupon_lines IS NULL OR cardinality(p.coupon_lines) = 0
+                              OR EXISTS (SELECT 1 FROM checkout_payments o WHERE o.checkout_id = p.checkout_id AND o.id <> p.id
+                                         AND o.method IN ('discount', 'store_coupon', 'member_discount')))::int AS n,
+           count(*)::int AS total
+    FROM checkout_payments p LEFT JOIN benefits b ON b.id = p.benefit_id WHERE p.method = 'member_discount'`;
   return [
     {
       label: '会员权益发放记录与发券记录一致',
@@ -1002,6 +1105,11 @@ export async function benefitChecks(db: Db): Promise<{ label: string; ok: boolea
       label: '会员权益登记使用不超过次数',
       ok: uses!.n === 0,
       detail: uses!.n ? `${uses!.n} 条登记超过了当时的上限` : `${uses!.total} 条有效登记都没有超过上限`,
+    },
+    {
+      label: '会员折扣：对应折扣类权益、一单一种、不与券和优惠同用',
+      ok: md!.n === 0,
+      detail: md!.n ? `${md!.n} 笔会员折扣对不上（不是折扣类、没有适用明细，或与券、优惠同在一张结账单）` : `${md!.total} 笔会员折扣都对得上`,
     },
     {
       label: '会员权益自动发放（每天的自动任务）',

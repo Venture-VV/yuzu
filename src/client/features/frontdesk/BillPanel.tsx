@@ -32,6 +32,7 @@ import {
   type FrontdeskRules,
   type VisitDetail,
 } from '@shared/frontdesk';
+import { minutesText } from '@shared/benefits';
 import { backfillText } from '@shared/backfill';
 import { KITCHEN_STATUS_LABELS } from '@shared/dining';
 import { technicianText } from '@shared/technicians';
@@ -157,6 +158,11 @@ export function BillPanel({
                 {visit.memberGrade && (
                   <span className={cn('ml-1 text-[12px] font-semibold', visit.memberGrade.graceUntil ? 'text-ember' : 'text-yuzu-deep')} data-testid="bill-member-grade">
                     {visit.memberGrade.label}
+                  </span>
+                )}
+                {visit.memberGrade?.trial && (
+                  <span className="ml-1 text-[12px] font-semibold text-lake" data-testid="bill-member-trial">
+                    体验 {visit.memberGrade.trial.label}
                   </span>
                 )}{' '}
                 <span className="num text-[12px] font-semibold text-ink-3">{visit.member.memberNo} · {maskPhone(visit.member.phone)}</span>
@@ -317,6 +323,11 @@ export function BillPanel({
                       {formatTime(visit.ticket.nextJumpAt)} 后 <Money cents={visit.ticket.nextAmount} />
                     </span>
                   ))}
+                {visit.ticket.extension && (
+                  <span className="text-[12px] text-lake" data-testid="bill-ticket-extension">
+                    会员浴票延迟 {minutesText(visit.ticket.extension.minutes)}
+                  </span>
+                )}
                 <span className="flex-1" />
                 {open && can('frontdesk.operate') && (
                   <button type="button" onClick={() => onAction('ticket')} className="text-[12.5px] font-semibold text-pine hover:underline" data-testid="bill-ticket-change">

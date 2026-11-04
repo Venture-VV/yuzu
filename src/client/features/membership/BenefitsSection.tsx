@@ -1,6 +1,7 @@
 // 后台「会员权益」（会员体系 v2 第二期，v0.7.24；docs/BENEFITS.md）：本店权益清单按类别分组，每项一行——
 // 编号、名称、配置起点、数量与周期、发哪张券、状态、本月发了多少；一键导入清单；逐项编辑（带版本号）、发布、暂缓。
 // 券类发布后每月（每年）自动发、月中升档当场补发；事件礼按事件自动发；服务类列在会员详情「本月可享」、登记使用数次数。
+// 折扣类（v0.7.25）：设打哪些明细、起点与各档阶的折扣（付几成）、每周几 / 每月几号，发布后手牌结账时自动算。
 
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -13,9 +14,19 @@ import {
   BENEFIT_EVENTS,
   BENEFIT_PERIOD_LABELS,
   BENEFIT_STATUS_LABELS,
+  DISCOUNT_TARGET_LABELS,
+  DISCOUNT_TARGETS,
+  discountDaysText,
   MAX_BENEFIT_COUPONS,
   MAX_BENEFIT_LIMIT,
+  MAX_DISCOUNT_RATE,
+  MAX_EXTENSION_MINUTES,
+  minutesText,
+  MIN_DISCOUNT_RATE,
+  MIN_EXTENSION_MINUTES,
   quantityText,
+  rateText,
+  WEEKDAY_LABELS,
   startLabel,
   stateRank,
   type Benefit,
@@ -24,6 +35,7 @@ import {
   type BenefitEvent,
   type BenefitPeriod,
   type BenefitStatus,
+  type DiscountTarget,
   type TierQuantity,
 } from '@shared/benefits';
 import { GRADE_STATES, type Grade, type Tier } from '@shared/membership';
@@ -184,7 +196,11 @@ function BenefitsEditor() {
                       <td className="py-2 pr-3">
                         <span className="whitespace-nowrap">{quantityText(b.category, b.period, b.quantity)}</span>
                         {b.tierQuantities.length > 0 && (
-                          <span className="block text-[12px] text-ink-3">{b.tierQuantities.map((t) => `${startLabel(t.grade, t.tier)} 起 ${t.quantity}`).join('；')}</span>
+                          <span className="block text-[12px] text-ink-3">
+                            {b.tierQuantities
+                              .map((t) => `${startLabel(t.grade, t.tier)} 起 ${cat === 'discount' ? rateText(t.quantity) : cat === 'extension' ? minutesText(t.quantity) : t.quantity}`)
+                              .join('；')}
+                          </span>
                         )}
                       </td>
                       <td className="max-w-[300px] py-2 pr-3 text-ink-2">
@@ -202,6 +218,11 @@ function BenefitsEditor() {
                           <span className="line-clamp-2 text-[12.5px]">{b.content}</span>
                         )}
                         {b.festivalDates.length > 0 && <span className="block text-[12px] text-ink-3">节日 {b.festivalDates.join('、')}</span>}
+                        {cat === 'discount' && (
+                          <span className="block text-[12px] text-ink-3" data-testid={`benefit-discount-${b.code}`}>
+                            {b.discountTarget ? `${DISCOUNT_TARGET_LABELS[b.discountTarget]} · ${discountDaysText(b.weekdays, b.monthDays)}` : '还没选打哪些明细'}
+                          </span>
+                        )}
                       </td>
                       <td className="num py-2 pr-3 whitespace-nowrap text-ink-2">
                         {cat === 'service' ? `${b.month.uses} 次` : cat === 'coupon' || cat === 'event' ? `${b.month.coupons} 张 · ${b.month.members} 位` : '—'}
@@ -224,8 +245,6 @@ function BenefitsEditor() {
                               variant="secondary"
                               icon={<Send className="size-3.5" />}
                               loading={busy === `${b.id}`}
-                              disabled={b.category === 'discount'}
-                              title={b.category === 'discount' ? '折扣类第三期（v0.7.25）结账时自动算，这一期不能发布' : undefined}
                               onClick={() => void changeStatus(b, 'published')}
                               data-testid={`benefit-publish-${b.code}`}
                             >
@@ -265,6 +284,10 @@ interface Draft {
   templateId: string;
   events: BenefitEvent[];
   festivals: string;
+  /** 折扣类（v0.7.25）：打哪些明细、每周几、每月几号（顿号隔开） */
+  discountTarget: DiscountTarget | '';
+  weekdays: number[];
+  monthDays: string;
   content: string;
   conditions: string;
 }
@@ -279,6 +302,9 @@ const toDraft = (b: Benefit): Draft => ({
   templateId: b.templateId === null ? '' : String(b.templateId),
   events: b.events,
   festivals: b.festivalDates.join('、'),
+  discountTarget: b.discountTarget ?? '',
+  weekdays: b.weekdays,
+  monthDays: b.monthDays.join('、'),
   content: b.content,
   conditions: b.conditions,
 });
@@ -297,8 +323,13 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
   if (!benefit || !draft) return null;
   const set = (patch: Partial<Draft>) => setDraft({ ...draft, ...patch });
   const couponLike = draft.category === 'coupon' || draft.category === 'event';
-  const counted = draft.category === 'coupon' || draft.category === 'event' || (draft.category === 'service' && draft.period !== 'none');
-  const maxQty = couponLike ? MAX_BENEFIT_COUPONS : MAX_BENEFIT_LIMIT;
+  const isDiscount = draft.category === 'discount';
+  // 浴票延迟（v0.7.25 续）的「数量」是多给的分钟数：起点的与各档阶的
+  const isExtension = draft.category === 'extension';
+  // 折扣类的「数量」是付几成（v0.7.25）：起点的折扣与各档阶的折扣
+  const counted = couponLike || isDiscount || isExtension || (draft.category === 'service' && draft.period !== 'none');
+  const minQty = isDiscount ? MIN_DISCOUNT_RATE : isExtension ? MIN_EXTENSION_MINUTES : 1;
+  const maxQty = couponLike ? MAX_BENEFIT_COUPONS : isDiscount ? MAX_DISCOUNT_RATE : isExtension ? MAX_EXTENSION_MINUTES : MAX_BENEFIT_LIMIT;
   // 选得到的券：启用的、没过期的，加上现在用的那张（停用了也列出来，方便看清）
   const templates = [...catalog.templates];
   if (benefit.templateId !== null && !templates.some((t) => t.id === benefit.templateId)) {
@@ -310,11 +341,23 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
     setError(null);
     const start = draft.start ? parseState(draft.start) : null;
     const quantity = counted ? (draft.quantity.trim() ? intOf(draft.quantity) : null) : null;
-    if (quantity !== null && (Number.isNaN(quantity) || quantity < 1 || quantity > maxQty)) return setError(`数量要是 1–${maxQty} 的整数`);
+    if (quantity !== null && (Number.isNaN(quantity) || quantity < minQty || quantity > maxQty)) {
+      return setError(
+        isDiscount ? `折扣填「付几成」：${minQty}–${maxQty} 的整数（75 = 7.5 折）` : isExtension ? `浴票延迟填分钟数：${minQty}–${maxQty} 的整数` : `数量要是 1–${maxQty} 的整数`,
+      );
+    }
     const tierQuantities: TierQuantity[] = [];
     for (const t of counted ? draft.tiers : []) {
       const n = intOf(t.quantity);
-      if (!t.state || Number.isNaN(n) || n < 1 || n > maxQty) return setError(`各档阶数量：请选档阶，数量是 1–${maxQty} 的整数`);
+      if (!t.state || Number.isNaN(n) || n < minQty || n > maxQty) {
+        return setError(
+          isDiscount
+            ? `各档阶的折扣：请选档阶，折扣是 ${minQty}–${maxQty} 的整数（75 = 7.5 折）`
+            : isExtension
+              ? `各档阶的浴票延迟：请选档阶，分钟数是 ${minQty}–${maxQty} 的整数`
+              : `各档阶数量：请选档阶，数量是 1–${maxQty} 的整数`,
+        );
+      }
       tierQuantities.push({ ...parseState(t.state), quantity: n });
     }
     const festivalDates = draft.events.includes('festival')
@@ -324,6 +367,14 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
           .filter(Boolean)
       : [];
     if (festivalDates.some((f) => !/^\d{4}-\d{2}-\d{2}$/.test(f))) return setError('节日日期按 YYYY-MM-DD 填，几个日期用顿号隔开');
+    const monthDays = isDiscount
+      ? draft.monthDays
+          .split(/[\s,，、;；]+/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .map(intOf)
+      : [];
+    if (monthDays.some((d) => Number.isNaN(d) || d < 1 || d > 31)) return setError('每月几号填 1–31，几个日期用顿号隔开');
     setBusy(true);
     try {
       await api.put(`/api/benefits/${benefit.id}`, {
@@ -338,6 +389,9 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
         templateId: couponLike && draft.templateId ? Number(draft.templateId) : null,
         events: draft.category === 'event' ? draft.events : [],
         festivalDates,
+        discountTarget: isDiscount && draft.discountTarget ? draft.discountTarget : null,
+        weekdays: isDiscount ? draft.weekdays : [],
+        monthDays,
         content: draft.content.trim(),
         conditions: draft.conditions.trim(),
       });
@@ -414,17 +468,33 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
         )}
         {counted && (
           <Field
-            label={draft.category === 'coupon' ? '每期几张' : draft.category === 'event' ? '每次几张' : '每期几次'}
+            label={
+              draft.category === 'coupon' ? '每期几张' : draft.category === 'event' ? '每次几张' : isDiscount ? '起点的折扣（付几成）' : isExtension ? '起点多给几分钟（不跳档）' : '每期几次'
+            }
             htmlFor="benefit-quantity"
-            hint={draft.category === 'service' ? '到上限后不能再登记' : `最多 ${MAX_BENEFIT_COUPONS} 张`}
+            hint={
+              draft.category === 'service'
+                ? '到上限后不能再登记'
+                : isDiscount
+                  ? `${MIN_DISCOUNT_RATE}–${MAX_DISCOUNT_RATE}：75 = 7.5 折，50 = 5 折`
+                  : isExtension
+                    ? `${MIN_EXTENSION_MINUTES}–${MAX_EXTENSION_MINUTES} 分钟，在「门票跳档宽限」之上多给；每个 12 小时的分界点都多给`
+                    : `最多 ${MAX_BENEFIT_COUPONS} 张`
+            }
           >
             <Input id="benefit-quantity" inputMode="numeric" value={draft.quantity} onChange={(e) => set({ quantity: e.target.value })} data-testid="benefit-quantity" />
           </Field>
         )}
         {counted && (
           <div className="sm:col-span-2">
-            <p className="text-[13px] font-semibold text-ink-2">各档阶数量（可选）</p>
-            <p className="text-[12.5px] text-ink-3">高档阶多给：从这个档阶起按这一行，按会员现在的档阶取一行、不相加。</p>
+            <p className="text-[13px] font-semibold text-ink-2">{isDiscount ? '各档阶的折扣（可选）' : isExtension ? '各档阶多给几分钟（可选）' : '各档阶数量（可选）'}</p>
+            <p className="text-[12.5px] text-ink-3">
+              {isDiscount
+                ? '高档阶折扣更低：从这个档阶起按这一行（付几成），按会员现在的档阶取一行。'
+                : isExtension
+                  ? '从这个档阶起按这一行的分钟数，按会员现在的档阶（含体验中的临时身份）取一行、不相加。'
+                  : '高档阶多给：从这个档阶起按这一行，按会员现在的档阶取一行、不相加。'}
+            </p>
             <div className="mt-2 space-y-2">
               {draft.tiers.map((t, i) => (
                 <div key={i} className="flex items-center gap-2">
@@ -492,6 +562,47 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
               })}
             </div>
           </Field>
+        )}
+        {isDiscount && (
+          <>
+            <Field label="打哪些明细" htmlFor="benefit-discount-target" hint="只打会员本人手牌账单上的这些明细；一张结账单只享一种会员折扣、不与券同用" className="sm:col-span-2">
+              <Select
+                id="benefit-discount-target"
+                value={draft.discountTarget}
+                onChange={(e) => set({ discountTarget: e.target.value as DiscountTarget | '' })}
+                data-testid="benefit-discount-target"
+              >
+                <option value="">请选择（不能发布）</option>
+                {DISCOUNT_TARGETS.map((t) => (
+                  <option key={t} value={t}>
+                    {DISCOUNT_TARGET_LABELS[t]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="每周几（不选 = 每天）" className="sm:col-span-2">
+              <div className="flex flex-wrap gap-2">
+                {WEEKDAY_LABELS.map((label, i) => {
+                  const d = i + 1;
+                  const on = draft.weekdays.includes(d);
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => set({ weekdays: on ? draft.weekdays.filter((x) => x !== d) : [...draft.weekdays, d].sort((a, b) => a - b) })}
+                      className={cn('h-8 rounded-full border px-3 text-[13px] font-semibold', on ? 'border-pine bg-pine-soft text-pine' : 'border-line-strong text-ink-3 hover:text-ink')}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
+            <Field label="每月几号（不填 = 每天）" htmlFor="benefit-month-days" hint="例如会员日每月 8 日；几个日期用顿号隔开；每周几也选了时两样都要满足" className="sm:col-span-2">
+              <Input id="benefit-month-days" value={draft.monthDays} placeholder="8" onChange={(e) => set({ monthDays: e.target.value })} data-testid="benefit-month-days" />
+            </Field>
+          </>
         )}
         {draft.category === 'event' && draft.events.includes('festival') && (
           <Field label="节日日期" htmlFor="benefit-festivals" hint="YYYY-MM-DD，几个日期用顿号隔开；农历节日每年填当年的日期；当天起 7 天内发" className="sm:col-span-2">

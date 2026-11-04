@@ -1,5 +1,6 @@
 // 后台「会员规则」（会员体系 v2，v0.7.23；docs/MEMBERSHIP.md 第 2、4 节）：一页改完档级门槛与赠送比例、享阶 / 尊阶比例、
-// 会籍周期与补充期、首充 / 续充最低、到期提醒、上线定档最高档、VIP 柜对应。保存前列出「会影响哪些以后的判断」。
+// 会籍周期与补充期、首充 / 续充最低、到期提醒、上线定档最高档、VIP 柜对应；v0.7.25 起还有低一档邀请体验的天数、次数与受邀间隔。
+// 保存前列出「会影响哪些以后的判断」。
 
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -16,7 +17,7 @@ export function MembershipRulesSection() {
   return (
     <AdminPage
       section="membership"
-      description="档级门槛与赠送比例、享阶 / 尊阶、会籍周期与补充期、最低充值、到期提醒、VIP 柜对应。改了只影响以后的充值、消费与到期判断，已经记下的档阶不重算。"
+      description="档级门槛与赠送比例、享阶 / 尊阶、会籍周期与补充期、最低充值、到期提醒、VIP 柜对应、邀请体验。改了只影响以后的充值、消费与到期判断，已经记下的档阶不重算。"
     >
       <RulesEditor />
     </AdminPage>
@@ -34,6 +35,9 @@ interface Draft {
   reminderDays: string;
   onboardMaxGrade: number;
   lockers: string[];
+  inviteDays: string;
+  invitesPerMonth: string;
+  inviteeMonths: string;
 }
 
 const yuanText = (cents: number) => (cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2));
@@ -51,6 +55,9 @@ function toDraft(r: MembershipRules): Draft {
     reminderDays: r.reminderDays.join('、'),
     onboardMaxGrade: r.onboardMaxGrade,
     lockers: r.vipLockerLevels.map(String),
+    inviteDays: String(r.trialInviteDays),
+    invitesPerMonth: String(r.trialInvitesPerMonth),
+    inviteeMonths: String(r.trialInviteeMonths),
   };
 }
 
@@ -81,6 +88,8 @@ function fromDraft(d: Draft): MembershipRules | string {
   if (reminderDays.some(Number.isNaN)) return '提醒天数请填整数，用顿号分开，例如 90、60、30、7';
   const lockers = d.lockers.map(int);
   if (lockers.some(Number.isNaN)) return 'VIP 柜等级请填整数（0 = 不能用）';
+  const trial = { trialInviteDays: int(d.inviteDays), trialInvitesPerMonth: int(d.invitesPerMonth), trialInviteeMonths: int(d.inviteeMonths) };
+  if (Object.values(trial).some(Number.isNaN)) return '邀请体验的天数、次数与受邀间隔请填整数';
   return {
     grades,
     ...nums,
@@ -89,6 +98,7 @@ function fromDraft(d: Draft): MembershipRules | string {
     reminderDays,
     onboardMaxGrade: d.onboardMaxGrade,
     vipLockerLevels: lockers,
+    ...trial,
   };
 }
 
@@ -111,6 +121,10 @@ function effects(before: MembershipRules, after: MembershipRules): string[] {
   if (after.reminderDays.join() !== before.reminderDays.join()) out.push(`到期提醒改为前 ${after.reminderDays.join('、')} 天：提醒名单马上按新天数`);
   if (after.onboardMaxGrade !== before.onboardMaxGrade) out.push(`期初导入定档最高 L${before.onboardMaxGrade} → L${after.onboardMaxGrade}：以后的期初导入按新上限`);
   if (after.vipLockerLevels.join() !== before.vipLockerLevels.join()) out.push('VIP 柜对应：发牌、换牌马上按新的对应核对');
+  if (after.trialInviteDays !== before.trialInviteDays) out.push(`邀请体验 ${before.trialInviteDays} → ${after.trialInviteDays} 天：以后发起的按新天数，已经在体验中的到期日不变`);
+  if (after.trialInvitesPerMonth !== before.trialInvitesPerMonth)
+    out.push(`每位会员每月能邀请 ${before.trialInvitesPerMonth} → ${after.trialInvitesPerMonth} 次${after.trialInvitesPerMonth === 0 ? '（0 = 不开放邀请体验）' : ''}：马上生效`);
+  if (after.trialInviteeMonths !== before.trialInviteeMonths) out.push(`受邀间隔 ${before.trialInviteeMonths} → ${after.trialInviteeMonths} 个月：以后发起时按新间隔核对`);
   return out;
 }
 
@@ -236,6 +250,24 @@ function RulesEditor() {
                 </option>
               ))}
             </Select>
+          </Field>
+        </div>
+      </Card>
+
+      <Card className="p-5">
+        <SectionTitle aside={<PendingBadge title="M52：L2 起的会员每月 1 次，给对方低一档的初阶 7 天；受邀人 12 个月内一次（待店主确认）" />}>低一档邀请体验</SectionTitle>
+        <p className="mt-1 text-[12.5px] text-ink-3">
+          L2 起的会员可以邀请一位朋友体验「自己的档级 − 1」的初阶，只享服务、折扣与 VIP 柜，不发券、不进升档保级；赠送会籍（QY-042）的次数在「会员权益」里按 QY-042 设。
+        </p>
+        <div className="mt-3 grid gap-4 sm:grid-cols-3">
+          <Field label="体验几天" htmlFor="trial-days" hint="从发起当天算起">
+            <Input id="trial-days" value={draft.inviteDays} inputMode="numeric" disabled={!editable} data-testid="rule-trial-days" onChange={(e) => setDraft({ ...draft, inviteDays: e.target.value })} />
+          </Field>
+          <Field label="每位会员每月能邀请几次" htmlFor="trial-per-month" hint="0 = 不开放；撤销的不退">
+            <Input id="trial-per-month" value={draft.invitesPerMonth} inputMode="numeric" disabled={!editable} data-testid="rule-trial-per-month" onChange={(e) => setDraft({ ...draft, invitesPerMonth: e.target.value })} />
+          </Field>
+          <Field label="受邀人几个月内只能一次" htmlFor="trial-interval" hint="邀请体验、赠送会籍合计；撤销的不算">
+            <Input id="trial-interval" value={draft.inviteeMonths} inputMode="numeric" disabled={!editable} data-testid="rule-trial-interval" onChange={(e) => setDraft({ ...draft, inviteeMonths: e.target.value })} />
           </Field>
         </div>
       </Card>
