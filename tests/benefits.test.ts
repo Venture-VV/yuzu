@@ -146,11 +146,12 @@ describe('权益清单', () => {
     expect(c.items.filter((b) => b.status === 'paused').map((b) => b.code).sort()).toEqual(['QY-035', 'QY-048', 'QY-050', 'QY-057']);
     expect(c.items.filter((b) => b.status === 'published')).toHaveLength(0);
     const count = (cat: string) => c.items.filter((b) => b.category === cat).length;
-    // QY-004 浴票延迟（v0.7.25 续，迁移 045）归「浴票延迟」类，不再是服务与资格
+    // QY-004 浴票延迟（v0.7.25 续，迁移 045）归「浴票延迟」类，不再是服务与资格；
+    // v0.7.28：QY-057 会员挑战是事件礼「每月到店满几次」，QY-016 停车优惠是服务类（标了停车优惠）
     expect({ coupon: count('coupon'), event: count('event'), discount: count('discount'), extension: count('extension'), info: count('info'), service: count('service') }).toEqual({
       coupon: 11,
-      event: 5,
-      discount: 4,
+      event: 6,
+      discount: 3,
       extension: 1,
       info: 1,
       service: 37,

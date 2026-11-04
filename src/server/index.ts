@@ -10,7 +10,7 @@ import { expireCountCards } from './modules/count-cards';
 import { issueBirthdayCoupons } from './modules/coupons';
 import { checkDevicesOnce, recoverJobs, resumeWaitingJobs } from './modules/devices';
 import { ensureMembershipLive, runMembershipDaily } from './modules/membership';
-import { runBenefitsDaily } from './modules/benefits';
+import { runBenefitsDaily, runVisitChallenges } from './modules/benefits';
 import { HEARTBEAT_INTERVAL_MS } from '@shared/devices';
 import { holdAppPresence } from './presence';
 import { buildMpApp } from './modules/mp/app';
@@ -99,6 +99,13 @@ async function main() {
       if (run.cancelled || run.noShow) app.log.info(`预约：自动取消 ${run.cancelled} 张、记爽约 ${run.noShow} 张`);
     } catch (error) {
       app.log.error({ err: error }, '预约的自动处理失败，下一分钟重试');
+    }
+    // 会员挑战（v0.7.28，QY-057）：这个月到店天数满了、还没送过的会员送一次
+    try {
+      const r = await runVisitChallenges({ sql, config });
+      if (r.members > 0) app.log.info(`会员挑战：${r.members} 位会员满了，发券 ${r.coupons} 张`);
+    } catch (error) {
+      app.log.error({ err: error }, '会员挑战的发放失败，下一分钟重试');
     }
     // 次卡（v0.7.28）：过了有效期没用完的次数作废
     try {

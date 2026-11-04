@@ -101,8 +101,8 @@ beforeAll(async () => {
   await sql`ALTER TABLE recharges ADD COLUMN channel text NOT NULL DEFAULT 'counter'`;
   await sql`CREATE TABLE member_grade_events (id bigserial PRIMARY KEY, member_id bigint, kind text, business_date date, from_grade smallint, from_tier smallint, to_grade smallint, to_tier smallint, cycle_start date, cycle_end date, grace_until date, cycle_spend bigint, rolling_recharge bigint, recharge_id bigint, consumption_id bigint, staff_id bigint, reason text, client_key uuid)`;
   await sql`INSERT INTO settings (key, value) VALUES ('membership_rules', '{"firstRechargeMinCents": 0, "topUpMinCents": 0}'::jsonb)`;
-  // 现版本首笔充值时按会员权益发首充礼（041 才有，042 加了折扣类的几列，047 加了同行几位）：写入期间临时建空的权益表，迁移前删掉
-  await sql`CREATE TABLE benefits (id bigint, code text, name text, category text, start_grade smallint, start_tier smallint, period text, quantity smallint, tier_quantities jsonb, template_id bigint, events text[], festival_dates date[], discount_target text, companion_count smallint, companion_counts jsonb, weekdays smallint[], month_days smallint[], content text, conditions text, status text, version integer, sort_order integer)`;
+  // 现版本首笔充值时按会员权益发首充礼（041 才有，042 加了折扣类的几列，047 加了同行几位，058 加了会员挑战、停车优惠的几列）：写入期间临时建空的权益表，迁移前删掉
+  await sql`CREATE TABLE benefits (id bigint, code text, name text, category text, start_grade smallint, start_tier smallint, period text, quantity smallint, tier_quantities jsonb, template_id bigint, events text[], festival_dates date[], discount_target text, companion_count smallint, companion_counts jsonb, weekdays smallint[], month_days smallint[], visit_target smallint, is_parking boolean, parking_hours smallint, parking_hours_by_tier jsonb, content text, conditions text, status text, version integer, sort_order integer)`;
   // 现版本结账时记浴票延迟（045 才有）：写入期间临时加结账单的两列，迁移前删掉
   await sql`ALTER TABLE checkout_bills ADD COLUMN ticket_extension_minutes smallint NOT NULL DEFAULT 0, ADD COLUMN ticket_extension_benefit_id bigint`;
   const deps = { sql, config };

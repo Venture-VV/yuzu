@@ -83,7 +83,7 @@ import { createSql, type Sql } from './db';
 import { writeAudit } from './lib/audit';
 import { migrate } from './migrate';
 import { ensureMembershipLive, runMembershipDaily } from './modules/membership';
-import { catalogImportPreview, importCatalog, runBenefitsDaily } from './modules/benefits';
+import { catalogImportPreview, importCatalog, runBenefitsDaily, runVisitChallenges } from './modules/benefits';
 import { seedDemo, DEMO_PASSWORD } from './seed';
 import { seedInventoryDemo } from './seed-inventory';
 import { seedFrontdeskDemo } from './seed-frontdesk';
@@ -722,6 +722,9 @@ async function main() {
             ? `会员权益自动发放（营业日 ${benefits.businessDate}）：${benefits.processed} 位会员、${benefits.coupons} 张券${benefits.error ? `；出错：${benefits.error}` : ''}`
             : '会员权益今天已经发过，权益清单之后没有改过',
         );
+        // 会员挑战（v0.7.28）：这个月到店天数满了、还没送过的会员送一次
+        const challenge = await runVisitChallenges({ sql, config });
+        console.log(challenge.members ? `会员挑战：${challenge.members} 位会员满了，发券 ${challenge.coupons} 张` : '会员挑战：没有新满的会员');
         if (run?.error || benefits?.error) process.exitCode = 1;
         break;
       }

@@ -9,6 +9,11 @@
 // 锁：自动发放在调用方已经锁住的会员一行之后，对券模板加共享锁（与改模板串行），不锁权益（读已发布的）；
 //     登记使用：操作编号的咨询锁（与「确认作废」串行）→ 会员一行 → 权益一行（共享锁）；作废使用只锁那条登记；
 //     修改、发布、暂缓只锁权益一行（带版本号）。
+// v0.7.28 ⑧（docs/SCHEDULE_FINISH.md 第 9 节）：
+//   · 会员挑战（QY-057，N9）：事件礼「每月到店满几次」——到店按有结账的营业日算、一天算一次，满了每月每人送一次；
+//     应用每分钟查一次（runVisitChallenges），一位一个事务、只锁会员一行，发放记录的去重键兜底；
+//   · 停车优惠（QY-016，N10）：服务类里标了「停车优惠」的一项——每天一次、按档阶每次免费几小时，前台登记车牌和几小时；
+//     系统不收停车费，只登记，后台「停车登记」按营业日列出、导出给停车场对账。
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -39,6 +44,12 @@ import {
   MAX_BENEFIT_COUPONS,
   MAX_BENEFIT_LIMIT,
   MAX_FESTIVAL_DATES,
+  MAX_PARKING_HOURS,
+  MAX_VISIT_TARGET,
+  MIN_VISIT_TARGET,
+  normalizePlate,
+  parkingHoursFor,
+  PLATE_RE,
   parseStart,
   periodEnd,
   periodKey,
@@ -58,6 +69,7 @@ import {
   type DiscountTarget,
   type MemberBenefitItem,
   type MemberBenefits,
+  type ParkingUseRow,
   type TierQuantity,
 } from '@shared/benefits';
 import { asGrade, gradeLabel, MAX_GRADE, type GradeEventKind, type GradeState, type Tier } from '@shared/membership';
@@ -72,6 +84,7 @@ import { assertNotFenced } from '../lib/fences';
 import { idParam, parse } from '../lib/validate';
 import { sameJson } from '../lib/rule-settings';
 import { setTxTimeouts } from '../lib/tx';
+import { csvReply, toCsv } from '../lib/csv';
 import { issueBenefitCoupons, listTemplates } from './coupons';
 import { erpOpAbandoned } from './erp-ops';
 import { loadMembershipRules, projectedGrade, settleMemberDue } from './membership';
@@ -99,6 +112,10 @@ interface BenefitDef {
   companionCounts: TierQuantity[];
   weekdays: number[];
   monthDays: number[];
+  visitTarget: number | null;
+  parking: boolean;
+  parkingHours: number | null;
+  parkingHoursByTier: TierQuantity[];
   content: string;
   conditions: string;
   status: BenefitStatus;
@@ -109,7 +126,8 @@ interface BenefitDef {
 const DEF_COLUMNS = (db: Db) => db`
   b.id, b.code, b.name, b.category, b.start_grade, b.start_tier, b.period, b.quantity, b.tier_quantities, b.template_id, b.events,
   b.festival_dates::text[] AS festival_dates, b.discount_target, b.companion_count, b.companion_counts,
-  b.weekdays::int[] AS weekdays, b.month_days::int[] AS month_days, b.content, b.conditions, b.status, b.version, b.sort_order`;
+  b.weekdays::int[] AS weekdays, b.month_days::int[] AS month_days, b.visit_target,
+  b.is_parking AS parking, b.parking_hours, b.parking_hours_by_tier, b.content, b.conditions, b.status, b.version, b.sort_order`;
 
 /** 已发布的券类、事件礼（自动发放用；不加锁，读已提交的） */
 async function publishedForGrants(db: Db): Promise<BenefitDef[]> {
@@ -428,6 +446,61 @@ async function needingGrants(db: Db, page: { id: number; grade: number; tier: nu
     .map((m) => Number(m.id));
 }
 
+// ───────────────────────── 会员挑战（v0.7.28，QY-057） ─────────────────────────
+
+/** 这位会员这个月到店几天：有结账（没反结账）的营业日，一天算一次（按来访登记的会员；同行的散客不算） */
+export async function monthVisitDays(db: Db, memberId: number, date: string): Promise<number> {
+  const [row] = await db<{ days: number }[]>`
+    SELECT count(DISTINCT c.business_date)::int AS days
+    FROM checkouts c JOIN checkout_bills cb ON cb.checkout_id = c.id JOIN visits v ON v.id = cb.visit_id
+    WHERE v.member_id = ${memberId} AND c.status = 'completed' AND c.business_date BETWEEN ${`${date.slice(0, 7)}-01`} AND ${date}`;
+  return row?.days ?? 0;
+}
+
+/**
+ * 会员挑战：已发布的「每月到店满几次」事件礼，这个月到店天数够了、还没送过的会员各送一次（事件键「visits:YYYY-MM」去重）。
+ * 应用每分钟调用：每一项先在事务外查出够了还没送的会员，再一位一个事务、只锁会员一行发（到期没处理的跳过，处理完下一分钟再发）。
+ * 送过之后反结账、到店天数又不够了不收回
+ */
+export async function runVisitChallenges(deps: Pick<Deps, 'sql' | 'config'>, now = new Date()): Promise<{ members: number; coupons: number }> {
+  const { sql } = deps;
+  const out = { members: 0, coupons: 0 };
+  const challenges = (await publishedForGrants(sql)).filter((b) => b.category === 'event' && b.events.includes('monthly_visits') && b.visitTarget !== null);
+  if (!challenges.length) return out;
+  const date = businessDateOf(now, deps.config.timezone, (await loadSettings(sql)).businessDayStartHour);
+  const monthKey = date.slice(0, 7);
+  const eventKey = `visits:${monthKey}`;
+  for (const b of challenges) {
+    const due = await sql<{ memberId: number }[]>`
+      SELECT v.member_id
+      FROM checkouts c JOIN checkout_bills cb ON cb.checkout_id = c.id JOIN visits v ON v.id = cb.visit_id JOIN members m ON m.id = v.member_id
+      WHERE c.status = 'completed' AND c.business_date BETWEEN ${`${monthKey}-01`} AND ${date} AND m.status = 'active'
+        AND NOT EXISTS (SELECT 1 FROM benefit_grants g WHERE g.benefit_id = ${b.id} AND g.member_id = v.member_id AND g.event_key = ${eventKey})
+      GROUP BY v.member_id HAVING count(DISTINCT c.business_date) >= ${b.visitTarget!}
+      ORDER BY v.member_id`;
+    for (const { memberId } of due) {
+      const n = await sql.begin(async (tx) => {
+        await setTxTimeouts(tx);
+        await tx`SELECT id FROM members WHERE id = ${memberId} FOR UPDATE`;
+        const g = await granteeOf(tx, Number(memberId), date, null, { settled: true });
+        if (!g) return 0;
+        // 锁住以后再数一次（期间反结账了的不发）
+        if ((await monthVisitDays(tx, Number(memberId), date)) < b.visitTarget!) return 0;
+        const issued = await grantEvent(tx, g, 'monthly_visits', eventKey, [b]);
+        if (issued) {
+          await writeAudit(tx, { staffId: null, action: 'benefit_granted', targetType: 'member', targetId: Number(memberId), detail: { coupons: issued, challenge: b.code, month: monthKey }, businessDate: date });
+        }
+        return issued;
+      });
+      if (n) {
+        out.members += 1;
+        out.coupons += n;
+      }
+    }
+  }
+  return out;
+}
+
 // ───────────────────────── 权益清单：导入、修改、发布 ─────────────────────────
 
 /** 导入预览：清单里编号还没有的会新建 */
@@ -449,11 +522,11 @@ export async function importCatalog(sql: Sql, staffId: number | null, ip?: strin
       // 按默认做法预填的（仍是草稿）：折扣类的折扣（v0.7.25，M44）、浴票延迟的起点与分钟数（v0.7.26，M50）
       const rows = await tx`
         INSERT INTO benefits (code, name, category, start_grade, start_tier, period, quantity, tier_quantities, discount_target,
-                              companion_count, companion_counts, events, content, conditions, status, sort_order, created_by, updated_by)
+                              companion_count, companion_counts, events, is_parking, content, conditions, status, sort_order, created_by, updated_by)
         VALUES (${e.code}, ${e.name}, ${e.category}, ${start?.grade ?? null}, ${start?.tier ?? null}, ${e.period}, ${e.quantity},
                 ${tx.json((e.tierQuantities ?? []) as unknown as Parameters<typeof tx.json>[0])}, ${e.discountTarget ?? null},
                 ${e.companionCount ?? null}, ${tx.json((e.companionCounts ?? []) as unknown as Parameters<typeof tx.json>[0])},
-                ${e.events}::text[], ${e.content}, ${e.conditions}, ${e.status}, ${(i + 1) * 10}, ${staffId}, ${staffId})
+                ${e.events}::text[], ${e.parking ?? false}, ${e.content}, ${e.conditions}, ${e.status}, ${(i + 1) * 10}, ${staffId}, ${staffId})
         ON CONFLICT (code) DO NOTHING RETURNING id`;
       created += rows.length;
     }
@@ -491,6 +564,21 @@ const BenefitInput = z.object({
     .default([]),
   weekdays: z.array(z.number('星期不正确').int().min(1, '星期不正确').max(7, '星期不正确')).max(7).default([]),
   monthDays: z.array(z.number('日期不正确').int().min(1, '每月几号是 1–31').max(31, '每月几号是 1–31')).max(31).default([]),
+  // 会员挑战（v0.7.28）：每月到店满几次
+  visitTarget: z
+    .number('满几次要是整数')
+    .int('满几次要是整数')
+    .min(MIN_VISIT_TARGET, `每月到店至少 ${MIN_VISIT_TARGET} 次`)
+    .max(MAX_VISIT_TARGET, `每月到店最多 ${MAX_VISIT_TARGET} 次`)
+    .nullable()
+    .default(null),
+  // 停车优惠（v0.7.28）：服务类里标为停车优惠（每天一次）；起点与各档阶每次免费几小时（1–24）
+  parking: z.boolean().default(false),
+  parkingHours: z.number('免费几小时要是整数').int('免费几小时要是整数').min(1, '至少免 1 小时').max(MAX_PARKING_HOURS, `最多免 ${MAX_PARKING_HOURS} 小时`).nullable().default(null),
+  parkingHoursByTier: z
+    .array(z.object({ grade: gradeField, tier: tierField, quantity: z.number('免费几小时要是整数').int().min(1, '至少免 1 小时').max(MAX_PARKING_HOURS, `最多免 ${MAX_PARKING_HOURS} 小时`) }))
+    .max(18, '各档阶免费几小时最多 18 行')
+    .default([]),
   content: z.string().trim().max(500, '内容最多 500 字').default(''),
   conditions: z.string().trim().max(500, '使用条件最多 500 字').default(''),
 });
@@ -517,7 +605,7 @@ function normalize(input: BenefitInputData): Normalized {
     out.events = [];
     out.festivalDates = [];
   }
-  if (b.category === 'service') {
+  if (b.category === 'service' && !b.parking) {
     if (b.period === 'none') {
       out.quantity = null;
       out.tierQuantities = [];
@@ -530,6 +618,25 @@ function normalize(input: BenefitInputData): Normalized {
     out.quantity = null;
     out.tierQuantities = [];
   }
+  // 停车优惠（v0.7.28）：只有服务类能标；每天一次（每天 1 次），免费几小时在自己的起点与各档阶表里
+  if (b.parking) {
+    if (b.category !== 'service') throw issue('只有服务类能标为停车优惠', 'parking');
+    out.period = 'day';
+    out.quantity = 1;
+    out.tierQuantities = [];
+    const prows = b.parkingHoursByTier.map((c) => ({ grade: asGrade(c.grade), tier: c.grade === 0 ? null : ((c.tier ?? 0) as Tier), quantity: c.quantity }));
+    const pranks = prows.map((c) => stateRank(c.grade, c.tier));
+    if (new Set(pranks).size !== pranks.length) throw issue('各档阶免费几小时里有重复的档阶', 'parkingHoursByTier');
+    if (b.startGrade !== null && prows.some((c) => stateRank(c.grade, c.tier) <= stateRank(b.startGrade!, b.startTier))) {
+      throw issue('各档阶免费几小时要高于配置起点（起点的填在「免费几小时」里）', 'parkingHoursByTier');
+    }
+    out.parkingHoursByTier = prows.sort((x, y) => stateRank(x.grade, x.tier) - stateRank(y.grade, y.tier));
+  } else {
+    out.parkingHours = null;
+    out.parkingHoursByTier = [];
+  }
+  // 会员挑战（v0.7.28）：只有事件里有「每月到店满几次」才有满几次
+  if (out.category !== 'event' || !out.events.includes('monthly_visits')) out.visitTarget = null;
   // 浴票延迟（v0.7.25 续）：起点与各档阶的分钟数（1–240），不计次；别的类别数量最多 99
   if (b.category === 'extension') {
     out.period = 'none';
@@ -605,6 +712,8 @@ async function publishProblems(db: Db, b: Normalized, today: string): Promise<st
   }
   if (b.category === 'service' && b.period !== 'none' && b.quantity === null) problems.push('请填写每期几次');
   if (b.category === 'extension' && b.quantity === null) problems.push('请填写起点多给几分钟不跳档（浴票延迟）');
+  if (b.category === 'event' && b.events.includes('monthly_visits') && b.visitTarget === null) problems.push('会员挑战请填写每月到店满几次送');
+  if (b.parking && b.parkingHours === null) problems.push('请填写起点每次免费几小时（停车优惠）');
   return problems;
 }
 
@@ -653,6 +762,10 @@ function toBenefit(r: CatalogRow, summaries: Map<number, string>): Benefit {
     companionCounts: r.companionCounts,
     weekdays: r.weekdays,
     monthDays: r.monthDays,
+    visitTarget: r.visitTarget,
+    parking: r.parking,
+    parkingHours: r.parkingHours,
+    parkingHoursByTier: r.parkingHoursByTier,
     content: r.content,
     conditions: r.conditions,
     status: r.status,
@@ -728,7 +841,7 @@ async function lockBenefit(tx: Tx, id: number, expectedVersion: number): Promise
 
 const FIELDS = [
   'name', 'category', 'startGrade', 'startTier', 'period', 'quantity', 'tierQuantities', 'templateId', 'events', 'festivalDates',
-  'discountTarget', 'companionCount', 'companionCounts', 'weekdays', 'monthDays', 'content', 'conditions',
+  'discountTarget', 'companionCount', 'companionCounts', 'weekdays', 'monthDays', 'visitTarget', 'parking', 'parkingHours', 'parkingHoursByTier', 'content', 'conditions',
 ] as const;
 
 /** 改一项（带版本号，对不上拒绝）；已发布的改完还要能发布。已经发出的券、登记的使用不变 */
@@ -769,7 +882,8 @@ export async function updateBenefit(deps: Deps, id: number, raw: unknown, ctx: O
              quantity = ${b.quantity}, tier_quantities = ${tx.json(b.tierQuantities)}, template_id = ${b.templateId}, events = ${b.events}::text[],
              festival_dates = ${b.festivalDates}::date[], discount_target = ${b.discountTarget}, companion_count = ${b.companionCount},
              companion_counts = ${tx.json(b.companionCounts)}, weekdays = ${b.weekdays}::smallint[],
-             month_days = ${b.monthDays}::smallint[], content = ${b.content}, conditions = ${b.conditions},
+             month_days = ${b.monthDays}::smallint[], visit_target = ${b.visitTarget}, is_parking = ${b.parking},
+             parking_hours = ${b.parkingHours}, parking_hours_by_tier = ${tx.json(b.parkingHoursByTier)}, content = ${b.content}, conditions = ${b.conditions},
              version = version + 1, updated_by = ${ctx.actor.id}, updated_at = now()
       WHERE id = ${id}`;
     await writeAudit(tx, {
@@ -825,7 +939,7 @@ const GRANT_SELECT = (db: Db) => db`
 
 const USE_SELECT = (db: Db) => db`
   SELECT u.id, u.benefit_id, b.code AS benefit_code, b.name AS benefit_name, u.quantity, u.period_key, u.limit_at, u.note, u.staff_id,
-         s.display_name AS staff_name, u.business_date, u.created_at, u.status, u.void_reason, v.display_name AS voided_by_name
+         s.display_name AS staff_name, u.business_date, u.created_at, u.status, u.void_reason, v.display_name AS voided_by_name, u.plate, u.hours
   FROM benefit_uses u JOIN benefits b ON b.id = u.benefit_id JOIN staff s ON s.id = u.staff_id LEFT JOIN staff v ON v.id = u.voided_by`;
 
 const toUse = (r: BenefitUseRow): BenefitUseRow => ({
@@ -857,6 +971,8 @@ export async function memberBenefits(db: Db, memberId: number, date: string): Pr
     SELECT benefit_id, period_key, sum(quantity)::int AS n,
            coalesce(sum(quantity) FILTER (WHERE business_date >= ${`${date.slice(0, 7)}-01`}), 0)::int AS month_n
     FROM benefit_uses WHERE member_id = ${memberId} AND status = 'active' GROUP BY 1, 2`;
+  // 会员挑战（v0.7.28）：本月到店几天（有结账的营业日，一天算一次）
+  const visitDays = defs.some((d) => d.events.includes('monthly_visits')) ? await monthVisitDays(db, memberId, date) : 0;
   const items: MemberBenefitItem[] = [];
   const upcoming: MemberBenefits['upcoming'] = [];
   for (const b of defs) {
@@ -868,6 +984,7 @@ export async function memberBenefits(db: Db, memberId: number, date: string): Pr
     }
     const mine = grants.filter((g) => Number(g.benefitId) === id);
     const pk = b.category === 'service' && b.period === 'none' ? null : b.category === 'event' ? null : periodKey(b.period, date);
+    const usedInPeriod = uses.find((u) => Number(u.benefitId) === id && u.periodKey === pk)?.n ?? 0;
     const quantity = b.category === 'service' && b.period === 'none' ? null : benefitQuantity(b, st.grade, st.tier);
     const inPeriod = b.category === 'coupon' ? mine.filter((g) => g.reason !== 'event' && g.periodKey === pk) : mine;
     items.push({
@@ -888,7 +1005,7 @@ export async function memberBenefits(db: Db, memberId: number, date: string): Pr
           ? 0
           : pk === null
             ? uses.filter((u) => Number(u.benefitId) === id && u.periodKey === null).reduce((s, u) => s + u.monthN, 0)
-            : (uses.find((u) => Number(u.benefitId) === id && u.periodKey === pk)?.n ?? 0),
+            : usedInPeriod,
       lastGrantDate: mine.length ? mine.map((g) => g.businessDate).sort().at(-1)! : null,
       templateName: b.templateName,
       events: b.events,
@@ -900,6 +1017,8 @@ export async function memberBenefits(db: Db, memberId: number, date: string): Pr
             }
           : null,
       extension: b.category === 'extension' && quantity !== null ? { minutes: quantity, text: `结账时自动 · 门票多 ${minutesText(quantity)}不跳档` } : null,
+      parking: b.parking ? parkingItem(parkingHoursFor(b, st.grade, st.tier), usedInPeriod > 0) : null,
+      visits: b.category === 'event' && b.events.includes('monthly_visits') && b.visitTarget !== null ? { days: visitDays, target: b.visitTarget } : null,
     });
   }
   upcoming.sort((x, y) => {
@@ -921,11 +1040,23 @@ export async function memberBenefits(db: Db, memberId: number, date: string): Pr
   };
 }
 
+/** 停车优惠在「本月可享」里的说明（没填免费几小时的不能登记） */
+const parkingItem = (hours: number | null, usedToday: boolean) =>
+  hours === null ? null : { hours, usedToday, text: `每次免 ${hours} 小时 · 前台登记车牌（每个营业日一次，系统不收停车费）` };
+
 const UseInput = z.object({
   clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
   benefitId: z.number('请选择权益').int().positive('请选择权益'),
   quantity: z.number('次数要是整数').int('次数要是整数').min(1, '至少 1 次').max(MAX_BENEFIT_LIMIT, `一次最多 ${MAX_BENEFIT_LIMIT} 次`).default(1),
   note: z.string().trim().max(200, '备注最多 200 字').default(''),
+  // 停车优惠（v0.7.28）：车牌（去空格、转大写）与这次免费几小时（不超过这位会员的档阶能免的）
+  plate: z
+    .string()
+    .transform(normalizePlate)
+    .refine((v) => PLATE_RE.test(v), '车牌是 2–12 位汉字、字母或数字（如 粤B12345）')
+    .nullable()
+    .default(null),
+  hours: z.number('免费几小时要是整数').int('免费几小时要是整数').min(1, '至少 1 小时').max(MAX_PARKING_HOURS, `最多 ${MAX_PARKING_HOURS} 小时`).nullable().default(null),
 });
 
 async function getUse(db: Db, id: number): Promise<BenefitUseRow> {
@@ -941,10 +1072,17 @@ async function getUse(db: Db, id: number): Promise<BenefitUseRow> {
 export async function registerBenefitUse(deps: Deps, memberId: number, raw: unknown, ctx: OpContext): Promise<{ use: BenefitUseRow; replayed: boolean }> {
   const input = parse(UseInput, raw);
   const replay = async (db: Db) => {
-    const [p] = await db<{ id: number; memberId: number; benefitId: number; quantity: number; note: string }[]>`
-      SELECT id, member_id, benefit_id, quantity, note FROM benefit_uses WHERE client_key = ${input.clientKey}`;
+    const [p] = await db<{ id: number; memberId: number; benefitId: number; quantity: number; note: string; plate: string | null; hours: number | null }[]>`
+      SELECT id, member_id, benefit_id, quantity, note, plate, hours FROM benefit_uses WHERE client_key = ${input.clientKey}`;
     if (!p) return null;
-    if (Number(p.memberId) !== memberId || Number(p.benefitId) !== input.benefitId || p.quantity !== input.quantity || p.note !== input.note) {
+    if (
+      Number(p.memberId) !== memberId ||
+      Number(p.benefitId) !== input.benefitId ||
+      p.quantity !== input.quantity ||
+      p.note !== input.note ||
+      p.plate !== input.plate ||
+      p.hours !== input.hours
+    ) {
       throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一次登记，请刷新页面后重新登记');
     }
     return Number(p.id);
@@ -979,6 +1117,18 @@ export async function registerBenefitUse(deps: Deps, memberId: number, raw: unkn
       if (!benefitEligible(b, st.grade, st.tier)) {
         throw unprocessable('BENEFIT_NOT_ELIGIBLE', `这位会员现在是「${gradeLabel(rules, st.grade, st.tier)}」${st.trial ? '（含体验中的）' : ''}，「${b.name}」从「${startLabel(b.startGrade, b.startTier)}」起才能享`);
       }
+      // 停车优惠（v0.7.28）：要车牌与这次免费几小时，不超过这位会员现在的档阶能免的；每个营业日一次（数量 1、每天）
+      if (b.parking) {
+        const allowed = parkingHoursFor(b, st.grade, st.tier);
+        if (allowed === null) throw unprocessable('BENEFIT_UNAVAILABLE', `「${b.name}」还没填免费几小时，不能登记`);
+        if (input.plate === null || input.hours === null) throw badRequest('停车优惠请填车牌与这次免费几小时', { field: input.plate === null ? 'plate' : 'hours' });
+        if (input.hours > allowed) {
+          throw unprocessable('PARKING_HOURS', `这位会员现在是「${gradeLabel(rules, st.grade, st.tier)}」，每次最多免 ${allowed} 小时`, { allowed });
+        }
+        if (input.quantity !== 1) throw badRequest('停车优惠一次登记一次', { field: 'quantity' });
+      } else if (input.plate !== null || input.hours !== null) {
+        throw badRequest(`「${b.name}」不是停车优惠，不用填车牌`, { field: 'plate' });
+      }
       const limit = b.period === 'none' ? null : benefitQuantity(b, st.grade, st.tier);
       const pk = limit === null ? null : periodKey(b.period, date);
       if (limit !== null) {
@@ -987,6 +1137,7 @@ export async function registerBenefitUse(deps: Deps, memberId: number, raw: unkn
           WHERE member_id = ${memberId} AND benefit_id = ${b.id} AND period_key = ${pk} AND status = 'active'`;
         if (used!.n + input.quantity > limit) {
           const span = b.period === 'day' ? '今天' : b.period === 'month' ? '本月' : '今年';
+          if (b.parking) throw unprocessable('BENEFIT_LIMIT', `「${b.name}」每个营业日一次，这位会员今天已经登记过了`, { used: used!.n, limit });
           throw unprocessable('BENEFIT_LIMIT', `「${b.name}」${span}已用 ${used!.n} 次，上限 ${limit} 次${used!.n < limit ? `，最多还能登记 ${limit - used!.n} 次` : '，已经用完'}`, {
             used: used!.n,
             limit,
@@ -994,15 +1145,16 @@ export async function registerBenefitUse(deps: Deps, memberId: number, raw: unkn
         }
       }
       const [row] = await tx<{ id: number }[]>`
-        INSERT INTO benefit_uses (benefit_id, member_id, business_date, period_key, quantity, limit_at, note, staff_id, client_key)
-        VALUES (${b.id}, ${memberId}, ${date}, ${pk}, ${input.quantity}, ${limit}, ${input.note}, ${ctx.actor.id}, ${input.clientKey})
+        INSERT INTO benefit_uses (benefit_id, member_id, business_date, period_key, quantity, limit_at, note, staff_id, client_key, plate, hours)
+        VALUES (${b.id}, ${memberId}, ${date}, ${pk}, ${input.quantity}, ${limit}, ${input.note}, ${ctx.actor.id}, ${input.clientKey},
+                ${b.parking ? input.plate : null}, ${b.parking ? input.hours : null})
         RETURNING id`;
       await writeAudit(tx, {
         staffId: ctx.actor.id,
         action: 'benefit_used',
         targetType: 'member',
         targetId: memberId,
-        detail: { useId: row!.id, code: b.code, name: b.name, quantity: input.quantity, period: pk, limit, note: input.note || undefined },
+        detail: { useId: row!.id, code: b.code, name: b.name, quantity: input.quantity, period: pk, limit, note: input.note || undefined, plate: b.parking ? input.plate : undefined, hours: b.parking ? input.hours : undefined },
         ip: ctx.ip,
         businessDate: date,
       });
@@ -1049,6 +1201,28 @@ export async function voidBenefitUse(deps: Deps, id: number, raw: unknown, ctx: 
     });
   });
   return getUse(deps.sql, id);
+}
+
+// ───────────────────────── 停车登记（v0.7.28，给停车场对账） ─────────────────────────
+
+/** 一段营业日里登记的停车优惠（含作废的，作废的不算），按时间先后 */
+export async function parkingUses(db: Db, from: string, to: string): Promise<ParkingUseRow[]> {
+  const rows = await db<ParkingUseRow[]>`
+    SELECT u.id, u.business_date, u.created_at, u.plate, u.hours, u.member_id, m.member_no, m.name AS member_name, b.code AS benefit_code,
+           s.display_name AS staff_name, u.status, u.void_reason
+    FROM benefit_uses u JOIN benefits b ON b.id = u.benefit_id JOIN members m ON m.id = u.member_id JOIN staff s ON s.id = u.staff_id
+    WHERE u.plate IS NOT NULL AND u.business_date BETWEEN ${from} AND ${to}
+    ORDER BY u.id`;
+  return rows.map((r) => ({ ...r, id: Number(r.id), memberId: Number(r.memberId), createdAt: new Date(r.createdAt).toISOString() }));
+}
+
+/** 停车登记导出（给停车场对账）：营业日、时间、车牌、免费几小时、会员号、会员、经办、状态 */
+export function parkingCsv(rows: ParkingUseRow[], timeZone: string): string {
+  const time = (iso: string) => new Date(iso).toLocaleString('zh-CN', { timeZone, hour12: false });
+  return toCsv([
+    ['营业日', '登记时间', '车牌', '免费小时', '会员号', '会员', '经办', '状态'],
+    ...rows.map((r) => [r.businessDate, time(r.createdAt), r.plate, r.hours, r.memberNo, r.memberName, r.staffName, r.status === 'voided' ? `已作废（${r.voidReason ?? ''}）` : '有效']),
+  ]);
 }
 
 // ───────────────────────── 看板汇总 ─────────────────────────
@@ -1202,5 +1376,26 @@ export function registerBenefitRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/benefit-uses/:id/void', { preHandler: guard('benefit.use') }, async (req) => {
     const { id } = parse(idParam, req.params);
     return voidBenefitUse(deps, id, req.body, ctxOf(req));
+  });
+
+  // 停车登记（v0.7.28）：一段营业日里登记的停车优惠，给停车场对账（能登记权益使用的、维护会员权益的都能看）
+  const ParkingQuery = z.object({ from: z.string().regex(ISO_DATE, '开始日期格式应为 YYYY-MM-DD'), to: z.string().regex(ISO_DATE, '结束日期格式应为 YYYY-MM-DD') });
+  const parkingRange = (raw: unknown) => {
+    const q = parse(ParkingQuery, raw ?? {});
+    if (q.from > q.to) throw badRequest('开始日期不能晚于结束日期');
+    if (shiftDate(q.from, 92) < q.to) throw badRequest('一次最多查 93 天');
+    return q;
+  };
+  app.get('/api/benefits/parking', { preHandler: guard() }, async (req) => {
+    if (!can(req.actor, 'benefit.use') && !can(req.actor, 'benefit.publish')) throw forbidden();
+    const q = parkingRange(req.query);
+    return parkingUses(sql, q.from, q.to);
+  });
+  app.get('/api/benefits/parking/export', { preHandler: guard() }, async (req, reply) => {
+    if (!can(req.actor, 'benefit.use') && !can(req.actor, 'benefit.publish')) throw forbidden();
+    const q = parkingRange(req.query);
+    const rows = await parkingUses(sql, q.from, q.to);
+    await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'benefit', targetId: `parking:${q.from}~${q.to}`, ip: req.ip });
+    return csvReply(reply, `停车登记-${q.from}-${q.to}.csv`, parkingCsv(rows, deps.config.timezone));
   });
 }
