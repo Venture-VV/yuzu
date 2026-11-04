@@ -36,6 +36,7 @@ import { registerBenefitRoutes } from './modules/benefits';
 import { registerTrialRoutes } from './modules/member-trials';
 import { registerDeviceRoutes } from './modules/devices';
 import { registerOpeningRoutes } from './modules/opening';
+import { registerMemberHistoryRoutes } from './modules/member-history';
 import { registerPrintRoutes } from './modules/print';
 import { registerShiftRoutes } from './modules/shifts';
 import { registerDashboardRoutes } from './modules/dashboard';
@@ -52,6 +53,10 @@ import { registerSpaceRoutes } from './modules/spaces';
 import { registerFloorplanRoutes } from './modules/floorplans';
 import { registerFloorMapRoutes } from './modules/floormap';
 import { registerUsageRoutes } from './modules/usages';
+import { registerBookingRoutes } from './modules/bookings';
+import { registerCountCardRoutes } from './modules/count-cards';
+import { registerMemberCardRoutes } from './modules/member-cards';
+import { registerPlatformRoutes } from './modules/platform-redemptions';
 import { registerGuideRoutes } from './modules/guide';
 import { registerLocationRoutes } from './modules/locations';
 import { registerCommissionRoutes } from './modules/commission';
@@ -164,6 +169,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerMemberRefundRoutes(app, deps);
   registerMemberAdminRoutes(app, deps);
   registerOpeningRoutes(app, deps);
+  registerMemberHistoryRoutes(app, deps);
   registerShiftRoutes(app, deps);
   registerPrintRoutes(app, deps);
   registerDashboardRoutes(app, deps);
@@ -199,6 +205,10 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerFloorMapRoutes(app, deps);
   // 派对房等「开单即占用」的使用单（v0.7.19）
   registerUsageRoutes(app, deps);
+  registerBookingRoutes(app, deps);
+  registerCountCardRoutes(app, deps);
+  registerMemberCardRoutes(app, deps);
+  registerPlatformRoutes(app, deps);
   // 对客导览（v0.7.19）
   registerGuideRoutes(app, deps);
   registerLocationRoutes(app, deps);

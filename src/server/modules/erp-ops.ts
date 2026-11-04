@@ -16,7 +16,7 @@ import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { conflict, forbidden } from '../lib/errors';
-import { benefitUseOpRef, couponOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isDeviceOp, isFenced, isMemberOp, memberOpRef, trialOpRef } from '../lib/fences';
+import { benefitUseOpRef, countCardOpRef, memberCardOpRef, couponOpRef, platformOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isCountCardOp, isDeviceOp, isFenced, isMemberOp, isPlatformOp, memberOpRef, trialOpRef } from '../lib/fences';
 import { parse } from '../lib/validate';
 import { setTxTimeouts } from '../lib/tx';
 
@@ -59,6 +59,16 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   member_refund: ['member.refund'],
   member_status: ['member.status'],
   member_merge: ['member.merge'],
+  // 次卡（v0.7.28）
+  count_card_sale: ['countcard.sell'],
+  count_card_refund: ['countcard.refund'],
+  // 平台核销补录（v0.7.28）
+  platform_redemption: ['platform.redeem'],
+  platform_settlement: ['platform.settle'],
+  // 业务单据打到小票机（v0.7.28）
+  doc_print: ['print.network'],
+  // 会员实体卡（v0.7.28）
+  member_card: ['member.card'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -87,6 +97,12 @@ const READ: Record<ErpOpType, Permission[]> = {
   member_refund: ['member.refund'],
   member_status: ['member.status'],
   member_merge: ['member.merge'],
+  count_card_sale: ['countcard.sell', 'member.read'],
+  count_card_refund: ['countcard.refund'],
+  platform_redemption: ['platform.redeem', 'platform.settle'],
+  platform_settlement: ['platform.settle'],
+  doc_print: ['print.network'],
+  member_card: ['member.card', 'member.read'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {
@@ -133,6 +149,21 @@ export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise
   // 会员体系收尾（v0.7.26）：退储值单、停用 / 启用记录（refId 是那位会员）、合并单
   if (isMemberOp(type)) {
     const refId = await memberOpRef(db, key, type);
+    if (refId !== null) return { found: true, abandoned: false, refId };
+  }
+  // 次卡（v0.7.28）：售卡、退卡的编号记在卡、退卡单上：refId 是那张卡
+  if (isCountCardOp(type)) {
+    const refId = await countCardOpRef(db, key, type);
+    if (refId !== null) return { found: true, abandoned: false, refId };
+  }
+  // 平台核销补录（v0.7.28）：refId 是那笔补登记、那笔打款登记
+  if (isPlatformOp(type)) {
+    const refId = await platformOpRef(db, key, type);
+    if (refId !== null) return { found: true, abandoned: false, refId };
+  }
+  // 会员实体卡（v0.7.28）：refId 是那张卡
+  if (type === 'member_card') {
+    const refId = await memberCardOpRef(db, key);
     if (refId !== null) return { found: true, abandoned: false, refId };
   }
   return { found: false, abandoned: await isFenced(db, key, [type]) };

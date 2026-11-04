@@ -98,7 +98,14 @@ export async function dashboard(db: Db, today: string, days: number, opts: { inS
     history.push({ date, ...(i === 0 ? t : await dayNet(db, date)) });
   }
   const openShifts = await db<DashboardData['openShifts']>`
-    SELECT s.shift_no, st.display_name AS staff_name, s.started_at FROM shifts s JOIN staff st ON st.id = s.staff_id
+    SELECT s.shift_no,
+           -- 按钱箱交班的：钱箱名（此刻在上面的人）
+           CASE WHEN s.drawer IS NULL THEN st.display_name
+                ELSE s.drawer_name || coalesce('（' || (SELECT string_agg(ms.display_name, '、' ORDER BY m.joined_at, m.id)
+                                                       FROM shift_members m JOIN staff ms ON ms.id = m.staff_id
+                                                       WHERE m.shift_id = s.id AND m.left_at IS NULL) || '）', '') END AS staff_name,
+           s.started_at
+    FROM shifts s JOIN staff st ON st.id = s.staff_id
     WHERE s.status = 'open' ORDER BY s.started_at`;
   return {
     today,

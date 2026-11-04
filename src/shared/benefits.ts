@@ -52,6 +52,16 @@ export const MAX_COMPANIONS = 9;
 /** 折扣「付几成」：10 = 1 折 … 99 = 9.9 折 */
 export const MIN_DISCOUNT_RATE = 10;
 export const MAX_DISCOUNT_RATE = 99;
+/**
+ * 停车优惠（v0.7.28，N10）：服务类里标了「停车优惠」的一项——每天一次，按档阶每次免费几小时（1–24），登记时填车牌（2–12 位汉字、大写字母、数字）。
+ * 系统不收停车费，只登记、给停车场对账
+ */
+export const MAX_PARKING_HOURS = 24;
+export const PLATE_RE = /^[A-Z0-9\u4e00-\u9fa5]{2,12}$/;
+export const normalizePlate = (raw: string): string => raw.replace(/[\s·.-]/g, '').toUpperCase();
+/** 会员挑战（v0.7.28，QY-057，N9）：每月到店满几次（按有结账的营业日数，一天算一次）：2–31 */
+export const MIN_VISIT_TARGET = 2;
+export const MAX_VISIT_TARGET = 31;
 /** 浴票延迟的分钟数（v0.7.25 续，迁移 045）：1–240 */
 export const MIN_EXTENSION_MINUTES = 1;
 export const MAX_EXTENSION_MINUTES = 240;
@@ -59,7 +69,7 @@ export const MAX_EXTENSION_MINUTES = 240;
 export const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] as const;
 
 /** 事件礼的触发事件 */
-export const BENEFIT_EVENTS = ['first_recharge', 'grade_up', 'tier_up', 'retain', 'birthday', 'festival'] as const;
+export const BENEFIT_EVENTS = ['first_recharge', 'grade_up', 'tier_up', 'retain', 'birthday', 'festival', 'monthly_visits'] as const;
 export type BenefitEvent = (typeof BENEFIT_EVENTS)[number];
 export const BENEFIT_EVENT_LABELS: Record<BenefitEvent, string> = {
   first_recharge: '首笔充值',
@@ -68,6 +78,7 @@ export const BENEFIT_EVENT_LABELS: Record<BenefitEvent, string> = {
   retain: '保级',
   birthday: '生日月',
   festival: '节日',
+  monthly_visits: '每月到店满几次',
 };
 
 export const BENEFIT_STATUSES = ['draft', 'published', 'paused'] as const;
@@ -224,11 +235,16 @@ export function discountDayMatches(d: { weekdays: readonly number[]; monthDays: 
 }
 
 /** 适用的明细：客房房费按部门「客房」、门票按「门票」（与部门营业额快照同一口径），整张账单是全部明细 */
-export function discountLines<L extends { category: string }>(target: DiscountTarget, lines: readonly L[]): L[] {
+export function discountLines<L extends { category: string; partyRoomDay?: boolean; usageCharge?: 'fee' | 'open_fee' | null }>(
+  target: DiscountTarget,
+  lines: readonly L[],
+): L[] {
   // 同行优惠按同行客人的明细，口径与本人的门票、整张账单一样
   if (target === 'bill' || target === 'companion_bill') return [...lines];
-  const category = target === 'room' ? '客房' : '门票';
-  return lines.filter((l) => l.category === category);
+  // 包房房费折扣：客房房费，加上派对房等的房费（营业日是周一至周四的，M44；v0.7.28）。
+  // 派对房等的使用单费用只看「房费、周一至周四」，开台费不打——与明细在价目里的分类无关（测试会话 18d4344 的 P2）
+  if (target === 'room') return lines.filter((l) => (l.usageCharge ? l.usageCharge === 'fee' && l.partyRoomDay === true : l.partyRoomDay === true || l.category === '客房'));
+  return lines.filter((l) => l.category === '门票');
 }
 
 /**
@@ -266,6 +282,8 @@ interface CatalogEntry {
   /** 同行优惠预填的同行几位（v0.7.26，M81）：起点的与各档阶表 */
   companionCount?: number;
   companionCounts?: readonly TierQuantity[];
+  /** 停车优惠（v0.7.28，N10）：服务类、每天一次，免费几小时由店主按档阶填 */
+  parking?: boolean;
 }
 
 /**
@@ -338,7 +356,8 @@ export const BENEFIT_CATALOG: readonly CatalogEntry[] = [
   service('QY-013', '房型升级', 'L4·初', '消费客房时免费房型升级。', '视房态；适用房型和日期待明确。'),
   service('QY-014', '客房赠送', 'L4·初', '高卡赠送客房房晚。', '仅周一至周四，节假日禁用；按房态，次日14:00退房；次数待定。'),
   service('QY-015', '专属车位（10个）', 'L5·初', '专属停车位使用资格。', '已决策10万元起，车位有限；不保证随到随有，预留规则待明确。'),
-  listed('discount', 'QY-016', '停车折扣', 'L0·会员', '停车优惠。', '其他档位按档优惠；折扣、时长及停车场待明确。'),
+  // 停车优惠（v0.7.28，N10）：服务类、每天一次，按档阶配每次免费几小时，前台登记车牌和时长（系统不收停车费，只登记、给停车场对账）
+  { ...service('QY-016', '停车折扣', 'L0·会员', '停车优惠。', '其他档位按档优惠；折扣、时长及停车场待明确。'), period: 'day', quantity: 1, parking: true },
   service('QY-017', '欢迎饮品', 'L1·初', '每次到店咖啡、特调或手作糖水1份。', '首份免费，后续付费；可选品类待公布。'),
   service('QY-018', '限定甜品', 'L2·享', '每次入场限定甜品1份。', '具体品类和领取规则待公布。'),
   monthlyCoupon('QY-019', '月度餐饮券', 'L2·初', '月度餐饮消费券。', '面额按档配置，适用餐次和期限待明确。'),
@@ -385,7 +404,8 @@ export const BENEFIT_CATALOG: readonly CatalogEntry[] = [
   listed('discount', 'QY-054', '会员日', 'L1·初', '会员日券核销活动。', '旧宝安库为每月8日，无积分；最终活动日期及内容待公布。'),
   eventGift('QY-055', '节日关怀', 'L1·初', '节日礼赠与生日关怀。', '按公布节日和会员档位，不承诺每月必发。', ['festival']),
   listed('info', 'QY-056', '跨店余额通用', 'L0·会员', '福田、宝安会员资金通用。', '制度规则而非券类权益；统一等级与资金，具体权益按到店门店清单。'),
-  service('QY-057', '会员挑战活动', 'L0·会员', '限时会员挑战活动候选。', '暂缓，待单独公布活动；非注册即得，不照搬福田月到店4次活动。', 'paused'),
+  // 会员挑战（v0.7.28，N9）：每月到店满几次送券（事件礼）；店主填了次数和券才能发布，导入仍是暂缓
+  { ...eventGift('QY-057', '会员挑战活动', 'L0·会员', '限时会员挑战活动候选。', '暂缓，待单独公布活动；非注册即得，不照搬福田月到店4次活动。', ['monthly_visits']), status: 'paused' },
   service('CUS-1790670435981', '专属锁牌号', 'L4·初', '专属锁牌号使用资格。', '号码范围、保留期限和可用规则待明确。'),
   service('P021', '行李优先寄存', '未配置；待公布', '会员行李优先寄存。', '物理资源表记录为会员便利服务，不预约；具体适用资格待公布。'),
 ];
@@ -419,6 +439,12 @@ export interface Benefit {
   companionCounts: TierQuantity[];
   weekdays: number[];
   monthDays: number[];
+  /** 会员挑战（v0.7.28，事件「每月到店满几次」）：满几次送 */
+  visitTarget: number | null;
+  /** 停车优惠（v0.7.28）：服务类里的停车优惠（每天一次）；起点每次免费几小时与各档阶表 */
+  parking: boolean;
+  parkingHours: number | null;
+  parkingHoursByTier: TierQuantity[];
   content: string;
   conditions: string;
   status: BenefitStatus;
@@ -482,6 +508,10 @@ export interface MemberBenefitItem {
   discount: { rate: number; text: string } | null;
   /** 浴票延迟（v0.7.25 续）：这位会员此刻多给几分钟不跳档 */
   extension: { minutes: number; text: string } | null;
+  /** 停车优惠（v0.7.28）：这位会员每次免费几小时；今天登记过没有（每个营业日一次） */
+  parking: { hours: number; usedToday: boolean; text: string } | null;
+  /** 会员挑战（v0.7.28）：本月到店几天、满几天送 */
+  visits: { days: number; target: number } | null;
 }
 
 export interface BenefitGrantRow {
@@ -514,6 +544,25 @@ export interface BenefitUseRow {
   status: 'active' | 'voided';
   voidReason: string | null;
   voidedByName: string | null;
+  /** 停车优惠（v0.7.28）：车牌与免费几小时 */
+  plate: string | null;
+  hours: number | null;
+}
+
+/** 停车登记（v0.7.28，给停车场对账）：一段营业日里登记的停车优惠 */
+export interface ParkingUseRow {
+  id: number;
+  businessDate: string;
+  createdAt: string;
+  plate: string;
+  hours: number;
+  memberId: number;
+  memberNo: string;
+  memberName: string;
+  benefitCode: string;
+  staffName: string;
+  status: 'active' | 'voided';
+  voidReason: string | null;
 }
 
 export interface MemberBenefits {
@@ -544,4 +593,15 @@ export interface BenefitSummary {
   job: BenefitJobRun | null;
   /** 会员折扣（v0.7.25）：本月结账的（不含已反结账的）笔数、金额（分）、几位会员 */
   memberDiscount: { count: number; amount: number; members: number };
+}
+
+/** 停车优惠的说明：「每次免 2 小时，L3·初 起 3 小时」；没填起点的是「还没填免费几小时」 */
+export function parkingText(b: { parkingHours: number | null; parkingHoursByTier: readonly TierQuantity[] }): string {
+  if (b.parkingHours === null) return '还没填免费几小时';
+  return [`每次免 ${b.parkingHours} 小时`, ...b.parkingHoursByTier.map((t) => `${startLabel(t.grade, t.tier)} 起 ${t.quantity} 小时`)].join('，');
+}
+
+/** 这位会员每次免费几小时：与数量一样按会员现在的档阶取一行、不相加；没配置为空 */
+export function parkingHoursFor(b: { parkingHours: number | null; parkingHoursByTier: TierQuantity[] }, grade: number, tier: number | null): number | null {
+  return benefitQuantity({ quantity: b.parkingHours, tierQuantities: b.parkingHoursByTier }, grade, tier);
 }

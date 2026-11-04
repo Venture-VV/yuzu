@@ -56,6 +56,8 @@ beforeAll(async () => {
   await sql`CREATE TABLE bonus_lots (id bigserial PRIMARY KEY, member_id bigint, source text, recharge_id bigint, amount bigint, remaining bigint, expires_at timestamptz, created_at timestamptz)`;
   await sql`CREATE TABLE checkouts (id bigserial PRIMARY KEY, checkout_no text, status text)`;
   await sql`CREATE TABLE shifts (id bigserial PRIMARY KEY, staff_id bigint, status text)`;
+  // 收款按当班成员找班次（059 才有）：写入期间临时建空表，迁移前删掉
+  await sql`CREATE TABLE shift_members (shift_id bigint, staff_id bigint, left_at timestamptz)`;
   await sql`ALTER TABLE recharges ADD COLUMN shift_id bigint`;
   // 现版本的会员消费会查会员有没有在店手牌（R1.2，004 才有手牌与来访）；收款前必须先开班的规则（R1.2）在升级前不存在
   await sql`CREATE TABLE hand_tags (id bigserial PRIMARY KEY, code text)`;
@@ -74,8 +76,8 @@ beforeAll(async () => {
   await sql`ALTER TABLE recharges ADD COLUMN channel text NOT NULL DEFAULT 'counter'`;
   await sql`CREATE TABLE member_grade_events (id bigserial PRIMARY KEY, member_id bigint, kind text, business_date date, from_grade smallint, from_tier smallint, to_grade smallint, to_tier smallint, cycle_start date, cycle_end date, grace_until date, cycle_spend bigint, rolling_recharge bigint, recharge_id bigint, consumption_id bigint, staff_id bigint, reason text, client_key uuid)`;
   await sql`INSERT INTO settings (key, value) VALUES ('membership_rules', '{"firstRechargeMinCents": 0, "topUpMinCents": 0}'::jsonb)`;
-  // 现版本首笔充值时按会员权益发首充礼（041 才有，042 加了折扣类的几列，047 加了同行几位）：写入期间临时建空的权益表，迁移前删掉
-  await sql`CREATE TABLE benefits (id bigint, code text, name text, category text, start_grade smallint, start_tier smallint, period text, quantity smallint, tier_quantities jsonb, template_id bigint, events text[], festival_dates date[], discount_target text, companion_count smallint, companion_counts jsonb, weekdays smallint[], month_days smallint[], content text, conditions text, status text, version integer, sort_order integer)`;
+  // 现版本首笔充值时按会员权益发首充礼（041 才有，042 加了折扣类的几列，047 加了同行几位，058 加了会员挑战、停车优惠的几列）：写入期间临时建空的权益表，迁移前删掉
+  await sql`CREATE TABLE benefits (id bigint, code text, name text, category text, start_grade smallint, start_tier smallint, period text, quantity smallint, tier_quantities jsonb, template_id bigint, events text[], festival_dates date[], discount_target text, companion_count smallint, companion_counts jsonb, weekdays smallint[], month_days smallint[], visit_target smallint, is_parking boolean, parking_hours smallint, parking_hours_by_tier jsonb, content text, conditions text, status text, version integer, sort_order integer)`;
   // 升级前已有的消费项目（只有一个价格）
   const [item] = await sql<{ id: number }[]>`INSERT INTO service_items (name, category, price) VALUES ('升级前项目', '护理', 6800) RETURNING id`;
   itemId = item!.id;
@@ -101,6 +103,7 @@ beforeAll(async () => {
   await sql`DROP TABLE visits`;
   await sql`DROP TABLE hand_tags`;
   await sql`DELETE FROM settings WHERE key = 'require_open_shift'`;
+  await sql`DROP TABLE shift_members`;
   await sql`DROP TABLE shifts`;
   await sql`ALTER TABLE recharges DROP COLUMN shift_id`;
   await sql`DROP TABLE coupon_rules`;

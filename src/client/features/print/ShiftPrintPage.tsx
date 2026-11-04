@@ -45,7 +45,16 @@ function ShiftSlip({ s }: { s: ShiftRecord }) {
       <SlipHeader title={closed ? '交班表' : '交班表（预览）'} />
       {!closed && <p className="mb-1 text-center font-bold">当班中，尚未交班</p>}
       <Row left="班次" right={s.shiftNo} />
-      <Row left="交班人" right={s.staffName} />
+      {s.drawerName ? (
+        <>
+          <Row left="钱箱" right={s.drawerName} />
+          <p className="text-[11px]" data-testid="print-shift-members">
+            当班：{s.members.map((m) => `${m.staffName} ${stamp(m.joinedAt, tz).slice(-5)}${m.leftAt ? `–${stamp(m.leftAt, tz).slice(-5)}` : ' 起'}`).join('、')}
+          </p>
+        </>
+      ) : (
+        <Row left="交班人" right={s.staffName} />
+      )}
       <Row left="营业日" right={s.businessDate} />
       <Row left="开班" right={stamp(s.startedAt, tz)} />
       <Row left="交班" right={s.endedAt ? stamp(s.endedAt, tz) : '—'} />
@@ -76,9 +85,28 @@ function ShiftSlip({ s }: { s: ShiftRecord }) {
           ))}
         </div>
       )}
+      {sum.countCards && (
+        <div data-testid="print-shift-count-cards">
+          <p className="mt-1.5 font-bold">次卡（收款，不算营业额）</p>
+          {sum.countCards.sales.byMethod.map((m) => (
+            <Row key={`s-${m.method}`} left={`卖 ${PAYMENT_METHOD_LABELS[m.method] ?? m.method} · ${m.count} 笔`} right={yuan(m.amount)} />
+          ))}
+          {sum.countCards.refunds.byMethod.map((m) => (
+            <Row key={`r-${m.method}`} left={`退 ${PAYMENT_METHOD_LABELS[m.method] ?? m.method} · ${m.count} 笔`} right={yuan(m.amount)} />
+          ))}
+        </div>
+      )}
       <p className="text-[11px]">
         会员工作台储值消费 {sum.walletConsumes.count} 笔 {yuan(sum.walletConsumes.total)}（不是现金）
       </p>
+      {sum.byOperator && sum.byOperator.length > 0 && (
+        <div data-testid="print-shift-operators">
+          <p className="mt-1.5 font-bold">各人经办（结账 / 充值）</p>
+          {sum.byOperator.map((o) => (
+            <Row key={o.staffId} left={`${o.staffName} · ${o.checkouts.count} 张 / ${o.recharges.count} 笔`} right={yuan(o.checkouts.total + o.recharges.paid)} />
+          ))}
+        </div>
+      )}
       <Rule />
       <p className="font-bold">现金</p>
       <Row left="备用金" right={yuan(sum.cash.opening)} />
@@ -87,6 +115,8 @@ function ShiftSlip({ s }: { s: ShiftRecord }) {
       {!!sum.cash.refund && <Row left="− 反结账退现金" right={yuan(sum.cash.refund)} />}
       {!!sum.cash.deposit && <Row left={sum.cash.deposit > 0 ? '+ 押金现金（收 − 退）' : '− 押金现金（退 − 收）'} right={yuan(Math.abs(sum.cash.deposit))} />}
       {!!sum.cash.refundSlip && <Row left="− 退款单退现金" right={yuan(sum.cash.refundSlip)} />}
+      {!!sum.cash.memberRefund && <Row left="− 储值退回的现金" right={yuan(sum.cash.memberRefund)} />}
+      {!!sum.cash.countCard && <Row left={sum.cash.countCard > 0 ? '+ 次卡现金（卖 − 退）' : '− 次卡现金（退 − 卖）'} right={yuan(Math.abs(sum.cash.countCard))} />}
       <Row left="= 应有现金" right={yuan(s.expectedCash ?? sum.cash.expected)} strong />
       {closed && s.countedCash !== null && (
         <>
@@ -136,6 +166,20 @@ function ShiftSlip({ s }: { s: ShiftRecord }) {
             </p>
           ))}
           <p className="text-[11px]">现金从本班钱箱退，已从应有现金里扣掉；扫码、银行卡在商户后台原路退回。</p>
+        </div>
+      )}
+      {sum.memberRefunds && (
+        <div data-testid="print-shift-member-refunds">
+          <Rule />
+          <p className="font-bold">
+            储值退回 {sum.memberRefunds.count} 张 · {yuan(sum.memberRefunds.total)}
+          </p>
+          {sum.memberRefunds.list.map((r) => (
+            <p key={r.refundNo} className="break-all">
+              {r.refundNo} {r.memberName} {yuan(r.amount)} · {r.reason}
+              {r.operatorName ? ` · ${r.operatorName}从本班钱箱退` : ''}
+            </p>
+          ))}
         </div>
       )}
       {s.note && <p className="mt-1 break-all">备注：{s.note}</p>}

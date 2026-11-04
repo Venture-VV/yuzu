@@ -410,7 +410,7 @@ function RefundDialog({ member, onClose, onDone }: { member: MemberDetail; onClo
               <option value="">请选择钱箱</option>
               {(drawers.data?.shifts ?? []).map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.staffName} · {s.shiftNo}
+                  {s.drawerName ?? s.staffName} · {s.shiftNo}
                   {s.mine ? '（我的）' : ''}
                 </option>
               ))}

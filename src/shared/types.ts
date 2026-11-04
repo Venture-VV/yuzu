@@ -2,7 +2,7 @@
 
 import type { BusinessHours } from './business-date';
 import type { PriceTier, Strength, TierPrice } from './catalog';
-import type { CheckoutMethod, CouponPlatform } from './checkout';
+import type { CashDrawer, CheckoutMethod, CouponPlatform, ShiftMode } from './checkout';
 import type { DeductionRule, WalletBalance } from './deduction';
 import type { InstanceKind } from './instance';
 import type { EntryType, PaymentMethod } from './labels';
@@ -37,6 +37,10 @@ export interface StoreRules {
   reversalWindowHours: number | null;
   /** 充值、结账、反结账前必须先开班（2026-10-29 签认，默认开）；关闭后没开班的收款不属于任何班次 */
   requireOpenShift: boolean;
+  /** 交班方式（v0.7.28 ⑨，N11 待确认）：按人交班（默认）或按钱箱交班；切换后新开的班按新做法，开着的班照旧到交班为止 */
+  shiftMode: ShiftMode;
+  /** 钱箱清单（按钱箱交班时开班选钱箱） */
+  cashDrawers: CashDrawer[];
   /** 隐藏页面上的「待确认」标记（店主签认经营规则后打开，R1.3）；只影响显示，不改任何规则 */
   hidePendingMarks: boolean;
   /** 营业时间（#4，待确认）；null 为全天 24 小时营业。只用于显示与提醒 */
@@ -374,6 +378,16 @@ export interface SettlementTotals {
    * held 是当天结束时的在住押金余额。升级之前确认的日结快照没有这一项，按 0 补齐
    */
   deposits: SettlementDeposits;
+  /**
+   * 次卡（v0.7.28）：售卡、退卡（按方式，现金进出钱箱）、结账使用、过期作废、期初导入与当天结束时还剩的次数。
+   * 升级之前确认的日结快照没有这一项，按 0 补齐
+   */
+  countCards: import('./count-cards').CountCardDayTotals;
+  /**
+   * 平台核销补录（v0.7.28）：已在平台 App 核销、没有经过前台结账的券（按核销的营业日）。不结账、不算营业额，单列；
+   * 升级之前确认的日结快照没有这一项，按 0 补齐
+   */
+  platformRedemptions: import('./platform').PlatformDayTotals;
 }
 
 export interface SettlementDeposits {

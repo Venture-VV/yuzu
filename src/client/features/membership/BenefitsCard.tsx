@@ -4,6 +4,7 @@
 //   · 服务与资格：本期用了几次 / 上限，「登记使用」（数次数、到上限拒绝；超时、断网、回复 500 时结果待确认）；
 //   · 折扣类（v0.7.25）：几折、打哪些明细、哪几天——手牌结账时自动算；
 //   · 升档以后还能享的；最近的使用登记（登记错的作废，写原因）。
+//   · v0.7.28：停车优惠登记车牌与这次免费几小时（每个营业日一次）；会员挑战显示本月到店几天、满几天送。
 
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -13,6 +14,8 @@ import {
   BENEFIT_EVENT_LABELS,
   BENEFIT_PERIOD_LABELS,
   MAX_BENEFIT_LIMIT,
+  normalizePlate,
+  PLATE_RE,
   type BenefitUseRow,
   type MemberBenefitItem,
   type MemberBenefits,
@@ -104,8 +107,13 @@ export function BenefitsCard({ member }: { member: MemberDetail }) {
               {events.map((i) => (
                 <Row key={i.benefitId} item={i} testId={`member-benefit-${i.code}`}>
                   <span>
-                    {i.events.map((e) => BENEFIT_EVENT_LABELS[e]).join('、')} · 每次 {i.quantity ?? 0} 张
+                    {i.events.map((e) => (e === 'monthly_visits' && i.visits ? `每月到店满 ${i.visits.target} 次` : BENEFIT_EVENT_LABELS[e])).join('、')} · 每次 {i.quantity ?? 0} 张
                     {i.granted > 0 ? ` · 收到过 ${i.granted} 次（最近 ${i.lastGrantDate}）` : ' · 还没收到过'}
+                    {i.visits && (
+                      <span className="block text-ink-3" data-testid={`member-benefit-visits-${i.code}`}>
+                        本月到店 {i.visits.days} 天{i.visits.days >= i.visits.target ? '（已满）' : `，再来 ${i.visits.target - i.visits.days} 天就送`}
+                      </span>
+                    )}
                   </span>
                 </Row>
               ))}
@@ -146,7 +154,11 @@ export function BenefitsCard({ member }: { member: MemberDetail }) {
                     }
                   >
                     <span className={cn('num', full && 'font-semibold text-clay')}>
-                      {i.quantity === null ? `不限次 · 本月登记 ${i.used} 次` : `${periodSpan(i)}已用 ${i.used} / ${i.quantity} 次（${BENEFIT_PERIOD_LABELS[i.period]}）`}
+                      {i.parking
+                        ? `${i.parking.text}${i.parking.usedToday ? ' · 今天已登记' : ''}`
+                        : i.quantity === null
+                          ? `不限次 · 本月登记 ${i.used} 次`
+                          : `${periodSpan(i)}已用 ${i.used} / ${i.quantity} 次（${BENEFIT_PERIOD_LABELS[i.period]}）`}
                     </span>
                   </Row>
                 );
@@ -199,7 +211,7 @@ export function BenefitsCard({ member }: { member: MemberDetail }) {
                 <li key={u.id} className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="num text-ink-3">{formatDateTime(u.createdAt)}</span>
                   <span className={cn('font-semibold', u.status === 'voided' ? 'text-ink-4 line-through' : 'text-ink')}>
-                    {u.benefitName} × {u.quantity}
+                    {u.plate ? `${u.benefitName} · ${u.plate} 免 ${u.hours} 小时` : `${u.benefitName} × ${u.quantity}`}
                   </span>
                   <span className="text-ink-3">经办 {u.staffName}</span>
                   {u.note && <span className="text-ink-3">· {u.note}</span>}
@@ -268,19 +280,28 @@ function UseDialog({ item, member, onClose, onDone }: { item: MemberBenefitItem 
   const session = useSession();
   const [quantity, setQuantity] = useState('1');
   const [note, setNote] = useState('');
+  // 停车优惠（v0.7.28）：车牌与这次免费几小时（默认这位会员能免的）
+  const [plate, setPlate] = useState('');
+  const [hours, setHours] = useState('');
   const [key, setKey] = useState(uuid);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useResetOnOpen(!!item, () => {
     setQuantity('1');
     setNote('');
+    setPlate('');
+    setHours(item?.parking ? String(item.parking.hours) : '');
     setKey(uuid());
     setError(null);
   });
   if (!item) return null;
-  const n = /^\d+$/.test(quantity.trim()) ? Number(quantity.trim()) : NaN;
+  const parking = item.parking;
+  const n = parking ? 1 : /^\d+$/.test(quantity.trim()) ? Number(quantity.trim()) : NaN;
   const left = item.quantity === null ? null : item.quantity - item.used;
-  const ok = Number.isInteger(n) && n >= 1 && n <= (left ?? MAX_BENEFIT_LIMIT);
+  const plateValue = normalizePlate(plate);
+  const h = /^\d+$/.test(hours.trim()) ? Number(hours.trim()) : NaN;
+  const parkingOk = !parking || (PLATE_RE.test(plateValue) && Number.isInteger(h) && h >= 1 && h <= parking.hours);
+  const ok = Number.isInteger(n) && n >= 1 && n <= (left ?? MAX_BENEFIT_LIMIT) && parkingOk;
   const submit = async () => {
     setBusy(true);
     setError(null);
@@ -289,11 +310,11 @@ function UseDialog({ item, member, onClose, onDone }: { item: MemberBenefitItem 
         key,
         type: 'benefit_use',
         url: useUrl(member.id),
-        body: { clientKey: key, benefitId: item.benefitId, quantity: n, note: note.trim() },
-        summary: `${member.name}：${item.name} × ${n}`,
+        body: { clientKey: key, benefitId: item.benefitId, quantity: n, note: note.trim(), ...(parking ? { plate: plateValue, hours: h } : {}) },
+        summary: parking ? `${member.name}：${item.name} · ${plateValue} 免 ${h} 小时` : `${member.name}：${item.name} × ${n}`,
         staffName: session.staff.displayName,
       });
-      toast({ tone: 'success', title: '已登记使用', body: `${member.name}：${item.name} × ${n}` });
+      toast({ tone: 'success', title: '已登记使用', body: parking ? `${member.name}：${plateValue} 免 ${h} 小时` : `${member.name}：${item.name} × ${n}` });
       onDone();
       onClose();
     } catch (e) {
@@ -315,9 +336,11 @@ function UseDialog({ item, member, onClose, onDone }: { item: MemberBenefitItem 
       onClose={onClose}
       title={`登记使用：${item.name}`}
       description={
-        item.quantity === null
-          ? `${member.name}（${item.startLabel} 起）。不限次，登记留痕。`
-          : `${member.name}${periodSpan(item)}已用 ${item.used} / ${item.quantity} 次，还能登记 ${Math.max(0, left ?? 0)} 次。`
+        parking
+          ? `${member.name}：每次最多免 ${parking.hours} 小时，每个营业日一次。系统不收停车费，只登记、给停车场对账。`
+          : item.quantity === null
+            ? `${member.name}（${item.startLabel} 起）。不限次，登记留痕。`
+            : `${member.name}${periodSpan(item)}已用 ${item.used} / ${item.quantity} 次，还能登记 ${Math.max(0, left ?? 0)} 次。`
       }
       footer={
         <div className="flex justify-end gap-2">
@@ -332,9 +355,20 @@ function UseDialog({ item, member, onClose, onDone }: { item: MemberBenefitItem 
     >
       <div className="grid gap-4">
         {item.conditions && <Notice tone="info" title="使用条件">{item.conditions}</Notice>}
-        <Field label="次数" htmlFor="benefit-use-quantity">
-          <Input id="benefit-use-quantity" inputMode="numeric" value={quantity} onChange={(e) => setQuantity(e.target.value)} data-testid="benefit-use-quantity" />
-        </Field>
+        {parking ? (
+          <>
+            <Field label="车牌" htmlFor="benefit-use-plate" hint={plate && !PLATE_RE.test(plateValue) ? '车牌是 2–12 位汉字、字母或数字（如 粤B12345）' : undefined}>
+              <Input id="benefit-use-plate" value={plate} maxLength={16} placeholder="粤B12345" onChange={(e) => setPlate(e.target.value)} data-testid="benefit-use-plate" />
+            </Field>
+            <Field label="这次免费几小时" htmlFor="benefit-use-hours" hint={`最多 ${parking.hours} 小时`}>
+              <Input id="benefit-use-hours" inputMode="numeric" value={hours} onChange={(e) => setHours(e.target.value)} data-testid="benefit-use-hours" />
+            </Field>
+          </>
+        ) : (
+          <Field label="次数" htmlFor="benefit-use-quantity">
+            <Input id="benefit-use-quantity" inputMode="numeric" value={quantity} onChange={(e) => setQuantity(e.target.value)} data-testid="benefit-use-quantity" />
+          </Field>
+        )}
         <Field label="备注（可选）" htmlFor="benefit-use-note" hint="例如手牌号、陪同人数">
           <Input id="benefit-use-note" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} data-testid="benefit-use-note" />
         </Field>

@@ -18,6 +18,10 @@ import { dateSchema, parse } from '../lib/validate';
 import { resolveReadableDate } from './ledger';
 import { loadFrontdeskRules } from './frontdesk/common';
 import { loadSettings } from './settings';
+import { countCardDayTotals } from './count-cards';
+import { EMPTY_COUNT_CARD_TOTALS } from '@shared/count-cards';
+import { platformDayTotals } from './platform-redemptions';
+import { EMPTY_PLATFORM_DAY_TOTALS } from '@shared/platform';
 
 type Pair = { principal: number; bonus: number };
 
@@ -88,6 +92,8 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
     business: await businessTotals(db, date),
     backfill: (await db<{ count: number }[]>`SELECT count(*)::int AS count FROM backfill_entries WHERE business_date = ${date}`)[0]!,
     deposits: await depositTotals(db, date),
+    countCards: await countCardDayTotals(db, date),
+    platformRedemptions: await platformDayTotals(db, date),
   };
 }
 
@@ -192,6 +198,10 @@ const withNewSections = (t: SettlementTotals): SettlementTotals => ({
   business: t.business ? { ...t.business, refunds: t.business.refunds ?? EMPTY_REFUNDS } : EMPTY_BUSINESS,
   backfill: t.backfill ?? { count: 0 },
   deposits: t.deposits ?? EMPTY_DEPOSITS,
+  // 次卡（v0.7.28）之前确认的快照没有这一项
+  countCards: t.countCards ?? EMPTY_COUNT_CARD_TOTALS,
+  // 平台核销补录（v0.7.28）之前确认的快照没有这一项
+  platformRedemptions: t.platformRedemptions ?? EMPTY_PLATFORM_DAY_TOTALS,
 });
 /**
  * 比较「日结后有变动」：快照按 withNewSections 补齐后与此刻的口径比。
@@ -674,7 +684,9 @@ export function settlementCsv(s: SettlementSummary): string {
       signed(m.amount),
       m.method === 'wallet'
         ? '会员余额抵扣，同时计入储值消费'
-        : m.method === 'coupon'
+        : m.method === 'count_card'
+          ? '会员次卡抵扣（预付的次数），售卡的钱在售卡当天收'
+          : m.method === 'coupon'
           ? '平台团购核销，由平台结算'
           : m.method === 'discount' || m.method === 'store_coupon' || m.method === 'member_discount'
             ? '优惠，不是收款'
@@ -686,6 +698,21 @@ export function settlementCsv(s: SettlementSummary): string {
     ...s.deposits.received.map((m) => [`收押金 · ${PAYMENT_METHOD_LABELS[m.method]}`, m.count, y(m.amount), m.method === 'cash' ? '现金计入钱箱' : '']),
     ...s.deposits.refunded.map((m) => [`退押金 · ${PAYMENT_METHOD_LABELS[m.method]}`, m.count, '-' + y(m.amount), m.method === 'cash' ? '现金从钱箱退' : '原路退回']),
     ['当天结束时在住押金余额', '', y(s.deposits.held), ''],
+    [],
+    ['次卡（v0.7.28）', '笔数 / 次数', '金额（元）', '说明'],
+    ['售卡收款', s.countCards.sales.count, y(s.countCards.sales.amount), '预收，不是营业额；用的时候按项目价算营业额'],
+    ...s.countCards.sales.byMethod.map((m) => [`  · ${PAYMENT_METHOD_LABELS[m.method]}`, m.count, y(m.amount), m.method === 'cash' ? '现金计入钱箱' : '']),
+    ['退卡', s.countCards.refunds.count, s.countCards.refunds.amount ? '-' + y(s.countCards.refunds.amount) : y(0), '退剩下的次数，按售价折算'],
+    ...s.countCards.refunds.byMethod.map((m) => [`  · 退${PAYMENT_METHOD_LABELS[m.method]}`, m.count, '-' + y(m.amount), m.method === 'cash' ? '现金从钱箱退' : '商户后台原路退回']),
+    ['结账使用（净次数）', s.countCards.uses.count, signed(s.countCards.uses.amount), '营业口径里的「次卡」，按项目价'],
+    ['过期作废', s.countCards.expired.uses, '', `${s.countCards.expired.cards} 张卡过期，没用完的次数作废，不退钱`],
+    ...(s.countCards.opening.cards ? [['旧次卡期初', s.countCards.opening.uses, '', `${s.countCards.opening.cards} 张，只记次数，不是收款`]] : []),
+    ['当天结束时还剩', s.countCards.outstanding.uses, '', `${s.countCards.outstanding.cards} 张卡`],
+    [],
+    ['平台核销补录（不结账，不算营业额）', '张数', '金额（元）', '说明'],
+    ['补登记（面值）', s.platformRedemptions.count, y(s.platformRedemptions.face), s.platformRedemptions.voidCount ? `另有作废 ${s.platformRedemptions.voidCount} 笔` : '已在平台 App 核销、没有经过前台结账的券'],
+    ...s.platformRedemptions.byPlatform.map((p) => [`  · ${COUPON_PLATFORM_LABELS[p.platform]}`, p.count, y(p.face), `平台应结 ${y(p.settle)}`]),
+    ['平台应结合计', '', y(s.platformRedemptions.settle), '扣佣金后平台应打给门店的，与平台打款对账'],
     [],
     ['余额核对', '本金（元）', '赠金（元）'],
     ['期初余额', y(s.balances.opening.principal), y(s.balances.opening.bonus)],

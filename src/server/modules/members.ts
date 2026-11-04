@@ -4,6 +4,7 @@ import { businessDateOf } from '@shared/business-date';
 import { checkCustomValues, type MemberCustomValues } from '@shared/member-fields';
 import { MEMBER_CHANNEL_KEY, type BonusLotRow } from '@shared/members';
 import type { LedgerRow, MemberDetail, MemberSummary } from '@shared/types';
+import { looksLikeCardNo, normalizeCardNo } from '@shared/member-cards';
 import { isUniqueViolation, type Db, type Sql, type Tx } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
@@ -58,6 +59,20 @@ export async function getMember(db: Db, id: number): Promise<MemberSummary> {
   return row;
 }
 
+/**
+ * 在用的会员实体卡是哪位会员的（v0.7.28 ⑦）：合并过的找到最后合并到的那位（与线上收款一样沿「合并到」找）；没有在用的这张卡为 null
+ */
+export async function activeCardMemberId(db: Db, cardNo: string): Promise<number | null> {
+  const [row] = await db<{ id: number }[]>`
+    WITH RECURSIVE chain AS (
+      SELECT m.id, m.merged_into_id, 0 AS depth FROM member_cards c JOIN members m ON m.id = c.member_id WHERE c.card_no = ${cardNo} AND c.status = 'active'
+      UNION ALL
+      SELECT m.id, m.merged_into_id, chain.depth + 1 FROM members m JOIN chain ON m.id = chain.merged_into_id WHERE chain.depth < 20
+    )
+    SELECT id FROM chain WHERE merged_into_id IS NULL LIMIT 1`;
+  return row ? Number(row.id) : null;
+}
+
 export async function searchMembers(db: Db, q: string, limit: number): Promise<MemberSummary[]> {
   if (!q) {
     return db<MemberSummary[]>`
@@ -67,12 +82,16 @@ export async function searchMembers(db: Db, q: string, limit: number): Promise<M
   const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
   // 只有搜索词全是数字（可带空格、横线、+、括号）时才按手机号找；「张三-999」这类文字里的数字不当作手机号片段
   const digits = /^[\d\s()+-]+$/.test(q) ? q.replace(/\D/g, '') : '';
+  // 刷卡（v0.7.28 ⑦）：读卡器把卡号打进查找框，整串是在用的会员卡号时排在最前（挂失的卡号查不到人，页面另外提醒）
+  const cardMember = looksLikeCardNo(q) ? await activeCardMemberId(db, normalizeCardNo(q)) : null;
   return db<MemberSummary[]>`
     SELECT ${MEMBER_COLUMNS(db)} FROM members m
     WHERE m.name ILIKE ${like}
        OR m.member_no ILIKE ${like}
        OR (${digits.length >= 3} AND m.phone LIKE ${`%${digits}%`})
-    ORDER BY (m.phone = ${digits}) DESC,
+       OR m.id = ${cardMember ?? 0}
+    ORDER BY (m.id = ${cardMember ?? 0}) DESC,
+             (m.phone = ${digits}) DESC,
              (m.member_no ILIKE ${q}) DESC,
              (m.phone LIKE ${`%${digits}`}) DESC,
              (m.name = ${q}) DESC,

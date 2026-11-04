@@ -53,6 +53,8 @@ export const FRONTDESK_OPS = [
   'usage_end',
   'usage_cancel',
   'checkout_refund',
+  'booking_create',
+  'booking_change',
 ] as const;
 export type FrontdeskOp = (typeof FRONTDESK_OPS)[number];
 
@@ -79,6 +81,8 @@ export const FRONTDESK_OP_PERMISSIONS: Record<FrontdeskOp, readonly Permission[]
   usage_end: ['room.operate'],
   usage_cancel: ['room.operate'],
   checkout_refund: ['frontdesk.refund'],
+  booking_create: ['booking.manage'],
+  booking_change: ['booking.manage'],
 };
 
 export const abandonedError = () =>

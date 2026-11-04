@@ -245,6 +245,7 @@ issueMpClaimCoupon(tx, deps, { templateId, memberId, claimId, at? })
 - **开关在小程序线**：小程序线的原路退回接上、微信支付配好并打开时，在启动时注册
   `registerOnlineRefundRoute({ available: async (db) => boolean })`（`src/server/modules/member-refunds.ts`）。没注册、`available()` 为 false 或出错时，核对接口返回 `onlineRoute: false`，页面不给选，提交 `mp_auto` 拒绝（`ONLINE_REFUND_UNAVAILABLE`），与 v0.7.26 一样要在商户平台退、填退款单号——不会出现「标了自动退、但没有人退」，也不会退两次；
 - 小程序线按行取：`listOnlineRefundLines(db, { afterId, limit })`，按行号升序给 `mp_auto` 的行（`lineId`、`refundId`、`refundNo`、`memberId`、`rechargeId`、`rechargeDocNo`、`paymentRef` 即充值单上的微信支付交易单号、`amount`、`createdAt`），小程序线按 `lineId` 唯一建原路退回单；
+- 小程序线怎么取（2026-11-04 小程序线告知）：`pullRefundLines` 先只读查 `member_refund_lines`，找还没建原路退回单的最小行号（`min(id) … WHERE route = 'mp_auto' AND NOT EXISTS 原路退回单`），再从那里起用 `listOnlineRefundLines` 一页一页取。不加锁、不写。不能只记「取到的最大行号」：行号插入时分配，提交顺序可能不同，晚提交的小行号会漏。所以小程序线依赖 `member_refund_lines.route` 这一列和 `'mp_auto'` 这个值；主线以后要改名、换表或加新的取值，先告诉小程序线。小程序线的 `available()` 在门店系统的微信支付配好、而且小程序线「线上充值」设置里的自动原路退回开着（默认开）时才回 true；关掉只影响以后的退储值，已经交出去的照样退完；微信退不了的在小程序线后台处理；
 - 页面：会员详情「退储值」里线上那一行可选「门店系统原路退回」（开着时默认）或「已在商户平台退过」（填单号）；没开时写「请在小程序的微信支付商户平台原路退回后填退款单号」；退过的储值写明「门店系统原路退回」；
 - 账：退储值单照旧（本金、赠金扣回、流水、降档都不变）。日结「储值退回」单列「其中退线上充值（小程序）」——钱从小程序的商户号退，其中交给门店系统的多少；异常清单与对账包 `11-储值退回.csv` 的单号一栏写「门店系统原路退回（小程序）」；
 - 员工退的行不带 `route` 进请求摘要：v0.7.26 的页面提交、升级后「结果待确认」原样重提，仍是同一笔。

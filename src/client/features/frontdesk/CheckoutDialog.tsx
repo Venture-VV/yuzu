@@ -31,11 +31,14 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Input, Notice, Select, Skeleton, Textarea } from '../../components/ui';
 import { PrintButton } from '../print/PrintButton';
+import { NetPrintButton } from '../print/NetPrintButton';
 import { CloseStayById } from '../rooms/CloseStayDialog';
+import { EndUsageById } from '../rooms/UsageDialogs';
 import { SHIFT_ERRORS, shiftKeys, ShiftGate, StartShiftForm, useShiftReady } from '../shift/ShiftGate';
 import { ZoneChip } from './parts';
 import { BackfillNotice, backfillBody, backfillSummary, useBackfill } from './backfill';
 import { PaymentsSection, usePayRows } from './payments';
+import { allocateCountCards, type CheckoutCountCardOption, type CountCardAllocation } from '@shared/count-cards';
 import { pendingFor, PendingPanel, useFrontdeskOp, useFrontdeskPending } from './pending';
 import { RefundPanel, RefundsList } from './RefundPanel';
 import { stayText, useCheckout, useCheckoutPreview, useCheckouts, useRefreshFrontdesk, useTicketTypes } from './queries';
@@ -68,6 +71,8 @@ export function CheckoutDialog({
   const [ticketPick, setTicketPick] = useState<Record<number, number>>({});
   const [note, setNote] = useState('');
   const [result, setResult] = useState<CheckoutDetail | null>(null);
+  /** 次卡（v0.7.28）：每张卡这次抵几次 */
+  const [cardUses, setCardUses] = useState<Record<number, number>>({});
   const shiftReady = useShiftReady(open);
   const qc = useQueryClient();
   // 补录纸质单：按纸质单上的实际离店时间计价；补录的结账不能用会员储值
@@ -89,6 +94,7 @@ export function CheckoutDialog({
     setTicketPick({});
     setNote('');
     setResult(null);
+    setCardUses({});
     op.clearError();
   });
 
@@ -96,7 +102,7 @@ export function CheckoutDialog({
   useEffect(() => {
     if (
       op.state.phase === 'error' &&
-      ['PRICE_CHANGED', 'SPLIT_CHANGED', 'INSUFFICIENT_BALANCE', 'TICKET_CHANGED', 'ROOM_OPEN', 'COUPON_AMOUNT_CHANGED', 'COUPON_USED', 'COUPON_NOT_USABLE', 'COUPON_VOIDED'].includes(
+      ['PRICE_CHANGED', 'SPLIT_CHANGED', 'INSUFFICIENT_BALANCE', 'TICKET_CHANGED', 'ROOM_OPEN', 'COUPON_AMOUNT_CHANGED', 'COUPON_USED', 'COUPON_NOT_USABLE', 'COUPON_VOIDED', 'COUNT_CARD_CHANGED', 'COUNT_CARD_NOT_USABLE'].includes(
         op.state.code ?? '',
       )
     ) {
@@ -130,6 +136,21 @@ export function CheckoutDialog({
   const total = p && amounts.every((a) => a !== null) ? amounts.reduce<number>((s, a) => s + a!, 0) : null;
 
   const visitIds = p ? p.visits.map((v) => v.visitId) : selected;
+  // 次卡（v0.7.28）：选的几张卡按同一个算法分配到明细上（单价高的先抵、一次一份），每张卡这次抵多少
+  const cardOptions = (p?.countCards ?? []).filter((c) => c.coverable > 0);
+  const cardPicked = cardOptions.filter((c) => (cardUses[c.cardId] ?? 0) > 0);
+  const cardAlloc = allocateCountCards(
+    cardPicked.map((c) => ({ cardId: c.cardId, itemIds: c.itemIds, ticketTypeIds: c.ticketTypeIds, uses: cardUses[c.cardId]! })),
+    p?.countCardLines ?? [],
+  );
+  const cardShort = cardAlloc.find((a) => a.units.length < (cardUses[a.cardId] ?? 0));
+  const countCard = cardAlloc.length
+    ? {
+        amount: cardAlloc.reduce((s, a) => s + a.amount, 0),
+        payments: cardAlloc.map((a) => ({ method: 'count_card' as const, cardId: a.cardId, uses: cardUses[a.cardId]!, amount: a.amount })),
+        problem: cardShort ? `${cardOptions.find((c) => c.cardId === cardShort.cardId)?.name ?? '次卡'}这次只能抵 ${cardShort.units.length} 次（别的卡已经抵了同样的项目）` : null,
+      }
+    : null;
   const pay = usePayRows({
     open,
     total,
@@ -142,11 +163,14 @@ export function CheckoutDialog({
     coupons: p?.storeCoupons ?? null,
     // 会员折扣（v0.7.25）：结账核对给出的省得最多的一种，自动带上；选了券、优惠 / 免单就不用
     memberDiscount: p?.memberDiscounts?.[0] ?? null,
+    countCard,
   });
   const { remaining, problems } = pay;
   // 客房（S7）：还住着客房的客人要先退房（补齐房费挂到手牌账单、退押金），房费才都在账单上
   const roomsOpen = (preview.data?.rooms ?? []).length > 0;
-  const ready = total !== null && remaining === 0 && pay.ok && !preview.isFetching && shiftReady.ready && !backfillBlocked && !roomsOpen;
+  // 计费的派对房等（v0.7.28）：先「结束使用」把房费挂上再结账
+  const usagesUncharged = (preview.data?.usages ?? []).some((u) => u.priced);
+  const ready = total !== null && remaining === 0 && pay.ok && !preview.isFetching && shiftReady.ready && !backfillBlocked && !roomsOpen && !usagesUncharged;
 
   const submit = async () => {
     if (!ready || !p) return;
@@ -194,6 +218,7 @@ export function CheckoutDialog({
             <PrintButton path={`/print/checkout/${result.id}`} size="lg" testId="checkout-print">
               打印结账单
             </PrintButton>
+            <NetPrintButton doc={{ type: 'checkout', id: result.id }} size="lg" testId="checkout-netprint" />
             <Button variant="primary" size="lg" onClick={() => onDone(result)} data-testid="checkout-finish">
               完成
             </Button>
@@ -292,10 +317,22 @@ export function CheckoutDialog({
               {(p.sessions ?? []).length > 0 && <SessionsNotice sessions={p.sessions} />}
               {(p.dishes ?? []).length > 0 && <DishesNotice dishes={p.dishes} />}
               {(p.rooms ?? []).length > 0 && <RoomsNotice rooms={p.rooms!} onClosed={() => void preview.refetch()} />}
-              {(p.usages ?? []).length > 0 && <UsagesNotice usages={p.usages!} />}
+              {(p.usages ?? []).length > 0 && <UsagesNotice usages={p.usages!} onEnded={() => void preview.refetch()} />}
               <ReviewTable preview={p} amounts={amounts} ticketPick={ticketPick} onPick={(id, t) => edit(() => setTicketPick((x) => ({ ...x, [id]: t })))} />
             </>
           )
+        )}
+
+        {/* 次卡（v0.7.28）：会员的卡能抵的项目，一次一份；用了次卡就不打会员折扣、不用券与优惠 */}
+        {cardOptions.length > 0 && (
+          <CountCardPanel
+            options={cardOptions}
+            uses={cardUses}
+            alloc={cardAlloc}
+            problem={countCard?.problem ?? null}
+            locked={locked || pay.hasDiscount || pay.hasStoreCoupon}
+            onChange={(cardId, n) => edit(() => setCardUses((x) => ({ ...x, [cardId]: n })))}
+          />
         )}
 
         {/* 收款 */}
@@ -390,20 +427,61 @@ function RoomsNotice({ rooms, onClosed }: { rooms: NonNullable<CheckoutPreview['
 }
 
 /** 餐饮（S5）：客人点的菜还没上齐时提醒（不拦结账；结账后厨房屏标出「客人已结账」） */
-/** 派对房等（v0.7.19）：客人开着的使用单结账后自动结束（房间变空闲）；场次费等要先挂到手牌账单上 */
-function UsagesNotice({ usages }: { usages: NonNullable<CheckoutPreview['usages']> }) {
+/**
+ * 派对房等（v0.7.19）：没设计费的使用单结账后自动结束（房间变空闲），场次费等要先挂到手牌账单上；
+ * 设了计费的（v0.7.28）要先「结束使用」把房费挂上，重新核对后一起结账
+ */
+function UsagesNotice({ usages, onEnded }: { usages: NonNullable<CheckoutPreview['usages']>; onEnded: () => void }) {
+  const can = useCan();
+  const [ending, setEnding] = useState<number | null>(null);
+  const priced = usages.filter((u) => u.priced);
+  const plain = usages.filter((u) => !u.priced);
   return (
-    <div data-testid="checkout-usages">
-      <Notice tone="info" title="有客人开着派对房等的使用单：结账后自动结束">
-        <ul className="mt-1 space-y-0.5">
-          {usages.map((u) => (
-            <li key={u.usageId}>
-              <span className="num font-semibold">{u.tagCode}</span> · <span className="num font-semibold">{u.spaceCode}</span> {u.spaceName}（{u.usageNo}）
-            </li>
-          ))}
-        </ul>
-        <p className="mt-1">场次费请先挂到手牌账单上，再一起结账。</p>
-      </Notice>
+    <div className="space-y-2" data-testid="checkout-usages">
+      {priced.length > 0 && (
+        <Notice tone="warning" title="有客人还在用按时长收费的房间：先结束使用，房费挂到手牌账单上再一起结账">
+          <ul className="mt-1 space-y-1">
+            {priced.map((u) => (
+              <li key={u.usageId} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>
+                  <span className="num font-semibold">{u.tagCode}</span> · <span className="num font-semibold">{u.spaceCode}</span> {u.spaceName}
+                  {u.minutes !== undefined && `，已用 ${minutesText(u.minutes)}`}
+                  {u.estimate != null && `，房费约 ${formatYuan(u.estimate)}`}
+                </span>
+                {can('room.operate') ? (
+                  <Button size="sm" variant="secondary" icon={<LogOut className="size-3.5" />} onClick={() => setEnding(u.usageId)} data-testid={`checkout-usage-end-${u.spaceCode}`}>
+                    结束使用并挂房费
+                  </Button>
+                ) : (
+                  <span className="text-[12px] text-ink-3">请有客房权限的同事结束使用</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Notice>
+      )}
+      {plain.length > 0 && (
+        <Notice tone="info" title="有客人开着派对房等的使用单：结账后自动结束">
+          <ul className="mt-1 space-y-0.5">
+            {plain.map((u) => (
+              <li key={u.usageId}>
+                <span className="num font-semibold">{u.tagCode}</span> · <span className="num font-semibold">{u.spaceCode}</span> {u.spaceName}（{u.usageNo}）
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1">场次费请先挂到手牌账单上，再一起结账。</p>
+        </Notice>
+      )}
+      {ending !== null && (
+        <EndUsageById
+          usageId={ending}
+          onClose={() => setEnding(null)}
+          onDone={() => {
+            setEnding(null);
+            onEnded();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -787,9 +865,12 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
       ) : (
         <>
           <CheckoutReceipt detail={d} />
-          <PrintButton path={`/print/checkout/${d.id}`} testId="checkout-reprint">
-            打印结账单
-          </PrintButton>
+          <div className="flex flex-wrap gap-2">
+            <PrintButton path={`/print/checkout/${d.id}`} testId="checkout-reprint">
+              打印结账单
+            </PrintButton>
+            <NetPrintButton doc={{ type: 'checkout', id: d.id }} testId="checkout-renetprint" />
+          </div>
           <RefundsList refunds={d.refunds ?? []} onChanged={() => void detail.refetch()} />
           {d.status === 'completed' && can('frontdesk.refund') && !voiding && !showRefund && (
             <Button variant="secondary" icon={<Undo2 className="size-4" />} onClick={() => setRefunding(true)} data-testid="checkout-refund">
@@ -896,12 +977,12 @@ function RefundDrawerPicker({
           )}
           data-testid={`refund-drawer-${x.shiftNo}`}
         >
-          <span className="font-bold">{x.staffName}的钱箱</span>
+          <span className="font-bold">{x.drawerName ?? `${x.staffName}的钱箱`}</span>
           <span className="text-[12px] text-ink-3">
             班次 {x.shiftNo} · {formatTime(x.startedAt)} 开班
           </span>
           {x.original && <Badge tone="pine">原单收款的班次</Badge>}
-          {x.mine && <Badge tone="lake">你的班次</Badge>}
+          {x.mine && <Badge tone="lake">{x.drawerName ? '你在这个钱箱' : '你的班次'}</Badge>}
         </button>
       ))}
     </div>
@@ -1044,5 +1125,63 @@ export function TicketDialog({ open, visit, onClose, onDone }: { open: boolean; 
         />
       )}
     </Dialog>
+  );
+}
+
+/** 结账「用次卡」（v0.7.28）：每张卡这次抵几次（不超过剩下的、能抵的份数）；抵哪几份、多少钱按同一个算法算好给员工看 */
+function CountCardPanel({
+  options,
+  uses,
+  alloc,
+  problem,
+  locked,
+  onChange,
+}: {
+  options: CheckoutCountCardOption[];
+  uses: Record<number, number>;
+  alloc: CountCardAllocation[];
+  problem: string | null;
+  locked: boolean;
+  onChange: (cardId: number, n: number) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-line bg-paper/50 p-3" data-testid="checkout-count-cards">
+      <p className="text-[13px] font-bold text-ink-2">
+        <Ticket className="mr-1 inline size-3.5" />
+        次卡 <span className="font-normal text-ink-3">· 一次抵一份，单价高的先抵；用了次卡就不打会员折扣、不能再用券与优惠 / 免单</span>
+      </p>
+      <ul className="mt-2 space-y-1.5">
+        {options.map((c) => {
+          const n = uses[c.cardId] ?? 0;
+          const max = Math.min(c.remaining, c.coverable);
+          const a = alloc.find((x) => x.cardId === c.cardId);
+          return (
+            <li key={c.cardId} className="flex flex-wrap items-center gap-2 text-[13.5px]" data-testid={`checkout-count-card-${c.cardNo}`}>
+              <span className="font-semibold">{c.name}</span>
+              <span className="text-[12.5px] text-ink-3">
+                {c.memberName} · 剩 {c.remaining} 次{c.expiresOn ? ` · 到 ${c.expiresOn}` : ''} · 这次最多抵 {max} 次
+              </span>
+              <span className="ml-auto flex items-center gap-1.5">
+                <Button size="sm" variant="secondary" disabled={locked || n <= 0} onClick={() => onChange(c.cardId, n - 1)} aria-label="少抵一次">
+                  −
+                </Button>
+                <span className="num w-6 text-center font-bold" data-testid={`checkout-count-card-uses-${c.cardNo}`}>
+                  {n}
+                </span>
+                <Button size="sm" variant="secondary" disabled={locked || n >= max} onClick={() => onChange(c.cardId, n + 1)} aria-label="多抵一次" data-testid={`checkout-count-card-add-${c.cardNo}`}>
+                  +
+                </Button>
+                {a && a.amount > 0 && (
+                  <span className="text-[12.5px] text-ink-2">
+                    抵 <Money cents={a.amount} /> （{a.units.map((u) => u.name).join('、')}）
+                  </span>
+                )}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      {problem && <Notice tone="error" className="mt-2" title={problem} />}
+    </div>
   );
 }

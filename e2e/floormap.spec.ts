@@ -144,6 +144,25 @@ async function prepare(page: Page) {
   return { roomId: room.id };
 }
 
+const PARTY_FEE_ITEM = 'E2E 派对房房费';
+/** 派对房计费（v0.7.28）：on 时用专用的房费项目（¥120/小时、起步 60 分钟、每 30 分钟），off 时去掉（不影响别的用例） */
+async function setPartyPricing(page: Page, on: boolean) {
+  const rules = await getJson<{ businessTypes: string[]; pricing: Record<string, unknown> }>(page, '/api/admin/usage-rules');
+  const pricing = { ...rules.pricing };
+  delete pricing['派对房'];
+  if (on) {
+    type Items = { items: { id: number; name: string; active: boolean }[] };
+    let item = (await getJson<Items>(page, '/api/catalog?all=1')).items.find((i) => i.name === PARTY_FEE_ITEM);
+    if (!item || !item.active) {
+      const body = { name: PARTY_FEE_ITEM, category: 'E2E 派对房', price: 12000 };
+      await (item ? send(page, 'put', `/api/items/${item.id}`, { ...body, active: true }) : send(page, 'post', '/api/items', body));
+      item = (await getJson<Items>(page, '/api/catalog?all=1')).items.find((i) => i.name === PARTY_FEE_ITEM)!;
+    }
+    pricing['派对房'] = { feeItemId: item.id, minMinutes: 60, stepMinutes: 30, openFeeItemId: null };
+  }
+  await send(page, 'put', '/api/admin/usage-rules', { businessTypes: rules.businessTypes, pricing });
+}
+
 /** 结束 X201 开着的使用单（v0.7.19，上次中断留下的） */
 async function endUsages(page: Page) {
   const fm = await page.request.get('/api/floormap');
@@ -173,6 +192,8 @@ async function clearVisit(page: Page, visitId: number, reason: string) {
 
 /** 收尾（店主）：E7 下牌（不留在轮钟队列里）；X201 的使用单结束；W301 的房间取消挂接、停用；W301、W302 停用；关闭客房与技师功能 */
 async function cleanup(page: Page) {
+  // 先去掉派对房计费再结束使用单（中断时留下的不挂房费）
+  await setPartyPricing(page, false);
   await endUsages(page);
   const board = await page.request.get('/api/clockroom');
   const e7 = board.ok() ? ((await board.json()) as ClockroomBoard).technicians.find((t) => t.techNo === TECH.techNo) : undefined;
@@ -326,6 +347,29 @@ test.describe('v0.7.16 房态图', () => {
       await cancelDlg.getByTestId('usage-close-submit').click();
       await expect(cancelDlg).toBeHidden();
       await expect(space(page, 'X201')).toHaveAttribute('data-state', 'vacant');
+      // 派对房计费（v0.7.28）：后台设了「房费项目」以后，侧栏显示到现在的房费，结束时挂到手牌账单上
+      const mapUrl = page.url();
+      await relogin(page, 'linlan');
+      await setPartyPricing(page, true);
+      await relogin(page, 'xiaozhou');
+      await page.goto(mapUrl);
+      await map.getByRole('radiogroup', { name: '楼层' }).getByRole('radio', { name: 'L2 二层平面图' }).click();
+      await space(page, 'X201').click();
+      await openUsage();
+      await expect(panel.getByTestId('floormap-usage-fee')).toContainText('¥120.00');
+      await panel.getByTestId('floormap-usage-end').click();
+      const feeDlg = page.getByRole('dialog').filter({ hasText: /结束使用 · X201/ });
+      await expect(feeDlg.getByTestId('usage-close-fee')).toContainText('每小时 ¥120.00，起步 60 分钟，之后每 30 分钟计一次');
+      await feeDlg.getByTestId('usage-close-submit').click();
+      await expect(feeDlg).toBeHidden();
+      await expect(page.getByText(/房费 ¥120\.00 已挂到手牌/)).toBeVisible();
+      const charged = await getJson<{ lines: { name: string; amount: number; status: string }[] }>(page, `/api/frontdesk/visits/${visit}`);
+      expect(charged.lines.filter((l) => l.status === 'active' && l.name.startsWith(PARTY_FEE_ITEM)).map((l) => l.amount)).toEqual([12000]);
+      await relogin(page, 'linlan');
+      await setPartyPricing(page, false);
+      await relogin(page, 'xiaozhou');
+      await page.goto(mapUrl);
+      await map.getByRole('radiogroup', { name: '楼层' }).getByRole('radio', { name: 'L2 二层平面图' }).click();
       await map.getByRole('radiogroup', { name: '楼层' }).getByRole('radio', { name: 'L3 三层平面图' }).click();
 
       // ⑤ 客房 W301：开房（原来的入住对话框）→ 在住 → 查房 → 退房 → 待打扫 → 打扫好了 → 空闲

@@ -66,7 +66,7 @@ function RefundSlip({ d }: { d: RefundDetail }) {
           <div key={p.method}>
             <Row left={PAYMENT_METHOD_LABELS[p.method]} right={yuan(p.amount)} />
             {p.ref && <p className="pl-3 text-[11px] break-all">{p.method === 'other' ? p.ref : `退款单号 ${p.ref}`}</p>}
-            {p.method === 'cash' && d.shift && <p className="pl-3 text-[11px]">从 {d.shift.staffName} 的钱箱退（班次 {d.shift.shiftNo}）</p>}
+            {p.method === 'cash' && d.shift && <p className="pl-3 text-[11px]">从 {d.shift.drawerName ?? `${d.shift.staffName} 的钱箱`}退（班次 {d.shift.shiftNo}）</p>}
           </div>
         ))}
       </div>

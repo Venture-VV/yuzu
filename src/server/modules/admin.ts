@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ADMIN_PERMISSIONS, type AdminOverview, type RolePermissionMatrix, type RuleEntry } from '@shared/admin';
 import { describeBusinessHours } from '@shared/business-date';
+import { SHIFT_MODE_LABELS } from '@shared/checkout';
 import { DEFAULT_FRONTDESK_RULES, type FrontdeskRules } from '@shared/frontdesk';
 import { APPROVAL_RULE_LABELS, type ApprovalRules } from '@shared/inventory';
 import { DEDUCTION_RULE_LABELS, describeHours, ROLE_LABELS } from '@shared/labels';
@@ -56,6 +57,8 @@ import { loadRoomRules } from './rooms';
 import { loadLocationRules } from './locations';
 import { DEFAULT_LOCATION_RULES } from '@shared/locations';
 import { loadUsageRules } from './usages';
+import { loadBookingRules } from './bookings';
+import { DEFAULT_BOOKING_RULES, type BookingRules } from '@shared/bookings';
 import { DEFAULT_USAGE_RULES } from '@shared/usages';
 import { loadGuideRules } from './guide';
 import { DEFAULT_GUIDE_RULES } from '@shared/guide';
@@ -146,6 +149,16 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   add({
     key: 'require_open_shift', group: 'wallet', label: '收款前必须先开班', value: onOff(s.requireOpenShift, '必须先开班', '不要求'), defaultValue: '必须先开班',
     pending: false, section: 'rules', current: s.requireOpenShift, dflt: d.requireOpenShift, metaKey: sk('requireOpenShift'),
+  });
+  // 交班方式（v0.7.28 ⑨，N11 待确认）
+  const drawers = (list: typeof s.cashDrawers) => list.filter((d) => d.active).map((d) => d.label).join('、') || '没有启用的钱箱';
+  add({
+    key: 'shift_mode', group: 'wallet', label: '交班方式', value: SHIFT_MODE_LABELS[s.shiftMode], defaultValue: SHIFT_MODE_LABELS[d.shiftMode],
+    pending: true, section: 'rules', hint: '按钱箱交班：同一个钱箱的人在同一个班次上，交班时点这个钱箱的钱', current: s.shiftMode, dflt: d.shiftMode, metaKey: sk('shiftMode'),
+  });
+  add({
+    key: 'cash_drawers', group: 'wallet', label: '钱箱', value: drawers(s.cashDrawers), defaultValue: drawers(d.cashDrawers),
+    pending: true, section: 'rules', hint: '按钱箱交班时开班选钱箱', current: s.cashDrawers, dflt: d.cashDrawers, metaKey: sk('cashDrawers'),
   });
   add({
     key: 'custom_bonus_valid_days', group: 'wallet', label: '自定义赠金有效期', value: days(s.customBonusValidDays), defaultValue: days(d.customBonusValidDays),
@@ -244,6 +257,21 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   });
   add({ key: 'room_rules.hourlyGraceMinutes', group: 'rooms', label: '钟点房超时宽限', value: `${rm.hourlyGraceMinutes} 分钟`, defaultValue: `${rmd.hourlyGraceMinutes} 分钟`, pending: true, section: 'rooms', hint: '超过已付时段加宽限才按段补', current: rm.hourlyGraceMinutes, dflt: rmd.hourlyGraceMinutes, metaKey: 'room_rules' });
   add({ key: 'room_rules.defaultDeposit', group: 'rooms', label: '入住默认押金', value: rm.defaultDeposit ? `默认收 ${formatYuan(rm.defaultDeposit)}` : '默认不收', defaultValue: '默认不收', pending: true, section: 'rooms', hint: '住客都有手牌、离店前在前台结清；入住时可以改', current: rm.defaultDeposit, dflt: rmd.defaultDeposit, metaKey: 'room_rules' });
+  // ── 预约（v0.7.28 ③，N4）──
+  const bk = await loadBookingRules(db);
+  const bkd = DEFAULT_BOOKING_RULES;
+  const windowText = (r: BookingRules) => `${r.openTime}–${r.closeTime}，每 ${r.slotMinutes} 分钟一格，最远约 ${r.maxDaysAhead} 天后`;
+  const mpText = (r: BookingRules) => `每人同时最多 ${r.mpMaxOpen} 个；开始前 ${r.confirmLeadMinutes} 分钟还没确认自动取消；开始前 ${r.mpCancelLeadMinutes} 分钟以前可以自己取消`;
+  const noShowText = (r: BookingRules) =>
+    `过了开始 ${r.noShowMinutes} 分钟没到店记爽约；${r.noShowWindowDays} 天内爽约 ${r.noShowLimit} 次${r.noShowBanDays ? `，之后 ${r.noShowBanDays} 天不能在小程序预约` : '，不限制'}`;
+  const lengthText = (r: BookingRules) => `派对房等可约 ${r.spaceDurations.map((m) => `${m / 60} 小时`).join('、')}；技师项目没写时长按 ${r.defaultServiceMinutes} 分钟；客房电话预订保留到预计到店后 ${r.roomHoldMinutes} 分钟`;
+  const pick = <K extends keyof BookingRules>(r: BookingRules, keys: K[]) => keys.map((x) => r[x]);
+  const bookingEntry = (key: string, label: string, text: (r: BookingRules) => string, keys: (keyof BookingRules)[], hint?: string) =>
+    add({ key: `booking_rules.${key}`, group: 'bookings', label, value: text(bk), defaultValue: text(bkd), pending: true, section: 'bookings', hint, current: pick(bk, keys), dflt: pick(bkd, keys), metaKey: 'booking_rules' });
+  bookingEntry('window', '能约的时段', windowText, ['openTime', 'closeTime', 'slotMinutes', 'maxDaysAhead'], '前台、电话、小程序都按这个时段约');
+  bookingEntry('mp', '小程序预约', mpText, ['mpMaxOpen', 'confirmLeadMinutes', 'mpCancelLeadMinutes'], '小程序的预约先「待确认」，前台确认');
+  bookingEntry('noShow', '爽约', noShowText, ['noShowMinutes', 'noShowWindowDays', 'noShowLimit', 'noShowBanDays']);
+  bookingEntry('lengths', '时长与保留', lengthText, ['spaceDurations', 'defaultServiceMinutes', 'roomHoldMinutes']);
   // ── 平面图收尾（v0.7.19）：开单即占用的业态 ──
   const ur = await loadUsageRules(db);
   const usageText = (types: string[]) => (types.length ? `${types.join('、')}：有开着的使用单算使用中` : '没有（派对房等只显示业态）');
@@ -361,6 +389,8 @@ const SETTING_LABELS: Record<string, string> = {
   memberFields: '会员自定义字段',
   customBonusValidDays: '自定义赠金有效期',
   requireOpenShift: '收款前必须先开班',
+  shiftMode: '交班方式',
+  cashDrawers: '钱箱',
   hidePendingMarks: '「待确认」标记',
   memberChannels: '渠道来源',
 };
@@ -378,6 +408,7 @@ function describeChange(action: string, detail: Record<string, unknown>): string
       if (detail.key === 'room_rules') return '修改了客房规则';
       if (detail.key === 'location_rules') return '修改了实时位置的开关与区域';
       if (detail.key === 'usage_rules') return '修改了开单即占用的业态';
+      if (detail.key === 'booking_rules') return '修改了预约规则';
       if (detail.key === 'guide_rules') return '修改了对客导览的设置';
       const after = (detail.after ?? {}) as Record<string, unknown>;
       const keys = Object.keys(after).map((x) => SETTING_LABELS[x] ?? x);

@@ -34,6 +34,7 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, ConfirmCheck, Field, Notice, PendingBadge, SectionTitle, Skeleton, Textarea } from '../../components/ui';
 import { PrintButton } from '../print/PrintButton';
+import { NetPrintButton } from '../print/NetPrintButton';
 import { ANOMALY_LABELS, receivedByMethod } from './summary';
 
 export function SettlementPage() {
@@ -59,6 +60,7 @@ export function SettlementPage() {
                 打印
               </PrintButton>
             )}
+            {s.data && <NetPrintButton doc={{ type: 'settlement', date }} docName="日结单（80mm 汇总）" size="sm" testId="settlement-netprint" />}
             {can('ledger.export') && (
               <Button size="sm" variant="secondary" icon={<Download className="size-4" />} onClick={() => downloadUrl(`/api/settlements/${date}/export`)}>
                 导出
@@ -280,6 +282,8 @@ function Summary({ s, dayLabel }: { s: SettlementSummary; dayLabel: string }) {
 
       <BusinessCard s={s} />
       <DepositsCard s={s} />
+      <CountCardsDayCard s={s} />
+      <PlatformDayCard s={s} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
         {/* 余额核对（手机上表格放不下时在框内横向滑动） */}
@@ -558,6 +562,67 @@ function DepositsCard({ s }: { s: SettlementSummary }) {
         <Row label="退押金（原路退回）" cents={-sum(d.refunded)} className="text-clay" />
         <p className="pl-3 text-[12px] text-ink-3">{line(d.refunded)}</p>
         <p className="text-[12px] text-ink-4">现金押金进出钱箱，交班按此核对应有现金；扫码、银行卡收的押金退房时在商户后台原路退。</p>
+      </div>
+    </Card>
+  );
+}
+
+/** 平台核销补录（v0.7.28）：已在平台 App 核销、没有经过前台结账的券；不算营业额，与平台打款对账 */
+function PlatformDayCard({ s }: { s: SettlementSummary }) {
+  const p = s.platformRedemptions;
+  if (!p || (p.count === 0 && p.voidCount === 0)) return null;
+  return (
+    <Card className="overflow-hidden" data-testid="settlement-platform">
+      <div className="border-b border-line px-5 pt-4 pb-3">
+        <p className="flex items-center gap-2 text-[13px] font-bold text-ink-2">
+          <span className="size-2 rounded-full bg-lake" />
+          平台核销补录 · 不结账，不算营业额
+        </p>
+      </div>
+      <div className="space-y-2 px-5 py-4 text-[13px]">
+        <Row label={`补登记（${p.count} 张，面值）`} cents={p.face} className="text-ink" />
+        <p className="pl-3 text-[12px] text-ink-3">{p.byPlatform.map((b) => `${COUPON_PLATFORM_LABELS[b.platform]} ${b.count} 张 ${formatYuan(b.face)}`).join('、') || '无'}</p>
+        <Row label="平台应结" cents={p.settle} className="text-pine" />
+        {p.voidCount > 0 && <p className="text-[12px] text-ink-3">另有作废 {p.voidCount} 笔</p>}
+        <p className="text-[12px] text-ink-4">在「前台 → 平台核销」补登记与对账；前台结账时用的团购券在上面的收款构成里。</p>
+      </div>
+    </Card>
+  );
+}
+
+/** 次卡（v0.7.28）：售卡、退卡是收款与退款；结账使用在营业口径里（「次卡」）；过期作废不退钱 */
+function CountCardsDayCard({ s }: { s: SettlementSummary }) {
+  const c = s.countCards;
+  if (!c || (c.sales.count === 0 && c.refunds.count === 0 && c.uses.count === 0 && c.expired.cards === 0 && c.opening.cards === 0 && c.outstanding.cards === 0)) return null;
+  const line = (list: typeof c.sales.byMethod) => (list.length ? list.map((m) => `${PAYMENT_METHOD_LABELS[m.method]} ${m.count} 张 ${formatYuan(m.amount)}`).join('、') : '无');
+  return (
+    <Card className="overflow-hidden" data-testid="settlement-count-cards">
+      <div className="border-b border-line px-5 pt-4 pb-3">
+        <p className="flex items-center gap-2 text-[13px] font-bold text-ink-2">
+          <span className="size-2 rounded-full bg-yuzu" />
+          次卡 · 售卡是预收，用的时候按项目价算营业额
+        </p>
+        <p className="mt-1.5 text-[12.5px] text-ink-3">
+          当天结束时还剩 <span className="font-bold text-ink">{c.outstanding.uses}</span> 次（{c.outstanding.cards} 张卡）
+        </p>
+      </div>
+      <div className="space-y-2 px-5 py-4 text-[13px]">
+        <Row label={`售卡收款（${c.sales.count} 张）`} cents={c.sales.amount} className="text-ink" />
+        <p className="pl-3 text-[12px] text-ink-3">{line(c.sales.byMethod)}</p>
+        {c.refunds.count > 0 && (
+          <>
+            <Row label={`退卡（${c.refunds.count} 张）`} cents={-c.refunds.amount} className="text-clay" />
+            <p className="pl-3 text-[12px] text-ink-3">{line(c.refunds.byMethod)}</p>
+          </>
+        )}
+        <Row label={`结账使用（净 ${c.uses.count} 次）`} cents={c.uses.amount} className="text-pine" />
+        {(c.expired.cards > 0 || c.opening.cards > 0) && (
+          <p className="text-[12px] text-ink-3">
+            {c.expired.cards > 0 && `过期作废 ${c.expired.uses} 次（${c.expired.cards} 张，不退钱）`}
+            {c.expired.cards > 0 && c.opening.cards > 0 && '；'}
+            {c.opening.cards > 0 && `旧次卡期初 ${c.opening.uses} 次（${c.opening.cards} 张，不是收款）`}
+          </p>
+        )}
       </div>
     </Card>
   );

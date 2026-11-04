@@ -31,7 +31,7 @@ import type { Actor, Deps, OpContext } from '../../lib/context';
 import { badRequest, conflict, notFound, unprocessable } from '../../lib/errors';
 import { parse, positiveCents } from '../../lib/validate';
 import { loadSettings } from '../settings';
-import { lockPaymentShift, lockRefundShift, openShiftOf } from '../shifts';
+import { lockPaymentShift, lockRefundShift, openShiftOf, shiftDrawerLabel } from '../shifts';
 import { businessDate, hashRequest, nextDocNo, runIdempotent, saveKey, setTxTimeouts } from './common';
 
 // ───────────────────────── 输入 ─────────────────────────
@@ -262,10 +262,7 @@ export async function createRefund(deps: Deps, checkoutId: number, raw: RefundIn
       await tx`INSERT INTO refund_payments (refund_id, method, amount, ref) VALUES (${r!.id}, ${p.method}, ${p.amount}, ${p.ref})`;
     }
     // 从别人的钱箱退现金：审计写明记到了谁的哪个班次
-    const [drawer] = shiftId
-      ? await tx<{ shiftNo: string; staffId: number; staffName: string }[]>`
-          SELECT s.shift_no, s.staff_id, st.display_name AS staff_name FROM shifts s JOIN staff st ON st.id = s.staff_id WHERE s.id = ${shiftId}`
-      : [];
+    const drawer = shiftId ? await shiftDrawerLabel(tx, shiftId, ctx.actor.id) : null;
     await saveKey(tx, key, 'checkout_refund', requestHash, r!.id, ctx.actor.id);
     await writeAudit(tx, {
       staffId: ctx.actor.id,
@@ -279,7 +276,7 @@ export async function createRefund(deps: Deps, checkoutId: number, raw: RefundIn
         reason: input.reason,
         items: input.items,
         payments: input.payments.map((p) => ({ method: p.method, amount: p.amount, ref: p.ref })),
-        ...(drawer && drawer.staffId !== ctx.actor.id ? { refundShift: drawer.shiftNo, refundDrawer: drawer.staffName } : {}),
+        ...(drawer && !drawer.mine ? { refundShift: drawer.shiftNo, refundDrawer: drawer.label } : {}),
       },
       ip: ctx.ip,
       businessDate: date,
@@ -303,7 +300,7 @@ export async function voidRefund(deps: Deps, refundId: number, raw: unknown, ctx
     if (!peek) throw notFound('退款单不存在');
     if (peek.shiftId !== null) {
       const [s] = await tx<{ status: string; shiftNo: string; staffName: string }[]>`
-        SELECT s.status, s.shift_no, st.display_name AS staff_name FROM shifts s JOIN staff st ON st.id = s.staff_id
+        SELECT s.status, s.shift_no, coalesce(s.drawer_name, st.display_name) AS staff_name FROM shifts s JOIN staff st ON st.id = s.staff_id
         WHERE s.id = ${peek.shiftId} FOR SHARE OF s`;
       if (s!.status !== 'open') {
         throw conflict('REFUND_SHIFT_CLOSED', `这张退款单记在${s!.staffName}的班次 ${s!.shiftNo}，已经交班，不能再作废；请店主处理`, { shiftNo: s!.shiftNo });
@@ -380,7 +377,8 @@ export async function getRefund(db: Db, id: number): Promise<RefundDetail> {
   const payments = await db<RefundDetail['payments']>`SELECT method, amount, ref FROM refund_payments WHERE refund_id = ${id} ORDER BY id`;
   const [extra] = await db<{ shift: RefundDetail['shift']; voidedAt: string | null; voidedByName: string | null; voidReason: string | null }[]>`
     SELECT CASE WHEN s.id IS NULL THEN NULL
-                ELSE json_build_object('id', s.id, 'shiftNo', s.shift_no, 'staffName', ss.display_name, 'open', s.status = 'open') END AS shift,
+                ELSE json_build_object('id', s.id, 'shiftNo', s.shift_no, 'staffName', ss.display_name, 'drawerName', s.drawer_name,
+                                       'open', s.status = 'open') END AS shift,
            r.voided_at, vb.display_name AS voided_by_name, r.void_reason
     FROM refunds r LEFT JOIN shifts s ON s.id = r.shift_id LEFT JOIN staff ss ON ss.id = s.staff_id LEFT JOIN staff vb ON vb.id = r.voided_by
     WHERE r.id = ${id}`;

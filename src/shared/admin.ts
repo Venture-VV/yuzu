@@ -24,6 +24,8 @@ export const ADMIN_SECTIONS = {
   technicians: { path: '/admin/technicians', label: '技师', perms: ['technician.manage', 'settings.manage', 'catalog.manage', 'audit.read'] },
   dining: { path: '/admin/dining', label: '餐饮', perms: ['settings.manage', 'catalog.manage'] },
   rooms: { path: '/admin/rooms', label: '客房', perms: ['settings.manage', 'catalog.manage'] },
+  // 预约（v0.7.28 ③）：能约的时段、小程序预约的限制、爽约规则
+  bookings: { path: '/admin/bookings', label: '预约', perms: ['settings.manage'] },
   // 空间台账（RQ-004 第一段，v0.7.14）：店主、店总，与「客房」同一组权限
   spaces: { path: '/admin/spaces', label: '空间台账', perms: ['settings.manage', 'catalog.manage'] },
   // 设备（RQ-001，v0.7.21，见 docs/HARDWARE.md）：设备登记、按采购清单导入、打印任务与设备事件；默认店主、店总
@@ -49,6 +51,7 @@ export const RULE_GROUPS = {
   technicians: '技师',
   dining: '餐饮',
   rooms: '客房',
+  bookings: '预约',
   floormap: '平面图与导览',
   locations: '实时位置',
   inventory: '库存与采购',

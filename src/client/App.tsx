@@ -22,6 +22,8 @@ import { lazyPage } from './lib/lazyPage';
 const ClockroomPage = lazyPage(() => import('./features/clockroom/ClockroomPage').then((m) => m.ClockroomPage));
 const DiningPage = lazyPage(() => import('./features/dining/DiningPage').then((m) => m.DiningPage));
 const RoomsPage = lazyPage(() => import('./features/rooms/RoomsPage').then((m) => m.RoomsPage));
+const BookingsPage = lazyPage(() => import('./features/bookings/BookingsPage').then((m) => m.BookingsPage));
+const PlatformPage = lazyPage(() => import('./features/platform/PlatformPage').then((m) => m.PlatformPage));
 const GuidePage = lazyPage(() => import('./features/guide/GuidePage').then((m) => m.GuidePage));
 const GuideScreenPage = lazyPage(() => import('./features/guide/GuidePage').then((m) => m.GuideScreenPage));
 const DevicesPage = lazyPage(() => import('./features/devices/DevicesPage').then((m) => m.DevicesPage));
@@ -225,6 +227,8 @@ const router = createBrowserRouter([
       { path: 'clockroom', element: <ClockroomPage /> },
       { path: 'dining/:tab?', element: <DiningPage /> },
       { path: 'rooms', element: <RoomsPage /> },
+      { path: 'bookings', element: <BookingsPage /> },
+      { path: 'platform', element: <PlatformPage /> },
       { path: 'guide', element: <GuidePage /> },
       { path: 'devices', element: <DevicesPage /> },
       { path: 'ledger', element: <LedgerPage /> },

@@ -22,6 +22,7 @@ import { CheckoutReceipt } from '../frontdesk/CheckoutDialog';
 import { PaymentsSection, usePayRows } from '../frontdesk/payments';
 import { PendingPanel, useFrontdeskOp } from '../frontdesk/pending';
 import { PrintButton } from '../print/PrintButton';
+import { NetPrintButton } from '../print/NetPrintButton';
 import { SHIFT_ERRORS, shiftKeys, ShiftGate, useShiftReady } from '../shift/ShiftGate';
 import { tablesKey, useTableCheckoutPreview } from './queries';
 
@@ -150,6 +151,7 @@ export function TableCheckoutDialog({
             <PrintButton path={`/print/checkout/${result.id}`} size="lg" testId="checkout-print">
               打印结账单
             </PrintButton>
+            <NetPrintButton doc={{ type: 'checkout', id: result.id }} size="lg" testId="checkout-netprint" />
             <Button variant="primary" size="lg" onClick={() => onDone(result)} data-testid="checkout-finish">
               完成
             </Button>

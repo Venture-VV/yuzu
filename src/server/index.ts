@@ -5,10 +5,12 @@ import { loadConfig } from './config';
 import { createSql } from './db';
 import { migrate } from './migrate';
 import { sweepExpiredBonus } from './modules/bonus';
+import { sweepBookings } from './modules/bookings';
+import { expireCountCards } from './modules/count-cards';
 import { issueBirthdayCoupons } from './modules/coupons';
-import { checkDevicesOnce, recoverJobs } from './modules/devices';
+import { checkDevicesOnce, recoverJobs, resumeWaitingJobs } from './modules/devices';
 import { ensureMembershipLive, runMembershipDaily } from './modules/membership';
-import { runBenefitsDaily } from './modules/benefits';
+import { runBenefitsDaily, runVisitChallenges } from './modules/benefits';
 import { HEARTBEAT_INTERVAL_MS } from '@shared/devices';
 import { holdAppPresence } from './presence';
 import { buildMpApp } from './modules/mp/app';
@@ -91,6 +93,27 @@ async function main() {
         app.log.error({ err: error }, '生日礼发券失败，10 分钟后重试');
       }
     }
+    // 预约（v0.7.28）：小程序预约开始前还没确认的自动取消、过了时间没到店的记爽约、客房过了保留时间释放
+    try {
+      const run = await sweepBookings(sql);
+      if (run.cancelled || run.noShow) app.log.info(`预约：自动取消 ${run.cancelled} 张、记爽约 ${run.noShow} 张`);
+    } catch (error) {
+      app.log.error({ err: error }, '预约的自动处理失败，下一分钟重试');
+    }
+    // 会员挑战（v0.7.28，QY-057）：这个月到店天数满了、还没送过的会员送一次
+    try {
+      const r = await runVisitChallenges({ sql, config });
+      if (r.members > 0) app.log.info(`会员挑战：${r.members} 位会员满了，发券 ${r.coupons} 张`);
+    } catch (error) {
+      app.log.error({ err: error }, '会员挑战的发放失败，下一分钟重试');
+    }
+    // 次卡（v0.7.28）：过了有效期没用完的次数作废
+    try {
+      const n = await expireCountCards(sql, { config });
+      if (n > 0) app.log.info(`次卡：${n} 张过期作废`);
+    } catch (error) {
+      app.log.error({ err: error }, '次卡的过期处理失败，下一分钟重试');
+    }
     // 顺带检查应用在跑的标记（数据库重启过、专用连接断了就重新拿）
     try {
       await presence.ensure();
@@ -101,11 +124,14 @@ async function main() {
   await sweep();
   const sweeper = setInterval(() => void sweep(), 60_000);
 
-  // 硬件连接（v0.7.21）：每 2 秒查一次设备（网口心跳、终端上报超时）；打印任务的恢复在开端口之前做过了
+  // 硬件连接（v0.7.21）：每 2 秒查一次设备（网口心跳、终端上报超时）；打印任务的恢复在开端口之前做过了。
+  // 断网打印队列（v0.7.28）：每轮心跳之后，恢复在线的打印机把等它的单子改回排队补打，等太久的不再打
   let deviceCheck: Promise<void> | null = null;
   const deviceTimer = setInterval(() => {
     if (deviceCheck) return;
     deviceCheck = checkDevicesOnce({ sql })
+      .then(() => resumeWaitingJobs({ sql, config }, { log: deviceLog }))
+      .then(() => undefined)
       .catch((error) => app.log.error({ err: error }, '设备心跳失败，2 秒后重试'))
       .finally(() => {
         deviceCheck = null;

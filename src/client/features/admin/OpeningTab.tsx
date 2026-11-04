@@ -21,6 +21,7 @@ import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, ConfirmCheck, Field, Input, Notice, SectionTitle, Skeleton } from '../../components/ui';
+import { MemberHistoryImportCard } from './MemberHistoryImportCard';
 
 const listKey = ['opening-imports'] as const;
 
@@ -31,6 +32,8 @@ export function OpeningTab() {
     <div className="space-y-5">
       <ImportCard />
       <HistoryCard onOpen={setOpenId} />
+      {/* 旧系统逐笔流水（v0.7.28 ⑩）：只读导入，会员详情里看 */}
+      <MemberHistoryImportCard />
       {openId !== null && <ImportDetailDialog id={openId} onClose={() => setOpenId(null)} />}
     </div>
   );

@@ -124,7 +124,7 @@ const toRow = (rules: MembershipRules, r: TrialDbRow): TrialRow => ({
   createdAt: new Date(r.createdAt).toISOString(),
 });
 
-async function getTrial(db: Db, id: number): Promise<TrialRow> {
+export async function getTrial(db: Db, id: number): Promise<TrialRow> {
   const [r] = await db<TrialDbRow[]>`${TRIAL_SELECT(db)} WHERE t.id = ${id}`;
   if (!r) throw notFound('临时身份不存在');
   return toRow(await loadMembershipRules(db), r);
@@ -295,7 +295,7 @@ function inviteeProblem(rules: MembershipRules, inviterId: number, invitee: Invi
   return null;
 }
 
-const PhoneField = z
+export const PhoneField = z
   .string('请输入受邀人的手机号')
   .transform((s) => s.replace(/[\s-]/g, ''))
   .pipe(z.string().regex(/^1\d{10}$/, '请输入 11 位手机号'));
@@ -353,6 +353,127 @@ async function expireOverdue(tx: Tx, memberIds: number[], date: string): Promise
   return rows.length;
 }
 
+/** 发起需要的内容（前台按校验整理后的请求；小程序入口 mp-entries.ts 照同一套规则） */
+export interface TrialCreateArgs {
+  inviterId: number;
+  kind: TrialKind;
+  phone: string;
+  name: string;
+  channel: string | null | undefined;
+  clientKey: string;
+  requestHash: string;
+}
+
+/**
+ * 发起一笔（调用方的事务里；调用方已取操作编号的锁、核对过重提）：返回新的临时身份编号。
+ * 锁：两位会员一行（id 升序）→ QY-042 权益一行（共享锁，赠送会籍时）
+ */
+export async function createTrialTx(tx: Tx, deps: Deps, args: TrialCreateArgs, ctx: OpContext, date: string): Promise<number> {
+  const { inviterId } = args;
+  const rules = await loadMembershipRules(tx);
+  const [found] = await tx<{ id: number }[]>`SELECT id FROM members WHERE phone = ${args.phone}`;
+  const existingId = found ? Number(found.id) : null;
+  if (existingId === inviterId) throw unprocessable('TRIAL_SELF', '不能邀请自己：请输入受邀人的手机号');
+  // 两位会员按 id 升序锁（与充值、消费、登记使用同一把锁）
+  const ids = existingId === null ? [inviterId] : [inviterId, existingId].sort((a, b) => a - b);
+  const locked = await tx<{ id: number; status: string; phone: string; name: string }[]>`
+    SELECT id, status, phone, name FROM members WHERE id IN ${tx(ids)} ORDER BY id FOR UPDATE`;
+  const inviter = locked.find((m) => Number(m.id) === inviterId);
+  if (!inviter) throw notFound('会员不存在');
+  const existing = existingId === null ? null : (locked.find((m) => Number(m.id) === existingId) ?? null);
+  if (existingId !== null && (!existing || existing.phone !== args.phone)) {
+    throw conflict('MEMBER_CHANGED', '受邀人的会员档案刚刚有变化，请重新发起');
+  }
+  // 到期没处理的先按规则处理（两位都是，按 id 升序），再按处理完的档阶判断（与充值、消费、登记使用一样）
+  const settled = new Map<number, { grade: Grade; tier: Tier | null }>();
+  for (const id of ids) settled.set(id, (await settleMemberDue(tx, id, date))!);
+  const f = await inviterFacts(tx, inviterId, settled.get(inviterId)!, date, rules, { lockGift: args.kind === 'gift' });
+  const option = args.kind === 'invite' ? inviteOption(rules, f, date) : giftOption(rules, f, date);
+  if (!option.allowed) throw unprocessable('TRIAL_NOT_ALLOWED', option.reason!);
+  const grade = option.grade!;
+  let inviteeId: number;
+  let inviteeName: string;
+  let created = false;
+  if (existing) {
+    inviteeId = existingId!;
+    inviteeName = existing.name;
+    // 过了结束日还没处理的先记到期，不占「同一时间一个」
+    await expireOverdue(tx, [inviteeId], date);
+    const problem = inviteeProblem(rules, inviterId, await inviteeFacts(tx, inviteeId, settled.get(inviteeId)!, date, rules), option);
+    if (problem) throw unprocessable('TRIAL_INVITEE', problem);
+  } else {
+    if (!args.name) throw badRequest('受邀人还不是会员，请填写姓名（当场建档）', { field: 'name' });
+    // 必填的自定义字段可以先空着（只问姓名、手机号），之后编辑会员时再补
+    inviteeId = await insertMember(tx, { name: args.name, phone: args.phone, channel: args.channel }, ctx, { enforceRequired: false });
+    // 与在建档页建档一样：按发券规则发开卡礼，「L0·会员」起点的权益当场发（这些按自己的档阶，与临时身份无关）
+    await issueOpenCardCoupons(tx, deps, inviteeId, ctx);
+    await onMemberSaved(tx, deps, inviteeId, ctx);
+    inviteeName = args.name;
+    created = true;
+  }
+  let use: { id: number; code: string; name: string; period: string | null; limit: number | null; note: string } | null = null;
+  if (args.kind === 'gift') {
+    const g = f.gift!;
+    const limit = option.limit;
+    const pk = limit === null ? null : periodKey(g.period, date);
+    const note = `赠送会籍：${inviteeName}`.slice(0, 200);
+    const [u] = await tx<{ id: number }[]>`
+      INSERT INTO benefit_uses (benefit_id, member_id, business_date, period_key, quantity, limit_at, note, staff_id, client_key)
+      VALUES (${g.id}, ${inviterId}, ${date}, ${pk}, 1, ${limit}, ${note}, ${ctx.actor.id}, ${randomUUID()})
+      RETURNING id`;
+    use = { id: Number(u!.id), code: g.code, name: g.name, period: pk, limit, note };
+  }
+  const endsOn = option.endsOn!;
+  const [row] = await tx<{ id: number }[]>`
+    INSERT INTO member_trials (member_id, kind, grade, tier, starts_on, ends_on, inviter_id, benefit_use_id, business_date, staff_id, client_key, request_hash)
+    VALUES (${inviteeId}, ${args.kind}, ${grade}, 0, ${date}, ${endsOn}, ${inviterId}, ${use?.id ?? null}, ${date}, ${ctx.actor.id}, ${args.clientKey}, ${args.requestHash})
+    RETURNING id`;
+  const trialId = Number(row!.id);
+  if (use) {
+    await writeAudit(tx, {
+      staffId: ctx.actor.id,
+      action: 'benefit_used',
+      targetType: 'member',
+      targetId: inviterId,
+      detail: { useId: use.id, code: use.code, name: use.name, quantity: 1, period: use.period, limit: use.limit, note: use.note, trialId },
+      ip: ctx.ip,
+      businessDate: date,
+    });
+  }
+  await writeAudit(tx, {
+    staffId: ctx.actor.id,
+    action: 'member_trial_created',
+    targetType: 'member',
+    targetId: inviteeId,
+    detail: {
+      trialId,
+      kind: TRIAL_KIND_LABELS[args.kind],
+      label: option.label,
+      startsOn: date,
+      endsOn,
+      inviterId,
+      inviter: inviter.name,
+      useId: use?.id,
+      newMember: created || undefined,
+    },
+    ip: ctx.ip,
+    businessDate: date,
+  });
+  return trialId;
+}
+
+/** 发起时撞上唯一约束：翻译成店员看得懂的提示（不是这几种返回空） */
+export function trialUniqueError(error: unknown) {
+  if (isUniqueViolation(error, 'members_phone_key')) {
+    return conflict('PHONE_EXISTS', '这个手机号刚刚登记为会员，请重新发起（会按已有会员邀请）');
+  }
+  if (isUniqueViolation(error, 'member_trials_active_uq')) return conflict('TRIAL_ACTIVE', '受邀人刚刚有了一个临时身份，请刷新后再看');
+  return null;
+}
+
+/** 发起时的营业日 */
+export const trialToday = (db: Db, timezone: string, at?: Date) => today(db, timezone, at);
+
 /**
  * 发起邀请体验或赠送会籍（M52–M54）。同一编号重提返回原来那条；结果待确认时可以「确认作废」，之后原请求晚到也不生效。
  * 受邀人按手机号找；还不是会员的当场建档（L0、没有余额，与建档页一样发开卡礼）
@@ -375,96 +496,8 @@ export async function createTrial(deps: Deps, inviterId: number, raw: unknown, c
       await assertNotFenced(tx, input.clientKey, 'member_trial', erpOpAbandoned);
       const prior = await replay(tx);
       if (prior !== null) return { id: prior, replayed: true };
-      const rules = await loadMembershipRules(tx);
-      const [found] = await tx<{ id: number }[]>`SELECT id FROM members WHERE phone = ${input.phone}`;
-      const existingId = found ? Number(found.id) : null;
-      if (existingId === inviterId) throw unprocessable('TRIAL_SELF', '不能邀请自己：请输入受邀人的手机号');
-      // 两位会员按 id 升序锁（与充值、消费、登记使用同一把锁）
-      const ids = existingId === null ? [inviterId] : [inviterId, existingId].sort((a, b) => a - b);
-      const locked = await tx<{ id: number; status: string; phone: string; name: string }[]>`
-        SELECT id, status, phone, name FROM members WHERE id IN ${tx(ids)} ORDER BY id FOR UPDATE`;
-      const inviter = locked.find((m) => Number(m.id) === inviterId);
-      if (!inviter) throw notFound('会员不存在');
-      const existing = existingId === null ? null : (locked.find((m) => Number(m.id) === existingId) ?? null);
-      if (existingId !== null && (!existing || existing.phone !== input.phone)) {
-        throw conflict('MEMBER_CHANGED', '受邀人的会员档案刚刚有变化，请重新发起');
-      }
-      // 到期没处理的先按规则处理（两位都是，按 id 升序），再按处理完的档阶判断（与充值、消费、登记使用一样）
-      const settled = new Map<number, { grade: Grade; tier: Tier | null }>();
-      for (const id of ids) settled.set(id, (await settleMemberDue(tx, id, date))!);
-      const f = await inviterFacts(tx, inviterId, settled.get(inviterId)!, date, rules, { lockGift: input.kind === 'gift' });
-      const option = input.kind === 'invite' ? inviteOption(rules, f, date) : giftOption(rules, f, date);
-      if (!option.allowed) throw unprocessable('TRIAL_NOT_ALLOWED', option.reason!);
-      const grade = option.grade!;
-      let inviteeId: number;
-      let inviteeName: string;
-      let created = false;
-      if (existing) {
-        inviteeId = existingId!;
-        inviteeName = existing.name;
-        // 过了结束日还没处理的先记到期，不占「同一时间一个」
-        await expireOverdue(tx, [inviteeId], date);
-        const problem = inviteeProblem(rules, inviterId, await inviteeFacts(tx, inviteeId, settled.get(inviteeId)!, date, rules), option);
-        if (problem) throw unprocessable('TRIAL_INVITEE', problem);
-      } else {
-        if (!input.name) throw badRequest('受邀人还不是会员，请填写姓名（当场建档）', { field: 'name' });
-        // 必填的自定义字段可以先空着（只问姓名、手机号），之后编辑会员时再补
-        inviteeId = await insertMember(tx, { name: input.name, phone: input.phone, channel: input.channel }, ctx, { enforceRequired: false });
-        // 与在建档页建档一样：按发券规则发开卡礼，「L0·会员」起点的权益当场发（这些按自己的档阶，与临时身份无关）
-        await issueOpenCardCoupons(tx, deps, inviteeId, ctx);
-        await onMemberSaved(tx, deps, inviteeId, ctx);
-        inviteeName = input.name;
-        created = true;
-      }
-      let use: { id: number; code: string; name: string; period: string | null; limit: number | null; note: string } | null = null;
-      if (input.kind === 'gift') {
-        const g = f.gift!;
-        const limit = option.limit;
-        const pk = limit === null ? null : periodKey(g.period, date);
-        const note = `赠送会籍：${inviteeName}`.slice(0, 200);
-        const [u] = await tx<{ id: number }[]>`
-          INSERT INTO benefit_uses (benefit_id, member_id, business_date, period_key, quantity, limit_at, note, staff_id, client_key)
-          VALUES (${g.id}, ${inviterId}, ${date}, ${pk}, 1, ${limit}, ${note}, ${ctx.actor.id}, ${randomUUID()})
-          RETURNING id`;
-        use = { id: Number(u!.id), code: g.code, name: g.name, period: pk, limit, note };
-      }
-      const endsOn = option.endsOn!;
-      const [row] = await tx<{ id: number }[]>`
-        INSERT INTO member_trials (member_id, kind, grade, tier, starts_on, ends_on, inviter_id, benefit_use_id, business_date, staff_id, client_key, request_hash)
-        VALUES (${inviteeId}, ${input.kind}, ${grade}, 0, ${date}, ${endsOn}, ${inviterId}, ${use?.id ?? null}, ${date}, ${ctx.actor.id}, ${input.clientKey}, ${requestHash})
-        RETURNING id`;
-      const trialId = Number(row!.id);
-      if (use) {
-        await writeAudit(tx, {
-          staffId: ctx.actor.id,
-          action: 'benefit_used',
-          targetType: 'member',
-          targetId: inviterId,
-          detail: { useId: use.id, code: use.code, name: use.name, quantity: 1, period: use.period, limit: use.limit, note: use.note, trialId },
-          ip: ctx.ip,
-          businessDate: date,
-        });
-      }
-      await writeAudit(tx, {
-        staffId: ctx.actor.id,
-        action: 'member_trial_created',
-        targetType: 'member',
-        targetId: inviteeId,
-        detail: {
-          trialId,
-          kind: TRIAL_KIND_LABELS[input.kind],
-          label: option.label,
-          startsOn: date,
-          endsOn,
-          inviterId,
-          inviter: inviter.name,
-          useId: use?.id,
-          newMember: created || undefined,
-        },
-        ip: ctx.ip,
-        businessDate: date,
-      });
-      return { id: trialId, replayed: false };
+      const args = { inviterId, kind: input.kind, phone: input.phone, name: input.name, channel: input.channel, clientKey: input.clientKey, requestHash };
+      return { id: await createTrialTx(tx, deps, args, ctx, date), replayed: false };
     });
     return { trial: await getTrial(deps.sql, out.id), replayed: out.replayed };
   } catch (error) {
@@ -473,11 +506,7 @@ export async function createTrial(deps: Deps, inviterId: number, raw: unknown, c
       const id = await replay(deps.sql);
       if (id !== null) return { trial: await getTrial(deps.sql, id), replayed: true };
     }
-    if (isUniqueViolation(error, 'members_phone_key')) {
-      throw conflict('PHONE_EXISTS', '这个手机号刚刚登记为会员，请重新发起（会按已有会员邀请）');
-    }
-    if (isUniqueViolation(error, 'member_trials_active_uq')) throw conflict('TRIAL_ACTIVE', '受邀人刚刚有了一个临时身份，请刷新后再看');
-    throw error;
+    throw trialUniqueError(error) ?? error;
   }
 }
 

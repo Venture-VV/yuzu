@@ -4,12 +4,14 @@
 // 三个写操作都带操作编号，断网时走「结果待确认」（查回 / 原样重提 / 确认作废）。
 
 import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ban, CircleStop, PartyPopper } from 'lucide-react';
 import { normalizeTagCode, TAG_CODE_PATTERN } from '@shared/frontdesk';
 import type { FloorMapSpace, FloorMapUsage } from '@shared/floormap';
 import { spaceLabel } from '@shared/spaces';
-import { durationText, MAX_USAGE_GUESTS, MAX_USAGE_NOTE, usageMinutes, type UsageDetail } from '@shared/usages';
+import { durationText, MAX_USAGE_GUESTS, MAX_USAGE_NOTE, pricingText, usageEstimate, usageMinutes, type UsageDetail } from '@shared/usages';
+import { formatYuan } from '@shared/money';
+import { api, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { formatTime } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
@@ -155,7 +157,8 @@ export function CloseUsageDialog({
 
   const finish = (u: UsageDetail) => {
     void qc.invalidateQueries({ queryKey: roomsKey });
-    toast({ tone: 'success', title: `${u.spaceCode} ${mode === 'end' ? '已结束使用' : '已撤单'}`, body: `${u.usageNo} · 手牌 ${u.tagCode}` });
+    const fee = u.fee ? `；房费 ${formatYuan(u.fee.amount)}${u.fee.openFee > 0 ? `、开台费 ${formatYuan(u.fee.openFee)}` : ''} 已挂到手牌 ${u.tagCode}` : '';
+    toast({ tone: 'success', title: `${u.spaceCode} ${mode === 'end' ? '已结束使用' : '已撤单'}`, body: `${u.usageNo} · 手牌 ${u.tagCode}${fee}` });
     onDone(u);
   };
   const submit = async () => {
@@ -195,7 +198,15 @@ export function CloseUsageDialog({
       <PendingPanel op={op} onResolved={finish} />
       <div className="space-y-3" data-testid="usage-close">
         {mode === 'end' ? (
-          <p className="text-[13.5px] text-ink-2">结束后房间变空闲；场次费等请确认已挂到手牌 {usage.tagCode} 的账单上。</p>
+          usage.pricing ? (
+            <Notice tone="info" title={`结束时按时长挂房费：到现在约 ${formatYuan(usageEstimate(minutes, usage.pricing))}`}>
+              <p data-testid="usage-close-fee">
+                {usage.pricing.itemName}：{pricingText(usage.pricing, formatYuan)}。按确认结束那一刻计时，挂到手牌 {usage.tagCode} 的账单上。
+              </p>
+            </Notice>
+          ) : (
+            <p className="text-[13.5px] text-ink-2">结束后房间变空闲；场次费等请确认已挂到手牌 {usage.tagCode} 的账单上。</p>
+          )
         ) : (
           <>
             <Notice tone="warning" title="撤单只用于开错了">
@@ -222,4 +233,32 @@ export function CloseUsageDialog({
       </div>
     </Dialog>
   );
+}
+
+/** 结账前「结束使用并挂房费」（v0.7.28）：按编号取使用单，再用同一个结束对话框 */
+export function EndUsageById({ usageId, onClose, onDone }: { usageId: number; onClose: () => void; onDone: (u: UsageDetail) => void }) {
+  const q = useQuery({ queryKey: ['usages', 'one', usageId], queryFn: () => api.get<UsageDetail>(`/api/usages/${usageId}`) });
+  if (q.isError) {
+    return (
+      <Dialog open onClose={onClose} title="结束使用">
+        <Notice tone="error">{errorMessage(q.error)}</Notice>
+      </Dialog>
+    );
+  }
+  if (!q.data) return null;
+  const d = q.data;
+  const usage: FloorMapUsage = {
+    id: d.id,
+    usageNo: d.usageNo,
+    spaceId: d.spaceId,
+    visitId: d.visitId,
+    tagCode: d.tagCode,
+    guests: d.guests,
+    note: d.note,
+    openedAt: d.openedAt,
+    openedByName: d.openedByName,
+    pricing: d.pricing ?? null,
+  };
+  const space = { id: d.spaceId, code: d.spaceCode, displayName: d.spaceName, businessType: d.businessType, capacity: null };
+  return <CloseUsageDialog usage={usage} space={space} mode="end" onClose={onClose} onDone={onDone} />;
 }

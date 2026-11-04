@@ -70,6 +70,19 @@ export const FENCED_OPS = [
   'member_refund',
   'member_status',
   'member_merge',
+  // 预约（v0.7.28，迁移 053）：新建、改动（确认、改时间、到店、取消、爽约）
+  'booking_create',
+  'booking_change',
+  // 次卡（v0.7.28，迁移 054）：售卡、退卡；编号记在卡、退卡单上（client_key）
+  'count_card_sale',
+  'count_card_refund',
+  // 平台核销补录（v0.7.28，迁移 055）：补登记、打款登记；编号记在各自的行上（client_key）
+  'platform_redemption',
+  'platform_settlement',
+  // 业务单据打到小票机（v0.7.28，迁移 056）：编号记在打印任务上（device_jobs.client_key）
+  'doc_print',
+  // 会员实体卡（v0.7.28，迁移 057）：发卡、补卡；编号记在卡上（member_cards.client_key）
+  'member_card',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -117,6 +130,8 @@ export async function fenceKey(
   if (opType === 'benefit_use' && (await benefitUseOpRef(tx, key)) !== null) return { existingOpType: opType };
   if (opType === 'member_trial' && (await trialOpRef(tx, key)) !== null) return { existingOpType: opType };
   if (isMemberOp(opType) && (await memberOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
+  if (isCountCardOp(opType) && (await countCardOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
+  if (isPlatformOp(opType) && (await platformOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   const rows = await tx`
     INSERT INTO op_fences (key, op_type, staff_id) VALUES (${key}, ${opType}, ${staffId})
     ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;
@@ -138,11 +153,11 @@ export async function couponOpRef(db: Db, key: string, opType: CouponOp): Promis
   return rows[0] ? Number(rows[0].id) : null;
 }
 
-const DEVICE_OPS = ['device_create', 'device_job'] as const;
+const DEVICE_OPS = ['device_create', 'device_job', 'doc_print'] as const;
 type DeviceOp = (typeof DEVICE_OPS)[number];
 export const isDeviceOp = (op: string): op is DeviceOp => (DEVICE_OPS as readonly string[]).includes(op);
 
-/** 硬件连接（v0.7.21）的操作编号记在设备、打印任务上：查到时返回那一台设备、那个任务的编号 */
+/** 硬件连接（v0.7.21）的操作编号记在设备、打印任务上（v0.7.28 起打印单据也是打印任务）：查到时返回那一台设备、那个任务的编号 */
 export async function deviceOpRef(db: Db, key: string, opType: DeviceOp): Promise<number | null> {
   const rows =
     opType === 'device_create'
@@ -187,5 +202,37 @@ export async function memberOpRef(db: Db, key: string, op: MemberOp): Promise<nu
     return row ? Number(row.memberId) : null;
   }
   const [row] = await db<{ id: number }[]>`SELECT id FROM member_merges WHERE client_key = ${key}`;
+  return row ? Number(row.id) : null;
+}
+
+const COUNT_CARD_OPS = ['count_card_sale', 'count_card_refund'] as const;
+type CountCardOp = (typeof COUNT_CARD_OPS)[number];
+export const isCountCardOp = (op: string): op is CountCardOp => (COUNT_CARD_OPS as readonly string[]).includes(op);
+
+/** 次卡（v0.7.28）的操作编号记在卡（售卡）、退卡单上：查到时返回那张卡的编号 */
+export async function countCardOpRef(db: Db, key: string, op: CountCardOp): Promise<number | null> {
+  const [row] =
+    op === 'count_card_sale'
+      ? await db<{ id: number }[]>`SELECT id FROM count_cards WHERE client_key = ${key}`
+      : await db<{ id: number }[]>`SELECT card_id AS id FROM count_card_refunds WHERE client_key = ${key}`;
+  return row ? Number(row.id) : null;
+}
+
+const PLATFORM_OPS = ['platform_redemption', 'platform_settlement'] as const;
+type PlatformOp = (typeof PLATFORM_OPS)[number];
+export const isPlatformOp = (op: string): op is PlatformOp => (PLATFORM_OPS as readonly string[]).includes(op);
+
+/** 平台核销补录（v0.7.28）的操作编号记在补登记、打款登记上：查到时返回那一行的编号 */
+export async function platformOpRef(db: Db, key: string, op: PlatformOp): Promise<number | null> {
+  const [row] =
+    op === 'platform_redemption'
+      ? await db<{ id: number }[]>`SELECT id FROM platform_redemptions WHERE client_key = ${key}`
+      : await db<{ id: number }[]>`SELECT id FROM platform_settlements WHERE client_key = ${key}`;
+  return row ? Number(row.id) : null;
+}
+
+/** 会员实体卡（v0.7.28）的发卡、补卡编号记在卡上：查到时返回那张卡的编号 */
+export async function memberCardOpRef(db: Db, key: string): Promise<number | null> {
+  const [row] = await db<{ id: number }[]>`SELECT id FROM member_cards WHERE client_key = ${key}`;
   return row ? Number(row.id) : null;
 }

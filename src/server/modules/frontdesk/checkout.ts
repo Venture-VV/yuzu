@@ -43,7 +43,7 @@ import { cents, parse, positiveCents } from '../../lib/validate';
 import { consumeDiscountGrant } from '../../auth/grants';
 import { expireMemberBonus } from '../bonus';
 import { loadSettings } from '../settings';
-import { lockPaymentShift, lockRefundShift, openShiftOf } from '../shifts';
+import { lockPaymentShift, lockRefundShift, openShiftOf, shiftDrawerLabel } from '../shifts';
 import { consumeForCheckout, reverseForCheckout } from '../wallet';
 import {
   assertOpen,
@@ -68,6 +68,9 @@ import { assertNoRefunds, listRefundsOf } from './refunds';
 import { CouponCodeInput, couponLines, memberCouponOptions, redeemCoupon, returnCheckoutCoupons, withTicketLines } from '../coupon-checkout';
 import { memberDiscountPreview, settleMemberDiscount, type MemberDiscountEntry } from '../member-discounts';
 import { memberTicketExtensions } from '../ticket-extensions';
+import { countCardOptions, redeemCountCards, returnCheckoutCountCards } from '../count-cards';
+import { lockPlatformCode, redemptionOfCode } from '../platform-redemptions';
+import { MAX_COUNT_CARD_USES, MAX_COUNT_CARDS_PER_CHECKOUT } from '@shared/count-cards';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -116,7 +119,17 @@ const MemberDiscountPayment = z.object({
   benefitId: z.number().int().positive(),
   amount: positiveCents('会员折扣'),
 });
-export const Payment = z.union([CashPayment, WalletPayment, CouponPayment, DiscountPayment, StoreCouponPayment, MemberDiscountPayment], '收款方式不正确');
+/**
+ * 次卡（v0.7.28）：这位会员的哪张卡、抵几次；amount 是员工确认时看到的（按明细的价钱，一次一份），服务端按此刻的明细重新分配，
+ * 不一致时拒绝。只有手牌结账能用；不和券、会员折扣、优惠 / 免单同时用
+ */
+const CountCardPayment = z.object({
+  method: z.literal('count_card'),
+  cardId: z.number().int().positive(),
+  uses: z.number('次数要是整数').int('次数要是整数').min(1, '至少抵 1 次').max(MAX_COUNT_CARD_USES, `一次最多抵 ${MAX_COUNT_CARD_USES} 次`),
+  amount: positiveCents('次卡抵扣'),
+});
+export const Payment = z.union([CashPayment, WalletPayment, CouponPayment, DiscountPayment, StoreCouponPayment, MemberDiscountPayment, CountCardPayment], '收款方式不正确');
 
 export const CheckoutInput = z.object({
   clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
@@ -242,6 +255,8 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
       visits.flatMap((v) => (v.ticket ? [{ visitId: v.visitId, typeId: v.ticket.typeId, name: v.ticket.name, amount: v.ticket.amount }] : [])),
     );
     const storeCoupons = await memberCouponOptions(tx, memberIds, couponBase, date);
+    // 次卡（v0.7.28）：与券同一套明细（已挂的明细 + 此刻的门票）
+    const countCards = await countCardOptions(tx, memberIds, couponBase, date);
     // 会员折扣（v0.7.25）：按会员本人账单上的明细加上此刻的门票算，省得最多的在前（没选券、优惠时第一项要带上）
     const memberDiscounts = await memberDiscountPreview(
       tx,
@@ -279,12 +294,14 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
       members,
       storeCoupons,
       memberDiscounts,
+      countCards,
+      countCardLines: couponBase.map(({ id, itemId, ticketTypeId, name, unitPrice, quantity, amount }) => ({ id, itemId, ticketTypeId, name, unitPrice, quantity, amount })),
       graceMinutes: rules.overtimeGraceMinutes,
       pricedAt: at.toISOString(),
       sessions: await openSessionsOf(tx, ids),
       dishes: await unservedDishesOf(tx, ids),
       rooms: await openRoomsOf(tx, ids),
-      usages: await openUsagesOf(tx, ids),
+      usages: await openUsagesOf(tx, ids, at),
     };
   });
 }
@@ -311,6 +328,7 @@ export function splitPayments(payments: CheckoutPaymentInput[], actor: OpContext
   const discounts = payments.filter((p) => p.method === 'discount');
   const storeCoupons = payments.filter((p) => p.method === 'store_coupon');
   const memberDiscounts = payments.filter((p) => p.method === 'member_discount');
+  const countCards = payments.filter((p) => p.method === 'count_card');
   if (discounts.length > 1) throw badRequest('优惠 / 免单最多登记一笔，请合并金额后重新授权');
   // 券（v0.7.20）：每张结账单最多 1 张，不与优惠 / 免单同时用
   if (storeCoupons.length > 1) throw badRequest('每张结账单最多用 1 张券');
@@ -318,11 +336,15 @@ export function splitPayments(payments: CheckoutPaymentInput[], actor: OpContext
   // 会员折扣（v0.7.25，M13）：一张结账单只享一种，不与券、优惠 / 免单同用
   if (memberDiscounts.length > 1) throw badRequest('一张结账单只享一种会员折扣');
   if (memberDiscounts.length && (storeCoupons.length || discounts.length)) throw badRequest('会员折扣不能和券、优惠 / 免单同时用，请二选一');
+  // 次卡（v0.7.28，N5）：一张结账单最多几张卡、同一张卡合并成一笔；不和券、会员折扣、优惠 / 免单同时用（与它们之间一样二选一）
+  if (countCards.length > MAX_COUNT_CARDS_PER_CHECKOUT) throw badRequest(`一张结账单最多用 ${MAX_COUNT_CARDS_PER_CHECKOUT} 张次卡`);
+  if (new Set(countCards.map((c) => c.cardId)).size !== countCards.length) throw badRequest('同一张次卡请合并为一笔（抵几次写在一起）');
+  if (countCards.length && (storeCoupons.length || discounts.length || memberDiscounts.length)) throw badRequest('次卡不能和券、会员折扣、优惠 / 免单同时用，请二选一');
   if (payments.some((p) => p.method === 'other' && !p.ref)) throw badRequest('「其他」收款请在备注里写明收的是什么');
   if (wallets.length && !can(actor, 'consume.create')) throw forbidden('当前岗位不能用会员储值收款');
   if (new Set(wallets.map((w) => w.memberId)).size !== wallets.length) throw badRequest('同一位会员的储值支付请合并为一笔');
   if (new Set(coupons.map((c) => `${c.platform}:${c.code}`)).size !== coupons.length) throw badRequest('同一张团购券不能登记两次');
-  return { wallets, coupons, discounts, storeCoupons, memberDiscounts };
+  return { wallets, coupons, discounts, storeCoupons, memberDiscounts, countCards };
 }
 
 /** 收款合计必须等于应收（手牌结账与桌台结账共用） */
@@ -395,8 +417,13 @@ export async function recordCheckoutPayments(
       INSERT INTO checkout_payments (checkout_id, method, amount, member_id, consumption_id)
       VALUES (${a.checkoutId}, 'wallet', ${w.amount}, ${w.memberId}, ${r.consumptionId})`;
   }
-  // 团购券：同一平台同一券码只能有一笔有效登记
+  // 团购券：同一平台同一券码只能有一笔有效登记；也不能是已在平台核销补登记过的（v0.7.28，先取「平台 + 券码」的咨询锁，与补登记串行）
   for (const cp of coupons) {
+    await lockPlatformCode(tx, cp.platform, cp.code);
+    const registered = await redemptionOfCode(tx, cp.platform, cp.code);
+    if (registered) {
+      throw conflict('COUPON_USED', `${COUPON_PLATFORM_LABELS[cp.platform]}券码 ${cp.code} 已在平台核销补登记过（${registered}），同一张券不能重复使用`, { platform: cp.platform, code: cp.code });
+    }
     const [used] = await tx<{ checkoutNo: string; registeredAt: string }[]>`
       SELECT c.checkout_no, g.registered_at FROM group_buy_coupons g JOIN checkouts c ON c.id = g.checkout_id
       WHERE g.platform = ${cp.platform} AND g.code = ${cp.code} AND g.status = 'active'`;
@@ -425,6 +452,24 @@ export async function recordCheckoutPayments(
       INSERT INTO checkout_payments (checkout_id, method, amount, ref, store_coupon_id, coupon_lines)
       VALUES (${a.checkoutId}, 'store_coupon', ${r.amount}, ${r.ref}, ${r.couponId}, ${r.lineIds}::bigint[])`;
   }
+  // 次卡（v0.7.28）：在券之后按卡的 id 升序锁卡，按此刻的明细（门票已挂到账单）重新分配；会员的预付消费，与储值一样不分摊到部门快照
+  const countCardPays = a.payments.filter((p) => p.method === 'count_card');
+  if (countCardPays.length) {
+    const used = await redeemCountCards(tx, {
+      payments: countCardPays.map((p) => ({ cardId: p.cardId, uses: p.uses, amount: p.amount })),
+      memberIds: a.memberIds,
+      lines: await couponLines(tx, a.billIds),
+      checkoutId: a.checkoutId,
+      date: a.date,
+      at: a.at,
+      staffId: a.ctx.actor.id,
+    });
+    for (const u of used) {
+      await tx`
+        INSERT INTO checkout_payments (checkout_id, method, amount, ref, count_card_id, count_card_uses)
+        VALUES (${a.checkoutId}, 'count_card', ${u.amount}, ${u.ref}, ${u.cardId}, ${u.uses})`;
+    }
+  }
   // 会员折扣（v0.7.25）：优惠、不是收款；记会员、权益与版本、折扣、适用明细（部门快照按这些明细分摊）
   if (a.memberDiscount) {
     const d = a.memberDiscount;
@@ -433,7 +478,7 @@ export async function recordCheckoutPayments(
       VALUES (${a.checkoutId}, 'member_discount', ${d.amount}, ${d.ref}, ${d.memberId}, ${d.benefitId}, ${d.version}, ${d.rate}, ${d.lineIds}::bigint[])`;
   }
   for (const p of a.payments) {
-    if (p.method === 'wallet' || p.method === 'coupon' || p.method === 'discount' || p.method === 'store_coupon' || p.method === 'member_discount') continue;
+    if (p.method === 'wallet' || p.method === 'coupon' || p.method === 'discount' || p.method === 'store_coupon' || p.method === 'member_discount' || p.method === 'count_card') continue;
     await tx`
       INSERT INTO checkout_payments (checkout_id, method, amount, ref)
       VALUES (${a.checkoutId}, ${p.method}, ${p.amount}, ${p.ref})`;
@@ -449,7 +494,7 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
   const input = parse(CheckoutInput, raw);
   const ids = [...new Set(input.visitIds)];
   if (ids.length !== input.visitIds.length) throw badRequest('同一张手牌不能重复结账');
-  const { wallets, discounts, storeCoupons, memberDiscounts } = splitPayments(input.payments, ctx.actor);
+  const { wallets, discounts, storeCoupons, memberDiscounts, countCards } = splitPayments(input.payments, ctx.actor);
   for (const t of input.tickets) if (!ids.includes(t.visitId)) throw badRequest('补选票种的客人不在本次结账里');
   // 补录纸质单：按纸质单上的实际离店时间结账；储值流水按发生顺序连续记账，不能插到过去，补录的结账不能用储值
   const backfill = resolveBackfill(input.backfill, ctx.actor);
@@ -571,7 +616,8 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
       guests: priced.flatMap((r) => (r.memberId ? [{ memberId: Number(r.memberId), memberName: r.memberName ?? '', tagCode: r.tagCode, billId: r.billId }] : [])),
       companions: priced.flatMap((r) => (r.memberId ? [] : [{ tagCode: r.tagCode, billId: r.billId }])),
       input: md ? { memberId: md.memberId, benefitId: md.benefitId, amount: md.amount } : null,
-      otherReduction: storeCoupons.length > 0 || discounts.length > 0,
+      // 用了次卡（v0.7.28）也不打会员折扣：与券、优惠 / 免单一样二选一
+      otherReduction: storeCoupons.length > 0 || discounts.length > 0 || countCards.length > 0,
       date,
     });
     await recordCheckoutPayments(tx, deps, { checkoutId, checkoutNo, payments: input.payments, discount, tagCodes, billIds, memberIds, date, at, ctx, memberDiscount });
@@ -750,16 +796,15 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
       WHERE checkout_id = ${c.id} AND status = 'active'`;
     // 用掉的券退回（v0.7.20；在会员之后锁券）
     await returnCheckoutCoupons(tx, { checkoutId: c.id, reason: voidText, date, at, staffId: ctx.actor.id });
+    // 用掉的次卡次数退回（v0.7.28；在券之后按卡的 id 升序锁卡）
+    await returnCheckoutCountCards(tx, { checkoutId: c.id, reason: voidText, date, at, staffId: ctx.actor.id });
     // 退款记到反结账人的班次，或所选钱箱当班的班次（事务开头已加锁核对）
     await tx`
       UPDATE checkouts SET status = 'voided', voided_at = ${at}, voided_by = ${ctx.actor.id}, void_reason = ${reason}, void_business_date = ${date},
                            void_shift_id = ${voidShiftId}
       WHERE id = ${c.id}`;
     // 从别人的钱箱退：审计写明记到了谁的哪个班次
-    const [drawer] = voidShiftId
-      ? await tx<{ shiftNo: string; staffId: number; staffName: string }[]>`
-          SELECT s.shift_no, s.staff_id, st.display_name AS staff_name FROM shifts s JOIN staff st ON st.id = s.staff_id WHERE s.id = ${voidShiftId}`
-      : [];
+    const drawer = voidShiftId ? await shiftDrawerLabel(tx, voidShiftId, ctx.actor.id) : null;
     await writeAudit(tx, {
       staffId: ctx.actor.id,
       action: 'frontdesk_checkout_void',
@@ -770,7 +815,7 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
         tags: tags.map((t) => t.code),
         ...(tables.length ? { tables: tables.map((t) => t.name) } : {}),
         reason,
-        ...(drawer && drawer.staffId !== ctx.actor.id ? { refundShift: drawer.shiftNo, refundDrawer: drawer.staffName } : {}),
+        ...(drawer && !drawer.mine ? { refundShift: drawer.shiftNo, refundDrawer: drawer.label } : {}),
       },
       ip: ctx.ip,
       businessDate: date,

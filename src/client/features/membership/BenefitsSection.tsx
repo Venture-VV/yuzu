@@ -27,6 +27,10 @@ import {
   minutesText,
   MIN_DISCOUNT_RATE,
   MIN_EXTENSION_MINUTES,
+  MAX_PARKING_HOURS,
+  MAX_VISIT_TARGET,
+  MIN_VISIT_TARGET,
+  parkingText,
   quantityText,
   rateText,
   WEEKDAY_LABELS,
@@ -38,13 +42,15 @@ import {
   type BenefitEvent,
   type BenefitPeriod,
   type BenefitStatus,
+  type ParkingUseRow,
   type DiscountTarget,
   type TierQuantity,
 } from '@shared/benefits';
 import { GRADE_STATES, type Grade, type Tier } from '@shared/membership';
 import { api, ApiError, errorMessage } from '../../lib/api';
+import { useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
-import { cn, formatTime } from '../../lib/utils';
+import { cn, downloadUrl, formatDateTime, formatTime } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton, Textarea } from '../../components/ui';
@@ -59,6 +65,7 @@ export function BenefitsSection() {
       description="本店权益清单（会员文档附录三 A 与补充项）：逐项设好配置起点、数量与券，发布后券类每月自动发、事件礼按事件自动发，服务类列在会员详情「本月可享」。改了只影响以后，已经发出的券、登记的使用不变。"
     >
       <BenefitsEditor />
+      <ParkingLogCard />
     </AdminPage>
   );
 }
@@ -197,7 +204,7 @@ function BenefitsEditor() {
                       <td className="py-2 pr-3 font-semibold text-ink">{b.name}</td>
                       <td className={cn('py-2 pr-3 whitespace-nowrap', b.startGrade === null && 'text-clay')}>{b.startLabel}</td>
                       <td className="py-2 pr-3">
-                        <span className="whitespace-nowrap">{quantityText(b.category, b.period, b.quantity)}</span>
+                        <span className="whitespace-nowrap">{b.parking ? parkingText(b) : quantityText(b.category, b.period, b.quantity)}</span>
                         {b.tierQuantities.length > 0 && (
                           <span className="block text-[12px] text-ink-3">
                             {b.tierQuantities
@@ -207,7 +214,12 @@ function BenefitsEditor() {
                         )}
                       </td>
                       <td className="max-w-[300px] py-2 pr-3 text-ink-2">
-                        {cat === 'event' && <span className="block">{b.events.map((e) => BENEFIT_EVENT_LABELS[e]).join('、') || '—'}</span>}
+                        {cat === 'event' && (
+                          <span className="block">
+                            {b.events.map((e) => (e === 'monthly_visits' ? `每月到店满 ${b.visitTarget ?? '?'} 次` : BENEFIT_EVENT_LABELS[e])).join('、') || '—'}
+                          </span>
+                        )}
+                        {b.parking && <span className="block text-[12px] font-semibold text-pine">停车优惠 · 前台登记车牌</span>}
                         {cat === 'coupon' || cat === 'event' ? (
                           b.templateName ? (
                             <span className={cn('block text-[12.5px]', b.templateActive === false && 'text-clay')} title={b.templateSummary ?? undefined}>
@@ -296,6 +308,12 @@ interface Draft {
   companionTiers: { state: string; quantity: string }[];
   weekdays: number[];
   monthDays: string;
+  /** 会员挑战（v0.7.28）：每月到店满几次 */
+  visitTarget: string;
+  /** 停车优惠（v0.7.28）：服务类里标为停车优惠；起点每次免费几小时与各档阶表 */
+  parking: boolean;
+  parkingHours: string;
+  parkingTiers: { state: string; quantity: string }[];
   content: string;
   conditions: string;
 }
@@ -315,6 +333,10 @@ const toDraft = (b: Benefit): Draft => ({
   companionTiers: b.companionCounts.map((t) => ({ state: stateValue(t.grade, t.tier), quantity: String(t.quantity) })),
   weekdays: b.weekdays,
   monthDays: b.monthDays.join('、'),
+  visitTarget: b.visitTarget === null ? '' : String(b.visitTarget),
+  parking: b.parking,
+  parkingHours: b.parkingHours === null ? '' : String(b.parkingHours),
+  parkingTiers: b.parkingHoursByTier.map((t) => ({ state: stateValue(t.grade, t.tier), quantity: String(t.quantity) })),
   content: b.content,
   conditions: b.conditions,
 });
@@ -337,7 +359,9 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
   // 浴票延迟（v0.7.25 续）的「数量」是多给的分钟数：起点的与各档阶的
   const isExtension = draft.category === 'extension';
   // 折扣类的「数量」是付几成（v0.7.25）：起点的折扣与各档阶的折扣
-  const counted = couponLike || isDiscount || isExtension || (draft.category === 'service' && draft.period !== 'none');
+  // 停车优惠（v0.7.28）：服务类、每天一次，数量固定 1；免费几小时另填
+  const isParking = draft.category === 'service' && draft.parking;
+  const counted = !isParking && (couponLike || isDiscount || isExtension || (draft.category === 'service' && draft.period !== 'none'));
   const minQty = isDiscount ? MIN_DISCOUNT_RATE : isExtension ? MIN_EXTENSION_MINUTES : 1;
   const maxQty = couponLike ? MAX_BENEFIT_COUPONS : isDiscount ? MAX_DISCOUNT_RATE : isExtension ? MAX_EXTENSION_MINUTES : MAX_BENEFIT_LIMIT;
   // 选得到的券：启用的、没过期的，加上现在用的那张（停用了也列出来，方便看清）
@@ -345,7 +369,7 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
   if (benefit.templateId !== null && !templates.some((t) => t.id === benefit.templateId)) {
     templates.push({ id: benefit.templateId, name: `${benefit.templateName ?? ''}（已停用或过期）`, summary: benefit.templateSummary ?? '', validity: '' });
   }
-  const periodOptions: BenefitPeriod[] = draft.category === 'coupon' ? ['month', 'year'] : draft.category === 'service' ? ['none', 'day', 'month', 'year'] : ['none'];
+  const periodOptions: BenefitPeriod[] = isParking ? ['day'] : draft.category === 'coupon' ? ['month', 'year'] : draft.category === 'service' ? ['none', 'day', 'month', 'year'] : ['none'];
 
   const save = async () => {
     setError(null);
@@ -397,6 +421,23 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
       if (!c.state || Number.isNaN(n) || n < 1 || n > MAX_COMPANIONS) return setError(`各档阶同行几位：请选档阶，人数是 1–${MAX_COMPANIONS} 的整数`);
       companionCounts.push({ ...parseState(c.state), quantity: n });
     }
+    // 会员挑战（v0.7.28）：每月到店满几次
+    const challenge = draft.category === 'event' && draft.events.includes('monthly_visits');
+    const visitTarget = challenge && draft.visitTarget.trim() ? intOf(draft.visitTarget) : null;
+    if (visitTarget !== null && (Number.isNaN(visitTarget) || visitTarget < MIN_VISIT_TARGET || visitTarget > MAX_VISIT_TARGET)) {
+      return setError(`每月到店满几次填 ${MIN_VISIT_TARGET}–${MAX_VISIT_TARGET} 的整数`);
+    }
+    // 停车优惠（v0.7.28）：起点每次免费几小时与各档阶表（1–24）
+    const parkingHours = isParking && draft.parkingHours.trim() ? intOf(draft.parkingHours) : null;
+    if (parkingHours !== null && (Number.isNaN(parkingHours) || parkingHours < 1 || parkingHours > MAX_PARKING_HOURS)) {
+      return setError(`免费几小时填 1–${MAX_PARKING_HOURS} 的整数`);
+    }
+    const parkingHoursByTier: TierQuantity[] = [];
+    for (const c of isParking ? draft.parkingTiers : []) {
+      const n = intOf(c.quantity);
+      if (!c.state || Number.isNaN(n) || n < 1 || n > MAX_PARKING_HOURS) return setError(`各档阶免费几小时：请选档阶，小时数是 1–${MAX_PARKING_HOURS} 的整数`);
+      parkingHoursByTier.push({ ...parseState(c.state), quantity: n });
+    }
     setBusy(true);
     try {
       await api.put(`/api/benefits/${benefit.id}`, {
@@ -416,6 +457,10 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
         companionCounts,
         weekdays: isDiscount ? draft.weekdays : [],
         monthDays,
+        visitTarget,
+        parking: isParking,
+        parkingHours,
+        parkingHoursByTier,
         content: draft.content.trim(),
         conditions: draft.conditions.trim(),
       });
@@ -489,6 +534,54 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
               ))}
             </Select>
           </Field>
+        )}
+        {draft.category === 'service' && (
+          <label className="flex items-start gap-2 text-[13px] sm:col-span-2" data-testid="benefit-parking-toggle">
+            <input type="checkbox" className="mt-0.5" checked={draft.parking} onChange={(e) => set({ parking: e.target.checked, period: e.target.checked ? 'day' : draft.period })} />
+            <span>
+              <span className="font-semibold">停车优惠</span>
+              <span className="block text-[12.5px] text-ink-3">每位会员每个营业日一次，按档阶每次免费几小时；前台登记车牌和几小时，系统不收停车费，只登记、给停车场对账</span>
+            </span>
+          </label>
+        )}
+        {isParking && (
+          <div className="grid gap-2 sm:col-span-2" data-testid="benefit-parking">
+            <Field label="起点每次免费几小时" htmlFor="benefit-parking-hours" hint={`1–${MAX_PARKING_HOURS} 小时`}>
+              <Input id="benefit-parking-hours" inputMode="numeric" value={draft.parkingHours} onChange={(e) => set({ parkingHours: e.target.value })} data-testid="benefit-parking-hours" />
+            </Field>
+            <p className="text-[12.5px] text-ink-3">各档阶免费几小时（可选）：从这个档阶起按这一行，按会员现在的档阶取一行、不相加。</p>
+            {draft.parkingTiers.map((c, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <Select
+                  aria-label="从哪个档阶起"
+                  className="w-40"
+                  value={c.state}
+                  onChange={(e) => set({ parkingTiers: draft.parkingTiers.map((x, j) => (j === i ? { ...x, state: e.target.value } : x)) })}
+                >
+                  <option value="">选档阶</option>
+                  {STATE_OPTIONS.filter((o) => !draft.start || stateRank(parseState(o.value).grade, parseState(o.value).tier) > stateRank(parseState(draft.start).grade, parseState(draft.start).tier)).map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label} 起
+                    </option>
+                  ))}
+                </Select>
+                <Input
+                  fullWidth={false}
+                  className="w-24"
+                  aria-label="几小时"
+                  inputMode="numeric"
+                  value={c.quantity}
+                  onChange={(e) => set({ parkingTiers: draft.parkingTiers.map((x, j) => (j === i ? { ...x, quantity: e.target.value } : x)) })}
+                />
+                <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} onClick={() => set({ parkingTiers: draft.parkingTiers.filter((_, j) => j !== i) })}>
+                  删掉
+                </Button>
+              </div>
+            ))}
+            <Button size="sm" variant="ghost" icon={<Plus className="size-3.5" />} onClick={() => set({ parkingTiers: [...draft.parkingTiers, { state: '', quantity: '' }] })}>
+              加一行
+            </Button>
+          </div>
         )}
         {counted && (
           <Field
@@ -585,6 +678,16 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
                 );
               })}
             </div>
+          </Field>
+        )}
+        {draft.category === 'event' && draft.events.includes('monthly_visits') && (
+          <Field
+            label="每月到店满几次送"
+            htmlFor="benefit-visit-target"
+            hint={`${MIN_VISIT_TARGET}–${MAX_VISIT_TARGET} 次；到店按有结账的营业日算，一天算一次；满了每月每人送一次（反结账不收回）`}
+            className="sm:col-span-2"
+          >
+            <Input id="benefit-visit-target" inputMode="numeric" value={draft.visitTarget} onChange={(e) => set({ visitTarget: e.target.value })} data-testid="benefit-visit-target" />
           </Field>
         )}
         {isDiscount && (
@@ -692,5 +795,82 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
         {error && <Notice tone="error" title={error} className="sm:col-span-2" />}
       </div>
     </Dialog>
+  );
+}
+
+/**
+ * 停车登记（v0.7.28，QY-016，N10）：一段营业日里前台登记的停车优惠（车牌、免费几小时、会员、经办），导出给停车场对账。
+ * 系统不收停车费，只登记
+ */
+function ParkingLogCard() {
+  const today = useSession().today;
+  const [from, setFrom] = useState(`${today.slice(0, 7)}-01`);
+  const [to, setTo] = useState(today);
+  const valid = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to) && from <= to;
+  const q = useQuery({
+    queryKey: ['benefits', 'parking', from, to],
+    queryFn: () => api.get<ParkingUseRow[]>(`/api/benefits/parking?from=${from}&to=${to}`),
+    enabled: valid,
+  });
+  const rows = q.data ?? [];
+  const active = rows.filter((r) => r.status === 'active');
+  return (
+    <Card className="mt-4 p-5" data-testid="benefit-parking-log">
+      <SectionTitle
+        aside={
+          <Button size="sm" variant="secondary" icon={<Download className="size-3.5" />} disabled={!valid} onClick={() => downloadUrl(`/api/benefits/parking/export?from=${from}&to=${to}`)}>
+            导出给停车场
+          </Button>
+        }
+      >
+        停车登记
+      </SectionTitle>
+      <p className="mt-1 text-[12.5px] text-ink-3">前台登记的停车优惠（车牌、免费几小时）；系统不收停车费，只登记、给停车场对账。作废的列出来但不算。</p>
+      <div className="mt-3 flex flex-wrap items-end gap-2">
+        <Field label="从" htmlFor="parking-from">
+          <Input id="parking-from" type="date" fullWidth={false} value={from} onChange={(e) => setFrom(e.target.value)} />
+        </Field>
+        <Field label="到" htmlFor="parking-to">
+          <Input id="parking-to" type="date" fullWidth={false} value={to} onChange={(e) => setTo(e.target.value)} />
+        </Field>
+        <span className="pb-2 text-[13px] text-ink-2" data-testid="benefit-parking-total">
+          {active.length} 次 · 共免 {active.reduce((sum, r) => sum + r.hours, 0)} 小时
+        </span>
+      </div>
+      {q.error ? (
+        <Notice tone="error" title={errorMessage(q.error)} className="mt-3" />
+      ) : rows.length === 0 ? (
+        <p className="mt-3 text-[13px] text-ink-3">这段时间没有停车登记。</p>
+      ) : (
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[640px] text-[13px]">
+            <thead className="text-left text-[12px] text-ink-3">
+              <tr>
+                <th className="py-1.5 pr-3">时间</th>
+                <th className="py-1.5 pr-3">车牌</th>
+                <th className="py-1.5 pr-3">免费</th>
+                <th className="py-1.5 pr-3">会员</th>
+                <th className="py-1.5 pr-3">经办</th>
+                <th className="py-1.5">状态</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line/70">
+              {rows.map((r) => (
+                <tr key={r.id} data-testid={`parking-row-${r.plate}`}>
+                  <td className="num py-1.5 pr-3 whitespace-nowrap">{formatDateTime(r.createdAt)}</td>
+                  <td className="py-1.5 pr-3 font-semibold">{r.plate}</td>
+                  <td className="num py-1.5 pr-3">{r.hours} 小时</td>
+                  <td className="py-1.5 pr-3">
+                    {r.memberName} <span className="text-ink-4">{r.memberNo}</span>
+                  </td>
+                  <td className="py-1.5 pr-3">{r.staffName}</td>
+                  <td className="py-1.5">{r.status === 'voided' ? <Badge tone="clay">已作废：{r.voidReason}</Badge> : '有效'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
   );
 }

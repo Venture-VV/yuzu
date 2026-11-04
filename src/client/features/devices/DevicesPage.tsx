@@ -28,6 +28,7 @@ import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, Segmented, Select, Skeleton } from '../../components/ui';
 import { DEFAULT_BRIDGE_URL, terminalActions, useTerminalBridge, useTerminalState } from './terminal';
+import { PrintQueueCard } from '../print/NetPrintButton';
 
 export const deviceKeys = { overview: ['devices', 'overview'] as const, all: ['devices'] as const };
 
@@ -78,7 +79,7 @@ export function DevicesPage() {
   return (
     <div className="space-y-4" data-testid="devices-page">
       <PageHeader title="设备" subtitle="打印机、标签机、读卡器、扫码与终端，按区域一屏看全部状态（2 秒刷新）。离线变灰，故障标红，拔线 10 秒内能看到。" />
-      <ErpPendingPanel types={['device_job']} className="space-y-2" />
+      <ErpPendingPanel types={['device_job', 'doc_print']} className="space-y-2" />
       {!o ? (
         <Skeleton className="h-64" />
       ) : o.counts.total === 0 ? (
@@ -136,7 +137,10 @@ export function DevicesPage() {
             )}
             <CatalogCard overview={o} />
           </div>
-          <TerminalPanel terminals={o.devices.filter((d) => d.kind === 'terminal' && d.enabled)} />
+          <div className="min-w-0 space-y-4">
+            <PrintQueueCard />
+            <TerminalPanel terminals={o.devices.filter((d) => d.kind === 'terminal' && d.enabled)} />
+          </div>
         </div>
       )}
     </div>
