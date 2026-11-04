@@ -94,6 +94,23 @@ export async function takeForRefund(tx: Tx, o: { memberId: number; refundId: num
   if (left > 0) throw mismatch();
 }
 
+/**
+ * 合并（v0.7.26，M78）：来源会员还有剩余的赠金批次按原来的到期日搬到目标会员（新批次记来源批次与合并单，来源批次记「合并转出」）。
+ * 到期的由调用方之前处理掉；批次合计必须等于转过去的赠金，不一致说明账不一致，拒绝记账
+ */
+export async function moveLotsForMerge(tx: Tx, o: { sourceId: number; targetId: number; mergeId: number; amount: number; at: Date }) {
+  const lots = await tx<{ id: number; remaining: number; expiresAt: Date | null }[]>`
+    SELECT id, remaining, expires_at FROM bonus_lots WHERE member_id = ${o.sourceId} AND remaining > 0 ORDER BY id FOR UPDATE`;
+  if (lots.reduce((s, l) => s + l.remaining, 0) !== o.amount) throw mismatch();
+  for (const lot of lots) {
+    await tx`UPDATE bonus_lots SET remaining = 0 WHERE id = ${lot.id}`;
+    await tx`INSERT INTO bonus_lot_moves (lot_id, kind, amount, member_merge_id, created_at) VALUES (${lot.id}, 'merge_out', ${-lot.remaining}, ${o.mergeId}, ${o.at})`;
+    await tx`
+      INSERT INTO bonus_lots (member_id, source, amount, remaining, expires_at, member_merge_id, origin_lot_id, created_at)
+      VALUES (${o.targetId}, 'merged', ${lot.remaining}, ${lot.remaining}, ${lot.expiresAt}, ${o.mergeId}, ${lot.id}, ${o.at})`;
+  }
+}
+
 /** 会员当前有剩余的批次（先到期的在前）：会员详情显示「¥50 有效至 11-26」 */
 export async function openLots(db: Db, memberId: number) {
   return db<{ remaining: number; expiresAt: Date | null }[]>`

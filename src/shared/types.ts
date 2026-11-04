@@ -94,6 +94,8 @@ export interface MemberSummary extends MemberGradeFields {
   customFields: MemberCustomValues;
   /** 渠道来源的编号（见 StoreRules.memberChannels）；没登记为 null */
   channel: string | null;
+  /** 已合并到的会员（v0.7.26）：这份档案停用、余额已转过去；没合并为 null */
+  mergedIntoId: number | null;
 }
 
 export interface MemberDetail extends MemberSummary {

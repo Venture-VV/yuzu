@@ -14,6 +14,7 @@ import { membershipChecks } from '../modules/membership';
 import { benefitChecks } from '../modules/benefits';
 import { trialChecks } from '../modules/member-trials';
 import { memberRefundChecks } from '../modules/member-refunds';
+import { memberMergeChecks } from '../modules/member-admin';
 import { computeSettlement } from '../modules/settlement';
 import { loadSettings } from '../modules/settings';
 
@@ -46,5 +47,7 @@ export async function consistencyChecks(sql: Sql, timezone: string): Promise<Che
   const trials = await readSnapshot(sql, trialChecks);
   // 储值退回（v0.7.26）
   const refunds = await readSnapshot(sql, memberRefundChecks);
-  return [...summary.checks, ...inventory, ...expenses, ...requests, ...frontdesk, legacy, ...spaces, ...floorplans, ...locations, ...membership, ...benefits, ...trials, ...refunds].map(({ label, ok, detail }) => ({ label, ok, detail }));
+  // 会员合并（v0.7.26）
+  const merges = await readSnapshot(sql, memberMergeChecks);
+  return [...summary.checks, ...inventory, ...expenses, ...requests, ...frontdesk, legacy, ...spaces, ...floorplans, ...locations, ...membership, ...benefits, ...trials, ...refunds, ...merges].map(({ label, ok, detail }) => ({ label, ok, detail }));
 }

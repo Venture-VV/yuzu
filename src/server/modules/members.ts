@@ -8,7 +8,9 @@ import { isUniqueViolation, type Db, type Sql, type Tx } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps, OpContext } from '../lib/context';
-import { badRequest, conflict, notFound } from '../lib/errors';
+import { badRequest, conflict, notFound, unprocessable } from '../lib/errors';
+import { consumeMemberPhoneGrant } from '../auth/grants';
+import { can } from '@shared/permissions';
 import { idParam, parse } from '../lib/validate';
 import { expireMemberBonus, openLots } from './bonus';
 import { issueOpenCardCoupons } from './coupons';
@@ -20,7 +22,7 @@ import { loadSettings } from './settings';
 const MEMBER_COLUMNS = (db: Db) => db`
   m.id, m.member_no, m.name, m.phone, m.gender, m.birthday::text AS birthday, m.note,
   m.principal_balance, m.bonus_balance, m.status, m.is_synthetic, m.created_at, m.custom_fields, m.channel,
-  m.grade, m.tier, m.cycle_end, m.grace_until,
+  m.grade, m.tier, m.cycle_end, m.grace_until, m.merged_into_id,
   (SELECT max(le.created_at) FROM ledger_entries le WHERE le.member_id = m.id) AS last_activity_at`;
 
 const MemberInput = z.object({
@@ -38,6 +40,12 @@ const MemberInput = z.object({
   channel: z.string().regex(MEMBER_CHANNEL_KEY, '渠道来源不正确').nullable().optional(),
 });
 export type MemberInputData = z.input<typeof MemberInput>;
+
+/** 编辑会员时改手机号（v0.7.26，M77）：要写原因；没有「改会员手机号」权限的要值班经理及以上当场授权（授权绑定这位会员与新号码） */
+const PhoneChangeInput = z.object({
+  phoneReason: z.string().trim().max(200, '原因最多 200 字').optional(),
+  phoneGrantId: z.uuid('授权编号不正确，请重新授权').optional(),
+});
 
 const SearchQuery = z.object({
   q: z.string().trim().max(32).default(''),
@@ -239,12 +247,27 @@ export function registerMemberRoutes(app: FastifyInstance, deps: Deps) {
   app.put('/api/members/:id', { preHandler: guard('member.write') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const input = parse(MemberInput, req.body);
+    const phoneChange = parse(PhoneChangeInput, req.body);
     const before = await getMember(sql, id);
+    const date = await todayOf();
     try {
       await sql.begin(async (tx) => {
         // 自定义字段在会员行锁内按最新的字段定义核对；没带时保持原值（停用字段的值始终保留）
-        const [locked] = await tx<{ customFields: MemberCustomValues; channel: string | null; birthday: string | null }[]>`
-          SELECT custom_fields, channel, birthday::text AS birthday FROM members WHERE id = ${id} FOR UPDATE`;
+        const [locked] = await tx<{ customFields: MemberCustomValues; channel: string | null; birthday: string | null; phone: string; mergedIntoId: number | null }[]>`
+          SELECT custom_fields, channel, birthday::text AS birthday, phone, merged_into_id FROM members WHERE id = ${id} FOR UPDATE`;
+        if (!locked) throw notFound('会员不存在');
+        // 已合并的会员（v0.7.26）：档案停用、历史单据留在这里，资料不再改
+        if (locked.mergedIntoId !== null) throw unprocessable('MEMBER_MERGED', '这位会员已合并到另一位会员，资料不能再改；请到那位会员那里改');
+        // 改手机号（v0.7.26，M77）：写原因；没有「改会员手机号」权限的核销值班经理及以上的当场授权（授权绑定会员与新号码）
+        let phoneApprover: { approverId: number; approverName: string } | null = null;
+        if (input.phone !== locked.phone) {
+          const reason = phoneChange.phoneReason ?? '';
+          if (reason.length < 2) throw badRequest('改手机号要写原因（至少 2 个字）', { field: 'phoneReason' });
+          if (!can(req.actor, 'member.phone')) {
+            if (!phoneChange.phoneGrantId) throw unprocessable('PHONE_AUTH_REQUIRED', '改手机号要值班经理、店总或店主当场授权');
+            phoneApprover = await consumeMemberPhoneGrant(tx, { grantId: phoneChange.phoneGrantId, actor: req.actor, scope: { memberId: id, phone: input.phone }, usedRef: `member_phone:${id}` });
+          }
+        }
         const customFields = input.customFields === undefined ? locked!.customFields : await customValuesFor(tx, input.customFields, locked!.customFields, true);
         const channel = await channelFor(tx, input.channel, locked!.channel);
         await tx`
@@ -276,6 +299,27 @@ export function registerMemberRoutes(app: FastifyInstance, deps: Deps) {
           },
           ip: req.ip,
         });
+        if (input.phone !== locked.phone) {
+          await tx`
+            INSERT INTO member_phone_changes (member_id, old_phone, new_phone, reason, staff_id, approved_by, business_date)
+            VALUES (${id}, ${locked.phone}, ${input.phone}, ${phoneChange.phoneReason ?? ''}, ${req.actor.id}, ${phoneApprover?.approverId ?? null}, ${date})`;
+          await writeAudit(tx, {
+            staffId: req.actor.id,
+            action: 'member_phone_changed',
+            targetType: 'member',
+            targetId: id,
+            detail: {
+              memberNo: before.memberNo,
+              name: input.name,
+              from: locked.phone,
+              to: input.phone,
+              reason: phoneChange.phoneReason,
+              ...(phoneApprover ? { approverName: phoneApprover.approverName } : {}),
+            },
+            ip: req.ip,
+            businessDate: date,
+          });
+        }
         // 会员权益（v0.7.24）：补填、改了生日的当场看生日礼（Codex 自动审查 98806a3）
         if (input.birthday !== locked!.birthday) await onMemberSaved(tx, deps, id, { actor: req.actor, ip: req.ip });
       });
@@ -285,6 +329,6 @@ export function registerMemberRoutes(app: FastifyInstance, deps: Deps) {
       }
       throw error;
     }
-    return getMemberDetail(sql, id, await todayOf());
+    return getMemberDetail(sql, id, date);
   });
 }

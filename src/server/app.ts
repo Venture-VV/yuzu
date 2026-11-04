@@ -57,6 +57,7 @@ import { registerLocationRoutes } from './modules/locations';
 import { registerCommissionRoutes } from './modules/commission';
 import { registerWalletRoutes } from './modules/wallet';
 import { registerMemberRefundRoutes } from './modules/member-refunds';
+import { registerMemberAdminRoutes } from './modules/member-admin';
 import { registerErpModuleGate, registerErpRoutes } from './modules/erp';
 import { registerMpStaffRoutes } from './modules/mp/staff';
 
@@ -161,6 +162,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerWalletRoutes(app, deps);
   // 储值退回（v0.7.26）
   registerMemberRefundRoutes(app, deps);
+  registerMemberAdminRoutes(app, deps);
   registerOpeningRoutes(app, deps);
   registerShiftRoutes(app, deps);
   registerPrintRoutes(app, deps);

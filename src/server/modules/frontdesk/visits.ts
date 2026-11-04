@@ -148,8 +148,12 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
     // 会员只读：确认存在、没有其他在店手牌
     const names = new Map<number, string>();
     if (memberIds.length) {
-      const found = await tx<{ id: number; name: string }[]>`SELECT id, name FROM members WHERE id IN ${tx(memberIds)}`;
+      const found = await tx<{ id: number; name: string; mergedIntoNo: string | null }[]>`
+        SELECT m.id, m.name, t.member_no AS merged_into_no FROM members m LEFT JOIN members t ON t.id = m.merged_into_id WHERE m.id IN ${tx(memberIds)}`;
       if (found.length !== memberIds.length) throw notFound('会员不存在，请重新查找');
+      // 已合并的会员（v0.7.26）：档案停用、余额在合并进去的那位，请按那位接待
+      const merged = found.find((m) => m.mergedIntoNo !== null);
+      if (merged) throw unprocessable('MEMBER_MERGED', `会员「${merged.name}」已合并到 ${merged.mergedIntoNo}，请按那位会员接待`);
       for (const m of found) names.set(m.id, m.name);
       const inStore = await tx<{ name: string; code: string }[]>`
         SELECT m.name, t.code FROM visits v JOIN members m ON m.id = v.member_id JOIN hand_tags t ON t.id = v.tag_id

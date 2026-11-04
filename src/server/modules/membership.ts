@@ -295,6 +295,49 @@ export async function projectedGrade(db: Db, memberId: number, today: string): P
   return (await projectDue(db, await loadMembershipRules(db), memberId, current.state, today)).state;
 }
 
+// ───────────────────────── 合并（v0.7.26，M79） ─────────────────────────
+
+/** 两个状态谁高：档级 → 阶位 → 不在补充期的高 → 会籍周期结束得晚的高；返回正数表示 a 高 */
+export function compareStates(a: GradeState, b: GradeState): number {
+  if (a.grade !== b.grade) return a.grade - b.grade;
+  if ((a.tier ?? -1) !== (b.tier ?? -1)) return (a.tier ?? -1) - (b.tier ?? -1);
+  const ag = a.graceUntil === null ? 1 : 0;
+  const bg = b.graceUntil === null ? 1 : 0;
+  if (ag !== bg) return ag - bg;
+  return (a.cycleEnd ?? '').localeCompare(b.cycleEnd ?? '');
+}
+
+/**
+ * 合并时的档阶（两位会员一行都已锁）：两位都先把到期没处理的处理掉，目标会员取两位里高的状态，记一条状态变化「合并」。
+ * 不发升级礼，也不当场补本期的券（来源会员这一期的已经发过；下一期按新的档阶照常发）
+ */
+export async function applyMergeGrade(
+  tx: Tx,
+  o: { sourceId: number; targetId: number; mergeId: number; today: string; staffId: number; reason: string },
+): Promise<{ from: string; to: string; changed: boolean }> {
+  const rules = await loadMembershipRules(tx);
+  const source = await settleMemberDue(tx, o.sourceId, o.today);
+  const target = await settleMemberDue(tx, o.targetId, o.today);
+  if (!source || !target) throw notFound('会员不存在');
+  const takeSource = compareStates(source, target) > 0;
+  if (takeSource) {
+    await changeState(tx, o.targetId, 'merge', o.today, target, source, { memberMergeId: o.mergeId, staffId: o.staffId, reason: o.reason, deferPeriodic: true });
+  }
+  const label = (s: GradeState) => gradeLabel(rules, s.grade, s.tier);
+  return { from: label(target), to: label(takeSource ? source : target), changed: takeSource };
+}
+
+/** 合并前核对（只读）：按规则推算到 today 的两位的档阶，与合并以后目标会员的档阶 */
+export async function previewMergeGrade(db: Db, sourceId: number, targetId: number, today: string) {
+  const rules = await loadMembershipRules(db);
+  const source = await projectedGrade(db, sourceId, today);
+  const target = await projectedGrade(db, targetId, today);
+  if (!source || !target) throw notFound('会员不存在');
+  const label = (s: GradeState) => gradeLabel(rules, s.grade, s.tier);
+  const after = compareStates(source, target) > 0 ? source : target;
+  return { source: label(source), target: label(target), after: label(after), changed: after === source && compareStates(source, target) > 0 };
+}
+
 // ───────────────────────── 充值与消费（钱包的事务里调用） ─────────────────────────
 
 export interface RechargeGrade {
@@ -624,9 +667,10 @@ export async function memberGradeBadges(db: Db, memberIds: number[], todayDate: 
   const ids = [...new Set(memberIds)];
   if (!ids.length) return new Map();
   const rules = await loadMembershipRules(db);
-  const rows = await db<(GradeRow & { id: number })[]>`
-    SELECT id, grade, tier, cycle_start, cycle_end, grace_until, grade_version FROM members WHERE id IN ${db(ids)}`;
+  const rows = await db<(GradeRow & { id: number; status: 'active' | 'frozen' })[]>`
+    SELECT id, grade, tier, cycle_start, cycle_end, grace_until, grade_version, status FROM members WHERE id IN ${db(ids)}`;
   // 临时身份（v0.7.25，M51）：VIP 柜按自己的与临时身份的取高的；徽标仍显示自己的档阶，另外标「体验中」
+  // 停用的会员（v0.7.26，M76）：VIP 柜按散客（0 级），临时身份也不算
   const trials = await activeTrialsOf(db, ids, todayDate);
   return new Map(
     rows.map((r) => {
@@ -644,8 +688,8 @@ export async function memberGradeBadges(db: Db, memberIds: number[], todayDate: 
           graceUntil: s.graceUntil,
           daysLeft,
           reminder: s.graceUntil === null ? reminderBucket(rules, daysLeft) : null,
-          lockerLevel: Math.max(lockerLevelOf(rules, s.grade), trial ? lockerLevelOf(rules, trial.grade) : 0),
-          trial: trial ? { grade: trial.grade, label: gradeLabel(rules, trial.grade, trial.tier), endsOn: trial.endsOn, kind: trial.kind } : null,
+          lockerLevel: r.status !== 'active' ? 0 : Math.max(lockerLevelOf(rules, s.grade), trial ? lockerLevelOf(rules, trial.grade) : 0),
+          trial: trial && r.status === 'active' ? { grade: trial.grade, label: gradeLabel(rules, trial.grade, trial.tier), endsOn: trial.endsOn, kind: trial.kind } : null,
         },
       ];
     }),

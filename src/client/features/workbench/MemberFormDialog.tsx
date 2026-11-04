@@ -1,10 +1,13 @@
 import { useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import type { MemberPhoneGrantRequest } from '@shared/grants';
+import { formatPhone } from '@shared/labels';
 import { normalizeFieldValue, type MemberFieldDef } from '@shared/member-fields';
 import type { MemberDetail, MemberSummary } from '@shared/types';
 import { api, ApiError, errorMessage } from '../../lib/api';
-import { useSession } from '../../lib/session';
+import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
+import { AuthorizeDialog } from '../../components/AuthorizeDialog';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Button, Field, Input, Notice, Segmented, Select, Textarea } from '../../components/ui';
@@ -30,6 +33,7 @@ export function MemberFormDialog({
   const qc = useQueryClient();
   const toast = useToast();
   const session = useSession();
+  const can = useCan();
   /** 启用的自定义字段（#12） */
   const fields = session.rules.memberFields.filter((d) => d.active);
   // 启用的渠道；编辑时会员原来的渠道已停用也照常列出，不改就保留
@@ -44,6 +48,11 @@ export function MemberFormDialog({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [existing, setExisting] = useState<{ id: number; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  // 改手机号（v0.7.26，M77）：要写原因；没有「改会员手机号」权限的要值班经理及以上当场授权
+  const [phoneReason, setPhoneReason] = useState('');
+  const [authorizing, setAuthorizing] = useState(false);
+  const cleanPhone = phone.replace(/[\s-]/g, '');
+  const phoneChanged = !!member && cleanPhone !== member.phone;
 
   useResetOnOpen(
     open,
@@ -58,14 +67,19 @@ export function MemberFormDialog({
       setCustom(Object.fromEntries(Object.entries(member?.customFields ?? {}).map(([k, v]) => [k, String(v)])));
       setErrors({});
       setExisting(null);
+      setPhoneReason('');
+      setAuthorizing(false);
     },
     [member, prefill],
   );
 
-  const submit = async (e: FormEvent) => {
+  const submit = (e: FormEvent) => {
     e.preventDefault();
+    void save();
+  };
+
+  const save = async (phoneGrantId?: string) => {
     const errs: Record<string, string> = {};
-    const cleanPhone = phone.replace(/[\s-]/g, '');
     if (!name.trim()) errs.name = '请填写会员姓名';
     if (!/^1\d{10}$/.test(cleanPhone)) errs.phone = '请输入 11 位手机号';
     for (const f of fields) {
@@ -73,12 +87,27 @@ export function MemberFormDialog({
       if (error) errs[`customFields.${f.key}`] = error;
       else if (value === undefined && f.required) errs[`customFields.${f.key}`] = `请填写「${f.label}」`;
     }
+    if (phoneChanged && phoneReason.trim().length < 2) errs.phoneReason = '改手机号要写原因（至少 2 个字）';
     setErrors(errs);
     if (Object.keys(errs).length) return;
+    // 没有「改会员手机号」权限：先请值班经理、店总或店主当场授权（授权绑定这位会员与新号码）
+    if (phoneChanged && !can('member.phone') && !phoneGrantId) {
+      setAuthorizing(true);
+      return;
+    }
     setSaving(true);
     setExisting(null);
     const customFields = Object.fromEntries(fields.map((f) => [f.key, custom[f.key] ?? '']));
-    const body = { name, phone: cleanPhone, gender: gender === 'unknown' ? null : gender, birthday: birthday || null, note, customFields, channel: channel || null };
+    const body = {
+      name,
+      phone: cleanPhone,
+      gender: gender === 'unknown' ? null : gender,
+      birthday: birthday || null,
+      note,
+      customFields,
+      channel: channel || null,
+      ...(phoneChanged ? { phoneReason: phoneReason.trim(), ...(phoneGrantId ? { phoneGrantId } : {}) } : {}),
+    };
     try {
       const saved = member
         ? await api.put<MemberDetail>(`/api/members/${member.id}`, body)
@@ -126,6 +155,16 @@ export function MemberFormDialog({
             <Input id="m-phone" value={phone} inputMode="tel" maxLength={13} onChange={(e) => setPhone(e.target.value)} invalid={!!errors.phone} className="num" />
           </Field>
         </div>
+        {phoneChanged && (
+          <Field
+            label="改手机号的原因"
+            htmlFor="m-phone-reason"
+            hint={can('member.phone') ? `${formatPhone(member!.phone)} → ${formatPhone(cleanPhone)}` : '保存时请值班经理、店总或店主当场授权'}
+            error={errors.phoneReason}
+          >
+            <Input id="m-phone-reason" value={phoneReason} maxLength={200} onChange={(e) => setPhoneReason(e.target.value)} invalid={!!errors.phoneReason} data-testid="member-phone-reason" />
+          </Field>
+        )}
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="性别">
             <Segmented
@@ -186,6 +225,18 @@ export function MemberFormDialog({
         )}
         {errors.form && <Notice tone="error" title={errors.form} />}
       </form>
+      {member && (
+        <AuthorizeDialog<MemberPhoneGrantRequest>
+          open={authorizing}
+          request={{ purpose: 'member_phone', scope: { memberId: member.id, phone: cleanPhone } }}
+          lines={[`会员 ${member.name}（${member.memberNo}）`, `手机号 ${formatPhone(member.phone)} → ${formatPhone(cleanPhone)}`, `原因：${phoneReason.trim()}`]}
+          onClose={() => setAuthorizing(false)}
+          onGranted={(g) => {
+            setAuthorizing(false);
+            void save(g.grantId);
+          }}
+        />
+      )}
     </Dialog>
   );
 }

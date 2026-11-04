@@ -35,7 +35,7 @@ import { onRecharge } from './benefits';
 import { loadPricedItems, priceLine } from './pricing';
 import { loadSettings } from './settings';
 import { lockPaymentShift, openShiftOf } from './shifts';
-import { applyBalance, lockMember, nextDocNo, type LockedMember } from './wallet-core';
+import { applyBalance, assertNotMerged, lockMember, nextDocNo, type LockedMember } from './wallet-core';
 import { hashRequest } from '../lib/idempotency';
 import { ctxOf } from '../lib/context';
 import { setTxTimeouts } from '../lib/tx';
@@ -482,7 +482,9 @@ export async function reverseForCheckout(
 ): Promise<{ reversalId: number; docNo: string }> {
   const [peek] = await tx<{ memberId: number }[]>`SELECT member_id FROM consumptions WHERE id = ${o.consumptionId}`;
   if (!peek) throw notFound('消费单不存在');
-  const member = await expireDueLots(tx, deps, await lockMember(tx, peek.memberId), o.at);
+  const lockedMember = await lockMember(tx, peek.memberId);
+  await assertNotMerged(tx, peek.memberId, '这张结账单用储值付的部分不能再退回，不能反结账');
+  const member = await expireDueLots(tx, deps, lockedMember, o.at);
   const [c] = await tx<{ id: number; docNo: string; status: string; principalAmount: number; bonusAmount: number }[]>`
     SELECT id, doc_no, status, principal_amount, bonus_amount FROM consumptions WHERE id = ${o.consumptionId} FOR UPDATE`;
   if (c!.status !== 'completed') throw conflict('ALREADY_REVERSED', `储值消费 ${c!.docNo} 已撤销，不会重复恢复余额`);
@@ -723,6 +725,8 @@ export async function reverse(deps: Deps, consumptionId: number, raw: ReverseInp
     async (tx, locked) => {
       const settings = await loadSettings(tx);
       const at = ctx.at ?? new Date();
+      // 合并以后（v0.7.26）来源会员的余额已经转走：它合并之前的消费不能再撤销到这份档案上
+      await assertNotMerged(tx, locked.id, '这笔储值消费不能再撤销');
       const member = await expireDueLots(tx, deps, locked, at);
       // 锁顺序始终是「会员 → 消费单 → 赠金批次」，避免死锁（结账单只读、不加锁）
       const [c] = await tx<{ id: number; docNo: string; status: string; principalAmount: number; bonusAmount: number; businessDate: string; createdAt: Date; checkoutId: number | null; checkoutNo: string | null }[]>`

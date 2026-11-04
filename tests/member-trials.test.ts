@@ -388,7 +388,8 @@ describe('转正、结果待确认', () => {
 
     // 正常编辑会员档案更正手机号
     const corrected = '19966660001';
-    const edit = await api(ctx.app, ctx.owner, 'PUT', `/api/members/${p}`, { name: '改手机号的客人', phone: corrected });
+    // 改手机号要写原因（v0.7.26，M77；店主有「改会员手机号」权限，不用授权）
+    const edit = await api(ctx.app, ctx.owner, 'PUT', `/api/members/${p}`, { name: '改手机号的客人', phone: corrected, phoneReason: '登记时手机号写错了' });
     expect(edit.status, JSON.stringify(edit.body)).toBe(200);
 
     // 结果待确认时原样重提：返回原来那条，不看档案此刻的手机号
