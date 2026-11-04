@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MpInviteClaimed, MpInviteItem } from '../../src/shared/mp';
 
 type Reply = { status: number; data: unknown } | 'fail';
+/** 先不回：测试调 onHold 给的函数时才回（请求还在发） */
+type Held = { hold: Reply; onHold: (release: () => void) => void };
 
-function installWx(routes: Record<string, Reply | (() => Reply)>, opts: { storageBroken?: string; storage?: Record<string, unknown>; readFails?: string } = {}) {
+function installWx(routes: Record<string, Reply | Held | (() => Reply)>, opts: { storageBroken?: string; storage?: Record<string, unknown>; readFails?: string } = {}) {
   const storage: Record<string, unknown> = opts.storage ?? {};
   const sent: { path: string; data: unknown }[] = [];
   vi.stubGlobal('wx', {
@@ -27,8 +29,10 @@ function installWx(routes: Record<string, Reply | (() => Reply)>, opts: { storag
       const path = o.url.replace(/^https?:\/\/[^/]+/, '');
       if (path !== '/v1/login') sent.push({ path: (o.method ?? 'GET') + ' ' + path, data: o.data });
       const route = path === '/v1/login' ? { status: 200, data: { token: 'v1.t', expiresAt: new Date(Date.now() + 7 * 86400e3).toISOString() } } : routes[(o.method ?? 'GET') + ' ' + path];
-      const r = typeof route === 'function' ? route() : route;
-      setTimeout(() => (!r || r === 'fail' ? o.fail({ errMsg: 'request:fail' }) : o.success({ statusCode: r.status, data: r.data, header: {} })), 0);
+      const r0 = typeof route === 'function' ? route() : route;
+      const answer = (r: Reply | undefined) => (!r || r === 'fail' ? o.fail({ errMsg: 'request:fail' }) : o.success({ statusCode: r.status, data: r.data, header: {} }));
+      if (r0 && typeof r0 === 'object' && 'hold' in r0) r0.onHold(() => answer(r0.hold));
+      else setTimeout(() => answer(r0), 0);
     },
   });
   return { storage, sent };
@@ -93,21 +97,47 @@ describe('好友领取的「结果待确认」', () => {
     expect((w2.sent[0]!.data as Record<string, unknown>).name).toBeUndefined();
   });
 
-  it('结果不确定：马上请门店系统确认作废——已经领到了回那一次；还没有就作废，可以重新领；连作废都发不出去时保留、不能再领', async () => {
+  it('结果不确定：马上请门店系统确认作废——已经领到了回那一次；连作废都发不出去时保留；上一次没领到的，再点接着领这一份', async () => {
     let abandon: Reply = { status: 200, data: { status: 'claimed', claimed: { ...CLAIMED, replayed: true } } };
-    const w = installWx({ ['POST /v1/invites/' + CODE + '/claim']: 'fail', 'POST /v1/invites/claim/abandon': () => abandon });
+    let claim: Reply = 'fail';
+    const w = installWx({ ['POST /v1/invites/' + CODE + '/claim']: () => claim, 'POST /v1/invites/claim/abandon': () => abandon });
     const r = await load();
     expect(await r.sendClaim(CODE, 'phone-code-1', '', KEY, 2)).toMatchObject({ kind: 'claimed', claimed: { replayed: true } });
     expect(w.storage.tq_invite_claim_pending).toBeUndefined();
     abandon = 'fail';
     expect((await r.sendClaim(CODE, 'phone-code-2', '', KEY, 2)).kind).toBe('pending');
     expect(w.storage.tq_invite_claim_pending).toMatchObject({ clientKey: KEY, code: CODE });
-    // 还有待确认的：不发新的领取，先确认
+    // 还有待确认的：先确认那一次（没领到、已作废），再接着领这一份
     const before = w.sent.length;
     abandon = { status: 200, data: { status: 'abandoned' } };
-    expect(await r.sendClaim(CODE, 'phone-code-3', '', 'b0b0b0b0-9b8a-4c7d-8e6f-5a4b3c2d1e0f', 2)).toEqual({ kind: 'abandoned' });
-    expect(w.sent.slice(before).map((s) => s.path)).toEqual(['POST /v1/invites/claim/abandon']);
+    claim = { status: 201, data: CLAIMED };
+    const next = 'b0b0b0b0-9b8a-4c7d-8e6f-5a4b3c2d1e0f';
+    expect(await r.sendClaim(CODE, 'phone-code-3', '', next, 2)).toEqual({ kind: 'claimed', claimed: CLAIMED });
+    expect(w.sent.slice(before).map((s) => s.path)).toEqual(['POST /v1/invites/claim/abandon', 'POST /v1/invites/' + CODE + '/claim']);
+    expect((w.sent.at(-1)!.data as { clientKey: string }).clientKey).toBe(next);
     expect(w.storage.tq_invite_claim_pending).toBeUndefined();
+  });
+
+  it('上一次领的是另一份、已经领到了：告诉顾客，这一份不领；请求还在发时不去作废它', async () => {
+    const OTHER = 'Z9Y8X7W6V5';
+    const w = installWx({ ['POST /v1/invites/' + CODE + '/claim']: { status: 201, data: CLAIMED }, 'POST /v1/invites/claim/abandon': { status: 200, data: { status: 'claimed', claimed: { ...CLAIMED, code: OTHER, replayed: true } } } }, {
+      storage: { tq_invite_claim_pending: { clientKey: KEY, code: OTHER, at: 1 } },
+    });
+    const r = await load();
+    const out = await r.sendClaim(CODE, 'phone-code-1', '', 'c0c0c0c0-9b8a-4c7d-8e6f-5a4b3c2d1e0f', 2);
+    expect(out.kind).toBe('earlier');
+    expect(w.sent.map((s) => s.path)).toEqual(['POST /v1/invites/claim/abandon']);
+    // 正在发：确认作废不发，等它回来
+    let release: () => void = () => undefined;
+    const w2 = installWx({ ['POST /v1/invites/' + CODE + '/claim']: { hold: { status: 201, data: CLAIMED }, onHold: (go) => (release = go) } });
+    const r2 = await load();
+    const p = r2.sendClaim(CODE, 'phone-code-2', '', KEY, 2);
+    await new Promise((ok) => setTimeout(ok, 5));
+    expect(await r2.resolveClaimPending()).toMatchObject({ kind: 'pending' });
+    expect(w2.sent.map((s) => s.path)).toEqual(['POST /v1/invites/' + CODE + '/claim']);
+    release();
+    expect(await p).toEqual({ kind: 'claimed', claimed: CLAIMED });
+    expect(w2.storage.tq_invite_claim_pending).toBeUndefined();
   });
 
   it('手机上的记录读不出来、存不了：不发', async () => {

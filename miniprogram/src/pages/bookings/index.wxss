@@ -1,0 +1,93 @@
+/* 我的预约：一张一个卡片，状态用细框标出；不用 flex 的 gap */
+.lede {
+  display: block;
+  margin: 12rpx 0;
+  line-height: 1.6;
+}
+.head {
+  margin-bottom: 28rpx;
+}
+.head .sub {
+  display: block;
+  margin-top: 8rpx;
+}
+.new {
+  margin-top: 24rpx !important;
+}
+.empty {
+  text-align: center;
+}
+.item {
+  margin-bottom: 20rpx;
+}
+.it-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.it-t {
+  flex: 1;
+  min-width: 0;
+  margin-right: 16rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+}
+.st {
+  flex: none;
+  padding: 0 12rpx;
+  font-size: 22rpx;
+  font-weight: 600;
+  line-height: 1.7;
+  border: 1px solid var(--line);
+  border-radius: 4rpx;
+  color: var(--muted);
+}
+.st-pending {
+  border-color: var(--wood);
+  color: var(--wood);
+}
+.st-confirmed {
+  border-color: var(--relax);
+  color: var(--relax);
+}
+.st-arrived {
+  border-color: var(--organic);
+  color: var(--organic);
+}
+.st-no_show {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.it-when {
+  display: block;
+  margin-top: 10rpx;
+  font-size: 28rpx;
+}
+.why {
+  display: block;
+  margin-top: 6rpx;
+}
+.it-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 20rpx;
+  padding-top: 18rpx;
+  border-top: 1px solid var(--line);
+}
+.remind {
+  padding: 8rpx 22rpx;
+  margin-right: 20rpx;
+  border: 1px solid var(--wood);
+  border-radius: 999rpx;
+  color: var(--wood);
+  font-size: 24rpx;
+}
+.remind.on {
+  background-color: var(--wood-6);
+}
+.act {
+  padding: 8rpx 0;
+  color: var(--danger);
+  font-size: 26rpx;
+}

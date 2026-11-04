@@ -1,5 +1,5 @@
 // 小程序第三期 3a：到期提醒（小程序线，docs/MP_PHASE3.md 第 1 节；MP28、MP29）：
-//   · 设置（店主、店总；版本号；模板编号与字段名的格式；券没有金额；三种用三个模板）；默认关着；
+//   · 设置（店主、店总；版本号；模板编号与字段名的格式；券没有金额；每种用不同的模板）；默认关着；
 //   · 设提醒：券（3 天前）、会籍（7 天前）、补充期（进补充期当天）、赠金（7 天前）；同一个编号重提、同一样东西再设都返回原来那条；
 //     模板换过、绑定变过、到期日变过、券用掉或不是自己的都拒绝；
 //   · 排期：到了那天、北京时间 10:00–20:00 之间才排，字段按微信的格式；那时已经不用提醒的记「不发」与原因；
@@ -153,7 +153,7 @@ describe('到期提醒的设置', () => {
     expect(await options('openid-remind-nobody-01')).toMatchObject({ open: false, bindVersion: 0 });
   });
 
-  it('保存：模板编号与字段名照微信的格式，券没有金额，三种用三个模板，带打开时的版本号', async () => {
+  it('保存：模板编号与字段名照微信的格式，券没有金额，每种用不同的模板，带打开时的版本号', async () => {
     const { version } = (await adminData()).rules;
     const put = (body: unknown) => api(ctx.app, ctx.owner, 'PUT', '/api/admin/mp/reminders/rules', body);
     const bad = async (patch: Record<string, unknown>, message: RegExp) => {
@@ -165,7 +165,7 @@ describe('到期提醒的设置', () => {
     await bad({ coupon: { templateId: TPL.coupon, fields: [{ key: 'foo1', source: 'name' }] } }, /字段名不对/);
     await bad({ coupon: { templateId: TPL.coupon, fields: [{ key: 'amount1', source: 'amount' }] } }, /不能填「金额」/);
     await bad({ coupon: { templateId: TPL.coupon, fields: [{ key: 'thing1', source: 'name' }, { key: 'thing1', source: 'tip' }] } }, /同一个字段名/);
-    await bad({ bonus: { templateId: TPL.coupon, fields: [{ key: 'thing1', source: 'name' }] } }, /三个不同的模板/);
+    await bad({ bonus: { templateId: TPL.coupon, fields: [{ key: 'thing1', source: 'name' }] } }, /每种提醒要用不同的模板/);
     const stale = await put({ ...RULES(), version: version + 5 });
     expect(stale.status).toBe(409);
     expect(stale.body.error.code).toBe('VERSION_CONFLICT');
@@ -175,7 +175,7 @@ describe('到期提醒的设置', () => {
     const one = await saveRules({ membership: null, bonus: null });
     expect(one.membership).toBeNull();
     const a = await bound('演示·只配了券');
-    expect((await options(a.openid)).templates).toEqual({ coupon: TPL.coupon, membership: null, bonus: null });
+    expect((await options(a.openid)).templates).toEqual({ coupon: TPL.coupon, membership: null, bonus: null, booking: null });
     const r = await consent(a.openid, { kind: 'bonus', targetDate: shiftDate(today, 4) });
     expect(r.statusCode).toBe(422);
     expect(r.json().error.code).toBe('REMINDER_UNAVAILABLE');
@@ -205,7 +205,7 @@ describe('设提醒', () => {
     const both = await Promise.all([consent(a.openid, { kind: 'coupon', couponCode: c2.code }), consent(a.openid, { kind: 'coupon', couponCode: c2.code })]);
     expect(both.map((r) => r.statusCode).sort()).toEqual([200, 201]);
     expect(both[0]!.json().consentId).toBe(both[1]!.json().consentId);
-    expect((await options(a.openid)).set.filter((s) => s.couponCode === c.code)).toEqual([{ kind: 'coupon', couponCode: c.code, targetDate: c.validTo, dueDate: due, state: 'waiting' }]);
+    expect((await options(a.openid)).set.filter((s) => s.couponCode === c.code)).toEqual([{ kind: 'coupon', couponCode: c.code, bookingId: null, targetDate: c.validTo, dueDate: due, state: 'waiting' }]);
     const [row] = await ctx.sql<{ count: number }[]>`SELECT count(*)::int FROM mp_reminder_consents WHERE member_id = ${a.memberId}`;
     expect(row!.count).toBe(2);
   });

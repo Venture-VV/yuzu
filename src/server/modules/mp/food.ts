@@ -134,6 +134,8 @@ function friendlyFoodError(error: unknown): unknown {
       return say('VISIT_CHANGED', '你的手牌刚刚变过，这一单没有下，请刷新后再点');
     case 'BILL_CLOSED':
       return say('BILL_CLOSED', '手牌的账单已经结了，不能再点；请到前台咨询');
+    case 'VISIT_CLOSED':
+      return say('VISIT_CLOSED', '你的手牌刚刚结账了，不能再点；请到前台咨询');
     case 'MP_CLAIM_CONFLICT':
       return say('CLIENT_KEY_REUSED', '这一单的编号已经用过，请重新下单');
     default:
@@ -256,7 +258,8 @@ export async function orderFood(deps: Deps, openid: string, raw: unknown): Promi
         throw unprocessable('DISH_NOT_OPEN', `「${it?.name ?? '这道菜'}」不能在小程序点，请服务员点单`);
       }
       let tableName: string | null = null;
-      if (input.table) {
+      // 门店系统没配签名密钥时认不了桌码：照点餐页说的，不写桌号、服务员按手牌送（独立审查 3b/3c 的 P3）
+      if (input.table && deps.config.mp.codeSecret) {
         const t = await resolveTable(deps, tx, input.table);
         if (!t.table) throw unprocessable('TABLE_CODE_INVALID', t.notice ?? '桌码不对，请重新扫桌上的码');
         tableName = t.table.name;

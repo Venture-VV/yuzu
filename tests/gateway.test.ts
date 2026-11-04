@@ -452,6 +452,45 @@ describe('扫码点餐（第三期 3c）', () => {
   });
 });
 
+describe('预约（第三期 3d）', () => {
+  it('预约页、可约时段、预约、确认作废、取消：网关带会话里的微信转给 yuzu；格式不对网关先拒', async () => {
+    const it = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '网关足疗', category: '足疗', price: 16800, durationMinutes: 60 });
+    expect(it.status, JSON.stringify(it.body)).toBe(200);
+    const itemId = it.body.items.find((i: { name: string }) => i.name === '网关足疗').id as number;
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/technicians/items', { items: [{ id: itemId, required: true }] })).status).toBe(200);
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/technicians', { techNo: 'G7', name: '网关技师', gender: 'female', grade: 'standard' })).status).toBe(200);
+    const rules = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/mp/bookings')).body.rules as { version: number };
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/mp/bookings/rules', { enabled: true, itemIds: [itemId], spaceIds: [], version: rules.version })).status).toBe(200);
+    await createMember(ctx, '演示·gw-booking', '13700008001');
+    const t = await login(gw, 'gw-booking');
+    expect((await authed(gw, t, 'POST', '/v1/bind', { phoneCode: 'mock-phone-13700008001', clientKey: randomUUID(), bindVersion: 0 })).statusCode).toBe(200);
+    const home = await authed(gw, t, 'GET', '/v1/bookings');
+    expect(home.statusCode, home.body).toBe(200);
+    expect(home.json()).toMatchObject({ open: true, canBook: true, items: [{ id: itemId, name: '网关足疗' }] });
+    const date = home.json().dates[1] as string;
+    const slots = await authed(gw, t, 'GET', `/v1/bookings/slots?kind=technician&date=${date}&itemId=${itemId}`);
+    expect(slots.statusCode, slots.body).toBe(200);
+    const slot = (slots.json() as { startsAt: string; free: number; technicians: { techNo: string }[] }[])[0]!;
+    expect(slot.technicians.map((x) => x.techNo)).toContain('G7');
+    expect((await authed(gw, t, 'GET', `/v1/bookings/slots?kind=room&date=${date}`)).statusCode).toBe(400);
+    const clientKey = randomUUID();
+    const body = { clientKey, kind: 'technician', itemId, technicianId: null, startsAt: slot.startsAt, bindVersion: home.json().bindVersion };
+    const b = await authed(gw, t, 'POST', '/v1/bookings', body);
+    expect(b.statusCode, b.body).toBe(201);
+    expect(b.json()).toMatchObject({ replayed: false, booking: { status: 'pending', title: '网关足疗 · 不指定技师' } });
+    expect((await authed(gw, t, 'POST', '/v1/bookings', body)).statusCode).toBe(200);
+    expect((await authed(gw, t, 'POST', '/v1/bookings', { ...body, startsAt: 'tomorrow' })).statusCode).toBe(400);
+    const ab = await authed(gw, t, 'POST', '/v1/bookings/abandon', { clientKey });
+    expect(ab.json()).toMatchObject({ status: 'done', action: 'create' });
+    const id = b.json().booking.id as number;
+    const c = await authed(gw, t, 'POST', `/v1/bookings/${id}/cancel`, { clientKey: randomUUID(), bindVersion: home.json().bindVersion });
+    expect(c.statusCode, c.body).toBe(200);
+    expect(c.json()).toMatchObject({ booking: { id, status: 'cancelled' } });
+    expect((await authed(gw, t, 'POST', '/v1/bookings/abc/cancel', { clientKey: randomUUID(), bindVersion: 0 })).statusCode).toBe(400);
+    expect((await authed(gw, null, 'GET', '/v1/bookings')).statusCode).toBe(401);
+  });
+});
+
 describe('到期提醒（第三期 3a）', () => {
   const TPL = 'tplGwCoupon-0123456789abcdefABCD';
   it('能设哪些、设一条：网关带会话里的微信转给 yuzu；没会话拒绝；格式不对网关先拒', async () => {

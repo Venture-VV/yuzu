@@ -8,6 +8,7 @@ import { MP_GATEWAY_HEADER } from '@shared/mp';
 import type { AppConfig } from '../../config';
 import type { Sql } from '../../db';
 import { AppError } from '../../lib/errors';
+import { registerMpBookingRoutes } from './booking-routes';
 import { registerMpCouponRoutes } from './coupon-routes';
 import { registerMpFoodRoutes } from './food-routes';
 import { registerMpInviteRoutes } from './invite-routes';
@@ -79,6 +80,8 @@ export async function buildMpApp(sql: Sql, config: AppConfig, opts: MpAppOptions
   registerMpInviteRoutes(app, { sql, config });
   // 扫码点餐（第三期 3c）：点餐页、下单（主线的 orderFoodFromMp 挂在顾客的手牌账单上）、确认作废、我的账单
   registerMpFoodRoutes(app, { sql, config });
+  // 预约技师与派对房（第三期 3d）：可约的、时段、预约与取消（主线的 createBookingFromMp、cancelBookingFromMp）、确认作废、我的预约
+  registerMpBookingRoutes(app, { sql, config });
 
   // 线上充值（第二期 2a）：微信支付的凭据只在门店 yuzu（MP17）；配错了不开线上充值、写日志，门店系统照常启动
   let pay: PayRuntime | null = null;

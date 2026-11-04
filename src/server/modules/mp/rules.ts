@@ -2,18 +2,21 @@
 
 import type { preHandlerAsyncHookHandler } from 'fastify';
 import {
+  DEFAULT_MP_BOOKING_RULES,
   DEFAULT_MP_COUPON_RULES,
   DEFAULT_MP_FOOD_RULES,
   DEFAULT_MP_INVITE_RULES,
   DEFAULT_MP_RECHARGE_RULES,
   DEFAULT_MP_REMINDER_RULES,
   DEFAULT_MP_RULES,
+  MP_BOOKING_RULES_KEY,
   MP_COUPON_RULES_KEY,
   MP_FOOD_RULES_KEY,
   MP_INVITE_RULES_KEY,
   MP_RECHARGE_RULES_KEY,
   MP_REMINDER_RULES_KEY,
   MP_RULES_KEY,
+  type MpBookingRules,
   type MpCouponRules,
   type MpFoodRules,
   type MpInviteRules,
@@ -64,6 +67,18 @@ export async function loadFoodRules(db: Db): Promise<MpFoodRules> {
 export async function foodOpenOf(db: Db): Promise<boolean> {
   const [rules, dining] = await Promise.all([loadFoodRules(db), loadDiningRules(db)]);
   return rules.enabled && dining.enabled;
+}
+
+/** 小程序预约的设置（第三期 3d，settings 的 mp_booking_rules）：默认关、没有可约的 */
+export async function loadBookingMpRules(db: Db): Promise<MpBookingRules> {
+  const [row] = await db<{ value: Partial<MpBookingRules> | null }[]>`SELECT value FROM settings WHERE key = ${MP_BOOKING_RULES_KEY}`;
+  return { ...DEFAULT_MP_BOOKING_RULES, ...(row?.value ?? {}) };
+}
+
+/** 小程序预约对顾客开着：后台开了、勾了可约的项目或房间（「我的」页显示「预约」） */
+export async function bookingOpenOf(db: Db): Promise<boolean> {
+  const r = await loadBookingMpRules(db);
+  return r.enabled && (r.itemIds.length > 0 || r.spaceIds.length > 0);
 }
 
 /** 店主在后台「小程序」里开了才对顾客开放（默认关闭）；health 不看开关 */

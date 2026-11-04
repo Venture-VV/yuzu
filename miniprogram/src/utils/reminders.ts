@@ -5,6 +5,7 @@
 //     拒绝了才删；结果不确定（断网、超时、网关或门店出错、门店连不上）时保留，下次打开券、会员卡、余额页时原样重提（同一个编号
 //     门店系统返回同一条）。不用确认作废：晚到生效也是顾客自己要的提醒，不会记两条；
 //   · 已经设好的显示「已设提醒」，不再弹窗。
+//   · 第三期 3d 加了「到店提醒我」（我的预约）：门店确认以后，预约那天 10:00–20:00 之间发一条。
 
 import type { MpReminderConsented, MpReminderKind, MpReminderOptions, MpReminderTemplateKind } from '../../../src/shared/mp';
 import { isApiError, member, messageOf } from './api';
@@ -14,7 +15,10 @@ const KEY = 'tq_reminder_pending';
 /** 手机上最多留几条没确认的 */
 const MAX_PENDING = 20;
 
-export type ReminderTarget = { kind: 'coupon'; couponCode: string } | { kind: 'membership' | 'grace' | 'bonus'; targetDate: string };
+export type ReminderTarget =
+  | { kind: 'coupon'; couponCode: string }
+  | { kind: 'membership' | 'grace' | 'bonus'; targetDate: string }
+  | { kind: 'booking'; bookingId: number };
 
 export const templateKindOf = (k: MpReminderKind): MpReminderTemplateKind => (k === 'grace' ? 'membership' : k);
 
@@ -28,13 +32,14 @@ export async function loadReminders(): Promise<MpReminderOptions | null> {
   }
 }
 
-const sameTarget = (a: ReminderTarget, kind: MpReminderKind, couponCode: string | null, targetDate: string) =>
-  a.kind === kind && (a.kind === 'coupon' ? a.couponCode === couponCode : a.targetDate === targetDate);
+const sameTarget = (a: ReminderTarget, s: { kind: MpReminderKind; couponCode: string | null; bookingId?: number | null; targetDate: string }) =>
+  a.kind === s.kind && (a.kind === 'coupon' ? a.couponCode === s.couponCode : a.kind === 'booking' ? a.bookingId === s.bookingId : a.targetDate === s.targetDate);
 
 /** 这一样东西的「提醒我」：能不能设、已经设了没有、按钮上写什么 */
 export function remindButton(o: MpReminderOptions | null, target: ReminderTarget): { show: boolean; set: boolean; text: string } {
   if (!o || !o.templates[templateKindOf(target.kind)]) return { show: false, set: false, text: '' };
-  const done = o.set.some((s) => sameTarget(target, s.kind, s.couponCode, s.targetDate) && s.state !== 'done');
+  const done = o.set.some((s) => sameTarget(target, s) && s.state !== 'done');
+  if (target.kind === 'booking') return done ? { show: true, set: true, text: '已设到店提醒' } : { show: true, set: false, text: '到店提醒我' };
   if (done) return { show: true, set: true, text: target.kind === 'grace' ? '已设补充期提醒' : '已设提醒' };
   return { show: true, set: false, text: target.kind === 'grace' ? '进补充期也提醒我' : '到期提醒我' };
 }
@@ -43,6 +48,7 @@ export function remindButton(o: MpReminderOptions | null, target: ReminderTarget
 export function remindHint(o: MpReminderOptions, kind: MpReminderKind): string {
   const hours = o.sendHours.from + ':00–' + o.sendHours.to + ':00';
   if (kind === 'grace') return '进补充期当天 ' + hours + ' 之间发一条微信消息';
+  if (kind === 'booking') return '门店确认以后，预约那天 ' + hours + ' 之间发一条微信消息';
   return '到期前 ' + o.leadDays[kind] + ' 天 ' + hours + ' 之间发一条微信消息';
 }
 
@@ -76,7 +82,7 @@ export function refusedText(r: 'reject' | 'ban' | 'fail'): string {
 
 interface ReminderPending {
   clientKey: string;
-  body: { kind: MpReminderKind; couponCode?: string; targetDate?: string; templateId: string; bindVersion: number };
+  body: { kind: MpReminderKind; couponCode?: string; bookingId?: number; targetDate?: string; templateId: string; bindVersion: number };
   at: number;
 }
 
@@ -140,7 +146,12 @@ async function post(p: ReminderPending): Promise<ConsentOutcome> {
 export async function sendConsent(clientKey: string, target: ReminderTarget, templateId: string, bindVersion: number): Promise<ConsentOutcome> {
   const r = readList();
   if (!r.ok) return { kind: 'rejected', code: 'PENDING_UNREADABLE', message: '手机上的记录读不出来，这次没有设提醒，请稍后再试' };
-  const body = target.kind === 'coupon' ? { kind: target.kind, couponCode: target.couponCode, templateId, bindVersion } : { kind: target.kind, targetDate: target.targetDate, templateId, bindVersion };
+  const body =
+    target.kind === 'coupon'
+      ? { kind: target.kind, couponCode: target.couponCode, templateId, bindVersion }
+      : target.kind === 'booking'
+        ? { kind: target.kind, bookingId: target.bookingId, templateId, bindVersion }
+        : { kind: target.kind, targetDate: target.targetDate, templateId, bindVersion };
   const p: ReminderPending = { clientKey, body, at: Date.now() };
   // 最多留 20 条：太旧的先丢（门店系统里同一样东西只记一条，丢了的顾客再点一次就行）
   if (!writeList([...r.list, p].slice(-MAX_PENDING))) {
@@ -162,6 +173,7 @@ export async function retryPendingReminders(): Promise<number> {
 export function setText(c: MpReminderConsented, o: MpReminderOptions | null): string {
   const [, m, d] = c.dueDate.split('-');
   const from = o ? o.sendHours.from : 10;
+  if (c.kind === 'booking') return '已设到店提醒：门店确认以后，' + Number(m) + '月' + Number(d) + '日 ' + from + ':00 以后发一条微信消息';
   return '已设提醒：' + Number(m) + '月' + Number(d) + '日 ' + from + ':00 以后发一条微信消息';
 }
 

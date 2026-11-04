@@ -1,5 +1,5 @@
 // 后台「微信小程序」→「到期提醒」（小程序线第三期 3a，docs/MP_PHASE3.md 第 1 节；权限 mp.reminder：店主、店总）：
-//   · 设置：开关（默认关）、三种提醒各用哪个订阅消息模板、模板的每个字段填什么；带版本号保存，结果待确认照其他开关；
+//   · 设置：开关（默认关）、四种提醒（第三期 3d 加了预约到店）各用哪个订阅消息模板、模板的每个字段填什么；带版本号保存，结果待确认照其他开关；
 //   · 最近 30 天同意了多少、各状态的消息多少、还没到发的时候的有多少；网关最近一次来取消息的时间；最近 50 条消息。
 // 模板由店主在微信公众平台「订阅消息」从公共模板库选：模板详情里的 {{thing1.DATA}} 就填 thing1。
 
@@ -39,12 +39,14 @@ const KINDS: { kind: MpReminderTemplateKind; title: string; when: string; source
     sources: ['name', 'date', 'amount', 'tip', 'store'],
   },
   { kind: 'bonus', title: '赠金快到期', when: `赠金作废前 ${MP_REMINDER_LEAD_DAYS.bonus} 天`, sources: ['name', 'date', 'amount', 'tip', 'store'] },
+  { kind: 'booking', title: '预约到店', when: '门店确认了的小程序预约，开始那天发（还待确认的等确认了再发）', sources: ['name', 'date', 'tip', 'store'] },
 ];
 
 const SOURCE_TEXT: Record<MpReminderTemplateKind, Record<MpReminderSource, string>> = {
   coupon: { name: '券名', date: '到期日', amount: '—', tip: '提示：到前台结账时出示会员码就能用', store: '门店名' },
   membership: { name: '档阶（如 L3 观澜 · 享）', date: '到期日（补充期写补充期到哪天）', amount: '保级还差多少储值消费', tip: '提示：再消费多少可保级', store: '门店名' },
   bonus: { name: '「赠金」', date: '作废的那一天', amount: '那一天作废的赠金', tip: '提示：到期前消费会先用快到期的赠金', store: '门店名' },
+  booking: { name: '项目与技师号，或房间', date: '开始的日子（time 字段带上几点）', amount: '—', tip: '提示：请准时到店，到前台报手机号', store: '门店名' },
 };
 
 const STATUS: Record<MpReminderStatus, { label: string; tone: 'neutral' | 'moss' | 'yuzu' | 'ember' | 'lake' }> = {
@@ -55,7 +57,7 @@ const STATUS: Record<MpReminderStatus, { label: string; tone: 'neutral' | 'moss'
   unknown: { label: '结果不明', tone: 'yuzu' },
   skipped: { label: '不用发了', tone: 'neutral' },
 };
-const KIND_LABELS: Record<MpReminderKind, string> = { coupon: '券快到期', membership: '会籍快到期', grace: '进补充期', bonus: '赠金快到期' };
+const KIND_LABELS: Record<MpReminderKind, string> = { coupon: '券快到期', membership: '会籍快到期', grace: '进补充期', bonus: '赠金快到期', booking: '预约到店' };
 
 export function ReminderTab({ data }: { data: MpAdminData }) {
   const q = useQuery({ queryKey: reminderKey, queryFn: () => api.get<MpReminderAdminData>('/api/admin/mp/reminders') });
@@ -76,7 +78,14 @@ type TplRow = { on: boolean; templateId: string; fields: FieldRow[] };
 const toRow = (t: MpReminderTemplate | null, kind: MpReminderTemplateKind): TplRow =>
   t
     ? { on: true, templateId: t.templateId, fields: t.fields.map((f) => ({ ...f })) }
-    : { on: false, templateId: '', fields: [{ key: 'thing1', source: 'name' }, { key: kind === 'coupon' ? 'date2' : 'amount2', source: kind === 'coupon' ? 'date' : 'amount' }] };
+    : {
+        on: false,
+        templateId: '',
+        fields: [
+          { key: 'thing1', source: 'name' },
+          kind === 'coupon' ? { key: 'date2', source: 'date' } : kind === 'booking' ? { key: 'time2', source: 'date' } : { key: 'amount2', source: 'amount' },
+        ],
+      };
 
 function RulesForm({ rules, pending }: { rules: MpAdminData['reminderRules']; pending: boolean }) {
   const qc = useQueryClient();
@@ -87,6 +96,7 @@ function RulesForm({ rules, pending }: { rules: MpAdminData['reminderRules']; pe
     coupon: toRow(rules.coupon, 'coupon'),
     membership: toRow(rules.membership, 'membership'),
     bonus: toRow(rules.bonus, 'bonus'),
+    booking: toRow(rules.booking, 'booking'),
   });
   const [saving, setSaving] = useState(false);
   const patch = (kind: MpReminderTemplateKind, p: Partial<TplRow>) => setRows((r) => ({ ...r, [kind]: { ...r[kind], ...p } }));
@@ -103,7 +113,7 @@ function RulesForm({ rules, pending }: { rules: MpAdminData['reminderRules']; pe
       if (bad !== undefined) return `「${k.title}」的字段名「${bad}」不对：照模板详情里的写，比如 thing1、date2`;
       if (new Set(keys).size !== keys.length) return `「${k.title}」同一个字段名只能填一次`;
     }
-    if (new Set(ids).size !== ids.length) return '三种提醒要用三个不同的模板';
+    if (new Set(ids).size !== ids.length) return '每种提醒要用不同的模板';
     return null;
   })();
   const save = async () => {
@@ -118,7 +128,7 @@ function RulesForm({ rules, pending }: { rules: MpAdminData['reminderRules']; pe
         type: 'reminder_rules_update',
         url: '/api/admin/mp/reminders/rules',
         target: 'reminder_rules',
-        body: { enabled, coupon: tpl('coupon'), membership: tpl('membership'), bonus: tpl('bonus'), version: rules.version },
+        body: { enabled, coupon: tpl('coupon'), membership: tpl('membership'), bonus: tpl('bonus'), booking: tpl('booking'), version: rules.version },
         summary: '到期提醒的设置',
         staffName: session.staff.displayName,
       });

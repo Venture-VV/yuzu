@@ -10,7 +10,7 @@ import { uuid } from '../../utils/uuid';
 type State = 'loading' | 'ready' | 'ordered' | 'pending' | 'unreadable' | 'offline' | 'error';
 
 /** 这几种拒绝说明菜单变了：重新取一次菜单（购物车留着） */
-const RELOAD = ['PRICE_CHANGED', 'DISH_SOLD_OUT', 'DISH_NOT_OPEN', 'BIND_STALE', 'TABLE_CODE_INVALID', 'VISIT_CHANGED', 'ITEM_GENDER'];
+const RELOAD = ['PRICE_CHANGED', 'DISH_SOLD_OUT', 'DISH_NOT_OPEN', 'BIND_STALE', 'TABLE_CODE_INVALID', 'VISIT_CHANGED', 'VISIT_CLOSED', 'BILL_CLOSED', 'NO_OPEN_VISIT', 'ITEM_GENDER', 'MP_FOOD_DISABLED', 'DINING_DISABLED', 'MEMBER_UNAVAILABLE'];
 
 Page({
   data: {
@@ -31,7 +31,8 @@ Page({
   },
 
   onShow() {
-    if (this.data.state !== 'ordered') this.load();
+    // 下好了的停在结果页；正在下单（扫码、切到聊天再回来）的等它回来
+    if (this.data.state !== 'ordered' && !this.data.busy) this.load();
   },
 
   async load() {
@@ -155,6 +156,10 @@ Page({
     }
     if (out.kind === 'abandoned') {
       wx.showToast({ title: '上次那一单没有下成，可以重新下', icon: 'none' });
+      return false;
+    }
+    if (out.kind === 'earlier') {
+      wx.showModal({ title: '这一单还没下', content: out.message, showCancel: false });
       return false;
     }
     wx.showModal({ title: '没有下单', content: out.message, showCancel: false });

@@ -1,0 +1,138 @@
+<view class="view {{state === 'ready' && home.canBook ? 'with-bar' : ''}}">
+  <view wx:if="{{state === 'loading'}}" class="wait">正在打开…</view>
+
+  <view wx:elif="{{state === 'offline' || state === 'error'}}" class="panel wait">
+    <text class="h3">{{state === 'offline' ? '门店系统连接中' : message}}</text>
+    <text wx:if="{{state === 'offline'}}">暂时约不了，请打电话给门店，或稍后再试</text>
+    <button class="btn ghost" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+
+  <!-- 预约结果待确认：上次提交时网络不好，确认之前不能再约 -->
+  <view wx:elif="{{state === 'pending'}}" class="panel">
+    <text class="h3">预约结果待确认</text>
+    <text class="lede">上次提交时网络不好，还不知道约上没有。网络好了点「再确认一次」，门店系统会告诉我们结果；确认之前先不要重新约，免得约重。</text>
+    <button class="btn primary block" hover-class="btn-hover" bindtap="onConfirmPending">再确认一次</button>
+    <text wx:if="{{message}}" class="sub">{{message}}</text>
+  </view>
+
+  <view wx:elif="{{state === 'unreadable'}}" class="panel">
+    <text class="h3">预约记录暂时读不出来</text>
+    <text class="lede">手机上保存的预约记录读不出来，为防止约重，先不能预约。请稍后点「再试一次」；一直这样，请清理微信的存储空间后再打开小程序，或打电话给门店。</text>
+    <button class="btn primary block" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+
+  <!-- 约好了 -->
+  <view wx:elif="{{state === 'done'}}" class="panel hero">
+    <text class="eyebrow">Booked</text>
+    <text class="h3">提交好了，等门店确认</text>
+    <text class="lede">{{done.title}}</text>
+    <text class="num when">{{done.when}}<text wx:if="{{done.guests}}"> · {{done.guests}}</text></text>
+    <text class="sub fine">门店确认后在「我的预约」里写「已预约」；开始前 {{home.rules.confirmLeadMinutes}} 分钟还没确认的会自动取消。不收订金。</text>
+    <view wx:if="{{remind.show}}" class="remind-row">
+      <view class="remind {{remind.set ? 'on' : ''}}" bindtap="onRemind">{{remind.text}}</view>
+      <text class="sub">{{remindHintText}}</text>
+    </view>
+    <view class="pair">
+      <button class="btn ghost" hover-class="btn-hover" bindtap="onMore">再约一个</button>
+      <button class="btn primary" hover-class="btn-hover" bindtap="onMine">看我的预约</button>
+    </view>
+  </view>
+
+  <block wx:else>
+    <view class="panel head">
+      <text class="eyebrow">Booking</text>
+      <text class="h3">预约</text>
+      <text class="sub">选好项目和时段提交，门店确认后就约好了；不收订金。</text>
+      <view wx:if="{{!home.canBook}}" class="cant">
+        <text>{{home.notice || home.bookNotice}}</text>
+        <button wx:if="{{home.open && !home.bound}}" class="btn ghost bind" hover-class="btn-hover" bindtap="onBind">去绑定会员</button>
+        <button wx:elif="{{home.bound && home.bookings.length}}" class="btn ghost bind" hover-class="btn-hover" bindtap="onMine">看我的预约</button>
+      </view>
+    </view>
+
+    <block wx:if="{{home.canBook}}">
+      <!-- 约什么 -->
+      <view wx:if="{{kinds.length > 1}}" class="tabs">
+        <view wx:for="{{kinds}}" wx:key="kind" class="tab {{kind === item.kind ? 'on' : ''}}" data-kind="{{item.kind}}" bindtap="onKind">{{item.label}}</view>
+      </view>
+
+      <view wx:if="{{kind === 'technician'}}" class="sec">
+        <text class="eyebrow">Treatment</text>
+        <view class="opts">
+          <view wx:for="{{home.items}}" wx:key="id" class="opt {{itemId === item.id ? 'on' : ''}}" data-id="{{item.id}}" bindtap="onItem">
+            <text class="opt-t">{{item.name}}</text>
+            <text class="sub num">{{item.minutes}} 分钟</text>
+          </view>
+        </view>
+      </view>
+      <view wx:else class="sec">
+        <text class="eyebrow">Room</text>
+        <view class="opts">
+          <view wx:for="{{home.spaces}}" wx:key="id" class="opt {{spaceId === item.id ? 'on' : ''}}" data-id="{{item.id}}" bindtap="onSpace">
+            <text class="opt-t">{{item.name}}</text>
+          </view>
+        </view>
+        <text class="eyebrow sub-h">Duration</text>
+        <view class="chips-row">
+          <view wx:for="{{durations}}" wx:key="minutes" class="chip {{duration === item.minutes ? 'on' : ''}}" data-m="{{item.minutes}}" bindtap="onDuration">{{item.label}}</view>
+        </view>
+      </view>
+
+      <!-- 哪天 -->
+      <view class="sec">
+        <text class="eyebrow">Date</text>
+        <scroll-view class="days" scroll-x="{{true}}" enhanced="{{true}}" show-scrollbar="{{false}}">
+          <view wx:for="{{days}}" wx:key="date" class="day {{date === item.date ? 'on' : ''}}" data-date="{{item.date}}" bindtap="onDate">
+            <text class="day-t">{{item.label}}</text>
+            <text class="day-s">{{item.sub}}</text>
+          </view>
+        </scroll-view>
+      </view>
+
+      <!-- 几点 -->
+      <view class="sec">
+        <text class="eyebrow">Time</text>
+        <view wx:if="{{slotsLoading}}" class="sub slot-msg">正在查空着的时段…</view>
+        <view wx:elif="{{slotsMessage}}" class="sub slot-msg">{{slotsMessage}}</view>
+        <view wx:else class="slots">
+          <view wx:for="{{slots}}" wx:key="startsAt" class="slot {{item.full ? 'full' : ''}} {{slot === item.startsAt ? 'on' : ''}}" data-at="{{item.startsAt}}" bindtap="onSlot">
+            <text class="num slot-t">{{item.time}}</text>
+            <text class="slot-s">{{item.text}}</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- 技师（选了时段以后） -->
+      <view wx:if="{{kind === 'technician' && slot}}" class="sec">
+        <text class="eyebrow">Therapist</text>
+        <view class="chips-row">
+          <view class="chip {{technicianId === 0 ? 'on' : ''}}" data-id="{{0}}" bindtap="onTech">不指定</view>
+          <view wx:for="{{techs}}" wx:key="id" class="chip num {{technicianId === item.id ? 'on' : ''}}" data-id="{{item.id}}" bindtap="onTech">{{item.label}}</view>
+        </view>
+      </view>
+
+      <!-- 人数（派对房等） -->
+      <view wx:if="{{kind === 'space'}}" class="sec">
+        <text class="eyebrow">Guests</text>
+        <view class="stepper">
+          <view class="st-btn" hover-class="tap" data-d="{{-1}}" bindtap="onGuests" aria-label="少一位">−</view>
+          <text class="num st-n">{{guests}} 位</text>
+          <view class="st-btn" hover-class="tap" data-d="{{1}}" bindtap="onGuests" aria-label="多一位">+</view>
+        </view>
+      </view>
+
+      <view class="sec">
+        <text class="eyebrow">Note</text>
+        <input class="note-in" value="{{note}}" maxlength="100" placeholder="备注（选填）：比如力道、同行的人" bindinput="onNote" />
+      </view>
+
+      <text class="sub foot">每人同时最多 {{home.rules.maxOpen}} 个没到店的预约；开始前 {{home.rules.cancelLeadMinutes / 60}} 小时以前可以在「我的预约」里自己取消，之后请打电话给门店；过了开始时间 {{home.rules.noShowMinutes}} 分钟没到店记爽约。</text>
+    </block>
+  </block>
+</view>
+
+<!-- 底部：提交 -->
+<view wx:if="{{state === 'ready' && home.canBook}}" class="bar">
+  <text class="sub bar-t">{{slot ? '已选好时段' : '选一个时段'}}</text>
+  <button class="btn primary bar-go" hover-class="btn-hover" bindtap="onSubmit" loading="{{busy}}" disabled="{{busy || !slot}}">提交预约</button>
+</view>

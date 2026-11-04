@@ -249,6 +249,25 @@ describe('邀请好友', () => {
     void winnerKey;
   });
 
+  it('发出去了、回答路上丢了，之后又换过绑定：原样重提照样回那个码（码占着本月的次数，不能说成没发出）；别的微信用不了这个编号', async () => {
+    const a = await member('演示·邀请重提', 10000);
+    const key = randomUUID();
+    const v0 = await versionOf(a.openid);
+    const first = await create(a.openid, key, v0);
+    expect(first.statusCode, first.body).toBe(201);
+    const code = first.json().code as string;
+    // 解绑、再绑同一位会员（绑定状态版本号变了两次）
+    const bindings = (await api(ctx.app, ctx.owner, 'GET', `/api/admin/mp/members/${a.id}/bindings`)).body as { id: number }[];
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/admin/mp/bindings/${bindings[0]!.id}/unbind`, { clientKey: randomUUID(), reason: '测试换绑' })).status).toBe(200);
+    expect((await call('POST', '/api/mp/bind', a.openid, { clientKey: randomUUID(), phone: a.phone, bindVersion: await versionOf(a.openid), mock: true })).statusCode).toBe(200);
+    const again = await create(a.openid, key, v0);
+    expect(again.statusCode, again.body).toBe(200);
+    expect(again.json()).toMatchObject({ code, replayed: true });
+    const other = await member('演示·别的微信邀请', 10000);
+    const stolen = await create(other.openid, key);
+    expect([stolen.statusCode, stolen.json().error.code]).toEqual([409, 'CLIENT_KEY_REUSED']);
+  });
+
   it('邀请码只能这样变；后台看得到最近的邀请与各状态的数；自检照常全过', async () => {
     const [any] = await ctx.sql<{ id: number }[]>`SELECT id FROM mp_invites WHERE status = 'used' LIMIT 1`;
     await expect(ctx.sql`UPDATE mp_invites SET code = 'ABCDEFGHJK' WHERE id = ${any!.id}`).rejects.toThrow(/不能改/);

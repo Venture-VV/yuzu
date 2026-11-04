@@ -14,6 +14,8 @@
     "pages/invite-claim/index",
     "pages/food/index",
     "pages/bill/index",
+    "pages/booking/index",
+    "pages/bookings/index",
     "pages/unbind/index"
   ],
   "window": {

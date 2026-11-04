@@ -43,12 +43,13 @@ import {
 } from './mpPending';
 import { mpAdminKey, PendingUpdates, saveError, updateFailed } from './mpAdminShared';
 import { CouponTab } from './CouponTab';
+import { BookingTab } from './BookingTab';
 import { FoodTab } from './FoodTab';
 import { InviteTab } from './InviteTab';
 import { RechargeTab } from './RechargeTab';
 import { ReminderTab } from './ReminderTab';
 
-type Tab = 'store' | 'banners' | 'items' | 'recharge' | 'coupons' | 'reminders' | 'invites' | 'food' | 'bindings';
+type Tab = 'store' | 'banners' | 'items' | 'recharge' | 'coupons' | 'reminders' | 'invites' | 'food' | 'bookings' | 'bindings';
 const key = mpAdminKey;
 const imageUrl = (id: number) => `/api/admin/mp/images/${id}`;
 
@@ -96,6 +97,7 @@ export function MpAdminSection() {
   const canReminder = can('mp.reminder');
   const canInvite = can('mp.invite');
   const canFood = can('mp.food');
+  const canBooking = can('mp.booking');
   const q = useQuery({ queryKey: key, queryFn: () => api.get<MpAdminData>('/api/admin/mp') });
   const tabs = useMemo(
     () =>
@@ -108,9 +110,10 @@ export function MpAdminSection() {
         { value: 'reminders' as const, label: '到期提醒', show: canReminder },
         { value: 'invites' as const, label: '邀请好友', show: canInvite },
         { value: 'food' as const, label: '扫码点餐', show: canFood },
+        { value: 'bookings' as const, label: '预约', show: canBooking },
         { value: 'bindings' as const, label: '会员的微信', show: true },
       ].filter((t) => t.show),
-    [canContent, canRecharge, canCoupon, canReminder, canInvite, canFood],
+    [canContent, canRecharge, canCoupon, canReminder, canInvite, canFood, canBooking],
   );
   const [tab, setTab] = useState<Tab>(tabs[0]!.value);
   const unreadable = useMpPendingUnreadable();
@@ -154,6 +157,8 @@ export function MpAdminSection() {
           <InviteTab data={q.data} />
         ) : tab === 'food' ? (
           <FoodTab data={q.data} />
+        ) : tab === 'bookings' ? (
+          <BookingTab data={q.data} />
         ) : (
           <BindingsTab />
         )}

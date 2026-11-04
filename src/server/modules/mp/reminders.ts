@@ -11,6 +11,7 @@
 //   · 网关（leaseReminders / reportReminders，只认网关密钥）：每 30 秒取一批排队的消息去发、发完回报。取的时候再核对一次
 //     绑定与券。门店系统不连网关，门店断网时消息在门店等着，连上再发。
 // 只读券、会员档阶（主线的 memberGradeInfo）与赠金批次，主线不用改。
+// 第三期 3d 加一种「预约到店」：门店确认了的预约，开始那天 10:00–20:00 提醒一次（还待确认的等确认了再排；取消、到店、开始了的不发）。
 
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -104,6 +105,7 @@ const SOURCES_OF: Record<MpReminderTemplateKind, MpReminderSource[]> = {
   coupon: ['name', 'date', 'tip', 'store'],
   membership: MP_REMINDER_SOURCES,
   bonus: MP_REMINDER_SOURCES,
+  booking: ['name', 'date', 'tip', 'store'],
 };
 
 const TemplateInput = z
@@ -126,6 +128,8 @@ const RulesInput = z.object({
   coupon: TemplateInput,
   membership: TemplateInput,
   bonus: TemplateInput,
+  /** 预约到店（第三期 3d）；没带的当作不设（升级前的后台页面） */
+  booking: TemplateInput.default(null),
   /** 打开时看到的版本号；不带的不核对（只给脚本用） */
   version: z.number().int().min(0).optional(),
 });
@@ -142,7 +146,7 @@ export async function saveReminderRules(deps: Deps, raw: unknown, ctx: OpContext
     const bad = t.fields.find((f) => !SOURCES_OF[kind].includes(f.source));
     if (bad) throw badRequest(`${KIND_LABELS[kind]}的模板里，${bad.key} 不能填「${SOURCE_LABELS[bad.source]}」`);
   }
-  if (new Set(ids).size !== ids.length) throw badRequest('三种提醒要用三个不同的模板');
+  if (new Set(ids).size !== ids.length) throw badRequest('每种提醒要用不同的模板');
   return saveRuleSetting(
     deps.sql,
     MP_REMINDER_RULES_KEY,
@@ -150,13 +154,13 @@ export async function saveReminderRules(deps: Deps, raw: unknown, ctx: OpContext
     async (before) => {
       if (input.version !== undefined && input.version !== before.version) throw conflict('VERSION_CONFLICT', '到期提醒的设置刚被别人改过，请刷新后再改');
       // 内容没变也加一：后台「放弃这次修改」靠它让原来那次请求的版本号对不上
-      return { enabled: input.enabled, coupon: input.coupon, membership: input.membership, bonus: input.bonus, version: before.version + 1 };
+      return { enabled: input.enabled, coupon: input.coupon, membership: input.membership, bonus: input.bonus, booking: input.booking, version: before.version + 1 };
     },
     ctx,
   );
 }
 
-const KIND_LABELS: Record<MpReminderTemplateKind, string> = { coupon: '券快到期', membership: '会籍快到期', bonus: '赠金快到期' };
+const KIND_LABELS: Record<MpReminderTemplateKind, string> = { coupon: '券快到期', membership: '会籍快到期', bonus: '赠金快到期', booking: '预约到店' };
 const SOURCE_LABELS: Record<MpReminderSource, string> = { name: '名称', date: '到期日', amount: '金额', tip: '提示', store: '门店名' };
 
 // ───────────────────────── 顾客：能设哪些、设一条 ─────────────────────────
@@ -169,6 +173,7 @@ interface ConsentRow {
   memberId: number;
   kind: MpReminderKind;
   couponId: number | null;
+  bookingId: number | null;
   targetDate: string;
   templateId: string;
   dueDate: string;
@@ -191,7 +196,7 @@ export async function reminderOptions(deps: Deps, openid: string): Promise<MpRem
     leadDays: MP_REMINDER_LEAD_DAYS,
     sendHours: { from: MP_REMINDER_SEND_HOURS.from, to: MP_REMINDER_SEND_HOURS.to },
   };
-  const none = { coupon: null, membership: null, bonus: null };
+  const none = { coupon: null, membership: null, bonus: null, booking: null };
   if (!rules.enabled || !state.binding) return { open: false, ...base, templates: none, set: [], membership: null, bonus: null };
   const { id: bindingId, memberId } = state.binding;
   const [m] = await deps.sql<{ status: string; mergedIntoId: number | null }[]>`SELECT status, merged_into_id FROM members WHERE id = ${memberId}`;
@@ -202,8 +207,8 @@ export async function reminderOptions(deps: Deps, openid: string): Promise<MpRem
   const [info, bonus, rows] = await Promise.all([
     memberGradeInfo(deps.sql, memberId, today),
     earliestBonus(deps.sql, memberId, tz, businessDayStartHour, now),
-    deps.sql<{ kind: MpReminderKind; couponCode: string | null; targetDate: string; dueDate: string; templateId: string; status: MpReminderStatus | null }[]>`
-      SELECT c.kind, cp.code AS coupon_code, c.target_date::text AS target_date, c.due_date::text AS due_date, c.template_id, msg.status
+    deps.sql<{ kind: MpReminderKind; couponCode: string | null; bookingId: number | null; targetDate: string; dueDate: string; templateId: string; status: MpReminderStatus | null }[]>`
+      SELECT c.kind, cp.code AS coupon_code, c.booking_id, c.target_date::text AS target_date, c.due_date::text AS due_date, c.template_id, msg.status
       FROM mp_reminder_consents c
       LEFT JOIN coupons cp ON cp.id = c.coupon_id
       LEFT JOIN mp_reminder_messages msg ON msg.consent_id = c.id
@@ -215,6 +220,7 @@ export async function reminderOptions(deps: Deps, openid: string): Promise<MpRem
   const set: MpReminderSet[] = rows.map((r) => ({
     kind: r.kind,
     couponCode: r.couponCode,
+    bookingId: r.bookingId === null ? null : Number(r.bookingId),
     targetDate: r.targetDate,
     dueDate: r.dueDate,
     state:
@@ -227,7 +233,12 @@ export async function reminderOptions(deps: Deps, openid: string): Promise<MpRem
   return {
     open: true,
     ...base,
-    templates: { coupon: rules.coupon?.templateId ?? null, membership: rules.membership?.templateId ?? null, bonus: rules.bonus?.templateId ?? null },
+    templates: {
+      coupon: rules.coupon?.templateId ?? null,
+      membership: rules.membership?.templateId ?? null,
+      bonus: rules.bonus?.templateId ?? null,
+      booking: rules.booking?.templateId ?? null,
+    },
     set,
     membership: info.state.grade > 0 ? { cycleEnd: info.state.cycleEnd, inGrace: info.inGrace, label: info.label } : null,
     bonus,
@@ -237,13 +248,16 @@ export async function reminderOptions(deps: Deps, openid: string): Promise<MpRem
 const ConsentInput = z
   .object({
     clientKey: z.uuid('操作编号不正确'),
-    kind: z.enum(['coupon', 'membership', 'grace', 'bonus'], '提醒的种类不对'),
+    kind: z.enum(['coupon', 'membership', 'grace', 'bonus', 'booking'], '提醒的种类不对'),
     couponCode: z.string().trim().regex(/^[2-9A-HJ-NP-Z]{12}$/, '券码不对').optional(),
+    bookingId: z.number().int().positive().optional(),
     targetDate: z.iso.date('到期日不对').optional(),
     templateId: z.string().regex(MP_REMINDER_TEMPLATE_ID, '模板编号不对'),
     bindVersion: z.number('请刷新后再设提醒').int().min(0),
   })
-  .refine((v) => (v.kind === 'coupon' ? v.couponCode !== undefined : v.targetDate !== undefined), { message: '要提醒哪一样没说清，请刷新后再点' });
+  .refine((v) => (v.kind === 'coupon' ? v.couponCode !== undefined : v.kind === 'booking' ? v.bookingId !== undefined : v.targetDate !== undefined), {
+    message: '要提醒哪一样没说清，请刷新后再点',
+  });
 
 /** 设一条提醒的咨询锁：同一个微信的设提醒串行（同一个编号同时重提只记一条） */
 const lockReminderOpenid = (tx: Tx, openid: string) => tx`SELECT pg_advisory_xact_lock(hashtext(${`mp_reminder:${openid}`}))`;
@@ -259,21 +273,30 @@ async function resolveTarget(
   input: z.infer<typeof ConsentInput>,
   today: string,
   startHour: number,
-): Promise<{ couponId: number | null; targetDate: string; dueDate: string }> {
+): Promise<{ couponId: number | null; bookingId: number | null; targetDate: string; dueDate: string }> {
   const tz = deps.config.timezone;
+  if (input.kind === 'booking') {
+    // 预约到店：自己的、还没取消或到店、还没开始的预约；开始那天（营业日）提醒
+    const [b] = await tx<{ id: number; memberId: number | null; status: string; startsAt: string; businessDate: string }[]>`
+      SELECT id, member_id, status, starts_at, business_date::text AS business_date FROM bookings WHERE id = ${input.bookingId!}`;
+    if (!b || Number(b.memberId) !== memberId) throw notFound('这不是你的预约');
+    if (b.status !== 'pending' && b.status !== 'confirmed') throw gone(b.status === 'cancelled' ? '预约已经取消了' : b.status === 'arrived' ? '已经到店了' : '预约已经过了');
+    if (Date.parse(b.startsAt) <= Date.now()) throw gone('预约已经开始了');
+    return { couponId: null, bookingId: Number(b.id), targetDate: b.businessDate, dueDate: maxDate(today, b.businessDate) };
+  }
   if (input.kind === 'coupon') {
     const [c] = await tx<{ id: number; memberId: number | null; validTo: string; status: string }[]>`
       SELECT id, member_id, valid_to::text AS valid_to, status FROM coupons WHERE code = ${input.couponCode!}`;
     if (!c || Number(c.memberId) !== memberId) throw notFound('这张券不在你的会员卡上');
     if (c.status !== 'available') throw gone(c.status === 'used' ? '这张券已经用过了，不用提醒' : '这张券已经作废了，不用提醒');
     if (c.validTo < today) throw gone('这张券已经过期了');
-    return { couponId: Number(c.id), targetDate: c.validTo, dueDate: maxDate(today, shiftDate(c.validTo, -MP_REMINDER_LEAD_DAYS.coupon)) };
+    return { couponId: Number(c.id), bookingId: null, targetDate: c.validTo, dueDate: maxDate(today, shiftDate(c.validTo, -MP_REMINDER_LEAD_DAYS.coupon)) };
   }
   if (input.kind === 'bonus') {
     const b = await earliestBonus(tx, memberId, tz, startHour, new Date());
     if (!b) throw gone('没有会到期的赠金');
     if (b.lastDay !== input.targetDate) throw changed();
-    return { couponId: null, targetDate: b.lastDay, dueDate: maxDate(today, shiftDate(b.lastDay, -MP_REMINDER_LEAD_DAYS.bonus)) };
+    return { couponId: null, bookingId: null, targetDate: b.lastDay, dueDate: maxDate(today, shiftDate(b.lastDay, -MP_REMINDER_LEAD_DAYS.bonus)) };
   }
   const info = await memberGradeInfo(tx, memberId, today);
   const cycleEnd = info.state.cycleEnd;
@@ -282,9 +305,9 @@ async function resolveTarget(
   if (cycleEnd !== input.targetDate) throw changed();
   if (cycleEnd < today) throw gone('会籍已经到期了');
   return input.kind === 'membership'
-    ? { couponId: null, targetDate: cycleEnd, dueDate: maxDate(today, shiftDate(cycleEnd, -MP_REMINDER_LEAD_DAYS.membership)) }
+    ? { couponId: null, bookingId: null, targetDate: cycleEnd, dueDate: maxDate(today, shiftDate(cycleEnd, -MP_REMINDER_LEAD_DAYS.membership)) }
     : // 进补充期当天：周期最后一天的下一天
-      { couponId: null, targetDate: cycleEnd, dueDate: shiftDate(cycleEnd, 1) };
+      { couponId: null, bookingId: null, targetDate: cycleEnd, dueDate: shiftDate(cycleEnd, 1) };
 }
 
 export async function consentReminder(deps: Deps, openid: string, raw: unknown): Promise<MpReminderConsented> {
@@ -301,7 +324,7 @@ export async function consentReminder(deps: Deps, openid: string, raw: unknown):
       if (state.version !== input.bindVersion) throw conflict('BIND_STALE', '会员绑定刚变过，这次没有设提醒，请刷新后再点');
       const { id: bindingId, memberId } = state.binding;
       const [prev] = await tx<ConsentRow[]>`
-        SELECT id, client_key, openid, binding_id, member_id, kind, coupon_id, target_date::text AS target_date, template_id,
+        SELECT id, client_key, openid, binding_id, member_id, kind, coupon_id, booking_id, target_date::text AS target_date, template_id,
                due_date::text AS due_date, created_at
         FROM mp_reminder_consents WHERE client_key = ${input.clientKey}`;
       if (prev) {
@@ -328,22 +351,24 @@ export async function consentReminder(deps: Deps, openid: string, raw: unknown):
       // 这样东西已经设过这种提醒、还在等或已发出（同一个模板）：返回原来那条，微信那边多出来的一次同意不用。
       // 之前那条没发出、不用发了、或是按换掉的模板同意的：这次同意记新的一条（第几次加一）
       const [same] = await tx<(ConsentRow & { status: MpReminderStatus | null })[]>`
-        SELECT c.id, c.client_key, c.openid, c.binding_id, c.member_id, c.kind, c.coupon_id, c.target_date::text AS target_date,
+        SELECT c.id, c.client_key, c.openid, c.binding_id, c.member_id, c.kind, c.coupon_id, c.booking_id, c.target_date::text AS target_date,
                c.template_id, c.due_date::text AS due_date, c.created_at, m.status
         FROM mp_reminder_consents c LEFT JOIN mp_reminder_messages m ON m.consent_id = c.id
         WHERE c.binding_id = ${bindingId} AND c.kind = ${input.kind} AND coalesce(c.coupon_id, 0) = ${target.couponId ?? 0}
+          AND coalesce(c.booking_id, 0) = ${target.bookingId ?? 0}
           AND c.target_date = ${target.targetDate} AND c.template_id = ${input.templateId}
           AND (m.status IS NULL OR m.status IN ('queued', 'leased', 'sent'))
         ORDER BY c.id DESC LIMIT 1`;
       if (same) return consentView(same, true);
       const [next] = await tx<{ seq: number }[]>`
         SELECT coalesce(max(seq), 0)::int + 1 AS seq FROM mp_reminder_consents
-        WHERE binding_id = ${bindingId} AND kind = ${input.kind} AND coalesce(coupon_id, 0) = ${target.couponId ?? 0} AND target_date = ${target.targetDate}`;
+        WHERE binding_id = ${bindingId} AND kind = ${input.kind} AND coalesce(coupon_id, 0) = ${target.couponId ?? 0}
+          AND coalesce(booking_id, 0) = ${target.bookingId ?? 0} AND target_date = ${target.targetDate}`;
       const [row] = await tx<ConsentRow[]>`
-        INSERT INTO mp_reminder_consents (client_key, openid, binding_id, member_id, kind, coupon_id, target_date, template_id, due_date, seq)
-        VALUES (${input.clientKey}, ${openid}, ${bindingId}, ${memberId}, ${input.kind}, ${target.couponId}, ${target.targetDate},
+        INSERT INTO mp_reminder_consents (client_key, openid, binding_id, member_id, kind, coupon_id, booking_id, target_date, template_id, due_date, seq)
+        VALUES (${input.clientKey}, ${openid}, ${bindingId}, ${memberId}, ${input.kind}, ${target.couponId}, ${target.bookingId}, ${target.targetDate},
                 ${input.templateId}, ${target.dueDate}, ${next!.seq})
-        RETURNING id, client_key, openid, binding_id, member_id, kind, coupon_id, target_date::text AS target_date, template_id,
+        RETURNING id, client_key, openid, binding_id, member_id, kind, coupon_id, booking_id, target_date::text AS target_date, template_id,
                   due_date::text AS due_date, created_at`;
       return consentView(row!, false);
     });
@@ -367,7 +392,7 @@ interface Built {
  * time 写成那一天的 23:59；amount 写成「¥12.00」；number 只有数字；phrase 5 个以内的汉字；name 10 个以内的汉字（没有汉字时
  * 20 个以内的字母）；short_thing 5 个字；character_string 32 个以内的字母、数字、符号；letter 只有字母；symbol 5 个以内的符号
  */
-export function formatField(key: string, value: { text: string; date?: string; cents?: number }): string {
+export function formatField(key: string, value: { text: string; date?: string; time?: string; cents?: number }): string {
   const kind = MP_REMINDER_FIELD_KEY.exec(key)?.[1] ?? 'thing';
   const take = (s: string, n: number) => [...s].slice(0, n).join('');
   const zh = (s: string) => s.replace(/[^\u4e00-\u9fff]/g, '');
@@ -375,7 +400,7 @@ export function formatField(key: string, value: { text: string; date?: string; c
     case 'date':
       return value.date ? cnDate(value.date) : take(value.text, 20);
     case 'time':
-      return value.date ? `${cnDate(value.date)} 23:59` : take(value.text, 20);
+      return value.date ? `${cnDate(value.date)} ${value.time ?? '23:59'}` : take(value.text, 20);
     case 'amount':
       return yuanText(value.cents ?? 0);
     case 'number':
@@ -397,10 +422,23 @@ export function formatField(key: string, value: { text: string; date?: string; c
   }
 }
 
-const PAGES: Record<MpReminderKind, string> = { coupon: 'pages/coupons/index', membership: 'pages/me/index', grace: 'pages/me/index', bonus: 'pages/ledger/index' };
+const PAGES: Record<MpReminderKind, string> = {
+  coupon: 'pages/coupons/index',
+  membership: 'pages/me/index',
+  grace: 'pages/me/index',
+  bonus: 'pages/ledger/index',
+  booking: 'pages/bookings/index',
+};
 
-/** 这条同意此刻要不要发、发什么：要发的给消息的页面与字段，不用发的给原因 */
-async function buildMessage(deps: Deps, rules: MpReminderRules, c: ConsentRow, today: string, at: Date, startHour: number): Promise<Built | { skip: string }> {
+/** 门店时区里的日期与钟点：预约的开始时间（过了半夜的写第二天的日期） */
+function localDateTime(iso: string, timeZone: string): { date: string; time: string } {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(iso));
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+  return { date: `${get('year')}-${get('month')}-${get('day')}`, time: `${get('hour')}:${get('minute')}` };
+}
+
+/** 这条同意此刻要不要发、发什么：要发的给消息的页面与字段，不用发的给原因；预约还待门店确认的先等（下一分钟再看） */
+async function buildMessage(deps: Deps, rules: MpReminderRules, c: ConsentRow, today: string, at: Date, startHour: number): Promise<Built | { skip: string } | { wait: true }> {
   const tz = deps.config.timezone;
   const tpl: MpReminderTemplate | null = rules[mpReminderTemplateKind(c.kind)];
   if (!tpl) return { skip: '这种提醒的模板已经拿掉了' };
@@ -413,9 +451,31 @@ async function buildMessage(deps: Deps, rules: MpReminderRules, c: ConsentRow, t
   if (b.status !== 'active') return { skip: '会员卡已经停用' };
   let name = '';
   let date = c.targetDate;
+  let time: string | undefined;
   let cents: number | undefined;
   let tip = '';
-  if (c.kind === 'coupon') {
+  if (c.kind === 'booking') {
+    const [bk] = await deps.sql<{ status: string; startsAt: string; kind: string; itemName: string | null; techNo: string | null; spaceName: string | null; spaceCode: string | null; roomTypeName: string | null }[]>`
+      SELECT b.status, b.starts_at, b.kind, i.name AS item_name, t.tech_no, sp.display_name AS space_name, sp.code AS space_code, rt.name AS room_type_name
+      FROM bookings b LEFT JOIN service_items i ON i.id = b.item_id LEFT JOIN technicians t ON t.id = b.technician_id LEFT JOIN spaces sp ON sp.id = b.space_id
+      LEFT JOIN room_types rt ON rt.id = b.room_type_id
+      WHERE b.id = ${c.bookingId}`;
+    if (!bk) return { skip: '预约不存在' };
+    // 门店还没确认：等确认了再排（没确认的开始前会自动取消，到时候记不发）
+    if (bk.status === 'pending' && Date.parse(bk.startsAt) > at.getTime()) return { wait: true };
+    if (bk.status !== 'confirmed') return { skip: bk.status === 'cancelled' ? '预约已经取消' : bk.status === 'arrived' ? '已经到店' : '预约已经过了' };
+    if (Date.parse(bk.startsAt) <= at.getTime()) return { skip: '预约已经开始' };
+    name =
+      bk.kind === 'technician'
+        ? `${bk.itemName ?? '技师项目'}${bk.techNo ? ` · ${bk.techNo} 号技师` : ''}`
+        : bk.kind === 'room'
+          ? bk.roomTypeName || '客房'
+          : bk.spaceName || bk.spaceCode || '房间';
+    const local = localDateTime(bk.startsAt, tz);
+    date = local.date;
+    time = local.time;
+    tip = '请准时到店，到前台报手机号';
+  } else if (c.kind === 'coupon') {
     const [cp] = await deps.sql<{ status: string; validTo: string; name: string }[]>`
       SELECT c.status, c.valid_to::text AS valid_to, t.name FROM coupons c JOIN coupon_templates t ON t.id = c.template_id WHERE c.id = ${c.couponId}`;
     if (!cp) return { skip: '券不存在' };
@@ -453,10 +513,19 @@ async function buildMessage(deps: Deps, rules: MpReminderRules, c: ConsentRow, t
   }
   const store = (await loadSettings(deps.sql)).storeName;
   const value = (source: MpReminderSource) =>
-    source === 'name' ? { text: name } : source === 'date' ? { text: cnDate(date), date } : source === 'amount' ? { text: '', cents: cents ?? 0 } : source === 'tip' ? { text: tip } : { text: store };
+    source === 'name'
+      ? { text: name }
+      : source === 'date'
+        ? { text: cnDate(date), date, ...(time ? { time } : {}) }
+        : source === 'amount'
+          ? { text: '', cents: cents ?? 0 }
+          : source === 'tip'
+            ? { text: tip }
+            : { text: store };
   const data: Record<string, { value: string }> = {};
   for (const f of tpl.fields) data[f.key] = { value: formatField(f.key, value(f.source)) };
-  return { page: PAGES[c.kind], data, validUntil: date };
+  // 预约：过了开始那个营业日就不用发了（开始时间过了半夜，日期写第二天）
+  return { page: PAGES[c.kind], data, validUntil: c.kind === 'booking' ? c.targetDate : date };
 }
 
 /**
@@ -492,7 +561,7 @@ export async function planReminders(
   const { today, hour, startHour } = await nowOf(deps, at);
   if (!rules.enabled || !inSendHours(hour)) return { queued: 0, skipped: 0, unknown: lost.count, errors: 0 };
   const due = await deps.sql<ConsentRow[]>`
-    SELECT c.id, c.client_key, c.openid, c.binding_id, c.member_id, c.kind, c.coupon_id, c.target_date::text AS target_date,
+    SELECT c.id, c.client_key, c.openid, c.binding_id, c.member_id, c.kind, c.coupon_id, c.booking_id, c.target_date::text AS target_date,
            c.template_id, c.due_date::text AS due_date, c.created_at
     FROM mp_reminder_consents c
     WHERE c.due_date <= ${today} AND NOT EXISTS (SELECT 1 FROM mp_reminder_messages m WHERE m.consent_id = c.id)
@@ -503,6 +572,7 @@ export async function planReminders(
   for (const c of due) {
     try {
       const built = await buildMessage(deps, rules, c, today, at, startHour);
+      if ('wait' in built) continue;
       if ('skip' in built) {
         const r = await deps.sql`
           INSERT INTO mp_reminder_messages (consent_id, status, reason, created_at, finished_at) VALUES (${c.id}, 'skipped', ${built.skip}, ${at}, ${at})
@@ -591,15 +661,19 @@ export async function leaseReminders(deps: Deps, raw: unknown, at: Date = new Da
         memberStatus: string;
         mergedIntoId: number | null;
         couponStatus: string | null;
+        bookingStatus: string | null;
+        bookingStartsAt: string | null;
       }[]
     >`
       SELECT m.id, m.page, m.data, m.valid_until::text AS valid_until, m.created_at, c.openid, c.template_id, c.kind,
-             b.unbound_at IS NULL AS bound, mb.status AS member_status, mb.merged_into_id, cp.status AS coupon_status
+             b.unbound_at IS NULL AS bound, mb.status AS member_status, mb.merged_into_id, cp.status AS coupon_status,
+             bk.status AS booking_status, bk.starts_at AS booking_starts_at
       FROM mp_reminder_messages m
       JOIN mp_reminder_consents c ON c.id = m.consent_id
       JOIN mp_bindings b ON b.id = c.binding_id
       JOIN members mb ON mb.id = c.member_id
       LEFT JOIN coupons cp ON cp.id = c.coupon_id
+      LEFT JOIN bookings bk ON bk.id = c.booking_id
       WHERE m.status = 'queued' AND (m.retry_after IS NULL OR m.retry_after <= ${at})
       ORDER BY m.id LIMIT ${limit}
       FOR UPDATE OF m SKIP LOCKED`;
@@ -618,7 +692,15 @@ export async function leaseReminders(deps: Deps, raw: unknown, at: Date = new Da
                   ? r.couponStatus === 'used'
                     ? '券已经用过'
                     : '券已经作废'
-                  : null;
+                  : r.kind === 'booking' && r.bookingStatus !== 'confirmed'
+                    ? r.bookingStatus === 'cancelled'
+                      ? '预约已经取消'
+                      : r.bookingStatus === 'arrived'
+                        ? '已经到店'
+                        : '预约已经过了'
+                    : r.kind === 'booking' && Date.parse(r.bookingStartsAt!) <= at.getTime()
+                      ? '预约已经开始'
+                      : null;
       if (skip) {
         await tx`UPDATE mp_reminder_messages SET status = 'skipped', reason = ${skip}, retry_after = NULL, finished_at = ${at} WHERE id = ${r.id}`;
         continue;
@@ -699,8 +781,10 @@ export async function reminderAdminData(deps: Deps): Promise<MpReminderAdminData
     deps.sql<{ status: MpReminderStatus; n: number }[]>`
       SELECT status, count(*)::int AS n FROM mp_reminder_messages WHERE created_at > now() - interval '30 days' GROUP BY status`,
     deps.sql<{ waiting: number; overdue: number }[]>`
-      SELECT (count(*) FILTER (WHERE c.due_date > ${today}))::int AS waiting, (count(*) FILTER (WHERE c.due_date <= ${today}))::int AS overdue
-      FROM mp_reminder_consents c WHERE NOT EXISTS (SELECT 1 FROM mp_reminder_messages m WHERE m.consent_id = c.id)`,
+      SELECT (count(*) FILTER (WHERE c.due_date > ${today} OR bk.status = 'pending'))::int AS waiting,
+             (count(*) FILTER (WHERE c.due_date <= ${today} AND bk.status IS DISTINCT FROM 'pending'))::int AS overdue
+      FROM mp_reminder_consents c LEFT JOIN bookings bk ON bk.id = c.booking_id
+      WHERE NOT EXISTS (SELECT 1 FROM mp_reminder_messages m WHERE m.consent_id = c.id)`,
     deps.sql<(Omit<MpReminderMessageAdmin, 'createdAt' | 'finishedAt'> & { createdAt: string; finishedAt: string | null })[]>`
       SELECT m.id, c.kind, c.member_id, mb.name AS member_name, c.target_date::text AS target_date, c.due_date::text AS due_date,
              m.status, m.reason, m.errcode, m.attempts, m.created_at, m.finished_at

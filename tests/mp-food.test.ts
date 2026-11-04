@@ -11,7 +11,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MP_GATEWAY_HEADER, MP_OPENID_HEADER, type MpFoodAdminData, type MpFoodBill, type MpFoodMenu, type MpFoodOrdered } from '../src/shared/mp';
 import { buildMpApp } from '../src/server/modules/mp/app';
-import { foodAdminData, makeTableCode, tableIdOf } from '../src/server/modules/mp/food';
+import { foodAdminData, foodMenu, makeTableCode, orderFood, tableIdOf } from '../src/server/modules/mp/food';
 import { consistencyChecks } from '../src/server/ops/consistency';
 import { api, setup, type TestContext } from './helpers';
 
@@ -356,6 +356,22 @@ describe('扫码点餐', () => {
     const after = await order(a.openid, items, { clientKey: key, bindVersion: await versionOf(a.openid) });
     expect([after.statusCode, after.json().error.code]).toEqual([409, 'CLIENT_KEY_REUSED']);
     expect(await bill(a.openid)).toMatchObject({ open: false, notice: '请先绑定会员' });
+  });
+
+  it('门店系统没配签名密钥：带着桌码下单照点餐页说的，不写桌号、服务员按手牌送', async () => {
+    const a = await member('演示·没配密钥');
+    const v = await checkIn(a.id);
+    const noSecret = { sql: ctx.sql, config: { ...ctx.config, mp: { ...ctx.config.mp, codeSecret: null } } };
+    const m = await foodMenu(noSecret, a.openid, { table: makeTableCode(SECRET, tableId)! });
+    expect(m).toMatchObject({ canOrder: true, table: null, tableNotice: '门店系统还没配好桌码，这一单不写桌号，服务员按手牌送' });
+    const o = await orderFood(noSecret, a.openid, {
+      clientKey: randomUUID(),
+      items: [{ itemId: item['柠檬茶']!, quantity: 1 }],
+      table: makeTableCode(SECRET, tableId)!,
+      expectedTotal: 1500,
+      bindVersion: await versionOf(a.openid),
+    });
+    expect(o).toMatchObject({ deliverTo: '', tagCode: v.code, total: 1500, replayed: false });
   });
 
   it('后台：桌码要配了签名密钥才有；配了的每张启用的桌一个码、认得出', async () => {

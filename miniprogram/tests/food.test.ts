@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MpFoodDish, MpFoodOrdered } from '../../src/shared/mp';
 
 type Reply = { status: number; data: unknown } | 'fail';
+/** 先不回：测试调 onHold 给的函数时才回（请求还在发） */
+type Held = { hold: Reply; onHold: (release: () => void) => void };
 
-function installWx(routes: Record<string, Reply | (() => Reply)>, opts: { storageBroken?: string; storage?: Record<string, unknown>; readFails?: string } = {}) {
+function installWx(routes: Record<string, Reply | Held | (() => Reply)>, opts: { storageBroken?: string; storage?: Record<string, unknown>; readFails?: string } = {}) {
   const storage: Record<string, unknown> = opts.storage ?? {};
   const sent: { path: string; data: unknown }[] = [];
   vi.stubGlobal('wx', {
@@ -27,8 +29,10 @@ function installWx(routes: Record<string, Reply | (() => Reply)>, opts: { storag
       const path = o.url.replace(/^https?:\/\/[^/]+/, '');
       if (path !== '/v1/login') sent.push({ path: (o.method ?? 'GET') + ' ' + path, data: o.data });
       const route = path === '/v1/login' ? { status: 200, data: { token: 'v1.t', expiresAt: new Date(Date.now() + 7 * 86400e3).toISOString() } } : routes[(o.method ?? 'GET') + ' ' + path];
-      const r = typeof route === 'function' ? route() : route;
-      setTimeout(() => (!r || r === 'fail' ? o.fail({ errMsg: 'request:fail' }) : o.success({ statusCode: r.status, data: r.data, header: {} })), 0);
+      const r0 = typeof route === 'function' ? route() : route;
+      const answer = (r: Reply | undefined) => (!r || r === 'fail' ? o.fail({ errMsg: 'request:fail' }) : o.success({ statusCode: r.status, data: r.data, header: {} }));
+      if (r0 && typeof r0 === 'object' && 'hold' in r0) r0.onHold(() => answer(r0.hold));
+      else setTimeout(() => answer(r0), 0);
     },
   });
   return { storage, sent };
@@ -186,10 +190,10 @@ describe('下单的「结果待确认」', () => {
     abandon = 'fail';
     expect((await f.sendOrder(BODY, KEY)).kind).toBe('pending');
     expect(w.storage.tq_food_order_pending).toMatchObject({ clientKey: KEY });
-    // 还有待确认的：不发新的一单，先确认
+    // 还有待确认的：先确认上一单、告诉顾客结果，这一单不下（购物车留着）
     const before = w.sent.length;
     abandon = { status: 200, data: { status: 'abandoned' } };
-    expect(await f.sendOrder(BODY, 'b0b0b0b0-9b8a-4c7d-8e6f-5a4b3c2d1e0f')).toEqual({ kind: 'abandoned' });
+    expect(await f.sendOrder(BODY, 'b0b0b0b0-9b8a-4c7d-8e6f-5a4b3c2d1e0f')).toEqual({ kind: 'earlier', message: '上一单没有下成；这一单还没下，请再点一次「下单」' });
     expect(w.sent.slice(before).map((s) => s.path)).toEqual(['POST /v1/food/orders/abandon']);
     expect(w.storage.tq_food_order_pending).toBeUndefined();
     // 门店（5xx）、门店连不上也算不确定
@@ -197,6 +201,27 @@ describe('下单的「结果待确认」', () => {
     const f2 = await load();
     expect(await f2.sendOrder(BODY, KEY)).toEqual({ kind: 'abandoned' });
     expect(w2.sent.map((s) => s.path)).toEqual(['POST /v1/food/orders', 'POST /v1/food/orders/abandon']);
+  });
+
+  it('上一单已经下了：告诉顾客出品单号，这一单不下；请求还在发时不去作废它，回来以后照常', async () => {
+    const w = installWx({ 'POST /v1/food/orders/abandon': { status: 200, data: { status: 'ordered', ordered: { ...ORDERED, replayed: true } } } }, { storage: { tq_food_order_pending: { clientKey: KEY, at: 1 } } });
+    const f = await load();
+    expect(await f.sendOrder(BODY, 'c0c0c0c0-9b8a-4c7d-8e6f-5a4b3c2d1e0f')).toEqual({
+      kind: 'earlier',
+      message: '上一单已经下好了（出品单 CD20261104-0012，¥111.00）；这一单还没下，看一下「我的账单」，要的话再点一次「下单」',
+    });
+    expect(w.sent.map((s) => s.path)).toEqual(['POST /v1/food/orders/abandon']);
+    let release: () => void = () => undefined;
+    const w2 = installWx({ 'POST /v1/food/orders': { hold: { status: 201, data: ORDERED }, onHold: (go) => (release = go) } });
+    const f2 = await load();
+    const p = f2.sendOrder(BODY, KEY);
+    await new Promise((ok) => setTimeout(ok, 5));
+    expect(await f2.resolveOrderPending()).toEqual({ kind: 'pending', message: '这一单还在提交，请稍候再点「再确认一次」' });
+    expect(w2.sent.map((s) => s.path)).toEqual(['POST /v1/food/orders']);
+    release();
+    expect(await p).toEqual({ kind: 'ordered', ordered: ORDERED });
+    expect(w2.storage.tq_food_order_pending).toBeUndefined();
+    expect(await f2.resolveOrderPending()).toBeNull();
   });
 
   it('手机上的记录读不出来：不发；认不出的记录也当读不出来', async () => {

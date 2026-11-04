@@ -57,13 +57,14 @@ const TPL = 'tplCoupon-0123456789abcdefABCDEF';
 const OPTIONS: MpReminderOptions = {
   open: true,
   bindVersion: 3,
-  templates: { coupon: TPL, membership: 'tplMember-0123456789abcdefABCDEF', bonus: null },
+  templates: { coupon: TPL, membership: 'tplMember-0123456789abcdefABCDEF', bonus: null, booking: 'tplBooking-0123456789abcdefABCD' },
   leadDays: { coupon: 3, membership: 7, bonus: 7 },
   sendHours: { from: 10, to: 20 },
   set: [
-    { kind: 'coupon', couponCode: 'Q7K29XM4ABCD', targetDate: '2026-11-20', dueDate: '2026-11-17', state: 'waiting' },
-    { kind: 'coupon', couponCode: 'DONE2345ABCD', targetDate: '2026-11-20', dueDate: '2026-11-17', state: 'done' },
-    { kind: 'membership', couponCode: null, targetDate: '2027-03-31', dueDate: '2027-03-24', state: 'sent' },
+    { kind: 'coupon', couponCode: 'Q7K29XM4ABCD', bookingId: null, targetDate: '2026-11-20', dueDate: '2026-11-17', state: 'waiting' },
+    { kind: 'coupon', couponCode: 'DONE2345ABCD', bookingId: null, targetDate: '2026-11-20', dueDate: '2026-11-17', state: 'done' },
+    { kind: 'membership', couponCode: null, bookingId: null, targetDate: '2027-03-31', dueDate: '2027-03-24', state: 'sent' },
+    { kind: 'booking', couponCode: null, bookingId: 42, targetDate: '2026-11-06', dueDate: '2026-11-06', state: 'waiting' },
   ],
   membership: { cycleEnd: '2027-03-31', inGrace: false, label: 'L3 观澜 · 享' },
   bonus: { amount: 5000, lastDay: '2026-11-19' },
@@ -81,6 +82,10 @@ describe('「提醒我」的字', () => {
     expect(r.remindButton(OPTIONS, { kind: 'coupon', couponCode: 'DONE2345ABCD' })).toEqual({ show: true, set: false, text: '到期提醒我' });
     expect(r.remindButton(OPTIONS, { kind: 'coupon', couponCode: 'NEW23456ABCD' })).toEqual({ show: true, set: false, text: '到期提醒我' });
     expect(r.remindButton(OPTIONS, { kind: 'membership', targetDate: '2027-03-31' })).toEqual({ show: true, set: true, text: '已设提醒' });
+    // 预约到店（第三期 3d）：按预约单认
+    expect(r.remindButton(OPTIONS, { kind: 'booking', bookingId: 42 })).toEqual({ show: true, set: true, text: '已设到店提醒' });
+    expect(r.remindButton(OPTIONS, { kind: 'booking', bookingId: 43 })).toEqual({ show: true, set: false, text: '到店提醒我' });
+    expect(r.remindHint(OPTIONS, 'booking')).toBe('门店确认以后，预约那天 10:00–20:00 之间发一条微信消息');
     // 补充期用会籍的模板
     expect(r.remindButton(OPTIONS, { kind: 'grace', targetDate: '2027-03-31' })).toEqual({ show: true, set: false, text: '进补充期也提醒我' });
     expect(r.remindHint(OPTIONS, 'coupon')).toBe('到期前 3 天 10:00–20:00 之间发一条微信消息');

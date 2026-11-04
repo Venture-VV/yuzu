@@ -161,6 +161,8 @@ export interface MpMe {
         inviteOpen: boolean;
         /** 扫码点餐开着（第三期 3c：后台开了、餐饮功能开着）：「我的」页显示「点餐」「我的账单」 */
         foodOpen: boolean;
+        /** 小程序预约开着、有可约的项目或房间（第三期 3d）：「我的」页显示「预约」 */
+        bookingOpen: boolean;
       })
     | null;
 }
@@ -297,6 +299,8 @@ export interface MpAdminData {
   inviteRules: MpInviteRules;
   /** 扫码点餐的设置（第三期 3c） */
   foodRules: MpFoodRules;
+  /** 小程序预约的设置（第三期 3d） */
+  bookingRules: MpBookingRules;
   stores: MpStoreAdmin[];
   banners: MpBannerAdmin[];
   items: MpItemIntroAdmin[];
@@ -681,16 +685,16 @@ export interface MpCouponAdminData {
 
 // ── 到期提醒（第三期 3a，docs/MP_PHASE3.md 第 1 节，MP28、MP29）──
 
-/** coupon 券快到期、membership 会籍快到期、grace 进补充期当天、bonus 赠金快到期 */
-export type MpReminderKind = 'coupon' | 'membership' | 'grace' | 'bonus';
-/** 模板分三种：会籍与补充期用同一个模板（会籍的模板） */
-export type MpReminderTemplateKind = 'coupon' | 'membership' | 'bonus';
-export const MP_REMINDER_TEMPLATE_KINDS: MpReminderTemplateKind[] = ['coupon', 'membership', 'bonus'];
+/** coupon 券快到期、membership 会籍快到期、grace 进补充期当天、bonus 赠金快到期、booking 预约到店（第三期 3d） */
+export type MpReminderKind = 'coupon' | 'membership' | 'grace' | 'bonus' | 'booking';
+/** 模板分四种：会籍与补充期用同一个模板（会籍的模板） */
+export type MpReminderTemplateKind = 'coupon' | 'membership' | 'bonus' | 'booking';
+export const MP_REMINDER_TEMPLATE_KINDS: MpReminderTemplateKind[] = ['coupon', 'membership', 'bonus', 'booking'];
 export const mpReminderTemplateKind = (k: MpReminderKind): MpReminderTemplateKind => (k === 'grace' ? 'membership' : k);
 
 /**
- * 模板的一个字段填什么：name 券名 / 档阶 / 「赠金」，date 到期日，amount 赠金金额 / 保级还差的储值消费，
- * tip 一句提示（「到前台结账时可用」等），store 门店名
+ * 模板的一个字段填什么：name 券名 / 档阶 / 「赠金」 / 预约的项目或房间，date 到期日（预约是开始的日子，time 字段带上几点），
+ * amount 赠金金额 / 保级还差的储值消费，tip 一句提示（「到前台结账时可用」等），store 门店名
  */
 export type MpReminderSource = 'name' | 'date' | 'amount' | 'tip' | 'store';
 export const MP_REMINDER_SOURCES: MpReminderSource[] = ['name', 'date', 'amount', 'tip', 'store'];
@@ -711,10 +715,12 @@ export interface MpReminderRules {
   coupon: MpReminderTemplate | null;
   membership: MpReminderTemplate | null;
   bonus: MpReminderTemplate | null;
+  /** 预约到店（第三期 3d）：门店确认了的预约，开始那天 10:00–20:00 提醒一次 */
+  booking: MpReminderTemplate | null;
   /** 每保存一次加一；后台保存时带上看到的版本号 */
   version: number;
 }
-export const DEFAULT_MP_REMINDER_RULES: MpReminderRules = { enabled: false, coupon: null, membership: null, bonus: null, version: 0 };
+export const DEFAULT_MP_REMINDER_RULES: MpReminderRules = { enabled: false, coupon: null, membership: null, bonus: null, booking: null, version: 0 };
 export const MP_REMINDER_RULES_KEY = 'mp_reminder_rules';
 /** 提前几天提醒（MP28 默认）：券 3 天，会籍、赠金 7 天；补充期在进补充期当天 */
 export const MP_REMINDER_LEAD_DAYS: Record<'coupon' | 'membership' | 'bonus', number> = { coupon: 3, membership: 7, bonus: 7 };
@@ -731,6 +737,8 @@ export interface MpReminderSet {
   kind: MpReminderKind;
   /** 券快到期：哪张券（券码） */
   couponCode: string | null;
+  /** 预约到店：哪张预约单 */
+  bookingId: number | null;
   targetDate: string;
   dueDate: string;
   /** waiting 还没到发的时候、sent 已发、done 不用发了或没发出 */
@@ -764,6 +772,8 @@ export interface MpReminderConsentInput {
   kind: MpReminderKind;
   /** 券快到期：哪张券 */
   couponCode?: string;
+  /** 预约到店：哪张预约单 */
+  bookingId?: number;
   /** 会籍、补充期、赠金：页面上显示的到期日（对不上说明刚变过，请顾客刷新） */
   targetDate?: string;
   templateId: string;
@@ -1095,4 +1105,124 @@ export interface MpFoodAdminData {
   today: { orders: number; total: number };
   /** 最近 50 单 */
   recent: MpFoodAdminOrder[];
+}
+
+// ── 预约技师与派对房（第三期 3d，docs/MP_PHASE3.md 第 4 节，MP34–MP37；接主线 v0.7.28 的 bookings）──
+
+/** 小程序预约的设置（settings 的 mp_booking_rules，后台「微信小程序」→「预约」，权限 mp.booking）：默认关、没有可约的 */
+export interface MpBookingRules {
+  enabled: boolean;
+  /** 小程序可约的技师项目（需要技师的项目） */
+  itemIds: number[];
+  /** 小程序可约的房间（开单即占用的：派对房、宠物轰趴房、娱乐室……） */
+  spaceIds: number[];
+  version: number;
+}
+export const DEFAULT_MP_BOOKING_RULES: MpBookingRules = { enabled: false, itemIds: [], spaceIds: [], version: 0 };
+export const MP_BOOKING_RULES_KEY = 'mp_booking_rules';
+/** 项目、房间各最多勾多少 */
+export const MP_BOOKING_MAX_OPTIONS = 100;
+/** 小程序预约最多几位（同去的人数，派对房用） */
+export const MP_BOOKING_MAX_GUESTS = 30;
+/** 备注最多几个字（与主线的预约一样） */
+export const MP_BOOKING_NOTE_MAX = 100;
+
+/** technician 预约技师、space 预约派对房等；room 客房（只能电话预订，「我的预约」里看得到） */
+export type MpBookingKind = 'technician' | 'space' | 'room';
+/** pending 待门店确认、confirmed 已预约、arrived 已到店、cancelled 已取消、no_show 爽约 */
+export type MpBookingStatus = 'pending' | 'confirmed' | 'arrived' | 'cancelled' | 'no_show';
+
+/** 「我的预约」的一张（不带门店内部信息） */
+export interface MpBookingView {
+  id: number;
+  bookingNo: string;
+  kind: MpBookingKind;
+  status: MpBookingStatus;
+  /** 「肩颈按摩 · 12 号技师」「派对房 A」 */
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  guests: number;
+  cancelReason: string | null;
+  /** 现在还能在小程序自己取消（开始前 2 小时以前） */
+  cancellable: boolean;
+}
+
+/** 预约页与「我的预约」：能不能约、可约的项目与房间、能约哪几天、规则、自己的预约 */
+export interface MpBookingHome {
+  /** 小程序预约开着、有可约的 */
+  open: boolean;
+  /** 没开放、没绑定、会员卡合并或停用时的说明 */
+  notice: string | null;
+  bindVersion: number;
+  bound: boolean;
+  /** 现在能不能新约；不能时 bookNotice 写原因（爽约限制、同时预约数满了） */
+  canBook: boolean;
+  bookNotice: string | null;
+  items: { id: number; name: string; minutes: number }[];
+  spaces: { id: number; name: string }[];
+  /** 派对房等能约的时长（分钟） */
+  durations: number[];
+  /** 能约的营业日：今天到最远几天后 */
+  dates: string[];
+  rules: {
+    /** 每人同时最多几个没到店的（MP34） */
+    maxOpen: number;
+    /** 开始前多少分钟以前可以自己取消 */
+    cancelLeadMinutes: number;
+    /** 开始前多少分钟还没确认的自动取消（MP35） */
+    confirmLeadMinutes: number;
+    /** 过了开始多少分钟没到店记爽约（MP37） */
+    noShowMinutes: number;
+  };
+  bookings: MpBookingView[];
+}
+
+/** 一个可约的时段 */
+export interface MpBookingSlot {
+  startsAt: string;
+  endsAt: string;
+  /** 能约几位（预约技师「不指定」时空着的人数；房间 0 或 1） */
+  free: number;
+  /** 预约技师：这个时段空着的技师（只给技师号，不给名字） */
+  technicians: { id: number; techNo: string }[];
+}
+
+/** 预约、取消的结果 */
+export interface MpBookingDone {
+  booking: MpBookingView;
+  /** 同一个编号重提：返回第一次的结果 */
+  replayed: boolean;
+}
+
+/** 预约、取消的结果不确定时确认作废：已经办了返回那一张；还没有就登记作废（原请求之后到达也不办） */
+export type MpBookingAbandonResult = { status: 'done'; action: 'create' | 'cancel'; booking: MpBookingView } | { status: 'abandoned' };
+
+// ── 后台：小程序预约（权限 mp.booking）──
+
+export interface MpBookingAdminOp {
+  id: number;
+  createdAt: string;
+  action: 'create' | 'cancel';
+  memberId: number;
+  memberName: string;
+  bookingId: number;
+  bookingNo: string;
+  title: string;
+  startsAt: string;
+  status: MpBookingStatus;
+}
+
+export interface MpBookingAdminData {
+  rules: MpBookingRules;
+  /** 需要技师的项目（启用的） */
+  items: { id: number; name: string; minutes: number; open: boolean }[];
+  /** 开单即占用的房间（启用、可售的） */
+  spaces: { id: number; name: string; code: string; open: boolean }[];
+  /** 主线「预约」的规则（在后台「预约」里改）：给店主看一眼 */
+  bookingRules: { openTime: string; closeTime: string; slotMinutes: number; maxDaysAhead: number; mpMaxOpen: number; confirmLeadMinutes: number; mpCancelLeadMinutes: number };
+  /** 小程序来的、还待门店确认的 */
+  pending: number;
+  /** 最近 50 次小程序的预约、取消 */
+  recent: MpBookingAdminOp[];
 }

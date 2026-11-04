@@ -33,7 +33,8 @@ Page({
   },
 
   onShow() {
-    if (this.data.state !== 'claimed') this.load();
+    // 领到了的停在结果页；正在领（手机号验证的弹窗刚关掉、切到聊天再回来）的等它回来
+    if (this.data.state !== 'claimed' && !this.data.busy) this.load();
   },
 
   async load() {
@@ -42,9 +43,15 @@ Page({
       return;
     }
     // 上次领取时结果不确定：先请门店系统确认，确认之前不能再领
-    if (readClaimPending().state !== 'none') {
+    const pend = readClaimPending();
+    if (pend.state !== 'none') {
       const outcome = await resolveClaimPending();
-      if (outcome && this.after(outcome)) return;
+      // 上次领的是另一份邀请、已经领到了：告诉顾客一声，这一页照常显示这一份
+      if (outcome && outcome.kind === 'claimed' && outcome.claimed.code !== this.data.code) {
+        wx.showToast({ title: '你之前领的另一份邀请已经领到了', icon: 'none' });
+      } else if (outcome && this.after(outcome)) {
+        return;
+      }
     }
     try {
       const v = await member<MpInviteView>('GET', '/v1/invites/' + this.data.code);
@@ -95,6 +102,10 @@ Page({
     }
     if (out.kind === 'abandoned') {
       wx.showToast({ title: '上次没有领到，可以重新领', icon: 'none' });
+      return false;
+    }
+    if (out.kind === 'earlier') {
+      wx.showModal({ title: '这一份没有领', content: out.message, showCancel: false });
       return false;
     }
     if (out.code === 'NAME_REQUIRED') {

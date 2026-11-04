@@ -7,12 +7,14 @@
 //   · 点「下单」前先把这次的操作编号存在手机上并读回核对，存不了就不发请求；
 //   · 下了、或门店系统明确拒绝才删；结果不确定时保留，马上请门店系统「确认作废」这个编号：已经下了回那一单；
 //     还没有就登记作废，原来那次请求之后即使到达也不下。以这个回答为准；连作废都发不出去时保留，确认之前不能再下；
-//   · 手机上的记录读不出来不当作没有：不能下，提示稍后再试。
+//   · 手机上的记录读不出来不当作没有：不能下，提示稍后再试；
+//   · 请求还在发（页面回到前台时）不去确认作废它；点「下单」时手机上还有上一单没确认的，先确认上一单、告诉顾客结果，这一单不下
+//     （独立审查 3b/3c 的 P2：原来把上一单的结果当成这一单的，清掉了购物车）。
 
 import type { MpFoodAbandonResult, MpFoodBill, MpFoodDish, MpFoodMenu, MpFoodOrdered } from '../../../src/shared/mp';
 import { isApiError, member, messageOf } from './api';
 import { price, yuan } from './format';
-import { clearStored, readStored, saveStored, uncertain } from './pending-store';
+import { beginFlight, clearStored, endFlight, inFlight, readStored, saveStored, uncertain } from './pending-store';
 
 // ── 桌码 ──
 
@@ -201,7 +203,9 @@ export type OrderOutcome =
   /** 手机上的记录读不出来：不知道有没有没确认的，先不能下 */
   | { kind: 'unreadable' }
   /** 还确认不了（多半是断网）：记录保留，网络好了再确认 */
-  | { kind: 'pending'; message: string };
+  | { kind: 'pending'; message: string }
+  /** 点「下单」时手机上还有上一单没确认的：确认了上一单（message 写结果），这一单没有下，购物车留着 */
+  | { kind: 'earlier'; message: string };
 
 export type OrderPendingRead = { state: 'none' } | { state: 'pending'; clientKey: string } | { state: 'unreadable' };
 
@@ -217,6 +221,8 @@ export async function resolveOrderPending(): Promise<OrderOutcome | null> {
   const r0 = readOrderPending();
   if (r0.state === 'none') return null;
   if (r0.state === 'unreadable') return { kind: 'unreadable' };
+  // 这一单还在发（页面刚回到前台）：不去作废它，等它回来
+  if (inFlight(r0.clientKey)) return { kind: 'pending', message: '这一单还在提交，请稍候再点「再确认一次」' };
   try {
     const r = await member<MpFoodAbandonResult>('POST', '/v1/food/orders/abandon', { clientKey: r0.clientKey });
     clearStored(ORDER_KEY);
@@ -242,10 +248,20 @@ export interface OrderBody {
 export async function sendOrder(body: OrderBody, clientKey: string): Promise<OrderOutcome> {
   const before = readOrderPending();
   if (before.state === 'unreadable') return { kind: 'unreadable' };
-  if (before.state === 'pending') return (await resolveOrderPending()) || { kind: 'pending', message: '' };
+  if (before.state === 'pending') {
+    // 上一单还没确认：先确认上一单，告诉顾客结果；这一单不下（购物车留着，顾客看了再点）
+    const earlier = await resolveOrderPending();
+    if (!earlier || earlier.kind === 'abandoned') return { kind: 'earlier', message: '上一单没有下成；这一单还没下，请再点一次「下单」' };
+    if (earlier.kind === 'ordered') {
+      const o = earlier.ordered;
+      return { kind: 'earlier', message: '上一单已经下好了（' + (o.orderNo ? '出品单 ' + o.orderNo + '，' : '') + yuan(o.total) + '）；这一单还没下，看一下「我的账单」，要的话再点一次「下单」' };
+    }
+    return earlier;
+  }
   if (!saveStored(ORDER_KEY, { clientKey, at: Date.now() })) {
     return { kind: 'rejected', code: 'PENDING_STORE_FAILED', message: '手机存储空间不够，这一单没有下，请清理微信的存储空间后再试' };
   }
+  beginFlight(clientKey);
   try {
     const req: Record<string, unknown> = { clientKey, items: body.items, expectedTotal: body.expectedTotal, bindVersion: body.bindVersion };
     if (body.table) req.table = body.table;
@@ -257,6 +273,10 @@ export async function sendOrder(body: OrderBody, clientKey: string): Promise<Ord
       clearStored(ORDER_KEY);
       return { kind: 'rejected', code: e.code, message: e.message };
     }
+    // 请求回来了、结果不确定：先拿掉「正在发」，再确认作废
+    endFlight(clientKey);
     return (await resolveOrderPending()) || { kind: 'pending', message: messageOf(e) };
+  } finally {
+    endFlight(clientKey);
   }
 }

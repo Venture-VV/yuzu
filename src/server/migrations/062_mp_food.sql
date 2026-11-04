@@ -4,14 +4,16 @@
 --      下单的操作编号唯一：同一个编号重提返回这一单；结果不确定时「确认作废」查的也是它。只追加，不能改、不能删（触发器兜底）。
 --      不存微信标识：按绑定记录找（解绑满 3 年清除时一并清掉，不用另管）。
 --   ② mp_op_fences 加一类 mp_food：点单的结果不确定时确认作废这个编号（与绑定、领券、邀请一样只认同一个微信）。
--- 只建新表、只给小程序线自己的作废登记加一类；只用外键引用会员、绑定记录与来访（下单时主线已经锁住这次来访，外键检查不另等）。
+-- 只建新表、只给小程序线自己的作废登记加一类；用外键引用绑定记录与来访（下单时主线已经锁住这次来访、绑定在小程序线的锁里，
+-- 外键检查不另等）。会员不用外键（独立审查 3b/3c 的 P3）：记下这一单时主线已经写了实时位置，AGENTS.md 要求之后不再等别的业务锁，
+-- 外键检查却要给会员一行加共享锁、会等充值、每天的会员处理这类锁住会员的事务；会员就是这条绑定的会员（同一个事务里取的）。
 -- 062 登记给小程序线（ROADMAP 第 7 节；主线预留 051–060，小程序线第三期之后从 061 起）。
 
 CREATE TABLE mp_food_orders (
   id          bigserial PRIMARY KEY,
   client_key  uuid NOT NULL UNIQUE,
   binding_id  bigint NOT NULL REFERENCES mp_bindings (id),
-  member_id   bigint NOT NULL REFERENCES members (id),
+  member_id   bigint NOT NULL,
   visit_id    bigint NOT NULL REFERENCES visits (id),
   tag_code    text NOT NULL,
   -- 厨房出品单号（主线的出品单；没有进厨房的菜时为空，小程序只能点进厨房的菜，正常不会为空）

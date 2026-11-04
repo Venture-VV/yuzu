@@ -9,6 +9,7 @@ import { notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { getMember } from '../members';
 import { abandonBannerCreate, createBanner, lookupBannerOp, mpAdminData, saveItemIntro, saveMpImage, saveMpRules, saveStore, updateBanner } from './admin';
+import { bookingMpAdminData, saveBookingMpRules } from './bookings';
 import { couponAdminData, saveCouponRules } from './coupon-center';
 import { foodAdminData, saveFoodRules } from './food';
 import { memberBindings, resolveMemberCode, unbindMember } from './member';
@@ -41,7 +42,7 @@ export function registerMpStaffRoutes(app: FastifyInstance, deps: Deps) {
 
   // 后台「小程序」：维护内容要 mp.content；只管解绑的（值班经理）也能打开看
   const content = guard('mp.content');
-  app.get('/api/admin/mp', { preHandler: guardAny('mp.content', 'mp.unbind', 'mp.recharge', 'mp.coupon', 'mp.reminder', 'mp.invite', 'mp.food') }, async () => mpAdminData(sql));
+  app.get('/api/admin/mp', { preHandler: guardAny('mp.content', 'mp.unbind', 'mp.recharge', 'mp.coupon', 'mp.reminder', 'mp.invite', 'mp.food', 'mp.booking') }, async () => mpAdminData(sql));
   app.put('/api/admin/mp/rules', { preHandler: content }, async (req) => saveMpRules(deps, req.body, ctxOf(req)));
   app.put('/api/admin/mp/stores/:code', { preHandler: content }, async (req) => saveStore(deps, req.params, req.body, ctxOf(req)));
   app.post('/api/admin/mp/images', { preHandler: content, bodyLimit: 1_600_000 }, async (req, reply) => {
@@ -95,4 +96,8 @@ export function registerMpStaffRoutes(app: FastifyInstance, deps: Deps) {
   const food = guard('mp.food');
   app.get('/api/admin/mp/food', { preHandler: food }, async () => foodAdminData(deps));
   app.put('/api/admin/mp/food/rules', { preHandler: food }, async (req) => saveFoodRules(deps, req.body, ctxOf(req)));
+  // 预约（第三期 3d）：开关、小程序可约的项目与房间，最近的小程序预约（mp.booking：店主、店总）
+  const booking = guard('mp.booking');
+  app.get('/api/admin/mp/bookings', { preHandler: booking }, async () => bookingMpAdminData(deps));
+  app.put('/api/admin/mp/bookings/rules', { preHandler: booking }, async (req) => saveBookingMpRules(deps, req.body, ctxOf(req)));
 }

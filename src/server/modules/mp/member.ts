@@ -44,7 +44,7 @@ import { loadSettings } from '../settings';
 import { activePay } from './pay';
 import { mpToday } from './public';
 import { couponCenterOpen } from './coupon-center';
-import { foodOpenOf, loadInviteRules, loadRechargeRules } from './rules';
+import { bookingOpenOf, foodOpenOf, loadInviteRules, loadRechargeRules } from './rules';
 
 /** 网关验证过的小程序用户 */
 export function openidOf(req: FastifyRequest): string {
@@ -185,7 +185,7 @@ export async function getMe(deps: Deps, openid: string): Promise<MpMe> {
   const [m] = await deps.sql<{ memberNo: string; name: string; status: string; principalBalance: number; bonusBalance: number; mergedIntoId: number | null }[]>`
     SELECT member_no, name, status, principal_balance, bonus_balance, merged_into_id FROM members WHERE id = ${b.memberId}`;
   if (!m) throw notFound('会员不存在');
-  const [info, rules, coupons, settings, rechargeRules, couponOpen, inviteRules, foodOpen] = await Promise.all([
+  const [info, rules, coupons, settings, rechargeRules, couponOpen, inviteRules, foodOpen, bookingOpen] = await Promise.all([
     memberGradeInfo(deps.sql, b.memberId, today),
     loadMembershipRules(deps.sql),
     memberCoupons(deps.sql, b.memberId, today),
@@ -194,6 +194,7 @@ export async function getMe(deps: Deps, openid: string): Promise<MpMe> {
     couponCenterOpen(deps.sql),
     loadInviteRules(deps.sql),
     foodOpenOf(deps.sql),
+    bookingOpenOf(deps.sql),
   ]);
   const { grade, tier, cycleEnd } = info.state;
   const g: MpGrade = {
@@ -230,6 +231,8 @@ export async function getMe(deps: Deps, openid: string): Promise<MpMe> {
       inviteOpen: inviteRules.enabled,
       // 扫码点餐（第三期 3c）开着：「我的」页显示「点餐」「我的账单」（能不能点到点餐页再看：要有在店手牌）
       foodOpen,
+      // 小程序预约（第三期 3d）开着、有可约的：「我的」页显示「预约」
+      bookingOpen,
     },
   };
 }

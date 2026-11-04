@@ -174,14 +174,17 @@ export async function createInvite(deps: Deps, openid: string, raw: unknown): Pr
     await lockInviter(tx, openid);
     await lockOpenidShared(tx, openid);
     const state = await bindingStateOf(tx, openid);
+    // 同一个编号重提先查（独立审查 3b/3c 的 P3）：发出去了、回答路上丢了，之后绑定又变过的，原样重提照样回那个码
+    // （码在那位会员的邀请里、占着本月的次数，不能说成没发出）；只认同一个微信发的
+    const [prev] = await tx<(InviteRow & { bindingOpenid: string | null })[]>`
+      SELECT i.*, b.openid AS binding_openid FROM mp_invites i JOIN mp_bindings b ON b.id = i.inviter_binding_id WHERE i.client_key = ${input.clientKey}`;
+    if (prev) {
+      if (prev.bindingOpenid !== openid) throw conflict('CLIENT_KEY_REUSED', '这次邀请的编号已经用过，请重新点');
+      return { code: prev.code, label: prev.label, expiresAt: new Date(prev.expiresAt).toISOString(), replayed: true };
+    }
     if (!state.binding) throw new AppError(403, 'MP_NOT_BOUND', '请先绑定会员');
     if (state.version !== input.bindVersion) throw conflict('BIND_STALE', '会员绑定刚变过，这次没有发出邀请，请刷新后再点');
     const { id: bindingId, memberId } = state.binding;
-    const [prev] = await tx<InviteRow[]>`SELECT * FROM mp_invites WHERE client_key = ${input.clientKey}`;
-    if (prev) {
-      if (Number(prev.inviterBindingId) !== bindingId) throw conflict('CLIENT_KEY_REUSED', '这次邀请的编号已经用过，请重新点');
-      return { code: prev.code, label: prev.label, expiresAt: new Date(prev.expiresAt).toISOString(), replayed: true };
-    }
     if (!(await loadInviteRules(tx)).enabled) throw new AppError(403, 'MP_INVITE_DISABLED', '邀请好友还没开放');
     const problem = await memberProblem(tx, memberId);
     if (problem) throw unprocessable('MEMBER_UNAVAILABLE', problem);

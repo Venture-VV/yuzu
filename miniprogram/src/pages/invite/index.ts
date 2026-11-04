@@ -35,8 +35,10 @@ Page({
 
   async load() {
     // 上次生成邀请码时结果不确定：原样重提一次（同一个编号只出一个码）
-    const retried = await retryCreate();
-    if (retried && retried.kind === 'rejected') wx.showToast({ title: retried.message, icon: 'none' });
+    if (!this.data.busy) {
+      const retried = await retryCreate();
+      if (retried && retried.kind === 'rejected') wx.showToast({ title: retried.message, icon: 'none' });
+    }
     try {
       const h = await member<MpInviteHome>('GET', '/v1/invites');
       this.bindVersion = h.bindVersion;

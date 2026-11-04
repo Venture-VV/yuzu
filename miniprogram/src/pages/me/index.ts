@@ -10,6 +10,10 @@ import type { CardView } from '../../utils/member-card';
 import { loadReminders, remindButton, remindHint, remindTap, retryPendingReminders } from '../../utils/reminders';
 import type { ReminderTarget } from '../../utils/reminders';
 import { uuid } from '../../utils/uuid';
+import { readStored } from '../../utils/pending-store';
+
+/** 模拟微信（开发版）换人之前要确认完的「结果待确认」记录（绑定的另外处理） */
+const MOCK_PENDING_KEYS = ['tq_recharge_pending', 'tq_coupon_pending', 'tq_reminder_pending', 'tq_invite_create_pending', 'tq_invite_claim_pending', 'tq_food_order_pending', 'tq_booking_pending'];
 
 const NO_REMIND = { show: false, set: false, text: '' };
 
@@ -46,8 +50,8 @@ Page({
   },
 
   onShow() {
-    // 每次进来都读最新的余额与券
-    this.load();
+    // 每次进来都读最新的余额与券；正在绑定（手机号验证的弹窗刚关掉）的等它回来
+    if (!this.data.binding) this.load();
   },
 
   onPullDownRefresh() {
@@ -194,6 +198,16 @@ Page({
   },
 
   onMockSwitch() {
+    // 别的「结果待确认」也属于原来那个模拟微信：换了以后门店系统认不出这些编号，会当成没办（独立审查 3b/3c 的 P3），没确认完不能换
+    const left = MOCK_PENDING_KEYS.filter((k) => readStored(k).state !== 'none');
+    if (left.length) {
+      wx.showModal({
+        title: '先确认完再换',
+        content: '这个模拟微信还有没确认的操作（充值、领券、提醒、邀请、点餐或预约）。请先打开那一页点「再确认一次」，确认完再换一个微信。',
+        showCancel: false,
+      });
+      return;
+    }
     // 待确认的绑定属于原来那个模拟微信：换了就不再替它确认
     clearBindPending();
     this.setData({ mockUser: switchMockUser(), state: 'loading', card: null });
@@ -218,6 +232,10 @@ Page({
   },
   onInvite() {
     wx.navigateTo({ url: '/pages/invite/index' });
+  },
+
+  onBookings() {
+    wx.navigateTo({ url: '/pages/bookings/index' });
   },
 
   onFood() {

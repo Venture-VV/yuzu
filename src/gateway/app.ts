@@ -10,6 +10,7 @@
 //   · 到期提醒（第三期 3a）：/v1/reminders 带会话转发；每隔一会儿向门店取待发的订阅消息、发、回报（src/gateway/reminders.ts）。
 //   · 邀请好友（第三期 3b）：/v1/invites…；好友领取先用手机号快速验证的 code 换手机号，再转给 yuzu（与绑定一样）。
 //   · 扫码点餐（第三期 3c）：/v1/food…；桌码的签名在 yuzu 核对（密钥不在网关），下单挂在顾客自己的手牌账单上。
+//   · 预约（第三期 3d）：/v1/bookings…；可约时段、预约、取消都在 yuzu 算与办，网关只转发。
 // 网关不存会员、余额、券、订单；yuzu 返回的错误文字面向顾客，原样转给小程序。
 
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
@@ -72,8 +73,9 @@ const CouponClaim = z.object({
 /** 设一条到期提醒（第三期 3a）：顾客在微信的弹窗里同意以后；门店系统核对模板、绑定版本号与要提醒的东西 */
 const ReminderConsent = z.object({
   clientKey: z.uuid('操作编号不正确'),
-  kind: z.enum(['coupon', 'membership', 'grace', 'bonus'], '提醒的种类不对'),
+  kind: z.enum(['coupon', 'membership', 'grace', 'bonus', 'booking'], '提醒的种类不对'),
   couponCode: z.string().regex(/^[2-9A-HJ-NP-Z]{12}$/, '券码不对').optional(),
+  bookingId: z.number().int().positive().optional(),
   targetDate: z.iso.date('到期日不对').optional(),
   templateId: z.string().regex(/^[A-Za-z0-9_-]{10,64}$/, '模板编号不对'),
   bindVersion: z.number('请刷新后再设提醒').int().min(0),
@@ -106,6 +108,28 @@ const FoodOrder = z.object({
   expectedTotal: z.number('请刷新后再下单').int().nonnegative(),
   bindVersion: z.number('请刷新后再下单').int().min(0),
 });
+/** 预约（第三期 3d）：可约时段的查询、预约、取消（门店系统核对可约的、时段、绑定版本号） */
+const BookingSlotQuery = z.object({
+  kind: z.enum(['technician', 'space'], '请选择预约什么'),
+  date: z.iso.date('日期不对'),
+  itemId: z.coerce.number().int().positive().optional(),
+  spaceId: z.coerce.number().int().positive().optional(),
+  durationMinutes: z.coerce.number().int().min(30).max(720).optional(),
+});
+const BookingCreate = z.object({
+  clientKey: z.uuid('操作编号不正确'),
+  kind: z.enum(['technician', 'space'], '请选择预约什么'),
+  itemId: z.number().int().positive().optional(),
+  technicianId: z.number().int().positive().nullable().optional(),
+  spaceId: z.number().int().positive().optional(),
+  startsAt: z.iso.datetime({ offset: true, message: '请选择时段' }),
+  durationMinutes: z.number().int().min(30).max(720).optional(),
+  guests: z.number().int().min(1).max(30).optional(),
+  note: z.string().max(100, '备注最多 100 字').optional(),
+  bindVersion: z.number('请刷新后再预约').int().min(0),
+});
+const BookingCancel = z.object({ clientKey: z.uuid('操作编号不正确'), bindVersion: z.number('请刷新后再取消').int().min(0) });
+const BookingId = z.object({ id: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER) });
 /** 微信支付的到账通知：报文主体原样转（门店系统要用原文验签），最多 8 KB */
 const NOTIFY_MAX_BYTES = 8 * 1024;
 
@@ -141,6 +165,9 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
   const inviteLimit = new RateLimiter(20);
   // 扫码点餐：下单、确认作废每个微信每分钟 20 次
   const foodLimit = new RateLimiter(20);
+  // 预约：预约、取消、确认作废每个微信每分钟 20 次；查时段每分钟 60 次（换日子、换项目都要查）
+  const bookingLimit = new RateLimiter(20);
+  const slotLimit = new RateLimiter(60);
 
   app.addHook('onRequest', async (req) => {
     if (!perIp.take(`ip:${req.ip}`)) throw TOO_MANY();
@@ -400,6 +427,35 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
     return member(reply, 'POST', '/api/mp/food/orders/abandon', openid, parse(AbandonInput, req.body));
   });
   app.get('/v1/food/bill', async (req, reply) => member(reply, 'GET', '/api/mp/food/bill', openidOf(req)));
+
+  // 预约（第三期 3d）：预约页与我的预约、可约时段、预约、结果不确定时确认作废、自己取消
+  app.get('/v1/bookings', async (req, reply) => member(reply, 'GET', '/api/mp/bookings', openidOf(req)));
+  app.get('/v1/bookings/slots', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!slotLimit.take(`slot:${openid}`)) throw TOO_MANY();
+    const q = parse(BookingSlotQuery, req.query);
+    const qs = new URLSearchParams({ kind: q.kind, date: q.date });
+    if (q.itemId !== undefined) qs.set('itemId', String(q.itemId));
+    if (q.spaceId !== undefined) qs.set('spaceId', String(q.spaceId));
+    if (q.durationMinutes !== undefined) qs.set('durationMinutes', String(q.durationMinutes));
+    return member(reply, 'GET', `/api/mp/bookings/slots?${qs.toString()}`, openid);
+  });
+  app.post('/v1/bookings', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!bookingLimit.take(`booking:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/bookings', openid, parse(BookingCreate, req.body));
+  });
+  app.post('/v1/bookings/abandon', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!bookingLimit.take(`booking:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/bookings/abandon', openid, parse(AbandonInput, req.body));
+  });
+  app.post('/v1/bookings/:id/cancel', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!bookingLimit.take(`booking:${openid}`)) throw TOO_MANY();
+    const { id } = parse(BookingId, req.params);
+    return member(reply, 'POST', `/api/mp/bookings/${id}/cancel`, openid, parse(BookingCancel, req.body));
+  });
 
   // 到期提醒（第三期 3a）：能设哪几种、已经设了哪些；设一条（顾客在微信的弹窗里同意以后）
   app.get('/v1/reminders', async (req, reply) => member(reply, 'GET', '/api/mp/reminders', openidOf(req)));
