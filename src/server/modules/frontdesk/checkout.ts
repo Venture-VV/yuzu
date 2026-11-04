@@ -284,7 +284,7 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
       sessions: await openSessionsOf(tx, ids),
       dishes: await unservedDishesOf(tx, ids),
       rooms: await openRoomsOf(tx, ids),
-      usages: await openUsagesOf(tx, ids),
+      usages: await openUsagesOf(tx, ids, at),
     };
   });
 }

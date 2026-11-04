@@ -31,8 +31,11 @@ export async function couponLines(db: Db, billIds: number[]): Promise<CouponLine
                 WHEN l.source = 'room' THEN '客房'
                 WHEN l.item_id IS NULL THEN '其他（手动金额、赔偿等）'
                 ELSE coalesce(nullif(si.category, ''), '未分类') END AS category,
-           l.item_id, l.ticket_type_id, l.name, l.unit_price, l.quantity, l.amount
+           l.item_id, l.ticket_type_id, l.name, l.unit_price, l.quantity, l.amount,
+           -- 派对房等的房费（v0.7.28）：营业日是周一至周四的，包房房费折扣也打（M44）
+           (uc.line_id IS NOT NULL AND extract(isodow FROM l.business_date) BETWEEN 1 AND 4) AS party_room_day
     FROM bill_lines l LEFT JOIN service_items si ON si.id = l.item_id
+    LEFT JOIN space_usage_charges uc ON uc.line_id = l.id AND uc.kind = 'fee'
     WHERE l.bill_id IN ${db(billIds)} AND l.status = 'active'
     ORDER BY l.id`;
 }

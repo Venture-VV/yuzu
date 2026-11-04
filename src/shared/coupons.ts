@@ -86,6 +86,8 @@ export interface CouponLine {
   unitPrice: number;
   quantity: number;
   amount: number;
+  /** 派对房等的房费明细（v0.7.28），营业日是周一至周四：会员的包房房费折扣（QY-011）也打（M44） */
+  partyRoomDay?: boolean;
 }
 
 export type CouponEvaluation =

@@ -32,6 +32,7 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Input, Notice, Select, Skeleton, Textarea } from '../../components/ui';
 import { PrintButton } from '../print/PrintButton';
 import { CloseStayById } from '../rooms/CloseStayDialog';
+import { EndUsageById } from '../rooms/UsageDialogs';
 import { SHIFT_ERRORS, shiftKeys, ShiftGate, StartShiftForm, useShiftReady } from '../shift/ShiftGate';
 import { ZoneChip } from './parts';
 import { BackfillNotice, backfillBody, backfillSummary, useBackfill } from './backfill';
@@ -146,7 +147,9 @@ export function CheckoutDialog({
   const { remaining, problems } = pay;
   // 客房（S7）：还住着客房的客人要先退房（补齐房费挂到手牌账单、退押金），房费才都在账单上
   const roomsOpen = (preview.data?.rooms ?? []).length > 0;
-  const ready = total !== null && remaining === 0 && pay.ok && !preview.isFetching && shiftReady.ready && !backfillBlocked && !roomsOpen;
+  // 计费的派对房等（v0.7.28）：先「结束使用」把房费挂上再结账
+  const usagesUncharged = (preview.data?.usages ?? []).some((u) => u.priced);
+  const ready = total !== null && remaining === 0 && pay.ok && !preview.isFetching && shiftReady.ready && !backfillBlocked && !roomsOpen && !usagesUncharged;
 
   const submit = async () => {
     if (!ready || !p) return;
@@ -292,7 +295,7 @@ export function CheckoutDialog({
               {(p.sessions ?? []).length > 0 && <SessionsNotice sessions={p.sessions} />}
               {(p.dishes ?? []).length > 0 && <DishesNotice dishes={p.dishes} />}
               {(p.rooms ?? []).length > 0 && <RoomsNotice rooms={p.rooms!} onClosed={() => void preview.refetch()} />}
-              {(p.usages ?? []).length > 0 && <UsagesNotice usages={p.usages!} />}
+              {(p.usages ?? []).length > 0 && <UsagesNotice usages={p.usages!} onEnded={() => void preview.refetch()} />}
               <ReviewTable preview={p} amounts={amounts} ticketPick={ticketPick} onPick={(id, t) => edit(() => setTicketPick((x) => ({ ...x, [id]: t })))} />
             </>
           )
@@ -390,20 +393,61 @@ function RoomsNotice({ rooms, onClosed }: { rooms: NonNullable<CheckoutPreview['
 }
 
 /** 餐饮（S5）：客人点的菜还没上齐时提醒（不拦结账；结账后厨房屏标出「客人已结账」） */
-/** 派对房等（v0.7.19）：客人开着的使用单结账后自动结束（房间变空闲）；场次费等要先挂到手牌账单上 */
-function UsagesNotice({ usages }: { usages: NonNullable<CheckoutPreview['usages']> }) {
+/**
+ * 派对房等（v0.7.19）：没设计费的使用单结账后自动结束（房间变空闲），场次费等要先挂到手牌账单上；
+ * 设了计费的（v0.7.28）要先「结束使用」把房费挂上，重新核对后一起结账
+ */
+function UsagesNotice({ usages, onEnded }: { usages: NonNullable<CheckoutPreview['usages']>; onEnded: () => void }) {
+  const can = useCan();
+  const [ending, setEnding] = useState<number | null>(null);
+  const priced = usages.filter((u) => u.priced);
+  const plain = usages.filter((u) => !u.priced);
   return (
-    <div data-testid="checkout-usages">
-      <Notice tone="info" title="有客人开着派对房等的使用单：结账后自动结束">
-        <ul className="mt-1 space-y-0.5">
-          {usages.map((u) => (
-            <li key={u.usageId}>
-              <span className="num font-semibold">{u.tagCode}</span> · <span className="num font-semibold">{u.spaceCode}</span> {u.spaceName}（{u.usageNo}）
-            </li>
-          ))}
-        </ul>
-        <p className="mt-1">场次费请先挂到手牌账单上，再一起结账。</p>
-      </Notice>
+    <div className="space-y-2" data-testid="checkout-usages">
+      {priced.length > 0 && (
+        <Notice tone="warning" title="有客人还在用按时长收费的房间：先结束使用，房费挂到手牌账单上再一起结账">
+          <ul className="mt-1 space-y-1">
+            {priced.map((u) => (
+              <li key={u.usageId} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>
+                  <span className="num font-semibold">{u.tagCode}</span> · <span className="num font-semibold">{u.spaceCode}</span> {u.spaceName}
+                  {u.minutes !== undefined && `，已用 ${minutesText(u.minutes)}`}
+                  {u.estimate != null && `，房费约 ${formatYuan(u.estimate)}`}
+                </span>
+                {can('room.operate') ? (
+                  <Button size="sm" variant="secondary" icon={<LogOut className="size-3.5" />} onClick={() => setEnding(u.usageId)} data-testid={`checkout-usage-end-${u.spaceCode}`}>
+                    结束使用并挂房费
+                  </Button>
+                ) : (
+                  <span className="text-[12px] text-ink-3">请有客房权限的同事结束使用</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Notice>
+      )}
+      {plain.length > 0 && (
+        <Notice tone="info" title="有客人开着派对房等的使用单：结账后自动结束">
+          <ul className="mt-1 space-y-0.5">
+            {plain.map((u) => (
+              <li key={u.usageId}>
+                <span className="num font-semibold">{u.tagCode}</span> · <span className="num font-semibold">{u.spaceCode}</span> {u.spaceName}（{u.usageNo}）
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1">场次费请先挂到手牌账单上，再一起结账。</p>
+        </Notice>
+      )}
+      {ending !== null && (
+        <EndUsageById
+          usageId={ending}
+          onClose={() => setEnding(null)}
+          onDone={() => {
+            setEnding(null);
+            onEnded();
+          }}
+        />
+      )}
     </div>
   );
 }

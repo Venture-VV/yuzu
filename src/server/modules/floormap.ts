@@ -10,7 +10,7 @@ import type { FloorMapData, FloorMapSession, FloorMapSpace, FloorMapUsage } from
 import type { Db } from '../db';
 import { guardAny } from '../auth/guard';
 import type { Deps } from '../lib/context';
-import { loadUsageRules } from './usages';
+import { loadUsageRules, usagePricingViews } from './usages';
 import { outlineRev } from './floorplans';
 
 export async function floorMapData(db: Db): Promise<FloorMapData> {
@@ -30,17 +30,21 @@ export async function floorMapData(db: Db): Promise<FloorMapData> {
     JOIN hand_tags h ON h.id = v.tag_id JOIN service_items i ON i.id = s.item_id
     WHERE s.space_id IS NOT NULL AND s.status IN ('waiting', 'serving') AND v.status = 'open'
     ORDER BY s.space_id, (s.status = 'serving') DESC, coalesce(s.started_at, s.created_at), s.id`;
-  const usages = await db<(Omit<FloorMapUsage, 'openedAt'> & { openedAt: string })[]>`
-    SELECT u.id, u.usage_no, u.space_id, u.visit_id, h.code AS tag_code, u.guests, u.note, u.opened_at, st.display_name AS opened_by_name
+  const usages = await db<(Omit<FloorMapUsage, 'openedAt' | 'pricing'> & { openedAt: string; businessType: string })[]>`
+    SELECT u.id, u.usage_no, u.space_id, u.visit_id, h.code AS tag_code, u.guests, u.note, u.opened_at, st.display_name AS opened_by_name,
+           sp.business_type
     FROM space_usages u JOIN visits v ON v.id = u.visit_id JOIN hand_tags h ON h.id = v.tag_id JOIN staff st ON st.id = u.opened_by
+    JOIN spaces sp ON sp.id = u.space_id
     WHERE u.status = 'open'
     ORDER BY u.space_id`;
+  const usageRules = await loadUsageRules(db);
+  const pricingViews = await usagePricingViews(db, usageRules);
   return {
     serverTime: new Date(now!.now).toISOString(),
     floorplanBatchId: batch?.id ?? null,
     floorplanRev: await outlineRev(db, batch ? Number(batch.id) : null),
-    usageTypes: (await loadUsageRules(db)).businessTypes,
-    usages: usages.map((u) => ({ ...u, openedAt: new Date(u.openedAt).toISOString() })),
+    usageTypes: usageRules.businessTypes,
+    usages: usages.map(({ businessType, ...u }) => ({ ...u, openedAt: new Date(u.openedAt).toISOString(), pricing: pricingViews.get(businessType) ?? null })),
     spaces,
     sessions: sessions.map((s) => ({
       ...s,

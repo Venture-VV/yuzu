@@ -224,11 +224,12 @@ export function discountDayMatches(d: { weekdays: readonly number[]; monthDays: 
 }
 
 /** 适用的明细：客房房费按部门「客房」、门票按「门票」（与部门营业额快照同一口径），整张账单是全部明细 */
-export function discountLines<L extends { category: string }>(target: DiscountTarget, lines: readonly L[]): L[] {
+export function discountLines<L extends { category: string; partyRoomDay?: boolean }>(target: DiscountTarget, lines: readonly L[]): L[] {
   // 同行优惠按同行客人的明细，口径与本人的门票、整张账单一样
   if (target === 'bill' || target === 'companion_bill') return [...lines];
-  const category = target === 'room' ? '客房' : '门票';
-  return lines.filter((l) => l.category === category);
+  // 包房房费折扣：客房房费，加上派对房等的房费（营业日是周一至周四的，M44；v0.7.28）
+  if (target === 'room') return lines.filter((l) => l.category === '客房' || l.partyRoomDay === true);
+  return lines.filter((l) => l.category === '门票');
 }
 
 /**

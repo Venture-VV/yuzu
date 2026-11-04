@@ -94,6 +94,17 @@ export interface FloorMapUsage {
   note: string;
   openedAt: string;
   openedByName: string;
+  /** 这个业态的计费（v0.7.28；没设计费为空）：结束使用时按时长挂房费，页面据此显示「到现在约多少」 */
+  pricing?: UsagePricingView | null;
+}
+
+/** 页面估算房费用的计费（每小时价、开台费按此刻的价目） */
+export interface UsagePricingView {
+  itemName: string;
+  hourPrice: number;
+  minMinutes: number;
+  stepMinutes: number;
+  openFee: number;
 }
 
 export interface FloorMapData {

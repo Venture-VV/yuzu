@@ -293,7 +293,11 @@ export interface CheckoutPreview {
   /** 还在住的客房（S7）：要先退房（补齐房费挂到手牌账单、退押金）才能结账 */
   rooms?: { stayId: number; tagCode: string; roomNo: string; stayNo: string }[];
   /** 派对房等开着的使用单（v0.7.19）：结账后自动结束 */
-  usages?: { usageId: number; usageNo: string; tagCode: string; spaceCode: string; spaceName: string }[];
+  /**
+   * 开着的派对房等使用单：没设计费的结账后自动结束；设了计费的（v0.7.28，priced）要先「结束使用」挂房费才能结账，
+   * minutes 是到此刻用了多久，estimate 是按此刻算的房费与开台费（结束时按结束那一刻再算）
+   */
+  usages?: { usageId: number; usageNo: string; tagCode: string; spaceCode: string; spaceName: string; priced?: boolean; minutes?: number; estimate?: number | null }[];
 }
 
 /** 反结账退现金可以选的钱箱（v0.7.1，跨钱箱退款）：此刻当班的班次；original 原单收款的班次，mine 反结账人自己的班次 */
