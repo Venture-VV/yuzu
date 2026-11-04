@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { BookingBoard, BookingDetail, BookingSlot } from '../src/shared/bookings';
 import type { Deps } from '../src/server/lib/context';
-import { bookingChecks, cancelBookingFromMp, createBookingFromMp, memberBookings, mpBookingBan, sweepBookings, type MpBookingInput } from '../src/server/modules/bookings';
+import { bookingChecks, cancelBookingFromMp, createBookingFromMp, memberBookings, monthDayTime, mpBookingBan, sweepBookings, type MpBookingInput } from '../src/server/modules/bookings';
 import { signInAll } from '../src/server/modules/clockroom';
 import { postCharges } from '../src/server/modules/frontdesk/bills';
 import { api, setup, type TestContext } from './helpers';
@@ -202,6 +202,34 @@ describe('小程序（3d）', () => {
     expect(await mpBookingBan(ctx.sql, m)).toMatchObject({ banned: true, noShows: 3 });
     const s = (await slots({ kind: 'technician', date: tomorrow, itemId })).filter((x) => x.free > 0);
     expect((await errorOf(mp({ memberId: m, kind: 'technician', itemId, startsAt: s[0]!.startsAt, claimKey: 'ns-x' }))).code).toBe('BOOKING_BANNED');
+  });
+
+  it('爽约限制的提示按门店时间写到哪天几点：北京时间 0–8 点记的爽约不会早一天（小程序线 #55 的独立审查）', async () => {
+    expect(monthDayTime(new Date('2026-12-03T18:30:00Z'), 'Asia/Shanghai')).toBe('12月4日 02:30');
+    expect(monthDayTime(new Date('2026-12-03T16:00:00Z'), 'Asia/Shanghai')).toBe('12月4日 00:00');
+    const m = await member('凌晨爽约会员');
+    for (let i = 0; i < 3; i += 1) {
+      const s = (await slots({ kind: 'space', date: tomorrow, spaceId, durationMinutes: 120 })).filter((x) => x.free > 0);
+      const b = await mp({ memberId: m, kind: 'space', spaceId, startsAt: s[s.length - 1 - i]!.startsAt, durationMinutes: 120, claimKey: `early-ns-${i}` });
+      expect((await change(b.booking.id, { action: 'no_show' })).body.status).toBe('no_show');
+    }
+    // 三次爽约都挪到北京时间 11-04 02:30（UTC 还是 11-03）：限制到 30 天后的北京时间 12-04 02:30，UTC 是 12-03
+    await ctx.sql`UPDATE bookings SET no_show_at = ${new Date('2026-11-03T18:30:00Z')} WHERE member_id = ${m}`;
+    const s = (await slots({ kind: 'space', date: tomorrow, spaceId, durationMinutes: 120 })).filter((x) => x.free > 0);
+    const refused = await errorOf(mp({ memberId: m, kind: 'space', spaceId, startsAt: s[0]!.startsAt, durationMinutes: 120, claimKey: 'early-x', at: new Date('2026-11-04T18:30:00Z') }));
+    expect(refused.code).toBe('BOOKING_BANNED');
+    expect(refused.message).toContain('12月4日 02:30 以后才能在小程序预约');
+  });
+
+  it('开始前「自动取消的提前分钟」（默认 60）以内的时段不收（BOOKING_TOO_SOON），免得约上马上被自动取消；早一点的照常「待确认」', async () => {
+    const day = new Date(Date.parse(`${tomorrow}T12:00:00Z`) + 4 * 86_400_000).toISOString().slice(0, 10);
+    const m = await member('临时约的会员');
+    const s = (await slots({ kind: 'technician', date: day, itemId })).filter((x) => x.free > 0);
+    const start = Date.parse(s[2]!.startsAt);
+    const soon = await errorOf(mp({ memberId: m, kind: 'technician', itemId, startsAt: s[2]!.startsAt, claimKey: 'soon-1', at: new Date(start - 30 * 60_000) }));
+    expect(soon.code).toBe('BOOKING_TOO_SOON');
+    const ok = await mp({ memberId: m, kind: 'technician', itemId, startsAt: s[2]!.startsAt, claimKey: 'soon-2', at: new Date(start - 3 * 3_600_000) });
+    expect(ok.booking).toMatchObject({ status: 'pending', source: 'mp' });
   });
 
   it('「我的预约」带指定技师的工号 techNo（不指定的为 null；小程序线 2026-11-04 要的）', async () => {
