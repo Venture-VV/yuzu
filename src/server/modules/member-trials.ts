@@ -32,8 +32,7 @@ import { asGrade, gradeLabel, type Grade, type MembershipRules, type Tier } from
 import {
   GIFT_BENEFIT_CODE,
   INVITE_MIN_GRADE,
-  inviteeWindowFrom,
-  shiftMonths,
+  inviteeAgainFrom,
   TRIAL_KIND_LABELS,
   TRIAL_KINDS,
   TRIAL_STATUS_LABELS,
@@ -265,10 +264,12 @@ async function inviteeFacts(db: Db, memberId: number, own: { grade: Grade; tier:
   const [active] = await db<{ grade: number; tier: number; endsOn: string }[]>`
     SELECT grade, tier, ends_on FROM member_trials
     WHERE member_id = ${memberId} AND status = 'active' AND starts_on <= ${date}::date AND ends_on >= ${date}::date`;
-  const [recent] = await db<{ startsOn: string }[]>`
+  // 最近一次（撤销的不算）：它开始那天加上受邀间隔之前都不能再次——与页面写的「X 起才能再次」同一个日期（月底不多等一天）
+  const [last] = await db<{ startsOn: string }[]>`
     SELECT starts_on FROM member_trials
-    WHERE member_id = ${memberId} AND status <> 'cancelled' AND starts_on >= ${inviteeWindowFrom(date, rules.trialInviteeMonths)}::date
+    WHERE member_id = ${memberId} AND status <> 'cancelled'
     ORDER BY starts_on DESC LIMIT 1`;
+  const recent = last && date < inviteeAgainFrom(last.startsOn, rules.trialInviteeMonths) ? last : null;
   return {
     id: memberId,
     memberNo: m.memberNo,
@@ -288,7 +289,7 @@ function inviteeProblem(rules: MembershipRules, inviterId: number, invitee: Invi
   if (invitee.status !== 'active') return '这位会员已停用';
   if (invitee.active) return `已经在体验中（${invitee.active.label}，至 ${invitee.active.endsOn}），同一时间只能有一个`;
   if (invitee.recent) {
-    return `${rules.trialInviteeMonths} 个月内已被邀请或赠送过（${invitee.recent.startsOn} 开始），${shiftMonths(invitee.recent.startsOn, rules.trialInviteeMonths)} 起才能再次`;
+    return `${rules.trialInviteeMonths} 个月内已被邀请或赠送过（${invitee.recent.startsOn} 开始），${inviteeAgainFrom(invitee.recent.startsOn, rules.trialInviteeMonths)} 起才能再次`;
   }
   if (invitee.grade >= option.grade) return `这位会员现在是「${invitee.label}」，不低于体验的「${option.label}」`;
   return null;

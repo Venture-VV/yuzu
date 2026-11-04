@@ -269,6 +269,12 @@ describe('结账时自动多给（宽限 15 分钟、在店 12 小时 40 分）'
     expect(mine.items.find((i) => i.code === 'QY-004')).toBeUndefined();
     // 已结账的来访按结账单记下的延迟显示（快照），暂缓之后也不变：与当时收的门票一致
     expect((await visitOf(settledWithExtension)).ticket).toMatchObject({ segments: 1, amount: 49900, extension: { minutes: 30, code: 'QY-004' } });
+    // 结账里用过的浴票延迟不能再改类别（Codex 评审 24f6862）：暂缓了也一样；改分钟数照常
+    const locked = await editRaw('QY-004', { category: 'info' });
+    expect(locked.status, JSON.stringify(locked.body)).toBe(422);
+    expect(locked.body.error).toMatchObject({ code: 'BENEFIT_CATEGORY_LOCKED' });
+    expect(locked.body.error.message).toContain('次浴票延迟，不能再改类别');
+    expect((await edit('QY-004', { quantity: 45 })).quantity).toBe(45);
     await allChecksOk();
   });
 });

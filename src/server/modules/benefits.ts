@@ -718,6 +718,20 @@ export async function updateBenefit(deps: Deps, id: number, raw: unknown, ctx: O
       const problems = await publishProblems(tx, b, date);
       if (problems.length) throw unprocessable('BENEFIT_NOT_PUBLISHABLE', `这一项已发布，改完要还能发布：${problems.join('；')}（不再提供请先暂缓）`, { problems });
     }
+    // 结账里用过的会员折扣、浴票延迟不能再改类别（Codex 评审 24f6862）：结账单记的是这一项与当时的版本，
+    // 自检按类别核对每一笔会员折扣；改成别的类别，以前的结账单就对不上了（作废的结账单也算）。不再提供请暂缓
+    if (b.category !== cur.category && (cur.category === 'discount' || cur.category === 'extension')) {
+      const [used] = await tx<{ n: number }[]>`
+        SELECT (SELECT count(*) FROM checkout_payments WHERE benefit_id = ${id})::int
+             + (SELECT count(*) FROM checkout_bills WHERE ticket_extension_benefit_id = ${id})::int AS n`;
+      if (used!.n) {
+        throw unprocessable(
+          'BENEFIT_CATEGORY_LOCKED',
+          `「${cur.code} ${cur.name}」已经在结账里算过 ${used!.n} 次${cur.category === 'discount' ? '会员折扣' : '浴票延迟'}，不能再改类别；不再提供请暂缓`,
+          { field: 'category' },
+        );
+      }
+    }
     const before: Record<string, unknown> = { ...cur };
     // 各档阶数量存成 jsonb，读回来的键顺序不同：按键排序后比
     const changed = FIELDS.filter((k) => !sameJson(before[k], b[k]));

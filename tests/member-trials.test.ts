@@ -11,9 +11,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Benefit, BenefitCatalog, MemberBenefits } from '../src/shared/benefits';
 import { shiftDate } from '../src/shared/labels';
 import { rechargeOutcome, type MemberGradeBadge, type MemberGradeInfo, type MembershipRules } from '../src/shared/membership';
-import { trialEndsOn, type MemberTrials, type TrialOptions, type TrialRow } from '../src/shared/trials';
+import { inviteeAgainFrom, trialEndsOn, type MemberTrials, type TrialOptions, type TrialRow } from '../src/shared/trials';
 import { membershipChecks, runMembershipDaily } from '../src/server/modules/membership';
-import { trialChecks } from '../src/server/modules/member-trials';
+import { trialChecks, trialOptions } from '../src/server/modules/member-trials';
 import { api, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
@@ -242,6 +242,53 @@ describe('受邀人的限制', () => {
     expect(o.invitee).toMatchObject({ exists: true, problems: { invite: expect.stringContaining('12 个月内已被邀请或赠送过') } });
     expect((await create(l3b, { kind: 'invite', phone: phoneOf(old) })).body.error.code).toBe('TRIAL_INVITEE');
     await allChecksOk();
+  });
+});
+
+// 受邀间隔（Codex 评审 24f6862）：发起时的核对与页面写的「X 起才能再次」用同一个日期——上一次开始那天加 N 个月，
+// 月底落在那个月的最后一天。原来按「今天减 N 个月」反推，月底开始的要比写的日期多等一天
+describe('受邀间隔：上一次开始那天加 N 个月起才能再次', () => {
+  it('月底落在那个月的最后一天；平常的日子是同一天', () => {
+    expect(inviteeAgainFrom('2027-01-31', 1)).toBe('2027-02-28');
+    expect(inviteeAgainFrom('2028-01-31', 1)).toBe('2028-02-29');
+    expect(inviteeAgainFrom('2027-03-31', 1)).toBe('2027-04-30');
+    expect(inviteeAgainFrom('2028-02-29', 12)).toBe('2029-02-28');
+    expect(inviteeAgainFrom('2027-01-15', 1)).toBe('2027-02-15');
+  });
+
+  it('间隔 1 个月、上一次在月底开始：页面写的那一天就能再次邀请，前一天仍被拒并写明那一天', async () => {
+    // 今天以后第一个「下个月没有这一天」的月底（例如 10 月 31 日，下个月只到 30 日），那天开始过一次体验（已到期）
+    const monthEnd = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+    let start = today;
+    for (;;) {
+      const [y, m] = start.split('-').map(Number) as [number, number];
+      if (Number(monthEnd(y, m + 1).slice(8)) < Number(monthEnd(y, m).slice(8))) {
+        start = monthEnd(y, m);
+        break;
+      }
+      start = shiftDate(monthEnd(y, m), 1);
+    }
+    const [sy, sm] = start.split('-').map(Number) as [number, number];
+    const againOn = monthEnd(sy, sm + 1);
+    const inviter = await member('月底邀请人', 30000);
+    const friend = await member('月底受邀', 0);
+    await ctx.sql`
+      INSERT INTO member_trials (member_id, kind, grade, tier, starts_on, ends_on, inviter_id, business_date, staff_id, client_key, request_hash, status, ended_on)
+      VALUES (${friend}, 'invite', 2, 0, ${start}, ${shiftDate(start, 6)}, ${inviter}, ${start}, ${ctx.ownerId}, ${randomUUID()}, ${'b'.repeat(64)},
+              'expired', ${shiftDate(start, 7)})`;
+    const saved = await api(ctx.app, ctx.owner, 'PUT', '/api/membership/rules', { ...(await rules()), trialInviteeMonths: 1 });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    try {
+      const before = await trialOptions(ctx.sql, inviter, shiftDate(againOn, -1), phoneOf(friend));
+      expect(before.invite.allowed).toBe(true);
+      expect(before.invitee?.problems.invite).toBe(`1 个月内已被邀请或赠送过（${start} 开始），${againOn} 起才能再次`);
+      const onDay = await trialOptions(ctx.sql, inviter, againOn, phoneOf(friend));
+      expect(onDay.invite.allowed).toBe(true);
+      expect(onDay.invitee?.problems.invite).toBeNull();
+    } finally {
+      const back = await api(ctx.app, ctx.owner, 'PUT', '/api/membership/rules', { ...(await rules()), trialInviteeMonths: 12 });
+      expect(back.status, JSON.stringify(back.body)).toBe(200);
+    }
   });
 });
 

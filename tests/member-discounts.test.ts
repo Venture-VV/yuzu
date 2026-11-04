@@ -348,3 +348,39 @@ describe('会员日、整张账单、按日期', () => {
     expect(duty).toBeTruthy();
   });
 });
+
+// 用过的会员折扣不能再改类别（Codex 评审 24f6862）：结账单记的是这一项与当时的版本，自检按类别核对每一笔会员折扣；
+// 原来改成别的类别以后，以前的结账单（作废的也算）一直对不上，cli check 与备份核验都过不去
+describe('用过的会员折扣不能再改类别', () => {
+  it('QY-011 结账里用过：改成制度说明被拒（发布中、暂缓后都一样），改内容照常；没用过的折扣类照常能改类别；自检仍全部一致', async () => {
+    const [used] = await ctx.sql<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM checkout_payments p JOIN benefits b ON b.id = p.benefit_id WHERE b.code = 'QY-011'`;
+    expect(used!.n).toBeGreaterThan(0);
+    const toCategory = async (code: string, category: Benefit['category']) => {
+      const b = await byCode(code);
+      const { id, version, name, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions } =
+        b;
+      return api(ctx.app, ctx.owner, 'PUT', `/api/benefits/${id}`, {
+        expectedVersion: version,
+        ...{ name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions },
+      });
+    };
+    const published = (await byCode('QY-011')).status;
+    if (published !== 'published') await setStatus('QY-011', 'published');
+    let r = await toCategory('QY-011', 'info');
+    expect(r.status, JSON.stringify(r.body)).toBe(422);
+    expect(r.body.error).toMatchObject({ code: 'BENEFIT_CATEGORY_LOCKED' });
+    expect(r.body.error.message).toContain(`已经在结账里算过 ${used!.n} 次会员折扣`);
+    await setStatus('QY-011', 'paused');
+    r = await toCategory('QY-011', 'service');
+    expect(r.status, JSON.stringify(r.body)).toBe(422);
+    expect((await byCode('QY-011')).category).toBe('discount');
+    // 改类别以外的照常
+    await edit('QY-011', { content: '包房房费折扣（改了说明）' });
+    await setStatus('QY-011', 'published');
+    // 没在结账里用过的折扣类（QY-016 停车折扣，草稿）照常能改类别、改回来
+    expect((await toCategory('QY-016', 'info')).status).toBe(200);
+    expect((await toCategory('QY-016', 'discount')).status).toBe(200);
+    await allChecksOk();
+  });
+});

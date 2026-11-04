@@ -40,8 +40,12 @@ export function trialEndsOn(kind: TrialKind, start: string, inviteDays: number):
   return Number(same.slice(8, 10)) < d ? same : shiftDate(same, -1);
 }
 
-/** 受邀人多少个月内只能被邀请或赠送一次：这一天（含）之后开始的都算 */
-export const inviteeWindowFrom = (today: string, months: number): string => shiftDate(shiftMonths(today, -months), 1);
+/**
+ * 受邀人多少个月内只能被邀请或赠送一次：上一次（撤销的不算）从 startsOn 开始，这一天（含）起才能再次。
+ * 发起时的核对与页面写的「X 起才能再次」用这同一个日期：月底按 shiftMonths 落在那个月的最后一天
+ * （1 个月的间隔、1 月 31 日开始的，2 月 28 日起就能再次；不能用「今天减 N 个月」反推，那样月底会多等一天）
+ */
+export const inviteeAgainFrom = (startsOn: string, months: number): string => shiftMonths(startsOn, months);
 
 /** 一条临时身份 */
 export interface TrialRow {
