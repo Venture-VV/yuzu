@@ -6,7 +6,7 @@
 import postgres from 'postgres';
 import { migrate } from '../src/server/migrate';
 import { createSql } from '../src/server/db';
-import { assertTestDbName, BASE_TEST_DB, templateDbName, testDb, workerDbName } from './test-db';
+import { assertTestDbName, BASE_TEST_DB, dropDatabase, templateDbName, testDb, workerDbName } from './test-db';
 
 export default async function setup() {
   const workers = Number(process.env.TEST_WORKERS) || 1;
@@ -21,7 +21,7 @@ export default async function setup() {
       const [found] = await admin<{ hit: number }[]>`SELECT 1 AS hit FROM pg_database WHERE datname = ${name}`;
       if (!found) await admin.unsafe(`CREATE DATABASE "${name}"`);
     }
-    await admin.unsafe(`DROP DATABASE IF EXISTS "${tpl}" WITH (FORCE)`);
+    await dropDatabase(admin, tpl);
     await admin.unsafe(`CREATE DATABASE "${tpl}"`);
   } finally {
     await admin.end({ timeout: 5 });

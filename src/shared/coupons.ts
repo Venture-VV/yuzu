@@ -88,6 +88,8 @@ export interface CouponLine {
   amount: number;
   /** 派对房等的房费明细（v0.7.28），营业日是周一至周四：会员的包房房费折扣（QY-011）也打（M44） */
   partyRoomDay?: boolean;
+  /** 派对房等的使用单费用（v0.7.28）：房费 fee、开台费 open_fee；不是使用单的费用为 null */
+  usageCharge?: 'fee' | 'open_fee' | null;
 }
 
 export type CouponEvaluation =

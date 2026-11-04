@@ -100,12 +100,16 @@ describe('计费的算法（共用的纯函数）', () => {
     expect(usageFee(10, { minMinutes: 45, stepMinutes: 30 }, 30000)).toEqual({ chargedMinutes: 60, steps: 2, unitPrice: 15000, amount: 30000 });
     // 包房房费折扣：客房房费 + 周一至周四的派对房房费
     const lines = [
-      { id: 1, category: '客房', amount: 100 },
+      { id: 1, category: '客房', amount: 100, usageCharge: null },
       { id: 2, category: '派对房', amount: 200, partyRoomDay: true },
       { id: 3, category: '派对房', amount: 300, partyRoomDay: false },
-      { id: 4, category: '门票', amount: 400 },
+      { id: 4, category: '门票', amount: 400, usageCharge: null },
+      // 使用单的费用只看「房费、周一至周四」，与价目分类无关：分类选了「客房」的周五房费、开台费都不打（测试会话 18d4344 的 P2）
+      { id: 5, category: '客房', amount: 500, usageCharge: 'fee', partyRoomDay: false },
+      { id: 6, category: '客房', amount: 600, usageCharge: 'open_fee', partyRoomDay: false },
+      { id: 7, category: '派对房', amount: 700, usageCharge: 'fee', partyRoomDay: true },
     ] as unknown as CouponLine[];
-    expect(discountLines('room', lines).map((l) => l.id)).toEqual([1, 2]);
+    expect(discountLines('room', lines).map((l) => l.id)).toEqual([1, 2, 7]);
     expect(discountLines('ticket', lines).map((l) => l.id)).toEqual([4]);
   });
 });
@@ -210,5 +214,39 @@ describe('包房房费折扣：派对房只在周一至周四（M44）', () => {
     expect(monday.map((l) => [l.name, l.partyRoomDay])).toEqual([['派对房房费（每 30 分钟）', true]]);
     const friday = await endAt('2026-11-06T04:00:00Z');
     expect(friday.map((l) => [l.name, l.partyRoomDay])).toEqual([['派对房房费（每 30 分钟）', false]]);
+  });
+
+  it('房费、开台费的项目在价目里分类选了「客房」：照样只在周一至周四打房费，开台费不打（测试会话 18d4344 的 P2）', async () => {
+    for (const [name, price] of [
+      ['包房房费（客房分类）', 30000],
+      ['包房开台费（客房分类）', 5000],
+    ] as const) {
+      const r = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name, category: '客房', price });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      item[name] = r.body.items.find((i: { name: string }) => i.name === name).id;
+    }
+    const saved = await rules({
+      pricing: {
+        派对房: { feeItemId: item['派对房房费']!, minMinutes: 60, stepMinutes: 30, openFeeItemId: null },
+        娱乐室: { feeItemId: item['包房房费（客房分类）']!, minMinutes: 60, stepMinutes: 30, openFeeItemId: item['包房开台费（客房分类）']! },
+      },
+    });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    const endAt = async (when: string) => {
+      const g = await enter();
+      const u = await open('X303', g.tagCode);
+      await endUsage(deps, u.id, { clientKey: randomUUID() }, { actor: actor(), at: new Date(when) });
+      return couponLines(ctx.sql, [g.billId]);
+    };
+    // 2026-11-04 中午是周三、2026-11-06 中午是周五
+    const wednesday = await endAt('2026-11-04T04:00:00Z');
+    expect(wednesday.map((l) => [l.category, l.usageCharge, l.partyRoomDay])).toEqual([
+      ['客房', 'fee', true],
+      ['客房', 'open_fee', false],
+    ]);
+    expect(discountLines('room', wednesday).map((l) => l.usageCharge)).toEqual(['fee']);
+    const friday = await endAt('2026-11-06T04:00:00Z');
+    expect(friday.map((l) => l.usageCharge)).toEqual(['fee', 'open_fee']);
+    expect(discountLines('room', friday)).toEqual([]);
   });
 });

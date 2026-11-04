@@ -10,6 +10,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { BookingBoard, BookingDetail, BookingSlot } from '../src/shared/bookings';
 import type { Deps } from '../src/server/lib/context';
 import { bookingChecks, cancelBookingFromMp, createBookingFromMp, memberBookings, mpBookingBan, sweepBookings, type MpBookingInput } from '../src/server/modules/bookings';
+import { signInAll } from '../src/server/modules/clockroom';
+import { postCharges } from '../src/server/modules/frontdesk/bills';
 import { api, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
@@ -240,6 +242,71 @@ describe('每分钟的自动处理', () => {
     await createStaff(ctx.sql, { username: 'bo', displayName: '后勤', role: 'backoffice', password: PASSWORD, mustChangePassword: false });
     const bo = await login(ctx.app, 'bo');
     expect((await api(ctx.app, bo, 'GET', `/api/bookings?date=${tomorrow}`)).status).toBe(403);
+  });
+});
+
+describe('前台派钟、加钟与技师预约不重叠（测试会话 ded1958 的 P2）', () => {
+  it('这位技师有预约的时段派钟、加钟拒绝（TECHNICIAN_BOOKED）；别的技师、预约之后、约了这位技师的会员本人不拦；到店之后不再占时段', async () => {
+    const owner = { id: ctx.ownerId, username: 'owner', displayName: '测试店主', role: 'owner' as const, duties: [], mustChangePassword: false };
+    // 后天北京 13:00（05:00Z）乙有 60 分钟的预约；钟房按那一天上牌
+    const day = new Date(Date.parse(`${tomorrow}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+    const startsAt = `${day}T05:00:00.000Z`;
+    const booked = await create({ kind: 'technician', itemId, technicianId: tech['B2'], startsAt });
+    expect(booked.status, JSON.stringify(booked.body)).toBe(200);
+    // 派钟要先开技师功能（预约本身不要）
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/technicians/rules', { enabled: true })).status).toBe(200);
+    await signInAll(deps, { actor: owner, at: new Date(`${day}T02:00:00Z`) });
+    const visitOf = async (memberId?: number) => {
+      tagNo += 1;
+      const code = `Y${String(tagNo).padStart(3, '0')}`;
+      const r = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: code, zone: 'male', ...(memberId ? { memberId } : {}) }] });
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      return r.body.visits[0].id as number;
+    };
+    const dispatchAt = (visitId: number, technicianId: number, at: string, quantity = 1) =>
+      postCharges(
+        deps,
+        visitId,
+        { clientKey: randomUUID(), lines: [{ itemId, quantity, tier: 'standard', technicianId, callType: 'designated' }], expectedTotal: 16800 * quantity },
+        { actor: owner, at: new Date(at) },
+        { session: { dispatch: { startNow: true } } },
+      );
+    // 04:30 派乙 60 分钟：和 05:00 的预约重叠，拒绝，什么都不写
+    const v1 = await visitOf();
+    const refused = await errorOf(dispatchAt(v1, tech['B2']!, `${day}T04:30:00Z`));
+    expect(refused).toMatchObject({ code: 'TECHNICIAN_BOOKED' });
+    expect(refused.message).toContain(booked.body.bookingNo);
+    const [n] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM technician_sessions WHERE visit_id = ${v1}`;
+    expect(n!.n).toBe(0);
+    // 别的技师照常；03:00 派乙到 04:00 不重叠；加钟到 05:00 不重叠，再加一钟到 06:00 和预约重叠，拒绝
+    await dispatchAt(v1, tech['B1']!, `${day}T04:30:00Z`);
+    const v2 = await visitOf();
+    await dispatchAt(v2, tech['B2']!, `${day}T03:00:00Z`);
+    const [s] = await ctx.sql<{ id: number }[]>`SELECT id FROM technician_sessions WHERE visit_id = ${v2}`;
+    const extend = (at: string) =>
+      postCharges(
+        deps,
+        v2,
+        { clientKey: randomUUID(), lines: [{ itemId, quantity: 1, tier: 'standard', technicianId: tech['B2']!, callType: 'designated' }], expectedTotal: 16800 },
+        { actor: owner, at: new Date(at) },
+        { session: { extendId: Number(s!.id) } },
+      );
+    await extend(`${day}T03:50:00Z`);
+    expect(await errorOf(extend(`${day}T04:50:00Z`))).toMatchObject({ code: 'TECHNICIAN_BOOKED' });
+    // 约了乙的会员本人：派给乙不拦
+    const m = await member('约乙的会员');
+    const mine = await create({ kind: 'technician', itemId, technicianId: tech['B2'], startsAt: `${day}T07:00:00.000Z`, memberId: m });
+    expect(mine.status, JSON.stringify(mine.body)).toBe(200);
+    const v3 = await visitOf(m);
+    await dispatchAt(v3, tech['B2']!, `${day}T06:45:00Z`);
+    // 到店之后预约不再占时段：05:00 那张点到店以后，别的客人这时派给乙不再因为它拒绝
+    const v4 = await visitOf();
+    const [t4] = await ctx.sql<{ code: string }[]>`SELECT h.code FROM visits v JOIN hand_tags h ON h.id = v.tag_id WHERE v.id = ${v4}`;
+    const arrived = await change(booked.body.id, { action: 'arrive', tagCode: t4!.code });
+    expect(arrived.status, JSON.stringify(arrived.body)).toBe(200);
+    await dispatchAt(v4, tech['B2']!, `${day}T04:58:00Z`);
+    const [n4] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM technician_sessions WHERE visit_id = ${v4}`;
+    expect(n4!.n).toBe(1);
   });
 });
 

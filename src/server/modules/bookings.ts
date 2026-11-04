@@ -39,7 +39,6 @@ import { guard, guardAny } from '../auth/guard';
 import { writeAudit, type AuditAction } from '../lib/audit';
 import { ctxOf, type Deps, type OpContext } from '../lib/context';
 import { badRequest, conflict, notFound, unprocessable } from '../lib/errors';
-import { lockOpKey } from '../lib/fences';
 import { hashRequest } from '../lib/idempotency';
 import { saveRuleSetting } from '../lib/rule-settings';
 import { idParam, parse } from '../lib/validate';
@@ -51,6 +50,7 @@ import { loadPricedItems } from './pricing';
 import { loadUsageRules, openUsageTx } from './usages';
 import { ClaimKey, lockClaim, mpContext, saveClaim } from './mp-entries';
 import { randomUUID } from 'node:crypto';
+import { lockTechnicianBookings } from './booking-guard';
 
 // ───────────────────────── 规则 ─────────────────────────
 
@@ -196,13 +196,14 @@ async function technicianBusy(db: Db, ids: number[], from: number, to: number, e
     WHERE technician_id IN ${db(ids)} AND status IN ${db(ACTIVE_BOOKING_STATUSES)} AND starts_at < ${new Date(to)} AND ends_at > ${new Date(from)}
       AND id <> ${excludeBookingId ?? 0}`;
   for (const b of bookings) out.get(Number(b.technicianId))?.push({ start: Date.parse(b.startsAt), end: Date.parse(b.endsAt) });
-  const sessions = await db<{ technicianId: number; startedAt: string | null; minutes: number; clocks: number }[]>`
-    SELECT s.technician_id, s.started_at, s.minutes, s.clocks FROM technician_sessions s
+  // 钟单的 minutes 已经是全部钟数的分钟数（加钟时一起加），不再乘钟数
+  const sessions = await db<{ technicianId: number; startedAt: string | null; minutes: number }[]>`
+    SELECT s.technician_id, s.started_at, s.minutes FROM technician_sessions s
     WHERE s.technician_id IN ${db(ids)} AND s.status IN ('waiting', 'serving')`;
   const now = Date.now();
   for (const s of sessions) {
     const start = s.startedAt ? Date.parse(s.startedAt) : now;
-    out.get(Number(s.technicianId))?.push({ start, end: start + Number(s.minutes) * Number(s.clocks) * 60_000 });
+    out.get(Number(s.technicianId))?.push({ start, end: start + Number(s.minutes) * 60_000 });
   }
   return out;
 }
@@ -356,7 +357,8 @@ interface CreateArgs {
   strictGrid: boolean;
 }
 
-const lockTechnicianBookings = (tx: Tx) => lockOpKey(tx, 'booking:technicians');
+// 与前台建钟单、加钟同一把锁（booking-guard.ts）
+
 
 /**
  * 核对时段、取时段的锁、算出结束时刻（新建、改时间共用）。返回结束时刻与客房的保留时刻
