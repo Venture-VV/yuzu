@@ -15,6 +15,7 @@ import { activePay } from './pay';
 import { closeUnboundOrders } from './recharge';
 import { rechargeAdminData, resolveHeldOrder, runRecon, saveRechargeRules } from './recharge-admin';
 import { handleRefund, retryRefund } from './refund';
+import { reminderAdminData, saveReminderRules } from './reminders';
 
 const CodeParam = z.object({ code: z.string().trim().max(32) });
 
@@ -38,7 +39,7 @@ export function registerMpStaffRoutes(app: FastifyInstance, deps: Deps) {
 
   // 后台「小程序」：维护内容要 mp.content；只管解绑的（值班经理）也能打开看
   const content = guard('mp.content');
-  app.get('/api/admin/mp', { preHandler: guardAny('mp.content', 'mp.unbind', 'mp.recharge', 'mp.coupon') }, async () => mpAdminData(sql));
+  app.get('/api/admin/mp', { preHandler: guardAny('mp.content', 'mp.unbind', 'mp.recharge', 'mp.coupon', 'mp.reminder') }, async () => mpAdminData(sql));
   app.put('/api/admin/mp/rules', { preHandler: content }, async (req) => saveMpRules(deps, req.body, ctxOf(req)));
   app.put('/api/admin/mp/stores/:code', { preHandler: content }, async (req) => saveStore(deps, req.params, req.body, ctxOf(req)));
   app.post('/api/admin/mp/images', { preHandler: content, bodyLimit: 1_600_000 }, async (req, reply) => {
@@ -80,4 +81,8 @@ export function registerMpStaffRoutes(app: FastifyInstance, deps: Deps) {
   const coupon = guard('mp.coupon');
   app.get('/api/admin/mp/coupons', { preHandler: coupon }, async () => couponAdminData(deps));
   app.put('/api/admin/mp/coupons/rules', { preHandler: coupon }, async (req) => saveCouponRules(deps, req.body, ctxOf(req)));
+  // 到期提醒（第三期 3a）：开关、三种订阅消息模板，最近的消息（mp.reminder：店主、店总）
+  const reminder = guard('mp.reminder');
+  app.get('/api/admin/mp/reminders', { preHandler: reminder }, async () => reminderAdminData(deps));
+  app.put('/api/admin/mp/reminders/rules', { preHandler: reminder }, async (req) => saveReminderRules(deps, req.body, ctxOf(req)));
 }

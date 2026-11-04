@@ -15,6 +15,7 @@ import { MP_RECHARGE_ORDER_NO } from '@shared/mp';
 import type { GatewayConfig } from './config';
 import { ShowCache } from './cache';
 import { RateLimiter } from './ratelimit';
+import { sendDueReminders } from './reminders';
 import { issueSession, verifySession } from './session';
 import { UpstreamDown, type Upstream, type UpstreamResponse } from './upstream';
 import { WechatError, type WechatClient } from './wechat';
@@ -65,6 +66,15 @@ const CouponClaim = z.object({
   /** 顾客点领取时看到的绑定状态版本号：门店系统比对，换绑过的拒绝 */
   bindVersion: z.number('请刷新领券中心后再领').int().min(0),
 });
+/** 设一条到期提醒（第三期 3a）：顾客在微信的弹窗里同意以后；门店系统核对模板、绑定版本号与要提醒的东西 */
+const ReminderConsent = z.object({
+  clientKey: z.uuid('操作编号不正确'),
+  kind: z.enum(['coupon', 'membership', 'grace', 'bonus'], '提醒的种类不对'),
+  couponCode: z.string().regex(/^[2-9A-HJ-NP-Z]{12}$/, '券码不对').optional(),
+  targetDate: z.iso.date('到期日不对').optional(),
+  templateId: z.string().regex(/^[A-Za-z0-9_-]{10,64}$/, '模板编号不对'),
+  bindVersion: z.number('请刷新后再设提醒').int().min(0),
+});
 /** 微信支付的到账通知：报文主体原样转（门店系统要用原文验签），最多 8 KB */
 const NOTIFY_MAX_BYTES = 8 * 1024;
 
@@ -73,6 +83,8 @@ export interface GatewayDeps {
   wechat: WechatClient;
   upstream: Upstream;
   cache?: ShowCache;
+  /** 到期提醒多少毫秒取一次（不给按配置；测试给 0 不开，直接调 sendDueReminders） */
+  reminderMs?: number;
 }
 
 export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> {
@@ -92,6 +104,8 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
   const rechargeQueryLimit = new RateLimiter(60);
   // 线上领券：领取、确认作废每个微信每分钟 20 次（不限领的券也一样，MP_COUPONS.md 第 2 节）
   const couponLimit = new RateLimiter(20);
+  // 到期提醒：设提醒每个微信每分钟 20 次
+  const reminderLimit = new RateLimiter(20);
 
   app.addHook('onRequest', async (req) => {
     if (!perIp.take(`ip:${req.ip}`)) throw TOO_MANY();
@@ -293,6 +307,14 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
     return member(reply, 'POST', '/api/mp/coupon-claims/abandon', openid, parse(AbandonInput, req.body));
   });
 
+  // 到期提醒（第三期 3a）：能设哪几种、已经设了哪些；设一条（顾客在微信的弹窗里同意以后）
+  app.get('/v1/reminders', async (req, reply) => member(reply, 'GET', '/api/mp/reminders', openidOf(req)));
+  app.post('/v1/reminders', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!reminderLimit.take(`reminder:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/reminders', openid, parse(ReminderConsent, req.body));
+  });
+
   // 微信支付的到账通知：不要会话、不解析内容，报文主体与四个签名头原样转给门店系统（Base64 包一层，一个字节不改）。
   // 门店收下了（入账、记成已付款待处理）回 204；门店没收下、连不上回失败，微信按它的节奏重发
   await app.register(async (scope) => {
@@ -322,5 +344,31 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
     });
   });
 
+  // 到期提醒的发送：每隔一会儿向门店取一批待发的消息、发、回报（上一轮没完不开下一轮）
+  const reminderMs = deps.reminderMs ?? config.reminderSeconds * 1000;
+  if (reminderMs > 0) {
+    let timer: NodeJS.Timeout | undefined;
+    let running = false;
+    const memo = {};
+    app.addHook('onReady', async () => {
+      timer = setInterval(() => {
+        if (running) return;
+        running = true;
+        sendDueReminders({ upstream, wechat, state: config.subscribeState, memo })
+          .then((t) => {
+            if (t && t.leased) {
+              app.log.info(
+                `到期提醒：取了 ${t.leased} 条，发出 ${t.sent}、没发出 ${t.failed}、再试 ${t.retry}（其中没轮到发 ${t.notStarted}）、结果不明 ${t.unknown}${t.reportLost ? '；回报没送到门店' : ''}`,
+              );
+            }
+          })
+          .catch((error: unknown) => app.log.error({ err: error }, '到期提醒发送出错，下一轮再试'))
+          .finally(() => {
+            running = false;
+          });
+      }, reminderMs);
+    });
+    app.addHook('onClose', async () => clearInterval(timer));
+  }
   return app;
 }

@@ -88,6 +88,11 @@
         <text class="mc-text">{{card.bar.text}}，{{card.bar.hint}}</text>
       </view>
       <text wx:if="{{card.cycle}}" class="mc-muted">{{card.cycle}}</text>
+      <view wx:if="{{remindMember.show}}" class="mc-remind-row">
+        <view class="mc-remind {{remindMember.set ? 'on' : ''}}" data-kind="membership" bindtap="onRemind">{{remindMember.text}}</view>
+        <view wx:if="{{remindGrace.show}}" class="mc-remind {{remindGrace.set ? 'on' : ''}}" data-kind="grace" bindtap="onRemind">{{remindGrace.text}}</view>
+      </view>
+      <text wx:if="{{remindHint}}" class="mc-muted">{{remindHint}}</text>
     </view>
 
     <view class="bal">

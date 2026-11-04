@@ -284,6 +284,8 @@ export interface MpAdminData {
   rechargeRules: MpRechargeRules;
   /** 领券中心的设置（第二期 2c）：同上 */
   couponRules: MpCouponRules;
+  /** 到期提醒的设置（第三期 3a）：同上 */
+  reminderRules: MpReminderRules;
   stores: MpStoreAdmin[];
   banners: MpBannerAdmin[];
   items: MpItemIntroAdmin[];
@@ -664,4 +666,160 @@ export interface MpCouponAdminData {
   stats: { templateId: number; total: number; last7Days: number }[];
   /** 最近 50 条领取记录 */
   recent: MpCouponClaimAdmin[];
+}
+
+// ── 到期提醒（第三期 3a，docs/MP_PHASE3.md 第 1 节，MP28、MP29）──
+
+/** coupon 券快到期、membership 会籍快到期、grace 进补充期当天、bonus 赠金快到期 */
+export type MpReminderKind = 'coupon' | 'membership' | 'grace' | 'bonus';
+/** 模板分三种：会籍与补充期用同一个模板（会籍的模板） */
+export type MpReminderTemplateKind = 'coupon' | 'membership' | 'bonus';
+export const MP_REMINDER_TEMPLATE_KINDS: MpReminderTemplateKind[] = ['coupon', 'membership', 'bonus'];
+export const mpReminderTemplateKind = (k: MpReminderKind): MpReminderTemplateKind => (k === 'grace' ? 'membership' : k);
+
+/**
+ * 模板的一个字段填什么：name 券名 / 档阶 / 「赠金」，date 到期日，amount 赠金金额 / 保级还差的储值消费，
+ * tip 一句提示（「到前台结账时可用」等），store 门店名
+ */
+export type MpReminderSource = 'name' | 'date' | 'amount' | 'tip' | 'store';
+export const MP_REMINDER_SOURCES: MpReminderSource[] = ['name', 'date', 'amount', 'tip', 'store'];
+
+/** 一个订阅消息模板：店主在微信公众平台「订阅消息」从公共模板库选好，把模板编号与每个字段（thing1、date2…）填进后台 */
+export interface MpReminderTemplate {
+  templateId: string;
+  /** 模板详情里的 {{thing1.DATA}} 填 thing1：按字段名的前缀排成微信要的格式（thing 最多 20 个字、date 写成「2026年11月20日」…） */
+  fields: { key: string; source: MpReminderSource }[];
+}
+
+/**
+ * 到期提醒的设置（settings 的 mp_reminder_rules，后台「微信小程序」→「到期提醒」，权限 mp.reminder）。
+ * 默认关、没有模板；没填模板的那种提醒，小程序里不出现「提醒我」。
+ */
+export interface MpReminderRules {
+  enabled: boolean;
+  coupon: MpReminderTemplate | null;
+  membership: MpReminderTemplate | null;
+  bonus: MpReminderTemplate | null;
+  /** 每保存一次加一；后台保存时带上看到的版本号 */
+  version: number;
+}
+export const DEFAULT_MP_REMINDER_RULES: MpReminderRules = { enabled: false, coupon: null, membership: null, bonus: null, version: 0 };
+export const MP_REMINDER_RULES_KEY = 'mp_reminder_rules';
+/** 提前几天提醒（MP28 默认）：券 3 天，会籍、赠金 7 天；补充期在进补充期当天 */
+export const MP_REMINDER_LEAD_DAYS: Record<'coupon' | 'membership' | 'bonus', number> = { coupon: 3, membership: 7, bonus: 7 };
+/** 几点之间发（MP29 默认，北京时间）：10:00 起、20:00 前；晚上到点的推到第二天上午 */
+export const MP_REMINDER_SEND_HOURS = { from: 10, to: 20 } as const;
+/** 模板的字段名：微信的几种格式加编号 */
+export const MP_REMINDER_FIELD_KEY = /^(thing|short_thing|date|time|amount|number|phrase|character_string|letter|symbol|name)([1-9][0-9]?)$/;
+export const MP_REMINDER_FIELDS_MAX = 5;
+/** 模板编号：微信给的是 40 多位字母、数字、- 与 _ */
+export const MP_REMINDER_TEMPLATE_ID = /^[A-Za-z0-9_-]{10,64}$/;
+
+/** 这条绑定已经设好的一条提醒（「已设提醒」） */
+export interface MpReminderSet {
+  kind: MpReminderKind;
+  /** 券快到期：哪张券（券码） */
+  couponCode: string | null;
+  targetDate: string;
+  dueDate: string;
+  /** waiting 还没到发的时候、sent 已发、done 不用发了或没发出 */
+  state: 'waiting' | 'sent' | 'done';
+}
+
+/** 小程序打开券、会员卡、余额页时取：能设哪几种提醒、已经设了哪些、提醒要带的到期日 */
+export interface MpReminderOptions {
+  /** 到期提醒开着、这个微信绑定了会员 */
+  open: boolean;
+  /** 这个微信此刻的绑定状态版本号：设提醒时带上（之后解绑、换绑过的请求门店系统拒绝，BIND_STALE） */
+  bindVersion: number;
+  /** 每种提醒用的模板编号：小程序拿它请顾客同意（wx.requestSubscribeMessage）；没配的为空，不显示「提醒我」 */
+  templates: Record<MpReminderTemplateKind, string | null>;
+  /** 提前几天提醒、几点之间发（给顾客看的说明用） */
+  leadDays: Record<'coupon' | 'membership' | 'bonus', number>;
+  sendHours: { from: number; to: number };
+  set: MpReminderSet[];
+  /** 会籍：周期最后一天（L0 没有）、在不在补充期；设会籍、补充期提醒时带上周期最后一天 */
+  membership: { cycleEnd: string | null; inGrace: boolean; label: string } | null;
+  /**
+   * 最早到期的赠金（没有会到期的赠金为空）：lastDay 是最后能用的那个营业日（到期那天营业日开始时作废），
+   * 与券的有效期到、会籍周期的最后一天同一个口径；设赠金提醒时带上这一天
+   */
+  bonus: { amount: number; lastDay: string } | null;
+}
+
+/** 设一条提醒：顾客在微信的弹窗里同意以后发；同一个编号重提返回同一条（结果不确定时原样重提） */
+export interface MpReminderConsentInput {
+  clientKey: string;
+  kind: MpReminderKind;
+  /** 券快到期：哪张券 */
+  couponCode?: string;
+  /** 会籍、补充期、赠金：页面上显示的到期日（对不上说明刚变过，请顾客刷新） */
+  targetDate?: string;
+  templateId: string;
+  bindVersion: number;
+}
+
+export interface MpReminderConsented {
+  consentId: number;
+  kind: MpReminderKind;
+  targetDate: string;
+  dueDate: string;
+  /** 同一个编号重提，或这样东西之前已经设过这种提醒：返回原来那条，没有再记 */
+  replayed: boolean;
+}
+
+// ── 网关取待发的提醒、回报结果（第三期 3a；只认网关密钥，不带 openid）──
+
+export interface MpReminderLeased {
+  id: number;
+  leaseToken: string;
+  openid: string;
+  templateId: string;
+  page: string;
+  data: Record<string, { value: string }>;
+}
+
+/** 网关取一批的回答：leasedUntil 是这一批的期限，过了它网关不再开始发（剩下的报「再试」）；没有要发的为空 */
+export interface MpReminderLease {
+  messages: MpReminderLeased[];
+  leasedUntil: string | null;
+}
+
+/** 网关发完一条的结果：sent 发出；failed 微信明确拒绝（顾客拒收、模板或字段不对）；retry 没发出去、可以再试；unknown 发了没收到回音 */
+export interface MpReminderReport {
+  id: number;
+  leaseToken: string;
+  outcome: 'sent' | 'failed' | 'retry' | 'unknown';
+  errcode?: number | null;
+  errmsg?: string | null;
+}
+
+// ── 后台：到期提醒（权限 mp.reminder）──
+
+export type MpReminderStatus = 'queued' | 'leased' | 'sent' | 'failed' | 'unknown' | 'skipped';
+
+export interface MpReminderMessageAdmin {
+  id: number;
+  kind: MpReminderKind;
+  memberId: number;
+  memberName: string;
+  targetDate: string;
+  dueDate: string;
+  status: MpReminderStatus;
+  reason: string | null;
+  errcode: number | null;
+  attempts: number;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export interface MpReminderAdminData {
+  rules: MpReminderRules;
+  /** 最近 30 天：同意了多少、各状态的消息多少 */
+  /** waiting：还没到发的那一天的同意；overdue：到了那天还没排成消息的（提醒关着、不在 10:00–20:00、或排期出错） */
+  stats: { consents: number; byStatus: Partial<Record<MpReminderStatus, number>>; waiting: number; overdue: number };
+  /** 网关最近一次来取消息的时间（没来过为空）：太久没来说明网关没开或连不上门店 */
+  lastLeaseAt: string | null;
+  /** 最近 50 条消息 */
+  recent: MpReminderMessageAdmin[];
 }

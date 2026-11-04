@@ -25,7 +25,7 @@ import { saveRuleSetting } from '../../lib/rule-settings';
 import { setTxTimeouts } from '../../lib/tx';
 import { parse } from '../../lib/validate';
 import { loadRechargeRules } from './recharge';
-import { loadCouponRules, loadMpRules } from './rules';
+import { loadCouponRules, loadMpRules, loadReminderRules } from './rules';
 
 type StoreRow = Omit<MpStoreAdmin, 'latitude' | 'longitude'> & { latitude: string | null; longitude: string | null };
 const toStore = (s: StoreRow): MpStoreAdmin => ({ ...s, latitude: s.latitude === null ? null : Number(s.latitude), longitude: s.longitude === null ? null : Number(s.longitude) });
@@ -40,7 +40,15 @@ export async function mpAdminData(db: Db): Promise<MpAdminData> {
     SELECT i.id AS item_id, i.name, i.category, i.active, coalesce(x.intro, '') AS intro, x.image_id, coalesce(x.version, 0) AS version
     FROM service_items i LEFT JOIN mp_item_intros x ON x.item_id = i.id
     ORDER BY i.active DESC, i.sort_order, i.id`;
-  return { rules: await loadMpRules(db), rechargeRules: await loadRechargeRules(db), couponRules: await loadCouponRules(db), stores: stores.map(toStore), banners, items };
+  return {
+    rules: await loadMpRules(db),
+    rechargeRules: await loadRechargeRules(db),
+    couponRules: await loadCouponRules(db),
+    reminderRules: await loadReminderRules(db),
+    stores: stores.map(toStore),
+    banners,
+    items,
+  };
 }
 
 // ── 开关 ──

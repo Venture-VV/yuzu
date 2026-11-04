@@ -15,6 +15,8 @@ import { sweepRechargeOrders } from './recharge';
 import { processRefunds, registerRefundRoute } from './refund';
 import { maybeReconcileYesterday } from './recharge-recon';
 import { registerMpRechargeRoutes } from './recharge-routes';
+import { registerMpReminderRoutes } from './reminder-routes';
+import { planReminders } from './reminders';
 import { registerMpMemberRoutes } from './routes';
 
 const digest = (s: string) => createHash('sha256').update(s, 'utf8').digest();
@@ -24,6 +26,8 @@ export interface MpAppOptions {
   pay?: PayRuntime | null;
   /** 补查、关单的间隔（毫秒，默认每分钟）；0 不开（测试里直接调 sweepRechargeOrders） */
   sweepMs?: number;
+  /** 到期提醒：网关来取时按什么时间算（测试给固定的时间；不给是此刻） */
+  clock?: () => Date;
 }
 
 export async function buildMpApp(sql: Sql, config: AppConfig, opts: MpAppOptions = {}): Promise<FastifyInstance> {
@@ -66,6 +70,8 @@ export async function buildMpApp(sql: Sql, config: AppConfig, opts: MpAppOptions
   registerMpMemberRoutes(app, { sql, config });
   // 线上领券（第二期 2c）
   registerMpCouponRoutes(app, { sql, config });
+  // 到期提醒（第三期 3a）：顾客设提醒；网关取待发的消息、回报结果
+  registerMpReminderRoutes(app, { sql, config }, opts.clock);
 
   // 线上充值（第二期 2a）：微信支付的凭据只在门店 yuzu（MP17）；配错了不开线上充值、写日志，门店系统照常启动
   let pay: PayRuntime | null = null;
@@ -90,8 +96,22 @@ export async function buildMpApp(sql: Sql, config: AppConfig, opts: MpAppOptions
   if (sweepMs > 0) {
     let timer: NodeJS.Timeout | undefined;
     let running = false;
+    let planning = false;
     app.addHook('onReady', async () => {
       timer = setInterval(() => {
+        // 到期提醒（第三期 3a）：到点的同意排成消息、网关没回报的记结果不明；与线上充值的补查互不等
+        if (!planning) {
+          planning = true;
+          planReminders({ sql, config })
+            .then((r) => {
+              if (r.queued || r.skipped || r.unknown) app.log.info(`到期提醒：排了 ${r.queued} 条，不发 ${r.skipped} 条，结果不明 ${r.unknown} 条`);
+              if (r.errors) app.log.error(`到期提醒：${r.errors} 条排期出错，下一分钟再排`);
+            })
+            .catch((error: unknown) => app.log.error({ err: error }, '到期提醒排期出错，下一分钟再排'))
+            .finally(() => {
+              planning = false;
+            });
+        }
         if (running) return;
         running = true;
         sweepRechargeOrders({ sql, config }, pay)

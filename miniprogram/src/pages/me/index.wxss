@@ -300,3 +300,22 @@
   margin-top: 28rpx;
   border-color: var(--wood-4);
 }
+
+/* 到期提醒（第三期 3a）：会籍快到期、进补充期 */
+.mc-remind-row {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 4rpx;
+}
+.mc-remind {
+  margin: 8rpx 12rpx 0 0;
+  padding: 6rpx 18rpx;
+  font-size: 24rpx;
+  color: var(--card-ink);
+  border: 1px solid var(--card-muted);
+  border-radius: 999rpx;
+}
+.mc-remind.on {
+  color: var(--card-muted);
+  border-color: var(--card-track);
+}

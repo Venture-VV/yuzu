@@ -44,8 +44,9 @@ import {
 import { mpAdminKey, PendingUpdates, saveError, updateFailed } from './mpAdminShared';
 import { CouponTab } from './CouponTab';
 import { RechargeTab } from './RechargeTab';
+import { ReminderTab } from './ReminderTab';
 
-type Tab = 'store' | 'banners' | 'items' | 'recharge' | 'coupons' | 'bindings';
+type Tab = 'store' | 'banners' | 'items' | 'recharge' | 'coupons' | 'reminders' | 'bindings';
 const key = mpAdminKey;
 const imageUrl = (id: number) => `/api/admin/mp/images/${id}`;
 
@@ -90,6 +91,7 @@ export function MpAdminSection() {
   const canContent = can('mp.content');
   const canRecharge = can('mp.recharge');
   const canCoupon = can('mp.coupon');
+  const canReminder = can('mp.reminder');
   const q = useQuery({ queryKey: key, queryFn: () => api.get<MpAdminData>('/api/admin/mp') });
   const tabs = useMemo(
     () =>
@@ -99,9 +101,10 @@ export function MpAdminSection() {
         { value: 'items' as const, label: '项目介绍', show: canContent },
         { value: 'recharge' as const, label: '线上充值', show: canRecharge },
         { value: 'coupons' as const, label: '领券中心', show: canCoupon },
+        { value: 'reminders' as const, label: '到期提醒', show: canReminder },
         { value: 'bindings' as const, label: '会员的微信', show: true },
       ].filter((t) => t.show),
-    [canContent, canRecharge, canCoupon],
+    [canContent, canRecharge, canCoupon, canReminder],
   );
   const [tab, setTab] = useState<Tab>(tabs[0]!.value);
   const unreadable = useMpPendingUnreadable();
@@ -139,6 +142,8 @@ export function MpAdminSection() {
           <RechargeTab data={q.data} />
         ) : tab === 'coupons' ? (
           <CouponTab data={q.data} />
+        ) : tab === 'reminders' ? (
+          <ReminderTab data={q.data} />
         ) : (
           <BindingsTab />
         )}

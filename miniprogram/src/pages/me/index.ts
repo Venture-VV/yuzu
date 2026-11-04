@@ -1,13 +1,17 @@
 // 我的：绑定会员（MP6：用微信验证过的手机号，对上门店的会员档案才绑；对不上不建会员，MP3）、会员卡（会员体系 v2 的档阶与进度）、
 // 余额（本金、赠金）、会员码、充值（线上充值开着时，第二期 2a）、流水、券、解绑与换号。会员相关的数字不存本机，门店连不上时显示「门店系统连接中」。
-import type { MpHome, MpMe } from '../../../../src/shared/mp';
+import type { MpHome, MpMe, MpReminderOptions } from '../../../../src/shared/mp';
 import { appVersion } from '../../config/env';
 import { isOffline, member, messageOf, mockUser, mockWechat, show, switchMockUser } from '../../utils/api';
 import { clearBindPending, dropUnreadableWhenBound, readBindPending, resolveBindPending, sendBind } from '../../utils/bind-pending';
 import type { BindOutcome } from '../../utils/bind-pending';
 import { cardView } from '../../utils/member-card';
 import type { CardView } from '../../utils/member-card';
+import { loadReminders, remindButton, remindHint, remindTap, retryPendingReminders } from '../../utils/reminders';
+import type { ReminderTarget } from '../../utils/reminders';
 import { uuid } from '../../utils/uuid';
+
+const NO_REMIND = { show: false, set: false, text: '' };
 
 type State = 'loading' | 'unbound' | 'notmember' | 'pending' | 'unreadable' | 'bound' | 'offline' | 'error';
 
@@ -24,7 +28,12 @@ Page({
     version: '',
     /** 绑定状态版本号（/v1/me 给的，点绑定时带上）；没读到之前是 -1 */
     bindVersion: -1,
+    /** 到期提醒（第三期 3a）：会籍快到期、进补充期当天 */
+    remindMember: NO_REMIND,
+    remindGrace: NO_REMIND,
+    remindHint: '',
   },
+  reminders: null as MpReminderOptions | null,
 
   onLoad() {
     this.setData({ version: appVersion() });
@@ -64,6 +73,7 @@ Page({
       if (me.bound && me.member) {
         dropUnreadableWhenBound();
         this.setData({ state: 'bound', card: cardView(me.member) });
+        this.loadReminders();
         return;
       }
       // 没绑定：手机上的记录读不出来（或又有了没确认的）时先不能绑定，读得出来、确认之后才显示绑定按钮
@@ -74,6 +84,34 @@ Page({
     } catch (e) {
       this.setData({ state: isOffline(e) ? 'offline' : 'error', message: messageOf(e), card: null });
     }
+  },
+
+  /** 到期提醒：取不到不影响会员卡；L0、在补充期里的不显示会籍提醒；会籍的设好了才显示「进补充期也提醒我」 */
+  async loadReminders() {
+    const o = await retryPendingReminders().then(loadReminders);
+    this.reminders = o;
+    const m = o && o.membership;
+    if (!o || !m || !m.cycleEnd || m.inGrace) {
+      this.setData({ remindMember: NO_REMIND, remindGrace: NO_REMIND, remindHint: '' });
+      return;
+    }
+    const member = remindButton(o, { kind: 'membership', targetDate: m.cycleEnd });
+    this.setData({
+      remindMember: member,
+      remindGrace: member.set ? remindButton(o, { kind: 'grace', targetDate: m.cycleEnd }) : NO_REMIND,
+      remindHint: member.show && !member.set ? remindHint(o, 'membership') : '',
+    });
+  },
+
+  onRemind(e: WechatMiniprogram.TouchEvent) {
+    const kind = (e.currentTarget.dataset as { kind?: string }).kind;
+    const m = this.reminders && this.reminders.membership;
+    if (!m || !m.cycleEnd || (kind !== 'membership' && kind !== 'grace')) return;
+    if ((kind === 'membership' ? this.data.remindMember : this.data.remindGrace).set) return;
+    const target: ReminderTarget = { kind, targetDate: m.cycleEnd };
+    remindTap(this.reminders, target).then((refresh) => {
+      if (refresh) this.loadReminders();
+    });
   },
 
   onPhone(e: WechatMiniprogram.CustomEvent<{ code?: string; errMsg?: string }>) {

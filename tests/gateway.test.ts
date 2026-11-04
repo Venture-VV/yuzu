@@ -16,8 +16,11 @@ import { ShowCache } from '../src/gateway/cache';
 import { loadGatewayConfig, type GatewayConfig } from '../src/gateway/config';
 import { issueSession, verifySession } from '../src/gateway/session';
 import { createUpstream, UpstreamDown, type Upstream } from '../src/gateway/upstream';
+import { sendDueReminders } from '../src/gateway/reminders';
 import { createMockWechat, createWechat, WechatError } from '../src/gateway/wechat';
 import { buildMpApp } from '../src/server/modules/mp/app';
+import { mpToday } from '../src/server/modules/mp/public';
+import { planReminders } from '../src/server/modules/mp/reminders';
 import type { PayRuntime } from '../src/server/modules/mp/pay';
 import { createMockWxPay, type MockWxPay } from '../src/server/modules/mp/wxpay-mock';
 import { api, createMember, setup, type TestContext } from './helpers';
@@ -42,6 +45,8 @@ const gatewayConfig = (over: Partial<GatewayConfig> = {}): GatewayConfig => ({
   sessionDays: 7,
   mockWechat: true,
   wechat: null,
+  reminderSeconds: 0,
+  subscribeState: 'developer',
   logLevel: 'silent',
   ...over,
 });
@@ -361,6 +366,166 @@ describe('线上领券（第二期 2c）', () => {
     let last = 0;
     for (let i = 0; i < 17; i++) last = (await authed(gw, token, 'POST', '/v1/coupon-claims', { clientKey: randomUUID(), templateId: tpl.body.id, bindVersion })).statusCode;
     expect(last).toBe(429);
+  });
+});
+
+describe('到期提醒（第三期 3a）', () => {
+  const TPL = 'tplGwCoupon-0123456789abcdefABCD';
+  it('能设哪些、设一条：网关带会话里的微信转给 yuzu；没会话拒绝；格式不对网关先拒', async () => {
+    const saved = await api(ctx.app, ctx.owner, 'PUT', '/api/admin/mp/reminders/rules', {
+      enabled: true,
+      coupon: { templateId: TPL, fields: [{ key: 'thing1', source: 'name' }, { key: 'date2', source: 'date' }] },
+      membership: null,
+      bonus: null,
+    });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    for (const [name, phone] of [['gw-remind', '13700005001'], ['gw-refuse', '13700005002']] as const) {
+      const m = await createMember(ctx, `演示·${name}`, phone);
+      const token = await login(gw, name);
+      expect((await authed(gw, token, 'POST', '/v1/bind', { phoneCode: `mock-phone-${phone}`, clientKey: randomUUID(), bindVersion: 0 })).statusCode).toBe(200);
+      const tpl = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', { clientKey: randomUUID(), name: '网关提醒的券', kind: 'cash', faceValue: 1000, validity: 'days', validDays: 2 });
+      expect((await api(ctx.app, ctx.owner, 'POST', `/api/members/${m.id}/coupons`, { clientKey: randomUUID(), templateId: tpl.body.id, quantity: 1, reason: '测试发券' })).status).toBe(201);
+      const [c] = await ctx.sql<{ code: string }[]>`SELECT code FROM coupons WHERE member_id = ${m.id}`;
+      const o = await authed(gw, token, 'GET', '/v1/reminders');
+      expect(o.statusCode, o.body).toBe(200);
+      expect(o.json()).toMatchObject({ open: true, templates: { coupon: TPL, membership: null, bonus: null } });
+      expect((await authed(gw, token, 'POST', '/v1/reminders', { clientKey: randomUUID(), kind: 'coupon', couponCode: c!.code, templateId: TPL })).statusCode).toBe(400);
+      const r = await authed(gw, token, 'POST', '/v1/reminders', { clientKey: randomUUID(), kind: 'coupon', couponCode: c!.code, templateId: TPL, bindVersion: o.json().bindVersion });
+      expect(r.statusCode, r.body).toBe(201);
+    }
+    expect((await authed(gw, null, 'GET', '/v1/reminders')).statusCode).toBe(401);
+  });
+
+  it('发送：网关取走、用模拟微信发、回报给门店；顾客拒收的记没发出；门店连不上时什么都不做；回报没送到门店的门店记结果不明', async () => {
+    const today = await mpToday(ctx.sql, ctx.config.timezone);
+    const noon = new Date(`${today}T12:00:00+08:00`);
+    await planReminders({ sql: ctx.sql, config: ctx.config }, noon);
+    // 门店的小程序端口按固定的时间（中午）算 10:00–20:00
+    const timed = await buildMpApp(ctx.sql, { ...ctx.config, mp: { ...ctx.config.mp, gatewayKey: KEY, codeSecret: CODE_SECRET } }, { pay: null, sweepMs: 0, clock: () => noon });
+    await timed.listen({ host: '127.0.0.1', port: 0 });
+    try {
+      const up = createUpstream(`http://127.0.0.1:${(timed.server.address() as AddressInfo).port}`, KEY);
+      const wechat = createMockWechat();
+      // 网关的钟与门店的一样停在中午（门店给的这一批期限是中午 12:05）
+      const clock = () => noon.getTime();
+      const tick = await sendDueReminders({ upstream: up, wechat, state: 'developer', now: clock });
+      expect(tick).toMatchObject({ leased: 2, sent: 1, failed: 1, retry: 0, unknown: 0, notStarted: 0, reportLost: false });
+      expect(wechat.sent).toEqual([{ touser: 'mock_gw-remind', templateId: TPL, page: 'pages/coupons/index', data: { thing1: { value: '网关提醒的券' }, date2: { value: expect.stringMatching(/^\d{4}年\d{1,2}月\d{1,2}日$/) } }, state: 'developer' }]);
+      const rows = await ctx.sql<{ openid: string; status: string; errcode: number | null }[]>`
+        SELECT c.openid, m.status, m.errcode FROM mp_reminder_messages m JOIN mp_reminder_consents c ON c.id = m.consent_id ORDER BY c.openid`;
+      expect(rows).toEqual([
+        { openid: 'mock_gw-refuse', status: 'failed', errcode: 43101 },
+        { openid: 'mock_gw-remind', status: 'sent', errcode: null },
+      ]);
+      // 没有要发的
+      expect(await sendDueReminders({ upstream: up, wechat, state: 'developer', now: clock })).toMatchObject({ leased: 0 });
+      // 门店连不上
+      const down: Upstream = { call: async () => { throw new UpstreamDown('门店系统连不上'); } };
+      expect(await sendDueReminders({ upstream: down, wechat, state: 'developer' })).toBeNull();
+      // 取到了、回报送不到：报回报没送到（门店过了期限记结果不明）
+      const lossy: Upstream = {
+        call: async (method, path, o) => {
+          if (path.endsWith('/report')) throw new UpstreamDown('门店系统连不上');
+          if (path.endsWith('/lease')) {
+            const body = JSON.stringify({ messages: [{ id: 999999, leaseToken: randomUUID(), openid: 'mock_lossy', templateId: TPL, page: 'pages/coupons/index', data: {} }] });
+            return { status: 200, contentType: 'application/json', cacheControl: null, body: Buffer.from(body) };
+          }
+          return up.call(method, path, o);
+        },
+      };
+      expect(await sendDueReminders({ upstream: lossy, wechat, state: 'developer' })).toMatchObject({ leased: 1, sent: 1, reportLost: true });
+    } finally {
+      await timed.close();
+    }
+  });
+
+  it('一批的期限与停下：微信忙或超时就停下这一批、剩下的报「再试」；快到期限的不再开始发；取一批没收到回答时下一轮带同一个批次号', async () => {
+    const reported: unknown[] = [];
+    const leaseBodies: { batchId?: string }[] = [];
+    let leaseReply: () => unknown = () => ({ messages: [], leasedUntil: null });
+    let leaseThrows = false;
+    const fake: Upstream = {
+      call: async (_method, path, o) => {
+        if (path.endsWith('/lease')) {
+          leaseBodies.push(o!.body as { batchId?: string });
+          if (leaseThrows) throw new UpstreamDown('门店系统连不上');
+          return { status: 200, contentType: 'application/json', cacheControl: null, body: Buffer.from(JSON.stringify(leaseReply())) };
+        }
+        reported.push(o!.body);
+        return { status: 200, contentType: 'application/json', cacheControl: null, body: Buffer.from('{"accepted":0}') };
+      },
+    };
+    const msg = (id: number, openid: string) => ({ id, leaseToken: randomUUID(), openid, templateId: TPL, page: 'pages/coupons/index', data: { thing1: { value: '券' } } });
+    const wechat = createMockWechat();
+    // 第二条遇到微信忙：停下，第三条没发、报再试
+    leaseReply = () => ({ messages: [msg(1, 'mock_ok-1'), msg(2, 'mock_busy-2'), msg(3, 'mock_ok-3')], leasedUntil: new Date(Date.now() + 5 * 60_000).toISOString() });
+    const t1 = await sendDueReminders({ upstream: fake, wechat, state: 'formal' });
+    expect(t1).toMatchObject({ leased: 3, sent: 1, retry: 2, notStarted: 1, unknown: 0 });
+    expect(wechat.sent.map((m) => m.touser)).toEqual(['mock_ok-1']);
+    expect((reported.at(-1) as { results: { id: number; outcome: string }[] }).results.map((r) => [r.id, r.outcome])).toEqual([
+      [1, 'sent'],
+      [2, 'retry'],
+      [3, 'retry'],
+    ]);
+    // 期限快到了（只剩 10 秒）：一条都不开始发
+    leaseReply = () => ({ messages: [msg(4, 'mock_ok-4')], leasedUntil: new Date(Date.now() + 10_000).toISOString() });
+    expect(await sendDueReminders({ upstream: fake, wechat, state: 'formal' })).toMatchObject({ leased: 1, sent: 0, notStarted: 1 });
+    expect(wechat.sent).toHaveLength(1);
+    // 取一批时门店连不上（也可能是门店取好了、回答路上丢了）：下一轮带同一个批次号再要；拿到并回报以后换新的
+    const memo = {};
+    leaseThrows = true;
+    expect(await sendDueReminders({ upstream: fake, wechat, state: 'formal', memo })).toBeNull();
+    leaseThrows = false;
+    leaseReply = () => ({ messages: [], leasedUntil: null });
+    await sendDueReminders({ upstream: fake, wechat, state: 'formal', memo });
+    const [b1, b2] = leaseBodies.slice(-2);
+    expect(b1!.batchId).toBeTruthy();
+    expect(b2!.batchId).toBe(b1!.batchId);
+    await sendDueReminders({ upstream: fake, wechat, state: 'formal', memo });
+    expect(leaseBodies.at(-1)!.batchId).not.toBe(b1!.batchId);
+  });
+
+  it('微信真接口（替身 fetch）：发送的请求格式；凭据失效重取一次；拒收、忙、超时、连不上各怎么报', async () => {
+    const calls: { url: string; body?: string }[] = [];
+    let send: () => unknown = () => ({ errcode: 0, errmsg: 'ok' });
+    let tokens = 0;
+    const fakeFetch = async (url: string, init?: { body?: string }) => {
+      calls.push({ url, body: init?.body });
+      if (url.includes('stable_token')) {
+        tokens += 1;
+        return { ok: true, status: 200, json: async () => ({ access_token: `AT-${tokens}`, expires_in: 7200 }) };
+      }
+      const reply = send();
+      if (reply instanceof Error) throw reply;
+      return { ok: true, status: 200, json: async () => reply };
+    };
+    const wx = createWechat('wx-app-id', 'wx-app-secret', fakeFetch);
+    const msg = { touser: 'o-real-1', templateId: TPL, page: 'pages/coupons/index', data: { thing1: { value: '券' } }, state: 'formal' as const };
+    expect(await wx.sendSubscribe(msg)).toEqual({ outcome: 'sent', errcode: null, errmsg: null });
+    const sendCall = calls.find((c) => c.url.includes('subscribe/send'))!;
+    expect(sendCall.url).toContain('access_token=AT-1');
+    expect(JSON.parse(sendCall.body!)).toEqual({ touser: 'o-real-1', template_id: TPL, page: 'pages/coupons/index', data: { thing1: { value: '券' } }, miniprogram_state: 'formal', lang: 'zh_CN' });
+    // 凭据失效：重取一次再发
+    let first = true;
+    send = () => (first ? ((first = false), { errcode: 40001, errmsg: 'invalid credential' }) : { errcode: 0 });
+    expect((await wx.sendSubscribe(msg)).outcome).toBe('sent');
+    expect(tokens).toBe(2);
+    send = () => ({ errcode: 43101, errmsg: 'user refuse to accept the msg' });
+    expect(await wx.sendSubscribe(msg)).toEqual({ outcome: 'failed', errcode: 43101, errmsg: 'user refuse to accept the msg' });
+    send = () => ({ errcode: -1, errmsg: 'system error' });
+    expect(await wx.sendSubscribe(msg)).toMatchObject({ outcome: 'retry', errcode: -1 });
+    send = () => Object.assign(new Error('timeout'), { name: 'TimeoutError' });
+    expect(await wx.sendSubscribe(msg)).toMatchObject({ outcome: 'unknown' });
+    send = () => Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+    expect(await wx.sendSubscribe(msg)).toMatchObject({ outcome: 'retry', errmsg: '连不上微信' });
+  });
+
+  it('配置：取消息的间隔 0–3600 秒（默认 30）、跳到哪一版小程序（默认正式版）', () => {
+    const base = { MP_UPSTREAM_URL: 'http://100.64.0.10:8081', MP_GATEWAY_KEY: KEY, MP_SESSION_SECRET: SESSION, MP_MOCK_WECHAT: 'true' };
+    expect(loadGatewayConfig(base)).toMatchObject({ reminderSeconds: 30, subscribeState: 'formal' });
+    expect(loadGatewayConfig({ ...base, MP_REMINDER_SECONDS: '0', MP_SUBSCRIBE_STATE: 'trial' })).toMatchObject({ reminderSeconds: 0, subscribeState: 'trial' });
+    expect(() => loadGatewayConfig({ ...base, MP_REMINDER_SECONDS: '-1' })).toThrow(/MP_REMINDER_SECONDS/);
+    expect(() => loadGatewayConfig({ ...base, MP_SUBSCRIBE_STATE: 'beta' })).toThrow(/MP_SUBSCRIBE_STATE/);
   });
 });
 

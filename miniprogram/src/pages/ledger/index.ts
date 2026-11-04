@@ -1,7 +1,9 @@
 // 余额与流水：门店系统会员钱包里的记录（充值、消费、撤销、赠金过期……），只读；最近 50 条。
-import type { MpLedgerRow, MpMe } from '../../../../src/shared/mp';
+// 到期提醒（第三期 3a）：有会到期的赠金时写「¥X 赠金用到 M月D日」（最后能用的那一天），旁边「到期提醒我」（到期前 7 天发一条微信消息）。
+import type { MpLedgerRow, MpMe, MpReminderOptions } from '../../../../src/shared/mp';
 import { isApiError, isOffline, member, messageOf } from '../../utils/api';
 import { yuan } from '../../utils/format';
+import { loadReminders, remindButton, remindHint, remindTap, retryPendingReminders } from '../../utils/reminders';
 import { ledgerRow } from '../../utils/views';
 import type { LedgerView } from '../../utils/views';
 
@@ -13,7 +15,12 @@ Page({
     principal: '',
     bonus: '',
     rows: [] as LedgerView[],
+    /** 最早到期的赠金：「¥50.00 赠金用到 11月19日」；没有会到期的为空 */
+    bonusExpiring: '',
+    remind: { show: false, set: false, text: '' },
+    remindHint: '',
   },
+  reminders: null as MpReminderOptions | null,
 
   onLoad() {
     this.load();
@@ -39,6 +46,16 @@ Page({
         bonus: yuan(m.bonusBalance),
         rows: rows.map(ledgerRow),
       });
+      // 到期提醒：取不到不影响余额与流水
+      const o = await retryPendingReminders().then(loadReminders);
+      this.reminders = o;
+      const b = o && o.bonus;
+      const [, mm, dd] = b ? b.lastDay.split('-') : [];
+      this.setData({
+        bonusExpiring: b ? yuan(b.amount) + ' 赠金用到 ' + Number(mm) + '月' + Number(dd) + '日' : '',
+        remind: b ? remindButton(o, { kind: 'bonus', targetDate: b.lastDay }) : { show: false, set: false, text: '' },
+        remindHint: o && b && o.templates.bonus ? remindHint(o, 'bonus') : '',
+      });
     } catch (e) {
       if (isApiError(e) && e.code === 'MP_NOT_BOUND') this.setData({ state: 'unbound' });
       else this.setData({ state: isOffline(e) ? 'offline' : 'error', message: messageOf(e) });
@@ -47,5 +64,13 @@ Page({
 
   onBind() {
     wx.switchTab({ url: '/pages/me/index' });
+  },
+
+  onRemind() {
+    const b = this.reminders && this.reminders.bonus;
+    if (!b || this.data.remind.set) return;
+    remindTap(this.reminders, { kind: 'bonus', targetDate: b.lastDay }).then((refresh) => {
+      if (refresh) this.load();
+    });
   },
 });

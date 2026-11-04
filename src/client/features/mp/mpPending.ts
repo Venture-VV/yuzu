@@ -28,7 +28,7 @@ import { uuid } from '../../lib/utils';
 //     这时一律不发新的请求、不改写记录（原来的记录原样留着），页面提示恢复后再读一次，读得出来才继续。
 // 作废用小程序线自己的登记（迁移 044），不进共用的 op_fences，所以不用 ERP 的面板。
 
-export type MpUpdateType = 'rules_update' | 'store_update' | 'banner_update' | 'intro_update' | 'recharge_rules_update' | 'coupon_rules_update';
+export type MpUpdateType = 'rules_update' | 'store_update' | 'banner_update' | 'intro_update' | 'recharge_rules_update' | 'coupon_rules_update' | 'reminder_rules_update';
 export type MpOpType = 'banner_create' | 'unbind' | 'recharge_resolve' | 'refund_retry' | 'refund_handle' | MpUpdateType;
 
 export interface MpPendingOp {
@@ -292,6 +292,7 @@ const CONTENT_FIELDS: Record<MpUpdateType, string[]> = {
   intro_update: ['intro', 'imageId'],
   recharge_rules_update: ['enabled', 'planIds', 'customEnabled', 'maxCents', 'dailyLimit', 'refundAuto'],
   coupon_rules_update: ['enabled', 'offers'],
+  reminder_rules_update: ['enabled', 'coupon', 'membership', 'bonus'],
 };
 
 const isUpdate = (op: MpPendingOp): op is MpPendingOp & { type: MpUpdateType } => op.type in CONTENT_FIELDS;
@@ -305,6 +306,8 @@ function currentOf(op: MpPendingOp, data: MpAdminData): { version: number; conte
         ? { ...data.rechargeRules }
         : op.type === 'coupon_rules_update'
           ? { ...data.couponRules }
+          : op.type === 'reminder_rules_update'
+            ? { ...data.reminderRules }
           : op.type === 'store_update'
           ? data.stores.find((s) => s.code === op.target)
           : op.type === 'banner_update'
@@ -322,10 +325,13 @@ const sortKeys = (v: unknown): unknown =>
   Array.isArray(v) ? v.map(sortKeys) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys((v as Record<string, unknown>)[k])])) : v;
 /**
  * 比内容用：服务端会去掉首尾空格，定位存到小数点后 6 位；勾选的套餐不看先后、去重；
- * 领券中心可领的券是一串对象，先后就是顾客看到的先后，按原来的先后比、对象里不看键的先后
+ * 领券中心可领的券是一串对象，先后就是顾客看到的先后，按原来的先后比、对象里不看键的先后；
+ * 到期提醒的模板是一个对象（模板编号与字段），不看键的先后
  */
 const norm = (v: unknown) =>
-  Array.isArray(v)
+  v !== null && typeof v === 'object' && !Array.isArray(v)
+    ? JSON.stringify(sortKeys(v))
+    : Array.isArray(v)
     ? v.some((x) => x !== null && typeof x === 'object')
       ? JSON.stringify(sortKeys(v))
       : JSON.stringify([...new Set(v)].sort())
