@@ -345,7 +345,9 @@ export function PaymentsSection({
  * 会员折扣（v0.7.25）：自动带上、不能单独去掉；选了券或优惠 / 免单就不用（二选一），这里写明两边的取舍
  */
 function MemberDiscountRow({ offered, applied }: { offered: MemberDiscountOption; applied: boolean }) {
-  const what = `${offered.memberName} · ${offered.stateLabel} ${rateText(offered.rate)} · ${offered.name}（${DISCOUNT_TARGET_LABELS[offered.target]}）`;
+  // 同行优惠（v0.7.26）：写明打的是哪几位同行
+  const whom = offered.companions?.length ? ` ${offered.companions.join('、')}` : '';
+  const what = `${offered.memberName} · ${offered.stateLabel} ${rateText(offered.rate)} · ${offered.name}（${DISCOUNT_TARGET_LABELS[offered.target]}${whom}）`;
   return applied ? (
     <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-yuzu/40 bg-yuzu-soft/40 px-3 py-2" data-testid="member-discount">
       <Badge tone="yuzu">会员折扣</Badge>

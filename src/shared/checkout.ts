@@ -140,6 +140,8 @@ export interface MemberDiscountOption {
   /** 适用明细的合计、省下多少（分） */
   base: number;
   amount: number;
+  /** 同行优惠（v0.7.26）打的那几位同行的手牌号；别的折扣为空 */
+  companions: string[];
 }
 
 // ───────────── 退款单（v0.7.20，飞书需求 RQ-006；docs/CASHIER.md 第 3 节）─────────────

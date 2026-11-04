@@ -260,6 +260,18 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
           : [],
       ),
       date,
+      // 同行优惠（v0.7.26，QY-041）：这张结账单里不是会员的客人
+      visits.flatMap((v) =>
+        v.memberId
+          ? []
+          : [
+              {
+                billId: v.billId,
+                tagCode: v.tagCode,
+                ticket: v.ticket ? withTicketLines([], [{ visitId: v.visitId, typeId: v.ticket.typeId, name: v.ticket.name, amount: v.ticket.amount }])[0] ?? null : null,
+              },
+            ],
+      ),
     );
     return {
       visits,
@@ -557,6 +569,7 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
     const md = memberDiscounts[0];
     const memberDiscount = await settleMemberDiscount(tx, {
       guests: priced.flatMap((r) => (r.memberId ? [{ memberId: Number(r.memberId), memberName: r.memberName ?? '', tagCode: r.tagCode, billId: r.billId }] : [])),
+      companions: priced.flatMap((r) => (r.memberId ? [] : [{ tagCode: r.tagCode, billId: r.billId }])),
       input: md ? { memberId: md.memberId, benefitId: md.benefitId, amount: md.amount } : null,
       otherReduction: storeCoupons.length > 0 || discounts.length > 0,
       date,
