@@ -145,16 +145,20 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
     // 补录：实际时间那一刻手牌、会员不能已被别的来访占用（已离店的也算），否则时间重叠
     if (backfill) await assertFreeAt(tx, at, [...tags.values()].map((t) => t.id), memberIds, deps.config.timezone);
 
-    // 会员只读：确认存在、没有其他在店手牌
+    // 会员只读：确认存在、没有其他在店手牌（下面 ④ 再在会员一行的共享锁里核对一次）
     const names = new Map<number, string>();
+    const statusSeen = new Map<number, string>();
     if (memberIds.length) {
-      const found = await tx<{ id: number; name: string; mergedIntoNo: string | null }[]>`
-        SELECT m.id, m.name, t.member_no AS merged_into_no FROM members m LEFT JOIN members t ON t.id = m.merged_into_id WHERE m.id IN ${tx(memberIds)}`;
+      const found = await tx<{ id: number; name: string; status: string; mergedIntoNo: string | null }[]>`
+        SELECT m.id, m.name, m.status, t.member_no AS merged_into_no FROM members m LEFT JOIN members t ON t.id = m.merged_into_id WHERE m.id IN ${tx(memberIds)}`;
       if (found.length !== memberIds.length) throw notFound('会员不存在，请重新查找');
       // 已合并的会员（v0.7.26）：档案停用、余额在合并进去的那位，请按那位接待
       const merged = found.find((m) => m.mergedIntoNo !== null);
       if (merged) throw unprocessable('MEMBER_MERGED', `会员「${merged.name}」已合并到 ${merged.mergedIntoNo}，请按那位会员接待`);
-      for (const m of found) names.set(m.id, m.name);
+      for (const m of found) {
+        names.set(Number(m.id), m.name);
+        statusSeen.set(Number(m.id), m.status);
+      }
       const inStore = await tx<{ name: string; code: string }[]>`
         SELECT m.name, t.code FROM visits v JOIN members m ON m.id = v.member_id JOIN hand_tags t ON t.id = v.tag_id
         WHERE v.status = 'open' AND v.member_id IN ${tx(memberIds)}`;
@@ -207,6 +211,24 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
         await tx`
           INSERT INTO visit_group_events (group_id, visit_id, action, operator_id, created_at)
           VALUES (${groupId}, ${target.id}, 'join', ${ctx.actor.id}, ${at})`;
+      }
+    }
+
+    // ④ 会员一行（共享锁，id 升序；v0.7.26，测试会话 dcbf252 的 P2）：会员合并、停用 / 启用都是锁住会员一行以后才核对
+    //   「有没有在店手牌」，这里锁住以后再核对没被合并、状态没变——两边串行，不会出现合并走了余额的原档案仍被接待到店
+    //  （原来只读核对：合并在接待核对之后、写入来访之前提交，接待照样成功）
+    if (memberIds.length) {
+      const locked = await tx<{ id: number; status: string; mergedIntoId: number | null }[]>`
+        SELECT id, status, merged_into_id FROM members WHERE id IN ${tx(memberIds)} ORDER BY id FOR SHARE`;
+      for (const m of locked) {
+        const name = names.get(Number(m.id)) ?? '';
+        if (m.mergedIntoId !== null) {
+          const [into] = await tx<{ memberNo: string }[]>`SELECT member_no FROM members WHERE id = ${m.mergedIntoId}`;
+          throw unprocessable('MEMBER_MERGED', `会员「${name}」已合并到 ${into?.memberNo ?? ''}，请按那位会员接待`);
+        }
+        if (m.status !== statusSeen.get(Number(m.id))) {
+          throw conflict('MEMBER_CHANGED', `会员「${name}」刚刚被${m.status === 'frozen' ? '停用' : '启用'}，请重新核对后再接待`);
+        }
       }
     }
 

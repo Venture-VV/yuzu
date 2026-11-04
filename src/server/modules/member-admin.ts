@@ -360,8 +360,11 @@ export async function memberMergeChecks(db: Db): Promise<{ label: string; ok: bo
              OR g.bonus <> (SELECT coalesce(sum(l.amount), 0) FROM bonus_lots l WHERE l.member_merge_id = g.id AND l.member_id = g.target_id)
              OR NOT EXISTS (SELECT 1 FROM members m WHERE m.id = g.source_id AND m.merged_into_id = g.target_id AND m.status = 'frozen'))::int AS bad
     FROM member_merges g`;
-  const [b] = await db<{ n: number; bad: number }[]>`
-    SELECT count(*)::int AS n, count(*) FILTER (WHERE principal_balance <> 0 OR bonus_balance <> 0)::int AS bad FROM members WHERE merged_into_id IS NOT NULL`;
+  // 被并走的会员：余额为 0，也没有在店的来访（接待与合并在会员一行上串行；测试会话 dcbf252 的 P2）
+  const [b] = await db<{ n: number; bad: number; inStore: number }[]>`
+    SELECT count(*)::int AS n, count(*) FILTER (WHERE principal_balance <> 0 OR bonus_balance <> 0)::int AS bad,
+           count(*) FILTER (WHERE EXISTS (SELECT 1 FROM visits v WHERE v.member_id = m.id AND v.status = 'open'))::int AS in_store
+    FROM members m WHERE merged_into_id IS NOT NULL`;
   return [
     {
       label: '会员合并：合并单 = 转出 = 转入 = 搬过去的赠金批次',
@@ -369,9 +372,12 @@ export async function memberMergeChecks(db: Db): Promise<{ label: string; ok: bo
       detail: a!.bad ? `${a!.bad} 张合并单的流水、赠金批次或来源会员的状态对不上` : `共 ${a!.n} 张合并单，逐张核对一致`,
     },
     {
-      label: '会员合并：被并走的会员余额为 0',
-      ok: b!.bad === 0,
-      detail: b!.bad ? `${b!.bad} 位被并走的会员还有余额` : `被并走的会员 ${b!.n} 位，余额都是 0`,
+      label: '会员合并：被并走的会员余额为 0、不在店',
+      ok: b!.bad === 0 && b!.inStore === 0,
+      detail:
+        b!.bad || b!.inStore
+          ? [b!.bad ? `${b!.bad} 位被并走的会员还有余额` : '', b!.inStore ? `${b!.inStore} 位被并走的会员还有在店手牌` : ''].filter(Boolean).join('；')
+          : `被并走的会员 ${b!.n} 位，余额都是 0、都不在店`,
     },
   ];
 }

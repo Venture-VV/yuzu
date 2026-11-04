@@ -382,21 +382,37 @@ export async function previewRechargeGrade(db: Db, memberId: number, paidCents: 
 // ───────────────────────── 储值退回（v0.7.26，M73） ─────────────────────────
 
 /**
- * 现在这一档是不是本会籍周期里靠充值升上来的：最近一条改了档级的状态变化是「充值升档」、发生在这个周期里
- * （周期从升档那天起算）。靠保级、手动调整、上线定档、合并留在这一档的不算
+ * 现在这一档里靠本会籍周期的充值升上来的那一段（M73）：从最近的状态变化往回看——
+ *   · 「储值退回降档」接着往前看（退过一次、降过一档的，剩下的这一档仍是那次充值升上来的；测试会话 c938e79 的 P2：
+ *     原来只看最近一条改了档级的，第二次退清时找不到「充值升档」，退完本金还留在 L2）；
+ *   · 「消费升阶」「进入补充期」不改档级的来源，跳过；
+ *   · 「充值升档」记下它之前的档级，接着往前看是不是还连着充值升档或退回降档；
+ *   · 遇到上线 / 期初导入定档、保级、补充期内保级、降档、手动调整、合并就停：这些留下的档级不因退回而降。
+ * 返回这一段之前的档级（退回最多降到这一档）；最近的充值升档不在这个周期里、或根本不是靠充值升上来的为空
  */
-async function gradeFromRecharge(db: Db, memberId: number, state: GradeState): Promise<boolean> {
-  if (state.grade === 0 || !state.cycleStart) return false;
-  const [e] = await db<{ kind: GradeEventKind; businessDate: string }[]>`
-    SELECT kind, business_date FROM member_grade_events
-    WHERE member_id = ${memberId} AND to_grade <> from_grade ORDER BY id DESC LIMIT 1`;
-  return !!e && e.kind === 'recharge_up' && e.businessDate >= state.cycleStart;
+async function rechargeFloor(db: Db, memberId: number, state: GradeState): Promise<number | null> {
+  if (state.grade === 0 || !state.cycleStart) return null;
+  const events = await db<{ kind: GradeEventKind; fromGrade: number; businessDate: string }[]>`
+    SELECT kind, from_grade, business_date FROM member_grade_events WHERE member_id = ${memberId} ORDER BY id DESC`;
+  let floor: number | null = null;
+  let latestUp: string | null = null;
+  for (const e of events) {
+    if (e.kind === 'spend_up' || e.kind === 'grace_start' || e.kind === 'refund_down') continue;
+    if (e.kind !== 'recharge_up') break;
+    floor = e.fromGrade;
+    latestUp ??= e.businessDate;
+  }
+  return floor !== null && latestUp !== null && latestUp >= state.cycleStart ? floor : null;
 }
 
-/** 储值退回以后够得上的档阶：降到够得上的那一档的初阶，会籍周期不变；L0 没有周期。够得上、或不是靠充值升上来的为空 */
+/**
+ * 储值退回以后够得上的档阶：降到够得上的那一档的初阶，会籍周期不变；L0 没有周期。
+ * 最多降到靠充值升上来之前的档级（保级、手动调整、上线定档等留下的不降）。够得上、或不是靠充值升上来的为空
+ */
 async function refundTarget(db: Db, rules: MembershipRules, memberId: number, state: GradeState, rollingAfter: number): Promise<GradeState | null> {
-  if (!(await gradeFromRecharge(db, memberId, state))) return null;
-  const reached = gradeForAmount(rules, rollingAfter);
+  const floor = await rechargeFloor(db, memberId, state);
+  if (floor === null) return null;
+  const reached = Math.max(gradeForAmount(rules, rollingAfter), floor) as Grade;
   if (reached >= state.grade) return null;
   return reached === 0 ? L0_STATE : { grade: reached, tier: 0, cycleStart: state.cycleStart, cycleEnd: state.cycleEnd, graceUntil: null };
 }

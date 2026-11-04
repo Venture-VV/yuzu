@@ -12,6 +12,7 @@ import type { MemberAccountHistory, MergeCheck } from '../src/shared/member-admi
 import type { MembershipRules } from '../src/shared/membership';
 import type { Deps } from '../src/server/lib/context';
 import { memberGradeBadges } from '../src/server/modules/membership';
+import { memberMergeChecks } from '../src/server/modules/member-admin';
 import { consume } from '../src/server/modules/wallet';
 import { rechargeOnline } from '../src/server/modules/wallet-online';
 import { consistencyChecks } from '../src/server/ops/consistency';
@@ -234,5 +235,122 @@ describe('合并（M78、M79）', () => {
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     expect(ok.body.merge).toMatchObject({ principal: 0, bonus: 0, grade: null });
     expect((await consistencyChecks(ctx.sql, ctx.config.timezone)).filter((x) => !x.ok)).toEqual([]);
+  });
+});
+
+/** 在单独连接里开一个事务持锁，返回释放函数（回滚） */
+async function hold(statement: string) {
+  const conn = await ctx.sql.reserve();
+  await conn.unsafe('BEGIN');
+  await conn.unsafe(statement);
+  return async () => {
+    await conn.unsafe('ROLLBACK');
+    conn.release();
+  };
+}
+
+/** 等到有 n 个会话在等锁，证明请求确实卡在预期的位置 */
+async function waitForLockWaiters(n: number) {
+  for (let i = 0; i < 200; i++) {
+    const [row] = await ctx.sql<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+    if (row!.n >= n) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error(`等待 ${n} 个锁等待者超时`);
+}
+
+const groupCheckin = (memberId: number, codes: [string, string]) =>
+  api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', {
+    clientKey: randomUUID(),
+    guests: [
+      { tagCode: codes[0], zone: 'male', memberId },
+      { tagCode: codes[1], zone: 'male', memberId: null },
+    ],
+  });
+const openVisitsOf = async (memberId: number) =>
+  (await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM visits WHERE member_id = ${memberId} AND status = 'open'`)[0]!.n;
+
+describe('接待与合并、停用并发（测试会话 dcbf252 的 P2：接待在会员一行的共享锁里再核对一次）', () => {
+  it('接待已经核对过「没合并」、还没写来访时合并提交：接待被拒 MEMBER_MERGED，原档案不会在店', async () => {
+    const source = (await createMember(ctx, '并发旧档案', '19933330040')).id;
+    const target = (await createMember(ctx, '并发新档案', '19933330041')).id;
+    await recharge(source, yuan(1000));
+    const check = await checkMerge(source, target);
+    expect(check.problems).toEqual([]);
+    // 两位客人一起接待要建同行组：持住同行组表，接待卡在建组上（已经过了开头的只读核对）
+    const release = await hold('LOCK TABLE visit_groups IN SHARE MODE');
+    const pending = groupCheckin(source, ['A003', 'A004']);
+    try {
+      await waitForLockWaiters(1);
+      const merged = await merge(source, check);
+      expect(merged.status, JSON.stringify(merged.body)).toBe(200);
+    } finally {
+      await release();
+    }
+    const r = await pending;
+    expect(r.status, JSON.stringify(r.body)).toBe(422);
+    expect(r.body.error.code).toBe('MEMBER_MERGED');
+    expect(await openVisitsOf(source)).toBe(0);
+    expect(await balanceOf(ctx, source)).toEqual({ principal: 0, bonus: 0 });
+    expect((await consistencyChecks(ctx.sql, ctx.config.timezone)).filter((x) => !x.ok)).toEqual([]);
+  });
+
+  it('接待先拿到会员一行的共享锁：合并等它写完来访，再核对时看到在店手牌，拒绝合并', async () => {
+    const source = (await createMember(ctx, '先接待的旧档案', '19933330042')).id;
+    const target = (await createMember(ctx, '先接待的新档案', '19933330043')).id;
+    const check = await checkMerge(source, target);
+    expect(check.problems).toEqual([]);
+    // 持住来访表：接待锁住会员一行以后卡在写来访上；合并锁会员一行时排在它后面
+    const release = await hold('LOCK TABLE visits IN SHARE MODE');
+    const pending = groupCheckin(source, ['A005', 'A006']);
+    let merging: ReturnType<typeof merge> | null = null;
+    try {
+      await waitForLockWaiters(1);
+      merging = merge(source, check);
+      await waitForLockWaiters(2);
+    } finally {
+      await release();
+    }
+    const r = await pending;
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    const m = await merging!;
+    expect(m.status, JSON.stringify(m.body)).toBe(422);
+    expect(m.body.error.code).toBe('MERGE_BLOCKED');
+    expect(await openVisitsOf(source)).toBe(1);
+    const [row] = await ctx.sql<{ mergedIntoId: number | null }[]>`SELECT merged_into_id FROM members WHERE id = ${source}`;
+    expect(row!.mergedIntoId).toBeNull();
+    // 自检也看这个交叉不变量：手工造出「被并走的会员仍在店」（只在事务里，回滚）时报错
+    await ctx.sql
+      .begin(async (tx) => {
+        await tx`UPDATE members SET status = 'frozen', merged_into_id = ${target} WHERE id = ${source}`;
+        const c = (await memberMergeChecks(tx)).find((x) => x.label.includes('不在店'))!;
+        expect(c).toMatchObject({ ok: false, detail: expect.stringContaining('1 位被并走的会员还有在店手牌') });
+        throw new Error('rollback');
+      })
+      .catch((e: Error) => {
+        if (e.message !== 'rollback') throw e;
+      });
+    expect((await memberMergeChecks(ctx.sql)).every((x) => x.ok)).toBe(true);
+  });
+
+  it('接待核对之后会员被停用：接待被拒 MEMBER_CHANGED（VIP 柜按停用前算的不作数），重新核对后按散客接待', async () => {
+    const m = (await createMember(ctx, '并发停用', '19933330044')).id;
+    const release = await hold('LOCK TABLE visit_groups IN SHARE MODE');
+    const pending = groupCheckin(m, ['A007', 'A008']);
+    try {
+      await waitForLockWaiters(1);
+      const frozen = await setStatus(m, 'frozen');
+      expect(frozen.status, JSON.stringify(frozen.body)).toBe(200);
+    } finally {
+      await release();
+    }
+    const r = await pending;
+    expect(r.status, JSON.stringify(r.body)).toBe(409);
+    expect(r.body.error.code).toBe('MEMBER_CHANGED');
+    expect(await openVisitsOf(m)).toBe(0);
+    // 重新提交：停用的会员照样能接待（VIP 柜按散客）
+    const again = await groupCheckin(m, ['A007', 'A008']);
+    expect(again.status, JSON.stringify(again.body)).toBe(201);
   });
 });
