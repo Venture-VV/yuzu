@@ -19,6 +19,11 @@
         <view class="bs"><text class="k">本金</text><text class="nv num">{{principal}}</text></view>
         <view class="bs"><text class="k">赠金</text><text class="nv num">{{bonus}}</text></view>
       </view>
+      <view wx:if="{{bonusExpiring}}" class="bal-exp">
+        <text class="num">{{bonusExpiring}}</text>
+        <view wx:if="{{remind.show}}" class="remind {{remind.set ? 'on' : ''}}" bindtap="onRemind">{{remind.text}}</view>
+      </view>
+      <text wx:if="{{remindHint && !remind.set}}" class="bal-hint">{{remindHint}}</text>
     </view>
 
     <view class="sec-h"><view><text class="eyebrow">Statement</text><text class="h3">最近的流水</text></view></view>

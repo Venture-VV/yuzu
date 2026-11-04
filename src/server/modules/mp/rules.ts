@@ -1,9 +1,32 @@
 // 小程序的开关与规则（settings 的 mp_rules）：默认关闭，店主在后台「小程序」里开（第 12 节）。
 
 import type { preHandlerAsyncHookHandler } from 'fastify';
-import { DEFAULT_MP_RECHARGE_RULES, DEFAULT_MP_RULES, MP_RECHARGE_RULES_KEY, MP_RULES_KEY, type MpRechargeRules, type MpRules } from '@shared/mp';
+import {
+  DEFAULT_MP_BOOKING_RULES,
+  DEFAULT_MP_COUPON_RULES,
+  DEFAULT_MP_FOOD_RULES,
+  DEFAULT_MP_INVITE_RULES,
+  DEFAULT_MP_RECHARGE_RULES,
+  DEFAULT_MP_REMINDER_RULES,
+  DEFAULT_MP_RULES,
+  MP_BOOKING_RULES_KEY,
+  MP_COUPON_RULES_KEY,
+  MP_FOOD_RULES_KEY,
+  MP_INVITE_RULES_KEY,
+  MP_RECHARGE_RULES_KEY,
+  MP_REMINDER_RULES_KEY,
+  MP_RULES_KEY,
+  type MpBookingRules,
+  type MpCouponRules,
+  type MpFoodRules,
+  type MpInviteRules,
+  type MpRechargeRules,
+  type MpReminderRules,
+  type MpRules,
+} from '@shared/mp';
 import type { Db } from '../../db';
 import { AppError } from '../../lib/errors';
+import { loadDiningRules } from '../dining';
 
 export async function loadMpRules(db: Db): Promise<MpRules> {
   const [row] = await db<{ value: Partial<MpRules> | null }[]>`SELECT value FROM settings WHERE key = ${MP_RULES_KEY}`;
@@ -14,6 +37,48 @@ export async function loadMpRules(db: Db): Promise<MpRules> {
 export async function loadRechargeRules(db: Db): Promise<MpRechargeRules> {
   const [row] = await db<{ value: Partial<MpRechargeRules> | null }[]>`SELECT value FROM settings WHERE key = ${MP_RECHARGE_RULES_KEY}`;
   return { ...DEFAULT_MP_RECHARGE_RULES, ...(row?.value ?? {}) };
+}
+
+/** 领券中心的设置（第二期 2c，settings 的 mp_coupon_rules）：默认关、没有可领的券 */
+export async function loadCouponRules(db: Db): Promise<MpCouponRules> {
+  const [row] = await db<{ value: Partial<MpCouponRules> | null }[]>`SELECT value FROM settings WHERE key = ${MP_COUPON_RULES_KEY}`;
+  return { ...DEFAULT_MP_COUPON_RULES, ...(row?.value ?? {}) };
+}
+
+/** 到期提醒的设置（第三期 3a，settings 的 mp_reminder_rules）：默认关、没有模板 */
+export async function loadReminderRules(db: Db): Promise<MpReminderRules> {
+  const [row] = await db<{ value: Partial<MpReminderRules> | null }[]>`SELECT value FROM settings WHERE key = ${MP_REMINDER_RULES_KEY}`;
+  return { ...DEFAULT_MP_REMINDER_RULES, ...(row?.value ?? {}) };
+}
+
+/** 邀请好友的设置（第三期 3b，settings 的 mp_invite_rules）：默认关 */
+export async function loadInviteRules(db: Db): Promise<MpInviteRules> {
+  const [row] = await db<{ value: Partial<MpInviteRules> | null }[]>`SELECT value FROM settings WHERE key = ${MP_INVITE_RULES_KEY}`;
+  return { ...DEFAULT_MP_INVITE_RULES, ...(row?.value ?? {}) };
+}
+
+/** 扫码点餐的设置（第三期 3c，settings 的 mp_food_rules）：默认关、没有可点的菜 */
+export async function loadFoodRules(db: Db): Promise<MpFoodRules> {
+  const [row] = await db<{ value: Partial<MpFoodRules> | null }[]>`SELECT value FROM settings WHERE key = ${MP_FOOD_RULES_KEY}`;
+  return { ...DEFAULT_MP_FOOD_RULES, ...(row?.value ?? {}) };
+}
+
+/** 扫码点餐对顾客开着：后台开了、餐饮功能开着（「我的」页显示「点餐」「我的账单」） */
+export async function foodOpenOf(db: Db): Promise<boolean> {
+  const [rules, dining] = await Promise.all([loadFoodRules(db), loadDiningRules(db)]);
+  return rules.enabled && dining.enabled;
+}
+
+/** 小程序预约的设置（第三期 3d，settings 的 mp_booking_rules）：默认关、没有可约的 */
+export async function loadBookingMpRules(db: Db): Promise<MpBookingRules> {
+  const [row] = await db<{ value: Partial<MpBookingRules> | null }[]>`SELECT value FROM settings WHERE key = ${MP_BOOKING_RULES_KEY}`;
+  return { ...DEFAULT_MP_BOOKING_RULES, ...(row?.value ?? {}) };
+}
+
+/** 小程序预约对顾客开着：后台开了、勾了可约的项目或房间（「我的」页显示「预约」） */
+export async function bookingOpenOf(db: Db): Promise<boolean> {
+  const r = await loadBookingMpRules(db);
+  return r.enabled && (r.itemIds.length > 0 || r.spaceIds.length > 0);
 }
 
 /** 店主在后台「小程序」里开了才对顾客开放（默认关闭）；health 不看开关 */

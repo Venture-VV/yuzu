@@ -3,7 +3,8 @@
 // 写操作都按「结果待确认」处理（mpPending.ts）：提交前存在本机，没收到结果时在这一页上方查回、按原内容重新提交或作废 / 放弃。
 // 修改都带版本号（重提不会改两次）；新建轮播、解绑带操作编号（重提返回原来那次）。
 // 维护内容要「维护小程序内容」；只有「解绑会员的微信」的（值班经理）只看到绑定这一页；
-// 线上充值（第二期 2a：设置、处理已付款待处理的单）要「小程序线上充值」（RechargeTab.tsx）。
+// 线上充值（第二期 2a：设置、处理已付款待处理的单）要「小程序线上充值」（RechargeTab.tsx）；
+// 领券中心（第二期 2c：哪些券可领、领取限制、停领）要「小程序领券中心」（CouponTab.tsx）。
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -41,9 +42,14 @@ import {
   type MpPendingOp,
 } from './mpPending';
 import { mpAdminKey, PendingUpdates, saveError, updateFailed } from './mpAdminShared';
+import { CouponTab } from './CouponTab';
+import { BookingTab } from './BookingTab';
+import { FoodTab } from './FoodTab';
+import { InviteTab } from './InviteTab';
 import { RechargeTab } from './RechargeTab';
+import { ReminderTab } from './ReminderTab';
 
-type Tab = 'store' | 'banners' | 'items' | 'recharge' | 'bindings';
+type Tab = 'store' | 'banners' | 'items' | 'recharge' | 'coupons' | 'reminders' | 'invites' | 'food' | 'bookings' | 'bindings';
 const key = mpAdminKey;
 const imageUrl = (id: number) => `/api/admin/mp/images/${id}`;
 
@@ -87,6 +93,11 @@ export function MpAdminSection() {
   const can = useCan();
   const canContent = can('mp.content');
   const canRecharge = can('mp.recharge');
+  const canCoupon = can('mp.coupon');
+  const canReminder = can('mp.reminder');
+  const canInvite = can('mp.invite');
+  const canFood = can('mp.food');
+  const canBooking = can('mp.booking');
   const q = useQuery({ queryKey: key, queryFn: () => api.get<MpAdminData>('/api/admin/mp') });
   const tabs = useMemo(
     () =>
@@ -95,9 +106,14 @@ export function MpAdminSection() {
         { value: 'banners' as const, label: '首页轮播', show: canContent },
         { value: 'items' as const, label: '项目介绍', show: canContent },
         { value: 'recharge' as const, label: '线上充值', show: canRecharge },
+        { value: 'coupons' as const, label: '领券中心', show: canCoupon },
+        { value: 'reminders' as const, label: '到期提醒', show: canReminder },
+        { value: 'invites' as const, label: '邀请好友', show: canInvite },
+        { value: 'food' as const, label: '扫码点餐', show: canFood },
+        { value: 'bookings' as const, label: '预约', show: canBooking },
         { value: 'bindings' as const, label: '会员的微信', show: true },
       ].filter((t) => t.show),
-    [canContent, canRecharge],
+    [canContent, canRecharge, canCoupon, canReminder, canInvite, canFood, canBooking],
   );
   const [tab, setTab] = useState<Tab>(tabs[0]!.value);
   const unreadable = useMpPendingUnreadable();
@@ -133,6 +149,16 @@ export function MpAdminSection() {
           <ItemsTab data={q.data} />
         ) : tab === 'recharge' ? (
           <RechargeTab data={q.data} />
+        ) : tab === 'coupons' ? (
+          <CouponTab data={q.data} />
+        ) : tab === 'reminders' ? (
+          <ReminderTab data={q.data} />
+        ) : tab === 'invites' ? (
+          <InviteTab data={q.data} />
+        ) : tab === 'food' ? (
+          <FoodTab data={q.data} />
+        ) : tab === 'bookings' ? (
+          <BookingTab data={q.data} />
         ) : (
           <BindingsTab />
         )}
@@ -763,15 +789,23 @@ function BindingsTab() {
                 <div key={b.id} className="flex flex-wrap items-center gap-3 py-2.5">
                   <div className="min-w-0 flex-1 text-[13.5px]">
                     <p>
-                      微信 …{b.openidTail} · 手机号 {b.phone} {b.mock && <Badge tone="ember">模拟微信</Badge>}
+                      {b.purgedAt ? (
+                        '微信与手机号已清除（解绑满 3 年）'
+                      ) : (
+                        <>
+                          微信 …{b.openidTail} · 手机号 {b.phone}
+                        </>
+                      )}{' '}
+                      {b.mock && <Badge tone="ember">模拟微信</Badge>}
                     </p>
                     <p className="text-[12.5px] text-ink-3">
                       {formatDateTime(b.boundAt)} 绑定
                       {b.unboundAt && ` · ${formatDateTime(b.unboundAt)} ${b.unboundByName ?? ''}解绑（${b.unbindReason}）`}
+                      {b.purgedAt && ` · ${formatDateTime(b.purgedAt)} 清除`}
                     </p>
                   </div>
                   {b.unboundAt ? (
-                    <Badge>已解绑</Badge>
+                    <Badge>{b.purgedAt ? '已清除' : '已解绑'}</Badge>
                   ) : can('mp.unbind') ? (
                     <Button
                       variant="secondary"

@@ -231,6 +231,14 @@ export const PERMISSIONS = {
   'mp.unbind': { roles: ['owner', 'store_manager', 'duty_manager'] },
   /** 线上充值（小程序线第二期 2a，MP_RECHARGE.md，待确认：店主、店总）：设置（开关、可充套餐、限额），处理「已付款待处理」的单子 */
   'mp.recharge': { roles: ['owner', 'store_manager'] },
+  /** 领券中心（小程序线第二期 2c，MP_COUPONS.md，MP27 待确认：店主、店总，与维护券模板同一批人）：哪些券可领、领取限制、停领 */
+  'mp.coupon': { roles: ['owner', 'store_manager'] },
+  /** 到期提醒（小程序线第三期 3a，MP_PHASE3.md 第 1 节，待确认：店主、店总）：开关、三种订阅消息模板 */
+  'mp.reminder': { roles: ['owner', 'store_manager'] },
+  /** 邀请好友（小程序线第三期 3b，MP_PHASE3.md 第 2 节，待确认：店主、店总）：开关、看邀请记录 */
+  'mp.invite': { roles: ['owner', 'store_manager'] },
+  'mp.food': { roles: ['owner', 'store_manager'] },
+  'mp.booking': { roles: ['owner', 'store_manager'] },
   'settings.manage': { roles: ['owner'] },
   'audit.read': { roles: ['owner', 'store_manager'] },
   // ── 数据看板（v0.6.0；当日看板仍按「查看当日流水与日结」）──
@@ -385,6 +393,11 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'mp.content': '维护小程序内容（门店信息、首页轮播、项目介绍、开关）',
   'mp.unbind': '解绑会员的微信（换手机号、换微信）',
   'mp.recharge': '小程序线上充值：设置，处理已付款没能自动入账的单子',
+  'mp.coupon': '小程序领券中心：哪些券可领、每人限领几张、停领',
+  'mp.reminder': '小程序到期提醒：开关、订阅消息模板',
+  'mp.invite': '小程序邀请好友：开关、看邀请记录',
+  'mp.food': '小程序扫码点餐：开关、可点的菜、打印桌码、看点单记录',
+  'mp.booking': '小程序预约：开关、可约的项目与房间、看小程序的预约',
   'settings.manage': '修改经营规则设置',
   'audit.read': '查看操作审计',
   'report.executive': '看经营总览（任选时段、环比）',
@@ -408,7 +421,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   },
   { title: '券与会员权益', items: ['coupon.manage', 'coupon.issue', 'coupon.void'] },
   { title: '设备', items: ['device.view', 'device.test', 'device.manage', 'print.network'] },
-  { title: '微信小程序', items: ['mp.content', 'mp.unbind', 'mp.recharge'] },
+  { title: '微信小程序', items: ['mp.content', 'mp.unbind', 'mp.recharge', 'mp.coupon', 'mp.reminder', 'mp.invite', 'mp.food', 'mp.booking'] },
   {
     title: 'ERP（库存、采购、货款、费用、营业数据）',
     items: [

@@ -190,7 +190,9 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '045_ticket_extension.sql',
   '046_mp_recharge.sql',
   '047_membership_finish.sql',
+  '048_mp_coupons_refunds.sql',
   '049_mp_claim_refund_route.sql',
+  '050_mp_reminders_retention.sql',
   '051_mp_entries.sql',
   '052_usage_charges.sql',
   '053_bookings.sql',
@@ -201,6 +203,9 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '058_challenge_parking.sql',
   '059_shift_drawers.sql',
   '060_member_history.sql',
+  '061_mp_invites.sql',
+  '062_mp_food.sql',
+  '063_mp_bookings.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

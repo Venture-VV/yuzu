@@ -1,0 +1,36 @@
+<view class="view">
+  <view wx:if="{{state === 'loading'}}" class="wait">正在打开…</view>
+
+  <view wx:elif="{{state === 'offline' || state === 'error'}}" class="panel wait">
+    <text class="h3">{{state === 'offline' ? '门店系统连接中' : message}}</text>
+    <text wx:if="{{state === 'offline'}}">账单暂时看不到，店里网络恢复后就能看</text>
+    <button class="btn ghost" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+
+  <view wx:elif="{{state === 'none'}}" class="panel wait">
+    <text class="h3">现在没有在店手牌</text>
+    <text>{{message}}</text>
+  </view>
+
+  <block wx:else>
+    <view class="panel head">
+      <text class="eyebrow">Bill</text>
+      <text class="h3 num">手牌 {{tagCode}}</text>
+      <text wx:if="{{since}}" class="sub num">{{since}} 入场</text>
+    </view>
+    <view class="rows">
+      <view wx:for="{{lines}}" wx:key="key" class="row-line line">
+        <view class="l-main">
+          <text>{{item.name}}</text>
+          <text wx:if="{{item.status}}" class="st {{item.waiting ? 'wait-on' : ''}}">{{item.status}}</text>
+        </view>
+        <text class="num l-qty">{{item.qty}}</text>
+        <text class="num l-amt">{{item.amount}}</text>
+      </view>
+      <view wx:if="{{!lines.length}}" class="row-line"><text class="sub">还没有消费</text></view>
+    </view>
+    <view class="total"><text>合计</text><text class="num">{{total}}</text></view>
+    <text class="sub fine">明细的原价合计；会员折扣、券在前台结账时算，以前台结账为准。退菜请服务员。</text>
+    <button class="btn ghost block more" hover-class="btn-hover" bindtap="onFood">继续点餐</button>
+  </block>
+</view>

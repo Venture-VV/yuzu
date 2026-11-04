@@ -8,11 +8,19 @@ import { MP_GATEWAY_HEADER } from '@shared/mp';
 import type { AppConfig } from '../../config';
 import type { Sql } from '../../db';
 import { AppError } from '../../lib/errors';
+import { registerMpBookingRoutes } from './booking-routes';
+import { registerMpCouponRoutes } from './coupon-routes';
+import { registerMpFoodRoutes } from './food-routes';
+import { registerMpInviteRoutes } from './invite-routes';
 import { loadPayRuntime, setActivePay, type PayRuntime } from './pay';
 import { registerMpPublicRoutes } from './public';
 import { sweepRechargeOrders } from './recharge';
+import { processRefunds, registerRefundRoute } from './refund';
 import { maybeReconcileYesterday } from './recharge-recon';
 import { registerMpRechargeRoutes } from './recharge-routes';
+import { registerMpReminderRoutes } from './reminder-routes';
+import { planReminders } from './reminders';
+import { purgeOldBindings } from './retention';
 import { registerMpMemberRoutes } from './routes';
 
 const digest = (s: string) => createHash('sha256').update(s, 'utf8').digest();
@@ -22,6 +30,8 @@ export interface MpAppOptions {
   pay?: PayRuntime | null;
   /** 补查、关单的间隔（毫秒，默认每分钟）；0 不开（测试里直接调 sweepRechargeOrders） */
   sweepMs?: number;
+  /** 到期提醒：网关来取时按什么时间算（测试给固定的时间；不给是此刻） */
+  clock?: () => Date;
 }
 
 export async function buildMpApp(sql: Sql, config: AppConfig, opts: MpAppOptions = {}): Promise<FastifyInstance> {
@@ -62,6 +72,16 @@ export async function buildMpApp(sql: Sql, config: AppConfig, opts: MpAppOptions
 
   registerMpPublicRoutes(app, { sql, config });
   registerMpMemberRoutes(app, { sql, config });
+  // 线上领券（第二期 2c）
+  registerMpCouponRoutes(app, { sql, config });
+  // 到期提醒（第三期 3a）：顾客设提醒；网关取待发的消息、回报结果
+  registerMpReminderRoutes(app, { sql, config }, opts.clock);
+  // 邀请好友（第三期 3b）：邀请人发邀请码、收回；好友领取（主线的 createTrialInviteFromMp 建临时身份）
+  registerMpInviteRoutes(app, { sql, config });
+  // 扫码点餐（第三期 3c）：点餐页、下单（主线的 orderFoodFromMp 挂在顾客的手牌账单上）、确认作废、我的账单
+  registerMpFoodRoutes(app, { sql, config });
+  // 预约技师与派对房（第三期 3d）：可约的、时段、预约与取消（主线的 createBookingFromMp、cancelBookingFromMp）、确认作废、我的预约
+  registerMpBookingRoutes(app, { sql, config });
 
   // 线上充值（第二期 2a）：微信支付的凭据只在门店 yuzu（MP17）；配错了不开线上充值、写日志，门店系统照常启动
   let pay: PayRuntime | null = null;
@@ -80,17 +100,45 @@ export async function buildMpApp(sql: Sql, config: AppConfig, opts: MpAppOptions
     }
   }
   registerMpRechargeRoutes(app, { sql, config }, pay);
+  // 原路退回（2d）：向主线报能不能接（门店系统的微信支付配好、店主开着才能接）
+  registerRefundRoute();
   const sweepMs = opts.sweepMs ?? 60_000;
   if (sweepMs > 0) {
     let timer: NodeJS.Timeout | undefined;
     let running = false;
+    let planning = false;
+    // 解绑满 3 年清除（MP16）：每小时看一次
+    let purgedAt = 0;
     app.addHook('onReady', async () => {
       timer = setInterval(() => {
+        if (Date.now() - purgedAt >= 3_600_000) {
+          purgedAt = Date.now();
+          purgeOldBindings({ sql, config })
+            .then((r) => {
+              if (r.bindings || r.fences) app.log.info(`解绑满 3 年清除：绑定记录 ${r.bindings} 条，作废登记 ${r.fences} 条`);
+            })
+            .catch((error: unknown) => app.log.error({ err: error }, '解绑满 3 年清除出错，一小时后再试'));
+        }
+        // 到期提醒（第三期 3a）：到点的同意排成消息、网关没回报的记结果不明；与线上充值的补查互不等
+        if (!planning) {
+          planning = true;
+          planReminders({ sql, config })
+            .then((r) => {
+              if (r.queued || r.skipped || r.unknown) app.log.info(`到期提醒：排了 ${r.queued} 条，不发 ${r.skipped} 条，结果不明 ${r.unknown} 条`);
+              if (r.errors) app.log.error(`到期提醒：${r.errors} 条排期出错，下一分钟再排`);
+            })
+            .catch((error: unknown) => app.log.error({ err: error }, '到期提醒排期出错，下一分钟再排'))
+            .finally(() => {
+              planning = false;
+            });
+        }
         if (running) return;
         running = true;
         sweepRechargeOrders({ sql, config }, pay)
           .then(async (r) => {
             if (r.errors) app.log.error(`线上充值单补查：${r.checked} 张里 ${r.errors} 张出错，下一分钟再查`);
+            // 原路退回（2d）：取新的行、申请退款、查处理中的
+            await processRefunds({ sql, config }, pay).catch((error: unknown) => app.log.error({ err: error }, '原路退回出错，下一分钟再试'));
             // 2b 对账：北京时间 10 点半以后对前一天的账（一天一次，没对上的标红给店主看）
             const recon = await maybeReconcileYesterday({ sql, config }, pay).catch((error: unknown) => {
               app.log.error(error instanceof Error ? error.message : String(error));

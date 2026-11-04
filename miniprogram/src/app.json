@@ -9,6 +9,13 @@
     "pages/coupons/index",
     "pages/benefits/index",
     "pages/recharge/index",
+    "pages/coupon-center/index",
+    "pages/invite/index",
+    "pages/invite-claim/index",
+    "pages/food/index",
+    "pages/bill/index",
+    "pages/booking/index",
+    "pages/bookings/index",
     "pages/unbind/index"
   ],
   "window": {

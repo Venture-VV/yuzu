@@ -61,3 +61,18 @@
 .later {
   margin-top: 56rpx;
 }
+
+/* 到期提醒（第三期 3a） */
+.cp-remind {
+  display: inline-block;
+  margin-top: 12rpx;
+  padding: 6rpx 18rpx;
+  font-size: 24rpx;
+  color: var(--wood);
+  border: 1px solid var(--wood-3);
+  border-radius: 999rpx;
+}
+.cp-remind.on {
+  color: var(--muted);
+  border-color: var(--line);
+}

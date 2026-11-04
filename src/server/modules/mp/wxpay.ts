@@ -160,6 +160,58 @@ export function parseTransaction(raw: unknown): WxTransaction {
   };
 }
 
+/** 商户退款单号：1–64 个字符，只能是数字、大小写字母、_ - | * @（微信的规定） */
+export const OUT_REFUND_NO = /^[0-9A-Za-z_\-|*@]{1,64}$/;
+
+/** 微信支付的退款（申请退款、查退款的应答，退款通知解密后的内容）：只取用得到的字段 */
+export interface WxRefund {
+  /** 微信退款单号 */
+  refundId: string;
+  outRefundNo: string;
+  transactionId: string | null;
+  outTradeNo: string | null;
+  /** SUCCESS 退款成功、PROCESSING 处理中、ABNORMAL 退款异常（例如顾客的卡注销了，要到商户平台手动处理）、CLOSED 退款关闭 */
+  status: string;
+  /** 这笔退了多少（分） */
+  refund: number;
+  /** 原订单金额（分） */
+  total: number;
+  /** 退到哪（例如「支付用户零钱」「招商银行信用卡0403」） */
+  userReceivedAccount: string | null;
+  successTime: string | null;
+}
+
+const Refund = z.object({
+  refund_id: z.string().min(1),
+  out_refund_no: z.string().min(1),
+  transaction_id: z.string().optional(),
+  out_trade_no: z.string().optional(),
+  // 申请、查询的应答里是 status，退款通知里是 refund_status
+  status: z.string().optional(),
+  refund_status: z.string().optional(),
+  user_received_account: z.string().optional(),
+  success_time: z.string().optional(),
+  amount: z.object({ refund: z.number().int(), total: z.number().int() }),
+});
+
+export function parseRefund(raw: unknown): WxRefund {
+  const r = Refund.safeParse(raw);
+  const status = r.success ? (r.data.status ?? r.data.refund_status) : undefined;
+  if (!r.success || !status) throw new WxPayError('WXPAY_BAD_RESPONSE', '微信支付的退款内容格式不对');
+  const x = r.data;
+  return {
+    refundId: x.refund_id,
+    outRefundNo: x.out_refund_no,
+    transactionId: x.transaction_id ?? null,
+    outTradeNo: x.out_trade_no ?? null,
+    status,
+    refund: x.amount.refund,
+    total: x.amount.total,
+    userReceivedAccount: x.user_received_account ?? null,
+    successTime: x.success_time ?? null,
+  };
+}
+
 const Notification = z.object({
   id: z.string(),
   event_type: z.string(),
@@ -167,11 +219,19 @@ const Notification = z.object({
   resource: z.unknown(),
 });
 
+/** 微信支付发来的通知：支付的（TRANSACTION.*）带订单，退款的（REFUND.*）带退款，别的事件两样都没有 */
+export interface WxNotification {
+  id: string;
+  eventType: string;
+  transaction: WxTransaction | null;
+  refund: WxRefund | null;
+}
+
 /**
- * 到账通知（网关原样转来的头与报文主体）：验签 → 解密 → 订单内容。
- * 只有支付成功的通知（TRANSACTION.SUCCESS）会带订单；别的事件也照样验签解密，由调用方按 tradeState 处理。
+ * 微信支付的通知（网关原样转来的头与报文主体）：验签 → 解密 → 按事件类型取订单或退款。
+ * 别的事件也照样验签解密、不报错：调用方回「收到」就行，免得微信一直重发（例如商户平台把退款通知也配到了这个地址）。
  */
-export function parseNotification(cfg: WxPayConfig, h: WxSignedHeaders, body: string, now = nowSeconds()): { id: string; eventType: string; transaction: WxTransaction } {
+export function parseNotification(cfg: WxPayConfig, h: WxSignedHeaders, body: string, now = nowSeconds()): WxNotification {
   verifyWechatSignature(cfg, h, body, now);
   let json: unknown;
   try {
@@ -188,7 +248,13 @@ export function parseNotification(cfg: WxPayConfig, h: WxSignedHeaders, body: st
     if (error instanceof WxPayError) throw error;
     throw new WxPayError('WXPAY_BAD_NOTIFY', '到账通知解密后不是 JSON');
   }
-  return { id: n.data.id, eventType: n.data.event_type, transaction: parseTransaction(plain) };
+  const type = n.data.event_type;
+  return {
+    id: n.data.id,
+    eventType: type,
+    transaction: type.startsWith('TRANSACTION.') ? parseTransaction(plain) : null,
+    refund: type.startsWith('REFUND.') ? parseRefund(plain) : null,
+  };
 }
 
 /** 小程序 wx.requestPayment 的参数：签名串是 AppID、时间戳、随机串、package（prepay_id=…）各占一行，用商户私钥签 */
@@ -220,6 +286,19 @@ export interface JsapiOrderInput {
   expiresAt: Date;
 }
 
+export interface RefundInput {
+  /** 原来那笔支付的商户单号 */
+  outTradeNo: string;
+  /** 商户退款单号：同一笔退款重复申请用同一个，微信只退一次 */
+  outRefundNo: string;
+  /** 退款原因（顾客在微信的退款消息里看得到），超过 80 个字截掉 */
+  reason: string;
+  /** 这次退多少（分） */
+  refundCents: number;
+  /** 原订单金额（分），要与微信那边的一致 */
+  totalCents: number;
+}
+
 export interface WxPayClient {
   /** 下单：拿 prepay_id */
   jsapiOrder(o: JsapiOrderInput): Promise<{ prepayId: string }>;
@@ -229,6 +308,13 @@ export interface WxPayClient {
   closeOrder(outTradeNo: string): Promise<void>;
   /** 某一天（北京时间，YYYY-MM-DD）的交易账单：申请 → 下载 → 按摘要核对 → 解析；那天没有交易返回空数组 */
   tradeBill(billDate: string): Promise<WxTradeBillRow[]>;
+  /**
+   * 申请退款（原路退回，2d）：同一个商户退款单号、同样的内容再申请，微信回同一笔退款、不会退两次。
+   * 应答里的状态多半是「处理中」，结果看退款通知或查退款
+   */
+  refund(r: RefundInput): Promise<WxRefund>;
+  /** 按商户退款单号查退款：微信那边没有这一笔返回 null */
+  queryRefund(outRefundNo: string): Promise<WxRefund | null>;
 }
 
 /** 交易账单的一行（2b 对账用到的字段；金额都是分） */
@@ -426,6 +512,31 @@ export function createWxPayClient(cfg: WxPayConfig, fetchImpl: WxFetch = fetch a
         throw new WxPayError('WXPAY_BAD_BILL', '下载的账单与微信给的摘要对不上（文件不完整或被改过）');
       }
       return parseTradeBill(bytes.toString('utf8'));
+    },
+
+    async refund(r) {
+      if (!OUT_TRADE_NO.test(r.outTradeNo)) throw new WxPayError('WXPAY_BAD_INPUT', '商户单号不符合微信的格式');
+      if (!OUT_REFUND_NO.test(r.outRefundNo)) throw new WxPayError('WXPAY_BAD_INPUT', '商户退款单号不符合微信的格式');
+      if (!Number.isInteger(r.refundCents) || r.refundCents <= 0 || !Number.isInteger(r.totalCents) || r.refundCents > r.totalCents) {
+        throw new WxPayError('WXPAY_BAD_INPUT', '退款金额应为正整数（分），且不超过原订单金额');
+      }
+      const res = await call('POST', '/v3/refund/domestic/refunds', {
+        out_trade_no: r.outTradeNo,
+        out_refund_no: r.outRefundNo,
+        ...(r.reason.trim() ? { reason: [...r.reason.trim()].slice(0, 80).join('') } : {}),
+        notify_url: cfg.notifyUrl,
+        amount: { refund: r.refundCents, total: r.totalCents, currency: 'CNY' },
+      });
+      if (res.status !== 200) throw failure(res.status, res.body);
+      return parseRefund(JSON.parse(res.body));
+    },
+
+    async queryRefund(outRefundNo) {
+      if (!OUT_REFUND_NO.test(outRefundNo)) throw new WxPayError('WXPAY_BAD_INPUT', '商户退款单号不符合微信的格式');
+      const res = await call('GET', `/v3/refund/domestic/refunds/${encodeURIComponent(outRefundNo)}`);
+      if (res.status === 404) return null;
+      if (res.status !== 200) throw failure(res.status, res.body);
+      return parseRefund(JSON.parse(res.body));
     },
   };
 }

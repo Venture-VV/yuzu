@@ -1,0 +1,100 @@
+<view class="view {{state === 'ready' && menu.canOrder ? 'with-bar' : ''}}">
+  <view wx:if="{{state === 'loading'}}" class="wait">正在打开…</view>
+
+  <view wx:elif="{{state === 'offline' || state === 'error'}}" class="panel wait">
+    <text class="h3">{{state === 'offline' ? '门店系统连接中' : message}}</text>
+    <text wx:if="{{state === 'offline'}}">暂时点不了，请服务员点单，或稍后再试</text>
+    <button class="btn ghost" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+
+  <!-- 下单结果待确认：上次点下单时网络不好，确认之前不能再下 -->
+  <view wx:elif="{{state === 'pending'}}" class="panel">
+    <text class="h3">下单结果待确认</text>
+    <text class="lede">上次下单时网络不好，还不知道下成没有。网络好了点「再确认一次」，门店系统会告诉我们结果；确认之前先不要重新下，免得点重。</text>
+    <button class="btn primary block" hover-class="btn-hover" bindtap="onConfirmPending">再确认一次</button>
+    <text wx:if="{{message}}" class="sub">{{message}}</text>
+  </view>
+
+  <view wx:elif="{{state === 'unreadable'}}" class="panel">
+    <text class="h3">下单记录暂时读不出来</text>
+    <text class="lede">手机上保存的下单记录读不出来，为防止点重，先不能下单。请稍后点「再试一次」；一直这样，请清理微信的存储空间后再打开小程序，或请服务员点单。</text>
+    <button class="btn primary block" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+
+  <!-- 下好了 -->
+  <view wx:elif="{{state === 'ordered'}}" class="panel hero">
+    <text class="eyebrow">Ordered</text>
+    <text class="h3">已下单，厨房在做了</text>
+    <text class="lede">{{ordered.where}}<text wx:if="{{ordered.no}}" class="num"> · {{ordered.no}}</text></text>
+    <view class="rows done-rows">
+      <view wx:for="{{ordered.lines}}" wx:key="key" class="row-line done-row">
+        <view class="dr-main">
+          <text>{{item.name}}</text>
+          <text wx:if="{{item.note}}" class="sub dr-note">{{item.note}}</text>
+        </view>
+        <text class="num dr-qty">{{item.qty}}</text>
+        <text class="num dr-amt">{{item.amount}}</text>
+      </view>
+    </view>
+    <view class="done-total"><text class="sub">合计（结账时按会员折扣、券另算）</text><text class="num">{{ordered.total}}</text></view>
+    <view class="pair">
+      <button class="btn ghost" hover-class="btn-hover" bindtap="onBill">看我的账单</button>
+      <button class="btn primary" hover-class="btn-hover" bindtap="onMore">继续点</button>
+    </view>
+  </view>
+
+  <block wx:else>
+    <!-- 手牌与桌 -->
+    <view class="panel head">
+      <text class="eyebrow">Taste</text>
+      <text class="h3">扫码点餐</text>
+      <view wx:if="{{menu.tagCode}}" class="where">
+        <view class="where-t">
+          <text class="num">手牌 {{menu.tagCode}}</text>
+          <text wx:if="{{menu.table}}"> · 送到 {{menu.table.name}} 桌</text>
+          <text wx:else class="sub"> · 没扫桌码：服务员按手牌送</text>
+        </view>
+        <button class="btn quiet scan" hover-class="btn-hover" bindtap="onScan">{{menu.table ? '换一张桌' : '扫桌码'}}</button>
+      </view>
+      <text wx:if="{{menu.tableNotice}}" class="why">{{menu.tableNotice}}</text>
+      <view wx:if="{{!menu.canOrder}}" class="cant">
+        <text>{{menu.notice}}</text>
+        <button wx:if="{{menu.open && !menu.bound}}" class="btn ghost bind" hover-class="btn-hover" bindtap="onBind">去绑定会员</button>
+      </view>
+    </view>
+
+    <!-- 菜单 -->
+    <view wx:for="{{groups}}" wx:for-item="g" wx:key="name" class="sec group">
+      <text class="eyebrow g-h">{{g.name}}</text>
+      <view class="rows">
+        <view wx:for="{{g.dishes}}" wx:for-item="d" wx:key="id" class="row-line dish {{d.soldOut ? 'out' : ''}}">
+          <view class="d-main">
+            <text class="d-name">{{d.name}}</text>
+            <view class="d-meta">
+              <text class="num d-price">{{d.price}}</text>
+              <text wx:if="{{d.stock}}" class="sub d-stock">{{d.stock}}</text>
+            </view>
+            <text wx:if="{{d.count > 0}}" class="d-note" data-id="{{d.id}}" bindtap="onNote">{{d.note ? '备注：' + d.note : '加口味备注'}}</text>
+          </view>
+          <view wx:if="{{menu.canOrder && !d.soldOut}}" class="stepper">
+            <view wx:if="{{d.count > 0}}" class="st-btn" hover-class="tap" data-id="{{d.id}}" bindtap="onMinus" aria-label="减一份">−</view>
+            <text wx:if="{{d.count > 0}}" class="num st-n">{{d.count}}</text>
+            <view class="st-btn add" hover-class="tap" data-id="{{d.id}}" bindtap="onAdd" aria-label="加一份">+</view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <text wx:if="{{menu.open}}" class="sub foot">一单最多 {{menu.limits.maxQuantity}} 份；自己不能退菜，退菜请服务员；结账在前台，会员折扣、券在结账时算。</text>
+    <view wx:if="{{menu.tagCode}}" class="foot-link" hover-class="tap" bindtap="onBill"><text>看我的账单</text></view>
+  </block>
+</view>
+
+<!-- 底部：已选与下单 -->
+<view wx:if="{{state === 'ready' && menu.canOrder}}" class="bar">
+  <view class="bar-sum">
+    <text class="sub">已选 {{count}} 份</text>
+    <text class="num bar-total">{{count > 0 ? total : '¥0.00'}}</text>
+  </view>
+  <button class="btn primary bar-go" hover-class="btn-hover" bindtap="onSubmit" loading="{{busy}}" disabled="{{busy || count === 0}}">下单</button>
+</view>
