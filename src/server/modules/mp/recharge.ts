@@ -33,7 +33,7 @@ import { parse } from '../../lib/validate';
 import { memberGradeInfo } from '../membership';
 import { loadSettings } from '../settings';
 import { previewOnlineRecharge, rechargeOnline } from '../wallet-online';
-import { activeBinding } from './member';
+import { activeBinding, lockOpenidShared } from './member';
 import { loadRechargeRules } from './rules';
 import type { PayRuntime } from './pay';
 import { parseNotification, paymentParams, WxPayError, type WxTransaction } from './wxpay';
@@ -163,10 +163,15 @@ async function boundMember(db: Db, openid: string): Promise<{ bindingId: number;
   return { bindingId: b.id, memberId: b.memberId };
 }
 
-/** 这个微信下的单（别人的单当作没有） */
+/**
+ * 这个微信**现在这条有效绑定**下的单：没绑定回「请先绑定会员」；解绑、换绑之前下的单当作没有，
+ * 不能再看、再付、再取消（小程序线测试 866ccfa 的 P1）。之前已经付了的照常由到账通知、补查按原单入账到原来的会员，
+ * 解绑后还没付的由解绑与每分钟的补查请微信关掉（closeUnboundOrders）
+ */
 async function myOrder(db: Db, openid: string, orderNo: string): Promise<OrderRow> {
   if (!MP_RECHARGE_ORDER_NO.test(orderNo)) throw badRequest('充值单号不正确');
-  const [o] = await db<OrderRow[]>`SELECT * FROM mp_recharge_orders WHERE order_no = ${orderNo} AND openid = ${openid}`;
+  const { bindingId } = await boundMember(db, openid);
+  const [o] = await db<OrderRow[]>`SELECT * FROM mp_recharge_orders WHERE order_no = ${orderNo} AND openid = ${openid} AND binding_id = ${bindingId}`;
   if (!o) throw notFound('充值单不存在');
   return o;
 }
@@ -200,7 +205,7 @@ async function usedToday(db: Db, memberId: number, today: string): Promise<numbe
 }
 
 export async function rechargeOptions(deps: Deps, pay: PayRuntime | null, openid: string): Promise<MpRechargeOptions> {
-  const { memberId } = await boundMember(deps.sql, openid);
+  const { bindingId, memberId } = await boundMember(deps.sql, openid);
   const rules = await loadRechargeRules(deps.sql);
   const settings = await loadSettings(deps.sql);
   const now = new Date();
@@ -238,7 +243,8 @@ export async function rechargeOptions(deps: Deps, pay: PayRuntime | null, openid
     });
   }
   const used = await usedToday(deps.sql, memberId, today);
-  const [pendingRow] = await deps.sql<OrderRow[]>`SELECT * FROM mp_recharge_orders WHERE member_id = ${memberId} AND status = 'pending'`;
+  // 只给这条绑定下的：换绑前那个微信留下、还没关上的单不给这个微信看、也付不了（下单的付款人是那个微信）
+  const [pendingRow] = await deps.sql<OrderRow[]>`SELECT * FROM mp_recharge_orders WHERE binding_id = ${bindingId} AND status = 'pending'`;
   const notice = !rules.enabled
     ? '线上充值还没开通，请到前台充值'
     : !pay
@@ -308,15 +314,22 @@ export async function createRechargeOrder(deps: Deps, pay: PayRuntime | null, op
       // 这个编号已经确认作废（结果不确定时小程序请门店系统作废的）：晚到的原请求不再建单
       const [fenced] = await tx`SELECT 1 FROM mp_op_fences WHERE key = ${input.clientKey} AND op_type = 'mp_recharge' AND openid = ${openid}`;
       if (fenced) throw conflict('OP_ABANDONED', '这次充值已经放弃，请重新选择');
+      // 这个微信绑定状态的共享锁（解绑拿排他的）：这里读到的有效绑定到写单、提交之前不会被解绑；
+      // 解绑提交之后再扫这条绑定没付的单去关，不会漏掉同时建的这一张（小程序线测试 866ccfa 的 P1）
+      await lockOpenidShared(tx, openid);
+      const { bindingId, memberId } = await boundMember(tx, openid);
       const [prev] = await tx<OrderRow[]>`SELECT * FROM mp_recharge_orders WHERE client_key = ${input.clientKey}`;
       if (prev) {
-        const same = prev.openid === openid && (input.planId !== null ? prev.planId === input.planId : prev.planId === null && prev.amount === input.amount);
+        // 同一个编号重提：只认同一个微信、同一条绑定、同样的内容；解绑、换绑之前下的单不再给这个微信
+        const same =
+          prev.openid === openid &&
+          prev.bindingId === bindingId &&
+          (input.planId !== null ? prev.planId === input.planId : prev.planId === null && prev.amount === input.amount);
         if (!same) throw conflict('CLIENT_KEY_REUSED', '这次充值的编号已经用过，请重新选择');
         return { order: prev, replayed: true };
       }
       const rules = await loadRechargeRules(tx);
       if (!rules.enabled) throw new AppError(403, 'MP_RECHARGE_DISABLED', '线上充值还没开通，请到前台充值');
-      const { bindingId, memberId } = await boundMember(tx, openid);
       const now = new Date();
       const settings = await loadSettings(tx);
       const today = businessDateOf(now, deps.config.timezone, settings.businessDayStartHour);
@@ -345,8 +358,12 @@ export async function createRechargeOrder(deps: Deps, pay: PayRuntime | null, op
       if ((await usedToday(tx, memberId, today)) >= rules.dailyLimit) {
         throw unprocessable('DAILY_LIMIT', `线上每天最多充 ${rules.dailyLimit} 笔，明天再来或到前台充值`);
       }
-      const [pending] = await tx`SELECT 1 FROM mp_recharge_orders WHERE member_id = ${memberId} AND status = 'pending'`;
-      if (pending) throw conflict('ORDER_PENDING', '还有一张待支付的充值单，请先付完或取消');
+      const [pending] = await tx<{ bindingId: number }[]>`SELECT binding_id FROM mp_recharge_orders WHERE member_id = ${memberId} AND status = 'pending'`;
+      if (pending) {
+        // 换绑前那个微信留下的、解绑时没关上（例如当时微信支付连不上）：每分钟的补查接着关
+        if (pending.bindingId !== bindingId) throw conflict('ORDER_PENDING', '换绑之前下的那张充值单还在关闭，请过一分钟再试');
+        throw conflict('ORDER_PENDING', '还有一张待支付的充值单，请先付完或取消');
+      }
       const expiresAt = new Date(now.getTime() + MP_RECHARGE_EXPIRE_MINUTES * 60_000);
       const [row] = await tx<OrderRow[]>`
         INSERT INTO mp_recharge_orders (order_no, client_key, openid, binding_id, member_id, plan_id, plan_name, amount,
@@ -409,16 +426,22 @@ async function ensurePayment(deps: Deps, pay: PayRuntime, o: OrderRow): Promise<
       return null;
     }
     // 下单期间这张单可能被取消、关掉了（「继续支付」与「取消」同时点）：只有还是待支付才记下 prepay_id、给支付参数；
-    // 已经不是待支付的，刚才在微信下的这一单要关掉，不能留着能付（审查 2a 的 P2）
+    // 已经不是待支付的，刚才在微信下的这一单要关掉，不能留着能付（审查 2a 的 P2）。
+    // 下单期间这条绑定被解除了的也一样：解绑之后不再给支付参数（小程序线测试 866ccfa 的 P1）
     const [kept] = await deps.sql<{ prepayId: string }[]>`
-      UPDATE mp_recharge_orders SET prepay_id = coalesce(prepay_id, ${prepayId}), updated_at = now()
-      WHERE id = ${o.id} AND status = 'pending'
-      RETURNING prepay_id`;
+      UPDATE mp_recharge_orders o SET prepay_id = coalesce(o.prepay_id, ${prepayId}), updated_at = now()
+      WHERE o.id = ${o.id} AND o.status = 'pending'
+        AND EXISTS (SELECT 1 FROM mp_bindings b WHERE b.id = o.binding_id AND b.unbound_at IS NULL)
+      RETURNING o.prepay_id`;
     if (!kept) {
-      await pay.client.closeOrder(o.orderNo).catch(async (error: unknown) => {
-        if (error instanceof WxPayError && error.code === 'ORDERPAID') await syncFromWechat(deps, pay, o, 'order');
-      });
-      await recordEvent(deps.sql, o.id, 'wx_order', false, 'ORDER_NOT_PENDING', { message: '下单期间这张单已经不是待支付，已请微信关单' });
+      await pay.client.closeOrder(o.orderNo).then(
+        // 微信关上了：解绑的那种这里还是待支付，一起记已关闭（已经不是待支付的不动）；关不上的由每分钟的补查接着关
+        () => closeLocally(deps.sql, o.id, 'cancelled', { unbound: true }),
+        async (error: unknown) => {
+          if (error instanceof WxPayError && error.code === 'ORDERPAID') await syncFromWechat(deps, pay, o, 'order');
+        },
+      );
+      await recordEvent(deps.sql, o.id, 'wx_order', false, 'ORDER_NOT_PENDING', { message: '下单期间这张单已经不是待支付（或绑定已解除），已请微信关单' });
       throw conflict('ORDER_NOT_PENDING', '这张单已经关闭，请重新下单');
     }
     prepayId = kept.prepayId;
@@ -479,6 +502,9 @@ export async function abandonRechargeCreate(deps: Deps, openid: string, raw: unk
     const [prev] = await tx<OrderRow[]>`SELECT * FROM mp_recharge_orders WHERE client_key = ${clientKey}`;
     if (prev) {
       if (prev.openid !== openid) throw conflict('CLIENT_KEY_REUSED', '这次充值的编号已经用过，请重新选择');
+      // 解绑、换绑之前下的单不再给这个微信（解绑时已请微信关掉）：对现在的绑定来说这个编号就是作废了，请重新选择
+      const b = await activeBinding(tx, openid);
+      if (!b || b.id !== prev.bindingId) return { status: 'abandoned' as const };
       return { status: 'created' as const, order: await orderView(tx, prev) };
     }
     await tx`
@@ -520,7 +546,7 @@ async function closeLocally(sql: Sql, orderId: number, reason: 'expired' | 'canc
 }
 
 /** 请微信关单（事务外）：关上了（或微信那边没有这一单）再记「已关闭」；关不上说明已经付了，转去查单入账 */
-async function closeAtWechat(deps: Deps, pay: PayRuntime, o: OrderRow, reason: 'expired' | 'cancelled' | 'wx_failed') {
+async function closeAtWechat(deps: Deps, pay: PayRuntime, o: OrderRow, reason: 'expired' | 'cancelled' | 'wx_failed', detail: Record<string, unknown> = {}) {
   try {
     await pay.client.closeOrder(o.orderNo);
   } catch (error) {
@@ -531,12 +557,37 @@ async function closeAtWechat(deps: Deps, pay: PayRuntime, o: OrderRow, reason: '
     if (!(error instanceof WxPayError && (error.status === 404 || error.code === 'ORDER_NOT_EXIST'))) {
       await recordEvent(deps.sql, o.id, 'close', false, codeOf(error), {
         reason,
+        ...detail,
         message: messageOf(error),
       });
       throw new AppError(503, 'WXPAY_UNAVAILABLE', '微信支付暂时连不上，请稍后再试');
     }
   }
-  await closeLocally(deps.sql, o.id, reason, {});
+  await closeLocally(deps.sql, o.id, reason, detail);
+}
+
+/**
+ * 绑定已经解除的待支付单请微信关掉（解绑之后，与每分钟的补查）：解绑、换绑之后旧单不能再付（小程序线测试 866ccfa 的 P1）。
+ * 微信说已经付了的照常查单、按原单入账到原来的会员（钱不会因为解绑丢）；关不上的（微信连不上）下一分钟接着关。
+ * 不传 bindingId 时扫所有已解绑的，每次最多 20 张。
+ */
+export async function closeUnboundOrders(deps: Deps, pay: PayRuntime | null, bindingId?: number): Promise<SweepResult> {
+  const out: SweepResult = { checked: 0, errors: 0 };
+  const rows = await deps.sql<OrderRow[]>`
+    SELECT o.* FROM mp_recharge_orders o JOIN mp_bindings b ON b.id = o.binding_id
+    WHERE o.status = 'pending' AND b.unbound_at IS NOT NULL ${bindingId === undefined ? deps.sql`` : deps.sql`AND o.binding_id = ${bindingId}`}
+    ORDER BY o.id LIMIT 20`;
+  for (const o of rows) {
+    out.checked++;
+    try {
+      if (sameMode(pay, o)) await closeAtWechat(deps, pay, o, 'cancelled', { unbound: true });
+      // 模拟的单在真的微信支付下（或没有微信支付时）付不了：直接关。真的单要等微信支付恢复后再关
+      else if (o.mock) await closeLocally(deps.sql, o.id, 'cancelled', { unbound: true });
+    } catch {
+      out.errors++;
+    }
+  }
+  return out;
 }
 
 // ── 到账：查单、到账通知、入账 ──
@@ -806,7 +857,8 @@ export interface SweepResult {
 
 /** 待支付超过 2 分钟、1 分钟内没查过的去微信查（已付的入账、过期的关单）；每次最多 20 张 */
 export async function sweepRechargeOrders(deps: Deps, pay: PayRuntime | null, now = new Date()): Promise<SweepResult> {
-  const out: SweepResult = { checked: 0, errors: 0 };
+  // 解绑时没关上的（微信连不上）接着关
+  const out = await closeUnboundOrders(deps, pay);
   // 模拟的单在真的微信支付下付不了：过期就关
   await deps.sql`
     UPDATE mp_recharge_orders SET status = 'closed', closed_at = now(), close_reason = 'expired', updated_at = now()
