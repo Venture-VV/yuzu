@@ -2,7 +2,7 @@
 // 假的微信支付核对商户请求的签名、给应答签名。下单 / 查单 / 关单的请求格式与应答验签；到账通知的验签、防重放、
 // 探测通知、解密；小程序调起支付的 paySign。不连数据库、不连真的微信支付。
 
-import { createCipheriv, createSign, createVerify, generateKeyPairSync } from 'node:crypto';
+import { createCipheriv, createHash, createSign, createVerify, generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   createWxPayClient,
@@ -10,6 +10,7 @@ import {
   nowSeconds,
   OUT_TRADE_NO,
   parseNotification,
+  parseTradeBill,
   paymentParams,
   randomNonce,
   rfc3339Beijing,
@@ -215,5 +216,67 @@ describe('到账通知', () => {
     expect(() => decryptResource(API_V3_KEY, { ...good, ciphertext: bytes.toString('base64') })).toThrow(expect.objectContaining({ code: 'WXPAY_DECRYPT' }));
     expect(() => decryptResource(API_V3_KEY, { ...good, algorithm: 'AES_128' })).toThrow(expect.objectContaining({ code: 'WXPAY_BAD_NOTIFY' }));
     expect(() => decryptResource('short-key', good)).toThrow(expect.objectContaining({ code: 'WXPAY_CONFIG' }));
+  });
+});
+
+describe('交易账单（2b 对账）', () => {
+  const header =
+    '交易时间,公众账号ID,商户号,特约商户号,设备号,微信订单号,商户订单号,用户标识,交易类型,交易状态,付款银行,货币种类,应结订单金额,代金券金额,' +
+    '微信退款单号,商户退款单号,退款金额,充值券退款金额,退款类型,退款状态,商品名称,商户数据包,手续费,费率,订单金额,申请退款金额,费率备注';
+  const line = (f: string[]) => f.map((x) => '`' + x).join(',');
+  const pay = ['2026-11-03 14:05:09', cfg.appId, cfg.mchId, '0', '', '4200000985202611030000000001', 'MPR20261103AAAAAAAAAA', 'oUpF8u-openid', 'JSAPI', 'SUCCESS', 'OTHERS', 'CNY', '1000.50', '0.00', '0', '0', '0.00', '0.00', '', '', '汤崎宝安店 会员充值 1,000.50元', '', '6.00', '0.60%', '1000.50', '0.00', ''];
+  const refund = ['2026-11-03 18:00:00', cfg.appId, cfg.mchId, '0', '', '4200000985202611030000000001', 'MPR20261103AAAAAAAAAA', 'oUpF8u-openid', 'JSAPI', 'REFUND', 'OTHERS', 'CNY', '0.00', '0.00', '50300000000000001', 'TC20261103001', '100.00', '0.00', 'ORIGINAL', 'SUCCESS', '会员充值', '', '-0.60', '0.60%', '0.00', '100.00', ''];
+  const csv = '﻿' + [header, line(pay), line(refund), '总交易单数,应结订单总金额,退款总金额,充值券退款总金额,手续费总金额,订单总金额,申请退款总金额', line(['2', '1000.50', '100.00', '0.00', '5.40', '1000.50', '100.00'])].join('\r\n');
+
+  /** 假的微信支付：申请账单回下载地址与摘要（签名），下载回原文（不签名） */
+  function billWx(o: { hash?: string; noStatement?: boolean } = {}) {
+    const paths: { path: string; signedByMerchant: boolean }[] = [];
+    const fetchImpl: WxFetch = async (url, init) => {
+      const u = new URL(url);
+      const path = u.pathname + u.search;
+      const auth = Object.fromEntries([...(init.headers.Authorization ?? '').matchAll(/(\w+)="([^"]*)"/g)].map((m) => [m[1], m[2]]));
+      const signedByMerchant = createVerify('RSA-SHA256').update(`GET\n${path}\n${auth.timestamp}\n${auth.nonce_str}\n\n`).verify(merchant.publicKey, auth.signature ?? '', 'base64');
+      paths.push({ path, signedByMerchant });
+      if (u.pathname === '/v3/billdownload/file') {
+        const bytes = Buffer.from(csv, 'utf8');
+        return { status: 200, headers: { get: () => null }, text: async () => csv, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer };
+      }
+      const body = o.noStatement
+        ? JSON.stringify({ code: 'NO_STATEMENT_EXIST', message: '账单不存在' })
+        : JSON.stringify({ hash_type: 'SHA1', hash_value: o.hash ?? createHash('sha1').update(Buffer.from(csv, 'utf8')).digest('hex'), download_url: 'https://wxpay.test/v3/billdownload/file?token=t0k3n' });
+      const h = wechatSign(body);
+      const headers: Record<string, string> = { 'wechatpay-timestamp': h.timestamp!, 'wechatpay-nonce': h.nonce!, 'wechatpay-signature': h.signature!, 'wechatpay-serial': h.serial! };
+      return { status: o.noStatement ? 400 : 200, headers: { get: (n: string) => headers[n.toLowerCase()] ?? null }, text: async () => body };
+    };
+    return { fetchImpl, paths };
+  }
+
+  it('申请账单 → 带商户签名下载 → 按摘要核对 → 解析成分（描述里有逗号、开头有 BOM 也不乱；退款单列）', async () => {
+    const wx = billWx();
+    const rows = await createWxPayClient(cfg, wx.fetchImpl).tradeBill('2026-11-03');
+    expect(wx.paths).toEqual([
+      { path: '/v3/bill/tradebill?bill_date=2026-11-03&bill_type=ALL', signedByMerchant: true },
+      { path: '/v3/billdownload/file?token=t0k3n', signedByMerchant: true },
+    ]);
+    expect(rows).toEqual([
+      expect.objectContaining({ outTradeNo: 'MPR20261103AAAAAAAAAA', transactionId: '4200000985202611030000000001', tradeState: 'SUCCESS', amount: 100050, refundAmount: 0 }),
+      expect.objectContaining({ tradeState: 'REFUND', amount: 0, refundId: '50300000000000001', outRefundNo: 'TC20261103001', refundAmount: 10000, refundStatus: 'SUCCESS' }),
+    ]);
+  });
+
+  it('下载的文件与摘要对不上不认；那天没有交易回空；日期格式不对不发', async () => {
+    await expect(createWxPayClient(cfg, billWx({ hash: 'deadbeef' }).fetchImpl).tradeBill('2026-11-03')).rejects.toMatchObject({ code: 'WXPAY_BAD_BILL' });
+    expect(await createWxPayClient(cfg, billWx({ noStatement: true }).fetchImpl).tradeBill('2026-11-03')).toEqual([]);
+    const wx = billWx();
+    await expect(createWxPayClient(cfg, wx.fetchImpl).tradeBill('2026/11/03')).rejects.toMatchObject({ code: 'WXPAY_BAD_INPUT' });
+    expect(wx.paths).toEqual([]);
+  });
+
+  it('解析：表头按名字取列；字段数对不上、金额认不出都报错；到汇总行为止', () => {
+    expect(parseTradeBill(csv)).toHaveLength(2);
+    expect(() => parseTradeBill([header, '`2026-11-03 14:05:09,`only-two'].join('\n'))).toThrow('字段');
+    expect(() => parseTradeBill([header, line(pay.map((f, i) => (i === 12 ? '1,000.50' : f)))].join('\n'))).toThrow();
+    expect(() => parseTradeBill('交易时间,商户号\n')).toThrow('公众账号ID');
+    expect(parseTradeBill('')).toEqual([]);
   });
 });

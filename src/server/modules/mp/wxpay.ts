@@ -6,7 +6,7 @@
 // 凭据只在门店 yuzu（MP17）：商户 API 私钥、APIv3 密钥、微信支付公钥。网关不放、不经手；网关被攻破也伪造不了到账。
 // 这里只管协议，不碰数据库；单子、入账在调用方。
 
-import { createDecipheriv, createPrivateKey, createPublicKey, createSign, createVerify, randomBytes, type KeyObject } from 'node:crypto';
+import { createDecipheriv, createHash, createPrivateKey, createPublicKey, createSign, createVerify, randomBytes, type KeyObject } from 'node:crypto';
 import { z } from 'zod';
 
 export interface WxPayConfig {
@@ -205,6 +205,8 @@ export interface WxFetchResponse {
   status: number;
   headers: { get(name: string): string | null };
   text(): Promise<string>;
+  /** 下载账单时按原始字节核对摘要（有就用；没有按 text() 的 UTF-8 字节算） */
+  arrayBuffer?(): Promise<ArrayBuffer>;
 }
 export type WxFetch = (url: string, init: { method: string; headers: Record<string, string>; body?: string; signal?: AbortSignal }) => Promise<WxFetchResponse>;
 
@@ -225,6 +227,90 @@ export interface WxPayClient {
   queryOrder(outTradeNo: string): Promise<WxTransaction | null>;
   /** 关单：没付的单子到期后关掉（已付的关不了，微信会回错） */
   closeOrder(outTradeNo: string): Promise<void>;
+  /** 某一天（北京时间，YYYY-MM-DD）的交易账单：申请 → 下载 → 按摘要核对 → 解析；那天没有交易返回空数组 */
+  tradeBill(billDate: string): Promise<WxTradeBillRow[]>;
+}
+
+/** 交易账单的一行（2b 对账用到的字段；金额都是分） */
+export interface WxTradeBillRow {
+  /** 交易时间（北京时间，例如 2026-11-03 14:05:09） */
+  time: string;
+  appId: string;
+  mchId: string;
+  transactionId: string;
+  outTradeNo: string;
+  openid: string;
+  /** SUCCESS 支付成功、REFUND 退款、REVOKED 已撤销 */
+  tradeState: string;
+  /** 应结订单金额 */
+  amount: number;
+  refundId: string | null;
+  outRefundNo: string | null;
+  refundAmount: number | null;
+  refundStatus: string | null;
+}
+
+/** 账单里的金额：「`500.00」→ 50000 分（按字符串转成分，不用浮点数）；空的为 null */
+function billCents(raw: string | undefined): number | null {
+  const t = (raw ?? '').replace(/^`/, '').trim();
+  if (!t) return null;
+  const m = /^(-?)(\d+)(?:\.(\d{1,2}))?$/.exec(t);
+  if (!m) throw new WxPayError('WXPAY_BAD_BILL', `账单里的金额认不出：${t}`);
+  const cents = Number(m[2]) * 100 + Number((m[3] ?? '').padEnd(2, '0'));
+  return m[1] ? -cents : cents;
+}
+
+/**
+ * 解析交易账单（CSV）：第一行是表头；之后每一行的每个字段前都有一个 ` 号（所以按「,`」切，字段里有逗号也不乱）；
+ * 「总交易单数」开头的是汇总，到那里为止。按表头的名字取列，不靠列的先后
+ */
+export function parseTradeBill(text: string): WxTradeBillRow[] {
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((l) => l.trim());
+  if (!lines.length) return [];
+  const header = lines[0]!.split(',').map((h) => h.replace(/^`/, '').trim());
+  const at = (name: string) => {
+    const i = header.indexOf(name);
+    if (i < 0) throw new WxPayError('WXPAY_BAD_BILL', `账单里没有「${name}」这一列`);
+    return i;
+  };
+  const c = {
+    time: at('交易时间'),
+    appId: at('公众账号ID'),
+    mchId: at('商户号'),
+    transactionId: at('微信订单号'),
+    outTradeNo: at('商户订单号'),
+    openid: at('用户标识'),
+    tradeState: at('交易状态'),
+    amount: at('应结订单金额'),
+    refundId: at('微信退款单号'),
+    outRefundNo: at('商户退款单号'),
+    refundAmount: at('退款金额'),
+    refundStatus: at('退款状态'),
+  };
+  const rows: WxTradeBillRow[] = [];
+  for (const line of lines.slice(1)) {
+    if (line.startsWith('总交易单数')) break;
+    if (!line.startsWith('`')) throw new WxPayError('WXPAY_BAD_BILL', '账单的格式认不出');
+    const f = line.slice(1).split(',`');
+    if (f.length !== header.length) throw new WxPayError('WXPAY_BAD_BILL', `账单的一行有 ${f.length} 个字段，表头有 ${header.length} 个`);
+    const v = (i: number) => (f[i] ?? '').trim();
+    const amount = billCents(v(c.amount));
+    rows.push({
+      time: v(c.time),
+      appId: v(c.appId),
+      mchId: v(c.mchId),
+      transactionId: v(c.transactionId),
+      outTradeNo: v(c.outTradeNo),
+      openid: v(c.openid),
+      tradeState: v(c.tradeState),
+      amount: amount ?? 0,
+      refundId: v(c.refundId) || null,
+      outRefundNo: v(c.outRefundNo) || null,
+      refundAmount: billCents(v(c.refundAmount)),
+      refundStatus: v(c.refundStatus) || null,
+    });
+  }
+  return rows;
 }
 
 /** 到期时间按北京时间写（RFC 3339，带 +08:00），不带毫秒 */
@@ -307,6 +393,39 @@ export function createWxPayClient(cfg: WxPayConfig, fetchImpl: WxFetch = fetch a
       if (!OUT_TRADE_NO.test(outTradeNo)) throw new WxPayError('WXPAY_BAD_INPUT', '商户单号不符合微信的格式');
       const r = await call('POST', `/v3/pay/transactions/out-trade-no/${encodeURIComponent(outTradeNo)}/close`, { mchid: cfg.mchId });
       if (r.status !== 204 && r.status !== 200) throw failure(r.status, r.body);
+    },
+
+    async tradeBill(billDate) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(billDate)) throw new WxPayError('WXPAY_BAD_INPUT', '账单日期应为 YYYY-MM-DD');
+      const r = await call('GET', `/v3/bill/tradebill?bill_date=${billDate}&bill_type=ALL`);
+      if (r.status !== 200) {
+        const e = failure(r.status, r.body);
+        // 那天没有交易：微信不出账单
+        if (e.code === 'NO_STATEMENT_EXIST') return [];
+        throw e;
+      }
+      const meta = z.object({ hash_type: z.string(), hash_value: z.string().min(1), download_url: z.string().url() }).safeParse(JSON.parse(r.body));
+      if (!meta.success) throw new WxPayError('WXPAY_BAD_RESPONSE', '申请账单的应答格式不对');
+      const url = new URL(meta.data.download_url);
+      const pathWithQuery = `${url.pathname}${url.search}`;
+      let res: WxFetchResponse;
+      try {
+        // 下载也要商户签名（签名串里是下载地址的路径与查询串）；下载的应答不签名，靠摘要核对
+        res = await fetchImpl(url.toString(), {
+          method: 'GET',
+          headers: { Authorization: authorizationHeader(cfg, 'GET', pathWithQuery, ''), 'User-Agent': 'yuzu-miniprogram' },
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch {
+        throw new WxPayError('WXPAY_UNREACHABLE', '连不上微信支付');
+      }
+      if (res.status !== 200) throw failure(res.status, await res.text());
+      const bytes = res.arrayBuffer ? Buffer.from(await res.arrayBuffer()) : Buffer.from(await res.text(), 'utf8');
+      if (meta.data.hash_type.toUpperCase() !== 'SHA1') throw new WxPayError('WXPAY_BAD_BILL', `账单的摘要算法认不出：${meta.data.hash_type}`);
+      if (createHash('sha1').update(bytes).digest('hex') !== meta.data.hash_value.toLowerCase()) {
+        throw new WxPayError('WXPAY_BAD_BILL', '下载的账单与微信给的摘要对不上（文件不完整或被改过）');
+      }
+      return parseTradeBill(bytes.toString('utf8'));
     },
   };
 }

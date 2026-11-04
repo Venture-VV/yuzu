@@ -2,7 +2,7 @@
 // 本机生成「商户」与「微信支付」的两对密钥和 APIv3 密钥，照真的协议回应下单、查单、关单：核对商户的签名、给应答签名。
 // 顾客「付款」时造一条照真的签名、加密的到账通知，交给门店系统同一条验签、解密、入账的路。不连外网。
 
-import { createCipheriv, createVerify, generateKeyPairSync, randomInt, randomUUID } from 'node:crypto';
+import { createCipheriv, createHash, createVerify, generateKeyPairSync, randomInt, randomUUID } from 'node:crypto';
 import {
   createWxPayClient,
   rfc3339Beijing,
@@ -41,7 +41,15 @@ export interface MockWxPay {
   state(outTradeNo: string): MockOrder['state'] | null;
   /** 模拟连不上微信支付（测试用） */
   setDown(down: boolean): void;
+  /** 往某一天的交易账单里加一行（测试用：例如门店系统没有的一笔、金额不一样的一笔） */
+  addBillRow(billDate: string, row: { outTradeNo: string; transactionId: string; amount: number; openid?: string; tradeState?: string; time?: string }): void;
 }
+
+/** 交易账单的表头（微信支付「全部」账单的 27 列） */
+const BILL_HEADER =
+  '交易时间,公众账号ID,商户号,特约商户号,设备号,微信订单号,商户订单号,用户标识,交易类型,交易状态,付款银行,货币种类,应结订单金额,代金券金额,' +
+  '微信退款单号,商户退款单号,退款金额,充值券退款金额,退款类型,退款状态,商品名称,商户数据包,手续费,费率,订单金额,申请退款金额,费率备注';
+const billYuan = (cents: number) => `${cents < 0 ? '-' : ''}${Math.floor(Math.abs(cents) / 100)}.${String(Math.abs(cents) % 100).padStart(2, '0')}`;
 
 const ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 const randomText = (n: number) => Array.from({ length: n }, () => ALNUM[randomInt(ALNUM.length)]).join('');
@@ -65,6 +73,8 @@ export function createMockWxPay(o: { appId?: string; mchId?: string; notifyUrl?:
     baseUrl: 'https://mock-wxpay.invalid',
   };
   const orders = new Map<string, MockOrder>();
+  const extraBillRows = new Map<string, string[][]>();
+  const bills = new Map<string, string>();
   let down = false;
 
   const signed = (status: number, payload?: unknown): WxFetchResponse => {
@@ -156,6 +166,30 @@ export function createMockWxPay(o: { appId?: string; mchId?: string; notifyUrl?:
       x.state = 'CLOSED';
       return signed(204);
     }
+    if (init.method === 'GET' && u.pathname === '/v3/bill/tradebill') {
+      const date = u.searchParams.get('bill_date') ?? '';
+      const rows: string[][] = [];
+      for (const [no, x] of orders) {
+        if (x.state !== 'SUCCESS' || !x.successTime || x.successTime.slice(0, 10) !== date) continue;
+        const total = billYuan(x.request.amount.total);
+        rows.push([
+          x.successTime.slice(0, 19).replace('T', ' '), x.request.appid, x.request.mchid, '0', '', x.transactionId!, no, x.request.payer.openid,
+          'JSAPI', 'SUCCESS', 'OTHERS', 'CNY', total, '0.00', '0', '0', '0.00', '0.00', '', '', x.request.description, '', '0.00', '0.60%', total, '0.00', '',
+        ]);
+      }
+      rows.push(...(extraBillRows.get(date) ?? []));
+      if (!rows.length) return error(400, 'NO_STATEMENT_EXIST', '账单不存在');
+      const csv = [BILL_HEADER, ...rows.map((r) => r.map((f) => `\`${f}`).join(',')), '总交易单数,应结订单总金额,退款总金额,充值券退款总金额,手续费总金额,订单总金额,申请退款总金额', `\`${rows.length},\`0.00,\`0.00,\`0.00,\`0.00,\`0.00,\`0.00`].join('\r\n');
+      const token = randomText(24);
+      bills.set(token, csv);
+      return signed(200, { hash_type: 'SHA1', hash_value: createHash('sha1').update(csv, 'utf8').digest('hex'), download_url: `${config.baseUrl}/v3/billdownload/file?token=${token}` });
+    }
+    if (init.method === 'GET' && u.pathname === '/v3/billdownload/file') {
+      const csv = bills.get(u.searchParams.get('token') ?? '');
+      if (csv === undefined) return error(404, 'NOT_FOUND', '账单不存在');
+      const bytes = Buffer.from(csv, 'utf8');
+      return { status: 200, headers: { get: () => null }, text: async () => csv, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer };
+    }
     return error(404, 'NOT_FOUND', '接口不存在');
   };
 
@@ -210,6 +244,14 @@ export function createMockWxPay(o: { appId?: string; mchId?: string; notifyUrl?:
     state: (no) => orders.get(no)?.state ?? null,
     setDown(v) {
       down = v;
+    },
+    addBillRow(billDate, r) {
+      const yuan = billYuan(r.amount);
+      const row = [
+        r.time ?? `${billDate} 12:00:00`, config.appId, config.mchId, '0', '', r.transactionId, r.outTradeNo, r.openid ?? 'openid-bill-extra',
+        'JSAPI', r.tradeState ?? 'SUCCESS', 'OTHERS', 'CNY', yuan, '0.00', '0', '0', '0.00', '0.00', '', '', '会员充值', '', '0.00', '0.60%', yuan, '0.00', '',
+      ];
+      extraBillRows.set(billDate, [...(extraBillRows.get(billDate) ?? []), row]);
     },
   };
 }

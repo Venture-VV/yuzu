@@ -10,7 +10,7 @@ import { idParam, parse } from '../../lib/validate';
 import { getMember } from '../members';
 import { abandonBannerCreate, createBanner, lookupBannerOp, mpAdminData, saveItemIntro, saveMpImage, saveMpRules, saveStore, updateBanner } from './admin';
 import { memberBindings, resolveMemberCode, unbindMember } from './member';
-import { rechargeAdminData, resolveHeldOrder, saveRechargeRules } from './recharge-admin';
+import { rechargeAdminData, resolveHeldOrder, runRecon, saveRechargeRules } from './recharge-admin';
 
 const CodeParam = z.object({ code: z.string().trim().max(32) });
 
@@ -59,4 +59,6 @@ export function registerMpStaffRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/admin/mp/recharge/orders/:id/resolve', { preHandler: recharge }, async (req) =>
     resolveHeldOrder(deps, parse(idParam, req.params).id, req.body, ctxOf(req)),
   );
+  // 2b 对账：按天重新核对（只追加一条结论）
+  app.post('/api/admin/mp/recharge/recon', { preHandler: recharge }, async (req) => runRecon(deps, req.body, ctxOf(req)));
 }
