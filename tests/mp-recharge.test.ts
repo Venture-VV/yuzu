@@ -451,7 +451,11 @@ describe('模拟支付与微信支付的配置', () => {
     expect(loadPayRuntime(env, 'production')).toMatchObject({ mode: 'real', mock: null, config: { mchId: '1900000109', appId: 'wx0123456789abcdef' } });
     expect(() => loadPayRuntime({ ...env, WXPAY_APIV3_KEY: 'short' }, 'production')).toThrow('32 个字符');
     expect(() => loadPayRuntime({ ...env, WXPAY_PRIVATE_KEY_FILE: join(dir, 'nothing.pem') }, 'production')).toThrow('读不了');
-    expect(() => loadPayRuntime({ ...env, WXPAY_PUBLIC_KEY_FILE: join(dir, 'key.pem') }, 'production')).not.toThrow();
+    // 证书也可以给文件内容的 Base64（一行，放进 .env）
+    const b64 = { ...env, WXPAY_PRIVATE_KEY_FILE: '', WXPAY_PRIVATE_KEY_BASE64: Buffer.from(merchant.privateKey.export({ type: 'pkcs8', format: 'pem' })).toString('base64') };
+    expect(loadPayRuntime(b64, 'production')?.mode).toBe('real');
+    expect(() => loadPayRuntime({ ...b64, WXPAY_PRIVATE_KEY_BASE64: 'bm90IGEga2V5' }, 'production')).toThrow('WXPAY_PRIVATE_KEY_BASE64 不是商户 API 证书的私钥');
+    expect(() => loadPayRuntime({ ...env, WXPAY_PUBLIC_KEY_FILE: '' }, 'production')).toThrow('WXPAY_PUBLIC_KEY_FILE（或 WXPAY_PUBLIC_KEY_BASE64）');
     expect(() => loadPayRuntime({ ...env, WXPAY_NOTIFY_URL: 'http://mp.example.com/v1/pay/notify' }, 'production')).toThrow('https');
     expect(() => loadPayRuntime({ ...env, MP_PAY_MOCK: 'true' }, 'development')).toThrow('不要再配');
   });
