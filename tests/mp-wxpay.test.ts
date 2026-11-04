@@ -1,6 +1,7 @@
 // 微信支付 v3 的协议部分（小程序线第二期，docs/MP_RECHARGE.md 第 2 节）：用本机生成的商户密钥与「微信支付」密钥，
 // 假的微信支付核对商户请求的签名、给应答签名。下单 / 查单 / 关单的请求格式与应答验签；到账通知的验签、防重放、
-// 探测通知、解密；小程序调起支付的 paySign。不连数据库、不连真的微信支付。
+// 探测通知、解密；小程序调起支付的 paySign；交易账单（2b）；申请退款、查退款与退款通知（2d），模拟微信支付的退款。
+// 不连数据库、不连真的微信支付。
 
 import { createCipheriv, createHash, createSign, createVerify, generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
@@ -8,6 +9,7 @@ import {
   createWxPayClient,
   decryptResource,
   nowSeconds,
+  OUT_REFUND_NO,
   OUT_TRADE_NO,
   parseNotification,
   parseTradeBill,
@@ -18,6 +20,7 @@ import {
   type WxPayConfig,
   type WxSignedHeaders,
 } from '../src/server/modules/mp/wxpay';
+import { createMockWxPay } from '../src/server/modules/mp/wxpay-mock';
 
 const merchant = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const wechat = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -278,5 +281,139 @@ describe('交易账单（2b 对账）', () => {
     expect(() => parseTradeBill([header, line(pay.map((f, i) => (i === 12 ? '1,000.50' : f)))].join('\n'))).toThrow();
     expect(() => parseTradeBill('交易时间,商户号\n')).toThrow('公众账号ID');
     expect(parseTradeBill('')).toEqual([]);
+  });
+});
+
+describe('退款（2d 原路退回）', () => {
+  const refundBody = (over: Record<string, unknown> = {}) => ({
+    refund_id: '50000000382019052709732678859',
+    out_refund_no: 'MPRF000123',
+    transaction_id: '4200000985202611040123456789',
+    out_trade_no: 'MP20261104000001',
+    channel: 'ORIGINAL',
+    user_received_account: '支付用户零钱',
+    create_time: '2026-11-05T10:00:00+08:00',
+    status: 'PROCESSING',
+    funds_account: 'AVAILABLE',
+    amount: { total: 300000, refund: 50000, payer_total: 300000, payer_refund: 50000, settlement_refund: 50000, settlement_total: 300000, discount_refund: 0, currency: 'CNY', refund_fee: 0, from: [] },
+    ...over,
+  });
+  const input = (over: Record<string, unknown> = {}) => ({ outTradeNo: 'MP20261104000001', outRefundNo: 'MPRF000123', reason: '会员储值退回', refundCents: 50000, totalCents: 300000, ...over });
+
+  it('申请退款：带商户签名、按微信的格式（原商户单号、退款单号、退多少与原订单金额、通知地址）；拿到退款（多半处理中）', async () => {
+    const { fetchImpl, calls } = fakeWxPay(() => ({ status: 200, body: refundBody() }));
+    const r = await createWxPayClient(cfg, fetchImpl).refund(input());
+    expect(r).toMatchObject({ refundId: '50000000382019052709732678859', outRefundNo: 'MPRF000123', status: 'PROCESSING', refund: 50000, total: 300000, transactionId: '4200000985202611040123456789', successTime: null });
+    expect(calls[0]).toMatchObject({ method: 'POST', path: '/v3/refund/domestic/refunds', signedByMerchant: true });
+    expect(calls[0]!.body).toEqual({ out_trade_no: 'MP20261104000001', out_refund_no: 'MPRF000123', reason: '会员储值退回', notify_url: cfg.notifyUrl, amount: { refund: 50000, total: 300000, currency: 'CNY' } });
+  });
+
+  it('退款原因超过 80 个字截掉、空的不带；金额、单号不对的不发；微信拒绝的带回错误码（例如商户号余额不够）', async () => {
+    const { fetchImpl, calls } = fakeWxPay((c) =>
+      (c.body as { out_refund_no?: string } | null)?.out_refund_no === 'MPRF-POOR' ? { status: 403, body: { code: 'NOT_ENOUGH', message: '基本账户余额不足' } } : { status: 200, body: refundBody() },
+    );
+    const client = createWxPayClient(cfg, fetchImpl);
+    await client.refund(input({ reason: '退'.repeat(100) }));
+    expect([...(calls[0]!.body as { reason: string }).reason]).toHaveLength(80);
+    await client.refund(input({ reason: '  ' }));
+    expect(calls[1]!.body).not.toHaveProperty('reason');
+    for (const bad of [{ refundCents: 0 }, { refundCents: 300001 }, { refundCents: 1.5 }, { outRefundNo: '退款单' }, { outRefundNo: 'x'.repeat(65) }, { outTradeNo: 'a' }]) {
+      await expect(client.refund(input(bad))).rejects.toMatchObject({ code: 'WXPAY_BAD_INPUT' });
+    }
+    expect(calls).toHaveLength(2);
+    await expect(client.refund(input({ outRefundNo: 'MPRF-POOR' }))).rejects.toMatchObject({ code: 'NOT_ENOUGH', status: 403 });
+    expect(OUT_REFUND_NO.test('MPRF20261105-0001@A|*_')).toBe(true);
+    expect(OUT_REFUND_NO.test('')).toBe(false);
+  });
+
+  it('查退款：路径里是商户退款单号、也在签名里；没有这一笔返回 null；应答不是微信支付签的不认', async () => {
+    const { fetchImpl, calls } = fakeWxPay((c) =>
+      c.path.endsWith('/MPRF-NONE')
+        ? { status: 404, body: { code: 'RESOURCE_NOT_EXISTS', message: '退款单不存在' } }
+        : { status: 200, body: refundBody({ status: 'SUCCESS', success_time: '2026-11-05T10:00:05+08:00' }) },
+    );
+    const client = createWxPayClient(cfg, fetchImpl);
+    expect(await client.queryRefund('MPRF000123')).toMatchObject({ status: 'SUCCESS', successTime: '2026-11-05T10:00:05+08:00', userReceivedAccount: '支付用户零钱' });
+    expect(calls[0]).toMatchObject({ method: 'GET', path: '/v3/refund/domestic/refunds/MPRF000123', signedByMerchant: true });
+    expect(await client.queryRefund('MPRF-NONE')).toBeNull();
+    await expect(client.queryRefund('退款单')).rejects.toMatchObject({ code: 'WXPAY_BAD_INPUT' });
+    const forged = createWxPayClient(cfg, fakeWxPay(() => ({ status: 200, body: refundBody() }), stranger.privateKey).fetchImpl);
+    await expect(forged.queryRefund('MPRF000123')).rejects.toMatchObject({ code: 'WXPAY_BAD_SIGNATURE' });
+  });
+
+  it('退款通知：验签、解密（附加数据是 refund）后拿到退款，状态字段是 refund_status；支付以外的事件不当作订单，也不报错', () => {
+    const plain = {
+      mchid: cfg.mchId,
+      transaction_id: '4200000985202611040123456789',
+      out_trade_no: 'MP20261104000001',
+      refund_id: '50000000382019052709732678859',
+      out_refund_no: 'MPRF000123',
+      refund_status: 'SUCCESS',
+      success_time: '2026-11-05T10:00:05+08:00',
+      user_received_account: '支付用户零钱',
+      amount: { total: 300000, refund: 50000, payer_total: 300000, payer_refund: 50000 },
+    };
+    const resource = { ...encrypt(JSON.stringify(plain), API_V3_KEY, 'refundnonce1', 'refund'), original_type: 'refund' };
+    const body = JSON.stringify({ id: 'EV-REFUND-1', create_time: '2026-11-05T10:00:06+08:00', event_type: 'REFUND.SUCCESS', resource_type: 'encrypt-resource', resource, summary: '退款成功' });
+    expect(parseNotification(cfg, wechatSign(body), body)).toMatchObject({
+      eventType: 'REFUND.SUCCESS',
+      transaction: null,
+      refund: { outRefundNo: 'MPRF000123', outTradeNo: 'MP20261104000001', status: 'SUCCESS', refund: 50000, total: 300000 },
+    });
+    const other = JSON.stringify({ id: 'EV-OTHER-1', create_time: '2026-11-05T10:00:06+08:00', event_type: 'SOMETHING.ELSE', resource_type: 'encrypt-resource', resource: encrypt('{"hello":1}'), summary: '' });
+    expect(parseNotification(cfg, wechatSign(other), other)).toMatchObject({ eventType: 'SOMETHING.ELSE', transaction: null, refund: null });
+    const broken = JSON.stringify({ ...JSON.parse(body), resource: { ...encrypt('{"refund_id":"x"}', API_V3_KEY, 'refundnonce2', 'refund'), original_type: 'refund' } });
+    expect(() => parseNotification(cfg, wechatSign(broken), broken)).toThrow(expect.objectContaining({ code: 'WXPAY_BAD_RESPONSE' }));
+  });
+
+  it('模拟微信支付：同一个退款单号同样内容回同一笔、内容不同拒绝；退超了、没付的、余额不够都拒；处理中到有结果发退款通知；账单记付款与退款两行', async () => {
+    const mock = createMockWxPay();
+    const c = mock.client;
+    const expiresAt = new Date(Date.now() + 15 * 60_000);
+    await c.jsapiOrder({ outTradeNo: 'MPR20261105AAAAAAAAAA', description: '会员充值', amountCents: 300000, payerOpenid: 'openid-refund-1', expiresAt });
+    await c.jsapiOrder({ outTradeNo: 'MPR20261105BBBBBBBBBB', description: '会员充值', amountCents: 10000, payerOpenid: 'openid-refund-2', expiresAt });
+    await expect(c.refund({ outTradeNo: 'MPR20261105BBBBBBBBBB', outRefundNo: 'RF-UNPAID', reason: '', refundCents: 100, totalCents: 10000 })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    await expect(c.refund({ outTradeNo: 'MPR20261105CCCCCCCCCC', outRefundNo: 'RF-NONE', reason: '', refundCents: 100, totalCents: 10000 })).rejects.toMatchObject({ code: 'RESOURCE_NOT_EXISTS', status: 404 });
+    mock.pay('MPR20261105AAAAAAAAAA');
+    const first = await c.refund({ outTradeNo: 'MPR20261105AAAAAAAAAA', outRefundNo: 'RF-0001', reason: '储值退回', refundCents: 100000, totalCents: 300000 });
+    expect(first).toMatchObject({ status: 'PROCESSING', refund: 100000, total: 300000 });
+    expect((await c.refund({ outTradeNo: 'MPR20261105AAAAAAAAAA', outRefundNo: 'RF-0001', reason: '储值退回', refundCents: 100000, totalCents: 300000 })).refundId).toBe(first.refundId);
+    await expect(c.refund({ outTradeNo: 'MPR20261105AAAAAAAAAA', outRefundNo: 'RF-0001', reason: '', refundCents: 200000, totalCents: 300000 })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    await expect(c.refund({ outTradeNo: 'MPR20261105AAAAAAAAAA', outRefundNo: 'RF-0002', reason: '', refundCents: 200001, totalCents: 300000 })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    await expect(c.refund({ outTradeNo: 'MPR20261105AAAAAAAAAA', outRefundNo: 'RF-0002', reason: '', refundCents: 100, totalCents: 299999 })).rejects.toMatchObject({ code: 'PARAM_ERROR' });
+    mock.setNotEnough(true);
+    await expect(c.refund({ outTradeNo: 'MPR20261105AAAAAAAAAA', outRefundNo: 'RF-0002', reason: '', refundCents: 100, totalCents: 300000 })).rejects.toMatchObject({ code: 'NOT_ENOUGH', status: 403 });
+    mock.setNotEnough(false);
+    expect(await c.queryRefund('RF-0002')).toBeNull();
+    expect((await c.queryOrder('MPR20261105AAAAAAAAAA'))!.tradeState).toBe('REFUND');
+    // 处理中 → 成功：退款通知照真的签名、加密，门店系统同一个验签解密的路认得
+    const notice = mock.settleRefund('RF-0001', 'SUCCESS');
+    const n = parseNotification(mock.config, notice.headers, notice.body);
+    expect(n).toMatchObject({ eventType: 'REFUND.SUCCESS', transaction: null, refund: { outRefundNo: 'RF-0001', status: 'SUCCESS', refund: 100000 } });
+    expect(mock.refundState('RF-0001')).toBe('SUCCESS');
+    expect(await c.queryRefund('RF-0001')).toMatchObject({ status: 'SUCCESS', refundId: first.refundId });
+    expect(() => mock.settleRefund('RF-0001', 'CLOSED')).toThrow();
+    // 马上成功的一笔；处理中后来关闭的一笔不占可退金额；异常的占着（要到商户平台处理）
+    mock.setRefundMode('success');
+    expect(await c.refund({ outTradeNo: 'MPR20261105AAAAAAAAAA', outRefundNo: 'RF-0003', reason: '', refundCents: 50000, totalCents: 300000 })).toMatchObject({ status: 'SUCCESS' });
+    mock.setRefundMode('processing');
+    await c.refund({ outTradeNo: 'MPR20261105AAAAAAAAAA', outRefundNo: 'RF-0004', reason: '', refundCents: 100000, totalCents: 300000 });
+    const closed = mock.settleRefund('RF-0004', 'CLOSED');
+    expect(parseNotification(mock.config, closed.headers, closed.body)).toMatchObject({ eventType: 'REFUND.CLOSED', refund: { status: 'CLOSED' } });
+    await c.refund({ outTradeNo: 'MPR20261105AAAAAAAAAA', outRefundNo: 'RF-0005', reason: '', refundCents: 100000, totalCents: 300000 });
+    const abnormal = mock.settleRefund('RF-0005', 'ABNORMAL');
+    expect(parseNotification(mock.config, abnormal.headers, abnormal.body)).toMatchObject({ eventType: 'REFUND.ABNORMAL', refund: { status: 'ABNORMAL' } });
+    await c.refund({ outTradeNo: 'MPR20261105AAAAAAAAAA', outRefundNo: 'RF-0006', reason: '', refundCents: 50000, totalCents: 300000 });
+    mock.settleRefund('RF-0006', 'SUCCESS');
+    await expect(c.refund({ outTradeNo: 'MPR20261105AAAAAAAAAA', outRefundNo: 'RF-0007', reason: '', refundCents: 1, totalCents: 300000 })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    // 交易账单：付款那天一行「支付成功」（之后退了也照样有）；每笔退款成功的那天一行「转入退款」，关闭、异常的不出现
+    const payDay = (await c.queryOrder('MPR20261105AAAAAAAAAA'))!.successTime!.slice(0, 10);
+    expect((await c.tradeBill(payDay)).filter((r) => r.outTradeNo === 'MPR20261105AAAAAAAAAA' && r.tradeState === 'SUCCESS')).toHaveLength(1);
+    for (const [no, cents] of [['RF-0001', 100000], ['RF-0003', 50000], ['RF-0006', 50000]] as const) {
+      const day = (await c.queryRefund(no))!.successTime!.slice(0, 10);
+      expect((await c.tradeBill(day)).find((r) => r.outRefundNo === no)).toMatchObject({ tradeState: 'REFUND', outTradeNo: 'MPR20261105AAAAAAAAAA', refundAmount: cents, refundStatus: 'SUCCESS' });
+    }
+    const days = new Set([payDay, rfc3339Beijing(new Date()).slice(0, 10)]);
+    for (const day of days) expect((await c.tradeBill(day)).some((r) => r.outRefundNo === 'RF-0004' || r.outRefundNo === 'RF-0005')).toBe(false);
   });
 });

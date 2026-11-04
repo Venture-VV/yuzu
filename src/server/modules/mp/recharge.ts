@@ -830,8 +830,9 @@ export async function handlePayNotify(deps: Deps, pay: PayRuntime | null, raw: u
     if (error instanceof WxPayError) throw new AppError(401, codeOf(error), error.message);
     throw error;
   }
+  // 只处理支付成功的；别的事件（例如退款通知）验过签就回收到，免得微信一直重发
   const t = n.transaction;
-  if (n.eventType !== 'TRANSACTION.SUCCESS' || t.tradeState !== 'SUCCESS') return;
+  if (n.eventType !== 'TRANSACTION.SUCCESS' || !t || t.tradeState !== 'SUCCESS') return;
   const [o] = await deps.sql<OrderRow[]>`SELECT * FROM mp_recharge_orders WHERE order_no = ${t.outTradeNo}`;
   if (!o) {
     // 验过签的真付款，但门店系统里没有这张单（例如从备份恢复过）：记下来给店主看，同一笔只记一次
