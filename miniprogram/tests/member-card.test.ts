@@ -13,6 +13,7 @@ const member = (grade: Partial<MpGrade>, over: Partial<MeMember> = {}): MeMember
   deductionRule: '先本金，后赠金',
   availableCoupons: 2,
   rechargeOpen: false,
+  merged: false,
   grade: {
     label: 'L3 观澜 · 享',
     grade: 3,
@@ -68,5 +69,12 @@ describe('会员卡', () => {
 
   it('冻结的会员照样显示，标出来', () => {
     expect(cardView(member({}, { frozen: true })).frozen).toBe(true);
+  });
+
+  it('线上充值开着才有「充值」；合并掉的会员卡标出来、不给充值（MP25）', () => {
+    expect(cardView(member({})).recharge).toBe(false);
+    expect(cardView(member({}, { rechargeOpen: true })).recharge).toBe(true);
+    const merged = cardView(member({}, { rechargeOpen: true, frozen: true, merged: true }));
+    expect(merged).toMatchObject({ merged: true, frozen: true, recharge: false });
   });
 });

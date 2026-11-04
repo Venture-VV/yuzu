@@ -251,6 +251,18 @@ describe('可充的项与建单', () => {
   });
 });
 
+describe('合并掉的会员卡（主线 v0.7.26，MP25）', () => {
+  it('「我的」写已合并、不给充值；线上充值不能下单', async () => {
+    const target = await createMember(ctx, '演示·合并目标', '13666009991');
+    const { memberId, openid } = await bound('演示·合并来源');
+    await ctx.sql`UPDATE members SET status = 'frozen', merged_into_id = ${target.id} WHERE id = ${memberId}`;
+    const me = (await call('GET', '/api/mp/me', openid)).json();
+    expect(me.member).toMatchObject({ merged: true, frozen: true });
+    expect((await options(openid)).open).toBe(false);
+    expect((await createOrder(openid, { amount: yuan(600) })).statusCode).toBeGreaterThanOrEqual(400);
+  });
+});
+
 describe('建单结果待确认', () => {
   it('确认作废：已经建了就返回那张单；还没有就作废，之后原请求不建单；别的微信用同一个编号不认', async () => {
     const { openid } = await bound('演示·作废');
