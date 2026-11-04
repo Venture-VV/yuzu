@@ -158,6 +158,13 @@ export const MemberList = forwardRef<
                         L{m.grade}
                       </span>
                     )}
+                    {m.mergedIntoId !== null ? (
+                      <span className="shrink-0 rounded bg-paper-2 px-1 text-[11px] font-bold text-ink-3" title="这份档案已合并到另一位会员">
+                        已合并
+                      </span>
+                    ) : (
+                      m.status === 'frozen' && <span className="shrink-0 rounded bg-clay-soft px-1 text-[11px] font-bold text-clay">已停用</span>
+                    )}
                   </span>
                   <span className="num block truncate text-[12.5px] text-ink-3">
                     {maskPhone(m.phone)} · {relativeTime(m.lastActivityAt)}

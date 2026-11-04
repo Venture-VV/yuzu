@@ -2,6 +2,8 @@
 //   · 已经导入、还没人动过的 QY-004（浴票延迟、草稿、版本 1、起点 L1·尊、没填分钟数）补上默认——
 //     L1·初 起 30 分钟，各档阶表与导入清单的 TICKET_EXTENSION_DEFAULT_ROWS 一样（每一档初 30、享 60、尊 90），仍是草稿、版本 1；
 //   · 改过的（版本 2）不动；没导入清单的库不新建 QY-004。
+// 同一个迁移里 QY-041 同行优惠（M81）：没人动过的草稿补上「同行的门票」、同行 1 位、L6·初 起 2 位，不填折扣（发布不了）；
+//   改过的（版本 2 或填了适用明细）不动；别的折扣类不加同行几位。
 
 import { readdir, readFile } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -70,5 +72,51 @@ describe('迁移 047 · 浴票延迟的默认分钟数', () => {
     await migrate(sql);
     const [n] = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM benefits`;
     expect(n!.n).toBe(0);
+  });
+});
+
+/** v0.7.24 导入的 QY-041：折扣类、草稿、起点 L3·初、没填适用明细与折扣 */
+const insertQy041 = (version: number, discountTarget: string | null = null) => sql`
+  INSERT INTO benefits (code, name, category, start_grade, start_tier, quantity, version, discount_target, content)
+  VALUES ('QY-041', '同行优惠', 'discount', 3, 0, NULL, ${version}, ${discountTarget}, '高档可带1人、最高档可带2人享同行礼遇的规划。')`;
+type CompanionRow = { status: string; version: number; discountTarget: string | null; quantity: number | null; companionCount: number | null; companionCounts: TierQuantity[] };
+const qy041 = async () =>
+  (
+    await sql<CompanionRow[]>`
+      SELECT status, version, discount_target, quantity, companion_count, companion_counts FROM benefits WHERE code = 'QY-041'`
+  )[0]!;
+
+describe('迁移 047 · QY-041 同行优惠的预填', () => {
+  it('没动过的 QY-041 补上同行的门票、同行 1 位、L6·初 起 2 位，不填折扣：仍是草稿、版本 1，发布不了', async () => {
+    await schemaBefore047();
+    await insertQy041(1);
+    // 别的折扣类（本人的门票）不加同行几位
+    await sql`
+      INSERT INTO benefits (code, name, category, start_grade, start_tier, quantity, discount_target, content)
+      VALUES ('QY-011', '门票折扣', 'discount', 1, 0, 90, 'ticket', '门票折扣')`;
+    await migrate(sql);
+    expect(await qy041()).toEqual({ status: 'draft', version: 1, discountTarget: 'companion_ticket', quantity: null, companionCount: 1, companionCounts: [{ grade: 6, tier: 0, quantity: 2 }] });
+    const [other] = await sql<{ companionCount: number | null; companionCounts: TierQuantity[] }[]>`
+      SELECT companion_count, companion_counts FROM benefits WHERE code = 'QY-011'`;
+    expect(other).toEqual({ companionCount: null, companionCounts: [] });
+    // 没填折扣：数据库也不让发布「没填同行几位」的同行优惠；填了同行几位、折扣以后能发布
+    await expect(
+      sql`UPDATE benefits SET quantity = 80, companion_count = NULL, companion_counts = '[]', status = 'published', published_at = now() WHERE code = 'QY-041'`,
+    ).rejects.toThrow(/benefits_companion_publish_check/);
+    await sql`UPDATE benefits SET quantity = 80, status = 'published', published_at = now(), version = version + 1 WHERE code = 'QY-041'`;
+    // 「同行几位」只给同行的适用明细
+    await expect(sql`UPDATE benefits SET companion_count = 1 WHERE code = 'QY-011'`).rejects.toThrow(/benefits_companion_check/);
+  });
+
+  it('改过的 QY-041（版本 2，或已经填了适用明细）不动', async () => {
+    await schemaBefore047();
+    await insertQy041(2);
+    await migrate(sql);
+    expect(await qy041()).toMatchObject({ version: 2, discountTarget: null, companionCount: null, companionCounts: [] });
+
+    await schemaBefore047();
+    await insertQy041(1, 'bill');
+    await migrate(sql);
+    expect(await qy041()).toMatchObject({ version: 1, discountTarget: 'bill', companionCount: null, companionCounts: [] });
   });
 });

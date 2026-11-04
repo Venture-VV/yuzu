@@ -3,7 +3,7 @@
 //   · 店主或店总当场授权（授权绑定会员与本金），店员不能授权；扫码、银行卡要登记退款单号；
 //   · 提交时按此刻的余额重新分配，与页面核对的不一致拒绝；同一编号重提返回原来那张，内容不同拒绝；确认作废后原请求不生效；
 //   · 现金从所选钱箱退、扣减那个班次的应有现金；日结「储值退回」与单据推算、流水一致；自检照常全过；
-//   · 靠充值升上来、扣完够不上这一档的当场降档；靠上线定档等留在这一档的不降。
+//   · 靠充值升上来、扣完够不上这一档的当场降档（连续退回接着降），最多降到靠充值升上来之前的档级；靠上线定档、手动调整等留在这一档的不降。
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -244,6 +244,62 @@ describe('对档阶的影响（M73）', () => {
     expect(e).toEqual({ kind: 'refund_down', memberRefundId: done.body.refund.id });
     // 滚动累计按「充值 − 退回」算
     expect(after.rollingRechargeCents).toBe(400_000);
+  });
+
+  it('连续退回：L3 退一部分降到 L2，再退清降到 L0（核对时也写明）——测试会话 c938e79 的 P2', async () => {
+    const m = (await createMember(ctx, '连续退回', '19911110005')).id;
+    // 3 万元：升到 L3（初阶），赠金按档 8%
+    const r = await api(ctx.app, ctx.owner, 'POST', '/api/recharges', rechargeBody(m, 3_000_000, 240_000, { paymentMethod: 'wechat', bonusMode: 'auto' }));
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect((await api(ctx.app, ctx.owner, 'GET', `/api/members/${m}/grade`)).body.state).toMatchObject({ grade: 3, tier: 0 });
+    const first = await plan(m, 2_000_000);
+    expect(first.grade!.to).toContain('L2');
+    expect((await refund(m, body(first, (await grant(m, 2_000_000)).body.grantId))).status).toBe(200);
+    const mid = (await api(ctx.app, ctx.owner, 'GET', `/api/members/${m}/grade`)).body;
+    expect(mid.state).toMatchObject({ grade: 2, tier: 0 });
+    // 第二次退清：剩下的 L2 仍是那次充值升上来的，滚动累计 0 → L0
+    const second = await plan(m);
+    expect(second.amount).toBe(1_000_000);
+    expect(second.grade).not.toBeNull();
+    expect(second.grade!.from).toContain('L2');
+    expect(second.grade!.to).toContain('L0');
+    const done = await refund(m, body(second, (await grant(m, 1_000_000)).body.grantId));
+    expect(done.status, JSON.stringify(done.body)).toBe(200);
+    expect(done.body.refund.grade).toEqual(second.grade);
+    const after = (await api(ctx.app, ctx.owner, 'GET', `/api/members/${m}/grade`)).body;
+    expect(after.state).toMatchObject({ grade: 0, tier: null });
+    expect(after.rollingRechargeCents).toBe(0);
+    const kinds = await ctx.sql<{ kind: string; fromGrade: number; toGrade: number }[]>`
+      SELECT kind, from_grade, to_grade FROM member_grade_events WHERE member_id = ${m} ORDER BY id`;
+    expect(kinds).toEqual([
+      { kind: 'recharge_up', fromGrade: 0, toGrade: 3 },
+      { kind: 'refund_down', fromGrade: 3, toGrade: 2 },
+      { kind: 'refund_down', fromGrade: 2, toGrade: 0 },
+    ]);
+  });
+
+  it('最多降到靠充值升上来之前的档级：手动调到 L2 再充到 L3，退清回到 L2；只靠手动调整的不降', async () => {
+    const m = (await createMember(ctx, '先手动再充值', '19911110006')).id;
+    const info = (await api(ctx.app, ctx.owner, 'GET', `/api/members/${m}/grade`)).body as { version: number };
+    const adj = await api(ctx.app, ctx.owner, 'POST', `/api/members/${m}/grade`, { clientKey: randomUUID(), grade: 2, tier: 0, reason: '老客户补定档', expectedVersion: info.version });
+    expect(adj.status, JSON.stringify(adj.body)).toBe(200);
+    const r = await api(ctx.app, ctx.owner, 'POST', '/api/recharges', rechargeBody(m, 3_000_000, 240_000, { paymentMethod: 'cash', bonusMode: 'auto' }));
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect((await api(ctx.app, ctx.owner, 'GET', `/api/members/${m}/grade`)).body.state).toMatchObject({ grade: 3 });
+    const p = await plan(m);
+    expect(p.grade!.to).toContain('L2');
+    expect((await refund(m, body(p, (await grant(m, p.amount)).body.grantId))).status).toBe(200);
+    expect((await api(ctx.app, ctx.owner, 'GET', `/api/members/${m}/grade`)).body.state).toMatchObject({ grade: 2, tier: 0 });
+
+    // 只靠手动调整的 L4：充一笔不升档的，退清也不降
+    const k = (await createMember(ctx, '只手动调整', '19911110007')).id;
+    const kinfo = (await api(ctx.app, ctx.owner, 'GET', `/api/members/${k}/grade`)).body as { version: number };
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/members/${k}/grade`, { clientKey: randomUUID(), grade: 4, tier: 0, reason: '老客户补定档', expectedVersion: kinfo.version })).status).toBe(200);
+    expect((await recharge(k, 600_000, 0, 'cash')).id).toBeGreaterThan(0);
+    const kp = await plan(k);
+    expect(kp.grade).toBeNull();
+    expect((await refund(k, body(kp, (await grant(k, kp.amount)).body.grantId))).status).toBe(200);
+    expect((await api(ctx.app, ctx.owner, 'GET', `/api/members/${k}/grade`)).body.state).toMatchObject({ grade: 4 });
   });
 
   it('退得少、扣完还够得上的不降', async () => {

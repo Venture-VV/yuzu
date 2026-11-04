@@ -16,6 +16,9 @@ import {
   BENEFIT_STATUS_LABELS,
   DISCOUNT_TARGET_LABELS,
   DISCOUNT_TARGETS,
+  companionText,
+  isCompanionTarget,
+  MAX_COMPANIONS,
   discountDaysText,
   MAX_BENEFIT_COUPONS,
   MAX_BENEFIT_LIMIT,
@@ -220,7 +223,9 @@ function BenefitsEditor() {
                         {b.festivalDates.length > 0 && <span className="block text-[12px] text-ink-3">节日 {b.festivalDates.join('、')}</span>}
                         {cat === 'discount' && (
                           <span className="block text-[12px] text-ink-3" data-testid={`benefit-discount-${b.code}`}>
-                            {b.discountTarget ? `${DISCOUNT_TARGET_LABELS[b.discountTarget]} · ${discountDaysText(b.weekdays, b.monthDays)}` : '还没选打哪些明细'}
+                            {b.discountTarget
+                              ? `${DISCOUNT_TARGET_LABELS[b.discountTarget]}${isCompanionTarget(b.discountTarget) ? `（${companionText(b)}）` : ''} · ${discountDaysText(b.weekdays, b.monthDays)}`
+                              : '还没选打哪些明细'}
                           </span>
                         )}
                       </td>
@@ -286,6 +291,9 @@ interface Draft {
   festivals: string;
   /** 折扣类（v0.7.25）：打哪些明细、每周几、每月几号（顿号隔开） */
   discountTarget: DiscountTarget | '';
+  /** 同行优惠（v0.7.26）：起点能带几位、各档阶表 */
+  companionCount: string;
+  companionTiers: { state: string; quantity: string }[];
   weekdays: number[];
   monthDays: string;
   content: string;
@@ -303,6 +311,8 @@ const toDraft = (b: Benefit): Draft => ({
   events: b.events,
   festivals: b.festivalDates.join('、'),
   discountTarget: b.discountTarget ?? '',
+  companionCount: b.companionCount === null ? '' : String(b.companionCount),
+  companionTiers: b.companionCounts.map((t) => ({ state: stateValue(t.grade, t.tier), quantity: String(t.quantity) })),
   weekdays: b.weekdays,
   monthDays: b.monthDays.join('、'),
   content: b.content,
@@ -375,6 +385,18 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
           .map(intOf)
       : [];
     if (monthDays.some((d) => Number.isNaN(d) || d < 1 || d > 31)) return setError('每月几号填 1–31，几个日期用顿号隔开');
+    // 同行优惠（v0.7.26）：起点能带几位与各档阶表（1–9 位）
+    const companion = isDiscount && draft.discountTarget !== '' && isCompanionTarget(draft.discountTarget);
+    const companionCount = companion && draft.companionCount.trim() ? intOf(draft.companionCount) : null;
+    if (companionCount !== null && (Number.isNaN(companionCount) || companionCount < 1 || companionCount > MAX_COMPANIONS)) {
+      return setError(`同行几位填 1–${MAX_COMPANIONS} 的整数`);
+    }
+    const companionCounts: TierQuantity[] = [];
+    for (const c of companion ? draft.companionTiers : []) {
+      const n = intOf(c.quantity);
+      if (!c.state || Number.isNaN(n) || n < 1 || n > MAX_COMPANIONS) return setError(`各档阶同行几位：请选档阶，人数是 1–${MAX_COMPANIONS} 的整数`);
+      companionCounts.push({ ...parseState(c.state), quantity: n });
+    }
     setBusy(true);
     try {
       await api.put(`/api/benefits/${benefit.id}`, {
@@ -390,6 +412,8 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
         events: draft.category === 'event' ? draft.events : [],
         festivalDates,
         discountTarget: isDiscount && draft.discountTarget ? draft.discountTarget : null,
+        companionCount,
+        companionCounts,
         weekdays: isDiscount ? draft.weekdays : [],
         monthDays,
         content: draft.content.trim(),
@@ -565,7 +589,12 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
         )}
         {isDiscount && (
           <>
-            <Field label="打哪些明细" htmlFor="benefit-discount-target" hint="只打会员本人手牌账单上的这些明细；一张结账单只享一种会员折扣、不与券同用" className="sm:col-span-2">
+            <Field
+              label="打哪些明细"
+              htmlFor="benefit-discount-target"
+              hint="客房房费、门票、整张账单打会员本人手牌账单上的；「同行的」打合并结账里不是会员的同行客人的。一张结账单只享一种会员折扣、不与券同用"
+              className="sm:col-span-2"
+            >
               <Select
                 id="benefit-discount-target"
                 value={draft.discountTarget}
@@ -580,6 +609,51 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
                 ))}
               </Select>
             </Field>
+            {draft.discountTarget !== '' && isCompanionTarget(draft.discountTarget) && (
+              <div className="grid gap-2 sm:col-span-2" data-testid="benefit-companions">
+                <Field label="起点能带同行几位" htmlFor="benefit-companion-count" hint={`1–${MAX_COMPANIONS} 位；同行里适用明细多的先算，相同时按手牌号`}>
+                  <Input
+                    id="benefit-companion-count"
+                    inputMode="numeric"
+                    value={draft.companionCount}
+                    onChange={(e) => set({ companionCount: e.target.value })}
+                    data-testid="benefit-companion-count"
+                  />
+                </Field>
+                <p className="text-[12.5px] text-ink-3">各档阶能带几位（可选）：从这个档阶起按这一行，按会员现在的档阶取一行、不相加。</p>
+                {draft.companionTiers.map((c, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Select
+                      aria-label="从哪个档阶起"
+                      className="w-40"
+                      value={c.state}
+                      onChange={(e) => set({ companionTiers: draft.companionTiers.map((x, j) => (j === i ? { ...x, state: e.target.value } : x)) })}
+                    >
+                      <option value="">选档阶</option>
+                      {STATE_OPTIONS.filter((o) => !draft.start || stateRank(parseState(o.value).grade, parseState(o.value).tier) > stateRank(parseState(draft.start).grade, parseState(draft.start).tier)).map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label} 起
+                        </option>
+                      ))}
+                    </Select>
+                    <Input
+                      fullWidth={false}
+                      className="w-24"
+                      aria-label="几位"
+                      inputMode="numeric"
+                      value={c.quantity}
+                      onChange={(e) => set({ companionTiers: draft.companionTiers.map((x, j) => (j === i ? { ...x, quantity: e.target.value } : x)) })}
+                    />
+                    <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} onClick={() => set({ companionTiers: draft.companionTiers.filter((_, j) => j !== i) })}>
+                      删掉
+                    </Button>
+                  </div>
+                ))}
+                <Button size="sm" variant="ghost" icon={<Plus className="size-3.5" />} onClick={() => set({ companionTiers: [...draft.companionTiers, { state: '', quantity: '' }] })}>
+                  加一行
+                </Button>
+              </div>
+            )}
             <Field label="每周几（不选 = 每天）" className="sm:col-span-2">
               <div className="flex flex-wrap gap-2">
                 {WEEKDAY_LABELS.map((label, i) => {

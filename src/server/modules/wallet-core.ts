@@ -3,7 +3,7 @@
 
 import type { WalletBalance } from '@shared/deduction';
 import type { Tx } from '../db';
-import { AppError, notFound } from '../lib/errors';
+import { AppError, notFound, unprocessable } from '../lib/errors';
 import { nextDocNo as nextNo } from '../lib/tx';
 
 export type WalletDocType = 'recharge' | 'consume' | 'reversal' | 'expire' | 'opening';
@@ -29,6 +29,21 @@ export async function lockMember(tx: Tx, id: number): Promise<LockedMember> {
     SELECT id, name, principal_balance, bonus_balance, status FROM members WHERE id = ${id} FOR UPDATE`;
   if (!m) throw notFound('会员不存在');
   return m;
+}
+
+/**
+ * 已合并的会员（v0.7.26，M79）：余额已经转到合并进去的那位，不能再在这份档案上记账（撤销储值消费、反结账退回储值）。
+ * what 写明这次不能做什么
+ */
+export async function assertNotMerged(tx: Tx, memberId: number, what: string) {
+  const [m] = await tx<{ mergedIntoNo: string | null; mergedIntoName: string | null }[]>`
+    SELECT t.member_no AS merged_into_no, t.name AS merged_into_name
+    FROM members m LEFT JOIN members t ON t.id = m.merged_into_id WHERE m.id = ${memberId}`;
+  if (m?.mergedIntoNo) {
+    throw unprocessable('MEMBER_MERGED', `会员已合并到「${m.mergedIntoName}」（${m.mergedIntoNo}），余额已经转过去，${what}；要更正请在那位会员那里办理`, {
+      mergedIntoNo: m.mergedIntoNo,
+    });
+  }
 }
 
 export function nextDocNo(tx: Tx, type: WalletDocType, businessDate: string): Promise<string> {

@@ -295,6 +295,49 @@ export async function projectedGrade(db: Db, memberId: number, today: string): P
   return (await projectDue(db, await loadMembershipRules(db), memberId, current.state, today)).state;
 }
 
+// ───────────────────────── 合并（v0.7.26，M79） ─────────────────────────
+
+/** 两个状态谁高：档级 → 阶位 → 不在补充期的高 → 会籍周期结束得晚的高；返回正数表示 a 高 */
+export function compareStates(a: GradeState, b: GradeState): number {
+  if (a.grade !== b.grade) return a.grade - b.grade;
+  if ((a.tier ?? -1) !== (b.tier ?? -1)) return (a.tier ?? -1) - (b.tier ?? -1);
+  const ag = a.graceUntil === null ? 1 : 0;
+  const bg = b.graceUntil === null ? 1 : 0;
+  if (ag !== bg) return ag - bg;
+  return (a.cycleEnd ?? '').localeCompare(b.cycleEnd ?? '');
+}
+
+/**
+ * 合并时的档阶（两位会员一行都已锁）：两位都先把到期没处理的处理掉，目标会员取两位里高的状态，记一条状态变化「合并」。
+ * 不发升级礼，也不当场补本期的券（来源会员这一期的已经发过；下一期按新的档阶照常发）
+ */
+export async function applyMergeGrade(
+  tx: Tx,
+  o: { sourceId: number; targetId: number; mergeId: number; today: string; staffId: number; reason: string },
+): Promise<{ from: string; to: string; changed: boolean }> {
+  const rules = await loadMembershipRules(tx);
+  const source = await settleMemberDue(tx, o.sourceId, o.today);
+  const target = await settleMemberDue(tx, o.targetId, o.today);
+  if (!source || !target) throw notFound('会员不存在');
+  const takeSource = compareStates(source, target) > 0;
+  if (takeSource) {
+    await changeState(tx, o.targetId, 'merge', o.today, target, source, { memberMergeId: o.mergeId, staffId: o.staffId, reason: o.reason, deferPeriodic: true });
+  }
+  const label = (s: GradeState) => gradeLabel(rules, s.grade, s.tier);
+  return { from: label(target), to: label(takeSource ? source : target), changed: takeSource };
+}
+
+/** 合并前核对（只读）：按规则推算到 today 的两位的档阶，与合并以后目标会员的档阶 */
+export async function previewMergeGrade(db: Db, sourceId: number, targetId: number, today: string) {
+  const rules = await loadMembershipRules(db);
+  const source = await projectedGrade(db, sourceId, today);
+  const target = await projectedGrade(db, targetId, today);
+  if (!source || !target) throw notFound('会员不存在');
+  const label = (s: GradeState) => gradeLabel(rules, s.grade, s.tier);
+  const after = compareStates(source, target) > 0 ? source : target;
+  return { source: label(source), target: label(target), after: label(after), changed: after === source && compareStates(source, target) > 0 };
+}
+
 // ───────────────────────── 充值与消费（钱包的事务里调用） ─────────────────────────
 
 export interface RechargeGrade {
@@ -339,21 +382,37 @@ export async function previewRechargeGrade(db: Db, memberId: number, paidCents: 
 // ───────────────────────── 储值退回（v0.7.26，M73） ─────────────────────────
 
 /**
- * 现在这一档是不是本会籍周期里靠充值升上来的：最近一条改了档级的状态变化是「充值升档」、发生在这个周期里
- * （周期从升档那天起算）。靠保级、手动调整、上线定档、合并留在这一档的不算
+ * 现在这一档里靠本会籍周期的充值升上来的那一段（M73）：从最近的状态变化往回看——
+ *   · 「储值退回降档」接着往前看（退过一次、降过一档的，剩下的这一档仍是那次充值升上来的；测试会话 c938e79 的 P2：
+ *     原来只看最近一条改了档级的，第二次退清时找不到「充值升档」，退完本金还留在 L2）；
+ *   · 「消费升阶」「进入补充期」不改档级的来源，跳过；
+ *   · 「充值升档」记下它之前的档级，接着往前看是不是还连着充值升档或退回降档；
+ *   · 遇到上线 / 期初导入定档、保级、补充期内保级、降档、手动调整、合并就停：这些留下的档级不因退回而降。
+ * 返回这一段之前的档级（退回最多降到这一档）；最近的充值升档不在这个周期里、或根本不是靠充值升上来的为空
  */
-async function gradeFromRecharge(db: Db, memberId: number, state: GradeState): Promise<boolean> {
-  if (state.grade === 0 || !state.cycleStart) return false;
-  const [e] = await db<{ kind: GradeEventKind; businessDate: string }[]>`
-    SELECT kind, business_date FROM member_grade_events
-    WHERE member_id = ${memberId} AND to_grade <> from_grade ORDER BY id DESC LIMIT 1`;
-  return !!e && e.kind === 'recharge_up' && e.businessDate >= state.cycleStart;
+async function rechargeFloor(db: Db, memberId: number, state: GradeState): Promise<number | null> {
+  if (state.grade === 0 || !state.cycleStart) return null;
+  const events = await db<{ kind: GradeEventKind; fromGrade: number; businessDate: string }[]>`
+    SELECT kind, from_grade, business_date FROM member_grade_events WHERE member_id = ${memberId} ORDER BY id DESC`;
+  let floor: number | null = null;
+  let latestUp: string | null = null;
+  for (const e of events) {
+    if (e.kind === 'spend_up' || e.kind === 'grace_start' || e.kind === 'refund_down') continue;
+    if (e.kind !== 'recharge_up') break;
+    floor = e.fromGrade;
+    latestUp ??= e.businessDate;
+  }
+  return floor !== null && latestUp !== null && latestUp >= state.cycleStart ? floor : null;
 }
 
-/** 储值退回以后够得上的档阶：降到够得上的那一档的初阶，会籍周期不变；L0 没有周期。够得上、或不是靠充值升上来的为空 */
+/**
+ * 储值退回以后够得上的档阶：降到够得上的那一档的初阶，会籍周期不变；L0 没有周期。
+ * 最多降到靠充值升上来之前的档级（保级、手动调整、上线定档等留下的不降）。够得上、或不是靠充值升上来的为空
+ */
 async function refundTarget(db: Db, rules: MembershipRules, memberId: number, state: GradeState, rollingAfter: number): Promise<GradeState | null> {
-  if (!(await gradeFromRecharge(db, memberId, state))) return null;
-  const reached = gradeForAmount(rules, rollingAfter);
+  const floor = await rechargeFloor(db, memberId, state);
+  if (floor === null) return null;
+  const reached = Math.max(gradeForAmount(rules, rollingAfter), floor) as Grade;
   if (reached >= state.grade) return null;
   return reached === 0 ? L0_STATE : { grade: reached, tier: 0, cycleStart: state.cycleStart, cycleEnd: state.cycleEnd, graceUntil: null };
 }
@@ -624,9 +683,10 @@ export async function memberGradeBadges(db: Db, memberIds: number[], todayDate: 
   const ids = [...new Set(memberIds)];
   if (!ids.length) return new Map();
   const rules = await loadMembershipRules(db);
-  const rows = await db<(GradeRow & { id: number })[]>`
-    SELECT id, grade, tier, cycle_start, cycle_end, grace_until, grade_version FROM members WHERE id IN ${db(ids)}`;
+  const rows = await db<(GradeRow & { id: number; status: 'active' | 'frozen' })[]>`
+    SELECT id, grade, tier, cycle_start, cycle_end, grace_until, grade_version, status FROM members WHERE id IN ${db(ids)}`;
   // 临时身份（v0.7.25，M51）：VIP 柜按自己的与临时身份的取高的；徽标仍显示自己的档阶，另外标「体验中」
+  // 停用的会员（v0.7.26，M76）：VIP 柜按散客（0 级），临时身份也不算
   const trials = await activeTrialsOf(db, ids, todayDate);
   return new Map(
     rows.map((r) => {
@@ -644,8 +704,8 @@ export async function memberGradeBadges(db: Db, memberIds: number[], todayDate: 
           graceUntil: s.graceUntil,
           daysLeft,
           reminder: s.graceUntil === null ? reminderBucket(rules, daysLeft) : null,
-          lockerLevel: Math.max(lockerLevelOf(rules, s.grade), trial ? lockerLevelOf(rules, trial.grade) : 0),
-          trial: trial ? { grade: trial.grade, label: gradeLabel(rules, trial.grade, trial.tier), endsOn: trial.endsOn, kind: trial.kind } : null,
+          lockerLevel: r.status !== 'active' ? 0 : Math.max(lockerLevelOf(rules, s.grade), trial ? lockerLevelOf(rules, trial.grade) : 0),
+          trial: trial && r.status === 'active' ? { grade: trial.grade, label: gradeLabel(rules, trial.grade, trial.tier), endsOn: trial.endsOn, kind: trial.kind } : null,
         },
       ];
     }),

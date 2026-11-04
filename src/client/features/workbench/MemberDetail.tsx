@@ -65,7 +65,11 @@ export function MemberDetail({
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-[22px] leading-tight font-bold tracking-tight break-all text-ink">{member.name}</h2>
               <GradeBadge member={member} withExpiry />
-              {member.status === 'frozen' && <Badge tone="clay">已停用</Badge>}
+              {member.mergedIntoId !== null ? (
+                <Badge tone="neutral">已合并</Badge>
+              ) : (
+                member.status === 'frozen' && <Badge tone="clay">已停用</Badge>
+              )}
               {member.isSynthetic && <Badge tone="ember">合成数据</Badge>}
             </div>
             <p className="num mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[13px] text-ink-2">
@@ -82,7 +86,7 @@ export function MemberDetail({
               {channel && ` · 渠道 ${channel}`}
             </p>
           </div>
-          {can('member.write') && (
+          {can('member.write') && member.mergedIntoId === null && (
             <Button size="sm" variant="secondary" icon={<PencilLine className="size-3.5" />} onClick={onEdit}>
               编辑
             </Button>

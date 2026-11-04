@@ -16,18 +16,21 @@ import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending, type ErpPendingOp } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
-import { uuid } from '../../lib/utils';
+import { formatDate, uuid } from '../../lib/utils';
 import { AuthorizeDialog } from '../../components/AuthorizeDialog';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, MoneyInput, Notice, PendingBadge, SectionTitle, Select, Skeleton, Textarea } from '../../components/ui';
-import { MemberStatusActions } from './MemberStatusActions';
+import type { MemberAccountHistory } from '@shared/member-admin';
+import { formatPhone } from '@shared/labels';
+import { MemberStatusActions, mergeUrl, statusUrl } from './MemberStatusActions';
 
 const refundUrl = (memberId: number) => `/api/members/${memberId}/refunds`;
 export const accountKeys = {
   refunds: (memberId: number) => ['member-refunds', memberId] as const,
+  history: (memberId: number) => ['member-account-history', memberId] as const,
   plan: (memberId: number, amount: number | null) => ['member-refund-plan', memberId, amount ?? 'all'] as const,
 };
 
@@ -36,13 +39,17 @@ export function AccountCard({ member }: { member: MemberDetail }) {
   const qc = useQueryClient();
   const canRefund = can('member.refund');
   const refunds = useQuery({ queryKey: accountKeys.refunds(member.id), queryFn: () => api.get<MemberRefundDetail[]>(`/api/members/${member.id}/refunds`) });
+  const history = useQuery({ queryKey: accountKeys.history(member.id), queryFn: () => api.get<MemberAccountHistory>(`/api/members/${member.id}/account-history`) });
   const ofMember = (op: ErpPendingOp) => op.url === refundUrl(member.id);
+  const ofAccount = (op: ErpPendingOp) => op.url === statusUrl(member.id) || op.url === mergeUrl(member.id);
   const pending = useErpPending(['member_refund']).filter(ofMember);
   const [open, setOpen] = useState(false);
   const refresh = () =>
     Promise.all([
       qc.invalidateQueries({ queryKey: ['member', member.id] }),
       qc.invalidateQueries({ queryKey: accountKeys.refunds(member.id) }),
+      qc.invalidateQueries({ queryKey: accountKeys.history(member.id) }),
+      qc.invalidateQueries({ queryKey: ['members'] }),
       qc.invalidateQueries({ queryKey: ['activity', member.id] }),
       qc.invalidateQueries({ queryKey: ['membership'] }),
     ]);
@@ -83,6 +90,7 @@ export function AccountCard({ member }: { member: MemberDetail }) {
         </span>
       </SectionTitle>
       {canRefund && <ErpPendingPanel types={['member_refund']} filter={ofMember} className="mt-3 space-y-2" onFound={() => void refresh()} />}
+      <ErpPendingPanel types={['member_status', 'member_merge']} filter={ofAccount} className="mt-3 space-y-2" onFound={() => void refresh()} />
       {merged && (
         <Notice tone="warning" className="mt-3" title={`已合并到 ${merged.name}（${merged.memberNo}）`} data-testid="member-merged-into">
           余额与赠金已经转过去，这份档案停用；以后在那位会员那里办理。
@@ -117,8 +125,41 @@ export function AccountCard({ member }: { member: MemberDetail }) {
           ))}
         </ul>
       )}
+      {history.data && <AccountHistory h={history.data} />}
       {open && <RefundDialog member={member} onClose={() => setOpen(false)} onDone={() => void refresh()} />}
     </Card>
+  );
+}
+
+/** 停用 / 启用、换手机号、合并的记录（最近的在前） */
+function AccountHistory({ h }: { h: MemberAccountHistory }) {
+  const rows = [
+    ...h.statusEvents
+      .filter((e) => !e.mergeNo)
+      .map((e) => ({ at: e.createdAt, key: `s${e.id}`, text: `${e.toStatus === 'frozen' ? '停用' : '启用'} · ${e.reason} · ${e.staffName}` })),
+    ...h.phoneChanges.map((c) => ({
+      at: c.createdAt,
+      key: `p${c.id}`,
+      text: `换手机号 ${formatPhone(c.oldPhone)} → ${formatPhone(c.newPhone)} · ${c.reason} · ${c.staffName}${c.approverName ? `，${c.approverName}授权` : ''}`,
+    })),
+    ...h.mergedFrom.map((g) => ({
+      at: g.createdAt,
+      key: `m${g.id}`,
+      text: `合并转入 ${g.mergeNo}：${g.source.name}（${g.source.memberNo}）本金 ${formatYuan(g.principal)}、赠金 ${formatYuan(g.bonus)}${g.grade ? `，档阶 ${g.grade.from} → ${g.grade.to}` : ''} · ${g.staffName}`,
+    })),
+    ...(h.mergedInto
+      ? [{ at: h.mergedInto.createdAt, key: 'into', text: `合并到 ${h.mergedInto.target.name}（${h.mergedInto.target.memberNo}）${h.mergedInto.mergeNo} · ${h.mergedInto.reason} · ${h.mergedInto.staffName}` }]
+      : []),
+  ].sort((a, b) => (a.at < b.at ? 1 : -1));
+  if (rows.length === 0) return null;
+  return (
+    <ul className="mt-3 space-y-1 border-t border-line pt-3 text-[12.5px] text-ink-3" data-testid="member-account-history">
+      {rows.map((r) => (
+        <li key={r.key}>
+          <span className="num">{formatDate(r.at)}</span> {r.text}
+        </li>
+      ))}
+    </ul>
   );
 }
 
