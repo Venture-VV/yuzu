@@ -489,7 +489,8 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
         '充值实收', '赠金', '工作台储值消费', '反结账退现金', '押金现金（收 − 退）', '退款单退现金', '应有现金', '实点现金', '长短款', '反结账张数', '退款单张数', '接班人', '备注'],
       ...day.shifts.map((r) => [
         r.shiftNo,
-        r.staffName,
+        // 按钱箱交班（v0.7.28）：钱箱名与在上面待过的人
+        r.drawerName ? `${r.drawerName}（${[...new Set(r.members.map((m) => m.staffName))].join('、')}）` : r.staffName,
         r.businessDate,
         r.status === 'closed' ? '已交班' : '当班中',
         stampOf(r.startedAt),

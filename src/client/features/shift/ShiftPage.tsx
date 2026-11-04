@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardCheck, Clock3, Coins, Undo2 } from 'lucide-react';
+import { ClipboardCheck, Clock3, Coins, LogOut, Undo2, Users } from 'lucide-react';
 import { CHECKOUT_METHOD_LABELS, COUPON_PLATFORM_LABELS, type ShiftRecord, type ShiftSummary } from '@shared/checkout';
 import { PAYMENT_METHOD_LABELS } from '@shared/labels';
 import { parseYuan } from '@shared/money';
@@ -14,7 +14,7 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, MoneyInput, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { PrintButton } from '../print/PrintButton';
 import { NetPrintButton } from '../print/NetPrintButton';
-import { CrossDayShiftNotice, shiftKeys, StartShiftForm, useCurrentShift } from './ShiftGate';
+import { CrossDayShiftNotice, shiftKeys, StartShiftForm, useCurrentShift, useDrawerBoard } from './ShiftGate';
 
 // 交班（店主 #11，2026-10-29 签认）：开班登记备用金 → 当班期间系统按本人经办的结账与充值汇总 → 交班时实点现金，记下长款 / 短款。
 // 结账收款算在收款时的班次；反结账退的现金算在执行反结账的人当时的班次、扣减应有现金（同一钱箱的人合并核对时相抵）。
@@ -53,11 +53,14 @@ export function ShiftPage() {
 
 function StartShift() {
   const session = useSession();
+  const drawerMode = useDrawerBoard().data?.mode === 'drawer';
   return (
     <Card className="p-5" data-testid="shift-start">
       <SectionTitle>开班</SectionTitle>
       <p className="mt-1 text-[13px] text-ink-3">
-        登记抽屉里的备用金后开始当班；交班时系统按你经办的结账与充值汇总各收款方式，算出应有现金。
+        {drawerMode
+          ? '按钱箱交班：选你所在的钱箱，已经开班的点「加入」，还没开班的登记抽屉里的备用金后开班；交班时按这个钱箱所有人经办的结账与充值汇总，算出应有现金。'
+          : '登记抽屉里的备用金后开始当班；交班时系统按你经办的结账与充值汇总各收款方式，算出应有现金。'}
         {session.rules.requireOpenShift ? '充值、结账、反结账前都要先开班。' : ''}
       </p>
       <StartShiftForm />
@@ -65,9 +68,27 @@ function StartShift() {
   );
 }
 
+/** 按钱箱交班：班次上的人（加入、离开的时间） */
+function MembersLine({ shift }: { shift: ShiftRecord }) {
+  if (!shift.drawerName) return null;
+  return (
+    <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[12.5px] text-ink-3" data-testid="shift-members">
+      <Users className="size-3.5" /> 在这个钱箱上：
+      {shift.members.map((m, i) => (
+        <span key={`${m.staffId}-${m.joinedAt}`} className={cn(m.leftAt ? 'text-ink-4' : 'font-semibold text-ink-2')}>
+          {m.staffName} {formatTime(m.joinedAt)}
+          {m.leftAt ? `–${formatTime(m.leftAt)}` : ' 起'}
+          {i < shift.members.length - 1 ? '、' : ''}
+        </span>
+      ))}
+    </p>
+  );
+}
+
 function OpenShift({ shift }: { shift: ShiftRecord }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const [leaving, setLeaving] = useState(false);
   const [counted, setCounted] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -95,16 +116,47 @@ function OpenShift({ shift }: { shift: ShiftRecord }) {
       setBusy(false);
     }
   };
+  /** 按钱箱交班：离开钱箱（班次照常开着，钱等交班时一起点） */
+  const leave = async () => {
+    setLeaving(true);
+    setError(null);
+    try {
+      await api.post<ShiftRecord>(`/api/shifts/${shift.id}/leave`, {});
+      toast({ tone: 'success', title: `已离开${shift.drawerName ?? ''}`, body: '之后你的收款不再记到这个钱箱；钱箱的班次照常开着，交班时一起点钱。' });
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setLeaving(false);
+      void qc.invalidateQueries({ queryKey: shiftKeys.all });
+    }
+  };
+  const onShift = shift.members.filter((m) => !m.leftAt).length;
   return (
     <Card className="p-5" data-testid="shift-open">
-      <SectionTitle aside={<Badge tone="pine">当班中</Badge>}>
+      <SectionTitle
+        aside={
+          <span className="flex items-center gap-2">
+            {shift.drawerName && (
+              <Button size="sm" variant="ghost" icon={<LogOut className="size-3.5" />} loading={leaving} onClick={() => void leave()} data-testid="shift-leave">
+                离开钱箱
+              </Button>
+            )}
+            <Badge tone="pine">当班中</Badge>
+          </span>
+        }
+      >
         <span className="flex items-center gap-2">
           <ClipboardCheck className="size-4 text-pine" /> 交班表 · {shift.shiftNo}
+          {shift.drawerName ? ` · ${shift.drawerName}` : ''}
         </span>
       </SectionTitle>
       <p className="mt-1 flex items-center gap-1.5 text-[13px] text-ink-3">
         <Clock3 className="size-3.5" /> {formatDateTime(shift.startedAt)} 开班 · 备用金 <Money cents={shift.openingCash} /> · 数据每 30 秒刷新
       </p>
+      <MembersLine shift={shift} />
+      {shift.drawerName && onShift <= 1 && (
+        <p className="mt-1 text-[12px] text-ink-3">你是这个钱箱上最后一个人：离开后钱箱的班次还开着（钱在里面），下一位点「加入」接着收；要点钱交班就在下面确认交班。</p>
+      )}
       <SummaryView summary={shift.summary} />
       <div className="mt-5 rounded-lg border border-line bg-paper/60 p-4">
         <div className="flex flex-wrap items-end gap-4">
@@ -245,6 +297,7 @@ function SummaryView({ summary }: { summary: ShiftSummary }) {
           赠金 <Money cents={summary.recharges.bonus} /> · 会员工作台储值消费 {summary.walletConsumes.count} 笔 <Money cents={summary.walletConsumes.total} />（不是现金）
         </p>
       </div>
+      {summary.byOperator && summary.byOperator.length > 0 && <OperatorsView operators={summary.byOperator} />}
       {summary.deposits && <DepositsView deposits={summary.deposits} />}
       {summary.refundSlips && <RefundSlipsView slips={summary.refundSlips} />}
       {summary.countCards && <CountCardsView cards={summary.countCards} />}
@@ -262,6 +315,29 @@ function SummaryView({ summary }: { summary: ShiftSummary }) {
             {summary.voids.map((v) => `${v.checkoutNo}（¥${(v.amount / 100).toFixed(2)}，${v.reason}${v.voidedByName ? `，${v.voidedByName}反结账、从本班钱箱退` : ''}）`).join('；')}。原单收过的现金不计入应有现金，请核对是否已退还或已重新收取。
           </Notice>
         ))}
+    </div>
+  );
+}
+
+/** 按钱箱交班（v0.7.28）：各人经办的结账与充值（一个钱箱几个人收款） */
+function OperatorsView({ operators }: { operators: NonNullable<ShiftSummary['byOperator']> }) {
+  return (
+    <div className="rounded-lg border border-line p-4 md:col-span-2" data-testid="shift-operators">
+      <p className="text-[13px] font-bold text-ink-2">各人经办</p>
+      <ul className="mt-2 space-y-1 text-[13px]">
+        {operators.map((o) => (
+          <li key={o.staffId} className="flex flex-wrap justify-between gap-x-3">
+            <span className="text-ink-2">
+              {o.staffName}
+              <span className="text-ink-3">
+                {' '}
+                · 结账 {o.checkouts.count} 张 <Money cents={o.checkouts.total} /> · 充值 {o.recharges.count} 笔 <Money cents={o.recharges.paid} />
+              </span>
+            </span>
+            <Money cents={o.checkouts.total + o.recharges.paid} className="font-semibold" />
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -301,7 +377,9 @@ function ShiftRow({ s }: { s: ShiftRecord }) {
     <li>
       <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-left hover:bg-paper-2/60">
         <span className="num font-bold">{s.shiftNo}</span>
-        <span className="text-[13px] font-semibold text-ink-2">{s.staffName}</span>
+        <span className="text-[13px] font-semibold text-ink-2">
+          {s.drawerName ? `${s.drawerName}（${[...new Set(s.members.map((m) => m.staffName))].join('、')}）` : s.staffName}
+        </span>
         <span className="text-[12.5px] text-ink-3">
           {formatTime(s.startedAt)} – {s.endedAt ? formatTime(s.endedAt) : '当班中'}
         </span>

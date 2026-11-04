@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ADMIN_PERMISSIONS, type AdminOverview, type RolePermissionMatrix, type RuleEntry } from '@shared/admin';
 import { describeBusinessHours } from '@shared/business-date';
+import { SHIFT_MODE_LABELS } from '@shared/checkout';
 import { DEFAULT_FRONTDESK_RULES, type FrontdeskRules } from '@shared/frontdesk';
 import { APPROVAL_RULE_LABELS, type ApprovalRules } from '@shared/inventory';
 import { DEDUCTION_RULE_LABELS, describeHours, ROLE_LABELS } from '@shared/labels';
@@ -148,6 +149,16 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   add({
     key: 'require_open_shift', group: 'wallet', label: '收款前必须先开班', value: onOff(s.requireOpenShift, '必须先开班', '不要求'), defaultValue: '必须先开班',
     pending: false, section: 'rules', current: s.requireOpenShift, dflt: d.requireOpenShift, metaKey: sk('requireOpenShift'),
+  });
+  // 交班方式（v0.7.28 ⑨，N11 待确认）
+  const drawers = (list: typeof s.cashDrawers) => list.filter((d) => d.active).map((d) => d.label).join('、') || '没有启用的钱箱';
+  add({
+    key: 'shift_mode', group: 'wallet', label: '交班方式', value: SHIFT_MODE_LABELS[s.shiftMode], defaultValue: SHIFT_MODE_LABELS[d.shiftMode],
+    pending: true, section: 'rules', hint: '按钱箱交班：同一个钱箱的人在同一个班次上，交班时点这个钱箱的钱', current: s.shiftMode, dflt: d.shiftMode, metaKey: sk('shiftMode'),
+  });
+  add({
+    key: 'cash_drawers', group: 'wallet', label: '钱箱', value: drawers(s.cashDrawers), defaultValue: drawers(d.cashDrawers),
+    pending: true, section: 'rules', hint: '按钱箱交班时开班选钱箱', current: s.cashDrawers, dflt: d.cashDrawers, metaKey: sk('cashDrawers'),
   });
   add({
     key: 'custom_bonus_valid_days', group: 'wallet', label: '自定义赠金有效期', value: days(s.customBonusValidDays), defaultValue: days(d.customBonusValidDays),
@@ -378,6 +389,8 @@ const SETTING_LABELS: Record<string, string> = {
   memberFields: '会员自定义字段',
   customBonusValidDays: '自定义赠金有效期',
   requireOpenShift: '收款前必须先开班',
+  shiftMode: '交班方式',
+  cashDrawers: '钱箱',
   hidePendingMarks: '「待确认」标记',
   memberChannels: '渠道来源',
 };

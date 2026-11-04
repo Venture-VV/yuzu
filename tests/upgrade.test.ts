@@ -56,6 +56,8 @@ beforeAll(async () => {
   await sql`CREATE TABLE bonus_lots (id bigserial PRIMARY KEY, member_id bigint, source text, recharge_id bigint, amount bigint, remaining bigint, expires_at timestamptz, created_at timestamptz)`;
   await sql`CREATE TABLE checkouts (id bigserial PRIMARY KEY, checkout_no text, status text)`;
   await sql`CREATE TABLE shifts (id bigserial PRIMARY KEY, staff_id bigint, status text)`;
+  // 收款按当班成员找班次（059 才有）：写入期间临时建空表，迁移前删掉
+  await sql`CREATE TABLE shift_members (shift_id bigint, staff_id bigint, left_at timestamptz)`;
   await sql`ALTER TABLE recharges ADD COLUMN shift_id bigint`;
   // 现版本的会员消费会查会员有没有在店手牌（R1.2，004 才有手牌与来访）；收款前必须先开班的规则（R1.2）在升级前不存在
   await sql`CREATE TABLE hand_tags (id bigserial PRIMARY KEY, code text)`;
@@ -101,6 +103,7 @@ beforeAll(async () => {
   await sql`DROP TABLE visits`;
   await sql`DROP TABLE hand_tags`;
   await sql`DELETE FROM settings WHERE key = 'require_open_shift'`;
+  await sql`DROP TABLE shift_members`;
   await sql`DROP TABLE shifts`;
   await sql`ALTER TABLE recharges DROP COLUMN shift_id`;
   await sql`DROP TABLE coupon_rules`;

@@ -198,7 +198,7 @@ export function buildRefundSlip(d: RefundDetail, meta: SlipMeta): Buffer {
   for (const p of d.payments) {
     s.pair(payLabel(p.method), yuan(p.amount));
     if (p.ref) s.text(p.method === 'other' ? p.ref : `退款单号 ${p.ref}`, 2);
-    if (p.method === 'cash' && d.shift) s.text(`从 ${d.shift.staffName} 的钱箱退（班次 ${d.shift.shiftNo}）`, 2);
+    if (p.method === 'cash' && d.shift) s.text(`从 ${d.shift.drawerName ?? `${d.shift.staffName} 的钱箱`}退（班次 ${d.shift.shiftNo}）`, 2);
   }
   s.text(`原因：${d.reason}`).rule().sign('客人签字').sign('经办签字', d.operatorName);
   return s.footer().bytes();
@@ -208,13 +208,23 @@ export function buildRefundSlip(d: RefundDetail, meta: SlipMeta): Buffer {
 
 type Summary = ShiftSummary & { refunds?: ShiftSummary['refunds']; cash: ShiftSummary['cash'] };
 
+/** 按钱箱交班的班次上待过的人：张三 09:00–12:30、李四 10:15 起 */
+function shiftPeople(r: ShiftRecord, tz: string): string {
+  const hm = (iso: string) => slipStamp(iso, tz).slice(-5);
+  return r.members.map((m) => `${m.staffName} ${hm(m.joinedAt)}${m.leftAt ? `–${hm(m.leftAt)}` : ' 起'}`).join('、') || '—';
+}
+
 export function buildShiftSlip(r: ShiftRecord, meta: SlipMeta): Buffer {
   const closed = r.status === 'closed';
   const s = new Slip(meta).header(closed ? '交 班 表' : '交班表（预览）');
   const tz = meta.timeZone;
   const sum = r.summary as Summary;
   if (!closed) s.strong('当班中，尚未交班');
-  s.pair('班次', r.shiftNo).pair('交班人', r.staffName).pair('营业日', r.businessDate).pair('开班', slipStamp(r.startedAt, tz)).pair('交班', r.endedAt ? slipStamp(r.endedAt, tz) : '—');
+  s.pair('班次', r.shiftNo);
+  // 按钱箱交班：钱箱名与在上面待过的人；按人交班：交班人
+  if (r.drawerName) s.pair('钱箱', r.drawerName).text(`当班：${shiftPeople(r, tz)}`);
+  else s.pair('交班人', r.staffName);
+  s.pair('营业日', r.businessDate).pair('开班', slipStamp(r.startedAt, tz)).pair('交班', r.endedAt ? slipStamp(r.endedAt, tz) : '—');
   s.rule().pair('备用金', yuan(r.openingCash), { strong: true });
   s.strong(`前台结账 ${sum.checkouts.count} 张`);
   if (sum.checkoutByMethod.length === 0) s.text('无');
@@ -236,6 +246,10 @@ export function buildShiftSlip(r: ShiftRecord, meta: SlipMeta): Buffer {
     for (const m of sum.countCards.refunds.byMethod) s.pair(`退 ${payLabel(m.method)} · ${m.count} 笔`, yuan(m.amount));
   }
   s.text(`会员工作台储值消费 ${sum.walletConsumes.count} 笔 ${yuan(sum.walletConsumes.total)}（不是现金）`);
+  if (sum.byOperator && sum.byOperator.length > 0) {
+    s.strong('各人经办（结账 / 充值）');
+    for (const o of sum.byOperator) s.pair(`${o.staffName} · ${o.checkouts.count} 张 / ${o.recharges.count} 笔`, yuan(o.checkouts.total + o.recharges.paid));
+  }
   s.rule().strong('现金');
   s.pair('备用金', yuan(sum.cash.opening)).pair('+ 结账现金', yuan(sum.cash.checkout)).pair('+ 充值现金', yuan(sum.cash.recharge));
   if (sum.cash.refund) s.pair('− 反结账退现金', yuan(sum.cash.refund));

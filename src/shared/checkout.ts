@@ -182,7 +182,7 @@ export interface RefundDetail extends RefundSummary {
   items: { category: string; name: string; quantity: number; amount: number }[];
   payments: { method: RefundMethod; amount: number; ref: string }[];
   /** 记到的班次（现金退款是所选钱箱当班的班次）；没有开班时为 null */
-  shift: { id: number; shiftNo: string; staffName: string; open: boolean } | null;
+  shift: { id: number; shiftNo: string; staffName: string; drawerName: string | null; open: boolean } | null;
   voidedAt: string | null;
   voidedByName: string | null;
   voidReason: string | null;
@@ -308,7 +308,8 @@ export interface CheckoutPreview {
 
 /** 反结账退现金可以选的钱箱（v0.7.1，跨钱箱退款）：此刻当班的班次；original 原单收款的班次，mine 反结账人自己的班次 */
 export interface RefundShiftOptions {
-  shifts: { id: number; shiftNo: string; staffName: string; startedAt: string; mine: boolean; original: boolean }[];
+  /** drawerName：按钱箱交班开的班是钱箱名（按人交班的为 null，显示「某某的钱箱」） */
+  shifts: { id: number; shiftNo: string; staffName: string; drawerName: string | null; startedAt: string; mine: boolean; original: boolean }[];
   /** 建议的默认：原单收款的班次仍在班上时选它，否则是自己的班次，只有一个当班的班次时选它；都没有时为 null */
   suggested: number | null;
 }
@@ -461,8 +462,59 @@ export interface ShiftSummary {
     sales: { count: number; total: number; byMethod: { method: PaymentMethod; count: number; amount: number }[] };
     refunds: { count: number; total: number; byMethod: { method: PaymentMethod; count: number; amount: number }[] };
   };
+  /**
+   * 按钱箱交班（v0.7.28）的班次：各人经办的结账与充值（一个钱箱几个人收款，交班时看各收了多少）；按人交班的班次没有这一项
+   */
+  byOperator?: ShiftOperatorTotals[];
   /** 应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金 + 押金现金（收 − 退）− 退款单退现金 − 储值退回的现金 + 次卡现金（卖 − 退） */
   cash: { opening: number; checkout: number; recharge: number; refund?: number; deposit?: number; refundSlip?: number; memberRefund?: number; countCard?: number; expected: number };
+}
+
+export interface ShiftOperatorTotals {
+  staffId: number;
+  staffName: string;
+  checkouts: { count: number; total: number };
+  recharges: { count: number; paid: number };
+}
+
+// ───────────── 交班方式（v0.7.28 ⑨，N11） ─────────────
+
+/** 交班方式：按人交班（默认，一人一个班次、各点各的钱）或按钱箱交班（同一个钱箱的人在同一个班次上，交班时点这个钱箱的钱） */
+export const SHIFT_MODES = ['person', 'drawer'] as const;
+export type ShiftMode = (typeof SHIFT_MODES)[number];
+export const SHIFT_MODE_LABELS: Record<ShiftMode, string> = { person: '按人交班', drawer: '按钱箱交班' };
+
+/** 钱箱（后台「经营规则」维护）：编号保存后不变，不能删、只能停用 */
+export interface CashDrawer {
+  key: string;
+  label: string;
+  active: boolean;
+}
+export const CASH_DRAWER_KEY = /^k\d{1,3}$/;
+export const MAX_CASH_DRAWERS = 20;
+export const DEFAULT_CASH_DRAWERS: CashDrawer[] = [{ key: 'k1', label: '1 号钱箱', active: true }];
+
+/** 班次上的人：按人交班时只有开班人；按钱箱交班时同一个钱箱的人，可以中途加入、离开 */
+export interface ShiftMember {
+  staffId: number;
+  staffName: string;
+  joinedAt: string;
+  /** 还在这个班次上为 null */
+  leftAt: string | null;
+}
+
+/** 开班页按钱箱交班时选钱箱：每个钱箱此刻有没有开着的班次、谁在上面 */
+export interface DrawerBoard {
+  mode: ShiftMode;
+  drawers: {
+    key: string;
+    name: string;
+    /** 停用了、但还有开着的班次时也列出来（可以加入、交班，不能新开） */
+    active: boolean;
+    shift: { id: number; shiftNo: string; startedAt: string; openingCash: number; members: ShiftMember[] } | null;
+  }[];
+  /** 本人此刻所在的班次 */
+  mine: number | null;
 }
 
 export interface ShiftRecord {
@@ -481,6 +533,10 @@ export interface ShiftRecord {
   handedToName: string | null;
   closedByName: string | null;
   summary: ShiftSummary;
+  /** 按钱箱交班开的班：钱箱名（开班时的名字）；按人交班的为 null */
+  drawerName: string | null;
+  /** 班次上的人（加入、离开的时间） */
+  members: ShiftMember[];
 }
 
 /** 经营看板（S3.5） */

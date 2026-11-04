@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { HHMM } from '@shared/business-date';
+import { CASH_DRAWER_KEY, DEFAULT_CASH_DRAWERS, MAX_CASH_DRAWERS, SHIFT_MODES, type CashDrawer } from '@shared/checkout';
 import { DEDUCTION_RULES } from '@shared/deduction';
 import { MAX_MEMBER_FIELDS, MEMBER_FIELD_KEY, MEMBER_FIELD_TYPES, type MemberFieldDef } from '@shared/member-fields';
 import { DEFAULT_MEMBER_CHANNELS, MAX_MEMBER_CHANNELS, MEMBER_CHANNEL_KEY, type MemberChannel } from '@shared/members';
@@ -30,6 +31,8 @@ const KEY_MAP = {
   require_open_shift: 'requireOpenShift',
   hide_pending_marks: 'hidePendingMarks',
   member_channels: 'memberChannels',
+  shift_mode: 'shiftMode',
+  cash_drawers: 'cashDrawers',
 } as const satisfies Record<string, keyof StoreSettings>;
 
 /** 设置项在库里的键（规则总表按它找最近修改的时间与人） */
@@ -50,6 +53,9 @@ const DEFAULTS: StoreSettings = {
   requireOpenShift: true,
   hidePendingMarks: false,
   memberChannels: DEFAULT_MEMBER_CHANNELS,
+  // 交班方式（v0.7.28 ⑨，N11 待确认）：默认按人交班（现在的做法）；按钱箱交班时开班选钱箱
+  shiftMode: 'person',
+  cashDrawers: DEFAULT_CASH_DRAWERS,
 };
 
 export const DEFAULT_SETTINGS: Readonly<StoreSettings> = DEFAULTS;
@@ -102,6 +108,17 @@ const SettingsInput = z
         }),
       )
       .max(MAX_MEMBER_CHANNELS, `渠道最多 ${MAX_MEMBER_CHANNELS} 个`),
+    shiftMode: z.enum(SHIFT_MODES, '交班方式不正确'),
+    cashDrawers: z
+      .array(
+        z.object({
+          /** 已有钱箱的编号；新钱箱不带，由服务端分配 */
+          key: z.string().regex(CASH_DRAWER_KEY, '钱箱编号不正确').nullable().optional(),
+          label: z.string().trim().min(1, '请填写钱箱名称').max(16, '钱箱名称最多 16 个字'),
+          active: z.boolean().default(true),
+        }),
+      )
+      .max(MAX_CASH_DRAWERS, `钱箱最多 ${MAX_CASH_DRAWERS} 个`),
   })
   // 只提交要修改的项（各设置卡片分别保存）；没有提交的项保持原值
   .partial();
@@ -163,6 +180,30 @@ function normalizeChannels(current: readonly MemberChannel[], input: ChannelInpu
   });
 }
 
+type DrawerInput = NonNullable<z.infer<typeof SettingsInput>['cashDrawers']>[number];
+
+/** 钱箱的保存规则（与渠道相同）：已有钱箱不能删除（只能停用），名称不重复；新钱箱按顺序分配编号（k1、k2…），保存后不变 */
+function normalizeDrawers(current: readonly CashDrawer[], input: DrawerInput[]): CashDrawer[] {
+  const byKey = new Map(current.map((d) => [d.key, d]));
+  const kept = new Set(input.map((d) => d.key).filter(Boolean));
+  for (const d of current) {
+    if (!kept.has(d.key)) throw badRequest(`钱箱「${d.label}」不能删除，只能停用（如果是其他人刚刚改过钱箱，请刷新后再改）`);
+  }
+  let next = Math.max(0, ...current.map((d) => Number(d.key.slice(1))));
+  const labels = new Set<string>();
+  return input.map((d) => {
+    const label = d.label.trim();
+    if (labels.has(label)) throw badRequest(`钱箱「${label}」重复`);
+    labels.add(label);
+    if (d.key) {
+      if (!byKey.has(d.key)) throw badRequest('有未知的钱箱，请刷新页面后重试');
+      return { key: d.key, label, active: d.active };
+    }
+    next += 1;
+    return { key: `k${next}`, label, active: d.active };
+  });
+}
+
 export function registerSettingsRoutes(app: FastifyInstance, { sql }: Deps) {
   app.get('/api/settings', { preHandler: guard('settings.manage') }, async () => loadSettings(sql));
 
@@ -176,7 +217,12 @@ export function registerSettingsRoutes(app: FastifyInstance, { sql }: Deps) {
         ...parsed,
         ...(parsed.memberFields ? { memberFields: normalizeMemberFields(before.memberFields, parsed.memberFields) } : {}),
         ...(parsed.memberChannels ? { memberChannels: normalizeChannels(before.memberChannels, parsed.memberChannels) } : {}),
+        ...(parsed.cashDrawers ? { cashDrawers: normalizeDrawers(before.cashDrawers, parsed.cashDrawers) } : {}),
       } as Partial<StoreSettings>;
+      // 按钱箱交班至少要有一个启用的钱箱（切换后新开的班按新做法，开着的班照旧到交班为止，所以切换不用等大家交班）
+      const mode = input.shiftMode ?? before.shiftMode;
+      const drawers = input.cashDrawers ?? before.cashDrawers;
+      if (mode === 'drawer' && !drawers.some((d) => d.active)) throw badRequest('按钱箱交班至少要有一个启用的钱箱');
       for (const [key, prop] of Object.entries(KEY_MAP)) {
         if (!(prop in input)) continue;
         const value = input[prop as keyof typeof input];

@@ -47,7 +47,7 @@ import { expireDueLots, takeForRefund } from './bonus';
 import { erpOpAbandoned } from './erp-ops';
 import { onRefundGrade, previewRefundGrade } from './membership';
 import { loadSettings } from './settings';
-import { lockPaymentShift, lockRefundShift, openShiftOf } from './shifts';
+import { lockPaymentShift, lockRefundShift, openDrawerShifts, openShiftOf, shiftDrawerLabel } from './shifts';
 import { applyBalance, lockMember } from './wallet-core';
 
 // ───────────────────────── 线上充值的原路退回（v0.7.27） ─────────────────────────
@@ -199,10 +199,7 @@ export async function memberRefundPlan(deps: Deps, memberId: number, amount: num
 
 /** 退现金能选的钱箱：此刻当班（未交班、不是升级前开的）的班次；默认自己的，只有一个当班的班次时选它 */
 export async function refundDrawers(db: Db, actorId: number): Promise<RefundShiftOptions> {
-  const rows = await db<{ id: number; shiftNo: string; staffId: number; staffName: string; startedAt: string }[]>`
-    SELECT s.id, s.shift_no, s.staff_id, st.display_name AS staff_name, s.started_at
-    FROM shifts s JOIN staff st ON st.id = s.staff_id WHERE s.status = 'open' AND NOT s.legacy_refund ORDER BY s.started_at, s.id`;
-  const shifts = rows.map((r) => ({ id: r.id, shiftNo: r.shiftNo, staffName: r.staffName, startedAt: new Date(r.startedAt).toISOString(), mine: r.staffId === actorId, original: false }));
+  const shifts = (await openDrawerShifts(db, actorId)).map((r) => ({ ...r, original: false }));
   const suggested = (shifts.find((x) => x.mine) ?? (shifts.length === 1 ? shifts[0] : undefined))?.id ?? null;
   return { shifts, suggested };
 }
@@ -351,10 +348,7 @@ export async function createMemberRefund(deps: Deps, memberId: number, raw: Memb
       });
       // 靠充值升上来、扣完够不上这一档的当场降档（M73）
       const grade = await onRefundGrade(tx, { memberId, refundId, refundNo, today: date, staffId: ctx.actor.id });
-      const [drawer] = shiftId
-        ? await tx<{ shiftNo: string; staffId: number; staffName: string }[]>`
-            SELECT s.shift_no, s.staff_id, st.display_name AS staff_name FROM shifts s JOIN staff st ON st.id = s.staff_id WHERE s.id = ${shiftId}`
-        : [];
+      const drawer = shiftId ? await shiftDrawerLabel(tx, shiftId, ctx.actor.id) : null;
       await writeAudit(tx, {
         staffId: ctx.actor.id,
         action: 'member_refund',
@@ -370,7 +364,7 @@ export async function createMemberRefund(deps: Deps, memberId: number, raw: Memb
           approverName: approval.approverName,
           lines: input.lines.map((l) => ({ source: l.source, id: l.id, method: l.method, amount: l.amount, ref: l.ref, ...(l.route === 'mp_auto' ? { route: l.route } : {}) })),
           ...(grade ? { grade } : {}),
-          ...(drawer && Number(drawer.staffId) !== ctx.actor.id ? { refundShift: drawer.shiftNo, refundDrawer: drawer.staffName } : {}),
+          ...(drawer && !drawer.mine ? { refundShift: drawer.shiftNo, refundDrawer: drawer.label } : {}),
         },
         ip: ctx.ip,
         businessDate: date,
@@ -392,7 +386,7 @@ export async function createMemberRefund(deps: Deps, memberId: number, raw: Memb
 
 const detailSql = (db: Db) => db`
   SELECT r.id, r.refund_no, r.member_id, m.member_no, m.name AS member_name, r.principal, r.bonus, r.reason,
-         o.display_name AS operator_name, a.display_name AS approver_name, s.shift_no, ss.display_name AS shift_staff_name,
+         o.display_name AS operator_name, a.display_name AS approver_name, s.shift_no, coalesce(s.drawer_name, ss.display_name) AS shift_staff_name,
          to_char(r.business_date, 'YYYY-MM-DD') AS business_date, r.created_at,
          (SELECT json_build_object('fromGrade', e.from_grade, 'fromTier', e.from_tier, 'toGrade', e.to_grade, 'toTier', e.to_tier)
           FROM member_grade_events e WHERE e.member_refund_id = r.id) AS grade_event

@@ -45,7 +45,16 @@ function ShiftSlip({ s }: { s: ShiftRecord }) {
       <SlipHeader title={closed ? '交班表' : '交班表（预览）'} />
       {!closed && <p className="mb-1 text-center font-bold">当班中，尚未交班</p>}
       <Row left="班次" right={s.shiftNo} />
-      <Row left="交班人" right={s.staffName} />
+      {s.drawerName ? (
+        <>
+          <Row left="钱箱" right={s.drawerName} />
+          <p className="text-[11px]" data-testid="print-shift-members">
+            当班：{s.members.map((m) => `${m.staffName} ${stamp(m.joinedAt, tz).slice(-5)}${m.leftAt ? `–${stamp(m.leftAt, tz).slice(-5)}` : ' 起'}`).join('、')}
+          </p>
+        </>
+      ) : (
+        <Row left="交班人" right={s.staffName} />
+      )}
       <Row left="营业日" right={s.businessDate} />
       <Row left="开班" right={stamp(s.startedAt, tz)} />
       <Row left="交班" right={s.endedAt ? stamp(s.endedAt, tz) : '—'} />
@@ -90,6 +99,14 @@ function ShiftSlip({ s }: { s: ShiftRecord }) {
       <p className="text-[11px]">
         会员工作台储值消费 {sum.walletConsumes.count} 笔 {yuan(sum.walletConsumes.total)}（不是现金）
       </p>
+      {sum.byOperator && sum.byOperator.length > 0 && (
+        <div data-testid="print-shift-operators">
+          <p className="mt-1.5 font-bold">各人经办（结账 / 充值）</p>
+          {sum.byOperator.map((o) => (
+            <Row key={o.staffId} left={`${o.staffName} · ${o.checkouts.count} 张 / ${o.recharges.count} 笔`} right={yuan(o.checkouts.total + o.recharges.paid)} />
+          ))}
+        </div>
+      )}
       <Rule />
       <p className="font-bold">现金</p>
       <Row left="备用金" right={yuan(sum.cash.opening)} />

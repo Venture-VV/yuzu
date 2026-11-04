@@ -14,6 +14,7 @@ import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Button, Card, Field, Input, MoneyInput, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton } from '../../components/ui';
 import { useInvSettings } from '../inventory/queries';
+import { ShiftModeCard } from './ShiftModeCard';
 
 const EXAMPLE = { balance: { principal: 50000, bonus: 5000 }, amount: 11000 };
 /** 撤销时限的常用选项（小时）；null 为不限 */
@@ -276,6 +277,9 @@ export function RulesTab() {
           保存规则
         </Button>
       </div>
+
+      {/* 交班方式与钱箱（v0.7.28 ⑨）单独保存 */}
+      <ShiftModeCard />
 
       {/* 库存与采购的规则属于 ERP 的库存模块：模块关着时不显示（接口也会拒绝） */}
       {session.erpModules.includes('inventory') ? (

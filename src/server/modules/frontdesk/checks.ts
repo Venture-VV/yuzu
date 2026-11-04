@@ -326,7 +326,34 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
     ...(await countCardChecks(db)),
     // ㉑ 平台核销补录（v0.7.28）
     await platformChecks(db),
+    // ㉒ 班次与当班的人（v0.7.28 按钱箱交班）
+    await shiftMemberCheck(db),
   ];
+}
+
+/**
+ * ㉒ 班次与当班的人一致（v0.7.28）：每个班次都有开班人从开班起的那一条；已交班的班次上没有还在的人、离开都不晚于交班
+ * （一位员工同时只在一个班次上、一个钱箱同时只有一个开着的班次由唯一索引保证）
+ */
+async function shiftMemberCheck(db: Db): Promise<FrontdeskCheck> {
+  const diff = await db<{ ref: string }[]>`
+    SELECT s.shift_no AS ref FROM shifts s
+    WHERE NOT EXISTS (SELECT 1 FROM shift_members m WHERE m.shift_id = s.id AND m.staff_id = s.staff_id AND m.joined_at = s.started_at)
+       OR (s.status = 'closed' AND EXISTS (SELECT 1 FROM shift_members m WHERE m.shift_id = s.id
+                                           AND (m.left_at IS NULL OR m.left_at > greatest(s.ended_at, m.joined_at))))
+    ORDER BY s.id LIMIT 5`;
+  const [t] = await db<{ open: number; drawer: number; members: number }[]>`
+    SELECT count(*) FILTER (WHERE s.status = 'open')::int AS open, count(*) FILTER (WHERE s.status = 'open' AND s.drawer IS NOT NULL)::int AS drawer,
+           (SELECT count(*)::int FROM shift_members WHERE left_at IS NULL) AS members
+    FROM shifts s`;
+  return {
+    key: 'shift_members',
+    label: '班次与当班的人一致',
+    ok: diff.length === 0,
+    detail: diff.length
+      ? `${diff.length} 个班次的当班记录与班次不符（如 ${diff.map((d) => d.ref).join('、')}）`
+      : `未交班的班次 ${t!.open} 个（按钱箱交班 ${t!.drawer} 个），此刻在班上 ${t!.members} 人；每个班次都有开班人，已交班的班次上没有还在的人`,
+  };
 }
 
 /**

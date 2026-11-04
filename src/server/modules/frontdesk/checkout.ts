@@ -43,7 +43,7 @@ import { cents, parse, positiveCents } from '../../lib/validate';
 import { consumeDiscountGrant } from '../../auth/grants';
 import { expireMemberBonus } from '../bonus';
 import { loadSettings } from '../settings';
-import { lockPaymentShift, lockRefundShift, openShiftOf } from '../shifts';
+import { lockPaymentShift, lockRefundShift, openShiftOf, shiftDrawerLabel } from '../shifts';
 import { consumeForCheckout, reverseForCheckout } from '../wallet';
 import {
   assertOpen,
@@ -804,10 +804,7 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
                            void_shift_id = ${voidShiftId}
       WHERE id = ${c.id}`;
     // 从别人的钱箱退：审计写明记到了谁的哪个班次
-    const [drawer] = voidShiftId
-      ? await tx<{ shiftNo: string; staffId: number; staffName: string }[]>`
-          SELECT s.shift_no, s.staff_id, st.display_name AS staff_name FROM shifts s JOIN staff st ON st.id = s.staff_id WHERE s.id = ${voidShiftId}`
-      : [];
+    const drawer = voidShiftId ? await shiftDrawerLabel(tx, voidShiftId, ctx.actor.id) : null;
     await writeAudit(tx, {
       staffId: ctx.actor.id,
       action: 'frontdesk_checkout_void',
@@ -818,7 +815,7 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
         tags: tags.map((t) => t.code),
         ...(tables.length ? { tables: tables.map((t) => t.name) } : {}),
         reason,
-        ...(drawer && drawer.staffId !== ctx.actor.id ? { refundShift: drawer.shiftNo, refundDrawer: drawer.staffName } : {}),
+        ...(drawer && !drawer.mine ? { refundShift: drawer.shiftNo, refundDrawer: drawer.label } : {}),
       },
       ip: ctx.ip,
       businessDate: date,

@@ -52,6 +52,8 @@ export type AuditAction =
   | 'ticket_type_saved'
   | 'shift_started'
   | 'shift_closed'
+  | 'shift_joined'
+  | 'shift_left'
   | 'hand_tags_created'
   | 'hand_tags_imported'
   | 'hand_tag_locked'

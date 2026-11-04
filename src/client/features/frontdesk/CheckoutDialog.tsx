@@ -977,12 +977,12 @@ function RefundDrawerPicker({
           )}
           data-testid={`refund-drawer-${x.shiftNo}`}
         >
-          <span className="font-bold">{x.staffName}的钱箱</span>
+          <span className="font-bold">{x.drawerName ?? `${x.staffName}的钱箱`}</span>
           <span className="text-[12px] text-ink-3">
             班次 {x.shiftNo} · {formatTime(x.startedAt)} 开班
           </span>
           {x.original && <Badge tone="pine">原单收款的班次</Badge>}
-          {x.mine && <Badge tone="lake">你的班次</Badge>}
+          {x.mine && <Badge tone="lake">{x.drawerName ? '你在这个钱箱' : '你的班次'}</Badge>}
         </button>
       ))}
     </div>
