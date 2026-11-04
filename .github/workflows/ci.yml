@@ -110,7 +110,18 @@ jobs:
           node dist/server/index.js > app.log 2>&1 &
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/api/health && exit 0; sleep 1; done
           cat app.log; exit 1
+      - name: 检查预装 Chromium 是否可用
+        id: chromium_ready
+        run: |
+          if timeout 15s node -e 'const {chromium}=require("@playwright/test"); chromium.launch().then(async b=>{await b.close()}).catch(()=>process.exit(1))'; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "当前版本的 Chromium 可用，跳过缓存恢复"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "当前版本的 Chromium 不可用，恢复缓存并执行安装"
+          fi
       - name: 缓存 Playwright 浏览器（按依赖版本）
+        if: steps.chromium_ready.outputs.ready != 'true'
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
@@ -246,7 +257,18 @@ jobs:
           echo $! > app.pid
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/api/health && exit 0; sleep 1; done
           cat app.log; exit 1
+      - name: 检查预装 Chromium 是否可用
+        id: chromium_ready
+        run: |
+          if timeout 15s node -e 'const {chromium}=require("@playwright/test"); chromium.launch().then(async b=>{await b.close()}).catch(()=>process.exit(1))'; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "当前版本的 Chromium 可用，跳过缓存恢复"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "当前版本的 Chromium 不可用，恢复缓存并执行安装"
+          fi
       - name: 缓存 Playwright 浏览器（按依赖版本）
+        if: steps.chromium_ready.outputs.ready != 'true'
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
