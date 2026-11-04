@@ -179,6 +179,16 @@ function SettlementSheet({ s }: { s: SettlementSummary }) {
               {s.memberRefund.byMethod.map((m) => (
                 <Row key={m.method} left={<span className="pl-3">{`退${PAYMENT_METHOD_LABELS[m.method]} · ${m.count} 笔`}</span>} right={`-${yuan(m.amount)}`} />
               ))}
+              {s.memberRefund.online?.count ? (
+                <Row
+                  left={
+                    <span className="pl-3">{`其中退线上充值（小程序）· ${s.memberRefund.online.count} 张${
+                      s.memberRefund.online.auto ? `，门店系统原路退回 ${yuan(s.memberRefund.online.auto)}` : ''
+                    }`}</span>
+                  }
+                  right={`-${yuan(s.memberRefund.online.amount)}`}
+                />
+              ) : null}
             </>
           )}
         </Section>

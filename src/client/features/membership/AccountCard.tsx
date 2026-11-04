@@ -1,6 +1,8 @@
 // 会员详情「储值与账户」（会员体系收尾，v0.7.26；docs/MEMBERSHIP_FINISH.md 第 1、3、4 节）：
 //   · 退储值（M69–M74）：退本金余额以内、默认全退；最近的充值先退、按原收款方式（期初、合并转入的选方式）；赠金按比例扣回；
 //     现金选钱箱；扫码、银行卡登记退款单号；店主或店总当场授权；超时、断网、回复 500 时结果待确认，在卡片上方查回、重提或作废；
+//   · 线上充值（小程序）的那一行（v0.7.27）：小程序线的原路退回开着时，可以选「门店系统原路退回」（不填退款单号），
+//     或「已在商户平台退过」（填退款单号）；没开时与 v0.7.26 一样填退款单号；
 //   · 退过的储值（退储值单）列在下面。停用 / 启用、合并在同一张卡片上（见 MemberStatusActions）。
 
 import { useEffect, useMemo, useState } from 'react';
@@ -9,7 +11,15 @@ import { HandCoins, ShieldCheck } from 'lucide-react';
 import type { RefundShiftOptions } from '@shared/checkout';
 import type { Granted, MemberRefundGrantRequest } from '@shared/grants';
 import { PAYMENT_METHOD_LABELS, PAYMENT_METHODS, type PaymentMethod } from '@shared/labels';
-import { REFUND_SOURCE_LABELS, refundRefRequired, type MemberRefundDetail, type MemberRefundPlan, type RefundPlanLine } from '@shared/member-refunds';
+import {
+  onlineRoutable,
+  REFUND_SOURCE_LABELS,
+  refundRefRequired,
+  type MemberRefundDetail,
+  type MemberRefundPlan,
+  type RefundPlanLine,
+  type RefundRoute,
+} from '@shared/member-refunds';
 import { centsToInput, formatYuan, parseYuan } from '@shared/money';
 import type { MemberDetail } from '@shared/types';
 import { api, errorMessage, UncertainError } from '../../lib/api';
@@ -118,7 +128,10 @@ export function AccountCard({ member }: { member: MemberDetail }) {
                 {r.grade && <Badge tone="ember">{`${r.grade.from} → ${r.grade.to}`}</Badge>}
               </div>
               <p className="mt-0.5 text-[12.5px] text-ink-3">
-                {r.lines.map((l) => `${PAYMENT_METHOD_LABELS[l.method]} ${formatYuan(l.amount)}${l.ref ? `（${l.ref}）` : ''}`).join('、')} · {r.reason} · 经办 {r.operatorName}，
+                {r.lines
+                  .map((l) => `${PAYMENT_METHOD_LABELS[l.method]} ${formatYuan(l.amount)}${l.ref ? `（${l.ref}）` : l.route === 'mp_auto' ? '（门店系统原路退回）' : ''}`)
+                  .join('、')}{' '}
+                · {r.reason} · 经办 {r.operatorName}，
                 {r.approverName}授权
               </p>
             </li>
@@ -163,10 +176,11 @@ function AccountHistory({ h }: { h: MemberAccountHistory }) {
   );
 }
 
-/** 每一行的退款方式与退款单号（充值的方式固定是原收款方式；期初、合并转入的员工选） */
+/** 每一行的退款方式与退款单号（充值的方式固定是原收款方式；期初、合并转入的员工选）；线上充值的那一行还可以交给门店系统原路退回 */
 interface LineDraft {
   method: PaymentMethod;
   ref: string;
+  route: RefundRoute;
 }
 const lineKey = (l: RefundPlanLine) => `${l.source}:${l.id}`;
 
@@ -205,16 +219,25 @@ function RefundDialog({ member, onClose, onDone }: { member: MemberDetail; onClo
   const p = plan.data;
   // 金额、分配变了：授权作废（授权绑定金额）
   useEffect(() => setGrant(null), [p?.amount, member.id]);
+  // 线上充值的那一行：原路退回开着时默认交给门店系统；没开（或刚关掉）的一律员工退、填退款单号
+  const autoOk = (l: RefundPlanLine) => !!p?.onlineRoute && onlineRoutable(l);
   const lines = useMemo(
-    () => (p?.lines ?? []).map((l) => ({ ...l, draft: drafts[lineKey(l)] ?? { method: l.method ?? 'cash', ref: '' } })),
-    [p?.lines, drafts],
+    () =>
+      (p?.lines ?? []).map((l) => {
+        const d = drafts[lineKey(l)] ?? { method: l.method ?? 'cash', ref: '', route: autoOk(l) ? ('mp_auto' as const) : ('manual' as const) };
+        return { ...l, draft: { ...d, route: autoOk(l) ? d.route : ('manual' as const) } };
+      }),
+    [p?.lines, p?.onlineRoute, drafts],
   );
   const hasCash = lines.some((l) => l.draft.method === 'cash');
-  const missingRef = lines.find((l) => refundRefRequired(l.draft.method) && l.draft.ref.trim().length < 2);
+  const missingRef = lines.find((l) => l.draft.route === 'manual' && refundRefRequired(l.draft.method) && l.draft.ref.trim().length < 2);
   const overBalance = amount !== null && amount > member.principalBalance;
   const ready = !!p && !p.blocked && p.amount > 0 && !overBalance && !missingRef && reason.trim().length >= 2 && (!hasCash || drawer !== null);
   const setDraft = (l: RefundPlanLine, patch: Partial<LineDraft>) =>
-    setDrafts((d) => ({ ...d, [lineKey(l)]: { ...(d[lineKey(l)] ?? { method: l.method ?? 'cash', ref: '' }), ...patch } }));
+    setDrafts((d) => ({
+      ...d,
+      [lineKey(l)]: { ...(d[lineKey(l)] ?? { method: l.method ?? 'cash', ref: '', route: autoOk(l) ? 'mp_auto' : 'manual' }), ...patch },
+    }));
 
   const submit = async (g: Granted<MemberRefundGrantRequest>) => {
     if (!p) return;
@@ -229,7 +252,14 @@ function RefundDialog({ member, onClose, onDone }: { member: MemberDetail; onClo
           clientKey: key,
           amount: p.amount,
           expectedBonus: p.bonus,
-          lines: lines.map((l) => ({ source: l.source, id: l.id, method: l.draft.method, amount: l.amount, ref: l.draft.ref.trim() })),
+          lines: lines.map((l) => ({
+            source: l.source,
+            id: l.id,
+            method: l.draft.method,
+            amount: l.amount,
+            ref: l.draft.route === 'mp_auto' ? '' : l.draft.ref.trim(),
+            route: l.draft.route,
+          })),
           reason: reason.trim(),
           ...(hasCash && drawer !== null ? { refundShiftId: drawer } : {}),
           grantId: g.grantId,
@@ -322,6 +352,15 @@ function RefundDialog({ member, onClose, onDone }: { member: MemberDetail; onClo
                       退 <Money cents={l.amount} />
                       {l.method ? ` · 原收款方式 ${PAYMENT_METHOD_LABELS[l.method]}` : ' · 没有原收款方式，请选退款方式'}
                     </p>
+                    {onlineRoutable(l) && (
+                      <p className="text-[12px] text-ink-3" data-testid={`member-refund-route-hint-${i}`}>
+                        {l.draft.route === 'mp_auto'
+                          ? '门店系统会自动原路退回到顾客的微信，不用去商户平台'
+                          : p.onlineRoute
+                            ? '已在小程序的微信支付商户平台退过：填那边的退款单号，门店系统不会再退'
+                            : '线上充值：请在小程序的微信支付商户平台原路退回后填退款单号'}
+                      </p>
+                    )}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     {l.method === null && (
@@ -338,7 +377,18 @@ function RefundDialog({ member, onClose, onDone }: { member: MemberDetail; onClo
                         ))}
                       </Select>
                     )}
-                    {refundRefRequired(l.draft.method) && (
+                    {autoOk(l) && (
+                      <Select
+                        aria-label="怎么退"
+                        value={l.draft.route}
+                        onChange={(e) => setDraft(l, { route: e.target.value as RefundRoute })}
+                        data-testid={`member-refund-route-${i}`}
+                      >
+                        <option value="mp_auto">门店系统原路退回</option>
+                        <option value="manual">已在商户平台退过</option>
+                      </Select>
+                    )}
+                    {l.draft.route === 'manual' && refundRefRequired(l.draft.method) && (
                       <Input
                         aria-label={l.draft.method === 'other' ? '怎么退的' : '退款单号'}
                         placeholder={l.draft.method === 'other' ? '写明怎么退的' : '商户后台的退款单号'}

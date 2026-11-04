@@ -264,6 +264,11 @@ function Summary({ s, dayLabel }: { s: SettlementSummary; dayLabel: string }) {
                 <p className="mb-1.5 text-[12px] text-ink-3">
                   储值退回 {s.memberRefund.count} 张（按原收款方式退回，不是营业额）：
                   {s.memberRefund.byMethod.map((m) => `${PAYMENT_METHOD_LABELS[m.method]} ${formatYuan(m.amount)}`).join('、')}
+                  {s.memberRefund.online?.count
+                    ? `；其中退线上充值（小程序）${formatYuan(s.memberRefund.online.amount)}，从小程序的商户号退${
+                        s.memberRefund.online.auto ? `（${formatYuan(s.memberRefund.online.auto)} 交给门店系统原路退回）` : ''
+                      }`
+                    : ''}
                 </p>
                 <Row label="退回本金" cents={-s.memberRefund.principal} className="text-clay" />
                 <Row label="扣回赠金" cents={-s.memberRefund.bonus} className="text-ink-3" />

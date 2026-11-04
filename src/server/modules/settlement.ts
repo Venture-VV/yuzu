@@ -62,6 +62,12 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
     SELECT l.method, count(DISTINCT r.id)::int AS count, sum(l.amount)::bigint AS amount
     FROM member_refund_lines l JOIN member_refunds r ON r.id = l.refund_id
     WHERE r.business_date = ${date} GROUP BY l.method ORDER BY l.method`;
+  // 其中退线上充值（小程序）的（v0.7.27）：钱从小程序的商户号退；auto = 交给门店系统原路退回的
+  const [mrOnline] = await db<{ count: number; amount: number; auto: number }[]>`
+    SELECT count(DISTINCT r.id)::int AS count, coalesce(sum(l.amount), 0)::bigint AS amount,
+           coalesce(sum(l.amount) FILTER (WHERE l.route = 'mp_auto'), 0)::bigint AS auto
+    FROM member_refund_lines l JOIN member_refunds r ON r.id = l.refund_id JOIN recharges rc ON rc.id = l.recharge_id
+    WHERE r.business_date = ${date} AND rc.channel = 'mp'`;
   const [net] = await db<Pair[]>`
     SELECT coalesce(sum(principal_delta), 0) AS principal, coalesce(sum(bonus_delta), 0) AS bonus
     FROM ledger_entries WHERE business_date = ${date}`;
@@ -71,7 +77,13 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
     reversal: rv!,
     expiry: ex!,
     opening: op!,
-    memberRefund: { count: mr!.count, principal: Number(mr!.principal), bonus: Number(mr!.bonus), byMethod: mrByMethod.map((m) => ({ ...m, amount: Number(m.amount) })) },
+    memberRefund: {
+      count: mr!.count,
+      principal: Number(mr!.principal),
+      bonus: Number(mr!.bonus),
+      byMethod: mrByMethod.map((m) => ({ ...m, amount: Number(m.amount) })),
+      online: { count: mrOnline!.count, amount: Number(mrOnline!.amount), auto: Number(mrOnline!.auto) },
+    },
     net: net!,
     business: await businessTotals(db, date),
     backfill: (await db<{ count: number }[]>`SELECT count(*)::int AS count FROM backfill_entries WHERE business_date = ${date}`)[0]!,
@@ -172,8 +184,10 @@ const withNewSections = (t: SettlementTotals): SettlementTotals => ({
   recharge: { ...t.recharge, online: t.recharge.online ?? { count: 0, paid: 0, bonus: 0 } },
   expiry: t.expiry ?? { count: 0, bonus: 0 },
   opening: t.opening ?? { count: 0, voidCount: 0, principal: 0, bonus: 0 },
-  // 储值退回（v0.7.26）之前确认的快照没有这一项
-  memberRefund: t.memberRefund ?? { count: 0, principal: 0, bonus: 0, byMethod: [] },
+  // 储值退回（v0.7.26）之前确认的快照没有这一项；其中退线上充值的（v0.7.27）之前的快照没有
+  memberRefund: t.memberRefund
+    ? { ...t.memberRefund, online: t.memberRefund.online ?? { count: 0, amount: 0, auto: 0 } }
+    : { count: 0, principal: 0, bonus: 0, byMethod: [], online: { count: 0, amount: 0, auto: 0 } },
   // 退款单（v0.7.20）之前确认的快照没有 refunds
   business: t.business ? { ...t.business, refunds: t.business.refunds ?? EMPTY_REFUNDS } : EMPTY_BUSINESS,
   backfill: t.backfill ?? { count: 0 },
@@ -439,14 +453,16 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
   // 储值退回（v0.7.26）：每一张都列出来（退的本金、扣回的赠金、按什么方式退、谁办谁批）
   const memberRefunds = await db<{
     refundNo: string; createdAt: string; memberName: string; principal: number; bonus: number; reason: string; staffName: string; approverName: string;
-    pays: { method: PaymentMethod; amount: number; ref: string }[];
+    pays: { method: PaymentMethod; amount: number; ref: string; route: string }[];
   }[]>`
     SELECT r.refund_no, r.created_at, m.name AS member_name, r.principal, r.bonus, r.reason, s.display_name AS staff_name, a.display_name AS approver_name,
-           (SELECT json_agg(json_build_object('method', l.method, 'amount', l.amount, 'ref', l.ref) ORDER BY l.id) FROM member_refund_lines l WHERE l.refund_id = r.id) AS pays
+           (SELECT json_agg(json_build_object('method', l.method, 'amount', l.amount, 'ref', l.ref, 'route', l.route) ORDER BY l.id) FROM member_refund_lines l WHERE l.refund_id = r.id) AS pays
     FROM member_refunds r JOIN members m ON m.id = r.member_id JOIN staff s ON s.id = r.operator_id JOIN staff a ON a.id = r.approved_by
     WHERE r.business_date = ${date} ORDER BY r.id`;
   for (const r of memberRefunds) {
-    const pays = r.pays.map((p) => `${PAYMENT_METHOD_LABELS[p.method]} ${formatYuan(p.amount)}${p.ref ? `（${p.ref}）` : ''}`).join('、');
+    const pays = r.pays
+      .map((p) => `${PAYMENT_METHOD_LABELS[p.method]} ${formatYuan(p.amount)}${p.ref ? `（${p.ref}）` : p.route === 'mp_auto' ? '（门店系统原路退回）' : ''}`)
+      .join('、');
     anomalies.push({
       kind: 'member_refund',
       at: r.createdAt,
@@ -625,6 +641,10 @@ export function settlementCsv(s: SettlementSummary): string {
     ['  · 期初赠金', '', y(s.opening.bonus), ''],
     ['储值退回（本金）', s.memberRefund.count, s.memberRefund.principal ? '-' + y(s.memberRefund.principal) : y(0), '会员退储值，按原收款方式退回，不是营业额'],
     ...s.memberRefund.byMethod.map((m) => [`  · 退${PAYMENT_METHOD_LABELS[m.method]}`, m.count, '-' + y(m.amount), m.method === 'cash' ? '现金从钱箱退' : '商户后台原路退回']),
+    ...(s.memberRefund.online?.count
+      ? [['  · 其中退线上充值（小程序）', s.memberRefund.online.count, '-' + y(s.memberRefund.online.amount),
+          s.memberRefund.online.auto ? `从小程序的商户号退；其中 ${y(s.memberRefund.online.auto)} 交给门店系统原路退回` : '从小程序的商户号退']]
+      : []),
     ['  · 扣回赠金', '', s.memberRefund.bonus ? '-' + y(s.memberRefund.bonus) : y(0), '赠金扣回，不退钱'],
     [],
     ['营业口径（前台结账）', '笔数', '金额（元）', '说明'],

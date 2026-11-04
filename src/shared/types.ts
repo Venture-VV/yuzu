@@ -346,7 +346,17 @@ export interface SettlementTotals {
    * 储值退回（v0.7.26，M69–M74）：退的本金（按退款方式）与扣回的赠金。不是营业额，是储值减少、钱退回去；
    * 升级之前确认的日结快照没有这一项，按 0 补齐
    */
-  memberRefund: { count: number; principal: number; bonus: number; byMethod: { method: PaymentMethod; count: number; amount: number }[] };
+  memberRefund: {
+    count: number;
+    principal: number;
+    bonus: number;
+    byMethod: { method: PaymentMethod; count: number; amount: number }[];
+    /**
+     * 其中退线上充值（小程序）的（v0.7.27）：钱从小程序的微信支付商户号退出去；auto 是交给门店系统原路退回的部分。
+     * 之前确认的快照没有，按 0 补齐
+     */
+    online?: { count: number; amount: number; auto: number };
+  };
   /** 本营业日流水的余额净变动 */
   net: WalletBalance;
   /**

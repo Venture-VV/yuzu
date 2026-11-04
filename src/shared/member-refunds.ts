@@ -3,6 +3,8 @@
 //   · 退的是本金（本金余额以内，默认全退）；赠金按退的本金占本金余额的比例扣回、四舍五入到分，本金退到 0 时剩下的赠金全部扣回（M70）；
 //   · 按原收款方式退（M71）：先进先出地消费，剩下的本金算作最近的几笔充值——退的本金按最近的先退，分到每一笔充值，
 //     每一行用那一笔的收款方式、每一笔累计不超过它收的钱；期初余额与合并转入的本金没有原收款方式，按员工选的方式退；
+//   · 线上充值的那一行（v0.7.27，MP21，docs/MP_RECHARGE.md 第 9 节）：小程序线的原路退回接上并打开时，可以交给门店系统原路退回
+//     （route = mp_auto，不填退款单号，小程序线按行调微信支付的退款接口）；员工已在商户平台退过的照旧填退款单号（manual）；
 //   · 金额一律整数分，按比例扣回赠金用整数运算（不用浮点数算钱）。前后端共用。
 
 import type { PaymentMethod } from './labels';
@@ -85,8 +87,17 @@ export function refundBonus(principalBalance: number, bonusBalance: number, amou
   return Math.min(bonusBalance, Number(v));
 }
 
-/** 退款方式要不要登记单号：微信、支付宝、银行卡登记商户后台的退款单号；其他写明怎么退的；现金不用 */
+/** 退款方式要不要登记单号：微信、支付宝、银行卡登记商户后台的退款单号；其他写明怎么退的；现金不用（门店系统原路退回的行也不用） */
 export const refundRefRequired = (method: PaymentMethod) => method !== 'cash';
+
+/** 每一行怎么退（v0.7.27）：员工退（现金从钱箱退，扫码、银行卡在商户后台退后登记单号）；门店系统原路退回（线上充值的那一行） */
+export const REFUND_ROUTES = ['manual', 'mp_auto'] as const;
+export type RefundRoute = (typeof REFUND_ROUTES)[number];
+export const REFUND_ROUTE_LABELS: Record<RefundRoute, string> = { manual: '员工退', mp_auto: '门店系统原路退回' };
+
+/** 这一行能不能交给门店系统原路退回：来源是线上充值（小程序）、原收款方式微信 */
+export const onlineRoutable = (l: { source: RefundSource; channel: 'counter' | 'mp' | null; method: PaymentMethod | null }) =>
+  l.source === 'recharge' && l.channel === 'mp' && l.method === 'wechat';
 
 /** 退储值前的核对（只读）：能退多少、分到哪几笔、扣回多少赠金、会不会降档 */
 export interface MemberRefundPlan {
@@ -107,6 +118,8 @@ export interface MemberRefundPlan {
   grade: { from: string; to: string } | null;
   /** 不能退的原因（没有本金、被合并了） */
   blocked: string | null;
+  /** 线上充值的那一行此刻能不能交给门店系统原路退回（小程序线的原路退回接上并打开了；v0.7.27） */
+  onlineRoute: boolean;
 }
 
 /** 退储值单 */
@@ -126,7 +139,7 @@ export interface MemberRefundDetail {
   shiftStaffName: string | null;
   businessDate: string;
   createdAt: string;
-  lines: (RefundPlanLine & { method: PaymentMethod; ref: string })[];
+  lines: (RefundPlanLine & { method: PaymentMethod; ref: string; route: RefundRoute })[];
   /** 这次退回降了档（M73） */
   grade: { from: string; to: string } | null;
 }
