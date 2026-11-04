@@ -189,7 +189,8 @@ export interface MpBenefitItem {
   code: string;
   name: string;
   /** coupon 券类、event 事件礼、service 服务与资格、discount 折扣（第三期）、info 制度说明 */
-  category: 'coupon' | 'event' | 'service' | 'discount' | 'info';
+  /** 与本店权益的类别一一对应（`@shared/benefits` 的 BENEFIT_CATEGORIES）；extension 是浴票延迟（主线 v0.7.25） */
+  category: 'coupon' | 'event' | 'service' | 'discount' | 'extension' | 'info';
   /** 次数、张数按什么算：none 不计次、day 每天、month 每月、year 每年 */
   period: 'none' | 'day' | 'month' | 'year';
   /** 「每月 2 次」「每月 1 张」「每次 1 张」「不限次」；折扣、制度说明为空 */
