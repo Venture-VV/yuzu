@@ -89,7 +89,11 @@ export interface OnlineRefundLine {
   createdAt: string;
 }
 
-/** 交给门店系统原路退回的行（只读）：行号大于 afterId 的，按行号升序，最多 limit 行（1–500，默认 100） */
+/**
+ * 交给门店系统原路退回的行（只读）：行号大于 afterId 的，按行号升序，最多 limit 行（1–500，默认 100）。
+ * 行号插入时分配、提交顺序可能不同：调用方不要只记取到的最大行号（晚提交的小行号会漏），小程序线按「还没建原路退回单的
+ * 最小行号」起取（它直接只读 member_refund_lines.route = 'mp_auto'；改这一列或取值先告诉小程序线，docs/MEMBERSHIP_FINISH.md 第 8.2 节）
+ */
 export async function listOnlineRefundLines(db: Db, opts: { afterId?: number; limit?: number } = {}): Promise<OnlineRefundLine[]> {
   const afterId = Math.max(0, Math.trunc(opts.afterId ?? 0));
   const limit = Math.min(500, Math.max(1, Math.trunc(opts.limit ?? 100)));
