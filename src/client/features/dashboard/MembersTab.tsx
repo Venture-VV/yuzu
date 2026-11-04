@@ -53,6 +53,11 @@ export function MembersTab() {
                 <span className="block text-[12px] font-semibold text-ink-3">
                   {d.period.rechargeCount} 笔 · {d.period.rechargeMembers} 位会员
                 </span>
+                {d.period.memberRefundCount > 0 && (
+                  <span className="block text-[12px] font-semibold text-ink-3">
+                    退储值 −<Money cents={d.period.memberRefund} /> · {d.period.memberRefundCount} 张
+                  </span>
+                )}
               </Kpi>
               <Kpi icon={<Wallet className="size-4" />} label="本期储值消费">
                 <Money cents={d.period.walletConsumed} />

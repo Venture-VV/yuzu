@@ -1,6 +1,6 @@
 {
   "name": "yuzu",
-  "version": "0.7.25",
+  "version": "0.7.26",
   "private": true,
   "description": "浴族 yuzu · 汤泉门店经营系统（会员充值、消费、撤销、流水与日结）",
   "type": "module",

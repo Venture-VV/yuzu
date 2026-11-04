@@ -7,12 +7,14 @@
 // 会员折扣是优惠、不是收款：部门营业额快照只按适用明细分摊（与券抵扣同一个函数），退款单不能退，反结账随结账单作废。
 
 import {
+  benefitCompanionCount,
   benefitEligible,
   benefitQuantity,
   DISCOUNT_TARGET_LABELS,
   discountDayMatches,
   discountLines,
   discountOff,
+  isCompanionTarget,
   MAX_DISCOUNT_RATE,
   MIN_DISCOUNT_RATE,
   rateText,
@@ -39,6 +41,8 @@ interface DiscountDef {
   quantity: number | null;
   tierQuantities: TierQuantity[];
   discountTarget: DiscountTarget | null;
+  companionCount: number | null;
+  companionCounts: TierQuantity[];
   weekdays: number[];
   monthDays: number[];
   sortOrder: number;
@@ -47,8 +51,8 @@ interface DiscountDef {
 /** 已发布的折扣类（不加锁，读已提交的；结账事务里读到的就是这一刻的） */
 async function publishedDiscounts(db: Db): Promise<DiscountDef[]> {
   return db<DiscountDef[]>`
-    SELECT id, code, name, version, start_grade, start_tier, quantity, tier_quantities, discount_target, weekdays::int[] AS weekdays,
-           month_days::int[] AS month_days, sort_order
+    SELECT id, code, name, version, start_grade, start_tier, quantity, tier_quantities, discount_target, companion_count, companion_counts,
+           weekdays::int[] AS weekdays, month_days::int[] AS month_days, sort_order
     FROM benefits WHERE status = 'published' AND category = 'discount' AND discount_target IS NOT NULL
     ORDER BY sort_order, id`;
 }
@@ -63,15 +67,53 @@ export interface DiscountGuest {
   lines: CouponLine[];
 }
 
-/** 这几位会员能享的会员折扣，省得多的在前（相同时按折扣低的、清单顺序、会员编号）；省 0 元的不列 */
-export function discountOptions(defs: DiscountDef[], guests: DiscountGuest[], date: string, label: (grade: number, tier: number | null) => string): (MemberDiscountOption & { lineIds: number[]; sortOrder: number })[] {
+/** 同行（v0.7.26，QY-041）：合并结账里不是会员的客人，他们手牌账单上的有效明细（结账前核对时含按此刻算出的门票） */
+export interface CompanionGuest {
+  tagCode: string;
+  lines: CouponLine[];
+}
+
+/**
+ * 同行优惠打哪几位同行（M80）：每位按适用明细的合计，省得多的（合计大的）先挑，相同时按手牌号；最多 n 位、合计为 0 的不挑
+ */
+function pickCompanions(target: DiscountTarget, companions: CompanionGuest[], n: number) {
+  return companions
+    .map((c) => {
+      const lines = discountLines(target, c.lines).filter((l) => l.amount > 0);
+      return { tagCode: c.tagCode, lines, base: lines.reduce((s, l) => s + l.amount, 0) };
+    })
+    .filter((c) => c.base > 0)
+    .sort((a, b) => b.base - a.base || a.tagCode.localeCompare(b.tagCode))
+    .slice(0, n);
+}
+
+/**
+ * 这几位会员能享的会员折扣，省得多的在前（相同时按折扣低的、清单顺序、会员编号）；省 0 元的不列。
+ * 同行优惠（v0.7.26）打的是同行客人的明细：每位能享的会员最多带「同行几位」，金额按挑中的几位的合计算
+ */
+export function discountOptions(
+  defs: DiscountDef[],
+  guests: DiscountGuest[],
+  date: string,
+  label: (grade: number, tier: number | null) => string,
+  companions: CompanionGuest[] = [],
+): (MemberDiscountOption & { lineIds: number[]; sortOrder: number })[] {
   const out: (MemberDiscountOption & { lineIds: number[]; sortOrder: number })[] = [];
   for (const g of guests) {
     for (const d of defs) {
       if (!d.discountTarget || !benefitEligible(d, g.grade, g.tier) || !discountDayMatches(d, date)) continue;
       const rate = benefitQuantity(d, g.grade, g.tier);
       if (rate === null || rate < MIN_DISCOUNT_RATE || rate > MAX_DISCOUNT_RATE) continue;
-      const lines = discountLines(d.discountTarget, g.lines).filter((l) => l.amount > 0);
+      let lines: CouponLine[];
+      let withWhom: string[] = [];
+      if (isCompanionTarget(d.discountTarget)) {
+        const n = benefitCompanionCount(d, g.grade, g.tier) ?? 0;
+        const picked = n > 0 ? pickCompanions(d.discountTarget, companions, n) : [];
+        lines = picked.flatMap((c) => c.lines);
+        withWhom = picked.map((c) => c.tagCode);
+      } else {
+        lines = discountLines(d.discountTarget, g.lines).filter((l) => l.amount > 0);
+      }
       const base = lines.reduce((s, l) => s + l.amount, 0);
       const amount = discountOff(base, rate);
       if (amount <= 0) continue;
@@ -88,6 +130,7 @@ export function discountOptions(defs: DiscountDef[], guests: DiscountGuest[], da
         target: d.discountTarget,
         base,
         amount,
+        companions: withWhom,
         lineIds: lines.map((l) => Number(l.id)),
         sortOrder: d.sortOrder,
       });
@@ -98,11 +141,15 @@ export function discountOptions(defs: DiscountDef[], guests: DiscountGuest[], da
 
 const publicOption = ({ lineIds: _l, sortOrder: _s, ...o }: MemberDiscountOption & { lineIds: number[]; sortOrder: number }): MemberDiscountOption => o;
 
-/** 结账前核对（只读）：visits 是这张结账单里有会员的客人；ticketOf 给出这位客人按此刻算出的门票（还没挂到账单，用负数编号） */
+/**
+ * 结账前核对（只读）：visits 是这张结账单里有会员的客人，companions 是不是会员的客人（同行优惠打他们的明细）；
+ * ticket 是这位客人按此刻算出的门票（还没挂到账单，用负数编号）
+ */
 export async function memberDiscountPreview(
   db: Db,
   visits: { visitId: number; billId: number; memberId: number; memberName: string; tagCode: string; ticket: CouponLine | null }[],
   date: string,
+  companionVisits: { billId: number; tagCode: string; ticket: CouponLine | null }[] = [],
 ): Promise<MemberDiscountOption[]> {
   if (visits.length === 0) return [];
   const defs = await publishedDiscounts(db);
@@ -117,7 +164,11 @@ export async function memberDiscountPreview(
     const s = await benefitState(db, v.memberId, own, date);
     guests.push({ memberId: v.memberId, memberName: v.memberName, tagCode: v.tagCode, grade: s.grade, tier: s.tier, lines: [...(await couponLines(db, [v.billId])), ...(v.ticket ? [v.ticket] : [])] });
   }
-  return discountOptions(defs, guests, date, (g, t) => gradeLabel(rules, g, t as Tier | null)).map(publicOption);
+  const companions: CompanionGuest[] = [];
+  if (defs.some((d) => d.discountTarget && isCompanionTarget(d.discountTarget))) {
+    for (const c of companionVisits) companions.push({ tagCode: c.tagCode, lines: [...(await couponLines(db, [c.billId])), ...(c.ticket ? [c.ticket] : [])] });
+  }
+  return discountOptions(defs, guests, date, (g, t) => gradeLabel(rules, g, t as Tier | null), companions).map(publicOption);
 }
 
 /** 结账收款里的「会员折扣」：员工确认时看到的会员、权益与金额 */
@@ -149,6 +200,8 @@ export async function settleMemberDiscount(
   tx: Tx,
   o: {
     guests: { memberId: number; memberName: string; tagCode: string; billId: number }[];
+    /** 同行（不是会员的客人）的手牌与账单：同行优惠打他们的明细（v0.7.26） */
+    companions?: { tagCode: string; billId: number }[];
     input: MemberDiscountInput | null;
     otherReduction: boolean;
     date: string;
@@ -175,7 +228,11 @@ export async function settleMemberDiscount(
     const s = await benefitState(tx, g.memberId, own, o.date);
     guests.push({ memberId: g.memberId, memberName: g.memberName, tagCode: g.tagCode, grade: s.grade, tier: s.tier, lines: await couponLines(tx, [g.billId]) });
   }
-  const options = defs.length ? discountOptions(defs, guests, o.date, (gr, t) => gradeLabel(rules, gr, t as Tier | null)) : [];
+  const companions: CompanionGuest[] = [];
+  if (defs.some((d) => d.discountTarget && isCompanionTarget(d.discountTarget))) {
+    for (const c of o.companions ?? []) companions.push({ tagCode: c.tagCode, lines: await couponLines(tx, [c.billId]) });
+  }
+  const options = defs.length ? discountOptions(defs, guests, o.date, (gr, t) => gradeLabel(rules, gr, t as Tier | null), companions) : [];
   const best = options[0] ?? null;
   if (o.input) {
     if (!best || best.memberId !== o.input.memberId || best.benefitId !== o.input.benefitId || best.amount !== o.input.amount) {
@@ -202,6 +259,6 @@ export async function settleMemberDiscount(
     rate: best.rate,
     amount: best.amount,
     lineIds: best.lineIds,
-    ref: `${best.name}（${best.stateLabel} ${rateText(best.rate)} · ${DISCOUNT_TARGET_LABELS[best.target]}）`.slice(0, 64),
+    ref: `${best.name}（${best.stateLabel} ${rateText(best.rate)} · ${DISCOUNT_TARGET_LABELS[best.target]}${best.companions.length ? ` ${best.companions.join('、')}` : ''}）`.slice(0, 64),
   };
 }

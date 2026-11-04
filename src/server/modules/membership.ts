@@ -148,35 +148,56 @@ async function readGrade(db: Db, memberId: number): Promise<{ state: GradeState;
   return r ? { state: stateOf(r), version: r.gradeVersion } : null;
 }
 
+/**
+ * 这位会员与并进来的会员（v0.7.26 合并，M79：以后的滚动累计充值、周期储值消费、是不是首充都把来源会员的算进去；
+ * 并进来的会员之前也并过别人的，一并算）
+ */
+export async function memberFamily(db: Db, memberId: number): Promise<number[]> {
+  const rows = await db<{ id: number }[]>`
+    WITH RECURSIVE fam AS (
+      SELECT ${memberId}::bigint AS id
+      UNION SELECT m.id FROM members m JOIN fam ON m.merged_into_id = fam.id
+    ) SELECT id FROM fam ORDER BY id`;
+  return rows.map((r) => Number(r.id));
+}
+
 /** 净储值消费：from 到 to（营业日，含两端）的储值消费；撤销了的（含反结账）不算 */
 async function spendBetween(db: Db, memberId: number, from: string, to: string): Promise<number> {
+  const family = await memberFamily(db, memberId);
   const [r] = await db<{ s: number }[]>`
     SELECT coalesce(sum(total_amount), 0) AS s FROM consumptions
-    WHERE member_id = ${memberId} AND status = 'completed' AND business_date BETWEEN ${from} AND ${to}`;
+    WHERE member_id IN ${db(family)} AND status = 'completed' AND business_date BETWEEN ${from} AND ${to}`;
   return Number(r!.s);
 }
 
 /** 周期开始以来的净储值消费（消费的营业日不会在今天之后；补录、跨夜结账记在更早的营业日也照算） */
 async function spendSince(db: Db, memberId: number, from: string): Promise<number> {
+  const family = await memberFamily(db, memberId);
   const [r] = await db<{ s: number }[]>`
     SELECT coalesce(sum(total_amount), 0) AS s FROM consumptions
-    WHERE member_id = ${memberId} AND status = 'completed' AND business_date >= ${from}`;
+    WHERE member_id IN ${db(family)} AND status = 'completed' AND business_date >= ${from}`;
   return Number(r!.s);
 }
 
-/** 滚动累计充值：today 往前一个会籍周期（含 today）的充值实收；期初导入的旧系统累计不算（日期不明） */
+/**
+ * 滚动累计充值：today 往前一个会籍周期（含 today）的充值实收，减去这几笔退回的本金（v0.7.26 储值退回，M73）；
+ * 期初导入的旧系统累计不算（日期不明）；并进来的会员的充值一并算（M79）
+ */
 async function rollingRecharge(db: Db, rules: MembershipRules, memberId: number, today: string): Promise<number> {
+  const family = await memberFamily(db, memberId);
   const [r] = await db<{ s: number }[]>`
-    SELECT coalesce(sum(paid_amount), 0) AS s FROM recharges
-    WHERE member_id = ${memberId} AND business_date BETWEEN ${rollingFrom(rules, today)} AND ${today}`;
+    SELECT coalesce(sum(r.paid_amount - coalesce((SELECT sum(l.amount) FROM member_refund_lines l WHERE l.recharge_id = r.id), 0)), 0) AS s
+    FROM recharges r
+    WHERE r.member_id IN ${db(family)} AND r.business_date BETWEEN ${rollingFrom(rules, today)} AND ${today}`;
   return Number(r!.s);
 }
 
 /** 首充：还没有充值、也没有有效期初的会员 */
 async function isFirstRecharge(db: Db, memberId: number): Promise<boolean> {
+  const family = await memberFamily(db, memberId);
   const [r] = await db<{ first: boolean }[]>`
-    SELECT NOT EXISTS (SELECT 1 FROM recharges WHERE member_id = ${memberId})
-       AND NOT EXISTS (SELECT 1 FROM opening_balances WHERE member_id = ${memberId} AND status = 'active') AS first`;
+    SELECT NOT EXISTS (SELECT 1 FROM recharges WHERE member_id IN ${db(family)})
+       AND NOT EXISTS (SELECT 1 FROM opening_balances WHERE member_id IN ${db(family)} AND status = 'active') AS first`;
   return r!.first;
 }
 
@@ -188,6 +209,9 @@ interface EventExtra {
   staffId?: number | null;
   reason?: string;
   clientKey?: string | null;
+  /** 储值退回降档（v0.7.26）、合并（v0.7.26）的单子 */
+  memberRefundId?: number | null;
+  memberMergeId?: number | null;
   /** 补跑到期的中间几步：只发事件礼，本期券类与生日礼等走完再按最后的状态发（settleDue） */
   deferPeriodic?: boolean;
 }
@@ -203,10 +227,11 @@ async function changeState(tx: Tx, memberId: number, kind: GradeEventKind, busin
     WHERE id = ${memberId}`;
   const [event] = await tx<{ id: number }[]>`
     INSERT INTO member_grade_events (member_id, kind, business_date, from_grade, from_tier, to_grade, to_tier, cycle_start, cycle_end, grace_until,
-                                     cycle_spend, rolling_recharge, recharge_id, consumption_id, staff_id, reason, client_key)
+                                     cycle_spend, rolling_recharge, recharge_id, consumption_id, staff_id, reason, client_key,
+                                     member_refund_id, member_merge_id)
     VALUES (${memberId}, ${kind}, ${businessDate}, ${from.grade}, ${from.tier}, ${to.grade}, ${to.tier}, ${to.cycleStart}, ${to.cycleEnd}, ${to.graceUntil},
             ${extra.cycleSpend ?? 0}, ${extra.rollingRecharge ?? null}, ${extra.rechargeId ?? null}, ${extra.consumptionId ?? null},
-            ${extra.staffId ?? null}, ${extra.reason ?? ''}, ${extra.clientKey ?? null})
+            ${extra.staffId ?? null}, ${extra.reason ?? ''}, ${extra.clientKey ?? null}, ${extra.memberRefundId ?? null}, ${extra.memberMergeId ?? null})
     RETURNING id`;
   // 临时身份（v0.7.25，M53）：自己的档级升到体验的档级或更高时转正
   if (to.grade > from.grade) await convertTrials(tx, [memberId], businessDate);
@@ -270,6 +295,49 @@ export async function projectedGrade(db: Db, memberId: number, today: string): P
   return (await projectDue(db, await loadMembershipRules(db), memberId, current.state, today)).state;
 }
 
+// ───────────────────────── 合并（v0.7.26，M79） ─────────────────────────
+
+/** 两个状态谁高：档级 → 阶位 → 不在补充期的高 → 会籍周期结束得晚的高；返回正数表示 a 高 */
+export function compareStates(a: GradeState, b: GradeState): number {
+  if (a.grade !== b.grade) return a.grade - b.grade;
+  if ((a.tier ?? -1) !== (b.tier ?? -1)) return (a.tier ?? -1) - (b.tier ?? -1);
+  const ag = a.graceUntil === null ? 1 : 0;
+  const bg = b.graceUntil === null ? 1 : 0;
+  if (ag !== bg) return ag - bg;
+  return (a.cycleEnd ?? '').localeCompare(b.cycleEnd ?? '');
+}
+
+/**
+ * 合并时的档阶（两位会员一行都已锁）：两位都先把到期没处理的处理掉，目标会员取两位里高的状态，记一条状态变化「合并」。
+ * 不发升级礼，也不当场补本期的券（来源会员这一期的已经发过；下一期按新的档阶照常发）
+ */
+export async function applyMergeGrade(
+  tx: Tx,
+  o: { sourceId: number; targetId: number; mergeId: number; today: string; staffId: number; reason: string },
+): Promise<{ from: string; to: string; changed: boolean }> {
+  const rules = await loadMembershipRules(tx);
+  const source = await settleMemberDue(tx, o.sourceId, o.today);
+  const target = await settleMemberDue(tx, o.targetId, o.today);
+  if (!source || !target) throw notFound('会员不存在');
+  const takeSource = compareStates(source, target) > 0;
+  if (takeSource) {
+    await changeState(tx, o.targetId, 'merge', o.today, target, source, { memberMergeId: o.mergeId, staffId: o.staffId, reason: o.reason, deferPeriodic: true });
+  }
+  const label = (s: GradeState) => gradeLabel(rules, s.grade, s.tier);
+  return { from: label(target), to: label(takeSource ? source : target), changed: takeSource };
+}
+
+/** 合并前核对（只读）：按规则推算到 today 的两位的档阶，与合并以后目标会员的档阶 */
+export async function previewMergeGrade(db: Db, sourceId: number, targetId: number, today: string) {
+  const rules = await loadMembershipRules(db);
+  const source = await projectedGrade(db, sourceId, today);
+  const target = await projectedGrade(db, targetId, today);
+  if (!source || !target) throw notFound('会员不存在');
+  const label = (s: GradeState) => gradeLabel(rules, s.grade, s.tier);
+  const after = compareStates(source, target) > 0 ? source : target;
+  return { source: label(source), target: label(target), after: label(after), changed: after === source && compareStates(source, target) > 0 };
+}
+
 // ───────────────────────── 充值与消费（钱包的事务里调用） ─────────────────────────
 
 export interface RechargeGrade {
@@ -295,6 +363,97 @@ export async function planRechargeGrade(tx: Tx, memberId: number, paidCents: num
   const rollingBeforeCents = await rollingRecharge(tx, rules, memberId, today);
   const first = await isFirstRecharge(tx, memberId);
   return { rules, state, first, minimum: rechargeMinimum(rules, first), rollingBeforeCents, outcome: rechargeOutcome(rules, state.grade, rollingBeforeCents, paidCents) };
+}
+
+/**
+ * 只读预估（小程序线上下单页，v0.7.26）：与 planRechargeGrade 同一套算法，到期没处理的按规则推算、不写任何东西。
+ * 到账时按那一刻的规则重新算（以到账时为准）
+ */
+export async function previewRechargeGrade(db: Db, memberId: number, paidCents: number, today: string): Promise<RechargeGrade> {
+  const rules = await loadMembershipRules(db);
+  const current = await readGrade(db, memberId);
+  if (!current) throw notFound('会员不存在');
+  const { state } = await projectDue(db, rules, memberId, current.state, today);
+  const rollingBeforeCents = await rollingRecharge(db, rules, memberId, today);
+  const first = await isFirstRecharge(db, memberId);
+  return { rules, state, first, minimum: rechargeMinimum(rules, first), rollingBeforeCents, outcome: rechargeOutcome(rules, state.grade, rollingBeforeCents, paidCents) };
+}
+
+// ───────────────────────── 储值退回（v0.7.26，M73） ─────────────────────────
+
+/**
+ * 现在这一档里靠本会籍周期的充值升上来的那一段（M73）：从最近的状态变化往回看——
+ *   · 「储值退回降档」接着往前看（退过一次、降过一档的，剩下的这一档仍是那次充值升上来的；测试会话 c938e79 的 P2：
+ *     原来只看最近一条改了档级的，第二次退清时找不到「充值升档」，退完本金还留在 L2）；
+ *   · 「消费升阶」「进入补充期」不改档级的来源，跳过；
+ *   · 「充值升档」记下它之前的档级，接着往前看是不是还连着充值升档或退回降档；
+ *   · 遇到上线 / 期初导入定档、保级、补充期内保级、降档、手动调整、合并就停：这些留下的档级不因退回而降。
+ * 返回这一段之前的档级（退回最多降到这一档）；最近的充值升档不在这个周期里、或根本不是靠充值升上来的为空
+ */
+async function rechargeFloor(db: Db, memberId: number, state: GradeState): Promise<number | null> {
+  if (state.grade === 0 || !state.cycleStart) return null;
+  const events = await db<{ kind: GradeEventKind; fromGrade: number; businessDate: string }[]>`
+    SELECT kind, from_grade, business_date FROM member_grade_events WHERE member_id = ${memberId} ORDER BY id DESC`;
+  let floor: number | null = null;
+  let latestUp: string | null = null;
+  for (const e of events) {
+    if (e.kind === 'spend_up' || e.kind === 'grace_start' || e.kind === 'refund_down') continue;
+    if (e.kind !== 'recharge_up') break;
+    floor = e.fromGrade;
+    latestUp ??= e.businessDate;
+  }
+  return floor !== null && latestUp !== null && latestUp >= state.cycleStart ? floor : null;
+}
+
+/**
+ * 储值退回以后够得上的档阶：降到够得上的那一档的初阶，会籍周期不变；L0 没有周期。
+ * 最多降到靠充值升上来之前的档级（保级、手动调整、上线定档等留下的不降）。够得上、或不是靠充值升上来的为空
+ */
+async function refundTarget(db: Db, rules: MembershipRules, memberId: number, state: GradeState, rollingAfter: number): Promise<GradeState | null> {
+  const floor = await rechargeFloor(db, memberId, state);
+  if (floor === null) return null;
+  const reached = Math.max(gradeForAmount(rules, rollingAfter), floor) as Grade;
+  if (reached >= state.grade) return null;
+  return reached === 0 ? L0_STATE : { grade: reached, tier: 0, cycleStart: state.cycleStart, cycleEnd: state.cycleEnd, graceUntil: null };
+}
+
+/**
+ * 退储值前的核对（只读）：按这次分到每一笔充值的本金推算会不会降档；返回「从哪一档降到哪一档」，不降为空。
+ * refunded：充值单编号 → 这次要退的本金（期初、合并转入的不算充值，不影响滚动累计）
+ */
+export async function previewRefundGrade(db: Db, memberId: number, refunded: Map<number, number>, today: string): Promise<{ from: string; to: string } | null> {
+  const rules = await loadMembershipRules(db);
+  const state = await projectedGrade(db, memberId, today);
+  if (!state || state.grade === 0) return null;
+  let minus = 0;
+  if (refunded.size) {
+    const rows = await db<{ id: number }[]>`
+      SELECT id FROM recharges WHERE id IN ${db([...refunded.keys()])} AND business_date BETWEEN ${rollingFrom(rules, today)} AND ${today}`;
+    for (const r of rows) minus += refunded.get(Number(r.id)) ?? 0;
+  }
+  const to = await refundTarget(db, rules, memberId, state, (await rollingRecharge(db, rules, memberId, today)) - minus);
+  return to ? { from: gradeLabel(rules, state.grade, state.tier), to: gradeLabel(rules, to.grade, to.tier) } : null;
+}
+
+/**
+ * 退储值单记好之后（会员一行已锁、退回的几行已写）：到期没处理的先处理掉，够不上这一档就当场降档、记一条「储值退回降档」。
+ * 返回从哪一档降到哪一档（不降为空）
+ */
+export async function onRefundGrade(tx: Tx, o: { memberId: number; refundId: number; refundNo: string; today: string; staffId: number }): Promise<{ from: string; to: string } | null> {
+  const rules = await loadMembershipRules(tx);
+  const current = await readGrade(tx, o.memberId);
+  if (!current) return null;
+  const { state } = await settleDue(tx, rules, o.memberId, current.state, o.today);
+  const rolling = await rollingRecharge(tx, rules, o.memberId, o.today);
+  const to = await refundTarget(tx, rules, o.memberId, state, rolling);
+  if (!to) return null;
+  await changeState(tx, o.memberId, 'refund_down', o.today, state, to, {
+    rollingRecharge: rolling,
+    staffId: o.staffId,
+    reason: `储值退回 ${o.refundNo}`,
+    memberRefundId: o.refundId,
+  });
+  return { from: gradeLabel(rules, state.grade, state.tier), to: gradeLabel(rules, to.grade, to.tier) };
 }
 
 /** 充值单记好之后：升档的写新状态（进初阶，会籍周期从今天起算）与一条「充值升档」 */
@@ -524,9 +683,10 @@ export async function memberGradeBadges(db: Db, memberIds: number[], todayDate: 
   const ids = [...new Set(memberIds)];
   if (!ids.length) return new Map();
   const rules = await loadMembershipRules(db);
-  const rows = await db<(GradeRow & { id: number })[]>`
-    SELECT id, grade, tier, cycle_start, cycle_end, grace_until, grade_version FROM members WHERE id IN ${db(ids)}`;
+  const rows = await db<(GradeRow & { id: number; status: 'active' | 'frozen' })[]>`
+    SELECT id, grade, tier, cycle_start, cycle_end, grace_until, grade_version, status FROM members WHERE id IN ${db(ids)}`;
   // 临时身份（v0.7.25，M51）：VIP 柜按自己的与临时身份的取高的；徽标仍显示自己的档阶，另外标「体验中」
+  // 停用的会员（v0.7.26，M76）：VIP 柜按散客（0 级），临时身份也不算
   const trials = await activeTrialsOf(db, ids, todayDate);
   return new Map(
     rows.map((r) => {
@@ -544,8 +704,8 @@ export async function memberGradeBadges(db: Db, memberIds: number[], todayDate: 
           graceUntil: s.graceUntil,
           daysLeft,
           reminder: s.graceUntil === null ? reminderBucket(rules, daysLeft) : null,
-          lockerLevel: Math.max(lockerLevelOf(rules, s.grade), trial ? lockerLevelOf(rules, trial.grade) : 0),
-          trial: trial ? { grade: trial.grade, label: gradeLabel(rules, trial.grade, trial.tier), endsOn: trial.endsOn, kind: trial.kind } : null,
+          lockerLevel: r.status !== 'active' ? 0 : Math.max(lockerLevelOf(rules, s.grade), trial ? lockerLevelOf(rules, trial.grade) : 0),
+          trial: trial && r.status === 'active' ? { grade: trial.grade, label: gradeLabel(rules, trial.grade, trial.tier), endsOn: trial.endsOn, kind: trial.kind } : null,
         },
       ];
     }),

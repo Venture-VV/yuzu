@@ -71,7 +71,7 @@
 ## 4. 已执行的验证
 
 - `npm run typecheck`、`npm run build` 通过。
-- `npm test`（本机，独立测试库）：90 个文件 897 项全部通过。浴票延迟新增 `tests/ticket-extension.test.ts`（7 项：共用规则、配置与发布、按档阶多给与手牌详情 / 核对 / 结账 / 看板同一算法、合并结账只给会员本人、临时身份取高的、跨营业日体验已到期而到期处理没跑时手牌详情与核对一致、核对后暂缓按应收合计变了重新核对与已结账的快照）与 `tests/upgrade-ticket-extension.test.ts`（从 044 升级）；`tests/upgrade-shift.test.ts` 写升级前的结账单时临时加结账单的两列。新增 `tests/member-discounts.test.ts`（11 项，含折后的分的半分边界、用过的折扣不能改类别）、`tests/member-trials.test.ts`（12 项：受邀间隔按上一次开始那天加 N 个月（月底）、邀请体验、重提与编号冲突（含发起后改了受邀人的手机号再原样重提）、本月次数、享与不享与 VIP 柜、受邀人的限制、当场建档、撤销、到期与 12 个月、赠送会籍与 QY-042 次数、不能单独登记与作废、转正、查回与确认作废、看板）、`tests/upgrade-member-discounts.test.ts`（从 041 升级）、`tests/billing-seed-window.test.ts`（切换后 70 分钟灌结账演示都在当天）、`tests/migrations-list.test.ts`；改了 `tests/demo-prepare.test.ts`、`tests/demo-time.test.ts`、`tests/erp.test.ts`、`tests/benefits.test.ts`、`tests/recon.test.ts` 与几份升级用例。
+- `npm test`（本机，独立测试库）：90 个文件 897 项全部通过（交接时的数；main 合并小程序线之后测试会话在 `2767461` 上实测 906 项，小程序 `npm run check` 61 条，2026-11-04 更正）。浴票延迟新增 `tests/ticket-extension.test.ts`（7 项：共用规则、配置与发布、按档阶多给与手牌详情 / 核对 / 结账 / 看板同一算法、合并结账只给会员本人、临时身份取高的、跨营业日体验已到期而到期处理没跑时手牌详情与核对一致、核对后暂缓按应收合计变了重新核对与已结账的快照）与 `tests/upgrade-ticket-extension.test.ts`（从 044 升级）；`tests/upgrade-shift.test.ts` 写升级前的结账单时临时加结账单的两列。新增 `tests/member-discounts.test.ts`（11 项，含折后的分的半分边界、用过的折扣不能改类别）、`tests/member-trials.test.ts`（12 项：受邀间隔按上一次开始那天加 N 个月（月底）、邀请体验、重提与编号冲突（含发起后改了受邀人的手机号再原样重提）、本月次数、享与不享与 VIP 柜、受邀人的限制、当场建档、撤销、到期与 12 个月、赠送会籍与 QY-042 次数、不能单独登记与作废、转正、查回与确认作废、看板）、`tests/upgrade-member-discounts.test.ts`（从 041 升级）、`tests/billing-seed-window.test.ts`（切换后 70 分钟灌结账演示都在当天）、`tests/migrations-list.test.ts`；改了 `tests/demo-prepare.test.ts`、`tests/demo-time.test.ts`、`tests/erp.test.ts`、`tests/benefits.test.ts`、`tests/recon.test.ts` 与几份升级用例。
 - 浏览器（本机按 CI 的方式灌演示数据，门店电脑尺寸）：新增 `e2e/member-trials.spec.ts`（邀请还不是会员的朋友、体验中、前台标「体验」、撤销；结账自动带会员折扣、加优惠时不用、按会员折扣结清）、`e2e/member-code.spec.ts`（没配会员码时写明原因；会员工作台、接待对话框「同一个码先认出、失效再扫」与第一次就过期的对照，会员码的校验结果用 `page.route` 模拟）；`e2e/dining-tables.spec.ts` 加开台对话框的同一项；改了 `e2e/benefits.spec.ts`（QY-011 预填折扣、仍是草稿）；`benefits`、`membership`、`member-trials`、`member-code`、`frontdesk`、`dining-tables` 几份本机全部通过。
 - 浴票延迟（本机浏览器验收库）：`e2e/benefits.spec.ts` 加 QY-004 填分钟数；另手动发布 QY-004（L1·尊 30 分钟）核对过手牌详情、结账对话框写「会员浴票延迟 30 分钟」、下一次跳档推后到 12 小时 45 分，会员详情与后台清单的写法。`e2e/print.spec.ts`、`e2e/regression/gr1-pages.spec.ts` 的净营业额标签改成含会员折扣的（v0.7.25 起日结、看板一直写「应收 − 优惠 − 券抵扣 − 会员折扣 − 退款」，原来的用例还写着旧标签，CI 跑到会失败），与 `viewports`、`frontdesk`、`member-trials` 一起本机通过。
 - 配了会员码的路径本机手动核对过：有效的码直接打开那位会员并清空查找框，一分钟以前的码写明过期。
@@ -84,7 +84,7 @@
 ```
 请在独立演示库上验收 yuzu v0.7.25（main 上的 v0.7.25 标签，以标签指向的完整 SHA 为准）：
 1. npm ci && npm run typecheck && npm run build && npm test（TEST_DATABASE_URL 指向独立测试库）。
-2. 新建演示库：demo-prepare、check（63 项）、demo-check；从 v0.7.24 升级应用 042–045、check 全 ✓；已经准备过的演示库再执行 demo-prepare 只补「会员折扣与邀请体验」一步。
+2. 新建演示库：demo-prepare、check（63 项）、demo-check；从 v0.7.24 升级应用 042、045（`043`、`044` 是小程序线的，v0.7.24 时已在库里；2026-11-04 按测试会话报告更正）、check 全 ✓；已经准备过的演示库再执行 demo-prepare 只补「会员折扣与邀请体验」一步。
 3. 按 docs/HANDOFF_V0725.md 第 3 节 D1–D7、T1–T8、X1–X3、M1、P1、U1 逐条核对（到期要等 7 天、不能快进时间的记「受阻未测」；扫码盒与真手机记「受阻未测」，由真机测试做）。
 4. 浏览器：E2E_BASE_URL=… npm run e2e；营业日切换后 5 个半小时内新建演示库再跑一次 e2e/print.spec.ts。
 5. 重点核对：会员的浴票延迟只改门票的跳档时刻、只给会员本人的手牌；会员折扣不进实收、不动钱包余额，日结与交班的净营业额 = 应收 − 优惠 − 券抵扣 − 会员折扣 − 退款；一张结账单最多一种会员折扣、不与券和优惠同在；临时身份不发券、不进升档保级；撤销赠送会籍后 QY-042 次数腾出来。

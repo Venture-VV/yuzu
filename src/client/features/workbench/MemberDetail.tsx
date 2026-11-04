@@ -16,6 +16,7 @@ import { GradeBadge } from '../membership/GradeBadge';
 import { GradeCard } from '../membership/GradeCard';
 import { BenefitsCard } from '../membership/BenefitsCard';
 import { TrialsCard } from '../membership/TrialsCard';
+import { AccountCard } from '../membership/AccountCard';
 
 export function MemberDetail({
   member,
@@ -64,7 +65,11 @@ export function MemberDetail({
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-[22px] leading-tight font-bold tracking-tight break-all text-ink">{member.name}</h2>
               <GradeBadge member={member} withExpiry />
-              {member.status === 'frozen' && <Badge tone="clay">已停用</Badge>}
+              {member.mergedIntoId !== null ? (
+                <Badge tone="neutral">已合并</Badge>
+              ) : (
+                member.status === 'frozen' && <Badge tone="clay">已停用</Badge>
+              )}
               {member.isSynthetic && <Badge tone="ember">合成数据</Badge>}
             </div>
             <p className="num mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[13px] text-ink-2">
@@ -81,7 +86,7 @@ export function MemberDetail({
               {channel && ` · 渠道 ${channel}`}
             </p>
           </div>
-          {can('member.write') && (
+          {can('member.write') && member.mergedIntoId === null && (
             <Button size="sm" variant="secondary" icon={<PencilLine className="size-3.5" />} onClick={onEdit}>
               编辑
             </Button>
@@ -212,6 +217,9 @@ export function MemberDetail({
 
       {/* 邀请体验 / 赠送会籍（会员体系 v2 第三期，v0.7.25）：换会员时整块重来（发起的操作编号不带到下一位会员） */}
       <TrialsCard key={`trials-${member.id}`} member={member} />
+
+      {/* 储值与账户（会员体系收尾，v0.7.26）：退储值、停用 / 启用、合并；换会员时整块重来（操作编号不带到下一位会员） */}
+      <AccountCard key={`account-${member.id}`} member={member} />
 
       {/* 账户内券（v0.7.20）：换会员时整块重来（筛选、发券的操作编号都不带到下一位会员） */}
       {can('member.read') && <MemberCouponsCard key={member.id} member={member} />}

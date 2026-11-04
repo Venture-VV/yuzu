@@ -63,6 +63,11 @@ export function RevenuePage() {
                 </Kpi>
                 <Kpi icon={<Banknote className="size-4" />} label="会员充值实收" tone="lake">
                   <Money cents={d.kpis.rechargePaid} />
+                  {d.kpis.memberRefund > 0 && (
+                    <span className="block text-[12px] font-semibold text-ink-3">
+                      退储值 −<Money cents={d.kpis.memberRefund} />
+                    </span>
+                  )}
                 </Kpi>
               </div>
 

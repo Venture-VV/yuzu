@@ -132,6 +132,12 @@ export type AuditAction =
   // 会员体系 v2 第三期（v0.7.25）：邀请体验、赠送会籍的发起与撤销
   | 'member_trial_created'
   | 'member_trial_cancelled'
+  // 会员体系收尾（v0.7.26）：退储值、小程序线上充值入账、停用 / 启用、改手机号、合并
+  | 'member_refund'
+  | 'recharge_online'
+  | 'member_status_changed'
+  | 'member_phone_changed'
+  | 'member_merged'
   // 微信小程序（小程序线）：解绑会员的微信、维护小程序内容、作废结果不确定的操作
   | 'mp_unbind'
   | 'mp_content_saved'

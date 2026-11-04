@@ -64,15 +64,22 @@ test.describe('会员权益', () => {
       await expect(roomDiscount).toContainText('客房房费');
       await expect(roomDiscount).toContainText('草稿');
 
-      // 浴票延迟（v0.7.25 续）：QY-004 归「浴票延迟」类、导入时不预填分钟数；填起点多给 30 分钟保存
+      // 浴票延迟（v0.7.25 续；v0.7.26 按 M50 的默认预填）：QY-004 归「浴票延迟」类，导入时从 L1·初 起 30 分钟，
+      // 每一档初阶 30、享阶 60、尊阶 90 分钟，仍是草稿；改起点的分钟数能保存，最后改回 30（重跑时与刚导入的一样）
       // （这个用例不发布：发布后会员门票的跳档会推后，结账的浴票延迟由 tests/ticket-extension.test.ts 覆盖）
       const extension = page.getByTestId('benefit-row-QY-004');
-      await expect(extension).toContainText('L1·尊');
-      await expect(extension).toContainText('草稿');
-      await page.getByTestId('benefit-edit-QY-004').click();
-      await page.getByTestId('benefit-quantity').fill('30');
-      await page.getByTestId('benefit-save').click();
+      await expect(extension).toContainText('L1·初');
       await expect(extension).toContainText('多 30 分钟不跳档');
+      await expect(extension).toContainText('L1·享 起 1 小时；L1·尊 起 1 小时 30 分钟；L2·初 起 30 分钟');
+      await expect(extension).toContainText('L6·尊 起 1 小时 30 分钟');
+      await expect(extension).toContainText('草稿');
+      for (const minutes of ['45', '30']) {
+        await page.getByTestId('benefit-edit-QY-004').click();
+        await page.getByTestId('benefit-quantity').fill(minutes);
+        await page.getByTestId('benefit-save').click();
+        await expect(extension).toContainText(`多 ${minutes} 分钟不跳档`);
+      }
+      await expect(extension).toContainText('草稿');
 
       // 服务类：每月 2 次，发布
       await page.getByTestId('benefit-edit-QY-001').click();
