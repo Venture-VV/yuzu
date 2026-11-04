@@ -188,6 +188,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '043_miniprogram.sql',
   '044_miniprogram_fences.sql',
   '045_ticket_extension.sql',
+  '046_mp_recharge.sql',
   '047_membership_finish.sql',
 ];
 

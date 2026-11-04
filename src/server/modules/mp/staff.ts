@@ -10,6 +10,7 @@ import { idParam, parse } from '../../lib/validate';
 import { getMember } from '../members';
 import { abandonBannerCreate, createBanner, lookupBannerOp, mpAdminData, saveItemIntro, saveMpImage, saveMpRules, saveStore, updateBanner } from './admin';
 import { memberBindings, resolveMemberCode, unbindMember } from './member';
+import { rechargeAdminData, resolveHeldOrder, saveRechargeRules } from './recharge-admin';
 
 const CodeParam = z.object({ code: z.string().trim().max(32) });
 
@@ -26,7 +27,7 @@ export function registerMpStaffRoutes(app: FastifyInstance, deps: Deps) {
 
   // 后台「小程序」：维护内容要 mp.content；只管解绑的（值班经理）也能打开看
   const content = guard('mp.content');
-  app.get('/api/admin/mp', { preHandler: guardAny('mp.content', 'mp.unbind') }, async () => mpAdminData(sql));
+  app.get('/api/admin/mp', { preHandler: guardAny('mp.content', 'mp.unbind', 'mp.recharge') }, async () => mpAdminData(sql));
   app.put('/api/admin/mp/rules', { preHandler: content }, async (req) => saveMpRules(deps, req.body, ctxOf(req)));
   app.put('/api/admin/mp/stores/:code', { preHandler: content }, async (req) => saveStore(deps, req.params, req.body, ctxOf(req)));
   app.post('/api/admin/mp/images', { preHandler: content, bodyLimit: 1_600_000 }, async (req, reply) => {
@@ -50,4 +51,12 @@ export function registerMpStaffRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/admin/mp/banners/abandon', { preHandler: content }, async (req) => abandonBannerCreate(deps, req.body, ctxOf(req)));
   app.put('/api/admin/mp/banners/:id', { preHandler: content }, async (req) => updateBanner(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
   app.put('/api/admin/mp/items/:id/intro', { preHandler: content }, async (req) => saveItemIntro(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
+
+  // 线上充值（第二期 2a）：设置、线上充值单、处理已付款待处理的（mp.recharge：店主、店总）
+  const recharge = guard('mp.recharge');
+  app.get('/api/admin/mp/recharge', { preHandler: recharge }, async () => rechargeAdminData(sql));
+  app.put('/api/admin/mp/recharge/rules', { preHandler: recharge }, async (req) => saveRechargeRules(deps, req.body, ctxOf(req)));
+  app.post('/api/admin/mp/recharge/orders/:id/resolve', { preHandler: recharge }, async (req) =>
+    resolveHeldOrder(deps, parse(idParam, req.params).id, req.body, ctxOf(req)),
+  );
 }

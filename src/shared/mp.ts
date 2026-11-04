@@ -274,6 +274,8 @@ export interface MpItemIntroAdmin {
 
 export interface MpAdminData {
   rules: MpRules;
+  /** 线上充值的设置（第二期 2a）：放在这里，「结果待确认」查回修改结论时与其他开关同一份数据 */
+  rechargeRules: MpRechargeRules;
   stores: MpStoreAdmin[];
   banners: MpBannerAdmin[];
   items: MpItemIntroAdmin[];
@@ -285,3 +287,165 @@ export const MP_BANNER_LINKS: { value: MpBannerLink; label: string }[] = [
   { value: 'guide', label: '楼层导览' },
   { value: 'store', label: '门店信息' },
 ];
+
+// ── 线上充值（第二期 2a，docs/MP_RECHARGE.md）──
+
+/**
+ * 线上充值的设置（settings 的 mp_recharge_rules，后台「微信小程序」→「线上充值」，权限 mp.recharge）：
+ * 开关默认关（小程序本身也要开着）；线上可充的套餐由店主勾选；自定义金额的框默认开（MP18）；
+ * 线上单笔上限默认 1 万元、每人每天最多 3 笔（MP20），线上单笔上限不超过前台的单笔上限。
+ */
+export interface MpRechargeRules {
+  enabled: boolean;
+  planIds: number[];
+  customEnabled: boolean;
+  /** 线上单笔上限（分） */
+  maxCents: number;
+  /** 每人每天最多几笔（按下单的营业日，没付关掉的不算） */
+  dailyLimit: number;
+  /** 每保存一次加一；后台保存时带上看到的版本号 */
+  version: number;
+}
+export const DEFAULT_MP_RECHARGE_RULES: MpRechargeRules = { enabled: false, planIds: [], customEnabled: true, maxCents: 1_000_000, dailyLimit: 3, version: 0 };
+export const MP_RECHARGE_RULES_KEY = 'mp_recharge_rules';
+/** 一张单从下单到微信支付过期：15 分钟（MP19） */
+export const MP_RECHARGE_EXPIRE_MINUTES = 15;
+/** 商户单号：MPR + 下单的营业日 + 10 位随机 */
+export const MP_RECHARGE_ORDER_NO = /^MPR[0-9]{8}[0-9A-Z]{10}$/;
+
+/** pending 待支付、paid 已入账、closed 已关闭、held 已付款待处理（门店没能自动入账）、handled 已处理（店主另行处理了） */
+export type MpRechargeStatus = 'pending' | 'paid' | 'closed' | 'held' | 'handled';
+
+/** 按这位会员此刻的规则预估（以到账时为准） */
+export interface MpRechargeEstimate {
+  /** 实付（分） */
+  amount: number;
+  /** 预估赠金（分） */
+  bonus: number;
+  /** 充完以后的档阶，例如「L2 潭影 · 初」 */
+  label: string;
+  upgraded: boolean;
+}
+
+/** 一项可充的套餐 */
+export interface MpRechargePlan extends MpRechargeEstimate {
+  planId: number;
+  name: string;
+  /** 套餐上挂的券（按充完的档能领的）：「名称 × 张数」 */
+  coupons: string[];
+  /** 不能充时的原因（不够首充 / 续充最低、超过线上单笔上限）；能充为 null */
+  blocked: string | null;
+}
+
+export interface MpRechargeOrder {
+  orderNo: string;
+  status: MpRechargeStatus;
+  amount: number;
+  /** 选的套餐；自定义金额为空 */
+  planName: string | null;
+  estBonus: number;
+  estLabel: string;
+  expiresAt: string;
+  createdAt: string;
+  /** 已入账：实际入账的本金、赠金与入账后的档阶 */
+  result: { principal: number; bonus: number; label: string } | null;
+  /** 已付款待处理、已处理、已关闭时写给顾客的 */
+  notice: string | null;
+}
+
+export interface MpRechargeOptions {
+  /** 现在能不能在线充：线上充值开着、微信支付配好了、会员没冻结、今天的笔数没用完；不能时 notice 写原因 */
+  open: boolean;
+  notice: string | null;
+  plans: MpRechargePlan[];
+  /** 自定义金额的框（后台开着才有）：整元，最少、最多（分） */
+  custom: { minCents: number; maxCents: number } | null;
+  /** 首充还是续充、单笔最低（分，0 = 不限） */
+  first: boolean;
+  minimum: number;
+  dailyLimit: number;
+  usedToday: number;
+  /** 还没付完的单（同一位会员同时只有一张） */
+  pending: MpRechargeOrder | null;
+  /** 模拟微信支付（只在演示库）：小程序点「模拟支付」，不调 wx.requestPayment */
+  mock: boolean;
+}
+
+/** wx.requestPayment 的参数 */
+export interface MpPayParams {
+  timeStamp: string;
+  nonceStr: string;
+  package: string;
+  signType: 'RSA';
+  paySign: string;
+}
+
+export interface MpRechargeCreated {
+  order: MpRechargeOrder;
+  /** 微信支付下单没成功（连不上）时为空：之后「继续支付」再下单 */
+  payment: MpPayParams | null;
+  mock: boolean;
+  /** 同一个操作编号重提：返回原来那张单 */
+  replayed: boolean;
+}
+
+/** 建单结果不确定时确认作废：已经建了就返回那张单 */
+export type MpRechargeAbandonResult = { status: 'abandoned' } | { status: 'created'; order: MpRechargeOrder };
+
+// ── 后台：线上充值单（权限 mp.recharge）──
+
+export type MpRechargeFlag = 'frozen' | 'merged' | 'after_close';
+export type MpRechargeResolution = 'rebook' | 'rebook_amount' | 'handled';
+
+export interface MpRechargeOrderAdmin {
+  id: number;
+  orderNo: string;
+  status: MpRechargeStatus;
+  memberId: number;
+  memberNo: string;
+  memberName: string;
+  creditedMemberId: number | null;
+  planId: number | null;
+  planName: string | null;
+  amount: number;
+  estBonus: number;
+  estLabel: string;
+  /** 入账的充值单与实际赠金（已入账） */
+  rechargeId: number | null;
+  rechargeDocNo: string | null;
+  bookedBonus: number | null;
+  bookedLabel: string | null;
+  transactionId: string | null;
+  paidAt: string | null;
+  bookedAt: string | null;
+  flags: MpRechargeFlag[];
+  closedAt: string | null;
+  closeReason: string | null;
+  holdCode: string | null;
+  holdMessage: string | null;
+  heldAt: string | null;
+  resolution: MpRechargeResolution | null;
+  resolutionNote: string | null;
+  resolvedByName: string | null;
+  resolvedAt: string | null;
+  mock: boolean;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface MpRechargeAdminData {
+  rules: MpRechargeRules;
+  /** 门店系统里的微信支付：real 已配好、mock 模拟（演示库）、null 没配好或小程序端口没开 */
+  payMode: 'real' | 'mock' | null;
+  /** 微信支付配错了的原因（只配了一部分、文件读不了、模拟开在别的环境）；没配或配好了为 null */
+  payProblem: string | null;
+  /** 启用的充值套餐（勾选用） */
+  plans: { id: number; name: string; payAmount: number }[];
+  /** 前台的单笔上限（分）：线上单笔上限不超过它 */
+  counterMaxCents: number;
+  /** 已付款待处理的（全部）与最近的单子 */
+  held: MpRechargeOrderAdmin[];
+  recent: MpRechargeOrderAdmin[];
+  /** 验过签、但门店系统里找不到单子的到账通知（例如从备份恢复过） */
+  orphans: { id: number; createdAt: string; outTradeNo: string; transactionId: string | null; amount: number | null }[];
+}
