@@ -109,6 +109,7 @@ const BENEFIT_GROUPS: [MpBenefitItem['category'], string, string][] = [
   ['coupon', '每期的券', 'Coupons'],
   ['event', '礼遇', 'Gifts'],
   ['discount', '折扣', 'Discounts'],
+  ['extension', '浴票延迟', 'Extra Time'],
   ['info', '说明', 'Notes'],
 ];
 const PERIOD_NOW: Record<string, string> = { day: '今天', month: '本月', year: '今年' };

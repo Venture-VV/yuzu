@@ -104,4 +104,20 @@ describe('本月可享', () => {
     const empty = benefitsView({ month: '2026-01', label: 'L0 青溪', items: [], upcoming: [] });
     expect(empty).toMatchObject({ month: '1 月', groups: [], hasCoupons: false });
   });
+
+  it('浴票延迟（主线 v0.7.25 的新类别）单独一组，排在折扣之后、说明之前，写多给几分钟', () => {
+    const v = benefitsView({
+      month: '2026-11',
+      label: 'L3 观澜 · 享',
+      items: [
+        benefit({ code: 'QY-060', name: '跨店余额通用', category: 'info', allowance: '', used: null, limit: null }),
+        benefit({ code: 'QY-004', name: '浴票延迟', category: 'extension', allowance: '多 1 小时不跳档', used: null, limit: null }),
+        benefit({ code: 'QY-011', name: '包房 9 折', category: 'discount', allowance: '', used: null, limit: null }),
+      ],
+      upcoming: [],
+    });
+    expect(v.groups.map((g) => g.title)).toEqual(['折扣', '浴票延迟', '说明']);
+    expect(v.groups[1]!.items[0]!.meta).toBe('多 1 小时不跳档');
+    expect(v.hasCoupons).toBe(false);
+  });
 });
