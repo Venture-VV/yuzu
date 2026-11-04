@@ -1,0 +1,44 @@
+<view class="view">
+  <view wx:if="{{state === 'loading'}}" class="wait">正在打开…</view>
+
+  <view wx:elif="{{state === 'unbound'}}" class="panel wait">
+    <text class="h3">先绑定会员</text>
+    <button class="btn primary" hover-class="btn-hover" bindtap="onBind">去绑定</button>
+  </view>
+
+  <view wx:elif="{{state === 'offline' || state === 'error'}}" class="panel wait">
+    <text class="h3">{{state === 'offline' ? '门店系统连接中' : message}}</text>
+    <text wx:if="{{state === 'offline'}}">暂时邀请不了，店里网络恢复后再来</text>
+    <button class="btn ghost" hover-class="btn-hover" bindtap="load">再试一次</button>
+  </view>
+
+  <block wx:else>
+    <view wx:if="{{!open}}" class="panel wait">
+      <text class="h3">{{notice || '邀请好友还没开放'}}</text>
+    </view>
+    <block wx:else>
+      <view class="panel hero">
+        <text class="eyebrow">Invite</text>
+        <text class="h3">请好友来体验</text>
+        <text wx:if="{{label}}" class="lede">好友领了，就有「{{label}}」的体验身份{{until ? '，今天领的话到 ' + until : ''}}；还不是会员的当场开卡。</text>
+        <text class="sub">{{quota}}。邀请码 7 天内有效、只能用一次；发出去没人领的占着这个月的次数，收回或过期的退回来。</text>
+        <text wx:if="{{reason}}" class="why">{{reason}}</text>
+        <button wx:if="{{allowed}}" class="btn primary block go" hover-class="btn-hover" bindtap="onCreate" loading="{{busy}}" disabled="{{busy}}">生成邀请码</button>
+      </view>
+
+      <view class="sec-h"><view><text class="eyebrow">Sent</text><text class="h3">发出去的邀请</text></view></view>
+      <view wx:if="{{!items.length}}" class="wait">还没有发过邀请</view>
+      <view wx:for="{{items}}" wx:key="code" class="inv {{item.open ? '' : 'off'}}">
+        <view class="inv-main">
+          <text class="inv-state">{{item.stateText}}</text>
+          <text class="inv-line">{{item.line}}</text>
+          <text class="inv-when num">{{item.when}}</text>
+        </view>
+        <view wx:if="{{item.open}}" class="inv-act">
+          <button class="btn primary mini" hover-class="btn-hover" open-type="share" data-code="{{item.code}}">发给好友</button>
+          <button class="btn ghost mini" hover-class="btn-hover" data-code="{{item.code}}" bindtap="onRevoke">收回</button>
+        </view>
+      </view>
+    </block>
+  </block>
+</view>

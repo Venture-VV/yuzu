@@ -10,6 +10,8 @@
     "pages/benefits/index",
     "pages/recharge/index",
     "pages/coupon-center/index",
+    "pages/invite/index",
+    "pages/invite-claim/index",
     "pages/unbind/index"
   ],
   "window": {

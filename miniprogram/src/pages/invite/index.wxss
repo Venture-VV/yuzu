@@ -1,0 +1,56 @@
+.hero .lede {
+  display: block;
+  margin: 12rpx 0;
+  line-height: 1.6;
+}
+.why {
+  display: block;
+  margin-top: 12rpx;
+  font-size: 26rpx;
+  color: var(--wood);
+}
+.go {
+  margin-top: 28rpx;
+}
+.inv {
+  display: flex;
+  align-items: center;
+  margin-bottom: 20rpx;
+  padding: 24rpx;
+  background-color: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8rpx;
+}
+.inv.off {
+  opacity: 0.72;
+}
+.inv-main {
+  flex: 1;
+  min-width: 0;
+}
+.inv-state {
+  display: block;
+  font-weight: 600;
+}
+.inv-line,
+.inv-when {
+  display: block;
+  font-size: 24rpx;
+  color: var(--muted);
+}
+.inv-act {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.inv-act .btn + .btn {
+  margin-top: 12rpx;
+}
+.btn.mini {
+  min-width: 132rpx;
+  height: 64rpx;
+  padding: 0 20rpx;
+  font-size: 26rpx;
+  line-height: 64rpx;
+}

@@ -30,6 +30,8 @@ export interface CardView {
   merged: boolean;
   /** 领券中心开着、有可领的券（第二期 2c）：菜单里有「领券中心」 */
   couponCenter: boolean;
+  /** 邀请好友开着（第三期 3b） */
+  invite: boolean;
 }
 
 const pct = (part: number, whole: number) => (whole > 0 ? Math.max(0, Math.min(100, Math.floor((part * 100) / whole))) : 0);
@@ -84,5 +86,6 @@ export function cardView(m: MeMember): CardView {
     recharge: m.rechargeOpen === true && m.merged !== true,
     merged: m.merged === true,
     couponCenter: m.couponCenterOpen === true && m.merged !== true,
+    invite: m.inviteOpen === true && m.merged !== true,
   };
 }

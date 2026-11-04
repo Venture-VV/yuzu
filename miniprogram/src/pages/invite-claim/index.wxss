@@ -1,0 +1,37 @@
+.lede {
+  display: block;
+  margin: 12rpx 0;
+  line-height: 1.6;
+}
+.why {
+  display: block;
+  margin-top: 12rpx;
+  font-size: 26rpx;
+  color: var(--wood);
+}
+.go {
+  margin-top: 28rpx;
+}
+.note {
+  margin-top: 20rpx;
+}
+.field {
+  margin-bottom: 20rpx;
+}
+.field .k {
+  display: block;
+  margin-bottom: 10rpx;
+  font-size: 26rpx;
+  color: var(--muted);
+}
+.name-in {
+  height: 84rpx;
+  padding: 0 20rpx;
+  background-color: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8rpx;
+  font-size: 30rpx;
+}
+.name-in.want {
+  border-color: var(--wood);
+}

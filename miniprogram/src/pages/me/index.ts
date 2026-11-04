@@ -216,6 +216,10 @@ Page({
   onRecharge() {
     wx.navigateTo({ url: '/pages/recharge/index' });
   },
+  onInvite() {
+    wx.navigateTo({ url: '/pages/invite/index' });
+  },
+
   onCouponCenter() {
     wx.navigateTo({ url: '/pages/coupon-center/index' });
   },
