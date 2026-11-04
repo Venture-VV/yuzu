@@ -1,4 +1,4 @@
-import { ArchiveRestore, ArchiveX, Bath, CirclePlus, Hourglass, Undo2 } from 'lucide-react';
+import { ArchiveRestore, ArchiveX, Bath, CirclePlus, Combine, HandCoins, Hourglass, Undo2 } from 'lucide-react';
 import { PAYMENT_METHOD_LABELS, type EntryType } from '@shared/labels';
 import type { LedgerRow } from '@shared/types';
 import { cn, formatDateTime } from '../../lib/utils';
@@ -12,6 +12,9 @@ export const ENTRY_META = {
   expire: { label: '赠金过期', icon: Hourglass, tone: 'bg-paper-2 text-ink-3' },
   opening: { label: '期初导入', icon: ArchiveRestore, tone: 'bg-pine-tint text-pine' },
   opening_void: { label: '期初作废', icon: ArchiveX, tone: 'bg-clay-soft text-clay' },
+  refund: { label: '储值退回', icon: HandCoins, tone: 'bg-clay-soft text-clay' },
+  merge_out: { label: '合并转出', icon: Combine, tone: 'bg-paper-2 text-ink-3' },
+  merge_in: { label: '合并转入', icon: Combine, tone: 'bg-pine-tint text-pine' },
 } as const satisfies Record<EntryType, { label: string; icon: unknown; tone: string }>;
 
 /** 会员的余额变化时间线：充值 / 消费 / 撤销 / 赠金过期 */
@@ -48,9 +51,9 @@ export function ActivityRow({
               ? `充值 · ${row.summary}`
               : row.entryType === 'reversal'
                 ? '撤销消费'
-                : row.entryType === 'expire' || row.entryType === 'opening' || row.entryType === 'opening_void'
-                  ? row.summary || ENTRY_META[row.entryType].label
-                  : row.summary || '消费'}
+                : row.entryType === 'consume'
+                  ? row.summary || '消费'
+                  : row.summary || ENTRY_META[row.entryType].label}
           </span>
           {reversed && <Badge tone="clay">已撤销</Badge>}
           {crossDay && <Badge tone="ember">跨日撤销</Badge>}

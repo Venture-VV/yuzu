@@ -140,6 +140,8 @@ export interface MemberDiscountOption {
   /** 适用明细的合计、省下多少（分） */
   base: number;
   amount: number;
+  /** 同行优惠（v0.7.26）打的那几位同行的手牌号；别的折扣为空 */
+  companions: string[];
 }
 
 // ───────────── 退款单（v0.7.20，飞书需求 RQ-006；docs/CASHIER.md 第 3 节）─────────────
@@ -430,8 +432,19 @@ export interface ShiftSummary {
       operatorName?: string;
     }[];
   };
-  /** 应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金 + 押金现金（收 − 退）− 退款单退现金 */
-  cash: { opening: number; checkout: number; recharge: number; refund?: number; deposit?: number; refundSlip?: number; expected: number };
+  /**
+   * 储值退回（v0.7.26，M72）：记到本班次的退储值单，按退款方式；现金从本班钱箱退、扣减应有现金，
+   * 微信、支付宝、银行卡、其他列出退款单号只作提醒。别人从本班钱箱退的写明是谁。
+   * 本班次没有退储值、升级之前交班的快照都没有这一项（cash.memberRefund 同样没有）
+   */
+  memberRefunds?: {
+    count: number;
+    total: number;
+    byMethod: { method: PaymentMethod; count: number; amount: number }[];
+    list: { refundNo: string; memberName: string; amount: number; cash: number; reason: string; createdAt: string; refs: { method: PaymentMethod; amount: number; ref: string }[]; operatorName?: string }[];
+  };
+  /** 应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金 + 押金现金（收 − 退）− 退款单退现金 − 储值退回的现金 */
+  cash: { opening: number; checkout: number; recharge: number; refund?: number; deposit?: number; refundSlip?: number; memberRefund?: number; expected: number };
 }
 
 export interface ShiftRecord {
@@ -477,6 +490,12 @@ export interface DashboardData {
     refund: number;
     rechargePaid: number;
     rechargeCount: number;
+    /** 其中线上（小程序，v0.7.26）：微信支付到账，不进交班 */
+    rechargeOnline?: number;
+    rechargeOnlineCount?: number;
+    /** 当天的储值退回（v0.7.26，退的本金；不是营业额，净充值 = 充值实收 − 储值退回） */
+    memberRefund?: number;
+    memberRefundCount?: number;
   };
   tickets: { name: string; count: number; amount: number }[];
   days: { date: string; net: number; checkouts: number; rechargePaid: number }[];

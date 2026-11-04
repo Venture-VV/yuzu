@@ -32,10 +32,23 @@ export const BENEFIT_PERIODS = ['none', 'day', 'month', 'year'] as const;
 export type BenefitPeriod = (typeof BENEFIT_PERIODS)[number];
 export const BENEFIT_PERIOD_LABELS: Record<BenefitPeriod, string> = { none: '不计次', day: '每天', month: '每月', year: '每年' };
 
-/** 折扣类打哪些明细（v0.7.25）：客房房费（全天房、超时半天、钟点房）、门票、整张账单 */
-export const DISCOUNT_TARGETS = ['room', 'ticket', 'bill'] as const;
+/**
+ * 折扣类打哪些明细（v0.7.25）：客房房费（全天房、超时半天、钟点房）、门票、整张账单；
+ * 同行优惠（v0.7.26，QY-041，M80）：合并结账里同行的（不是会员的）客人的门票、整张账单
+ */
+export const DISCOUNT_TARGETS = ['room', 'ticket', 'bill', 'companion_ticket', 'companion_bill'] as const;
 export type DiscountTarget = (typeof DISCOUNT_TARGETS)[number];
-export const DISCOUNT_TARGET_LABELS: Record<DiscountTarget, string> = { room: '客房房费', ticket: '门票', bill: '整张账单' };
+export const DISCOUNT_TARGET_LABELS: Record<DiscountTarget, string> = {
+  room: '客房房费',
+  ticket: '门票',
+  bill: '整张账单',
+  companion_ticket: '同行的门票',
+  companion_bill: '同行的整张账单',
+};
+/** 同行优惠：打的是同行客人的明细（不是会员本人的） */
+export const isCompanionTarget = (t: DiscountTarget): t is 'companion_ticket' | 'companion_bill' => t === 'companion_ticket' || t === 'companion_bill';
+/** 同行几位：1–9 */
+export const MAX_COMPANIONS = 9;
 /** 折扣「付几成」：10 = 1 折 … 99 = 9.9 折 */
 export const MIN_DISCOUNT_RATE = 10;
 export const MAX_DISCOUNT_RATE = 99;
@@ -117,6 +130,17 @@ export function benefitQuantity(b: Pick<BenefitTerms, 'quantity' | 'tierQuantiti
     if (r <= rank && (best === null || r > stateRank(best.grade, best.tier))) best = t;
   }
   return best ? best.quantity : b.quantity;
+}
+
+/** 同行优惠能带几位（v0.7.26，M80）：与数量一样按会员现在的档阶取一行、不相加；没配置为空 */
+export function benefitCompanionCount(b: { companionCount: number | null; companionCounts: TierQuantity[] }, grade: number, tier: number | null): number | null {
+  return benefitQuantity({ quantity: b.companionCount, tierQuantities: b.companionCounts }, grade, tier);
+}
+
+/** 同行几位的说明：「带 1 位，L6·初 起 2 位」；没填起点的人数是「还没填同行几位」 */
+export function companionText(b: { companionCount: number | null; companionCounts: readonly TierQuantity[] }): string {
+  if (b.companionCount === null) return '还没填同行几位';
+  return [`带 ${b.companionCount} 位`, ...b.companionCounts.map((t) => `${startLabel(t.grade, t.tier)} 起 ${t.quantity} 位`)].join('，');
 }
 
 /** 这一期的键：每月「2026-11」、每年「2026」、每天「2026-11-03」；不计次为空 */
@@ -201,7 +225,8 @@ export function discountDayMatches(d: { weekdays: readonly number[]; monthDays: 
 
 /** 适用的明细：客房房费按部门「客房」、门票按「门票」（与部门营业额快照同一口径），整张账单是全部明细 */
 export function discountLines<L extends { category: string }>(target: DiscountTarget, lines: readonly L[]): L[] {
-  if (target === 'bill') return [...lines];
+  // 同行优惠按同行客人的明细，口径与本人的门票、整张账单一样
+  if (target === 'bill' || target === 'companion_bill') return [...lines];
   const category = target === 'room' ? '客房' : '门票';
   return lines.filter((l) => l.category === category);
 }
@@ -222,6 +247,8 @@ interface CatalogEntry {
   name: string;
   /** 会员文档的配置起点原文：「L2·初」「L0·会员」「未配置；待公布」 */
   start: string;
+  /** 按默认做法定的起点与原文不同时（QY-004 按 M50 从 L1·初 起，原文 L1·尊）；导入用它 */
+  startDefault?: string;
   content: string;
   conditions: string;
   category: BenefitCategory;
@@ -229,9 +256,27 @@ interface CatalogEntry {
   quantity: number | null;
   events: BenefitEvent[];
   status: 'draft' | 'paused';
-  /** 折扣类按会员文档预填的折扣（仍是草稿，店主核对后发布；v0.7.25） */
-  discount?: { target: DiscountTarget; tierQuantities: TierQuantity[] };
+  /**
+   * 按默认做法预填的各档阶数量（仍是草稿，店主核对后发布）：折扣类的「付几成」（v0.7.25，M44）、
+   * 浴票延迟的分钟数（v0.7.26，M50）；起点的数量在 quantity
+   */
+  tierQuantities?: readonly TierQuantity[];
+  /** 折扣类预填的适用明细（v0.7.25，M44） */
+  discountTarget?: DiscountTarget;
+  /** 同行优惠预填的同行几位（v0.7.26，M81）：起点的与各档阶表 */
+  companionCount?: number;
+  companionCounts?: readonly TierQuantity[];
 }
+
+/**
+ * 浴票延迟的默认分钟数（v0.7.26，PENDING_DECISIONS M50，店主 2026-11-04 定按开发会话的默认）：
+ * 从 L1·初 起，每一档都是初阶 30 分钟、享阶 60 分钟、尊阶 90 分钟（按阶位 初 / 享 / 尊）
+ */
+export const TICKET_EXTENSION_DEFAULT_MINUTES = [30, 60, 90] as const;
+/** 浴票延迟默认的各档阶表：起点 L1·初 之上的 17 行（L1·享 60、L1·尊 90、L2·初 30 …… L6·尊 90）；迁移 047 补的是同样的值 */
+export const TICKET_EXTENSION_DEFAULT_ROWS: readonly TierQuantity[] = ([1, 2, 3, 4, 5, 6] as const)
+  .flatMap((grade) => ([0, 1, 2] as const).map((tier) => ({ grade, tier, quantity: TICKET_EXTENSION_DEFAULT_MINUTES[tier] })))
+  .filter((row) => row.grade > 1 || row.tier > 0);
 
 /** 「L2·初」→ { grade: 2, tier: 0 }；「L0·会员」→ { grade: 0, tier: null }；其余（未配置）→ null */
 export function parseStart(text: string): { grade: Grade; tier: Tier | null } | null {
@@ -264,8 +309,14 @@ export const BENEFIT_CATALOG: readonly CatalogEntry[] = [
   service('QY-001', '会员专属通道', 'L2·初', '入场、领手牌及结账会员专属通道。', '实际开放和适用节点待明确。'),
   service('QY-002', '高峰优先入场', 'L3·初', '高峰、节假日优先入场。', '按会员档位及现场可用资源，具体规则待公布。'),
   service('QY-003', '免预约入场', 'L2·初', '入场及部分服务优先排号。', '包房、技师等仍受资源限制，不能推定所有项目免预约。'),
-  // 浴票延迟（v0.7.25 续，M50）：结账时自动算；文档的起点与梯度对不上，不预填分钟数，店主填好各档阶的分钟数再发布
-  listed('extension', 'QY-004', '浴票延迟', 'L1·尊', '浴票延迟：初阶30分钟、享阶1小时、尊阶1.5—2小时。', '档位与延迟梯度需最终确认；不能使用福田8小时规则替代。'),
+  {
+    // 浴票延迟（v0.7.25 续结账时自动算）：文档的起点 L1·尊 与梯度对不上，按 M50 的默认预填（v0.7.26，店主 11-04 定）——
+    // 从 L1·初 起，每一档初阶 30、享阶 60、尊阶 90 分钟；仍是草稿，店主或店总核对后发布
+    ...listed('extension', 'QY-004', '浴票延迟', 'L1·尊', '浴票延迟：初阶30分钟、享阶1小时、尊阶1.5—2小时。', '档位与延迟梯度需最终确认；不能使用福田8小时规则替代。'),
+    startDefault: 'L1·初',
+    quantity: TICKET_EXTENSION_DEFAULT_MINUTES[0],
+    tierQuantities: TICKET_EXTENSION_DEFAULT_ROWS,
+  },
   monthlyCoupon('QY-005', '免费浴资次数', 'L1·初', '年度免费浴资券。', '各档张数、券种、是否含餐及期限待明确。', 'year'),
   service('QY-006', '通用VIP柜（VIP更衣区）', 'L3·初', '通用VIP更衣柜及配套更衣、淋浴、梳妆使用权。', '已决策3万元起；高峰排队，不预约。'),
   service('QY-007', 'VIP固定专属专柜', 'L6·初', '固定编号专属柜及姓名牌。', '资料存在10万元可申请与30万元L6专属冲突；限量，门槛和期限待确认。'),
@@ -276,14 +327,12 @@ export const BENEFIT_CATALOG: readonly CatalogEntry[] = [
     ...listed('discount', 'QY-011', '派对房及包房折扣', 'L3·初', '包房房费折扣：3万7.5折、5万6.5折、10万5.5折、30万5折。', '不含开台费及其他消费；派对房仅周一至周四。'),
     // M44：客房房费；L3·初 7.5 折（起点）、L4·初 6.5 折、L5·初 5.5 折、L6·初 5 折
     quantity: 75,
-    discount: {
-      target: 'room',
-      tierQuantities: [
-        { grade: 4, tier: 0, quantity: 65 },
-        { grade: 5, tier: 0, quantity: 55 },
-        { grade: 6, tier: 0, quantity: 50 },
-      ],
-    },
+    discountTarget: 'room',
+    tierQuantities: [
+      { grade: 4, tier: 0, quantity: 65 },
+      { grade: 5, tier: 0, quantity: 55 },
+      { grade: 6, tier: 0, quantity: 50 },
+    ],
   },
   service('QY-012', '宠物友好轰趴SKU', 'L3·尊', '宠物友好轰趴体验候选。', '独立项目；是否纳入权益及适用条件待明确。'),
   service('QY-013', '房型升级', 'L4·初', '消费客房时免费房型升级。', '视房态；适用房型和日期待明确。'),
@@ -314,7 +363,13 @@ export const BENEFIT_CATALOG: readonly CatalogEntry[] = [
   monthlyCoupon('QY-038', 'SPA项目券', 'L3·享', 'SPA项目券或技师礼遇。', '具体项目、次数、时长和加价项待明确。'),
   monthlyCoupon('QY-039', '头疗项目券', 'L2·尊', '头疗项目券。', '具体项目、次数、时长和使用期限待明确。'),
   monthlyCoupon('QY-040', '按摩/足浴项目券', 'L2·初', '按摩、足浴项目券。', '按正常项目规则；具体项目、次数及包房费用待明确。'),
-  listed('discount', 'QY-041', '同行优惠', 'L3·初', '高档可带1人、最高档可带2人享同行礼遇的规划。', '具体适用档位及权益范围待确认，不照搬福田同行88折。'),
+  {
+    ...listed('discount', 'QY-041', '同行优惠', 'L3·初', '高档可带1人、最高档可带2人享同行礼遇的规划。', '具体适用档位及权益范围待确认，不照搬福田同行88折。'),
+    // M81：同行的门票，L3·初 起带 1 位、L6·初 起带 2 位；折扣不填（等店主定），发布不了
+    discountTarget: 'companion_ticket',
+    companionCount: 1,
+    companionCounts: [{ grade: 6, tier: 0, quantity: 2 }],
+  },
   service('QY-042', '会籍赠送', 'L3·尊', '赠记名低一档体验会籍。', '单次1个月，仅权益、无升级礼；期内充值达门槛转正，未达即到期失效。'),
   service('QY-043', '会员专属活动', 'L4·初', '品鉴会、沙龙、节日活动邀约。', '按活动排期、资格和名额开放。'),
   service('QY-044', 'VVIP年度晚宴', 'L5·初', '年度答谢晚宴与品牌活动。', '按年度活动安排和名额，不承诺不限次参与。'),
@@ -359,6 +414,9 @@ export interface Benefit {
   festivalDates: string[];
   /** 折扣类（v0.7.25）：打哪些明细、每周几、每月几号（空 = 每天）；「付几成」在 quantity 与各档阶表里 */
   discountTarget: DiscountTarget | null;
+  /** 同行优惠（v0.7.26）：起点能带几位与各档阶表（只有「同行的」明细才有） */
+  companionCount: number | null;
+  companionCounts: TierQuantity[];
   weekdays: number[];
   monthDays: number[];
   content: string;

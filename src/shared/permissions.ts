@@ -80,6 +80,11 @@ export const PERMISSIONS = {
   'member.rules': { roles: ['owner', 'store_manager'] },
   /** 手动调整会员档阶（写原因，留记录） */
   'member.adjust': { roles: ['owner'] },
+  // 会员体系收尾（v0.7.26）：退储值（店员及以上发起，店主或店总当场授权）、停用 / 启用、改手机号、合并
+  'member.refund': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk'] },
+  'member.status': { roles: ['owner', 'store_manager'] },
+  'member.phone': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  'member.merge': { roles: ['owner', 'store_manager'] },
   /** 看会员体系看板、到期提醒名单与补充期名单（客户经理按名单联系客人） */
   'member.retention': { roles: ['owner', 'store_manager', 'account_manager'] },
   /** 他店查询：按手机号或会员号查一位会员的档阶与会籍（只读，不含余额与流水） */
@@ -164,6 +169,9 @@ export const PERMISSIONS = {
   // ── 当场授权（主管在弹窗里输入自己的账号密码确认）──
   /** 授权超过单笔上限的充值 / 消费 */
   'auth.overLimit': { roles: ['owner', 'store_manager'] },
+  // 退储值、改会员手机号的当场授权（v0.7.26，M69、M77）
+  'auth.memberRefund': { roles: ['owner', 'store_manager'] },
+  'auth.memberPhone': { roles: ['owner', 'store_manager', 'duty_manager'] },
   /** 授权散客或等级不够的会员使用 VIP 柜（经营规则开启后才可用） */
   'auth.vipOverride': { roles: ['owner', 'store_manager', 'duty_manager'] },
   /** 授权结账的「优惠 / 免单」、降低票种与免票（R1.2，店主 2026-10-29 签认） */
@@ -287,6 +295,10 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'wallet.opening': '导入旧系统会员余额（期初）与作废期初',
   'member.rules': '修改会员规则（档级门槛、赠送比例、周期）',
   'member.adjust': '手动调整会员档阶（写原因）',
+  'member.refund': '退储值（要店主或店总当场授权）',
+  'member.status': '停用、启用会员（写原因）',
+  'member.phone': '改会员手机号（不用授权；没有这一项的要当场授权）',
+  'member.merge': '合并会员（同一个人的两份档案，写原因）',
   'member.retention': '看会员体系看板与到期提醒名单',
   'member.lookup': '他店查询（按手机号查会员档阶，只读）',
   'benefit.publish': '维护会员权益（导入清单、修改、发布、暂缓）',
@@ -325,6 +337,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'request.create': '提部门采购需求单（只限本部门）',
   'request.review': '审核需求单、转采购单',
   'auth.overLimit': '当场授权超过单笔上限的充值 / 消费',
+  'auth.memberRefund': '当场授权退储值',
+  'auth.memberPhone': '当场授权改会员手机号',
   'auth.vipOverride': '当场授权散客或低等级会员使用 VIP 柜',
   'auth.discount': '当场授权优惠 / 免单、降低票种与免票',
   'staff.manage': '管理员工账号',
@@ -360,7 +374,10 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
     title: '前台手牌与账单',
     items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.refund', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen', 'room.operate', 'room.housekeep', 'location.view', 'location.report', 'guide.view'],
   },
-  { title: '会员体系', items: ['member.rules', 'member.adjust', 'member.retention', 'member.lookup', 'benefit.publish', 'benefit.use'] },
+  {
+    title: '会员体系',
+    items: ['member.rules', 'member.adjust', 'member.retention', 'member.lookup', 'benefit.publish', 'benefit.use', 'member.refund', 'member.status', 'member.phone', 'member.merge'],
+  },
   { title: '券与会员权益', items: ['coupon.manage', 'coupon.issue', 'coupon.void'] },
   { title: '设备', items: ['device.view', 'device.test', 'device.manage'] },
   { title: '微信小程序', items: ['mp.content', 'mp.unbind'] },
@@ -372,7 +389,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
       'expense.read', 'expense.manage', 'petty.manage', 'expense.approve', 'finance.void', 'expense.export', 'request.create', 'request.review', 'erp.revenue',
     ],
   },
-  { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount'] },
+  { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount', 'auth.memberRefund', 'auth.memberPhone'] },
   { title: '数据看板', items: ['report.executive', 'report.members', 'report.technicians', 'report.commission'] },
   { title: '管理后台', items: ['staff.manage', 'catalog.manage', 'technician.manage', 'settings.manage', 'audit.read'] },
 ];

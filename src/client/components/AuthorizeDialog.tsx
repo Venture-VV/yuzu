@@ -11,6 +11,8 @@ const TEXT: Record<GrantPurpose, { title: string; who: string }> = {
   over_limit: { title: '超过单笔上限', who: '请店总或店主输入自己的账号密码' },
   checkout_discount: { title: '优惠 / 免单', who: '请值班经理、店总或店主输入自己的账号密码' },
   ticket_discount: { title: '降低票种 / 免票', who: '请值班经理、店总或店主输入自己的账号密码' },
+  member_refund: { title: '退储值', who: '请店总或店主输入自己的账号密码' },
+  member_phone: { title: '改会员手机号', who: '请值班经理、店总或店主输入自己的账号密码' },
 };
 
 /**

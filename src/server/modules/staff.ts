@@ -43,6 +43,8 @@ export async function listStaff(db: Db): Promise<StaffRecord[]> {
     SELECT s.id, s.username, s.display_name, s.role, s.duties, s.department_id, d.name AS department_name, s.active, s.must_change_password,
            s.last_login_at, s.created_at
     FROM staff s LEFT JOIN departments d ON d.id = s.department_id
+    -- 系统账号（小程序线上收款的经办人，v0.7.26）不出现在员工名单里
+    WHERE NOT s.system
     ORDER BY s.active DESC, (s.role = 'owner') DESC, s.id`;
 }
 
@@ -107,9 +109,9 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
     await sql.begin(async (tx) => {
       // 锁住全部店主行，保证并发修改时仍至少保留一位在职店主
       await tx`SELECT id FROM staff WHERE role = 'owner' FOR UPDATE`;
-      const [before] = await tx<{ role: string; duties: string[]; active: boolean; displayName: string }[]>`
-        SELECT role, duties, active, display_name FROM staff WHERE id = ${id}`;
-      if (!before) throw notFound('员工不存在');
+      const [before] = await tx<{ role: string; duties: string[]; active: boolean; displayName: string; system: boolean }[]>`
+        SELECT role, duties, active, display_name, system FROM staff WHERE id = ${id}`;
+      if (!before || before.system) throw notFound('员工不存在');
       if (id === req.actor.id && (!input.active || input.role !== 'owner')) {
         throw unprocessable('SELF_LOCKOUT', '不能停用自己或取消自己的店主岗位');
       }
@@ -143,7 +145,7 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
     const hash = await hashPassword(password);
     await sql.begin(async (tx) => {
       const rows = await tx`
-        UPDATE staff SET password_hash = ${hash}, must_change_password = true, updated_at = now() WHERE id = ${id} RETURNING id`;
+        UPDATE staff SET password_hash = ${hash}, must_change_password = true, updated_at = now() WHERE id = ${id} AND NOT system RETURNING id`;
       if (rows.length === 0) throw notFound('员工不存在');
       await destroyStaffSessions(tx, id);
       await writeAudit(tx, { staffId: req.actor.id, action: 'staff_password_reset', targetType: 'staff', targetId: id, ip: req.ip });

@@ -94,6 +94,8 @@ export interface MemberSummary extends MemberGradeFields {
   customFields: MemberCustomValues;
   /** 渠道来源的编号（见 StoreRules.memberChannels）；没登记为 null */
   channel: string | null;
+  /** 已合并到的会员（v0.7.26）：这份档案停用、余额已转过去；没合并为 null */
+  mergedIntoId: number | null;
 }
 
 export interface MemberDetail extends MemberSummary {
@@ -106,6 +108,8 @@ export interface MemberDetail extends MemberSummary {
   bonusLots: { remaining: number; expiresAt: string | null }[];
   /** 从旧系统导入的期初（有效的那一笔） */
   opening: { importNo: string; docNo: string; source: string; legacyNo: string; principal: number; bonus: number; legacyRecharged: number; importedAt: string } | null;
+  /** 被合并到的会员（v0.7.26，M79）：这份档案停用，余额已转过去；没合并为空 */
+  mergedInto: { id: number; memberNo: string; name: string } | null;
   stats: {
     totalPaid: number;
     totalBonusGranted: number;
@@ -173,6 +177,8 @@ export interface RechargeDoc {
   overLimitApproverName: string | null;
   /** 赠金到期时刻（那个营业日开始时作废）；没有赠金或长期有效时为 null */
   bonusExpiresAt: string | null;
+  /** 渠道（v0.7.26）：前台 / 小程序线上充值（微信支付到账，不进交班） */
+  channel: 'counter' | 'mp';
 }
 
 export interface ConsumptionLine {
@@ -311,7 +317,9 @@ export interface SettlementAnomaly {
     | 'backfill'
     // v0.7.20：退款单（离店后部分退款）与当天作废的退款单
     | 'refund'
-    | 'refund_void';
+    | 'refund_void'
+    // 储值退回（v0.7.26）
+    | 'member_refund';
   at: string | null;
   docNo: string | null;
   memberName: string | null;
@@ -320,13 +328,25 @@ export interface SettlementAnomaly {
 }
 
 export interface SettlementTotals {
-  recharge: { count: number; paid: number; bonus: number; byMethod: { method: PaymentMethod; count: number; amount: number }[] };
+  recharge: {
+    count: number;
+    paid: number;
+    bonus: number;
+    byMethod: { method: PaymentMethod; count: number; amount: number }[];
+    /** 其中线上（小程序，v0.7.26）：微信支付到账，不进交班；之前确认的快照没有 */
+    online?: { count: number; paid: number; bonus: number };
+  };
   consume: { count: number; total: number; principal: number; bonus: number; reversedCount: number };
   reversal: { count: number; principal: number; bonus: number; crossDayCount: number };
   /** 赠金到期作废（Batch 2.4c）：不是收款，也不是退款 */
   expiry: { count: number; bonus: number };
   /** 旧系统余额期初导入（Batch 2.4d，扣除当天作废的）：不是收款 */
   opening: { count: number; voidCount: number; principal: number; bonus: number };
+  /**
+   * 储值退回（v0.7.26，M69–M74）：退的本金（按退款方式）与扣回的赠金。不是营业额，是储值减少、钱退回去；
+   * 升级之前确认的日结快照没有这一项，按 0 补齐
+   */
+  memberRefund: { count: number; principal: number; bonus: number; byMethod: { method: PaymentMethod; count: number; amount: number }[] };
   /** 本营业日流水的余额净变动 */
   net: WalletBalance;
   /**

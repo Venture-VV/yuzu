@@ -50,6 +50,8 @@ beforeAll(async () => {
   await sql`ALTER TABLE recharges ADD COLUMN bonus_expires_at timestamptz`;
   await sql`ALTER TABLE ledger_entries ADD COLUMN expiry_id bigint`;
   await sql`ALTER TABLE ledger_entries ADD COLUMN opening_id bigint`;
+  // 储值退回、合并（v0.7.26，047 才有）：余额流水多两列
+  await sql`ALTER TABLE ledger_entries ADD COLUMN member_refund_id bigint, ADD COLUMN member_merge_id bigint`;
   await sql`ALTER TABLE consumptions ADD COLUMN checkout_id bigint`;
   await sql`CREATE TABLE bonus_lots (id bigserial PRIMARY KEY, member_id bigint, source text, recharge_id bigint, amount bigint, remaining bigint, expires_at timestamptz, created_at timestamptz)`;
   await sql`CREATE TABLE checkouts (id bigserial PRIMARY KEY, checkout_no text, status text)`;
@@ -65,10 +67,15 @@ beforeAll(async () => {
   // 现版本充值、消费时按会员体系 v2 算档阶（040 才有，首充 / 续充最低默认 5,000 元）：写入期间临时加会员的档阶列、状态变化表，
   // 最低充值设成不限，迁移前删掉
   await sql`ALTER TABLE members ADD COLUMN grade smallint NOT NULL DEFAULT 0, ADD COLUMN tier smallint, ADD COLUMN cycle_start date, ADD COLUMN cycle_end date, ADD COLUMN grace_until date, ADD COLUMN grade_version integer NOT NULL DEFAULT 0`;
+  // 现版本按「这位会员与并进来的会员」算滚动累计充值，充值减去退回的本金（v0.7.26，047 才有）：写入期间临时加列、建空表，迁移前删掉
+  await sql`ALTER TABLE members ADD COLUMN merged_into_id bigint`;
+  await sql`CREATE TABLE member_refund_lines (id bigint, recharge_id bigint, amount bigint)`;
+  // 读充值单时带渠道（前台 / 小程序，047 才有）
+  await sql`ALTER TABLE recharges ADD COLUMN channel text NOT NULL DEFAULT 'counter'`;
   await sql`CREATE TABLE member_grade_events (id bigserial PRIMARY KEY, member_id bigint, kind text, business_date date, from_grade smallint, from_tier smallint, to_grade smallint, to_tier smallint, cycle_start date, cycle_end date, grace_until date, cycle_spend bigint, rolling_recharge bigint, recharge_id bigint, consumption_id bigint, staff_id bigint, reason text, client_key uuid)`;
   await sql`INSERT INTO settings (key, value) VALUES ('membership_rules', '{"firstRechargeMinCents": 0, "topUpMinCents": 0}'::jsonb)`;
-  // 现版本首笔充值时按会员权益发首充礼（041 才有，042 加了折扣类的几列）：写入期间临时建空的权益表，迁移前删掉
-  await sql`CREATE TABLE benefits (id bigint, code text, name text, category text, start_grade smallint, start_tier smallint, period text, quantity smallint, tier_quantities jsonb, template_id bigint, events text[], festival_dates date[], discount_target text, weekdays smallint[], month_days smallint[], content text, conditions text, status text, version integer, sort_order integer)`;
+  // 现版本首笔充值时按会员权益发首充礼（041 才有，042 加了折扣类的几列，047 加了同行几位）：写入期间临时建空的权益表，迁移前删掉
+  await sql`CREATE TABLE benefits (id bigint, code text, name text, category text, start_grade smallint, start_tier smallint, period text, quantity smallint, tier_quantities jsonb, template_id bigint, events text[], festival_dates date[], discount_target text, companion_count smallint, companion_counts jsonb, weekdays smallint[], month_days smallint[], content text, conditions text, status text, version integer, sort_order integer)`;
   // 升级前已有的消费项目（只有一个价格）
   const [item] = await sql<{ id: number }[]>`INSERT INTO service_items (name, category, price) VALUES ('升级前项目', '护理', 6800) RETURNING id`;
   itemId = item!.id;
@@ -87,6 +94,7 @@ beforeAll(async () => {
   await sql`ALTER TABLE recharges DROP COLUMN bonus_expires_at`;
   await sql`ALTER TABLE ledger_entries DROP COLUMN expiry_id`;
   await sql`ALTER TABLE ledger_entries DROP COLUMN opening_id`;
+  await sql`ALTER TABLE ledger_entries DROP COLUMN member_refund_id, DROP COLUMN member_merge_id`;
   await sql`ALTER TABLE consumptions DROP COLUMN checkout_id`;
   await sql`DROP TABLE bonus_lots`;
   await sql`DROP TABLE checkouts`;
@@ -101,6 +109,9 @@ beforeAll(async () => {
   await sql`DROP TABLE member_grade_events`;
   await sql`DELETE FROM settings WHERE key = 'membership_rules'`;
   await sql`DROP TABLE benefits`;
+  await sql`DROP TABLE member_refund_lines`;
+  await sql`ALTER TABLE members DROP COLUMN merged_into_id`;
+  await sql`ALTER TABLE recharges DROP COLUMN channel`;
 
   // 升级：增量执行 002 之后的全部迁移
   const applied = await migrate(sql);

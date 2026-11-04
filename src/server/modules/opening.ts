@@ -81,9 +81,10 @@ interface PlannedRow extends OpeningRow {
 /** 按手机号匹配已有会员并逐行核对（预览与导入共用；导入时在咨询锁内核对，锁住已有会员后再核对一次） */
 async function planRows(db: Db, rows: OpeningRow[], today: string, timeZone: string, startHour: number) {
   const existing = rows.length
-    ? await db<{ id: number; memberNo: string; name: string; phone: string; openingDocNo: string | null }[]>`
+    ? await db<{ id: number; memberNo: string; name: string; phone: string; openingDocNo: string | null; mergedIntoNo: string | null }[]>`
         SELECT m.id, m.member_no, m.name, m.phone,
-               (SELECT b.doc_no FROM opening_balances b WHERE b.member_id = m.id AND b.status = 'active') AS opening_doc_no
+               (SELECT b.doc_no FROM opening_balances b WHERE b.member_id = m.id AND b.status = 'active') AS opening_doc_no,
+               (SELECT t.member_no FROM members t WHERE t.id = m.merged_into_id) AS merged_into_no
         FROM members m WHERE m.phone IN ${db(rows.map((r) => r.phone))}`
     : [];
   const byPhone = new Map(existing.map((m) => [m.phone, m]));
@@ -96,6 +97,8 @@ async function planRows(db: Db, rows: OpeningRow[], today: string, timeZone: str
       problems.push(`手机号 ${row.phone} 已登记为会员「${m.name}」（${m.memberNo}），与文件里的姓名「${row.name}」不一致，请核对后改成一致`);
     }
     if (m?.openingDocNo) problems.push(`会员「${m.name}」已有期初 ${m.openingDocNo}，不能重复导入；如需更正请先作废那一笔`);
+    // 已合并的会员（v0.7.26）：余额都在合并进去的那位，期初也要记到那位（改成那位的手机号）
+    if (m?.mergedIntoNo) problems.push(`会员「${m.name}」已合并到 ${m.mergedIntoNo}，期初请记到那位会员（改成那位的手机号）`);
     if (row.bonusExpiresOn && row.bonusExpiresOn < today) {
       problems.push(`赠金到期日 ${row.bonusExpiresOn} 已过（今天是营业日 ${today}），过期的赠金请填 0 或更正到期日`);
     }

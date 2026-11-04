@@ -202,6 +202,10 @@ export const ERP_OP_TYPES = [
   'benefit_use',
   // 会员体系 v2 第三期（v0.7.25）：邀请体验、赠送会籍（占每月次数、QY-042 的次数，重复发起会被拒）
   'member_trial',
+  // 会员体系收尾（v0.7.26）：退储值（动的是钱）、停用 / 启用、合并会员（重复提交会被拒）
+  'member_refund',
+  'member_status',
+  'member_merge',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -227,6 +231,9 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   grade_adjust: '手动调整会员档阶',
   benefit_use: '登记权益使用',
   member_trial: '邀请体验 / 赠送会籍',
+  member_refund: '退储值',
+  member_status: '停用 / 启用会员',
+  member_merge: '合并会员',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */
@@ -243,7 +250,7 @@ export interface ErpRevenue {
   to: string;
   days: number;
   /** 净营业额 = 应收 − 优惠；结账客人、客单价、充值收款（与经营总览同一口径） */
-  kpis: { receivable: number; discount: number; coupon: number; memberDiscount: number; refund: number; net: number; guests: number; checkouts: number; perGuest: number; rechargePaid: number };
+  kpis: { receivable: number; discount: number; coupon: number; memberDiscount: number; refund: number; net: number; guests: number; checkouts: number; perGuest: number; rechargePaid: number; memberRefund: number };
   trend: { date: string; net: number; guests: number; rechargePaid: number }[];
   byMethod: { method: import('./checkout').CheckoutMethod; amount: number }[];
   departments: import('./reports').DepartmentRevenue[];

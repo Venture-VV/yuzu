@@ -21,8 +21,11 @@ import {
   BENEFIT_EVENTS,
   BENEFIT_PERIODS,
   BENEFIT_STATUS_LABELS,
+  benefitCompanionCount,
   benefitEligible,
   benefitQuantity,
+  isCompanionTarget,
+  MAX_COMPANIONS,
   DISCOUNT_TARGET_LABELS,
   DISCOUNT_TARGETS,
   discountDaysText,
@@ -92,6 +95,8 @@ interface BenefitDef {
   events: BenefitEvent[];
   festivalDates: string[];
   discountTarget: DiscountTarget | null;
+  companionCount: number | null;
+  companionCounts: TierQuantity[];
   weekdays: number[];
   monthDays: number[];
   content: string;
@@ -103,8 +108,8 @@ interface BenefitDef {
 
 const DEF_COLUMNS = (db: Db) => db`
   b.id, b.code, b.name, b.category, b.start_grade, b.start_tier, b.period, b.quantity, b.tier_quantities, b.template_id, b.events,
-  b.festival_dates::text[] AS festival_dates, b.discount_target, b.weekdays::int[] AS weekdays, b.month_days::int[] AS month_days,
-  b.content, b.conditions, b.status, b.version, b.sort_order`;
+  b.festival_dates::text[] AS festival_dates, b.discount_target, b.companion_count, b.companion_counts,
+  b.weekdays::int[] AS weekdays, b.month_days::int[] AS month_days, b.content, b.conditions, b.status, b.version, b.sort_order`;
 
 /** 已发布的券类、事件礼（自动发放用；不加锁，读已提交的） */
 async function publishedForGrants(db: Db): Promise<BenefitDef[]> {
@@ -440,14 +445,15 @@ export async function importCatalog(sql: Sql, staffId: number | null, ip?: strin
   return sql.begin(async (tx) => {
     let created = 0;
     for (const [i, e] of BENEFIT_CATALOG.entries()) {
-      const start = parseStart(e.start);
-      // 折扣类按会员文档预填的折扣（v0.7.25，M44；仍是草稿）
+      const start = parseStart(e.startDefault ?? e.start);
+      // 按默认做法预填的（仍是草稿）：折扣类的折扣（v0.7.25，M44）、浴票延迟的起点与分钟数（v0.7.26，M50）
       const rows = await tx`
-        INSERT INTO benefits (code, name, category, start_grade, start_tier, period, quantity, tier_quantities, discount_target, events, content,
-                              conditions, status, sort_order, created_by, updated_by)
+        INSERT INTO benefits (code, name, category, start_grade, start_tier, period, quantity, tier_quantities, discount_target,
+                              companion_count, companion_counts, events, content, conditions, status, sort_order, created_by, updated_by)
         VALUES (${e.code}, ${e.name}, ${e.category}, ${start?.grade ?? null}, ${start?.tier ?? null}, ${e.period}, ${e.quantity},
-                ${tx.json((e.discount?.tierQuantities ?? []) as unknown as Parameters<typeof tx.json>[0])}, ${e.discount?.target ?? null}, ${e.events}::text[], ${e.content}, ${e.conditions},
-                ${e.status}, ${(i + 1) * 10}, ${staffId}, ${staffId})
+                ${tx.json((e.tierQuantities ?? []) as unknown as Parameters<typeof tx.json>[0])}, ${e.discountTarget ?? null},
+                ${e.companionCount ?? null}, ${tx.json((e.companionCounts ?? []) as unknown as Parameters<typeof tx.json>[0])},
+                ${e.events}::text[], ${e.content}, ${e.conditions}, ${e.status}, ${(i + 1) * 10}, ${staffId}, ${staffId})
         ON CONFLICT (code) DO NOTHING RETURNING id`;
       created += rows.length;
     }
@@ -477,6 +483,12 @@ const BenefitInput = z.object({
   festivalDates: z.array(z.string().regex(ISO_DATE, '节日日期格式应为 YYYY-MM-DD')).max(MAX_FESTIVAL_DATES, `节日最多 ${MAX_FESTIVAL_DATES} 个`).default([]),
   // 折扣类（v0.7.25）：打哪些明细、每周几（1 = 周一）、每月几号；空 = 每天
   discountTarget: z.enum(DISCOUNT_TARGETS, '请选择打哪些明细').nullable().default(null),
+  // 同行优惠（v0.7.26，M80）：起点能带几位、各档阶表（1–9 位）
+  companionCount: z.number('同行几位要是整数').int('同行几位要是整数').min(1, '同行至少 1 位').max(MAX_COMPANIONS, `同行最多 ${MAX_COMPANIONS} 位`).nullable().default(null),
+  companionCounts: z
+    .array(z.object({ grade: gradeField, tier: tierField, quantity: z.number('同行几位要是整数').int().min(1, '同行至少 1 位').max(MAX_COMPANIONS, `同行最多 ${MAX_COMPANIONS} 位`) }))
+    .max(18, '各档阶同行几位最多 18 行')
+    .default([]),
   weekdays: z.array(z.number('星期不正确').int().min(1, '星期不正确').max(7, '星期不正确')).max(7).default([]),
   monthDays: z.array(z.number('日期不正确').int().min(1, '每月几号是 1–31').max(31, '每月几号是 1–31')).max(31).default([]),
   content: z.string().trim().max(500, '内容最多 500 字').default(''),
@@ -541,6 +553,19 @@ function normalize(input: BenefitInputData): Normalized {
     out.weekdays = [];
     out.monthDays = [];
   }
+  // 同行优惠（v0.7.26）：只有「同行的」明细才有同行几位；各档阶表与数量的各档阶表同样整理
+  if (out.discountTarget !== null && isCompanionTarget(out.discountTarget)) {
+    const crows = b.companionCounts.map((c) => ({ grade: asGrade(c.grade), tier: c.grade === 0 ? null : ((c.tier ?? 0) as Tier), quantity: c.quantity }));
+    const cranks = crows.map((c) => stateRank(c.grade, c.tier));
+    if (new Set(cranks).size !== cranks.length) throw issue('各档阶同行几位里有重复的档阶', 'companionCounts');
+    if (b.startGrade !== null && crows.some((c) => stateRank(c.grade, c.tier) <= stateRank(b.startGrade!, b.startTier))) {
+      throw issue('各档阶同行几位要高于配置起点（起点的填在「同行几位」里）', 'companionCounts');
+    }
+    out.companionCounts = crows.sort((x, y) => stateRank(x.grade, x.tier) - stateRank(y.grade, y.tier));
+  } else {
+    out.companionCount = null;
+    out.companionCounts = [];
+  }
   if (couponLike && b.quantity !== null && b.quantity > MAX_BENEFIT_COUPONS) throw issue(`券每期（每次）最多 ${MAX_BENEFIT_COUPONS} 张`, 'quantity');
   // 各档阶数量：每行一个状态（L0 不分阶），不重复，按从低到高排；起点以下的行没有意义
   const rows = out.tierQuantities.map((t) => ({ grade: asGrade(t.grade), tier: t.grade === 0 ? null : ((t.tier ?? 0) as Tier), quantity: t.quantity }));
@@ -561,7 +586,8 @@ async function publishProblems(db: Db, b: Normalized, today: string): Promise<st
   const problems: string[] = [];
   if (b.startGrade === null) problems.push('请先设配置起点');
   if (b.category === 'discount') {
-    if (b.discountTarget === null) problems.push('请选择打哪些明细（客房房费、门票、整张账单）');
+    if (b.discountTarget === null) problems.push('请选择打哪些明细（客房房费、门票、整张账单、同行的门票或整张账单）');
+    if (b.discountTarget !== null && isCompanionTarget(b.discountTarget) && b.companionCount === null) problems.push('请填写起点能带同行几位');
     if (b.quantity === null) problems.push('请填写起点的折扣（付几成，75 = 7.5 折）');
   }
   if (b.category === 'coupon' || b.category === 'event') {
@@ -623,6 +649,8 @@ function toBenefit(r: CatalogRow, summaries: Map<number, string>): Benefit {
     events: r.events,
     festivalDates: r.festivalDates,
     discountTarget: r.discountTarget,
+    companionCount: r.companionCount,
+    companionCounts: r.companionCounts,
     weekdays: r.weekdays,
     monthDays: r.monthDays,
     content: r.content,
@@ -700,7 +728,7 @@ async function lockBenefit(tx: Tx, id: number, expectedVersion: number): Promise
 
 const FIELDS = [
   'name', 'category', 'startGrade', 'startTier', 'period', 'quantity', 'tierQuantities', 'templateId', 'events', 'festivalDates',
-  'discountTarget', 'weekdays', 'monthDays', 'content', 'conditions',
+  'discountTarget', 'companionCount', 'companionCounts', 'weekdays', 'monthDays', 'content', 'conditions',
 ] as const;
 
 /** 改一项（带版本号，对不上拒绝）；已发布的改完还要能发布。已经发出的券、登记的使用不变 */
@@ -739,7 +767,8 @@ export async function updateBenefit(deps: Deps, id: number, raw: unknown, ctx: O
     await tx`
       UPDATE benefits SET name = ${b.name}, category = ${b.category}, start_grade = ${b.startGrade}, start_tier = ${b.startTier}, period = ${b.period},
              quantity = ${b.quantity}, tier_quantities = ${tx.json(b.tierQuantities)}, template_id = ${b.templateId}, events = ${b.events}::text[],
-             festival_dates = ${b.festivalDates}::date[], discount_target = ${b.discountTarget}, weekdays = ${b.weekdays}::smallint[],
+             festival_dates = ${b.festivalDates}::date[], discount_target = ${b.discountTarget}, companion_count = ${b.companionCount},
+             companion_counts = ${tx.json(b.companionCounts)}, weekdays = ${b.weekdays}::smallint[],
              month_days = ${b.monthDays}::smallint[], content = ${b.content}, conditions = ${b.conditions},
              version = version + 1, updated_by = ${ctx.actor.id}, updated_at = now()
       WHERE id = ${id}`;
@@ -865,7 +894,10 @@ export async function memberBenefits(db: Db, memberId: number, date: string): Pr
       events: b.events,
       discount:
         b.category === 'discount' && quantity !== null && b.discountTarget
-          ? { rate: quantity, text: `结账时自动 · ${rateText(quantity)} · ${DISCOUNT_TARGET_LABELS[b.discountTarget]} · ${discountDaysText(b.weekdays, b.monthDays)}` }
+          ? {
+              rate: quantity,
+              text: `结账时自动 · ${rateText(quantity)} · ${DISCOUNT_TARGET_LABELS[b.discountTarget]}${isCompanionTarget(b.discountTarget) ? `（带 ${benefitCompanionCount(b, st.grade, st.tier) ?? 0} 位）` : ''} · ${discountDaysText(b.weekdays, b.monthDays)}`,
+            }
           : null,
       extension: b.category === 'extension' && quantity !== null ? { minutes: quantity, text: `结账时自动 · 门票多 ${minutesText(quantity)}不跳档` } : null,
     });

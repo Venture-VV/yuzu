@@ -1,7 +1,7 @@
 // 看板的小部件：指标卡（含环比）、竖条（按日 / 按小时）、横条（构成）、时段选择。
 // 只用一个色相表示数量（松绿），文字用正文色；每根条都有悬停说明（title），数值在旁边写出来，不靠颜色区分。
 
-import type { ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { REPORT_PRESET_LABELS, REPORT_PRESETS, type ReportPreset } from '@shared/reports';
 import { shiftDate } from '@shared/labels';
 import { formatYuan } from '@shared/money';
@@ -30,9 +30,48 @@ export function Kpi({
         {icon}
         {label}
       </p>
-      <div className={cn('mt-1.5 text-[22px] leading-tight font-bold', tone === 'pine' ? 'text-pine' : tone === 'lake' ? 'text-lake' : 'text-ink')}>{children}</div>
+      <FitText className={cn('mt-1.5 leading-tight font-bold', tone === 'pine' ? 'text-pine' : tone === 'lake' ? 'text-lake' : 'text-ink')}>{children}</FitText>
       {delta && <Delta {...delta} />}
     </Card>
+  );
+}
+
+/** 从 max 起逐级缩小到放得下（每次 1px，最小 min）；只缩这一层的字号，里面自己写了字号的（如小字说明）不变 */
+function fit(el: HTMLElement, max: number, min: number) {
+  let size = max;
+  el.style.fontSize = `${size}px`;
+  while (size > min && el.scrollWidth > el.clientWidth + 0.5) {
+    size -= 1;
+    el.style.fontSize = `${size}px`;
+  }
+}
+
+/**
+ * 指标卡的数值：放不下时逐级缩小字号（手机两列的指标卡里放大金额，例如 ¥1,031,920.00 会超出卡片；main v0.7.25 测试报告），
+ * 放得下的照旧 22px。每次渲染后量一次；卡片变宽变窄时再量（只看宽度：字号变了高度跟着变，不能因此再量）
+ */
+export function FitText({ as = 'div', max = 22, min = 13, className, children }: { as?: 'div' | 'p'; max?: number; min?: number; className?: string; children: ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    if (ref.current) fit(ref.current, max, min);
+  });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fit(el, max, min);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [max, min]);
+  const Tag = as;
+  return (
+    <Tag ref={ref as never} className={className} style={{ fontSize: max }}>
+      {children}
+    </Tag>
   );
 }
 

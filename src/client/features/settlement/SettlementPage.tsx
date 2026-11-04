@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { businessBreakdown, CHECKOUT_METHOD_LABELS, COUPON_PLATFORM_LABELS } from '@shared/checkout';
 import { describeDate, PAYMENT_METHOD_LABELS } from '@shared/labels';
+import { formatYuan } from '@shared/money';
 import type { SettlementAnomaly, SettlementSummary } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
 import { qk, useSettlement } from '../../lib/queries';
@@ -194,6 +195,12 @@ function Summary({ s, dayLabel }: { s: SettlementSummary; dayLabel: string }) {
                 </div>
               ))
             )}
+            {!!s.recharge.online?.count && (
+              <p className="flex items-center justify-between border-t border-dashed border-line pt-2 text-[12.5px] text-ink-3" data-testid="settlement-recharge-online">
+                <span>其中线上（小程序）· {s.recharge.online.count} 笔 · 不进交班</span>
+                <Money cents={s.recharge.online.paid} className="font-semibold text-ink-2" />
+              </p>
+            )}
           </div>
         </Card>
 
@@ -249,6 +256,17 @@ function Summary({ s, dayLabel }: { s: SettlementSummary; dayLabel: string }) {
                 </p>
                 <Row label="期初本金（净额）" cents={s.opening.principal} className="text-pine" />
                 <Row label="期初赠金（净额）" cents={s.opening.bonus} className="text-yuzu-deep" />
+              </div>
+            )}
+            {s.memberRefund.count > 0 && (
+              <div data-testid="settlement-member-refund">
+                <div className="my-1 border-t border-dashed border-line" />
+                <p className="mb-1.5 text-[12px] text-ink-3">
+                  储值退回 {s.memberRefund.count} 张（按原收款方式退回，不是营业额）：
+                  {s.memberRefund.byMethod.map((m) => `${PAYMENT_METHOD_LABELS[m.method]} ${formatYuan(m.amount)}`).join('、')}
+                </p>
+                <Row label="退回本金" cents={-s.memberRefund.principal} className="text-clay" />
+                <Row label="扣回赠金" cents={-s.memberRefund.bonus} className="text-ink-3" />
               </div>
             )}
           </div>
@@ -408,6 +426,7 @@ const ANOMALY_META: Record<
   backfill: { label: ANOMALY_LABELS.backfill, tone: 'lake', icon: FilePenLine, iconClass: 'bg-lake-soft text-lake' },
   refund: { label: ANOMALY_LABELS.refund, tone: 'ember', icon: Undo2, iconClass: 'bg-ember-soft text-ember' },
   refund_void: { label: ANOMALY_LABELS.refund_void, tone: 'clay', icon: CircleSlash, iconClass: 'bg-clay-soft text-clay' },
+  member_refund: { label: ANOMALY_LABELS.member_refund, tone: 'clay', icon: CircleSlash, iconClass: 'bg-clay-soft text-clay' },
 };
 
 function AnomalyItem({ a }: { a: SettlementAnomaly }) {

@@ -16,7 +16,7 @@ import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { conflict, forbidden } from '../lib/errors';
-import { benefitUseOpRef, couponOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isDeviceOp, isFenced, trialOpRef } from '../lib/fences';
+import { benefitUseOpRef, couponOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isDeviceOp, isFenced, isMemberOp, memberOpRef, trialOpRef } from '../lib/fences';
 import { parse } from '../lib/validate';
 import { setTxTimeouts } from '../lib/tx';
 
@@ -55,6 +55,10 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   benefit_use: ['benefit.use'],
   // 邀请体验、赠送会籍（v0.7.25）：与登记权益使用同一个权限（M56）
   member_trial: ['benefit.use'],
+  // 会员体系收尾（v0.7.26）：退储值、停用 / 启用、合并会员
+  member_refund: ['member.refund'],
+  member_status: ['member.status'],
+  member_merge: ['member.merge'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -80,6 +84,9 @@ const READ: Record<ErpOpType, Permission[]> = {
   grade_adjust: ['member.adjust'],
   benefit_use: ['benefit.use'],
   member_trial: ['benefit.use'],
+  member_refund: ['member.refund'],
+  member_status: ['member.status'],
+  member_merge: ['member.merge'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {
@@ -121,6 +128,11 @@ export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise
   // 邀请体验、赠送会籍（v0.7.25）的编号记在临时身份上：refId 是那条临时身份
   if (type === 'member_trial') {
     const refId = await trialOpRef(db, key);
+    if (refId !== null) return { found: true, abandoned: false, refId };
+  }
+  // 会员体系收尾（v0.7.26）：退储值单、停用 / 启用记录（refId 是那位会员）、合并单
+  if (isMemberOp(type)) {
+    const refId = await memberOpRef(db, key, type);
     if (refId !== null) return { found: true, abandoned: false, refId };
   }
   return { found: false, abandoned: await isFenced(db, key, [type]) };
