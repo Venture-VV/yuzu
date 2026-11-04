@@ -147,7 +147,7 @@ describe('开单、结束、撤单', () => {
     expect(m.usageTypes).toEqual(['派对房', '宠物轰趴房', '娱乐室']);
     expect(m.usages).toEqual([expect.objectContaining({ id: u.id, spaceId: sid.X201, visitId: g.visitId, tagCode: g.tagCode, guests: 4 })]);
     // 只带手牌号，不带会员姓名、手机号
-    expect(Object.keys(m.usages[0]!).sort()).toEqual(['guests', 'id', 'note', 'openedAt', 'openedByName', 'spaceId', 'tagCode', 'usageNo', 'visitId']);
+    expect(Object.keys(m.usages[0]!).sort()).toEqual(['guests', 'id', 'note', 'openedAt', 'openedByName', 'pricing', 'spaceId', 'tagCode', 'usageNo', 'visitId']);
     expect(await where(g.visitId)).toMatchObject({ spaceCode: 'X201', lastSource: 'usage_open' });
 
     const g2 = await enter();
@@ -211,7 +211,8 @@ describe('使用人结账、撤销来访', () => {
     await freeUp('X201');
     const u = (await open({ spaceId: sid.X201, tagCode: g.tagCode })).body as UsageDetail;
     const preview = await pay(g.visitId);
-    expect(preview.usages).toEqual([{ usageId: u.id, usageNo: u.usageNo, tagCode: g.tagCode, spaceCode: 'X201', spaceName: '合成派对房' }]);
+    // v0.7.28 起带上计费（这里的业态没设计费：priced false、estimate 为空，结账时照旧自动结束）
+    expect(preview.usages).toEqual([{ usageId: u.id, usageNo: u.usageNo, tagCode: g.tagCode, spaceCode: 'X201', spaceName: '合成派对房', priced: false, minutes: expect.any(Number), estimate: null }]);
     const after = (await api(ctx.app, ctx.clerk, 'GET', `/api/usages/${u.id}`)).body as UsageDetail;
     expect(after).toMatchObject({ status: 'closed', closeKind: 'checkout', visitStatus: 'settled', closedByName: '测试店员' });
     expect(await stateOf('X201')).toBe('vacant');
@@ -255,7 +256,7 @@ describe('空间台账、业态规则', () => {
     expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/usage-rules', { businessTypes: ['派对房', 'SPA'] })).status).toBe(400);
     const r = await api(ctx.app, ctx.owner, 'PUT', '/api/admin/usage-rules', { businessTypes: ['派对房', '派对房', '娱乐室'] });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
-    expect(r.body).toEqual({ businessTypes: ['派对房', '娱乐室'] });
+    expect(r.body).toEqual({ businessTypes: ['派对房', '娱乐室'], pricing: {} });
     expect((await open({ spaceId: sid.X202, tagCode: g.tagCode })).body.error.code).toBe('USAGE_NOT_ALLOWED');
     expect(await stateOf('X202')).toBe('other');
     const catalog = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/rules')).body as { key: string; group: string; isDefault: boolean; pending: boolean; section: string; updatedBy: string | null }[];

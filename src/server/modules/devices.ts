@@ -5,6 +5,8 @@
 // · 心跳：每 2 秒查一次网口设备（连上发实时状态查询）；最近一次联系上超过 5 秒记离线；终端 5 秒没上报，它与它下面的设备记离线。
 // · 终端上报：开着页面的终端用登录身份每 2 秒替桥上报（锁顺序：终端一行 → 它下面的设备 id 升序），读卡、扫码事件按编号去重。
 // 状态变化、读卡、扫码记设备事件（只追加）；读到的卡号只在这里，不进会员与手牌。
+// v0.7.28 ⑥ 断网打印队列（硬件 v0.2）：业务单据遇到打印机离线、故障，或还没开始发就连不上时进「等打印机恢复」，
+// 心跳看到打印机恢复在线后按提交顺序改回排队、自动补打；等太久不再打；排队、等恢复的可以取消。测试页照旧离线直接失败。
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -15,12 +17,13 @@ import {
   DEVICE_ERROR_LABELS,
   DEVICE_EVENT_TYPES,
   DEVICE_EVENT_VALUE_MAX,
-  DEVICE_JOB_KINDS,
   DEVICE_KIND_CONNECTIONS,
   DEVICE_KINDS,
   DEVICE_QUOTE,
   DEVICE_STATUSES,
   isDeviceErrorCode,
+  isDocJobKind,
+  PRINT_WAIT_MAX_MS,
   NETWORK_CONNECTIONS,
   OFFLINE_AFTER_MS,
   plannedQuoteDevices,
@@ -40,10 +43,11 @@ import { isUniqueViolation, type Db, type Sql, type Tx } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps, OpContext } from '../lib/context';
-import { badRequest, conflict, notFound, unprocessable } from '../lib/errors';
+import { badRequest, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { assertNotFenced } from '../lib/fences';
 import { idParam, parse } from '../lib/validate';
 import { buildTestLabel, buildTestPage } from '../devices/escpos';
+import { finishSlip } from '../devices/slips';
 import { probe, sendToPrinter } from '../devices/netprint';
 import { erpOpAbandoned } from './erp-ops';
 import { loadSettings } from './settings';
@@ -105,19 +109,22 @@ export async function deviceOverview(db: Db): Promise<DeviceOverview> {
 
 const jobColumns = (db: Db) => db`
   j.id, j.device_id, d.code AS device_code, d.name AS device_name, j.kind, j.status, j.attempts, j.error_code, j.error_message,
-  s.display_name AS created_by_name, j.created_at, j.finished_at`;
+  j.doc_label, j.first_waited_at, j.wait_code, j.created_by AS created_by_id, s.display_name AS created_by_name, c.display_name AS canceled_by_name,
+  j.created_at, j.finished_at`;
+const jobFrom = (db: Db) => db`device_jobs j JOIN devices d ON d.id = j.device_id JOIN staff s ON s.id = j.created_by LEFT JOIN staff c ON c.id = j.canceled_by`;
 
 export async function getJob(db: Db, id: number): Promise<DeviceJob> {
-  const [row] = await db<DeviceJob[]>`
-    SELECT ${jobColumns(db)} FROM device_jobs j JOIN devices d ON d.id = j.device_id JOIN staff s ON s.id = j.created_by WHERE j.id = ${id}`;
+  const [row] = await db<DeviceJob[]>`SELECT ${jobColumns(db)} FROM ${jobFrom(db)} WHERE j.id = ${id}`;
   if (!row) throw notFound('打印任务不存在');
   return row;
 }
 
-export async function listJobs(db: Db, f: { deviceId?: number; limit?: number }): Promise<DeviceJob[]> {
+export async function listJobs(db: Db, f: { deviceId?: number; limit?: number; open?: boolean; createdBy?: number }): Promise<DeviceJob[]> {
   return db<DeviceJob[]>`
-    SELECT ${jobColumns(db)} FROM device_jobs j JOIN devices d ON d.id = j.device_id JOIN staff s ON s.id = j.created_by
+    SELECT ${jobColumns(db)} FROM ${jobFrom(db)}
     WHERE ${f.deviceId ? db`j.device_id = ${f.deviceId}` : db`true`}
+      AND ${f.open ? db`j.status IN ('queued', 'sending', 'waiting')` : db`true`}
+      AND ${f.createdBy ? db`j.created_by = ${f.createdBy}` : db`true`}
     ORDER BY j.id DESC LIMIT ${f.limit ?? 50}`;
 }
 
@@ -275,10 +282,11 @@ export async function updateDevice(deps: Deps, id: number, raw: unknown, ctx: Op
                status_code = CASE WHEN ${moved} THEN NULL ELSE status_code END,
                status_changed_at = CASE WHEN ${moved} THEN now() ELSE status_changed_at END
         WHERE id = ${id}`;
-      // 排着还没发的打印任务是按旧设置提交的：记失败、不按新设置改投（已经在发的照常发完）（Codex 预检 3efa3fe）
+      // 排着还没发的打印任务是按旧设置提交的：记失败、不按新设置改投（已经在发的照常发完）（Codex 预检 3efa3fe）；
+      // 等打印机恢复的业务单据（v0.7.28）一样
       await tx`
         UPDATE device_jobs SET status = 'failed', error_code = 'DEVICE_CHANGED', error_message = '设备设置改了，这张排着还没发，没有按新设置发送，请重新提交', finished_at = now()
-        WHERE device_id = ${id} AND status = 'queued'`;
+        WHERE device_id = ${id} AND status IN ('queued', 'waiting')`;
       const { expectedVersion: _v, ...after } = input;
       await writeAudit(tx, {
         staffId: ctx.actor.id,
@@ -305,11 +313,11 @@ export async function setDeviceEnabled(deps: Deps, id: number, raw: unknown, ctx
       UPDATE devices SET enabled = ${input.enabled}, version = version + 1, updated_at = now(),
              status = 'unknown', status_code = NULL, status_changed_at = now()
       WHERE id = ${id}`;
-    // 停用：排着还没发的打印任务记失败、不再发（已经在发的照常发完）（Codex 预检 3efa3fe）
+    // 停用：排着还没发的打印任务记失败、不再发（已经在发的照常发完）（Codex 预检 3efa3fe）；等打印机恢复的（v0.7.28）一样
     if (!input.enabled) {
       await tx`
         UPDATE device_jobs SET status = 'failed', error_code = 'DEVICE_DISABLED', error_message = '设备已停用，这张排着还没发，没有发送', finished_at = now()
-        WHERE device_id = ${id} AND status = 'queued'`;
+        WHERE device_id = ${id} AND status IN ('queued', 'waiting')`;
     }
     await statusEvent(tx, id, { enabled: input.enabled }, ctx.actor.id);
     await writeAudit(tx, { staffId: ctx.actor.id, action: 'device_enabled', targetType: 'device', targetId: id, detail: { code: cur.code, enabled: input.enabled }, ip: ctx.ip });
@@ -511,7 +519,7 @@ export async function reportBridge(deps: Deps, raw: unknown, ctx: OpContext): Pr
 
 // ───────────────────────── 打印任务 ─────────────────────────
 
-const JobInput = z.object({ clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'), kind: z.enum(DEVICE_JOB_KINDS, '请选择打印内容') });
+const JobInput = z.object({ clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'), kind: z.enum(['test_page', 'label_test'], '请选择打印内容') });
 
 const JOB_FOR_KIND: Partial<Record<DeviceKind, DeviceJobKind>> = { printer: 'test_page', label_printer: 'label_test' };
 
@@ -539,6 +547,17 @@ const formatTime = (at: Date, timeZone: string) =>
     .format(at)
     .replace(/\//g, '-');
 
+/** 还没开始发就连不上（可以等打印机恢复再发）的错误码 */
+const NOT_STARTED_CODES: readonly DeviceErrorCode[] = ['DEVICE_TIMEOUT', 'DEVICE_REFUSED', 'DEVICE_UNREACHABLE'];
+
+/** 业务单据进「等打印机恢复」（只改还在排队的那一张；第一次开始等的时间不改） */
+async function toWaiting(db: Db, jobId: number, code: DeviceErrorCode, attempts = 0) {
+  await db`
+    UPDATE device_jobs SET status = 'waiting', wait_code = ${code}, attempts = attempts + ${attempts}, started_at = NULL,
+           first_waited_at = COALESCE(first_waited_at, now())
+    WHERE id = ${jobId} AND status IN ('queued', 'sending')`;
+}
+
 async function runJob(deps: Deps, jobId: number) {
   const { sql } = deps;
   const [ref] = await sql<{ deviceId: number }[]>`SELECT device_id FROM device_jobs WHERE id = ${jobId} AND status = 'queued'`;
@@ -551,11 +570,18 @@ async function runJob(deps: Deps, jobId: number) {
     if (!device.enabled) {
       await tx`
         UPDATE device_jobs SET status = 'failed', error_code = 'DEVICE_DISABLED', error_message = '设备已停用，这张排着还没发，没有发送', finished_at = now()
-        WHERE id = ${jobId} AND status = 'queued'`;
+        WHERE id = ${jobId} AND status IN ('queued', 'waiting')`;
       return null;
     }
-    const [job] = await tx<{ id: number; kind: DeviceJobKind }[]>`
-      UPDATE device_jobs SET status = 'sending', started_at = now() WHERE id = ${jobId} AND status = 'queued' RETURNING id, kind`;
+    const [cur] = await tx<{ kind: DeviceJobKind }[]>`SELECT kind FROM device_jobs WHERE id = ${jobId} AND status = 'queued' FOR UPDATE`;
+    if (!cur) return null;
+    // 业务单据（v0.7.28）：打印机离线、故障（缺纸、开盖、报错）时不发，等它恢复（心跳看到恢复在线后改回排队）
+    if (isDocJobKind(cur.kind) && (device.status === 'offline' || device.status === 'error')) {
+      await toWaiting(tx, jobId, device.statusCode ?? (device.status === 'offline' ? 'DEVICE_OFFLINE' : 'DEVICE_FAULT'));
+      return null;
+    }
+    const [job] = await tx<{ id: number; kind: DeviceJobKind; payload: Buffer | null; firstWaitedAt: Date | null }[]>`
+      UPDATE device_jobs SET status = 'sending', started_at = now() WHERE id = ${jobId} AND status = 'queued' RETURNING id, kind, payload, first_waited_at`;
     return job ? { job, device } : null;
   });
   if (!claimed) return;
@@ -565,7 +591,7 @@ async function runJob(deps: Deps, jobId: number) {
   busy.add(device.id);
   await probing.get(device.id)?.catch(() => {});
   try {
-    await sendJob(deps, jobId, job.kind, device);
+    await sendJob(deps, jobId, job, device);
   } catch (error) {
     // 拼指令、读设置出错（没开始发）：记失败，不留在「发送中」
     await sql`
@@ -577,9 +603,13 @@ async function runJob(deps: Deps, jobId: number) {
   }
 }
 
-async function sendJob(deps: Deps, jobId: number, kind: DeviceJobKind, device: Device) {
+async function sendJob(deps: Deps, jobId: number, job: { kind: DeviceJobKind; payload: Buffer | null; firstWaitedAt: Date | null }, device: Device) {
   const { sql, config } = deps;
-  {
+  let data: Buffer;
+  if (job.payload) {
+    // 业务单据：提交时排好的内容，末尾补上走纸、切纸（等过打印机恢复的注明补打）
+    data = finishSlip(Buffer.from(job.payload), { waitedSince: job.firstWaitedAt, now: new Date(), timeZone: config.timezone });
+  } else {
     const settings = await loadSettings(sql);
     const info = {
       storeName: settings.storeName,
@@ -591,27 +621,137 @@ async function sendJob(deps: Deps, jobId: number, kind: DeviceJobKind, device: D
       printedAt: formatTime(new Date(), config.timezone),
       jobId,
     };
-    const data = kind === 'label_test' ? buildTestLabel({ ...info, ...device.options }) : buildTestPage(info);
-    const res =
-      device.host && device.port
-        ? await sendToPrinter({ host: device.host, port: device.port }, data)
-        : { ok: false, attempts: 0, errorCode: 'DEVICE_NOT_CONFIGURED' as DeviceErrorCode, errorMessage: DEVICE_ERROR_LABELS.DEVICE_NOT_CONFIGURED };
-    await sql`
-      UPDATE device_jobs SET status = ${res.ok ? 'done' : 'failed'}, attempts = ${res.attempts}, error_code = ${res.ok ? null : (res.errorCode ?? 'DEVICE_TIMEOUT')},
-             error_message = ${res.ok ? null : (res.errorMessage ?? '').slice(0, 300) || DEVICE_ERROR_LABELS[res.errorCode ?? 'DEVICE_TIMEOUT']}, finished_at = now()
-      WHERE id = ${jobId}`;
-    // 打成了就是联系上了（打印时心跳跳过这台）；发送期间设备被改了的不记（按领取时的设置）
-    if (res.ok) await recordStatus(sql, device.id, 'online', null, { seen: true, expectVersion: device.version });
+    data = job.kind === 'label_test' ? buildTestLabel({ ...info, ...device.options }) : buildTestPage(info);
   }
+  const res =
+    device.host && device.port
+      ? await sendToPrinter({ host: device.host, port: device.port }, data)
+      : { ok: false, attempts: 0, errorCode: 'DEVICE_NOT_CONFIGURED' as DeviceErrorCode, errorMessage: DEVICE_ERROR_LABELS.DEVICE_NOT_CONFIGURED };
+  // 业务单据还没开始发就连不上：不算失败，等打印机恢复（已经开始发、中途断了的照旧记中断、不自动重打）
+  if (!res.ok && job.payload && res.errorCode && NOT_STARTED_CODES.includes(res.errorCode)) {
+    await toWaiting(sql, jobId, res.errorCode, res.attempts);
+    return;
+  }
+  await sql`
+    UPDATE device_jobs SET status = ${res.ok ? 'done' : 'failed'}, attempts = attempts + ${res.attempts}, error_code = ${res.ok ? null : (res.errorCode ?? 'DEVICE_TIMEOUT')},
+           error_message = ${res.ok ? null : (res.errorMessage ?? '').slice(0, 300) || DEVICE_ERROR_LABELS[res.errorCode ?? 'DEVICE_TIMEOUT']}, finished_at = now()
+    WHERE id = ${jobId} AND status = 'sending'`;
+  // 打成了就是联系上了（打印时心跳跳过这台）；发送期间设备被改了的不记（按领取时的设置）
+  if (res.ok) await recordStatus(sql, device.id, 'online', null, { seen: true, expectVersion: device.version });
 }
 
-/** 应用启动时：重启前还在发送的记失败（不自动重发，可能已打出一半），还在排队的接着打 */
+/** 应用启动时：重启前还在发送的记失败（不自动重发，可能已打出一半），还在排队的接着打；等打印机恢复的接着等 */
 export async function recoverJobs(deps: Deps, log?: (msg: string, err: unknown) => void) {
   await deps.sql`
     UPDATE device_jobs SET status = 'failed', error_code = 'DEVICE_INTERRUPTED', error_message = '应用重启时这张还在发送，没有自动重发', finished_at = now()
     WHERE status = 'sending'`;
   const queued = await deps.sql<{ id: number; deviceId: number }[]>`SELECT id, device_id FROM device_jobs WHERE status = 'queued' ORDER BY id`;
   for (const j of queued) enqueueJob(deps, j.id, j.deviceId, log);
+}
+
+/**
+ * 断网打印队列（v0.7.28）：每轮心跳之后调用。
+ *   · 等了超过 PRINT_WAIT_MAX_MS（默认 30 分钟）的不再打，记失败（DEVICE_WAIT_EXPIRED）；
+ *   · 恢复在线的打印机：先锁这台一行（共享锁，与修改、停用串行），把它等恢复的单子按提交顺序改回排队、交给按台的队列补打。
+ */
+export async function resumeWaitingJobs(deps: Deps, opts: { now?: Date; log?: (msg: string, err: unknown) => void } = {}): Promise<{ resumed: number; expired: number }> {
+  const { sql } = deps;
+  const now = opts.now ?? new Date();
+  const expired = await sql`
+    UPDATE device_jobs SET status = 'failed', error_code = 'DEVICE_WAIT_EXPIRED', error_message = ${`等打印机恢复超过 ${PRINT_WAIT_MAX_MS / 60_000} 分钟，没有再打`}, finished_at = now()
+    WHERE status = 'waiting' AND first_waited_at < ${new Date(now.getTime() - PRINT_WAIT_MAX_MS)}
+    RETURNING id`;
+  const ready = await sql<{ deviceId: number }[]>`
+    SELECT DISTINCT j.device_id FROM device_jobs j JOIN devices d ON d.id = j.device_id
+    WHERE j.status = 'waiting' AND d.enabled AND d.status = 'online'`;
+  let resumed = 0;
+  for (const { deviceId } of ready) {
+    const ids = await sql.begin(async (tx) => {
+      const [d] = await tx<{ enabled: boolean; status: DeviceStatus }[]>`SELECT enabled, status FROM devices WHERE id = ${deviceId} FOR SHARE`;
+      if (!d?.enabled || d.status !== 'online') return [];
+      const rows = await tx<{ id: number }[]>`UPDATE device_jobs SET status = 'queued' WHERE device_id = ${deviceId} AND status = 'waiting' RETURNING id`;
+      return rows.map((r) => Number(r.id)).sort((a, b) => a - b);
+    });
+    for (const id of ids) enqueueJob(deps, id, deviceId, opts.log);
+    resumed += ids.length;
+  }
+  return { resumed, expired: expired.length };
+}
+
+/** 取消排队、等打印机恢复的打印任务（提交人或维护设备的人）；已经在发、已经结束的不能取消。只锁任务一行 */
+export async function cancelJob(deps: Deps, id: number, ctx: OpContext, canManage: boolean): Promise<DeviceJob> {
+  await deps.sql.begin(async (tx) => {
+    const [j] = await tx<{ status: string; createdBy: number; deviceId: number; docLabel: string | null; kind: DeviceJobKind }[]>`
+      SELECT status, created_by, device_id, doc_label, kind FROM device_jobs WHERE id = ${id} FOR UPDATE`;
+    if (!j) throw notFound('打印任务不存在');
+    if (Number(j.createdBy) !== ctx.actor.id && !canManage) throw forbidden('只能取消自己提交的打印任务');
+    if (j.status !== 'queued' && j.status !== 'waiting') {
+      throw conflict('JOB_NOT_CANCELABLE', j.status === 'sending' ? '这张正在发送，不能取消' : '这张已经结束了，不用取消');
+    }
+    await tx`UPDATE device_jobs SET status = 'canceled', canceled_by = ${ctx.actor.id}, finished_at = now() WHERE id = ${id}`;
+    await writeAudit(tx, { staffId: ctx.actor.id, action: 'device_job_canceled', targetType: 'device', targetId: Number(j.deviceId), detail: { jobId: id, kind: j.kind, doc: j.docLabel, from: j.status }, ip: ctx.ip });
+  });
+  return getJob(deps.sql, id);
+}
+
+/**
+ * 建业务单据的打印任务（v0.7.28，调用方已核对能看这张单据、排好了内容）：
+ * 操作编号的咨询锁（与「确认作废」串行）→ 打印机一行；打印机离线、故障时也建，进「等打印机恢复」（不像测试页那样直接失败）。
+ */
+export async function createDocJob(
+  deps: Deps,
+  input: { clientKey: string; deviceId: number; kind: DeviceJobKind; docRef: string; docLabel: string; payload: Buffer },
+  ctx: OpContext,
+  log?: (msg: string, err: unknown) => void,
+): Promise<DeviceJob> {
+  const replay = async (db: Db) => {
+    const [p] = await db<{ id: number; deviceId: number; kind: string; docRef: string | null }[]>`SELECT id, device_id, kind, doc_ref FROM device_jobs WHERE client_key = ${input.clientKey}`;
+    if (!p) return null;
+    if (Number(p.deviceId) !== input.deviceId || p.kind !== input.kind || p.docRef !== input.docRef) {
+      throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一个打印任务，请刷新页面后重试');
+    }
+    return Number(p.id);
+  };
+  const prior = await replay(deps.sql);
+  if (prior !== null) return getJob(deps.sql, prior);
+  let created: { id: number; queued: boolean };
+  try {
+    created = await deps.sql.begin(async (tx) => {
+      await assertNotFenced(tx, input.clientKey, 'doc_print', erpOpAbandoned);
+      const again = await replay(tx);
+      if (again !== null) return { id: again, queued: false };
+      const d = await lockDevice(tx, input.deviceId);
+      if (!d.enabled) throw unprocessable('DEVICE_DISABLED', DEVICE_ERROR_LABELS.DEVICE_DISABLED);
+      if (d.kind !== 'printer') throw unprocessable('DEVICE_UNSUPPORTED', '单据只能打到小票打印机');
+      if (!NETWORK_CONNECTIONS.includes(d.connection as never) || !d.host || !d.port) throw unprocessable('DEVICE_NOT_CONFIGURED', DEVICE_ERROR_LABELS.DEVICE_NOT_CONFIGURED);
+      const [cur] = await tx<{ status: DeviceStatus; statusCode: DeviceErrorCode | null }[]>`SELECT status, status_code FROM devices WHERE id = ${input.deviceId}`;
+      // 打印机离线、故障：直接进「等打印机恢复」，恢复后自动补打
+      const waiting = cur!.status === 'offline' || cur!.status === 'error';
+      const waitCode: DeviceErrorCode | null = waiting ? (cur!.statusCode ?? (cur!.status === 'offline' ? 'DEVICE_OFFLINE' : 'DEVICE_FAULT')) : null;
+      const [row] = await tx<{ id: number }[]>`
+        INSERT INTO device_jobs (device_id, kind, status, client_key, created_by, doc_ref, doc_label, payload, first_waited_at, wait_code)
+        VALUES (${input.deviceId}, ${input.kind}, ${waiting ? 'waiting' : 'queued'}, ${input.clientKey}, ${ctx.actor.id}, ${input.docRef}, ${input.docLabel}, ${input.payload},
+                ${waiting ? tx`now()` : null}, ${waitCode})
+        RETURNING id`;
+      await writeAudit(tx, {
+        staffId: ctx.actor.id,
+        action: 'device_job_created',
+        targetType: 'device',
+        targetId: input.deviceId,
+        detail: { code: d.code, kind: input.kind, doc: input.docLabel, jobId: row!.id, waiting },
+        ip: ctx.ip,
+      });
+      return { id: Number(row!.id), queued: !waiting };
+    });
+  } catch (error) {
+    if (isUniqueViolation(error, 'device_jobs_client_key_key')) {
+      const again = await replay(deps.sql);
+      if (again !== null) return getJob(deps.sql, again);
+    }
+    throw error;
+  }
+  if (created.queued) enqueueJob(deps, created.id, input.deviceId, log);
+  return getJob(deps.sql, created.id);
 }
 
 export async function createJob(deps: Deps, deviceId: number, raw: unknown, ctx: OpContext, log?: (msg: string, err: unknown) => void): Promise<DeviceJob> {

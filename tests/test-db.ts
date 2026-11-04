@@ -43,6 +43,22 @@ async function withAdmin<T>(fn: (admin: postgres.Sql) => Promise<T>): Promise<T>
   }
 }
 
+/**
+ * 删库（WITH FORCE 断开别的连接）。上一轮刚写满的库可能正被自动清理（autovacuum）处理：那是超级用户的进程，
+ * 普通账号断不开，会报 permission denied to terminate process——稍等重试，清理完就能删
+ */
+export async function dropDatabase(admin: postgres.Sql, name: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await admin.unsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
+      return;
+    } catch (e) {
+      if (attempt >= 20 || !/permission denied to terminate process/.test(String((e as Error).message))) throw e;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+}
+
 /** 并行时：把这个进程的库换成模板库的一份新复制（已迁移到最新）；返回是否换了（不并行时返回 false，由调用方自己清库迁移） */
 export async function recreateFromTemplate(): Promise<boolean> {
   if (!parallelDbs()) return false;
@@ -50,7 +66,7 @@ export async function recreateFromTemplate(): Promise<boolean> {
   const base = dbNameOf(BASE_TEST_DB);
   const name = dbNameOf(testDbUrl());
   await withAdmin(async (admin) => {
-    await admin.unsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
+    await dropDatabase(admin, name);
     await admin.unsafe(`CREATE DATABASE "${name}" TEMPLATE "${templateDbName(base)}"`);
   });
   return true;

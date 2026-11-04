@@ -34,6 +34,7 @@ import { conflict, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse, positiveCents } from '../lib/validate';
 import { assertCanFix, assertOpen, businessDate, loadFrontdeskRules, lockVisits, nextDocNo, setTxTimeouts } from './frontdesk/common';
 import { loadTechnicianRules, loadTechnicians } from './technicians';
+import { assertTechnicianNotBooked } from './booking-guard';
 import { locateSession, locateSessionEnd, locateSignIn, locateSignOut } from './locations';
 import { ctxOf } from '../lib/context';
 
@@ -140,6 +141,12 @@ export async function lockServiceSpace(tx: Tx, spaceId: number): Promise<Service
   return { id: sp.id, code: sp.code, displayName: sp.displayName };
 }
 
+/** 这位客人是会员时的会员（核对预约冲突时，这位会员自己约的不算） */
+async function visitMember(tx: Tx, visitId: number): Promise<number | null> {
+  const [v] = await tx<{ memberId: number | null }[]>`SELECT member_id FROM visits WHERE id = ${visitId}`;
+  return v?.memberId === null || v?.memberId === undefined ? null : Number(v.memberId);
+}
+
 /**
  * 在挂账的事务里为每条技师明细建钟单（或加到正在上钟的钟单），返回各条明细的钟单编号。
  * 调用前已锁好来访与账单；这里再拿技师队列锁。
@@ -171,6 +178,19 @@ export async function attachSessions(
       if (s.visitId !== args.visitId || s.technicianId !== l.technicianId || s.itemId !== l.itemId) {
         throw conflict('SESSION_MISMATCH', '加钟的技师、项目或客人与钟单不一致，请刷新后重试');
       }
+      // 加的这段时间不能和这位技师的预约重叠（测试会话 ded1958 的 P2）
+      const [cur] = await tx<{ endsAt: Date }[]>`
+        SELECT coalesce(started_at, ${at}) + make_interval(mins => minutes) AS ends_at FROM technician_sessions WHERE id = ${s.id}`;
+      const from = new Date(cur!.endsAt).getTime();
+      const t = (await loadTechnicians(tx, [s.technicianId])).get(s.technicianId);
+      await assertTechnicianNotBooked(tx, {
+        technicianId: s.technicianId,
+        techLabel: t ? `${t.techNo} 号 ${t.name}` : '这位技师',
+        from,
+        to: from + perClock(l.itemId) * l.quantity * 60_000,
+        memberId: await visitMember(tx, args.visitId),
+        timeZone: deps.config.timezone,
+      });
       await tx`UPDATE technician_sessions SET clocks = clocks + ${l.quantity}, minutes = minutes + ${perClock(l.itemId) * l.quantity} WHERE id = ${s.id}`;
       await logEvent(tx, { technicianId: s.technicianId, sessionId: s.id, kind: 'extend', detail: { clocks: l.quantity, callType: l.callType }, staffId: actor.id, businessDate: today, at });
       ids.push(s.id);
@@ -254,6 +274,21 @@ export async function attachSessions(
         }
       }
     }
+
+    // 与技师预约不重叠（测试会话 ded1958 的 P2）：按这一钟计划的时段（马上上钟从此刻起，否则从这位技师手上的钟做完起）
+    // 核对这位技师还占着时段的预约；这位客人自己约的不拦
+    const [planned] = await tx<{ freeAt: Date | null }[]>`
+      SELECT max(coalesce(started_at, ${at}) + make_interval(mins => minutes)) AS free_at FROM technician_sessions
+      WHERE technician_id = ${t.id} AND status IN ('waiting', 'serving')`;
+    const from = start ? at.getTime() : Math.max(at.getTime(), planned?.freeAt ? new Date(planned.freeAt).getTime() : 0);
+    await assertTechnicianNotBooked(tx, {
+      technicianId: t.id,
+      techLabel: `${t.techNo} 号 ${t.name}`,
+      from,
+      to: from + minutes * 60_000,
+      memberId: await visitMember(tx, args.visitId),
+      timeZone: deps.config.timezone,
+    });
 
     // 客人已离店、还记着在钟上的旧钟单先自动下钟，再上这一钟
     if (start) await closeStale(tx, deps, t.id, actor, at);

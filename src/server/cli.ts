@@ -20,6 +20,12 @@
 //                                         导入旧系统（EBC）会员余额作为期初（真实业务数据，默认只预览，加 --apply 才写入）；
 //                                         本金、赠金分开记「期初导入」流水，不计入充值实收；同一位会员只能有一笔有效的期初；
 //                                         给了控制总数时核对「导入 + 排除清单 = 控制总数」，不一致不导入（正式环境必须给）
+//   import-count-cards <旧次卡.csv> --operator <店主账号> [--batch 批次备注] [--apply]
+//                                         旧次卡期初（v0.7.28）：每行一位会员的一张卡（手机号或会员号、卡名、能抵的项目与票种、总次数、剩余次数、
+//                                         原售价、到期日），只记次数、不是收款；默认只预览，有一行不对整批不写，加 --apply 才写入
+//   import-member-history <流水.csv> --operator <店主账号> [--source EBC] [--note 备注] [--apply]
+//                                         旧 EBC 逐笔流水只读导入（v0.7.28）：按旧卡号或手机号认会员，认不出的行不导入；默认只预览，
+//                                         加 --apply 才写进只读表（不进正式账），会员详情「旧系统流水」里看；同一份文件只能有一批有效导入
 //   import-legacy <文件.xlsx> --operator <店主账号> [--apply] [--replace 原因]
 //                                         8–10 月旧账只读对照（v0.7.10）：认出是四份原始 Excel 中的哪一份，默认只预览（行数与核验结果），
 //                                         加 --apply 才写进只读表（不进正式账）；这份表已导入过时要 --replace 写原因（旧的作废）
@@ -57,6 +63,7 @@
 //                                         模拟终端上的设备服务（桥，不连数据库）：输入 card <卡号>、scan <条码>、nfc <卡号>、unplug <键>、plug <键>、
 //                                         fail、quit；--auto 每隔几秒自动发一次读卡与扫码
 
+import { importOpeningCountCards, OPENING_COUNT_CARD_HEADER, parseOpeningCountCardsCsv } from './modules/count-cards';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -79,7 +86,7 @@ import { createSql, type Sql } from './db';
 import { writeAudit } from './lib/audit';
 import { migrate } from './migrate';
 import { ensureMembershipLive, runMembershipDaily } from './modules/membership';
-import { catalogImportPreview, importCatalog, runBenefitsDaily } from './modules/benefits';
+import { catalogImportPreview, importCatalog, runBenefitsDaily, runVisitChallenges } from './modules/benefits';
 import { seedDemo, DEMO_PASSWORD } from './seed';
 import { seedInventoryDemo } from './seed-inventory';
 import { seedFrontdeskDemo } from './seed-frontdesk';
@@ -93,6 +100,8 @@ import { TANGQI_PRICE_LIST_CSV } from './demo/price-list-tangqi-2026-10-27';
 import { importPriceList } from './modules/catalog';
 import { importHandTags } from './modules/frontdesk/tags';
 import { applyOpeningImport, previewOpeningImport } from './modules/opening';
+import { importMemberHistory, previewMemberHistory } from './modules/member-history';
+import { describeHistoryAmount, MEMBER_HISTORY_KIND_LABELS } from '@shared/member-history';
 import { loadSettings } from './modules/settings';
 import { createStaff } from './modules/staff';
 import { assertBackupTarget, backupDirFromEnv, backupLoop, backupPolicyFromEnv, createBackup, verifyBackup } from './ops/backup';
@@ -533,6 +542,40 @@ async function main() {
         console.log('请运行 check 核对：期初 + 本日变动 = 期末。');
         break;
       }
+      case 'import-member-history': {
+        // 旧 EBC 逐笔流水只读导入（v0.7.28 ⑩）：默认只预览，加 --apply 才写入（真实业务数据，门店环境须店主同意）
+        const file = args.find((a, i) => !a.startsWith('--') && !args[i - 1]?.startsWith('--'));
+        const username = flag(args, 'operator')?.toLowerCase();
+        if (!file || !username) throw new Error('用法：import-member-history <流水.csv> --operator <店主账号> [--source EBC] [--note 备注] [--apply]');
+        await prepareDb(sql, config);
+        const [actor] = await sql<{ id: number; username: string; displayName: string; role: string; active: boolean }[]>`
+          SELECT id, username, display_name, role, active FROM staff WHERE username = ${username}`;
+        if (!actor || !actor.active) throw new Error(`账号「${username}」不存在或已停用`);
+        if (actor.role !== 'owner') throw new Error('旧系统流水导入只能由店主账号经办');
+        const body = { source: flag(args, 'source') ?? 'EBC', fileName: basename(file), note: flag(args, 'note') ?? '', csv: await readImportFile(file) };
+        const deps = { sql, config };
+        const p = await previewMemberHistory(deps, body);
+        console.log(`文件共 ${p.totalRows} 行：认出会员 ${p.matchedRows} 行（${p.memberCount} 位会员；按旧卡号 ${p.byLegacyNo}、按手机号 ${p.byPhone}）· 认不出会员 ${p.unmatched.count} 行（不导入）`);
+        if (p.firstAt) console.log(`时间从 ${p.firstAt.slice(0, 10)} 到 ${p.lastAt!.slice(0, 10)}；${p.byKind.map((k) => `${MEMBER_HISTORY_KIND_LABELS[k.kind]} ${k.count} 笔 ${describeHistoryAmount(k.amount)}`).join('，')}`);
+        for (const u of p.unmatched.lines.slice(0, 20)) console.log(`· 第 ${u.line} 行认不出会员（手机号 ${u.phone || '—'}，旧卡号 ${u.legacyNo || '—'}）`);
+        if (p.duplicateOf) console.log(`✗ 这份文件已经导入过（批次 ${p.duplicateOf}），要重新导入请先在页面上作废那一批`);
+        if (p.errors.length) {
+          for (const e of p.errors.slice(0, 30)) console.log(`✗ 第 ${e.line} 行：${e.message}`);
+          throw new Error(`有 ${p.errors.length} 行格式不对，未导入`);
+        }
+        if (p.duplicateOf) throw new Error('同一份文件不能重复导入');
+        if (!args.includes('--apply')) {
+          console.log('以上为预览，没有写入。确认无误后加 --apply 执行导入（只读，不进正式账）。');
+          break;
+        }
+        const report = await importMemberHistory(
+          deps,
+          { ...body, clientKey: randomUUID() },
+          { actor: { id: actor.id, username: actor.username, displayName: actor.displayName, role: 'owner', duties: [], mustChangePassword: false } },
+        );
+        console.log(`✓ 已导入，批次 ${report.importNo}：${report.matchedRows} 行、${report.memberCount} 位会员；会员详情「旧系统流水」里看。`);
+        break;
+      }
       case 'import-legacy': {
         const file = args.find((a, i) => !a.startsWith('--') && !['--operator', '--replace'].includes(args[i - 1] ?? ''));
         const username = flag(args, 'operator')?.toLowerCase();
@@ -718,7 +761,26 @@ async function main() {
             ? `会员权益自动发放（营业日 ${benefits.businessDate}）：${benefits.processed} 位会员、${benefits.coupons} 张券${benefits.error ? `；出错：${benefits.error}` : ''}`
             : '会员权益今天已经发过，权益清单之后没有改过',
         );
+        // 会员挑战（v0.7.28）：这个月到店天数满了、还没送过的会员送一次
+        const challenge = await runVisitChallenges({ sql, config });
+        console.log(challenge.members ? `会员挑战：${challenge.members} 位会员满了，发券 ${challenge.coupons} 张` : '会员挑战：没有新满的会员');
         if (run?.error || benefits?.error) process.exitCode = 1;
+        break;
+      }
+      case 'import-count-cards': {
+        const file = args.find((a, i) => !a.startsWith('--') && !['--operator', '--batch'].includes(args[i - 1] ?? ''));
+        const username = flag(args, 'operator')?.toLowerCase();
+        if (!file || !username) throw new Error('用法：import-count-cards <旧次卡.csv> --operator <店主账号> [--batch 批次备注] [--apply]');
+        await prepareDb(sql, config);
+        const actor = await ownerOperator(sql, username, '旧次卡期初导入');
+        const parsed = parseOpeningCountCardsCsv(await readImportFile(file));
+        for (const e of parsed.errors.slice(0, 30)) console.log(`✗ 第 ${e.line} 行：${e.message}`);
+        if (parsed.errors.length) throw new Error(`有 ${parsed.errors.length} 处格式不对，未导入（表头：${OPENING_COUNT_CARD_HEADER.join('、')}）`);
+        const apply = args.includes('--apply');
+        const r = await importOpeningCountCards({ sql, config }, parsed.rows, { operatorId: actor.id, apply, batch: flag(args, 'batch') ?? basename(file) });
+        for (const row of r.rows) console.log(`${row.ok ? '✓' : '✗'} 第 ${row.line} 行 ${row.memberName ?? '（找不到会员）'} · ${row.name} · 剩 ${row.remaining} 次${row.problem ? `：${row.problem}` : ''}`);
+        if (r.bad) throw new Error(`有 ${r.bad} 行不对，整批没有写入；改好后重新预览`);
+        console.log(apply ? `✓ 已导入 ${r.ok} 张旧次卡（只记次数，不是收款）。请运行 check 核对。` : `以上为预览（${r.ok} 张），没有写入。确认无误后加 --apply 执行导入（门店环境须店主同意）。`);
         break;
       }
       case 'import-benefits': {
@@ -736,7 +798,7 @@ async function main() {
         break;
       }
       default:
-        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo [--previous-day] | seed-billing-demo [--previous-day] | seed-legacy-demo | demo-prepare [--previous-day] | demo-check | demo-reset --confirm <数据库名> | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup | daily-recon | balance-changes | floorplan-convert | floorplan-sample | import-devices | device-selftest | device-printer-mock | device-bridge-mock | membership-daily | import-benefits');
+        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo [--previous-day] | seed-billing-demo [--previous-day] | seed-legacy-demo | demo-prepare [--previous-day] | demo-check | demo-reset --confirm <数据库名> | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup | daily-recon | balance-changes | floorplan-convert | floorplan-sample | import-devices | device-selftest | device-printer-mock | device-bridge-mock | membership-daily | import-benefits | import-count-cards');
         process.exitCode = command ? 1 : 0;
     }
   } finally {

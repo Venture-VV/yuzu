@@ -11,7 +11,8 @@ import { Minus, Plus, Scan, Search, X } from 'lucide-react';
 import type { FloorplanFloor } from '@shared/floorplans';
 import type { LocationPerson } from '@shared/locations';
 import { DASHED_STATES, FLOOR_MAP_LEGEND, FLOOR_MAP_STATES, spaceMatches, spaceStatus, type FloorMapSession, type FloorMapSpace, type FloorMapState, type FloorMapUsage, type SpaceStatus } from '@shared/floormap';
-import { durationText, usageMinutes, type UsageDetail } from '@shared/usages';
+import { durationText, usageEstimate, usageMinutes, type UsageDetail } from '@shared/usages';
+import { formatYuan } from '@shared/money';
 import { ROOM_BOARD_LABELS, type RoomBoard, type RoomBoardRoom } from '@shared/rooms';
 import { areaText, spaceLabel } from '@shared/spaces';
 import { api, errorMessage } from '../../lib/api';
@@ -930,6 +931,11 @@ function UsagePart({
         <p className="text-ink-2">
           {formatTime(u.openedAt)} 开单 · 已用 {durationText(minutes)} · {u.guests} 人
         </p>
+        {u.pricing && (
+          <p className="font-semibold text-pine" data-testid="floormap-usage-fee">
+            到现在房费约 {formatYuan(usageEstimate(minutes, u.pricing))}（结束使用时挂到手牌 {u.tagCode} 的账单）
+          </p>
+        )}
         <p className="text-[12px] text-ink-3">
           {u.usageNo} · {u.openedByName}
           {u.note ? ` · ${u.note}` : ''}

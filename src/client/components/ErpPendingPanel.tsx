@@ -51,6 +51,7 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     // 硬件连接（v0.7.21）：登记设备返回那台设备，打印任务返回那个任务
     case 'device_create':
     case 'device_job':
+    case 'doc_print':
       return typeof d.id === 'number' ? { refId: d.id } : null;
     case 'coupon_issue':
       return typeof d.issueId === 'number' ? { refId: d.issueId } : null;
@@ -68,6 +69,9 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     // 邀请体验、赠送会籍（v0.7.25）：返回那条临时身份
     case 'member_trial':
       return d.trial && typeof d.trial === 'object' ? { refId: d.trial.id } : null;
+    // 会员实体卡（v0.7.28）：发卡、补卡返回那张卡
+    case 'member_card':
+      return d.card && typeof d.card === 'object' ? { refId: d.card.id } : null;
     // 会员体系收尾（v0.7.26）：退储值返回那张退储值单，停用 / 启用返回那位会员，合并返回那张合并单
     case 'member_refund':
       return d.refund && typeof d.refund === 'object' ? { refId: d.refund.id } : null;
@@ -75,6 +79,15 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
       return typeof d.memberId === 'number' ? { refId: d.memberId } : null;
     case 'member_merge':
       return d.merge && typeof d.merge === 'object' ? { refId: d.merge.id } : null;
+    // 次卡（v0.7.28）：售卡、退卡都返回那张卡
+    case 'count_card_sale':
+    case 'count_card_refund':
+      return d.card && typeof d.card === 'object' ? { refId: d.card.id } : null;
+    // 平台核销补录（v0.7.28）
+    case 'platform_redemption':
+      return d.redemption && typeof d.redemption === 'object' ? { refId: d.redemption.id } : null;
+    case 'platform_settlement':
+      return d.settlement && typeof d.settlement === 'object' ? { refId: d.settlement.id } : null;
   }
 }
 

@@ -63,6 +63,8 @@ beforeAll(async () => {
   // 用现版本的记账流程写入升级前的单据。现版本会写充值单、结账单的班次（016 才有），写入期间临时加这两列，迁移前删掉
   await sql`ALTER TABLE recharges ADD COLUMN shift_id bigint`;
   await sql`ALTER TABLE checkouts ADD COLUMN shift_id bigint`;
+  // 收款按当班成员找班次（059 才有）：写入期间临时建空表（升级前的单据不记班次），迁移前删掉
+  await sql`CREATE TABLE shift_members (shift_id bigint, staff_id bigint, left_at timestamptz)`;
   // 现版本结账按来访的「门票计到的时间」计价（017 才有）；收款前必须先开班的规则（R1.2）在升级前不存在
   await sql`ALTER TABLE visits ADD COLUMN ticket_end_at timestamptz`;
   await sql`ALTER TABLE checkout_payments ADD COLUMN approved_by bigint`;
@@ -85,7 +87,7 @@ beforeAll(async () => {
   // 现版本结账时记部门营业额快照（025 才有）：写入期间临时建一个什么都不做的函数，迁移前删掉（迁移 025 会给这张结账单补记）
   await sql.unsafe('CREATE FUNCTION yuzu_snapshot_checkout_items(p_checkout bigint, p_current boolean) RETURNS void LANGUAGE plpgsql AS $$ BEGIN END $$');
   // 现版本结账时一起结束派对房等开着的使用单（036 才有）：写入期间临时建最小的表，迁移前删掉
-  await sql`CREATE TABLE space_usages (id bigint, usage_no text, visit_id bigint, status text)`;
+  await sql`CREATE TABLE space_usages (id bigint, usage_no text, visit_id bigint, status text, space_id bigint)`;
   // 现版本充值时按发券规则发券、读结账单时列出退款单（037 才有）：写入期间临时建最小的表，迁移前删掉
   await sql`CREATE TABLE coupon_rules (id bigint, kind text, level smallint, plan_id bigint, template_id bigint, quantity integer, active boolean)`;
   await sql`CREATE TABLE refunds (id bigint, refund_no text, checkout_id bigint, amount bigint, reason text, status text, business_date date, created_at timestamptz, operator_id bigint)`;
@@ -101,8 +103,8 @@ beforeAll(async () => {
   await sql`ALTER TABLE recharges ADD COLUMN channel text NOT NULL DEFAULT 'counter'`;
   await sql`CREATE TABLE member_grade_events (id bigserial PRIMARY KEY, member_id bigint, kind text, business_date date, from_grade smallint, from_tier smallint, to_grade smallint, to_tier smallint, cycle_start date, cycle_end date, grace_until date, cycle_spend bigint, rolling_recharge bigint, recharge_id bigint, consumption_id bigint, staff_id bigint, reason text, client_key uuid)`;
   await sql`INSERT INTO settings (key, value) VALUES ('membership_rules', '{"firstRechargeMinCents": 0, "topUpMinCents": 0}'::jsonb)`;
-  // 现版本首笔充值时按会员权益发首充礼（041 才有，042 加了折扣类的几列，047 加了同行几位）：写入期间临时建空的权益表，迁移前删掉
-  await sql`CREATE TABLE benefits (id bigint, code text, name text, category text, start_grade smallint, start_tier smallint, period text, quantity smallint, tier_quantities jsonb, template_id bigint, events text[], festival_dates date[], discount_target text, companion_count smallint, companion_counts jsonb, weekdays smallint[], month_days smallint[], content text, conditions text, status text, version integer, sort_order integer)`;
+  // 现版本首笔充值时按会员权益发首充礼（041 才有，042 加了折扣类的几列，047 加了同行几位，058 加了会员挑战、停车优惠的几列）：写入期间临时建空的权益表，迁移前删掉
+  await sql`CREATE TABLE benefits (id bigint, code text, name text, category text, start_grade smallint, start_tier smallint, period text, quantity smallint, tier_quantities jsonb, template_id bigint, events text[], festival_dates date[], discount_target text, companion_count smallint, companion_counts jsonb, weekdays smallint[], month_days smallint[], visit_target smallint, is_parking boolean, parking_hours smallint, parking_hours_by_tier jsonb, content text, conditions text, status text, version integer, sort_order integer)`;
   // 现版本结账时记浴票延迟（045 才有）：写入期间临时加结账单的两列，迁移前删掉
   await sql`ALTER TABLE checkout_bills ADD COLUMN ticket_extension_minutes smallint NOT NULL DEFAULT 0, ADD COLUMN ticket_extension_benefit_id bigint`;
   const deps = { sql, config };
@@ -117,6 +119,7 @@ beforeAll(async () => {
   await checkout(deps, { clientKey: randomUUID(), visitIds: [v.visits[0]!.id], expectedTotal: 49900, payments: [{ method: 'cash', amount: 49900 }] }, { actor: as(clerk!.id, 'clerk') });
   await sql`ALTER TABLE recharges DROP COLUMN shift_id`;
   await sql`ALTER TABLE checkouts DROP COLUMN shift_id`;
+  await sql`DROP TABLE shift_members`;
   await sql`ALTER TABLE visits DROP COLUMN ticket_end_at`;
   await sql`ALTER TABLE checkout_payments DROP COLUMN approved_by`;
   await sql`ALTER TABLE checkout_payments DROP COLUMN discount_member_id`;

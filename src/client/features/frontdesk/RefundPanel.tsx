@@ -17,6 +17,7 @@ import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Input, MoneyInput, Notice, Skeleton } from '../../components/ui';
 import { PrintButton } from '../print/PrintButton';
+import { NetPrintButton } from '../print/NetPrintButton';
 import { SHIFT_ERRORS, shiftKeys, ShiftGate } from '../shift/ShiftGate';
 import { PendingPanel, useFrontdeskOp } from './pending';
 
@@ -344,6 +345,7 @@ export function RefundsList({ refunds, onChanged }: { refunds: RefundSummary[]; 
               <PrintButton path={`/print/refund/${r.id}`} testId={`refund-print-${r.refundNo}`}>
                 打印退款凭条
               </PrintButton>
+              <NetPrintButton doc={{ type: 'refund', id: r.id }} docName="退款单" testId={`refund-netprint-${r.refundNo}`} />
               {r.status === 'completed' && r.businessDate === session.today && can('frontdesk.refund') && voiding !== r.id && (
                 <Button size="sm" variant="ghost" onClick={() => setVoiding(r.id)} data-testid={`refund-void-${r.refundNo}`}>
                   作废这张退款单

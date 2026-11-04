@@ -7,7 +7,7 @@ import { api } from '../../lib/api';
 import { formatDateTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
-import { FRONTDESK_OP_LABELS, isRoomOp, isTableOp, isUsageOp, removeFrontdeskPending, useFrontdeskPendingForBanner, type FrontdeskPendingOp } from './pending';
+import { FRONTDESK_OP_LABELS, isBookingOp, isRoomOp, isTableOp, isUsageOp, removeFrontdeskPending, useFrontdeskPendingForBanner, type FrontdeskPendingOp } from './pending';
 
 /**
  * 页面顶部的前台「结果待确认」提醒（刷新、重新登录后仍在）。
@@ -77,6 +77,12 @@ export function FrontdeskPendingBanner() {
       if (op.spaceId) params.set('sp', String(op.spaceId));
       if (op.usageIds?.[0]) params.set('u', String(op.usageIds[0]));
       navigate(`/rooms?${params}`);
+      return;
+    }
+    // 预约（v0.7.28）到「预约」页处理：改动回到那张预约单
+    if (isBookingOp(op.type)) {
+      if (op.bookingIds?.[0]) params.set('b', String(op.bookingIds[0]));
+      navigate(`/bookings?${params}`);
       return;
     }
     // 退款单（v0.7.20）回到前台「结账记录」里的原结账单

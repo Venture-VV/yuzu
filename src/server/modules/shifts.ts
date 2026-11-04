@@ -14,6 +14,10 @@
 //   · 收款前必须先开班（经营规则开关，默认开）：没有开班时充值、结账、反结账整笔拒绝（SHIFT_REQUIRED）；
 //   · 交班：员工实点现金，系统记下应有现金、差额与汇总快照；员工确认时看到的应有现金与此刻不一致（期间又有收款）时拒绝；
 //   · 本人交本人的班；值班经理及以上可以替别人交班（例如员工忘了交班就下班）。
+//   · 按钱箱交班（v0.7.28 ⑨，N11 待确认，后台可选，默认按人交班）：开班选钱箱，同一个钱箱的人「加入」同一个班次，
+//     收款记到经办人此刻所在的班次（当班成员表 shift_members）；可以中途「离开钱箱」，班次照常开着；交班时点这个钱箱的钱，
+//     在上面的人一起离开（在上面的人或值班经理及以上可以交）。交班表另列各人经办的结账与充值。切换交班方式后新开的班按新做法，
+//     开着的班照旧到交班为止。按人交班时成员只有开班人自己，与原来一样。
 //
 // 班次边界（迁移 016）：充值、结账、反结账在入账事务里记下经办人的班次（lockPaymentShift），交班表按班次汇总，
 // 不按单据时间：收款取时间在等锁之前，按时间窗口会把交班之后才提交的收款算进已交的班次之内、又不在快照里。
@@ -26,22 +30,28 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf, ISO_DATE } from '@shared/business-date';
-import type { RefundShiftOptions, ShiftRecord, ShiftSummary } from '@shared/checkout';
+import { CASH_DRAWER_KEY, type DrawerBoard, type RefundShiftOptions, type ShiftMember, type ShiftRecord, type ShiftSummary } from '@shared/checkout';
+import type { PaymentMethod } from '@shared/labels';
 import { can } from '@shared/permissions';
-import type { Db, Tx } from '../db';
+import { isUniqueViolation, type Db, type Tx } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps, OpContext } from '../lib/context';
-import { conflict, forbidden, notFound } from '../lib/errors';
+import { badRequest, conflict, forbidden, notFound } from '../lib/errors';
 import { cents, idParam, parse } from '../lib/validate';
 import { resolveReadableDate } from './ledger';
 import { loadSettings } from './settings';
 import { nextDocNo } from '../lib/tx';
 import { ctxOf } from '../lib/context';
 
-/** 收款开始处理时经办人未交班的班次（不加锁，没有开班时为 null）；入账事务里交给 lockPaymentShift 核对 */
+/**
+ * 收款开始处理时经办人所在的班次（不加锁，没有开班时为 null）；入账事务里交给 lockPaymentShift 核对。
+ * 按当班成员找（v0.7.28）：按人交班时就是本人未交班的班次，按钱箱交班时是本人加入的钱箱的班次
+ */
 export async function openShiftOf(db: Db, staffId: number): Promise<number | null> {
-  const [row] = await db<{ id: number }[]>`SELECT id FROM shifts WHERE staff_id = ${staffId} AND status = 'open'`;
+  const [row] = await db<{ id: number }[]>`
+    SELECT s.id FROM shift_members m JOIN shifts s ON s.id = m.shift_id
+    WHERE m.staff_id = ${staffId} AND m.left_at IS NULL AND s.status = 'open'`;
   return row?.id ?? null;
 }
 
@@ -55,10 +65,18 @@ export async function openShiftOf(db: Db, staffId: number): Promise<number | nul
  *     规则关闭时没有开班的照常收款、不记班次，期间开了班的记到新开的班次。
  */
 export async function lockPaymentShift(tx: Tx, staffId: number, seen: number | null): Promise<number | null> {
-  const [row] = await tx<{ id: number }[]>`SELECT id FROM shifts WHERE staff_id = ${staffId} AND status = 'open' FOR SHARE`;
+  // 只锁班次一行（共享锁）：交班的排他锁在班次上；按钱箱交班时同时离开钱箱的，这笔开始时还在钱箱上，照样记进这个钱箱的班次
+  const [row] = await tx<{ id: number }[]>`
+    SELECT s.id FROM shift_members m JOIN shifts s ON s.id = m.shift_id
+    WHERE m.staff_id = ${staffId} AND m.left_at IS NULL AND s.status = 'open' FOR SHARE OF s`;
   const id = row?.id ?? null;
   if (seen !== null && id !== seen) {
-    const [s] = await tx<{ shiftNo: string }[]>`SELECT shift_no FROM shifts WHERE id = ${seen}`;
+    const [s] = await tx<{ shiftNo: string; status: string; drawerName: string | null }[]>`SELECT shift_no, status, drawer_name FROM shifts WHERE id = ${seen}`;
+    if (s!.status === 'open') {
+      throw conflict('SHIFT_CLOSED', `你在这笔收款入账之前已经离开${s!.drawerName ?? ''}的班次 ${s!.shiftNo}，这笔没有入账，也不会记入任何班次；请加入钱箱后重新办理`, {
+        shiftNo: s!.shiftNo,
+      });
+    }
     throw conflict('SHIFT_CLOSED', `班次 ${s!.shiftNo} 在这笔收款入账之前已经交班，这笔没有入账，也不会记入任何班次；请开新班后重新办理`, {
       shiftNo: s!.shiftNo,
     });
@@ -76,7 +94,7 @@ export async function lockPaymentShift(tx: Tx, staffId: number, seen: number | n
  */
 export async function lockRefundShift(tx: Tx, shiftId: number): Promise<number> {
   const [row] = await tx<{ id: number; status: string; shiftNo: string; staffName: string; legacyRefund: boolean }[]>`
-    SELECT s.id, s.status, s.shift_no, st.display_name AS staff_name, s.legacy_refund
+    SELECT s.id, s.status, s.shift_no, coalesce(s.drawer_name, st.display_name) AS staff_name, s.legacy_refund
     FROM shifts s JOIN staff st ON st.id = s.staff_id WHERE s.id = ${shiftId} FOR SHARE OF s`;
   if (!row) throw notFound('所选钱箱的班次不存在，请刷新后重新选择');
   if (row.status !== 'open') {
@@ -95,24 +113,37 @@ export async function lockRefundShift(tx: Tx, shiftId: number): Promise<number> 
 export async function refundShiftOptions(db: Db, checkoutId: number, actorId: number): Promise<RefundShiftOptions> {
   const [c] = await db<{ shiftId: number | null }[]>`SELECT shift_id FROM checkouts WHERE id = ${checkoutId}`;
   if (!c) throw notFound('结账单不存在');
-  const rows = await db<{ id: number; shiftNo: string; staffId: number; staffName: string; startedAt: string }[]>`
-    SELECT s.id, s.shift_no, s.staff_id, st.display_name AS staff_name, s.started_at
-    FROM shifts s JOIN staff st ON st.id = s.staff_id WHERE s.status = 'open' AND NOT s.legacy_refund ORDER BY s.started_at, s.id`;
-  const shifts = rows.map((r) => ({
-    id: r.id,
-    shiftNo: r.shiftNo,
-    staffName: r.staffName,
-    startedAt: new Date(r.startedAt).toISOString(),
-    mine: r.staffId === actorId,
-    original: r.id === c.shiftId,
-  }));
+  const shifts = (await openDrawerShifts(db, actorId)).map((r) => ({ ...r, original: r.id === c.shiftId }));
   const suggested = (shifts.find((x) => x.original) ?? shifts.find((x) => x.mine) ?? (shifts.length === 1 ? shifts[0] : undefined))?.id ?? null;
   return { shifts, suggested };
+}
+
+/**
+ * 此刻当班（未交班、不是升级前开的）的班次，给退现金选钱箱用：按钱箱交班开的显示钱箱名；
+ * mine 是本人此刻在这个班次上（按人交班时是自己的班次）
+ */
+export async function openDrawerShifts(db: Db, actorId: number): Promise<Omit<RefundShiftOptions['shifts'][number], 'original'>[]> {
+  const rows = await db<{ id: number; shiftNo: string; staffName: string; drawerName: string | null; startedAt: string; mine: boolean }[]>`
+    SELECT s.id, s.shift_no, st.display_name AS staff_name, s.drawer_name, s.started_at,
+           EXISTS (SELECT 1 FROM shift_members m WHERE m.shift_id = s.id AND m.staff_id = ${actorId} AND m.left_at IS NULL) AS mine
+    FROM shifts s JOIN staff st ON st.id = s.staff_id WHERE s.status = 'open' AND NOT s.legacy_refund ORDER BY s.started_at, s.id`;
+  return rows.map((r) => ({ id: r.id, shiftNo: r.shiftNo, staffName: r.staffName, drawerName: r.drawerName, startedAt: new Date(r.startedAt).toISOString(), mine: r.mine }));
+}
+
+/** 审计、提示里写「记到了谁的钱箱」：按钱箱交班的是钱箱名，按人交班的是开班人；mine 是经办人此刻在这个班次上 */
+export async function shiftDrawerLabel(db: Db, shiftId: number, actorId: number): Promise<{ shiftNo: string; label: string; mine: boolean }> {
+  const [row] = await db<{ shiftNo: string; label: string; mine: boolean }[]>`
+    SELECT s.shift_no, coalesce(s.drawer_name, st.display_name) AS label,
+           EXISTS (SELECT 1 FROM shift_members m WHERE m.shift_id = s.id AND m.staff_id = ${actorId} AND m.left_at IS NULL) AS mine
+    FROM shifts s JOIN staff st ON st.id = s.staff_id WHERE s.id = ${shiftId}`;
+  return row!;
 }
 
 interface ShiftScope {
   id: number;
   staffId: number;
+  /** 按钱箱交班开的班（v0.7.28）：钱箱名；交班表写明每笔是谁办的，另列各人经办的结账与充值 */
+  drawerName: string | null;
   startedAt: string;
   openingCash: number;
   /** 升级（迁移 016）时仍未交班的班次：升级前的单据没有记班次 */
@@ -129,6 +160,8 @@ interface ShiftScope {
  */
 async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<ShiftSummary> {
   const from = s.startedAt;
+  // 按钱箱交班：一个钱箱几个人收款，反结账、退款单、退储值都写明是谁办的
+  const named = s.drawerName !== null;
   // 单据属于本班次：按单据记下的班次。升级时仍未交班的班次，再补上升级前没有记班次、开班之后本人经办的单据
   // （原来的时间窗口口径）；升级之后经办人有未交班的班次时单据都会记下班次，补算不会多算
   const ofShift = (shiftCol: string, staffCol: string, timeCol: string) =>
@@ -153,14 +186,17 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
       memberRefundTotals: { count: number; total: number };
       memberRefundByMethod: NonNullable<ShiftSummary['memberRefunds']>['byMethod'];
       memberRefundList: NonNullable<ShiftSummary['memberRefunds']>['list'];
+      countCardSales: { method: PaymentMethod; count: number; amount: number }[];
+      countCardRefunds: { method: PaymentMethod; count: number; amount: number }[];
+      byOperator: NonNullable<ShiftSummary['byOperator']>;
     })[]
   >`
     WITH co AS (
-      SELECT c.id, c.total_amount FROM checkouts c LEFT JOIN shifts vs ON vs.id = c.void_shift_id
+      SELECT c.id, c.total_amount, c.operator_id FROM checkouts c LEFT JOIN shifts vs ON vs.id = c.void_shift_id
       WHERE ${ofShift('c.shift_id', 'c.operator_id', 'c.created_at')}
         AND (c.status = 'completed' OR (vs.id IS NOT NULL AND NOT vs.legacy_refund))
     ), rc AS (
-      SELECT r.payment_method, r.paid_amount, r.bonus_amount FROM recharges r
+      SELECT r.payment_method, r.paid_amount, r.bonus_amount, r.operator_id FROM recharges r
       WHERE ${ofShift('r.shift_id', 'r.operator_id', 'r.created_at')}
     ), pay AS (
       SELECT p.method, count(*) AS count, sum(p.amount) AS amount FROM checkout_payments p JOIN co ON co.id = p.checkout_id
@@ -173,15 +209,18 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
     ), vd AS (
       -- 跨钱箱退款时反结账的是别人（例如值班经理从收银员的钱箱退）：写明是谁做的反结账
       SELECT c.id, c.checkout_no, c.total_amount, c.void_reason, c.voided_at,
-             CASE WHEN c.voided_by <> ${s.staffId} THEN vb.display_name END AS voided_by_name,
+             CASE WHEN ${named} OR c.voided_by <> ${s.staffId} THEN vb.display_name END AS voided_by_name,
              (SELECT coalesce(sum(p.amount), 0) FROM checkout_payments p WHERE p.checkout_id = c.id AND p.method = 'cash') AS cash_refund
       FROM checkouts c LEFT JOIN staff vb ON vb.id = c.voided_by
       WHERE ${ofShift('c.void_shift_id', 'c.voided_by', 'c.voided_at')}
     ), rf AS (
       SELECT p.method, sum(p.amount) AS amount FROM checkout_payments p JOIN vd ON vd.id = p.checkout_id GROUP BY p.method
     ), wc AS (
-      SELECT total_amount FROM consumptions
-      WHERE operator_id = ${s.staffId} AND checkout_id IS NULL AND status = 'completed' AND created_at >= ${from} AND created_at < ${to}
+      -- 按当班成员在班上的时段（按人交班时就是开班人从开班到此刻）
+      SELECT w.total_amount FROM consumptions w
+      WHERE w.checkout_id IS NULL AND w.status = 'completed' AND w.created_at >= ${from} AND w.created_at < ${to}
+        AND EXISTS (SELECT 1 FROM shift_members m WHERE m.shift_id = ${s.id} AND m.staff_id = w.operator_id
+                    AND w.created_at >= m.joined_at AND (m.left_at IS NULL OR w.created_at < m.left_at))
     ), dp AS (
       -- 客房押金（S7）：收、退都记在经办人当班的班次
       SELECT kind, method, count(*) AS count, sum(amount) AS amount FROM room_deposits
@@ -189,7 +228,7 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
     ), rs AS (
       -- 退款单（v0.7.20）：记到本班次的、生效的（作废只能在班次交班前，作废后不算）；别人从本班钱箱退的写明是谁
       SELECT r.id, r.refund_no, r.amount, r.reason, r.created_at, c.checkout_no,
-             CASE WHEN r.operator_id <> ${s.staffId} THEN ob.display_name END AS operator_name
+             CASE WHEN ${named} OR r.operator_id <> ${s.staffId} THEN ob.display_name END AS operator_name
       FROM refunds r JOIN checkouts c ON c.id = r.checkout_id JOIN staff ob ON ob.id = r.operator_id
       WHERE r.shift_id = ${s.id} AND r.status = 'completed'
     ), rsp AS (
@@ -197,11 +236,24 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
     ), mr AS (
       -- 储值退回（v0.7.26）：记到本班次的退储值单（不能作废）；别人从本班钱箱退的写明是谁
       SELECT r.id, r.refund_no, r.principal, r.reason, r.created_at, m.name AS member_name,
-             CASE WHEN r.operator_id <> ${s.staffId} THEN ob.display_name END AS operator_name
+             CASE WHEN ${named} OR r.operator_id <> ${s.staffId} THEN ob.display_name END AS operator_name
       FROM member_refunds r JOIN members m ON m.id = r.member_id JOIN staff ob ON ob.id = r.operator_id
       WHERE r.shift_id = ${s.id}
     ), mrl AS (
       SELECT l.refund_id, l.method, l.amount, l.ref FROM member_refund_lines l JOIN mr ON mr.id = l.refund_id
+    ), ccs AS (
+      -- 次卡（v0.7.28）：本班次卖的卡（售价按收款方式）
+      SELECT payment_method AS method, count(*)::int AS count, sum(price)::bigint AS amount FROM count_cards
+      WHERE shift_id = ${s.id} AND source = 'sale' GROUP BY payment_method
+    ), ccr AS (
+      -- 次卡（v0.7.28）：本班次退的卡（不能作废）
+      SELECT method, count(*)::int AS count, sum(amount)::bigint AS amount FROM count_card_refunds WHERE shift_id = ${s.id} GROUP BY method
+    ), ops AS (
+      -- 按钱箱交班：各人经办的结账与充值
+      SELECT x.operator_id, sum(x.cn)::int AS checkout_count, sum(x.ct)::bigint AS checkout_total, sum(x.rn)::int AS recharge_count, sum(x.rp)::bigint AS recharge_paid
+      FROM (SELECT operator_id, 1 AS cn, total_amount AS ct, 0 AS rn, 0 AS rp FROM co
+            UNION ALL SELECT operator_id, 0, 0, 1, paid_amount FROM rc) x
+      GROUP BY x.operator_id
     )
     SELECT
       (SELECT json_build_object('count', count(*), 'total', coalesce(sum(total_amount), 0)) FROM co) AS checkouts,
@@ -242,9 +294,16 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
                 'cash', coalesce((SELECT sum(mrl.amount) FROM mrl WHERE mrl.refund_id = mr.id AND mrl.method = 'cash'), 0),
                 'refs', coalesce((SELECT json_agg(json_build_object('method', mrl.method, 'amount', mrl.amount, 'ref', mrl.ref) ORDER BY mrl.method)
                                   FROM mrl WHERE mrl.refund_id = mr.id), '[]'::json))
-              ORDER BY mr.created_at, mr.id), '[]'::json) FROM mr) AS member_refund_list`;
+              ORDER BY mr.created_at, mr.id), '[]'::json) FROM mr) AS member_refund_list,
+      (SELECT coalesce(json_agg(json_build_object('method', method, 'count', count, 'amount', amount) ORDER BY method), '[]'::json) FROM ccs) AS count_card_sales,
+      (SELECT coalesce(json_agg(json_build_object('method', method, 'count', count, 'amount', amount) ORDER BY method), '[]'::json) FROM ccr) AS count_card_refunds,
+      (SELECT coalesce(json_agg(json_build_object('staffId', ops.operator_id, 'staffName', st.display_name,
+                                                  'checkouts', json_build_object('count', ops.checkout_count, 'total', ops.checkout_total),
+                                                  'recharges', json_build_object('count', ops.recharge_count, 'paid', ops.recharge_paid))
+                                ORDER BY st.display_name, ops.operator_id), '[]'::json)
+       FROM ops JOIN staff st ON st.id = ops.operator_id) AS by_operator`;
   const { checkouts, checkoutByMethod, recharges, rechargeByMethod, walletConsumes, coupons, refunds, refundByMethod, depositReceived, depositRefunded } = row!;
-  const { refundSlipTotals, refundSlipByMethod, refundSlipList, memberRefundTotals, memberRefundByMethod, memberRefundList } = row!;
+  const { refundSlipTotals, refundSlipByMethod, refundSlipList, memberRefundTotals, memberRefundByMethod, memberRefundList, countCardSales, countCardRefunds } = row!;
   const cashCheckout = checkoutByMethod.find((m) => m.method === 'cash')?.amount ?? 0;
   const cashRecharge = rechargeByMethod.find((m) => m.method === 'cash')?.amount ?? 0;
   // 升级时已有的班次：反结账按原口径只列提醒（与 v0.3 的交班表相同），不列退款、不扣现金
@@ -259,6 +318,11 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
   // 储值退回（v0.7.26）：现金从本班钱箱退，扣减应有现金；本班次没有退储值时不列这一项
   const hasMemberRefunds = memberRefundTotals.count > 0;
   const cashMemberRefund = Number(memberRefundByMethod.find((m) => m.method === 'cash')?.amount ?? 0);
+  // 次卡（v0.7.28）：卖卡收的现金计入、退卡退的现金扣减；本班次没有次卡往来时不列这一项
+  const hasCountCards = countCardSales.length > 0 || countCardRefunds.length > 0;
+  const cashCountCard = Number(countCardSales.find((m) => m.method === 'cash')?.amount ?? 0) - Number(countCardRefunds.find((m) => m.method === 'cash')?.amount ?? 0);
+  const cardRows = (rows: { method: PaymentMethod; count: number; amount: number }[]) => rows.map((m) => ({ ...m, amount: Number(m.amount) }));
+  const cardSum = (rows: { count: number; amount: number }[]) => ({ count: rows.reduce((t, m) => t + m.count, 0), total: rows.reduce((t, m) => t + Number(m.amount), 0) });
   return {
     from: new Date(from).toISOString(),
     to: new Date(to).toISOString(),
@@ -305,6 +369,23 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
           },
         }
       : {}),
+    ...(hasCountCards
+      ? {
+          countCards: {
+            sales: { ...cardSum(countCardSales), byMethod: cardRows(countCardSales) },
+            refunds: { ...cardSum(countCardRefunds), byMethod: cardRows(countCardRefunds) },
+          },
+        }
+      : {}),
+    ...(named
+      ? {
+          byOperator: row!.byOperator.map((o) => ({
+            ...o,
+            checkouts: { count: o.checkouts.count, total: Number(o.checkouts.total) },
+            recharges: { count: o.recharges.count, paid: Number(o.recharges.paid) },
+          })),
+        }
+      : {}),
     cash: {
       opening: s.openingCash,
       checkout: cashCheckout,
@@ -313,15 +394,29 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
       ...(hasCashDeposit ? { deposit: cashDeposit } : {}),
       ...(hasSlips ? { refundSlip: cashSlip } : {}),
       ...(hasMemberRefunds ? { memberRefund: cashMemberRefund } : {}),
-      expected: s.openingCash + cashCheckout + cashRecharge - cashRefund + cashDeposit - cashSlip - cashMemberRefund,
+      ...(hasCountCards ? { countCard: cashCountCard } : {}),
+      expected: s.openingCash + cashCheckout + cashRecharge - cashRefund + cashDeposit - cashSlip - cashMemberRefund + cashCountCard,
     },
   };
 }
 
-interface ShiftRow extends Omit<ShiftRecord, 'summary'> {
+interface ShiftRow extends Omit<ShiftRecord, 'summary' | 'members'> {
   summary: ShiftSummary | null;
   legacyWindow: boolean;
   legacyRefund: boolean;
+}
+
+/** 班次上的人（加入、离开的时间） */
+async function shiftMembers(db: Db, shiftId: number): Promise<ShiftMember[]> {
+  const rows = await db<{ staffId: number; staffName: string; joinedAt: Date; leftAt: Date | null }[]>`
+    SELECT m.staff_id, st.display_name AS staff_name, m.joined_at, m.left_at
+    FROM shift_members m JOIN staff st ON st.id = m.staff_id WHERE m.shift_id = ${shiftId} ORDER BY m.joined_at, m.id`;
+  return rows.map((r) => ({
+    staffId: r.staffId,
+    staffName: r.staffName,
+    joinedAt: new Date(r.joinedAt).toISOString(),
+    leftAt: r.leftAt ? new Date(r.leftAt).toISOString() : null,
+  }));
 }
 
 /** 已交班的返回交班时的快照；当班中的按此刻汇总 */
@@ -329,17 +424,18 @@ export async function getShift(db: Db, id: number, now = new Date()): Promise<Sh
   const [row] = await db<ShiftRow[]>`
     SELECT s.id, s.shift_no, s.staff_id, st.display_name AS staff_name, s.status, s.business_date, s.started_at, s.opening_cash,
            s.ended_at, s.expected_cash, s.counted_cash, s.note, h.display_name AS handed_to_name, c.display_name AS closed_by_name, s.summary,
-           s.legacy_window, s.legacy_refund
+           s.legacy_window, s.legacy_refund, s.drawer_name
     FROM shifts s JOIN staff st ON st.id = s.staff_id LEFT JOIN staff h ON h.id = s.handed_to LEFT JOIN staff c ON c.id = s.closed_by
     WHERE s.id = ${id}`;
   if (!row) throw notFound('班次不存在');
   const { legacyWindow: _legacy, legacyRefund: _legacyRefund, ...shift } = row;
-  return { ...shift, summary: row.summary ?? (await shiftSummary(db, row, now)) };
+  return { ...shift, summary: row.summary ?? (await shiftSummary(db, row, now)), members: await shiftMembers(db, id) };
 }
 
+/** 本人此刻所在的班次（按人交班是自己未交班的班次，按钱箱交班是加入的钱箱的班次） */
 export async function currentShift(db: Db, staffId: number): Promise<ShiftRecord | null> {
-  const [row] = await db<{ id: number }[]>`SELECT id FROM shifts WHERE staff_id = ${staffId} AND status = 'open'`;
-  return row ? getShift(db, row.id) : null;
+  const id = await openShiftOf(db, staffId);
+  return id ? getShift(db, id) : null;
 }
 
 export async function listShifts(db: Db, date: string): Promise<ShiftRecord[]> {
@@ -348,7 +444,46 @@ export async function listShifts(db: Db, date: string): Promise<ShiftRecord[]> {
   return Promise.all(rows.map((r) => getShift(db, r.id)));
 }
 
-const StartInput = z.object({ openingCash: cents('备用金') });
+/** 能看这个班次：自己开的或在上面待过的（按钱箱交班），或能看历史营业日的岗位（默认值班经理及以上） */
+const canSeeShift = (actor: OpContext['actor'], s: ShiftRecord) =>
+  s.staffId === actor.id || s.members.some((m) => m.staffId === actor.id) || can(actor, 'ledger.readHistory');
+
+/** 按钱箱交班时开班页选钱箱：每个钱箱此刻有没有开着的班次、谁在上面；本人此刻所在的班次 */
+export async function drawerBoard(db: Db, actorId: number): Promise<DrawerBoard> {
+  const settings = await loadSettings(db);
+  const open = await db<{ id: number; shiftNo: string; drawer: string; drawerName: string; startedAt: Date; openingCash: number }[]>`
+    SELECT id, shift_no, drawer, drawer_name, started_at, opening_cash FROM shifts WHERE status = 'open' AND drawer IS NOT NULL ORDER BY started_at, id`;
+  const members = open.length
+    ? await db<{ shiftId: number; staffId: number; staffName: string; joinedAt: Date }[]>`
+        SELECT m.shift_id, m.staff_id, st.display_name AS staff_name, m.joined_at FROM shift_members m JOIN staff st ON st.id = m.staff_id
+        WHERE m.shift_id IN ${db(open.map((o) => o.id))} AND m.left_at IS NULL ORDER BY m.joined_at, m.id`
+    : [];
+  const shiftOf = (o: (typeof open)[number]) => ({
+    id: o.id,
+    shiftNo: o.shiftNo,
+    startedAt: new Date(o.startedAt).toISOString(),
+    openingCash: Number(o.openingCash),
+    members: members
+      .filter((m) => m.shiftId === o.id)
+      .map((m) => ({ staffId: m.staffId, staffName: m.staffName, joinedAt: new Date(m.joinedAt).toISOString(), leftAt: null })),
+  });
+  const listed = new Set(settings.cashDrawers.map((d) => d.key));
+  const drawers: DrawerBoard['drawers'] = [
+    ...settings.cashDrawers
+      .map((d) => ({ d, o: open.find((x) => x.drawer === d.key) }))
+      .filter(({ d, o }) => d.active || o)
+      .map(({ d, o }) => ({ key: d.key, name: d.label, active: d.active, shift: o ? shiftOf(o) : null })),
+    // 清单里没有了的钱箱（不会发生：钱箱只能停用不能删），开着的班照样列出来
+    ...open.filter((o) => !listed.has(o.drawer)).map((o) => ({ key: o.drawer, name: o.drawerName, active: false, shift: shiftOf(o) })),
+  ];
+  return { mode: settings.shiftMode, drawers, mine: await openShiftOf(db, actorId) };
+}
+
+const StartInput = z.object({
+  openingCash: cents('备用金'),
+  /** 按钱箱交班时在哪个钱箱开班（按人交班时不填） */
+  drawer: z.string().regex(CASH_DRAWER_KEY, '钱箱不正确，请刷新后重新选择').nullable().optional(),
+});
 const CloseInput = z.object({
   countedCash: cents('实点现金'),
   /**
@@ -361,28 +496,119 @@ const CloseInput = z.object({
   handedTo: z.number().int().positive().nullable().default(null),
 });
 
+/** 本人此刻所在的班次：已经在一个班次上的不能再开班或加入别的钱箱 */
+async function assertNotOnShift(tx: Tx, staffId: number) {
+  const [mine] = await tx<{ shiftNo: string; drawerName: string | null }[]>`
+    SELECT s.shift_no, s.drawer_name FROM shift_members m JOIN shifts s ON s.id = m.shift_id
+    WHERE m.staff_id = ${staffId} AND m.left_at IS NULL`;
+  if (mine) {
+    throw conflict(
+      'SHIFT_OPEN',
+      mine.drawerName ? `你还在${mine.drawerName}的班次 ${mine.shiftNo} 上，请先离开钱箱或交班` : `你还有未交班的班次 ${mine.shiftNo}，请先交班`,
+      { shiftNo: mine.shiftNo },
+    );
+  }
+}
+
+/** 同一位员工同时开两次、同一个钱箱同时开两次：唯一索引兜底，换成和先查时一样的提示 */
+function shiftConflict(e: unknown): never {
+  if (isUniqueViolation(e, 'shift_members_current_uq')) throw conflict('SHIFT_OPEN', '你已经在一个班次上了，请刷新后再看');
+  if (isUniqueViolation(e, 'shifts_drawer_open_uq')) throw conflict('DRAWER_OPEN', '这个钱箱刚刚有人开班了，请刷新后点「加入」');
+  throw e;
+}
+
 export async function startShift(deps: Deps, raw: unknown, ctx: OpContext): Promise<ShiftRecord> {
   const input = parse(StartInput, raw);
   const at = ctx.at ?? new Date();
-  const id = await deps.sql.begin(async (tx) => {
-    const [open] = await tx<{ shiftNo: string }[]>`SELECT shift_no FROM shifts WHERE staff_id = ${ctx.actor.id} AND status = 'open' FOR UPDATE`;
-    if (open) throw conflict('SHIFT_OPEN', `你还有未交班的班次 ${open.shiftNo}，请先交班`);
-    const settings = await loadSettings(tx);
-    const date = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
-    const shiftNo = await nextDocNo(tx, 'shift', 'BC', date);
-    const [row] = await tx<{ id: number }[]>`
-      INSERT INTO shifts (shift_no, staff_id, business_date, started_at, opening_cash)
-      VALUES (${shiftNo}, ${ctx.actor.id}, ${date}, ${at}, ${input.openingCash}) RETURNING id`;
+  const id = await deps.sql
+    .begin(async (tx) => {
+      await assertNotOnShift(tx, ctx.actor.id);
+      const settings = await loadSettings(tx);
+      // 按钱箱交班：选一个启用的、还没开班的钱箱；按人交班不选钱箱
+      let drawer: { key: string; label: string } | null = null;
+      if (settings.shiftMode === 'drawer') {
+        if (!input.drawer) throw badRequest('现在是按钱箱交班：请选择在哪个钱箱开班');
+        const d = settings.cashDrawers.find((x) => x.key === input.drawer);
+        if (!d || !d.active) throw badRequest('这个钱箱不存在或已停用，请刷新后重新选择');
+        const [open] = await tx<{ id: number; shiftNo: string }[]>`SELECT id, shift_no FROM shifts WHERE drawer = ${d.key} AND status = 'open'`;
+        if (open) throw conflict('DRAWER_OPEN', `${d.label}已经开班（班次 ${open.shiftNo}），请点「加入」`, { shiftId: open.id, shiftNo: open.shiftNo });
+        drawer = { key: d.key, label: d.label };
+      } else if (input.drawer) {
+        throw conflict('SHIFT_MODE_CHANGED', '现在是按人交班，开班不用选钱箱；请刷新页面后再开班');
+      }
+      const date = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
+      const shiftNo = await nextDocNo(tx, 'shift', 'BC', date);
+      // 开班人自动加入这个班次（触发器写当班成员）
+      const [row] = await tx<{ id: number }[]>`
+        INSERT INTO shifts (shift_no, staff_id, business_date, started_at, opening_cash, drawer, drawer_name)
+        VALUES (${shiftNo}, ${ctx.actor.id}, ${date}, ${at}, ${input.openingCash}, ${drawer?.key ?? null}, ${drawer?.label ?? null}) RETURNING id`;
+      await writeAudit(tx, {
+        staffId: ctx.actor.id,
+        action: 'shift_started',
+        targetType: 'shift',
+        targetId: row!.id,
+        detail: { docNo: shiftNo, openingCash: input.openingCash, ...(drawer ? { drawer: drawer.label } : {}) },
+        ip: ctx.ip,
+        businessDate: date,
+      });
+      return row!.id;
+    })
+    .catch(shiftConflict);
+  return getShift(deps.sql, id);
+}
+
+/**
+ * 按钱箱交班：加入同一个钱箱开着的班次，之后本人的收款记到这个班次。对班次加共享锁（与交班串行：交班之后不能再加入）；
+ * 已经在一个班次上的不能加入（先离开钱箱或交班）。
+ */
+export async function joinShift(deps: Deps, id: number, ctx: OpContext): Promise<ShiftRecord> {
+  const at = ctx.at ?? new Date();
+  await deps.sql
+    .begin(async (tx) => {
+      const [s] = await tx<{ id: number; shiftNo: string; status: string; drawerName: string | null; businessDate: string }[]>`
+        SELECT id, shift_no, status, drawer_name, to_char(business_date, 'YYYY-MM-DD') AS business_date FROM shifts WHERE id = ${id} FOR SHARE`;
+      if (!s) throw notFound('班次不存在');
+      if (s.status !== 'open') throw conflict('SHIFT_CLOSED', `班次 ${s.shiftNo} 已交班，不能再加入；请在这个钱箱开新班`);
+      if (s.drawerName === null) throw conflict('NOT_DRAWER_SHIFT', `班次 ${s.shiftNo} 是按人交班开的，不能加入；请自己开班`);
+      await assertNotOnShift(tx, ctx.actor.id);
+      await tx`INSERT INTO shift_members (shift_id, staff_id, joined_at) VALUES (${s.id}, ${ctx.actor.id}, ${at})`;
+      await writeAudit(tx, {
+        staffId: ctx.actor.id,
+        action: 'shift_joined',
+        targetType: 'shift',
+        targetId: s.id,
+        detail: { docNo: s.shiftNo, drawer: s.drawerName },
+        ip: ctx.ip,
+        businessDate: s.businessDate,
+      });
+    })
+    .catch(shiftConflict);
+  return getShift(deps.sql, id);
+}
+
+/**
+ * 按钱箱交班：离开钱箱（例如下班、换到别的钱箱），班次照常开着，钱箱里的钱等交班时一起点；之后本人的收款不再记到这个班次。
+ * 只锁本人那一条当班记录（交班时也要改它，二者串行）；按人交班的班次不能离开，要交班。
+ */
+export async function leaveShift(deps: Deps, id: number, ctx: OpContext): Promise<ShiftRecord> {
+  const at = ctx.at ?? new Date();
+  await deps.sql.begin(async (tx) => {
+    const [m] = await tx<{ id: number; shiftNo: string; drawerName: string | null; businessDate: string }[]>`
+      SELECT m.id, s.shift_no, s.drawer_name, to_char(s.business_date, 'YYYY-MM-DD') AS business_date
+      FROM shift_members m JOIN shifts s ON s.id = m.shift_id
+      WHERE m.shift_id = ${id} AND m.staff_id = ${ctx.actor.id} AND m.left_at IS NULL FOR UPDATE OF m`;
+    if (!m) throw conflict('NOT_ON_SHIFT', '你现在不在这个班次上（可能已经交班），请刷新');
+    if (m.drawerName === null) throw conflict('NOT_DRAWER_SHIFT', `班次 ${m.shiftNo} 是按人交班开的，不能离开，请交班`);
+    await tx`UPDATE shift_members SET left_at = greatest(${at}::timestamptz, joined_at), left_by = ${ctx.actor.id} WHERE id = ${m.id}`;
     await writeAudit(tx, {
       staffId: ctx.actor.id,
-      action: 'shift_started',
+      action: 'shift_left',
       targetType: 'shift',
-      targetId: row!.id,
-      detail: { docNo: shiftNo, openingCash: input.openingCash },
+      targetId: id,
+      detail: { docNo: m.shiftNo, drawer: m.drawerName },
       ip: ctx.ip,
-      businessDate: date,
+      businessDate: m.businessDate,
     });
-    return row!.id;
   });
   return getShift(deps.sql, id);
 }
@@ -392,13 +618,20 @@ export async function closeShift(deps: Deps, id: number, raw: unknown, ctx: OpCo
   await deps.sql.begin(async (tx) => {
     // 排他锁：等已对本班次加了共享锁、正在入账的收款提交后再汇总（它们计入本班次）；
     // 之后才拿锁的收款看到本班次已交，不会记进来，所以汇总快照不会漏掉记在本班次的单据
-    const [s] = await tx<(ShiftScope & { shiftNo: string; status: string })[]>`
-      SELECT id, shift_no, staff_id, status, started_at, opening_cash, legacy_window, legacy_refund FROM shifts WHERE id = ${id} FOR UPDATE`;
+    const [s] = await tx<(ShiftScope & { shiftNo: string; status: string; onShift: boolean })[]>`
+      SELECT id, shift_no, staff_id, status, started_at, opening_cash, legacy_window, legacy_refund, drawer_name,
+             EXISTS (SELECT 1 FROM shift_members m WHERE m.shift_id = shifts.id AND m.staff_id = ${ctx.actor.id} AND m.left_at IS NULL) AS on_shift
+      FROM shifts WHERE id = ${id} FOR UPDATE`;
     // 交班时刻取在拿到锁之后：快照里的单据都不晚于交班时刻
     const at = ctx.at ?? new Date();
     if (!s) throw notFound('班次不存在');
     if (s.status !== 'open') throw conflict('SHIFT_CLOSED', `班次 ${s.shiftNo} 已交班`);
-    if (s.staffId !== ctx.actor.id && !can(ctx.actor, 'frontdesk.correct')) throw forbidden('只能交自己的班；替别人交班需要值班经理及以上');
+    // 按人交班：本人交本人的班；按钱箱交班：此刻在这个钱箱上的人都可以交（交班后所有人一起离开）；值班经理及以上可以替别人交
+    if (s.drawerName === null ? s.staffId !== ctx.actor.id : !s.onShift) {
+      if (!can(ctx.actor, 'frontdesk.correct')) {
+        throw forbidden(s.drawerName === null ? '只能交自己的班；替别人交班需要值班经理及以上' : `你不在${s.drawerName}的班次上；替别人交班需要值班经理及以上`);
+      }
+    }
     if (input.handedTo === s.staffId) throw conflict('HANDOVER_SELF', '接班人不能是交班人自己');
     const summary = await shiftSummary(tx, s, at);
     if (summary.cash.expected !== input.expectedCash) {
@@ -414,7 +647,14 @@ export async function closeShift(deps: Deps, id: number, raw: unknown, ctx: OpCo
       action: 'shift_closed',
       targetType: 'shift',
       targetId: s.id,
-      detail: { docNo: s.shiftNo, expectedCash: summary.cash.expected, countedCash: input.countedCash, diff: input.countedCash - summary.cash.expected, note: input.note },
+      detail: {
+        docNo: s.shiftNo,
+        expectedCash: summary.cash.expected,
+        countedCash: input.countedCash,
+        diff: input.countedCash - summary.cash.expected,
+        note: input.note,
+        ...(s.drawerName ? { drawer: s.drawerName } : {}),
+      },
       ip: ctx.ip,
       businessDate: businessDateOf(at, deps.config.timezone, settings.businessDayStartHour),
     });
@@ -434,18 +674,32 @@ export function registerShiftRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/shifts', { preHandler: guard('ledger.readToday') }, async (req) => {
     const { date } = parse(z.object({ date: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD').optional() }), req.query ?? {});
     const list = await listShifts(sql, await resolveReadableDate(deps, req, date));
-    // 别人的班次（备用金、实点现金、长短款）与单个班次同一规则：只给能看历史营业日的岗位（默认值班经理及以上）
-    return can(req.actor, 'ledger.readHistory') ? list : list.filter((s) => s.staffId === req.actor.id);
+    // 别人的班次（备用金、实点现金、长短款）与单个班次同一规则：只给能看历史营业日的岗位（默认值班经理及以上）；
+    // 按钱箱交班时在上面待过的人也能看
+    return list.filter((s) => canSeeShift(req.actor, s));
   });
+
+  // 按钱箱交班时开班选钱箱（v0.7.28 ⑨）；按人交班时 mode 为 person，页面照旧只填备用金
+  app.get('/api/shifts/drawers', { preHandler: guard('ledger.readToday') }, async (req) => drawerBoard(sql, req.actor.id));
 
   app.get('/api/shifts/:id', { preHandler: guard('ledger.readToday') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const shift = await getShift(sql, id);
-    if (shift.staffId !== req.actor.id && !can(req.actor, 'ledger.readHistory')) throw forbidden('只能查看自己的班次');
+    if (!canSeeShift(req.actor, shift)) throw forbidden('只能查看自己的班次');
     return shift;
   });
 
   app.post('/api/shifts', { preHandler: guard('ledger.readToday') }, async (req) => startShift(deps, req.body, ctxOf(req)));
+
+  app.post('/api/shifts/:id/join', { preHandler: guard('ledger.readToday') }, async (req) => {
+    const { id } = parse(idParam, req.params);
+    return joinShift(deps, id, ctxOf(req));
+  });
+
+  app.post('/api/shifts/:id/leave', { preHandler: guard('ledger.readToday') }, async (req) => {
+    const { id } = parse(idParam, req.params);
+    return leaveShift(deps, id, ctxOf(req));
+  });
 
   app.post('/api/shifts/:id/close', { preHandler: guard('ledger.readToday') }, async (req) => {
     const { id } = parse(idParam, req.params);
