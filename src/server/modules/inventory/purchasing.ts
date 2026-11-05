@@ -482,7 +482,7 @@ async function approveLocked(tx: Tx, po: PoRow, actor: Actor, reason = '') {
 }
 
 /**
- * 询价门槛（v0.7.29 ERP 采购五项⑤，E5）：合计到门槛、第一次提交（没改过版）、不是补单、不是演示数据的采购单，
+ * 询价门槛（v0.7.29 ERP 采购五项⑤，E5）：合计到门槛、没改过版（退回修改后再提交也算）、不是补单、不是演示数据的采购单，
  * 要来自已定标的询价单、供应商与中标的一致（QUOTES_REQUIRED）。在采购单的锁里调用；只读询价单、不加锁。
  */
 export async function assertQuotesForPo(tx: Tx, poId: number) {
@@ -507,7 +507,7 @@ export async function assertQuotesForPo(tx: Tx, poId: number) {
 async function submitLocked(tx: Tx, po: PoRow, actor: Actor, approveNow: boolean, deptConfirm = false) {
   if (po.status === 'submitted' || po.status === 'approved') return;
   if (po.status !== 'draft' && po.status !== 'returned') throw conflict('INVALID_STATE', '采购单当前状态不能提交');
-  // 询价门槛（v0.7.29 E5）：合计到门槛、第一次提交的采购单要来自已定标的询价单
+  // 询价门槛（v0.7.29 E5）：合计到门槛、没改过版的采购单要来自已定标的询价单
   await assertQuotesForPo(tx, po.id);
   await tx`UPDATE purchase_orders SET status = 'submitted', submitted_by = ${actor.id}, submitted_at = now(), updated_at = now() WHERE id = ${po.id}`;
   await logApproval(tx, 'purchase_order', po.id, 'submit', actor.id, '', po.revision);
