@@ -8,7 +8,9 @@ import type {
   ExpenseRules,
   PettyAdvance,
   PettyAdvanceSummary,
+  PettyAccountRow,
   PettyDaily,
+  PettyJournal,
   PoCandidate,
   PoForClaim,
   StaffRef,
@@ -29,6 +31,8 @@ export const ek = {
   poForClaim: (id: number) => ['inv', 'po-for-claim', id] as const,
   toClaim: ['inv', 'to-claim'] as const,
   prefill: (id: number) => ['inv', 'claim-prefill', id] as const,
+  pettyAccounts: ['inv', 'petty-accounts'] as const,
+  pettyJournal: (id: number, from: string, to: string) => ['inv', 'petty-journal', id, from, to] as const,
 };
 
 export function useInvalidateExpenses() {
@@ -101,4 +105,17 @@ export const useClaimPrefill = (poId: number | null) =>
     enabled: !!poId,
     staleTime: 0,
     gcTime: 0,
+  });
+
+/** 部门备用金看板（v0.7.29 ERP 采购五项③） */
+export const usePettyAccounts = (enabled = true) =>
+  useQuery({ queryKey: ek.pettyAccounts, queryFn: () => api.get<PettyAccountRow[]>('/api/erp/petty/accounts'), enabled });
+
+/** 一个部门的备用金台账（期初、逐笔、每笔之后的余额、期末） */
+export const usePettyJournal = (departmentId: number | null, from: string, to: string) =>
+  useQuery({
+    queryKey: ek.pettyJournal(departmentId ?? 0, from, to),
+    queryFn: () => api.get<PettyJournal>(`/api/erp/petty/accounts/${departmentId}/journal?${search({ from, to })}`),
+    enabled: !!departmentId && from <= to,
+    placeholderData: keepPreviousData,
   });

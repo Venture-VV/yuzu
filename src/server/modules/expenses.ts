@@ -336,6 +336,15 @@ async function claimTotals(db: Db, f: ClaimFilter): Promise<ExpenseClaimList['to
   return { confirmedCents: Number(t!.confirmedCents), pendingCents: Number(t!.pendingCents), count: t!.count };
 }
 
+/** 用这个部门的备用金、还没确认的报销（部门备用金台账下方列出，不算进余额；v0.7.29） */
+export async function listClaimsForAdvanceDept(db: Db, departmentId: number): Promise<ExpenseClaimSummary[]> {
+  const ids = await db<{ id: number }[]>`
+    SELECT c.id FROM expense_claims c JOIN petty_advances a ON a.id = c.advance_id
+    WHERE a.department_id = ${departmentId} AND a.status = 'active' AND c.status IN ('submitted', 'returned')
+    ORDER BY c.expense_date, c.id LIMIT 200`;
+  return ids.length ? claimSummaries(db, { ids: ids.map((i) => Number(i.id)) }) : [];
+}
+
 export async function listClaims(db: Db, f: ClaimFilter): Promise<ExpenseClaimList> {
   const claims = await claimSummaries(db, f, CLAIM_LIST_LIMIT);
   const totals = await claimTotals(db, f);

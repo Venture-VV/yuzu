@@ -278,3 +278,94 @@ describe('② 采购单一键转报销（E2）', () => {
     expect((await api(ctx.app, buyer, 'GET', `/api/purchase-orders/${creditPo.id}`)).body.reimbursement.settlement).toBe('credit');
   });
 });
+
+describe('③ 部门备用金台账（E3）', () => {
+  it('看板：余额、在手、待补付、待确认、本月支出、建议补足；台账逐笔带余额、期初期末、明细与途径；设置带版本号；自检一致', async () => {
+    const { pettyAccountChecks } = await import('../src/server/modules/petty-accounts');
+    await api(ctx.app, boss, 'POST', '/api/inventory/departments', { name: '水吧' });
+    const deptB = (await api(ctx.app, boss, 'GET', '/api/inventory/departments?all=1')).body.find((d: { name: string }) => d.name === '水吧').id as number;
+    const daysAgo = (n: number) => new Date(Date.parse(`${today}T00:00:00Z`) - n * 86_400_000).toISOString().slice(0, 10);
+
+    // 设置：只有能登记打款的人能改；版本号对不上的拒绝
+    expect((await api(ctx.app, keeper, 'PUT', `/api/erp/petty/accounts/${deptB}`, { custodianId: costerId, limitCents: 300_000, version: 0 })).status).toBe(403);
+    const set = await api(ctx.app, coster, 'PUT', `/api/erp/petty/accounts/${deptB}`, { custodianId: costerId, limitCents: 300_000, note: '水吧零用', version: 0 });
+    expect(set.status).toBe(200);
+    expect(set.body).toMatchObject({ custodian: { id: costerId }, limitCents: 300_000, note: '水吧零用', version: 1 });
+    expect((await api(ctx.app, coster, 'PUT', `/api/erp/petty/accounts/${deptB}`, { custodianId: null, limitCents: 300_000, version: 0 })).body.error.code).toBe('VERSION_CONFLICT');
+    expect((await api(ctx.app, coster, 'PUT', `/api/erp/petty/accounts/${deptB}`, { custodianId: costerId, limitCents: 0, version: 1 })).status).toBe(400);
+
+    const advance = async (advanceDate: string, amountCents: number) =>
+      (await api(ctx.app, coster, 'POST', '/api/erp/petty/advances', {
+        clientKey: randomUUID(),
+        departmentId: deptB,
+        handlerId: costerId,
+        advanceDate,
+        amountCents,
+        method: 'cash',
+        evidence: '现金当面点清',
+      })).body.advance;
+    const old = await advance(daysAgo(3), 30_000);
+    const a1 = await advance(today, 200_000);
+    const pettyClaim = (advanceId: number, amountCents: number, body: Record<string, unknown> = {}) =>
+      claim({ departmentId: deptB, paySource: 'petty', advanceId, lines: [{ name: '柠檬', category: 'low_value', unit: '斤', boughtMilli: q(5), receivedMilli: q(5), amountCents }], ...body });
+    const c1 = (await pettyClaim(a1.id, 50_000, { channel: 'wholesale', channelNote: '水果档' })).body.claim;
+    expect(c1.status).toBe('confirmed');
+    // 超过确认门槛（¥2,000）的待确认，不算进余额
+    const c2 = (await pettyClaim(a1.id, 210_000)).body.claim;
+    expect(c2.status).toBe('submitted');
+    // 旧的那笔花超了：经办人垫了 ¥100，等公司补付
+    const c3 = (await pettyClaim(old.id, 40_000, { expenseDate: daysAgo(2) })).body.claim;
+    expect(c3.status).toBe('confirmed');
+    const ret = await api(ctx.app, coster, 'POST', '/api/erp/petty/settlements', {
+      clientKey: randomUUID(),
+      advanceId: a1.id,
+      kind: 'return',
+      settleDate: today,
+      amountCents: 50_000,
+      method: 'cash',
+      evidence: '退回现金',
+    });
+    expect(ret.status).toBe(201);
+
+    // 看板：a1 未退回 200,000 − 50,000 − 50,000 = 100,000；旧的 30,000 − 40,000 = −10,000
+    const board = (await api(ctx.app, keeper, 'GET', '/api/erp/petty/accounts')).body as { department: { id: number } }[];
+    expect(board.find((r) => r.department.id === deptB)).toMatchObject({
+      custodian: { id: costerId },
+      limitCents: 300_000,
+      balanceCents: 90_000,
+      inHandCents: 100_000,
+      owedCents: 10_000,
+      pendingCents: 210_000,
+      monthSpentCents: today.slice(0, 7) === daysAgo(2).slice(0, 7) ? 90_000 : 50_000,
+      openAdvances: 2,
+      overdue: 0,
+      topUpCents: 210_000,
+      lastDate: today,
+    });
+
+    // 台账：今天这一段的期初 = 之前的 30,000 − 40,000；逐笔带余额
+    const j = (await api(ctx.app, keeper, 'GET', `/api/erp/petty/accounts/${deptB}/journal?from=${today}&to=${today}`)).body;
+    expect(j).toMatchObject({ openingCents: -10_000, inCents: 200_000, outCents: 100_000, closingCents: 90_000, limitCents: 300_000, truncated: false });
+    expect(j.entries.map((e: { kind: string; deltaCents: number; balanceCents: number }) => [e.kind, e.deltaCents, e.balanceCents])).toEqual([
+      ['advance', 200_000, 190_000],
+      ['expense', -50_000, 140_000],
+      ['return', -50_000, 90_000],
+    ]);
+    const exp = j.entries.find((e: { kind: string }) => e.kind === 'expense');
+    expect(exp).toMatchObject({ docNo: c1.docNo, description: '办公', channel: '批发市场 · 水果档', items: [{ name: '柠檬', boughtMilli: q(5), unit: '斤', amountCents: 50_000 }] });
+    expect(j.pending.map((c: { id: number }) => c.id)).toEqual([c2.id]);
+    // 整段：期初 0，期末与看板相同
+    const all = (await api(ctx.app, keeper, 'GET', `/api/erp/petty/accounts/${deptB}/journal?from=${daysAgo(5)}&to=${today}`)).body;
+    expect(all).toMatchObject({ openingCents: 0, closingCents: 90_000 });
+    expect(all.entries).toHaveLength(5);
+
+    // 导出：要导出权限
+    expect((await api(ctx.app, keeper, 'GET', `/api/erp/petty/accounts/${deptB}/journal/export?from=${today}&to=${today}`)).status).toBe(403);
+    const csv = String((await api(ctx.app, approver, 'GET', `/api/erp/petty/accounts/${deptB}/journal/export?from=${today}&to=${today}`)).body);
+    expect(csv).toContain('期初余额');
+    expect(csv).toContain(c1.docNo);
+    expect(csv).toContain('柠檬 5斤');
+
+    for (const c of await pettyAccountChecks(ctx.sql)) expect(c, c.detail).toMatchObject({ ok: true });
+  });
+});

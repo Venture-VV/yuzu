@@ -302,3 +302,72 @@ export interface PoReimbursement {
   /** 还没在有效报销单里的行 */
   unclaimedLines: number;
 }
+
+// ───────────────────────── 部门备用金台账（v0.7.29 ERP 采购五项③，docs/ERP_PURCHASING.md 第 4 节） ─────────────────────────
+
+/** 部门备用金看板的一行（E3）：余额 = 有效打款 − 用备用金的已确认报销 − 退回 + 补付（= 各笔打款的未退回之和） */
+export interface PettyAccountRow {
+  department: { id: number; name: string; active: boolean };
+  custodian: StaffRef | null;
+  /** 定额（可空） */
+  limitCents: number | null;
+  note: string;
+  /** 设置的版本号；0 = 还没设过 */
+  version: number;
+  balanceCents: number;
+  /** 在手：没平的打款里还在经办人手里的 */
+  inHandCents: number;
+  /** 待补付：经办人垫了、等公司补的 */
+  owedCents: number;
+  /** 用备用金、还没确认的报销（确认后才算支出） */
+  pendingCents: number;
+  /** 本月（自然月）已确认的支出 */
+  monthSpentCents: number;
+  openAdvances: number;
+  overdue: number;
+  /** 建议补足 = 定额 − 余额（设了定额、余额不到定额时） */
+  topUpCents: number | null;
+  lastDate: string | null;
+}
+
+export type PettyJournalKind = 'advance' | 'expense' | 'return' | 'topup';
+export const PETTY_JOURNAL_LABELS: Record<PettyJournalKind, string> = { advance: '打款', expense: '支出', return: '退回', topup: '补付' };
+
+export interface PettyJournalEntry {
+  kind: PettyJournalKind;
+  date: string;
+  docNo: string;
+  /** 打款、报销单、退回补付单的编号（打开详情用） */
+  refId: number;
+  advanceId: number;
+  advanceNo: string;
+  handler: StaffRef;
+  /** 打款、退回、补付：方式与凭据；支出：用途 */
+  description: string;
+  /** 支出：明细 */
+  items: { name: string; boughtMilli: number; unit: string; amountCents: number }[];
+  channel: string | null;
+  poNo: string | null;
+  /** 进为正（打款、补付），出为负（支出、退回） */
+  deltaCents: number;
+  /** 这一笔之后的余额 */
+  balanceCents: number;
+}
+
+export interface PettyJournal {
+  department: { id: number; name: string };
+  from: string;
+  to: string;
+  custodian: StaffRef | null;
+  limitCents: number | null;
+  /** 期初余额（开始日期之前的） */
+  openingCents: number;
+  entries: PettyJournalEntry[];
+  closingCents: number;
+  inCents: number;
+  outCents: number;
+  /** 用备用金、还没确认的报销（不算进余额） */
+  pending: ExpenseClaimSummary[];
+  /** 逐笔只显示前 3000 笔（期末余额仍按全部算） */
+  truncated: boolean;
+}

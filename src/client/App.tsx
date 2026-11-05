@@ -45,6 +45,7 @@ const RevenuePage = lazyPage(() => import('./features/erp/RevenuePage').then((m)
 const ExpensesPage = lazyPage(() => import('./features/expenses/ExpensesPage').then((m) => m.ExpensesPage));
 const ClaimFormPage = lazyPage(() => import('./features/expenses/ClaimFormPage').then((m) => m.ClaimFormPage));
 const PettyPage = lazyPage(() => import('./features/expenses/PettyPage').then((m) => m.PettyPage));
+const PettyAccountsPage = lazyPage(() => import('./features/expenses/PettyAccountsPage').then((m) => m.PettyAccountsPage));
 const RequestsPage = lazyPage(() => import('./features/requests/RequestsPage').then((m) => m.RequestsPage));
 const RequestFormPage = lazyPage(() => import('./features/requests/RequestFormPage').then((m) => m.RequestFormPage));
 const DeptStockPage = lazyPage(() => import('./features/dept-stock/DeptStockPage').then((m) => m.DeptStockPage));
@@ -190,6 +191,7 @@ const router = createBrowserRouter([
       { path: 'expenses', element: <ExpensesPage /> },
       { path: 'expenses/new', element: <ClaimFormPage /> },
       { path: 'petty', element: <PettyPage /> },
+      { path: 'petty/accounts', element: <PettyAccountsPage /> },
       { path: 'requests', element: <RequestsPage /> },
       { path: 'dept-stock', element: <DeptStockPage /> },
       { path: 'dept-stock/new/:type', element: <DeptDocFormPage /> },

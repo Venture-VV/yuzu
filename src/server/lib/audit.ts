@@ -36,6 +36,8 @@ export type AuditAction =
   | 'erp_import'
   | 'expense_doc'
   | 'petty_doc'
+  | 'petty_account'
+  | 'sourcing_doc'
   | 'purchase_request'
   | 'erp_image'
   | 'erp_op_abandoned'
