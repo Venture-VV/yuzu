@@ -446,6 +446,76 @@ describe('Codex 自动审查 2cfd28b：新建规则与设代理人的「结果�
   });
 });
 
+describe('Codex 自动审查 c0acccf：没收到结果时按原级别重新提交、店主的代理人会签', () => {
+  it('按原审批单与级别原样再发：上次已经生效的不重复记（单张、批量、退回都一样），不会多同意一级；不是自己审过的这一级拒绝（APPROVAL_MOVED）', async () => {
+    const r = await rule({ docType: 'payment', minCents: 432_100, maxCents: 432_101, steps: [{ group: 'manager' }, { group: 'owner' }] });
+    try {
+      const p = await payment(4_321);
+      const rid = p.approval!.requestId;
+      const actions = async () => (await ctx.sql<{ level: number; action: string }[]>`SELECT level, action FROM approval_actions WHERE request_id = ${rid} ORDER BY id`).map((a) => `${a.level}:${a.action}`);
+      const state = async () => (await ctx.sql<{ status: string; currentLevel: number }[]>`SELECT status, current_level FROM approval_requests WHERE id = ${rid}`)[0];
+      // 店主同意第 1 级（店主每一级都能审）：进第 2 级；页面没收到结果
+      expect((await approve(boss, rid, 1)).body).toMatchObject({ status: 'pending', currentLevel: 2 });
+      // 按原内容（第 1 级）重新提交：单张、批量都按成功返回，不重复记、不会同意第 2 级
+      expect((await approve(boss, rid, 1)).status).toBe(200);
+      const batch = await api(ctx.app, boss, 'POST', '/api/approvals/batch-approve', { items: [{ id: rid, level: 1 }], comment: '' });
+      expect(batch.body.results[0]).toMatchObject({ ok: true });
+      expect(await state()).toMatchObject({ status: 'pending', currentLevel: 2 });
+      expect(await actions()).toEqual(['1:approve']);
+      expect((await ctx.sql<{ status: string }[]>`SELECT status FROM payments WHERE id = ${p.id}`)[0]?.status).toBe('submitted');
+      // 别人拿着第 1 级来：这一级不是他审的，拒绝
+      const moved = await approve(mgrA, rid, 1);
+      expect(moved.status).toBe(409);
+      expect(moved.body.error.code).toBe('APPROVAL_MOVED');
+      // 退回同样：上次的退回已经生效，原样再发按成功返回、不重复记
+      const back = { level: 2, reason: '金额再核对' };
+      expect((await api(ctx.app, boss, 'POST', `/api/approvals/${rid}/return`, back)).status).toBe(200);
+      expect((await api(ctx.app, boss, 'POST', `/api/approvals/${rid}/return`, back)).status).toBe(200);
+      expect(await state()).toMatchObject({ status: 'returned' });
+      expect(await actions()).toEqual(['1:approve', '2:return']);
+      // 退回以后再拿第 2 级来同意：单据不在待确认，拒绝（上次那次到得再晚也一样）
+      expect((await approve(boss, rid, 2)).status).toBe(409);
+    } finally {
+      await deactivate(r);
+    }
+  });
+
+  it('店主请假设了代理人：会签这一级代理人能替店主同意（店主同意即这一级通过，记「代 店主」），待我审批里也有；收回后不能', async () => {
+    const [owner] = await ctx.sql<{ id: number; displayName: string }[]>`SELECT id, display_name FROM staff WHERE username = 'linlan'`;
+    const set = await api(ctx.app, boss, 'POST', '/api/approvals/delegations', { clientKey: randomUUID(), staffId: owner!.id, delegateId: ids.shop_boss, startsOn: today, endsOn: today, reason: '店主请假' });
+    expect(set.status, JSON.stringify(set.body)).toBe(201);
+    let revoked = false;
+    const r = await rule({ docType: 'damage', minCents: 0, steps: [{ staffIds: [ids.mgr_a!, ids.mgr_b!], mode: 'all' }] });
+    try {
+      // 指定的两人都还没同意
+      const d1 = await damage();
+      const rid1 = d1.approval!.requestId;
+      expect((await mine(shopBoss)).find((c) => c.id === rid1)).toMatchObject({ canAct: true, actingFor: [owner!.displayName] });
+      const res = await approve(shopBoss, rid1, 1, '替店主审');
+      expect(res.body).toMatchObject({ status: 'approved' });
+      expect(res.body.levelsDetail[0].actions.at(-1)).toMatchObject({ actorName: '店总丙', onBehalfOfName: owner!.displayName, comment: '替店主审' });
+      expect((await api(ctx.app, keeper, 'GET', `/api/inventory/docs/${d1.id}`)).body.status).toBe('confirmed');
+      // 已经有一人同意、还差一人：同样替店主同意即通过；再点一次不重复记
+      const d2 = await damage();
+      const rid2 = d2.approval!.requestId;
+      expect((await approve(mgrA, rid2, 1)).body).toMatchObject({ status: 'pending' });
+      expect((await approve(shopBoss, rid2, 1)).body).toMatchObject({ status: 'approved' });
+      expect((await approve(shopBoss, rid2, 1)).status).toBe(200);
+      expect((await ctx.sql`SELECT 1 FROM approval_actions WHERE request_id = ${rid2} AND action = 'approve'`).length).toBe(2);
+      // 收回后不能
+      expect((await api(ctx.app, boss, 'POST', `/api/approvals/delegations/${set.body.id}/revoke`, {})).status).toBe(200);
+      revoked = true;
+      const d3 = await damage();
+      expect((await mine(shopBoss)).some((c) => c.id === d3.approval!.requestId)).toBe(false);
+      expect((await approve(shopBoss, d3.approval!.requestId, 1)).body.error.code).toBe('APPROVAL_NOT_ELIGIBLE');
+      expect((await approve(boss, d3.approval!.requestId, 1)).body).toMatchObject({ status: 'approved' });
+    } finally {
+      await deactivate(r);
+      if (!revoked) await api(ctx.app, boss, 'POST', `/api/approvals/delegations/${set.body.id}/revoke`, {});
+    }
+  });
+});
+
 describe('盘点差异审批（A8）、急采待补单（A10）、数据隔离（A9）', () => {
   it('总仓盘点的大差异要写原因类别与说明才能提交；提交后在审批中心看到账面、实盘、差异、比例与原因', async () => {
     const stock = (await api(ctx.app, keeper, 'GET', `/api/inventory/materials/${mat.id}`)).body.stockMilli as number;

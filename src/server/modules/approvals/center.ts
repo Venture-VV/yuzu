@@ -180,7 +180,10 @@ function myStanding(req: RequestRow, v: Viewer, actions: ApprovalActionView[]): 
   const filled = new Set(actions.filter((a) => a.level === req.currentLevel && a.action === 'approve').map((a) => a.onBehalfOf ?? a.actorId));
   const mine = st.self && required.includes(v.actor.id) && !filled.has(v.actor.id);
   const behalf = st.behalf.filter((b) => required.includes(b) && !filled.has(b));
-  return { canAct: mine || behalf.length > 0, actingFor: mine ? [] : behalf };
+  // 代理店主：会签时代理人能替店主同意（店主同意即这一级通过），与 approveCurrent 一致
+  const owner = st.behalf.find((b) => !filled.has(b) && v.delegators.some((d) => d.id === b && d.role === 'owner'));
+  if (owner !== undefined && !behalf.includes(owner)) behalf.push(owner);
+  return { canAct: mine || behalf.length > 0, actingFor: mine && owner === undefined ? [] : behalf };
 }
 
 async function toCards(db: Db, reqs: RequestRow[], v: Viewer): Promise<ApprovalCard[]> {

@@ -3,14 +3,15 @@ import { Link } from 'react-router';
 import { Ban, CircleCheck, CornerUpLeft, RotateCcw, Send, X } from 'lucide-react';
 import { PAY_METHOD_LABELS, type OpeningPayableDoc, type PaymentDoc } from '@shared/purchasing';
 import { formatAmount, parseYuan } from '@shared/money';
-import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Dialog, Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
-import { ApprovalProgress, useApprovalGate } from '../approvals/ApprovalProgress';
+import { ApprovalProgress, ApprovalResend, useApprovalGate } from '../approvals/ApprovalProgress';
+import { postDocAction } from '../approvals/uncertain';
 import type { ApprovalBrief } from '@shared/approvals';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Field, IconButton, Input, MoneyInput, Notice, Select, Spinner, InfoItem as Info } from '../../components/ui';
@@ -30,7 +31,8 @@ function useActions(base: string, docNo: string) {
   const run = async (act: Act, body: unknown = {}) => {
     setBusy(act);
     try {
-      await api.post(`${base}/${act}`, body);
+      // 确认、退回带着审批单与级别：没收到结果时记下，之后只能按原内容重新提交（uncertain.ts）
+      await postDocAction(`${base}/${act}`, body, docNo);
       await invalidate();
       toast({ tone: 'success', title: { approve: '已确认', return: '已退回修改', cancel: '已撤回', void: '已冲销', resubmit: '已重新提交' }[act], body: docNo });
       return true;
@@ -82,8 +84,9 @@ function Footer({
   const session = useSession();
   const approve = can('inventory.approve');
   const manage = can('payable.manage');
-  // 审批中心（v0.7.30）：这一级不归我审时只显示在等谁
+  // 审批中心（v0.7.30）：这一级不归我审时只显示在等谁；上次确认、退回没收到结果时只能按原内容重新提交
   const gate = useApprovalGate(approval, kind);
+  const invalidate = useInvalidateAll();
   return (
     <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-line bg-card px-5 py-3.5">
       {status === 'confirmed' && can('finance.void') && (
@@ -101,8 +104,9 @@ function Footer({
           按原内容重新提交
         </Button>
       )}
-      {status === 'submitted' && approve && !gate.canActHere && gate.waiting && <span className="text-[12.5px] text-ink-3">{gate.waiting}</span>}
-      {status === 'submitted' && approve && gate.canActHere && (
+      {status === 'submitted' && approve && gate.uncertain && <ApprovalResend sent={gate.uncertain} onDone={invalidate} />}
+      {status === 'submitted' && approve && !gate.uncertain && !gate.canActHere && gate.waiting && <span className="text-[12.5px] text-ink-3">{gate.waiting}</span>}
+      {status === 'submitted' && approve && !gate.uncertain && gate.canActHere && (
         <>
           <Button variant="secondary" icon={<CornerUpLeft className="size-4" />} onClick={() => onReason('return')}>
             退回修改

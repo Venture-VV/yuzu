@@ -351,6 +351,10 @@ export async function approveCurrent(tx: Tx, kind: ApprovalDocKind, docId: numbe
       const fills: (number | null)[] = [];
       if (standing.self && required.includes(actor.id) && !filled.has(actor.id)) fills.push(null);
       for (const b of standing.behalf) if (required.includes(b) && !filled.has(b)) fills.push(b);
+      // 代理店主（Codex 自动审查 c0acccf）：店主请假设了代理人，代理人能做店主能做的——会签时店主同意即这一级通过，
+      // 代理人替店主同意也一样（记「代 店主」）；本人或别的委托人也有要签的份时一并记上
+      const owner = standing.behalf.find((b) => !filled.has(b) && delegators.some((d) => d.id === b && d.role === 'owner'));
+      if (owner !== undefined && !fills.includes(owner)) fills.push(owner);
       if (fills.length === 0) {
         if ((standing.self && filled.has(actor.id)) || standing.behalf.some((b) => filled.has(b))) return 'already';
         throw await notEligible(tx, req, standing, opts.selfSubmit);
@@ -359,7 +363,7 @@ export async function approveCurrent(tx: Tx, kind: ApprovalDocKind, docId: numbe
         await record(f);
         filled.add(f ?? actor.id);
       }
-      complete = required.every((id) => filled.has(id));
+      complete = owner !== undefined || required.every((id) => filled.has(id));
     }
   }
   if (!complete) return 'partial';

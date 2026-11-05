@@ -1,11 +1,15 @@
 // 单据详情里的「审批进度」（v0.7.30）：审批链每一级、谁同意或退回、意见；原来的「确认」「退回」按钮带上看到的审批单与级别。
 
+import { useState } from 'react';
 import { Link } from 'react-router';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, RotateCcw } from 'lucide-react';
 import { APPROVAL_STATUS_LABELS, inStep, type ApprovalBrief, type ApprovalDocKind } from '@shared/approvals';
+import { errorMessage, UncertainError } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
-import { Badge } from '../../components/ui';
+import { useToast } from '../../components/Toast';
+import { Badge, Button } from '../../components/ui';
+import { sendApproval, uncertainApproval, useSettleWhenFinished, useUncertainApprovals, type SentApproval } from './uncertain';
 
 /** 等了多久：12 分钟、3 小时、2 天 */
 export function waited(iso: string): string {
@@ -19,10 +23,13 @@ export function waited(iso: string): string {
 /**
  * 原来的确认、退回按钮用：在审的审批单当前这一级我能不能审（本人；代理的去审批中心审），
  * 以及要带上的审批单与级别（审批单已经变了、走到别的级别时服务端拒绝）。
+ * uncertain：上次同意或退回没收到结果（uncertain.ts）——这时只给「按原内容重新提交」（ApprovalResend），不按刷新后的级别重新拼。
  */
 export function useApprovalGate(approval: ApprovalBrief | null | undefined, kind: ApprovalDocKind) {
   const session = useSession();
-  if (!approval || approval.status !== 'pending') return { fence: {}, canActHere: true, waiting: null as string | null };
+  useUncertainApprovals();
+  useSettleWhenFinished(approval?.requestId, approval?.status);
+  if (!approval || approval.status !== 'pending') return { fence: {}, canActHere: true, waiting: null as string | null, uncertain: null as SentApproval | null };
   const step = approval.steps[approval.currentLevel - 1]!;
   const me = { id: session.staff.id, role: session.staff.role, duties: session.staff.duties, permissions: session.permissions };
   const selfBlocked = !approval.allowSelf && approval.submittedBy === me.id;
@@ -33,7 +40,42 @@ export function useApprovalGate(approval: ApprovalBrief | null | undefined, kind
     fence: { requestId: approval.requestId, level: approval.currentLevel },
     canActHere,
     waiting: canActHere ? null : `${levels}等「${approval.stepLabels[approval.currentLevel - 1]}」审批${selfBlocked ? '（提交人不能审自己的单）' : ''}`,
+    uncertain: uncertainApproval(approval.requestId),
   };
+}
+
+/** 「同意第 2 级」「退回」：没收到结果的那次做的是什么 */
+export const sentLabel = (s: SentApproval) => (s.action === 'approve' ? `同意第 ${s.level} 级` : `退回（第 ${s.level} 级）`);
+
+/**
+ * 上次同意或退回没收到结果：只能按原内容重新提交（原样再发，见 uncertain.ts）——已经生效的不重复记，
+ * 这张单走过了这一级或已经结束的会被拒绝（那也说明上次那次不会再生效）。单据详情的底部、审批中心的详情共用。
+ */
+export function ApprovalResend({ sent, onDone, className }: { sent: SentApproval; onDone: () => unknown; className?: string }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const resend = async () => {
+    setBusy(true);
+    try {
+      await sendApproval(sent);
+      toast({ tone: 'success', title: `已按原内容重新提交：${sentLabel(sent)}`, body: `${sent.docNo} · 上次已经生效的不重复记` });
+    } catch (e) {
+      toast({ tone: 'error', title: e instanceof UncertainError ? `还是没收到结果：${errorMessage(e)}` : errorMessage(e), body: sent.docNo });
+    } finally {
+      setBusy(false);
+      await onDone();
+    }
+  };
+  return (
+    <div className={cn('flex flex-wrap items-center justify-end gap-x-3 gap-y-1.5', className)} data-testid="approval-uncertain">
+      <p className="min-w-0 flex-1 text-[12.5px] text-ink-2">
+        <span className="font-semibold text-ember">上次「{sentLabel(sent)}」没收到结果</span>，可能已经生效。按原内容重新提交：已经生效的不重复记，这张单已经走过这一级的会提示。
+      </p>
+      <Button variant="primary" loading={busy} icon={<RotateCcw className="size-4" />} onClick={() => void resend()} data-testid="approval-resend">
+        按原内容重新提交
+      </Button>
+    </div>
+  );
 }
 
 export function ApprovalProgress({ approval, className }: { approval: ApprovalBrief | null | undefined; className?: string }) {

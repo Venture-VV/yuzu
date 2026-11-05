@@ -6,7 +6,7 @@ import { CircleCheck, CornerUpLeft, ExternalLink, TriangleAlert, X } from 'lucid
 import { APPROVAL_DOC_TYPE_LABELS, APPROVAL_MODE_LABELS, APPROVAL_STATUS_LABELS } from '@shared/approvals';
 import { erpModuleOfPage } from '@shared/erp';
 import { COUNT_REASONS, COUNT_REASON_LABELS } from '@shared/inventory';
-import { api, errorMessage } from '../../lib/api';
+import { errorMessage, UncertainError } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
 import { Sheet } from '../../components/Overlay';
@@ -14,8 +14,9 @@ import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
 import { Money } from '../../components/Money';
 import { Badge, Button, IconButton, Input, Notice, Select, Skeleton } from '../../components/ui';
-import { waited } from './ApprovalProgress';
+import { ApprovalResend, waited } from './ApprovalProgress';
 import { useApprovalDetail, useRefreshAfterApproval } from './queries';
+import { sendApproval, uncertainApproval, useSettleWhenFinished, useUncertainApprovals } from './uncertain';
 
 export function ApprovalSheet({ id, onClose }: { id: number | null; onClose: () => void }) {
   return (
@@ -35,18 +36,25 @@ function Body({ id, onClose }: { id: number; onClose: () => void }) {
   const [returning, setReturning] = useState(false);
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const d = detail.data;
+  // 上次同意或退回没收到结果：只能按原内容重新提交（uncertain.ts），不按刷新后的级别重新拼
+  useUncertainApprovals();
+  useSettleWhenFinished(d?.id, d?.status);
+  const uncertain = d?.status === 'pending' ? uncertainApproval(d.id) : null;
 
   const act = async (action: 'approve' | 'return', body: Record<string, unknown>) => {
     if (!d) return;
     setBusy(action);
     try {
-      await api.post(`/api/approvals/${d.id}/${action}`, { level: d.currentLevel, ...body });
+      await sendApproval({ requestId: d.id, docNo: d.docNo, action, level: d.currentLevel, url: `/api/approvals/${d.id}/${action}`, body: { level: d.currentLevel, ...body } });
       toast({ tone: 'success', title: action === 'approve' ? (d.currentLevel < d.levels ? `已同意第 ${d.currentLevel} 级` : '已同意，单据生效') : '已退回', body: d.docNo });
       setReturning(false);
       setComment('');
       await refresh();
     } catch (e) {
-      toast({ tone: 'error', title: errorMessage(e) });
+      if (e instanceof UncertainError) {
+        toast({ tone: 'error', title: `没收到结果：${errorMessage(e)}`, body: `${d.docNo} 可能已经生效，下面只能按原内容重新提交` });
+        setReturning(false);
+      } else toast({ tone: 'error', title: errorMessage(e) });
       await refresh();
     } finally {
       setBusy(null);
@@ -139,7 +147,7 @@ function Body({ id, onClose }: { id: number; onClose: () => void }) {
                             原因：{l.count.reason ?? '未写（确认时按默认）'}
                             {l.count.reasonNote && ` · ${l.count.reasonNote}`}
                           </p>
-                          {d.canAct && d.currentLevel === d.levels && (
+                          {d.canAct && !uncertain && d.currentLevel === d.levels && (
                             <label className="flex items-center gap-2">
                               <span className="shrink-0 text-ink-3">确认原因</span>
                               <Select
@@ -238,7 +246,11 @@ function Body({ id, onClose }: { id: number; onClose: () => void }) {
         )}
       </div>
 
-      {d?.canAct && (
+      {uncertain ? (
+        <footer className="shrink-0 border-t border-line bg-card px-5 py-3 pb-[max(12px,env(safe-area-inset-bottom))]">
+          <ApprovalResend sent={uncertain} onDone={refresh} />
+        </footer>
+      ) : d?.canAct && (
         <footer className="shrink-0 space-y-2 border-t border-line bg-card px-5 py-3 pb-[max(12px,env(safe-area-inset-bottom))]">
           {d.actingFor.length > 0 && <p className="text-[12.5px] font-semibold text-lake">你是 {d.actingFor.join('、')} 的代理人，这次记「代 {d.actingFor.join('、')}」</p>}
           <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="意见（选填）" maxLength={200} data-testid="approval-comment" />

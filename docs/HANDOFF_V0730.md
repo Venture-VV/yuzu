@@ -17,7 +17,9 @@
 | 急采待补单升级 | `a5e62a9` | — | `APPROVALS.md` 第 8 节 | A10 |
 | 版本号、文档 | `e4727cc` | — | — | — |
 | demo-reset 与测试清库分批删、打印任务先读回再入队、两条浏览器用例 | `2cfd28b` | — | — | — |
-| Codex 自动审查（2cfd28b）：新建规则与设代理人的「结果待确认」、去重后的图片预览、审批中心按模块开关 | 本 PR 最后的提交 | `076` | — | — |
+| Codex 自动审查（2cfd28b）：新建规则与设代理人的「结果待确认」、去重后的图片预览、审批中心按模块开关 | `33d0c74` | `076` | — | — |
+| Codex 自动审查（d04d05d）：审批规则的金额区间按整数分解析 | `c0acccf` | — | — | — |
+| Codex 自动审查（c0acccf）：同意、退回没收到结果时按原内容重新提交（批量、详情、单据原来的按钮）；店主的代理人审会签这一级 | 本 PR 最后的提交 | — | `APPROVALS.md` 第 4、10 节 | — |
 
 入口：
 
@@ -52,12 +54,13 @@
 13. **急采待补单升级**：急采收货生效后超过 3 天没补采购单的，负责人在审批中心顶部与 `/todo` 看到「超 n 天」；补单后消失。
 14. **询价接上需求单**：需求单转采购单到了询价门槛「改为询价」→ 询价单带上需求行 → 定标转采购单时需求单显示「已下单」；需求行在询价中显示「询价中」、不能再直接转采购单；补货建议「发起询价」，询价中的数量算在途。
 15. **结果待确认与模块开关**（Codex 自动审查 2cfd28b）：新建审批规则、设代理人时断网或服务器出错 → 页面上方「结果待确认」，刷新后还在、先不能再建；查回、按原内容重新提交只建一条，确认作废后原请求晚到也不建（`OP_ABANDONED`）。关掉「应付货款」模块后，付款的审批单在审批中心不列，打开、同意、退回、批量同意都提示模块没开启（`ERP_MODULE_DISABLED`），开回来照常。
+16. **没收到结果时按原内容重新提交、代理店主**（Codex 自动审查 c0acccf）：建「付款，某个金额区间（不超过 ¥5,000）→ 负责人 → 店主」，对账付款登记两笔；店主在审批中心勾一笔批量同意时断网或服务器出错 → 对话框只剩「按原内容重新提交」，列着「同意第 1 级」，卡片标「结果待确认」；列表刷新后卡片已经是第 2 级，点重新提交仍按第 1 级发：付款仍待确认、停在第 2 级，第 1 级只有一条同意。另一笔打开详情同意时同样出错 → 底部只剩「按原内容重新提交」，结果一样。采购单、物资单据、付款、期初未付、报销详情原来的确认、退回按钮同样。店主给店总设代理人后，指定两人会签的单店总在「待我审批」里看得到（标「代 店主」），同意一次这一级即通过，记「店总（代 店主）」；收回后看不到、审不了。
 
 ## 4. 已执行的验证
 
 - `npm run typecheck`、`npm run build` 通过。
-- 集成用例全量 `npx vitest run`（本机 4 个并行库）：121 个文件、1188 项全过；新增 `tests/approvals.test.ts` 12 项、`tests/sourcing-requests.test.ts` 3 项；改了 3 条部门盘点的旧用例（大差异要写原因、走审批）。
-- 浏览器用例（门店电脑）：`e2e/approvals.spec.ts` 3 条、`e2e/erp-purchasing.spec.ts`、`inventory.spec.ts`、`erp.spec.ts`、`expenses.spec.ts`、`requests.spec.ts`、`purchase-ledger.spec.ts`、`review-fixes.spec.ts`、`warehouses.spec.ts`（部门盘点改为少 1 双是大差异：写原因、店主提交并确认）、`viewports.spec.ts`（门店电脑与手机）全过。
+- 集成用例全量 `npx vitest run`（本机 4 个并行库）：121 个文件、1192 项全过；新增 `tests/approvals.test.ts` 16 项（含 Codex 自动审查 2cfd28b、c0acccf 的 4 项）、`tests/sourcing-requests.test.ts` 3 项；改了 3 条部门盘点的旧用例（大差异要写原因、走审批）。本机跑 `tests/backup.test.ts` 时，测试库账号要有 `pg_signal_backend`（不是超级用户时删临时库停不了库上自动清理的进程，临时库删不掉），CI 不受影响。
+- 浏览器用例（门店电脑）：`e2e/approvals.spec.ts` 5 条（含没收到结果时批量与详情按原内容重新提交）、`e2e/erp-purchasing.spec.ts`、`inventory.spec.ts`、`erp.spec.ts`、`expenses.spec.ts`、`requests.spec.ts`、`purchase-ledger.spec.ts`、`review-fixes.spec.ts`、`warehouses.spec.ts`（部门盘点改为少 1 双是大差异：写原因、店主提交并确认）、`viewports.spec.ts`（门店电脑与手机）全过。
 - **数据库锁**：本版加表后，demo-reset 一句 `DROP SCHEMA public CASCADE` 在 CI 上与并行的集成测试撞上 `out of shared memory`（一个迁移好的模式约 6500 把锁，数据库默认的共享锁表约 7800）。demo-reset 改为改名挪开、提交后分批删（`src/server/lib/drop-schema.ts`），集成测试清空测试库也用它。本机 4 个并行库跑全量，同一时刻的锁最多 3924 把（改之前 7611 把，就是 demo-reset 那一句）；只跑升级用例、4 个并行库挤在一起时最多 5568 把。
 - main 定时测试（v0.7.29）报的打印任务状态偶发（读回时已是「发送中」）：改为先读回、再交给发送队列（`devices.ts` 的 `readThenEnqueue`）。
 

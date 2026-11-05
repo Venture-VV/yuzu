@@ -8,7 +8,8 @@ import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { Dialog, Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
-import { ApprovalProgress, useApprovalGate } from '../approvals/ApprovalProgress';
+import { ApprovalProgress, ApprovalResend, useApprovalGate } from '../approvals/ApprovalProgress';
+import { postDocAction } from '../approvals/uncertain';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, IconButton, Notice, Select, Spinner, InfoItem as Info } from '../../components/ui';
@@ -88,7 +89,8 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
   const run = async (key: string, url: string, body: unknown, success: string) => {
     setBusy(key);
     try {
-      await api.post(url, body);
+      // 同意、退回带着审批单与级别：没收到结果时记下，之后只能按原内容重新提交（uncertain.ts）
+      await postDocAction(url, body, doc.docNo);
       await invalidate();
       toast({ tone: 'success', title: success, body: doc.docNo });
       setDialog(null);
@@ -337,7 +339,7 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
                       <Qty milli={l.countedMilli ?? 0} unit={l.inventoryUnit} className="font-bold" />
                     </Mini>
                     {l.qtyMilli !== 0 &&
-                      (doc.status === 'submitted' && canApprove && gate.canActHere && finalLevel ? (
+                      (doc.status === 'submitted' && canApprove && gate.canActHere && !gate.uncertain && finalLevel ? (
                         <label className="ml-auto flex items-center gap-2">
                           <span className="font-semibold text-ink-3">确认原因</span>
                           <Select
@@ -486,8 +488,9 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             到部门验收确认
           </Button>
         )}
-        {doc.status === 'submitted' && canApprove && !doc.urgent && !gate.canActHere && gate.waiting && <span className="text-[12.5px] text-ink-3">{gate.waiting}</span>}
-        {doc.status === 'submitted' && canApprove && !doc.urgent && gate.canActHere && (
+        {doc.status === 'submitted' && canApprove && !doc.urgent && gate.uncertain && <ApprovalResend sent={gate.uncertain} onDone={invalidate} />}
+        {doc.status === 'submitted' && canApprove && !doc.urgent && !gate.uncertain && !gate.canActHere && gate.waiting && <span className="text-[12.5px] text-ink-3">{gate.waiting}</span>}
+        {doc.status === 'submitted' && canApprove && !doc.urgent && !gate.uncertain && gate.canActHere && (
           <>
             <Button variant="secondary" icon={<CornerUpLeft className="size-4" />} onClick={() => setDialog({ kind: 'return' })}>
               退回修改

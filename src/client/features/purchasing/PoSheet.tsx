@@ -5,14 +5,15 @@ import { CLAIM_STATUS_LABELS } from '@shared/expenses';
 import { INV_STATUS_LABELS } from '@shared/inventory';
 import { channelText, type PurchaseOrder } from '@shared/purchasing';
 import { formatQty } from '@shared/quantity';
-import { api, errorMessage } from '../../lib/api';
+import { errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
 import { ImageThumbs } from '../../components/Images';
 import { Money } from '../../components/Money';
 import { Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
-import { ApprovalProgress, useApprovalGate } from '../approvals/ApprovalProgress';
+import { ApprovalProgress, ApprovalResend, useApprovalGate } from '../approvals/ApprovalProgress';
+import { postDocAction } from '../approvals/uncertain';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, IconButton, Notice, Spinner, InfoItem as Info } from '../../components/ui';
 import { Qty, SimRule } from '../inventory/parts';
@@ -69,7 +70,8 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
   const run = async (key: string, path: string, body: unknown, success: string) => {
     setBusy(key);
     try {
-      await api.post(`/api/purchase-orders/${po.id}/${path}`, body);
+      // 同意、退回带着审批单与级别：没收到结果时记下，之后只能按原内容重新提交（uncertain.ts）
+      await postDocAction(`/api/purchase-orders/${po.id}/${path}`, body, po.docNo);
       await invalidate();
       toast({ tone: 'success', title: success, body: po.docNo });
       setDialog(null);
@@ -357,8 +359,9 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
             </Button>
           </>
         )}
-        {po.status === 'submitted' && canApprove && !gate.canActHere && gate.waiting && <span className="text-[12.5px] text-ink-3">{gate.waiting}</span>}
-        {po.status === 'submitted' && canApprove && gate.canActHere && (
+        {po.status === 'submitted' && canApprove && gate.uncertain && <ApprovalResend sent={gate.uncertain} onDone={invalidate} />}
+        {po.status === 'submitted' && canApprove && !gate.uncertain && !gate.canActHere && gate.waiting && <span className="text-[12.5px] text-ink-3">{gate.waiting}</span>}
+        {po.status === 'submitted' && canApprove && !gate.uncertain && gate.canActHere && (
           <>
             <Button variant="secondary" icon={<CornerUpLeft className="size-4" />} onClick={() => setDialog('return')}>
               退回修改

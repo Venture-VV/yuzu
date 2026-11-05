@@ -13,7 +13,7 @@ import {
 } from '@shared/expenses';
 import { formatQty } from '@shared/quantity';
 import { channelText, RECEIVING_LABELS } from '@shared/purchasing';
-import { api, errorMessage } from '../../lib/api';
+import { errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
@@ -21,7 +21,8 @@ import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
 import { Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
-import { ApprovalProgress, useApprovalGate } from '../approvals/ApprovalProgress';
+import { ApprovalProgress, ApprovalResend, useApprovalGate } from '../approvals/ApprovalProgress';
+import { postDocAction } from '../approvals/uncertain';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Input, Notice, Select, Skeleton } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
@@ -212,7 +213,8 @@ function ClaimSheet({ id, onClose }: { id: number | null; onClose: () => void })
     setError(null);
     try {
       const fence = action === 'approve' || action === 'return' ? gate.fence : {};
-      await api.post<ExpenseClaim>(`/api/erp/expenses/${c.id}/${action}`, reason ? { reason, ...fence } : fence);
+      // 确认、退回带着审批单与级别：没收到结果时记下，之后只能按原内容重新提交（uncertain.ts）
+      await postDocAction<ExpenseClaim>(`/api/erp/expenses/${c.id}/${action}`, reason ? { reason, ...fence } : fence, c.docNo);
       await invalidate();
       setReasonFor(null);
       toast({ tone: 'success', title: { approve: '已确认', return: '已退回', resubmit: '已重新提交', cancel: '已撤回', void: '已冲销' }[action] });
@@ -317,8 +319,9 @@ function ClaimSheet({ id, onClose }: { id: number | null; onClose: () => void })
       </div>
       {c && (
         <div className="flex flex-wrap justify-end gap-2 border-t border-line px-5 py-3">
-          {c.status === 'submitted' && can('expense.approve') && !gate.canActHere && gate.waiting && <span className="self-center text-[12.5px] text-ink-3">{gate.waiting}</span>}
-          {c.status === 'submitted' && can('expense.approve') && gate.canActHere && (
+          {c.status === 'submitted' && can('expense.approve') && gate.uncertain && <ApprovalResend sent={gate.uncertain} onDone={invalidate} className="w-full" />}
+          {c.status === 'submitted' && can('expense.approve') && !gate.uncertain && !gate.canActHere && gate.waiting && <span className="self-center text-[12.5px] text-ink-3">{gate.waiting}</span>}
+          {c.status === 'submitted' && can('expense.approve') && !gate.uncertain && gate.canActHere && (
             <>
               <Button variant="secondary" disabled={busy} onClick={() => setReasonFor('return')}>
                 退回

@@ -2,6 +2,7 @@
 //   ① 店主在「审批规则」里建两级规则（负责人 → 店主），对账付款登记一笔命中的付款；店主在手机尺寸的审批中心逐级同意，第二级同意后付款生效；
 //   ② 批量同意：勾两张同一种、不超过 ¥5,000 的付款一起同意；
 //   ③ 新建规则没收到结果（Codex 自动审查 2cfd28b）：回复丢了的自动查回、只建一条；请求没发出去的记在「结果待确认」，按原内容重新提交只建一条；
+//   ③b 同意没收到结果（Codex 自动审查 c0acccf）：批量与单张都只能按原内容重新提交、照上次的级别再发，不会多同意一级；
 //   ④ 盘点大差异：没写原因不能提交，写了原因提交后进审批中心，详情里看到账面、实盘、差异与原因。
 // 依赖演示数据（只在独立演示库）；账号：店主 linlan、对账付款 qianfen，密码 yuzu2026。会登记单据，只在门店电脑尺寸执行。
 // 规则用一个别的用例碰不到的金额区间，用完停用，不影响其他用例的默认规则。
@@ -169,6 +170,78 @@ test.describe('审批中心（v0.7.30）', () => {
       for (const note of [lost, offline]) {
         for (const r of await rulesNamed(note)) await page.request.post(`/api/approvals/rules/${r.id}/active`, { data: { version: r.version, active: false } });
       }
+    }
+  });
+
+  test('同意没收到结果（Codex 自动审查 c0acccf）：批量与单张都只能按原内容重新提交，照上次的级别再发——已经生效的不重复记，不会多同意一级', async ({ page }) => {
+    await login(page, 'linlan');
+    const supplier = await newSupplier(page);
+    // 两级（负责人 → 店主）：店主两级都能审，按刷新后的级别重新拼就会多同意一级
+    const note = `E2E 原样重提 ${Date.now()}`;
+    const created = await page.request.post('/api/approvals/rules', {
+      data: { clientKey: randomUUID(), docType: 'payment', minCents: 432_100, maxCents: 432_200, steps: [{ group: 'manager' }, { group: 'owner' }], note },
+    });
+    expect(created.status(), await created.text()).toBe(201);
+    const ruleId = (await created.json()).id as number;
+    type State = { status: string; approval: { requestId: number; status: string; currentLevel: number; actions: unknown[] } };
+    const state = async (id: number) => (await (await page.request.get(`/api/payables/payments/${id}`)).json()) as State;
+    const lostReply = async (route: import('@playwright/test').Route) => {
+      await route.fetch();
+      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL', message: '模拟：回复丢了' } }) });
+    };
+    try {
+      await logout(page);
+      await login(page, 'qianfen');
+      const a = await prepay(page, supplier.id, 432_150);
+      const b = await prepay(page, supplier.id, 432_160);
+      await logout(page);
+      await login(page, 'linlan');
+      await page.goto('/approvals');
+
+      // ① 批量：请求到了服务端、第 1 级同意了，回复丢了 → 这一批记下，只能按原内容（第 1 级）重新提交
+      await page.getByTestId(`approval-pick-${a.docNo}`).check();
+      await page.route('**/api/approvals/batch-approve', lostReply);
+      await page.getByTestId('approval-batch').click();
+      await page.getByTestId('approval-batch-confirm').click();
+      await expect(page.getByTestId('approval-batch-pending')).toContainText(`${a.docNo}同意第 1 级`);
+      await page.unroute('**/api/approvals/batch-approve');
+      // 刷新后的卡片已经是第 2 级
+      await expect(page.getByTestId(`approval-card-${a.docNo}`)).toContainText('第 2/2 级');
+      await expect(page.getByTestId(`approval-card-${a.docNo}`)).toContainText('结果待确认');
+      await page.getByTestId('approval-batch-resend').click();
+      await expect(page.getByTestId('approval-batch-result')).toContainText(a.docNo);
+      await expect(page.getByTestId('approval-batch-result')).not.toContainText('没成功');
+      await page.getByRole('button', { name: '知道了' }).click();
+      await expect(page.getByTestId('approval-batch-uncertain')).toHaveCount(0);
+      const sa = await state(a.id);
+      expect(sa).toMatchObject({ status: 'submitted', approval: { status: 'pending', currentLevel: 2 } });
+      expect(sa.approval.actions).toHaveLength(1);
+
+      // ② 单张（审批中心详情）：同意第 1 级的回复丢了 → 底部只有「按原内容重新提交」，照第 1 级再发
+      await page.getByTestId(`approval-card-${b.docNo}`).getByRole('button').click();
+      await expect(page.getByTestId('approval-approve')).toContainText('第 1/2 级');
+      await page.route('**/api/approvals/*/approve', lostReply);
+      await page.getByTestId('approval-approve').click();
+      await expect(page.getByTestId('approval-uncertain')).toContainText('同意第 1 级');
+      await page.unroute('**/api/approvals/*/approve');
+      await expect(page.getByTestId('approval-chain-2')).toContainText('审批中');
+      await expect(page.getByTestId('approval-approve')).toHaveCount(0);
+      await page.getByTestId('approval-resend').click();
+      await expect(page.getByText('已按原内容重新提交').first()).toBeVisible();
+      await expect(page.getByTestId('approval-uncertain')).toHaveCount(0);
+      await expect(page.getByTestId('approval-approve')).toContainText('第 2/2 级');
+      const sb = await state(b.id);
+      expect(sb).toMatchObject({ status: 'submitted', approval: { status: 'pending', currentLevel: 2 } });
+      expect(sb.approval.actions).toHaveLength(1);
+
+      // 收尾：第 2 级照常同意
+      for (const s of [sa, sb]) {
+        const res = await page.request.post(`/api/approvals/${s.approval.requestId}/approve`, { data: { level: 2 } });
+        expect(res.status(), await res.text()).toBe(200);
+      }
+    } finally {
+      const fresh = ((await (await page.request.get('/api/approvals/rules')).json()) as { id: number; version: number }[]).find((r) => r.id === ruleId)!;
+      await page.request.post(`/api/approvals/rules/${ruleId}/active`, { data: { version: fresh.version, active: false } });
     }
   });
 

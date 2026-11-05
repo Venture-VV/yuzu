@@ -4,7 +4,7 @@
 
 import { useMemo, useState } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router';
-import { CheckCheck, ChevronDown, ChevronUp, PackageX, TriangleAlert } from 'lucide-react';
+import { CheckCheck, ChevronDown, ChevronUp, PackageX, RotateCcw, TriangleAlert } from 'lucide-react';
 import {
   APPROVAL_BATCH_MAX,
   APPROVAL_BATCH_MAX_CENTS,
@@ -15,7 +15,7 @@ import {
   type BatchApproveResult,
 } from '@shared/approvals';
 import { formatAmount } from '@shared/money';
-import { api, errorMessage } from '../../lib/api';
+import { errorMessage, UncertainError } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
@@ -29,6 +29,7 @@ import { ApprovalSheet } from './ApprovalSheet';
 import { DelegationsPanel } from './DelegationsPanel';
 import { RulesPanel } from './RulesPanel';
 import { useApprovals, useRefreshAfterApproval, useUrgentBackfills, type ApprovalTab } from './queries';
+import { sendBatchApprove, uncertainApproval, uncertainBatch, useUncertainApprovals } from './uncertain';
 
 type Tab = ApprovalTab | 'rules' | 'delegations';
 
@@ -109,22 +110,46 @@ export function ApprovalsPage() {
 function CardList({ cards, tab, onOpen }: { cards: ApprovalCard[]; tab: ApprovalTab; onOpen: (id: number) => void }) {
   const [selected, setSelected] = useState<number[]>([]);
   const [batchOpen, setBatchOpen] = useState(false);
+  // 上次同意没收到结果的单（uncertain.ts）：不能再勾进新的一批，打开后只能按原内容重新提交；没收到结果的那一批在列表上方
+  useUncertainApprovals();
+  const retry = tab === 'mine' ? uncertainBatch() : null;
   const picked = useMemo(() => cards.filter((c) => selected.includes(c.id)), [cards, selected]);
   const pickedType = picked[0]?.docType ?? null;
   const batchable = (c: ApprovalCard) =>
-    tab === 'mine' && c.canAct && c.amountCents !== null && c.amountCents <= APPROVAL_BATCH_MAX_CENTS && (!pickedType || c.docType === pickedType);
+    tab === 'mine' && c.canAct && !uncertainApproval(c.id) && c.amountCents !== null && c.amountCents <= APPROVAL_BATCH_MAX_CENTS && (!pickedType || c.docType === pickedType);
+  const retryNotice = retry && (
+    <Notice
+      tone="warning"
+      icon={<TriangleAlert className="size-4" />}
+      title={`上次批量同意 ${retry.items.length} 张没收到结果`}
+      action={
+        <Button size="sm" variant="primary" icon={<RotateCcw className="size-4" />} onClick={() => setBatchOpen(true)} data-testid="approval-batch-retry">
+          按原内容重新提交
+        </Button>
+      }
+      data-testid="approval-batch-uncertain"
+    >
+      可能已经同意了一部分。重新提交时每张按上次的级别与意见再提交一次，已经生效的不重复记。
+    </Notice>
+  );
+  const batchDialog = <BatchDialog open={batchOpen} cards={picked} onClose={() => setBatchOpen(false)} onDone={() => setSelected([])} />;
   if (cards.length === 0) {
     return (
-      <EmptyState
-        art="calm"
-        title={tab === 'mine' ? '没有待你审批的单据' : tab === 'all' ? '没有在审的单据' : '你还没有提交过要审批的单据'}
-        description={tab === 'mine' ? '有单据走到你能审的这一级（或你代理的人能审）时会出现在这里。' : undefined}
-        className="rounded-lg border border-dashed border-line-strong bg-card"
-      />
+      <>
+        {retryNotice}
+        <EmptyState
+          art="calm"
+          title={tab === 'mine' ? '没有待你审批的单据' : tab === 'all' ? '没有在审的单据' : '你还没有提交过要审批的单据'}
+          description={tab === 'mine' ? '有单据走到你能审的这一级（或你代理的人能审）时会出现在这里。' : undefined}
+          className="rounded-lg border border-dashed border-line-strong bg-card"
+        />
+        {batchDialog}
+      </>
     );
   }
   return (
     <>
+      {retryNotice}
       {tab === 'mine' && (
         <p className="text-[12.5px] text-ink-3">
           勾选同一种单据、每张不超过 ¥{formatAmount(APPROVAL_BATCH_MAX_CENTS)} 的可以一起同意（一次最多 {APPROVAL_BATCH_MAX} 张）。
@@ -151,6 +176,7 @@ function CardList({ cards, tab, onOpen }: { cards: ApprovalCard[]; tab: Approval
                 {c.overdue && <Badge tone="clay">超时</Badge>}
                 {c.stuck && <Badge tone="ember">没人能审</Badge>}
                 {c.actingFor.length > 0 && <Badge tone="moss">代 {c.actingFor.join('、')}</Badge>}
+                {uncertainApproval(c.id) && <Badge tone="ember">结果待确认</Badge>}
                 {tab === 'submitted' && c.status !== 'pending' && <Badge tone={c.status === 'approved' ? 'pine' : 'neutral'}>{c.status === 'approved' ? '已通过' : c.status === 'returned' ? '已退回' : '已撤回'}</Badge>}
                 <span className="ml-auto">
                   {c.amountCents !== null ? <Money cents={c.amountCents} className="text-[15px] font-bold" /> : <span className="text-[12px] text-ink-3">金额算不出</span>}
@@ -195,17 +221,23 @@ function CardList({ cards, tab, onOpen }: { cards: ApprovalCard[]; tab: Approval
           </Button>
         </div>
       )}
-      <BatchDialog open={batchOpen} cards={picked} onClose={() => setBatchOpen(false)} onDone={() => setSelected([])} />
+      {batchDialog}
     </>
   );
 }
 
+/**
+ * 批量同意。没收到结果（超时、断网、服务器出错）时这一批原样记下（uncertain.ts）：再打开只能按原内容重新提交——
+ * 勾的单、各自当时的级别与意见都照上次的发，不按刷新后的卡片重新拼（同一个人能审连续几级时会多同意一级）。
+ */
 function BatchDialog({ open, cards, onClose, onDone }: { open: boolean; cards: ApprovalCard[]; onClose: () => void; onDone: () => void }) {
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<BatchApproveResult | null>(null);
   const refresh = useRefreshAfterApproval();
   const toast = useToast();
+  useUncertainApprovals();
+  const retry = uncertainBatch();
   const close = () => {
     setResult(null);
     setComment('');
@@ -214,13 +246,22 @@ function BatchDialog({ open, cards, onClose, onDone }: { open: boolean; cards: A
   const run = async () => {
     setBusy(true);
     try {
-      const r = await api.post<BatchApproveResult>('/api/approvals/batch-approve', { items: cards.map((c) => ({ id: c.id, level: c.currentLevel })), comment: comment.trim() });
+      const r = retry
+        ? await sendBatchApprove(
+            retry.items.map((s) => ({ requestId: s.requestId, docNo: s.docNo, level: s.level })),
+            retry.comment,
+          )
+        : await sendBatchApprove(
+            cards.map((c) => ({ requestId: c.id, docNo: c.docNo, level: c.currentLevel })),
+            comment.trim(),
+          );
       setResult(r);
       onDone();
       const ok = r.results.filter((x) => x.ok).length;
       toast({ tone: ok === r.results.length ? 'success' : 'error', title: `同意 ${ok} 张${ok < r.results.length ? `，${r.results.length - ok} 张没成功` : ''}` });
     } catch (e) {
-      toast({ tone: 'error', title: errorMessage(e) });
+      if (e instanceof UncertainError) toast({ tone: 'error', title: `没收到结果：${errorMessage(e)}`, body: '可能已经同意了一部分，只能按原内容重新提交' });
+      else toast({ tone: 'error', title: errorMessage(e) });
     } finally {
       setBusy(false);
       await refresh();
@@ -230,8 +271,14 @@ function BatchDialog({ open, cards, onClose, onDone }: { open: boolean; cards: A
     <Dialog
       open={open}
       onClose={close}
-      title={result ? '批量同意的结果' : `批量同意 ${cards.length} 张`}
-      description={result ? undefined : '每张单独同意当前这一级：成功的照常生效或进下一级，没成功的写明原因、照旧在待办里。'}
+      title={result ? '批量同意的结果' : retry ? `批量同意 ${retry.items.length} 张没收到结果` : `批量同意 ${cards.length} 张`}
+      description={
+        result
+          ? undefined
+          : retry
+            ? '上次批量同意没收到结果，可能已经同意了一部分。按原内容重新提交：每张按上次的级别与意见再提交一次，已经生效的不重复记，走过了这一级的写明原因。'
+            : '每张单独同意当前这一级：成功的照常生效或进下一级，没成功的写明原因、照旧在待办里。'
+      }
       footer={
         result ? (
           <Button variant="primary" onClick={close}>
@@ -242,9 +289,15 @@ function BatchDialog({ open, cards, onClose, onDone }: { open: boolean; cards: A
             <Button variant="ghost" onClick={close}>
               取消
             </Button>
-            <Button variant="primary" loading={busy} onClick={() => void run()} data-testid="approval-batch-confirm">
-              同意这 {cards.length} 张
-            </Button>
+            {retry ? (
+              <Button variant="primary" loading={busy} icon={<RotateCcw className="size-4" />} onClick={() => void run()} data-testid="approval-batch-resend">
+                按原内容重新提交 {retry.items.length} 张
+              </Button>
+            ) : (
+              <Button variant="primary" loading={busy} disabled={cards.length === 0} onClick={() => void run()} data-testid="approval-batch-confirm">
+                同意这 {cards.length} 张
+              </Button>
+            )}
           </>
         )
       }
@@ -259,6 +312,18 @@ function BatchDialog({ open, cards, onClose, onDone }: { open: boolean; cards: A
             </li>
           ))}
         </ul>
+      ) : retry ? (
+        <div className="space-y-2 text-[13px]" data-testid="approval-batch-pending">
+          <ul className="space-y-1">
+            {retry.items.map((s) => (
+              <li key={s.requestId} className="flex gap-2">
+                <span className="num font-semibold">{s.docNo}</span>
+                <span className="text-ink-2">同意第 {s.level} 级</span>
+              </li>
+            ))}
+          </ul>
+          {retry.comment && <p className="text-ink-2">意见：{retry.comment}</p>}
+        </div>
       ) : (
         <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="意见（选填，每张都记这一句）" maxLength={200} data-autofocus />
       )}
