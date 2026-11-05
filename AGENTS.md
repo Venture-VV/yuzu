@@ -60,6 +60,8 @@ node dist/server/cli.js device-bridge-mock [--terminal <终端编号>] [--port 1
                                           # 模拟终端设备服务（桥）：输入 card / scan / nfc <号码>、unplug / plug <设备键>、fail；用法见 docs/HARDWARE.md 第 10 节
 E2E_BASE_URL=http://127.0.0.1:<端口> npm run e2e   # 1440×900 / 1024×768 / 820×1180，另有 1280×720 与手机只跑视口冒烟（CI 拆三组并行，见 docs/TESTING.md）
 E2E_DEMO_SHOWCASE=1 E2E_BASE_URL=… npx playwright test e2e/demo-showcase.spec.ts --project=门店电脑   # demo-prepare 准备好的库上核对演示场景
+E2E_MP_PORT=… E2E_MP_GATEWAY_KEY=… E2E_BASE_URL=… npx playwright test e2e/member-refund-online.spec.ts --project=门店电脑
+                                           # 退储值「门店系统原路退回」（v0.7.29）：应用要用 MP_PORT、MP_GATEWAY_KEY、MP_PAY_MOCK=true 启动（只在 development、test）
 ```
 
 演示数据的固定预期结果在 `src/server/demo/*-expected.json`。
