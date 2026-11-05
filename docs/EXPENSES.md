@@ -63,6 +63,8 @@
 - **按采购单报销**只能选现付的采购单（已确认或已关闭）；采购单的每一行只能报销一次，报销单撤回或冲销后可以重新报。
 - **一张采购单只有一种结算方式**（v0.7.8 修正）：以第一张生效的收货记下的为准；还没收货但已按采购单报销的算现付；都没有才看供应商当前的设置。所以供应商改了结算方式之后：挂账时已收货（记了应付）的采购单不能再报销；现付时已报销的采购单，后面的收货也按现付、不记应付。同一笔货不会既在应付里付、又在报销里报。
 - 挂账供应商照旧在「应付货款」里付款核销，不能按采购单报销。
+- **待报销与一键转报销**（v0.7.29，`docs/ERP_PURCHASING.md` 第 3 节）：「费用报销」页顶上列出现付、已确认或已关闭、还有没报销的行的采购单；采购单详情有「报销」一栏与「转报销」。转报销打开登记页并带好没报销的行、金额、采购途径、经办人、部门、上次的用途与科目、经办人在这个部门最早没平的打款，核对后提交；上面的规则都不变。
+- **采购途径**（v0.7.29）：按次报销要选在哪买的（供应商配送、批发市场、网购平台、商超门店、其他，字典在 ERP「模块设置 → 采购规则」），后四项要写说明；按采购单报销照采购单记。报销列表、详情与 CSV 都带途径。
 
 ## 5. 权限（D10：按现有的岗位 + 职责）
 
@@ -81,11 +83,14 @@
 
 备用金打款 → 采购单 → 报销单 / 退回补付单。登记报销先锁打款（与退回、冲销串行），按采购单报销再锁采购单（同一行不会被两张报销单同时报）。
 
+部门备用金设置（v0.7.29）只锁 `petty_accounts` 一行、带版本号，不碰打款、报销的锁；部门备用金台账、待报销与转报销带出的默认值只读。
+
 ## 7. 自检（`check` 库存部分）
 
 - **费用报销单与明细一致**：每张报销单的金额 = 各行合计；用备用金的报销与它的打款同一个部门；有效报销单里同一采购单行只出现一次。
 - **备用金台账一致**：有效的退回 / 补付都记在有效的打款上；冲销的打款下面没有有效的报销与退回补付。
 - **现付供应商的收货不记应付**：挂账的收货各有一条应付，现付的收货没有应付；同一张采购单的收货结算方式一致；报销的采购单没有挂账的收货（v0.7.8 加）。
+- **部门备用金台账与平账一致**（v0.7.29）：每个部门台账的余额（打款 + 补付 − 用备用金的已确认报销 − 退回）= 这个部门各笔打款的「未退回」之和。
 
 ## 8. 接口
 
@@ -97,6 +102,8 @@
 | 打款 | `GET /api/erp/petty/advances`；`GET /api/erp/petty/advances/:id`；`GET /api/erp/petty/advances/by-key/:key`；`POST /api/erp/petty/advances`；`POST /api/erp/petty/advances/:id/void` |
 | 退回 / 补付 | `GET /api/erp/petty/settlements/by-key/:key`；`POST /api/erp/petty/settlements`；`POST /api/erp/petty/settlements/:id/void` |
 | 每日平账 | `GET /api/erp/petty/daily`（按日期、部门、经办人）；`GET /api/erp/petty/daily/export` |
+| 待报销、转报销（v0.7.29） | `GET /api/erp/expenses/to-claim`；`GET /api/erp/expenses/po/:id/prefill` |
+| 部门备用金台账（v0.7.29） | `GET /api/erp/petty/accounts`；`PUT /api/erp/petty/accounts/:id`（保管人、定额、备注，带版本号）；`GET /api/erp/petty/accounts/:id/journal?from=&to=`；`GET /api/erp/petty/accounts/:id/journal/export` |
 | 结果待确认（v0.7.8） | `GET /api/erp/ops/:key?type=expense_claim|petty_advance|petty_settlement` 查回；`POST /api/erp/ops/:key/abandon` 确认作废 |
 
 报销列表最多显示最近 2000 张，合计（件数、已确认、待确认金额）按全部单据算，没显示全时页面提示；导出不截断，一次超过 2 万张整份拒绝（`EXPORT_TOO_LARGE`），请缩短日期范围分几次导出（v0.7.8 修正）。

@@ -56,7 +56,7 @@ npm run typecheck && npm test && npm run build                  # 交 PR 前
 | 餐饮与桌台 | `dining*` | `dining*` |
 | 客房 | `rooms*` | `rooms` |
 | 空间台账、底图、房态图、实时位置 | `spaces`、`floorplan*`、`floormap`、`locations`、`upgrade-floormap` | `spaces`、`floorplans`、`floormap`、`locations` |
-| ERP（库存、采购、应付、报销、需求单、两级库存、台账、旧账） | `inventory*`、`purchasing`、`supplier-settlement`、`stock-cycles`、`warehouses`、`expenses`、`requests`、`purchase-ledger`、`erp`、`legacy` | `inventory`、`warehouses`、`supplier-settlement`、`stock-cycles`、`expenses`、`requests`、`purchase-ledger`、`erp`、`legacy` |
+| ERP（库存、采购、应付、报销、需求单、两级库存、台账、旧账；采购途径、转报销、部门备用金台账、补货建议、询价比价） | `inventory*`、`purchasing`、`supplier-settlement`、`stock-cycles`、`warehouses`、`expenses`、`requests`、`purchase-ledger`、`erp`、`erp-purchasing`、`legacy` | `inventory`、`warehouses`、`supplier-settlement`、`stock-cycles`、`expenses`、`requests`、`purchase-ledger`、`erp`、`erp-purchasing`、`legacy` |
 | 后台、岗位权限、看板 | `admin-v060`、`roles`、`instance` | `admin-v060`、`review-v060`、`viewports`、`pending-marks` |
 | 演示数据 | `*-seed`、`demo-time`、`demo-prepare`（新增） | `demo-showcase`（新增） |
 | 退储值的「门店系统原路退回」（要小程序端口与模拟微信支付） | `member-refunds-online`、`mp-refund` | `member-refund-online`（设了 `E2E_MP_PORT`、`E2E_MP_GATEWAY_KEY` 才收，见下） |
