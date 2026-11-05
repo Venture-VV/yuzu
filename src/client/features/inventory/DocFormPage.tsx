@@ -1,7 +1,21 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, CircleAlert, CircleCheck, CloudOff, Eraser, ListPlus, RotateCw, Search, Trash2 } from 'lucide-react';
-import { COUNT_REASON_LABELS, INV_DOC_META, type DeptStockMeta, type InvDoc, type InvDocSummary, type InvDocType, type Material, type WarehouseStockRow } from '@shared/inventory';
+import {
+  COUNT_REASON_LABELS,
+  COUNT_REASONS,
+  DEFAULT_COUNT_BIG_CENTS,
+  DEFAULT_COUNT_BIG_PCT,
+  INV_DOC_META,
+  isBigVariance,
+  type CountReason,
+  type DeptStockMeta,
+  type InvDoc,
+  type InvDocSummary,
+  type InvDocType,
+  type Material,
+  type WarehouseStockRow,
+} from '@shared/inventory';
 import { centsToInput, parseYuan } from '@shared/money';
 import { formatQty, lineAmountCents } from '@shared/quantity';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
@@ -41,6 +55,9 @@ interface LineDraft {
   bookMilli: number | null;
   stale: boolean;
   note: string;
+  /** 盘点差异的原因类别与说明（v0.7.30：大差异的行提交时必须写） */
+  diffReason?: CountReason | '';
+  diffNote?: string;
 }
 
 interface FormState {
@@ -71,6 +88,8 @@ const blankLine = (materialId: number, over: Partial<LineDraft> = {}): LineDraft
   bookMilli: null,
   stale: false,
   note: '',
+  diffReason: '',
+  diffNote: '',
   ...over,
 });
 
@@ -168,6 +187,11 @@ function useScopeData(scope: FormScope) {
     urgentCapCents: central ? settingsQ.data?.urgentCapCents : meta.data?.urgentCapCents,
     /** 称重收货容差（%，v0.7.13）：按采购单收货只在总仓 */
     weighTolerancePct: central ? (settingsQ.data?.weighTolerancePct ?? 10) : 10,
+    /** 盘点大差异（v0.7.30，A8） */
+    countBig: {
+      countBigPct: (central ? settingsQ.data?.countBigPct : meta.data?.countBigPct) ?? DEFAULT_COUNT_BIG_PCT,
+      countBigCents: (central ? settingsQ.data?.countBigCents : meta.data?.countBigCents) ?? DEFAULT_COUNT_BIG_CENTS,
+    },
   };
 }
 
@@ -218,6 +242,8 @@ function formFromDoc(doc: InvDoc, materials: Map<number, Material>): FormState {
         bookMilli: l.bookMilli,
         stale: l.stale,
         note: l.note,
+        diffReason: l.diffReason && l.diffReason !== 'pending' ? l.diffReason : '',
+        diffNote: l.diffNote ?? '',
       });
     }),
   };
@@ -499,6 +525,7 @@ function DocForm({
     let maxReturn: number | null = null;
     let book: number | null = null;
     let diff: number | null = null;
+    let big = false;
     let accepted: ReturnType<typeof resolveQty> | null = null;
     let delivered: ReturnType<typeof resolveQty> | null = null;
     let price: number | null = null;
@@ -543,6 +570,9 @@ function DocForm({
         if (qty.milli !== null) diff = qty.milli - book;
         ready = qty.milli !== null;
         if (l.stale) errorText = '盘点后又有收发，需重新核对账面';
+        // 大差异（v0.7.30）：差异超过账面的 2% 或差异金额超过 ¥500，要写原因类别与说明（部门小仓看不到参考价，只按比例；服务端照两样核对）
+        big = diff !== null && isBigVariance(book, diff, m.refPriceCents === null ? null : lineAmountCents(Math.abs(diff), m.refPriceCents, m.purchaseFactorMilli), data.countBig);
+        if (big && (!l.diffReason || (l.diffNote ?? '').trim().length < 2)) errorText = errorText ?? '大差异：请选原因类别并写说明（至少 2 个字）';
         break;
       case 'receipt': {
         const pl = l.poLineId ? poLines.get(l.poLineId) : undefined;
@@ -585,6 +615,7 @@ function DocForm({
       maxReturn,
       book,
       diff,
+      big,
       accepted,
       delivered,
       price,
@@ -604,11 +635,14 @@ function DocForm({
   const countDiffs = type === 'count' ? rows.filter((r) => r.diff != null && r.diff !== 0).length : 0;
 
   const rules = data.approvalRules;
-  // 部门小仓的盘点差异由部门自己管，提交即生效；急采要仓库到部门验收（v0.7.11）
+  // 部门小仓的盘点只有小差异的提交即生效，有大差异的要审批（v0.7.30）；急采要仓库到部门验收（v0.7.11）
+  // 只是页面提示：命中审批规则的（审批中心）以服务端为准
   const needsApproval = urgent
     ? true
     : type === 'count'
-      ? central && countDiffs > 0
+      ? central
+        ? countDiffs > 0
+        : rows.some((r) => r.big)
       : type === 'opening'
         ? !!rules?.opening
         : type === 'damage'
@@ -692,6 +726,7 @@ function DocForm({
             countedMilli: r.qty!.milli,
             expectedBookMilli: r.book ?? null,
             note: r.line.note,
+            ...(r.diff ? { diffReason: r.line.diffReason || null, diffNote: (r.line.diffNote ?? '').trim() } : {}),
           })),
         };
       case 'issue_return':
@@ -1162,6 +1197,8 @@ interface Row {
   maxReturn?: number | null;
   book?: number | null;
   diff?: number | null;
+  /** 盘点大差异（v0.7.30） */
+  big?: boolean;
   accepted?: Resolved | null;
   delivered?: Resolved | null;
   price?: number | null;
@@ -1366,6 +1403,35 @@ function LineRow({
           <span className="hidden @3xl:block">{remove}</span>
           {row.error && line.qty.text && <p className="text-[12px] font-semibold text-clay @lg:col-span-2 @3xl:col-span-full">{row.error}</p>}
           {type === 'count' && line.stale && <p className="text-[12px] font-semibold text-clay @3xl:col-span-full">盘点后这项物料又有收发，需要按最新账面重新核对</p>}
+          {type === 'count' && row.diff !== null && row.diff !== undefined && row.diff !== 0 && (
+            <div className="flex flex-wrap items-center gap-2 @lg:col-span-2 @3xl:col-span-full" data-testid={`count-reason-${m.id}`}>
+              <span className={cn('text-[12.5px] font-semibold', row.big ? 'text-clay' : 'text-ink-3')}>{row.big ? '大差异，必须写原因' : '差异原因（选填）'}</span>
+              <Select
+                fullWidth={false}
+                value={line.diffReason ?? ''}
+                onChange={(e) => onPatch({ diffReason: e.target.value as CountReason | '' })}
+                disabled={locked}
+                className="h-8 text-[12.5px]"
+                aria-label={`${m.name}差异原因`}
+              >
+                <option value="">原因类别</option>
+                {COUNT_REASONS.map((r) => (
+                  <option key={r} value={r}>
+                    {COUNT_REASON_LABELS[r]}
+                  </option>
+                ))}
+              </Select>
+              <Input
+                value={line.diffNote ?? ''}
+                onChange={(e) => onPatch({ diffNote: e.target.value })}
+                disabled={locked}
+                maxLength={100}
+                placeholder={row.big ? '说明（至少 2 个字）' : '说明（选填）'}
+                className="h-8 min-w-0 flex-1 text-[12.5px]"
+                aria-label={`${m.name}差异说明`}
+              />
+            </div>
+          )}
         </>
       )}
     </li>

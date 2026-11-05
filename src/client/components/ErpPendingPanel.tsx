@@ -88,6 +88,10 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
       return d.redemption && typeof d.redemption === 'object' ? { refId: d.redemption.id } : null;
     case 'platform_settlement':
       return d.settlement && typeof d.settlement === 'object' ? { refId: d.settlement.id } : null;
+    // 审批中心（v0.7.30）：新建审批规则、设代理人都返回那一条（id）
+    case 'approval_rule':
+    case 'approval_delegation':
+      return typeof d.id === 'number' ? { refId: d.id } : null;
   }
 }
 

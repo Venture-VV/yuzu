@@ -87,13 +87,15 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     requires: ['inventory'],
   },
   approvals: {
-    label: '审批待办',
+    label: '审批中心',
     group: '供应链',
-    description: '待办汇总：负责人要确认的采购、报损、盘点调整、退货、付款、期初集中在一页。关掉只是不显示这一页，各单据里的确认照常',
-    path: '/todo',
-    pages: ['/todo'],
-    apis: [],
-    perms: ['inventory.approve'],
+    description:
+      '审批规则（单据类型 × 金额 × 部门 → 一到三级审批链）、待我审批、批量同意、超时提醒、代理人，手机上也能审；采购、报损、盘点差异、退货、付款、期初、报销都走这里（v0.7.30）。' +
+      '旧的「审批待办」页照常在。关掉只是不显示这两页，各单据里的确认照常走审批规则',
+    path: '/approvals',
+    pages: ['/approvals', '/todo'],
+    apis: ['/api/approvals'],
+    perms: ['approval.act', 'inventory.approve', 'expense.approve'],
     defaultEnabled: true,
     requires: ['inventory'],
   },
@@ -217,6 +219,9 @@ export const ERP_OP_TYPES = [
   'doc_print',
   // 会员实体卡：发卡、补卡（v0.7.28）
   'member_card',
+  // 审批中心（v0.7.30）：新建审批规则、设代理人（Codex 自动审查 2cfd28b：没收到结果时刷新、关掉对话框后也要能查回、重提或作废）
+  'approval_rule',
+  'approval_delegation',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -251,6 +256,8 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   platform_settlement: '平台打款登记',
   doc_print: '打印单据',
   member_card: '发卡、补卡',
+  approval_rule: '新建审批规则',
+  approval_delegation: '设代理人',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

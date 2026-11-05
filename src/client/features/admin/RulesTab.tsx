@@ -297,7 +297,7 @@ export function RulesTab() {
   );
 }
 
-type CycleKey = 'weighTolerancePct' | 'stocktakeDay' | 'stocktakeGraceDays' | 'monthlyReconDay' | 'monthlyReconGraceDays' | 'batchReconGraceDays';
+type CycleKey = 'weighTolerancePct' | 'stocktakeDay' | 'stocktakeGraceDays' | 'monthlyReconDay' | 'monthlyReconGraceDays' | 'batchReconGraceDays' | 'countBigPct';
 const CYCLE_FIELDS: { key: CycleKey; label: string; hint: string; min: number; max: number }[] = [
   { key: 'weighTolerancePct', label: '称重收货容差（%）', hint: '称重的物料按实际称重收货，可以比采购单多出这么多（0–30）', min: 0, max: 30 },
   { key: 'stocktakeDay', label: '每月盘点日', hint: '每月几号起提醒盘点（1–28）', min: 1, max: 28 },
@@ -305,6 +305,7 @@ const CYCLE_FIELDS: { key: CycleKey; label: string; hint: string; min: number; m
   { key: 'monthlyReconDay', label: '月结对账日', hint: '每月几号起提醒月结供应商对上个月的账（1–28）', min: 1, max: 28 },
   { key: 'monthlyReconGraceDays', label: '月结对账宽限天数', hint: '对账日过了几天还没登记标红', min: 0, max: 27 },
   { key: 'batchReconGraceDays', label: '按批次对账宽限天数', hint: '按批次的供应商，收货后几天还没登记对账标红', min: 0, max: 30 },
+  { key: 'countBigPct', label: '盘点大差异（超过账面的 %）', hint: '差异超过账面的这个比例算大差异：要写原因、走审批（v0.7.30，1–50）', min: 1, max: 50 },
 ];
 
 /** 库存与采购的经营规则（模拟规则，可由店主调整） */
@@ -324,7 +325,10 @@ function InventoryRules() {
     monthlyReconDay: '',
     monthlyReconGraceDays: '',
     batchReconGraceDays: '',
+    countBigPct: '',
   });
+  // 盘点大差异的金额（v0.7.30）：差异数量 × 参考价超过它也算大差异
+  const [bigCentsText, setBigCentsText] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (settings.data && !draft) {
@@ -333,6 +337,7 @@ function InventoryRules() {
     setThresholdText(centsToInput(settings.data.approvalThresholdCents));
     setWindowText(String(settings.data.usageWindowDays));
     setCycle(Object.fromEntries(CYCLE_FIELDS.map((f) => [f.key, String(settings.data![f.key])])) as Record<CycleKey, string>);
+    setBigCentsText(centsToInput(settings.data.countBigCents));
   }
   if (!draft) return <Skeleton className="h-48" />;
 
@@ -349,10 +354,12 @@ function InventoryRules() {
       if (cycle[f.key].trim() === '' || !Number.isInteger(v) || v < f.min || v > f.max) return setError(`${f.label}要在 ${f.min} 到 ${f.max} 之间`);
       cycleValues[f.key] = v;
     }
+    const countBigCents = parseYuan(bigCentsText);
+    if (!countBigCents || countBigCents < 100 || countBigCents > 10_000_000) return setError('盘点大差异的金额要在 ¥1 到 ¥10 万之间');
     setSaving(true);
     setError(null);
     try {
-      const next = await api.put<InventorySettings>('/api/inventory/settings', { ...draft, urgentCapCents, approvalThresholdCents, usageWindowDays, ...cycleValues });
+      const next = await api.put<InventorySettings>('/api/inventory/settings', { ...draft, urgentCapCents, approvalThresholdCents, usageWindowDays, ...cycleValues, countBigCents });
       qc.setQueryData(['inv', 'settings'], next);
       toast({ tone: 'success', title: '库存与采购规则已保存', body: '只影响之后提交的单据。' });
     } catch (err) {
@@ -366,7 +373,7 @@ function InventoryRules() {
   return (
     <Card className="p-5">
       <SectionTitle aside={<PendingBadge />}>库存与采购</SectionTitle>
-      <p className="mt-1 text-[12.5px] text-ink-3">库存范围、价格口径、急采上限与单层负责人确认。常规领料、收货、退回不需要逐笔审批；总仓的盘点调整固定需要负责人确认，部门小仓的盘点差异由部门自己管。</p>
+      <p className="mt-1 text-[12.5px] text-ink-3">库存范围、价格口径、急采上限与负责人确认（没有审批规则命中时的默认规则；多级审批在 ERP「审批中心」设）。常规领料、收货、退回不需要逐笔审批；总仓的盘点调整固定需要确认，部门小仓只有大差异的要审批。</p>
       <div className="mt-4 grid gap-4 md:grid-cols-3">
         <Field label="库存范围" htmlFor="i-scope" hint="库存数字代表哪里，避免重复管理">
           <Input id="i-scope" value={draft.scopeName} maxLength={20} onChange={(e) => setDraft({ ...draft, scopeName: e.target.value })} />
@@ -391,6 +398,9 @@ function InventoryRules() {
             <Input id={`i-${f.key}`} inputMode="numeric" value={cycle[f.key]} onChange={(e) => setCycle({ ...cycle, [f.key]: e.target.value.replace(/\D/g, '') })} />
           </Field>
         ))}
+        <Field label="盘点大差异（差异金额）" htmlFor="i-count-big-cents" hint="差异数量 × 参考价超过这个金额也算大差异（v0.7.30）">
+          <MoneyInput id="i-count-big-cents" value={bigCentsText} onChange={(e) => setBigCentsText(e.target.value)} />
+        </Field>
       </div>
       <p className="mt-5 mb-2 text-[13px] font-bold text-ink-2">需要负责人确认的单据</p>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">

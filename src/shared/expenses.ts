@@ -1,6 +1,7 @@
 // 费用报销与备用金（v0.7.7，飞书需求 RQ-005 第一步，见 docs/EXPENSES.md）。
 // 金额为整数「分」，数量为千分之一单位，税点为万分之一（1300 = 13%）。
 
+import type { ApprovalBrief } from './approvals';
 import type { PayMethod } from './purchasing';
 
 export const EXPENSE_CATEGORIES = ['office', 'fixed_asset', 'low_value', 'freight'] as const;
@@ -128,6 +129,8 @@ export interface ExpenseClaim extends ExpenseClaimSummary {
   isSynthetic: boolean;
   lines: ExpenseClaimLine[];
   approvals: { id: number; action: string; actorName: string; reason: string; createdAt: string }[];
+  /** 审批中心（v0.7.30）：在审的审批单，没有在审的取最近一张；从没走过审批中心的为空 */
+  approval: ApprovalBrief | null;
 }
 
 export interface ExpenseClaimList {

@@ -3,7 +3,8 @@
 //   ② 采购单一键转报销：现付采购单出现在「待报销」，点转报销打开带好的登记页，提交后采购单上看得到报销单；
 //   ③ 部门备用金台账：设定额，看板显示建议补足，点开部门看到逐笔与期末余额；
 //   ④ 补货建议：低于提醒数量的物料按供应商分组，一键生成采购单草稿；
-//   ⑤ 询价比价：新建询价单、两家报价、定标、转采购单。
+//   ⑤ 询价比价：新建询价单、两家报价、定标、转采购单；
+//   v0.7.30：需求单转采购单到了询价门槛「改为询价」带上需求单，补货建议「发起询价」。
 // 依赖演示数据（只在独立演示库）；账号：店主 linlan，密码 yuzu2026。会登记单据，只在门店电脑尺寸执行。
 // 每次用新的供应商、物料编码，不改演示数据里已有的档案。
 import { randomUUID } from 'node:crypto';
@@ -212,5 +213,54 @@ test.describe('ERP 采购五项（v0.7.29）', () => {
     const poId = Number(/\/purchasing\/(\d+)\/edit/.exec(page.url())![1]);
     const po = (await (await page.request.get(`/api/purchase-orders/${poId}`)).json()) as { status: string; supplier: { id: number }; sourcing: { id: number } | null; totalCents: number };
     expect(po).toMatchObject({ status: 'draft', supplier: { id: a.id }, sourcing: { id: eventId }, totalCents: 58_000 });
+  });
+});
+
+// v0.7.30：询价接上需求单与补货建议（v0.7.29 的已知问题）
+test.describe('询价接上需求单与补货建议（v0.7.30）', () => {
+  test.skip(({ viewport }) => (viewport?.width ?? 0) < 1280, '会登记单据的流程只在门店电脑尺寸执行一次');
+
+  test('需求单转采购单到了询价门槛：「改为询价」带上需求单；询价单上看得到来自哪张需求单，需求单显示询价中', async ({ page }) => {
+    const { tag } = await setup(page);
+    const dept = await firstDepartment(page);
+    const mat = await newMaterial(page, tag); // 参考价 ¥30/箱
+    const rules = (await (await page.request.get('/api/inventory/purchase-rules')).json()) as { quoteThresholdCents: number };
+    const boxes = Math.max(2, Math.ceil(rules.quoteThresholdCents / 3_000) + 1);
+    const made = await page.request.post('/api/erp/requests', {
+      data: { clientKey: randomUUID(), departmentId: dept.id, lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: boxes * 1000, unit: '箱' }] },
+    });
+    expect(made.status(), await made.text()).toBe(201);
+    const request = (await made.json()).request as { id: number; docNo: string; lines: { id: number }[] };
+    expect((await page.request.post(`/api/erp/requests/${request.id}/approve`, { data: {} })).ok()).toBe(true);
+
+    await page.goto(`/purchasing/new?requestLines=${request.lines[0]!.id}`);
+    await expect(page.getByTestId('po-from-requests')).toContainText('来自需求单');
+    if (rules.quoteThresholdCents > 0) await expect(page.getByTestId('po-over-quote')).toBeVisible();
+    await page.getByTestId('po-to-sourcing').click();
+    await expect(page.getByTestId('sc-title')).toHaveValue(mat.name);
+    await expect(page.getByText(`来自需求单 ${request.docNo}`)).toBeVisible();
+    await page.getByTestId('sourcing-create').click();
+    await expect(page).toHaveURL(/\/purchasing\/sourcing\/\d+$/);
+    await expect(page.getByTestId('sourcing-line-requests-1')).toContainText(request.docNo);
+    const eventId = Number(/\/sourcing\/(\d+)$/.exec(page.url())![1]);
+    const detail = (await (await page.request.get(`/api/erp/requests/${request.id}`)).json()) as { lines: { progress: { state: string; sourcing: { id: number } | null } }[] };
+    expect(detail.lines[0]!.progress).toMatchObject({ state: 'sourcing', sourcing: { id: eventId } });
+  });
+
+  test('补货建议「发起询价」：建好的询价单算在途，这个物料不再建议', async ({ page }) => {
+    const { tag } = await setup(page);
+    const sup = await newSupplier(page, tag);
+    const mat = await newMaterial(page, tag, { defaultSupplierId: sup.id, lowStockMilli: 25_000 });
+
+    await page.goto('/purchasing/suggestions');
+    const group = page.getByTestId(`suggest-group-${sup.id}`);
+    await expect(group.getByTestId(`suggest-qty-${mat.id}`)).toHaveValue('3');
+    await group.getByTestId('suggest-sourcing').click();
+    await expect(page.getByTestId('sc-qty-0')).toHaveValue('3');
+    await page.getByTestId('sourcing-create').click();
+    await expect(page).toHaveURL(/\/purchasing\/sourcing\/\d+$/);
+    await page.goto('/purchasing/suggestions');
+    await expect(page.getByTestId('suggestions-page')).toBeVisible();
+    await expect(page.getByTestId(`suggest-line-${mat.id}`)).toHaveCount(0);
   });
 });

@@ -7,7 +7,7 @@ import { migrate } from '../src/server/migrate';
 import { createStaff } from '../src/server/modules/staff';
 import { demoSeedWindow } from '../src/server/ops/demo-time';
 
-import { recreateFromTemplate, testDbUrl } from './test-db';
+import { dropPublicSchema, recreateFromTemplate, testDbUrl } from './test-db';
 
 /** 测试库：并行跑时每个进程一个库（见 tests/test-db.ts、vitest.config.ts） */
 export const TEST_DB = testDbUrl();
@@ -31,7 +31,7 @@ export async function setup(): Promise<TestContext> {
   // 并行时从迁移好的模板库整库复制一份新的；不并行时照旧清空、迁移（见 tests/test-db.ts）
   const fresh = await recreateFromTemplate();
   const sql = createSql(TEST_DB, { max: 20 });
-  if (!fresh) await sql.unsafe('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+  if (!fresh) await dropPublicSchema(sql);
   await migrate(sql);
   // 「收款前必须先开班」（R1.2）默认开启；之前的用例按开班可选的口径编写，这里关闭，
   // 开启时的行为由 tests/r1-funds.test.ts 单独验证（openShiftRequired(ctx) 重新开启）
@@ -209,6 +209,10 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '070_purchase_channels.sql',
   '071_petty_accounts.sql',
   '072_sourcing.sql',
+  '073_approval_center.sql',
+  '074_sourcing_requests.sql',
+  '075_stocktake_variance.sql',
+  '076_approval_op_fences.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

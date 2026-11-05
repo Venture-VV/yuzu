@@ -1,5 +1,6 @@
 // 库存与采购：前后端共用的类型与中文名称。数量为 milli（千分之一库存单位），金额为分。
 
+import type { ApprovalBrief } from './approvals';
 import type { PriceCompare } from './purchasing';
 
 export const INV_DOC_TYPES = ['opening', 'receipt', 'issue', 'issue_return', 'direct_use', 'damage', 'count', 'supplier_return'] as const;
@@ -117,6 +118,9 @@ export interface DeptStockMeta {
   signDueDays: number;
   /** 期初、报损要不要负责人确认（与库存规则一致） */
   approvalRules: ApprovalRules;
+  /** 盘点大差异（v0.7.30，A8）：差异超过账面的百分比、差异金额（分） */
+  countBigPct: number;
+  countBigCents: number;
   materials: {
     id: number;
     code: string;
@@ -170,7 +174,36 @@ export interface InventorySettings {
   monthlyReconGraceDays: number;
   /** 按批次供应商：收货后几天没对账标红（#23，默认 3 天） */
   batchReconGraceDays: number;
+  /** 盘点大差异（v0.7.30，A8）：差异数量超过账面的这个百分比（默认 2），或差异金额超过这个金额（分，默认 ¥500） */
+  countBigPct: number;
+  countBigCents: number;
   approvalRules: ApprovalRules;
+}
+
+/** 盘点大差异（v0.7.30，A8）的默认：差异超过账面的 2%，或差异金额超过 ¥500 */
+export const DEFAULT_COUNT_BIG_PCT = 2;
+export const DEFAULT_COUNT_BIG_CENTS = 50_000;
+
+/**
+ * 盘点这一行是不是「大差异」（v0.7.30，A8）：差异数量超过账面数的 countBigPct%（账面是 0 的有差异就算），
+ * 或差异金额（差异数量 × 参考价，取绝对值）超过 countBigCents。没有参考价的只按比例看。
+ */
+export function isBigVariance(
+  bookMilli: number,
+  diffMilli: number,
+  diffAmountCents: number | null,
+  rules: Pick<InventorySettings, 'countBigPct' | 'countBigCents'>,
+): boolean {
+  if (diffMilli === 0) return false;
+  if (bookMilli === 0) return true;
+  if (Math.abs(diffMilli) * 100 > Math.abs(bookMilli) * rules.countBigPct) return true;
+  return diffAmountCents !== null && Math.abs(diffAmountCents) > rules.countBigCents;
+}
+
+/** 盘点差异占账面的百分比（保留一位小数）；账面是 0 的为空 */
+export function variancePct(bookMilli: number, diffMilli: number): number | null {
+  if (bookMilli === 0) return null;
+  return Math.round((diffMilli * 1000) / bookMilli) / 10;
 }
 
 export interface Department {
@@ -282,6 +315,8 @@ export interface InvDocLine {
   bookMilli: number | null;
   countedMilli: number | null;
   diffReason: CountReason | 'pending' | null;
+  /** 差异说明（v0.7.30：大差异的行提交时写） */
+  diffNote: string;
   /** 盘点：记录账面数之后该物料又有收发，需要重新核对 */
   stale: boolean;
   sourceLineId: number | null;
@@ -351,6 +386,8 @@ export interface InvDoc {
   /** 由本单派生的退回、退货单 */
   children: DocRef[];
   approvals: ApprovalLog[];
+  /** 审批中心（v0.7.30）：在审的审批单，没有在审的取最近一张；从没走过审批中心的为空 */
+  approval: ApprovalBrief | null;
   /** 是否允许冲销及原因 */
   voidable: { ok: boolean; reason: string | null };
 }

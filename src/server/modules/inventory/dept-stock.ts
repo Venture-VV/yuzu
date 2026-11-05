@@ -109,6 +109,9 @@ export async function deptStockMeta(db: Db, actor: Actor): Promise<DeptStockMeta
     urgentCapCents: settings.urgentCapCents,
     signDueDays: ISSUE_SIGN_DUE_DAYS,
     approvalRules: settings.approvalRules,
+    // 盘点大差异（v0.7.30，A8）：页面提示要写原因（部门看不到参考价，只按比例；服务端照两样核对）
+    countBigPct: settings.countBigPct,
+    countBigCents: settings.countBigCents,
     // 台面日耗品（v0.7.13）：部门小仓不登记它的期初、耗用、报损、盘点，急采照常（验收后即算耗用）
     materials: await db<DeptStockMeta['materials']>`
       SELECT id, code, name, category, specification, inventory_unit, decimals, purchase_unit, purchase_factor_milli, counter_use, weighed

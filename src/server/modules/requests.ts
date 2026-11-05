@@ -36,7 +36,7 @@ import { badRequest, conflict, forbidden, notFound, unprocessable } from '../lib
 import { idParam, parse } from '../lib/validate';
 import { erpOpAbandoned } from './erp-ops';
 import { loadExpenseRules } from './expenses';
-import { docDateSchema, logApproval } from './inventory/common';
+import { docDateSchema, logApproval, sourcingHolds } from './inventory/common';
 import { todayIn } from '../lib/dates';
 import { nextDocNo, setTxTimeouts } from '../lib/tx';
 import { hashRequest } from '../lib/idempotency';
@@ -80,6 +80,21 @@ const PROGRESS_SQL = (db: Db) => db`
      WHERE x.request_line_id = l.id AND po.status <> 'cancelled'
      ORDER BY pl.id LIMIT 1)`;
 
+/**
+ * 需求行的询价单（v0.7.30：从需求单发起询价）：还占着它的那张（询价中；同一时刻最多一张，接口里锁需求单核对、自检兜底），
+ * 或者它所在的没撤回的采购单就是从这张询价单转出的（已下单，显示询价单号）。转出以后从采购单上解开的不算（sourcingHolds）。
+ */
+const SOURCING_SQL = (db: Db) => db`
+  (SELECT json_build_object('id', e.id, 'docNo', e.doc_no)
+     FROM sourcing_line_requests sr JOIN sourcing_lines sl ON sl.id = sr.sourcing_line_id
+     JOIN sourcing_events e ON e.id = sl.event_id
+     WHERE sr.request_line_id = l.id
+       AND (${sourcingHolds(db)}
+            OR EXISTS (SELECT 1 FROM purchase_order_line_requests ox JOIN purchase_order_lines ol ON ol.id = ox.po_line_id
+                       JOIN purchase_orders op ON op.id = ol.po_id
+                       WHERE ox.request_line_id = l.id AND op.sourcing_event_id = e.id AND op.status <> 'cancelled'))
+     ORDER BY e.id DESC LIMIT 1)`;
+
 interface RawProgress {
   poId: number;
   docNo: string;
@@ -92,12 +107,14 @@ interface RawProgress {
   returnedMilli: number;
 }
 
-function progressOf(p: RawProgress | null): RequestLineProgress {
-  if (!p) return { po: null, orderedMilli: 0, receivedMilli: 0, returnedMilli: 0, inventoryUnit: null, mergedLines: 0, state: 'none' };
+function progressOf(p: RawProgress | null, s: { id: number; docNo: string } | null = null): RequestLineProgress {
+  const sourcing = s ? { id: Number(s.id), docNo: s.docNo } : null;
+  if (!p) return { po: null, orderedMilli: 0, receivedMilli: 0, returnedMilli: 0, inventoryUnit: null, mergedLines: 0, sourcing, state: sourcing ? 'sourcing' : 'none' };
   const received = Number(p.receivedMilli);
   const ordered = Number(p.orderedMilli);
   return {
     po: { id: p.poId, docNo: p.docNo, status: p.status, supplierName: p.supplierName },
+    sourcing,
     orderedMilli: ordered,
     receivedMilli: received,
     returnedMilli: Number(p.returnedMilli),
@@ -154,21 +171,21 @@ export async function getRequest(db: Db, actor: Actor, requestId: number): Promi
   const [extra] = await db<{ note: string; reviewedByName: string | null; reviewedAt: string | null; reason: string | null; isSynthetic: boolean }[]>`
     SELECT r.note, rb.display_name AS reviewed_by_name, r.reviewed_at, r.reason, r.is_synthetic
     FROM purchase_requests r LEFT JOIN staff rb ON rb.id = r.reviewed_by WHERE r.id = ${requestId}`;
-  const lines = await db<(Omit<PurchaseRequest['lines'][number], 'progress'> & { progress: RawProgress | null })[]>`
+  const lines = await db<(Omit<PurchaseRequest['lines'][number], 'progress'> & { progress: RawProgress | null; sourcing: { id: number; docNo: string } | null })[]>`
     SELECT l.id, l.line_no, l.material_id, m.name AS material_name, l.name, l.purpose, l.qty_milli, l.unit, l.link, l.details,
            l.ref_price_cents, l.note,
            coalesce((SELECT json_agg(json_build_object('id', i.image_id, 'url', '/api/erp/images/' || i.image_id) ORDER BY i.sort_no)
                      FROM purchase_request_line_images i WHERE i.request_line_id = l.id), '[]'::json) AS images,
-           ${PROGRESS_SQL(db)} AS progress
+           ${PROGRESS_SQL(db)} AS progress, ${SOURCING_SQL(db)} AS sourcing
     FROM purchase_request_lines l LEFT JOIN materials m ON m.id = l.material_id
     WHERE l.request_id = ${requestId} ORDER BY l.line_no`;
   const approvals = await db<PurchaseRequest['approvals']>`
     SELECT a.id, a.action, s.display_name AS actor_name, a.reason, a.created_at
     FROM approval_logs a JOIN staff s ON s.id = a.actor_id WHERE a.doc_kind = 'purchase_request' AND a.doc_id = ${requestId} ORDER BY a.id`;
-  return { ...toSummary(row), ...extra!, lines: lines.map((l) => ({ ...l, progress: progressOf(l.progress) })), approvals };
+  return { ...toSummary(row), ...extra!, lines: lines.map(({ sourcing, ...l }) => ({ ...l, progress: progressOf(l.progress, sourcing) })), approvals };
 }
 
-/** 已通过、还没下单的需求行（转采购单用；ids 给了就只取这些） */
+/** 已通过、还没下单、也没被询价单占着的需求行（转采购单、发起询价用；ids 给了就只取这些） */
 export async function openLines(db: Db, ids?: number[]): Promise<OpenRequestLine[]> {
   const rows = await db<(Omit<OpenRequestLine, 'department'> & { departmentId: number; departmentName: string })[]>`
     SELECT l.id, r.id AS request_id, r.doc_no AS request_no, r.department_id, d.name AS department_name, s.display_name AS requester_name,
@@ -182,6 +199,9 @@ export async function openLines(db: Db, ids?: number[]): Promise<OpenRequestLine
       AND NOT EXISTS (SELECT 1 FROM purchase_order_line_requests x JOIN purchase_order_lines pl ON pl.id = x.po_line_id
                       JOIN purchase_orders po ON po.id = pl.po_id
                       WHERE x.request_line_id = l.id AND po.status <> 'cancelled')
+      AND NOT EXISTS (SELECT 1 FROM sourcing_line_requests sr JOIN sourcing_lines sl ON sl.id = sr.sourcing_line_id
+                      JOIN sourcing_events e ON e.id = sl.event_id
+                      WHERE sr.request_line_id = l.id AND ${sourcingHolds(db)})
       ${ids ? db`AND l.id IN ${db(ids)}` : db``}
     ORDER BY r.created_at, r.id, l.line_no
     LIMIT 500`;
@@ -449,7 +469,7 @@ export async function requestChecks(db: Db) {
 // ───────────────────────── 导出（v0.7.9） ─────────────────────────
 
 const EXPORT_LIMIT = 20_000;
-const PROGRESS_LABELS: Record<RequestLineProgress['state'], string> = { none: '未下单', ordered: '已下单', partial: '部分到货', received: '已到货', closed: '采购单已关闭' };
+const PROGRESS_LABELS: Record<RequestLineProgress['state'], string> = { none: '未下单', sourcing: '询价中', ordered: '已下单', partial: '部分到货', received: '已到货', closed: '采购单已关闭' };
 
 /** 需求单导出：每一行需求一行，带下单 / 到货 / 退货与采购单号。能导出的是有「导出费用」权限的人（店主、对账付款、成本核算、负责人），导出全部部门 */
 async function requestsCsv(db: Db, timezone: string, f: { from: string; to: string; status?: RequestStatus; departmentId?: number }) {
@@ -478,12 +498,13 @@ async function requestsCsv(db: Db, timezone: string, f: { from: string; to: stri
     note: string;
     imageCount: number;
     progress: RawProgress | null;
+    sourcing: { id: number; docNo: string } | null;
   }[]>`
     SELECT r.doc_no, to_char(r.created_at AT TIME ZONE ${timezone}, 'YYYY-MM-DD HH24:MI') AS created_local,
            d.name AS department_name, s.display_name AS requester_name, r.status, r.need_by,
            l.line_no, l.name, m.name AS material_name, l.purpose, l.qty_milli, l.unit, l.ref_price_cents, l.link, l.details, l.note,
            (SELECT count(*)::int FROM purchase_request_line_images i WHERE i.request_line_id = l.id) AS image_count,
-           ${PROGRESS_SQL(db)} AS progress
+           ${PROGRESS_SQL(db)} AS progress, ${SOURCING_SQL(db)} AS sourcing
     FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
     JOIN departments d ON d.id = r.department_id JOIN staff s ON s.id = r.requester_id
     LEFT JOIN materials m ON m.id = l.material_id
@@ -495,7 +516,7 @@ async function requestsCsv(db: Db, timezone: string, f: { from: string; to: stri
      '进度', '采购单号', '供应商', '下单数量', '到货数量', '退货数量', '库存单位'],
   ];
   for (const r of rows) {
-    const p = progressOf(r.progress);
+    const p = progressOf(r.progress, r.sourcing);
     out.push([
       r.docNo,
       r.createdLocal,
@@ -557,7 +578,8 @@ export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
     if (!row) throw notFound('没有找到这次提交');
     return getRequest(sql, req.actor, row.id);
   });
-  app.get('/api/erp/requests/checks', { preHandler: anyRequest }, async () => readSnapshot(sql, requestChecks));
+  // 自检看的是全店的需求单（含别的部门的单号与产品名）：只给审核的人（v0.7.30 数据隔离，A9）
+  app.get('/api/erp/requests/checks', { preHandler: guardAny('request.review') }, async () => readSnapshot(sql, requestChecks));
   // 导出需求单（v0.7.9）：与报销、台账同一个导出权限（店主、对账付款、成本核算、负责人）
   app.get('/api/erp/requests/export', { preHandler: guard('expense.export') }, async (req, reply) => {
     const f = parse(ExportQuery, req.query);
@@ -587,7 +609,20 @@ export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
     return img;
   });
   app.get('/api/erp/images/:id', { preHandler: guardAny('request.create', 'request.review', 'inventory.read', 'expense.read') }, async (req, reply) => {
-    const [img] = await sql<{ mime: string; data: Buffer }[]>`SELECT mime, data FROM erp_images WHERE id = ${docId(req)}`;
+    const imageId = docId(req);
+    // 数据隔离（v0.7.30，A9）：只有「部门申购」的账号只能看自己上传的、本部门与自己提的需求单里的图片（编号是连续的，不能靠猜）
+    if (!can(req.actor, 'request.review') && !can(req.actor, 'inventory.read') && !can(req.actor, 'expense.read')) {
+      const me = await myContext(sql, req.actor);
+      const [mine] = await sql<{ ok: boolean }[]>`
+        SELECT true AS ok FROM erp_images i
+        WHERE i.id = ${imageId}
+          AND (i.created_by = ${req.actor.id} OR EXISTS (
+            SELECT 1 FROM purchase_request_line_images li JOIN purchase_request_lines l ON l.id = li.request_line_id
+            JOIN purchase_requests r ON r.id = l.request_id
+            WHERE li.image_id = i.id AND (r.requester_id = ${req.actor.id} OR r.department_id = ${me.departmentId ?? 0})))`;
+      if (!mine) throw notFound('图片不存在');
+    }
+    const [img] = await sql<{ mime: string; data: Buffer }[]>`SELECT mime, data FROM erp_images WHERE id = ${imageId}`;
     if (!img) throw notFound('图片不存在');
     reply.header('content-type', img.mime).header('cache-control', 'private, max-age=31536000, immutable');
     return reply.send(img.data);

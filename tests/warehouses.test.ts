@@ -240,24 +240,37 @@ describe('领料：总仓出、部门小仓进；部门签收（#17）', () => {
 });
 
 describe('部门小仓的盘点、耗用、报损与期初', () => {
-  it('部门盘点提交即生效、差异默认「耗用」；成本岗可给任何部门盘点；越权与总仓单据被拒绝', async () => {
+  it('部门盘点只有小差异的提交即生效、差异默认「耗用」；大差异要写原因、走审批（v0.7.30）；成本岗可给任何部门盘点；越权与总仓单据被拒绝', async () => {
     const m = await material('W002', { name: '洗发水小瓶', inventoryUnit: '瓶' });
-    await opening(m.id, q(50));
-    await issue(m.id, q(20));
+    await opening(m.id, q(500));
+    await issue(m.id, q(200));
+    // 差 2 瓶（1%）：小差异，提交即生效
     const count = await ok(
-      deptDoc(bath, { docType: 'count', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(12), expectedBookMilli: q(20) }] }),
+      deptDoc(bath, { docType: 'count', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(198), expectedBookMilli: q(200) }] }),
     );
     expect(count).toMatchObject({ status: 'confirmed', warehouse: { id: bathWh } });
-    expect(count.lines[0]).toMatchObject({ bookMilli: q(20), qtyMilli: q(-8), diffReason: 'consumed' });
-    expect(await deptStock(bathWh, m.id)).toBe(q(12));
-    expect(await central(m.id)).toBe(q(30));
+    expect(count.lines[0]).toMatchObject({ bookMilli: q(200), qtyMilli: q(-2), diffReason: 'consumed' });
+    expect(await deptStock(bathWh, m.id)).toBe(q(198));
+    expect(await central(m.id)).toBe(q(300));
     // 页面上的账面与部门小仓不一致：拒绝
-    const stale = await deptDoc(bath, { docType: 'count', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(12), expectedBookMilli: q(20) }] });
+    const stale = await deptDoc(bath, { docType: 'count', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(198), expectedBookMilli: q(200) }] });
     expect(stale.body.error.code).toBe('COUNT_STALE');
     // 成本岗（每月 1 号到部门盘点）
-    const audit = await ok(deptDoc(coster, { docType: 'count', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(11) }] }));
+    const audit = await ok(deptDoc(coster, { docType: 'count', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(197) }] }));
     expect(audit.status).toBe('confirmed');
-    expect(await deptStock(bathWh, m.id)).toBe(q(11));
+    expect(await deptStock(bathWh, m.id)).toBe(q(197));
+    // 大差异（差 20 瓶，超过账面的 2%）：没写原因拒绝提交；写了原因进审批，负责人同意后生效、原因照提交时的
+    const bigLine = { materialId: m.id, countedMilli: q(177), expectedBookMilli: q(197) };
+    const noReason = await deptDoc(bath, { docType: 'count', warehouseId: bathWh, lines: [bigLine] });
+    expect(noReason.status).toBe(422);
+    expect(noReason.body.error.code).toBe('COUNT_REASON_REQUIRED');
+    const big = await ok(deptDoc(bath, { docType: 'count', warehouseId: bathWh, lines: [{ ...bigLine, diffReason: 'damaged', diffNote: '漏水泡坏' }] }));
+    expect(big.status).toBe('submitted');
+    expect(await deptStock(bathWh, m.id)).toBe(q(197));
+    const approved = await api(ctx.app, approver, 'POST', `/api/inventory/docs/${big.id}/approve`, {});
+    expect(approved.body).toMatchObject({ status: 'confirmed' });
+    expect(approved.body.lines[0]).toMatchObject({ diffReason: 'damaged', diffNote: '漏水泡坏' });
+    expect(await deptStock(bathWh, m.id)).toBe(q(177));
     // 别的部门、总仓、领料都不能从部门入口登记
     expect((await deptDoc(bar, { docType: 'count', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(1) }] })).status).toBe(403);
     expect((await deptDoc(bath, { docType: 'count', warehouseId: 1, lines: [{ materialId: m.id, countedMilli: q(1) }] })).status).toBe(400);
@@ -268,7 +281,7 @@ describe('部门小仓的盘点、耗用、报损与期初', () => {
     const dmg = await ok(deptDoc(bath, { docType: 'damage', warehouseId: bathWh, note: '摔碎', lines: [{ materialId: m.id, qtyMilli: q(1) }] }));
     expect(dmg.status).toBe('submitted');
     expect((await api(ctx.app, approver, 'POST', `/api/inventory/docs/${dmg.id}/approve`, {})).body.status).toBe('confirmed');
-    expect(await deptStock(bathWh, m.id)).toBe(q(10));
+    expect(await deptStock(bathWh, m.id)).toBe(q(176));
     // 部门列表里的「对象」是部门
     const list = (await api(ctx.app, bath, 'GET', `/api/erp/dept-stock/${bathId}/docs`)).body;
     expect(list.find((x: { id: number }) => x.id === dmg.id)).toMatchObject({ partyName: '浴区', warehouseName: '浴区小仓' });
@@ -497,8 +510,8 @@ describe('部门停用', () => {
     expect(blocked.status).toBe(422);
     expect(blocked.body.error.code).toBe('DEPT_STOCK_NOT_EMPTY');
     expect(blocked.body.error.message).toContain('毛巾 3 个');
-    // 盘点到 0（店主替部门盘）后可以停用
-    await ok(deptDoc(ctx.owner, { docType: 'count', warehouseId: gymWh, lines: [{ materialId: m.id, countedMilli: 0 }] }));
+    // 盘点到 0（店主替部门盘，大差异写原因、一并确认）后可以停用
+    await ok(deptDoc(ctx.owner, { docType: 'count', warehouseId: gymWh, approveNow: true, lines: [{ materialId: m.id, countedMilli: 0, diffReason: 'consumed', diffNote: '停用前清空' }] }));
     expect((await put(false)).status).toBe(200);
     const late = await doc(keeper, { docType: 'issue', departmentId: gymId, handler: 'x', lines: [{ materialId: m.id, qtyMilli: q(1) }] });
     expect(late.status).toBe(422);

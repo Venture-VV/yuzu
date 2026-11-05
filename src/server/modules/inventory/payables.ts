@@ -46,9 +46,19 @@ import {
   todayIn,
 } from './common';
 import { hashRequest } from '../../lib/idempotency';
+import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForApproval } from '../approvals/engine';
 
 const id = z.number().int().positive();
 const ReasonInput = z.object({ reason: z.string().trim().min(2, '请填写原因（至少 2 个字）').max(200) });
+/** 审批（v0.7.30）：页面看到的审批单与级别（审批单已经变了、走到别的级别时拒绝），同意时的意见 */
+const ApprovalFence = z.object({
+  requestId: id.optional(),
+  level: z.number().int().min(1).max(3).optional(),
+  /** 审批中心的批量同意（记在审批记录上） */
+  batch: z.boolean().optional(),
+});
+const ApproveInput = ApprovalFence.extend({ comment: z.string().trim().max(200, '意见最多 200 个字').default('') });
+const ReturnInput = ReasonInput.extend(ApprovalFence.shape);
 
 export async function lockSupplier(tx: Tx, supplierId: number) {
   // 不修改供应商主键；允许库存应付流水的外键校验取得 KEY SHARE，避免与收货冲销互相等待。
@@ -128,15 +138,15 @@ export async function getOpening(db: Db, openingId: number): Promise<OpeningPaya
     SELECT a.id, a.action, s.display_name AS actor_name, a.reason, a.revision, a.created_at
     FROM approval_logs a JOIN staff s ON s.id = a.actor_id WHERE a.doc_kind = 'opening_payable' AND a.doc_id = ${openingId} ORDER BY a.id`;
   const { supplierId, supplierName, ...rest } = o;
-  return { ...rest, supplier: { id: supplierId, name: supplierName }, approvals };
+  return { ...rest, supplier: { id: supplierId, name: supplierName }, approvals, approval: await approvalBrief(db, 'opening_payable', openingId) };
 }
 
-export async function confirmOpening(tx: Tx, o: { id: number; supplierId: number; amountCents: number; asOfDate: string }, actor: Actor) {
+export async function confirmOpening(tx: Tx, o: { id: number; supplierId: number; amountCents: number; asOfDate: string }, actor: Actor, comment = '') {
   await tx`UPDATE opening_payables SET status = 'confirmed', confirmed_by = ${actor.id}, confirmed_at = now(), returned_reason = NULL, updated_at = now() WHERE id = ${o.id}`;
   await tx`
     INSERT INTO ap_entries (supplier_id, entry_type, amount_delta_cents, opening_payable_id, entry_date, operator_id)
     VALUES (${o.supplierId}, 'opening', ${o.amountCents}, ${o.id}, ${o.asOfDate}, ${actor.id})`;
-  await logApproval(tx, 'opening_payable', o.id, 'approve', actor.id);
+  await logApproval(tx, 'opening_payable', o.id, 'approve', actor.id, comment);
 }
 
 export async function createOpening(deps: Deps, raw: unknown, actor: Actor, ip?: string) {
@@ -171,11 +181,11 @@ export async function createOpening(deps: Deps, raw: unknown, actor: Actor, ip?:
       await tx`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (${input.clientKey}, 'opening_payable', ${requestHash}, ${newId}, ${actor.id})`;
       await logApproval(tx, 'opening_payable', newId, 'create', actor.id);
       await logApproval(tx, 'opening_payable', newId, 'submit', actor.id);
-      // #18：金额不超过免确认门槛的登记即确认（v0.7.12）
+      // #18：金额不超过免确认门槛的登记即确认（v0.7.12）；v0.7.30 起命中审批规则的按规则的审批链
       const settings = await loadInventorySettings(tx);
-      if (!(settings.approvalRules.opening && overThreshold(settings, input.amountCents)) || input.approveNow) {
-        await confirmOpening(tx, { id: newId, ...input }, actor);
-      }
+      const fallback = settings.approvalRules.opening && overThreshold(settings, input.amountCents);
+      const r = await submitForApproval(tx, 'opening_payable', newId, { actor, timeZone: deps.config.timezone }, { fallback, approveNow: input.approveNow });
+      if (r.outcome === 'effective') await confirmOpening(tx, { id: newId, ...input }, actor);
       await writeAudit(tx, { staffId: actor.id, action: 'payable_doc', targetType: 'opening_payable', targetId: newId, detail: { docNo, amountCents: input.amountCents }, ip });
       return { id: newId, replayed: false };
     });
@@ -204,29 +214,38 @@ async function lockOpening(tx: Tx, openingId: number) {
 
 export async function actOnOpening(deps: Deps, openingId: number, action: 'approve' | 'return' | 'cancel' | 'void' | 'resubmit', raw: unknown, actor: Actor) {
   const reason = action === 'approve' || action === 'resubmit' ? '' : parse(ReasonInput, raw).reason;
+  const ctx = { actor, timeZone: deps.config.timezone };
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const o = await lockOpening(tx, openingId);
     switch (action) {
-      case 'approve':
+      case 'approve': {
         if (o.status === 'confirmed') return;
         if (o.status !== 'submitted') throw conflict('INVALID_STATE', '只有待确认的记录可以确认');
-        return confirmOpening(tx, o, actor);
+        // v0.7.30：同意的是当前这一级，最后一级同意后确认（默认规则下一次就确认）
+        const { comment, ...fence } = parse(ApproveInput, raw ?? {});
+        if ((await approveCurrent(tx, 'opening_payable', o.id, ctx, { ...fence, comment })) !== 'final') return;
+        return confirmOpening(tx, o, actor, comment);
+      }
       case 'return':
         if (o.status === 'returned') return;
         if (o.status !== 'submitted') throw conflict('INVALID_STATE', '只有待确认的记录可以退回');
+        await returnCurrent(tx, 'opening_payable', o.id, ctx, { ...parse(ReturnInput, raw), reason });
         await tx`UPDATE opening_payables SET status = 'returned', returned_reason = ${reason}, updated_at = now() WHERE id = ${o.id}`;
         return logApproval(tx, 'opening_payable', o.id, 'return', actor.id, reason);
       case 'resubmit':
         if (o.status === 'submitted') return;
         if (o.status !== 'returned') throw conflict('INVALID_STATE', '只有退回的记录可以重新提交');
         await tx`UPDATE opening_payables SET status = 'submitted', updated_at = now() WHERE id = ${o.id}`;
+        // 退回后再提交按当时的规则从第一级重新走；没有规则命中按默认规则（与以前一样，退回的再提交都要确认）
+        await submitForApproval(tx, 'opening_payable', o.id, ctx, { fallback: true });
         return logApproval(tx, 'opening_payable', o.id, 'submit', actor.id);
       case 'cancel':
         if (o.status === 'cancelled') return;
         if (o.status !== 'submitted' && o.status !== 'returned') throw conflict('INVALID_STATE', '已确认的记录不能撤回，只能冲销');
         if (!can(actor, 'inventory.approve') && o.createdBy !== actor.id) throw forbidden('只能撤回自己登记的记录');
         await tx`UPDATE opening_payables SET status = 'cancelled', returned_reason = ${reason}, updated_at = now() WHERE id = ${o.id}`;
+        await closeApproval(tx, 'opening_payable', o.id, actor);
         return logApproval(tx, 'opening_payable', o.id, 'cancel', actor.id, reason);
       case 'void': {
         if (o.status === 'voided') return;
@@ -306,6 +325,7 @@ export async function getPayment(db: Db, paymentId: number): Promise<PaymentDoc>
     prepayRefundedCents: used!.refundedCents,
     prepayAvailableCents: p.status === 'confirmed' ? prepaidCents - used!.offsetCents - used!.refundedCents : 0,
     approvals,
+    approval: await approvalBrief(db, 'payment', paymentId),
   };
 }
 
@@ -334,7 +354,7 @@ async function checkAllocations(tx: Tx, supplierId: number, allocations: { kind:
   }
 }
 
-async function confirmPayment(tx: Tx, p: { id: number; supplierId: number; amountCents: number; payDate: string }, actor: Actor) {
+async function confirmPayment(tx: Tx, p: { id: number; supplierId: number; amountCents: number; payDate: string }, actor: Actor, comment = '') {
   const allocs = await tx<{ kind: 'receipt' | 'opening'; targetId: number; amountCents: number }[]>`
     SELECT CASE WHEN receipt_doc_id IS NOT NULL THEN 'receipt' ELSE 'opening' END AS kind,
            coalesce(receipt_doc_id, opening_payable_id) AS target_id, amount_cents
@@ -344,7 +364,7 @@ async function confirmPayment(tx: Tx, p: { id: number; supplierId: number; amoun
   await tx`
     INSERT INTO ap_entries (supplier_id, entry_type, amount_delta_cents, payment_id, entry_date, operator_id)
     VALUES (${p.supplierId}, 'payment', ${-p.amountCents}, ${p.id}, ${p.payDate}, ${actor.id})`;
-  await logApproval(tx, 'payment', p.id, 'approve', actor.id);
+  await logApproval(tx, 'payment', p.id, 'approve', actor.id, comment);
 }
 
 export async function createPayment(deps: Deps, raw: unknown, actor: Actor, ip?: string) {
@@ -399,11 +419,11 @@ export async function createPayment(deps: Deps, raw: unknown, actor: Actor, ip?:
       await tx`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (${input.clientKey}, 'payment', ${requestHash}, ${newId}, ${actor.id})`;
       await logApproval(tx, 'payment', newId, 'create', actor.id);
       await logApproval(tx, 'payment', newId, 'submit', actor.id);
-      // #18：金额不超过免确认门槛的登记即确认（v0.7.12）
+      // #18：金额不超过免确认门槛的登记即确认（v0.7.12）；v0.7.30 起命中审批规则的按规则的审批链
       const settings = await loadInventorySettings(tx);
-      if (!(settings.approvalRules.payment && overThreshold(settings, input.amountCents)) || input.approveNow) {
-        await confirmPayment(tx, { id: newId, ...input }, actor);
-      }
+      const fallback = settings.approvalRules.payment && overThreshold(settings, input.amountCents);
+      const r = await submitForApproval(tx, 'payment', newId, { actor, timeZone: deps.config.timezone }, { fallback, approveNow: input.approveNow });
+      if (r.outcome === 'effective') await confirmPayment(tx, { id: newId, ...input }, actor);
       await writeAudit(tx, { staffId: actor.id, action: 'payable_doc', targetType: 'payment', targetId: newId, detail: { docNo, amountCents: input.amountCents }, ip });
       return { id: newId, replayed: false };
     });
@@ -422,6 +442,7 @@ export async function createPayment(deps: Deps, raw: unknown, actor: Actor, ip?:
 
 export async function actOnPayment(deps: Deps, paymentId: number, action: 'approve' | 'return' | 'cancel' | 'void' | 'resubmit', raw: unknown, actor: Actor) {
   const reason = action === 'approve' || action === 'resubmit' ? '' : parse(ReasonInput, raw).reason;
+  const ctx = { actor, timeZone: deps.config.timezone };
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const [head] = await tx<{ supplierId: number }[]>`SELECT supplier_id FROM payments WHERE id = ${paymentId}`;
@@ -430,13 +451,18 @@ export async function actOnPayment(deps: Deps, paymentId: number, action: 'appro
     const [p] = await tx<{ id: number; status: string; supplierId: number; amountCents: number; payDate: string; createdBy: number }[]>`
       SELECT id, status, supplier_id, amount_cents, pay_date, created_by FROM payments WHERE id = ${paymentId} FOR UPDATE`;
     switch (action) {
-      case 'approve':
+      case 'approve': {
         if (p!.status === 'confirmed') return;
         if (p!.status !== 'submitted') throw conflict('INVALID_STATE', '只有待确认的付款可以确认');
-        return confirmPayment(tx, p!, actor);
+        // v0.7.30：同意的是当前这一级，最后一级同意后确认（默认规则下一次就确认）
+        const { comment, ...fence } = parse(ApproveInput, raw ?? {});
+        if ((await approveCurrent(tx, 'payment', p!.id, ctx, { ...fence, comment })) !== 'final') return;
+        return confirmPayment(tx, p!, actor, comment);
+      }
       case 'return':
         if (p!.status === 'returned') return;
         if (p!.status !== 'submitted') throw conflict('INVALID_STATE', '只有待确认的付款可以退回');
+        await returnCurrent(tx, 'payment', p!.id, ctx, { ...parse(ReturnInput, raw), reason });
         await tx`UPDATE payments SET status = 'returned', returned_reason = ${reason}, updated_at = now() WHERE id = ${p!.id}`;
         return logApproval(tx, 'payment', p!.id, 'return', actor.id, reason);
       case 'resubmit': {
@@ -448,6 +474,8 @@ export async function actOnPayment(deps: Deps, paymentId: number, action: 'appro
           FROM payment_allocations WHERE payment_id = ${p!.id}`;
         await checkAllocations(tx, p!.supplierId, allocs, p!.id);
         await tx`UPDATE payments SET status = 'submitted', updated_at = now() WHERE id = ${p!.id}`;
+        // 退回后再提交按当时的规则从第一级重新走；没有规则命中按默认规则（与以前一样，退回的再提交都要确认）
+        await submitForApproval(tx, 'payment', p!.id, ctx, { fallback: true });
         return logApproval(tx, 'payment', p!.id, 'submit', actor.id);
       }
       case 'cancel':
@@ -455,6 +483,7 @@ export async function actOnPayment(deps: Deps, paymentId: number, action: 'appro
         if (p!.status !== 'submitted' && p!.status !== 'returned') throw conflict('INVALID_STATE', '已确认的付款不能撤回，只能冲销');
         if (!can(actor, 'inventory.approve') && p!.createdBy !== actor.id) throw forbidden('只能撤回自己登记的付款');
         await tx`UPDATE payments SET status = 'cancelled', returned_reason = ${reason}, updated_at = now() WHERE id = ${p!.id}`;
+        await closeApproval(tx, 'payment', p!.id, actor);
         return logApproval(tx, 'payment', p!.id, 'cancel', actor.id, reason);
       case 'void':
         if (p!.status === 'voided') return;

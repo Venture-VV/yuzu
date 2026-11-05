@@ -1,4 +1,4 @@
-// v0.7.11 两级库存（飞书需求 RQ-002 第一步）浏览器验收：领料进部门小仓、部门签收、部门盘点（差异默认「耗用」）、
+// v0.7.11 两级库存（飞书需求 RQ-002 第一步）浏览器验收：领料进部门小仓、部门签收、部门盘点（v0.7.30 起大差异要写原因、走审批）、
 // 急采 → 仓库到部门验收 → 部门补采购单、库存按仓查看。依赖 seed-demo 与 seed-inventory-demo（仅独立演示库）。
 // 账号：店主 linlan（不限部门，替水吧操作）/ 物资经办 lixiao，密码 yuzu2026。会改演示数据，断言都用相对变化。
 import { expect, test, type Page } from '@playwright/test';
@@ -56,7 +56,7 @@ test.describe('两级库存：总仓 + 部门小仓', () => {
     await expect(page.getByText('E2E：数量无误')).toBeVisible();
     await page.keyboard.press('Escape');
 
-    // ── 部门盘点：提交即生效，差异默认「耗用」──
+    // ── 部门盘点：少 1 双超过账面的 2%，是大差异（v0.7.30）：要写原因类别与说明、走审批；店主可以提交并一并确认 ──
     const stockOf = async (code: string) => ((await getJson<StockRow[]>(page, `/api/erp/dept-stock/${bar.id}/stock`)).find((r) => r.code === code)?.stockMilli ?? 0) / 1000;
     const book = await stockOf('M001');
     expect(book).toBeGreaterThanOrEqual(5);
@@ -65,8 +65,14 @@ test.describe('两级库存：总仓 + 部门小仓', () => {
     await page.getByLabel('添加物料').fill('拖鞋');
     await page.keyboard.press('Enter');
     await page.keyboard.type(String(book - 1));
-    await expect(page.getByText('提交即生效，库存立即更新')).toBeVisible();
-    await page.getByRole('button', { name: /确认盘点/ }).click();
+    const reason = page.getByTestId(`count-reason-${slipper.id}`);
+    await expect(reason).toContainText('大差异，必须写原因');
+    await expect(page.getByText('提交后需负责人确认')).toBeVisible();
+    await expect(page.getByRole('button', { name: /提交确认/ })).toBeDisabled();
+    await reason.getByLabel(/差异原因/).selectOption('consumed');
+    await reason.getByLabel(/差异说明/).fill('E2E：水吧多用了 1 双');
+    await page.getByLabel('同时以负责人身份确认').check();
+    await page.getByRole('button', { name: /提交并确认/ }).click();
     await expect(page.getByText('盘点已生效')).toBeVisible();
     expect(await stockOf('M001')).toBe(book - 1);
 

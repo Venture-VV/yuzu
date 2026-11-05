@@ -40,11 +40,15 @@ const toBase64 = (blob: Blob) =>
     r.readAsDataURL(blob);
   });
 
-export async function uploadImage(file: File): Promise<ImageRef> {
+async function uploadCompressed(file: File): Promise<{ ref: ImageRef; blob: Blob }> {
   const blob = await compress(file);
   if (blob.size > MAX_IMAGE_BYTES) throw new Error('图片压缩后仍超过 1 MB，请换一张或裁小一点');
   const mime = blob.type === 'image/png' || blob.type === 'image/webp' ? blob.type : 'image/jpeg';
-  return api.post<ImageRef>('/api/erp/images', { mime, data: await toBase64(blob) }, { timeoutMs: 30_000 });
+  return { ref: await api.post<ImageRef>('/api/erp/images', { mime, data: await toBase64(blob) }, { timeoutMs: 30_000 }), blob };
+}
+
+export async function uploadImage(file: File): Promise<ImageRef> {
+  return (await uploadCompressed(file)).ref;
 }
 
 /** 只读缩略图；点开看大图 */
@@ -103,6 +107,13 @@ export function ImagePicker({
   }, [busy]);
   // 上传中这一行被删掉：别让表单一直以为还在上传
   useEffect(() => () => busyRef.current?.(false), []);
+  // 这次刚传的图，缩略图用本机压缩好的那份（Codex 自动审查 2cfd28b）：服务端按内容去重，别人传过同一张图时返回的是那张的编号，
+  // 只有「部门申购」的账号在需求单保存之前看不到它（数据隔离只放行自己上传的、本部门与自己提的需求单里的）；保存后就在自己的需求单里了
+  const local = useRef(new Map<number, string>());
+  useEffect(() => {
+    const urls = local.current;
+    return () => urls.forEach((u) => URL.revokeObjectURL(u));
+  }, []);
   const add = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setBusy(true);
@@ -110,7 +121,8 @@ export function ImagePicker({
     const next = [...value];
     try {
       for (const f of [...files].slice(0, max - value.length)) {
-        const img = await uploadImage(f);
+        const { ref: img, blob } = await uploadCompressed(f);
+        if (!local.current.has(img.id)) local.current.set(img.id, URL.createObjectURL(blob));
         if (!next.some((x) => x.id === img.id)) next.push(img);
       }
       onChange(next);
@@ -127,7 +139,7 @@ export function ImagePicker({
       <div className="flex flex-wrap items-center gap-1.5">
         {value.map((img, i) => (
           <span key={img.id} className="relative size-14 overflow-hidden rounded-md border border-line bg-paper-2">
-            <img src={img.url} alt="" className="size-full object-cover" />
+            <img src={local.current.get(img.id) ?? img.url} alt="" className="size-full object-cover" />
             {!disabled && (
               <button
                 type="button"

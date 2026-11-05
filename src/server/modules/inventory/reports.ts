@@ -2,6 +2,7 @@
 // 所有汇总只按各物料自己的库存单位统计，不跨单位求和。
 
 import type { FastifyInstance } from 'fastify';
+import { approvalChecks } from '../approvals/engine';
 import { z } from 'zod';
 import {
   CENTRAL_WAREHOUSE_ID,
@@ -442,6 +443,9 @@ export async function inventoryChecks(db: Db): Promise<CheckItem[]> {
         ? [...recon.bad, ...recon.badTotals.map((id) => `对账登记 #${id} 合计不一致`)].join('、')
         : '一致',
   });
+
+  // 审批中心（v0.7.30）
+  items.push(await approvalChecks(db));
   return items;
 }
 

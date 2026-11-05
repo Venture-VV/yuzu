@@ -88,6 +88,9 @@ test.describe('设备', () => {
     const terminal = `TRM-E2E-${run}`;
     const other = `TRM-E2E-${run}B`;
     const reader = `RDR-E2E-${run}`;
+    // 卡号每次跑都不同：库里留着上一次跑的读卡事件时，按卡号查事件不会混进别的读卡器（main 定时测试 v0.7.29 报的重跑失败）
+    const stamp = String(Date.now()).slice(-6);
+    const [cardA, cardB, cardC] = [`0012${stamp}`, `0055${stamp}`, `0011${stamp}`];
     const bridge = await startMockBridge({ terminal });
     try {
       await login(page);
@@ -101,8 +104,8 @@ test.describe('设备', () => {
       await expect(panel.getByTestId('terminal-device-rc300')).toHaveAttribute('data-status', 'online');
       await panel.getByTestId('terminal-select').selectOption(terminal);
 
-      bridge.sendCard('0012345678');
-      await expect(panel.getByTestId('terminal-events')).toContainText('0012345678');
+      bridge.sendCard(cardA);
+      await expect(panel.getByTestId('terminal-events')).toContainText(cardA);
       bridge.sendScan('6901234567890');
       await expect(panel.getByTestId('terminal-events')).toContainText('6901234567890');
       // 模拟键盘：焦点不在输入框时，很快打完再回车认作一次扫码
@@ -115,7 +118,7 @@ test.describe('设备', () => {
       await expect(page.getByTestId(`device-${terminal}`)).toHaveAttribute('data-status', 'online', { timeout: 10_000 });
       await expect(page.getByTestId(`device-${reader}`)).toHaveAttribute('data-status', 'online', { timeout: 10_000 });
       await expect
-        .poll(async () => ((await (await page.request.get('/api/devices/events?type=card&limit=50')).json()) as { deviceCode: string; data: { value: string } }[]).some((e) => e.deviceCode === reader && e.data.value === '0012345678'))
+        .poll(async () => ((await (await page.request.get('/api/devices/events?type=card&limit=50')).json()) as { deviceCode: string; data: { value: string } }[]).some((e) => e.deviceCode === reader && e.data.value === cardA))
         .toBe(true);
 
       // 读卡器拔掉：离线
@@ -133,13 +136,13 @@ test.describe('设备', () => {
         const panel2 = second.getByTestId('terminal-panel');
         await expect(panel2.getByTestId('terminal-bridge-state')).toContainText('设备服务已连上');
         await expect.poll(() => bridge.clients()).toBe(2);
-        bridge.sendCard('0055667788');
-        await expect(panel.getByTestId('terminal-events')).toContainText('0055667788');
-        await expect(panel2.getByTestId('terminal-events')).toContainText('0055667788');
-        await expect.poll(async () => (await cardEvents('0055667788')).length, { timeout: 10_000 }).toBe(1);
+        bridge.sendCard(cardB);
+        await expect(panel.getByTestId('terminal-events')).toContainText(cardB);
+        await expect(panel2.getByTestId('terminal-events')).toContainText(cardB);
+        await expect.poll(async () => (await cardEvents(cardB)).length, { timeout: 10_000 }).toBe(1);
         // 两个页面都又报过两轮（每 2 秒一次）：仍然只有一条
         await second.waitForTimeout(4_500);
-        expect((await cardEvents('0055667788')).map((e) => e.deviceCode)).toEqual([reader]);
+        expect((await cardEvents(cardB)).map((e) => e.deviceCode)).toEqual([reader]);
       } finally {
         await second.close();
       }
@@ -147,12 +150,12 @@ test.describe('设备', () => {
       // 换「这台终端是」：之前收到、还没报出去的读卡不改记到新选的那台（Codex 自动审查 8a20a54）
       await postJson(page.request, '/api/devices', { clientKey: randomUUID(), code: other, name: `测试终端 B ${run}`, kind: 'terminal', area: '收银', connection: 'none' });
       await page.route('**/api/devices/bridge-report', (route) => route.abort());
-      bridge.sendCard('0011223344');
-      await expect(panel.getByTestId('terminal-events')).toContainText('0011223344');
+      bridge.sendCard(cardC);
+      await expect(panel.getByTestId('terminal-events')).toContainText(cardC);
       await panel.getByTestId('terminal-select').selectOption(other);
       await page.unroute('**/api/devices/bridge-report');
       await expect(page.getByTestId(`device-${other}`)).toHaveAttribute('data-status', 'online', { timeout: 10_000 });
-      expect(await cardEvents('0011223344')).toEqual([]);
+      expect(await cardEvents(cardC)).toEqual([]);
       await panel.getByTestId('terminal-select').selectOption(terminal);
       await expect(page.getByTestId(`device-${reader}`)).toHaveAttribute('data-status', 'online', { timeout: 10_000 });
 

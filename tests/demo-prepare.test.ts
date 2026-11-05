@@ -258,6 +258,8 @@ describe('演示数据准备', () => {
     // 冲突造的改动都没了：清库重建
     const [t301] = await ctx.sql<{ businessType: string }[]>`SELECT business_type FROM spaces WHERE code = 'T301'`;
     expect(t301!.businessType).toBe('SPA');
+    // 清库是先把 public 改名挪开、提交后再分批删（v0.7.30，一句 DROP SCHEMA 锁太多）：挪开的旧模式不留下
+    expect(await ctx.sql`SELECT 1 FROM pg_namespace WHERE nspname = 'yuzu_demo_reset_old'`).toHaveLength(0);
     // 清库、跑全部迁移、从零准备：本机约 7 秒，慢的电脑整套串行跑时会超过默认的 30 秒（Codex 在 main v0.7.20 上的首轮），单独放宽
   }, 120_000);
 });

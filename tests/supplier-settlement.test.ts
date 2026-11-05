@@ -519,7 +519,13 @@ describe('按可用天数提醒（#22）', () => {
     // 部门小仓：盘点耗用 28 个（日均 1 个），结存 58 个可用 58 天
     const book = (await api(ctx.app, keeper, 'GET', `/api/inventory/warehouses/${bathWh}/stock`)).body.find((r: { materialId: number }) => r.materialId === m.id);
     expect(book.stockMilli).toBe(q(86));
-    const count = await ok(doc(ctx.owner, { docType: 'count', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(58), expectedBookMilli: q(86) }] }));
+    // 差 28 个是大差异（v0.7.30）：写原因，店主一并确认
+    const count = await ok(doc(ctx.owner, {
+      docType: 'count',
+      warehouseId: bathWh,
+      approveNow: true,
+      lines: [{ materialId: m.id, countedMilli: q(58), expectedBookMilli: q(86), diffReason: 'consumed', diffNote: '本月客用耗用' }],
+    }));
     expect(count.doc.status).toBe('confirmed');
     const row = (await api(ctx.app, keeper, 'GET', `/api/inventory/warehouses/${bathWh}/stock`)).body.find((r: { materialId: number }) => r.materialId === m.id);
     expect(row).toMatchObject({ stockMilli: q(58), coverDays: 7, dailyUsageMilli: q(1), daysOfCover: 58, isLow: false });
