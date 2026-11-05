@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router';
-import { PackageSearch, Plus, Search } from 'lucide-react';
+import { Lightbulb, PackageSearch, Plus, Search } from 'lucide-react';
 import type { PoStatus } from '@shared/purchasing';
 import { errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
@@ -12,7 +12,7 @@ import { Badge, Notice, Select, Skeleton } from '../../components/ui';
 import { useSuppliers } from '../inventory/queries';
 import { PoSheet } from './PoSheet';
 import { PoStatusChip, ReceivingChip } from './parts';
-import { usePos } from './queries';
+import { usePos, useSuggestions } from './queries';
 
 const FILTERS: { value: string; label: string }[] = [
   { value: '', label: '全部' },
@@ -32,6 +32,8 @@ export function PurchasingPage() {
   const suppliers = useSuppliers(true);
   const pos = usePos({ status: status || undefined, supplierId: supplierId || undefined, q: params.get('q') ?? undefined });
   const openId = Number(params.get('po')) || null;
+  // 补货建议（v0.7.29）：有要补的物料时入口上带数量
+  const suggestions = useSuggestions(can('inventory.read'));
 
   const update = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(params);
@@ -59,6 +61,15 @@ export function PurchasingPage() {
         subtitle="采购单表达「准备买什么」；收货按实际合格数量入库；付款另行登记"
         actions={
           <span className="flex flex-wrap items-center gap-2">
+            <Link
+              to="/purchasing/suggestions"
+              className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
+              data-testid="suggestions-link"
+            >
+              <Lightbulb className="size-4" />
+              补货建议
+              {!!suggestions.data?.count && <span className="num rounded-full bg-yuzu px-1.5 text-[11.5px] font-bold text-ink">{suggestions.data.count}</span>}
+            </Link>
             <Link
               to="/purchasing/ordered"
               className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"

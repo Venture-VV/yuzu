@@ -10,6 +10,7 @@ import type {
   PriceCompare,
   PurchaseOrder,
   PurchaseRules,
+  ReplenishSuggestions,
   Statement,
   SupplierCredit,
   SupplierRefundDoc,
@@ -35,6 +36,7 @@ export const pk = {
   refund: (id: number) => ['inv', 'refund', id] as const,
   imports: ['inv', 'erp-imports'] as const,
   purchaseRules: ['inv', 'purchase-rules'] as const,
+  suggestions: ['inv', 'purchase-suggestions'] as const,
 };
 
 /** 采购、货款与库存共用一个缓存前缀：任何单据变化后一起刷新 */
@@ -117,3 +119,7 @@ export const useErpImports = (enabled = true) => useQuery({ queryKey: pk.imports
 /** 采购规则（v0.7.29）：采购途径字典、询价门槛、补货天数；编制采购单、登记报销、补货建议都读它 */
 export const usePurchaseRules = (enabled = true) =>
   useQuery({ queryKey: pk.purchaseRules, queryFn: () => api.get<PurchaseRules>('/api/inventory/purchase-rules'), staleTime: 60_000, enabled });
+
+/** 补货建议（v0.7.29 ERP 采购五项④）：与采购单共用 'inv' 缓存前缀，生成草稿后一起刷新 */
+export const useSuggestions = (enabled = true) =>
+  useQuery({ queryKey: pk.suggestions, queryFn: () => api.get<ReplenishSuggestions>('/api/purchase-suggestions'), enabled, staleTime: 30_000 });

@@ -472,3 +472,54 @@ export function channelText(c: ChannelRef | null | undefined): string {
   if (!c) return '—';
   return c.note ? `${c.label} · ${c.note}` : c.label;
 }
+
+// ───────────────────────── 补货建议（v0.7.29 ERP 采购五项④，docs/ERP_PURCHASING.md 第 5 节） ─────────────────────────
+
+export interface ReplenishLine {
+  materialId: number;
+  code: string;
+  name: string;
+  specification: string;
+  inventoryUnit: string;
+  purchaseUnit: string;
+  factorMilli: number;
+  decimals: number;
+  /** 总仓结存（库存单位） */
+  stockMilli: number;
+  /** 在途：没撤回、没关闭的采购单还没收到的（补单除外） */
+  inTransitMilli: number;
+  /** 在途来自哪几张采购单 */
+  openPos: string[];
+  /** 日均用量（库存单位，近 N 天）；没有用量为 null */
+  dailyUsageMilli: number | null;
+  /** (结存 + 在途) ÷ 日均用量，一位小数 */
+  daysOfCover: number | null;
+  /** cover：可用天数不足；low_stock：没有用量、低于提醒数量 */
+  reason: 'cover' | 'low_stock';
+  /** 触发天数（物料的提醒天数，或规则的补货触发天数）与补到的天数 */
+  triggerDays: number | null;
+  targetDays: number | null;
+  lowStockMilli: number | null;
+  /** 建议采购数量（采购单位，整包装）与折成的库存数量 */
+  suggestedPurchaseMilli: number;
+  suggestedBaseMilli: number;
+  /** 单价（每采购单位）：最近一次同口径成交价，没有用参考价 */
+  priceCents: number | null;
+  priceSource: 'last' | 'ref' | null;
+  amountCents: number | null;
+}
+
+export interface ReplenishGroup {
+  /** 物料的默认供应商，没设的取最近一次收货的供应商；都没有为空（要先选供应商） */
+  supplier: Ref | null;
+  lines: ReplenishLine[];
+  totalCents: number;
+}
+
+export interface ReplenishSuggestions {
+  windowDays: number;
+  reorderDays: number;
+  targetDays: number;
+  count: number;
+  groups: ReplenishGroup[];
+}

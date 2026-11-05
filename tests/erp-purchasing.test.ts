@@ -369,3 +369,92 @@ describe('③ 部门备用金台账（E3）', () => {
     for (const c of await pettyAccountChecks(ctx.sql)) expect(c, c.detail).toMatchObject({ ok: true });
   });
 });
+
+describe('④ 补货建议（E4）', () => {
+  it('取整与目标天数：按采购单位向上取整，换算后不是整库存单位的再多加一包；提醒天数不短于目标天数时补到提醒天数 + 7', async () => {
+    const { packsFor, targetDaysFor } = await import('../src/server/modules/inventory/replenish');
+    expect(packsFor(q(13), q(12), 0)).toEqual({ purchaseMilli: q(2), baseMilli: q(24) });
+    expect(packsFor(q(1), q(12), 0)).toEqual({ purchaseMilli: q(1), baseMilli: q(12) });
+    // 半箱 = 0.5 个：库存单位不带小数时一箱不够整，取 2 箱
+    expect(packsFor(q(0.3), q(0.5), 0)).toEqual({ purchaseMilli: q(2), baseMilli: q(1) });
+    expect(targetDaysFor(7, 14)).toBe(14);
+    expect(targetDaysFor(20, 14)).toBe(27);
+  });
+
+  it('没有用量的按低库存提醒数量补；有用量的按可用天数（含在途）补到目标天数；按默认供应商、最近收货的供应商分组；草稿算在途', async () => {
+    const s3 = await supplier('S003');
+    const s4 = await supplier('S004');
+    const mkMaterial = async (body: Record<string, unknown>) => {
+      const res = await api(ctx.app, buyer, 'POST', '/api/inventory/materials', { category: '测试', ...body });
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      return (await material(body.code as string)) as { id: number };
+    };
+    const x = await mkMaterial({ code: 'RX01', name: '矿泉水（补货）', inventoryUnit: '瓶', purchaseUnit: '箱', purchaseFactorMilli: q(12), refPriceCents: 6_000, defaultSupplierId: s3.id, lowStockMilli: q(24) });
+    const y = await mkMaterial({ code: 'RY01', name: '纸巾（补货）', inventoryUnit: '包', purchaseUnit: '包', purchaseFactorMilli: q(1), refPriceCents: 500, coverDays: 5 });
+    const suggest = async () => (await api(ctx.app, keeper, 'GET', '/api/purchase-suggestions')).body;
+    const lineOf = (d: { groups: { supplier: { id: number } | null; lines: { materialId: number }[] }[] }, id: number) => {
+      for (const g of d.groups) {
+        const l = g.lines.find((x) => x.materialId === id);
+        if (l) return { supplierId: g.supplier?.id ?? null, line: l as Record<string, unknown> };
+      }
+      return null;
+    };
+
+    // X：没有用量、结存 0 低于 24 瓶 → 补 2 箱，参考价，归默认供应商
+    let d = await suggest();
+    expect(d).toMatchObject({ windowDays: 28, reorderDays: 7, targetDays: 14 });
+    expect(lineOf(d, x.id)).toEqual({
+      supplierId: s3.id,
+      line: expect.objectContaining({ reason: 'low_stock', stockMilli: 0, inTransitMilli: 0, suggestedPurchaseMilli: q(2), suggestedBaseMilli: q(24), priceCents: 6_000, priceSource: 'ref', amountCents: 12_000 }),
+    });
+    // Y 没有用量、也没设提醒数量：不建议
+    expect(lineOf(d, y.id)).toBeNull();
+
+    // 草稿 1 箱算在途：只差 1 箱
+    const draft = (await newPo({ supplierId: s3.id, action: 'save', lines: [{ materialId: x.id, purchaseQtyMilli: q(1), priceCents: 6_000 }] })).body.po;
+    d = await suggest();
+    expect(lineOf(d, x.id)?.line).toMatchObject({ inTransitMilli: q(12), openPos: [draft.docNo], suggestedPurchaseMilli: q(1) });
+
+    // Y：从 S004 收 30 包、领走 28 包 → 日均 1 包，够用 2 天 < 5 天 → 补到 14 天：14 − 2 = 12 包，最近成交价，归最近收货的供应商
+    const yPo = (await newPo({ supplierId: s4.id, lines: [{ materialId: y.id, purchaseQtyMilli: q(30), priceCents: 450 }] })).body.po;
+    await api(ctx.app, approver, 'POST', `/api/purchase-orders/${yPo.id}/approve`, {});
+    const rc = await api(ctx.app, keeper, 'POST', '/api/inventory/docs', {
+      clientKey: randomUUID(),
+      docType: 'receipt',
+      docDate: today,
+      supplierId: s4.id,
+      purchaseOrderId: yPo.id,
+      coAcceptorId: buyerId,
+      lines: [{ materialId: y.id, poLineId: yPo.lines[0].id, deliveredMilli: q(30), acceptedMilli: q(30) }],
+    });
+    expect(rc.status, JSON.stringify(rc.body)).toBe(201);
+    const issue = await api(ctx.app, keeper, 'POST', '/api/inventory/docs', {
+      clientKey: randomUUID(),
+      docType: 'issue',
+      docDate: today,
+      departmentId: deptA,
+      handler: '采购部',
+      lines: [{ materialId: y.id, qtyMilli: q(28) }],
+    });
+    expect(issue.status, JSON.stringify(issue.body)).toBe(201);
+    d = await suggest();
+    expect(lineOf(d, y.id)).toEqual({
+      supplierId: s4.id,
+      line: expect.objectContaining({
+        reason: 'cover',
+        stockMilli: q(2),
+        dailyUsageMilli: q(1),
+        daysOfCover: 2,
+        triggerDays: 5,
+        targetDays: 14,
+        suggestedPurchaseMilli: q(12),
+        priceCents: 450,
+        priceSource: 'last',
+        amountCents: 5_400,
+      }),
+    });
+    expect(d.count).toBe(d.groups.reduce((t: number, g: { lines: unknown[] }) => t + g.lines.length, 0));
+    // 店员看不到
+    expect((await api(ctx.app, ctx.clerk, 'GET', '/api/purchase-suggestions')).status).toBe(403);
+  });
+});

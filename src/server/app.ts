@@ -29,6 +29,7 @@ import { registerRequestRoutes } from './modules/requests';
 import { registerPurchasingRoutes } from './modules/inventory/purchasing';
 import { registerPurchaseRulesRoutes } from './modules/inventory/purchase-rules';
 import { registerPettyAccountRoutes } from './modules/petty-accounts';
+import { registerReplenishRoutes } from './modules/inventory/replenish';
 import { registerReportRoutes } from './modules/inventory/reports';
 import { registerLedgerRoutes } from './modules/ledger';
 import { registerMemberRoutes } from './modules/members';
@@ -190,6 +191,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerPurchasingRoutes(app, deps);
   registerPurchaseRulesRoutes(app, deps);
   registerPettyAccountRoutes(app, deps);
+  registerReplenishRoutes(app, deps);
   registerPayableRoutes(app, deps);
   registerCycleRoutes(app, deps);
   registerImportRoutes(app, deps);

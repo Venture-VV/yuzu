@@ -59,6 +59,7 @@ const TodoPage = lazyPage(() => import('./features/inventory/TodoPage').then((m)
 const PurchasingPage = lazyPage(() => import('./features/purchasing/PurchasingPage').then((m) => m.PurchasingPage));
 const PoFormPage = lazyPage(() => import('./features/purchasing/PoFormPage').then((m) => m.PoFormPage));
 const OrderedPage = lazyPage(() => import('./features/purchasing/OrderedPage').then((m) => m.OrderedPage));
+const SuggestionsPage = lazyPage(() => import('./features/purchasing/SuggestionsPage').then((m) => m.SuggestionsPage));
 const PayablesPage = lazyPage(() => import('./features/payables/PayablesPage').then((m) => m.PayablesPage));
 const PaymentFormPage = lazyPage(() => import('./features/payables/PaymentFormPage').then((m) => m.PaymentFormPage));
 const ImportPage = lazyPage(() => import('./features/payables/ImportPage').then((m) => m.ImportPage));
@@ -214,6 +215,7 @@ const router = createBrowserRouter([
       { path: 'purchasing', element: <PurchasingPage /> },
       { path: 'purchasing/new', element: <PoFormPage mode="new" /> },
       { path: 'purchasing/ordered', element: <OrderedPage /> },
+      { path: 'purchasing/suggestions', element: <SuggestionsPage /> },
       { path: 'purchasing/:id/edit', element: <PoFormPage mode="edit" /> },
       { path: 'purchasing/:id/revise', element: <PoFormPage mode="revise" /> },
       { path: 'payables', element: <PayablesPage /> },
