@@ -25,6 +25,7 @@ const ACTION_LABELS: Record<string, string> = { create: '登记', submit: '提�
 type Act = 'approve' | 'return' | 'cancel' | 'void' | 'resubmit';
 
 function useActions(base: string, docNo: string) {
+  const session = useSession();
   const toast = useToast();
   const invalidate = useInvalidateAll();
   const [busy, setBusy] = useState<Act | null>(null);
@@ -32,7 +33,7 @@ function useActions(base: string, docNo: string) {
     setBusy(act);
     try {
       // 确认、退回带着审批单与级别：没收到结果时记下，之后只能按原内容重新提交（uncertain.ts）
-      await postDocAction(`${base}/${act}`, body, docNo);
+      await postDocAction(`${base}/${act}`, body, docNo, session.staff.id);
       await invalidate();
       toast({ tone: 'success', title: { approve: '已确认', return: '已退回修改', cancel: '已撤回', void: '已冲销', resubmit: '已重新提交' }[act], body: docNo });
       return true;

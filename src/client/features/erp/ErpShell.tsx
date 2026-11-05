@@ -50,7 +50,7 @@ export function ErpShell() {
       document.title = session.storeName;
     };
   }, [session.storeName]);
-  // 审批中心（v0.7.30）：待我审批的张数加急采待补单（负责人）；有超时的数字标红
+  // 审批中心（v0.7.30）：待我审批的张数加急采待补单、急采待验收（负责人）；有超时的数字标红
   const todo = useQuery({
     queryKey: ['approvals', 'count'],
     queryFn: () => api.get<ApprovalCounts>('/api/approvals/count'),
@@ -64,7 +64,7 @@ export function ErpShell() {
     to: ERP_MODULES[k].path,
     label: ERP_MODULES[k].label,
     icon: ICONS[k],
-    badge: k === 'approvals' && todo.data ? todo.data.mine + todo.data.backfill : undefined,
+    badge: k === 'approvals' && todo.data ? todo.data.mine + todo.data.backfill + todo.data.accept : undefined,
     alert: k === 'approvals' && !!todo.data?.overdue,
   });
   const groups: { title: string; items: Item[] }[] = [

@@ -16,7 +16,7 @@ import { Money } from '../../components/Money';
 import { Badge, Button, IconButton, Input, Notice, Select, Skeleton } from '../../components/ui';
 import { ApprovalResend, waited } from './ApprovalProgress';
 import { useApprovalDetail, useRefreshAfterApproval } from './queries';
-import { sendApproval, uncertainApproval, useSettleWhenFinished, useUncertainApprovals } from './uncertain';
+import { sendApproval, useSettleWhenFinished, useUncertainApprovals } from './uncertain';
 
 export function ApprovalSheet({ id, onClose }: { id: number | null; onClose: () => void }) {
   return (
@@ -37,15 +37,15 @@ function Body({ id, onClose }: { id: number; onClose: () => void }) {
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const d = detail.data;
   // 上次同意或退回没收到结果：只能按原内容重新提交（uncertain.ts），不按刷新后的级别重新拼
-  useUncertainApprovals();
+  const sent = useUncertainApprovals();
   useSettleWhenFinished(d?.id, d?.status);
-  const uncertain = d?.status === 'pending' ? uncertainApproval(d.id) : null;
+  const uncertain = d?.status === 'pending' ? sent.get(d.id) : null;
 
   const act = async (action: 'approve' | 'return', body: Record<string, unknown>) => {
     if (!d) return;
     setBusy(action);
     try {
-      await sendApproval({ requestId: d.id, docNo: d.docNo, action, level: d.currentLevel, url: `/api/approvals/${d.id}/${action}`, body: { level: d.currentLevel, ...body } });
+      await sendApproval({ staffId: sent.staffId, requestId: d.id, docNo: d.docNo, action, level: d.currentLevel, url: `/api/approvals/${d.id}/${action}`, body: { level: d.currentLevel, ...body } });
       toast({ tone: 'success', title: action === 'approve' ? (d.currentLevel < d.levels ? `已同意第 ${d.currentLevel} 级` : '已同意，单据生效') : '已退回', body: d.docNo });
       setReturning(false);
       setComment('');

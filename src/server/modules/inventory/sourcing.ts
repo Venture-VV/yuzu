@@ -25,7 +25,7 @@ import { hashRequest } from '../../lib/idempotency';
 import { lockOpKey } from '../../lib/fences';
 import { idParam, parse } from '../../lib/validate';
 import { shiftDate } from '@shared/labels';
-import { docDateSchema, loadInventorySettings, nextDocNo, priceBaseline, setTxTimeouts, todayIn } from './common';
+import { docDateSchema, loadInventorySettings, nextDocNo, priceBaseline, setTxTimeouts, sourcingHolds, todayIn } from './common';
 import { loadPurchaseRules } from './purchase-rules';
 import { createPo } from './purchasing';
 
@@ -198,7 +198,7 @@ async function checkSourcingRequests(tx: Tx, lines: { materialId: number; reques
              WHERE x.request_line_id = l.id AND po.status <> 'cancelled' LIMIT 1) AS taken_by,
            (SELECT e.doc_no FROM sourcing_line_requests sr JOIN sourcing_lines sl ON sl.id = sr.sourcing_line_id
               JOIN sourcing_events e ON e.id = sl.event_id
-             WHERE sr.request_line_id = l.id AND e.status <> 'cancelled' LIMIT 1) AS in_sourcing
+             WHERE sr.request_line_id = l.id AND ${sourcingHolds(tx)} LIMIT 1) AS in_sourcing
     FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
     WHERE l.id IN ${tx(all)}`;
   const byId = new Map(rows.map((r) => [Number(r.id), r]));
@@ -453,6 +453,15 @@ export async function orderFromSourcing(deps: Deps, eventId: number, raw: unknow
       throw conflict('SOURCING_UNIT_CHANGED', `「${l.materialName}」的采购单位或换算改过了，请重新询价`);
     }
   }
+  // 只带这张询价单还占着的需求行：转出以后从采购单上解开、放开了的不再带回来（sourcingHolds）
+  const held = new Set(
+    (
+      await deps.sql<{ requestLineId: number }[]>`
+        SELECT sr.request_line_id FROM sourcing_line_requests sr JOIN sourcing_lines sl ON sl.id = sr.sourcing_line_id
+        JOIN sourcing_events e ON e.id = sl.event_id
+        WHERE e.id = ${eventId} AND ${sourcingHolds(deps.sql)}`
+    ).map((r) => Number(r.requestLineId)),
+  );
   const today = todayIn(deps.config.timezone);
   const note = `询价单 ${e.docNo}：${e.title}${q.freightCents > 0 ? `；运费 ¥${formatAmount(q.freightCents)} 另计` : ''}`.slice(0, 200);
   return createPo(
@@ -470,7 +479,7 @@ export async function orderFromSourcing(deps: Deps, eventId: number, raw: unknow
         priceCents: q.prices.find((p) => p.lineId === l.id)!.priceCents,
         spec: l.spec,
         // 从需求单发起的询价（v0.7.30）：需求行一起带到采购单行上，需求单的进度由采购单算
-        ...(l.requests.length ? { requestLineIds: l.requests.map((r) => r.lineId) } : {}),
+        ...(l.requests.some((r) => held.has(r.lineId)) ? { requestLineIds: l.requests.filter((r) => held.has(r.lineId)).map((r) => r.lineId) } : {}),
       })),
     },
     actor,
@@ -528,9 +537,9 @@ export async function sourcingChecks(db: Db): Promise<{ key: string; label: stri
         <> (SELECT count(*) FROM sourcing_lines sl WHERE sl.event_id = q.event_id)
       OR q.goods_cents <> coalesce((SELECT sum(ql.amount_cents) FROM sourcing_quote_lines ql WHERE ql.quote_id = q.id), 0))
     UNION ALL
-    SELECT min(e.doc_no), '需求行 #' || sr.request_line_id || ' 同时在 ' || count(DISTINCT e.id) || ' 张没撤销的询价单里'
+    SELECT min(e.doc_no), '需求行 #' || sr.request_line_id || ' 同时被 ' || count(DISTINCT e.id) || ' 张询价单占着'
     FROM sourcing_line_requests sr JOIN sourcing_lines sl ON sl.id = sr.sourcing_line_id JOIN sourcing_events e ON e.id = sl.event_id
-    WHERE e.status <> 'cancelled'
+    WHERE ${sourcingHolds(db)}
     GROUP BY sr.request_line_id HAVING count(DISTINCT e.id) > 1
     ORDER BY 1 LIMIT 20`;
   const [n] = await db<{ events: number; linked: number }[]>`

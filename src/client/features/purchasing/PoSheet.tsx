@@ -71,7 +71,7 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
     setBusy(key);
     try {
       // 同意、退回带着审批单与级别：没收到结果时记下，之后只能按原内容重新提交（uncertain.ts）
-      await postDocAction(`/api/purchase-orders/${po.id}/${path}`, body, po.docNo);
+      await postDocAction(`/api/purchase-orders/${po.id}/${path}`, body, po.docNo, session.staff.id);
       await invalidate();
       toast({ tone: 'success', title: success, body: po.docNo });
       setDialog(null);

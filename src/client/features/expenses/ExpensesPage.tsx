@@ -214,7 +214,7 @@ function ClaimSheet({ id, onClose }: { id: number | null; onClose: () => void })
     try {
       const fence = action === 'approve' || action === 'return' ? gate.fence : {};
       // 确认、退回带着审批单与级别：没收到结果时记下，之后只能按原内容重新提交（uncertain.ts）
-      await postDocAction<ExpenseClaim>(`/api/erp/expenses/${c.id}/${action}`, reason ? { reason, ...fence } : fence, c.docNo);
+      await postDocAction<ExpenseClaim>(`/api/erp/expenses/${c.id}/${action}`, reason ? { reason, ...fence } : fence, c.docNo, session.staff.id);
       await invalidate();
       setReasonFor(null);
       toast({ tone: 'success', title: { approve: '已确认', return: '已退回', resubmit: '已重新提交', cancel: '已撤回', void: '已冲销' }[action] });

@@ -193,38 +193,53 @@ test.describe('审批中心（v0.7.30）', () => {
       await logout(page);
       await login(page, 'qianfen');
       const a = await prepay(page, supplier.id, 432_150);
+      const a2 = await prepay(page, supplier.id, 432_155);
       const b = await prepay(page, supplier.id, 432_160);
       await logout(page);
       await login(page, 'linlan');
       await page.goto('/approvals');
 
-      // ① 批量：请求到了服务端、第 1 级同意了，回复丢了 → 这一批记下，只能按原内容（第 1 级）重新提交
+      // ① 批量：请求到了服务端、第 1 级同意了，回复丢了 → 这一批记下（存在本机），只能按原内容（第 1 级）重新提交
       await page.getByTestId(`approval-pick-${a.docNo}`).check();
+      await page.getByTestId(`approval-pick-${a2.docNo}`).check();
       await page.route('**/api/approvals/batch-approve', lostReply);
       await page.getByTestId('approval-batch').click();
       await page.getByTestId('approval-batch-confirm').click();
       await expect(page.getByTestId('approval-batch-pending')).toContainText(`${a.docNo}同意第 1 级`);
       await page.unroute('**/api/approvals/batch-approve');
-      // 刷新后的卡片已经是第 2 级
+      // 刷新页面：记录还在；卡片已经是第 2 级
+      await page.reload();
+      const panel = page.getByTestId('approval-uncertain-panel');
+      await expect(panel).toContainText(a.docNo);
+      await expect(panel).toContainText(a2.docNo);
+      await expect(panel).toContainText('同意第 1 级 · 批量');
       await expect(page.getByTestId(`approval-card-${a.docNo}`)).toContainText('第 2/2 级');
       await expect(page.getByTestId(`approval-card-${a.docNo}`)).toContainText('结果待确认');
+      // 整批按原内容重新提交：仍照第 1 级发
+      await page.getByTestId('approval-batch-retry').click();
       await page.getByTestId('approval-batch-resend').click();
       await expect(page.getByTestId('approval-batch-result')).toContainText(a.docNo);
+      await expect(page.getByTestId('approval-batch-result')).toContainText(a2.docNo);
       await expect(page.getByTestId('approval-batch-result')).not.toContainText('没成功');
       await page.getByRole('button', { name: '知道了' }).click();
-      await expect(page.getByTestId('approval-batch-uncertain')).toHaveCount(0);
+      await expect(panel).toHaveCount(0);
       const sa = await state(a.id);
-      expect(sa).toMatchObject({ status: 'submitted', approval: { status: 'pending', currentLevel: 2 } });
-      expect(sa.approval.actions).toHaveLength(1);
+      const sa2 = await state(a2.id);
+      for (const s of [sa, sa2]) {
+        expect(s).toMatchObject({ status: 'submitted', approval: { status: 'pending', currentLevel: 2 } });
+        expect(s.approval.actions).toHaveLength(1);
+      }
 
-      // ② 单张（审批中心详情）：同意第 1 级的回复丢了 → 底部只有「按原内容重新提交」，照第 1 级再发
+      // ② 单张（审批中心详情）：同意第 1 级的回复丢了 → 刷新后底部仍只有「按原内容重新提交」，照第 1 级再发
       await page.getByTestId(`approval-card-${b.docNo}`).getByRole('button').click();
       await expect(page.getByTestId('approval-approve')).toContainText('第 1/2 级');
       await page.route('**/api/approvals/*/approve', lostReply);
       await page.getByTestId('approval-approve').click();
       await expect(page.getByTestId('approval-uncertain')).toContainText('同意第 1 级');
       await page.unroute('**/api/approvals/*/approve');
+      await page.reload();
       await expect(page.getByTestId('approval-chain-2')).toContainText('审批中');
+      await expect(page.getByTestId('approval-uncertain')).toContainText('同意第 1 级');
       await expect(page.getByTestId('approval-approve')).toHaveCount(0);
       await page.getByTestId('approval-resend').click();
       await expect(page.getByText('已按原内容重新提交').first()).toBeVisible();
@@ -235,7 +250,7 @@ test.describe('审批中心（v0.7.30）', () => {
       expect(sb.approval.actions).toHaveLength(1);
 
       // 收尾：第 2 级照常同意
-      for (const s of [sa, sb]) {
+      for (const s of [sa, sa2, sb]) {
         const res = await page.request.post(`/api/approvals/${s.approval.requestId}/approve`, { data: { level: 2 } });
         expect(res.status(), await res.text()).toBe(200);
       }

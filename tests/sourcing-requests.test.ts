@@ -140,6 +140,58 @@ describe('询价接上需求单（v0.7.29 的已知问题）', () => {
     expect((await sourcingChecks(ctx.sql))[0]).toMatchObject({ key: 'sourcing_links', ok: true });
   });
 
+  it('转出采购单以后从采购单上解开的需求行放开：可以另转采购单、另发起询价；采购单撤回时只有还在上面的回到询价中，再转只带这些（Codex 自动审查 abe2842）', async () => {
+    const r = await approvedRequest(reqA, [
+      { materialId: mat.id, name: mat.name, qtyMilli: q(2) },
+      { materialId: mat.id, name: mat.name, qtyMilli: q(2) },
+      { materialId: mat.id, name: mat.name, qtyMilli: q(2) },
+    ]);
+    const [la, lb, lc] = r.lines.map((l) => l.id) as [number, number, number];
+    const ev = (await sourcing({ title: '床单 6 箱', lines: [{ materialId: mat.id, purchaseQtyMilli: q(6), requestLineIds: [la, lb, lc] }] })).body.event;
+    const lineId = ev.lines[0].id;
+    expect((await quote(ev.id, { supplierId: s1.id, prices: [{ lineId, priceCents: 45_000 }] })).status).toBe(200);
+    expect((await quote(ev.id, { supplierId: s2.id, prices: [{ lineId, priceCents: 46_000 }] })).status).toBe(200);
+    const winner = (await api(ctx.app, buyer, 'GET', `/api/purchase-sourcing/${ev.id}`)).body.quotes.find((x: { supplier: { id: number } }) => x.supplier.id === s1.id);
+    expect((await api(ctx.app, buyer, 'POST', `/api/purchase-sourcing/${ev.id}/award`, { quoteId: winner.id, reason: '单价最低' })).body.status).toBe('awarded');
+    const po1 = (await api(ctx.app, buyer, 'POST', `/api/purchase-sourcing/${ev.id}/order`, { clientKey: randomUUID() })).body.po;
+    expect(po1.lines[0].requests).toHaveLength(3);
+
+    // 采购单上只留第一行需求（另两行分开买）：另两行放开，回到待转采购单
+    const edited = await api(ctx.app, buyer, 'PUT', `/api/purchase-orders/${po1.id}`, {
+      supplierId: s1.id,
+      orderDate: today,
+      action: 'save',
+      lines: [{ id: po1.lines[0].id, materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000, requestLineIds: [la] }],
+    });
+    expect(edited.status, JSON.stringify(edited.body)).toBe(200);
+    expect((await progressOf(r.id)).map((p) => p.state)).toEqual(['ordered', 'none', 'none']);
+    expect(await openIds()).toEqual(expect.arrayContaining([lb, lc]));
+    // 一行另转采购单、一行另发起询价（原来被这张询价单占着，REQUEST_LINE_IN_SOURCING）
+    const po2 = await api(ctx.app, buyer, 'POST', '/api/purchase-orders', {
+      clientKey: randomUUID(),
+      supplierId: s2.id,
+      orderDate: today,
+      action: 'save',
+      lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000, requestLineIds: [lb] }],
+    });
+    expect(po2.status, JSON.stringify(po2.body)).toBe(201);
+    const evB = await sourcing({ title: '床单另询', lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), requestLineIds: [lc] }] });
+    expect(evB.status, JSON.stringify(evB.body)).toBe(201);
+
+    // 撤回第一张采购单：只有还在上面的第一行回到这张询价单（询价中），另两行留在各自的地方，不会两处都占着
+    expect((await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po1.id}/cancel`, { reason: '数量改一下' })).body.status).toBe('cancelled');
+    expect(await progressOf(r.id)).toEqual([
+      expect.objectContaining({ state: 'sourcing', sourcing: { id: ev.id, docNo: ev.docNo } }),
+      expect.objectContaining({ state: 'ordered', po: expect.objectContaining({ docNo: po2.body.po.docNo }), sourcing: null }),
+      expect.objectContaining({ state: 'sourcing', sourcing: { id: evB.body.event.id, docNo: evB.body.event.docNo } }),
+    ]);
+    expect((await sourcingChecks(ctx.sql))[0]).toMatchObject({ key: 'sourcing_links', ok: true });
+    // 再转：只带这张询价单还占着的那一行
+    const again = await api(ctx.app, buyer, 'POST', `/api/purchase-sourcing/${ev.id}/order`, { clientKey: randomUUID() });
+    expect(again.status, JSON.stringify(again.body)).toBe(201);
+    expect(again.body.po.lines[0].requests.map((x: { lineId: number }) => x.lineId)).toEqual([la]);
+  });
+
   it('拒绝：没有审核需求单权限、需求单没通过、物料不一致、同一行需求重复；撤销询价单后需求行回到待转采购单', async () => {
     const img = await upload(reqA, 'slipper');
     const r = await approvedRequest(reqA, [

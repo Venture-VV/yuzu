@@ -9,6 +9,7 @@ import type {
   ApprovalRuleView,
   ApproverOption,
   DelegationView,
+  UrgentAcceptItem,
   UrgentBackfillItem,
 } from '@shared/approvals';
 import { api } from '../../lib/api';
@@ -24,6 +25,7 @@ export const ak = {
   approvers: ['approvals', 'approvers'] as const,
   delegations: (all: boolean) => ['approvals', 'delegations', all] as const,
   backfills: ['approvals', 'backfills'] as const,
+  accepts: ['approvals', 'accepts'] as const,
 };
 
 export const useApprovals = (tab: ApprovalTab, docType?: ApprovalDocType, enabled = true) =>
@@ -48,6 +50,10 @@ export const useApprovers = (enabled = true) =>
 
 export const useDelegations = (all: boolean, enabled = true) =>
   useQuery({ queryKey: ak.delegations(all), queryFn: () => api.get<DelegationView[]>(`/api/approvals/delegations${all ? '?all=1' : ''}`), enabled });
+
+/** 急采待验收（负责人看；不走审批中心，到部门验收后生效） */
+export const useUrgentAccepts = (enabled = true) =>
+  useQuery({ queryKey: ak.accepts, queryFn: () => api.get<UrgentAcceptItem[]>('/api/approvals/accepts'), enabled, refetchInterval: 60_000 });
 
 export const useUrgentBackfills = (enabled = true) =>
   useQuery({ queryKey: ak.backfills, queryFn: () => api.get<UrgentBackfillItem[]>('/api/approvals/backfills'), enabled, refetchInterval: 300_000 });

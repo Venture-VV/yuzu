@@ -41,7 +41,7 @@ import { actOnClaim } from '../expenses';
 import { approveDoc, returnDoc } from '../inventory/docs';
 import { actOnOpening, actOnPayment } from '../inventory/payables';
 import { approvePo, returnPo } from '../inventory/purchasing';
-import { approvalCounts, assertApprovalKindOpen, getApprovalDetail, listApprovals, urgentBackfills, type ApprovalTab } from './center';
+import { approvalCounts, assertApprovalKindOpen, getApprovalDetail, listApprovals, urgentAwaitingAcceptance, urgentBackfills, type ApprovalTab } from './center';
 import { hasApprovalAccess, staffNames } from './engine';
 
 const id = z.number().int().positive();
@@ -351,6 +351,8 @@ export function registerApprovalRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/approvals/count', { preHandler: ACT }, async (req) => approvalCounts(sql, req.actor, config.timezone));
   // 急采待补单（A10）：生效后超过 3 天没补采购单的，进负责人的待办
   app.get('/api/approvals/backfills', { preHandler: guard('inventory.approve') }, async () => urgentBackfills(sql, config.timezone));
+  // 急采待验收（不走审批中心）：负责人的数字算上、页面上方列出来（Codex 自动审查 abe2842）
+  app.get('/api/approvals/accepts', { preHandler: guard('inventory.approve') }, async (req) => urgentAwaitingAcceptance(sql, req.actor));
   app.get('/api/approvals/rules', { preHandler: ACT }, async () => listRules(sql));
   app.get('/api/approvals/approvers', { preHandler: ACT }, async () => approverOptions(sql));
   app.get('/api/approvals/delegations', { preHandler: ACT }, async (req) => {

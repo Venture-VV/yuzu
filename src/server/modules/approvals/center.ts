@@ -17,6 +17,7 @@ import {
   type ApprovalStatus,
   type ApprovalStep,
   type ApproverSubject,
+  type UrgentAcceptItem,
   type UrgentBackfillItem,
 } from '@shared/approvals';
 import type { ErpModuleKey } from '@shared/erp';
@@ -267,8 +268,10 @@ export async function listApprovals(db: Db, actor: Actor, timeZone: string, tab:
 /** 导航上的数字：待我审批几张、其中超时几张；急采待补单（超过 3 天，负责人看） */
 export async function approvalCounts(db: Db, actor: Actor, timeZone: string): Promise<ApprovalCounts> {
   const mine = await listApprovals(db, actor, timeZone, 'mine');
-  const backfill = can(actor, 'inventory.approve') ? (await urgentBackfills(db, timeZone)).length : 0;
-  return { mine: mine.length, overdue: mine.filter((c) => c.overdue).length, backfill };
+  const approver = can(actor, 'inventory.approve');
+  const backfill = approver ? (await urgentBackfills(db, timeZone)).length : 0;
+  const accept = approver ? (await urgentAwaitingAcceptance(db, actor)).length : 0;
+  return { mine: mine.length, overdue: mine.filter((c) => c.overdue).length, backfill, accept };
 }
 
 // ───────────────────────── 详情 ─────────────────────────
@@ -484,6 +487,22 @@ export const yuan = (cents: number) => `¥${formatAmount(cents)}`;
 // ───────────────────────── 急采待补单（A10） ─────────────────────────
 
 /** 急采收货生效后超过 3 天还没补采购单的（补单后自动消失；补单撤回的回到这里） */
+/**
+ * 急采待验收：部门登记的急采收货，等仓库或负责人到部门验收（急采不走审批中心）。原来导航上「审批待办」的数字把所有待确认的
+ * 物资单据都算上，审批中心的数字只算审批单，这些就没了提醒（Codex 自动审查 abe2842）：负责人的数字照样算上、页面上方列出来。
+ * 登记的人自己验收不了（店主除外），不算他的。
+ */
+export async function urgentAwaitingAcceptance(db: Db, actor: Actor): Promise<UrgentAcceptItem[]> {
+  const rows = await db<{ docId: number; docNo: string; departmentName: string | null; supplierName: string | null; amountCents: number | null; createdAt: string; handlerName: string }[]>`
+    SELECT d.id AS doc_id, d.doc_no, wd.name AS department_name, s.name AS supplier_name, d.amount_cents, d.created_at, cb.display_name AS handler_name
+    FROM inv_docs d JOIN staff cb ON cb.id = d.created_by
+    LEFT JOIN suppliers s ON s.id = d.supplier_id LEFT JOIN warehouses w ON w.id = d.warehouse_id LEFT JOIN departments wd ON wd.id = w.department_id
+    WHERE d.doc_type = 'receipt' AND d.urgent AND d.status = 'submitted'
+      ${actor.role === 'owner' ? db`` : db`AND d.created_by <> ${actor.id}`}
+    ORDER BY d.created_at, d.id`;
+  return rows.map((r) => ({ ...r, docId: Number(r.docId), amountCents: r.amountCents === null ? null : Number(r.amountCents) }));
+}
+
 export async function urgentBackfills(db: Db, timeZone: string): Promise<UrgentBackfillItem[]> {
   // 补单要开采购单：采购模块关着时不提醒（补不了）
   if (!(await enabledErpModules(db)).has('purchasing')) return [];

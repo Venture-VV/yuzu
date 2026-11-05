@@ -551,7 +551,7 @@ describe('盘点差异审批（A8）、急采待补单（A10）、数据隔离�
     expect((await api(ctx.app, keeper, 'GET', `/api/inventory/docs/${ok.body.doc.id}`)).body.lines[0]).toMatchObject({ diffReason: 'unknown', diffNote: '仓库漏雨泡坏' });
   });
 
-  it('急采收货生效后超过 3 天没补采购单的进负责人待办；补单后消失', async () => {
+  it('急采待验收算进负责人的数字、列出来，验收后消失；急采收货生效后超过 3 天没补采购单的进负责人待办，补单后消失', async () => {
     const roomsWh = (await ctx.sql<{ id: number }[]>`SELECT id FROM warehouses WHERE department_id = ${ids.rooms!}`)[0]!.id;
     const rc = await api(ctx.app, reqA, 'POST', '/api/erp/dept-stock/docs', {
       clientKey: randomUUID(),
@@ -564,8 +564,14 @@ describe('盘点差异审批（A8）、急采待补单（A10）、数据隔离�
     });
     expect(rc.status, JSON.stringify(rc.body)).toBe(201);
     expect(roomsWh).toBeGreaterThan(0);
+    // 急采待验收不走审批中心：原来导航的数字算着它（所有待确认的物资单据），负责人的数字照样算上、列出来（Codex 自动审查 abe2842）
+    const accepting = async () => ((await api(ctx.app, mgrA, 'GET', '/api/approvals/accepts')).body as { docId: number }[]).some((x) => x.docId === rc.body.doc.id);
+    expect(await accepting()).toBe(true);
+    expect((await api(ctx.app, mgrA, 'GET', '/api/approvals/count')).body.accept).toBeGreaterThanOrEqual(1);
+    expect((await api(ctx.app, payer, 'GET', '/api/approvals/accepts')).status).toBe(403);
     const verified = await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${rc.body.doc.id}/verify-urgent`, {});
     expect(verified.body.status).toBe('confirmed');
+    expect(await accepting()).toBe(false);
     const listed = async () => ((await api(ctx.app, mgrA, 'GET', '/api/approvals/backfills')).body as { receiptId: number; daysOver: number }[]).find((x) => x.receiptId === rc.body.doc.id);
     expect(await listed()).toBeUndefined();
     // 已生效的单据有触发器拦改，测试库里临时关掉、把生效时间往前挪 5 天

@@ -4,7 +4,7 @@
 
 import { useMemo, useState } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router';
-import { CheckCheck, ChevronDown, ChevronUp, PackageX, RotateCcw, TriangleAlert } from 'lucide-react';
+import { CheckCheck, ChevronDown, ChevronUp, PackageCheck, PackageX, RotateCcw, TriangleAlert } from 'lucide-react';
 import {
   APPROVAL_BATCH_MAX,
   APPROVAL_BATCH_MAX_CENTS,
@@ -13,6 +13,7 @@ import {
   URGENT_BACKFILL_ESCALATE_DAYS,
   type ApprovalCard,
   type BatchApproveResult,
+  type UrgentAcceptItem,
 } from '@shared/approvals';
 import { formatAmount } from '@shared/money';
 import { errorMessage, UncertainError } from '../../lib/api';
@@ -24,12 +25,12 @@ import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Input, Notice, Segmented, Skeleton } from '../../components/ui';
-import { waited } from './ApprovalProgress';
+import { useApprovalResend, waited } from './ApprovalProgress';
 import { ApprovalSheet } from './ApprovalSheet';
 import { DelegationsPanel } from './DelegationsPanel';
 import { RulesPanel } from './RulesPanel';
-import { useApprovals, useRefreshAfterApproval, useUrgentBackfills, type ApprovalTab } from './queries';
-import { sendBatchApprove, uncertainApproval, uncertainBatch, useUncertainApprovals } from './uncertain';
+import { useApprovals, useRefreshAfterApproval, useUrgentAccepts, useUrgentBackfills, type ApprovalTab } from './queries';
+import { sendBatchApprove, sentLabel, useUncertainApprovals } from './uncertain';
 
 type Tab = ApprovalTab | 'rules' | 'delegations';
 
@@ -53,6 +54,8 @@ export function ApprovalsPage() {
   const list = useApprovals(listTab, undefined, canAct && (tab === 'all' || tab === 'submitted'));
   const cards = tab === 'mine' ? mine : list;
   const backfills = useUrgentBackfills(can('inventory.approve'));
+  const accepts = useUrgentAccepts(can('inventory.approve'));
+  const [retryOpen, setRetryOpen] = useState(false);
   if (!canAct) return <Navigate to="/erp" replace />;
 
   const overdue = (mine.data ?? []).filter((c) => c.overdue).length;
@@ -80,6 +83,8 @@ export function ApprovalsPage() {
       />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[920px] space-y-4 px-4 py-4 md:px-7 md:py-5" data-testid="approvals-page">
+          <UncertainPanel onOpen={(id) => setParam({ open: String(id) })} onBatch={() => setRetryOpen(true)} />
+          {(accepts.data?.length ?? 0) > 0 && <AcceptStrip items={accepts.data!} />}
           {(backfills.data?.length ?? 0) > 0 && <BackfillStrip items={backfills.data!} />}
           <div className="-mx-1 overflow-x-auto px-1">
             <Segmented value={tab} onChange={(v) => setParam({ tab: v === 'mine' ? null : v })} options={tabs} ariaLabel="审批中心分页" className="min-w-max" />
@@ -103,40 +108,69 @@ export function ApprovalsPage() {
         </div>
       </div>
       <ApprovalSheet id={openId} onClose={() => setParam({ open: null })} />
+      {/* 没收到结果的那一批：从上方「结果待确认」整批重新提交（不按刷新后的卡片，照上次的发） */}
+      <BatchDialog open={retryOpen} cards={[]} onClose={() => setRetryOpen(false)} onDone={() => undefined} />
     </>
+  );
+}
+
+/**
+ * 没收到结果的同意、退回（uncertain.ts，存在本机、按账号分开）：刷新、重新登录以后也列在这里，可以逐张按原内容重新提交、
+ * 打开看审批进度；批量的那一批可以整批重新提交。有明确结果（或读回时审批单已经结束）才从这里消失。
+ */
+function UncertainPanel({ onOpen, onBatch }: { onOpen: (id: number) => void; onBatch: () => void }) {
+  const sent = useUncertainApprovals();
+  const refresh = useRefreshAfterApproval();
+  const { busy, resend } = useApprovalResend(refresh);
+  if (sent.all.length === 0) return null;
+  return (
+    <Notice
+      tone="warning"
+      icon={<TriangleAlert className="size-4" />}
+      title={`${sent.all.length} 张的同意或退回没收到结果`}
+      action={
+        sent.batch && sent.batch.items.length > 1 ? (
+          <Button size="sm" variant="primary" icon={<RotateCcw className="size-4" />} onClick={onBatch} data-testid="approval-batch-retry">
+            这一批 {sent.batch.items.length} 张一起重新提交
+          </Button>
+        ) : undefined
+      }
+      data-testid="approval-uncertain-panel"
+    >
+      <p>可能已经生效。按原内容重新提交：已经生效的不重复记，这张单已经走过这一级的会写明原因。</p>
+      <ul className="mt-1.5 space-y-1.5">
+        {sent.all.map((s) => (
+          <li key={s.requestId} className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            <button type="button" onClick={() => onOpen(s.requestId)} className="num font-semibold text-lake hover:underline">
+              {s.docNo}
+            </button>
+            <span className="text-ink-2">
+              {sentLabel(s)}
+              {s.batch ? ' · 批量' : ''}
+            </span>
+            <Button size="sm" variant="secondary" loading={busy === s.requestId} onClick={() => void resend(s)} data-testid={`approval-uncertain-resend-${s.docNo}`}>
+              按原内容重新提交
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </Notice>
   );
 }
 
 function CardList({ cards, tab, onOpen }: { cards: ApprovalCard[]; tab: ApprovalTab; onOpen: (id: number) => void }) {
   const [selected, setSelected] = useState<number[]>([]);
   const [batchOpen, setBatchOpen] = useState(false);
-  // 上次同意没收到结果的单（uncertain.ts）：不能再勾进新的一批，打开后只能按原内容重新提交；没收到结果的那一批在列表上方
-  useUncertainApprovals();
-  const retry = tab === 'mine' ? uncertainBatch() : null;
+  // 上次同意没收到结果的单（uncertain.ts）：不能再勾进新的一批，打开后只能按原内容重新提交（页面上方「结果待确认」里也列着）
+  const sent = useUncertainApprovals();
   const picked = useMemo(() => cards.filter((c) => selected.includes(c.id)), [cards, selected]);
   const pickedType = picked[0]?.docType ?? null;
   const batchable = (c: ApprovalCard) =>
-    tab === 'mine' && c.canAct && !uncertainApproval(c.id) && c.amountCents !== null && c.amountCents <= APPROVAL_BATCH_MAX_CENTS && (!pickedType || c.docType === pickedType);
-  const retryNotice = retry && (
-    <Notice
-      tone="warning"
-      icon={<TriangleAlert className="size-4" />}
-      title={`上次批量同意 ${retry.items.length} 张没收到结果`}
-      action={
-        <Button size="sm" variant="primary" icon={<RotateCcw className="size-4" />} onClick={() => setBatchOpen(true)} data-testid="approval-batch-retry">
-          按原内容重新提交
-        </Button>
-      }
-      data-testid="approval-batch-uncertain"
-    >
-      可能已经同意了一部分。重新提交时每张按上次的级别与意见再提交一次，已经生效的不重复记。
-    </Notice>
-  );
+    tab === 'mine' && c.canAct && !sent.get(c.id) && c.amountCents !== null && c.amountCents <= APPROVAL_BATCH_MAX_CENTS && (!pickedType || c.docType === pickedType);
   const batchDialog = <BatchDialog open={batchOpen} cards={picked} onClose={() => setBatchOpen(false)} onDone={() => setSelected([])} />;
   if (cards.length === 0) {
     return (
       <>
-        {retryNotice}
         <EmptyState
           art="calm"
           title={tab === 'mine' ? '没有待你审批的单据' : tab === 'all' ? '没有在审的单据' : '你还没有提交过要审批的单据'}
@@ -149,7 +183,6 @@ function CardList({ cards, tab, onOpen }: { cards: ApprovalCard[]; tab: Approval
   }
   return (
     <>
-      {retryNotice}
       {tab === 'mine' && (
         <p className="text-[12.5px] text-ink-3">
           勾选同一种单据、每张不超过 ¥{formatAmount(APPROVAL_BATCH_MAX_CENTS)} 的可以一起同意（一次最多 {APPROVAL_BATCH_MAX} 张）。
@@ -176,7 +209,7 @@ function CardList({ cards, tab, onOpen }: { cards: ApprovalCard[]; tab: Approval
                 {c.overdue && <Badge tone="clay">超时</Badge>}
                 {c.stuck && <Badge tone="ember">没人能审</Badge>}
                 {c.actingFor.length > 0 && <Badge tone="moss">代 {c.actingFor.join('、')}</Badge>}
-                {uncertainApproval(c.id) && <Badge tone="ember">结果待确认</Badge>}
+                {sent.get(c.id) && <Badge tone="ember">结果待确认</Badge>}
                 {tab === 'submitted' && c.status !== 'pending' && <Badge tone={c.status === 'approved' ? 'pine' : 'neutral'}>{c.status === 'approved' ? '已通过' : c.status === 'returned' ? '已退回' : '已撤回'}</Badge>}
                 <span className="ml-auto">
                   {c.amountCents !== null ? <Money cents={c.amountCents} className="text-[15px] font-bold" /> : <span className="text-[12px] text-ink-3">金额算不出</span>}
@@ -236,8 +269,8 @@ function BatchDialog({ open, cards, onClose, onDone }: { open: boolean; cards: A
   const [result, setResult] = useState<BatchApproveResult | null>(null);
   const refresh = useRefreshAfterApproval();
   const toast = useToast();
-  useUncertainApprovals();
-  const retry = uncertainBatch();
+  const sent = useUncertainApprovals();
+  const retry = sent.batch;
   const close = () => {
     setResult(null);
     setComment('');
@@ -248,10 +281,13 @@ function BatchDialog({ open, cards, onClose, onDone }: { open: boolean; cards: A
     try {
       const r = retry
         ? await sendBatchApprove(
+            sent.staffId,
             retry.items.map((s) => ({ requestId: s.requestId, docNo: s.docNo, level: s.level })),
             retry.comment,
+            retry.id,
           )
         : await sendBatchApprove(
+            sent.staffId,
             cards.map((c) => ({ requestId: c.id, docNo: c.docNo, level: c.currentLevel })),
             comment.trim(),
           );
@@ -328,6 +364,37 @@ function BatchDialog({ open, cards, onClose, onDone }: { open: boolean; cards: A
         <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="意见（选填，每张都记这一句）" maxLength={200} data-autofocus />
       )}
     </Dialog>
+  );
+}
+
+/** 急采待验收：部门登记、等仓库或负责人到部门验收（不走审批中心，在原单据上「到部门验收确认」） */
+function AcceptStrip({ items }: { items: UrgentAcceptItem[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="rounded-lg border border-lake/25 bg-lake-soft/40 px-4 py-3" data-testid="approval-accepts">
+      <button type="button" className="flex w-full items-center gap-2 text-left" onClick={() => setOpen((o) => !o)}>
+        <PackageCheck className="size-4 text-lake" />
+        <span className="text-[14px] font-bold">急采待验收 {items.length} 张</span>
+        <span className="text-[12.5px] text-ink-3">部门登记的急采收货，到部门验收后生效</span>
+        <span className="ml-auto">{open ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}</span>
+      </button>
+      {open && (
+        <ul className="mt-2 space-y-1.5">
+          {items.map((d) => (
+            <li key={d.docId} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[13px]">
+              <Link to={`/inventory/docs?doc=${d.docId}`} className="num font-semibold text-lake hover:underline">
+                {d.docNo}
+              </Link>
+              <span>{[d.departmentName, d.supplierName].filter(Boolean).join(' · ')}</span>
+              {d.amountCents !== null && <Money cents={d.amountCents} className="font-semibold" />}
+              <span className="text-ink-3">
+                {d.handlerName} 登记 · {formatDateTime(d.createdAt)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

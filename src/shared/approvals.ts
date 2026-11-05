@@ -221,6 +221,8 @@ export interface ApprovalCounts {
   overdue: number;
   /** 急采待补单（超过 3 天，负责人看） */
   backfill: number;
+  /** 急采待验收（部门登记、等仓库到部门验收；负责人看，自己登记的不算，店主除外） */
+  accept: number;
 }
 
 export interface ApprovalRuleView {
@@ -276,6 +278,17 @@ export interface UrgentBackfillItem {
   amountCents: number;
   confirmedAt: string;
   daysOver: number;
+  handlerName: string;
+}
+
+/** 急采待验收（不走审批中心：仓库或负责人到部门验收后生效） */
+export interface UrgentAcceptItem {
+  docId: number;
+  docNo: string;
+  departmentName: string | null;
+  supplierName: string | null;
+  amountCents: number | null;
+  createdAt: string;
   handlerName: string;
 }
 

@@ -29,6 +29,7 @@ import {
   poSettlement,
   priceBaseline,
   setTxTimeouts,
+  sourcingHolds,
   todayIn,
   weighedCapMilli,
 } from './common';
@@ -376,7 +377,7 @@ async function checkRequestLinks(
              WHERE x.request_line_id = l.id AND po.status <> 'cancelled' ${poId ? tx`AND po.id <> ${poId}` : tx``} LIMIT 1) AS taken_by,
            (SELECT e.doc_no FROM sourcing_line_requests sr JOIN sourcing_lines sl ON sl.id = sr.sourcing_line_id
               JOIN sourcing_events e ON e.id = sl.event_id
-             WHERE sr.request_line_id = l.id AND e.status <> 'cancelled' ${sourcingEventId ? tx`AND e.id <> ${sourcingEventId}` : tx``} LIMIT 1) AS in_sourcing
+             WHERE sr.request_line_id = l.id AND ${sourcingHolds(tx)} ${sourcingEventId ? tx`AND e.id <> ${sourcingEventId}` : tx``} LIMIT 1) AS in_sourcing
     FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
     WHERE l.id IN ${tx(all)}`;
   const byId = new Map(rows.map((r) => [Number(r.id), r]));

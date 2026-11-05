@@ -36,7 +36,7 @@ import { badRequest, conflict, forbidden, notFound, unprocessable } from '../lib
 import { idParam, parse } from '../lib/validate';
 import { erpOpAbandoned } from './erp-ops';
 import { loadExpenseRules } from './expenses';
-import { docDateSchema, logApproval } from './inventory/common';
+import { docDateSchema, logApproval, sourcingHolds } from './inventory/common';
 import { todayIn } from '../lib/dates';
 import { nextDocNo, setTxTimeouts } from '../lib/tx';
 import { hashRequest } from '../lib/idempotency';
@@ -80,12 +80,19 @@ const PROGRESS_SQL = (db: Db) => db`
      WHERE x.request_line_id = l.id AND po.status <> 'cancelled'
      ORDER BY pl.id LIMIT 1)`;
 
-/** 需求行在哪张没撤销的询价单里（v0.7.30：从需求单发起询价；同一时刻最多一张，接口里锁需求单核对、自检兜底） */
+/**
+ * 需求行的询价单（v0.7.30：从需求单发起询价）：还占着它的那张（询价中；同一时刻最多一张，接口里锁需求单核对、自检兜底），
+ * 或者它所在的没撤回的采购单就是从这张询价单转出的（已下单，显示询价单号）。转出以后从采购单上解开的不算（sourcingHolds）。
+ */
 const SOURCING_SQL = (db: Db) => db`
   (SELECT json_build_object('id', e.id, 'docNo', e.doc_no)
      FROM sourcing_line_requests sr JOIN sourcing_lines sl ON sl.id = sr.sourcing_line_id
      JOIN sourcing_events e ON e.id = sl.event_id
-     WHERE sr.request_line_id = l.id AND e.status <> 'cancelled'
+     WHERE sr.request_line_id = l.id
+       AND (${sourcingHolds(db)}
+            OR EXISTS (SELECT 1 FROM purchase_order_line_requests ox JOIN purchase_order_lines ol ON ol.id = ox.po_line_id
+                       JOIN purchase_orders op ON op.id = ol.po_id
+                       WHERE ox.request_line_id = l.id AND op.sourcing_event_id = e.id AND op.status <> 'cancelled'))
      ORDER BY e.id DESC LIMIT 1)`;
 
 interface RawProgress {
@@ -178,7 +185,7 @@ export async function getRequest(db: Db, actor: Actor, requestId: number): Promi
   return { ...toSummary(row), ...extra!, lines: lines.map(({ sourcing, ...l }) => ({ ...l, progress: progressOf(l.progress, sourcing) })), approvals };
 }
 
-/** 已通过、还没下单、也不在没撤销的询价单里的需求行（转采购单、发起询价用；ids 给了就只取这些） */
+/** 已通过、还没下单、也没被询价单占着的需求行（转采购单、发起询价用；ids 给了就只取这些） */
 export async function openLines(db: Db, ids?: number[]): Promise<OpenRequestLine[]> {
   const rows = await db<(Omit<OpenRequestLine, 'department'> & { departmentId: number; departmentName: string })[]>`
     SELECT l.id, r.id AS request_id, r.doc_no AS request_no, r.department_id, d.name AS department_name, s.display_name AS requester_name,
@@ -194,7 +201,7 @@ export async function openLines(db: Db, ids?: number[]): Promise<OpenRequestLine
                       WHERE x.request_line_id = l.id AND po.status <> 'cancelled')
       AND NOT EXISTS (SELECT 1 FROM sourcing_line_requests sr JOIN sourcing_lines sl ON sl.id = sr.sourcing_line_id
                       JOIN sourcing_events e ON e.id = sl.event_id
-                      WHERE sr.request_line_id = l.id AND e.status <> 'cancelled')
+                      WHERE sr.request_line_id = l.id AND ${sourcingHolds(db)})
       ${ids ? db`AND l.id IN ${db(ids)}` : db``}
     ORDER BY r.created_at, r.id, l.line_no
     LIMIT 500`;
