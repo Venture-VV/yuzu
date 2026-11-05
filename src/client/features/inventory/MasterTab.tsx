@@ -13,6 +13,7 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Field, Input, MoneyInput, Notice, Segmented, Select, Skeleton } from '../../components/ui';
 import { SimRule } from './parts';
 import { useDepartments, useInvalidateInventory, useMaterials, useSuppliers } from './queries';
+import { usePurchaseRules } from '../purchasing/queries';
 
 type Section = 'materials' | 'suppliers' | 'departments';
 
@@ -406,7 +407,18 @@ function Suppliers({ editable }: { editable: boolean }) {
 function SupplierDialog({ editing, onClose }: { editing: Supplier | 'new' | null; onClose: () => void }) {
   const toast = useToast();
   const invalidate = useInvalidateInventory();
-  const blank = { code: '', name: '', contact: '', phone: '', note: '', settlement: 'credit' as SupplierSettlement, reconcileCycle: 'monthly' as ReconcileCycle, active: true };
+  const purchaseRules = usePurchaseRules(!!editing);
+  const blank = {
+    code: '',
+    name: '',
+    contact: '',
+    phone: '',
+    note: '',
+    settlement: 'credit' as SupplierSettlement,
+    reconcileCycle: 'monthly' as ReconcileCycle,
+    defaultChannel: null as string | null,
+    active: true,
+  };
   const [form, setForm] = useState(blank);
   const [last, setLast] = useState<typeof editing>(null);
   const [error, setError] = useState<string | null>(null);
@@ -423,6 +435,7 @@ function SupplierDialog({ editing, onClose }: { editing: Supplier | 'new' | null
             note: editing.note,
             settlement: editing.settlement,
             reconcileCycle: editing.reconcileCycle,
+            defaultChannel: editing.defaultChannel ?? null,
             active: editing.active,
           }
         : blank,
@@ -506,6 +519,21 @@ function SupplierDialog({ editing, onClose }: { editing: Supplier | 'new' | null
             />
           </Field>
         )}
+        <Field label="默认采购途径" htmlFor="s-channel" className="sm:col-span-3" hint="新建这家的采购单时按它带出，可改；不设按采购规则的第一项">
+          <Select
+            id="s-channel"
+            value={form.defaultChannel ?? ''}
+            onChange={(e) => setForm({ ...form, defaultChannel: e.target.value || null })}
+            data-testid="s-channel"
+          >
+            <option value="">不设</option>
+            {(purchaseRules.data?.channels ?? []).map((c) => (
+              <option key={c.key} value={c.key}>
+                {c.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
         <Field label="状态" className="sm:col-span-3">
           <Segmented
             value={form.active ? 'on' : 'off'}

@@ -5,6 +5,8 @@ import { readSnapshot, type Sql } from '../db';
 import { frontdeskChecks } from '../modules/frontdesk/checks';
 import { inventoryChecks } from '../modules/inventory/reports';
 import { expenseChecks } from '../modules/expenses';
+import { pettyAccountChecks } from '../modules/petty-accounts';
+import { sourcingChecks } from '../modules/inventory/sourcing';
 import { requestChecks } from '../modules/requests';
 import { legacyChecks } from '../modules/legacy';
 import { spaceChecks } from '../modules/spaces';
@@ -30,6 +32,10 @@ export async function consistencyChecks(sql: Sql, timezone: string): Promise<Che
   const summary = await readSnapshot(sql, (tx) => computeSettlement(tx, today, today));
   const inventory = await readSnapshot(sql, inventoryChecks);
   const expenses = await readSnapshot(sql, expenseChecks);
+  // 部门备用金台账（v0.7.29）：台账余额 = 各笔打款的未退回之和
+  const pettyAccounts = await readSnapshot(sql, pettyAccountChecks);
+  // 询价单与采购单的关联（v0.7.29）
+  const sourcing = await readSnapshot(sql, sourcingChecks);
   const requests = await readSnapshot(sql, requestChecks);
   const frontdesk = await readSnapshot(sql, frontdeskChecks);
   // 旧账只读表与导入记录一致（v0.7.10；旧账不进正式账，这里只核对只读表没被动过）
@@ -49,5 +55,5 @@ export async function consistencyChecks(sql: Sql, timezone: string): Promise<Che
   const refunds = await readSnapshot(sql, memberRefundChecks);
   // 会员合并（v0.7.26）
   const merges = await readSnapshot(sql, memberMergeChecks);
-  return [...summary.checks, ...inventory, ...expenses, ...requests, ...frontdesk, legacy, ...spaces, ...floorplans, ...locations, ...membership, ...benefits, ...trials, ...refunds, ...merges].map(({ label, ok, detail }) => ({ label, ok, detail }));
+  return [...summary.checks, ...inventory, ...expenses, ...pettyAccounts, ...sourcing, ...requests, ...frontdesk, legacy, ...spaces, ...floorplans, ...locations, ...membership, ...benefits, ...trials, ...refunds, ...merges].map(({ label, ok, detail }) => ({ label, ok, detail }));
 }

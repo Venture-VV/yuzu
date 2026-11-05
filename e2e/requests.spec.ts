@@ -164,6 +164,8 @@ test.describe('部门采购需求单', () => {
       await page.getByTestId('ex-dept').selectOption(String(dept.id));
       await page.getByTestId('ex-purpose').selectOption('办公');
       await page.getByTestId('ex-invoice').selectOption({ label: '无票' });
+      await page.getByTestId('ex-channel').selectOption('store');
+      await page.getByTestId('ex-channel-note').fill('楼下便利店');
       await page.getByTestId('line-name-0').fill(name);
       await page.getByTestId('line-cat-0').selectOption('office');
       await page.getByTestId('line-unit-0').fill('包');
@@ -221,6 +223,8 @@ test.describe('部门采购需求单', () => {
     await page.getByTestId('ex-dept').selectOption(String(dept.id));
     await page.getByTestId('ex-purpose').selectOption('办公');
     await page.getByTestId('ex-invoice').selectOption({ label: '无票' });
+    await page.getByTestId('ex-channel').selectOption('store');
+    await page.getByTestId('ex-channel-note').fill('楼下便利店');
     await page.getByTestId('line-name-0').fill(name);
     await page.getByTestId('line-cat-0').selectOption('office');
     await page.getByTestId('line-unit-0').fill('包');

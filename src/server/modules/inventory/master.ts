@@ -12,6 +12,7 @@ import { conflict, notFound, unprocessable } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { CENTRAL_WAREHOUSE_ID } from '@shared/inventory';
 import { coverFor, loadInventorySettings, todayIn, usageByMaterial, usageSince } from './common';
+import { assertChannelKey, ChannelKey } from './purchase-rules';
 import { lockSettings } from '../../lib/rule-settings';
 
 const MATERIAL_COLUMNS = (db: Db) => db`
@@ -55,7 +56,7 @@ export async function getMaterial(db: Db, id: number, timeZone?: string): Promis
 
 export const listSuppliers = (db: Db, includeInactive = false) =>
   db<Supplier[]>`
-    SELECT id, code, name, contact, phone, note, settlement, reconcile_cycle, reconcile_since::text AS reconcile_since, active, is_synthetic FROM suppliers
+    SELECT id, code, name, contact, phone, note, settlement, reconcile_cycle, reconcile_since::text AS reconcile_since, default_channel, active, is_synthetic FROM suppliers
     ${includeInactive ? db`` : db`WHERE active`} ORDER BY active DESC, code`;
 
 export const listDepartments = (db: Db, includeInactive = false) =>
@@ -113,6 +114,8 @@ export const SupplierInput = z.object({
   settlement: z.enum(['credit', 'cash']).optional(),
   /** 挂账的对账方式（#23，v0.7.13）：月结 / 按批次；新建不填按月结，修改不填保持原样 */
   reconcileCycle: z.enum(['monthly', 'batch']).optional(),
+  /** 默认采购途径（v0.7.29，E1）：新建不填为空（按采购规则的第一项），修改不填保持原样，传 null 清掉 */
+  defaultChannel: ChannelKey.nullable().optional(),
   active: z.boolean().default(true),
 });
 export type SupplierInputData = z.input<typeof SupplierInput>;
@@ -207,18 +210,20 @@ export async function saveSupplier(
   // 改成按批次对账的那天（#23，v0.7.13）：之前的收货不提醒对账
   const today = extra.today ?? null;
   const cycle = s.reconcileCycle ?? null;
+  await assertChannelKey(db, s.defaultChannel);
   try {
     if (id === null) {
       const [row] = await db<{ id: number }[]>`
-        INSERT INTO suppliers (code, name, contact, phone, note, settlement, reconcile_cycle, reconcile_since, active, is_synthetic)
+        INSERT INTO suppliers (code, name, contact, phone, note, settlement, reconcile_cycle, reconcile_since, default_channel, active, is_synthetic)
         VALUES (${s.code}, ${s.name}, ${s.contact}, ${s.phone}, ${s.note}, ${s.settlement ?? 'credit'}, ${cycle ?? 'monthly'},
-                ${cycle === 'batch' ? db`coalesce(${today}::date, CURRENT_DATE)` : null}, ${s.active}, ${extra.isSynthetic ?? false})
+                ${cycle === 'batch' ? db`coalesce(${today}::date, CURRENT_DATE)` : null}, ${s.defaultChannel ?? null}, ${s.active}, ${extra.isSynthetic ?? false})
         RETURNING id`;
       return row!.id;
     }
     const rows = await db`
       UPDATE suppliers SET code = ${s.code}, name = ${s.name}, contact = ${s.contact}, phone = ${s.phone}, note = ${s.note},
              settlement = coalesce(${s.settlement ?? null}, settlement),
+             default_channel = ${s.defaultChannel === undefined ? db`default_channel` : s.defaultChannel},
              reconcile_since = CASE WHEN ${cycle}::text = 'batch' AND reconcile_cycle <> 'batch' THEN coalesce(${today}::date, CURRENT_DATE)
                                     ELSE reconcile_since END,
              reconcile_cycle = coalesce(${cycle}::text, reconcile_cycle),

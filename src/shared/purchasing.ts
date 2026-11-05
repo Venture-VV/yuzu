@@ -70,7 +70,7 @@ export interface PoRevision {
   revision: number;
   changedByName: string;
   changedAt: string;
-  snapshot: { supplierName: string; totalCents: number; lines: { materialName: string; spec?: string; purchaseQtyMilli: number; purchaseUnit: string; priceCents: number; amountCents: number; imageIds?: number[] }[] };
+  snapshot: { supplierName: string; channel?: string | null; totalCents: number; lines: { materialName: string; spec?: string; purchaseQtyMilli: number; purchaseUnit: string; priceCents: number; amountCents: number; imageIds?: number[] }[] };
 }
 
 export interface PurchaseOrder {
@@ -78,6 +78,10 @@ export interface PurchaseOrder {
   docNo: string;
   status: PoStatus;
   supplier: Ref;
+  /** 采购途径（v0.7.29，E1）；v0.7.29 以前的单据为空 */
+  channel: ChannelRef | null;
+  /** 从哪张询价单转来的（v0.7.29，E5） */
+  sourcing: { id: number; docNo: string; status: 'open' | 'awarded' | 'cancelled' } | null;
   orderDate: string;
   expectedDate: string | null;
   note: string;
@@ -112,6 +116,8 @@ export interface PurchaseOrder {
   receipts: (DocRef & { docDate: string; amountCents: number })[];
   revisions: PoRevision[];
   approvals: ApprovalLog[];
+  /** 报销情况（v0.7.29）：现付的采购单在费用报销里报，这里列报在哪几张、还有几行没报 */
+  reimbursement: import('./expenses').PoReimbursement;
 }
 
 export interface PoSummary {
@@ -119,6 +125,7 @@ export interface PoSummary {
   docNo: string;
   status: PoStatus;
   supplierName: string;
+  channel: ChannelRef | null;
   supplierId: number;
   orderDate: string;
   expectedDate: string | null;
@@ -417,4 +424,196 @@ export interface ErpImportRecord {
   totalCents: number;
   createdByName: string;
   createdAt: string;
+}
+
+// ───────────────────────── 采购规则（v0.7.29 ERP 采购五项，docs/ERP_PURCHASING.md） ─────────────────────────
+
+/** 采购途径（E1）：键固定、名称可改；needsNote 的要写途径说明（档口、平台与店铺、门店名……） */
+export interface PurchaseChannelDef {
+  key: string;
+  label: string;
+  needsNote: boolean;
+}
+
+export interface PurchaseRules {
+  channels: PurchaseChannelDef[];
+  /** 询价门槛（分，E5）：合计 ≥ 这个金额的采购单第一次提交时要来自已定标的询价单；0 = 不要求 */
+  quoteThresholdCents: number;
+  /** 定标至少要几家有效报价（E6）；不够的标「单一来源」、由负责人定标 */
+  minQuotes: number;
+  /** 补货触发天数（E4）：物料没设提醒天数时，可用天数（含在途）少于它就建议补货 */
+  reorderDays: number;
+  /** 补货目标天数（E4）：建议补到能用这么多天 */
+  targetDays: number;
+}
+
+/** 默认规则（待确认，E1、E4–E6）：店主在 ERP「模块设置 → 采购规则」里改 */
+export const DEFAULT_PURCHASE_RULES: PurchaseRules = {
+  channels: [
+    { key: 'supplier', label: '供应商配送', needsNote: false },
+    { key: 'wholesale', label: '批发市场', needsNote: true },
+    { key: 'online', label: '网购平台', needsNote: true },
+    { key: 'store', label: '商超门店', needsNote: true },
+    { key: 'other', label: '其他', needsNote: true },
+  ],
+  quoteThresholdCents: 500_000,
+  minQuotes: 2,
+  reorderDays: 7,
+  targetDays: 14,
+};
+
+/** 单据上记的采购途径：键与当时的名称、途径说明 */
+export interface ChannelRef {
+  key: string;
+  label: string;
+  note: string;
+}
+
+/** 「网购平台 · 某某旗舰店」；没记的显示「—」 */
+export function channelText(c: ChannelRef | null | undefined): string {
+  if (!c) return '—';
+  return c.note ? `${c.label} · ${c.note}` : c.label;
+}
+
+// ───────────────────────── 补货建议（v0.7.29 ERP 采购五项④，docs/ERP_PURCHASING.md 第 5 节） ─────────────────────────
+
+export interface ReplenishLine {
+  materialId: number;
+  code: string;
+  name: string;
+  specification: string;
+  inventoryUnit: string;
+  purchaseUnit: string;
+  factorMilli: number;
+  decimals: number;
+  /** 总仓结存（库存单位） */
+  stockMilli: number;
+  /** 在途：没撤回、没关闭的采购单还没收到的（补单除外） */
+  inTransitMilli: number;
+  /** 在途来自哪几张采购单 */
+  openPos: string[];
+  /** 日均用量（库存单位，近 N 天）；没有用量为 null */
+  dailyUsageMilli: number | null;
+  /** (结存 + 在途) ÷ 日均用量，一位小数 */
+  daysOfCover: number | null;
+  /** cover：可用天数不足；low_stock：没有用量、低于提醒数量 */
+  reason: 'cover' | 'low_stock';
+  /** 触发天数（物料的提醒天数，或规则的补货触发天数）与补到的天数 */
+  triggerDays: number | null;
+  targetDays: number | null;
+  lowStockMilli: number | null;
+  /** 建议采购数量（采购单位，整包装）与折成的库存数量 */
+  suggestedPurchaseMilli: number;
+  suggestedBaseMilli: number;
+  /** 单价（每采购单位）：最近一次同口径成交价，没有用参考价 */
+  priceCents: number | null;
+  priceSource: 'last' | 'ref' | null;
+  amountCents: number | null;
+}
+
+export interface ReplenishGroup {
+  /** 物料的默认供应商，没设的取最近一次收货的供应商；都没有为空（要先选供应商） */
+  supplier: Ref | null;
+  lines: ReplenishLine[];
+  totalCents: number;
+}
+
+export interface ReplenishSuggestions {
+  windowDays: number;
+  reorderDays: number;
+  targetDays: number;
+  count: number;
+  groups: ReplenishGroup[];
+}
+
+// ───────────────────────── 询价比价与定标（v0.7.29 ERP 采购五项⑤，docs/ERP_PURCHASING.md 第 6 节） ─────────────────────────
+
+export type SourcingStatus = 'open' | 'awarded' | 'cancelled';
+export const SOURCING_STATUS_LABELS: Record<SourcingStatus, string> = { open: '询价中', awarded: '已定标', cancelled: '已撤销' };
+
+export interface SourcingLine {
+  id: number;
+  lineNo: number;
+  materialId: number;
+  materialCode: string;
+  materialName: string;
+  specification: string;
+  purchaseUnit: string;
+  inventoryUnit: string;
+  factorMilli: number;
+  purchaseQtyMilli: number;
+  baseQtyMilli: number;
+  spec: string;
+  /** 最近一次同口径成交价（比价用） */
+  baseline: PriceCompare['baseline'];
+}
+
+export interface SourcingQuote {
+  id: number;
+  supplier: Ref;
+  status: 'active' | 'withdrawn';
+  goodsCents: number;
+  freightCents: number;
+  /** 综合到价 = 货款合计 + 运费（E7） */
+  landedCents: number;
+  payTerms: string;
+  creditDays: number;
+  deliveryDays: number | null;
+  validUntil: string | null;
+  note: string;
+  prices: { lineId: number; priceCents: number; amountCents: number; changePercent: number | null }[];
+  /** 有效报价里按综合到价的名次（1 = 最低）；撤下的为空 */
+  rank: number | null;
+  createdByName: string;
+  createdAt: string;
+  withdrawReason: string | null;
+  withdrawnByName: string | null;
+}
+
+export interface SourcingEvent {
+  id: number;
+  docNo: string;
+  title: string;
+  status: SourcingStatus;
+  needBy: string | null;
+  note: string;
+  singleSource: boolean;
+  awardedQuoteId: number | null;
+  awardReason: string | null;
+  awardedByName: string | null;
+  awardedAt: string | null;
+  cancelReason: string | null;
+  createdByName: string;
+  createdAt: string;
+  lines: SourcingLine[];
+  quotes: SourcingQuote[];
+  /** 每行最低的有效报价：行 → 报价 */
+  lowest: Record<number, number>;
+  /** 转出的、没撤回的采购单 */
+  purchaseOrder: { id: number; docNo: string; status: PoStatus } | null;
+  /** 定标至少要几家有效报价（规则） */
+  minQuotes: number;
+}
+
+export interface SourcingSummary {
+  id: number;
+  docNo: string;
+  title: string;
+  status: SourcingStatus;
+  needBy: string | null;
+  lineCount: number;
+  quoteCount: number;
+  summary: string;
+  awardedSupplierName: string | null;
+  lowestLandedCents: number | null;
+  purchaseOrder: { id: number; docNo: string } | null;
+  createdByName: string;
+  createdAt: string;
+}
+
+/** 价格曲线（E8）：近 12 个月的成交价与报价，按日期 */
+export interface PriceHistory {
+  materialId: number;
+  materialName: string;
+  points: { date: string; source: 'receipt' | 'quote'; docNo: string; supplierName: string; priceCents: number; purchaseUnit: string; qtyMilli: number | null }[];
 }

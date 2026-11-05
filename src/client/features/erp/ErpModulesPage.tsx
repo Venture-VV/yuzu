@@ -12,6 +12,7 @@ import { cn, formatDateTime } from '../../lib/utils';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Notice, PendingBadge, Segmented, Skeleton } from '../../components/ui';
 import { ExpenseRulesCard } from '../expenses/ExpenseRulesCard';
+import { PurchaseRulesCard } from '../purchasing/PurchaseRulesCard';
 import { ErpPage } from './ErpHome';
 
 const erpModulesKey = ['erp', 'modules'] as const;
@@ -95,6 +96,7 @@ export function ErpModulesPage() {
             })}
           </Card>
           {error && <Notice tone="error" title={error} />}
+          {d.modules.find((m) => m.key === 'inventory')?.enabled && <PurchaseRulesCard />}
           {d.modules.find((m) => m.key === 'expenses')?.enabled && <ExpenseRulesCard />}
         </div>
       )}

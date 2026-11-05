@@ -171,6 +171,7 @@ export function PurchaseLedgerPage() {
                             {e.paySource && ` · ${PAY_SOURCE_LABELS[e.paySource]}`}
                             {e.advanceNo && e.kind !== 'advance' && ` · 打款 ${e.advanceNo}`}
                             {e.poNo && ` · 采购单 ${e.poNo}`}
+                            {e.channel && ` · ${e.channel}`}
                           </span>
                         </span>
                         <span className="hidden text-[12px] text-ink-3 md:block">{e.kind === 'expense' ? (e.paySource === 'petty' ? '备用金支出' : '公司直付') : ''}</span>

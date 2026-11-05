@@ -56,11 +56,18 @@ npm run typecheck && npm test && npm run build                  # 交 PR 前
 | 餐饮与桌台 | `dining*` | `dining*` |
 | 客房 | `rooms*` | `rooms` |
 | 空间台账、底图、房态图、实时位置 | `spaces`、`floorplan*`、`floormap`、`locations`、`upgrade-floormap` | `spaces`、`floorplans`、`floormap`、`locations` |
-| ERP（库存、采购、应付、报销、需求单、两级库存、台账、旧账） | `inventory*`、`purchasing`、`supplier-settlement`、`stock-cycles`、`warehouses`、`expenses`、`requests`、`purchase-ledger`、`erp`、`legacy` | `inventory`、`warehouses`、`supplier-settlement`、`stock-cycles`、`expenses`、`requests`、`purchase-ledger`、`erp`、`legacy` |
+| ERP（库存、采购、应付、报销、需求单、两级库存、台账、旧账；采购途径、转报销、部门备用金台账、补货建议、询价比价） | `inventory*`、`purchasing`、`supplier-settlement`、`stock-cycles`、`warehouses`、`expenses`、`requests`、`purchase-ledger`、`erp`、`erp-purchasing`、`legacy` | `inventory`、`warehouses`、`supplier-settlement`、`stock-cycles`、`expenses`、`requests`、`purchase-ledger`、`erp`、`erp-purchasing`、`legacy` |
 | 后台、岗位权限、看板 | `admin-v060`、`roles`、`instance` | `admin-v060`、`review-v060`、`viewports`、`pending-marks` |
 | 演示数据 | `*-seed`、`demo-time`、`demo-prepare`（新增） | `demo-showcase`（新增） |
+| 退储值的「门店系统原路退回」（要小程序端口与模拟微信支付） | `member-refunds-online`、`mp-refund` | `member-refund-online`（设了 `E2E_MP_PORT`、`E2E_MP_GATEWAY_KEY` 才收，见下） |
 | 迁移 | `upgrade*`；加了迁移一定跑全量 `npm test` | — |
 | 备份与运维脚本 | `backup`、`static-compression`、`import-encoding`；`shellcheck` | — |
+
+退储值「门店系统原路退回」的浏览器用例（`e2e/member-refund-online.spec.ts`，v0.7.29）要应用开着小程序端口与模拟微信支付：应用用 `MP_PORT`、`MP_GATEWAY_KEY`（至少 32 个字符）、`MP_PAY_MOCK=true` 启动（只在 development、test，实例标识不是 prod / shadow / test），Playwright 设同一个端口与密钥的 `E2E_MP_PORT`、`E2E_MP_GATEWAY_KEY` 才收这个文件；平时的浏览器验收不收、用例总数不变。它会临时打开小程序与线上充值、开着原路退回，结束时（含失败）照原样改回。CI 里还没有跑它的步骤（CI 的测试步骤归测试会话与 Codex）。
+
+```bash
+E2E_MP_PORT=<小程序端口> E2E_MP_GATEWAY_KEY=<网关密钥> E2E_BASE_URL=http://127.0.0.1:<端口> npx playwright test e2e/member-refund-online.spec.ts --project=门店电脑
+```
 
 ## 5. 验证（实测）
 

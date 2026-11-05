@@ -28,7 +28,7 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, MoneyInput, Notice, Select, Skeleton } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
 import { useDepartments } from '../inventory/queries';
-import { search, useAdvance, useExpenseRules, useHandlers, useInvalidateExpenses, usePettyDaily } from './queries';
+import { search, useAdvance, useExpenseRules, useHandlers, useInvalidateExpenses, usePettyAccounts, usePettyDaily } from './queries';
 
 export const STATE_LABELS: Record<PettyBalance['state'], string> = { settled: '已平', open: '未退回', overdue: '超期未退', owed: '待补付' };
 const STATE_TONE: Record<PettyBalance['state'], 'pine' | 'yuzu' | 'clay' | 'ember'> = { settled: 'pine', open: 'yuzu', overdue: 'clay', owed: 'ember' };
@@ -70,6 +70,11 @@ export function PettyPage() {
           <Link to="/erp/ledger">
             <Button variant="secondary" icon={<BookOpenCheck className="size-4" />}>
               采购台账
+            </Button>
+          </Link>
+          <Link to="/erp/petty/accounts">
+            <Button variant="secondary" icon={<HandCoins className="size-4" />} data-testid="petty-accounts-link">
+              部门备用金台账
             </Button>
           </Link>
           {can('expense.export') && (
@@ -442,6 +447,8 @@ function AdvanceDialog({ open, onClose, onDone }: { open: boolean; onClose: () =
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pending = useErpPending(['petty_advance']);
+  // 部门定额（v0.7.29，E3）：打款后在手超过定额只提示、不拦
+  const accounts = usePettyAccounts(open);
   useResetOnOpen(open, () => {
     setDepartmentId('');
     setHandlerId('');
@@ -453,6 +460,8 @@ function AdvanceDialog({ open, onClose, onDone }: { open: boolean; onClose: () =
     setError(null);
   });
   const cents = amount.trim() ? parseYuan(amount) : null;
+  const account = accounts.data?.find((a) => a.department.id === Number(departmentId));
+  const overLimit = account?.limitCents && cents && cents > 0 && account.balanceCents + cents > account.limitCents ? account : null;
   const blocking = pending.length > 0
     ? '上一笔打款结果待确认，请先在页面顶部查回、重新提交或作废'
     : !departmentId ? '请选择部门' : !handlerId ? '请选择经办人' : !cents || cents <= 0 ? '请填写打款金额' : evidence.trim().length < 2 ? '请填写凭据说明' : null;
@@ -555,6 +564,11 @@ function AdvanceDialog({ open, onClose, onDone }: { open: boolean; onClose: () =
           <Input id="adv-note" value={note} maxLength={200} disabled={locked} onChange={(e) => setNote(e.target.value)} placeholder="可选" className="h-10" />
         </Field>
       </div>
+      {overLimit && (
+        <Notice tone="warning" title="打款后超过这个部门的备用金定额" className="mt-3" data-testid="adv-over-limit">
+          定额 ¥{formatAmount(overLimit.limitCents!)}，现在余额 ¥{formatAmount(overLimit.balanceCents)}，打款后 ¥{formatAmount(overLimit.balanceCents + (cents ?? 0))}。只是提醒，可以照常登记。
+        </Notice>
+      )}
       {blocking && !locked && <p className="mt-3 text-[12.5px] font-semibold text-clay">{blocking}</p>}
       {error && <Notice tone="error" title={error} className="mt-3" />}
     </Dialog>
