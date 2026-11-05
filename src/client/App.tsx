@@ -45,6 +45,7 @@ const RevenuePage = lazyPage(() => import('./features/erp/RevenuePage').then((m)
 const ExpensesPage = lazyPage(() => import('./features/expenses/ExpensesPage').then((m) => m.ExpensesPage));
 const ClaimFormPage = lazyPage(() => import('./features/expenses/ClaimFormPage').then((m) => m.ClaimFormPage));
 const PettyPage = lazyPage(() => import('./features/expenses/PettyPage').then((m) => m.PettyPage));
+const PettyAccountsPage = lazyPage(() => import('./features/expenses/PettyAccountsPage').then((m) => m.PettyAccountsPage));
 const RequestsPage = lazyPage(() => import('./features/requests/RequestsPage').then((m) => m.RequestsPage));
 const RequestFormPage = lazyPage(() => import('./features/requests/RequestFormPage').then((m) => m.RequestFormPage));
 const DeptStockPage = lazyPage(() => import('./features/dept-stock/DeptStockPage').then((m) => m.DeptStockPage));
@@ -58,6 +59,9 @@ const TodoPage = lazyPage(() => import('./features/inventory/TodoPage').then((m)
 const PurchasingPage = lazyPage(() => import('./features/purchasing/PurchasingPage').then((m) => m.PurchasingPage));
 const PoFormPage = lazyPage(() => import('./features/purchasing/PoFormPage').then((m) => m.PoFormPage));
 const OrderedPage = lazyPage(() => import('./features/purchasing/OrderedPage').then((m) => m.OrderedPage));
+const SuggestionsPage = lazyPage(() => import('./features/purchasing/SuggestionsPage').then((m) => m.SuggestionsPage));
+const SourcingPage = lazyPage(() => import('./features/purchasing/SourcingPage').then((m) => m.SourcingPage));
+const SourcingDetailPage = lazyPage(() => import('./features/purchasing/SourcingPage').then((m) => m.SourcingDetailPage));
 const PayablesPage = lazyPage(() => import('./features/payables/PayablesPage').then((m) => m.PayablesPage));
 const PaymentFormPage = lazyPage(() => import('./features/payables/PaymentFormPage').then((m) => m.PaymentFormPage));
 const ImportPage = lazyPage(() => import('./features/payables/ImportPage').then((m) => m.ImportPage));
@@ -190,6 +194,7 @@ const router = createBrowserRouter([
       { path: 'expenses', element: <ExpensesPage /> },
       { path: 'expenses/new', element: <ClaimFormPage /> },
       { path: 'petty', element: <PettyPage /> },
+      { path: 'petty/accounts', element: <PettyAccountsPage /> },
       { path: 'requests', element: <RequestsPage /> },
       { path: 'dept-stock', element: <DeptStockPage /> },
       { path: 'dept-stock/new/:type', element: <DeptDocFormPage /> },
@@ -212,6 +217,9 @@ const router = createBrowserRouter([
       { path: 'purchasing', element: <PurchasingPage /> },
       { path: 'purchasing/new', element: <PoFormPage mode="new" /> },
       { path: 'purchasing/ordered', element: <OrderedPage /> },
+      { path: 'purchasing/suggestions', element: <SuggestionsPage /> },
+      { path: 'purchasing/sourcing', element: <SourcingPage /> },
+      { path: 'purchasing/sourcing/:id', element: <SourcingDetailPage /> },
       { path: 'purchasing/:id/edit', element: <PoFormPage mode="edit" /> },
       { path: 'purchasing/:id/revise', element: <PoFormPage mode="revise" /> },
       { path: 'payables', element: <PayablesPage /> },

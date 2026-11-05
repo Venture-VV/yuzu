@@ -4,7 +4,7 @@
 // 断网时「结果待确认」（v0.7.8 修正）：提交前把编号和原请求存在本机并读回核对，存不了就不提交；
 // 刷新、关闭页面后仍在页面顶部查回、按原内容重新提交（同一编号不会重复登记）或确认作废。
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
 import { ArrowLeft, CircleAlert, CircleCheck, Plus, ReceiptText, Trash2 } from 'lucide-react';
 import {
@@ -17,6 +17,7 @@ import {
   type PaySource,
 } from '@shared/expenses';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
+import { channelText } from '@shared/purchasing';
 import { formatQty, parseQty } from '@shared/quantity';
 import { ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
@@ -29,7 +30,8 @@ import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Button, Field, Input, MoneyInput, Notice, Segmented, Select, Skeleton } from '../../components/ui';
 import { useDepartments } from '../inventory/queries';
-import { useAdvances, useExpenseRules, useHandlers, useInvalidateExpenses, usePoCandidates, usePoForClaim } from './queries';
+import { usePurchaseRules } from '../purchasing/queries';
+import { useAdvances, useClaimPrefill, useExpenseRules, useHandlers, useInvalidateExpenses, usePoCandidates, usePoForClaim } from './queries';
 
 interface AdhocLine {
   key: string;
@@ -66,6 +68,10 @@ export function ClaimFormPage() {
   const [taxRateBp, setTaxRateBp] = useState<number | null>(null);
   const [invoiceNo, setInvoiceNo] = useState('');
   const [note, setNote] = useState('');
+  // 采购途径（v0.7.29，E1）：按次报销必选；按采购单报销照采购单（v0.7.29 以前的采购单没记的可以补选）
+  const purchaseRules = usePurchaseRules();
+  const [channel, setChannel] = useState('');
+  const [channelNote, setChannelNote] = useState('');
   const [lines, setLines] = useState<AdhocLine[]>([blankLine()]);
   const [poQuery, setPoQuery] = useState('');
   const [poId, setPoId] = useState<number | null>(Number(params.get('po')) || null);
@@ -80,6 +86,28 @@ export function ClaimFormPage() {
   const advances = useAdvances({ departmentId: departmentId ? String(departmentId) : undefined, unsettled: '1' }, paySource === 'petty' && !!departmentId);
   const candidates = usePoCandidates(poQuery.trim(), mode === 'po' && !poId);
   const po = usePoForClaim(mode === 'po' ? poId : null);
+  // 一键转报销（v0.7.29 ERP 采购五项②，E2）：选了采购单就读一次默认值，只填人还没动过的项
+  const prefill = useClaimPrefill(mode === 'po' ? poId : null);
+  const touched = useRef(new Set<string>());
+  const touch = (k: string) => touched.current.add(k);
+  const prefilledFor = useRef<number | null>(null);
+  const pf = prefill.data && prefill.data.po.id === poId ? prefill.data.prefill : null;
+  useEffect(() => {
+    if (!pf || !poId || prefilledFor.current === poId) return;
+    prefilledFor.current = poId;
+    const t = touched.current;
+    if (!t.has('department') && pf.departmentId) setDepartmentId(pf.departmentId);
+    if (!t.has('handler') && pf.handlerId) setHandlerId(pf.handlerId);
+    if (!t.has('purpose') && pf.purpose) setPurpose(pf.purpose);
+    if (!t.has('invoice') && pf.invoiceType) {
+      setInvoiceType(pf.invoiceType);
+      setTaxRateBp(pf.taxRateBp);
+    }
+    if (!t.has('paySource')) {
+      setPaySource(pf.paySource);
+      setAdvanceId(pf.advanceId);
+    }
+  }, [pf, poId]);
 
   // 从打款进来：部门跟着打款
   const fromAdvance = advances.data?.find((a) => a.id === advanceId);
@@ -87,12 +115,22 @@ export function ClaimFormPage() {
     if (fromAdvance && departmentId !== fromAdvance.department.id) setDepartmentId(fromAdvance.department.id);
   }, [fromAdvance, departmentId]);
   // 采购单载入后：每一行默认勾上（已报销的除外），金额按采购单
+  // 费用科目按这个物料上次报销用的带出（E2）
+  const pfCategories = pf?.categories;
   useEffect(() => {
     if (!po.data) return;
-    setPoPick(Object.fromEntries(po.data.lines.map((l) => [l.poLineId, { on: !l.claimedBy, category: '', amount: centsToInput(l.amountCents), diffReason: '' }])));
-  }, [po.data]);
+    setPoPick(
+      Object.fromEntries(
+        po.data.lines.map((l) => [l.poLineId, { on: !l.claimedBy, category: pfCategories?.[l.poLineId] ?? '', amount: centsToInput(l.amountCents), diffReason: '' }]),
+      ),
+    );
+  }, [po.data, pfCategories]);
 
   const inv = rules.data?.invoiceTypes.find((t) => t.key === invoiceType);
+  const channels = purchaseRules.data?.channels ?? [];
+  const channelDef = channels.find((c) => c.key === channel);
+  /** 页面上要选采购途径：按次报销，或采购单没记采购途径（v0.7.29 以前的） */
+  const pickChannel = mode === 'adhoc' || (!!po.data && !po.data.channel);
   const adhocRows = lines.map((l) => {
     const bought = parseQty(l.bought);
     const received = parseQty(l.received);
@@ -148,6 +186,10 @@ export function ClaimFormPage() {
         ? '请选择用途'
         : paySource === 'petty' && !advanceId
           ? '请选择这笔钱出自哪一笔打款'
+          : mode === 'adhoc' && channels.length > 0 && !channelDef
+            ? '请选择采购途径'
+          : pickChannel && channelDef?.needsNote && channelNote.trim().length < 2
+            ? `采购途径选了「${channelDef.label}」，请写明在哪买的`
           : !inv
             ? '请选择发票类型'
             : taxRateBp === null
@@ -231,6 +273,8 @@ export function ClaimFormPage() {
       taxRateBp,
       invoiceNo: invoiceNo.trim(),
       purchaseOrderId: mode === 'po' ? poId : null,
+      channel: pickChannel && channelDef ? channelDef.key : null,
+      channelNote: pickChannel && channelDef ? channelNote.trim() : '',
       note: note.trim(),
       approveNow: needsApproval && approveNow,
       lines: payloadLines,
@@ -261,6 +305,15 @@ export function ClaimFormPage() {
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1080px] space-y-4 px-5 py-5 md:px-7" data-testid="claim-form">
           <ErpPendingPanel types={['expense_claim']} onFound={(_, ref) => navigate(`/erp/expenses?claim=${ref.refId}`)} />
+          {mode === 'po' && pf && pf.basis.length > 0 && (
+            <Notice tone="info" title="已按采购单带好，请核对后提交（与实际不一样的直接改）" data-testid="claim-prefill-note">
+              <ul className="list-disc pl-5 text-[12.5px]">
+                {pf.basis.map((b) => (
+                  <li key={b}>{b}</li>
+                ))}
+              </ul>
+            </Notice>
+          )}
           <Segmented
             ariaLabel="报销方式"
             value={mode}
@@ -280,6 +333,7 @@ export function ClaimFormPage() {
                 value={departmentId ?? ''}
                 disabled={locked}
                 onChange={(e) => {
+                  touch('department');
                   setDepartmentId(Number(e.target.value) || null);
                   setAdvanceId(null);
                 }}
@@ -294,7 +348,10 @@ export function ClaimFormPage() {
               </Select>
             </Field>
             <Field label="经办人" htmlFor="ex-handler">
-              <Select id="ex-handler" value={handlerId ?? ''} disabled={locked} onChange={(e) => setHandlerId(Number(e.target.value) || null)} data-testid="ex-handler">
+              <Select id="ex-handler" value={handlerId ?? ''} disabled={locked} onChange={(e) => {
+                  touch('handler');
+                  setHandlerId(Number(e.target.value) || null);
+                }} data-testid="ex-handler">
                 <option value="">选择经办人</option>
                 {handlers.data?.map((h) => (
                   <option key={h.id} value={h.id}>
@@ -304,7 +361,10 @@ export function ClaimFormPage() {
               </Select>
             </Field>
             <Field label="用途" htmlFor="ex-purpose">
-              <Select id="ex-purpose" value={purpose} disabled={locked} onChange={(e) => setPurpose(e.target.value)} data-testid="ex-purpose">
+              <Select id="ex-purpose" value={purpose} disabled={locked} onChange={(e) => {
+                  touch('purpose');
+                  setPurpose(e.target.value);
+                }} data-testid="ex-purpose">
                 <option value="">选择用途</option>
                 {rules.data?.purposes.map((p) => (
                   <option key={p} value={p}>
@@ -317,13 +377,20 @@ export function ClaimFormPage() {
               <Segmented
                 ariaLabel="付款来源"
                 value={paySource}
-                onChange={(v) => !locked && setPaySource(v)}
+                onChange={(v) => {
+                  if (locked) return;
+                  touch('paySource');
+                  setPaySource(v);
+                }}
                 options={(['petty', 'company'] as const).map((v) => ({ value: v, label: PAY_SOURCE_LABELS[v] }))}
               />
             </Field>
             {paySource === 'petty' && (
               <Field label="出自哪一笔打款" htmlFor="ex-adv" className="sm:col-span-2" hint={departmentId ? '只列这个部门没平账的打款' : '先选部门'}>
-                <Select id="ex-adv" value={advanceId ?? ''} disabled={locked || !departmentId} onChange={(e) => setAdvanceId(Number(e.target.value) || null)} data-testid="ex-advance">
+                <Select id="ex-adv" value={advanceId ?? ''} disabled={locked || !departmentId} onChange={(e) => {
+                  touch('paySource');
+                  setAdvanceId(Number(e.target.value) || null);
+                }} data-testid="ex-advance">
                   <option value="">选择打款</option>
                   {advances.data?.map((a) => (
                     <option key={a.id} value={a.id}>
@@ -339,6 +406,7 @@ export function ClaimFormPage() {
                 value={invoiceType}
                 disabled={locked}
                 onChange={(e) => {
+                  touch('invoice');
                   setInvoiceType(e.target.value);
                   const t = rules.data?.invoiceTypes.find((x) => x.key === e.target.value);
                   setTaxRateBp(t && t.taxRatesBp.length === 1 ? t.taxRatesBp[0]! : null);
@@ -354,7 +422,10 @@ export function ClaimFormPage() {
               </Select>
             </Field>
             <Field label="税点" htmlFor="ex-tax">
-              <Select id="ex-tax" value={taxRateBp ?? ''} disabled={locked || !inv} onChange={(e) => setTaxRateBp(e.target.value === '' ? null : Number(e.target.value))} data-testid="ex-tax">
+              <Select id="ex-tax" value={taxRateBp ?? ''} disabled={locked || !inv} onChange={(e) => {
+                  touch('invoice');
+                  setTaxRateBp(e.target.value === '' ? null : Number(e.target.value));
+                }} data-testid="ex-tax">
                 <option value="">{inv ? '选择税点' : '先选发票类型'}</option>
                 {inv?.taxRatesBp.map((bp) => (
                   <option key={bp} value={bp}>
@@ -369,6 +440,41 @@ export function ClaimFormPage() {
             <Field label="备注" htmlFor="ex-note">
               <Input id="ex-note" value={note} maxLength={200} disabled={locked} onChange={(e) => setNote(e.target.value)} placeholder="可选" className="h-10" />
             </Field>
+            {pickChannel ? (
+              <>
+                <Field label="采购途径" htmlFor="ex-channel" hint={mode === 'adhoc' ? '在哪买的' : '这张采购单没记，可以补选'}>
+                  <Select id="ex-channel" value={channel} disabled={locked} onChange={(e) => setChannel(e.target.value)} data-testid="ex-channel">
+                    <option value="">选择采购途径</option>
+                    {channels.map((c) => (
+                      <option key={c.key} value={c.key}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="途径说明" htmlFor="ex-channel-note" className="sm:col-span-1 lg:col-span-3" hint={channelDef?.needsNote ? '必填：档口、平台与店铺、门店名' : '选填'}>
+                  <Input
+                    id="ex-channel-note"
+                    value={channelNote}
+                    maxLength={60}
+                    disabled={locked}
+                    onChange={(e) => setChannelNote(e.target.value)}
+                    placeholder={channelDef?.needsNote ? '例如：某某批发市场 3 号档、某平台某某旗舰店' : '可选'}
+                    className="h-10"
+                    data-testid="ex-channel-note"
+                  />
+                </Field>
+              </>
+            ) : (
+              mode === 'po' &&
+              po.data?.channel && (
+                <Field label="采购途径" className="sm:col-span-2 lg:col-span-4" hint="照采购单记">
+                  <p className="flex h-10 items-center text-[13.5px] font-semibold" data-testid="ex-po-channel">
+                    {channelText(po.data.channel)}
+                  </p>
+                </Field>
+              )
+            )}
           </section>
 
           {mode === 'adhoc' ? (

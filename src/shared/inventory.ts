@@ -193,6 +193,8 @@ export interface Supplier {
   reconcileCycle: ReconcileCycle;
   /** 改成按批次的日期：之前的收货不提醒对账 */
   reconcileSince: string | null;
+  /** 默认采购途径（v0.7.29，E1）：新建采购单按它带出；没设的按「采购规则」的第一项 */
+  defaultChannel: string | null;
   active: boolean;
   isSynthetic: boolean;
 }

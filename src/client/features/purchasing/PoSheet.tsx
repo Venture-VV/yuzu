@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Ban, CircleCheck, CornerUpLeft, FilePen, Lock, PackagePlus, Pencil, Send, X } from 'lucide-react';
+import { Ban, CircleCheck, CornerUpLeft, FilePen, Lock, PackagePlus, Pencil, ReceiptText, Send, X } from 'lucide-react';
+import { CLAIM_STATUS_LABELS } from '@shared/expenses';
 import { INV_STATUS_LABELS } from '@shared/inventory';
-import type { PurchaseOrder } from '@shared/purchasing';
+import { channelText, type PurchaseOrder } from '@shared/purchasing';
 import { formatQty } from '@shared/quantity';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
@@ -134,6 +135,16 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
 
         <dl className="grid grid-cols-2 gap-x-5 gap-y-2.5 rounded-lg border border-line bg-card px-4 py-3.5 text-[13px] sm:grid-cols-3">
           <Info label="供应商">{po.supplier.name}</Info>
+          <Info label="采购途径">
+            <span data-testid="po-sheet-channel">{channelText(po.channel)}</span>
+          </Info>
+          {po.sourcing && (
+            <Info label="询价单">
+              <Link to={`/purchasing/sourcing/${po.sourcing.id}`} className="num font-semibold text-lake hover:underline" data-testid="po-sheet-sourcing">
+                {po.sourcing.docNo}
+              </Link>
+            </Info>
+          )}
           <Info label="下单日期">
             <span className="num">{po.orderDate}</span>
           </Info>
@@ -235,6 +246,41 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
           </section>
         )}
 
+        {po.reimbursement.settlement === 'cash' && (po.reimbursement.claims.length > 0 || po.status === 'approved' || po.status === 'closed') && (
+          <section data-testid="po-reimbursement">
+            <h3 className="mb-2 flex items-center gap-2 text-[13px] font-bold text-ink-2">
+              报销
+              <span className="font-normal text-ink-3">现付：货款在费用报销里报</span>
+              {po.reimbursement.unclaimedLines > 0 && (po.status === 'approved' || po.status === 'closed') && (
+                <Badge tone="yuzu">{po.reimbursement.unclaimedLines} 行未报销</Badge>
+              )}
+            </h3>
+            {po.reimbursement.claims.length > 0 && (
+              <ul className="mb-2 space-y-1.5">
+                {po.reimbursement.claims.map((c) => (
+                  <li key={c.id}>
+                    <Link to={`/erp/expenses?claim=${c.id}`} className="flex items-center gap-3 rounded-md border border-line bg-card px-3 py-2 text-[13px] hover:border-line-strong">
+                      <span className="num font-semibold">{c.docNo}</span>
+                      <span className="num text-ink-3">{c.expenseDate}</span>
+                      <span className="flex-1" />
+                      <Money cents={c.amountCents} className="font-semibold" />
+                      <span className={cn('text-[12px] font-semibold', c.status === 'confirmed' ? 'text-pine' : 'text-ink-3')}>{CLAIM_STATUS_LABELS[c.status]}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {po.reimbursement.unclaimedLines > 0 &&
+              (po.status === 'approved' || po.status === 'closed') &&
+              can('expense.manage') &&
+              session.erpModules.includes('expenses') && (
+                <Button variant="secondary" size="sm" icon={<ReceiptText className="size-4" />} onClick={() => navigate(`/erp/expenses/new?po=${po.id}`)} data-testid="po-to-claim">
+                  转报销（带好经办人、部门、用途与金额）
+                </Button>
+              )}
+          </section>
+        )}
+
         {po.revisions.length > 0 && (
           <section>
             <h3 className="mb-2 text-[13px] font-bold text-ink-2">历史版本</h3>
@@ -242,7 +288,8 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
               {po.revisions.map((r) => (
                 <li key={r.revision} className="rounded-md border border-dashed border-line-strong bg-paper/60 px-3 py-2 text-[12.5px]">
                   <p className="font-semibold">
-                    第 {r.revision} 版 · {r.snapshot.supplierName} · <Money cents={r.snapshot.totalCents} />
+                    第 {r.revision} 版 · {r.snapshot.supplierName}
+                    {r.snapshot.channel && ` · ${r.snapshot.channel}`} · <Money cents={r.snapshot.totalCents} />
                     <span className="font-normal text-ink-3">
                       {' '}
                       · {r.changedByName} 于 {formatDateTime(r.changedAt)} 改版

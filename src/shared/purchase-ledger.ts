@@ -27,6 +27,8 @@ export interface LedgerEntry {
   qty: { boughtMilli: number; receivedMilli: number; unit: string } | null;
   paySource: PaySource | null;
   poNo: string | null;
+  /** 支出的采购途径与说明（v0.7.29，E1）：「网购平台 · 某某店」；没记的为空 */
+  channel: string | null;
   amountCents: number;
 }
 
@@ -94,6 +96,8 @@ export interface OrderedLine {
   orderDate: string;
   expectedDate: string | null;
   supplierName: string;
+  /** 采购途径与说明（v0.7.29）；没记的为空 */
+  channel: string | null;
   lineId: number;
   materialCode: string;
   materialName: string;

@@ -9,6 +9,11 @@ import type {
   PoSummary,
   PriceCompare,
   PurchaseOrder,
+  PriceHistory,
+  PurchaseRules,
+  ReplenishSuggestions,
+  SourcingEvent,
+  SourcingSummary,
   Statement,
   SupplierCredit,
   SupplierRefundDoc,
@@ -33,6 +38,11 @@ export const pk = {
   refunds: (params: Record<string, string | undefined>) => ['inv', 'refunds', params] as const,
   refund: (id: number) => ['inv', 'refund', id] as const,
   imports: ['inv', 'erp-imports'] as const,
+  purchaseRules: ['inv', 'purchase-rules'] as const,
+  suggestions: ['inv', 'purchase-suggestions'] as const,
+  sourcingList: (params: Record<string, string | undefined>) => ['inv', 'sourcing', params] as const,
+  sourcing: (id: number) => ['inv', 'sourcing-one', id] as const,
+  priceHistory: (materialId: number) => ['inv', 'price-history', materialId] as const,
 };
 
 /** 采购、货款与库存共用一个缓存前缀：任何单据变化后一起刷新 */
@@ -111,3 +121,32 @@ export const useRefund = (id: number | null) =>
   useQuery({ queryKey: pk.refund(id ?? 0), queryFn: () => api.get<SupplierRefundDoc>(`/api/payables/refunds/${id}`), enabled: !!id });
 
 export const useErpImports = (enabled = true) => useQuery({ queryKey: pk.imports, queryFn: () => api.get<ErpImportRecord[]>('/api/payables/imports'), enabled });
+
+/** 采购规则（v0.7.29）：采购途径字典、询价门槛、补货天数；编制采购单、登记报销、补货建议都读它 */
+export const usePurchaseRules = (enabled = true) =>
+  useQuery({ queryKey: pk.purchaseRules, queryFn: () => api.get<PurchaseRules>('/api/inventory/purchase-rules'), staleTime: 60_000, enabled });
+
+/** 补货建议（v0.7.29 ERP 采购五项④）：与采购单共用 'inv' 缓存前缀，生成草稿后一起刷新 */
+export const useSuggestions = (enabled = true) =>
+  useQuery({ queryKey: pk.suggestions, queryFn: () => api.get<ReplenishSuggestions>('/api/purchase-suggestions'), enabled, staleTime: 30_000 });
+
+/** 询价比价（v0.7.29 ERP 采购五项⑤） */
+export const useSourcingList = (params: { status?: string; q?: string }, enabled = true) =>
+  useQuery({
+    queryKey: pk.sourcingList(params),
+    queryFn: () => api.get<SourcingSummary[]>(`/api/purchase-sourcing?${search(params)}`),
+    placeholderData: keepPreviousData,
+    enabled,
+  });
+
+export const useSourcing = (id: number | null) =>
+  useQuery({ queryKey: pk.sourcing(id ?? 0), queryFn: () => api.get<SourcingEvent>(`/api/purchase-sourcing/${id}`), enabled: !!id });
+
+/** 价格曲线（E8）：近 12 个月的成交价与报价 */
+export const usePriceHistory = (materialId: number | null) =>
+  useQuery({
+    queryKey: pk.priceHistory(materialId ?? 0),
+    queryFn: () => api.get<PriceHistory>(`/api/purchase-price-history?materialId=${materialId}`),
+    enabled: !!materialId,
+    staleTime: 60_000,
+  });

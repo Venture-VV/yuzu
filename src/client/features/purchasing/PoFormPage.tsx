@@ -20,8 +20,9 @@ import { MaterialDialog } from '../inventory/MasterTab';
 import { SimRule } from '../inventory/parts';
 import { useInvSettings, useMaterials, useSuppliers } from '../inventory/queries';
 import { CompareChip } from './parts';
+import { PriceHistoryButton } from './PriceHistory';
 import { useOpenLines } from '../requests/queries';
-import { useBaseline, useInvalidateAll, usePo } from './queries';
+import { useBaseline, useInvalidateAll, usePo, usePurchaseRules } from './queries';
 
 interface Line {
   key: string;
@@ -124,6 +125,11 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
   const [orderDate, setOrderDate] = useState(existing?.orderDate ?? session.calendarToday);
   const [expectedDate, setExpectedDate] = useState(existing?.expectedDate ?? '');
   const [note, setNote] = useState(existing?.note ?? '');
+  // 采购途径（v0.7.29，E1）：新建按供应商的默认带出，没设的按采购规则的第一项；人选过就不再跟着供应商变
+  const purchaseRules = usePurchaseRules();
+  const [channel, setChannel] = useState(existing?.channel?.key ?? '');
+  const [channelNote, setChannelNote] = useState(existing?.channel?.note ?? '');
+  const [channelTouched, setChannelTouched] = useState(!!existing?.channel);
   const [lines, setLines] = useState<Line[]>(existing ? linesFrom(existing) : []);
   const [approveNow, setApproveNow] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: 'edit' });
@@ -155,6 +161,16 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
   });
   const locked = phase.kind !== 'edit';
   const hasReceipts = lines.some((l) => l.receivedMilli > 0);
+  const channels = purchaseRules.data?.channels ?? [];
+  const supplierDefault = suppliers.data?.find((s) => s.id === supplierId)?.defaultChannel ?? null;
+  useEffect(() => {
+    if (channelTouched || channels.length === 0) return;
+    const next = channels.some((c) => c.key === supplierDefault) ? supplierDefault! : channels[0]!.key;
+    if (next !== channel) setChannel(next);
+  }, [channelTouched, channels, supplierDefault, channel]);
+  const channelDef = channels.find((c) => c.key === channel);
+  // 要写说明的途径必须写；选的就是这家供应商档案的默认途径时选填（档案已经说明在哪买，与服务端一致）
+  const noteRequired = !!channelDef?.needsNote && channelDef.key !== supplierDefault;
 
   // 常用该供应商的物料排在前面
   const materials = useMemo(() => {
@@ -256,6 +272,8 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
     ? `还有 ${unmatched.length} 行新产品没选物料`
     : !supplierId
     ? '请选择供应商'
+    : noteRequired && channelNote.trim().length < 2
+    ? `采购途径选了「${channelDef!.label}」，请写明在哪买的`
     : rows.length === 0
       ? '请至少添加一项物料'
       : rows.some((r) => r.err)
@@ -271,6 +289,7 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
     orderDate,
     expectedDate: expectedDate || null,
     note: note.trim(),
+    ...(channelDef ? { channel: channelDef.key, channelNote: channelNote.trim() } : {}),
     action,
     approveNow: action === 'submit' && needsApproval && approveNow,
     lines: rows.map((r) => ({
@@ -376,6 +395,37 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
                 {settings.data?.priceBasis ?? '—'} <SimRule>待确认</SimRule>
               </p>
             </Field>
+            <Field label="采购途径" htmlFor="po-channel" hint={channelTouched ? undefined : '按供应商的默认带出，可改'}>
+              <Select
+                id="po-channel"
+                value={channel}
+                disabled={locked || channels.length === 0}
+                onChange={(e) => {
+                  setChannel(e.target.value);
+                  setChannelTouched(true);
+                }}
+                data-testid="po-channel"
+              >
+                {channels.length === 0 && <option value="">{existing?.channel?.label ?? '读取中…'}</option>}
+                {channels.map((c) => (
+                  <option key={c.key} value={c.key}>
+                    {c.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="途径说明" htmlFor="po-channel-note" className="sm:col-span-1 lg:col-span-3" hint={noteRequired ? '必填：档口、平台与店铺、门店名' : channelDef?.needsNote ? '选填：这家供应商的默认途径' : '选填'}>
+              <Input
+                id="po-channel-note"
+                value={channelNote}
+                maxLength={60}
+                disabled={locked}
+                onChange={(e) => setChannelNote(e.target.value)}
+                placeholder={channelDef?.needsNote ? '例如：某某批发市场 3 号档、某平台某某旗舰店' : '可选'}
+                className="h-10"
+                data-testid="po-channel-note"
+              />
+            </Field>
             <Field label="备注" htmlFor="po-note" className="sm:col-span-2 lg:col-span-4">
               <Input id="po-note" value={note} maxLength={200} disabled={locked} onChange={(e) => setNote(e.target.value)} placeholder="例如：需求来源、送货要求" className="h-10" />
             </Field>
@@ -472,7 +522,21 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
             )}
           </section>
 
-          {error && <Notice tone="error" title={error} icon={<CircleAlert className="size-5" />}>内容仍保留在页面上，可修改后再提交。</Notice>}
+          {error && (
+            <Notice tone="error" title={error} icon={<CircleAlert className="size-5" />}>
+              内容仍保留在页面上，可修改后再提交。
+              {error.includes('询价门槛') && (
+                <>
+                  {' '}
+                  可以先点「保存草稿」，再到
+                  <Link to="/purchasing/sourcing" className="mx-1 font-bold text-lake underline">
+                    询价比价
+                  </Link>
+                  建询价单。
+                </>
+              )}
+            </Notice>
+          )}
           {phase.kind === 'uncertain' && (
             <Notice
               tone="warning"
@@ -615,8 +679,9 @@ function PoLineRow({
         <p className="mt-1 text-right text-[11.5px] text-ink-3">{priceLocked ? '已有收货，单价锁定' : `元 / ${l.purchaseUnit}`}</p>
       </div>
       <div className="text-right @4xl:pt-2">{row.amount !== null ? <Money cents={row.amount} className="text-[15px] font-bold" /> : <span className="text-ink-4">—</span>}</div>
-      <div className="@4xl:pt-2.5">
-        <CompareChip compare={compare} unit={l.purchaseUnit} />
+      <div className="flex items-start gap-1 @4xl:pt-1">
+        <CompareChip compare={compare} unit={l.purchaseUnit} className="pt-1.5" />
+        <PriceHistoryButton materialId={l.materialId} name={m?.name ?? '物料'} />
       </div>
       <span className="hidden justify-self-end @4xl:block">
         {onRemove && (

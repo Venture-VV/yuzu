@@ -5,7 +5,13 @@ import { defineConfig, devices } from '@playwright/test';
 // 演示数据场景块的核对（v0.7.18）只在 demo-prepare 准备好的演示库上跑：设了 E2E_DEMO_SHOWCASE 才收这个文件（CI「演示数据」job），
 // 平时的浏览器验收（只灌五块演示数据）不收，用例总数也不算它
 const DEMO_SHOWCASE = 'demo-showcase.spec.ts';
-const testIgnore = process.env.E2E_DEMO_SHOWCASE ? [] : [`**/${DEMO_SHOWCASE}`];
+// 退储值「门店系统原路退回」（v0.7.29）要应用开着小程序端口与模拟微信支付（MP_PORT、MP_GATEWAY_KEY、MP_PAY_MOCK=true）：
+// 设了 E2E_MP_PORT、E2E_MP_GATEWAY_KEY（与应用的相同）才收这个文件，平时的浏览器验收不收、用例总数也不算它
+const MP_REFUND_ONLINE = 'member-refund-online.spec.ts';
+const testIgnore = [
+  ...(process.env.E2E_DEMO_SHOWCASE ? [] : [`**/${DEMO_SHOWCASE}`]),
+  ...(process.env.E2E_MP_PORT && process.env.E2E_MP_GATEWAY_KEY ? [] : [`**/${MP_REFUND_ONLINE}`]),
+];
 
 export default defineConfig({
   testDir: 'e2e',

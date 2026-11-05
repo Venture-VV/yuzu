@@ -16,6 +16,7 @@ import { AFTER_DESIGNATED_LABELS, AFTER_ROTATION_LABELS, DEFAULT_CLOCKROOM_RULES
 import { DEFAULT_DINING_RULES } from '@shared/dining';
 import { DEFAULT_ROOM_RULES } from '@shared/rooms';
 import { formatYuan } from '@shared/money';
+import { DEFAULT_PURCHASE_RULES } from '@shared/purchasing';
 import {
   ALL_PERMISSIONS,
   can,
@@ -51,6 +52,7 @@ import {
 import { DEFAULT_SETTINGS, loadSettings, SETTINGS_KEYS } from './settings';
 import { loadTechnicianRules } from './technicians';
 import { loadClockroomRules } from './clockroom';
+import { loadPurchaseRules } from './inventory/purchase-rules';
 import { commissionSettings } from './commission';
 import { loadDiningRules } from './dining';
 import { loadRoomRules } from './rooms';
@@ -92,6 +94,7 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   const fd = await loadFrontdeskRules(db);
   const fdd: FrontdeskRules = DEFAULT_FRONTDESK_RULES;
   const inv = await loadInventorySettings(db);
+  const pr = await loadPurchaseRules(db);
   const tech = await loadTechnicianRules(db);
   const techd = DEFAULT_TECHNICIAN_RULES;
   const overrides = await loadRoleOverrides(db);
@@ -342,6 +345,26 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
     hint: '挂账供应商在档案里选「月结」或「按批次」；对完账在「货款 → 对账」登记',
     current: [inv.monthlyReconDay, inv.monthlyReconGraceDays, inv.batchReconGraceDays],
     dflt: [cyc.monthlyReconDay, cyc.monthlyReconGraceDays, cyc.batchReconGraceDays], metaKey: 'inventory_cycle_rules',
+  });
+  // 采购规则（v0.7.29 ERP 采购五项，docs/ERP_PURCHASING.md）：存成一条 purchase_rules
+  const prd = DEFAULT_PURCHASE_RULES;
+  const channelText = (r: typeof pr) => r.channels.map((c) => (c.needsNote ? `${c.label}（写说明）` : c.label)).join('、');
+  add({
+    key: 'purchase_rules.channels', group: 'inventory', label: '采购途径', value: channelText(pr), defaultValue: channelText(prd), pending: true, section: 'rules',
+    hint: '采购单、报销单记在哪买的；供应商档案可设默认途径。在 ERP「模块设置 → 采购规则」里改',
+    current: pr.channels, dflt: prd.channels, metaKey: 'purchase_rules',
+  });
+  const quoteText = (r: typeof pr) => (r.quoteThresholdCents > 0 ? `${formatYuan(r.quoteThresholdCents)} 及以上要询价比价，至少 ${r.minQuotes} 家报价` : '不要求询价比价');
+  add({
+    key: 'purchase_rules.quotes', group: 'inventory', label: '询价比价门槛', value: quoteText(pr), defaultValue: quoteText(prd), pending: true, section: 'rules',
+    hint: '合计到门槛的采购单第一次提交时要来自已定标的询价单；只有一家报价的标单一来源、由负责人定标；补单与改版不拦',
+    current: [pr.quoteThresholdCents, pr.minQuotes], dflt: [prd.quoteThresholdCents, prd.minQuotes], metaKey: 'purchase_rules',
+  });
+  const replText = (r: typeof pr) => `可用天数少于 ${r.reorderDays} 天（物料设了提醒天数按物料的）就建议补，补到 ${r.targetDays} 天`;
+  add({
+    key: 'purchase_rules.replenish', group: 'inventory', label: '补货建议', value: replText(pr), defaultValue: replText(prd), pending: true, section: 'rules',
+    hint: '只看总仓；在途（没到的采购单）算进去；按采购单位向上取整',
+    current: [pr.reorderDays, pr.targetDays], dflt: [prd.reorderDays, prd.targetDays], metaKey: 'purchase_rules',
   });
   // ── 岗位与权限 ──
   const changed = overrideCount(overrides);
