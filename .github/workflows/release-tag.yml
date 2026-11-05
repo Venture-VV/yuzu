@@ -1,6 +1,11 @@
 # 版本标签：main 上的 CI 通过后，按 package.json 的版本号创建 vX.Y.Z 标签（已有同名标签时跳过）。
 # 发版只需在 PR 里改版本号；合并到 main、CI 通过后自动打标签，部署脚本 scripts/update.sh 按标签更新。
-# 也可以在 Actions 页面手动运行，给当前 main 补打标签。
+#
+# 也可以在 Actions 页面手动运行（「版本标签」→ Run workflow）：
+# - 什么都不填：按当前 main 的版本号给当前 main 补打标签（原来的用法）；
+# - 填「版本号」（例如 v0.7.24）：补打以前漏掉的标签，自动找 main 上这个版本号第一次出现的提交（发版合并提交）；
+# - 再填「提交」：打在指定的提交上——必须在 main 上、且那个提交的 package.json 版本号就是填的版本号，否则不打。
+# 云端开发会话推不了标签（Claude Code 的 GitHub 代理只放行分支推送），漏打的标签用这里补（v0.7.30 加）。
 name: 版本标签
 
 on:
@@ -9,6 +14,15 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
+    inputs:
+      version:
+        description: 补打哪个版本号（例如 v0.7.24）；不填就按当前 main 的版本号打在当前 main 上
+        required: false
+        default: ''
+      commit:
+        description: 打在哪个提交上（可不填：自动找 main 上这个版本号第一次出现的提交）
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -20,25 +34,75 @@ concurrency:
 jobs:
   tag:
     name: 按 package.json 版本号打标签
-    # 只给 main 上推送后 CI 通过的提交打标签（PR 上的 CI 不触发）
+    # 只给 main 上推送后 CI 通过的提交打标签（PR 上的 CI 不触发）；手动运行时按填的内容核对后再打
     if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
       SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      INPUT_VERSION: ${{ github.event.inputs.version }}
+      INPUT_COMMIT: ${{ github.event.inputs.commit }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.SHA }}
+          # 补打旧版本要在 main 的历史里找提交
+          fetch-depth: 0
       - name: 创建缺少的版本标签
         run: |
-          tag="v$(node -p "require('./package.json').version")"
+          set -euo pipefail
+          version_at() {
+            git show "$1:package.json" | node -e 'let s="";process.stdin.on("data",(d)=>{s+=d}).on("end",()=>{console.log(JSON.parse(s).version)})'
+          }
+          if [ -z "${INPUT_VERSION}" ]; then
+            if [ -n "${INPUT_COMMIT}" ]; then
+              echo "只填了提交没填版本号：请同时填版本号（例如 v0.7.24）"
+              exit 1
+            fi
+            sha="${SHA}"
+          else
+            want="${INPUT_VERSION#v}"
+            if ! [[ "${want}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "版本号格式不对：${INPUT_VERSION}（应为 v0.7.24 这样）"
+              exit 1
+            fi
+            git fetch --quiet origin main
+            if [ -n "${INPUT_COMMIT}" ]; then
+              if ! sha="$(git rev-parse --verify --quiet "${INPUT_COMMIT}^{commit}")"; then
+                echo "找不到提交 ${INPUT_COMMIT}"
+                exit 1
+              fi
+            else
+              # main 的主线上改过 package.json 的提交里，第一个版本号等于要补的版本号的（即发版的合并提交）
+              sha=""
+              for c in $(git rev-list --first-parent --reverse origin/main -- package.json); do
+                if [ "$(version_at "${c}")" = "${want}" ]; then
+                  sha="${c}"
+                  break
+                fi
+              done
+              if [ -z "${sha}" ]; then
+                echo "main 上找不到 package.json 版本号是 ${want} 的提交，不打标签"
+                exit 1
+              fi
+            fi
+          fi
+          # 只给 main 上的提交打版本标签（手动运行时「Use workflow from」能选别的分支，这里一律核对）
+          if ! git merge-base --is-ancestor "${sha}" origin/main; then
+            echo "提交 ${sha} 不在 main 上，不打标签（只给 main 上的提交打版本标签）"
+            exit 1
+          fi
+          have="$(version_at "${sha}")"
+          if [ -n "${INPUT_VERSION}" ] && [ "${have}" != "${want}" ]; then
+            echo "提交 ${sha} 的 package.json 版本号是 ${have}，不是 ${want}，不打标签"
+            exit 1
+          fi
+          tag="v${have}"
           if [ -n "$(git ls-remote --tags origin "refs/tags/${tag}")" ]; then
             echo "标签 ${tag} 已存在，跳过"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${tag}" -m "浴族 yuzu ${tag}" "${SHA}"
+          git tag -a "${tag}" -m "浴族 yuzu ${tag}" "${sha}"
           git push origin "refs/tags/${tag}"
-          echo "已创建标签 ${tag} → ${SHA}"
+          echo "已创建标签 ${tag} → ${sha}"

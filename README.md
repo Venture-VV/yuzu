@@ -256,7 +256,7 @@ docker compose exec app node dist/server/cli.js reset-password boss
 
 **看门狗**：`./scripts/watchdog.sh` 由宿主机每 5 分钟运行一次，检查应用健康（连续 3 次失败自动重启）、备份服务、备份新鲜度与核验结果、外置盘与磁盘空间、异地副本是否跟上，异常推到企业微信群（`.env` 的 `WECOM_WEBHOOK_URL`），见部署手册 3.2。
 
-版本标签：合并到 main、CI 通过后，GitHub Actions「版本标签」按 `package.json` 的版本号自动创建 `vX.Y.Z`（已有同名标签时跳过；也可在 Actions 页面手动运行补打）。
+版本标签：合并到 main、CI 通过后，GitHub Actions「版本标签」按 `package.json` 的版本号自动创建 `vX.Y.Z`（已有同名标签时跳过）。没打上的可在 Actions 页面「版本标签」→ Run workflow 填版本号（如 `v0.7.24`）补打，自动打在 main 上这个版本号第一次出现的提交（发版合并提交）上；什么都不填就按当前 main 的版本号打在当前 main 上。
 
 **自动备份**：`backup` 服务（与应用同一个镜像）每 `BACKUP_INTERVAL_MINUTES` 分钟（默认 60）做一次完整备份（`pg_dump` 自定义格式），写入 `BACKUP_DIR`。每份导出后都在临时库里完整恢复一遍、跑自检并算数据指纹，结果写在备份旁同名的 `.json` 里，然后删掉临时库。每天 `BACKUP_HOUR` 点之后的第一份记为 daily。hourly 保留 `BACKUP_HOURLY_KEEP_HOURS` 小时（默认 48），daily、升级前、恢复前与手动备份保留 `BACKUP_KEEP_DAYS` 天（默认 30）。请把 `BACKUP_DIR` 指向外置硬盘或另一块磁盘，设 `BACKUP_REQUIRE_SENTINEL=true` 并在目录里放空文件 `.yuzu-backup-target`：外置盘没挂载时不备份、不往内置盘写。店外副本有两处，都用 age 公钥加密：每天的备份上传阿里云 OSS（保留 180 天，部署手册第 9 节）；每一份备份由 `./scripts/offsite-copy.sh` 在 15 分钟内经 Tailscale 传到云服务器 A（保留 7 天，第 9.8 节）。
 

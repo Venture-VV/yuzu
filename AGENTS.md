@@ -91,7 +91,7 @@ E2E_MP_PORT=… E2E_MP_GATEWAY_KEY=… E2E_BASE_URL=… npx playwright test e2e/
   - **评论开头写身份**：【主线·开发】【小程序线·开发】【主线·测试】【小程序线·测试】；末尾署名照下面。
   - **合并顺序**：被依赖的先合，其余先好先合（CI 全绿、没有阻断项）。后合的一方把 `main` 合进来、解决冲突、CI 全绿再交店主；登记处（`app.ts`、权限表、路由表、审计动作、后台分区）两边都加了行的两边都留。小程序线不改版本号，它合并的代码随主线下一个版本标签一起发。
   - **同一台电脑上测试互不干扰**：两个 Codex 会话用各自的端口与数据库（写在各自的本地配置里，不进仓库），不同时跑全量浏览器验收。
-- 版本标签由 CI 自动创建：main 上的 CI 通过后，`.github/workflows/release-tag.yml` 按 `package.json` 的版本号打 `vX.Y.Z`（已有则跳过）。发版时在 PR 里同时改 `package.json`、`package-lock.json`、`Dockerfile`、`compose.yaml` 与 `src/server/config.ts` 里的版本号。正式切换用 1.0.0；在那之前每次发布只加最后一位（v0.7.1、v0.7.2……，店主 2026-10-30 定，见 ROADMAP 第 7 节）。
+- 版本标签由 CI 自动创建：main 上的 CI 通过后，`.github/workflows/release-tag.yml` 按 `package.json` 的版本号打 `vX.Y.Z`（已有则跳过；打在这个版本号下第一次 CI 通过的 main 提交上，发版那次 CI 被紧接着的合并取消时就落在后面那次合并上）。没打上的（CI 没过、Actions 额度用完等）在 Actions 页面「版本标签」→ Run workflow 填版本号补打：自动找 main 上这个版本号第一次出现的提交（发版合并提交），也可以再填提交，核对在 main 上、版本号一致才打（v0.7.30 起）；云端开发会话推不了标签（Claude Code 的 GitHub 代理只放行分支推送）。发版时在 PR 里同时改 `package.json`、`package-lock.json`、`Dockerfile`、`compose.yaml` 与 `src/server/config.ts` 里的版本号。正式切换用 1.0.0；在那之前每次发布只加最后一位（v0.7.1、v0.7.2……，店主 2026-10-30 定，见 ROADMAP 第 7 节）。
 - 部署（测试服、门店实例、正式服）只用 `main` 上的版本标签或完整 SHA（`./scripts/update.sh <标签或 SHA>`），不部署 `claude/*` 等开发分支或未合并的 PR。PR 合并后开发分支可以删除，后续开发从最新 `main` 重新拉分支。
 - 提交信息写清阶段与内容；生成内容不写具体模型版本号。
 - 验收 / 复审评论直接发在对应 PR 上，至少包含：测试 SHA、实际验证范围与环境、未测项（环境缺失记「受阻未测」，不记通过）、问题清单（标 P1 / P2，附复现步骤与位置）。账错、串单、越权、数据丢失、重复扣款或破坏旧模块自检为阻断项。
