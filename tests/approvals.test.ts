@@ -385,6 +385,67 @@ describe('批量同意（A5）与规则维护', () => {
   });
 });
 
+describe('Codex 自动审查 2cfd28b：新建规则与设代理人的「结果待确认」、模块开关', () => {
+  it('新建规则、设代理人：按操作编号查回；已建好的不能作废；先作废的原请求晚到也不登记（OP_ABANDONED）；作废按原业务的权限', async () => {
+    const body = { docType: 'damage', minCents: 900_000, maxCents: 900_001, steps: [{ group: 'owner' }], note: '结果待确认' };
+    const key = randomUUID();
+    const created = await api(ctx.app, boss, 'POST', '/api/approvals/rules', { clientKey: key, ...body });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    expect((await api(ctx.app, boss, 'GET', `/api/erp/ops/${key}?type=approval_rule`)).body).toMatchObject({ found: true, abandoned: false, refId: created.body.id });
+    // 已经建好的编号：作废只返回查回结果，规则照旧在
+    expect((await api(ctx.app, boss, 'POST', `/api/erp/ops/${key}/abandon`, { type: 'approval_rule' })).body).toMatchObject({ found: true, abandoned: false });
+    // 没收到结果、在服务端确认作废之后，原请求才到：整笔拒绝，不多建一条
+    const lost = randomUUID();
+    expect((await api(ctx.app, boss, 'POST', `/api/erp/ops/${lost}/abandon`, { type: 'approval_rule' })).body).toMatchObject({ found: false, abandoned: true });
+    const late = await api(ctx.app, boss, 'POST', '/api/approvals/rules', { clientKey: lost, ...body });
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('OP_ABANDONED');
+    expect((await ctx.sql`SELECT 1 FROM approval_rules WHERE client_key = ${lost}`).length).toBe(0);
+    // 作废要有原业务的权限：负责人不能作废「新建审批规则」
+    expect((await api(ctx.app, mgrA, 'POST', `/api/erp/ops/${randomUUID()}/abandon`, { type: 'approval_rule' })).status).toBe(403);
+    // 设代理人同一套：作废后原请求晚到也不会悄悄生效
+    const dKey = randomUUID();
+    expect((await api(ctx.app, mgrA, 'POST', `/api/erp/ops/${dKey}/abandon`, { type: 'approval_delegation' })).body).toMatchObject({ found: false, abandoned: true });
+    const lateDelegation = await api(ctx.app, mgrA, 'POST', '/api/approvals/delegations', { clientKey: dKey, staffId: ids.mgr_a, delegateId: ids.mgr_b, startsOn: today, endsOn: today, reason: '' });
+    expect(lateDelegation.body.error.code).toBe('OP_ABANDONED');
+    expect((await ctx.sql`SELECT 1 FROM approval_delegations WHERE client_key = ${dKey}`).length).toBe(0);
+    const okKey = randomUUID();
+    const delegation = await api(ctx.app, mgrA, 'POST', '/api/approvals/delegations', { clientKey: okKey, staffId: ids.mgr_a, delegateId: ids.mgr_b, startsOn: today, endsOn: today, reason: '' });
+    expect(delegation.status, JSON.stringify(delegation.body)).toBe(201);
+    expect((await api(ctx.app, mgrA, 'GET', `/api/erp/ops/${okKey}?type=approval_delegation`)).body).toMatchObject({ found: true, refId: delegation.body.id });
+    expect((await api(ctx.app, mgrA, 'POST', `/api/approvals/delegations/${delegation.body.id}/revoke`, {})).status).toBe(200);
+    await deactivate({ id: created.body.id, version: 1 });
+  });
+
+  it('单据所属的 ERP 模块关着时，审批中心不列、不给看、不能审（单张与批量都拒绝 ERP_MODULE_DISABLED）；开回来照常', async () => {
+    const p = await payment(2_600);
+    expect(p.status).toBe('submitted');
+    const rid = p.approval!.requestId;
+    const switchPayables = async (on: boolean) => expect((await api(ctx.app, boss, 'PUT', '/api/erp/modules', { modules: { payables: on } })).status).toBe(200);
+    await switchPayables(false);
+    try {
+      // 原来的接口拒绝
+      expect((await api(ctx.app, payer, 'GET', `/api/payables/payments/${p.id}`)).body.error.code).toBe('ERP_MODULE_DISABLED');
+      // 审批中心：不列、不给看、不能审
+      for (const tab of ['mine', 'all']) {
+        const cards = (await api(ctx.app, boss, 'GET', `/api/approvals?tab=${tab}`)).body as { id: number }[];
+        expect(cards.some((c) => c.id === rid), tab).toBe(false);
+      }
+      expect((await api(ctx.app, boss, 'GET', `/api/approvals/${rid}`)).body.error.code).toBe('ERP_MODULE_DISABLED');
+      const one = await approve(mgrA, rid, 1);
+      expect(one.status).toBe(403);
+      expect(one.body.error.code).toBe('ERP_MODULE_DISABLED');
+      expect((await api(ctx.app, mgrA, 'POST', `/api/approvals/${rid}/return`, { level: 1, reason: '模块关着' })).body.error.code).toBe('ERP_MODULE_DISABLED');
+      const batch = await api(ctx.app, mgrA, 'POST', '/api/approvals/batch-approve', { items: [{ id: rid, level: 1 }] });
+      expect(batch.body.results[0]).toMatchObject({ ok: false, code: 'ERP_MODULE_DISABLED' });
+      expect((await ctx.sql<{ status: string }[]>`SELECT status FROM payments WHERE id = ${p.id}`)[0]?.status).toBe('submitted');
+    } finally {
+      await switchPayables(true);
+    }
+    expect((await approve(mgrA, rid, 1)).body.status).toBe('approved');
+  });
+});
+
 describe('盘点差异审批（A8）、急采待补单（A10）、数据隔离（A9）', () => {
   it('总仓盘点的大差异要写原因类别与说明才能提交；提交后在审批中心看到账面、实盘、差异、比例与原因', async () => {
     const stock = (await api(ctx.app, keeper, 'GET', `/api/inventory/materials/${mat.id}`)).body.stockMilli as number;

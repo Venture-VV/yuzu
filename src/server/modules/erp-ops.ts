@@ -16,7 +16,7 @@ import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { conflict, forbidden } from '../lib/errors';
-import { benefitUseOpRef, countCardOpRef, memberCardOpRef, couponOpRef, platformOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isCountCardOp, isDeviceOp, isFenced, isMemberOp, isPlatformOp, memberOpRef, trialOpRef } from '../lib/fences';
+import { approvalOpRef, benefitUseOpRef, countCardOpRef, memberCardOpRef, couponOpRef, platformOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isCountCardOp, isApprovalOp, isDeviceOp, isFenced, isMemberOp, isPlatformOp, memberOpRef, trialOpRef } from '../lib/fences';
 import { parse } from '../lib/validate';
 import { setTxTimeouts } from '../lib/tx';
 
@@ -69,6 +69,9 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   doc_print: ['print.network'],
   // 会员实体卡（v0.7.28）
   member_card: ['member.card'],
+  // 审批中心（v0.7.30）：新建审批规则要「维护审批规则」；设代理人与接口一致（能进审批中心的）
+  approval_rule: ['approval.rules'],
+  approval_delegation: ['approval.act', 'inventory.approve', 'expense.approve'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -103,6 +106,8 @@ const READ: Record<ErpOpType, Permission[]> = {
   platform_settlement: ['platform.settle'],
   doc_print: ['print.network'],
   member_card: ['member.card', 'member.read'],
+  approval_rule: ['approval.rules'],
+  approval_delegation: ['approval.act', 'inventory.approve', 'expense.approve'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {
@@ -164,6 +169,11 @@ export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise
   // 会员实体卡（v0.7.28）：refId 是那张卡
   if (type === 'member_card') {
     const refId = await memberCardOpRef(db, key);
+    if (refId !== null) return { found: true, abandoned: false, refId };
+  }
+  // 审批中心（v0.7.30）：refId 是那条审批规则、那条代理设置
+  if (isApprovalOp(type)) {
+    const refId = await approvalOpRef(db, key, type);
     if (refId !== null) return { found: true, abandoned: false, refId };
   }
   return { found: false, abandoned: await isFenced(db, key, [type]) };

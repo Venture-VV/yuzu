@@ -219,6 +219,9 @@ export const ERP_OP_TYPES = [
   'doc_print',
   // 会员实体卡：发卡、补卡（v0.7.28）
   'member_card',
+  // 审批中心（v0.7.30）：新建审批规则、设代理人（Codex 自动审查 2cfd28b：没收到结果时刷新、关掉对话框后也要能查回、重提或作废）
+  'approval_rule',
+  'approval_delegation',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -253,6 +256,8 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   platform_settlement: '平台打款登记',
   doc_print: '打印单据',
   member_card: '发卡、补卡',
+  approval_rule: '新建审批规则',
+  approval_delegation: '设代理人',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

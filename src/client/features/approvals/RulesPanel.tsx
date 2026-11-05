@@ -1,5 +1,7 @@
 // 审批规则（v0.7.30，A1、A2、A3）：单据类型 × 金额区间（含下限、不含上限）× 部门 → 一到三级审批链；
 // 店主（维护审批规则）新建、修改、停用（不删，带版本号）；改规则只影响之后提交的单据。
+// 新建走「结果待确认」（与 ERP 单据一套，Codex 自动审查 2cfd28b）：发出前把操作编号与原请求存在本机，没收到结果时刷新、关掉对话框后
+// 也能在页面上方查回、按原内容重新提交（同一编号，不会多建一条）或确认作废；修改、停用带版本号，没收到结果再保存会被拒绝，不会改两次。
 
 import { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
@@ -17,10 +19,12 @@ import {
   type ApprovalStep,
 } from '@shared/approvals';
 import { formatAmount } from '@shared/money';
-import { api, errorMessage } from '../../lib/api';
-import { useCan } from '../../lib/session';
+import { api, errorMessage, UncertainError } from '../../lib/api';
+import { sendErpOp, useErpPending } from '../../lib/erpPending';
+import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { cn } from '../../lib/utils';
+import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Field, Input, MoneyInput, Notice, Segmented, Select, Skeleton } from '../../components/ui';
@@ -31,11 +35,15 @@ const yuanText = (cents: number) => `¥${formatAmount(cents)}`;
 export const rangeText = (r: Pick<ApprovalRuleView, 'minCents' | 'maxCents'>) =>
   r.maxCents === null ? (r.minCents === 0 ? '任何金额' : `${yuanText(r.minCents)} 起`) : `${yuanText(r.minCents)} 到 ${yuanText(r.maxCents)}（不含）`;
 
+const RULE_PENDING = ['approval_rule'] as const;
+
 export function RulesPanel() {
   const can = useCan();
   const manage = can('approval.rules');
   const rules = useApprovalRules();
   const refresh = useRefreshAfterApproval();
+  // 新建的结果待确认时先处理那一笔（查回、重提或作废），免得同一条规则建两条
+  const pendingNew = useErpPending(RULE_PENDING).length > 0;
   const toast = useToast();
   const [editing, setEditing] = useState<ApprovalRuleView | 'new' | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
@@ -56,10 +64,14 @@ export function RulesPanel() {
       <Notice tone="info" title="没有规则命中时按现在的「负责人确认」开关与免确认门槛（默认规则：一级负责人）">
         命中时取最具体的一条：指定了部门的优先，其次金额下限高的，再其次后建的。改规则只影响之后提交的单据，已在审批中的照提交时的审批链走完。店主在每一级都能审。
       </Notice>
+      <ErpPendingPanel types={RULE_PENDING} className="space-y-2" onFound={() => void refresh()} />
       {manage && (
-        <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setEditing('new')} data-testid="approval-rule-new">
-          新建规则
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setEditing('new')} disabled={pendingNew} data-testid="approval-rule-new">
+            新建规则
+          </Button>
+          {pendingNew && <span className="text-[12.5px] text-ink-3">先处理上面「结果待确认」那一笔</span>}
+        </div>
       )}
       {rules.error ? (
         <Notice tone="error" title={errorMessage(rules.error)} />
@@ -126,6 +138,7 @@ function RuleDialog({ rule, open, onClose }: { rule: ApprovalRuleView | null; op
   const approvers = useApprovers(open);
   const refresh = useRefreshAfterApproval();
   const toast = useToast();
+  const session = useSession();
   const [clientKey, setClientKey] = useState(() => crypto.randomUUID());
   const [docType, setDocType] = useState<ApprovalDocType>('purchase_order');
   const [min, setMin] = useState('');
@@ -159,12 +172,28 @@ function RuleDialog({ rule, open, onClose }: { rule: ApprovalRuleView | null; op
     setError(null);
     try {
       if (rule) await api.put(`/api/approvals/rules/${rule.id}`, { ...body, version: rule.version });
-      else await api.post('/api/approvals/rules', { ...body, clientKey });
+      else
+        await sendErpOp({
+          key: clientKey,
+          type: 'approval_rule',
+          url: '/api/approvals/rules',
+          body: { ...body, clientKey },
+          summary: `${APPROVAL_DOC_TYPE_LABELS[docType]} · ${rangeText({ minCents, maxCents })}${note.trim() ? ` · ${note.trim()}` : ''}`,
+          staffName: session.staff.displayName,
+        });
       toast({ tone: 'success', title: rule ? '规则已修改' : '规则已建好', body: '之后提交的单据按新规则走' });
       await refresh();
       onClose();
     } catch (e) {
-      setError(errorMessage(e));
+      if (e instanceof UncertainError && !rule) {
+        // 新建没收到结果：记录留在本机，到页面上方处理
+        toast({ tone: 'info', title: '新建审批规则：没收到结果', body: '可能已经建好。记录留在本机，到页面上方查回、按原内容重新提交（不会多建一条）或确认作废' });
+        void refresh();
+        onClose();
+      } else {
+        // 修改没收到结果：再保存时版本号对不上会被拒绝（不会改两次），关掉后看列表里的版本核对
+        setError(e instanceof UncertainError ? `${e.message}，不确定有没有改上：关掉后看列表里的版本核对，再改` : errorMessage(e));
+      }
     } finally {
       setBusy(false);
     }

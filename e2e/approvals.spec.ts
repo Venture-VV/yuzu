@@ -1,7 +1,8 @@
 // v0.7.30 审批中心的浏览器验收（docs/APPROVALS.md）：
 //   ① 店主在「审批规则」里建两级规则（负责人 → 店主），对账付款登记一笔命中的付款；店主在手机尺寸的审批中心逐级同意，第二级同意后付款生效；
 //   ② 批量同意：勾两张同一种、不超过 ¥5,000 的付款一起同意；
-//   ③ 盘点大差异：没写原因不能提交，写了原因提交后进审批中心，详情里看到账面、实盘、差异与原因。
+//   ③ 新建规则没收到结果（Codex 自动审查 2cfd28b）：回复丢了的自动查回、只建一条；请求没发出去的记在「结果待确认」，按原内容重新提交只建一条；
+//   ④ 盘点大差异：没写原因不能提交，写了原因提交后进审批中心，详情里看到账面、实盘、差异与原因。
 // 依赖演示数据（只在独立演示库）；账号：店主 linlan、对账付款 qianfen，密码 yuzu2026。会登记单据，只在门店电脑尺寸执行。
 // 规则用一个别的用例碰不到的金额区间，用完停用，不影响其他用例的默认规则。
 import { randomUUID } from 'node:crypto';
@@ -117,6 +118,57 @@ test.describe('审批中心（v0.7.30）', () => {
     await expect(result).not.toContainText('没成功');
     for (const p of [a, b]) {
       expect(((await (await page.request.get(`/api/payables/payments/${p.id}`)).json()) as { status: string }).status).toBe('confirmed');
+    }
+  });
+
+  test('新建规则没收到结果：回复丢了的自动查回、只建一条；请求没发出去的记在「结果待确认」、先不能再建，刷新后按原内容重新提交只建一条', async ({ page }) => {
+    await login(page, 'linlan');
+    await page.goto('/approvals?tab=rules');
+    const stamp = Date.now();
+    const rulesNamed = async (note: string) =>
+      ((await (await page.request.get('/api/approvals/rules')).json()) as { id: number; version: number; note: string }[]).filter((r) => r.note === note);
+    const fill = async (note: string, min: string) => {
+      await page.getByTestId('approval-rule-new').click();
+      await page.getByTestId('approval-rule-doctype').selectOption('damage');
+      await page.getByTestId('approval-rule-min').fill(min);
+      await page.locator('#rule-max').fill(String(Number(min) + 1));
+      await page.locator('#rule-note').fill(note);
+      await page.getByTestId('approval-rule-save').click();
+    };
+    const lost = `E2E 回复丢了 ${stamp}`;
+    const offline = `E2E 没发出去 ${stamp}`;
+    try {
+      // ① 请求到了服务端、规则建好了，只是回复丢了（服务器出错）：页面记下这笔并马上查回，查到已建好，不用再填
+      await page.route('**/api/approvals/rules', async (route) => {
+        if (route.request().method() !== 'POST') return route.continue();
+        await route.fetch();
+        await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL', message: '模拟：回复丢了' } }) });
+      });
+      await fill(lost, '77777');
+      await expect(page.getByText('新建审批规则：没收到结果').first()).toBeVisible();
+      await expect(page.getByText('已查回：新建审批规则已登记').first()).toBeVisible();
+      await expect(page.getByTestId('erp-pending')).toHaveCount(0);
+      expect(await rulesNamed(lost)).toHaveLength(1);
+      await page.unroute('**/api/approvals/rules');
+
+      // ② 请求没发出去（断网）：记在「结果待确认」，刷新后还在；先处理这一笔才能再建；按原内容重新提交只建一条
+      await page.route('**/api/approvals/rules', (route) => (route.request().method() === 'POST' ? route.abort('internetdisconnected') : route.continue()));
+      await fill(offline, '66666');
+      await expect(page.getByText('新建审批规则：没收到结果').first()).toBeVisible();
+      await expect(page.getByTestId('erp-pending')).toContainText('新建审批规则');
+      await expect(page.getByTestId('approval-rule-new')).toBeDisabled();
+      await page.unroute('**/api/approvals/rules');
+      await page.reload();
+      await expect(page.getByTestId('erp-pending')).toContainText('新建审批规则');
+      expect(await rulesNamed(offline)).toHaveLength(0);
+      await page.getByTestId('erp-pending-resend').click();
+      await expect(page.getByTestId('erp-pending')).toHaveCount(0);
+      await expect(page.getByTestId('approval-rule-new')).toBeEnabled();
+      expect(await rulesNamed(offline)).toHaveLength(1);
+    } finally {
+      for (const note of [lost, offline]) {
+        for (const r of await rulesNamed(note)) await page.request.post(`/api/approvals/rules/${r.id}/active`, { data: { version: r.version, active: false } });
+      }
     }
   });
 

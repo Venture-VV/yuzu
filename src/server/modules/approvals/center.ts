@@ -2,6 +2,7 @@
 // 导航上的数字（含超时）、急采待补单（超过 3 天，A10）。只读，不加锁。
 
 import {
+  APPROVAL_DOC_KINDS,
   APPROVAL_DOC_TYPE_LABELS,
   APPROVAL_MODE_LABELS,
   URGENT_BACKFILL_ESCALATE_DAYS,
@@ -18,6 +19,7 @@ import {
   type ApproverSubject,
   type UrgentBackfillItem,
 } from '@shared/approvals';
+import type { ErpModuleKey } from '@shared/erp';
 import { EXPENSE_CATEGORY_LABELS, PAY_SOURCE_LABELS, type ExpenseCategory, type PaySource } from '@shared/expenses';
 import { COUNT_REASON_LABELS, INV_DOC_META, isBigVariance, variancePct, type CountReason, type InvDocType } from '@shared/inventory';
 import { formatAmount } from '@shared/money';
@@ -29,6 +31,7 @@ import type { Db } from '../../db';
 import type { Actor } from '../../lib/context';
 import { todayIn } from '../../lib/dates';
 import { forbidden, notFound } from '../../lib/errors';
+import { enabledErpModules, erpModuleDisabled } from '../erp';
 import { loadInventorySettings } from '../inventory/common';
 import { actionsOf, delegatorsOf, eligibleAt, requiredOf, staffNames, standingOf } from './engine';
 
@@ -219,12 +222,37 @@ async function toCards(db: Db, reqs: RequestRow[], v: Viewer): Promise<ApprovalC
 
 export type ApprovalTab = 'mine' | 'all' | 'submitted';
 
+/**
+ * 单据属于哪个 ERP 模块（Codex 自动审查 2cfd28b）：模块关着时，单据原来的接口一律拒绝（ERP_MODULE_DISABLED），
+ * 审批中心也不列、不给看、不能审，不能借这里绕过模块开关。库存单据跟审批中心本身同依赖库存，能进审批中心就说明库存开着
+ */
+const MODULE_OF_KIND: Record<ApprovalDocKind, ErpModuleKey> = {
+  purchase_order: 'purchasing',
+  inv_doc: 'inventory',
+  payment: 'payables',
+  opening_payable: 'payables',
+  expense_claim: 'expenses',
+};
+
+/** 模块关着的单据种类 */
+export async function closedApprovalKinds(db: Db): Promise<Set<ApprovalDocKind>> {
+  const on = await enabledErpModules(db);
+  return new Set(APPROVAL_DOC_KINDS.filter((k) => !on.has(MODULE_OF_KIND[k])));
+}
+
+/** 这种单据的模块关着：拒绝（与单据原来的接口一样） */
+export async function assertApprovalKindOpen(db: Db, kind: ApprovalDocKind): Promise<void> {
+  if ((await closedApprovalKinds(db)).has(kind)) throw erpModuleDisabled(MODULE_OF_KIND[kind]);
+}
+
 /** 待我审批（含我代理的）、全部在审（负责人与店主看全店）、我提交的（最近 100 张） */
 export async function listApprovals(db: Db, actor: Actor, timeZone: string, tab: ApprovalTab, docType?: ApprovalDocType): Promise<ApprovalCard[]> {
   if (tab === 'all' && !canViewAll(actor)) throw forbidden('「全部在审」给负责人与店主看');
   const v = await viewerOf(db, actor, timeZone);
-  const reqs = tab === 'submitted' ? await loadRequests(db, { submittedBy: actor.id, limit: 100 }) : await loadRequests(db, { pending: true });
-  let cards = await toCards(db, docType ? reqs.filter((r) => r.docType === docType) : reqs, v);
+  const loaded = tab === 'submitted' ? await loadRequests(db, { submittedBy: actor.id, limit: 100 }) : await loadRequests(db, { pending: true });
+  const closed = await closedApprovalKinds(db);
+  const reqs = loaded.filter((r) => !closed.has(r.docKind) && (!docType || r.docType === docType));
+  let cards = await toCards(db, reqs, v);
   if (tab === 'mine') cards = cards.filter((c) => c.canAct);
   if (tab !== 'submitted') {
     // 超时的排在最前，其次等得久的
@@ -402,6 +430,7 @@ async function digestOf(db: Db, kind: ApprovalDocKind, docId: number): Promise<A
 export async function getApprovalDetail(db: Db, actor: Actor, timeZone: string, id: number): Promise<ApprovalDetail> {
   const [req] = await loadRequests(db, { ids: [id] });
   if (!req) throw notFound('审批单不存在');
+  await assertApprovalKindOpen(db, req.docKind);
   const v = await viewerOf(db, actor, timeZone);
   const [card] = await toCards(db, [req], v);
   const actions = (await actionsOf(db, [id])).get(id) ?? [];
@@ -453,6 +482,8 @@ export const yuan = (cents: number) => `¥${formatAmount(cents)}`;
 
 /** 急采收货生效后超过 3 天还没补采购单的（补单后自动消失；补单撤回的回到这里） */
 export async function urgentBackfills(db: Db, timeZone: string): Promise<UrgentBackfillItem[]> {
+  // 补单要开采购单：采购模块关着时不提醒（补不了）
+  if (!(await enabledErpModules(db)).has('purchasing')) return [];
   const today = todayIn(timeZone);
   const rows = await db<{ receiptId: number; docNo: string; departmentName: string | null; supplierName: string | null; amountCents: number; confirmedAt: string; daysOver: number; handlerName: string }[]>`
     SELECT d.id AS receipt_id, d.doc_no, wd.name AS department_name, s.name AS supplier_name, d.amount_cents, d.confirmed_at,

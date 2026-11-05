@@ -83,6 +83,9 @@ export const FENCED_OPS = [
   'doc_print',
   // 会员实体卡（v0.7.28，迁移 057）：发卡、补卡；编号记在卡上（member_cards.client_key）
   'member_card',
+  // 审批中心（v0.7.30，迁移 073）：新建审批规则、设代理人；编号记在各自的行上（client_key）
+  'approval_rule',
+  'approval_delegation',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -132,6 +135,7 @@ export async function fenceKey(
   if (isMemberOp(opType) && (await memberOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   if (isCountCardOp(opType) && (await countCardOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   if (isPlatformOp(opType) && (await platformOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
+  if (isApprovalOp(opType) && (await approvalOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   const rows = await tx`
     INSERT INTO op_fences (key, op_type, staff_id) VALUES (${key}, ${opType}, ${staffId})
     ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;
@@ -150,6 +154,19 @@ export async function couponOpRef(db: Db, key: string, opType: CouponOp): Promis
       : opType === 'coupon_rule'
         ? await db<{ id: number }[]>`SELECT id FROM coupon_rules WHERE client_key = ${key}`
         : await db<{ id: number }[]>`SELECT id FROM coupon_issues WHERE client_key = ${key} AND kind = ${opType === 'coupon_batch' ? 'batch' : 'manual'}`;
+  return rows[0] ? Number(rows[0].id) : null;
+}
+
+const APPROVAL_OPS = ['approval_rule', 'approval_delegation'] as const;
+type ApprovalOp = (typeof APPROVAL_OPS)[number];
+export const isApprovalOp = (op: string): op is ApprovalOp => (APPROVAL_OPS as readonly string[]).includes(op);
+
+/** 审批中心（v0.7.30）的操作编号记在审批规则、代理设置上：查到时返回那一条的编号 */
+export async function approvalOpRef(db: Db, key: string, opType: ApprovalOp): Promise<number | null> {
+  const rows =
+    opType === 'approval_rule'
+      ? await db<{ id: number }[]>`SELECT id FROM approval_rules WHERE client_key = ${key}`
+      : await db<{ id: number }[]>`SELECT id FROM approval_delegations WHERE client_key = ${key}`;
   return rows[0] ? Number(rows[0].id) : null;
 }
 

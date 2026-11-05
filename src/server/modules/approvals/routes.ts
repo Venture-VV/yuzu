@@ -32,7 +32,8 @@ import { writeAudit } from '../../lib/audit';
 import type { Actor, Deps } from '../../lib/context';
 import { daysBetween, todayIn } from '../../lib/dates';
 import { AppError, badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
-import { lockOpKey } from '../../lib/fences';
+import { assertNotFenced } from '../../lib/fences';
+import { erpOpAbandoned } from '../erp-ops';
 import { hashRequest } from '../../lib/idempotency';
 import { setTxTimeouts } from '../../lib/tx';
 import { idParam, parse } from '../../lib/validate';
@@ -40,7 +41,7 @@ import { actOnClaim } from '../expenses';
 import { approveDoc, returnDoc } from '../inventory/docs';
 import { actOnOpening, actOnPayment } from '../inventory/payables';
 import { approvePo, returnPo } from '../inventory/purchasing';
-import { approvalCounts, getApprovalDetail, listApprovals, urgentBackfills, type ApprovalTab } from './center';
+import { approvalCounts, assertApprovalKindOpen, getApprovalDetail, listApprovals, urgentBackfills, type ApprovalTab } from './center';
 import { hasApprovalAccess, staffNames } from './engine';
 
 const id = z.number().int().positive();
@@ -70,6 +71,8 @@ async function requestHead(db: Db, requestId: number): Promise<{ id: number; doc
 /** 按审批单走到单据模块原来的确认、退回（同一段代码，默认规则下与原来的按钮一样） */
 async function actOnRequest(deps: Deps, requestId: number, action: 'approve' | 'return', body: Record<string, unknown>, actor: Actor) {
   const head = await requestHead(deps.sql, requestId);
+  // 单据所属的模块关着：与单据原来的接口一样拒绝（批量同意时这一张单独失败）
+  await assertApprovalKindOpen(deps.sql, head.docKind);
   const raw = { ...body, requestId };
   switch (head.docKind) {
     case 'purchase_order':
@@ -162,7 +165,8 @@ async function createRule(deps: Deps, raw: unknown, actor: Actor, ip?: string) {
   try {
     return await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
-      await lockOpKey(tx, clientKey);
+      // 先取操作编号的咨询锁（与「确认作废」串行），确认这笔没有被作废
+      await assertNotFenced(tx, clientKey, 'approval_rule', erpOpAbandoned);
       const existing = await find(tx);
       if (existing) return { id: existing, replayed: true };
       await checkDepartment(tx, rule.departmentId);
@@ -260,7 +264,7 @@ async function createDelegation(deps: Deps, raw: unknown, actor: Actor, ip?: str
   try {
     return await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
-      await lockOpKey(tx, clientKey);
+      await assertNotFenced(tx, clientKey, 'approval_delegation', erpOpAbandoned);
       const existing = await find(tx);
       if (existing) return { id: existing, replayed: true };
       const people = await tx<{ id: number; displayName: string; role: Role; duties: Duty[] | null; active: boolean }[]>`
