@@ -4,13 +4,9 @@ import { ensureInitialOwner } from './bootstrap';
 import { loadConfig } from './config';
 import { createSql } from './db';
 import { migrate } from './migrate';
-import { sweepExpiredBonus } from './modules/bonus';
-import { sweepBookings } from './modules/bookings';
-import { expireCountCards } from './modules/count-cards';
-import { issueBirthdayCoupons } from './modules/coupons';
+import { runMinuteJobs, type JobLog } from './jobs';
 import { checkDevicesOnce, recoverJobs, resumeWaitingJobs } from './modules/devices';
-import { ensureMembershipLive, runMembershipDaily } from './modules/membership';
-import { runBenefitsDaily, runVisitChallenges } from './modules/benefits';
+import { ensureMembershipLive } from './modules/membership';
 import { HEARTBEAT_INTERVAL_MS } from '@shared/devices';
 import { holdAppPresence } from './presence';
 import { buildMpApp } from './modules/mp/app';
@@ -56,64 +52,14 @@ async function main() {
     app.log.info(`小程序端口已开：${config.mp.host}:${config.mp.port}（只给网关）`);
   }
 
-  // 赠金到期作废：启动时先扫描一次，之后每分钟一次（会员记账、打开会员详情时也会先处理这位会员）
+  // 每分钟的自动任务（赠金到期、会员到期处理、权益发放、生日礼、预约、会员挑战、次卡过期，见 jobs.ts）：
+  // 启动时先跑一次，之后每分钟一次；生日礼每 10 分钟查一次
   let lastBirthday = 0;
+  const jobLog: JobLog = { info: (msg) => app.log.info(msg), error: (msg, err) => app.log.error({ err }, msg) };
   const sweep = async () => {
-    try {
-      const n = await sweepExpiredBonus({ sql, config });
-      if (n > 0) app.log.info(`赠金到期作废：${n} 位会员`);
-    } catch (error) {
-      app.log.error({ err: error }, '赠金到期作废扫描失败，下一分钟重试');
-    }
-    // 会员到期处理（v0.7.23）：营业日开始后处理周期、补充期已结束的会员（今天跑过、没有到期的就什么都不做）。
-    // 放在生日礼之前：生日礼按会员现在的档阶发，到期该降的先降，不按过期的档阶发（Codex 自动审查 43d53e9）
-    try {
-      const run = await runMembershipDaily({ sql, config });
-      if (run?.processed) app.log.info(`会员到期处理：${run.processed} 位（保级 ${run.retained}、进补充期 ${run.grace}、降档 ${run.downgraded}）`);
-      if (run?.trialsExpired) app.log.info(`临时身份到期：${run.trialsExpired} 位`);
-      if (run?.error) app.log.error(`会员到期处理有出错的：${run.error}`);
-    } catch (error) {
-      app.log.error({ err: error }, '会员到期处理失败，下一分钟重试');
-    }
-    // 会员权益（v0.7.24）：到期处理之后按新的档阶发本期的券类、生日礼、节日关怀（今天跑过、权益清单没改过就什么都不做）
-    try {
-      const run = await runBenefitsDaily({ sql, config });
-      if (run?.coupons) app.log.info(`会员权益自动发放：${run.processed} 位会员、${run.coupons} 张券`);
-      if (run?.error) app.log.error(`会员权益自动发放有出错的：${run.error}`);
-    } catch (error) {
-      app.log.error({ err: error }, '会员权益自动发放失败，下一分钟重试');
-    }
-    // 生日礼（v0.7.20）：每 10 分钟检查一次生日当月还没发的会员（去重键兜底，几个进程同时跑也只发一次）
-    if (Date.now() - lastBirthday >= 10 * 60_000) {
-      lastBirthday = Date.now();
-      try {
-        const n = await issueBirthdayCoupons({ sql, config });
-        if (n > 0) app.log.info(`生日礼：发给 ${n} 位会员`);
-      } catch (error) {
-        app.log.error({ err: error }, '生日礼发券失败，10 分钟后重试');
-      }
-    }
-    // 预约（v0.7.28）：小程序预约开始前还没确认的自动取消、过了时间没到店的记爽约、客房过了保留时间释放
-    try {
-      const run = await sweepBookings(sql);
-      if (run.cancelled || run.noShow) app.log.info(`预约：自动取消 ${run.cancelled} 张、记爽约 ${run.noShow} 张`);
-    } catch (error) {
-      app.log.error({ err: error }, '预约的自动处理失败，下一分钟重试');
-    }
-    // 会员挑战（v0.7.28，QY-057）：这个月到店天数满了、还没送过的会员送一次
-    try {
-      const r = await runVisitChallenges({ sql, config });
-      if (r.members > 0) app.log.info(`会员挑战：${r.members} 位会员满了，发券 ${r.coupons} 张`);
-    } catch (error) {
-      app.log.error({ err: error }, '会员挑战的发放失败，下一分钟重试');
-    }
-    // 次卡（v0.7.28）：过了有效期没用完的次数作废
-    try {
-      const n = await expireCountCards(sql, { config });
-      if (n > 0) app.log.info(`次卡：${n} 张过期作废`);
-    } catch (error) {
-      app.log.error({ err: error }, '次卡的过期处理失败，下一分钟重试');
-    }
+    const birthday = Date.now() - lastBirthday >= 10 * 60_000;
+    if (birthday) lastBirthday = Date.now();
+    await runMinuteJobs({ sql, config }, jobLog, { birthday });
     // 顺带检查应用在跑的标记（数据库重启过、专用连接断了就重新拿）
     try {
       await presence.ensure();

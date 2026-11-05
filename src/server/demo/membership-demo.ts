@@ -140,7 +140,7 @@ export async function seedMembershipDemo(sql: Sql, config: AppConfig, opts: { no
     done.push(`发布 ${p.code} ${b.name}`);
   }
   const granted = await runBenefitsDaily(deps, now);
-  if (granted?.coupons) done.push(`自动发放：${granted.processed} 位会员收到本月的券 ${granted.coupons} 张`);
+  if (granted?.thisRun.coupons) done.push(`自动发放：${granted.thisRun.processed} 位会员收到本月的券 ${granted.thisRun.coupons} 张`);
 
   await sql`
     INSERT INTO settings (key, value) VALUES (${MEMBERSHIP_DEMO_KEY}, ${sql.json({ version: 1, preparedAt: now.toISOString(), businessDate: today })})

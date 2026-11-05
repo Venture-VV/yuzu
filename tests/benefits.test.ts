@@ -247,11 +247,11 @@ describe('券类：当场补发、每期发放', () => {
 
   it('每天的自动任务：本月已发够不再发；下个月第一天按档阶发 2 张，有效到下月底；当天再跑什么都不做', async () => {
     const run = await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(today));
-    expect(run).toMatchObject({ processed: 0, coupons: 0, error: null });
+    expect(run).toMatchObject({ processed: 0, coupons: 0, error: null, thisRun: { processed: 0, coupons: 0 } });
     expect(await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(today))).toBeNull();
     const next = nextMonthFirst(today);
     const nextRun = await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(next));
-    expect(nextRun).toMatchObject({ businessDate: next, processed: 1, coupons: 2, error: null });
+    expect(nextRun).toMatchObject({ businessDate: next, processed: 1, coupons: 2, error: null, thisRun: { processed: 1, coupons: 2 } });
     const g = (await grantsOf(m)).at(-1)!;
     expect(g).toMatchObject({ reason: 'monthly', periodKey: next.slice(0, 7), quantity: 2, target: 2 });
     const later = (await couponsOf(m)).coupons.filter((c) => c.validFrom === next);
@@ -263,9 +263,9 @@ describe('券类：当场补发、每期发放', () => {
   it('权益清单改了（数量加到 3），同一天再跑一次只补差额；暂缓以后不再发，已发的照常可用', async () => {
     const next = nextMonthFirst(today);
     expect((await edit('QY-040', { tierQuantities: [{ grade: 3, tier: 0, quantity: 3 }] })).status).toBe(200);
-    // 运行记录一个营业日一条，同一天再跑累加：上一次 1 位 2 张，这次 1 位 1 张
+    // 运行记录一个营业日一条，同一天再跑累加：上一次 1 位 2 张，这次 1 位 1 张（thisRun 是这一次的，日志只写它）
     const run = await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(next));
-    expect(run).toMatchObject({ processed: 2, coupons: 3 });
+    expect(run).toMatchObject({ processed: 2, coupons: 3, thisRun: { processed: 1, coupons: 1 } });
     expect((await grantsOf(m)).at(-1)).toMatchObject({ periodKey: next.slice(0, 7), quantity: 1, target: 3 });
     expect((await setStatus('QY-040', 'paused')).status).toBe(200);
     const after = nextMonthFirst(next);
