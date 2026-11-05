@@ -26,7 +26,7 @@ import {
   type SealView,
 } from '@shared/contracts';
 import type { Db } from '../../db';
-import { notFound } from '../../lib/errors';
+import { notFound, unprocessable } from '../../lib/errors';
 import { approvalBrief, approvalBriefById } from '../approvals/engine';
 import { readContent } from './content';
 
@@ -484,4 +484,38 @@ export async function contractChecks(db: Db): Promise<{ key: string; label: stri
       detail: bad.length ? bad.join('；') : '一致',
     },
   ];
+}
+
+/** 采购单挂的合同与按单价表核对的结果（采购单详情、审批中心的要点、提交时的核对共用；只读） */
+export async function poContract(db: Db, poId: number): Promise<{ contract: { id: number; contractNo: string; title: string } | null; contractNote: string; contractCheck: ContractCheckResult | null }> {
+  const [p] = await db<{ contractId: number | null; contractNo: string | null; title: string | null; contractNote: string }[]>`
+    SELECT po.contract_id, c.contract_no, c.title, po.contract_note
+    FROM purchase_orders po LEFT JOIN contracts c ON c.id = po.contract_id WHERE po.id = ${poId}`;
+  if (!p || p.contractId === null) return { contract: null, contractNote: p?.contractNote ?? '', contractCheck: null };
+  const lines = await db<{ lineNo: number; materialId: number; purchaseUnit: string; purchaseQtyMilli: number; priceCents: number }[]>`
+    SELECT line_no, material_id, purchase_unit, purchase_qty_milli, price_cents FROM purchase_order_lines WHERE po_id = ${poId} ORDER BY line_no`;
+  const contractId = Number(p.contractId);
+  return {
+    contract: { id: contractId, contractNo: p.contractNo!, title: p.title! },
+    contractNote: p.contractNote,
+    contractCheck: await checkAgainstContract(
+      db,
+      contractId,
+      p.contractNo!,
+      lines.map((l) => ({ lineNo: l.lineNo, materialId: Number(l.materialId), purchaseUnit: l.purchaseUnit, purchaseQtyMilli: Number(l.purchaseQtyMilli), priceCents: Number(l.priceCents) })),
+      poId,
+    ),
+  };
+}
+
+/** 采购单能挂这份合同吗（C9）：同一供应商、采购类型、已签署或已归档、下单日在起止日内 */
+export async function assertContractForPo(db: Db, contractId: number, supplierId: number, orderDate: string): Promise<void> {
+  const [c] = await db<{ contractNo: string; supplierId: number | null; category: ContractCategory; status: ContractStatus; startDate: string | null; endDate: string | null }[]>`
+    SELECT contract_no, supplier_id, category, status, start_date, end_date FROM contracts WHERE id = ${contractId}`;
+  if (!c) throw unprocessable('CONTRACT_NOT_FOUND', '合同不存在，请刷新后重新选');
+  if (c.category !== 'purchase' || Number(c.supplierId) !== supplierId) throw unprocessable('CONTRACT_MISMATCH', `合同 ${c.contractNo} 不是这家供应商的采购合同`);
+  if (!CONTRACT_EFFECTIVE.includes(c.status)) throw unprocessable('CONTRACT_NOT_EFFECTIVE', `合同 ${c.contractNo} 不在生效中（已签署或已归档的才能挂）`);
+  if ((c.startDate && orderDate < c.startDate) || (c.endDate && orderDate > c.endDate)) {
+    throw unprocessable('CONTRACT_NOT_EFFECTIVE', `下单日不在合同 ${c.contractNo} 的起止日内（${c.startDate ?? '—'} 至 ${c.endDate ?? '长期'}）`);
+  }
 }

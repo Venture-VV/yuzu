@@ -48,7 +48,7 @@ import { todayIn } from '../../lib/dates';
 import { forbidden, notFound } from '../../lib/errors';
 import { enabledErpModules, erpModuleDisabled } from '../erp';
 import { readContent } from '../contracts/content';
-import { reviewsOf } from '../contracts/ledger';
+import { poContract, reviewsOf } from '../contracts/ledger';
 import { loadInventorySettings } from '../inventory/common';
 import { actionsOf, delegatorsOf, eligibleAt, requiredOf, staffNames, standingOf } from './engine';
 
@@ -321,6 +321,7 @@ async function digestOf(db: Db, kind: ApprovalDocKind, docId: number, requestId:
         SELECT s.name AS supplier_name, p.order_date, p.note, p.revision, p.backfill, p.channel_label, p.expected_date
         FROM purchase_orders p JOIN suppliers s ON s.id = p.supplier_id WHERE p.id = ${docId}`;
       if (!p) throw notFound('采购单不存在');
+      const pc = await poContract(db, docId);
       const lines = await db<{ id: number; name: string; spec: string; purchaseQtyMilli: number; purchaseUnit: string; priceCents: number; amountCents: number }[]>`
         SELECT pl.id, m.name, coalesce(nullif(pl.spec, ''), m.specification) AS spec, pl.purchase_qty_milli, pl.purchase_unit, pl.price_cents, pl.amount_cents
         FROM purchase_order_lines pl JOIN materials m ON m.id = pl.material_id WHERE pl.po_id = ${docId} ORDER BY pl.line_no`;
@@ -333,6 +334,20 @@ async function digestOf(db: Db, kind: ApprovalDocKind, docId: number, requestId:
         facts: [
           ...(p.channelLabel ? [{ label: '采购途径', value: p.channelLabel }] : []),
           ...(p.expectedDate ? [{ label: '预计到货', value: p.expectedDate }] : []),
+          // 挂的合同与超出合同的行（v0.7.31，C9）
+          ...(pc.contract ? [{ label: '合同', value: `${pc.contract.contractNo} ${pc.contract.title}` }] : []),
+          ...(pc.contractCheck?.exceeded
+            ? [
+                {
+                  label: '超出合同',
+                  value: pc.contractCheck.lines
+                    .filter((l) => l.priceOverCents > 0 || l.overQtyMilli > 0)
+                    .map((l) => `第 ${l.lineNo} 行${l.priceOverCents > 0 ? `单价高 ¥${formatAmount(l.priceOverCents)}` : ''}${l.overQtyMilli > 0 ? `数量超 ${formatQty(l.overQtyMilli)}` : ''}`)
+                    .join('；'),
+                },
+                { label: '超出原因', value: pc.contractNote || '—' },
+              ]
+            : []),
         ],
         lines: lines.map((l) => ({
           id: Number(l.id),

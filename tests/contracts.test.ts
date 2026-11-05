@@ -278,6 +278,41 @@ describe('合同与法务审查', () => {
     expect(ok.body.exceeded).toBe(false);
   });
 
+  it('采购单挂合同：超价时提交要写原因，审批中心看得到；合同不是这家供应商的、不在生效中的挂不上', async () => {
+    const line = { materialId: mat.id, purchaseQtyMilli: 10_000, priceCents: 60_00 };
+    const draft = await api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, action: 'save', contractId: c.id, lines: [line] });
+    expect(draft.status, JSON.stringify(draft.body)).toBe(201);
+    const po = draft.body.po;
+    expect(po.contract).toMatchObject({ id: c.id, contractNo: c.contractNo });
+    expect(po.contractCheck).toMatchObject({ exceeded: true, lines: [{ priceOverCents: 5_00, overQtyMilli: 0 }] });
+    // 超价没写原因：提交拒绝
+    const noReason = await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po.id}/submit`, {});
+    expect(noReason.body.error.code).toBe('CONTRACT_DEVIATION_REASON_REQUIRED');
+    // 写了原因再提交
+    const withReason = await api(ctx.app, buyer, 'PUT', `/api/purchase-orders/${po.id}`, {
+      supplierId,
+      orderDate: today,
+      action: 'submit',
+      contractNote: '急用，按现价补一批',
+      lines: [{ ...line, id: po.lines[0].id }],
+    });
+    expect(withReason.status, JSON.stringify(withReason.body)).toBe(200);
+    expect(withReason.body).toMatchObject({ status: 'submitted', contractNote: '急用，按现价补一批', contract: { id: c.id } });
+    const detail = await api(ctx.app, mgr, 'GET', `/api/approvals/${withReason.body.approval.requestId}`);
+    expect(detail.body.doc.facts).toEqual(expect.arrayContaining([expect.objectContaining({ label: '超出原因', value: '急用，按现价补一批' })]));
+    // 已提交的采购单的数量算进合同的已下单：剩余量变少
+    const after = await api(ctx.app, buyer, 'POST', '/api/erp/contracts/check', {
+      contractId: c.id,
+      lines: [{ lineNo: 1, materialId: mat.id, purchaseUnit: mat.purchaseUnit, purchaseQtyMilli: 95_000, priceCents: 55_00 }],
+    });
+    expect(after.body.lines[0]).toMatchObject({ remainingMilli: 90_000, overQtyMilli: 5_000 });
+    // 别的供应商的合同挂不上
+    const others = (await api(ctx.app, boss, 'GET', '/api/inventory/suppliers?all=1')).body as { id: number; active: boolean }[];
+    const other = others.find((x) => x.active && x.id !== supplierId)!;
+    const mismatch = await api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId: other.id, orderDate: today, action: 'save', contractId: c.id, lines: [line] });
+    expect(mismatch.body.error.code).toBe('CONTRACT_MISMATCH');
+  });
+
   it('到期前 60 天提醒；续签的新合同签署以后不再提醒；终止要写原因', async () => {
     // 一份 30 天后到期的服务合同（只写相对方名称）
     let s = await create({ category: 'service', supplierId: null, counterparty: '保洁外包公司', content: content({ title: '保洁服务', endDate: shiftDate(today, 30), lines: [] }) });

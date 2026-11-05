@@ -1,6 +1,7 @@
 // 采购单、供应商货款与付款：前后端共用的类型与中文名称。金额为分，数量为 milli。
 
 import type { ApprovalBrief } from './approvals';
+import type { ContractCheckResult } from './contracts';
 import type { ApprovalLog, DocRef, Ref } from './inventory';
 
 export const PO_STATUSES = ['draft', 'submitted', 'returned', 'approved', 'cancelled', 'closed'] as const;
@@ -83,6 +84,10 @@ export interface PurchaseOrder {
   channel: ChannelRef | null;
   /** 从哪张询价单转来的（v0.7.29，E5） */
   sourcing: { id: number; docNo: string; status: 'open' | 'awarded' | 'cancelled' } | null;
+  /** 挂的合同（v0.7.31，C9）与超价、超量时写的原因；按合同单价表核对的结果（没挂合同为空） */
+  contract: { id: number; contractNo: string; title: string } | null;
+  contractNote: string;
+  contractCheck: ContractCheckResult | null;
   orderDate: string;
   expectedDate: string | null;
   note: string;
