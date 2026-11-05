@@ -2,7 +2,7 @@
 // 法务那一级按审查清单逐条给结论）、签署登记、用印申请（走审批）、扫描件、归档、变更单、终止、续签、挂这份合同的采购单，
 // 以及每一次提交（合同本身、变更单）的内容与法务审查结论。
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import {
   Archive,
@@ -547,17 +547,36 @@ function Detail({ c }: { c: ContractDetail }) {
 function ReviewActions({ approval, kind, docNo, urlBase, onDone }: { approval: ApprovalBrief | null; kind: ApprovalDocKind; docNo: string; urlBase: string; onDone: () => unknown }) {
   const can = useCan();
   const gate = useApprovalGate(approval, kind);
-  const [open, setOpen] = useState(false);
+  // 打开审批对话框时的这一次提交与级别：同意、退回按它发（对不上服务端拒绝 APPROVAL_MOVED）。
+  // 对话框开着时后台刷新拿到了新的一次提交（撤回、改了再提交又到这一级）或别的级别，就提示关掉重开，
+  // 不把这次填的审查清单、意见算到新的提交上（Codex 自动审查 e426148）
+  const [opened, setOpened] = useState<{ approval: ApprovalBrief; fence: { requestId?: number; level?: number } } | null>(null);
   const approver = can('approval.act') || can('inventory.approve') || can('expense.approve');
+  // 这一级已经轮不到自己（别人审过、退回、撤回……）时收起对话框，免得以后又到这一级时自己弹出来
+  const actionable = !!approval && approval.status === 'pending' && approver && !gate.uncertain && gate.canActHere;
+  useEffect(() => {
+    if (!actionable) setOpened(null);
+  }, [actionable]);
   if (!approval || approval.status !== 'pending' || !approver) return null;
   if (gate.uncertain) return <ApprovalResend sent={gate.uncertain} onDone={onDone} />;
   if (!gate.canActHere) return gate.waiting ? <span className="text-[12.5px] text-ink-3">{gate.waiting}</span> : null;
+  const moved = !!opened && (opened.fence.requestId !== gate.fence.requestId || opened.fence.level !== gate.fence.level);
   return (
     <>
-      <Button size="sm" variant="primary" icon={<Gavel className="size-4" />} onClick={() => setOpen(true)} data-testid={`review-open-${docNo}`}>
+      <Button size="sm" variant="primary" icon={<Gavel className="size-4" />} onClick={() => setOpened({ approval, fence: gate.fence })} data-testid={`review-open-${docNo}`}>
         审批{approval.levels > 1 ? `（第 ${approval.currentLevel}/${approval.levels} 级）` : ''}
       </Button>
-      <ApproveDialog open={open} onClose={() => setOpen(false)} approval={approval} kind={kind} docNo={docNo} urlBase={urlBase} fence={gate.fence} onDone={onDone} />
+      <ApproveDialog
+        open={!!opened}
+        onClose={() => setOpened(null)}
+        approval={opened?.approval ?? approval}
+        kind={kind}
+        docNo={docNo}
+        urlBase={urlBase}
+        fence={opened?.fence ?? gate.fence}
+        moved={moved}
+        onDone={onDone}
+      />
     </>
   );
 }
@@ -570,6 +589,7 @@ function ApproveDialog({
   docNo,
   urlBase,
   fence,
+  moved,
   onDone,
 }: {
   open: boolean;
@@ -579,6 +599,8 @@ function ApproveDialog({
   docNo: string;
   urlBase: string;
   fence: { requestId?: number; level?: number };
+  /** 打开以后审批变了（新的一次提交或到了别的级别）：不能按这次填的提交 */
+  moved: boolean;
   onDone: () => unknown;
 }) {
   const session = useSession();
@@ -637,7 +659,7 @@ function ApproveDialog({
             <Button variant="ghost" disabled={!!busy} onClick={() => setReturning(false)}>
               不退回了
             </Button>
-            <Button variant="danger" loading={busy === 'return'} disabled={!!returnProblem || reason.trim().length < 2} icon={<CornerUpLeft className="size-4" />} onClick={() => void send('return')} data-testid="review-return-confirm">
+            <Button variant="danger" loading={busy === 'return'} disabled={moved || !!returnProblem || reason.trim().length < 2} icon={<CornerUpLeft className="size-4" />} onClick={() => void send('return')} data-testid="review-return-confirm">
               确认退回
             </Button>
           </>
@@ -646,7 +668,7 @@ function ApproveDialog({
             <Button variant="secondary" disabled={!!busy} icon={<CornerUpLeft className="size-4" />} onClick={() => setReturning(true)} data-testid="review-return">
               退回…
             </Button>
-            <Button variant="primary" loading={busy === 'approve'} disabled={!!approveProblem} icon={<CircleCheck className="size-4" />} onClick={() => void send('approve')} data-testid="review-approve">
+            <Button variant="primary" loading={busy === 'approve'} disabled={moved || !!approveProblem} icon={<CircleCheck className="size-4" />} onClick={() => void send('approve')} data-testid="review-approve">
               同意
             </Button>
           </>
@@ -654,6 +676,11 @@ function ApproveDialog({
       }
     >
       <div className="space-y-3">
+        {moved && (
+          <Notice tone="warning" title="审批已经变了" data-testid="review-moved">
+            打开以后这份单据撤回重提或到了别的级别，这里填的不能算到新的提交上。请关掉重新打开，看过新的内容再审。
+          </Notice>
+        )}
         {legal && <LegalChecklistEditor value={checklist} onChange={setChecklist} disabled={!!busy} />}
         {returning ? (
           <Field label="退回原因" htmlFor="rv-reason">

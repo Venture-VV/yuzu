@@ -310,4 +310,64 @@ test.describe('合同与法务审查（v0.7.31）', () => {
     const voided = await page.request.post(`/api/erp/contracts/${draft.id}/void`, { data: { version: after.version, reason: 'E2E 用完作废' } });
     expect(voided.ok(), await voided.text()).toBe(true);
   });
+
+  test('审批对话框开着时单据撤回、改了再提交：提示「审批已经变了」、不能同意，关掉重开后按新的提交审（Codex 自动审查 e426148）', async ({ page }) => {
+    await login(page, 'linlan');
+    const me = (await (await page.request.get('/api/auth/me')).json()) as { calendarToday: string };
+    const today = me.calendarToday;
+    const tag = String(Date.now()).slice(-6);
+    const header = { category: 'service', counterparty: `E2E 绿植租摆${tag}` };
+    const content = {
+      title: `E2E 审批中重提${tag}`,
+      startDate: today,
+      endDate: addDays(today, 365),
+      totalCents: 100_000,
+      taxRateBp: 600,
+      freightBearer: 'supplier',
+      unloadingBearer: 'supplier',
+      paymentTerms: DEFAULT_PAYMENT_TERMS,
+      warranty: { basis: 'acceptance', months: 12 },
+      acceptance: { method: '按月验收', signer: '前厅经理', penalty: '扣当月服务费' },
+      note: '',
+      lines: [],
+    };
+    type Row = { id: number; version: number; contractNo: string; status: string };
+    const created = await page.request.post('/api/erp/contracts', { data: { clientKey: randomUUID(), ...header, content } });
+    expect(created.status(), await created.text()).toBe(201);
+    let c = (await created.json()).contract as Row;
+    const get = async () => (await (await page.request.get(`/api/erp/contracts/${c.id}`)).json()) as Row;
+    const post = async (action: string, data: Record<string, unknown>) => {
+      const r = await page.request.post(`/api/erp/contracts/${c.id}/${action}`, { data });
+      expect(r.ok(), await r.text()).toBe(true);
+      c = await get();
+    };
+    await post('submit', { version: c.version });
+    await page.goto(`/erp/contracts/${c.id}`);
+    await page.getByTestId(`review-open-${c.contractNo}`).click();
+    await expect(page.getByTestId('review-approve')).toBeEnabled();
+    // 对话框开着，起草的人撤回、改了再提交：新的一次提交又到第 1 级
+    await post('withdraw', { version: c.version });
+    const edited = await page.request.put(`/api/erp/contracts/${c.id}`, { data: { version: c.version, ...header, content: { ...content, title: `${content.title}（改过）` } } });
+    expect(edited.ok(), await edited.text()).toBe(true);
+    c = await get();
+    await post('submit', { version: c.version });
+    // 回到窗口时后台刷新：对话框提示审批变了，不能按刚才打开的那次同意
+    await page.waitForTimeout(5_500);
+    const refetched = page.waitForResponse((r) => r.url().endsWith(`/api/erp/contracts/${c.id}`) && r.request().method() === 'GET');
+    await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
+    await refetched;
+    await expect(page.getByTestId('review-moved')).toBeVisible();
+    await expect(page.getByTestId('review-approve')).toBeDisabled();
+    // 关掉重新打开：按新的这次提交审
+    await page.keyboard.press('Escape');
+    await page.getByTestId(`review-open-${c.contractNo}`).click();
+    await expect(page.getByTestId('review-moved')).toHaveCount(0);
+    await page.getByTestId('review-approve').click();
+    await expect(page.getByText('已同意第 1 级').first()).toBeVisible();
+    // 用完撤回、作废，不留在台账里
+    c = await get();
+    await post('withdraw', { version: c.version });
+    await post('void', { version: c.version, reason: 'E2E 用完作废' });
+    expect(c.status).toBe('voided');
+  });
 });
