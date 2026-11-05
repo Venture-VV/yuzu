@@ -20,23 +20,26 @@
 // 2026-11-03 微信小程序（小程序线）新增「维护小程序内容」「解绑会员的微信」（MP7，docs/MINIPROGRAM.md 第 5 节）；
 // 店主 11-03 已定：维护小程序内容只给店主、店总（客户经理不给）。
 // v0.7.30 审批中心：新增「审批中心：审批」「审批中心：维护审批规则」（docs/APPROVALS.md，默认值待确认）。
+// v0.7.31 合同与法务审查：新职责「法务」（单独一组），新增「查看合同」「维护合同」（docs/CONTRACTS.md C4、C12，待确认）。
 
 export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice', 'other_store'] as const;
 export type Role = (typeof ROLES)[number];
 
-export const DUTIES = ['stock', 'purchase', 'payable', 'approve', 'cost', 'request'] as const;
+export const DUTIES = ['stock', 'purchase', 'payable', 'approve', 'cost', 'request', 'legal'] as const;
 export type Duty = (typeof DUTIES)[number];
 
 /**
  * 分岗不兼任（#17 后半句，v0.7.12）：职责分五组，一名员工的职责只能在一组里；财务组内对账付款、成本核算可以同时有。
  * 店主不受限制。后台保存员工时校验；已有跨组的员工不自动改，后台员工页提示（不进自检）。
  */
-export const DUTY_GROUPS: { key: 'stock' | 'purchase' | 'department' | 'finance' | 'approve'; label: string; duties: readonly Duty[] }[] = [
+export const DUTY_GROUPS: { key: 'stock' | 'purchase' | 'department' | 'finance' | 'approve' | 'legal'; label: string; duties: readonly Duty[] }[] = [
   { key: 'stock', label: '仓库', duties: ['stock'] },
   { key: 'purchase', label: '采购', duties: ['purchase'] },
   { key: 'department', label: '部门', duties: ['request'] },
   { key: 'finance', label: '财务（含成本）', duties: ['payable', 'cost'] },
   { key: 'approve', label: '负责人', duties: ['approve'] },
+  // 法务（v0.7.31，C4）：合同审查的法务那一级，不和别的职责兼任
+  { key: 'legal', label: '法务', duties: ['legal'] },
 ];
 
 /** 职责跨组时返回涉及的组名（如「仓库、采购」），不跨组返回 null；店主不受限制 */
@@ -181,9 +184,14 @@ export const PERMISSIONS = {
    * 用审批中心审批：待我审批、批量同意、设自己的代理人。能不能审某一张单还要看审批规则（岗位组或指定的人）；
    * 默认店主、店总，负责人（负责人确认）与财务（对账付款、成本核算）职责
    */
-  'approval.act': { roles: ['owner', 'store_manager'], duties: ['approve', 'payable', 'cost'] },
+  'approval.act': { roles: ['owner', 'store_manager'], duties: ['approve', 'payable', 'cost', 'legal'] },
   /** 维护审批规则（单据类型 × 金额 × 部门 → 审批链），给别人设代理人（默认店主） */
   'approval.rules': { roles: ['owner'] },
+  // ── 合同与法务审查（v0.7.31，docs/CONTRACTS.md C12，默认值待确认）──
+  /** 查看合同台账、详情、提交记录与审查意见、扫描件 */
+  'contract.read': { roles: ['owner', 'store_manager'], duties: ['purchase', 'payable', 'cost', 'approve', 'legal'] },
+  /** 起草、修改、提交、撤回、作废、终止合同，登记签署、用印申请、归档、变更单、上传扫描件 */
+  'contract.manage': { roles: ['owner', 'store_manager'], duties: ['purchase', 'legal'] },
   // ── 管理 ──
   // ── 当场授权（主管在弹窗里输入自己的账号密码确认）──
   /** 授权超过单笔上限的充值 / 消费 */
@@ -380,6 +388,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'request.review': '审核需求单、转采购单',
   'approval.act': '审批中心：审批（按审批规则）、批量同意、设自己的代理人',
   'approval.rules': '审批中心：维护审批规则、给别人设代理人',
+  'contract.read': '合同：查看台账、详情、审查意见与扫描件',
+  'contract.manage': '合同：起草、提交、签署、用印申请、归档、变更、终止',
   'auth.overLimit': '当场授权超过单笔上限的充值 / 消费',
   'auth.memberRefund': '当场授权退储值',
   'auth.memberPhone': '当场授权改会员手机号',
@@ -439,7 +449,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
       'inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'supplierReturn.create', 'supplierReturn.answer', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.void', 'inventory.export',
       'deptStock.operate', 'deptStock.audit',
       'expense.read', 'expense.manage', 'petty.manage', 'expense.approve', 'finance.void', 'expense.export', 'request.create', 'request.review', 'erp.revenue',
-      'approval.act', 'approval.rules',
+      'approval.act', 'approval.rules', 'contract.read', 'contract.manage',
     ],
   },
   { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount', 'auth.memberRefund', 'auth.memberPhone'] },

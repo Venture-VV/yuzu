@@ -4,7 +4,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Boxes, ClipboardCheck, ClipboardList, HandCoins, LayoutGrid, LineChart, Package, ReceiptText, ShoppingCart, SlidersHorizontal, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, Boxes, ClipboardCheck, ClipboardList, FileSignature, HandCoins, LayoutGrid, LineChart, Package, ReceiptText, ShoppingCart, SlidersHorizontal, type LucideIcon } from 'lucide-react';
 import type { ApprovalCounts } from '@shared/approvals';
 import { ERP_MODULES, erpModuleOfPage, type ErpModuleKey } from '@shared/erp';
 import { versionText } from '@shared/instance';
@@ -24,6 +24,7 @@ const ICONS: Record<ErpModuleKey, LucideIcon> = {
   deptStock: Package,
   payables: HandCoins,
   approvals: ClipboardCheck,
+  contracts: FileSignature,
   expenses: ReceiptText,
   revenue: LineChart,
 };
@@ -71,6 +72,7 @@ export function ErpShell() {
     { title: '概览', items: [{ key: 'home', to: '/erp', label: 'ERP 首页', icon: LayoutGrid, end: true }] },
     { title: '供应链', items: access.modules.filter((k) => ERP_MODULES[k].group === '供应链').map(moduleItem) },
     { title: '财务', items: access.modules.filter((k) => ERP_MODULES[k].group === '财务').map(moduleItem) },
+    { title: '法务', items: access.modules.filter((k) => ERP_MODULES[k].group === '法务').map(moduleItem) },
     { title: '设置', items: access.canSettings ? [{ key: 'modules', to: '/erp/modules', label: '模块设置', icon: SlidersHorizontal }] : [] },
   ].filter((g) => g.items.length > 0);
 

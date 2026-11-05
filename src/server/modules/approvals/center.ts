@@ -20,6 +20,20 @@ import {
   type UrgentAcceptItem,
   type UrgentBackfillItem,
 } from '@shared/approvals';
+import {
+  BEARER_LABELS,
+  CHANGE_KIND_LABELS,
+  CONTRACT_CATEGORY_LABELS,
+  CONTRACT_STATUS_LABELS,
+  PAYMENT_STAGE_LABELS,
+  SEAL_TYPE_LABELS,
+  WARRANTY_BASIS_LABELS,
+  formatPercentBp,
+  type ChangeKind,
+  type ContractCategory,
+  type ContractStatus,
+  type SealType,
+} from '@shared/contracts';
 import type { ErpModuleKey } from '@shared/erp';
 import { EXPENSE_CATEGORY_LABELS, PAY_SOURCE_LABELS, type ExpenseCategory, type PaySource } from '@shared/expenses';
 import { COUNT_REASON_LABELS, INV_DOC_META, isBigVariance, variancePct, type CountReason, type InvDocType } from '@shared/inventory';
@@ -33,6 +47,8 @@ import type { Actor } from '../../lib/context';
 import { todayIn } from '../../lib/dates';
 import { forbidden, notFound } from '../../lib/errors';
 import { enabledErpModules, erpModuleDisabled } from '../erp';
+import { readContent } from '../contracts/content';
+import { reviewsOf } from '../contracts/ledger';
 import { loadInventorySettings } from '../inventory/common';
 import { actionsOf, delegatorsOf, eligibleAt, requiredOf, staffNames, standingOf } from './engine';
 
@@ -157,6 +173,25 @@ async function summaries(db: Db, reqs: RequestRow[]): Promise<Map<string, string
       FROM expense_claims c JOIN departments d ON d.id = c.department_id JOIN staff h ON h.id = c.handler_id WHERE c.id IN ${db(ec)}`;
     for (const r of rows) put('expense_claim', Number(r.id), r.party, `${r.purpose} · 经办 ${r.handler}`, 1);
   }
+  // 合同类（v0.7.31）：相对方 · 标题（变更单带变更类型，用印带印章与份数）
+  const ct = ids('contract');
+  if (ct.length) {
+    const rows = await db<{ id: number; party: string; title: string; category: ContractCategory }[]>`
+      SELECT id, counterparty AS party, title, category FROM contracts WHERE id IN ${db(ct)}`;
+    for (const r of rows) put('contract', Number(r.id), r.party, `${CONTRACT_CATEGORY_LABELS[r.category]}合同 · ${r.title}`, 1);
+  }
+  const cc = ids('contract_change');
+  if (cc.length) {
+    const rows = await db<{ id: number; party: string; contractNo: string; kinds: ChangeKind[] }[]>`
+      SELECT x.id, c.counterparty AS party, c.contract_no, x.kinds FROM contract_changes x JOIN contracts c ON c.id = x.contract_id WHERE x.id IN ${db(cc)}`;
+    for (const r of rows) put('contract_change', Number(r.id), r.party, `${r.contractNo} 变更：${r.kinds.map((k) => CHANGE_KIND_LABELS[k]).join('、')}`, 1);
+  }
+  const cs = ids('contract_seal');
+  if (cs.length) {
+    const rows = await db<{ id: number; party: string; contractNo: string; sealType: SealType; copies: number }[]>`
+      SELECT s.id, c.counterparty AS party, c.contract_no, s.seal_type, s.copies FROM contract_seals s JOIN contracts c ON c.id = s.contract_id WHERE s.id IN ${db(cs)}`;
+    for (const r of rows) put('contract_seal', Number(r.id), r.party, `${r.contractNo} 用印：${SEAL_TYPE_LABELS[r.sealType]} ${r.copies} 份`, 1);
+  }
   return out;
 }
 
@@ -236,6 +271,9 @@ const MODULE_OF_KIND: Record<ApprovalDocKind, ErpModuleKey> = {
   payment: 'payables',
   opening_payable: 'payables',
   expense_claim: 'expenses',
+  contract: 'contracts',
+  contract_change: 'contracts',
+  contract_seal: 'contracts',
 };
 
 /** 模块关着的单据种类 */
@@ -276,7 +314,7 @@ export async function approvalCounts(db: Db, actor: Actor, timeZone: string): Pr
 
 // ───────────────────────── 详情 ─────────────────────────
 
-async function digestOf(db: Db, kind: ApprovalDocKind, docId: number): Promise<ApprovalDocDigest> {
+async function digestOf(db: Db, kind: ApprovalDocKind, docId: number, requestId: number): Promise<ApprovalDocDigest> {
   switch (kind) {
     case 'purchase_order': {
       const [p] = await db<{ supplierName: string; orderDate: string; note: string; revision: number; backfill: boolean; channelLabel: string | null; expectedDate: string | null }[]>`
@@ -430,7 +468,116 @@ async function digestOf(db: Db, kind: ApprovalDocKind, docId: number): Promise<A
         })),
       };
     }
+    case 'contract':
+    case 'contract_change':
+      return contractDigest(db, kind, docId, requestId);
+    case 'contract_seal': {
+      const [x] = await db<{
+        contractId: number;
+        contractNo: string;
+        title: string;
+        counterparty: string;
+        status: ContractStatus;
+        sealType: SealType;
+        copies: number;
+        operatorName: string;
+        sealDate: string;
+        purpose: string;
+      }[]>`
+        SELECT c.id AS contract_id, c.contract_no, c.title, c.counterparty, c.status, s.seal_type, s.copies, o.display_name AS operator_name, s.seal_date, s.purpose
+        FROM contract_seals s JOIN contracts c ON c.id = s.contract_id JOIN staff o ON o.id = s.operator_id WHERE s.id = ${docId}`;
+      if (!x) throw notFound('用印申请不存在');
+      return {
+        title: '用印申请',
+        link: `/erp/contracts?id=${x.contractId}`,
+        party: x.counterparty,
+        docDate: x.sealDate,
+        note: x.purpose,
+        facts: [
+          { label: '合同', value: `${x.contractNo} ${x.title}` },
+          { label: '合同状态', value: CONTRACT_STATUS_LABELS[x.status] },
+          { label: '印章', value: SEAL_TYPE_LABELS[x.sealType] },
+          { label: '份数', value: `${x.copies} 份` },
+          { label: '用印人', value: x.operatorName },
+          { label: '用印日期', value: x.sealDate },
+        ],
+        lines: [],
+        contract: { kind: 'contract_seal', contractId: Number(x.contractId), contractNo: x.contractNo, revisionId: null, reviews: [] },
+      };
+    }
   }
+}
+
+/** 合同、合同变更的要点：这次提交的内容（四要素）、单价表、提交记录上已有的审查清单结论；变更单另有改前改后（v0.7.31） */
+async function contractDigest(db: Db, kind: 'contract' | 'contract_change', docId: number, requestId: number): Promise<ApprovalDocDigest> {
+  const [h] =
+    kind === 'contract'
+      ? await db<{ contractId: number; contractNo: string; category: ContractCategory; counterparty: string; handlerName: string; draft: unknown }[]>`
+          SELECT c.id AS contract_id, c.contract_no, c.category, c.counterparty, s.display_name AS handler_name, c.draft
+          FROM contracts c JOIN staff s ON s.id = c.handler_id WHERE c.id = ${docId}`
+      : await db<{ contractId: number; contractNo: string; category: ContractCategory; counterparty: string; handlerName: string; draft: unknown }[]>`
+          SELECT c.id AS contract_id, c.contract_no, c.category, c.counterparty, s.display_name AS handler_name, x.draft
+          FROM contract_changes x JOIN contracts c ON c.id = x.contract_id JOIN staff s ON s.id = c.handler_id WHERE x.id = ${docId}`;
+  if (!h) throw notFound(kind === 'contract' ? '合同不存在' : '变更单不存在');
+  // 这张审批单对着的提交记录（审查中改不了草稿，所以与草稿一样；旧的审批单看当时那一份）
+  const [rev] = await db<{ id: number; content: unknown }[]>`SELECT id, content FROM contract_revisions WHERE approval_request_id = ${requestId}`;
+  const revisionId = rev ? Number(rev.id) : null;
+  const content = readContent(rev ? rev.content : h.draft);
+  const lines = revisionId
+    ? await db<{ lineNo: number; itemName: string; spec: string; unit: string; priceCents: number; taxRateBp: number; qtyMilli: number | null }[]>`
+        SELECT line_no, item_name, spec, unit, price_cents, tax_rate_bp, qty_milli FROM contract_lines WHERE revision_id = ${revisionId} ORDER BY line_no`
+    : readContent(h.draft).lines.map((l, i) => ({ ...l, lineNo: i + 1 }));
+  const terms = content.paymentTerms.map((t) => `${PAYMENT_STAGE_LABELS[t.stage]} ${formatPercentBp(t.percentBp)}${t.condition ? `（${t.condition}）` : ''}`).join('；');
+  const facts = [
+    { label: '合同', value: `${h.contractNo} · ${CONTRACT_CATEGORY_LABELS[h.category]}` },
+    { label: '起止', value: `${content.startDate ?? '—'} 至 ${content.endDate ?? '长期'}` },
+    { label: '总价', value: `¥${formatAmount(content.totalCents)}（税率 ${formatPercentBp(content.taxRateBp)}）` },
+    { label: '运费 / 卸货', value: `${BEARER_LABELS[content.freightBearer]} / ${BEARER_LABELS[content.unloadingBearer]}` },
+    { label: '付款节点', value: terms },
+    { label: '质保', value: content.warranty.months ? `${WARRANTY_BASIS_LABELS[content.warranty.basis]}起 ${content.warranty.months} 个月` : '没有质保' },
+    { label: '验收标准', value: [content.acceptance.method, content.acceptance.signer && `签字：${content.acceptance.signer}`, content.acceptance.penalty && `不合格：${content.acceptance.penalty}`].filter(Boolean).join('；') || '—' },
+    { label: '经办', value: h.handlerName },
+  ];
+  let change: NonNullable<ApprovalDocDigest['contract']>['change'];
+  if (kind === 'contract_change') {
+    const [x] = await db<{ kinds: ChangeKind[]; reason: string; baseVersion: number; beforeTotalCents: number }[]>`
+      SELECT x.kinds, x.reason, x.base_version, (r.content->>'totalCents')::bigint AS before_total_cents
+      FROM contract_changes x JOIN contract_versions v ON v.contract_id = x.contract_id AND v.version_no = x.base_version
+      JOIN contract_revisions r ON r.id = v.revision_id WHERE x.id = ${docId}`;
+    if (x) {
+      change = { kinds: x.kinds, reason: x.reason, baseVersion: x.baseVersion, beforeTotalCents: Number(x.beforeTotalCents), afterTotalCents: content.totalCents };
+      facts.unshift(
+        { label: '变更', value: `${x.kinds.map((k) => CHANGE_KIND_LABELS[k]).join('、')}（在第 ${x.baseVersion} 版上改）` },
+        { label: '变更原因', value: x.reason },
+        { label: '总价变化', value: `¥${formatAmount(Number(x.beforeTotalCents))} → ¥${formatAmount(content.totalCents)}` },
+      );
+    }
+  }
+  return {
+    title: kind === 'contract' ? `${CONTRACT_CATEGORY_LABELS[h.category]}合同` : '合同变更',
+    link: `/erp/contracts?id=${h.contractId}`,
+    party: h.counterparty,
+    docDate: content.startDate,
+    note: content.note,
+    facts,
+    lines: lines.map((l) => ({
+      id: l.lineNo,
+      name: l.itemName,
+      spec: l.spec,
+      qty: l.qtyMilli === null ? '不限' : formatQty(Number(l.qtyMilli)),
+      unit: l.unit,
+      priceCents: Number(l.priceCents),
+      amountCents: l.qtyMilli === null ? null : lineAmountCents(Number(l.qtyMilli), Number(l.priceCents), 1000),
+    })),
+    contract: {
+      kind,
+      contractId: Number(h.contractId),
+      contractNo: h.contractNo,
+      revisionId,
+      reviews: revisionId ? ((await reviewsOf(db, [revisionId])).get(revisionId) ?? []) : [],
+      ...(change ? { change } : {}),
+    },
+  };
 }
 
 export async function getApprovalDetail(db: Db, actor: Actor, timeZone: string, id: number): Promise<ApprovalDetail> {
@@ -474,7 +621,7 @@ export async function getApprovalDetail(db: Db, actor: Actor, timeZone: string, 
     ...card!,
     allowSelf: req.allowSelf,
     levelsDetail,
-    doc: await digestOf(db, req.docKind, req.docId),
+    doc: await digestOf(db, req.docKind, req.docId, req.id),
     previous: previous.map((p) => ({ ...p, id: Number(p.id) })),
   };
 }

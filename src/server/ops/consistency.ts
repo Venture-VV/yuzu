@@ -7,6 +7,7 @@ import { inventoryChecks } from '../modules/inventory/reports';
 import { expenseChecks } from '../modules/expenses';
 import { pettyAccountChecks } from '../modules/petty-accounts';
 import { sourcingChecks } from '../modules/inventory/sourcing';
+import { contractChecks } from '../modules/contracts/ledger';
 import { requestChecks } from '../modules/requests';
 import { legacyChecks } from '../modules/legacy';
 import { spaceChecks } from '../modules/spaces';
@@ -55,5 +56,7 @@ export async function consistencyChecks(sql: Sql, timezone: string): Promise<Che
   const refunds = await readSnapshot(sql, memberRefundChecks);
   // 会员合并（v0.7.26）
   const merges = await readSnapshot(sql, memberMergeChecks);
-  return [...summary.checks, ...inventory, ...expenses, ...pettyAccounts, ...sourcing, ...requests, ...frontdesk, legacy, ...spaces, ...floorplans, ...locations, ...membership, ...benefits, ...trials, ...refunds, ...merges].map(({ label, ok, detail }) => ({ label, ok, detail }));
+  // 合同与法务审查（v0.7.31）
+  const contracts = await readSnapshot(sql, contractChecks);
+  return [...summary.checks, ...inventory, ...expenses, ...pettyAccounts, ...sourcing, ...requests, ...frontdesk, legacy, ...spaces, ...floorplans, ...locations, ...membership, ...benefits, ...trials, ...refunds, ...merges, ...contracts].map(({ label, ok, detail }) => ({ label, ok, detail }));
 }

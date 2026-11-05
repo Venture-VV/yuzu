@@ -92,6 +92,13 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     case 'approval_rule':
     case 'approval_delegation':
       return typeof d.id === 'number' ? { refId: d.id } : null;
+    // 合同与法务审查（v0.7.31）：新建合同返回那份合同，变更单、用印申请返回那一条
+    case 'contract_create':
+      return d.contract && typeof d.contract === 'object' ? { refId: d.contract.id } : null;
+    case 'contract_change':
+      return d.change && typeof d.change === 'object' ? { refId: d.change.id } : null;
+    case 'contract_seal':
+      return d.seal && typeof d.seal === 'object' ? { refId: d.seal.id } : null;
   }
 }
 

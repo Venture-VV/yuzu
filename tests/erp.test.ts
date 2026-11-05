@@ -73,7 +73,7 @@ describe('ERP 模块开关', () => {
     expect(await modules(boss)).toContain('revenue');
   });
 
-  it('关掉库存：库存、采购、货款、审批待办都用不了（依赖库存），接口拒绝；营业数据不受影响；再开就恢复', async () => {
+  it('关掉库存：库存、采购、货款、审批待办、合同都用不了（依赖库存），接口拒绝；营业数据不受影响；再开就恢复', async () => {
     expect((await switchModules(ctx.owner, { modules: { inventory: false } })).status).toBe(200);
     try {
       const info = (await api(ctx.app, ctx.owner, 'GET', '/api/erp/modules')).body.modules as { key: string; switchedOn: boolean; enabled: boolean }[];
@@ -84,11 +84,12 @@ describe('ERP 模块开关', () => {
         ['deptStock', true, false],
         ['payables', true, false],
         ['approvals', true, false],
+        ['contracts', true, false],
         ['expenses', true, false],
         ['revenue', true, true],
       ]);
       expect(await modules(ctx.owner)).toEqual(['revenue']);
-      for (const url of ['/api/inventory/materials', '/api/inventory/todo-count', '/api/purchase-orders', '/api/purchase-baseline?materialId=1', '/api/payables/overview', '/api/erp/expenses', '/api/erp/petty/daily', '/api/erp/requests', '/api/erp/images/1', '/api/erp/dept-stock/meta']) {
+      for (const url of ['/api/inventory/materials', '/api/inventory/todo-count', '/api/purchase-orders', '/api/purchase-baseline?materialId=1', '/api/payables/overview', '/api/erp/expenses', '/api/erp/petty/daily', '/api/erp/requests', '/api/erp/images/1', '/api/erp/dept-stock/meta', '/api/erp/contracts']) {
         const r = await api(ctx.app, ctx.owner, 'GET', url);
         expect(r.status, url).toBe(403);
         expect(r.body.error.code, url).toBe('ERP_MODULE_DISABLED');

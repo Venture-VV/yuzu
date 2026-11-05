@@ -4,6 +4,8 @@
 
 import {
   APPROVAL_OVERDUE_HOURS,
+  CONTRACT_DEFAULT_STEPS,
+  SEAL_DEFAULT_STEPS,
   inStep,
   stepLabel,
   type ApprovalActionView,
@@ -17,7 +19,7 @@ import {
 import { can, permissionsOf, type Duty, type Role } from '@shared/permissions';
 import { lineAmountCents } from '@shared/quantity';
 import { loadRoleOverrides } from '../../auth/role-permissions';
-import type { Db, Tx } from '../../db';
+import type { Db, Fragment, Tx } from '../../db';
 import type { Actor } from '../../lib/context';
 import { todayIn } from '../../lib/dates';
 import { AppError, conflict } from '../../lib/errors';
@@ -42,7 +44,7 @@ export interface DocInfo {
   submittedBy: number;
 }
 
-interface RequestRow {
+export interface RequestRow {
   id: number;
   docKind: ApprovalDocKind;
   docId: number;
@@ -86,6 +88,15 @@ async function invDocAmount(db: Db, docId: number, count: boolean): Promise<numb
 }
 
 const INV_TYPES: Record<string, ApprovalDocType> = { damage: 'damage', supplier_return: 'supplier_return', opening: 'opening', count: 'stocktake' };
+
+/**
+ * 没有规则命中时的审批链（默认规则）：库存、采购、货款、报销是一级负责人（与 v0.7.29 一样）；
+ * 合同、合同变更是 财务 → 法务 → 负责人（C2），用印是一级店主（C7）。默认规则里提交人有资格的可以审（与 v0.7.30 的默认规则一样）
+ */
+export function defaultPlanFor(docType: ApprovalDocType): ApprovalPlan {
+  const steps = docType === 'contract' || docType === 'contract_change' ? CONTRACT_DEFAULT_STEPS : docType === 'contract_seal' ? SEAL_DEFAULT_STEPS : DEFAULT_STEPS;
+  return { ruleId: null, ruleVersion: null, steps, allowSelf: true };
+}
 
 /** 单据在审批规则里的类型、金额、部门（docs/APPROVALS.md 第 2 节） */
 export async function describeDoc(db: Db, kind: ApprovalDocKind, docId: number): Promise<DocInfo> {
@@ -134,6 +145,32 @@ export async function describeDoc(db: Db, kind: ApprovalDocKind, docId: number):
       if (!c) throw new AppError(404, 'NOT_FOUND', '报销单不存在');
       return { docType: 'expense_claim', docNo: c.docNo, amountCents: Number(c.amountCents), departmentId: Number(c.departmentId), submittedBy: Number(c.createdBy) };
     }
+    // 合同（v0.7.31）：金额 = 合同总价（起草中按草稿）、部门 = 合同的部门；提交人取最近一次提交的人
+    case 'contract': {
+      const [c] = await db<{ docNo: string; totalCents: number; departmentId: number | null; submittedBy: number }[]>`
+        SELECT c.contract_no AS doc_no, c.total_cents, c.department_id,
+               coalesce((SELECT r.submitted_by FROM contract_revisions r WHERE r.contract_id = c.id AND r.change_id IS NULL ORDER BY r.seq DESC LIMIT 1), c.created_by) AS submitted_by
+        FROM contracts c WHERE c.id = ${docId}`;
+      if (!c) throw new AppError(404, 'NOT_FOUND', '合同不存在');
+      return { docType: 'contract', docNo: c.docNo, amountCents: Number(c.totalCents), departmentId: c.departmentId === null ? null : Number(c.departmentId), submittedBy: Number(c.submittedBy) };
+    }
+    // 合同变更：金额 = 改前改后总价之差的绝对值（C10）
+    case 'contract_change': {
+      const [c] = await db<{ docNo: string; deltaCents: number; departmentId: number | null; submittedBy: number }[]>`
+        SELECT x.change_no AS doc_no, x.delta_cents, c.department_id,
+               coalesce((SELECT r.submitted_by FROM contract_revisions r WHERE r.change_id = x.id ORDER BY r.seq DESC LIMIT 1), x.created_by) AS submitted_by
+        FROM contract_changes x JOIN contracts c ON c.id = x.contract_id WHERE x.id = ${docId}`;
+      if (!c) throw new AppError(404, 'NOT_FOUND', '变更单不存在');
+      return { docType: 'contract_change', docNo: c.docNo, amountCents: Number(c.deltaCents), departmentId: c.departmentId === null ? null : Number(c.departmentId), submittedBy: Number(c.submittedBy) };
+    }
+    // 用印：金额 = 合同总价
+    case 'contract_seal': {
+      const [s] = await db<{ docNo: string; totalCents: number; departmentId: number | null; createdBy: number }[]>`
+        SELECT s.seal_no AS doc_no, c.total_cents, c.department_id, s.created_by
+        FROM contract_seals s JOIN contracts c ON c.id = s.contract_id WHERE s.id = ${docId}`;
+      if (!s) throw new AppError(404, 'NOT_FOUND', '用印申请不存在');
+      return { docType: 'contract_seal', docNo: s.docNo, amountCents: Number(s.totalCents), departmentId: s.departmentId === null ? null : Number(s.departmentId), submittedBy: Number(s.createdBy) };
+    }
   }
 }
 
@@ -154,7 +191,7 @@ export async function planApproval(db: Db, input: { docType: ApprovalDocType; am
     ORDER BY (department_id IS NOT NULL) DESC, min_cents DESC, id DESC
     LIMIT 1`;
   if (rule) return { ruleId: Number(rule.id), ruleVersion: rule.version, steps: rule.steps, allowSelf: rule.allowSelf };
-  return input.fallback ? { ruleId: null, ruleVersion: null, steps: DEFAULT_STEPS, allowSelf: true } : null;
+  return input.fallback ? defaultPlanFor(input.docType) : null;
 }
 
 // ───────────────────────── 开审批单 ─────────────────────────
@@ -273,7 +310,8 @@ async function notEligible(db: Db, req: RequestRow, standing: Standing, selfSubm
 
 // ───────────────────────── 同意、退回、关掉 ─────────────────────────
 
-async function lockPending(tx: Tx, kind: ApprovalDocKind, docId: number): Promise<RequestRow | null> {
+/** 锁住单据在审的那张审批单（调用方已锁住单据一行）；没有返回 null。合同类按当前这一级是不是法务决定要不要审查清单 */
+export async function lockPending(tx: Tx, kind: ApprovalDocKind, docId: number): Promise<RequestRow | null> {
   const [r] = await tx<RequestRow[]>`
     SELECT id, doc_kind, doc_id, doc_type, doc_no, steps, allow_self, current_level, status, submitted_by
     FROM approval_requests WHERE doc_kind = ${kind} AND doc_id = ${docId} AND status = 'pending' FOR UPDATE`;
@@ -289,7 +327,7 @@ async function pendingOrDefault(tx: Tx, kind: ApprovalDocKind, docId: number, re
   if (found) return found;
   if (requestId !== undefined) throw conflict('APPROVAL_MOVED', '这张单的审批已经变了（退回、撤回或重新提交），请刷新后再看');
   const info = await describeDoc(tx, kind, docId);
-  await insertRequest(tx, kind, docId, info, { ruleId: null, ruleVersion: null, steps: DEFAULT_STEPS, allowSelf: true }, info.submittedBy);
+  await insertRequest(tx, kind, docId, info, defaultPlanFor(info.docType), info.submittedBy);
   return (await lockPending(tx, kind, docId))!;
 }
 
@@ -421,6 +459,15 @@ export async function actionsOf(db: Db, requestIds: number[]): Promise<Map<numbe
 
 /** 单据详情里的审批进度：在审的那张，没有在审的取最近一张；从没走过审批中心的为空 */
 export async function approvalBrief(db: Db, kind: ApprovalDocKind, docId: number): Promise<ApprovalBrief | null> {
+  return briefOf(db, db`doc_kind = ${kind} AND doc_id = ${docId}`);
+}
+
+/** 指定的那张审批单的进度（合同的每一份提交记录各对着一张，v0.7.31） */
+export async function approvalBriefById(db: Db, requestId: number): Promise<ApprovalBrief | null> {
+  return briefOf(db, db`id = ${requestId}`);
+}
+
+async function briefOf(db: Db, where: Fragment): Promise<ApprovalBrief | null> {
   const [r] = await db<{
     id: number;
     status: ApprovalStatus;
@@ -434,7 +481,7 @@ export async function approvalBrief(db: Db, kind: ApprovalDocKind, docId: number
   }[]>`
     SELECT id, status, rule_id, current_level, steps, allow_self, submitted_by, level_started_at,
            (status = 'pending' AND level_started_at < now() - make_interval(hours => ${APPROVAL_OVERDUE_HOURS})) AS overdue
-    FROM approval_requests WHERE doc_kind = ${kind} AND doc_id = ${docId}
+    FROM approval_requests WHERE ${where}
     ORDER BY (status = 'pending') DESC, id DESC LIMIT 1`;
   if (!r) return null;
   const id = Number(r.id);
@@ -473,6 +520,9 @@ export async function approvalChecks(db: Db): Promise<{ key: string; label: stri
       UNION ALL SELECT 'payment', id, doc_no FROM payments WHERE status = 'submitted'
       UNION ALL SELECT 'opening_payable', id, doc_no FROM opening_payables WHERE status = 'submitted'
       UNION ALL SELECT 'expense_claim', id, doc_no FROM expense_claims WHERE status = 'submitted'
+      UNION ALL SELECT 'contract', id, contract_no FROM contracts WHERE status = 'reviewing'
+      UNION ALL SELECT 'contract_change', id, change_no FROM contract_changes WHERE status = 'reviewing'
+      UNION ALL SELECT 'contract_seal', id, seal_no FROM contract_seals WHERE status = 'reviewing'
     ) d
     WHERE (SELECT count(*) FROM approval_requests r WHERE r.doc_kind = d.kind AND r.doc_id = d.id AND r.status = 'pending') <> 1`;
   const orphans = await db<{ docNo: string }[]>`
@@ -483,6 +533,9 @@ export async function approvalChecks(db: Db): Promise<{ key: string; label: stri
       WHEN 'payment' THEN (SELECT status FROM payments WHERE id = r.doc_id)
       WHEN 'opening_payable' THEN (SELECT status FROM opening_payables WHERE id = r.doc_id)
       WHEN 'expense_claim' THEN (SELECT status FROM expense_claims WHERE id = r.doc_id)
+      WHEN 'contract' THEN (SELECT CASE status WHEN 'reviewing' THEN 'submitted' ELSE status END FROM contracts WHERE id = r.doc_id)
+      WHEN 'contract_change' THEN (SELECT CASE status WHEN 'reviewing' THEN 'submitted' ELSE status END FROM contract_changes WHERE id = r.doc_id)
+      WHEN 'contract_seal' THEN (SELECT CASE status WHEN 'reviewing' THEN 'submitted' ELSE status END FROM contract_seals WHERE id = r.doc_id)
     END, '') <> 'submitted'`;
   const bad = [
     ...docs.map((d) => `${d.docNo} 待确认但${d.n === 0 ? '没有在审的审批单' : `有 ${d.n} 张在审的审批单`}`),
