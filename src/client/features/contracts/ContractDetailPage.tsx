@@ -478,6 +478,18 @@ function Detail({ c }: { c: ContractDetail }) {
                   </p>
                 )}
                 {r.reviews.length > 0 && <ReviewsView reviews={r.reviews} />}
+                {/* 这次提交时的内容与单价表：旧版本留着可以查（Codex 自动审查 344f7e8） */}
+                <details className="mt-2 rounded-md border border-line bg-paper-2/40 px-3 py-2" data-testid={`revision-content-${r.seq}`}>
+                  <summary className="cursor-pointer text-[12.5px] font-semibold text-ink-2">这次提交的内容与单价表</summary>
+                  <div className="mt-2 space-y-3">
+                    <p className="text-[13px] text-ink-2">
+                      {r.content.title} · {r.content.startDate ?? '—'} 至 {r.content.endDate ?? '不定期'}
+                    </p>
+                    <TermsView content={r.content} />
+                    <LinesView lines={r.lines} />
+                    {r.content.note && <p className="text-[12.5px] text-ink-2">备注：{r.content.note}</p>}
+                  </div>
+                </details>
               </li>
             ))}
           </ol>

@@ -208,6 +208,14 @@ test.describe('合同与法务审查（v0.7.31）', () => {
     const afterWithdraw = (await get()).changes[0]!;
     const voided = await page.request.post(`/api/erp/contracts/changes/${change.id}/void`, { data: { version: afterWithdraw.version, reason: 'E2E：先不调价' } });
     expect(voided.ok(), await voided.text()).toBe(true);
+    // 提交记录里每一次提交都能展开当时的内容与单价表：第 1 次（成为第 1 版）单价 50，变更单那次 45（Codex 自动审查 344f7e8）
+    await page.reload();
+    const firstRevision = page.getByTestId('revision-content-1');
+    await firstRevision.locator('summary').click();
+    await expect(firstRevision.getByTestId('contract-lines')).toContainText('¥50.00');
+    const changeRevision = page.getByTestId('revision-content-2');
+    await changeRevision.locator('summary').click();
+    await expect(changeRevision.getByTestId('contract-lines')).toContainText('¥45.00');
 
     // ④ 到期提醒与续签
     await page.goto('/erp/contracts');
