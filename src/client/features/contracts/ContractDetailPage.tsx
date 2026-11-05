@@ -869,7 +869,8 @@ function FilesCard({ c, manage, onChanged }: { c: ContractDetail; manage: boolea
   const [viewing, setViewing] = useState<string | null>(null);
   const [removing, setRemoving] = useState<number | null>(null);
   const canAdd = manage && c.status !== 'voided';
-  const canRemove = manage && c.status !== 'archived' && c.status !== 'voided';
+  // 归档过的（含归档后终止的）扫描件只能追加
+  const canRemove = manage && !c.archiveNo && c.status !== 'voided';
   const upload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setBusy(true);

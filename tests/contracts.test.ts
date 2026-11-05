@@ -29,6 +29,8 @@ let dept: string; // 部门申购
 let supplierId: number;
 let mat: { id: number; name: string; purchaseUnit: string };
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAAEUlEQVR42mP8z8DwnxEJMAIAJF4C/3FpsJcAAAAASUVORK5CYII=', 'base64');
+/** 另一张图（与上面那张内容不同，不会按内容去重） */
+const PNG2 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 
 const content = (over: Record<string, unknown> = {}) => ({
   title: '洗浴用品年度采购',
@@ -179,6 +181,8 @@ describe('合同与法务审查', () => {
     const detail = await api(ctx.app, mgr, 'GET', `/api/approvals/${rid2}`);
     expect(detail.status, JSON.stringify(detail.body)).toBe(200);
     expect(detail.body.doc.contract).toMatchObject({ kind: 'contract', contractId: c.id });
+    // 「打开原单据」直达合同详情（Codex 自动审查 9d5272b）
+    expect(detail.body.doc.link).toBe(`/erp/contracts/${c.id}`);
     expect(detail.body.doc.contract.reviews).toHaveLength(1);
     expect(detail.body.doc.lines[0]).toMatchObject({ name: mat.name, priceCents: 50_00 });
     expect((await approveAt(mgr, rid2, 3)).status).toBe(200);
@@ -357,5 +361,25 @@ describe('合同与法务审查', () => {
     expect((await api(ctx.app, payer, 'POST', '/api/erp/contracts', { clientKey: randomUUID(), category: 'other', counterparty: 'X', content: content({ lines: [] }) })).status).toBe(403);
     expect(await contractChecks(ctx.sql)).toEqual([expect.objectContaining({ ok: true })]);
     expect(await approvalChecks(ctx.sql)).toMatchObject({ ok: true });
+  });
+
+  it('归档后终止：扫描件照样只能追加、不能删（Codex 自动审查 9d5272b）', async () => {
+    c = await get(c.id);
+    expect(c.status).toBe('archived');
+    const fileIds = c.files.map((f) => f.id);
+    expect(fileIds.length).toBeGreaterThan(0);
+    const t = await op(c.id, 'terminate', { version: c.version, closedOn: today, reason: '供应商停产，提前终止' });
+    expect(t.status, JSON.stringify(t.body)).toBe(200);
+    c = t.body;
+    expect(c).toMatchObject({ status: 'terminated', archiveNo: expect.stringMatching(/^GD/) });
+    const removed = await api(ctx.app, buyer, 'POST', `/api/erp/contracts/files/${fileIds[0]}/remove`, {});
+    expect(removed.status).toBe(409);
+    expect(removed.body.error.code).toBe('INVALID_STATE');
+    expect((await get(c.id)).files.map((f) => f.id)).toEqual(fileIds);
+    // 追加照样可以
+    const more = await api(ctx.app, buyer, 'POST', `/api/erp/contracts/${c.id}/files`, { mime: 'image/png', data: PNG2.toString('base64') });
+    expect(more.status, JSON.stringify(more.body)).toBe(201);
+    expect(more.body.files).toHaveLength(fileIds.length + 1);
+    expect(await contractChecks(ctx.sql)).toEqual([expect.objectContaining({ ok: true })]);
   });
 });

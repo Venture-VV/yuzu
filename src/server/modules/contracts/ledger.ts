@@ -468,13 +468,13 @@ export async function contractChecks(db: Db): Promise<{ key: string; label: stri
       AND NOT EXISTS (SELECT 1 FROM contract_reviews v WHERE v.revision_id = r.id AND v.approval_request_id = q.id AND v.action = 'approve')`;
   const archived = await db<{ contractNo: string }[]>`
     SELECT c.contract_no FROM contracts c
-    WHERE c.status = 'archived'
+    WHERE c.archived_at IS NOT NULL
       AND (NOT EXISTS (SELECT 1 FROM contract_seals s WHERE s.contract_id = c.id AND s.status = 'approved')
            OR NOT EXISTS (SELECT 1 FROM contract_files f WHERE f.contract_id = c.id AND f.removed_at IS NULL))`;
   const bad = [
     ...versions.map((v) => `${v.contractNo} 生效的版本与提交记录、审批单对不上`),
     ...legal.map((l) => `${l.docNo} 审批通过了但法务那一级没有审查清单的结论`),
-    ...archived.map((a) => `${a.contractNo} 已归档但没有生效的用印登记或扫描件`),
+    ...archived.map((a) => `${a.contractNo} 归档过但没有生效的用印登记或扫描件`),
   ];
   return [
     {

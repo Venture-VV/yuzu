@@ -747,7 +747,7 @@ export async function addFile(deps: Deps, contractId: number, raw: unknown, acto
   });
 }
 
-/** 删掉传错的扫描件（标记，不删记录）：归档以后不能删 */
+/** 删掉传错的扫描件（标记，不删记录）：归档过的不能删——归档后终止的合同照样不能删（Codex 自动审查 9d5272b） */
 export async function removeFile(deps: Deps, fileId: number, actor: Actor, ip?: string) {
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
@@ -755,7 +755,9 @@ export async function removeFile(deps: Deps, fileId: number, actor: Actor, ip?: 
     if (!f) throw notFound('扫描件不存在');
     const c = await lockContract(tx, Number(f.contractId));
     if (f.removedAt) return;
-    if (c.status === 'archived') throw conflict('INVALID_STATE', '归档以后扫描件只能追加，不能删');
+    // 锁住合同一行以后再读归档记录：终止只改状态，归档号、归档时间留着
+    const [a] = await tx<{ archived: boolean }[]>`SELECT archived_at IS NOT NULL AS archived FROM contracts WHERE id = ${c.id}`;
+    if (c.status === 'archived' || a!.archived) throw conflict('INVALID_STATE', '归档以后扫描件只能追加，不能删');
     await tx`UPDATE contract_files SET removed_by = ${actor.id}, removed_at = now() WHERE id = ${fileId} AND removed_at IS NULL`;
     await writeAudit(tx, { staffId: actor.id, action: 'contract_doc', targetType: 'contract', targetId: c.id, detail: { op: 'file_remove', contractNo: c.contractNo, fileId }, ip });
   });

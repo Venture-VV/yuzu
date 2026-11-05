@@ -506,7 +506,7 @@ async function digestOf(db: Db, kind: ApprovalDocKind, docId: number, requestId:
       if (!x) throw notFound('用印申请不存在');
       return {
         title: '用印申请',
-        link: `/erp/contracts?id=${x.contractId}`,
+        link: `/erp/contracts/${x.contractId}`,
         party: x.counterparty,
         docDate: x.sealDate,
         note: x.purpose,
@@ -572,7 +572,7 @@ async function contractDigest(db: Db, kind: 'contract' | 'contract_change', docI
   }
   return {
     title: kind === 'contract' ? `${CONTRACT_CATEGORY_LABELS[h.category]}合同` : '合同变更',
-    link: `/erp/contracts?id=${h.contractId}`,
+    link: `/erp/contracts/${h.contractId}`,
     party: h.counterparty,
     docDate: content.startDate,
     note: content.note,
