@@ -546,7 +546,12 @@ export interface SourcingLine {
   spec: string;
   /** 最近一次同口径成交价（比价用） */
   baseline: PriceCompare['baseline'];
+  /** 来自哪几行需求（v0.7.30：从需求单发起的询价；定标转采购单时一起带到采购单行上） */
+  requests: SourcingLineRequest[];
 }
+
+/** 询价单行来自的需求行：与采购单行的需求关联同一形状 */
+export type SourcingLineRequest = PoLineRequest;
 
 export interface SourcingQuote {
   id: number;

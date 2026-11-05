@@ -335,9 +335,17 @@ async function prepareLines(db: Db, body: z.infer<typeof PoBody>, existing: Map<
 /**
  * 转采购单（v0.7.8）：新关联的需求行要已通过、没被别的有效采购单（撤回的不算）占用；需求行选了物料的，采购单行的物料要一致。
  * 同一物料的几行需求（几个部门都要）可以合并成采购单的一行。锁需求单（id 升序）后再核对，同一行需求不会被两张采购单同时转走。
+ * 在没撤销的询价单里的需求行（v0.7.30）只能由那张询价单转采购单（sourcingEventId 是这张采购单来自的询价单）。
  * 加锁顺序：采购单 → 需求单。去掉关联（删行、撤回采购单）不需要审核权限，需求行回到「未下单」。
  */
-async function checkRequestLinks(tx: Tx, poId: number | null, lines: PreparedLine[], existing: Map<number, ExistingLine>, actor: Actor) {
+async function checkRequestLinks(
+  tx: Tx,
+  poId: number | null,
+  lines: PreparedLine[],
+  existing: Map<number, ExistingLine>,
+  actor: Actor,
+  sourcingEventId: number | null,
+) {
   const all = lines.flatMap((l) => l.requestLineIds);
   if (new Set(all).size !== all.length) throw badRequest('同一行需求在一张采购单里只能出现一次');
   if (all.length === 0) return;
@@ -350,11 +358,14 @@ async function checkRequestLinks(tx: Tx, poId: number | null, lines: PreparedLin
       WHERE r.id IN (SELECT request_id FROM purchase_request_lines WHERE id IN ${tx(added)})
       ORDER BY r.id FOR UPDATE`;
   }
-  const rows = await tx<{ id: number; name: string; materialId: number | null; status: string; docNo: string; takenBy: string | null }[]>`
+  const rows = await tx<{ id: number; name: string; materialId: number | null; status: string; docNo: string; takenBy: string | null; inSourcing: string | null }[]>`
     SELECT l.id, l.name, l.material_id, r.status, r.doc_no,
            (SELECT po.doc_no FROM purchase_order_line_requests x JOIN purchase_order_lines pl ON pl.id = x.po_line_id
               JOIN purchase_orders po ON po.id = pl.po_id
-             WHERE x.request_line_id = l.id AND po.status <> 'cancelled' ${poId ? tx`AND po.id <> ${poId}` : tx``} LIMIT 1) AS taken_by
+             WHERE x.request_line_id = l.id AND po.status <> 'cancelled' ${poId ? tx`AND po.id <> ${poId}` : tx``} LIMIT 1) AS taken_by,
+           (SELECT e.doc_no FROM sourcing_line_requests sr JOIN sourcing_lines sl ON sl.id = sr.sourcing_line_id
+              JOIN sourcing_events e ON e.id = sl.event_id
+             WHERE sr.request_line_id = l.id AND e.status <> 'cancelled' ${sourcingEventId ? tx`AND e.id <> ${sourcingEventId}` : tx``} LIMIT 1) AS in_sourcing
     FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
     WHERE l.id IN ${tx(all)}`;
   const byId = new Map(rows.map((r) => [Number(r.id), r]));
@@ -366,6 +377,7 @@ async function checkRequestLinks(tx: Tx, poId: number | null, lines: PreparedLin
       if (before.has(rid)) continue;
       if (r.status !== 'approved') throw conflict('REQUEST_NOT_APPROVED', `需求单 ${r.docNo} 还没通过审核，不能转采购单`);
       if (r.takenBy) throw conflict('REQUEST_LINE_ORDERED', `「${r.name}」已经在采购单 ${r.takenBy} 里`, { docNo: r.takenBy });
+      if (r.inSourcing) throw conflict('REQUEST_LINE_IN_SOURCING', `「${r.name}」在询价单 ${r.inSourcing} 里，请定标后从询价单转采购单`, { docNo: r.inSourcing });
     }
   }
 }
@@ -446,11 +458,12 @@ interface PoRow {
   backfill: boolean;
   backfillReceiptId: number | null;
   createdBy: number;
+  sourcingEventId: number | null;
 }
 
 async function lockPo(tx: Tx, poId: number): Promise<PoRow> {
   const [po] = await tx<PoRow[]>`
-    SELECT id, doc_no, status, supplier_id, revision, backfill, backfill_receipt_id, created_by
+    SELECT id, doc_no, status, supplier_id, revision, backfill, backfill_receipt_id, created_by, sourcing_event_id
     FROM purchase_orders WHERE id = ${poId} FOR UPDATE`;
   if (!po) throw notFound('采购单不存在');
   return po;
@@ -571,7 +584,7 @@ export async function createPo(
       const sup = await assertSupplier(tx, body.supplierId);
       const ch = resolveChannel(await loadPurchaseRules(tx), body, sup.defaultChannel);
       const lines = await prepareLines(tx, body, new Map());
-      await checkRequestLinks(tx, null, lines, new Map(), actor);
+      await checkRequestLinks(tx, null, lines, new Map(), actor, opts.sourcingEventId ?? null);
       await checkImages(tx, lines);
       const settings = await loadInventorySettings(tx);
       const docNo = await nextDocNo(tx, 'purchase_order', 'CG', body.orderDate);
@@ -669,7 +682,7 @@ export async function updatePo(deps: Deps, poId: number, raw: PoBodyInput & { ac
     const sup = await assertSupplier(tx, body.supplierId);
     const ch = await channelForUpdate(tx, poId, body, sup.defaultChannel);
     const lines = await prepareLines(tx, body, existing);
-    await checkRequestLinks(tx, poId, lines, existing, actor);
+    await checkRequestLinks(tx, poId, lines, existing, actor, po.sourcingEventId === null ? null : Number(po.sourcingEventId));
     await checkImages(tx, lines);
     const total = await syncLines(tx, poId, lines, existing);
     await tx`

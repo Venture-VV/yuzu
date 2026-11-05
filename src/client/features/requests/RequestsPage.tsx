@@ -30,6 +30,7 @@ export const REQUEST_STATUS_TONE: Record<RequestStatus, 'pine' | 'yuzu' | 'neutr
 
 const PROGRESS: Record<RequestLineProgress['state'], { label: string; tone: 'neutral' | 'lake' | 'yuzu' | 'pine' }> = {
   none: { label: '未下单', tone: 'neutral' },
+  sourcing: { label: '询价中', tone: 'yuzu' },
   ordered: { label: '已下单', tone: 'lake' },
   partial: { label: '部分到货', tone: 'yuzu' },
   received: { label: '已到货', tone: 'pine' },
@@ -268,6 +269,18 @@ function ProgressText({ p, canSeePo }: { p: RequestLineProgress; canSeePo: boole
   return (
     <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] text-ink-3">
       <Badge tone={s.tone}>{s.label}</Badge>
+      {!p.po && p.sourcing && (
+        <>
+          {canSeePo ? (
+            <Link to={`/purchasing/sourcing/${p.sourcing.id}`} className="num font-semibold text-lake hover:underline">
+              {p.sourcing.docNo}
+            </Link>
+          ) : (
+            <span className="num font-semibold">{p.sourcing.docNo}</span>
+          )}
+          <span>定标后转采购单</span>
+        </>
+      )}
       {p.po && (
         <>
           {canSeePo ? (

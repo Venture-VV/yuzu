@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
-import { ArrowLeft, CircleAlert, CircleCheck, ClipboardList, CloudOff, PackagePlus, RotateCw, Search, ShoppingCart, Trash2, X } from 'lucide-react';
+import { ArrowLeft, CircleAlert, CircleCheck, ClipboardList, CloudOff, FileSearch, PackagePlus, RotateCw, Search, ShoppingCart, Trash2, X } from 'lucide-react';
 import type { Material } from '@shared/inventory';
-import { centsToInput, parseYuan } from '@shared/money';
+import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import type { PoLineRequest, PriceCompare, PurchaseOrder } from '@shared/purchasing';
 import { fitsDecimals, formatQty, lineAmountCents, parseQty, priceChangePercent, toBaseQty } from '@shared/quantity';
 import { MAX_LINE_IMAGES, type ImageRef, type OpenRequestLine } from '@shared/requests';
@@ -22,6 +22,7 @@ import { useInvSettings, useMaterials, useSuppliers } from '../inventory/queries
 import { CompareChip } from './parts';
 import { PriceHistoryButton } from './PriceHistory';
 import { useOpenLines } from '../requests/queries';
+import { SourcingCreateDialog, type SourcingDraft } from './SourcingPage';
 import { useBaseline, useInvalidateAll, usePo, usePurchaseRules } from './queries';
 
 interface Line {
@@ -249,6 +250,28 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
     // 只在需求行第一次读回时并入一次（之后的修改由采购在明细里调整）
   }, [openLines.data, materialsQ.data]);
   const patch = (key: string, p: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...p } : l)));
+  // 改为询价（v0.7.30）：合计到询价门槛的、或者想先比价的，把明细（物料、数量、规格、需求单）带到一张新询价单；这张采购单不保存
+  const [sourcingDraft, setSourcingDraft] = useState<SourcingDraft | null>(null);
+  const toSourcing = () => {
+    if (unmatched.length > 0) {
+      setError(`还有 ${unmatched.length} 行新产品没选物料：先选好物料，再改为询价`);
+      return;
+    }
+    const mats = new Map((materialsQ.data ?? []).map((m) => [m.id, m]));
+    const draftLines = lines.flatMap((l) => {
+      const m = mats.get(l.materialId);
+      if (!m) return [];
+      const docs = [...new Set(l.requests.map((r) => `${r.requestNo} ${r.departmentName}`))];
+      return [{ key: l.key, material: m, qty: l.qty, spec: l.spec, requestLineIds: l.requests.map((r) => r.lineId), sources: docs.length ? docs.join('、') : undefined }];
+    });
+    if (draftLines.length === 0) {
+      setError('请至少加一项物料');
+      return;
+    }
+    const names = draftLines.map((d) => d.material.name);
+    setError(null);
+    setSourcingDraft({ title: (names.length > 1 ? `${names[0]}等 ${names.length} 项` : names[0]!).slice(0, 40), needBy: expectedDate, note: note.trim(), lines: draftLines });
+  };
 
   const rows = lines.map((l) => {
     const m = materialsQ.data?.find((x) => x.id === l.materialId);
@@ -266,6 +289,9 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
   });
   const total = rows.reduce((s, r) => s + (r.amount ?? 0), 0);
   const needsApproval = !!settings.data?.approvalRules.purchase_order;
+  // 询价门槛（E5）：没改过版、不是补单、不是从已定标的询价单转来的，合计到门槛要先询价（与服务端提交时的核对一致）
+  const quoteThreshold = purchaseRules.data?.quoteThresholdCents ?? 0;
+  const overQuote = mode !== 'revise' && quoteThreshold > 0 && total >= quoteThreshold && !existing?.sourcing && !existing?.backfill;
   const blocking = uploading.size > 0
     ? '图片还在上传，请稍等'
     : unmatched.length > 0
@@ -525,16 +551,19 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
           {error && (
             <Notice tone="error" title={error} icon={<CircleAlert className="size-5" />}>
               内容仍保留在页面上，可修改后再提交。
-              {error.includes('询价门槛') && (
-                <>
-                  {' '}
-                  可以先点「保存草稿」，再到
-                  <Link to="/purchasing/sourcing" className="mx-1 font-bold text-lake underline">
-                    询价比价
-                  </Link>
-                  建询价单。
-                </>
-              )}
+              {error.includes('询价门槛') &&
+                (mode === 'new' ? (
+                  <> 点下面的「改为询价」，把这些物料（连同需求单）带到一张新询价单；定标后从询价单转采购单。</>
+                ) : (
+                  <>
+                    {' '}
+                    到
+                    <Link to="/purchasing/sourcing" className="mx-1 font-bold text-lake underline">
+                      询价比价
+                    </Link>
+                    建询价单，定标后从询价单转采购单。
+                  </>
+                ))}
             </Notice>
           )}
           {phase.kind === 'uncertain' && (
@@ -578,12 +607,22 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
               )}
             </span>
             {blocking && phase.kind === 'edit' && <span className="text-[12.5px] font-semibold text-clay">{blocking}</span>}
+            {overQuote && (
+              <span className="text-[12.5px] font-semibold text-yuzu-deep" data-testid="po-over-quote">
+                合计到了询价门槛 ¥{formatAmount(quoteThreshold)}：{mode === 'new' ? '先「改为询价」，定标后再转采购单' : '要来自已定标的询价单才能提交'}
+              </span>
+            )}
           </div>
           {needsApproval && can('inventory.approve') && (
             <label className="flex cursor-pointer items-center gap-2 text-[13px] font-semibold text-ink-2">
               <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={approveNow} disabled={locked} onChange={(e) => setApproveNow(e.target.checked)} />
               同时以负责人身份确认
             </label>
+          )}
+          {mode === 'new' && (
+            <Button variant="secondary" disabled={locked || lines.length === 0} icon={<FileSearch className="size-4" />} onClick={toSourcing} data-testid="po-to-sourcing">
+              改为询价
+            </Button>
           )}
           {mode !== 'revise' && (
             <Button variant="secondary" disabled={locked || !!blocking} loading={phase.kind === 'submitting'} onClick={() => void send({ ...body('save'), clientKey })}>
@@ -605,6 +644,7 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
         }
         onSaved={(m) => creating && placeRequest(m, creating)}
       />
+      <SourcingCreateDialog open={!!sourcingDraft} onClose={() => setSourcingDraft(null)} initial={sourcingDraft ?? undefined} />
     </>
   );
 }

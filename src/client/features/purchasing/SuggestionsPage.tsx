@@ -1,12 +1,12 @@
 // 补货建议（v0.7.29 ERP 采购五项④，E4，docs/ERP_PURCHASING.md 第 5 节）。
 // 总仓物料按日均用量、结存与在途算出该补多少，按供应商分组；采购改数量、去掉不要的行，一键生成采购单草稿，
-// 打开草稿核对后提交。建好的草稿算在途，刷新后不会重复建议。
+// 打开草稿核对后提交；合计到询价门槛的（或想先比价的）可以「发起询价」（v0.7.30）。建好的草稿、询价单都算在途，刷新后不会重复建议。
 
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router';
-import { ArrowLeft, CloudOff, FilePlus2, Lightbulb } from 'lucide-react';
+import { ArrowLeft, CloudOff, FilePlus2, FileSearch, Lightbulb } from 'lucide-react';
 import type { PurchaseOrder, ReplenishGroup } from '@shared/purchasing';
-import { centsToInput, parseYuan } from '@shared/money';
+import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { fitsDecimals, formatQty, lineAmountCents, parseQty, toBaseQty } from '@shared/quantity';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
@@ -16,8 +16,9 @@ import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Input, MoneyInput, Notice, Select, Skeleton } from '../../components/ui';
-import { useSuppliers } from '../inventory/queries';
-import { useInvalidateAll, useSuggestions } from './queries';
+import { useMaterials, useSuppliers } from '../inventory/queries';
+import { useInvalidateAll, usePurchaseRules, useSuggestions } from './queries';
+import { SourcingCreateDialog, type SourcingDraft } from './SourcingPage';
 
 export function SuggestionsPage() {
   const can = useCan();
@@ -74,7 +75,10 @@ function GroupCard({ group, canCreate }: { group: ReplenishGroup; canCreate: boo
   const navigate = useNavigate();
   const invalidate = useInvalidateAll();
   const suppliers = useSuppliers();
+  const materials = useMaterials();
+  const purchaseRules = usePurchaseRules();
   const [supplierId, setSupplierId] = useState<number | null>(group.supplier?.id ?? null);
+  const [sourcingDraft, setSourcingDraft] = useState<SourcingDraft | null>(null);
   const [picks, setPicks] = useState<Record<number, Pick>>({});
   const [clientKey, setClientKey] = useState(uuid);
   const [busy, setBusy] = useState(false);
@@ -110,6 +114,28 @@ function GroupCard({ group, canCreate }: { group: ReplenishGroup; canCreate: boo
   const chosen = rows.filter((r) => r.p.on);
   const total = chosen.reduce((t, r) => t + (r.amount ?? 0), 0);
   const blocking = !supplierId ? '请先选供应商' : chosen.length === 0 ? '请至少勾一行' : (chosen.find((r) => r.err)?.err ?? null);
+  // 询价门槛（E5）：合计到门槛的草稿提交时会被拦，先发起询价（v0.7.30）
+  const quoteThreshold = purchaseRules.data?.quoteThresholdCents ?? 0;
+  const overQuote = quoteThreshold > 0 && total >= quoteThreshold;
+  const toSourcing = () => {
+    const mats = new Map((materials.data ?? []).map((m) => [m.id, m]));
+    const lines = chosen.flatMap((r) => {
+      const m = mats.get(r.l.materialId);
+      return m ? [{ key: uuid(), material: m, qty: r.p.qty, spec: r.l.specification.slice(0, 80) }] : [];
+    });
+    if (lines.length === 0) {
+      setError('请至少勾一行');
+      return;
+    }
+    const who = suppliers.data?.find((s) => s.id === supplierId)?.name ?? group.supplier?.name;
+    setError(null);
+    setSourcingDraft({
+      title: `补货：${lines[0]!.material.name}${lines.length > 1 ? `等 ${lines.length} 项` : ''}`.slice(0, 40),
+      needBy: '',
+      note: who ? `补货建议发起（常用供应商：${who}）` : '补货建议发起',
+      lines,
+    });
+  };
   const setPick = (id: number, patch: Partial<Pick>) => setPicks((ps) => ({ ...ps, [id]: { ...ps[id]!, ...patch } }));
 
   const done = (po: PurchaseOrder) => {
@@ -180,9 +206,32 @@ function GroupCard({ group, canCreate }: { group: ReplenishGroup; canCreate: boo
           勾选的合计 <Money cents={total} className="font-semibold text-ink-2" />
         </span>
         {canCreate && (
-          <span className="ml-auto flex items-center gap-2">
+          <span className="ml-auto flex flex-wrap items-center justify-end gap-2">
             {blocking && <span className="text-[12px] font-semibold text-clay">{blocking}</span>}
-            <Button variant="primary" size="sm" icon={<FilePlus2 className="size-4" />} disabled={!!blocking || busy || uncertain} loading={busy} onClick={() => void create()} data-testid="suggest-create">
+            {overQuote && (
+              <span className="text-[12px] font-semibold text-yuzu-deep" data-testid="suggest-over-quote">
+                合计到了询价门槛 ¥{formatAmount(quoteThreshold)}，要先询价
+              </span>
+            )}
+            <Button
+              variant={overQuote ? 'primary' : 'secondary'}
+              size="sm"
+              icon={<FileSearch className="size-4" />}
+              disabled={chosen.length === 0 || busy || uncertain}
+              onClick={toSourcing}
+              data-testid="suggest-sourcing"
+            >
+              发起询价
+            </Button>
+            <Button
+              variant={overQuote ? 'secondary' : 'primary'}
+              size="sm"
+              icon={<FilePlus2 className="size-4" />}
+              disabled={!!blocking || busy || uncertain}
+              loading={busy}
+              onClick={() => void create()}
+              data-testid="suggest-create"
+            >
               生成采购单草稿
             </Button>
           </span>
@@ -245,6 +294,7 @@ function GroupCard({ group, canCreate }: { group: ReplenishGroup; canCreate: boo
           </li>
         ))}
       </ul>
+      <SourcingCreateDialog open={!!sourcingDraft} onClose={() => setSourcingDraft(null)} initial={sourcingDraft ?? undefined} />
     </Card>
   );
 }

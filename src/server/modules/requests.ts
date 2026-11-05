@@ -80,6 +80,14 @@ const PROGRESS_SQL = (db: Db) => db`
      WHERE x.request_line_id = l.id AND po.status <> 'cancelled'
      ORDER BY pl.id LIMIT 1)`;
 
+/** 需求行在哪张没撤销的询价单里（v0.7.30：从需求单发起询价；同一时刻最多一张，接口里锁需求单核对、自检兜底） */
+const SOURCING_SQL = (db: Db) => db`
+  (SELECT json_build_object('id', e.id, 'docNo', e.doc_no)
+     FROM sourcing_line_requests sr JOIN sourcing_lines sl ON sl.id = sr.sourcing_line_id
+     JOIN sourcing_events e ON e.id = sl.event_id
+     WHERE sr.request_line_id = l.id AND e.status <> 'cancelled'
+     ORDER BY e.id DESC LIMIT 1)`;
+
 interface RawProgress {
   poId: number;
   docNo: string;
@@ -92,12 +100,14 @@ interface RawProgress {
   returnedMilli: number;
 }
 
-function progressOf(p: RawProgress | null): RequestLineProgress {
-  if (!p) return { po: null, orderedMilli: 0, receivedMilli: 0, returnedMilli: 0, inventoryUnit: null, mergedLines: 0, state: 'none' };
+function progressOf(p: RawProgress | null, s: { id: number; docNo: string } | null = null): RequestLineProgress {
+  const sourcing = s ? { id: Number(s.id), docNo: s.docNo } : null;
+  if (!p) return { po: null, orderedMilli: 0, receivedMilli: 0, returnedMilli: 0, inventoryUnit: null, mergedLines: 0, sourcing, state: sourcing ? 'sourcing' : 'none' };
   const received = Number(p.receivedMilli);
   const ordered = Number(p.orderedMilli);
   return {
     po: { id: p.poId, docNo: p.docNo, status: p.status, supplierName: p.supplierName },
+    sourcing,
     orderedMilli: ordered,
     receivedMilli: received,
     returnedMilli: Number(p.returnedMilli),
@@ -154,21 +164,21 @@ export async function getRequest(db: Db, actor: Actor, requestId: number): Promi
   const [extra] = await db<{ note: string; reviewedByName: string | null; reviewedAt: string | null; reason: string | null; isSynthetic: boolean }[]>`
     SELECT r.note, rb.display_name AS reviewed_by_name, r.reviewed_at, r.reason, r.is_synthetic
     FROM purchase_requests r LEFT JOIN staff rb ON rb.id = r.reviewed_by WHERE r.id = ${requestId}`;
-  const lines = await db<(Omit<PurchaseRequest['lines'][number], 'progress'> & { progress: RawProgress | null })[]>`
+  const lines = await db<(Omit<PurchaseRequest['lines'][number], 'progress'> & { progress: RawProgress | null; sourcing: { id: number; docNo: string } | null })[]>`
     SELECT l.id, l.line_no, l.material_id, m.name AS material_name, l.name, l.purpose, l.qty_milli, l.unit, l.link, l.details,
            l.ref_price_cents, l.note,
            coalesce((SELECT json_agg(json_build_object('id', i.image_id, 'url', '/api/erp/images/' || i.image_id) ORDER BY i.sort_no)
                      FROM purchase_request_line_images i WHERE i.request_line_id = l.id), '[]'::json) AS images,
-           ${PROGRESS_SQL(db)} AS progress
+           ${PROGRESS_SQL(db)} AS progress, ${SOURCING_SQL(db)} AS sourcing
     FROM purchase_request_lines l LEFT JOIN materials m ON m.id = l.material_id
     WHERE l.request_id = ${requestId} ORDER BY l.line_no`;
   const approvals = await db<PurchaseRequest['approvals']>`
     SELECT a.id, a.action, s.display_name AS actor_name, a.reason, a.created_at
     FROM approval_logs a JOIN staff s ON s.id = a.actor_id WHERE a.doc_kind = 'purchase_request' AND a.doc_id = ${requestId} ORDER BY a.id`;
-  return { ...toSummary(row), ...extra!, lines: lines.map((l) => ({ ...l, progress: progressOf(l.progress) })), approvals };
+  return { ...toSummary(row), ...extra!, lines: lines.map(({ sourcing, ...l }) => ({ ...l, progress: progressOf(l.progress, sourcing) })), approvals };
 }
 
-/** 已通过、还没下单的需求行（转采购单用；ids 给了就只取这些） */
+/** 已通过、还没下单、也不在没撤销的询价单里的需求行（转采购单、发起询价用；ids 给了就只取这些） */
 export async function openLines(db: Db, ids?: number[]): Promise<OpenRequestLine[]> {
   const rows = await db<(Omit<OpenRequestLine, 'department'> & { departmentId: number; departmentName: string })[]>`
     SELECT l.id, r.id AS request_id, r.doc_no AS request_no, r.department_id, d.name AS department_name, s.display_name AS requester_name,
@@ -182,6 +192,9 @@ export async function openLines(db: Db, ids?: number[]): Promise<OpenRequestLine
       AND NOT EXISTS (SELECT 1 FROM purchase_order_line_requests x JOIN purchase_order_lines pl ON pl.id = x.po_line_id
                       JOIN purchase_orders po ON po.id = pl.po_id
                       WHERE x.request_line_id = l.id AND po.status <> 'cancelled')
+      AND NOT EXISTS (SELECT 1 FROM sourcing_line_requests sr JOIN sourcing_lines sl ON sl.id = sr.sourcing_line_id
+                      JOIN sourcing_events e ON e.id = sl.event_id
+                      WHERE sr.request_line_id = l.id AND e.status <> 'cancelled')
       ${ids ? db`AND l.id IN ${db(ids)}` : db``}
     ORDER BY r.created_at, r.id, l.line_no
     LIMIT 500`;
@@ -449,7 +462,7 @@ export async function requestChecks(db: Db) {
 // ───────────────────────── 导出（v0.7.9） ─────────────────────────
 
 const EXPORT_LIMIT = 20_000;
-const PROGRESS_LABELS: Record<RequestLineProgress['state'], string> = { none: '未下单', ordered: '已下单', partial: '部分到货', received: '已到货', closed: '采购单已关闭' };
+const PROGRESS_LABELS: Record<RequestLineProgress['state'], string> = { none: '未下单', sourcing: '询价中', ordered: '已下单', partial: '部分到货', received: '已到货', closed: '采购单已关闭' };
 
 /** 需求单导出：每一行需求一行，带下单 / 到货 / 退货与采购单号。能导出的是有「导出费用」权限的人（店主、对账付款、成本核算、负责人），导出全部部门 */
 async function requestsCsv(db: Db, timezone: string, f: { from: string; to: string; status?: RequestStatus; departmentId?: number }) {
@@ -478,12 +491,13 @@ async function requestsCsv(db: Db, timezone: string, f: { from: string; to: stri
     note: string;
     imageCount: number;
     progress: RawProgress | null;
+    sourcing: { id: number; docNo: string } | null;
   }[]>`
     SELECT r.doc_no, to_char(r.created_at AT TIME ZONE ${timezone}, 'YYYY-MM-DD HH24:MI') AS created_local,
            d.name AS department_name, s.display_name AS requester_name, r.status, r.need_by,
            l.line_no, l.name, m.name AS material_name, l.purpose, l.qty_milli, l.unit, l.ref_price_cents, l.link, l.details, l.note,
            (SELECT count(*)::int FROM purchase_request_line_images i WHERE i.request_line_id = l.id) AS image_count,
-           ${PROGRESS_SQL(db)} AS progress
+           ${PROGRESS_SQL(db)} AS progress, ${SOURCING_SQL(db)} AS sourcing
     FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
     JOIN departments d ON d.id = r.department_id JOIN staff s ON s.id = r.requester_id
     LEFT JOIN materials m ON m.id = l.material_id
@@ -495,7 +509,7 @@ async function requestsCsv(db: Db, timezone: string, f: { from: string; to: stri
      '进度', '采购单号', '供应商', '下单数量', '到货数量', '退货数量', '库存单位'],
   ];
   for (const r of rows) {
-    const p = progressOf(r.progress);
+    const p = progressOf(r.progress, r.sourcing);
     out.push([
       r.docNo,
       r.createdLocal,

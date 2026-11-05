@@ -134,18 +134,32 @@ export function SourcingPage() {
           )}
         </div>
       </div>
-      <CreateDialog open={creating} onClose={() => setCreating(false)} />
+      <SourcingCreateDialog open={creating} onClose={() => setCreating(false)} />
     </>
   );
 }
 
-interface DraftLine {
+export interface DraftLine {
   key: string;
   material: Material;
   qty: string;
+  /** 规格（从采购单表单带来的；不填用物料档案的） */
+  spec?: string;
+  /** 来自哪几行需求（v0.7.30：采购单表单「改为询价」带来的，定标转采购单时一起带上） */
+  requestLineIds?: number[];
+  /** 页面上显示的需求来源，例如「RQ-20261105-001 客房部」 */
+  sources?: string;
 }
 
-function CreateDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** 预填的询价单（v0.7.30：采购单表单「改为询价」、补货建议「发起询价」） */
+export interface SourcingDraft {
+  title: string;
+  needBy: string;
+  note?: string;
+  lines: DraftLine[];
+}
+
+export function SourcingCreateDialog({ open, onClose, initial }: { open: boolean; onClose: () => void; initial?: SourcingDraft }) {
   const session = useSession();
   const toast = useToast();
   const navigate = useNavigate();
@@ -160,10 +174,10 @@ function CreateDialog({ open, onClose }: { open: boolean; onClose: () => void })
   const [uncertain, setUncertain] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useResetOnOpen(open, () => {
-    setTitle('');
-    setNeedBy('');
-    setNote('');
-    setLines([]);
+    setTitle(initial?.title.slice(0, 40) ?? '');
+    setNeedBy(initial?.needBy ?? '');
+    setNote(initial?.note?.slice(0, 200) ?? '');
+    setLines(initial?.lines ?? []);
     setClientKey(uuid());
     setUncertain(false);
     setError(null);
@@ -188,7 +202,18 @@ function CreateDialog({ open, onClose }: { open: boolean; onClose: () => void })
     try {
       const r = await api.post<{ event: SourcingEvent }>(
         '/api/purchase-sourcing',
-        { clientKey, title: title.trim(), needBy: needBy || null, note: note.trim(), lines: rows.map((r) => ({ materialId: r.l.material.id, purchaseQtyMilli: r.qty })) },
+        {
+          clientKey,
+          title: title.trim(),
+          needBy: needBy || null,
+          note: note.trim(),
+          lines: rows.map((r) => ({
+            materialId: r.l.material.id,
+            purchaseQtyMilli: r.qty,
+            ...(r.l.spec !== undefined ? { spec: r.l.spec.slice(0, 80) } : {}),
+            ...(r.l.requestLineIds?.length ? { requestLineIds: r.l.requestLineIds } : {}),
+          })),
+        },
         { timeoutMs: 20_000 },
       );
       done(r.event);
@@ -258,6 +283,7 @@ function CreateDialog({ open, onClose }: { open: boolean; onClose: () => void })
                   <span className="num mr-1.5 text-ink-3">{l.material.code}</span>
                   {l.material.name}
                 </span>
+                {l.sources && <span className="block truncate text-[12px] text-ink-3">来自需求单 {l.sources}</span>}
                 {err && l.qty.trim() && <span className="text-[12px] font-semibold text-clay">{err}</span>}
               </span>
               <label className="flex items-center gap-1.5 text-[12.5px] text-ink-3">
@@ -558,6 +584,11 @@ function Compare({ ev, quotes }: { ev: SourcingEvent; quotes: SourcingQuote[] })
                       {formatQty(l.purchaseQtyMilli)} {l.purchaseUnit}
                       {l.spec && ` · ${l.spec}`}
                     </span>
+                    {l.requests.length > 0 && (
+                      <span className="block text-[12px] text-ink-3" data-testid={`sourcing-line-requests-${l.lineNo}`}>
+                        来自需求单 {[...new Set(l.requests.map((r) => `${r.requestNo} ${r.departmentName}`))].join('、')}
+                      </span>
+                    )}
                   </span>
                   <PriceHistoryButton materialId={l.materialId} name={l.materialName} />
                 </span>
