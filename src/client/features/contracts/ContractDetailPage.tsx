@@ -41,7 +41,7 @@ import {
 import { formatAmount } from '@shared/money';
 import { PO_STATUS_LABELS, type PoStatus } from '@shared/purchasing';
 import { api, errorMessage, UncertainError } from '../../lib/api';
-import { sendErpOp } from '../../lib/erpPending';
+import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
@@ -290,14 +290,31 @@ function Detail({ c }: { c: ContractDetail }) {
                     </span>
                     <span className="ml-auto text-[13px]">
                       总价 <Money cents={x.totalCents} className="font-bold" />
-                      {x.deltaCents !== 0 && (
-                        <span className={cn('num ml-1 font-semibold', x.deltaCents > 0 ? 'text-clay' : 'text-pine')}>
-                          （{x.deltaCents > 0 ? '+' : '−'}¥{formatAmount(Math.abs(x.deltaCents))}）
+                      {/* 涨跌按变更前那一版的总价算（deltaCents 是绝对值，给审批规则匹配金额用） */}
+                      {x.totalCents !== x.baseTotalCents && (
+                        <span className={cn('num ml-1 font-semibold', x.totalCents > x.baseTotalCents ? 'text-clay' : 'text-pine')} data-testid={`change-delta-${x.changeNo}`}>
+                          （{x.totalCents > x.baseTotalCents ? '+' : '−'}¥{formatAmount(Math.abs(x.totalCents - x.baseTotalCents))}）
                         </span>
                       )}
                     </span>
                   </div>
                   <p className="mt-1 text-[13px]">{x.reason}</p>
+                  {/* 变更后的内容：审查中的展开，审批人在这里就看得到改了什么（Codex 自动审查 315e7f7） */}
+                  {(x.status === 'draft' || x.status === 'reviewing' || x.status === 'returned') && (
+                    <details className="mt-2 rounded-md border border-line bg-paper-2/40 px-3 py-2" open={x.status === 'reviewing'} data-testid={`change-draft-${x.changeNo}`}>
+                      <summary className="cursor-pointer text-[12.5px] font-semibold text-ink-2">
+                        变更后的内容（第 {x.baseVersion} 版 ¥{formatAmount(x.baseTotalCents)} → ¥{formatAmount(x.totalCents)}）
+                      </summary>
+                      <div className="mt-2 space-y-3">
+                        <p className="text-[13px] text-ink-2">
+                          {x.draft.title} · {x.draft.startDate ?? '—'} 至 {x.draft.endDate ?? '不定期'}
+                        </p>
+                        <TermsView content={x.draft} />
+                        <LinesView lines={x.draft.lines.map((l, i) => ({ ...l, lineNo: i + 1, materialName: null }))} />
+                        {x.draft.note && <p className="text-[12.5px] text-ink-2">备注：{x.draft.note}</p>}
+                      </div>
+                    </details>
+                  )}
                   <p className="text-[12px] text-ink-3">
                     {x.createdByName} · {formatDateTime(x.createdAt)}
                     {x.closedReason && ` · 作废：${x.closedReason}`}
@@ -769,6 +786,10 @@ function SealDialog({ open, c, seal, onClose, onDone }: { open: boolean; c: Cont
   const [purpose, setPurpose] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 上一条用印申请没收到结果：先在页面上方查回、按原内容重新提交或作废，不另起一条（Codex 自动审查 315e7f7）
+  const sealUrl = `/api/erp/contracts/${c.id}/seals`;
+  const pendingSeal = useErpPending(['contract_seal']).filter((p) => p.url === sealUrl);
+  const blockedByPending = !seal && pendingSeal.length > 0;
   useResetOnOpen(open, () => {
     setSealType(seal?.sealType ?? 'contract');
     setCopies(String(seal?.copies ?? 2));
@@ -820,7 +841,7 @@ function SealDialog({ open, c, seal, onClose, onDone }: { open: boolean; c: Cont
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             取消
           </Button>
-          <Button variant="primary" loading={busy} disabled={!ok} onClick={() => void submit()} data-testid="seal-confirm">
+          <Button variant="primary" loading={busy} disabled={!ok || blockedByPending} onClick={() => void submit()} data-testid="seal-confirm">
             {seal ? '改了再提交' : '提交用印申请'}
           </Button>
         </>
@@ -855,6 +876,11 @@ function SealDialog({ open, c, seal, onClose, onDone }: { open: boolean; c: Cont
           <Input id="sl-purpose" value={purpose} maxLength={100} onChange={(e) => setPurpose(e.target.value)} className="h-10" />
         </Field>
       </div>
+      {blockedByPending && (
+        <Notice tone="warning" className="mt-3" title="上一条用印申请结果待确认" data-testid="seal-pending-block">
+          请先在页面上方查回、按原内容重新提交（同一编号只建一条）或确认作废，再申请新的。
+        </Notice>
+      )}
       {error && <Notice tone="error" title={error} className="mt-3" />}
     </Dialog>
   );

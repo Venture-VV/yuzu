@@ -2,7 +2,8 @@
 //   ① 店主在 ERP「合同」起草一份采购合同（四要素按模板、单价表一行），保存并提交审查；
 //   ② 审查链 财务 → 法务 → 负责人：店主在合同详情审第 1 级；法务（新建的「法务」职责账号）在手机尺寸的审批中心按审查清单逐条给结论
 //      （不能勾选批量；有「要修改」不能同意，「风险提示」要写意见）；店主审第 3 级，合同「审批通过（待签署）」；
-//   ③ 登记签署、用印申请（店主批）、上传扫描件、归档，拿到归档号；
+//   ③ 登记签署、用印申请（店主批；回复丢了时页面上方「结果待确认」，查回之前不能另起一条）、上传扫描件、归档，拿到归档号；
+//      开一张降价的变更单并提交：合同详情里审查中的变更单展开变更后的内容，总价标「−」；撤回、作废后接着往下；
 //   ④ 结束日在 60 天内：台账顶部「到期提醒」、导航「合同」上的数字，点「续签」照原合同预填；
 //   ⑤ 采购单选这份合同：逐行显示合同价与剩余量，超价、超量标出来，要写原因；存草稿后详情里看到合同与超出原因。
 // 依赖演示数据（只在独立演示库）；账号：店主 linlan，密码 yuzu2026。会登记单据，只在门店电脑尺寸执行。
@@ -36,6 +37,7 @@ interface ContractApi {
   archiveNo: string | null;
   seals: { id: number; sealNo: string; status: string }[];
   files: { id: number }[];
+  changes: { id: number; changeNo: string; status: string; version: number }[];
 }
 
 test.describe('合同与法务审查（v0.7.31）', () => {
@@ -144,10 +146,29 @@ test.describe('合同与法务审查（v0.7.31）', () => {
     await page.getByTestId('sign-theirs').fill('供应商经理');
     await page.getByTestId('sign-confirm').click();
     await expect(page.getByText('已登记签署，合同生效').first()).toBeVisible();
+    // 用印申请的回复丢了（服务端已经建好、回 5xx，查回也暂时不通）：页面上方「结果待确认」，
+    // 查回、按原内容重提或作废之前，再打开用印申请不能另起一条（Codex 自动审查 315e7f7）
+    const sealsUrl = `**/api/erp/contracts/${contractId}/seals`;
+    await page.route(sealsUrl, async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      await route.fetch();
+      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL', message: '模拟：回复丢了' } }) });
+    });
+    await page.route('**/api/erp/ops/**', (route) => route.abort('internetdisconnected'));
     await page.getByTestId('contract-seal').click();
     await page.getByTestId('seal-confirm').click();
-    await expect(page.getByText('用印申请已提交').first()).toBeVisible();
+    await expect(page.getByText('用印申请没收到结果').first()).toBeVisible();
+    await expect(page.getByTestId('erp-pending')).toContainText('用印申请结果待确认');
+    await page.getByTestId('contract-seal').click();
+    await expect(page.getByTestId('seal-pending-block')).toBeVisible();
+    await expect(page.getByTestId('seal-confirm')).toBeDisabled();
+    await page.getByRole('dialog').getByRole('button', { name: '取消' }).click();
+    await page.unroute(sealsUrl);
+    await page.unroute('**/api/erp/ops/**');
+    await page.getByTestId('erp-pending-check').click();
+    await expect(page.getByTestId('erp-pending')).toHaveCount(0);
     c = await get();
+    expect(c.seals).toHaveLength(1);
     const seal = c.seals[0]!;
     expect(seal.status).toBe('reviewing');
     await page.getByTestId(`review-open-${seal.sealNo}`).click();
@@ -164,6 +185,29 @@ test.describe('合同与法务审查（v0.7.31）', () => {
     c = await get();
     expect(c.status).toBe('archived');
     expect(c.archiveNo).toMatch(/^GD\d{8}-\d{4}$/);
+
+    // 降价的变更单（总价 1000 → 900、单价 50 → 45）：审查中的在合同详情里展开变更后的内容，总价标「−¥100.00」（Codex 自动审查 315e7f7）
+    await page.getByTestId('contract-change').click();
+    await expect(page).toHaveURL(new RegExp(`/erp/contracts/${contractId}/change$`));
+    await page.getByTestId('change-kind-price').click();
+    await page.getByTestId('change-reason').fill('供应商让利，单价降到 45 元');
+    await page.getByTestId('contract-total').fill('900');
+    await page.getByTestId('contract-line-price-0').fill('45');
+    await page.getByTestId('contract-save-submit').click();
+    await expect(page.getByText('变更单已提交审查').first()).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/erp/contracts/${contractId}$`));
+    const change = (await get()).changes[0]!;
+    expect(change.status).toBe('reviewing');
+    await expect(page.getByTestId(`change-delta-${change.changeNo}`)).toHaveText('（−¥100.00）');
+    const draft = page.getByTestId(`change-draft-${change.changeNo}`);
+    await expect(draft.getByTestId('contract-lines')).toBeVisible();
+    await expect(draft.getByTestId('contract-lines')).toContainText('¥45.00');
+    // 撤回、作废这张变更单：后面的续签与采购单核对照第 1 版
+    const withdrawn = await page.request.post(`/api/erp/contracts/changes/${change.id}/withdraw`, { data: { version: change.version } });
+    expect(withdrawn.ok(), await withdrawn.text()).toBe(true);
+    const afterWithdraw = (await get()).changes[0]!;
+    const voided = await page.request.post(`/api/erp/contracts/changes/${change.id}/void`, { data: { version: afterWithdraw.version, reason: 'E2E：先不调价' } });
+    expect(voided.ok(), await voided.text()).toBe(true);
 
     // ④ 到期提醒与续签
     await page.goto('/erp/contracts');

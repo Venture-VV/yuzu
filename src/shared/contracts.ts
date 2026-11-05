@@ -228,6 +228,9 @@ export interface ChangeView {
   reason: string;
   draft: ContractContent;
   totalCents: number;
+  /** 变更前（所在版本）的总价；涨了还是降了看 totalCents − baseTotalCents（Codex 自动审查 315e7f7） */
+  baseTotalCents: number;
+  /** 总价变动的绝对值（审批规则按它匹配金额区间） */
   deltaCents: number;
   status: ChangeStatus;
   version: number;

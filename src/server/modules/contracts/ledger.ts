@@ -240,6 +240,7 @@ async function changesOf(db: Db, contractId: number): Promise<ChangeView[]> {
     reason: string;
     draft: unknown;
     totalCents: number;
+    baseTotalCents: number | null;
     deltaCents: number;
     status: ChangeStatus;
     version: number;
@@ -249,7 +250,9 @@ async function changesOf(db: Db, contractId: number): Promise<ChangeView[]> {
     createdAt: string;
   }[]>`
     SELECT x.id, x.change_no, x.base_version, x.kinds, x.reason, x.draft, x.total_cents, x.delta_cents, x.status, x.version, x.result_version,
-           x.closed_reason, c.display_name AS created_by_name, x.created_at
+           x.closed_reason, c.display_name AS created_by_name, x.created_at,
+           (SELECT (r.content->>'totalCents')::bigint FROM contract_versions v JOIN contract_revisions r ON r.id = v.revision_id
+            WHERE v.contract_id = x.contract_id AND v.version_no = x.base_version) AS base_total_cents
     FROM contract_changes x JOIN staff c ON c.id = x.created_by
     WHERE x.contract_id = ${contractId} ORDER BY x.id DESC`;
   const out: ChangeView[] = [];
@@ -259,6 +262,7 @@ async function changesOf(db: Db, contractId: number): Promise<ChangeView[]> {
       id: Number(r.id),
       draft: readContent(r.draft),
       totalCents: Number(r.totalCents),
+      baseTotalCents: r.baseTotalCents === null ? Number(r.totalCents) : Number(r.baseTotalCents),
       deltaCents: Number(r.deltaCents),
       approval: await approvalBrief(db, 'contract_change', Number(r.id)),
     });

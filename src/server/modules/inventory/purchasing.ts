@@ -455,7 +455,8 @@ async function syncLineRequests(tx: Tx, poLineId: number, next: number[], prev: 
 async function checkImages(db: Db, lines: PreparedLine[]) {
   const ids = [...new Set(lines.flatMap((l) => l.imageIds))];
   if (ids.length === 0) return;
-  const found = new Set((await db<{ id: number }[]>`SELECT id FROM erp_images WHERE id IN ${db(ids)}`).map((r) => Number(r.id)));
+  // 只能挂需求单、采购单用的图片（v0.7.31 迁移 079：合同扫描件另存，挂不上）
+  const found = new Set((await db<{ id: number }[]>`SELECT id FROM erp_images WHERE id IN ${db(ids)} AND scope = 'general'`).map((r) => Number(r.id)));
   if (ids.some((i) => !found.has(i))) throw unprocessable('IMAGE_NOT_FOUND', '有图片没有上传成功，请重新上传');
 }
 

@@ -729,7 +729,8 @@ export async function actOnSeal(deps: Deps, sealId: number, action: 'approve' | 
 
 /** 上传一页扫描件（图片，压缩后不超过 1 MB）：作废的合同不能再传；归档以后只能追加 */
 export async function addFile(deps: Deps, contractId: number, raw: unknown, actor: Actor, ip?: string) {
-  const img = await saveImage(deps.sql, raw, actor);
+  // 合同扫描件单独存（迁移 079）：通用的图片接口给不出、需求单与采购单的行挂不上
+  const img = await saveImage(deps.sql, raw, actor, 'contract');
   return deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const c = await lockContract(tx, contractId);

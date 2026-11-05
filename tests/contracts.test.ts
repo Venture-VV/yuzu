@@ -5,7 +5,8 @@
 //   · 审批通过 → 签署 → 用印申请（默认一级店主）→ 上传扫描件 → 归档；
 //   · 变更单：同样走审查，同意后版本号加 1、单价表按新的一版，旧版本留着；
 //   · 采购单按合同核对（超价、超量）；到期前 60 天的提醒（续签生效的不提醒）；
-//   · 合同类不能批量同意；合同的审批规则要有且只有一级「法务」；部门账号看不到合同；自检一致。
+//   · 合同类不能批量同意；合同的审批规则要有且只有一级「法务」；部门账号看不到合同；自检一致；
+//   · 合同扫描件与需求单、采购单的图片分开存：通用的图片接口给不出，需求单、采购单的行挂不上（迁移 079）。
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -26,6 +27,7 @@ let payer: string; // 对账付款（财务）
 let lawyer: string; // 法务
 let mgr: string; // 负责人
 let dept: string; // 部门申购
+let keeper: string; // 只有仓库职责（有「查看库存」、没有「查看合同」）
 let supplierId: number;
 let mat: { id: number; name: string; purchaseUnit: string };
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAAEUlEQVR42mP8z8DwnxEJMAIAJF4C/3FpsJcAAAAASUVORK5CYII=', 'base64');
@@ -73,6 +75,7 @@ beforeAll(async () => {
   boss = await login(ctx.app, 'linlan', 'yuzu2026');
   buyer = await login(ctx.app, 'zhouyi', 'yuzu2026');
   payer = await login(ctx.app, 'qianfen', 'yuzu2026');
+  keeper = await login(ctx.app, 'lixiao', 'yuzu2026');
   const staff = async (username: string, displayName: string, duties: ('approve' | 'legal' | 'request')[], departmentId: number | null = null) => {
     await createStaff(ctx.sql, { username, displayName, role: 'backoffice', duties, departmentId, password: PASSWORD, mustChangePassword: false });
     return login(ctx.app, username);
@@ -248,7 +251,8 @@ describe('合同与法务审查', () => {
       content: { ...content({ totalCents: 13_200_00 }), lines: [{ ...content().lines[0], priceCents: 55_00 }] },
     });
     expect(x.status, JSON.stringify(x.body)).toBe(201);
-    expect(x.body.change).toMatchObject({ status: 'draft', baseVersion: 1, deltaCents: 1_200_00 });
+    // 涨跌按所在版本的总价看（deltaCents 是绝对值，给审批规则匹配金额用；Codex 自动审查 315e7f7）
+    expect(x.body.change).toMatchObject({ status: 'draft', baseVersion: 1, baseTotalCents: 12_000_00, totalCents: 13_200_00, deltaCents: 1_200_00 });
     // 同一合同同时只有一张没结束的变更单
     const dup = await api(ctx.app, buyer, 'POST', `/api/erp/contracts/${c.id}/changes`, { clientKey: randomUUID(), kinds: ['other'], reason: '再开一张', content: content() });
     expect(dup.body.error.code).toBe('CONTRACT_CHANGE_OPEN');
@@ -265,9 +269,21 @@ describe('合同与法务审查', () => {
     expect(c.currentVersion).toBe(2);
     expect(c.totalCents).toBe(13_200_00);
     expect(c.content.lines[0]!.priceCents).toBe(55_00);
-    expect(c.changes[0]).toMatchObject({ status: 'approved', resultVersion: 2 });
+    expect(c.changes[0]).toMatchObject({ status: 'approved', resultVersion: 2, baseTotalCents: 12_000_00, totalCents: 13_200_00 });
     expect(c.revisions.filter((r) => r.versionNo !== null).map((r) => r.versionNo)).toEqual([2, 1]);
     expect(c.revisions.find((r) => r.versionNo === 1)!.lines[0]!.priceCents).toBe(50_00);
+    // 降价的变更单：所在版本（第 2 版）的总价比变更后的高，deltaCents 照样是绝对值
+    const down = await api(ctx.app, buyer, 'POST', `/api/erp/contracts/${c.id}/changes`, {
+      clientKey: randomUUID(),
+      kinds: ['price'],
+      reason: '供应商让利，单价降到 45 元',
+      content: { ...content({ totalCents: 10_800_00 }), lines: [{ ...content().lines[0], priceCents: 45_00 }] },
+    });
+    expect(down.status, JSON.stringify(down.body)).toBe(201);
+    expect(down.body.change).toMatchObject({ baseVersion: 2, baseTotalCents: 13_200_00, totalCents: 10_800_00, deltaCents: 2_400_00 });
+    const dropped = await api(ctx.app, buyer, 'POST', `/api/erp/contracts/changes/${down.body.change.id}/void`, { version: down.body.change.version, reason: '先不调价' });
+    expect(dropped.status, JSON.stringify(dropped.body)).toBe(200);
+    c = await get(c.id);
   });
 
   it('采购单按合同核对：超价、超量标出来；选合同只列同一供应商、生效中的', async () => {
@@ -380,6 +396,47 @@ describe('合同与法务审查', () => {
     const more = await api(ctx.app, buyer, 'POST', `/api/erp/contracts/${c.id}/files`, { mime: 'image/png', data: PNG2.toString('base64') });
     expect(more.status, JSON.stringify(more.body)).toBe(201);
     expect(more.body.files).toHaveLength(fileIds.length + 1);
+    expect(await contractChecks(ctx.sql)).toEqual([expect.objectContaining({ ok: true })]);
+  });
+
+  it('合同扫描件不经通用的图片接口给出，需求单、采购单的行挂不上（Codex 自动审查 315e7f7，迁移 079）', async () => {
+    c = await get(c.id);
+    const scan = c.files[0]!;
+    // 只有仓库职责的账号：看不到合同，也不能按编号从通用的图片接口翻到合同扫描件
+    expect((await api(ctx.app, keeper, 'GET', `/api/erp/contracts/${c.id}`)).status).toBe(403);
+    expect((await api(ctx.app, keeper, 'GET', scan.url)).status).toBe(403);
+    expect((await api(ctx.app, keeper, 'GET', `/api/erp/images/${scan.imageId}`)).status).toBe(404);
+    // 店主什么都能看：通用接口照样不给，只经合同的接口看
+    expect((await api(ctx.app, boss, 'GET', `/api/erp/images/${scan.imageId}`)).status).toBe(404);
+    expect((await api(ctx.app, boss, 'GET', scan.url)).status).toBe(200);
+    // 同一张图作为需求单、采购单的图片上传：另存一份（按内容去重只在同一种用途里），通用接口给得出
+    const general = await api(ctx.app, buyer, 'POST', '/api/erp/images', { mime: 'image/png', data: PNG.toString('base64') });
+    expect(general.status, JSON.stringify(general.body)).toBe(201);
+    expect(general.body.id).not.toBe(scan.imageId);
+    expect((await api(ctx.app, keeper, 'GET', general.body.url)).status).toBe(200);
+    // 需求单、采购单的行挂不上合同扫描件的编号
+    const line = { name: '香薰扩香石', purpose: '客用消耗', qtyMilli: 10_000, unit: '个', link: 'https://example.com/item/1', details: '', refPriceCents: 1500 };
+    const rq = await api(ctx.app, dept, 'POST', '/api/erp/requests', { clientKey: randomUUID(), lines: [{ ...line, imageIds: [scan.imageId] }] });
+    expect(rq.status).toBe(422);
+    expect(rq.body.error.code).toBe('IMAGE_NOT_FOUND');
+    const po = await api(ctx.app, buyer, 'POST', '/api/purchase-orders', {
+      clientKey: randomUUID(),
+      supplierId,
+      orderDate: today,
+      action: 'save',
+      lines: [{ materialId: mat.id, purchaseQtyMilli: 1000, priceCents: 100, imageIds: [scan.imageId] }],
+    });
+    expect(po.status).toBe(422);
+    expect(po.body.error.code).toBe('IMAGE_NOT_FOUND');
+    // 用通用的图片照常能提需求单
+    const ok = await api(ctx.app, dept, 'POST', '/api/erp/requests', { clientKey: randomUUID(), lines: [{ ...line, imageIds: [general.body.id] }] });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+    // 数据库兜底：直接写也挂不上
+    const [rl] = await ctx.sql<{ id: number }[]>`
+      SELECT l.id FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id WHERE r.doc_no = ${ok.body.request.docNo}`;
+    await expect(ctx.sql`INSERT INTO purchase_request_line_images (request_line_id, sort_no, image_id) VALUES (${rl!.id}, 9, ${scan.imageId})`).rejects.toThrow(/用途/);
+    const [me] = await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'zhouyi'`;
+    await expect(ctx.sql`INSERT INTO contract_files (contract_id, image_id, sort_no, added_by) VALUES (${c.id}, ${general.body.id}, 99, ${me!.id})`).rejects.toThrow(/用途/);
     expect(await contractChecks(ctx.sql)).toEqual([expect.objectContaining({ ok: true })]);
   });
 });

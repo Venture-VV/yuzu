@@ -215,6 +215,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '076_approval_op_fences.sql',
   '077_contracts.sql',
   '078_po_contracts.sql',
+  '079_contract_scan_scope.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

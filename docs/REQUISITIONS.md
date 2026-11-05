@@ -62,5 +62,5 @@ v0.7.7 的 5 个（`expense.read`、`expense.manage`、`petty.manage`、`expense
 | 需求单 | `GET /api/erp/requests`（本部门 / 全部，按状态、部门筛选）；`GET /api/erp/requests/meta`（提单用的用途、部门、受管物料，部门申购没有库存查看权限也能选物料）；`GET /api/erp/requests/:id`；`POST /api/erp/requests`；`PUT /api/erp/requests/:id`（提交后、退回后由提单人改，改完回到待审核）；`POST /api/erp/requests/:id/{approve,return,reject,cancel}`；`GET /api/erp/requests/by-key/:key`；`GET /api/erp/requests/checks` |
 | 转采购单 | 采购单的新建 / 修改接口每一行带 `requestLineIds`（不传保持原样）；`GET /api/erp/requests/open-lines?ids=`（已通过、未下单的行） |
 | 结果待确认 | `GET /api/erp/ops/:key?type=purchase_request` 查回；`POST /api/erp/ops/:key/abandon` 确认作废（与费用报销、备用金共用，见 `docs/EXPENSES.md`） |
-| 图片 | `POST /api/erp/images`（压缩后的图片，Base64）；`GET /api/erp/images/:id` |
+| 图片 | `POST /api/erp/images`（压缩后的图片，Base64）；`GET /api/erp/images/:id`（只给需求单、采购单用的图片；合同扫描件分开存，v0.7.31 迁移 `079`） |
 | 员工所属部门 | 后台员工档案（`POST /api/staff`、`PUT /api/staff/:id` 加 `departmentId`；修改时不传保持原样） |
