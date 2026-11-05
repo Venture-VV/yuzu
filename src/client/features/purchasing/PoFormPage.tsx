@@ -169,6 +169,8 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
     if (next !== channel) setChannel(next);
   }, [channelTouched, channels, supplierDefault, channel]);
   const channelDef = channels.find((c) => c.key === channel);
+  // 要写说明的途径必须写；选的就是这家供应商档案的默认途径时选填（档案已经说明在哪买，与服务端一致）
+  const noteRequired = !!channelDef?.needsNote && channelDef.key !== supplierDefault;
 
   // 常用该供应商的物料排在前面
   const materials = useMemo(() => {
@@ -270,8 +272,8 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
     ? `还有 ${unmatched.length} 行新产品没选物料`
     : !supplierId
     ? '请选择供应商'
-    : channelDef?.needsNote && channelNote.trim().length < 2
-    ? `采购途径选了「${channelDef.label}」，请写明在哪买的`
+    : noteRequired && channelNote.trim().length < 2
+    ? `采购途径选了「${channelDef!.label}」，请写明在哪买的`
     : rows.length === 0
       ? '请至少添加一项物料'
       : rows.some((r) => r.err)
@@ -412,7 +414,7 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
                 ))}
               </Select>
             </Field>
-            <Field label="途径说明" htmlFor="po-channel-note" className="sm:col-span-1 lg:col-span-3" hint={channelDef?.needsNote ? '必填：档口、平台与店铺、门店名' : '选填'}>
+            <Field label="途径说明" htmlFor="po-channel-note" className="sm:col-span-1 lg:col-span-3" hint={noteRequired ? '必填：档口、平台与店铺、门店名' : channelDef?.needsNote ? '选填：这家供应商的默认途径' : '选填'}>
               <Input
                 id="po-channel-note"
                 value={channelNote}

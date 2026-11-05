@@ -103,6 +103,10 @@ describe('① 采购途径（E1）', () => {
     expect(byDefault.body.po.channel).toEqual({ key: 'wholesale', label: '批发市场', note: '' });
     // 明确选了要写说明的：不写拒绝，写了照记
     expect((await newPo({ supplierId: s.id, lines, channel: 'online' })).body.error.code).toBe('CHANNEL_NOTE_REQUIRED');
+    // 明确选的就是这家供应商的默认途径：说明选填（供应商档案已经说明在哪买）
+    const explicitDefault = await newPo({ supplierId: s.id, lines, channel: 'wholesale' });
+    expect(explicitDefault.status, JSON.stringify(explicitDefault.body)).toBe(201);
+    expect(explicitDefault.body.po.channel).toEqual({ key: 'wholesale', label: '批发市场', note: '' });
     expect((await newPo({ supplierId: s.id, lines, channel: 'nope' })).body.error.code).toBe('CHANNEL_INVALID');
     expect((await newPo({ supplierId: s.id, lines, channel: 'Bad Key' })).status).toBe(400);
     const online = await newPo({ supplierId: s.id, lines, channel: 'online', channelNote: '某平台某某旗舰店', action: 'save' });
@@ -115,9 +119,13 @@ describe('① 采购途径（E1）', () => {
     expect(kept.body.channel).toEqual({ key: 'online', label: '网购平台', note: '某平台某某旗舰店' });
     const moved = await api(ctx.app, buyer, 'PUT', `/api/purchase-orders/${po.id}`, { ...body, action: 'save', channel: 'supplier' });
     expect(moved.body.channel).toEqual({ key: 'supplier', label: '供应商配送', note: '' });
+    // 改回供应商的默认途径，不写说明也行；改成别的要写说明的途径不写说明被拒
+    const backToDefault = await api(ctx.app, buyer, 'PUT', `/api/purchase-orders/${po.id}`, { ...body, action: 'save', channel: 'wholesale' });
+    expect(backToDefault.body.channel, JSON.stringify(backToDefault.body)).toEqual({ key: 'wholesale', label: '批发市场', note: '' });
+    expect((await api(ctx.app, buyer, 'PUT', `/api/purchase-orders/${po.id}`, { ...body, action: 'save', channel: 'store' })).body.error.code).toBe('CHANNEL_NOTE_REQUIRED');
     // 列表也带途径
     const list = (await api(ctx.app, buyer, 'GET', `/api/purchase-orders?q=${po.docNo}`)).body;
-    expect(list[0].channel).toMatchObject({ key: 'supplier' });
+    expect(list[0].channel).toMatchObject({ key: 'wholesale', label: '批发市场' });
 
     // 改名：之后的单据按新名称，已有单据保留当时的名称
     const renamed = { ...DEFAULT_PURCHASE_RULES, channels: DEFAULT_PURCHASE_RULES.channels.map((c) => (c.key === 'wholesale' ? { ...c, label: '农批市场' } : c)) };

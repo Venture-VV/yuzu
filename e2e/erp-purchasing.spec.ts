@@ -32,7 +32,8 @@ async function setup(page: Page) {
 }
 
 async function newSupplier(page: Page, tag: string, body: Record<string, unknown> = {}) {
-  const code = `E${tag}${Math.floor(Math.random() * 90 + 10)}`;
+  // Z 开头：排在演示数据的 S001… 后面，别的用例按顺序取第一家供应商时不会取到这里新建的
+  const code = `Z${tag}${Math.floor(Math.random() * 90 + 10)}`;
   const res = await page.request.post('/api/inventory/suppliers', { data: { code, name: `E2E 供应商${code}`, ...body } });
   expect(res.status(), await res.text()).toBe(201);
   const list = (await (await page.request.get('/api/inventory/suppliers')).json()) as { id: number; code: string; name: string }[];
@@ -40,7 +41,7 @@ async function newSupplier(page: Page, tag: string, body: Record<string, unknown
 }
 
 async function newMaterial(page: Page, tag: string, body: Record<string, unknown> = {}) {
-  const code = `EM${tag}${Math.floor(Math.random() * 90 + 10)}`;
+  const code = `ZM${tag}${Math.floor(Math.random() * 90 + 10)}`;
   const res = await page.request.post('/api/inventory/materials', {
     data: { code, name: `E2E 物料${code}`, category: 'E2E', inventoryUnit: '包', purchaseUnit: '箱', purchaseFactorMilli: 10_000, refPriceCents: 3_000, ...body },
   });
@@ -68,8 +69,9 @@ test.describe('ERP 采购五项（v0.7.29）', () => {
 
     await page.goto('/purchasing/new');
     await page.locator('#po-sup').selectOption(String(sup.id));
-    // 按供应商的默认途径带出
+    // 按供应商的默认途径带出；选的是这家供应商的默认途径，说明选填
     await expect(page.getByTestId('po-channel')).toHaveValue('wholesale');
+    await expect(page.getByText('采购途径选了「批发市场」，请写明在哪买的')).toHaveCount(0);
     await page.getByTestId('po-channel').selectOption('online');
     await expect(page.getByText('采购途径选了「网购平台」，请写明在哪买的')).toBeVisible();
     await page.getByTestId('po-channel-note').fill('某平台某某旗舰店');

@@ -627,7 +627,7 @@ async function channelForUpdate(
   supplierDefault: string | null,
 ): Promise<ChannelColumns> {
   const rules = await loadPurchaseRules(tx);
-  if (body.channel !== undefined) return resolveChannel(rules, body, null);
+  if (body.channel !== undefined) return resolveChannel(rules, body, supplierDefault);
   const [cur] = await tx<{ channel: string | null; channelLabel: string | null; channelNote: string }[]>`
     SELECT channel, channel_label, channel_note FROM purchase_orders WHERE id = ${poId}`;
   if (cur?.channel) return { channel: cur.channel, channelLabel: cur.channelLabel ?? cur.channel, channelNote: body.channelNote ?? cur.channelNote };

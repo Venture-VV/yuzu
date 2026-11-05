@@ -54,7 +54,8 @@ export interface ChannelColumns {
 }
 
 /**
- * 定采购途径：明确选了的按选的（要写说明的必须写）；没选的按 fallback（供应商默认），fallback 不在字典里时按第一项。
+ * 定采购途径：明确选了的按选的（要写说明的必须写；选的就是 fallback——供应商档案的默认途径——时说明选填，
+ * 供应商档案已经说明在哪买）；没选的按 fallback，fallback 不在字典里时按第一项。
  */
 export function resolveChannel(rules: PurchaseRules, input: { channel?: string | null; channelNote?: string | null }, fallback: string | null): ChannelColumns {
   const note = (input.channelNote ?? '').trim();
@@ -62,7 +63,7 @@ export function resolveChannel(rules: PurchaseRules, input: { channel?: string |
   if (input.channel) {
     const def = find(input.channel);
     if (!def) throw unprocessable('CHANNEL_INVALID', `采购途径只能从固定选项里选：${rules.channels.map((c) => c.label).join('、')}`);
-    if (def.needsNote && note.length < 2) {
+    if (def.needsNote && note.length < 2 && def.key !== fallback) {
       throw unprocessable('CHANNEL_NOTE_REQUIRED', `采购途径选了「${def.label}」，请写明在哪买的（例如档口、平台与店铺、门店名）`);
     }
     return { channel: def.key, channelLabel: def.label, channelNote: note };
