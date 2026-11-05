@@ -439,6 +439,41 @@ export async function priceHistory(db: Db, timezone: string, materialId: number,
   };
 }
 
+// ───────────────────────── 自检 ─────────────────────────
+
+/**
+ * 询价单与采购单的关联一致（v0.7.29）：没撤回的采购单关联的询价单都是已定标；已定标的询价单中标的是自己的、没撤下的报价；
+ * 有效报价每行都报了、货款 = 各行金额之和。
+ */
+export async function sourcingChecks(db: Db): Promise<{ key: string; label: string; ok: boolean; detail: string }[]> {
+  const bad = await db<{ docNo: string; why: string }[]>`
+    SELECT e.doc_no, '关联的采购单 ' || po.doc_no || ' 没撤回，询价单却不是已定标' AS why
+    FROM purchase_orders po JOIN sourcing_events e ON e.id = po.sourcing_event_id
+    WHERE po.status <> 'cancelled' AND e.status <> 'awarded'
+    UNION ALL
+    SELECT e.doc_no, '中标的报价不是这张询价单的有效报价' FROM sourcing_events e LEFT JOIN sourcing_quotes q ON q.id = e.awarded_quote_id
+    WHERE e.status = 'awarded' AND (q.id IS NULL OR q.event_id <> e.id OR q.status <> 'active')
+    UNION ALL
+    SELECT e.doc_no, '报价 #' || q.id || ' 没报全部物料或货款与各行金额之和不一致'
+    FROM sourcing_quotes q JOIN sourcing_events e ON e.id = q.event_id
+    WHERE q.status = 'active' AND (
+      (SELECT count(*) FROM sourcing_quote_lines ql JOIN sourcing_lines sl ON sl.id = ql.sourcing_line_id AND sl.event_id = q.event_id WHERE ql.quote_id = q.id)
+        <> (SELECT count(*) FROM sourcing_lines sl WHERE sl.event_id = q.event_id)
+      OR q.goods_cents <> coalesce((SELECT sum(ql.amount_cents) FROM sourcing_quote_lines ql WHERE ql.quote_id = q.id), 0))
+    ORDER BY 1 LIMIT 20`;
+  const [n] = await db<{ events: number; linked: number }[]>`
+    SELECT (SELECT count(*)::int FROM sourcing_events) AS events,
+           (SELECT count(*)::int FROM purchase_orders WHERE sourcing_event_id IS NOT NULL AND status <> 'cancelled') AS linked`;
+  return [
+    {
+      key: 'sourcing_links',
+      label: '询价单与采购单的关联一致',
+      ok: bad.length === 0,
+      detail: bad.length ? bad.map((b) => `${b.docNo}：${b.why}`).join('；') : `${n!.events} 张询价单，${n!.linked} 张采购单来自询价单`,
+    },
+  ];
+}
+
 // ───────────────────────── 路由 ─────────────────────────
 
 const ListQuery = z.object({ status: z.enum(['open', 'awarded', 'cancelled']).optional(), q: z.string().trim().max(32).optional() });

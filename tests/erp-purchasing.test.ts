@@ -569,5 +569,20 @@ describe('⑤ 询价比价与定标（E5–E8）', () => {
     ]);
     expect(hist.points.some((p: { source: string }) => p.source === 'receipt')).toBe(true);
     expect((await api(ctx.app, ctx.clerk, 'GET', `/api/purchase-price-history?materialId=${mat.id}`)).status).toBe(403);
+
+    // 自检：询价单与采购单的关联一致；关联了没撤回的采购单、询价单却回到询价中，自检报出来
+    const { sourcingChecks } = await import('../src/server/modules/inventory/sourcing');
+    const [ok] = await sourcingChecks(ctx.sql);
+    expect(ok, ok!.detail).toMatchObject({ key: 'sourcing_links', ok: true });
+    await ctx.sql`UPDATE sourcing_events SET status = 'open', awarded_quote_id = NULL WHERE id = ${e1.id}`;
+    try {
+      const [broken] = await sourcingChecks(ctx.sql);
+      expect(broken!.ok).toBe(false);
+      expect(broken!.detail).toContain(e1.docNo);
+      expect(broken!.detail).toContain(po.docNo);
+    } finally {
+      await ctx.sql`UPDATE sourcing_events SET status = 'awarded', awarded_quote_id = ${qa.id} WHERE id = ${e1.id}`;
+    }
+    expect((await sourcingChecks(ctx.sql))[0]!.ok).toBe(true);
   });
 });
