@@ -98,6 +98,32 @@ describe('绑定会员', () => {
     expect(await activeBindings(a.id)).toBe(1);
   });
 
+  it('合并掉的会员卡：用它的手机号绑定拒绝（MP25），用合并到的那张卡的手机号照常绑；之前已经绑着的照旧认', async () => {
+    const source = await createMember(ctx, '演示·合并来源', phoneOf(60));
+    const target = await createMember(ctx, '演示·合并目标', phoneOf(61));
+    const kept = await createMember(ctx, '演示·合并前已绑', phoneOf(62));
+    const keptOpenid = newOpenid();
+    expect((await bind(keptOpenid, phoneOf(62))).statusCode).toBe(200);
+    // 主线的合并：来源会员停用、记合并到谁，手机号还留在来源会员上
+    await ctx.sql`UPDATE members SET status = 'frozen', merged_into_id = ${target.id} WHERE id IN ${ctx.sql([source.id, kept.id])}`;
+    const openid = newOpenid();
+    const refused = await bind(openid, phoneOf(60));
+    expect(refused.statusCode).toBe(422);
+    expect(refused.json().error).toMatchObject({
+      code: 'MEMBER_MERGED',
+      message: '这个手机号的会员卡已经合并到另一张会员卡：请用那张卡登记的手机号绑定，不清楚的请问前台',
+    });
+    expect(refused.body).not.toContain('演示·合并目标');
+    expect(await activeBindings(source.id)).toBe(0);
+    // 同一个微信改用目标会员的手机号：照常绑上
+    const ok = await bind(openid, phoneOf(61));
+    expect(ok.statusCode, ok.body).toBe(200);
+    expect(ok.json()).toMatchObject({ status: 'bound', member: { name: '演示·合并目标' } });
+    // 合并之前就绑着来源会员的微信：照旧认（「我的」写已合并、请到前台换绑），不会被这条拦掉
+    expect((await bind(keptOpenid, phoneOf(62))).json()).toMatchObject({ status: 'bound', replayed: true });
+    expect((await call(mp, 'GET', '/api/mp/me', keptOpenid)).json()).toMatchObject({ bound: true, member: { merged: true } });
+  });
+
   it('两个微信同时绑同一位会员：只成一个', async () => {
     const m = await createMember(ctx, '演示·并发', phoneOf(5));
     const results = await Promise.all([bind(newOpenid(), phoneOf(5)), bind(newOpenid(), phoneOf(5)), bind(newOpenid(), phoneOf(5))]);
