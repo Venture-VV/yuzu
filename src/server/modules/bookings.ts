@@ -89,6 +89,16 @@ async function saveBookingRules(deps: Deps, raw: unknown, ctx: OpContext) {
 
 const iso = (v: string | Date | null) => (v === null ? null : new Date(v).toISOString());
 
+/** 门店时间的「M月D日 HH:mm」（给顾客看的提示用） */
+export function monthDayTime(at: Date, timeZone: string): string {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-GB', { timeZone, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+      .formatToParts(at)
+      .map((x) => [x.type, x.value]),
+  );
+  return `${Number(p.month)}月${Number(p.day)}日 ${p.hour}:${p.minute}`;
+}
+
 type BookingRow = Omit<BookingDetail, 'startsAt' | 'endsAt' | 'holdUntil' | 'createdAt' | 'confirmedAt' | 'arrivedAt' | 'cancelledAt' | 'noShowAt' | 'technicianText'> & {
   startsAt: string;
   endsAt: string;
@@ -757,8 +767,8 @@ export type MpBookingInput = z.input<typeof MpCreateInput>;
 
 /**
  * 小程序预约（3d）：「待确认」，前台确认；时段要对齐、在最远天数内；每人同时最多 N 个没到店的（MP34）；爽约限制（MP37）。
- * 拒绝码：MEMBER_INACTIVE、BOOKING_BANNED、BOOKING_LIMIT、BOOKING_TIME、BOOKING_RANGE、BOOKING_PAST、BOOKING_ITEM、BOOKING_TECHNICIAN、
- * BOOKING_SPACE、BOOKING_DURATION、BOOKING_TAKEN。同一个 claimKey 再调用返回第一次的结果（replayed）
+ * 拒绝码：MEMBER_INACTIVE、BOOKING_BANNED、BOOKING_LIMIT、BOOKING_TOO_SOON、BOOKING_TIME、BOOKING_RANGE、BOOKING_PAST、BOOKING_ITEM、
+ * BOOKING_TECHNICIAN、BOOKING_SPACE、BOOKING_DURATION、BOOKING_TAKEN。同一个 claimKey 再调用返回第一次的结果（replayed）
  */
 export async function createBookingFromMp(tx: Tx, deps: Pick<Deps, 'config'>, raw: MpBookingInput): Promise<{ booking: BookingDetail; replayed: boolean }> {
   const input = parse(MpCreateInput, raw);
@@ -773,10 +783,21 @@ export async function createBookingFromMp(tx: Tx, deps: Pick<Deps, 'config'>, ra
   if (!m) throw notFound('会员不存在');
   if (m.status !== 'active') throw unprocessable('MEMBER_INACTIVE', '会员卡已停用或已合并，请到前台办理');
   const ban = await mpBookingBan(tx, input.memberId, ctx.at);
-  if (ban.banned) throw unprocessable('BOOKING_BANNED', `${rules.noShowWindowDays} 天内爽约 ${ban.noShows} 次，${ban.until!.slice(0, 10)} 前不能在小程序预约，请打电话给门店`);
+  // 限制到那一刻为止：按门店时间写日子和钟点（UTC 的日子在北京时间 0–8 点会早一天；小程序线 #55 的独立审查）
+  if (ban.banned) {
+    throw unprocessable(
+      'BOOKING_BANNED',
+      `${rules.noShowWindowDays} 天内爽约 ${ban.noShows} 次，${monthDayTime(new Date(ban.until!), deps.config.timezone)} 以后才能在小程序预约，请打电话给门店`,
+    );
+  }
   const [open] = await tx<{ n: number }[]>`
     SELECT count(*)::int AS n FROM bookings WHERE member_id = ${input.memberId} AND status IN ${tx(ACTIVE_BOOKING_STATUSES)} AND starts_at > ${ctx.at!}`;
   if (open!.n >= rules.mpMaxOpen) throw unprocessable('BOOKING_LIMIT', `每人同时最多 ${rules.mpMaxOpen} 个没到店的预约`);
+  // 开始前「自动取消的提前分钟」以内的：还没确认就会被每分钟的自动处理马上取消，不收（已经过了的照旧报 BOOKING_PAST）
+  const start = Date.parse(payload.startsAt);
+  if (start > ctx.at!.getTime() && start - rules.confirmLeadMinutes * 60_000 <= ctx.at!.getTime()) {
+    throw unprocessable('BOOKING_TOO_SOON', `开始前 ${rules.confirmLeadMinutes} 分钟以内的时段门店来不及确认，不能在小程序预约，请约晚一点的时段或打电话给门店`);
+  }
   const id = await createBookingTx(
     tx,
     deps,
