@@ -270,6 +270,8 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
     ? `还有 ${unmatched.length} 行新产品没选物料`
     : !supplierId
     ? '请选择供应商'
+    : channelDef?.needsNote && channelNote.trim().length < 2
+    ? `采购途径选了「${channelDef.label}」，请写明在哪买的`
     : rows.length === 0
       ? '请至少添加一项物料'
       : rows.some((r) => r.err)
@@ -278,9 +280,7 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
           ? '还有行没填完整'
           : expectedDate && expectedDate < orderDate
             ? '预计到货日期不能早于下单日期'
-            : channelDef?.needsNote && channelNote.trim().length < 2
-              ? `采购途径选了「${channelDef.label}」，请写明在哪买的`
-              : null;
+            : null;
 
   const body = (action: 'save' | 'submit') => ({
     supplierId,
