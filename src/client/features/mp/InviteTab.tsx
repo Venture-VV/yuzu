@@ -75,7 +75,11 @@ function Switch({ rules, pending }: { rules: MpAdminData['inviteRules']; pending
         <Segmented
           value={rules.enabled ? 'on' : 'off'}
           ariaLabel="邀请好友开关"
-          onChange={(v) => void save(v === 'on')}
+          // 点的是现在的那一边：不保存（不然版本号白加一次、还提示「已开通 / 已关闭」）
+          onChange={(v) => {
+            if (saving || pending || (v === 'on') === rules.enabled) return;
+            void save(v === 'on');
+          }}
           options={[
             { value: 'off', label: '关闭', disabled: pending || saving },
             { value: 'on', label: '开通', disabled: pending || saving },

@@ -3,6 +3,9 @@
 # 以及真实浏览器验收（含完整收银流程与五种视口）。
 # 只使用合成数据与一次性的 CI 数据库，不连接任何门店环境。
 #
+# 运行机：GitHub 托管（ubuntu-latest）。2026-11-03 曾改到门店 Mac mini 的自托管运行机，店主 2026-11-05 嫌太慢改回；
+# 浏览器缓存的键带运行机架构、先查预装的 Chromium 这两处在托管运行机上照常可用，保留。
+#
 # 提速（v0.7.18，RQ-008，见 docs/TESTING.md）：各 job 同时开始，浏览器验收不再等测试 job；浏览器验收按文件名拆成三组
 # 并行（门店电脑 a–l、门店电脑 m–z、其余四个尺寸），每组用自己的临时库与应用；「浏览器验收汇总」核对三组都跑完、
 # 合计跑过的用例 = 不拆分时的总数、没有失败。集成测试按文件并行，每个进程用自己的测试库。任何一个 job 失败整次 CI 失败。
@@ -20,7 +23,7 @@ concurrency:
 jobs:
   test:
     name: 类型检查 · 集成测试 · 构建
-    runs-on: [self-hosted, Linux, ARM64, yuzu-mini-ci-isolated]
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
       postgres:
@@ -40,6 +43,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
       - run: npm ci
       - name: pg_dump / pg_restore 用 16 版（与数据库同一大版本，备份测试用）
         run: |
@@ -57,7 +61,7 @@ jobs:
 
   e2e:
     name: 浏览器验收（${{ matrix.name }}）
-    runs-on: [self-hosted, Linux, ARM64, yuzu-mini-ci-isolated]
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
       fail-fast: false
@@ -93,6 +97,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
       - run: npm ci
       - run: npm run build
       - name: 写入合成演示数据（会员 + 库存采购 + 前台手牌 + 结账交班 + 旧账合成样例）
@@ -151,7 +156,7 @@ jobs:
 
   e2e-summary:
     name: 浏览器验收汇总（三组都跑完、用例一项不少、没有失败）
-    runs-on: [self-hosted, Linux, ARM64, yuzu-mini-ci-isolated]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: e2e
     # 有分组失败也要核对、写明哪一组；整次 CI 被取消（新的提交推上来）时不跑
@@ -161,6 +166,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
       - run: npm ci
       - name: 取回三组的结果
         uses: actions/download-artifact@v4
@@ -176,7 +182,7 @@ jobs:
 
   demo:
     name: 演示数据：准备、重复执行与核对
-    runs-on: [self-hosted, Linux, ARM64, yuzu-mini-ci-isolated]
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
       postgres:
@@ -198,6 +204,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
       - run: npm ci
       - run: npm run build
       - name: 新库：demo-prepare 一次准备完（最后自带一致性自检与演示核对）
@@ -318,7 +325,7 @@ jobs:
 
   upgrade:
     name: 从上一发布版本的演示库升级
-    runs-on: [self-hosted, Linux, ARM64, yuzu-mini-ci-isolated]
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
       postgres:
@@ -342,6 +349,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
       - name: 找上一发布版本（目标分支上最新的版本标签）
         id: prev
         run: |
@@ -405,7 +413,7 @@ jobs:
   # 接口改了小程序这边会报错。单元测试不要微信开发者工具（页面在开发者工具与真机上测，见第 11 节）。
   miniprogram:
     name: 小程序：类型检查 · 单元测试
-    runs-on: [self-hosted, Linux, ARM64, yuzu-mini-ci-isolated]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
       run:
@@ -415,6 +423,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: miniprogram/package-lock.json
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
