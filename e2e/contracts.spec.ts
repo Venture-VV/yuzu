@@ -8,11 +8,11 @@
 //   ⑤ 采购单选这份合同：逐行显示合同价与剩余量，超价、超量标出来，要写原因；存草稿后详情里看到合同与超出原因。
 // 依赖演示数据（只在独立演示库）；账号：店主 linlan，密码 yuzu2026。会登记单据，只在门店电脑尺寸执行。
 // 每次用新的供应商、物料编码与员工账号，不改演示数据里已有的档案。
+import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
+import { DEFAULT_PAYMENT_TERMS } from '../src/shared/contracts';
 
 const PASSWORD = 'yuzu2026';
-/** 1×1 的 PNG（扫描件用） */
-const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 
 async function login(page: Page, username: string, password = PASSWORD) {
   await page.goto('/login');
@@ -175,9 +175,21 @@ test.describe('合同与法务审查（v0.7.31）', () => {
     await page.getByTestId('review-approve').click();
     await expect(page.getByText('已同意，审批通过').first()).toBeVisible();
     await expect(page.getByTestId(`seal-${seal.sealNo}`)).toContainText('已生效');
-    await page.getByTestId('contract-file-input').setInputFiles({ name: 'page1.png', mimeType: 'image/png', buffer: PNG });
+    // 一次选 21 页：全部逐页上传，不悄悄丢掉第 20 页以后的（Codex 自动审查 d64e3ed）
+    const pages = await page.evaluate(() =>
+      Array.from({ length: 21 }, (_, i) => {
+        const cv = document.createElement('canvas');
+        cv.width = 4;
+        cv.height = 4;
+        const g = cv.getContext('2d')!;
+        g.fillStyle = `rgb(${(i * 11) % 256}, ${(255 - i * 7) % 256}, ${(i * 37) % 256})`;
+        g.fillRect(0, 0, 4, 4);
+        return cv.toDataURL('image/png').split(',')[1]!;
+      }),
+    );
+    await page.getByTestId('contract-file-input').setInputFiles(pages.map((b, i) => ({ name: `page${i + 1}.png`, mimeType: 'image/png', buffer: Buffer.from(b, 'base64') })));
     await expect(page.getByText('扫描件已上传').first()).toBeVisible();
-    await expect(page.getByTestId('contract-files').locator('li')).toHaveCount(1);
+    await expect(page.getByTestId('contract-files').locator('li')).toHaveCount(21);
     await page.getByTestId('contract-archive').click();
     await page.getByTestId('archive-location').fill('财务室 1 号柜');
     await page.getByTestId('archive-confirm').click();
@@ -253,5 +265,49 @@ test.describe('合同与法务审查（v0.7.31）', () => {
     const list = (await (await page.request.get('/api/staff')).json()) as { id: number; username: string; displayName: string; role: string; duties: string[] }[];
     const s = list.find((x) => x.username === lawyer);
     if (s) await page.request.put(`/api/staff/${s.id}`, { data: { displayName: s.displayName, role: s.role, duties: s.duties, active: false } });
+  });
+
+  test('修改合同：打开表单以后别人先存了一次，这边再保存提示「刚被别人改过」，不拿后台刷新到的新版本号覆盖别人的修改（Codex 自动审查 d64e3ed）', async ({ page }) => {
+    await login(page, 'linlan');
+    const me = (await (await page.request.get('/api/auth/me')).json()) as { calendarToday: string };
+    const today = me.calendarToday;
+    const tag = String(Date.now()).slice(-6);
+    const header = { category: 'service', counterparty: `E2E 保洁服务${tag}` };
+    const content = {
+      title: `E2E 并发修改${tag}`,
+      startDate: today,
+      endDate: addDays(today, 365),
+      totalCents: 100_000,
+      taxRateBp: 600,
+      freightBearer: 'supplier',
+      unloadingBearer: 'supplier',
+      paymentTerms: DEFAULT_PAYMENT_TERMS,
+      warranty: { basis: 'acceptance', months: 12 },
+      acceptance: { method: '按月验收', signer: '前厅经理', penalty: '扣当月服务费' },
+      note: '',
+      lines: [],
+    };
+    const created = await page.request.post('/api/erp/contracts', { data: { clientKey: randomUUID(), ...header, content } });
+    expect(created.status(), await created.text()).toBe(201);
+    const draft = (await created.json()).contract as { id: number; version: number };
+    await page.goto(`/erp/contracts/${draft.id}/edit`);
+    await expect(page.getByTestId('contract-title')).toHaveValue(content.title);
+    // 别人先存了一次
+    const theirs = `${content.title}（别人改过）`;
+    const other = await page.request.put(`/api/erp/contracts/${draft.id}`, { data: { version: draft.version, ...header, content: { ...content, title: theirs } } });
+    expect(other.ok(), await other.text()).toBe(true);
+    // 这边的页面回到窗口时在后台刷新，拿到了新的版本号；表单里还是打开时的内容
+    await page.waitForTimeout(5_500);
+    const refetched = page.waitForResponse((r) => r.url().endsWith(`/api/erp/contracts/${draft.id}`) && r.request().method() === 'GET');
+    await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
+    await refetched;
+    await page.getByTestId('contract-title').fill(`${content.title}（我改的）`);
+    await page.getByTestId('contract-save').click();
+    await expect(page.getByText('这份合同刚被别人改过').first()).toBeVisible();
+    const after = (await (await page.request.get(`/api/erp/contracts/${draft.id}`)).json()) as { title: string; version: number };
+    expect(after.title).toBe(theirs);
+    // 用完作废，不留在台账里
+    const voided = await page.request.post(`/api/erp/contracts/${draft.id}/void`, { data: { version: after.version, reason: 'E2E 用完作废' } });
+    expect(voided.ok(), await voided.text()).toBe(true);
   });
 });

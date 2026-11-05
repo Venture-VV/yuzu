@@ -231,6 +231,9 @@ function ContractForm({ mode, meta, contract, change, renew }: { mode: ContractF
   const [busy, setBusy] = useState<null | 'save' | 'submit'>(null);
   const [error, setError] = useState<string | null>(null);
   const [uncertainEdit, setUncertainEdit] = useState(false);
+  // 打开表单时的版本：保存时带这几个号，表单里是这时的内容。后台刷新（回到窗口时）会拿到别人保存后的新版本号，
+  // 用新版本号配旧内容就把别人的修改覆盖了；别人改过的，服务端按这里的旧号拒绝（VERSION_CONFLICT），刷新后再改（Codex 自动审查 d64e3ed）
+  const [opened] = useState(() => ({ contractVersion: contract?.version ?? 0, changeVersion: change?.version ?? 0, currentVersion: contract?.currentVersion ?? 0 }));
 
   const materials = useMemo(() => new Map(meta.materials.map((m) => [m.id, m])), [meta.materials]);
   const built = build(form);
@@ -306,9 +309,10 @@ function ContractForm({ mode, meta, contract, change, renew }: { mode: ContractF
         });
         detail = r.contract;
       } else if (mode === 'edit') {
-        detail = await api.put<ContractDetail>(`/api/erp/contracts/${contract!.id}`, { version: contract!.version, ...headerBody(), renewalOf: contract!.renewalOf?.id ?? null, content });
+        detail = await api.put<ContractDetail>(`/api/erp/contracts/${contract!.id}`, { version: opened.contractVersion, ...headerBody(), renewalOf: contract!.renewalOf?.id ?? null, content });
       } else if (mode === 'change') {
-        const body = { clientKey: uuid(), kinds, reason: reason.trim(), content };
+        // 带上打开表单时合同生效的是第几版：这期间别的变更单生效了，按旧版本改的内容不能当成新版本上的变更
+        const body = { clientKey: uuid(), baseVersion: opened.currentVersion, kinds, reason: reason.trim(), content };
         const r = await sendErpOp<{ change: ChangeView; contract: ContractDetail }>({
           key: body.clientKey,
           type: 'contract_change',
@@ -320,7 +324,7 @@ function ContractForm({ mode, meta, contract, change, renew }: { mode: ContractF
         detail = r.contract;
         saved = r.change;
       } else {
-        detail = await api.put<ContractDetail>(`/api/erp/contracts/changes/${change!.id}`, { version: change!.version, kinds, reason: reason.trim(), content });
+        detail = await api.put<ContractDetail>(`/api/erp/contracts/changes/${change!.id}`, { version: opened.changeVersion, kinds, reason: reason.trim(), content });
         saved = detail.changes.find((x) => x.id === change!.id) ?? null;
       }
     } catch (e) {

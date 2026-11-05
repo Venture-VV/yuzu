@@ -904,6 +904,8 @@ function FilesCard({ c, manage, onChanged }: { c: ContractDetail; manage: boolea
   const toast = useToast();
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  // 一次选了几页时逐页上传，按钮上显示进度（Codex 自动审查 d64e3ed：原来只传前 20 张、后面的悄悄丢掉）
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [viewing, setViewing] = useState<string | null>(null);
   const [removing, setRemoving] = useState<number | null>(null);
   const canAdd = manage && c.status !== 'voided';
@@ -911,20 +913,27 @@ function FilesCard({ c, manage, onChanged }: { c: ContractDetail; manage: boolea
   const canRemove = manage && !c.archiveNo && c.status !== 'voided';
   const upload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
+    const list = [...files];
+    let done = 0;
     setBusy(true);
     try {
-      for (const f of [...files].slice(0, 20)) {
+      for (const f of list) {
+        setProgress({ done, total: list.length });
         await api.post(`/api/erp/contracts/${c.id}/files`, await imagePayload(f), { timeoutMs: 30_000 });
+        done += 1;
       }
-      toast({ tone: 'success', title: '扫描件已上传', body: c.contractNo });
+      toast({ tone: 'success', title: '扫描件已上传', body: `${c.contractNo}：${done} 页` });
     } catch (e) {
+      // 说清楚传到第几页：前面的已经存好，没传上的重新选了再传（同一张图重新上传不会多记一份）
+      const which = list.length > 1 ? `第 ${done + 1} 页（共 ${list.length} 页）` : '扫描件';
       toast({
         tone: 'error',
-        title: e instanceof UncertainError ? '上传没收到结果' : errorMessage(e),
-        body: e instanceof UncertainError ? '刷新看看；同一张图重新上传不会多记一份' : c.contractNo,
+        title: e instanceof UncertainError ? `${which}上传没收到结果` : `${which}没传上：${errorMessage(e)}`,
+        body: `已上传 ${done} 页；${e instanceof UncertainError ? '刷新看看，' : ''}没传上的几页重新选了再传，同一张图重新上传不会多记一份`,
       });
     } finally {
       setBusy(false);
+      setProgress(null);
       if (input.current) input.current.value = '';
       await onChanged();
     }
@@ -948,8 +957,8 @@ function FilesCard({ c, manage, onChanged }: { c: ContractDetail; manage: boolea
         {canAdd && (
           <>
             <input ref={input} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void upload(e.target.files)} data-testid="contract-file-input" />
-            <Button size="sm" variant="secondary" className="ml-auto" loading={busy} icon={<ImagePlus className="size-4" />} onClick={() => input.current?.click()}>
-              上传
+            <Button size="sm" variant="secondary" className="ml-auto" loading={busy} icon={<ImagePlus className="size-4" />} onClick={() => input.current?.click()} data-testid="contract-file-upload">
+              {progress && progress.total > 1 ? `上传中 ${progress.done + 1}/${progress.total}` : '上传'}
             </Button>
           </>
         )}

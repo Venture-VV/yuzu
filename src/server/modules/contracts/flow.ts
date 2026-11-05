@@ -448,7 +448,8 @@ async function currentTotal(db: Db, contractId: number): Promise<number> {
 }
 
 export async function createChange(deps: Deps, contractId: number, raw: unknown, actor: Actor, ip?: string): Promise<{ id: number; replayed: boolean }> {
-  const input = parse(ChangeBody.extend({ clientKey: ClientKey }), raw);
+  // baseVersion：开变更单的表单打开时合同生效的是第几版（选填）；这期间有别的变更单生效了就拒绝，免得按旧版本改的内容覆盖新版本（Codex 自动审查 d64e3ed）
+  const input = parse(ChangeBody.extend({ clientKey: ClientKey, baseVersion: z.number().int().positive().optional() }), raw);
   const requestHash = hashRequest({ ...input, clientKey: undefined, contractId });
   const find = async (db: Db) => {
     const [row] = await db<{ id: number; requestHash: string }[]>`SELECT id, request_hash FROM contract_changes WHERE client_key = ${input.clientKey}`;
@@ -464,6 +465,9 @@ export async function createChange(deps: Deps, contractId: number, raw: unknown,
       if (existing) return { id: existing, replayed: true };
       const c = await lockContract(tx, contractId);
       if (!['signed', 'archived'].includes(c.status)) throw conflict('INVALID_STATE', '只有已签署、已归档的合同可以开变更单');
+      if (input.baseVersion !== undefined && input.baseVersion !== c.currentVersion) {
+        throw conflict('VERSION_CONFLICT', `合同已经有了新的版本（第 ${c.currentVersion} 版），请刷新后在新版本上开变更单`);
+      }
       const [open] = await tx<{ changeNo: string }[]>`SELECT change_no FROM contract_changes WHERE contract_id = ${contractId} AND status IN ('draft', 'reviewing', 'returned') LIMIT 1`;
       if (open) throw conflict('CONTRACT_CHANGE_OPEN', `这份合同已经有一张没结束的变更单 ${open.changeNo}`);
       const content = await normalizeContent(tx, input.content);

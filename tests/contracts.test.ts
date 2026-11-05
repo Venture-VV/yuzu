@@ -272,9 +272,14 @@ describe('合同与法务审查', () => {
     expect(c.changes[0]).toMatchObject({ status: 'approved', resultVersion: 2, baseTotalCents: 12_000_00, totalCents: 13_200_00 });
     expect(c.revisions.filter((r) => r.versionNo !== null).map((r) => r.versionNo)).toEqual([2, 1]);
     expect(c.revisions.find((r) => r.versionNo === 1)!.lines[0]!.priceCents).toBe(50_00);
+    // 开变更单的表单打开时是第 1 版、这期间合同升到了第 2 版：按旧版本改的内容不能开成变更单（Codex 自动审查 d64e3ed）
+    const stale = await api(ctx.app, buyer, 'POST', `/api/erp/contracts/${c.id}/changes`, { clientKey: randomUUID(), baseVersion: 1, kinds: ['price'], reason: '按第 1 版改的', content: content() });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error.code).toBe('VERSION_CONFLICT');
     // 降价的变更单：所在版本（第 2 版）的总价比变更后的高，deltaCents 照样是绝对值
     const down = await api(ctx.app, buyer, 'POST', `/api/erp/contracts/${c.id}/changes`, {
       clientKey: randomUUID(),
+      baseVersion: 2,
       kinds: ['price'],
       reason: '供应商让利，单价降到 45 元',
       content: { ...content({ totalCents: 10_800_00 }), lines: [{ ...content().lines[0], priceCents: 45_00 }] },
