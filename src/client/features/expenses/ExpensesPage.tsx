@@ -12,6 +12,7 @@ import {
   type ExpenseClaim,
 } from '@shared/expenses';
 import { formatQty } from '@shared/quantity';
+import { channelText } from '@shared/purchasing';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
@@ -167,6 +168,7 @@ export function ExpensesPage() {
                       <span className="block truncate text-[12px] text-ink-3">
                         {c.department.name} · {c.handler.name} · {c.purpose}
                         {c.purchaseOrder ? ` · 采购单 ${c.purchaseOrder.docNo}` : ''}
+                        {c.channel ? ` · ${c.channel.label}` : ''}
                       </span>
                     </span>
                     <span className="hidden text-[12.5px] text-ink-2 md:block">
@@ -264,6 +266,8 @@ function ClaimSheet({ id, onClose }: { id: number | null; onClose: () => void })
                 {c.invoiceLabel} · 税点 {taxRateText(c.taxRateBp)}
                 {c.invoiceNo && <span className="num ml-1.5">{c.invoiceNo}</span>}
               </dd>
+              <dt className="text-ink-3">采购途径</dt>
+              <dd data-testid="claim-channel">{channelText(c.channel)}</dd>
               {c.purchaseOrder && (
                 <>
                   <dt className="text-ink-3">采购单</dt>

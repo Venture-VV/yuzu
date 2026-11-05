@@ -27,6 +27,7 @@ import { registerPurchaseLedgerRoutes } from './modules/purchase-ledger';
 import { registerLegacyRoutes } from './modules/legacy';
 import { registerRequestRoutes } from './modules/requests';
 import { registerPurchasingRoutes } from './modules/inventory/purchasing';
+import { registerPurchaseRulesRoutes } from './modules/inventory/purchase-rules';
 import { registerReportRoutes } from './modules/inventory/reports';
 import { registerLedgerRoutes } from './modules/ledger';
 import { registerMemberRoutes } from './modules/members';
@@ -186,6 +187,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerReportRoutes(app, deps);
   registerDeptStockRoutes(app, deps);
   registerPurchasingRoutes(app, deps);
+  registerPurchaseRulesRoutes(app, deps);
   registerPayableRoutes(app, deps);
   registerCycleRoutes(app, deps);
   registerImportRoutes(app, deps);

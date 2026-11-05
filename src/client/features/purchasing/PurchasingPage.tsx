@@ -140,6 +140,7 @@ export function PurchasingPage() {
                   <span className="col-span-2 min-w-0 lg:col-span-1">
                     <span className="flex items-center gap-1.5">
                       <span className="truncate text-[13.5px] font-semibold">{p.supplierName}</span>
+                      {p.channel && <span className="shrink-0 truncate text-[11.5px] font-semibold text-ink-3">{p.channel.label}</span>}
                       {p.backfill && <Badge tone="ember">补单</Badge>}
                     </span>
                     <span className="block truncate text-[12.5px] text-ink-3">

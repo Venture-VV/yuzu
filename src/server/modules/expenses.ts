@@ -50,6 +50,7 @@ import { checkDateRange, daysBetween, todayIn } from '../lib/dates';
 import { nextDocNo, setTxTimeouts } from '../lib/tx';
 import { hashRequest } from '../lib/idempotency';
 import { saveRuleSetting } from '../lib/rule-settings';
+import { ChannelKey, ChannelNote, loadPurchaseRules, resolveChannel } from './inventory/purchase-rules';
 
 const id = z.number().int().positive();
 const yuan = (cents: number) => (cents < 0 ? '-' : '') + formatAmount(Math.abs(cents)).replace(/,/g, '');
@@ -284,7 +285,7 @@ const claimWhere = (db: Db, f: ClaimFilter) => db`
 
 async function claimSummaries(db: Db, f: ClaimFilter, limit: number | null = null): Promise<ExpenseClaimSummary[]> {
   const rows = await db<
-    (Omit<ExpenseClaimSummary, 'department' | 'handler' | 'advance' | 'purchaseOrder'> & {
+    (Omit<ExpenseClaimSummary, 'department' | 'handler' | 'advance' | 'purchaseOrder' | 'channel'> & {
       departmentId: number;
       departmentName: string;
       handlerId: number;
@@ -294,11 +295,15 @@ async function claimSummaries(db: Db, f: ClaimFilter, limit: number | null = nul
       poId: number | null;
       poNo: string | null;
       supplierName: string | null;
+      channelKey: string | null;
+      channelLabel: string | null;
+      channelNote: string;
     })[]
   >`
     SELECT c.id, c.doc_no, c.status, c.expense_date, c.department_id, d.name AS department_name, c.handler_id, h.display_name AS handler_name,
            c.purpose, c.pay_source, c.advance_id, a.doc_no AS advance_no, c.invoice_type, c.invoice_label, c.tax_rate_bp, c.invoice_no,
            c.purchase_order_id AS po_id, po.doc_no AS po_no, s.name AS supplier_name, c.amount_cents, c.needs_approval,
+           c.channel AS channel_key, c.channel_label, c.channel_note,
            coalesce((SELECT string_agg(l.name, '、' ORDER BY l.line_no) FROM expense_claim_lines l WHERE l.claim_id = c.id AND l.line_no <= 3), '') AS summary,
            cb.display_name AS created_by_name, c.created_at
     FROM expense_claims c JOIN departments d ON d.id = c.department_id JOIN staff h ON h.id = c.handler_id JOIN staff cb ON cb.id = c.created_by
@@ -307,8 +312,9 @@ async function claimSummaries(db: Db, f: ClaimFilter, limit: number | null = nul
     WHERE TRUE ${claimWhere(db, f)}
     ORDER BY c.expense_date DESC, c.id DESC
     ${limit ? db`LIMIT ${limit}` : db``}`;
-  return rows.map(({ departmentId, departmentName, handlerId, handlerName, advanceId, advanceNo, poId, poNo, supplierName, ...r }) => ({
+  return rows.map(({ departmentId, departmentName, handlerId, handlerName, advanceId, advanceNo, poId, poNo, supplierName, channelKey, channelLabel, channelNote, ...r }) => ({
     ...r,
+    channel: channelKey ? { key: channelKey, label: channelLabel ?? channelKey, note: channelNote } : null,
     department: { id: departmentId, name: departmentName },
     handler: { id: handlerId, name: handlerName },
     advance: advanceId ? { id: advanceId, docNo: advanceNo! } : null,
@@ -360,12 +366,17 @@ async function receivedByLine(db: Db, poId: number) {
 }
 
 export async function poForClaim(db: Db, poId: number, excludeClaimId: number | null = null): Promise<PoForClaim & { settlement: string; status: string }> {
-  const [head] = await db<{ id: number; docNo: string; supplierName: string; orderDate: string; status: string }[]>`
-    SELECT p.id, p.doc_no, s.name AS supplier_name, p.order_date, p.status
+  const [head] = await db<{ id: number; docNo: string; supplierName: string; orderDate: string; status: string; channelKey: string | null; channelLabel: string | null; channelNote: string }[]>`
+    SELECT p.id, p.doc_no, s.name AS supplier_name, p.order_date, p.status, p.channel AS channel_key, p.channel_label, p.channel_note
     FROM purchase_orders p JOIN suppliers s ON s.id = p.supplier_id WHERE p.id = ${poId}`;
   if (!head) throw notFound('采购单不存在');
   // 结算方式按这张采购单自己的（第一张收货定下的），不看供应商当前的设置：挂账收下的货已记应付，不能再报销
-  const po = { ...head, settlement: await poSettlement(db, poId) };
+  const { channelKey, channelLabel, channelNote, ...rest } = head;
+  const po = {
+    ...rest,
+    channel: channelKey ? { key: channelKey, label: channelLabel ?? channelKey, note: channelNote } : null,
+    settlement: await poSettlement(db, poId),
+  };
   const lines = await db<{ poLineId: number; materialId: number; name: string; unit: string; boughtMilli: number; amountCents: number }[]>`
     SELECT pl.id AS po_line_id, pl.material_id, m.name, pl.inventory_unit AS unit, pl.base_qty_milli AS bought_milli, pl.amount_cents
     FROM purchase_order_lines pl JOIN materials m ON m.id = pl.material_id WHERE pl.po_id = ${poId} ORDER BY pl.line_no`;
@@ -425,6 +436,9 @@ const ClaimInput = z.object({
   taxRateBp: z.number().int().min(0).max(10_000),
   invoiceNo: z.string().trim().max(40, '发票号码最多 40 个字').default(''),
   purchaseOrderId: id.nullable().default(null),
+  /** 采购途径与途径说明（v0.7.29，E1）：按采购单报销的照采购单记（采购单没记的才用这里的）；按次报销的页面上必选，接口不传记「未填」 */
+  channel: ChannelKey.nullable().default(null),
+  channelNote: ChannelNote.default(''),
   note: z.string().trim().max(200).default(''),
   lines: z.array(LineInput).min(1, '至少一行').max(50, '一张报销单最多 50 行'),
   approveNow: z.boolean().default(false),
@@ -514,16 +528,25 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
         }
       }
 
+      // 采购途径（v0.7.29）：按采购单报销的照采购单记；采购单没记（v0.7.29 以前的）或按次报销的按这次选的，没选记「未填」
+      let ch: { channel: string | null; channelLabel: string | null; channelNote: string } = { channel: null, channelLabel: null, channelNote: '' };
+      const [poCh] = input.purchaseOrderId
+        ? await tx<{ channel: string | null; channelLabel: string | null; channelNote: string }[]>`
+            SELECT channel, channel_label, channel_note FROM purchase_orders WHERE id = ${input.purchaseOrderId}`
+        : [];
+      if (poCh?.channel) ch = { channel: poCh.channel, channelLabel: poCh.channelLabel, channelNote: poCh.channelNote };
+      else if (input.channel) ch = resolveChannel(await loadPurchaseRules(tx), input, null);
+
       const confirmNow = !needsApproval || input.approveNow;
       const docNo = await nextDocNo(tx, 'expense_claim', 'BX', input.expenseDate);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO expense_claims (doc_no, expense_date, department_id, handler_id, purpose, pay_source, advance_id, invoice_type, invoice_label,
                                     tax_rate_bp, invoice_no, purchase_order_id, amount_cents, note, needs_approval, status, client_key, created_by,
-                                    confirmed_by, confirmed_at)
+                                    confirmed_by, confirmed_at, channel, channel_label, channel_note)
         VALUES (${docNo}, ${input.expenseDate}, ${input.departmentId}, ${input.handlerId}, ${input.purpose}, ${input.paySource}, ${input.advanceId},
                 ${inv.key}, ${inv.label}, ${input.taxRateBp}, ${input.invoiceNo}, ${input.purchaseOrderId}, ${total}, ${input.note}, ${needsApproval},
                 ${confirmNow ? 'confirmed' : 'submitted'}, ${input.clientKey}, ${actor.id},
-                ${confirmNow ? actor.id : null}, ${confirmNow ? tx`now()` : null})
+                ${confirmNow ? actor.id : null}, ${confirmNow ? tx`now()` : null}, ${ch.channel}, ${ch.channelLabel}, ${ch.channelNote})
         RETURNING id`;
       const newId = row!.id;
       let lineNo = 0;
@@ -852,7 +875,7 @@ async function claimsCsv(db: Db, f: ClaimFilter & { from: string; to: string }) 
   const confirmed = claims.filter((c) => c.status === 'confirmed').reduce((t, c) => t + c.amountCents, 0);
   return toCsv([
     [`费用报销明细 ${f.from} 至 ${f.to}（门店内部管理口径；已确认合计 ¥${yuan(confirmed)}）`],
-    ['单号', '日期', '状态', '部门', '经办人', '用途', '付款来源', '打款单', '发票类型', '税点', '发票号码', '采购单', '供应商', '行', '物品 / 内容', '费用科目', '单位', '购买数量', '到货数量', '差异原因', '金额（元）'],
+    ['单号', '日期', '状态', '部门', '经办人', '用途', '付款来源', '打款单', '发票类型', '税点', '发票号码', '采购单', '供应商', '采购途径', '途径说明', '行', '物品 / 内容', '费用科目', '单位', '购买数量', '到货数量', '差异原因', '金额（元）'],
     ...claims.flatMap((c) =>
       (byClaim.get(c.id) ?? []).map((l) => [
         c.docNo,
@@ -868,6 +891,8 @@ async function claimsCsv(db: Db, f: ClaimFilter & { from: string; to: string }) 
         c.invoiceNo,
         c.purchaseOrder?.docNo ?? '',
         c.purchaseOrder?.supplierName ?? '',
+        c.channel?.label ?? '',
+        c.channel?.note ?? '',
         l.lineNo,
         l.name,
         EXPENSE_CATEGORY_LABELS[l.category],

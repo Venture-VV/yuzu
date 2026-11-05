@@ -70,7 +70,7 @@ export interface PoRevision {
   revision: number;
   changedByName: string;
   changedAt: string;
-  snapshot: { supplierName: string; totalCents: number; lines: { materialName: string; spec?: string; purchaseQtyMilli: number; purchaseUnit: string; priceCents: number; amountCents: number; imageIds?: number[] }[] };
+  snapshot: { supplierName: string; channel?: string | null; totalCents: number; lines: { materialName: string; spec?: string; purchaseQtyMilli: number; purchaseUnit: string; priceCents: number; amountCents: number; imageIds?: number[] }[] };
 }
 
 export interface PurchaseOrder {
@@ -78,6 +78,8 @@ export interface PurchaseOrder {
   docNo: string;
   status: PoStatus;
   supplier: Ref;
+  /** 采购途径（v0.7.29，E1）；v0.7.29 以前的单据为空 */
+  channel: ChannelRef | null;
   orderDate: string;
   expectedDate: string | null;
   note: string;
@@ -119,6 +121,7 @@ export interface PoSummary {
   docNo: string;
   status: PoStatus;
   supplierName: string;
+  channel: ChannelRef | null;
   supplierId: number;
   orderDate: string;
   expectedDate: string | null;
@@ -417,4 +420,53 @@ export interface ErpImportRecord {
   totalCents: number;
   createdByName: string;
   createdAt: string;
+}
+
+// ───────────────────────── 采购规则（v0.7.29 ERP 采购五项，docs/ERP_PURCHASING.md） ─────────────────────────
+
+/** 采购途径（E1）：键固定、名称可改；needsNote 的要写途径说明（档口、平台与店铺、门店名……） */
+export interface PurchaseChannelDef {
+  key: string;
+  label: string;
+  needsNote: boolean;
+}
+
+export interface PurchaseRules {
+  channels: PurchaseChannelDef[];
+  /** 询价门槛（分，E5）：合计 ≥ 这个金额的采购单第一次提交时要来自已定标的询价单；0 = 不要求 */
+  quoteThresholdCents: number;
+  /** 定标至少要几家有效报价（E6）；不够的标「单一来源」、由负责人定标 */
+  minQuotes: number;
+  /** 补货触发天数（E4）：物料没设提醒天数时，可用天数（含在途）少于它就建议补货 */
+  reorderDays: number;
+  /** 补货目标天数（E4）：建议补到能用这么多天 */
+  targetDays: number;
+}
+
+/** 默认规则（待确认，E1、E4–E6）：店主在 ERP「模块设置 → 采购规则」里改 */
+export const DEFAULT_PURCHASE_RULES: PurchaseRules = {
+  channels: [
+    { key: 'supplier', label: '供应商配送', needsNote: false },
+    { key: 'wholesale', label: '批发市场', needsNote: true },
+    { key: 'online', label: '网购平台', needsNote: true },
+    { key: 'store', label: '商超门店', needsNote: true },
+    { key: 'other', label: '其他', needsNote: true },
+  ],
+  quoteThresholdCents: 500_000,
+  minQuotes: 2,
+  reorderDays: 7,
+  targetDays: 14,
+};
+
+/** 单据上记的采购途径：键与当时的名称、途径说明 */
+export interface ChannelRef {
+  key: string;
+  label: string;
+  note: string;
+}
+
+/** 「网购平台 · 某某旗舰店」；没记的显示「—」 */
+export function channelText(c: ChannelRef | null | undefined): string {
+  if (!c) return '—';
+  return c.note ? `${c.label} · ${c.note}` : c.label;
 }

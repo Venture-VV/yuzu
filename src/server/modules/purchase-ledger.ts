@@ -55,7 +55,9 @@ interface LedgerFilter {
   handlerId?: number;
 }
 
-type PurchaseLedgerRow = Omit<LedgerEntry, 'department' | 'handler' | 'qty' | 'description'> & {
+type PurchaseLedgerRow = Omit<LedgerEntry, 'department' | 'handler' | 'qty' | 'description' | 'channel'> & {
+  channelLabel: string | null;
+  channelNote: string;
   departmentId: number;
   departmentName: string;
   handlerId: number;
@@ -83,20 +85,22 @@ async function ledgerRows(db: Db, f: LedgerFilter, limit: number | null): Promis
       SELECT 'advance'::text AS kind, a.advance_date AS date, a.doc_no, a.id AS ref_id, a.id AS advance_id, a.doc_no AS advance_no,
              a.department_id, d.name AS department_name, a.handler_id, h.display_name AS handler_name,
              NULL::text AS item_name, a.method, a.evidence, NULL::text AS category, NULL::bigint AS bought_milli, NULL::bigint AS received_milli,
-             NULL::text AS unit, NULL::text AS pay_source, NULL::text AS po_no, a.amount_cents, 1 AS line_no
+             NULL::text AS unit, NULL::text AS pay_source, NULL::text AS po_no, NULL::text AS channel_label, ''::text AS channel_note,
+             a.amount_cents, 1 AS line_no
       FROM petty_advances a JOIN departments d ON d.id = a.department_id JOIN staff h ON h.id = a.handler_id
       WHERE a.status = 'active' AND a.advance_date BETWEEN ${f.from} AND ${f.to} ${byAdvance(db, f)}
       UNION ALL
       SELECT s.kind, s.settle_date, s.doc_no, s.id, a.id, a.doc_no,
              a.department_id, d.name, a.handler_id, h.display_name,
-             NULL, s.method, s.evidence, NULL, NULL, NULL, NULL, NULL, NULL, s.amount_cents, 1
+             NULL, s.method, s.evidence, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '', s.amount_cents, 1
       FROM petty_settlements s JOIN petty_advances a ON a.id = s.advance_id
       JOIN departments d ON d.id = a.department_id JOIN staff h ON h.id = a.handler_id
       WHERE s.status = 'active' AND s.settle_date BETWEEN ${f.from} AND ${f.to} ${byAdvance(db, f)}
       UNION ALL
       SELECT 'expense', c.expense_date, c.doc_no, c.id, c.advance_id, a.doc_no,
              c.department_id, d.name, c.handler_id, h.display_name,
-             l.name, NULL, NULL, l.category, l.bought_milli, l.received_milli, l.unit, c.pay_source, po.doc_no, l.amount_cents, l.line_no
+             l.name, NULL, NULL, l.category, l.bought_milli, l.received_milli, l.unit, c.pay_source, po.doc_no, c.channel_label, c.channel_note,
+             l.amount_cents, l.line_no
       FROM expense_claim_lines l JOIN expense_claims c ON c.id = l.claim_id
       JOIN departments d ON d.id = c.department_id JOIN staff h ON h.id = c.handler_id
       LEFT JOIN petty_advances a ON a.id = c.advance_id LEFT JOIN purchase_orders po ON po.id = c.purchase_order_id
@@ -124,6 +128,7 @@ function toEntry(r: PurchaseLedgerRow): LedgerEntry {
     qty,
     paySource: (r.paySource as PaySource | null) ?? null,
     poNo: r.poNo,
+    channel: r.channelLabel ? (r.channelNote ? `${r.channelLabel} · ${r.channelNote}` : r.channelLabel) : null,
     amountCents: Number(r.amountCents),
   };
 }
@@ -197,7 +202,7 @@ async function ledgerCsv(db: Db, f: LedgerFilter) {
     throw unprocessable('EXPORT_TOO_LARGE', `这段时间有 ${count} 笔，一次最多导出 ${EXPORT_LIMIT} 笔，请缩短日期范围分几次导出`);
   }
   const entries = (await ledgerRows(db, f, null)).map(toEntry).reverse();
-  const rows: (string | number)[][] = [['日期', '类型', '单号', '部门', '经办人', '内容', '费用科目', '购买数量', '到货数量', '单位', '钱从哪来', '打款单号', '采购单号', '金额（元）']];
+  const rows: (string | number)[][] = [['日期', '类型', '单号', '部门', '经办人', '内容', '费用科目', '购买数量', '到货数量', '单位', '钱从哪来', '打款单号', '采购单号', '采购途径', '金额（元）']];
   for (const e of entries) {
     rows.push([
       e.date,
@@ -213,16 +218,17 @@ async function ledgerCsv(db: Db, f: LedgerFilter) {
       e.paySource ? PAY_SOURCE_LABELS[e.paySource] : e.kind === 'expense' ? '' : '备用金',
       e.advanceNo ?? '',
       e.poNo ?? '',
+      e.channel ?? '',
       formatAmount(e.amountCents).replace(/,/g, ''),
     ]);
   }
   const t = await ledgerTotals(db, f);
   rows.push([]);
-  rows.push(['合计', '打款', '', '', '', '', '', '', '', '', '', '', '', formatAmount(t.advanceCents).replace(/,/g, '')]);
-  rows.push(['合计', '支出（备用金）', '', '', '', '', '', '', '', '', '', '', '', formatAmount(t.pettySpentCents).replace(/,/g, '')]);
-  rows.push(['合计', '支出（公司直付）', '', '', '', '', '', '', '', '', '', '', '', formatAmount(t.companySpentCents).replace(/,/g, '')]);
-  rows.push(['合计', '退回', '', '', '', '', '', '', '', '', '', '', '', formatAmount(t.returnedCents).replace(/,/g, '')]);
-  rows.push(['合计', '补付', '', '', '', '', '', '', '', '', '', '', '', formatAmount(t.toppedUpCents).replace(/,/g, '')]);
+  rows.push(['合计', '打款', '', '', '', '', '', '', '', '', '', '', '', '', formatAmount(t.advanceCents).replace(/,/g, '')]);
+  rows.push(['合计', '支出（备用金）', '', '', '', '', '', '', '', '', '', '', '', '', formatAmount(t.pettySpentCents).replace(/,/g, '')]);
+  rows.push(['合计', '支出（公司直付）', '', '', '', '', '', '', '', '', '', '', '', '', formatAmount(t.companySpentCents).replace(/,/g, '')]);
+  rows.push(['合计', '退回', '', '', '', '', '', '', '', '', '', '', '', '', formatAmount(t.returnedCents).replace(/,/g, '')]);
+  rows.push(['合计', '补付', '', '', '', '', '', '', '', '', '', '', '', '', formatAmount(t.toppedUpCents).replace(/,/g, '')]);
   return toCsv(rows);
 }
 
@@ -241,6 +247,8 @@ async function orderedRows(db: Db, f: OrderedFilter) {
   const approvedOnly = f.state === 'open' || f.state === 'overdue';
   return db<(Omit<OrderedLine, 'state' | 'dueDate' | 'overdue'> & { poStatus: string })[]>`
     SELECT po.id AS po_id, po.doc_no, po.order_date, po.expected_date, po.status AS po_status, s.name AS supplier_name,
+           CASE WHEN po.channel_label IS NULL THEN NULL WHEN po.channel_note = '' THEN po.channel_label
+                ELSE po.channel_label || ' · ' || po.channel_note END AS channel,
            pl.id AS line_id, m.code AS material_code, m.name AS material_name, pl.spec, pl.purchase_qty_milli, pl.purchase_unit,
            pl.base_qty_milli, pl.inventory_unit, pl.price_cents, pl.amount_cents,
            coalesce((SELECT sum(l.qty_milli) FROM inv_doc_lines l JOIN inv_docs d ON d.id = l.doc_id
@@ -294,12 +302,13 @@ export async function orderedLines(db: Db, timezone: string, f: OrderedFilter, l
   return { lines: limit ? wanted.slice(0, limit) : wanted, truncated: limit ? wanted.length > limit : false };
 }
 
-const ORDERED_HEADERS = ['下单日期', '采购单号', '供应商', '物料编码', '物料', '规格', '采购数量', '采购单位', '库存数量', '已到', '未到', '库存单位', '单价（元）', '金额（元）', '应到日期', '状态', '需求部门'];
+const ORDERED_HEADERS = ['下单日期', '采购单号', '供应商', '采购途径', '物料编码', '物料', '规格', '采购数量', '采购单位', '库存数量', '已到', '未到', '库存单位', '单价（元）', '金额（元）', '应到日期', '状态', '需求部门'];
 function orderedCells(l: OrderedLine): (string | number)[] {
   return [
     l.orderDate,
     l.docNo,
     l.supplierName,
+    l.channel ?? '',
     l.materialCode,
     l.materialName,
     l.spec,
@@ -373,6 +382,7 @@ export async function orderedXlsx(db: Db, timezone: string, f: OrderedFilter, im
       { header: '下单日期', width: 11 },
       { header: '采购单号', width: 16 },
       { header: '供应商', width: 16 },
+      { header: '采购途径', width: 16 },
       { header: '物料编码', width: 10 },
       { header: '物料', width: 22 },
       { header: '规格', width: 22 },

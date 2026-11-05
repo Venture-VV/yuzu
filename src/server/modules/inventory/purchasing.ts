@@ -31,6 +31,7 @@ import {
   weighedCapMilli,
 } from './common';
 import { hashRequest } from '../../lib/idempotency';
+import { ChannelKey, ChannelNote, loadPurchaseRules, resolveChannel, type ChannelColumns } from './purchase-rules';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -56,6 +57,9 @@ const PoBody = z.object({
   orderDate: docDateSchema,
   expectedDate: docDateSchema.nullable().default(null),
   note: z.string().trim().max(200).default(''),
+  /** 采购途径与途径说明（v0.7.29，E1）：新建不传按供应商的默认、再按采购规则的第一项；修改不传保持原样 */
+  channel: ChannelKey.optional(),
+  channelNote: ChannelNote.optional(),
   lines: z.array(LineInput).min(1, '请至少添加一项物料').max(100, '采购单最多 100 行'),
 });
 type PoBodyInput = z.input<typeof PoBody>;
@@ -76,9 +80,10 @@ function receivingOf(lines: { baseQtyMilli: number; receivedMilli: number }[]): 
 }
 
 export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
-  const [po] = await db<(PurchaseOrder & { supplierId: number; supplierName: string; backfillReceiptId: number | null })[]>`
+  const [po] = await db<(Omit<PurchaseOrder, 'channel'> & { supplierId: number; supplierName: string; backfillReceiptId: number | null; channelKey: string | null; channelLabel: string | null; channelNote: string })[]>`
     SELECT po.id, po.doc_no, po.status, po.order_date, po.expected_date, po.note, po.price_basis, po.revision, po.backfill,
            po.backfill_receipt_id, po.created_by, cb.display_name AS created_by_name, po.created_at,
+           po.channel AS channel_key, po.channel_label, po.channel_note,
            ab.display_name AS approved_by_name, po.approved_at, po.returned_reason,
            clb.display_name AS closed_by_name, po.closed_at, po.close_reason, po.is_synthetic, po.total_cents,
            s.id AS supplier_id, s.name AS supplier_name
@@ -152,10 +157,11 @@ export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
     ? await db<PurchaseOrder['receipts']>`SELECT id, doc_no, doc_type, status, doc_date, amount_cents FROM inv_docs WHERE id = ${po.backfillReceiptId}`
     : [];
 
-  const { supplierId, supplierName, backfillReceiptId: _b, ...rest } = po;
+  const { supplierId, supplierName, backfillReceiptId: _b, channelKey, channelLabel, channelNote, ...rest } = po;
   return {
     ...rest,
     supplier: { id: supplierId, name: supplierName },
+    channel: channelKey ? { key: channelKey, label: channelLabel ?? channelKey, note: channelNote } : null,
     backfillReceipt: backfillReceipt ?? null,
     lines,
     receiving: receivingOf(lines),
@@ -172,9 +178,10 @@ export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
 
 export async function listPos(db: Db, f: { status?: string; supplierId?: number; q?: string; open?: boolean }): Promise<PoSummary[]> {
   const like = f.q ? `%${f.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null;
-  const rows = await db<(Omit<PoSummary, 'receiving'> & { orderedMilli: number; receivedMilli: number; fullLines: number })[]>`
+  const rows = await db<(Omit<PoSummary, 'receiving' | 'channel'> & { orderedMilli: number; receivedMilli: number; fullLines: number; channelKey: string | null; channelLabel: string | null; channelNote: string })[]>`
     SELECT po.id, po.doc_no, po.status, s.name AS supplier_name, po.supplier_id, po.order_date, po.expected_date, po.total_cents,
            po.revision, po.backfill, cb.display_name AS created_by_name, po.created_at,
+           po.channel AS channel_key, po.channel_label, po.channel_note,
            (SELECT count(*) FROM purchase_order_lines WHERE po_id = po.id) AS line_count,
            coalesce((SELECT string_agg(m.name, '、' ORDER BY pl.line_no) FROM purchase_order_lines pl JOIN materials m ON m.id = pl.material_id
                      WHERE pl.po_id = po.id AND pl.line_no <= 3), '') AS summary,
@@ -197,8 +204,9 @@ export async function listPos(db: Db, f: { status?: string; supplierId?: number;
       ${like ? db`AND (po.doc_no ILIKE ${like} OR s.name ILIKE ${like} OR po.note ILIKE ${like})` : db``}
     ORDER BY po.order_date DESC, po.id DESC
     LIMIT 300`;
-  return rows.map(({ receivedMilli, fullLines, orderedMilli: _o, ...r }) => ({
+  return rows.map(({ receivedMilli, fullLines, orderedMilli: _o, channelKey, channelLabel, channelNote, ...r }) => ({
     ...r,
+    channel: channelKey ? { key: channelKey, label: channelLabel ?? channelKey, note: channelNote } : null,
     receiving: receivedMilli === 0 ? 'none' : fullLines >= r.lineCount ? 'full' : 'partial',
   }));
 }
@@ -400,9 +408,11 @@ async function checkImages(db: Db, lines: PreparedLine[]) {
   if (ids.some((i) => !found.has(i))) throw unprocessable('IMAGE_NOT_FOUND', '有图片没有上传成功，请重新上传');
 }
 
-async function assertSupplier(db: Db, supplierId: number) {
-  const [s] = await db<{ active: boolean }[]>`SELECT active FROM suppliers WHERE id = ${supplierId}`;
+/** 供应商要在用；返回它的默认采购途径（v0.7.29） */
+async function assertSupplier(db: Db, supplierId: number): Promise<{ defaultChannel: string | null }> {
+  const [s] = await db<{ active: boolean; defaultChannel: string | null }[]>`SELECT active, default_channel FROM suppliers WHERE id = ${supplierId}`;
   if (!s || !s.active) throw unprocessable('SUPPLIER_INACTIVE', '供应商不存在或已停用');
+  return { defaultChannel: s.defaultChannel };
 }
 
 // ───────────────────────── 状态流转 ─────────────────────────
@@ -496,7 +506,8 @@ export async function createPo(deps: Deps, raw: unknown, actor: Actor, opts: { b
       await lockOpKey(tx, meta.clientKey);
       const existing = await findExisting(tx);
       if (existing) return { id: existing, replayed: true };
-      await assertSupplier(tx, body.supplierId);
+      const sup = await assertSupplier(tx, body.supplierId);
+      const ch = resolveChannel(await loadPurchaseRules(tx), body, sup.defaultChannel);
       const lines = await prepareLines(tx, body, new Map());
       await checkRequestLinks(tx, null, lines, new Map(), actor);
       await checkImages(tx, lines);
@@ -504,9 +515,10 @@ export async function createPo(deps: Deps, raw: unknown, actor: Actor, opts: { b
       const docNo = await nextDocNo(tx, 'purchase_order', 'CG', body.orderDate);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO purchase_orders (doc_no, supplier_id, status, order_date, expected_date, note, price_basis, backfill,
-                                     backfill_receipt_id, client_key, created_by)
+                                     backfill_receipt_id, client_key, created_by, channel, channel_label, channel_note)
         VALUES (${docNo}, ${body.supplierId}, 'draft', ${body.orderDate}, ${body.expectedDate}, ${body.note}, ${settings.priceBasis},
-                ${!!opts.backfillReceiptId}, ${opts.backfillReceiptId ?? null}, ${meta.clientKey}, ${actor.id})
+                ${!!opts.backfillReceiptId}, ${opts.backfillReceiptId ?? null}, ${meta.clientKey}, ${actor.id},
+                ${ch.channel}, ${ch.channelLabel}, ${ch.channelNote})
         RETURNING id`;
       const newId = row!.id;
       const total = await syncLines(tx, newId, lines, new Map());
@@ -543,6 +555,21 @@ export async function createPo(deps: Deps, raw: unknown, actor: Actor, opts: { b
   return { po: await getPo(deps.sql, poId), replayed };
 }
 
+/** 修改时的采购途径：传了按传的；没传保持原样（旧单据没记的按供应商的默认带上） */
+async function channelForUpdate(
+  tx: Tx,
+  poId: number,
+  body: { channel?: string; channelNote?: string },
+  supplierDefault: string | null,
+): Promise<ChannelColumns> {
+  const rules = await loadPurchaseRules(tx);
+  if (body.channel !== undefined) return resolveChannel(rules, body, null);
+  const [cur] = await tx<{ channel: string | null; channelLabel: string | null; channelNote: string }[]>`
+    SELECT channel, channel_label, channel_note FROM purchase_orders WHERE id = ${poId}`;
+  if (cur?.channel) return { channel: cur.channel, channelLabel: cur.channelLabel ?? cur.channel, channelNote: body.channelNote ?? cur.channelNote };
+  return resolveChannel(rules, { channelNote: body.channelNote }, supplierDefault);
+}
+
 /** 修改草稿 / 退回的采购单；已确认的采购单改关键内容时走改版（revise = true） */
 export async function updatePo(deps: Deps, poId: number, raw: PoBodyInput & { action?: 'save' | 'submit'; approveNow?: boolean }, actor: Actor, revise = false) {
   const body = parse(PoBody, raw);
@@ -564,6 +591,7 @@ export async function updatePo(deps: Deps, poId: number, raw: PoBodyInput & { ac
         INSERT INTO purchase_order_revisions (po_id, revision, snapshot, changed_by)
         VALUES (${poId}, ${po.revision}, ${tx.json({
           supplierName: snapshot.supplier.name,
+          channel: snapshot.channel ? (snapshot.channel.note ? `${snapshot.channel.label} · ${snapshot.channel.note}` : snapshot.channel.label) : null,
           totalCents: snapshot.totalCents,
           lines: snapshot.lines.map((l) => ({ materialName: l.materialName, spec: l.spec, purchaseQtyMilli: l.purchaseQtyMilli, purchaseUnit: l.purchaseUnit, priceCents: l.priceCents, amountCents: l.amountCents, imageIds: l.images.map((i) => i.id) })),
         } as never)}, ${actor.id})`;
@@ -574,14 +602,16 @@ export async function updatePo(deps: Deps, poId: number, raw: PoBodyInput & { ac
       throw conflict('INVALID_STATE', po.status === 'approved' ? '已确认的采购单请使用「改版」' : '采购单当前状态不能修改');
     }
     if (!revise && received && body.supplierId !== po.supplierId) throw unprocessable('PO_SUPPLIER_LOCKED', '已有收货的采购单不能更换供应商');
-    await assertSupplier(tx, body.supplierId);
+    const sup = await assertSupplier(tx, body.supplierId);
+    const ch = await channelForUpdate(tx, poId, body, sup.defaultChannel);
     const lines = await prepareLines(tx, body, existing);
     await checkRequestLinks(tx, poId, lines, existing, actor);
     await checkImages(tx, lines);
     const total = await syncLines(tx, poId, lines, existing);
     await tx`
       UPDATE purchase_orders SET supplier_id = ${body.supplierId}, order_date = ${body.orderDate}, expected_date = ${body.expectedDate},
-             note = ${body.note}, total_cents = ${total}, updated_at = now()
+             note = ${body.note}, total_cents = ${total}, channel = ${ch.channel}, channel_label = ${ch.channelLabel},
+             channel_note = ${ch.channelNote}, updated_at = now()
       WHERE id = ${poId}`;
     if (meta.action === 'submit' || revise) await submitLocked(tx, po, actor, meta.approveNow);
   });

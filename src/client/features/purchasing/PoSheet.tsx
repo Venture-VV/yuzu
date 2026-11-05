@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { Ban, CircleCheck, CornerUpLeft, FilePen, Lock, PackagePlus, Pencil, Send, X } from 'lucide-react';
 import { INV_STATUS_LABELS } from '@shared/inventory';
-import type { PurchaseOrder } from '@shared/purchasing';
+import { channelText, type PurchaseOrder } from '@shared/purchasing';
 import { formatQty } from '@shared/quantity';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
@@ -134,6 +134,9 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
 
         <dl className="grid grid-cols-2 gap-x-5 gap-y-2.5 rounded-lg border border-line bg-card px-4 py-3.5 text-[13px] sm:grid-cols-3">
           <Info label="供应商">{po.supplier.name}</Info>
+          <Info label="采购途径">
+            <span data-testid="po-sheet-channel">{channelText(po.channel)}</span>
+          </Info>
           <Info label="下单日期">
             <span className="num">{po.orderDate}</span>
           </Info>
@@ -242,7 +245,8 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
               {po.revisions.map((r) => (
                 <li key={r.revision} className="rounded-md border border-dashed border-line-strong bg-paper/60 px-3 py-2 text-[12.5px]">
                   <p className="font-semibold">
-                    第 {r.revision} 版 · {r.snapshot.supplierName} · <Money cents={r.snapshot.totalCents} />
+                    第 {r.revision} 版 · {r.snapshot.supplierName}
+                    {r.snapshot.channel && ` · ${r.snapshot.channel}`} · <Money cents={r.snapshot.totalCents} />
                     <span className="font-normal text-ink-3">
                       {' '}
                       · {r.changedByName} 于 {formatDateTime(r.changedAt)} 改版

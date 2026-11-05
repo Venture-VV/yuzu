@@ -106,6 +106,8 @@ export interface ExpenseClaimSummary {
   taxRateBp: number;
   invoiceNo: string;
   purchaseOrder: { id: number; docNo: string; supplierName: string } | null;
+  /** 采购途径（v0.7.29，E1）：按采购单报销的照采购单；没记的为空 */
+  channel: import('./purchasing').ChannelRef | null;
   amountCents: number;
   needsApproval: boolean;
   /** 前几行的名称，列表里显示 */
@@ -236,6 +238,8 @@ export interface PoForClaim {
   docNo: string;
   supplierName: string;
   orderDate: string;
+  /** 采购单的采购途径（v0.7.29）：报销照它记 */
+  channel: import('./purchasing').ChannelRef | null;
   lines: {
     poLineId: number;
     materialId: number;

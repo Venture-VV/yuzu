@@ -9,6 +9,7 @@ import type {
   PoSummary,
   PriceCompare,
   PurchaseOrder,
+  PurchaseRules,
   Statement,
   SupplierCredit,
   SupplierRefundDoc,
@@ -33,6 +34,7 @@ export const pk = {
   refunds: (params: Record<string, string | undefined>) => ['inv', 'refunds', params] as const,
   refund: (id: number) => ['inv', 'refund', id] as const,
   imports: ['inv', 'erp-imports'] as const,
+  purchaseRules: ['inv', 'purchase-rules'] as const,
 };
 
 /** 采购、货款与库存共用一个缓存前缀：任何单据变化后一起刷新 */
@@ -111,3 +113,7 @@ export const useRefund = (id: number | null) =>
   useQuery({ queryKey: pk.refund(id ?? 0), queryFn: () => api.get<SupplierRefundDoc>(`/api/payables/refunds/${id}`), enabled: !!id });
 
 export const useErpImports = (enabled = true) => useQuery({ queryKey: pk.imports, queryFn: () => api.get<ErpImportRecord[]>('/api/payables/imports'), enabled });
+
+/** 采购规则（v0.7.29）：采购途径字典、询价门槛、补货天数；编制采购单、登记报销、补货建议都读它 */
+export const usePurchaseRules = (enabled = true) =>
+  useQuery({ queryKey: pk.purchaseRules, queryFn: () => api.get<PurchaseRules>('/api/inventory/purchase-rules'), staleTime: 60_000, enabled });

@@ -17,6 +17,7 @@ import {
   type PaySource,
 } from '@shared/expenses';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
+import { channelText } from '@shared/purchasing';
 import { formatQty, parseQty } from '@shared/quantity';
 import { ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
@@ -29,6 +30,7 @@ import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Button, Field, Input, MoneyInput, Notice, Segmented, Select, Skeleton } from '../../components/ui';
 import { useDepartments } from '../inventory/queries';
+import { usePurchaseRules } from '../purchasing/queries';
 import { useAdvances, useExpenseRules, useHandlers, useInvalidateExpenses, usePoCandidates, usePoForClaim } from './queries';
 
 interface AdhocLine {
@@ -66,6 +68,10 @@ export function ClaimFormPage() {
   const [taxRateBp, setTaxRateBp] = useState<number | null>(null);
   const [invoiceNo, setInvoiceNo] = useState('');
   const [note, setNote] = useState('');
+  // 采购途径（v0.7.29，E1）：按次报销必选；按采购单报销照采购单（v0.7.29 以前的采购单没记的可以补选）
+  const purchaseRules = usePurchaseRules();
+  const [channel, setChannel] = useState('');
+  const [channelNote, setChannelNote] = useState('');
   const [lines, setLines] = useState<AdhocLine[]>([blankLine()]);
   const [poQuery, setPoQuery] = useState('');
   const [poId, setPoId] = useState<number | null>(Number(params.get('po')) || null);
@@ -93,6 +99,10 @@ export function ClaimFormPage() {
   }, [po.data]);
 
   const inv = rules.data?.invoiceTypes.find((t) => t.key === invoiceType);
+  const channels = purchaseRules.data?.channels ?? [];
+  const channelDef = channels.find((c) => c.key === channel);
+  /** 页面上要选采购途径：按次报销，或采购单没记采购途径（v0.7.29 以前的） */
+  const pickChannel = mode === 'adhoc' || (!!po.data && !po.data.channel);
   const adhocRows = lines.map((l) => {
     const bought = parseQty(l.bought);
     const received = parseQty(l.received);
@@ -148,6 +158,10 @@ export function ClaimFormPage() {
         ? '请选择用途'
         : paySource === 'petty' && !advanceId
           ? '请选择这笔钱出自哪一笔打款'
+          : mode === 'adhoc' && channels.length > 0 && !channelDef
+            ? '请选择采购途径'
+          : pickChannel && channelDef?.needsNote && channelNote.trim().length < 2
+            ? `采购途径选了「${channelDef.label}」，请写明在哪买的`
           : !inv
             ? '请选择发票类型'
             : taxRateBp === null
@@ -231,6 +245,8 @@ export function ClaimFormPage() {
       taxRateBp,
       invoiceNo: invoiceNo.trim(),
       purchaseOrderId: mode === 'po' ? poId : null,
+      channel: pickChannel && channelDef ? channelDef.key : null,
+      channelNote: pickChannel && channelDef ? channelNote.trim() : '',
       note: note.trim(),
       approveNow: needsApproval && approveNow,
       lines: payloadLines,
@@ -369,6 +385,41 @@ export function ClaimFormPage() {
             <Field label="备注" htmlFor="ex-note">
               <Input id="ex-note" value={note} maxLength={200} disabled={locked} onChange={(e) => setNote(e.target.value)} placeholder="可选" className="h-10" />
             </Field>
+            {pickChannel ? (
+              <>
+                <Field label="采购途径" htmlFor="ex-channel" hint={mode === 'adhoc' ? '在哪买的' : '这张采购单没记，可以补选'}>
+                  <Select id="ex-channel" value={channel} disabled={locked} onChange={(e) => setChannel(e.target.value)} data-testid="ex-channel">
+                    <option value="">选择采购途径</option>
+                    {channels.map((c) => (
+                      <option key={c.key} value={c.key}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="途径说明" htmlFor="ex-channel-note" className="sm:col-span-1 lg:col-span-3" hint={channelDef?.needsNote ? '必填：档口、平台与店铺、门店名' : '选填'}>
+                  <Input
+                    id="ex-channel-note"
+                    value={channelNote}
+                    maxLength={60}
+                    disabled={locked}
+                    onChange={(e) => setChannelNote(e.target.value)}
+                    placeholder={channelDef?.needsNote ? '例如：某某批发市场 3 号档、某平台某某旗舰店' : '可选'}
+                    className="h-10"
+                    data-testid="ex-channel-note"
+                  />
+                </Field>
+              </>
+            ) : (
+              mode === 'po' &&
+              po.data?.channel && (
+                <Field label="采购途径" className="sm:col-span-2 lg:col-span-4" hint="照采购单记">
+                  <p className="flex h-10 items-center text-[13.5px] font-semibold" data-testid="ex-po-channel">
+                    {channelText(po.data.channel)}
+                  </p>
+                </Field>
+              )
+            )}
           </section>
 
           {mode === 'adhoc' ? (

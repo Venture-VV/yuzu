@@ -125,7 +125,8 @@ export function OrderedPage() {
                       <Link to={`/purchasing?po=${l.poId}`} className="num font-semibold text-lake hover:underline">
                         {l.docNo}
                       </Link>{' '}
-                      · {l.supplierName} · 下单 {l.orderDate} · 应到 <span className={cn(l.overdue && 'font-bold text-clay')}>{l.dueDate}</span>
+                      · {l.supplierName}
+                      {l.channel && ` · ${l.channel}`} · 下单 {l.orderDate} · 应到 <span className={cn(l.overdue && 'font-bold text-clay')}>{l.dueDate}</span>
                       {l.departments.length > 0 && ` · 需求：${l.departments.join('、')}`}
                     </span>
                   </span>

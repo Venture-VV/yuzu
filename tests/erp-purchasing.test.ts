@@ -1,0 +1,188 @@
+// v0.7.29 ERP 采购五项（docs/ERP_PURCHASING.md）：①采购途径、②采购单一键转报销、③部门备用金台账、④补货建议、⑤询价比价与定标。
+
+import { randomUUID } from 'node:crypto';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { DEFAULT_PURCHASE_RULES } from '../src/shared/purchasing';
+import { todayIn } from '../src/server/modules/inventory/common';
+import { createStaff } from '../src/server/modules/staff';
+import { seedInventoryDemo } from '../src/server/seed-inventory';
+import { api, login, PASSWORD, setup, type TestContext } from './helpers';
+
+let ctx: TestContext;
+let today: string;
+let boss: string; // 演示店主 linlan
+let keeper: string; // 物资经办 lixiao
+let buyer: string; // 采购经办 zhouyi
+let buyerId: number;
+let coster: string; // 成本核算（登记报销）
+let costerId: number;
+let approver: string; // 负责人
+let deptA: number;
+const q = (n: number) => Math.round(n * 1000);
+
+const supplier = async (code: string) =>
+  (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/suppliers?all=1')).body.find((s: { code: string }) => s.code === code);
+const material = async (code: string) =>
+  (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/materials?all=1')).body.find((m: { code: string }) => m.code === code);
+const rules = async () => (await api(ctx.app, boss, 'GET', '/api/inventory/purchase-rules')).body;
+const saveRules = (cookie: string, body: Record<string, unknown>) => api(ctx.app, cookie, 'PUT', '/api/inventory/purchase-rules', body);
+
+/** 采购单：默认 M016 两箱、每箱 ¥450（¥900，不超过免确认门槛，提交即确认） */
+const newPo = (body: Record<string, unknown>) =>
+  api(ctx.app, buyer, 'POST', '/api/purchase-orders', {
+    clientKey: randomUUID(),
+    orderDate: today,
+    action: 'submit',
+    ...body,
+  });
+
+const claim = (body: Record<string, unknown> = {}) =>
+  api(ctx.app, coster, 'POST', '/api/erp/expenses', {
+    clientKey: randomUUID(),
+    expenseDate: today,
+    departmentId: deptA,
+    handlerId: costerId,
+    purpose: '办公',
+    paySource: 'company',
+    invoiceType: 'receipt',
+    taxRateBp: 0,
+    lines: [{ name: '打印纸', category: 'office', unit: '包', boughtMilli: q(2), receivedMilli: q(2), amountCents: 6_000 }],
+    ...body,
+  });
+
+beforeAll(async () => {
+  ctx = await setup();
+  today = todayIn(ctx.config.timezone);
+  expect((await seedInventoryDemo(ctx.sql, ctx.config)).skipped).toBe(false);
+  boss = await login(ctx.app, 'linlan', 'yuzu2026');
+  keeper = await login(ctx.app, 'lixiao', 'yuzu2026');
+  buyer = await login(ctx.app, 'zhouyi', 'yuzu2026');
+  buyerId = (await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'zhouyi'`)[0]!.id;
+  costerId = await createStaff(ctx.sql, { username: 'coster', displayName: '成本岗', role: 'backoffice', duties: ['cost'], password: PASSWORD, mustChangePassword: false });
+  await createStaff(ctx.sql, { username: 'appr', displayName: '负责人', role: 'backoffice', duties: ['approve'], password: PASSWORD, mustChangePassword: false });
+  coster = await login(ctx.app, 'coster');
+  approver = await login(ctx.app, 'appr');
+  await api(ctx.app, boss, 'POST', '/api/inventory/departments', { name: '采购部' });
+  deptA = (await api(ctx.app, boss, 'GET', '/api/inventory/departments?all=1')).body.find((d: { name: string }) => d.name === '采购部').id;
+}, 120_000);
+afterAll(async () => ctx.close());
+
+describe('① 采购途径（E1）', () => {
+  it('规则：默认五个途径；店主可改名、加途径，键重复拒绝；没有门店设置权限的不能改', async () => {
+    expect(await rules()).toEqual(DEFAULT_PURCHASE_RULES);
+    expect((await api(ctx.app, coster, 'GET', '/api/inventory/purchase-rules')).status).toBe(200);
+    expect((await api(ctx.app, ctx.clerk, 'GET', '/api/inventory/purchase-rules')).status).toBe(403);
+    const changed = { ...DEFAULT_PURCHASE_RULES, channels: [...DEFAULT_PURCHASE_RULES.channels, { key: 'custom_live', label: '直播间', needsNote: true }] };
+    expect((await saveRules(buyer, changed)).status).toBe(403);
+    const dup = { ...changed, channels: [...changed.channels, { key: 'online', label: '又一个网购', needsNote: false }] };
+    expect((await saveRules(boss, dup)).status).toBe(400);
+    expect((await saveRules(boss, { ...DEFAULT_PURCHASE_RULES, reorderDays: 14, targetDays: 7 })).status).toBe(400);
+    const ok = await saveRules(boss, changed);
+    expect(ok.status).toBe(200);
+    expect(ok.body.channels.at(-1)).toEqual({ key: 'custom_live', label: '直播间', needsNote: true });
+    // 后台规则总表里也看得到
+    const catalog = (await api(ctx.app, boss, 'GET', '/api/admin/rules')).body as { key: string; value: string }[];
+    expect(catalog.find((r) => r.key === 'purchase_rules.channels')?.value).toContain('直播间（写说明）');
+    expect((await saveRules(boss, DEFAULT_PURCHASE_RULES)).status).toBe(200);
+  });
+
+  it('供应商的默认途径带进新建的采购单；明确选了要写说明的途径必须写；修改不传保持原样；改名不影响已有单据', async () => {
+    const s = await supplier('S002');
+    const mat = await material('M016');
+    expect((await api(ctx.app, buyer, 'PUT', `/api/inventory/suppliers/${s.id}`, { code: s.code, name: s.name, defaultChannel: 'bogus' })).body.error.code).toBe('CHANNEL_INVALID');
+    expect((await api(ctx.app, buyer, 'PUT', `/api/inventory/suppliers/${s.id}`, { code: s.code, name: s.name, defaultChannel: 'wholesale' })).status).toBe(200);
+    expect(await supplier('S002')).toMatchObject({ defaultChannel: 'wholesale' });
+    // 只改别的字段时默认途径保持原样
+    expect((await api(ctx.app, buyer, 'PUT', `/api/inventory/suppliers/${s.id}`, { code: s.code, name: s.name, note: '批发' })).status).toBe(200);
+    expect(await supplier('S002')).toMatchObject({ defaultChannel: 'wholesale', note: '批发' });
+
+    const lines = [{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000 }];
+    // 不传：按供应商的默认带出，带出的不强制写说明
+    const byDefault = await newPo({ supplierId: s.id, lines });
+    expect(byDefault.status).toBe(201);
+    expect(byDefault.body.po.channel).toEqual({ key: 'wholesale', label: '批发市场', note: '' });
+    // 明确选了要写说明的：不写拒绝，写了照记
+    expect((await newPo({ supplierId: s.id, lines, channel: 'online' })).body.error.code).toBe('CHANNEL_NOTE_REQUIRED');
+    expect((await newPo({ supplierId: s.id, lines, channel: 'nope' })).body.error.code).toBe('CHANNEL_INVALID');
+    expect((await newPo({ supplierId: s.id, lines, channel: 'Bad Key' })).status).toBe(400);
+    const online = await newPo({ supplierId: s.id, lines, channel: 'online', channelNote: '某平台某某旗舰店', action: 'save' });
+    expect(online.status).toBe(201);
+    expect(online.body.po.channel).toEqual({ key: 'online', label: '网购平台', note: '某平台某某旗舰店' });
+    // 修改：不传途径保持原样；传了按传的
+    const po = online.body.po;
+    const body = { supplierId: s.id, orderDate: today, lines: [{ id: po.lines[0].id, materialId: mat.id, purchaseQtyMilli: q(3), priceCents: 45_000 }] };
+    const kept = await api(ctx.app, buyer, 'PUT', `/api/purchase-orders/${po.id}`, { ...body, action: 'save' });
+    expect(kept.body.channel).toEqual({ key: 'online', label: '网购平台', note: '某平台某某旗舰店' });
+    const moved = await api(ctx.app, buyer, 'PUT', `/api/purchase-orders/${po.id}`, { ...body, action: 'save', channel: 'supplier' });
+    expect(moved.body.channel).toEqual({ key: 'supplier', label: '供应商配送', note: '' });
+    // 列表也带途径
+    const list = (await api(ctx.app, buyer, 'GET', `/api/purchase-orders?q=${po.docNo}`)).body;
+    expect(list[0].channel).toMatchObject({ key: 'supplier' });
+
+    // 改名：之后的单据按新名称，已有单据保留当时的名称
+    const renamed = { ...DEFAULT_PURCHASE_RULES, channels: DEFAULT_PURCHASE_RULES.channels.map((c) => (c.key === 'wholesale' ? { ...c, label: '农批市场' } : c)) };
+    expect((await saveRules(boss, renamed)).status).toBe(200);
+    const after = await newPo({ supplierId: s.id, lines });
+    expect(after.body.po.channel.label).toBe('农批市场');
+    expect((await api(ctx.app, buyer, 'GET', `/api/purchase-orders/${byDefault.body.po.id}`)).body.channel.label).toBe('批发市场');
+    expect((await saveRules(boss, DEFAULT_PURCHASE_RULES)).status).toBe(200);
+  });
+
+  it('报销：按次报销记选的途径；按采购单报销照采购单；台账、下单物料、报销与台账导出都带途径', async () => {
+    expect((await claim({ channel: 'store' })).body.error.code).toBe('CHANNEL_NOTE_REQUIRED');
+    const adhoc = await claim({ channel: 'store', channelNote: '楼下便利店' });
+    expect(adhoc.status).toBe(201);
+    expect(adhoc.body.claim.channel).toEqual({ key: 'store', label: '商超门店', note: '楼下便利店' });
+    // 不传（旧调用）记「未填」
+    expect((await claim()).body.claim.channel).toBeNull();
+
+    // 现付供应商的采购单：报销照采购单的途径，忽略页面传的
+    const s = await supplier('S004');
+    expect((await api(ctx.app, buyer, 'PUT', `/api/inventory/suppliers/${s.id}`, { code: s.code, name: s.name, settlement: 'cash' })).status).toBe(200);
+    const mat = await material('M016');
+    const created = (await newPo({ supplierId: s.id, channel: 'online', channelNote: '某某专营店', lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000 }] })).body.po;
+    const po = (await api(ctx.app, approver, 'POST', `/api/purchase-orders/${created.id}/approve`, {})).body;
+    expect(po.status).toBe('approved');
+    const forClaim = (await api(ctx.app, coster, 'GET', `/api/erp/expenses/po/${po.id}`)).body;
+    expect(forClaim.channel).toEqual({ key: 'online', label: '网购平台', note: '某某专营店' });
+    const pl = forClaim.lines[0];
+    const byPo = await claim({
+      purchaseOrderId: po.id,
+      purpose: '客用消耗',
+      channel: 'store',
+      channelNote: '页面传的不算',
+      lines: [{ name: pl.name, category: 'low_value', unit: pl.unit, boughtMilli: pl.boughtMilli, receivedMilli: pl.receivedMilli, amountCents: 90_000, poLineId: pl.poLineId, diffReason: '还没到货' }],
+    });
+    expect(byPo.status).toBe(201);
+    expect(byPo.body.claim.channel).toEqual({ key: 'online', label: '网购平台', note: '某某专营店' });
+
+    // 采购台账：支出一行带途径；导出多一列
+    const ledger = (await api(ctx.app, coster, 'GET', `/api/erp/ledger?from=${today}&to=${today}`)).body;
+    const entries = ledger.days.flatMap((d: { entries: unknown[] }) => d.entries) as { docNo: string; channel: string | null }[];
+    expect(entries.find((e) => e.docNo === adhoc.body.claim.docNo)?.channel).toBe('商超门店 · 楼下便利店');
+    expect(entries.find((e) => e.docNo === byPo.body.claim.docNo)?.channel).toBe('网购平台 · 某某专营店');
+    const ledgerCsv = String((await api(ctx.app, coster, 'GET', `/api/erp/ledger/export?from=${today}&to=${today}`)).body);
+    expect(ledgerCsv).toContain('采购途径');
+    expect(ledgerCsv).toContain('网购平台 · 某某专营店');
+    // 报销导出：两列
+    const claimsCsv = String((await api(ctx.app, approver, 'GET', `/api/erp/expenses/export?from=${today}&to=${today}`)).body);
+    expect(claimsCsv).toContain('途径说明');
+    expect(claimsCsv).toContain('楼下便利店');
+    // 下单物料：页面与导出
+    const ordered = (await api(ctx.app, keeper, 'GET', `/api/purchase-orders/ordered-lines?from=${today}&to=${today}`)).body;
+    expect(ordered.lines.find((l: { poId: number }) => l.poId === po.id)?.channel).toBe('网购平台 · 某某专营店');
+    const orderedCsv = String((await api(ctx.app, keeper, 'GET', `/api/purchase-orders/ordered-lines/export.csv?from=${today}&to=${today}`)).body);
+    expect(orderedCsv.split('\n')[0]).toContain('供应商,采购途径,物料编码');
+    // 收货不受影响
+    const rc = await api(ctx.app, keeper, 'POST', '/api/inventory/docs', {
+      clientKey: randomUUID(),
+      docType: 'receipt',
+      docDate: today,
+      supplierId: s.id,
+      purchaseOrderId: po.id,
+      coAcceptorId: buyerId,
+      lines: [{ materialId: mat.id, poLineId: po.lines[0].id, deliveredMilli: q(1000), acceptedMilli: q(1000) }],
+    });
+    expect(rc.status).toBe(201);
+  });
+});
