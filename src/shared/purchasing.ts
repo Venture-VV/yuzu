@@ -80,6 +80,8 @@ export interface PurchaseOrder {
   supplier: Ref;
   /** 采购途径（v0.7.29，E1）；v0.7.29 以前的单据为空 */
   channel: ChannelRef | null;
+  /** 从哪张询价单转来的（v0.7.29，E5） */
+  sourcing: { id: number; docNo: string; status: 'open' | 'awarded' | 'cancelled' } | null;
   orderDate: string;
   expectedDate: string | null;
   note: string;
@@ -522,4 +524,96 @@ export interface ReplenishSuggestions {
   targetDays: number;
   count: number;
   groups: ReplenishGroup[];
+}
+
+// ───────────────────────── 询价比价与定标（v0.7.29 ERP 采购五项⑤，docs/ERP_PURCHASING.md 第 6 节） ─────────────────────────
+
+export type SourcingStatus = 'open' | 'awarded' | 'cancelled';
+export const SOURCING_STATUS_LABELS: Record<SourcingStatus, string> = { open: '询价中', awarded: '已定标', cancelled: '已撤销' };
+
+export interface SourcingLine {
+  id: number;
+  lineNo: number;
+  materialId: number;
+  materialCode: string;
+  materialName: string;
+  specification: string;
+  purchaseUnit: string;
+  inventoryUnit: string;
+  factorMilli: number;
+  purchaseQtyMilli: number;
+  baseQtyMilli: number;
+  spec: string;
+  /** 最近一次同口径成交价（比价用） */
+  baseline: PriceCompare['baseline'];
+}
+
+export interface SourcingQuote {
+  id: number;
+  supplier: Ref;
+  status: 'active' | 'withdrawn';
+  goodsCents: number;
+  freightCents: number;
+  /** 综合到价 = 货款合计 + 运费（E7） */
+  landedCents: number;
+  payTerms: string;
+  creditDays: number;
+  deliveryDays: number | null;
+  validUntil: string | null;
+  note: string;
+  prices: { lineId: number; priceCents: number; amountCents: number; changePercent: number | null }[];
+  /** 有效报价里按综合到价的名次（1 = 最低）；撤下的为空 */
+  rank: number | null;
+  createdByName: string;
+  createdAt: string;
+  withdrawReason: string | null;
+  withdrawnByName: string | null;
+}
+
+export interface SourcingEvent {
+  id: number;
+  docNo: string;
+  title: string;
+  status: SourcingStatus;
+  needBy: string | null;
+  note: string;
+  singleSource: boolean;
+  awardedQuoteId: number | null;
+  awardReason: string | null;
+  awardedByName: string | null;
+  awardedAt: string | null;
+  cancelReason: string | null;
+  createdByName: string;
+  createdAt: string;
+  lines: SourcingLine[];
+  quotes: SourcingQuote[];
+  /** 每行最低的有效报价：行 → 报价 */
+  lowest: Record<number, number>;
+  /** 转出的、没撤回的采购单 */
+  purchaseOrder: { id: number; docNo: string; status: PoStatus } | null;
+  /** 定标至少要几家有效报价（规则） */
+  minQuotes: number;
+}
+
+export interface SourcingSummary {
+  id: number;
+  docNo: string;
+  title: string;
+  status: SourcingStatus;
+  needBy: string | null;
+  lineCount: number;
+  quoteCount: number;
+  summary: string;
+  awardedSupplierName: string | null;
+  lowestLandedCents: number | null;
+  purchaseOrder: { id: number; docNo: string } | null;
+  createdByName: string;
+  createdAt: string;
+}
+
+/** 价格曲线（E8）：近 12 个月的成交价与报价，按日期 */
+export interface PriceHistory {
+  materialId: number;
+  materialName: string;
+  points: { date: string; source: 'receipt' | 'quote'; docNo: string; supplierName: string; priceCents: number; purchaseUnit: string; qtyMilli: number | null }[];
 }

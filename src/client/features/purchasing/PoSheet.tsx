@@ -138,6 +138,13 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
           <Info label="采购途径">
             <span data-testid="po-sheet-channel">{channelText(po.channel)}</span>
           </Info>
+          {po.sourcing && (
+            <Info label="询价单">
+              <Link to={`/purchasing/sourcing/${po.sourcing.id}`} className="num font-semibold text-lake hover:underline" data-testid="po-sheet-sourcing">
+                {po.sourcing.docNo}
+              </Link>
+            </Info>
+          )}
           <Info label="下单日期">
             <span className="num">{po.orderDate}</span>
           </Info>

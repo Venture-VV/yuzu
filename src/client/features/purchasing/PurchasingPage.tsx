@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router';
-import { Lightbulb, PackageSearch, Plus, Search } from 'lucide-react';
+import { Lightbulb, PackageSearch, Plus, Scale, Search } from 'lucide-react';
 import type { PoStatus } from '@shared/purchasing';
 import { errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
@@ -61,6 +61,14 @@ export function PurchasingPage() {
         subtitle="采购单表达「准备买什么」；收货按实际合格数量入库；付款另行登记"
         actions={
           <span className="flex flex-wrap items-center gap-2">
+            <Link
+              to="/purchasing/sourcing"
+              className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
+              data-testid="sourcing-link"
+            >
+              <Scale className="size-4" />
+              询价比价
+            </Link>
             <Link
               to="/purchasing/suggestions"
               className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"

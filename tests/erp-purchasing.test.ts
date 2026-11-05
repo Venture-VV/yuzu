@@ -458,3 +458,116 @@ describe('④ 补货建议（E4）', () => {
     expect((await api(ctx.app, ctx.clerk, 'GET', '/api/purchase-suggestions')).status).toBe(403);
   });
 });
+
+describe('⑤ 询价比价与定标（E5–E8）', () => {
+  it('询价门槛：合计 ≥ ¥5,000 的采购单直接提交被拒，可以存草稿；门槛设 0 不要求', async () => {
+    const s1 = await supplier('S001');
+    const mat = await material('M016');
+    const big = { supplierId: s1.id, lines: [{ materialId: mat.id, purchaseQtyMilli: q(20), priceCents: 45_000 }] };
+    const rejected = await newPo(big);
+    expect(rejected.status).toBe(422);
+    expect(rejected.body.error.code).toBe('QUOTES_REQUIRED');
+    expect(rejected.body.error.message).toContain('¥5,000.00');
+    const draft = (await newPo({ ...big, action: 'save' })).body.po;
+    expect(draft.status).toBe('draft');
+    expect((await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${draft.id}/submit`, {})).body.error.code).toBe('QUOTES_REQUIRED');
+    // ¥5,000 以下照常
+    expect((await newPo({ supplierId: s1.id, lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000 }] })).status).toBe(201);
+    // 门槛设 0：不要求
+    expect((await saveRules(boss, { ...DEFAULT_PURCHASE_RULES, quoteThresholdCents: 0 })).status).toBe(200);
+    expect((await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${draft.id}/submit`, {})).body.status).toBe('submitted');
+    expect((await saveRules(boss, DEFAULT_PURCHASE_RULES)).status).toBe(200);
+  });
+
+  it('询价 → 两家报价比价 → 定标 → 转采购单 → 提交过门槛；单一来源要负责人；价格曲线带成交价与报价', async () => {
+    const s1 = await supplier('S001');
+    const s2 = await supplier('S002');
+    const s3 = await supplier('S003');
+    const mat = await material('M016');
+    const create = (body: Record<string, unknown>, cookie = buyer) => api(ctx.app, cookie, 'POST', '/api/purchase-sourcing', { clientKey: randomUUID(), ...body });
+    const quote = (eventId: number, body: Record<string, unknown>) =>
+      api(ctx.app, buyer, 'POST', `/api/purchase-sourcing/${eventId}/quotes`, { clientKey: randomUUID(), payTerms: '月结 30 天', ...body });
+
+    expect((await create({ title: '护理床单 20 箱', lines: [{ materialId: mat.id, purchaseQtyMilli: q(20) }] }, keeper)).status).toBe(403);
+    const key = randomUUID();
+    const made = await api(ctx.app, buyer, 'POST', '/api/purchase-sourcing', { clientKey: key, title: '护理床单 20 箱', needBy: today, lines: [{ materialId: mat.id, purchaseQtyMilli: q(20) }] });
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    // 同一编号重提：返回原询价单
+    const again = await api(ctx.app, buyer, 'POST', '/api/purchase-sourcing', { clientKey: key, title: '护理床单 20 箱', needBy: today, lines: [{ materialId: mat.id, purchaseQtyMilli: q(20) }] });
+    expect(again.status).toBe(200);
+    expect(again.body.event.id).toBe(made.body.event.id);
+    const e1 = made.body.event;
+    expect(e1).toMatchObject({ status: 'open', minQuotes: 2, lines: [{ materialId: mat.id, purchaseQtyMilli: q(20), baseQtyMilli: q(10_000), purchaseUnit: '箱' }] });
+    const lineId = e1.lines[0].id;
+
+    // 报价：甲 ¥450/箱、无运费；乙 ¥440/箱 + 运费 ¥300（综合到价更高）
+    const a = await quote(e1.id, { supplierId: s1.id, prices: [{ lineId, priceCents: 45_000 }], creditDays: 30 });
+    expect(a.status, JSON.stringify(a.body)).toBe(200);
+    const b = await quote(e1.id, { supplierId: s2.id, freightCents: 30_000, payTerms: '预付 50%', prices: [{ lineId, priceCents: 44_000 }] });
+    expect(b.status).toBe(200);
+    expect((await quote(e1.id, { supplierId: s1.id, prices: [{ lineId, priceCents: 1 }] })).body.error.code).toBe('QUOTE_EXISTS');
+    expect((await quote(e1.id, { supplierId: s3.id, prices: [{ lineId: lineId + 9999, priceCents: 1 }] })).body.error.code).toBe('QUOTE_LINES');
+    expect((await quote(e1.id, { supplierId: s3.id, validUntil: '2020-01-01', prices: [{ lineId, priceCents: 1 }] })).body.error.code).toBe('QUOTE_EXPIRED');
+    const ev = (await api(ctx.app, keeper, 'GET', `/api/purchase-sourcing/${e1.id}`)).body;
+    const qa = ev.quotes.find((x: { supplier: { id: number } }) => x.supplier.id === s1.id);
+    const qb = ev.quotes.find((x: { supplier: { id: number } }) => x.supplier.id === s2.id);
+    expect(qa).toMatchObject({ goodsCents: 900_000, freightCents: 0, landedCents: 900_000, rank: 1, payTerms: '月结 30 天', creditDays: 30 });
+    expect(qb).toMatchObject({ goodsCents: 880_000, freightCents: 30_000, landedCents: 910_000, rank: 2 });
+    // 单行最低的是乙
+    expect(ev.lowest).toEqual({ [lineId]: qb.id });
+    expect(ev.lines[0].baseline).not.toBeNull();
+    const list = (await api(ctx.app, keeper, 'GET', '/api/purchase-sourcing?status=open')).body;
+    expect(list.find((x: { id: number }) => x.id === e1.id)).toMatchObject({ quoteCount: 2, lowestLandedCents: 900_000, summary: mat.name });
+
+    // 定标甲（理由必填）；定标后不能再报价
+    expect((await api(ctx.app, buyer, 'POST', `/api/purchase-sourcing/${e1.id}/award`, { quoteId: qa.id, reason: '' })).status).toBe(400);
+    const awarded = await api(ctx.app, buyer, 'POST', `/api/purchase-sourcing/${e1.id}/award`, { quoteId: qa.id, reason: '综合到价最低，月结' });
+    expect(awarded.body).toMatchObject({ status: 'awarded', awardedQuoteId: qa.id, awardReason: '综合到价最低，月结', singleSource: false });
+    expect((await quote(e1.id, { supplierId: s3.id, prices: [{ lineId, priceCents: 1 }] })).body.error.code).toBe('INVALID_STATE');
+
+    // 转采购单：草稿、按中标价、记下询价单；同一张询价单不能再转
+    const ordered = await api(ctx.app, buyer, 'POST', `/api/purchase-sourcing/${e1.id}/order`, { clientKey: randomUUID() });
+    expect(ordered.status, JSON.stringify(ordered.body)).toBe(201);
+    const po = ordered.body.po;
+    expect(po).toMatchObject({ status: 'draft', supplier: { id: s1.id }, totalCents: 900_000, sourcing: { id: e1.id, docNo: e1.docNo, status: 'awarded' }, expectedDate: today });
+    expect(po.note).toContain(e1.docNo);
+    expect(po.lines[0]).toMatchObject({ materialId: mat.id, purchaseQtyMilli: q(20), priceCents: 45_000 });
+    expect((await api(ctx.app, buyer, 'POST', `/api/purchase-sourcing/${e1.id}/order`, { clientKey: randomUUID() })).body.error.code).toBe('SOURCING_ORDERED');
+    expect((await api(ctx.app, buyer, 'POST', `/api/purchase-sourcing/${e1.id}/reopen`, { reason: '想换一家' })).body.error.code).toBe('SOURCING_ORDERED');
+    // 提交：来自已定标的询价单，过门槛（超过 ¥2,000 等负责人确认）
+    const submitted = await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po.id}/submit`, {});
+    expect(submitted.body.status).toBe('submitted');
+
+    // 单一来源：只有一家报价，采购不能定标，负责人写清原因可以
+    const e2 = (await create({ title: '指定品牌洗发水', lines: [{ materialId: mat.id, purchaseQtyMilli: q(30) }] })).body.event;
+    const only = (await quote(e2.id, { supplierId: s3.id, prices: [{ lineId: e2.lines[0].id, priceCents: 40_000 }] })).body.quotes[0];
+    expect((await api(ctx.app, buyer, 'POST', `/api/purchase-sourcing/${e2.id}/award`, { quoteId: only.id, reason: '只有一家' })).body.error.code).toBe('QUOTES_NOT_ENOUGH');
+    expect((await api(ctx.app, buyer, 'POST', `/api/purchase-sourcing/${e2.id}/award`, { quoteId: only.id, reason: '品牌指定只此一家', singleSource: true })).status).toBe(403);
+    expect((await api(ctx.app, approver, 'POST', `/api/purchase-sourcing/${e2.id}/award`, { quoteId: only.id, reason: '只此家', singleSource: true })).body.error.code).toBe('REASON_TOO_SHORT');
+    const single = await api(ctx.app, approver, 'POST', `/api/purchase-sourcing/${e2.id}/award`, { quoteId: only.id, reason: '品牌指定只此一家', singleSource: true });
+    expect(single.body).toMatchObject({ status: 'awarded', singleSource: true });
+    // 转出的草稿改了供应商：提交被拒；撤回采购单后可以撤销定标、撤销询价单
+    const po2 = (await api(ctx.app, buyer, 'POST', `/api/purchase-sourcing/${e2.id}/order`, { clientKey: randomUUID() })).body.po;
+    const changed = await api(ctx.app, buyer, 'PUT', `/api/purchase-orders/${po2.id}`, {
+      supplierId: s2.id,
+      orderDate: today,
+      action: 'submit',
+      lines: [{ id: po2.lines[0].id, materialId: mat.id, purchaseQtyMilli: q(30), priceCents: 40_000 }],
+    });
+    expect(changed.body.error.code).toBe('QUOTES_REQUIRED');
+    expect((await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po2.id}/cancel`, { reason: '换供应商' })).body.status).toBe('cancelled');
+    expect((await api(ctx.app, buyer, 'POST', `/api/purchase-sourcing/${e2.id}/reopen`, { reason: '重新询价' })).body).toMatchObject({ status: 'open', awardedQuoteId: null });
+    expect((await api(ctx.app, buyer, 'POST', `/api/purchase-sourcing/${e2.id}/cancel`, { reason: '不买了' })).body).toMatchObject({ status: 'cancelled', cancelReason: '不买了' });
+
+    // 价格曲线：近 12 个月的成交价与报价（撤销的询价单不算）
+    const hist = (await api(ctx.app, keeper, 'GET', `/api/purchase-price-history?materialId=${mat.id}`)).body;
+    expect(hist.materialName).toBe(mat.name);
+    const quotes = hist.points.filter((p: { source: string }) => p.source === 'quote');
+    expect(quotes.map((p: { docNo: string; priceCents: number }) => [p.docNo, p.priceCents]).sort()).toEqual([
+      [e1.docNo, 44_000],
+      [e1.docNo, 45_000],
+    ]);
+    expect(hist.points.some((p: { source: string }) => p.source === 'receipt')).toBe(true);
+    expect((await api(ctx.app, ctx.clerk, 'GET', `/api/purchase-price-history?materialId=${mat.id}`)).status).toBe(403);
+  });
+});

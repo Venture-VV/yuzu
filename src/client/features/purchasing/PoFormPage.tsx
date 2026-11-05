@@ -20,6 +20,7 @@ import { MaterialDialog } from '../inventory/MasterTab';
 import { SimRule } from '../inventory/parts';
 import { useInvSettings, useMaterials, useSuppliers } from '../inventory/queries';
 import { CompareChip } from './parts';
+import { PriceHistoryButton } from './PriceHistory';
 import { useOpenLines } from '../requests/queries';
 import { useBaseline, useInvalidateAll, usePo, usePurchaseRules } from './queries';
 
@@ -519,7 +520,21 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
             )}
           </section>
 
-          {error && <Notice tone="error" title={error} icon={<CircleAlert className="size-5" />}>内容仍保留在页面上，可修改后再提交。</Notice>}
+          {error && (
+            <Notice tone="error" title={error} icon={<CircleAlert className="size-5" />}>
+              内容仍保留在页面上，可修改后再提交。
+              {error.includes('询价门槛') && (
+                <>
+                  {' '}
+                  可以先点「保存草稿」，再到
+                  <Link to="/purchasing/sourcing" className="mx-1 font-bold text-lake underline">
+                    询价比价
+                  </Link>
+                  建询价单。
+                </>
+              )}
+            </Notice>
+          )}
           {phase.kind === 'uncertain' && (
             <Notice
               tone="warning"
@@ -662,8 +677,9 @@ function PoLineRow({
         <p className="mt-1 text-right text-[11.5px] text-ink-3">{priceLocked ? '已有收货，单价锁定' : `元 / ${l.purchaseUnit}`}</p>
       </div>
       <div className="text-right @4xl:pt-2">{row.amount !== null ? <Money cents={row.amount} className="text-[15px] font-bold" /> : <span className="text-ink-4">—</span>}</div>
-      <div className="@4xl:pt-2.5">
-        <CompareChip compare={compare} unit={l.purchaseUnit} />
+      <div className="flex items-start gap-1 @4xl:pt-1">
+        <CompareChip compare={compare} unit={l.purchaseUnit} className="pt-1.5" />
+        <PriceHistoryButton materialId={l.materialId} name={m?.name ?? '物料'} />
       </div>
       <span className="hidden justify-self-end @4xl:block">
         {onRemove && (
