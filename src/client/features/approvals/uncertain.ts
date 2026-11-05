@@ -7,12 +7,14 @@
 //   · 上次那次已经生效：不重复记（同一个人对同一级重复同意、单据已经生效或已经退回的，都按成功返回）；
 //   · 还没生效：照常同意或退回这一级；
 //   · 这张单已经走过这一级（别人审的）或已经结束：拒绝（APPROVAL_MOVED 等），上次那次到得再晚也同样被拒。
-// 所以重新提交拿到的明确结果（成功或拒绝）就是上次那次的结果，之后不会再变，记录就删掉；还是没收到结果就接着留着。
+// 所以重新提交成功、或被拒绝的原因说明这张单已经走过这一级 / 不在待确认（见 CONCLUSIVE），上次那次就不会再变，记录删掉；
+// 第一次发就被明确拒绝（发出去的就是原来那次）也删掉。重新提交因为别的原因没被受理（会话过期 401、没有权限、模块没开启……）
+// 不能说明上次那次已经处理完——批量是一张一张处理的，上次那批可能还在服务端往下走——记录留着、写上这次的原因（Codex 自动审查 3ed02db）。
 // 读回时审批单已经结束（通过、退回、撤回）也删掉：上次那次已经改变不了什么（生效了的在审批记录里）。
 
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { ApprovalStatus, BatchApproveResult } from '@shared/approvals';
-import { api, UncertainError } from '../../lib/api';
+import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { uuid } from '../../lib/utils';
 
@@ -30,7 +32,15 @@ export interface SentApproval {
   /** 批量同意的同一批：重新提交时整批原样再发 */
   batch?: { id: string; comment: string };
   createdAt: string;
+  /** 上次重新提交没被受理的原因（例如会话过期、没有权限）：记录还留着 */
+  lastError?: string;
 }
+
+/**
+ * 重新提交被拒绝时，能断定上次那次不会再生效（或已经有结果）的原因：这张单已经走过这一级、已经结束或退回后重新提交过
+ * （APPROVAL_MOVED，级别只往前走），单据已经不在待确认（INVALID_STATE），金额超过批量上限（BATCH_OVER_LIMIT，原来那批一样）。
+ */
+const CONCLUSIVE = new Set(['APPROVAL_MOVED', 'INVALID_STATE', 'BATCH_OVER_LIMIT']);
 
 const STORAGE_KEY = 'yuzu.approvalPending.v1';
 const listeners = new Set<() => void>();
@@ -63,7 +73,7 @@ export class ApprovalPendingError extends Error {
 /** 「同意第 2 级」「退回（第 1 级）」：没收到结果的那次做的是什么 */
 export const sentLabel = (s: Pick<SentApproval, 'action' | 'level'>) => (s.action === 'approve' ? `同意第 ${s.level} 级` : `退回（第 ${s.level} 级）`);
 
-const sameAct = (a: SentApproval, b: SentApproval) =>
+const sameAct = (a: Pick<SentApproval, 'action' | 'level' | 'url' | 'body' | 'batch'>, b: Pick<SentApproval, 'action' | 'level' | 'url' | 'body' | 'batch'>) =>
   a.action === b.action && a.level === b.level && a.url === b.url && JSON.stringify(a.body) === JSON.stringify(b.body) && a.batch?.id === b.batch?.id;
 
 function readAll(): SentApproval[] {
@@ -116,6 +126,15 @@ function remove(keys: string[]) {
   const list = readAll();
   if (!list.some((p) => keys.includes(keyOf(p)))) return;
   if (!persist(list.filter((p) => !keys.includes(keyOf(p))))) keys.forEach((k) => settled.add(k));
+  notify();
+}
+
+/** 重新提交没被受理：记录留着，写上原因（写不进去也没关系，记录本身还在） */
+function note(reasons: Map<string, string>) {
+  if (reasons.size === 0) return;
+  const list = readAll();
+  if (!list.some((p) => reasons.has(keyOf(p)))) return;
+  persist(list.map((p) => (reasons.has(keyOf(p)) ? { ...p, lastError: reasons.get(keyOf(p))! } : p)));
   notify();
 }
 
@@ -200,8 +219,15 @@ export async function sendApproval<T = unknown>(act: Omit<SentApproval, 'created
     remove([key]);
     return result;
   } catch (e) {
-    // 明确的拒绝也是上次那次的结果（级别只往前走，见上），删掉；没收到结果的接着留着
-    if (!(e instanceof UncertainError)) remove([key]);
+    if (e instanceof UncertainError) {
+      // 没收到结果：接着留着
+    } else if (!stored || (e instanceof ApiError && CONCLUSIVE.has(e.code))) {
+      // 第一次发就被拒绝（就是原来那次），或者拒绝的原因说明上次那次不会再生效：删掉
+      remove([key]);
+    } else {
+      // 重新提交没被受理（会话过期、没有权限……）：上次那次可能还在处理，留着
+      note(new Map([[key, errorMessage(e)]]));
+    }
     throw e;
   } finally {
     if (!stored) flight([key], false);
@@ -250,6 +276,7 @@ export async function sendBatchApprove(
   }
   const keys = records.map(keyOf);
   const fresh = keys.filter((k) => !list.some((p) => keyOf(p) === k));
+  const replayed = keys.filter((k) => !fresh.includes(k));
   flight(fresh, true);
   try {
     save(records);
@@ -258,11 +285,27 @@ export async function sendBatchApprove(
     throw e;
   }
   try {
-    const r = await api.post<BatchApproveResult>('/api/approvals/batch-approve', { items: records.map((x) => ({ id: x.requestId, level: x.level })), comment });
-    remove(keys);
+    // 一批最多 50 张、一张一个事务：多给一些时间，少一些「没收到结果」
+    const r = await api.post<BatchApproveResult>(
+      '/api/approvals/batch-approve',
+      { items: records.map((x) => ({ id: x.requestId, level: x.level })), comment },
+      { timeoutMs: 60_000 },
+    );
+    // 每张的结果：成功的、第一次发的、拒绝原因能断定的删掉；重新提交没被受理的留着（上次那批可能还在处理这一张）
+    const kept = new Map<string, string>();
+    for (const x of r.results) {
+      const k = keyOf({ staffId, requestId: x.id });
+      if (!x.ok && replayed.includes(k) && !(x.code && CONCLUSIVE.has(x.code))) kept.set(k, x.message ?? x.code ?? '没成功');
+    }
+    remove(keys.filter((k) => !kept.has(k)));
+    note(kept);
     return r;
   } catch (e) {
-    if (!(e instanceof UncertainError)) remove(keys);
+    if (!(e instanceof UncertainError)) {
+      // 整批被拒（会话过期、没有权限、校验……）：第一次发的就是原来那批、不会再生效，删掉；重新提交的留着
+      remove(fresh);
+      note(new Map(replayed.map((k) => [k, errorMessage(e)])));
+    }
     throw e;
   } finally {
     flight(fresh, false);

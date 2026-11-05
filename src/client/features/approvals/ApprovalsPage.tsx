@@ -151,6 +151,7 @@ function UncertainPanel({ onOpen, onBatch }: { onOpen: (id: number) => void; onB
             <Button size="sm" variant="secondary" loading={busy === s.requestId} onClick={() => void resend(s)} data-testid={`approval-uncertain-resend-${s.docNo}`}>
               按原内容重新提交
             </Button>
+            {s.lastError && <span className="w-full text-[12px] text-clay">上次重新提交没被受理：{s.lastError}</span>}
           </li>
         ))}
       </ul>

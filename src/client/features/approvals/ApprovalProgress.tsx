@@ -73,6 +73,7 @@ export function ApprovalResend({ sent, onDone, className }: { sent: SentApproval
     <div className={cn('flex flex-wrap items-center justify-end gap-x-3 gap-y-1.5', className)} data-testid="approval-uncertain">
       <p className="min-w-0 flex-1 text-[12.5px] text-ink-2">
         <span className="font-semibold text-ember">上次「{sentLabel(sent)}」没收到结果</span>，可能已经生效。按原内容重新提交：已经生效的不重复记，这张单已经走过这一级的会提示。
+        {sent.lastError && <span className="mt-0.5 block text-clay">上次重新提交没被受理：{sent.lastError}</span>}
       </p>
       <Button variant="primary" loading={busy === sent.requestId} icon={<RotateCcw className="size-4" />} onClick={() => void resend(sent)} data-testid="approval-resend">
         按原内容重新提交

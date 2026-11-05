@@ -241,6 +241,15 @@ test.describe('审批中心（v0.7.30）', () => {
       await expect(page.getByTestId('approval-chain-2')).toContainText('审批中');
       await expect(page.getByTestId('approval-uncertain')).toContainText('同意第 1 级');
       await expect(page.getByTestId('approval-approve')).toHaveCount(0);
+      // 重新提交没被受理（例如没有权限）：不能说明上次那次处理完了，记录留着、写上原因
+      await page.route('**/api/approvals/*/approve', (route) =>
+        route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: { code: 'FORBIDDEN', message: '模拟：没有权限' } }) }),
+      );
+      await page.getByTestId('approval-resend').click();
+      await expect(page.getByTestId('approval-uncertain')).toContainText('上次重新提交没被受理：模拟：没有权限');
+      await page.unroute('**/api/approvals/*/approve');
+      await page.reload();
+      await expect(page.getByTestId('approval-uncertain')).toContainText('上次重新提交没被受理');
       await page.getByTestId('approval-resend').click();
       await expect(page.getByText('已按原内容重新提交').first()).toBeVisible();
       await expect(page.getByTestId('approval-uncertain')).toHaveCount(0);
