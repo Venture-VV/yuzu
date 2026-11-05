@@ -112,7 +112,7 @@ export function ContractsPage() {
               </button>
             ))}
           </div>
-          <Select aria-label="合同类型" value={category} onChange={(e) => setCategory(e.target.value as ContractCategory | '')} className="h-9 w-auto">
+          <Select aria-label="合同类型" value={category} fullWidth={false} onChange={(e) => setCategory(e.target.value as ContractCategory | '')} className="h-9 w-32" data-testid="contract-category-filter">
             <option value="">全部类型</option>
             {CONTRACT_CATEGORIES.map((c) => (
               <option key={c} value={c}>
