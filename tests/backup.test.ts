@@ -115,7 +115,8 @@ describe('备份与核验', () => {
     expect(other.ok).toBe(false);
     expect(other.lines.join('\n')).toContain('与本版本（rows-md5-sorted-v1）不同，无法比对');
     await writeFile(`${file}.json`, JSON.stringify(saved));
-  });
+    // 三次核验，每次都在临时库完整恢复一遍再算指纹：CI 上平时 16–20 秒，并行的用例多、运行机慢时超过默认的 30 秒（PR #65 的 33d0c74），单独放宽
+  }, 120_000);
 
   it('不是有效备份的文件：恢复失败，核验不通过', async () => {
     const bad = join(dir, 'yuzu-20261030-120000-manual.dump');
