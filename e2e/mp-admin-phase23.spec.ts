@@ -67,13 +67,31 @@ async function getJson<T>(page: Page, url: string): Promise<T> {
 }
 const adminData = (page: Page) => getJson<MpAdminData>(page, '/api/admin/mp');
 
-/** 这一页的 GET 照常请求门店系统，再用 patch 换掉里面（演示库里空着的）列表；只拦 GET，保存照常到门店系统 */
+/**
+ * 这一页的 GET 照常请求门店系统，再用 patch 换掉里面（演示库里空着的）列表；只拦 GET，保存照常到门店系统。
+ * 返回 idle()：等这个地址的 GET 都回来、并且安静了一会儿。要在页面查回的途中改假数据时先等它，不然查回可能读到改过的数据、
+ * 在刷新之前就下了结论（main 合并后 CI 的 m–z 组碰到过一次）
+ */
 async function patchGet<T>(page: Page, url: string, patch: (real: T) => T) {
+  let inflight = 0;
+  let last = Date.now();
   await page.route(url, async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
-    const res = await route.fetch();
-    await route.fulfill({ response: res, json: patch((await res.json()) as T) });
+    inflight += 1;
+    last = Date.now();
+    try {
+      const res = await route.fetch();
+      const json = (await res.json()) as T;
+      await route.fulfill({ response: res, json: patch(json) });
+    } catch (error) {
+      // 页面在这期间刷新了：这次请求已经作废，不用再回；别的错照常报出来
+      if (!/disposed|closed|already handled/i.test(String(error))) throw error;
+    } finally {
+      inflight -= 1;
+      last = Date.now();
+    }
   });
+  return { idle: () => expect.poll(() => inflight === 0 && Date.now() - last > 500, { timeout: 15_000 }).toBe(true) };
 }
 
 const openTab = (page: Page, label: string) => page.getByRole('radiogroup', { name: '小程序后台分页' }).getByRole('radio', { name: label, exact: true }).click();
@@ -444,7 +462,7 @@ test.describe('后台「微信小程序」第二、三期的几页（小程序�
     const r2 = refund(990052, 'E2E 吴乙', { status: 'closed', failCode: 'REFUND_CLOSED', failMessage: '微信那边退款关闭了' });
     const r3 = refund(990053, 'E2E 吴丙', { status: 'abnormal', failCode: 'ABNORMAL', failMessage: '退款异常：顾客的银行卡注销了' });
     let refunds = [r1, r2, r3];
-    await patchGet<MpRechargeAdminData>(page, '**/api/admin/mp/recharge', (real) => ({ ...real, refunds }));
+    const recharge = await patchGet<MpRechargeAdminData>(page, '**/api/admin/mp/recharge', (real) => ({ ...real, refunds }));
     let reply: 'lost' | 'ok' = 'lost';
     const sent: { path: string; body: unknown }[] = [];
     await page.route('**/api/admin/mp/refunds/*/retry', async (route) => {
@@ -486,6 +504,9 @@ test.describe('后台「微信小程序」第二、三期的几页（小程序�
       // ② 没收到结果、其实已经办了（门店系统换了新的退款单号重新申请）：刷新后查回看到单号变了，自动移除
       reply = 'lost';
       await row('E2E 吴乙').getByRole('button', { name: '重试' }).click();
+      await expect(pending).toHaveCount(1);
+      // 先等没收到结果以后的那次查回（看到的还是旧单号）回来，门店系统那边再变；结论只能在刷新之后的查回里下
+      await recharge.idle();
       await expect(pending).toHaveCount(1);
       refunds = refunds.map((x) => (x.id === r2.id ? { ...x, status: 'new', outRefundNo: 'MPRF20261104E2E1990052', failCode: null, failMessage: null } : x));
       await page.reload();

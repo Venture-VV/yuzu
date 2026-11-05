@@ -32,7 +32,7 @@ import {
 import { isUniqueViolation, type Db } from '../../db';
 import { writeAudit } from '../../lib/audit';
 import type { Deps, OpContext } from '../../lib/context';
-import { AppError, badRequest, conflict, notFound } from '../../lib/errors';
+import { AppError, badRequest, conflict, notFound, unprocessable } from '../../lib/errors';
 import { setTxTimeouts } from '../../lib/tx';
 import { parse } from '../../lib/validate';
 import { memberBenefits } from '../benefits';
@@ -127,8 +127,8 @@ export async function bindMember(deps: Deps, openid: string, raw: unknown): Prom
       // 这里读到的绑定与版本号到写入、提交之前都不会变（3ab3ab5 的 P1：原来解绑不取这把锁，能插在比对与写入之间）
       const state = await bindingStateOf(tx, openid);
       if (state.version !== input.bindVersion) throw conflict('BIND_STALE', '绑定状态刚刚变过，请刷新后再绑定');
-      const [m] = await tx<{ id: number; memberNo: string; name: string; status: string }[]>`
-        SELECT id, member_no, name, status FROM members WHERE phone = ${input.phone} FOR SHARE`;
+      const [m] = await tx<{ id: number; memberNo: string; name: string; status: string; mergedIntoId: number | null }[]>`
+        SELECT id, member_no, name, status, merged_into_id FROM members WHERE phone = ${input.phone} FOR SHARE`;
       const current = state.binding;
       if (current) {
         // 这个微信已经绑定了这位会员：照旧返回；绑定的是别人就要先到前台解绑
@@ -136,6 +136,11 @@ export async function bindMember(deps: Deps, openid: string, raw: unknown): Prom
         throw conflict('OPENID_BOUND', '这个微信已经绑定了另一位会员，要换绑请到前台办理');
       }
       if (!m) throw new AppError(404, 'NOT_MEMBER', '这个手机号还不是会员，请到前台开卡');
+      // 合并掉的会员卡（主线的合并：来源会员停用、手机号还在它上面）：不绑到这张上，用合并到的那张卡的手机号绑（MP25）。
+      // 不说合并到了谁（万一合并错了，不把别人的卡露给这个微信）；小程序助手在 v0.7.26 上测出旧卡的手机号还能绑上
+      if (m.mergedIntoId !== null) {
+        throw unprocessable('MEMBER_MERGED', '这个手机号的会员卡已经合并到另一张会员卡：请用那张卡登记的手机号绑定，不清楚的请问前台');
+      }
       const [other] = await tx`SELECT 1 FROM mp_bindings WHERE member_id = ${m.id} AND unbound_at IS NULL`;
       if (other) throw conflict('MEMBER_BOUND', '这位会员已经绑定了别的微信，要换绑请到前台办理');
       await tx`
