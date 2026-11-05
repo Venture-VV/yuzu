@@ -9,6 +9,7 @@ import { businessDateOf } from '@shared/business-date';
 import { INSTANCE_LABELS } from '@shared/instance';
 import type { AppConfig } from '../config';
 import type { Sql } from '../db';
+import { dropSchemaInBatches } from '../lib/drop-schema';
 import { migrate } from '../migrate';
 import { ensureMembershipLive } from '../modules/membership';
 import { loadSettings } from '../modules/settings';
@@ -271,6 +272,9 @@ export async function demoCheck(sql: Sql, config: AppConfig): Promise<DemoCheckR
   return { ok: lines.every((l) => l.ok), lines, notes };
 }
 
+/** demo-reset 清库时把原来的 public 改名挪到这里，提交后再分批删掉（见 demoReset） */
+const RESET_OLD_SCHEMA = 'yuzu_demo_reset_old';
+
 /** 能用 demo-reset 的库：APP_ENV=development、实例标识不是正式服 / 影子运行 / 测试服 */
 export function assertResettable(config: Pick<AppConfig, 'env' | 'instance'>) {
   refuseLiveDemo(config, '重建演示库');
@@ -297,6 +301,8 @@ export async function demoReset(
   const backup = await (opts.backup ?? createBackup)(config, opts.backupDir, 'demo-reset');
   if (!backup.verified) throw new Error(`备份没有核验通过（${backup.verifyError ?? '原因不明'}），没有清库。备份文件：${backup.file}`);
   log(`✓ 已备份（${(backup.bytes / 1024).toFixed(0)} KB），在临时库恢复核验通过：${backup.file}`);
+  // 上一次清库中途断了、留下挪开的旧模式：先分批删掉（备份里也有它，删之前已经备份过）
+  await dropSchemaInBatches(sql, RESET_OLD_SCHEMA);
   // 清库在一个事务里：先确认没有应用开着，再给 public 下所有表加共享锁（挡住写入；别的连接还在写、等锁 10 秒拿不到就放弃），再算一次数据指纹，
   // 与备份恢复出来的指纹相同才删——备份里就是现在的全部数据。备份之后有过写入的指纹对不上，拒绝；
   // 锁住之后再来的写入被挡在锁外，删库后失败，不会提交（Codex 复审 174fa29：原来只比对备份前的指纹，备份到删库之间的写入会悄悄丢掉）
@@ -313,7 +319,9 @@ export async function demoReset(
       if (now.digest !== backup.fingerprintDigest) {
         throw new Error(`备份之后库里又有写入（现在的数据指纹与备份恢复出来的不同，应用没停？），没有清库。请停掉应用后再执行。备份文件：${backup.file}`);
       }
-      await tx.unsafe('DROP SCHEMA public CASCADE');
+      // 不在这个事务里 DROP SCHEMA：那要在一个事务里拿下整个模式的锁（v0.7.30 约 6500 把），快超出数据库默认的共享锁表，
+      // 库一忙就 out of shared memory。这里只把 public 改名挪开、建一个空的 public（几把锁），提交之后再分批删掉挪开的旧模式
+      await tx.unsafe(`ALTER SCHEMA public RENAME TO ${RESET_OLD_SCHEMA}`);
       await tx.unsafe('CREATE SCHEMA public');
     });
   } catch (error) {
@@ -322,6 +330,11 @@ export async function demoReset(
     throw error;
   }
   log('清库前锁住所有表再核对：数据指纹与备份一致');
+  try {
+    await dropSchemaInBatches(sql, RESET_OLD_SCHEMA);
+  } catch (error) {
+    throw new Error(`库已清空，挪开的旧数据（模式 ${RESET_OLD_SCHEMA}）没删完：${(error as Error).message}。再执行一次 demo-reset 会先删掉它。备份文件：${backup.file}`);
+  }
   log(`已清空数据库「${db}」，重新准备演示数据…`);
   return { backup, prepare: await demoPrepare(sql, config, { log }) };
 }

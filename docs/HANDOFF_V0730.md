@@ -52,8 +52,10 @@
 ## 4. 已执行的验证
 
 - `npm run typecheck`、`npm run build` 通过。
-- 集成用例全量 `npx vitest run`：除 `tests/backup.test.ts` 在本机 3 个并行库时临时库互相看见的两条（单独跑全过，与本版无关）外全过；新增 `tests/approvals.test.ts` 12 项、`tests/sourcing-requests.test.ts` 3 项；改了 3 条部门盘点的旧用例（大差异要写原因、走审批）。
-- 浏览器用例（门店电脑）：`e2e/approvals.spec.ts` 3 条、`e2e/erp-purchasing.spec.ts`、`inventory.spec.ts`、`erp.spec.ts`、`expenses.spec.ts`、`requests.spec.ts`、`purchase-ledger.spec.ts`、`review-fixes.spec.ts`、`viewports.spec.ts`（门店电脑与手机）全过。
+- 集成用例全量 `npx vitest run`（本机 4 个并行库）：121 个文件、1188 项全过；新增 `tests/approvals.test.ts` 12 项、`tests/sourcing-requests.test.ts` 3 项；改了 3 条部门盘点的旧用例（大差异要写原因、走审批）。
+- 浏览器用例（门店电脑）：`e2e/approvals.spec.ts` 3 条、`e2e/erp-purchasing.spec.ts`、`inventory.spec.ts`、`erp.spec.ts`、`expenses.spec.ts`、`requests.spec.ts`、`purchase-ledger.spec.ts`、`review-fixes.spec.ts`、`warehouses.spec.ts`（部门盘点改为少 1 双是大差异：写原因、店主提交并确认）、`viewports.spec.ts`（门店电脑与手机）全过。
+- **数据库锁**：本版加表后，demo-reset 一句 `DROP SCHEMA public CASCADE` 在 CI 上与并行的集成测试撞上 `out of shared memory`（一个迁移好的模式约 6500 把锁，数据库默认的共享锁表约 7800）。demo-reset 改为改名挪开、提交后分批删（`src/server/lib/drop-schema.ts`），集成测试清空测试库也用它。本机 4 个并行库跑全量，同一时刻的锁最多 3924 把（改之前 7611 把，就是 demo-reset 那一句）；只跑升级用例、4 个并行库挤在一起时最多 5568 把。
+- main 定时测试（v0.7.29）报的打印任务状态偶发（读回时已是「发送中」）：改为先读回、再交给发送队列（`devices.ts` 的 `readThenEnqueue`）。
 
 ## 5. 给测试 AI 的指令（可复制）
 
