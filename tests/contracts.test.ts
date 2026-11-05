@@ -220,6 +220,11 @@ describe('合同与法务审查', () => {
     expect(file.status, JSON.stringify(file.body)).toBe(201);
     c = file.body;
     expect(c.files).toHaveLength(1);
+    // 没收到结果、同一张图重新上传：不另记一份
+    const again = await api(ctx.app, buyer, 'POST', `/api/erp/contracts/${c.id}/files`, { mime: 'image/png', data: PNG.toString('base64') });
+    expect(again.status).toBe(201);
+    expect(again.body.files.map((f: { id: number }) => f.id)).toEqual(c.files.map((f) => f.id));
+    c = again.body;
     const img = await api(ctx.app, lawyer, 'GET', c.files[0]!.url);
     expect(img.status).toBe(200);
     const archived = await op(c.id, 'archive', { version: c.version, archiveLocation: '财务室 1 号柜' });

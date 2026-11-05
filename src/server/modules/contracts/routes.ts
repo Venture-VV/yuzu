@@ -3,7 +3,7 @@
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { CONTRACT_CATEGORIES } from '@shared/contracts';
+import { CONTRACT_CATEGORIES, type ContractMeta } from '@shared/contracts';
 import { guardAny } from '../../auth/guard';
 import { readSnapshot } from '../../db';
 import type { Deps } from '../../lib/context';
@@ -84,14 +84,14 @@ export function registerContractRoutes(app: FastifyInstance, deps: Deps) {
     const q = parse(ListQuery, req.query);
     return readSnapshot(sql, (tx) => listContracts(tx, today(), { filter: q.filter as ContractListFilter, category: q.category, q: q.q }));
   });
-  app.get('/api/erp/contracts/meta', { preHandler: READ }, async () =>
+  app.get('/api/erp/contracts/meta', { preHandler: READ }, async (): Promise<ContractMeta> =>
     readSnapshot(sql, async (tx) => ({
       today: today(),
-      suppliers: await tx<{ id: number; name: string }[]>`SELECT id, name FROM suppliers WHERE active ORDER BY name`,
-      departments: await tx<{ id: number; name: string }[]>`SELECT id, name FROM departments WHERE active ORDER BY name`,
-      staff: await tx<{ id: number; displayName: string }[]>`SELECT id, display_name FROM staff WHERE active ORDER BY display_name`,
-      materials: await tx<{ id: number; name: string; purchaseUnit: string; specification: string }[]>`
-        SELECT id, name, purchase_unit, specification FROM materials WHERE active ORDER BY name`,
+      suppliers: await tx<ContractMeta['suppliers']>`SELECT id, name FROM suppliers WHERE active ORDER BY name`,
+      departments: await tx<ContractMeta['departments']>`SELECT id, name FROM departments WHERE active ORDER BY name`,
+      staff: await tx<ContractMeta['staff']>`SELECT id, display_name FROM staff WHERE active ORDER BY display_name`,
+      materials: await tx<ContractMeta['materials']>`
+        SELECT id, code, name, purchase_unit, specification FROM materials WHERE active ORDER BY code`,
     })),
   );
   app.get('/api/erp/contracts/expiring', { preHandler: READ }, async () => readSnapshot(sql, (tx) => expiringContracts(tx, today())));

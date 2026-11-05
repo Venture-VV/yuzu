@@ -53,6 +53,9 @@ const DeptDocFormPage = lazyPage(() => import('./features/dept-stock/DeptDocForm
 const PurchaseLedgerPage = lazyPage(() => import('./features/purchase-ledger/PurchaseLedgerPage').then((m) => m.PurchaseLedgerPage));
 const AuditPage = lazyPage(() => import('./features/purchase-ledger/AuditPage').then((m) => m.AuditPage));
 const LegacyPage = lazyPage(() => import('./features/legacy/LegacyPage').then((m) => m.LegacyPage));
+const ContractsPage = lazyPage(() => import('./features/contracts/ContractsPage').then((m) => m.ContractsPage));
+const ContractDetailPage = lazyPage(() => import('./features/contracts/ContractDetailPage').then((m) => m.ContractDetailPage));
+const ContractFormPage = lazyPage(() => import('./features/contracts/ContractFormPage').then((m) => m.ContractFormPage));
 const DocFormPage = lazyPage(() => import('./features/inventory/DocFormPage').then((m) => m.DocFormPage));
 const InventoryPage = lazyPage(() => import('./features/inventory/InventoryPage').then((m) => m.InventoryPage));
 const TodoPage = lazyPage(() => import('./features/inventory/TodoPage').then((m) => m.TodoPage));
@@ -205,6 +208,13 @@ const router = createBrowserRouter([
       { path: 'ledger', element: <PurchaseLedgerPage /> },
       { path: 'audit', element: <AuditPage /> },
       { path: 'legacy', element: <LegacyPage /> },
+      // 合同与法务审查（v0.7.31）
+      { path: 'contracts', element: <ContractsPage /> },
+      { path: 'contracts/new', element: <ContractFormPage mode="new" /> },
+      { path: 'contracts/:id', element: <ContractDetailPage /> },
+      { path: 'contracts/:id/edit', element: <ContractFormPage mode="edit" /> },
+      { path: 'contracts/:id/change', element: <ContractFormPage mode="change" /> },
+      { path: 'contracts/:id/changes/:changeId/edit', element: <ContractFormPage mode="change-edit" /> },
       { path: '*', element: <Navigate to="/erp" replace /> },
     ],
   },

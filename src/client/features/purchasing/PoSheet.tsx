@@ -4,6 +4,7 @@ import { Ban, CircleCheck, CornerUpLeft, FilePen, Lock, PackagePlus, Pencil, Rec
 import { CLAIM_STATUS_LABELS } from '@shared/expenses';
 import { INV_STATUS_LABELS } from '@shared/inventory';
 import { channelText, type PurchaseOrder } from '@shared/purchasing';
+import { formatAmount } from '@shared/money';
 import { formatQty } from '@shared/quantity';
 import { errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
@@ -150,6 +151,19 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
               </Link>
             </Info>
           )}
+          {po.contract && (
+            <Info label="合同">
+              {session.erpModules.includes('contracts') && can('contract.read') ? (
+                <Link to={`/erp/contracts/${po.contract.id}`} className="num font-semibold text-lake hover:underline" data-testid="po-sheet-contract">
+                  {po.contract.contractNo}
+                </Link>
+              ) : (
+                <span className="num" data-testid="po-sheet-contract">
+                  {po.contract.contractNo}
+                </span>
+              )}
+            </Info>
+          )}
           <Info label="下单日期">
             <span className="num">{po.orderDate}</span>
           </Info>
@@ -165,6 +179,26 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
             </Info>
           )}
         </dl>
+
+        {po.contractCheck?.exceeded && (
+          <Notice tone="warning" title={`超出合同 ${po.contractCheck.contractNo} 的单价或数量`} data-testid="po-sheet-contract-exceeded">
+            {po.contractCheck.lines
+              .filter((x) => x.priceOverCents > 0 || x.overQtyMilli > 0)
+              .map((x) => {
+                const line = po.lines.find((l) => l.lineNo === x.lineNo);
+                const unit = line?.purchaseUnit ?? '';
+                return (
+                  <span key={x.lineNo} className="block">
+                    {line?.materialName ?? `第 ${x.lineNo} 行`}：
+                    {x.priceOverCents > 0 && `合同价 ¥${formatAmount(x.contractPriceCents ?? 0)}，超价 ¥${formatAmount(x.priceOverCents)} / ${unit}`}
+                    {x.priceOverCents > 0 && x.overQtyMilli > 0 && '；'}
+                    {x.overQtyMilli > 0 && `超出合同剩余量 ${formatQty(x.overQtyMilli)} ${unit}`}
+                  </span>
+                );
+              })}
+            <span className="mt-1 block font-semibold">原因：{po.contractNote || '还没写（提交时要写）'}</span>
+          </Notice>
+        )}
 
         <section>
           <h3 className="mb-2 text-[13px] font-bold text-ink-2">明细 · {po.lines.length} 行</h3>

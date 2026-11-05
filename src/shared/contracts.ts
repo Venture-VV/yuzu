@@ -286,6 +286,15 @@ export interface ContractDetail extends ContractSummary {
   purchaseOrders: ContractPoView[];
 }
 
+/** 起草页用的下拉选项（在用的供应商、部门、员工、物料） */
+export interface ContractMeta {
+  today: string;
+  suppliers: { id: number; name: string }[];
+  departments: { id: number; name: string }[];
+  staff: { id: number; displayName: string }[];
+  materials: { id: number; code: string; name: string; purchaseUnit: string; specification: string }[];
+}
+
 /** 到期提醒（C11） */
 export interface ContractExpiryItem {
   id: number;
@@ -342,6 +351,18 @@ export function formatPercentBp(bp: number): string {
   const s = (bp / 100).toFixed(2).replace(/\.?0+$/, '');
   return `${s}%`;
 }
+
+/** 输入框里的百分数（最多两位小数）→ 万分比：「30」→ 3000，「12.5」→ 1250；格式不对或超过 100% 为 null */
+export function parsePercentBp(input: string): number | null {
+  const s = input.trim().replace(/%$/, '');
+  if (!/^\d{1,3}(\.\d{1,2})?$/.test(s)) return null;
+  const [int, frac = ''] = s.split('.');
+  const bp = Number(int) * 100 + Number(frac.padEnd(2, '0'));
+  return bp <= 10000 ? bp : null;
+}
+
+/** 万分比 → 输入框里的百分数（不带 %）：1250 → 「12.5」 */
+export const bpToInput = (bp: number): string => formatPercentBp(bp).slice(0, -1);
 
 /** 新合同的空白内容（四要素按模板预填，C5、C6） */
 export function blankContent(): ContractContent {

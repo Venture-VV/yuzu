@@ -5,7 +5,9 @@ import {
   APPROVAL_DOC_KINDS,
   APPROVAL_DOC_TYPE_LABELS,
   APPROVAL_MODE_LABELS,
+  CONTRACT_REVIEW_DOC_TYPES,
   URGENT_BACKFILL_ESCALATE_DAYS,
+  isLegalStep,
   stepLabel,
   type ApprovalActionView,
   type ApprovalCard,
@@ -626,6 +628,7 @@ export async function getApprovalDetail(db: Db, actor: Actor, timeZone: string, 
       state,
       waitingFor: state === 'current' ? required.filter((sid) => !approved.has(sid)).map((sid) => names.get(sid) ?? `#${sid}`) : [],
       actions: acts,
+      legal: CONTRACT_REVIEW_DOC_TYPES.includes(req.docType) && isLegalStep(step),
     };
   });
   const previous = await db<{ id: number; status: ApprovalStatus; submittedAt: string; finishedAt: string | null; lastComment: string | null }[]>`

@@ -202,6 +202,8 @@ export interface ApprovalDetail extends ApprovalCard {
     /** 会签时这一级还要谁同意 */
     waitingFor: string[];
     actions: ApprovalActionView[];
+    /** 法务这一级（v0.7.31，合同、合同变更）：同意时按审查清单逐条给结论 */
+    legal: boolean;
   }[];
   /** 单据要点 */
   doc: ApprovalDocDigest;

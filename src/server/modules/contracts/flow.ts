@@ -734,6 +734,10 @@ export async function addFile(deps: Deps, contractId: number, raw: unknown, acto
     await setTxTimeouts(tx);
     const c = await lockContract(tx, contractId);
     if (c.status === 'voided') throw conflict('INVALID_STATE', '作废的合同不能再上传扫描件');
+    // 同一张图已经挂在这份合同上（上次上传没收到结果、重新上传的）：不另记一份（图片本身按内容去重）
+    const [same] = await tx<{ id: number }[]>`
+      SELECT id FROM contract_files WHERE contract_id = ${contractId} AND image_id = ${img.id} AND removed_at IS NULL LIMIT 1`;
+    if (same) return { id: Number(same.id) };
     const [next] = await tx<{ sortNo: number }[]>`SELECT coalesce(max(sort_no), 0) + 1 AS sort_no FROM contract_files WHERE contract_id = ${contractId}`;
     const sortNo = Number(next!.sortNo);
     const [row] = await tx<{ id: number }[]>`
