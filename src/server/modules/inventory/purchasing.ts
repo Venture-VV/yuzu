@@ -35,6 +35,7 @@ import {
 import { hashRequest } from '../../lib/idempotency';
 import { ChannelKey, ChannelNote, loadPurchaseRules, resolveChannel, type ChannelColumns } from './purchase-rules';
 import { formatAmount } from '@shared/money';
+import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForApproval } from '../approvals/engine';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -73,6 +74,15 @@ const Meta = z.object({
 });
 const CreateInput = Meta.extend({ clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试') });
 const ReasonInput = z.object({ reason: z.string().trim().min(2, '请填写原因（至少 2 个字）').max(200) });
+/** 审批（v0.7.30）：页面看到的审批单与级别（审批单已经变了、走到别的级别时拒绝），同意时的意见 */
+export const ApprovalFence = z.object({
+  requestId: id.optional(),
+  level: z.number().int().min(1).max(3).optional(),
+  comment: z.string().trim().max(200, '意见最多 200 个字').default(''),
+  /** 审批中心的批量同意（记在审批记录上） */
+  batch: z.boolean().optional(),
+});
+const ReturnInput = ReasonInput.extend(ApprovalFence.omit({ comment: true }).shape);
 
 // ───────────────────────── 读取 ─────────────────────────
 
@@ -193,6 +203,7 @@ export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
     revisions,
     approvals,
     reimbursement,
+    approval: await approvalBrief(db, 'purchase_order', poId),
   };
 }
 
@@ -516,25 +527,29 @@ export async function assertQuotesForPo(tx: Tx, poId: number) {
   throw unprocessable('QUOTES_REQUIRED', `合计 ${amount} 到了询价门槛 ${gate}：请先询价（至少 ${rules.minQuotes} 家报价）并定标，再从询价单转采购单`, { threshold: rules.quoteThresholdCents });
 }
 
-/** deptConfirm：急采的补单由本部门自己确认（#19，v0.7.11），不走负责人确认 */
-async function submitLocked(tx: Tx, po: PoRow, actor: Actor, approveNow: boolean, deptConfirm = false) {
+/**
+ * deptConfirm：急采的补单由本部门自己确认（#19，v0.7.11），不走审批。
+ * 其余按审批中心（v0.7.30）：命中审批规则的按规则的审批链；没有规则命中按「需要负责人确认」与免确认门槛（默认规则），与以前一样。
+ */
+async function submitLocked(tx: Tx, po: PoRow, actor: Actor, approveNow: boolean, timeZone: string, deptConfirm = false) {
   if (po.status === 'submitted' || po.status === 'approved') return;
   if (po.status !== 'draft' && po.status !== 'returned') throw conflict('INVALID_STATE', '采购单当前状态不能提交');
   // 询价门槛（v0.7.29 E5）：合计到门槛、没改过版的采购单要来自已定标的询价单
   await assertQuotesForPo(tx, po.id);
   await tx`UPDATE purchase_orders SET status = 'submitted', submitted_by = ${actor.id}, submitted_at = now(), updated_at = now() WHERE id = ${po.id}`;
   await logApproval(tx, 'purchase_order', po.id, 'submit', actor.id, '', po.revision);
+  if (deptConfirm) {
+    await approveLocked(tx, { ...po, status: 'submitted' }, actor, '急采补单，部门确认');
+    return;
+  }
   const settings = await loadInventorySettings(tx);
   // #18：合计不超过免确认门槛的采购单提交即确认（v0.7.12）
   const [totals] = await tx<{ totalCents: number }[]>`SELECT total_cents FROM purchase_orders WHERE id = ${po.id}`;
-  const totalCents = totals?.totalCents ?? null;
-  if (deptConfirm) {
-    await approveLocked(tx, { ...po, status: 'submitted' }, actor, '急采补单，部门确认');
-  } else if (!(settings.approvalRules.purchase_order && overThreshold(settings, totalCents))) {
-    await approveLocked(tx, { ...po, status: 'submitted' }, actor, settings.approvalRules.purchase_order ? '未超过免确认门槛，提交即确认' : '');
-  } else if (approveNow) {
-    if (!can(actor, 'inventory.approve')) throw forbidden('当前账号不能确认采购单，请提交给负责人');
-    await approveLocked(tx, { ...po, status: 'submitted' }, actor);
+  const fallback = settings.approvalRules.purchase_order && overThreshold(settings, totals?.totalCents ?? null);
+  if (approveNow && !can(actor, 'inventory.approve')) throw forbidden('当前账号不能确认采购单，请提交给负责人');
+  const r = await submitForApproval(tx, 'purchase_order', po.id, { actor, timeZone }, { fallback, approveNow });
+  if (r.outcome === 'effective') {
+    await approveLocked(tx, { ...po, status: 'submitted' }, actor, r.skipped && settings.approvalRules.purchase_order ? '未超过免确认门槛，提交即确认' : '');
   }
 }
 
@@ -602,7 +617,7 @@ export async function createPo(
         INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id)
         VALUES (${meta.clientKey}, 'purchase_order', ${requestHash}, ${newId}, ${actor.id})`;
       await logApproval(tx, 'purchase_order', newId, 'create', actor.id, '', 1);
-      if (meta.action === 'submit') await submitLocked(tx, await lockPo(tx, newId), actor, meta.approveNow, opts.deptConfirm);
+      if (meta.action === 'submit') await submitLocked(tx, await lockPo(tx, newId), actor, meta.approveNow, deps.config.timezone, opts.deptConfirm);
       await writeAudit(tx, {
         staffId: actor.id,
         action: 'purchase_order',
@@ -690,7 +705,7 @@ export async function updatePo(deps: Deps, poId: number, raw: PoBodyInput & { ac
              note = ${body.note}, total_cents = ${total}, channel = ${ch.channel}, channel_label = ${ch.channelLabel},
              channel_note = ${ch.channelNote}, updated_at = now()
       WHERE id = ${poId}`;
-    if (meta.action === 'submit' || revise) await submitLocked(tx, po, actor, meta.approveNow);
+    if (meta.action === 'submit' || revise) await submitLocked(tx, po, actor, meta.approveNow, deps.config.timezone);
   });
   return getPo(deps.sql, poId);
 }
@@ -698,28 +713,32 @@ export async function updatePo(deps: Deps, poId: number, raw: PoBodyInput & { ac
 export async function submitPo(deps: Deps, poId: number, actor: Actor, approveNow: boolean) {
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
-    await submitLocked(tx, await lockPo(tx, poId), actor, approveNow);
+    await submitLocked(tx, await lockPo(tx, poId), actor, approveNow, deps.config.timezone);
   });
   return getPo(deps.sql, poId);
 }
 
-export async function approvePo(deps: Deps, poId: number, actor: Actor) {
+/** 同意（v0.7.30 起走审批中心）：同意的是当前这一级，最后一级同意后采购单确认（默认规则下一次就确认，与以前一样） */
+export async function approvePo(deps: Deps, poId: number, actor: Actor, raw: unknown = {}) {
+  const fence = parse(ApprovalFence, raw ?? {});
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const po = await lockPo(tx, poId);
     if (po.status === 'approved') return;
     if (po.status !== 'submitted') throw conflict('INVALID_STATE', '只有待确认的采购单可以确认');
-    await approveLocked(tx, po, actor);
+    const step = await approveCurrent(tx, 'purchase_order', poId, { actor, timeZone: deps.config.timezone }, fence);
+    if (step === 'final') await approveLocked(tx, po, actor, fence.comment);
   });
   return getPo(deps.sql, poId);
 }
 
 export async function returnPo(deps: Deps, poId: number, raw: unknown, actor: Actor) {
-  const { reason } = parse(ReasonInput, raw);
+  const { reason, ...fence } = parse(ReturnInput, raw);
   await deps.sql.begin(async (tx) => {
     const po = await lockPo(tx, poId);
     if (po.status === 'returned') return;
     if (po.status !== 'submitted') throw conflict('INVALID_STATE', '只有待确认的采购单可以退回');
+    await returnCurrent(tx, 'purchase_order', poId, { actor, timeZone: deps.config.timezone }, { ...fence, reason });
     await tx`UPDATE purchase_orders SET status = 'returned', returned_reason = ${reason}, updated_at = now() WHERE id = ${poId}`;
     await logApproval(tx, 'purchase_order', poId, 'return', actor.id, reason, po.revision);
   });
@@ -736,6 +755,7 @@ export async function cancelPo(deps: Deps, poId: number, raw: unknown, actor: Ac
     if (rc!.n > 0) throw conflict('PO_HAS_RECEIPTS', '这张采购单已有收货，不能撤回；请负责人确认后关闭');
     if (!can(actor, 'inventory.approve') && po.createdBy !== actor.id) throw forbidden('只能撤回自己创建的采购单');
     await tx`UPDATE purchase_orders SET status = 'cancelled', returned_reason = ${reason}, updated_at = now() WHERE id = ${poId}`;
+    await closeApproval(tx, 'purchase_order', poId, actor);
     await logApproval(tx, 'purchase_order', poId, 'cancel', actor.id, reason, po.revision);
   });
   return getPo(deps.sql, poId);
@@ -853,7 +873,7 @@ export function registerPurchasingRoutes(app: FastifyInstance, deps: Deps) {
     const { approveNow } = parse(z.object({ approveNow: z.boolean().default(false) }), req.body ?? {});
     return submitPo(deps, poId(req), req.actor, approveNow);
   });
-  app.post('/api/purchase-orders/:id/approve', { preHandler: guard('inventory.approve') }, async (req) => approvePo(deps, poId(req), req.actor));
+  app.post('/api/purchase-orders/:id/approve', { preHandler: guard('inventory.approve') }, async (req) => approvePo(deps, poId(req), req.actor, req.body ?? {}));
   app.post('/api/purchase-orders/:id/return', { preHandler: guard('inventory.approve') }, async (req) => returnPo(deps, poId(req), req.body, req.actor));
   app.post('/api/purchase-orders/:id/cancel', { preHandler: guard('purchase.manage') }, async (req) => cancelPo(deps, poId(req), req.body, req.actor));
   app.post('/api/purchase-orders/:id/close', { preHandler: guard('inventory.read') }, async (req) => {

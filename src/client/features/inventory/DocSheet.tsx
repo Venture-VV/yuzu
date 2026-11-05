@@ -8,6 +8,7 @@ import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { Dialog, Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
+import { ApprovalProgress, useApprovalGate } from '../approvals/ApprovalProgress';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, IconButton, Notice, Select, Spinner, InfoItem as Info } from '../../components/ui';
@@ -70,6 +71,9 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
   const operatePerm = doc.docType === 'supplier_return' ? 'supplierReturn.create' : 'inventory.operate';
   const canOperate = can(operatePerm);
   const canApprove = can('inventory.approve');
+  // 审批中心（v0.7.30）：报损、退供应商、期初、盘点同意的是当前这一级，带上看到的审批单与级别
+  const gate = useApprovalGate(doc.urgent ? null : doc.approval, 'inv_doc');
+  const finalLevel = !doc.approval || doc.approval.currentLevel === doc.approval.levels;
   // #21：库存冲销由仓库或财务成本岗，只限当月（v0.7.11）
   const canVoid = can('inventory.void');
   const isMine = doc.createdBy === session.staff.id;
@@ -333,12 +337,12 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
                       <Qty milli={l.countedMilli ?? 0} unit={l.inventoryUnit} className="font-bold" />
                     </Mini>
                     {l.qtyMilli !== 0 &&
-                      (doc.status === 'submitted' && canApprove ? (
+                      (doc.status === 'submitted' && canApprove && gate.canActHere && finalLevel ? (
                         <label className="ml-auto flex items-center gap-2">
                           <span className="font-semibold text-ink-3">确认原因</span>
                           <Select
                             fullWidth={false}
-                            value={reasons[l.id] ?? 'unknown'}
+                            value={reasons[l.id] ?? (l.diffReason && l.diffReason !== 'pending' ? l.diffReason : doc.warehouse?.kind === 'department' ? 'consumed' : 'unknown')}
                             onChange={(e) => setReasons((r) => ({ ...r, [l.id]: e.target.value as CountReason }))}
                             className="h-8 text-[12.5px]"
                             aria-label={`${l.materialName}差异原因`}
@@ -355,6 +359,7 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
                           {COUNT_REASON_LABELS[l.diffReason ?? 'pending']}
                         </Badge>
                       ))}
+                    {l.diffNote && <p className="w-full text-ink-2">差异说明：{l.diffNote}</p>}
                     {l.stale && <p className="w-full font-semibold text-clay">盘点后这项物料又有收发，需重新核对账面</p>}
                   </div>
                 )}
@@ -402,6 +407,8 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             </ul>
           </section>
         )}
+
+        <ApprovalProgress approval={doc.urgent ? null : doc.approval} />
 
         <section>
           <h3 className="mb-2 text-[13px] font-bold text-ink-2">经办记录</h3>
@@ -479,7 +486,8 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             到部门验收确认
           </Button>
         )}
-        {doc.status === 'submitted' && canApprove && !doc.urgent && (
+        {doc.status === 'submitted' && canApprove && !doc.urgent && !gate.canActHere && gate.waiting && <span className="text-[12.5px] text-ink-3">{gate.waiting}</span>}
+        {doc.status === 'submitted' && canApprove && !doc.urgent && gate.canActHere && (
           <>
             <Button variant="secondary" icon={<CornerUpLeft className="size-4" />} onClick={() => setDialog({ kind: 'return' })}>
               退回修改
@@ -492,12 +500,13 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
                 run(
                   'approve',
                   `/api/inventory/docs/${doc.id}/approve`,
-                  { countReasons: Object.fromEntries(diffLines.map((l) => [String(l.id), reasons[l.id] ?? 'unknown'])) },
-                  doc.docType === 'count' ? '盘点调整已确认' : '已确认生效',
+                  // 只带确认时改过的原因；没改的照提交时写的（没写的按默认：部门小仓「耗用」、总仓「不明差异」）
+                  { ...gate.fence, countReasons: Object.fromEntries(diffLines.filter((l) => reasons[l.id]).map((l) => [String(l.id), reasons[l.id]!])) },
+                  !finalLevel ? `已同意第 ${doc.approval!.currentLevel} 级` : doc.docType === 'count' ? '盘点调整已确认' : '已确认生效',
                 )
               }
             >
-              {doc.docType === 'count' ? '确认盘点调整' : '确认生效'}
+              {doc.approval && doc.approval.levels > 1 ? `同意（第 ${doc.approval.currentLevel}/${doc.approval.levels} 级）` : doc.docType === 'count' ? '确认盘点调整' : '确认生效'}
             </Button>
           </>
         )}
@@ -533,7 +542,7 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             void run('reject', `/api/inventory/docs/${doc.id}/supplier-answer`, { agreed: false, note: reason }, '已登记供应商不同意，退货单撤回');
             return;
           }
-          void run(kind, `/api/inventory/docs/${doc.id}/${kind}`, { reason }, kind === 'void' ? '已冲销' : kind === 'return' ? '已退回修改' : '已撤回');
+          void run(kind, `/api/inventory/docs/${doc.id}/${kind}`, kind === 'return' ? { reason, ...gate.fence } : { reason }, kind === 'void' ? '已冲销' : kind === 'return' ? '已退回修改' : '已撤回');
         }}
       />
       <AgreeDialog

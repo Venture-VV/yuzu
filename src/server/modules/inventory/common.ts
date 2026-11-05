@@ -5,7 +5,7 @@
 //   · 先按 id 升序锁定涉及的物料行（SELECT … FOR UPDATE），同一物料的收发严格串行；
 //   · 结存字段有 CHECK (>= 0) 兜底，任何情况下都不会出现负库存。
 
-import { CENTRAL_WAREHOUSE_ID, type ApprovalRules, type InventorySettings, type MoveType } from '@shared/inventory';
+import { CENTRAL_WAREHOUSE_ID, DEFAULT_COUNT_BIG_CENTS, DEFAULT_COUNT_BIG_PCT, type ApprovalRules, type InventorySettings, type MoveType } from '@shared/inventory';
 import { shiftDate } from '@shared/labels';
 import { formatQty } from '@shared/quantity';
 import { z } from 'zod';
@@ -56,7 +56,14 @@ export const DEFAULT_USAGE_WINDOW_DAYS = 28;
 /** 称重容差与盘点、对账提醒的规则（#14、#23，v0.7.13，可调）：存成一条设置 inventory_cycle_rules */
 export type CycleRules = Pick<
   InventorySettings,
-  'weighTolerancePct' | 'stocktakeDay' | 'stocktakeGraceDays' | 'monthlyReconDay' | 'monthlyReconGraceDays' | 'batchReconGraceDays'
+  | 'weighTolerancePct'
+  | 'stocktakeDay'
+  | 'stocktakeGraceDays'
+  | 'monthlyReconDay'
+  | 'monthlyReconGraceDays'
+  | 'batchReconGraceDays'
+  | 'countBigPct'
+  | 'countBigCents'
 >;
 export const DEFAULT_CYCLE_RULES: CycleRules = {
   weighTolerancePct: 10,
@@ -65,6 +72,9 @@ export const DEFAULT_CYCLE_RULES: CycleRules = {
   monthlyReconDay: 1,
   monthlyReconGraceDays: 5,
   batchReconGraceDays: 3,
+  // 盘点大差异（v0.7.30，A8）
+  countBigPct: DEFAULT_COUNT_BIG_PCT,
+  countBigCents: DEFAULT_COUNT_BIG_CENTS,
 };
 const CYCLE_RULE_KEYS = Object.keys(DEFAULT_CYCLE_RULES) as (keyof CycleRules)[];
 function pickCycleRules(raw: unknown): Partial<CycleRules> {

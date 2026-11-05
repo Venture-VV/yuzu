@@ -253,12 +253,20 @@ describe('台面日耗品（#14）', () => {
   it('提交后才改成台面日耗品的部门盘点单，生效时同样拒绝', async () => {
     const m = await material('CU04');
     await stockIn(m.id, 1);
-    // 部门盘点单先存草稿（账面 0），物料再改成台面日耗品
-    const draft = await ok(deptDoc(bath, { docType: 'count', action: 'save', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(2), expectedBookMilli: 0 }] }));
+    // 部门盘点单先存草稿（账面 0），物料再改成台面日耗品；账面是 0 的有差异算大差异（v0.7.30），写了原因、提交后要审批，生效（同意）时拒绝
+    const draft = await ok(deptDoc(bath, {
+      docType: 'count',
+      action: 'save',
+      warehouseId: bathWh,
+      lines: [{ materialId: m.id, countedMilli: q(2), expectedBookMilli: 0, diffReason: 'unrecorded', diffNote: '领料漏记' }],
+    }));
     expect((await updateMaterial(m.id, { counterUse: true })).status).toBe(200);
     const sub = await api(ctx.app, bath, 'POST', `/api/erp/dept-stock/docs/${draft.doc.id}/submit`, {});
-    expect(sub.status).toBe(409);
-    expect(sub.body.error.code).toBe('COUNTER_USE_NOT_ALLOWED');
+    expect(sub.status).toBe(200);
+    expect(sub.body.status).toBe('submitted');
+    const approve = await api(ctx.app, ctx.owner, 'POST', `/api/inventory/docs/${draft.doc.id}/approve`, {});
+    expect(approve.status).toBe(409);
+    expect(approve.body.error.code).toBe('COUNTER_USE_NOT_ALLOWED');
     expect(await deptStock(m.id)).toBe(0);
   });
 });

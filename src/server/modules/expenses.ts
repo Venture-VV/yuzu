@@ -55,10 +55,20 @@ import { nextDocNo, setTxTimeouts } from '../lib/tx';
 import { hashRequest } from '../lib/idempotency';
 import { saveRuleSetting } from '../lib/rule-settings';
 import { ChannelKey, ChannelNote, loadPurchaseRules, resolveChannel } from './inventory/purchase-rules';
+import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForApproval } from './approvals/engine';
 
 const id = z.number().int().positive();
 const yuan = (cents: number) => (cents < 0 ? '-' : '') + formatAmount(Math.abs(cents)).replace(/,/g, '');
 const ReasonInput = z.object({ reason: z.string().trim().min(2, '请填写原因（至少 2 个字）').max(200) });
+/** 审批（v0.7.30）：页面看到的审批单与级别（审批单已经变了、走到别的级别时拒绝），同意时的意见 */
+const ApprovalFence = z.object({
+  requestId: id.optional(),
+  level: z.number().int().min(1).max(3).optional(),
+  /** 审批中心的批量同意（记在审批记录上） */
+  batch: z.boolean().optional(),
+});
+const ApproveInput = ApprovalFence.extend({ comment: z.string().trim().max(200, '意见最多 200 个字').default('') });
+const ReturnInput = ReasonInput.extend(ApprovalFence.shape);
 const ACTIVE_CLAIM = ['submitted', 'returned', 'confirmed'] as const;
 const CREDIT_PO_MESSAGE = '这张采购单按挂账结算（收货已记应付），请在「应付货款」里付款核销，不能按采购单报销';
 
@@ -364,7 +374,7 @@ export async function getClaim(db: Db, claimId: number): Promise<ExpenseClaim> {
   const approvals = await db<ExpenseClaim['approvals']>`
     SELECT a.id, a.action, s.display_name AS actor_name, a.reason, a.created_at
     FROM approval_logs a JOIN staff s ON s.id = a.actor_id WHERE a.doc_kind = 'expense_claim' AND a.doc_id = ${claimId} ORDER BY a.id`;
-  return { ...summary, ...extra!, lines, approvals };
+  return { ...summary, ...extra!, lines, approvals, approval: await approvalBrief(db, 'expense_claim', claimId) };
 }
 
 // ───────────────────────── 按采购单报销 ─────────────────────────
@@ -688,7 +698,6 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
       if (poCh?.channel) ch = { channel: poCh.channel, channelLabel: poCh.channelLabel, channelNote: poCh.channelNote };
       else if (input.channel) ch = resolveChannel(await loadPurchaseRules(tx), input, null);
 
-      const confirmNow = !needsApproval || input.approveNow;
       const docNo = await nextDocNo(tx, 'expense_claim', 'BX', input.expenseDate);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO expense_claims (doc_no, expense_date, department_id, handler_id, purpose, pay_source, advance_id, invoice_type, invoice_label,
@@ -696,8 +705,7 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
                                     confirmed_by, confirmed_at, channel, channel_label, channel_note)
         VALUES (${docNo}, ${input.expenseDate}, ${input.departmentId}, ${input.handlerId}, ${input.purpose}, ${input.paySource}, ${input.advanceId},
                 ${inv.key}, ${inv.label}, ${input.taxRateBp}, ${input.invoiceNo}, ${input.purchaseOrderId}, ${total}, ${input.note}, ${needsApproval},
-                ${confirmNow ? 'confirmed' : 'submitted'}, ${input.clientKey}, ${actor.id},
-                ${confirmNow ? actor.id : null}, ${confirmNow ? tx`now()` : null}, ${ch.channel}, ${ch.channelLabel}, ${ch.channelNote})
+                'submitted', ${input.clientKey}, ${actor.id}, NULL, NULL, ${ch.channel}, ${ch.channelLabel}, ${ch.channelNote})
         RETURNING id`;
       const newId = row!.id;
       let lineNo = 0;
@@ -711,7 +719,16 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
       await tx`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (${input.clientKey}, 'expense_claim', ${requestHash}, ${newId}, ${actor.id})`;
       await logApproval(tx, 'expense_claim', newId, 'create', actor.id);
       await logApproval(tx, 'expense_claim', newId, 'submit', actor.id);
-      if (confirmNow) await logApproval(tx, 'expense_claim', newId, 'approve', actor.id, needsApproval ? '' : '未超过确认门槛，登记即确认');
+      // 不超过确认门槛的登记即确认；v0.7.30 起命中审批规则的按规则的审批链（没有规则命中与以前一样）
+      const r = await submitForApproval(tx, 'expense_claim', newId, { actor, timeZone: deps.config.timezone }, { fallback: needsApproval, approveNow: input.approveNow });
+      const confirmNow = r.outcome === 'effective';
+      if (confirmNow) {
+        await tx`UPDATE expense_claims SET status = 'confirmed', confirmed_by = ${actor.id}, confirmed_at = now(), needs_approval = ${!r.skipped} WHERE id = ${newId}`;
+        await logApproval(tx, 'expense_claim', newId, 'approve', actor.id, r.skipped ? '未超过确认门槛，登记即确认' : '');
+      } else if (!needsApproval) {
+        // 门槛以内、但命中了审批规则
+        await tx`UPDATE expense_claims SET needs_approval = true WHERE id = ${newId}`;
+      }
       await writeAudit(tx, { staffId: actor.id, action: 'expense_doc', targetType: 'expense_claim', targetId: newId, detail: { docNo, amountCents: total, status: confirmNow ? 'confirmed' : 'submitted' }, ip });
       return { id: newId, replayed: false };
     });
@@ -730,6 +747,7 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
 
 export async function actOnClaim(deps: Deps, claimId: number, action: 'approve' | 'return' | 'resubmit' | 'cancel' | 'void', raw: unknown, actor: Actor) {
   const reason = action === 'approve' || action === 'resubmit' ? '' : parse(ReasonInput, raw).reason;
+  const ctx = { actor, timeZone: deps.config.timezone };
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const [head] = await tx<{ advanceId: number | null }[]>`SELECT advance_id FROM expense_claims WHERE id = ${claimId}`;
@@ -739,15 +757,20 @@ export async function actOnClaim(deps: Deps, claimId: number, action: 'approve' 
       SELECT id, status, created_by, expense_date FROM expense_claims WHERE id = ${claimId} FOR UPDATE`;
     const mine = c!.createdBy === actor.id;
     switch (action) {
-      case 'approve':
+      case 'approve': {
         if (c!.status === 'confirmed') return;
         if (c!.status !== 'submitted') throw conflict('INVALID_STATE', '只有待确认的报销可以确认');
         if (advance && advance.status !== 'active') throw conflict('ADVANCE_VOIDED', `打款 ${advance.docNo} 已冲销，请退回让登记人改用别的打款`);
+        // v0.7.30：同意的是当前这一级，最后一级同意后确认（默认规则下一次就确认）
+        const { comment, ...fence } = parse(ApproveInput, raw ?? {});
+        if ((await approveCurrent(tx, 'expense_claim', claimId, ctx, { ...fence, comment })) !== 'final') return;
         await tx`UPDATE expense_claims SET status = 'confirmed', confirmed_by = ${actor.id}, confirmed_at = now(), returned_reason = NULL, updated_at = now() WHERE id = ${claimId}`;
-        return logApproval(tx, 'expense_claim', claimId, 'approve', actor.id);
+        return logApproval(tx, 'expense_claim', claimId, 'approve', actor.id, comment);
+      }
       case 'return':
         if (c!.status === 'returned') return;
         if (c!.status !== 'submitted') throw conflict('INVALID_STATE', '只有待确认的报销可以退回');
+        await returnCurrent(tx, 'expense_claim', claimId, ctx, { ...parse(ReturnInput, raw), reason });
         await tx`UPDATE expense_claims SET status = 'returned', returned_reason = ${reason}, updated_at = now() WHERE id = ${claimId}`;
         return logApproval(tx, 'expense_claim', claimId, 'return', actor.id, reason);
       case 'resubmit':
@@ -756,12 +779,15 @@ export async function actOnClaim(deps: Deps, claimId: number, action: 'approve' 
         if (!mine && !can(actor, 'expense.manage')) throw forbidden('只能重新提交自己登记的报销');
         if (advance && advance.status !== 'active') throw conflict('ADVANCE_VOIDED', `打款 ${advance.docNo} 已冲销，请撤回后重新登记`);
         await tx`UPDATE expense_claims SET status = 'submitted', updated_at = now() WHERE id = ${claimId}`;
+        // 退回后再提交按当时的规则从第一级重新走；没有规则命中按默认规则（与以前一样，退回的再提交都要确认）
+        await submitForApproval(tx, 'expense_claim', claimId, ctx, { fallback: true });
         return logApproval(tx, 'expense_claim', claimId, 'submit', actor.id);
       case 'cancel':
         if (c!.status === 'cancelled') return;
         if (c!.status !== 'submitted' && c!.status !== 'returned') throw conflict('INVALID_STATE', '已确认的报销不能撤回，只能由财务冲销');
         if (!mine && !can(actor, 'expense.approve')) throw forbidden('只能撤回自己登记的报销');
         await tx`UPDATE expense_claims SET status = 'cancelled', returned_reason = ${reason}, updated_at = now() WHERE id = ${claimId}`;
+        await closeApproval(tx, 'expense_claim', claimId, actor);
         return logApproval(tx, 'expense_claim', claimId, 'cancel', actor.id, reason);
       case 'void':
         if (c!.status === 'voided') return;

@@ -571,7 +571,8 @@ export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
     if (!row) throw notFound('没有找到这次提交');
     return getRequest(sql, req.actor, row.id);
   });
-  app.get('/api/erp/requests/checks', { preHandler: anyRequest }, async () => readSnapshot(sql, requestChecks));
+  // 自检看的是全店的需求单（含别的部门的单号与产品名）：只给审核的人（v0.7.30 数据隔离，A9）
+  app.get('/api/erp/requests/checks', { preHandler: guardAny('request.review') }, async () => readSnapshot(sql, requestChecks));
   // 导出需求单（v0.7.9）：与报销、台账同一个导出权限（店主、对账付款、成本核算、负责人）
   app.get('/api/erp/requests/export', { preHandler: guard('expense.export') }, async (req, reply) => {
     const f = parse(ExportQuery, req.query);
@@ -601,7 +602,20 @@ export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
     return img;
   });
   app.get('/api/erp/images/:id', { preHandler: guardAny('request.create', 'request.review', 'inventory.read', 'expense.read') }, async (req, reply) => {
-    const [img] = await sql<{ mime: string; data: Buffer }[]>`SELECT mime, data FROM erp_images WHERE id = ${docId(req)}`;
+    const imageId = docId(req);
+    // 数据隔离（v0.7.30，A9）：只有「部门申购」的账号只能看自己上传的、本部门与自己提的需求单里的图片（编号是连续的，不能靠猜）
+    if (!can(req.actor, 'request.review') && !can(req.actor, 'inventory.read') && !can(req.actor, 'expense.read')) {
+      const me = await myContext(sql, req.actor);
+      const [mine] = await sql<{ ok: boolean }[]>`
+        SELECT true AS ok FROM erp_images i
+        WHERE i.id = ${imageId}
+          AND (i.created_by = ${req.actor.id} OR EXISTS (
+            SELECT 1 FROM purchase_request_line_images li JOIN purchase_request_lines l ON l.id = li.request_line_id
+            JOIN purchase_requests r ON r.id = l.request_id
+            WHERE li.image_id = i.id AND (r.requester_id = ${req.actor.id} OR r.department_id = ${me.departmentId ?? 0})))`;
+      if (!mine) throw notFound('图片不存在');
+    }
+    const [img] = await sql<{ mime: string; data: Buffer }[]>`SELECT mime, data FROM erp_images WHERE id = ${imageId}`;
     if (!img) throw notFound('图片不存在');
     reply.header('content-type', img.mime).header('cache-control', 'private, max-age=31536000, immutable');
     return reply.send(img.data);

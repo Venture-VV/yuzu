@@ -31,6 +31,7 @@ import { loadInventorySettings, logApproval, nextDocNo, overThreshold, setTxTime
 import { erpOpAbandoned } from '../erp-ops';
 import { actOnOpening, confirmOpening, lockSupplier } from './payables';
 import { hashRequest } from '../../lib/idempotency';
+import { submitForApproval } from '../approvals/engine';
 
 
 /** 一份文件最多多少行 */
@@ -251,7 +252,7 @@ export async function applyImport(deps: Deps, raw: unknown, actor: Actor, ip?: s
           VALUES (${s.code}, ${s.name}, ${s.contact}, ${s.phone}, ${s.note}, ${s.settlement}, ${importId})`;
       }
     } else {
-      await importOpenings(tx, p.openings, importId, actor);
+      await importOpenings(tx, p.openings, importId, actor, deps.config.timezone);
     }
     await writeAudit(tx, {
       staffId: actor.id,
@@ -266,8 +267,8 @@ export async function applyImport(deps: Deps, raw: unknown, actor: Actor, ip?: s
   return { import: await getImport(deps.sql, r.id), replayed: r.replayed };
 }
 
-/** 期初未付：逐笔登记（同逐条登记的规则），免确认门槛以内的直接确认；按供应商 id 升序锁供应商 */
-async function importOpenings(tx: Tx, rows: OpeningRow[], importId: number, actor: Actor) {
+/** 期初未付：逐笔登记（同逐条登记的规则），免确认门槛以内的直接确认（v0.7.30 起命中审批规则的按规则）；按供应商 id 升序锁供应商 */
+async function importOpenings(tx: Tx, rows: OpeningRow[], importId: number, actor: Actor, timeZone: string) {
   const settings = await loadInventorySettings(tx);
   for (const supplierId of [...new Set(rows.map((r) => r.supplierId!))].sort((a, b) => a - b)) await lockSupplier(tx, supplierId);
   for (const o of rows) {
@@ -278,7 +279,9 @@ async function importOpenings(tx: Tx, rows: OpeningRow[], importId: number, acto
       RETURNING id`;
     await logApproval(tx, 'opening_payable', row!.id, 'create', actor.id);
     await logApproval(tx, 'opening_payable', row!.id, 'submit', actor.id);
-    if (!(settings.approvalRules.opening && overThreshold(settings, o.amountCents))) {
+    const fallback = settings.approvalRules.opening && overThreshold(settings, o.amountCents);
+    const r = await submitForApproval(tx, 'opening_payable', row!.id, { actor, timeZone }, { fallback });
+    if (r.outcome === 'effective') {
       await confirmOpening(tx, { id: row!.id, supplierId: o.supplierId!, amountCents: o.amountCents, asOfDate: o.asOfDate }, actor);
     }
   }

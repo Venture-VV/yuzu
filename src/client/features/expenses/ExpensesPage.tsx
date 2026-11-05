@@ -21,6 +21,7 @@ import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
 import { Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
+import { ApprovalProgress, useApprovalGate } from '../approvals/ApprovalProgress';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Input, Notice, Select, Skeleton } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
@@ -202,13 +203,16 @@ function ClaimSheet({ id, onClose }: { id: number | null; onClose: () => void })
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const c = claim.data;
+  // 审批中心（v0.7.30）：同意的是当前这一级，带上看到的审批单与级别
+  const gate = useApprovalGate(c?.approval, 'expense_claim');
 
   const act = async (action: 'approve' | 'return' | 'resubmit' | 'cancel' | 'void', reason?: string) => {
     if (!c) return;
     setBusy(true);
     setError(null);
     try {
-      await api.post<ExpenseClaim>(`/api/erp/expenses/${c.id}/${action}`, reason ? { reason } : {});
+      const fence = action === 'approve' || action === 'return' ? gate.fence : {};
+      await api.post<ExpenseClaim>(`/api/erp/expenses/${c.id}/${action}`, reason ? { reason, ...fence } : fence);
       await invalidate();
       setReasonFor(null);
       toast({ tone: 'success', title: { approve: '已确认', return: '已退回', resubmit: '已重新提交', cancel: '已撤回', void: '已冲销' }[action] });
@@ -306,19 +310,21 @@ function ClaimSheet({ id, onClose }: { id: number | null; onClose: () => void })
                 </li>
               ))}
             </ol>
+            <ApprovalProgress approval={c.approval} />
             {error && <Notice tone="error" title={error} />}
           </>
         )}
       </div>
       {c && (
         <div className="flex flex-wrap justify-end gap-2 border-t border-line px-5 py-3">
-          {c.status === 'submitted' && can('expense.approve') && (
+          {c.status === 'submitted' && can('expense.approve') && !gate.canActHere && gate.waiting && <span className="self-center text-[12.5px] text-ink-3">{gate.waiting}</span>}
+          {c.status === 'submitted' && can('expense.approve') && gate.canActHere && (
             <>
               <Button variant="secondary" disabled={busy} onClick={() => setReasonFor('return')}>
                 退回
               </Button>
               <Button variant="primary" loading={busy} onClick={() => void act('approve')} data-testid="claim-approve">
-                确认
+                {c.approval && c.approval.levels > 1 ? `同意（第 ${c.approval.currentLevel}/${c.approval.levels} 级）` : '确认'}
               </Button>
             </>
           )}

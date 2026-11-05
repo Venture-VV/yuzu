@@ -4,7 +4,8 @@
 import { useEffect, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Boxes, ClipboardList, HandCoins, Inbox, LayoutGrid, LineChart, Package, ReceiptText, ShoppingCart, SlidersHorizontal, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, Boxes, ClipboardCheck, ClipboardList, HandCoins, LayoutGrid, LineChart, Package, ReceiptText, ShoppingCart, SlidersHorizontal, type LucideIcon } from 'lucide-react';
+import type { ApprovalCounts } from '@shared/approvals';
 import { ERP_MODULES, erpModuleOfPage, type ErpModuleKey } from '@shared/erp';
 import { versionText } from '@shared/instance';
 import { DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
@@ -22,7 +23,7 @@ const ICONS: Record<ErpModuleKey, LucideIcon> = {
   requests: ClipboardList,
   deptStock: Package,
   payables: HandCoins,
-  approvals: Inbox,
+  approvals: ClipboardCheck,
   expenses: ReceiptText,
   revenue: LineChart,
 };
@@ -34,6 +35,8 @@ interface Item {
   icon: LucideIcon;
   end?: boolean;
   badge?: number;
+  /** 数字标红（审批中心有超时的） */
+  alert?: boolean;
 }
 
 export function ErpShell() {
@@ -47,15 +50,23 @@ export function ErpShell() {
       document.title = session.storeName;
     };
   }, [session.storeName]);
+  // 审批中心（v0.7.30）：待我审批的张数加急采待补单（负责人）；有超时的数字标红
   const todo = useQuery({
-    queryKey: ['inv', 'todo-count'],
-    queryFn: () => api.get<{ count: number }>('/api/inventory/todo-count'),
-    enabled: access.modules.includes('approvals') && can('inventory.approve'),
+    queryKey: ['approvals', 'count'],
+    queryFn: () => api.get<ApprovalCounts>('/api/approvals/count'),
+    enabled: access.modules.includes('approvals') && (can('approval.act') || can('inventory.approve') || can('expense.approve')),
     refetchInterval: 60_000,
   });
   if (!access.canEnter) return <Navigate to="/" replace />;
 
-  const moduleItem = (k: ErpModuleKey): Item => ({ key: k, to: ERP_MODULES[k].path, label: ERP_MODULES[k].label, icon: ICONS[k], badge: k === 'approvals' ? todo.data?.count : undefined });
+  const moduleItem = (k: ErpModuleKey): Item => ({
+    key: k,
+    to: ERP_MODULES[k].path,
+    label: ERP_MODULES[k].label,
+    icon: ICONS[k],
+    badge: k === 'approvals' && todo.data ? todo.data.mine + todo.data.backfill : undefined,
+    alert: k === 'approvals' && !!todo.data?.overdue,
+  });
   const groups: { title: string; items: Item[] }[] = [
     { title: '概览', items: [{ key: 'home', to: '/erp', label: 'ERP 首页', icon: LayoutGrid, end: true }] },
     { title: '供应链', items: access.modules.filter((k) => ERP_MODULES[k].group === '供应链').map(moduleItem) },
@@ -85,7 +96,11 @@ export function ErpShell() {
         <Icon className="size-4 shrink-0" />
         <span className="min-w-0 flex-1">{it.label}</span>
         {!!it.badge && (
-          <span className="num flex h-5 min-w-5 items-center justify-center rounded-full bg-yuzu px-1.5 text-[11px] font-bold text-ink" aria-hidden>
+          <span
+            className={cn('num flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold', it.alert ? 'bg-clay text-paper' : 'bg-yuzu text-ink')}
+            aria-hidden
+            data-testid={`erp-badge-${it.key}`}
+          >
             {it.badge > 99 ? '99+' : it.badge}
           </span>
         )}

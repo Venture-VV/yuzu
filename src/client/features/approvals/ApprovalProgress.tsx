@@ -1,0 +1,89 @@
+// 单据详情里的「审批进度」（v0.7.30）：审批链每一级、谁同意或退回、意见；原来的「确认」「退回」按钮带上看到的审批单与级别。
+
+import { Link } from 'react-router';
+import { ArrowRight } from 'lucide-react';
+import { APPROVAL_STATUS_LABELS, inStep, type ApprovalBrief, type ApprovalDocKind } from '@shared/approvals';
+import { useCan, useSession } from '../../lib/session';
+import { cn, formatDateTime } from '../../lib/utils';
+import { Badge } from '../../components/ui';
+
+/** 等了多久：12 分钟、3 小时、2 天 */
+export function waited(iso: string): string {
+  const min = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60_000));
+  if (min < 60) return `${min} 分钟`;
+  const hr = Math.floor(min / 60);
+  if (hr < 48) return `${hr} 小时`;
+  return `${Math.floor(hr / 24)} 天`;
+}
+
+/**
+ * 原来的确认、退回按钮用：在审的审批单当前这一级我能不能审（本人；代理的去审批中心审），
+ * 以及要带上的审批单与级别（审批单已经变了、走到别的级别时服务端拒绝）。
+ */
+export function useApprovalGate(approval: ApprovalBrief | null | undefined, kind: ApprovalDocKind) {
+  const session = useSession();
+  if (!approval || approval.status !== 'pending') return { fence: {}, canActHere: true, waiting: null as string | null };
+  const step = approval.steps[approval.currentLevel - 1]!;
+  const me = { id: session.staff.id, role: session.staff.role, duties: session.staff.duties, permissions: session.permissions };
+  const selfBlocked = !approval.allowSelf && approval.submittedBy === me.id;
+  const done = approval.approvedIds.includes(me.id) && me.role !== 'owner';
+  const canActHere = !selfBlocked && !done && inStep(step, me, kind);
+  const levels = approval.levels > 1 ? `第 ${approval.currentLevel}/${approval.levels} 级 · ` : '';
+  return {
+    fence: { requestId: approval.requestId, level: approval.currentLevel },
+    canActHere,
+    waiting: canActHere ? null : `${levels}等「${approval.stepLabels[approval.currentLevel - 1]}」审批${selfBlocked ? '（提交人不能审自己的单）' : ''}`,
+  };
+}
+
+export function ApprovalProgress({ approval, className }: { approval: ApprovalBrief | null | undefined; className?: string }) {
+  const can = useCan();
+  const session = useSession();
+  if (!approval) return null;
+  const centerOn = session.erpModules.includes('approvals') && (can('approval.act') || can('inventory.approve') || can('expense.approve'));
+  return (
+    <section className={className} data-testid="approval-progress">
+      <div className="mb-2 flex items-center gap-2">
+        <h3 className="text-[13px] font-bold text-ink-2">审批进度</h3>
+        <Badge tone={approval.status === 'approved' ? 'pine' : approval.status === 'pending' ? (approval.overdue ? 'clay' : 'yuzu') : 'neutral'}>
+          {approval.status === 'pending' && approval.overdue ? '超时' : APPROVAL_STATUS_LABELS[approval.status]}
+        </Badge>
+        <span className="text-[12px] text-ink-3">{approval.ruleId ? '按审批规则' : '默认规则'}</span>
+        {centerOn && approval.status === 'pending' && (
+          <Link to={`/approvals?open=${approval.requestId}`} className="ml-auto flex items-center gap-0.5 text-[12.5px] font-semibold text-lake hover:underline">
+            审批中心 <ArrowRight className="size-3.5" />
+          </Link>
+        )}
+      </div>
+      <ol className="space-y-1.5">
+        {approval.stepLabels.map((label, i) => {
+          const level = i + 1;
+          const acts = approval.actions.filter((a) => a.level === level);
+          const current = approval.status === 'pending' && level === approval.currentLevel;
+          const done = approval.status === 'approved' || level < approval.currentLevel;
+          const returned = acts.some((a) => a.action === 'return');
+          return (
+            <li key={level} className={cn('rounded-md border px-3 py-2 text-[12.5px]', current ? 'border-yuzu-deep/40 bg-yuzu-tint' : 'border-line bg-card')} data-testid={`approval-level-${level}`}>
+              <div className="flex items-center gap-2">
+                <span className="num text-ink-3">第 {level} 级</span>
+                <span className="font-bold text-ink">{label}</span>
+                <span className="ml-auto text-[12px] font-semibold">
+                  {returned ? <span className="text-clay">已退回</span> : done ? <span className="text-pine">已同意</span> : current ? <span className="text-yuzu-deep">审批中 · 等了 {waited(approval.levelStartedAt)}</span> : <span className="text-ink-4">未到</span>}
+                </span>
+              </div>
+              {acts.map((a) => (
+                <p key={a.id} className="mt-1 text-ink-2">
+                  <span className={a.action === 'return' ? 'font-semibold text-clay' : 'font-semibold text-pine'}>{a.action === 'return' ? '退回' : '同意'}</span>
+                  <span> · {a.actorName}{a.onBehalfOfName ? `（代 ${a.onBehalfOfName}）` : ''}</span>
+                  {a.batch && <span className="text-ink-3"> · 批量</span>}
+                  <span className="num text-ink-3"> · {formatDateTime(a.createdAt)}</span>
+                  {a.comment && <span className="block text-ink">{a.comment}</span>}
+                </p>
+              ))}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}

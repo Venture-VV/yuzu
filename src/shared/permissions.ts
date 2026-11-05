@@ -19,6 +19,7 @@
 // v0.7.24 会员体系 v2 第二期：新增「维护会员权益」（导入本店权益清单、修改、发布、暂缓）与「登记权益使用」（docs/BENEFITS.md），默认值待确认。
 // 2026-11-03 微信小程序（小程序线）新增「维护小程序内容」「解绑会员的微信」（MP7，docs/MINIPROGRAM.md 第 5 节）；
 // 店主 11-03 已定：维护小程序内容只给店主、店总（客户经理不给）。
+// v0.7.30 审批中心：新增「审批中心：审批」「审批中心：维护审批规则」（docs/APPROVALS.md，默认值待确认）。
 
 export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice', 'other_store'] as const;
 export type Role = (typeof ROLES)[number];
@@ -175,6 +176,14 @@ export const PERMISSIONS = {
   'request.create': { roles: ['owner'], duties: ['request'] },
   /** 审核需求单、转采购单（看全部部门的需求单） */
   'request.review': { roles: ['owner'], duties: ['purchase', 'approve'] },
+  // ── 审批中心（v0.7.30，docs/APPROVALS.md，默认值待确认）──
+  /**
+   * 用审批中心审批：待我审批、批量同意、设自己的代理人。能不能审某一张单还要看审批规则（岗位组或指定的人）；
+   * 默认店主、店总，负责人（负责人确认）与财务（对账付款、成本核算）职责
+   */
+  'approval.act': { roles: ['owner', 'store_manager'], duties: ['approve', 'payable', 'cost'] },
+  /** 维护审批规则（单据类型 × 金额 × 部门 → 审批链），给别人设代理人（默认店主） */
+  'approval.rules': { roles: ['owner'] },
   // ── 管理 ──
   // ── 当场授权（主管在弹窗里输入自己的账号密码确认）──
   /** 授权超过单笔上限的充值 / 消费 */
@@ -369,6 +378,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'expense.export': '导出报销明细与每日平账',
   'request.create': '提部门采购需求单（只限本部门）',
   'request.review': '审核需求单、转采购单',
+  'approval.act': '审批中心：审批（按审批规则）、批量同意、设自己的代理人',
+  'approval.rules': '审批中心：维护审批规则、给别人设代理人',
   'auth.overLimit': '当场授权超过单笔上限的充值 / 消费',
   'auth.memberRefund': '当场授权退储值',
   'auth.memberPhone': '当场授权改会员手机号',
@@ -428,6 +439,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
       'inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'supplierReturn.create', 'supplierReturn.answer', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.void', 'inventory.export',
       'deptStock.operate', 'deptStock.audit',
       'expense.read', 'expense.manage', 'petty.manage', 'expense.approve', 'finance.void', 'expense.export', 'request.create', 'request.review', 'erp.revenue',
+      'approval.act', 'approval.rules',
     ],
   },
   { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount', 'auth.memberRefund', 'auth.memberPhone'] },

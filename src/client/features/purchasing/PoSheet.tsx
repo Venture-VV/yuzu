@@ -12,6 +12,7 @@ import { ImageThumbs } from '../../components/Images';
 import { Money } from '../../components/Money';
 import { Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
+import { ApprovalProgress, useApprovalGate } from '../approvals/ApprovalProgress';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, IconButton, Notice, Spinner, InfoItem as Info } from '../../components/ui';
 import { Qty, SimRule } from '../inventory/parts';
@@ -61,6 +62,8 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
   const [dialog, setDialog] = useState<Pending>(null);
   const canManage = can('purchase.manage');
   const canApprove = can('inventory.approve');
+  // 审批中心（v0.7.30）：同意的是当前这一级，带上看到的审批单与级别；这一级不归我审时只显示在等谁
+  const gate = useApprovalGate(po.approval, 'purchase_order');
   const editable = (po.status === 'draft' || po.status === 'returned') && canManage && !po.backfill;
 
   const run = async (key: string, path: string, body: unknown, success: string) => {
@@ -304,6 +307,8 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
           </section>
         )}
 
+        <ApprovalProgress approval={po.approval} />
+
         <section>
           <h3 className="mb-2 text-[13px] font-bold text-ink-2">经办记录</h3>
           <ol className="space-y-2 border-l-2 border-line pl-4">
@@ -352,13 +357,19 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
             </Button>
           </>
         )}
-        {po.status === 'submitted' && canApprove && (
+        {po.status === 'submitted' && canApprove && !gate.canActHere && gate.waiting && <span className="text-[12.5px] text-ink-3">{gate.waiting}</span>}
+        {po.status === 'submitted' && canApprove && gate.canActHere && (
           <>
             <Button variant="secondary" icon={<CornerUpLeft className="size-4" />} onClick={() => setDialog('return')}>
               退回修改
             </Button>
-            <Button variant="primary" loading={busy === 'approve'} icon={<CircleCheck className="size-4" />} onClick={() => run('approve', 'approve', {}, '采购单已确认')}>
-              {po.backfill ? '确认补单' : '确认采购'}
+            <Button
+              variant="primary"
+              loading={busy === 'approve'}
+              icon={<CircleCheck className="size-4" />}
+              onClick={() => run('approve', 'approve', gate.fence, po.approval && po.approval.levels > po.approval.currentLevel ? `已同意第 ${po.approval.currentLevel} 级` : '采购单已确认')}
+            >
+              {po.approval && po.approval.levels > 1 ? `同意（第 ${po.approval.currentLevel}/${po.approval.levels} 级）` : po.backfill ? '确认补单' : '确认采购'}
             </Button>
           </>
         )}
@@ -378,7 +389,7 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
         label={dialog === 'return' ? '需要修改什么' : '原因'}
         confirmLabel={dialog === 'close' ? '确认关闭' : dialog === 'return' ? '退回修改' : '确认撤回'}
         onClose={() => setDialog(null)}
-        onConfirm={(reason) => void run(dialog!, dialog!, { reason }, dialog === 'close' ? '采购单已关闭' : dialog === 'return' ? '已退回修改' : '已撤回')}
+        onConfirm={(reason) => void run(dialog!, dialog!, dialog === 'return' ? { reason, ...gate.fence } : { reason }, dialog === 'close' ? '采购单已关闭' : dialog === 'return' ? '已退回修改' : '已撤回')}
       />
     </>
   );

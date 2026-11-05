@@ -56,6 +56,7 @@ const LegacyPage = lazyPage(() => import('./features/legacy/LegacyPage').then((m
 const DocFormPage = lazyPage(() => import('./features/inventory/DocFormPage').then((m) => m.DocFormPage));
 const InventoryPage = lazyPage(() => import('./features/inventory/InventoryPage').then((m) => m.InventoryPage));
 const TodoPage = lazyPage(() => import('./features/inventory/TodoPage').then((m) => m.TodoPage));
+const ApprovalsPage = lazyPage(() => import('./features/approvals/ApprovalsPage').then((m) => m.ApprovalsPage));
 const PurchasingPage = lazyPage(() => import('./features/purchasing/PurchasingPage').then((m) => m.PurchasingPage));
 const PoFormPage = lazyPage(() => import('./features/purchasing/PoFormPage').then((m) => m.PoFormPage));
 const OrderedPage = lazyPage(() => import('./features/purchasing/OrderedPage').then((m) => m.OrderedPage));
@@ -214,6 +215,7 @@ const router = createBrowserRouter([
       { path: 'inventory/docs/:id/edit', element: <DocFormPage /> },
       { path: 'inventory/:tab?', element: <InventoryPage /> },
       { path: 'todo', element: <TodoPage /> },
+      { path: 'approvals', element: <ApprovalsPage /> },
       { path: 'purchasing', element: <PurchasingPage /> },
       { path: 'purchasing/new', element: <PoFormPage mode="new" /> },
       { path: 'purchasing/ordered', element: <OrderedPage /> },

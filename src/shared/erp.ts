@@ -87,13 +87,15 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     requires: ['inventory'],
   },
   approvals: {
-    label: '审批待办',
+    label: '审批中心',
     group: '供应链',
-    description: '待办汇总：负责人要确认的采购、报损、盘点调整、退货、付款、期初集中在一页。关掉只是不显示这一页，各单据里的确认照常',
-    path: '/todo',
-    pages: ['/todo'],
-    apis: [],
-    perms: ['inventory.approve'],
+    description:
+      '审批规则（单据类型 × 金额 × 部门 → 一到三级审批链）、待我审批、批量同意、超时提醒、代理人，手机上也能审；采购、报损、盘点差异、退货、付款、期初、报销都走这里（v0.7.30）。' +
+      '旧的「审批待办」页照常在。关掉只是不显示这两页，各单据里的确认照常走审批规则',
+    path: '/approvals',
+    pages: ['/approvals', '/todo'],
+    apis: ['/api/approvals'],
+    perms: ['approval.act', 'inventory.approve', 'expense.approve'],
     defaultEnabled: true,
     requires: ['inventory'],
   },

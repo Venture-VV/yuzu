@@ -1,5 +1,6 @@
 // 采购单、供应商货款与付款：前后端共用的类型与中文名称。金额为分，数量为 milli。
 
+import type { ApprovalBrief } from './approvals';
 import type { ApprovalLog, DocRef, Ref } from './inventory';
 
 export const PO_STATUSES = ['draft', 'submitted', 'returned', 'approved', 'cancelled', 'closed'] as const;
@@ -116,6 +117,8 @@ export interface PurchaseOrder {
   receipts: (DocRef & { docDate: string; amountCents: number })[];
   revisions: PoRevision[];
   approvals: ApprovalLog[];
+  /** 审批中心（v0.7.30）：在审的审批单，没有在审的取最近一张；从没走过审批中心的为空 */
+  approval: ApprovalBrief | null;
   /** 报销情况（v0.7.29）：现付的采购单在费用报销里报，这里列报在哪几张、还有几行没报 */
   reimbursement: import('./expenses').PoReimbursement;
 }
@@ -219,6 +222,8 @@ export interface PaymentDoc {
   prepayRefundedCents: number;
   prepayAvailableCents: number;
   approvals: ApprovalLog[];
+  /** 审批中心（v0.7.30）：在审的审批单，没有在审的取最近一张；从没走过审批中心的为空 */
+  approval: ApprovalBrief | null;
 }
 
 export interface OpeningPayableDoc {
@@ -246,6 +251,8 @@ export interface OpeningPayableDoc {
   /** 批量导入的（v0.7.12） */
   importId: number | null;
   approvals: ApprovalLog[];
+  /** 审批中心（v0.7.30）：在审的审批单，没有在审的取最近一张；从没走过审批中心的为空 */
+  approval: ApprovalBrief | null;
 }
 
 /** 供应商余额：期初未付 + 已确认收货货款 − 已确认退货扣款 − 净付款 */
