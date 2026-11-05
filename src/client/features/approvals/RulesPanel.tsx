@@ -18,7 +18,7 @@ import {
   type ApprovalRuleView,
   type ApprovalStep,
 } from '@shared/approvals';
-import { formatAmount } from '@shared/money';
+import { formatAmount, parseYuan } from '@shared/money';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
@@ -125,13 +125,12 @@ type StepDraft = { kind: 'group'; group: ApprovalGroup } | { kind: 'staff'; staf
 
 const toDraft = (s: ApprovalStep): StepDraft => ('group' in s ? { kind: 'group', group: s.group } : { kind: 'staff', staffIds: s.staffIds, mode: s.mode });
 const fromDraft = (s: StepDraft): ApprovalStep => (s.kind === 'group' ? { group: s.group, mode: 'any' } : { staffIds: s.staffIds, mode: s.mode });
-const yuanInput = (cents: number | null) => (cents === null ? '' : String(cents / 100));
-const centsOf = (text: string): number | null => {
-  const t = text.trim();
-  if (!t) return null;
-  const n = Number(t);
-  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : NaN;
-};
+const yuanInput = (cents: number | null) => (cents === null ? '' : cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2));
+/**
+ * 元 → 分：用整数分的 parseYuan（金额不用浮点数算，Codex 自动审查 d04d05d：原来 1.005 会被悄悄算成 100 分、5000.005 算成 500001 分，
+ * 改了规则命中的边界）。空着是 null；填了但格式不对（不是数字、小数超过两位）是 NaN，保存时拒绝，不替店主四舍五入
+ */
+const centsOf = (text: string): number | null => (text.trim() ? (parseYuan(text) ?? NaN) : null);
 
 function RuleDialog({ rule, open, onClose }: { rule: ApprovalRuleView | null; open: boolean; onClose: () => void }) {
   const departments = useDepartments(false, open);
@@ -164,7 +163,7 @@ function RuleDialog({ rule, open, onClose }: { rule: ApprovalRuleView | null; op
   const save = async () => {
     const minCents = centsOf(min) ?? 0;
     const maxCents = centsOf(max);
-    if (Number.isNaN(minCents) || Number.isNaN(maxCents)) return setError('金额格式不对');
+    if (Number.isNaN(minCents) || Number.isNaN(maxCents)) return setError('金额格式不对：只能填数字，最多两位小数');
     if (maxCents !== null && maxCents <= minCents) return setError('金额上限要大于下限（上限不含）');
     if (steps.some((s) => s.kind === 'staff' && s.staffIds.length === 0)) return setError('指定的人至少选一位');
     const body = { docType, minCents, maxCents, departmentId: departmentId ? Number(departmentId) : null, steps: steps.map(fromDraft), allowSelf, note: note.trim() };
