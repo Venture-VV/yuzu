@@ -12,7 +12,7 @@ import {
   type ExpenseClaim,
 } from '@shared/expenses';
 import { formatQty } from '@shared/quantity';
-import { channelText } from '@shared/purchasing';
+import { channelText, RECEIVING_LABELS } from '@shared/purchasing';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
@@ -25,7 +25,7 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Input, Notice, Select, Skeleton } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
 import { useDepartments } from '../inventory/queries';
-import { monthRange, search, useClaim, useClaims, useHandlers, useInvalidateExpenses } from './queries';
+import { monthRange, search, useClaim, useClaims, useHandlers, useInvalidateExpenses, useToClaim } from './queries';
 
 const STATUS_TONE: Record<ClaimStatus, 'pine' | 'yuzu' | 'neutral' | 'clay'> = {
   submitted: 'yuzu',
@@ -95,6 +95,7 @@ export function ExpensesPage() {
     >
       <div className="space-y-4" data-testid="expenses-page">
         <ErpPendingPanel types={['expense_claim']} onFound={(_, ref) => setParams({ claim: String(ref.refId) }, { replace: true })} />
+        <ToClaimCard />
         <Card className="flex flex-wrap items-end gap-3 p-4">
           <label className="flex flex-col gap-1 text-[12.5px] font-semibold text-ink-3">
             从
@@ -349,5 +350,67 @@ function ClaimSheet({ id, onClose }: { id: number | null; onClose: () => void })
         onConfirm={(reason) => reasonFor && void act(reasonFor, reason)}
       />
     </Sheet>
+  );
+}
+
+/** 待报销（v0.7.29 ERP 采购五项②）：现付、已确认或已关闭、还有没报销的行的采购单，最早的在上面；点「转报销」打开带好的登记页 */
+function ToClaimCard() {
+  const can = useCan();
+  const list = useToClaim();
+  const [all, setAll] = useState(false);
+  const rows = list.data ?? [];
+  if (rows.length === 0) return null;
+  const shown = all ? rows : rows.slice(0, 5);
+  const total = rows.reduce((t, r) => t + r.openCents, 0);
+  return (
+    <Card className="overflow-hidden" data-testid="to-claim">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
+        <ReceiptText className="size-4 text-yuzu-deep" />
+        <h2 className="text-[14px] font-bold">待报销的现付采购单</h2>
+        <Badge tone="yuzu">{rows.length} 张</Badge>
+        <span className="text-[12.5px] text-ink-3">
+          未报销 <Money cents={total} className="font-semibold text-ink-2" /> · 经办人、部门、用途、金额会带好，核对后提交
+        </span>
+      </div>
+      <ul className="divide-y divide-line/70">
+        {shown.map((r) => (
+          <li key={r.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-2.5 md:grid-cols-[150px_minmax(0,1fr)_120px_auto]" data-testid={`to-claim-${r.id}`}>
+            <span className="num text-[13.5px] font-bold">
+              {r.docNo}
+              <span className="block font-sans text-[12px] font-medium text-ink-3">
+                {r.orderDate} · {r.ageDays} 天
+              </span>
+            </span>
+            <span className="min-w-0 text-[12.5px] text-ink-2">
+              <span className="block truncate font-semibold text-ink">
+                {r.supplierName}
+                {r.channel && <span className="ml-1.5 font-normal text-ink-3">{channelText(r.channel)}</span>}
+              </span>
+              <span className="block truncate text-ink-3">
+                经办 {r.createdBy.name}
+                {r.departments.length > 0 && ` · ${r.departments.join('、')}`} · {RECEIVING_LABELS[r.receiving]} · {r.openLines}/{r.lineCount} 行未报销
+              </span>
+            </span>
+            <Money cents={r.openCents} className="text-right font-bold" />
+            {can('expense.manage') ? (
+              <Link to={`/erp/expenses/new?po=${r.id}`} className="col-start-2 md:col-start-auto">
+                <Button variant="secondary" size="sm" data-testid={`to-claim-go-${r.id}`}>
+                  转报销
+                </Button>
+              </Link>
+            ) : (
+              <span />
+            )}
+          </li>
+        ))}
+      </ul>
+      {rows.length > 5 && (
+        <div className="border-t border-line px-4 py-2">
+          <Button variant="ghost" size="sm" onClick={() => setAll((v) => !v)}>
+            {all ? '收起' : `展开全部 ${rows.length} 张`}
+          </Button>
+        </div>
+      )}
+    </Card>
   );
 }

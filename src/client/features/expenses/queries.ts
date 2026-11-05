@@ -1,7 +1,19 @@
 // 费用报销与备用金（v0.7.7）的查询：与库存、采购共用 'inv' 缓存前缀，任何单据变化后一起刷新（采购单的「已报销」也会变）。
 
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ExpenseClaim, ExpenseClaimList, ExpenseRules, PettyAdvance, PettyAdvanceSummary, PettyDaily, PoCandidate, PoForClaim, StaffRef } from '@shared/expenses';
+import type {
+  ClaimPrefill,
+  ExpenseClaim,
+  ExpenseClaimList,
+  ExpenseRules,
+  PettyAdvance,
+  PettyAdvanceSummary,
+  PettyDaily,
+  PoCandidate,
+  PoForClaim,
+  StaffRef,
+  ToClaimPo,
+} from '@shared/expenses';
 import { api } from '../../lib/api';
 
 export const ek = {
@@ -15,6 +27,8 @@ export const ek = {
   daily: (params: Record<string, string | undefined>) => ['inv', 'petty-daily', params] as const,
   poCandidates: (q: string) => ['inv', 'po-candidates', q] as const,
   poForClaim: (id: number) => ['inv', 'po-for-claim', id] as const,
+  toClaim: ['inv', 'to-claim'] as const,
+  prefill: (id: number) => ['inv', 'claim-prefill', id] as const,
 };
 
 export function useInvalidateExpenses() {
@@ -74,3 +88,17 @@ export const usePoForClaim = (id: number | null) =>
 export function monthRange(calendarToday: string) {
   return { from: `${calendarToday.slice(0, 8)}01`, to: calendarToday };
 }
+
+/** 待报销的现付采购单（v0.7.29 ERP 采购五项②） */
+export const useToClaim = (enabled = true) =>
+  useQuery({ queryKey: ek.toClaim, queryFn: () => api.get<ToClaimPo[]>('/api/erp/expenses/to-claim'), enabled });
+
+/** 转报销带出的默认值（E2）：每次选了采购单读一次，不缓存（打款、上一张报销随时会变） */
+export const useClaimPrefill = (poId: number | null) =>
+  useQuery({
+    queryKey: ek.prefill(poId ?? 0),
+    queryFn: () => api.get<{ po: PoForClaim; prefill: ClaimPrefill }>(`/api/erp/expenses/po/${poId}/prefill`),
+    enabled: !!poId,
+    staleTime: 0,
+    gcTime: 0,
+  });

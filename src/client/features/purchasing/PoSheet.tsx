@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Ban, CircleCheck, CornerUpLeft, FilePen, Lock, PackagePlus, Pencil, Send, X } from 'lucide-react';
+import { Ban, CircleCheck, CornerUpLeft, FilePen, Lock, PackagePlus, Pencil, ReceiptText, Send, X } from 'lucide-react';
+import { CLAIM_STATUS_LABELS } from '@shared/expenses';
 import { INV_STATUS_LABELS } from '@shared/inventory';
 import { channelText, type PurchaseOrder } from '@shared/purchasing';
 import { formatQty } from '@shared/quantity';
@@ -235,6 +236,41 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
                 </li>
               ))}
             </ul>
+          </section>
+        )}
+
+        {po.reimbursement.settlement === 'cash' && (po.reimbursement.claims.length > 0 || po.status === 'approved' || po.status === 'closed') && (
+          <section data-testid="po-reimbursement">
+            <h3 className="mb-2 flex items-center gap-2 text-[13px] font-bold text-ink-2">
+              报销
+              <span className="font-normal text-ink-3">现付：货款在费用报销里报</span>
+              {po.reimbursement.unclaimedLines > 0 && (po.status === 'approved' || po.status === 'closed') && (
+                <Badge tone="yuzu">{po.reimbursement.unclaimedLines} 行未报销</Badge>
+              )}
+            </h3>
+            {po.reimbursement.claims.length > 0 && (
+              <ul className="mb-2 space-y-1.5">
+                {po.reimbursement.claims.map((c) => (
+                  <li key={c.id}>
+                    <Link to={`/erp/expenses?claim=${c.id}`} className="flex items-center gap-3 rounded-md border border-line bg-card px-3 py-2 text-[13px] hover:border-line-strong">
+                      <span className="num font-semibold">{c.docNo}</span>
+                      <span className="num text-ink-3">{c.expenseDate}</span>
+                      <span className="flex-1" />
+                      <Money cents={c.amountCents} className="font-semibold" />
+                      <span className={cn('text-[12px] font-semibold', c.status === 'confirmed' ? 'text-pine' : 'text-ink-3')}>{CLAIM_STATUS_LABELS[c.status]}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {po.reimbursement.unclaimedLines > 0 &&
+              (po.status === 'approved' || po.status === 'closed') &&
+              can('expense.manage') &&
+              session.erpModules.includes('expenses') && (
+                <Button variant="secondary" size="sm" icon={<ReceiptText className="size-4" />} onClick={() => navigate(`/erp/expenses/new?po=${po.id}`)} data-testid="po-to-claim">
+                  转报销（带好经办人、部门、用途与金额）
+                </Button>
+              )}
           </section>
         )}
 

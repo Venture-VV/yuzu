@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { can } from '@shared/permissions';
 import { MAX_LINE_IMAGES } from '@shared/requests';
 import type { PoLine, PoRevision, PoStatus, PoSummary, PurchaseOrder, ReceivingState } from '@shared/purchasing';
+import type { PoReimbursement } from '@shared/expenses';
 import { fitsDecimals, formatQty, lineAmountCents, priceChangePercent, toBaseQty, toPurchaseQty } from '@shared/quantity';
 import { isUniqueViolation, type Db, type Tx } from '../../db';
 import { guard } from '../../auth/guard';
@@ -25,6 +26,7 @@ import {
   logApproval,
   nextDocNo,
   overThreshold,
+  poSettlement,
   priceBaseline,
   setTxTimeouts,
   todayIn,
@@ -156,6 +158,19 @@ export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
   const [backfillReceipt] = po.backfillReceiptId
     ? await db<PurchaseOrder['receipts']>`SELECT id, doc_no, doc_type, status, doc_date, amount_cents FROM inv_docs WHERE id = ${po.backfillReceiptId}`
     : [];
+  // 报销情况（v0.7.29 ERP 采购五项②）：现付的采购单在费用报销里报
+  const claims = await db<PoReimbursement['claims']>`
+    SELECT id, doc_no, status, amount_cents, expense_date FROM expense_claims WHERE purchase_order_id = ${poId} ORDER BY id`;
+  const [unclaimed] = await db<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM purchase_order_lines pl
+    WHERE pl.po_id = ${poId} AND NOT EXISTS (
+      SELECT 1 FROM expense_claim_lines l JOIN expense_claims c ON c.id = l.claim_id
+      WHERE l.po_line_id = pl.id AND c.status IN ('submitted', 'returned', 'confirmed'))`;
+  const reimbursement: PoReimbursement = {
+    settlement: await poSettlement(db, poId),
+    claims: claims.map((c) => ({ ...c, amountCents: Number(c.amountCents) })),
+    unclaimedLines: unclaimed!.n,
+  };
 
   const { supplierId, supplierName, backfillReceiptId: _b, channelKey, channelLabel, channelNote, ...rest } = po;
   return {
@@ -173,6 +188,7 @@ export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
     receipts,
     revisions,
     approvals,
+    reimbursement,
   };
 }
 

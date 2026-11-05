@@ -253,3 +253,52 @@ export interface PoForClaim {
     claimedBy: string | null;
   }[];
 }
+
+// ───────────────────────── 采购单一键转报销（v0.7.29 ERP 采购五项②，docs/ERP_PURCHASING.md 第 3 节） ─────────────────────────
+
+/** 待报销：现付、已确认或已关闭、还有没报销的行的采购单 */
+export interface ToClaimPo {
+  id: number;
+  docNo: string;
+  supplierName: string;
+  channel: import('./purchasing').ChannelRef | null;
+  orderDate: string;
+  status: 'approved' | 'closed';
+  backfill: boolean;
+  /** 采购单的编制人（转报销时默认的经办人） */
+  createdBy: StaffRef;
+  /** 关联需求单的部门；没有的取编制人档案的部门 */
+  departments: string[];
+  totalCents: number;
+  /** 还没报销的行与金额（按采购单金额） */
+  openLines: number;
+  lineCount: number;
+  openCents: number;
+  receiving: import('./purchasing').ReceivingState;
+  /** 下单后过了几天 */
+  ageDays: number;
+}
+
+/** 转报销时带出的默认值（E2）：人只核对、改不一样的 */
+export interface ClaimPrefill {
+  departmentId: number | null;
+  handlerId: number | null;
+  purpose: string | null;
+  invoiceType: string | null;
+  taxRateBp: number | null;
+  paySource: PaySource;
+  advanceId: number | null;
+  /** 每行（采购单行）的费用科目 */
+  categories: Record<number, ExpenseCategory>;
+  /** 各项是按什么带出的（页面上提示） */
+  basis: string[];
+}
+
+/** 采购单上的报销情况（采购单详情显示，v0.7.29） */
+export interface PoReimbursement {
+  /** 这张采购单的结算方式（第一张收货定下的；还没收货的按供应商当前的） */
+  settlement: SupplierSettlement;
+  claims: { id: number; docNo: string; status: ClaimStatus; amountCents: number; expenseDate: string }[];
+  /** 还没在有效报销单里的行 */
+  unclaimedLines: number;
+}

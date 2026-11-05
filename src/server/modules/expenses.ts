@@ -30,6 +30,10 @@ import {
   type PettySettlement,
   type PoCandidate,
   type PoForClaim,
+  type ClaimPrefill,
+  type ExpenseCategory,
+  type PaySource,
+  type ToClaimPo,
 } from '@shared/expenses';
 import { formatAmount } from '@shared/money';
 import { can } from '@shared/permissions';
@@ -392,23 +396,161 @@ export async function poForClaim(db: Db, poId: number, excludeClaimId: number | 
   };
 }
 
+/** 采购单 p（供应商 s）按现付结算：第一张生效收货定下的；没收货的看有没有有效报销，再看供应商当前的（与 poSettlement 同一口径） */
+const poIsCash = (db: Db) => db`
+  coalesce((SELECT d.settlement FROM inv_docs d
+            WHERE d.purchase_order_id = p.id AND d.doc_type = 'receipt' AND d.status = 'confirmed' AND d.settlement IS NOT NULL
+            ORDER BY d.confirmed_at, d.id LIMIT 1),
+           CASE WHEN EXISTS (SELECT 1 FROM expense_claims c WHERE c.purchase_order_id = p.id AND c.status IN ${db(ACTIVE_CLAIM)}) THEN 'cash' END,
+           s.settlement) = 'cash'`;
+/** 采购单行 pl 已在有效的报销单里 */
+const lineClaimed = (db: Db) => db`
+  EXISTS (SELECT 1 FROM expense_claim_lines l JOIN expense_claims c ON c.id = l.claim_id WHERE l.po_line_id = pl.id AND c.status IN ${db(ACTIVE_CLAIM)})`;
+
 export async function poCandidates(db: Db, q: string): Promise<PoCandidate[]> {
   const like = `%${q.trim()}%`;
   return db<PoCandidate[]>`
     SELECT p.id, p.doc_no, s.name AS supplier_name, p.order_date, p.status, p.total_cents,
-           (SELECT count(*) FROM purchase_order_lines pl WHERE pl.po_id = p.id AND NOT EXISTS (
-              SELECT 1 FROM expense_claim_lines l JOIN expense_claims c ON c.id = l.claim_id
-              WHERE l.po_line_id = pl.id AND c.status IN ${db(ACTIVE_CLAIM)}))::int AS open_lines
+           (SELECT count(*) FROM purchase_order_lines pl WHERE pl.po_id = p.id AND NOT ${lineClaimed(db)})::int AS open_lines
     FROM purchase_orders p JOIN suppliers s ON s.id = p.supplier_id
-    WHERE p.status IN ('approved', 'closed')
-      AND coalesce((SELECT d.settlement FROM inv_docs d
-                    WHERE d.purchase_order_id = p.id AND d.doc_type = 'receipt' AND d.status = 'confirmed' AND d.settlement IS NOT NULL
-                    ORDER BY d.confirmed_at, d.id LIMIT 1),
-                   CASE WHEN EXISTS (SELECT 1 FROM expense_claims c WHERE c.purchase_order_id = p.id AND c.status IN ${db(ACTIVE_CLAIM)}) THEN 'cash' END,
-                   s.settlement) = 'cash'
+    WHERE p.status IN ('approved', 'closed') AND ${poIsCash(db)}
       ${q.trim() ? db`AND (p.doc_no ILIKE ${like} OR s.name ILIKE ${like} OR s.code ILIKE ${like})` : db``}
     ORDER BY p.order_date DESC, p.id DESC
     LIMIT 50`;
+}
+
+// ───────────────────────── 待报销与一键转报销（v0.7.29 ERP 采购五项②） ─────────────────────────
+
+const TO_CLAIM_LIMIT = 300;
+
+/** 待报销：现付、已确认或已关闭、还有没报销的行的采购单，最早的在前 */
+export async function toClaimList(db: Db, today: string): Promise<ToClaimPo[]> {
+  const rows = await db<
+    (Omit<ToClaimPo, 'channel' | 'createdBy' | 'receiving' | 'ageDays'> & {
+      channelKey: string | null;
+      channelLabel: string | null;
+      channelNote: string;
+      createdById: number;
+      createdByName: string;
+      fullLines: number;
+      receivedMilli: number;
+    })[]
+  >`
+    WITH open_po AS (
+      SELECT p.id,
+             (SELECT count(*) FROM purchase_order_lines pl WHERE pl.po_id = p.id AND NOT ${lineClaimed(db)})::int AS open_lines,
+             coalesce((SELECT sum(pl.amount_cents) FROM purchase_order_lines pl WHERE pl.po_id = p.id AND NOT ${lineClaimed(db)}), 0)::bigint AS open_cents
+      FROM purchase_orders p JOIN suppliers s ON s.id = p.supplier_id
+      WHERE p.status IN ('approved', 'closed') AND ${poIsCash(db)}
+    )
+    SELECT p.id, p.doc_no, s.name AS supplier_name, p.order_date, p.status, p.backfill, p.total_cents,
+           p.channel AS channel_key, p.channel_label, p.channel_note,
+           cb.id AS created_by_id, cb.display_name AS created_by_name,
+           o.open_lines, o.open_cents,
+           (SELECT count(*) FROM purchase_order_lines pl WHERE pl.po_id = p.id)::int AS line_count,
+           coalesce(
+             (SELECT array_agg(DISTINCT d.name ORDER BY d.name) FROM purchase_order_lines pl
+                JOIN purchase_order_line_requests x ON x.po_line_id = pl.id JOIN purchase_request_lines rl ON rl.id = x.request_line_id
+                JOIN purchase_requests r ON r.id = rl.request_id JOIN departments d ON d.id = r.department_id
+              WHERE pl.po_id = p.id),
+             CASE WHEN cd.name IS NOT NULL THEN ARRAY[cd.name] END,
+             '{}') AS departments,
+           (SELECT count(*) FROM purchase_order_lines pl WHERE pl.po_id = p.id AND pl.base_qty_milli <= coalesce(
+              (SELECT sum(l.qty_milli) FROM inv_doc_lines l JOIN inv_docs d ON d.id = l.doc_id WHERE l.po_line_id = pl.id AND d.status = 'confirmed'), 0))::int AS full_lines,
+           coalesce((SELECT sum(l.qty_milli) FROM inv_doc_lines l JOIN inv_docs d ON d.id = l.doc_id
+                     JOIN purchase_order_lines pl ON pl.id = l.po_line_id WHERE pl.po_id = p.id AND d.status = 'confirmed'), 0)::bigint AS received_milli
+    FROM open_po o JOIN purchase_orders p ON p.id = o.id JOIN suppliers s ON s.id = p.supplier_id
+    JOIN staff cb ON cb.id = p.created_by LEFT JOIN departments cd ON cd.id = cb.department_id
+    WHERE o.open_lines > 0
+    ORDER BY p.order_date, p.id
+    LIMIT ${TO_CLAIM_LIMIT}`;
+  return rows.map(({ channelKey, channelLabel, channelNote, createdById, createdByName, fullLines, receivedMilli, ...r }) => ({
+    ...r,
+    totalCents: Number(r.totalCents),
+    openCents: Number(r.openCents),
+    channel: channelKey ? { key: channelKey, label: channelLabel ?? channelKey, note: channelNote } : null,
+    createdBy: { id: Number(createdById), name: createdByName },
+    receiving: Number(receivedMilli) === 0 ? 'none' : fullLines >= r.lineCount ? 'full' : 'partial',
+    ageDays: Math.max(0, daysBetween(r.orderDate, today)),
+  }));
+}
+
+/**
+ * 转报销带出的默认值（E2）：经办人 = 采购单的编制人；部门 = 需求单都来自同一部门时取它，否则经办人档案的部门；
+ * 用途、发票 = 同一供应商上一张报销的；每行科目 = 这个物料上次报销用的（没有用低值易耗）；
+ * 经办人在这个部门有没平的打款时用备用金和最早那一笔，否则公司直付。只是默认值，登记时照常校验。
+ */
+export async function claimPrefill(db: Db, timezone: string, poId: number): Promise<{ po: PoForClaim; prefill: ClaimPrefill }> {
+  const full = await poForClaim(db, poId);
+  if (full.settlement !== 'cash') throw unprocessable('CREDIT_SUPPLIER', CREDIT_PO_MESSAGE);
+  if (full.status !== 'approved' && full.status !== 'closed') throw conflict('PO_NOT_APPROVED', '只能报销已确认或已关闭的采购单');
+  const { settlement: _s, status: _st, ...po } = full;
+  const rules = await loadExpenseRules(db);
+  const basis: string[] = [];
+  const [head] = await db<{ createdBy: number; handlerActive: boolean; handlerDept: number | null; handlerDeptActive: boolean | null; supplierId: number }[]>`
+    SELECT p.created_by, st.active AS handler_active, st.department_id AS handler_dept, d.active AS handler_dept_active, p.supplier_id
+    FROM purchase_orders p JOIN staff st ON st.id = p.created_by LEFT JOIN departments d ON d.id = st.department_id
+    WHERE p.id = ${poId}`;
+  const handlerId = head!.handlerActive ? head!.createdBy : null;
+  if (handlerId) basis.push('经办人：采购单的编制人');
+
+  const reqDepts = await db<{ id: number }[]>`
+    SELECT DISTINCT r.department_id AS id FROM purchase_order_lines pl
+    JOIN purchase_order_line_requests x ON x.po_line_id = pl.id JOIN purchase_request_lines rl ON rl.id = x.request_line_id
+    JOIN purchase_requests r ON r.id = rl.request_id JOIN departments d ON d.id = r.department_id AND d.active
+    WHERE pl.po_id = ${poId}`;
+  let departmentId: number | null = null;
+  if (reqDepts.length === 1) {
+    departmentId = Number(reqDepts[0]!.id);
+    basis.push('部门：需求单的部门');
+  } else if (head!.handlerDept && head!.handlerDeptActive) {
+    departmentId = Number(head!.handlerDept);
+    basis.push('部门：经办人档案里的部门');
+  }
+
+  let purpose: string | null = null;
+  let invoiceType: string | null = null;
+  let taxRateBp: number | null = null;
+  const [last] = await db<{ docNo: string; purpose: string; invoiceType: string; taxRateBp: number }[]>`
+    SELECT c.doc_no, c.purpose, c.invoice_type, c.tax_rate_bp FROM expense_claims c JOIN purchase_orders p ON p.id = c.purchase_order_id
+    WHERE p.supplier_id = ${head!.supplierId} AND c.status IN ${db(ACTIVE_CLAIM)}
+    ORDER BY c.created_at DESC, c.id DESC LIMIT 1`;
+  if (last) {
+    if (rules.purposes.includes(last.purpose)) purpose = last.purpose;
+    const inv = rules.invoiceTypes.find((t) => t.key === last.invoiceType);
+    if (inv) {
+      invoiceType = inv.key;
+      taxRateBp = inv.taxRatesBp.includes(last.taxRateBp) ? last.taxRateBp : inv.taxRatesBp.length === 1 ? inv.taxRatesBp[0]! : null;
+    }
+    if (purpose || invoiceType) basis.push(`用途、发票：同一供应商上一张报销 ${last.docNo}`);
+  }
+
+  const materialIds = [...new Set(po.lines.map((l) => l.materialId))];
+  const used = materialIds.length
+    ? await db<{ materialId: number; category: ExpenseCategory }[]>`
+        SELECT DISTINCT ON (l.material_id) l.material_id, l.category FROM expense_claim_lines l JOIN expense_claims c ON c.id = l.claim_id
+        WHERE l.material_id IN ${db(materialIds)} AND l.category <> 'freight' AND c.status IN ${db(ACTIVE_CLAIM)}
+        ORDER BY l.material_id, c.created_at DESC, l.claim_id DESC`
+    : [];
+  const usedCat = new Map(used.map((u) => [Number(u.materialId), u.category]));
+  const categories = Object.fromEntries(po.lines.map((l) => [l.poLineId, usedCat.get(l.materialId) ?? ('low_value' as ExpenseCategory)]));
+  if (used.length) basis.push('费用科目：这个物料上次报销用的（没报过的按低值易耗）');
+
+  let paySource: PaySource = 'company';
+  let advanceId: number | null = null;
+  if (handlerId && departmentId) {
+    const today = todayIn(timezone);
+    const open = (await advanceRows(db, { departmentId, handlerId }))
+      .map((r) => toAdvanceSummary(r, today, rules.overdueDays))
+      .filter((a) => a.outstandingCents > 0)
+      .sort((a, b) => (a.advanceDate === b.advanceDate ? a.id - b.id : a.advanceDate < b.advanceDate ? -1 : 1));
+    if (open[0]) {
+      paySource = 'petty';
+      advanceId = open[0].id;
+      basis.push(`钱从哪来：备用金 ${open[0].docNo}（这位经办人在这个部门最早没平的打款）`);
+    }
+  }
+  return { po, prefill: { departmentId, handlerId, purpose, invoiceType, taxRateBp, paySource, advanceId, categories, basis } };
 }
 
 // ───────────────────────── 登记报销 ─────────────────────────
@@ -990,6 +1132,12 @@ export function registerExpenseRoutes(app: FastifyInstance, deps: Deps) {
     const { q } = parse(z.object({ q: z.string().max(40).default('') }), req.query);
     return poCandidates(sql, q);
   });
+  app.get('/api/erp/expenses/to-claim', { preHandler: guard('expense.read') }, async () =>
+    readSnapshot(sql, (tx) => toClaimList(tx, todayIn(config.timezone))),
+  );
+  app.get('/api/erp/expenses/po/:id/prefill', { preHandler: guard('expense.manage') }, async (req) =>
+    readSnapshot(sql, (tx) => claimPrefill(tx, config.timezone, docId(req))),
+  );
   app.get('/api/erp/expenses/po/:id', { preHandler: guard('expense.manage') }, async (req) => {
     const po = await poForClaim(sql, docId(req));
     if (po.settlement !== 'cash') throw unprocessable('CREDIT_SUPPLIER', CREDIT_PO_MESSAGE);

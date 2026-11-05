@@ -114,6 +114,8 @@ export interface PurchaseOrder {
   receipts: (DocRef & { docDate: string; amountCents: number })[];
   revisions: PoRevision[];
   approvals: ApprovalLog[];
+  /** 报销情况（v0.7.29）：现付的采购单在费用报销里报，这里列报在哪几张、还有几行没报 */
+  reimbursement: import('./expenses').PoReimbursement;
 }
 
 export interface PoSummary {

@@ -25,7 +25,7 @@ const supplier = async (code: string) =>
 const material = async (code: string) =>
   (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/materials?all=1')).body.find((m: { code: string }) => m.code === code);
 const rules = async () => (await api(ctx.app, boss, 'GET', '/api/inventory/purchase-rules')).body;
-const saveRules = (cookie: string, body: Record<string, unknown>) => api(ctx.app, cookie, 'PUT', '/api/inventory/purchase-rules', body);
+const saveRules = (cookie: string, body: object) => api(ctx.app, cookie, 'PUT', '/api/inventory/purchase-rules', body as Record<string, unknown>);
 
 /** 采购单：默认 M016 两箱、每箱 ¥450（¥900，不超过免确认门槛，提交即确认） */
 const newPo = (body: Record<string, unknown>) =>
@@ -184,5 +184,97 @@ describe('① 采购途径（E1）', () => {
       lines: [{ materialId: mat.id, poLineId: po.lines[0].id, deliveredMilli: q(1000), acceptedMilli: q(1000) }],
     });
     expect(rc.status).toBe(201);
+  });
+});
+
+describe('② 采购单一键转报销（E2）', () => {
+  it('现付采购单确认后进「待报销」；带出经办人、部门、最早没平的打款、上次的科目与用途；报完从待报销里消失，采购单上看得到报销单', async () => {
+    const s = await supplier('S005');
+    expect((await api(ctx.app, buyer, 'PUT', `/api/inventory/suppliers/${s.id}`, { code: s.code, name: s.name, settlement: 'cash', defaultChannel: 'wholesale' })).status).toBe(200);
+    const mat = await material('M016');
+    // 采购经办的档案部门 = 采购部；他在采购部有两笔没平的打款，最早的那笔被带出
+    await ctx.sql`UPDATE staff SET department_id = ${deptA} WHERE id = ${buyerId}`;
+    const adv = async (advanceDate: string) =>
+      (await api(ctx.app, coster, 'POST', '/api/erp/petty/advances', {
+        clientKey: randomUUID(),
+        departmentId: deptA,
+        handlerId: buyerId,
+        advanceDate,
+        amountCents: 200_000,
+        method: 'wechat',
+        evidence: '转账尾号 0002',
+      })).body.advance;
+    const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+    const older = await adv(yesterday);
+    await adv(today);
+
+    const mkPo = async () => {
+      const created = (await newPo({ supplierId: s.id, channelNote: '3 号档', lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000 }] })).body.po;
+      return (await api(ctx.app, approver, 'POST', `/api/purchase-orders/${created.id}/approve`, {})).body;
+    };
+    const po = await mkPo();
+    expect(po.reimbursement).toEqual({ settlement: 'cash', claims: [], unclaimedLines: 1 });
+
+    const list = (await api(ctx.app, keeper, 'GET', '/api/erp/expenses/to-claim')).body as { id: number }[];
+    const row = list.find((r) => r.id === po.id);
+    expect(row).toMatchObject({
+      docNo: po.docNo,
+      channel: { key: 'wholesale', label: '批发市场', note: '3 号档' },
+      createdBy: { id: buyerId },
+      departments: ['采购部'],
+      openLines: 1,
+      lineCount: 1,
+      openCents: 90_000,
+      receiving: 'none',
+      ageDays: 0,
+    });
+    // 物资经办能看待报销，不能读带出的默认值（要能登记报销）
+    expect((await api(ctx.app, keeper, 'GET', `/api/erp/expenses/po/${po.id}/prefill`)).status).toBe(403);
+
+    const first = (await api(ctx.app, coster, 'GET', `/api/erp/expenses/po/${po.id}/prefill`)).body;
+    const lineId = first.po.lines[0].poLineId;
+    expect(first.prefill).toMatchObject({
+      handlerId: buyerId,
+      departmentId: deptA,
+      paySource: 'petty',
+      advanceId: older.id,
+      purpose: null,
+      invoiceType: null,
+      categories: { [lineId]: 'low_value' },
+    });
+    expect(first.prefill.basis.join('；')).toContain(older.docNo);
+
+    // 按带出的报（科目改成办公费、用途选客用消耗），之后从待报销里消失
+    const pl = first.po.lines[0];
+    const done = await claim({
+      purchaseOrderId: po.id,
+      departmentId: first.prefill.departmentId,
+      handlerId: first.prefill.handlerId,
+      paySource: 'petty',
+      advanceId: first.prefill.advanceId,
+      purpose: '客用消耗',
+      invoiceType: 'vat_normal',
+      taxRateBp: 300,
+      invoiceNo: 'FP-0001',
+      lines: [{ name: pl.name, category: 'office', unit: pl.unit, boughtMilli: pl.boughtMilli, receivedMilli: pl.receivedMilli, amountCents: pl.amountCents, poLineId: pl.poLineId, diffReason: '货在路上' }],
+    });
+    expect(done.status).toBe(201);
+    expect(done.body.claim.channel).toMatchObject({ key: 'wholesale', note: '3 号档' });
+    expect(((await api(ctx.app, keeper, 'GET', '/api/erp/expenses/to-claim')).body as { id: number }[]).some((r) => r.id === po.id)).toBe(false);
+    const after = (await api(ctx.app, buyer, 'GET', `/api/purchase-orders/${po.id}`)).body;
+    expect(after.reimbursement).toMatchObject({ settlement: 'cash', unclaimedLines: 0, claims: [{ id: done.body.claim.id, docNo: done.body.claim.docNo, status: 'confirmed', amountCents: 90_000 }] });
+
+    // 同一供应商、同一物料的下一张：用途、发票、科目照上一张
+    const po2 = await mkPo();
+    const second = (await api(ctx.app, coster, 'GET', `/api/erp/expenses/po/${po2.id}/prefill`)).body;
+    expect(second.prefill).toMatchObject({ purpose: '客用消耗', invoiceType: 'vat_normal', taxRateBp: 300, categories: { [second.po.lines[0].poLineId]: 'office' } });
+    expect(second.prefill.basis.join('；')).toContain(done.body.claim.docNo);
+
+    // 挂账的采购单不能转报销
+    const credit = await supplier('S001');
+    const creditPo = (await newPo({ supplierId: credit.id, lines: [{ materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 45_000 }] })).body.po;
+    await api(ctx.app, approver, 'POST', `/api/purchase-orders/${creditPo.id}/approve`, {});
+    expect((await api(ctx.app, coster, 'GET', `/api/erp/expenses/po/${creditPo.id}/prefill`)).body.error.code).toBe('CREDIT_SUPPLIER');
+    expect((await api(ctx.app, buyer, 'GET', `/api/purchase-orders/${creditPo.id}`)).body.reimbursement.settlement).toBe('credit');
   });
 });

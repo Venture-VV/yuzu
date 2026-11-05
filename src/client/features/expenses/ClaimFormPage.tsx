@@ -4,7 +4,7 @@
 // 断网时「结果待确认」（v0.7.8 修正）：提交前把编号和原请求存在本机并读回核对，存不了就不提交；
 // 刷新、关闭页面后仍在页面顶部查回、按原内容重新提交（同一编号不会重复登记）或确认作废。
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
 import { ArrowLeft, CircleAlert, CircleCheck, Plus, ReceiptText, Trash2 } from 'lucide-react';
 import {
@@ -31,7 +31,7 @@ import { useToast } from '../../components/Toast';
 import { Button, Field, Input, MoneyInput, Notice, Segmented, Select, Skeleton } from '../../components/ui';
 import { useDepartments } from '../inventory/queries';
 import { usePurchaseRules } from '../purchasing/queries';
-import { useAdvances, useExpenseRules, useHandlers, useInvalidateExpenses, usePoCandidates, usePoForClaim } from './queries';
+import { useAdvances, useClaimPrefill, useExpenseRules, useHandlers, useInvalidateExpenses, usePoCandidates, usePoForClaim } from './queries';
 
 interface AdhocLine {
   key: string;
@@ -86,6 +86,28 @@ export function ClaimFormPage() {
   const advances = useAdvances({ departmentId: departmentId ? String(departmentId) : undefined, unsettled: '1' }, paySource === 'petty' && !!departmentId);
   const candidates = usePoCandidates(poQuery.trim(), mode === 'po' && !poId);
   const po = usePoForClaim(mode === 'po' ? poId : null);
+  // 一键转报销（v0.7.29 ERP 采购五项②，E2）：选了采购单就读一次默认值，只填人还没动过的项
+  const prefill = useClaimPrefill(mode === 'po' ? poId : null);
+  const touched = useRef(new Set<string>());
+  const touch = (k: string) => touched.current.add(k);
+  const prefilledFor = useRef<number | null>(null);
+  const pf = prefill.data && prefill.data.po.id === poId ? prefill.data.prefill : null;
+  useEffect(() => {
+    if (!pf || !poId || prefilledFor.current === poId) return;
+    prefilledFor.current = poId;
+    const t = touched.current;
+    if (!t.has('department') && pf.departmentId) setDepartmentId(pf.departmentId);
+    if (!t.has('handler') && pf.handlerId) setHandlerId(pf.handlerId);
+    if (!t.has('purpose') && pf.purpose) setPurpose(pf.purpose);
+    if (!t.has('invoice') && pf.invoiceType) {
+      setInvoiceType(pf.invoiceType);
+      setTaxRateBp(pf.taxRateBp);
+    }
+    if (!t.has('paySource')) {
+      setPaySource(pf.paySource);
+      setAdvanceId(pf.advanceId);
+    }
+  }, [pf, poId]);
 
   // 从打款进来：部门跟着打款
   const fromAdvance = advances.data?.find((a) => a.id === advanceId);
@@ -93,10 +115,16 @@ export function ClaimFormPage() {
     if (fromAdvance && departmentId !== fromAdvance.department.id) setDepartmentId(fromAdvance.department.id);
   }, [fromAdvance, departmentId]);
   // 采购单载入后：每一行默认勾上（已报销的除外），金额按采购单
+  // 费用科目按这个物料上次报销用的带出（E2）
+  const pfCategories = pf?.categories;
   useEffect(() => {
     if (!po.data) return;
-    setPoPick(Object.fromEntries(po.data.lines.map((l) => [l.poLineId, { on: !l.claimedBy, category: '', amount: centsToInput(l.amountCents), diffReason: '' }])));
-  }, [po.data]);
+    setPoPick(
+      Object.fromEntries(
+        po.data.lines.map((l) => [l.poLineId, { on: !l.claimedBy, category: pfCategories?.[l.poLineId] ?? '', amount: centsToInput(l.amountCents), diffReason: '' }]),
+      ),
+    );
+  }, [po.data, pfCategories]);
 
   const inv = rules.data?.invoiceTypes.find((t) => t.key === invoiceType);
   const channels = purchaseRules.data?.channels ?? [];
@@ -277,6 +305,15 @@ export function ClaimFormPage() {
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1080px] space-y-4 px-5 py-5 md:px-7" data-testid="claim-form">
           <ErpPendingPanel types={['expense_claim']} onFound={(_, ref) => navigate(`/erp/expenses?claim=${ref.refId}`)} />
+          {mode === 'po' && pf && pf.basis.length > 0 && (
+            <Notice tone="info" title="已按采购单带好，请核对后提交（与实际不一样的直接改）" data-testid="claim-prefill-note">
+              <ul className="list-disc pl-5 text-[12.5px]">
+                {pf.basis.map((b) => (
+                  <li key={b}>{b}</li>
+                ))}
+              </ul>
+            </Notice>
+          )}
           <Segmented
             ariaLabel="报销方式"
             value={mode}
@@ -296,6 +333,7 @@ export function ClaimFormPage() {
                 value={departmentId ?? ''}
                 disabled={locked}
                 onChange={(e) => {
+                  touch('department');
                   setDepartmentId(Number(e.target.value) || null);
                   setAdvanceId(null);
                 }}
@@ -310,7 +348,10 @@ export function ClaimFormPage() {
               </Select>
             </Field>
             <Field label="经办人" htmlFor="ex-handler">
-              <Select id="ex-handler" value={handlerId ?? ''} disabled={locked} onChange={(e) => setHandlerId(Number(e.target.value) || null)} data-testid="ex-handler">
+              <Select id="ex-handler" value={handlerId ?? ''} disabled={locked} onChange={(e) => {
+                  touch('handler');
+                  setHandlerId(Number(e.target.value) || null);
+                }} data-testid="ex-handler">
                 <option value="">选择经办人</option>
                 {handlers.data?.map((h) => (
                   <option key={h.id} value={h.id}>
@@ -320,7 +361,10 @@ export function ClaimFormPage() {
               </Select>
             </Field>
             <Field label="用途" htmlFor="ex-purpose">
-              <Select id="ex-purpose" value={purpose} disabled={locked} onChange={(e) => setPurpose(e.target.value)} data-testid="ex-purpose">
+              <Select id="ex-purpose" value={purpose} disabled={locked} onChange={(e) => {
+                  touch('purpose');
+                  setPurpose(e.target.value);
+                }} data-testid="ex-purpose">
                 <option value="">选择用途</option>
                 {rules.data?.purposes.map((p) => (
                   <option key={p} value={p}>
@@ -333,13 +377,20 @@ export function ClaimFormPage() {
               <Segmented
                 ariaLabel="付款来源"
                 value={paySource}
-                onChange={(v) => !locked && setPaySource(v)}
+                onChange={(v) => {
+                  if (locked) return;
+                  touch('paySource');
+                  setPaySource(v);
+                }}
                 options={(['petty', 'company'] as const).map((v) => ({ value: v, label: PAY_SOURCE_LABELS[v] }))}
               />
             </Field>
             {paySource === 'petty' && (
               <Field label="出自哪一笔打款" htmlFor="ex-adv" className="sm:col-span-2" hint={departmentId ? '只列这个部门没平账的打款' : '先选部门'}>
-                <Select id="ex-adv" value={advanceId ?? ''} disabled={locked || !departmentId} onChange={(e) => setAdvanceId(Number(e.target.value) || null)} data-testid="ex-advance">
+                <Select id="ex-adv" value={advanceId ?? ''} disabled={locked || !departmentId} onChange={(e) => {
+                  touch('paySource');
+                  setAdvanceId(Number(e.target.value) || null);
+                }} data-testid="ex-advance">
                   <option value="">选择打款</option>
                   {advances.data?.map((a) => (
                     <option key={a.id} value={a.id}>
@@ -355,6 +406,7 @@ export function ClaimFormPage() {
                 value={invoiceType}
                 disabled={locked}
                 onChange={(e) => {
+                  touch('invoice');
                   setInvoiceType(e.target.value);
                   const t = rules.data?.invoiceTypes.find((x) => x.key === e.target.value);
                   setTaxRateBp(t && t.taxRatesBp.length === 1 ? t.taxRatesBp[0]! : null);
@@ -370,7 +422,10 @@ export function ClaimFormPage() {
               </Select>
             </Field>
             <Field label="税点" htmlFor="ex-tax">
-              <Select id="ex-tax" value={taxRateBp ?? ''} disabled={locked || !inv} onChange={(e) => setTaxRateBp(e.target.value === '' ? null : Number(e.target.value))} data-testid="ex-tax">
+              <Select id="ex-tax" value={taxRateBp ?? ''} disabled={locked || !inv} onChange={(e) => {
+                  touch('invoice');
+                  setTaxRateBp(e.target.value === '' ? null : Number(e.target.value));
+                }} data-testid="ex-tax">
                 <option value="">{inv ? '选择税点' : '先选发票类型'}</option>
                 {inv?.taxRatesBp.map((bp) => (
                   <option key={bp} value={bp}>
