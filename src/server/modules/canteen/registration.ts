@@ -27,7 +27,7 @@ import { AppError, badRequest, conflict, unprocessable } from '../../lib/errors'
 import { lockSettings } from '../../lib/rule-settings';
 import { setTxTimeouts } from '../../lib/tx';
 import { parse } from '../../lib/validate';
-import { checkCanteenPassword, createCanteenSession, findLoginRow, verifyLoginRow } from './portal-auth';
+import { checkCanteenPassword, createCanteenSession, findPhoneRow, verifyLoginRow } from './portal-auth';
 import { loadCanteenSettings } from './settings';
 
 const KEY = 'canteen_registration';
@@ -165,8 +165,8 @@ export async function registerEmployee(
 
   const result = await sql.begin(async (tx) => {
     await setTxTimeouts(tx);
-    // 这个手机号已经登记过：当作登录
-    const existing = await findLoginRow(tx, phone);
+    // 这个手机号已经登记过：当作登录（只按手机号找：后台有人用一串数字当工号，也不会被当成这个手机号）
+    const existing = await findPhoneRow(tx, phone);
     if (existing) {
       const checked = await verifyLoginRow(tx, existing, input.password);
       if ('error' in checked) {

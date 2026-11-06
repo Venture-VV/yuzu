@@ -229,10 +229,18 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
     } catch {
       throw new AppError(429, 'TOO_MANY_REGISTRATIONS', '这一会儿登记的人太多了，请过一会儿再试，或者找管理员');
     }
-    const { token, employeeId, created } = await limited(req, () => registerEmployee(sql, req.body, meta(req)));
-    if (created) registrations.fail(key);
-    setSession(reply, token);
-    return buildMe(employeeId);
+    // 先占一个名额（在等数据库之前，同时来的几个不会都挤过上限），没开成新账号的（出错、当作登录）再还回去
+    const reservedAt = Date.now();
+    registrations.fail(key, reservedAt);
+    let created = false;
+    try {
+      const result = await limited(req, () => registerEmployee(sql, req.body, meta(req)));
+      created = result.created;
+      setSession(reply, result.token);
+      return await buildMe(result.employeeId);
+    } finally {
+      if (!created) registrations.release(key, reservedAt);
+    }
   });
 
   app.post('/api/canteen/logout', async (req, reply) => {

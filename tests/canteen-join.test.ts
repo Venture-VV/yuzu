@@ -186,6 +186,30 @@ describe('自己登记', () => {
     expect((await register({ username: '批量60', phone: '13100000060' }, '10.7.0.2')).status).toBe(200);
   });
 
+  it('同时来的几个登记也不会挤过每小时的上限（先占名额，没开成新账号的再还回去）', async () => {
+    const ip = '10.7.0.9';
+    for (let i = 0; i < 59; i++) {
+      const r = await register({ username: `并发${i}`, phone: `1320000${String(i).padStart(4, '0')}` }, ip);
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+    }
+    // 当作登录的（同一个手机号、密码对）不占名额
+    expect((await register({ username: '并发0', phone: '13200000000' }, ip)).status).toBe(200);
+    const burst = await Promise.all([0, 1, 2].map((i) => register({ username: `并发尾${i}`, phone: `1320000${String(80 + i).padStart(4, '0')}` }, ip)));
+    expect(burst.map((r) => r.status).sort()).toEqual([200, 429, 429]);
+    const [n] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM canteen_employees WHERE username LIKE '并发尾%'`;
+    expect(n!.n).toBe(1);
+  });
+
+  it('后台有人用一串数字当工号：同样数字的手机号照样能登记（登记只按手机号找）', async () => {
+    expect((await admin('POST', '/api/erp/canteen/employees', { empNo: '13300133000', name: '数字工号', role: 'staff', departmentId: null })).status).toBe(200);
+    const r = await register({ username: '真手机号', phone: '13300133000' });
+    expect([r.status, r.body.employee?.username], JSON.stringify(r.body)).toEqual([200, '真手机号']);
+    // 后台那位没有被记失败、没有被锁
+    const [e] = await ctx.sql<{ failedLogins: number; locked: boolean }[]>`
+      SELECT failed_logins, locked_until IS NOT NULL AS locked FROM canteen_employees WHERE emp_no = '13300133000'`;
+    expect(e).toEqual({ failedLogins: 0, locked: false });
+  });
+
   it('关掉模块后登记也停', async () => {
     expect((await admin('PUT', '/api/erp/modules', { modules: { canteen: false } })).status).toBe(200);
     const r = await register({ username: '模块关了', phone: '13200132001' });

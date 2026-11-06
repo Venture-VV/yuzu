@@ -323,6 +323,18 @@ test.describe.serial('第二期：开场动画、新同事登记、新手教程�
     await p.getByTestId('talk-send').click();
     await expect(p.getByText('柚子收到啦')).toBeVisible();
     await expect(p.getByText('柚子还没看').first()).toBeVisible();
+    // 结果待确认：发出去没收到回复，这一条留在手机上；确认之前不能发新的（会顶掉它的操作编号），原样再发以后才行
+    await p.route('**/api/canteen/feedback', (route) => (route.request().method() === 'POST' ? route.abort() : route.continue()));
+    await p.getByLabel('想跟柚子说的话').fill('今天的汤有点咸');
+    await p.getByTestId('talk-send').click();
+    await expect(p.getByTestId('talk-pending')).toContainText('今天的汤有点咸');
+    await p.getByLabel('想跟柚子说的话').fill('再写一条');
+    await expect(p.getByTestId('talk-send')).toBeDisabled();
+    await p.unroute('**/api/canteen/feedback');
+    await p.getByTestId('talk-pending').getByRole('button', { name: '原样再发' }).click();
+    await expect(p.getByTestId('talk-pending')).toHaveCount(0);
+    await expect(p.getByText('今天的汤有点咸')).toBeVisible();
+    await expect(p.getByTestId('talk-send')).toBeEnabled();
     await noOverflow(p);
     await p.screenshot({ path: `${OUT}/talk.png`, fullPage: true });
 

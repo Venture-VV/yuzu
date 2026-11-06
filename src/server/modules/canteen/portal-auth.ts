@@ -61,6 +61,12 @@ export class AttemptLimiter {
       for (const [k, v] of this.fails) if (!v.some((t) => now - t < this.windowMs)) this.fails.delete(k);
     }
   }
+  /** 先占的一个名额没用上（这次没成）：还回去 */
+  release(key: string, at: number) {
+    const list = this.fails.get(key);
+    const i = list?.lastIndexOf(at) ?? -1;
+    if (list && i >= 0) list.splice(i, 1);
+  }
 }
 
 const TRIVIAL = new Set(['123456', '654321', '000000', '111111', '666666', '888888', '123123', '112233', 'abcdef', 'qwerty', 'password', 'abc123', '123456789', '12345678']);
@@ -163,18 +169,25 @@ export interface LoginRow {
  * 按账号找人并锁住那一行：像手机号的先按手机号（没有再当工号找，后台可能用了一串数字当工号）；
  * 否则先按用户名（不分大小写）、再按工号。用户名与工号在登记、加人时就不许撞（K13），撞了也是用户名优先。
  */
+const LOGIN_COLS = (tx: Tx) => tx`
+  id, active, password_hash, failed_logins,
+  CASE WHEN locked_until > now() THEN ceil(extract(epoch FROM locked_until - now()) / 60)::int END AS locked_minutes`;
+
+/** 只按手机号找人并锁住那一行（自己登记时核对「这个手机号已经有账号了没有」只看手机号，不当工号找） */
+export async function findPhoneRow(tx: Tx, phone: string): Promise<LoginRow | undefined> {
+  const [row] = await tx<LoginRow[]>`SELECT ${LOGIN_COLS(tx)} FROM canteen_employees WHERE phone = ${phone} FOR UPDATE`;
+  return row;
+}
+
 export async function findLoginRow(tx: Tx, rawAccount: string): Promise<LoginRow | undefined> {
   const account = rawAccount.trim();
   const phone = normalizePhone(account);
-  const cols = tx`
-    id, active, password_hash, failed_logins,
-    CASE WHEN locked_until > now() THEN ceil(extract(epoch FROM locked_until - now()) / 60)::int END AS locked_minutes`;
   if (PHONE.test(phone)) {
-    const [byPhone] = await tx<LoginRow[]>`SELECT ${cols} FROM canteen_employees WHERE phone = ${phone} FOR UPDATE`;
+    const byPhone = await findPhoneRow(tx, phone);
     if (byPhone) return byPhone;
   }
   const [row] = await tx<LoginRow[]>`
-    SELECT ${cols} FROM canteen_employees
+    SELECT ${LOGIN_COLS(tx)} FROM canteen_employees
     WHERE lower(username) = lower(${account}) OR emp_no = ${normalizeEmpNo(account)}
     ORDER BY (lower(username) = lower(${account})) IS TRUE DESC, id
     LIMIT 1 FOR UPDATE`;

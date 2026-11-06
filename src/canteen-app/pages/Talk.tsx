@@ -1,7 +1,7 @@
 // 跟柚子说（docs/CANTEEN.md 第 16 节，K16）：想让柚子在汤崎的线上数字化空间做的事（心愿）、碎碎念，都可以写给柚子；
 // 管理员在后台「柚子信箱」看、回信，回信显示在下面「我说过的」里。
 // 结果待确认（AGENTS.md）：发之前把操作编号与内容存在这台手机上并读回核对，存不下就不发；回复没收到时留着，
-// 再打开页面或联网时按原编号自动重发（同一个编号不会存两条），也可以点「原样再发」。
+// 再打开页面或联网时按原编号自动重发（同一个编号不会存两条），也可以点「原样再发」；没确认之前不能发新的（会顶掉它的编号）。
 
 import { useCallback, useEffect, useState } from 'react';
 import { FEEDBACK_KIND_LABELS, FEEDBACK_LIMITS, type CanteenMe, type FeedbackKind, type MyFeedbackRow } from '@shared/canteen';
@@ -83,6 +83,8 @@ export function TalkPage({ me, online }: { me: CanteenMe; online: boolean }) {
   const submit = async () => {
     const text = content.trim();
     if (!text) return toast('写点什么吧', 'error');
+    // 上一条还没确认送到：先把它发出去（再写一条会顶掉它的操作编号，那一条就没法确认了）
+    if (pending || readJson<Pending>(storeKey)) return toast('上一条还没确认送到：先点「原样再发」', 'error');
     const p: Pending = { clientKey: uuid(), kind, content: text, savedAt: Date.now() };
     if (!writeJson(storeKey, p)) return toast('这台手机存不下，先不发了：清理一下浏览器的存储再试', 'error');
     setPending(p);
@@ -154,11 +156,12 @@ export function TalkPage({ me, online }: { me: CanteenMe; online: boolean }) {
         />
         <div className="flex items-center gap-3">
           <span className={cn('num text-[12.5px]', left < 30 ? 'font-bold text-energy' : 'text-ink-3')}>还能写 {left} 字</span>
-          <Button className="ml-auto" disabled={busy || !content.trim() || !online} onClick={() => void submit()} data-testid="talk-send">
+          <Button className="ml-auto" disabled={busy || !content.trim() || !online || !!pending} onClick={() => void submit()} data-testid="talk-send">
             <IconLetter size={20} fill="var(--color-yuzu)" /> 交给柚子
           </Button>
         </div>
         {!online && <p className="text-[13px] font-bold text-relax">现在没网：联网后才能发</p>}
+        {online && pending && <p className="text-[13px] font-bold text-yuzu-deep">上面那一条还没确认送到，先「原样再发」，再写新的</p>}
       </Card>
 
       <section className="space-y-2">
