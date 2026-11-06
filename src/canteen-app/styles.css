@@ -1,0 +1,104 @@
+@import 'tailwindcss' source('.');
+
+/*
+ * 柚子饭堂 · 可爱一点的浴族（docs/CANTEEN.md）
+ * 奶油色底、柚子黄当主角、叶子绿表示成功、蜜桃色点赞与提醒；大圆角、软阴影；数字用等宽对齐。
+ * 与员工后台同一套字体，颜色更暖、更圆润。
+ */
+@theme {
+  --color-cream: #fff6e5;
+  --color-cream-2: #ffeccc;
+  --color-card: #ffffff;
+  --color-line: #f2e3c9;
+
+  --color-ink: #3b2f2a;
+  --color-ink-2: #6b5b53;
+  --color-ink-3: #a3938b;
+
+  --color-yuzu: #ffc93c;
+  --color-yuzu-deep: #c98a00;
+  --color-yuzu-soft: #fff0c2;
+
+  --color-leaf: #4fa463;
+  --color-leaf-deep: #2f7d3e;
+  --color-leaf-soft: #e1f3df;
+
+  --color-peach: #ff7b6b;
+  --color-peach-soft: #ffe4de;
+
+  --color-berry: #d9485b;
+  --color-berry-soft: #fde2e5;
+
+  --color-sky: #3d9bdc;
+  --color-sky-soft: #def0fc;
+
+  --color-pine: #24493a;
+
+  --font-sans:
+    'Plus Jakarta Sans Variable', 'PingFang SC', 'HarmonyOS Sans SC', 'MiSans', 'Microsoft YaHei UI', 'Microsoft YaHei',
+    'Noto Sans CJK SC', system-ui, sans-serif;
+
+  --radius-card: 24px;
+  --shadow-soft: 0 1px 0 rgb(59 47 42 / 0.03), 0 6px 18px -10px rgb(59 47 42 / 0.28);
+  --shadow-pop: 0 14px 40px -18px rgb(59 47 42 / 0.45);
+
+  --animate-pop: pop 0.38s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-rise: rise 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-wiggle: wiggle 1.6s ease-in-out infinite;
+  --animate-float: float 3s ease-in-out infinite;
+
+  @keyframes pop {
+    0% { opacity: 0; transform: scale(0.86); }
+    60% { opacity: 1; transform: scale(1.03); }
+    100% { transform: scale(1); }
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes wiggle {
+    0%, 100% { transform: rotate(-4deg); }
+    50% { transform: rotate(4deg); }
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-5px); }
+  }
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+body {
+  margin: 0;
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  overscroll-behavior-y: none;
+}
+.num {
+  font-variant-numeric: tabular-nums;
+}
+/* 底部导航与刘海屏 */
+.safe-bottom {
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+.safe-top {
+  padding-top: max(12px, env(safe-area-inset-top));
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

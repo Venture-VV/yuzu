@@ -72,6 +72,7 @@ import { registerMemberRefundRoutes } from './modules/member-refunds';
 import { registerMemberAdminRoutes } from './modules/member-admin';
 import { registerErpModuleGate, registerErpRoutes } from './modules/erp';
 import { registerMpStaffRoutes } from './modules/mp/staff';
+import { registerCanteenAdminRoutes } from './modules/canteen/admin-routes';
 
 function originHost(origin: string): string | null {
   try {
@@ -232,6 +233,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerErpRoutes(app, deps);
   // 微信小程序（小程序线）：前台用会员码查会员、解绑会员的微信、后台「小程序」
   registerMpStaffRoutes(app, deps);
+  // 员工食堂 · 柚子饭堂（docs/CANTEEN.md）：管理后台的 /api/erp/canteen；员工用的 /api/canteen/* 只在员工端口上
+  registerCanteenAdminRoutes(app, deps);
 
   // 前端静态资源（构建产物），全部从本机提供，外网中断不影响使用。
   const staticDir = resolve(process.env.STATIC_DIR ?? 'dist/client');

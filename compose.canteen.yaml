@@ -1,0 +1,15 @@
+# 开员工食堂（柚子饭堂，docs/CANTEEN.md 第 9 节）的 yuzu 实例才叠加这个文件：在那台的 .env 里写
+#   COMPOSE_FILE=compose.yaml:compose.canteen.yaml
+# （同时接了小程序的写 COMPOSE_FILE=compose.yaml:compose.mp.yaml:compose.canteen.yaml）
+# 员工端口只挂柚子饭堂的页面与 /api/canteen/*；只让网关服务器经 Tailscale 连（或测试服本机的 tailscale serve），
+# 不做端口转发、不对公网开放。备案之前只给测试服 A 的演示库（yuzu-demo）用；门店正式服开不开由店主定。
+services:
+  app:
+    environment:
+      # 容器里固定用 8090；宿主机上的端口是 .env 的 CANTEEN_PORT
+      CANTEEN_PORT: "8090"
+      CANTEEN_CODE_SECRET: ${CANTEEN_CODE_SECRET:?开员工食堂要在 .env 设置 CANTEEN_CODE_SECRET（至少 32 个字符，openssl rand -hex 32）}
+      CANTEEN_COOKIE_SECURE: ${CANTEEN_COOKIE_SECURE:-true}
+      CANTEEN_TRUST_PROXY: ${CANTEEN_TRUST_PROXY:-}
+    ports:
+      - "${CANTEEN_BIND:-127.0.0.1}:${CANTEEN_PORT:-8090}:8090"

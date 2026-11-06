@@ -22,6 +22,34 @@ export interface AppConfig {
   initOwner: { username: string; password: string; displayName: string } | null;
   /** 微信小程序（小程序线，docs/MINIPROGRAM.md 第 12 节）：单开的小程序端口，只挂给网关的 /api/mp/*；没设 MP_PORT 就不开 */
   mp: MpConfig;
+  /** 员工食堂 · 柚子饭堂（docs/CANTEEN.md）：单开的员工端口，只挂柚子饭堂的页面与 /api/canteen/*；没设 CANTEEN_PORT 就不开 */
+  canteen: CanteenConfig;
+}
+
+export interface CanteenConfig {
+  port: number | null;
+  host: string;
+  /** 饭卡码的密钥（CANTEEN_CODE_SECRET）：员工的码钥匙由它算出；只在 yuzu */
+  codeSecret: string | null;
+  /** 员工端走 HTTPS 时设 true（Cookie 加 Secure） */
+  cookieSecure: boolean;
+  /** 前面的转发服务器（Caddy）的地址：限次按它转来的真实来源 IP 算；空为不信任转发头 */
+  trustProxy: string[];
+}
+
+/** 员工端口：没设 CANTEEN_PORT 不开；开了就必须配足够长的饭卡码密钥，端口不能与员工后台、小程序端口相同 */
+export function loadCanteenConfig(env: NodeJS.ProcessEnv, mainPort: number, mpPort: number | null): CanteenConfig {
+  const host = env.CANTEEN_HOST?.trim() || env.HOST || '0.0.0.0';
+  const codeSecret = env.CANTEEN_CODE_SECRET?.trim() || null;
+  const cookieSecure = env.CANTEEN_COOKIE_SECURE === 'true';
+  const trustProxy = (env.CANTEEN_TRUST_PROXY ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const raw = env.CANTEEN_PORT?.trim();
+  if (!raw) return { port: null, host, codeSecret, cookieSecure, trustProxy };
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`CANTEEN_PORT 应为 1–65535 的端口号，当前是「${raw}」`);
+  if (port === mainPort || port === mpPort) throw new Error('CANTEEN_PORT 不能与 PORT、MP_PORT 相同：员工端口只挂柚子饭堂');
+  if (!codeSecret || codeSecret.length < 32) throw new Error('开了 CANTEEN_PORT 就要配 CANTEEN_CODE_SECRET（至少 32 个字符，可以用 openssl rand -hex 32 生成）');
+  return { port, host, codeSecret, cookieSecure, trustProxy };
 }
 
 export interface MpConfig {
@@ -79,10 +107,12 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   }
   const ownerUser = process.env.INIT_OWNER_USERNAME?.trim();
   const ownerPass = process.env.INIT_OWNER_PASSWORD;
+  const mainPort = Number(process.env.PORT ?? 8080);
+  const mp = overrides.mp ?? loadMpConfig(process.env, mainPort);
   return {
     env,
     host: process.env.HOST ?? '0.0.0.0',
-    port: Number(process.env.PORT ?? 8080),
+    port: mainPort,
     databaseUrl,
     timezone: process.env.APP_TIMEZONE ?? 'Asia/Shanghai',
     sessionTtlHours: Number(process.env.SESSION_TTL_HOURS ?? 12),
@@ -96,7 +126,8 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       ownerUser && ownerPass
         ? { username: ownerUser, password: ownerPass, displayName: process.env.INIT_OWNER_NAME?.trim() || '店主' }
         : null,
-    mp: loadMpConfig(process.env, Number(process.env.PORT ?? 8080)),
+    mp,
+    canteen: overrides.canteen ?? loadCanteenConfig(process.env, mainPort, mp.port),
     ...overrides,
   };
 }
