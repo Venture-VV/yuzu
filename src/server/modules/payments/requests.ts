@@ -140,6 +140,7 @@ function toSummary(r: RequestRow): PaymentRequestSummary {
     expectedDate: r.expectedDate,
     purpose: r.purpose,
     departmentName: r.departmentName,
+    createdById: r.createdBy,
     createdByName: r.createdByName,
     createdAt: r.createdAt,
     submittedAt: r.submittedAt,

@@ -210,6 +210,7 @@ export interface PaymentRequestSummary {
   expectedDate: string;
   purpose: string;
   departmentName: string | null;
+  createdById: number;
   createdByName: string;
   createdAt: string;
   submittedAt: string;
