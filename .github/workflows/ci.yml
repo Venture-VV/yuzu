@@ -154,6 +154,51 @@ jobs:
             app.log
           retention-days: 7
 
+  employee-e2e:
+    name: 员工食堂 · 菜单发布与扫码打卡
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: yuzu
+          POSTGRES_PASSWORD: yuzu_ci_only
+          POSTGRES_DB: postgres
+        ports: ['55461:5432']
+        options: >-
+          --health-cmd "pg_isready -U yuzu -d postgres"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      CANTEEN_DEMO_DATABASE_URL: postgres://yuzu:yuzu_ci_only@127.0.0.1:55461/c1_canteen_ci_demo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: 启动两个独立合成服务
+        run: |
+          npm run demo:canteen > canteen-demo.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:18961/api/health && curl -sf http://127.0.0.1:18962/api/health; then exit 0; fi
+            sleep 1
+          done
+          cat canteen-demo.log; exit 1
+      - run: npm run e2e:employee
+      - name: 保留扫码验收截图与失败轨迹
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: employee-canteen-e2e
+          path: |
+            test-results
+            canteen-demo.log
+          retention-days: 7
+
   e2e-summary:
     name: 浏览器验收汇总（三组都跑完、用例一项不少、没有失败）
     runs-on: ubuntu-latest

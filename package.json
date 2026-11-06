@@ -11,7 +11,7 @@
     "dev": "node scripts/dev.mjs",
     "dev:server": "tsx watch --clear-screen=false src/server/index.ts",
     "dev:client": "vite",
-    "build": "npm run build:client && npm run build:server",
+    "build": "npm run build:client && npm run build:employee && npm run build:server",
     "build:client": "vite build && node scripts/compress-assets.mjs",
     "build:server": "node scripts/build-server.mjs",
     "start": "node dist/server/index.js",
@@ -21,15 +21,22 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "build:employee": "vite build --config vite.employee.config.ts",
+    "dev:employee": "vite --config vite.employee.config.ts",
+    "start:employee": "node dist/employee/server/index.js",
+    "demo:canteen": "tsx scripts/canteen-demo.ts",
+    "e2e:employee": "playwright test --config playwright.employee.config.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.3",
     "@fastify/static": "^10.1.7",
     "@mlightcad/libredwg-web": "0.8.1",
+    "@zxing/browser": "0.2.1",
     "fastify": "^5.12.7",
     "pdfjs-dist": "6.4.299",
     "postgres": "^3.4.9",
+    "qrcode": "1.5.4",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -39,6 +46,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query": "^5.104.5",
     "@types/node": "^22.20.5",
+    "@types/qrcode": "1.5.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",

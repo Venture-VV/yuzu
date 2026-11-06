@@ -1,0 +1,17 @@
+{
+  "id": "/",
+  "name": "YuZu 员工食堂",
+  "short_name": "YuZu 员工",
+  "description": "每日菜单、员工码和食堂打卡",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6f3ec",
+  "theme_color": "#24493a",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

@@ -1,5 +1,6 @@
 // 运行配置全部来自环境变量；本地开发可放在 .env（不进入 Git）。
 
+import { loadCanteenConnection, type CanteenConnection } from './modules/canteen/connection';
 import { SETTABLE_INSTANCES, type InstanceKind } from '@shared/instance';
 
 export type AppEnv = 'development' | 'trial' | 'production' | 'test';
@@ -22,6 +23,7 @@ export interface AppConfig {
   initOwner: { username: string; password: string; displayName: string } | null;
   /** 微信小程序（小程序线，docs/MINIPROGRAM.md 第 12 节）：单开的小程序端口，只挂给网关的 /api/mp/*；没设 MP_PORT 就不开 */
   mp: MpConfig;
+  employeePortal?: CanteenConnection | null;
 }
 
 export interface MpConfig {
@@ -81,6 +83,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   const ownerPass = process.env.INIT_OWNER_PASSWORD;
   return {
     env,
+    employeePortal: loadCanteenConnection(process.env, env),
     host: process.env.HOST ?? '0.0.0.0',
     port: Number(process.env.PORT ?? 8080),
     databaseUrl,

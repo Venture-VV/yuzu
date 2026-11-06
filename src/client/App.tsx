@@ -57,6 +57,7 @@ const ContractsPage = lazyPage(() => import('./features/contracts/ContractsPage'
 const ContractDetailPage = lazyPage(() => import('./features/contracts/ContractDetailPage').then((m) => m.ContractDetailPage));
 const ContractFormPage = lazyPage(() => import('./features/contracts/ContractFormPage').then((m) => m.ContractFormPage));
 const PaymentsPage = lazyPage(() => import('./features/payments/PaymentsPage').then((m) => m.PaymentsPage));
+const CanteenPage = lazyPage(() => import('./features/canteen/CanteenPage').then((m) => m.CanteenPage));
 const PaymentRequestPage = lazyPage(() => import('./features/payments/PaymentRequestPage').then((m) => m.PaymentRequestPage));
 const PaymentRequestFormPage = lazyPage(() => import('./features/payments/PaymentRequestFormPage').then((m) => m.PaymentRequestFormPage));
 const DocFormPage = lazyPage(() => import('./features/inventory/DocFormPage').then((m) => m.DocFormPage));
@@ -220,6 +221,7 @@ const router = createBrowserRouter([
       { path: 'contracts/:id/changes/:changeId/edit', element: <ContractFormPage mode="change-edit" /> },
       // 付款流（v0.7.32）
       { path: 'payments', element: <PaymentsPage /> },
+      { path: 'canteen', element: <CanteenPage /> },
       { path: 'payments/requests/new', element: <PaymentRequestFormPage /> },
       { path: 'payments/requests/:id', element: <PaymentRequestPage /> },
       { path: '*', element: <Navigate to="/erp" replace /> },

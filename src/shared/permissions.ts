@@ -207,6 +207,7 @@ export const PERMISSIONS = {
   /** 授权结账的「优惠 / 免单」、降低票种与免票（R1.2，店主 2026-10-29 签认） */
   'auth.discount': { roles: ['owner', 'store_manager', 'duty_manager'] },
   'staff.manage': { roles: ['owner'] },
+  'canteen.manage': { roles: ['owner', 'store_manager'] },
   'catalog.manage': { roles: ['owner', 'store_manager'] },
   /** 技师名册：新建、编辑、停用技师（v0.7.0，待确认：默认店主与店总） */
   'technician.manage': { roles: ['owner', 'store_manager'] },
@@ -400,6 +401,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'auth.vipOverride': '当场授权散客或低等级会员使用 VIP 柜',
   'auth.discount': '当场授权优惠 / 免单、降低票种与免票',
   'staff.manage': '管理员工账号',
+  'canteen.manage': '管理员工食堂',
   'catalog.manage': '管理充值套餐与消费项目',
   'technician.manage': '维护技师名册',
   'technician.dispatch': '钟房派钟、上下钟、加钟、退钟、上牌',
@@ -458,5 +460,6 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   },
   { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount', 'auth.memberRefund', 'auth.memberPhone'] },
   { title: '数据看板', items: ['report.executive', 'report.members', 'report.technicians', 'report.commission'] },
+  { title: '员工食堂', items: ['canteen.manage'] },
   { title: '管理后台', items: ['staff.manage', 'catalog.manage', 'technician.manage', 'settings.manage', 'audit.read'] },
 ];

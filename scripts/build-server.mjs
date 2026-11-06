@@ -21,3 +21,6 @@ await build({ ...common, entryPoints: ['src/server/floorplan/worker.ts'], outfil
 await build({ ...common, entryPoints: ['src/gateway/index.ts'], outfile: 'dist/gateway/index.js' });
 await mkdir('dist/server/migrations', { recursive: true });
 await cp('src/server/migrations', 'dist/server/migrations', { recursive: true });
+
+// 独立员工服务：与内网 YuZu 使用不同数据库与监听端口。
+await build({ ...common, entryPoints: ['src/employee/server/index.ts'], outfile: 'dist/employee/server/index.js' });

@@ -1,6 +1,9 @@
 import type { Db } from '../db';
 
 export type AuditAction =
+  | 'canteen_employee'
+  | 'canteen_settings'
+  | 'canteen_menu'
   | 'login'
   | 'login_failed'
   | 'auth_granted'

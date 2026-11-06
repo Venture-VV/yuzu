@@ -50,6 +50,7 @@ import { registerDashboardRoutes } from './modules/dashboard';
 import { registerDashboardReportRoutes } from './modules/reports';
 import { registerSettingsRoutes } from './modules/settings';
 import { registerSettlementRoutes } from './modules/settlement';
+import { registerCanteenRoutes } from './modules/canteen/routes';
 import { registerStaffRoutes } from './modules/staff';
 import { registerTechnicianRoutes } from './modules/technicians';
 import { registerClockroomRoutes } from './modules/clockroom';
@@ -184,6 +185,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerLedgerRoutes(app, deps);
   registerSettlementRoutes(app, deps);
   registerStaffRoutes(app, deps);
+  registerCanteenRoutes(app, deps);
   registerCatalogRoutes(app, deps);
   registerSettingsRoutes(app, deps);
   registerAuditRoutes(app, deps);

@@ -56,7 +56,7 @@ describe('数据指纹与排序规则', () => {
     await ctx.sql`CREATE TABLE collation_probe (k text PRIMARY KEY)`;
     await ctx.sql`INSERT INTO collation_probe VALUES ('a'), ('B'), ('_c'), ('b')`;
     const m = await createBackup(ctx.config, dir, 'collate');
-    const name = `yuzu_test_icu_${Date.now()}`;
+    const name = `${scratchPrefix()}icu_${Date.now()}`;
     await ctx.sql.unsafe(`CREATE DATABASE "${name}" TEMPLATE template0 ENCODING 'UTF8' LOCALE_PROVIDER icu ICU_LOCALE 'en-US' LOCALE 'C'`);
     const url = new URL(ctx.config.databaseUrl);
     url.pathname = `/${name}`;
@@ -127,7 +127,7 @@ describe('备份与核验', () => {
   });
 
   it('旧版本的备份也能核验：恢复后先比对指纹，再补跑本版本的迁移后自检', async () => {
-    const name = `yuzu_test_old_${Date.now()}`;
+    const name = `${scratchPrefix()}old_${Date.now()}`;
     await ctx.sql.unsafe(`CREATE DATABASE "${name}"`);
     const url = new URL(ctx.config.databaseUrl);
     url.pathname = `/${name}`;

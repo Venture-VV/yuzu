@@ -4,13 +4,13 @@
 
 import type { Permission } from './permissions';
 
-export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'approvals', 'contracts', 'payments', 'expenses', 'revenue'] as const;
+export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'approvals', 'contracts', 'payments', 'expenses', 'revenue', 'canteen'] as const;
 export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
 
 export interface ErpModuleDef {
   label: string;
   /** ERP 导航的分组 */
-  group: '供应链' | '财务' | '法务';
+  group: '供应链' | '财务' | '法务' | '员工服务';
   description: string;
   /** 模块的入口页面 */
   path: string;
@@ -27,6 +27,11 @@ export interface ErpModuleDef {
 }
 
 export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
+  canteen: {
+    label: '员工食堂', group: '员工服务', description: '员工名册、食堂菜单、负责人扫码打卡与独立员工服务同步',
+    path: '/erp/canteen', pages: ['/erp/canteen'], apis: ['/api/erp/canteen'], perms: ['canteen.manage'],
+    defaultEnabled: false, requires: [],
+  },
   inventory: {
     label: '库存',
     group: '供应链',
