@@ -72,7 +72,9 @@ describe('数据指纹与排序规则', () => {
       await ctx.sql.unsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
       await ctx.sql`DROP TABLE IF EXISTS collation_probe`;
     }
-  });
+    // 一次完整导出、在 ICU 库里恢复、两边各算一遍指纹：CI 上平时 18 秒，并行的用例多、运行机慢时超过默认的 30 秒（PR #71 的 616e446），
+    // 单独放宽。超时以后 finally 里的清理还在后台跑，探测表晚删，会连带下一条的指纹对不上
+  }, 120_000);
 });
 
 describe('备份与核验', () => {
@@ -92,13 +94,15 @@ describe('备份与核验', () => {
     // 临时库已删除
     const left = await ctx.sql`SELECT datname FROM pg_database WHERE datname LIKE ${`${scratchPrefix()}%`}`;
     expect(left).toEqual([]);
-  });
+    // 导出、在临时库完整恢复、自检：CI 上平时 9 秒，运行机慢时 18 秒以上，与下面几条一样单独放宽
+  }, 120_000);
 
   it('演练核验：恢复后的指纹与备份时一致', async () => {
     const result = await verifyBackup(ctx.config, file);
     expect(result.ok).toBe(true);
     expect(result.lines.join('\n')).toContain('✓ 数据指纹与备份时一致');
-  });
+    // 在临时库完整恢复一遍再算指纹：同上
+  }, 120_000);
 
   it('文件摘要或记下的指纹被改动时核验不通过', async () => {
     const saved = JSON.parse(await readFile(`${file}.json`, 'utf8')) as BackupManifest;
@@ -151,7 +155,8 @@ describe('备份与核验', () => {
       await old.end({ timeout: 5 });
       await ctx.sql.unsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
     }
-  });
+    // 建旧版本的库、导出、恢复后补跑本版本的全部迁移：CI 上平时 12 秒，运行机慢时 20 秒以上，同上放宽
+  }, 120_000);
 
   it('备注只能是小写字母、数字与短横线', async () => {
     await expect(createBackup(ctx.config, dir, '../x')).rejects.toThrow(/备份备注/);
