@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -16 240 316" role="img" aria-label="柚子 · 困了"><title>柚子 · 困了</title>
+<defs>
+  <radialGradient id="yz-sleepy-yz" cx=".36" cy=".3" r=".8"><stop offset="0" stop-color="#FFE28A"/><stop offset=".65" stop-color="#F2C230"/><stop offset="1" stop-color="#E0A81A"/></radialGradient>
+  <linearGradient id="yz-sleepy-iris" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5A3418"/><stop offset=".55" stop-color="#B07A12"/><stop offset="1" stop-color="#F2C230"/></linearGradient>
+  <linearGradient id="yz-sleepy-hair" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7A5638"/><stop offset="1" stop-color="#5A3D27"/></linearGradient>
+</defs>
+<style>
+.yz-all{animation:yz-bob 2.8s ease-in-out infinite}
+.yz-pet{animation:yz-wob 2.8s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 100%}
+.yz-open{animation:yz-blink 4.6s infinite;transform-box:fill-box;transform-origin:center}
+.yz-steam path{animation:yz-steam 2.6s ease-in-out infinite;opacity:0}
+.yz-steam path:nth-child(2){animation-delay:.85s}
+.yz-steam path:nth-child(3){animation-delay:1.7s}
+.yz-spark{animation:yz-twinkle 1.8s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+.yz-spark:nth-of-type(2n){animation-delay:.9s}
+.yz-z{animation:yz-float 2.4s ease-in-out infinite}
+.yz-drop{animation:yz-drip 1.6s ease-in infinite}
+@keyframes yz-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+@keyframes yz-wob{0%,100%{transform:rotate(-7deg)}50%{transform:rotate(7deg)}}
+@keyframes yz-blink{0%,93%,100%{transform:scaleY(1)}95.5%{transform:scaleY(.08)}}
+@keyframes yz-steam{0%{opacity:0;transform:translateY(6px)}35%{opacity:.85}100%{opacity:0;transform:translateY(-16px)}}
+@keyframes yz-twinkle{0%,100%{transform:scale(.6);opacity:.5}50%{transform:scale(1.1);opacity:1}}
+@keyframes yz-float{0%,100%{transform:translate(0,0);opacity:.7}50%{transform:translate(3px,-5px);opacity:1}}
+@keyframes yz-drip{0%{transform:translateY(-3px);opacity:0}30%{opacity:1}100%{transform:translateY(5px);opacity:0}}
+@media (prefers-reduced-motion:reduce){.yz-all,.yz-pet,.yz-open,.yz-steam path,.yz-spark,.yz-z,.yz-drop{animation:none}.yz-steam path{opacity:.7}}
+</style>
+<ellipse cx="120" cy="291" rx="58" ry="6.5" fill="#3B2416" opacity=".1"/>
+<g class="yz-all">
+<!-- 后发 -->
+<path d="M44 124C40 62 80 34 120 34S200 62 196 124C196 168 190 196 178 212C168 206 162 200 158 192H82C78 200 72 206 62 212C50 196 44 168 44 124Z" fill="url(#yz-sleepy-hair)"/>
+<!-- 木屐 -->
+<ellipse cx="103" cy="287" rx="14" ry="5" fill="#937051"/><ellipse cx="137" cy="287" rx="14" ry="5" fill="#937051"/>
+<ellipse cx="103" cy="282" rx="9" ry="5" fill="#FFE8D8" stroke="#E3AE97" stroke-width="1.4"/><ellipse cx="137" cy="282" rx="9" ry="5" fill="#FFE8D8" stroke="#E3AE97" stroke-width="1.4"/>
+<!-- 浴衣：米白麻，松林绿领口 -->
+<rect x="112" y="174" width="16" height="20" fill="#F4CBB4"/>
+<path d="M84 190C72 220 66 254 68 282Q120 294 172 282C174 254 168 220 156 190Q120 184 84 190Z" fill="#FBF8F1" stroke="#D3CBBB" stroke-width="2"/>
+<g fill="#F2C230" opacity=".55"><circle cx="82" cy="270" r="2.2"/><circle cx="94" cy="262" r="1.6"/><circle cx="156" cy="272" r="2.2"/><circle cx="148" cy="264" r="1.6"/></g>
+<path d="M104 190L120 222L136 190Z" fill="#FFE8D8"/>
+<path d="M140 189L117 225" stroke="#24493A" stroke-width="8"/>
+<path d="M100 189L124 229" stroke="#24493A" stroke-width="8"/>
+<!-- 腰带：松林绿，柚黄绳结 -->
+<path d="M71 238H169L171 258H69Z" fill="#24493A"/>
+<path d="M70 248H170" stroke="#F2C230" stroke-width="2.6"/>
+<g transform="translate(160 248)"><ellipse cx="-7" cy="-4" rx="8" ry="4.6" transform="rotate(-25)" fill="#F2C230"/><ellipse cx="7" cy="-4" rx="8" ry="4.6" transform="rotate(25)" fill="#F2C230"/><path d="M-2 2l-5 12M2 2l6 11" stroke="#F2C230" stroke-width="2.6" stroke-linecap="round"/><circle r="3.6" fill="#E0A81A"/></g>
+<!-- 袖子 -->
+<path d="M86 194C68 206 60 232 70 250C80 260 96 254 102 244C96 230 94 212 96 198Z" fill="#FBF8F1" stroke="#D3CBBB" stroke-width="2" stroke-linejoin="round"/>
+<path d="M154 194C172 206 180 232 170 250C160 260 144 254 138 244C144 230 146 212 144 198Z" fill="#FBF8F1" stroke="#D3CBBB" stroke-width="2" stroke-linejoin="round"/>
+<path d="M72 249Q86 259 101 245M168 249Q154 259 139 245" stroke="#24493A" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+<path d="M92 236L148 236L143 275L97 275Z" fill="#C4A67E" stroke="#937051" stroke-width="2.2" stroke-linejoin="round"/>
+<g stroke="#AD8E69" stroke-width="1.6"><path d="M106 237l-1 38M120 237v38M134 237l1 38"/></g>
+<path d="M93.5 245h53M96 266h48" stroke="#6E5238" stroke-width="3.2" stroke-linecap="round"/>
+<ellipse cx="120" cy="236" rx="28.5" ry="6.5" fill="#D2B993" stroke="#937051" stroke-width="2.2"/>
+<ellipse cx="120" cy="236.5" rx="24" ry="4.2" fill="#A9D3D0"/>
+<g class="yz-steam" stroke="#DAD3C6" stroke-width="2.4" stroke-linecap="round" fill="none">
+  <path d="M110 224c-4-4 4-7 0-12"/><path d="M121 222c-4-4 4-7 0-12"/><path d="M132 224c-4-4 4-7 0-12"/></g>
+<g><circle cx="129" cy="232" r="8" fill="#F2C230" stroke="#E0A81A" stroke-width="1.6"/><path d="M128 224.5c2-4 6-5 9-4-1 3-5 5-9 4z" fill="#5E9B5E"/><circle cx="126" cy="229.5" r="2" fill="#fff" opacity=".6"/></g>
+<circle cx="110" cy="235" r="5" fill="#F2C230" stroke="#E0A81A" stroke-width="1.4"/>
+<!-- 手 -->
+<circle cx="99" cy="239" r="7.5" fill="#FFE8D8" stroke="#E3AE97" stroke-width="1.6"/>
+<circle cx="141" cy="239" r="7.5" fill="#FFE8D8" stroke="#E3AE97" stroke-width="1.6"/>
+<!-- 脸 -->
+<path d="M58 122C58 84 86 62 120 62S182 84 182 122C182 160 156 184 120 184S58 160 58 122Z" fill="#FFE8D8"/>
+<g fill="#FF8E7A" opacity=".42"><ellipse cx="72" cy="157" rx="11" ry="6"/><ellipse cx="168" cy="157" rx="11" ry="6"/></g>
+<g stroke="#F06A5A" stroke-width="1.6" stroke-linecap="round" opacity=".5"><path d="M66 158l3-4M72 158l3-4M78 158l3-4M162 158l3-4M168 158l3-4M174 158l3-4"/></g>
+<g stroke="#5A3D27" stroke-width="3" stroke-linecap="round" fill="none"><path d="M83 114q9-5 18-1"/><path d="M139 113q9-4 18 1"/></g>
+<g stroke="#3B2416" stroke-width="4" stroke-linecap="round" fill="none"><path d="M81 134Q92 141 103 134"/><path d="M83 137l-4 3"/></g><g stroke="#3B2416" stroke-width="4" stroke-linecap="round" fill="none"><path d="M137 134Q148 141 159 134"/><path d="M157 137l4 3"/></g>
+<ellipse cx="120" cy="163" rx="3.6" ry="3" fill="#A8443A"/>
+<!-- 刘海与鬓发 -->
+<path d="M48 126C42 66 82 38 120 38S198 66 192 126C188 112 182 102 174 96C176 104 176 110 173 117C168 104 160 96 150 92C152 100 150 107 146 113C140 101 132 94 122 92C120 100 116 106 110 111C108 101 100 95 90 94C92 102 90 109 86 115C80 104 73 98 66 96C62 104 60 111 58 119Z" fill="url(#yz-sleepy-hair)"/>
+<path d="M50 116C46 150 50 178 64 198C66 186 68 172 66 160C70 168 74 172 78 174C70 160 66 140 66 120Z" fill="#7A5638"/>
+<path d="M190 116C194 150 190 178 176 198C174 186 172 172 174 160C170 168 166 172 162 174C170 160 174 140 174 120Z" fill="#7A5638"/>
+<path d="M76 72Q92 57 112 53M130 53Q150 56 164 70" stroke="#A9845E" stroke-width="4.5" stroke-linecap="round" fill="none" opacity=".8"/>
+<path d="M98 58l5 1M137 56l5 1.5" stroke="#fff" stroke-width="2.6" stroke-linecap="round" opacity=".5"/>
+<path d="M100 42C88 30 92 16 104 12C100 22 104 32 110 38Z" fill="#7A5638"/>
+<!-- 柚子切片发夹 -->
+<g transform="translate(173 94)"><circle r="9.5" fill="#F2C230" stroke="#E0A81A" stroke-width="1.8"/><circle r="6.6" fill="#FFE28A"/><path d="M0-6.6V6.6M-5.7-3.3L5.7 3.3M-5.7 3.3L5.7-3.3" stroke="#fff" stroke-width="1.3"/><circle r="1.4" fill="#fff"/></g>
+<!-- 头顶：叠好的汤巾 + 柚柚 -->
+<g transform="rotate(-8 120 40)"><rect x="84" y="31" width="72" height="18" rx="8" fill="#fff" stroke="#D9D2C3" stroke-width="2"/><path d="M96 33v14M144 33v14" stroke="#24493A" stroke-width="3"/></g>
+<g class="yz-pet">
+  <path d="M129 2c1-5 5-8 10-7" stroke="#937051" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+  <circle cx="128" cy="19" r="15" fill="url(#yz-sleepy-yz)"/>
+  <path d="M130 4c4-8 13-10 20-7-3 7-12 10-20 7z" fill="#5E9B5E"/>
+  <circle cx="122.5" cy="18.5" r="1.9" fill="#3B2416"/><circle cx="133.5" cy="18.5" r="1.9" fill="#3B2416"/>
+  <path d="M125 23q3 3 6 0" stroke="#3B2416" stroke-width="1.6" stroke-linecap="round" fill="none"/>
+  <ellipse cx="119" cy="23" rx="2.6" ry="1.5" fill="#FF8E7A" opacity=".5"/><ellipse cx="137" cy="23" rx="2.6" ry="1.5" fill="#FF8E7A" opacity=".5"/>
+</g>
+<g class="yz-z" fill="#24493A" font-family="system-ui,sans-serif" font-weight="800"><text x="186" y="92" font-size="18">Z</text><text x="204" y="74" font-size="12">z</text></g>
+</g>
+</svg>
