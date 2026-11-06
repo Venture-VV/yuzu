@@ -4,7 +4,7 @@
 
 import type { Permission } from './permissions';
 
-export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'approvals', 'contracts', 'expenses', 'revenue'] as const;
+export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'approvals', 'contracts', 'payments', 'expenses', 'revenue'] as const;
 export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
 
 export interface ErpModuleDef {
@@ -112,6 +112,20 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     defaultEnabled: true,
     // 相对方、物料在库存模块的档案里；审查走审批中心的接口（审批中心关着时各单据照常走审批规则）
     requires: ['inventory'],
+  },
+  payments: {
+    label: '付款',
+    group: '财务',
+    description:
+      '付款申请（从合同的付款节点或没挂合同的应付发起，走审批中心：财务 → 负责人，提前付款多一级店主），批了以后按申请登记付款；' +
+      '发票登记与三单匹配（差额超过 1% 或 ¥50 挂起、财务放行），质保金台账（到期前 30 天提醒），本周应付（四周、资金缺口、导出）（v0.7.32）',
+    path: '/erp/payments',
+    pages: ['/erp/payments'],
+    apis: ['/api/erp/payments'],
+    perms: ['payable.read', 'payment.request'],
+    defaultEnabled: true,
+    // 付款登记、供应商往来在应付货款模块里；合同的付款计划、验收在合同模块里（合同模块关着时只能对没挂合同的应付提申请）
+    requires: ['inventory', 'payables'],
   },
   expenses: {
     label: '费用与备用金',
@@ -240,6 +254,12 @@ export const ERP_OP_TYPES = [
   'contract_create',
   'contract_change',
   'contract_seal',
+  // 付款流（v0.7.32）：付款申请、合同付款、验收登记、质量问题登记、登记发票（按申请登记的供应商往来付款用上面的 payment）
+  'payment_request',
+  'contract_payout',
+  'contract_acceptance',
+  'contract_quality',
+  'supplier_invoice',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -279,6 +299,11 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   contract_create: '新建合同',
   contract_change: '新建变更单',
   contract_seal: '用印申请',
+  payment_request: '付款申请',
+  contract_payout: '合同付款',
+  contract_acceptance: '验收登记',
+  contract_quality: '质量问题登记',
+  supplier_invoice: '登记发票',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

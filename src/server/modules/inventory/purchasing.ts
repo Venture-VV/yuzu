@@ -517,16 +517,18 @@ async function approveLocked(tx: Tx, po: PoRow, actor: Actor, reason = '') {
 /**
  * 询价门槛（v0.7.29 ERP 采购五项⑤，E5）：合计到门槛、没改过版（退回修改后再提交也算）、不是补单、不是演示数据的采购单，
  * 要来自已定标的询价单、供应商与中标的一致（QUOTES_REQUIRED）。在采购单的锁里调用；只读询价单、不加锁。
+ * 挂了合同的采购单不用询价（v0.7.32）：价格按合同的单价表，超价、超量的提交时写原因（C9）；没有合同的零星采购照旧走询价
+ * （docs/ERP_FINANCE_LEGAL_PLAN.md 第 4.2 节）。
  */
 export async function assertQuotesForPo(tx: Tx, poId: number) {
   const rules = await loadPurchaseRules(tx);
   if (rules.quoteThresholdCents <= 0) return;
-  const [po] = await tx<{ totalCents: number; revision: number; backfill: boolean; isSynthetic: boolean; supplierId: number; eventId: number | null; eventStatus: string | null; awardedSupplierId: number | null; eventNo: string | null }[]>`
-    SELECT p.total_cents, p.revision, p.backfill, p.is_synthetic, p.supplier_id, e.id AS event_id, e.status AS event_status,
+  const [po] = await tx<{ totalCents: number; revision: number; backfill: boolean; isSynthetic: boolean; supplierId: number; contractId: number | null; eventId: number | null; eventStatus: string | null; awardedSupplierId: number | null; eventNo: string | null }[]>`
+    SELECT p.total_cents, p.revision, p.backfill, p.is_synthetic, p.supplier_id, p.contract_id, e.id AS event_id, e.status AS event_status,
            q.supplier_id AS awarded_supplier_id, e.doc_no AS event_no
     FROM purchase_orders p LEFT JOIN sourcing_events e ON e.id = p.sourcing_event_id LEFT JOIN sourcing_quotes q ON q.id = e.awarded_quote_id
     WHERE p.id = ${poId}`;
-  if (!po || po.backfill || po.isSynthetic || po.revision > 1 || Number(po.totalCents) < rules.quoteThresholdCents) return;
+  if (!po || po.backfill || po.isSynthetic || po.revision > 1 || po.contractId !== null || Number(po.totalCents) < rules.quoteThresholdCents) return;
   if (po.eventId && po.eventStatus === 'awarded' && Number(po.awardedSupplierId) === Number(po.supplierId)) return;
   const amount = `¥${formatAmount(Number(po.totalCents))}`;
   const gate = `¥${formatAmount(rules.quoteThresholdCents)}`;

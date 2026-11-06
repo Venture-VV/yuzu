@@ -3,12 +3,27 @@
 // 没有规则命中按现在的「负责人确认」开关与门槛（默认规则：一级负责人），没建规则时与 v0.7.29 一样。
 // v0.7.31 合同与法务审查（docs/CONTRACTS.md）：加三种单据（合同、合同变更、用印）与岗位组「法务」；
 // 合同、合同变更没有规则命中时走 财务 → 法务 → 负责人，用印走一级店主（C2、C7，待确认）。
+// v0.7.32 付款流（docs/PAYMENTS.md）：加两种单据（付款申请、提前付款），挂在付款申请上；没有规则命中时付款申请走 财务 → 负责人
+// （申请金额 ≥ ¥50,000 再加一级店主），提前付款走 财务 → 负责人 → 店主（P5、P6，待确认）。
 
 import type { ChangeKind, ReviewView } from './contracts';
 import { can, type Duty, type Permission, type Role } from './permissions';
 
 /** 规则里的单据类型 */
-export const APPROVAL_DOC_TYPES = ['purchase_order', 'damage', 'supplier_return', 'opening', 'payment', 'expense_claim', 'stocktake', 'contract', 'contract_change', 'contract_seal'] as const;
+export const APPROVAL_DOC_TYPES = [
+  'purchase_order',
+  'damage',
+  'supplier_return',
+  'opening',
+  'payment',
+  'expense_claim',
+  'stocktake',
+  'contract',
+  'contract_change',
+  'contract_seal',
+  'payment_request',
+  'payment_early',
+] as const;
 export type ApprovalDocType = (typeof APPROVAL_DOC_TYPES)[number];
 export const APPROVAL_DOC_TYPE_LABELS: Record<ApprovalDocType, string> = {
   purchase_order: '采购单',
@@ -21,14 +36,17 @@ export const APPROVAL_DOC_TYPE_LABELS: Record<ApprovalDocType, string> = {
   contract: '合同',
   contract_change: '合同变更',
   contract_seal: '用印',
+  payment_request: '付款申请',
+  payment_early: '提前付款',
 };
 /** 合同类的单据（法务那一级按审查清单逐条给意见；规则必须有且只有一级「法务」） */
 export const CONTRACT_REVIEW_DOC_TYPES: readonly ApprovalDocType[] = ['contract', 'contract_change'];
 /** 不能批量同意的单据：合同类（法务那一级要逐条给意见）、用印 */
-export const NO_BATCH_DOC_TYPES: readonly ApprovalDocType[] = ['contract', 'contract_change', 'contract_seal'];
+/** 提前付款（v0.7.32）要看原因，也逐张审 */
+export const NO_BATCH_DOC_TYPES: readonly ApprovalDocType[] = ['contract', 'contract_change', 'contract_seal', 'payment_early'];
 
 /** 审批单挂在哪张表的单据上 */
-export const APPROVAL_DOC_KINDS = ['purchase_order', 'inv_doc', 'payment', 'opening_payable', 'expense_claim', 'contract', 'contract_change', 'contract_seal'] as const;
+export const APPROVAL_DOC_KINDS = ['purchase_order', 'inv_doc', 'payment', 'opening_payable', 'expense_claim', 'contract', 'contract_change', 'contract_seal', 'payment_request'] as const;
 export type ApprovalDocKind = (typeof APPROVAL_DOC_KINDS)[number];
 
 /** 岗位组（A2）：店主算在每一组里 */
@@ -56,6 +74,17 @@ export const CONTRACT_DEFAULT_STEPS: ApprovalStep[] = [
 ];
 /** 用印没有规则命中时（C7）：一级店主 */
 export const SEAL_DEFAULT_STEPS: ApprovalStep[] = [{ group: 'owner', mode: 'any' }];
+/** 付款申请没有规则命中时（P5）：财务 → 负责人；申请金额 ≥ ¥50,000（PAYMENT_OWNER_LEVEL_CENTS）的再加一级店主 */
+export const PAYMENT_REQUEST_DEFAULT_STEPS: ApprovalStep[] = [
+  { group: 'finance', mode: 'any' },
+  { group: 'manager', mode: 'any' },
+];
+/** 提前付款没有规则命中时（P6）：财务 → 负责人 → 店主 */
+export const PAYMENT_EARLY_DEFAULT_STEPS: ApprovalStep[] = [
+  { group: 'finance', mode: 'any' },
+  { group: 'manager', mode: 'any' },
+  { group: 'owner', mode: 'any' },
+];
 /** 这一级是不是法务那一级（合同类的单据在这一级按审查清单逐条给意见） */
 export const isLegalStep = (step: ApprovalStep | undefined): boolean => !!step && 'group' in step && step.group === 'legal';
 
@@ -101,7 +130,7 @@ export interface ApproverSubject {
   permissions?: readonly Permission[];
 }
 
-/** 岗位组的「负责人」：采购单、物资单据、付款、期初未付、合同类按「负责人确认」，报销按「确认超门槛的报销」 */
+/** 岗位组的「负责人」：采购单、物资单据、付款、期初未付、合同类、付款申请按「负责人确认」，报销按「确认超门槛的报销」 */
 export function managerPermission(kind: ApprovalDocKind): Permission {
   return kind === 'expense_claim' ? 'expense.approve' : 'inventory.approve';
 }
