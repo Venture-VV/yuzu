@@ -173,6 +173,17 @@ const LOGIN_COLS = (tx: Tx) => tx`
   id, active, password_hash, failed_logins,
   CASE WHEN locked_until > now() THEN ceil(extract(epoch FROM locked_until - now()) / 60)::int END AS locked_minutes`;
 
+/**
+ * 登录名（工号与自己登记的用户名，不分大小写，登录时两个都认）的咨询锁：自己登记、后台加人、粘贴一批、改工号，
+ * 在核对「两边不撞」之前先取这把锁，同时来的两个不会都以为没撞（库里的唯一索引各管一列，管不到两列之间）。
+ * 一次要取好几个的（粘贴一批）按大写排好序再取，免得互相等。
+ */
+export async function lockLoginNames(tx: Tx, names: string[]): Promise<void> {
+  for (const name of [...new Set(names.map((n) => n.toUpperCase()))].sort()) {
+    await tx`SELECT pg_advisory_xact_lock(hashtext('canteen-login-name'), hashtext(${name}))`;
+  }
+}
+
 /** 只按手机号找人并锁住那一行（自己登记时核对「这个手机号已经有账号了没有」只看手机号，不当工号找） */
 export async function findPhoneRow(tx: Tx, phone: string): Promise<LoginRow | undefined> {
   const [row] = await tx<LoginRow[]>`SELECT ${LOGIN_COLS(tx)} FROM canteen_employees WHERE phone = ${phone} FOR UPDATE`;

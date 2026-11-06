@@ -53,16 +53,22 @@ export function TalkPage({ me, online }: { me: CanteenMe; online: boolean }) {
         void load();
         return true;
       } catch (e) {
-        if (e instanceof NetworkError) {
-          toast('网络不太好，这一条先存在手机上，联网后再发', 'error');
-        } else {
-          // 门店系统明确拒绝了（太长、今天说太多了……）：这一条不会生效，放下，内容放回输入框
+        // 只有这几种拒绝能说明这一条（连同之前没收到回复的那次）不会生效：内容不对（原来那次也一样不对）、
+        // 今天说太多了（门店系统先查同一个操作编号的那一条有没有，有就原样给回，没有才数今天几条）。放下，内容放回输入框
+        const settled = e instanceof ApiError && (e.status === 400 || e.code === 'FEEDBACK_DAILY_LIMIT' || e.code === 'CLIENT_KEY_USED');
+        if (settled) {
           removeKey(storeKey);
           setPending(null);
           setContent(p.content);
           setKind(p.kind);
           toast(messageOf(e), 'error');
-          if (e instanceof ApiError && e.status === 401) window.location.reload();
+        } else if (e instanceof ApiError && e.status === 401) {
+          // 登录过期：这一条留在手机上，重新登录以后打开「跟柚子说」会按原编号再发
+          toast('登录过期了：重新登录以后会把这一条原样再发一次', 'error');
+          window.location.reload();
+        } else {
+          // 没网、超时、门店系统出错或暂时关着：不知道之前那次送到没有，这一条留着，之后按原编号再发
+          toast(e instanceof NetworkError ? '网络不太好，这一条先存在手机上，联网后再发' : `${messageOf(e)}（这一条先存在手机上，之后再发）`, 'error');
         }
         return false;
       } finally {

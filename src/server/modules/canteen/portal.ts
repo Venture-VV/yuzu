@@ -200,7 +200,8 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
     try {
       return await fn();
     } catch (error) {
-      if (error instanceof AppError && error.status < 500 && error.code !== 'TOO_MANY_ATTEMPTS') limiter.fail(key);
+      // 被限次挡下的（试太多次、这一会儿登记的人太多）不再算一次失败
+      if (error instanceof AppError && error.status < 500 && error.code !== 'TOO_MANY_ATTEMPTS' && error.code !== 'TOO_MANY_REGISTRATIONS') limiter.fail(key);
       throw error;
     }
   };
@@ -224,22 +225,24 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
 
   app.post('/api/canteen/register', async (req, reply) => {
     const key = `ip:${req.ip}`;
+    // 名额用完了也让「同一个手机号再登记、密码对」的进来（回复没收到时原样重试 = 登录，K14），只是不能开新账号
+    let canCreate = true;
     try {
       registrations.check(key);
     } catch {
-      throw new AppError(429, 'TOO_MANY_REGISTRATIONS', '这一会儿登记的人太多了，请过一会儿再试，或者找管理员');
+      canCreate = false;
     }
-    // 先占一个名额（在等数据库之前，同时来的几个不会都挤过上限），没开成新账号的（出错、当作登录）再还回去
-    const reservedAt = Date.now();
-    registrations.fail(key, reservedAt);
+    // 能开新账号的先占一个名额（在等数据库之前，同时来的几个不会都挤过上限），没开成新账号的（出错、当作登录）再还回去
+    const reservedAt = canCreate ? Date.now() : null;
+    if (reservedAt !== null) registrations.fail(key, reservedAt);
     let created = false;
     try {
-      const result = await limited(req, () => registerEmployee(sql, req.body, meta(req)));
+      const result = await limited(req, () => registerEmployee(sql, req.body, meta(req), { allowCreate: canCreate }));
       created = result.created;
       setSession(reply, result.token);
       return await buildMe(result.employeeId);
     } finally {
-      if (!created) registrations.release(key, reservedAt);
+      if (reservedAt !== null && !created) registrations.release(key, reservedAt);
     }
   });
 

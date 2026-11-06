@@ -330,6 +330,16 @@ test.describe.serial('第二期：开场动画、新同事登记、新手教程�
     await expect(p.getByTestId('talk-pending')).toContainText('今天的汤有点咸');
     await p.getByLabel('想跟柚子说的话').fill('再写一条');
     await expect(p.getByTestId('talk-send')).toBeDisabled();
+    // 原样再发被拒（饭堂暂时关着）也不能断定之前那次没送到：这一条照样留着
+    await p.unroute('**/api/canteen/feedback');
+    await p.route('**/api/canteen/feedback', (route) =>
+      route.request().method() === 'POST'
+        ? route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'CANTEEN_CLOSED', message: '饭堂还没开张' } }) })
+        : route.continue(),
+    );
+    await p.getByTestId('talk-pending').getByRole('button', { name: '原样再发' }).click();
+    await expect(p.getByText(/这一条先存在手机上/)).toBeVisible();
+    await expect(p.getByTestId('talk-pending')).toContainText('今天的汤有点咸');
     await p.unroute('**/api/canteen/feedback');
     await p.getByTestId('talk-pending').getByRole('button', { name: '原样再发' }).click();
     await expect(p.getByTestId('talk-pending')).toHaveCount(0);

@@ -27,6 +27,7 @@ import type { OpContext } from '../../lib/context';
 import { badRequest, conflict, notFound, unprocessable } from '../../lib/errors';
 import { setTxTimeouts } from '../../lib/tx';
 import { parse } from '../../lib/validate';
+import { lockLoginNames } from './portal-auth';
 import { loadCanteenSettings } from './settings';
 
 const EmpNo = z
@@ -85,7 +86,7 @@ async function checkDepartment(db: Db, settings: CanteenSettings, role: CanteenR
   }
 }
 
-/** 工号不能和别人自己登记的用户名一样（登录时工号、用户名都认，K13） */
+/** 工号不能和别人自己登记的用户名一样（登录时工号、用户名都认，K13）。调用前先取这个工号的登录名锁（lockLoginNames） */
 async function checkEmpNoFree(db: Db, empNo: string, selfId: number | null) {
   const [hit] = await db<{ name: string }[]>`
     SELECT name FROM canteen_employees WHERE lower(username) = lower(${empNo}) AND id IS DISTINCT FROM ${selfId} LIMIT 1`;
@@ -117,6 +118,7 @@ export async function createEmployee(sql: Sql, raw: unknown, ctx: OpContext): Pr
     await setTxTimeouts(tx);
     const settings = await loadCanteenSettings(tx);
     await checkDepartment(tx, settings, input.role, input.departmentId);
+    await lockLoginNames(tx, [input.empNo]);
     await checkEmpNoFree(tx, input.empNo, null);
     const id = await insertEmployee(tx, input, ctx);
     if (id === null) {
@@ -205,7 +207,11 @@ export async function batchEmployees(sql: Sql, raw: unknown, ctx: OpContext): Pr
     const errors = rows.filter((r) => r.status === 'error');
     if (errors.length) throw unprocessable('BATCH_HAS_ERRORS', `有 ${errors.length} 行有问题，改好再加（一行都没加）`, { lines: errors.map((r) => r.line) });
     let created = 0;
-    for (const r of rows.filter((x) => x.status === 'new')) {
+    const fresh = rows.filter((x) => x.status === 'new');
+    // 取好这一批工号的登录名锁以后再核对一次（预览之后有人登记了同名的用户名）
+    await lockLoginNames(tx, fresh.map((r) => r.empNo));
+    for (const r of fresh) await checkEmpNoFree(tx, r.empNo, null);
+    for (const r of fresh) {
       const id = await insertEmployee(tx, { empNo: r.empNo, name: r.name, departmentId: r.departmentId, role: 'staff' }, ctx);
       if (id === null) throw conflict('EMP_NO_TAKEN', `工号 ${r.empNo} 刚被别人加了，请重新预览`);
       created++;
@@ -229,7 +235,10 @@ export async function updateEmployee(sql: Sql, id: number, raw: unknown, ctx: Op
     if (same) return employeeRow(tx, id);
     if (cur.version !== input.version) throw conflict('VERSION_CHANGED', '这位员工刚被别人改过，刷新后再改');
     if (input.active) await checkDepartment(tx, await loadCanteenSettings(tx), input.role, input.departmentId);
-    if (input.empNo !== cur.empNo) await checkEmpNoFree(tx, input.empNo, id);
+    if (input.empNo !== cur.empNo) {
+      await lockLoginNames(tx, [input.empNo]);
+      await checkEmpNoFree(tx, input.empNo, id);
+    }
     const deactivate = cur.active && !input.active;
     try {
       await tx`

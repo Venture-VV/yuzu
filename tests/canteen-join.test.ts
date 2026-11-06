@@ -183,6 +183,9 @@ describe('自己登记', () => {
     }
     const blocked = await register({ username: '批量60', phone: '13100000060' }, '10.7.0.1');
     expect([blocked.status, blocked.body.error.code]).toEqual([429, 'TOO_MANY_REGISTRATIONS']);
+    // 名额用完了，原样重试已经开好的那一个（回复没收到时）照样当作登录
+    const retry = await register({ username: '批量59', phone: '13100000059' }, '10.7.0.1');
+    expect([retry.status, retry.body.employee?.username]).toEqual([200, '批量59']);
     expect((await register({ username: '批量60', phone: '13100000060' }, '10.7.0.2')).status).toBe(200);
   });
 
@@ -198,6 +201,20 @@ describe('自己登记', () => {
     expect(burst.map((r) => r.status).sort()).toEqual([200, 429, 429]);
     const [n] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM canteen_employees WHERE username LIKE '并发尾%'`;
     expect(n!.n).toBe(1);
+  });
+
+  it('同时有人登记用户名 b888、后台加工号 B888：只成功一个（登录名锁串行）', async () => {
+    for (let round = 0; round < 3; round++) {
+      const name = `R${round}88`;
+      const [reg, made] = await Promise.all([
+        register({ username: name.toLowerCase(), phone: `1340013400${round}` }, '10.5.0.1'),
+        admin('POST', '/api/erp/canteen/employees', { empNo: name, name: `并发工号${round}`, role: 'staff', departmentId: null }),
+      ]);
+      expect([reg.status, made.status].sort(), JSON.stringify([reg.body, made.body])).toEqual([200, 409]);
+      const [n] = await ctx.sql<{ n: number }[]>`
+        SELECT count(*)::int AS n FROM canteen_employees WHERE lower(username) = lower(${name}) OR emp_no = ${name}`;
+      expect(n!.n).toBe(1);
+    }
   });
 
   it('后台有人用一串数字当工号：同样数字的手机号照样能登记（登记只按手机号找）', async () => {

@@ -27,7 +27,7 @@ import { AppError, badRequest, conflict, unprocessable } from '../../lib/errors'
 import { lockSettings } from '../../lib/rule-settings';
 import { setTxTimeouts } from '../../lib/tx';
 import { parse } from '../../lib/validate';
-import { checkCanteenPassword, createCanteenSession, findPhoneRow, verifyLoginRow } from './portal-auth';
+import { checkCanteenPassword, createCanteenSession, findPhoneRow, lockLoginNames, verifyLoginRow } from './portal-auth';
 import { loadCanteenSettings } from './settings';
 
 const KEY = 'canteen_registration';
@@ -151,6 +151,8 @@ export async function registerEmployee(
   sql: Sql,
   raw: unknown,
   meta: { ip?: string; userAgent?: string },
+  /** false：这个来源 IP 一小时的名额用完了——只认「同一个手机号再登记、密码对」（当作登录），不开新账号 */
+  opts: { allowCreate: boolean } = { allowCreate: true },
 ): Promise<{ token: string; employeeId: number; created: boolean }> {
   const input = parse(RegisterInput, raw);
   const code = normalizeActivationCode(input.code);
@@ -180,9 +182,11 @@ export async function registerEmployee(
       }
       return { token: await createCanteenSession(tx, existing.id, meta), employeeId: existing.id, created: false };
     }
+    if (!opts.allowCreate) throw new AppError(429, 'TOO_MANY_REGISTRATIONS', '这一会儿登记的人太多了，请过一会儿再试，或者找管理员');
     const weak = checkCanteenPassword(input.password, username, phone);
     if (weak) throw badRequest(weak);
-    // 用户名不能和别人的用户名、工号一样（登录时都认，K13）
+    // 用户名不能和别人的用户名、工号一样（登录时都认，K13）：先取登录名锁，与后台加人、改工号串行
+    await lockLoginNames(tx, [username]);
     const [taken] = await tx<{ id: number }[]>`
       SELECT id FROM canteen_employees WHERE lower(username) = lower(${username}) OR emp_no = upper(${username}) LIMIT 1`;
     if (taken) throw conflict('USERNAME_TAKEN', '这个用户名有人用了：换一个，或者加点区别（例如 林小雨2）');
