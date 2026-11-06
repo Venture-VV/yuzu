@@ -102,6 +102,8 @@ describe('合成数据：与附件预期结果逐项一致', () => {
       refundedCents: 0,
       balanceCents: t.closingPayableCents,
       creditCents: 0,
+      // 没到期的质保金（v0.7.32）：演示数据没有合同
+      warrantyHeldCents: 0,
     });
   });
 
