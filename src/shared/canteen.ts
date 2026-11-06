@@ -266,6 +266,8 @@ export interface CanteenRegistration {
   link: string | null;
   /** 自己登记、在用的人数 */
   selfRegistered: number;
+  /** 改了几次：开关、换口令都带上看到的这个数，对不上拒绝（REGISTRATION_CHANGED） */
+  rev: number;
 }
 
 /** 员工端：现在能不能自己登记、带来的口令对不对（没带口令时 codeOk 为 null） */

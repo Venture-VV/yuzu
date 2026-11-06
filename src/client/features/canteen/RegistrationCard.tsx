@@ -1,11 +1,13 @@
 // 注册二维码（docs/CANTEEN.md 第 14 节，K12）：员工扫码打开柚子饭堂，看完柚子的开场，在「新同事登记」填用户名、手机号、密码就开好账号。
 // 口令就在二维码和链接里（#reg=口令），外面的人拿到员工入口地址也登记不了；换一个口令旧的二维码马上作废。
+// 换口令、开关都带上看到的 rev（对不上拒绝）：没收到结果时不当作「没换成」，刷新看现在的；再点或晚到的那一下
+// 不会在已经换好以后再换一次（刚打印的海报不会被它作废）。
 
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Copy, RefreshCw } from 'lucide-react';
 import { displayActivationCode, type CanteenRegistration } from '@shared/canteen';
-import { api, errorMessage } from '../../lib/api';
+import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { Badge, Button, Card, ConfirmCheck, Notice, SectionTitle } from '../../components/ui';
 import { useToast } from '../../components/Toast';
 import { QrCode } from '../../../canteen-app/QrCode';
@@ -17,16 +19,31 @@ export function RegistrationCard({ registration, portalUrl }: { registration: Ca
   const [busy, setBusy] = useState<'code' | 'toggle' | null>(null);
   const [confirmRotate, setConfirmRotate] = useState(false);
   const refresh = () => void qc.invalidateQueries({ queryKey: ['canteen'] });
+  /** 没收到结果、或者服务端说刚改过：都刷新看现在的，不当作没办成 */
+  const unsure = (e: unknown, what: string): boolean => {
+    if (e instanceof UncertainError) {
+      refresh();
+      toast({ tone: 'info', title: `${what}：没收到结果`, body: '可能已经办好了。已经刷新，看看现在的口令和开关；再点会接着现在的来，不会多换一次' });
+      return true;
+    }
+    if (e instanceof ApiError && e.code === 'REGISTRATION_CHANGED') {
+      refresh();
+      toast({ tone: 'info', title: '注册设置刚改过', body: '可能是刚才那一下已经办好了：已经刷新，看看现在的口令和开关' });
+      return true;
+    }
+    return false;
+  };
 
   const rotate = async () => {
     setBusy('code');
     try {
-      await api.post<CanteenRegistration>('/api/erp/canteen/registration/code');
+      await api.post<CanteenRegistration>('/api/erp/canteen/registration/code', { rev: registration.rev });
       setConfirmRotate(false);
       refresh();
       toast({ tone: 'success', title: registration.code ? '换好了：旧的二维码已经作废，请重新打印海报' : '注册二维码生成好了' });
     } catch (e) {
-      toast({ tone: 'error', title: '没换成', body: errorMessage(e) });
+      if (unsure(e, registration.code ? '换口令' : '生成注册二维码')) setConfirmRotate(false);
+      else toast({ tone: 'error', title: '没换成', body: errorMessage(e) });
     } finally {
       setBusy(null);
     }
@@ -34,10 +51,10 @@ export function RegistrationCard({ registration, portalUrl }: { registration: Ca
   const toggle = async (enabled: boolean) => {
     setBusy('toggle');
     try {
-      await api.put<CanteenRegistration>('/api/erp/canteen/registration', { enabled });
+      await api.put<CanteenRegistration>('/api/erp/canteen/registration', { enabled, rev: registration.rev });
       refresh();
     } catch (e) {
-      toast({ tone: 'error', title: '没改成', body: errorMessage(e) });
+      if (!unsure(e, enabled ? '打开自己登记' : '关掉自己登记')) toast({ tone: 'error', title: '没改成', body: errorMessage(e) });
     } finally {
       setBusy(null);
     }

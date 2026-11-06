@@ -45,7 +45,7 @@ describe('注册二维码（后台）', () => {
 
     const s = (await admin('GET', '/api/erp/canteen/settings')).body;
     expect((await admin('PUT', '/api/erp/canteen/settings', { ...s, portalUrl: 'https://staff.example.com' })).status).toBe(200);
-    const made = await admin('POST', '/api/erp/canteen/registration/code');
+    const made = await admin('POST', '/api/erp/canteen/registration/code', { rev: before.body.rev });
     expect(made.status).toBe(200);
     code = made.body.code;
     expect(code).toMatch(/^[2-9A-HJ-NP-Z]{8}$/);
@@ -55,6 +55,27 @@ describe('注册二维码（后台）', () => {
       SELECT detail FROM audit_logs WHERE action = 'settings_updated' AND detail->>'key' = 'canteen_registration' ORDER BY id DESC LIMIT 1`;
     expect(JSON.stringify(audit!.detail)).not.toContain(code);
     expect(audit!.detail.codeChanged).toBe(true);
+  });
+
+  it('换口令、开关带上看到的 rev：回复没收到时再点一次、或者晚到的那一下，不会在换好以后再换一次、不会把开关改回去', async () => {
+    const seen = (await admin('GET', '/api/erp/canteen/registration')).body;
+    // 没带 rev 的拒绝
+    expect((await admin('POST', '/api/erp/canteen/registration/code')).status).toBe(400);
+    // 用看到的 rev 换一次口令：换好了，rev 加一
+    const rotated = await admin('POST', '/api/erp/canteen/registration/code', { rev: seen.rev });
+    expect([rotated.status, rotated.body.rev]).toEqual([200, seen.rev + 1]);
+    expect(rotated.body.code).not.toBe(seen.code);
+    // 同一个旧 rev 再来一次（回复没收到时再点、或者晚到的第一下）：拒绝，刚换好的口令还在
+    const again = await admin('POST', '/api/erp/canteen/registration/code', { rev: seen.rev });
+    expect([again.status, again.body.error.code]).toEqual([409, 'REGISTRATION_CHANGED']);
+    expect((await admin('GET', '/api/erp/canteen/registration')).body).toMatchObject({ code: rotated.body.code, rev: seen.rev + 1 });
+    // 开关：已经是要的样子就不用改（rev 不变）；旧 rev 要改成别的样子拒绝
+    const same = await admin('PUT', '/api/erp/canteen/registration', { enabled: true, rev: seen.rev });
+    expect([same.status, same.body.enabled, same.body.rev]).toEqual([200, true, seen.rev + 1]);
+    const stale = await admin('PUT', '/api/erp/canteen/registration', { enabled: false, rev: seen.rev });
+    expect([stale.status, stale.body.error.code]).toEqual([409, 'REGISTRATION_CHANGED']);
+    expect((await admin('GET', '/api/erp/canteen/registration')).body.enabled).toBe(true);
+    code = rotated.body.code;
   });
 
   it('员工端：带对的口令 codeOk，错的口令算失败；口令输入不分大小写、可带短横线', async () => {
@@ -163,13 +184,14 @@ describe('自己登记', () => {
   });
 
   it('关掉自己登记、换口令：旧口令马上作废', async () => {
-    const off = await admin('PUT', '/api/erp/canteen/registration', { enabled: false });
+    const off = await admin('PUT', '/api/erp/canteen/registration', { enabled: false, rev: (await admin('GET', '/api/erp/canteen/registration')).body.rev });
     expect([off.status, off.body.enabled]).toEqual([200, false]);
     expect((await register({ username: '晚来的', phone: '13500135001' })).body.error.code).toBe('REGISTRATION_CLOSED');
     expect((await c(null, 'GET', `/api/canteen/register?code=${code}`)).body).toEqual({ open: false, codeOk: false });
-    expect((await admin('PUT', '/api/erp/canteen/registration', { enabled: true })).body.enabled).toBe(true);
+    const on = await admin('PUT', '/api/erp/canteen/registration', { enabled: true, rev: off.body.rev });
+    expect(on.body.enabled).toBe(true);
     const old = code;
-    code = (await admin('POST', '/api/erp/canteen/registration/code')).body.code;
+    code = (await admin('POST', '/api/erp/canteen/registration/code', { rev: on.body.rev })).body.code;
     expect(code).not.toBe(old);
     const stale = await c(null, 'POST', '/api/canteen/register', { code: old, username: '晚来的', phone: '13500135001', password: 'Yuzi-2026!' });
     expect(stale.body.error.code).toBe('REGISTRATION_CODE_INVALID');

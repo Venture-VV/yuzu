@@ -415,6 +415,37 @@ test.describe.serial('第二期：开场动画、新同事登记、新手教程�
     await noOverflow(p);
     await p.screenshot({ path: `${OUT}/talk.png`, fullPage: true });
 
+    // 发出去的那次还没回来就离开再回来这一页（新的这一页按原编号重发、送到了），接着又发了一条没送到的；
+    // 原来那次的回复这时才回来，也不能把新的这一条从手机上删掉（Codex 审查 da39570）
+    let posts = 0;
+    let firstDone: Promise<void> = Promise.resolve();
+    await p.route('**/api/canteen/feedback', (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      posts += 1;
+      if (posts === 1) {
+        firstDone = new Promise<void>((resolve) => setTimeout(() => void route.continue().then(resolve, resolve), 2500));
+        return firstDone;
+      }
+      return posts === 2 ? route.continue() : route.abort();
+    });
+    await p.getByLabel('想跟柚子说的话').fill('第一句：中午的米饭有点硬');
+    await p.getByTestId('talk-send').click();
+    await p.getByTestId('tab-home').click();
+    await p.getByTestId('tab-talk').click();
+    await expect(p.getByTestId('talk-page')).toBeVisible();
+    await expect(p.getByTestId('talk-pending')).toHaveCount(0);
+    await p.getByLabel('想跟柚子说的话').fill('第二句：明天想吃饺子');
+    await p.getByTestId('talk-send').click();
+    await expect(p.getByTestId('talk-pending')).toContainText('第二句：明天想吃饺子');
+    await firstDone;
+    await p.waitForTimeout(800);
+    await p.reload();
+    await expect(p.getByTestId('talk-pending')).toContainText('第二句：明天想吃饺子');
+    await p.unroute('**/api/canteen/feedback');
+    await p.getByTestId('talk-pending').getByRole('button', { name: '原样再发' }).click();
+    await expect(p.getByTestId('talk-pending')).toHaveCount(0);
+    await expect(p.getByText('第二句：明天想吃饺子')).toBeVisible();
+
     // 后台：名单里有自己登记的小雨；柚子信箱里回信
     await admin.getByRole('radio', { name: '员工名单' }).click();
     await expect(admin.getByRole('row', { name: /小雨/ })).toContainText('自己登记');

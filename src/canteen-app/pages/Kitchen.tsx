@@ -96,9 +96,10 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
   }, [load]);
   const ready = loadedFor === selection;
 
-  const clearPending = () => {
-    removeKey(storeKey);
-    setPending(null);
+  /** 有了结论只放下这一笔：手机上存的已经是别的一笔时不动它（例如离开再回来这一页、重试存好又存了新的，原来那次的回复才晚到） */
+  const clearPending = (key: string) => {
+    if (readJson<Pending>(storeKey)?.body.clientKey === key) removeKey(storeKey);
+    setPending((cur) => (cur?.body.clientKey === key ? null : cur));
   };
 
   const edit = (fn: (d: Draft) => Draft) => {
@@ -113,7 +114,7 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
     setBusy(true);
     try {
       const saved = await call<CanteenMenu>('PUT', `/api/canteen/menus/${p.date}/${p.meal}`, p.body);
-      clearPending();
+      clearPending(p.body.clientKey);
       // 厨师可能已经换到别的日子、餐次了：只在还选着这一份时换上存好的内容（还在取的这一份作废：存好的就是最新的）
       if (key === selected.current) {
         latest.current++;
@@ -129,7 +130,7 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
       if (e instanceof ApiError && e.code === 'MENU_CHANGED') {
         // 版本号已经过去了：原来那次以后也不会生效（要么已经存好，要么再也存不上），放下它。
         // 厨师这次要存的内容放回编辑框（刷新以后才重试的，编辑框里是刚取到的那一份，不是他要存的），再给他看最新的，由他决定
-        clearPending();
+        clearPending(p.body.clientKey);
         const latestMenu = await fetchMenu(p.date, p.meal).catch(() => undefined);
         if (key !== selected.current) {
           toast(`${monthDay(p.date)} ${MEAL_LABELS[p.meal]}的菜单刚被别人改过：回到这一份看看最新的再改`, 'error');
@@ -140,7 +141,7 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
           else toast(`${messageOf(e)}（最新的这会儿没取到：过一会儿再存一次就能看到）`, 'error');
         }
       } else if (settled) {
-        clearPending();
+        clearPending(p.body.clientKey);
         toast(settled, 'error');
       } else if (e instanceof ApiError && e.status === 401) {
         // 登录过期：这一笔留在手机上，重新登录以后到「厨房」点「原样重试」

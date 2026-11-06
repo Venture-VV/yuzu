@@ -3,7 +3,7 @@
 // 结果待确认（AGENTS.md）：发之前把操作编号与内容存在这台手机上并读回核对，存不下就不发；回复没收到时留着，
 // 再打开页面或联网时按原编号自动重发（同一个编号不会存两条），也可以点「原样再发」；没确认之前不能发新的（会顶掉它的编号）。
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { FEEDBACK_KIND_LABELS, FEEDBACK_LIMITS, type CanteenMe, type FeedbackKind, type MyFeedbackRow } from '@shared/canteen';
 import { Mascot } from '../Mascot';
 import { IconLetter, IconSparkle } from '../doodles';
@@ -31,6 +31,8 @@ export function TalkPage({ me, online }: { me: CanteenMe; online: boolean }) {
   const [pending, setPending] = useState<Pending | null>(() => readJson<Pending>(storeKey));
   const [busy, setBusy] = useState(false);
   const [flying, setFlying] = useState(0);
+  // 正在发的那一条：同一条同时只发一次（联网时的自动重发不会和还没回来的那次叠在一起）
+  const sending = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -43,11 +45,17 @@ export function TalkPage({ me, online }: { me: CanteenMe; online: boolean }) {
   /** 交给门店系统；没收到回复时留着这一条 */
   const send = useCallback(
     async (p: Pending): Promise<boolean> => {
+      if (sending.current === p.clientKey) return false;
+      sending.current = p.clientKey;
       setBusy(true);
+      // 有了结论只放下这一条：手机上存的已经是别的一条时不动它（例如离开再回来这一页，原来那次的回复晚到了）
+      const settle = () => {
+        if (readJson<Pending>(storeKey)?.clientKey === p.clientKey) removeKey(storeKey);
+        setPending((cur) => (cur?.clientKey === p.clientKey ? null : cur));
+      };
       try {
         await call<MyFeedbackRow>('POST', '/api/canteen/feedback', { clientKey: p.clientKey, kind: p.kind, content: p.content });
-        removeKey(storeKey);
-        setPending(null);
+        settle();
         setFlying((n) => n + 1);
         toast('柚子收到啦！✉️', 'ok');
         void load();
@@ -57,8 +65,7 @@ export function TalkPage({ me, online }: { me: CanteenMe; online: boolean }) {
         // 今天说太多了（门店系统先查同一个操作编号的那一条有没有，有就原样给回，没有才数今天几条）。放下，内容放回输入框
         const settled = e instanceof ApiError && (e.status === 400 || e.code === 'FEEDBACK_DAILY_LIMIT' || e.code === 'CLIENT_KEY_USED');
         if (settled) {
-          removeKey(storeKey);
-          setPending(null);
+          settle();
           setContent(p.content);
           setKind(p.kind);
           toast(messageOf(e), 'error');
@@ -72,6 +79,7 @@ export function TalkPage({ me, online }: { me: CanteenMe; online: boolean }) {
         }
         return false;
       } finally {
+        if (sending.current === p.clientKey) sending.current = null;
         setBusy(false);
       }
     },

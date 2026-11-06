@@ -1,7 +1,9 @@
 // 员工食堂 · 自己登记（docs/CANTEEN.md 第 14 节，店主 2026-11-06，K12–K14）：
 // 管理员在后台生成注册口令（注册二维码、海报上的链接里就带着），员工在开场引导的最后填用户名、手机号、密码，账号马上开好并登录。
 //
-// 注册口令存在 settings 的 canteen_registration 一项（开没开、口令）；换口令、开关都取规则锁串行，审计里不记口令本身。
+// 注册口令存在 settings 的 canteen_registration 一项（开没开、口令、改了几次 rev）；换口令、开关都取规则锁串行，审计里不记口令本身。
+// 换口令、开关都带上页面看到的 rev（与「修改带版本号、对不上拒绝」一样）：回复没收到时再点一次、或者晚到的那一下，
+// 都不会在别的修改之后再换一次口令（刚打印的海报不会被它作废）、再把开关改回去。
 // 登记的锁：同一个手机号的那一行（有的话，FOR UPDATE，与登录同一把）；新建靠用户名、手机号、工号的唯一索引兜底。
 
 import { randomInt, timingSafeEqual } from 'node:crypto';
@@ -35,14 +37,22 @@ const KEY = 'canteen_registration';
 interface Stored {
   enabled: boolean;
   code: string | null;
+  /** 改了几次（开关、换口令各加一）；没存过的算 0 */
+  rev: number;
 }
 
 /** 读注册设置：没存过时开着、还没有口令（管理员生成注册二维码以后才能登记） */
 export async function loadRegistration(db: Db): Promise<Stored> {
   const [row] = await db<{ value: Partial<Stored> | null }[]>`SELECT value FROM settings WHERE key = ${KEY}`;
   const v = row?.value ?? {};
-  return { enabled: typeof v.enabled === 'boolean' ? v.enabled : true, code: typeof v.code === 'string' && REG_CODE.test(v.code) ? v.code : null };
+  return {
+    enabled: typeof v.enabled === 'boolean' ? v.enabled : true,
+    code: typeof v.code === 'string' && REG_CODE.test(v.code) ? v.code : null,
+    rev: Number.isInteger(v.rev) && (v.rev as number) >= 0 ? (v.rev as number) : 0,
+  };
 }
+
+const registrationChanged = () => conflict('REGISTRATION_CHANGED', '注册设置刚改过（可能是刚才那一下已经办好了）：看看现在的口令和开关再说');
 
 /** 管理后台看的注册二维码：口令、链接（没填员工入口地址时没有链接）、自己登记的人数 */
 export async function registrationView(db: Db): Promise<CanteenRegistration> {
@@ -54,17 +64,20 @@ export async function registrationView(db: Db): Promise<CanteenRegistration> {
     code: reg.code,
     link: reg.code && settings.portalUrl ? registrationLink(settings.portalUrl, reg.code) : null,
     selfRegistered: n!.n,
+    rev: reg.rev,
   };
 }
 
 const newCode = () => Array.from({ length: 8 }, () => ACTIVATION_ALPHABET[randomInt(ACTIVATION_ALPHABET.length)]).join('');
 
-/** 在规则锁里改注册设置并记审计（审计只记开关与有没有换口令，不记口令） */
-async function saveRegistration(sql: Sql, ctx: OpContext, change: (before: Stored) => Stored): Promise<void> {
+/** 在规则锁里改注册设置并记审计（审计只记开关与有没有换口令，不记口令）；change 返回 null 表示不用改 */
+async function saveRegistration(sql: Sql, ctx: OpContext, change: (before: Stored) => Stored | null): Promise<void> {
   await sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
     await lockSettings(tx);
     const before = await loadRegistration(tx);
     const after = change(before);
+    if (!after) return;
     await tx`
       INSERT INTO settings (key, value, updated_at, updated_by) VALUES (${KEY}, ${tx.json(after as never)}, now(), ${ctx.actor.id})
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`;
@@ -78,19 +91,30 @@ async function saveRegistration(sql: Sql, ctx: OpContext, change: (before: Store
   });
 }
 
-/** 开关自己登记 */
+const Rev = z.number('页面上的注册设置太旧了：刷新再改').int().min(0);
+
+/** 开关自己登记：已经是要的样子就不用改；不然要带上看到的 rev，对不上拒绝（晚到的那一下不会把开关改回去） */
 export async function setRegistrationEnabled(sql: Sql, raw: unknown, ctx: OpContext): Promise<CanteenRegistration> {
-  const { enabled } = parse(z.object({ enabled: z.boolean('开还是关？') }), raw);
-  await saveRegistration(sql, ctx, (before) => ({ ...before, enabled }));
+  const { enabled, rev } = parse(z.object({ enabled: z.boolean('开还是关？'), rev: Rev }), raw);
+  await saveRegistration(sql, ctx, (before) => {
+    if (before.enabled === enabled) return null;
+    if (before.rev !== rev) throw registrationChanged();
+    return { ...before, enabled, rev: before.rev + 1 };
+  });
   return registrationView(sql);
 }
 
-/** 生成（或换）注册口令：旧的二维码、链接马上作废；生成时顺便打开自己登记 */
-export async function rotateRegistrationCode(sql: Sql, ctx: OpContext): Promise<CanteenRegistration> {
+/**
+ * 生成（或换）注册口令：旧的二维码、链接马上作废；生成时顺便打开自己登记。
+ * 要带上看到的 rev，对不上拒绝：回复没收到时再点一次、或者晚到的那一下，不会在已经换好以后再换一次。
+ */
+export async function rotateRegistrationCode(sql: Sql, raw: unknown, ctx: OpContext): Promise<CanteenRegistration> {
+  const { rev } = parse(z.object({ rev: Rev }), raw ?? {});
   await saveRegistration(sql, ctx, (before) => {
+    if (before.rev !== rev) throw registrationChanged();
     let code = newCode();
     while (code === before.code) code = newCode();
-    return { enabled: before.code === null ? true : before.enabled, code };
+    return { enabled: before.code === null ? true : before.enabled, code, rev: before.rev + 1 };
   });
   return registrationView(sql);
 }

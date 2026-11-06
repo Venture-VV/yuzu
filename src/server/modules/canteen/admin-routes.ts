@@ -70,7 +70,7 @@ export function registerCanteenAdminRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/erp/canteen/registration', manage, async () => registrationView(sql));
   app.put('/api/erp/canteen/registration', manage, async (req) => setRegistrationEnabled(sql, req.body, ctxOf(req)));
   /** 生成或换一个注册口令（旧二维码马上作废） */
-  app.post('/api/erp/canteen/registration/code', manage, async (req) => rotateRegistrationCode(sql, ctxOf(req)));
+  app.post('/api/erp/canteen/registration/code', manage, async (req) => rotateRegistrationCode(sql, req.body, ctxOf(req)));
 
   // ── 员工名单 ──
   app.get('/api/erp/canteen/employees', manage, async () => listEmployees(sql));
