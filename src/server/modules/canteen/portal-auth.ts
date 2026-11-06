@@ -78,8 +78,11 @@ async function createCanteenSession(db: Db, employeeId: number, meta: { ip?: str
   return token;
 }
 
-/** 校验会话：员工停用、会话过期都不认；有效时顺延（每小时最多写一次） */
-export async function resolveCanteenSession(db: Db, token: string): Promise<CanteenSessionEmployee | null> {
+/**
+ * 校验会话：员工停用、会话过期都不认；有效时顺延（每小时最多写一次）。renewed 为 true 时调用方要把浏览器的 Cookie 也顺延，
+ * 否则库里顺延了、浏览器还是在登录 30 天后丢掉 Cookie
+ */
+export async function resolveCanteenSession(db: Db, token: string): Promise<{ me: CanteenSessionEmployee; renewed: boolean } | null> {
   const [row] = await db<(CanteenSessionEmployee & { active: boolean; tokenHash: string; stale: boolean })[]>`
     SELECT s.token_hash, e.id, e.emp_no, e.name, e.role, e.avatar, e.department_id, e.code_epoch, e.active,
            s.last_seen_at < now() - interval '1 hour' AS stale
@@ -92,7 +95,10 @@ export async function resolveCanteenSession(db: Db, token: string): Promise<Cant
       WHERE token_hash = ${row.tokenHash}`;
     await db`UPDATE canteen_employees SET last_seen_at = now() WHERE id = ${row.id}`;
   }
-  return { id: row.id, empNo: row.empNo, name: row.name, role: row.role, avatar: row.avatar, departmentId: row.departmentId, codeEpoch: row.codeEpoch };
+  return {
+    me: { id: row.id, empNo: row.empNo, name: row.name, role: row.role, avatar: row.avatar, departmentId: row.departmentId, codeEpoch: row.codeEpoch },
+    renewed: row.stale,
+  };
 }
 
 export async function destroyCanteenSession(db: Db, token: string): Promise<void> {

@@ -216,19 +216,35 @@ const ListInput = z.object({
   voided: z.enum(['include', 'exclude', 'only']).default('include'),
 });
 
-/** 管理后台的用餐记录：按日期区间（最多 93 天）、餐次、工号或姓名筛选 */
-export async function listCheckins(db: Db, raw: unknown): Promise<CanteenCheckinRow[]> {
+/** 筛选条件（日期区间最多 93 天） */
+function checkinFilter(db: Db, raw: unknown): Fragment {
   const f = parse(ListInput, raw);
   if (f.from > f.to) throw badRequest('开始日期不能晚于结束日期');
   if ((Date.parse(f.to) - Date.parse(f.from)) / 86_400_000 > 93) throw badRequest('一次最多查 93 天');
   const like = f.q ? `%${f.q.replace(/[\\%_]/g, (m) => `\\${m}`)}%` : null;
-  return db<CanteenCheckinRow[]>`
-    ${ROW(db)}
-    WHERE c.meal_date BETWEEN ${f.from} AND ${f.to}
+  return db`c.meal_date BETWEEN ${f.from} AND ${f.to}
       ${f.meal ? db`AND c.meal = ${f.meal}` : db``}
       ${like ? db`AND (c.emp_no ILIKE ${like} OR c.employee_name ILIKE ${like})` : db``}
-      ${f.voided === 'exclude' ? db`AND c.voided_at IS NULL` : f.voided === 'only' ? db`AND c.voided_at IS NOT NULL` : db``}
-    ORDER BY c.meal_date DESC, c.scanned_at DESC, c.id DESC LIMIT 5000`;
+      ${f.voided === 'exclude' ? db`AND c.voided_at IS NULL` : f.voided === 'only' ? db`AND c.voided_at IS NOT NULL` : db``}`;
+}
+
+/** 页面上一次最多列这么多条；更多的看合计、导出表格（导出不截断） */
+export const CHECKIN_PAGE_LIMIT = 2000;
+
+/** 管理后台的用餐记录：按日期区间、餐次、工号或姓名筛选。limit 为 null 时全部（导出用） */
+export async function listCheckins(db: Db, raw: unknown, limit: number | null = CHECKIN_PAGE_LIMIT): Promise<CanteenCheckinRow[]> {
+  const where = checkinFilter(db, raw);
+  return db<CanteenCheckinRow[]>`
+    ${ROW(db)} WHERE ${where}
+    ORDER BY c.meal_date DESC, c.scanned_at DESC, c.id DESC ${limit === null ? db`` : db`LIMIT ${limit}`}`;
+}
+
+/** 同样的筛选：一共几条、其中没撤销的几条 */
+export async function countCheckins(db: Db, raw: unknown): Promise<{ total: number; valid: number }> {
+  const where = checkinFilter(db, raw);
+  const [r] = await db<{ total: number; valid: number }[]>`
+    SELECT count(*)::int AS total, count(*) FILTER (WHERE c.voided_at IS NULL)::int AS valid FROM canteen_checkins c WHERE ${where}`;
+  return r!;
 }
 
 /** 导出用的表格行（第一行是表头） */

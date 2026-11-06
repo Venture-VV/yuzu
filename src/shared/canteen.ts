@@ -276,6 +276,15 @@ export interface CheckinResult {
   mealCount: number;
 }
 
+/** 管理后台的用餐记录：页面一次最多列 rows 这么多条；total、valid 是按同样筛选的合计（导出表格不截断） */
+export interface CanteenCheckinList {
+  rows: CanteenCheckinRow[];
+  total: number;
+  valid: number;
+  /** 列不下了（合计比列出来的多） */
+  truncated: boolean;
+}
+
 export interface CanteenToday {
   today: string;
   /** 现在是哪一餐（不在开饭时间为 null） */

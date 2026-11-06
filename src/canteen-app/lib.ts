@@ -91,8 +91,12 @@ export interface CachedMe {
 }
 
 export const loadCachedMe = () => readJson<CachedMe>(ME_KEY);
-export function saveMe(me: CanteenMe): CachedMe {
-  const cached = { me, offsetMs: Date.parse(me.serverTime) - Date.now(), savedAt: Date.now() };
+/**
+ * 记下「我」：刚从门店系统拿到的（serverTime 是此刻）按它算时间差；只在本机改了一点（例如换头像）时传原来的时间差，
+ * 不能拿旧的 serverTime 重算（否则过了几分钟再换头像，饭卡码就慢了几分钟、扫的时候提示过期）
+ */
+export function saveMe(me: CanteenMe, keepOffsetMs?: number): CachedMe {
+  const cached = { me, offsetMs: keepOffsetMs ?? Date.parse(me.serverTime) - Date.now(), savedAt: Date.now() };
   writeJson(ME_KEY, cached);
   return cached;
 }
