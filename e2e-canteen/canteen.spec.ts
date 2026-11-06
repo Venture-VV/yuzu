@@ -195,6 +195,33 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
     await cook.unroute('**/api/canteen/menus/**');
     const later = await (await ctx.request.get(`${CANTEEN}/api/canteen/menus?from=${slot.date}&to=${slot.date}`)).json();
     expect(later.find((m: { meal: string }) => m.meal === 'lunch').note).toBe('今天有甜品，还有冰粉和绿豆汤');
+
+    // 刷新以后原样重试才发现菜单刚被别人改过：「用我的覆盖」存的是这次要存的内容、照原来要的发布（不是刷新后取到的那一份）
+    const lunch = async () => (await (await ctx.request.get(`${CANTEEN}/api/canteen/menus?from=${slot.date}&to=${slot.date}`)).json()).find((m: { meal: string }) => m.meal === 'lunch');
+    const openSlot = async () => {
+      await cook.getByRole('tab', { name: new RegExp(slot.date === (await today(ctx)) ? '今天' : '昨天') }).click();
+      await cook.getByRole('button', { name: /午餐/ }).click();
+    };
+    await openSlot();
+    await ctx.setOffline(true);
+    await cook.getByLabel('一句话备注').fill('冰粉卖完了，换成双皮奶');
+    await cook.getByRole('button', { name: '更新菜单' }).click();
+    await expect(cook.getByTestId('menu-pending')).toBeVisible();
+    await ctx.setOffline(false);
+    const before = await lunch();
+    const other = await ctx.request.put(`${CANTEEN}/api/canteen/menus/${slot.date}/lunch`, {
+      data: { clientKey: crypto.randomUUID(), version: before.version, dishes: before.dishes, note: '别人改的一句话', published: true },
+    });
+    expect(other.status()).toBe(200);
+    await cook.reload();
+    await openSlot();
+    await expect(cook.getByLabel('一句话备注')).toHaveValue('别人改的一句话');
+    await cook.getByTestId('menu-pending').getByRole('button', { name: '原样重试' }).click();
+    const sheet = cook.getByRole('dialog', { name: '菜单刚被别人改过' });
+    await expect(sheet).toBeVisible();
+    await sheet.getByRole('button', { name: '用我的覆盖（发布）' }).click();
+    await expect.poll(async () => (await lunch()).note).toBe('冰粉卖完了，换成双皮奶');
+    expect((await lunch()).published).toBe(true);
     await ctx.close();
   });
 

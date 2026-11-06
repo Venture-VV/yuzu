@@ -62,7 +62,8 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
   const [busy, setBusy] = useState(false);
   const storeKey = pendingKey(me.employee.id);
   const [pending, setPending] = useState<Pending | null>(() => readJson<Pending>(storeKey));
-  const [conflict, setConflict] = useState<CanteenMenu | null>(null);
+  // 「菜单刚被别人改过」：最新的那一份，和厨师这次要的是发布还是存草稿（「用我的覆盖」照这个存，不照别人的）
+  const [conflict, setConflict] = useState<{ latest: CanteenMenu; published: boolean } | null>(null);
   const [emojiFor, setEmojiFor] = useState<string | null>(null);
   const selection = `${date}:${meal}`;
   const latest = useRef(0);
@@ -126,11 +127,18 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
     } catch (e) {
       const settled = settledBy(e, p, storeNow(offsetMs).date);
       if (e instanceof ApiError && e.code === 'MENU_CHANGED') {
-        // 版本号已经过去了：原来那次以后也不会生效（要么已经存好，要么再也存不上），放下它，给厨师看最新的
+        // 版本号已经过去了：原来那次以后也不会生效（要么已经存好，要么再也存不上），放下它。
+        // 厨师这次要存的内容放回编辑框（刷新以后才重试的，编辑框里是刚取到的那一份，不是他要存的），再给他看最新的，由他决定
         clearPending();
-        const latestMenu = (await fetchMenu(p.date, p.meal).catch(() => undefined)) ?? null;
-        if (key === selected.current) setConflict(latestMenu);
-        else toast(`${monthDay(p.date)} ${MEAL_LABELS[p.meal]}的菜单刚被别人改过：回到这一份看看最新的再改`, 'error');
+        const latestMenu = await fetchMenu(p.date, p.meal).catch(() => undefined);
+        if (key !== selected.current) {
+          toast(`${monthDay(p.date)} ${MEAL_LABELS[p.meal]}的菜单刚被别人改过：回到这一份看看最新的再改`, 'error');
+        } else {
+          setDraft({ dishes: p.body.dishes.map((d) => ({ ...d, auto: false })), note: p.body.note });
+          setDirty(true);
+          if (latestMenu) setConflict({ latest: latestMenu, published: p.body.published });
+          else toast(`${messageOf(e)}（最新的这会儿没取到：过一会儿再存一次就能看到）`, 'error');
+        }
       } else if (settled) {
         clearPending();
         toast(settled, 'error');
@@ -342,15 +350,15 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
       <Sheet open={!!conflict} onClose={() => setConflict(null)} title="菜单刚被别人改过">
         <div className="space-y-3 pb-6">
           <p className="text-[15px] text-ink-2">
-            {conflict?.updatedByName ?? '别人'} {conflict && timeText(conflict.updatedAt)} 改过这份菜单，现在是 {conflict?.dishes.length ?? 0} 道菜：
+            {conflict?.latest.updatedByName ?? '别人'} {conflict && timeText(conflict.latest.updatedAt)} 改过这份菜单，现在是 {conflict?.latest.dishes.length ?? 0} 道菜：
           </p>
-          <p className="rounded-2xl bg-card p-3 text-[14px]">{conflict?.dishes.map((d) => `${d.emoji}${d.name}`).join('、') || '（空的）'}</p>
+          <p className="rounded-2xl bg-card p-3 text-[14px]">{conflict?.latest.dishes.map((d) => `${d.emoji}${d.name}`).join('、') || '（空的）'}</p>
           <Button
             tone="ghost"
             className="w-full"
             onClick={() => {
-              setServer(conflict ?? undefined);
-              setDraft(fromMenu(conflict ?? undefined));
+              setServer(conflict?.latest);
+              setDraft(fromMenu(conflict?.latest));
               setDirty(false);
               setConflict(null);
             }}
@@ -361,13 +369,14 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
             tone="peach"
             className="w-full"
             onClick={() => {
-              const v = conflict?.version ?? 0;
-              setServer(conflict ?? undefined);
+              if (!conflict) return;
+              setServer(conflict.latest);
               setConflict(null);
-              save(conflict?.published ?? false, v);
+              // 编辑框里是厨师这次要存的内容；照他原来要的发布或存草稿，接在最新的版本号上存
+              save(conflict.published, conflict.latest.version);
             }}
           >
-            用我的覆盖
+            用我的覆盖（{conflict?.published ? '发布' : '存成草稿'}）
           </Button>
         </div>
       </Sheet>
