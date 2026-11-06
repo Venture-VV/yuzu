@@ -106,9 +106,16 @@ yuzu 数据库（名单、菜单、点赞、打卡都在这里）← 管理后�
 
 1. 演示库那台的 `.env` 叠加 `compose.canteen.yaml`，设 `CANTEEN_PORT`、`CANTEEN_CODE_SECRET`（`openssl rand -hex 32`）。
 2. 在测试服 A 上用 `tailscale serve` 把员工端口发成 tailnet 内的 HTTPS 地址（带有效证书，相机和添加到桌面都能用）；参加测试的手机装 Tailscale 加入店主的 tailnet 就能打开。也可以用香港的服务器挂 Caddy 转发（不用备案，但跨境网络不保证稳定）。
-3. ERP「模块设置」打开「员工食堂」，「员工食堂 → 设置」选食堂部门、核对开饭时间、填员工入口地址；加几位测试员工、打印开通卡片，按第 11 节的清单在 iPhone 和安卓真机上走一遍。
+3. ERP「模块设置」打开「员工食堂」，「员工食堂 → 设置」选食堂部门、核对开饭时间、填员工入口地址；加几位测试员工、打印开通卡片，按第 12 节的清单在 iPhone 和安卓真机上走一遍。
 
-**备案之后（正式）**：网关服务器的 Caddy 加一个站点 `staff.<域名>`，转发到门店 yuzu 的员工端口（经 Tailscale，规则只放行网关服务器到这个端口）；门店 yuzu 叠加 `compose.canteen.yaml`、设 `CANTEEN_COOKIE_SECURE=true` 与 `CANTEEN_TRUST_PROXY=<网关服务器的 Tailscale 地址>`。部署照旧由 Codex 按 `main` 的版本标签做，开不开由店主定。
+**备案之后（正式）**：网关服务器的 Caddy 加一个站点 `staff.<域名>`，转发到门店 yuzu 的员工端口（经 Tailscale，规则只放行网关服务器到这个端口）；门店 yuzu 叠加 `compose.canteen.yaml`、设 `CANTEEN_COOKIE_SECURE=true` 与 `CANTEEN_TRUST_PROXY=<网关服务器的 Tailscale 地址>`，`CANTEEN_BIND` 设成门店那台的 Tailscale 地址（默认只监听本机 127.0.0.1，适合 `tailscale serve`）。部署照旧由 Codex 按 `main` 的版本标签做，开不开由店主定。
+
+```
+# 网关服务器的 Caddyfile 里加一段（示例）
+staff.<域名> {
+  reverse_proxy <门店 yuzu 的 Tailscale 地址>:8090
+}
+```
 
 | 环境变量 | 说明 |
 | --- | --- |
@@ -122,8 +129,30 @@ yuzu 数据库（名单、菜单、点赞、打卡都在这里）← 管理后�
 
 收费、餐补、饭卡余额、报餐与备菜人数、按部门限餐；门禁闸机与电锁；菜品照片；「下周想吃什么」投票；食堂负责人在手机上加人（名单只在后台管）；员工账号与系统账号合并登录。以后要做时再排。
 
-## 11. 测试与验收
+## 11. 代码在哪儿
+
+| 位置 | 内容 |
+| --- | --- |
+| `src/server/migrations/090_canteen.sql` | 五张表与打卡记录的保护（只能撤销，不能改、不能删） |
+| `src/shared/canteen.ts`、`src/shared/qr-svg.ts` | 角色、餐次与开饭时间、菜与标签、头像、饭卡码与开通码的格式、接口的数据；二维码画成 SVG |
+| `src/server/modules/canteen/` | `settings` 设置、`employees` 名单与开通、`portal-auth` 员工端登录与会话、`code` 饭卡码、`checkins` 打卡、`menus` 菜单与点赞、`portal` 员工端口、`admin-routes` 管理后台接口 |
+| `src/canteen-app/` | 手机端「柚子饭堂」（Vite 单独构建到 `dist/canteen-app`，员工端口托管）：吉祥物「柚柚」、首页、菜单、饭卡码、我的、厨房、扫码；离线外壳 `public/sw.js` |
+| `src/client/features/canteen/` | ERP「员工食堂」：今天、员工名单、菜单、用餐记录、设置；开通卡片的打印页 `/print/canteen-cards/:ids` |
+| 登记处 | ERP 注册表加模块 `canteen`（分组「员工服务」，默认关）、权限 `canteen.manage`、审计动作 `canteen_employee`、`app.ts` 挂管理接口、`index.ts` 开员工端口 |
+
+本机看界面：`npm run build` 后用独立演示库起应用（`CANTEEN_PORT=8090 CANTEEN_CODE_SECRET=<32 位以上> node dist/server/index.js`），手机尺寸打开 `http://localhost:8090`；改界面时 `npm run dev:canteen` 热更新。
+
+## 12. 测试与验收
 
 - 集成测试 `tests/canteen.test.ts`：模块开关、名单与开通、登录与锁定、饭卡码（过期、伪造、停用、重新开通后作废、跨天）、每餐一次、手动登记与撤销、断网补登（24 小时内外）、同一编号并发、菜单版本与发布、点赞、员工端口与主端口互不认会话、来源检查。
 - 手机浏览器流程 `e2e-canteen/`（Pixel 5 与 iPhone 尺寸）：后台开模块、加人、打印开通卡片 → 厨师开通并发布午餐 → 员工开通、点赞、亮码 → 负责人开通，用「从相册选」识别员工的码打卡、重复扫提示已打卡、断网扫到先记下、联网后补登成功 → 后台看到记录。CI 单独一个检查「员工食堂：手机端浏览器验收」。
 - **要真机验收的**（自动化替代不了）：iPhone Safari 与安卓浏览器的相机扫码速度、添加到桌面后离线打开、在饭堂实际 4G 信号下亮码与补登、微信里打开的提示。
+
+给测试 AI 的验收要点（独立演示库，不碰门店库与测试服的演练库）：
+
+1. 模块默认关：ERP 导航没有「员工食堂」，员工端口回「饭堂还没开张」；打开后才有。别的模块的页面、接口、`check` 自检都不受影响。
+2. 名单：工号转大写、重复的拒绝（内容一样的原样重提不重复）；厨师、负责人必须在食堂部门；粘贴一批有一行错就一行都不加；停用后那位员工马上登录不了、码扫不进；重新开通后旧密码、旧登录、旧码都作废。
+3. 饭卡码：飞行模式下也能亮码、30 秒换一次；截图 90 秒后扫提示过期；改过的码、别人的码拒绝。
+4. 打卡：每人每餐一次（重复扫黄色提示），不在开饭时间拒绝；断网扫到显示「已记下」，联网后自动补登；手动登记；负责人只能撤销自己当天登记的，管理员随时，撤销留原因。
+5. 菜单：员工看不到草稿；两人同时改，后存的提示被改过；点赞重复点不多算。
+6. 安全：员工端口上没有 `/api/erp/*`、`/api/auth/*`，主端口上没有 `/api/canteen/*`；两边的登录互不认；跨站的写请求被拒绝。

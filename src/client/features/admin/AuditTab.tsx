@@ -26,6 +26,7 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   operation_abandoned: { label: '作废待确认记账', tone: 'ember' },
   settlement_closed: { label: '确认日结', tone: 'pine' },
   settings_updated: { label: '修改规则', tone: 'ember' },
+  canteen_employee: { label: '员工食堂名单', tone: 'pine' },
   plan_saved: { label: '保存套餐', tone: 'neutral' },
   item_saved: { label: '保存项目', tone: 'neutral' },
   export: { label: '导出', tone: 'neutral' },

@@ -36,6 +36,7 @@ const AdminShell = lazyPage(() => import('./features/admin/AdminShell').then((m)
 const CheckoutPrintPage = lazyPage(() => import('./features/print/CheckoutPrintPage').then((m) => m.CheckoutPrintPage));
 const RefundPrintPage = lazyPage(() => import('./features/print/RefundPrintPage').then((m) => m.RefundPrintPage));
 const SettlementPrintPage = lazyPage(() => import('./features/print/SettlementPrintPage').then((m) => m.SettlementPrintPage));
+const CanteenCardsPrintPage = lazyPage(() => import('./features/canteen/CardsPrintPage').then((m) => m.CanteenCardsPrintPage));
 const ShiftPrintPage = lazyPage(() => import('./features/print/ShiftPrintPage').then((m) => m.ShiftPrintPage));
 // ERP 工作区
 const ErpShell = lazyPage(() => import('./features/erp/ErpShell').then((m) => m.ErpShell));
@@ -57,6 +58,7 @@ const ContractsPage = lazyPage(() => import('./features/contracts/ContractsPage'
 const ContractDetailPage = lazyPage(() => import('./features/contracts/ContractDetailPage').then((m) => m.ContractDetailPage));
 const ContractFormPage = lazyPage(() => import('./features/contracts/ContractFormPage').then((m) => m.ContractFormPage));
 const PaymentsPage = lazyPage(() => import('./features/payments/PaymentsPage').then((m) => m.PaymentsPage));
+const CanteenPage = lazyPage(() => import('./features/canteen/CanteenPage').then((m) => m.CanteenPage));
 const PaymentRequestPage = lazyPage(() => import('./features/payments/PaymentRequestPage').then((m) => m.PaymentRequestPage));
 const PaymentRequestFormPage = lazyPage(() => import('./features/payments/PaymentRequestFormPage').then((m) => m.PaymentRequestFormPage));
 const DocFormPage = lazyPage(() => import('./features/inventory/DocFormPage').then((m) => m.DocFormPage));
@@ -184,6 +186,8 @@ const router = createBrowserRouter([
       { path: 'refund/:id', element: <RefundPrintPage /> },
       { path: 'shift/:id', element: <ShiftPrintPage /> },
       { path: 'settlement/:date', element: <SettlementPrintPage /> },
+      // 员工食堂的开通卡片（A4）
+      { path: 'canteen-cards/:ids', element: <CanteenCardsPrintPage /> },
     ],
   },
   // 对客导览的大屏模式（v0.7.19）：没有导航与操作，适合门店大屏常开
@@ -222,6 +226,8 @@ const router = createBrowserRouter([
       { path: 'payments', element: <PaymentsPage /> },
       { path: 'payments/requests/new', element: <PaymentRequestFormPage /> },
       { path: 'payments/requests/:id', element: <PaymentRequestPage /> },
+      // 员工食堂 · 柚子饭堂（docs/CANTEEN.md）
+      { path: 'canteen', element: <CanteenPage /> },
       { path: '*', element: <Navigate to="/erp" replace /> },
     ],
   },

@@ -22,5 +22,5 @@
       "@client/*": ["./src/client/*"]
     }
   },
-  "include": ["src", "tests", "e2e", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"]
+  "include": ["src", "tests", "e2e", "e2e-canteen", "vite.config.ts", "vite.canteen.config.ts", "vitest.config.ts", "playwright.config.ts", "playwright.canteen.config.ts"]
 }

@@ -4,13 +4,13 @@
 
 import type { Permission } from './permissions';
 
-export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'approvals', 'contracts', 'payments', 'expenses', 'revenue'] as const;
+export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'approvals', 'contracts', 'payments', 'expenses', 'revenue', 'canteen'] as const;
 export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
 
 export interface ErpModuleDef {
   label: string;
   /** ERP 导航的分组 */
-  group: '供应链' | '财务' | '法务';
+  group: '供应链' | '财务' | '法务' | '员工服务';
   description: string;
   /** 模块的入口页面 */
   path: string;
@@ -149,6 +149,18 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     apis: ['/api/erp/revenue'],
     perms: ['erp.revenue'],
     defaultEnabled: true,
+    requires: [],
+  },
+  // 员工食堂 · 柚子饭堂（店主 2026-11-06，docs/CANTEEN.md）：默认关；关着时员工端口也回「饭堂还没开张」
+  canteen: {
+    label: '员工食堂',
+    group: '员工服务',
+    description: '员工手机上的「柚子饭堂」：看菜单、点赞、亮饭卡码；食堂负责人扫码打卡、厨师发布菜单。这里管员工名单、打印开通卡片、看用餐记录、设开饭时间',
+    path: '/erp/canteen',
+    pages: ['/erp/canteen'],
+    apis: ['/api/erp/canteen'],
+    perms: ['canteen.manage'],
+    defaultEnabled: false,
     requires: [],
   },
 };

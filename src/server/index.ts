@@ -10,6 +10,7 @@ import { ensureMembershipLive } from './modules/membership';
 import { HEARTBEAT_INTERVAL_MS } from '@shared/devices';
 import { holdAppPresence } from './presence';
 import { buildMpApp } from './modules/mp/app';
+import { buildCanteenApp } from './modules/canteen/portal';
 
 const config = loadConfig();
 const sql = createSql(config.databaseUrl);
@@ -51,6 +52,12 @@ async function main() {
     await mpApp.listen({ host: config.mp.host, port: config.mp.port! });
     app.log.info(`小程序端口已开：${config.mp.host}:${config.mp.port}（只给网关）`);
   }
+  // 员工食堂 · 柚子饭堂（docs/CANTEEN.md）：单开的员工端口，只挂柚子饭堂的页面与 /api/canteen/*；没设 CANTEEN_PORT 不开
+  const canteenApp = config.canteen.port ? await buildCanteenApp(sql, config) : null;
+  if (canteenApp) {
+    await canteenApp.listen({ host: config.canteen.host, port: config.canteen.port! });
+    app.log.info(`员工端口（柚子饭堂）已开：${config.canteen.host}:${config.canteen.port}`);
+  }
 
   // 每分钟的自动任务（赠金到期、会员到期处理、权益发放、生日礼、预约、会员挑战、次卡过期，见 jobs.ts）：
   // 启动时先跑一次，之后每分钟一次；生日礼每 10 分钟查一次
@@ -90,6 +97,7 @@ async function main() {
     clearInterval(deviceTimer);
     await app.close();
     await mpApp?.close();
+    await canteenApp?.close();
     await presence.release();
     await sql.end({ timeout: 5 });
     process.exit(0);
