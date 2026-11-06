@@ -1,6 +1,8 @@
 // 员工食堂 · 柚子饭堂（docs/CANTEEN.md）的浏览器流程：后台（电脑尺寸）准备名单与开通卡片 →
 // 厨师在手机上发布菜单 → 员工开通、点赞、亮饭卡码 → 负责人「从相册选」员工的码打卡、重复扫提示已打卡、
 // 断网扫到先记下、联网后自动补登 → 后台看到人数与记录。
+// 第二期（第 14–16 节）：新同事扫注册二维码 → 看柚子的开场动画 → 自己登记 → 走新手教程 → 跟柚子说 → 后台柚子信箱回信。
+// 前面那几位（开通卡片来的）在手机上先记成「看过开场、走过教程」，只测原来的流程。
 // 要应用开着员工端口：E2E_BASE_URL（员工后台，默认 http://localhost:8080）、E2E_CANTEEN_URL（员工端口，默认 http://localhost:8090），
 // 库里要有演示的店主 linlan（seed-demo）。只在独立演示库上跑：会建部门、员工、菜单与打卡。
 
@@ -20,8 +22,16 @@ const PHONES = {
   iphone: { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, userAgent: devices['iPhone 13'].userAgent },
 };
 
-async function phone(browser: Browser, kind: keyof typeof PHONES): Promise<BrowserContext> {
-  return browser.newContext({ ...PHONES[kind], locale: 'zh-CN', timezoneId: tz });
+/** fresh：第一次打开柚子饭堂的手机（放开场动画、走新手教程）；不给时当作已经看过开场、走过教程 */
+async function phone(browser: Browser, kind: keyof typeof PHONES, fresh = false): Promise<BrowserContext> {
+  const ctx = await browser.newContext({ ...PHONES[kind], locale: 'zh-CN', timezoneId: tz });
+  if (!fresh) {
+    await ctx.addInitScript(() => {
+      localStorage.setItem('yuzu.canteen.intro.v1', 'true');
+      localStorage.setItem('yuzu.canteen.tour.v1', 'done');
+    });
+  }
+  return ctx;
 }
 
 /** 扫开通卡片打开（#join=开通码），设密码，进首页 */
@@ -235,6 +245,119 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
     await admin.getByRole('radio', { name: '菜单' }).click();
     await expect(admin.getByTestId('canteen-menus').getByText('❤️1')).toBeVisible();
     await admin.screenshot({ path: `${OUT}/admin.png`, fullPage: true });
+  });
+});
+
+test.describe.serial('第二期：开场动画、新同事登记、新手教程、跟柚子说', () => {
+  test('新同事扫注册二维码：开场动画 → 自己登记 → 新手教程 → 跟柚子说；后台回信，员工看得到', async ({ browser }) => {
+    // 后台：生成注册二维码（前面已经开了模块、填了员工入口地址）
+    const actx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-CN', timezoneId: tz });
+    const admin = await actx.newPage();
+    await admin.goto('/login');
+    await admin.fill('#username', 'linlan');
+    await admin.fill('#password', 'yuzu2026');
+    await admin.getByRole('button', { name: '登录' }).click();
+    await admin.waitForURL((u) => !u.pathname.startsWith('/login'));
+    await admin.goto('/erp/canteen');
+    await admin.getByRole('radio', { name: '设置' }).click();
+    const create = admin.getByTestId('canteen-reg-create');
+    if (await create.isVisible()) await create.click();
+    const link = (await admin.getByTestId('canteen-reg-link').innerText()).trim();
+    expect(link).toMatch(new RegExp(`^${CANTEEN.replace(/[.:/]/g, '\\$&')}/#reg=[2-9A-HJ-NP-Z]{8}$`));
+    await admin.screenshot({ path: `${OUT}/admin-registration.png`, fullPage: true });
+
+    // 新同事的手机：第一次打开，先放开场动画（七段，点一下打完这句、再点下一句）
+    const ctx = await phone(browser, 'iphone', true);
+    const p = await ctx.newPage();
+    await p.goto(link);
+    const intro = p.getByTestId('intro');
+    await expect(intro).toBeVisible();
+    await expect(intro).toContainText('汤崎的小 AI 助理');
+    for (let i = 0; i < 7; i++) {
+      await expect(intro).toHaveAttribute('data-beat', String(i));
+      await p.getByTestId('intro-stage').click();
+      if (i === 4) await p.screenshot({ path: `${OUT}/intro-scratch.png` });
+      if (i < 6) await p.getByTestId('intro-stage').click();
+    }
+    await expect(intro).toContainText('我想从我开的这家柚子食堂开始。');
+    await p.screenshot({ path: `${OUT}/intro-door.png` });
+    await p.getByTestId('intro-enter').click();
+
+    // 新同事登记：口令从二维码里带上了，填三格就进门
+    await expect(p.getByTestId('register-page')).toBeVisible();
+    await expect(p.getByTestId('register-code-ok')).toBeVisible();
+    await noOverflow(p);
+    await p.getByLabel('用户名').fill('小雨');
+    await p.getByLabel('手机号').fill('139 0000 1234');
+    await p.getByLabel('密码', { exact: true }).fill('xiaoyu-2026');
+    await p.screenshot({ path: `${OUT}/register.png`, fullPage: true });
+    await p.getByTestId('register-submit').click();
+
+    // 新手教程：指着的地方要自己点才往下走
+    const tour = p.getByTestId('tour');
+    await expect(tour).toHaveAttribute('data-step', 'home');
+    await p.screenshot({ path: `${OUT}/tour-home.png` });
+    await p.getByTestId('tour-next').click();
+    await expect(tour).toHaveAttribute('data-step', 'like');
+    await p.getByRole('button', { name: '点赞：番茄炒蛋（示例）' }).click();
+    await expect(tour).toHaveAttribute('data-step', 'code');
+    // 点别处不算：挡板接住了点击
+    await p.mouse.click(20, 200);
+    await expect(tour).toHaveAttribute('data-step', 'code');
+    await p.getByTestId('tab-code').click();
+    await expect(tour).toHaveAttribute('data-step', 'qr');
+    await expect(p.getByTestId('meal-code').locator('svg[data-qr]')).toHaveAttribute('data-qr', /^YZC1:/);
+    await p.getByTestId('tour-next').click();
+    await expect(tour).toHaveAttribute('data-step', 'talk');
+    await p.getByTestId('tour-next').click();
+    await expect(tour).toHaveAttribute('data-step', 'me');
+    await p.getByTestId('tour-next').click();
+    await expect(tour).toHaveAttribute('data-step', 'done');
+    await p.getByTestId('tour-finish').click();
+    await expect(tour).toHaveCount(0);
+
+    // 跟柚子说
+    await p.getByTestId('talk-entry').click();
+    await expect(p.getByTestId('talk-page')).toBeVisible();
+    await p.getByLabel('想跟柚子说的话').fill('想在手机上就能看到排班表！');
+    await p.getByTestId('talk-send').click();
+    await expect(p.getByText('柚子收到啦')).toBeVisible();
+    await expect(p.getByText('柚子还没看').first()).toBeVisible();
+    await noOverflow(p);
+    await p.screenshot({ path: `${OUT}/talk.png`, fullPage: true });
+
+    // 后台：名单里有自己登记的小雨；柚子信箱里回信
+    await admin.getByRole('radio', { name: '员工名单' }).click();
+    await expect(admin.getByRole('row', { name: /小雨/ })).toContainText('自己登记');
+    await admin.getByRole('radio', { name: /柚子信箱/ }).click();
+    const item = admin.getByTestId('canteen-feedback').locator('li', { hasText: '想在手机上就能看到排班表' }).first();
+    await item.getByRole('button', { name: '回信' }).click();
+    await admin.getByRole('textbox', { name: '回信' }).fill('收到！柚子记下了，排班表排进下一版～');
+    await admin.getByTestId('feedback-reply-save').click();
+    await expect(admin.getByText('回信发出去了')).toBeVisible();
+    await admin.screenshot({ path: `${OUT}/admin-mailbox.png`, fullPage: true });
+
+    // 员工看得到回信；「我的」里能再看一遍开场
+    await p.reload();
+    await expect(p.getByTestId('talk-reply').first()).toContainText('排班表排进下一版');
+    await p.getByTestId('tab-me').click();
+    await p.getByTestId('replay-intro').click();
+    await expect(p.getByTestId('intro')).toBeVisible();
+    await p.getByTestId('intro-skip').click();
+    await expect(p.getByTestId('replay-intro')).toBeVisible();
+
+    // 换手机：用用户名或手机号登录（看过开场的手机直接到登录页）
+    const other = await phone(browser, 'android');
+    const q = await other.newPage();
+    await q.goto(CANTEEN);
+    await expect(q.getByTestId('login-page')).toBeVisible();
+    await q.getByLabel('账号').fill('13900001234');
+    await q.getByLabel('密码').fill('xiaoyu-2026');
+    await q.getByRole('button', { name: '登录' }).click();
+    await expect(q.getByTestId('tab-home')).toBeVisible();
+    await other.close();
+    await ctx.close();
+    await actx.close();
   });
 });
 

@@ -1,6 +1,7 @@
 // 看板娘「柚子」（docs/MASCOT.md）：浴族 yuzu 总被 AI 认成柚子，干脆就叫柚子——汤崎的小 AI 助理、柚子饭堂的老板娘。
 // 手绘动画的样子：墨色描线带一点「抖动」（每秒换几次噪声种子，像一帧一帧重画的线），平涂两色的赛璐璐阴影。
-// 头顶叠好的汤巾上坐着小柚子「柚柚」，米白浴衣、松林绿领口与前掛け（围裙上一个「柚」字），栗木色短发、柚子切片发夹。
+// 头顶叠好的汤巾（Relax 蓝的条纹）上坐着小柚子「柚柚」，麻色浴衣、Organic 绿的领口与前掛け（围裙上一个「柚」字），
+// 栗木色短发、柚子切片发夹。颜色都取自汤崎品牌书（木与麻 + 概念色），见 docs/MASCOT.md。
 //
 // 表情 mood 与动作 pose 可以随意组合；talking 时嘴一张一合（开场动画说话用）。动画全用 SVG 自带的 SMIL，
 // 管理后台与柚子饭堂两边都能用、不依赖页面的样式；系统设了「减少动态效果」或传 still 时一动不动（打印用）。
@@ -14,33 +15,34 @@ export type Pose = 'rest' | 'wave' | 'bowl' | 'point' | 'scratch' | 'cheer';
 export const MOODS: readonly Mood[] = ['happy', 'yum', 'sleepy', 'oops', 'wink', 'worried', 'love'];
 export const POSES: readonly Pose[] = ['rest', 'wave', 'bowl', 'point', 'scratch', 'cheer'];
 
+// 颜色照汤崎品牌书（店主 11-06 给的飞书文件）：描线用深胡桃（不用纯黑），浴衣是麻的米白、木色的阴影；
+// 前掛け用 Organic 绿（「食」）、汤巾的条纹用 Relax 蓝（「疗」）、柚子用柔和的 Pure 黄（「清新的柑橘」）。
 const C = {
-  ink: '#3A2A1F',
-  skin: '#FFE7D6',
-  skinShade: '#F6C9AF',
-  hair: '#7A5233',
-  hairShade: '#5C3B24',
-  hairHi: '#A87F55',
-  robe: '#FCF7EC',
-  robeShade: '#E8DDC6',
-  pine: '#24493A',
-  pineShade: '#183428',
-  pineHi: '#3D6B56',
-  yuzu: '#F2C230',
-  yuzuShade: '#D9A21C',
-  yuzuHi: '#FFE38C',
+  ink: '#4a3628',
+  skin: '#fde5d3',
+  skinShade: '#f3c8ad',
+  hair: '#7a5636',
+  hairShade: '#5c3f27',
+  hairHi: '#a8825a',
+  robe: '#f8f1e6',
+  robeShade: '#e4d0b3',
+  apron: '#6d673d',
+  apronShade: '#57522f',
+  towel: '#4d718c',
+  yuzu: '#e9c75e',
+  yuzuShade: '#cfa63c',
+  yuzuHi: '#f6e3a0',
+  leaf: '#7c7a45',
   wood: '#937051',
-  woodHi: '#C4A67E',
-  woodShade: '#735539',
-  irisDark: '#4A2A13',
-  iris: '#C98A16',
-  blush: '#F49A84',
-  mouth: '#9C3A2E',
-  tongue: '#F28A86',
-  heart: '#E0604A',
-  steam: '#D8CFBE',
-  sweat: '#8FC9E6',
-  white: '#FFFFFF',
+  irisDark: '#4a2c16',
+  iris: '#bf8a2a',
+  blush: '#ef9f86',
+  mouth: '#9c3f2f',
+  tongue: '#ee8f86',
+  heart: '#c04a1f',
+  steam: '#d8cbb6',
+  sweat: '#8db6cf',
+  white: '#ffffff',
 } as const;
 
 const reduceMotion = () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -132,11 +134,11 @@ function Body({ pose, anim }: { pose: Pose; anim: boolean }) {
       <path d="M150 198C158 222 162 252 163 278Q156 281 149 282C151 252 149 224 143 200Z" fill={C.robeShade} />
       {/* 领口：左襟压右襟，松林绿的领 */}
       <path d="M104 190L120 222L136 190Z" fill={C.skin} />
-      <path d="M137 187L146 191L121 231L114 226Z" fill={C.pine} {...line(2)} />
-      <path d="M103 187L94 191L122 235L128 229Z" fill={C.pine} {...line(2)} />
-      {/* 前掛け（店里的围裙）：松林绿，系柚黄的绳，中间一个「柚」字 */}
-      <path d="M84 236H156L160 283Q120 291 80 283Z" fill={C.pine} {...line()} />
-      <path d="M100 242L98 284M140 242L142 284" fill="none" {...line(1.6, C.pineShade)} />
+      <path d="M137 187L146 191L121 231L114 226Z" fill={C.apron} {...line(2)} />
+      <path d="M103 187L94 191L122 235L128 229Z" fill={C.apron} {...line(2)} />
+      {/* 前掛け（店里的围裙）：Organic 绿（食），系柚黄的绳，中间一个「柚」字 */}
+      <path d="M84 236H156L160 283Q120 291 80 283Z" fill={C.apron} {...line()} />
+      <path d="M100 242L98 284M140 242L142 284" fill="none" {...line(1.6, C.apronShade)} />
       <path d="M82 236H158" fill="none" {...line(3.4, C.yuzu)} />
       <g transform="translate(82 238)">
         <path d="M0 0C-8 -6 -14 -2 -10 4C-6 8 -2 4 0 0Z" fill={C.yuzu} {...line(1.6)} />
@@ -149,8 +151,8 @@ function Body({ pose, anim }: { pose: Pose; anim: boolean }) {
         textAnchor="middle"
         fontSize="15"
         fontWeight="900"
-        fill={C.pine}
-        fontFamily="'PingFang SC','HarmonyOS Sans SC','Microsoft YaHei','Noto Sans CJK SC',sans-serif"
+        fill={C.apron}
+        fontFamily="'HarmonyOS Sans SC','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',sans-serif"
       >
         柚
       </text>
@@ -164,7 +166,7 @@ function Sleeve({ d, cuff }: { d: string; cuff: string }) {
   return (
     <g>
       <path d={d} fill={C.robe} {...line()} />
-      <path d={cuff} fill="none" {...line(3, C.pine)} />
+      <path d={cuff} fill="none" {...line(3, C.apron)} />
     </g>
   );
 }
@@ -304,7 +306,7 @@ function Bowl({ anim }: { anim: boolean }) {
         <path d="M0 -4.4V4.4M-3.8 -2.2L3.8 2.2M-3.8 2.2L3.8 -2.2" fill="none" {...line(1, C.white)} />
       </g>
       <path d="M90 230Q92 268 120 270Q148 268 150 230Z" fill={C.white} {...line()} />
-      <path d="M94 240Q120 250 146 240" fill="none" {...line(3, C.pine)} />
+      <path d="M94 240Q120 250 146 240" fill="none" {...line(3, C.towel)} />
       <path d="M110 270H130L128 276H112Z" fill={C.robeShade} {...line(2)} />
     </g>
   );
@@ -372,7 +374,7 @@ function Head({ mood, pose, talking, anim, id }: { mood: Mood; pose: Pose; talki
       {/* 头顶：叠好的汤巾，两道松林绿条纹 */}
       <g transform="rotate(-8 120 40)">
         <rect x="83" y="30" width="74" height="19" rx="8" fill={C.white} {...line(2.6)} />
-        <path d="M96 32V47M144 32V47" fill="none" {...line(3, C.pine)} />
+        <path d="M96 32V47M144 32V47" fill="none" {...line(3, C.towel)} />
         <path d="M100 39H140" fill="none" {...line(1.4, C.robeShade)} />
       </g>
       <Yuyu mood={mood} anim={anim} id={id} />
@@ -388,7 +390,7 @@ function Yuyu({ mood, anim, id }: { mood: Mood; anim: boolean; id: (n: string) =
       {anim && <animateTransform attributeName="transform" type="rotate" values="-7 128 32;7 128 32;-7 128 32" dur="2.6s" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1" />}
       <path d="M129 2c1 -5 5 -8 10 -7" fill="none" {...line(2.4, C.wood)} />
       <circle cx="128" cy="18" r="15" fill={`url(#${id('yz')})`} {...line(2.6)} />
-      <path d="M130 4c4 -8 13 -10 20 -7c-3 7 -12 10 -20 7z" fill="#5E9B5E" {...line(1.8)} />
+      <path d="M130 4c4 -8 13 -10 20 -7c-3 7 -12 10 -20 7z" fill={C.leaf} {...line(1.8)} />
       {closed ? (
         <path d="M119 18q3.5 -3 7 0M130 18q3.5 -3 7 0" fill="none" {...line(1.8)} />
       ) : (
@@ -413,7 +415,7 @@ function Blush() {
     <g>
       <ellipse cx="74" cy="157" rx="11" ry="6" fill={C.blush} opacity="0.45" />
       <ellipse cx="166" cy="157" rx="11" ry="6" fill={C.blush} opacity="0.45" />
-      <path d="M67 159l3 -5M73 159l3 -5M79 159l3 -5M161 159l3 -5M167 159l3 -5M173 159l3 -5" fill="none" {...line(1.6, '#E8705C')} opacity="0.55" />
+      <path d="M67 159l3 -5M73 159l3 -5M79 159l3 -5M161 159l3 -5M167 159l3 -5M173 159l3 -5" fill="none" {...line(1.6, '#dc7a62')} opacity="0.55" />
     </g>
   );
 }
@@ -636,7 +638,7 @@ function Effects({ mood, anim }: { mood: Mood; anim: boolean }) {
       return (
         <g>
           <Sparkle x={202} y={126} anim={anim} />
-          <Sparkle x={38} y={88} s={0.6} color={C.pine} delay={0.9} anim={anim} />
+          <Sparkle x={38} y={88} s={0.6} color={C.towel} delay={0.9} anim={anim} />
         </g>
       );
     case 'yum':
@@ -656,7 +658,7 @@ function Effects({ mood, anim }: { mood: Mood; anim: boolean }) {
       );
     case 'sleepy':
       return (
-        <g fill={C.pine} fontFamily="system-ui, sans-serif" fontWeight="800">
+        <g fill={C.towel} fontFamily="'Helvetica Neue', Helvetica, Arial, sans-serif" fontWeight="800">
           {anim && <animateTransform attributeName="transform" type="translate" values="0 0;4 -6;0 0" dur="2.4s" repeatCount="indefinite" />}
           <text x="186" y="90" fontSize="20">
             Z

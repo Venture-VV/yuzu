@@ -174,6 +174,9 @@ export function beep(kind: 'ok' | 'already' | 'error' | 'queued') {
 
 const hm = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 export const timeText = (iso: string) => hm.format(new Date(iso));
+const md = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric' });
+/** 门店时间的「11月6日」（给一个时刻） */
+export const dayText = (iso: string) => md.format(new Date(iso));
 
 const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 export function dayLabel(date: string, today: string): string {

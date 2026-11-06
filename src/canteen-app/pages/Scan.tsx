@@ -166,7 +166,7 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
         ))}
       </div>
       {today && !current && <p className="rounded-2xl bg-cream-2 px-4 py-2.5 text-[14px] font-bold text-ink-2">现在不是开饭时间，扫了也不会记</p>}
-      {!online && <p className="rounded-2xl bg-sky-soft px-4 py-2.5 text-[14px] font-bold text-[#1f6fa8]">📶 现在没网：照样扫，先记在手机上，联网后自动补登</p>}
+      {!online && <p className="rounded-2xl bg-sky-soft px-4 py-2.5 text-[14px] font-bold text-relax">📶 现在没网：照样扫，先记在手机上，联网后自动补登</p>}
 
       <div className="relative overflow-hidden rounded-[28px] bg-ink shadow-[var(--shadow-pop)]">
         <video ref={video} className={cn('aspect-square w-full object-cover', camera !== 'on' && 'opacity-0')} playsInline muted />

@@ -25,7 +25,7 @@ export function MenuPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number }) 
             onClick={() => setDay(d)}
             className={cn(
               'flex min-w-[64px] shrink-0 flex-col items-center rounded-2xl px-3 py-2 transition-all active:scale-95',
-              d === day ? 'bg-yuzu font-black text-ink shadow-[0_3px_0_#e0a91c]' : 'bg-card text-ink-2 ring-1 ring-line',
+              d === day ? 'bg-wood-deep font-black text-white shadow-[0_3px_0_var(--color-wood-ink)]' : 'bg-card text-ink-2 ring-1 ring-line',
             )}
           >
             <span className="text-[14px] font-extrabold">{dayLabel(d, today)}</span>
@@ -33,7 +33,7 @@ export function MenuPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number }) 
           </button>
         ))}
       </div>
-      {stale && <p className="rounded-2xl bg-sky-soft px-4 py-2.5 text-[14px] font-bold text-[#1f6fa8]">没网，显示的是上次看到的菜单</p>}
+      {stale && <p className="rounded-2xl bg-sky-soft px-4 py-2.5 text-[14px] font-bold text-relax">没网，显示的是上次看到的菜单</p>}
       <div className="space-y-3">
         {enabled.map((w) => (
           <MealCard key={w.meal} meal={w.meal} window={w} menu={menus?.find((m) => m.date === day && m.meal === w.meal)} onLike={like} />

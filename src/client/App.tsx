@@ -37,6 +37,7 @@ const CheckoutPrintPage = lazyPage(() => import('./features/print/CheckoutPrintP
 const RefundPrintPage = lazyPage(() => import('./features/print/RefundPrintPage').then((m) => m.RefundPrintPage));
 const SettlementPrintPage = lazyPage(() => import('./features/print/SettlementPrintPage').then((m) => m.SettlementPrintPage));
 const CanteenCardsPrintPage = lazyPage(() => import('./features/canteen/CardsPrintPage').then((m) => m.CanteenCardsPrintPage));
+const CanteenPosterPrintPage = lazyPage(() => import('./features/canteen/PosterPrintPage').then((m) => m.CanteenPosterPrintPage));
 const ShiftPrintPage = lazyPage(() => import('./features/print/ShiftPrintPage').then((m) => m.ShiftPrintPage));
 // ERP 工作区
 const ErpShell = lazyPage(() => import('./features/erp/ErpShell').then((m) => m.ErpShell));
@@ -188,6 +189,7 @@ const router = createBrowserRouter([
       { path: 'settlement/:date', element: <SettlementPrintPage /> },
       // 员工食堂的开通卡片（A4）
       { path: 'canteen-cards/:ids', element: <CanteenCardsPrintPage /> },
+      { path: 'canteen-poster', element: <CanteenPosterPrintPage /> },
     ],
   },
   // 对客导览的大屏模式（v0.7.19）：没有导航与操作，适合门店大屏常开

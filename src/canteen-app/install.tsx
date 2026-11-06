@@ -70,14 +70,14 @@ export function InstallGuide() {
           </ol>
         )
       )}
-      <p className="rounded-2xl bg-yuzu-soft px-4 py-3 text-[14px]">添加以后，桌面上会多一颗小柚子 🍊 开饭时点它就能亮码，没网也行。</p>
+      <p className="rounded-2xl bg-yuzu-soft px-4 py-3 text-[14px]">添加以后，桌面上会多一个柚子：开饭时点它就能亮码，没网也行。</p>
     </div>
   );
 }
 
 export function WeChatTip() {
   return (
-    <div className="rounded-2xl bg-peach-soft px-4 py-3 text-[14px] font-bold text-[#a8382c]">
+    <div className="rounded-2xl bg-peach-soft px-4 py-3 text-[14px] font-bold text-danger">
       你在微信里打开的：点右上角 <span className="font-black">···</span> 选「在浏览器打开」，才能添加到桌面、用相机扫码。
     </div>
   );

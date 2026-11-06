@@ -177,7 +177,7 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
             type="button"
             onClick={() => (!dirty || confirm('改的还没保存，换餐次会丢掉，确定吗？')) && setMeal(m)}
             aria-pressed={m === meal}
-            className={cn('flex-1 rounded-2xl py-2.5 text-[15px] font-extrabold', m === meal ? 'bg-yuzu text-ink shadow-[0_3px_0_#e0a91c]' : 'bg-card text-ink-2 ring-1 ring-line')}
+            className={cn('flex-1 rounded-2xl py-2.5 text-[15px] font-extrabold', m === meal ? 'bg-wood-deep text-white shadow-[0_3px_0_var(--color-wood-ink)]' : 'bg-card text-ink-2 ring-1 ring-line')}
           >
             {MEAL_EMOJI[m]} {MEAL_LABELS[m]}
           </button>
@@ -186,7 +186,7 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
 
       {pending && !busy && (
         <Card className="bg-sky-soft ring-sky/30" data-testid="menu-pending">
-          <p className="text-[15px] font-extrabold text-[#1f6fa8]">
+          <p className="text-[15px] font-extrabold text-relax">
             上一次保存还没确认（{monthDay(pending.date)} {MEAL_LABELS[pending.meal]}，{pending.body.published ? '发布' : '存草稿'}）
           </p>
           <p className="mt-1 text-[13px] text-ink-2">可能存好了，也可能没有。联网后点「原样重试」：同一个编号，不会存两遍；确认之前不能存别的。</p>

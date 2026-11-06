@@ -7,6 +7,7 @@ import { api, errorMessage } from '../../lib/api';
 import { Button, Card, ConfirmCheck, Field, Input, Notice, SectionTitle, Select, Skeleton } from '../../components/ui';
 import { useToast } from '../../components/Toast';
 import { useOverview } from './CanteenPage';
+import { RegistrationCard } from './RegistrationCard';
 import { useDepartments } from './RosterTab';
 
 export function SettingsTab() {
@@ -99,7 +100,7 @@ export function SettingsTab() {
           <Field
             label="员工手机打开柚子饭堂的网址"
             className="mt-3"
-            hint="备案前用测试地址（例如 Tailscale 给的 https 地址）；备案后填 https://staff.你的域名。开通卡片上的二维码就是它。"
+            hint="备案前用测试地址（例如 Tailscale 给的 https 地址）；备案后填 https://staff.你的域名。注册二维码、开通卡片上的二维码都是它。"
           >
             <Input value={form.portalUrl} onChange={(e) => setForm({ ...form, portalUrl: e.target.value })} placeholder="https://staff.example.com" aria-label="员工入口地址" />
           </Field>
@@ -111,6 +112,7 @@ export function SettingsTab() {
       </Card>
 
       <div className="space-y-4">
+        <RegistrationCard registration={overview.data.registration} portalUrl={overview.data.settings.portalUrl} />
         <Notice tone={overview.data.portOpen ? 'success' : 'warning'} title={overview.data.portOpen ? '员工端口开着' : '员工端口还没开'}>
           {overview.data.portOpen
             ? '员工的手机经网关服务器的 HTTPS 转发到这个端口打开柚子饭堂。'
@@ -119,10 +121,10 @@ export function SettingsTab() {
         <Card className="p-5 text-[13px] leading-relaxed text-ink-2">
           <p className="font-bold text-ink">谁能做什么</p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
-            <li>员工：看菜单、给菜点赞、亮饭卡码、看自己吃了几顿</li>
+            <li>员工：扫注册二维码自己登记；看菜单、给菜点赞、亮饭卡码、看自己吃了几顿、跟柚子说</li>
             <li>厨师：再加上编辑、发布菜单</li>
             <li>食堂负责人：再加上扫码打卡、手动登记、撤销当天自己登记错的</li>
-            <li>这里（店主、店总）：名单、开通卡片、用餐记录、设置</li>
+            <li>这里（店主、店总）：注册二维码、名单（安排厨师和负责人）、开通卡片、用餐记录、柚子信箱、设置</li>
           </ul>
           <p className="mt-3">员工账号只能登录柚子饭堂，没有任何管理后台的权限。</p>
         </Card>

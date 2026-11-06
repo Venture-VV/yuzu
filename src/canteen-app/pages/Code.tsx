@@ -63,8 +63,8 @@ export function CodePage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
 
   return (
     <div className="flex flex-col items-center pt-2 text-center">
-      <div className="flex items-center gap-3 self-stretch rounded-[var(--radius-card)] bg-card p-3 shadow-[var(--shadow-soft)] ring-1 ring-line/70">
-        <span className="flex size-14 items-center justify-center rounded-full bg-yuzu-soft text-[32px]">{me.employee.avatar}</span>
+      <div className="sketch flex items-center gap-3 self-stretch rounded-[var(--radius-card)] bg-card p-3 shadow-[var(--shadow-sticker)]">
+        <span className="flex size-14 items-center justify-center rounded-full bg-wood-6 text-[32px]">{me.employee.avatar}</span>
         <div className="min-w-0 flex-1 text-left">
           <p className="truncate text-[20px] font-black">{me.employee.name}</p>
           <p className="num truncate text-[14px] font-semibold text-ink-2">
@@ -87,14 +87,21 @@ export function CodePage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
             className="mt-6 w-[min(84vw,330px)] rounded-[34px] p-[7px] shadow-[var(--shadow-pop)]"
             style={{ background: `conic-gradient(var(--color-yuzu) ${(left / CODE_STEP_SECONDS) * 360}deg, var(--color-yuzu-soft) 0deg)` }}
             data-testid="meal-code"
+            data-tour="meal-code"
           >
             <div className="rounded-[27px] bg-white p-4">
               {code ? <QrCode text={code.text} className="block aspect-square w-full" label="饭卡码" /> : <div className="aspect-square w-full animate-pulse rounded-2xl bg-cream" />}
             </div>
           </div>
-          <p className="mt-6 text-[18px] font-black">给食堂负责人扫一扫 📷</p>
+          <p className="mt-6 text-[18px] font-black">
+            <span className="marker">给食堂负责人扫一扫</span>
+          </p>
           <p className="num mt-1 text-[14px] text-ink-2">{Math.ceil(left)} 秒后自动换码 · 截图没用哦</p>
-          <div className="mt-3">{online ? <Pill tone="leaf">✓ 已连上门店</Pill> : <Pill tone="sky">📶 没网也能用</Pill>}</div>
+          <div className="mt-3">{online ? <Pill tone="leaf">✓ 已连上门店</Pill> : <Pill tone="sky">没网也能用</Pill>}</div>
+          <div className="mt-6 flex items-center gap-2 text-[13px] text-ink-3">
+            <Mascot mood="yum" pose="bowl" className="h-16 w-auto" />
+            <span>吃饱饱，下午才有力气呀</span>
+          </div>
         </>
       )}
     </div>
