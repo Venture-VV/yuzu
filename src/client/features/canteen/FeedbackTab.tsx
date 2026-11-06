@@ -9,7 +9,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Download, MessageCircleReply } from 'lucide-react';
 import { FEEDBACK_KIND_LABELS, FEEDBACK_LIMITS, type CanteenFeedbackList, type CanteenFeedbackRow, type FeedbackKind } from '@shared/canteen';
 import { api, errorMessage, UncertainError } from '../../lib/api';
-import { sendErpOp, useErpPending, type ErpPendingOp } from '../../lib/erpPending';
+import { sendErpOp, useErpPending, useErpRecorded, type ErpPendingOp } from '../../lib/erpPending';
 import { useSession } from '../../lib/session';
 import { downloadUrl, formatDateTime, relativeTime, uuid } from '../../lib/utils';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
@@ -34,7 +34,9 @@ export function FeedbackTab() {
   const list = useQuery({ queryKey: ['canteen', 'feedback', params], queryFn: () => api.get<CanteenFeedbackList>(`/api/erp/canteen/feedback?${params}`) });
   const [replying, setReplying] = useState<CanteenFeedbackRow | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
-  const pendingReplies = pendingFor(useErpPending(REPLY_PENDING));
+  // 待确认的（上面列着、能查回重提作废）标出来；还在路上的也算：关掉对话框、切走再回来以后这一条照样不能再回信
+  const unconfirmed = pendingFor(useErpPending(REPLY_PENDING));
+  const pendingReplies = pendingFor(useErpRecorded(REPLY_PENDING));
   const refresh = () => void qc.invalidateQueries({ queryKey: ['canteen'] });
 
   const markRead = async (row: CanteenFeedbackRow) => {
@@ -102,7 +104,7 @@ export function FeedbackTab() {
                       {relativeTime(r.createdAt)}
                     </span>
                     {!r.readAt && <Badge tone="ember">没看过</Badge>}
-                    {pendingReplies.has(r.id) && <Badge tone="neutral">回信待确认</Badge>}
+                    {unconfirmed.has(r.id) ? <Badge tone="neutral">回信待确认</Badge> : pendingReplies.has(r.id) && <Badge tone="neutral">回信发送中</Badge>}
                   </div>
                   <p className="mt-2 text-[15px] leading-relaxed whitespace-pre-wrap">{r.content}</p>
                   {r.reply && (
@@ -128,7 +130,9 @@ export function FeedbackTab() {
                       variant={r.reply ? 'ghost' : 'primary'}
                       icon={<MessageCircleReply className="size-3.5" />}
                       disabled={pendingReplies.has(r.id)}
-                      title={pendingReplies.has(r.id) ? '上一次回信还没确认：先在上面查回、按原内容重新提交或作废' : undefined}
+                      title={
+                        unconfirmed.has(r.id) ? '上一次回信还没确认：先在上面查回、按原内容重新提交或作废' : pendingReplies.has(r.id) ? '上一次回信还在发送，等它有了结果再改' : undefined
+                      }
                       onClick={() => setReplying(r)}
                       data-testid={`feedback-reply-${r.id}`}
                     >

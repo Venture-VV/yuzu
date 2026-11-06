@@ -450,6 +450,27 @@ test.describe.serial('第二期：开场动画、新同事登记、新手教程�
     await admin.getByRole('radio', { name: '员工名单' }).click();
     await expect(admin.getByRole('row', { name: /小雨/ })).toContainText('自己登记');
     await admin.getByRole('radio', { name: /柚子信箱/ }).click();
+    // 回信还在路上时关掉对话框、切到别的页签再回来：这一条照样不能再回信（不然又发一句不一样的，
+    // 晚到的那次会把它改回去，Codex 审查 616e446）；那一次有了结果才放开
+    const soup = admin.getByTestId('canteen-feedback').locator('li', { hasText: '今天的汤有点咸' }).first();
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await admin.route('**/api/erp/canteen/feedback/*/reply', async (route) => {
+      await held;
+      await route.continue();
+    });
+    await soup.getByRole('button', { name: '回信' }).click();
+    await admin.getByRole('textbox', { name: '回信' }).fill('收到，已经跟厨师说少放点盐');
+    await admin.getByTestId('feedback-reply-save').click();
+    await admin.getByRole('dialog').getByRole('button', { name: '取消' }).click();
+    await admin.getByRole('radio', { name: '设置' }).click();
+    await admin.getByRole('radio', { name: /柚子信箱/ }).click();
+    await expect(soup.getByRole('button', { name: '回信' })).toBeDisabled();
+    await expect(soup).toContainText('回信发送中');
+    release();
+    // 发出去了：回信算看过，这一条从「没看过的」里下去
+    await expect(soup).toHaveCount(0);
+    await admin.unroute('**/api/erp/canteen/feedback/*/reply');
     const item = admin.getByTestId('canteen-feedback').locator('li', { hasText: '想在手机上就能看到排班表' }).first();
     // 回信没收到结果（结果待确认，Codex 审查 3bc51e6）：记录留在这台电脑上，关掉对话框也还在；确认之前这一条不能再回信，
     // 按原内容重新提交（同一个编号）才发出去
@@ -471,7 +492,8 @@ test.describe.serial('第二期：开场动画、新同事登记、新手教程�
 
     // 员工看得到回信；「我的」里能再看一遍开场
     await p.reload();
-    await expect(p.getByTestId('talk-reply').first()).toContainText('排班表排进下一版');
+    await expect(p.getByTestId('talk-reply').filter({ hasText: '排班表排进下一版' })).toBeVisible();
+    await expect(p.getByTestId('talk-reply').filter({ hasText: '少放点盐' })).toBeVisible();
     await p.getByTestId('tab-me').click();
     await p.getByTestId('replay-intro').click();
     await expect(p.getByTestId('intro')).toBeVisible();
