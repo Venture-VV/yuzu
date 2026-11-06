@@ -3,7 +3,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { CanteenOverview } from '@shared/canteen';
+import type { CanteenCheckinList, CanteenOverview } from '@shared/canteen';
 import { businessDateOf } from '@shared/business-date';
 import { guard } from '../../auth/guard';
 import { readSnapshot } from '../../db';
@@ -12,7 +12,7 @@ import { ctxOf } from '../../lib/context';
 import { csvReply, toCsv } from '../../lib/csv';
 import { idParam, parse } from '../../lib/validate';
 import { enabledErpModules } from '../erp';
-import { canteenToday, checkinCsvRows, dailyCounts, listCheckins, voidCheckin } from './checkins';
+import { canteenToday, checkinCsvRows, countCheckins, dailyCounts, listCheckins, voidCheckin } from './checkins';
 import { activationCards, batchEmployees, createEmployee, listEmployees, reissueActivation, updateEmployee } from './employees';
 import { listMenus, topDishes } from './menus';
 import { canteenPortOpen } from './portal';
@@ -88,10 +88,17 @@ export function registerCanteenAdminRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   // ── 用餐记录 ──
-  app.get('/api/erp/canteen/checkins', manage, async (req) => listCheckins(sql, req.query));
+  // 页面一次最多列 2,000 条，合计照实给；列不下时页面提示导出表格（导出不截断）
+  app.get('/api/erp/canteen/checkins', manage, async (req): Promise<CanteenCheckinList> =>
+    readSnapshot(sql, async (tx) => {
+      const rows = await listCheckins(tx, req.query);
+      const { total, valid } = await countCheckins(tx, req.query);
+      return { rows, total, valid, truncated: total > rows.length };
+    }),
+  );
   app.get('/api/erp/canteen/checkins.csv', manage, async (req, reply) => {
     const q = req.query as { from?: string; to?: string };
-    const rows = await listCheckins(sql, req.query);
+    const rows = await listCheckins(sql, req.query, null);
     return csvReply(reply, `饭堂用餐记录-${q.from}-${q.to}.csv`, toCsv(checkinCsvRows(rows, config.timezone)));
   });
   app.post('/api/erp/canteen/checkins/:id/void', manage, async (req) => {

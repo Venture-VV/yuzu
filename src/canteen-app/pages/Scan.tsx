@@ -6,7 +6,7 @@ import { MEAL_EMOJI, MEAL_LABELS, MEALS, type CanteenCheckinRow, type CanteenMe,
 import { Mascot } from '../Mascot';
 import { ApiError, beep, call, messageOf, timeText, unlockAudio, uuid } from '../lib';
 import { enqueue, flush, loadQueue, submit, type Outcome, type QueuedScan, type ScanBody } from '../queue';
-import { CameraError, decodeImageFile, startScanner } from '../scanner';
+import { CameraError, decodeImageFile, preloadDecoder, startScanner } from '../scanner';
 import { Button, Card, cn, inputClass, Pill, Sheet, toast } from '../ui';
 
 type Shown =
@@ -36,6 +36,8 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
       .catch(() => undefined);
   }, []);
   useEffect(() => refreshToday(), [refreshToday]);
+  // 先把识别二维码的程序取下来（没有系统自带识别的手机要用），断网时也能扫
+  useEffect(() => preloadDecoder(), []);
 
   const show = (s: Shown) => {
     setShown(s);

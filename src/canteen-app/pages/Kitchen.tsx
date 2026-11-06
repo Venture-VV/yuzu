@@ -1,7 +1,10 @@
 // 厨房（厨师、负责人）：选日子和餐次，加菜、选表情和标签、写一句话，保存草稿或发布给大家。
-// 改菜单带版本号：别人刚改过时提示，看过最新的再决定覆盖不覆盖；保存的回复没收到时「原样重试」（同一个编号、同一个版本）。
+// 改菜单带版本号：别人刚改过时提示，看过最新的再决定覆盖不覆盖。
+// 结果待确认（AGENTS.md）：每次保存先把操作编号与原请求存在这台手机上并读回核对，存不下就不发；回复没收到时留着，
+// 刷新、关掉再开也还在，只能「原样重试」（同一个编号、同一个版本，不会存两遍）。重试被「菜单刚被别人改过」拒绝时，
+// 原来那次也不会再生效（版本号已经过去了），这时才放下。没确认之前不能再存别的，免得把它顶掉。
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   DISH_TAG_EMOJI,
   DISH_TAG_LABELS,
@@ -16,7 +19,7 @@ import {
   type DishTag,
   type Meal,
 } from '@shared/canteen';
-import { ApiError, addDays, call, dayLabel, messageOf, monthDay, NetworkError, storeNow, timeText, uuid } from '../lib';
+import { ApiError, addDays, call, dayLabel, messageOf, monthDay, NetworkError, readJson, removeKey, storeNow, timeText, uuid, writeJson } from '../lib';
 import { Mascot } from '../Mascot';
 import { Button, Card, cn, inputClass, Pill, Sheet, toast } from '../ui';
 
@@ -26,11 +29,12 @@ type Draft = { dishes: (Dish & { auto: boolean })[]; note: string };
 const fromMenu = (m?: CanteenMenu): Draft => ({ dishes: (m?.dishes ?? []).map((d) => ({ ...d, auto: false })), note: m?.note ?? '' });
 
 interface Pending {
-  key: string;
   date: string;
   meal: Meal;
   body: { clientKey: string; version: number; dishes: Dish[]; note: string; published: boolean };
+  savedAt: number;
 }
+const pendingKey = (employeeId: number) => `yuzu.canteen.menuPending.v1.${employeeId}`;
 
 export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number }) {
   const today = storeNow(offsetMs).date;
@@ -39,31 +43,46 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
   const [date, setDate] = useState(today);
   const [meal, setMeal] = useState<Meal>(meals[1] ?? meals[0] ?? 'lunch');
   const [server, setServer] = useState<CanteenMenu | undefined>();
-  const [loaded, setLoaded] = useState(false);
+  // 编辑框里的内容属于哪一天哪一餐：只有这一份取到了，才能保存（取失败时不会把上一份的菜存到这一份上）
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState('');
   const [draft, setDraft] = useState<Draft>(fromMenu());
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [pending, setPending] = useState<Pending | null>(null);
+  const storeKey = pendingKey(me.employee.id);
+  const [pending, setPending] = useState<Pending | null>(() => readJson<Pending>(storeKey));
   const [conflict, setConflict] = useState<CanteenMenu | null>(null);
   const [emojiFor, setEmojiFor] = useState<string | null>(null);
+  const selection = `${date}:${meal}`;
+  const latest = useRef(0);
 
   const fetchMenu = useCallback(async (d: string, m: Meal) => (await call<CanteenMenu[]>('GET', `/api/canteen/menus?from=${d}&to=${d}`)).find((x) => x.meal === m), []);
   const load = useCallback(async () => {
-    setLoaded(false);
+    const req = ++latest.current;
+    setLoadedFor(null);
+    setLoadError('');
+    setServer(undefined);
+    setDraft(fromMenu());
+    setDirty(false);
     try {
       const m = await fetchMenu(date, meal);
+      if (req !== latest.current) return;
       setServer(m);
       setDraft(fromMenu(m));
-      setDirty(false);
+      setLoadedFor(`${date}:${meal}`);
     } catch (e) {
-      toast(messageOf(e), 'error');
-    } finally {
-      setLoaded(true);
+      if (req === latest.current) setLoadError(messageOf(e));
     }
   }, [date, meal, fetchMenu]);
   useEffect(() => {
     void load();
   }, [load]);
+  const ready = loadedFor === selection;
+
+  const clearPending = () => {
+    removeKey(storeKey);
+    setPending(null);
+  };
 
   const edit = (fn: (d: Draft) => Draft) => {
     setDraft(fn);
@@ -71,27 +90,32 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
   };
   const setDish = (id: string, patch: Partial<Dish & { auto: boolean }>) => edit((d) => ({ ...d, dishes: d.dishes.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
 
-  const send = async (body: Pending['body'], d = date, m = meal) => {
+  /** 交一笔（已经存在本机的）：明确结果才从本机删掉，回复没收到就留着等「原样重试」 */
+  const send = async (p: Pending) => {
     setBusy(true);
-    const key = `${d}:${m}`;
     try {
-      const saved = await call<CanteenMenu>('PUT', `/api/canteen/menus/${d}/${m}`, body);
-      setPending(null);
-      if (d === date && m === meal) {
+      const saved = await call<CanteenMenu>('PUT', `/api/canteen/menus/${p.date}/${p.meal}`, p.body);
+      clearPending();
+      if (`${p.date}:${p.meal}` === selection) {
         setServer(saved);
         setDraft(fromMenu(saved));
         setDirty(false);
+        setLoadedFor(selection);
       }
       toast(saved.published ? '发布啦，大家都能看到了 🎉' : '草稿存好了', 'ok');
     } catch (e) {
-      if (e instanceof ApiError && e.code === 'MENU_CHANGED') {
-        setPending(null);
-        setConflict((await fetchMenu(d, m).catch(() => undefined)) ?? null);
-      } else if (e instanceof NetworkError) {
-        // 结果不确定：留着原来的编号和内容，原样重试不会存两遍
-        setPending({ key, date: d, meal: m, body });
+      if (e instanceof NetworkError) {
+        // 结果不确定：本机留着原来的编号和内容，原样重试不会存两遍
+        setPending(p);
+        toast('没收到门店系统的回复：这次可能存好了，也可能没有，联网后点「原样重试」', 'error');
+      } else if (e instanceof ApiError && e.code === 'MENU_CHANGED') {
+        // 版本号已经过去了：原来那次不会再生效，放下它，给厨师看最新的
+        clearPending();
+        const latestMenu = (await fetchMenu(p.date, p.meal).catch(() => undefined)) ?? null;
+        if (`${p.date}:${p.meal}` === selection) setConflict(latestMenu);
+        else toast(`${monthDay(p.date)} ${MEAL_LABELS[p.meal]}的菜单刚被别人改过，这次没存`, 'error');
       } else {
-        setPending(null);
+        clearPending();
         toast(messageOf(e), 'error');
       }
     } finally {
@@ -100,9 +124,15 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
   };
 
   const save = (published: boolean, version = server?.version ?? 0) => {
+    if (pending) return toast('上一次保存还没确认：先点「原样重试」', 'error');
+    if (!ready) return toast('这份菜单还没取到，等一下再存', 'error');
     const dishes = draft.dishes.filter((x) => x.name.trim()).map(({ auto: _auto, ...x }) => ({ ...x, name: x.name.trim() }));
     if (published && !dishes.length) return toast('还没有菜，加几道再发布吧', 'error');
-    void send({ clientKey: uuid(), version, dishes, note: draft.note.trim(), published });
+    const p: Pending = { date, meal, body: { clientKey: uuid(), version, dishes, note: draft.note.trim(), published }, savedAt: Date.now() };
+    // 先存在这台手机上并读回核对；存不下就不发（AGENTS.md「结果待确认」）
+    if (!writeJson(storeKey, p)) return toast('这台手机存不下记录（隐私模式或存储满了），为防止存两遍，这次没有发出', 'error');
+    setPending(p);
+    void send(p);
   };
 
   const copyFrom = async (from: string) => {
@@ -154,11 +184,13 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
         ))}
       </div>
 
-      {pending && (
-        <Card className="bg-sky-soft ring-sky/30">
-          <p className="text-[15px] font-extrabold text-[#1f6fa8]">上一次保存没收到回复（{monthDay(pending.date)} {MEAL_LABELS[pending.meal]}）</p>
-          <p className="mt-1 text-[13px] text-ink-2">可能存好了，也可能没有。点「原样重试」：同一个编号，不会存两遍。</p>
-          <Button className="mt-3" tone="ink" disabled={busy} onClick={() => void send(pending.body, pending.date, pending.meal)}>
+      {pending && !busy && (
+        <Card className="bg-sky-soft ring-sky/30" data-testid="menu-pending">
+          <p className="text-[15px] font-extrabold text-[#1f6fa8]">
+            上一次保存还没确认（{monthDay(pending.date)} {MEAL_LABELS[pending.meal]}，{pending.body.published ? '发布' : '存草稿'}）
+          </p>
+          <p className="mt-1 text-[13px] text-ink-2">可能存好了，也可能没有。联网后点「原样重试」：同一个编号，不会存两遍；确认之前不能存别的。</p>
+          <Button className="mt-3" tone="ink" disabled={busy} onClick={() => void send(pending)}>
             原样重试
           </Button>
         </Card>
@@ -172,7 +204,14 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
           {server ? server.published ? <Pill tone="leaf">已发布</Pill> : <Pill tone="ink">草稿</Pill> : <Pill tone="ink">还没写</Pill>}
           {server?.updatedByName && <span className="ml-auto text-[12px] text-ink-3">{server.updatedByName} {timeText(server.updatedAt)} 改的</span>}
         </div>
-        {!loaded ? (
+        {loadError ? (
+          <div className="flex flex-col items-center gap-3 py-6 text-center">
+            <p className="text-[14px] font-bold text-berry">没取到这份菜单：{loadError}</p>
+            <Button tone="ghost" onClick={() => void load()}>
+              再取一次
+            </Button>
+          </div>
+        ) : !ready ? (
           <p className="py-6 text-center text-[14px] text-ink-3">正在取菜单…</p>
         ) : (
           <>
@@ -247,10 +286,10 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
       </Card>
 
       <div className="grid grid-cols-2 gap-3">
-        <Button tone="ghost" big disabled={busy || !loaded} onClick={() => save(false)}>
+        <Button tone="ghost" big disabled={busy || !ready || !!pending} onClick={() => save(false)}>
           {server?.published ? '撤回成草稿' : '存草稿'}
         </Button>
-        <Button tone="leaf" big disabled={busy || !loaded} onClick={() => save(true)}>
+        <Button tone="leaf" big disabled={busy || !ready || !!pending} onClick={() => save(true)}>
           {server?.published ? '更新菜单' : '发布给大家'}
         </Button>
       </div>

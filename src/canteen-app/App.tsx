@@ -41,8 +41,8 @@ export function App() {
     window.scrollTo(0, 0);
   }, []);
 
-  const adopt = useCallback((me: CanteenMe) => {
-    setCached(saveMe(me));
+  const adopt = useCallback((me: CanteenMe, keepOffsetMs?: number) => {
+    setCached(saveMe(me, keepOffsetMs));
     setState('ready');
   }, []);
 
@@ -144,7 +144,7 @@ export function App() {
     code: <CodePage me={me} offsetMs={offsetMs} online={online} />,
     kitchen: <KitchenPage me={me} offsetMs={offsetMs} />,
     scan: <ScanPage me={me} offsetMs={offsetMs} online={online} />,
-    me: <MePage me={me} offsetMs={offsetMs} online={online} onMe={adopt} onLogout={() => void logout()} />,
+    me: <MePage me={me} offsetMs={offsetMs} online={online} onMe={(next) => adopt(next)} onPatch={(next) => adopt(next, offsetMs)} onLogout={() => void logout()} />,
   }[route];
 
   return shell(

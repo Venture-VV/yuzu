@@ -390,10 +390,12 @@ describe('管理后台', () => {
 
   it('用餐记录：筛选、导出、后台撤销', async () => {
     const all = (await admin('GET', `/api/erp/canteen/checkins?from=${today}&to=${today}`)).body;
-    expect(all.length).toBeGreaterThanOrEqual(4);
-    const lunch = (await admin('GET', `/api/erp/canteen/checkins?from=${today}&to=${today}&meal=lunch&voided=exclude`)).body;
+    expect(all.rows.length).toBeGreaterThanOrEqual(4);
+    expect([all.total, all.truncated]).toEqual([all.rows.length, false]);
+    expect(all.valid).toBe(all.rows.filter((r: any) => !r.voidedAt).length);
+    const lunch = (await admin('GET', `/api/erp/canteen/checkins?from=${today}&to=${today}&meal=lunch&voided=exclude`)).body.rows;
     expect(lunch.every((r: any) => r.meal === 'lunch' && !r.voidedAt)).toBe(true);
-    const byName = (await admin('GET', `/api/erp/canteen/checkins?from=${today}&to=${today}&q=${encodeURIComponent('阿美')}`)).body;
+    const byName = (await admin('GET', `/api/erp/canteen/checkins?from=${today}&to=${today}&q=${encodeURIComponent('阿美')}`)).body.rows;
     expect(byName.length).toBeGreaterThan(0);
     const csv = await ctx.app.inject({ method: 'GET', url: `/api/erp/canteen/checkins.csv?from=${today}&to=${today}`, headers: { cookie: ctx.owner } });
     expect(csv.statusCode).toBe(200);
@@ -435,5 +437,34 @@ describe('员工端口的边界：编码过的地址、登录限次', () => {
     const blocked = await from('10.9.0.2', 'zhou-2026');
     expect([blocked.statusCode, blocked.json().error.code]).toEqual([429, 'TOO_MANY_ATTEMPTS']);
     expect((await from('10.9.0.3', 'zhou-2026')).statusCode).toBe(200);
+  });
+});
+
+describe('Codex 审查 9d12ae8 的修正', () => {
+  it('会话顺延时浏览器的 Cookie 也顺延（30 天，用着就一直不用重新登录）', async () => {
+    const login = await c(null, 'POST', '/api/canteen/login', { empNo: 'E002', password: 'zhou-2026' });
+    const fresh = await canteen.inject({ method: 'GET', url: '/api/canteen/me', headers: { cookie: login.cookie! } });
+    expect(fresh.cookies.find((k) => k.name === 'yuzu_canteen_sid')).toBeUndefined();
+    await ctx.sql`UPDATE canteen_sessions SET last_seen_at = now() - interval '2 hours'`;
+    const renewed = await canteen.inject({ method: 'GET', url: '/api/canteen/me', headers: { cookie: login.cookie! } });
+    const cookie = renewed.cookies.find((k) => k.name === 'yuzu_canteen_sid');
+    expect([renewed.statusCode, cookie?.value, cookie?.maxAge, cookie?.httpOnly, cookie?.sameSite]).toEqual([200, login.cookie!.split('=')[1], 30 * 86_400, true, 'Strict']);
+  });
+
+  it('用餐记录超过页面能列的条数：页面给出合计并标出列不下，导出表格不截断', async () => {
+    const [{ ownerId }, [emp]] = [ctx, await ctx.sql<{ id: number }[]>`SELECT id FROM canteen_employees WHERE emp_no = 'E100'`];
+    // 2,001 条已撤销的记录（不占「每餐一次」的唯一索引）
+    await ctx.sql`
+      INSERT INTO canteen_checkins (employee_id, emp_no, employee_name, department_name, meal_date, meal, method, scanned_at, recorder_id, recorder_name,
+                                    client_key, voided_at, void_reason, voided_by_staff)
+      SELECT ${emp!.id}::bigint, 'E100', '阿美', '', ${yesterday}::date, 'lunch', 'manual', now(), ${emp!.id}::bigint, '合成', gen_random_uuid(), now(),
+             '合成：测列表上限', ${ownerId}::bigint
+      FROM generate_series(1, 2001)`;
+    const r = (await admin('GET', `/api/erp/canteen/checkins?from=${yesterday}&to=${today}`)).body;
+    expect(r.rows).toHaveLength(2000);
+    expect(r.truncated).toBe(true);
+    expect(r.total).toBeGreaterThan(2001);
+    const csv = await ctx.app.inject({ method: 'GET', url: `/api/erp/canteen/checkins.csv?from=${yesterday}&to=${today}`, headers: { cookie: ctx.owner } });
+    expect(csv.body.replace(/^\uFEFF/, '').trim().split(/\r?\n/)).toHaveLength(r.total + 1);
   });
 });

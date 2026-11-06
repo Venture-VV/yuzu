@@ -3,13 +3,13 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Download } from 'lucide-react';
-import { MEAL_LABELS, MEALS, type CanteenCheckinRow, type Meal } from '@shared/canteen';
+import { MEAL_LABELS, MEALS, type CanteenCheckinList, type CanteenCheckinRow, type Meal } from '@shared/canteen';
 import { api, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { downloadUrl, formatDateTime } from '../../lib/utils';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { EmptyState } from '../../components/EmptyState';
-import { Badge, Button, Card, Field, Input, Select, Skeleton } from '../../components/ui';
+import { Badge, Button, Card, Field, Input, Notice, Select, Skeleton } from '../../components/ui';
 import { useToast } from '../../components/Toast';
 
 export function RecordsTab() {
@@ -23,10 +23,9 @@ export function RecordsTab() {
     return { from: d.toISOString().slice(0, 10), to: session.calendarToday, meal: '' as Meal | '', q: '', voided: 'include' as 'include' | 'exclude' | 'only' };
   });
   const params = new URLSearchParams({ from: f.from, to: f.to, voided: f.voided, ...(f.meal ? { meal: f.meal } : {}), ...(f.q.trim() ? { q: f.q.trim() } : {}) }).toString();
-  const list = useQuery({ queryKey: ['canteen', 'checkins', params], queryFn: () => api.get<CanteenCheckinRow[]>(`/api/erp/canteen/checkins?${params}`), enabled: f.from <= f.to });
+  const list = useQuery({ queryKey: ['canteen', 'checkins', params], queryFn: () => api.get<CanteenCheckinList>(`/api/erp/canteen/checkins?${params}`), enabled: f.from <= f.to });
   const [voiding, setVoiding] = useState<CanteenCheckinRow | null>(null);
   const [busy, setBusy] = useState(false);
-  const valid = list.data?.filter((r) => !r.voidedAt).length ?? 0;
   return (
     <div className="space-y-4" data-testid="canteen-records">
       <Card className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-[repeat(5,minmax(0,1fr))_auto] lg:items-end">
@@ -62,15 +61,20 @@ export function RecordsTab() {
       </Card>
       {list.isLoading ? (
         <Skeleton className="h-48" />
-      ) : !list.data?.length ? (
+      ) : !list.data?.rows.length ? (
         <Card>
           <EmptyState art="calm" title="这段时间没有用餐记录" />
         </Card>
       ) : (
         <Card className="overflow-x-auto p-0">
           <p className="border-b border-line px-4 py-2.5 text-[12.5px] text-ink-3">
-            共 {list.data.length} 条，有效 {valid} 条
+            共 {list.data.total} 条，有效 {list.data.valid} 条
           </p>
+          {list.data.truncated && (
+            <Notice tone="warning" className="m-3" data-testid="canteen-records-truncated">
+              这里只列最近的 {list.data.rows.length} 条；全部的请点「导出表格」（导出不截断），或把日期范围缩小一点。
+            </Notice>
+          )}
           <table className="w-full min-w-[820px] text-[13px]">
             <thead className="border-b border-line text-left text-[12px] text-ink-3">
               <tr>
@@ -84,7 +88,7 @@ export function RecordsTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
-              {list.data.map((r) => (
+              {list.data.rows.map((r) => (
                 <tr key={r.id} className={r.voidedAt ? 'text-ink-3' : ''}>
                   <td className="px-4 py-2">
                     {r.date.slice(5)} {MEAL_LABELS[r.meal]}

@@ -6,7 +6,22 @@ import { call, dayLabel, messageOf, monthDay, storeNow, timeText } from '../lib'
 import { Button, Card, cn, Field, inputClass, Pill, Sheet, toast } from '../ui';
 import { InstallGuide } from '../install';
 
-export function MePage({ me, offsetMs, online, onMe, onLogout }: { me: CanteenMe; offsetMs: number; online: boolean; onMe: (me: CanteenMe) => void; onLogout: () => void }) {
+/** onMe：门店系统刚给的「我」（重算时间差）；onPatch：本机改了一点（保留原来的时间差） */
+export function MePage({
+  me,
+  offsetMs,
+  online,
+  onMe,
+  onPatch,
+  onLogout,
+}: {
+  me: CanteenMe;
+  offsetMs: number;
+  online: boolean;
+  onMe: (me: CanteenMe) => void;
+  onPatch: (me: CanteenMe) => void;
+  onLogout: () => void;
+}) {
   const today = storeNow(offsetMs).date;
   const [rows, setRows] = useState<CanteenCheckinRow[] | null>(null);
   const [sheet, setSheet] = useState<'avatar' | 'password' | 'install' | null>(null);
@@ -20,7 +35,7 @@ export function MePage({ me, offsetMs, online, onMe, onLogout }: { me: CanteenMe
   const pickAvatar = async (avatar: string) => {
     try {
       await call('PUT', '/api/canteen/me/avatar', { avatar });
-      onMe({ ...me, employee: { ...me.employee, avatar } });
+      onPatch({ ...me, employee: { ...me.employee, avatar } });
       setSheet(null);
       toast('换好啦 ✨', 'ok');
     } catch (e) {

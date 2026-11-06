@@ -21,7 +21,20 @@ async function nativeDetector(): Promise<Detector | null> {
 
 type JsQr = (data: Uint8ClampedArray, width: number, height: number, opts?: { inversionAttempts?: 'dontInvert' | 'onlyInvert' | 'attemptBoth' | 'invertFirst' }) => { data: string } | null;
 let jsQr: Promise<JsQr> | null = null;
-const loadJsQr = () => (jsQr ??= import('jsqr').then((m) => (m.default ?? m) as unknown as JsQr));
+// 下载失败（例如第一次扫码时刚好断网）不记住失败：下一帧、下一次再试
+const loadJsQr = () =>
+  (jsQr ??= import('jsqr').then(
+    (m) => (m.default ?? m) as unknown as JsQr,
+    (error: unknown) => {
+      jsQr = null;
+      throw error;
+    },
+  ));
+
+/** 打开扫码页时（还联网）就把 jsQR 取下来：离线外壳会缓存它，之后断网也能识别 */
+export function preloadDecoder() {
+  void loadJsQr().catch(() => undefined);
+}
 
 /** 从画面（视频帧或图片）读一个二维码：先用系统自带的，再用 jsQR */
 async function decodeFrom(source: CanvasImageSource, width: number, height: number, canvas: HTMLCanvasElement, maxSide: number): Promise<string | null> {

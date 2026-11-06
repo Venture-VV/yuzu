@@ -134,6 +134,26 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
     await expect(cook.getByText('已发布')).toBeVisible();
     await noOverflow(cook);
     await cook.screenshot({ path: `${OUT}/kitchen.png`, fullPage: true });
+
+    // 结果待确认（Codex 审查 9d12ae8）：断网时改菜单，这一笔先存在手机上；刷新以后还在，只能原样重试，确认之前不能存别的
+    cook.on('dialog', (d) => void d.accept());
+    await ctx.setOffline(true);
+    await cook.getByLabel('一句话备注').fill('今天有甜品，还有冰粉');
+    await cook.getByRole('button', { name: '更新菜单' }).click();
+    await expect(cook.getByTestId('menu-pending')).toBeVisible();
+    await expect(cook.getByRole('button', { name: '更新菜单' })).toBeDisabled();
+    // 断网时换一天：这一份取不到，不能把上一份的菜存过去
+    await cook.getByRole('tab', { name: /明天/ }).click();
+    await expect(cook.getByText(/没取到这份菜单/)).toBeVisible();
+    await expect(cook.getByRole('button', { name: '发布给大家' })).toBeDisabled();
+    await ctx.setOffline(false);
+    await cook.reload();
+    await expect(cook.getByTestId('menu-pending')).toBeVisible();
+    await cook.getByTestId('menu-pending').getByRole('button', { name: '原样重试' }).click();
+    await expect(cook.getByText('发布啦')).toBeVisible();
+    await expect(cook.getByTestId('menu-pending')).toHaveCount(0);
+    const saved = await (await ctx.request.get(`${CANTEEN}/api/canteen/menus?from=${slot.date}&to=${slot.date}`)).json();
+    expect(saved.find((m: { meal: string }) => m.meal === 'lunch').note).toBe('今天有甜品，还有冰粉');
     await ctx.close();
   });
 
