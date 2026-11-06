@@ -118,6 +118,7 @@ export function RegistrationCard({ registration, portalUrl }: { registration: Ca
             开着自己登记（关掉以后扫码也登记不了；已经登记的人照常用）
           </ConfirmCheck>
           {!portalUrl && <Notice tone="warning">还没填员工入口地址：员工没法扫码打开，只能手动输入口令。</Notice>}
+          <p className="text-[12.5px] leading-relaxed text-ink-3">有同事离职：在「员工名单」里停用他，再在这里换一个口令（免得他用别的手机号再登记一次）。</p>
         </>
       )}
     </Card>

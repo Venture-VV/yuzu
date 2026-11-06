@@ -160,24 +160,24 @@ export interface LoginRow {
 }
 
 /**
- * 按账号找人并锁住那一行：像手机号的按手机号；否则先按用户名（不分大小写）、再按工号。
- * 用户名与工号在登记、加人时就不许撞（K13），撞了也是用户名优先。
+ * 按账号找人并锁住那一行：像手机号的先按手机号（没有再当工号找，后台可能用了一串数字当工号）；
+ * 否则先按用户名（不分大小写）、再按工号。用户名与工号在登记、加人时就不许撞（K13），撞了也是用户名优先。
  */
 export async function findLoginRow(tx: Tx, rawAccount: string): Promise<LoginRow | undefined> {
   const account = rawAccount.trim();
   const phone = normalizePhone(account);
-  const [row] = PHONE.test(phone)
-    ? await tx<LoginRow[]>`
-        SELECT id, active, password_hash, failed_logins,
-               CASE WHEN locked_until > now() THEN ceil(extract(epoch FROM locked_until - now()) / 60)::int END AS locked_minutes
-        FROM canteen_employees WHERE phone = ${phone} FOR UPDATE`
-    : await tx<LoginRow[]>`
-        SELECT id, active, password_hash, failed_logins,
-               CASE WHEN locked_until > now() THEN ceil(extract(epoch FROM locked_until - now()) / 60)::int END AS locked_minutes
-        FROM canteen_employees
-        WHERE lower(username) = lower(${account}) OR emp_no = ${normalizeEmpNo(account)}
-        ORDER BY (lower(username) = lower(${account})) IS TRUE DESC, id
-        LIMIT 1 FOR UPDATE`;
+  const cols = tx`
+    id, active, password_hash, failed_logins,
+    CASE WHEN locked_until > now() THEN ceil(extract(epoch FROM locked_until - now()) / 60)::int END AS locked_minutes`;
+  if (PHONE.test(phone)) {
+    const [byPhone] = await tx<LoginRow[]>`SELECT ${cols} FROM canteen_employees WHERE phone = ${phone} FOR UPDATE`;
+    if (byPhone) return byPhone;
+  }
+  const [row] = await tx<LoginRow[]>`
+    SELECT ${cols} FROM canteen_employees
+    WHERE lower(username) = lower(${account}) OR emp_no = ${normalizeEmpNo(account)}
+    ORDER BY (lower(username) = lower(${account})) IS TRUE DESC, id
+    LIMIT 1 FOR UPDATE`;
   return row;
 }
 
