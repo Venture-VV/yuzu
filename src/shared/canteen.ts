@@ -224,6 +224,100 @@ export const normalizeEmpNo = (raw: string) => raw.trim().toUpperCase();
 export const PASSWORD_MIN = 6;
 export const PASSWORD_MAX = 72;
 
+// ── 自己登记（第二期，docs/CANTEEN.md 第 14 节，K12–K14）──
+
+/** admin：管理员在后台加的；self：员工自己在柚子饭堂登记的 */
+export type EmployeeSource = 'admin' | 'self';
+
+export const USERNAME_MIN = 2;
+export const USERNAME_MAX = 16;
+/** 用户名：汉字、字母、数字和 · _ -，2–16 个字 */
+const USERNAME_CHARS = /^[\p{Script=Han}A-Za-z0-9·_-]+$/u;
+export const normalizeUsername = (raw: string) => raw.trim();
+/** 用户名的问题（没问题返回 null）；不能全是数字（免得和手机号、工号弄混） */
+export function usernameProblem(name: string): string | null {
+  const n = [...name].length;
+  if (n < USERNAME_MIN) return `用户名至少 ${USERNAME_MIN} 个字`;
+  if (n > USERNAME_MAX) return `用户名最多 ${USERNAME_MAX} 个字`;
+  if (!USERNAME_CHARS.test(name)) return '用户名只能用汉字、字母、数字和 · _ -（不能有空格）';
+  if (/^[0-9]+$/.test(name)) return '用户名不能全是数字';
+  if (/^ZC[0-9]+(-[0-9]+)?$/i.test(name)) return '用户名不能是 ZC 加数字（那是系统给的工号）';
+  return null;
+}
+
+/** 11 位大陆手机号；输入时去掉空格、短横线和 +86 */
+export const PHONE = /^1[3-9][0-9]{9}$/;
+export const normalizePhone = (raw: string) => raw.replace(/[\s-]/g, '').replace(/^(\+?86)(?=1[0-9]{10}$)/, '');
+/** 名单里给人看的手机号：138 0013 8000 */
+export const displayPhone = (phone: string) => `${phone.slice(0, 3)} ${phone.slice(3, 7)} ${phone.slice(7)}`;
+
+/** 注册口令：和开通码同样的 8 位字母数字（去掉容易认错的 0 O 1 I），印在海报上是 ABCD-2345 */
+export const REG_CODE = /^[2-9A-HJ-NP-Z]{8}$/;
+/** 注册链接：员工入口地址 + #reg=口令（扫海报上的二维码打开） */
+export const registrationLink = (portalUrl: string, code: string) => `${portalUrl}/#reg=${code}`;
+
+/** 管理后台看的「注册二维码」 */
+export interface CanteenRegistration {
+  /** 开着自己登记 */
+  enabled: boolean;
+  /** 注册口令（还没生成为 null） */
+  code: string | null;
+  /** 注册链接（没填员工入口地址、没生成口令时为 null） */
+  link: string | null;
+  /** 自己登记、在用的人数 */
+  selfRegistered: number;
+}
+
+/** 员工端：现在能不能自己登记、带来的口令对不对（没带口令时 codeOk 为 null） */
+export interface RegisterInfo {
+  open: boolean;
+  codeOk: boolean | null;
+}
+
+// ── 跟柚子说（第二期，docs/CANTEEN.md 第 16 节，K16）──
+
+export const FEEDBACK_KINDS = ['wish', 'chat'] as const;
+export type FeedbackKind = (typeof FEEDBACK_KINDS)[number];
+export const FEEDBACK_KIND_LABELS: Record<FeedbackKind, string> = { wish: '想要柚子做的', chat: '碎碎念' };
+export const FEEDBACK_LIMITS = { content: 500, reply: 300, perDay: 20 } as const;
+
+/** 员工自己说过的 */
+export interface MyFeedbackRow {
+  id: number;
+  kind: FeedbackKind;
+  content: string;
+  createdAt: string;
+  /** 柚子（管理员）看过了 */
+  read: boolean;
+  reply: string | null;
+  repliedAt: string | null;
+}
+
+/** 管理后台「柚子信箱」的一条 */
+export interface CanteenFeedbackRow {
+  id: number;
+  employeeId: number;
+  name: string;
+  empNo: string;
+  avatar: string;
+  kind: FeedbackKind;
+  content: string;
+  createdAt: string;
+  readAt: string | null;
+  readByName: string | null;
+  reply: string | null;
+  repliedAt: string | null;
+  repliedByName: string | null;
+}
+
+export interface CanteenFeedbackList {
+  rows: CanteenFeedbackRow[];
+  /** 按同样筛选的合计 */
+  total: number;
+  /** 全部还没看的 */
+  unread: number;
+}
+
 // ── 接口的数据 ──
 
 /** 员工端：我是谁、码钥匙、开饭时间 */
@@ -235,6 +329,9 @@ export interface CanteenMe {
     department: string;
     role: CanteenRole;
     avatar: string;
+    /** 自己登记的用户名（后台加的人没有） */
+    username: string | null;
+    source: EmployeeSource;
   };
   /** 码钥匙（base64url）：只在这台手机上用来生成饭卡码 */
   codeKey: string;
@@ -310,6 +407,10 @@ export interface CanteenEmployeeRow {
   id: number;
   empNo: string;
   name: string;
+  /** 自己登记的用户名、手机号（后台加的人没有） */
+  username: string | null;
+  phone: string | null;
+  source: EmployeeSource;
   departmentId: number | null;
   department: string;
   role: CanteenRole;
@@ -359,4 +460,8 @@ export interface CanteenOverview {
   topDishes: { date: string; meal: Meal; name: string; emoji: string; likes: number }[];
   /** 员工端口开着没有（CANTEEN_PORT） */
   portOpen: boolean;
+  /** 自己登记（注册二维码） */
+  registration: CanteenRegistration;
+  /** 柚子信箱里还没看的 */
+  feedbackUnread: number;
 }

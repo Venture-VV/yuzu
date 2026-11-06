@@ -180,8 +180,9 @@ export type AuditAction =
   // 小程序线第二期 2d：原路退回没退成的，店主重试、已另行处理
   | 'mp_refund_retried'
   | 'mp_refund_handled'
-  // 员工食堂 · 柚子饭堂（docs/CANTEEN.md）：员工名单的新建、修改、停用、重新开通
-  | 'canteen_employee';
+  // 员工食堂 · 柚子饭堂（docs/CANTEEN.md）：员工名单的新建、修改、停用、重新开通、员工自己登记；跟柚子说的回信
+  | 'canteen_employee'
+  | 'canteen_feedback';
 
 export interface AuditEntry {
   staffId: number | null;

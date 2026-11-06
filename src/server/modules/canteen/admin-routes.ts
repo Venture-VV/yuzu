@@ -3,7 +3,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { CanteenCheckinList, CanteenOverview } from '@shared/canteen';
+import type { CanteenCheckinList, CanteenFeedbackList, CanteenOverview } from '@shared/canteen';
 import { businessDateOf } from '@shared/business-date';
 import { guard } from '../../auth/guard';
 import { readSnapshot } from '../../db';
@@ -14,8 +14,10 @@ import { idParam, parse } from '../../lib/validate';
 import { enabledErpModules } from '../erp';
 import { canteenToday, checkinCsvRows, countCheckins, dailyCounts, listCheckins, voidCheckin } from './checkins';
 import { activationCards, batchEmployees, createEmployee, listEmployees, reissueActivation, updateEmployee } from './employees';
+import { feedbackCsvRows, listFeedback, markFeedbackRead, replyFeedback, unreadFeedbackCount } from './feedback';
 import { listMenus, topDishes } from './menus';
 import { canteenPortOpen } from './portal';
+import { registrationView, rotateRegistrationCode, setRegistrationEnabled } from './registration';
 import { canteenDepartmentName, createCanteenDepartment, loadCanteenSettings, saveCanteenSettings } from './settings';
 
 const daysAgo = (date: string, n: number) => {
@@ -49,6 +51,8 @@ export function registerCanteenAdminRoutes(app: FastifyInstance, deps: Deps) {
         days: await dailyCounts(tx, daysAgo(date, 13), date),
         topDishes: await topDishes(tx, daysAgo(date, 6), date),
         portOpen: canteenPortOpen(config),
+        registration: await registrationView(tx),
+        feedbackUnread: await unreadFeedbackCount(tx),
       };
     }),
   );
@@ -61,6 +65,12 @@ export function registerCanteenAdminRoutes(app: FastifyInstance, deps: Deps) {
   /** 选部门用：在用的部门 */
   app.get('/api/erp/canteen/departments', manage, async () =>
     sql<{ id: number; name: string }[]>`SELECT id, name FROM departments WHERE active ORDER BY sort_order, id`);
+
+  // ── 自己登记：注册二维码（第二期，K12） ──
+  app.get('/api/erp/canteen/registration', manage, async () => registrationView(sql));
+  app.put('/api/erp/canteen/registration', manage, async (req) => setRegistrationEnabled(sql, req.body, ctxOf(req)));
+  /** 生成或换一个注册口令（旧二维码马上作废） */
+  app.post('/api/erp/canteen/registration/code', manage, async (req) => rotateRegistrationCode(sql, ctxOf(req)));
 
   // ── 员工名单 ──
   app.get('/api/erp/canteen/employees', manage, async () => listEmployees(sql));
@@ -104,5 +114,20 @@ export function registerCanteenAdminRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/erp/canteen/checkins/:id/void', manage, async (req) => {
     const { id } = parse(idParam, req.params);
     return voidCheckin(sql, id, req.body, { staffId: req.actor.id }, config.timezone);
+  });
+
+  // ── 跟柚子说：柚子信箱（第二期，K16） ──
+  app.get('/api/erp/canteen/feedback', manage, async (req): Promise<CanteenFeedbackList> => readSnapshot(sql, (tx) => listFeedback(tx, req.query)));
+  app.get('/api/erp/canteen/feedback.csv', manage, async (req, reply) => {
+    const list = await listFeedback(sql, req.query, null);
+    return csvReply(reply, '跟柚子说.csv', toCsv(feedbackCsvRows(list.rows, config.timezone)));
+  });
+  app.post('/api/erp/canteen/feedback/:id/read', manage, async (req) => {
+    const { id } = parse(idParam, req.params);
+    return markFeedbackRead(sql, id, ctxOf(req));
+  });
+  app.put('/api/erp/canteen/feedback/:id/reply', manage, async (req) => {
+    const { id } = parse(idParam, req.params);
+    return replyFeedback(sql, id, req.body, ctxOf(req));
   });
 }
