@@ -13,10 +13,13 @@ import {
   APPROVAL_GROUPS,
   APPROVAL_MAX_LEVELS,
   APPROVAL_MAX_STAFF,
+  CONTRACT_REVIEW_DOC_TYPES,
   DELEGATION_MAX_DAYS,
+  NO_BATCH_DOC_TYPES,
   inStep,
   stepLabel,
   type ApprovalDocKind,
+  type ApprovalDocType,
   type ApprovalRuleView,
   type ApprovalStep,
   type ApproverOption,
@@ -37,6 +40,7 @@ import { erpOpAbandoned } from '../erp-ops';
 import { hashRequest } from '../../lib/idempotency';
 import { setTxTimeouts } from '../../lib/tx';
 import { idParam, parse } from '../../lib/validate';
+import { actOnChange, actOnContract, actOnSeal } from '../contracts/flow';
 import { actOnClaim } from '../expenses';
 import { approveDoc, returnDoc } from '../inventory/docs';
 import { actOnOpening, actOnPayment } from '../inventory/payables';
@@ -50,15 +54,19 @@ const ACT = guardAny('approval.act', 'inventory.approve', 'expense.approve');
 
 // ───────────────────────── 同意、退回 ─────────────────────────
 
+/** 合同类法务那一级的审查清单（v0.7.31，C3；合同模块里再核对每一条） */
+const Checklist = z.array(z.object({ key: z.string().max(20), verdict: z.string().max(10), note: z.string().max(200).default('') })).max(20);
 const ApproveBody = z.object({
   level: z.number().int().min(1).max(APPROVAL_MAX_LEVELS),
   comment: z.string().trim().max(200, '意见最多 200 个字').default(''),
   /** 盘点：最后一级同意时可以改每行差异的原因类别（与原来的确认一样） */
   countReasons: z.record(z.string(), z.string()).optional(),
+  checklist: Checklist.optional(),
 });
 const ReturnBody = z.object({
   level: z.number().int().min(1).max(APPROVAL_MAX_LEVELS),
   reason: z.string().trim().min(2, '请写退回原因（至少 2 个字）').max(200, '原因最多 200 个字'),
+  checklist: Checklist.optional(),
 });
 
 async function requestHead(db: Db, requestId: number): Promise<{ id: number; docKind: ApprovalDocKind; docId: number; docNo: string; docType: string; amountCents: number | null; status: string }> {
@@ -85,6 +93,13 @@ async function actOnRequest(deps: Deps, requestId: number, action: 'approve' | '
       return actOnOpening(deps, head.docId, action, raw, actor);
     case 'expense_claim':
       return actOnClaim(deps, head.docId, action, raw, actor);
+    // 合同与法务审查（v0.7.31）：法务那一级带审查清单
+    case 'contract':
+      return actOnContract(deps, head.docId, action, raw, actor);
+    case 'contract_change':
+      return actOnChange(deps, head.docId, action, raw, actor);
+    case 'contract_seal':
+      return actOnSeal(deps, head.docId, action, raw, actor);
   }
 }
 
@@ -112,8 +127,14 @@ const CreateRuleBody = RuleBody.and(z.object({ clientKey: z.uuid('缺少有效�
 const UpdateRuleBody = RuleBody.and(z.object({ version: z.number().int().positive() }));
 const ActiveBody = z.object({ version: z.number().int().positive(), active: z.boolean() });
 
-/** 指定的人要在用、能用审批中心；同一级不重复 */
-async function checkSteps(db: Db, steps: ApprovalStep[]) {
+/** 指定的人要在用、能用审批中心；同一级不重复；合同、合同变更要有且只有一级「法务」，别的单据不能用「法务」（C2） */
+async function checkSteps(db: Db, steps: ApprovalStep[], docType: ApprovalDocType) {
+  const legal = steps.filter((s) => 'group' in s && s.group === 'legal').length;
+  if (CONTRACT_REVIEW_DOC_TYPES.includes(docType)) {
+    if (legal !== 1) throw unprocessable('RULE_LEGAL_REQUIRED', '合同、合同变更的审批链要有且只有一级「法务」（法务按审查清单逐条给意见）');
+  } else if (legal > 0) {
+    throw unprocessable('RULE_LEGAL_NOT_ALLOWED', '「法务」这一组只用于合同、合同变更');
+  }
   const ids = [...new Set(steps.flatMap((s) => ('staffIds' in s ? s.staffIds : [])))];
   for (const s of steps) if ('staffIds' in s && new Set(s.staffIds).size !== s.staffIds.length) throw badRequest('同一级里指定的人重复了');
   if (ids.length === 0) return;
@@ -170,7 +191,7 @@ async function createRule(deps: Deps, raw: unknown, actor: Actor, ip?: string) {
       const existing = await find(tx);
       if (existing) return { id: existing, replayed: true };
       await checkDepartment(tx, rule.departmentId);
-      await checkSteps(tx, rule.steps);
+      await checkSteps(tx, rule.steps, rule.docType);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO approval_rules (doc_type, min_cents, max_cents, department_id, steps, allow_self, note, client_key, request_hash, created_by, updated_by)
         VALUES (${rule.docType}, ${rule.minCents}, ${rule.maxCents}, ${rule.departmentId}, ${tx.json(rule.steps as never)}, ${rule.allowSelf}, ${rule.note},
@@ -196,7 +217,7 @@ async function updateRule(deps: Deps, ruleId: number, raw: unknown, actor: Actor
     if (!cur) throw notFound('审批规则不存在');
     if (cur.version !== version) throw conflict('VERSION_CONFLICT', '这条规则刚被别人改过，请刷新后再改');
     await checkDepartment(tx, rule.departmentId);
-    await checkSteps(tx, rule.steps);
+    await checkSteps(tx, rule.steps, rule.docType);
     await tx`
       UPDATE approval_rules SET doc_type = ${rule.docType}, min_cents = ${rule.minCents}, max_cents = ${rule.maxCents}, department_id = ${rule.departmentId},
              steps = ${tx.json(rule.steps as never)}, allow_self = ${rule.allowSelf}, note = ${rule.note}, version = version + 1,
@@ -383,6 +404,11 @@ export function registerApprovalRoutes(app: FastifyInstance, deps: Deps) {
     const results: BatchApproveResult['results'] = [];
     for (const [i, item] of body.items.entries()) {
       const head = heads[i]!;
+      // 合同、合同变更（法务要逐条给意见）、用印要逐张审（v0.7.31）
+      if (NO_BATCH_DOC_TYPES.includes(head.docType as ApprovalDocType)) {
+        results.push({ id: item.id, ok: false, docNo: head.docNo, code: 'APPROVAL_NO_BATCH', message: '合同、合同变更、用印要逐张审，请打开单独审' });
+        continue;
+      }
       if (head.amountCents === null || head.amountCents > APPROVAL_BATCH_MAX_CENTS) {
         results.push({ id: item.id, ok: false, docNo: head.docNo, code: 'BATCH_OVER_LIMIT', message: `金额超过 ¥${formatAmount(APPROVAL_BATCH_MAX_CENTS)}（或算不出），请打开单独审` });
         continue;

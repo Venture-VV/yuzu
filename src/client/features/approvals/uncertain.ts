@@ -38,9 +38,18 @@ export interface SentApproval {
 
 /**
  * 重新提交被拒绝时，能断定上次那次不会再生效（或已经有结果）的原因：这张单已经走过这一级、已经结束或退回后重新提交过
- * （APPROVAL_MOVED，级别只往前走），单据已经不在待确认（INVALID_STATE），金额超过批量上限（BATCH_OVER_LIMIT，原来那批一样）。
+ * （APPROVAL_MOVED，级别只往前走），单据已经不在待确认（INVALID_STATE），金额超过批量上限（BATCH_OVER_LIMIT，原来那批一样）；
+ * 合同类（v0.7.31）：这种单据不能批量（APPROVAL_NO_BATCH），审查清单没填全、有「要修改」、风险提示没写意见（原样再发，原来那次一样被拒）。
  */
-const CONCLUSIVE = new Set(['APPROVAL_MOVED', 'INVALID_STATE', 'BATCH_OVER_LIMIT']);
+const CONCLUSIVE = new Set([
+  'APPROVAL_MOVED',
+  'INVALID_STATE',
+  'BATCH_OVER_LIMIT',
+  'APPROVAL_NO_BATCH',
+  'LEGAL_CHECKLIST_REQUIRED',
+  'LEGAL_CHECKLIST_REVISE',
+  'LEGAL_CHECKLIST_NOTE',
+]);
 
 const STORAGE_KEY = 'yuzu.approvalPending.v1';
 const listeners = new Set<() => void>();

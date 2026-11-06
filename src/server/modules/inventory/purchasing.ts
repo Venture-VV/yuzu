@@ -37,6 +37,7 @@ import { hashRequest } from '../../lib/idempotency';
 import { ChannelKey, ChannelNote, loadPurchaseRules, resolveChannel, type ChannelColumns } from './purchase-rules';
 import { formatAmount } from '@shared/money';
 import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForApproval } from '../approvals/engine';
+import { assertContractForPo, poContract } from '../contracts/ledger';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -65,6 +66,10 @@ const PoBody = z.object({
   /** 采购途径与途径说明（v0.7.29，E1）：新建不传按供应商的默认、再按采购规则的第一项；修改不传保持原样 */
   channel: ChannelKey.optional(),
   channelNote: ChannelNote.optional(),
+  /** 挂的合同（v0.7.31，C9）：新建不传 = 不挂；修改不传保持原样、传 null 取消 */
+  contractId: id.nullable().optional(),
+  /** 单价超过合同价、数量超过合同剩余量时的原因（提交时核对）；修改不传保持原样 */
+  contractNote: z.string().trim().max(200, '原因最多 200 个字').optional(),
   lines: z.array(LineInput).min(1, '请至少添加一项物料').max(100, '采购单最多 100 行'),
 });
 type PoBodyInput = z.input<typeof PoBody>;
@@ -94,7 +99,7 @@ function receivingOf(lines: { baseQtyMilli: number; receivedMilli: number }[]): 
 }
 
 export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
-  const [po] = await db<(Omit<PurchaseOrder, 'channel' | 'sourcing'> & { supplierId: number; supplierName: string; backfillReceiptId: number | null; channelKey: string | null; channelLabel: string | null; channelNote: string; sourcingId: number | null; sourcingNo: string | null; sourcingStatus: string | null })[]>`
+  const [po] = await db<(Omit<PurchaseOrder, 'channel' | 'sourcing' | 'contract' | 'contractNote' | 'contractCheck'> & { supplierId: number; supplierName: string; backfillReceiptId: number | null; channelKey: string | null; channelLabel: string | null; channelNote: string; sourcingId: number | null; sourcingNo: string | null; sourcingStatus: string | null })[]>`
     SELECT po.id, po.doc_no, po.status, po.order_date, po.expected_date, po.note, po.price_basis, po.revision, po.backfill,
            po.backfill_receipt_id, po.created_by, cb.display_name AS created_by_name, po.created_at,
            po.channel AS channel_key, po.channel_label, po.channel_note,
@@ -189,6 +194,8 @@ export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
   const { supplierId, supplierName, backfillReceiptId: _b, channelKey, channelLabel, channelNote, sourcingId, sourcingNo, sourcingStatus, ...rest } = po;
   return {
     ...rest,
+    // 挂的合同与按单价表核对（v0.7.31，C9）
+    ...(await poContract(db, poId)),
     sourcing: sourcingId ? { id: Number(sourcingId), docNo: sourcingNo!, status: sourcingStatus as 'open' | 'awarded' | 'cancelled' } : null,
     supplier: { id: supplierId, name: supplierName },
     channel: channelKey ? { key: channelKey, label: channelLabel ?? channelKey, note: channelNote } : null,
@@ -448,7 +455,8 @@ async function syncLineRequests(tx: Tx, poLineId: number, next: number[], prev: 
 async function checkImages(db: Db, lines: PreparedLine[]) {
   const ids = [...new Set(lines.flatMap((l) => l.imageIds))];
   if (ids.length === 0) return;
-  const found = new Set((await db<{ id: number }[]>`SELECT id FROM erp_images WHERE id IN ${db(ids)}`).map((r) => Number(r.id)));
+  // 只能挂需求单、采购单用的图片（v0.7.31 迁移 079：合同扫描件另存，挂不上）
+  const found = new Set((await db<{ id: number }[]>`SELECT id FROM erp_images WHERE id IN ${db(ids)} AND scope = 'general'`).map((r) => Number(r.id)));
   if (ids.some((i) => !found.has(i))) throw unprocessable('IMAGE_NOT_FOUND', '有图片没有上传成功，请重新上传');
 }
 
@@ -528,6 +536,18 @@ export async function assertQuotesForPo(tx: Tx, poId: number) {
   throw unprocessable('QUOTES_REQUIRED', `合计 ${amount} 到了询价门槛 ${gate}：请先询价（至少 ${rules.minQuotes} 家报价）并定标，再从询价单转采购单`, { threshold: rules.quoteThresholdCents });
 }
 
+/** 提交时按合同核对（C9）：合同仍在生效中、下单日在起止日内；超价、超量的要写原因（至少 2 个字） */
+async function assertContractDeviation(tx: Tx, poId: number) {
+  const [p] = await tx<{ supplierId: number; orderDate: string; contractId: number | null }[]>`
+    SELECT supplier_id, order_date, contract_id FROM purchase_orders WHERE id = ${poId}`;
+  if (!p || p.contractId === null) return;
+  await assertContractForPo(tx, Number(p.contractId), Number(p.supplierId), p.orderDate);
+  const { contractNote, contractCheck } = await poContract(tx, poId);
+  if (!contractCheck?.exceeded || contractNote.length >= 2) return;
+  const over = contractCheck.lines.filter((l) => l.priceOverCents > 0 || l.overQtyMilli > 0).map((l) => `第 ${l.lineNo} 行`);
+  throw unprocessable('CONTRACT_DEVIATION_REASON_REQUIRED', `${over.join('、')}的单价超过合同价或数量超过合同剩余量，请写明原因再提交`, { lines: contractCheck.lines });
+}
+
 /**
  * deptConfirm：急采的补单由本部门自己确认（#19，v0.7.11），不走审批。
  * 其余按审批中心（v0.7.30）：命中审批规则的按规则的审批链；没有规则命中按「需要负责人确认」与免确认门槛（默认规则），与以前一样。
@@ -537,6 +557,8 @@ async function submitLocked(tx: Tx, po: PoRow, actor: Actor, approveNow: boolean
   if (po.status !== 'draft' && po.status !== 'returned') throw conflict('INVALID_STATE', '采购单当前状态不能提交');
   // 询价门槛（v0.7.29 E5）：合计到门槛、没改过版的采购单要来自已定标的询价单
   await assertQuotesForPo(tx, po.id);
+  // 挂了合同的（v0.7.31，C9）：合同仍要生效中；超价、超量的要写原因（在采购单的锁里再核对一次，读合同不加锁）
+  await assertContractDeviation(tx, po.id);
   await tx`UPDATE purchase_orders SET status = 'submitted', submitted_by = ${actor.id}, submitted_at = now(), updated_at = now() WHERE id = ${po.id}`;
   await logApproval(tx, 'purchase_order', po.id, 'submit', actor.id, '', po.revision);
   if (deptConfirm) {
@@ -599,6 +621,7 @@ export async function createPo(
       }
       const sup = await assertSupplier(tx, body.supplierId);
       const ch = resolveChannel(await loadPurchaseRules(tx), body, sup.defaultChannel);
+      if (body.contractId) await assertContractForPo(tx, body.contractId, body.supplierId, body.orderDate);
       const lines = await prepareLines(tx, body, new Map());
       await checkRequestLinks(tx, null, lines, new Map(), actor, opts.sourcingEventId ?? null);
       await checkImages(tx, lines);
@@ -606,10 +629,12 @@ export async function createPo(
       const docNo = await nextDocNo(tx, 'purchase_order', 'CG', body.orderDate);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO purchase_orders (doc_no, supplier_id, status, order_date, expected_date, note, price_basis, backfill,
-                                     backfill_receipt_id, client_key, created_by, channel, channel_label, channel_note, sourcing_event_id)
+                                     backfill_receipt_id, client_key, created_by, channel, channel_label, channel_note, sourcing_event_id,
+                                     contract_id, contract_note)
         VALUES (${docNo}, ${body.supplierId}, 'draft', ${body.orderDate}, ${body.expectedDate}, ${body.note}, ${settings.priceBasis},
                 ${!!opts.backfillReceiptId}, ${opts.backfillReceiptId ?? null}, ${meta.clientKey}, ${actor.id},
-                ${ch.channel}, ${ch.channelLabel}, ${ch.channelNote}, ${opts.sourcingEventId ?? null})
+                ${ch.channel}, ${ch.channelLabel}, ${ch.channelNote}, ${opts.sourcingEventId ?? null},
+                ${body.contractId ?? null}, ${body.contractNote ?? ''})
         RETURNING id`;
       const newId = row!.id;
       const total = await syncLines(tx, newId, lines, new Map());
@@ -697,6 +722,11 @@ export async function updatePo(deps: Deps, poId: number, raw: PoBodyInput & { ac
     if (!revise && received && body.supplierId !== po.supplierId) throw unprocessable('PO_SUPPLIER_LOCKED', '已有收货的采购单不能更换供应商');
     const sup = await assertSupplier(tx, body.supplierId);
     const ch = await channelForUpdate(tx, poId, body, sup.defaultChannel);
+    // 挂的合同（v0.7.31）：不传保持原样，传 null 取消；挂着的合同仍要对得上（换了供应商、改了下单日也核对）
+    const [cur] = await tx<{ contractId: number | null; contractNote: string }[]>`SELECT contract_id, contract_note FROM purchase_orders WHERE id = ${poId}`;
+    const contractId = body.contractId === undefined ? (cur!.contractId === null ? null : Number(cur!.contractId)) : body.contractId;
+    const contractNote = body.contractNote ?? cur!.contractNote;
+    if (contractId !== null) await assertContractForPo(tx, contractId, body.supplierId, body.orderDate);
     const lines = await prepareLines(tx, body, existing);
     await checkRequestLinks(tx, poId, lines, existing, actor, po.sourcingEventId === null ? null : Number(po.sourcingEventId));
     await checkImages(tx, lines);
@@ -704,7 +734,7 @@ export async function updatePo(deps: Deps, poId: number, raw: PoBodyInput & { ac
     await tx`
       UPDATE purchase_orders SET supplier_id = ${body.supplierId}, order_date = ${body.orderDate}, expected_date = ${body.expectedDate},
              note = ${body.note}, total_cents = ${total}, channel = ${ch.channel}, channel_label = ${ch.channelLabel},
-             channel_note = ${ch.channelNote}, updated_at = now()
+             channel_note = ${ch.channelNote}, contract_id = ${contractId}, contract_note = ${contractNote}, updated_at = now()
       WHERE id = ${poId}`;
     if (meta.action === 'submit' || revise) await submitLocked(tx, po, actor, meta.approveNow, deps.config.timezone);
   });

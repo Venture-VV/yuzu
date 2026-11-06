@@ -86,6 +86,10 @@ export const FENCED_OPS = [
   // 审批中心（v0.7.30，迁移 073）：新建审批规则、设代理人；编号记在各自的行上（client_key）
   'approval_rule',
   'approval_delegation',
+  // 合同与法务审查（v0.7.31，迁移 077）：新建合同、变更单、用印申请；编号记在各自的行上（client_key）
+  'contract_create',
+  'contract_change',
+  'contract_seal',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -136,6 +140,7 @@ export async function fenceKey(
   if (isCountCardOp(opType) && (await countCardOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   if (isPlatformOp(opType) && (await platformOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   if (isApprovalOp(opType) && (await approvalOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
+  if (isContractOp(opType) && (await contractOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   const rows = await tx`
     INSERT INTO op_fences (key, op_type, staff_id) VALUES (${key}, ${opType}, ${staffId})
     ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;
@@ -167,6 +172,21 @@ export async function approvalOpRef(db: Db, key: string, opType: ApprovalOp): Pr
     opType === 'approval_rule'
       ? await db<{ id: number }[]>`SELECT id FROM approval_rules WHERE client_key = ${key}`
       : await db<{ id: number }[]>`SELECT id FROM approval_delegations WHERE client_key = ${key}`;
+  return rows[0] ? Number(rows[0].id) : null;
+}
+
+const CONTRACT_OPS = ['contract_create', 'contract_change', 'contract_seal'] as const;
+type ContractOp = (typeof CONTRACT_OPS)[number];
+export const isContractOp = (op: string): op is ContractOp => (CONTRACT_OPS as readonly string[]).includes(op);
+
+/** 合同（v0.7.31）的操作编号记在合同、变更单、用印登记上：查到时返回那一条的编号 */
+export async function contractOpRef(db: Db, key: string, opType: ContractOp): Promise<number | null> {
+  const rows =
+    opType === 'contract_create'
+      ? await db<{ id: number }[]>`SELECT id FROM contracts WHERE client_key = ${key}`
+      : opType === 'contract_change'
+        ? await db<{ id: number }[]>`SELECT id FROM contract_changes WHERE client_key = ${key}`
+        : await db<{ id: number }[]>`SELECT id FROM contract_seals WHERE client_key = ${key}`;
   return rows[0] ? Number(rows[0].id) : null;
 }
 

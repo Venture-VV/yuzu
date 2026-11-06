@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { businessDateOf } from '../src/shared/business-date';
 import { loadConfig, type AppConfig } from '../src/server/config';
 import { demoCheck, demoPrepare, demoReset } from '../src/server/demo/prepare';
+import { runMinuteJobs } from '../src/server/jobs';
 import expected from '../src/server/demo/showcase-expected.json' with { type: 'json' };
 import { seedShowcaseDemo, ShowcaseConflictError, SHOWCASE_KEY, showcaseState } from '../src/server/demo/showcase';
 import { SAMPLE_SPACES_CSV, SAMPLE_ZONES_CSV } from '../src/server/demo/space-sample';
@@ -131,6 +132,16 @@ describe('演示数据准备', () => {
     const r = await demoPrepare(ctx.sql, ctx.config);
     expect(r.blocks.every((b) => !b.written)).toBe(true);
     expect(r.check.ok).toBe(true);
+    expect(await fingerprint()).toBe(before);
+  });
+
+  it('准备完以后应用第一次跑每分钟的自动任务不改数据（demo-prepare 最后已经照样跑过一次，main 定时测试 v0.7.29）', async () => {
+    // 原来会员折扣块发布 QY-011 在当天的权益发放之后，权益清单变了，应用启动后第一分钟又跑一次（一张没多发，
+    // 但运行记录改了、指纹变了，日志写的累计数看起来像又发了一轮）
+    const before = await fingerprint();
+    const lines: string[] = [];
+    await runMinuteJobs({ sql: ctx.sql, config: ctx.config }, { info: (m) => lines.push(m), error: (m) => lines.push(`出错：${m}`) });
+    expect(lines).toEqual([]);
     expect(await fingerprint()).toBe(before);
   });
 

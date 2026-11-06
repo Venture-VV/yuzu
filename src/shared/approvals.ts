@@ -1,11 +1,14 @@
 // 审批中心（v0.7.30，docs/APPROVALS.md；默认 A1–A10 待确认）：审批规则、审批单、审批记录、代理人。
 // 要审批的单据（采购单、物资单据、付款、期初未付、报销）提交时按规则生成审批单，逐级同意、任何一级可退回；
 // 没有规则命中按现在的「负责人确认」开关与门槛（默认规则：一级负责人），没建规则时与 v0.7.29 一样。
+// v0.7.31 合同与法务审查（docs/CONTRACTS.md）：加三种单据（合同、合同变更、用印）与岗位组「法务」；
+// 合同、合同变更没有规则命中时走 财务 → 法务 → 负责人，用印走一级店主（C2、C7，待确认）。
 
+import type { ChangeKind, ReviewView } from './contracts';
 import { can, type Duty, type Permission, type Role } from './permissions';
 
 /** 规则里的单据类型 */
-export const APPROVAL_DOC_TYPES = ['purchase_order', 'damage', 'supplier_return', 'opening', 'payment', 'expense_claim', 'stocktake'] as const;
+export const APPROVAL_DOC_TYPES = ['purchase_order', 'damage', 'supplier_return', 'opening', 'payment', 'expense_claim', 'stocktake', 'contract', 'contract_change', 'contract_seal'] as const;
 export type ApprovalDocType = (typeof APPROVAL_DOC_TYPES)[number];
 export const APPROVAL_DOC_TYPE_LABELS: Record<ApprovalDocType, string> = {
   purchase_order: '采购单',
@@ -15,27 +18,46 @@ export const APPROVAL_DOC_TYPE_LABELS: Record<ApprovalDocType, string> = {
   payment: '付款',
   expense_claim: '报销',
   stocktake: '盘点差异',
+  contract: '合同',
+  contract_change: '合同变更',
+  contract_seal: '用印',
 };
+/** 合同类的单据（法务那一级按审查清单逐条给意见；规则必须有且只有一级「法务」） */
+export const CONTRACT_REVIEW_DOC_TYPES: readonly ApprovalDocType[] = ['contract', 'contract_change'];
+/** 不能批量同意的单据：合同类（法务那一级要逐条给意见）、用印 */
+export const NO_BATCH_DOC_TYPES: readonly ApprovalDocType[] = ['contract', 'contract_change', 'contract_seal'];
 
 /** 审批单挂在哪张表的单据上 */
-export const APPROVAL_DOC_KINDS = ['purchase_order', 'inv_doc', 'payment', 'opening_payable', 'expense_claim'] as const;
+export const APPROVAL_DOC_KINDS = ['purchase_order', 'inv_doc', 'payment', 'opening_payable', 'expense_claim', 'contract', 'contract_change', 'contract_seal'] as const;
 export type ApprovalDocKind = (typeof APPROVAL_DOC_KINDS)[number];
 
 /** 岗位组（A2）：店主算在每一组里 */
-export const APPROVAL_GROUPS = ['manager', 'finance', 'store_manager', 'owner'] as const;
+export const APPROVAL_GROUPS = ['manager', 'finance', 'store_manager', 'owner', 'legal'] as const;
 export type ApprovalGroup = (typeof APPROVAL_GROUPS)[number];
 export const APPROVAL_GROUP_LABELS: Record<ApprovalGroup, string> = {
   manager: '负责人',
   finance: '财务',
   store_manager: '店总',
   owner: '店主',
+  legal: '法务',
 };
 export const APPROVAL_GROUP_HINTS: Record<ApprovalGroup, string> = {
   manager: '有「负责人确认」职责的（报销是能确认报销的）',
   finance: '对账付款、成本核算',
   store_manager: '店总岗位',
   owner: '只有店主',
+  legal: '有「法务」职责的（只用于合同、合同变更，按审查清单逐条给意见）',
 };
+/** 合同、合同变更没有规则命中时的审查链（C2）：财务 → 法务 → 负责人 */
+export const CONTRACT_DEFAULT_STEPS: ApprovalStep[] = [
+  { group: 'finance', mode: 'any' },
+  { group: 'legal', mode: 'any' },
+  { group: 'manager', mode: 'any' },
+];
+/** 用印没有规则命中时（C7）：一级店主 */
+export const SEAL_DEFAULT_STEPS: ApprovalStep[] = [{ group: 'owner', mode: 'any' }];
+/** 这一级是不是法务那一级（合同类的单据在这一级按审查清单逐条给意见） */
+export const isLegalStep = (step: ApprovalStep | undefined): boolean => !!step && 'group' in step && step.group === 'legal';
 
 export type ApprovalMode = 'any' | 'all';
 export const APPROVAL_MODE_LABELS: Record<ApprovalMode, string> = { any: '或签', all: '会签' };
@@ -79,7 +101,7 @@ export interface ApproverSubject {
   permissions?: readonly Permission[];
 }
 
-/** 岗位组的「负责人」：采购单、物资单据、付款、期初未付按「负责人确认」，报销按「确认超门槛的报销」 */
+/** 岗位组的「负责人」：采购单、物资单据、付款、期初未付、合同类按「负责人确认」，报销按「确认超门槛的报销」 */
 export function managerPermission(kind: ApprovalDocKind): Permission {
   return kind === 'expense_claim' ? 'expense.approve' : 'inventory.approve';
 }
@@ -98,6 +120,8 @@ export function inStep(step: ApprovalStep, who: ApproverSubject, kind: ApprovalD
       return who.role === 'store_manager';
     case 'owner':
       return false;
+    case 'legal':
+      return who.duties.includes('legal');
   }
 }
 
@@ -178,6 +202,8 @@ export interface ApprovalDetail extends ApprovalCard {
     /** 会签时这一级还要谁同意 */
     waitingFor: string[];
     actions: ApprovalActionView[];
+    /** 法务这一级（v0.7.31，合同、合同变更）：同意时按审查清单逐条给结论 */
+    legal: boolean;
   }[];
   /** 单据要点 */
   doc: ApprovalDocDigest;
@@ -212,6 +238,16 @@ export interface ApprovalDocDigest {
       reasonNote: string;
     };
   }[];
+  /** 合同类单据（v0.7.31）：合同号、这张审批单对着的提交记录与上面已有的审查清单结论；变更单另有改前改后 */
+  contract?: {
+    kind: 'contract' | 'contract_change' | 'contract_seal';
+    contractId: number;
+    contractNo: string;
+    /** 合同、变更单这次提交的提交记录（用印没有） */
+    revisionId: number | null;
+    reviews: ReviewView[];
+    change?: { kinds: ChangeKind[]; reason: string; baseVersion: number; beforeTotalCents: number; afterTotalCents: number };
+  };
 }
 
 export interface ApprovalCounts {

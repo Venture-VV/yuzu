@@ -40,11 +40,22 @@ const toBase64 = (blob: Blob) =>
     r.readAsDataURL(blob);
   });
 
-async function uploadCompressed(file: File): Promise<{ ref: ImageRef; blob: Blob }> {
+async function prepare(file: File): Promise<{ blob: Blob; mime: string; data: string }> {
   const blob = await compress(file);
   if (blob.size > MAX_IMAGE_BYTES) throw new Error('图片压缩后仍超过 1 MB，请换一张或裁小一点');
   const mime = blob.type === 'image/png' || blob.type === 'image/webp' ? blob.type : 'image/jpeg';
-  return { ref: await api.post<ImageRef>('/api/erp/images', { mime, data: await toBase64(blob) }, { timeoutMs: 30_000 }), blob };
+  return { blob, mime, data: await toBase64(blob) };
+}
+
+async function uploadCompressed(file: File): Promise<{ ref: ImageRef; blob: Blob }> {
+  const { blob, mime, data } = await prepare(file);
+  return { ref: await api.post<ImageRef>('/api/erp/images', { mime, data }, { timeoutMs: 30_000 }), blob };
+}
+
+/** 压缩好、转成上传用的 { mime, data }：走自己接口的图片用（合同扫描件，v0.7.31） */
+export async function imagePayload(file: File): Promise<{ mime: string; data: string }> {
+  const { mime, data } = await prepare(file);
+  return { mime, data };
 }
 
 export async function uploadImage(file: File): Promise<ImageRef> {

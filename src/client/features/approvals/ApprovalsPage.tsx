@@ -10,6 +10,7 @@ import {
   APPROVAL_BATCH_MAX_CENTS,
   APPROVAL_DOC_TYPE_LABELS,
   APPROVAL_OVERDUE_HOURS,
+  NO_BATCH_DOC_TYPES,
   URGENT_BACKFILL_ESCALATE_DAYS,
   type ApprovalCard,
   type BatchApproveResult,
@@ -167,7 +168,14 @@ function CardList({ cards, tab, onOpen }: { cards: ApprovalCard[]; tab: Approval
   const picked = useMemo(() => cards.filter((c) => selected.includes(c.id)), [cards, selected]);
   const pickedType = picked[0]?.docType ?? null;
   const batchable = (c: ApprovalCard) =>
-    tab === 'mine' && c.canAct && !sent.get(c.id) && c.amountCents !== null && c.amountCents <= APPROVAL_BATCH_MAX_CENTS && (!pickedType || c.docType === pickedType);
+    tab === 'mine' &&
+    c.canAct &&
+    !sent.get(c.id) &&
+    // 合同、合同变更、用印（v0.7.31）要逐张审：法务那一级按审查清单逐条给意见
+    !NO_BATCH_DOC_TYPES.includes(c.docType) &&
+    c.amountCents !== null &&
+    c.amountCents <= APPROVAL_BATCH_MAX_CENTS &&
+    (!pickedType || c.docType === pickedType);
   const batchDialog = <BatchDialog open={batchOpen} cards={picked} onClose={() => setBatchOpen(false)} onDone={() => setSelected([])} />;
   if (cards.length === 0) {
     return (
@@ -186,7 +194,7 @@ function CardList({ cards, tab, onOpen }: { cards: ApprovalCard[]; tab: Approval
     <>
       {tab === 'mine' && (
         <p className="text-[12.5px] text-ink-3">
-          勾选同一种单据、每张不超过 ¥{formatAmount(APPROVAL_BATCH_MAX_CENTS)} 的可以一起同意（一次最多 {APPROVAL_BATCH_MAX} 张）。
+          勾选同一种单据、每张不超过 ¥{formatAmount(APPROVAL_BATCH_MAX_CENTS)} 的可以一起同意（一次最多 {APPROVAL_BATCH_MAX} 张）；合同、合同变更、用印要逐张审。
         </p>
       )}
       <ul className="space-y-2.5" data-testid="approval-cards">

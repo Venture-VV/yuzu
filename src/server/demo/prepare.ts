@@ -9,6 +9,7 @@ import { businessDateOf } from '@shared/business-date';
 import { INSTANCE_LABELS } from '@shared/instance';
 import type { AppConfig } from '../config';
 import type { Sql } from '../db';
+import { runMinuteJobs } from '../jobs';
 import { dropSchemaInBatches } from '../lib/drop-schema';
 import { migrate } from '../migrate';
 import { ensureMembershipLive } from '../modules/membership';
@@ -149,6 +150,17 @@ export async function demoPrepare(
     blocks.push({ block: MEMBERSHIP_P3_BLOCK, written: true, detail: `${trialDemo.done.length} 步`, items: trialDemo.done });
     notes.push(...trialDemo.notes);
   }
+
+  // 最后照应用每分钟的自动任务跑一次（v0.7.31，main 定时测试 v0.7.29 报的）：后面的块会改到前面的块已经用过的规则
+  // （会员折扣块发布 QY-011，权益清单变了，当天的权益发放要再跑一次），在这里跑掉，准备完以后第一次启动应用就不再改数据
+  await runMinuteJobs(
+    { sql, config },
+    {
+      info: (msg) => notes.push(`自动任务：${msg}`),
+      error: (msg, err) => notes.push(`自动任务出错：${msg}${err instanceof Error ? `（${err.message}）` : ''}`),
+    },
+    { now: opts.now },
+  );
 
   return { blocks, notes, check: await demoCheck(sql, config) };
 }

@@ -4,8 +4,9 @@
 import { useEffect, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Boxes, ClipboardCheck, ClipboardList, HandCoins, LayoutGrid, LineChart, Package, ReceiptText, ShoppingCart, SlidersHorizontal, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, Boxes, ClipboardCheck, ClipboardList, FileSignature, HandCoins, LayoutGrid, LineChart, Package, ReceiptText, ShoppingCart, SlidersHorizontal, type LucideIcon } from 'lucide-react';
 import type { ApprovalCounts } from '@shared/approvals';
+import type { ContractExpiryItem } from '@shared/contracts';
 import { ERP_MODULES, erpModuleOfPage, type ErpModuleKey } from '@shared/erp';
 import { versionText } from '@shared/instance';
 import { DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
@@ -24,6 +25,7 @@ const ICONS: Record<ErpModuleKey, LucideIcon> = {
   deptStock: Package,
   payables: HandCoins,
   approvals: ClipboardCheck,
+  contracts: FileSignature,
   expenses: ReceiptText,
   revenue: LineChart,
 };
@@ -57,20 +59,29 @@ export function ErpShell() {
     enabled: access.modules.includes('approvals') && (can('approval.act') || can('inventory.approve') || can('expense.approve')),
     refetchInterval: 60_000,
   });
+  // 合同（v0.7.31，C11）：60 天内到期、还没续签的份数（维护合同的人看）
+  const expiring = useQuery({
+    queryKey: ['inv', 'contracts', 'expiring'],
+    queryFn: () => api.get<ContractExpiryItem[]>('/api/erp/contracts/expiring'),
+    enabled: access.modules.includes('contracts') && can('contract.manage'),
+    refetchInterval: 300_000,
+  });
   if (!access.canEnter) return <Navigate to="/" replace />;
+  const contractsDue = (expiring.data ?? []).filter((x) => !x.renewal);
 
   const moduleItem = (k: ErpModuleKey): Item => ({
     key: k,
     to: ERP_MODULES[k].path,
     label: ERP_MODULES[k].label,
     icon: ICONS[k],
-    badge: k === 'approvals' && todo.data ? todo.data.mine + todo.data.backfill + todo.data.accept : undefined,
-    alert: k === 'approvals' && !!todo.data?.overdue,
+    badge: k === 'approvals' && todo.data ? todo.data.mine + todo.data.backfill + todo.data.accept : k === 'contracts' ? contractsDue.length : undefined,
+    alert: (k === 'approvals' && !!todo.data?.overdue) || (k === 'contracts' && contractsDue.some((x) => x.daysLeft < 0)),
   });
   const groups: { title: string; items: Item[] }[] = [
     { title: '概览', items: [{ key: 'home', to: '/erp', label: 'ERP 首页', icon: LayoutGrid, end: true }] },
     { title: '供应链', items: access.modules.filter((k) => ERP_MODULES[k].group === '供应链').map(moduleItem) },
     { title: '财务', items: access.modules.filter((k) => ERP_MODULES[k].group === '财务').map(moduleItem) },
+    { title: '法务', items: access.modules.filter((k) => ERP_MODULES[k].group === '法务').map(moduleItem) },
     { title: '设置', items: access.canSettings ? [{ key: 'modules', to: '/erp/modules', label: '模块设置', icon: SlidersHorizontal }] : [] },
   ].filter((g) => g.items.length > 0);
 

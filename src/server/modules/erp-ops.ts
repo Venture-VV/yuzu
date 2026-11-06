@@ -16,7 +16,7 @@ import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { conflict, forbidden } from '../lib/errors';
-import { approvalOpRef, benefitUseOpRef, countCardOpRef, memberCardOpRef, couponOpRef, platformOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isCountCardOp, isApprovalOp, isDeviceOp, isFenced, isMemberOp, isPlatformOp, memberOpRef, trialOpRef } from '../lib/fences';
+import { approvalOpRef, benefitUseOpRef, contractOpRef, countCardOpRef, memberCardOpRef, couponOpRef, platformOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isContractOp, isCountCardOp, isApprovalOp, isDeviceOp, isFenced, isMemberOp, isPlatformOp, memberOpRef, trialOpRef } from '../lib/fences';
 import { parse } from '../lib/validate';
 import { setTxTimeouts } from '../lib/tx';
 
@@ -72,6 +72,10 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   // 审批中心（v0.7.30）：新建审批规则要「维护审批规则」；设代理人与接口一致（能进审批中心的）
   approval_rule: ['approval.rules'],
   approval_delegation: ['approval.act', 'inventory.approve', 'expense.approve'],
+  // 合同与法务审查（v0.7.31）：新建合同、变更单、用印申请都要「维护合同」
+  contract_create: ['contract.manage'],
+  contract_change: ['contract.manage'],
+  contract_seal: ['contract.manage'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -108,6 +112,9 @@ const READ: Record<ErpOpType, Permission[]> = {
   member_card: ['member.card', 'member.read'],
   approval_rule: ['approval.rules'],
   approval_delegation: ['approval.act', 'inventory.approve', 'expense.approve'],
+  contract_create: ['contract.read'],
+  contract_change: ['contract.read'],
+  contract_seal: ['contract.read'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {
@@ -174,6 +181,11 @@ export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise
   // 审批中心（v0.7.30）：refId 是那条审批规则、那条代理设置
   if (isApprovalOp(type)) {
     const refId = await approvalOpRef(db, key, type);
+    if (refId !== null) return { found: true, abandoned: false, refId };
+  }
+  // 合同与法务审查（v0.7.31）：refId 是那份合同、那张变更单、那条用印登记
+  if (isContractOp(type)) {
+    const refId = await contractOpRef(db, key, type);
     if (refId !== null) return { found: true, abandoned: false, refId };
   }
   return { found: false, abandoned: await isFenced(db, key, [type]) };

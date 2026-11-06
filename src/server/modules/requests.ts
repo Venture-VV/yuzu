@@ -248,7 +248,8 @@ async function validateLines(db: Db, lines: z.infer<typeof LineInput>[]) {
     ? new Map((await db<{ id: number; name: string; active: boolean; tracked: boolean }[]>`SELECT id, name, active, tracked FROM materials WHERE id IN ${db(matIds)}`).map((m) => [m.id, m]))
     : new Map<number, { id: number; name: string; active: boolean; tracked: boolean }>();
   const imageIds = [...new Set(lines.flatMap((l) => l.imageIds))];
-  const images = imageIds.length ? new Set((await db<{ id: number }[]>`SELECT id FROM erp_images WHERE id IN ${db(imageIds)}`).map((r) => r.id)) : new Set<number>();
+  // 只能挂需求单、采购单用的图片（v0.7.31 迁移 079：合同扫描件另存，挂不上）
+  const images = imageIds.length ? new Set((await db<{ id: number }[]>`SELECT id FROM erp_images WHERE id IN ${db(imageIds)} AND scope = 'general'`).map((r) => Number(r.id))) : new Set<number>();
   for (const l of lines) {
     if (!rules.purposes.includes(l.purpose)) throw unprocessable('PURPOSE_INVALID', `用途只能从固定选项里选：${rules.purposes.join('、')}`);
     if (l.materialId !== null) {
@@ -415,7 +416,8 @@ function sniff(buf: Buffer): string | null {
   return null;
 }
 
-export async function saveImage(db: Db, raw: unknown, actor: Actor) {
+/** 存一张图片（按内容去重）。scope：general 需求单、采购单的行；contract 合同扫描件（v0.7.31 迁移 079，两处各存一份、互不相通） */
+export async function saveImage(db: Db, raw: unknown, actor: Actor, scope: 'general' | 'contract' = 'general') {
   const input = parse(ImageInput, raw);
   const buf = Buffer.from(input.data, 'base64');
   if (buf.length === 0) throw badRequest('图片内容为空');
@@ -424,9 +426,9 @@ export async function saveImage(db: Db, raw: unknown, actor: Actor) {
   if (!kind || kind !== input.mime) throw unprocessable('IMAGE_INVALID', '文件不是有效的 JPEG、PNG 或 WebP 图片');
   const sha = createHash('sha256').update(buf).digest('hex');
   const [row] = await db<{ id: number }[]>`
-    INSERT INTO erp_images (sha256, mime, data, size_bytes, created_by) VALUES (${sha}, ${kind}, ${buf}, ${buf.length}, ${actor.id})
-    ON CONFLICT (sha256) DO NOTHING RETURNING id`;
-  const imageId = row?.id ?? (await db<{ id: number }[]>`SELECT id FROM erp_images WHERE sha256 = ${sha}`)[0]!.id;
+    INSERT INTO erp_images (sha256, mime, data, size_bytes, created_by, scope) VALUES (${sha}, ${kind}, ${buf}, ${buf.length}, ${actor.id}, ${scope})
+    ON CONFLICT (scope, sha256) DO NOTHING RETURNING id`;
+  const imageId = row?.id ?? (await db<{ id: number }[]>`SELECT id FROM erp_images WHERE scope = ${scope} AND sha256 = ${sha}`)[0]!.id;
   return { id: imageId, url: imageUrl(imageId) };
 }
 
@@ -622,7 +624,8 @@ export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
             WHERE li.image_id = i.id AND (r.requester_id = ${req.actor.id} OR r.department_id = ${me.departmentId ?? 0})))`;
       if (!mine) throw notFound('图片不存在');
     }
-    const [img] = await sql<{ mime: string; data: Buffer }[]>`SELECT mime, data FROM erp_images WHERE id = ${imageId}`;
+    // 合同扫描件不经这里给（v0.7.31 迁移 079）：只经合同的接口看，要「查看合同」、合同模块开着
+    const [img] = await sql<{ mime: string; data: Buffer }[]>`SELECT mime, data FROM erp_images WHERE id = ${imageId} AND scope = 'general'`;
     if (!img) throw notFound('图片不存在');
     reply.header('content-type', img.mime).header('cache-control', 'private, max-age=31536000, immutable');
     return reply.send(img.data);

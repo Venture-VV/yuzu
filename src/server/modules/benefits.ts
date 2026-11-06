@@ -357,12 +357,19 @@ export async function onMemberSaved(tx: Tx, deps: Pick<Deps, 'config'>, memberId
 /** 一次翻多少位会员 */
 const DAILY_PAGE = 500;
 
+/** 每天的自动发放跑了一次：运行记录（当天累计）加上这一次新发的 */
+export interface BenefitDailyRun extends BenefitJobRun {
+  /** 这一次发了券的会员人数、张数（运行记录的 processed、coupons 是当天累计的，同一天再跑一次会累加） */
+  thisRun: { processed: number; coupons: number };
+}
+
 /**
  * 会员权益的自动发放：营业日开始后，给在册会员发本期还没发够的券类、生日月的生日礼、节日当周的节日关怀（一位一个事务、锁会员一行）。
  * 应用每分钟调用一次：今天已经跑完、没出错、之后也没人改过权益清单时什么都不做；有人修改、发布、暂缓了，同一天再跑一次
- * （今天才发布的月度券当天就发）。每页先在事务外算出谁还缺，只给缺的会员开事务；运行记录一个营业日一条，同一天多次累加
+ * （今天才发布的月度券当天就发）。每页先在事务外算出谁还缺，只给缺的会员开事务；运行记录一个营业日一条，同一天多次累加。
+ * 日志只写这一次新发的（thisRun）：写累计的数，清单改过后再跑一次、一张没发时看起来也像又发了一轮（main 定时测试 v0.7.29）
  */
-export async function runBenefitsDaily(deps: Pick<Deps, 'sql' | 'config'>, now = new Date(), opts: { pageSize?: number } = {}): Promise<BenefitJobRun | null> {
+export async function runBenefitsDaily(deps: Pick<Deps, 'sql' | 'config'>, now = new Date(), opts: { pageSize?: number } = {}): Promise<BenefitDailyRun | null> {
   const { sql } = deps;
   const pageSize = opts.pageSize ?? DAILY_PAGE;
   const settings = await loadSettings(sql);
@@ -414,7 +421,7 @@ export async function runBenefitsDaily(deps: Pick<Deps, 'sql' | 'config'>, now =
        SET processed = processed + ${counts.processed}, coupons = coupons + ${counts.coupons}, finished_at = now(), error = ${error}
      WHERE job = 'benefits' AND business_date = ${today}
     RETURNING business_date, started_at, finished_at, processed, coupons, error`;
-  return saved ?? null;
+  return saved ? { ...saved, thisRun: counts } : null;
 }
 
 /** 这一页里还缺券的会员（事务外、只读；进了事务再按最新的状态核对一遍） */

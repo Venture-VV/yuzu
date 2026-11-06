@@ -14,6 +14,8 @@ import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
 import { Money } from '../../components/Money';
 import { Badge, Button, IconButton, Input, Notice, Select, Skeleton } from '../../components/ui';
+import { checklistBody, checklistProblem, LegalChecklistEditor, type ChecklistDraft } from '../contracts/LegalChecklist';
+import { ReviewsView } from '../contracts/parts';
 import { ApprovalResend, waited } from './ApprovalProgress';
 import { useApprovalDetail, useRefreshAfterApproval } from './queries';
 import { sendApproval, useSettleWhenFinished, useUncertainApprovals } from './uncertain';
@@ -21,7 +23,7 @@ import { sendApproval, useSettleWhenFinished, useUncertainApprovals } from './un
 export function ApprovalSheet({ id, onClose }: { id: number | null; onClose: () => void }) {
   return (
     <Sheet open={id !== null} onClose={onClose} label="审批单" width="w-[min(560px,100vw)]">
-      {id !== null && <Body id={id} onClose={onClose} />}
+      {id !== null && <Body key={id} id={id} onClose={onClose} />}
     </Sheet>
   );
 }
@@ -35,11 +37,17 @@ function Body({ id, onClose }: { id: number; onClose: () => void }) {
   const [busy, setBusy] = useState<'approve' | 'return' | null>(null);
   const [returning, setReturning] = useState(false);
   const [reasons, setReasons] = useState<Record<string, string>>({});
+  // 合同、合同变更的法务那一级（v0.7.31）：按审查清单逐条给结论
+  const [checklist, setChecklist] = useState<ChecklistDraft>({});
   const d = detail.data;
   // 上次同意或退回没收到结果：只能按原内容重新提交（uncertain.ts），不按刷新后的级别重新拼
   const sent = useUncertainApprovals();
   useSettleWhenFinished(d?.id, d?.status);
   const uncertain = d?.status === 'pending' ? sent.get(d.id) : null;
+  const legal = !!d && d.status === 'pending' && !!d.levelsDetail.find((l) => l.level === d.currentLevel)?.legal;
+  const approveProblem = legal ? checklistProblem(checklist, 'approve') : null;
+  const returnProblem = legal ? checklistProblem(checklist, 'return') : null;
+  const withChecklist = (body: Record<string, unknown>) => (legal && checklistBody(checklist).length ? { ...body, checklist: checklistBody(checklist) } : body);
 
   const act = async (action: 'approve' | 'return', body: Record<string, unknown>) => {
     if (!d) return;
@@ -49,6 +57,7 @@ function Body({ id, onClose }: { id: number; onClose: () => void }) {
       toast({ tone: 'success', title: action === 'approve' ? (d.currentLevel < d.levels ? `已同意第 ${d.currentLevel} 级` : '已同意，单据生效') : '已退回', body: d.docNo });
       setReturning(false);
       setComment('');
+      setChecklist({});
       await refresh();
     } catch (e) {
       if (e instanceof UncertainError) {
@@ -180,6 +189,14 @@ function Body({ id, onClose }: { id: number; onClose: () => void }) {
               </section>
             )}
 
+            {d.doc.contract && (d.doc.contract.reviews.length > 0 || (legal && d.canAct && !uncertain)) && (
+              <section className="space-y-2">
+                <h3 className="text-[13px] font-bold text-ink-2">法务审查</h3>
+                <ReviewsView reviews={d.doc.contract.reviews} />
+                {legal && d.canAct && !uncertain && <LegalChecklistEditor value={checklist} onChange={setChecklist} disabled={!!busy} />}
+              </section>
+            )}
+
             <section>
               <h3 className="mb-1.5 text-[13px] font-bold text-ink-2">审批链</h3>
               <ol className="space-y-2" data-testid="approval-chain">
@@ -253,22 +270,32 @@ function Body({ id, onClose }: { id: number; onClose: () => void }) {
       ) : d?.canAct && (
         <footer className="shrink-0 space-y-2 border-t border-line bg-card px-5 py-3 pb-[max(12px,env(safe-area-inset-bottom))]">
           {d.actingFor.length > 0 && <p className="text-[12.5px] font-semibold text-lake">你是 {d.actingFor.join('、')} 的代理人，这次记「代 {d.actingFor.join('、')}」</p>}
+          {legal && (approveProblem || returnProblem) && (
+            <p className="text-[12.5px] font-semibold text-ember" data-testid="approval-legal-problem">
+              {returnProblem ?? approveProblem}
+              {!returnProblem && approveProblem && '（退回可以只填有问题的几条）'}
+            </p>
+          )}
           <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="意见（选填）" maxLength={200} data-testid="approval-comment" />
           <div className="flex gap-2">
-            <Button variant="secondary" className="flex-1" icon={<CornerUpLeft className="size-4" />} onClick={() => setReturning(true)} data-testid="approval-return">
+            <Button variant="secondary" className="flex-1" icon={<CornerUpLeft className="size-4" />} disabled={!!returnProblem} onClick={() => setReturning(true)} data-testid="approval-return">
               退回
             </Button>
             <Button
               variant="primary"
               className="flex-[2]"
               loading={busy === 'approve'}
+              disabled={!!approveProblem}
               icon={<CircleCheck className="size-4" />}
               data-testid="approval-approve"
               onClick={() =>
-                void act('approve', {
-                  comment: comment.trim(),
-                  ...(Object.values(reasons).some(Boolean) ? { countReasons: Object.fromEntries(Object.entries(reasons).filter(([, v]) => v)) } : {}),
-                })
+                void act(
+                  'approve',
+                  withChecklist({
+                    comment: comment.trim(),
+                    ...(Object.values(reasons).some(Boolean) ? { countReasons: Object.fromEntries(Object.entries(reasons).filter(([, v]) => v)) } : {}),
+                  }),
+                )
               }
             >
               {d.levels > 1 ? `同意（第 ${d.currentLevel}/${d.levels} 级）` : '同意'}
@@ -286,7 +313,7 @@ function Body({ id, onClose }: { id: number; onClose: () => void }) {
         confirmLabel="退回"
         testId="approval-return-dialog"
         onClose={() => setReturning(false)}
-        onConfirm={(reason) => void act('return', { reason })}
+        onConfirm={(reason) => void act('return', withChecklist({ reason }))}
       />
     </>
   );

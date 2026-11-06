@@ -4,13 +4,13 @@
 
 import type { Permission } from './permissions';
 
-export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'approvals', 'expenses', 'revenue'] as const;
+export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'approvals', 'contracts', 'expenses', 'revenue'] as const;
 export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
 
 export interface ErpModuleDef {
   label: string;
   /** ERP 导航的分组 */
-  group: '供应链' | '财务';
+  group: '供应链' | '财务' | '法务';
   description: string;
   /** 模块的入口页面 */
   path: string;
@@ -97,6 +97,20 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     apis: ['/api/approvals'],
     perms: ['approval.act', 'inventory.approve', 'expense.approve'],
     defaultEnabled: true,
+    requires: ['inventory'],
+  },
+  contracts: {
+    label: '合同',
+    group: '法务',
+    description:
+      '合同台账与四要素（单价表、付款节点、质保、验收标准），审查走审批中心（财务 → 法务 → 负责人，法务按审查清单逐条给意见），' +
+      '签署、用印、归档，变更单，到期前 60 天提醒；采购单可以挂合同、按单价表核对（v0.7.31）',
+    path: '/erp/contracts',
+    pages: ['/erp/contracts'],
+    apis: ['/api/erp/contracts'],
+    perms: ['contract.read'],
+    defaultEnabled: true,
+    // 相对方、物料在库存模块的档案里；审查走审批中心的接口（审批中心关着时各单据照常走审批规则）
     requires: ['inventory'],
   },
   expenses: {
@@ -222,6 +236,10 @@ export const ERP_OP_TYPES = [
   // 审批中心（v0.7.30）：新建审批规则、设代理人（Codex 自动审查 2cfd28b：没收到结果时刷新、关掉对话框后也要能查回、重提或作废）
   'approval_rule',
   'approval_delegation',
+  // 合同与法务审查（v0.7.31）：新建合同、变更单、用印申请
+  'contract_create',
+  'contract_change',
+  'contract_seal',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -258,6 +276,9 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   member_card: '发卡、补卡',
   approval_rule: '新建审批规则',
   approval_delegation: '设代理人',
+  contract_create: '新建合同',
+  contract_change: '新建变更单',
+  contract_seal: '用印申请',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

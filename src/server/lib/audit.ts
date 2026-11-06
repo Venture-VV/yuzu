@@ -41,6 +41,7 @@ export type AuditAction =
   | 'approval_rule'
   | 'approval_delegation'
   | 'approval_batch'
+  | 'contract_doc'
   | 'purchase_request'
   | 'erp_image'
   | 'erp_op_abandoned'

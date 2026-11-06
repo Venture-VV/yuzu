@@ -32,6 +32,7 @@ import { registerPettyAccountRoutes } from './modules/petty-accounts';
 import { registerReplenishRoutes } from './modules/inventory/replenish';
 import { registerSourcingRoutes } from './modules/inventory/sourcing';
 import { registerApprovalRoutes } from './modules/approvals/routes';
+import { registerContractRoutes } from './modules/contracts/routes';
 import { registerReportRoutes } from './modules/inventory/reports';
 import { registerLedgerRoutes } from './modules/ledger';
 import { registerMemberRoutes } from './modules/members';
@@ -197,6 +198,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerSourcingRoutes(app, deps);
   // 审批中心（v0.7.30）
   registerApprovalRoutes(app, deps);
+  // 合同与法务审查（v0.7.31）
+  registerContractRoutes(app, deps);
   registerPayableRoutes(app, deps);
   registerCycleRoutes(app, deps);
   registerImportRoutes(app, deps);
