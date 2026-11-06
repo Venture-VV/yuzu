@@ -159,11 +159,42 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
     await ctx.setOffline(false);
     await cook.reload();
     await expect(cook.getByTestId('menu-pending')).toBeVisible();
+    // 原样重试被拒（没权限、饭堂暂时关着）也说明不了原来那次存没存上：这一笔照样留着（Codex 审查 c04f1d9）
+    for (const [status, code, message] of [
+      [403, 'FORBIDDEN', '只有厨师和食堂负责人能改菜单'],
+      [503, 'CANTEEN_CLOSED', '饭堂还没开张'],
+    ] as const) {
+      await cook.route('**/api/canteen/menus/**', (route) =>
+        route.request().method() === 'PUT' ? route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ error: { code, message } }) }) : route.continue(),
+      );
+      await cook.getByTestId('menu-pending').getByRole('button', { name: '原样重试' }).click();
+      await expect(cook.getByText(`${message}（上一次保存先留在手机上，之后点「原样重试」）`)).toBeVisible();
+      await expect(cook.getByTestId('menu-pending')).toBeVisible();
+      await cook.unroute('**/api/canteen/menus/**');
+    }
     await cook.getByTestId('menu-pending').getByRole('button', { name: '原样重试' }).click();
     await expect(cook.getByText('发布啦')).toBeVisible();
     await expect(cook.getByTestId('menu-pending')).toHaveCount(0);
     const saved = await (await ctx.request.get(`${CANTEEN}/api/canteen/menus?from=${slot.date}&to=${slot.date}`)).json();
     expect(saved.find((m: { meal: string }) => m.meal === 'lunch').note).toBe('今天有甜品，还有冰粉');
+
+    // 保存还没回来就换到别的日子：回复回来以后只放下这一笔，现在这一份照样能改（不会卡在「正在取菜单…」）（Codex 审查 c04f1d9）
+    await cook.getByRole('tab', { name: new RegExp(slot.date === (await today(ctx)) ? '今天' : '昨天') }).click();
+    await cook.getByRole('button', { name: /午餐/ }).click();
+    await cook.route('**/api/canteen/menus/**', async (route) => {
+      if (route.request().method() !== 'PUT') return route.continue();
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.continue();
+    });
+    await cook.getByLabel('一句话备注').fill('今天有甜品，还有冰粉和绿豆汤');
+    await cook.getByRole('button', { name: '更新菜单' }).click();
+    await cook.getByRole('tab', { name: /明天/ }).click();
+    await expect(cook.getByRole('button', { name: /发布给大家|更新菜单/ })).toBeEnabled({ timeout: 10_000 });
+    await expect(cook.getByText('正在取菜单…')).toHaveCount(0);
+    await expect(cook.getByTestId('menu-pending')).toHaveCount(0);
+    await cook.unroute('**/api/canteen/menus/**');
+    const later = await (await ctx.request.get(`${CANTEEN}/api/canteen/menus?from=${slot.date}&to=${slot.date}`)).json();
+    expect(later.find((m: { meal: string }) => m.meal === 'lunch').note).toBe('今天有甜品，还有冰粉和绿豆汤');
     await ctx.close();
   });
 
@@ -260,6 +291,8 @@ test.describe.serial('第二期：开场动画、新同事登记、新手教程�
     await admin.waitForURL((u) => !u.pathname.startsWith('/login'));
     await admin.goto('/erp/canteen');
     await admin.getByRole('radio', { name: '设置' }).click();
+    // 等设置取到了再看要不要生成（isVisible 不会等）
+    await expect(admin.getByTestId('canteen-registration')).toBeVisible();
     const create = admin.getByTestId('canteen-reg-create');
     if (await create.isVisible()) await create.click();
     const link = (await admin.getByTestId('canteen-reg-link').innerText()).trim();
@@ -338,7 +371,7 @@ test.describe.serial('第二期：开场动画、新同事登记、新手教程�
         : route.continue(),
     );
     await p.getByTestId('talk-pending').getByRole('button', { name: '原样再发' }).click();
-    await expect(p.getByText(/这一条先存在手机上/)).toBeVisible();
+    await expect(p.getByText('饭堂还没开张（这一条先存在手机上，之后再发）')).toBeVisible();
     await expect(p.getByTestId('talk-pending')).toContainText('今天的汤有点咸');
     await p.unroute('**/api/canteen/feedback');
     await p.getByTestId('talk-pending').getByRole('button', { name: '原样再发' }).click();

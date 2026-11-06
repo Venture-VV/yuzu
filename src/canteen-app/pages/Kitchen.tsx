@@ -1,10 +1,11 @@
 // 厨房（厨师、负责人）：选日子和餐次，加菜、选表情和标签、写一句话，保存草稿或发布给大家。
 // 改菜单带版本号：别人刚改过时提示，看过最新的再决定覆盖不覆盖。
 // 结果待确认（AGENTS.md）：每次保存先把操作编号与原请求存在这台手机上并读回核对，存不下就不发；回复没收到时留着，
-// 刷新、关掉再开也还在，只能「原样重试」（同一个编号、同一个版本，不会存两遍）。重试被「菜单刚被别人改过」拒绝时，
-// 原来那次也不会再生效（版本号已经过去了），这时才放下。没确认之前不能再存别的，免得把它顶掉。
+// 刷新、关掉再开也还在，只能「原样重试」（同一个编号、同一个版本，不会存两遍）。重试被拒时，只有能说明原来那次以后也不会生效的
+// 才放下：菜单刚被别人改过（版本号已经过去了）、内容本身不对（原来那次是同样的内容）、这一天已经过了能改的日子（日子只会往后走）；
+// 没登录、没权限、饭堂暂时关着、正忙都说明不了，照样留着。没确认之前不能再存别的，免得把它顶掉。
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   DISH_TAG_EMOJI,
   DISH_TAG_LABELS,
@@ -36,6 +37,16 @@ interface Pending {
 }
 const pendingKey = (employeeId: number) => `yuzu.canteen.menuPending.v1.${employeeId}`;
 
+/** 原样重试被拒时：这个拒绝能说明原来那次以后也不会生效，就返回要告诉厨师的话（放下这一笔）；说明不了返回 null（留着） */
+function settledBy(e: unknown, p: Pending, today: string): string | null {
+  if (!(e instanceof ApiError)) return null;
+  // 内容本身不对：原来那次是同样的内容，一样存不上
+  if (e.status === 400 || e.code === 'MENU_EMPTY') return `${messageOf(e)}（上一次保存没存上：改一改再存）`;
+  // 这一天已经过了能改的日子：日子只会往后走，原来那次以后也存不上了。往后的日子被拒只会是手机和门店系统的日子差了一点，过一会儿就能改，照样留着
+  if (e.code === 'MENU_OUT_OF_RANGE' && p.date < today) return `${monthDay(p.date)} ${MEAL_LABELS[p.meal]}已经过了能改的日子，上一次保存不再重试了`;
+  return null;
+}
+
 export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number }) {
   const today = storeNow(offsetMs).date;
   const days = Array.from({ length: 8 }, (_, i) => addDays(today, i - 1));
@@ -55,6 +66,11 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
   const [emojiFor, setEmojiFor] = useState<string | null>(null);
   const selection = `${date}:${meal}`;
   const latest = useRef(0);
+  // 现在选着的那一份：保存的回复回来时拿它比（发出那一刻的 selection 可能已经换掉了）
+  const selected = useRef(selection);
+  useLayoutEffect(() => {
+    selected.current = selection;
+  }, [selection]);
 
   const fetchMenu = useCallback(async (d: string, m: Meal) => (await call<CanteenMenu[]>('GET', `/api/canteen/menus?from=${d}&to=${d}`)).find((x) => x.meal === m), []);
   const load = useCallback(async () => {
@@ -90,33 +106,45 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
   };
   const setDish = (id: string, patch: Partial<Dish & { auto: boolean }>) => edit((d) => ({ ...d, dishes: d.dishes.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
 
-  /** 交一笔（已经存在本机的）：明确结果才从本机删掉，回复没收到就留着等「原样重试」 */
+  /** 交一笔（已经存在本机的）：有了明确结果才从本机删掉；回复没收到、或者这次的拒绝说明不了原来那次的，就留着等「原样重试」 */
   const send = async (p: Pending) => {
+    const key = `${p.date}:${p.meal}`;
     setBusy(true);
     try {
       const saved = await call<CanteenMenu>('PUT', `/api/canteen/menus/${p.date}/${p.meal}`, p.body);
       clearPending();
-      if (`${p.date}:${p.meal}` === selection) {
+      // 厨师可能已经换到别的日子、餐次了：只在还选着这一份时换上存好的内容（还在取的这一份作废：存好的就是最新的）
+      if (key === selected.current) {
+        latest.current++;
         setServer(saved);
         setDraft(fromMenu(saved));
         setDirty(false);
-        setLoadedFor(selection);
+        setLoadError('');
+        setLoadedFor(key);
       }
       toast(saved.published ? '发布啦，大家都能看到了 🎉' : '草稿存好了', 'ok');
     } catch (e) {
-      if (e instanceof NetworkError) {
-        // 结果不确定：本机留着原来的编号和内容，原样重试不会存两遍
-        setPending(p);
-        toast('没收到门店系统的回复：这次可能存好了，也可能没有，联网后点「原样重试」', 'error');
-      } else if (e instanceof ApiError && e.code === 'MENU_CHANGED') {
-        // 版本号已经过去了：原来那次不会再生效，放下它，给厨师看最新的
+      const settled = settledBy(e, p, storeNow(offsetMs).date);
+      if (e instanceof ApiError && e.code === 'MENU_CHANGED') {
+        // 版本号已经过去了：原来那次以后也不会生效（要么已经存好，要么再也存不上），放下它，给厨师看最新的
         clearPending();
         const latestMenu = (await fetchMenu(p.date, p.meal).catch(() => undefined)) ?? null;
-        if (`${p.date}:${p.meal}` === selection) setConflict(latestMenu);
-        else toast(`${monthDay(p.date)} ${MEAL_LABELS[p.meal]}的菜单刚被别人改过，这次没存`, 'error');
-      } else {
+        if (key === selected.current) setConflict(latestMenu);
+        else toast(`${monthDay(p.date)} ${MEAL_LABELS[p.meal]}的菜单刚被别人改过：回到这一份看看最新的再改`, 'error');
+      } else if (settled) {
         clearPending();
-        toast(messageOf(e), 'error');
+        toast(settled, 'error');
+      } else if (e instanceof ApiError && e.status === 401) {
+        // 登录过期：这一笔留在手机上，重新登录以后到「厨房」点「原样重试」
+        toast('登录过期了：重新登录以后到「厨房」点「原样重试」', 'error');
+        window.location.reload();
+      } else {
+        // 没网、超时、门店系统出错、饭堂暂时关着、没有权限、正忙：都说明不了原来那次存没存上。本机留着原来的编号和内容，原样重试不会存两遍
+        setPending(p);
+        toast(
+          e instanceof NetworkError ? '没收到门店系统的回复：这次可能存好了，也可能没有，联网后点「原样重试」' : `${messageOf(e)}（上一次保存先留在手机上，之后点「原样重试」）`,
+          'error',
+        );
       }
     } finally {
       setBusy(false);
