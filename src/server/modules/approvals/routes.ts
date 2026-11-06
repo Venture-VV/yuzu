@@ -41,6 +41,7 @@ import { hashRequest } from '../../lib/idempotency';
 import { setTxTimeouts } from '../../lib/tx';
 import { idParam, parse } from '../../lib/validate';
 import { actOnChange, actOnContract, actOnSeal } from '../contracts/flow';
+import { actOnPaymentRequest } from '../payments/requests';
 import { actOnClaim } from '../expenses';
 import { approveDoc, returnDoc } from '../inventory/docs';
 import { actOnOpening, actOnPayment } from '../inventory/payables';
@@ -100,6 +101,9 @@ async function actOnRequest(deps: Deps, requestId: number, action: 'approve' | '
       return actOnChange(deps, head.docId, action, raw, actor);
     case 'contract_seal':
       return actOnSeal(deps, head.docId, action, raw, actor);
+    // 付款申请（v0.7.32）：提前付款不能批量同意
+    case 'payment_request':
+      return actOnPaymentRequest(deps, head.docId, action, raw, actor);
   }
 }
 

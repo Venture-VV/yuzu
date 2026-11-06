@@ -141,7 +141,7 @@ function SuppliersView({ onStatement }: { onStatement: (id: number) => void }) {
   const active = suppliers.filter((s) => s.balanceCents !== 0 || s.receivedCents !== 0 || s.openingCents !== 0 || s.creditCents !== 0 || s.paidCents !== 0);
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4 xl:grid-cols-7">
+      <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4 xl:grid-cols-8">
         <Tile label="期初未付" cents={totals.openingCents} />
         <Tile label="收货货款" cents={totals.receivedCents} tone="pine" sign="+" />
         <Tile label="退货扣款" cents={totals.returnCreditCents} tone="clay" sign="−" />
@@ -149,6 +149,8 @@ function SuppliersView({ onStatement }: { onStatement: (id: number) => void }) {
         <Tile label="供应商退款" cents={totals.refundedCents} sign="+" />
         <Tile label="当前余额" cents={totals.balanceCents} sign="=" />
         <Tile label="其中可抵扣" cents={totals.creditCents} tone="clay" />
+        {/* 没到期的质保金（v0.7.32，P9）：余额里含着，单独列出、不算现在该付 */}
+        <Tile label="其中质保金（未到期）" cents={totals.warrantyHeldCents} />
       </div>
       {(pending.payments > 0 || pending.openings > 0) && (
         <Notice tone="warning" title={`${pending.payments} 笔付款、${pending.openings} 笔期初未付待负责人确认`}>
@@ -159,7 +161,7 @@ function SuppliersView({ onStatement }: { onStatement: (id: number) => void }) {
         <EmptyState art="calm" title="还没有供应商货款" description="收货生效后，货款会按供应商自动汇总在这里。" className="rounded-lg border border-dashed border-line-strong" />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-line bg-card shadow-card">
-          <table className="w-full min-w-[1020px] text-left text-[13px]">
+          <table className="w-full min-w-[1110px] text-left text-[13px]">
             <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
               <tr>
                 <th className="px-4 py-2.5">供应商</th>
@@ -170,6 +172,7 @@ function SuppliersView({ onStatement }: { onStatement: (id: number) => void }) {
                 <th className="px-2 py-2.5 text-right">+ 供应商退款</th>
                 <th className="bg-paper-3/50 px-2 py-2.5 text-right text-ink-2">= 余额</th>
                 <th className="px-2 py-2.5 text-right">可抵扣</th>
+                <th className="px-2 py-2.5 text-right">质保金（未到期）</th>
                 <th className="px-2 py-2.5 text-right">待确认付款</th>
                 <th className="w-[170px] px-4 py-2.5" />
               </tr>
@@ -196,6 +199,7 @@ function SuppliersView({ onStatement }: { onStatement: (id: number) => void }) {
                     {s.balanceCents < 0 && <span className="block text-[11px] font-semibold text-clay">供应商欠我们（预付 / 退货余额）</span>}
                   </td>
                   <td className="num px-2 py-2.5 text-right">{s.creditCents ? <Money cents={s.creditCents} className="text-ember" /> : <span className="text-ink-4">·</span>}</td>
+                  <td className="num px-2 py-2.5 text-right" data-testid={`warranty-held-${s.code}`}>{s.warrantyHeldCents ? <Money cents={s.warrantyHeldCents} /> : <span className="text-ink-4">·</span>}</td>
                   <td className="num px-2 py-2.5 text-right text-yuzu-deep">{s.pendingPaymentCents ? <Money cents={s.pendingPaymentCents} /> : <span className="text-ink-4">·</span>}</td>
                   <td className="px-4 py-2.5 text-right">
                     <span className="flex justify-end gap-1.5">

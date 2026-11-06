@@ -99,6 +99,16 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
       return d.change && typeof d.change === 'object' ? { refId: d.change.id } : null;
     case 'contract_seal':
       return d.seal && typeof d.seal === 'object' ? { refId: d.seal.id } : null;
+    // 付款流（v0.7.32）：付款申请返回那张申请，合同付款返回那一笔，验收、质量问题登记返回那一条（id），发票返回那张发票
+    case 'payment_request':
+      return d.request && typeof d.request === 'object' ? { refId: d.request.id } : null;
+    case 'contract_payout':
+      return typeof d.payoutId === 'number' ? { refId: d.payoutId } : null;
+    case 'contract_acceptance':
+    case 'contract_quality':
+      return typeof d.id === 'number' ? { refId: d.id } : null;
+    case 'supplier_invoice':
+      return d.invoice && typeof d.invoice === 'object' ? { refId: d.invoice.id } : null;
   }
 }
 

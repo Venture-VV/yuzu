@@ -20,6 +20,8 @@ import { Badge, Button, IconButton, Notice, Spinner, InfoItem as Info } from '..
 import { Qty, SimRule } from '../inventory/parts';
 import { CompareChip, PoStatusChip, ReceivingChip } from './parts';
 import { useInvalidateAll, usePo } from './queries';
+import { ThreeWayBadge } from '../payments/parts';
+import { usePoThreeWay } from '../payments/queries';
 
 const ACTION_LABELS: Record<PurchaseOrder['approvals'][number]['action'], string> = {
   create: '创建',
@@ -285,6 +287,9 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
           </section>
         )}
 
+        {/* 三单匹配（v0.7.32）：采购单、收货（减退货）、发票对不对得上；付款申请要对得上或财务放行 */}
+        {po.receipts.length > 0 && <ThreeWayLine poId={po.id} />}
+
         {po.reimbursement.settlement === 'cash' && (po.reimbursement.claims.length > 0 || po.status === 'approved' || po.status === 'closed') && (
           <section data-testid="po-reimbursement">
             <h3 className="mb-2 flex items-center gap-2 text-[13px] font-bold text-ink-2">
@@ -443,3 +448,26 @@ function MoneyTile({ label, cents, hint, tone = 'ink' }: { label: string; cents:
   );
 }
 
+/** 采购单的三单比对（付款模块开着、能看货款的人才查） */
+function ThreeWayLine({ poId }: { poId: number }) {
+  const can = useCan();
+  const session = useSession();
+  const enabled = session.erpModules.includes('payments') && (can('payable.read') || can('payment.request'));
+  const q = usePoThreeWay(poId, enabled);
+  if (!enabled || !q.data) return null;
+  const t = q.data;
+  return (
+    <section data-testid="po-three-way">
+      <h3 className="mb-2 flex items-center gap-2 text-[13px] font-bold text-ink-2">
+        三单匹配 <ThreeWayBadge status={t.status} />
+      </h3>
+      <p className="text-[13px]">
+        采购单 <Money cents={t.poTotalCents} /> · 收货 <Money cents={t.receivedCents} /> · 发票 <Money cents={t.invoicedCents} />
+      </p>
+      <p className={cn('text-[12.5px]', t.status === 'held' ? 'text-clay' : 'text-ink-3')}>
+        {t.reason}
+        {t.releaseStale && '（放行以后金额变了，要重新放行）'}
+      </p>
+    </section>
+  );
+}

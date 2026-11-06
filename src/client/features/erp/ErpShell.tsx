@@ -4,9 +4,10 @@
 import { useEffect, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Boxes, ClipboardCheck, ClipboardList, FileSignature, HandCoins, LayoutGrid, LineChart, Package, ReceiptText, ShoppingCart, SlidersHorizontal, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, Banknote, Boxes, ClipboardCheck, ClipboardList, FileSignature, HandCoins, LayoutGrid, LineChart, Package, ReceiptText, ShoppingCart, SlidersHorizontal, type LucideIcon } from 'lucide-react';
 import type { ApprovalCounts } from '@shared/approvals';
 import type { ContractExpiryItem } from '@shared/contracts';
+import type { PaymentTodo } from '@shared/payments';
 import { ERP_MODULES, erpModuleOfPage, type ErpModuleKey } from '@shared/erp';
 import { versionText } from '@shared/instance';
 import { DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
@@ -26,6 +27,7 @@ const ICONS: Record<ErpModuleKey, LucideIcon> = {
   payables: HandCoins,
   approvals: ClipboardCheck,
   contracts: FileSignature,
+  payments: Banknote,
   expenses: ReceiptText,
   revenue: LineChart,
 };
@@ -66,15 +68,23 @@ export function ErpShell() {
     enabled: access.modules.includes('contracts') && can('contract.manage'),
     refetchInterval: 300_000,
   });
+  // 付款（v0.7.32）：批了待付款的申请（登记付款的人）、到期前 30 天的质保金（P9）
+  const payTodo = useQuery({
+    queryKey: ['inv', 'payments', 'todo'],
+    queryFn: () => api.get<PaymentTodo>('/api/erp/payments/todo'),
+    enabled: access.modules.includes('payments') && can('payable.read'),
+    refetchInterval: 300_000,
+  });
   if (!access.canEnter) return <Navigate to="/" replace />;
   const contractsDue = (expiring.data ?? []).filter((x) => !x.renewal);
+  const paymentsBadge = payTodo.data ? (can('payable.manage') ? payTodo.data.awaitingPayment : 0) + payTodo.data.warrantyDue : undefined;
 
   const moduleItem = (k: ErpModuleKey): Item => ({
     key: k,
     to: ERP_MODULES[k].path,
     label: ERP_MODULES[k].label,
     icon: ICONS[k],
-    badge: k === 'approvals' && todo.data ? todo.data.mine + todo.data.backfill + todo.data.accept : k === 'contracts' ? contractsDue.length : undefined,
+    badge: k === 'approvals' && todo.data ? todo.data.mine + todo.data.backfill + todo.data.accept : k === 'contracts' ? contractsDue.length : k === 'payments' ? paymentsBadge : undefined,
     alert: (k === 'approvals' && !!todo.data?.overdue) || (k === 'contracts' && contractsDue.some((x) => x.daysLeft < 0)),
   });
   const groups: { title: string; items: Item[] }[] = [

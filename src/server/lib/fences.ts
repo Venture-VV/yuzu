@@ -90,6 +90,12 @@ export const FENCED_OPS = [
   'contract_create',
   'contract_change',
   'contract_seal',
+  // 付款流（v0.7.32，迁移 080、081）：付款申请、合同付款、验收登记、质量问题登记、登记发票；编号记在各自的行上（client_key）
+  'payment_request',
+  'contract_payout',
+  'contract_acceptance',
+  'contract_quality',
+  'supplier_invoice',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -141,6 +147,7 @@ export async function fenceKey(
   if (isPlatformOp(opType) && (await platformOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   if (isApprovalOp(opType) && (await approvalOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   if (isContractOp(opType) && (await contractOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
+  if (isPaymentFlowOp(opType) && (await paymentFlowOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   const rows = await tx`
     INSERT INTO op_fences (key, op_type, staff_id) VALUES (${key}, ${opType}, ${staffId})
     ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;
@@ -187,6 +194,25 @@ export async function contractOpRef(db: Db, key: string, opType: ContractOp): Pr
       : opType === 'contract_change'
         ? await db<{ id: number }[]>`SELECT id FROM contract_changes WHERE client_key = ${key}`
         : await db<{ id: number }[]>`SELECT id FROM contract_seals WHERE client_key = ${key}`;
+  return rows[0] ? Number(rows[0].id) : null;
+}
+
+const PAYMENT_FLOW_OPS = ['payment_request', 'contract_payout', 'contract_acceptance', 'contract_quality', 'supplier_invoice'] as const;
+type PaymentFlowOp = (typeof PAYMENT_FLOW_OPS)[number];
+export const isPaymentFlowOp = (op: string): op is PaymentFlowOp => (PAYMENT_FLOW_OPS as readonly string[]).includes(op);
+
+/** 付款流（v0.7.32）的操作编号记在付款申请、合同付款、验收登记、质量问题、发票上：查到时返回那一条的编号 */
+export async function paymentFlowOpRef(db: Db, key: string, opType: PaymentFlowOp): Promise<number | null> {
+  const rows =
+    opType === 'payment_request'
+      ? await db<{ id: number }[]>`SELECT id FROM payment_requests WHERE client_key = ${key}`
+      : opType === 'contract_payout'
+        ? await db<{ id: number }[]>`SELECT id FROM contract_payouts WHERE client_key = ${key}`
+        : opType === 'contract_acceptance'
+          ? await db<{ id: number }[]>`SELECT id FROM contract_acceptances WHERE client_key = ${key}`
+          : opType === 'contract_quality'
+            ? await db<{ id: number }[]>`SELECT id FROM contract_quality_issues WHERE client_key = ${key}`
+            : await db<{ id: number }[]>`SELECT id FROM supplier_invoices WHERE client_key = ${key}`;
   return rows[0] ? Number(rows[0].id) : null;
 }
 

@@ -40,6 +40,7 @@ import type { ErpModuleKey } from '@shared/erp';
 import { EXPENSE_CATEGORY_LABELS, PAY_SOURCE_LABELS, type ExpenseCategory, type PaySource } from '@shared/expenses';
 import { COUNT_REASON_LABELS, INV_DOC_META, isBigVariance, variancePct, type CountReason, type InvDocType } from '@shared/inventory';
 import { formatAmount } from '@shared/money';
+import { PAY_MODE_LABELS, THREE_WAY_STATUS_LABELS } from '@shared/payments';
 import { can, permissionsOf, type Duty, type Role } from '@shared/permissions';
 import { PAY_METHOD_LABELS, type PayMethod } from '@shared/purchasing';
 import { formatQty, lineAmountCents } from '@shared/quantity';
@@ -50,6 +51,7 @@ import { todayIn } from '../../lib/dates';
 import { forbidden, notFound } from '../../lib/errors';
 import { enabledErpModules, erpModuleDisabled } from '../erp';
 import { readContent } from '../contracts/content';
+import { getPaymentRequest } from '../payments/requests';
 import { poContract, reviewsOf } from '../contracts/ledger';
 import { loadInventorySettings } from '../inventory/common';
 import { actionsOf, delegatorsOf, eligibleAt, requiredOf, staffNames, standingOf } from './engine';
@@ -194,6 +196,17 @@ async function summaries(db: Db, reqs: RequestRow[]): Promise<Map<string, string
       SELECT s.id, c.counterparty AS party, c.contract_no, s.seal_type, s.copies FROM contract_seals s JOIN contracts c ON c.id = s.contract_id WHERE s.id IN ${db(cs)}`;
     for (const r of rows) put('contract_seal', Number(r.id), r.party, `${r.contractNo} 用印：${SEAL_TYPE_LABELS[r.sealType]} ${r.copies} 份`, 1);
   }
+  // 付款申请（v0.7.32）：收款方 · 合同号 + 付款节点（没挂合同的写几笔货款）
+  const pr = ids('payment_request');
+  if (pr.length) {
+    const rows = await db<{ id: number; payee: string; contractNo: string | null; stage: keyof typeof PAYMENT_STAGE_LABELS | null; n: number; early: boolean }[]>`
+      SELECT r.id, r.payee, c.contract_no, r.stage, r.early, (SELECT count(*) FROM payment_request_targets t WHERE t.request_id = r.id)::int AS n
+      FROM payment_requests r LEFT JOIN contracts c ON c.id = r.contract_id WHERE r.id IN ${db(pr)}`;
+    for (const r of rows) {
+      const what = r.contractNo ? `${r.contractNo} ${PAYMENT_STAGE_LABELS[r.stage!]}款${r.early ? '（提前付款）' : ''}` : `没挂合同的应付 ${r.n} 笔`;
+      put('payment_request', Number(r.id), r.payee, what, 1);
+    }
+  }
   return out;
 }
 
@@ -276,6 +289,7 @@ const MODULE_OF_KIND: Record<ApprovalDocKind, ErpModuleKey> = {
   contract: 'contracts',
   contract_change: 'contracts',
   contract_seal: 'contracts',
+  payment_request: 'payments',
 };
 
 /** 模块关着的单据种类 */
@@ -316,8 +330,10 @@ export async function approvalCounts(db: Db, actor: Actor, timeZone: string): Pr
 
 // ───────────────────────── 详情 ─────────────────────────
 
-async function digestOf(db: Db, kind: ApprovalDocKind, docId: number, requestId: number): Promise<ApprovalDocDigest> {
+async function digestOf(db: Db, kind: ApprovalDocKind, docId: number, requestId: number, timeZone: string): Promise<ApprovalDocDigest> {
   switch (kind) {
+    case 'payment_request':
+      return paymentRequestDigest(db, docId, timeZone);
     case 'purchase_order': {
       const [p] = await db<{ supplierName: string; orderDate: string; note: string; revision: number; backfill: boolean; channelLabel: string | null; expectedDate: string | null }[]>`
         SELECT s.name AS supplier_name, p.order_date, p.note, p.revision, p.backfill, p.channel_label, p.expected_date
@@ -525,6 +541,52 @@ async function digestOf(db: Db, kind: ApprovalDocKind, docId: number, requestId:
   }
 }
 
+/** 付款申请的要点（v0.7.32）：合同那一段的计划、可付、已申请、已付与说明；三单；供应商往来余额；没挂合同的列出选的货款 */
+async function paymentRequestDigest(db: Db, docId: number, timeZone: string): Promise<ApprovalDocDigest> {
+  const r = await getPaymentRequest(db, docId, todayIn(timeZone));
+  const facts: ApprovalDocDigest['facts'] = [
+    { label: '申请金额', value: yuan(r.amountCents) },
+    { label: '付款方式', value: PAY_MODE_LABELS[r.payMode] },
+    { label: '期望付款日', value: r.expectedDate },
+  ];
+  if (r.contractId !== null) {
+    facts.unshift({ label: '合同', value: `${r.contractNo} ${r.contractTitle ?? ''} · ${PAYMENT_STAGE_LABELS[r.stage!]}款` });
+    if (r.early) facts.push({ label: '提前付款原因', value: r.earlyReason });
+    const st = r.stagePlan;
+    if (st) {
+      facts.push(
+        { label: `${PAYMENT_STAGE_LABELS[st.stage]}段`, value: `计划 ${yuan(st.plannedCents)} · 现在可付 ${yuan(st.payableCents)} · 已申请 ${yuan(st.requestedCents)} · 已付 ${yuan(st.paidCents)}` },
+        { label: '条件', value: st.reason },
+      );
+    }
+  } else facts.unshift({ label: '来源', value: `没挂合同的应付 ${r.targets.length} 笔` });
+  if (r.threeWayRequired) {
+    facts.push({
+      label: '三单',
+      value: r.threeWay.length ? r.threeWay.map((t) => `${t.poNo} ${THREE_WAY_STATUS_LABELS[t.status]}（${t.reason}）`).join('；') : '没有收货的采购单',
+    });
+  }
+  if (r.supplierBalanceCents !== null) facts.push({ label: '供应商往来余额', value: `${yuan(r.supplierBalanceCents)}（其中可抵扣 ${yuan(r.supplierCreditCents ?? 0)}）` });
+  facts.push({ label: '经办', value: r.createdByName });
+  return {
+    title: r.early ? '提前付款' : '付款申请',
+    link: `/erp/payments/requests/${r.id}`,
+    party: r.payee,
+    docDate: r.expectedDate,
+    note: r.purpose,
+    facts,
+    lines: r.targets.map((t, i) => ({
+      id: i + 1,
+      name: `${t.kind === 'receipt' ? '收货单' : '期初未付'} ${t.docNo}`,
+      spec: t.purchaseOrderNo ? `采购单 ${t.purchaseOrderNo}` : '',
+      qty: '',
+      unit: '',
+      priceCents: null,
+      amountCents: t.amountCents,
+    })),
+  };
+}
+
 /** 合同、合同变更的要点：这次提交的内容（四要素）、单价表、提交记录上已有的审查清单结论；变更单另有改前改后（v0.7.31） */
 async function contractDigest(db: Db, kind: 'contract' | 'contract_change', docId: number, requestId: number): Promise<ApprovalDocDigest> {
   const [h] =
@@ -639,7 +701,7 @@ export async function getApprovalDetail(db: Db, actor: Actor, timeZone: string, 
     ...card!,
     allowSelf: req.allowSelf,
     levelsDetail,
-    doc: await digestOf(db, req.docKind, req.docId, req.id),
+    doc: await digestOf(db, req.docKind, req.docId, req.id, timeZone),
     previous: previous.map((p) => ({ ...p, id: Number(p.id) })),
   };
 }

@@ -16,7 +16,7 @@ import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { conflict, forbidden } from '../lib/errors';
-import { approvalOpRef, benefitUseOpRef, contractOpRef, countCardOpRef, memberCardOpRef, couponOpRef, platformOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isContractOp, isCountCardOp, isApprovalOp, isDeviceOp, isFenced, isMemberOp, isPlatformOp, memberOpRef, trialOpRef } from '../lib/fences';
+import { approvalOpRef, benefitUseOpRef, contractOpRef, countCardOpRef, memberCardOpRef, couponOpRef, platformOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isContractOp, isCountCardOp, isApprovalOp, isDeviceOp, isFenced, isMemberOp, isPaymentFlowOp, isPlatformOp, memberOpRef, paymentFlowOpRef, trialOpRef } from '../lib/fences';
 import { parse } from '../lib/validate';
 import { setTxTimeouts } from '../lib/tx';
 
@@ -76,6 +76,12 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   contract_create: ['contract.manage'],
   contract_change: ['contract.manage'],
   contract_seal: ['contract.manage'],
+  // 付款流（v0.7.32）：付款申请要「发起付款申请」，合同付款、登记发票要「登记期初未付、付款……」，验收、质量问题要「维护合同」
+  payment_request: ['payment.request'],
+  contract_payout: ['payable.manage'],
+  contract_acceptance: ['contract.manage'],
+  contract_quality: ['contract.manage'],
+  supplier_invoice: ['payable.manage'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -115,6 +121,11 @@ const READ: Record<ErpOpType, Permission[]> = {
   contract_create: ['contract.read'],
   contract_change: ['contract.read'],
   contract_seal: ['contract.read'],
+  payment_request: ['payable.read', 'payment.request'],
+  contract_payout: ['payable.read'],
+  contract_acceptance: ['contract.read'],
+  contract_quality: ['contract.read'],
+  supplier_invoice: ['payable.read'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {
@@ -186,6 +197,11 @@ export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise
   // 合同与法务审查（v0.7.31）：refId 是那份合同、那张变更单、那条用印登记
   if (isContractOp(type)) {
     const refId = await contractOpRef(db, key, type);
+    if (refId !== null) return { found: true, abandoned: false, refId };
+  }
+  // 付款流（v0.7.32）：refId 是那张付款申请、那笔合同付款、那条验收 / 质量问题登记、那张发票
+  if (isPaymentFlowOp(type)) {
+    const refId = await paymentFlowOpRef(db, key, type);
     if (refId !== null) return { found: true, abandoned: false, refId };
   }
   return { found: false, abandoned: await isFenced(db, key, [type]) };

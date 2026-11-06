@@ -56,6 +56,9 @@ const LegacyPage = lazyPage(() => import('./features/legacy/LegacyPage').then((m
 const ContractsPage = lazyPage(() => import('./features/contracts/ContractsPage').then((m) => m.ContractsPage));
 const ContractDetailPage = lazyPage(() => import('./features/contracts/ContractDetailPage').then((m) => m.ContractDetailPage));
 const ContractFormPage = lazyPage(() => import('./features/contracts/ContractFormPage').then((m) => m.ContractFormPage));
+const PaymentsPage = lazyPage(() => import('./features/payments/PaymentsPage').then((m) => m.PaymentsPage));
+const PaymentRequestPage = lazyPage(() => import('./features/payments/PaymentRequestPage').then((m) => m.PaymentRequestPage));
+const PaymentRequestFormPage = lazyPage(() => import('./features/payments/PaymentRequestFormPage').then((m) => m.PaymentRequestFormPage));
 const DocFormPage = lazyPage(() => import('./features/inventory/DocFormPage').then((m) => m.DocFormPage));
 const InventoryPage = lazyPage(() => import('./features/inventory/InventoryPage').then((m) => m.InventoryPage));
 const TodoPage = lazyPage(() => import('./features/inventory/TodoPage').then((m) => m.TodoPage));
@@ -215,6 +218,10 @@ const router = createBrowserRouter([
       { path: 'contracts/:id/edit', element: <ContractFormPage mode="edit" /> },
       { path: 'contracts/:id/change', element: <ContractFormPage mode="change" /> },
       { path: 'contracts/:id/changes/:changeId/edit', element: <ContractFormPage mode="change-edit" /> },
+      // 付款流（v0.7.32）
+      { path: 'payments', element: <PaymentsPage /> },
+      { path: 'payments/requests/new', element: <PaymentRequestFormPage /> },
+      { path: 'payments/requests/:id', element: <PaymentRequestPage /> },
       { path: '*', element: <Navigate to="/erp" replace /> },
     ],
   },

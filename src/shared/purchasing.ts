@@ -277,6 +277,8 @@ export interface SupplierBalance {
   creditCents: number;
   /** 待确认的付款（不计入余额） */
   pendingPaymentCents: number;
+  /** 其中没到期的质保金（v0.7.32，P9）：这家的采购合同里质保段还没到可付、没付清的部分（不超过余额），不算现在该付 */
+  warrantyHeldCents: number;
   /** 未结清货款张数 */
   openItemCount: number;
   lastActivity: string | null;
@@ -320,7 +322,7 @@ export interface Statement {
 }
 
 export interface PayablesOverview {
-  totals: { openingCents: number; receivedCents: number; returnCreditCents: number; paidCents: number; refundedCents: number; balanceCents: number; creditCents: number };
+  totals: { openingCents: number; receivedCents: number; returnCreditCents: number; paidCents: number; refundedCents: number; balanceCents: number; creditCents: number; warrantyHeldCents: number };
   suppliers: SupplierBalance[];
   pending: { payments: number; openings: number; purchaseOrders: number };
 }

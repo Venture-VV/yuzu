@@ -47,6 +47,7 @@ import {
 } from './common';
 import { hashRequest } from '../../lib/idempotency';
 import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForApproval } from '../approvals/engine';
+import { contractPlan } from '../payments/plan';
 
 const id = z.number().int().positive();
 const ReasonInput = z.object({ reason: z.string().trim().min(2, '请填写原因（至少 2 个字）').max(200) });
@@ -329,8 +330,31 @@ export async function getPayment(db: Db, paymentId: number): Promise<PaymentDoc>
   };
 }
 
+/**
+ * 挂了合同的采购单的货款必须先提付款申请（v0.7.32，P7）：直接登记付款（不带申请）、把没带申请的预付款核销上去都拒绝。
+ * 返回第一张这样的收货单，没有为空。
+ */
+export async function contractReceiptAmong(db: Db, receiptIds: number[]): Promise<{ docNo: string; contractNo: string } | null> {
+  if (receiptIds.length === 0) return null;
+  const [r] = await db<{ docNo: string; contractNo: string }[]>`
+    SELECT d.doc_no, c.contract_no FROM inv_docs d JOIN purchase_orders po ON po.id = d.purchase_order_id JOIN contracts c ON c.id = po.contract_id
+    WHERE d.id IN ${db(receiptIds)} ORDER BY d.id LIMIT 1`;
+  return r ?? null;
+}
+
+async function assertNoContractReceipts(db: Db, allocations: { kind: 'receipt' | 'opening'; targetId: number }[]) {
+  const hit = await contractReceiptAmong(db, allocations.filter((a) => a.kind === 'receipt').map((a) => a.targetId));
+  if (hit) {
+    throw unprocessable(
+      'PAYMENT_REQUEST_REQUIRED',
+      `收货单 ${hit.docNo} 挂在合同 ${hit.contractNo} 下，合同的货款要先在「付款」里提付款申请，批了以后按申请登记付款`,
+      { docNo: hit.docNo, contractNo: hit.contractNo },
+    );
+  }
+}
+
 /** 核销校验：目标属于该供应商、仍有未结清金额，且不超过未结清金额 */
-async function checkAllocations(tx: Tx, supplierId: number, allocations: { kind: 'receipt' | 'opening'; targetId: number; amountCents: number }[], excludePaymentId: number | null) {
+export async function checkAllocations(tx: Tx, supplierId: number, allocations: { kind: 'receipt' | 'opening'; targetId: number; amountCents: number }[], excludePaymentId: number | null) {
   // 与收货冲销、退货确认使用同一原单行锁。先锁再读余额，避免核销检查后原单失效。
   const receiptIds = [...new Set(allocations.filter((a) => a.kind === 'receipt').map((a) => a.targetId))].sort((a, b) => a - b);
   if (receiptIds.length) await tx`SELECT id FROM inv_docs WHERE id IN ${tx(receiptIds)} ORDER BY id FOR UPDATE`;
@@ -354,7 +378,7 @@ async function checkAllocations(tx: Tx, supplierId: number, allocations: { kind:
   }
 }
 
-async function confirmPayment(tx: Tx, p: { id: number; supplierId: number; amountCents: number; payDate: string }, actor: Actor, comment = '') {
+export async function confirmPayment(tx: Tx, p: { id: number; supplierId: number; amountCents: number; payDate: string }, actor: Actor, comment = '') {
   const allocs = await tx<{ kind: 'receipt' | 'opening'; targetId: number; amountCents: number }[]>`
     SELECT CASE WHEN receipt_doc_id IS NOT NULL THEN 'receipt' ELSE 'opening' END AS kind,
            coalesce(receipt_doc_id, opening_payable_id) AS target_id, amount_cents
@@ -403,6 +427,8 @@ export async function createPayment(deps: Deps, raw: unknown, actor: Actor, ip?:
       // 页面上确认作废过的编号（结果待确认后作废，v0.7.22）：原请求晚到也不登记
       await assertNotFenced(tx, input.clientKey, 'payment', erpOpAbandoned);
       await lockSupplier(tx, input.supplierId);
+      // 挂合同的货款要走付款申请（v0.7.32，P7）
+      await assertNoContractReceipts(tx, input.allocations);
       await checkAllocations(tx, input.supplierId, input.allocations, null);
       const docNo = await nextDocNo(tx, 'payment', 'FK', input.payDate);
       const [row] = await tx<{ id: number }[]>`
@@ -448,8 +474,8 @@ export async function actOnPayment(deps: Deps, paymentId: number, action: 'appro
     const [head] = await tx<{ supplierId: number }[]>`SELECT supplier_id FROM payments WHERE id = ${paymentId}`;
     if (!head) throw notFound('付款记录不存在');
     await lockSupplier(tx, head.supplierId);
-    const [p] = await tx<{ id: number; status: string; supplierId: number; amountCents: number; payDate: string; createdBy: number }[]>`
-      SELECT id, status, supplier_id, amount_cents, pay_date, created_by FROM payments WHERE id = ${paymentId} FOR UPDATE`;
+    const [p] = await tx<{ id: number; status: string; supplierId: number; amountCents: number; payDate: string; createdBy: number; paymentRequestId: number | null }[]>`
+      SELECT id, status, supplier_id, amount_cents, pay_date, created_by, payment_request_id FROM payments WHERE id = ${paymentId} FOR UPDATE`;
     switch (action) {
       case 'approve': {
         if (p!.status === 'confirmed') return;
@@ -472,6 +498,8 @@ export async function actOnPayment(deps: Deps, paymentId: number, action: 'appro
           SELECT CASE WHEN receipt_doc_id IS NOT NULL THEN 'receipt' ELSE 'opening' END AS kind,
                  coalesce(receipt_doc_id, opening_payable_id) AS target_id, amount_cents
           FROM payment_allocations WHERE payment_id = ${p!.id}`;
+        // 退回后再提交也是新的提交：挂合同的货款要走付款申请（v0.7.32，P7）
+        await assertNoContractReceipts(tx, allocs);
         await checkAllocations(tx, p!.supplierId, allocs, p!.id);
         await tx`UPDATE payments SET status = 'submitted', updated_at = now() WHERE id = ${p!.id}`;
         // 退回后再提交按当时的规则从第一级重新走；没有规则命中按默认规则（与以前一样，退回的再提交都要确认）
@@ -500,10 +528,21 @@ export async function actOnPayment(deps: Deps, paymentId: number, action: 'appro
         await tx`
           INSERT INTO ap_entries (supplier_id, entry_type, amount_delta_cents, payment_id, entry_date, operator_id)
           VALUES (${p!.supplierId}, 'void', ${p!.amountCents}, ${p!.id}, ${todayIn(deps.config.timezone)}, ${actor.id})`;
+        // 按付款申请登记的付款（v0.7.32）：冲销后申请回到「待付款」（锁：供应商 → 付款 → 付款申请）
+        if (p!.paymentRequestId !== null) await reopenPaidRequest(tx, Number(p!.paymentRequestId));
         return logApproval(tx, 'payment', p!.id, 'void', actor.id, reason);
     }
   });
   return getPayment(deps.sql, paymentId);
+}
+
+/**
+ * 按付款申请登记的付款或合同付款冲销以后（v0.7.32）：申请已付清的回到「待付款」，可以重新登记；结束了的照旧结束。
+ * 调用前已锁住付款（或合同付款）；这里只锁付款申请一行。
+ */
+export async function reopenPaidRequest(tx: Tx, requestId: number) {
+  await tx`SELECT id FROM payment_requests WHERE id = ${requestId} FOR UPDATE`;
+  await tx`UPDATE payment_requests SET status = 'approved', version = version + 1, updated_at = now() WHERE id = ${requestId} AND status = 'paid'`;
 }
 
 // ───────────────────────── 余额与对账单 ─────────────────────────
@@ -535,8 +574,26 @@ export async function statementTotals(db: Db, supplierId: number, from: string, 
   return r!;
 }
 
-export async function supplierBalances(db: Db): Promise<SupplierBalance[]> {
-  const rows = await db<Omit<SupplierBalance, 'openItemCount'>[]>`
+/**
+ * 没到期的质保金（v0.7.32，P9）：采购合同（签署以后）的质保段还没到可付、没付清的部分，按供应商合计。
+ * 供应商余额里含着它（收货全额记应付），单独一列、不算现在该付。today 为空（没给门店日期的调用）时不算。
+ */
+async function warrantyHeldBySupplier(db: Db, today: string | undefined): Promise<Map<number, number>> {
+  const held = new Map<number, number>();
+  if (!today) return held;
+  const rows = await db<{ id: number; supplierId: number }[]>`
+    SELECT id, supplier_id FROM contracts WHERE category = 'purchase' AND status IN ('signed', 'archived', 'terminated') AND supplier_id IS NOT NULL`;
+  for (const r of rows) {
+    const st = (await contractPlan(db, Number(r.id), today)).stages.find((s) => s.stage === 'warranty')!;
+    if (st.done || st.payableCents > 0) continue;
+    const left = Math.max(0, st.plannedCents - st.paidCents);
+    if (left > 0) held.set(Number(r.supplierId), (held.get(Number(r.supplierId)) ?? 0) + left);
+  }
+  return held;
+}
+
+export async function supplierBalances(db: Db, today?: string): Promise<SupplierBalance[]> {
+  const rows = await db<Omit<SupplierBalance, 'openItemCount' | 'warrantyHeldCents'>[]>`
     SELECT s.id AS supplier_id, s.code, s.name, s.active,
            coalesce(sum(x.amount_delta_cents) FILTER (WHERE x.kind = 'opening'), 0) AS opening_cents,
            coalesce(sum(x.amount_delta_cents) FILTER (WHERE x.kind = 'receipt'), 0) AS received_cents,
@@ -553,11 +610,17 @@ export async function supplierBalances(db: Db): Promise<SupplierBalance[]> {
   for (const c of await supplierCredits(db, null)) {
     if (c.canOffset) credits.set(c.supplierId, (credits.get(c.supplierId) ?? 0) + c.availableCents);
   }
+  const held = await warrantyHeldBySupplier(db, today);
   const result: SupplierBalance[] = [];
   for (const r of rows) {
     const creditCents = credits.get(r.supplierId) ?? 0;
     const items = r.balanceCents !== 0 || r.receivedCents !== 0 || creditCents !== 0 ? await openItems(db, r.supplierId) : [];
-    result.push({ ...r, creditCents, openItemCount: items.filter((i) => i.amountCents - i.creditCents - i.offsetCents - i.paidCents !== 0).length });
+    result.push({
+      ...r,
+      creditCents,
+      warrantyHeldCents: Math.min(held.get(Number(r.supplierId)) ?? 0, Math.max(0, r.balanceCents)),
+      openItemCount: items.filter((i) => i.amountCents - i.creditCents - i.offsetCents - i.paidCents !== 0).length,
+    });
   }
   return result;
 }
@@ -593,8 +656,8 @@ export async function supplierCredits(db: Db, supplierId: number | null): Promis
     .sort((a, b) => a.date.localeCompare(b.date) || a.docNo.localeCompare(b.docNo));
 }
 
-export async function payablesOverview(db: Db): Promise<PayablesOverview> {
-  const suppliers = await supplierBalances(db);
+export async function payablesOverview(db: Db, today?: string): Promise<PayablesOverview> {
+  const suppliers = await supplierBalances(db, today);
   const sum = (k: keyof SupplierBalance) => suppliers.reduce((s, x) => s + (x[k] as number), 0);
   const [pending] = await db<PayablesOverview['pending'][]>`
     SELECT (SELECT count(*) FROM payments WHERE status = 'submitted') AS payments,
@@ -609,6 +672,7 @@ export async function payablesOverview(db: Db): Promise<PayablesOverview> {
       refundedCents: sum('refundedCents'),
       balanceCents: sum('balanceCents'),
       creditCents: sum('creditCents'),
+      warrantyHeldCents: sum('warrantyHeldCents'),
     },
     suppliers,
     pending: pending!,
@@ -760,6 +824,11 @@ export async function createOffset(deps: Deps, raw: unknown, actor: Actor, ip?: 
       await lockSupplier(tx, input.supplierId);
       const credit = await lockCredit(tx, input.supplierId, input.credit);
       if (!credit.canOffset) throw unprocessable('CREDIT_NOT_OFFSETTABLE', '现付供应商的退货没记应付，只能登记供应商退款，不能核销');
+      // 挂合同的货款要走付款申请（v0.7.32，P7）：没带申请的预付款不能核销到合同的收货单上（带申请的、退货余额照旧）
+      if (input.credit.kind === 'prepayment') {
+        const [cp] = await tx<{ paymentRequestId: number | null }[]>`SELECT payment_request_id FROM payments WHERE id = ${input.credit.id}`;
+        if (cp && cp.paymentRequestId === null) await assertNoContractReceipts(tx, input.lines);
+      }
       if (total > credit.availableCents) {
         throw conflict('OVER_CREDIT', `${credit.docNo} 还可以抵扣 ¥${formatAmount(credit.availableCents)}，本次核销 ¥${formatAmount(total)} 超出`, {
           availableCents: credit.availableCents,
@@ -920,7 +989,8 @@ export function registerPayableRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
   const docId = (req: FastifyRequest) => parse(idParam, req.params).id;
 
-  app.get('/api/payables/overview', { preHandler: guard('payable.read') }, async () => readSnapshot(sql, payablesOverview));
+  // 门店日期用来算质保金到没到期（v0.7.32）
+  app.get('/api/payables/overview', { preHandler: guard('payable.read') }, async () => readSnapshot(sql, (tx) => payablesOverview(tx, todayIn(deps.config.timezone))));
   app.get('/api/payables/suppliers/:id/open-items', { preHandler: guard('payable.read') }, async (req) => openItems(sql, docId(req)));
   app.get('/api/payables/statement', { preHandler: guard('payable.read') }, async (req) => {
     const q = parse(RangeQuery, req.query);
