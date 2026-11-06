@@ -167,11 +167,13 @@ export function App() {
   if (state === 'offline') return shell(<OfflinePage onRetry={() => void refresh()} />);
   // 扫开通卡片（#join=…）或注册二维码（#reg=…）打开的：哪怕这台手机上登录着别人，也先给开通、登记（换人用）
   if (state === 'auth' || !cached || hash.join !== null || hash.reg !== null) {
+    // 页面开着时又点了另一个口令的链接（只有 # 后面变了）：按口令换一个新页面，填的口令、核对结果都跟着新链接走，
+    // 不会把旧口令（或上一个链接不对时清空的口令）交上去
     if (hash.join !== null && !hash.login) {
-      return shell(<JoinPage initialCode={hash.join} onDone={signedIn} onLogin={() => (window.location.hash = '/login')} />);
+      return shell(<JoinPage key={`join:${hash.join}`} initialCode={hash.join} onDone={signedIn} onLogin={() => (window.location.hash = '/login')} />);
     }
     if (hash.reg !== null || (justIntroduced && !hash.login)) {
-      return shell(<RegisterPage initialCode={hash.reg ?? ''} onDone={signedIn} onLogin={() => (window.location.hash = '/login')} />);
+      return shell(<RegisterPage key={`reg:${hash.reg ?? ''}`} initialCode={hash.reg ?? ''} onDone={signedIn} onLogin={() => (window.location.hash = '/login')} />);
     }
     return shell(<LoginPage onDone={signedIn} onJoin={() => (window.location.hash = 'join=')} onRegister={() => (window.location.hash = 'reg=')} />);
   }

@@ -272,6 +272,8 @@ export const ERP_OP_TYPES = [
   'contract_acceptance',
   'contract_quality',
   'supplier_invoice',
+  // 员工食堂第二期：柚子信箱的回信（Codex 自动审查 3bc51e6：没收到结果时关掉对话框、刷新以后也要能查回、重提或作废）
+  'canteen_reply',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -316,6 +318,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   contract_acceptance: '验收登记',
   contract_quality: '质量问题登记',
   supplier_invoice: '登记发票',
+  canteen_reply: '柚子信箱回信',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

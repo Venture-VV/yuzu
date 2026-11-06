@@ -220,6 +220,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '081_three_way_match.sql',
   '090_canteen.sql',
   '091_canteen_join.sql',
+  '092_canteen_reply_ops.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

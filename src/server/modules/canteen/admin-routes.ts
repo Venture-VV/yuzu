@@ -126,7 +126,8 @@ export function registerCanteenAdminRoutes(app: FastifyInstance, deps: Deps) {
     const { id } = parse(idParam, req.params);
     return markFeedbackRead(sql, id, ctxOf(req));
   });
-  app.put('/api/erp/canteen/feedback/:id/reply', manage, async (req) => {
+  // 回信带操作编号、走 ERP 的「结果待确认」（页面用 sendErpOp 发 POST；查回、作废走 /api/erp/ops）
+  app.post('/api/erp/canteen/feedback/:id/reply', manage, async (req) => {
     const { id } = parse(idParam, req.params);
     return replyFeedback(sql, id, req.body, ctxOf(req));
   });

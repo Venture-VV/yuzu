@@ -2,7 +2,8 @@
 // 和碎碎念；管理员在 ERP「员工食堂 → 柚子信箱」看、标为看过、回一句话，员工在柚子饭堂里看得到回信。
 //
 // 说出去的内容只追加（触发器挡着改与删），只能标看过、回信。同一个操作编号重发返回同一条（回复没收到时原样重发）。
-// 锁：员工发一条先锁那位员工一行（同一个人的几条串行，数「今天说了几条」不会多算）；看过、回信只锁那一条。
+// 锁：员工发一条先锁那位员工一行（同一个人的几条串行，数「今天说了几条」不会多算）；看过只锁那一条；
+// 回信先取操作编号的咨询锁（与「确认作废」串行），再锁那一条。
 
 import { z } from 'zod';
 import { FEEDBACK_KINDS, FEEDBACK_KIND_LABELS, FEEDBACK_LIMITS, type CanteenFeedbackList, type CanteenFeedbackRow, type MyFeedbackRow } from '@shared/canteen';
@@ -11,8 +12,11 @@ import type { Db, Sql } from '../../db';
 import { writeAudit } from '../../lib/audit';
 import type { OpContext } from '../../lib/context';
 import { conflict, notFound, unauthorized, unprocessable } from '../../lib/errors';
+import { assertNotFenced } from '../../lib/fences';
+import { hashRequest } from '../../lib/idempotency';
 import { setTxTimeouts } from '../../lib/tx';
 import { parse } from '../../lib/validate';
+import { erpOpAbandoned } from '../erp-ops';
 import type { CanteenSessionEmployee } from './portal-auth';
 
 const MY_ROW = (db: Db) => db`
@@ -123,6 +127,7 @@ export async function markFeedbackRead(sql: Sql, id: number, ctx: OpContext): Pr
 }
 
 const ReplyInput = z.object({
+  clientKey: z.uuid('操作编号不正确'),
   reply: z
     .string('写一句回信')
     .trim()
@@ -130,26 +135,41 @@ const ReplyInput = z.object({
     .max(FEEDBACK_LIMITS.reply, `回信最多 ${FEEDBACK_LIMITS.reply} 个字`),
 });
 
-/** 回一句话（回信自动算看过）；再回一次是改回信，员工看到的是最新的那句 */
+/**
+ * 回一句话（回信自动算看过）；再回一次是改回信，员工看到的是最新的那句。
+ * 结果待确认（AGENTS.md）：每次回信带操作编号，记在 idempotency_keys（canteen_reply，ref_id 是那一条）。同一个编号再交只返回那一条、
+ * 不再改一遍（之后改过的回信不会被晚到的旧请求改回去）；「确认作废」之后才到的整笔不改。
+ * 锁：操作编号的咨询锁（与「确认作废」串行）→ 那一条。
+ */
 export async function replyFeedback(sql: Sql, id: number, raw: unknown, ctx: OpContext): Promise<CanteenFeedbackRow> {
-  const { reply } = parse(ReplyInput, raw);
+  const { clientKey, reply } = parse(ReplyInput, raw);
+  const requestHash = hashRequest({ id, reply });
   return sql.begin(async (tx) => {
     await setTxTimeouts(tx);
-    const [cur] = await tx<{ reply: string | null; readAt: string | null }[]>`SELECT reply, read_at FROM canteen_feedback WHERE id = ${id} FOR UPDATE`;
+    await assertNotFenced(tx, clientKey, 'canteen_reply', erpOpAbandoned);
+    const [done] = await tx<{ opType: string; requestHash: string; refId: number }[]>`
+      SELECT op_type, request_hash, ref_id FROM idempotency_keys WHERE key = ${clientKey}`;
+    if (done) {
+      if (done.opType !== 'canteen_reply' || done.requestHash !== requestHash) throw conflict('IDEMPOTENCY_CONFLICT', '这个操作编号已经用过了（内容不一样）：刷新页面再回信');
+      return feedbackRow(tx, Number(done.refId));
+    }
+    const [cur] = await tx<{ reply: string | null }[]>`SELECT reply FROM canteen_feedback WHERE id = ${id} FOR UPDATE`;
     if (!cur) throw notFound('没有这一条');
-    if (cur.reply === reply) return feedbackRow(tx, id);
-    await tx`
-      UPDATE canteen_feedback SET reply = ${reply}, replied_at = now(), replied_by = ${ctx.actor.id},
-             read_at = coalesce(read_at, now()), read_by = coalesce(read_by, ${ctx.actor.id})
-      WHERE id = ${id}`;
-    await writeAudit(tx, {
-      staffId: ctx.actor.id,
-      action: 'canteen_feedback',
-      targetType: 'canteen_feedback',
-      targetId: id,
-      detail: { op: cur.reply === null ? 'reply' : 'edit_reply', before: cur.reply, after: reply },
-      ip: ctx.ip,
-    });
+    if (cur.reply !== reply) {
+      await tx`
+        UPDATE canteen_feedback SET reply = ${reply}, replied_at = now(), replied_by = ${ctx.actor.id},
+               read_at = coalesce(read_at, now()), read_by = coalesce(read_by, ${ctx.actor.id})
+        WHERE id = ${id}`;
+      await writeAudit(tx, {
+        staffId: ctx.actor.id,
+        action: 'canteen_feedback',
+        targetType: 'canteen_feedback',
+        targetId: id,
+        detail: { op: cur.reply === null ? 'reply' : 'edit_reply', before: cur.reply, after: reply },
+        ip: ctx.ip,
+      });
+    }
+    await tx`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (${clientKey}, 'canteen_reply', ${requestHash}, ${id}, ${ctx.actor.id})`;
     return feedbackRow(tx, id);
   });
 }

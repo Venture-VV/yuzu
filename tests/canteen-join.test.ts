@@ -283,10 +283,11 @@ describe('跟柚子说', () => {
     const read = await admin('POST', `/api/erp/canteen/feedback/${wish.id}/read`);
     expect([read.status, read.body.readByName]).toEqual([200, '测试店主']);
     const chat = (await admin('GET', '/api/erp/canteen/feedback?kind=chat&status=unread')).body.rows.find((r: { content: string }) => r.content === '今天的汤有点咸');
-    const reply = await admin('PUT', `/api/erp/canteen/feedback/${chat.id}/reply`, { reply: '收到！已经跟厨师说了，明天少放点盐～' });
+    const reply = await admin('POST', `/api/erp/canteen/feedback/${chat.id}/reply`, { clientKey: randomUUID(), reply: '收到！已经跟厨师说了，明天少放点盐～' });
     expect(reply.status).toBe(200);
     expect(reply.body.readAt).not.toBeNull();
-    expect((await admin('PUT', `/api/erp/canteen/feedback/${chat.id}/reply`, { reply: ' ' })).status).toBe(400);
+    expect((await admin('POST', `/api/erp/canteen/feedback/${chat.id}/reply`, { clientKey: randomUUID(), reply: ' ' })).status).toBe(400);
+    expect((await admin('POST', `/api/erp/canteen/feedback/${chat.id}/reply`, { reply: '没带操作编号' })).status).toBe(400);
     expect((await admin('GET', '/api/erp/canteen/feedback?status=replied')).body.rows).toHaveLength(1);
     const mine = (await c(a.cookie, 'GET', '/api/canteen/feedback')).body;
     expect(mine.find((r: { id: number }) => r.id === chat.id)).toMatchObject({ read: true, reply: '收到！已经跟厨师说了，明天少放点盐～' });
@@ -295,6 +296,34 @@ describe('跟柚子说', () => {
     // 店员没有管理权限；员工端口上没有后台的接口
     expect((await api(ctx.app, ctx.clerk, 'GET', '/api/erp/canteen/feedback')).status).toBe(403);
     expect((await c(a.cookie, 'GET', '/api/erp/canteen/feedback')).status).toBe(404);
+  });
+
+  it('回信的结果待确认：同一个编号只记一次、晚到的旧请求不会把新回信改回去；能查回；作废以后原请求到了也不改', async () => {
+    const row = (await admin('GET', '/api/erp/canteen/feedback?kind=wish')).body.rows[0];
+    const k1 = randomUUID();
+    const first = await admin('POST', `/api/erp/canteen/feedback/${row.id}/reply`, { clientKey: k1, reply: '排班表在排期里了' });
+    expect([first.status, first.body.reply]).toEqual([200, '排班表在排期里了']);
+    // 查回：按编号找得到，refId 是那一条
+    expect((await admin('GET', `/api/erp/ops/${k1}?type=canteen_reply`)).body).toEqual({ found: true, abandoned: false, refId: row.id });
+    // 之后改了回信；第一次那个编号原样重提（回复没收到时）只返回那一条，不会把回信改回去
+    expect((await admin('POST', `/api/erp/canteen/feedback/${row.id}/reply`, { clientKey: randomUUID(), reply: '排班表下周上线' })).status).toBe(200);
+    const replay = await admin('POST', `/api/erp/canteen/feedback/${row.id}/reply`, { clientKey: k1, reply: '排班表在排期里了' });
+    expect([replay.status, replay.body.reply]).toEqual([200, '排班表下周上线']);
+    // 同一个编号换了内容：拒绝
+    const changed = await admin('POST', `/api/erp/canteen/feedback/${row.id}/reply`, { clientKey: k1, reply: '别的话' });
+    expect([changed.status, changed.body.error.code]).toEqual([409, 'IDEMPOTENCY_CONFLICT']);
+    // 已经记上的不能作废：作废返回查回的结果
+    expect((await admin('POST', `/api/erp/ops/${k1}/abandon`, { type: 'canteen_reply' })).body).toMatchObject({ found: true, abandoned: false });
+
+    // 结果不明的那次先确认作废，原请求晚到了也不改回信
+    const k2 = randomUUID();
+    expect((await admin('GET', `/api/erp/ops/${k2}?type=canteen_reply`)).body).toEqual({ found: false, abandoned: false });
+    expect((await admin('POST', `/api/erp/ops/${k2}/abandon`, { type: 'canteen_reply', summary: '回信给 阿信' })).body).toEqual({ found: false, abandoned: true });
+    const late = await admin('POST', `/api/erp/canteen/feedback/${row.id}/reply`, { clientKey: k2, reply: '晚到的旧回信' });
+    expect([late.status, late.body.error.code]).toEqual([409, 'OP_ABANDONED']);
+    expect((await admin('GET', '/api/erp/canteen/feedback?kind=wish')).body.rows[0].reply).toBe('排班表下周上线');
+    // 店员不能查回、作废这一类
+    expect((await api(ctx.app, ctx.clerk, 'GET', `/api/erp/ops/${k1}?type=canteen_reply`)).status).toBe(403);
   });
 
   it('导出表格不截断；内容发出后不能改、不能删', async () => {

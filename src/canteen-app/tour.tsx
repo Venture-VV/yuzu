@@ -78,12 +78,25 @@ function measure(target: string | undefined): Rect | null {
 const same = (a: Rect | null, b: Rect | null) =>
   a === b || (!!a && !!b && Math.abs(a.top - b.top) < 1 && Math.abs(a.left - b.left) < 1 && Math.abs(a.width - b.width) < 1 && Math.abs(a.height - b.height) < 1);
 
+/** 要指的东西等这么久还没出来（例如不是 HTTPS 打开的、这台手机亮不了饭卡码），就照常显示说话框，能「下一步」、能跳过 */
+const TARGET_WAIT_MS = 2500;
+
 export function Tour({ steps, route, go, onClose }: { steps: TourStep[]; route: string; go: (route: string) => void; onClose: (finished: boolean) => void }) {
   const [index, setIndex] = useState(0);
   const [rect, setRect] = useState<Rect | null>(null);
   const [liked, setLiked] = useState(false);
+  const [missing, setMissing] = useState(false);
   const step = steps[index]!;
   const scrolled = useRef<string | null>(null);
+
+  // 每一步先等要指的东西出来；等久了还没有就不再干等（不然整屏挡着、说话框和「跳过」都不出来，只能刷新）。
+  // 按这一步的编号算（steps 每次重新渲染都是新数组，按对象算会一直重新计时）
+  useEffect(() => {
+    setMissing(false);
+    if (!step.target) return;
+    const timer = setTimeout(() => setMissing(true), TARGET_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [step.id, step.target]);
 
   const next = useCallback(() => {
     setLiked(false);
@@ -151,7 +164,8 @@ export function Tour({ steps, route, go, onClose }: { steps: TourStep[]; route: 
 
   const vh = window.innerHeight;
   const vw = window.innerWidth;
-  const waitingForTarget = !!step.target && !rect;
+  const targetGone = !!step.target && !rect && missing;
+  const waitingForTarget = !!step.target && !rect && !missing;
   const below = rect ? rect.top + rect.height / 2 < vh * 0.5 : false;
   const bubbleStyle: React.CSSProperties = rect
     ? below
@@ -190,6 +204,7 @@ export function Tour({ steps, route, go, onClose }: { steps: TourStep[]; route: 
                   Step {index + 1} / {steps.length}
                 </p>
                 <p className="mt-1 text-[16px] leading-relaxed font-bold text-ink">{step.text}</p>
+                {targetGone && <p className="mt-1 text-[13px] text-ink-3">这一步要指的地方这会儿没出来，先往下走吧。</p>}
               </div>
             </div>
             {step.wait === 'like' && (
@@ -220,12 +235,12 @@ export function Tour({ steps, route, go, onClose }: { steps: TourStep[]; route: 
                 </button>
               )}
               <span className="ml-auto" />
-              {step.wait === 'next' && (
+              {(step.wait === 'next' || (step.wait === 'tap' && targetGone)) && (
                 <Button onClick={next} data-testid="tour-next">
                   下一步
                 </Button>
               )}
-              {step.wait === 'tap' && <span className="text-[13px] font-bold text-wood-deep">↑ 点一下亮着的地方</span>}
+              {step.wait === 'tap' && !targetGone && <span className="text-[13px] font-bold text-wood-deep">↑ 点一下亮着的地方</span>}
               {step.wait === 'like' && !liked && <span className="text-[13px] font-bold text-wood-deep">点一下爱心试试</span>}
               {step.wait === 'like' && liked && <span className="text-[13px] font-bold text-organic">厨师收到啦！</span>}
               {step.wait === 'finish' && (

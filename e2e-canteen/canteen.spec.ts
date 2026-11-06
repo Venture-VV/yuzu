@@ -346,6 +346,13 @@ test.describe.serial('第二期：开场动画、新同事登记、新手教程�
     // 新同事登记：口令从二维码里带上了，填三格就进门
     await expect(p.getByTestId('register-page')).toBeVisible();
     await expect(p.getByTestId('register-code-ok')).toBeVisible();
+    // 页面开着时又点了另一个口令的链接（只有 # 后面变了）：口令跟着新链接走，交上去的不是旧的（Codex 审查 3bc51e6）
+    const goodHash = new URL(link).hash;
+    await p.evaluate((h) => void (window.location.hash = h), goodHash.endsWith('AAAAAAAA') ? '#reg=BBBBBBBB' : '#reg=AAAAAAAA');
+    await expect(p.getByText('链接里的注册口令不对或已经换了')).toBeVisible();
+    await expect(p.getByTestId('register-code-ok')).toHaveCount(0);
+    await p.evaluate((h) => void (window.location.hash = h), goodHash);
+    await expect(p.getByTestId('register-code-ok')).toBeVisible();
     await noOverflow(p);
     await p.getByLabel('用户名').fill('小雨');
     await p.getByLabel('手机号').fill('139 0000 1234');
@@ -413,10 +420,22 @@ test.describe.serial('第二期：开场动画、新同事登记、新手教程�
     await expect(admin.getByRole('row', { name: /小雨/ })).toContainText('自己登记');
     await admin.getByRole('radio', { name: /柚子信箱/ }).click();
     const item = admin.getByTestId('canteen-feedback').locator('li', { hasText: '想在手机上就能看到排班表' }).first();
+    // 回信没收到结果（结果待确认，Codex 审查 3bc51e6）：记录留在这台电脑上，关掉对话框也还在；确认之前这一条不能再回信，
+    // 按原内容重新提交（同一个编号）才发出去
+    await admin.route('**/api/erp/canteen/feedback/*/reply', (route) => route.abort());
     await item.getByRole('button', { name: '回信' }).click();
     await admin.getByRole('textbox', { name: '回信' }).fill('收到！柚子记下了，排班表排进下一版～');
     await admin.getByTestId('feedback-reply-save').click();
-    await expect(admin.getByText('回信发出去了')).toBeVisible();
+    await expect(admin.getByText('回信：没收到结果')).toBeVisible();
+    await expect(admin.getByTestId('erp-pending')).toContainText('回信给 小雨');
+    await expect(item.getByRole('button', { name: '回信' })).toBeDisabled();
+    await admin.unroute('**/api/erp/canteen/feedback/*/reply');
+    await admin.getByTestId('erp-pending-resend').click();
+    await expect(admin.getByText('柚子信箱回信已登记')).toBeVisible();
+    await expect(admin.getByTestId('erp-pending')).toHaveCount(0);
+    // 回信自动算看过：这一条从「没看过的」里下去了，在「回过信的」里
+    await admin.getByRole('radio', { name: '回过信的' }).click();
+    await expect(admin.getByTestId('canteen-feedback')).toContainText('排班表排进下一版');
     await admin.screenshot({ path: `${OUT}/admin-mailbox.png`, fullPage: true });
 
     // 员工看得到回信；「我的」里能再看一遍开场
@@ -427,6 +446,23 @@ test.describe.serial('第二期：开场动画、新同事登记、新手教程�
     await expect(p.getByTestId('intro')).toBeVisible();
     await p.getByTestId('intro-skip').click();
     await expect(p.getByTestId('replay-intro')).toBeVisible();
+
+    // 这台手机亮不了饭卡码（例如不是 HTTPS 打开的）：再走一遍教程，指不到饭卡码的那一步等一会儿照常显示说话框，
+    // 能「下一步」、能跳过，不会整屏挡住（Codex 审查 3bc51e6）
+    await p.evaluate(() => Object.defineProperty(window.crypto, 'subtle', { configurable: true, get: () => undefined }));
+    await p.getByTestId('replay-tour').click();
+    await expect(tour).toHaveAttribute('data-step', 'home');
+    await p.getByTestId('tour-next').click();
+    await p.getByRole('button', { name: '点赞：番茄炒蛋（示例）' }).click();
+    await expect(tour).toHaveAttribute('data-step', 'code');
+    await p.getByTestId('tab-code').click();
+    await expect(tour).toHaveAttribute('data-step', 'qr');
+    await expect(p.getByText('这一步要指的地方这会儿没出来')).toBeVisible();
+    await expect(p.getByTestId('meal-code')).toHaveCount(0);
+    await p.getByTestId('tour-next').click();
+    await expect(tour).toHaveAttribute('data-step', 'talk');
+    await p.getByTestId('tour-skip').click();
+    await expect(tour).toHaveCount(0);
 
     // 换手机：用用户名或手机号登录（看过开场的手机直接到登录页）
     const other = await phone(browser, 'android');
