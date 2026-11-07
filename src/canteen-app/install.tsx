@@ -54,7 +54,7 @@ export function InstallGuide() {
         <ol className="list-decimal space-y-2 pl-5">
           <li>用 <b className="text-ink">Safari</b> 打开柚子饭堂（别的浏览器不行）</li>
           <li>
-            点底部中间的 <b className="text-ink">分享按钮</b>（方框加向上的箭头）
+            点 <b className="text-ink">分享按钮</b>（方框加向上的箭头）。底部工具栏上没有的话（iOS 26），先点地址栏旁边的 <b className="text-ink">「···」</b>，再点「分享」
           </li>
           <li>
             往下滑，点 <b className="text-ink">「添加到主屏幕」</b>，再点右上角「添加」
@@ -70,7 +70,14 @@ export function InstallGuide() {
           </ol>
         )
       )}
-      <p className="rounded-2xl bg-yuzu-soft px-4 py-3 text-[14px]">添加以后，桌面上会多一个柚子：开饭时点它就能亮码，没网也行。</p>
+      {window.isSecureContext ? (
+        <p className="rounded-2xl bg-yuzu-soft px-4 py-3 text-[14px]">添加以后，桌面上会多一个柚子：开饭时点它就能亮码，没网也行。</p>
+      ) : (
+        // http 打开的（例如局域网 IP）：浏览器不给加密、也装不了离线缓存，添加到桌面也亮不了饭卡码、没网打不开
+        <p className="rounded-2xl bg-peach-soft px-4 py-3 text-[14px] font-bold text-danger" data-testid="install-insecure">
+          现在是用 http 打开的：这样添加到桌面也亮不了饭卡码，没网也打不开。请用管理员给的 https 网址打开柚子饭堂，再添加到桌面。
+        </p>
+      )}
     </div>
   );
 }

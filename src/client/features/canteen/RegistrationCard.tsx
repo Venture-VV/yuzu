@@ -1,12 +1,12 @@
-// 注册二维码（docs/CANTEEN.md 第 14 节，K12）：员工扫码打开柚子饭堂，看完柚子的开场，在「新同事登记」填用户名、手机号、密码就开好账号。
-// 口令就在二维码和链接里（#reg=口令），外面的人拿到员工入口地址也登记不了；换一个口令旧的二维码马上作废。
-// 换口令、开关都带上看到的 rev（对不上拒绝）：没收到结果时不当作「没换成」，刷新看现在的；再点或晚到的那一下
-// 不会在已经换好以后再换一次（刚打印的海报不会被它作废）。
+// 注册二维码（docs/CANTEEN.md 第 14 节，K12）：员工扫码（或点员工群里的链接）打开柚子饭堂，看完柚子的开场，
+// 在「新同事登记」填用户名、手机号、密码就开好账号（普通员工）。不要注册口令（店主 2026-11-07）：管理员在这里打开自己登记，
+// 拿到员工入口地址的人就能登记；名单里看得到谁是自己登记的，不认识的停用，不想再有人登记就关掉。
+// 开关带上看到的 rev（对不上拒绝）：没收到结果时不当作「没改成」，刷新看现在的；晚到的那一下不会把开关改回去。
 
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Copy, RefreshCw } from 'lucide-react';
-import { displayActivationCode, type CanteenRegistration } from '@shared/canteen';
+import { Copy } from 'lucide-react';
+import type { CanteenRegistration } from '@shared/canteen';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { Badge, Button, Card, ConfirmCheck, Notice, SectionTitle } from '../../components/ui';
 import { useToast } from '../../components/Toast';
@@ -16,47 +16,28 @@ import { PrintButton } from '../print/PrintButton';
 export function RegistrationCard({ registration, portalUrl }: { registration: CanteenRegistration; portalUrl: string }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [busy, setBusy] = useState<'code' | 'toggle' | null>(null);
-  const [confirmRotate, setConfirmRotate] = useState(false);
+  const [busy, setBusy] = useState(false);
   const refresh = () => void qc.invalidateQueries({ queryKey: ['canteen'] });
-  /** 没收到结果、或者服务端说刚改过：都刷新看现在的，不当作没办成 */
-  const unsure = (e: unknown, what: string): boolean => {
-    if (e instanceof UncertainError) {
-      refresh();
-      toast({ tone: 'info', title: `${what}：没收到结果`, body: '可能已经办好了。已经刷新，看看现在的口令和开关；再点会接着现在的来，不会多换一次' });
-      return true;
-    }
-    if (e instanceof ApiError && e.code === 'REGISTRATION_CHANGED') {
-      refresh();
-      toast({ tone: 'info', title: '注册设置刚改过', body: '可能是刚才那一下已经办好了：已经刷新，看看现在的口令和开关' });
-      return true;
-    }
-    return false;
-  };
 
-  const rotate = async () => {
-    setBusy('code');
-    try {
-      await api.post<CanteenRegistration>('/api/erp/canteen/registration/code', { rev: registration.rev });
-      setConfirmRotate(false);
-      refresh();
-      toast({ tone: 'success', title: registration.code ? '换好了：旧的二维码已经作废，请重新打印海报' : '注册二维码生成好了' });
-    } catch (e) {
-      if (unsure(e, registration.code ? '换口令' : '生成注册二维码')) setConfirmRotate(false);
-      else toast({ tone: 'error', title: '没换成', body: errorMessage(e) });
-    } finally {
-      setBusy(null);
-    }
-  };
   const toggle = async (enabled: boolean) => {
-    setBusy('toggle');
+    if (busy) return;
+    setBusy(true);
+    const what = enabled ? '打开自己登记' : '关掉自己登记';
     try {
       await api.put<CanteenRegistration>('/api/erp/canteen/registration', { enabled, rev: registration.rev });
       refresh();
+      if (enabled) toast({ tone: 'success', title: '自己登记打开了', body: '把注册二维码发到员工群、或打印海报贴在饭堂' });
     } catch (e) {
-      if (!unsure(e, enabled ? '打开自己登记' : '关掉自己登记')) toast({ tone: 'error', title: '没改成', body: errorMessage(e) });
+      // 没收到结果、或者服务端说刚改过：都刷新看现在的，不当作没改成
+      if (e instanceof UncertainError) {
+        refresh();
+        toast({ tone: 'info', title: `${what}：没收到结果`, body: '可能已经改好了。已经刷新，看看现在的开关；再点会接着现在的来' });
+      } else if (e instanceof ApiError && e.code === 'REGISTRATION_CHANGED') {
+        refresh();
+        toast({ tone: 'info', title: '开关刚改过', body: '可能是刚才那一下已经改好了：已经刷新，看看现在的' });
+      } else toast({ tone: 'error', title: '没改成', body: errorMessage(e) });
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   };
   const copy = async (text: string) => {
@@ -70,15 +51,14 @@ export function RegistrationCard({ registration, portalUrl }: { registration: Ca
 
   return (
     <Card className="space-y-4 p-5" data-testid="canteen-registration">
-      <SectionTitle aside={registration.code ? <Badge tone={registration.enabled ? 'pine' : 'neutral'}>{registration.enabled ? '开着' : '关了'}</Badge> : undefined}>
-        注册二维码
-      </SectionTitle>
+      <SectionTitle aside={<Badge tone={registration.enabled ? 'pine' : 'neutral'}>{registration.enabled ? '开着' : '关着'}</Badge>}>注册二维码</SectionTitle>
       <p className="text-[13px] leading-relaxed text-ink-2">
-        员工用手机扫这个码，看完柚子的开场，在「新同事登记」填用户名、手机号、密码就开好账号（普通员工）。发到员工群、或打印海报贴在饭堂都行。已经有 <b>{registration.selfRegistered}</b> 位自己登记。
+        员工用手机扫这个码（或打开链接），看完柚子的开场，在「新同事登记」填用户名、手机号、密码就开好账号（普通员工），不用口令。发到员工群、或打印海报贴在饭堂都行。已经有{' '}
+        <b>{registration.selfRegistered}</b> 位自己登记。
       </p>
-      {!registration.code ? (
-        <Button variant="primary" loading={busy === 'code'} onClick={() => void rotate()} data-testid="canteen-reg-create">
-          生成注册二维码
+      {!registration.enabled ? (
+        <Button variant="primary" loading={busy} onClick={() => void toggle(true)} data-testid="canteen-reg-open">
+          打开自己登记
         </Button>
       ) : (
         <>
@@ -88,56 +68,32 @@ export function RegistrationCard({ registration, portalUrl }: { registration: Ca
             ) : (
               <div className="flex size-36 shrink-0 items-center justify-center rounded-lg border border-dashed border-line-strong p-3 text-center text-[12px] text-ink-3">先在左边填员工入口地址，才有二维码</div>
             )}
-            <div className="min-w-0 flex-1 space-y-2">
-              <div>
-                <p className="text-[12px] text-ink-3">注册口令（没扫码的同事手动输入）</p>
-                <p className="num font-mono text-[22px] font-bold tracking-[0.15em]" data-testid="canteen-reg-code">
-                  {displayActivationCode(registration.code)}
+            {registration.link && (
+              <div className="min-w-0 flex-1 space-y-2">
+                <p className="text-[12px] text-ink-3">注册链接</p>
+                <p className="text-[12.5px] break-all select-all" data-testid="canteen-reg-link">
+                  {registration.link}
                 </p>
-              </div>
-              {registration.link && (
-                <div>
-                  <p className="text-[12px] text-ink-3">注册链接</p>
-                  <p className="text-[12.5px] break-all select-all" data-testid="canteen-reg-link">
-                    {registration.link}
-                  </p>
+                <div className="flex flex-wrap items-center gap-2">
                   <Button size="sm" variant="ghost" icon={<Copy className="size-3.5" />} onClick={() => void copy(registration.link!)}>
                     复制链接
                   </Button>
+                  <PrintButton path="/print/canteen-poster" paper="a4" size="sm" testId="canteen-print-poster">
+                    打印注册海报
+                  </PrintButton>
                 </div>
-              )}
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {registration.link && (
-              <PrintButton path="/print/canteen-poster" paper="a4" size="sm" testId="canteen-print-poster">
-                打印注册海报
-              </PrintButton>
-            )}
-            <Button size="sm" variant="secondary" icon={<RefreshCw className="size-3.5" />} onClick={() => setConfirmRotate((v) => !v)}>
-              换一个口令
-            </Button>
-          </div>
-          {confirmRotate && (
-            <Notice tone="warning" title="换了口令，旧的二维码、链接、海报马上作废" data-testid="canteen-reg-rotate-confirm">
-              已经登记的人不受影响。换好以后请重新打印海报、重新发链接。
-              <div className="mt-2 flex gap-2">
-                <Button size="sm" variant="danger" loading={busy === 'code'} onClick={() => void rotate()}>
-                  确定换
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setConfirmRotate(false)}>
-                  先不换
-                </Button>
               </div>
-            </Notice>
-          )}
-          <ConfirmCheck checked={registration.enabled} onChange={(v) => busy !== 'toggle' && void toggle(v)}>
+            )}
+          </div>
+          <ConfirmCheck checked={registration.enabled} onChange={(v) => void toggle(v)}>
             开着自己登记（关掉以后扫码也登记不了；已经登记的人照常用）
           </ConfirmCheck>
-          {!portalUrl && <Notice tone="warning">还没填员工入口地址：员工没法扫码打开，只能手动输入口令。</Notice>}
-          <p className="text-[12.5px] leading-relaxed text-ink-3">有同事离职：在「员工名单」里停用他，再在这里换一个口令（免得他用别的手机号再登记一次）。</p>
+          {!portalUrl && <Notice tone="warning">还没填员工入口地址：员工没法扫码打开。</Notice>}
         </>
       )}
+      <p className="text-[12.5px] leading-relaxed text-ink-3">
+        拿到员工入口地址的人都能登记成普通员工：「员工名单」里看得到谁是自己登记的，不认识的停用就好；不想再有人登记就关掉。有同事离职，在「员工名单」里停用他就行：停用以后他登录不了，用他的手机号也登记不了。
+      </p>
     </Card>
   );
 }

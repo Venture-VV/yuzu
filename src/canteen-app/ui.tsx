@@ -2,6 +2,7 @@
 // 按钮像贴纸一样有一道错开的实色投影、按下去会压下来；卡片可以带一圈手抖的描边（sketch）。
 
 import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 export const cn = (...xs: (string | false | null | undefined)[]) => xs.filter(Boolean).join(' ');
 
@@ -72,7 +73,11 @@ export function Stamp({ children, className, tone = 'energy' }: { children: Reac
   );
 }
 
-/** 从底部弹出的面板（手机上好按）；点背景或「关闭」收起 */
+/**
+ * 从底部弹出的面板（手机上好按）；点背景或「关闭」收起。
+ * 挂到 body 上：外面一层有进场动画（transform）、滤镜时，fixed 会改成跟着那一层定位，面板会长到页面顶上外面看不见
+ * （店主 11-07 在 iPhone 上点首页「怎么放」看到的就是这样）。
+ */
 export function Sheet({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
   useEffect(() => {
     if (!open) return;
@@ -81,7 +86,7 @@ export function Sheet({ open, onClose, title, children }: { open: boolean; onClo
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
   if (!open) return null;
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40" onClick={onClose} role="presentation">
       <div
         role="dialog"
@@ -101,7 +106,8 @@ export function Sheet({ open, onClose, title, children }: { open: boolean; onClo
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

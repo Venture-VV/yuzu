@@ -234,6 +234,13 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
       const p = await join(ctx, codes[empNo]!, pw);
       await expect(p.getByTestId('meal-lunch').getByText('红烧肉')).toBeVisible();
       await noOverflow(p);
+      // 首页「把柚子饭堂放到桌面」点「怎么放」：说明面板整个在屏幕里、标题看得到（店主 11-07 在 iPhone 上看到面板顶上长出页面、看不见）
+      await p.getByRole('button', { name: '怎么放' }).click();
+      const guide = p.getByRole('dialog', { name: '添加到桌面' });
+      await expect(guide).toBeInViewport({ ratio: 1 });
+      await expect(guide.getByRole('heading', { name: '添加到桌面' })).toBeInViewport();
+      await guide.getByRole('button', { name: '关闭' }).click();
+      await expect(guide).toBeHidden();
       if (empNo === 'A001') {
         const heart = p.getByRole('button', { name: '点赞：红烧肉' });
         await heart.click();
@@ -308,7 +315,7 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
 
 test.describe.serial('第二期：开场动画、新同事登记、新手教程、跟柚子说', () => {
   test('新同事扫注册二维码：开场动画 → 自己登记 → 新手教程 → 跟柚子说；后台回信，员工看得到', async ({ browser }) => {
-    // 后台：生成注册二维码（前面已经开了模块、填了员工入口地址）
+    // 后台：打开自己登记、拿到注册链接（前面已经开了模块、填了员工入口地址）
     const actx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-CN', timezoneId: tz });
     const admin = await actx.newPage();
     await admin.goto('/login');
@@ -318,12 +325,12 @@ test.describe.serial('第二期：开场动画、新同事登记、新手教程�
     await admin.waitForURL((u) => !u.pathname.startsWith('/login'));
     await admin.goto('/erp/canteen');
     await admin.getByRole('radio', { name: '设置' }).click();
-    // 等设置取到了再看要不要生成（isVisible 不会等）
+    // 等设置取到了再看要不要打开（isVisible 不会等）；不要注册口令（店主 2026-11-07），链接就是员工入口地址 + #reg
     await expect(admin.getByTestId('canteen-registration')).toBeVisible();
-    const create = admin.getByTestId('canteen-reg-create');
-    if (await create.isVisible()) await create.click();
+    const open = admin.getByTestId('canteen-reg-open');
+    if (await open.isVisible()) await open.click();
     const link = (await admin.getByTestId('canteen-reg-link').innerText()).trim();
-    expect(link).toMatch(new RegExp(`^${CANTEEN.replace(/[.:/]/g, '\\$&')}/#reg=[2-9A-HJ-NP-Z]{8}$`));
+    expect(link).toBe(`${CANTEEN}/#reg`);
     await admin.screenshot({ path: `${OUT}/admin-registration.png`, fullPage: true });
 
     // 新同事的手机：第一次打开，先放开场动画（七段，点一下打完这句、再点下一句）
@@ -343,16 +350,9 @@ test.describe.serial('第二期：开场动画、新同事登记、新手教程�
     await p.screenshot({ path: `${OUT}/intro-door.png` });
     await p.getByTestId('intro-enter').click();
 
-    // 新同事登记：口令从二维码里带上了，填三格就进门
+    // 新同事登记：填三格就进门，不用口令
     await expect(p.getByTestId('register-page')).toBeVisible();
-    await expect(p.getByTestId('register-code-ok')).toBeVisible();
-    // 页面开着时又点了另一个口令的链接（只有 # 后面变了）：口令跟着新链接走，交上去的不是旧的（Codex 审查 3bc51e6）
-    const goodHash = new URL(link).hash;
-    await p.evaluate((h) => void (window.location.hash = h), goodHash.endsWith('AAAAAAAA') ? '#reg=BBBBBBBB' : '#reg=AAAAAAAA');
-    await expect(p.getByText('链接里的注册口令不对或已经换了')).toBeVisible();
-    await expect(p.getByTestId('register-code-ok')).toHaveCount(0);
-    await p.evaluate((h) => void (window.location.hash = h), goodHash);
-    await expect(p.getByTestId('register-code-ok')).toBeVisible();
+    await expect(p.getByLabel('注册口令')).toHaveCount(0);
     await noOverflow(p);
     await p.getByLabel('用户名').fill('小雨');
     await p.getByLabel('手机号').fill('139 0000 1234');

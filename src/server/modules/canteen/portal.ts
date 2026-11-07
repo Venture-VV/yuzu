@@ -220,8 +220,8 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
     return buildMe(employeeId);
   });
 
-  /** 自己登记（第二期，K12–K14）：现在能不能登记、口令对不对（口令不对算一次失败） */
-  app.get('/api/canteen/register', async (req) => limited(req, () => registerInfo(sql, (req.query as { code?: string }).code)));
+  /** 自己登记（第二期，K12–K14）：现在能不能登记（不要注册口令，店主 2026-11-07） */
+  app.get('/api/canteen/register', async () => registerInfo(sql));
 
   app.post('/api/canteen/register', async (req, reply) => {
     const key = `ip:${req.ip}`;

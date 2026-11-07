@@ -251,29 +251,27 @@ export const normalizePhone = (raw: string) => raw.replace(/[\s-]/g, '').replace
 /** 名单里给人看的手机号：138 0013 8000 */
 export const displayPhone = (phone: string) => `${phone.slice(0, 3)} ${phone.slice(3, 7)} ${phone.slice(7)}`;
 
-/** 注册口令：和开通码同样的 8 位字母数字（去掉容易认错的 0 O 1 I），印在海报上是 ABCD-2345 */
-export const REG_CODE = /^[2-9A-HJ-NP-Z]{8}$/;
-/** 注册链接：员工入口地址 + #reg=口令（扫海报上的二维码打开） */
-export const registrationLink = (portalUrl: string, code: string) => `${portalUrl}/#reg=${code}`;
+/**
+ * 注册链接：员工入口地址 + #reg（扫海报上的二维码、点员工群里的链接，打开就是「新同事登记」）。
+ * 不要注册口令（店主 2026-11-07，K12）：以前印的 #reg=口令 照样打开登记页，口令不再核对。
+ */
+export const registrationLink = (portalUrl: string) => `${portalUrl}/#reg`;
 
 /** 管理后台看的「注册二维码」 */
 export interface CanteenRegistration {
-  /** 开着自己登记 */
+  /** 开着自己登记（没打开过时关着，管理员在后台打开） */
   enabled: boolean;
-  /** 注册口令（还没生成为 null） */
-  code: string | null;
-  /** 注册链接（没填员工入口地址、没生成口令时为 null） */
+  /** 注册链接（没填员工入口地址时为 null） */
   link: string | null;
   /** 自己登记、在用的人数 */
   selfRegistered: number;
-  /** 改了几次：开关、换口令都带上看到的这个数，对不上拒绝（REGISTRATION_CHANGED） */
+  /** 改了几次：开关带上看到的这个数，对不上拒绝（REGISTRATION_CHANGED） */
   rev: number;
 }
 
-/** 员工端：现在能不能自己登记、带来的口令对不对（没带口令时 codeOk 为 null） */
+/** 员工端：现在能不能自己登记 */
 export interface RegisterInfo {
   open: boolean;
-  codeOk: boolean | null;
 }
 
 // ── 跟柚子说（第二期，docs/CANTEEN.md 第 16 节，K16）──
