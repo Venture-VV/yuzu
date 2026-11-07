@@ -1,5 +1,5 @@
-// ERP「员工食堂」（docs/CANTEEN.md）：今天的概况、员工名单与开通卡片、菜单（只看）、用餐记录、设置。
-// 员工、厨师、食堂负责人用的是手机上的「柚子饭堂」（员工端口）；这里给管理员管名单、看记录。
+// ERP「员工食堂」（docs/CANTEEN.md）：今天的概况、员工名单与开通卡片、菜单（只看）、用餐记录、柚子信箱、设置（含注册二维码）。
+// 员工、厨师、食堂负责人用的是手机上的「柚子饭堂」（员工端口）；这里给管理员管名单、看记录、回员工的话。
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -10,21 +10,24 @@ import { relativeTime } from '../../lib/utils';
 import { Badge, Card, Notice, SectionTitle, Segmented, Skeleton } from '../../components/ui';
 import { Mascot } from '../../../canteen-app/Mascot';
 import { ErpPage } from '../erp/ErpHome';
+import { FeedbackTab } from './FeedbackTab';
 import { MenusTab } from './MenusTab';
 import { RecordsTab } from './RecordsTab';
 import { RosterTab } from './RosterTab';
 import { SettingsTab } from './SettingsTab';
 
-type Tab = 'today' | 'roster' | 'menus' | 'records' | 'settings';
+type Tab = 'today' | 'roster' | 'menus' | 'records' | 'mailbox' | 'settings';
 
 export const useOverview = () => useQuery({ queryKey: ['canteen', 'overview'], queryFn: () => api.get<CanteenOverview>('/api/erp/canteen/overview'), refetchInterval: 60_000 });
 
 export function CanteenPage() {
   const [tab, setTab] = useState<Tab>('today');
+  const overview = useOverview();
+  const unread = overview.data?.feedbackUnread ?? 0;
   return (
     <ErpPage
       title="员工食堂"
-      description="员工手机上的「柚子饭堂」：看菜单、点赞、亮饭卡码；食堂负责人扫码打卡、厨师发布菜单。这里管员工名单、打印开通卡片、看用餐记录。"
+      description="员工手机上的「柚子饭堂」：扫码自己登记、看菜单、点赞、亮饭卡码、跟柚子说；食堂负责人扫码打卡、厨师发布菜单。这里管注册二维码与名单、看用餐记录、回员工的话。"
     >
       <div className="space-y-5" data-testid="canteen-page">
         <Segmented<Tab>
@@ -36,6 +39,7 @@ export function CanteenPage() {
             { value: 'roster', label: '员工名单' },
             { value: 'menus', label: '菜单' },
             { value: 'records', label: '用餐记录' },
+            { value: 'mailbox', label: unread ? `柚子信箱 · ${unread}` : '柚子信箱' },
             { value: 'settings', label: '设置' },
           ]}
         />
@@ -43,6 +47,7 @@ export function CanteenPage() {
         {tab === 'roster' && <RosterTab />}
         {tab === 'menus' && <MenusTab />}
         {tab === 'records' && <RecordsTab />}
+        {tab === 'mailbox' && <FeedbackTab />}
         {tab === 'settings' && <SettingsTab />}
       </div>
     </ErpPage>
@@ -54,11 +59,17 @@ function TodayTab({ go }: { go: (t: Tab) => void }) {
   const o = q.data;
   if (!o) return q.isError ? <Notice tone="error" title="取不到员工食堂的概况" /> : <Skeleton className="h-64" />;
   const meals = o.settings.meals.filter((m) => m.enabled).map((m) => m.meal);
+  const reg = o.registration;
   const steps = [
     { done: o.settings.departmentId !== null, label: '选好食堂部门', detail: o.departmentName ?? '还没选', tab: 'settings' as Tab },
-    { done: o.people.managers > 0, label: '加员工，安排食堂负责人和厨师', detail: `在用 ${o.people.active} 位 · 负责人 ${o.people.managers} · 厨师 ${o.people.cooks}`, tab: 'roster' as Tab },
-    { done: o.people.active > 0 && o.people.pending === 0, label: '打印开通卡片发给大家', detail: o.people.pending ? `还有 ${o.people.pending} 位没开通` : '都开通了', tab: 'roster' as Tab },
-    { done: !!o.settings.portalUrl, label: '填员工入口地址（开通卡片上的二维码用）', detail: o.settings.portalUrl || '还没填', tab: 'settings' as Tab },
+    { done: !!o.settings.portalUrl, label: '填员工入口地址（注册二维码、开通卡片都用它）', detail: o.settings.portalUrl || '还没填', tab: 'settings' as Tab },
+    {
+      done: !!reg.code && reg.enabled,
+      label: '生成注册二维码，发到员工群或贴在饭堂（大家扫码自己登记）',
+      detail: !reg.code ? '还没生成' : !reg.enabled ? '自己登记关着' : `已经有 ${reg.selfRegistered} 位自己登记`,
+      tab: 'settings' as Tab,
+    },
+    { done: o.people.managers > 0, label: '在名单里安排食堂负责人和厨师', detail: `在用 ${o.people.active} 位 · 负责人 ${o.people.managers} · 厨师 ${o.people.cooks}`, tab: 'roster' as Tab },
   ];
   const ready = steps.every((s) => s.done);
   const maxDay = Math.max(1, ...o.days.map((d) => MEALS.reduce((n, m) => n + d.counts[m], 0)));
@@ -71,7 +82,7 @@ function TodayTab({ go }: { go: (t: Tab) => void }) {
       )}
       {!ready && (
         <Card className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center" data-testid="canteen-setup">
-          <Mascot mood="wink" className="size-24 shrink-0 self-center" />
+          <Mascot mood="wink" pose="point" className="h-28 w-auto shrink-0 self-center" />
           <div className="min-w-0 flex-1">
             <p className="text-[16px] font-bold">开张前还差几步</p>
             <ol className="mt-2 space-y-1.5">
@@ -151,6 +162,19 @@ function TodayTab({ go }: { go: (t: Tab) => void }) {
           )}
         </Card>
       </div>
+
+      {o.feedbackUnread > 0 && (
+        <Card className="flex items-center gap-4 p-4" data-testid="canteen-mailbox-summary">
+          <Mascot mood="love" className="h-20 w-auto shrink-0" still />
+          <div className="min-w-0 flex-1">
+            <p className="text-[15px] font-bold">柚子信箱里有 {o.feedbackUnread} 条还没看</p>
+            <p className="text-[13px] text-ink-3">员工在「跟柚子说」里写的心愿和碎碎念，回一句话他们就看得到。</p>
+          </div>
+          <button type="button" onClick={() => go('mailbox')} className="text-[13.5px] font-semibold text-pine hover:underline">
+            去看看
+          </button>
+        </Card>
+      )}
 
       <Card className="p-5">
         <SectionTitle aside={<span className="text-[12.5px] text-ink-3">名单：在用 {o.people.active} 位，已开通 {o.people.activated} 位</span>}>今天刚打卡的</SectionTitle>

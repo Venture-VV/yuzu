@@ -1,6 +1,8 @@
 // 员工食堂 · 柚子饭堂（docs/CANTEEN.md）的浏览器流程：后台（电脑尺寸）准备名单与开通卡片 →
 // 厨师在手机上发布菜单 → 员工开通、点赞、亮饭卡码 → 负责人「从相册选」员工的码打卡、重复扫提示已打卡、
 // 断网扫到先记下、联网后自动补登 → 后台看到人数与记录。
+// 第二期（第 14–16 节）：新同事扫注册二维码 → 看柚子的开场动画 → 自己登记 → 走新手教程 → 跟柚子说 → 后台柚子信箱回信。
+// 前面那几位（开通卡片来的）在手机上先记成「看过开场、走过教程」，只测原来的流程。
 // 要应用开着员工端口：E2E_BASE_URL（员工后台，默认 http://localhost:8080）、E2E_CANTEEN_URL（员工端口，默认 http://localhost:8090），
 // 库里要有演示的店主 linlan（seed-demo）。只在独立演示库上跑：会建部门、员工、菜单与打卡。
 
@@ -20,8 +22,16 @@ const PHONES = {
   iphone: { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, userAgent: devices['iPhone 13'].userAgent },
 };
 
-async function phone(browser: Browser, kind: keyof typeof PHONES): Promise<BrowserContext> {
-  return browser.newContext({ ...PHONES[kind], locale: 'zh-CN', timezoneId: tz });
+/** fresh：第一次打开柚子饭堂的手机（放开场动画、走新手教程）；不给时当作已经看过开场、走过教程 */
+async function phone(browser: Browser, kind: keyof typeof PHONES, fresh = false): Promise<BrowserContext> {
+  const ctx = await browser.newContext({ ...PHONES[kind], locale: 'zh-CN', timezoneId: tz });
+  if (!fresh) {
+    await ctx.addInitScript(() => {
+      localStorage.setItem('yuzu.canteen.intro.v1', 'true');
+      localStorage.setItem('yuzu.canteen.tour.v1', 'done');
+    });
+  }
+  return ctx;
 }
 
 /** 扫开通卡片打开（#join=开通码），设密码，进首页 */
@@ -149,11 +159,69 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
     await ctx.setOffline(false);
     await cook.reload();
     await expect(cook.getByTestId('menu-pending')).toBeVisible();
+    // 原样重试被拒（没权限、饭堂暂时关着）也说明不了原来那次存没存上：这一笔照样留着（Codex 审查 c04f1d9）
+    for (const [status, code, message] of [
+      [403, 'FORBIDDEN', '只有厨师和食堂负责人能改菜单'],
+      [503, 'CANTEEN_CLOSED', '饭堂还没开张'],
+    ] as const) {
+      await cook.route('**/api/canteen/menus/**', (route) =>
+        route.request().method() === 'PUT' ? route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ error: { code, message } }) }) : route.continue(),
+      );
+      await cook.getByTestId('menu-pending').getByRole('button', { name: '原样重试' }).click();
+      await expect(cook.getByText(`${message}（上一次保存先留在手机上，之后点「原样重试」）`)).toBeVisible();
+      await expect(cook.getByTestId('menu-pending')).toBeVisible();
+      await cook.unroute('**/api/canteen/menus/**');
+    }
     await cook.getByTestId('menu-pending').getByRole('button', { name: '原样重试' }).click();
     await expect(cook.getByText('发布啦')).toBeVisible();
     await expect(cook.getByTestId('menu-pending')).toHaveCount(0);
     const saved = await (await ctx.request.get(`${CANTEEN}/api/canteen/menus?from=${slot.date}&to=${slot.date}`)).json();
     expect(saved.find((m: { meal: string }) => m.meal === 'lunch').note).toBe('今天有甜品，还有冰粉');
+
+    // 保存还没回来就换到别的日子：回复回来以后只放下这一笔，现在这一份照样能改（不会卡在「正在取菜单…」）（Codex 审查 c04f1d9）
+    await cook.getByRole('tab', { name: new RegExp(slot.date === (await today(ctx)) ? '今天' : '昨天') }).click();
+    await cook.getByRole('button', { name: /午餐/ }).click();
+    await cook.route('**/api/canteen/menus/**', async (route) => {
+      if (route.request().method() !== 'PUT') return route.continue();
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.continue();
+    });
+    await cook.getByLabel('一句话备注').fill('今天有甜品，还有冰粉和绿豆汤');
+    await cook.getByRole('button', { name: '更新菜单' }).click();
+    await cook.getByRole('tab', { name: /明天/ }).click();
+    await expect(cook.getByRole('button', { name: /发布给大家|更新菜单/ })).toBeEnabled({ timeout: 10_000 });
+    await expect(cook.getByText('正在取菜单…')).toHaveCount(0);
+    await expect(cook.getByTestId('menu-pending')).toHaveCount(0);
+    await cook.unroute('**/api/canteen/menus/**');
+    const later = await (await ctx.request.get(`${CANTEEN}/api/canteen/menus?from=${slot.date}&to=${slot.date}`)).json();
+    expect(later.find((m: { meal: string }) => m.meal === 'lunch').note).toBe('今天有甜品，还有冰粉和绿豆汤');
+
+    // 刷新以后原样重试才发现菜单刚被别人改过：「用我的覆盖」存的是这次要存的内容、照原来要的发布（不是刷新后取到的那一份）
+    const lunch = async () => (await (await ctx.request.get(`${CANTEEN}/api/canteen/menus?from=${slot.date}&to=${slot.date}`)).json()).find((m: { meal: string }) => m.meal === 'lunch');
+    const openSlot = async () => {
+      await cook.getByRole('tab', { name: new RegExp(slot.date === (await today(ctx)) ? '今天' : '昨天') }).click();
+      await cook.getByRole('button', { name: /午餐/ }).click();
+    };
+    await openSlot();
+    await ctx.setOffline(true);
+    await cook.getByLabel('一句话备注').fill('冰粉卖完了，换成双皮奶');
+    await cook.getByRole('button', { name: '更新菜单' }).click();
+    await expect(cook.getByTestId('menu-pending')).toBeVisible();
+    await ctx.setOffline(false);
+    const before = await lunch();
+    const other = await ctx.request.put(`${CANTEEN}/api/canteen/menus/${slot.date}/lunch`, {
+      data: { clientKey: crypto.randomUUID(), version: before.version, dishes: before.dishes, note: '别人改的一句话', published: true },
+    });
+    expect(other.status()).toBe(200);
+    await cook.reload();
+    await openSlot();
+    await expect(cook.getByLabel('一句话备注')).toHaveValue('别人改的一句话');
+    await cook.getByTestId('menu-pending').getByRole('button', { name: '原样重试' }).click();
+    const sheet = cook.getByRole('dialog', { name: '菜单刚被别人改过' });
+    await expect(sheet).toBeVisible();
+    await sheet.getByRole('button', { name: '用我的覆盖（发布）' }).click();
+    await expect.poll(async () => (await lunch()).note).toBe('冰粉卖完了，换成双皮奶');
+    expect((await lunch()).published).toBe(true);
     await ctx.close();
   });
 
@@ -235,6 +303,232 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
     await admin.getByRole('radio', { name: '菜单' }).click();
     await expect(admin.getByTestId('canteen-menus').getByText('❤️1')).toBeVisible();
     await admin.screenshot({ path: `${OUT}/admin.png`, fullPage: true });
+  });
+});
+
+test.describe.serial('第二期：开场动画、新同事登记、新手教程、跟柚子说', () => {
+  test('新同事扫注册二维码：开场动画 → 自己登记 → 新手教程 → 跟柚子说；后台回信，员工看得到', async ({ browser }) => {
+    // 后台：生成注册二维码（前面已经开了模块、填了员工入口地址）
+    const actx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-CN', timezoneId: tz });
+    const admin = await actx.newPage();
+    await admin.goto('/login');
+    await admin.fill('#username', 'linlan');
+    await admin.fill('#password', 'yuzu2026');
+    await admin.getByRole('button', { name: '登录' }).click();
+    await admin.waitForURL((u) => !u.pathname.startsWith('/login'));
+    await admin.goto('/erp/canteen');
+    await admin.getByRole('radio', { name: '设置' }).click();
+    // 等设置取到了再看要不要生成（isVisible 不会等）
+    await expect(admin.getByTestId('canteen-registration')).toBeVisible();
+    const create = admin.getByTestId('canteen-reg-create');
+    if (await create.isVisible()) await create.click();
+    const link = (await admin.getByTestId('canteen-reg-link').innerText()).trim();
+    expect(link).toMatch(new RegExp(`^${CANTEEN.replace(/[.:/]/g, '\\$&')}/#reg=[2-9A-HJ-NP-Z]{8}$`));
+    await admin.screenshot({ path: `${OUT}/admin-registration.png`, fullPage: true });
+
+    // 新同事的手机：第一次打开，先放开场动画（七段，点一下打完这句、再点下一句）
+    const ctx = await phone(browser, 'iphone', true);
+    const p = await ctx.newPage();
+    await p.goto(link);
+    const intro = p.getByTestId('intro');
+    await expect(intro).toBeVisible();
+    await expect(intro).toContainText('汤崎的小 AI 助理');
+    for (let i = 0; i < 7; i++) {
+      await expect(intro).toHaveAttribute('data-beat', String(i));
+      await p.getByTestId('intro-stage').click();
+      if (i === 4) await p.screenshot({ path: `${OUT}/intro-scratch.png` });
+      if (i < 6) await p.getByTestId('intro-stage').click();
+    }
+    await expect(intro).toContainText('我想从我开的这家柚子食堂开始。');
+    await p.screenshot({ path: `${OUT}/intro-door.png` });
+    await p.getByTestId('intro-enter').click();
+
+    // 新同事登记：口令从二维码里带上了，填三格就进门
+    await expect(p.getByTestId('register-page')).toBeVisible();
+    await expect(p.getByTestId('register-code-ok')).toBeVisible();
+    // 页面开着时又点了另一个口令的链接（只有 # 后面变了）：口令跟着新链接走，交上去的不是旧的（Codex 审查 3bc51e6）
+    const goodHash = new URL(link).hash;
+    await p.evaluate((h) => void (window.location.hash = h), goodHash.endsWith('AAAAAAAA') ? '#reg=BBBBBBBB' : '#reg=AAAAAAAA');
+    await expect(p.getByText('链接里的注册口令不对或已经换了')).toBeVisible();
+    await expect(p.getByTestId('register-code-ok')).toHaveCount(0);
+    await p.evaluate((h) => void (window.location.hash = h), goodHash);
+    await expect(p.getByTestId('register-code-ok')).toBeVisible();
+    await noOverflow(p);
+    await p.getByLabel('用户名').fill('小雨');
+    await p.getByLabel('手机号').fill('139 0000 1234');
+    await p.getByLabel('密码', { exact: true }).fill('xiaoyu-2026');
+    await p.screenshot({ path: `${OUT}/register.png`, fullPage: true });
+    await p.getByTestId('register-submit').click();
+
+    // 新手教程：指着的地方要自己点才往下走
+    const tour = p.getByTestId('tour');
+    await expect(tour).toHaveAttribute('data-step', 'home');
+    await p.screenshot({ path: `${OUT}/tour-home.png` });
+    await p.getByTestId('tour-next').click();
+    await expect(tour).toHaveAttribute('data-step', 'like');
+    await p.getByRole('button', { name: '点赞：番茄炒蛋（示例）' }).click();
+    await expect(tour).toHaveAttribute('data-step', 'code');
+    // 点别处不算：挡板接住了点击
+    await p.mouse.click(20, 200);
+    await expect(tour).toHaveAttribute('data-step', 'code');
+    await p.getByTestId('tab-code').click();
+    await expect(tour).toHaveAttribute('data-step', 'qr');
+    await expect(p.getByTestId('meal-code').locator('svg[data-qr]')).toHaveAttribute('data-qr', /^YZC1:/);
+    await p.getByTestId('tour-next').click();
+    await expect(tour).toHaveAttribute('data-step', 'talk');
+    await p.getByTestId('tour-next').click();
+    await expect(tour).toHaveAttribute('data-step', 'me');
+    await p.getByTestId('tour-next').click();
+    await expect(tour).toHaveAttribute('data-step', 'done');
+    await p.getByTestId('tour-finish').click();
+    await expect(tour).toHaveCount(0);
+
+    // 跟柚子说
+    await p.getByTestId('talk-entry').click();
+    await expect(p.getByTestId('talk-page')).toBeVisible();
+    await p.getByLabel('想跟柚子说的话').fill('想在手机上就能看到排班表！');
+    await p.getByTestId('talk-send').click();
+    await expect(p.getByText('柚子收到啦')).toBeVisible();
+    await expect(p.getByText('柚子还没看').first()).toBeVisible();
+    // 结果待确认：发出去没收到回复，这一条留在手机上；确认之前不能发新的（会顶掉它的操作编号），原样再发以后才行
+    await p.route('**/api/canteen/feedback', (route) => (route.request().method() === 'POST' ? route.abort() : route.continue()));
+    await p.getByLabel('想跟柚子说的话').fill('今天的汤有点咸');
+    await p.getByTestId('talk-send').click();
+    await expect(p.getByTestId('talk-pending')).toContainText('今天的汤有点咸');
+    await p.getByLabel('想跟柚子说的话').fill('再写一条');
+    await expect(p.getByTestId('talk-send')).toBeDisabled();
+    // 原样再发被拒（饭堂暂时关着）也不能断定之前那次没送到：这一条照样留着
+    await p.unroute('**/api/canteen/feedback');
+    await p.route('**/api/canteen/feedback', (route) =>
+      route.request().method() === 'POST'
+        ? route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'CANTEEN_CLOSED', message: '饭堂还没开张' } }) })
+        : route.continue(),
+    );
+    await p.getByTestId('talk-pending').getByRole('button', { name: '原样再发' }).click();
+    await expect(p.getByText('饭堂还没开张（这一条先存在手机上，之后再发）')).toBeVisible();
+    await expect(p.getByTestId('talk-pending')).toContainText('今天的汤有点咸');
+    await p.unroute('**/api/canteen/feedback');
+    await p.getByTestId('talk-pending').getByRole('button', { name: '原样再发' }).click();
+    await expect(p.getByTestId('talk-pending')).toHaveCount(0);
+    await expect(p.getByText('今天的汤有点咸')).toBeVisible();
+    await expect(p.getByTestId('talk-send')).toBeEnabled();
+    await noOverflow(p);
+    await p.screenshot({ path: `${OUT}/talk.png`, fullPage: true });
+
+    // 发出去的那次还没回来就离开再回来这一页（新的这一页按原编号重发、送到了），接着又发了一条没送到的；
+    // 原来那次的回复这时才回来，也不能把新的这一条从手机上删掉（Codex 审查 da39570）
+    let posts = 0;
+    let firstDone: Promise<void> = Promise.resolve();
+    await p.route('**/api/canteen/feedback', (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      posts += 1;
+      if (posts === 1) {
+        firstDone = new Promise<void>((resolve) => setTimeout(() => void route.continue().then(resolve, resolve), 2500));
+        return firstDone;
+      }
+      return posts === 2 ? route.continue() : route.abort();
+    });
+    await p.getByLabel('想跟柚子说的话').fill('第一句：中午的米饭有点硬');
+    await p.getByTestId('talk-send').click();
+    await p.getByTestId('tab-home').click();
+    await p.getByTestId('tab-talk').click();
+    await expect(p.getByTestId('talk-page')).toBeVisible();
+    await expect(p.getByTestId('talk-pending')).toHaveCount(0);
+    await p.getByLabel('想跟柚子说的话').fill('第二句：明天想吃饺子');
+    await p.getByTestId('talk-send').click();
+    await expect(p.getByTestId('talk-pending')).toContainText('第二句：明天想吃饺子');
+    await firstDone;
+    await p.waitForTimeout(800);
+    await p.reload();
+    await expect(p.getByTestId('talk-pending')).toContainText('第二句：明天想吃饺子');
+    await p.unroute('**/api/canteen/feedback');
+    await p.getByTestId('talk-pending').getByRole('button', { name: '原样再发' }).click();
+    await expect(p.getByTestId('talk-pending')).toHaveCount(0);
+    await expect(p.getByText('第二句：明天想吃饺子')).toBeVisible();
+
+    // 后台：名单里有自己登记的小雨；柚子信箱里回信
+    await admin.getByRole('radio', { name: '员工名单' }).click();
+    await expect(admin.getByRole('row', { name: /小雨/ })).toContainText('自己登记');
+    await admin.getByRole('radio', { name: /柚子信箱/ }).click();
+    // 回信还在路上时关掉对话框、切到别的页签再回来：这一条照样不能再回信（不然又发一句不一样的，
+    // 晚到的那次会把它改回去，Codex 审查 616e446）；那一次有了结果才放开
+    const soup = admin.getByTestId('canteen-feedback').locator('li', { hasText: '今天的汤有点咸' }).first();
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await admin.route('**/api/erp/canteen/feedback/*/reply', async (route) => {
+      await held;
+      await route.continue();
+    });
+    await soup.getByRole('button', { name: '回信' }).click();
+    await admin.getByRole('textbox', { name: '回信' }).fill('收到，已经跟厨师说少放点盐');
+    await admin.getByTestId('feedback-reply-save').click();
+    await admin.getByRole('dialog').getByRole('button', { name: '取消' }).click();
+    await admin.getByRole('radio', { name: '设置' }).click();
+    await admin.getByRole('radio', { name: /柚子信箱/ }).click();
+    await expect(soup.getByRole('button', { name: '回信' })).toBeDisabled();
+    await expect(soup).toContainText('回信发送中');
+    release();
+    // 发出去了：回信算看过，这一条从「没看过的」里下去
+    await expect(soup).toHaveCount(0);
+    await admin.unroute('**/api/erp/canteen/feedback/*/reply');
+    const item = admin.getByTestId('canteen-feedback').locator('li', { hasText: '想在手机上就能看到排班表' }).first();
+    // 回信没收到结果（结果待确认，Codex 审查 3bc51e6）：记录留在这台电脑上，关掉对话框也还在；确认之前这一条不能再回信，
+    // 按原内容重新提交（同一个编号）才发出去
+    await admin.route('**/api/erp/canteen/feedback/*/reply', (route) => route.abort());
+    await item.getByRole('button', { name: '回信' }).click();
+    await admin.getByRole('textbox', { name: '回信' }).fill('收到！柚子记下了，排班表排进下一版～');
+    await admin.getByTestId('feedback-reply-save').click();
+    await expect(admin.getByText('回信：没收到结果')).toBeVisible();
+    await expect(admin.getByTestId('erp-pending')).toContainText('回信给 小雨');
+    await expect(item.getByRole('button', { name: '回信' })).toBeDisabled();
+    await admin.unroute('**/api/erp/canteen/feedback/*/reply');
+    await admin.getByTestId('erp-pending-resend').click();
+    await expect(admin.getByText('柚子信箱回信已登记')).toBeVisible();
+    await expect(admin.getByTestId('erp-pending')).toHaveCount(0);
+    // 回信自动算看过：这一条从「没看过的」里下去了，在「回过信的」里
+    await admin.getByRole('radio', { name: '回过信的' }).click();
+    await expect(admin.getByTestId('canteen-feedback')).toContainText('排班表排进下一版');
+    await admin.screenshot({ path: `${OUT}/admin-mailbox.png`, fullPage: true });
+
+    // 员工看得到回信；「我的」里能再看一遍开场
+    await p.reload();
+    await expect(p.getByTestId('talk-reply').filter({ hasText: '排班表排进下一版' })).toBeVisible();
+    await expect(p.getByTestId('talk-reply').filter({ hasText: '少放点盐' })).toBeVisible();
+    await p.getByTestId('tab-me').click();
+    await p.getByTestId('replay-intro').click();
+    await expect(p.getByTestId('intro')).toBeVisible();
+    await p.getByTestId('intro-skip').click();
+    await expect(p.getByTestId('replay-intro')).toBeVisible();
+
+    // 这台手机亮不了饭卡码（例如不是 HTTPS 打开的）：再走一遍教程，指不到饭卡码的那一步等一会儿照常显示说话框，
+    // 能「下一步」、能跳过，不会整屏挡住（Codex 审查 3bc51e6）
+    await p.evaluate(() => Object.defineProperty(window.crypto, 'subtle', { configurable: true, get: () => undefined }));
+    await p.getByTestId('replay-tour').click();
+    await expect(tour).toHaveAttribute('data-step', 'home');
+    await p.getByTestId('tour-next').click();
+    await p.getByRole('button', { name: '点赞：番茄炒蛋（示例）' }).click();
+    await expect(tour).toHaveAttribute('data-step', 'code');
+    await p.getByTestId('tab-code').click();
+    await expect(tour).toHaveAttribute('data-step', 'qr');
+    await expect(p.getByText('这一步要指的地方这会儿没出来')).toBeVisible();
+    await expect(p.getByTestId('meal-code')).toHaveCount(0);
+    await p.getByTestId('tour-next').click();
+    await expect(tour).toHaveAttribute('data-step', 'talk');
+    await p.getByTestId('tour-skip').click();
+    await expect(tour).toHaveCount(0);
+
+    // 换手机：用用户名或手机号登录（看过开场的手机直接到登录页）
+    const other = await phone(browser, 'android');
+    const q = await other.newPage();
+    await q.goto(CANTEEN);
+    await expect(q.getByTestId('login-page')).toBeVisible();
+    await q.getByLabel('账号').fill('13900001234');
+    await q.getByLabel('密码').fill('xiaoyu-2026');
+    await q.getByRole('button', { name: '登录' }).click();
+    await expect(q.getByTestId('tab-home')).toBeVisible();
+    await other.close();
+    await ctx.close();
+    await actx.close();
   });
 });
 

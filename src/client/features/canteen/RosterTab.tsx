@@ -1,10 +1,10 @@
-// 员工名单：单个加、粘贴一批加、修改与停用、重新开通、打印开通卡片。
+// 员工名单：员工扫注册二维码自己登记的（第二期）、后台单个加、粘贴一批加；修改（工号、部门、角色）与停用、重新开通、打印开通卡片。
 // 写操作都是「原样重试不会重复」：结果不确定时刷新名单核对，或者原样再点一次（同一个工号、同一个版本号、同一个操作编号）。
 
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { KeyRound, Pencil, Plus, Search, UsersRound } from 'lucide-react';
-import { CANTEEN_ROLE_LABELS, displayActivationCode, type ActivationCard, type BatchPreviewRow, type CanteenEmployeeRow, type CanteenRole } from '@shared/canteen';
+import { CANTEEN_ROLE_LABELS, displayActivationCode, displayPhone, type ActivationCard, type BatchPreviewRow, type CanteenEmployeeRow, type CanteenRole } from '@shared/canteen';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { relativeTime, uuid } from '../../lib/utils';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
@@ -15,7 +15,7 @@ import { useToast } from '../../components/Toast';
 import { PrintButton } from '../print/PrintButton';
 import { useOverview } from './CanteenPage';
 
-type Filter = 'all' | 'pending' | 'activated' | 'inactive';
+type Filter = 'all' | 'self' | 'pending' | 'activated' | 'inactive';
 const ROLE_TONE: Record<CanteenRole, 'neutral' | 'yuzu' | 'pine'> = { staff: 'neutral', cook: 'yuzu', manager: 'pine' };
 const uncertainHint = '结果不确定：刷新名单看看加上没有；原样再点一次也不会重复';
 
@@ -36,7 +36,8 @@ export function RosterTab() {
   const rows = useMemo(() => {
     const kw = q.trim().toUpperCase();
     return (list.data ?? []).filter((e) => {
-      if (kw && !e.empNo.includes(kw) && !e.name.toUpperCase().includes(kw)) return false;
+      if (kw && !e.empNo.includes(kw) && !e.name.toUpperCase().includes(kw) && !(e.username ?? '').toUpperCase().includes(kw) && !(e.phone ?? '').includes(kw)) return false;
+      if (filter === 'self') return e.source === 'self';
       if (filter === 'pending') return e.active && !e.activated;
       if (filter === 'activated') return e.active && e.activated;
       if (filter === 'inactive') return !e.active;
@@ -50,7 +51,7 @@ export function RosterTab() {
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[200px] flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-3" />
-          <Input className="pl-9" placeholder="搜工号或姓名" value={q} onChange={(e) => setQ(e.target.value)} aria-label="搜工号或姓名" />
+          <Input className="pl-9" placeholder="搜工号、姓名、用户名或手机号" value={q} onChange={(e) => setQ(e.target.value)} aria-label="搜工号或姓名" />
         </div>
         <Segmented<Filter>
           size="sm"
@@ -59,6 +60,7 @@ export function RosterTab() {
           ariaLabel="筛选"
           options={[
             { value: 'all', label: '全部' },
+            { value: 'self', label: '自己登记的' },
             { value: 'pending', label: '待开通' },
             { value: 'activated', label: '已开通' },
             { value: 'inactive', label: '已停用' },
@@ -81,7 +83,11 @@ export function RosterTab() {
         <Skeleton className="h-48" />
       ) : rows.length === 0 ? (
         <Card>
-          <EmptyState art="leaf" title={list.data?.length ? '没有符合条件的员工' : '名单还是空的'} description="单个加，或者把「工号 姓名 部门」一行一位粘贴进来。" />
+          <EmptyState
+            art="leaf"
+            title={list.data?.length ? '没有符合条件的员工' : '名单还是空的'}
+            description="在「设置」里生成注册二维码，大家扫码自己登记；没手机的同事在这里单个加，或者把「工号 姓名 部门」一行一位粘贴进来。"
+          />
         </Card>
       ) : (
         <Card className="overflow-x-auto p-0">
@@ -103,8 +109,15 @@ export function RosterTab() {
                     <div className="flex items-center gap-2.5">
                       <span className="text-[22px]">{e.avatar}</span>
                       <div>
-                        <p className="font-semibold">{e.name}</p>
-                        <p className="num text-[12px] text-ink-3">{e.empNo}</p>
+                        <p className="flex items-center gap-1.5 font-semibold">
+                          {e.name}
+                          {e.source === 'self' && <Badge tone="lake">自己登记</Badge>}
+                        </p>
+                        <p className="num text-[12px] text-ink-3">
+                          {e.empNo}
+                          {e.username && e.username !== e.name && ` · 用户名 ${e.username}`}
+                          {e.phone && ` · ${displayPhone(e.phone)}`}
+                        </p>
                       </div>
                     </div>
                   </td>

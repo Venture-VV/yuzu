@@ -134,6 +134,16 @@ export function useErpPending(types: readonly ErpOpType[]): ErpPendingOp[] {
 }
 
 /**
+ * 本机这些类型的全部登记，含本页正在提交中的：同一件事在上一笔有结论之前不许再提交另一笔时用
+ * （关掉对话框、切走再回来以后，还在路上的那一笔照样算，免得它晚到把新的一笔改回去）
+ */
+export function useErpRecorded(types: readonly ErpOpType[]): ErpPendingOp[] {
+  const all = useSyncExternalStore(subscribe, readAll);
+  const key = types.join(',');
+  return useMemo(() => all.filter((p) => key.split(',').includes(p.type)), [all, key]);
+}
+
+/**
  * 提交一笔 ERP 登记：先存本机并读回核对（存不了就不发请求），再发请求。
  * 成功、或第一次提交就被明确拒绝（4xx）时删除记录；超时、断网、服务器出错（5xx，可能已经登记、只是读结果时出错）保留
  * （页面上可以查回、重提或作废，不另起一笔）；

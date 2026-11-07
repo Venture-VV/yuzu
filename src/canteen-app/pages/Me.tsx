@@ -1,10 +1,12 @@
-// 我的：换头像、这个月吃了几顿、我的记录、改密码、添加到桌面、退出。
+// 我的：换头像、这个月吃了几顿、我的记录、跟柚子说、再看一遍开场与新手教程、改密码、添加到桌面、退出。
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { AVATARS, CANTEEN_ROLE_LABELS, MEAL_EMOJI, MEAL_LABELS, PASSWORD_MIN, type CanteenCheckinRow, type CanteenMe } from '@shared/canteen';
 import { call, dayLabel, messageOf, monthDay, storeNow, timeText } from '../lib';
 import { Button, Card, cn, Field, inputClass, Pill, Sheet, toast } from '../ui';
 import { InstallGuide } from '../install';
+import { IconArrow, IconInstall, IconKey, IconLetter, IconPlay, IconSparkle } from '../doodles';
+import { Mascot } from '../Mascot';
 
 /** onMe：门店系统刚给的「我」（重算时间差）；onPatch：本机改了一点（保留原来的时间差） */
 export function MePage({
@@ -14,6 +16,9 @@ export function MePage({
   onMe,
   onPatch,
   onLogout,
+  onIntro,
+  onTour,
+  go,
 }: {
   me: CanteenMe;
   offsetMs: number;
@@ -21,6 +26,11 @@ export function MePage({
   onMe: (me: CanteenMe) => void;
   onPatch: (me: CanteenMe) => void;
   onLogout: () => void;
+  /** 再看一遍开场动画 */
+  onIntro: () => void;
+  /** 再走一遍新手教程 */
+  onTour: () => void;
+  go: (route: string) => void;
 }) {
   const today = storeNow(offsetMs).date;
   const [rows, setRows] = useState<CanteenCheckinRow[] | null>(null);
@@ -46,14 +56,17 @@ export function MePage({
 
   return (
     <div className="space-y-4">
-      <Card className="flex items-center gap-4">
-        <button type="button" onClick={() => setSheet('avatar')} className="relative flex size-20 shrink-0 items-center justify-center rounded-full bg-yuzu-soft text-[44px] ring-4 ring-yuzu active:scale-95" aria-label="换头像">
+      <Card sketch className="flex items-center gap-4">
+        <button type="button" onClick={() => setSheet('avatar')} className="relative flex size-20 shrink-0 items-center justify-center rounded-full bg-wood-6 text-[44px] ring-4 ring-wood-4 active:scale-95" aria-label="换头像">
           {me.employee.avatar}
-          <span className="absolute -right-1 -bottom-1 rounded-full bg-ink px-1.5 py-0.5 text-[10px] font-bold text-cream">换</span>
+          <span className="absolute -right-1 -bottom-1 rounded-full bg-wood-deep px-1.5 py-0.5 text-[10px] font-bold text-white">换</span>
         </button>
         <div className="min-w-0">
+          <p className="eyebrow">My page</p>
           <h1 className="truncate text-[22px] font-black">{me.employee.name}</h1>
-          <p className="num text-[14px] font-semibold text-ink-2">工号 {me.employee.empNo}</p>
+          <p className="num text-[14px] font-semibold text-ink-2">
+            {me.employee.username && me.employee.username !== me.employee.name && `用户名 ${me.employee.username} · `}工号 {me.employee.empNo}
+          </p>
           <div className="mt-1 flex flex-wrap gap-1">
             {me.employee.department && <Pill tone="ink">{me.employee.department}</Pill>}
             <Pill tone={me.employee.role === 'staff' ? 'yuzu' : 'leaf'}>{CANTEEN_ROLE_LABELS[me.employee.role]}</Pill>
@@ -63,7 +76,7 @@ export function MePage({
 
       <Card className="bg-yuzu-soft ring-yuzu/40">
         <p className="text-[14px] font-bold text-yuzu-deep">这个月在饭堂吃了</p>
-        <p className="num mt-0.5 text-[40px] leading-none font-black">
+        <p className="num mt-0.5 text-[44px] leading-none font-black" style={{ fontFamily: 'var(--font-en)' }}>
           {count} <span className="text-[18px]">顿</span>
         </p>
         <p className="mt-2 text-[22px] leading-tight tracking-[0.1em]" aria-hidden>
@@ -98,13 +111,16 @@ export function MePage({
         </Card>
       </section>
 
-      <div className="grid grid-cols-2 gap-3">
-        <Button tone="ghost" onClick={() => setSheet('install')}>
-          📲 添加到桌面
-        </Button>
-        <Button tone="ghost" onClick={() => setSheet('password')}>
-          🔑 改密码
-        </Button>
+      <Card className="divide-y divide-line/80 p-0">
+        <Row icon={<IconLetter size={24} />} label="跟柚子说" hint="心愿、碎碎念，柚子都听着" onClick={() => go('talk')} />
+        <Row icon={<IconPlay size={24} />} label="再看一遍开场" hint="柚子的自我介绍" onClick={onIntro} testId="replay-intro" />
+        <Row icon={<IconSparkle size={24} />} label="再走一遍新手教程" hint="饭卡码、点赞、跟柚子说怎么用" onClick={onTour} testId="replay-tour" />
+        <Row icon={<IconInstall size={24} />} label="添加到桌面" hint="开饭时一点就亮码" onClick={() => setSheet('install')} />
+        <Row icon={<IconKey size={24} />} label="改密码" hint="改好后别的手机上的登录会退出" onClick={() => setSheet('password')} />
+      </Card>
+      <div className="flex items-center justify-center gap-2 pt-2 text-[12.5px] text-ink-3">
+        <Mascot mood="wink" className="size-10" still />
+        柚子饭堂 · 汤崎的员工食堂
       </div>
       <Button tone="ghost" className="w-full text-berry" onClick={onLogout}>
         退出登录
@@ -171,5 +187,20 @@ function PasswordForm({ onDone }: { onDone: (me: CanteenMe) => void }) {
         {busy ? '正在改…' : '改好了'}
       </Button>
     </form>
+  );
+}
+
+function Row({ icon, label, hint, onClick, testId }: { icon: React.ReactNode; label: string; hint: string; onClick: () => void; testId?: string }) {
+  return (
+    <button type="button" onClick={onClick} className="flex w-full items-center gap-3 px-4 py-3.5 text-left active:bg-cream" data-testid={testId}>
+      <span className="text-wood">{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[15px] font-bold">{label}</span>
+        <span className="block truncate text-[12.5px] text-ink-3">{hint}</span>
+      </span>
+      <span className="text-ink-4">
+        <IconArrow size={18} />
+      </span>
+    </button>
   );
 }

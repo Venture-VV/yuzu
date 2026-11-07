@@ -17,6 +17,7 @@ import { isApiRequest, routePath } from '../../lib/paths';
 import { idParam, parse } from '../../lib/validate';
 import { enabledErpModules } from '../erp';
 import { canteenToday, mealsThisMonth, myCheckins, recordCheckin, searchPeople, voidCheckin } from './checkins';
+import { myFeedback, submitFeedback } from './feedback';
 import { employeeCodeKey } from './code';
 import { likeDish, listMenus, saveMenu } from './menus';
 import {
@@ -32,6 +33,7 @@ import {
   setCanteenAvatar,
   type CanteenSessionEmployee,
 } from './portal-auth';
+import { registerEmployee, registerInfo } from './registration';
 import { loadCanteenSettings } from './settings';
 
 declare module 'fastify' {
@@ -83,6 +85,8 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
   });
   await app.register(fastifyCookie);
   const limiter = new AttemptLimiter();
+  /** 同一来源 IP 一小时最多登记 60 个账号（只记成功的，K14） */
+  const registrations = new AttemptLimiter(60, 60 * 60_000);
 
   // 模块开关每个请求查一次太多，缓存 3 秒（店主关了模块，最多 3 秒后员工端就停）
   const cacheMs = opts.openCacheMs ?? 3000;
@@ -164,15 +168,17 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
   };
 
   const buildMe = async (employeeId: number): Promise<CanteenMe> => {
-    const [e] = await sql<{ id: number; empNo: string; name: string; role: CanteenMe['employee']['role']; avatar: string; department: string; codeEpoch: number }[]>`
-      SELECT e.id, e.emp_no, e.name, e.role, e.avatar, coalesce(d.name, '') AS department, e.code_epoch
+    const [e] = await sql<
+      (Omit<CanteenMe['employee'], 'username' | 'source'> & { username: string | null; source: CanteenMe['employee']['source']; codeEpoch: number })[]
+    >`
+      SELECT e.id, e.emp_no, e.name, e.role, e.avatar, coalesce(d.name, '') AS department, e.code_epoch, e.username, e.source
       FROM canteen_employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.id = ${employeeId} AND e.active`;
     if (!e) throw unauthorized('请先登录柚子饭堂');
     const settings = await loadCanteenSettings(sql);
     const at = new Date(now());
     const today = businessDateOf(at, config.timezone, 0);
     return {
-      employee: { id: e.id, empNo: e.empNo, name: e.name, department: e.department, role: e.role, avatar: e.avatar },
+      employee: { id: e.id, empNo: e.empNo, name: e.name, department: e.department, role: e.role, avatar: e.avatar, username: e.username, source: e.source },
       codeKey: employeeCodeKey(secret, e.id, e.codeEpoch).toString('base64url'),
       codeEpoch: e.codeEpoch,
       serverTime: at.toISOString(),
@@ -194,7 +200,8 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
     try {
       return await fn();
     } catch (error) {
-      if (error instanceof AppError && error.status < 500 && error.code !== 'TOO_MANY_ATTEMPTS') limiter.fail(key);
+      // 被限次挡下的（试太多次、这一会儿登记的人太多）不再算一次失败
+      if (error instanceof AppError && error.status < 500 && error.code !== 'TOO_MANY_ATTEMPTS' && error.code !== 'TOO_MANY_REGISTRATIONS') limiter.fail(key);
       throw error;
     }
   };
@@ -211,6 +218,32 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
     const { token, employeeId } = await limited(req, () => loginCanteen(sql, req.body, meta(req)));
     setSession(reply, token);
     return buildMe(employeeId);
+  });
+
+  /** 自己登记（第二期，K12–K14）：现在能不能登记、口令对不对（口令不对算一次失败） */
+  app.get('/api/canteen/register', async (req) => limited(req, () => registerInfo(sql, (req.query as { code?: string }).code)));
+
+  app.post('/api/canteen/register', async (req, reply) => {
+    const key = `ip:${req.ip}`;
+    // 名额用完了也让「同一个手机号再登记、密码对」的进来（回复没收到时原样重试 = 登录，K14），只是不能开新账号
+    let canCreate = true;
+    try {
+      registrations.check(key);
+    } catch {
+      canCreate = false;
+    }
+    // 能开新账号的先占一个名额（在等数据库之前，同时来的几个不会都挤过上限），没开成新账号的（出错、当作登录）再还回去
+    const reservedAt = canCreate ? Date.now() : null;
+    if (reservedAt !== null) registrations.fail(key, reservedAt);
+    let created = false;
+    try {
+      const result = await limited(req, () => registerEmployee(sql, req.body, meta(req), { allowCreate: canCreate }));
+      created = result.created;
+      setSession(reply, result.token);
+      return await buildMe(result.employeeId);
+    } finally {
+      if (reservedAt !== null && !created) registrations.release(key, reservedAt);
+    }
   });
 
   app.post('/api/canteen/logout', async (req, reply) => {
@@ -240,6 +273,10 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
   });
 
   app.put('/api/canteen/likes', async (req) => likeDish(sql, who(req), req.body));
+
+  /** 跟柚子说（第二期，K16）：自己说过的、发一条 */
+  app.get('/api/canteen/feedback', async (req) => myFeedback(sql, who(req).id));
+  app.post('/api/canteen/feedback', async (req) => submitFeedback(sql, who(req), req.body, config.timezone, now()));
 
   // ── 厨师、负责人 ──
 

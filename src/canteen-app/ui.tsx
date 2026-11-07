@@ -1,19 +1,21 @@
-// 柚子饭堂的小组件：按钮、卡片、标签、底部弹层、提示条。大圆角、软阴影、按下去会缩一下。
+// 柚子饭堂的小组件：按钮、卡片、标签、底部弹层、提示条。汤崎的木色与米白（styles.css），
+// 按钮像贴纸一样有一道错开的实色投影、按下去会压下来；卡片可以带一圈手抖的描边（sketch）。
 
 import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
 
 export const cn = (...xs: (string | false | null | undefined)[]) => xs.filter(Boolean).join(' ');
 
-type Tone = 'yuzu' | 'leaf' | 'ghost' | 'peach' | 'ink';
+type Tone = 'wood' | 'yuzu' | 'leaf' | 'ghost' | 'peach' | 'ink';
 const TONES: Record<Tone, string> = {
-  yuzu: 'bg-yuzu text-ink shadow-[0_4px_0_#e0a91c] active:shadow-[0_1px_0_#e0a91c] active:translate-y-[3px]',
-  leaf: 'bg-leaf text-white shadow-[0_4px_0_#2f7d3e] active:shadow-[0_1px_0_#2f7d3e] active:translate-y-[3px]',
-  peach: 'bg-peach text-white shadow-[0_4px_0_#d9584a] active:shadow-[0_1px_0_#d9584a] active:translate-y-[3px]',
-  ink: 'bg-ink text-cream shadow-[0_4px_0_#1e1714] active:shadow-[0_1px_0_#1e1714] active:translate-y-[3px]',
-  ghost: 'bg-white/70 text-ink-2 ring-1 ring-line active:scale-[0.97]',
+  wood: 'bg-wood-deep text-white shadow-[0_4px_0_var(--color-wood-ink)] active:shadow-[0_1px_0_var(--color-wood-ink)] active:translate-y-[3px]',
+  yuzu: 'bg-yuzu text-ink shadow-[0_4px_0_#b8932c] active:shadow-[0_1px_0_#b8932c] active:translate-y-[3px]',
+  leaf: 'bg-organic text-white shadow-[0_4px_0_#4a4529] active:shadow-[0_1px_0_#4a4529] active:translate-y-[3px]',
+  peach: 'bg-energy text-white shadow-[0_4px_0_#7f3218] active:shadow-[0_1px_0_#7f3218] active:translate-y-[3px]',
+  ink: 'bg-ink text-cream shadow-[0_4px_0_#1f1712] active:shadow-[0_1px_0_#1f1712] active:translate-y-[3px]',
+  ghost: 'bg-card/80 text-ink-2 ring-1 ring-line-strong active:scale-[0.97]',
 };
 
-export function Button({ tone = 'yuzu', big, className, children, ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: Tone; big?: boolean }) {
+export function Button({ tone = 'wood', big, className, children, ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: Tone; big?: boolean }) {
   return (
     <button
       type="button"
@@ -30,24 +32,44 @@ export function Button({ tone = 'yuzu', big, className, children, ...rest }: But
   );
 }
 
-export function Card({ className, children, ...rest }: { className?: string; children: ReactNode } & React.HTMLAttributes<HTMLDivElement>) {
+/** 卡片：sketch 时多一圈手抖的描边（像用笔描过），用在想让人注意的那几张上 */
+export function Card({ className, children, sketch, ...rest }: { className?: string; children: ReactNode; sketch?: boolean } & React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn('rounded-[var(--radius-card)] bg-card p-4 shadow-[var(--shadow-soft)] ring-1 ring-line/70', className)} {...rest}>
+    <div
+      className={cn('rounded-[var(--radius-card)] bg-card p-4', sketch ? 'sketch shadow-[var(--shadow-sticker)]' : 'shadow-[var(--shadow-soft)] ring-1 ring-line/80', className)}
+      {...rest}
+    >
       {children}
     </div>
   );
 }
 
-export function Pill({ tone = 'yuzu', children, className }: { tone?: 'yuzu' | 'leaf' | 'peach' | 'sky' | 'ink' | 'berry'; children: ReactNode; className?: string }) {
+export function Pill({ tone = 'yuzu', children, className }: { tone?: 'yuzu' | 'leaf' | 'peach' | 'sky' | 'ink' | 'berry' | 'wood'; children: ReactNode; className?: string }) {
   const t = {
     yuzu: 'bg-yuzu-soft text-yuzu-deep',
-    leaf: 'bg-leaf-soft text-leaf-deep',
-    peach: 'bg-peach-soft text-[#c4473a]',
-    sky: 'bg-sky-soft text-[#1f6fa8]',
+    leaf: 'bg-organic-soft text-leaf-deep',
+    peach: 'bg-energy-soft text-energy',
+    sky: 'bg-relax-soft text-relax',
     ink: 'bg-cream-2 text-ink-2',
-    berry: 'bg-berry-soft text-berry',
+    berry: 'bg-danger-soft text-danger',
+    wood: 'bg-wood-6 text-wood-deep',
   }[tone];
   return <span className={cn('inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[12px] font-bold whitespace-nowrap', t, className)}>{children}</span>;
+}
+
+/** 圆形章印（汤崎餐饮的版式：小标语、章印）：Energy 橙的双圈、歪一点盖上去 */
+export function Stamp({ children, className, tone = 'energy' }: { children: ReactNode; className?: string; tone?: 'energy' | 'organic' | 'wood' | 'light' }) {
+  const color = { energy: 'var(--color-energy)', organic: 'var(--color-organic)', wood: 'var(--color-wood-deep)', light: 'var(--color-yuzu-soft)' }[tone];
+  // 两圈之间露出底色：盖在木色的条上（light）时是木色，盖在纸上时是纸色
+  const gap = tone === 'light' ? 'var(--color-wood-deep)' : 'var(--color-card)';
+  return (
+    <span
+      className={cn('inline-flex size-[54px] shrink-0 -rotate-[10deg] items-center justify-center rounded-full text-center text-[12.5px] leading-[1.15] font-black tracking-wider', className)}
+      style={{ color, boxShadow: `inset 0 0 0 2px ${color}, inset 0 0 0 4px ${gap}, inset 0 0 0 5.5px ${color}` }}
+    >
+      {children}
+    </span>
+  );
 }
 
 /** 从底部弹出的面板（手机上好按）；点背景或「关闭」收起 */
@@ -68,9 +90,11 @@ export function Sheet({ open, onClose, title, children }: { open: boolean; onClo
         className="safe-bottom max-h-[88dvh] w-full max-w-[480px] animate-rise overflow-y-auto rounded-t-[28px] bg-cream px-5 pt-3"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-line" />
+        <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-line-strong" />
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-[18px] font-extrabold">{title}</h2>
+          <h2 className="text-[18px] font-extrabold">
+            <span className="marker">{title}</span>
+          </h2>
           <button type="button" onClick={onClose} className="rounded-full px-3 py-1 text-[14px] font-bold text-ink-2 active:bg-cream-2">
             关闭
           </button>
@@ -112,7 +136,7 @@ export function Toasts() {
           role="status"
           className={cn(
             'max-w-[440px] animate-pop rounded-2xl px-4 py-2.5 text-[14px] font-bold shadow-[var(--shadow-pop)]',
-            t.tone === 'ok' ? 'bg-leaf text-white' : t.tone === 'error' ? 'bg-berry text-white' : 'bg-ink text-cream',
+            t.tone === 'ok' ? 'bg-organic text-white' : t.tone === 'error' ? 'bg-danger text-white' : 'bg-wood-ink text-cream',
           )}
         >
           {t.text}
@@ -133,4 +157,4 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 }
 
 export const inputClass =
-  'h-12 w-full rounded-2xl border-0 bg-white px-4 text-[16px] font-semibold text-ink ring-2 ring-line outline-none placeholder:font-normal placeholder:text-ink-3 focus:ring-yuzu';
+  'h-12 w-full rounded-2xl border-0 bg-white px-4 text-[16px] font-semibold text-ink ring-2 ring-line outline-none placeholder:font-normal placeholder:text-ink-4 focus:ring-wood';

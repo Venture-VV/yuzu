@@ -1,4 +1,4 @@
-// 开通卡片（A4，一页 8 张，沿虚线剪开）：柚柚、姓名、工号、扫码开通的二维码与 8 位开通码。
+// 开通卡片（A4，一页 8 张，沿虚线剪开）：看板娘柚子、姓名、工号、扫码开通的二维码与 8 位开通码。
 // 地址 /print/canteen-cards/all（全部没开通的）或 /print/canteen-cards/12,13。
 
 import { useQuery } from '@tanstack/react-query';
@@ -30,7 +30,7 @@ export function CanteenCardsPrintPage() {
         {cards.data?.map((c) => (
           <div key={c.employeeId} className="flex h-[66mm] break-inside-avoid flex-col border border-dashed border-[#bbb] p-[5mm]" data-testid="canteen-card">
             <div className="flex items-center gap-[2mm]">
-              <Mascot className="size-[11mm]" />
+              <Mascot className="h-[13mm] w-auto" still />
               <div>
                 <p className="text-[15px] leading-tight font-bold">柚子饭堂 · 开通卡</p>
                 <p className="text-[10px] text-[#555]">员工食堂：看菜单、给菜点赞、开饭时亮码</p>

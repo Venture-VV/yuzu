@@ -109,6 +109,9 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
       return typeof d.id === 'number' ? { refId: d.id } : null;
     case 'supplier_invoice':
       return d.invoice && typeof d.invoice === 'object' ? { refId: d.invoice.id } : null;
+    // 员工食堂第二期：柚子信箱的回信返回那一条（id）
+    case 'canteen_reply':
+      return typeof d.id === 'number' ? { refId: d.id } : null;
   }
 }
 

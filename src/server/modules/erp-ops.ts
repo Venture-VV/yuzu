@@ -82,6 +82,8 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   contract_acceptance: ['contract.manage'],
   contract_quality: ['contract.manage'],
   supplier_invoice: ['payable.manage'],
+  // 员工食堂第二期：柚子信箱的回信，与回信接口一致
+  canteen_reply: ['canteen.manage'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -126,6 +128,7 @@ const READ: Record<ErpOpType, Permission[]> = {
   contract_acceptance: ['contract.read'],
   contract_quality: ['contract.read'],
   supplier_invoice: ['payable.read'],
+  canteen_reply: ['canteen.manage'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { DISH_TAG_EMOJI, DISH_TAG_LABELS, MEAL_EMOJI, MEAL_LABELS, type CanteenMenu, type Dish, type Meal, type MealWindow } from '@shared/canteen';
 import { call, messageOf, NetworkError, readJson, writeJson } from './lib';
+import { IconHeart } from './doodles';
 import { cn, Pill, toast } from './ui';
 
 const CACHE_KEY = 'yuzu.canteen.menus.v1';
@@ -61,7 +62,7 @@ export function useMenus(from: string, to: string) {
 export function DishRow({ dish, likes, liked, onLike }: { dish: Dish; likes: number; liked: boolean; onLike?: () => void }) {
   return (
     <li className="flex items-center gap-3 py-2">
-      <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-cream text-[24px]" aria-hidden>
+      <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-cream ring-1 ring-line text-[24px]" aria-hidden>
         {dish.emoji}
       </span>
       <div className="min-w-0 flex-1">
@@ -84,10 +85,12 @@ export function DishRow({ dish, likes, liked, onLike }: { dish: Dish; likes: num
           aria-label={`${liked ? '取消点赞' : '点赞'}：${dish.name}`}
           className={cn(
             'flex h-10 min-w-14 items-center justify-center gap-1 rounded-full px-3 text-[14px] font-extrabold transition-all active:scale-90',
-            liked ? 'bg-peach text-white' : 'bg-cream text-ink-3',
+            liked ? 'bg-energy text-white shadow-[0_2px_0_#7f3218]' : 'bg-cream text-ink-3 ring-1 ring-line-strong',
           )}
         >
-          <span className={cn(liked && 'animate-pop')}>{liked ? '❤️' : '🤍'}</span>
+          <span className={cn(liked && 'animate-pop')}>
+            <IconHeart size={19} fill={liked ? '#fff' : 'none'} />
+          </span>
           <span className="num">{likes}</span>
         </button>
       )}
@@ -102,6 +105,7 @@ export function MealCard({
   menu,
   onLike,
   badge,
+  stamp,
   highlight,
 }: {
   meal: Meal;
@@ -109,10 +113,16 @@ export function MealCard({
   menu?: CanteenMenu;
   onLike?: (menu: CanteenMenu, dishId: string) => void;
   badge?: React.ReactNode;
+  /** 盖在卡片右上角的章印（例如「开饭中」） */
+  stamp?: React.ReactNode;
   highlight?: boolean;
 }) {
   return (
-    <section className={cn('rounded-[var(--radius-card)] p-4 shadow-[var(--shadow-soft)] ring-1', highlight ? 'bg-yuzu-soft ring-yuzu/60' : 'bg-card ring-line/70')} data-testid={`meal-${meal}`}>
+    <section
+      className={cn('relative rounded-[var(--radius-card)] p-4', highlight ? 'sketch bg-yuzu-soft shadow-[var(--shadow-sticker)]' : 'bg-card shadow-[var(--shadow-soft)] ring-1 ring-line/70')}
+      data-testid={`meal-${meal}`}
+    >
+      {stamp && <span className="absolute -top-4 right-3">{stamp}</span>}
       <header className="flex items-center gap-2">
         <span className="text-[24px]" aria-hidden>
           {MEAL_EMOJI[meal]}
@@ -123,7 +133,7 @@ export function MealCard({
             {window.start}–{window.end}
           </span>
         )}
-        <span className="ml-auto">{badge}</span>
+        <span className={cn('ml-auto', !!stamp && 'mr-14')}>{badge}</span>
       </header>
       {menu && menu.dishes.length > 0 ? (
         <>
@@ -132,7 +142,7 @@ export function MealCard({
               <DishRow key={d.id} dish={d} likes={menu.likes[d.id] ?? 0} liked={menu.myLikes.includes(d.id)} onLike={onLike && menu.published ? () => onLike(menu, d.id) : undefined} />
             ))}
           </ul>
-          {menu.note && <p className="mt-2 rounded-2xl bg-cream px-3 py-2 text-[14px] text-ink-2">📝 {menu.note}</p>}
+          {menu.note && <p className="mt-2 rounded-2xl bg-cream px-3 py-2 text-[14px] text-ink-2">厨师说：{menu.note}</p>}
         </>
       ) : (
         <p className="mt-3 text-[14px] text-ink-3">厨师还在想这一顿做什么～</p>

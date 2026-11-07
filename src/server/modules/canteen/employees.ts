@@ -1,5 +1,6 @@
-// 员工食堂 · 员工名单（docs/CANTEEN.md 第 8 节）：只由管理员在 yuzu 后台维护——单个加、粘贴一批加、修改与停用、
-// 重新开通（新开通码、旧手机的登录与饭卡码马上失效）、打印开通卡片。
+// 员工食堂 · 员工名单（docs/CANTEEN.md 第 8 节）：管理员在 yuzu 后台维护——单个加、粘贴一批加、修改与停用、
+// 重新开通（新开通码、旧手机的登录与饭卡码马上失效）、打印开通卡片。员工自己登记的（第二期）见 registration.ts，
+// 在这里一样能改工号、部门、角色或停用（用户名、手机号是员工自己填的，后台只看）。
 //
 // 写操作都设计成「原样重试不会重复」：新建按工号去重（内容一样的返回原来那位），修改带版本号（内容一样的重提照样成功），
 // 重新开通带操作编号（同一编号返回同一张开通码）。锁：只锁那位员工一行（新建靠工号的唯一约束兜底）。
@@ -26,6 +27,7 @@ import type { OpContext } from '../../lib/context';
 import { badRequest, conflict, notFound, unprocessable } from '../../lib/errors';
 import { setTxTimeouts } from '../../lib/tx';
 import { parse } from '../../lib/validate';
+import { lockLoginNames } from './portal-auth';
 import { loadCanteenSettings } from './settings';
 
 const EmpNo = z
@@ -53,7 +55,7 @@ const ActivationInput = z.object({ clientKey: z.uuid('操作编号不正确') })
 export const newActivationCode = () => Array.from({ length: 8 }, () => ACTIVATION_ALPHABET[randomInt(ACTIVATION_ALPHABET.length)]).join('');
 
 const ROW_SELECT = (db: Db) => db`
-  SELECT e.id, e.emp_no, e.name, e.department_id, coalesce(d.name, '') AS department, e.role, e.avatar, e.active,
+  SELECT e.id, e.emp_no, e.name, e.username, e.phone, e.source, e.department_id, coalesce(d.name, '') AS department, e.role, e.avatar, e.active,
          e.password_hash IS NOT NULL AS activated, e.activated_at,
          (e.activation_code IS NOT NULL AND e.activation_expires_at > now()) AS activation_pending,
          e.activation_expires_at, e.last_seen_at, e.version, e.created_at
@@ -84,6 +86,13 @@ async function checkDepartment(db: Db, settings: CanteenSettings, role: CanteenR
   }
 }
 
+/** 工号不能和别人自己登记的用户名一样（登录时工号、用户名都认，K13）。调用前先取这个工号的登录名锁（lockLoginNames） */
+async function checkEmpNoFree(db: Db, empNo: string, selfId: number | null) {
+  const [hit] = await db<{ name: string }[]>`
+    SELECT name FROM canteen_employees WHERE lower(username) = lower(${empNo}) AND id IS DISTINCT FROM ${selfId} LIMIT 1`;
+  if (hit) throw conflict('EMP_NO_TAKEN', `工号 ${empNo} 和 ${hit.name} 的用户名一样了，换一个工号`);
+}
+
 /** 新开通码（与已有的撞了就再换一个） */
 async function setNewActivation(tx: Tx, id: number, clientKey: string | null) {
   for (let i = 0; ; i++) {
@@ -109,6 +118,8 @@ export async function createEmployee(sql: Sql, raw: unknown, ctx: OpContext): Pr
     await setTxTimeouts(tx);
     const settings = await loadCanteenSettings(tx);
     await checkDepartment(tx, settings, input.role, input.departmentId);
+    await lockLoginNames(tx, [input.empNo]);
+    await checkEmpNoFree(tx, input.empNo, null);
     const id = await insertEmployee(tx, input, ctx);
     if (id === null) {
       const [same] = await tx<{ id: number; name: string; departmentId: number | null; role: string }[]>`
@@ -162,6 +173,9 @@ export async function batchEmployees(sql: Sql, raw: unknown, ctx: OpContext): Pr
     const existing = new Map(
       (await tx<{ empNo: string; name: string; departmentId: number | null }[]>`SELECT emp_no, name, department_id FROM canteen_employees`).map((e) => [e.empNo, e]),
     );
+    const usernames = new Map(
+      (await tx<{ username: string; name: string }[]>`SELECT username, name FROM canteen_employees WHERE username IS NOT NULL`).map((e) => [e.username.toUpperCase(), e.name]),
+    );
     const seen = new Set<string>();
     const rows: BatchPreviewRow[] = lines.map(({ line, text }) => {
       const parts = text.split(/[\s,，\t]+/).filter(Boolean);
@@ -179,6 +193,7 @@ export async function batchEmployees(sql: Sql, raw: unknown, ctx: OpContext): Pr
         row.departmentId = d.id;
       }
       if (seen.has(empNo)) return bad('这一批里工号重复了');
+      if (usernames.has(empNo)) return bad(`工号和 ${usernames.get(empNo)} 的用户名一样了`);
       seen.add(empNo);
       const old = existing.get(empNo);
       if (old) {
@@ -192,7 +207,11 @@ export async function batchEmployees(sql: Sql, raw: unknown, ctx: OpContext): Pr
     const errors = rows.filter((r) => r.status === 'error');
     if (errors.length) throw unprocessable('BATCH_HAS_ERRORS', `有 ${errors.length} 行有问题，改好再加（一行都没加）`, { lines: errors.map((r) => r.line) });
     let created = 0;
-    for (const r of rows.filter((x) => x.status === 'new')) {
+    const fresh = rows.filter((x) => x.status === 'new');
+    // 取好这一批工号的登录名锁以后再核对一次（预览之后有人登记了同名的用户名）
+    await lockLoginNames(tx, fresh.map((r) => r.empNo));
+    for (const r of fresh) await checkEmpNoFree(tx, r.empNo, null);
+    for (const r of fresh) {
       const id = await insertEmployee(tx, { empNo: r.empNo, name: r.name, departmentId: r.departmentId, role: 'staff' }, ctx);
       if (id === null) throw conflict('EMP_NO_TAKEN', `工号 ${r.empNo} 刚被别人加了，请重新预览`);
       created++;
@@ -216,6 +235,10 @@ export async function updateEmployee(sql: Sql, id: number, raw: unknown, ctx: Op
     if (same) return employeeRow(tx, id);
     if (cur.version !== input.version) throw conflict('VERSION_CHANGED', '这位员工刚被别人改过，刷新后再改');
     if (input.active) await checkDepartment(tx, await loadCanteenSettings(tx), input.role, input.departmentId);
+    if (input.empNo !== cur.empNo) {
+      await lockLoginNames(tx, [input.empNo]);
+      await checkEmpNoFree(tx, input.empNo, id);
+    }
     const deactivate = cur.active && !input.active;
     try {
       await tx`
