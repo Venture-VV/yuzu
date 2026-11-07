@@ -37,7 +37,7 @@ services:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
         ALPINE_MIRROR: ${ALPINE_MIRROR:-}
-        APP_VERSION: ${YUZU_VERSION:-0.7.33}
+        APP_VERSION: ${YUZU_VERSION:-8.0.0}
         APP_COMMIT: ${YUZU_COMMIT:-}
     # 不同 Compose 项目使用独立标签，演示构建不会覆盖试用 / 正式镜像。
     image: ${APP_IMAGE:-yuzu-app:${COMPOSE_PROJECT_NAME:-local}}
@@ -52,10 +52,17 @@ services:
       DATABASE_URL: postgres://yuzu:${POSTGRES_PASSWORD}@db:5432/yuzu
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      # 外网正式服走 HTTPS（反向代理 Caddy）时设 COOKIE_SECURE=true、TRUST_PROXY=<容器里看到的代理地址>：同一台主机上的 Caddy
+      # 经发布的端口连进来时，容器里看到的是 Docker 网络的网关，不是 127.0.0.1（8.0.0，docs/RELEASE_V800.md 第 2.3 节第 7 条）
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-}
       INIT_OWNER_USERNAME: ${INIT_OWNER_USERNAME:-}
       INIT_OWNER_PASSWORD: ${INIT_OWNER_PASSWORD:-}
       INIT_OWNER_NAME: ${INIT_OWNER_NAME:-店主}
       TZ: ${APP_TIMEZONE:-Asia/Shanghai}
+    # APP_PORT 只写端口（8080）时开在所有网卡上，门店局域网这样用；写成「地址:端口」只开在这个地址上：云服务器上写
+    # 127.0.0.1:8080（只给本机的 Caddy）或 <Tailscale 地址>:8080——Docker 发布的端口会绕过主机防火墙，不能只靠 ufw 挡。
+    # 已有实例两种写法都在用，这一行不要再拼别的变量（tests/compose-config.test.ts 核对两种写法都能展开）
     ports:
       - "${APP_PORT:-8080}:8080"
     logging: *logging

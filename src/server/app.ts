@@ -86,6 +86,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   const app = Fastify({
     logger: { level: config.logLevel },
     bodyLimit: 64 * 1024,
+    // 正式服在反向代理（Caddy）后面时设 TRUST_PROXY：来源 IP、https 按代理转来的算（8.0.0，docs/RELEASE_V800.md）
+    trustProxy: config.trustProxy.length ? config.trustProxy : false,
   });
   const deps: Deps = { sql, config };
 
@@ -113,9 +115,12 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
     }
   });
 
-  // 浏览器按声明的类型解析响应，不猜测内容类型（测试服 E2E 报告）
+  // 浏览器按声明的类型解析响应，不猜测内容类型（测试服 E2E 报告）；不让别的网站把页面嵌进去（防点击劫持），
+  // 跳到别的网站时不带地址里的内容（8.0.0：正式服放公网之前补上，docs/RELEASE_V800.md）
   app.addHook('onSend', async (_req, reply, payload) => {
     reply.header('x-content-type-options', 'nosniff');
+    reply.header('x-frame-options', 'SAMEORIGIN');
+    reply.header('referrer-policy', 'same-origin');
     return payload;
   });
 

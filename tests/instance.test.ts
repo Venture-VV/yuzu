@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/server/app';
 import { loadConfig, resolveInstance, type AppConfig } from '../src/server/config';
 import { seedDemo } from '../src/server/seed';
-import { api, setup, type TestContext } from './helpers';
+import { api, PASSWORD, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
 beforeAll(async () => {
@@ -58,6 +58,42 @@ describe('版本与提交 SHA', () => {
     expect(load('production').instance).toBe('prod');
     process.env.YUZU_INSTANCE = 'test';
     expect(load('production').instance).toBe('test');
+  });
+});
+
+describe('外网正式服在反向代理后面（8.0.0，docs/RELEASE_V800.md）', () => {
+  it('TRUST_PROXY 读成地址清单；没设时不信任转发头', () => {
+    const saved = process.env.TRUST_PROXY;
+    try {
+      process.env.TRUST_PROXY = ' 127.0.0.1 , 100.64.0.0/10 ';
+      expect(loadConfig({ databaseUrl: ctx.config.databaseUrl, env: 'test', logLevel: 'silent' }).trustProxy).toEqual(['127.0.0.1', '100.64.0.0/10']);
+      delete process.env.TRUST_PROXY;
+      expect(loadConfig({ databaseUrl: ctx.config.databaseUrl, env: 'test', logLevel: 'silent' }).trustProxy).toEqual([]);
+    } finally {
+      if (saved === undefined) delete process.env.TRUST_PROXY;
+      else process.env.TRUST_PROXY = saved;
+    }
+  });
+
+  it('信任代理时登录记下真实来源 IP、Cookie 加 Secure；不信任时转发头不算', async () => {
+    const login = async (config: AppConfig) => {
+      const app = await buildApp(ctx.sql, config);
+      try {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/auth/login',
+          headers: { 'x-forwarded-for': '203.0.113.9', 'x-forwarded-proto': 'https' },
+          payload: { username: 'owner', password: PASSWORD },
+        });
+        expect(res.statusCode, res.body).toBe(200);
+        const [row] = await ctx.sql<{ ip: string | null }[]>`SELECT ip FROM audit_logs WHERE action = 'login' ORDER BY id DESC LIMIT 1`;
+        return { ip: row?.ip ?? null, secure: res.cookies.find((c) => c.name === 'yuzu_sid')?.secure ?? false };
+      } finally {
+        await app.close();
+      }
+    };
+    expect(await login({ ...ctx.config, trustProxy: ['127.0.0.1'], cookieSecure: true })).toEqual({ ip: '203.0.113.9', secure: true });
+    expect((await login({ ...ctx.config, trustProxy: [], cookieSecure: false })).ip).not.toBe('203.0.113.9');
   });
 });
 

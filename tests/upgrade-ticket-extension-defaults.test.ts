@@ -14,6 +14,11 @@ import { migrationsFrom, TEST_DB } from './helpers';
 import { resetPublicSchema } from './test-db';
 
 const MIGRATIONS = new URL('../src/server/migrations/', import.meta.url);
+/**
+ * 每条用例都从零重建一遍库（047 之前的迁移全跑，有的两遍）再升级：本机三秒左右，CI 上与别的测试文件并行建库、删库
+ * （逼数据库做检查点）时会慢上十倍，30 秒的默认时限不够（2026-11-07 PR #74 上超时过一次）。与 d04d05d 的备份用例一样放宽到 120 秒
+ */
+const HEAVY = 120_000;
 let sql: Sql;
 
 beforeAll(() => {
@@ -60,7 +65,7 @@ describe('迁移 047 · 浴票延迟的默认分钟数', () => {
     }
     // 补上以后就能发布（发布要有起点的分钟数）
     await sql`UPDATE benefits SET status = 'published', published_at = now(), version = version + 1 WHERE code = 'QY-004'`;
-  });
+  }, HEAVY);
 
   it('改过的 QY-004（版本 2）不动；没导入清单的库不新建', async () => {
     await schemaBefore047();
@@ -72,7 +77,7 @@ describe('迁移 047 · 浴票延迟的默认分钟数', () => {
     await migrate(sql);
     const [n] = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM benefits`;
     expect(n!.n).toBe(0);
-  });
+  }, HEAVY);
 });
 
 /** v0.7.24 导入的 QY-041：折扣类、草稿、起点 L3·初、没填适用明细与折扣 */
@@ -106,7 +111,7 @@ describe('迁移 047 · QY-041 同行优惠的预填', () => {
     await sql`UPDATE benefits SET quantity = 80, status = 'published', published_at = now(), version = version + 1 WHERE code = 'QY-041'`;
     // 「同行几位」只给同行的适用明细
     await expect(sql`UPDATE benefits SET companion_count = 1 WHERE code = 'QY-011'`).rejects.toThrow(/benefits_companion_check/);
-  });
+  }, HEAVY);
 
   it('改过的 QY-041（版本 2，或已经填了适用明细）不动', async () => {
     await schemaBefore047();
@@ -118,5 +123,5 @@ describe('迁移 047 · QY-041 同行优惠的预填', () => {
     await insertQy041(1, 'bill');
     await migrate(sql);
     expect(await qy041()).toMatchObject({ version: 1, discountTarget: 'bill', companionCount: null, companionCounts: [] });
-  });
+  }, HEAVY);
 });
