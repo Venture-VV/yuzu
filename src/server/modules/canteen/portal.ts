@@ -92,7 +92,16 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
     return openCache.open;
   };
 
-  app.addHook('onRequest', async (req) => {
+  const setSession = (reply: FastifyReply, token: string) =>
+    reply.setCookie(CANTEEN_COOKIE, token, {
+      httpOnly: true,
+      sameSite: 'strict',
+      secure: config.canteen.cookieSecure,
+      path: '/',
+      maxAge: CANTEEN_SESSION_DAYS * 86_400,
+    });
+
+  app.addHook('onRequest', async (req, reply) => {
     // 按解码后的路径认接口（/%61pi/… 与 /api/… 进的是同一个接口，见 lib/paths）
     if (!isApiRequest(req)) return;
     if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -103,10 +112,12 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
     if (!(await canteenOpen())) throw new AppError(503, 'CANTEEN_CLOSED', '饭堂还没开张：请管理员在 yuzu 的 ERP「模块设置」里打开「员工食堂」');
     const token = req.cookies[CANTEEN_COOKIE];
     if (token) {
-      const me = await resolveCanteenSession(sql, token);
-      if (me) {
-        req.canteenEmployee = me;
+      const found = await resolveCanteenSession(sql, token);
+      if (found) {
+        req.canteenEmployee = found.me;
         req.canteenToken = token;
+        // 库里顺延了，浏览器的 Cookie 也顺延（用着就一直不用重新登录，K7）
+        if (found.renewed) setSession(reply, token);
       }
     }
   });
@@ -142,14 +153,6 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
   });
 
   const meta = (req: FastifyRequest) => ({ ip: req.ip, userAgent: req.headers['user-agent'] });
-  const setSession = (reply: FastifyReply, token: string) =>
-    reply.setCookie(CANTEEN_COOKIE, token, {
-      httpOnly: true,
-      sameSite: 'strict',
-      secure: config.canteen.cookieSecure,
-      path: '/',
-      maxAge: CANTEEN_SESSION_DAYS * 86_400,
-    });
   const who = (req: FastifyRequest): CanteenSessionEmployee => {
     if (!req.canteenEmployee) throw unauthorized('请先登录柚子饭堂');
     return req.canteenEmployee;
