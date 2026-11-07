@@ -73,6 +73,7 @@ const SuggestionsPage = lazyPage(() => import('./features/purchasing/Suggestions
 const SourcingPage = lazyPage(() => import('./features/purchasing/SourcingPage').then((m) => m.SourcingPage));
 const SourcingDetailPage = lazyPage(() => import('./features/purchasing/SourcingPage').then((m) => m.SourcingDetailPage));
 const UrgentPage = lazyPage(() => import('./features/purchasing/UrgentPage').then((m) => m.UrgentPage));
+const PurchaseRulesPage = lazyPage(() => import('./features/purchasing/PurchaseRulesPage').then((m) => m.PurchaseRulesPage));
 const UrgentDocFormPage = lazyPage(() => import('./features/inventory/DocFormPage').then((m) => m.UrgentDocFormPage));
 const PayablesPage = lazyPage(() => import('./features/payables/PayablesPage').then((m) => m.PayablesPage));
 const PaymentFormPage = lazyPage(() => import('./features/payables/PaymentFormPage').then((m) => m.PaymentFormPage));
@@ -253,6 +254,8 @@ const router = createBrowserRouter([
       { path: 'purchasing/urgent', element: <UrgentPage /> },
       { path: 'purchasing/urgent/new', element: <UrgentDocFormPage /> },
       { path: 'purchasing/urgent/:id/edit', element: <UrgentDocFormPage /> },
+      // 采购规则（8.0.1 采购组整改 01：从 ERP「模块设置」挪过来）
+      { path: 'purchasing/rules', element: <PurchaseRulesPage /> },
       { path: 'purchasing/:id/edit', element: <PoFormPage mode="edit" /> },
       { path: 'purchasing/:id/revise', element: <PoFormPage mode="revise" /> },
       { path: 'payables', element: <PayablesPage /> },
