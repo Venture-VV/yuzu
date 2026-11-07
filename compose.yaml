@@ -37,7 +37,7 @@ services:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
         ALPINE_MIRROR: ${ALPINE_MIRROR:-}
-        APP_VERSION: ${YUZU_VERSION:-0.7.33}
+        APP_VERSION: ${YUZU_VERSION:-8.0.0}
         APP_COMMIT: ${YUZU_COMMIT:-}
     # 不同 Compose 项目使用独立标签，演示构建不会覆盖试用 / 正式镜像。
     image: ${APP_IMAGE:-yuzu-app:${COMPOSE_PROJECT_NAME:-local}}
@@ -52,12 +52,17 @@ services:
       DATABASE_URL: postgres://yuzu:${POSTGRES_PASSWORD}@db:5432/yuzu
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      # 外网正式服走 HTTPS（反向代理 Caddy）时设 COOKIE_SECURE=true、TRUST_PROXY=<代理的地址>（8.0.0，docs/RELEASE_V800.md）
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-}
       INIT_OWNER_USERNAME: ${INIT_OWNER_USERNAME:-}
       INIT_OWNER_PASSWORD: ${INIT_OWNER_PASSWORD:-}
       INIT_OWNER_NAME: ${INIT_OWNER_NAME:-店主}
       TZ: ${APP_TIMEZONE:-Asia/Shanghai}
+    # APP_BIND：只在这个地址上开端口。门店局域网用默认（所有网卡）；云服务器上设 127.0.0.1（只给本机的 Caddy）或 Tailscale 地址——
+    # Docker 发布的端口会绕过主机防火墙，不能只靠 ufw 挡
     ports:
-      - "${APP_PORT:-8080}:8080"
+      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-8080}:8080"
     logging: *logging
 
   # 备份服务：与 app 同一个镜像（含 pg_dump / pg_restore），由 app 构建、不从网上拉。

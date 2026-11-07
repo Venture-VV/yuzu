@@ -12,6 +12,8 @@ export interface AppConfig {
   timezone: string;
   sessionTtlHours: number;
   cookieSecure: boolean;
+  /** 前面的反向代理（Caddy）的地址（TRUST_PROXY，逗号分隔、可写网段）：认它转来的真实来源 IP 与 https；空为不信任转发头 */
+  trustProxy: string[];
   logLevel: string;
   /** 页面显示的版本号（不带开头的 v） */
   version: string;
@@ -117,9 +119,10 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     timezone: process.env.APP_TIMEZONE ?? 'Asia/Shanghai',
     sessionTtlHours: Number(process.env.SESSION_TTL_HOURS ?? 12),
     cookieSecure: process.env.COOKIE_SECURE === 'true',
+    trustProxy: (process.env.TRUST_PROXY ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     logLevel: process.env.LOG_LEVEL ?? (env === 'test' ? 'silent' : 'info'),
     // update.sh 用 git describe 写入的版本带 v 前缀，页面统一加 v，这里去掉
-    version: (process.env.APP_VERSION || '0.7.33').replace(/^v/, ''),
+    version: (process.env.APP_VERSION || '8.0.0').replace(/^v/, ''),
     commit: /^[0-9a-f]{7,40}$/.test(process.env.APP_COMMIT ?? '') ? process.env.APP_COMMIT! : '',
     instance: resolveInstance(env, process.env.YUZU_INSTANCE),
     initOwner:

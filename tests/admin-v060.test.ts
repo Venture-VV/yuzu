@@ -264,11 +264,13 @@ describe('后台首页与规则总表', () => {
   });
 });
 
-describe('响应头（测试服 E2E 报告）', () => {
-  it('接口、出错的响应都带 x-content-type-options: nosniff', async () => {
+describe('响应头（测试服 E2E 报告；8.0.0 正式服放公网之前补上防嵌入与 Referrer）', () => {
+  it('接口、出错的响应都带 nosniff、SAMEORIGIN、same-origin', async () => {
     for (const url of ['/api/health', '/api/auth/me', '/api/no-such-api']) {
       const res = await ctx.app.inject({ method: 'GET', url });
       expect(res.headers['x-content-type-options'], url).toBe('nosniff');
+      expect(res.headers['x-frame-options'], url).toBe('SAMEORIGIN');
+      expect(res.headers['referrer-policy'], url).toBe('same-origin');
     }
   });
 });
