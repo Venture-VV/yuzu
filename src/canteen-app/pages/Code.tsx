@@ -1,10 +1,11 @@
-// 饭卡码：在手机上离线生成，每 30 秒换一个（外圈倒计时）；亮码时让屏幕常亮。没网也能用。
+// 饭卡码：在手机上离线生成，每 30 秒换一个（外圈倒计时）；亮码时让屏幕常亮。没网也能用；
+// 店里局域网用 http 打开也能亮（签名不靠 WebCrypto，K18；只是 http 下浏览器不给「屏幕常亮」）。
 
 import { useEffect, useState } from 'react';
 import { CANTEEN_ROLE_LABELS, CODE_STEP_SECONDS, type CanteenMe } from '@shared/canteen';
 import { Mascot } from '../Mascot';
 import { QrCode } from '../QrCode';
-import { makeCode, secureContextOk } from '../lib';
+import { makeCode } from '../lib';
 import { Pill } from '../ui';
 
 type WakeLock = { release(): Promise<void> };
@@ -33,10 +34,6 @@ export function CodePage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
   useWakeLock();
 
   useEffect(() => {
-    if (!secureContextOk()) {
-      setError('这个地址不安全，生成不了饭卡码：请用管理员给的 https 网址打开柚子饭堂');
-      return;
-    }
     let alive = true;
     let current = -1;
     const tick = async () => {

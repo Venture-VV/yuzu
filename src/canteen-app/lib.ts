@@ -1,6 +1,6 @@
-// 柚子饭堂的小工具：接口、本机存储、离线生成饭卡码（WebCrypto）、提示音。
+// 柚子饭堂的小工具：接口、本机存储、离线生成饭卡码、提示音。
 
-import { base32, CODE_MAC_LENGTH, codeMessage, codeStepOf, formatCanteenCode, type CanteenMe } from '@shared/canteen';
+import { signCanteenCode, type CanteenMe } from '@shared/canteen';
 
 // ── 接口 ──
 
@@ -103,26 +103,10 @@ export function saveMe(me: CanteenMe, keepOffsetMs?: number): CachedMe {
 export const clearCachedMe = () => removeKey(ME_KEY);
 
 // ── 饭卡码（手机上离线生成，与服务端 src/server/modules/canteen/code.ts 同一个算法） ──
-
-const keys = new Map<string, Promise<CryptoKey>>();
-
-function importKey(b64url: string): Promise<CryptoKey> {
-  let k = keys.get(b64url);
-  if (!k) {
-    const bin = atob(b64url.replace(/-/g, '+').replace(/_/g, '/'));
-    const bytes = Uint8Array.from(bin, (ch) => ch.charCodeAt(0));
-    k = crypto.subtle.importKey('raw', bytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-    keys.set(b64url, k);
-  }
-  return k;
-}
-
-export const secureContextOk = () => typeof crypto !== 'undefined' && !!crypto.subtle;
+// 用纯 JS 的 HMAC（@shared/hmac-sha256），不靠 WebCrypto：店里局域网用 http 打开时浏览器不给 crypto.subtle，饭卡码也要能亮。
 
 export async function makeCode(codeKey: string, employeeId: number, atMs: number): Promise<{ text: string; step: number }> {
-  const step = codeStepOf(atMs);
-  const sig = await crypto.subtle.sign('HMAC', await importKey(codeKey), new TextEncoder().encode(codeMessage(step)));
-  return { text: formatCanteenCode(employeeId, step, base32(new Uint8Array(sig), CODE_MAC_LENGTH)), step };
+  return signCanteenCode(codeKey, employeeId, atMs);
 }
 
 // ── 提示音（负责人扫码：成功叮咚、已打过卡叮、出错嘟嘟） ──

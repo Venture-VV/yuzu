@@ -190,6 +190,28 @@ export const IconInstall = (p: IconProps) => (
   </Doodle>
 );
 
+/** 喇叭：on 时带两道声波，关了是一个小叉（开场动画的声音开关） */
+export const IconSound = ({ on = true, ...p }: IconProps & { on?: boolean }) => (
+  <Doodle {...p}>
+    {(f) => (
+      <>
+        <path d="M5.2 12.6c1.6-.2 3.2-.2 4.8-.1l6.4-5.4c.4 6 .4 11.8 0 17.8l-6.4-5.2c-1.6.1-3.2.1-4.8-.1-.3-2.4-.3-4.6 0-7Z" fill={f} />
+        {on ? (
+          <>
+            <path d="M20.4 12.2c1.4 2.4 1.4 5.2 0 7.6" />
+            <path d="M23.8 9c3 4.4 3 9.6 0 14" />
+          </>
+        ) : (
+          <>
+            <path d="M20.6 12.6l6 6.4" />
+            <path d="M26.6 12.4l-6 6.6" />
+          </>
+        )}
+      </>
+    )}
+  </Doodle>
+);
+
 export const IconArrow = (p: IconProps) => (
   <Doodle {...p}>
     {() => (

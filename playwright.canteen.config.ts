@@ -16,7 +16,8 @@ export default defineConfig({
     timezoneId: 'Asia/Shanghai',
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
-    launchOptions: process.env.PW_CHROMIUM_PATH ? { executablePath: process.env.PW_CHROMIUM_PATH } : {},
+    // canteen-lan.local 指到本机：店里局域网 http 打开的样子（对浏览器是不安全的来源，对员工端口是局域网地址，K18）
+    launchOptions: { args: ['--host-resolver-rules=MAP canteen-lan.local 127.0.0.1'], ...(process.env.PW_CHROMIUM_PATH ? { executablePath: process.env.PW_CHROMIUM_PATH } : {}) },
   },
   projects: [{ name: '员工食堂', use: { ...devices['Desktop Chrome'] } }],
 });

@@ -1,6 +1,8 @@
 // 新手教程（docs/CANTEEN.md 第 15 节，K15）：登记好（或第一次登录）以后接着走，「我的」里能再走一遍。
 // 柚子在旁边说话、指着要点的地方；要员工自己点一下才往下走（点别处不算），右上角能跳过。
 // 页面上要指的东西带 data-tour="…"；聚光灯外面四块挡住点击，只有被指着的那一块点得到。
+// 每一步开始时不在那一页就先跳过去，只跳这一次（「点一下」那一步员工自己点过去的页面不再被拉回来）；
+// 要指的东西一会儿没出来，说话框先在屏幕中间出来（能「下一步」、能跳过），不会整屏挡着又什么都不显示。
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { canEditMenu, canScan, type CanteenRole } from '@shared/canteen';
@@ -78,24 +80,37 @@ function measure(target: string | undefined): Rect | null {
 const same = (a: Rect | null, b: Rect | null) =>
   a === b || (!!a && !!b && Math.abs(a.top - b.top) < 1 && Math.abs(a.left - b.left) < 1 && Math.abs(a.width - b.width) < 1 && Math.abs(a.height - b.height) < 1);
 
-/** 要指的东西等这么久还没出来（例如不是 HTTPS 打开的、这台手机亮不了饭卡码），就照常显示说话框，能「下一步」、能跳过 */
+/** 要指的东西这么久还没出来，说话框先在屏幕中间出来（平时换页后一两百毫秒就找到了，不会闪一下） */
+const BUBBLE_WAIT_MS = 600;
+/** 等这么久还没出来，就说一声「这会儿没出来，先往下走吧」 */
 const TARGET_WAIT_MS = 2500;
 
 export function Tour({ steps, route, go, onClose }: { steps: TourStep[]; route: string; go: (route: string) => void; onClose: (finished: boolean) => void }) {
   const [index, setIndex] = useState(0);
   const [rect, setRect] = useState<Rect | null>(null);
   const [liked, setLiked] = useState(false);
+  const [slow, setSlow] = useState(false);
   const [missing, setMissing] = useState(false);
   const step = steps[index]!;
   const scrolled = useRef<string | null>(null);
+  // 外壳每次重新渲染都给新的 steps、onClose：下面按这一步的编号算，最新的 onClose、页面从这里读
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const routeRef = useRef(route);
+  routeRef.current = route;
 
-  // 每一步先等要指的东西出来；等久了还没有就不再干等（不然整屏挡着、说话框和「跳过」都不出来，只能刷新）。
-  // 按这一步的编号算（steps 每次重新渲染都是新数组，按对象算会一直重新计时）
+  // 每一步先等要指的东西出来；等一会儿还没有，说话框先出来，等久了再说一声没出来
+  // （不然整屏挡着、说话框和「跳过」都不出来，像卡住了）
   useEffect(() => {
+    setSlow(false);
     setMissing(false);
     if (!step.target) return;
+    const bubble = setTimeout(() => setSlow(true), BUBBLE_WAIT_MS);
     const timer = setTimeout(() => setMissing(true), TARGET_WAIT_MS);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(bubble);
+      clearTimeout(timer);
+    };
   }, [step.id, step.target]);
 
   const next = useCallback(() => {
@@ -103,14 +118,15 @@ export function Tour({ steps, route, go, onClose }: { steps: TourStep[]; route: 
     setRect(null);
     if (index >= steps.length - 1) {
       markTourDone();
-      onClose(true);
+      closeRef.current(true);
     } else setIndex(index + 1);
-  }, [index, steps.length, onClose]);
+  }, [index, steps.length]);
 
-  // 这一步要在哪一页：不在就先过去
+  // 这一步要在哪一页：开始时不在就先过去。只在换步时跳一次——「点一下饭卡码」那一步，员工点过去以后、
+  // 下一步接上之前页面已经换了，不能又把人拉回首页（来回跳一下，慢的手机上看着像卡住）
   useEffect(() => {
-    if (step.route && route !== step.route) go(step.route);
-  }, [step, route, go]);
+    if (step.route && routeRef.current !== step.route) go(step.route);
+  }, [step.id, step.route, go]);
 
   // 找要指的东西（页面可能还在取数据：每 200 毫秒找一次），找到先滚到中间
   useLayoutEffect(() => {
@@ -137,7 +153,7 @@ export function Tour({ steps, route, go, onClose }: { steps: TourStep[]; route: 
       window.removeEventListener('resize', find);
       window.removeEventListener('scroll', find, true);
     };
-  }, [step]);
+  }, [step.id, step.target]);
 
   // tap：等员工点被指的那一下（让页面先处理这次点击，再往下走）
   useEffect(() => {
@@ -148,13 +164,13 @@ export function Tour({ steps, route, go, onClose }: { steps: TourStep[]; route: 
     };
     document.addEventListener('click', onClick, true);
     return () => document.removeEventListener('click', onClick, true);
-  }, [step, next]);
+  }, [step.id, step.wait, step.target, next]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose(false);
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current(false);
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, []);
 
   const like = () => {
     if (liked) return;
@@ -165,7 +181,10 @@ export function Tour({ steps, route, go, onClose }: { steps: TourStep[]; route: 
   const vh = window.innerHeight;
   const vw = window.innerWidth;
   const targetGone = !!step.target && !rect && missing;
-  const waitingForTarget = !!step.target && !rect && !missing;
+  // 刚换步、要指的东西还没找到：先暗一下，不出说话框（一般一两百毫秒就找到了）
+  const waitingForTarget = !!step.target && !rect && !slow;
+  // 找了一会儿还没找到：说话框先在中间出来，「点一下」的那一步也给「下一步」
+  const notYet = !!step.target && !rect && slow;
   const below = rect ? rect.top + rect.height / 2 < vh * 0.5 : false;
   const bubbleStyle: React.CSSProperties = rect
     ? below
@@ -185,13 +204,13 @@ export function Tour({ steps, route, go, onClose }: { steps: TourStep[]; route: 
           <div className="pointer-events-auto absolute left-0" style={{ top: rect.top, height: rect.height, width: Math.max(0, rect.left), background: shade }} />
           <div className="pointer-events-auto absolute right-0" style={{ top: rect.top, height: rect.height, left: rect.left + rect.width, background: shade }} />
           {step.wait !== 'tap' && <div className="pointer-events-auto absolute" style={{ ...rect }} />}
-          <div className="pointer-events-none absolute rounded-[22px]" style={{ ...rect, ['--sketch-color' as string]: 'var(--color-yuzu)' }}>
+          <div className="pointer-events-none absolute rounded-[22px]" style={{ ...rect, ['--sketch-color' as string]: 'var(--color-yuzu)' }} data-testid="tour-spotlight">
             <div className="sketch absolute inset-0 rounded-[22px]" style={{ ['--sketch-color' as string]: 'var(--color-yuzu)' }} />
             <div className="absolute inset-0 rounded-[22px] ring-4 ring-yuzu" style={{ animation: 'yz-ring 1.4s ease-out infinite' }} />
           </div>
         </>
       ) : (
-        <div className="pointer-events-auto absolute inset-0" style={{ background: waitingForTarget ? 'transparent' : shade }} />
+        <div className="pointer-events-auto absolute inset-0" style={{ background: waitingForTarget ? 'rgb(28 26 23 / 0.25)' : shade, transition: 'background .2s' }} />
       )}
 
       {!waitingForTarget && (
@@ -230,17 +249,17 @@ export function Tour({ steps, route, go, onClose }: { steps: TourStep[]; route: 
             )}
             <div className="mt-3 flex items-center gap-2">
               {step.wait !== 'finish' && (
-                <button type="button" onClick={() => onClose(false)} className="rounded-full px-2 py-1 text-[13px] font-bold text-ink-3 active:bg-cream-2" data-testid="tour-skip">
+                <button type="button" onClick={() => closeRef.current(false)} className="rounded-full px-2 py-1 text-[13px] font-bold text-ink-3 active:bg-cream-2" data-testid="tour-skip">
                   跳过教程
                 </button>
               )}
               <span className="ml-auto" />
-              {(step.wait === 'next' || (step.wait === 'tap' && targetGone)) && (
+              {(step.wait === 'next' || (step.wait === 'tap' && notYet)) && (
                 <Button onClick={next} data-testid="tour-next">
                   下一步
                 </Button>
               )}
-              {step.wait === 'tap' && !targetGone && <span className="text-[13px] font-bold text-wood-deep">↑ 点一下亮着的地方</span>}
+              {step.wait === 'tap' && !notYet && <span className="text-[13px] font-bold text-wood-deep">↑ 点一下亮着的地方</span>}
               {step.wait === 'like' && !liked && <span className="text-[13px] font-bold text-wood-deep">点一下爱心试试</span>}
               {step.wait === 'like' && liked && <span className="text-[13px] font-bold text-organic">厨师收到啦！</span>}
               {step.wait === 'finish' && (

@@ -8,7 +8,7 @@ import { resolve } from 'node:path';
 import fastifyCookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
-import { canEditMenu, canScan, type CanteenMe } from '@shared/canteen';
+import { canEditMenu, canScan, isLanHost, type CanteenMe } from '@shared/canteen';
 import { businessDateOf } from '@shared/business-date';
 import type { AppConfig } from '../../config';
 import type { Sql } from '../../db';
@@ -96,11 +96,17 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
     return openCache.open;
   };
 
-  const setSession = (reply: FastifyReply, token: string) =>
+  /**
+   * 登录 Cookie 加不加 Secure：https 打开的（直接 TLS，或信任的转发服务器说是 https）都加；设了 CANTEEN_COOKIE_SECURE=true 时
+   * 其余的也加，只有店里局域网用 http 打开的不加（K18：加了浏览器存不下，就登录不进去）。Cookie 按地址分开存，
+   * 局域网地址上的 Cookie 不会带到外网的 https 地址上去。
+   */
+  const secureCookie = (req: FastifyRequest) => req.protocol === 'https' || (config.canteen.cookieSecure && !isLanHost(req.hostname));
+  const setSession = (req: FastifyRequest, reply: FastifyReply, token: string) =>
     reply.setCookie(CANTEEN_COOKIE, token, {
       httpOnly: true,
       sameSite: 'strict',
-      secure: config.canteen.cookieSecure,
+      secure: secureCookie(req),
       path: '/',
       maxAge: CANTEEN_SESSION_DAYS * 86_400,
     });
@@ -121,7 +127,7 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
         req.canteenEmployee = found.me;
         req.canteenToken = token;
         // 库里顺延了，浏览器的 Cookie 也顺延（用着就一直不用重新登录，K7）
-        if (found.renewed) setSession(reply, token);
+        if (found.renewed) setSession(req, reply, token);
       }
     }
   });
@@ -210,13 +216,13 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
 
   app.post('/api/canteen/join', async (req, reply) => {
     const { token, employeeId } = await limited(req, () => joinWithActivation(sql, req.body, meta(req)));
-    setSession(reply, token);
+    setSession(req, reply, token);
     return buildMe(employeeId);
   });
 
   app.post('/api/canteen/login', async (req, reply) => {
     const { token, employeeId } = await limited(req, () => loginCanteen(sql, req.body, meta(req)));
-    setSession(reply, token);
+    setSession(req, reply, token);
     return buildMe(employeeId);
   });
 
@@ -239,7 +245,7 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
     try {
       const result = await limited(req, () => registerEmployee(sql, req.body, meta(req), { allowCreate: canCreate }));
       created = result.created;
-      setSession(reply, result.token);
+      setSession(req, reply, result.token);
       return await buildMe(result.employeeId);
     } finally {
       if (reservedAt !== null && !created) registrations.release(key, reservedAt);

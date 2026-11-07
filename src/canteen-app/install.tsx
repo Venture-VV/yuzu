@@ -73,9 +73,9 @@ export function InstallGuide() {
       {window.isSecureContext ? (
         <p className="rounded-2xl bg-yuzu-soft px-4 py-3 text-[14px]">添加以后，桌面上会多一个柚子：开饭时点它就能亮码，没网也行。</p>
       ) : (
-        // http 打开的（例如局域网 IP）：浏览器不给加密、也装不了离线缓存，添加到桌面也亮不了饭卡码、没网打不开
+        // http 打开的（例如店里局域网的 IP）：饭卡码照样亮（手机上用纯 JS 算，K18），只是浏览器装不了离线缓存，添加到桌面以后没网打不开
         <p className="rounded-2xl bg-peach-soft px-4 py-3 text-[14px] font-bold text-danger" data-testid="install-insecure">
-          现在是用 http 打开的：这样添加到桌面也亮不了饭卡码，没网也打不开。请用管理员给的 https 网址打开柚子饭堂，再添加到桌面。
+          现在是用 http（店里局域网）打开的：添加到桌面以后要连着店里的 Wi-Fi 才打得开，打开以后断网饭卡码照样亮。想没网也能打开，请用管理员给的 https 网址打开柚子饭堂，再添加到桌面。
         </p>
       )}
     </div>

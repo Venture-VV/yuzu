@@ -4,6 +4,7 @@
 // 饭卡码在手机上离线生成：登录后拿到自己的码钥匙，每 30 秒按时间段算一次签名；服务端按扫到的时间核对。
 
 import { businessDateOf, HHMM, minuteOfDay } from './business-date';
+import { hmacSha256 } from './hmac-sha256';
 
 // ── 角色 ──
 
@@ -195,6 +196,35 @@ export function base32(bytes: Uint8Array, length: number): string {
 export const formatCanteenCode = (employeeId: number, step: number, mac: string) =>
   `${CODE_PREFIX}:${employeeId.toString(36).toUpperCase()}:${step.toString(36).toUpperCase()}:${mac}`;
 
+/** base64url（不带 =）解成字节：码钥匙是这样交给手机的 */
+export function fromBase64Url(text: string): Uint8Array {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  const out: number[] = [];
+  let buffer = 0;
+  let bits = 0;
+  for (const ch of text.replace(/=+$/, '')) {
+    const v = alphabet.indexOf(ch === '+' ? '-' : ch === '/' ? '_' : ch);
+    if (v < 0) throw new Error('码钥匙不对');
+    buffer = ((buffer << 6) | v) & 0xffffff;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push((buffer >> bits) & 0xff);
+    }
+  }
+  return Uint8Array.from(out);
+}
+
+/**
+ * 手机上生成饭卡码（与服务端 src/server/modules/canteen/code.ts 同一个算法）：用纯 JS 的 HMAC-SHA256，
+ * 不靠 WebCrypto——店里局域网用 http 打开时浏览器不给 WebCrypto，饭卡码也要亮得出来。
+ */
+export function signCanteenCode(codeKey: string, employeeId: number, atMs: number): { text: string; step: number } {
+  const step = codeStepOf(atMs);
+  const mac = hmacSha256(fromBase64Url(codeKey), new TextEncoder().encode(codeMessage(step)));
+  return { text: formatCanteenCode(employeeId, step, base32(mac, CODE_MAC_LENGTH)), step };
+}
+
 const CODE_RE = /^YZC1:([0-9A-Z]{1,10}):([0-9A-Z]{1,10}):([A-Z2-7]{8})$/;
 export function parseCanteenCode(text: string): { employeeId: number; step: number; mac: string } | null {
   const m = CODE_RE.exec(text.trim().toUpperCase());
@@ -250,6 +280,21 @@ export const PHONE = /^1[3-9][0-9]{9}$/;
 export const normalizePhone = (raw: string) => raw.replace(/[\s-]/g, '').replace(/^(\+?86)(?=1[0-9]{10}$)/, '');
 /** 名单里给人看的手机号：138 0013 8000 */
 export const displayPhone = (phone: string) => `${phone.slice(0, 3)} ${phone.slice(3, 7)} ${phone.slice(7)}`;
+
+/**
+ * 店里局域网的地址（K18）：本机、192.168.x.x、10.x.x.x、172.16–31.x.x、100.64–127.x.x（Tailscale 的地址），
+ * 或 .local / .lan / .home.arpa / .internal 结尾的名字。员工入口地址用 http 时只能是这样的地址（公网地址要 https），
+ * 员工端口按它决定登录 Cookie 要不要加 Secure（局域网 http 打开的加了浏览器存不下）。
+ */
+export function isLanHost(hostname: string): boolean {
+  const host = hostname.trim().toLowerCase().replace(/\.$/, '');
+  if (host === 'localhost' || /\.(local|lan|home\.arpa|internal)$/.test(host)) return true;
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!m) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  if ([a, b, Number(m[3]), Number(m[4])].some((n) => n > 255)) return false;
+  return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+}
 
 /**
  * 注册链接：员工入口地址 + #reg（扫海报上的二维码、点员工群里的链接，打开就是「新同事登记」）。
