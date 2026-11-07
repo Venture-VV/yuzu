@@ -112,11 +112,28 @@ export async function startScanner(video: HTMLVideoElement, onText: (text: strin
   };
 }
 
+/**
+ * 读单张图片（从相册选、拍一张）的边长：先按原大小（最多 1400 像素）读，读不出来再缩到 480、360 像素读。
+ * jsQR 偶尔读不出原大小的圆角饭卡码（约千分之一到千分之五，与码的内容和手机缩放有关），缩小以后都能读出来。
+ */
+export const IMAGE_DECODE_SIDES = [1400, 480, 360] as const;
+
 /** 从相册选的图片里读二维码 */
 export async function decodeImageFile(file: File): Promise<string | null> {
   const bitmap = await createImageBitmap(file);
   try {
-    return await decodeFrom(bitmap, bitmap.width, bitmap.height, document.createElement('canvas'), 1400);
+    const canvas = document.createElement('canvas');
+    const longest = Math.max(bitmap.width, bitmap.height);
+    let tried = 0;
+    for (const side of IMAGE_DECODE_SIDES) {
+      // 图片本来就比这一档小时，缩放结果与上一档一样，不用再读一遍
+      const actual = Math.min(longest, side);
+      if (actual === tried) continue;
+      tried = actual;
+      const text = await decodeFrom(bitmap, bitmap.width, bitmap.height, canvas, side);
+      if (text) return text;
+    }
+    return null;
   } finally {
     bitmap.close();
   }

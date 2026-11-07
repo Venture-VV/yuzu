@@ -313,7 +313,7 @@ function ResultCard({ shown, onClose }: { shown: Shown; onClose: () => void }) {
   const tone =
     shown.status === 'ok' ? 'bg-leaf text-white' : shown.status === 'already' ? 'bg-yuzu text-ink' : shown.status === 'queued' ? 'bg-sky text-white' : 'bg-berry text-white';
   return (
-    <button type="button" onClick={onClose} className={cn('absolute inset-0 flex animate-pop flex-col items-center justify-center gap-2 p-6 text-center', tone)} data-testid="scan-result" data-status={shown.status}>
+    <button type="button" onClick={onClose} className={cn('absolute inset-0 flex animate-pop flex-col items-center justify-center gap-2 p-6 text-center', tone)} data-testid="scan-result" data-status={shown.status} data-code={shown.status === 'error' ? shown.code : undefined}>
       {shown.status === 'ok' || shown.status === 'already' ? (
         <>
           <span className="text-[56px] leading-none">{shown.result.checkin.avatar}</span>

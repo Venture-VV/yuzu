@@ -10,6 +10,7 @@
 
 import { mkdirSync } from 'node:fs';
 import { expect, test, devices, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { qrShape } from '../src/shared/qr-svg';
 
 const CANTEEN = process.env.E2E_CANTEEN_URL ?? 'http://localhost:8090';
 const OUT = 'test-results/canteen';
@@ -46,6 +47,26 @@ async function join(ctx: BrowserContext, code: string, password: string): Promis
   await p.getByRole('button', { name: /开吃/ }).click();
   await expect(p.getByTestId('tab-home')).toBeVisible();
   return p;
+}
+
+/**
+ * 一张 jsQR 按原大小读不出来的饭卡码截图（iPhone 3 倍、与饭卡码页一样的外框；码的内容是随便编的，门店系统会拒绝）。
+ * 圆角码偶尔有这样的（约千分之一到千分之五）：扫码页要缩小再读，不能报「没找到二维码」（CI 偶发失败，8.0.1 修）。
+ */
+async function hardCodeImage(browser: Browser, path: string) {
+  const text = 'YZC1:H:ZMBGD:ZSV7GIBF';
+  const s = qrShape(text);
+  const eyes = s.eyes
+    .map((e) => `<rect x="${e.x + 0.5}" y="${e.y + 0.5}" width="6" height="6" rx="1.8" fill="none" stroke="#24493A" stroke-width="1"/><rect x="${e.x + 2}" y="${e.y + 2}" width="3" height="3" rx="0.9" fill="#24493A"/>`)
+    .join('');
+  const svg = `<svg viewBox="-2 -2 ${s.size + 4} ${s.size + 4}" style="display:block;width:100%;aspect-ratio:1/1" shape-rendering="geometricPrecision"><rect x="-2" y="-2" width="${s.size + 4}" height="${s.size + 4}" fill="#fff" rx="2.5"/><path d="${s.modules}" fill="#3B2F2A"/>${eyes}</svg>`;
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 800 }, deviceScaleFactor: 3 });
+  const p = await ctx.newPage();
+  await p.setContent(
+    `<body style="margin:0;background:#fff8ec"><div id="code" style="margin:24px auto;width:min(84vw,330px);border-radius:34px;padding:7px;background:conic-gradient(#f6c445 200deg,#fbe7a6 0deg)"><div style="border-radius:27px;background:#fff;padding:16px">${svg}</div></div></body>`,
+  );
+  await p.locator('#code').screenshot({ path });
+  await ctx.close();
 }
 
 /** 页面没有横向滚动 */
@@ -354,6 +375,13 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
     await mgr.getByTestId('scan-file').setInputFiles(`${OUT}/qr-A001.png`);
     await expect(result).toHaveAttribute('data-status', 'already');
     await expect(result).toContainText('已经打过卡啦');
+    await result.click();
+
+    // 原大小读不出来的码：缩小再读，读出来交给门店系统（内容是编的，门店系统拒绝：码不对），不报「没找到二维码」
+    await hardCodeImage(mgr.context().browser()!, `${OUT}/qr-hard.png`);
+    await mgr.getByTestId('scan-file').setInputFiles(`${OUT}/qr-hard.png`);
+    await expect(result).toHaveAttribute('data-status', 'error');
+    await expect(result).toHaveAttribute('data-code', 'CODE_INVALID');
     await result.click();
 
     await ctx.setOffline(true);
