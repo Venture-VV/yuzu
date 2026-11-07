@@ -64,9 +64,9 @@ function TodayTab({ go }: { go: (t: Tab) => void }) {
     { done: o.settings.departmentId !== null, label: '选好食堂部门', detail: o.departmentName ?? '还没选', tab: 'settings' as Tab },
     { done: !!o.settings.portalUrl, label: '填员工入口地址（注册二维码、开通卡片都用它）', detail: o.settings.portalUrl || '还没填', tab: 'settings' as Tab },
     {
-      done: !!reg.code && reg.enabled,
-      label: '生成注册二维码，发到员工群或贴在饭堂（大家扫码自己登记）',
-      detail: !reg.code ? '还没生成' : !reg.enabled ? '自己登记关着' : `已经有 ${reg.selfRegistered} 位自己登记`,
+      done: reg.enabled,
+      label: '打开自己登记，把注册二维码发到员工群或贴在饭堂（大家扫码自己登记）',
+      detail: !reg.enabled ? '自己登记关着' : `已经有 ${reg.selfRegistered} 位自己登记`,
       tab: 'settings' as Tab,
     },
     { done: o.people.managers > 0, label: '在名单里安排食堂负责人和厨师', detail: `在用 ${o.people.active} 位 · 负责人 ${o.people.managers} · 厨师 ${o.people.cooks}`, tab: 'roster' as Tab },

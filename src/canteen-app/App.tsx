@@ -1,6 +1,6 @@
 // 柚子饭堂的外壳：开机先问门店系统「我是谁」（连不上就用上次的，离线也能亮码）；底部五个入口按角色显示。
 // 第二期（docs/CANTEEN.md 第 14、15 节）：这台手机第一次打开时先放柚子的开场动画；没登录的进门是「新同事登记」
-// （扫注册二维码来的 #reg=口令 自动带上），登记好或第一次登录后接着走新手教程。
+// （扫注册二维码、点员工群里的链接来的 #reg 直接进登记），登记好或第一次登录后接着走新手教程。
 
 import { useCallback, useEffect, useState } from 'react';
 import { canEditMenu, canScan, type CanteenMe } from '@shared/canteen';
@@ -24,14 +24,13 @@ import { Button, cn, Sheet, Toasts } from './ui';
 type Route = 'home' | 'menu' | 'code' | 'talk' | 'kitchen' | 'scan' | 'me';
 const ROUTES: Route[] = ['home', 'menu', 'code', 'talk', 'kitchen', 'scan', 'me'];
 
-/** #join=ABCD2345（开通卡片）、#reg=ABCD2345（注册二维码）、#/menu、#/intro 这样的地址 */
-function readHash(): { route: Route; join: string | null; reg: string | null; login: boolean; intro: boolean } {
+/** #join=ABCD2345（开通卡片）、#reg（注册二维码；以前印的 #reg=口令 也认，口令不再看）、#/menu、#/intro 这样的地址 */
+function readHash(): { route: Route; join: string | null; reg: boolean; login: boolean; intro: boolean } {
   const h = window.location.hash.replace(/^#\/?/, '');
   const join = /^join(?:=|\/)([A-Za-z0-9-]*)/.exec(h);
-  if (join) return { route: 'home', join: join[1] ?? '', reg: null, login: false, intro: false };
-  const reg = /^reg(?:=|\/)([A-Za-z0-9-]*)/.exec(h);
-  if (reg) return { route: 'home', join: null, reg: reg[1] ?? '', login: false, intro: false };
-  return { route: (ROUTES as string[]).includes(h) ? (h as Route) : 'home', join: null, reg: null, login: h === 'login', intro: h === 'intro' };
+  if (join) return { route: 'home', join: join[1] ?? '', reg: false, login: false, intro: false };
+  if (/^reg(?:[=/][A-Za-z0-9-]*)?$/.test(h)) return { route: 'home', join: null, reg: true, login: false, intro: false };
+  return { route: (ROUTES as string[]).includes(h) ? (h as Route) : 'home', join: null, reg: false, login: h === 'login', intro: h === 'intro' };
 }
 
 /** 这台手机看过开场动画没有（K15） */
@@ -88,7 +87,7 @@ export function App() {
   }, [adopt]);
 
   useEffect(() => {
-    if (hash.join !== null || hash.reg !== null || hash.login) {
+    if (hash.join !== null || hash.reg || hash.login) {
       setState((s) => (s === 'loading' ? 'auth' : s));
       return;
     }
@@ -165,17 +164,16 @@ export function App() {
     );
   if (state === 'closed') return shell(<ClosedPage onRetry={() => void refresh()} />);
   if (state === 'offline') return shell(<OfflinePage onRetry={() => void refresh()} />);
-  // 扫开通卡片（#join=…）或注册二维码（#reg=…）打开的：哪怕这台手机上登录着别人，也先给开通、登记（换人用）
-  if (state === 'auth' || !cached || hash.join !== null || hash.reg !== null) {
-    // 页面开着时又点了另一个口令的链接（只有 # 后面变了）：按口令换一个新页面，填的口令、核对结果都跟着新链接走，
-    // 不会把旧口令（或上一个链接不对时清空的口令）交上去
+  // 扫开通卡片（#join=…）或注册二维码（#reg）打开的：哪怕这台手机上登录着别人，也先给开通、登记（换人用）
+  if (state === 'auth' || !cached || hash.join !== null || hash.reg) {
+    // 页面开着时又点了另一个开通码的链接（只有 # 后面变了）：按开通码换一个新页面，填的码、核对结果都跟着新链接走
     if (hash.join !== null && !hash.login) {
       return shell(<JoinPage key={`join:${hash.join}`} initialCode={hash.join} onDone={signedIn} onLogin={() => (window.location.hash = '/login')} />);
     }
-    if (hash.reg !== null || (justIntroduced && !hash.login)) {
-      return shell(<RegisterPage key={`reg:${hash.reg ?? ''}`} initialCode={hash.reg ?? ''} onDone={signedIn} onLogin={() => (window.location.hash = '/login')} />);
+    if (hash.reg || (justIntroduced && !hash.login)) {
+      return shell(<RegisterPage onDone={signedIn} onLogin={() => (window.location.hash = '/login')} />);
     }
-    return shell(<LoginPage onDone={signedIn} onJoin={() => (window.location.hash = 'join=')} onRegister={() => (window.location.hash = 'reg=')} />);
+    return shell(<LoginPage onDone={signedIn} onJoin={() => (window.location.hash = 'join=')} onRegister={() => (window.location.hash = 'reg')} />);
   }
 
   const { me, offsetMs } = cached;

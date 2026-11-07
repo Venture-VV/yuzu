@@ -86,7 +86,7 @@ export function RosterTab() {
           <EmptyState
             art="leaf"
             title={list.data?.length ? '没有符合条件的员工' : '名单还是空的'}
-            description="在「设置」里生成注册二维码，大家扫码自己登记；没手机的同事在这里单个加，或者把「工号 姓名 部门」一行一位粘贴进来。"
+            description="在「设置」里打开自己登记，大家扫注册二维码自己登记；没手机的同事在这里单个加，或者把「工号 姓名 部门」一行一位粘贴进来。"
           />
         </Card>
       ) : (

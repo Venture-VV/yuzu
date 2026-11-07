@@ -1,37 +1,18 @@
-// 新同事登记（docs/CANTEEN.md 第 14 节，K12–K14）：开场动画的最后进门就是这里。一本手绘的登记簿，三格——用户名、手机号、密码；
-// 扫注册二维码来的（#reg=口令）口令自动带上，没带的多一格「注册口令」。登记好账号马上开好、直接进去（接着是新手教程）。
+// 新同事登记（docs/CANTEEN.md 第 14 节，K12–K14）：开场动画的最后进门就是这里。一本手绘的登记簿，三格——用户名、手机号、密码，
+// 不要注册口令（店主 2026-11-07）。登记好账号马上开好、直接进去（接着是新手教程）。
 // 同一个手机号、同一个密码再点一次就是登录：回复没收到时原样再点不会登记两次。
 
 import { useEffect, useState, type FormEvent } from 'react';
-import {
-  normalizeActivationCode,
-  normalizePhone,
-  normalizeUsername,
-  PASSWORD_MIN,
-  PHONE,
-  usernameProblem,
-  type CanteenMe,
-  type RegisterInfo,
-} from '@shared/canteen';
+import { normalizePhone, normalizeUsername, PASSWORD_MIN, PHONE, usernameProblem, type CanteenMe, type RegisterInfo } from '@shared/canteen';
 import { Mascot } from '../Mascot';
-import { IconDoor, IconKey, IconMe, IconPhone } from '../doodles';
+import { IconKey, IconMe, IconPhone } from '../doodles';
 import { ApiError, call, messageOf, NetworkError } from '../lib';
 import { Button, cn, inputClass, Stamp } from '../ui';
 
-type Field = 'username' | 'phone' | 'password' | 'code';
+type Field = 'username' | 'phone' | 'password';
 
-export function RegisterPage({
-  initialCode,
-  onDone,
-  onLogin,
-}: {
-  initialCode: string;
-  onDone: (me: CanteenMe) => void;
-  onLogin: () => void;
-}) {
+export function RegisterPage({ onDone, onLogin }: { onDone: (me: CanteenMe) => void; onLogin: () => void }) {
   const [info, setInfo] = useState<RegisterInfo | null>(null);
-  const [code, setCode] = useState(initialCode);
-  const [codeFromLink, setCodeFromLink] = useState(false);
   const [username, setUsername] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -39,25 +20,20 @@ export function RegisterPage({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ field: Field | null; text: string } | null>(null);
 
-  // 打开时问一下：开着自己登记没有、链接里带的口令对不对
+  // 打开时问一下：开着自己登记没有（问不到的先当作开着，提交时门店系统会再说）
   useEffect(() => {
-    const c = normalizeActivationCode(initialCode);
-    call<RegisterInfo>('GET', `/api/canteen/register${c ? `?code=${encodeURIComponent(c)}` : ''}`)
-      .then((r) => {
-        setInfo(r);
-        if (r.codeOk) setCodeFromLink(true);
-      })
+    let alive = true;
+    call<RegisterInfo>('GET', '/api/canteen/register')
+      .then((r) => alive && setInfo(r))
       .catch((e) => {
-        if (e instanceof ApiError && e.code === 'REGISTRATION_CODE_INVALID') {
-          setInfo({ open: true, codeOk: false });
-          setCode('');
-          setError({ field: 'code', text: '链接里的注册口令不对或已经换了：请扫饭堂里最新的注册二维码，或问管理员要口令' });
-        } else {
-          setInfo({ open: true, codeOk: null });
-          if (e instanceof NetworkError) setError({ field: null, text: '连不上门店系统：联网后再登记' });
-        }
+        if (!alive) return;
+        setInfo({ open: true });
+        if (e instanceof NetworkError) setError({ field: null, text: '连不上门店系统：联网后再登记' });
       });
-  }, [initialCode]);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const check = (): { field: Field; text: string } | null => {
     const name = normalizeUsername(username);
@@ -65,7 +41,6 @@ export function RegisterPage({
     if (bad) return { field: 'username', text: bad };
     if (!PHONE.test(normalizePhone(phone))) return { field: 'phone', text: '手机号写 11 位，例如 13800138000' };
     if (password.length < PASSWORD_MIN) return { field: 'password', text: `密码至少 ${PASSWORD_MIN} 位` };
-    if (!codeFromLink && normalizeActivationCode(code).length !== 8) return { field: 'code', text: '注册口令是 8 位字母数字（饭堂海报上、或问管理员）' };
     return null;
   };
 
@@ -76,19 +51,11 @@ export function RegisterPage({
     setBusy(true);
     setError(null);
     try {
-      onDone(
-        await call<CanteenMe>('POST', '/api/canteen/register', {
-          code: normalizeActivationCode(code),
-          username: normalizeUsername(username),
-          phone: normalizePhone(phone),
-          password,
-        }),
-      );
+      onDone(await call<CanteenMe>('POST', '/api/canteen/register', { username: normalizeUsername(username), phone: normalizePhone(phone), password }));
     } catch (err) {
       if (err instanceof ApiError) {
-        const field: Field | null =
-          err.code === 'USERNAME_TAKEN' ? 'username' : err.code === 'PHONE_TAKEN' ? 'phone' : err.code === 'REGISTRATION_CODE_INVALID' ? 'code' : null;
-        if (err.code === 'REGISTRATION_CODE_INVALID') setCodeFromLink(false);
+        if (err.code === 'REGISTRATION_CLOSED') setInfo({ open: false });
+        const field: Field | null = err.code === 'USERNAME_TAKEN' ? 'username' : err.code === 'PHONE_TAKEN' ? 'phone' : null;
         setError({ field, text: err.message });
       } else {
         // 回复没收到：账号可能已经开好了。原样再点一次就是登录，不会登记两次
@@ -128,7 +95,7 @@ export function RegisterPage({
         </div>
         {closed ? (
           <div className="space-y-4 p-5 text-[15px] text-ink-2">
-            <p>员工食堂还没开放自己登记，或者注册口令换了。可以找管理员要一张开通卡片，或者用已有的账号登录。</p>
+            <p>员工食堂现在没开放自己登记。可以找管理员要一张开通卡片，或者用已有的账号登录。</p>
             <Button big className="w-full" onClick={onLogin}>
               去登录
             </Button>
@@ -188,23 +155,6 @@ export function RegisterPage({
                 </button>
               </div>
             </Line>
-            {codeFromLink ? (
-              <p className="pt-2 text-[13px] font-semibold text-organic" data-testid="register-code-ok">
-                ✓ 注册口令已经从二维码里带上了
-              </p>
-            ) : (
-              <Line icon={<IconDoor size={22} />} label="注册口令" hint="饭堂海报上的 8 位字母数字，或者问管理员" error={fieldError('code')}>
-                <input
-                  className={`${inputClass} font-mono tracking-[0.2em] uppercase`}
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.toUpperCase())}
-                  placeholder="ABCD-2345"
-                  autoCapitalize="characters"
-                  maxLength={9}
-                  aria-label="注册口令"
-                />
-              </Line>
-            )}
             {error && error.field === null && (
               <p className="pt-2 text-[14px] font-bold text-danger" role="alert">
                 {error.text}
