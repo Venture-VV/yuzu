@@ -454,6 +454,8 @@ jobs:
       CANTEEN_PORT: 8090
       # 只给 CI 的一次性库用，不是任何门店环境的密钥
       CANTEEN_CODE_SECRET: ci-only-canteen-code-secret-0123456789abcdef
+      # 与 compose.canteen.yaml 的默认一样：局域网 http 打开（canteen-lan.local）的登录 Cookie 照样存得下（K18）
+      CANTEEN_COOKIE_SECURE: 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

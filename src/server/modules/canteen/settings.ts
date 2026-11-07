@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import {
   DEFAULT_CANTEEN_SETTINGS,
+  isLanHost,
   MEAL_LABELS,
   MEALS,
   mealWindowsOverlap,
@@ -36,7 +37,10 @@ export async function loadCanteenSettings(db: Db): Promise<CanteenSettings> {
   };
 }
 
-/** 员工入口地址：https 的网址；本机测试可以用 http://localhost、127.0.0.1；不带路径之外的东西 */
+/**
+ * 员工入口地址：https 的网址；店里局域网的地址（K18：192.168.x.x、10.x.x.x 等，见 isLanHost）可以用 http，
+ * 公网地址不能用 http（登录与饭卡码钥匙会明文过公网）；不带路径之外的东西
+ */
 const PortalUrl = z
   .string()
   .trim()
@@ -45,12 +49,11 @@ const PortalUrl = z
     if (!s) return true;
     try {
       const u = new URL(s);
-      const local = u.hostname === 'localhost' || u.hostname === '127.0.0.1';
-      return (u.protocol === 'https:' || (u.protocol === 'http:' && local)) && !u.username && !u.password && !u.search && !u.hash;
+      return (u.protocol === 'https:' || (u.protocol === 'http:' && isLanHost(u.hostname))) && !u.username && !u.password && !u.search && !u.hash;
     } catch {
       return false;
     }
-  }, '员工入口地址要以 https:// 开头，例如 https://staff.example.com（本机测试可以用 http://localhost）')
+  }, '员工入口地址要以 https:// 开头，例如 https://staff.example.com；店里局域网的地址可以用 http://，例如 http://192.168.1.20:8090')
   .transform((s) => s.replace(/\/+$/, ''));
 
 const SettingsInput = z.object({

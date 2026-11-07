@@ -71,7 +71,7 @@ export class CameraError extends Error {
 /** 打开后置相机，把识别到的文字交给 onText（同一个码 2.5 秒内只报一次）；返回停止函数 */
 export async function startScanner(video: HTMLVideoElement, onText: (text: string) => void): Promise<() => void> {
   if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-    throw new CameraError('insecure', '相机要在 https 地址下才能用：请用管理员给的 https 网址打开柚子饭堂');
+    throw new CameraError('insecure', '这个地址打开的网页开不了相机取景：用「拍一张扫码」或「从相册选」');
   }
   let stream: MediaStream;
   try {

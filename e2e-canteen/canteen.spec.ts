@@ -2,6 +2,8 @@
 // 厨师在手机上发布菜单 → 员工开通、点赞、亮饭卡码 → 负责人「从相册选」员工的码打卡、重复扫提示已打卡、
 // 断网扫到先记下、联网后自动补登 → 后台看到人数与记录。
 // 第二期（第 14–16 节）：新同事扫注册二维码 → 看柚子的开场动画 → 自己登记 → 走新手教程 → 跟柚子说 → 后台柚子信箱回信。
+// 店里局域网（K18）：用 http://canteen-lan.local（浏览器解析到本机）打开——登录、饭卡码、教程第二遍、负责人拍照扫码；
+// 柚子的声音（K19）：开场动画一句一句念出来（无头浏览器里没有中文朗读，换成假的朗读记下念了什么）。
 // 前面那几位（开通卡片来的）在手机上先记成「看过开场、走过教程」，只测原来的流程。
 // 要应用开着员工端口：E2E_BASE_URL（员工后台，默认 http://localhost:8080）、E2E_CANTEEN_URL（员工端口，默认 http://localhost:8090），
 // 库里要有演示的店主 linlan（seed-demo）。只在独立演示库上跑：会建部门、员工、菜单与打卡。
@@ -50,6 +52,84 @@ async function join(ctx: BrowserContext, code: string, password: string): Promis
 async function noOverflow(p: Page) {
   const [scroll, client] = await p.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);
   expect(scroll, '页面不应横向溢出').toBeLessThanOrEqual(client + 1);
+}
+
+/** 新手教程从头走到尾：要指东西的每一步都亮着聚光灯（不出「这会儿没出来」），饭卡码那一步码亮着 */
+async function walkTour(p: Page, steps: string[]) {
+  const tour = p.getByTestId('tour');
+  for (const step of steps) {
+    await expect(tour).toHaveAttribute('data-step', step);
+    if (step === 'like') {
+      await p.getByRole('button', { name: '点赞：番茄炒蛋（示例）' }).click();
+      continue;
+    }
+    if (step === 'done') {
+      await p.getByTestId('tour-finish').click();
+      continue;
+    }
+    await expect(p.getByTestId('tour-spotlight')).toBeVisible();
+    if (step === 'code') {
+      await p.getByTestId('tab-code').click();
+      continue;
+    }
+    if (step === 'qr') await expect(p.getByTestId('meal-code').locator('svg[data-qr]')).toHaveAttribute('data-qr', /^YZC1:/);
+    await expect(p.getByText('这一步要指的地方这会儿没出来')).toHaveCount(0);
+    await p.getByTestId('tour-next').click();
+  }
+  await expect(tour).toHaveCount(0);
+}
+
+/** 假的系统朗读：无头浏览器里没有中文朗读。记下念了什么（window.__spoken，打断记 <cancel>）；没点过屏幕时像 Chrome 一样报 not-allowed */
+function fakeSpeech() {
+  const spoken: string[] = [];
+  (window as unknown as { __spoken: string[] }).__spoken = spoken;
+  type U = { text: string; onstart?: (e: unknown) => void; onend?: (e: unknown) => void; onerror?: (e: { error: string }) => void };
+  let current: { u: U; done: boolean } | null = null;
+  const synth = {
+    speaking: false,
+    pending: false,
+    paused: false,
+    getVoices: () => [{ name: 'Tingting', lang: 'zh-CN', localService: true, default: true, voiceURI: 'Tingting' }],
+    speak(u: U) {
+      if (!(navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation?.hasBeenActive) {
+        setTimeout(() => u.onerror?.({ error: 'not-allowed' }), 0);
+        return;
+      }
+      const job = { u, done: false };
+      current = job;
+      spoken.push(u.text);
+      synth.speaking = true;
+      setTimeout(() => !job.done && u.onstart?.({}), 10);
+      setTimeout(() => {
+        if (job.done) return;
+        job.done = true;
+        synth.speaking = false;
+        u.onend?.({});
+      }, 400);
+    },
+    cancel() {
+      if (current && !current.done) {
+        current.done = true;
+        current.u.onerror?.({ error: 'interrupted' });
+      }
+      synth.speaking = false;
+      spoken.push('<cancel>');
+    },
+    pause() {},
+    resume() {},
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: synth });
+  Object.defineProperty(window, 'SpeechSynthesisUtterance', {
+    configurable: true,
+    value: class {
+      text: string;
+      constructor(text: string) {
+        this.text = text;
+      }
+    },
+  });
 }
 
 test.describe.serial('员工食堂 · 柚子饭堂', () => {
@@ -500,20 +580,15 @@ test.describe.serial('第二期：开场动画、新同事登记、新手教程�
     await p.getByTestId('intro-skip').click();
     await expect(p.getByTestId('replay-intro')).toBeVisible();
 
-    // 这台手机亮不了饭卡码（例如不是 HTTPS 打开的）：再走一遍教程，指不到饭卡码的那一步等一会儿照常显示说话框，
-    // 能「下一步」、能跳过，不会整屏挡住（Codex 审查 3bc51e6）
+    // 再走一遍教程（店主 2026-11-07：第二次打开可能演示不完整）：一步不少走到「开始用吧」。去掉 WebCrypto（局域网 http 打开时
+    // 浏览器就不给）饭卡码照样亮，那一步照样指着它（K18）
     await p.evaluate(() => Object.defineProperty(window.crypto, 'subtle', { configurable: true, get: () => undefined }));
     await p.getByTestId('replay-tour').click();
+    await walkTour(p, ['home', 'like', 'code', 'qr', 'talk', 'me', 'done']);
+    // 第三遍中途跳过也行
+    await p.getByTestId('tab-me').click();
+    await p.getByTestId('replay-tour').click();
     await expect(tour).toHaveAttribute('data-step', 'home');
-    await p.getByTestId('tour-next').click();
-    await p.getByRole('button', { name: '点赞：番茄炒蛋（示例）' }).click();
-    await expect(tour).toHaveAttribute('data-step', 'code');
-    await p.getByTestId('tab-code').click();
-    await expect(tour).toHaveAttribute('data-step', 'qr');
-    await expect(p.getByText('这一步要指的地方这会儿没出来')).toBeVisible();
-    await expect(p.getByTestId('meal-code')).toHaveCount(0);
-    await p.getByTestId('tour-next').click();
-    await expect(tour).toHaveAttribute('data-step', 'talk');
     await p.getByTestId('tour-skip').click();
     await expect(tour).toHaveCount(0);
 
@@ -529,6 +604,96 @@ test.describe.serial('第二期：开场动画、新同事登记、新手教程�
     await other.close();
     await ctx.close();
     await actx.close();
+  });
+
+  test('店里局域网（http）打开：登录、饭卡码、教程第二遍一步不少；负责人拍一张员工的码打卡（K18）', async ({ browser }) => {
+    // canteen-lan.local 由浏览器解析到本机（playwright.canteen.config.ts）：对浏览器是局域网的 http 地址（不安全的来源：
+    // 没有 WebCrypto、网页开不了相机取景、没有离线外壳），对员工端口是局域网地址（登录 Cookie 不加 Secure，CI 里开着 CANTEEN_COOKIE_SECURE）
+    const LAN = CANTEEN.replace(/\/\/[^/:]+/, '//canteen-lan.local');
+    const ctx = await phone(browser, 'android');
+    const p = await ctx.newPage();
+    await p.goto(LAN);
+    expect(await p.evaluate(() => [window.isSecureContext, typeof crypto.subtle])).toEqual([false, 'undefined']);
+    await expect(p.getByTestId('login-page')).toBeVisible();
+    await p.getByLabel('账号').fill('13900001234');
+    await p.getByLabel('密码').fill('xiaoyu-2026');
+    await p.getByRole('button', { name: '登录' }).click();
+    await expect(p.getByTestId('tab-home')).toBeVisible();
+    // 刷新还登录着：Cookie 存下了
+    await p.reload();
+    await expect(p.getByTestId('tab-home')).toBeVisible();
+    await p.getByTestId('tab-code').click();
+    const code = p.getByTestId('meal-code');
+    await expect(code.locator('svg[data-qr]')).toHaveAttribute('data-qr', /^YZC1:/);
+    await expect(p.getByText('这个地址不安全')).toHaveCount(0);
+    await p.screenshot({ path: `${OUT}/lan-code.png` });
+    // 教程第二遍：每一步都指着东西
+    await p.getByTestId('tab-me').click();
+    await p.getByTestId('replay-tour').click();
+    await walkTour(p, ['home', 'like', 'code', 'qr', 'talk', 'me', 'done']);
+
+    // 负责人：网页开不了相机取景，改成「拍一张扫码」；拍员工手机上的码
+    const mctx = await phone(browser, 'android');
+    const m = await mctx.newPage();
+    await m.goto(LAN);
+    await m.getByLabel('账号').fill('M001');
+    await m.getByLabel('密码').fill('chen-2026');
+    await m.getByRole('button', { name: '登录' }).click();
+    await m.getByTestId('tab-scan').click();
+    await expect(m.getByTestId('scan-lan-hint')).toBeVisible();
+    await expect(m.getByRole('button', { name: '开始扫码' })).toHaveCount(0);
+    await m.screenshot({ path: `${OUT}/lan-scan.png` });
+    await p.getByTestId('tab-code').click();
+    await code.screenshot({ path: `${OUT}/qr-lan.png` });
+    await m.getByTestId('scan-photo').setInputFiles(`${OUT}/qr-lan.png`);
+    const result = m.getByTestId('scan-result');
+    await expect(result).toHaveAttribute('data-status', /^(ok|already)$/);
+    await expect(result).toContainText('小雨');
+    await m.screenshot({ path: `${OUT}/lan-scan-ok.png` });
+    await mctx.close();
+    await ctx.close();
+  });
+
+  test('开场动画念出柚子的话：没点过屏幕先提示点一下，之后每句都念；关掉声音这台手机记住（K19）', async ({ browser }) => {
+    const ctx = await phone(browser, 'android', true);
+    await ctx.addInitScript(fakeSpeech);
+    const p = await ctx.newPage();
+    await p.goto(CANTEEN);
+    const intro = p.getByTestId('intro');
+    await expect(intro).toBeVisible();
+    const said = () => p.evaluate(() => (window as unknown as { __spoken: string[] }).__spoken.filter((t) => t !== '<cancel>'));
+    // 浏览器还不让出声：说话框里请员工点一下；点了先念第一句（不翻页）
+    await expect(p.getByTestId('intro-voice-hint')).toBeVisible();
+    expect(await said()).toEqual([]);
+    await p.screenshot({ path: `${OUT}/intro-voice-hint.png` });
+    await p.getByTestId('intro-stage').click();
+    await expect.poll(said).toEqual(['hi！欢迎加入汤崎，我是柚子，汤崎的小AI助理，']);
+    await expect(p.getByTestId('intro-voice-hint')).toHaveCount(0);
+    await expect(intro).toHaveAttribute('data-beat', '0');
+    // 之后每翻一句就念这一句
+    await p.getByTestId('intro-stage').click();
+    await expect(intro).toHaveAttribute('data-beat', '1');
+    await expect.poll(async () => (await said()).at(-1)).toBe('目前我在搭建汤崎的线上数字化空间。');
+    await p.getByTestId('intro-stage').click();
+    await p.getByTestId('intro-stage').click();
+    await expect(intro).toHaveAttribute('data-beat', '2');
+    await expect.poll(async () => (await said()).at(-1)).toBe('感谢你的辛勤工作，为我带来足够的token，让我每天都能吃饱饱，');
+    // 关掉声音：之后不念；这台手机记住
+    await p.getByTestId('intro-voice').click();
+    await expect(p.getByTestId('intro-voice')).toHaveAttribute('aria-pressed', 'false');
+    const count = (await said()).length;
+    await p.getByTestId('intro-stage').click();
+    await p.getByTestId('intro-stage').click();
+    await expect(intro).toHaveAttribute('data-beat', '3');
+    await p.waitForTimeout(300);
+    expect((await said()).length).toBe(count);
+    expect(await p.evaluate(() => localStorage.getItem('yuzu.canteen.voice.v1'))).toBe('off');
+    // 再打开：点开声音就接着念这一句
+    await p.getByTestId('intro-voice').click();
+    await expect.poll(async () => (await said()).at(-1)).toBe('目前我的能力还很弱，狂烧24小时token，能做到的事情依然很有限，');
+    await p.getByTestId('intro-skip').click();
+    await expect(intro).toHaveCount(0);
+    await ctx.close();
   });
 });
 

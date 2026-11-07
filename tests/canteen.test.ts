@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { businessDateOf } from '../src/shared/business-date';
+import { signCanteenCode } from '../src/shared/canteen';
 import { makeCanteenCode } from '../src/server/modules/canteen/code';
 import { buildCanteenApp } from '../src/server/modules/canteen/portal';
 import { api, setup, type TestContext } from './helpers';
@@ -103,7 +104,7 @@ describe('模块开关与两个端口的边界', () => {
 });
 
 describe('设置与名单', () => {
-  it('一键新建食堂部门；开饭时间不能重叠；员工入口要 https', async () => {
+  it('一键新建食堂部门；开饭时间不能重叠；员工入口要 https（店里局域网的地址可以用 http，K18）', async () => {
     const d = await admin('POST', '/api/erp/canteen/department', {});
     expect(d.status).toBe(200);
     deptId = d.body.departmentId;
@@ -112,6 +113,9 @@ describe('设置与名单', () => {
     const overlap = { ...s, meals: s.meals.map((m: any) => (m.meal === 'dinner' ? { ...m, start: '14:00' } : m)) };
     expect((await admin('PUT', '/api/erp/canteen/settings', overlap)).status).toBe(400);
     expect((await admin('PUT', '/api/erp/canteen/settings', { ...s, portalUrl: 'http://staff.example.com' })).status).toBe(400);
+    expect((await admin('PUT', '/api/erp/canteen/settings', { ...s, portalUrl: 'http://8.8.8.8:8090' })).status).toBe(400);
+    const lan = await admin('PUT', '/api/erp/canteen/settings', { ...s, portalUrl: 'http://192.168.1.20:8090/' });
+    expect([lan.status, lan.body.portalUrl]).toEqual([200, 'http://192.168.1.20:8090']);
     const ok = await admin('PUT', '/api/erp/canteen/settings', { ...s, portalUrl: 'https://staff.example.com/' });
     expect([ok.status, ok.body.portalUrl, ok.body.departmentId]).toEqual([200, 'https://staff.example.com', deptId]);
   });
@@ -466,5 +470,40 @@ describe('Codex 审查 9d12ae8 的修正', () => {
     expect(r.total).toBeGreaterThan(2001);
     const csv = await ctx.app.inject({ method: 'GET', url: `/api/erp/canteen/checkins.csv?from=${yesterday}&to=${today}`, headers: { cookie: ctx.owner } });
     expect(csv.body.replace(/^\uFEFF/, '').trim().split(/\r?\n/)).toHaveLength(r.total + 1);
+  });
+});
+
+describe('店里局域网用 http 打开（K18）', () => {
+  it('手机上纯 JS 算的饭卡码（不靠 WebCrypto）扫得进', async () => {
+    const lan = await hire('L001', '小局', 'staff', otherDeptId);
+    clock = at('12:10');
+    const code = signCanteenCode(lan.me.codeKey, lan.id, clock).text;
+    expect(code).toBe(makeCanteenCode(SECRET, lan.id, lan.epoch, clock));
+    const r = await scan(boss.cookie, { code });
+    expect([r.status, r.body.status, r.body.checkin.empNo]).toEqual([200, 'ok', 'L001']);
+  });
+
+  it('登录 Cookie：https 或公网地址加 Secure；局域网 http 打开的不加（不然浏览器存不下）', async () => {
+    const secureOn = { ...ctx.config, canteen: { port: null, host: '127.0.0.1', codeSecret: SECRET, cookieSecure: true, trustProxy: ['127.0.0.1'] } };
+    const secureOff = { ...secureOn, canteen: { ...secureOn.canteen, cookieSecure: false } };
+    const apps = { on: await buildCanteenApp(ctx.sql, secureOn, { clock: () => clock, openCacheMs: 0 }), off: await buildCanteenApp(ctx.sql, secureOff, { clock: () => clock, openCacheMs: 0 }) };
+    try {
+      const secureFlag = async (app: FastifyInstance, headers: Record<string, string>) => {
+        const res = await app.inject({ method: 'POST', url: '/api/canteen/login', headers, payload: { empNo: 'L001', password: 'Fan-tang-2026' } });
+        expect(res.statusCode, res.body).toBe(200);
+        return res.cookies.find((k) => k.name === 'yuzu_canteen_sid')?.secure ?? false;
+      };
+      // CANTEEN_COOKIE_SECURE=true（compose.canteen.yaml 的默认）
+      expect(await secureFlag(apps.on, { host: 'staff.example.com' })).toBe(true);
+      expect(await secureFlag(apps.on, { host: '192.168.1.20:8090' })).toBe(false);
+      expect(await secureFlag(apps.on, { host: 'yuzu.local:8090' })).toBe(false);
+      expect(await secureFlag(apps.on, { host: '192.168.1.20:8090', 'x-forwarded-proto': 'https' })).toBe(true);
+      // 没设：https 打开的照样加
+      expect(await secureFlag(apps.off, { host: 'staff.example.com', 'x-forwarded-proto': 'https' })).toBe(true);
+      expect(await secureFlag(apps.off, { host: '192.168.1.20:8090' })).toBe(false);
+    } finally {
+      await apps.on.close();
+      await apps.off.close();
+    }
   });
 });

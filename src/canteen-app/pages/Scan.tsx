@@ -1,5 +1,6 @@
 // 扫码打卡（食堂负责人）：相机对准员工的饭卡码，叮咚一声就记下；没带手机的同事手动登记；登记错了当天可以撤销。
 // 每一笔先存在这台手机上再交给门店系统，没网时显示「已记下」，联网后自动按原编号补交（queue.ts）。
+// 店里局域网用 http 打开时，浏览器不让网页开相机取景（K18）：改成「拍一张扫码」，用手机自带的相机拍员工的码再识别。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MEAL_EMOJI, MEAL_LABELS, MEALS, type CanteenCheckinRow, type CanteenMe, type CanteenPerson, type CanteenToday, type CheckinResult } from '@shared/canteen';
@@ -21,6 +22,8 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
   const busyRef = useRef(false);
   const coolUntil = useRef(0);
   const [camera, setCamera] = useState<'off' | 'starting' | 'on'>('off');
+  // 网页能不能开相机取景：要 https（或本机地址）和 getUserMedia；局域网 http 打开的不行，只能拍照识别
+  const [liveCamera] = useState(() => window.isSecureContext && !!navigator.mediaDevices?.getUserMedia);
   const [cameraError, setCameraError] = useState('');
   const [shown, setShown] = useState<Shown | null>(null);
   const [today, setToday] = useState<CanteenToday | null>(null);
@@ -125,17 +128,17 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
   };
   useEffect(() => () => stopRef.current?.(), []);
 
-  const pickImage = async (file: File | undefined) => {
+  const pickImage = async (file: File | undefined, label = '相册') => {
     if (!file) return;
     unlockAudio();
     try {
       const text = await decodeImageFile(file);
       if (!text) {
         beep('error');
-        show({ status: 'error', code: 'NO_QR', message: '这张图里没找到二维码' });
+        show({ status: 'error', code: 'NO_QR', message: label === '拍照' ? '这张照片里没找到二维码：凑近一点、对准员工手机上的码再拍' : '这张图里没找到二维码' });
         return;
       }
-      await record({ code: text }, '相册');
+      await record({ code: text }, label);
     } catch {
       show({ status: 'error', code: 'NO_QR', message: '这张图读不了，换一张试试' });
     }
@@ -174,9 +177,28 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
             <Mascot mood={cameraError ? 'oops' : 'happy'} className="size-20" />
             {cameraError && <p className="text-[14px] font-bold text-yuzu">{cameraError}</p>}
-            <Button big onClick={() => void start()} disabled={camera === 'starting'}>
-              {camera === 'starting' ? '正在打开相机…' : '开始扫码'}
-            </Button>
+            {liveCamera ? (
+              <Button big onClick={() => void start()} disabled={camera === 'starting'}>
+                {camera === 'starting' ? '正在打开相机…' : '开始扫码'}
+              </Button>
+            ) : (
+              <>
+                <p className="text-[14px] font-bold text-white" data-testid="scan-lan-hint">
+                  店里局域网打开的，网页里开不了相机取景：点下面，用手机相机拍一张员工的饭卡码
+                </p>
+                <label className="inline-flex h-14 cursor-pointer items-center justify-center gap-2 rounded-2xl bg-wood px-6 text-[17px] font-black text-white shadow-[0_4px_0_var(--color-wood-ink)] active:translate-y-[3px] active:shadow-[0_1px_0_var(--color-wood-ink)]">
+                  📷 拍一张扫码
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    data-testid="scan-photo"
+                    onChange={(e) => void pickImage(e.target.files?.[0], '拍照').finally(() => (e.target.value = ''))}
+                  />
+                </label>
+              </>
+            )}
           </div>
         )}
         {camera === 'on' && (

@@ -31,7 +31,7 @@ export interface CanteenConfig {
   host: string;
   /** 饭卡码的密钥（CANTEEN_CODE_SECRET）：员工的码钥匙由它算出；只在 yuzu */
   codeSecret: string | null;
-  /** 员工端走 HTTPS 时设 true（Cookie 加 Secure） */
+  /** 员工端走 HTTPS 时设 true（Cookie 加 Secure；店里局域网用 http 打开的不加，K18）。https 打开的不设也加 */
   cookieSecure: boolean;
   /** 前面的转发服务器（Caddy）的地址：限次按它转来的真实来源 IP 算；空为不信任转发头 */
   trustProxy: string[];

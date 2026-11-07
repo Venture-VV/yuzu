@@ -2,11 +2,14 @@
 // 七段：柚子每段换一个动作和表情，旁边的小道具跟着变；字一个一个打出来（说话时嘴一张一合），点一下打完这句、再点下一句。
 // 最后一段画出「柚子食堂」的暖帘，点「进门」暖帘掀开，接着是新同事登记（没登录的）或新手教程（已登录的）。
 // 系统设了「减少动态效果」时字直接出来、柚子不动。
+// 柚子的话会念出来（K19，voice.ts）：每段开始时念这一句，念的时候嘴一张一合；右上角能关掉声音。
+// 浏览器要先点过一下屏幕才肯出声：第一次打开时说话框里提示「点一下，听柚子说」，点了就从这一句念起。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Mascot, type Mood, type Pose } from '../Mascot';
-import { IconArrow, IconDoor } from '../doodles';
+import { IconArrow, IconDoor, IconSound } from '../doodles';
 import { cn } from '../ui';
+import { useYuzuVoice } from '../voice';
 import { BuildingSketch, BurningClock, Feast, Noren, ScribbleCloud, SignBoard, TokenRain, Twinkles } from './props';
 
 type Scene = 'hello' | 'build' | 'tokens' | 'burn' | 'scribble' | 'feast' | 'door';
@@ -29,6 +32,7 @@ export const INTRO_BEATS: readonly Beat[] = [
   { text: '所以，关于我与你的第一次接触，我想从我开的这家柚子食堂开始。', pose: 'point', mood: 'wink', scene: 'door' },
 ];
 
+const LINES = INTRO_BEATS.map((b) => b.text);
 const CHAR_MS = 55;
 const reduceMotion = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
@@ -65,10 +69,19 @@ export function Intro({ cta, onDone }: { cta: string; onDone: (skipped: boolean)
   const [shown, setShown] = useState(0);
   const [opening, setOpening] = useState(false);
   const still = useRef(reduceMotion()).current;
+  const voice = useYuzuVoice(LINES);
   const beat = INTRO_BEATS[index]!;
   const chars = [...beat.text];
   const typing = shown < chars.length;
   const last = index === INTRO_BEATS.length - 1;
+  // 浏览器还不让出声：说话框里请员工点一下
+  const voiceNeedsTap = voice.on && voice.available && voice.blocked;
+
+  // 每段开始时念这一句（点「下一句」时在点击里已经念了；这里补上第一句、声音列表晚到的情况）
+  useEffect(() => {
+    if (voice.on && voice.available && !voice.heard(index)) voice.autoSay(index);
+    // 只按「第几句、开没开、念不念得出来」触发
+  }, [index, voice.on, voice.available]);
 
   // 字一个一个打出来：每次在当前的基础上加一个字（点一下打完以后，计时器不会把字又缩回去）
   useEffect(() => {
@@ -99,10 +112,19 @@ export function Intro({ cta, onDone }: { cta: string; onDone: (skipped: boolean)
 
   const advance = useCallback(() => {
     if (opening) return;
+    // 这一句因为还没点过屏幕没念出来：这一下先念这一句（字也一下子出来），不翻页
+    if (voiceNeedsTap) {
+      voice.say(index);
+      if (typing) setShown(chars.length);
+      return;
+    }
     if (typing) return setShown(chars.length);
     if (last) return finish();
-    setIndex((i) => Math.min(i + 1, INTRO_BEATS.length - 1));
-  }, [opening, typing, chars.length, last, finish]);
+    const next = Math.min(index + 1, INTRO_BEATS.length - 1);
+    // 在点击里念下一句（iPhone 要在点的那一下里出声）
+    if (voice.on && voice.available) voice.say(next);
+    setIndex(next);
+  }, [opening, voiceNeedsTap, voice, index, typing, chars.length, last, finish]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -120,14 +142,26 @@ export function Intro({ cta, onDone }: { cta: string; onDone: (skipped: boolean)
   return (
     <div className="fixed inset-0 z-[70] flex flex-col bg-cream" data-testid="intro" data-beat={index} role="dialog" aria-modal="true" aria-label="柚子的开场">
       {/* 顶上：第几段、跳过 */}
-      <div className="safe-top mx-auto flex w-full max-w-[480px] items-center gap-3 px-4 pb-1">
-        <p className="eyebrow">YUZU · 汤崎的小 AI 助理</p>
-        <ol className="ml-auto flex gap-1.5" aria-label={`第 ${index + 1} 段，共 ${INTRO_BEATS.length} 段`}>
+      <div className="safe-top mx-auto flex w-full max-w-[480px] items-center gap-2 px-4 pb-1">
+        <p className="eyebrow min-w-0 truncate">YUZU · 汤崎的小 AI 助理</p>
+        <ol className="ml-auto flex shrink-0 gap-1.5" aria-label={`第 ${index + 1} 段，共 ${INTRO_BEATS.length} 段`}>
           {INTRO_BEATS.map((b, i) => (
             <li key={b.scene} className={cn('h-1.5 rounded-full transition-all', i === index ? 'w-5 bg-wood-deep' : i < index ? 'w-1.5 bg-wood-3' : 'w-1.5 bg-line-strong')} />
           ))}
         </ol>
-        <button type="button" onClick={() => onDone(true)} className="rounded-full px-3 py-1.5 text-[14px] font-bold text-ink-3 active:bg-cream-2" data-testid="intro-skip">
+        {voice.available && (
+          <button
+            type="button"
+            onClick={() => voice.toggle(index)}
+            aria-pressed={voice.on}
+            aria-label={voice.on ? '关掉柚子的声音' : '打开柚子的声音'}
+            className={cn('flex size-9 shrink-0 items-center justify-center rounded-full active:bg-cream-2', voice.on ? 'text-wood-deep' : 'text-ink-3')}
+            data-testid="intro-voice"
+          >
+            <IconSound size={24} on={voice.on} fill={voice.on ? 'var(--color-yuzu)' : 'none'} />
+          </button>
+        )}
+        <button type="button" onClick={() => onDone(true)} className="shrink-0 rounded-full px-2.5 py-1.5 text-[14px] font-bold whitespace-nowrap text-ink-3 active:bg-cream-2" data-testid="intro-skip">
           跳过
         </button>
       </div>
@@ -143,7 +177,7 @@ export function Intro({ cta, onDone }: { cta: string; onDone: (skipped: boolean)
             className="h-[min(48dvh,350px)] w-auto"
             style={{ animation: still ? undefined : index === 0 ? 'yz-hop-in .7s cubic-bezier(.3,1.4,.5,1) both' : 'yz-boing .55s cubic-bezier(.3,1.6,.5,1) both', transformOrigin: '50% 100%' }}
           >
-            <Mascot pose={beat.pose} mood={beat.mood} talking={typing} className="h-full w-auto" title="柚子" />
+            <Mascot pose={beat.pose} mood={beat.mood} talking={typing || voice.speaking} className="h-full w-auto" title="柚子" />
           </div>
         </div>
       </div>
@@ -173,6 +207,10 @@ export function Intro({ cta, onDone }: { cta: string; onDone: (skipped: boolean)
               >
                 <IconDoor size={22} fill="var(--color-yuzu)" /> {cta}
               </button>
+            ) : voiceNeedsTap ? (
+              <span className="flex animate-pulse items-center gap-1.5 text-[14px] font-extrabold text-wood-deep" data-testid="intro-voice-hint">
+                <IconSound size={20} fill="var(--color-yuzu)" /> 点一下，听柚子说
+              </span>
             ) : (
               <span className={cn('flex items-center gap-1 text-[13px] font-bold text-ink-3', !typing && 'animate-pulse')}>
                 {typing ? '…' : '点一下继续'} {!typing && <IconArrow size={18} />}
