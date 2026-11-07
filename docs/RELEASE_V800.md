@@ -44,10 +44,10 @@
 | --- | --- | --- |
 | 登录 Cookie 的 Secure | `compose.yaml` 没把 `COOKIE_SECURE` 传进容器，`.env` 里设了也没用 | 传进去；正式服走 https 时设 `COOKIE_SECURE=true` |
 | 信任反向代理 | 主应用不认转发头。正式服在 Caddy 后面时，所有请求的来源 IP 都是 Caddy，审计日志记不到真实 IP | 加 `TRUST_PROXY`，来源 IP 与 https 按代理转来的算。填应用容器里看到的代理地址：Caddy 装在同一台主机、经发布的端口连进来时，容器里看到的是 Docker 网络的网关（例如 `172.18.0.1`），不是 `127.0.0.1` |
-| 端口开在哪 | `compose.yaml` 把 8080 开在所有网卡上；云服务器上 Docker 发布的端口会绕过主机防火墙 | 加 `APP_BIND`；正式服设 `127.0.0.1`（只给本机的 Caddy）或 Tailscale 地址 |
+| 端口开在哪 | 云服务器上 Docker 发布的端口会绕过主机防火墙。`APP_PORT` 本来就能写成「地址:端口」只开在一个地址上（已有的测试服、演示库就这么用），只是 `.env.example` 没写；看门狗不认这种写法，会拼出 `http://127.0.0.1:127.0.0.1:8080`，健康检查一直失败、连续 3 次就重启应用 | `.env.example` 与 `compose.yaml` 写明；正式服设 `APP_PORT=127.0.0.1:8080`（只给本机的 Caddy）或 `<Tailscale 地址>:8080`；看门狗按同一个地址做健康检查。这个 PR 第一版另加的 `APP_BIND` 撤掉了：和「地址:端口」拼在一起 Compose 直接报错，已有实例升级不上去（测试会话 P1） |
 | 安全响应头 | 只有 `nosniff` | 加 `X-Frame-Options: SAMEORIGIN`（不让别的网站嵌进去，防点击劫持）、`Referrer-Policy: same-origin`；HTTPS 的 HSTS 在 Caddy 上加 |
 
-测试：`tests/instance.test.ts` 核对 `TRUST_PROXY` 的读法、信任代理时登录记下真实来源 IP 与 Cookie 加 Secure；`tests/admin-v060.test.ts` 核对响应头。
+测试：`tests/instance.test.ts` 核对 `TRUST_PROXY` 的读法、信任代理时登录记下真实来源 IP 与 Cookie 加 Secure；`tests/admin-v060.test.ts` 核对响应头；`tests/compose-config.test.ts` 用 `docker compose config` 只读展开 `compose.yaml`，核对 `APP_PORT` 只写端口与写「地址:端口」两种写法都能用、`COOKIE_SECURE` 与 `TRUST_PROXY` 传进容器（没有 docker compose 的机器上跳过，CI 上必跑）。
 
 ### 2.3 正式服放阿里云以后要改善的
 
@@ -72,7 +72,7 @@
 6. **ICP 备案**由店主办，一般两三周。备案之前正式服只经 Tailscale。
 7. **Caddy 做 HTTPS 反向代理**：原样透传 Host（写操作的同源校验比 Origin 与 Host），加 HSTS。正式服 `.env` 设：
    - `COOKIE_SECURE=true`；
-   - `APP_BIND=127.0.0.1`：只有本机的 Caddy 连得进来；
+   - `APP_PORT=127.0.0.1:8080`：端口只开在本机，只有本机的 Caddy 连得进来；
    - `TRUST_PROXY` 填 Docker 网络的网关，用 `docker network inspect yuzu-prod_default -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}'` 查，例如 `172.18.0.1`。不能填 `127.0.0.1`：经 Docker 发布的端口连进容器时，容器里看到的来源是这个网关。端口只开在 127.0.0.1 上，信任网关也就只信任本机的 Caddy；
    - 上线后在审计日志里核对记下的是浏览器的地址。
 
@@ -97,7 +97,7 @@
 
 - **阿里云正式服：**
   - 按 `docs/DEPLOY_TEST_SERVER.md` 的做法装 Docker 与 Tailscale、收紧安全组；
-  - `.env` 设 `APP_ENV=production`、`YUZU_INSTANCE=prod`、`APP_BIND=127.0.0.1`（或 Tailscale 地址），以及第 2.3 节第 4 条的备份设置；
+  - `.env` 设 `APP_ENV=production`、`YUZU_INSTANCE=prod`、`APP_PORT=127.0.0.1:8080`（或 `<Tailscale 地址>:8080`），以及第 2.3 节第 4 条的备份设置；
   - 部署 `v8.0.0`：`./scripts/update.sh v8.0.0`；
   - 备案、加固做完以后再加 Caddy 与 `COOKIE_SECURE=true`、`TRUST_PROXY=<Docker 网络的网关>`（第 2.3 节第 7 条）。
 - **门店 Mac mini 测试服：**

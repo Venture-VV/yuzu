@@ -12,7 +12,7 @@
 - **正式服放公网之前的加固**（这一版，默认都不改现在的行为）：
   - `compose.yaml` 把 `COOKIE_SECURE`、`TRUST_PROXY` 传进容器；
   - 主应用按 `TRUST_PROXY` 信任反向代理；
-  - `APP_BIND` 指定端口开在哪个地址；
+  - `APP_PORT` 写成「地址:端口」只开在这个地址上（原来就支持，这一版写明；看门狗的健康检查跟着认，原来会拼错地址、一直判失败）；
   - 响应头加 `X-Frame-Options: SAMEORIGIN`、`Referrer-Policy: same-origin`。
 - **版本号** 8.0.0：`package.json`、`package-lock.json`、`Dockerfile`、`compose.yaml`、`src/server/config.ts`。
 - **文档**：AGENTS.md 与 ROADMAP 的版本号规则（之后默认每次加最后一位，Z1）、环境与部署（ROADMAP 第 6 节）；两本部署手册开头写明角色互换；`RELEASE_V800.md`。
@@ -33,13 +33,16 @@
    - 登录后 Cookie 带 Secure；
    - 审计日志的来源 IP 是浏览器的真实地址，不是 Caddy 的；
    - 不经 Caddy 直接 http 打开时登录不上（Cookie 存不下，属预期）。
-5. `APP_BIND=127.0.0.1` 时，从别的机器连不上 8080，本机的 Caddy 能连。
+5. 端口（已有实例的 `.env` 不用改）：
+   - `APP_PORT=8080`（所有网卡）与 `APP_PORT=127.0.0.1:8080`（只开在本机）都照样能起，`docker compose config` 不报错（这个 PR 第一版加的 `APP_BIND` 和后一种写法拼在一起报错，已撤掉）；
+   - `APP_PORT=127.0.0.1:8080` 时，从别的机器连不上 8080，本机的 Caddy 能连；看门狗的健康检查照常通过。
 6. 员工食堂 PR #73 的验收要点见 `docs/CANTEEN.md` 第 12 节（局域网、开场语音）。
 
 ## 4. 已执行的验证（本机，独立的合成库）
 
 - `npm run typecheck`、`npm run build` 通过；`npm test` 全过。
-- 新测试：`tests/instance.test.ts`（`TRUST_PROXY` 的读法；信任代理时登录记下真实来源 IP、Cookie 加 Secure；不信任时转发头不算），`tests/admin-v060.test.ts`（三个响应头）。
+- 新测试：`tests/instance.test.ts`（`TRUST_PROXY` 的读法；信任代理时登录记下真实来源 IP、Cookie 加 Secure；不信任时转发头不算），`tests/admin-v060.test.ts`（三个响应头），`tests/compose-config.test.ts`（`docker compose config` 只读展开：两种 `APP_PORT` 写法、`COOKIE_SECURE` 与 `TRUST_PROXY` 传进容器；没有 docker compose 的机器上跳过，CI 上必跑）。
+- 看门狗：`shellcheck` 通过；健康检查地址按 `APP_PORT` 的几种写法（不设、只写端口、`127.0.0.1:8080`、`0.0.0.0:8080`、Tailscale 地址）在 bash 里核对过。
 - CI 的结果以这个 PR 最后一个提交上的检查为准。
 
 ## 5. 给测试 AI 的指令（可复制）
@@ -49,6 +52,7 @@
 1. npm ci && npm run build；新建库，demo-prepare，起应用，核对登录页的版本 8.0.0 与 SHA。
 2. 不设新环境变量：登录、前台接待结账、ERP 各走一遍，check 全 ✓；响应头带 X-Frame-Options: SAMEORIGIN、Referrer-Policy: same-origin。
 3. 设 COOKIE_SECURE=true，前面挂一个本机的 https 反向代理；TRUST_PROXY 填应用看到的代理地址（直接 node 跑时 127.0.0.1；用 Docker 跑时是 Docker 网络的网关，docker network inspect <项目名>_default 里的 Gateway）：登录 Cookie 带 Secure，审计日志记下真实来源 IP。
-4. 员工食堂按 docs/CANTEEN.md 第 12 节走一遍局域网与开场语音（e2e-canteen 可以直接跑）。
-5. 报告第一行：【主线·测试】→ 主线 · PR #74 · <完整 SHA>（合并后：→ 主线 · main v8.0.0 · <完整 SHA>）。
+4. 端口：已有实例的两种写法 APP_PORT=8080、APP_PORT=127.0.0.1:8080 用 docker compose config 各展开一次都不报错（npx vitest run tests/compose-config.test.ts 也行）；后一种写法下 scripts/watchdog.sh 的健康检查通过。
+5. 员工食堂按 docs/CANTEEN.md 第 12 节走一遍局域网与开场语音（e2e-canteen 可以直接跑）。
+6. 报告第一行：【主线·测试】→ 主线 · PR #74 · <完整 SHA>（合并后：→ 主线 · main v8.0.0 · <完整 SHA>）。
 ```

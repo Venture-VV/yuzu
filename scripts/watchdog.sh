@@ -79,8 +79,15 @@ fi
 resolve docker "Docker 已在运行"
 
 # 2. 应用健康检查
-port=$(env_of APP_PORT)
-health=$(curl -fsS -m 10 "http://127.0.0.1:${port:-8080}/api/health" 2>/dev/null || true)
+# APP_PORT 可以只写端口，也可以写「地址:端口」只开在那个地址上（云服务器上的 127.0.0.1:8080、<Tailscale 地址>:8080）
+bind=$(env_of APP_PORT)
+bind=${bind:-8080}
+host=127.0.0.1
+if [[ "$bind" == *:* ]]; then
+  host=${bind%:*}
+  [[ "$host" == 0.0.0.0 ]] && host=127.0.0.1
+fi
+health=$(curl -fsS -m 10 "http://${host}:${bind##*:}/api/health" 2>/dev/null || true)
 maintenance=""
 [[ -f .deploy/maintenance ]] && maintenance=$(cat .deploy/maintenance)
 if [[ "$health" == *'"ok":true'* ]]; then

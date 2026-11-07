@@ -60,10 +60,11 @@ services:
       INIT_OWNER_PASSWORD: ${INIT_OWNER_PASSWORD:-}
       INIT_OWNER_NAME: ${INIT_OWNER_NAME:-店主}
       TZ: ${APP_TIMEZONE:-Asia/Shanghai}
-    # APP_BIND：只在这个地址上开端口。门店局域网用默认（所有网卡）；云服务器上设 127.0.0.1（只给本机的 Caddy）或 Tailscale 地址——
-    # Docker 发布的端口会绕过主机防火墙，不能只靠 ufw 挡
+    # APP_PORT 只写端口（8080）时开在所有网卡上，门店局域网这样用；写成「地址:端口」只开在这个地址上：云服务器上写
+    # 127.0.0.1:8080（只给本机的 Caddy）或 <Tailscale 地址>:8080——Docker 发布的端口会绕过主机防火墙，不能只靠 ufw 挡。
+    # 已有实例两种写法都在用，这一行不要再拼别的变量（tests/compose-config.test.ts 核对两种写法都能展开）
     ports:
-      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-8080}:8080"
+      - "${APP_PORT:-8080}:8080"
     logging: *logging
 
   # 备份服务：与 app 同一个镜像（含 pg_dump / pg_restore），由 app 构建、不从网上拉。
