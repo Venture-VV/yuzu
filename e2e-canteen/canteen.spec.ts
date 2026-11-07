@@ -234,6 +234,13 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
       const p = await join(ctx, codes[empNo]!, pw);
       await expect(p.getByTestId('meal-lunch').getByText('红烧肉')).toBeVisible();
       await noOverflow(p);
+      // 首页「把柚子饭堂放到桌面」点「怎么放」：说明面板整个在屏幕里、标题看得到（店主 11-07 在 iPhone 上看到面板顶上长出页面、看不见）
+      await p.getByRole('button', { name: '怎么放' }).click();
+      const guide = p.getByRole('dialog', { name: '添加到桌面' });
+      await expect(guide).toBeInViewport({ ratio: 1 });
+      await expect(guide.getByRole('heading', { name: '添加到桌面' })).toBeInViewport();
+      await guide.getByRole('button', { name: '关闭' }).click();
+      await expect(guide).toBeHidden();
       if (empNo === 'A001') {
         const heart = p.getByRole('button', { name: '点赞：红烧肉' });
         await heart.click();
