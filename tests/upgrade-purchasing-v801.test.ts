@@ -42,6 +42,13 @@ describe('8.0.0 → 8.0.1 · 采购组整改', () => {
     const [req] = await sql<{ id: number }[]>`
       INSERT INTO purchase_requests (doc_no, department_id, requester_id, status, created_at)
       VALUES ('XQ-1', ${dept!.id}, ${staff!.id}, 'submitted', '2026-11-01 09:30:00+08') RETURNING id`;
+    // 结束审核的需求单（守护不许改）：升级时照样补上提交时间，别的不动
+    for (const [no, status] of [['XQ-A', 'approved'], ['XQ-R', 'rejected'], ['XQ-C', 'cancelled']] as const) {
+      await sql`
+        INSERT INTO purchase_requests (doc_no, department_id, requester_id, status, reviewed_by, reviewed_at, created_at)
+        VALUES (${no}, ${dept!.id}, ${staff!.id}, ${status}, ${status === 'cancelled' ? null : staff!.id}, ${status === 'cancelled' ? null : '2026-11-02 10:00:00+08'},
+                '2026-11-01 08:00:00+08')`;
+    }
     const urgent = (no: string, status: string) => sql<{ id: number }[]>`
       INSERT INTO inv_docs (doc_no, doc_type, status, doc_date, created_by, supplier_id, warehouse_id, urgent, urgent_cap_cents, amount_cents, submitted_at)
       VALUES (${no}, 'receipt', ${status}, '2026-11-02', ${staff!.id}, ${sup!.id}, ${wh!.id}, true, 200000, 45000,
@@ -56,6 +63,13 @@ describe('8.0.0 → 8.0.1 · 采购组整改', () => {
     const [r] = await sql<{ priority: string; sameTime: boolean; approvableOn: string | null; source: string; importId: number | null }[]>`
       SELECT priority, submitted_at = created_at AS same_time, approvable_on, source, import_id FROM purchase_requests WHERE id = ${req!.id}`;
     expect(r).toEqual({ priority: 'normal', sameTime: true, approvableOn: null, source: 'form', importId: null });
+    expect(await sql`SELECT doc_no, status, submitted_at = created_at AS same_time FROM purchase_requests WHERE doc_no IN ('XQ-A', 'XQ-C', 'XQ-R') ORDER BY doc_no`).toEqual([
+      { docNo: 'XQ-A', status: 'approved', sameTime: true },
+      { docNo: 'XQ-C', status: 'cancelled', sameTime: true },
+      { docNo: 'XQ-R', status: 'rejected', sameTime: true },
+    ]);
+    // 守护照旧：结束审核的需求单还是改不了
+    await expect(sql`UPDATE purchase_requests SET priority = 'urgent' WHERE doc_no = 'XQ-A'`).rejects.toThrow(/需求单已结束审核/);
     // 新的需求单：提交时间默认现在，来源与导入记录对得上
     await expect(sql`INSERT INTO purchase_requests (doc_no, department_id, requester_id, status, source) VALUES ('XQ-2', ${dept!.id}, ${staff!.id}, 'submitted', 'import')`).rejects.toThrow(
       /purchase_requests_source_import/,

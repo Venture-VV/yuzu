@@ -13,7 +13,10 @@ ALTER TABLE purchase_requests
   ADD COLUMN approvable_on date,
   ADD COLUMN source        text NOT NULL DEFAULT 'form' CHECK (source IN ('form', 'import')),
   ADD COLUMN import_id     bigint;
+-- 补提交时间：结束审核（通过、不采购、撤回）的需求单整行不许改（027 的守护），只在这一步停用守护、补完马上恢复（同一个迁移事务里）
+ALTER TABLE purchase_requests DISABLE TRIGGER purchase_requests_guard;
 UPDATE purchase_requests SET submitted_at = created_at;
+ALTER TABLE purchase_requests ENABLE TRIGGER purchase_requests_guard;
 ALTER TABLE purchase_requests
   ALTER COLUMN submitted_at SET NOT NULL,
   ALTER COLUMN submitted_at SET DEFAULT now();
