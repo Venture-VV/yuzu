@@ -690,3 +690,51 @@ export interface PriceHistory {
   materialName: string;
   points: { date: string; source: 'receipt' | 'quote'; docNo: string; supplierName: string; priceCents: number; purchaseUnit: string; qtyMilli: number | null }[];
 }
+
+// ───────────────────────── 供应商比价看板（8.0.1 采购组整改 07，CG07） ─────────────────────────
+
+/** 默认看近多少天 */
+export const COMPARE_DEFAULT_DAYS = 90;
+
+/** 一个物料 × 一家供应商：这段时间的价格、品质；单价都按物料现在的采购单位折算 */
+export interface SupplierCompareRow {
+  materialId: number;
+  materialCode: string;
+  materialName: string;
+  category: string;
+  purchaseUnit: string;
+  inventoryUnit: string;
+  supplierId: number;
+  supplierName: string;
+  /** 采购次数（已生效的收货单张数）、收货数量（库存单位）、金额 */
+  receipts: number;
+  receivedMilli: number;
+  amountCents: number;
+  /** 最近一次的单价与日期 */
+  lastPriceCents: number | null;
+  lastDate: string | null;
+  /** 加权平均、最低、最高单价 */
+  avgPriceCents: number | null;
+  minPriceCents: number | null;
+  maxPriceCents: number | null;
+  /** 上一个同样长的时段的平均单价，与比上一个时段涨跌（百分比，两位小数） */
+  prevAvgPriceCents: number | null;
+  changePercent: number | null;
+  /** 退供应商的数量（库存单位）与退货率（百分比，两位小数） */
+  returnedMilli: number;
+  returnRatePct: number | null;
+}
+
+export interface SupplierCompare {
+  from: string;
+  to: string;
+  prevFrom: string;
+  prevTo: string;
+  rows: SupplierCompareRow[];
+  /** 这家供应商合同验收登记的质量问题数（这段时间发现的、没作废的） */
+  quality: { supplierId: number; issues: number }[];
+  /** 物料这段时间的耗用：领用（总仓发到部门）、直接耗用（库存单位） */
+  consumption: { materialId: number; issuedMilli: number; directUsedMilli: number }[];
+  /** 能选的品类 */
+  categories: string[];
+}

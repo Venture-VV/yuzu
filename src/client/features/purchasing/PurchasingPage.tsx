@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router';
-import { FileUp, Lightbulb, PackageSearch, Plus, Scale, Search, Settings2, Zap } from 'lucide-react';
+import { ChartColumn, FileUp, Lightbulb, PackageSearch, Plus, Scale, Search, Settings2, Zap } from 'lucide-react';
 import type { PoStatus } from '@shared/purchasing';
 import { errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
@@ -86,6 +86,14 @@ export function PurchasingPage() {
             >
               <Zap className="size-4" />
               急采
+            </Link>
+            <Link
+              to="/purchasing/compare"
+              className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
+              data-testid="compare-link"
+            >
+              <ChartColumn className="size-4" />
+              供应商比价
             </Link>
             <Link
               to="/purchasing/sourcing"

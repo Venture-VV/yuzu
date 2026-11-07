@@ -554,3 +554,23 @@ export interface CheckItem {
   ok: boolean;
   detail: string;
 }
+
+/** 赠品入库台账（8.0.1 采购组整改 09，CG09）：只记台账，不进库存结存、不记成本 */
+export interface GiftReceipt {
+  id: number;
+  docNo: string;
+  receivedOn: string;
+  material: { id: number; code: string; name: string } | null;
+  name: string;
+  qtyMilli: number;
+  unit: string;
+  supplier: { id: number; name: string } | null;
+  receipt: { id: number; docNo: string } | null;
+  note: string;
+  status: 'valid' | 'voided';
+  createdByName: string;
+  createdAt: string;
+  voidReason: string | null;
+  voidedByName: string | null;
+  voidedAt: string | null;
+}

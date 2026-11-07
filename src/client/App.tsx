@@ -75,6 +75,7 @@ const SourcingDetailPage = lazyPage(() => import('./features/purchasing/Sourcing
 const UrgentPage = lazyPage(() => import('./features/purchasing/UrgentPage').then((m) => m.UrgentPage));
 const PurchaseRulesPage = lazyPage(() => import('./features/purchasing/PurchaseRulesPage').then((m) => m.PurchaseRulesPage));
 const RequestImportPage = lazyPage(() => import('./features/purchasing/RequestImportPage').then((m) => m.RequestImportPage));
+const ComparePage = lazyPage(() => import('./features/purchasing/ComparePage').then((m) => m.ComparePage));
 const UrgentDocFormPage = lazyPage(() => import('./features/inventory/DocFormPage').then((m) => m.UrgentDocFormPage));
 const PayablesPage = lazyPage(() => import('./features/payables/PayablesPage').then((m) => m.PayablesPage));
 const PaymentFormPage = lazyPage(() => import('./features/payables/PaymentFormPage').then((m) => m.PaymentFormPage));
@@ -259,6 +260,8 @@ const router = createBrowserRouter([
       { path: 'purchasing/rules', element: <PurchaseRulesPage /> },
       // 集采导入（8.0.1 采购组整改 06）
       { path: 'purchasing/import', element: <RequestImportPage /> },
+      // 供应商比价看板（8.0.1 采购组整改 07）
+      { path: 'purchasing/compare', element: <ComparePage /> },
       { path: 'purchasing/:id/edit', element: <PoFormPage mode="edit" /> },
       { path: 'purchasing/:id/revise', element: <PoFormPage mode="revise" /> },
       { path: 'payables', element: <PayablesPage /> },

@@ -440,3 +440,107 @@ describe('集采模板与一键导入（06）', () => {
     expect(wrong.body.error.code).toBe('IMPORT_COLUMNS');
   });
 });
+
+describe('供应商比价看板（07）', () => {
+  it('每个物料 × 供应商一行：单价按现在的采购单位折算、加权平均、最低最高、比上一个时段涨跌；退货率；领用与耗用', async () => {
+    const created = await api(ctx.app, boss, 'POST', '/api/inventory/materials', {
+      code: 'CMP01', name: '比价测试纸巾', category: '比价测试', inventoryUnit: '包', purchaseUnit: '箱', purchaseFactorMilli: q(10), refPriceCents: 10_000,
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const m = ((await api(ctx.app, boss, 'GET', '/api/inventory/materials?all=1')).body as { id: number; code: string }[]).find((x) => x.code === 'CMP01')!;
+    const sups = (await api(ctx.app, boss, 'GET', '/api/inventory/suppliers?all=1')).body as { id: number; code: string; name: string }[];
+    const a = sups.find((x) => x.code === 'S001')!;
+    const b = sups.find((x) => x.code === 'S002')!;
+    const ownerId = (await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'linlan'`)[0]!.id;
+    const deptId = (await ctx.sql<{ id: number }[]>`SELECT id FROM departments ORDER BY id LIMIT 1`)[0]!.id;
+    let n = 0;
+    // 直接写已生效的单据（看板只读单据与明细；单价、换算、日期可控）
+    const doc = async (type: string, date: string, line: { qty: number; price?: number; factor?: number }, extra: Record<string, unknown> = {}) => {
+      n += 1;
+      const amount = line.price === undefined ? null : Math.round(((line.qty / (line.factor ?? 10_000)) * line.price));
+      const [d] = await ctx.sql<{ id: number }[]>`
+        INSERT INTO inv_docs (doc_no, doc_type, status, doc_date, created_by, supplier_id, source_doc_id, department_id, warehouse_id, amount_cents)
+        VALUES (${`CMP-${n}`}, ${type}, 'confirmed', ${date}, ${ownerId}, ${(extra.supplierId as number) ?? null}, ${(extra.sourceDocId as number) ?? null},
+                ${(extra.departmentId as number) ?? null}, 1, ${amount ?? 0})
+        RETURNING id`;
+      await ctx.sql`
+        INSERT INTO inv_doc_lines (doc_id, line_no, material_id, qty_milli, inventory_unit, purchase_unit, factor_milli, price_cents, amount_cents)
+        VALUES (${d!.id}, 1, ${m.id}, ${line.qty}, '包', '箱', ${line.factor ?? 10_000}, ${line.price ?? null}, ${amount})`;
+      return Number(d!.id);
+    };
+    const from = shiftDate(today, -29);
+    // 上一个时段：A 2 箱 @ 100 元
+    await doc('receipt', shiftDate(today, -40), { qty: q(20), price: 10_000 }, { supplierId: a.id });
+    // 这个时段：A 1 箱 @ 110、3 箱 @ 120；B 按半箱（5 包）收、每半箱 50 元 = 每箱 100 元
+    const a1 = await doc('receipt', shiftDate(today, -20), { qty: q(10), price: 11_000 }, { supplierId: a.id });
+    await doc('receipt', shiftDate(today, -5), { qty: q(30), price: 12_000 }, { supplierId: a.id });
+    await doc('receipt', shiftDate(today, -3), { qty: q(10), price: 5_000, factor: q(5) }, { supplierId: b.id });
+    // A 退了 10 包；领用 15 包、直接耗用 4 包
+    await doc('supplier_return', shiftDate(today, -2), { qty: q(10) }, { supplierId: a.id, sourceDocId: a1 });
+    await doc('issue', shiftDate(today, -1), { qty: q(15) }, { departmentId: deptId });
+    await doc('direct_use', shiftDate(today, -1), { qty: q(4) });
+
+    const res = await api(ctx.app, buyer, 'GET', `/api/purchase-compare?from=${from}&to=${today}&category=${encodeURIComponent('比价测试')}`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ from, to: today, prevTo: shiftDate(from, -1) });
+    const rows = res.body.rows as { supplierId: number }[];
+    expect(rows.map((r) => r.supplierId)).toEqual([b.id, a.id]); // 平均单价低的在前
+    expect(rows[1]).toMatchObject({
+      receipts: 2,
+      receivedMilli: q(40),
+      avgPriceCents: 11_750,
+      minPriceCents: 11_000,
+      maxPriceCents: 12_000,
+      lastPriceCents: 12_000,
+      prevAvgPriceCents: 10_000,
+      changePercent: 17.5,
+      returnedMilli: q(10),
+      returnRatePct: 25,
+    });
+    expect(rows[0]).toMatchObject({ receipts: 1, avgPriceCents: 10_000, minPriceCents: 10_000, prevAvgPriceCents: null, changePercent: null, returnRatePct: 0 });
+    expect(res.body.consumption).toEqual([{ materialId: m.id, issuedMilli: q(15), directUsedMilli: q(4) }]);
+    expect(res.body.categories).toContain('比价测试');
+    // 只看一家供应商、一个物料；没权限的看不了
+    expect((await api(ctx.app, buyer, 'GET', `/api/purchase-compare?from=${from}&to=${today}&materialId=${m.id}&supplierId=${b.id}`)).body.rows).toHaveLength(1);
+    expect((await api(ctx.app, ctx.clerk, 'GET', '/api/purchase-compare')).status).toBe(403);
+  });
+});
+
+describe('赠品入库台账（09）', () => {
+  it('仓库、采购登记赠品（名称可以从物料里选）；只记台账、不进库存；作废写原因；导出 CSV；同一编号只记一次；只追加', async () => {
+    const stockBefore = ((await api(ctx.app, boss, 'GET', '/api/inventory/materials?all=1')).body as { id: number; stockMilli: number }[]).find((x) => x.id === mat.id)!.stockMilli;
+    const sups = (await api(ctx.app, boss, 'GET', '/api/inventory/suppliers?all=1')).body as { id: number; code: string }[];
+    const s4 = sups.find((x) => x.code === 'S004')!;
+    const key = randomUUID();
+    const body = { clientKey: key, receivedOn: today, materialId: mat.id, name: mat.name, qtyMilli: q(2), unit: '箱', supplierId: s4.id, note: '满 20 箱送 2 箱' };
+    const made = await api(ctx.app, keeper, 'POST', '/api/inventory/gifts', body);
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    expect(made.body.gift).toMatchObject({ name: mat.name, qtyMilli: q(2), unit: '箱', status: 'valid', supplier: { id: s4.id }, material: { id: mat.id } });
+    expect(made.body.gift.docNo).toMatch(/^ZP\d{8}-\d{4}$/);
+    // 同一编号重提：原来那一条
+    const again = await api(ctx.app, keeper, 'POST', '/api/inventory/gifts', body);
+    expect(again.status).toBe(200);
+    expect(again.body.gift.id).toBe(made.body.gift.id);
+    // 采购也能登记；名称可以直接写；不进库存
+    const other = await api(ctx.app, buyer, 'POST', '/api/inventory/gifts', { clientKey: randomUUID(), receivedOn: today, name: '供应商送的围裙', qtyMilli: q(5), unit: '条' });
+    expect(other.status).toBe(201);
+    expect(((await api(ctx.app, boss, 'GET', '/api/inventory/materials?all=1')).body as { id: number; stockMilli: number }[]).find((x) => x.id === mat.id)!.stockMilli).toBe(stockBefore);
+    // 没权限、日期在以后
+    expect((await api(ctx.app, ctx.clerk, 'POST', '/api/inventory/gifts', { ...body, clientKey: randomUUID() })).status).toBe(403);
+    expect((await api(ctx.app, keeper, 'POST', '/api/inventory/gifts', { ...body, clientKey: randomUUID(), receivedOn: shiftDate(today, 1) })).body.error.code).toBe('DATE_IN_FUTURE');
+    // 作废要写原因；作废以后列表里还在
+    expect((await api(ctx.app, keeper, 'POST', `/api/inventory/gifts/${other.body.gift.id}/void`, { reason: '' })).status).toBe(400);
+    const voided = await api(ctx.app, keeper, 'POST', `/api/inventory/gifts/${other.body.gift.id}/void`, { reason: '登记重复' });
+    expect(voided.body).toMatchObject({ status: 'voided', voidReason: '登记重复' });
+    const list = (await api(ctx.app, keeper, 'GET', `/api/inventory/gifts?from=${today}&to=${today}`)).body as { id: number; status: string }[];
+    expect(list.map((g) => g.id).sort()).toEqual([made.body.gift.id, other.body.gift.id].sort());
+    // 导出
+    const csv = String((await api(ctx.app, keeper, 'GET', `/api/inventory/gifts/export?from=${today}&to=${today}`)).body);
+    expect(csv.split('\n')[0]).toContain('赠品名称');
+    expect(csv).toContain('满 20 箱送 2 箱');
+    expect(csv).toContain('已作废');
+    // 只追加
+    await expect(ctx.sql`DELETE FROM gift_receipts WHERE id = ${made.body.gift.id}`).rejects.toThrow();
+    await expect(ctx.sql`UPDATE gift_receipts SET qty_milli = 1 WHERE id = ${made.body.gift.id}`).rejects.toThrow();
+  });
+});

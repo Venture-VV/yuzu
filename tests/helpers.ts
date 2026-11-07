@@ -220,6 +220,8 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '081_three_way_match.sql',
   '082_purchasing_flow.sql',
   '083_suppliers_contracts.sql',
+  '084_receipt_attachments.sql',
+  '085_gift_receipts.sql',
   '090_canteen.sql',
   '091_canteen_join.sql',
   '092_canteen_reply_ops.sql',

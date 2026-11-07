@@ -1,5 +1,5 @@
-// 8.0.0 → 8.0.1 升级（迁移 082、083、093，采购组整改，docs/PURCHASING_V801.md）：
-//   · 8.0.0 的库已经有 090–092（柚子饭堂），升级时 082、083 排在它们后面执行，093 最后；
+// 8.0.0 → 8.0.1 升级（迁移 082–085、093，采购组整改，docs/PURCHASING_V801.md）：
+//   · 8.0.0 的库已经有 090–092（柚子饭堂），升级时 082–085 排在它们后面执行，093 最后；
 //   · 旧需求单当作普通、截单前提交（提交时间取建单时间，没有最早可通过日期），来源是填单；
 //   · 升级前已经提交（待验收）、生效、冲销的急采当作已经审批过（仓库照旧验收）；草稿、退回、撤回的没有审批时间；
 //   · 生效以后急采的审批时间不能改；供应商都是「未签约」；「确认作废」能写集采导入、赠品登记两类；审批规则能写「急采」。
@@ -12,7 +12,7 @@ import { TEST_DB } from './helpers';
 import { resetPublicSchema } from './test-db';
 
 const MIGRATIONS = new URL('../src/server/migrations/', import.meta.url);
-const NEW = ['082_purchasing_flow.sql', '083_suppliers_contracts.sql', '093_purchasing_ops.sql'];
+const NEW = ['082_purchasing_flow.sql', '083_suppliers_contracts.sql', '084_receipt_attachments.sql', '085_gift_receipts.sql', '093_purchasing_ops.sql'];
 let sql: Sql;
 
 beforeAll(() => {
@@ -78,6 +78,7 @@ describe('8.0.0 → 8.0.1 · 采购组整改', () => {
     // 「确认作废」的两类、审批规则的「急采」
     for (const op of ['request_import', 'gift_receipt']) {
       await sql`INSERT INTO op_fences (key, op_type, staff_id) VALUES (gen_random_uuid(), ${op}, ${staff!.id})`;
+      await sql`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (gen_random_uuid(), ${op}, 'h', 1, ${staff!.id})`;
     }
     await expect(sql`INSERT INTO op_fences (key, op_type, staff_id) VALUES (gen_random_uuid(), 'nothing', ${staff!.id})`).rejects.toThrow();
     await sql`
