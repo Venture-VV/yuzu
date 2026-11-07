@@ -43,7 +43,7 @@
 | 项 | 原来 | 现在 |
 | --- | --- | --- |
 | 登录 Cookie 的 Secure | `compose.yaml` 没把 `COOKIE_SECURE` 传进容器，`.env` 里设了也没用 | 传进去；正式服走 https 时设 `COOKIE_SECURE=true` |
-| 信任反向代理 | 主应用不认转发头。正式服在 Caddy 后面时，所有请求的来源 IP 都是 Caddy，审计日志记不到真实 IP | 加 `TRUST_PROXY`（填代理的地址），来源 IP 与 https 按代理转来的算 |
+| 信任反向代理 | 主应用不认转发头。正式服在 Caddy 后面时，所有请求的来源 IP 都是 Caddy，审计日志记不到真实 IP | 加 `TRUST_PROXY`，来源 IP 与 https 按代理转来的算。填应用容器里看到的代理地址：Caddy 装在同一台主机、经发布的端口连进来时，容器里看到的是 Docker 网络的网关（例如 `172.18.0.1`），不是 `127.0.0.1` |
 | 端口开在哪 | `compose.yaml` 把 8080 开在所有网卡上；云服务器上 Docker 发布的端口会绕过主机防火墙 | 加 `APP_BIND`；正式服设 `127.0.0.1`（只给本机的 Caddy）或 Tailscale 地址 |
 | 安全响应头 | 只有 `nosniff` | 加 `X-Frame-Options: SAMEORIGIN`（不让别的网站嵌进去，防点击劫持）、`Referrer-Policy: same-origin`；HTTPS 的 HSTS 在 Caddy 上加 |
 
@@ -70,7 +70,13 @@
 **对公网开放之前（ICP 备案以后）做的：**
 
 6. **ICP 备案**由店主办，一般两三周。备案之前正式服只经 Tailscale。
-7. **Caddy 做 HTTPS 反向代理**：原样透传 Host（写操作的同源校验比 Origin 与 Host），加 HSTS。正式服 `.env` 设 `COOKIE_SECURE=true`、`TRUST_PROXY=127.0.0.1`、`APP_BIND=127.0.0.1`；安全组只开 443（80 只用来跳转和签证书）。
+7. **Caddy 做 HTTPS 反向代理**：原样透传 Host（写操作的同源校验比 Origin 与 Host），加 HSTS。正式服 `.env` 设：
+   - `COOKIE_SECURE=true`；
+   - `APP_BIND=127.0.0.1`：只有本机的 Caddy 连得进来；
+   - `TRUST_PROXY` 填 Docker 网络的网关，用 `docker network inspect yuzu-prod_default -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}'` 查，例如 `172.18.0.1`。不能填 `127.0.0.1`：经 Docker 发布的端口连进容器时，容器里看到的来源是这个网关。端口只开在 127.0.0.1 上，信任网关也就只信任本机的 Caddy；
+   - 上线后在审计日志里核对记下的是浏览器的地址。
+
+   安全组只开 443（80 只用来跳转和签证书）。
 8. **登录限次按来源 IP。** 现在只按账号在内存里计数（同一账号 15 分钟错 5 次锁 5 分钟）。放到公网以后，别人能反复把店主账号锁住，换着账号试也没有按 IP 的上限。建议 8.0.1 改，规则要店主定（Z4）。
 9. **管理后台、ERP 要不要只在店里和 Tailscale 内打开**，公网只给前台用得到的页面（Z5）。
 
@@ -78,7 +84,7 @@
 
 10. **员工食堂的局域网用法（K18）。** 正式服不在门店局域网里了：
     - 备案前：员工连店里 Wi-Fi，经 Mac mini 转发到正式服的员工端口（Mac mini 上一个反向代理：局域网 8090 → Tailscale → 阿里云，正式服的 `CANTEEN_TRUST_PROXY` 设 Mac mini 的 Tailscale 地址），员工入口地址填 `http://<Mac mini 局域网 IP>:8090`；
-    - 备案后：直接用 `https://staff.<域名>`。
+    - 备案后：直接用 `https://staff.<域名>`；Caddy 和正式服在同一台时，`CANTEEN_TRUST_PROXY` 同样填 Docker 网络的网关（第 7 条）。
 11. **小程序网关。** 原定单独一台阿里云最低配，经 Tailscale 只连 yuzu 的小程序端口。正式服也在阿里云以后，网关可以和正式服同机，也可以放同一个专有网络（Z3）。小程序端口照旧不对公网开放。
 
 **其他：**
@@ -93,7 +99,7 @@
   - 按 `docs/DEPLOY_TEST_SERVER.md` 的做法装 Docker 与 Tailscale、收紧安全组；
   - `.env` 设 `APP_ENV=production`、`YUZU_INSTANCE=prod`、`APP_BIND=127.0.0.1`（或 Tailscale 地址），以及第 2.3 节第 4 条的备份设置；
   - 部署 `v8.0.0`：`./scripts/update.sh v8.0.0`；
-  - 备案、加固做完以后再加 Caddy 与 `COOKIE_SECURE=true`、`TRUST_PROXY=127.0.0.1`。
+  - 备案、加固做完以后再加 Caddy 与 `COOKIE_SECURE=true`、`TRUST_PROXY=<Docker 网络的网关>`（第 2.3 节第 7 条）。
 - **门店 Mac mini 测试服：**
   - 按 `docs/DEPLOY_MAC_MINI.md` 的做法装，演练库 `YUZU_INSTANCE=test`，演示库 `APP_ENV=development`、`YUZU_INSTANCE=demo`；
   - 再做 Tailscale 子网路由（打印机）与员工食堂的局域网转发；

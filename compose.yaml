@@ -52,7 +52,8 @@ services:
       DATABASE_URL: postgres://yuzu:${POSTGRES_PASSWORD}@db:5432/yuzu
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
-      # 外网正式服走 HTTPS（反向代理 Caddy）时设 COOKIE_SECURE=true、TRUST_PROXY=<代理的地址>（8.0.0，docs/RELEASE_V800.md）
+      # 外网正式服走 HTTPS（反向代理 Caddy）时设 COOKIE_SECURE=true、TRUST_PROXY=<容器里看到的代理地址>：同一台主机上的 Caddy
+      # 经发布的端口连进来时，容器里看到的是 Docker 网络的网关，不是 127.0.0.1（8.0.0，docs/RELEASE_V800.md 第 2.3 节第 7 条）
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       TRUST_PROXY: ${TRUST_PROXY:-}
       INIT_OWNER_USERNAME: ${INIT_OWNER_USERNAME:-}

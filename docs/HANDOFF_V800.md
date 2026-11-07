@@ -28,7 +28,8 @@
 2. 不设新环境变量时行为与 v0.7.33 一样：门店局域网照常登录，登录 Cookie 不加 Secure。
 3. 响应头带 `X-Frame-Options: SAMEORIGIN`、`Referrer-Policy: same-origin`；别的网站嵌不进页面，页面自己打印用的隐藏框照常能用（管理后台「小程序」里打印扫码点餐的桌贴）。
 4. 正式服配置演练（演示库上做就行）：
-   - `.env` 设 `COOKIE_SECURE=true`、`TRUST_PROXY=127.0.0.1`，前面挂 Caddy（https）；
+   - `.env` 设 `COOKIE_SECURE=true`，前面挂 Caddy（https）；
+   - `TRUST_PROXY` 填应用看到的代理地址：用 Docker 跑、Caddy 在同一台主机时是 Docker 网络的网关（`docker network inspect <项目名>_default` 里的 Gateway），不是 `127.0.0.1`；直接用 `node` 跑时才是 `127.0.0.1`；
    - 登录后 Cookie 带 Secure；
    - 审计日志的来源 IP 是浏览器的真实地址，不是 Caddy 的；
    - 不经 Caddy 直接 http 打开时登录不上（Cookie 存不下，属预期）。
@@ -47,7 +48,7 @@
 请在一个新建的独立演示库上验收 v8.0.0（完整 SHA 以 PR #74 最后一个提交为准，合并后以 main 的 v8.0.0 标签为准），不要碰门店库、测试服与正式服：
 1. npm ci && npm run build；新建库，demo-prepare，起应用，核对登录页的版本 8.0.0 与 SHA。
 2. 不设新环境变量：登录、前台接待结账、ERP 各走一遍，check 全 ✓；响应头带 X-Frame-Options: SAMEORIGIN、Referrer-Policy: same-origin。
-3. 设 COOKIE_SECURE=true、TRUST_PROXY=127.0.0.1，前面挂一个本机的 https 反向代理：登录 Cookie 带 Secure，审计日志记下真实来源 IP。
+3. 设 COOKIE_SECURE=true，前面挂一个本机的 https 反向代理；TRUST_PROXY 填应用看到的代理地址（直接 node 跑时 127.0.0.1；用 Docker 跑时是 Docker 网络的网关，docker network inspect <项目名>_default 里的 Gateway）：登录 Cookie 带 Secure，审计日志记下真实来源 IP。
 4. 员工食堂按 docs/CANTEEN.md 第 12 节走一遍局域网与开场语音（e2e-canteen 可以直接跑）。
 5. 报告第一行：【主线·测试】→ 主线 · PR #74 · <完整 SHA>（合并后：→ 主线 · main v8.0.0 · <完整 SHA>）。
 ```

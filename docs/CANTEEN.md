@@ -131,7 +131,7 @@ staff.<域名> {
 | `CANTEEN_HOST` | 员工端口监听的地址，默认同 `HOST` |
 | `CANTEEN_CODE_SECRET` | 饭卡码的密钥，至少 32 个字符；开了员工端口就必须配。换了它所有人的饭卡码要重新打开柚子饭堂（联网一次）才能用 |
 | `CANTEEN_COOKIE_SECURE` | 员工端走 HTTPS 时设 `true`（`compose.canteen.yaml` 默认就是 `true`）：登录 Cookie 加 Secure；店里局域网用 http 打开的不加，不然浏览器存不下（第 17 节）。https 打开的不设也加 |
-| `CANTEEN_TRUST_PROXY` | 前面的转发服务器的地址（逗号分隔，可写网段）；限次按它转来的真实来源 IP 算。不设就不信任转发头 |
+| `CANTEEN_TRUST_PROXY` | 前面的转发服务器的地址（逗号分隔，可写网段）；限次按它转来的真实来源 IP 算。不设就不信任转发头。转发服务器和应用在同一台主机、经 Docker 发布的端口连进来时，容器里看到的是 Docker 网络的网关，填它，不是 127.0.0.1（`docs/RELEASE_V800.md` 第 2.3 节第 7 条） |
 
 ## 10. 这一版不做
 
