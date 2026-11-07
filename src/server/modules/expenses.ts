@@ -30,6 +30,7 @@ import {
   type PettySettlement,
   type PoCandidate,
   type PoForClaim,
+  type PoReceiptRef,
   type ClaimPrefill,
   type ExpenseCategory,
   type PaySource,
@@ -56,6 +57,7 @@ import { hashRequest } from '../lib/idempotency';
 import { saveRuleSetting } from '../lib/rule-settings';
 import { ChannelKey, ChannelNote, loadPurchaseRules, resolveChannel } from './inventory/purchase-rules';
 import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForApproval } from './approvals/engine';
+import { receiptAttachments } from './inventory/attachments';
 
 const id = z.number().int().positive();
 const yuan = (cents: number) => (cents < 0 ? '-' : '') + formatAmount(Math.abs(cents)).replace(/,/g, '');
@@ -373,7 +375,23 @@ export async function getClaim(db: Db, claimId: number): Promise<ExpenseClaim> {
   const approvals = await db<ExpenseClaim['approvals']>`
     SELECT a.id, a.action, s.display_name AS actor_name, a.reason, a.created_at
     FROM approval_logs a JOIN staff s ON s.id = a.actor_id WHERE a.doc_kind = 'expense_claim' AND a.doc_id = ${claimId} ORDER BY a.id`;
-  return { ...summary, ...extra!, lines, approvals, approval: await approvalBrief(db, 'expense_claim', claimId) };
+  return {
+    ...summary,
+    ...extra!,
+    lines,
+    approvals,
+    approval: await approvalBrief(db, 'expense_claim', claimId),
+    receipts: summary.purchaseOrder ? await poReceipts(db, summary.purchaseOrder.id) : [],
+  };
+}
+
+/** 采购单已生效的收货单与附件（8.0.1 采购组整改 11，CG11） */
+export async function poReceipts(db: Db, poId: number): Promise<PoReceiptRef[]> {
+  const rows = await db<{ id: number; docNo: string; docDate: string }[]>`
+    SELECT id, doc_no, doc_date FROM inv_docs
+    WHERE purchase_order_id = ${poId} AND doc_type = 'receipt' AND status = 'confirmed' ORDER BY doc_date, id`;
+  const att = await receiptAttachments(db, rows.map((r) => Number(r.id)));
+  return rows.map((r) => ({ id: Number(r.id), docNo: r.docNo, docDate: r.docDate, attachments: att.get(Number(r.id)) ?? [] }));
 }
 
 // ───────────────────────── 按采购单报销 ─────────────────────────
@@ -410,6 +428,7 @@ export async function poForClaim(db: Db, poId: number, excludeClaimId: number | 
   const claimedMap = new Map(claimed.map((c) => [c.poLineId, c.docNo]));
   return {
     ...po,
+    receipts: await poReceipts(db, poId),
     lines: lines.map((l) => ({ ...l, receivedMilli: received.get(l.poLineId) ?? 0, claimedBy: claimedMap.get(l.poLineId) ?? null })),
   };
 }
@@ -440,6 +459,16 @@ export async function poCandidates(db: Db, q: string): Promise<PoCandidate[]> {
 // ───────────────────────── 待报销与一键转报销（v0.7.29 ERP 采购五项②） ─────────────────────────
 
 const TO_CLAIM_LIMIT = 300;
+
+/** 已收货、待报销的现付采购单张数（8.0.1 采购组整改 11：ERP 导航「费用与备用金」上的数字） */
+export async function toClaimReceivedCount(db: Db): Promise<number> {
+  const [row] = await db<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM purchase_orders p JOIN suppliers s ON s.id = p.supplier_id
+    WHERE p.status IN ('approved', 'closed') AND ${poIsCash(db)}
+      AND EXISTS (SELECT 1 FROM inv_docs d WHERE d.purchase_order_id = p.id AND d.doc_type = 'receipt' AND d.status = 'confirmed')
+      AND EXISTS (SELECT 1 FROM purchase_order_lines pl WHERE pl.po_id = p.id AND NOT ${lineClaimed(db)})`;
+  return row!.n;
+}
 
 /** 待报销：现付、已确认或已关闭、还有没报销的行的采购单，最早的在前 */
 export async function toClaimList(db: Db, today: string): Promise<ToClaimPo[]> {
@@ -482,8 +511,20 @@ export async function toClaimList(db: Db, today: string): Promise<ToClaimPo[]> {
     WHERE o.open_lines > 0
     ORDER BY p.order_date, p.id
     LIMIT ${TO_CLAIM_LIMIT}`;
+  // 已生效的收货单与附件份数（8.0.1 采购组整改 11：收货生效后推送到待报销）
+  const receiptRows = rows.length
+    ? await db<{ poId: number; id: number; docNo: string; docDate: string; attachmentCount: number }[]>`
+        SELECT d.purchase_order_id AS po_id, d.id, d.doc_no, d.doc_date,
+               (SELECT count(*) FROM inv_doc_attachments a WHERE a.doc_id = d.id)::int AS attachment_count
+        FROM inv_docs d
+        WHERE d.purchase_order_id IN ${db(rows.map((r) => r.id))} AND d.doc_type = 'receipt' AND d.status = 'confirmed'
+        ORDER BY d.doc_date, d.id`
+    : [];
+  const receiptsOf = (poId: number) =>
+    receiptRows.filter((x) => Number(x.poId) === poId).map((x) => ({ id: Number(x.id), docNo: x.docNo, docDate: x.docDate, attachmentCount: x.attachmentCount }));
   return rows.map(({ channelKey, channelLabel, channelNote, createdById, createdByName, fullLines, receivedMilli, ...r }) => ({
     ...r,
+    receipts: receiptsOf(Number(r.id)),
     totalCents: Number(r.totalCents),
     openCents: Number(r.openCents),
     channel: channelKey ? { key: channelKey, label: channelLabel ?? channelKey, note: channelNote } : null,
@@ -1170,6 +1211,7 @@ export function registerExpenseRoutes(app: FastifyInstance, deps: Deps) {
     const { q } = parse(z.object({ q: z.string().max(40).default('') }), req.query);
     return poCandidates(sql, q);
   });
+  app.get('/api/erp/expenses/to-claim/count', { preHandler: guard('expense.read') }, async () => ({ received: await toClaimReceivedCount(sql) }));
   app.get('/api/erp/expenses/to-claim', { preHandler: guard('expense.read') }, async () =>
     readSnapshot(sql, (tx) => toClaimList(tx, todayIn(config.timezone))),
   );

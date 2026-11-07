@@ -29,6 +29,7 @@ import { registerRequestRoutes } from './modules/requests';
 import { registerPurchasingRoutes } from './modules/inventory/purchasing';
 import { registerPurchaseRulesRoutes } from './modules/inventory/purchase-rules';
 import { registerFileRoutes } from './modules/inventory/files';
+import { registerAttachmentRoutes } from './modules/inventory/attachments';
 import { registerPettyAccountRoutes } from './modules/petty-accounts';
 import { registerReplenishRoutes } from './modules/inventory/replenish';
 import { registerSourcingRoutes } from './modules/inventory/sourcing';
@@ -202,6 +203,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerPurchasingRoutes(app, deps);
   registerPurchaseRulesRoutes(app, deps);
   registerFileRoutes(app, deps);
+  registerAttachmentRoutes(app, deps);
   registerPettyAccountRoutes(app, deps);
   registerReplenishRoutes(app, deps);
   registerSourcingRoutes(app, deps);

@@ -264,3 +264,84 @@ describe('签约供应商的合同 PDF（08）', () => {
     await expect(ctx.sql`UPDATE erp_files SET size_bytes = size_bytes WHERE scope = 'supplier_contract'`).rejects.toThrow();
   });
 });
+
+describe('收货附件推送到财务待报销（11）', () => {
+  const jpeg = (seed: string) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from(`yuzu-${seed}`)]).toString('base64');
+  const pdf = (seed: string) => Buffer.from(`%PDF-1.4\n% receipt ${seed}\n%%EOF\n`).toString('base64');
+
+  it('收货单挂照片与 PDF（最多 9 份、只追加）；现付采购单收货生效后待报销标已收货、带附件数；报销单上看得到附件', async () => {
+    const coster = boss; // 店主：费用与备用金能看能登记
+    const sups = (await api(ctx.app, boss, 'GET', '/api/inventory/suppliers?all=1')).body as { id: number; code: string; name: string }[];
+    const cash = sups.find((x) => x.code === 'S005')!;
+    expect((await api(ctx.app, buyer, 'PUT', `/api/inventory/suppliers/${cash.id}`, { code: cash.code, name: cash.name, settlement: 'cash' })).status).toBe(200);
+    const created = (await po([{ materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 45_000 }], { supplierId: cash.id, approveNow: false })).body.po;
+    const order = (await api(ctx.app, approver, 'POST', `/api/purchase-orders/${created.id}/approve`, {})).body;
+    expect(order.status).toBe('approved');
+    const before = (await api(ctx.app, coster, 'GET', '/api/erp/expenses/to-claim')).body.find((r: { id: number }) => r.id === order.id);
+    expect(before).toMatchObject({ receiving: 'none', receipts: [] });
+    const receivedBefore = (await api(ctx.app, coster, 'GET', '/api/erp/expenses/to-claim/count')).body.received;
+
+    const buyerId = (await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'zhouyi'`)[0]!.id;
+    const rc = await api(ctx.app, keeper, 'POST', '/api/inventory/docs', {
+      clientKey: randomUUID(),
+      docType: 'receipt',
+      docDate: today,
+      supplierId: cash.id,
+      purchaseOrderId: order.id,
+      coAcceptorId: buyerId,
+      lines: [{ materialId: mat.id, poLineId: order.lines[0].id, deliveredMilli: q(500), acceptedMilli: q(500) }],
+    });
+    expect(rc.status, JSON.stringify(rc.body)).toBe(201);
+    const docId = rc.body.doc.id as number;
+    const attach = (cookie: string, body: Record<string, unknown>, id = docId) => api(ctx.app, cookie, 'POST', `/api/inventory/docs/${id}/attachments`, body);
+    // 仓库挂一张照片、采购挂一份 PDF；同一份再挂不重复
+    expect((await attach(keeper, { name: '送货单', mime: 'image/jpeg', data: jpeg('a') })).status).toBe(201);
+    const two = await attach(buyer, { name: '小票', mime: 'application/pdf', data: pdf('a') });
+    expect(two.status, JSON.stringify(two.body)).toBe(201);
+    expect(two.body.map((a: { kind: string; name: string }) => [a.kind, a.name])).toEqual([
+      ['image', '送货单'],
+      ['pdf', '小票'],
+    ]);
+    expect((await attach(keeper, { name: '送货单', mime: 'image/jpeg', data: jpeg('a') })).body).toHaveLength(2);
+    // 不是 PDF、没有权限、不是收货单
+    expect((await attach(keeper, { mime: 'application/pdf', data: Buffer.from('not a pdf at all').toString('base64') })).body.error.code).toBe('FILE_NOT_PDF');
+    expect((await attach(ctx.clerk, { mime: 'image/jpeg', data: jpeg('b') })).status).toBe(403);
+    // 单据详情带附件；PDF 能下载
+    const detail = (await api(ctx.app, keeper, 'GET', `/api/inventory/docs/${docId}`)).body;
+    expect(detail.attachments).toHaveLength(2);
+    const dl = await ctx.app.inject({ method: 'GET', url: detail.attachments[1].url, headers: { cookie: coster } });
+    expect(dl.statusCode).toBe(200);
+    expect(dl.rawPayload.subarray(0, 5).toString()).toBe('%PDF-');
+    // 最多 9 份
+    for (let i = 0; i < 7; i++) expect((await attach(keeper, { mime: 'image/jpeg', data: jpeg(`more-${i}`) })).status).toBe(201);
+    const tenth = await attach(keeper, { mime: 'image/jpeg', data: jpeg('tenth') });
+    expect(tenth.status).toBe(409);
+    expect(tenth.body.error.code).toBe('ATTACHMENT_LIMIT');
+    // 只追加
+    await expect(ctx.sql`DELETE FROM inv_doc_attachments WHERE doc_id = ${docId}`).rejects.toThrow();
+
+    // 待报销：已收货，带收货单与附件份数；导航上的数字加一
+    const after = (await api(ctx.app, coster, 'GET', '/api/erp/expenses/to-claim')).body.find((r: { id: number }) => r.id === order.id);
+    expect(after).toMatchObject({ receiving: 'full', receipts: [{ id: docId, attachmentCount: 9 }] });
+    expect((await api(ctx.app, coster, 'GET', '/api/erp/expenses/to-claim/count')).body.received).toBe(receivedBefore + 1);
+    // 转报销页带出收货单与附件；登记后报销单上也看得到
+    const forClaim = (await api(ctx.app, coster, 'GET', `/api/erp/expenses/po/${order.id}`)).body;
+    expect(forClaim.receipts).toEqual([expect.objectContaining({ id: docId, attachments: expect.any(Array) })]);
+    expect(forClaim.receipts[0].attachments).toHaveLength(9);
+    const pl = forClaim.lines[0];
+    const claim = await api(ctx.app, coster, 'POST', '/api/erp/expenses', {
+      clientKey: randomUUID(),
+      expenseDate: today,
+      departmentId: (await ctx.sql<{ id: number }[]>`SELECT id FROM departments ORDER BY id LIMIT 1`)[0]!.id,
+      handlerId: buyerId,
+      purpose: '客用消耗',
+      paySource: 'company',
+      invoiceType: 'receipt',
+      taxRateBp: 0,
+      purchaseOrderId: order.id,
+      lines: [{ name: pl.name, category: 'low_value', unit: pl.unit, boughtMilli: pl.boughtMilli, receivedMilli: pl.receivedMilli, amountCents: 45_000, poLineId: pl.poLineId }],
+    });
+    expect(claim.status, JSON.stringify(claim.body)).toBe(201);
+    expect(claim.body.claim.receipts).toEqual([expect.objectContaining({ id: docId, docNo: rc.body.doc.docNo })]);
+  });
+});

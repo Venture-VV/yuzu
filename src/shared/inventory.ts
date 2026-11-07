@@ -249,6 +249,20 @@ export interface SupplierContractFile {
 /** 合同 PDF 每份最多 10 MB */
 export const MAX_PDF_BYTES = 10 * 1024 * 1024;
 
+/** 收货单的附件（8.0.1 采购组整改 11，CG11）：货物、送货单、小票的照片（≤ 1 MB）或 PDF（≤ 10 MB） */
+export interface ReceiptAttachment {
+  id: number;
+  kind: 'image' | 'pdf';
+  name: string;
+  /** 看图、下载的地址（要登录） */
+  url: string;
+  sizeBytes: number;
+  uploadedByName: string;
+  uploadedAt: string;
+}
+/** 每张收货单最多几份附件 */
+export const MAX_RECEIPT_ATTACHMENTS = 9;
+
 export const RECONCILE_CYCLES = ['monthly', 'batch'] as const;
 export type ReconcileCycle = (typeof RECONCILE_CYCLES)[number];
 export const RECONCILE_CYCLE_LABELS: Record<ReconcileCycle, { title: string; hint: string }> = {
@@ -407,6 +421,8 @@ export interface InvDoc {
   approvals: ApprovalLog[];
   /** 审批中心（v0.7.30）：在审的审批单，没有在审的取最近一张；从没走过审批中心的为空 */
   approval: ApprovalBrief | null;
+  /** 收货单的附件（8.0.1，CG11）；不是收货单的为空 */
+  attachments: ReceiptAttachment[];
   /** 是否允许冲销及原因 */
   voidable: { ok: boolean; reason: string | null };
 }

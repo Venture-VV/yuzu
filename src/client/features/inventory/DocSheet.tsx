@@ -11,6 +11,7 @@ import { ReasonDialog } from '../../components/ReasonDialog';
 import { ApprovalProgress, ApprovalResend, useApprovalGate } from '../approvals/ApprovalProgress';
 import { postDocAction } from '../approvals/uncertain';
 import { Money } from '../../components/Money';
+import { ReceiptAttachmentsPanel } from '../../components/ReceiptAttachments';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, IconButton, Notice, Select, Spinner, InfoItem as Info } from '../../components/ui';
 import { DOC_VISUAL, DocTypeChip, PackHint, Qty, SimRule, StatusChip } from './parts';
@@ -424,6 +425,16 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
               ))}
             </ul>
           </section>
+        )}
+
+        {/* 收货单的附件（8.0.1 采购组整改 11）：仓库、采购都能补传；现付的推送到财务待报销 */}
+        {doc.docType === 'receipt' && doc.status !== 'cancelled' && (
+          <ReceiptAttachmentsPanel
+            docId={doc.id}
+            items={doc.attachments ?? []}
+            canUpload={doc.status !== 'voided' && (can('inventory.operate') || can('purchase.manage'))}
+            onChanged={invalidate}
+          />
         )}
 
         <ApprovalProgress approval={doc.urgent && !doc.approval ? null : doc.approval} />

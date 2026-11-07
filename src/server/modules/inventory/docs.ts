@@ -54,6 +54,7 @@ import {
 import { hashRequest } from '../../lib/idempotency';
 import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForApproval } from '../approvals/engine';
 import { urgentPlan } from './urgent';
+import { receiptAttachments } from './attachments';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -356,7 +357,9 @@ export async function getDoc(db: Db, docId: number, timeZone?: string): Promise<
   }
   const { warehouseId: _w, returnAppliedCents: _a, sourceSettlement: _s, ...rest } = d;
   const approval = await approvalBrief(db, 'inv_doc', docId);
-  const doc = { ...rest, returnCredit, lines, children, approvals, approval, voidable: { ok: false, reason: null } } as InvDoc;
+  // 收货单的附件（8.0.1，CG11）
+  const attachments = d.docType === 'receipt' ? ((await receiptAttachments(db, [docId])).get(docId) ?? []) : [];
+  const doc = { ...rest, returnCredit, lines, children, approvals, approval, attachments, voidable: { ok: false, reason: null } } as InvDoc;
   doc.voidable = await voidability(db, doc, timeZone);
   return doc;
 }

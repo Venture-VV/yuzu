@@ -128,6 +128,8 @@ export interface ExpenseClaim extends ExpenseClaimSummary {
   approvals: { id: number; action: string; actorName: string; reason: string; createdAt: string }[];
   /** 审批中心（v0.7.30）：在审的审批单，没有在审的取最近一张；从没走过审批中心的为空 */
   approval: ApprovalBrief | null;
+  /** 按采购单报销的：采购单已生效的收货单与附件（8.0.1，CG11）；按次报销的为空 */
+  receipts: PoReceiptRef[];
 }
 
 export interface ExpenseClaimList {
@@ -233,11 +235,21 @@ export interface PoCandidate {
   openLines: number;
 }
 
+/** 采购单已生效的收货单与附件（8.0.1 采购组整改 11，CG11）：转报销、报销单上看 */
+export interface PoReceiptRef {
+  id: number;
+  docNo: string;
+  docDate: string;
+  attachments: import('./inventory').ReceiptAttachment[];
+}
+
 export interface PoForClaim {
   id: number;
   docNo: string;
   supplierName: string;
   orderDate: string;
+  /** 已生效的收货单与附件（8.0.1） */
+  receipts: PoReceiptRef[];
   /** 采购单的采购途径（v0.7.29）：报销照它记 */
   channel: import('./purchasing').ChannelRef | null;
   lines: {
@@ -275,6 +287,8 @@ export interface ToClaimPo {
   lineCount: number;
   openCents: number;
   receiving: import('./purchasing').ReceivingState;
+  /** 已生效的收货单与附件份数（8.0.1 采购组整改 11：收货生效后推送到待报销，标「已收货」） */
+  receipts: { id: number; docNo: string; docDate: string; attachmentCount: number }[];
   /** 下单后过了几天 */
   ageDays: number;
 }

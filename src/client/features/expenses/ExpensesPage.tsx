@@ -19,6 +19,7 @@ import { cn, formatDateTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
+import { PoReceiptsList } from '../../components/ReceiptAttachments';
 import { Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { ApprovalProgress, ApprovalResend, useApprovalGate } from '../approvals/ApprovalProgress';
@@ -281,6 +282,15 @@ function ClaimSheet({ id, onClose }: { id: number | null; onClose: () => void })
                   <dd>
                     <span className="num">{c.purchaseOrder.docNo}</span> · {c.purchaseOrder.supplierName}
                   </dd>
+                  {/* 收货单与附件（8.0.1 采购组整改 11：收货确认时传的照片、送货单） */}
+                  {c.receipts.length > 0 && (
+                    <>
+                      <dt className="text-ink-3">收货附件</dt>
+                      <dd>
+                        <PoReceiptsList receipts={c.receipts} />
+                      </dd>
+                    </>
+                  )}
                 </>
               )}
               {c.note && (
@@ -399,6 +409,13 @@ function ToClaimCard() {
                 经办 {r.createdBy.name}
                 {r.departments.length > 0 && ` · ${r.departments.join('、')}`} · {RECEIVING_LABELS[r.receiving]} · {r.openLines}/{r.lineCount} 行未报销
               </span>
+              {/* 收货生效后推送过来（8.0.1 采购组整改 11）：收货单与附件份数 */}
+              {r.receipts.length > 0 && (
+                <span className="flex flex-wrap items-center gap-1.5 text-ink-3" data-testid={`to-claim-receipts-${r.id}`}>
+                  <Badge tone="pine">已收货</Badge>
+                  收货单 {r.receipts.map((x) => x.docNo).join('、')} · 附件 {r.receipts.reduce((n, x) => n + x.attachmentCount, 0)} 份
+                </span>
+              )}
             </span>
             <Money cents={r.openCents} className="text-right font-bold" />
             {can('expense.manage') ? (

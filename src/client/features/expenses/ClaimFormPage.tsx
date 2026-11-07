@@ -27,6 +27,7 @@ import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
+import { PoReceiptsList } from '../../components/ReceiptAttachments';
 import { useToast } from '../../components/Toast';
 import { Button, Field, Input, MoneyInput, Notice, Segmented, Select, Skeleton } from '../../components/ui';
 import { useDepartments } from '../inventory/queries';
@@ -535,6 +536,12 @@ export function ClaimFormPage() {
                     <Button variant="ghost" size="sm" disabled={locked} onClick={() => setPoId(null)}>
                       换一张
                     </Button>
+                    {/* 收货单与附件（8.0.1 采购组整改 11） */}
+                    {po.data.receipts.length > 0 && (
+                      <div className="w-full">
+                        <PoReceiptsList receipts={po.data.receipts} />
+                      </div>
+                    )}
                   </>
                 ) : (
                   <span className="text-[12.5px] text-ink-3">只列现付供应商已确认或已关闭的采购单；挂账的在「应付货款」里付款</span>
