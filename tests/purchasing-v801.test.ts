@@ -6,6 +6,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { shiftDate } from '../src/shared/labels';
 import { todayIn } from '../src/server/modules/inventory/common';
 import { createStaff } from '../src/server/modules/staff';
+import { readXlsx } from '../src/server/lib/xlsx-read';
+import { REQUEST_IMPORT_COLUMNS } from '../src/shared/requests';
 import { seedInventoryDemo } from '../src/server/seed-inventory';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
@@ -343,5 +345,98 @@ describe('收货附件推送到财务待报销（11）', () => {
     });
     expect(claim.status, JSON.stringify(claim.body)).toBe(201);
     expect(claim.body.claim.receipts).toEqual([expect.objectContaining({ id: docId, docNo: rc.body.doc.docNo })]);
+  });
+});
+
+describe('集采模板与一键导入（06）', () => {
+  it('下载模板；预览逐行核对；有错整份不导；按部门 + 优先级 + 期望到货日期合成已通过的需求单；同一份文件只能导一次', async () => {
+    // 模板：一张「集采需求表」，表头与采购组的一样
+    const tpl = await ctx.app.inject({ method: 'GET', url: '/api/erp/requests/import/template', headers: { cookie: buyer } });
+    expect(tpl.statusCode).toBe(200);
+    const book = readXlsx(tpl.rawPayload);
+    expect(book.sheets[0]!.name).toBe('集采需求表');
+    const rows = book.sheets[0]!.rows;
+    const head = rows.get(Math.min(...rows.keys()))!;
+    expect(REQUEST_IMPORT_COLUMNS.map((_, c) => head.get(c)?.value)).toEqual([...REQUEST_IMPORT_COLUMNS]);
+    expect((await ctx.app.inject({ method: 'GET', url: '/api/erp/requests/import/template', headers: { cookie: reqA } })).statusCode).toBe(403);
+
+    const sups = (await api(ctx.app, boss, 'GET', '/api/inventory/suppliers?all=1')).body as { code: string; name: string; id: number }[];
+    const s4 = sups.find((x) => x.code === 'S004')!;
+    const later = shiftDate(today, 3);
+    const header = REQUEST_IMPORT_COLUMNS.join(',');
+    const good = [
+      `1,客房部,小李,${mat.name},箱,2,紧急,${later},供应商,${s4.name},加厚`,
+      `2,客房部,小王,香薰扩香石,个,10,紧急,${later},网购,,白色`,
+      `3,客房部,小李,一次性牙刷,支,300,普通,,自采（现采/零采）,,`,
+    ];
+    const bad = [
+      `4,不存在的部门,小李,纸巾,包,1,普通,,,,`,
+      `5,客房部,小李,纸巾,包,abc,普通,,,,`,
+      `6,客房部,小李,纸巾,包,1,很急,,,,`,
+      `7,客房部,小李,纸巾,包,1,普通,,快递,,`,
+      `8,客房部,小李,纸巾,包,1,普通,,供应商,没有这家,`,
+      `9,客房部,小李,纸巾,包,1,普通,${shiftDate(today, -1)},,,`,
+    ];
+    const preview = (csv: string, name = '集采-11月.csv') => api(ctx.app, buyer, 'POST', '/api/erp/requests/import/preview', { fileName: name, csv });
+    const p1 = (await preview([header, ...good, ...bad].join('\n'))).body;
+    expect(p1.rows).toHaveLength(9);
+    expect(p1.issueCount).toBe(6);
+    const issueOf = (row: number) => p1.rows.find((r: { row: number }) => r.row === row).issues[0] as string;
+    expect(issueOf(5)).toContain('不在部门档案里');
+    expect(issueOf(6)).toContain('数量');
+    expect(issueOf(7)).toContain('采购优先级');
+    expect(issueOf(8)).toContain('采购途径');
+    expect(issueOf(9)).toContain('不在供应商档案里');
+    expect(issueOf(10)).toContain('不能早于今天');
+    // 物品名称与物料档案一样的带上物料；供应商按名称找
+    expect(p1.rows[0]).toMatchObject({ material: { id: mat.id }, supplier: { id: s4.id }, channel: 'supplier', priority: 'urgent', needBy: later, applicant: '小李' });
+    expect(p1.rows[1]).toMatchObject({ material: null, channel: 'online' });
+    // 有错整份不导
+    const refused = await api(ctx.app, buyer, 'POST', '/api/erp/requests/import', { clientKey: randomUUID(), fileName: '集采-11月.csv', csv: [header, ...good, ...bad].join('\n') });
+    expect(refused.status).toBe(422);
+    expect(refused.body.error.code).toBe('IMPORT_INVALID');
+
+    // 改好的文件：两张需求单（紧急 + 期望日期一张，普通一张），已通过，进待转采购单
+    const csv = [header, ...good].join('\n');
+    const p2 = (await preview(csv)).body;
+    expect(p2).toMatchObject({ issueCount: 0, duplicate: null });
+    expect(p2.groups).toEqual([
+      { department: '客房部', priority: 'urgent', needBy: later, lines: 2 },
+      { department: '客房部', priority: 'normal', needBy: null, lines: 1 },
+    ]);
+    const key = randomUUID();
+    const done = await api(ctx.app, buyer, 'POST', '/api/erp/requests/import', { clientKey: key, fileName: '集采-11月.csv', csv });
+    expect(done.status, JSON.stringify(done.body)).toBe(201);
+    expect(done.body.import).toMatchObject({ rowCount: 3, requestCount: 2 });
+    expect(done.body.requests.map((r: { priority: string; lineCount: number }) => [r.priority, r.lineCount])).toEqual([
+      ['urgent', 2],
+      ['normal', 1],
+    ]);
+    const first = (await api(ctx.app, buyer, 'GET', `/api/erp/requests/${done.body.requests[0].id}`)).body;
+    expect(first).toMatchObject({ status: 'approved', source: 'import', priority: 'urgent', needBy: later });
+    expect(first.lines.map((l: { name: string; applicant: string; channel: string; supplier: { id: number } | null }) => [l.name, l.applicant, l.channel, l.supplier?.id ?? null])).toEqual([
+      [mat.name, '小李', 'supplier', s4.id],
+      ['香薰扩香石', '小王', 'online', null],
+    ]);
+    const open = await openIds();
+    for (const l of first.lines) expect(open).toContain(l.id);
+    // 导入的新产品不要求链接和图片：需求单自检、账目自检第 12 条照常 ✓
+    expect(((await api(ctx.app, buyer, 'GET', '/api/erp/requests/checks')).body as { ok: boolean }[]).every((c) => c.ok)).toBe(true);
+    const audit = (await api(ctx.app, boss, 'GET', '/api/erp/audit')).body;
+    expect(audit.rules.find((r: { no: number }) => r.no === 12)).toMatchObject({ ok: true });
+
+    // 同一个操作编号重提：原来那次的结果；同一份文件换编号再导：拒绝
+    const again = await api(ctx.app, buyer, 'POST', '/api/erp/requests/import', { clientKey: key, fileName: '集采-11月.csv', csv });
+    expect(again.status).toBe(200);
+    expect(again.body).toMatchObject({ replayed: true, import: { id: done.body.import.id } });
+    expect((await preview(csv)).body.duplicate).toMatchObject({ id: done.body.import.id });
+    const dup = await api(ctx.app, buyer, 'POST', '/api/erp/requests/import', { clientKey: randomUUID(), fileName: '集采-11月-副本.csv', csv });
+    expect(dup.status).toBe(409);
+    expect(dup.body.error.code).toBe('IMPORT_DUPLICATE');
+    // 部门申购不能导入
+    expect((await api(ctx.app, reqA, 'POST', '/api/erp/requests/import/preview', { fileName: 'x.csv', csv })).status).toBe(403);
+    // 表头不对
+    const wrong = await preview('名称,数量\n纸巾,1');
+    expect(wrong.body.error.code).toBe('IMPORT_COLUMNS');
   });
 });

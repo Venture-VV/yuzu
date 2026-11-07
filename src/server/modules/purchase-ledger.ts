@@ -518,11 +518,12 @@ export async function ledgerAudit(db: Db, timezone: string): Promise<LedgerAudit
   push(11, '标注有发票但实际无票直接拦截', 'block', '发票类型要求发票号的报销单都填了发票号（登记时拦截）',
     bad11.map((c) => ({ text: `${c.docNo}：${c.invoiceLabel} 没有发票号`, date: c.expenseDate, link: claimLink(c.id) })));
 
-  // 12 新产品的图片与链接
+  // 12 新产品的图片与链接（集采导入的不要求，8.0.1 CG06：导入的就是采购自己整理的需求）
   const r12 = await db<{ id: number; docNo: string; createdDate: string; name: string }[]>`
     SELECT r.id, r.doc_no, to_char(r.created_at AT TIME ZONE ${timezone}, 'YYYY-MM-DD') AS created_date, l.name
     FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
-    WHERE l.material_id IS NULL AND (l.link = '' OR NOT EXISTS (SELECT 1 FROM purchase_request_line_images i WHERE i.request_line_id = l.id))
+    WHERE l.material_id IS NULL AND r.source = 'form'
+      AND (l.link = '' OR NOT EXISTS (SELECT 1 FROM purchase_request_line_images i WHERE i.request_line_id = l.id))
     LIMIT 500`;
   push(12, '图片与链接为必填', 'block', '需求单里的新产品（不在物料档案里的）都有参考链接与图片（提交时拦截）',
     r12.map((r) => ({ text: `${r.docNo}「${r.name}」缺链接或图片`, date: r.createdDate, link: { kind: 'request' as const, id: Number(r.id) } })));

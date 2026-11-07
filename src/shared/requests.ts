@@ -166,3 +166,49 @@ export interface RequestMeta {
 }
 
 export const imageUrl = (id: number) => `/api/erp/images/${id}`;
+
+// ───────────────────────── 集采导入（8.0.1 采购组整改 06，CG06） ─────────────────────────
+
+/** 标准模板的列（与采购组的「集采需求表」一样）；申请部门、物品名称、单位、数量必填 */
+export const REQUEST_IMPORT_COLUMNS = ['序号', '申请部门', '申请人', '物品名称', '单位', '数量', '采购优先级', '期望到货日期', '采购途径', '供应商名称', '备注'] as const;
+export const REQUEST_IMPORT_REQUIRED = ['申请部门', '物品名称', '单位', '数量'] as const;
+/** 一份文件最多多少行 */
+export const REQUEST_IMPORT_MAX_ROWS = 500;
+
+export interface RequestImportRow {
+  /** 文件里的行号（表头是第 1 行） */
+  row: number;
+  seq: string;
+  department: { id: number; name: string } | null;
+  departmentText: string;
+  applicant: string;
+  name: string;
+  unit: string;
+  qtyMilli: number | null;
+  priority: RequestPriority;
+  needBy: string | null;
+  channel: 'online' | 'self' | 'supplier' | null;
+  supplier: { id: number; name: string } | null;
+  note: string;
+  /** 物品名称与物料档案里的名称一样的：带上物料；不一样的按新产品 */
+  material: { id: number; name: string } | null;
+  /** 这一行的问题（空 = 可以导入） */
+  issues: string[];
+}
+
+export interface RequestImportPreview {
+  fileName: string;
+  sha256: string;
+  rows: RequestImportRow[];
+  /** 合成几张需求单：部门 + 优先级 + 期望到货日期 */
+  groups: { department: string; priority: RequestPriority; needBy: string | null; lines: number }[];
+  issueCount: number;
+  /** 这份文件已经导入过 */
+  duplicate: { id: number; createdAt: string; createdByName: string } | null;
+}
+
+export interface RequestImportResult {
+  import: { id: number; fileName: string; rowCount: number; requestCount: number; createdAt: string; createdByName: string };
+  requests: { id: number; docNo: string; department: string; priority: RequestPriority; needBy: string | null; lineCount: number }[];
+  replayed: boolean;
+}

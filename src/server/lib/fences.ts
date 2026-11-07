@@ -98,6 +98,9 @@ export const FENCED_OPS = [
   'supplier_invoice',
   // 员工食堂第二期（迁移 092）：柚子信箱的回信；编号记在 idempotency_keys（ref_id 是那一条）
   'canteen_reply',
+  // 8.0.1 采购组整改（迁移 093）：集采导入、赠品登记；编号记在 idempotency_keys（ref_id 是那次导入、那条赠品登记）
+  'request_import',
+  'gift_receipt',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 

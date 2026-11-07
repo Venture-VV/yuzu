@@ -488,7 +488,9 @@ export async function requestChecks(db: Db) {
     WHERE po.status <> 'cancelled' AND r.status <> 'approved'
     UNION ALL
     SELECT r.doc_no, '新产品「' || l.name || '」没有链接或图片' FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
-    WHERE l.material_id IS NULL AND (l.link = '' OR NOT EXISTS (SELECT 1 FROM purchase_request_line_images i WHERE i.request_line_id = l.id))`;
+    -- 集采导入的不要求链接和图片（8.0.1 CG06）
+    WHERE l.material_id IS NULL AND r.source = 'form'
+      AND (l.link = '' OR NOT EXISTS (SELECT 1 FROM purchase_request_line_images i WHERE i.request_line_id = l.id))`;
   const [n] = await db<{ requests: number; images: number; bytes: number }[]>`
     SELECT (SELECT count(*)::int FROM purchase_requests) AS requests, (SELECT count(*)::int FROM erp_images) AS images,
            (SELECT coalesce(sum(size_bytes), 0)::bigint FROM erp_images) AS bytes`;
