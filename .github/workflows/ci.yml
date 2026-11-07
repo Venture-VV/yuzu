@@ -23,7 +23,8 @@ concurrency:
 jobs:
   test:
     name: 类型检查 · 集成测试 · 构建
-    runs-on: ubuntu-latest
+    # 要 PostgreSQL 16 的 pg_dump / pg_restore（备份测试）：ubuntu-latest 换成 26.04 以后不带 16 版、apt 里也没有，固定用 24.04（自带 16）
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
@@ -182,7 +183,8 @@ jobs:
 
   demo:
     name: 演示数据：准备、重复执行与核对
-    runs-on: ubuntu-latest
+    # 同上：demo-reset 先备份，要 16 版的 pg_dump
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
