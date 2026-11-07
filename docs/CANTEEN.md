@@ -110,7 +110,7 @@ yuzu 数据库（名单、菜单、点赞、打卡都在这里）← 管理后�
 **代码合并后、备案之前（测试环境跑通）**——只在测试服 A 的演示库（`yuzu-demo`）上开，不在门店试用库、演练库上开：
 
 1. 演示库那台的 `.env` 叠加 `compose.canteen.yaml`，设 `CANTEEN_PORT`、`CANTEEN_CODE_SECRET`（`openssl rand -hex 32`）。
-2. 在测试服 A 上用 `tailscale serve` 把员工端口发成 tailnet 内的 HTTPS 地址（带有效证书，相机和添加到桌面都能用）；参加测试的手机装 Tailscale 加入店主的 tailnet 就能打开。也可以用香港的服务器挂 Caddy 转发（不用备案，但跨境网络不保证稳定）。
+2. 在测试服 A 上用 `tailscale serve` 把员工端口发成 tailnet 内的 HTTPS 地址（带有效证书，相机和添加到桌面都能用）；参加测试的手机装 Tailscale 加入店主的 tailnet 就能打开。也可以用香港的服务器挂 Caddy 转发（不用备案，但跨境网络不保证稳定）。员工端一定要用 HTTPS 打开：用 http（例如局域网 IP）打开时亮不了饭卡码、负责人也扫不了码（浏览器只在 HTTPS 或本机 localhost 下给加密与相机），登记、登录、看菜单照常。
 3. ERP「模块设置」打开「员工食堂」，「员工食堂 → 设置」选食堂部门、核对开饭时间、填员工入口地址；加几位测试员工、打印开通卡片，按第 12 节的清单在 iPhone 和安卓真机上走一遍。
 
 **备案之后（正式）**：网关服务器的 Caddy 加一个站点 `staff.<域名>`，转发到门店 yuzu 的员工端口（经 Tailscale，规则只放行网关服务器到这个端口）；门店 yuzu 叠加 `compose.canteen.yaml`、设 `CANTEEN_COOKIE_SECURE=true` 与 `CANTEEN_TRUST_PROXY=<网关服务器的 Tailscale 地址>`，`CANTEEN_BIND` 设成门店那台的 Tailscale 地址（默认只监听本机 127.0.0.1，适合 `tailscale serve`）。部署照旧由 Codex 按 `main` 的版本标签做，开不开由店主定。
