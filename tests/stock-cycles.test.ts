@@ -234,8 +234,8 @@ describe('台面日耗品（#14）', () => {
     await ok(deptDoc(bath, { docType: 'direct_use', warehouseId: bathWh, note: '客用', lines: [{ materialId: m.id, qtyMilli: q(6) }] }));
     expect((await updateMaterial(m.id, { counterUse: true })).status).toBe(200);
 
-    // 急采：验收生效时进部门小仓即算耗用
-    const rc = await ok(deptDoc(bath, {
+    // 急采（8.0.1 起由采购登记、按金额审批）：验收生效时进部门小仓即算耗用
+    const rc = await ok(doc(buyer, {
       docType: 'receipt',
       urgent: true,
       departmentId: bathId,
@@ -243,6 +243,7 @@ describe('台面日耗品（#14）', () => {
       lines: [{ materialId: m.id, deliveredMilli: q(4), acceptedMilli: q(4), priceCents: 1_000 }],
     }));
     expect(rc.doc.status).toBe('submitted');
+    await ok(api(ctx.app, ctx.owner, 'POST', `/api/inventory/docs/${rc.doc.id}/approve`, {}), 200);
     const verified = await ok(api(ctx.app, keeper, 'POST', `/api/inventory/docs/${rc.doc.id}/verify-urgent`, {}), 200);
     expect(verified.status).toBe('confirmed');
     expect(verified.lines[0].autoConsumed).toBe(true);

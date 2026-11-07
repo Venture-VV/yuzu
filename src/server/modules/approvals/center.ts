@@ -379,8 +379,8 @@ async function digestOf(db: Db, kind: ApprovalDocKind, docId: number, requestId:
       };
     }
     case 'inv_doc': {
-      const [d] = await db<{ docType: InvDocType; docDate: string; note: string; party: string | null; warehouseName: string | null }[]>`
-        SELECT d.doc_type, d.doc_date, d.note, coalesce(s.name, dep.name) AS party, wd.name || '小仓' AS warehouse_name
+      const [d] = await db<{ docType: InvDocType; urgent: boolean; docDate: string; note: string; party: string | null; warehouseName: string | null }[]>`
+        SELECT d.doc_type, d.urgent, d.doc_date, d.note, coalesce(s.name, dep.name) AS party, wd.name || '小仓' AS warehouse_name
         FROM inv_docs d LEFT JOIN suppliers s ON s.id = d.supplier_id LEFT JOIN departments dep ON dep.id = d.department_id
         LEFT JOIN warehouses w ON w.id = d.warehouse_id LEFT JOIN departments wd ON wd.id = w.department_id
         WHERE d.id = ${docId}`;
@@ -406,8 +406,9 @@ async function digestOf(db: Db, kind: ApprovalDocKind, docId: number, requestId:
         FROM inv_doc_lines l JOIN materials m ON m.id = l.material_id WHERE l.doc_id = ${docId} ORDER BY l.line_no`;
       const count = d.docType === 'count';
       return {
-        title: count ? '盘点差异' : INV_DOC_META[d.docType].title,
-        link: `/inventory/docs?doc=${docId}`,
+        // 急采（8.0.1）在「采购 → 急采」里看
+        title: count ? '盘点差异' : d.urgent ? '急采' : INV_DOC_META[d.docType].title,
+        link: d.urgent ? `/purchasing/urgent?doc=${docId}` : `/inventory/docs?doc=${docId}`,
         party: d.warehouseName ?? d.party,
         docDate: d.docDate,
         note: d.note,
@@ -724,7 +725,7 @@ export async function urgentAwaitingAcceptance(db: Db, actor: Actor): Promise<Ur
     SELECT d.id AS doc_id, d.doc_no, wd.name AS department_name, s.name AS supplier_name, d.amount_cents, d.created_at, cb.display_name AS handler_name
     FROM inv_docs d JOIN staff cb ON cb.id = d.created_by
     LEFT JOIN suppliers s ON s.id = d.supplier_id LEFT JOIN warehouses w ON w.id = d.warehouse_id LEFT JOIN departments wd ON wd.id = w.department_id
-    WHERE d.doc_type = 'receipt' AND d.urgent AND d.status = 'submitted'
+    WHERE d.doc_type = 'receipt' AND d.urgent AND d.status = 'submitted' AND d.urgent_approved_at IS NOT NULL
       ${actor.role === 'owner' ? db`` : db`AND d.created_by <> ${actor.id}`}
     ORDER BY d.created_at, d.id`;
   return rows.map((r) => ({ ...r, docId: Number(r.docId), amountCents: r.amountCents === null ? null : Number(r.amountCents) }));

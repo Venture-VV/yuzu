@@ -35,6 +35,7 @@ import { unprocessable } from '../lib/errors';
 import { dateSchema, parse } from '../lib/validate';
 import { buildXlsx, type XlsxImage } from '../lib/xlsx';
 import { advanceRows, loadExpenseRules, toAdvanceSummary } from './expenses';
+import { loadPurchaseRules } from './inventory/purchase-rules';
 import { checkDateRange, daysBetween, todayIn } from '../lib/dates';
 import { shiftDate } from '@shared/labels';
 
@@ -276,7 +277,8 @@ function orderedState(r: { poStatus: string; receivedMilli: number; baseQtyMilli
 }
 
 export async function orderedLines(db: Db, timezone: string, f: OrderedFilter, limit: number | null = 2000): Promise<OrderedLines> {
-  const rules = await loadExpenseRules(db);
+  // 「下单后几天没到货算超期」8.0.1 挪到采购规则（CG01；采购规则里没存过时沿用费用报销规则里原来的值）
+  const rules = await loadPurchaseRules(db);
   const today = todayIn(timezone);
   const all = (await orderedRows(db, f)).map(({ poStatus, ...r }): OrderedLine => {
     const state = orderedState({ poStatus, receivedMilli: r.receivedMilli, baseQtyMilli: r.baseQtyMilli });
@@ -493,7 +495,8 @@ export async function ledgerAudit(db: Db, timezone: string): Promise<LedgerAudit
 
   // 9 已下单未到货超期：所有没到齐的已确认采购单，不限下单日期（不能因为单子下得早就从预警里消失，v0.7.9 审查修正）
   const late = (await orderedLines(db, timezone, { state: 'overdue' }, null)).lines;
-  push(9, `已下单未到货超约定天数预警`, 'warn', `已确认的采购单行没到齐：有预计到货日的过了预计日，没有的过了下单后 ${rules.arrivalOverdueDays} 天（费用报销规则里改）`,
+  const arrivalDays = (await loadPurchaseRules(db)).arrivalOverdueDays;
+  push(9, `已下单未到货超约定天数预警`, 'warn', `已确认的采购单行没到齐：有预计到货日的过了预计日，没有的过了下单后 ${arrivalDays} 天（采购 → 采购规则里改）`,
     late.map((l) => ({
       text: `${l.docNo} ${l.materialName}：应到 ${l.dueDate}，已到 ${formatQty(l.receivedMilli)} / ${formatQty(l.baseQtyMilli)} ${l.inventoryUnit}`,
       date: l.orderDate,

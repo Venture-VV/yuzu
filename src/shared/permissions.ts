@@ -141,6 +141,8 @@ export const PERMISSIONS = {
   'inventory.master': { roles: ['owner'], duties: ['purchase'] },
   /** 采购单 */
   'purchase.manage': { roles: ['owner'], duties: ['purchase'] },
+  /** 采购规则（途径、询价门槛、截单、急采分级审批……）：8.0.1 采购组整改 01（CG01），默认只有店主，可在岗位权限里下放给采购 */
+  'purchase.rules': { roles: ['owner'] },
   /** 退供应商申请（仓库或采购均可发起） */
   'supplierReturn.create': { roles: ['owner'], duties: ['stock', 'purchase'] },
   /** 登记供应商对退货的答复（同意 → 退货生效；不同意 → 撤回），采购与供应商沟通（#20，v0.7.12） */
@@ -373,6 +375,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'inventory.operate': '期初、收货、领料、退回、耗用、报损、盘点录入（总仓）',
   'inventory.master': '维护物料、供应商、部门档案',
   'purchase.manage': '编制与提交采购单',
+  'purchase.rules': '维护采购规则（截单、急采分级审批、询价门槛……）',
   'supplierReturn.create': '发起退供应商',
   'supplierReturn.answer': '登记供应商对退货的答复',
   'payable.read': '查看供应商货款与对账',
@@ -453,7 +456,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   {
     title: 'ERP（库存、采购、货款、费用、营业数据）',
     items: [
-      'inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'supplierReturn.create', 'supplierReturn.answer', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.void', 'inventory.export',
+      'inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'purchase.rules', 'supplierReturn.create', 'supplierReturn.answer', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.void', 'inventory.export',
       'deptStock.operate', 'deptStock.audit',
       'expense.read', 'expense.manage', 'petty.manage', 'expense.approve', 'finance.void', 'expense.export', 'request.create', 'request.review', 'erp.revenue',
       'approval.act', 'approval.rules', 'contract.read', 'contract.manage', 'payment.request',

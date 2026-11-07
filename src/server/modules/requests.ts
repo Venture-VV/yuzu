@@ -23,6 +23,7 @@ import {
   type PurchaseRequestSummary,
   type RequestLineProgress,
   type RequestMeta,
+  type RequestPriority,
   type RequestsList,
   type RequestStatus,
 } from '@shared/requests';
@@ -37,7 +38,9 @@ import { idParam, parse } from '../lib/validate';
 import { erpOpAbandoned } from './erp-ops';
 import { loadExpenseRules } from './expenses';
 import { docDateSchema, logApproval, sourcingHolds } from './inventory/common';
-import { todayIn } from '../lib/dates';
+import { clockIn, todayIn } from '../lib/dates';
+import { shiftDate } from '@shared/labels';
+import { loadPurchaseRules } from './inventory/purchase-rules';
 import { nextDocNo, setTxTimeouts } from '../lib/tx';
 import { hashRequest } from '../lib/idempotency';
 
@@ -129,8 +132,12 @@ async function summaries(
   db: Db,
   f: { ids?: number[]; status?: RequestStatus; departmentId?: number; requesterOrDept?: { staffId: number; departmentId: number | null }; from?: string; to?: string; timezone?: string },
 ) {
+  // 截单（03）：今天还不能通过的（最早可通过日期在今天以后）；截单关了以后都能通过（按现在的规则）
+  const today = f.timezone && (await loadPurchaseRules(db)).cutoffEnabled ? todayIn(f.timezone) : null;
   return db<(Omit<PurchaseRequestSummary, 'department' | 'requester'> & { departmentId: number; departmentName: string; requesterId: number; requesterName: string })[]>`
     SELECT r.id, r.doc_no, r.status, r.need_by, r.created_at, r.department_id, d.name AS department_name, r.requester_id, s.display_name AS requester_name,
+           r.priority, r.submitted_at, r.approvable_on, r.source,
+           (r.status = 'submitted' AND r.approvable_on IS NOT NULL AND ${today}::date IS NOT NULL AND r.approvable_on > ${today}::date) AS locked_today,
            (SELECT count(*)::int FROM purchase_request_lines l WHERE l.request_id = r.id) AS line_count,
            coalesce((SELECT string_agg(l.name, '、' ORDER BY l.line_no) FROM purchase_request_lines l WHERE l.request_id = r.id AND l.line_no <= 3), '') AS summary,
            (SELECT count(*)::int FROM purchase_request_lines l WHERE l.request_id = r.id AND EXISTS (
@@ -149,7 +156,10 @@ async function summaries(
       ${f.from && f.timezone ? db`AND (r.created_at AT TIME ZONE ${f.timezone})::date >= ${f.from}` : db``}
       ${f.to && f.timezone ? db`AND (r.created_at AT TIME ZONE ${f.timezone})::date <= ${f.to}` : db``}
       ${f.requesterOrDept ? db`AND (r.requester_id = ${f.requesterOrDept.staffId} OR r.department_id = ${f.requesterOrDept.departmentId ?? 0})` : db``}
-    ORDER BY r.created_at DESC, r.id DESC
+    ${f.status === 'submitted'
+      ? // 待审核（CG02）：紧急在前 → 期望到货日期早的在前（没填的排后）→ 提交早的在前（与 @shared/requests 的 reviewOrder 一样）
+        db`ORDER BY (r.priority = 'urgent') DESC, r.need_by ASC NULLS LAST, r.submitted_at, r.id`
+      : db`ORDER BY r.created_at DESC, r.id DESC`}
     LIMIT 500`;
 }
 
@@ -164,20 +174,21 @@ export async function listRequests(db: Db, actor: Actor, f: { status?: RequestSt
   return { requests: rows.map(toSummary), me };
 }
 
-export async function getRequest(db: Db, actor: Actor, requestId: number): Promise<PurchaseRequest> {
+export async function getRequest(db: Db, actor: Actor, requestId: number, timezone?: string): Promise<PurchaseRequest> {
   const me = await myContext(db, actor);
-  const [row] = await summaries(db, { ids: [requestId] });
+  const [row] = await summaries(db, { ids: [requestId], timezone });
   if (!row || !visible(me, actor, { departmentId: row.departmentId, requesterId: row.requesterId })) throw notFound('需求单不存在');
   const [extra] = await db<{ note: string; reviewedByName: string | null; reviewedAt: string | null; reason: string | null; isSynthetic: boolean }[]>`
     SELECT r.note, rb.display_name AS reviewed_by_name, r.reviewed_at, r.reason, r.is_synthetic
     FROM purchase_requests r LEFT JOIN staff rb ON rb.id = r.reviewed_by WHERE r.id = ${requestId}`;
   const lines = await db<(Omit<PurchaseRequest['lines'][number], 'progress'> & { progress: RawProgress | null; sourcing: { id: number; docNo: string } | null })[]>`
     SELECT l.id, l.line_no, l.material_id, m.name AS material_name, l.name, l.purpose, l.qty_milli, l.unit, l.link, l.details,
-           l.ref_price_cents, l.note,
+           l.ref_price_cents, l.note, l.applicant, l.channel,
+           CASE WHEN l.supplier_id IS NULL THEN NULL ELSE json_build_object('id', sp.id, 'name', sp.name) END AS supplier,
            coalesce((SELECT json_agg(json_build_object('id', i.image_id, 'url', '/api/erp/images/' || i.image_id) ORDER BY i.sort_no)
                      FROM purchase_request_line_images i WHERE i.request_line_id = l.id), '[]'::json) AS images,
            ${PROGRESS_SQL(db)} AS progress, ${SOURCING_SQL(db)} AS sourcing
-    FROM purchase_request_lines l LEFT JOIN materials m ON m.id = l.material_id
+    FROM purchase_request_lines l LEFT JOIN materials m ON m.id = l.material_id LEFT JOIN suppliers sp ON sp.id = l.supplier_id
     WHERE l.request_id = ${requestId} ORDER BY l.line_no`;
   const approvals = await db<PurchaseRequest['approvals']>`
     SELECT a.id, a.action, s.display_name AS actor_name, a.reason, a.created_at
@@ -190,11 +201,13 @@ export async function openLines(db: Db, ids?: number[]): Promise<OpenRequestLine
   const rows = await db<(Omit<OpenRequestLine, 'department'> & { departmentId: number; departmentName: string })[]>`
     SELECT l.id, r.id AS request_id, r.doc_no AS request_no, r.department_id, d.name AS department_name, s.display_name AS requester_name,
            l.material_id, m.name AS material_name, l.name, l.purpose, l.qty_milli, l.unit, l.link, l.details, l.ref_price_cents,
+           r.priority, r.need_by, r.submitted_at, l.applicant, l.channel,
+           CASE WHEN l.supplier_id IS NULL THEN NULL ELSE json_build_object('id', sp.id, 'name', sp.name) END AS supplier,
            coalesce((SELECT json_agg(json_build_object('id', i.image_id, 'url', '/api/erp/images/' || i.image_id) ORDER BY i.sort_no)
                      FROM purchase_request_line_images i WHERE i.request_line_id = l.id), '[]'::json) AS images
     FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
     JOIN departments d ON d.id = r.department_id JOIN staff s ON s.id = r.requester_id
-    LEFT JOIN materials m ON m.id = l.material_id
+    LEFT JOIN materials m ON m.id = l.material_id LEFT JOIN suppliers sp ON sp.id = l.supplier_id
     WHERE r.status = 'approved'
       AND NOT EXISTS (SELECT 1 FROM purchase_order_line_requests x JOIN purchase_order_lines pl ON pl.id = x.po_line_id
                       JOIN purchase_orders po ON po.id = pl.po_id
@@ -203,7 +216,7 @@ export async function openLines(db: Db, ids?: number[]): Promise<OpenRequestLine
                       JOIN sourcing_events e ON e.id = sl.event_id
                       WHERE sr.request_line_id = l.id AND ${sourcingHolds(db)})
       ${ids ? db`AND l.id IN ${db(ids)}` : db``}
-    ORDER BY r.created_at, r.id, l.line_no
+    ORDER BY (r.priority = 'urgent') DESC, r.need_by ASC NULLS LAST, r.submitted_at, r.id, l.line_no
     LIMIT 500`;
   return rows.map(({ departmentId, departmentName, ...r }) => ({ ...r, department: { id: departmentId, name: departmentName } }));
 }
@@ -215,7 +228,8 @@ export async function requestMeta(db: Db, actor: Actor): Promise<RequestMeta> {
   const departments = await db<RequestMeta['departments']>`SELECT id, name FROM departments WHERE active ORDER BY sort_order, id`;
   const materials = await db<RequestMeta['materials']>`
     SELECT id, code, name, category, specification, purchase_unit, inventory_unit FROM materials WHERE active AND tracked ORDER BY code`;
-  return { purposes: rules.purposes, departments, materials, me };
+  const purchase = await loadPurchaseRules(db);
+  return { purposes: rules.purposes, departments, materials, me, cutoff: { enabled: purchase.cutoffEnabled, time: purchase.cutoffTime } };
 }
 
 // ───────────────────────── 提交与修改 ─────────────────────────
@@ -236,6 +250,8 @@ const LineInput = z.object({
 const BodyInput = z.object({
   departmentId: id.nullable().default(null),
   needBy: docDateSchema.nullable().default(null),
+  /** 采购优先级（02，CG02）：紧急 / 普通，默认普通 */
+  priority: z.enum(['urgent', 'normal']).default('normal'),
   note: z.string().trim().max(200).default(''),
   lines: z.array(LineInput).min(1, '至少一行').max(50, '一张需求单最多 50 行'),
 });
@@ -294,6 +310,16 @@ async function resolveDepartment(db: Db, actor: Actor, wanted: number | null) {
   return deptId;
 }
 
+/**
+ * 每日截单（03，CG03）：截单时间以后（含，门店时区）提交的需求单，最早第二天才能通过；截单前提交或没开截单的为空（随时能审）。
+ * 提交时算好记在单上，之后改截单时间不影响已经提交的单。
+ */
+export async function approvableOnFor(db: Db, timezone: string, at: Date = new Date()): Promise<string | null> {
+  const rules = await loadPurchaseRules(db);
+  if (!rules.cutoffEnabled) return null;
+  return clockIn(timezone, at) >= rules.cutoffTime ? shiftDate(todayIn(timezone), 1) : null;
+}
+
 export async function createRequest(deps: Deps, raw: unknown, actor: Actor, ip?: string) {
   const input = parse(CreateInput, raw);
   const requestHash = hashRequest({ ...input, clientKey: undefined });
@@ -315,9 +341,10 @@ export async function createRequest(deps: Deps, raw: unknown, actor: Actor, ip?:
       const deptId = await resolveDepartment(tx, actor, input.departmentId);
       await validateLines(tx, input.lines);
       const docNo = await nextDocNo(tx, 'purchase_request', 'XQ', todayIn(deps.config.timezone));
+      const approvableOn = await approvableOnFor(tx, deps.config.timezone);
       const [row] = await tx<{ id: number }[]>`
-        INSERT INTO purchase_requests (doc_no, department_id, requester_id, need_by, note, status, client_key)
-        VALUES (${docNo}, ${deptId}, ${actor.id}, ${input.needBy}, ${input.note}, 'submitted', ${input.clientKey})
+        INSERT INTO purchase_requests (doc_no, department_id, requester_id, need_by, note, status, client_key, priority, approvable_on)
+        VALUES (${docNo}, ${deptId}, ${actor.id}, ${input.needBy}, ${input.note}, 'submitted', ${input.clientKey}, ${input.priority}, ${approvableOn})
         RETURNING id`;
       await writeLines(tx, row!.id, input.lines);
       await tx`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (${input.clientKey}, 'purchase_request', ${requestHash}, ${row!.id}, ${actor.id})`;
@@ -336,12 +363,12 @@ export async function createRequest(deps: Deps, raw: unknown, actor: Actor, ip?:
       replayed = true;
     } else throw error;
   }
-  return { request: await getRequest(deps.sql, actor, requestId), replayed };
+  return { request: await getRequest(deps.sql, actor, requestId, deps.config.timezone), replayed };
 }
 
 async function lockRequest(tx: Db, requestId: number) {
-  const [r] = await tx<{ id: number; status: RequestStatus; requesterId: number; departmentId: number; docNo: string }[]>`
-    SELECT id, status, requester_id, department_id, doc_no FROM purchase_requests WHERE id = ${requestId} FOR UPDATE`;
+  const [r] = await tx<{ id: number; status: RequestStatus; requesterId: number; departmentId: number; docNo: string; approvableOn: string | null; priority: RequestPriority }[]>`
+    SELECT id, status, requester_id, department_id, doc_no, approvable_on, priority FROM purchase_requests WHERE id = ${requestId} FOR UPDATE`;
   if (!r) throw notFound('需求单不存在');
   return r;
 }
@@ -359,11 +386,16 @@ export async function updateRequest(deps: Deps, requestId: number, raw: unknown,
     await tx`DELETE FROM purchase_request_line_images WHERE request_line_id IN (SELECT id FROM purchase_request_lines WHERE request_id = ${requestId})`;
     await tx`DELETE FROM purchase_request_lines WHERE request_id = ${requestId}`;
     await writeLines(tx, requestId, input.lines);
-    await tx`UPDATE purchase_requests SET need_by = ${input.needBy}, note = ${input.note}, status = 'submitted', reason = NULL, updated_at = now() WHERE id = ${requestId}`;
+    // 修改、退回后再提交都算重新提交：提交时间与截单后的最早可通过日期按这一次算（03）
+    const approvableOn = await approvableOnFor(tx, deps.config.timezone);
+    await tx`
+      UPDATE purchase_requests SET need_by = ${input.needBy}, note = ${input.note}, priority = ${input.priority}, status = 'submitted', reason = NULL,
+             submitted_at = now(), approvable_on = ${approvableOn}, updated_at = now()
+      WHERE id = ${requestId}`;
     await logApproval(tx, 'purchase_request', requestId, r.status === 'returned' ? 'submit' : 'revise', actor.id);
   });
   await writeAudit(deps.sql, { staffId: actor.id, action: 'purchase_request', targetType: 'purchase_request', targetId: requestId, detail: { action: 'update' }, ip });
-  return getRequest(deps.sql, actor, requestId);
+  return getRequest(deps.sql, actor, requestId, deps.config.timezone);
 }
 
 export async function actOnRequest(deps: Deps, requestId: number, action: 'approve' | 'return' | 'reject' | 'cancel', raw: unknown, actor: Actor, ip?: string) {
@@ -376,6 +408,10 @@ export async function actOnRequest(deps: Deps, requestId: number, action: 'appro
         if (!can(actor, 'request.review')) throw forbidden('当前账号不能审核需求单');
         if (r.status === 'approved') return;
         if (r.status !== 'submitted') throw conflict('INVALID_STATE', '只有待审核的需求单可以通过');
+        // 每日截单（03，CG03）：截单后提交的当天不能通过（退回、不采购不受限）；截单关了以后不再拦（按现在的规则）
+        if (r.approvableOn && r.approvableOn > todayIn(deps.config.timezone) && (await loadPurchaseRules(tx)).cutoffEnabled) {
+          throw conflict('CUTOFF_LOCKED', `这张需求单是截单以后提交的，今天不能审核通过，${r.approvableOn} 起可以通过（可以先退回或定为不采购）`, { approvableOn: r.approvableOn });
+        }
         await tx`UPDATE purchase_requests SET status = 'approved', reviewed_by = ${actor.id}, reviewed_at = now(), reason = NULL, updated_at = now() WHERE id = ${requestId}`;
         return logApproval(tx, 'purchase_request', requestId, 'approve', actor.id);
       case 'return':
@@ -399,7 +435,7 @@ export async function actOnRequest(deps: Deps, requestId: number, action: 'appro
     }
   });
   await writeAudit(deps.sql, { staffId: actor.id, action: 'purchase_request', targetType: 'purchase_request', targetId: requestId, detail: { action, reason }, ip });
-  return getRequest(deps.sql, actor, requestId);
+  return getRequest(deps.sql, actor, requestId, deps.config.timezone);
 }
 
 // ───────────────────────── 图片 ─────────────────────────
@@ -578,7 +614,7 @@ export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
     const { key } = parse(keyParam, req.params);
     const [row] = await sql<{ id: number }[]>`SELECT id FROM purchase_requests WHERE client_key = ${key}`;
     if (!row) throw notFound('没有找到这次提交');
-    return getRequest(sql, req.actor, row.id);
+    return getRequest(sql, req.actor, row.id, deps.config.timezone);
   });
   // 自检看的是全店的需求单（含别的部门的单号与产品名）：只给审核的人（v0.7.30 数据隔离，A9）
   app.get('/api/erp/requests/checks', { preHandler: guardAny('request.review') }, async () => readSnapshot(sql, requestChecks));
@@ -592,7 +628,7 @@ export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
     return csv;
   });
   app.get('/api/erp/requests/meta', { preHandler: anyRequest }, async (req) => readSnapshot(sql, (tx) => requestMeta(tx, req.actor)));
-  app.get('/api/erp/requests/:id', { preHandler: anyRequest }, async (req) => readSnapshot(sql, (tx) => getRequest(tx, req.actor, docId(req))));
+  app.get('/api/erp/requests/:id', { preHandler: anyRequest }, async (req) => readSnapshot(sql, (tx) => getRequest(tx, req.actor, docId(req), deps.config.timezone)));
   app.post('/api/erp/requests', { preHandler: guardAny('request.create') }, async (req, reply) => {
     const r = await createRequest(deps, req.body, req.actor, req.ip);
     if (!r.replayed) reply.code(201);

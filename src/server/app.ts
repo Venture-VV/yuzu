@@ -28,6 +28,7 @@ import { registerLegacyRoutes } from './modules/legacy';
 import { registerRequestRoutes } from './modules/requests';
 import { registerPurchasingRoutes } from './modules/inventory/purchasing';
 import { registerPurchaseRulesRoutes } from './modules/inventory/purchase-rules';
+import { registerFileRoutes } from './modules/inventory/files';
 import { registerPettyAccountRoutes } from './modules/petty-accounts';
 import { registerReplenishRoutes } from './modules/inventory/replenish';
 import { registerSourcingRoutes } from './modules/inventory/sourcing';
@@ -200,6 +201,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerDeptStockRoutes(app, deps);
   registerPurchasingRoutes(app, deps);
   registerPurchaseRulesRoutes(app, deps);
+  registerFileRoutes(app, deps);
   registerPettyAccountRoutes(app, deps);
   registerReplenishRoutes(app, deps);
   registerSourcingRoutes(app, deps);

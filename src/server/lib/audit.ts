@@ -182,7 +182,13 @@ export type AuditAction =
   | 'mp_refund_handled'
   // 员工食堂 · 柚子饭堂（docs/CANTEEN.md）：员工名单的新建、修改、停用、重新开通、员工自己登记；跟柚子说的回信
   | 'canteen_employee'
-  | 'canteen_feedback';
+  | 'canteen_feedback'
+  // 8.0.1 采购组整改：签约供应商的合同 PDF（08）、收货附件（11）、集采导入（06）、赠品台账（09）
+  | 'supplier_contract_file'
+  | 'supplier_contract_file_removed'
+  | 'receipt_attachment'
+  | 'request_import'
+  | 'gift_receipt';
 
 export interface AuditEntry {
   staffId: number | null;

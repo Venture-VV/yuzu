@@ -20,7 +20,6 @@ import { lockOpKey } from '../../lib/fences';
 import { idParam, parse } from '../../lib/validate';
 import {
   assertNotFuture,
-  canOperateDept,
   docDateSchema,
   loadInventorySettings,
   logApproval,
@@ -212,6 +211,7 @@ export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
     approvals,
     reimbursement,
     approval: await approvalBrief(db, 'purchase_order', poId),
+    withdrawable: rest.status !== 'cancelled' && (await withdrawBlock(db, poId)) === null,
   };
 }
 
@@ -538,6 +538,18 @@ export async function assertQuotesForPo(tx: Tx, poId: number) {
   throw unprocessable('QUOTES_REQUIRED', `合计 ${amount} 到了询价门槛 ${gate}：请先询价（至少 ${rules.minQuotes} 家报价）并定标，再从询价单转采购单`, { threshold: rules.quoteThresholdCents });
 }
 
+/** 采购单每一行都来自已通过的需求单（04，CG04）；空单返回 false */
+async function allLinesFromApprovedRequests(tx: Tx, poId: number): Promise<boolean> {
+  const [row] = await tx<{ total: number; linked: number }[]>`
+    SELECT count(*)::int AS total,
+           count(*) FILTER (WHERE EXISTS (
+             SELECT 1 FROM purchase_order_line_requests x JOIN purchase_request_lines rl ON rl.id = x.request_line_id
+             JOIN purchase_requests r ON r.id = rl.request_id
+             WHERE x.po_line_id = pl.id AND r.status = 'approved'))::int AS linked
+    FROM purchase_order_lines pl WHERE pl.po_id = ${poId}`;
+  return !!row && row.total > 0 && row.linked === row.total;
+}
+
 /** 提交时按合同核对（C9）：合同仍在生效中、下单日在起止日内；超价、超量的要写原因（至少 2 个字） */
 async function assertContractDeviation(tx: Tx, poId: number) {
   const [p] = await tx<{ supplierId: number; orderDate: string; contractId: number | null }[]>`
@@ -551,8 +563,9 @@ async function assertContractDeviation(tx: Tx, poId: number) {
 }
 
 /**
- * deptConfirm：急采的补单由本部门自己确认（#19，v0.7.11），不走审批。
+ * deptConfirm：急采的补单提交即确认（8.0.1 起由采购补单，急采已按金额分级审批，CG05；补单与急采逐行对得上，见 approveLocked）。
  * 其余按审批中心（v0.7.30）：命中审批规则的按规则的审批链；没有规则命中按「需要负责人确认」与免确认门槛（默认规则），与以前一样。
+ * 需求单转的采购单（8.0.1 采购组整改 04，CG04）：每一行都来自已通过的需求单的，没有规则命中时不再走默认规则，提交即确认。
  */
 async function submitLocked(tx: Tx, po: PoRow, actor: Actor, approveNow: boolean, timeZone: string, deptConfirm = false) {
   if (po.status === 'submitted' || po.status === 'approved') return;
@@ -564,17 +577,20 @@ async function submitLocked(tx: Tx, po: PoRow, actor: Actor, approveNow: boolean
   await tx`UPDATE purchase_orders SET status = 'submitted', submitted_by = ${actor.id}, submitted_at = now(), updated_at = now() WHERE id = ${po.id}`;
   await logApproval(tx, 'purchase_order', po.id, 'submit', actor.id, '', po.revision);
   if (deptConfirm) {
-    await approveLocked(tx, { ...po, status: 'submitted' }, actor, '急采补单，部门确认');
+    await approveLocked(tx, { ...po, status: 'submitted' }, actor, '急采补单：急采已按金额分级审批，提交即确认');
     return;
   }
   const settings = await loadInventorySettings(tx);
   // #18：合计不超过免确认门槛的采购单提交即确认（v0.7.12）
   const [totals] = await tx<{ totalCents: number }[]>`SELECT total_cents FROM purchase_orders WHERE id = ${po.id}`;
-  const fallback = settings.approvalRules.purchase_order && overThreshold(settings, totals?.totalCents ?? null);
+  // 04（CG04）：每一行都来自已通过的需求单（供应链审核过）——只读需求单，不加锁（锁顺序：采购单 → 需求单，这里只在采购单的锁里读）
+  const fromRequests = (await loadPurchaseRules(tx)).requestPoDirect && (await allLinesFromApprovedRequests(tx, po.id));
+  const fallback = !fromRequests && settings.approvalRules.purchase_order && overThreshold(settings, totals?.totalCents ?? null);
   if (approveNow && !can(actor, 'inventory.approve')) throw forbidden('当前账号不能确认采购单，请提交给负责人');
   const r = await submitForApproval(tx, 'purchase_order', po.id, { actor, timeZone }, { fallback, approveNow });
   if (r.outcome === 'effective') {
-    await approveLocked(tx, { ...po, status: 'submitted' }, actor, r.skipped && settings.approvalRules.purchase_order ? '未超过免确认门槛，提交即确认' : '');
+    const reason = !r.skipped ? '' : fromRequests ? '需求单转的采购单：供应链审核需求单即可采购，提交即确认' : settings.approvalRules.purchase_order ? '未超过免确认门槛，提交即确认' : '';
+    await approveLocked(tx, { ...po, status: 'submitted' }, actor, reason);
   }
 }
 
@@ -778,14 +794,41 @@ export async function returnPo(deps: Deps, poId: number, raw: unknown, actor: Ac
   return getPo(deps.sql, poId);
 }
 
+/**
+ * 撤回：草稿、待确认、退回的采购单；已确认的只有「提交即确认、没经过人审批」的（需求单转的、没超过免确认门槛的，8.0.1 CG04）
+ * 在还没有报销、发票、三单放行时可以撤回（与以前待确认时撤回一样），需求行回到未下单；人审批过的照旧只能关闭。都要还没有收货。
+ * 返回不能撤回的原因（错误码与说明），能撤回返回 null；撤回时在采购单的锁里调用，详情页只读地调用（显示「撤回」按钮）。
+ */
+async function withdrawBlock(db: Db, poId: number): Promise<{ code: string; message: string } | null> {
+  const [po] = await db<{ status: PoStatus; backfill: boolean; reviewed: number; used: number; receipts: number }[]>`
+    SELECT p.status, p.backfill,
+           -- 这一次提交有没有经过人审批：提交与建审批单在同一个事务里，审批单的提交时间与采购单的相同
+           (SELECT count(*) FROM approval_requests a
+             WHERE a.doc_kind = 'purchase_order' AND a.doc_id = p.id AND a.submitted_at >= p.submitted_at)::int AS reviewed,
+           (SELECT count(*) FROM expense_claims WHERE purchase_order_id = p.id AND status NOT IN ('cancelled', 'voided'))::int
+             + (SELECT count(*) FROM supplier_invoice_lines l JOIN supplier_invoices i ON i.id = l.invoice_id
+                 WHERE l.purchase_order_id = p.id AND i.status = 'valid')::int
+             + (SELECT count(*) FROM po_match_releases WHERE purchase_order_id = p.id)::int AS used,
+           (SELECT count(*) FROM inv_docs WHERE purchase_order_id = p.id AND status <> 'cancelled')::int AS receipts
+    FROM purchase_orders p WHERE p.id = ${poId}`;
+  if (!po) return { code: 'NOT_FOUND', message: '采购单不存在' };
+  if (po.status === 'approved') {
+    if (po.backfill || po.reviewed > 0) return { code: 'INVALID_STATE', message: '已确认的采购单不能撤回；不再到货请关闭' };
+    if (po.used > 0) return { code: 'PO_IN_USE', message: '这张采购单已经有报销、发票或三单放行，不能撤回；不再到货请关闭' };
+  } else if (!['draft', 'submitted', 'returned'].includes(po.status)) {
+    return { code: 'INVALID_STATE', message: '已确认的采购单不能撤回；不再到货请关闭' };
+  }
+  if (po.receipts > 0) return { code: 'PO_HAS_RECEIPTS', message: '这张采购单已有收货，不能撤回；请负责人确认后关闭' };
+  return null;
+}
+
 export async function cancelPo(deps: Deps, poId: number, raw: unknown, actor: Actor) {
   const { reason } = parse(ReasonInput, raw);
   await deps.sql.begin(async (tx) => {
     const po = await lockPo(tx, poId);
     if (po.status === 'cancelled') return;
-    if (!['draft', 'submitted', 'returned'].includes(po.status)) throw conflict('INVALID_STATE', '已确认的采购单不能撤回；不再到货请关闭');
-    const [rc] = await tx<{ n: number }[]>`SELECT count(*) AS n FROM inv_docs WHERE purchase_order_id = ${poId} AND status <> 'cancelled'`;
-    if (rc!.n > 0) throw conflict('PO_HAS_RECEIPTS', '这张采购单已有收货，不能撤回；请负责人确认后关闭');
+    const block = await withdrawBlock(tx, poId);
+    if (block) throw conflict(block.code, block.message);
     if (!can(actor, 'inventory.approve') && po.createdBy !== actor.id) throw forbidden('只能撤回自己创建的采购单');
     await tx`UPDATE purchase_orders SET status = 'cancelled', returned_reason = ${reason}, updated_at = now() WHERE id = ${poId}`;
     await closeApproval(tx, 'purchase_order', poId, actor);
@@ -814,17 +857,17 @@ export async function closePo(deps: Deps, poId: number, raw: unknown, actor: Act
  * 按直接收货单（迁移 029 以前）或急采生成补单采购单（数量、价格取自收货单，不再入库或计款）。
  * dept：急采由本部门的部门申购补单并自己确认（#19，v0.7.11）。
  */
-export async function backfillPo(deps: Deps, raw: unknown, actor: Actor, ip?: string, opts: { dept?: boolean } = {}) {
+/**
+ * 补采购单：给没有采购单的收货单（急采、v0.7.11 以前的收货）按实收数量与价格生成采购单。
+ * 急采的补单（8.0.1 起只由采购补，CG05）提交即确认：急采已经按金额分级审批过，补单与急采逐行对得上（approveLocked 核对）。
+ */
+export async function backfillPo(deps: Deps, raw: unknown, actor: Actor, ip?: string) {
   const input = parse(z.object({ receiptDocId: id, clientKey: z.uuid(), approveNow: z.boolean().default(false), note: z.string().trim().max(200).default('') }), raw);
   const [rc] = await deps.sql<{ id: number; docType: string; status: string; supplierId: number; docDate: string; purchaseOrderId: number | null; docNo: string; urgent: boolean; departmentId: number | null }[]>`
     SELECT d.id, d.doc_type, d.status, d.supplier_id, d.doc_date, d.purchase_order_id, d.doc_no, d.urgent, w.department_id
     FROM inv_docs d LEFT JOIN warehouses w ON w.id = d.warehouse_id WHERE d.id = ${input.receiptDocId}`;
   if (!rc || rc.docType !== 'receipt') throw notFound('收货单不存在');
-  if (opts.dept) {
-    if (!rc.urgent) throw unprocessable('BACKFILL_NOT_URGENT', '部门只能给本部门的急采补单');
-    if (!(await canOperateDept(deps.sql, actor, rc.departmentId))) throw forbidden('只有急采部门的部门申购可以补单');
-    if (input.approveNow) throw badRequest('部门补单会直接由部门确认，不用再选「提交并确认」');
-  }
+  if (rc.urgent && input.approveNow) throw badRequest('急采的补单提交即确认，不用再选「提交并确认」');
   if (rc.status !== 'confirmed') throw unprocessable('BACKFILL_SOURCE_INVALID', '只有已生效的收货单可以补采购单');
   if (rc.purchaseOrderId) throw unprocessable('BACKFILL_LINKED', '这张收货单已关联采购单');
   const lines = await deps.sql<{ materialId: number; qtyMilli: number; factorMilli: number; priceCents: number; purchaseUnit: string }[]>`
@@ -847,7 +890,7 @@ export async function backfillPo(deps: Deps, raw: unknown, actor: Actor, ip?: st
       approveNow: input.approveNow,
     },
     actor,
-    { backfillReceiptId: rc.id, ip, deptConfirm: opts.dept },
+    { backfillReceiptId: rc.id, ip, deptConfirm: rc.urgent },
   );
 }
 

@@ -226,11 +226,28 @@ export interface Supplier {
   reconcileCycle: ReconcileCycle;
   /** 改成按批次的日期：之前的收货不提醒对账 */
   reconcileSince: string | null;
-  /** 默认采购途径（v0.7.29，E1）：新建采购单按它带出；没设的按「采购规则」的第一项 */
+  /** 默认采购途径（v0.7.29，E1；8.0.1 起只有三类）：新建采购单按它带出；没设的按「供应商」 */
   defaultChannel: string | null;
+  /** 签约 / 未签约（8.0.1 采购组整改 08，CG08）：签约的可以上传合同 PDF */
+  contracted: boolean;
+  /** 在用的合同 PDF 份数 */
+  contractFiles: number;
   active: boolean;
   isSynthetic: boolean;
 }
+
+/** 签约供应商的合同 PDF（8.0.1，CG08） */
+export interface SupplierContractFile {
+  id: number;
+  name: string;
+  sizeBytes: number;
+  uploadedByName: string;
+  uploadedAt: string;
+  /** 下载地址（要登录） */
+  url: string;
+}
+/** 合同 PDF 每份最多 10 MB */
+export const MAX_PDF_BYTES = 10 * 1024 * 1024;
 
 export const RECONCILE_CYCLES = ['monthly', 'batch'] as const;
 export type ReconcileCycle = (typeof RECONCILE_CYCLES)[number];
@@ -362,6 +379,8 @@ export interface InvDoc {
   /** 急采收货（#19）：没有采购单，进部门小仓，合计不超过登记时的上限 */
   urgent: boolean;
   urgentCapCents: number | null;
+  /** 急采按金额分级审批通过的时间（8.0.1，CG05）：为空且已提交 = 还在审批中；不为空且已提交 = 等仓库到部门验收 */
+  urgentApprovedAt: string | null;
   /** 一起验收的采购经办（#17 第一次验收） */
   coAcceptor: Ref | null;
   /** 领料：部门签收（#17 第二次验收）；没签收为空 */
@@ -407,6 +426,8 @@ export interface InvDocSummary {
   urgent: boolean;
   /** 急采已生效、还没补采购单 */
   needsBackfill: boolean;
+  /** 急采已经按金额分级审批通过（8.0.1）：已提交的急采据此分「审批中」与「待验收」 */
+  urgentApproved: boolean;
   /** 领料：部门是否已签收（其他单据为空） */
   deptSigned: boolean | null;
   createdByName: string;

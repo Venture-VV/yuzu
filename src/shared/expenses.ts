@@ -46,8 +46,6 @@ export interface ExpenseRules {
   approvalThresholdCents: number;
   /** 打款后超过多少天还没平账标红（12 条自检第 4 条：默认 7 天） */
   overdueDays: number;
-  /** 已下单未到货：没有预计到货日的，下单后超过多少天算超期（12 条自检第 9 条：默认 7 天，v0.7.9） */
-  arrivalOverdueDays: number;
   /** 用途（固定选项） */
   purposes: string[];
   invoiceTypes: InvoiceTypeDef[];
@@ -57,7 +55,6 @@ export interface ExpenseRules {
 export const DEFAULT_EXPENSE_RULES: ExpenseRules = {
   approvalThresholdCents: 200_000,
   overdueDays: 7,
-  arrivalOverdueDays: 7,
   purposes: ['客用消耗', '员工用品', '办公', '维修保养', '装修改造', '营销活动', '餐饮原料', '其他'],
   invoiceTypes: [
     { key: 'vat_special', label: '增值税专用发票', needsNumber: true, taxRatesBp: [100, 300, 600, 900, 1300] },

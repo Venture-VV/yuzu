@@ -77,7 +77,6 @@ const CREDIT_PO_MESSAGE = '这张采购单按挂账结算（收货已记应付�
 const RulesInput = z.object({
   approvalThresholdCents: z.number().int().min(0, '门槛不能为负').max(100_000_000, '门槛不能超过 100 万元'),
   overdueDays: z.number().int().min(1, '至少 1 天').max(90, '最多 90 天'),
-  arrivalOverdueDays: z.number().int().min(1, '至少 1 天').max(180, '最多 180 天').default(7),
   purposes: z
     .array(z.string().trim().min(1, '用途不能为空').max(20, '用途最多 20 个字'))
     .min(1, '至少保留一个用途')
@@ -1141,7 +1140,11 @@ export function registerExpenseRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/erp/expenses/rules', { preHandler: guard('expense.read') }, async () => loadExpenseRules(sql));
   app.put('/api/erp/expenses/rules', { preHandler: guard('settings.manage') }, async (req) => {
     const rules = parse(RulesInput, req.body);
-    await saveRuleSetting(sql, 'expense_rules', loadExpenseRules, () => rules, ctxOf(req));
+    // 「到货超期天数」8.0.1 挪到采购规则（CG01）：这里存过的原样留着（采购规则里没存过时沿用它），页面不再改
+    await saveRuleSetting(sql, 'expense_rules', loadExpenseRules, (before) => {
+      const legacy = (before as { arrivalOverdueDays?: unknown }).arrivalOverdueDays;
+      return typeof legacy === 'number' ? ({ ...rules, arrivalOverdueDays: legacy } as ExpenseRules) : rules;
+    }, ctxOf(req));
     return loadExpenseRules(sql);
   });
 
