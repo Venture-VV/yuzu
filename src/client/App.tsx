@@ -72,6 +72,8 @@ const OrderedPage = lazyPage(() => import('./features/purchasing/OrderedPage').t
 const SuggestionsPage = lazyPage(() => import('./features/purchasing/SuggestionsPage').then((m) => m.SuggestionsPage));
 const SourcingPage = lazyPage(() => import('./features/purchasing/SourcingPage').then((m) => m.SourcingPage));
 const SourcingDetailPage = lazyPage(() => import('./features/purchasing/SourcingPage').then((m) => m.SourcingDetailPage));
+const UrgentPage = lazyPage(() => import('./features/purchasing/UrgentPage').then((m) => m.UrgentPage));
+const UrgentDocFormPage = lazyPage(() => import('./features/inventory/DocFormPage').then((m) => m.UrgentDocFormPage));
 const PayablesPage = lazyPage(() => import('./features/payables/PayablesPage').then((m) => m.PayablesPage));
 const PaymentFormPage = lazyPage(() => import('./features/payables/PaymentFormPage').then((m) => m.PaymentFormPage));
 const ImportPage = lazyPage(() => import('./features/payables/ImportPage').then((m) => m.ImportPage));
@@ -247,6 +249,10 @@ const router = createBrowserRouter([
       { path: 'purchasing/suggestions', element: <SuggestionsPage /> },
       { path: 'purchasing/sourcing', element: <SourcingPage /> },
       { path: 'purchasing/sourcing/:id', element: <SourcingDetailPage /> },
+      // 急采（8.0.1 采购组整改 05：由采购登记、按金额分级审批）
+      { path: 'purchasing/urgent', element: <UrgentPage /> },
+      { path: 'purchasing/urgent/new', element: <UrgentDocFormPage /> },
+      { path: 'purchasing/urgent/:id/edit', element: <UrgentDocFormPage /> },
       { path: 'purchasing/:id/edit', element: <PoFormPage mode="edit" /> },
       { path: 'purchasing/:id/revise', element: <PoFormPage mode="revise" /> },
       { path: 'payables', element: <PayablesPage /> },

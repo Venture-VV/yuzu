@@ -360,6 +360,8 @@ describe('急采（#19；8.0.1 收拢到采购、按金额分级审批，CG05）
     const early = await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${rc.id}/verify-urgent`, {});
     expect(early.status).toBe(409);
     expect(early.body.error.code).toBe('URGENT_NOT_APPROVED');
+    // 审批中的不算「急采待仓库验收」
+    expect((await api(ctx.app, keeper, 'GET', '/api/inventory/overview')).body.urgentToVerify).toBe(0);
     expect((await api(ctx.app, ctx.owner, 'GET', `/api/approvals?tab=all&docType=urgent_purchase`)).body).toEqual(
       expect.arrayContaining([expect.objectContaining({ docId: rc.id, docType: 'urgent_purchase', amountCents: 30_000, departmentName: '浴区' })]),
     );

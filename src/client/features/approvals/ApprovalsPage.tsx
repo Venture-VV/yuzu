@@ -421,7 +421,7 @@ function BackfillStrip({ items }: { items: { receiptId: number; docNo: string; d
         <ul className="mt-2 space-y-1.5">
           {items.map((b) => (
             <li key={b.receiptId} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[13px]">
-              <Link to={`/inventory/docs?doc=${b.receiptId}`} className="num font-semibold text-lake hover:underline">
+              <Link to={`/purchasing/urgent?doc=${b.receiptId}`} className="num font-semibold text-lake hover:underline">
                 {b.docNo}
               </Link>
               <span>{[b.departmentName, b.supplierName].filter(Boolean).join(' · ')}</span>

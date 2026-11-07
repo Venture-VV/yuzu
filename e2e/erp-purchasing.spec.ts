@@ -63,29 +63,31 @@ async function firstDepartment(page: Page) {
 test.describe('ERP 采购五项（v0.7.29）', () => {
   test.skip(({ viewport }) => (viewport?.width ?? 0) < 1280, '会登记单据的流程只在门店电脑尺寸执行一次');
 
-  test('① 采购途径：编制采购单时选途径，网购没写店铺被拦；详情显示途径', async ({ page }) => {
+  test('① 采购途径（8.0.1 起固定三类：网购、自采、供应商）：编制采购单时选途径，网购没写店铺被拦；详情显示途径', async ({ page }) => {
     const { today, tag } = await setup(page);
-    const sup = await newSupplier(page, tag, { defaultChannel: 'wholesale' });
+    const sup = await newSupplier(page, tag, { defaultChannel: 'self' });
     const mat = await newMaterial(page, tag);
 
     await page.goto('/purchasing/new');
     await page.locator('#po-sup').selectOption(String(sup.id));
     // 按供应商的默认途径带出；选的是这家供应商的默认途径，说明选填
-    await expect(page.getByTestId('po-channel')).toHaveValue('wholesale');
-    await expect(page.getByText('采购途径选了「批发市场」，请写明在哪买的')).toHaveCount(0);
+    await expect(page.getByTestId('po-channel')).toHaveValue('self');
+    await expect(page.getByText('采购途径选了「自采（现采/零采）」，请写明在哪买的')).toHaveCount(0);
+    // 只有三类可选
+    await expect(page.getByTestId('po-channel').locator('option')).toHaveText(['网购', '自采（现采/零采）', '供应商']);
     await page.getByTestId('po-channel').selectOption('online');
-    await expect(page.getByText('采购途径选了「网购平台」，请写明在哪买的')).toBeVisible();
+    await expect(page.getByText('采购途径选了「网购」，请写明在哪买的')).toBeVisible();
     await page.getByTestId('po-channel-note').fill('某平台某某旗舰店');
-    await expect(page.getByText('采购途径选了「网购平台」，请写明在哪买的')).toHaveCount(0);
+    await expect(page.getByText('采购途径选了「网购」，请写明在哪买的')).toHaveCount(0);
 
     // 接口建一张带途径的采购单，详情里看得到
     const po = (await (
       await page.request.post('/api/purchase-orders', {
-        data: { clientKey: randomUUID(), supplierId: sup.id, orderDate: today, approveNow: true, channel: 'store', channelNote: `E2E 门店${tag}`, lines: [{ materialId: mat.id, purchaseQtyMilli: 1000, priceCents: 3_000 }] },
+        data: { clientKey: randomUUID(), supplierId: sup.id, orderDate: today, approveNow: true, channel: 'self', channelNote: `E2E 门店${tag}`, lines: [{ materialId: mat.id, purchaseQtyMilli: 1000, priceCents: 3_000 }] },
       })
     ).json()) as { po: { id: number } };
     await page.goto(`/purchasing?po=${po.po.id}`);
-    await expect(page.getByTestId('po-sheet-channel')).toHaveText(`商超门店 · E2E 门店${tag}`);
+    await expect(page.getByTestId('po-sheet-channel')).toHaveText(`自采（现采/零采） · E2E 门店${tag}`);
   });
 
   test('② 现付采购单一键转报销：待报销 → 带好的登记页 → 提交，采购单上看到报销单', async ({ page }) => {
@@ -106,7 +108,7 @@ test.describe('ERP 采购五项（v0.7.29）', () => {
     // 带好的：经办人 = 采购单的编制人，采购途径照采购单
     await expect(page.getByTestId('claim-prefill-note')).toBeVisible();
     await expect(page.getByTestId('ex-handler')).toHaveValue(String(me.staff.id));
-    await expect(page.getByTestId('ex-po-channel')).toHaveText(`网购平台 · E2E 网店${tag}`);
+    await expect(page.getByTestId('ex-po-channel')).toHaveText(`网购 · E2E 网店${tag}`);
     if ((await page.getByTestId('ex-dept').inputValue()) === '') {
       const dept = await firstDepartment(page);
       await page.getByTestId('ex-dept').selectOption(String(dept.id));

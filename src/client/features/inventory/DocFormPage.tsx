@@ -108,9 +108,12 @@ const blankForm = (date: string): FormState => ({
 
 // ───────────────────────── 入口：库存（总仓）或本部门小仓（v0.7.11） ─────────────────────────
 
-/** 表单服务于哪个入口：库存页（总仓、领料与退回、按采购单收货）或本部门小仓（部门的期初、耗用、报损、盘点、急采） */
+/**
+ * 表单服务于哪个入口：库存页（总仓、领料与退回、按采购单收货）、本部门小仓（部门的期初、耗用、报损、盘点），
+ * 或急采（8.0.1 起由采购在「采购 → 急采」登记，CG05：数据按总仓，给哪个部门买的在表头选）
+ */
 export interface FormScope {
-  kind: 'central' | 'dept';
+  kind: 'central' | 'dept' | 'urgent';
   dept: { id: number; name: string; warehouseId: number } | null;
   /** 单据接口 */
   api: string;
@@ -128,6 +131,16 @@ const CENTRAL_SCOPE: FormScope = {
   newLink: (t) => `/inventory/new/${t}`,
 };
 
+/** 急采（8.0.1，CG05）：走库存单据接口（带 urgent 与部门），回到「采购 → 急采」 */
+export const URGENT_SCOPE: FormScope = {
+  kind: 'urgent',
+  dept: null,
+  api: '/api/inventory/docs',
+  home: '/purchasing/urgent',
+  docLink: (id) => `/purchasing/urgent?doc=${id}`,
+  newLink: () => '/purchasing/urgent/new',
+};
+
 export function deptScope(dept: { id: number; name: string; warehouseId: number }): FormScope {
   return {
     kind: 'dept',
@@ -139,8 +152,8 @@ export function deptScope(dept: { id: number; name: string; warehouseId: number 
   };
 }
 
-/** 部门小仓能登记的单据：急采、耗用、报损、盘点、期初（领料与退回由仓库登记） */
-export const DEPT_DOC_TYPES: InvDocType[] = ['receipt', 'direct_use', 'damage', 'count', 'opening'];
+/** 部门小仓能登记的单据：耗用、报损、盘点、期初（领料与退回由仓库登记；急采 8.0.1 起由采购登记） */
+export const DEPT_DOC_TYPES: InvDocType[] = ['direct_use', 'damage', 'count', 'opening'];
 
 /** 部门小仓的物料：部门的员工看不到总仓结存与参考价，库存按本部门小仓 */
 function deptMaterial(m: DeptStockMeta['materials'][number], row: WarehouseStockRow | undefined): Material {
@@ -168,7 +181,8 @@ function deptMaterial(m: DeptStockMeta['materials'][number], row: WarehouseStock
 
 /** 按入口取表单要的数据：总仓走库存接口；部门小仓走 /api/erp/dept-stock（部门的员工没有「查看库存」） */
 function useScopeData(scope: FormScope) {
-  const central = scope.kind === 'central';
+  // 急采按总仓的数据（采购有「查看库存」）
+  const central = scope.kind !== 'dept';
   const materialsQ = useMaterials(true, central);
   const suppliersQ = useSuppliers(false, central);
   const settingsQ = useInvSettings(central);
@@ -263,8 +277,10 @@ const INTRO: Record<InvDocType, string> = {
 };
 
 /** 本部门小仓的说明（v0.7.11） */
+const URGENT_INTRO =
+  '急采：没有采购单、临时给部门买的东西，由采购登记。合计不超过急采上限；提交后按金额分级审批，批了以后仓库到部门验收、进部门小仓，之后补采购单（提交即确认）。';
+
 const DEPT_INTRO: Partial<Record<InvDocType, string>> = {
-  receipt: '急采：没有采购单、临时买的东西。合计不超过急采上限；提交后要仓库到部门验收、确认后才进本部门小仓，之后补采购单。',
   direct_use: '本部门小仓里用掉的东西（客用、日耗品等），从本部门小仓扣。',
   damage: '本部门小仓里已知损坏的东西，注明原因；报损要负责人确认。',
   count: '本部门小仓的盘点：差异由部门自己管，提交即生效，差异原因默认「耗用」（客用、日耗品用掉的）。',
@@ -296,12 +312,18 @@ const NOTE_SPAN: Record<InvDocType, string> = {
 
 // ───────────────────────── 页面 ─────────────────────────
 
+/** 急采的登记与修改（8.0.1，「采购 → 急采」） */
+export function UrgentDocFormPage() {
+  return <DocFormPage scope={URGENT_SCOPE} />;
+}
+
 export function DocFormPage({ scope = CENTRAL_SCOPE }: { scope?: FormScope }) {
   const params = useParams();
   const editId = params.id ? Number(params.id) : null;
-  const type = params.type as InvDocType | undefined;
+  const type = scope.kind === 'urgent' ? 'receipt' : (params.type as InvDocType | undefined);
   const can = useCan();
-  const central = scope.kind === 'central';
+  // 急采与总仓用库存单据接口
+  const central = scope.kind !== 'dept';
   const invDoc = useInvDoc(central ? editId : null);
   const deptDoc = useDeptDoc(central ? null : editId);
   const doc = central ? invDoc : deptDoc;
@@ -315,7 +337,9 @@ export function DocFormPage({ scope = CENTRAL_SCOPE }: { scope?: FormScope }) {
     return <DocForm key={editId} scope={scope} type={doc.data.docType} editing={doc.data} initial={formFromDoc(doc.data, map)} />;
   }
   if (!type || !(type in INV_DOC_META)) return <Navigate to={scope.home} replace />;
-  if (central) {
+  if (scope.kind === 'urgent') {
+    if (!can('purchase.manage')) return <Navigate to="/purchasing" replace />;
+  } else if (central) {
     const perm = type === 'supplier_return' ? 'supplierReturn.create' : 'inventory.operate';
     if (!can(perm)) return <Navigate to="/inventory" replace />;
   } else if (!DEPT_DOC_TYPES.includes(type)) {
@@ -408,12 +432,13 @@ function DocForm({
   const invalidateInv = useInvalidateInventory();
   const invalidateDept = useInvalidateDept();
   const central = scope.kind === 'central';
-  const invalidate = () => (central ? invalidateInv() : invalidateDept());
+  // 急采（8.0.1 起由采购登记）：总仓的数据，给哪个部门买的在表头选
+  const urgent = scope.kind === 'urgent';
+  const invalidate = () => (scope.kind === 'dept' ? invalidateDept() : invalidateInv());
   const data = useScopeData(scope);
-  const departments = useDepartments(false, central && type === 'issue');
+  const departments = useDepartments(false, (central && type === 'issue') || urgent);
   // 按采购单收货：一起验收的采购经办（#17）
   const coAcceptors = useCoAcceptors(central && type === 'receipt');
-  const urgent = !central && type === 'receipt';
   const [form, setForm] = useState<FormState>(initial);
   const [phase, setPhase] = useState<Phase>({ kind: 'edit' });
   const [error, setError] = useState<ApiError | null>(null);
@@ -658,8 +683,10 @@ function DocForm({
   const headerError =
     type === 'receipt' && !form.supplierId
       ? '请选择供应商'
+      : urgent && !form.departmentId
+        ? '请选给哪个部门买的'
       : type === 'receipt' && central && !form.purchaseOrderId
-        ? '请选择采购单（没有采购单不能收货，急采由部门登记）'
+        ? '请选择采购单（没有采购单不能收货；没有采购单的临时采购由采购在「采购 → 急采」登记）'
         : type === 'receipt' && central && !form.coAcceptorId
           ? '请选一起验收的采购'
           : urgentOver
@@ -743,7 +770,7 @@ function DocForm({
           supplierId: form.supplierId,
           purchaseOrderId: urgent ? null : form.purchaseOrderId,
           coAcceptorId: urgent ? null : form.coAcceptorId,
-          ...(urgent ? { urgent: true, departmentId: scope.dept!.id } : {}),
+          ...(urgent ? { urgent: true, departmentId: form.departmentId } : {}),
           handler: form.handler.trim(),
           lines: lines.map((r) => ({
             materialId: r.line.materialId,
@@ -836,7 +863,7 @@ function DocForm({
         dateMode="calendar"
         title={
           <span className="flex items-center gap-2.5">
-            <Link to={scope.home} className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label={central ? '返回库存' : '返回本部门小仓'}>
+            <Link to={scope.home} className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label={central ? '返回库存' : urgent ? '返回急采' : '返回本部门小仓'}>
               <ArrowLeft className="size-[18px]" />
             </Link>
             <span className={cn('flex size-8 items-center justify-center rounded-full', visual.tone)}>
@@ -846,7 +873,7 @@ function DocForm({
             {editing ? `修改${urgent ? '急采' : meta.title} · ${editing.docNo}` : `新建${urgent ? '急采' : meta.title}`}
           </span>
         }
-        subtitle={(scope.dept && DEPT_INTRO[type]) || INTRO[type]}
+        subtitle={urgent ? URGENT_INTRO : (scope.dept && DEPT_INTRO[type]) || INTRO[type]}
       />
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
@@ -936,6 +963,18 @@ function DocForm({
                     </Select>
                   </Field>
                 )}
+                {urgent && (
+                  <Field label="给哪个部门买的" htmlFor="urgent-dept" hint="验收后进这个部门的小仓">
+                    <Select id="urgent-dept" value={form.departmentId ?? ''} disabled={locked} onChange={(e) => patch({ departmentId: Number(e.target.value) || null })} data-testid="urgent-dept">
+                      <option value="">选择部门</option>
+                      {departments.data?.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                )}
                 <Field label={urgent ? '经手人' : '收货人'} htmlFor="handler">
                   <Input id="handler" value={form.handler} disabled={locked} onChange={(e) => patch({ handler: e.target.value })} placeholder={urgent ? '实际去买的人' : '默认为当前账号'} className="h-10" />
                 </Field>
@@ -1006,7 +1045,7 @@ function DocForm({
 
           {urgent && (
             <Notice tone={urgentOver ? 'error' : 'warning'} title={`急采：合计不超过 ¥${((data.urgentCapCents ?? 0) / 100).toFixed(2)}`} icon={<CircleAlert className="size-5" />}>
-              没有采购单的收货只能登记急采。提交后要仓库到部门验收、确认后才进{scope.dept?.name}小仓；之后在本部门小仓里补采购单（部门自己确认）。上限 <SimRule className="align-middle" />
+              没有采购单的临时采购登记成急采：提交后按金额分级审批，批了以后仓库到部门验收、确认后才进部门小仓；之后在「采购 → 急采」里补采购单（提交即确认）。上限是采购规则里急采分级的最高一档 <SimRule className="align-middle" />
             </Notice>
           )}
           {type === 'receipt' && po.data && form.purchaseOrderId === po.data.id && (
@@ -1025,7 +1064,7 @@ function DocForm({
               {type === 'issue' && <UsualChips departmentId={form.departmentId} materials={materials} taken={takenMaterials} disabled={locked} onAdd={(m, qty) => addMaterial(m, { qty: qtyEntryFromMilli(qty, m) })} />}
               {type === 'count' && !locked && (
                 <CountFillMenu
-                  materials={central ? (data.materials ?? []) : (data.materials ?? []).filter((m) => m.hasMoves && !m.counterUse)}
+                  materials={scope.kind !== 'dept' ? (data.materials ?? []) : (data.materials ?? []).filter((m) => m.hasMoves && !m.counterUse)}
                   taken={takenMaterials}
                   onAdd={(list) => setForm((f) => ({ ...f, lines: [...f.lines, ...list.map((m) => blankLine(m.id))] }))}
                 />
@@ -1143,7 +1182,7 @@ function DocForm({
             )}
             <span className="flex items-center gap-2 text-[12.5px]">
               {urgent ? (
-                <span className="font-semibold text-yuzu-deep">提交后由仓库到部门验收，确认后才进小仓</span>
+                <span className="font-semibold text-yuzu-deep">提交后按金额分级审批，批了以后仓库到部门验收、进部门小仓</span>
               ) : needsApproval ? (
                 <>
                   <span className="font-semibold text-yuzu-deep">提交后需负责人确认</span>
@@ -1643,7 +1682,15 @@ function DoneView({ scope, type, doc, replayed, onAgain }: { scope: FormScope; t
             </svg>
           </span>
           <h2 className="mt-5 text-[22px] font-bold">
-            {effective ? `${meta.title}已生效` : doc.status === 'draft' ? '草稿已保存' : doc.urgent ? '已提交，等仓库到部门验收' : '已提交，等待负责人确认'}
+            {effective
+              ? `${meta.title}已生效`
+              : doc.status === 'draft'
+                ? '草稿已保存'
+                : doc.urgent
+                  ? doc.urgentApprovedAt
+                    ? '已批准，等仓库到部门验收'
+                    : '已提交，按金额分级审批'
+                  : '已提交，等待负责人确认'}
           </h2>
           <p className="num mt-1 text-[15px] font-semibold text-ink-2">{doc.docNo}</p>
           <div className="mt-3">
@@ -1657,7 +1704,7 @@ function DoneView({ scope, type, doc, replayed, onAgain }: { scope: FormScope; t
                 : doc.status === 'draft'
                   ? '草稿不影响库存，可以稍后继续修改再提交。'
                   : doc.urgent
-                    ? '仓库验收确认前不影响库存或货款；确认后进本部门小仓，再补采购单。'
+                    ? '审批人在审批中心批了以后，仓库到部门验收；验收确认前不影响库存或货款，确认后进部门小仓，再由采购补采购单（提交即确认）。'
                     : '确认前不影响库存或货款。负责人可以在「待办」里确认或退回修改。'}
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-2.5">
@@ -1665,7 +1712,7 @@ function DoneView({ scope, type, doc, replayed, onAgain }: { scope: FormScope; t
               查看单据
             </Button>
             <Button variant="secondary" onClick={() => navigate(scope.home)}>
-              {scope.dept ? '回到本部门小仓' : '回到库存'}
+              {scope.dept ? '回到本部门小仓' : scope.kind === 'urgent' ? '回到急采' : '回到库存'}
             </Button>
             <Button variant="primary" onClick={onAgain}>
               再录一张{meta.title}
