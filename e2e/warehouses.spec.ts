@@ -127,7 +127,7 @@ test.describe('两级库存：总仓 + 部门小仓', () => {
     await login(page, 'zhouyi', '库存');
     await page.goto('/purchasing/urgent?view=backfill');
     await page.getByTestId(`urgent-row-${urgent.id}`).click();
-    await page.getByRole('button', { name: '补采购单' }).click();
+    await page.getByTestId('doc-backfill').click();
     await expect(page.getByText(/已生成补单/)).toBeVisible();
     await expect(page.getByText('急采补单：急采已按金额分级审批，提交即确认')).toBeVisible();
     await logout(page);

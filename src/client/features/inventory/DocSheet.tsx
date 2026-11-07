@@ -465,7 +465,7 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
           </Button>
         )}
         {doc.status === 'confirmed' && doc.docType === 'receipt' && doc.noPo && !doc.purchaseOrder && can('purchase.manage') && (
-          <Button variant="secondary" size="sm" loading={busy === 'backfill'} icon={<FilePlus2 className="size-4" />} onClick={backfill}>
+          <Button variant="secondary" size="sm" loading={busy === 'backfill'} icon={<FilePlus2 className="size-4" />} onClick={backfill} data-testid="doc-backfill">
             补采购单
           </Button>
         )}

@@ -44,7 +44,7 @@
 
 - `npm run typecheck`、`npm run build` 通过；`npm test` 全过。
 - 新测试：`tests/login-throttle.test.ts`（Z4）、`tests/purchasing-v801.test.ts`（02、03、04 与撤回、01、08 合同 PDF、11、06、07、09）、`tests/upgrade-purchasing-v801.test.ts`（8.0.0 → 8.0.1 升级）；改了受影响的旧测试（急采改由采购登记、需求单转的采购单提交即确认、途径三类、到货超期天数挪到采购规则）。
-- 浏览器流程：`e2e/warehouses.spec.ts` 的急采改成采购登记 → 店主批准 → 仓库验收 → 采购补单；`e2e/erp-purchasing.spec.ts`、`e2e/requests.spec.ts` 的采购途径改成三类；员工食堂 `e2e-canteen` 加一张原大小读不出来的码（去掉修复时这一步报 `NO_QR`），本机 9 条全过。
+- 浏览器流程：新加 `e2e/purchasing-v801.spec.ts`（采购规则、集采导入、供应商比价、赠品台账、签约供应商的合同 PDF）；`e2e/warehouses.spec.ts` 的急采改成采购登记 → 店主批准 → 仓库验收 → 采购补单；`e2e/erp-purchasing.spec.ts`、`e2e/requests.spec.ts`、`e2e/expenses.spec.ts` 的采购途径改成三类（本机门店电脑尺寸跑过受影响的 14 个文件，平板、小屏、手机尺寸跑过 `warehouses`、`viewports`）；员工食堂 `e2e-canteen` 加一张原大小读不出来的码（去掉修复时这一步报 `NO_QR`），本机 9 条全过。
 - CI 的结果以 PR #75 最后一个提交上的检查为准。
 
 ## 5. 给测试 AI 的指令（可复制）

@@ -5,7 +5,7 @@ import { ArrowLeft, CircleAlert, CircleCheck, ClipboardList, CloudOff, FileSearc
 import type { ContractCheckResult, ContractLineCheck } from '@shared/contracts';
 import type { Material } from '@shared/inventory';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
-import type { PoLineRequest, PriceCompare, PurchaseOrder } from '@shared/purchasing';
+import { DEFAULT_CHANNEL_KEY, type PoLineRequest, type PriceCompare, type PurchaseOrder } from '@shared/purchasing';
 import { fitsDecimals, formatQty, lineAmountCents, parseQty, priceChangePercent, toBaseQty } from '@shared/quantity';
 import { MAX_LINE_IMAGES, type ImageRef, type OpenRequestLine } from '@shared/requests';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
@@ -173,7 +173,8 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
   const supplierDefault = suppliers.data?.find((s) => s.id === supplierId)?.defaultChannel ?? null;
   useEffect(() => {
     if (channelTouched || channels.length === 0) return;
-    const next = channels.some((c) => c.key === supplierDefault) ? supplierDefault! : channels[0]!.key;
+    // 供应商档案没设默认途径时按「供应商」（与服务端一样，8.0.1 固定三类：第一项「网购」要写在哪买，不能当默认）
+    const next = channels.some((c) => c.key === supplierDefault) ? supplierDefault! : channels.some((c) => c.key === DEFAULT_CHANNEL_KEY) ? DEFAULT_CHANNEL_KEY : channels[0]!.key;
     if (next !== channel) setChannel(next);
   }, [channelTouched, channels, supplierDefault, channel]);
   const channelDef = channels.find((c) => c.key === channel);
