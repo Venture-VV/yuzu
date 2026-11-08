@@ -22,6 +22,8 @@ import { registerPayableRoutes } from './modules/inventory/payables';
 import { registerCycleRoutes } from './modules/inventory/cycles';
 import { registerImportRoutes } from './modules/inventory/imports';
 import { registerExpenseRoutes } from './modules/expenses';
+import { registerBudgetRoutes } from './modules/budgets';
+import { registerInvoiceRoutes } from './modules/invoices';
 import { registerErpOpsRoutes } from './modules/erp-ops';
 import { registerPurchaseLedgerRoutes } from './modules/purchase-ledger';
 import { registerLegacyRoutes } from './modules/legacy';
@@ -221,6 +223,9 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerCycleRoutes(app, deps);
   registerImportRoutes(app, deps);
   registerExpenseRoutes(app, deps);
+  // 费用预算与进项发票台账（8.0.3）
+  registerBudgetRoutes(app, deps);
+  registerInvoiceRoutes(app, deps);
   registerRequestRoutes(app, deps);
   registerRequestImportRoutes(app, deps);
   registerErpOpsRoutes(app, deps);

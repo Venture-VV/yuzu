@@ -13,6 +13,8 @@ import { resetPublicSchema } from './test-db';
 
 const MIGRATIONS = new URL('../src/server/migrations/', import.meta.url);
 const NEW = ['082_purchasing_flow.sql', '083_suppliers_contracts.sql', '084_receipt_attachments.sql', '085_gift_receipts.sql', '093_purchasing_ops.sql'];
+/** 8.0.1 以后的版本加的迁移：8.0.0 的库里也没有，升级时按文件名一起补上 */
+const LATER = ['086_expense_budgets.sql', '087_input_invoices.sql'];
 let sql: Sql;
 
 beforeAll(() => {
@@ -26,7 +28,7 @@ afterAll(async () => {
 async function schemaAt800() {
   await resetPublicSchema(sql);
   await sql`CREATE TABLE schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`;
-  for (const f of (await readdir(MIGRATIONS)).filter((x) => x.endsWith('.sql') && !NEW.includes(x)).sort()) {
+  for (const f of (await readdir(MIGRATIONS)).filter((x) => x.endsWith('.sql') && !NEW.includes(x) && !LATER.includes(x)).sort()) {
     await sql.unsafe(await readFile(new URL(f, MIGRATIONS), 'utf8'));
     await sql`INSERT INTO schema_migrations (version) VALUES (${f})`;
   }
@@ -58,7 +60,7 @@ describe('8.0.0 → 8.0.1 · 采购组整改', () => {
     await sql`
       INSERT INTO settings (key, value) VALUES ('expense_rules', ${sql.json({ approvalThresholdCents: 200000, overdueDays: 7, arrivalOverdueDays: 12 } as never)})`;
 
-    expect(await migrate(sql)).toEqual(NEW);
+    expect(await migrate(sql)).toEqual([...NEW, ...LATER].sort());
 
     const [r] = await sql<{ priority: string; sameTime: boolean; approvableOn: string | null; source: string; importId: number | null }[]>`
       SELECT priority, submitted_at = created_at AS same_time, approvable_on, source, import_id FROM purchase_requests WHERE id = ${req!.id}`;

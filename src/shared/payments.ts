@@ -308,6 +308,8 @@ export interface PaymentRequestMeta {
   today: string;
   suppliers: { id: number; name: string }[];
   contracts: { id: number; contractNo: string; title: string; counterparty: string; category: ContractCategory; supplierId: number | null }[];
+  /** 登记发票可选的发票类型（8.0.3：费用报销规则里要填号码的类型，进项发票台账按它记要不要认证） */
+  invoiceKinds: { key: string; label: string; taxRatesBp: number[] }[];
 }
 
 // ───────────────────────── 发票 ─────────────────────────

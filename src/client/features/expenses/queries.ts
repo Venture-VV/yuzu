@@ -119,3 +119,26 @@ export const usePettyJournal = (departmentId: number | null, from: string, to: s
     enabled: !!departmentId && from <= to,
     placeholderData: keepPreviousData,
   });
+
+// ───────────────────────── 费用预算（8.0.3） ─────────────────────────
+
+export const budgetKeys = {
+  grid: (month: string) => ['inv', 'budgets', month] as const,
+  usage: (departmentId: number, date: string) => ['inv', 'budget-usage', departmentId, date] as const,
+};
+
+export const useBudgetGrid = (month: string) =>
+  useQuery({
+    queryKey: budgetKeys.grid(month),
+    queryFn: () => api.get<import('@shared/budgets').BudgetGrid>(`/api/erp/expenses/budgets?month=${month}`),
+    placeholderData: keepPreviousData,
+  });
+
+/** 登记报销页：这个部门这个月各科目的额度与已占用 */
+export const useBudgetUsage = (departmentId: number | null, date: string) =>
+  useQuery({
+    queryKey: budgetKeys.usage(departmentId ?? 0, date),
+    queryFn: () => api.get<import('@shared/budgets').BudgetUsage>(`/api/erp/expenses/budgets/usage?departmentId=${departmentId}&date=${date}`),
+    enabled: !!departmentId && /^\d{4}-\d{2}-\d{2}$/.test(date),
+    staleTime: 15_000,
+  });

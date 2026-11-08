@@ -59,35 +59,49 @@ const toBase64 = (file: Blob) =>
     r.readAsDataURL(file);
   });
 
-/** 收货单详情里的附件：列表 + 补传（照片压缩到 1 MB 以内；PDF ≤ 10 MB）；最多 9 份，不能删 */
+/**
+ * 收货单详情里的附件：列表 + 补传（照片压缩到 1 MB 以内；PDF ≤ 10 MB）；最多 9 份，不能删。
+ * 8.0.3 起进项发票的照片也用它（uploadUrl、标题、份数上限另给）。
+ */
 export function ReceiptAttachmentsPanel({
   docId,
   items,
   canUpload,
   onChanged,
+  uploadUrl,
+  title = '附件（照片、送货单、小票）',
+  note = '生效以后还能补传，不能删',
+  max = MAX_RECEIPT_ATTACHMENTS,
+  testId = 'receipt-attachments',
 }: {
   docId: number;
   items: ReceiptAttachment[];
   canUpload: boolean;
   onChanged: () => unknown;
+  uploadUrl?: string;
+  title?: string;
+  note?: string;
+  max?: number;
+  testId?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const full = items.length >= MAX_RECEIPT_ATTACHMENTS;
+  const full = items.length >= max;
+  const url = uploadUrl ?? `/api/inventory/docs/${docId}/attachments`;
   const upload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setBusy(true);
     setError(null);
     try {
-      for (const file of [...files].slice(0, MAX_RECEIPT_ATTACHMENTS - items.length)) {
+      for (const file of [...files].slice(0, max - items.length)) {
         const name = file.name.replace(/\.[^.]+$/, '').slice(0, 80);
         if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
           if (file.size > MAX_PDF_BYTES) throw new Error(`「${file.name}」超过 10 MB`);
-          await api.post(`/api/inventory/docs/${docId}/attachments`, { name, mime: 'application/pdf', data: await toBase64(file) }, { timeoutMs: 60_000 });
+          await api.post(url, { name, mime: 'application/pdf', data: await toBase64(file) }, { timeoutMs: 60_000 });
         } else {
           const { mime, data } = await imagePayload(file);
-          await api.post(`/api/inventory/docs/${docId}/attachments`, { name, mime, data }, { timeoutMs: 30_000 });
+          await api.post(url, { name, mime, data }, { timeoutMs: 30_000 });
         }
       }
     } catch (e) {
@@ -99,11 +113,11 @@ export function ReceiptAttachmentsPanel({
     }
   };
   return (
-    <section data-testid="receipt-attachments">
+    <section data-testid={testId}>
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <h3 className="text-[13px] font-bold text-ink-2">附件（照片、送货单、小票）</h3>
+        <h3 className="text-[13px] font-bold text-ink-2">{title}</h3>
         <span className="text-[12px] text-ink-3">
-          {items.length}/{MAX_RECEIPT_ATTACHMENTS} 份 · 生效以后还能补传，不能删
+          {items.length}/{max} 份 · {note}
         </span>
         {canUpload && !full && (
           <>
@@ -114,7 +128,7 @@ export function ReceiptAttachmentsPanel({
               accept="image/jpeg,image/png,image/webp,application/pdf,.pdf"
               className="hidden"
               onChange={(e) => void upload(e.target.files)}
-              data-testid="receipt-attachment-file"
+              data-testid={testId === 'receipt-attachments' ? 'receipt-attachment-file' : `${testId}-file`}
             />
             <Button size="sm" variant="secondary" className="ml-auto" icon={<Upload className="size-4" />} loading={busy} onClick={() => input.current?.click()}>
               上传附件

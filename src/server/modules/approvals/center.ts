@@ -46,6 +46,8 @@ import { PAY_METHOD_LABELS, type PayMethod } from '@shared/purchasing';
 import { formatQty, lineAmountCents } from '@shared/quantity';
 import { loadRoleOverrides } from '../../auth/role-permissions';
 import type { Db } from '../../db';
+import type { BudgetCheckItem } from '@shared/budgets';
+import { budgetSummary } from '../budgets';
 import type { Actor } from '../../lib/context';
 import { todayIn } from '../../lib/dates';
 import { forbidden, notFound } from '../../lib/errors';
@@ -471,8 +473,9 @@ async function digestOf(db: Db, kind: ApprovalDocKind, docId: number, requestId:
       return { title: '期初未付', link: '/payables?view=openings', party: o.supplierName, docDate: o.asOfDate, note: o.note, facts: [{ label: '截至', value: o.asOfDate }], lines: [] };
     }
     case 'expense_claim': {
-      const [c] = await db<{ departmentName: string; expenseDate: string; note: string; purpose: string; paySource: PaySource; invoiceLabel: string; handlerName: string; poNo: string | null }[]>`
-        SELECT d.name AS department_name, c.expense_date, c.note, c.purpose, c.pay_source, c.invoice_label, h.display_name AS handler_name, po.doc_no AS po_no
+      const [c] = await db<{ departmentName: string; expenseDate: string; note: string; purpose: string; paySource: PaySource; invoiceLabel: string; invoiceNo: string; handlerName: string; poNo: string | null; overBudget: boolean; budgetCheck: BudgetCheckItem[] | null }[]>`
+        SELECT d.name AS department_name, c.expense_date, c.note, c.purpose, c.pay_source, c.invoice_label, c.invoice_no, h.display_name AS handler_name, po.doc_no AS po_no,
+               c.over_budget, c.budget_check
         FROM expense_claims c JOIN departments d ON d.id = c.department_id JOIN staff h ON h.id = c.handler_id
         LEFT JOIN purchase_orders po ON po.id = c.purchase_order_id WHERE c.id = ${docId}`;
       if (!c) throw notFound('报销单不存在');
@@ -488,8 +491,10 @@ async function digestOf(db: Db, kind: ApprovalDocKind, docId: number, requestId:
           { label: '用途', value: c.purpose },
           { label: '经办', value: c.handlerName },
           { label: '付款来源', value: PAY_SOURCE_LABELS[c.paySource] ?? c.paySource },
-          { label: '发票', value: c.invoiceLabel },
+          { label: '发票', value: c.invoiceNo ? `${c.invoiceLabel} ${c.invoiceNo}` : c.invoiceLabel },
           ...(c.poNo ? [{ label: '采购单', value: c.poNo }] : []),
+          // 费用预算（8.0.3）：登记（或重新提交）时超了哪个科目
+          ...(c.overBudget && c.budgetCheck ? [{ label: '超预算', value: budgetSummary(c.budgetCheck) }] : []),
         ],
         lines: lines.map((l) => ({
           id: Number(l.id),

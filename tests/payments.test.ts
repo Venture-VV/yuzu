@@ -588,7 +588,8 @@ describe('付款流', () => {
   });
 
   it('自检一致', async () => {
-    expect(await paymentChecks(ctx.sql)).toEqual([expect.objectContaining({ ok: true })]);
+    // 8.0.3 加了一项「进项发票台账」
+    expect(await paymentChecks(ctx.sql)).toEqual([expect.objectContaining({ key: 'payments', ok: true }), expect.objectContaining({ key: 'input_invoices', ok: true })]);
     expect(await approvalChecks(ctx.sql)).toMatchObject({ ok: true });
   });
 });

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { Archive, BookOpenCheck, Download, Plus, ReceiptText, ShieldCheck, Wallet, X } from 'lucide-react';
+import { Archive, BookOpenCheck, Download, FileText, Gauge, Plus, ReceiptText, ShieldCheck, Wallet, X } from 'lucide-react';
 import {
   CLAIM_STATUS_LABELS,
   EXPENSE_CATEGORY_LABELS,
@@ -11,6 +11,9 @@ import {
   type ClaimStatus,
   type ExpenseClaim,
 } from '@shared/expenses';
+import { budgetCheckText, budgetOver } from '@shared/budgets';
+import { CERT_STATUS_LABELS } from '@shared/invoices';
+import { formatAmount } from '@shared/money';
 import { formatQty } from '@shared/quantity';
 import { channelText, RECEIVING_LABELS } from '@shared/purchasing';
 import { errorMessage } from '../../lib/api';
@@ -64,6 +67,18 @@ export function ExpensesPage() {
               备用金与每日平账
             </Button>
           </Link>
+          <Link to="/erp/expenses/budgets">
+            <Button variant="secondary" icon={<Gauge className="size-4" />} data-testid="budgets-link">
+              费用预算
+            </Button>
+          </Link>
+          {session.erpModules.includes('invoices') && (
+            <Link to="/erp/invoices">
+              <Button variant="secondary" icon={<FileText className="size-4" />} data-testid="invoices-link">
+                发票台账
+              </Button>
+            </Link>
+          )}
           <Link to="/erp/ledger">
             <Button variant="secondary" icon={<BookOpenCheck className="size-4" />}>
               采购台账
@@ -179,9 +194,10 @@ export function ExpensesPage() {
                       {PAY_SOURCE_LABELS[c.paySource]}
                       {c.advance && <span className="num block text-[11.5px] text-ink-3">{c.advance.docNo}</span>}
                     </span>
-                    <Badge tone={STATUS_TONE[c.status]} className="justify-self-start md:justify-self-auto">
-                      {CLAIM_STATUS_LABELS[c.status]}
-                    </Badge>
+                    <span className="flex flex-wrap items-center gap-1 justify-self-start md:justify-self-auto">
+                      <Badge tone={STATUS_TONE[c.status]}>{CLAIM_STATUS_LABELS[c.status]}</Badge>
+                      {c.overBudget && <Badge tone="clay">超预算</Badge>}
+                    </span>
                     <Money cents={c.amountCents} className="text-right font-bold" />
                   </button>
                 </li>
@@ -252,11 +268,23 @@ function ClaimSheet({ id, onClose }: { id: number | null; onClose: () => void })
           <>
             <div className="flex items-center gap-2">
               <Badge tone={STATUS_TONE[c.status]}>{CLAIM_STATUS_LABELS[c.status]}</Badge>
+              {c.overBudget && <Badge tone="clay">超预算</Badge>}
               {c.needsApproval && <span className="text-[12.5px] text-ink-3">超过门槛，需负责人确认</span>}
               <Money cents={c.amountCents} className="ml-auto text-[20px] font-bold" />
             </div>
             {c.returnedReason && c.status === 'returned' && <Notice tone="warning" title={`退回：${c.returnedReason}`} />}
             {c.voidReason && <Notice tone="error" title={`冲销：${c.voidReason}（${c.voidedByName}）`} />}
+            {c.budgetCheck && c.budgetCheck.length > 0 && (
+              <Notice tone={c.overBudget ? 'warning' : 'info'} title={c.overBudget ? '超预算：走「超预算报销」审批（提交时核对）' : '提交时核对的预算'} data-testid="claim-budget-check">
+                <ul className="space-y-0.5 text-[12.5px]">
+                  {c.budgetCheck.map((b) => (
+                    <li key={b.category} className={cn(budgetOver(b) && 'font-semibold text-clay')}>
+                      {budgetCheckText(b, (cents) => `¥${formatAmount(cents)}`)}
+                    </li>
+                  ))}
+                </ul>
+              </Notice>
+            )}
             <dl className="grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[13.5px]">
               <dt className="text-ink-3">部门</dt>
               <dd>{c.department.name}</dd>
@@ -273,6 +301,11 @@ function ClaimSheet({ id, onClose }: { id: number | null; onClose: () => void })
               <dd>
                 {c.invoiceLabel} · 税点 {taxRateText(c.taxRateBp)}
                 {c.invoiceNo && <span className="num ml-1.5">{c.invoiceNo}</span>}
+                {c.invoice && session.erpModules.includes('invoices') && (
+                  <Link to={`/erp/invoices?invoice=${c.invoice.id}`} className="ml-1.5 text-[12.5px] font-semibold text-lake" data-testid="claim-invoice-link">
+                    台账 · {c.invoice.issuerName || '开票方未填'} · {CERT_STATUS_LABELS[c.invoice.certStatus]}
+                  </Link>
+                )}
               </dd>
               <dt className="text-ink-3">采购途径</dt>
               <dd data-testid="claim-channel">{channelText(c.channel)}</dd>

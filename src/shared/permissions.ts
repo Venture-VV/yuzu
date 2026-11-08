@@ -199,6 +199,11 @@ export const PERMISSIONS = {
   // ── 付款流（v0.7.32，docs/PAYMENTS.md P10，默认值待确认）──
   /** 发起付款申请（从合同的付款节点或没挂合同的应付）、修改与撤回自己的申请；看付款申请（审批走审批中心，登记付款要「登记期初未付、付款……」） */
   'payment.request': { roles: ['owner', 'store_manager'], duties: ['purchase', 'payable'] },
+  // ── 费用预算与进项发票台账（8.0.3，docs/BUDGET_INVOICES.md BI05、BI12，默认值待确认）──
+  /** 设定部门 × 费用科目的月度额度（看预算与占用：能看费用报销的人都能看） */
+  'budget.manage': { roles: ['owner'] },
+  /** 进项发票台账：直接登记发票、标认证与所属期、上传照片、作废（三单里分到采购单的发票照旧在付款页登记） */
+  'invoice.manage': { roles: ['owner'], duties: ['payable', 'cost'] },
   // ── 管理 ──
   // ── 当场授权（主管在弹窗里输入自己的账号密码确认）──
   /** 授权超过单笔上限的充值 / 消费 */
@@ -400,6 +405,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'contract.read': '合同：查看台账、详情、审查意见与扫描件',
   'contract.manage': '合同：起草、提交、签署、用印申请、归档、变更、终止',
   'payment.request': '付款：发起付款申请、修改与撤回',
+  'budget.manage': '设定费用预算（部门 × 费用科目的月度额度）',
+  'invoice.manage': '管理进项发票（台账里登记、标认证、上传照片、作废）',
   'auth.overLimit': '当场授权超过单笔上限的充值 / 消费',
   'auth.memberRefund': '当场授权退储值',
   'auth.memberPhone': '当场授权改会员手机号',
@@ -459,7 +466,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
       'inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'purchase.rules', 'supplierReturn.create', 'supplierReturn.answer', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.void', 'inventory.export',
       'deptStock.operate', 'deptStock.audit',
       'expense.read', 'expense.manage', 'petty.manage', 'expense.approve', 'finance.void', 'expense.export', 'request.create', 'request.review', 'erp.revenue',
-      'approval.act', 'approval.rules', 'contract.read', 'contract.manage', 'payment.request',
+      'approval.act', 'approval.rules', 'contract.read', 'contract.manage', 'payment.request', 'budget.manage', 'invoice.manage',
     ],
   },
   { title: '员工食堂', items: ['canteen.manage'] },

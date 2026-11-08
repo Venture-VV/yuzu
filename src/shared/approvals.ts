@@ -25,6 +25,8 @@ export const APPROVAL_DOC_TYPES = [
   'payment_early',
   // 8.0.1 采购组整改 05（CG05）：急采按金额分级审批，挂在物资单据（急采收货）上
   'urgent_purchase',
+  // 8.0.3 费用预算（BI04）：让某个科目的本月占用超过额度的报销，挂在报销单上；没有规则时在报销原来的审批链后面加一级店主
+  'expense_over_budget',
 ] as const;
 export type ApprovalDocType = (typeof APPROVAL_DOC_TYPES)[number];
 export const APPROVAL_DOC_TYPE_LABELS: Record<ApprovalDocType, string> = {
@@ -41,12 +43,13 @@ export const APPROVAL_DOC_TYPE_LABELS: Record<ApprovalDocType, string> = {
   payment_request: '付款申请',
   payment_early: '提前付款',
   urgent_purchase: '急采',
+  expense_over_budget: '超预算报销',
 };
 /** 合同类的单据（法务那一级按审查清单逐条给意见；规则必须有且只有一级「法务」） */
 export const CONTRACT_REVIEW_DOC_TYPES: readonly ApprovalDocType[] = ['contract', 'contract_change'];
 /** 不能批量同意的单据：合同类（法务那一级要逐条给意见）、用印 */
-/** 提前付款（v0.7.32）要看原因，也逐张审 */
-export const NO_BATCH_DOC_TYPES: readonly ApprovalDocType[] = ['contract', 'contract_change', 'contract_seal', 'payment_early'];
+/** 提前付款（v0.7.32）要看原因，也逐张审；超预算报销（8.0.3）要看超了多少，也逐张审 */
+export const NO_BATCH_DOC_TYPES: readonly ApprovalDocType[] = ['contract', 'contract_change', 'contract_seal', 'payment_early', 'expense_over_budget'];
 
 /** 审批单挂在哪张表的单据上 */
 export const APPROVAL_DOC_KINDS = ['purchase_order', 'inv_doc', 'payment', 'opening_payable', 'expense_claim', 'contract', 'contract_change', 'contract_seal', 'payment_request'] as const;
@@ -160,6 +163,8 @@ export function inStep(step: ApprovalStep, who: ApproverSubject, kind: ApprovalD
 /** 审批单在单据详情里的一句话（单据的读接口带上，不分看的人） */
 export interface ApprovalBrief {
   requestId: number;
+  /** 规则里的单据类型（报销超预算的是「超预算报销」，8.0.3） */
+  docType: ApprovalDocType;
   status: ApprovalStatus;
   /** 默认规则（没有规则命中）为空 */
   ruleId: number | null;

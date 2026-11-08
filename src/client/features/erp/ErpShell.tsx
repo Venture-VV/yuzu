@@ -4,10 +4,11 @@
 import { useEffect, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Banknote, Boxes, ClipboardCheck, ClipboardList, FileSignature, HandCoins, LayoutGrid, LineChart, Package, ReceiptText, ShoppingCart, SlidersHorizontal, Soup, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, Banknote, Boxes, ClipboardCheck, ClipboardList, FileSignature, FileText, HandCoins, LayoutGrid, LineChart, Package, ReceiptText, ShoppingCart, SlidersHorizontal, Soup, type LucideIcon } from 'lucide-react';
 import type { ApprovalCounts } from '@shared/approvals';
 import type { ContractExpiryItem } from '@shared/contracts';
 import type { PaymentTodo } from '@shared/payments';
+import type { InvoiceTodo } from '@shared/invoices';
 import { ERP_MODULES, erpModuleOfPage, type ErpModuleKey } from '@shared/erp';
 import { versionText } from '@shared/instance';
 import { DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
@@ -29,6 +30,7 @@ const ICONS: Record<ErpModuleKey, LucideIcon> = {
   contracts: FileSignature,
   payments: Banknote,
   expenses: ReceiptText,
+  invoices: FileText,
   revenue: LineChart,
   canteen: Soup,
 };
@@ -83,6 +85,13 @@ export function ErpShell() {
     enabled: access.modules.includes('expenses') && can('expense.read'),
     refetchInterval: 300_000,
   });
+  // 发票台账（8.0.3，BI09）：认证期限到期前几天以内（含已过期）的待认证发票
+  const invTodo = useQuery({
+    queryKey: ['erp', 'invoices', 'todo'],
+    queryFn: () => api.get<InvoiceTodo>('/api/erp/invoices/todo'),
+    enabled: access.modules.includes('invoices') && (can('payable.read') || can('expense.read') || can('invoice.manage')),
+    refetchInterval: 300_000,
+  });
   if (!access.canEnter) return <Navigate to="/" replace />;
   const contractsDue = (expiring.data ?? []).filter((x) => !x.renewal);
   const paymentsBadge = payTodo.data ? (can('payable.manage') ? payTodo.data.awaitingPayment : 0) + payTodo.data.warrantyDue : undefined;
@@ -101,8 +110,13 @@ export function ErpShell() {
             ? paymentsBadge
             : k === 'expenses'
               ? toClaim.data?.received
-              : undefined,
-    alert: (k === 'approvals' && !!todo.data?.overdue) || (k === 'contracts' && contractsDue.some((x) => x.daysLeft < 0)),
+              : k === 'invoices'
+                ? invTodo.data?.due
+                : undefined,
+    alert:
+      (k === 'approvals' && !!todo.data?.overdue) ||
+      (k === 'contracts' && contractsDue.some((x) => x.daysLeft < 0)) ||
+      (k === 'invoices' && !!invTodo.data?.overdue),
   });
   const groups: { title: string; items: Item[] }[] = [
     { title: '概览', items: [{ key: 'home', to: '/erp', label: 'ERP 首页', icon: LayoutGrid, end: true }] },

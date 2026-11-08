@@ -1,5 +1,6 @@
 // 登记发票（v0.7.32，docs/PAYMENTS.md 第 4 节）：发票号码、开票日、价税合计、税额、税率，分到这家供应商已下单的采购单（合计等于价税合计）。
 // 提交前把操作编号和原请求存在本机（结果待确认时在付款页「发票」上方查回、重提或作废），同一供应商同一发票号码只能有一张没作废的。
+// 8.0.3：选发票类型（费用报销规则里要填号码的，默认增值税专用发票），进项发票台账按它记要不要认证。
 
 import { useState } from 'react';
 import { formatAmount, parseYuan } from '@shared/money';
@@ -27,6 +28,7 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
   const [total, setTotal] = useState('');
   const [tax, setTax] = useState('');
   const [rate, setRate] = useState('13');
+  const [kind, setKind] = useState('vat_special');
   const [note, setNote] = useState('');
   const [split, setSplit] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
@@ -39,6 +41,7 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
     setTotal('');
     setTax('');
     setRate('13');
+    setKind('vat_special');
     setNote('');
     setSplit({});
     setError(null);
@@ -47,6 +50,8 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
   const totalCents = total.trim() ? parseYuan(total) : null;
   const taxCents = tax.trim() ? parseYuan(tax) : 0;
   const rateBp = parsePercentBp(rate);
+  const kinds = meta.data?.invoiceKinds ?? [];
+  const kindDef = kinds.find((k) => k.key === kind);
   const lines = Object.entries(split)
     .map(([poId, text]) => ({ poId: Number(poId), cents: text.trim() ? parseYuan(text) : null, text }))
     .filter((l) => l.text.trim());
@@ -66,13 +71,15 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
                 ? '税额格式不对或超过价税合计'
                 : rateBp === null
                   ? '税率格式不对'
-                  : lines.length === 0
-                    ? '请把发票金额分到采购单上'
-                    : lines.some((l) => !l.cents)
-                      ? '有分到采购单的金额格式不对'
-                      : splitSum !== totalCents
-                        ? `分到采购单的合计 ¥${formatAmount(splitSum)} 与价税合计 ¥${formatAmount(totalCents)} 不一样`
-                        : null;
+                  : kinds.length > 0 && !kindDef
+                    ? '请选择发票类型'
+                    : lines.length === 0
+                      ? '请把发票金额分到采购单上'
+                      : lines.some((l) => !l.cents)
+                        ? '有分到采购单的金额格式不对'
+                        : splitSum !== totalCents
+                          ? `分到采购单的合计 ¥${formatAmount(splitSum)} 与价税合计 ¥${formatAmount(totalCents)} 不一样`
+                          : null;
 
   const submit = async () => {
     if (problem) return;
@@ -83,6 +90,7 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
       clientKey: uuid(),
       supplierId,
       invoiceNo: invoiceNo.trim(),
+      kind,
       invoiceDate,
       totalCents,
       taxCents,
@@ -141,8 +149,19 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
             ))}
           </Select>
         </Field>
+        <Field label="发票类型" htmlFor="iv-kind">
+          <Select id="iv-kind" value={kinds.length === 0 || kindDef ? kind : ''} onChange={(e) => setKind(e.target.value)} data-testid="invoice-kind">
+            {kinds.length === 0 && <option value="vat_special">增值税专用发票</option>}
+            {kinds.length > 0 && !kindDef && <option value="">选择发票类型</option>}
+            {kinds.map((k) => (
+              <option key={k.key} value={k.key}>
+                {k.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
         <Field label="发票号码" htmlFor="iv-no">
-          <Input id="iv-no" value={invoiceNo} maxLength={30} onChange={(e) => setInvoiceNo(e.target.value)} className="h-10" data-testid="invoice-no" />
+          <Input id="iv-no" value={invoiceNo} maxLength={40} onChange={(e) => setInvoiceNo(e.target.value)} className="h-10" data-testid="invoice-no" />
         </Field>
         <Field label="开票日" htmlFor="iv-date">
           <Input id="iv-date" type="date" value={invoiceDate} max={session.calendarToday} onChange={(e) => setInvoiceDate(e.target.value)} className="h-10" />
@@ -201,6 +220,11 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
             </table>
           )}
         </div>
+      )}
+      {kindDef && rateBp !== null && !kindDef.taxRatesBp.includes(rateBp) && (
+        <p className="mt-2 text-[12.5px] text-yuzu-deep" data-testid="invoice-rate-warning">
+          {`${kindDef.label}的税率通常是 ${kindDef.taxRatesBp.map((bp) => `${bp / 100}%`).join('、')}：照常登记，发票台账里会标「税率不符」`}
+        </p>
       )}
       {problem && (totalCents || lines.length > 0) && <p className="mt-2 text-[12.5px] font-semibold text-ember">{problem}</p>}
       {error && <Notice tone="error" title={error} className="mt-3" />}

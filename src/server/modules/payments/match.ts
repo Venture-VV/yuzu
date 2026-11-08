@@ -18,6 +18,9 @@ import { setTxTimeouts } from '../../lib/tx';
 import { dateSchema, parse, positiveCents } from '../../lib/validate';
 import { PO_ORDERED_STATUSES } from '../contracts/ledger';
 import { erpOpAbandoned } from '../erp-ops';
+import { loadExpenseRules } from '../expenses';
+import { findByNo, ledgerKind, lockInvoiceNo, voidInputInvoice } from '../invoices';
+import { invoiceTypeCertifies } from '@shared/expenses';
 
 const id = z.number().int().positive();
 const yuan = (cents: number) => `¥${formatAmount(cents)}`;
@@ -150,7 +153,7 @@ async function invoicesWhere(db: Db, where: Fragment): Promise<SupplierInvoiceVi
     SELECT i.id, i.invoice_no, i.supplier_id, s.name AS supplier_name, i.invoice_date, i.total_cents::text AS total_cents, i.tax_cents::text AS tax_cents,
            i.tax_rate_bp, i.note, i.status, cb.display_name AS created_by_name, i.created_at, vb.display_name AS voided_by_name, i.voided_at, i.void_reason
     FROM supplier_invoices i JOIN suppliers s ON s.id = i.supplier_id JOIN staff cb ON cb.id = i.created_by LEFT JOIN staff vb ON vb.id = i.voided_by
-    WHERE ${where}
+    WHERE i.source = 'three_way' AND ${where}
     ORDER BY i.invoice_date DESC, i.id DESC
     LIMIT 300`;
   if (rows.length === 0) return [];
@@ -189,7 +192,9 @@ export async function getInvoice(db: Db, invoiceId: number): Promise<SupplierInv
 const InvoiceInput = z.object({
   clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
   supplierId: id,
-  invoiceNo: z.string('请填写发票号码').trim().min(1, '请填写发票号码').max(30, '发票号码最多 30 位'),
+  invoiceNo: z.string('请填写发票号码').trim().min(1, '请填写发票号码').max(40, '发票号码最多 40 位'),
+  /** 发票类型（8.0.3 进项发票台账）：费用报销规则里要填号码的类型，不传按增值税专用发票 */
+  kind: z.string().min(1).max(32).default('vat_special'),
   invoiceDate: dateSchema('开票日'),
   totalCents: positiveCents('价税合计'),
   taxCents: z.number('请填写税额').int('税额要精确到分').min(0, '税额不能为负').max(1_000_000_000),
@@ -205,6 +210,8 @@ export async function createInvoice(deps: Deps, raw: unknown, actor: Actor, ip?:
   if (input.taxCents > input.totalCents) throw badRequest('税额不能超过价税合计');
   const split = input.lines.reduce((s, l) => s + l.amountCents, 0);
   if (split !== input.totalCents) throw badRequest(`分到采购单的金额合计 ${yuan(split)} 与价税合计 ${yuan(input.totalCents)} 不一样`);
+  const kind = ledgerKind(await loadExpenseRules(deps.sql), input.kind);
+  if (!kind) throw unprocessable('INVOICE_TYPE_INVALID', '发票类型不在费用报销规则里（要填号码的类型），请刷新页面后重选');
   if (new Set(input.lines.map((l) => l.poId)).size !== input.lines.length) throw badRequest('同一张采购单在一张发票里只能出现一次');
   const requestHash = hashRequest({ ...input, clientKey: undefined });
   const find = async (db: Db) => {
@@ -220,7 +227,7 @@ export async function createInvoice(deps: Deps, raw: unknown, actor: Actor, ip?:
       await assertNotFenced(tx, input.clientKey, 'supplier_invoice', erpOpAbandoned);
       const existing = await find(tx);
       if (existing) return { id: existing, replayed: true };
-      const [sup] = await tx<{ id: number }[]>`SELECT id FROM suppliers WHERE id = ${input.supplierId}`;
+      const [sup] = await tx<{ id: number; name: string }[]>`SELECT id, name FROM suppliers WHERE id = ${input.supplierId}`;
       if (!sup) throw notFound('供应商不存在');
       // 8.0.2：先按 id 升序锁住选的采购单，锁住以后再核对状态。撤回采购单在采购单的排他锁里核对「没有发票」，
       // 这里的共享锁（KEY SHARE，只与排他锁冲突，两张发票之间不互相等）让两边串行：不会有发票挂在已撤回的采购单上
@@ -233,10 +240,23 @@ export async function createInvoice(deps: Deps, raw: unknown, actor: Actor, ip?:
         if (Number(po.supplierId) !== input.supplierId) throw unprocessable('PO_SUPPLIER_MISMATCH', `采购单 ${po.docNo} 不是这家供应商的`);
         if (!(PO_ORDERED_STATUSES as readonly string[]).includes(po.status)) throw unprocessable('PO_NOT_ORDERED', `采购单 ${po.docNo} 还没下单（或已撤回），不能登记发票`);
       }
+      // 8.0.3：同一个发票号码的登记（三单、报销、台账）串行；在采购单的锁之后取（与报销的锁顺序一致）
+      await lockInvoiceNo(tx, input.invoiceNo);
+      // 在号码锁里核对台账里有没有同一张（Codex 自动审查 84f5fe5）：同一供应商的，或者开票方名称就是这家供应商的
+      // （报销、台账登记时没挂供应商、只写了开票方）。不核对的话同一张发票既报销、又分到采购单走货款付款
+      const issuer = sup.name.trim().toLowerCase();
+      const dup = (await findByNo(tx, input.invoiceNo)).find(
+        (c) => c.supplierId === input.supplierId || (c.supplierId === null && c.issuerName.trim().toLowerCase() === issuer),
+      );
+      if (dup?.usedBy) {
+        throw conflict('INVOICE_ALREADY_CLAIMED', `发票 ${input.invoiceNo} 已在报销单 ${dup.usedBy} 里报销，不能再分到采购单走货款`, { invoiceId: dup.id });
+      }
+      if (dup) throw conflict('INVOICE_DUPLICATE', `${sup.name}的发票 ${input.invoiceNo} 已经在发票台账里了（登错了先作废原来那张）`, { invoiceId: dup.id });
       const [row] = await tx<{ id: number }[]>`
-        INSERT INTO supplier_invoices (invoice_no, supplier_id, invoice_date, total_cents, tax_cents, tax_rate_bp, note, client_key, request_hash, created_by)
+        INSERT INTO supplier_invoices (invoice_no, supplier_id, invoice_date, total_cents, tax_cents, tax_rate_bp, note, client_key, request_hash, created_by,
+                                       kind, kind_label, source, cert_status)
         VALUES (${input.invoiceNo}, ${input.supplierId}, ${input.invoiceDate}, ${input.totalCents}, ${input.taxCents}, ${input.taxRateBp}, ${input.note},
-                ${input.clientKey}, ${requestHash}, ${actor.id})
+                ${input.clientKey}, ${requestHash}, ${actor.id}, ${kind.key}, ${kind.label}, 'three_way', ${invoiceTypeCertifies(kind) ? 'pending' : 'not_required'})
         RETURNING id`;
       const invoiceId = Number(row!.id);
       for (const l of input.lines) {
@@ -255,17 +275,10 @@ export async function createInvoice(deps: Deps, raw: unknown, actor: Actor, ip?:
   }
 }
 
-/** 作废发票（登错了）：写原因；作废以后分到采购单的金额不再算 */
+/** 作废发票（登错了）：写原因；作废以后分到采购单的金额不再算。8.0.3 起与台账同一套：挂在有效报销单上的不能作废 */
 export async function voidInvoice(deps: Deps, invoiceId: number, raw: unknown, actor: Actor, ip?: string) {
   const { reason } = parse(z.object({ reason: Reason }), raw);
-  await deps.sql.begin(async (tx) => {
-    await setTxTimeouts(tx);
-    const [inv] = await tx<{ status: string; invoiceNo: string }[]>`SELECT status, invoice_no FROM supplier_invoices WHERE id = ${invoiceId} FOR UPDATE`;
-    if (!inv) throw notFound('发票登记不存在');
-    if (inv.status === 'voided') return;
-    await tx`UPDATE supplier_invoices SET status = 'voided', voided_by = ${actor.id}, voided_at = now(), void_reason = ${reason} WHERE id = ${invoiceId}`;
-    await writeAudit(tx, { staffId: actor.id, action: 'payment_doc', targetType: 'supplier_invoice', targetId: invoiceId, detail: { op: 'void', invoiceNo: inv.invoiceNo, reason }, ip });
-  });
+  await voidInputInvoice(deps, invoiceId, reason, actor, ip);
 }
 
 // ───────────────────────── 放行 ─────────────────────────
@@ -324,6 +337,8 @@ export async function releasePo(deps: Deps, poId: number, raw: unknown, actor: A
 export async function invoiceChecks(db: Db): Promise<string[]> {
   const rows = await db<{ invoiceNo: string; supplierName: string }[]>`
     SELECT i.invoice_no, s.name AS supplier_name FROM supplier_invoices i JOIN suppliers s ON s.id = i.supplier_id
-    WHERE coalesce((SELECT sum(l.amount_cents) FROM supplier_invoice_lines l WHERE l.invoice_id = i.id), 0) <> i.total_cents`;
+    -- 8.0.3：只查三单匹配登记的（报销、台账登记的发票不分到采购单）
+    WHERE i.source = 'three_way'
+      AND coalesce((SELECT sum(l.amount_cents) FROM supplier_invoice_lines l WHERE l.invoice_id = i.id), 0) <> i.total_cents`;
   return rows.map((r) => `${r.supplierName} 的发票 ${r.invoiceNo} 分到采购单的金额合计与价税合计不一样`);
 }

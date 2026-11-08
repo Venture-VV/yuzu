@@ -38,6 +38,7 @@ import { dateSchema, parse, positiveCents } from '../../lib/validate';
 import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForApproval } from '../approvals/engine';
 import { enabledErpModules, erpModuleDisabled } from '../erp';
 import { erpOpAbandoned } from '../erp-ops';
+import { loadExpenseRules } from '../expenses';
 import { assertNotFuture, assertSameMonth, logApproval } from '../inventory/common';
 import { checkAllocations, confirmPayment, lockSupplier, openItems, reopenPaidRequest, supplierCredits } from '../inventory/payables';
 import { contractReceivedPoIds, poThreeWay, threeWayProblems } from './match';
@@ -323,10 +324,12 @@ export async function paymentRequestMeta(db: Db, today: string): Promise<Payment
   const contracts = await db<{ id: number; contractNo: string; title: string; counterparty: string; category: ContractCategory; supplierId: number | null }[]>`
     SELECT id, contract_no, title, counterparty, category, supplier_id FROM contracts
     WHERE status IN ('signed', 'archived', 'terminated') ORDER BY id DESC LIMIT 500`;
+  const rules = await loadExpenseRules(db);
   return {
     today,
     suppliers: suppliers.map((s) => ({ ...s, id: Number(s.id) })),
     contracts: contracts.map((c) => ({ ...c, id: Number(c.id), supplierId: c.supplierId === null ? null : Number(c.supplierId) })),
+    invoiceKinds: rules.invoiceTypes.filter((t) => t.needsNumber).map((t) => ({ key: t.key, label: t.label, taxRatesBp: t.taxRatesBp })),
   };
 }
 

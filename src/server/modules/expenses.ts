@@ -56,8 +56,10 @@ import { nextDocNo, setTxTimeouts } from '../lib/tx';
 import { hashRequest } from '../lib/idempotency';
 import { saveRuleSetting } from '../lib/rule-settings';
 import { ChannelKey, ChannelNote, loadPurchaseRules, resolveChannel } from './inventory/purchase-rules';
-import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForApproval } from './approvals/engine';
+import { approvalBrief, approveCurrent, closeApproval, overBudgetPlan, returnCurrent, submitForApproval } from './approvals/engine';
 import { receiptAttachments } from './inventory/attachments';
+import { checkClaimBudget } from './budgets';
+import { resolveClaimInvoice } from './invoices';
 
 const id = z.number().int().positive();
 const yuan = (cents: number) => (cents < 0 ? '-' : '') + formatAmount(Math.abs(cents)).replace(/,/g, '');
@@ -90,6 +92,7 @@ const RulesInput = z.object({
         key: z.string().regex(/^[a-z0-9_]{1,32}$/, '发票类型的键只能用小写字母、数字、下划线'),
         label: z.string().trim().min(1, '发票类型名称不能为空').max(20, '发票类型名称最多 20 个字'),
         needsNumber: z.boolean(),
+        certify: z.boolean().optional(),
         taxRatesBp: z
           .array(z.number().int().min(0).max(10_000))
           .min(1, '每种发票类型至少一个税点')
@@ -100,6 +103,11 @@ const RulesInput = z.object({
     .min(1, '至少保留一种发票类型')
     .max(10)
     .refine((a) => new Set(a.map((t) => t.key)).size === a.length, '发票类型的键不能重复'),
+  // 8.0.3（BI03、BI09、BI10）：没传的沿用存过的（旧页面保存时不会冲掉）
+  budgetWarnPercent: z.number().int().min(50, '黄灯至少 50%').max(100, '黄灯最多 100%').optional(),
+  invoiceCertifyDays: z.number().int().min(0, '认证期限不能为负').max(3650, '认证期限最多 3650 天').optional(),
+  invoiceRemindDays: z.number().int().min(0, '提醒天数不能为负').max(90, '最多提前 90 天提醒').optional(),
+  invoiceTaxToleranceCents: z.number().int().min(0, '容差不能为负').max(100_000, '容差最多 ¥1,000').optional(),
 });
 
 export async function loadExpenseRules(db: Db): Promise<ExpenseRules> {
@@ -313,22 +321,29 @@ async function claimSummaries(db: Db, f: ClaimFilter, limit: number | null = nul
       channelKey: string | null;
       channelLabel: string | null;
       channelNote: string;
+      invoiceRefId: number | null;
+      invoiceRefNo: string | null;
+      invoiceRefIssuer: string | null;
+      invoiceRefCert: import('@shared/invoices').CertStatus | null;
     })[]
   >`
     SELECT c.id, c.doc_no, c.status, c.expense_date, c.department_id, d.name AS department_name, c.handler_id, h.display_name AS handler_name,
            c.purpose, c.pay_source, c.advance_id, a.doc_no AS advance_no, c.invoice_type, c.invoice_label, c.tax_rate_bp, c.invoice_no,
            c.purchase_order_id AS po_id, po.doc_no AS po_no, s.name AS supplier_name, c.amount_cents, c.needs_approval,
-           c.channel AS channel_key, c.channel_label, c.channel_note,
+           c.channel AS channel_key, c.channel_label, c.channel_note, c.over_budget,
+           iv.id AS invoice_ref_id, iv.invoice_no AS invoice_ref_no, coalesce(ivs.name, iv.issuer_name) AS invoice_ref_issuer, iv.cert_status AS invoice_ref_cert,
            coalesce((SELECT string_agg(l.name, '、' ORDER BY l.line_no) FROM expense_claim_lines l WHERE l.claim_id = c.id AND l.line_no <= 3), '') AS summary,
            cb.display_name AS created_by_name, c.created_at
     FROM expense_claims c JOIN departments d ON d.id = c.department_id JOIN staff h ON h.id = c.handler_id JOIN staff cb ON cb.id = c.created_by
     LEFT JOIN petty_advances a ON a.id = c.advance_id
     LEFT JOIN purchase_orders po ON po.id = c.purchase_order_id LEFT JOIN suppliers s ON s.id = po.supplier_id
+    LEFT JOIN supplier_invoices iv ON iv.id = c.invoice_id LEFT JOIN suppliers ivs ON ivs.id = iv.supplier_id
     WHERE TRUE ${claimWhere(db, f)}
     ORDER BY c.expense_date DESC, c.id DESC
     ${limit ? db`LIMIT ${limit}` : db``}`;
-  return rows.map(({ departmentId, departmentName, handlerId, handlerName, advanceId, advanceNo, poId, poNo, supplierName, channelKey, channelLabel, channelNote, ...r }) => ({
+  return rows.map(({ departmentId, departmentName, handlerId, handlerName, advanceId, advanceNo, poId, poNo, supplierName, channelKey, channelLabel, channelNote, invoiceRefId, invoiceRefNo, invoiceRefIssuer, invoiceRefCert, ...r }) => ({
     ...r,
+    invoice: invoiceRefId ? { id: Number(invoiceRefId), invoiceNo: invoiceRefNo!, issuerName: invoiceRefIssuer ?? '', certStatus: invoiceRefCert! } : null,
     channel: channelKey ? { key: channelKey, label: channelLabel ?? channelKey, note: channelNote } : null,
     department: { id: departmentId, name: departmentName },
     handler: { id: handlerId, name: handlerName },
@@ -365,9 +380,9 @@ export async function listClaims(db: Db, f: ClaimFilter): Promise<ExpenseClaimLi
 export async function getClaim(db: Db, claimId: number): Promise<ExpenseClaim> {
   const [summary] = await claimSummaries(db, { ids: [claimId] });
   if (!summary) throw notFound('报销单不存在');
-  const [extra] = await db<Pick<ExpenseClaim, 'note' | 'createdBy' | 'confirmedByName' | 'confirmedAt' | 'returnedReason' | 'voidedByName' | 'voidedAt' | 'voidReason' | 'isSynthetic'>[]>`
+  const [extra] = await db<Pick<ExpenseClaim, 'note' | 'createdBy' | 'confirmedByName' | 'confirmedAt' | 'returnedReason' | 'voidedByName' | 'voidedAt' | 'voidReason' | 'isSynthetic' | 'budgetCheck'>[]>`
     SELECT c.note, c.created_by, ob.display_name AS confirmed_by_name, c.confirmed_at, c.returned_reason, vb.display_name AS voided_by_name,
-           c.voided_at, c.void_reason, c.is_synthetic
+           c.voided_at, c.void_reason, c.is_synthetic, c.budget_check
     FROM expense_claims c LEFT JOIN staff ob ON ob.id = c.confirmed_by LEFT JOIN staff vb ON vb.id = c.voided_by WHERE c.id = ${claimId}`;
   const lines = await db<ExpenseClaim['lines']>`
     SELECT line_no, name, category, unit, bought_milli, received_milli, diff_reason, amount_cents, po_line_id, material_id
@@ -636,6 +651,12 @@ const ClaimInput = z.object({
   invoiceType: z.string().min(1, '请选择发票类型').max(32),
   taxRateBp: z.number().int().min(0).max(10_000),
   invoiceNo: z.string().trim().max(40, '发票号码最多 40 个字').default(''),
+  /** 进项发票台账（8.0.3，BI11）：登记页选的台账里的那张发票；不选按号码找，没有就自动登记进台账 */
+  invoiceId: id.nullable().default(null),
+  /** 自动登记进台账时用：开票方（按采购单报销的是采购单的供应商，不用填）、开票日（不填按费用日期）、税额（不填按税点算） */
+  invoiceIssuer: z.string().trim().max(60, '开票方最多 60 个字').default(''),
+  invoiceDate: docDateSchema.nullable().default(null),
+  invoiceTaxCents: z.number().int('税额要精确到分').min(0, '税额不能为负').max(1_000_000_000).nullable().default(null),
   purchaseOrderId: id.nullable().default(null),
   /** 采购途径与途径说明（v0.7.29，E1）：按采购单报销的照采购单记（采购单没记的才用这里的）；按次报销的页面上必选，接口不传记「未填」 */
   channel: ChannelKey.nullable().default(null),
@@ -664,6 +685,8 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
     throw unprocessable('TAX_RATE_MISMATCH', `${inv.label}的税点只能是 ${inv.taxRatesBp.map(taxRateText).join('、')}`);
   }
   if (inv.needsNumber && !input.invoiceNo) throw unprocessable('INVOICE_NO_REQUIRED', `标了${inv.label}，请填写发票号码；没有发票请选「收据」或「无票」`);
+  if (!inv.needsNumber && input.invoiceId) throw badRequest(`${inv.label}不进发票台账，不能选台账里的发票`);
+  if (input.invoiceDate) assertNotFuture(input.invoiceDate, deps.config.timezone);
   if (input.paySource === 'petty' && !input.advanceId) throw badRequest('用备用金付的，请选择这笔钱出自哪一笔打款');
   if (input.paySource === 'company' && input.advanceId) throw badRequest('公司直付的报销不选打款');
   if (!input.purchaseOrderId && input.lines.some((l) => l.poLineId)) throw badRequest('按次报销的明细不能关联采购单行');
@@ -677,6 +700,7 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
     }
   }
   const total = input.lines.reduce((t, l) => t + l.amountCents, 0);
+  if (input.invoiceTaxCents !== null && input.invoiceTaxCents > total) throw badRequest('税额不能超过报销金额');
   const needsApproval = total > rules.approvalThresholdCents;
   const requestHash = hashRequest({ ...input, clientKey: undefined });
 
@@ -738,14 +762,40 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
       if (poCh?.channel) ch = { channel: poCh.channel, channelLabel: poCh.channelLabel, channelNote: poCh.channelNote };
       else if (input.channel) ch = resolveChannel(await loadPurchaseRules(tx), input, null);
 
+      // 进项发票台账（8.0.3，BI11）：要填号码的发票进台账——选了台账的那张就关联；没选按号码找（同一张不能报销两次），没有就登记
+      let invoiceId: number | null = null;
+      if (inv.needsNumber) {
+        const [sup] = input.purchaseOrderId
+          ? await tx<{ id: number; name: string }[]>`SELECT s.id, s.name FROM purchase_orders p JOIN suppliers s ON s.id = p.supplier_id WHERE p.id = ${input.purchaseOrderId}`
+          : [];
+        invoiceId = await resolveClaimInvoice(
+          tx,
+          {
+            invoiceId: input.invoiceId,
+            kind: inv,
+            invoiceNo: input.invoiceNo,
+            supplier: sup ? { id: Number(sup.id), name: sup.name } : null,
+            issuerName: input.invoiceIssuer,
+            invoiceDate: input.invoiceDate ?? input.expenseDate,
+            totalCents: total,
+            taxCents: input.invoiceTaxCents,
+            taxRateBp: input.taxRateBp,
+          },
+          actor,
+        );
+      }
+      // 费用预算（8.0.3，BI04）：逐个科目核对，超了的不拦登记、走「超预算报销」审批（取「部门 + 科目」的锁）
+      const budget = await checkClaimBudget(tx, { departmentId: input.departmentId, expenseDate: input.expenseDate, lines });
+
       const docNo = await nextDocNo(tx, 'expense_claim', 'BX', input.expenseDate);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO expense_claims (doc_no, expense_date, department_id, handler_id, purpose, pay_source, advance_id, invoice_type, invoice_label,
                                     tax_rate_bp, invoice_no, purchase_order_id, amount_cents, note, needs_approval, status, client_key, created_by,
-                                    confirmed_by, confirmed_at, channel, channel_label, channel_note)
+                                    confirmed_by, confirmed_at, channel, channel_label, channel_note, over_budget, budget_check, invoice_id)
         VALUES (${docNo}, ${input.expenseDate}, ${input.departmentId}, ${input.handlerId}, ${input.purpose}, ${input.paySource}, ${input.advanceId},
                 ${inv.key}, ${inv.label}, ${input.taxRateBp}, ${input.invoiceNo}, ${input.purchaseOrderId}, ${total}, ${input.note}, ${needsApproval},
-                'submitted', ${input.clientKey}, ${actor.id}, NULL, NULL, ${ch.channel}, ${ch.channelLabel}, ${ch.channelNote})
+                'submitted', ${input.clientKey}, ${actor.id}, NULL, NULL, ${ch.channel}, ${ch.channelLabel}, ${ch.channelNote},
+                ${budget.overBudget}, ${tx.json(budget.items as never)}, ${invoiceId})
         RETURNING id`;
       const newId = row!.id;
       let lineNo = 0;
@@ -759,8 +809,13 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
       await tx`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (${input.clientKey}, 'expense_claim', ${requestHash}, ${newId}, ${actor.id})`;
       await logApproval(tx, 'expense_claim', newId, 'create', actor.id);
       await logApproval(tx, 'expense_claim', newId, 'submit', actor.id);
-      // 不超过确认门槛的登记即确认；v0.7.30 起命中审批规则的按规则的审批链（没有规则命中与以前一样）
-      const r = await submitForApproval(tx, 'expense_claim', newId, { actor, timeZone: deps.config.timezone }, { fallback: needsApproval, approveNow: input.approveNow });
+      // 不超过确认门槛的登记即确认；v0.7.30 起命中审批规则的按规则的审批链（没有规则命中与以前一样）；
+      // 超预算的（8.0.3）走「超预算报销」：有规则按规则，没有在原来的审批链后面加一级店主
+      const r = await submitForApproval(tx, 'expense_claim', newId, { actor, timeZone: deps.config.timezone }, {
+        fallback: needsApproval || budget.overBudget,
+        approveNow: input.approveNow,
+        defaultPlan: budget.overBudget ? await overBudgetPlan(tx, { amountCents: total, departmentId: input.departmentId, fallback: needsApproval }) : undefined,
+      });
       const confirmNow = r.outcome === 'effective';
       if (confirmNow) {
         await tx`UPDATE expense_claims SET status = 'confirmed', confirmed_by = ${actor.id}, confirmed_at = now(), needs_approval = ${!r.skipped} WHERE id = ${newId}`;
@@ -769,7 +824,14 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
         // 门槛以内、但命中了审批规则
         await tx`UPDATE expense_claims SET needs_approval = true WHERE id = ${newId}`;
       }
-      await writeAudit(tx, { staffId: actor.id, action: 'expense_doc', targetType: 'expense_claim', targetId: newId, detail: { docNo, amountCents: total, status: confirmNow ? 'confirmed' : 'submitted' }, ip });
+      await writeAudit(tx, {
+        staffId: actor.id,
+        action: 'expense_doc',
+        targetType: 'expense_claim',
+        targetId: newId,
+        detail: { docNo, amountCents: total, status: confirmNow ? 'confirmed' : 'submitted', overBudget: budget.overBudget, invoiceId },
+        ip,
+      });
       return { id: newId, replayed: false };
     });
     claimId = r.id;
@@ -818,9 +880,24 @@ export async function actOnClaim(deps: Deps, claimId: number, action: 'approve' 
         if (c!.status !== 'returned') throw conflict('INVALID_STATE', '只有退回的报销可以重新提交');
         if (!mine && !can(actor, 'expense.manage')) throw forbidden('只能重新提交自己登记的报销');
         if (advance && advance.status !== 'active') throw conflict('ADVANCE_VOIDED', `打款 ${advance.docNo} 已冲销，请撤回后重新登记`);
-        await tx`UPDATE expense_claims SET status = 'submitted', updated_at = now() WHERE id = ${claimId}`;
+        // 8.0.3：按现在的额度再核对一次预算（不算这张自己），超了的走「超预算报销」
+        const [cur] = await tx<{ departmentId: number; expenseDate: string; amountCents: number }[]>`
+          SELECT department_id, expense_date, amount_cents FROM expense_claims WHERE id = ${claimId}`;
+        const claimLines = await tx<{ category: ExpenseCategory; amountCents: number }[]>`SELECT category, amount_cents FROM expense_claim_lines WHERE claim_id = ${claimId}`;
+        const budget = await checkClaimBudget(tx, {
+          departmentId: Number(cur!.departmentId),
+          expenseDate: cur!.expenseDate,
+          lines: claimLines.map((l) => ({ category: l.category, amountCents: Number(l.amountCents) })),
+          excludeClaimId: claimId,
+        });
+        await tx`
+          UPDATE expense_claims SET status = 'submitted', over_budget = ${budget.overBudget}, budget_check = ${tx.json(budget.items as never)}, updated_at = now()
+          WHERE id = ${claimId}`;
         // 退回后再提交按当时的规则从第一级重新走；没有规则命中按默认规则（与以前一样，退回的再提交都要确认）
-        await submitForApproval(tx, 'expense_claim', claimId, ctx, { fallback: true });
+        await submitForApproval(tx, 'expense_claim', claimId, ctx, {
+          fallback: true,
+          defaultPlan: budget.overBudget ? await overBudgetPlan(tx, { amountCents: Number(cur!.amountCents), departmentId: Number(cur!.departmentId), fallback: true }) : undefined,
+        });
         return logApproval(tx, 'expense_claim', claimId, 'submit', actor.id);
       case 'cancel':
         if (c!.status === 'cancelled') return;
@@ -1184,7 +1261,15 @@ export function registerExpenseRoutes(app: FastifyInstance, deps: Deps) {
     // 「到货超期天数」8.0.1 挪到采购规则（CG01）：这里存过的原样留着（采购规则里没存过时沿用它），页面不再改
     await saveRuleSetting(sql, 'expense_rules', loadExpenseRules, (before) => {
       const legacy = (before as { arrivalOverdueDays?: unknown }).arrivalOverdueDays;
-      return typeof legacy === 'number' ? ({ ...rules, arrivalOverdueDays: legacy } as ExpenseRules) : rules;
+      // 8.0.3 加的几项：没传的沿用存过的
+      const merged: ExpenseRules = {
+        ...rules,
+        budgetWarnPercent: rules.budgetWarnPercent ?? before.budgetWarnPercent,
+        invoiceCertifyDays: rules.invoiceCertifyDays ?? before.invoiceCertifyDays,
+        invoiceRemindDays: rules.invoiceRemindDays ?? before.invoiceRemindDays,
+        invoiceTaxToleranceCents: rules.invoiceTaxToleranceCents ?? before.invoiceTaxToleranceCents,
+      };
+      return typeof legacy === 'number' ? ({ ...merged, arrivalOverdueDays: legacy } as ExpenseRules) : merged;
     }, ctxOf(req));
     return loadExpenseRules(sql);
   });
