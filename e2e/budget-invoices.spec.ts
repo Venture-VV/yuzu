@@ -166,6 +166,26 @@ async function budgetsAndInvoices(page: Page, dept: { id: number; name: string }
   await page.getByTestId('invoice-view-certified').click();
   await expect(page.getByTestId(`invoice-row-${specialNo}`)).toContainText(`已认证 · ${month}`);
 
+  // ⑥ 详情开着的时候别人改了认证、页面又刷新了：保存按打开时的版本核对，不拿旧表单盖掉别人的修改（Codex 自动审查 84f5fe5）
+  await page.getByTestId(`invoice-row-${specialNo}`).getByRole('button').click();
+  await expect(page.getByTestId('invoice-cert')).toContainText('认证：已认证');
+  const invoiceId = Number(new URL(page.url()).searchParams.get('invoice'));
+  const seen = (await (await page.request.get(`/api/erp/invoices/${invoiceId}`)).json()) as { certVersion: number };
+  const otherCert = await page.request.post(`/api/erp/invoices/${invoiceId}/cert`, { data: { status: 'pending', period: null, note: '另一个人改回待认证', version: seen.certVersion } });
+  expect(otherCert.ok()).toBe(true);
+  const refreshed = page.waitForResponse((r) => r.url().endsWith(`/api/erp/invoices/${invoiceId}`) && r.request().method() === 'GET');
+  await page.waitForTimeout(5_500);
+  await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
+  await refreshed;
+  await page.locator('#inv-cert-note').fill('E2E 核对过');
+  await page.getByTestId('invoice-cert-save').click();
+  await expect(page.getByTestId('invoice-cert')).toContainText('认证刚被别人改过');
+  await expect(page.getByTestId('invoice-cert')).toContainText('认证：待认证');
+  await expect(page.getByTestId('invoice-cert-status')).toHaveValue('pending');
+  const after = (await (await page.request.get(`/api/erp/invoices/${invoiceId}`)).json()) as { certStatus: string; certNote: string };
+  expect(after).toMatchObject({ certStatus: 'pending', certNote: '另一个人改回待认证' });
+  await page.keyboard.press('Escape');
+
   const checks = (await (await page.request.get('/api/erp/expenses/checks')).json()) as { label: string; ok: boolean }[];
   for (const c of checks) expect(c.ok, c.label).toBe(true);
 }

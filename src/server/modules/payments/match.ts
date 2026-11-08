@@ -19,7 +19,7 @@ import { dateSchema, parse, positiveCents } from '../../lib/validate';
 import { PO_ORDERED_STATUSES } from '../contracts/ledger';
 import { erpOpAbandoned } from '../erp-ops';
 import { loadExpenseRules } from '../expenses';
-import { ledgerKind, lockInvoiceNo, voidInputInvoice } from '../invoices';
+import { findByNo, ledgerKind, lockInvoiceNo, voidInputInvoice } from '../invoices';
 import { invoiceTypeCertifies } from '@shared/expenses';
 
 const id = z.number().int().positive();
@@ -227,7 +227,7 @@ export async function createInvoice(deps: Deps, raw: unknown, actor: Actor, ip?:
       await assertNotFenced(tx, input.clientKey, 'supplier_invoice', erpOpAbandoned);
       const existing = await find(tx);
       if (existing) return { id: existing, replayed: true };
-      const [sup] = await tx<{ id: number }[]>`SELECT id FROM suppliers WHERE id = ${input.supplierId}`;
+      const [sup] = await tx<{ id: number; name: string }[]>`SELECT id, name FROM suppliers WHERE id = ${input.supplierId}`;
       if (!sup) throw notFound('供应商不存在');
       // 8.0.2：先按 id 升序锁住选的采购单，锁住以后再核对状态。撤回采购单在采购单的排他锁里核对「没有发票」，
       // 这里的共享锁（KEY SHARE，只与排他锁冲突，两张发票之间不互相等）让两边串行：不会有发票挂在已撤回的采购单上
@@ -242,6 +242,16 @@ export async function createInvoice(deps: Deps, raw: unknown, actor: Actor, ip?:
       }
       // 8.0.3：同一个发票号码的登记（三单、报销、台账）串行；在采购单的锁之后取（与报销的锁顺序一致）
       await lockInvoiceNo(tx, input.invoiceNo);
+      // 在号码锁里核对台账里有没有同一张（Codex 自动审查 84f5fe5）：同一供应商的，或者开票方名称就是这家供应商的
+      // （报销、台账登记时没挂供应商、只写了开票方）。不核对的话同一张发票既报销、又分到采购单走货款付款
+      const issuer = sup.name.trim().toLowerCase();
+      const dup = (await findByNo(tx, input.invoiceNo)).find(
+        (c) => c.supplierId === input.supplierId || (c.supplierId === null && c.issuerName.trim().toLowerCase() === issuer),
+      );
+      if (dup?.usedBy) {
+        throw conflict('INVOICE_ALREADY_CLAIMED', `发票 ${input.invoiceNo} 已在报销单 ${dup.usedBy} 里报销，不能再分到采购单走货款`, { invoiceId: dup.id });
+      }
+      if (dup) throw conflict('INVOICE_DUPLICATE', `${sup.name}的发票 ${input.invoiceNo} 已经在发票台账里了（登错了先作废原来那张）`, { invoiceId: dup.id });
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO supplier_invoices (invoice_no, supplier_id, invoice_date, total_cents, tax_cents, tax_rate_bp, note, client_key, request_hash, created_by,
                                        kind, kind_label, source, cert_status)

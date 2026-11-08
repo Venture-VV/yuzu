@@ -295,6 +295,34 @@ describe('进项发票台账（BI07–BI12）', () => {
     const blocked = await claim({ ...special('ZP-0004'), invoiceIssuer: sup.name, lines: [line({ amountCents: 45_000 })] });
     expect(blocked.status).toBe(409);
     expect(blocked.body.error.code).toBe('INVOICE_IN_PAYABLES');
+
+    // 反过来（Codex 自动审查 84f5fe5）：先报销、开票方写的就是这家供应商的名称（没挂供应商），再到付款页按三单登记同一张：拦下，
+    // 不然同一张发票既报销、又分到采购单走货款付款
+    const po2 = await ok(api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId: sup.id, orderDate: today, lines: [{ materialId: mats.find((m) => m.code === 'M016')!.id, purchaseQtyMilli: q(1), priceCents: 1_130 }] }));
+    const threeWay = (no: string) =>
+      api(ctx.app, payer, 'POST', '/api/erp/payments/invoices', {
+        clientKey: randomUUID(),
+        supplierId: sup.id,
+        invoiceNo: no,
+        invoiceDate: today,
+        totalCents: 1_130,
+        taxCents: 130,
+        taxRateBp: 1300,
+        lines: [{ poId: po2.po.id, amountCents: 1_130 }],
+      });
+    const reimbursed = (await ok(claim({ ...special('ZP-0005'), invoiceIssuer: sup.name.toUpperCase(), lines: [line({ amountCents: 1_130 })] }))).claim;
+    const again = await threeWay(' zp-0005 ');
+    expect(again.status).toBe(409);
+    expect(again.body.error).toMatchObject({ code: 'INVOICE_ALREADY_CLAIMED', details: { invoiceId: reimbursed.invoice.id } });
+    // 台账里直接登记的（开票方写供应商名称、还没报销）：三单登记同一张也拦，登错了先作废原来那张
+    const manual = (
+      await ok(api(ctx.app, payer, 'POST', '/api/erp/invoices', { clientKey: randomUUID(), kind: 'vat_special', invoiceNo: 'ZP-0006', issuerName: sup.name, invoiceDate: today, totalCents: 1_130, taxCents: 130, taxRateBp: 1300 }))
+    ).invoice;
+    const dup = await threeWay('ZP-0006');
+    expect(dup.status).toBe(409);
+    expect(dup.body.error.code).toBe('INVOICE_DUPLICATE');
+    await ok(api(ctx.app, payer, 'POST', `/api/erp/invoices/${manual.id}/void`, { reason: '要按三单登记' }), 200);
+    expect((await threeWay('ZP-0006')).status).toBe(201);
   });
 
   it('标认证：所属期、版本号、一批；改回待认证；作废的不能改', async () => {
@@ -372,6 +400,18 @@ describe('进项发票台账（BI07–BI12）', () => {
     const img = png();
     const first = await ok(api(ctx.app, coster, 'POST', `/api/erp/invoices/${inv}/attachments`, { name: '发票正面', mime: 'image/png', data: img }));
     expect(first).toHaveLength(1);
+    // 照片经台账自己的接口给（Codex 自动审查 84f5fe5）：采购模块关着也能看
+    expect(first[0].url).toBe(`/api/erp/invoices/attachments/${first[0].id}/download`);
+    const view = async () => ctx.app.inject({ method: 'GET', url: first[0].url, headers: { cookie: payer } });
+    expect((await view()).headers['content-type']).toBe('image/png');
+    expect((await api(ctx.app, boss, 'PUT', '/api/erp/modules', { modules: { purchasing: false } })).status).toBe(200);
+    try {
+      const shown = await view();
+      expect(shown.statusCode).toBe(200);
+      expect(shown.rawPayload.equals(Buffer.from(img, 'base64'))).toBe(true);
+    } finally {
+      expect((await api(ctx.app, boss, 'PUT', '/api/erp/modules', { modules: { purchasing: true } })).status).toBe(200);
+    }
     expect((await ok(api(ctx.app, coster, 'POST', `/api/erp/invoices/${inv}/attachments`, { mime: 'image/png', data: img }))).length).toBe(1);
     const pdf = Buffer.from('%PDF-1.4\n% yuzu invoice test\n').toString('base64');
     const withPdf = await ok(api(ctx.app, coster, 'POST', `/api/erp/invoices/${inv}/attachments`, { name: '电子发票.pdf', mime: 'application/pdf', data: pdf }));

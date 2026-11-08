@@ -291,7 +291,8 @@ async function attachmentsOf(db: Db, invoiceId: number): Promise<InvoiceAttachme
     id: Number(r.id),
     kind: r.imageId ? 'image' : 'pdf',
     name: r.name,
-    url: r.imageId ? `/api/erp/images/${r.imageId}` : `/api/erp/invoices/attachments/${r.id}/download`,
+    // 图片也经台账自己的接口给（Codex 自动审查 84f5fe5）：/api/erp/images 跟采购模块走，采购关着、或者只有「管理进项发票」的账号看不了
+    url: `/api/erp/invoices/attachments/${r.id}/download`,
     sizeBytes: Number(r.sizeBytes),
     uploadedByName: r.uploadedByName,
     uploadedAt: r.uploadedAt,
@@ -700,8 +701,17 @@ export function registerInvoiceRoutes(app: FastifyInstance, deps: Deps) {
     return csvReply(reply, `进项发票台账_${today()}.csv`, csv);
   });
   app.get('/api/erp/invoices/attachments/:id/download', { preHandler: READ }, async (req, reply) => {
-    const [a] = await sql<{ fileId: number | null; name: string }[]>`SELECT file_id, name FROM supplier_invoice_attachments WHERE id = ${docId(req)}`;
-    if (!a || !a.fileId) throw notFound('附件不存在');
+    const [a] = await sql<{ imageId: number | null; fileId: number | null; name: string }[]>`
+      SELECT image_id, file_id, name FROM supplier_invoice_attachments WHERE id = ${docId(req)}`;
+    if (!a) throw notFound('附件不存在');
+    // 照片：直接显示（与 /api/erp/images 一样的缓存），PDF：下载
+    if (a.imageId) {
+      const [img] = await sql<{ mime: string; data: Buffer }[]>`SELECT mime, data FROM erp_images WHERE id = ${a.imageId}`;
+      if (!img) throw notFound('附件不存在');
+      reply.header('content-type', img.mime).header('cache-control', 'private, max-age=31536000, immutable');
+      return reply.send(img.data);
+    }
+    if (!a.fileId) throw notFound('附件不存在');
     const file = await readFile(sql, Number(a.fileId), 'invoice');
     if (!file) throw notFound('附件不存在');
     attachment(reply, a.name.toLowerCase().endsWith('.pdf') ? a.name : `${a.name}.pdf`, file.mime);

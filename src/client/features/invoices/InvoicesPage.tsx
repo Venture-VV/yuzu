@@ -16,10 +16,11 @@ import {
   expectedTaxCents,
   type CertStatus,
   type InputInvoice,
+  type InputInvoiceDetail,
   type InvoiceView,
 } from '@shared/invoices';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
-import { api, errorMessage, UncertainError } from '../../lib/api';
+import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
@@ -247,25 +248,43 @@ function InvoiceSheet({ id, onClose }: { id: number | null; onClose: () => void 
   const [certStatus, setCertStatus] = useState<CertStatus>('pending');
   const [period, setPeriod] = useState('');
   const [note, setNote] = useState('');
+  // 表单是按哪个版本的认证状态填的：期间刷新拿到别人改过的版本号，保存时也照这个版本核对，对不上提示
+  // （Codex 自动审查 84f5fe5：原来用刷新后的版本号，会拿旧表单把别人刚改的认证状态盖掉）
+  const [certBase, setCertBase] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [voiding, setVoiding] = useState(false);
+  const initCert = (x: InputInvoiceDetail | undefined) => {
+    setCertStatus(x?.certStatus ?? 'pending');
+    setPeriod(x?.certPeriod ?? session.calendarToday.slice(0, 7));
+    setNote(x?.certNote ?? '');
+    setCertBase(x?.certVersion ?? null);
+  };
   useResetOnOpen(!!r, () => {
-    setCertStatus(r?.certStatus ?? 'pending');
-    setPeriod(r?.certPeriod ?? session.calendarToday.slice(0, 7));
-    setNote(r?.certNote ?? '');
+    initCert(r);
     setError(null);
   });
   const manage = can('invoice.manage');
   const saveCert = async () => {
-    if (!r) return;
+    if (!r || certBase === null) return;
     setBusy(true);
     setError(null);
     try {
-      await api.post(`/api/erp/invoices/${r.id}/cert`, { status: certStatus, period: certStatus === 'certified' ? period : null, note: note.trim(), version: r.certVersion });
+      const next = await api.post<InputInvoiceDetail>(`/api/erp/invoices/${r.id}/cert`, {
+        status: certStatus,
+        period: certStatus === 'certified' ? period : null,
+        note: note.trim(),
+        version: certBase,
+      });
+      initCert(next);
       toast({ tone: 'success', title: `${r.invoiceNo} · ${CERT_STATUS_LABELS[certStatus]}` });
     } catch (e) {
-      setError(errorMessage(e));
+      if (e instanceof ApiError && e.code === 'CERT_CHANGED') {
+        // 别人刚改过：按最新的认证状态重新填，看过再改
+        const fresh = await inv.refetch();
+        initCert(fresh.data);
+        setError(`${errorMessage(e)}（已按最新的认证状态刷新）`);
+      } else setError(errorMessage(e));
     } finally {
       setBusy(false);
       await invalidate();
