@@ -48,6 +48,8 @@ const ExpensesPage = lazyPage(() => import('./features/expenses/ExpensesPage').t
 const ClaimFormPage = lazyPage(() => import('./features/expenses/ClaimFormPage').then((m) => m.ClaimFormPage));
 const PettyPage = lazyPage(() => import('./features/expenses/PettyPage').then((m) => m.PettyPage));
 const PettyAccountsPage = lazyPage(() => import('./features/expenses/PettyAccountsPage').then((m) => m.PettyAccountsPage));
+const BudgetsPage = lazyPage(() => import('./features/expenses/BudgetsPage').then((m) => m.BudgetsPage));
+const InvoicesPage = lazyPage(() => import('./features/invoices/InvoicesPage').then((m) => m.InvoicesPage));
 const RequestsPage = lazyPage(() => import('./features/requests/RequestsPage').then((m) => m.RequestsPage));
 const RequestFormPage = lazyPage(() => import('./features/requests/RequestFormPage').then((m) => m.RequestFormPage));
 const DeptStockPage = lazyPage(() => import('./features/dept-stock/DeptStockPage').then((m) => m.DeptStockPage));
@@ -211,6 +213,9 @@ const router = createBrowserRouter([
       { path: 'revenue', element: <RevenuePage /> },
       { path: 'expenses', element: <ExpensesPage /> },
       { path: 'expenses/new', element: <ClaimFormPage /> },
+      // 费用预算与进项发票台账（8.0.3）
+      { path: 'expenses/budgets', element: <BudgetsPage /> },
+      { path: 'invoices', element: <InvoicesPage /> },
       { path: 'petty', element: <PettyPage /> },
       { path: 'petty/accounts', element: <PettyAccountsPage /> },
       { path: 'requests', element: <RequestsPage /> },
