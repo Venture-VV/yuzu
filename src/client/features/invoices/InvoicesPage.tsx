@@ -33,9 +33,7 @@ import { ReceiptAttachmentsPanel } from '../../components/ReceiptAttachments';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, MoneyInput, Notice, Select, Skeleton } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
-import { useExpenseRules } from '../expenses/queries';
-import { useSuppliers } from '../inventory/queries';
-import { search, useInputInvoice, useInvalidateInvoices, useInvoiceLedger } from './queries';
+import { search, useInputInvoice, useInvalidateInvoices, useInvoiceLedger, useInvoiceMeta } from './queries';
 
 const VIEWS: InvoiceView[] = ['all', 'pending', 'due', 'certified', 'not_required', 'anomaly', 'voided'];
 const CERT_TONE: Record<CertStatus, 'yuzu' | 'pine' | 'neutral'> = { pending: 'yuzu', certified: 'pine', not_required: 'neutral' };
@@ -440,9 +438,9 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
   const session = useSession();
   const toast = useToast();
   const invalidate = useInvalidateInvoices();
-  const rules = useExpenseRules();
-  const suppliers = useSuppliers();
-  const kinds = (rules.data?.invoiceTypes ?? []).filter((t) => t.needsNumber);
+  // 发票类型与供应商走台账自己的接口：费用报销模块关着、没有「查看费用报销」也能登记（Codex 自动审查 c2c4a12）
+  const meta = useInvoiceMeta(open);
+  const kinds = meta.data?.kinds ?? [];
   const [kind, setKind] = useState('');
   const [invoiceNo, setInvoiceNo] = useState('');
   const [supplierId, setSupplierId] = useState<number | null>(null);
@@ -541,7 +539,7 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
       }
     >
       <div className="grid gap-3 sm:grid-cols-2" data-testid="invoice-create">
-        <Field label="发票类型" htmlFor="inv-kind">
+        <Field label="发票类型" htmlFor="inv-kind" hint={def ? (def.certify ? '要认证：登记后记「待认证」' : '不用认证') : meta.error ? errorMessage(meta.error) : undefined}>
           <Select
             id="inv-kind"
             value={kind}
@@ -566,7 +564,7 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
         <Field label="供应商" htmlFor="inv-supplier" hint="不是档案里的供应商就填开票方">
           <Select id="inv-supplier" value={supplierId ?? ''} onChange={(e) => setSupplierId(Number(e.target.value) || null)} data-testid="inv-supplier">
             <option value="">不是档案里的供应商</option>
-            {suppliers.data?.map((s) => (
+            {meta.data?.suppliers.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
               </option>

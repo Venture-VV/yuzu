@@ -226,6 +226,34 @@ describe('进项发票台账（BI07–BI12）', () => {
     expect(cnt!.n).toBe(1);
   });
 
+  it('登记发票要的发票类型与供应商走台账自己的接口：费用报销模块关着也能登记（Codex 自动审查 c2c4a12）', async () => {
+    const meta = (await api(ctx.app, payer, 'GET', '/api/erp/invoices/meta')).body;
+    expect(meta.kinds.map((k: { key: string }) => k.key)).toEqual(['vat_special', 'vat_normal']);
+    expect(meta.kinds.map((k: { certify: boolean }) => k.certify)).toEqual([true, false]);
+    expect(meta.suppliers.length).toBeGreaterThan(0);
+    // 关掉费用报销：费用报销的规则接口拦下，台账的照常，照样能登记
+    expect((await api(ctx.app, boss, 'PUT', '/api/erp/modules', { modules: { expenses: false } })).status).toBe(200);
+    try {
+      expect((await api(ctx.app, payer, 'GET', '/api/erp/expenses/rules')).body.error.code).toBe('ERP_MODULE_DISABLED');
+      expect((await api(ctx.app, payer, 'GET', '/api/erp/invoices/meta')).body.kinds).toHaveLength(2);
+      const r = await ok(
+        api(ctx.app, payer, 'POST', '/api/erp/invoices', {
+          clientKey: randomUUID(),
+          kind: 'vat_normal',
+          invoiceNo: 'MK-OFF-1',
+          issuerName: '费用模块关着',
+          invoiceDate: today,
+          totalCents: 1_000,
+          taxCents: 0,
+          taxRateBp: 0,
+        }),
+      );
+      expect(r.invoice.certStatus).toBe('not_required');
+    } finally {
+      expect((await api(ctx.app, boss, 'PUT', '/api/erp/modules', { modules: { expenses: true } })).status).toBe(200);
+    }
+  });
+
   it('台账里直接登记的发票：报销时按号码关联；同一开票方同一号码不能登记两次；登错类型、开票日拒绝', async () => {
     const body = { clientKey: randomUUID(), kind: 'vat_special', invoiceNo: 'ZP-0003', issuerName: '城西印刷', invoiceDate: today, totalCents: 33_900, taxCents: 3_900, taxRateBp: 1300 };
     const created = await ok(api(ctx.app, coster, 'POST', '/api/erp/invoices', body));
@@ -286,7 +314,7 @@ describe('进项发票台账（BI07–BI12）', () => {
     expect(batch).toEqual({ certified: 3, skipped: [] });
     expect((await ok(api(ctx.app, payer, 'POST', '/api/erp/invoices/cert-batch', { ids: [a], period: month }), 200)).skipped).toEqual(['ZP-0101']);
     expect((await ledger('?view=certified')).invoices.map((r: any) => r.id)).toEqual(expect.arrayContaining([a, b, c]));
-    // 采购经办看不到台账
+    // 采购经办能看台账，但不能标认证（没有「管理进项发票」）
     expect((await api(ctx.app, buyer, 'POST', `/api/erp/invoices/cert-batch`, { ids: [a], period: month })).status).toBe(403);
   });
 

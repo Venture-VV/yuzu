@@ -1,6 +1,8 @@
 // 费用预算（8.0.3，docs/BUDGET_INVOICES.md 第 2 节，默认 BI01–BI06 待确认）：按月看「部门 × 费用科目」的额度与已占用；
 // 额度从某月起生效、之后每月沿用，直到下一次修改；没设的格子不控制。达到黄灯百分比（默认 80%）黄灯，超过 100% 红灯；
 // 登记报销超了的不拦，走审批中心的「超预算报销」（多一级店主）。能「设定费用预算」的人（默认只有店主）在这里改额度。
+// 改额度时按点「改额度」那一刻的额度做底（snap）：改的过程中页面刷新不影响，保存时只送改了的格子、带上那一刻的额度核对
+// （Codex 自动审查 c2c4a12：原来按刷新后的额度比对、送刷新后的额度，会把别人刚改的格子悄悄改回去）。
 
 import { useState } from 'react';
 import { Link } from 'react-router';
@@ -30,18 +32,25 @@ export function BudgetsPage() {
   const [month, setMonth] = useState(session.calendarToday.slice(0, 7));
   const grid = useBudgetGrid(month);
   const [editing, setEditing] = useState(false);
+  // 开始改时的额度：改的过程中按它显示、比对与核对，期间的刷新不影响
+  const [snap, setSnap] = useState<BudgetGrid | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const canManage = can('budget.manage');
 
   const startEdit = (g: BudgetGrid) => {
+    setSnap(g);
     setDraft(Object.fromEntries(g.rows.flatMap((r) => r.cells.map((c) => [cellKey(r.departmentId, c.category), c.budgetCents === null ? '' : centsToInput(c.budgetCents)]))));
     setError(null);
     setEditing(true);
   };
+  const stopEdit = () => {
+    setEditing(false);
+    setSnap(null);
+  };
 
-  /** 改了的格子（空 = 不控制）；格式不对的返回错误 */
+  /** 改了的格子（空 = 不控制，与开始改时的额度比）；格式不对的返回错误 */
   const changes = (g: BudgetGrid): { cells: BudgetSaveCell[]; problem: string | null } => {
     const cells: BudgetSaveCell[] = [];
     for (const r of g.rows) {
@@ -55,24 +64,30 @@ export function BudgetsPage() {
     return { cells, problem: null };
   };
 
-  const save = async (g: BudgetGrid) => {
-    const { cells, problem } = changes(g);
+  const save = async () => {
+    if (!snap) return;
+    const { cells, problem } = changes(snap);
     if (problem) return setError(problem);
-    if (cells.length === 0) return setEditing(false);
+    if (cells.length === 0) return stopEdit();
     setBusy(true);
     setError(null);
     try {
-      const r = await api.put<{ changed: number }>('/api/erp/expenses/budgets', { month, cells });
+      const r = await api.put<{ changed: number }>('/api/erp/expenses/budgets', { month: snap.month, cells });
       await invalidate();
-      toast({ tone: 'success', title: `已保存 ${r.changed} 格额度`, body: `从 ${month} 起生效，之后的月份没另设的都沿用` });
-      setEditing(false);
+      toast({ tone: 'success', title: `已保存 ${r.changed} 格额度`, body: `从 ${snap.month} 起生效，之后的月份没另设的都沿用` });
+      stopEdit();
     } catch (e) {
-      setError(errorMessage(e));
-      if (e instanceof ApiError && e.code === 'BUDGET_CHANGED') await invalidate();
+      // 别人刚改过：退出编辑、按最新的额度重新打开再改（不拿刷新后的额度当底，免得把别人的修改改回去）
+      if (e instanceof ApiError && e.code === 'BUDGET_CHANGED') {
+        setError(`${errorMessage(e)}（页面已刷新）`);
+        stopEdit();
+        await invalidate();
+      } else setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
   };
+  const shown = editing && snap ? snap : grid.data;
 
   return (
     <ErpPage
@@ -86,17 +101,17 @@ export function BudgetsPage() {
             </Button>
           </Link>
           <Input type="month" fullWidth={false} value={month} disabled={editing} onChange={(e) => e.target.value && setMonth(e.target.value)} className="h-10 w-40" aria-label="月份" data-testid="budget-month" />
-          {canManage && grid.data && !editing && (
+          {canManage && grid.data && !grid.isPlaceholderData && !editing && (
             <Button variant="primary" icon={<PencilLine className="size-4" />} onClick={() => startEdit(grid.data!)} data-testid="budget-edit">
               改额度
             </Button>
           )}
-          {editing && grid.data && (
+          {editing && snap && (
             <>
-              <Button variant="secondary" icon={<X className="size-4" />} disabled={busy} onClick={() => setEditing(false)}>
+              <Button variant="secondary" icon={<X className="size-4" />} disabled={busy} onClick={stopEdit}>
                 取消
               </Button>
-              <Button variant="primary" icon={<Save className="size-4" />} loading={busy} onClick={() => void save(grid.data!)} data-testid="budget-save">
+              <Button variant="primary" icon={<Save className="size-4" />} loading={busy} onClick={() => void save()} data-testid="budget-save">
                 保存
               </Button>
             </>
@@ -108,26 +123,26 @@ export function BudgetsPage() {
         <Skeleton className="h-64" />
       ) : grid.error ? (
         <Notice tone="error" title={errorMessage(grid.error)} />
-      ) : grid.data!.rows.length === 0 ? (
+      ) : shown!.rows.length === 0 ? (
         <EmptyState art="calm" title="还没有部门" description="先在库存的档案里建部门，再按部门设预算。" />
       ) : (
         <div className="space-y-3" data-testid="budgets-page">
           {editing && (
-            <Notice tone="info" title={`改的是从 ${month} 起的额度：${month} 以后没另设的月份都沿用；清空 = 从这个月起不控制`}>
-              <span className="text-[12.5px]">保存时核对你打开时看到的额度，别人刚改过会提示刷新。</span>
+            <Notice tone="info" title={`改的是从 ${snap?.month ?? month} 起的额度：以后没另设的月份都沿用；清空 = 从这个月起不控制`}>
+              <span className="text-[12.5px]">只保存你改了的格子，并核对你点「改额度」时看到的额度：别人刚改过会提示、刷新后请重新改。</span>
             </Notice>
           )}
           {error && <Notice tone="error" title={error} />}
-          <Legend warnPercent={grid.data!.warnPercent} />
+          <Legend warnPercent={shown!.warnPercent} />
           <Card className="overflow-hidden">
             <div className="hidden grid-cols-[minmax(0,1fr)_repeat(4,minmax(0,1.15fr))] gap-x-3 border-b border-line px-4 py-2 text-[12px] font-semibold text-ink-3 lg:grid">
               <span>部门</span>
-              {grid.data!.categories.map((c) => (
+              {shown!.categories.map((c) => (
                 <span key={c.key}>{c.label}</span>
               ))}
             </div>
             <ul className="divide-y divide-line/70">
-              {grid.data!.rows.map((r) => (
+              {shown!.rows.map((r) => (
                 <li key={r.departmentId} className="grid gap-x-3 gap-y-2 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_repeat(4,minmax(0,1.15fr))] lg:items-start" data-testid={`budget-row-${r.departmentId}`}>
                   <span className="text-[14px] font-bold">
                     {r.departmentName}
@@ -137,8 +152,8 @@ export function BudgetsPage() {
                     <BudgetCellView
                       key={c.category}
                       cell={c}
-                      label={grid.data!.categories.find((x) => x.key === c.category)!.label}
-                      month={month}
+                      label={shown!.categories.find((x) => x.key === c.category)!.label}
+                      month={shown!.month}
                       testId={`budget-cell-${r.departmentId}-${c.category}`}
                       editing={editing}
                       value={draft[cellKey(r.departmentId, c.category)] ?? ''}

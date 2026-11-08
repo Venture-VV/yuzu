@@ -1,7 +1,7 @@
 // 进项发票台账（8.0.3，docs/BUDGET_INVOICES.md 第 3 节）的查询：与库存、采购、费用共用 'inv' 缓存前缀，报销、三单登记以后一起刷新。
 
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { InputInvoiceDetail, InvoiceLedger, InvoiceTodo, InvoiceView } from '@shared/invoices';
+import type { InputInvoiceDetail, InvoiceLedger, InvoiceMeta, InvoiceTodo, InvoiceView } from '@shared/invoices';
 import { api } from '../../lib/api';
 
 export const ik = {
@@ -9,6 +9,7 @@ export const ik = {
   ledger: (params: Record<string, string | undefined>) => ['inv', 'input-invoices', params] as const,
   one: (id: number) => ['inv', 'input-invoice', id] as const,
   lookup: (no: string) => ['inv', 'input-invoice-lookup', no] as const,
+  meta: ['inv', 'input-invoice-meta'] as const,
   todo: ['erp', 'invoices', 'todo'] as const,
 };
 
@@ -59,3 +60,7 @@ export const useInvoiceLookup = (no: string, enabled: boolean) =>
 
 export const useInvoiceTodo = (enabled: boolean) =>
   useQuery({ queryKey: ik.todo, queryFn: () => api.get<InvoiceTodo>('/api/erp/invoices/todo'), enabled, refetchInterval: 300_000 });
+
+/** 登记发票要的发票类型与供应商（台账模块自己的接口，不依赖费用报销模块） */
+export const useInvoiceMeta = (enabled: boolean) =>
+  useQuery({ queryKey: ik.meta, queryFn: () => api.get<InvoiceMeta>('/api/erp/invoices/meta'), enabled, staleTime: 60_000 });

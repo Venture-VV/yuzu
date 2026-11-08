@@ -110,6 +110,15 @@ export interface InvoiceLedger {
   rules: { certifyDays: number; remindDays: number; taxToleranceCents: number };
 }
 
+/**
+ * 台账页「登记发票」要的：要填号码的发票类型（费用报销规则里的）、在用的供应商。
+ * 走台账模块自己的接口与权限，费用报销模块关着、或者只有「管理进项发票」没有「查看费用报销」也能登记（Codex 自动审查 c2c4a12）。
+ */
+export interface InvoiceMeta {
+  kinds: { key: string; label: string; taxRatesBp: number[]; certify: boolean }[];
+  suppliers: { id: number; name: string }[];
+}
+
 /** ERP 导航「发票台账」的数字：认证期限到期前几天以内（含已过期）的待认证发票 */
 export interface InvoiceTodo {
   due: number;

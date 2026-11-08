@@ -45,7 +45,7 @@ test.describe('费用预算与发票台账', () => {
 });
 
 async function budgetsAndInvoices(page: Page, dept: { id: number; name: string }, run: string) {
-  // ① 费用预算：办公用品 100 元
+  // ① 费用预算：办公用品 100 元、运费 200 元
   await page.goto('/erp/expenses/budgets');
   await expect(page.getByTestId('budgets-page')).toBeVisible();
   // 门店营业时区的本月（页面默认显示本月）
@@ -53,10 +53,29 @@ async function budgetsAndInvoices(page: Page, dept: { id: number; name: string }
   expect(month).toMatch(/^\d{4}-\d{2}$/);
   await page.getByTestId('budget-edit').click();
   await page.getByTestId(`budget-cell-${dept.id}-office-input`).fill('100');
+  await page.getByTestId(`budget-cell-${dept.id}-freight-input`).fill('200');
   await page.getByTestId('budget-save').click();
   const cell = page.getByTestId(`budget-cell-${dept.id}-office`);
   await expect(cell).toContainText('100.00');
   await expect(cell).toHaveAttribute('data-level', 'ok');
+  const freight = page.getByTestId(`budget-cell-${dept.id}-freight`);
+  await expect(freight).toContainText('200.00');
+
+  // ①b 改额度的过程中别人改了另一格、页面又刷新了：保存只送自己改的格子，别人改的不会被悄悄改回去（Codex 自动审查 c2c4a12）
+  await page.getByTestId('budget-edit').click();
+  const other = await page.request.put('/api/erp/expenses/budgets', {
+    data: { month, cells: [{ departmentId: dept.id, category: 'freight', amountCents: 30_000, seenCents: 20_000 }] },
+  });
+  expect(other.ok()).toBe(true);
+  // 等页面上的额度过期（5 秒）、切回窗口时自动刷新
+  const refetched = page.waitForResponse((r) => r.url().includes(`/api/erp/expenses/budgets?month=${month}`) && r.request().method() === 'GET');
+  await page.waitForTimeout(5_500);
+  await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
+  await refetched;
+  await page.getByTestId(`budget-cell-${dept.id}-low_value-input`).fill('50');
+  await page.getByTestId('budget-save').click();
+  await expect(page.getByTestId(`budget-cell-${dept.id}-low_value`)).toContainText('50.00');
+  await expect(freight).toContainText('300.00');
 
   // ② 登记报销：专票 150 元办公用品 → 超预算；台账里没有这张发票
   const invoiceNo = `ZP${run}`;

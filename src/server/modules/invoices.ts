@@ -32,6 +32,7 @@ import {
   type InvoiceAnomaly,
   type InvoiceAttachment,
   type InvoiceLedger,
+  type InvoiceMeta,
   type InvoiceSource,
   type InvoiceTodo,
   type InvoiceView,
@@ -303,6 +304,16 @@ export async function getInputInvoice(db: Db, invoiceId: number, today: string):
   if (!row) throw notFound('发票不存在');
   const pos = await poSplits(db, [invoiceId]);
   return { ...toInvoice(row, pos.get(invoiceId) ?? [], rules, today), attachments: await attachmentsOf(db, invoiceId) };
+}
+
+/** 台账页「登记发票」要的发票类型与供应商（只读；不经费用报销模块的接口） */
+export async function invoiceMeta(db: Db): Promise<InvoiceMeta> {
+  const rules = await loadExpenseRules(db);
+  const suppliers = await db<{ id: number; name: string }[]>`SELECT id, name FROM suppliers WHERE active ORDER BY code`;
+  return {
+    kinds: rules.invoiceTypes.filter((t) => t.needsNumber).map((t) => ({ key: t.key, label: t.label, taxRatesBp: t.taxRatesBp, certify: invoiceTypeCertifies(t) })),
+    suppliers: suppliers.map((r) => ({ id: Number(r.id), name: r.name })),
+  };
 }
 
 /** ERP 导航「发票台账」的数字：认证期限到期前几天以内（含已过期）的待认证发票 */
@@ -678,6 +689,7 @@ export function registerInvoiceRoutes(app: FastifyInstance, deps: Deps) {
 
   app.get('/api/erp/invoices', { preHandler: READ }, async (req) => readSnapshot(sql, (tx) => loadLedger(tx, req.query, today())));
   app.get('/api/erp/invoices/todo', { preHandler: READ }, async () => invoiceTodo(sql, today()));
+  app.get('/api/erp/invoices/meta', { preHandler: READ }, async () => readSnapshot(sql, invoiceMeta));
   app.get('/api/erp/invoices/lookup', { preHandler: guardAny('expense.read', 'invoice.manage') }, async (req) => {
     const { no } = parse(z.object({ no: z.string().trim().min(1, '请填写发票号码').max(40) }), req.query);
     return findByNo(sql, no);
