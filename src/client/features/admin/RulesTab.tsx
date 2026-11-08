@@ -26,6 +26,8 @@ interface Draft {
   businessDayStartHour: number;
   maxRecharge: string;
   maxConsume: string;
+  /** 充值当日的储值消费比例（%，8.0.4）；空为不限 */
+  spendPct: string;
   reversalWindowHours: number | null;
   /** 全天营业时为 null */
   businessHours: { open: string; close: string } | null;
@@ -53,6 +55,7 @@ export function RulesTab() {
       businessDayStartHour: settings.data.businessDayStartHour,
       maxRecharge: centsToInput(settings.data.maxRechargeCents),
       maxConsume: centsToInput(settings.data.maxConsumeCents),
+      spendPct: settings.data.rechargeSpendPct === null ? '' : String(settings.data.rechargeSpendPct),
       reversalWindowHours: settings.data.reversalWindowHours,
       businessHours: settings.data.businessHours,
       customBonusValidDays: settings.data.customBonusValidDays ? String(settings.data.customBonusValidDays) : '',
@@ -67,6 +70,8 @@ export function RulesTab() {
     const maxRechargeCents = parseYuan(draft.maxRecharge);
     const maxConsumeCents = parseYuan(draft.maxConsume);
     if (!maxRechargeCents || !maxConsumeCents) return setError('请填写正确的单笔上限');
+    const spendPct = draft.spendPct.trim() ? Number(draft.spendPct.trim()) : null;
+    if (spendPct !== null && (!Number.isInteger(spendPct) || spendPct < 1 || spendPct > 100)) return setError('充值当日的消费比例请填 1–100 的整数，不限请留空');
     const hours = draft.businessHours;
     if (hours && (!HHMM.test(hours.open) || !HHMM.test(hours.close))) return setError('请填写营业时间（开门与打烊时间）');
     if (hours && hours.open === hours.close) return setError('开门与打烊时间不能相同；全天营业请选「全天 24 小时」');
@@ -83,6 +88,7 @@ export function RulesTab() {
         businessDayStartHour: draft.businessDayStartHour,
         maxRechargeCents,
         maxConsumeCents,
+        rechargeSpendPct: spendPct,
         reversalWindowHours: draft.reversalWindowHours,
         businessHours: draft.businessHours,
         customBonusValidDays: customDays,
@@ -174,6 +180,13 @@ export function RulesTab() {
         </Field>
         <Field label="单笔消费上限" htmlFor="r-maxc" hint="同上，超过需当场授权">
           <MoneyInput id="r-maxc" value={draft.maxConsume} onChange={(e) => setDraft({ ...draft, maxConsume: e.target.value })} />
+        </Field>
+        <Field
+          label={<span className="inline-flex items-center gap-2">充值当日的储值消费比例（%） <PendingBadge title="HY01：会员充了值的那一天，储值支付不超过「当天第一笔充值前的余额 + 当天充值实收 × 这个比例」；默认 70，待店主确认" /></span>}
+          htmlFor="r-spend-pct"
+          hint="会员充了值的那一天，用储值付的钱不超过「充值前的余额 + 当天充值实收 × 这个比例」；例：新会员充 10 万、比例 70，当天最多用 7 万储值。超过的直接拒绝并显示剩余额度；留空不限"
+        >
+          <Input id="r-spend-pct" value={draft.spendPct} inputMode="numeric" placeholder="不限" data-testid="rules-spend-pct" onChange={(e) => setDraft({ ...draft, spendPct: e.target.value })} />
         </Field>
         <Field
           label="撤销与反结账时限"

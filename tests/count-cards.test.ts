@@ -63,6 +63,8 @@ beforeAll(async () => {
   await createStaff(ctx.sql, { username: 'duty', displayName: '值班经理', role: 'duty_manager', password: PASSWORD, mustChangePassword: false });
   duty = await login(ctx.app, 'duty');
   today = (await api(ctx.app, ctx.owner, 'GET', '/api/auth/me')).body.today;
+  // 8.0.4 起次卡默认停售（需求表 03，HY05）；这里的用例要售卡，先打开（停售的行为见 tests/membership-v804.test.ts）
+  expect((await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { countCardSales: true })).status).toBe(200);
   expect((await api(ctx.app, ctx.owner, 'POST', '/api/frontdesk/tags/batch', { prefix: 'K', from: 1, to: 40, width: 3, zone: 'male' })).status).toBe(200);
   for (const [name, category, price] of [
     ['次卡足疗', '次卡足疗', 19800],

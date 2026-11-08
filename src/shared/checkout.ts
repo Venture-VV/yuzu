@@ -8,6 +8,7 @@
 import { PAYMENT_METHOD_LABELS, PAYMENT_METHODS, type PaymentMethod } from './labels';
 import type { BackfillMark } from './backfill';
 import type { TagZone } from './frontdesk';
+import type { SpendQuota } from './spend-quota';
 
 export const TICKET_SEGMENT_MS = 12 * 3_600_000;
 
@@ -243,6 +244,17 @@ export interface TicketExtension {
   version: number;
 }
 
+/** 结账里的会员（选储值支付用）：余额，与充值当日的储值额度（8.0.4 需求表 04；当天没充值为空） */
+export interface CheckoutMember {
+  id: number;
+  name: string;
+  memberNo: string;
+  status: 'active' | 'frozen';
+  principalBalance: number;
+  bonusBalance: number;
+  spendQuota: SpendQuota | null;
+}
+
 export interface CheckoutPreview {
   visits: {
     visitId: number;
@@ -280,7 +292,7 @@ export interface CheckoutPreview {
   }[];
   totalAmount: number;
   /** 这些手牌上的会员（可用储值支付），附余额 */
-  members: { id: number; name: string; memberNo: string; status: 'active' | 'frozen'; principalBalance: number; bonusBalance: number }[];
+  members: CheckoutMember[];
   /** 这些会员的券（v0.7.20）：能抵多少，不能用的写原因 */
   storeCoupons?: import('./coupons').CheckoutCouponOption[];
   /** 能享的会员折扣（v0.7.25），省得多的在前；没选券、优惠时第一项必须带上 */

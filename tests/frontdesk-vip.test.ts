@@ -100,10 +100,12 @@ describe('会员档级与 VIP 柜（会员体系 v2，v0.7.23）', () => {
     expect(await gradeOf(m)).toMatchObject({ grade: 4, lockerLevel: 2 });
   });
 
-  it('前台规则只剩手牌与授权的几项：旧页面带来的等级门槛不再保存；只改提交的字段；店员不能改规则', async () => {
+  it('前台规则只剩手牌的几项：旧页面带来的等级门槛、VIP 柜授权开关（8.0.4 起归会员权益）不再保存；只改提交的字段；店员不能改规则', async () => {
     const before = (await api(ctx.app, ctx.owner, 'GET', '/api/frontdesk/rules')).body;
-    expect(before).toEqual({ selfVoidMinutes: 15, lostTagFeeCents: 20000, vipOverrideEnabled: false, overtimeGraceMinutes: 15 });
+    expect(before).toEqual({ selfVoidMinutes: 15, lostTagFeeCents: 20000, overtimeGraceMinutes: 15 });
     expect(await setRules({ vipLevelThresholds: [0, 5_000_000, 5_000_000] })).toEqual(before);
+    expect(await setRules({ vipOverrideEnabled: true })).toEqual(before);
+    expect((await api(ctx.app, ctx.owner, 'GET', '/api/vip-lockers')).body.rules.overrideEnabled).toBe(false);
     expect(await setRules({ selfVoidMinutes: 20 })).toEqual({ ...before, selfVoidMinutes: 20 });
     await setRules({ selfVoidMinutes: 15 });
     expect((await api(ctx.app, ctx.clerk, 'PUT', '/api/frontdesk/rules', { selfVoidMinutes: 30 })).status).toBe(403);
@@ -163,7 +165,9 @@ describe('VIP 柜等级校验（当场授权关闭，默认）', () => {
 describe('当场授权（开关开启）', () => {
   let walkinGrant: string;
   beforeAll(async () => {
-    await setRules({ vipOverrideEnabled: true });
+    // 8.0.4 起在「会员权益 → VIP 柜」开（vip_locker_rules）
+    const on = await api(ctx.app, ctx.owner, 'PUT', '/api/vip-lockers', { overrideEnabled: true });
+    if (on.status !== 200) throw new Error(JSON.stringify(on.body));
   });
 
   it('没有授权时提示需要当场授权', async () => {

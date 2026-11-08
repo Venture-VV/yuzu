@@ -19,6 +19,7 @@ import { onMemberSaved } from './benefits';
 import { listLedger } from './ledger';
 import { memberGradeInfo } from './membership';
 import { loadSettings } from './settings';
+import { spendQuotaOf } from './spend-quota';
 
 const MEMBER_COLUMNS = (db: Db) => db`
   m.id, m.member_no, m.name, m.phone, m.gender, m.birthday::text AS birthday, m.note,
@@ -151,6 +152,8 @@ export async function getMemberDetail(db: Db, id: number, today: string): Promis
     bonusLots: lots.map((l) => ({ remaining: l.remaining, expiresAt: l.expiresAt ? new Date(l.expiresAt).toISOString() : null })),
     opening: opening ?? null,
     mergedInto: mergedInto ? { ...mergedInto, id: Number(mergedInto.id) } : null,
+    // 充值当日的储值额度（8.0.4 需求表 04）
+    spendQuota: await spendQuotaOf(db, id, today, (await loadSettings(db)).rechargeSpendPct),
   };
 }
 

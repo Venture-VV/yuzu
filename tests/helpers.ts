@@ -39,6 +39,9 @@ export async function setup(): Promise<TestContext> {
   // 会员体系 v2（v0.7.23）的首充 / 续充最低默认 5,000 元；之前的用例按小额充值编写，这里设成不限，
   // 最低充值的行为由 tests/membership.test.ts 单独验证（那里按需改回）
   await sql`INSERT INTO settings (key, value) VALUES ('membership_rules', ${sql.json({ firstRechargeMinCents: 0, topUpMinCents: 0 })})`;
+  // 8.0.4 的充值当日储值消费比例默认 70%（HY01）：之前的用例常在同一天先充值再消费，这里设成不限，
+  // 比例的行为由 tests/membership-v804.test.ts 单独验证（那里按需改回 70）
+  await sql`INSERT INTO settings (key, value) VALUES ('recharge_spend_pct', 'null'::jsonb)`;
   const ownerId = await createStaff(sql, { username: 'owner', displayName: '测试店主', role: 'owner', password: PASSWORD, mustChangePassword: false });
   const clerkId = await createStaff(sql, { username: 'clerk', displayName: '测试店员', role: 'clerk', password: PASSWORD, mustChangePassword: false });
   const app = await buildApp(sql, config);
@@ -224,10 +227,13 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '085_gift_receipts.sql',
   '086_expense_budgets.sql',
   '087_input_invoices.sql',
+  '088_member_tags_vip.sql',
+  '089_coupon_campaigns.sql',
   '090_canteen.sql',
   '091_canteen_join.sql',
   '092_canteen_reply_ops.sql',
   '093_purchasing_ops.sql',
+  '094_coupon_campaign_ops.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

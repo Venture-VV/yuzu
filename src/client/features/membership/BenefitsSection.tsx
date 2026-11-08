@@ -4,6 +4,7 @@
 // 折扣类（v0.7.25）：设打哪些明细、起点与各档阶的折扣（付几成）、每周几 / 每月几号，发布后手牌结账时自动算。
 
 import { useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Download, PauseCircle, PencilLine, Plus, Search, Send, Trash2, TriangleAlert } from 'lucide-react';
 import {
@@ -56,16 +57,47 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton, Textarea } from '../../components/ui';
 import { AdminPage } from '../admin/AdminShell';
 import { benefitKeys } from './queries';
+import { BenefitTiersView } from './BenefitTiersView';
+import { VipLockersCard } from './VipLockersCard';
+
+/** 三个视图（8.0.4）：按档阶（默认，需求表 01）、按类别（原来的清单）、VIP 柜（需求表 02，从会员规则、手牌与前台移过来） */
+type BenefitView = 'tiers' | 'list' | 'vip';
+const VIEWS: BenefitView[] = ['tiers', 'list', 'vip'];
 
 export function BenefitsSection() {
+  const [params, setParams] = useSearchParams();
+  const raw = params.get('view');
+  const view: BenefitView = VIEWS.includes(raw as BenefitView) ? (raw as BenefitView) : 'tiers';
   return (
     <AdminPage
       section="benefits"
       wide
       description="本店权益清单（会员文档附录三 A 与补充项）：逐项设好配置起点、数量与券，发布后券类每月自动发、事件礼按事件自动发，服务类列在会员详情「本月可享」。改了只影响以后，已经发出的券、登记的使用不变。"
+      actions={
+        <Link to="/admin/coupons?tab=usage" className="text-[13px] font-semibold text-pine hover:underline" data-testid="benefits-usage-link">
+          看使用率
+        </Link>
+      }
     >
-      <BenefitsEditor />
-      <ParkingLogCard />
+      <Segmented
+        ariaLabel="看法"
+        className="mb-4"
+        value={view}
+        onChange={(v) => setParams(v === 'tiers' ? {} : { view: v }, { replace: true })}
+        options={[
+          { value: 'tiers', label: '按档阶' },
+          { value: 'list', label: '按类别' },
+          { value: 'vip', label: 'VIP 柜' },
+        ]}
+      />
+      {view === 'vip' ? (
+        <VipLockersCard />
+      ) : (
+        <>
+          <BenefitsEditor view={view} />
+          <ParkingLogCard />
+        </>
+      )}
     </AdminPage>
   );
 }
@@ -81,7 +113,7 @@ const parseState = (v: string): { grade: Grade; tier: Tier | null } => {
 };
 const STATE_OPTIONS = GRADE_STATES.map((s) => ({ value: stateValue(s.grade, s.tier), label: startLabel(s.grade, s.tier) }));
 
-function BenefitsEditor() {
+function BenefitsEditor({ view }: { view: 'tiers' | 'list' }) {
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({ queryKey: benefitKeys.catalog, queryFn: () => api.get<BenefitCatalog>('/api/benefits') });
@@ -156,7 +188,7 @@ function BenefitsEditor() {
           </span>
           <PendingBadge title="归类、默认数量与发放时机按 PENDING_DECISIONS M27–M35（待店主确认）" />
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-3">
+        {view === 'list' && <div className="mt-4 flex flex-wrap items-center gap-3">
           <Segmented
             ariaLabel="状态"
             size="sm"
@@ -173,10 +205,11 @@ function BenefitsEditor() {
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-4" />
             <Input fullWidth={false} className="h-9 w-56 pl-9" placeholder="编号或名称" value={keyword} onChange={(e) => setKeyword(e.target.value)} aria-label="搜索权益" />
           </div>
-        </div>
+        </div>}
       </Card>
 
-      {BENEFIT_CATEGORIES.map((cat) => {
+      {view === 'tiers' && <BenefitTiersView onEdit={(id) => setEditing(d.items.find((b) => b.id === id) ?? null)} />}
+      {view === 'list' && BENEFIT_CATEGORIES.map((cat) => {
         const rows = shown.filter((b) => b.category === cat);
         if (!rows.length) return null;
         return (
@@ -278,7 +311,7 @@ function BenefitsEditor() {
           </Card>
         );
       })}
-      {shown.length === 0 && d.items.length > 0 && <p className="text-center text-[13px] text-ink-3">没有符合条件的权益。</p>}
+      {view === 'list' && shown.length === 0 && d.items.length > 0 && <p className="text-center text-[13px] text-ink-3">没有符合条件的权益。</p>}
       <EditDialog benefit={editing} catalog={d} onClose={() => setEditing(null)} onSaved={() => void refresh()} />
     </div>
   );

@@ -1,6 +1,7 @@
 // 前后端共用的接口数据结构。金额字段均为整数「分」。
 
 import type { BusinessHours } from './business-date';
+import type { SpendQuota } from './spend-quota';
 import type { PriceTier, Strength, TierPrice } from './catalog';
 import type { CashDrawer, CheckoutMethod, CouponPlatform, ShiftMode } from './checkout';
 import type { DeductionRule, WalletBalance } from './deduction';
@@ -33,6 +34,13 @@ export interface StoreRules {
   maxRechargeCents: number;
   /** 单笔消费上限（默认 50 万元）；超过需要店主或店总当场授权 */
   maxConsumeCents: number;
+  /**
+   * 充值当日的储值消费比例（8.0.4 需求表 04，HY01）：会员在某个营业日充了值，这一天用储值付的钱不超过
+   * 「当天第一笔充值前的余额 + 当天充值实收 × 这个百分比」；null 为不限（默认 70）
+   */
+  rechargeSpendPct: number | null;
+  /** 次卡售卖（8.0.4 需求表 03，HY05）：默认停售，已售的照常用、退、打印；没有页面开关 */
+  countCardSales: boolean;
   /** 撤销与反结账时限（#10，2026-10-29 签认默认 48 小时）：消费 / 结账后多少小时内可以撤销、反结账，超过后只有店主可以；null 为不限 */
   reversalWindowHours: number | null;
   /** 充值、结账、反结账前必须先开班（2026-10-29 签认，默认开）；关闭后没开班的收款不属于任何班次 */
@@ -114,6 +122,8 @@ export interface MemberDetail extends MemberSummary {
   opening: { importNo: string; docNo: string; source: string; legacyNo: string; principal: number; bonus: number; legacyRecharged: number; importedAt: string } | null;
   /** 被合并到的会员（v0.7.26，M79）：这份档案停用，余额已转过去；没合并为空 */
   mergedInto: { id: number; memberNo: string; name: string } | null;
+  /** 充值当日的储值额度（8.0.4 需求表 04）：今天充了值才有，否则为空 */
+  spendQuota: SpendQuota | null;
   stats: {
     totalPaid: number;
     totalBonusGranted: number;

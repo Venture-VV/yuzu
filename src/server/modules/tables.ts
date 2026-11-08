@@ -28,6 +28,8 @@ import { writeAudit } from '../lib/audit';
 import type { Deps, OpContext } from '../lib/context';
 import { badRequest, conflict, notFound, unprocessable } from '../lib/errors';
 import { cents, idParam, parse, positiveCents } from '../lib/validate';
+import { loadSettings } from './settings';
+import { withSpendQuota } from './spend-quota';
 import { expireMemberBonus } from './bonus';
 import { cancelKitchenItem, createKitchenItems, kitchenStationsOf, loadDiningRules, takeDishLimits, type KitchenLine } from './dining';
 import { assertSettled, getCheckout, Payment, recordCheckoutPayments, snapshotCheckoutItems, splitPayments } from './frontdesk/checkout';
@@ -471,11 +473,13 @@ export async function previewTableCheckout(deps: Deps, sessionIds: number[], at 
     if (closed) throw conflict('TABLE_CLOSED', `桌台「${closed.tableName}」的这次开台已结束，请刷新后重新选择`);
     const lines = await tx<{ id: number; billId: number; name: string; quantity: number; amount: number }[]>`
       SELECT id, bill_id, name, quantity, amount FROM bill_lines WHERE status = 'active' AND bill_id IN ${tx(rows.map((r) => r.billId))} ORDER BY id`;
-    const members = rows.some((r) => r.memberId)
-      ? await tx<TableCheckoutPreview['members']>`
+    const memberRows = rows.some((r) => r.memberId)
+      ? await tx<Omit<TableCheckoutPreview['members'][number], 'spendQuota'>[]>`
           SELECT id, name, member_no, status, principal_balance, bonus_balance FROM members
           WHERE id IN ${tx(rows.flatMap((r) => (r.memberId ? [r.memberId] : [])))} ORDER BY id`
       : [];
+    // 充值当日的储值额度（8.0.4 需求表 04）
+    const members = await withSpendQuota(tx, memberRows, await businessDate(tx, deps, at), (await loadSettings(tx)).rechargeSpendPct);
     const dishes = await tx<TableCheckoutPreview['dishes']>`
       SELECT t.name AS table_name, i.name, k.quantity, k.status
       FROM kitchen_items k JOIN service_items i ON i.id = k.item_id JOIN table_sessions s ON s.id = k.table_session_id JOIN dining_tables t ON t.id = s.table_id

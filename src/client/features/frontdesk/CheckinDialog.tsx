@@ -8,7 +8,7 @@ import {
   ZONES,
   type BoardTag,
   type CheckinResult,
-  type FrontdeskRules,
+  type FrontdeskBoardRules,
   type Zone,
 } from '@shared/frontdesk';
 import { grantCovers, ticketGrantCovers, type TicketGrant, type TicketGrantItem, type TicketGrantRequest, type VipGrant, type VipGrantTag } from '@shared/grants';
@@ -90,7 +90,7 @@ export function CheckinDialog({
 }: {
   open: boolean;
   tags: BoardTag[];
-  rules: FrontdeskRules | undefined;
+  rules: FrontdeskBoardRules | undefined;
   prefill: CheckinPrefill;
   onClose: () => void;
   onDone: (result: CheckinResult) => void;

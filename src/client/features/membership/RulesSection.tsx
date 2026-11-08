@@ -1,9 +1,11 @@
 // 后台「会员规则」（会员体系 v2，v0.7.23；docs/MEMBERSHIP.md 第 2、4 节）：一页改完档级门槛与赠送比例、享阶 / 尊阶比例、
-// 会籍周期与补充期、首充 / 续充最低、到期提醒、上线定档最高档、VIP 柜对应；v0.7.25 起还有低一档邀请体验的天数、次数与受邀间隔。
-// 保存前列出「会影响哪些以后的判断」。
+// 会籍周期与补充期、首充 / 续充最低、到期提醒、上线定档最高档；v0.7.25 起还有低一档邀请体验的天数、次数与受邀间隔；
+// 8.0.4 起有生日礼提前几天到账，VIP 柜对应移到「会员权益 → VIP 柜」（这里留一条跳转）。保存前列出「会影响哪些以后的判断」。
 
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
+import { ShieldCheck } from 'lucide-react';
 import { DEFAULT_MEMBERSHIP_RULES, MAX_GRADE, type MembershipRules } from '@shared/membership';
 import { formatYuan, parseYuan } from '@shared/money';
 import { api, ApiError, errorMessage } from '../../lib/api';
@@ -17,7 +19,7 @@ export function MembershipRulesSection() {
   return (
     <AdminPage
       section="membership"
-      description="档级门槛与赠送比例、享阶 / 尊阶、会籍周期与补充期、最低充值、到期提醒、VIP 柜对应、邀请体验。改了只影响以后的充值、消费与到期判断，已经记下的档阶不重算。"
+      description="档级门槛与赠送比例、享阶 / 尊阶、会籍周期与补充期、最低充值、到期提醒、生日礼到账、邀请体验。改了只影响以后的充值、消费与到期判断，已经记下的档阶不重算。"
     >
       <RulesEditor />
     </AdminPage>
@@ -34,7 +36,7 @@ interface Draft {
   topUpMin: string;
   reminderDays: string;
   onboardMaxGrade: number;
-  lockers: string[];
+  birthdayLead: string;
   inviteDays: string;
   invitesPerMonth: string;
   inviteeMonths: string;
@@ -54,7 +56,7 @@ function toDraft(r: MembershipRules): Draft {
     topUpMin: r.topUpMinCents ? yuanText(r.topUpMinCents) : '',
     reminderDays: r.reminderDays.join('、'),
     onboardMaxGrade: r.onboardMaxGrade,
-    lockers: r.vipLockerLevels.map(String),
+    birthdayLead: String(r.birthdayLeadDays),
     inviteDays: String(r.trialInviteDays),
     invitesPerMonth: String(r.trialInvitesPerMonth),
     inviteeMonths: String(r.trialInviteeMonths),
@@ -86,8 +88,8 @@ function fromDraft(d: Draft): MembershipRules | string {
     .filter(Boolean)
     .map(int);
   if (reminderDays.some(Number.isNaN)) return '提醒天数请填整数，用顿号分开，例如 90、60、30、7';
-  const lockers = d.lockers.map(int);
-  if (lockers.some(Number.isNaN)) return 'VIP 柜等级请填整数（0 = 不能用）';
+  const birthdayLeadDays = int(d.birthdayLead);
+  if (Number.isNaN(birthdayLeadDays)) return '生日礼提前几天请填整数（0 = 生日当天）';
   const trial = { trialInviteDays: int(d.inviteDays), trialInvitesPerMonth: int(d.invitesPerMonth), trialInviteeMonths: int(d.inviteeMonths) };
   if (Object.values(trial).some(Number.isNaN)) return '邀请体验的天数、次数与受邀间隔请填整数';
   return {
@@ -97,7 +99,7 @@ function fromDraft(d: Draft): MembershipRules | string {
     topUpMinCents: topUpMin,
     reminderDays,
     onboardMaxGrade: d.onboardMaxGrade,
-    vipLockerLevels: lockers,
+    birthdayLeadDays,
     ...trial,
   };
 }
@@ -120,7 +122,8 @@ function effects(before: MembershipRules, after: MembershipRules): string[] {
     out.push(`最低充值改为首充 ${after.firstRechargeMinCents ? formatYuan(after.firstRechargeMinCents) : '不限'}、续充 ${after.topUpMinCents ? formatYuan(after.topUpMinCents) : '不限'}：下一笔充值起生效`);
   if (after.reminderDays.join() !== before.reminderDays.join()) out.push(`到期提醒改为前 ${after.reminderDays.join('、')} 天：提醒名单马上按新天数`);
   if (after.onboardMaxGrade !== before.onboardMaxGrade) out.push(`期初导入定档最高 L${before.onboardMaxGrade} → L${after.onboardMaxGrade}：以后的期初导入按新上限`);
-  if (after.vipLockerLevels.join() !== before.vipLockerLevels.join()) out.push('VIP 柜对应：发牌、换牌马上按新的对应核对');
+  if (after.birthdayLeadDays !== before.birthdayLeadDays)
+    out.push(`生日礼 ${before.birthdayLeadDays ? `生日前 ${before.birthdayLeadDays} 天` : '生日当天'} → ${after.birthdayLeadDays ? `生日前 ${after.birthdayLeadDays} 天` : '生日当天'}到账：今年还没发的按新天数`);
   if (after.trialInviteDays !== before.trialInviteDays) out.push(`邀请体验 ${before.trialInviteDays} → ${after.trialInviteDays} 天：以后发起的按新天数，已经在体验中的到期日不变`);
   if (after.trialInvitesPerMonth !== before.trialInvitesPerMonth)
     out.push(`每位会员每月能邀请 ${before.trialInvitesPerMonth} → ${after.trialInvitesPerMonth} 次${after.trialInvitesPerMonth === 0 ? '（0 = 不开放邀请体验）' : ''}：马上生效`);
@@ -169,8 +172,7 @@ function RulesEditor() {
       <Card className="p-5">
         <SectionTitle aside={<PendingBadge title="按会员文档（2026-11-02）与 PENDING_DECISIONS「会员体系 v2」的默认做法，待店主确认" />}>档级、门槛与赠送比例</SectionTitle>
         <p className="mt-1 text-[12.5px] text-ink-3">
-          滚动 {draft.cycleDays || rules.data.cycleDays} 天内的累计充值（含本笔）达到门槛就升入那一档的初阶，可以连跳几档；赠金 = 本笔实收 × 充值后所在档的比例。VIP
-          柜一栏是这一档能用到几级柜（柜子的 1–5 级沿用柜号清单，0 = 不能用）。
+          滚动 {draft.cycleDays || rules.data.cycleDays} 天内的累计充值（含本笔）达到门槛就升入那一档的初阶，可以连跳几档；赠金 = 本笔实收 × 充值后所在档的比例。
         </p>
         <div className="mt-3 overflow-x-auto rounded-lg border border-line">
           <table className="w-full min-w-[620px] text-[13px]">
@@ -180,7 +182,6 @@ function RulesEditor() {
                 <th className="px-3 py-2 text-left">名称</th>
                 <th className="px-3 py-2 text-left">充值门槛（元）</th>
                 <th className="px-3 py-2 text-left">赠送比例（%）</th>
-                <th className="px-3 py-2 text-left">VIP 柜</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line/70">
@@ -200,21 +201,20 @@ function RulesEditor() {
                   <td className="px-3 py-1.5">
                     <Input value={g.bonus} inputMode="decimal" className="num h-9" disabled={!editable} aria-label={`L${i} 赠送比例`} data-testid={`rule-grade-bonus-${i}`} onChange={(e) => setGrade(i, { bonus: e.target.value })} />
                   </td>
-                  <td className="px-3 py-1.5">
-                    <Input
-                      value={draft.lockers[i] ?? ''}
-                      inputMode="numeric"
-                      className="num h-9 w-20"
-                      fullWidth={false}
-                      disabled={!editable}
-                      aria-label={`L${i} 能用几级 VIP 柜`}
-                      onChange={(e) => setDraft({ ...draft, lockers: draft.lockers.map((v, j) => (j === i ? e.target.value : v)) })}
-                    />
-                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+        {/* VIP 柜（8.0.4 起归「会员权益」，docs/MEMBERSHIP_V804.md 第 2 节）：原来这里的「VIP 柜」一列搬过去了，这里只留跳转 */}
+        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-paper/60 px-4 py-3" data-testid="vip-moved">
+          <ShieldCheck className="size-5 shrink-0 text-pine" />
+          <p className="min-w-0 flex-1 text-[12.5px] text-ink-3">
+            <b className="text-ink">VIP 柜已移到「会员权益」</b>：各档能用到几级柜、当场授权开关都在「会员权益 → VIP 柜」设置，原来的设置已原样搬过去。
+          </p>
+          <Link to="/admin/vip-lockers" className="inline-flex h-8 items-center rounded-full bg-pine px-3.5 text-[12.5px] font-semibold text-paper hover:bg-pine/90" data-testid="vip-moved-link">
+            去设置
+          </Link>
         </div>
       </Card>
 
@@ -241,6 +241,9 @@ function RulesEditor() {
           </Field>
           <Field label="到期提醒（到期前几天）" htmlFor="reminder-days" hint="用顿号分开">
             <Input id="reminder-days" value={draft.reminderDays} disabled={!editable} onChange={(e) => setDraft({ ...draft, reminderDays: e.target.value })} />
+          </Field>
+          <Field label="生日礼提前几天到账" htmlFor="birthday-lead" hint="发券规则的生日礼、权益的生日礼遇都按它；0 = 生日当天（HY13）">
+            <Input id="birthday-lead" value={draft.birthdayLead} inputMode="numeric" disabled={!editable} data-testid="rule-birthday-lead" onChange={(e) => setDraft({ ...draft, birthdayLead: e.target.value })} />
           </Field>
           <Field label="期初导入定档最高" htmlFor="onboard-max" hint="最高档要新充值达到门槛">
             <Select id="onboard-max" value={draft.onboardMaxGrade} disabled={!editable} onChange={(e) => setDraft({ ...draft, onboardMaxGrade: Number(e.target.value) })}>

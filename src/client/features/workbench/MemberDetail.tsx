@@ -3,6 +3,7 @@ import { formatPhone } from '@shared/labels';
 import { lastUsableDate } from '@shared/business-date';
 import { displayFieldValue } from '@shared/member-fields';
 import { channelLabel } from '@shared/members';
+import { spendQuotaText } from '@shared/spend-quota';
 import type { MemberDetail as Member } from '@shared/types';
 import { useActivity } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
@@ -152,6 +153,13 @@ export function MemberDetail({
           </div>
         </div>
       </Card>
+
+      {/* 充值当日的储值额度（8.0.4 需求表 04）：今天充了值才显示 */}
+      {member.spendQuota && (
+        <p className="-mt-1 rounded-md bg-ember-soft/60 px-3 py-2 text-[12.5px] font-semibold text-ember" data-testid="member-spend-quota">
+          {spendQuotaText(member.spendQuota)}
+        </p>
+      )}
 
       {/* 常用操作 */}
       <div className="grid grid-cols-2 gap-3">

@@ -379,7 +379,6 @@ const yuan = (cents: number) => String(cents / 100);
 function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSaved: () => void }) {
   const [minutes, setMinutes] = useState('');
   const [fee, setFee] = useState('');
-  const [override, setOverride] = useState(false);
   const [grace, setGrace] = useState('0');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -387,7 +386,6 @@ function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSa
     if (!rules) return;
     setMinutes(String(rules.selfVoidMinutes));
     setFee(yuan(rules.lostTagFeeCents));
-    setOverride(rules.vipOverrideEnabled);
     setGrace(String(rules.overtimeGraceMinutes ?? 0));
   }, [rules]);
 
@@ -409,7 +407,6 @@ function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSa
       await api.put('/api/frontdesk/rules', {
         selfVoidMinutes: n,
         lostTagFeeCents: feeCents,
-        vipOverrideEnabled: override,
         overtimeGraceMinutes: g,
       });
       onSaved();
@@ -442,25 +439,16 @@ function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSa
         </Field>
       </div>
 
-      <div className="mt-5 rounded-lg border border-line bg-paper/60 p-4">
-        <p className="flex items-center gap-2 text-[13.5px] font-bold text-ink">
-          VIP 柜会员等级 <PendingBadge title="等级口径、各级门槛与当场授权开关为店主 2026-10-27 答复里的默认做法，待确认" />
-        </p>
-        <p className="mt-1 text-[12.5px] text-ink-3">
-          会员等级不低于柜子等级才能使用该 VIP 柜；散客为 0 级。等级口径、各级门槛与名称在「
-          <Link to="/admin/members" className="font-semibold text-pine hover:underline">
-            会员与渠道
-          </Link>
-          」设置。
-        </p>
-        <div className="mt-3">
-          <ConfirmCheck checked={override} onChange={setOverride}>
-            <span className="flex items-center gap-1.5">
-              <ShieldCheck className="size-4 text-pine" /> 允许当场授权散客或等级不够的会员使用 VIP 柜
-            </span>
-            <span className="block text-[12.5px] font-normal text-ink-3">开启后由值班经理、店总或店主在发牌弹窗里输入账号密码授权，每次授权只能用一次</span>
-          </ConfirmCheck>
+      {/* VIP 柜（8.0.4 起归「会员权益」，docs/MEMBERSHIP_V804.md 第 2 节）：原来这里的当场授权开关搬过去了，这里只留跳转 */}
+      <div className="mt-5 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-paper/60 p-4" data-testid="vip-moved">
+        <ShieldCheck className="size-5 shrink-0 text-pine" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[13.5px] font-bold text-ink">VIP 柜已移到「会员权益」</p>
+          <p className="mt-0.5 text-[12.5px] text-ink-3">各档能用到几级 VIP 柜、当场授权散客或等级不够的会员使用 VIP 柜，都在「会员权益 → VIP 柜」设置；原来的设置已原样搬过去。</p>
         </div>
+        <Link to="/admin/vip-lockers" className="inline-flex h-9 items-center rounded-full bg-pine px-4 text-[13px] font-semibold text-paper hover:bg-pine/90" data-testid="vip-moved-link">
+          去设置
+        </Link>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">

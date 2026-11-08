@@ -33,6 +33,8 @@ const KEY_MAP = {
   member_channels: 'memberChannels',
   shift_mode: 'shiftMode',
   cash_drawers: 'cashDrawers',
+  recharge_spend_pct: 'rechargeSpendPct',
+  count_card_sales: 'countCardSales',
 } as const satisfies Record<string, keyof StoreSettings>;
 
 /** 设置项在库里的键（规则总表按它找最近修改的时间与人） */
@@ -56,6 +58,9 @@ const DEFAULTS: StoreSettings = {
   // 交班方式（v0.7.28 ⑨，N11 待确认）：默认按人交班（现在的做法）；按钱箱交班时开班选钱箱
   shiftMode: 'person',
   cashDrawers: DEFAULT_CASH_DRAWERS,
+  // 8.0.4：充值当日的储值消费不超过「充值前余额 + 当天充值 × 70%」（HY01）；次卡停售（HY05，迁移 088 也写入「关」）
+  rechargeSpendPct: 70,
+  countCardSales: false,
 };
 
 export const DEFAULT_SETTINGS: Readonly<StoreSettings> = DEFAULTS;
@@ -109,6 +114,8 @@ const SettingsInput = z
       )
       .max(MAX_MEMBER_CHANNELS, `渠道最多 ${MAX_MEMBER_CHANNELS} 个`),
     shiftMode: z.enum(SHIFT_MODES, '交班方式不正确'),
+    rechargeSpendPct: z.number('充值当日的消费比例请填整数').int('充值当日的消费比例请填整数').min(1, '比例至少 1%').max(100, '比例最多 100%').nullable(),
+    countCardSales: z.boolean('请选择是否售次卡'),
     cashDrawers: z
       .array(
         z.object({

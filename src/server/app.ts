@@ -47,6 +47,8 @@ import { registerMemberRoutes } from './modules/members';
 import { registerCouponRoutes } from './modules/coupons';
 import { registerMembershipRoutes } from './modules/membership';
 import { registerBenefitRoutes } from './modules/benefits';
+import { registerVipLockerRoutes } from './modules/vip-lockers';
+import { registerBenefitTierRoutes } from './modules/benefit-tiers';
 import { registerTrialRoutes } from './modules/member-trials';
 import { registerDeviceRoutes } from './modules/devices';
 import { registerOpeningRoutes } from './modules/opening';
@@ -182,6 +184,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerCouponRoutes(app, deps);
   registerMembershipRoutes(app, deps);
   registerBenefitRoutes(app, deps);
+  registerVipLockerRoutes(app, deps);
+  registerBenefitTierRoutes(app, deps);
   registerTrialRoutes(app, deps);
   registerDeviceRoutes(app, deps);
   registerWalletRoutes(app, deps);
