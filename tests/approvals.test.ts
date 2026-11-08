@@ -553,7 +553,9 @@ describe('盘点差异审批（A8）、急采待补单（A10）、数据隔离�
 
   it('急采待验收算进负责人的数字、列出来，验收后消失；急采收货生效后超过 3 天没补采购单的进负责人待办，补单后消失', async () => {
     const roomsWh = (await ctx.sql<{ id: number }[]>`SELECT id FROM warehouses WHERE department_id = ${ids.rooms!}`)[0]!.id;
-    const rc = await api(ctx.app, reqA, 'POST', '/api/erp/dept-stock/docs', {
+    // 8.0.1 起急采由采购登记（采购组整改 05，CG05），部门不能登记
+    expect((await api(ctx.app, reqA, 'POST', '/api/erp/dept-stock/docs', { clientKey: randomUUID(), docType: 'receipt', urgent: true, departmentId: ids.rooms, supplierId: s1.id, lines: [] })).status).toBe(400);
+    const rc = await api(ctx.app, buyer, 'POST', '/api/inventory/docs', {
       clientKey: randomUUID(),
       docType: 'receipt',
       docDate: today,
@@ -564,8 +566,11 @@ describe('盘点差异审批（A8）、急采待补单（A10）、数据隔离�
     });
     expect(rc.status, JSON.stringify(rc.body)).toBe(201);
     expect(roomsWh).toBeGreaterThan(0);
-    // 急采待验收不走审批中心：原来导航的数字算着它（所有待确认的物资单据），负责人的数字照样算上、列出来（Codex 自动审查 abe2842）
+    // 先按金额分级审批（采购规则里没指定审批人时由负责人审），批了才算「待验收」
     const accepting = async () => ((await api(ctx.app, mgrA, 'GET', '/api/approvals/accepts')).body as { docId: number }[]).some((x) => x.docId === rc.body.doc.id);
+    expect(await accepting()).toBe(false);
+    expect((await api(ctx.app, mgrA, 'POST', `/api/inventory/docs/${rc.body.doc.id}/approve`, {})).status).toBe(200);
+    // 急采待验收：负责人的数字照样算上、列出来（Codex 自动审查 abe2842）
     expect(await accepting()).toBe(true);
     expect((await api(ctx.app, mgrA, 'GET', '/api/approvals/count')).body.accept).toBeGreaterThanOrEqual(1);
     expect((await api(ctx.app, payer, 'GET', '/api/approvals/accepts')).status).toBe(403);

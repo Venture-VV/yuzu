@@ -5,7 +5,7 @@ import { ArrowLeft, CircleAlert, CircleCheck, ClipboardList, CloudOff, FileSearc
 import type { ContractCheckResult, ContractLineCheck } from '@shared/contracts';
 import type { Material } from '@shared/inventory';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
-import type { PoLineRequest, PriceCompare, PurchaseOrder } from '@shared/purchasing';
+import { DEFAULT_CHANNEL_KEY, type PoLineRequest, type PriceCompare, type PurchaseOrder } from '@shared/purchasing';
 import { fitsDecimals, formatQty, lineAmountCents, parseQty, priceChangePercent, toBaseQty } from '@shared/quantity';
 import { MAX_LINE_IMAGES, type ImageRef, type OpenRequestLine } from '@shared/requests';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
@@ -173,7 +173,8 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
   const supplierDefault = suppliers.data?.find((s) => s.id === supplierId)?.defaultChannel ?? null;
   useEffect(() => {
     if (channelTouched || channels.length === 0) return;
-    const next = channels.some((c) => c.key === supplierDefault) ? supplierDefault! : channels[0]!.key;
+    // 供应商档案没设默认途径时按「供应商」（与服务端一样，8.0.1 固定三类：第一项「网购」要写在哪买，不能当默认）
+    const next = channels.some((c) => c.key === supplierDefault) ? supplierDefault! : channels.some((c) => c.key === DEFAULT_CHANNEL_KEY) ? DEFAULT_CHANNEL_KEY : channels[0]!.key;
     if (next !== channel) setChannel(next);
   }, [channelTouched, channels, supplierDefault, channel]);
   const channelDef = channels.find((c) => c.key === channel);
@@ -322,7 +323,9 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
   });
   const checkOf = (i: number): ContractLineCheck | null => (contractId ? (contractCheck.data?.lines.find((x) => x.lineNo === i + 1) ?? null) : null);
   const contractExceeded = !!contractId && !!contractCheck.data?.exceeded && contractCheck.data.contractId === contractId;
-  const needsApproval = !!settings.data?.approvalRules.purchase_order;
+  // 需求单转的采购单（8.0.1 采购组整改 04，CG04）：每一行都来自审核过的需求单时提交即确认（采购规则里可以关；命中审批规则的照规则）
+  const fromRequests = !!purchaseRules.data?.requestPoDirect && mode !== 'revise' && rows.length > 0 && rows.every((r) => r.l.requests.length > 0);
+  const needsApproval = !!settings.data?.approvalRules.purchase_order && !fromRequests;
   // 询价门槛（E5）：没改过版、不是补单、不是从已定标的询价单转来的，合计到门槛要先询价（与服务端提交时的核对一致）
   const quoteThreshold = purchaseRules.data?.quoteThresholdCents ?? 0;
   const overQuote = mode !== 'revise' && quoteThreshold > 0 && total >= quoteThreshold && !existing?.sourcing && !existing?.backfill;
@@ -677,6 +680,10 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
               {needsApproval ? (
                 <span className="flex items-center gap-2 text-yuzu-deep">
                   提交后需负责人确认 <SimRule />
+                </span>
+              ) : fromRequests ? (
+                <span className="text-pine" data-testid="po-direct">
+                  需求单转的采购单：供应链审核过需求单，提交即确认
                 </span>
               ) : (
                 <span className="text-pine">提交即确认</span>

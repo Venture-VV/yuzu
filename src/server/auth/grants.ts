@@ -153,12 +153,12 @@ export function registerGrantRoutes(app: FastifyInstance, deps: Deps) {
       if (s.amount <= limit) throw conflict('GRANT_NOT_NEEDED', `金额没有超过单笔${KIND_LABEL[s.kind]}上限 ${formatYuan(limit)}，不需要授权`);
       scope = { kind: s.kind, memberId: s.memberId, amount: s.amount };
     }
-    checkLock(input.username);
+    checkLock(input.username, req.ip);
     const [approver] = await sql<{ id: number; displayName: string; role: Role; duties: Duty[] | null; active: boolean; passwordHash: string }[]>`
       SELECT id, display_name, role, duties, active, password_hash FROM staff WHERE username = ${input.username}`;
     const ok = approver ? await verifyPassword(input.password, approver.passwordHash) : false;
     if (!approver || !ok || !approver.active) {
-      recordFailure(input.username);
+      recordFailure(input.username, req.ip);
       await writeAudit(sql, {
         staffId: req.actor.id,
         action: 'auth_failed',
@@ -168,7 +168,7 @@ export function registerGrantRoutes(app: FastifyInstance, deps: Deps) {
       if (approver && ok && !approver.active) throw new AppError(403, 'AUTH_FAILED', '授权人账号已停用');
       throw authFailed();
     }
-    clearFailures(input.username);
+    clearFailures(input.username, req.ip);
     const rule = PURPOSE_RULES[input.purpose];
     if (!can(await subjectOf(sql, approver), rule.approver)) {
       throw new AppError(403, 'AUTH_NOT_ALLOWED', `「${approver.displayName}」的岗位不能授权${rule.approverText}`);

@@ -38,6 +38,7 @@ import { AppError, badRequest, conflict, forbidden, notFound, unprocessable } fr
 import { assertNotFenced } from '../../lib/fences';
 import { erpOpAbandoned } from '../erp-ops';
 import { hashRequest } from '../../lib/idempotency';
+import { assertApprovers } from './approvers';
 import { setTxTimeouts } from '../../lib/tx';
 import { idParam, parse } from '../../lib/validate';
 import { actOnChange, actOnContract, actOnSeal } from '../contracts/flow';
@@ -139,18 +140,8 @@ async function checkSteps(db: Db, steps: ApprovalStep[], docType: ApprovalDocTyp
   } else if (legal > 0) {
     throw unprocessable('RULE_LEGAL_NOT_ALLOWED', '「法务」这一组只用于合同、合同变更');
   }
-  const ids = [...new Set(steps.flatMap((s) => ('staffIds' in s ? s.staffIds : [])))];
   for (const s of steps) if ('staffIds' in s && new Set(s.staffIds).size !== s.staffIds.length) throw badRequest('同一级里指定的人重复了');
-  if (ids.length === 0) return;
-  const rows = await db<{ id: number; displayName: string; role: Role; duties: Duty[] | null; active: boolean }[]>`
-    SELECT id, display_name, role, duties, active FROM staff WHERE id IN ${db(ids)}`;
-  const overrides = await loadRoleOverrides(db);
-  for (const sid of ids) {
-    const s = rows.find((r) => Number(r.id) === sid);
-    if (!s || !s.active) throw unprocessable('APPROVER_INVALID', '指定的人有不存在或已停用的，请重新选择');
-    const who = { id: sid, role: s.role, duties: s.duties ?? [], permissions: permissionsOf({ role: s.role, duties: s.duties ?? [] }, overrides) };
-    if (!hasApprovalAccess(who)) throw unprocessable('APPROVER_INVALID', `「${s.displayName}」没有审批中心的权限（岗位权限里的「审批中心：审批」），不能指定为审批人`);
-  }
+  await assertApprovers(db, steps.flatMap((s) => ('staffIds' in s ? s.staffIds : [])));
 }
 
 async function checkDepartment(db: Db, departmentId: number | null) {

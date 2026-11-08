@@ -53,6 +53,8 @@ import {
 } from './common';
 import { hashRequest } from '../../lib/idempotency';
 import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForApproval } from '../approvals/engine';
+import { urgentPlan } from './urgent';
+import { receiptAttachments } from './attachments';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -180,7 +182,8 @@ export interface WarehouseRef {
 
 /**
  * 谁能登记（v0.7.11 两级库存，见 docs/WAREHOUSES.md）：总仓的单据与领料、退回要「物资经办」（退供应商：物资经办或采购经办）；
- * 部门小仓：本部门的部门申购（期初、急采、耗用、报损、盘点、退供应商），财务成本岗可给任何部门盘点、登记耗用；店主不限。
+ * 部门小仓：本部门的部门申购（期初、耗用、报损、盘点、退供应商），财务成本岗可给任何部门盘点、登记耗用；店主不限。
+ * 急采（进部门小仓的收货）8.0.1 起收拢到采购（采购组整改 05，CG05）：只有「编制与提交采购单」的（与店主）能登记，部门、仓库都不能。
  */
 export async function assertCanOperate(db: Db, actor: Actor, type: InvDocType, wh: WarehouseRef | null) {
   const central = !wh || wh.kind === 'central' || type === 'issue' || type === 'issue_return';
@@ -189,6 +192,10 @@ export async function assertCanOperate(db: Db, actor: Actor, type: InvDocType, w
     return;
   }
   if (actor.role === 'owner') return;
+  if (type === 'receipt') {
+    if (can(actor, 'purchase.manage')) return;
+    throw forbidden('急采统一由采购在「采购 → 急采」登记（8.0.1 起部门、仓库不再登记急采）');
+  }
   if ((type === 'count' || type === 'direct_use') && can(actor, 'deptStock.audit')) return;
   if (type === 'supplier_return' && can(actor, 'supplierReturn.create')) return;
   if (await canOperateDept(db, actor, wh.departmentId)) return;
@@ -243,6 +250,8 @@ interface DocRow {
   sourceDocId: number | null;
   warehouseId: number | null;
   urgent: boolean;
+  /** 急采按金额分级审批通过的时间（8.0.1）；批了以后才能验收 */
+  urgentApprovedAt?: string | null;
   createdBy: number;
   submittedBy: number | null;
   /** 退供应商：供应商同意的日期（生效日期，v0.7.12） */
@@ -258,7 +267,7 @@ export async function getDoc(db: Db, docId: number, timeZone?: string): Promise<
   const [d] = await db<(InvDoc & Record<string, unknown>)[]>`
     SELECT d.id, d.doc_no, d.doc_type, d.status, d.doc_date, d.handler, d.note, d.amount_cents, d.no_po, d.is_synthetic, d.created_by,
            d.created_at, d.submitted_at, d.confirmed_at, d.returned_reason, d.voided_at, d.void_reason,
-           d.warehouse_id, d.urgent, d.urgent_cap_cents,
+           d.warehouse_id, d.urgent, d.urgent_cap_cents, d.urgent_approved_at,
            CASE WHEN w.id IS NULL THEN NULL ELSE json_build_object('id', w.id, 'name', ${WAREHOUSE_NAME_SQL(db)}, 'kind', w.kind) END AS warehouse,
            CASE WHEN ca.id IS NULL THEN NULL ELSE json_build_object('id', ca.id, 'name', ca.display_name) END AS co_acceptor,
            CASE WHEN d.dept_signed_at IS NULL THEN NULL
@@ -348,7 +357,9 @@ export async function getDoc(db: Db, docId: number, timeZone?: string): Promise<
   }
   const { warehouseId: _w, returnAppliedCents: _a, sourceSettlement: _s, ...rest } = d;
   const approval = await approvalBrief(db, 'inv_doc', docId);
-  const doc = { ...rest, returnCredit, lines, children, approvals, approval, voidable: { ok: false, reason: null } } as InvDoc;
+  // 收货单的附件（8.0.1，CG11）
+  const attachments = d.docType === 'receipt' ? ((await receiptAttachments(db, [docId])).get(docId) ?? []) : [];
+  const doc = { ...rest, returnCredit, lines, children, approvals, approval, attachments, voidable: { ok: false, reason: null } } as InvDoc;
   doc.voidable = await voidability(db, doc, timeZone);
   return doc;
 }
@@ -378,6 +389,7 @@ export async function listDocs(
            CASE WHEN w.id IS NULL THEN NULL ELSE ${WAREHOUSE_NAME_SQL(db)} END AS warehouse_name,
            CASE WHEN d.doc_type = 'issue' AND d.warehouse_id IS NOT NULL THEN d.dept_signed_at IS NOT NULL END AS dept_signed,
            (d.urgent AND d.status = 'confirmed' AND d.purchase_order_id IS NULL) AS needs_backfill,
+           (d.urgent_approved_at IS NOT NULL) AS urgent_approved,
            (SELECT count(*) FROM inv_doc_lines WHERE doc_id = d.id) AS line_count,
            coalesce((SELECT string_agg(m.name, '、' ORDER BY l.line_no) FROM (
               SELECT * FROM inv_doc_lines WHERE doc_id = d.id ORDER BY line_no LIMIT 3) l
@@ -1242,7 +1254,7 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
 async function lockDoc(tx: Tx, docId: number) {
   const [doc] = await tx<(DocRow & { docNo: string; amountCents: number })[]>`
     SELECT id, doc_no, doc_type, status, doc_date, supplier_id, purchase_order_id, department_id, source_doc_id,
-           warehouse_id, urgent, amount_cents, created_by, submitted_by, supplier_answer_date
+           warehouse_id, urgent, urgent_approved_at, amount_cents, created_by, submitted_by, supplier_answer_date
     FROM inv_docs WHERE id = ${docId} FOR UPDATE`;
   if (!doc) throw notFound('单据不存在');
   return doc;
@@ -1255,6 +1267,18 @@ async function lockDoc(tx: Tx, docId: number) {
 async function submitLocked(tx: Tx, doc: DocRow & { docNo: string; amountCents: number }, actor: Actor, approveNow: boolean, timeZone: string) {
   if (doc.status === 'submitted' || doc.status === 'awaiting_supplier' || doc.status === 'confirmed') return; // 幂等
   if (doc.status !== 'draft' && doc.status !== 'returned') throw conflict('INVALID_STATE', '单据当前状态不能提交');
+  if (doc.urgent) {
+    // 急采（8.0.1 采购组整改 05，CG05）：按金额分级审批（审批中心「急采」），批了以后仓库到部门验收才进小仓
+    if (approveNow) throw badRequest('急采要按金额分级审批，不能提交时一并确认');
+    const plan = await urgentPlan(tx, Number(doc.amountCents));
+    await tx`
+      UPDATE inv_docs SET status = 'submitted', submitted_by = ${actor.id}, submitted_at = now(), returned_reason = NULL, urgent_approved_at = NULL, updated_at = now()
+      WHERE id = ${doc.id}`;
+    await logApproval(tx, 'inv_doc', doc.id, 'submit', actor.id);
+    const r = await submitForApproval(tx, 'inv_doc', doc.id, { actor, timeZone }, { fallback: true, defaultPlan: plan });
+    if (r.outcome === 'effective') await tx`UPDATE inv_docs SET urgent_approved_at = now() WHERE id = ${doc.id}`;
+    return;
+  }
   if (doc.docType === 'count') {
     const whId = doc.warehouseId ?? CENTRAL_WAREHOUSE_ID;
     const stale = await tx<{ name: string }[]>`
@@ -1415,7 +1439,16 @@ export async function approveDoc(deps: Deps, docId: number, raw: unknown, actor:
     const doc = await lockDoc(tx, docId);
     if (doc.status === 'confirmed' || doc.status === 'awaiting_supplier') return; // 幂等
     if (doc.status !== 'submitted') throw conflict('INVALID_STATE', '只有待确认的单据可以确认');
-    if (doc.urgent && doc.createdBy === actor.id && actor.role !== 'owner') throw forbidden('急采要由另一个人（仓库）验收，不能自己确认');
+    if (doc.urgent && doc.createdBy === actor.id && actor.role !== 'owner') throw forbidden('登记急采的人不能审自己的急采');
+    if (doc.urgent) {
+      // 急采（8.0.1，CG05）：这里是审批中心按金额分级的审批；批了以后还要仓库到部门验收（verifyUrgent）才进小仓
+      if (doc.urgentApprovedAt) return; // 已经批过、等验收（幂等）
+      const step = await approveCurrent(tx, 'inv_doc', docId, { actor, timeZone: deps.config.timezone }, { ...fence, comment });
+      if (step !== 'final') return;
+      await tx`UPDATE inv_docs SET urgent_approved_at = now(), updated_at = now() WHERE id = ${docId}`;
+      await logApproval(tx, 'inv_doc', docId, 'approve', actor.id, comment || '急采审批通过，等仓库到部门验收');
+      return;
+    }
     if (inApprovalCenter(doc)) {
       const step = await approveCurrent(tx, 'inv_doc', docId, { actor, timeZone: deps.config.timezone }, { ...fence, comment });
       if (step !== 'final') return;
@@ -1433,8 +1466,11 @@ export async function returnDoc(deps: Deps, docId: number, raw: unknown, actor: 
     const doc = await lockDoc(tx, docId);
     if (doc.status === 'returned') return;
     if (doc.status !== 'submitted') throw conflict('INVALID_STATE', '只有待确认的单据可以退回');
-    if (inApprovalCenter(doc)) await returnCurrent(tx, 'inv_doc', docId, { actor, timeZone: deps.config.timezone }, { ...fence, reason });
-    await tx`UPDATE inv_docs SET status = 'returned', returned_reason = ${reason}, updated_at = now() WHERE id = ${docId}`;
+    // 急采（8.0.1）：还在审批中的按审批中心退回；批了、等验收的由负责人退回，改了再提交要重新审批
+    if (inApprovalCenter(doc) || (doc.urgent && !doc.urgentApprovedAt)) {
+      await returnCurrent(tx, 'inv_doc', docId, { actor, timeZone: deps.config.timezone }, { ...fence, reason });
+    }
+    await tx`UPDATE inv_docs SET status = 'returned', returned_reason = ${reason}, urgent_approved_at = NULL, updated_at = now() WHERE id = ${docId}`;
     await logApproval(tx, 'inv_doc', docId, 'return', actor.id, reason);
   });
   return getDoc(deps.sql, docId, deps.config.timezone);
@@ -1609,6 +1645,7 @@ export async function verifyUrgent(deps: Deps, docId: number, actor: Actor) {
     if (doc.docType !== 'receipt' || !doc.urgent) throw badRequest('只有急采需要仓库验收');
     if (doc.status === 'confirmed') return; // 幂等
     if (doc.status !== 'submitted') throw conflict('INVALID_STATE', '只有待验收的急采可以确认');
+    if (!doc.urgentApprovedAt) throw conflict('URGENT_NOT_APPROVED', '这张急采还在审批中（按金额分级审批），批了以后才能验收');
     if (!can(actor, 'inventory.operate') && !can(actor, 'inventory.approve')) throw forbidden('急采要由仓库（物资经办）到部门验收后确认');
     if (doc.createdBy === actor.id && actor.role !== 'owner') throw forbidden('急采要由另一个人（仓库）验收，不能自己确认');
     await confirmDoc(tx, doc, actor);

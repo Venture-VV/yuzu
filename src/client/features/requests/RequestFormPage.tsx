@@ -8,7 +8,7 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import { ArrowLeft, CircleAlert, CircleCheck, ClipboardList, Plus, Trash2 } from 'lucide-react';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { formatQty, parseQty } from '@shared/quantity';
-import { MAX_LINE_IMAGES, type ImageRef, type PurchaseRequest, type RequestMeta } from '@shared/requests';
+import { MAX_LINE_IMAGES, type ImageRef, type PurchaseRequest, type RequestMeta, type RequestPriority } from '@shared/requests';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
@@ -18,6 +18,7 @@ import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { ImagePicker } from '../../components/Images';
 import { useToast } from '../../components/Toast';
 import { Button, Field, Input, MoneyInput, Notice, Segmented, Select, Skeleton } from '../../components/ui';
+import { PriorityDot } from './parts';
 import { useInvalidateRequests, useRequest, useRequestMeta } from './queries';
 
 interface FormLine {
@@ -97,6 +98,8 @@ function RequestForm({ meta, existing }: { meta: RequestMeta; existing?: Purchas
   const free = meta.me.canReview || session.staff.role === 'owner';
   const [departmentId, setDepartmentId] = useState<number | null>(existing?.department.id ?? meta.me.departmentId);
   const [needBy, setNeedBy] = useState(existing?.needBy ?? '');
+  // 采购优先级（8.0.1 采购组整改 02）：紧急（红点）/ 普通（绿点）
+  const [priority, setPriority] = useState<RequestPriority>(existing?.priority ?? 'normal');
   const [note, setNote] = useState(existing?.note ?? '');
   const [lines, setLines] = useState<FormLine[]>(existing ? linesFrom(existing) : [blankLine()]);
   const [busy, setBusy] = useState(false);
@@ -177,13 +180,13 @@ function RequestForm({ meta, existing }: { meta: RequestMeta; existing?: Purchas
     setError(null);
     try {
       if (existing) {
-        const r = await api.put<PurchaseRequest>(`/api/erp/requests/${existing.id}`, { departmentId: null, needBy: needBy || null, note: note.trim(), lines: payloadLines() });
+        const r = await api.put<PurchaseRequest>(`/api/erp/requests/${existing.id}`, { departmentId: null, needBy: needBy || null, priority, note: note.trim(), lines: payloadLines() });
         await invalidate();
         toast({ tone: 'success', title: '需求单已修改，重新等待审核', body: r.docNo });
         navigate(`/erp/requests?request=${r.id}`);
       } else {
         // 每次提交用新的操作编号；结果不明的那一笔存在本机，由页面顶部按原编号处理
-        const body = { clientKey: uuid(), departmentId: free ? departmentId : null, needBy: needBy || null, note: note.trim(), lines: payloadLines() };
+        const body = { clientKey: uuid(), departmentId: free ? departmentId : null, needBy: needBy || null, priority, note: note.trim(), lines: payloadLines() };
         const first = rows[0]?.l.name.trim() ?? '';
         const r = await sendErpOp<{ request: PurchaseRequest }>({
           key: body.clientKey,
@@ -228,7 +231,12 @@ function RequestForm({ meta, existing }: { meta: RequestMeta; existing?: Purchas
         <div className="mx-auto w-full max-w-[1080px] space-y-4 px-5 py-5 md:px-7" data-testid="request-form">
           {!existing && <ErpPendingPanel types={['purchase_request']} onFound={(_, ref) => navigate(`/erp/requests?request=${ref.refId}`)} />}
           {existing?.status === 'returned' && existing.reason && <Notice tone="warning" title={`采购退回：${existing.reason}`}>改好后提交，重新等待审核。</Notice>}
-          <section className="grid gap-4 rounded-lg border border-line bg-card p-5 shadow-card sm:grid-cols-3">
+          {meta.cutoff.enabled && (
+            <Notice tone="info" title={`每天 ${meta.cutoff.time} 截单`} data-testid="rq-cutoff">
+              {meta.cutoff.time} 以后提交的需求单照常提交，当天不能审核通过，第二天起可以。急需的选「紧急」并尽量在截单前提交，来不及的请找采购走急采。
+            </Notice>
+          )}
+          <section className="grid gap-4 rounded-lg border border-line bg-card p-5 shadow-card sm:grid-cols-2 lg:grid-cols-4">
             <Field label="部门" htmlFor="rq-dept" hint={free ? undefined : '员工档案里的所属部门'}>
               {free && !existing ? (
                 <Select id="rq-dept" value={departmentId ?? ''} disabled={busy} onChange={(e) => setDepartmentId(Number(e.target.value) || null)} data-testid="rq-dept">
@@ -245,7 +253,18 @@ function RequestForm({ meta, existing }: { meta: RequestMeta; existing?: Purchas
                 </p>
               )}
             </Field>
-            <Field label="需要日期" htmlFor="rq-need" hint="选填">
+            <Field label="采购优先级" hint="红点紧急、绿点普通；采购审核时紧急的排在前面">
+              <Segmented
+                ariaLabel="采购优先级"
+                value={priority}
+                onChange={(v) => setPriority(v)}
+                options={[
+                  { value: 'normal', label: <span className="inline-flex items-center gap-1.5"><PriorityDot priority="normal" />普通</span> },
+                  { value: 'urgent', label: <span className="inline-flex items-center gap-1.5"><PriorityDot priority="urgent" />紧急</span> },
+                ]}
+              />
+            </Field>
+            <Field label="期望到货日期" htmlFor="rq-need" hint="选填">
               <Input id="rq-need" type="date" value={needBy} min={session.calendarToday} disabled={busy} onChange={(e) => setNeedBy(e.target.value)} className="h-10" />
             </Field>
             <Field label="备注" htmlFor="rq-note">

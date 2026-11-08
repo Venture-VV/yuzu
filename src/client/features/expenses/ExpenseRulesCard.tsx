@@ -1,4 +1,5 @@
 // 费用报销规则（店主，v0.7.7）：确认门槛（D13，默认 2000 元）、超期天数、用途与发票类型的固定选项。
+// 「下单后几天没到货算超期」8.0.1 挪到「采购 → 采购规则」（CG01）。
 // 放在 ERP「模块设置」里；改动记审计，之后登记的报销按新规则，已登记的不变。
 
 import { useEffect, useState } from 'react';
@@ -14,7 +15,6 @@ import { ek, useExpenseRules } from './queries';
 interface Draft {
   threshold: string;
   overdueDays: string;
-  arrivalOverdueDays: string;
   purposes: string;
   invoiceTypes: (Omit<InvoiceTypeDef, 'taxRatesBp'> & { rates: string })[];
 }
@@ -22,7 +22,6 @@ interface Draft {
 const toDraft = (r: ExpenseRules): Draft => ({
   threshold: centsToInput(r.approvalThresholdCents),
   overdueDays: String(r.overdueDays),
-  arrivalOverdueDays: String(r.arrivalOverdueDays ?? 7),
   purposes: r.purposes.join('\n'),
   invoiceTypes: r.invoiceTypes.map((t) => ({ key: t.key, label: t.label, needsNumber: t.needsNumber, rates: t.taxRatesBp.map(taxRateText).join('、') })),
 });
@@ -56,18 +55,16 @@ export function ExpenseRulesCard() {
   const save = async () => {
     const threshold = parseYuan(draft.threshold);
     const overdueDays = Number(draft.overdueDays);
-    const arrivalOverdueDays = Number(draft.arrivalOverdueDays);
     const purposes = draft.purposes.split('\n').map((p) => p.trim()).filter(Boolean);
     const invoiceTypes = draft.invoiceTypes.map((t) => ({ key: t.key, label: t.label.trim(), needsNumber: t.needsNumber, taxRatesBp: parseRates(t.rates) }));
     if (threshold === null) return setError('确认门槛的金额格式不正确');
     if (!Number.isInteger(overdueDays)) return setError('超期天数要填整数');
-    if (!Number.isInteger(arrivalOverdueDays)) return setError('约定到货天数要填整数');
     const bad = invoiceTypes.find((t) => !t.taxRatesBp);
     if (bad) return setError(`「${bad.label || '新的发票类型'}」的税点格式不正确，例如 13%、9%、0`);
     setBusy(true);
     setError(null);
     try {
-      const next = await api.put<ExpenseRules>('/api/erp/expenses/rules', { approvalThresholdCents: threshold, overdueDays, arrivalOverdueDays, purposes, invoiceTypes });
+      const next = await api.put<ExpenseRules>('/api/erp/expenses/rules', { approvalThresholdCents: threshold, overdueDays, purposes, invoiceTypes });
       qc.setQueryData(ek.rules, next);
       setDraft(toDraft(next));
       toast({ tone: 'success', title: '费用报销规则已保存' });
@@ -96,9 +93,6 @@ export function ExpenseRulesCard() {
         </Field>
         <Field label="打款后超过几天没平账标红" htmlFor="er-days" hint="默认 7 天">
           <Input id="er-days" inputMode="numeric" value={draft.overdueDays} onChange={(e) => setDraft({ ...draft, overdueDays: e.target.value })} className="h-10" />
-        </Field>
-        <Field label="下单后几天没到货算超期" htmlFor="er-arrival" hint="采购单没填预计到货日时用（账目自检第 9 条），默认 7 天">
-          <Input id="er-arrival" inputMode="numeric" value={draft.arrivalOverdueDays} onChange={(e) => setDraft({ ...draft, arrivalOverdueDays: e.target.value })} className="h-10" data-testid="er-arrival" />
         </Field>
         <Field label="用途（每行一个）" htmlFor="er-purposes" className="sm:col-span-2">
           <Textarea id="er-purposes" rows={4} value={draft.purposes} onChange={(e) => setDraft({ ...draft, purposes: e.target.value })} />

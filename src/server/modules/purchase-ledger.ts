@@ -35,6 +35,7 @@ import { unprocessable } from '../lib/errors';
 import { dateSchema, parse } from '../lib/validate';
 import { buildXlsx, type XlsxImage } from '../lib/xlsx';
 import { advanceRows, loadExpenseRules, toAdvanceSummary } from './expenses';
+import { loadPurchaseRules } from './inventory/purchase-rules';
 import { checkDateRange, daysBetween, todayIn } from '../lib/dates';
 import { shiftDate } from '@shared/labels';
 
@@ -276,7 +277,8 @@ function orderedState(r: { poStatus: string; receivedMilli: number; baseQtyMilli
 }
 
 export async function orderedLines(db: Db, timezone: string, f: OrderedFilter, limit: number | null = 2000): Promise<OrderedLines> {
-  const rules = await loadExpenseRules(db);
+  // 「下单后几天没到货算超期」8.0.1 挪到采购规则（CG01；采购规则里没存过时沿用费用报销规则里原来的值）
+  const rules = await loadPurchaseRules(db);
   const today = todayIn(timezone);
   const all = (await orderedRows(db, f)).map(({ poStatus, ...r }): OrderedLine => {
     const state = orderedState({ poStatus, receivedMilli: r.receivedMilli, baseQtyMilli: r.baseQtyMilli });
@@ -493,7 +495,8 @@ export async function ledgerAudit(db: Db, timezone: string): Promise<LedgerAudit
 
   // 9 已下单未到货超期：所有没到齐的已确认采购单，不限下单日期（不能因为单子下得早就从预警里消失，v0.7.9 审查修正）
   const late = (await orderedLines(db, timezone, { state: 'overdue' }, null)).lines;
-  push(9, `已下单未到货超约定天数预警`, 'warn', `已确认的采购单行没到齐：有预计到货日的过了预计日，没有的过了下单后 ${rules.arrivalOverdueDays} 天（费用报销规则里改）`,
+  const arrivalDays = (await loadPurchaseRules(db)).arrivalOverdueDays;
+  push(9, `已下单未到货超约定天数预警`, 'warn', `已确认的采购单行没到齐：有预计到货日的过了预计日，没有的过了下单后 ${arrivalDays} 天（采购 → 采购规则里改）`,
     late.map((l) => ({
       text: `${l.docNo} ${l.materialName}：应到 ${l.dueDate}，已到 ${formatQty(l.receivedMilli)} / ${formatQty(l.baseQtyMilli)} ${l.inventoryUnit}`,
       date: l.orderDate,
@@ -515,11 +518,12 @@ export async function ledgerAudit(db: Db, timezone: string): Promise<LedgerAudit
   push(11, '标注有发票但实际无票直接拦截', 'block', '发票类型要求发票号的报销单都填了发票号（登记时拦截）',
     bad11.map((c) => ({ text: `${c.docNo}：${c.invoiceLabel} 没有发票号`, date: c.expenseDate, link: claimLink(c.id) })));
 
-  // 12 新产品的图片与链接
+  // 12 新产品的图片与链接（集采导入的不要求，8.0.1 CG06：导入的就是采购自己整理的需求）
   const r12 = await db<{ id: number; docNo: string; createdDate: string; name: string }[]>`
     SELECT r.id, r.doc_no, to_char(r.created_at AT TIME ZONE ${timezone}, 'YYYY-MM-DD') AS created_date, l.name
     FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
-    WHERE l.material_id IS NULL AND (l.link = '' OR NOT EXISTS (SELECT 1 FROM purchase_request_line_images i WHERE i.request_line_id = l.id))
+    WHERE l.material_id IS NULL AND r.source = 'form'
+      AND (l.link = '' OR NOT EXISTS (SELECT 1 FROM purchase_request_line_images i WHERE i.request_line_id = l.id))
     LIMIT 500`;
   push(12, '图片与链接为必填', 'block', '需求单里的新产品（不在物料档案里的）都有参考链接与图片（提交时拦截）',
     r12.map((r) => ({ text: `${r.docNo}「${r.name}」缺链接或图片`, date: r.createdDate, link: { kind: 'request' as const, id: Number(r.id) } })));

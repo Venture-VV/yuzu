@@ -46,7 +46,8 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     pages: ['/purchasing'],
     // 图片（v0.7.8）：采购单与需求单的行都用，跟采购模块走（需求单依赖采购）
     // 补货建议、询价比价、价格曲线（v0.7.29 ERP 采购五项）也跟采购模块走
-    apis: ['/api/purchase-orders', '/api/purchase-baseline', '/api/erp/images', '/api/purchase-suggestions', '/api/purchase-sourcing', '/api/purchase-price-history'],
+    // 供应商比价看板（8.0.1 采购组整改 07）也跟采购模块走
+    apis: ['/api/purchase-orders', '/api/purchase-baseline', '/api/erp/images', '/api/purchase-suggestions', '/api/purchase-sourcing', '/api/purchase-price-history', '/api/purchase-compare'],
     // 物资经办要看采购单、按单收货（采购单的读接口按「查看库存与物资单据」开放）
     perms: ['inventory.read', 'purchase.manage', 'inventory.approve', 'payable.read'],
     defaultEnabled: true,
@@ -274,6 +275,9 @@ export const ERP_OP_TYPES = [
   'supplier_invoice',
   // 员工食堂第二期：柚子信箱的回信（Codex 自动审查 3bc51e6：没收到结果时关掉对话框、刷新以后也要能查回、重提或作废）
   'canteen_reply',
+  // 8.0.1 采购组整改：集采导入（06）、赠品登记（09）
+  'request_import',
+  'gift_receipt',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -319,6 +323,8 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   contract_quality: '质量问题登记',
   supplier_invoice: '登记发票',
   canteen_reply: '柚子信箱回信',
+  request_import: '集采导入',
+  gift_receipt: '赠品登记',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

@@ -56,7 +56,12 @@ export async function getMaterial(db: Db, id: number, timeZone?: string): Promis
 
 export const listSuppliers = (db: Db, includeInactive = false) =>
   db<Supplier[]>`
-    SELECT id, code, name, contact, phone, note, settlement, reconcile_cycle, reconcile_since::text AS reconcile_since, default_channel, active, is_synthetic FROM suppliers
+    SELECT id, code, name, contact, phone, note, settlement, reconcile_cycle, reconcile_since::text AS reconcile_since,
+           -- 旧的途径键按三类显示（8.0.1，CG08）：档案下次保存时存成三类之一
+           CASE WHEN default_channel IS NULL OR default_channel IN ('supplier', 'online') THEN default_channel ELSE 'self' END AS default_channel,
+           contracted,
+           (SELECT count(*)::int FROM supplier_contract_files f WHERE f.supplier_id = suppliers.id AND f.removed_at IS NULL) AS contract_files,
+           active, is_synthetic FROM suppliers
     ${includeInactive ? db`` : db`WHERE active`} ORDER BY active DESC, code`;
 
 export const listDepartments = (db: Db, includeInactive = false) =>
@@ -114,8 +119,10 @@ export const SupplierInput = z.object({
   settlement: z.enum(['credit', 'cash']).optional(),
   /** 挂账的对账方式（#23，v0.7.13）：月结 / 按批次；新建不填按月结，修改不填保持原样 */
   reconcileCycle: z.enum(['monthly', 'batch']).optional(),
-  /** 默认采购途径（v0.7.29，E1）：新建不填为空（按采购规则的第一项），修改不填保持原样，传 null 清掉 */
+  /** 默认采购途径（v0.7.29，E1；8.0.1 起只有三类）：新建不填为空（按「供应商」），修改不填保持原样，传 null 清掉 */
   defaultChannel: ChannelKey.nullable().optional(),
+  /** 签约 / 未签约（8.0.1，CG08）：新建不填为未签约，修改不填保持原样 */
+  contracted: z.boolean().optional(),
   active: z.boolean().default(true),
 });
 export type SupplierInputData = z.input<typeof SupplierInput>;
@@ -214,9 +221,9 @@ export async function saveSupplier(
   try {
     if (id === null) {
       const [row] = await db<{ id: number }[]>`
-        INSERT INTO suppliers (code, name, contact, phone, note, settlement, reconcile_cycle, reconcile_since, default_channel, active, is_synthetic)
+        INSERT INTO suppliers (code, name, contact, phone, note, settlement, reconcile_cycle, reconcile_since, default_channel, contracted, active, is_synthetic)
         VALUES (${s.code}, ${s.name}, ${s.contact}, ${s.phone}, ${s.note}, ${s.settlement ?? 'credit'}, ${cycle ?? 'monthly'},
-                ${cycle === 'batch' ? db`coalesce(${today}::date, CURRENT_DATE)` : null}, ${s.defaultChannel ?? null}, ${s.active}, ${extra.isSynthetic ?? false})
+                ${cycle === 'batch' ? db`coalesce(${today}::date, CURRENT_DATE)` : null}, ${s.defaultChannel ?? null}, ${s.contracted ?? false}, ${s.active}, ${extra.isSynthetic ?? false})
         RETURNING id`;
       return row!.id;
     }
@@ -224,6 +231,7 @@ export async function saveSupplier(
       UPDATE suppliers SET code = ${s.code}, name = ${s.name}, contact = ${s.contact}, phone = ${s.phone}, note = ${s.note},
              settlement = coalesce(${s.settlement ?? null}, settlement),
              default_channel = ${s.defaultChannel === undefined ? db`default_channel` : s.defaultChannel},
+             contracted = coalesce(${s.contracted ?? null}, contracted),
              reconcile_since = CASE WHEN ${cycle}::text = 'batch' AND reconcile_cycle <> 'batch' THEN coalesce(${today}::date, CURRENT_DATE)
                                     ELSE reconcile_since END,
              reconcile_cycle = coalesce(${cycle}::text, reconcile_cycle),
@@ -240,8 +248,8 @@ export async function saveSupplier(
 const SettingsInput = z.object({
   scopeName: required(20, '库存范围名称'),
   priceBasis: required(20, '价格口径'),
-  /** 急采上限（分，#19）：1 元到 100 万元 */
-  urgentCapCents: z.number().int().min(100).max(100_000_000),
+  /** 急采上限（#19）：8.0.1 起按采购规则里急采分级的最高一档（CG05），这里传了也不用（旧页面还会带上） */
+  urgentCapCents: z.number().int().optional(),
   /** 免确认门槛（分，#18，v0.7.12）：0（全部要确认）到 100 万元 */
   approvalThresholdCents: z.number().int().min(0, '免确认门槛不能为负').max(100_000_000, '免确认门槛不能超过 100 万元'),
   /** 可用天数的用量统计天数（#22，v0.7.12）：7 到 90 天 */
@@ -278,7 +286,6 @@ export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps
       const entries: [string, unknown][] = [
         ['inventory_scope_name', s.scopeName],
         ['inventory_price_basis', s.priceBasis],
-        ['inventory_urgent_cap_cents', s.urgentCapCents],
         ['inventory_approval_threshold_cents', s.approvalThresholdCents],
         ['inventory_usage_window_days', s.usageWindowDays],
         ['inventory_approval_rules', s.approvalRules],

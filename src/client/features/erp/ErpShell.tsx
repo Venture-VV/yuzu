@@ -76,6 +76,13 @@ export function ErpShell() {
     enabled: access.modules.includes('payments') && can('payable.read'),
     refetchInterval: 300_000,
   });
+  // 费用与备用金（8.0.1 采购组整改 11）：已收货、待报销的现付采购单张数
+  const toClaim = useQuery({
+    queryKey: ['erp', 'expenses', 'to-claim-count'],
+    queryFn: () => api.get<{ received: number }>('/api/erp/expenses/to-claim/count'),
+    enabled: access.modules.includes('expenses') && can('expense.read'),
+    refetchInterval: 300_000,
+  });
   if (!access.canEnter) return <Navigate to="/" replace />;
   const contractsDue = (expiring.data ?? []).filter((x) => !x.renewal);
   const paymentsBadge = payTodo.data ? (can('payable.manage') ? payTodo.data.awaitingPayment : 0) + payTodo.data.warrantyDue : undefined;
@@ -85,7 +92,16 @@ export function ErpShell() {
     to: ERP_MODULES[k].path,
     label: ERP_MODULES[k].label,
     icon: ICONS[k],
-    badge: k === 'approvals' && todo.data ? todo.data.mine + todo.data.backfill + todo.data.accept : k === 'contracts' ? contractsDue.length : k === 'payments' ? paymentsBadge : undefined,
+    badge:
+      k === 'approvals' && todo.data
+        ? todo.data.mine + todo.data.backfill + todo.data.accept
+        : k === 'contracts'
+          ? contractsDue.length
+          : k === 'payments'
+            ? paymentsBadge
+            : k === 'expenses'
+              ? toClaim.data?.received
+              : undefined,
     alert: (k === 'approvals' && !!todo.data?.overdue) || (k === 'contracts' && contractsDue.some((x) => x.daysLeft < 0)),
   });
   const groups: { title: string; items: Item[] }[] = [

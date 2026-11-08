@@ -226,11 +226,42 @@ export interface Supplier {
   reconcileCycle: ReconcileCycle;
   /** 改成按批次的日期：之前的收货不提醒对账 */
   reconcileSince: string | null;
-  /** 默认采购途径（v0.7.29，E1）：新建采购单按它带出；没设的按「采购规则」的第一项 */
+  /** 默认采购途径（v0.7.29，E1；8.0.1 起只有三类）：新建采购单按它带出；没设的按「供应商」 */
   defaultChannel: string | null;
+  /** 签约 / 未签约（8.0.1 采购组整改 08，CG08）：签约的可以上传合同 PDF */
+  contracted: boolean;
+  /** 在用的合同 PDF 份数 */
+  contractFiles: number;
   active: boolean;
   isSynthetic: boolean;
 }
+
+/** 签约供应商的合同 PDF（8.0.1，CG08） */
+export interface SupplierContractFile {
+  id: number;
+  name: string;
+  sizeBytes: number;
+  uploadedByName: string;
+  uploadedAt: string;
+  /** 下载地址（要登录） */
+  url: string;
+}
+/** 合同 PDF 每份最多 10 MB */
+export const MAX_PDF_BYTES = 10 * 1024 * 1024;
+
+/** 收货单的附件（8.0.1 采购组整改 11，CG11）：货物、送货单、小票的照片（≤ 1 MB）或 PDF（≤ 10 MB） */
+export interface ReceiptAttachment {
+  id: number;
+  kind: 'image' | 'pdf';
+  name: string;
+  /** 看图、下载的地址（要登录） */
+  url: string;
+  sizeBytes: number;
+  uploadedByName: string;
+  uploadedAt: string;
+}
+/** 每张收货单最多几份附件 */
+export const MAX_RECEIPT_ATTACHMENTS = 9;
 
 export const RECONCILE_CYCLES = ['monthly', 'batch'] as const;
 export type ReconcileCycle = (typeof RECONCILE_CYCLES)[number];
@@ -362,6 +393,8 @@ export interface InvDoc {
   /** 急采收货（#19）：没有采购单，进部门小仓，合计不超过登记时的上限 */
   urgent: boolean;
   urgentCapCents: number | null;
+  /** 急采按金额分级审批通过的时间（8.0.1，CG05）：为空且已提交 = 还在审批中；不为空且已提交 = 等仓库到部门验收 */
+  urgentApprovedAt: string | null;
   /** 一起验收的采购经办（#17 第一次验收） */
   coAcceptor: Ref | null;
   /** 领料：部门签收（#17 第二次验收）；没签收为空 */
@@ -388,6 +421,8 @@ export interface InvDoc {
   approvals: ApprovalLog[];
   /** 审批中心（v0.7.30）：在审的审批单，没有在审的取最近一张；从没走过审批中心的为空 */
   approval: ApprovalBrief | null;
+  /** 收货单的附件（8.0.1，CG11）；不是收货单的为空 */
+  attachments: ReceiptAttachment[];
   /** 是否允许冲销及原因 */
   voidable: { ok: boolean; reason: string | null };
 }
@@ -407,6 +442,8 @@ export interface InvDocSummary {
   urgent: boolean;
   /** 急采已生效、还没补采购单 */
   needsBackfill: boolean;
+  /** 急采已经按金额分级审批通过（8.0.1）：已提交的急采据此分「审批中」与「待验收」 */
+  urgentApproved: boolean;
   /** 领料：部门是否已签收（其他单据为空） */
   deptSigned: boolean | null;
   createdByName: string;
@@ -516,4 +553,24 @@ export interface CheckItem {
   label: string;
   ok: boolean;
   detail: string;
+}
+
+/** 赠品入库台账（8.0.1 采购组整改 09，CG09）：只记台账，不进库存结存、不记成本 */
+export interface GiftReceipt {
+  id: number;
+  docNo: string;
+  receivedOn: string;
+  material: { id: number; code: string; name: string } | null;
+  name: string;
+  qtyMilli: number;
+  unit: string;
+  supplier: { id: number; name: string } | null;
+  receipt: { id: number; docNo: string } | null;
+  note: string;
+  status: 'valid' | 'voided';
+  createdByName: string;
+  createdAt: string;
+  voidReason: string | null;
+  voidedByName: string | null;
+  voidedAt: string | null;
 }

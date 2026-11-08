@@ -23,6 +23,8 @@ export const APPROVAL_DOC_TYPES = [
   'contract_seal',
   'payment_request',
   'payment_early',
+  // 8.0.1 采购组整改 05（CG05）：急采按金额分级审批，挂在物资单据（急采收货）上
+  'urgent_purchase',
 ] as const;
 export type ApprovalDocType = (typeof APPROVAL_DOC_TYPES)[number];
 export const APPROVAL_DOC_TYPE_LABELS: Record<ApprovalDocType, string> = {
@@ -38,6 +40,7 @@ export const APPROVAL_DOC_TYPE_LABELS: Record<ApprovalDocType, string> = {
   contract_seal: '用印',
   payment_request: '付款申请',
   payment_early: '提前付款',
+  urgent_purchase: '急采',
 };
 /** 合同类的单据（法务那一级按审查清单逐条给意见；规则必须有且只有一级「法务」） */
 export const CONTRACT_REVIEW_DOC_TYPES: readonly ApprovalDocType[] = ['contract', 'contract_change'];

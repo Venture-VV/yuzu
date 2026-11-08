@@ -251,7 +251,7 @@ describe('采购单', () => {
     expect(a.body.po.id).toBe(b.body.po.id);
   });
 
-  it('急采与补单：部门登记、仓库验收后进部门小仓；补单只关联原收货，不再入库、不再形成应付（v0.7.11，#19）', async () => {
+  it('急采与补单：采购登记、按金额审批、仓库验收后进部门小仓；补单只关联原收货、提交即确认，不再入库、不再形成应付（v0.7.11，#19；8.0.1 CG05）', async () => {
     const material = async () => (await api(ctx.app, boss, 'GET', '/api/inventory/materials')).body.find((m: { id: number }) => m.id === mat.id);
     const before = await material();
     const balance = async () => (await api(ctx.app, boss, 'GET', '/api/payables/overview')).body.suppliers.find((s: { supplierId: number }) => s.supplierId === sup).balanceCents;
@@ -265,21 +265,17 @@ describe('采购单', () => {
     });
     expect(direct.status).toBe(422);
     expect(direct.body.error.code).toBe('PO_REQUIRED');
-    // 浴区的部门申购登记急采
     const [dept] = await ctx.sql<{ id: number }[]>`SELECT id FROM departments WHERE name = '浴区'`;
+    const urgent = { docType: 'receipt', docDate: today, supplierId: sup, urgent: true, departmentId: dept!.id, lines: [{ materialId: mat.id, deliveredMilli: q(500), acceptedMilli: q(500), priceCents: 45000 }] };
+    // 8.0.1 起部门申购不能登记急采（收拢到采购，CG05）
     await createStaff(ctx.sql, { username: 'bath-req', displayName: '浴区申购', role: 'backoffice', duties: ['request'], departmentId: dept!.id, password: PASSWORD, mustChangePassword: false });
     const deptUser = await login(ctx.app, 'bath-req');
-    const rc = await api(ctx.app, deptUser, 'POST', '/api/erp/dept-stock/docs', {
-      clientKey: randomUUID(),
-      docType: 'receipt',
-      docDate: today,
-      supplierId: sup,
-      urgent: true,
-      departmentId: dept!.id,
-      lines: [{ materialId: mat.id, deliveredMilli: q(500), acceptedMilli: q(500), priceCents: 45000 }],
-    });
+    expect((await api(ctx.app, deptUser, 'POST', '/api/erp/dept-stock/docs', { clientKey: randomUUID(), ...urgent })).status).toBe(400);
+    // 采购登记急采，按金额分级审批（没指定审批人时由负责人审）
+    const rc = await api(ctx.app, buyer, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), ...urgent });
     expect(rc.status, JSON.stringify(rc.body)).toBe(201);
-    expect(rc.body.doc).toMatchObject({ status: 'submitted', urgent: true, noPo: true, urgentCapCents: 200000, amountCents: 45000 });
+    expect(rc.body.doc).toMatchObject({ status: 'submitted', urgent: true, noPo: true, urgentApprovedAt: null, urgentCapCents: 3_000_000, amountCents: 45000 });
+    expect((await api(ctx.app, approver, 'POST', `/api/inventory/docs/${rc.body.doc.id}/approve`, {})).status).toBe(200);
     // 仓库到部门验收后生效：进部门小仓，总仓不变
     const verified = await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${rc.body.doc.id}/verify-urgent`, {});
     expect(verified.body.status).toBe('confirmed');
@@ -287,13 +283,12 @@ describe('采购单', () => {
     expect((await material()).stockMilli).toBe(before.stockMilli);
     expect((await material()).deptStockMilli).toBe(before.deptStockMilli + q(500));
 
+    // 补单：急采已经按金额审批过，提交即确认；只关联原收货
     const bf = await api(ctx.app, buyer, 'POST', '/api/purchase-orders/backfill', { clientKey: randomUUID(), receiptDocId: rc.body.doc.id });
     expect(bf.status).toBe(201);
-    expect(bf.body.po).toMatchObject({ backfill: true, status: 'submitted', totalCents: 45000 });
+    expect(bf.body.po).toMatchObject({ backfill: true, status: 'approved', totalCents: 45000, receiving: 'full', receivedCents: 45000 });
     const again = await api(ctx.app, buyer, 'POST', '/api/purchase-orders/backfill', { clientKey: randomUUID(), receiptDocId: rc.body.doc.id });
-    expect(again.body.error.code).toBe('BACKFILL_EXISTS');
-    const ok = await api(ctx.app, approver, 'POST', `/api/purchase-orders/${bf.body.po.id}/approve`, {});
-    expect(ok.body).toMatchObject({ status: 'approved', receiving: 'full', receivedCents: 45000 });
+    expect(again.body.error.code).toBe('BACKFILL_LINKED');
     const linked = (await api(ctx.app, boss, 'GET', `/api/inventory/docs/${rc.body.doc.id}`)).body;
     expect(linked.purchaseOrder.id).toBe(bf.body.po.id);
     expect((await material()).deptStockMilli).toBe(before.deptStockMilli + q(500));

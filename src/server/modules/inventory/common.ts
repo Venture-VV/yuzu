@@ -7,6 +7,7 @@
 
 import { CENTRAL_WAREHOUSE_ID, DEFAULT_COUNT_BIG_CENTS, DEFAULT_COUNT_BIG_PCT, type ApprovalRules, type InventorySettings, type MoveType } from '@shared/inventory';
 import { shiftDate } from '@shared/labels';
+import { urgentCapOf } from '@shared/purchasing';
 import { formatQty } from '@shared/quantity';
 import { z } from 'zod';
 import { can } from '@shared/permissions';
@@ -16,6 +17,7 @@ import { AppError, unprocessable } from '../../lib/errors';
 import { dateSchema } from '../../lib/validate';
 import { dateIn, todayIn } from '../../lib/dates';
 import { nextDocNo, setTxTimeouts } from '../../lib/tx';
+import { loadPurchaseRules } from './purchase-rules';
 
 // 通用的日期与事务小工具已移到 lib（v0.7.22）；库存模块内部照旧从这里取
 export { dateIn, nextDocNo, setTxTimeouts, todayIn };
@@ -37,7 +39,8 @@ export async function loadInventorySettings(db: Db): Promise<InventorySettings> 
   return {
     scopeName: (map.get('inventory_scope_name') as string) ?? '后勤总库',
     priceBasis: (map.get('inventory_price_basis') as string) ?? '含税到货价',
-    urgentCapCents: Number(map.get('inventory_urgent_cap_cents') ?? DEFAULT_URGENT_CAP_CENTS),
+    // 急采上限（8.0.1 起，CG05）= 采购规则里急采分级的最高一档；原来单独存的 inventory_urgent_cap_cents 不再用
+    urgentCapCents: urgentCapOf(await loadPurchaseRules(db)),
     approvalThresholdCents: Number(map.get('inventory_approval_threshold_cents') ?? DEFAULT_APPROVAL_THRESHOLD_CENTS),
     usageWindowDays: Number(map.get('inventory_usage_window_days') ?? DEFAULT_USAGE_WINDOW_DAYS),
     ...DEFAULT_CYCLE_RULES,
@@ -46,8 +49,8 @@ export async function loadInventorySettings(db: Db): Promise<InventorySettings> 
   };
 }
 
-/** 急采上限默认 2000 元（#19，可调） */
-export const DEFAULT_URGENT_CAP_CENTS = 200_000;
+/** 急采上限的默认（8.0.1 起 = 采购规则里急采分级默认的最高一档，CG05；原来 #19 是 2000 元） */
+export const DEFAULT_URGENT_CAP_CENTS = 3_000_000;
 /** 免确认门槛默认 2000 元（#18，可调，v0.7.12）：设为需要确认的单据，金额不超过它的提交即生效 */
 export const DEFAULT_APPROVAL_THRESHOLD_CENTS = 200_000;
 /** 可用天数按近 28 天的用量算（#22，可调，v0.7.12） */

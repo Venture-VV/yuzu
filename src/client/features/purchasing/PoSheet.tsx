@@ -383,7 +383,7 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
             关闭
           </Button>
         )}
-        {['draft', 'submitted', 'returned'].includes(po.status) && po.receipts.length === 0 && (canApprove || (canManage && po.createdBy === session.staff.id)) && (
+        {po.withdrawable && (canApprove || (canManage && po.createdBy === session.staff.id)) && (
           <Button variant="ghost" size="sm" icon={<Ban className="size-4" />} onClick={() => setDialog('cancel')}>
             撤回
           </Button>

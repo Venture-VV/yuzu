@@ -125,8 +125,8 @@ describe('询价接上需求单（v0.7.29 的已知问题）', () => {
     expect(ordered.status, JSON.stringify(ordered.body)).toBe(201);
     const po = ordered.body.po;
     expect(po.lines[0].requests.map((r: { lineId: number }) => r.lineId).sort()).toEqual([la, lb].sort());
-    // 过门槛提交（超过免确认门槛，等负责人确认）
-    expect((await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po.id}/submit`, {})).body.status).toBe('submitted');
+    // 过询价门槛提交：行都来自审核过的需求单，提交即确认（8.0.1 CG04）
+    expect((await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po.id}/submit`, {})).body.status).toBe('approved');
     // 需求单：已下单，采购单号看得到
     expect(await progressOf(ra.id)).toEqual([expect.objectContaining({ state: 'ordered', po: expect.objectContaining({ docNo: po.docNo }), sourcing: { id: ev.id, docNo: ev.docNo } })]);
     expect(await progressOf(rb.id)).toEqual([expect.objectContaining({ state: 'ordered', po: expect.objectContaining({ docNo: po.docNo }) })]);

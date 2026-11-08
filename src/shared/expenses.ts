@@ -46,8 +46,6 @@ export interface ExpenseRules {
   approvalThresholdCents: number;
   /** 打款后超过多少天还没平账标红（12 条自检第 4 条：默认 7 天） */
   overdueDays: number;
-  /** 已下单未到货：没有预计到货日的，下单后超过多少天算超期（12 条自检第 9 条：默认 7 天，v0.7.9） */
-  arrivalOverdueDays: number;
   /** 用途（固定选项） */
   purposes: string[];
   invoiceTypes: InvoiceTypeDef[];
@@ -57,7 +55,6 @@ export interface ExpenseRules {
 export const DEFAULT_EXPENSE_RULES: ExpenseRules = {
   approvalThresholdCents: 200_000,
   overdueDays: 7,
-  arrivalOverdueDays: 7,
   purposes: ['客用消耗', '员工用品', '办公', '维修保养', '装修改造', '营销活动', '餐饮原料', '其他'],
   invoiceTypes: [
     { key: 'vat_special', label: '增值税专用发票', needsNumber: true, taxRatesBp: [100, 300, 600, 900, 1300] },
@@ -131,6 +128,8 @@ export interface ExpenseClaim extends ExpenseClaimSummary {
   approvals: { id: number; action: string; actorName: string; reason: string; createdAt: string }[];
   /** 审批中心（v0.7.30）：在审的审批单，没有在审的取最近一张；从没走过审批中心的为空 */
   approval: ApprovalBrief | null;
+  /** 按采购单报销的：采购单已生效的收货单与附件（8.0.1，CG11）；按次报销的为空 */
+  receipts: PoReceiptRef[];
 }
 
 export interface ExpenseClaimList {
@@ -236,11 +235,21 @@ export interface PoCandidate {
   openLines: number;
 }
 
+/** 采购单已生效的收货单与附件（8.0.1 采购组整改 11，CG11）：转报销、报销单上看 */
+export interface PoReceiptRef {
+  id: number;
+  docNo: string;
+  docDate: string;
+  attachments: import('./inventory').ReceiptAttachment[];
+}
+
 export interface PoForClaim {
   id: number;
   docNo: string;
   supplierName: string;
   orderDate: string;
+  /** 已生效的收货单与附件（8.0.1） */
+  receipts: PoReceiptRef[];
   /** 采购单的采购途径（v0.7.29）：报销照它记 */
   channel: import('./purchasing').ChannelRef | null;
   lines: {
@@ -278,6 +287,8 @@ export interface ToClaimPo {
   lineCount: number;
   openCents: number;
   receiving: import('./purchasing').ReceivingState;
+  /** 已生效的收货单与附件份数（8.0.1 采购组整改 11：收货生效后推送到待报销，标「已收货」） */
+  receipts: { id: number; docNo: string; docDate: string; attachmentCount: number }[];
   /** 下单后过了几天 */
   ageDays: number;
 }

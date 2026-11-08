@@ -1,15 +1,16 @@
 // 本部门小仓（v0.7.11，飞书需求 RQ-002 第一步，docs/WAREHOUSES.md）：部门申购看本部门小仓的结存、签收仓库登记的领料、
-// 登记急采与补采购单、本部门的期初、耗用、报损、盘点；财务成本岗可看所有部门、给部门盘点、登记耗用。
+// 本部门的期初、耗用、报损、盘点；财务成本岗可看所有部门、给部门盘点、登记耗用。
+// 急采 8.0.1 起由采购在「采购 → 急采」登记、补采购单（采购组整改 05，CG05）：这里只看给本部门买的急采。
 // 数据都从 /api/erp/dept-stock 取：部门的员工没有「查看库存」，看不到总仓的结存与参考价。
 
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { CircleAlert, ClipboardCheck, Droplets, FilePen, Flag, PackageCheck, PackagePlus, PackageX, ReceiptText, Send, X } from 'lucide-react';
+import { ClipboardCheck, Droplets, FilePen, Flag, PackageCheck, PackagePlus, PackageX, Send, X } from 'lucide-react';
 import { COUNT_REASON_LABELS, INV_DOC_META, type DeptStockMeta, type InvDoc, type InvDocSummary, type InvDocType } from '@shared/inventory';
 import { formatQty } from '@shared/quantity';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { useSession } from '../../lib/session';
-import { cn, formatDateTime, relativeTime, uuid } from '../../lib/utils';
+import { cn, formatDateTime, relativeTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
 import { Sheet } from '../../components/Overlay';
@@ -26,7 +27,6 @@ type View = 'stock' | 'sign' | 'docs';
 
 /** 部门能登记的单据（领料与退回由仓库登记） */
 const ACTIONS: { type: InvDocType; label: string; icon: typeof PackagePlus; audit?: boolean }[] = [
-  { type: 'receipt', label: '登记急采', icon: PackagePlus },
   { type: 'direct_use', label: '耗用', icon: Droplets, audit: true },
   { type: 'damage', label: '报损', icon: PackageX },
   { type: 'count', label: '盘点', icon: ClipboardCheck, audit: true },
@@ -56,7 +56,7 @@ export function DeptStockPage() {
   return (
     <ErpPage
       title={dept ? `${dept.name}小仓` : '本部门小仓'}
-      description="本部门从仓库领来的和自己急采的东西：结存、签收领料、急采与补单、耗用、报损、盘点。领料由仓库登记、部门签收；小仓的盘点差异由部门自己管。"
+      description="本部门从仓库领来的和采购给本部门急采的东西：结存、签收领料、耗用、报损、盘点。领料由仓库登记、部门签收；急采由采购登记、审批后仓库到部门验收；小仓的盘点差异由部门自己管。"
       actions={
         dept && meta.data ? (
           <div className="flex flex-wrap gap-2">
@@ -64,7 +64,7 @@ export function DeptStockPage() {
               const Icon = a.icon;
               return (
                 <Link key={a.type} to={`/erp/dept-stock/new/${a.type}?dept=${dept.id}`} data-testid={`dept-new-${a.type}`}>
-                  <Button variant={a.type === 'receipt' ? 'primary' : 'secondary'} icon={<Icon className="size-4" />}>
+                  <Button variant="secondary" icon={<Icon className="size-4" />}>
                     {a.label}
                   </Button>
                 </Link>
@@ -163,7 +163,7 @@ function StockList({ deptId }: { deptId: number }) {
 }
 
 function DocsView({ deptId, meta, onOpen }: { deptId: number; meta: DeptStockMeta; onOpen: (id: number) => void }) {
-  const [filter, setFilter] = useState<'all' | 'urgent' | 'backfill'>('all');
+  const [filter, setFilter] = useState<'all' | 'urgent'>('all');
   return (
     <div className="space-y-3">
       <Segmented
@@ -174,15 +174,13 @@ function DocsView({ deptId, meta, onOpen }: { deptId: number; meta: DeptStockMet
         options={[
           { value: 'all', label: '全部' },
           { value: 'urgent', label: '急采' },
-          { value: 'backfill', label: '急采待补单' },
         ]}
       />
       <DocList
         deptId={deptId}
         meta={meta}
         filter={filter === 'all' ? {} : { urgent: '1' }}
-        only={filter === 'backfill' ? (d) => d.needsBackfill : undefined}
-        empty={filter === 'backfill' ? '没有待补采购单的急采' : '还没有单据'}
+        empty={filter === 'urgent' ? '还没有给本部门买的急采' : '还没有单据'}
         onOpen={onOpen}
       />
     </div>
@@ -247,27 +245,6 @@ function DocList({
   );
 }
 
-/** 补采购单的操作编号存在本机：断网或超时后按同一编号重提，不会补出两张采购单 */
-const BACKFILL_KEY = (docId: number) => `yuzu.deptBackfill.v1.${docId}`;
-function backfillKey(docId: number): string | null {
-  try {
-    const saved = localStorage.getItem(BACKFILL_KEY(docId));
-    if (saved) return saved;
-    const key = uuid();
-    localStorage.setItem(BACKFILL_KEY(docId), key);
-    return localStorage.getItem(BACKFILL_KEY(docId)) === key ? key : null;
-  } catch {
-    return null;
-  }
-}
-function clearBackfillKey(docId: number) {
-  try {
-    localStorage.removeItem(BACKFILL_KEY(docId));
-  } catch {
-    /* 不可写时忽略 */
-  }
-}
-
 function DeptDocSheet({ id, dept, meta, onClose }: { id: number | null; dept: { id: number; name: string }; meta: DeptStockMeta; onClose: () => void }) {
   return (
     <Sheet open={!!id} onClose={onClose} label="本部门小仓单据" width="w-[min(620px,100vw)]">
@@ -315,26 +292,10 @@ function DeptDocDetail({ id, dept, meta, onClose }: { id: number; dept: { id: nu
   };
 
   const sign = () => run('sign', () => api.post(`/api/erp/dept-stock/docs/${id}/sign`, { note: signNote.trim() }), '已签收');
-  const submit = () => run('submit', () => api.post(`/api/erp/dept-stock/docs/${id}/submit`, {}), doc.urgent ? '已提交，等仓库验收' : '已提交');
-  const backfill = () => {
-    const key = backfillKey(id);
-    if (!key) {
-      setError('本机浏览器无法保存操作编号（存储空间已满或被禁用），为防止断网后补出两张采购单，这次没有提交。');
-      return;
-    }
-    void run(
-      'backfill',
-      async () => {
-        await api.post(`/api/erp/dept-stock/docs/${id}/backfill`, { clientKey: key }, { timeoutMs: 20_000 });
-        clearBackfillKey(id);
-      },
-      '已补采购单，并由本部门确认',
-    );
-  };
-
+  const submit = () => run('submit', () => api.post(`/api/erp/dept-stock/docs/${id}/submit`, {}), '已提交');
   const canSign = doc.docType === 'issue' && doc.status === 'confirmed' && doc.warehouse !== null && !doc.deptSign && canOperate;
-  const canBackfill = doc.urgent && doc.status === 'confirmed' && !doc.purchaseOrder && canOperate;
-  const editable = (doc.status === 'draft' || doc.status === 'returned') && (mine || session.staff.role === 'owner');
+  // 急采由采购登记、修改（8.0.1），部门这里只看
+  const editable = (doc.status === 'draft' || doc.status === 'returned') && (mine || session.staff.role === 'owner') && !doc.urgent;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -368,7 +329,12 @@ function DeptDocDetail({ id, dept, meta, onClose }: { id: number; dept: { id: nu
 
         {doc.status === 'returned' && doc.returnedReason && <Notice tone="warning" title="退回修改">{doc.returnedReason}</Notice>}
         {doc.urgent && doc.status === 'submitted' && (
-          <Notice tone="info" title="等仓库到部门验收">仓库验收确认后才进本部门小仓、记货款；验收前可以撤回。</Notice>
+          <Notice tone="info" title={doc.urgentApprovedAt ? '急采已批准，等仓库到部门验收' : '急采审批中'}>
+            采购给本部门买的急采：按金额分级审批，批了以后仓库到部门验收，确认后才进本部门小仓。
+          </Notice>
+        )}
+        {doc.urgent && doc.status === 'confirmed' && !doc.purchaseOrder && (
+          <Notice tone="info" title="等采购补采购单">急采已经进本部门小仓；补采购单由采购办，部门不用管。</Notice>
         )}
         {doc.deptSign && (
           <Notice tone="success" title={`${doc.deptSign.signedByName} 已签收 · ${formatDateTime(doc.deptSign.signedAt)}`}>
@@ -433,21 +399,6 @@ function DeptDocDetail({ id, dept, meta, onClose }: { id: number; dept: { id: nu
               </Button>
             </div>
           </section>
-        )}
-
-        {canBackfill && (
-          <Notice
-            tone="warning"
-            title="急采后要补采购单"
-            icon={<CircleAlert className="size-5" />}
-            action={
-              <Button size="sm" variant="primary" loading={busy === 'backfill'} icon={<ReceiptText className="size-4" />} onClick={backfill} data-testid="dept-backfill">
-                补采购单
-              </Button>
-            }
-          >
-            按这张急采的数量和价格生成采购单，由本部门确认；不会再入库或记货款。
-          </Notice>
         )}
 
         {error && <Notice tone="error" title={error} />}

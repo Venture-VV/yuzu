@@ -114,6 +114,9 @@ export function defaultPlanFor(docType: ApprovalDocType, amountCents: number | n
     case 'payment_early':
       steps = PAYMENT_EARLY_DEFAULT_STEPS;
       break;
+    // 急采（8.0.1，CG05）：正常由登记时按金额分级算好的审批人（inventory/urgent.ts 传进来）；这里只是兜底，登记的人不能审自己的急采
+    case 'urgent_purchase':
+      return { ruleId: null, ruleVersion: null, steps: DEFAULT_STEPS, allowSelf: false };
     default:
       steps = DEFAULT_STEPS;
   }
@@ -136,11 +139,12 @@ export async function describeDoc(db: Db, kind: ApprovalDocKind, docId: number):
       return { docType: 'purchase_order', docNo: p.docNo, amountCents: Number(p.totalCents), departmentId: depts.length === 1 ? Number(depts[0]!.departmentId) : null, submittedBy: Number(p.submittedBy) };
     }
     case 'inv_doc': {
-      const [d] = await db<{ docNo: string; docType: string; submittedBy: number; departmentId: number | null }[]>`
-        SELECT d.doc_no, d.doc_type, coalesce(d.submitted_by, d.created_by) AS submitted_by, w.department_id
+      const [d] = await db<{ docNo: string; docType: string; urgent: boolean; submittedBy: number; departmentId: number | null }[]>`
+        SELECT d.doc_no, d.doc_type, d.urgent, coalesce(d.submitted_by, d.created_by) AS submitted_by, w.department_id
         FROM inv_docs d LEFT JOIN warehouses w ON w.id = d.warehouse_id WHERE d.id = ${docId}`;
       if (!d) throw new AppError(404, 'NOT_FOUND', '单据不存在');
-      const docType = INV_TYPES[d.docType];
+      // 急采（8.0.1，CG05）：急采收货按金额分级审批，金额 = 急采合计、部门 = 给哪个部门买的
+      const docType = d.docType === 'receipt' && d.urgent ? 'urgent_purchase' : INV_TYPES[d.docType];
       if (!docType) throw conflict('APPROVAL_NOT_APPLICABLE', '这类单据不走审批中心');
       return {
         docType,
@@ -216,7 +220,10 @@ export async function describeDoc(db: Db, kind: ApprovalDocKind, docId: number):
  * 的规则里取最具体的一条：指定了部门的优先，其次下限高的，再其次后建的。没有命中：fallback（现在的开关与门槛要确认）为真时
  * 用默认规则（一级负责人），否则不用审批。
  */
-export async function planApproval(db: Db, input: { docType: ApprovalDocType; amountCents: number | null; departmentId: number | null; fallback: boolean }): Promise<ApprovalPlan | null> {
+export async function planApproval(
+  db: Db,
+  input: { docType: ApprovalDocType; amountCents: number | null; departmentId: number | null; fallback: boolean; defaultPlan?: ApprovalPlan },
+): Promise<ApprovalPlan | null> {
   const amount = input.amountCents;
   const [rule] = await db<{ id: number; version: number; steps: ApprovalStep[]; allowSelf: boolean }[]>`
     SELECT id, version, steps, allow_self FROM approval_rules
@@ -226,7 +233,8 @@ export async function planApproval(db: Db, input: { docType: ApprovalDocType; am
     ORDER BY (department_id IS NOT NULL) DESC, min_cents DESC, id DESC
     LIMIT 1`;
   if (rule) return { ruleId: Number(rule.id), ruleVersion: rule.version, steps: rule.steps, allowSelf: rule.allowSelf };
-  return input.fallback ? defaultPlanFor(input.docType, input.amountCents) : null;
+  // 单据模块可以给出自己的默认审批链（急采按金额分级，8.0.1）
+  return input.fallback ? (input.defaultPlan ?? defaultPlanFor(input.docType, input.amountCents)) : null;
 }
 
 // ───────────────────────── 开审批单 ─────────────────────────
@@ -261,10 +269,10 @@ export async function submitForApproval(
   kind: ApprovalDocKind,
   docId: number,
   ctx: { actor: Actor; timeZone: string },
-  opts: { fallback: boolean; approveNow?: boolean; comment?: string },
+  opts: { fallback: boolean; approveNow?: boolean; comment?: string; defaultPlan?: ApprovalPlan },
 ): Promise<SubmitResult> {
   const info = await describeDoc(tx, kind, docId);
-  const plan = await planApproval(tx, { docType: info.docType, amountCents: info.amountCents, departmentId: info.departmentId, fallback: opts.fallback });
+  const plan = await planApproval(tx, { docType: info.docType, amountCents: info.amountCents, departmentId: info.departmentId, fallback: opts.fallback, defaultPlan: opts.defaultPlan });
   if (!plan) return { outcome: 'effective', requestId: null, skipped: true };
   const requestId = await insertRequest(tx, kind, docId, info, plan, ctx.actor.id);
   if (opts.approveNow) {

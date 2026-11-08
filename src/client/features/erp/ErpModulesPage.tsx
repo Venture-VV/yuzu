@@ -2,7 +2,7 @@
 // 依赖的模块关着时，这个模块也用不了（开关保留，依赖的模块开了就恢复）。改动记审计。
 
 import { useState } from 'react';
-import { Navigate } from 'react-router';
+import { Link, Navigate } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ERP_MODULES, type ErpModuleKey, type ErpModulesInfo } from '@shared/erp';
 import { api, errorMessage } from '../../lib/api';
@@ -12,7 +12,6 @@ import { cn, formatDateTime } from '../../lib/utils';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Notice, PendingBadge, Segmented, Skeleton } from '../../components/ui';
 import { ExpenseRulesCard } from '../expenses/ExpenseRulesCard';
-import { PurchaseRulesCard } from '../purchasing/PurchaseRulesCard';
 import { ErpPage } from './ErpHome';
 
 const erpModulesKey = ['erp', 'modules'] as const;
@@ -96,7 +95,15 @@ export function ErpModulesPage() {
             })}
           </Card>
           {error && <Notice tone="error" title={error} />}
-          {d.modules.find((m) => m.key === 'inventory')?.enabled && <PurchaseRulesCard />}
+          {/* 采购规则 8.0.1 挪到「采购 → 采购规则」（采购组整改 01，CG01） */}
+          {d.modules.find((m) => m.key === 'purchasing')?.enabled && (
+            <Notice tone="info" title="采购规则在「采购 → 采购规则」里改">
+              截单时间、需求单转的采购单提交即确认、急采分级审批、询价门槛与到货超期天数都在那里。{' '}
+              <Link to="/purchasing/rules" className="font-bold text-lake hover:underline" data-testid="purchase-rules-link">
+                去采购规则
+              </Link>
+            </Notice>
+          )}
           {d.modules.find((m) => m.key === 'expenses')?.enabled && <ExpenseRulesCard />}
         </div>
       )}

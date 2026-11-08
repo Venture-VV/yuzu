@@ -304,7 +304,8 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   add({
     key: 'inventory_urgent_cap_cents', group: 'inventory', label: '急采上限', value: `每张急采单不超过 ${formatYuan(inv.urgentCapCents)}`,
     defaultValue: `每张急采单不超过 ${formatYuan(DEFAULT_URGENT_CAP_CENTS)}`, pending: true, section: 'rules',
-    hint: '没有采购单的收货只能登记急采：进部门小仓，仓库验收后生效，部门补采购单', current: inv.urgentCapCents, dflt: DEFAULT_URGENT_CAP_CENTS, metaKey: 'inventory_urgent_cap_cents',
+    hint: '8.0.1 起由采购在「采购 → 急采」登记，按金额分级审批后仓库验收、采购补单；上限就是「采购规则」里急采分级的最高一档，在那里改',
+    current: inv.urgentCapCents, dflt: DEFAULT_URGENT_CAP_CENTS, metaKey: 'purchase_rules',
   });
   add({
     key: 'inventory_approval_rules', group: 'inventory', label: '需要负责人确认的单据', value: approvals(inv.approvalRules), defaultValue: approvals(DEFAULT_APPROVAL_RULES),

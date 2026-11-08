@@ -83,9 +83,9 @@ export function StockTab() {
   const detail = selectedId ? <MaterialDetail key={`${selectedId}-${warehouseId}`} id={selectedId} warehouseId={warehouseId} onClose={() => select(null)} closable={!wide} /> : null;
   const todo = overview.data
     ? [
-        { n: overview.data.urgentToVerify, label: '急采待仓库验收', to: '/inventory/docs?type=receipt&urgent=1&status=submitted' },
+        { n: overview.data.urgentToVerify, label: '急采待仓库验收', to: '/purchasing/urgent?view=verifying' },
         { n: overview.data.unsignedIssues, label: `领料超过 ${ISSUE_SIGN_DUE_DAYS} 天部门没签收`, to: '/inventory/docs?type=issue&unsigned=1' },
-        { n: overview.data.urgentToBackfill, label: '急采待补采购单', to: '/inventory/docs?type=receipt&urgent=1&status=confirmed' },
+        { n: overview.data.urgentToBackfill, label: '急采待补采购单', to: '/purchasing/urgent?view=backfill' },
         {
           n: overview.data.awaitingSupplier,
           label: overview.data.awaitingSupplierOverdue

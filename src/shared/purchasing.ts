@@ -126,6 +126,11 @@ export interface PurchaseOrder {
   approval: ApprovalBrief | null;
   /** 报销情况（v0.7.29）：现付的采购单在费用报销里报，这里列报在哪几张、还有几行没报 */
   reimbursement: import('./expenses').PoReimbursement;
+  /**
+   * 现在能不能撤回（8.0.1）：草稿、待确认、退回的，与提交即确认（没经过人审批）、还没有报销、发票、三单放行的已确认采购单，都要还没有收货；
+   * 撤回的人还要是创建人或能确认采购单的
+   */
+  withdrawable: boolean;
 }
 
 export interface PoSummary {
@@ -442,14 +447,45 @@ export interface ErpImportRecord {
 
 // ───────────────────────── 采购规则（v0.7.29 ERP 采购五项，docs/ERP_PURCHASING.md） ─────────────────────────
 
-/** 采购途径（E1）：键固定、名称可改；needsNote 的要写途径说明（档口、平台与店铺、门店名……） */
+/** 采购途径：needsNote 的要写途径说明（平台与店铺、市场或门店……） */
 export interface PurchaseChannelDef {
   key: string;
   label: string;
   needsNote: boolean;
 }
 
+/**
+ * 采购途径固定三类（8.0.1 采购组整改 08，CG08，docs/PURCHASING_V801.md）：网购、自采（现采 / 零采）、供应商；
+ * 名称不能改、不能加。v0.7.29 起的途径字典（可改名、可加）在迁移 083 里并成这三类，数据库也只认这三个键。
+ */
+export const PURCHASE_CHANNEL_KEYS = ['online', 'self', 'supplier'] as const;
+export type PurchaseChannelKey = (typeof PURCHASE_CHANNEL_KEYS)[number];
+export const PURCHASE_CHANNELS: PurchaseChannelDef[] = [
+  { key: 'online', label: '网购', needsNote: true },
+  { key: 'self', label: '自采（现采/零采）', needsNote: true },
+  { key: 'supplier', label: '供应商', needsNote: false },
+];
+/**
+ * 旧的途径键（v0.7.29 的字典：供应商配送 supplier、网购平台 online、批发市场 wholesale、商超门店 store、其他 other 与自加的）按三类算（CG08）：
+ * supplier、online 照旧，其余都算自采。已经生效的单据只追加、不改历史，记的还是当时的名称；按三类统计、筛选，
+ * 以及供应商档案里旧的默认途径都按这个对应（档案下次保存时存成三类之一）。
+ */
+export const channelCategory = (key: string | null | undefined): PurchaseChannelKey | null =>
+  !key ? null : key === 'supplier' || key === 'online' ? key : 'self';
+
+/** 没选途径、供应商档案也没设默认途径时按「供应商」 */
+export const DEFAULT_CHANNEL_KEY: PurchaseChannelKey = 'supplier';
+export const channelLabel = (key: string | null | undefined): string => PURCHASE_CHANNELS.find((c) => c.key === key)?.label ?? '—';
+
+/** 急采分级审批的一档（05，CG05）：合计不超过 maxCents 的由这一档的审批人审（1–5 人或签；没指定的由负责人审） */
+export interface UrgentTier {
+  maxCents: number;
+  approverIds: number[];
+}
+export const URGENT_TIERS_MAX = 3;
+
 export interface PurchaseRules {
+  /** 固定三类（读出来总是 PURCHASE_CHANNELS，改不了） */
   channels: PurchaseChannelDef[];
   /** 询价门槛（分，E5）：合计 ≥ 这个金额的采购单第一次提交时要来自已定标的询价单；0 = 不要求 */
   quoteThresholdCents: number;
@@ -459,22 +495,40 @@ export interface PurchaseRules {
   reorderDays: number;
   /** 补货目标天数（E4）：建议补到能用这么多天 */
   targetDays: number;
+  /** 下单后几天没到货算超期（采购单没填预计到货日时用；账目自检第 9 条）。8.0.1 从费用报销规则挪过来（CG01） */
+  arrivalOverdueDays: number;
+  /** 每日截单（03，CG03）：开着时截单时间以后（含）提交的需求单当天不能审核通过 */
+  cutoffEnabled: boolean;
+  /** 截单时间（门店时区，HH:MM） */
+  cutoffTime: string;
+  /** 需求单转的采购单（04，CG04）：每一行都来自已通过的需求单的，提交即确认，不再走「负责人确认」的默认规则 */
+  requestPoDirect: boolean;
+  /** 急采分级审批（05，CG05）：按金额从小到大；最高一档就是急采上限 */
+  urgentTiers: UrgentTier[];
 }
 
-/** 默认规则（待确认，E1、E4–E6）：店主在 ERP「模块设置 → 采购规则」里改 */
+/** 默认规则（待确认，E1、E4–E6、CG01、CG03–CG05）：在「采购 → 采购规则」里改 */
 export const DEFAULT_PURCHASE_RULES: PurchaseRules = {
-  channels: [
-    { key: 'supplier', label: '供应商配送', needsNote: false },
-    { key: 'wholesale', label: '批发市场', needsNote: true },
-    { key: 'online', label: '网购平台', needsNote: true },
-    { key: 'store', label: '商超门店', needsNote: true },
-    { key: 'other', label: '其他', needsNote: true },
-  ],
+  channels: PURCHASE_CHANNELS,
   quoteThresholdCents: 500_000,
   minQuotes: 2,
   reorderDays: 7,
   targetDays: 14,
+  arrivalOverdueDays: 7,
+  // 截单默认关着（打开后默认 17:00）：升级后审核照旧，采购或店主在「采购 → 采购规则」里打开（CG03）
+  cutoffEnabled: false,
+  cutoffTime: '17:00',
+  requestPoDirect: true,
+  urgentTiers: [
+    { maxCents: 500_000, approverIds: [] },
+    { maxCents: 3_000_000, approverIds: [] },
+  ],
 };
+
+/** 急采上限：分级的最高一档 */
+export const urgentCapOf = (rules: Pick<PurchaseRules, 'urgentTiers'>): number => rules.urgentTiers[rules.urgentTiers.length - 1]?.maxCents ?? 0;
+/** 急采合计落在哪一档（第几档，从 0 起）；超过最高一档返回 -1 */
+export const urgentTierIndex = (rules: Pick<PurchaseRules, 'urgentTiers'>, amountCents: number): number => rules.urgentTiers.findIndex((t) => amountCents <= t.maxCents);
 
 /** 单据上记的采购途径：键与当时的名称、途径说明 */
 export interface ChannelRef {
@@ -635,4 +689,52 @@ export interface PriceHistory {
   materialId: number;
   materialName: string;
   points: { date: string; source: 'receipt' | 'quote'; docNo: string; supplierName: string; priceCents: number; purchaseUnit: string; qtyMilli: number | null }[];
+}
+
+// ───────────────────────── 供应商比价看板（8.0.1 采购组整改 07，CG07） ─────────────────────────
+
+/** 默认看近多少天 */
+export const COMPARE_DEFAULT_DAYS = 90;
+
+/** 一个物料 × 一家供应商：这段时间的价格、品质；单价都按物料现在的采购单位折算 */
+export interface SupplierCompareRow {
+  materialId: number;
+  materialCode: string;
+  materialName: string;
+  category: string;
+  purchaseUnit: string;
+  inventoryUnit: string;
+  supplierId: number;
+  supplierName: string;
+  /** 采购次数（已生效的收货单张数）、收货数量（库存单位）、金额 */
+  receipts: number;
+  receivedMilli: number;
+  amountCents: number;
+  /** 最近一次的单价与日期 */
+  lastPriceCents: number | null;
+  lastDate: string | null;
+  /** 加权平均、最低、最高单价 */
+  avgPriceCents: number | null;
+  minPriceCents: number | null;
+  maxPriceCents: number | null;
+  /** 上一个同样长的时段的平均单价，与比上一个时段涨跌（百分比，两位小数） */
+  prevAvgPriceCents: number | null;
+  changePercent: number | null;
+  /** 退供应商的数量（库存单位）与退货率（百分比，两位小数） */
+  returnedMilli: number;
+  returnRatePct: number | null;
+}
+
+export interface SupplierCompare {
+  from: string;
+  to: string;
+  prevFrom: string;
+  prevTo: string;
+  rows: SupplierCompareRow[];
+  /** 这家供应商合同验收登记的质量问题数（这段时间发现的、没作废的） */
+  quality: { supplierId: number; issues: number }[];
+  /** 物料这段时间的耗用：领用（总仓发到部门）、直接耗用（库存单位） */
+  consumption: { materialId: number; issuedMilli: number; directUsedMilli: number }[];
+  /** 能选的品类 */
+  categories: string[];
 }

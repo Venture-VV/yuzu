@@ -190,7 +190,8 @@ describe('审核、转采购单、进度回写', () => {
     expect((await api(ctx.app, reqA, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, lines: [{ materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 1, requestLineIds: [lineMat.id] }] })).status).toBe(403);
 
     let detail = (await api(ctx.app, reqA, 'GET', `/api/erp/requests/${created.id}`)).body;
-    expect(detail.lines[0].progress).toMatchObject({ state: 'ordered', po: { id: p1.id, docNo: p1.docNo, status: 'submitted' }, orderedMilli: q(1000), mergedLines: 1 });
+    // 需求单转的采购单：供应链审核过需求单，提交即确认（8.0.1 CG04）
+    expect(detail.lines[0].progress).toMatchObject({ state: 'ordered', po: { id: p1.id, docNo: p1.docNo, status: 'approved' }, orderedMilli: q(1000), mergedLines: 1 });
     expect(detail.orderedLines).toBe(2);
     expect(((await api(ctx.app, buyer, 'GET', '/api/erp/requests/open-lines')).body as { id: number }[]).map((l) => l.id)).not.toContain(lineMat.id);
 
