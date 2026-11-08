@@ -217,7 +217,9 @@ test('键盘：/ 搜索 → 回车选中 → R 打开充值 → Esc 关闭', asy
   await login(page, 'xiaozhou');
   await page.keyboard.press('/');
   await expect(page.getByLabel('搜索会员')).toBeFocused();
-  await page.keyboard.type('1003');
+  // 用陈一禾的完整手机号（演示数据 1990000 + 1003）：只输「1003」时，别的用例按时间生成的手机号里也会出现 1003，
+  // 搜索结果会有两位、这里就失败（测试会话 v8.0.3 验收报告）
+  await page.keyboard.type('19900001003');
   await expect(page.getByRole('option')).toHaveCount(1);
   await page.keyboard.press('Enter');
   await expect(page.locator('main').getByRole('heading', { name: '陈一禾' })).toBeVisible();
