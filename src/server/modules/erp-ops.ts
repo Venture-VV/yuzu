@@ -81,7 +81,8 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   contract_payout: ['payable.manage'],
   contract_acceptance: ['contract.manage'],
   contract_quality: ['contract.manage'],
-  supplier_invoice: ['payable.manage'],
+  // 8.0.3：台账里直接登记的发票也是这一类（要「管理进项发票」）
+  supplier_invoice: ['payable.manage', 'invoice.manage'],
   // 员工食堂第二期：柚子信箱的回信，与回信接口一致
   canteen_reply: ['canteen.manage'],
   request_import: ['request.review'],
@@ -129,7 +130,7 @@ const READ: Record<ErpOpType, Permission[]> = {
   contract_payout: ['payable.read'],
   contract_acceptance: ['contract.read'],
   contract_quality: ['contract.read'],
-  supplier_invoice: ['payable.read'],
+  supplier_invoice: ['payable.read', 'invoice.manage'],
   canteen_reply: ['canteen.manage'],
   request_import: ['request.review'],
   gift_receipt: ['inventory.read'],

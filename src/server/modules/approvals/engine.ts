@@ -3,6 +3,7 @@
 // 最后一级同意后由单据模块照旧让单据生效（同一段代码），所以默认规则下与 v0.7.29 一样一次就生效。
 
 import {
+  APPROVAL_MAX_LEVELS,
   APPROVAL_OVERDUE_HOURS,
   CONTRACT_DEFAULT_STEPS,
   PAYMENT_EARLY_DEFAULT_STEPS,
@@ -165,11 +166,18 @@ export async function describeDoc(db: Db, kind: ApprovalDocKind, docId: number):
       if (!o) throw new AppError(404, 'NOT_FOUND', '期初未付记录不存在');
       return { docType: 'opening', docNo: o.docNo, amountCents: Number(o.amountCents), departmentId: null, submittedBy: Number(o.createdBy) };
     }
+    // 超预算的报销（8.0.3，BI04）是单独的单据类型「超预算报销」：登记（或退回后再提交）时记在报销单上
     case 'expense_claim': {
-      const [c] = await db<{ docNo: string; amountCents: number; departmentId: number; createdBy: number }[]>`
-        SELECT doc_no, amount_cents, department_id, created_by FROM expense_claims WHERE id = ${docId}`;
+      const [c] = await db<{ docNo: string; amountCents: number; departmentId: number; createdBy: number; overBudget: boolean }[]>`
+        SELECT doc_no, amount_cents, department_id, created_by, over_budget FROM expense_claims WHERE id = ${docId}`;
       if (!c) throw new AppError(404, 'NOT_FOUND', '报销单不存在');
-      return { docType: 'expense_claim', docNo: c.docNo, amountCents: Number(c.amountCents), departmentId: Number(c.departmentId), submittedBy: Number(c.createdBy) };
+      return {
+        docType: c.overBudget ? 'expense_over_budget' : 'expense_claim',
+        docNo: c.docNo,
+        amountCents: Number(c.amountCents),
+        departmentId: Number(c.departmentId),
+        submittedBy: Number(c.createdBy),
+      };
     }
     // 合同（v0.7.31）：金额 = 合同总价（起草中按草稿）、部门 = 合同的部门；提交人取最近一次提交的人
     case 'contract': {
@@ -235,6 +243,21 @@ export async function planApproval(
   if (rule) return { ruleId: Number(rule.id), ruleVersion: rule.version, steps: rule.steps, allowSelf: rule.allowSelf };
   // 单据模块可以给出自己的默认审批链（急采按金额分级，8.0.1）
   return input.fallback ? (input.defaultPlan ?? defaultPlanFor(input.docType, input.amountCents)) : null;
+}
+
+/**
+ * 超预算报销没有规则命中时的审批链（8.0.3，BI04）：在报销原来的审批链（报销的规则，没有规则命中时门槛以上是一级负责人）后面
+ * 加一级「店主」；原来不用审批的就是一级店主；原来已经三级、或者最后一级就是店主的照原链。店主为「超预算报销」建的规则优先
+ * （submitForApproval 先按单据类型「超预算报销」找规则，找不到才用这里给的默认）。
+ */
+export async function overBudgetPlan(db: Db, input: { amountCents: number; departmentId: number | null; fallback: boolean }): Promise<ApprovalPlan> {
+  const owner: ApprovalStep = { group: 'owner', mode: 'any' };
+  const base = await planApproval(db, { docType: 'expense_claim', amountCents: input.amountCents, departmentId: input.departmentId, fallback: input.fallback });
+  if (!base) return { ruleId: null, ruleVersion: null, steps: [owner], allowSelf: true };
+  const last = base.steps[base.steps.length - 1];
+  const ownerLast = !!last && 'group' in last && last.group === 'owner';
+  const steps = base.steps.length >= APPROVAL_MAX_LEVELS || ownerLast ? base.steps : [...base.steps, owner];
+  return { ruleId: null, ruleVersion: null, steps, allowSelf: base.allowSelf };
 }
 
 // ───────────────────────── 开审批单 ─────────────────────────
@@ -513,6 +536,7 @@ export async function approvalBriefById(db: Db, requestId: number): Promise<Appr
 async function briefOf(db: Db, where: Fragment): Promise<ApprovalBrief | null> {
   const [r] = await db<{
     id: number;
+    docType: ApprovalDocType;
     status: ApprovalStatus;
     ruleId: number | null;
     currentLevel: number;
@@ -522,7 +546,7 @@ async function briefOf(db: Db, where: Fragment): Promise<ApprovalBrief | null> {
     levelStartedAt: string;
     overdue: boolean;
   }[]>`
-    SELECT id, status, rule_id, current_level, steps, allow_self, submitted_by, level_started_at,
+    SELECT id, doc_type, status, rule_id, current_level, steps, allow_self, submitted_by, level_started_at,
            (status = 'pending' AND level_started_at < now() - make_interval(hours => ${APPROVAL_OVERDUE_HOURS})) AS overdue
     FROM approval_requests WHERE ${where}
     ORDER BY (status = 'pending') DESC, id DESC LIMIT 1`;
@@ -532,6 +556,7 @@ async function briefOf(db: Db, where: Fragment): Promise<ApprovalBrief | null> {
   const names = await staffNames(db, r.steps.flatMap((s) => ('staffIds' in s ? s.staffIds : [])));
   return {
     requestId: id,
+    docType: r.docType,
     status: r.status,
     ruleId: r.ruleId === null ? null : Number(r.ruleId),
     currentLevel: r.currentLevel,

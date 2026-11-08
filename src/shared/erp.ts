@@ -4,7 +4,7 @@
 
 import type { Permission } from './permissions';
 
-export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'approvals', 'contracts', 'payments', 'expenses', 'revenue', 'canteen'] as const;
+export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'approvals', 'contracts', 'payments', 'expenses', 'invoices', 'revenue', 'canteen'] as const;
 export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
 
 export interface ErpModuleDef {
@@ -139,6 +139,21 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     perms: ['expense.read'],
     defaultEnabled: true,
     // 部门、供应商档案在库存模块里；按采购单报销读采购单（采购模块关着时只能按次报销）
+    requires: ['inventory'],
+  },
+  // 进项发票台账（8.0.3，docs/BUDGET_INVOICES.md 第 3 节）：三单的供应商发票、报销的专票普票、直接登记的都在这里
+  invoices: {
+    label: '发票台账',
+    group: '财务',
+    description:
+      '进项发票台账：三单匹配登记的供应商发票、报销单上的专票与普票、直接登记的；认证状态与所属期、认证期限到期前提醒、' +
+      '异常票（重号、税额税率不符、过期、与报销金额不符）标记、拍照上传（8.0.3）',
+    path: '/erp/invoices',
+    pages: ['/erp/invoices'],
+    apis: ['/api/erp/invoices'],
+    perms: ['payable.read', 'expense.read', 'invoice.manage'],
+    defaultEnabled: true,
+    // 开票方可以是供应商档案里的供应商
     requires: ['inventory'],
   },
   revenue: {

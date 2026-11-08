@@ -222,6 +222,8 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '083_suppliers_contracts.sql',
   '084_receipt_attachments.sql',
   '085_gift_receipts.sql',
+  '086_expense_budgets.sql',
+  '087_input_invoices.sql',
   '090_canteen.sql',
   '091_canteen_join.sql',
   '092_canteen_reply_ops.sql',

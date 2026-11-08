@@ -13,6 +13,7 @@ import {
 import type { Db } from '../../db';
 import { openItems } from '../inventory/payables';
 import { invoiceChecks } from './match';
+import { ledgerChecks } from '../invoices';
 import { PAYABLE_CONTRACT_STATUSES, contractPlan, requestPaidSql } from './plan';
 
 const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
@@ -207,12 +208,20 @@ export async function paymentChecks(db: Db): Promise<{ key: string; label: strin
     SELECT o.doc_no FROM contract_payouts o JOIN payment_requests r ON r.id = o.payment_request_id WHERE r.pay_mode <> 'direct'`;
   bad.push(...outs.map((o) => `合同付款 ${o.docNo} 的申请不是合同付款`));
   bad.push(...(await invoiceChecks(db)));
+  // 进项发票台账（8.0.3）
+  const ledger = await ledgerChecks(db);
   return [
     {
       key: 'payments',
       label: '付款流：付款申请的已付与付款登记一致，按申请登记的付款与申请对得上，发票分到采购单的金额合计等于价税合计',
       ok: bad.length === 0,
       detail: bad.length ? bad.slice(0, 20).join('；') : '一致',
+    },
+    {
+      key: 'input_invoices',
+      label: '进项发票台账：有效报销单关联的发票都没作废、一张发票只挂一张有效报销单、不既分到采购单又报销，已认证的都有所属期',
+      ok: ledger.length === 0,
+      detail: ledger.length ? ledger.slice(0, 20).join('；') : '一致',
     },
   ];
 }

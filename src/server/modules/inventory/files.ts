@@ -16,7 +16,7 @@ import type { Actor, Deps } from '../../lib/context';
 import { conflict, notFound, unprocessable } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 
-export type FileScope = 'supplier_contract' | 'receipt';
+export type FileScope = 'supplier_contract' | 'receipt' | 'invoice';
 
 const PdfInput = z.object({
   name: z.string().trim().min(1, '请写文件名').max(80, '文件名最多 80 个字'),
