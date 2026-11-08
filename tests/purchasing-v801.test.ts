@@ -2,6 +2,7 @@
 // 需求单转的采购单提交即确认与撤回（04）、「到货超期天数」挪到采购规则（01）、签约供应商的合同 PDF（08）。
 
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { shiftDate } from '../src/shared/labels';
 import { todayIn } from '../src/server/modules/inventory/common';
@@ -192,6 +193,147 @@ describe('需求单转的采购单（04）', () => {
     const refused = await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${p2.id}/cancel`, { reason: '换供应商' });
     expect(refused.status).toBe(409);
     expect(refused.body.error.code).toBe('PO_HAS_RECEIPTS');
+  });
+});
+
+// 8.0.2：测试会话在 a6b2b6d 上报的 P2——撤回与登记发票要在同一张采购单的行锁上串行（锁住以后再核对），
+// 不能出现「采购单已撤回、却挂着有效发票」。两种交错顺序都用另一个事务锁住一行、让一方停在半路来稳定重现。
+describe('采购单撤回与登记发票串行（8.0.2）', () => {
+  const staffId = async (username: string) => (await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = ${username}`)[0]!.id;
+  const poStatus = async (poId: number) => (await ctx.sql<{ status: string }[]>`SELECT status FROM purchase_orders WHERE id = ${poId}`)[0]!.status;
+  const validInvoiceLines = async (poId: number) =>
+    (await ctx.sql<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM supplier_invoice_lines l JOIN supplier_invoices i ON i.id = l.invoice_id
+      WHERE l.purchase_order_id = ${poId} AND i.status = 'valid'`)[0]!.n;
+  const invoice = (poId: number, amountCents: number) =>
+    api(ctx.app, boss, 'POST', '/api/erp/payments/invoices', {
+      clientKey: randomUUID(),
+      supplierId,
+      invoiceNo: `FP${randomUUID().slice(0, 8)}`,
+      invoiceDate: today,
+      totalCents: amountCents,
+      taxCents: 0,
+      taxRateBp: 1300,
+      lines: [{ poId, amountCents }],
+    });
+  const withdraw = (poId: number) => api(ctx.app, buyer, 'POST', `/api/purchase-orders/${poId}/cancel`, { reason: '换供应商' });
+  /** 需求单转的采购单：提交即确认，可以撤回 */
+  const directPo = async (boxes: number) => {
+    const r = await approve((await submit({}, [line({ qtyMilli: q(boxes) })])).id);
+    const res = await po([{ materialId: mat.id, purchaseQtyMilli: q(boxes), priceCents: 45_000, requestLineIds: [r.lines[0]!.id] }]);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.po).toMatchObject({ status: 'approved', withdrawable: true });
+    return res.body.po as { id: number; totalCents: number };
+  };
+  /** 在另一个事务里锁住一行（FOR UPDATE），直到 release() */
+  const holdRow = async (table: 'staff' | 'suppliers', id: number) => {
+    let release!: () => void;
+    let acquired!: () => void;
+    const locked = new Promise<void>((resolve) => { acquired = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const done = ctx.sql.begin(async (tx) => {
+      if (table === 'staff') await tx`SELECT id FROM staff WHERE id = ${id} FOR UPDATE`;
+      else await tx`SELECT id FROM suppliers WHERE id = ${id} FOR UPDATE`;
+      acquired();
+      await gate;
+    });
+    await locked;
+    return async () => { release(); await done; };
+  };
+  /** 等到有一条语句卡在行锁上（语句里含其中一段）；请求先做完了（没有卡住）返回 'done' */
+  const waitForLock = async (fragments: string[], finished: () => boolean = () => false) => {
+    for (let i = 0; i < 300; i++) {
+      if (finished()) return 'done';
+      const rows = await ctx.sql<{ query: string }[]>`
+        SELECT query FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+      if (rows.some((r) => fragments.some((f) => r.query.includes(f)))) return 'waiting';
+      await delay(10);
+    }
+    throw new Error(`没有观察到预期的并发交错：${fragments.join(' / ')}`);
+  };
+
+  it('先撤回、后登记发票：登记发票等撤回提交以后再核对，采购单已撤回就拒绝（PO_NOT_ORDERED），不会有发票挂在已撤回的单上', async () => {
+    const p = await directPo(3);
+    // 撤回已经锁住采购单、改成已撤回，记日志时停住（日志的外键要对经办人一行加共享锁）
+    const release = await holdRow('staff', await staffId('zhouyi'));
+    let withdrawing: ReturnType<typeof withdraw> | undefined;
+    let invoicing: ReturnType<typeof invoice> | undefined;
+    try {
+      withdrawing = withdraw(p.id);
+      expect(await waitForLock(['INSERT INTO approval_logs'])).toBe('waiting');
+      let finished = false;
+      invoicing = invoice(p.id, p.totalCents);
+      void invoicing.then(() => { finished = true; });
+      // 登记发票卡在采购单的锁上（修之前卡在写发票明细的外键上，等撤回提交以后照样写进去）
+      expect(await waitForLock(['FROM purchase_orders WHERE id IN', 'INSERT INTO supplier_invoice_lines'], () => finished)).toBe('waiting');
+    } finally {
+      await release();
+    }
+    const w = await withdrawing!;
+    expect(w.status, JSON.stringify(w.body)).toBe(200);
+    expect(w.body.status).toBe('cancelled');
+    const inv = await invoicing!;
+    expect(inv.status, JSON.stringify(inv.body)).toBe(422);
+    expect(inv.body.error.code).toBe('PO_NOT_ORDERED');
+    expect(await poStatus(p.id)).toBe('cancelled');
+    expect(await validInvoiceLines(p.id)).toBe(0);
+  });
+
+  it('先登记发票、后撤回：撤回等发票提交以后再核对，已经有发票就拒绝（PO_IN_USE），采购单仍是已确认', async () => {
+    const p = await directPo(3);
+    // 登记发票已经锁住采购单，写发票时停住（发票的外键要对供应商一行加共享锁）
+    const release = await holdRow('suppliers', supplierId);
+    let withdrawing: ReturnType<typeof withdraw> | undefined;
+    let invoicing: ReturnType<typeof invoice> | undefined;
+    try {
+      invoicing = invoice(p.id, p.totalCents);
+      expect(await waitForLock(['INSERT INTO supplier_invoices'])).toBe('waiting');
+      let finished = false;
+      withdrawing = withdraw(p.id);
+      void withdrawing.then(() => { finished = true; });
+      // 撤回卡在采购单的锁上（修之前登记发票还没锁采购单，撤回直接做完）
+      expect(await waitForLock(['FROM purchase_orders WHERE id = $1 FOR UPDATE'], () => finished)).toBe('waiting');
+    } finally {
+      await release();
+    }
+    const inv = await invoicing!;
+    expect(inv.status, JSON.stringify(inv.body)).toBe(201);
+    const w = await withdrawing!;
+    expect(w.status, JSON.stringify(w.body)).toBe(409);
+    expect(w.body.error.code).toBe('PO_IN_USE');
+    expect(await poStatus(p.id)).toBe('approved');
+    expect(await validInvoiceLines(p.id)).toBe(1);
+  });
+
+  it('待确认的采购单登记了发票：撤回同样拒绝（PO_IN_USE），发票作废以后可以撤回', async () => {
+    // 不是需求单转的、超过免确认门槛：提交后待负责人确认
+    const res = await po([{ materialId: other.id, purchaseQtyMilli: q(10), priceCents: 25_000 }]);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const p = res.body.po as { id: number; status: string; totalCents: number; withdrawable: boolean };
+    expect(p).toMatchObject({ status: 'submitted', withdrawable: true });
+    const inv = await invoice(p.id, p.totalCents);
+    expect(inv.status, JSON.stringify(inv.body)).toBe(201);
+    expect((await api(ctx.app, buyer, 'GET', `/api/purchase-orders/${p.id}`)).body.withdrawable).toBe(false);
+    const refused = await withdraw(p.id);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.code).toBe('PO_IN_USE');
+    const voided = await api(ctx.app, boss, 'POST', `/api/erp/payments/invoices/${inv.body.invoice.id}/void`, { reason: '登错了采购单' });
+    expect(voided.status, JSON.stringify(voided.body)).toBeLessThan(300);
+    const ok = await withdraw(p.id);
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(ok.body.status).toBe('cancelled');
+    // 撤回以后：登记发票、三单放行都拒绝（锁住采购单以后核对状态）
+    const late = await invoice(p.id, p.totalCents);
+    expect(late.status).toBe(422);
+    expect(late.body.error.code).toBe('PO_NOT_ORDERED');
+    const release = await api(ctx.app, boss, 'POST', `/api/erp/payments/three-way/po/${p.id}/release`, {
+      clientKey: randomUUID(),
+      reason: '撤回以后不该再放行',
+      seen: { poTotalCents: p.totalCents, receivedCents: 0, invoicedCents: 0 },
+    });
+    expect(release.status, JSON.stringify(release.body)).toBe(422);
+    expect(release.body.error.code).toBe('PO_NOT_ORDERED');
+    expect(await validInvoiceLines(p.id)).toBe(0);
   });
 });
 

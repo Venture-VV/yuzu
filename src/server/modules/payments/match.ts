@@ -222,8 +222,11 @@ export async function createInvoice(deps: Deps, raw: unknown, actor: Actor, ip?:
       if (existing) return { id: existing, replayed: true };
       const [sup] = await tx<{ id: number }[]>`SELECT id FROM suppliers WHERE id = ${input.supplierId}`;
       if (!sup) throw notFound('供应商不存在');
+      // 8.0.2：先按 id 升序锁住选的采购单，锁住以后再核对状态。撤回采购单在采购单的排他锁里核对「没有发票」，
+      // 这里的共享锁（KEY SHARE，只与排他锁冲突，两张发票之间不互相等）让两边串行：不会有发票挂在已撤回的采购单上
       const pos = await tx<{ id: number; docNo: string; supplierId: number; status: string }[]>`
-        SELECT id, doc_no, supplier_id, status FROM purchase_orders WHERE id IN ${tx(input.lines.map((l) => l.poId))}`;
+        SELECT id, doc_no, supplier_id, status FROM purchase_orders WHERE id IN ${tx(input.lines.map((l) => l.poId))}
+        ORDER BY id FOR KEY SHARE`;
       for (const l of input.lines) {
         const po = pos.find((p) => Number(p.id) === l.poId);
         if (!po) throw unprocessable('PO_NOT_FOUND', '选的采购单不存在，请刷新后重新选');
@@ -289,10 +292,12 @@ export async function releasePo(deps: Deps, poId: number, raw: unknown, actor: A
       await setTxTimeouts(tx);
       const existing = await find(tx);
       if (existing) return { id: existing, replayed: true };
-      const [po] = await tx<{ docNo: string }[]>`SELECT doc_no FROM purchase_orders WHERE id = ${poId} FOR NO KEY UPDATE`;
+      const [po] = await tx<{ docNo: string; status: string }[]>`SELECT doc_no, status FROM purchase_orders WHERE id = ${poId} FOR NO KEY UPDATE`;
       if (!po) throw notFound('采购单不存在');
       const again = await find(tx);
       if (again) return { id: again, replayed: true };
+      // 8.0.2：锁住以后再核对采购单还在下单状态（撤回在采购单的排他锁里核对没有三单放行，两边串行）
+      if (!(PO_ORDERED_STATUSES as readonly string[]).includes(po.status)) throw unprocessable('PO_NOT_ORDERED', `采购单 ${po.docNo} 还没下单（或已撤回），不能放行`);
       const [row] = await poThreeWay(tx, [poId]);
       if (row!.status === 'matched') throw conflict('THREE_WAY_MATCHED', `${po.docNo} 三单对得上，不用放行`);
       if (row!.status === 'released') throw conflict('THREE_WAY_RELEASED', `${po.docNo} 已经放行过（金额没变）`);
