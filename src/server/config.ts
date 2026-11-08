@@ -26,6 +26,40 @@ export interface AppConfig {
   mp: MpConfig;
   /** 员工食堂 · 柚子饭堂（docs/CANTEEN.md）：单开的员工端口，只挂柚子饭堂的页面与 /api/canteen/*；没设 CANTEEN_PORT 就不开 */
   canteen: CanteenConfig;
+  /** 短信通道（8.0.4 批量发券的短信通知，docs/MEMBERSHIP_V804.md 第 6 节）：没配时短信留在待发箱，页面导出手动发 */
+  sms: SmsConfig;
+}
+
+/**
+ * 短信通道（SMS_PROVIDER）：
+ *   · aliyun：阿里云短信（SMS_ACCESS_KEY_ID、SMS_ACCESS_KEY_SECRET、SMS_SIGN_NAME、SMS_TEMPLATE_COUPON 都要配；模板要先在阿里云申请）；
+ *   · mock：不真发、直接记「已发」，只给开发、测试用（APP_ENV=production 时不认，免得正式服以为发出去了）；
+ *   · 不配：不发，留在待发箱。
+ * 密钥只放 .env，不进 Git、不写日志。
+ */
+export interface SmsConfig {
+  provider: 'aliyun' | 'mock' | null;
+  accessKeyId: string;
+  accessKeySecret: string;
+  signName: string;
+  /** 「券到账」的模板编号（模板变量 count、coupon、validTo） */
+  templateCoupon: string;
+  endpoint: string;
+}
+
+export function loadSmsConfig(env: NodeJS.ProcessEnv, appEnv: AppEnv): SmsConfig {
+  const raw = env.SMS_PROVIDER?.trim().toLowerCase() || '';
+  const cfg: SmsConfig = {
+    provider: null,
+    accessKeyId: env.SMS_ACCESS_KEY_ID?.trim() ?? '',
+    accessKeySecret: env.SMS_ACCESS_KEY_SECRET?.trim() ?? '',
+    signName: env.SMS_SIGN_NAME?.trim() ?? '',
+    templateCoupon: env.SMS_TEMPLATE_COUPON?.trim() ?? '',
+    endpoint: env.SMS_ENDPOINT?.trim() || 'https://dysmsapi.aliyuncs.com/',
+  };
+  if (raw === 'aliyun' && cfg.accessKeyId && cfg.accessKeySecret && cfg.signName && cfg.templateCoupon) cfg.provider = 'aliyun';
+  else if (raw === 'mock' && appEnv !== 'production') cfg.provider = 'mock';
+  return cfg;
 }
 
 export interface CanteenConfig {
@@ -131,6 +165,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         : null,
     mp,
     canteen: overrides.canteen ?? loadCanteenConfig(process.env, mainPort, mp.port),
+    sms: overrides.sms ?? loadSmsConfig(process.env, env),
     ...overrides,
   };
 }

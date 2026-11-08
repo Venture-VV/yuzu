@@ -27,7 +27,8 @@ export const COUPON_RULE_KIND_LABELS: Record<CouponRuleKind, string> = {
  * 发券记录的种类：手动发给会员、无记名批次、四种自动规则，加上会员权益（v0.7.24，每期发放与事件礼，docs/BENEFITS.md）、
  * 小程序领取（v0.7.27，会员在小程序「领券中心」领的，docs/MP_COUPONS.md）
  */
-export const COUPON_ISSUE_KINDS = ['manual', 'batch', ...COUPON_RULE_KINDS, 'benefit', 'mp_claim'] as const;
+/** 8.0.4 起还有「批量发券」（campaign，按档级、标签圈一批会员发，docs/MEMBERSHIP_V804.md 第 6 节） */
+export const COUPON_ISSUE_KINDS = ['manual', 'batch', ...COUPON_RULE_KINDS, 'benefit', 'mp_claim', 'campaign'] as const;
 export type CouponIssueKind = (typeof COUPON_ISSUE_KINDS)[number];
 export const COUPON_ISSUE_KIND_LABELS: Record<CouponIssueKind, string> = {
   manual: '手动发',
@@ -35,6 +36,7 @@ export const COUPON_ISSUE_KIND_LABELS: Record<CouponIssueKind, string> = {
   ...COUPON_RULE_KIND_LABELS,
   benefit: '会员权益',
   mp_claim: '小程序领取',
+  campaign: '批量发券',
 };
 
 /** 手动发券一次最多几张；无记名券一批最多几张 */

@@ -4,13 +4,11 @@ import { lastUsableDate } from '@shared/business-date';
 import { channelLabel } from '@shared/members';
 import { spendQuotaText } from '@shared/spend-quota';
 import type { MemberDetail as Member } from '@shared/types';
-import { useActivity } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
 import { avatarTone, cn, formatDate, formatTime, relativeTime } from '../../lib/utils';
-import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
-import { Badge, Button, Card, IconButton, SectionTitle, Skeleton } from '../../components/ui';
-import { ActivityRow } from './ActivityList';
+import { Badge, Button, Card, IconButton, Skeleton } from '../../components/ui';
+import { MemberRecordsCard } from './MemberRecordsCard';
 import { BonusLotsCard, MemberCouponsCard } from './MemberExtras';
 import { GradeBadge } from '../membership/GradeBadge';
 import { GradeCard } from '../membership/GradeCard';
@@ -41,7 +39,6 @@ export function MemberDetail({
 }) {
   const can = useCan();
   const session = useSession();
-  const activity = useActivity(member.id);
   const total = member.principalBalance + member.bonusBalance;
   // 有到期时间的赠金（先到期的在前）；长期有效的不提示
   const expiring = (member.bonusLots ?? []).filter((l) => l.expiresAt !== null);
@@ -235,27 +232,8 @@ export function MemberDetail({
       {/* 旧系统流水（v0.7.28）：从旧 EBC 导入的逐笔记录，只读；没有的会员不显示 */}
       <MemberHistoryCard key={`legacy-history-${member.id}`} member={member} />
 
-      {/* 余额记录 */}
-      <Card className="p-2">
-        <SectionTitle className="px-3 pt-2.5 pb-1.5" aside={<span className="text-[12px] text-ink-3">本金 · 赠金分别记录</span>}>
-          余额记录
-        </SectionTitle>
-        {activity.isPending ? (
-          <div className="space-y-2 p-2">
-            {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-16" />
-            ))}
-          </div>
-        ) : (activity.data ?? []).length === 0 ? (
-          <EmptyState art="pool" title="还没有余额记录" description="充值后这里会出现每一笔余额变化。" />
-        ) : (
-          <div className="divide-y divide-line/70">
-            {activity.data!.map((row) => (
-              <ActivityRow key={row.id} row={row} onReverse={can('consume.reverse') ? onReverse : undefined} />
-            ))}
-          </div>
-        )}
-      </Card>
+      {/* 充值记录与消费记录（8.0.4 需求表 07）：原来的「余额记录」拆成两块，可分别查询、导出，上面是收支比例 */}
+      <MemberRecordsCard key={`records-${member.id}`} member={member} onReverse={can('consume.reverse') ? onReverse : undefined} />
     </div>
   );
 }

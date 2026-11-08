@@ -16,8 +16,13 @@ import { loadSettings } from './settings';
 
 export interface LedgerFilter {
   date?: string;
+  /** 营业日起止（含两头，8.0.4 会员的充值记录、消费记录） */
+  from?: string;
+  to?: string;
   memberId?: number;
   type?: EntryType;
+  /** 几种余额流水（8.0.4 会员的充值记录、消费记录） */
+  types?: readonly EntryType[];
   staffId?: number;
   q?: string;
   limit?: number;
@@ -65,6 +70,9 @@ export async function listLedger(db: Db, f: LedgerFilter): Promise<LedgerRow[]> 
       ${f.date ? db`AND le.business_date = ${f.date}` : db``}
       ${f.memberId ? db`AND le.member_id = ${f.memberId}` : db``}
       ${f.type ? db`AND le.entry_type = ${f.type}` : db``}
+      ${f.types ? db`AND le.entry_type IN ${db(f.types.length ? [...f.types] : ['-'])}` : db``}
+      ${f.from ? db`AND le.business_date >= ${f.from}` : db``}
+      ${f.to ? db`AND le.business_date <= ${f.to}` : db``}
       ${f.staffId ? db`AND le.operator_id = ${f.staffId}` : db``}
       ${like ? db`AND (m.name ILIKE ${like} OR m.phone LIKE ${like} OR m.member_no ILIKE ${like} OR le.doc_no ILIKE ${like})` : db``}
     ORDER BY le.id DESC

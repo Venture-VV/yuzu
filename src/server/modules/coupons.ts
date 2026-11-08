@@ -266,7 +266,7 @@ export async function updateTemplate(deps: Deps, id: number, raw: unknown, ctx: 
 
 // ───────────────────────── 发券 ─────────────────────────
 
-interface LockedTemplate extends CouponTerms {
+export interface LockedTemplate extends CouponTerms {
   id: number;
   name: string;
   validity: 'fixed' | 'days';
@@ -287,7 +287,7 @@ async function readTemplate(db: Db, id: number, lock: boolean): Promise<LockedTe
 }
 
 /** 发券前对模板加共享锁（改模板加排他锁，两边串行） */
-async function lockTemplate(tx: Tx, id: number): Promise<LockedTemplate | null> {
+export async function lockTemplate(tx: Tx, id: number): Promise<LockedTemplate | null> {
   return readTemplate(tx, id, true);
 }
 
@@ -303,7 +303,7 @@ function newCode(): string {
   return s;
 }
 
-interface IssueSpec {
+export interface IssueSpec {
   kind: CouponIssueKind;
   template: LockedTemplate;
   memberId: number | null;
@@ -319,13 +319,15 @@ interface IssueSpec {
   date: string;
   /** 指定有效期（会员权益的券类：到本期最后一天）；不给按模板算 */
   range?: { from: string; to: string };
+  /** 批量发券（8.0.4）的发券单 */
+  campaignId?: number | null;
 }
 
 /**
  * 写一次发券（在调用方的事务里，模板已加共享锁）：发券记录 + quantity 张券。自动发券带去重键，已发过返回 null；
  * 模板固定有效期已过：手动、批次报错，自动的跳过（返回 null）
  */
-async function writeIssue(tx: Tx, o: IssueSpec): Promise<{ issueId: number; issueNo: string; couponIds: number[] } | null> {
+export async function writeIssue(tx: Tx, o: IssueSpec): Promise<{ issueId: number; issueNo: string; couponIds: number[] } | null> {
   const range = o.range ?? validRange(o.template, o.date);
   if (!range) {
     if (o.dedupeKey) return null;
@@ -334,9 +336,9 @@ async function writeIssue(tx: Tx, o: IssueSpec): Promise<{ issueId: number; issu
   const issueNo = await nextDocNo(tx, 'coupon_issue', 'FQ', o.date);
   const [row] = await tx<{ id: number }[]>`
     INSERT INTO coupon_issues (issue_no, kind, template_id, member_id, quantity, rule_id, recharge_id, level, reason, client_key, dedupe_key,
-                               issued_by, issued_at, business_date)
+                               issued_by, issued_at, business_date, campaign_id)
     VALUES (${issueNo}, ${o.kind}, ${o.template.id}, ${o.memberId}, ${o.quantity}, ${o.ruleId ?? null}, ${o.rechargeId ?? null}, ${o.level ?? null},
-            ${o.reason ?? ''}, ${o.clientKey ?? null}, ${o.dedupeKey ?? null}, ${o.staffId}, ${o.at}, ${o.date})
+            ${o.reason ?? ''}, ${o.clientKey ?? null}, ${o.dedupeKey ?? null}, ${o.staffId}, ${o.at}, ${o.date}, ${o.campaignId ?? null})
     ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
     RETURNING id`;
   if (!row) return null;

@@ -54,6 +54,8 @@ export const FENCED_OPS = [
   'coupon_rule',
   'coupon_batch',
   'coupon_issue',
+  // 批量发券（8.0.4，迁移 094）：编号记在发券单上（coupon_campaigns.client_key）
+  'coupon_campaign',
   // 硬件连接（v0.7.21）：编号记在设备、打印任务上（client_key）
   'device_create',
   'device_job',
@@ -159,7 +161,7 @@ export async function fenceKey(
   return { inserted: rows.length > 0 };
 }
 
-const COUPON_OPS = ['coupon_template', 'coupon_rule', 'coupon_batch', 'coupon_issue'] as const;
+const COUPON_OPS = ['coupon_template', 'coupon_rule', 'coupon_batch', 'coupon_issue', 'coupon_campaign'] as const;
 type CouponOp = (typeof COUPON_OPS)[number];
 export const isCouponOp = (op: string): op is CouponOp => (COUPON_OPS as readonly string[]).includes(op);
 
@@ -170,7 +172,9 @@ export async function couponOpRef(db: Db, key: string, opType: CouponOp): Promis
       ? await db<{ id: number }[]>`SELECT id FROM coupon_templates WHERE client_key = ${key}`
       : opType === 'coupon_rule'
         ? await db<{ id: number }[]>`SELECT id FROM coupon_rules WHERE client_key = ${key}`
-        : await db<{ id: number }[]>`SELECT id FROM coupon_issues WHERE client_key = ${key} AND kind = ${opType === 'coupon_batch' ? 'batch' : 'manual'}`;
+        : opType === 'coupon_campaign'
+          ? await db<{ id: number }[]>`SELECT id FROM coupon_campaigns WHERE client_key = ${key}`
+          : await db<{ id: number }[]>`SELECT id FROM coupon_issues WHERE client_key = ${key} AND kind = ${opType === 'coupon_batch' ? 'batch' : 'manual'}`;
   return rows[0] ? Number(rows[0].id) : null;
 }
 

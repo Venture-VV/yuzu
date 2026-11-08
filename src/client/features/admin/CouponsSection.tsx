@@ -7,6 +7,7 @@
 // 默认店主、店总（「维护券模板、发券规则与无记名券」）；按批次作废还要「作废券」。会员的券在会员详情里看、发、作废。
 
 import { useMemo, useState, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Ban, CopyPlus, Download, Plus, Search } from 'lucide-react';
 import { ISO_DATE } from '@shared/business-date';
@@ -58,17 +59,20 @@ import {
   useInvalidateCoupons,
 } from '../coupons/queries';
 import { AdminPage } from './AdminShell';
+import { CampaignsCard } from './CampaignsCard';
 
-type Tab = 'templates' | 'rules' | 'batches' | 'stats';
+type Tab = 'templates' | 'rules' | 'campaigns' | 'batches' | 'stats';
 const TABS: { value: Tab; label: string }[] = [
   { value: 'templates', label: '券模板' },
   { value: 'rules', label: '发券规则' },
+  // 批量发券（8.0.4 需求表 06）
+  { value: 'campaigns', label: '批量发券' },
   { value: 'batches', label: '无记名券' },
   { value: 'stats', label: '统计' },
 ];
 
 /** 后台页面上方列出的「结果待确认」：后台的三种，另加发券给会员（店主在这里也能处理） */
-const COUPON_PENDING_TYPES = ['coupon_template', 'coupon_rule', 'coupon_batch', 'coupon_issue'] as const;
+const COUPON_PENDING_TYPES = ['coupon_template', 'coupon_rule', 'coupon_batch', 'coupon_issue', 'coupon_campaign'] as const;
 
 /** 没收到结果时的提示：记录留在本机，到页面上方处理 */
 const pendingToast = (label: string) => ({
@@ -78,7 +82,9 @@ const pendingToast = (label: string) => ({
 });
 
 export function CouponsSection() {
-  const [tab, setTab] = useState<Tab>('templates');
+  // 别的页面可以带 ?tab= 直接打开某一页（「会员权益」的「看使用率」）
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState<Tab>(() => TABS.find((t) => t.value === params.get('tab'))?.value ?? 'templates');
   const invalidateCoupons = useInvalidateCoupons();
   return (
     <AdminPage
@@ -96,7 +102,7 @@ export function CouponsSection() {
           className="max-w-full flex-wrap"
           options={TABS.map((t) => ({ value: t.value, label: <span data-testid={`coupon-tab-${t.value}`}>{t.label}</span> }))}
         />
-        {tab === 'templates' ? <TemplatesCard /> : tab === 'rules' ? <RulesCard /> : tab === 'batches' ? <BatchesCard /> : <StatsCard />}
+        {tab === 'templates' ? <TemplatesCard /> : tab === 'rules' ? <RulesCard /> : tab === 'campaigns' ? <CampaignsCard /> : tab === 'batches' ? <BatchesCard /> : <StatsCard />}
       </div>
     </AdminPage>
   );

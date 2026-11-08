@@ -42,6 +42,7 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   coupon_template: ['coupon.manage'],
   coupon_rule: ['coupon.manage'],
   coupon_batch: ['coupon.manage'],
+  coupon_campaign: ['coupon.manage'],
   coupon_issue: ['coupon.issue'],
   // 硬件连接（v0.7.21）
   device_create: ['device.manage'],
@@ -104,6 +105,7 @@ const READ: Record<ErpOpType, Permission[]> = {
   coupon_template: ['coupon.manage'],
   coupon_rule: ['coupon.manage'],
   coupon_batch: ['coupon.manage'],
+  coupon_campaign: ['coupon.manage'],
   coupon_issue: ['coupon.issue'],
   device_create: ['device.manage'],
   device_job: ['device.test'],
