@@ -12,6 +12,7 @@ import { todayIn } from '../src/server/modules/inventory/common';
 import { createStaff } from '../src/server/modules/staff';
 import { seedInventoryDemo } from '../src/server/seed-inventory';
 import { consistencyChecks } from '../src/server/ops/consistency';
+import { loadLedger } from '../src/server/modules/invoices';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
@@ -365,4 +366,80 @@ describe('进项发票台账（BI07–BI12）', () => {
     expect(csv.body).toContain('发票号码');
     expect(csv.body).toContain('ZP-0001');
   });
+
+  // 8.0.3 测试会话 P2（PR #77 · 1a1069a）：列表先取最新 1000 张、再在内存里筛「认证将到期」「异常票」，旧的逾期票查不到。
+  // 放在最后：插的 1000 张新票不影响前面的用例。
+  it('1000 张新票 + 1 张旧逾期票：将到期、异常视图都在 SQL 里先筛再取，旧票照样列出；上方数字不受张数限制；SQL 与逐张标记同一口径', async () => {
+    const before = (await ledger('?view=due')).invoices.length;
+    const old = (
+      await ok(
+        api(ctx.app, payer, 'POST', '/api/erp/invoices', {
+          clientKey: randomUUID(),
+          kind: 'vat_special',
+          invoiceNo: 'OLD-OVERDUE',
+          issuerName: '旧票供应商',
+          invoiceDate: shiftDate(today, -403),
+          totalCents: 11_300,
+          taxCents: 1_300,
+          taxRateBp: 1300,
+        }),
+      )
+    ).invoice;
+    // 与报销金额不符：台账里的票 113 元，报销 50 元按号码关联上
+    await ok(
+      api(ctx.app, payer, 'POST', '/api/erp/invoices', {
+        clientKey: randomUUID(),
+        kind: 'vat_special',
+        invoiceNo: 'MISMATCH-1',
+        issuerName: '金额不符店',
+        invoiceDate: today,
+        totalCents: 11_300,
+        taxCents: 1_300,
+        taxRateBp: 1300,
+      }),
+    );
+    const mismatch = (await ok(claim({ ...special('MISMATCH-1'), invoiceIssuer: '金额不符店', lines: [line({ amountCents: 5_000 })] }))).claim.invoice;
+    await ctx.sql`
+      INSERT INTO supplier_invoices (invoice_no, issuer_name, invoice_date, total_cents, tax_cents, tax_rate_bp, client_key, request_hash, created_by,
+                                     source, kind, kind_label, cert_status)
+      SELECT 'BULK-' || g, '批量新票', ${today}::date, 11300, 1300, 1300, gen_random_uuid(), 'bulk', ${costerId}, 'manual', 'vat_special', '增值税专用发票', 'pending'
+      FROM generate_series(1, 1000) g`;
+
+    const todo = (await api(ctx.app, payer, 'GET', '/api/erp/invoices/todo')).body;
+    const due = await ledger('?view=due');
+    expect(due.invoices.map((r: any) => r.id)).toContain(old.id);
+    expect(due.invoices.length).toBe(before + 1);
+    expect(due.invoices.length).toBe(todo.due);
+    expect(due.counts.due).toBe(todo.due);
+    expect(due.truncated).toBe(false);
+    // 全部有效：最新 1000 张，标明截断；待认证的数字按全部算
+    const all = await ledger('?view=all');
+    expect(all.invoices).toHaveLength(1000);
+    expect(all.truncated).toBe(true);
+    expect(all.invoices.map((r: any) => r.id)).not.toContain(old.id);
+    expect(all.counts.pending).toBeGreaterThan(1000);
+    // 异常票：旧逾期票、与报销金额不符的都在
+    const anomaly = await ledger('?view=anomaly');
+    expect(anomaly.invoices.map((r: any) => r.id)).toEqual(expect.arrayContaining([old.id, mismatch.id]));
+    expect(anomaly.invoices.find((r: any) => r.id === old.id).anomalies).toEqual(['cert_overdue']);
+    expect(anomaly.invoices.find((r: any) => r.id === mismatch.id).anomalies).toEqual(['amount_mismatch']);
+    expect(anomaly.counts.anomaly).toBe(anomaly.invoices.length);
+    // SQL 的筛法与逐张算的异常标记一致（这个文件里造过重号、税额不符、税率不符、过期、开票方未填、金额不符）
+    const everything = await loadLedger(ctx.sql, { view: 'all' }, today, 100_000);
+    const flagged = everything.invoices.filter((r) => r.anomalies.length > 0).map((r) => r.id).sort((x, y) => x - y);
+    const viaSql = (await loadLedger(ctx.sql, { view: 'anomaly' }, today, 100_000)).invoices.map((r) => r.id).sort((x, y) => x - y);
+    expect(viaSql).toEqual(flagged);
+    expect(new Set(everything.invoices.flatMap((r) => r.anomalies))).toEqual(
+      new Set(['duplicate_no', 'tax_mismatch', 'rate_not_allowed', 'cert_overdue', 'amount_mismatch', 'issuer_missing']),
+    );
+    const dueAll = (await loadLedger(ctx.sql, { view: 'due' }, today, 100_000)).invoices.map((r) => r.id).sort((x, y) => x - y);
+    const dueJs = everything.invoices
+      .filter((r) => r.certDueDate !== null && r.certDueDate <= shiftDate(today, 7))
+      .map((r) => r.id)
+      .sort((x, y) => x - y);
+    expect(dueAll).toEqual(dueJs);
+    // 导出不受列表 1000 张的限制
+    const csv = await ctx.app.inject({ method: 'GET', url: '/api/erp/invoices/export?view=all', headers: { cookie: payer } });
+    expect(csv.body).toContain('OLD-OVERDUE');
+  }, 60_000);
 });

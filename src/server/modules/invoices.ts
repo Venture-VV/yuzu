@@ -106,14 +106,46 @@ interface RawRow {
   claimAmountCents: string | null;
 }
 
+/** 同号码（去空白、不分大小写）的有效发票张数 */
+const sameNoSql = (db: Db) => db`(
+  SELECT count(*) FROM supplier_invoices d
+  WHERE d.status = 'valid' AND upper(regexp_replace(d.invoice_no, '\\s', '', 'g')) = upper(regexp_replace(i.invoice_no, '\\s', '', 'g')))`;
+
+/** 关联的报销单：有效的那张，没有有效的取最近一张（别名 c） */
+const claimJoinSql = (db: Db) => db`LEFT JOIN LATERAL (
+  SELECT x.id, x.doc_no, x.status, x.amount_cents FROM expense_claims x WHERE x.invoice_id = i.id
+  ORDER BY (x.status IN ('submitted', 'returned', 'confirmed')) DESC, x.id DESC LIMIT 1
+) c ON true`;
+
+/** 认证将到期（含已过期）：有效、待认证、规则设了期限，期限在今天 + 提醒天数以内（与 dueOf、invoiceTodo 同一口径） */
+function dueSql(db: Db, rules: ExpenseRules, today: string): Fragment {
+  if (rules.invoiceCertifyDays <= 0) return db`false`;
+  return db`(i.status = 'valid' AND i.cert_status = 'pending' AND i.invoice_date + ${rules.invoiceCertifyDays}::int <= ${shiftDate(today, rules.invoiceRemindDays)}::date)`;
+}
+
+/**
+ * 异常票：与 anomaliesOf 同一口径，放在 SQL 里先筛、再取前若干张（8.0.3 测试会话 P2：先取最新 1000 张再在内存里筛，旧的异常票、逾期票会漏掉）。
+ * 税额按「价税合计 × 税率 ÷ (1 + 税率)」四舍五入到分（金额都不为负，与 expectedTaxCents 一致）。
+ */
+function anomalySql(db: Db, rules: ExpenseRules, today: string): Fragment {
+  const kinds = rules.invoiceTypes.map((t) => t.key);
+  const allowed = rules.invoiceTypes.flatMap((t) => t.taxRatesBp.map((bp) => `${t.key}:${bp}`));
+  return db`(i.status = 'valid' AND (
+    ${sameNoSql(db)} > 1
+    OR abs(i.tax_cents - round(i.total_cents::numeric * i.tax_rate_bp / (10000 + i.tax_rate_bp))) > ${rules.invoiceTaxToleranceCents}
+    OR (i.kind = ANY(${kinds}::text[]) AND NOT ((i.kind || ':' || i.tax_rate_bp) = ANY(${allowed}::text[])))
+    ${rules.invoiceCertifyDays > 0 ? db`OR (i.cert_status = 'pending' AND i.invoice_date + ${rules.invoiceCertifyDays}::int < ${today}::date)` : db``}
+    OR (c.status IN ('submitted', 'returned', 'confirmed') AND c.amount_cents <> i.total_cents)
+    OR (i.supplier_id IS NULL AND btrim(i.issuer_name) = '')))`;
+}
+
 async function rowsWhere(db: Db, where: Fragment, limit = 1000): Promise<RawRow[]> {
   return db<RawRow[]>`
     SELECT i.id, i.invoice_no, i.kind, i.kind_label, i.supplier_id, s.name AS supplier_name, i.issuer_name, i.invoice_date,
            i.total_cents::text AS total_cents, i.tax_cents::text AS tax_cents, i.tax_rate_bp, i.source, i.status, i.note,
            i.cert_status, i.cert_period, i.cert_note, cb.display_name AS cert_by_name, i.cert_at, i.cert_version,
            cr.display_name AS created_by_name, i.created_at, vb.display_name AS voided_by_name, i.voided_at, i.void_reason,
-           (SELECT count(*) FROM supplier_invoices d
-             WHERE d.status = 'valid' AND upper(regexp_replace(d.invoice_no, '\\s', '', 'g')) = upper(regexp_replace(i.invoice_no, '\\s', '', 'g')))::int AS same_no,
+           ${sameNoSql(db)}::int AS same_no,
            (SELECT count(*) FROM supplier_invoice_attachments a WHERE a.invoice_id = i.id)::int AS attachment_count,
            c.id AS claim_id, c.doc_no AS claim_doc_no, c.status AS claim_status, c.amount_cents::text AS claim_amount_cents
     FROM supplier_invoices i
@@ -121,10 +153,7 @@ async function rowsWhere(db: Db, where: Fragment, limit = 1000): Promise<RawRow[
     JOIN staff cr ON cr.id = i.created_by
     LEFT JOIN staff cb ON cb.id = i.cert_by
     LEFT JOIN staff vb ON vb.id = i.voided_by
-    LEFT JOIN LATERAL (
-      SELECT x.id, x.doc_no, x.status, x.amount_cents FROM expense_claims x WHERE x.invoice_id = i.id
-      ORDER BY (x.status IN ('submitted', 'returned', 'confirmed')) DESC, x.id DESC LIMIT 1
-    ) c ON true
+    ${claimJoinSql(db)}
     WHERE ${where}
     ORDER BY i.invoice_date DESC, i.id DESC
     LIMIT ${limit}`;
@@ -210,37 +239,43 @@ const LedgerQuery = z.object({
   q: z.string().trim().max(60).optional(),
 });
 
-function inDue(r: InputInvoice, today: string, remindDays: number) {
-  return r.certDueDate !== null && r.certDueDate <= shiftDate(today, remindDays);
-}
+/** 列表一次最多几张（更多的缩短日期或导出）；导出最多几张 */
+const LEDGER_LIMIT = 1000;
+const EXPORT_LIMIT = 50_000;
 
-export async function loadLedger(db: Db, raw: unknown, today: string): Promise<InvoiceLedger> {
+export async function loadLedger(db: Db, raw: unknown, today: string, limit = LEDGER_LIMIT): Promise<InvoiceLedger> {
   const f = parse(LedgerQuery, raw ?? {});
   const rules = await loadExpenseRules(db);
   const q = f.q ? `%${f.q.replace(/[\\%_]/g, (m) => `\\${m}`)}%` : null;
   const where = db`true
     ${f.view === 'voided' ? db`AND i.status = 'voided'` : db`AND i.status = 'valid'`}
-    ${f.view === 'pending' || f.view === 'due' ? db`AND i.cert_status = 'pending'` : db``}
+    ${f.view === 'pending' ? db`AND i.cert_status = 'pending'` : db``}
+    ${f.view === 'due' ? db`AND ${dueSql(db, rules, today)}` : db``}
+    ${f.view === 'anomaly' ? db`AND ${anomalySql(db, rules, today)}` : db``}
     ${f.view === 'certified' ? db`AND i.cert_status = 'certified'` : db``}
     ${f.view === 'not_required' ? db`AND i.cert_status = 'not_required'` : db``}
     ${f.source ? db`AND i.source = ${f.source}` : db``}
     ${f.from ? db`AND i.invoice_date >= ${f.from}` : db``}
     ${f.to ? db`AND i.invoice_date <= ${f.to}` : db``}
     ${q ? db`AND (i.invoice_no ILIKE ${q} OR i.issuer_name ILIKE ${q} OR s.name ILIKE ${q})` : db``}`;
-  const rows = await rowsWhere(db, where);
-  const pos = await poSplits(db, rows.map((r) => Number(r.id)));
-  let invoices = rows.map((r) => toInvoice(r, pos.get(Number(r.id)) ?? [], rules, today));
-  if (f.view === 'due') invoices = invoices.filter((r) => inDue(r, today, rules.invoiceRemindDays));
-  if (f.view === 'anomaly') invoices = invoices.filter((r) => r.anomalies.length > 0);
-  // 上方的数字：全部有效的发票
-  const all = (await rowsWhere(db, db`i.status = 'valid'`, 100_000)).map((r) => toInvoice(r, [], rules, today));
+  // 多取一张看有没有截断
+  const rows = await rowsWhere(db, where, limit + 1);
+  const truncated = rows.length > limit;
+  const shown = truncated ? rows.slice(0, limit) : rows;
+  const pos = await poSplits(db, shown.map((r) => Number(r.id)));
+  const invoices = shown.map((r) => toInvoice(r, pos.get(Number(r.id)) ?? [], rules, today));
+  // 上方的数字：全部有效的发票，在 SQL 里数（不受列表张数限制）
+  const [counts] = await db<{ pending: number; due: number; anomaly: number }[]>`
+    SELECT count(*) FILTER (WHERE i.cert_status = 'pending')::int AS pending,
+           count(*) FILTER (WHERE ${dueSql(db, rules, today)})::int AS due,
+           count(*) FILTER (WHERE ${anomalySql(db, rules, today)})::int AS anomaly
+    FROM supplier_invoices i
+    ${claimJoinSql(db)}
+    WHERE i.status = 'valid'`;
   return {
     invoices,
-    counts: {
-      pending: all.filter((r) => r.certStatus === 'pending').length,
-      due: all.filter((r) => inDue(r, today, rules.invoiceRemindDays)).length,
-      anomaly: all.filter((r) => r.anomalies.length > 0).length,
-    },
+    truncated,
+    counts: counts!,
     rules: { certifyDays: rules.invoiceCertifyDays, remindDays: rules.invoiceRemindDays, taxToleranceCents: rules.invoiceTaxToleranceCents },
   };
 }
@@ -609,7 +644,7 @@ export async function ledgerChecks(db: Db): Promise<string[]> {
 }
 
 async function ledgerCsv(db: Db, raw: unknown, today: string) {
-  const ledger = await loadLedger(db, raw, today);
+  const ledger = await loadLedger(db, raw, today, EXPORT_LIMIT);
   return toCsv([
     ['发票号码', '发票类型', '开票方', '开票日', '价税合计', '税额', '税率', '来源', '关联单据', '认证状态', '所属期', '认证期限', '异常', '照片', '状态', '登记人', '登记时间'],
     ...ledger.invoices.map((r) => [

@@ -101,7 +101,10 @@ export const INVOICE_VIEW_LABELS: Record<InvoiceView, string> = {
 };
 
 export interface InvoiceLedger {
+  /** 按开票日从新到旧，最多 1000 张（导出最多 5 万张） */
   invoices: InputInvoice[];
+  /** 这个视图里还有更多（只列出最新的）：缩短日期范围或导出 */
+  truncated: boolean;
   /** 页面上方的数字（有效的发票） */
   counts: { pending: number; due: number; anomaly: number };
   rules: { certifyDays: number; remindDays: number; taxToleranceCents: number };
