@@ -795,9 +795,11 @@ export async function returnPo(deps: Deps, poId: number, raw: unknown, actor: Ac
 }
 
 /**
- * 撤回：草稿、待确认、退回的采购单；已确认的只有「提交即确认、没经过人审批」的（需求单转的、没超过免确认门槛的，8.0.1 CG04）
- * 在还没有报销、发票、三单放行时可以撤回（与以前待确认时撤回一样），需求行回到未下单；人审批过的照旧只能关闭。都要还没有收货。
+ * 撤回：草稿、待确认、退回的采购单；已确认的只有「提交即确认、没经过人审批」的（需求单转的、没超过免确认门槛的，8.0.1 CG04），
+ * 需求行回到未下单；人审批过的照旧只能关闭。都要还没有收货，也还没有报销、发票、三单放行（8.0.2 起待确认、退回的也核对：
+ * 待确认的单也能登记发票，撤回了发票就挂在已撤回的单上）。
  * 返回不能撤回的原因（错误码与说明），能撤回返回 null；撤回时在采购单的锁里调用，详情页只读地调用（显示「撤回」按钮）。
+ * 登记发票先对采购单加共享锁、锁住以后再核对状态，与这里串行；按采购单报销、三单放行也先锁采购单（8.0.2）。
  */
 async function withdrawBlock(db: Db, poId: number): Promise<{ code: string; message: string } | null> {
   const [po] = await db<{ status: PoStatus; backfill: boolean; reviewed: number; used: number; receipts: number }[]>`
@@ -814,9 +816,16 @@ async function withdrawBlock(db: Db, poId: number): Promise<{ code: string; mess
   if (!po) return { code: 'NOT_FOUND', message: '采购单不存在' };
   if (po.status === 'approved') {
     if (po.backfill || po.reviewed > 0) return { code: 'INVALID_STATE', message: '已确认的采购单不能撤回；不再到货请关闭' };
-    if (po.used > 0) return { code: 'PO_IN_USE', message: '这张采购单已经有报销、发票或三单放行，不能撤回；不再到货请关闭' };
   } else if (!['draft', 'submitted', 'returned'].includes(po.status)) {
     return { code: 'INVALID_STATE', message: '已确认的采购单不能撤回；不再到货请关闭' };
+  }
+  if (po.used > 0) {
+    return {
+      code: 'PO_IN_USE',
+      message: po.status === 'approved'
+        ? '这张采购单已经有报销、发票或三单放行，不能撤回；不再到货请关闭'
+        : '这张采购单已经有发票、报销或三单放行，不能撤回；发票登错了请先作废发票',
+    };
   }
   if (po.receipts > 0) return { code: 'PO_HAS_RECEIPTS', message: '这张采购单已有收货，不能撤回；请负责人确认后关闭' };
   return null;
