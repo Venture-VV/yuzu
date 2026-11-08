@@ -11,6 +11,7 @@ import { relativeTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { HBars, Kpi, PeriodPicker, presetRange, type Period } from './charts';
+import { TagMembersCard } from './TagMembersCard';
 
 export function MembersTab() {
   const session = useSession();
@@ -115,6 +116,8 @@ export function MembersTab() {
           </>
         )
       )}
+      {/* 按会员标签筛选、导出（8.0.4 需求表 05） */}
+      <TagMembersCard />
     </div>
   );
 }

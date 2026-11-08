@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf } from '@shared/business-date';
-import { checkCustomValues, type MemberCustomValues } from '@shared/member-fields';
 import { MEMBER_CHANNEL_KEY, type BonusLotRow } from '@shared/members';
 import type { LedgerRow, MemberDetail, MemberSummary } from '@shared/types';
 import { looksLikeCardNo, normalizeCardNo } from '@shared/member-cards';
@@ -19,11 +18,12 @@ import { onMemberSaved } from './benefits';
 import { listLedger } from './ledger';
 import { memberGradeInfo } from './membership';
 import { loadSettings } from './settings';
+import { memberTagsOf, setMemberTags, TagIdsField } from './member-tags';
 import { spendQuotaOf } from './spend-quota';
 
 const MEMBER_COLUMNS = (db: Db) => db`
   m.id, m.member_no, m.name, m.phone, m.gender, m.birthday::text AS birthday, m.note,
-  m.principal_balance, m.bonus_balance, m.status, m.is_synthetic, m.created_at, m.custom_fields, m.channel,
+  m.principal_balance, m.bonus_balance, m.status, m.is_synthetic, m.created_at, m.channel,
   m.grade, m.tier, m.cycle_end, m.grace_until, m.merged_into_id,
   (SELECT max(le.created_at) FROM ledger_entries le WHERE le.member_id = m.id) AS last_activity_at`;
 
@@ -36,8 +36,8 @@ const MemberInput = z.object({
   gender: z.enum(['female', 'male']).nullable().default(null),
   birthday: z.iso.date('生日格式应为 YYYY-MM-DD').nullable().default(null),
   note: z.string().trim().max(200, '备注最多 200 字').default(''),
-  /** 自定义字段的值（键为字段编号）；编辑时不带则保持原值 */
-  customFields: z.record(z.string(), z.unknown(), '自定义字段格式不正确').optional(),
+  /** 会员标签（8.0.4，替代原来的自定义字段）：整组替换；编辑时不带则保持原样 */
+  tagIds: TagIdsField.optional(),
   /** 渠道来源的编号；编辑时不带则保持原值，null 为清空 */
   channel: z.string().regex(MEMBER_CHANNEL_KEY, '渠道来源不正确').nullable().optional(),
 });
@@ -52,6 +52,8 @@ const PhoneChangeInput = z.object({
 const SearchQuery = z.object({
   q: z.string().trim().max(32).default(''),
   limit: z.coerce.number().int().min(1).max(50).default(20),
+  /** 按标签筛（8.0.4 需求表 05） */
+  tagId: z.coerce.number().int().positive().optional(),
 });
 
 export async function getMember(db: Db, id: number): Promise<MemberSummary> {
@@ -74,10 +76,12 @@ export async function activeCardMemberId(db: Db, cardNo: string): Promise<number
   return row ? Number(row.id) : null;
 }
 
-export async function searchMembers(db: Db, q: string, limit: number): Promise<MemberSummary[]> {
+export async function searchMembers(db: Db, q: string, limit: number, tagId?: number): Promise<MemberSummary[]> {
+  // 按标签筛（8.0.4 需求表 05）：只列挂着这个标签的会员
+  const tagged = tagId ? db`AND EXISTS (SELECT 1 FROM member_tag_links tl WHERE tl.member_id = m.id AND tl.tag_id = ${tagId})` : db``;
   if (!q) {
     return db<MemberSummary[]>`
-      SELECT ${MEMBER_COLUMNS(db)} FROM members m
+      SELECT ${MEMBER_COLUMNS(db)} FROM members m WHERE true ${tagged}
       ORDER BY last_activity_at DESC NULLS LAST, m.id DESC LIMIT ${limit}`;
   }
   const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
@@ -87,10 +91,10 @@ export async function searchMembers(db: Db, q: string, limit: number): Promise<M
   const cardMember = looksLikeCardNo(q) ? await activeCardMemberId(db, normalizeCardNo(q)) : null;
   return db<MemberSummary[]>`
     SELECT ${MEMBER_COLUMNS(db)} FROM members m
-    WHERE m.name ILIKE ${like}
+    WHERE (m.name ILIKE ${like}
        OR m.member_no ILIKE ${like}
        OR (${digits.length >= 3} AND m.phone LIKE ${`%${digits}%`})
-       OR m.id = ${cardMember ?? 0}
+       OR m.id = ${cardMember ?? 0}) ${tagged}
     ORDER BY (m.id = ${cardMember ?? 0}) DESC,
              (m.phone = ${digits}) DESC,
              (m.member_no ILIKE ${q}) DESC,
@@ -152,22 +156,11 @@ export async function getMemberDetail(db: Db, id: number, today: string): Promis
     bonusLots: lots.map((l) => ({ remaining: l.remaining, expiresAt: l.expiresAt ? new Date(l.expiresAt).toISOString() : null })),
     opening: opening ?? null,
     mergedInto: mergedInto ? { ...mergedInto, id: Number(mergedInto.id) } : null,
+    // 会员标签（8.0.4 需求表 05）
+    tags: (await memberTagsOf(db, [id])).get(id) ?? [],
     // 充值当日的储值额度（8.0.4 需求表 04）
     spendQuota: await spendQuotaOf(db, id, today, (await loadSettings(db)).rechargeSpendPct),
   };
-}
-
-/** 按当前字段定义核对自定义字段；不合格时 400 并指出字段 */
-async function customValuesFor(
-  db: Db,
-  input: Record<string, unknown>,
-  previous: MemberCustomValues,
-  enforceRequired: boolean,
-): Promise<MemberCustomValues> {
-  const { memberFields } = await loadSettings(db);
-  const result = checkCustomValues(memberFields, input, previous, { enforceRequired });
-  if (!result.ok) throw badRequest(result.message, result.field ? { field: `customFields.${result.field}` } : undefined);
-  return result.values;
 }
 
 /** 渠道来源：新选的渠道必须是后台启用中的；没改的（包括已停用的旧渠道）照常保留 */
@@ -182,7 +175,7 @@ async function channelFor(db: Db, input: string | null | undefined, previous: st
 }
 
 interface InsertMemberOptions {
-  /** false 用于期初导入等批量来源：必填的自定义字段可以先空着，之后编辑会员时再补 */
+  /** 8.0.4 起没有自定义字段（改成标签），这一项不再起作用（保留给原来的调用方：期初导入、演示数据） */
   enforceRequired?: boolean;
   /** false 时不逐位写审计（期初导入整批记一条审计） */
   audit?: boolean;
@@ -196,20 +189,21 @@ interface CreateMemberOptions extends InsertMemberOptions {
 /** 在调用方的事务里建档，返回会员 id。手机号重复时抛出唯一约束错误（members_phone_key），由调用方处理 */
 export async function insertMember(tx: Tx, raw: MemberInputData, ctx: OpContext, options: InsertMemberOptions = {}): Promise<number> {
   const input = parse(MemberInput, raw);
-  const customFields = await customValuesFor(tx, input.customFields ?? {}, {}, options.enforceRequired ?? true);
   const channel = await channelFor(tx, input.channel, null);
   const [row] = await tx<{ id: number }[]>`
-    INSERT INTO members (member_no, name, phone, gender, birthday, note, custom_fields, channel, created_by)
+    INSERT INTO members (member_no, name, phone, gender, birthday, note, channel, created_by)
     VALUES ('YZ' || lpad(nextval('member_no_seq')::text, 5, '0'),
-            ${input.name}, ${input.phone}, ${input.gender}, ${input.birthday}, ${input.note}, ${tx.json(customFields)}, ${channel}, ${ctx.actor.id})
+            ${input.name}, ${input.phone}, ${input.gender}, ${input.birthday}, ${input.note}, ${channel}, ${ctx.actor.id})
     RETURNING id`;
+  // 会员标签（8.0.4）：新建时挂的标签
+  const tags = input.tagIds?.length ? await setMemberTags(tx, row!.id, input.tagIds, ctx.actor.id) : null;
   if (options.audit ?? true) {
     await writeAudit(tx, {
       staffId: ctx.actor.id,
       action: 'member_created',
       targetType: 'member',
       targetId: row!.id,
-      detail: { name: input.name, phone: input.phone },
+      detail: { name: input.name, phone: input.phone, ...(tags?.added.length ? { tags: tags.added } : {}) },
       ip: ctx.ip,
     });
   }
@@ -243,8 +237,8 @@ export function registerMemberRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
   const todayOf = async () => businessDateOf(new Date(), deps.config.timezone, (await loadSettings(sql)).businessDayStartHour);
   app.get('/api/members', { preHandler: guard('member.read') }, async (req) => {
-    const { q, limit } = parse(SearchQuery, req.query);
-    return searchMembers(sql, q, limit);
+    const { q, limit, tagId } = parse(SearchQuery, req.query);
+    return searchMembers(sql, q, limit, tagId);
   });
 
   app.get('/api/members/:id', { preHandler: guard('member.read') }, async (req) => {
@@ -274,9 +268,8 @@ export function registerMemberRoutes(app: FastifyInstance, deps: Deps) {
     const date = await todayOf();
     try {
       await sql.begin(async (tx) => {
-        // 自定义字段在会员行锁内按最新的字段定义核对；没带时保持原值（停用字段的值始终保留）
-        const [locked] = await tx<{ customFields: MemberCustomValues; channel: string | null; birthday: string | null; phone: string; mergedIntoId: number | null }[]>`
-          SELECT custom_fields, channel, birthday::text AS birthday, phone, merged_into_id FROM members WHERE id = ${id} FOR UPDATE`;
+        const [locked] = await tx<{ channel: string | null; birthday: string | null; phone: string; mergedIntoId: number | null }[]>`
+          SELECT channel, birthday::text AS birthday, phone, merged_into_id FROM members WHERE id = ${id} FOR UPDATE`;
         if (!locked) throw notFound('会员不存在');
         // 已合并的会员（v0.7.26）：档案停用、历史单据留在这里，资料不再改
         if (locked.mergedIntoId !== null) throw unprocessable('MEMBER_MERGED', '这位会员已合并到另一位会员，资料不能再改；请到那位会员那里改');
@@ -290,14 +283,14 @@ export function registerMemberRoutes(app: FastifyInstance, deps: Deps) {
             phoneApprover = await consumeMemberPhoneGrant(tx, { grantId: phoneChange.phoneGrantId, actor: req.actor, scope: { memberId: id, phone: input.phone }, usedRef: `member_phone:${id}` });
           }
         }
-        const customFields = input.customFields === undefined ? locked!.customFields : await customValuesFor(tx, input.customFields, locked!.customFields, true);
         const channel = await channelFor(tx, input.channel, locked!.channel);
         await tx`
           UPDATE members SET name = ${input.name}, phone = ${input.phone}, gender = ${input.gender},
-                 birthday = ${input.birthday}, note = ${input.note}, custom_fields = ${tx.json(customFields)}, channel = ${channel}, updated_at = now()
+                 birthday = ${input.birthday}, note = ${input.note}, channel = ${channel}, updated_at = now()
           WHERE id = ${id}`;
-        const keys = new Set([...Object.keys(customFields), ...Object.keys(locked!.customFields)]);
-        const fieldsChanged = [...keys].some((k) => customFields[k] !== locked!.customFields[k]);
+        // 会员标签（8.0.4）：带了才整组替换，在会员一行锁里写
+        const tags = input.tagIds === undefined ? null : await setMemberTags(tx, id, input.tagIds, req.actor.id);
+        const tagsChanged = !!tags && (tags.added.length > 0 || tags.removed.length > 0);
         await writeAudit(tx, {
           staffId: req.actor.id,
           action: 'member_updated',
@@ -308,14 +301,14 @@ export function registerMemberRoutes(app: FastifyInstance, deps: Deps) {
               name: before.name,
               phone: before.phone,
               note: before.note,
-              ...(fieldsChanged ? { customFields: locked!.customFields } : {}),
+              ...(tagsChanged ? { tagsRemoved: tags!.removed } : {}),
               ...(channel !== locked!.channel ? { channel: locked!.channel } : {}),
             },
             after: {
               name: input.name,
               phone: input.phone,
               note: input.note,
-              ...(fieldsChanged ? { customFields } : {}),
+              ...(tagsChanged ? { tagsAdded: tags!.added } : {}),
               ...(channel !== locked!.channel ? { channel } : {}),
             },
           },

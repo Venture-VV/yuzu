@@ -7,7 +7,7 @@ import type { CashDrawer, CheckoutMethod, CouponPlatform, ShiftMode } from './ch
 import type { DeductionRule, WalletBalance } from './deduction';
 import type { InstanceKind } from './instance';
 import type { EntryType, PaymentMethod } from './labels';
-import type { MemberCustomValues, MemberFieldDef } from './member-fields';
+import type { MemberTagBrief } from './member-tags';
 import type { BonusLotRow, MemberChannel } from './members';
 import type { MemberGradeFields, MemberGradeInfo } from './membership';
 import type { Duty, Permission, Role } from './permissions';
@@ -53,8 +53,6 @@ export interface StoreRules {
   hidePendingMarks: boolean;
   /** 营业时间（#4，待确认）；null 为全天 24 小时营业。只用于显示与提醒 */
   businessHours: BusinessHours | null;
-  /** 会员自定义字段（#12）；固定字段之外由店主配置 */
-  memberFields: MemberFieldDef[];
   /** 自定义赠金（不按套餐）的有效期天数（#2）；null 为长期有效。套餐的有效期在套餐上设置 */
   customBonusValidDays: number | null;
   /** 会员渠道来源的可选项（v0.6.0，后台「会员与渠道」维护） */
@@ -102,8 +100,6 @@ export interface MemberSummary extends MemberGradeFields {
   isSynthetic: boolean;
   createdAt: string;
   lastActivityAt: string | null;
-  /** 自定义字段的值，键为字段编号（见 StoreRules.memberFields） */
-  customFields: MemberCustomValues;
   /** 渠道来源的编号（见 StoreRules.memberChannels）；没登记为 null */
   channel: string | null;
   /** 已合并到的会员（v0.7.26）：这份档案停用、余额已转过去；没合并为 null */
@@ -124,6 +120,8 @@ export interface MemberDetail extends MemberSummary {
   mergedInto: { id: number; memberNo: string; name: string } | null;
   /** 充值当日的储值额度（8.0.4 需求表 04）：今天充了值才有，否则为空 */
   spendQuota: SpendQuota | null;
+  /** 会员标签（8.0.4 需求表 05，替代原来的自定义字段） */
+  tags: MemberTagBrief[];
   stats: {
     totalPaid: number;
     totalBonusGranted: number;

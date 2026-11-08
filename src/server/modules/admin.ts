@@ -112,7 +112,6 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   const hours = (h: number) => `每天 ${String(h).padStart(2, '0')}:00`;
   const window = (h: number | null) => (h === null ? '不限' : `消费 / 结账后 ${describeHours(h)}内`);
   const days = (n: number | null) => (n === null ? '长期有效' : `${n} 天`);
-  const fields = (list: typeof s.memberFields) => (list.length ? `${list.length} 个（启用 ${list.filter((f) => f.active).length} 个）：${list.map((f) => f.label).join('、')}` : '没有自定义字段');
   const channels = (list: typeof s.memberChannels) => {
     const on = list.filter((c) => c.active).map((c) => c.label);
     return `${on.join('、') || '没有启用的渠道'}${list.length > on.length ? `（另有 ${list.length - on.length} 个已停用）` : ''}`;
@@ -175,7 +174,7 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   });
   // ── 会员与渠道 ──
   add({ key: 'member_channels', group: 'members', label: '渠道来源', value: channels(s.memberChannels), defaultValue: channels(d.memberChannels), pending: true, section: 'members', current: s.memberChannels, dflt: d.memberChannels, metaKey: sk('memberChannels') });
-  add({ key: 'member_fields', group: 'members', label: '会员自定义字段', value: fields(s.memberFields), defaultValue: fields(d.memberFields), pending: false, section: 'members', current: s.memberFields, dflt: d.memberFields, metaKey: sk('memberFields') });
+  // 会员自定义字段 8.0.4 起改成会员标签（数据，不是规则；在「会员与渠道 → 会员标签」维护），不在规则总表里
   // ── 会员体系 v2（v0.7.23，后台「会员体系 → 会员规则」）──
   const mr = await loadMembershipRules(db);
   const mrd = DEFAULT_MEMBERSHIP_RULES;
@@ -415,7 +414,6 @@ const SETTING_LABELS: Record<string, string> = {
   countCardSales: '次卡售卖',
   reversalWindowHours: '撤销与反结账时限',
   businessHours: '营业时间',
-  memberFields: '会员自定义字段',
   customBonusValidDays: '自定义赠金有效期',
   requireOpenShift: '收款前必须先开班',
   shiftMode: '交班方式',

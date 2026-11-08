@@ -10,7 +10,9 @@ import { useCan } from '../../lib/session';
 import { avatarTone, cn, relativeTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
-import { Button, Kbd, Notice, Skeleton } from '../../components/ui';
+import { Button, Kbd, Notice, Select, Skeleton } from '../../components/ui';
+import { groupTags, tagLabel } from '@shared/member-tags';
+import { useMemberTags } from '../membership/TagPicker';
 
 function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value);
@@ -32,7 +34,10 @@ export const MemberList = forwardRef<
   // 校验完成之前列表是空的，回车、点选都选不到人（测试会话预检 a040d79）。
   // 清空查找框也立刻生效：认出会员、自动清空后马上再扫同一个码，同样重新校验，不沿用刚才那次的结果
   const query = memberCodeOf(q) || !q.trim() ? q.trim() : debounced;
-  const members = useMembers(query);
+  // 按会员标签筛（8.0.4 需求表 05）
+  const [tagId, setTagId] = useState<number | null>(null);
+  const tags = useMemberTags();
+  const members = useMembers(query, memberCodeOf(query) ? null : tagId);
   const [cursor, setCursor] = useState(0);
   const list = members.data ?? [];
   // 扫到会员码（v0.7.25）：校验通过就直接打开这位会员，清空查找框（码 60 秒就换）
@@ -92,6 +97,24 @@ export const MemberList = forwardRef<
             <Kbd className="absolute top-1/2 right-3 -translate-y-1/2">/</Kbd>
           )}
         </div>
+        {(tags.data ?? []).some((t) => t.active) && (
+          <Select
+            value={tagId ?? ''}
+            onChange={(e) => setTagId(e.target.value ? Number(e.target.value) : null)}
+            aria-label="按标签筛选"
+            className="h-9 text-[13px]"
+            data-testid="member-tag-filter"
+          >
+            <option value="">全部会员（不按标签）</option>
+            {groupTags((tags.data ?? []).filter((t) => t.active)).flatMap((g) =>
+              g.tags.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {tagLabel(t)}
+                </option>
+              )),
+            )}
+          </Select>
+        )}
         <div className="flex items-center justify-between">
           <p className={cn('text-[12.5px] font-semibold', code && members.error ? 'text-clay' : 'text-ink-3')} data-testid="member-search-status">
             {code
@@ -102,7 +125,9 @@ export const MemberList = forwardRef<
                 ? members.isFetching
                   ? '搜索中…'
                   : `找到 ${list.length} 位会员`
-                : '最近到店'}
+                : tagId
+                  ? `这个标签下 ${list.length} 位（最近到店）`
+                  : '最近到店'}
           </p>
           {can('member.write') && (
             <Button size="sm" variant="quiet" icon={<UserPlus className="size-4" />} onClick={() => onCreate(q.trim())}>
