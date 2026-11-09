@@ -149,13 +149,16 @@ export function buildBenefitTiers(input: {
   couponRules: readonly TierRule[];
 }): BenefitTiers {
   const templates = new Map(input.templates.map((t) => [t.id, t]));
+  // 已经随权益、发券规则放进某一阶的券模板（第 3 步不再单放）。只在真的放进去时记：还没设起点的草稿权益、
+  // 没放进任何一阶的规则挂着的模板，照样在第 3 步按限定的档级单放，不会哪一阶都看不到（Codex 自动审查 e726bc0）
   const used = new Set<number>();
-  for (const b of input.benefits) if (b.templateId !== null) used.add(b.templateId);
-  for (const r of input.couponRules) used.add(r.templateId);
 
   // 每个档阶（19 个，按 rank）要放的条目
   const at = new Map<number, TierEntry[]>(GRADE_STATES.map((s) => [stateRank(s.grade, s.tier), []]));
-  const put = (rank: number, e: TierEntry) => at.get(rank)!.push(e);
+  const put = (rank: number, e: TierEntry) => {
+    at.get(rank)!.push(e);
+    if (e.templateId !== null) used.add(e.templateId);
+  };
   const couponOf = (templateId: number | null) => (templateId === null ? undefined : templates.get(templateId));
 
   // 1. 权益清单：起点不高于这一阶的都在
@@ -219,12 +222,8 @@ export function buildBenefitTiers(input: {
   }
 
   // 3. 其余券模板：限定了档级的放最低那一档·初阶，不限的放 L0
-  let placed = 0;
   for (const t of input.templates) {
-    if (used.has(t.id)) {
-      placed += 1;
-      continue;
-    }
+    if (used.has(t.id)) continue;
     const low = t.levels.length ? Math.min(...t.levels) : 0;
     put(low === 0 ? 0 : stateRank(low, 0), {
       key: `t${t.id}`,
@@ -242,8 +241,9 @@ export function buildBenefitTiers(input: {
       benefitId: null,
       templateId: t.id,
     });
-    placed += 1;
   }
+  // 真的出现在某一阶里的券模板（按条目数，不按「挂没挂在权益上」算）
+  const placed = input.templates.filter((t) => used.has(t.id)).length;
 
   const grades: TierGrade[] = ([0, 1, 2, 3, 4, 5, 6] as Grade[]).map((grade) => {
     const rule = input.rules.grades[grade];

@@ -54,6 +54,15 @@ describe.skipIf(!hasCompose && !process.env.CI)('compose.yaml：已有实例的 
     expect(ports({ APP_PORT: '100.101.102.103:8081' })).toEqual([{ host: '100.101.102.103', published: '8081', target: 8080 }]);
   });
 
+  it('短信通道（8.0.4）的设置传进容器；不设时为空、短信留在待发箱（Codex 自动审查 e726bc0）', () => {
+    const keys = ['SMS_PROVIDER', 'SMS_ACCESS_KEY_ID', 'SMS_ACCESS_KEY_SECRET', 'SMS_SIGN_NAME', 'SMS_TEMPLATE_COUPON', 'SMS_ENDPOINT'];
+    const off = app({}).environment;
+    expect(keys.map((k) => off[k] ?? '')).toEqual(['', '', '', '', '', '']);
+    const set = { SMS_PROVIDER: 'aliyun', SMS_ACCESS_KEY_ID: 'id-check', SMS_ACCESS_KEY_SECRET: 'secret-check', SMS_SIGN_NAME: '浴族', SMS_TEMPLATE_COUPON: 'SMS_1', SMS_ENDPOINT: 'https://example.invalid/' };
+    const on = app(set).environment;
+    expect(Object.fromEntries(keys.map((k) => [k, on[k]]))).toEqual(set);
+  });
+
   it('COOKIE_SECURE、TRUST_PROXY 传进容器；不设时不加 Secure、不信任代理', () => {
     const off = app({}).environment;
     expect([off.COOKIE_SECURE, off.TRUST_PROXY ?? '']).toEqual(['false', '']);
