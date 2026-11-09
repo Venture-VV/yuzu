@@ -88,7 +88,7 @@ test.describe('G-R1 页面回归', () => {
     await page.getByLabel('搜索会员').fill('黎明月');
     await page.getByRole('option').filter({ hasText: '黎明月' }).first().click();
     await expect(page.getByText('可用余额').first()).toBeVisible();
-    await page.getByRole('button', { name: /^充值/ }).click();
+    await page.getByRole('button', { name: /^充值(\s|$)/ }).click(); // 不是「充值记录」的展开按钮（8.0.4）
     await page.getByRole('button', { name: /常泡 500/ }).click();
     await page.getByRole('button', { name: '支付宝' }).click();
     await page.getByRole('button', { name: '下一步：核对收款' }).click();

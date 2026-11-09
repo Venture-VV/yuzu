@@ -35,8 +35,10 @@ test('发卡 → 刷卡找会员 → 挂失后刷卡提醒 → 补卡', async ({
 
   // ② 查找框刷卡：找到这位会员
   const search = page.getByRole('searchbox', { name: '搜索会员' }).or(page.getByLabel('搜索会员'));
+  // 限定在会员列表里：8.0.4 起列表上方「按标签筛选」下拉框的选项也是 option
+  const results = page.getByRole('listbox', { name: '会员列表' }).getByRole('option');
   await search.first().fill(first);
-  await expect(page.getByRole('option').first()).toContainText(`E2E 持卡 ${run}`);
+  await expect(results.first()).toContainText(`E2E 持卡 ${run}`);
   await search.first().fill('');
 
   // ③ 挂失：写原因；之后刷这张卡查不到人，提醒已挂失与卡主
@@ -56,5 +58,5 @@ test('发卡 → 刷卡找会员 → 挂失后刷卡提醒 → 补卡', async ({
   await expect(page.getByText('已补卡')).toBeVisible();
   await expect(box.getByTestId(`member-card-${second}`)).toHaveAttribute('data-status', 'active');
   await search.first().fill(second);
-  await expect(page.getByRole('option').first()).toContainText(`E2E 持卡 ${run}`);
+  await expect(results.first()).toContainText(`E2E 持卡 ${run}`);
 });
