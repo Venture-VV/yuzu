@@ -18,10 +18,16 @@ export async function spendQuotaOf(db: Db, memberId: number, businessDate: strin
     )
     SELECT (SELECT id FROM first) AS first_id,
            (SELECT prior FROM first) AS prior,
-           -- 第一笔充值以后合并、期初转进来的是原来的钱，算进「充值前的余额」
+           -- 第一笔充值以后合并、期初转进来的是原来的钱，算进「充值前的余额」；
+           -- 撤销第一笔充值之前的消费（含前几天的），退回来的也是原来的钱，一样算进去（8.0.4 独立验收 P2：原来退回后用不了）。
+           -- 第一笔充值以后的消费撤销了不在这里算：那笔消费本来就不再算「已用」（下面只数没撤销的）
            (SELECT coalesce(sum(le.principal_delta + le.bonus_delta), 0) FROM ledger_entries le
              WHERE le.member_id = ${memberId} AND le.entry_type IN ('merge_in', 'opening') AND le.business_date = ${businessDate}
-               AND le.id > (SELECT id FROM first)) AS carried,
+               AND le.id > (SELECT id FROM first))
+           + (SELECT coalesce(sum(r.principal_delta + r.bonus_delta), 0) FROM ledger_entries r
+               JOIN ledger_entries c ON c.consumption_id = r.consumption_id AND c.entry_type = 'consume'
+               WHERE r.member_id = ${memberId} AND r.entry_type = 'reversal' AND r.business_date = ${businessDate}
+                 AND r.id > (SELECT id FROM first) AND c.id < (SELECT id FROM first)) AS carried,
            (SELECT coalesce(sum(paid_amount), 0) FROM recharges WHERE member_id = ${memberId} AND business_date = ${businessDate}) AS recharged,
            (SELECT coalesce(sum(c.total_amount), 0) FROM consumptions c JOIN ledger_entries le ON le.consumption_id = c.id AND le.entry_type = 'consume'
              WHERE c.member_id = ${memberId} AND c.status = 'completed' AND c.business_date = ${businessDate}

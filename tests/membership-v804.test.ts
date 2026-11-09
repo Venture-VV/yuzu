@@ -169,6 +169,33 @@ describe('P1-04 充值当日储值消费比例', () => {
     expect((await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { rechargeSpendPct: null })).status).toBe(200);
     expect((await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', consumeBody(m.id, yuan(1_000)))).status).toBe(200);
   });
+
+  it('充值前用掉的原来的钱，充值后撤销了那笔消费：退回来的照样能用（8.0.5，8.0.4 独立验收 P2）', async () => {
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { rechargeSpendPct: 70 })).status).toBe(200);
+    try {
+      // 期初导入：卡里原来有 ¥100
+      const csv = ['姓名,手机号,旧卡号,本金,赠金,赠金到期日,累计充值,性别,生日,备注', '撤销额度会员,13900180008,,100,,,,,,'].join('\n');
+      const imported = await api(ctx.app, ctx.owner, 'POST', '/api/opening-imports', { source: 'EBC', fileName: 'quota.csv', note: '额度用例', csv, clientKey: randomUUID() });
+      expect(imported.status, JSON.stringify(imported.body)).toBe(200);
+      const [m] = await ctx.sql<{ id: number }[]>`SELECT id FROM members WHERE phone = '13900180008'`;
+      // 今天还没充值：用掉原来的 ¥100（不受比例限制）
+      const spent = await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', consumeBody(m!.id, yuan(100)));
+      expect(spent.status, JSON.stringify(spent.body)).toBe(200);
+      // 充 ¥100：今天最多用 ¥70
+      expect((await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m!.id, yuan(100)))).status).toBe(200);
+      expect((await api(ctx.app, ctx.clerk, 'GET', `/api/members/${m!.id}`)).body.spendQuota).toMatchObject({ priorBalance: 0, cap: yuan(70), remaining: yuan(70) });
+      // 撤销充值前那笔消费：卡里 ¥200，原来的 ¥100 照样能用，今天最多 ¥170
+      const back = await api(ctx.app, ctx.owner, 'POST', `/api/consumptions/${spent.body.consumption.id}/reverse`, { idempotencyKey: randomUUID(), reason: '项目选错' });
+      expect(back.status, JSON.stringify(back.body)).toBe(200);
+      const detail = (await api(ctx.app, ctx.clerk, 'GET', `/api/members/${m!.id}`)).body;
+      expect(detail.principalBalance).toBe(yuan(200));
+      expect(detail.spendQuota).toMatchObject({ priorBalance: yuan(100), cap: yuan(170), remaining: yuan(170) });
+      expect((await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', consumeBody(m!.id, yuan(170)))).status).toBe(200);
+      expect((await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', consumeBody(m!.id, 1))).body.error.code).toBe('RECHARGE_SPEND_CAP');
+    } finally {
+      await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { rechargeSpendPct: null });
+    }
+  });
 });
 
 describe('P1-05 标签', () => {
@@ -390,6 +417,7 @@ describe('P2-09 买一赠一与生日礼', () => {
       giftWarehouseId: warehouseId,
     });
     expect(t.summary).toContain('买一赠一');
+    expect(t.summary).toContain('买 整改搓澡 送 整改搓澡');
     expect(t.giftOutText).toContain('赠品果盘');
     const stock = async () => (await api(ctx.app, ctx.owner, 'GET', `/api/inventory/materials/${materialId}`)).body.stockMilli as number;
 
@@ -397,6 +425,9 @@ describe('P2-09 买一赠一与生日礼', () => {
     const m = await createMember(ctx, '买一赠一会员', '13900180005');
     await issue(m.id, t.id, 2);
     const [c1, c2] = (await memberCoupons(m.id)).filter((c) => c.templateId === t.id);
+    // 已发的券（会员详情、小程序读的同一份）：说明里写明买什么、送什么（8.0.5，8.0.4 独立验收 P2：原来写「买 指定项目」）
+    const issued = (await api(ctx.app, ctx.owner, 'GET', `/api/members/${m.id}/coupons`)).body.coupons.find((c: { templateId: number }) => c.templateId === t.id);
+    expect(issued.summary).toContain('买 整改搓澡 送 整改搓澡');
     const v1 = await enter([{ itemId: item['整改搓澡']!, quantity: 2, price: 6800 }], m.id);
     const pre = await preview(v1);
     expect(pre.storeCoupons.find((c) => c.code === c1!.code)).toMatchObject({ usable: true, amount: 6800 });
@@ -470,6 +501,22 @@ describe('P2-09 买一赠一与生日礼', () => {
     expect(await processGiftOuts({ sql: ctx.sql, config: ctx.config })).toMatchObject({ voided: 1 });
     const [after] = await ctx.sql<{ status: string; invDocId: number }[]>`SELECT status, inv_doc_id FROM coupon_gift_outs WHERE id = ${job!.id}`;
     expect(after).toMatchObject({ status: 'voided', invDocId: doc.body.doc.id });
+    expect(await stock()).toBe(5_000);
+
+    // 8.0.4 先记单号、再另一条语句把「已取消」改成待冲销：两步之间断了，留下「已取消 + 有单号」（8.0.5，8.0.4 独立验收 P1）。
+    // 再来一单出了库、反结账前的那一刻断在这里：对账照样认出来、冲销，库存回来
+    // 反结账以后上一位会员又在店了：换一位会员结这一单
+    const m2 = await createMember(ctx, '对账会员乙', '13900180009');
+    await issue(m2.id, t.id);
+    const code2 = (await memberCoupons(m2.id)).find((c) => c.templateId === t.id)!.code;
+    const k2 = await payWithCoupon(await enter([{ itemId: item['整改果盘']!, quantity: 2, price: 3800 }], m2.id), code2, 3800);
+    expect(await processGiftOuts({ sql: ctx.sql, config: ctx.config })).toMatchObject({ done: 1 });
+    expect(await stock()).toBe(4_000);
+    const [done2] = await ctx.sql<{ id: number; invDocId: number }[]>`SELECT id, inv_doc_id FROM coupon_gift_outs WHERE checkout_id = ${k2}`;
+    expect(done2!.invDocId).not.toBeNull();
+    await ctx.sql`UPDATE coupon_gift_outs SET status = 'cancelled', updated_at = now() WHERE id = ${done2!.id}`;
+    expect(await processGiftOuts({ sql: ctx.sql, config: ctx.config })).toMatchObject({ voided: 1 });
+    expect((await ctx.sql<{ status: string }[]>`SELECT status FROM coupon_gift_outs WHERE id = ${done2!.id}`)[0]!.status).toBe('voided');
     expect(await stock()).toBe(5_000);
   });
 });
