@@ -6,6 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
+import { ensureShift } from './shift';
 
 const PASSWORD = 'yuzu2026';
 
@@ -134,6 +135,7 @@ test.describe('8.0.4 会员体系整改', () => {
 
   test('会员详情：充值当日的储值额度；充值、消费记录默认展开，查询与导出', async ({ page }) => {
     await login(page, 'linlan');
+    await ensureShift(page); // 下面要充值：自己开班，不靠别的用例留下的班次（单独跑这一条也能过）
     const settings = await getJson<{ rechargeSpendPct: number | null }>(page, '/api/settings');
     const run = String(Date.now() % 100000);
     const member = await postJson<{ id: number }>(page, '/api/members', { name: `E2E额度${run}`, phone: phone(3) });
