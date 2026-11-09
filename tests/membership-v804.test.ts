@@ -17,6 +17,8 @@ import { aliyunSign, sendPendingSms } from '../src/server/modules/sms';
 import { processGiftOuts } from '../src/server/modules/gift-outs';
 import { runBenefitsDaily } from '../src/server/modules/benefits';
 import { createStaff } from '../src/server/modules/staff';
+import { consume, recharge } from '../src/server/modules/wallet';
+import type { Actor } from '../src/server/lib/context';
 import { api, consumeBody, createMember, login, PASSWORD, rechargeBody, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
@@ -192,6 +194,46 @@ describe('P1-04 充值当日储值消费比例', () => {
       expect(detail.spendQuota).toMatchObject({ priorBalance: yuan(100), cap: yuan(170), remaining: yuan(170) });
       expect((await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', consumeBody(m!.id, yuan(170)))).status).toBe(200);
       expect((await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', consumeBody(m!.id, 1))).body.error.code).toBe('RECHARGE_SPEND_CAP');
+    } finally {
+      await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { rechargeSpendPct: null });
+    }
+  });
+
+  it('撤销充值前的消费，退回的赠金批次已经到期、随即作废：作废的不算进额度（Codex 自动审查 2f24f8a）', async () => {
+    const DAY = 86_400_000;
+    const deps = { sql: ctx.sql, config: ctx.config };
+    const owner: Actor = { id: ctx.ownerId, username: 'owner', displayName: '测试店主', role: 'owner', duties: [], mustChangePassword: false };
+    const plan = await api(ctx.app, ctx.owner, 'POST', '/api/plans', { name: '额度用三十天赠金', payAmount: yuan(500), bonusAmount: yuan(100), bonusValidDays: 30 });
+    expect(plan.status, JSON.stringify(plan.body)).toBe(200);
+    const planId = plan.body.plans.find((p: { name: string }) => p.name === '额度用三十天赠金').id as number;
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { rechargeSpendPct: 70 })).status).toBe(200);
+    try {
+      const m = await createMember(ctx, '撤销遇到期赠金', '13900180010');
+      // 35 天前充 ¥500 送 ¥100（赠金 30 天有效），第二天全部用掉：卡里 0，那批赠金之后到期
+      const base = Date.now() - 35 * DAY;
+      await recharge(
+        deps,
+        { idempotencyKey: randomUUID(), memberId: m.id, planId, paidAmount: yuan(500), bonusAmount: yuan(100), paymentMethod: 'cash', paymentConfirmed: true, bonusMode: 'custom' },
+        { actor: owner, at: new Date(base) },
+      );
+      const old = await consume(
+        deps,
+        { idempotencyKey: randomUUID(), memberId: m.id, customLines: [{ name: '测试消费', amount: yuan(600) }], expectedTotal: yuan(600), expectedSplit: { principal: yuan(500), bonus: yuan(100) } },
+        { actor: owner, at: new Date(base + DAY) },
+      );
+      if (old.type !== 'consume') throw new Error('unexpected');
+      // 今天充 ¥100：充值前余额 0，今天最多用 ¥70
+      expect((await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, yuan(100)))).status).toBe(200);
+      // 撤销 35 天前那笔：本金 ¥500 回来；赠金 ¥100 回到已经到期的批次，随即作废
+      const back = await api(ctx.app, ctx.owner, 'POST', `/api/consumptions/${old.consumption.id}/reverse`, { idempotencyKey: randomUUID(), reason: '项目选错' });
+      expect(back.status, JSON.stringify(back.body)).toBe(200);
+      expect(back.body.reversal.expiredBonus).toMatchObject({ amount: yuan(100) });
+      const detail = (await api(ctx.app, ctx.clerk, 'GET', `/api/members/${m.id}`)).body;
+      expect([detail.principalBalance, detail.bonusBalance]).toEqual([yuan(600), 0]);
+      // 回到卡里的原来的钱只有本金 ¥500：今天最多 ¥500 + ¥70。修之前作废的 ¥100 也算进去（¥670），新充的 ¥100 能全部用掉
+      expect(detail.spendQuota).toMatchObject({ priorBalance: yuan(500), cap: yuan(570), remaining: yuan(570) });
+      expect((await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', consumeBody(m.id, yuan(570)))).status).toBe(200);
+      expect((await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', consumeBody(m.id, 1))).body.error.code).toBe('RECHARGE_SPEND_CAP');
     } finally {
       await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { rechargeSpendPct: null });
     }
