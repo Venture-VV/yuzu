@@ -285,6 +285,53 @@ export const GRADE_STATES: { grade: Grade; tier: Tier | null }[] = [
   ...([1, 2, 3, 4, 5, 6] as Grade[]).flatMap((grade) => ([0, 1, 2] as Tier[]).map((tier) => ({ grade, tier }))),
 ];
 
+// ───────────────────────── 生日礼的到账日（8.0.4 需求表 09，HY13） ─────────────────────────
+
+const isLeap = (y: number) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+
+/** 某一年的生日（MM-DD）；2 月 29 日生日平年按 2 月 28 日 */
+export function birthdayIn(year: number, monthDay: string): string {
+  const md = monthDay === '02-29' && !isLeap(year) ? '02-28' : monthDay;
+  return `${year}-${md}`;
+}
+
+const monthEndOf = (date: string) => {
+  const [y, m] = [Number(date.slice(0, 4)), Number(date.slice(5, 7))];
+  const next = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
+  return shiftDate(next, -1);
+};
+
+/**
+ * 生日礼（发券规则的生日礼、权益清单的生日礼遇）这一天该不该发：生日前 leadDays 天到账，到生日当月最后一天之间都算
+ * （那几天应用没开、当月才建档或补填生日的照样补发）。返回算哪一年的生日（去重键用这个年份）；不在这段日子里为 null。
+ * 1 月初的生日提前到上一年 12 月到账的，算生日那一年。
+ */
+export function birthdayDueYear(birthday: string | null, today: string, leadDays: number): string | null {
+  if (!birthday) return null;
+  const md = birthday.slice(5, 10);
+  const ty = Number(today.slice(0, 4));
+  for (const y of [ty, ty + 1]) {
+    const day = birthdayIn(y, md);
+    if (shiftDate(day, -Math.max(0, leadDays)) <= today && today <= monthEndOf(day)) return String(y);
+  }
+  return null;
+}
+
+/** 这一天该发生日礼的生日（MM-DD）都有哪些（按上面的规则；SQL 里按它筛会员） */
+export function birthdayMonthDaysDue(today: string, leadDays: number): { monthDay: string; year: string }[] {
+  const out: { monthDay: string; year: string }[] = [];
+  for (let m = 1; m <= 12; m++) {
+    for (let d = 1; d <= 31; d++) {
+      const md = `${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      // 只取真实存在的月日（2 月 29 日按闰年 2000 年核对）
+      if (new Date(`2000-${md}T00:00:00Z`).toISOString().slice(5, 10) !== md) continue;
+      const year = birthdayDueYear(`2000-${md}`, today, leadDays);
+      if (year) out.push({ monthDay: md, year });
+    }
+  }
+  return out;
+}
+
 /** 他店查询：姓名中间遮住（两个字遮后一个） */
 export function maskName(name: string): string {
   const chars = [...name.trim()];

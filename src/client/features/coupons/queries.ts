@@ -63,7 +63,7 @@ export function useInvalidateCoupons() {
 
 export const COUPON_STATE_ORDER: readonly CouponState[] = ['available', 'pending', 'expired', 'used', 'voided'];
 export const COUPON_STATE_TONES = { available: 'pine', pending: 'lake', expired: 'ember', used: 'neutral', voided: 'clay' } as const satisfies Record<CouponState, string>;
-export const COUPON_KIND_TONES = { cash: 'yuzu', discount: 'lake', exchange: 'moss' } as const satisfies Record<CouponKind, string>;
+export const COUPON_KIND_TONES = { cash: 'yuzu', discount: 'lake', exchange: 'moss', bogo: 'ember' } as const satisfies Record<CouponKind, string>;
 
 /** 券的有效期：「2026-11-02 至 2026-12-01」，只有一天时「仅 2026-11-02」 */
 export const couponRangeText = (from: string, to: string) => (from === to ? `仅 ${from}` : `${from} 至 ${to}`);

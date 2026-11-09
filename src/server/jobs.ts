@@ -9,6 +9,7 @@ import { sweepExpiredBonus } from './modules/bonus';
 import { sweepBookings } from './modules/bookings';
 import { expireCountCards } from './modules/count-cards';
 import { resumeCampaigns } from './modules/coupon-campaigns';
+import { processGiftOuts } from './modules/gift-outs';
 import { sendPendingSms } from './modules/sms';
 import { issueBirthdayCoupons } from './modules/coupons';
 import { runMembershipDaily } from './modules/membership';
@@ -88,6 +89,13 @@ export async function runMinuteJobs(
     if (r.sent || r.failed) log.info(`短信：发出 ${r.sent} 条${r.failed ? `、${r.failed} 条没发出去（下一分钟再试，最多 3 次）` : ''}`);
   } catch (error) {
     log.error('短信发送失败，下一分钟重试', error);
+  }
+  // 买一赠一的赠品出库（8.0.4，HY12）：结账后记下的待出库开直接耗用单，反结账的冲销；出不了的记失败等人重试
+  try {
+    const r = await processGiftOuts({ sql, config });
+    if (r.done || r.failed || r.voided) log.info(`赠品出库：出库 ${r.done} 条、冲销 ${r.voided} 条${r.failed ? `、${r.failed} 条失败（营销成本页重试）` : ''}`);
+  } catch (error) {
+    log.error('赠品出库失败，下一分钟重试', error);
   }
   // 次卡（v0.7.28）：过了有效期没用完的次数作废
   try {

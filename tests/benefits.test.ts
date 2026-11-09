@@ -317,12 +317,14 @@ describe('事件礼', () => {
     await allChecksOk();
   });
 
-  it('生日礼：L1·初 起；建档时还是 L0 不发，生日月里升到 L1 当场发，每年一次', async () => {
+  // 8.0.4 起生日前 3 天到账（会员规则「生日礼提前几天到账」，需求表 09）；原来是生日当月
+  it('生日礼：L1·初 起；建档时还是 L0 不发，生日前 3 天里升到 L1 当场发，每年一次', async () => {
     await publish('QY-020', { templateId: gift.id, quantity: 1 });
-    const m = await newMember('生日会员', `1990-${today.slice(5, 7)}-15`);
+    const birthday = shiftDate(today, 2);
+    const m = await newMember('生日会员', `1990-${birthday.slice(5)}`);
     expect((await grantsOf(m)).filter((g) => g.code === 'QY-020')).toHaveLength(0);
     await recharge(m, yuan(5000));
-    expect((await grantsOf(m)).filter((g) => g.code === 'QY-020')).toEqual([expect.objectContaining({ eventKey: `birthday:${today.slice(0, 4)}` })]);
+    expect((await grantsOf(m)).filter((g) => g.code === 'QY-020')).toEqual([expect.objectContaining({ eventKey: `birthday:${birthday.slice(0, 4)}` })]);
     await recharge(m, yuan(5000));
     expect((await grantsOf(m)).filter((g) => g.code === 'QY-020')).toHaveLength(1);
     // 每天的自动任务也不重发
@@ -449,17 +451,16 @@ describe('当天改了生日、节日当周才够格、补跑多步到期', () =
   };
   const birthdayGrants = async (memberId: number) => (await grantsOf(memberId)).filter((g) => g.code === 'QY-020');
 
-  it('自动发放今天已经跑完，再补填生日月的生日：当场发生日礼，再改同月的日期、改到别的月都不再发', async () => {
+  it('自动发放今天已经跑完，再补填快到了的生日：当场发生日礼，再改成另一个快到了的日期、改到还远的日子都不再发', async () => {
     const m = await newMember('补填生日');
     await recharge(m, yuan(5000));
     expect(await birthdayGrants(m)).toEqual([]);
     await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(today));
     expect(await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(today))).toBeNull();
-    await setBirthday(m, `1991-${today.slice(5, 7)}-20`);
-    expect(await birthdayGrants(m)).toEqual([expect.objectContaining({ reason: 'event', eventKey: `birthday:${today.slice(0, 4)}`, quantity: 1 })]);
-    await setBirthday(m, `1991-${today.slice(5, 7)}-01`);
-    const otherMonth = String((Number(today.slice(5, 7)) % 12) + 1).padStart(2, '0');
-    await setBirthday(m, `1991-${otherMonth}-01`);
+    await setBirthday(m, `1991-${shiftDate(today, 3).slice(5)}`);
+    expect(await birthdayGrants(m)).toEqual([expect.objectContaining({ reason: 'event', eventKey: `birthday:${shiftDate(today, 3).slice(0, 4)}`, quantity: 1 })]);
+    await setBirthday(m, `1991-${shiftDate(today, 1).slice(5)}`);
+    await setBirthday(m, `1991-${shiftDate(today, 40).slice(5)}`);
     expect(await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(today))).toBeNull();
     expect(await birthdayGrants(m)).toHaveLength(1);
     await allChecksOk();
@@ -496,14 +497,14 @@ describe('当天改了生日、节日当周才够格、补跑多步到期', () =
     await spend(m, tierTargets(r, 2).enjoy);
     const graceEnd = shiftDate(before.cycleEnd!, r.graceDays);
     const day = shiftDate(graceEnd, 1);
-    // 生日在处理的那个月
-    await setBirthday(m, `1990-${day.slice(5, 7)}-10`);
+    // 生日在处理那天的两天后（生日前 3 天到账，那天正该发）
+    await setBirthday(m, `1990-${shiftDate(day, 2).slice(5)}`);
     // 那天到期处理还没轮到这一位（或这一位出错、锁等超时）：会员权益的自动发放、发券规则的 L2 生日礼都先跳过，不按过期的 L2 发
     const rule = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/rules', { clientKey: randomUUID(), kind: 'birthday', level: 2, templateId: gift.id, quantity: 1 });
     expect(rule.status, JSON.stringify(rule.body)).toBe(200);
     await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(day));
     await issueBirthdayCoupons({ sql: ctx.sql, config: ctx.config }, noonOf(day));
-    expect((await grantsOf(m)).filter((g) => g.periodKey === day.slice(0, 7) || g.eventKey === `birthday:${day.slice(0, 4)}`)).toEqual([]);
+    expect((await grantsOf(m)).filter((g) => g.periodKey === day.slice(0, 7) || g.eventKey === `birthday:${shiftDate(day, 2).slice(0, 4)}`)).toEqual([]);
     expect(await ctx.sql`SELECT id FROM coupon_issues WHERE member_id = ${m} AND kind = 'birthday'`).toHaveLength(0);
     const run = await runMembershipDaily({ sql: ctx.sql, config: ctx.config }, noonOf(day));
     expect(run).toMatchObject({ error: null });
@@ -515,7 +516,7 @@ describe('当天改了生日、节日当周才够格、补跑多步到期', () =
     ]);
     const month = (await grantsOf(m)).filter((g) => g.periodKey === day.slice(0, 7));
     expect(month).toEqual([expect.objectContaining({ code: 'QY-036', reason: 'top_up', quantity: 1, target: 1 })]);
-    expect((await birthdayGrants(m)).filter((g) => g.eventKey === `birthday:${day.slice(0, 4)}`)).toEqual([]);
+    expect((await birthdayGrants(m)).filter((g) => g.eventKey === `birthday:${shiftDate(day, 2).slice(0, 4)}`)).toEqual([]);
     // 当天的自动发放也不按 L2 补
     await runBenefitsDaily({ sql: ctx.sql, config: ctx.config }, noonOf(day));
     expect((await grantsOf(m)).filter((g) => g.periodKey === day.slice(0, 7)).map((g) => g.code)).toEqual(['QY-036']);

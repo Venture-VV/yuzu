@@ -3,9 +3,10 @@
 
 import { formatYuan } from './money';
 
-export const COUPON_KINDS = ['cash', 'discount', 'exchange'] as const;
+/** 8.0.4 起有「买一赠一券」（bogo，需求表 09）：账单上有买的项目，又有赠的项目（同一个项目要 2 份），抵赠的那一份 */
+export const COUPON_KINDS = ['cash', 'discount', 'exchange', 'bogo'] as const;
 export type CouponKind = (typeof COUPON_KINDS)[number];
-export const COUPON_KIND_LABELS: Record<CouponKind, string> = { cash: '代金券', discount: '折扣券', exchange: '兑换券' };
+export const COUPON_KIND_LABELS: Record<CouponKind, string> = { cash: '代金券', discount: '折扣券', exchange: '兑换券', bogo: '买一赠一券' };
 
 export const COUPON_SCOPES = ['all', 'categories', 'items'] as const;
 export type CouponScope = (typeof COUPON_SCOPES)[number];
@@ -73,9 +74,11 @@ export interface CouponTerms {
   scopeCategories: string[];
   /** 指定价目项目 */
   scopeItems: number[];
-  /** 兑换券：兑换哪个价目项目，或哪个票种（二选一） */
+  /** 兑换券：兑换哪个价目项目，或哪个票种（二选一）；买一赠一券：赠的项目（exchangeItemId） */
   exchangeItemId: number | null;
   exchangeTicketTypeId: number | null;
+  /** 买一赠一券：买的项目（8.0.4） */
+  buyItemId: number | null;
 }
 
 /** 结账时的一条明细（含刚算出的门票），部门与部门营业额快照同一口径 */
@@ -109,6 +112,7 @@ const inScope = (t: CouponTerms, l: CouponLine) =>
  * lineIds 是适用的明细（部门营业额快照按它们的金额比例分摊抵扣）。
  */
 export function evaluateCoupon(t: CouponTerms, lines: readonly CouponLine[]): CouponEvaluation {
+  if (t.kind === 'bogo') return evaluateBogo(t, lines);
   if (t.kind === 'exchange') {
     const candidates = lines.filter(
       (l) => l.amount > 0 && (t.exchangeItemId !== null ? l.itemId === t.exchangeItemId : l.ticketTypeId !== null && l.ticketTypeId === t.exchangeTicketTypeId),
@@ -129,6 +133,25 @@ export function evaluateCoupon(t: CouponTerms, lines: readonly CouponLine[]): Co
   return { usable: true, amount, lineIds: applicable.map((l) => l.id), base };
 }
 
+/**
+ * 买一赠一券（8.0.4，HY11）：账单上有买的项目、又有赠的项目才能用——同一个项目时这个项目要有 2 份；抵赠的项目里单价最低的那一份，
+ * 不超过「最多抵」。lineIds 是那一份所在的明细（部门营业额快照把抵扣分到它上面）
+ */
+function evaluateBogo(t: CouponTerms, lines: readonly CouponLine[]): CouponEvaluation {
+  const buy = t.buyItemId;
+  const gift = t.exchangeItemId ?? buy;
+  const units = (itemId: number | null) => lines.filter((l) => l.amount > 0 && l.itemId !== null && l.itemId === itemId).reduce((s, l) => s + l.quantity, 0);
+  const giftLines = lines.filter((l) => l.amount > 0 && l.itemId !== null && l.itemId === gift);
+  if (buy === null || giftLines.length === 0 || units(buy) === 0) return { usable: false, reason: '账单上没有这张券要的买一赠一项目', base: 0 };
+  if (gift === buy && units(buy) < 2) return { usable: false, reason: '买一赠一要这个项目有 2 份（买一份、赠一份）', base: 0 };
+  // 单价最低的那一份（同价取先挂的）
+  const cheapest = giftLines.reduce((a, b) => (Math.min(b.unitPrice, b.amount) < Math.min(a.unitPrice, a.amount) || (b.unitPrice === a.unitPrice && b.id < a.id) ? b : a));
+  const unit = Math.min(cheapest.unitPrice, cheapest.amount);
+  const amount = t.maxOff !== null ? Math.min(unit, t.maxOff) : unit;
+  if (amount <= 0) return { usable: false, reason: '赠的那一份金额是 0，这张券抵不了钱', base: unit };
+  return { usable: true, amount, lineIds: [cheapest.id], base: unit };
+}
+
 /** 「8.8 折」：rate 88 → 8.8，90 → 9 */
 export const discountText = (ratePercent: number) => `${Number((ratePercent / 10).toFixed(1))} 折`;
 
@@ -137,14 +160,20 @@ export function couponTermsText(t: CouponTerms, names: { items?: Record<number, 
   const parts: string[] = [];
   if (t.kind === 'cash') parts.push(`代金券 ${formatYuan(t.faceValue ?? 0)}`);
   else if (t.kind === 'discount') parts.push(discountText(t.ratePercent ?? 100));
-  else {
+  else if (t.kind === 'bogo') {
+    // 「买一赠一 · 买 拿铁 送 拿铁 1 份」；小程序的券面认不得这个种类时显示「券」+ 后面的说明（小程序线会加上「买一赠一」）
+    const buy = t.buyItemId !== null ? (names.items?.[t.buyItemId] ?? '指定项目') : '指定项目';
+    const gift = t.exchangeItemId !== null ? (names.items?.[t.exchangeItemId] ?? buy) : buy;
+    parts.push('买一赠一', `买 ${buy} 送 ${gift} 1 份`);
+  } else {
     const target = t.exchangeItemId !== null ? (names.items?.[t.exchangeItemId] ?? '指定项目') : (names.ticketTypes?.[t.exchangeTicketTypeId ?? 0] ?? '门票');
     parts.push(`兑换 ${target} 1 份`);
   }
-  if (t.kind !== 'exchange' && t.threshold > 0) parts.push(`满 ${formatYuan(t.threshold)} 可用`);
-  if (t.maxOff !== null) parts.push(`${t.kind === 'exchange' ? '最多抵' : '最多减'} ${formatYuan(t.maxOff)}`);
-  if (t.kind !== 'exchange' && t.scope === 'categories') parts.push(`限${t.scopeCategories.join('、')}`);
-  if (t.kind !== 'exchange' && t.scope === 'items') parts.push(`限 ${t.scopeItems.length} 个项目`);
+  const itemBound = t.kind === 'exchange' || t.kind === 'bogo';
+  if (!itemBound && t.threshold > 0) parts.push(`满 ${formatYuan(t.threshold)} 可用`);
+  if (t.maxOff !== null) parts.push(`${itemBound ? '最多抵' : '最多减'} ${formatYuan(t.maxOff)}`);
+  if (!itemBound && t.scope === 'categories') parts.push(`限${t.scopeCategories.join('、')}`);
+  if (!itemBound && t.scope === 'items') parts.push(`限 ${t.scopeItems.length} 个项目`);
   return parts.join(' · ');
 }
 
@@ -187,6 +216,12 @@ export interface CouponTemplate extends CouponTerms {
   summary: string;
   /** 已发的张数；发过券后面额、折扣、门槛、范围、有效期、等级不能改 */
   issued: number;
+  /** 买一赠一的赠品出库（8.0.4，HY12）：物料、每份出库数量（库存单位的千分之一）、出哪个仓；不出库为空 */
+  giftMaterialId: number | null;
+  giftQtyMilli: number | null;
+  giftWarehouseId: number | null;
+  /** 「出 苏打水 1 瓶（水吧小仓）」 */
+  giftOutText: string | null;
 }
 
 export interface CouponRule {
@@ -266,6 +301,9 @@ export interface CouponMeta {
   ticketTypes: { id: number; name: string; active: boolean }[];
   plans: { id: number; name: string; payAmount: number; bonusAmount: number; active: boolean }[];
   levels: { level: number; name: string }[];
+  /** 买一赠一的赠品出库能选的物料、仓（8.0.4） */
+  materials: { id: number; name: string; unit: string; active: boolean }[];
+  warehouses: { id: number; name: string; active: boolean }[];
 }
 
 export interface CouponStatsRow {

@@ -60,8 +60,9 @@ import {
 } from '../coupons/queries';
 import { AdminPage } from './AdminShell';
 import { CampaignsCard } from './CampaignsCard';
+import { CouponUsageCard } from './CouponUsageCard';
 
-type Tab = 'templates' | 'rules' | 'campaigns' | 'batches' | 'stats';
+type Tab = 'templates' | 'rules' | 'campaigns' | 'batches' | 'stats' | 'usage';
 const TABS: { value: Tab; label: string }[] = [
   { value: 'templates', label: '券模板' },
   { value: 'rules', label: '发券规则' },
@@ -69,6 +70,8 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'campaigns', label: '批量发券' },
   { value: 'batches', label: '无记名券' },
   { value: 'stats', label: '统计' },
+  // 权益使用率看板（8.0.4 需求表 08）：按发放的一批券看领取率、核销率
+  { value: 'usage', label: '使用率' },
 ];
 
 /** 后台页面上方列出的「结果待确认」：后台的三种，另加发券给会员（店主在这里也能处理） */
@@ -89,7 +92,7 @@ export function CouponsSection() {
   return (
     <AdminPage
       section="coupons"
-      description="券模板（代金券、折扣券、兑换券）、自动发券的规则（开卡礼、升级礼、生日礼、充值赠券）、无记名纸质券与统计。会员的券在会员详情里看、发、作废；结账时在收款里用券。"
+      description="券模板（代金券、折扣券、兑换券、买一赠一券）、自动发券的规则（开卡礼、升级礼、生日礼、充值赠券）、批量发券、无记名纸质券、统计与使用率。会员的券在会员详情里看、发、作废；结账时在收款里用券。"
     >
       <div className="space-y-4" data-testid="coupon-admin">
         {/* 新建模板、加规则、生成无记名券、发券时断网：关掉对话框、刷新、重新登录后在这里查回、按原内容重新提交或作废（Codex 复审 6c3765c） */}
@@ -102,7 +105,19 @@ export function CouponsSection() {
           className="max-w-full flex-wrap"
           options={TABS.map((t) => ({ value: t.value, label: <span data-testid={`coupon-tab-${t.value}`}>{t.label}</span> }))}
         />
-        {tab === 'templates' ? <TemplatesCard /> : tab === 'rules' ? <RulesCard /> : tab === 'campaigns' ? <CampaignsCard /> : tab === 'batches' ? <BatchesCard /> : <StatsCard />}
+        {tab === 'templates' ? (
+          <TemplatesCard />
+        ) : tab === 'rules' ? (
+          <RulesCard />
+        ) : tab === 'campaigns' ? (
+          <CampaignsCard />
+        ) : tab === 'batches' ? (
+          <BatchesCard />
+        ) : tab === 'stats' ? (
+          <StatsCard />
+        ) : (
+          <CouponUsageCard />
+        )}
       </div>
     </AdminPage>
   );
@@ -209,7 +224,10 @@ function TemplateRow({ t, levels, today, onEdit }: { t: CouponTemplate; levels: 
           {t.active ? <Badge tone="pine">启用</Badge> : <Badge tone="clay">已停用</Badge>}
           {templateExpired(t, today) && <Badge tone="ember">有效期已过</Badge>}
         </p>
-        <p className="mt-0.5 text-[13px] text-ink-2">{t.summary}</p>
+        <p className="mt-0.5 text-[13px] text-ink-2">
+          {t.summary}
+          {t.giftOutText && <span className="text-ink-3"> · 核销后{t.giftOutText}</span>}
+        </p>
         <p className="mt-0.5 text-[12px] text-ink-3">
           {templateValidityText(t)} · {levelsText(levels, t.levels)}
           {t.note ? ` · ${t.note}` : ''}
@@ -237,8 +255,15 @@ interface Draft {
   scopeCategories: string[];
   scopeItems: number[];
   exchangeTarget: 'item' | 'ticket';
+  /** 兑换券：兑换的项目；买一赠一：赠的项目（空 = 同买的项目） */
   exchangeItemId: number | null;
   exchangeTicketTypeId: number | null;
+  /** 买一赠一（8.0.4）：买的项目；赠品出库（选了才出库）的物料、每份数量（按库存单位，最多三位小数）、仓 */
+  buyItemId: number | null;
+  giftOut: boolean;
+  giftMaterialId: number | null;
+  giftQty: string;
+  giftWarehouseId: number | null;
   validity: CouponValidity;
   validFrom: string;
   validTo: string;
@@ -262,6 +287,10 @@ type TemplateBody = Pick<
   | 'scopeItems'
   | 'exchangeItemId'
   | 'exchangeTicketTypeId'
+  | 'buyItemId'
+  | 'giftMaterialId'
+  | 'giftQtyMilli'
+  | 'giftWarehouseId'
   | 'validity'
   | 'validFrom'
   | 'validTo'
@@ -278,6 +307,14 @@ const MAX_THRESHOLD_CENTS = 100_000_000;
 
 /** 88 → 「8.8」，90 → 「9」 */
 const rateInput = (ratePercent: number) => String(Number((ratePercent / 10).toFixed(1)));
+/** 赠品每份出库数量（库存单位，最多三位小数）→ 千分之一单位；不对返回 null */
+function parseQtyMilli(text: string): number | null {
+  const m = /^(\d{1,7})(?:\.(\d{1,3}))?$/.exec(text.trim());
+  if (!m) return null;
+  const milli = Number(m[1]) * 1000 + Number((m[2] ?? '').padEnd(3, '0'));
+  return milli > 0 ? milli : null;
+}
+
 /** 「8.8」→ 88，「9」→ 90：1 折到 9.9 折、最多一位小数；不对返回 null */
 function parseRate(text: string): number | null {
   const m = /^([1-9])(?:\.(\d))?$/.exec(text.trim());
@@ -299,6 +336,11 @@ function draftOf(t: CouponTemplate | null, today: string, copy = false): Draft {
       exchangeTarget: 'item',
       exchangeItemId: null,
       exchangeTicketTypeId: null,
+      buyItemId: null,
+      giftOut: false,
+      giftMaterialId: null,
+      giftQty: '',
+      giftWarehouseId: null,
       validity: 'days',
       validFrom: today,
       validTo: shiftDate(today, 29),
@@ -319,8 +361,14 @@ function draftOf(t: CouponTemplate | null, today: string, copy = false): Draft {
     scopeCategories: [...t.scopeCategories],
     scopeItems: [...t.scopeItems],
     exchangeTarget: t.exchangeTicketTypeId !== null ? 'ticket' : 'item',
-    exchangeItemId: t.exchangeItemId,
+    // 买一赠一赠同一个项目时显示「同买的项目」
+    exchangeItemId: t.kind === 'bogo' && t.exchangeItemId === t.buyItemId ? null : t.exchangeItemId,
     exchangeTicketTypeId: t.exchangeTicketTypeId,
+    buyItemId: t.buyItemId,
+    giftOut: t.giftMaterialId !== null,
+    giftMaterialId: t.giftMaterialId,
+    giftQty: t.giftQtyMilli !== null ? String(t.giftQtyMilli / 1000) : '',
+    giftWarehouseId: t.giftWarehouseId,
     validity: t.validity,
     validFrom: t.validFrom ?? today,
     validTo: t.validTo ?? shiftDate(today, 29),
@@ -334,11 +382,16 @@ function draftOf(t: CouponTemplate | null, today: string, copy = false): Draft {
 /** 填写内容 → 提交的模板与第一个问题（null = 可以保存）；只留这个种类用得到的条件 */
 function buildBody(d: Draft): { body: TemplateBody; problem: string | null } {
   const exchange = d.kind === 'exchange';
-  const offLabel = exchange ? '最多抵' : '最多减';
+  const bogo = d.kind === 'bogo';
+  /** 兑换券、买一赠一按项目抵，没有门槛与适用范围 */
+  const itemBound = exchange || bogo;
+  const offLabel = itemBound ? '最多抵' : '最多减';
   const faceValue = d.kind === 'cash' ? parseYuan(d.faceValue) : null;
   const ratePercent = d.kind === 'discount' ? parseRate(d.rate) : null;
   const maxOff = d.kind !== 'cash' && d.maxOff.trim() ? parseYuan(d.maxOff) : null;
-  const threshold = exchange || !d.threshold.trim() ? 0 : parseYuan(d.threshold);
+  const threshold = itemBound || !d.threshold.trim() ? 0 : parseYuan(d.threshold);
+  const giftOut = bogo && d.giftOut;
+  const giftQtyMilli = giftOut ? parseQtyMilli(d.giftQty) : null;
   const days = Number(d.validDays);
   const body: TemplateBody = {
     name: d.name.trim(),
@@ -347,11 +400,15 @@ function buildBody(d: Draft): { body: TemplateBody; problem: string | null } {
     ratePercent,
     maxOff,
     threshold: threshold ?? 0,
-    scope: exchange ? 'all' : d.scope,
-    scopeCategories: !exchange && d.scope === 'categories' ? d.scopeCategories : [],
-    scopeItems: !exchange && d.scope === 'items' ? d.scopeItems : [],
-    exchangeItemId: exchange && d.exchangeTarget === 'item' ? d.exchangeItemId : null,
+    scope: itemBound ? 'all' : d.scope,
+    scopeCategories: !itemBound && d.scope === 'categories' ? d.scopeCategories : [],
+    scopeItems: !itemBound && d.scope === 'items' ? d.scopeItems : [],
+    exchangeItemId: (exchange && d.exchangeTarget === 'item') || bogo ? d.exchangeItemId : null,
     exchangeTicketTypeId: exchange && d.exchangeTarget === 'ticket' ? d.exchangeTicketTypeId : null,
+    buyItemId: bogo ? d.buyItemId : null,
+    giftMaterialId: giftOut ? d.giftMaterialId : null,
+    giftQtyMilli,
+    giftWarehouseId: giftOut ? d.giftWarehouseId : null,
     validity: d.validity,
     validFrom: d.validity === 'fixed' ? d.validFrom : null,
     validTo: d.validity === 'fixed' ? d.validTo : null,
@@ -360,41 +417,31 @@ function buildBody(d: Draft): { body: TemplateBody; problem: string | null } {
     note: d.note.trim(),
     active: d.active,
   };
-  const problem = !body.name
-    ? '请填写券的名称'
-    : d.kind === 'cash' && (faceValue === null || faceValue <= 0)
-      ? '请填写面额（最多两位小数）'
-      : d.kind === 'cash' && faceValue! > MAX_OFF_CENTS
-        ? '面额最多 10,000 元'
-        : d.kind === 'discount' && ratePercent === null
-          ? '几折请填 1 到 9.9（最多一位小数），例如 8.8'
-          : d.kind !== 'cash' && d.maxOff.trim() && (maxOff === null || maxOff <= 0)
-            ? `「${offLabel}」的金额不正确`
-            : maxOff !== null && maxOff > MAX_OFF_CENTS
-              ? `「${offLabel}」最多 10,000 元`
-              : threshold === null
-                ? '门槛金额不正确（最多两位小数）'
-                : threshold > MAX_THRESHOLD_CENTS
-                  ? '门槛过大'
-                  : exchange && d.exchangeTarget === 'item' && d.exchangeItemId === null
-                    ? '请选择兑换的项目'
-                    : exchange && d.exchangeTarget === 'ticket' && d.exchangeTicketTypeId === null
-                      ? '请选择兑换的票种'
-                      : !exchange && d.scope === 'categories' && d.scopeCategories.length === 0
-                        ? '请选择适用的部门'
-                        : !exchange && d.scope === 'categories' && d.scopeCategories.length > 30
-                          ? '指定部门最多选 30 个'
-                          : !exchange && d.scope === 'items' && d.scopeItems.length === 0
-                            ? '请选择适用的项目'
-                            : !exchange && d.scope === 'items' && d.scopeItems.length > 100
-                              ? '指定项目最多选 100 个'
-                              : d.validity === 'fixed' && (!ISO_DATE.test(d.validFrom) || !ISO_DATE.test(d.validTo))
-                                ? '请填写有效期的起止日期'
-                                : d.validity === 'fixed' && d.validFrom > d.validTo
-                                  ? '结束日期不能早于开始日期'
-                                  : d.validity === 'days' && (!Number.isInteger(days) || days < 1 || days > 3650)
-                                    ? '有效天数请填 1 到 3650'
-                                    : null;
+  // 按顺序找第一个问题（都是比较，前面的不成立时后面的也不会出错）
+  const checks: [boolean, string][] = [
+    [!body.name, '请填写券的名称'],
+    [d.kind === 'cash' && (faceValue === null || faceValue <= 0), '请填写面额（最多两位小数）'],
+    [d.kind === 'cash' && faceValue !== null && faceValue > MAX_OFF_CENTS, '面额最多 10,000 元'],
+    [d.kind === 'discount' && ratePercent === null, '几折请填 1 到 9.9（最多一位小数），例如 8.8'],
+    [d.kind !== 'cash' && !!d.maxOff.trim() && (maxOff === null || maxOff <= 0), `「${offLabel}」的金额不正确`],
+    [maxOff !== null && maxOff > MAX_OFF_CENTS, `「${offLabel}」最多 10,000 元`],
+    [threshold === null, '门槛金额不正确（最多两位小数）'],
+    [threshold !== null && threshold > MAX_THRESHOLD_CENTS, '门槛过大'],
+    [exchange && d.exchangeTarget === 'item' && d.exchangeItemId === null, '请选择兑换的项目'],
+    [exchange && d.exchangeTarget === 'ticket' && d.exchangeTicketTypeId === null, '请选择兑换的票种'],
+    [bogo && d.buyItemId === null, '请选择买的项目'],
+    [giftOut && d.giftMaterialId === null, '请选择赠品出库的物料'],
+    [giftOut && giftQtyMilli === null, '每份出库数量请填大于 0 的数（最多三位小数）'],
+    [giftOut && d.giftWarehouseId === null, '请选择赠品从哪个仓出库'],
+    [!itemBound && d.scope === 'categories' && d.scopeCategories.length === 0, '请选择适用的部门'],
+    [!itemBound && d.scope === 'categories' && d.scopeCategories.length > 30, '指定部门最多选 30 个'],
+    [!itemBound && d.scope === 'items' && d.scopeItems.length === 0, '请选择适用的项目'],
+    [!itemBound && d.scope === 'items' && d.scopeItems.length > 100, '指定项目最多选 100 个'],
+    [d.validity === 'fixed' && (!ISO_DATE.test(d.validFrom) || !ISO_DATE.test(d.validTo)), '请填写有效期的起止日期'],
+    [d.validity === 'fixed' && d.validFrom > d.validTo, '结束日期不能早于开始日期'],
+    [d.validity === 'days' && (!Number.isInteger(days) || days < 1 || days > 3650), '有效天数请填 1 到 3650'],
+  ];
+  const problem = checks.find(([bad]) => bad)?.[1] ?? null;
   return { body, problem };
 }
 
@@ -411,6 +458,10 @@ const lockedBody = (t: CouponTemplate, d: Draft): TemplateBody => ({
   scopeItems: t.scopeItems,
   exchangeItemId: t.exchangeItemId,
   exchangeTicketTypeId: t.exchangeTicketTypeId,
+  buyItemId: t.buyItemId,
+  giftMaterialId: t.giftMaterialId,
+  giftQtyMilli: t.giftQtyMilli,
+  giftWarehouseId: t.giftWarehouseId,
   validity: t.validity,
   validFrom: t.validFrom,
   validTo: t.validTo,
@@ -650,13 +701,35 @@ function TermsFields({ draft, set, meta }: { draft: Draft; set: (patch: Partial<
   );
   const maxOff = (
     <Field
-      label={draft.kind === 'exchange' ? '最多抵' : '最多减'}
+      label={draft.kind === 'exchange' || draft.kind === 'bogo' ? '最多抵' : '最多减'}
       htmlFor="coupon-maxoff"
-      hint={draft.kind === 'exchange' ? '不填为不限；例如门票只抵 12 小时档，就填那一档的价格' : '不填为不限'}
+      hint={
+        draft.kind === 'exchange'
+          ? '不填为不限；例如门票只抵 12 小时档，就填那一档的价格'
+          : draft.kind === 'bogo'
+            ? '不填为不限；抵赠的那一份（账单上这个项目单价最低的一份）'
+            : '不填为不限'
+      }
     >
       <MoneyInput id="coupon-maxoff" value={draft.maxOff} onChange={(e) => set({ maxOff: e.target.value })} placeholder="不限" data-testid="coupon-template-maxoff" />
     </Field>
   );
+  const itemSelect = (id: string, value: number | null, onChange: (v: number | null) => void, placeholder: string, testId: string) => (
+    <Select id={id} value={value ?? ''} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)} className="h-11" data-testid={testId}>
+      <option value="">{placeholder}</option>
+      {itemGroups.map(([category, items]) => (
+        <optgroup key={category} label={category}>
+          {items.map((i) => (
+            <option key={i.id} value={i.id} disabled={!i.active && i.id !== value}>
+              {i.name}
+              {i.active ? '' : '（已停用）'}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+    </Select>
+  );
+  const giftMaterial = meta.materials.find((m) => m.id === draft.giftMaterialId);
   return (
     <>
       <Field label="种类">
@@ -746,7 +819,73 @@ function TermsFields({ draft, set, meta }: { draft: Draft; set: (patch: Partial<
           </div>
         </>
       )}
-      {draft.kind !== 'exchange' && (
+      {draft.kind === 'bogo' && (
+        <>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field label="买的项目" htmlFor="coupon-buy-item" hint="账单上有这个项目才能用">
+              {itemSelect('coupon-buy-item', draft.buyItemId, (v) => set({ buyItemId: v }), '选择项目', 'coupon-template-buy-item')}
+            </Field>
+            <Field label="赠的项目" htmlFor="coupon-gift-item" hint="同一个项目时账单上要有 2 份">
+              {itemSelect('coupon-gift-item', draft.exchangeItemId, (v) => set({ exchangeItemId: v }), '同买的项目（买一送一）', 'coupon-template-gift-item')}
+            </Field>
+            {maxOff}
+          </div>
+          <div className="space-y-3 rounded-lg bg-paper-2/60 px-4 py-3">
+            <label className="flex cursor-pointer items-center gap-2 text-[13.5px] font-semibold text-ink">
+              <input type="checkbox" className="size-4 accent-pine" checked={draft.giftOut} onChange={(e) => set({ giftOut: e.target.checked })} data-testid="coupon-template-gift-out" />
+              核销后赠品自动出库（库存记账）
+            </label>
+            <p className="text-[12.5px] text-ink-3">
+              结账用了这张券，系统账号「赠品出库」在选的仓开一张直接耗用单；库存不够不挡结账，记「出库失败」，补完库存后在「数据看板 → 营销成本」重试；反结账自动冲销当月的单。
+            </p>
+            {draft.giftOut && (
+              <div className="grid gap-4 sm:grid-cols-3">
+                <Field label="物料" htmlFor="coupon-gift-material">
+                  <Select
+                    id="coupon-gift-material"
+                    value={draft.giftMaterialId ?? ''}
+                    onChange={(e) => set({ giftMaterialId: e.target.value ? Number(e.target.value) : null })}
+                    className="h-11"
+                    data-testid="coupon-template-gift-material"
+                  >
+                    <option value="">选择物料</option>
+                    {meta.materials.map((m) => (
+                      <option key={m.id} value={m.id} disabled={!m.active && m.id !== draft.giftMaterialId}>
+                        {m.name}
+                        {m.active ? '' : '（已停用）'}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="每份出库" htmlFor="coupon-gift-qty" hint="按库存单位，最多三位小数">
+                  <div className="relative">
+                    <Input id="coupon-gift-qty" inputMode="decimal" autoComplete="off" value={draft.giftQty} onChange={(e) => set({ giftQty: e.target.value })} placeholder="1" className="num pr-12 font-semibold" data-testid="coupon-template-gift-qty" />
+                    <span className="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-[13px] font-semibold text-ink-3">{giftMaterial?.unit ?? ''}</span>
+                  </div>
+                </Field>
+                <Field label="从哪个仓出" htmlFor="coupon-gift-warehouse">
+                  <Select
+                    id="coupon-gift-warehouse"
+                    value={draft.giftWarehouseId ?? ''}
+                    onChange={(e) => set({ giftWarehouseId: e.target.value ? Number(e.target.value) : null })}
+                    className="h-11"
+                    data-testid="coupon-template-gift-warehouse"
+                  >
+                    <option value="">选择仓</option>
+                    {meta.warehouses.map((w) => (
+                      <option key={w.id} value={w.id} disabled={!w.active && w.id !== draft.giftWarehouseId}>
+                        {w.name}
+                        {w.active ? '' : '（已停用）'}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+      {draft.kind !== 'exchange' && draft.kind !== 'bogo' && (
         <>
           <Field label="适用范围" hint="门槛与抵扣都只按适用的明细算；储值充值、押金不是账单明细，用不了券">
             <Segmented<CouponScope>

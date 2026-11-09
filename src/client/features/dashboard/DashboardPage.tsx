@@ -12,6 +12,7 @@ import { PageHeader } from '../../components/AppShell';
 import { Money } from '../../components/Money';
 import { Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { Columns, FitText, HBars, yuan } from './charts';
+import { MarketingCostTab } from './MarketingCostTab';
 import { MembersTab } from './MembersTab';
 import { MembershipTab } from '../membership/MembershipTab';
 import { OverviewTab } from './OverviewTab';
@@ -21,6 +22,7 @@ import { TechniciansTab } from './TechniciansTab';
 // 看板按岗位分页（v0.6.0）：今日（值班经理、收银）、经营总览（总经理）、会员总览（客户经理）；各页按权限显示
 // v0.7.0 加「技师业绩」（店主、店总、值班经理）；技师功能关闭时不显示（店主 2026-10-30 定，数据保留，重新开启后照常显示）
 // v0.7.4 加「客房」（经营总览的岗位看）；客房功能关闭时同样不显示
+// 8.0.4 加「营销成本」（营销成本测算：店主、店总；有财务职责的账号看不到，与财务隔离）
 const TABS = [
   { key: 'today', label: '今日', perm: 'ledger.readToday' },
   { key: 'overview', label: '经营总览', perm: 'report.executive' },
@@ -29,6 +31,8 @@ const TABS = [
   { key: 'membership', label: '会员体系', perm: 'member.retention' },
   { key: 'technicians', label: '技师业绩', perm: 'report.technicians' },
   { key: 'rooms', label: '客房', perm: 'report.executive' },
+  // 营销成本测算（8.0.4 需求表 10、11）：店主、店总；有财务职责的账号没有这项权限（与财务隔离）
+  { key: 'marketing', label: '营销成本', perm: 'marketing.cost' },
 ] as const satisfies readonly { key: string; label: string; perm: Permission }[];
 type TabKey = (typeof TABS)[number]['key'];
 
@@ -102,6 +106,8 @@ export function DashboardPage() {
             <TechniciansTab />
           ) : current.key === 'rooms' ? (
             <RoomsTab />
+          ) : current.key === 'marketing' ? (
+            <MarketingCostTab />
           ) : (
             <TodayTab />
           )}
