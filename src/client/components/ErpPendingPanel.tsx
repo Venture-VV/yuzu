@@ -50,6 +50,7 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     // 券与会员权益（v0.7.20）：模板、无记名券返回自己（id），规则返回 ruleId，发券返回 issueId
     case 'coupon_template':
     case 'coupon_batch':
+    case 'coupon_campaign':
       return typeof d.id === 'number' ? { refId: d.id } : null;
     case 'coupon_rule':
       return typeof d.ruleId === 'number' ? { refId: d.ruleId } : null;

@@ -25,10 +25,13 @@ async function confirmRecharge(page: Page): Promise<number> {
   return ((await (await res).json()) as { recharge: { bonusAmount: number } }).recharge.bonusAmount;
 }
 
+/** 会员列表里的搜索结果（8.0.4 起列表上方有「按标签筛选」的下拉框，它的选项也是 option，所以限定在会员列表里找） */
+const memberOptions = (page: Page) => page.getByRole('listbox', { name: '会员列表' }).getByRole('option');
+
 async function openMember(page: Page, query: string) {
   await page.getByLabel('搜索会员').fill(query);
-  await expect(page.getByRole('option').first()).toContainText(query);
-  await page.getByRole('option').filter({ hasText: query }).first().click();
+  await expect(memberOptions(page).first()).toContainText(query);
+  await memberOptions(page).filter({ hasText: query }).first().click();
   await expect(page.getByText('可用余额').first()).toBeVisible();
 }
 
@@ -43,7 +46,7 @@ test('店员：查找会员 → 套餐充值 → 消费扣款，余额变化清�
   await openMember(page, '周以安');
   const before = await availableCents(page);
 
-  await page.getByRole('button', { name: /^充值/ }).click();
+  await page.getByRole('button', { name: /^充值(\s|$)/ }).click(); // 不是「充值记录」的展开按钮（8.0.4）
   await page.getByRole('button', { name: /常泡 500/ }).click();
   await page.getByRole('button', { name: '支付宝' }).click();
   await page.getByRole('button', { name: '下一步：核对收款' }).click();
@@ -80,7 +83,7 @@ test('充值后马上接着消费：会员资料的重新读取还没回来时�
     await route.continue().catch(() => {});
   });
 
-  await page.getByRole('button', { name: /^充值/ }).click();
+  await page.getByRole('button', { name: /^充值(\s|$)/ }).click(); // 不是「充值记录」的展开按钮（8.0.4）
   await page.getByRole('button', { name: /常泡 500/ }).click();
   await page.getByRole('button', { name: '支付宝' }).click();
   await page.getByRole('button', { name: '下一步：核对收款' }).click();
@@ -164,7 +167,7 @@ test('请求超时：显示结果待确认，可查回原单且不重复记账',
     await route.fetch();
     await route.abort('connectionreset');
   });
-  await page.getByRole('button', { name: /^充值/ }).click();
+  await page.getByRole('button', { name: /^充值(\s|$)/ }).click(); // 不是「充值记录」的展开按钮（8.0.4）
   await page.getByRole('button', { name: /轻享 300/ }).click();
   await page.getByRole('button', { name: '现金' }).click();
   await page.getByRole('button', { name: '下一步：核对收款' }).click();
@@ -220,7 +223,7 @@ test('键盘：/ 搜索 → 回车选中 → R 打开充值 → Esc 关闭', asy
   // 用陈一禾的完整手机号（演示数据 1990000 + 1003）：只输「1003」时，别的用例按时间生成的手机号里也会出现 1003，
   // 搜索结果会有两位、这里就失败（测试会话 v8.0.3 验收报告）
   await page.keyboard.type('19900001003');
-  await expect(page.getByRole('option')).toHaveCount(1);
+  await expect(memberOptions(page)).toHaveCount(1);
   await page.keyboard.press('Enter');
   await expect(page.locator('main').getByRole('heading', { name: '陈一禾' })).toBeVisible();
   await page.locator('main').click({ position: { x: 5, y: 5 } });

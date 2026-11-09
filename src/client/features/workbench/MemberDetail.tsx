@@ -1,16 +1,14 @@
 import { ArrowLeft, Bath, CirclePlus, PencilLine, StickyNote } from 'lucide-react';
 import { formatPhone } from '@shared/labels';
 import { lastUsableDate } from '@shared/business-date';
-import { displayFieldValue } from '@shared/member-fields';
 import { channelLabel } from '@shared/members';
+import { spendQuotaText } from '@shared/spend-quota';
 import type { MemberDetail as Member } from '@shared/types';
-import { useActivity } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
 import { avatarTone, cn, formatDate, formatTime, relativeTime } from '../../lib/utils';
-import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
-import { Badge, Button, Card, IconButton, SectionTitle, Skeleton } from '../../components/ui';
-import { ActivityRow } from './ActivityList';
+import { Badge, Button, Card, IconButton, Skeleton } from '../../components/ui';
+import { MemberRecordsCard } from './MemberRecordsCard';
 import { BonusLotsCard, MemberCouponsCard } from './MemberExtras';
 import { GradeBadge } from '../membership/GradeBadge';
 import { GradeCard } from '../membership/GradeCard';
@@ -19,6 +17,7 @@ import { TrialsCard } from '../membership/TrialsCard';
 import { CountCardsCard } from '../membership/CountCardsCard';
 import { MemberCardsCard } from '../membership/MemberCardsCard';
 import { MemberHistoryCard } from '../membership/MemberHistoryCard';
+import { MemberTagChips } from '../membership/TagPicker';
 import { AccountCard } from '../membership/AccountCard';
 
 export function MemberDetail({
@@ -40,16 +39,10 @@ export function MemberDetail({
 }) {
   const can = useCan();
   const session = useSession();
-  const activity = useActivity(member.id);
   const total = member.principalBalance + member.bonusBalance;
   // 有到期时间的赠金（先到期的在前）；长期有效的不提示
   const expiring = (member.bonusLots ?? []).filter((l) => l.expiresAt !== null);
-  // 自定义字段：只显示启用且已填写的
   const channel = channelLabel(session.rules.memberChannels ?? [], member.channel);
-  const fieldRows = session.rules.memberFields
-    .filter((d) => d.active)
-    .map((d) => ({ key: d.key, label: d.label, value: displayFieldValue(member.customFields?.[d.key]) }))
-    .filter((r) => r.value !== null);
 
   return (
     <div className="mx-auto flex w-full max-w-[880px] flex-col gap-4 p-4 md:p-6">
@@ -101,15 +94,11 @@ export function MemberDetail({
             <span className="break-all">{member.note}</span>
           </div>
         )}
-        {fieldRows.length > 0 && (
-          <dl className="mx-5 mb-5 grid gap-x-5 gap-y-1.5 rounded-md bg-card/80 px-3 py-2.5 text-[13px] ring-1 ring-line sm:grid-cols-2" data-testid="member-custom-fields">
-            {fieldRows.map((r) => (
-              <div key={r.key} className="flex min-w-0 gap-2">
-                <dt className="shrink-0 text-ink-3">{r.label}</dt>
-                <dd className="min-w-0 font-semibold break-all text-ink-2">{r.value}</dd>
-              </div>
-            ))}
-          </dl>
+        {/* 会员标签（8.0.4，替代原来的自定义字段） */}
+        {member.tags.length > 0 && (
+          <div className="mx-5 mb-5">
+            <MemberTagChips tags={member.tags} />
+          </div>
         )}
 
         {/* 余额：合计 / 本金 / 赠金 分层展示。按卡片实际宽度（容器查询）决定是否三栏并排，金额始终完整显示 */}
@@ -152,6 +141,13 @@ export function MemberDetail({
           </div>
         </div>
       </Card>
+
+      {/* 充值当日的储值额度（8.0.4 需求表 04）：今天充了值才显示 */}
+      {member.spendQuota && (
+        <p className="-mt-1 rounded-md bg-ember-soft/60 px-3 py-2 text-[12.5px] font-semibold text-ember" data-testid="member-spend-quota">
+          {spendQuotaText(member.spendQuota)}
+        </p>
+      )}
 
       {/* 常用操作 */}
       <div className="grid grid-cols-2 gap-3">
@@ -236,27 +232,8 @@ export function MemberDetail({
       {/* 旧系统流水（v0.7.28）：从旧 EBC 导入的逐笔记录，只读；没有的会员不显示 */}
       <MemberHistoryCard key={`legacy-history-${member.id}`} member={member} />
 
-      {/* 余额记录 */}
-      <Card className="p-2">
-        <SectionTitle className="px-3 pt-2.5 pb-1.5" aside={<span className="text-[12px] text-ink-3">本金 · 赠金分别记录</span>}>
-          余额记录
-        </SectionTitle>
-        {activity.isPending ? (
-          <div className="space-y-2 p-2">
-            {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-16" />
-            ))}
-          </div>
-        ) : (activity.data ?? []).length === 0 ? (
-          <EmptyState art="pool" title="还没有余额记录" description="充值后这里会出现每一笔余额变化。" />
-        ) : (
-          <div className="divide-y divide-line/70">
-            {activity.data!.map((row) => (
-              <ActivityRow key={row.id} row={row} onReverse={can('consume.reverse') ? onReverse : undefined} />
-            ))}
-          </div>
-        )}
-      </Card>
+      {/* 充值记录与消费记录（8.0.4 需求表 07）：原来的「余额记录」拆成两块，可分别查询、导出，上面是收支比例 */}
+      <MemberRecordsCard key={`records-${member.id}`} member={member} onReverse={can('consume.reverse') ? onReverse : undefined} />
     </div>
   );
 }

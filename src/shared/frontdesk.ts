@@ -64,16 +64,22 @@ export interface FrontdeskRules {
   selfVoidMinutes: number;
   /** 丢牌赔偿（分），换牌时挂到客人账单；0 表示不收 */
   lostTagFeeCents: number;
-  /** 允许值班经理 / 店总当场授权散客或档级不够的会员使用 VIP 柜（店主 ❓2：默认关闭） */
-  vipOverrideEnabled: boolean;
+  // VIP 柜的当场授权开关 8.0.4 起归「会员权益 → VIP 柜」（vip_locker_rules，见 @shared/membership 的 VipLockerRules）
   /** 门票跳档宽限分钟数（店主 ❓6，2026-10-29 签认 15 分钟：12 小时分界点之后 15 分钟内不跳档） */
   overtimeGraceMinutes: number;
+}
+
+/**
+ * 前台看板带给页面的规则：前台规则加上 VIP 柜的当场授权开关（8.0.4 起这个开关存在「会员权益 → VIP 柜」，
+ * 看板只读带出来，发牌、换牌时页面据此决定能不能请人授权）
+ */
+export interface FrontdeskBoardRules extends FrontdeskRules {
+  vipOverrideEnabled: boolean;
 }
 
 export const DEFAULT_FRONTDESK_RULES: FrontdeskRules = {
   selfVoidMinutes: 15,
   lostTagFeeCents: 20000,
-  vipOverrideEnabled: false,
   overtimeGraceMinutes: 15,
 };
 
@@ -192,7 +198,7 @@ export interface FrontdeskBoard {
     unsettledCents: number;
     groups: number;
   };
-  rules: FrontdeskRules;
+  rules: FrontdeskBoardRules;
   /** 服务器当前时间，页面据此计算在店时长，避免终端时钟不准 */
   serverTime: string;
 }

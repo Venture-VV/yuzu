@@ -100,9 +100,11 @@ beforeAll(async () => {
     ...r,
     firstRechargeMinCents: yuan(1000),
     topUpMinCents: yuan(1000),
-    vipLockerLevels: [0, 1, 2, 3, 4, 5, 5],
   });
   expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+  // VIP 柜 8.0.4 起归「会员权益 → VIP 柜」
+  const vip = await api(ctx.app, ctx.owner, 'PUT', '/api/vip-lockers', { levels: [0, 1, 2, 3, 4, 5, 5], overrideEnabled: false });
+  expect(vip.status, JSON.stringify(vip.body)).toBe(200);
   expect(saved.body).toMatchObject({ trialInviteDays: 7, trialInvitesPerMonth: 1, trialInviteeMonths: 12 });
   expect((await api(ctx.app, ctx.owner, 'POST', '/api/benefits/import')).status).toBe(200);
 });

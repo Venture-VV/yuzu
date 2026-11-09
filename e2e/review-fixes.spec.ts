@@ -18,9 +18,11 @@ async function login(page: Page, username: string) {
 }
 
 async function openMember(page: Page, name: string) {
+  // 限定在会员列表里：8.0.4 起列表上方「按标签筛选」下拉框的选项也是 option
+  const options = page.getByRole('listbox', { name: '会员列表' }).getByRole('option');
   await page.getByLabel('搜索会员').fill(name);
-  await expect(page.getByRole('option').first()).toContainText(name);
-  await page.getByRole('option').filter({ hasText: name }).first().click();
+  await expect(options.first()).toContainText(name);
+  await options.filter({ hasText: name }).first().click();
   await expect(page.locator('main').getByRole('heading', { name })).toBeVisible();
 }
 

@@ -112,7 +112,6 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   const hours = (h: number) => `每天 ${String(h).padStart(2, '0')}:00`;
   const window = (h: number | null) => (h === null ? '不限' : `消费 / 结账后 ${describeHours(h)}内`);
   const days = (n: number | null) => (n === null ? '长期有效' : `${n} 天`);
-  const fields = (list: typeof s.memberFields) => (list.length ? `${list.length} 个（启用 ${list.filter((f) => f.active).length} 个）：${list.map((f) => f.label).join('、')}` : '没有自定义字段');
   const channels = (list: typeof s.memberChannels) => {
     const on = list.filter((c) => c.active).map((c) => c.label);
     return `${on.join('、') || '没有启用的渠道'}${list.length > on.length ? `（另有 ${list.length - on.length} 个已停用）` : ''}`;
@@ -145,6 +144,12 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
     key: 'max_consume_cents', group: 'wallet', label: '单笔消费上限', value: formatYuan(s.maxConsumeCents), defaultValue: formatYuan(d.maxConsumeCents),
     pending: false, section: 'rules', hint: '超过需店主或店总当场授权', current: s.maxConsumeCents, dflt: d.maxConsumeCents, metaKey: sk('maxConsumeCents'),
   });
+  // 充值当日的储值消费比例（8.0.4 需求表 04，HY01）
+  const spendPct = (p: number | null) => (p === null ? '不限' : `当天第一笔充值前的余额 + 当天充值实收 × ${p}%`);
+  add({
+    key: 'recharge_spend_pct', group: 'wallet', label: '充值当日的储值消费上限', value: spendPct(s.rechargeSpendPct), defaultValue: spendPct(d.rechargeSpendPct),
+    pending: true, section: 'rules', hint: '超过的储值支付直接拒绝并显示剩余额度；没充值的日子不限', current: s.rechargeSpendPct, dflt: d.rechargeSpendPct, metaKey: sk('rechargeSpendPct'),
+  });
   add({
     key: 'reversal_window_hours', group: 'wallet', label: '撤销与反结账时限', value: window(s.reversalWindowHours), defaultValue: window(d.reversalWindowHours),
     pending: false, section: 'rules', hint: '超过后只有店主可以', current: s.reversalWindowHours, dflt: d.reversalWindowHours, metaKey: sk('reversalWindowHours'),
@@ -169,19 +174,20 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   });
   // ── 会员与渠道 ──
   add({ key: 'member_channels', group: 'members', label: '渠道来源', value: channels(s.memberChannels), defaultValue: channels(d.memberChannels), pending: true, section: 'members', current: s.memberChannels, dflt: d.memberChannels, metaKey: sk('memberChannels') });
-  add({ key: 'member_fields', group: 'members', label: '会员自定义字段', value: fields(s.memberFields), defaultValue: fields(d.memberFields), pending: false, section: 'members', current: s.memberFields, dflt: d.memberFields, metaKey: sk('memberFields') });
+  // 会员自定义字段 8.0.4 起改成会员标签（数据，不是规则；在「会员与渠道 → 会员标签」维护），不在规则总表里
   // ── 会员体系 v2（v0.7.23，后台「会员体系 → 会员规则」）──
   const mr = await loadMembershipRules(db);
   const mrd = DEFAULT_MEMBERSHIP_RULES;
   const ladder = (r: MembershipRules) => r.grades.slice(1).map((g, i) => `L${i + 1} ${g.name} ${formatYuan(g.thresholdCents)} / ${g.bonusBp / 100}%`).join('，');
   const cycle = (r: MembershipRules) => `周期 ${r.cycleDays} 天；享阶 ${r.enjoyPct}%、尊阶（保级）${r.honorPct}%；补充期 ${r.graceDays} 天`;
   const mins = (r: MembershipRules) => `首充 ${r.firstRechargeMinCents ? formatYuan(r.firstRechargeMinCents) : '不限'}，续充 ${r.topUpMinCents ? formatYuan(r.topUpMinCents) : '不限'}`;
-  const lockers = (r: MembershipRules) => r.vipLockerLevels.map((v, i) => `L${i}→${v ? `${v} 级` : '不能用'}`).join('，');
   add({ key: 'membership_rules.grades', group: 'members', label: '档级：门槛 / 赠送比例', value: ladder(mr), defaultValue: ladder(mrd), pending: true, section: 'membership', hint: '按滚动 365 天累计充值升档', current: mr.grades, dflt: mrd.grades, metaKey: 'membership_rules' });
   add({ key: 'membership_rules.cycle', group: 'members', label: '阶位与会籍周期', value: cycle(mr), defaultValue: cycle(mrd), pending: true, section: 'membership', current: [mr.cycleDays, mr.enjoyPct, mr.honorPct, mr.graceDays], dflt: [mrd.cycleDays, mrd.enjoyPct, mrd.honorPct, mrd.graceDays], metaKey: 'membership_rules' });
   add({ key: 'membership_rules.minimum', group: 'members', label: '单笔最低充值', value: mins(mr), defaultValue: mins(mrd), pending: true, section: 'membership', hint: '建议续充改成 1,000 或不限（M4）', current: [mr.firstRechargeMinCents, mr.topUpMinCents], dflt: [mrd.firstRechargeMinCents, mrd.topUpMinCents], metaKey: 'membership_rules' });
   add({ key: 'membership_rules.reminderDays', group: 'members', label: '到期提醒', value: mr.reminderDays.map((d) => `${d} 天`).join('、'), defaultValue: mrd.reminderDays.map((d) => `${d} 天`).join('、'), pending: true, section: 'membership', current: mr.reminderDays, dflt: mrd.reminderDays, metaKey: 'membership_rules' });
-  add({ key: 'membership_rules.vipLockerLevels', group: 'members', label: 'VIP 柜（各档能用到几级柜）', value: lockers(mr), defaultValue: lockers(mrd), pending: true, section: 'membership', current: mr.vipLockerLevels, dflt: mrd.vipLockerLevels, metaKey: 'membership_rules' });
+  // 生日礼提前几天到账（8.0.4，HY13）；VIP 柜 8.0.4 起归「会员权益」，不在规则总表里
+  const lead = (d: number) => (d === 0 ? '生日当天' : `生日前 ${d} 天`);
+  add({ key: 'membership_rules.birthdayLeadDays', group: 'members', label: '生日礼到账', value: lead(mr.birthdayLeadDays), defaultValue: lead(mrd.birthdayLeadDays), pending: true, section: 'membership', hint: '发券规则的生日礼、权益清单的生日礼遇都按它', current: mr.birthdayLeadDays, dflt: mrd.birthdayLeadDays, metaKey: 'membership_rules' });
   // ── 前台与结账 ──
   add({
     key: 'frontdesk_rules.selfVoidMinutes', group: 'frontdesk', label: '店员自行更正时限', value: `${fd.selfVoidMinutes} 分钟`, defaultValue: `${fdd.selfVoidMinutes} 分钟`,
@@ -194,10 +200,6 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   add({
     key: 'frontdesk_rules.overtimeGraceMinutes', group: 'frontdesk', label: '门票跳档宽限', value: `${fd.overtimeGraceMinutes} 分钟`, defaultValue: `${fdd.overtimeGraceMinutes} 分钟`,
     pending: false, section: 'tags', hint: '12 小时分界点之后多少分钟内不跳档', current: fd.overtimeGraceMinutes, dflt: fdd.overtimeGraceMinutes, metaKey: 'frontdesk_rules',
-  });
-  add({
-    key: 'frontdesk_rules.vipOverrideEnabled', group: 'frontdesk', label: '当场授权使用 VIP 柜', value: onOff(fd.vipOverrideEnabled, '允许（值班经理及以上授权）', '不允许'), defaultValue: '不允许',
-    pending: true, section: 'tags', current: fd.vipOverrideEnabled, dflt: fdd.vipOverrideEnabled, metaKey: 'frontdesk_rules',
   });
   // ── 技师（v0.7.0）──
   add({
@@ -408,9 +410,10 @@ const SETTING_LABELS: Record<string, string> = {
   businessDayStartHour: '营业日切换时间',
   maxRechargeCents: '单笔充值上限',
   maxConsumeCents: '单笔消费上限',
+  rechargeSpendPct: '充值当日的储值消费上限',
+  countCardSales: '次卡售卖',
   reversalWindowHours: '撤销与反结账时限',
   businessHours: '营业时间',
-  memberFields: '会员自定义字段',
   customBonusValidDays: '自定义赠金有效期',
   requireOpenShift: '收款前必须先开班',
   shiftMode: '交班方式',
@@ -423,7 +426,8 @@ function describeChange(action: string, detail: Record<string, unknown>): string
   const name = (detail.name ?? detail.displayName ?? detail.username) as string | undefined;
   switch (action) {
     case 'settings_updated': {
-      if (detail.key === 'frontdesk_rules') return '修改了前台规则与会员等级';
+      if (detail.key === 'frontdesk_rules') return '修改了前台规则';
+      if (detail.key === 'vip_locker_rules') return '修改了 VIP 柜设置（会员权益）';
       if (detail.key === 'role_permissions') return '调整了岗位权限';
       if (detail.key === 'technician_rules') return '修改了技师规则';
       if (detail.key === 'clockroom_rules') return '修改了钟房与轮钟规则';

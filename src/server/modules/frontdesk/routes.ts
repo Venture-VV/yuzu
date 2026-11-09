@@ -38,11 +38,11 @@ import {
 import { ctxOf } from '../../lib/context';
 import { saveRuleSetting } from '../../lib/rule-settings';
 
-// 会员等级的口径、门槛与名称 v0.7.23 起归「会员规则」（membership.ts）；旧页面带来的这几项不再保存（zod 去掉多余的字段）
+// 会员等级的口径、门槛与名称 v0.7.23 起归「会员规则」（membership.ts）；VIP 柜的当场授权开关 8.0.4 起归「会员权益 → VIP 柜」
+// （vip-lockers.ts）。旧页面带来的这几项不再保存（zod 去掉多余的字段）
 const RulesInput = z.object({
   selfVoidMinutes: z.number().int().min(0, '分钟数不能为负').max(120, '最多 120 分钟'),
   lostTagFeeCents: z.number().int().min(0, '赔偿金额不能为负').max(10_000_00, '赔偿金额最多 10,000 元'),
-  vipOverrideEnabled: z.boolean(),
   overtimeGraceMinutes: z.number().int().min(0, '宽限分钟数不能为负').max(120, '宽限最多 120 分钟'),
 });
 

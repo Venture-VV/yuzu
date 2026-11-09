@@ -37,7 +37,7 @@ services:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
         ALPINE_MIRROR: ${ALPINE_MIRROR:-}
-        APP_VERSION: ${YUZU_VERSION:-8.0.3}
+        APP_VERSION: ${YUZU_VERSION:-8.0.4}
         APP_COMMIT: ${YUZU_COMMIT:-}
     # 不同 Compose 项目使用独立标签，演示构建不会覆盖试用 / 正式镜像。
     image: ${APP_IMAGE:-yuzu-app:${COMPOSE_PROJECT_NAME:-local}}
@@ -59,6 +59,14 @@ services:
       INIT_OWNER_USERNAME: ${INIT_OWNER_USERNAME:-}
       INIT_OWNER_PASSWORD: ${INIT_OWNER_PASSWORD:-}
       INIT_OWNER_NAME: ${INIT_OWNER_NAME:-店主}
+      # 短信通道（8.0.4 批量发券的短信通知，.env.example 里有写法）：.env 里配了才传进容器，不配时短信留在待发箱、后台导出名单手动发
+      # （Codex 自动审查 e726bc0：容器只认这里列出来的变量，原来没列，配了也发不出去）
+      SMS_PROVIDER: ${SMS_PROVIDER:-}
+      SMS_ACCESS_KEY_ID: ${SMS_ACCESS_KEY_ID:-}
+      SMS_ACCESS_KEY_SECRET: ${SMS_ACCESS_KEY_SECRET:-}
+      SMS_SIGN_NAME: ${SMS_SIGN_NAME:-}
+      SMS_TEMPLATE_COUPON: ${SMS_TEMPLATE_COUPON:-}
+      SMS_ENDPOINT: ${SMS_ENDPOINT:-}
       TZ: ${APP_TIMEZONE:-Asia/Shanghai}
     # APP_PORT 只写端口（8080）时开在所有网卡上，门店局域网这样用；写成「地址:端口」只开在这个地址上：云服务器上写
     # 127.0.0.1:8080（只给本机的 Caddy）或 <Tailscale 地址>:8080——Docker 发布的端口会绕过主机防火墙，不能只靠 ufw 挡。

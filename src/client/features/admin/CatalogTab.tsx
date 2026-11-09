@@ -10,7 +10,6 @@ import { api, errorMessage } from '../../lib/api';
 import { readImportFile } from '../../lib/import-file';
 import { useCatalog } from '../../lib/queries';
 import { useTicketTypes } from '../frontdesk/queries';
-import { CountCardTypesCard } from './CountCardTypesCard';
 import { cn } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
@@ -138,8 +137,7 @@ export function CatalogTab() {
 
       <PlanDialog editing={editing?.kind === 'plan' ? editing : null} onClose={() => setEditing(null)} />
       <ItemDialog editing={editing?.kind === 'item' ? editing : null} onClose={() => setEditing(null)} />
-      {/* 次卡（v0.7.28）：卡种 */}
-      <CountCardTypesCard />
+      {/* 次卡的卡种 8.0.4 起取消（需求表 03：价目与套餐不再有次卡；已售的次卡照常结账核销、退卡、打印，见 docs/MEMBERSHIP_V804.md 第 3 节） */}
     </div>
   );
 }

@@ -230,6 +230,10 @@ export async function sellCountCard(deps: Deps, raw: CountCardSaleInput, ctx: Op
       await assertNotFenced(tx, key, 'count_card_sale', erpOpAbandoned);
       const prior = await replay(tx);
       if (prior !== null) return { id: prior, replayed: true };
+      // 次卡停售（8.0.4 需求表 03，HY05）：已售的照常结账核销、退卡、打印；原样重提已经办成的那一笔照样返回原来的卡（上一行）
+      if (!(await loadSettings(tx)).countCardSales) {
+        throw unprocessable('COUNT_CARD_SALES_CLOSED', '次卡已停售（「价目与套餐」已取消次卡）；已售的次卡照常结账核销、退卡、打印');
+      }
       const shiftId = await lockPaymentShift(tx, ctx.actor.id, seenShift);
       const at = ctx.at ?? new Date();
       const [m] = await tx<{ name: string; status: string }[]>`SELECT name, status FROM members WHERE id = ${input.memberId} FOR SHARE`;

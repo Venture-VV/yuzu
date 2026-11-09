@@ -29,7 +29,7 @@ import {
   VOID_REASONS,
   ZONE_LABELS,
   type BillLine,
-  type FrontdeskRules,
+  type FrontdeskBoardRules,
   type VisitDetail,
 } from '@shared/frontdesk';
 import { minutesText } from '@shared/benefits';
@@ -65,7 +65,7 @@ export function BillPanel({
   visit: VisitDetail | undefined;
   loading: boolean;
   error: unknown;
-  rules: FrontdeskRules | undefined;
+  rules: FrontdeskBoardRules | undefined;
   onAction: (a: PanelAction) => void;
   onSelectVisit: (id: number) => void;
   onChanged: (v: VisitDetail) => void;

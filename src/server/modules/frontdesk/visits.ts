@@ -67,6 +67,7 @@ import { getTableSession } from '../tables';
 import { closeUsagesOfVisits, getUsage } from '../usages';
 import { resolveTicketType, ticketAuthRequired, visitTicket } from './tickets';
 import { lineTechnicianSql } from '../technicians';
+import { loadVipLockerRules } from '../vip-lockers';
 import { assertVipAllowed, consumeVipShortfalls, memberLockerGrades, vipShortfalls } from './vip';
 
 const clientKey = z.uuid('缺少有效的操作编号，请刷新页面后重试');
@@ -173,7 +174,7 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
       input.guests.map((g) => ({ tag: tags.get(g.tagCode)!, memberId: g.memberId, memberName: g.memberId ? (names.get(g.memberId) ?? null) : null })),
       levels,
     );
-    assertVipAllowed(shortfalls, levels, rules, input.vipGrantId);
+    assertVipAllowed(shortfalls, levels, await loadVipLockerRules(tx), input.vipGrantId);
     const overrideCodes = new Set(shortfalls.map((x) => x.code));
 
     // 票种：留存选定时的票价，结账时按在店时长计算门票；选免票的客人要当场授权（同一次接待一次授权）
@@ -357,7 +358,7 @@ export async function swapTag(deps: Deps, visitId: number, raw: SwapInputData, c
       const levels = await memberLockerGrades(tx, visit.memberId ? [visit.memberId] : [], await businessDate(tx, deps, at));
       const [m] = visit.memberId ? await tx<{ name: string }[]>`SELECT name FROM members WHERE id = ${visit.memberId}` : [];
       shortfalls = vipShortfalls([{ tag: to, memberId: visit.memberId, memberName: m?.name ?? null }], levels);
-      assertVipAllowed(shortfalls, levels, rules, input.vipGrantId);
+      assertVipAllowed(shortfalls, levels, await loadVipLockerRules(tx), input.vipGrantId);
     }
     if (input.lostFee !== null) {
       if (rules.lostTagFeeCents <= 0) throw unprocessable('LOST_FEE_DISABLED', '当前规则不收丢牌赔偿，请取消「收取丢牌赔偿」后重试');
@@ -610,7 +611,7 @@ export async function getBoard(db: Db): Promise<FrontdeskBoard> {
       unsettledCents: inStore.reduce((s, t) => s + t.visit!.amountCents, 0),
       groups: new Set(inStore.map((t) => t.visit!.groupId).filter(Boolean)).size,
     },
-    rules: await loadFrontdeskRules(db),
+    rules: { ...(await loadFrontdeskRules(db)), vipOverrideEnabled: (await loadVipLockerRules(db)).overrideEnabled },
     serverTime: now!.now,
   };
 }

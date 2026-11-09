@@ -112,7 +112,7 @@ test('演示场景：前台、客房与平面图、钟房、厨房、旧账都�
     await page.goto(`/?m=${member!.id}`);
     await expect(page.getByTestId('member-benefit-QY-040')).toContainText('本月发 1 / 1 张');
     await expect(page.getByTestId('member-benefit-QY-001')).toContainText('本月已用 0 / 4 次');
-    await page.goto('/admin/benefits');
+    await page.goto('/admin/benefits?view=list'); // 8.0.4 起默认「按档阶」看，原来的清单在「按类别」
     await expect(page.getByTestId('benefit-row-QY-040')).toContainText('已发布');
   });
 });

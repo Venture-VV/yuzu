@@ -1,6 +1,6 @@
 // 当场授权（店主 ❓2 / ❓4）：授权人在当前弹窗输入自己的账号密码，服务端核对后签发一次性授权。
 //
-//   · 用途 vip_tag：散客或等级不够的会员使用 VIP 柜（值班经理及以上，经营规则开启后才可用）；
+//   · 用途 vip_tag：散客或等级不够的会员使用 VIP 柜（值班经理及以上，「会员权益 → VIP 柜」开启当场授权后才可用）；
 //     用途 over_limit：超过单笔上限的充值 / 消费（店总、店主）；
 //     用途 checkout_discount：结账时的「优惠 / 免单」，绑定一起结账的来访与金额（值班经理及以上，R1.2）；
 //     用途 ticket_discount：改成更便宜的票种或免票（接待时直接选免票也算），绑定手牌与票种（值班经理及以上，R1.2）；
@@ -40,7 +40,7 @@ import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
 import { AppError, conflict, forbidden, unprocessable } from '../lib/errors';
 import { parse, positiveCents } from '../lib/validate';
-import { loadFrontdeskRules } from '../modules/frontdesk/common';
+import { loadVipLockerRules } from '../modules/vip-lockers';
 import { loadSettings } from '../modules/settings';
 import { guard } from './guard';
 import { checkLock, clearFailures, recordFailure } from './lockout';
@@ -124,9 +124,8 @@ export function registerGrantRoutes(app: FastifyInstance, deps: Deps) {
     if (input.purpose === 'vip_tag') {
       if (!can(req.actor, 'frontdesk.operate')) throw forbidden();
       scope = { tags: parse(VipScope, rawScope).tags };
-      const rules = await loadFrontdeskRules(sql);
-      if (!rules.vipOverrideEnabled) {
-        throw conflict('VIP_OVERRIDE_DISABLED', '未开启「VIP 柜当场授权」，请店主在「管理 → 手牌」开启后再授权');
+      if (!(await loadVipLockerRules(sql)).overrideEnabled) {
+        throw conflict('VIP_OVERRIDE_DISABLED', '未开启「VIP 柜当场授权」，请店主或店总在「管理后台 → 会员权益 → VIP 柜」开启后再授权');
       }
     } else if (input.purpose === 'checkout_discount') {
       if (!can(req.actor, 'frontdesk.checkout')) throw forbidden();

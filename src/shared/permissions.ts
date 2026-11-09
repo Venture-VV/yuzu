@@ -21,6 +21,8 @@
 // 店主 11-03 已定：维护小程序内容只给店主、店总（客户经理不给）。
 // v0.7.30 审批中心：新增「审批中心：审批」「审批中心：维护审批规则」（docs/APPROVALS.md，默认值待确认）。
 // v0.7.31 合同与法务审查：新职责「法务」（单独一组），新增「查看合同」「维护合同」（docs/CONTRACTS.md C4、C12，待确认）。
+// 8.0.4 会员体系整改：新增「营销成本测算」（docs/MEMBERSHIP_V804.md 第 10 节，HY14）：默认店主、店总；
+// 与财务隔离——有财务职责（对账付款、成本核算）的账号一律没有，后台岗位权限加了也不生效（店主除外，FINANCE_EXCLUDED）。
 
 export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice', 'other_store'] as const;
 export type Role = (typeof ROLES)[number];
@@ -279,6 +281,8 @@ export const PERMISSIONS = {
   'report.technicians': { roles: ['owner', 'store_manager', 'duty_manager'] },
   /** 技师提成：按提成规则算出的每位技师提成与明细导出（v0.7.1，待确认：默认店主与店总） */
   'report.commission': { roles: ['owner', 'store_manager'] },
+  /** 营销成本测算（8.0.4，HY14）：券、赠金、会员折扣、服务类权益的实核成本；有财务职责的账号一律没有（见 FINANCE_EXCLUDED） */
+  'marketing.cost': { roles: ['owner', 'store_manager'] },
 } as const satisfies Record<string, Rule>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -286,6 +290,18 @@ export const ALL_PERMISSIONS = Object.keys(PERMISSIONS) as Permission[];
 
 /** 只属于店主、不能在后台授给其他岗位的权限：管理员工账号、修改经营规则（含岗位权限本身）、导入期初余额 */
 export const LOCKED_PERMISSIONS: readonly Permission[] = ['staff.manage', 'settings.manage', 'wallet.opening'];
+
+/**
+ * 与财务隔离的权限（8.0.4，HY14）：有这些职责的账号一律没有，后台岗位权限加了也不生效；店主不受限制。
+ * 营销成本是经营测算，不进财务凭证与报表，财务账号看不到测算明细（需求表 11）。
+ */
+export const FINANCE_EXCLUDED: Partial<Record<Permission, readonly Duty[]>> = { 'marketing.cost': ['payable', 'cost'] };
+
+/** 这位账号的职责把这项权限挡掉了（与财务隔离） */
+export function excludedByDuty(subject: Pick<PermissionSubject, 'role' | 'duties'>, permission: Permission): boolean {
+  if (subject.role === 'owner') return false;
+  return !!FINANCE_EXCLUDED[permission]?.some((d) => subject.duties?.includes(d));
+}
 
 /** 可以在后台调整权限的岗位（店主固定拥有全部权限） */
 export const EDITABLE_ROLES = ROLES.filter((r): r is Exclude<Role, 'owner'> => r !== 'owner');
@@ -312,12 +328,13 @@ export function roleHas(role: Role, permission: Permission, overrides?: RoleOver
 /** 岗位权限（按后台调整）与职责权限（固定）的并集 */
 export function permissionsOf(subject: PermissionSubject, overrides?: RoleOverrides | null): Permission[] {
   return ALL_PERMISSIONS.filter(
-    (p) => roleHas(subject.role, p, overrides) || !!(PERMISSIONS[p] as Rule).duties?.some((d) => subject.duties?.includes(d)),
+    (p) => !excludedByDuty(subject, p) && (roleHas(subject.role, p, overrides) || !!(PERMISSIONS[p] as Rule).duties?.some((d) => subject.duties?.includes(d))),
   );
 }
 
 export function can(subject: PermissionSubject, permission: Permission): boolean {
   if (subject.permissions) return subject.permissions.includes(permission);
+  if (excludedByDuty(subject, permission)) return false;
   const rule = PERMISSIONS[permission] as Rule;
   if (rule.roles.includes(subject.role)) return true;
   return !!rule.duties?.some((d) => subject.duties?.includes(d));
@@ -442,6 +459,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'report.members': '看会员总览（储值、新增、活跃、等级）',
   'report.technicians': '看技师业绩（钟数、点钟 / 轮钟、金额）',
   'report.commission': '看技师提成与导出提成明细',
+  'marketing.cost': '营销成本测算（券、赠金、会员折扣的实核成本；有财务职责的账号不生效）',
 };
 
 export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
@@ -471,6 +489,6 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   },
   { title: '员工食堂', items: ['canteen.manage'] },
   { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount', 'auth.memberRefund', 'auth.memberPhone'] },
-  { title: '数据看板', items: ['report.executive', 'report.members', 'report.technicians', 'report.commission'] },
+  { title: '数据看板', items: ['report.executive', 'report.members', 'report.technicians', 'report.commission', 'marketing.cost'] },
   { title: '管理后台', items: ['staff.manage', 'catalog.manage', 'technician.manage', 'settings.manage', 'audit.read'] },
 ];

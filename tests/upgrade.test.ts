@@ -238,10 +238,10 @@ describe('升级后', () => {
     expect((await api(app, owner, 'GET', '/api/settings')).body).toMatchObject({ maxRechargeCents: 50_000_000, maxConsumeCents: 50_000_000 });
   });
 
-  it('已有会员的自定义字段为空，可以照常编辑；没有预置任何自定义字段', async () => {
+  it('已有会员没有自定义字段可转，升级后没有标签，可以照常编辑；标签只有预置的客群两个（8.0.4 起自定义字段改成标签）', async () => {
     const owner = await login(app, 'owner');
-    expect((await api(app, owner, 'GET', `/api/members/${memberId}`)).body.customFields).toEqual({});
-    expect((await api(app, owner, 'GET', '/api/settings')).body.memberFields).toEqual([]);
+    expect((await api(app, owner, 'GET', `/api/members/${memberId}`)).body.tags).toEqual([]);
+    expect((await api(app, owner, 'GET', '/api/member-tags')).body.map((t: { groupName: string; name: string }) => `${t.groupName}/${t.name}`)).toEqual(['客群/亲子客', '客群/商务客']);
     const edit = await api(app, owner, 'PUT', `/api/members/${memberId}`, { name: '升级前会员', phone: '19900001111', note: '升级后编辑' });
     expect(edit.status).toBe(200);
   });

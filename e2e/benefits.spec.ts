@@ -55,6 +55,9 @@ test.describe('会员权益', () => {
         await importButton.click();
         await expect(importButton).toHaveCount(0);
       }
+      // 8.0.4 起默认「按档阶」看；这里核对原来的清单，先切到「按类别」
+      await page.getByRole('radiogroup', { name: '看法' }).getByRole('radio', { name: '按类别' }).click();
+      await expect(page).toHaveURL(/view=list/);
       const channel = page.getByTestId('benefit-row-QY-001');
       await expect(channel).toContainText('会员专属通道');
       await expect(channel).toContainText('L2·初');
