@@ -4,7 +4,9 @@
 //     操作编号用这一条自己的，重做也不会开出两张），库存流水照常记账；出不了库的（库存不够、物料停用……）记「出库失败」与原因，
 //     补完库存后在「营销成本 → 赠品出库」点重试；
 //   · 反结账：还没出库的取消；已出库的这里冲销那张耗用单（库存模块的冲销，只能冲当月的；跨月的记「冲销失败」，由仓库手工处理）。
-// 锁：每一条在库存模块的事务里照库存单据原来的锁走（物料 id 升序……）；这里只在事务外读、事务后写这一条的结果。
+//   · 对账（Codex 自动审查 8603568）：开单的事务提交了、还没记下单号进程就断了，这一条还是「待出库」，这时反结账会把它记成「已取消」，
+//     库存却已经出了。每次处理前按这一条自己的操作编号（库存单据的 client_key）找已生效的单：「已取消」的改成待冲销、「出库失败」的改成已出库。
+// 锁：每一条在库存模块的事务里照库存单据原来的锁走（物料 id 升序……）；这里只在事务外读、事务后写这一条的结果（按状态条件写，不另加锁）。
 
 import type { FastifyInstance } from 'fastify';
 import { formatStoreCouponCode } from '@shared/coupons';
@@ -81,9 +83,14 @@ export async function handleGiftOut(deps: Pick<Deps, 'sql' | 'config'>, id: numb
       return 'failed';
     }
   }
-  // 待冲销
+  // 待冲销：单号没记下的（开单后断了），按这一条的操作编号找；找不到就是没出过库，记已取消
+  const docId = g.invDocId ?? (await sql<{ id: number }[]>`SELECT id FROM inv_docs WHERE client_key = ${g.clientKey}`)[0]?.id ?? null;
+  if (docId === null) {
+    await sql`UPDATE coupon_gift_outs SET status = 'cancelled', updated_at = now() WHERE id = ${id} AND status = 'void_pending'`;
+    return 'cancelled';
+  }
   try {
-    await voidDoc(deps as Deps, Number(g.invDocId), { reason: `结账单 ${g.checkoutNo} 已反结账，买一赠一的赠品出库冲销` }, actor);
+    await voidDoc(deps as Deps, Number(docId), { reason: `结账单 ${g.checkoutNo} 已反结账，买一赠一的赠品出库冲销` }, actor);
     await sql`UPDATE coupon_gift_outs SET status = 'voided', attempts = attempts + 1, last_error = NULL, updated_at = now() WHERE id = ${id} AND status = 'void_pending'`;
     return 'voided';
   } catch (error) {
@@ -92,8 +99,23 @@ export async function handleGiftOut(deps: Pick<Deps, 'sql' | 'config'>, id: numb
   }
 }
 
-/** 每分钟：待出库、待冲销的逐条处理（失败的等人点重试，不每分钟重试） */
+/**
+ * 对账：按这一条自己的操作编号找已生效的库存单据——开单的事务提交了、还没记下单号就断了的，「已取消」（之后反结账了）改成待冲销，
+ * 「出库失败」改成已出库（记下单号）。返回改了几条
+ */
+export async function reconcileGiftOuts(db: Db): Promise<number> {
+  const rows = await db`
+    UPDATE coupon_gift_outs g
+    SET status = CASE g.status WHEN 'cancelled' THEN 'void_pending' ELSE 'done' END, inv_doc_id = d.id, last_error = NULL, updated_at = now()
+    FROM inv_docs d
+    WHERE d.client_key = g.client_key AND d.status = 'confirmed' AND g.inv_doc_id IS NULL AND g.status IN ('cancelled', 'failed')
+    RETURNING g.id`;
+  return rows.length;
+}
+
+/** 每分钟：先对账，再把待出库、待冲销的逐条处理（失败的等人点重试，不每分钟重试） */
 export async function processGiftOuts(deps: Pick<Deps, 'sql' | 'config'>, opts: { limit?: number } = {}): Promise<{ done: number; failed: number; voided: number }> {
+  await reconcileGiftOuts(deps.sql);
   const rows = await deps.sql<{ id: number }[]>`
     SELECT id FROM coupon_gift_outs WHERE status IN ('pending', 'void_pending') ORDER BY id LIMIT ${opts.limit ?? 30}`;
   const out = { done: 0, failed: 0, voided: 0 };

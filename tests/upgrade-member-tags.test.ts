@@ -14,7 +14,7 @@ import { resetPublicSchema } from './test-db';
 
 const MIGRATIONS = new URL('../src/server/migrations/', import.meta.url);
 /** 8.0.4 新加的迁移：8.0.3 的库里没有（090–093 在 8.0.3 之前已发布） */
-const NEW_IN_804 = ['088_member_tags_vip.sql', '089_coupon_campaigns.sql', '094_coupon_campaign_ops.sql'];
+const NEW_IN_804 = ['088_member_tags_vip.sql', '089_coupon_campaigns.sql', '094_coupon_campaign_ops.sql', '095_sms_outbox_lease.sql'];
 let sql: Sql;
 
 beforeAll(() => {

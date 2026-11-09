@@ -234,6 +234,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '092_canteen_reply_ops.sql',
   '093_purchasing_ops.sql',
   '094_coupon_campaign_ops.sql',
+  '095_sms_outbox_lease.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

@@ -15,6 +15,7 @@ import { spendRatio } from '../src/shared/member-records';
 import { listMemberNotices, markMemberNoticeRead } from '../src/server/modules/member-notices';
 import { aliyunSign, sendPendingSms } from '../src/server/modules/sms';
 import { processGiftOuts } from '../src/server/modules/gift-outs';
+import { runBenefitsDaily } from '../src/server/modules/benefits';
 import { createStaff } from '../src/server/modules/staff';
 import { api, consumeBody, createMember, login, PASSWORD, rechargeBody, setup, type TestContext } from './helpers';
 
@@ -261,6 +262,49 @@ describe('P1-06 批量发券', () => {
     );
     expect(signature).toBe('zJDF+Lrzhj/ThnlvIToysFRq6t4=');
   });
+
+  it('两批短信叠在一起跑（前一批还在发）：后一批认领不到，每条只发一次；租约过期没记结果的再发（Codex 自动审查 8603568）', async () => {
+    const ids = (
+      await ctx.sql<{ id: number }[]>`
+        INSERT INTO sms_outbox (phone, purpose, params, content, dedupe_key)
+        SELECT '1380018' || lpad(n::text, 4, '0'), 'coupon_issued', '{"count":1}'::jsonb, '测试短信', 'overlap-test-' || n FROM generate_series(1, 3) AS n
+        RETURNING id`
+    ).map((r) => Number(r.id));
+    const sends: string[] = [];
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    let firstSend!: () => void;
+    const started = new Promise<void>((resolve) => (firstSend = resolve));
+    const slowSend = async (_cfg: unknown, phone: string) => {
+      sends.push(phone);
+      firstSend();
+      await gate;
+      return `ref-${phone}`;
+    };
+    const deps = { sql: ctx.sql, config: { sms: { ...ctx.config.sms, provider: 'aliyun' as const } } };
+    // 第一批认领了三条、正在发第一条时，第二批开始
+    const first = sendPendingSms(deps, { limit: 10, send: slowSend });
+    await started;
+    const second = await sendPendingSms(deps, { limit: 10, send: slowSend });
+    expect(second).toEqual({ sent: 0, failed: 0 });
+    open();
+    expect(await first).toEqual({ sent: 3, failed: 0 });
+    expect(sends).toHaveLength(3);
+    expect(new Set(sends).size).toBe(3);
+    const rows = await ctx.sql<{ status: string; attempts: number; claimedUntil: Date | null }[]>`
+      SELECT status, attempts, claimed_until FROM sms_outbox WHERE id IN ${ctx.sql(ids)}`;
+    expect(rows.every((r) => r.status === 'sent' && r.attempts === 1 && r.claimedUntil === null)).toBe(true);
+
+    // 认领了、进程在发送中断了（还是待发、租约还在）：租约内不再认领，过了再发
+    const [stuck] = await ctx.sql<{ id: number }[]>`
+      INSERT INTO sms_outbox (phone, purpose, params, content, dedupe_key, attempts, claimed_until)
+      VALUES ('13800189999', 'coupon_issued', '{"count":1}'::jsonb, '测试短信', 'overlap-test-stuck', 1, now() + interval '5 minutes') RETURNING id`;
+    const quick = async (_cfg: unknown, phone: string) => `ref-${phone}`;
+    expect(await sendPendingSms(deps, { limit: 10, send: quick })).toEqual({ sent: 0, failed: 0 });
+    await ctx.sql`UPDATE sms_outbox SET claimed_until = now() - interval '1 second' WHERE id = ${stuck!.id}`;
+    expect(await sendPendingSms(deps, { limit: 10, send: quick })).toEqual({ sent: 1, failed: 0 });
+    expect((await ctx.sql<{ attempts: number }[]>`SELECT attempts FROM sms_outbox WHERE id = ${stuck!.id}`)[0]!.attempts).toBe(2);
+  });
 });
 
 describe('P1-07 充值记录与消费记录', () => {
@@ -306,6 +350,21 @@ describe('P2-09 买一赠一与生日礼', () => {
     expect(birthdayDueYear('1990-01-02', '2026-12-30', 3)).toBe('2027');
     expect(birthdayDueYear('1992-02-29', '2027-02-25', 3)).toBe('2027');
     expect(birthdayDueYear('1992-02-29', '2027-02-24', 3)).toBeNull();
+  });
+
+  it('改了「生日礼提前几天」，今天已经跑完的会员权益任务同一天再跑一次（Codex 自动审查 8603568）', async () => {
+    const deps = { sql: ctx.sql, config: ctx.config };
+    await runBenefitsDaily(deps);
+    // 什么都没改：今天不再跑
+    expect(await runBenefitsDaily(deps)).toBeNull();
+    const rules = (await api(ctx.app, ctx.owner, 'GET', '/api/membership/rules')).body;
+    const saved = await api(ctx.app, ctx.owner, 'PUT', '/api/membership/rules', { ...rules, birthdayLeadDays: rules.birthdayLeadDays === 3 ? 5 : 3 });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    expect(await runBenefitsDaily(deps)).not.toBeNull();
+    expect(await runBenefitsDaily(deps)).toBeNull();
+    // 改回去：再跑一次
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/membership/rules', { ...rules, birthdayLeadDays: rules.birthdayLeadDays })).status).toBe(200);
+    expect(await runBenefitsDaily(deps)).not.toBeNull();
   });
 
   it('结账用了买一赠一券：赠品自动出库记账；库存不够记失败、补库存后重试；反结账冲销', async () => {
@@ -369,6 +428,49 @@ describe('P2-09 买一赠一与生日礼', () => {
     // 营销成本页看得到赠品出库
     const c = await cost();
     expect(c.giftOuts.counts).toMatchObject({ done: 1, voided: 1 });
+  });
+
+  it('开单的事务提交了、还没记下单号进程就断了，之后反结账：按操作编号找到那张单、照样冲销，库存回来（Codex 自动审查 8603568）', async () => {
+    const material = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', {
+      code: 'ZG-RECON',
+      name: '对账赠品',
+      specification: '一份',
+      inventoryUnit: '份',
+      purchaseUnit: '份',
+      purchaseFactorMilli: 1000,
+    });
+    expect(material.status, JSON.stringify(material.body)).toBe(201);
+    const materialId = material.body.id as number;
+    const warehouseId = ((await api(ctx.app, ctx.owner, 'GET', '/api/coupons/meta')).body as { warehouses: { id: number }[] }).warehouses[0]!.id;
+    const opening = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docDate: today, docType: 'opening', approveNow: true, lines: [{ materialId, qtyMilli: 5_000 }] });
+    expect(opening.status, JSON.stringify(opening.body)).toBe(201);
+    const stock = async () => (await api(ctx.app, ctx.owner, 'GET', `/api/inventory/materials/${materialId}`)).body.stockMilli as number;
+    const t = await template({ name: '对账买一赠一', kind: 'bogo', buyItemId: item['整改果盘'], giftMaterialId: materialId, giftQtyMilli: 1000, giftWarehouseId: warehouseId });
+    const m = await createMember(ctx, '对账会员', '13900180006');
+    await issue(m.id, t.id);
+    const code = (await memberCoupons(m.id)).find((c) => c.templateId === t.id)!.code;
+    const k = await payWithCoupon(await enter([{ itemId: item['整改果盘']!, quantity: 2, price: 3800 }], m.id), code, 3800);
+    const [job] = await ctx.sql<{ id: number; clientKey: string; status: string }[]>`SELECT id, client_key, status FROM coupon_gift_outs WHERE checkout_id = ${k}`;
+    expect(job!.status).toBe('pending');
+    // 模拟：出库的单用这一条的操作编号开好、提交了，进程在记下单号之前断了（这一条还是「待出库」）
+    const doc = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/docs', {
+      clientKey: job!.clientKey,
+      docDate: today,
+      docType: 'direct_use',
+      warehouseId,
+      note: '买一赠一的赠品（模拟断在记单号之前）',
+      lines: [{ materialId, qtyMilli: 1000 }],
+    });
+    expect(doc.status, JSON.stringify(doc.body)).toBe(201);
+    expect(await stock()).toBe(4_000);
+    // 下一分钟的任务之前就反结账了：原来这一条记成「已取消」，库存永远少一份
+    expect((await api(ctx.app, duty, 'POST', `/api/frontdesk/checkouts/${k}/void`, { reason: '收错了' })).status).toBe(200);
+    expect((await ctx.sql<{ status: string }[]>`SELECT status FROM coupon_gift_outs WHERE id = ${job!.id}`)[0]!.status).toBe('cancelled');
+    // 对账：按操作编号找到那张单，改成待冲销，冲销后库存回来
+    expect(await processGiftOuts({ sql: ctx.sql, config: ctx.config })).toMatchObject({ voided: 1 });
+    const [after] = await ctx.sql<{ status: string; invDocId: number }[]>`SELECT status, inv_doc_id FROM coupon_gift_outs WHERE id = ${job!.id}`;
+    expect(after).toMatchObject({ status: 'voided', invDocId: doc.body.doc.id });
+    expect(await stock()).toBe(5_000);
   });
 });
 

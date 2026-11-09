@@ -140,14 +140,16 @@ async function publishedForGrants(db: Db): Promise<BenefitDef[]> {
 /**
  * 权益清单的版本指纹（每天的自动任务据此判断要不要再跑一次）：每项权益的编号与版本，加上权益用到的券模板的编号与版本——
  * 有人修改、发布、暂缓、导入权益，或停用、启用、改了用到的券模板（例如跑的时候模板停着、发不出，之后又启用），同一天都会再跑
- * （Codex 自动审查 1648cd0）。取摘要的前 52 位（JS 数字能精确表示）；用指纹不用版本合计，两处改动不会互相抵消
+ * （Codex 自动审查 1648cd0）。取摘要的前 52 位（JS 数字能精确表示）；用指纹不用版本合计，两处改动不会互相抵消。
+ * 8.0.4 起再加上「生日礼提前几天」：改了这个天数，今天新到期的生日礼同一天就补上（Codex 自动审查 8603568）
  */
-async function catalogStamp(db: Db): Promise<number> {
+async function catalogStamp(db: Db, birthdayLeadDays: number): Promise<number> {
   const [r] = await db<{ stamp: number }[]>`
     SELECT ('x' || substr(md5(
              coalesce((SELECT string_agg(id || ':' || version, ',' ORDER BY id) FROM benefits), '') || '|' ||
              coalesce((SELECT string_agg(t.id || ':' || t.version, ',' ORDER BY t.id) FROM coupon_templates t
-                       WHERE t.id IN (SELECT template_id FROM benefits WHERE template_id IS NOT NULL)), '')
+                       WHERE t.id IN (SELECT template_id FROM benefits WHERE template_id IS NOT NULL)), '') || '|' ||
+             ${`birthday-lead:${birthdayLeadDays}`}::text
            ), 1, 13))::bit(52)::bigint AS stamp`;
   return Number(r!.stamp);
 }
@@ -380,7 +382,7 @@ export async function runBenefitsDaily(deps: Pick<Deps, 'sql' | 'config'>, now =
   const settings = await loadSettings(sql);
   const today = businessDateOf(now, deps.config.timezone, settings.businessDayStartHour);
   // 先读清单的版本合计、再读已发布的：这之后的修改会让合计变，下一次再跑
-  const stamp = await catalogStamp(sql);
+  const stamp = await catalogStamp(sql, (await loadMembershipRules(sql)).birthdayLeadDays);
   const [run] = await sql<{ finishedAt: string | null; error: string | null; catalogStamp: number | null }[]>`
     SELECT finished_at, error, catalog_stamp FROM membership_job_runs WHERE job = 'benefits' AND business_date = ${today}`;
   if (run && run.finishedAt && !run.error && run.catalogStamp !== null && Number(run.catalogStamp) === stamp) return null;
