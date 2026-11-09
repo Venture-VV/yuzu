@@ -75,8 +75,9 @@ FROM candidates
 ORDER BY ord, n, value
 ON CONFLICT (group_name, name) DO NOTHING;
 
+-- 按「分组（字段名）+ 值」挂：两个字段名字相同时，值相同的合成一个标签，两边的会员都挂上（一个值也不丢）
 WITH defs AS (
-  SELECT d->>'key' AS key
+  SELECT d->>'key' AS key, left(btrim(coalesce(d->>'label', '')), 16) AS label
   FROM settings s
   CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(s.value) = 'array' THEN s.value ELSE '[]'::jsonb END) AS t(d)
   WHERE s.key = 'member_fields' AND coalesce(d->>'key', '') <> ''
@@ -85,7 +86,7 @@ INSERT INTO member_tag_links (member_id, tag_id, created_at)
 SELECT m.id, t.id, m.created_at
 FROM members m
 JOIN defs d ON m.custom_fields ? d.key
-JOIN member_tags t ON t.source = 'field' AND t.field_key = d.key AND t.name = left(btrim(m.custom_fields->>d.key), 100)
+JOIN member_tags t ON t.group_name = d.label AND t.name = left(btrim(m.custom_fields->>d.key), 100)
 WHERE btrim(coalesce(m.custom_fields->>d.key, '')) <> ''
 ON CONFLICT DO NOTHING;
 
