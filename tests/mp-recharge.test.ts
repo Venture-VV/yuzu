@@ -12,13 +12,13 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
 import type { MembershipRules } from '../src/shared/membership';
 import { MP_GATEWAY_HEADER, MP_OPENID_HEADER, type MpRechargeAdminData, type MpRechargeOptions, type MpRechargeOrder } from '../src/shared/mp';
 import type { Deps } from '../src/server/lib/context';
 import { buildMpApp } from '../src/server/modules/mp/app';
 import { loadPayRuntime, type PayRuntime } from '../src/server/modules/mp/pay';
-import { payRechargeOrder, sweepRechargeOrders } from '../src/server/modules/mp/recharge';
+import { closeUnboundOrders, payRechargeOrder, sweepRechargeOrders } from '../src/server/modules/mp/recharge';
 import { createMockWxPay, type MockWxPay } from '../src/server/modules/mp/wxpay-mock';
 import { consistencyChecks } from '../src/server/ops/consistency';
 import { api, balanceOf, createMember, setup, type TestContext } from './helpers';
@@ -541,19 +541,24 @@ describe('解绑、换绑之后的旧充值单（小程序线测试 866ccfa 的 
     const id = await bindingOf(a.openid);
     // 先拿住这个微信绑定锁的排他模式，让解绑、继续支付按先后排队：解绑在前（只数排这一把的，见 advisoryWaitersOn）
     const holder = await holdAdvisory(`mp_bind:${a.openid}`);
-    wx.setDown(true);
     let unbinding: ReturnType<typeof api> | undefined;
     let paying: ReturnType<typeof call> | undefined;
-    try {
-      unbinding = api(ctx.app, ctx.owner, 'POST', `/api/admin/mp/bindings/${id}/unbind`, { clientKey: randomUUID(), reason: '换手机号' });
-      await waitForAdvisoryWaiters(holder.pid, 1);
-      paying = call('POST', `/api/mp/recharge/orders/${c.order.orderNo}/pay`, a.openid, {});
-      await waitForAdvisoryWaiters(holder.pid, 2);
-    } finally {
-      // 中途出错也放开，不让排着的请求一直等、连累后面的用例
-      await holder.release();
-    }
-    const [u, p] = await Promise.all([unbinding!, paying!]);
+    let passed = false;
+    // 收尾：这条用例中途哪里出错都做（排队、回答、之后的核对）——放开锁、等已经发出的请求做完、再恢复模拟微信；
+    // 没过的再关掉这次解绑留下的待支付单，不连累后面的用例（小程序线测试 3c28d68 的 P2）。收尾出错不往外抛，不盖住原来的错
+    onTestFinished(async () => {
+      await holder.release().catch(() => undefined);
+      await Promise.allSettled([unbinding, paying]);
+      wx.setDown(false);
+      if (!passed) await closeUnboundOrders(deps, pay, id).catch(() => undefined);
+    });
+    wx.setDown(true);
+    unbinding = api(ctx.app, ctx.owner, 'POST', `/api/admin/mp/bindings/${id}/unbind`, { clientKey: randomUUID(), reason: '换手机号' });
+    await waitForAdvisoryWaiters(holder.pid, 1);
+    paying = call('POST', `/api/mp/recharge/orders/${c.order.orderNo}/pay`, a.openid, {});
+    await waitForAdvisoryWaiters(holder.pid, 2);
+    await holder.release();
+    const [u, p] = await Promise.all([unbinding, paying]);
     wx.setDown(false);
     expect(u.status, JSON.stringify(u.body)).toBe(200);
     expect(p.statusCode, p.body).toBe(403);
@@ -567,6 +572,7 @@ describe('解绑、换绑之后的旧充值单（小程序线测试 866ccfa 的 
     await sweepRechargeOrders(deps, pay);
     expect(await row(c.order.orderNo)).toMatchObject({ status: 'paid' });
     expect(await rechargesOf(a.memberId)).toHaveLength(1);
+    passed = true;
   });
 
   it('建单与解绑同时：要么没建成（已解绑），要么建好的单在解绑后马上关掉；不会留下解绑之后还能付的单', async () => {
