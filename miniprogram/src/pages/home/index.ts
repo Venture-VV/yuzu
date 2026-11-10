@@ -38,6 +38,8 @@ Page({
   /** 上次问提醒的时刻：切回首页 30 秒内不再问（弹着的时候每次都重新问，解绑、换绑以后换成那位会员的） */
   noticeAt: 0,
   noticeBusy: false,
+  /** 这次打开以后点过「知道了」的：已读还没回来时同时在问的那一次不会把它们又弹出来 */
+  dismissed: [] as number[],
 
   onLoad() {
     const n = navMetrics();
@@ -65,7 +67,10 @@ Page({
     this.noticeBusy = true;
     this.noticeAt = Date.now();
     try {
-      const notices = await loadNotices();
+      const got = await loadNotices();
+      // 问不到（断网、门店连不上）：弹着的照旧
+      if (got === null) return;
+      const notices = got.filter((n) => this.dismissed.indexOf(n.id) < 0);
       this.setData({ notices, noticeOpen: notices.length > 0, noticeCoupon: notices.some((n) => n.coupon) });
     } finally {
       this.noticeBusy = false;
@@ -77,6 +82,7 @@ Page({
     const ids = this.data.notices.map((n) => n.id);
     this.setData({ noticeOpen: false, notices: [], noticeCoupon: false });
     this.noticeAt = Date.now();
+    this.dismissed = this.dismissed.concat(ids).slice(-100);
     markRead(ids);
   },
 

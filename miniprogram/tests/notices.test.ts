@@ -54,16 +54,17 @@ describe('问提醒', () => {
     ]);
   });
 
-  it('没绑定、门店连不上、会员功能没开、断网：当没有，不弹、不报错', async () => {
-    for (const reply of [
-      { status: 403, data: { error: { code: 'MP_NOT_BOUND', message: '请先绑定会员' } } },
-      { status: 503, data: { error: { code: 'STORE_OFFLINE', message: '门店系统连接中' } } },
-      { status: 403, data: { error: { code: 'MP_DISABLED', message: '小程序会员功能还没开放' } } },
-      'fail' as const,
-    ]) {
-      installWx({ '/v1/notices': reply });
+  it('没绑定、会员功能没开：没有（不弹、不报错）；门店连不上、出错、断网：问不到（null，页面上弹着的照旧）', async () => {
+    for (const [reply, expected] of [
+      [{ status: 403, data: { error: { code: 'MP_NOT_BOUND', message: '请先绑定会员' } } }, []],
+      [{ status: 403, data: { error: { code: 'MP_DISABLED', message: '小程序会员功能还没开放' } } }, []],
+      [{ status: 503, data: { error: { code: 'STORE_OFFLINE', message: '门店系统连接中' } } }, null],
+      [{ status: 500, data: { error: { code: 'INTERNAL', message: '出错了' } } }, null],
+      ['fail' as const, null],
+    ] as const) {
+      installWx({ '/v1/notices': reply as Reply });
       const m = await load();
-      expect(await m.loadNotices()).toEqual([]);
+      expect(await m.loadNotices()).toEqual(expected);
     }
   });
 });
@@ -87,13 +88,13 @@ describe('记已读', () => {
     await m.markRead([5, 4]);
     expect(storage.tq_notice_read_pending).toEqual([5, 4]);
     // 补发还是失败：只弹没看过的那条
-    expect((await m.loadNotices()).map((n) => n.id)).toEqual([9]);
+    expect((await m.loadNotices())!.map((n) => n.id)).toEqual([9]);
     expect(storage.tq_notice_read_pending).toEqual([5, 4]);
     // 网络好了（下次打开）：先补发，再问
     up = true;
     sent.length = 0;
     const next = await load();
-    expect((await next.loadNotices()).map((n) => n.id)).toEqual([5, 4, 9]);
+    expect((await next.loadNotices())!.map((n) => n.id)).toEqual([5, 4, 9]);
     expect(sent.map((x) => x.path)).toEqual(['/v1/notices/read', '/v1/notices']);
     expect(sent[0]!.data).toEqual({ ids: [5, 4] });
     expect(storage.tq_notice_read_pending).toBeUndefined();

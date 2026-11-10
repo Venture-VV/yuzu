@@ -1,6 +1,7 @@
 // 会员端提醒（RQ-014，接主线 8.0.4 批量发券的「会员端弹窗」；什么时候弹按 HY16，待确认）：
 // 首页显示时问门店系统这位会员今天要看的提醒（收到券、券快到期），有就弹出来；点「知道了」或「看我的券」记已读，以后不再弹。
-//   · 哪位会员、哪天的提醒都由门店系统按这个微信此刻的绑定与门店营业日算；没绑定、门店连不上、会员功能没开时不弹、不提示；
+//   · 哪位会员、哪天的提醒都由门店系统按这个微信此刻的绑定与门店营业日算；没绑定、门店连不上、会员功能没开时不弹、不提示
+//     （连不上时已经弹着的照旧，不关）；
 //   · 记已读：先记在手机上再发。门店系统回了（记上了；或者明确拒绝，比如已经解绑）就删掉；断网、超时、门店出错时留着，
 //     下次打开首页先补发、补发前不再弹这几条（看过了）。门店系统只记这位会员自己的提醒、同一条只记一次，
 //     所以重提、补发都不会多记，解绑或换绑以后补发的旧编号也记不到别的会员身上；
@@ -101,14 +102,17 @@ export async function markRead(ids: number[]): Promise<void> {
   await flushReads();
 }
 
-/** 今天要弹的提醒：先补发没确认的已读，再问；还没确认已读的那几条不再弹。没绑定、连不上、没开都当没有 */
-export async function loadNotices(): Promise<NoticeView[]> {
+/**
+ * 今天要弹的提醒：先补发没确认的已读，再问；还没确认已读的那几条不再弹。
+ * 没绑定、会员功能没开（门店系统明确回了）是没有；断网、门店连不上、出错是问不到，回 null：页面上弹着的照旧，不关
+ */
+export async function loadNotices(): Promise<NoticeView[] | null> {
   await flushReads();
   try {
     const r = await member<MpNotices>('GET', '/v1/notices');
     const pending = readPending();
     return (r.notices || []).filter((n) => pending.indexOf(n.id) < 0).map(noticeView);
-  } catch {
-    return [];
+  } catch (e) {
+    return settled(e) ? [] : null;
   }
 }
