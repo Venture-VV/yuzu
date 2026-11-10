@@ -108,5 +108,17 @@ describe('扫码盘点', () => {
     expect((await api(ctx.app, keeper, 'POST', `/api/erp/assets/stocktakes/${st.id}/scan`, { code: 'X' })).body.error.code).toBe('INVALID_STATE');
     // 卡片没被改
     expect((await api(ctx.app, keeper, 'GET', `/api/erp/assets/${inScope.cards[1].id}`)).body.status).toBe('in_use');
+
+    // 结束时记下了结果：之后在这个部门建卡、把盘亏的那张报废，都不改写这次盘点（Codex 审查 d8b314b）
+    await ok(create({ name: '盘点后新买的', quantity: 1, departmentId: deptId }));
+    const lost = (await api(ctx.app, keeper, 'GET', `/api/erp/assets/${inScope.cards[1].id}`)).body;
+    await ok(api(ctx.app, keeper, 'POST', `/api/erp/assets/${lost.id}/change`, { kind: 'scrap', reason: '盘点没找到，报损', expectedVersion: lost.version }), 200);
+    const later = (await api(ctx.app, keeper, 'GET', `/api/erp/assets/stocktakes/${st.id}`)).body;
+    expect(later).toMatchObject({ expected: closed.expected, found: closed.found });
+    expect(later.missing.map((x: { assetNo: string }) => x.assetNo)).toEqual(closed.missing.map((x: { assetNo: string }) => x.assetNo));
+    expect(later.extra).toEqual(closed.extra);
+    // 结束了的盘点不能再改、盘点记录不能删
+    await expect(ctx.sql`UPDATE asset_stocktakes SET note = '改一下' WHERE id = ${st.id}`).rejects.toThrow(/已经结束的盘点不能再改/);
+    await expect(ctx.sql`DELETE FROM asset_stocktakes WHERE id = ${st.id}`).rejects.toThrow(/不能删除/);
   });
 });

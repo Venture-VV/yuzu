@@ -68,7 +68,23 @@ describe('可调的数值（8.0.7 A1）', () => {
     expect(over.body.error.message).toContain('最多 5 天');
     const okRes = await api(ctx.app, ctx.owner, 'POST', '/api/approvals/delegations', body(5));
     expect(okRes.status, JSON.stringify(okRes.body)).toBeLessThan(300);
+    // 设到 31 天以上也能登记：库里原来卡在 31 天，迁移 105 放宽到 366 天（Codex 审查 d8b314b）
+    await settings({ delegationMaxDays: 366 });
+    const long = await api(ctx.app, ctx.owner, 'POST', '/api/approvals/delegations', body(366));
+    expect(long.status, JSON.stringify(long.body)).toBeLessThan(300);
     await settings({ delegationMaxDays: DEFAULT_TUNABLES.delegationMaxDays });
+  });
+
+  it('库里的约束跟得上可调的上限：批量发券最多 20,000 位、代理最长 366 天（迁移 105，Codex 审查 d8b314b）', async () => {
+    const defs = await ctx.sql<{ def: string }[]>`
+      SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
+      WHERE conrelid IN ('coupon_campaigns'::regclass, 'approval_delegations'::regclass) AND contype = 'c'`;
+    const targeted = defs.filter((d) => d.def.includes('targeted'));
+    expect(targeted).toHaveLength(1);
+    expect(targeted[0]!.def).toContain(`<= ${TUNABLE_LIMITS.campaignMaxMembers.max}`);
+    const span = defs.filter((d) => d.def.includes('ends_on - starts_on'));
+    expect(span).toHaveLength(1);
+    expect(span[0]!.def).toContain(`<= ${TUNABLE_LIMITS.delegationMaxDays.max - 1}`);
   });
 
   it('平台核销补录最早补到几天前（N6）按设置', async () => {

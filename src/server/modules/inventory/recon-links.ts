@@ -20,7 +20,7 @@ import { setTxTimeouts } from '../../lib/tx';
 import { AttemptLimiter } from '../canteen/portal-auth';
 import { enabledErpModules } from '../erp';
 import { loadSettings } from '../settings';
-import { statement } from './payables';
+import { statement, statementTotals } from './payables';
 
 const KIND_LABELS: Record<string, string> = { opening: '期初未付', receipt: '收货', supplier_return: '退货扣款', payment: '付款', refund: '供应商退款' };
 
@@ -103,6 +103,35 @@ async function snapshotOf(db: Db, reconId: number): Promise<ReconSnapshot> {
   };
 }
 
+/**
+ * 登记以后这一期的往来变了没有（与对账页上的「有变动」同一个判断）：月结比登记时与现在的期初、收货、退货、付款、退款、期末，
+ * 按批次看登记的收货单还是不是都生效。变了的不发链接：链接里的明细按现在的往来列、合计是登记时的，两边会对不上（Codex 审查 d8b314b）
+ */
+async function reconChanged(db: Db, reconId: number): Promise<boolean> {
+  const [r] = await db<{ supplierId: number; kind: 'month' | 'batch'; periodMonth: string | null; begin: string; opening: string; received: string; returnCredit: string; paid: string; refunded: string; end: string }[]>`
+    SELECT supplier_id, kind, period_month::text AS period_month, begin_cents::text AS begin, opening_cents::text AS opening, received_cents::text AS received,
+           return_credit_cents::text AS return_credit, paid_cents::text AS paid, refunded_cents::text AS refunded, end_cents::text AS end
+    FROM supplier_reconciliations WHERE id = ${reconId}`;
+  if (!r) return false;
+  if (r.kind === 'month') {
+    const t = await statementTotals(db, Number(r.supplierId), r.periodMonth!, monthEnd(r.periodMonth!));
+    const pairs: [unknown, string][] = [
+      [t.beginCents, r.begin],
+      [t.openingCents, r.opening],
+      [t.receivedCents, r.received],
+      [t.returnCreditCents, r.returnCredit],
+      [t.paidCents, r.paid],
+      [t.refundedCents, r.refunded],
+      [t.endCents, r.end],
+    ];
+    return pairs.some(([now, then]) => Number(now) !== Number(then));
+  }
+  const [x] = await db<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM supplier_reconciliation_docs rd JOIN inv_docs d ON d.id = rd.doc_id
+    WHERE rd.reconciliation_id = ${reconId} AND d.status <> 'confirmed'`;
+  return x!.n > 0;
+}
+
 /** 生成对账确认链接：返回链接原文（只给这一次）；上一条没回的自动作废 */
 export async function createLink(deps: Deps, reconId: number, actor: Actor, ip?: string): Promise<{ token: string; link: ReconLinkState }> {
   const token = randomBytes(24).toString('base64url');
@@ -113,6 +142,12 @@ export async function createLink(deps: Deps, reconId: number, actor: Actor, ip?:
       SELECT voided_at, supplier_id FROM supplier_reconciliations WHERE id = ${reconId} FOR NO KEY UPDATE`;
     if (!r) throw notFound('对账登记不存在');
     if (r.voidedAt) throw conflict('INVALID_STATE', '这条对账登记已撤销，不能再发确认链接');
+    if (await reconChanged(tx, reconId)) {
+      throw unprocessable(
+        'RECON_CHANGED',
+        '登记以后这一期的往来有变动（补登或冲销了收货、退货、付款），发出去的明细会和登记的合计对不上；请先撤销这条对账登记、重新登记，再发确认链接',
+      );
+    }
     const snapshot = await snapshotOf(tx, reconId);
     await tx`UPDATE recon_links SET voided_by = ${actor.id}, voided_at = now() WHERE reconciliation_id = ${reconId} AND voided_at IS NULL AND replied_at IS NULL`;
     const [row] = await tx<{ id: number }[]>`

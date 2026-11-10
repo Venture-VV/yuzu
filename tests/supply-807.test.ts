@@ -346,6 +346,40 @@ describe('2.5 验收标准模板与不合格挂起付款；A4 合同扫描件 PD
     const held = await request();
     expect(held.status, JSON.stringify(held.body)).toBe(422);
     expect(held.body.error.code).toBe('ACCEPTANCE_HOLD');
+    // 付款规则关掉 P7（可以不走申请直接付合同的货款）时，直接登记付款同样挂起（Codex 审查 d8b314b）
+    const po = await ok(
+      api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', {
+        clientKey: randomUUID(),
+        supplierId: contract.supplierId,
+        orderDate: today,
+        approveNow: true,
+        contractId: contract.id,
+        lines: [{ materialId: matId, purchaseQtyMilli: q(2), priceCents: 50_00 }],
+      }),
+    );
+    const rc = await ok(
+      api(ctx.app, keeper, 'POST', '/api/inventory/docs', {
+        clientKey: randomUUID(),
+        docDate: today,
+        docType: 'receipt',
+        supplierId: contract.supplierId,
+        purchaseOrderId: po.po.id,
+        lines: [{ materialId: matId, poLineId: po.po.lines[0].id, deliveredMilli: q(20), acceptedMilli: q(20) }],
+      }),
+    );
+    await ok(api(ctx.app, ctx.owner, 'PUT', '/api/erp/payments/rules', { requireRequestForContractGoods: false }), 200);
+    const direct = await api(ctx.app, payer, 'POST', '/api/payables/payments', {
+      clientKey: randomUUID(),
+      supplierId: contract.supplierId,
+      payDate: today,
+      amountCents: 10_000,
+      method: 'bank_transfer',
+      evidence: '流水尾号 0807',
+      allocations: [{ kind: 'receipt', targetId: rc.doc.id, amountCents: 10_000 }],
+    });
+    expect(direct.status, JSON.stringify(direct.body)).toBe(422);
+    expect(direct.body.error.code).toBe('ACCEPTANCE_HOLD');
+    await ok(api(ctx.app, ctx.owner, 'PUT', '/api/erp/payments/rules', { requireRequestForContractGoods: true }), 200);
     // 开关关掉：照常申请
     await settings({ acceptanceHoldsPayment: false });
     expect((await api(ctx.app, buyer, 'GET', `/api/erp/contracts/${contract.id}/payment-plan`)).body.acceptanceHold).toBe(false);
@@ -427,6 +461,46 @@ describe('2.6 供应商在线对账确认', () => {
     expect((await api(ctx.app, payer, 'POST', `/api/payables/reconciliations/${reconId}/links`, {})).body.error.code).toBe('INVALID_STATE');
     // 链接格式不对
     expect((await pub('bad')).statusCode).toBe(400);
+  });
+});
+
+describe('2.6 对账确认链接：登记以后往来变了不发链接（Codex 审查 d8b314b）', () => {
+  it('补登了上个月的收货：对账登记显示有变动，生成链接被拒（RECON_CHANGED）；撤销、重新登记以后能发，明细与合计对得上', async () => {
+    const sid = await newSupplier('S807Q', '对账有变动供应商');
+    const lastMonthEnd = shiftDate(`${today.slice(0, 7)}-01`, -1);
+    const month = lastMonthEnd.slice(0, 7);
+    const reg = await ok(api(ctx.app, payer, 'POST', '/api/payables/reconciliations', { clientKey: randomUUID(), supplierId: sid, kind: 'month', month }));
+    // 登记以后补登一张上个月的收货（¥100）
+    const po = await ok(
+      api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', {
+        clientKey: randomUUID(),
+        supplierId: sid,
+        orderDate: lastMonthEnd,
+        approveNow: true,
+        lines: [{ materialId: matId, purchaseQtyMilli: q(1), priceCents: 100_00 }],
+      }),
+    );
+    await ok(
+      api(ctx.app, keeper, 'POST', '/api/inventory/docs', {
+        clientKey: randomUUID(),
+        docDate: lastMonthEnd,
+        docType: 'receipt',
+        supplierId: sid,
+        purchaseOrderId: po.po.id,
+        lines: [{ materialId: matId, poLineId: po.po.lines[0].id, deliveredMilli: q(10), acceptedMilli: q(10) }],
+      }),
+    );
+    expect((await api(ctx.app, payer, 'GET', `/api/payables/reconciliations/${reg.reconciliation.id}`)).body.changed).toBe(true);
+    const refused = await api(ctx.app, payer, 'POST', `/api/payables/reconciliations/${reg.reconciliation.id}/links`, {});
+    expect(refused.status, JSON.stringify(refused.body)).toBe(422);
+    expect(refused.body.error.code).toBe('RECON_CHANGED');
+    // 撤销、按现在的往来重新登记以后能发：发出去的明细合计等于登记的收货
+    await ok(api(ctx.app, payer, 'POST', `/api/payables/reconciliations/${reg.reconciliation.id}/void`, { clientKey: randomUUID(), reason: '补登了收货' }), 200);
+    const again = await ok(api(ctx.app, payer, 'POST', '/api/payables/reconciliations', { clientKey: randomUUID(), supplierId: sid, kind: 'month', month }));
+    const link = await ok(api(ctx.app, payer, 'POST', `/api/payables/reconciliations/${again.reconciliation.id}/links`, {}));
+    const view = (await ctx.app.inject({ method: 'GET', url: `/api/public/recon/${link.token}` })).json();
+    expect(view.snapshot.totals.receivedCents).toBe(10_000);
+    expect(view.snapshot.rows.reduce((t: number, r: { amountCents: number }) => t + r.amountCents, 0)).toBe(view.snapshot.totals.endCents - view.snapshot.totals.beginCents);
   });
 });
 

@@ -43,6 +43,7 @@ import { assertNotFuture, assertSameMonth, logApproval } from '../inventory/comm
 import { checkAllocations, confirmPayment, lockSupplier, openItems, reopenPaidRequest, supplierCredits } from '../inventory/payables';
 import { contractReceivedPoIds, poThreeWay, threeWayProblems } from './match';
 import { loadSettings } from '../settings';
+import { assertNoAcceptanceHold } from './hold';
 import { contractPlan, requestPaidSql } from './plan';
 
 const id = z.number().int().positive();
@@ -362,17 +363,6 @@ interface ContractCheck {
  * 验收不合格挂起付款（8.0.7 2.5，V9）：这份合同最近一条没作废的验收是「不合格」、开关开着时拒绝（ACCEPTANCE_HOLD）。
  * 只读验收登记（登记验收锁合同一行，这里不锁合同：与登记同时发生时以先提交的为准）。
  */
-async function assertNoAcceptanceHold(tx: Tx, contractId: number) {
-  const [a] = await tx<{ result: string; acceptedOn: string; note: string; contractNo: string }[]>`
-    SELECT a.result, a.accepted_on::text AS accepted_on, a.note, c.contract_no
-    FROM contract_acceptances a JOIN contracts c ON c.id = a.contract_id
-    WHERE a.contract_id = ${contractId} AND a.voided_at IS NULL
-    ORDER BY a.accepted_on DESC, a.id DESC LIMIT 1`;
-  if (!a || a.result !== 'fail') return;
-  if (!(await loadSettings(tx)).acceptanceHoldsPayment) return;
-  throw unprocessable('ACCEPTANCE_HOLD', `合同 ${a.contractNo} 最近一次验收（${a.acceptedOn}）不合格${a.note ? `：${a.note}` : ''}，付款挂起；重新验收合格以后再付`);
-}
-
 async function checkContractRequest(
   tx: Tx,
   today: string,

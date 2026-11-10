@@ -203,30 +203,50 @@ export async function changeAsset(deps: Deps, id: number, raw: unknown, actor: A
 
 // ───────────────────────── 扫码盘点 ─────────────────────────
 
-export async function getStocktake(db: Db, id: number): Promise<AssetStocktake> {
-  const [s] = await db<{ id: number; docNo: string; departmentId: number | null; departmentName: string | null; status: 'open' | 'closed'; note: string; startedByName: string; startedAt: string; closedAt: string | null }[]>`
-    SELECT t.id, t.doc_no, t.department_id, d.name AS department_name, t.status, t.note, s.display_name AS started_by_name, t.started_at, t.closed_at
-    FROM asset_stocktakes t JOIN staff s ON s.id = t.started_by LEFT JOIN departments d ON d.id = t.department_id WHERE t.id = ${id}`;
-  if (!s) throw notFound('盘点不存在');
+type StocktakeResult = Pick<AssetStocktake, 'expected' | 'found' | 'missing' | 'extra'>;
+
+/** 按现在的卡片算这次盘点的结果：范围是这个部门（或全部）没报废的卡片；扫到的不在范围里、对不上的单列 */
+async function liveResult(db: Db, id: number, departmentId: number | null): Promise<StocktakeResult> {
   const scope = await db<{ id: number; assetNo: string; name: string; location: string; keeper: string }[]>`
     SELECT id, asset_no, name, location, keeper FROM asset_cards
-    WHERE status <> 'scrapped' ${s.departmentId ? db`AND department_id = ${s.departmentId}` : db``} ORDER BY asset_no`;
-  const scans = await db<{ code: string; assetId: number | null; assetNo: string | null; name: string | null; departmentId: number | null; departmentName: string | null; status: string | null; scannedAt: string }[]>`
-    SELECT x.code, x.asset_id, c.asset_no, c.name, c.department_id, d.name AS department_name, c.status, x.scanned_at
+    WHERE status <> 'scrapped' ${departmentId ? db`AND department_id = ${departmentId}` : db``} ORDER BY asset_no`;
+  const scans = await db<{ code: string; assetId: number | null; assetNo: string | null; name: string | null; departmentName: string | null }[]>`
+    SELECT x.code, x.asset_id, c.asset_no, c.name, d.name AS department_name
     FROM asset_stocktake_scans x LEFT JOIN asset_cards c ON c.id = x.asset_id LEFT JOIN departments d ON d.id = c.department_id
     WHERE x.stocktake_id = ${id} ORDER BY x.scanned_at`;
   const inScope = new Set(scope.map((a) => Number(a.id)));
   const scannedIds = new Set(scans.filter((x) => x.assetId !== null).map((x) => Number(x.assetId)));
   return {
-    ...s,
-    id: Number(s.id),
-    departmentId: s.departmentId === null ? null : Number(s.departmentId),
     expected: scope.length,
     found: [...scannedIds].filter((x) => inScope.has(x)).length,
-    missing: s.status === 'closed' ? scope.filter((a) => !scannedIds.has(Number(a.id))).map((a) => ({ ...a, id: Number(a.id) })) : [],
+    missing: scope.filter((a) => !scannedIds.has(Number(a.id))).map((a) => ({ ...a, id: Number(a.id) })),
     extra: scans
       .filter((x) => x.assetId === null || !inScope.has(Number(x.assetId)))
       .map((x) => ({ code: x.code, assetNo: x.assetNo, name: x.name, departmentName: x.departmentName })),
+  };
+}
+
+export async function getStocktake(db: Db, id: number): Promise<AssetStocktake> {
+  const [s] = await db<{ id: number; docNo: string; departmentId: number | null; departmentName: string | null; status: 'open' | 'closed'; note: string; startedByName: string; startedAt: string; closedAt: string | null; result: StocktakeResult | null }[]>`
+    SELECT t.id, t.doc_no, t.department_id, d.name AS department_name, t.status, t.note, s.display_name AS started_by_name, t.started_at, t.closed_at, t.result
+    FROM asset_stocktakes t JOIN staff s ON s.id = t.started_by LEFT JOIN departments d ON d.id = t.department_id WHERE t.id = ${id}`;
+  if (!s) throw notFound('盘点不存在');
+  const departmentId = s.departmentId === null ? null : Number(s.departmentId);
+  // 结束了的按结束时记下的结果（迁移 105，之后建卡、调拨、报废不改写）；8.0.7 早先结束、没记结果的照旧现算；进行中的现算、还不列盘亏
+  const result = s.status === 'closed' && s.result ? s.result : await liveResult(db, Number(s.id), departmentId);
+  const scans = await db<{ code: string; assetNo: string | null; name: string | null; scannedAt: string }[]>`
+    SELECT x.code, c.asset_no, c.name, x.scanned_at
+    FROM asset_stocktake_scans x LEFT JOIN asset_cards c ON c.id = x.asset_id
+    WHERE x.stocktake_id = ${id} ORDER BY x.scanned_at`;
+  const { result: _stored, ...head } = s;
+  return {
+    ...head,
+    id: Number(s.id),
+    departmentId,
+    expected: result.expected,
+    found: result.found,
+    missing: s.status === 'closed' ? result.missing : [],
+    extra: result.extra,
     scans: scans.map((x) => ({ code: x.code, assetNo: x.assetNo, name: x.name, scannedAt: x.scannedAt })),
   };
 }
@@ -268,10 +288,12 @@ export async function scanStocktake(deps: Deps, id: number, raw: unknown, actor:
 
 export async function closeStocktake(deps: Deps, id: number, actor: Actor, ip?: string) {
   await deps.sql.begin(async (tx) => {
-    const [s] = await tx<{ status: string; docNo: string }[]>`SELECT status, doc_no FROM asset_stocktakes WHERE id = ${id} FOR UPDATE`;
+    const [s] = await tx<{ status: string; docNo: string; departmentId: number | null }[]>`SELECT status, doc_no, department_id FROM asset_stocktakes WHERE id = ${id} FOR UPDATE`;
     if (!s) throw notFound('盘点不存在');
     if (s.status === 'closed') return;
-    await tx`UPDATE asset_stocktakes SET status = 'closed', closed_by = ${actor.id}, closed_at = now() WHERE id = ${id}`;
+    // 结束时记下结果：之后建卡、调拨、报废不改写这次盘点（Codex 审查 d8b314b）。锁住盘点一行以后再算，扫码已经停了（扫码要共享锁、核对没结束）
+    const result = await liveResult(tx, id, s.departmentId === null ? null : Number(s.departmentId));
+    await tx`UPDATE asset_stocktakes SET status = 'closed', closed_by = ${actor.id}, closed_at = now(), result = ${tx.json(result as never)} WHERE id = ${id}`;
     await writeAudit(tx, { staffId: actor.id, action: 'asset_stocktake', targetType: 'asset_stocktake', targetId: id, detail: { op: 'close', docNo: s.docNo }, ip });
   });
   return getStocktake(deps.sql, id);
