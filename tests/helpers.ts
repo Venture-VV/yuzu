@@ -245,6 +245,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '103_expiry.sql',
   '104_wecom_pushes.sql',
   '105_stocktake_result_limits.sql',
+  '106_stocktake_client_key.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

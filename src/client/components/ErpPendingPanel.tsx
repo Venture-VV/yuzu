@@ -47,6 +47,9 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
       return d.collection && typeof d.collection === 'object' ? { refId: d.collection.id } : null;
     case 'asset_card':
       return d.card && typeof d.card === 'object' ? { refId: d.card.id } : null;
+    // 开始扫码盘点（8.0.7）：返回那次盘点本身
+    case 'asset_stocktake':
+      return typeof d.id === 'number' ? { refId: d.id } : null;
     case 'supplier_recon':
     case 'supplier_recon_void':
       return d.reconciliation && typeof d.reconciliation === 'object' ? { refId: d.reconciliation.id } : null;

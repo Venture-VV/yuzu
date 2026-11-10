@@ -321,6 +321,7 @@ export const ERP_OP_TYPES = [
   // 8.0.7 ERP P2：回款登记（动的是钱）、资产建卡
   'ar_collection',
   'asset_card',
+  'asset_stocktake',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -371,6 +372,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   gift_receipt: '赠品登记',
   ar_collection: '回款登记',
   asset_card: '资产建卡',
+  asset_stocktake: '开始扫码盘点',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

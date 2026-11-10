@@ -60,7 +60,7 @@ export function AssetsPage() {
       }
     >
       <div className="space-y-4" data-testid="assets-page">
-        {manage && <ErpPendingPanel types={['asset_card']} />}
+        {manage && <ErpPendingPanel types={['asset_card', 'asset_stocktake']} />}
         <Segmented<Tab>
           ariaLabel="资产与易耗"
           value={tab}
@@ -422,6 +422,7 @@ function AssetSheet({ id, manage, onClose }: { id: number | null; manage: boolea
 function StocktakeView({ manage }: { manage: boolean }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const session = useSession();
   const departments = useDepartments(false, true);
   const list = useQuery({ queryKey: [...KEY, 'stocktakes'], queryFn: () => api.get<{ id: number; docNo: string; departmentName: string | null; status: string; startedAt: string; closedAt: string | null }[]>('/api/erp/assets/stocktakes') });
   const [openId, setOpenId] = useState<number | null>(null);
@@ -429,13 +430,18 @@ function StocktakeView({ manage }: { manage: boolean }) {
   const st = useQuery({ queryKey: [...KEY, 'stocktake', openId], queryFn: () => api.get<AssetStocktake>(`/api/erp/assets/stocktakes/${openId}`), enabled: openId !== null });
   const [code, setCode] = useState('');
   const input = useRef<HTMLInputElement>(null);
+  // 带操作编号、走「结果待确认」（Codex 审查 0048165）：回复丢了不会多开一次，记在页面上方查回或按原内容重提
   const start = async () => {
+    const body = { clientKey: uuid(), departmentId: Number(dept) || null };
+    const scope = departments.data?.find((d) => d.id === body.departmentId)?.name ?? '全部';
     try {
-      const r = await api.post<AssetStocktake>('/api/erp/assets/stocktakes', { departmentId: Number(dept) || null });
-      await qc.invalidateQueries({ queryKey: KEY });
+      const r = await sendErpOp<AssetStocktake>({ key: body.clientKey, type: 'asset_stocktake', url: '/api/erp/assets/stocktakes', body, summary: `开始扫码盘点（${scope}）`, staffName: session.staff.displayName });
       setOpenId(r.id);
     } catch (e) {
-      toast({ tone: 'error', title: errorMessage(e) });
+      if (e instanceof UncertainError) toast({ tone: 'error', title: '开始盘点没收到结果', body: '记在页面上方的「结果待确认」里，查回或按原内容重新提交' });
+      else toast({ tone: 'error', title: errorMessage(e) });
+    } finally {
+      await qc.invalidateQueries({ queryKey: KEY });
     }
   };
   const scan = async () => {

@@ -95,7 +95,18 @@ describe('扫码盘点', () => {
   it('范围内没扫到的是盘亏；不在范围里的、对不上的单列；结束后不能再扫；结果不改卡片', async () => {
     const inScope = await ok(create({ name: '盘点用电脑', quantity: 2, departmentId: deptId }));
     const other = await ok(create({ name: '别的部门的', quantity: 1, departmentId: null }));
-    const st = await ok(api(ctx.app, keeper, 'POST', '/api/erp/assets/stocktakes', { departmentId: deptId }));
+    const startBody = { clientKey: randomUUID(), departmentId: deptId };
+    const st = await ok(api(ctx.app, keeper, 'POST', '/api/erp/assets/stocktakes', startBody));
+    // 带操作编号（Codex 审查 0048165）：回复丢了按原内容重提返回原来那次，不多开一次；查得回；同一编号换内容拒绝；没有编号拒绝
+    expect((await ok(api(ctx.app, keeper, 'POST', '/api/erp/assets/stocktakes', startBody), 200)).id).toBe(st.id);
+    expect((await api(ctx.app, keeper, 'GET', `/api/erp/ops/${startBody.clientKey}?type=asset_stocktake`)).body).toMatchObject({ found: true, refId: st.id });
+    expect((await api(ctx.app, keeper, 'POST', '/api/erp/assets/stocktakes', { ...startBody, departmentId: null })).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+    expect((await api(ctx.app, keeper, 'POST', '/api/erp/assets/stocktakes', { departmentId: deptId })).status).toBe(400);
+    // 确认作废过的编号，原请求晚到也不开
+    const abandoned = randomUUID();
+    expect((await api(ctx.app, keeper, 'POST', `/api/erp/ops/${abandoned}/abandon`, { type: 'asset_stocktake', summary: '开始扫码盘点' })).status).toBeLessThan(300);
+    expect((await api(ctx.app, keeper, 'POST', '/api/erp/assets/stocktakes', { clientKey: abandoned, departmentId: deptId })).status).toBeGreaterThanOrEqual(400);
+    expect((await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM asset_stocktakes WHERE client_key = ${abandoned}`)[0]!.n).toBe(0);
     expect(st.expected).toBeGreaterThanOrEqual(2);
     const scan = (code: string) => ok(api(ctx.app, keeper, 'POST', `/api/erp/assets/stocktakes/${st.id}/scan`, { code }), 200);
     await scan(inScope.cards[0].assetNo);

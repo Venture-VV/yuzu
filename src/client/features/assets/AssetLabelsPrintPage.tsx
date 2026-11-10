@@ -8,14 +8,22 @@ import { useSession } from '../../lib/session';
 import { QrCode } from '../../../canteen-app/QrCode';
 import { PrintFrame } from '../print/PrintFrame';
 
+/** 一次取几张（与接口的上限一样） */
+const LABEL_BATCH = 300;
+
 export function AssetLabelsPrintPage() {
   const { ids = '' } = useParams();
   const session = useSession();
   const wanted = [...new Set(ids.split(',').map(Number).filter((x) => Number.isInteger(x) && x > 0))];
   // 按编号直接取这几张（不从列表里筛：列表最多 1,000 张，老卡片会漏掉）；按选的先后排
+  // 接口一次最多 300 张：选得多的分几批取（Codex 审查 0048165）
   const cards = useQuery({
     queryKey: ['erp', 'assets', 'labels', wanted.join(',')],
-    queryFn: () => api.get<AssetCard[]>(`/api/erp/assets?ids=${wanted.join(',')}`),
+    queryFn: async () => {
+      const batches: number[][] = [];
+      for (let i = 0; i < wanted.length; i += LABEL_BATCH) batches.push(wanted.slice(i, i + LABEL_BATCH));
+      return (await Promise.all(batches.map((b) => api.get<AssetCard[]>(`/api/erp/assets?ids=${b.join(',')}`)))).flat();
+    },
     enabled: wanted.length > 0,
   });
   const byId = new Map((cards.data ?? []).map((c) => [c.id, c]));

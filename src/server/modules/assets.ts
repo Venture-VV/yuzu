@@ -265,16 +265,41 @@ export async function listStocktakes(db: Db): Promise<{ id: number; docNo: strin
   return rows.map((r) => ({ ...r, id: Number(r.id) }));
 }
 
-export async function startStocktake(deps: Deps, raw: unknown, actor: Actor, ip?: string) {
-  const input = parse(z.object({ departmentId: z.number().int().positive().nullable().default(null), note: z.string().trim().max(200).default('') }), raw);
-  const id = await deps.sql.begin(async (tx) => {
+/**
+ * 开始一次扫码盘点。带操作编号（迁移 106，Codex 审查 0048165）：回复丢了按原内容重提返回原来那次，不再多开一次（盘点记录不能删）；
+ * 页面上走「结果待确认」，确认作废过的编号原请求晚到也不开。操作编号的咨询锁（与「确认作废」串行）→ 写盘点。
+ */
+export async function startStocktake(deps: Deps, raw: unknown, actor: Actor, ip?: string): Promise<{ stocktake: AssetStocktake; replayed: boolean }> {
+  const input = parse(
+    z.object({
+      clientKey: z.uuid('操作编号格式不正确'),
+      departmentId: z.number().int().positive().nullable().default(null),
+      note: z.string().trim().max(200).default(''),
+    }),
+    raw,
+  );
+  const requestHash = hashRequest({ ...input, clientKey: undefined });
+  const r = await deps.sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
+    await lockOpKey(tx, input.clientKey);
+    await assertNotFenced(tx, input.clientKey, 'asset_stocktake', erpOpAbandoned);
+    const [existing] = await tx<{ id: number; requestHash: string | null }[]>`SELECT id, request_hash FROM asset_stocktakes WHERE client_key = ${input.clientKey}`;
+    if (existing) {
+      if (existing.requestHash !== requestHash) throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一次盘点，请刷新页面后重新开始');
+      return { id: Number(existing.id), replayed: true };
+    }
+    if (input.departmentId) {
+      const [d] = await tx<{ active: boolean }[]>`SELECT active FROM departments WHERE id = ${input.departmentId}`;
+      if (!d || !d.active) throw unprocessable('DEPARTMENT_INACTIVE', '盘点的部门不存在或已停用');
+    }
     const docNo = await nextDocNo(tx, 'asset_stocktake', 'ZP', todayIn(deps.config.timezone));
     const [row] = await tx<{ id: number }[]>`
-      INSERT INTO asset_stocktakes (doc_no, department_id, note, started_by) VALUES (${docNo}, ${input.departmentId}, ${input.note}, ${actor.id}) RETURNING id`;
+      INSERT INTO asset_stocktakes (doc_no, department_id, note, started_by, client_key, request_hash)
+      VALUES (${docNo}, ${input.departmentId}, ${input.note}, ${actor.id}, ${input.clientKey}, ${requestHash}) RETURNING id`;
     await writeAudit(tx, { staffId: actor.id, action: 'asset_stocktake', targetType: 'asset_stocktake', targetId: row!.id, detail: { op: 'start', docNo, departmentId: input.departmentId }, ip });
-    return Number(row!.id);
+    return { id: Number(row!.id), replayed: false };
   });
-  return getStocktake(deps.sql, id);
+  return { stocktake: await getStocktake(deps.sql, r.id), replayed: r.replayed };
 }
 
 /** 扫一个码（资产编号）：同一个码只记一次；对不上的也记下（结束时列在「不在范围里的」） */
@@ -319,8 +344,8 @@ export function registerAssetRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/erp/assets/stocktakes/:id', { preHandler: READ }, async (req) => getStocktake(sql, parse(idParam, req.params).id));
   app.post('/api/erp/assets/stocktakes', { preHandler: MANAGE }, async (req, reply) => {
     const r = await startStocktake(deps, req.body, req.actor, req.ip);
-    reply.code(201);
-    return r;
+    reply.code(r.replayed ? 200 : 201);
+    return r.stocktake;
   });
   app.post('/api/erp/assets/stocktakes/:id/scan', { preHandler: MANAGE }, async (req) => scanStocktake(deps, parse(idParam, req.params).id, req.body, req.actor));
   app.post('/api/erp/assets/stocktakes/:id/close', { preHandler: MANAGE }, async (req) => closeStocktake(deps, parse(idParam, req.params).id, req.actor, req.ip));
