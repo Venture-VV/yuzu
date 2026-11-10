@@ -250,4 +250,58 @@ describe('转钟（B05）', () => {
     // 原技师没上钟：按取消派钟，不算被退
     expect((await events()).find((e) => e.kind === 'cancel' && e.techNo === '11')!.text).toBe('转钟：客人要换技师');
   });
+
+  /** 在岗、空闲、没停牌的技师，按轮钟排位 */
+  const idleQueue = async () =>
+    (await board()).technicians.filter((t) => t.state === 'on' && !t.busy && !t.suspendedAt && t.position !== null).sort((x, y) => x.position! - y.position!);
+
+  it('轮钟转给排在后面的那位：原技师（按退钟回到原位）不算在「该派给谁」里，不用写跳过原因（Codex 审查 9470097）', async () => {
+    const v = await enter();
+    const [a, b] = await idleQueue();
+    expect(a && b).toBeTruthy();
+    const d = await dispatch({ visitId: v, itemId: foot, technicianId: a!.id, callType: 'rotation', expectedTotal: 12800 });
+    expect(d.status, JSON.stringify(d.body)).toBe(200);
+    const s = (d.body.sessions as BoardSession[]).find((x) => x.visitId === v)!;
+    // 修之前：原技师按退钟回到排在前面，服务端要求写跳过原因（SKIP_REASON_REQUIRED），转钟对话框却不让写
+    const r = await transfer(s.id, { technicianId: b!.id, callType: 'rotation' });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const mine = (r.body.sessions as BoardSession[]).filter((x) => x.visitId === v);
+    expect(mine).toEqual([expect.objectContaining({ techNo: b!.techNo, status: 'serving' })]);
+    expect((await events()).filter((e) => e.kind === 'skip' && e.techNo === a!.techNo && e.text.includes(b!.techNo))).toHaveLength(0);
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/sessions/${mine[0]!.id}/finish`)).status).toBe(200);
+  });
+
+  it('转过去的明细照原来的挂账人、时间与营业日：店员不能借转钟作废别人挂的（Codex 审查 9470097）', async () => {
+    const v = await enter();
+    const [x, y] = await idleQueue();
+    // 店主派的点钟：挂账人是店主
+    const d = await api(ctx.app, ctx.owner, 'POST', '/api/clockroom/dispatch', {
+      clientKey: randomUUID(),
+      quantity: 1,
+      startNow: true,
+      visitId: v,
+      itemId: foot,
+      technicianId: x!.id,
+      callType: 'designated',
+      expectedTotal: 12800,
+    });
+    expect(d.status, JSON.stringify(d.body)).toBe(200);
+    const s = (d.body.sessions as BoardSession[]).find((z) => z.visitId === v)!;
+    const provenance = (sessionId: number) =>
+      ctx.sql<{ postedBy: number; postedAt: string; businessDate: string }[]>`
+        SELECT posted_by, posted_at, business_date::text AS business_date FROM bill_lines WHERE session_id = ${sessionId}`;
+    const [orig] = await provenance(s.id);
+    // 店员转钟可以（转钟不受「本人 15 分钟内」的限制）
+    const r = await transfer(s.id, { technicianId: y!.id, callType: 'designated' });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const moved = (r.body.sessions as BoardSession[]).find((z) => z.visitId === v)!;
+    const [now] = await provenance(moved.id);
+    expect(now).toEqual(orig);
+    expect(now!.postedBy).toBe(ctx.ownerId);
+    // 店员作废新钟单、新明细都拒绝（不是自己挂的）；店主能
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/sessions/${moved.id}/void`, { reason: '客人不做了' })).status).toBe(403);
+    const line = (await visitLines(v)).find((l) => l.status === 'active' && l.source === 'therapist')!;
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/lines/${line.id}/void`, { reason: '客人不做了' })).status).toBe(403);
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/clockroom/sessions/${moved.id}/void`, { reason: '客人不做了' })).status).toBe(200);
+  });
 });

@@ -111,9 +111,10 @@ export interface SessionPostOptions {
   /**
    * 钟房派钟：立即上钟；轮钟不派给第一位时的原因；服务的房间（v0.7.16，可不选）；
    * 预约到店派钟（8.0.8，A04）记预约编号；assign 为给前台已点、交给钟房派钟的明细补派（8.0.8，A01：不另挂一笔）；
-   * fixedTier：补派、转钟时价格档已经定了（不改金额），轮钟「该派给谁」只算这一档能做的技师
+   * fixedTier：补派、转钟时价格档已经定了（不改金额），轮钟「该派给谁」只算这一档能做的技师；
+   * excludeId：转钟时原技师（刚按退钟回到原位）不算在轮钟「该派给谁」里，与转钟对话框一致（Codex 审查 9470097）
    */
-  dispatch?: { startNow: boolean; skipReason?: string; spaceId?: number; bookingId?: number; assign?: boolean; fixedTier?: PriceTier };
+  dispatch?: { startNow: boolean; skipReason?: string; spaceId?: number; bookingId?: number; assign?: boolean; fixedTier?: PriceTier; excludeId?: number };
   /** 按实际时间补录的纸质单：钟单直接记为已下钟，不动排位 */
   backfill?: boolean;
 }
@@ -271,8 +272,10 @@ export async function attachSessions(
         const [cat] = await tx<{ category: string }[]>`SELECT category FROM service_items WHERE id = ${l.itemId}`;
         const itemShape = { category: cat!.category, prices: prices.length ? prices : [{ tier: 'standard' as const }] };
         const fixed = options.dispatch.fixedTier;
+        const excluded = options.dispatch.excludeId;
         const eligible = queueOrder(statuses).filter(
           (id) =>
+            id !== excluded &&
             !busyIds.has(id) &&
             !techs.get(id)!.suspendedAt &&
             !canServe(techs.get(id)!, itemShape, techRules.tierByGrade) &&
@@ -768,8 +771,11 @@ export async function transferSession(deps: Deps, sessionId: number, raw: unknow
       SELECT status, session_no, technician_id FROM technician_sessions WHERE id = ${sessionId}`;
     if (cur!.status !== 'waiting' && cur!.status !== 'serving') throw conflict('SESSION_CLOSED', `钟单 ${cur!.sessionNo} 已结束，不能再转钟`);
     if (Number(cur!.technicianId) === input.technicianId) throw unprocessable('TRANSFER_SAME', '转给的是同一位技师，请换一位');
-    const lines = await tx<{ id: number; itemId: number; name: string; tier: PriceTier | null; unitPrice: number; quantity: number; amount: number }[]>`
-      SELECT id, item_id, name, tier, unit_price, quantity, amount FROM bill_lines WHERE session_id = ${sessionId} AND status = 'active' ORDER BY id FOR UPDATE`;
+    const lines = await tx<
+      { id: number; itemId: number; name: string; tier: PriceTier | null; unitPrice: number; quantity: number; amount: number; postedBy: number; postedAt: string; businessDate: string }[]
+    >`
+      SELECT id, item_id, name, tier, unit_price, quantity, amount, posted_by, posted_at, business_date
+      FROM bill_lines WHERE session_id = ${sessionId} AND status = 'active' ORDER BY id FOR UPDATE`;
     if (lines.length === 0) throw conflict('SESSION_NO_LINES', `钟单 ${cur!.sessionNo} 没有有效的挂账，不能转钟（请刷新）`);
     const t = await checkTechnicianForLine(tx, { itemId: Number(lines[0]!.itemId), tier: lines[0]!.tier, name: lines[0]!.name }, input.technicianId);
     for (const l of lines.slice(1)) await checkTechnicianForLine(tx, { itemId: Number(l.itemId), tier: l.tier, name: l.name }, input.technicianId);
@@ -793,15 +799,26 @@ export async function transferSession(deps: Deps, sessionId: number, raw: unknow
       date,
       at,
       actor: ctx.actor,
-      options: { dispatch: { startNow: old.status === 'serving', skipReason: input.skipReason, spaceId: old.spaceId ?? undefined, bookingId: old.bookingId ?? undefined, fixedTier: lineTier(lines[0]!.tier) } },
+      options: {
+        dispatch: {
+          startNow: old.status === 'serving',
+          skipReason: input.skipReason,
+          spaceId: old.spaceId ?? undefined,
+          bookingId: old.bookingId ?? undefined,
+          fixedTier: lineTier(lines[0]!.tier),
+          excludeId: Number(old.technicianId),
+        },
+      },
     });
     await tx`UPDATE technician_sessions SET transferred_from = ${sessionId} WHERE id = ${newId!}`;
+    // 新明细照原来的挂账人、挂账时间与营业日（只换技师）：转钟不受「本人 15 分钟内」的限制，但之后作废新明细、新钟单
+    // 照旧按原来那一笔的挂账人与时间核对，不能借转钟绕过更正权限（Codex 审查 9470097）
     for (const l of lines) {
       await tx`
         INSERT INTO bill_lines (bill_id, source, item_id, tier, name, unit_price, quantity, amount, post_key, business_date, posted_by, posted_at,
                                 technician_id, call_type, session_id)
-        VALUES (${visit.billId}, 'therapist', ${l.itemId}, ${l.tier}, ${l.name}, ${l.unitPrice}, ${l.quantity}, ${l.amount}, ${key}, ${date},
-                ${ctx.actor.id}, ${at}, ${t.id}, ${input.callType}, ${newId!})`;
+        VALUES (${visit.billId}, 'therapist', ${l.itemId}, ${l.tier}, ${l.name}, ${l.unitPrice}, ${l.quantity}, ${l.amount}, ${key}, ${l.businessDate},
+                ${l.postedBy}, ${l.postedAt}, ${t.id}, ${input.callType}, ${newId!})`;
     }
     const [from] = await tx<{ techNo: string; name: string }[]>`SELECT tech_no, name FROM technicians WHERE id = ${old.technicianId}`;
     const [news] = await tx<{ sessionNo: string }[]>`SELECT session_no FROM technician_sessions WHERE id = ${newId!}`;

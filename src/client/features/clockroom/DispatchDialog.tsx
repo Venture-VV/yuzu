@@ -245,7 +245,8 @@ export function DispatchDialog({
         </>
       }
     >
-      {!target && <PendingPanel op={op} onResolved={() => onDone()} />}
+      {/* 派钟、补派共用这一个「结果待确认」（Codex 审查 9470097：补派也要看得到、能查回或确认作废） */}
+      <PendingPanel op={op} onResolved={() => onDone()} />
       {prefill?.note && <Notice tone="info" title={prefill.note} className="mb-3" />}
       {duplicate && (
         <Notice tone="warning" title={`这位客人前台已经点了「${duplicate.itemName}」× ${duplicate.quantity}，还没派技师`} className="mb-3" data-testid="dispatch-duplicate">
