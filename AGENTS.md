@@ -53,6 +53,8 @@ node dist/server/cli.js import-devices --quote          # 预览按需求文档�
 node dist/server/cli.js membership-daily               # 会员到期处理与会员权益自动发放（v0.7.23 / v0.7.24；应用每分钟自己会跑，停机后要马上补跑时用）
 node dist/server/cli.js import-benefits --quote        # 预览导入本店权益清单（v0.7.24，59 项，导入为草稿，编号已有的跳过）；--apply 才写入（门店环境须店主同意）
 node dist/server/cli.js import-member-history <流水.csv> --operator <店主账号>   # 预览导入旧 EBC 逐笔流水（v0.7.28，只读、不进正式账，会员详情「旧系统流水」里看）；--apply 才写入（真实业务数据，门店环境须店主同意）
+node dist/server/cli.js import-count-cards <旧次卡.csv> --operator <店主账号> [--batch 批次备注]   # 预览导入旧系统次卡（v0.7.28）；--apply 才写入（真实业务数据，门店环境须店主同意）
+node dist/server/cli.js void-legacy-import <导入编号> --operator <店主账号> --reason <原因>   # 作废一次 8–10 月旧账只读导入（页面上不再显示，不删，v0.7.10）
 node dist/server/cli.js device-selftest                # 硬件连接一键自检（v0.7.21）：协议、ESC/POS 与 TSPL、模拟打印机与模拟桥，24 项，不连数据库、不要真机
 node dist/server/cli.js device-printer-mock [--port 9100] [--mode normal|paper_out|cover_open|fault|silent|drop]
                                           # 模拟网口打印机：屏幕上显示打出来的中文；输入 mode <状态>、stop（拔线）、start（插回）
