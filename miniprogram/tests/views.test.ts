@@ -55,6 +55,25 @@ describe('券', () => {
     expect(couponView(coupon({ summary: '代金券 ¥30.50 · 满 ¥200.00 可用' })).big).toBe('¥30.50');
     expect(couponCode('ABCD1234')).toBe('ABCD-1234');
   });
+  it('买一赠一券（8.0.4，RQ-014）：大字写买一赠一（小一号），买的、送的项目与「最多抵」照写', () => {
+    expect(couponView(coupon({ kind: 'bogo', summary: '买一赠一 · 买 拿铁 送 拿铁 1 份' }))).toMatchObject({ big: '买一赠一', bigLong: true, kind: '买一赠一券', terms: '买 拿铁 送 拿铁 1 份' });
+    expect(couponView(coupon({ kind: 'bogo', summary: '买一赠一 · 买 扬州搓澡 送 修脚 1 份 · 最多抵 ¥68.00' }))).toMatchObject({
+      big: '买一赠一',
+      kind: '买一赠一券',
+      terms: '买 扬州搓澡 送 修脚 1 份 · 最多抵 ¥68',
+    });
+    // 门店系统给的第一段不是「买一赠一」时整句照写
+    expect(couponView(coupon({ kind: 'bogo', summary: '买 拿铁 送 拿铁 1 份' })).terms).toBe('买 拿铁 送 拿铁 1 份');
+  });
+  it('认不得的种类与对不上的说明：大字写「券」或种类，说明整句照写、不丢字；短的大字不缩小', () => {
+    expect(couponView(coupon({ kind: 'mystery', summary: '神秘券 · 满 ¥100.00 可用' }))).toMatchObject({ big: '券', bigLong: false, kind: '', terms: '神秘券 · 满 ¥100 可用' });
+    expect(couponView(coupon({ kind: 'cash', summary: '现金抵用 ¥30.00 · 满 ¥50.00 可用' }))).toMatchObject({ big: '代金券', terms: '现金抵用 ¥30 · 满 ¥50 可用' });
+    expect(couponView(coupon({ kind: 'mystery', summary: '' }))).toMatchObject({ big: '券', terms: '' });
+    expect(couponView(coupon({})).bigLong).toBe(false);
+    expect(couponView(coupon({ kind: 'discount', summary: '8.8 折' })).bigLong).toBe(false);
+    expect(couponView(coupon({ summary: '代金券 ¥30.50' })).bigLong).toBe(false);
+    expect(couponView(coupon({ summary: '代金券 ¥1000.50' })).bigLong).toBe(true);
+  });
 });
 
 const benefit = (over: Partial<MpBenefitItem>): MpBenefitItem => ({

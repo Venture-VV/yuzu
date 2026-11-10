@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { CouponTemplate, MemberCoupons } from '../src/shared/coupons';
-import { MP_GATEWAY_HEADER, MP_OPENID_HEADER, type MpCouponAdminData, type MpCouponCenter, type MpCouponOffer } from '../src/shared/mp';
+import { MP_GATEWAY_HEADER, MP_OPENID_HEADER, type MpCoupon, type MpCouponAdminData, type MpCouponCenter, type MpCouponOffer } from '../src/shared/mp';
 import { buildMpApp } from '../src/server/modules/mp/app';
 import { createStaff } from '../src/server/modules/staff';
 import { consistencyChecks } from '../src/server/ops/consistency';
@@ -298,6 +298,46 @@ describe('点了领取之后才换绑（小程序线测试 #52 的 P1，与充�
     await unbind(c.openid);
     expect((await claim(c.openid, t.free!.id, randomUUID(), v)).json().error.code).toBe('MP_NOT_BOUND');
     expect((await call('POST', '/api/mp/coupon-claims', a.openid, { clientKey: randomUUID(), templateId: t.free!.id })).statusCode).toBe(400);
+  });
+});
+
+describe('买一赠一券（8.0.4 的新种类，RQ-014）', () => {
+  it('领券中心与「我的券」都给出种类 bogo 与门店系统的一句话说明：买的、送的项目与「最多抵」', async () => {
+    const items: Record<string, number> = {};
+    for (const [name, price] of [
+      ['领券拿铁', 3200],
+      ['领券修脚', 6800],
+    ] as const) {
+      const r = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name, category: '领券测试', price });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      items[name] = r.body.items.find((i: { name: string }) => i.name === name).id;
+    }
+    const same = await template({ name: '拿铁买一赠一', kind: 'bogo', buyItemId: items['领券拿铁'] });
+    const other = await template({ name: '拿铁送修脚', kind: 'bogo', buyItemId: items['领券拿铁'], exchangeItemId: items['领券修脚'], maxOff: 5000 });
+    expect(same.summary).toBe('买一赠一 · 买 领券拿铁 送 领券拿铁 1 份');
+    expect(other.summary).toBe('买一赠一 · 买 领券拿铁 送 领券修脚 1 份 · 最多抵 ¥50.00');
+    await saveRules([...STANDARD(), offer(same.id), offer(other.id)]);
+    const a = await bound('演示·买一赠一');
+    const list = (await center(a.openid)).items.filter((i) => i.templateId === same.id || i.templateId === other.id);
+    expect(list.map((i) => [i.name, i.kind, i.summary, i.canClaim])).toEqual([
+      ['拿铁买一赠一', 'bogo', same.summary, true],
+      ['拿铁送修脚', 'bogo', other.summary, true],
+    ]);
+    // 后台勾选用的券模板列表也是同一句
+    expect((await adminData()).templates.find((x) => x.id === other.id)?.summary).toBe(other.summary);
+    for (const id of [same.id, other.id]) {
+      const r = await claim(a.openid, id);
+      expect(r.statusCode, r.body).toBe(201);
+      expect(r.json().coupon.summary).toMatch(/^买一赠一 · 买 /);
+    }
+    const mine = (await call('GET', '/api/mp/coupons', a.openid)).json() as MpCoupon[];
+    const byName = Object.fromEntries(mine.map((c) => [c.name, c]));
+    expect(byName['拿铁买一赠一']).toMatchObject({ kind: 'bogo', state: 'available' });
+    expect(byName['拿铁送修脚']).toMatchObject({ kind: 'bogo', state: 'available' });
+    // 送的项目与「最多抵」照写。已发券的查询带上买的项目名称在主线 #80（8.0.5）里修，修好之前这一段写「指定项目」
+    expect(byName['拿铁买一赠一']!.summary).toMatch(/^买一赠一 · 买 (领券拿铁|指定项目) 送 领券拿铁 1 份$/);
+    expect(byName['拿铁送修脚']!.summary).toMatch(/^买一赠一 · 买 (领券拿铁|指定项目) 送 领券修脚 1 份 · 最多抵 ¥50\.00$/);
+    await saveRules(STANDARD());
   });
 });
 

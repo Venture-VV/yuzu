@@ -23,6 +23,9 @@
   font-weight: 700;
   line-height: 1.15;
 }
+.cp-big.long {
+  font-size: 34rpx;
+}
 .cp-kind {
   margin-top: 4rpx;
   font-size: 22rpx;

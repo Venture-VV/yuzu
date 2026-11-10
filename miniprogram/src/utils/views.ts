@@ -38,14 +38,17 @@ export function ledgerRow(r: MpLedgerRow): LedgerView {
 }
 
 
-const KIND_LABELS: Record<string, string> = { cash: '代金券', discount: '折扣券', exchange: '兑换券' };
+/** 认得的券种类（买一赠一券 bogo 是 8.0.4 起的）；认不得的券面写「券」，说明照门店系统给的整句显示 */
+const KIND_LABELS: Record<string, string> = { cash: '代金券', discount: '折扣券', exchange: '兑换券', bogo: '买一赠一券' };
 const STATE_LABELS: Record<string, string> = { available: '可用', pending: '还没生效', expired: '已过期', used: '已使用', voided: '已作废' };
 
 export interface CouponView {
   code: string;
   name: string;
-  /** 券面上大字：¥50、8.8 折、兑换 */
+  /** 券面上大字：¥50、8.8 折、兑换、买一赠一 */
   big: string;
+  /** 大字放不下一行（「买一赠一」、¥100.50 这样长的金额）时小一号 */
+  bigLong: boolean;
   kind: string;
   /** 其余条件：满 ¥200 可用 · 限门票 */
   terms: string;
@@ -58,11 +61,15 @@ export interface CouponView {
 /** 券码每 4 位一段（与前台打印的一样） */
 export const couponCode = (code: string) => code.replace(/(.{4})(?=.)/g, '$1-');
 
+/** 券面左边一行大约放得下 3.6 个汉字宽：汉字算 1 个，数字、字母、符号算 0.6 个 */
+const faceWidth = (s: string) => s.split('').reduce((w, ch) => w + (/[㐀-鿿]/.test(ch) ? 1 : 0.6), 0);
+
 /**
  * 券面左边的大字与说明：门店系统给的一句话说明「代金券 ¥50.00 · 满 ¥200.00 可用 · 限门票」「8.8 折 · 最多减 ¥30.00」「兑换 搓澡 1 份」
- * 拆成大字（¥50、8.8 折、兑换）与其余的说明（我的券、领券中心共用）
+ * 「买一赠一 · 买 拿铁 送 拿铁 1 份 · 最多抵 ¥30.00」拆成大字（¥50、8.8 折、兑换、买一赠一）与其余的说明（我的券、领券中心共用）。
+ * 第一段不是预期的样子、或者认不得这个种类时，大字写种类（认不得写「券」），说明照整句显示，不丢字。
  */
-export function couponFace(kind: string, summary: string): { big: string; kind: string; terms: string } {
+export function couponFace(kind: string, summary: string): { big: string; bigLong: boolean; kind: string; terms: string } {
   const parts = summary.split(' · ');
   const head = parts[0] || '';
   let big = KIND_LABELS[kind] || '券';
@@ -72,8 +79,17 @@ export function couponFace(kind: string, summary: string): { big: string; kind: 
   else if (kind === 'exchange') {
     big = '兑换';
     terms = [head].concat(terms);
-  }
-  return { big, kind: KIND_LABELS[kind] || '', terms: terms.join(' · ').replace(/\.00(?=\D|$)/g, '') };
+  } else if (kind === 'bogo') {
+    // 「买 X 送 Y 1 份」与「最多抵」留在说明里
+    big = '买一赠一';
+    if (head !== '买一赠一') terms = parts;
+  } else terms = parts;
+  return {
+    big,
+    bigLong: faceWidth(big) > 3.6,
+    kind: KIND_LABELS[kind] || '',
+    terms: terms.filter((t) => t !== '').join(' · ').replace(/\.00(?=\D|$)/g, ''),
+  };
 }
 
 export function couponView(c: MpCoupon): CouponView {
@@ -82,6 +98,7 @@ export function couponView(c: MpCoupon): CouponView {
     code: couponCode(c.code),
     name: c.name,
     big: face.big,
+    bigLong: face.bigLong,
     kind: face.kind,
     terms: face.terms,
     valid: c.validFrom === c.validTo ? c.validTo + ' 当天有效' : c.validFrom + ' 至 ' + c.validTo,

@@ -185,7 +185,9 @@ export interface MpLedgerRow {
 export interface MpCoupon {
   code: string;
   name: string;
+  /** cash 代金券、discount 折扣券、exchange 兑换券、bogo 买一赠一券（8.0.4）；以后再加的种类小程序认不得时照 summary 整句显示 */
   kind: string;
+  /** 门店系统给的一句话说明：「代金券 ¥30.00 · 满 ¥50.00 可用」「买一赠一 · 买 拿铁 送 拿铁 1 份 · 最多抵 ¥30.00」 */
   summary: string;
   validFrom: string;
   validTo: string;
@@ -613,9 +615,9 @@ export const MP_COUPON_OFFERS_MAX = 30;
 export interface MpCouponCenterItem {
   templateId: number;
   name: string;
-  /** cash 代金券、discount 折扣券、exchange 兑换券 */
+  /** cash 代金券、discount 折扣券、exchange 兑换券、bogo 买一赠一券（8.0.4） */
   kind: string;
-  /** 「代金券 ¥30.00 · 满 ¥50.00 可用」 */
+  /** 「代金券 ¥30.00 · 满 ¥50.00 可用」「买一赠一 · 买 拿铁 送 拿铁 1 份 · 最多抵 ¥30.00」 */
   summary: string;
   /** 「领取后 30 天内有效」「2026-11-01 至 2026-12-31 有效」 */
   validity: string;
