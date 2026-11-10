@@ -998,15 +998,18 @@ export async function deactivateRule(deps: Deps, id: number, ctx: OpContext): Pr
 const COUPON_SELECT = (db: Db) => db`
   SELECT c.id, c.code, c.template_id, t.name AS template_name, t.kind, t.face_value, t.rate_percent, t.max_off, t.threshold, t.scope,
          t.scope_categories, t.scope_items, t.exchange_item_id, t.exchange_ticket_type_id, xi.name AS exchange_item_name, xt.name AS exchange_ticket_name,
+         t.buy_item_id, bi.name AS buy_item_name,
          c.member_id, m.name AS member_name, c.valid_from, c.valid_to, c.status, i.issue_no, i.kind AS issue_kind, i.issued_at,
          s.display_name AS issued_by_name, ck.checkout_no,
          (SELECT e.amount FROM coupon_events e WHERE e.coupon_id = c.id AND e.kind = 'use' AND e.checkout_id = c.checkout_id ORDER BY e.id DESC LIMIT 1) AS used_amount,
          (SELECT e.reason FROM coupon_events e WHERE e.coupon_id = c.id AND e.kind = 'void' ORDER BY e.id DESC LIMIT 1) AS void_reason
   FROM coupons c JOIN coupon_templates t ON t.id = c.template_id JOIN coupon_issues i ON i.id = c.issue_id
   LEFT JOIN members m ON m.id = c.member_id LEFT JOIN staff s ON s.id = i.issued_by LEFT JOIN checkouts ck ON ck.id = c.checkout_id
-  LEFT JOIN service_items xi ON xi.id = t.exchange_item_id LEFT JOIN ticket_types xt ON xt.id = t.exchange_ticket_type_id`;
+  LEFT JOIN service_items xi ON xi.id = t.exchange_item_id LEFT JOIN ticket_types xt ON xt.id = t.exchange_ticket_type_id
+  LEFT JOIN service_items bi ON bi.id = t.buy_item_id`;
 
-type CouponDbRow = Omit<CouponRow, 'summary' | 'state'> & CouponTerms & { exchangeItemName: string | null; exchangeTicketName: string | null };
+// 买一赠一券的说明要「买 X 送 Y」：带上买的项目与名称（8.0.4 独立验收 P2：原来已发的券只写「买 指定项目」）
+type CouponDbRow = Omit<CouponRow, 'summary' | 'state'> & CouponTerms & { exchangeItemName: string | null; exchangeTicketName: string | null; buyItemName: string | null };
 
 export function toCouponRow(r: CouponDbRow, today: string): CouponRow {
   return {
@@ -1056,13 +1059,15 @@ export async function memberCoupons(db: Db, memberId: number, today: string): Pr
 const BATCH_SELECT = (db: Db) => db`
   SELECT i.id, i.issue_no, i.template_id, t.name AS template_name, t.kind, t.face_value, t.rate_percent, t.max_off, t.threshold, t.scope,
          t.scope_categories, t.scope_items, t.exchange_item_id, t.exchange_ticket_type_id, xi.name AS exchange_item_name, xt.name AS exchange_ticket_name,
+         t.buy_item_id, bi.name AS buy_item_name,
          i.quantity, i.reason AS note, i.issued_at, s.display_name AS issued_by_name,
          (SELECT min(valid_from) FROM coupons WHERE issue_id = i.id) AS valid_from, (SELECT max(valid_to) FROM coupons WHERE issue_id = i.id) AS valid_to,
          (SELECT json_agg(json_build_object('status', status, 'validFrom', valid_from, 'validTo', valid_to)) FROM coupons WHERE issue_id = i.id) AS coupons
   FROM coupon_issues i JOIN coupon_templates t ON t.id = i.template_id LEFT JOIN staff s ON s.id = i.issued_by
   LEFT JOIN service_items xi ON xi.id = t.exchange_item_id LEFT JOIN ticket_types xt ON xt.id = t.exchange_ticket_type_id
+  LEFT JOIN service_items bi ON bi.id = t.buy_item_id
   WHERE i.kind = 'batch'`;
-type BatchRow = Omit<CouponBatch, 'summary' | 'counts'> & CouponTerms & { exchangeItemName: string | null; exchangeTicketName: string | null; coupons: { status: 'available' | 'used' | 'voided'; validFrom: string; validTo: string }[] };
+type BatchRow = Omit<CouponBatch, 'summary' | 'counts'> & CouponTerms & { exchangeItemName: string | null; exchangeTicketName: string | null; buyItemName: string | null; coupons: { status: 'available' | 'used' | 'voided'; validFrom: string; validTo: string }[] };
 
 function toBatch(r: BatchRow, today: string): CouponBatch {
   const counts = emptyCounts();
