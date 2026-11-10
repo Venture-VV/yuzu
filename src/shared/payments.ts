@@ -1,9 +1,10 @@
-// 付款流（v0.7.32，docs/PAYMENTS.md；默认 P1–P12 待确认）：合同的付款计划（按生效的那一版现算）、验收与质量问题登记、
+// 付款流（v0.7.32，docs/PAYMENTS.md；默认 P1–P12 店主 2026-11-10 照默认）：合同的付款计划（按生效的那一版现算）、验收与质量问题登记、
 // 付款申请（走审批中心：「付款申请」「提前付款」）、按申请登记付款、三单匹配（发票、按采购单比对、放行）、质保金台账、本周应付。
-// 金额一律整数分。
+// 有争议的数值与开关（P5、P7、P8、P9、P11）8.0.6 起是「付款规则」（PaymentRules），在页面上改。金额一律整数分。
 
 import type { ApprovalBrief } from './approvals';
-import type { ContractCategory, ContractStatus, PaymentStage, WarrantyBasis } from './contracts';
+import { formatPercentBp, type ContractCategory, type ContractStatus, type PaymentStage, type WarrantyBasis } from './contracts';
+import { centsToInput } from './money';
 import type { PayMethod } from './purchasing';
 
 export const PAYMENT_REQUEST_STATUSES = ['submitted', 'returned', 'approved', 'paid', 'ended', 'voided'] as const;
@@ -23,20 +24,51 @@ export const REQUEST_OPEN_STATUSES: readonly PaymentRequestStatus[] = ['submitte
 export type PayMode = 'ap' | 'direct';
 export const PAY_MODE_LABELS: Record<PayMode, string> = { ap: '供应商往来付款', direct: '合同付款（不进供应商往来）' };
 
-/** P5：付款申请没有规则命中时，申请金额 ≥ ¥50,000 的再加一级店主 */
-export const PAYMENT_OWNER_LEVEL_CENTS = 5_000_000;
-/** P8：三单门槛——差额 ≤ 已收货金额的 1% 并且 ≤ ¥50 */
-export const THREE_WAY_TOLERANCE_PERCENT = 1;
-export const THREE_WAY_TOLERANCE_CENTS = 5_000;
-/** P9：质保金到期前 30 天进待办 */
-export const WARRANTY_REMIND_DAYS = 30;
-/** P11：本周应付看四周 */
-export const WEEKLY_PAYABLE_WEEKS = 4;
+/**
+ * 付款规则（8.0.6，店主 2026-11-10：P1–P12 照默认，有争议的数值与开关不写死）：存在 settings 的 `payment_rules`，
+ * 在 ERP「付款 → 付款规则」里改（`settings.manage`），改了立即生效、记审计。没存过的照下面的默认。
+ */
+export interface PaymentRules {
+  /** P5：付款申请没有审批规则命中时，申请金额满这个数再加一级店主；null = 不加 */
+  ownerLevelCents: number | null;
+  /** P7：挂了合同的采购单的货款必须先提付款申请（关掉以后可以直接登记付款核销，付款计划各段的「已付」只算按申请登记的，直接登记的记在 legacyPaidCents） */
+  requireRequestForContractGoods: boolean;
+  /** P8：三单差额门槛——不超过已收货金额的这个比例（基点，100 = 1%）并且不超过这个金额（分）才算对得上 */
+  threeWayPctBp: number;
+  threeWayCapCents: number;
+  /** P9：质保金到期前几天进待办（含已到期没付的） */
+  warrantyRemindDays: number;
+  /** P11：本周应付从本周一起看几周 */
+  weeklyWeeks: number;
+}
 
-/** 差额在门槛内（P8）：|a − b| ≤ base 的 1% 并且 ≤ ¥50 */
-export function withinTolerance(a: number, b: number, base: number): boolean {
+export const DEFAULT_PAYMENT_RULES: PaymentRules = {
+  ownerLevelCents: 5_000_000,
+  requireRequestForContractGoods: true,
+  threeWayPctBp: 100,
+  threeWayCapCents: 5_000,
+  warrantyRemindDays: 30,
+  weeklyWeeks: 4,
+};
+
+/** 各项的取值范围（页面与服务端同一份） */
+export const PAYMENT_RULE_LIMITS = {
+  ownerLevelCents: { min: 100, max: 10_000_000_00 },
+  threeWayPctBp: { min: 0, max: 10_000 },
+  threeWayCapCents: { min: 0, max: 100_000_00 },
+  warrantyRemindDays: { min: 0, max: 365 },
+  weeklyWeeks: { min: 1, max: 12 },
+} as const;
+
+/** 三单门槛的说明文字，例：「1% 且 ¥50」 */
+export function threeWayToleranceText(rules: Pick<PaymentRules, 'threeWayPctBp' | 'threeWayCapCents'>): string {
+  return `${formatPercentBp(rules.threeWayPctBp)} 且 ¥${centsToInput(rules.threeWayCapCents)}`;
+}
+
+/** 差额在门槛内（P8）：|a − b| ≤ base × 比例 并且 ≤ 金额上限；不给规则时按默认（1% 且 ¥50） */
+export function withinTolerance(a: number, b: number, base: number, rules: Pick<PaymentRules, 'threeWayPctBp' | 'threeWayCapCents'> = DEFAULT_PAYMENT_RULES): boolean {
   const diff = Math.abs(a - b);
-  return diff * 100 <= Math.abs(base) * THREE_WAY_TOLERANCE_PERCENT && diff <= THREE_WAY_TOLERANCE_CENTS;
+  return diff * 10_000 <= Math.abs(base) * rules.threeWayPctBp && diff <= rules.threeWayCapCents;
 }
 
 /**
@@ -185,7 +217,7 @@ export interface ContractPaymentPlan {
   paidCents: number;
   /** 结项（P12）：四段都付清或结束 */
   settled: boolean;
-  /** 不带申请、核销到这份合同收货单上的付款（v0.7.32 以前登记的，不算在各段里） */
+  /** 不带申请、核销到这份合同收货单上的付款（v0.7.32 以前登记的，或「付款规则」关掉 P7 以后直接登记的；不算在各段里） */
   legacyPaidCents: number;
   acceptances: AcceptanceView[];
   qualityIssues: QualityIssueView[];
@@ -339,7 +371,7 @@ export type WarrantyRowStatus = 'not_started' | 'running' | 'due_soon' | 'payabl
 export const WARRANTY_ROW_STATUS_LABELS: Record<WarrantyRowStatus, string> = {
   not_started: '未起算',
   running: '未到期',
-  due_soon: '30 天内到期',
+  due_soon: '快到期',
   payable: '可付',
   held: '有质量问题挂起',
   paid: '已付清',
@@ -392,7 +424,7 @@ export interface WeeklyPayables {
   from: string;
   weeks: { start: string; end: string; items: WeeklyItem[]; totalCents: number }[];
   totalCents: number;
-  /** 期望付款日在四周以后的已批待付（不算进四周） */
+  /** 期望付款日在看的这几周（付款规则 P11，默认四周）以后的已批待付（不算进 weeks） */
   laterCents: number;
   /** 没挂合同、也没提申请的应付余额（没有付款日期，只作参考） */
   otherApCents: number;
@@ -401,7 +433,7 @@ export interface WeeklyPayables {
 export interface PaymentTodo {
   /** 批了待付款的申请（登记付款的人看） */
   awaitingPayment: number;
-  /** 到期前 30 天（含已到期没付的）的质保金（P9） */
+  /** 到期前「付款规则」里的天数内（默认 30 天，含已到期没付的）的质保金（P9） */
   warrantyDue: number;
   /** 每周一（门店时区）的本周应付（P11）；其余日子为空 */
   weekly: { totalCents: number; count: number } | null;

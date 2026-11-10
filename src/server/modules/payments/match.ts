@@ -6,13 +6,14 @@
 
 import { z } from 'zod';
 import { formatAmount } from '@shared/money';
-import { withinTolerance, type SupplierInvoiceView, type ThreeWayRow, type ThreeWayStatus } from '@shared/payments';
+import { DEFAULT_PAYMENT_RULES, threeWayToleranceText, withinTolerance, type PaymentRules, type SupplierInvoiceView, type ThreeWayRow, type ThreeWayStatus } from '@shared/payments';
 import { isUniqueViolation, type Db, type Fragment } from '../../db';
 import { writeAudit } from '../../lib/audit';
 import type { Actor, Deps } from '../../lib/context';
 import { todayIn } from '../../lib/dates';
 import { badRequest, conflict, notFound, unprocessable } from '../../lib/errors';
 import { assertNotFenced } from '../../lib/fences';
+import { loadPaymentRules } from './rules';
 import { hashRequest } from '../../lib/idempotency';
 import { setTxTimeouts } from '../../lib/tx';
 import { dateSchema, parse, positiveCents } from '../../lib/validate';
@@ -74,19 +75,22 @@ async function poAmounts(db: Db, poIds: number[]): Promise<PoAmounts[]> {
   }));
 }
 
-/** 不看放行时的结果（P8）：对得上 / 挂起 / 不齐，与原因 */
-export function rawStatus(a: Pick<PoAmounts, 'poTotalCents' | 'receivedCents' | 'invoicedCents'>): { status: Exclude<ThreeWayStatus, 'released'>; reason: string } {
+/** 不看放行时的结果（P8，门槛按付款规则，8.0.6）：对得上 / 挂起 / 不齐，与原因 */
+export function rawStatus(
+  a: Pick<PoAmounts, 'poTotalCents' | 'receivedCents' | 'invoicedCents'>,
+  rules: Pick<PaymentRules, 'threeWayPctBp' | 'threeWayCapCents'> = DEFAULT_PAYMENT_RULES,
+): { status: Exclude<ThreeWayStatus, 'released'>; reason: string } {
   if (a.receivedCents <= 0 && a.invoicedCents <= 0) return { status: 'incomplete', reason: '还没收货，也还没登记发票' };
   if (a.receivedCents <= 0) return { status: 'incomplete', reason: `已登记发票 ${yuan(a.invoicedCents)}，还没有生效的收货` };
   if (a.invoicedCents <= 0) return { status: 'incomplete', reason: `已收货 ${yuan(a.receivedCents)}，还没登记发票` };
   const problems: string[] = [];
-  if (!withinTolerance(a.invoicedCents, a.receivedCents, a.receivedCents)) {
+  if (!withinTolerance(a.invoicedCents, a.receivedCents, a.receivedCents, rules)) {
     problems.push(`发票 ${yuan(a.invoicedCents)} 与收货 ${yuan(a.receivedCents)} 差 ${yuan(Math.abs(a.invoicedCents - a.receivedCents))}`);
   }
-  if (a.receivedCents > a.poTotalCents && !withinTolerance(a.receivedCents, a.poTotalCents, a.poTotalCents)) {
+  if (a.receivedCents > a.poTotalCents && !withinTolerance(a.receivedCents, a.poTotalCents, a.poTotalCents, rules)) {
     problems.push(`收货 ${yuan(a.receivedCents)} 超过采购单 ${yuan(a.poTotalCents)}`);
   }
-  if (problems.length) return { status: 'held', reason: `${problems.join('；')}（超过 1% 或 ¥50）` };
+  if (problems.length) return { status: 'held', reason: `${problems.join('；')}（超过 ${threeWayToleranceText(rules)}）` };
   return { status: 'matched', reason: '采购单、收货、发票对得上' };
 }
 
@@ -94,6 +98,7 @@ export function rawStatus(a: Pick<PoAmounts, 'poTotalCents' | 'receivedCents' | 
 export async function poThreeWay(db: Db, poIds: number[]): Promise<ThreeWayRow[]> {
   const amounts = await poAmounts(db, [...new Set(poIds)]);
   if (amounts.length === 0) return [];
+  const rules = await loadPaymentRules(db);
   const releases = await db<{ poId: number; reason: string; byName: string; at: string; poTotalCents: string; receivedCents: string; invoicedCents: string }[]>`
     SELECT DISTINCT ON (r.purchase_order_id) r.purchase_order_id AS po_id, r.reason, s.display_name AS by_name, r.created_at AS at,
            r.po_total_cents::text AS po_total_cents, r.received_cents::text AS received_cents, r.invoiced_cents::text AS invoiced_cents
@@ -101,7 +106,7 @@ export async function poThreeWay(db: Db, poIds: number[]): Promise<ThreeWayRow[]
     WHERE r.purchase_order_id IN ${db(amounts.map((a) => a.poId))}
     ORDER BY r.purchase_order_id, r.id DESC`;
   return amounts.map((a) => {
-    const raw = rawStatus(a);
+    const raw = rawStatus(a, rules);
     const rel = releases.find((r) => Number(r.poId) === a.poId);
     const release = rel
       ? { reason: rel.reason, byName: rel.byName, at: rel.at, poTotalCents: Number(rel.poTotalCents), receivedCents: Number(rel.receivedCents), invoicedCents: Number(rel.invoicedCents) }

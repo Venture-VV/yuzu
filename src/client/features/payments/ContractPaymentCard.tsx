@@ -75,7 +75,7 @@ export function ContractPaymentCard({ c }: { c: ContractDetail }) {
         </span>
       </div>
       {!p.canRequest && <p className="text-[13px] text-ink-3">{p.whyNot}</p>}
-      {p.legacyPaidCents > 0 && <p className="text-[12.5px] text-ink-3">另有不带付款申请、核销到这份合同收货单上的付款 ¥{formatAmount(p.legacyPaidCents)}（v0.7.32 以前登记的，不算在各段里）。</p>}
+      {p.legacyPaidCents > 0 && <p className="text-[12.5px] text-ink-3">另有不带付款申请、核销到这份合同收货单上的付款 ¥{formatAmount(p.legacyPaidCents)}（v0.7.32 以前登记的，或「付款规则」关掉「挂合同的货款要先提申请」以后直接登记的；不算在各段里）。</p>}
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-[13px]" data-testid="payment-plan-stages">
           <thead>

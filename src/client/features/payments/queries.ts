@@ -7,6 +7,7 @@ import type {
   PaymentRequestDetail,
   PaymentRequestMeta,
   PaymentRequestSummary,
+  PaymentRules,
   PaymentTodo,
   SupplierInvoiceView,
   ThreeWayRow,
@@ -36,6 +37,7 @@ export const pk = {
   warranty: (filter: WarrantyFilter) => ['inv', 'payments', 'warranty', filter] as const,
   weekly: ['inv', 'payments', 'weekly'] as const,
   todo: ['inv', 'payments', 'todo'] as const,
+  rules: ['inv', 'payments', 'rules'] as const,
 };
 
 export const usePaymentRequests = (filter: RequestFilter, q: string) =>
@@ -83,6 +85,9 @@ export const useWarranty = (filter: WarrantyFilter) =>
 export const useWeeklyPayables = () => useQuery({ queryKey: pk.weekly, queryFn: () => api.get<WeeklyPayables>('/api/erp/payments/weekly') });
 
 export const usePaymentTodo = (enabled = true) => useQuery({ queryKey: pk.todo, queryFn: () => api.get<PaymentTodo>('/api/erp/payments/todo'), enabled, refetchInterval: 300_000 });
+
+/** 付款规则（8.0.6）：三单门槛、质保金提醒天数、本周应付的周数等页面上的说明跟着它 */
+export const usePaymentRules = () => useQuery({ queryKey: pk.rules, queryFn: () => api.get<PaymentRules>('/api/erp/payments/rules'), staleTime: 60_000 });
 
 /** 付款、合同、货款一起刷新（付款申请会改合同的付款计划、供应商往来） */
 export function useInvalidatePayments() {

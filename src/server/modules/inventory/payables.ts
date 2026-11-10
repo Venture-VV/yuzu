@@ -48,6 +48,7 @@ import {
 import { hashRequest } from '../../lib/idempotency';
 import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForApproval } from '../approvals/engine';
 import { contractPlan } from '../payments/plan';
+import { loadPaymentRules } from '../payments/rules';
 
 const id = z.number().int().positive();
 const ReasonInput = z.object({ reason: z.string().trim().min(2, '请填写原因（至少 2 个字）').max(200) });
@@ -343,6 +344,8 @@ export async function contractReceiptAmong(db: Db, receiptIds: number[]): Promis
 }
 
 async function assertNoContractReceipts(db: Db, allocations: { kind: 'receipt' | 'opening'; targetId: number }[]) {
+  // 8.0.6 起是「付款 → 付款规则」里的开关（P7，默认开）；关掉时照以前直接登记，合同的付款计划里记在「不带付款申请的付款」
+  if (!allocations.some((a) => a.kind === 'receipt') || !(await loadPaymentRules(db)).requireRequestForContractGoods) return;
   const hit = await contractReceiptAmong(db, allocations.filter((a) => a.kind === 'receipt').map((a) => a.targetId));
   if (hit) {
     throw unprocessable(

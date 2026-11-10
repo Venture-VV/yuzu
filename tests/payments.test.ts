@@ -7,6 +7,8 @@
 //   · 三单：没登记发票、发票与收货差额超过 1% 或 ¥50 的挂起，财务放行（金额变了要重新放行）；预付段、服务合同不要求；
 //   · 没挂合同的应付：选收货单 / 期初未付，别的申请占着的不能再申请；挂合同的收货单要从合同申请；
 //   · 质保金台账、本周应付、待办数字；部门、仓库账号进不来；自检一致。
+// 8.0.6 付款规则（店主 2026-11-10：照默认，有争议的不写死）：加店主一级的金额、挂合同的货款要不要先提申请、三单差额门槛、
+//   质保金提前提醒天数、本周应付的周数在「付款规则」里改，改了立即生效（已经提交的申请不回头改）。
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -16,7 +18,7 @@ import { paymentChecks } from '../src/server/modules/payments/ledger';
 import { createStaff } from '../src/server/modules/staff';
 import { seedInventoryDemo } from '../src/server/seed-inventory';
 import { LEGAL_ITEM_KEYS, type ContractDetail, type PaymentTerm } from '../src/shared/contracts';
-import { addMonths, stageAmounts, withinTolerance, type ContractPaymentPlan, type PaymentRequestDetail } from '../src/shared/payments';
+import { addMonths, DEFAULT_PAYMENT_RULES, stageAmounts, threeWayToleranceText, withinTolerance, type ContractPaymentPlan, type PaymentRequestDetail, type WarrantyRow } from '../src/shared/payments';
 import { shiftDate } from '../src/shared/labels';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
@@ -190,6 +192,14 @@ describe('计算', () => {
     expect(withinTolerance(10_150, 10_000, 10_000)).toBe(false); // 差 1.5 元：超过 1%
     expect(withinTolerance(1_000_050, 1_000_000, 1_000_000)).toBe(true); // 差 0.5 元，在 1% 与 ¥50 内
     expect(withinTolerance(1_006_000, 1_000_000, 1_000_000)).toBe(false); // 差 60 元，超过 ¥50
+    // 门槛按付款规则（8.0.6）：0.5% 且 ¥30
+    const tight = { threeWayPctBp: 50, threeWayCapCents: 3_000 };
+    expect(withinTolerance(10_050, 10_000, 10_000, tight)).toBe(true); // 差 5 角 = 0.5%
+    expect(withinTolerance(10_051, 10_000, 10_000, tight)).toBe(false);
+    expect(withinTolerance(1_003_100, 1_000_000, 1_000_000, tight)).toBe(false); // 差 31 元，超过 ¥30
+    expect(withinTolerance(1, 0, 0, { threeWayPctBp: 0, threeWayCapCents: 0 })).toBe(false); // 0 = 一分不差
+    expect(threeWayToleranceText(DEFAULT_PAYMENT_RULES)).toBe('1% 且 ¥50');
+    expect(threeWayToleranceText({ threeWayPctBp: 125, threeWayCapCents: 3_050 })).toBe('1.25% 且 ¥30.50');
   });
 });
 
@@ -591,5 +601,120 @@ describe('付款流', () => {
     // 8.0.3 加了一项「进项发票台账」
     expect(await paymentChecks(ctx.sql)).toEqual([expect.objectContaining({ key: 'payments', ok: true }), expect.objectContaining({ key: 'input_invoices', ok: true })]);
     expect(await approvalChecks(ctx.sql)).toMatchObject({ ok: true });
+  });
+});
+
+describe('付款规则（8.0.6）', () => {
+  const RULES = '/api/erp/payments/rules';
+  const setRules = (body: Record<string, unknown>, cookie = boss) => api(ctx.app, cookie, 'PUT', RULES, body);
+  const contract = (totalCents: number, boxes: number, over: Parameters<typeof signedContract>[0] = {}) =>
+    signedContract({ totalCents, lines: [{ materialId: matId, itemName: '', spec: '', unit: '', priceCents: 50_00, taxRateBp: 1300, qtyMilli: q(boxes) }], ...over });
+  // 放回默认，别的用例照默认算
+  afterAll(async () => {
+    await ok(setRules({ ...DEFAULT_PAYMENT_RULES }), 200);
+  });
+
+  it('默认值；能看付款的能看，改要「修改经营规则设置」；只改提交的字段、记审计；不合格的拒绝；本周应付按周数', async () => {
+    expect(await ok(api(ctx.app, payer, 'GET', RULES), 200)).toEqual(DEFAULT_PAYMENT_RULES);
+    expect(await ok(api(ctx.app, buyer, 'GET', RULES), 200)).toEqual(DEFAULT_PAYMENT_RULES);
+    expect((await api(ctx.app, dept, 'GET', RULES)).status).toBe(403);
+    expect((await setRules({ weeklyWeeks: 2 }, payer)).status).toBe(403);
+    expect((await setRules({ weeklyWeeks: 2 }, buyer)).status).toBe(403);
+    expect(await ok(setRules({ weeklyWeeks: 2 }), 200)).toEqual({ ...DEFAULT_PAYMENT_RULES, weeklyWeeks: 2 });
+    const [audit] = await ctx.sql<{ detail: { key: string; before: { weeklyWeeks: number }; after: { weeklyWeeks: number } } }[]>`
+      SELECT detail FROM audit_logs WHERE action = 'settings_updated' AND detail->>'key' = 'payment_rules' ORDER BY id DESC LIMIT 1`;
+    expect(audit!.detail).toMatchObject({ before: { weeklyWeeks: 4 }, after: { weeklyWeeks: 2 } });
+    for (const bad of [
+      { weeklyWeeks: 0 },
+      { weeklyWeeks: 13 },
+      { threeWayPctBp: 10_001 },
+      { threeWayCapCents: -1 },
+      { warrantyRemindDays: 1.5 },
+      { warrantyRemindDays: 366 },
+      { ownerLevelCents: 0 },
+      { requireRequestForContractGoods: 'no' },
+    ]) {
+      expect((await setRules(bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    // 不合格的没写进去
+    expect(await ok(api(ctx.app, payer, 'GET', RULES), 200)).toEqual({ ...DEFAULT_PAYMENT_RULES, weeklyWeeks: 2 });
+    const weekly = await ok(api(ctx.app, payer, 'GET', '/api/erp/payments/weekly'), 200);
+    expect(weekly.weeks).toHaveLength(2);
+    expect(String((await api(ctx.app, payer, 'GET', '/api/erp/payments/weekly/export')).body)).toContain('2 周合计');
+    await ok(setRules({ weeklyWeeks: 4 }), 200);
+    expect((await ok(api(ctx.app, payer, 'GET', '/api/erp/payments/weekly'), 200)).weeks).toHaveLength(4);
+  });
+
+  it('三单差额门槛（P8）：收紧以后挂起、原因里写当时的门槛；放回以后又对得上', async () => {
+    const rc = await receiveUnderContract(null, 20); // 1,000 元，没挂合同
+    await ok(invoice([{ poId: rc.poId, amountCents: 100_800 }])); // 差 8 元：在 1%（10 元）且 ¥50 内
+    const row = () => ok(api(ctx.app, payer, 'GET', `/api/erp/payments/three-way/po/${rc.poId}`), 200);
+    expect((await row()).status).toBe('matched');
+    await ok(setRules({ threeWayPctBp: 50 }), 200); // 0.5% = 5 元
+    expect(await row()).toMatchObject({ status: 'held', reason: expect.stringContaining('超过 0.5% 且 ¥50') });
+    await ok(setRules({ threeWayPctBp: 100, threeWayCapCents: 500 }), 200); // 1% 但封顶 ¥5
+    expect(await row()).toMatchObject({ status: 'held', reason: expect.stringContaining('超过 1% 且 ¥5') });
+    const pending = await ok<{ poId: number }[]>(api(ctx.app, payer, 'GET', '/api/erp/payments/three-way?pending=1'), 200);
+    expect(pending.map((x) => x.poId)).toContain(rc.poId);
+    await ok(setRules({ threeWayCapCents: 5_000 }), 200);
+    expect((await row()).status).toBe('matched');
+  });
+
+  it('质保金提前提醒天数（P9）：两个月后到期的，默认不提醒，改成 90 天进待办', async () => {
+    const w = await contract(100_000, 20, { paymentTerms: terms(0, 0, 90, 10), warranty: { basis: 'signing', months: 2 } });
+    const due = async () => ok<WarrantyRow[]>(api(ctx.app, payer, 'GET', '/api/erp/payments/warranty?filter=due'), 200);
+    const all = await ok<WarrantyRow[]>(api(ctx.app, payer, 'GET', '/api/erp/payments/warranty'), 200);
+    expect(all.find((r) => r.contractId === w.id)).toMatchObject({ rowStatus: 'running' });
+    expect((await due()).some((r) => r.contractId === w.id)).toBe(false);
+    const before = (await ok(api(ctx.app, payer, 'GET', '/api/erp/payments/todo'), 200)).warrantyDue as number;
+    await ok(setRules({ warrantyRemindDays: 90 }), 200);
+    expect((await due()).find((r) => r.contractId === w.id)).toMatchObject({ rowStatus: 'due_soon' });
+    expect((await ok(api(ctx.app, payer, 'GET', '/api/erp/payments/todo'), 200)).warrantyDue).toBe(before + 1);
+    await ok(setRules({ warrantyRemindDays: 30 }), 200);
+    expect((await due()).some((r) => r.contractId === w.id)).toBe(false);
+  });
+
+  it('加店主一级的金额（P5）：改了以后新提交的按新值、已经提交的不变；不勾为一律两级；提前付款照旧三级', async () => {
+    // 合同 ¥600,000，预付 20% = ¥120,000
+    const k = await contract(60_000_000, 12_000);
+    const prepay = (amountCents: number) => ok(request({ source: { kind: 'contract', contractId: k.id, stage: 'prepay', amountCents } })).then((r) => r.request as PaymentRequestDetail);
+    const before = await prepay(1_000_000); // ¥10,000：默认两级
+    expect(before.approval).toMatchObject({ levels: 2, stepLabels: ['财务', '负责人'] });
+    await ok(setRules({ ownerLevelCents: 1_000_000 }), 200); // 满 ¥10,000 加店主
+    expect((await prepay(1_000_000)).approval).toMatchObject({ levels: 3, stepLabels: ['财务', '负责人', '店主'] });
+    expect((await detail(before.id)).approval!.levels).toBe(2); // 已经提交的不回头改
+    await ok(setRules({ ownerLevelCents: null }), 200); // 不加店主
+    expect((await prepay(6_000_000)).approval).toMatchObject({ levels: 2, stepLabels: ['财务', '负责人'] }); // ¥60,000 也两级
+    const early = await ok(
+      request({ source: { kind: 'contract', contractId: k.id, stage: 'acceptance', amountCents: 1_000_000 }, early: true, earlyReason: '供应商资金周转' }),
+    );
+    expect((early.request as PaymentRequestDetail).approval!.levels).toBe(3); // 提前付款（P6）照旧三级
+    await ok(setRules({ ownerLevelCents: DEFAULT_PAYMENT_RULES.ownerLevelCents }), 200);
+    expect((await prepay(1_000_000)).approval!.levels).toBe(2);
+  });
+
+  it('挂合同的货款要先提申请（P7）：关掉以后可以直接登记付款，付款计划记在「不带付款申请的付款」；开回来又拦', async () => {
+    const k = await contract(100_000, 20);
+    const rc = await receiveUnderContract(k.id, 10); // 500 元
+    const pay = (amountCents: number) =>
+      api(ctx.app, payer, 'POST', '/api/payables/payments', {
+        clientKey: randomUUID(),
+        supplierId,
+        payDate: today,
+        amountCents,
+        method: 'bank_transfer',
+        evidence: '流水尾号 0806',
+        allocations: [{ kind: 'receipt', targetId: rc.receipt.id, amountCents }],
+      });
+    expect((await pay(1_000)).body.error.code).toBe('PAYMENT_REQUEST_REQUIRED');
+    await ok(setRules({ requireRequestForContractGoods: false }), 200);
+    const direct = await pay(1_000);
+    expect(direct.status, JSON.stringify(direct.body)).toBe(201);
+    if (direct.body.payment.status !== 'confirmed') await ok(api(ctx.app, mgr, 'POST', `/api/payables/payments/${direct.body.payment.id}/approve`, {}), 200);
+    const p = await plan(k.id);
+    expect(p).toMatchObject({ legacyPaidCents: 1_000, paidCents: 0 }); // 不算在各段里
+    await ok(setRules({ requireRequestForContractGoods: true }), 200);
+    expect((await pay(1_000)).body.error.code).toBe('PAYMENT_REQUEST_REQUIRED');
+    expect(await paymentChecks(ctx.sql)).toEqual([expect.objectContaining({ key: 'payments', ok: true }), expect.objectContaining({ key: 'input_invoices', ok: true })]);
   });
 });
