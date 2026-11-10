@@ -44,6 +44,11 @@ Page({
   noticeVersion: -1,
   /** 在问的时候又要问一次（切回首页、绑定状态变了）：这一次回来以后再问 */
   noticeAgain: false,
+  /**
+   * 第几轮：每离开一次首页（去别的页面、小程序退到后台）加一。离开之前发出去的回答回来时作废，不弹——
+   * 回到首页以后弹的，都是回来以后才问到的（离开期间可能解绑、换绑了，小程序线测试 280b08a 的 P1）
+   */
+  noticeRound: 0,
   stopWatch: null as (() => void) | null,
 
   onLoad() {
@@ -67,10 +72,19 @@ Page({
   },
 
   onShow() {
-    // 弹着的是换绑以前那位会员的（别的页面已经看到了更新的绑定状态）：先关上，马上重新问
-    const stale = this.data.noticeOpen && this.noticeVersion < latestBindVersion();
-    if (stale) this.setData({ noticeOpen: false, notices: [], noticeCoupon: false });
-    if (stale || this.data.noticeOpen || Date.now() - this.noticeAt > 30000) this.loadNotices();
+    if (Date.now() - this.noticeAt > 30000) this.loadNotices();
+  },
+
+  /**
+   * 离开首页：弹着的先收起来、离开之前发出去的回答作废，回来时重新问、问到了才弹（没看的照旧还会弹）。
+   * 离开期间解绑、换绑了，旧会员的提醒不会在新的绑定状态到之前露出来（小程序线测试 280b08a 的 P1）
+   */
+  onHide() {
+    // 弹着的、正在问的：回来时一定重新问；都没有的照旧 30 秒内不再问
+    const pending = this.data.noticeOpen || this.noticeBusy;
+    this.noticeRound += 1;
+    if (this.data.noticeOpen) this.setData({ noticeOpen: false, notices: [], noticeCoupon: false });
+    if (pending) this.noticeAt = 0;
   },
 
   /** 绑定状态版本号变新：弹着的是之前那位会员的，关上、重新问；正在问的那一次回来时按版本号核对（旧的丢掉、再问一次） */
@@ -92,9 +106,15 @@ Page({
     }
     this.noticeBusy = true;
     this.noticeAt = Date.now();
+    const round = this.noticeRound;
     let stale = false;
     try {
       const got = await loadNotices();
+      // 离开过首页（这是离开之前发出去的）：作废；回到首页时已经约好再问一次
+      if (round !== this.noticeRound) {
+        this.noticeAt = 0;
+        return;
+      }
       // 问不到（断网、门店连不上、手机上的记录一时读不出来）：弹着的照旧
       if (got === null) return;
       // 换绑以前发出去、换绑以后才回来的旧回答：丢掉，按现在的绑定再问一次（小程序线测试 29aa0cc 的 P1）

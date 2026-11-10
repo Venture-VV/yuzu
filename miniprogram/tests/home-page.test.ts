@@ -11,6 +11,7 @@ interface HomePage {
   onLoad(): void;
   loadNotices(): Promise<void>;
   onShow(): void;
+  onHide(): void;
   onNoticeOk(): void;
 }
 
@@ -140,5 +141,81 @@ describe('首页的会员端提醒与换绑同时', () => {
     page.onNoticeOk();
     await vi.waitFor(() => expect(sent.some((x) => x.path === '/v1/notices/read')).toBe(true));
     expect(sent.filter((x) => x.path === '/v1/notices/read').map((x) => x.data)).toEqual([{ ids: [2], bindVersion: 5 }]);
+  });
+});
+
+describe('离开首页再回来（小程序线测试 280b08a 的 P1）：回来以后弹的都是回来以后才问到的', () => {
+  const unbound: Reply = { status: 403, data: { error: { code: 'MP_NOT_BOUND', message: '请先绑定会员' } } };
+  const meReply = (bindVersion: number, bound = true): Reply => ({ status: 200, data: { bound, bindVersion, member: null } });
+
+  for (const order of ['旧提醒先到', '新的绑定状态先到'] as const) {
+    it(`去「我的」期间解绑了，离开之前发出去的旧提醒（${order}）：作废、不弹；回来重新问，没绑定就不弹`, async () => {
+      const oldNotices = later();
+      const lateMe = later();
+      const { page, api } = await loadPage({
+        '/v1/me': queue(meReply(1), lateMe.promise),
+        '/v1/notices': queue(oldNotices.promise, unbound),
+      });
+      await api.member('GET', '/v1/me');
+      const asking = page.loadNotices();
+      // 离开首页去「我的」（前台这时解绑了）；「我的」的回答晚一点；顾客回到首页
+      page.onHide();
+      const meAsking = api.member('GET', '/v1/me');
+      page.onShow();
+      if (order === '新的绑定状态先到') {
+        lateMe.resolve(meReply(2, false));
+        await meAsking;
+      }
+      oldNotices.resolve({ status: 200, data: { notices: [notice(1)], bindVersion: 1 } });
+      await asking;
+      // 旧会员的提醒一刻也不弹
+      expect(page.data.noticeOpen).toBe(false);
+      expect(ids(page)).toEqual([]);
+      if (order === '旧提醒先到') {
+        lateMe.resolve(meReply(2, false));
+        await meAsking;
+      }
+      await vi.waitFor(() => expect(page.data.noticeOpen).toBe(false));
+      expect(ids(page)).toEqual([]);
+    });
+  }
+
+  it('「我的」的绑定状态没取到（断网），也没解绑：回来重新问到的照常弹', async () => {
+    const oldNotices = later();
+    const { page, api } = await loadPage({
+      '/v1/me': queue(meReply(1), { status: 503, data: { error: { code: 'STORE_OFFLINE', message: '门店系统连接中' } } }),
+      '/v1/notices': queue(oldNotices.promise, { status: 200, data: { notices: [notice(1)], bindVersion: 1 } }),
+    });
+    await api.member('GET', '/v1/me');
+    const asking = page.loadNotices();
+    page.onHide();
+    await expect(api.member('GET', '/v1/me')).rejects.toMatchObject({ code: 'STORE_OFFLINE' });
+    page.onShow();
+    oldNotices.resolve({ status: 200, data: { notices: [notice(1)], bindVersion: 1 } });
+    await asking;
+    await vi.waitFor(() => expect(page.data.noticeOpen).toBe(true));
+    expect(ids(page)).toEqual([1]);
+  });
+
+  it('没换绑：弹着的离开时收起来，回来重新问到照旧弹；换绑了：回来弹的是新会员的', async () => {
+    let version = 1;
+    const { page, api } = await loadPage({
+      '/v1/me': () => meReply(version),
+      '/v1/notices': () => ({ status: 200, data: { notices: version === 1 ? [notice(1)] : [notice(2)], bindVersion: version } }),
+    });
+    await page.loadNotices();
+    expect(ids(page)).toEqual([1]);
+    page.onHide();
+    expect(page.data.noticeOpen).toBe(false);
+    page.onShow();
+    await vi.waitFor(() => expect(page.data.noticeOpen).toBe(true));
+    expect(ids(page)).toEqual([1]);
+    // 离开期间换绑到另一位会员（版本号 3）
+    page.onHide();
+    version = 3;
+    await api.member('GET', '/v1/me');
+    page.onShow();
+    await vi.waitFor(() => expect(ids(page)).toEqual([2]));
+    expect(page.data.noticeOpen).toBe(true);
   });
 });
