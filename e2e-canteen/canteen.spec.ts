@@ -605,7 +605,6 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
       // 发一条试试：模拟推送服务收到加密的通知，小美手机的钥匙解得开
       await p.getByTestId('reminder-test').click();
       await expect(p.getByText('发出去啦')).toBeVisible();
-      const selfTestAt = Date.now();
       await expect.poll(() => push.hits.length).toBe(1);
       expect(JSON.parse(mine.open(push.hits[0]!.body))).toMatchObject({
         title: '柚子来试试嗓子 🍊',
@@ -618,12 +617,28 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
       await p.goto(`${CANTEEN}/?from=shortcut#/scan`);
       await expect(p.getByText('扫码是食堂负责人用的')).toBeVisible();
       await expect(p.getByTestId('meal-code')).toBeVisible();
+
+      // 同一台手机、页面开着换了人（扫另一张开通卡片）：这台手机的提醒跟着改到新的人名下，不再收小美的（Codex 审查 e14089d）
+      const made2 = await admin.request.post('/api/erp/canteen/employees', { data: { empNo: 'A010', name: '小芳', role: 'staff', departmentId: null } });
+      expect(made2.status()).toBe(200);
+      const [card2] = await (await admin.request.get(`/api/erp/canteen/activation-cards?ids=${(await made2.json()).employee.id}`)).json();
+      await p.evaluate((code) => {
+        window.location.hash = `join=${code}`;
+      }, card2.code as string);
+      await expect(p.getByText(/欢迎你/)).toBeVisible();
+      await p.getByLabel('新密码', { exact: true }).fill('fang-2026');
+      await p.getByLabel('再输一遍密码').fill('fang-2026');
+      await p.getByRole('button', { name: /开吃/ }).click();
+      await expect(p.getByTestId('tab-home')).toBeVisible();
+      await expect
+        .poll(async () => ((await (await admin.request.get('/api/erp/canteen/reminders')).json()).recipients as { name: string }[]).map((r) => r.name))
+        .toEqual(['小芳']);
       await ctx.close();
 
-      // 后台「饭点提醒」：看得到小美开着；改午餐的标题和第一句，存好，刷新以后还在
+      // 后台「饭点提醒」：看得到小芳开着；改午餐的标题和第一句，存好，刷新以后还在
       await admin.goto('/erp/canteen');
       await admin.getByRole('radio', { name: '饭点提醒' }).click();
-      await expect(admin.getByTestId('reminders-people')).toContainText('小美');
+      await expect(admin.getByTestId('reminders-people')).toContainText('小芳');
       const lunch = admin.getByTestId('reminder-lunch');
       await lunch.getByLabel('午餐通知的标题').fill('开饭啦！柚子喊你吃午饭 🍱');
       await lunch.getByLabel('午餐第 1 句', { exact: true }).fill('{名字}，午饭开饭啦～今天有{菜单}');
@@ -636,9 +651,8 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
       await expect(admin.getByTestId('reminder-lunch').getByLabel('午餐第 1 句', { exact: true })).toHaveValue('{名字}，午饭开饭啦～今天有{菜单}');
       await admin.screenshot({ path: `${OUT}/reminders-admin.png` });
 
-      // 给小美试发今天的午餐提醒（同一个人十几秒内只能试发一条，等过了再发）
-      await admin.waitForTimeout(Math.max(0, 16_000 - (Date.now() - selfTestAt)));
-      await admin.getByLabel('发给谁').selectOption({ label: '小美（A009）' });
+      // 给小芳试发今天的午餐提醒（还是这台手机，钥匙一样）
+      await admin.getByLabel('发给谁').selectOption({ label: '小芳（A010）' });
       await admin.getByLabel('发哪一条').selectOption({ label: '今天的午餐提醒' });
       await admin.getByTestId('reminders-test-send').click();
       await expect(admin.getByTestId('reminders-test')).toContainText('送到了 1 台手机');

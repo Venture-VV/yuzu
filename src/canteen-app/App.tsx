@@ -1,7 +1,7 @@
 // 柚子饭堂的外壳：开机先问门店系统「我是谁」（连不上就用上次的，离线也能亮码）；底部五个入口按角色显示。
 // 第二期（docs/CANTEEN.md 第 14、15 节）：这台手机第一次打开时先放柚子的开场动画；没登录的进门是「新同事登记」
 // （扫注册二维码、点员工群里的链接来的 #reg 直接进登记），登记好或第一次登录后接着走新手教程。
-// 饭点提醒与桌面快捷入口（第 19 节）：打开时核对一遍这台手机的提醒订阅、清掉桌面图标的小红点；退出登录时关掉这台手机的提醒；
+// 饭点提醒与桌面快捷入口（第 19 节）：打开时、换人以后核对一遍这台手机的提醒订阅，清掉桌面图标的小红点；退出登录时关掉这台手机的提醒；
 // 不是负责人的从桌面「扫码」入口进来的，打开饭卡码。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -114,19 +114,24 @@ export function App() {
     };
   }, [refresh]);
 
-  // 打开柚子饭堂、回到前台：清掉桌面图标的小红点；这台手机开着提醒的，登录好以后交给门店系统核对一遍（每次打开一次）
+  // 打开柚子饭堂、回到前台：清掉桌面图标的小红点；这台手机开着提醒的，登录好以后交给门店系统核对一遍
   useEffect(() => {
     clearBadge();
     const on = () => document.visibilityState === 'visible' && clearBadge();
     document.addEventListener('visibilitychange', on);
     return () => document.removeEventListener('visibilitychange', on);
   }, []);
-  const synced = useRef(false);
+  // 每次打开核对一次；页面开着换了人（开通卡片、注册二维码打开以后另一位登录）再核对一遍，订阅改到新的人名下——
+  // 不然这台手机还收上一位的提醒（Codex 审查 e14089d）。没核对成的（没网、没登录上）下次再试
+  const syncedFor = useRef<number | null>(null);
+  const employeeId = cached?.me.employee.id ?? null;
   useEffect(() => {
-    if (state !== 'ready' || !online || synced.current) return;
-    synced.current = true;
-    void syncPush().catch(() => undefined);
-  }, [state, online]);
+    if (state !== 'ready' || !online || employeeId === null || syncedFor.current === employeeId) return;
+    syncedFor.current = employeeId;
+    void syncPush().catch(() => {
+      if (syncedFor.current === employeeId) syncedFor.current = null;
+    });
+  }, [state, online, employeeId]);
   // 不是负责人的从桌面「扫码」入口进来（页面上直接打开饭卡码）：说一声
   const scanNoticeShown = useRef(false);
   useEffect(() => {
