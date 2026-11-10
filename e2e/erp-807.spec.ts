@@ -2,7 +2,7 @@
 //   ① 应收与挂账：新增协议单位（编码、名称、额度），列表里看到；切到「账龄与平台回款」两块都在；
 //   ② 资产与易耗：手工建两张卡，列表里看到、打开详情有「建卡」的变动记录；
 //   ③ 供应商评分、库存「呆滞与临期」能打开；
-//   ④ 经营规则「可调的数值」：企业微信推送一行显示机器人地址配没配（CI 没配：「发一条试试」不能点）。
+//   ④ 经营规则「可调的数值」：两个页面同时开着各改一项，后保存的不把先保存的改回去；企业微信推送一行显示机器人地址配没配（CI 没配：「发一条试试」不能点）。
 // 依赖演示数据（只在独立演示库）；账号：店主 linlan，密码 yuzu2026。会登记单据，只在门店电脑尺寸执行。
 // 每次用新的编码、名称，不改演示数据里已有的档案。
 import { expect, test, type Page } from '@playwright/test';
@@ -66,6 +66,30 @@ test.describe('8.0.7 供应链收尾与 ERP P2', () => {
     await page.goto('/inventory/aging');
     await expect(page.getByTestId('aging-tab')).toBeVisible();
     await expect(page.getByTestId('slow-only')).toBeVisible();
+  });
+
+  test('经营规则「可调的数值」：两个页面同时开着各改一项，后保存的不把先保存的改回去', async ({ page }) => {
+    await login(page, 'linlan');
+    const other = await page.context().newPage();
+    try {
+      await page.goto('/admin/rules');
+      await other.goto('/admin/rules');
+      await expect(page.getByTestId('tun-slowMovingDays')).toHaveValue('90');
+      await expect(other.getByTestId('tun-expiryRemindDays')).toHaveValue('30');
+      await page.getByTestId('tun-slowMovingDays').fill('60');
+      await page.getByTestId('tunables-save').click();
+      await expect(page.getByText('可调的数值已保存').first()).toBeVisible();
+      // 第二个页面打开时呆滞还是 90 天，只改临期提醒、保存：呆滞不能被改回 90
+      await other.getByTestId('tun-expiryRemindDays').fill('20');
+      await other.getByTestId('tunables-save').click();
+      await expect(other.getByText('可调的数值已保存').first()).toBeVisible();
+      const s = (await (await page.request.get('/api/settings')).json()) as { slowMovingDays: number; expiryRemindDays: number };
+      expect(s).toMatchObject({ slowMovingDays: 60, expiryRemindDays: 20 });
+    } finally {
+      await other.close();
+      const r = await page.request.put('/api/settings', { data: { slowMovingDays: 90, expiryRemindDays: 30 } });
+      expect(r.status(), await r.text()).toBe(200);
+    }
   });
 
   test('经营规则「可调的数值」：企业微信推送显示机器人地址配没配', async ({ page }) => {

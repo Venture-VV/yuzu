@@ -110,25 +110,43 @@ function fromDraft(d: Draft): Partial<Tunables & { countCardSales: boolean }> | 
   return { ...body, ...bools, printMode: d.printMode, countCardSales: d.countCardSales, consumptionPurposes: purposes };
 }
 
+/** 当前设置按提交的样子摆出来（与 fromDraft 的结果比，找出改过的项） */
+function bodyOf(s: Tunables & { countCardSales: boolean }): Record<string, unknown> {
+  const body = fromDraft(toDraft(s));
+  return typeof body === 'string' ? {} : body;
+}
+
 export function TunablesCard() {
   const settings = useSettings();
   const qc = useQueryClient();
   const toast = useToast();
   const [draft, setDraft] = useState<Draft | null>(null);
+  // 打开时（或上次保存后）的值：保存时只交改过的项，两个页面同时开着时不会把别人刚改的改回去
+  const [base, setBase] = useState<Record<string, unknown> | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  if (settings.data && draft === null) setDraft(toDraft(settings.data));
-  if (!draft) return <Skeleton className="h-60" />;
+  if (settings.data && draft === null) {
+    setDraft(toDraft(settings.data));
+    setBase(bodyOf(settings.data));
+  }
+  if (!draft || !base) return <Skeleton className="h-60" />;
   const set = (patch: Partial<Draft>) => setDraft({ ...draft, ...patch });
 
   const save = async () => {
     const body = fromDraft(draft);
     if (typeof body === 'string') return setError(body);
+    const changed = Object.fromEntries(Object.entries(body).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(base[k])));
+    if (Object.keys(changed).length === 0) {
+      setError(null);
+      toast({ tone: 'info', title: '没有改动' });
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      const next = await api.put<Tunables & { countCardSales: boolean }>('/api/settings', body);
+      const next = await api.put<Tunables & { countCardSales: boolean }>('/api/settings', changed);
       setDraft(toDraft(next));
+      setBase(bodyOf(next));
       await qc.invalidateQueries({ queryKey: qk.settings });
       await qc.invalidateQueries({ queryKey: qk.session });
       toast({ tone: 'success', title: '可调的数值已保存', body: '立即生效；已经办完的单据不回头改' });

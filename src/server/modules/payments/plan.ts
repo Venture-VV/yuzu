@@ -252,11 +252,20 @@ export async function contractPlan(db: Db, contractId: number, today: string): P
     };
   });
 
+  // 不带付款申请、落到这份合同收货单上的钱：直接登记付款时的核销，加上没带申请的预付款后来核销上去的
+  // （P7 关掉以后两种都允许；8.0.7 补上后一种，Codex 审查 #82 b240f89 的 P2：原来只算前一种，预付款核销以后合同上看不到）
   const [legacy] = await db<{ cents: string }[]>`
-    SELECT coalesce(sum(pa.amount_cents), 0)::text AS cents
-    FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
-    JOIN inv_docs d ON d.id = pa.receipt_doc_id JOIN purchase_orders po ON po.id = d.purchase_order_id
-    WHERE po.contract_id = ${contractId} AND p.status = 'confirmed' AND p.payment_request_id IS NULL`;
+    SELECT coalesce(sum(x.cents), 0)::text AS cents FROM (
+      SELECT pa.amount_cents AS cents
+      FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
+      JOIN inv_docs d ON d.id = pa.receipt_doc_id JOIN purchase_orders po ON po.id = d.purchase_order_id
+      WHERE po.contract_id = ${contractId} AND p.status = 'confirmed' AND p.payment_request_id IS NULL
+      UNION ALL
+      SELECT ol.amount_cents
+      FROM ap_offset_lines ol JOIN ap_offsets o ON o.id = ol.offset_id JOIN payments p ON p.id = o.credit_payment_id
+      JOIN inv_docs d ON d.id = ol.receipt_doc_id JOIN purchase_orders po ON po.id = d.purchase_order_id
+      WHERE po.contract_id = ${contractId} AND o.status = 'confirmed' AND p.status = 'confirmed' AND p.payment_request_id IS NULL
+    ) x`;
 
   return {
     contractId: Number(c.id),
