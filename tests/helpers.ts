@@ -249,6 +249,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '107_clockroom_v808.sql',
   '108_rooms_v808.sql',
   '109_dining_v808.sql',
+  '110_technician_state_ops.sql',
   '120_canteen_push.sql',
 ];
 

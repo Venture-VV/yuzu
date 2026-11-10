@@ -17,8 +17,10 @@ type Pending = { lineId: number; visitId: number; itemName: string; tier: string
 
 const board = async () => (await api(ctx.app, ctx.clerk, 'GET', '/api/clockroom')).body as { technicians: BoardTech[]; sessions: BoardSession[]; pending: Pending[]; today: { clocks: number } };
 const techOf = async (no: string) => (await board()).technicians.find((t) => t.techNo === no)!;
-const state = (no: string, action: string, reason?: string) =>
-  api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/technicians/${tech[no]}/state`, { action, ...(reason ? { reason } : {}) });
+/** 休假、停牌、复牌必带操作编号（合并前 Codex 审查 e2cb70d），其余动作不带 */
+const KEYED_STATE = ['leave', 'suspend', 'resume'];
+const state = (no: string, action: string, reason?: string, key: string | null = KEYED_STATE.includes(action) ? randomUUID() : null) =>
+  api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/technicians/${tech[no]}/state`, { action, ...(reason ? { reason } : {}), ...(key ? { clientKey: key } : {}) });
 const setRules = (body: Record<string, unknown>) => api(ctx.app, ctx.owner, 'PUT', '/api/admin/technicians/rules', body);
 const enter = async () => {
   tagNo += 1;
@@ -223,6 +225,48 @@ describe('休假、停牌与按状态筛选（B01）', () => {
     expect(techFilterOf(await techOf('12'))).toBe('serving');
     const sid = (await board()).sessions.find((x) => x.visitId === v)!.id;
     expect((await api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/sessions/${sid}/finish`)).status).toBe(200);
+  });
+
+  it('休假、停牌、复牌带操作编号：确认作废以后迟到的原请求不生效；原样重提返回第一次的结果，复牌以后不会又停牌（Codex 审查 e2cb70d）', async () => {
+    expect((await techOf('14')).suspendedAt).toBeNull();
+    // 没带编号：拒绝，什么都没改
+    expect((await state('14', 'suspend', '迟到', null)).status).toBe(400);
+    expect((await state('14', 'leave', undefined, null)).status).toBe(400);
+    expect((await techOf('14')).suspendedAt).toBeNull();
+
+    // 第一次停牌的回复丢了（请求还在路上）：员工确认作废，再重新停牌、之后复牌
+    const lost = randomUUID();
+    const fenced = await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/ops/${lost}/abandon`, { type: 'technician_state' });
+    expect(fenced.body).toMatchObject({ found: false, abandoned: true });
+    const again = randomUUID();
+    expect((await state('14', 'suspend', '迟到', again)).status).toBe(200);
+    expect((await techOf('14')).suspendedAt).not.toBeNull();
+    const back = randomUUID();
+    expect((await state('14', 'resume', undefined, back)).status).toBe(200);
+    expect((await techOf('14')).suspendedAt).toBeNull();
+    // 作废了的原请求这时才到：拒绝，不会把复牌了的技师又停掉
+    const late = await state('14', 'suspend', '迟到', lost);
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('OP_ABANDONED');
+    expect((await techOf('14')).suspendedAt).toBeNull();
+    // 第二次停牌原样重提（回复也丢过、又到了一次）：返回第一次的结果，不再停牌
+    expect((await state('14', 'suspend', '迟到', again)).status).toBe(200);
+    expect((await techOf('14')).suspendedAt).toBeNull();
+    // 同一个编号换了内容：拒绝
+    expect((await state('14', 'suspend', '早退', again)).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+    // 按编号查回：查到这位技师；钟房日志里这次停牌只记了一次
+    const found = await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/ops/${again}?type=technician_state`);
+    expect(found.body).toMatchObject({ found: true, type: 'technician_state', technicianId: tech['14'] });
+    expect((await events()).filter((e) => e.techNo === '14' && e.kind === 'suspend' && e.text === '迟到').length).toBe(1);
+
+    // 休假也一样：原样重提返回第一次的结果，上牌（取消休假）以后不会又休假
+    const leave = randomUUID();
+    expect((await state('14', 'leave', '调休', leave)).status).toBe(200);
+    expect((await techOf('14')).state).toBe('leave');
+    expect((await state('14', 'sign_in')).status).toBe(200);
+    expect((await state('14', 'leave', '调休', leave)).status).toBe(200);
+    expect((await techOf('14')).state).toBe('on');
+    expect((await state('14', 'sign_out')).status).toBe(200);
   });
 });
 

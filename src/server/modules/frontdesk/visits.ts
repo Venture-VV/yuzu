@@ -843,6 +843,8 @@ export async function lookupFrontdeskOp(db: Db, key: string, timezone: string, e
     const { getBooking } = await import('../bookings');
     return { found: true as const, type: row.opType as 'booking_create' | 'booking_change', booking: await getBooking(db, row.refId) };
   }
+  // 技师停牌、复牌、休假（8.0.8）：编号记在那位技师上
+  if (row.opType === 'technician_state') return { found: true as const, type: 'technician_state' as const, technicianId: Number(row.refId) };
   const [c] = await db<{ visitId: number }[]>`SELECT visit_id FROM visit_tag_changes WHERE id = ${row.refId}`;
   return { found: true as const, type: 'tag_swap' as const, visit: await getVisit(db, c!.visitId, timezone) };
 }

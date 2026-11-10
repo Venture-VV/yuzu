@@ -20,6 +20,8 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { DispatchDialog, ExtendDialog, TransferDialog, type DispatchPrefill } from './DispatchDialog';
 import { RoomDialog } from './RoomPicker';
+import { TECH_STATE_DONE, TechStateDialog, type TechStateAction } from './TechStateDialog';
+import { useFrontdeskPending } from '../frontdesk/pending';
 
 export const clockKey = ['clockroom'] as const;
 
@@ -67,7 +69,9 @@ export function ClockroomPage() {
   const [filter, setFilter] = useState<TechFilter>('all');
   const [assigning, setAssigning] = useState<PendingLine | null>(null);
   const [transferring, setTransferring] = useState<BoardSession | null>(null);
-  const [suspending, setSuspending] = useState<BoardTechnician | null>(null);
+  // 休假、停牌、复牌走「结果待确认」（合并前 Codex 审查 e2cb70d）：在对话框里做，结果不明时留在对话框里处理
+  const [techState, setTechState] = useState<{ t: BoardTechnician; action: TechStateAction } | null>(null);
+  const techPending = useFrontdeskPending().filter((p) => p.type === 'technician_state');
   const [prefill, setPrefill] = useState<DispatchPrefill | null>(null);
 
   // 预约到店（8.0.8，A04）：从预约页过来带 ?booking=，打开派钟并带好手牌、项目、技师；前台已点了这个项目的直接给那一条派（不另收费）
@@ -107,6 +111,24 @@ export function ClockroomPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booking.data, board.data, bookingParam]);
 
+  // 顶部「结果待确认」点「去处理」过来（?resume=technician_state&t=技师）：打开那位技师的对话框
+  const resumeTech = params.get('resume') === 'technician_state' ? Number(params.get('t')) || null : null;
+  useEffect(() => {
+    if (!resumeTech || !board.data) return;
+    setParams(
+      (p) => {
+        p.delete('resume');
+        p.delete('t');
+        return p;
+      },
+      { replace: true },
+    );
+    const t = board.data.technicians.find((x) => x.id === resumeTech);
+    const p = techPending.find((x) => x.technicianIds?.includes(resumeTech));
+    if (t && p) setTechState({ t, action: ((p.body as { action?: TechStateAction }).action ?? 'suspend') as TechStateAction });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumeTech, board.data]);
+
   const run = async (key: string, fn: () => Promise<ClockroomBoard>, ok?: string) => {
     setBusy(key);
     try {
@@ -119,8 +141,25 @@ export function ClockroomPage() {
       setBusy(null);
     }
   };
-  const state = (t: BoardTechnician, action: 'sign_in' | 'rest' | 'back' | 'sign_out' | 'leave' | 'resume', ok: string) =>
-    run(`${action}-${t.id}`, () => api.post<ClockroomBoard>(`/api/clockroom/technicians/${t.id}/state`, { action }), ok);
+  /** 这位技师有一笔停牌 / 复牌 / 休假结果待确认：先在对话框里处理完，才能做别的 */
+  const blockedByPending = (t: BoardTechnician) => {
+    const p = techPending.find((x) => x.technicianIds?.includes(t.id));
+    if (!p) return false;
+    toast({ tone: 'info', title: `${t.techNo} 号有一笔停牌 / 复牌 / 休假结果待确认`, body: '先查回或确认作废，再做别的操作' });
+    setTechState({ t, action: ((p.body as { action?: TechStateAction }).action ?? 'suspend') as TechStateAction });
+    return true;
+  };
+  const state = (t: BoardTechnician, action: 'sign_in' | 'rest' | 'back' | 'sign_out' | 'leave' | 'resume', ok: string) => {
+    if (blockedByPending(t)) return;
+    if (action === 'leave' || action === 'resume') {
+      setTechState({ t, action });
+      return;
+    }
+    void run(`${action}-${t.id}`, () => api.post<ClockroomBoard>(`/api/clockroom/technicians/${t.id}/state`, { action }), ok);
+  };
+  const openSuspend = (t: BoardTechnician) => {
+    if (!blockedByPending(t)) setTechState({ t, action: 'suspend' });
+  };
 
   const d = board.data;
   const queue = useMemo(() => (d?.technicians ?? []).filter((t) => t.state === 'on').sort((a, b) => a.position! - b.position!), [d]);
@@ -198,8 +237,8 @@ export function ClockroomPage() {
               busy={busy}
               canPost={can('frontdesk.operate')}
               onState={(t, action, ok) => state(t, action, ok)}
-              onSuspend={(t) => setSuspending(t)}
-              onToEnd={(t) => setToEnd(t)}
+              onSuspend={openSuspend}
+              onToEnd={(t) => !blockedByPending(t) && setToEnd(t)}
               onStart={(s) => run(`start-${s.id}`, () => api.post(`/api/clockroom/sessions/${s.id}/start`), `${s.techNo} 号上钟`)}
               onFinish={(s) => run(`finish-${s.id}`, () => api.post(`/api/clockroom/sessions/${s.id}/finish`), `${s.techNo} 号下钟`)}
               onTransfer={(s) => setTransferring(s)}
@@ -227,7 +266,7 @@ export function ClockroomPage() {
                         busy={busy}
                         onRest={() => state(t, 'rest', `${t.techNo} 号休息`)}
                         onOff={() => state(t, 'sign_out', `${t.techNo} 号下牌`)}
-                        onToEnd={() => setToEnd(t)}
+                        onToEnd={() => !blockedByPending(t) && setToEnd(t)}
                       />
                     ))}
                   </ol>
@@ -245,7 +284,7 @@ export function ClockroomPage() {
                         <span className="num w-9 font-bold">{t.techNo}</span>
                         <span className="min-w-0 flex-1 truncate font-semibold">{t.name}</span>
                         {t.busy && <Badge tone="yuzu">在钟上</Badge>}
-                        <Button size="sm" variant="secondary" icon={<LogIn className="size-3.5" />} loading={busy === `back-${t.id}`} onClick={() => run(`back-${t.id}`, () => api.post(`/api/clockroom/technicians/${t.id}/state`, { action: 'back' }), `${t.techNo} 号回牌`)}>
+                        <Button size="sm" variant="secondary" icon={<LogIn className="size-3.5" />} loading={busy === `back-${t.id}`} onClick={() => state(t, 'back', `${t.techNo} 号回牌`)}>
                           回牌
                         </Button>
                       </li>
@@ -448,17 +487,16 @@ export function ClockroomPage() {
           }}
         />
       )}
-      <ReasonDialog
-        open={!!suspending}
-        title={`停牌 · ${suspending?.techNo ?? ''} 号 ${suspending?.name ?? ''}`}
-        description="停牌一直停到复牌（跨天）：停牌的不能上牌、不能派钟，「全部上牌」跳过他。原因记进钟房日志。"
-        placeholder="例如：迟到、培训、身体不适"
-        confirm="确认停牌"
-        onClose={() => setSuspending(null)}
-        onConfirm={async (reason) => {
-          const t = suspending!;
-          await run(`suspend-${t.id}`, () => api.post(`/api/clockroom/technicians/${t.id}/state`, { action: 'suspend', reason }), `${t.techNo} 号已停牌`);
-          setSuspending(null);
+      <TechStateDialog
+        technician={techState?.t ?? null}
+        action={techState?.action ?? 'suspend'}
+        onClose={() => setTechState(null)}
+        onDone={(b, how) => {
+          const cur = techState;
+          setTechState(null);
+          if (b) qc.setQueryData(clockKey, b);
+          else void qc.invalidateQueries({ queryKey: clockKey });
+          if (cur) toast({ tone: 'success', title: how === 'done' ? `${cur.t.techNo} 号${TECH_STATE_DONE[cur.action]}` : `${cur.t.techNo} 号的待确认已处理` });
         }}
       />
       {d && extending && <ExtendDialog session={extending} onClose={() => setExtending(null)} onDone={() => { setExtending(null); void qc.invalidateQueries({ queryKey: clockKey }); }} />}

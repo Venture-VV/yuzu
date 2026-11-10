@@ -55,6 +55,8 @@ export const FRONTDESK_OPS = [
   'checkout_refund',
   'booking_create',
   'booking_change',
+  // 技师停牌、复牌、休假（8.0.8 合并前 Codex 审查 e2cb70d）：对象是技师，在钟房处理
+  'technician_state',
 ] as const;
 export type FrontdeskOp = (typeof FRONTDESK_OPS)[number];
 
@@ -83,6 +85,7 @@ export const FRONTDESK_OP_PERMISSIONS: Record<FrontdeskOp, readonly Permission[]
   checkout_refund: ['frontdesk.refund'],
   booking_create: ['booking.manage'],
   booking_change: ['booking.manage'],
+  technician_state: ['technician.dispatch'],
 };
 
 export const abandonedError = () =>

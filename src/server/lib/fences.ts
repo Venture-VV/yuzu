@@ -108,6 +108,8 @@ export const FENCED_OPS = [
   'asset_card',
   // 8.0.7 合并前 Codex 审查（迁移 106）：开始扫码盘点；编号记在盘点上
   'asset_stocktake',
+  // 8.0.8 合并前 Codex 审查（迁移 110）：技师停牌、复牌、休假；编号记在 idempotency_keys（ref_id 是那位技师）
+  'technician_state',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 

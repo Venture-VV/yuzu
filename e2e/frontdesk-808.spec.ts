@@ -3,7 +3,8 @@
 //   · 餐饮（A05、B02、B06）：桌台点单下架时点单页只有手牌；服务员退小额的菜写原因直接退，大额的请值班经理当场授权（弹窗里看得到菜名、金额与原因）
 //     → 「退菜记录」写明怎么批的 →「台账」按分类筛；
 //   · 客房（B04、B07）：改房态先确认「从哪到哪」、可写备注 → 撤回上一次修改 →「房间详情」里有两条房态记录（撤回过的标出来）；
-//   · 后台新建项目（A01）：名称或分类含「护理」默认「需要技师」，手动改过的按选的保存（拦下保存请求，不写演示库）。
+//   · 后台新建项目（A01）：名称或分类含「护理」默认「需要技师」，手动改过的按选的保存（拦下保存请求，不写演示库）；
+//   · 钟房停牌（B01）：回复丢了以后对话框里「结果待确认」，查回是已停牌；复牌也在对话框里确认。
 // 依赖四套演示数据（仅独立演示库）；账号：店主 linlan、前台 xiaozhou、值班经理 zhangjl，密码 yuzu2026。
 // 专用项目、技师、房型、房间（E2E 808 开头）留着下次沿用；开始时收掉上次中断留下的，结束时把技师、餐饮、客房功能恢复关闭，可重复执行。
 import { randomUUID } from 'node:crypto';
@@ -108,7 +109,7 @@ test.describe('8.0.8 前台整改', () => {
       await send(page, 'put', '/api/admin/technicians/rules', { enabled: true, requireTechnician: false });
       await clearGuests(page, LABEL);
       const tech = (await getJson<ClockroomBoard>(page, '/api/clockroom')).technicians.find((t) => t.techNo === TECH.techNo)!;
-      if (tech.suspendedAt) await send(page, 'post', `/api/clockroom/technicians/${tech.id}/state`, { action: 'resume' });
+      if (tech.suspendedAt) await send(page, 'post', `/api/clockroom/technicians/${tech.id}/state`, { action: 'resume', clientKey: randomUUID() });
       if (tech.state === 'off' || tech.state === 'leave') await send(page, 'post', `/api/clockroom/technicians/${tech.id}/state`, { action: 'sign_in' });
       if (tech.state === 'rest') await send(page, 'post', `/api/clockroom/technicians/${tech.id}/state`, { action: 'back' });
       const guest = await checkinGuest(page, 'female', LABEL);
@@ -359,5 +360,68 @@ test.describe('8.0.8 前台整改', () => {
     await expect.poll(() => sent.length).toBe(2);
     expect(sent.at(-1)).toMatchObject({ name: 'E2E 808 足部护理', technicianRequired: false });
     await page.unroute('**/api/items');
+  });
+
+  test('钟房：停牌的回复丢了 → 对话框里「结果待确认」→ 查回是已停牌；复牌也在对话框里确认（B01，Codex 审查 e2cb70d）', async ({ page }) => {
+    // E6–E9 别的用例在用
+    const TECH = { techNo: 'E5', name: 'E2E 小许', gender: 'female', grade: 'standard' } as const;
+    await login(page, 'linlan');
+    const roster = (await getJson<{ technicians: { id: number; techNo: string; name: string; gender: string; grade: string; skills: string[]; active: boolean }[] }>(page, '/api/admin/technicians')).technicians;
+    const old = roster.find((x) => x.techNo === TECH.techNo);
+    if (!old) await send(page, 'post', '/api/admin/technicians', TECH);
+    else if (!old.active) await send(page, 'put', `/api/admin/technicians/${old.id}`, { name: old.name, gender: old.gender, grade: old.grade, skills: old.skills, active: true });
+    await send(page, 'put', '/api/admin/technicians/rules', { enabled: true });
+    const techOf = async () => (await getJson<ClockroomBoard>(page, '/api/clockroom')).technicians.find((t) => t.techNo === TECH.techNo)!;
+    const tech = await techOf();
+    // 上次中断留下的停牌、在岗先收掉
+    if (tech.suspendedAt) await send(page, 'post', `/api/clockroom/technicians/${tech.id}/state`, { action: 'resume', clientKey: randomUUID() });
+    if ((await techOf()).state !== 'off') await send(page, 'post', `/api/clockroom/technicians/${tech.id}/state`, { action: 'sign_out' });
+    try {
+      await relogin(page, 'xiaozhou');
+      // 第一次停牌：请求到了服务端（停了），回复丢在路上
+      let dropped = false;
+      await page.route(`**/api/clockroom/technicians/${tech.id}/state`, async (route) => {
+        const body = route.request().postDataJSON() as { action?: string };
+        if (body.action === 'suspend' && !dropped) {
+          dropped = true;
+          await route.fetch();
+          await route.abort('failed');
+          return;
+        }
+        await route.continue();
+      });
+      await page.goto('/clockroom');
+      await page.getByTestId('clock-filter-off').click();
+      await page.getByTestId(`clock-tech-suspend-${TECH.techNo}`).click();
+      const dialog = page.getByRole('dialog');
+      await dialog.locator('#tech-state-reason').fill('E2E 培训');
+      // 自动查回也先拦下：让待确认留在对话框里
+      await page.route('**/api/frontdesk/ops/*', (route) => route.abort('failed'));
+      await dialog.getByTestId('tech-state-confirm').click();
+      await expect(dialog.getByTestId('pending-op')).toBeVisible();
+      await expect(dialog.getByTestId('tech-state-confirm')).toBeDisabled();
+      // 结果没确认之前，这位技师不能另做别的（关掉对话框再点停牌，回到同一笔待确认）
+      await dialog.getByRole('button', { name: '先关掉' }).click();
+      await page.getByTestId(`clock-tech-suspend-${TECH.techNo}`).click();
+      await expect(page.getByRole('dialog').getByTestId('pending-op')).toBeVisible();
+      await page.unroute('**/api/frontdesk/ops/*');
+      // 查回：已经停了，只停了一次
+      await page.getByRole('dialog').getByTestId('pending-check').click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      expect((await techOf()).suspendedAt).not.toBeNull();
+      // 复牌在对话框里确认
+      await page.getByTestId('clock-filter-suspended').click();
+      await page.getByTestId(`clock-tech-resume-${TECH.techNo}`).click();
+      await page.getByRole('dialog').getByTestId('tech-state-confirm').click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect.poll(async () => (await techOf()).suspendedAt).toBeNull();
+    } finally {
+      await page.unroute('**/api/frontdesk/ops/*');
+      await page.unroute(`**/api/clockroom/technicians/${tech.id}/state`);
+      await relogin(page, 'linlan');
+      const t = await techOf();
+      if (t.suspendedAt) await send(page, 'post', `/api/clockroom/technicians/${t.id}/state`, { action: 'resume', clientKey: randomUUID() });
+      await send(page, 'put', '/api/admin/technicians/rules', { enabled: false });
+    }
   });
 });

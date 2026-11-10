@@ -7,7 +7,7 @@ import { api } from '../../lib/api';
 import { formatDateTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
-import { FRONTDESK_OP_LABELS, isBookingOp, isRoomOp, isTableOp, isUsageOp, removeFrontdeskPending, useFrontdeskPendingForBanner, type FrontdeskPendingOp } from './pending';
+import { FRONTDESK_OP_LABELS, isBookingOp, isRoomOp, isTableOp, isTechOp, isUsageOp, removeFrontdeskPending, useFrontdeskPendingForBanner, type FrontdeskPendingOp } from './pending';
 
 /**
  * 页面顶部的前台「结果待确认」提醒（刷新、重新登录后仍在）。
@@ -33,6 +33,7 @@ export function FrontdeskPendingBanner() {
             void qc.invalidateQueries({ queryKey: ['frontdesk'] });
             if (isTableOp(op.type)) void qc.invalidateQueries({ queryKey: ['dining'] });
             if (isRoomOp(op.type) || isUsageOp(op.type)) void qc.invalidateQueries({ queryKey: ['rooms'] });
+            if (isTechOp(op.type)) void qc.invalidateQueries({ queryKey: ['clockroom'] });
             if (found.found) {
               toast({ tone: 'success', title: `已查回：${op.tagCodes.join('、')} 的${FRONTDESK_OP_LABELS[op.type]}已生效`, body: '只生效了一次，无需重新操作。' });
             }
@@ -85,6 +86,12 @@ export function FrontdeskPendingBanner() {
       navigate(`/bookings?${params}`);
       return;
     }
+    // 技师停牌、复牌、休假（8.0.8）到钟房处理：打开那位技师的对话框
+    if (isTechOp(op.type)) {
+      if (op.technicianIds?.[0]) params.set('t', String(op.technicianIds[0]));
+      navigate(`/clockroom?${params}`);
+      return;
+    }
     // 退款单（v0.7.20）回到前台「结账记录」里的原结账单
     if (op.type === 'checkout_refund' && op.checkoutIds?.[0]) params.set('c', String(op.checkoutIds[0]));
     if (op.visitId) params.set('v', String(op.visitId));
@@ -92,7 +99,8 @@ export function FrontdeskPendingBanner() {
   };
   const anyTable = ops.some((op) => isTableOp(op.type));
   const anyRoom = ops.some((op) => isRoomOp(op.type) || isUsageOp(op.type));
-  const objects = ['手牌', ...(anyTable ? ['桌台'] : []), ...(anyRoom ? ['房间'] : [])];
+  const anyTech = ops.some((op) => isTechOp(op.type));
+  const objects = ['手牌', ...(anyTable ? ['桌台'] : []), ...(anyRoom ? ['房间'] : []), ...(anyTech ? ['技师'] : [])];
 
   return (
     <div role="status" data-testid="frontdesk-pending-banner" className="shrink-0 border-b border-yuzu-deep/25 bg-yuzu-tint px-5 py-2.5 md:px-7">

@@ -35,7 +35,8 @@ export type FrontdeskOpType =
   | 'usage_cancel'
   | 'checkout_refund'
   | 'booking_create'
-  | 'booking_change';
+  | 'booking_change'
+  | 'technician_state';
 
 export interface FrontdeskPendingOp {
   key: string;
@@ -62,6 +63,8 @@ export interface FrontdeskPendingOp {
   checkoutIds?: number[];
   /** 预约的改动（v0.7.28）：那张预约单 */
   bookingIds?: number[];
+  /** 技师停牌、复牌、休假（8.0.8）：那位技师（同一位技师上不能另起一笔，上牌、休息等也要先处理） */
+  technicianIds?: number[];
   /** 展示用：涉及的手牌（桌台为「桌 A1」）、内容摘要、金额 */
   tagCodes: string[];
   summary: string;
@@ -90,6 +93,7 @@ export const FRONTDESK_OP_LABELS: Record<FrontdeskOpType, string> = {
   checkout_refund: '退款单',
   booking_create: '新建预约',
   booking_change: '改预约',
+  technician_state: '停牌 / 复牌 / 休假',
 };
 
 /** 餐饮桌台的操作：对象是桌台或开台，不是手牌 */
@@ -100,6 +104,8 @@ export const isRoomOp = (type: FrontdeskOpType) => type.startsWith('room_');
 export const isUsageOp = (type: FrontdeskOpType) => type.startsWith('usage_');
 /** 预约（v0.7.28）：在「预约」页处理 */
 export const isBookingOp = (type: FrontdeskOpType) => type.startsWith('booking_');
+/** 技师停牌、复牌、休假（8.0.8）：对象是技师，在钟房处理 */
+export const isTechOp = (type: FrontdeskOpType) => type === 'technician_state';
 
 const STORAGE_KEY = 'yuzu.frontdeskPending.v1';
 const listeners = new Set<() => void>();
@@ -241,10 +247,12 @@ export function pendingFor(
     usageId?: number | null;
     checkoutId?: number | null;
     bookingId?: number | null;
+    technicianId?: number | null;
   } = {},
 ) {
   return list.find((p) => {
     if (p.type !== type) return false;
+    if (type === 'technician_state') return table.technicianId != null && !!p.technicianIds?.includes(table.technicianId);
     if (type === 'checkin' || type === 'booking_create') return true;
     if (type === 'booking_change') return table.bookingId != null && !!p.bookingIds?.includes(table.bookingId);
     if (type === 'checkout_refund') return table.checkoutId != null && !!p.checkoutIds?.includes(table.checkoutId);
@@ -287,6 +295,8 @@ export function useFrontdeskOp<T>(opts: {
   checkoutId?: number | null;
   /** 预约的改动：那张预约单 */
   bookingId?: number | null;
+  /** 技师停牌、复牌、休假：那位技师 */
+  technicianId?: number | null;
   staffName: string;
   pick: Pick<T>;
 }) {
@@ -301,6 +311,7 @@ export function useFrontdeskOp<T>(opts: {
       usageId: opts.usageId,
       checkoutId: opts.checkoutId,
       bookingId: opts.bookingId,
+      technicianId: opts.technicianId,
     }) ?? null;
   const [state, setState] = useState<OpState>({ phase: 'idle' });
   const { pick } = opts;
@@ -386,10 +397,11 @@ export function useFrontdeskOp<T>(opts: {
         ...(opts.usageId != null ? { usageIds: [opts.usageId] } : {}),
         ...(opts.checkoutId != null ? { checkoutIds: [opts.checkoutId] } : {}),
         ...(opts.bookingId != null ? { bookingIds: [opts.bookingId] } : {}),
+        ...(opts.technicianId != null ? { technicianIds: [opts.technicianId] } : {}),
       };
       return send({ key, type: opts.type, visitId: opts.visitId, staffName: opts.staffName, createdAt: new Date().toISOString(), ...table, ...b });
     },
-    [pending, send, opts.type, opts.visitId, opts.tableId, opts.sessionId, opts.roomId, opts.stayId, opts.spaceId, opts.usageId, opts.checkoutId, opts.bookingId, opts.staffName],
+    [pending, send, opts.type, opts.visitId, opts.tableId, opts.sessionId, opts.roomId, opts.stayId, opts.spaceId, opts.usageId, opts.checkoutId, opts.bookingId, opts.technicianId, opts.staffName],
   );
 
   /** 按原内容、原编号重新提交 */

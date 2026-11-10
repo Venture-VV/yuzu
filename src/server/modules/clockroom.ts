@@ -32,7 +32,7 @@ import { isUniqueViolation, type Db, type Tx } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps, OpContext } from '../lib/context';
-import { conflict, notFound, unprocessable } from '../lib/errors';
+import { badRequest, conflict, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse, positiveCents } from '../lib/validate';
 import { assertCanFix, assertOpen, businessDate, hashRequest, loadFrontdeskRules, lockVisits, nextDocNo, runIdempotent, saveKey, setTxTimeouts } from './frontdesk/common';
 import { loadPricedItems } from './pricing';
@@ -861,17 +861,26 @@ export async function clockSpaces(db: Db): Promise<ClockSpace[]> {
 export const StateInput = z.object({
   action: z.enum(['sign_in', 'rest', 'back', 'sign_out', 'to_end', 'leave', 'suspend', 'resume'], '操作不正确'),
   reason: z.string().trim().max(100, '原因最多 100 字').optional(),
+  /** 操作编号：休假、停牌、复牌必带（8.0.8 合并前 Codex 审查 e2cb70d），其余动作不带 */
+  clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试').optional(),
 });
+
+/** 带操作编号、走「结果待确认」的动作：停牌跨天，休假管一整天，结果不明时不能让迟到的原请求覆盖之后的操作 */
+const KEYED_STATE_ACTIONS: readonly string[] = ['leave', 'suspend', 'resume'];
 
 /**
  * 上牌、休息、回牌、下牌、排到队尾；8.0.8 加休假（只管当天）、停牌（跨天，到复牌为止）、复牌。
  * 锁：技师队列 → 技师一行（停牌、复牌要改这一行时加排他锁）→ 技师状态。
+ * 休假、停牌、复牌带操作编号（technician_state）：同一编号原样重提返回第一次的结果（没变化的也记下编号），
+ * 确认作废的编号原请求迟到也不生效（写编号前核对作废）；其余动作照旧不带。
  */
 export async function changeState(deps: Deps, technicianId: number, raw: unknown, ctx: OpContext) {
-  const { action, reason } = parse(StateInput, raw);
+  const { action, reason, clientKey } = parse(StateInput, raw);
   if (action === 'to_end' && (reason ?? '').length < 2) throw unprocessable('REASON_REQUIRED', '排到队尾请写原因（例如：叫了不在岗、拒钟）');
   if (action === 'suspend' && (reason ?? '').length < 2) throw unprocessable('REASON_REQUIRED', '停牌请写原因（至少 2 个字）');
-  await deps.sql.begin(async (tx) => {
+  const keyed = KEYED_STATE_ACTIONS.includes(action);
+  if (keyed && !clientKey) throw badRequest('缺少有效的操作编号，请刷新页面后重试');
+  const apply = async (tx: Tx) => {
     await setTxTimeouts(tx);
     const at = ctx.at ?? new Date();
     await lockQueue(tx);
@@ -945,7 +954,17 @@ export async function changeState(deps: Deps, technicianId: number, raw: unknown
     // 实时位置（v0.7.17）：上牌（没在店的才算到店）在技师休息区；下牌、在店时设休假、停牌算离店
     if (action === 'sign_in' && !inStore) await locateSignIn(tx, [t.id], { at, staffId: ctx.actor.id });
     if ((action === 'sign_out' || action === 'leave' || action === 'suspend') && inStore) await locateSignOut(tx, t.id, { at, staffId: ctx.actor.id });
-  });
+  };
+  if (keyed) {
+    const requestHash = hashRequest({ technicianId, action, reason: reason ?? null });
+    await runIdempotent(deps, { key: clientKey!, opType: 'technician_state', requestHash }, async (tx) => {
+      await apply(tx);
+      await saveKey(tx, clientKey!, 'technician_state', requestHash, technicianId, ctx.actor.id);
+      return technicianId;
+    });
+  } else {
+    await deps.sql.begin(async (tx) => apply(tx));
+  }
   return clockroomBoard(deps.sql, deps);
 }
 
