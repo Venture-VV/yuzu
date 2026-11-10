@@ -142,8 +142,9 @@ describe('结束使用时挂房费', () => {
     const r = await endAfter(u, 95, key);
     expect(r).toMatchObject({ status: 'closed', priced: true, fee: { amount: 60000, chargedMinutes: 120, openFee: 5000 } });
     expect(await linesOf(g.billId)).toEqual([
-      { name: '派对房房费（每 30 分钟）', quantity: 4, unitPrice: 15000, amount: 60000, source: 'other', category: '派对房' },
-      { name: '派对房开台费', quantity: 1, unitPrice: 5000, amount: 5000, source: 'other', category: '派对房' },
+      // 8.0.8（A03）：名称带房型和房间
+      { name: '派对房 X301 房费（每 30 分钟）', quantity: 4, unitPrice: 15000, amount: 60000, source: 'other', category: '派对房' },
+      { name: '派对房 X301 开台费', quantity: 1, unitPrice: 5000, amount: 5000, source: 'other', category: '派对房' },
     ]);
     // 同一个操作编号重提：返回原来那张，不重复挂；结束过的再结束拒绝
     expect((await endAfter(u, 95, key)).fee).toMatchObject({ amount: 60000 });
@@ -211,9 +212,9 @@ describe('包房房费折扣：派对房只在周一至周四（M44）', () => {
     };
     // 营业日按北京时间 06:00 切换：2026-11-02 中午是周一、2026-11-06 中午是周五
     const monday = await endAt('2026-11-02T04:00:00Z');
-    expect(monday.map((l) => [l.name, l.partyRoomDay])).toEqual([['派对房房费（每 30 分钟）', true]]);
+    expect(monday.map((l) => [l.name, l.partyRoomDay])).toEqual([['派对房 X302 房费（每 30 分钟）', true]]);
     const friday = await endAt('2026-11-06T04:00:00Z');
-    expect(friday.map((l) => [l.name, l.partyRoomDay])).toEqual([['派对房房费（每 30 分钟）', false]]);
+    expect(friday.map((l) => [l.name, l.partyRoomDay])).toEqual([['派对房 X302 房费（每 30 分钟）', false]]);
   });
 
   it('房费、开台费的项目在价目里分类选了「客房」：照样只在周一至周四打房费，开台费不打（测试会话 18d4344 的 P2）', async () => {

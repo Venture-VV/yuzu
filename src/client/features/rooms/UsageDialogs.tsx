@@ -23,7 +23,18 @@ import { roomsKey } from './queries';
 type UsageSpace = Pick<FloorMapSpace, 'id' | 'code' | 'displayName' | 'businessType' | 'capacity'>;
 
 /** 开单：使用人是在店客人（手牌），开单即「使用中」 */
-export function OpenUsageDialog({ space, onClose, onDone }: { space: UsageSpace; onClose: () => void; onDone: (u: UsageDetail) => void }) {
+export function OpenUsageDialog({
+  space,
+  priced = true,
+  onClose,
+  onDone,
+}: {
+  space: UsageSpace;
+  /** 这个业态设了计费；没设的（8.0.8，F7）开单时提醒结束不收房费 */
+  priced?: boolean;
+  onClose: () => void;
+  onDone: (u: UsageDetail) => void;
+}) {
   const session = useSession();
   const qc = useQueryClient();
   const toast = useToast();
@@ -80,6 +91,11 @@ export function OpenUsageDialog({ space, onClose, onDone }: { space: UsageSpace;
       }
     >
       <PendingPanel op={op} onResolved={finish} />
+      {!priced && (
+        <Notice tone="warning" title={`${space.businessType}还没有设定计费，结束时不收房费`} className="mb-3" data-testid="usage-open-unpriced">
+          要按时长收房费，请店主在后台「客房 → 派对房等」给这个业态设计费项目；场次费也可以到前台另挂。
+        </Notice>
+      )}
       <div className="space-y-4" data-testid="usage-open">
         <Field
           label="使用人的手牌号"
@@ -236,6 +252,24 @@ export function CloseUsageDialog({
 }
 
 /** 结账前「结束使用并挂房费」（v0.7.28）：按编号取使用单，再用同一个结束对话框 */
+/** 由使用单直接结束 / 撤单（8.0.8 派对房看板，不经过平面图） */
+export function CloseUsageFor({ usage: d, mode, onClose, onDone }: { usage: UsageDetail; mode: 'end' | 'cancel'; onClose: () => void; onDone: (u: UsageDetail) => void }) {
+  const usage: FloorMapUsage = {
+    id: d.id,
+    usageNo: d.usageNo,
+    spaceId: d.spaceId,
+    visitId: d.visitId,
+    tagCode: d.tagCode,
+    guests: d.guests,
+    note: d.note,
+    openedAt: d.openedAt,
+    openedByName: d.openedByName,
+    pricing: d.pricing ?? null,
+  };
+  const space = { id: d.spaceId, code: d.spaceCode, displayName: d.spaceName, businessType: d.businessType, capacity: null };
+  return <CloseUsageDialog usage={usage} space={space} mode={mode} onClose={onClose} onDone={onDone} />;
+}
+
 export function EndUsageById({ usageId, onClose, onDone }: { usageId: number; onClose: () => void; onDone: (u: UsageDetail) => void }) {
   const q = useQuery({ queryKey: ['usages', 'one', usageId], queryFn: () => api.get<UsageDetail>(`/api/usages/${usageId}`) });
   if (q.isError) {

@@ -154,3 +154,71 @@ describe('预约到店一键派钟、入住（A04）', () => {
     expect(dup.status).toBe(409);
   });
 });
+
+describe('派对房、宠物轰趴房（A03）', () => {
+  const sid: Record<string, number> = {};
+  let feeItem: number;
+  let openItem: number;
+  beforeAll(async () => {
+    const zones = ['楼层,区域名(中文),区域名(英文),备注', 'L3,合成派对区,Sample Party,合成样例'].join('\r\n');
+    const spaces = [
+      '楼层,区域字母,编码,业态,容量(人),建议显示名,面积,编码图原始标注,备注',
+      'L3,P,P301,派对房,12,合成派对房,,合成派对房 P301,',
+      'L3,P,P302,宠物轰趴房,10,合成宠物轰趴房,,合成宠物轰趴房 P302,',
+      'L3,P,P303,娱乐室,6,合成娱乐室,,合成娱乐室 P303,',
+    ].join('\r\n');
+    for (const [kind, csv] of [
+      ['zones', zones],
+      ['spaces', spaces],
+    ] as const) {
+      const r = await api(ctx.app, ctx.owner, 'POST', '/api/admin/spaces/imports', { kind, fileName: `${kind}.csv`, csv, encoding: 'UTF-8', clientKey: randomUUID() });
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+    }
+    for (const s of (await api(ctx.app, ctx.owner, 'GET', '/api/admin/spaces')).body.spaces as { id: number; code: string }[]) sid[s.code] = s.id;
+    // 一个计费项目给两种房共用（店里常这么设）：账单名称、部门仍按房间分开
+    const add = async (name: string, price: number) => {
+      const r = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name, category: '包房', price });
+      return r.body.items.find((i: { name: string }) => i.name === name).id as number;
+    };
+    feeItem = await add('包房房费', 20000);
+    openItem = await add('包房开台费', 10000);
+    const p = { feeItemId: feeItem, minMinutes: 60, stepMinutes: 30, openFeeItemId: openItem };
+    const r = await api(ctx.app, ctx.owner, 'PUT', '/api/admin/usage-rules', { businessTypes: ['派对房', '宠物轰趴房', '娱乐室'], pricing: { 派对房: p, 宠物轰趴房: p } });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+  });
+
+  it('看板列出各业态的房间（不需要底图），没设计费的标出来；结束后账单名称带房型和房间，结账后部门按业态', async () => {
+    const board = (await api(ctx.app, ctx.clerk, 'GET', '/api/usages/board')).body as {
+      businessTypes: string[];
+      spaces: { code: string; businessType: string; priced: boolean; usage: { id: number; usageNo: string } | null }[];
+    };
+    expect(board.spaces.map((s) => [s.code, s.businessType, s.priced, s.usage])).toEqual([
+      ['P301', '派对房', true, null],
+      ['P302', '宠物轰趴房', true, null],
+      ['P303', '娱乐室', false, null],
+    ]);
+    const v = await enter();
+    const tag = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/visits/${v}`)).body.tag.code as string;
+    const open = await api(ctx.app, ctx.clerk, 'POST', '/api/usages', { clientKey: randomUUID(), spaceId: sid['P302'], tagCode: tag, guests: 5 });
+    expect(open.status, JSON.stringify(open.body)).toBe(200);
+    expect(((await api(ctx.app, ctx.clerk, 'GET', '/api/usages/board')).body.spaces as { code: string; usage: { id: number } | null }[]).find((s) => s.code === 'P302')!.usage).toMatchObject({ id: open.body.id });
+    // 用了 70 分钟：起步 60 + 1 个 30 分钟 → 3 × ¥100
+    const { endUsage } = await import('../src/server/modules/usages');
+    await endUsage({ sql: ctx.sql, config: ctx.config }, open.body.id, { clientKey: randomUUID() }, {
+      actor: { id: ctx.clerkId, username: 'clerk', displayName: '店员', role: 'clerk', duties: [], mustChangePassword: false },
+      at: new Date(new Date(open.body.openedAt).getTime() + 70 * 60_000),
+    });
+    const lines = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/visits/${v}`)).body.lines as { name: string; quantity: number; amount: number }[];
+    expect(lines.map((l) => [l.name, l.quantity, l.amount])).toEqual([
+      ['宠物轰趴房 P302 房费（每 30 分钟）', 3, 30000],
+      ['宠物轰趴房 P302 开台费', 1, 10000],
+    ]);
+    const c = await pay(v);
+    const dept = await ctx.sql<{ category: string; name: string; amount: number }[]>`
+      SELECT category, name, amount FROM checkout_items WHERE checkout_id = ${c.id} AND category <> '门票' ORDER BY name`;
+    expect(dept).toEqual([
+      { category: '宠物轰趴房', name: '开台费', amount: 10000 },
+      { category: '宠物轰趴房', name: '房费', amount: 30000 },
+    ]);
+  });
+});
