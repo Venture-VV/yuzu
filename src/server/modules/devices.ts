@@ -577,6 +577,13 @@ async function runJob(deps: Deps, jobId: number) {
     }
     const [cur] = await tx<{ kind: DeviceJobKind }[]>`SELECT kind FROM device_jobs WHERE id = ${jobId} AND status = 'queued' FOR UPDATE`;
     if (!cur) return null;
+    // 打印方式是「本机打印」（8.0.7）：与新建时一样，排着的也不再往网口打印机发——改成本机打印之前、升级之前排下的也一样（Codex 审查 9ad0f56）
+    if ((await loadSettings(tx)).printMode === 'local') {
+      await tx`
+        UPDATE device_jobs SET status = 'failed', error_code = 'PRINT_MODE_LOCAL', error_message = ${DEVICE_ERROR_LABELS.PRINT_MODE_LOCAL}, finished_at = now()
+        WHERE id = ${jobId} AND status = 'queued'`;
+      return null;
+    }
     // 业务单据（v0.7.28）：打印机离线、故障（缺纸、开盖、报错）时不发，等它恢复（心跳看到恢复在线后改回排队）
     if (isDocJobKind(cur.kind) && (device.status === 'offline' || device.status === 'error')) {
       await toWaiting(tx, jobId, device.statusCode ?? (device.status === 'offline' ? 'DEVICE_OFFLINE' : 'DEVICE_FAULT'));
@@ -659,7 +666,14 @@ export async function recoverJobs(deps: Deps, log?: (msg: string, err: unknown) 
 export async function resumeWaitingJobs(deps: Deps, opts: { now?: Date; log?: (msg: string, err: unknown) => void } = {}): Promise<{ resumed: number; expired: number }> {
   const { sql } = deps;
   const now = opts.now ?? new Date();
-  const { printWaitMinutes } = await loadSettings(sql);
+  const { printWaitMinutes, printMode } = await loadSettings(sql);
+  // 「本机打印」（8.0.7）：服务器不往网口小票机发，等打印机恢复的单子也不再等（Codex 审查 9ad0f56）
+  if (printMode === 'local') {
+    const dropped = await sql`
+      UPDATE device_jobs SET status = 'failed', error_code = 'PRINT_MODE_LOCAL', error_message = ${DEVICE_ERROR_LABELS.PRINT_MODE_LOCAL}, finished_at = now()
+      WHERE status = 'waiting' RETURNING id`;
+    return { resumed: 0, expired: dropped.length };
+  }
   const expired = await sql`
     UPDATE device_jobs SET status = 'failed', error_code = 'DEVICE_WAIT_EXPIRED', error_message = ${`等打印机恢复超过 ${printWaitMinutes} 分钟，没有再打`}, finished_at = now()
     WHERE status = 'waiting' AND first_waited_at < ${new Date(now.getTime() - printWaitMinutes * 60_000)}

@@ -11,10 +11,22 @@ import { PrintFrame } from '../print/PrintFrame';
 export function AssetLabelsPrintPage() {
   const { ids = '' } = useParams();
   const session = useSession();
-  const wanted = new Set(ids.split(',').map(Number).filter((x) => x > 0));
-  const cards = useQuery({ queryKey: ['erp', 'assets', 'labels', ids], queryFn: () => api.get<AssetCard[]>('/api/erp/assets') });
-  const list = (cards.data ?? []).filter((c) => wanted.has(c.id));
-  const error = cards.error ? errorMessage(cards.error) : cards.isSuccess && list.length === 0 ? '没有要打印的资产标签' : null;
+  const wanted = [...new Set(ids.split(',').map(Number).filter((x) => Number.isInteger(x) && x > 0))];
+  // 按编号直接取这几张（不从列表里筛：列表最多 1,000 张，老卡片会漏掉）；按选的先后排
+  const cards = useQuery({
+    queryKey: ['erp', 'assets', 'labels', wanted.join(',')],
+    queryFn: () => api.get<AssetCard[]>(`/api/erp/assets?ids=${wanted.join(',')}`),
+    enabled: wanted.length > 0,
+  });
+  const byId = new Map((cards.data ?? []).map((c) => [c.id, c]));
+  const list = wanted.map((id) => byId.get(id)).filter((c): c is AssetCard => !!c);
+  const error = cards.error
+    ? errorMessage(cards.error)
+    : wanted.length === 0 || (cards.isSuccess && list.length === 0)
+      ? '没有要打印的资产标签'
+      : cards.isSuccess && list.length < wanted.length
+        ? `选的 ${wanted.length} 张里有 ${wanted.length - list.length} 张找不到，请回资产页重新选`
+        : null;
   return (
     <PrintFrame title="资产标签" ready={cards.isSuccess} error={error} paper="a4">
       <div className="grid grid-cols-3 gap-0" data-testid="asset-labels">

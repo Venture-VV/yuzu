@@ -268,6 +268,15 @@ describe('2.4 呆滞与周转', () => {
     expect(r.slowDays).toBe(30);
     const row = r.rows.find((x: { materialId: number }) => x.materialId === m.id);
     expect(row).toMatchObject({ warehouseName: '总仓', stockMilli: q(5), lastOutDate: null, idleDays: 40, slow: true, turnoverDays: null, amountCents: 15_00 });
+    // 领出去又冲销了：不算出库，最近出库日、用量照旧（Codex 审查 9ad0f56）
+    const [dep] = await ctx.sql<{ id: number }[]>`SELECT id FROM departments WHERE active ORDER BY id LIMIT 1`;
+    const issued = await ok(
+      api(ctx.app, keeper, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docType: 'issue', docDate: today, departmentId: Number(dep!.id), handler: '领料人', lines: [{ materialId: m.id, qtyMilli: q(2) }] }),
+    );
+    const voided = await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${issued.doc.id}/void`, { reason: '领错了' });
+    expect(voided.status, JSON.stringify(voided.body)).toBeLessThan(300);
+    const afterVoid = (await api(ctx.app, keeper, 'GET', '/api/inventory/slow-moving?warehouseId=1')).body.rows.find((x: { materialId: number }) => x.materialId === m.id);
+    expect(afterVoid).toMatchObject({ stockMilli: q(5), lastOutDate: null, idleDays: 40, slow: true, turnoverDays: null });
     const slowOnly = (await api(ctx.app, keeper, 'GET', '/api/inventory/slow-moving?slow=1')).body.rows as { slow: boolean }[];
     expect(slowOnly.every((x) => x.slow)).toBe(true);
     const csv = await ctx.app.inject({ method: 'GET', url: '/api/inventory/slow-moving/export', headers: { cookie: keeper } });

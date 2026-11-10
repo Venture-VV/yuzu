@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_TUNABLES, TUNABLE_LIMITS } from '../src/shared/tunables';
-import { checkDevicesOnce } from '../src/server/modules/devices';
+import { checkDevicesOnce, recoverJobs, resumeWaitingJobs } from '../src/server/modules/devices';
 import { createStaff } from '../src/server/modules/staff';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
@@ -114,6 +114,25 @@ describe('可调的数值（8.0.7 A1）', () => {
     await checkDevicesOnce(ctx);
     expect(await status()).toBe('offline'); // 服务器直连：照旧探测，连不上记离线
     await settings({ printMode: 'local' });
+    await api(ctx.app, ctx.owner, 'POST', `/api/devices/${id}/enabled`, { enabled: false, expectedVersion: (await ctx.sql<{ version: number }[]>`SELECT version FROM devices WHERE id = ${id}`)[0]!.version });
+  });
+
+  it('打印方式改成本机打印以后，之前排着、等打印机恢复的任务不再发（升级前留下的也一样；Codex 审查 9ad0f56）', async () => {
+    const created = await api(ctx.app, ctx.owner, 'POST', '/api/devices', { clientKey: randomUUID(), code: 'PRN-TUN-2', name: '升级前的小票机', kind: 'printer', area: '收银', connection: 'network', host: '127.0.0.1', port: 9 });
+    expect(created.status, JSON.stringify(created.body)).toBeLessThan(300);
+    const id = Number(created.body.id);
+    // 升级前（或改成本机打印前）留下的：一张排着的测试页、一张等打印机恢复的日结单
+    const [queued] = await ctx.sql<{ id: number }[]>`
+      INSERT INTO device_jobs (device_id, kind, status, client_key, created_by) VALUES (${id}, 'test_page', 'queued', ${randomUUID()}, ${ctx.ownerId}) RETURNING id`;
+    const [waiting] = await ctx.sql<{ id: number }[]>`
+      INSERT INTO device_jobs (device_id, kind, status, client_key, created_by, doc_ref, doc_label, payload, first_waited_at, wait_code)
+      VALUES (${id}, 'settlement_slip', 'waiting', ${randomUUID()}, ${ctx.ownerId}, '2026-11-10', '日结单 2026-11-10', ${Buffer.from('\x1b@')}, now(), 'DEVICE_OFFLINE') RETURNING id`;
+    const jobOf = async (jobId: number) => (await ctx.sql<{ status: string; errorCode: string | null }[]>`SELECT status, error_code FROM device_jobs WHERE id = ${jobId}`)[0]!;
+    await recoverJobs({ sql: ctx.sql, config: ctx.config });
+    for (let i = 0; i < 100 && (await jobOf(Number(queued!.id))).status === 'queued'; i++) await new Promise((r) => setTimeout(r, 20));
+    expect(await jobOf(Number(queued!.id))).toEqual({ status: 'failed', errorCode: 'PRINT_MODE_LOCAL' });
+    expect((await resumeWaitingJobs({ sql: ctx.sql, config: ctx.config })).resumed).toBe(0);
+    expect(await jobOf(Number(waiting!.id))).toEqual({ status: 'failed', errorCode: 'PRINT_MODE_LOCAL' });
     await api(ctx.app, ctx.owner, 'POST', `/api/devices/${id}/enabled`, { enabled: false, expectedVersion: (await ctx.sql<{ version: number }[]>`SELECT version FROM devices WHERE id = ${id}`)[0]!.version });
   });
 

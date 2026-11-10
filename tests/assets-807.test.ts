@@ -39,6 +39,10 @@ describe('资产卡片', () => {
     const r = await ok(create({ quantity: 2, departmentId: deptId, location: '前台', keeper: '小王' }, key));
     expect(r.cards).toHaveLength(2);
     expect(r.card.assetNo).toMatch(/^ZC\d{8}-\d{4}$/);
+    // 打标签按编号直接取这几张（不从列表里筛：列表最多 1,000 张；Codex 审查 9ad0f56）
+    const picked = (await api(ctx.app, keeper, 'GET', `/api/erp/assets?ids=${r.cards[1].id},${r.cards[0].id}`)).body as { id: number }[];
+    expect(picked.map((c) => c.id).sort()).toEqual([r.cards[0].id, r.cards[1].id].sort());
+    expect((await api(ctx.app, keeper, 'GET', '/api/erp/assets?ids=abc')).status).toBe(400);
     const again = await ok(create({ quantity: 2, departmentId: deptId, location: '前台', keeper: '小王' }, key), 200);
     expect(again.replayed).toBe(true);
     expect(again.cards.map((c: { id: number }) => c.id)).toEqual(r.cards.map((c: { id: number }) => c.id));

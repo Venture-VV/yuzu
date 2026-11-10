@@ -57,18 +57,20 @@ export async function slowMovingReport(db: Db, today: string, raw: unknown = {})
     picked AS (
       SELECT * FROM stocks ${q.warehouseId ? db`WHERE warehouse_id = ${q.warehouseId}` : db``}
     ),
+    -- 冲销了的单据不算（冲销留着原来的流水、另记一笔 void 抵回，这里按单据的状态整张排除；Codex 审查 9ad0f56）
     outs AS (
       SELECT sm.warehouse_id, sm.material_id, max(sm.doc_date) AS last_out,
              coalesce(sum(-sm.qty_delta_milli) FILTER (WHERE sm.doc_date >= ${since}::date), 0) AS used_milli
-      FROM stock_moves sm
-      WHERE sm.qty_delta_milli < 0 AND sm.move_type IN ('issue', 'issue_return', 'direct_use', 'damage', 'supplier_return')
+      FROM stock_moves sm JOIN inv_docs d ON d.id = sm.doc_id
+      WHERE sm.qty_delta_milli < 0 AND sm.move_type IN ('issue', 'issue_return', 'direct_use', 'damage', 'supplier_return') AND d.status <> 'voided'
         AND (sm.warehouse_id, sm.material_id) IN (SELECT warehouse_id, material_id FROM picked)
       GROUP BY sm.warehouse_id, sm.material_id
     ),
     ins AS (
       SELECT sm.warehouse_id, sm.material_id, min(sm.doc_date) AS first_in
-      FROM stock_moves sm
-      WHERE sm.qty_delta_milli > 0 AND (sm.warehouse_id, sm.material_id) IN (SELECT warehouse_id, material_id FROM picked)
+      FROM stock_moves sm JOIN inv_docs d ON d.id = sm.doc_id
+      WHERE sm.qty_delta_milli > 0 AND sm.move_type <> 'void' AND d.status <> 'voided'
+        AND (sm.warehouse_id, sm.material_id) IN (SELECT warehouse_id, material_id FROM picked)
       GROUP BY sm.warehouse_id, sm.material_id
     ),
     last_price AS (

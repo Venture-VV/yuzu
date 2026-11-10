@@ -72,6 +72,7 @@ export const DEVICE_ERROR_CODES = [
   'READ_FAILED',
   // v0.7.28 断网打印队列：等打印机恢复超过时限，不再打
   'DEVICE_WAIT_EXPIRED',
+  'PRINT_MODE_LOCAL',
 ] as const;
 export type DeviceErrorCode = (typeof DEVICE_ERROR_CODES)[number];
 export const DEVICE_ERROR_LABELS: Record<DeviceErrorCode, string> = {
@@ -91,7 +92,8 @@ export const DEVICE_ERROR_LABELS: Record<DeviceErrorCode, string> = {
   BRIDGE_OFFLINE: '终端的设备服务没连上',
   BRIDGE_PROTOCOL: '设备服务的报文不对（版本不符或字段缺失）',
   READ_FAILED: '读卡或扫码失败',
-  DEVICE_WAIT_EXPIRED: '等打印机恢复超过 30 分钟还没恢复，没有再打（恢复后请重新打印）',
+  DEVICE_WAIT_EXPIRED: '等打印机恢复超过设置的时间还没恢复，没有再打（恢复后请重新打印）',
+  PRINT_MODE_LOCAL: '打印方式改成了「本机打印」，服务器不再往网口小票机发这张（需要的话用浏览器打印）',
 };
 export const isDeviceErrorCode = (v: unknown): v is DeviceErrorCode => typeof v === 'string' && (DEVICE_ERROR_CODES as readonly string[]).includes(v);
 

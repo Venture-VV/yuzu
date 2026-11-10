@@ -44,6 +44,12 @@ const ListQuery = z.object({
   departmentId: z.coerce.number().int().positive().optional(),
   status: z.enum(ASSET_STATUSES).optional(),
   category: z.enum(ASSET_CATEGORIES).optional(),
+  /** 指定几张（打标签用，逗号分隔，最多 300 张）：不受列表 1,000 张的限制（Codex 审查 9ad0f56） */
+  ids: z
+    .string()
+    .regex(/^\d+(,\d+){0,299}$/, '资产卡片的编号不对（逗号分隔，最多 300 张）')
+    .transform((v) => [...new Set(v.split(',').map(Number))])
+    .optional(),
 });
 
 export async function listAssets(db: Db, raw: unknown): Promise<AssetCard[]> {
@@ -51,6 +57,7 @@ export async function listAssets(db: Db, raw: unknown): Promise<AssetCard[]> {
   const rows = await db<AssetCard[]>`
     ${CARD_SELECT(db)}
     WHERE true
+      ${q.ids ? db`AND c.id IN ${db(q.ids)}` : db``}
       ${q.departmentId ? db`AND c.department_id = ${q.departmentId}` : db``}
       ${q.status ? db`AND c.status = ${q.status}` : db``}
       ${q.category ? db`AND c.category = ${q.category}` : db``}
