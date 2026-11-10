@@ -10,7 +10,7 @@ export interface SpendQuota {
   businessDate: string;
   /** 当天充值实收合计（含线上） */
   recharged: number;
-  /** 当天第一笔充值入账前的余额（本金 + 赠金；当天第一笔充值以后合并、期初转进来的也算在这里） */
+  /** 当天第一笔充值入账前的余额（本金 + 赠金；当天第一笔充值以后合并、期初转进来的，撤销第一笔充值之前的消费退回来的也算在这里，随即作废的赠金不算） */
   priorBalance: number;
   /** 比例（%） */
   pct: number;

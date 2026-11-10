@@ -6,6 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
+import { ensureShift } from './shift';
 
 const PASSWORD = 'yuzu2026';
 
@@ -105,6 +106,23 @@ test.describe('8.0.4 会员体系整改', () => {
     await page.getByTestId('campaign-template').selectOption(String(cash.id));
     await page.getByTestId(`campaign-tag-${tag.id}`).click();
     await page.getByTestId('campaign-reason').fill('E2E 批量发券');
+    // 预览还在路上时改了圈选：旧的结果回来后不显示、不能发（8.0.5，8.0.4 独立验收 P2：原来照样显示旧人数、能点发券，发出去的却是新圈选）
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    await page.route('**/api/coupons/campaigns/preview', async (route) => {
+      const response = await route.fetch();
+      await gate;
+      await route.fulfill({ response });
+    });
+    await page.getByTestId('campaign-preview').click();
+    await page.getByTestId(`campaign-tag-${tag.id}`).click(); // 取消这个标签：圈到的是全部会员了
+    release();
+    await expect(page.getByTestId('campaign-preview')).toBeEnabled();
+    await expect(page.getByTestId('campaign-preview-result')).toHaveCount(0);
+    await expect(page.getByTestId('campaign-submit')).toBeDisabled();
+    await page.unroute('**/api/coupons/campaigns/preview');
+    // 选回这个标签，重新预览：两位
+    await page.getByTestId(`campaign-tag-${tag.id}`).click();
     await page.getByTestId('campaign-preview').click();
     await expect(page.getByTestId('campaign-preview-result')).toContainText('2');
     await page.getByTestId('campaign-submit').click();
@@ -117,6 +135,7 @@ test.describe('8.0.4 会员体系整改', () => {
 
   test('会员详情：充值当日的储值额度；充值、消费记录默认展开，查询与导出', async ({ page }) => {
     await login(page, 'linlan');
+    await ensureShift(page); // 下面要充值：自己开班，不靠别的用例留下的班次（单独跑这一条也能过）
     const settings = await getJson<{ rechargeSpendPct: number | null }>(page, '/api/settings');
     const run = String(Date.now() % 100000);
     const member = await postJson<{ id: number }>(page, '/api/members', { name: `E2E额度${run}`, phone: phone(3) });

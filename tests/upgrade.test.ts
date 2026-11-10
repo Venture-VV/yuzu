@@ -54,6 +54,8 @@ beforeAll(async () => {
   await sql`ALTER TABLE ledger_entries ADD COLUMN member_refund_id bigint, ADD COLUMN member_merge_id bigint`;
   await sql`ALTER TABLE consumptions ADD COLUMN checkout_id bigint`;
   await sql`CREATE TABLE bonus_lots (id bigserial PRIMARY KEY, member_id bigint, source text, recharge_id bigint, amount bigint, remaining bigint, expires_at timestamptz, created_at timestamptz)`;
+  // 现版本消费时算充值当日的储值额度（8.0.4，默认 70%），撤销退回的钱要减去随即作废的赠金、会查过期单（012 才有）：写入期间临时建空表，迁移前删掉
+  await sql`CREATE TABLE bonus_expiries (id bigserial PRIMARY KEY, member_id bigint, amount bigint, reversal_id bigint)`;
   await sql`CREATE TABLE checkouts (id bigserial PRIMARY KEY, checkout_no text, status text)`;
   await sql`CREATE TABLE shifts (id bigserial PRIMARY KEY, staff_id bigint, status text)`;
   // 收款按当班成员找班次（059 才有）：写入期间临时建空表，迁移前删掉
@@ -99,6 +101,7 @@ beforeAll(async () => {
   await sql`ALTER TABLE ledger_entries DROP COLUMN member_refund_id, DROP COLUMN member_merge_id`;
   await sql`ALTER TABLE consumptions DROP COLUMN checkout_id`;
   await sql`DROP TABLE bonus_lots`;
+  await sql`DROP TABLE bonus_expiries`;
   await sql`DROP TABLE checkouts`;
   await sql`DROP TABLE visits`;
   await sql`DROP TABLE hand_tags`;

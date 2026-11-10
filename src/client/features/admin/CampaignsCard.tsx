@@ -129,7 +129,9 @@ function CampaignDialog({ open, onClose, onDone }: { open: boolean; onClose: () 
   const [sms, setSms] = useState(false);
   const [popup, setPopup] = useState(true);
   const [remind, setRemind] = useState(String(DEFAULT_REMIND_DAYS));
-  const [preview, setPreview] = useState<CampaignPreview | null>(null);
+  // 预览带着它是按哪一组条件（券 + 圈选）算的；条件变了就不算数（8.0.4 独立验收 P2：预览还在路上时改了圈选，
+  // 旧的结果回来后照样显示、能点发券，发出去的却是新圈选）
+  const [previewed, setPreviewed] = useState<(CampaignPreview & { key: string }) | null>(null);
   const [busy, setBusy] = useState<'preview' | 'send' | null>(null);
   const [error, setError] = useState<string | null>(null);
   useResetOnOpen(open, () => {
@@ -142,12 +144,15 @@ function CampaignDialog({ open, onClose, onDone }: { open: boolean; onClose: () 
     setSms(false);
     setPopup(true);
     setRemind(String(DEFAULT_REMIND_DAYS));
-    setPreview(null);
+    setPreviewed(null);
     setError(null);
   });
   const choices = (templates.data ?? []).filter((t) => t.active && !templateExpired(t, session.today));
   const template = choices.find((t) => t.id === templateId) ?? null;
   const audience = { grades, tagIds, tagMode };
+  const inputKey = JSON.stringify({ templateId: template?.id ?? null, audience });
+  /** 只认按现在这组条件算出来的预览 */
+  const preview = previewed && previewed.key === inputKey ? previewed : null;
   const n = Number(quantity);
   const days = Number(remind);
   const problem = !template
@@ -160,14 +165,16 @@ function CampaignDialog({ open, onClose, onDone }: { open: boolean; onClose: () 
           ? '请填写发券原因（至少 2 个字）'
           : null;
   // 圈选条件改了，预览作废
-  const resetPreview = () => setPreview(null);
+  const resetPreview = () => setPreviewed(null);
 
   const doPreview = async () => {
     if (!template) return;
     setBusy('preview');
     setError(null);
     try {
-      setPreview(await api.post<CampaignPreview>('/api/coupons/campaigns/preview', { templateId: template.id, audience }));
+      const key = inputKey;
+      const result = await api.post<CampaignPreview>('/api/coupons/campaigns/preview', { templateId: template.id, audience });
+      setPreviewed({ ...result, key });
     } catch (e) {
       setError(errorMessage(e));
     } finally {

@@ -66,15 +66,15 @@ export async function handleGiftOut(deps: Pick<Deps, 'sql' | 'config'>, id: numb
         },
         actor,
       );
-      // 反结账在开单期间发生（这一条已改成待冲销）：照样记下单号，下一次冲销
+      // 记下单号与结果在同一条语句里：开单期间反结账了（这一条已是「待冲销」或「已取消」），单已经开了，一起改成待冲销——
+      // 不能先记单号、再另一条语句改状态：两条之间断了会留下「已取消 + 有单号」，之后谁都不处理、库存少一份（8.0.4 独立验收 P1）
       const [after] = await sql<{ status: GiftOutStatus }[]>`
-        UPDATE coupon_gift_outs SET status = CASE WHEN status = 'pending' THEN 'done' ELSE status END, inv_doc_id = ${doc.id},
-               attempts = attempts + 1, last_error = NULL, updated_at = now()
+        UPDATE coupon_gift_outs
+        SET status = CASE status WHEN 'pending' THEN 'done' WHEN 'cancelled' THEN 'void_pending' ELSE status END, inv_doc_id = ${doc.id},
+            attempts = attempts + 1, last_error = NULL, updated_at = now()
         WHERE id = ${id} AND status IN ('pending', 'void_pending', 'cancelled') RETURNING status`;
-      // 开单期间反结账、改成了「已取消」：单已经开了，改成待冲销
-      if (after?.status === 'cancelled') await sql`UPDATE coupon_gift_outs SET status = 'void_pending', updated_at = now() WHERE id = ${id}`;
       await writeAudit(sql, { staffId: actor.id, action: 'gift_out_done', targetType: 'coupon_gift_out', targetId: id, detail: { docNo: doc.docNo, checkoutNo: g.checkoutNo } });
-      return after?.status === 'cancelled' ? 'void_pending' : (after?.status ?? 'done');
+      return after?.status ?? 'done';
     } catch (error) {
       await sql`
         UPDATE coupon_gift_outs SET status = 'failed', attempts = attempts + 1, last_error = ${errText(error)}, updated_at = now()
@@ -101,14 +101,16 @@ export async function handleGiftOut(deps: Pick<Deps, 'sql' | 'config'>, id: numb
 
 /**
  * 对账：按这一条自己的操作编号找已生效的库存单据——开单的事务提交了、还没记下单号就断了的，「已取消」（之后反结账了）改成待冲销，
- * 「出库失败」改成已出库（记下单号）。返回改了几条
+ * 「出库失败」改成已出库（记下单号）。「已取消」但已经记了单号的（8.0.4 先记单号、再改状态，两步之间断了留下的）也改成待冲销。
+ * 返回改了几条
  */
 export async function reconcileGiftOuts(db: Db): Promise<number> {
   const rows = await db`
     UPDATE coupon_gift_outs g
     SET status = CASE g.status WHEN 'cancelled' THEN 'void_pending' ELSE 'done' END, inv_doc_id = d.id, last_error = NULL, updated_at = now()
     FROM inv_docs d
-    WHERE d.client_key = g.client_key AND d.status = 'confirmed' AND g.inv_doc_id IS NULL AND g.status IN ('cancelled', 'failed')
+    WHERE d.client_key = g.client_key AND d.status = 'confirmed'
+      AND ((g.status = 'cancelled' AND (g.inv_doc_id IS NULL OR g.inv_doc_id = d.id)) OR (g.status = 'failed' AND g.inv_doc_id IS NULL))
     RETURNING g.id`;
   return rows.length;
 }
