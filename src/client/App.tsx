@@ -36,6 +36,8 @@ const AdminShell = lazyPage(() => import('./features/admin/AdminShell').then((m)
 const CheckoutPrintPage = lazyPage(() => import('./features/print/CheckoutPrintPage').then((m) => m.CheckoutPrintPage));
 const RefundPrintPage = lazyPage(() => import('./features/print/RefundPrintPage').then((m) => m.RefundPrintPage));
 const SettlementPrintPage = lazyPage(() => import('./features/print/SettlementPrintPage').then((m) => m.SettlementPrintPage));
+const CanteenCardsPrintPage = lazyPage(() => import('./features/canteen/CardsPrintPage').then((m) => m.CanteenCardsPrintPage));
+const CanteenPosterPrintPage = lazyPage(() => import('./features/canteen/PosterPrintPage').then((m) => m.CanteenPosterPrintPage));
 const ShiftPrintPage = lazyPage(() => import('./features/print/ShiftPrintPage').then((m) => m.ShiftPrintPage));
 // ERP 工作区
 const ErpShell = lazyPage(() => import('./features/erp/ErpShell').then((m) => m.ErpShell));
@@ -46,6 +48,8 @@ const ExpensesPage = lazyPage(() => import('./features/expenses/ExpensesPage').t
 const ClaimFormPage = lazyPage(() => import('./features/expenses/ClaimFormPage').then((m) => m.ClaimFormPage));
 const PettyPage = lazyPage(() => import('./features/expenses/PettyPage').then((m) => m.PettyPage));
 const PettyAccountsPage = lazyPage(() => import('./features/expenses/PettyAccountsPage').then((m) => m.PettyAccountsPage));
+const BudgetsPage = lazyPage(() => import('./features/expenses/BudgetsPage').then((m) => m.BudgetsPage));
+const InvoicesPage = lazyPage(() => import('./features/invoices/InvoicesPage').then((m) => m.InvoicesPage));
 const RequestsPage = lazyPage(() => import('./features/requests/RequestsPage').then((m) => m.RequestsPage));
 const RequestFormPage = lazyPage(() => import('./features/requests/RequestFormPage').then((m) => m.RequestFormPage));
 const DeptStockPage = lazyPage(() => import('./features/dept-stock/DeptStockPage').then((m) => m.DeptStockPage));
@@ -53,15 +57,28 @@ const DeptDocFormPage = lazyPage(() => import('./features/dept-stock/DeptDocForm
 const PurchaseLedgerPage = lazyPage(() => import('./features/purchase-ledger/PurchaseLedgerPage').then((m) => m.PurchaseLedgerPage));
 const AuditPage = lazyPage(() => import('./features/purchase-ledger/AuditPage').then((m) => m.AuditPage));
 const LegacyPage = lazyPage(() => import('./features/legacy/LegacyPage').then((m) => m.LegacyPage));
+const ContractsPage = lazyPage(() => import('./features/contracts/ContractsPage').then((m) => m.ContractsPage));
+const ContractDetailPage = lazyPage(() => import('./features/contracts/ContractDetailPage').then((m) => m.ContractDetailPage));
+const ContractFormPage = lazyPage(() => import('./features/contracts/ContractFormPage').then((m) => m.ContractFormPage));
+const PaymentsPage = lazyPage(() => import('./features/payments/PaymentsPage').then((m) => m.PaymentsPage));
+const CanteenPage = lazyPage(() => import('./features/canteen/CanteenPage').then((m) => m.CanteenPage));
+const PaymentRequestPage = lazyPage(() => import('./features/payments/PaymentRequestPage').then((m) => m.PaymentRequestPage));
+const PaymentRequestFormPage = lazyPage(() => import('./features/payments/PaymentRequestFormPage').then((m) => m.PaymentRequestFormPage));
 const DocFormPage = lazyPage(() => import('./features/inventory/DocFormPage').then((m) => m.DocFormPage));
 const InventoryPage = lazyPage(() => import('./features/inventory/InventoryPage').then((m) => m.InventoryPage));
 const TodoPage = lazyPage(() => import('./features/inventory/TodoPage').then((m) => m.TodoPage));
+const ApprovalsPage = lazyPage(() => import('./features/approvals/ApprovalsPage').then((m) => m.ApprovalsPage));
 const PurchasingPage = lazyPage(() => import('./features/purchasing/PurchasingPage').then((m) => m.PurchasingPage));
 const PoFormPage = lazyPage(() => import('./features/purchasing/PoFormPage').then((m) => m.PoFormPage));
 const OrderedPage = lazyPage(() => import('./features/purchasing/OrderedPage').then((m) => m.OrderedPage));
 const SuggestionsPage = lazyPage(() => import('./features/purchasing/SuggestionsPage').then((m) => m.SuggestionsPage));
 const SourcingPage = lazyPage(() => import('./features/purchasing/SourcingPage').then((m) => m.SourcingPage));
 const SourcingDetailPage = lazyPage(() => import('./features/purchasing/SourcingPage').then((m) => m.SourcingDetailPage));
+const UrgentPage = lazyPage(() => import('./features/purchasing/UrgentPage').then((m) => m.UrgentPage));
+const PurchaseRulesPage = lazyPage(() => import('./features/purchasing/PurchaseRulesPage').then((m) => m.PurchaseRulesPage));
+const RequestImportPage = lazyPage(() => import('./features/purchasing/RequestImportPage').then((m) => m.RequestImportPage));
+const ComparePage = lazyPage(() => import('./features/purchasing/ComparePage').then((m) => m.ComparePage));
+const UrgentDocFormPage = lazyPage(() => import('./features/inventory/DocFormPage').then((m) => m.UrgentDocFormPage));
 const PayablesPage = lazyPage(() => import('./features/payables/PayablesPage').then((m) => m.PayablesPage));
 const PaymentFormPage = lazyPage(() => import('./features/payables/PaymentFormPage').then((m) => m.PaymentFormPage));
 const ImportPage = lazyPage(() => import('./features/payables/ImportPage').then((m) => m.ImportPage));
@@ -177,6 +194,9 @@ const router = createBrowserRouter([
       { path: 'refund/:id', element: <RefundPrintPage /> },
       { path: 'shift/:id', element: <ShiftPrintPage /> },
       { path: 'settlement/:date', element: <SettlementPrintPage /> },
+      // 员工食堂的开通卡片（A4）
+      { path: 'canteen-cards/:ids', element: <CanteenCardsPrintPage /> },
+      { path: 'canteen-poster', element: <CanteenPosterPrintPage /> },
     ],
   },
   // 对客导览的大屏模式（v0.7.19）：没有导航与操作，适合门店大屏常开
@@ -193,6 +213,9 @@ const router = createBrowserRouter([
       { path: 'revenue', element: <RevenuePage /> },
       { path: 'expenses', element: <ExpensesPage /> },
       { path: 'expenses/new', element: <ClaimFormPage /> },
+      // 费用预算与进项发票台账（8.0.3）
+      { path: 'expenses/budgets', element: <BudgetsPage /> },
+      { path: 'invoices', element: <InvoicesPage /> },
       { path: 'petty', element: <PettyPage /> },
       { path: 'petty/accounts', element: <PettyAccountsPage /> },
       { path: 'requests', element: <RequestsPage /> },
@@ -204,6 +227,19 @@ const router = createBrowserRouter([
       { path: 'ledger', element: <PurchaseLedgerPage /> },
       { path: 'audit', element: <AuditPage /> },
       { path: 'legacy', element: <LegacyPage /> },
+      // 合同与法务审查（v0.7.31）
+      { path: 'contracts', element: <ContractsPage /> },
+      { path: 'contracts/new', element: <ContractFormPage mode="new" /> },
+      { path: 'contracts/:id', element: <ContractDetailPage /> },
+      { path: 'contracts/:id/edit', element: <ContractFormPage mode="edit" /> },
+      { path: 'contracts/:id/change', element: <ContractFormPage mode="change" /> },
+      { path: 'contracts/:id/changes/:changeId/edit', element: <ContractFormPage mode="change-edit" /> },
+      // 付款流（v0.7.32）
+      { path: 'payments', element: <PaymentsPage /> },
+      { path: 'payments/requests/new', element: <PaymentRequestFormPage /> },
+      { path: 'payments/requests/:id', element: <PaymentRequestPage /> },
+      // 员工食堂 · 柚子饭堂（docs/CANTEEN.md）
+      { path: 'canteen', element: <CanteenPage /> },
       { path: '*', element: <Navigate to="/erp" replace /> },
     ],
   },
@@ -214,12 +250,23 @@ const router = createBrowserRouter([
       { path: 'inventory/docs/:id/edit', element: <DocFormPage /> },
       { path: 'inventory/:tab?', element: <InventoryPage /> },
       { path: 'todo', element: <TodoPage /> },
+      { path: 'approvals', element: <ApprovalsPage /> },
       { path: 'purchasing', element: <PurchasingPage /> },
       { path: 'purchasing/new', element: <PoFormPage mode="new" /> },
       { path: 'purchasing/ordered', element: <OrderedPage /> },
       { path: 'purchasing/suggestions', element: <SuggestionsPage /> },
       { path: 'purchasing/sourcing', element: <SourcingPage /> },
       { path: 'purchasing/sourcing/:id', element: <SourcingDetailPage /> },
+      // 急采（8.0.1 采购组整改 05：由采购登记、按金额分级审批）
+      { path: 'purchasing/urgent', element: <UrgentPage /> },
+      { path: 'purchasing/urgent/new', element: <UrgentDocFormPage /> },
+      { path: 'purchasing/urgent/:id/edit', element: <UrgentDocFormPage /> },
+      // 采购规则（8.0.1 采购组整改 01：从 ERP「模块设置」挪过来）
+      { path: 'purchasing/rules', element: <PurchaseRulesPage /> },
+      // 集采导入（8.0.1 采购组整改 06）
+      { path: 'purchasing/import', element: <RequestImportPage /> },
+      // 供应商比价看板（8.0.1 采购组整改 07）
+      { path: 'purchasing/compare', element: <ComparePage /> },
       { path: 'purchasing/:id/edit', element: <PoFormPage mode="edit" /> },
       { path: 'purchasing/:id/revise', element: <PoFormPage mode="revise" /> },
       { path: 'payables', element: <PayablesPage /> },

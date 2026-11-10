@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { spendQuotaText, type SpendQuota } from '@shared/spend-quota';
 import { BadgePercent, Plus, ShieldCheck, Ticket, TicketCheck, Trash2, UserRound, WalletCards } from 'lucide-react';
 import { DISCOUNT_TARGET_LABELS, rateText } from '@shared/benefits';
 import {
@@ -36,6 +37,8 @@ export interface PayMember {
   principalBalance: number;
   bonusBalance: number;
   status: 'active' | 'frozen';
+  /** 充值当日的储值额度（8.0.4 需求表 04）：当天没充值为空；结账前核对带来，服务端入账时再核对一遍 */
+  spendQuota?: SpendQuota | null;
 }
 
 /** 选储值会员时的说明：没有会员时的提示与规则 */
@@ -155,6 +158,12 @@ export function usePayRows(opts: {
       if (r.member.status !== 'active') return '会员已停用';
       const s = splitOf(r, c);
       if (s && !s.ok) return `余额不足，还差 ¥${(s.shortfall / 100).toFixed(2)}`;
+      // 充值当日的储值额度（8.0.4 需求表 04，HY02）：同一位会员几行储值合起来算，超了拦下并提示剩余额度
+      const q = r.member.spendQuota;
+      if (q) {
+        const used = rows.reduce((sum, x, j) => (x.method === 'wallet' && x.member?.id === r.member!.id ? sum + (rowCents[j] ?? 0) : sum), 0);
+        if (used > q.remaining) return `超过今天的储值额度：剩余 ${formatYuan(q.remaining)}（充值前余额 ${formatYuan(q.priorBalance)} + 今日充值 ${formatYuan(q.recharged)} × ${q.pct}%），其余请用别的方式付`;
+      }
     }
     if (r.method === 'coupon' && !COUPON_CODE_PATTERN.test(normalizeCouponCode(r.code))) return '请填写完整券码';
     if (r.method === 'other' && !r.ref.trim()) return '「其他」收款请在备注里写明收的是什么';
@@ -553,6 +562,11 @@ export function PayRowEditor({
             {split?.ok && (
               <span className="font-semibold text-pine" data-testid="wallet-split">
                 将扣本金 <Money cents={split.principal} /> · 赠金 <Money cents={split.bonus} />
+              </span>
+            )}
+            {row.member.spendQuota && (
+              <span className="w-full text-[12px] font-semibold text-ember" data-testid="wallet-spend-quota">
+                {spendQuotaText(row.member.spendQuota)}
               </span>
             )}
             <span className="flex-1" />

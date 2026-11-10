@@ -36,7 +36,12 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
       return d.refund && typeof d.refund === 'object' ? { refId: d.refund.id } : null;
     case 'erp_import':
     case 'space_import':
+    // 集采导入（8.0.1）：返回那次导入
+    case 'request_import':
       return d.import && typeof d.import === 'object' ? { refId: d.import.id } : null;
+    // 赠品登记（8.0.1）：返回那条登记
+    case 'gift_receipt':
+      return d.gift && typeof d.gift === 'object' ? { refId: d.gift.id } : null;
     case 'supplier_recon':
     case 'supplier_recon_void':
       return d.reconciliation && typeof d.reconciliation === 'object' ? { refId: d.reconciliation.id } : null;
@@ -45,6 +50,7 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     // 券与会员权益（v0.7.20）：模板、无记名券返回自己（id），规则返回 ruleId，发券返回 issueId
     case 'coupon_template':
     case 'coupon_batch':
+    case 'coupon_campaign':
       return typeof d.id === 'number' ? { refId: d.id } : null;
     case 'coupon_rule':
       return typeof d.ruleId === 'number' ? { refId: d.ruleId } : null;
@@ -88,6 +94,30 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
       return d.redemption && typeof d.redemption === 'object' ? { refId: d.redemption.id } : null;
     case 'platform_settlement':
       return d.settlement && typeof d.settlement === 'object' ? { refId: d.settlement.id } : null;
+    // 审批中心（v0.7.30）：新建审批规则、设代理人都返回那一条（id）
+    case 'approval_rule':
+    case 'approval_delegation':
+      return typeof d.id === 'number' ? { refId: d.id } : null;
+    // 合同与法务审查（v0.7.31）：新建合同返回那份合同，变更单、用印申请返回那一条
+    case 'contract_create':
+      return d.contract && typeof d.contract === 'object' ? { refId: d.contract.id } : null;
+    case 'contract_change':
+      return d.change && typeof d.change === 'object' ? { refId: d.change.id } : null;
+    case 'contract_seal':
+      return d.seal && typeof d.seal === 'object' ? { refId: d.seal.id } : null;
+    // 付款流（v0.7.32）：付款申请返回那张申请，合同付款返回那一笔，验收、质量问题登记返回那一条（id），发票返回那张发票
+    case 'payment_request':
+      return d.request && typeof d.request === 'object' ? { refId: d.request.id } : null;
+    case 'contract_payout':
+      return typeof d.payoutId === 'number' ? { refId: d.payoutId } : null;
+    case 'contract_acceptance':
+    case 'contract_quality':
+      return typeof d.id === 'number' ? { refId: d.id } : null;
+    case 'supplier_invoice':
+      return d.invoice && typeof d.invoice === 'object' ? { refId: d.invoice.id } : null;
+    // 员工食堂第二期：柚子信箱的回信返回那一条（id）
+    case 'canteen_reply':
+      return typeof d.id === 'number' ? { refId: d.id } : null;
   }
 }
 

@@ -43,6 +43,7 @@ import { cents, parse, positiveCents } from '../../lib/validate';
 import { consumeDiscountGrant } from '../../auth/grants';
 import { expireMemberBonus } from '../bonus';
 import { loadSettings } from '../settings';
+import { withSpendQuota } from '../spend-quota';
 import { lockPaymentShift, lockRefundShift, openShiftOf, shiftDrawerLabel } from '../shifts';
 import { consumeForCheckout, reverseForCheckout } from '../wallet';
 import {
@@ -204,12 +205,14 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
     const lines = await tx<{ id: number; billId: number; name: string; quantity: number; amount: number }[]>`
       SELECT id, bill_id, name, quantity, amount FROM bill_lines
       WHERE status = 'active' AND bill_id IN ${tx(rows.map((r) => r.billId))} ORDER BY id`;
-    const members = rows.some((r) => r.memberId)
-      ? await tx<CheckoutPreview['members']>`
+    const date = await businessDate(tx, deps, at);
+    const memberRows = rows.some((r) => r.memberId)
+      ? await tx<Omit<CheckoutPreview['members'][number], 'spendQuota'>[]>`
           SELECT id, name, member_no, status, principal_balance, bonus_balance FROM members
           WHERE id IN ${tx(rows.flatMap((r) => (r.memberId ? [r.memberId] : [])))} ORDER BY id`
       : [];
-    const date = await businessDate(tx, deps, at);
+    // 充值当日的储值额度（8.0.4 需求表 04）：选储值支付时页面显示剩余额度、超了先拦
+    const members = await withSpendQuota(tx, memberRows, date, (await loadSettings(tx)).rechargeSpendPct);
     // 浴票延迟（v0.7.25 续）：会员的门票在跳档宽限之上多给几分钟（按此刻推算的档阶，与结账时同一算法）
     const extensions = await memberTicketExtensions(tx, rows.map((r) => r.memberId), date);
     const visits = rows.map((r) => {

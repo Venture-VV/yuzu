@@ -1,12 +1,13 @@
 import { SUPPLIER_SETTLEMENT_LABELS, type SupplierSettlement } from '@shared/expenses';
-import { useState } from 'react';
-import { Plus, Search } from 'lucide-react';
-import { RECONCILE_CYCLE_LABELS, RECONCILE_CYCLES, type Department, type Material, type ReconcileCycle, type Supplier } from '@shared/inventory';
+import { useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { FileText, Plus, Search, Upload } from 'lucide-react';
+import { MAX_PDF_BYTES, RECONCILE_CYCLE_LABELS, RECONCILE_CYCLES, type Department, type Material, type ReconcileCycle, type Supplier, type SupplierContractFile } from '@shared/inventory';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { conversionText, formatQty, parseQty } from '@shared/quantity';
 import { api, errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
-import { cn } from '../../lib/utils';
+import { cn, formatDateTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
@@ -387,6 +388,7 @@ function Suppliers({ editable }: { editable: boolean }) {
                 <p className="flex items-center gap-2">
                   <span className="num text-[12px] font-semibold text-ink-3">{s.code}</span>
                   <span className="truncate text-[14px] font-bold">{s.name}</span>
+                  {s.contracted ? <Badge tone="pine">签约{s.contractFiles ? ` · 合同 ${s.contractFiles} 份` : ''}</Badge> : <Badge>未签约</Badge>}
                   {s.settlement === 'cash' && <Badge tone="lake">现付</Badge>}
                   {s.settlement === 'credit' && s.reconcileCycle === 'batch' && <Badge tone="lake">按批次对账</Badge>}
                   {!s.active && <Badge>已停用</Badge>}
@@ -417,6 +419,8 @@ function SupplierDialog({ editing, onClose }: { editing: Supplier | 'new' | null
     settlement: 'credit' as SupplierSettlement,
     reconcileCycle: 'monthly' as ReconcileCycle,
     defaultChannel: null as string | null,
+    // 签约 / 未签约（8.0.1 采购组整改 08，CG08）：签约的可以上传合同 PDF
+    contracted: false,
     active: true,
   };
   const [form, setForm] = useState(blank);
@@ -436,6 +440,7 @@ function SupplierDialog({ editing, onClose }: { editing: Supplier | 'new' | null
             settlement: editing.settlement,
             reconcileCycle: editing.reconcileCycle,
             defaultChannel: editing.defaultChannel ?? null,
+            contracted: editing.contracted,
             active: editing.active,
           }
         : blank,
@@ -519,7 +524,19 @@ function SupplierDialog({ editing, onClose }: { editing: Supplier | 'new' | null
             />
           </Field>
         )}
-        <Field label="默认采购途径" htmlFor="s-channel" className="sm:col-span-3" hint="新建这家的采购单时按它带出，可改；不设按采购规则的第一项">
+        <Field label="签约" className="sm:col-span-3" hint="签约的供应商可以上传合同 PDF（保存成签约以后在下面上传）">
+          <Segmented
+            ariaLabel="签约"
+            value={form.contracted ? 'yes' : 'no'}
+            onChange={(v) => setForm({ ...form, contracted: v === 'yes' })}
+            className="w-full"
+            options={[
+              { value: 'yes', label: '签约' },
+              { value: 'no', label: '未签约' },
+            ]}
+          />
+        </Field>
+        <Field label="默认采购途径" htmlFor="s-channel" className="sm:col-span-3" hint="新建这家的采购单时按它带出，可改；固定三类：网购、自采（现采/零采）、供应商">
           <Select
             id="s-channel"
             value={form.defaultChannel ?? ''}
@@ -546,8 +563,105 @@ function SupplierDialog({ editing, onClose }: { editing: Supplier | 'new' | null
           />
         </Field>
         {error && <Notice tone="error" title={error} className="sm:col-span-3" />}
+        {s && <ContractFiles supplier={s} pendingContracted={form.contracted} />}
       </div>
     </Dialog>
+  );
+}
+
+/** 读成 Base64（不带 data: 前缀） */
+const toBase64 = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ''));
+    r.onerror = () => reject(r.error ?? new Error('读不了这个文件'));
+    r.readAsDataURL(file);
+  });
+
+/** 签约供应商的合同 PDF（8.0.1，CG08）：可以传多份、下载、撤下（撤下保留记录）；同一份文件不重复挂 */
+function ContractFiles({ supplier, pendingContracted }: { supplier: Supplier; pendingContracted: boolean }) {
+  const can = useCan();
+  const toast = useToast();
+  const qc = useQueryClient();
+  const invalidate = useInvalidateInventory();
+  const key = ['inv', 'supplier-contracts', supplier.id] as const;
+  const files = useQuery({ queryKey: key, queryFn: () => api.get<SupplierContractFile[]>(`/api/inventory/suppliers/${supplier.id}/contract-files`) });
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const manage = can('inventory.master');
+  const set = async (next: SupplierContractFile[]) => {
+    qc.setQueryData(key, next);
+    await invalidate();
+  };
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    setError(null);
+    if (file.type && file.type !== 'application/pdf') return setError('只能上传 PDF 文件');
+    if (file.size > MAX_PDF_BYTES) return setError('文件不能超过 10 MB');
+    setBusy('upload');
+    try {
+      const name = file.name.replace(/\.pdf$/i, '').slice(0, 80) || '合同';
+      const next = await api.post<SupplierContractFile[]>(`/api/inventory/suppliers/${supplier.id}/contract-files`, { name, mime: 'application/pdf', data: await toBase64(file) }, { timeoutMs: 60_000 });
+      await set(next);
+      toast({ tone: 'success', title: '合同已上传', body: name });
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(null);
+      if (input.current) input.current.value = '';
+    }
+  };
+  const remove = async (f: SupplierContractFile) => {
+    setBusy(`remove-${f.id}`);
+    setError(null);
+    try {
+      await set(await api.post<SupplierContractFile[]>(`/api/inventory/supplier-contract-files/${f.id}/remove`, {}));
+      toast({ tone: 'success', title: '合同已撤下', body: `${f.name}（记录保留）` });
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <section className="space-y-2 rounded-lg border border-line p-3 sm:col-span-3" data-testid="supplier-contracts">
+      <div className="flex flex-wrap items-center gap-2">
+        <FileText className="size-4 text-ink-3" />
+        <span className="text-[13.5px] font-bold">合同 PDF</span>
+        {!supplier.contracted && <span className="text-[12.5px] text-ink-3">{pendingContracted ? '保存成签约以后可以上传' : '未签约的供应商不能上传合同'}</span>}
+        {supplier.contracted && manage && (
+          <>
+            <input ref={input} type="file" accept="application/pdf,.pdf" className="hidden" onChange={(e) => void upload(e.target.files?.[0])} data-testid="supplier-contract-file" />
+            <Button size="sm" variant="secondary" className="ml-auto" icon={<Upload className="size-4" />} loading={busy === 'upload'} onClick={() => input.current?.click()}>
+              上传合同（PDF，≤ 10 MB）
+            </Button>
+          </>
+        )}
+      </div>
+      {files.data && files.data.length > 0 ? (
+        <ul className="divide-y divide-line/70 rounded-md border border-line">
+          {files.data.map((f) => (
+            <li key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-[13px]" data-testid={`supplier-contract-${f.id}`}>
+              <a href={f.url} target="_blank" rel="noopener noreferrer" className="min-w-0 flex-1 truncate font-semibold text-lake hover:underline">
+                {f.name}.pdf
+              </a>
+              <span className="num text-[12px] text-ink-3">
+                {(f.sizeBytes / 1024).toFixed(f.sizeBytes < 102_400 ? 1 : 0)} KB · {f.uploadedByName} · {formatDateTime(f.uploadedAt)}
+              </span>
+              {manage && (
+                <Button size="sm" variant="ghost" loading={busy === `remove-${f.id}`} onClick={() => void remove(f)}>
+                  撤下
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        supplier.contracted && <p className="text-[12.5px] text-ink-3">还没有上传合同</p>
+      )}
+      {error && <Notice tone="error" title={error} />}
+    </section>
   );
 }
 

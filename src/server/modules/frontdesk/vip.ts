@@ -1,12 +1,12 @@
 // VIP 柜等级校验（店主 2026-10-27 #26：会员等级不低于柜子等级才能使用该柜）。
 //
-// 会员体系 v2（v0.7.23）起按会员的档级：会员规则里的「VIP 柜对应」写明每一档能用到几级柜（待确认）；散客为 0。
+// 会员体系 v2（v0.7.23）起按会员的档级：「VIP 柜对应」写明每一档能用到几级柜（待确认）；散客为 0。
+// 8.0.4 起「VIP 柜对应」与当场授权开关都归「会员权益 → VIP 柜」（vip_locker_rules，见 vip-lockers.ts）。
 // 只读会员一行，不加锁：等级是开牌那一刻的经营规则判断，不影响任何账务。
 // 等级不够时：规则未开启当场授权 → 拒绝；已开启 → 必须带值班经理 / 店总签发的授权，在同一事务里核销。
 
-import type { FrontdeskRules } from '@shared/frontdesk';
 import type { VipGrantTag } from '@shared/grants';
-import type { MemberGradeBadge } from '@shared/membership';
+import type { MemberGradeBadge, VipLockerRules } from '@shared/membership';
 import { consumeVipGrant } from '../../auth/grants';
 import type { Db, Tx } from '../../db';
 import type { Actor } from '../../lib/context';
@@ -53,11 +53,11 @@ function describe(s: VipShortfall, grades: Map<number, MemberGradeBadge>) {
  * 有等级不够的 VIP 柜时，确认可以授权（尽早调用，避免做无用功）：
  * 未开启当场授权 → VIP_LEVEL_TOO_LOW；已开启但没带授权 → VIP_AUTH_REQUIRED。
  */
-export function assertVipAllowed(shortfalls: VipShortfall[], grades: Map<number, MemberGradeBadge>, rules: FrontdeskRules, grantId: string | null) {
+export function assertVipAllowed(shortfalls: VipShortfall[], grades: Map<number, MemberGradeBadge>, vip: Pick<VipLockerRules, 'overrideEnabled'>, grantId: string | null) {
   if (shortfalls.length === 0) return;
   const first = shortfalls[0]!;
   const details = { shortfalls: shortfalls.map(({ code, memberId, tagLevel, memberLevel }) => ({ code, memberId, tagLevel, memberLevel })) };
-  if (!rules.vipOverrideEnabled) {
+  if (!vip.overrideEnabled) {
     throw unprocessable('VIP_LEVEL_TOO_LOW', `${describe(first, grades)}。请换普通柜或等级相符的 VIP 柜`, details);
   }
   if (!grantId) {

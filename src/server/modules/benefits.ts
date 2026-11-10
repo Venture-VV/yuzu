@@ -72,7 +72,7 @@ import {
   type ParkingUseRow,
   type TierQuantity,
 } from '@shared/benefits';
-import { asGrade, gradeLabel, MAX_GRADE, type GradeEventKind, type GradeState, type Tier } from '@shared/membership';
+import { asGrade, birthdayDueYear, gradeLabel, MAX_GRADE, type GradeEventKind, type GradeState, type Tier } from '@shared/membership';
 import { shiftDate } from '@shared/labels';
 import { can } from '@shared/permissions';
 import { guard } from '../auth/guard';
@@ -140,14 +140,16 @@ async function publishedForGrants(db: Db): Promise<BenefitDef[]> {
 /**
  * 权益清单的版本指纹（每天的自动任务据此判断要不要再跑一次）：每项权益的编号与版本，加上权益用到的券模板的编号与版本——
  * 有人修改、发布、暂缓、导入权益，或停用、启用、改了用到的券模板（例如跑的时候模板停着、发不出，之后又启用），同一天都会再跑
- * （Codex 自动审查 1648cd0）。取摘要的前 52 位（JS 数字能精确表示）；用指纹不用版本合计，两处改动不会互相抵消
+ * （Codex 自动审查 1648cd0）。取摘要的前 52 位（JS 数字能精确表示）；用指纹不用版本合计，两处改动不会互相抵消。
+ * 8.0.4 起再加上「生日礼提前几天」：改了这个天数，今天新到期的生日礼同一天就补上（Codex 自动审查 8603568）
  */
-async function catalogStamp(db: Db): Promise<number> {
+async function catalogStamp(db: Db, birthdayLeadDays: number): Promise<number> {
   const [r] = await db<{ stamp: number }[]>`
     SELECT ('x' || substr(md5(
              coalesce((SELECT string_agg(id || ':' || version, ',' ORDER BY id) FROM benefits), '') || '|' ||
              coalesce((SELECT string_agg(t.id || ':' || t.version, ',' ORDER BY t.id) FROM coupon_templates t
-                       WHERE t.id IN (SELECT template_id FROM benefits WHERE template_id IS NOT NULL)), '')
+                       WHERE t.id IN (SELECT template_id FROM benefits WHERE template_id IS NOT NULL)), '') || '|' ||
+             ${`birthday-lead:${birthdayLeadDays}`}::text
            ), 1, 13))::bit(52)::bigint AS stamp`;
   return Number(r!.stamp);
 }
@@ -244,10 +246,15 @@ async function grantEvent(tx: Tx, g: Grantee, event: BenefitEvent, eventKey: str
   return total;
 }
 
-/** 生日礼：生日在营业日这个月的、够格的，每年一次 */
+/**
+ * 生日礼：生日前 N 天（会员规则「生日礼提前几天到账」，默认 3 天，8.0.4 需求表 09）到账，到生日当月最后一天之间补发；
+ * 够格的每年一次（去重键是生日那一年）
+ */
 async function grantBirthday(tx: Tx, g: Grantee, benefits: BenefitDef[]): Promise<number> {
-  if (!g.birthday || g.birthday.slice(5, 7) !== g.date.slice(5, 7)) return 0;
-  return grantEvent(tx, g, 'birthday', `birthday:${g.date.slice(0, 4)}`, benefits);
+  if (!g.birthday || !benefits.some((b) => b.events.includes('birthday'))) return 0;
+  const year = birthdayDueYear(g.birthday, g.date, (await loadMembershipRules(tx)).birthdayLeadDays);
+  if (!year) return 0;
+  return grantEvent(tx, g, 'birthday', `birthday:${year}`, benefits);
 }
 
 /** 节日关怀：设置的日期当天起 7 天内（应用停机也不漏），每个日期一次 */
@@ -357,18 +364,25 @@ export async function onMemberSaved(tx: Tx, deps: Pick<Deps, 'config'>, memberId
 /** 一次翻多少位会员 */
 const DAILY_PAGE = 500;
 
+/** 每天的自动发放跑了一次：运行记录（当天累计）加上这一次新发的 */
+export interface BenefitDailyRun extends BenefitJobRun {
+  /** 这一次发了券的会员人数、张数（运行记录的 processed、coupons 是当天累计的，同一天再跑一次会累加） */
+  thisRun: { processed: number; coupons: number };
+}
+
 /**
  * 会员权益的自动发放：营业日开始后，给在册会员发本期还没发够的券类、生日月的生日礼、节日当周的节日关怀（一位一个事务、锁会员一行）。
  * 应用每分钟调用一次：今天已经跑完、没出错、之后也没人改过权益清单时什么都不做；有人修改、发布、暂缓了，同一天再跑一次
- * （今天才发布的月度券当天就发）。每页先在事务外算出谁还缺，只给缺的会员开事务；运行记录一个营业日一条，同一天多次累加
+ * （今天才发布的月度券当天就发）。每页先在事务外算出谁还缺，只给缺的会员开事务；运行记录一个营业日一条，同一天多次累加。
+ * 日志只写这一次新发的（thisRun）：写累计的数，清单改过后再跑一次、一张没发时看起来也像又发了一轮（main 定时测试 v0.7.29）
  */
-export async function runBenefitsDaily(deps: Pick<Deps, 'sql' | 'config'>, now = new Date(), opts: { pageSize?: number } = {}): Promise<BenefitJobRun | null> {
+export async function runBenefitsDaily(deps: Pick<Deps, 'sql' | 'config'>, now = new Date(), opts: { pageSize?: number } = {}): Promise<BenefitDailyRun | null> {
   const { sql } = deps;
   const pageSize = opts.pageSize ?? DAILY_PAGE;
   const settings = await loadSettings(sql);
   const today = businessDateOf(now, deps.config.timezone, settings.businessDayStartHour);
   // 先读清单的版本合计、再读已发布的：这之后的修改会让合计变，下一次再跑
-  const stamp = await catalogStamp(sql);
+  const stamp = await catalogStamp(sql, (await loadMembershipRules(sql)).birthdayLeadDays);
   const [run] = await sql<{ finishedAt: string | null; error: string | null; catalogStamp: number | null }[]>`
     SELECT finished_at, error, catalog_stamp FROM membership_job_runs WHERE job = 'benefits' AND business_date = ${today}`;
   if (run && run.finishedAt && !run.error && run.catalogStamp !== null && Number(run.catalogStamp) === stamp) return null;
@@ -414,18 +428,20 @@ export async function runBenefitsDaily(deps: Pick<Deps, 'sql' | 'config'>, now =
        SET processed = processed + ${counts.processed}, coupons = coupons + ${counts.coupons}, finished_at = now(), error = ${error}
      WHERE job = 'benefits' AND business_date = ${today}
     RETURNING business_date, started_at, finished_at, processed, coupons, error`;
-  return saved ?? null;
+  return saved ? { ...saved, thisRun: counts } : null;
 }
 
 /** 这一页里还缺券的会员（事务外、只读；进了事务再按最新的状态核对一遍） */
 async function needingGrants(db: Db, page: { id: number; grade: number; tier: number | null; birthday: string | null }[], benefits: BenefitDef[], today: string): Promise<number[]> {
   const ids = page.map((m) => Number(m.id));
+  const lead = (await loadMembershipRules(db)).birthdayLeadDays;
   const keys = [periodKey('month', today)!, periodKey('year', today)!];
   const periodic = await db<{ memberId: number; benefitId: number; periodKey: string; n: number }[]>`
     SELECT member_id, benefit_id, period_key, sum(quantity)::int AS n FROM benefit_grants
     WHERE member_id IN ${db(ids)} AND reason <> 'event' AND period_key IN ${db(keys)}
     GROUP BY member_id, benefit_id, period_key`;
-  const eventKeys = [`birthday:${today.slice(0, 4)}`];
+  // 生日礼：1 月初的生日在上一年 12 月就到账，去重键是生日那一年（今年、明年两种）
+  const eventKeys = [`birthday:${today.slice(0, 4)}`, `birthday:${Number(today.slice(0, 4)) + 1}`];
   for (const b of benefits) if (b.events.includes('festival')) for (const d of b.festivalDates) if (festivalOpen(d, today)) eventKeys.push(`festival:${d}`);
   const events = await db<{ memberId: number; benefitId: number; eventKey: string }[]>`
     SELECT member_id, benefit_id, event_key FROM benefit_grants WHERE member_id IN ${db(ids)} AND event_key IN ${db(eventKeys)}`;
@@ -439,7 +455,10 @@ async function needingGrants(db: Db, page: { id: number; grade: number; tier: nu
           const pk = periodKey(b.period, today)!;
           return Math.min(MAX_BENEFIT_COUPONS, benefitQuantity(b, m.grade, m.tier) ?? 0) > (granted.get(`${m.id}:${b.id}:${pk}`) ?? 0);
         }
-        if (b.events.includes('birthday') && m.birthday && m.birthday.slice(5, 7) === today.slice(5, 7) && !got.has(`${m.id}:${b.id}:birthday:${today.slice(0, 4)}`)) return true;
+        if (b.events.includes('birthday')) {
+          const year = birthdayDueYear(m.birthday, today, lead);
+          if (year && !got.has(`${m.id}:${b.id}:birthday:${year}`)) return true;
+        }
         return b.events.includes('festival') && b.festivalDates.some((d) => festivalOpen(d, today) && !got.has(`${m.id}:${b.id}:festival:${d}`));
       }),
     )
@@ -807,7 +826,7 @@ export async function benefitCatalog(db: Db, date: string): Promise<BenefitCatal
     warnings.push(`「券与会员权益 → 发券规则」里还有 ${rules!.levelUp} 条启用的升级礼，这里的升级礼也已发布：升档时会各发一份，请停用其中一边`);
   }
   if (rules!.birthday && published.some((b) => b.category === 'event' && b.events.includes('birthday'))) {
-    warnings.push(`「券与会员权益 → 发券规则」里还有 ${rules!.birthday} 条启用的生日礼，这里的生日礼也已发布：生日月会各发一份，请停用其中一边`);
+    warnings.push(`「券与会员权益 → 发券规则」里还有 ${rules!.birthday} 条启用的生日礼，这里的生日礼也已发布：生日前到账时会各发一份，请停用其中一边`);
   }
   const usable = new Map(templates.map((t) => [t.id, t]));
   for (const b of published) {

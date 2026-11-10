@@ -19,23 +19,29 @@
 // v0.7.24 会员体系 v2 第二期：新增「维护会员权益」（导入本店权益清单、修改、发布、暂缓）与「登记权益使用」（docs/BENEFITS.md），默认值待确认。
 // 2026-11-03 微信小程序（小程序线）新增「维护小程序内容」「解绑会员的微信」（MP7，docs/MINIPROGRAM.md 第 5 节）；
 // 店主 11-03 已定：维护小程序内容只给店主、店总（客户经理不给）。
+// v0.7.30 审批中心：新增「审批中心：审批」「审批中心：维护审批规则」（docs/APPROVALS.md，默认值待确认）。
+// v0.7.31 合同与法务审查：新职责「法务」（单独一组），新增「查看合同」「维护合同」（docs/CONTRACTS.md C4、C12，待确认）。
+// 8.0.4 会员体系整改：新增「营销成本测算」（docs/MEMBERSHIP_V804.md 第 10 节，HY14）：默认店主、店总；
+// 与财务隔离——有财务职责（对账付款、成本核算）的账号一律没有，后台岗位权限加了也不生效（店主除外，FINANCE_EXCLUDED）。
 
 export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice', 'other_store'] as const;
 export type Role = (typeof ROLES)[number];
 
-export const DUTIES = ['stock', 'purchase', 'payable', 'approve', 'cost', 'request'] as const;
+export const DUTIES = ['stock', 'purchase', 'payable', 'approve', 'cost', 'request', 'legal'] as const;
 export type Duty = (typeof DUTIES)[number];
 
 /**
  * 分岗不兼任（#17 后半句，v0.7.12）：职责分五组，一名员工的职责只能在一组里；财务组内对账付款、成本核算可以同时有。
  * 店主不受限制。后台保存员工时校验；已有跨组的员工不自动改，后台员工页提示（不进自检）。
  */
-export const DUTY_GROUPS: { key: 'stock' | 'purchase' | 'department' | 'finance' | 'approve'; label: string; duties: readonly Duty[] }[] = [
+export const DUTY_GROUPS: { key: 'stock' | 'purchase' | 'department' | 'finance' | 'approve' | 'legal'; label: string; duties: readonly Duty[] }[] = [
   { key: 'stock', label: '仓库', duties: ['stock'] },
   { key: 'purchase', label: '采购', duties: ['purchase'] },
   { key: 'department', label: '部门', duties: ['request'] },
   { key: 'finance', label: '财务（含成本）', duties: ['payable', 'cost'] },
   { key: 'approve', label: '负责人', duties: ['approve'] },
+  // 法务（v0.7.31，C4）：合同审查的法务那一级，不和别的职责兼任
+  { key: 'legal', label: '法务', duties: ['legal'] },
 ];
 
 /** 职责跨组时返回涉及的组名（如「仓库、采购」），不跨组返回 null；店主不受限制 */
@@ -137,6 +143,8 @@ export const PERMISSIONS = {
   'inventory.master': { roles: ['owner'], duties: ['purchase'] },
   /** 采购单 */
   'purchase.manage': { roles: ['owner'], duties: ['purchase'] },
+  /** 采购规则（途径、询价门槛、截单、急采分级审批……）：8.0.1 采购组整改 01（CG01），默认只有店主，可在岗位权限里下放给采购 */
+  'purchase.rules': { roles: ['owner'] },
   /** 退供应商申请（仓库或采购均可发起） */
   'supplierReturn.create': { roles: ['owner'], duties: ['stock', 'purchase'] },
   /** 登记供应商对退货的答复（同意 → 退货生效；不同意 → 撤回），采购与供应商沟通（#20，v0.7.12） */
@@ -159,6 +167,8 @@ export const PERMISSIONS = {
   'inventory.export': { roles: ['owner'], duties: ['payable', 'approve'] },
   /** ERP 营业数据（只读）：每天的营业收入、收款与部门构成、日结情况（v0.7.3，待确认：默认店主与店总） */
   'erp.revenue': { roles: ['owner', 'store_manager'] },
+  /** 员工食堂 · 柚子饭堂（docs/CANTEEN.md，K1，待确认：默认店主与店总）：员工名单、开通卡片、用餐记录、设置 */
+  'canteen.manage': { roles: ['owner', 'store_manager'] },
   // ── 费用报销与备用金（v0.7.7，飞书需求 RQ-005；D10：按现有的岗位 + 职责，见 docs/EXPENSES.md）──
   /** 查看费用报销、备用金与每日平账（物资经办、采购经办、负责人只读） */
   'expense.read': { roles: ['owner'], duties: ['stock', 'purchase', 'payable', 'cost', 'approve'] },
@@ -175,6 +185,27 @@ export const PERMISSIONS = {
   'request.create': { roles: ['owner'], duties: ['request'] },
   /** 审核需求单、转采购单（看全部部门的需求单） */
   'request.review': { roles: ['owner'], duties: ['purchase', 'approve'] },
+  // ── 审批中心（v0.7.30，docs/APPROVALS.md，默认值待确认）──
+  /**
+   * 用审批中心审批：待我审批、批量同意、设自己的代理人。能不能审某一张单还要看审批规则（岗位组或指定的人）；
+   * 默认店主、店总，负责人（负责人确认）与财务（对账付款、成本核算）职责
+   */
+  'approval.act': { roles: ['owner', 'store_manager'], duties: ['approve', 'payable', 'cost', 'legal'] },
+  /** 维护审批规则（单据类型 × 金额 × 部门 → 审批链），给别人设代理人（默认店主） */
+  'approval.rules': { roles: ['owner'] },
+  // ── 合同与法务审查（v0.7.31，docs/CONTRACTS.md C12，默认值待确认）──
+  /** 查看合同台账、详情、提交记录与审查意见、扫描件 */
+  'contract.read': { roles: ['owner', 'store_manager'], duties: ['purchase', 'payable', 'cost', 'approve', 'legal'] },
+  /** 起草、修改、提交、撤回、作废、终止合同，登记签署、用印申请、归档、变更单、上传扫描件 */
+  'contract.manage': { roles: ['owner', 'store_manager'], duties: ['purchase', 'legal'] },
+  // ── 付款流（v0.7.32，docs/PAYMENTS.md P10，默认值待确认）──
+  /** 发起付款申请（从合同的付款节点或没挂合同的应付）、修改与撤回自己的申请；看付款申请（审批走审批中心，登记付款要「登记期初未付、付款……」） */
+  'payment.request': { roles: ['owner', 'store_manager'], duties: ['purchase', 'payable'] },
+  // ── 费用预算与进项发票台账（8.0.3，docs/BUDGET_INVOICES.md BI05、BI12，默认值待确认）──
+  /** 设定部门 × 费用科目的月度额度（看预算与占用：能看费用报销的人都能看） */
+  'budget.manage': { roles: ['owner'] },
+  /** 进项发票台账：直接登记发票、标认证与所属期、上传照片、作废（三单里分到采购单的发票照旧在付款页登记） */
+  'invoice.manage': { roles: ['owner'], duties: ['payable', 'cost'] },
   // ── 管理 ──
   // ── 当场授权（主管在弹窗里输入自己的账号密码确认）──
   /** 授权超过单笔上限的充值 / 消费 */
@@ -250,6 +281,8 @@ export const PERMISSIONS = {
   'report.technicians': { roles: ['owner', 'store_manager', 'duty_manager'] },
   /** 技师提成：按提成规则算出的每位技师提成与明细导出（v0.7.1，待确认：默认店主与店总） */
   'report.commission': { roles: ['owner', 'store_manager'] },
+  /** 营销成本测算（8.0.4，HY14）：券、赠金、会员折扣、服务类权益的实核成本；有财务职责的账号一律没有（见 FINANCE_EXCLUDED） */
+  'marketing.cost': { roles: ['owner', 'store_manager'] },
 } as const satisfies Record<string, Rule>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -257,6 +290,18 @@ export const ALL_PERMISSIONS = Object.keys(PERMISSIONS) as Permission[];
 
 /** 只属于店主、不能在后台授给其他岗位的权限：管理员工账号、修改经营规则（含岗位权限本身）、导入期初余额 */
 export const LOCKED_PERMISSIONS: readonly Permission[] = ['staff.manage', 'settings.manage', 'wallet.opening'];
+
+/**
+ * 与财务隔离的权限（8.0.4，HY14）：有这些职责的账号一律没有，后台岗位权限加了也不生效；店主不受限制。
+ * 营销成本是经营测算，不进财务凭证与报表，财务账号看不到测算明细（需求表 11）。
+ */
+export const FINANCE_EXCLUDED: Partial<Record<Permission, readonly Duty[]>> = { 'marketing.cost': ['payable', 'cost'] };
+
+/** 这位账号的职责把这项权限挡掉了（与财务隔离） */
+export function excludedByDuty(subject: Pick<PermissionSubject, 'role' | 'duties'>, permission: Permission): boolean {
+  if (subject.role === 'owner') return false;
+  return !!FINANCE_EXCLUDED[permission]?.some((d) => subject.duties?.includes(d));
+}
 
 /** 可以在后台调整权限的岗位（店主固定拥有全部权限） */
 export const EDITABLE_ROLES = ROLES.filter((r): r is Exclude<Role, 'owner'> => r !== 'owner');
@@ -283,12 +328,13 @@ export function roleHas(role: Role, permission: Permission, overrides?: RoleOver
 /** 岗位权限（按后台调整）与职责权限（固定）的并集 */
 export function permissionsOf(subject: PermissionSubject, overrides?: RoleOverrides | null): Permission[] {
   return ALL_PERMISSIONS.filter(
-    (p) => roleHas(subject.role, p, overrides) || !!(PERMISSIONS[p] as Rule).duties?.some((d) => subject.duties?.includes(d)),
+    (p) => !excludedByDuty(subject, p) && (roleHas(subject.role, p, overrides) || !!(PERMISSIONS[p] as Rule).duties?.some((d) => subject.duties?.includes(d))),
   );
 }
 
 export function can(subject: PermissionSubject, permission: Permission): boolean {
   if (subject.permissions) return subject.permissions.includes(permission);
+  if (excludedByDuty(subject, permission)) return false;
   const rule = PERMISSIONS[permission] as Rule;
   if (rule.roles.includes(subject.role)) return true;
   return !!rule.duties?.some((d) => subject.duties?.includes(d));
@@ -351,6 +397,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'inventory.operate': '期初、收货、领料、退回、耗用、报损、盘点录入（总仓）',
   'inventory.master': '维护物料、供应商、部门档案',
   'purchase.manage': '编制与提交采购单',
+  'purchase.rules': '维护采购规则（截单、急采分级审批、询价门槛……）',
   'supplierReturn.create': '发起退供应商',
   'supplierReturn.answer': '登记供应商对退货的答复',
   'payable.read': '查看供应商货款与对账',
@@ -362,6 +409,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'deptStock.audit': '部门小仓（所有部门）：查看、盘点、登记耗用',
   'inventory.export': '导出库存与对账',
   'erp.revenue': 'ERP：看营业数据（只读）',
+  'canteen.manage': '员工食堂：名单、开通卡片、用餐记录与设置',
   'expense.read': '查看费用报销、备用金与每日平账',
   'expense.manage': '登记费用报销（发票、税点、科目）',
   'petty.manage': '登记备用金打款、退回、补付',
@@ -369,6 +417,13 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'expense.export': '导出报销明细与每日平账',
   'request.create': '提部门采购需求单（只限本部门）',
   'request.review': '审核需求单、转采购单',
+  'approval.act': '审批中心：审批（按审批规则）、批量同意、设自己的代理人',
+  'approval.rules': '审批中心：维护审批规则、给别人设代理人',
+  'contract.read': '合同：查看台账、详情、审查意见与扫描件',
+  'contract.manage': '合同：起草、提交、签署、用印申请、归档、变更、终止',
+  'payment.request': '付款：发起付款申请、修改与撤回',
+  'budget.manage': '设定费用预算（部门 × 费用科目的月度额度）',
+  'invoice.manage': '管理进项发票（台账里登记、标认证、上传照片、作废）',
   'auth.overLimit': '当场授权超过单笔上限的充值 / 消费',
   'auth.memberRefund': '当场授权退储值',
   'auth.memberPhone': '当场授权改会员手机号',
@@ -404,6 +459,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'report.members': '看会员总览（储值、新增、活跃、等级）',
   'report.technicians': '看技师业绩（钟数、点钟 / 轮钟、金额）',
   'report.commission': '看技师提成与导出提成明细',
+  'marketing.cost': '营销成本测算（券、赠金、会员折扣的实核成本；有财务职责的账号不生效）',
 };
 
 export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
@@ -425,12 +481,14 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   {
     title: 'ERP（库存、采购、货款、费用、营业数据）',
     items: [
-      'inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'supplierReturn.create', 'supplierReturn.answer', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.void', 'inventory.export',
+      'inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'purchase.rules', 'supplierReturn.create', 'supplierReturn.answer', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.void', 'inventory.export',
       'deptStock.operate', 'deptStock.audit',
       'expense.read', 'expense.manage', 'petty.manage', 'expense.approve', 'finance.void', 'expense.export', 'request.create', 'request.review', 'erp.revenue',
+      'approval.act', 'approval.rules', 'contract.read', 'contract.manage', 'payment.request', 'budget.manage', 'invoice.manage',
     ],
   },
+  { title: '员工食堂', items: ['canteen.manage'] },
   { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount', 'auth.memberRefund', 'auth.memberPhone'] },
-  { title: '数据看板', items: ['report.executive', 'report.members', 'report.technicians', 'report.commission'] },
+  { title: '数据看板', items: ['report.executive', 'report.members', 'report.technicians', 'report.commission', 'marketing.cost'] },
   { title: '管理后台', items: ['staff.manage', 'catalog.manage', 'technician.manage', 'settings.manage', 'audit.read'] },
 ];

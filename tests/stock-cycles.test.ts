@@ -234,8 +234,8 @@ describe('台面日耗品（#14）', () => {
     await ok(deptDoc(bath, { docType: 'direct_use', warehouseId: bathWh, note: '客用', lines: [{ materialId: m.id, qtyMilli: q(6) }] }));
     expect((await updateMaterial(m.id, { counterUse: true })).status).toBe(200);
 
-    // 急采：验收生效时进部门小仓即算耗用
-    const rc = await ok(deptDoc(bath, {
+    // 急采（8.0.1 起由采购登记、按金额审批）：验收生效时进部门小仓即算耗用
+    const rc = await ok(doc(buyer, {
       docType: 'receipt',
       urgent: true,
       departmentId: bathId,
@@ -243,6 +243,7 @@ describe('台面日耗品（#14）', () => {
       lines: [{ materialId: m.id, deliveredMilli: q(4), acceptedMilli: q(4), priceCents: 1_000 }],
     }));
     expect(rc.doc.status).toBe('submitted');
+    await ok(api(ctx.app, ctx.owner, 'POST', `/api/inventory/docs/${rc.doc.id}/approve`, {}), 200);
     const verified = await ok(api(ctx.app, keeper, 'POST', `/api/inventory/docs/${rc.doc.id}/verify-urgent`, {}), 200);
     expect(verified.status).toBe('confirmed');
     expect(verified.lines[0].autoConsumed).toBe(true);
@@ -253,12 +254,20 @@ describe('台面日耗品（#14）', () => {
   it('提交后才改成台面日耗品的部门盘点单，生效时同样拒绝', async () => {
     const m = await material('CU04');
     await stockIn(m.id, 1);
-    // 部门盘点单先存草稿（账面 0），物料再改成台面日耗品
-    const draft = await ok(deptDoc(bath, { docType: 'count', action: 'save', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(2), expectedBookMilli: 0 }] }));
+    // 部门盘点单先存草稿（账面 0），物料再改成台面日耗品；账面是 0 的有差异算大差异（v0.7.30），写了原因、提交后要审批，生效（同意）时拒绝
+    const draft = await ok(deptDoc(bath, {
+      docType: 'count',
+      action: 'save',
+      warehouseId: bathWh,
+      lines: [{ materialId: m.id, countedMilli: q(2), expectedBookMilli: 0, diffReason: 'unrecorded', diffNote: '领料漏记' }],
+    }));
     expect((await updateMaterial(m.id, { counterUse: true })).status).toBe(200);
     const sub = await api(ctx.app, bath, 'POST', `/api/erp/dept-stock/docs/${draft.doc.id}/submit`, {});
-    expect(sub.status).toBe(409);
-    expect(sub.body.error.code).toBe('COUNTER_USE_NOT_ALLOWED');
+    expect(sub.status).toBe(200);
+    expect(sub.body.status).toBe('submitted');
+    const approve = await api(ctx.app, ctx.owner, 'POST', `/api/inventory/docs/${draft.doc.id}/approve`, {});
+    expect(approve.status).toBe(409);
+    expect(approve.body.error.code).toBe('COUNTER_USE_NOT_ALLOWED');
     expect(await deptStock(m.id)).toBe(0);
   });
 });

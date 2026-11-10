@@ -75,7 +75,9 @@ describe('会员规则', () => {
   it('登录即可读；改要「修改会员规则」（店主、店总），门槛逐档递增、享阶低于尊阶', async () => {
     const r = await rules();
     expect(r.grades.map((g) => g.name)).toEqual(DEFAULT_MEMBERSHIP_RULES.grades.map((g) => g.name));
-    expect(r.vipLockerLevels).toEqual([1, 1, 1, 1, 2, 4, 5]);
+    // VIP 柜 8.0.4 起归「会员权益」（vip_locker_rules，见 tests/membership-v804.test.ts）；生日礼默认生日前 3 天到账
+    expect(r).not.toHaveProperty('vipLockerLevels');
+    expect(r.birthdayLeadDays).toBe(3);
     expect((await api(ctx.app, ctx.clerk, 'PUT', '/api/membership/rules', r)).status).toBe(403);
     expect((await api(ctx.app, am, 'PUT', '/api/membership/rules', r)).status).toBe(403);
     const bad = await api(ctx.app, ctx.owner, 'PUT', '/api/membership/rules', { ...r, grades: r.grades.map((g, i) => (i === 3 ? { ...g, thresholdCents: yuan(8000) } : g)) });

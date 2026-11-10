@@ -296,7 +296,7 @@ test.describe('视口冒烟', () => {
     for (const name of ['库存', '采购', '货款', '待办']) await expect(nav.getByRole('link', { name, exact: true })).toHaveCount(0);
   });
 
-  test('ERP 工作区：首页、库存、采购、应付货款、审批待办、营业数据、模块设置都不横向滚动，实例标识常显（v0.7.3）', async ({ page, isMobile }) => {
+  test('ERP 工作区：首页、库存、采购、应付货款、审批中心、营业数据、模块设置都不横向滚动，实例标识常显（v0.7.3）', async ({ page, isMobile }) => {
     await login(page, 'linlan');
     await page.goto('/erp');
     await expect(page.getByTestId('erp-shell')).toBeVisible();
@@ -305,12 +305,16 @@ test.describe('视口冒烟', () => {
     await expectFits(page);
     const navName = isMobile || (page.viewportSize()?.width ?? 0) < 1024 ? 'ERP 分区' : 'ERP 导航';
     const erpNav = page.getByRole('navigation', { name: navName });
-    for (const name of ['ERP 首页', '库存', '采购', '应付货款', '审批待办', '营业数据', '模块设置']) await expect(erpNav.getByRole('link', { name, exact: true })).toHaveCount(1);
+    for (const name of ['ERP 首页', '库存', '采购', '应付货款', '审批中心', '营业数据', '模块设置']) await expect(erpNav.getByRole('link', { name, exact: true })).toHaveCount(1);
     for (const [url, testId] of [
       ['/inventory', null],
       ['/purchasing', null],
       ['/payables', null],
       ['/todo', null],
+      // v0.7.30：审批中心（待我审批、审批规则、代理人）
+      ['/approvals', 'approvals-page'],
+      ['/approvals?tab=rules', 'approval-rules'],
+      ['/approvals?tab=delegations', 'approval-delegations'],
       ['/erp/revenue', 'erp-revenue'],
       ['/erp/modules', 'erp-module-switches'],
       // v0.7.9：采购台账、账目自检、下单物料

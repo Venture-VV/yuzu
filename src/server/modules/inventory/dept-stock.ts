@@ -1,5 +1,6 @@
 // 本部门小仓（v0.7.11，飞书需求 RQ-002 第一步，见 docs/WAREHOUSES.md）：部门申购看本部门小仓的结存、签收仓库登记的领料、
-// 登记急采与补采购单、本部门的期初、耗用、报损、盘点；财务成本岗（deptStock.audit）看所有部门，给部门盘点、登记耗用。
+// 本部门的期初、耗用、报损、盘点；财务成本岗（deptStock.audit）看所有部门，给部门盘点、登记耗用。
+// 急采与补采购单 8.0.1 起收拢到采购（采购组整改 05，CG05）：部门只看给本部门买的急采，不能登记、补单。
 // 部门的员工没有「查看库存与物资单据」，这组接口只给能看的部门的小仓，不含总仓的参考价与结存；
 // 单据的登记、生效、冲销都走库存单据的同一套逻辑（docs.ts），权限在那里再按仓核对一次。
 
@@ -12,7 +13,6 @@ import { guardAny } from '../../auth/guard';
 import type { Actor, Deps } from '../../lib/context';
 import { badRequest, forbidden, notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
-import { enabledErpModules } from '../erp';
 import { actorDepartmentId, deptBalances, docDateSchema, loadInventorySettings } from './common';
 import {
   assertCanOperate,
@@ -29,7 +29,6 @@ import {
   type DocBodyInput,
 } from './docs';
 import { deptStocktakeReminder } from './cycles';
-import { backfillPo } from './purchasing';
 import { warehouseStock } from './reports';
 
 const anyDept = guardAny('deptStock.operate', 'deptStock.audit');
@@ -76,10 +75,12 @@ async function deptSafeDoc(db: Db, doc: InvDoc): Promise<InvDoc> {
   };
 }
 
-/** 部门能登记的单据：本部门小仓的期初、耗用、报损、盘点，以及急采（按采购单收货、领料、退回由仓库办理） */
-const DEPT_DOC_TYPES = ['opening', 'direct_use', 'damage', 'count', 'receipt'] as const;
+/** 部门能登记的单据：本部门小仓的期初、耗用、报损、盘点（按采购单收货、领料、退回由仓库办理；急采 8.0.1 起由采购登记） */
+const DEPT_DOC_TYPES = ['opening', 'direct_use', 'damage', 'count'] as const;
 const DeptBodyHead = z.looseObject({
-  docType: z.enum(INV_DOC_TYPES).refine((t) => (DEPT_DOC_TYPES as readonly string[]).includes(t), '部门只能登记期初、耗用、报损、盘点与急采；领料、退回由仓库登记'),
+  docType: z
+    .enum(INV_DOC_TYPES)
+    .refine((t) => (DEPT_DOC_TYPES as readonly string[]).includes(t), '部门只能登记期初、耗用、报损、盘点；领料、退回由仓库登记，急采由采购在「采购 → 急采」登记'),
   warehouseId: z.number().int().positive().optional(),
   urgent: z.boolean().optional(),
   departmentId: z.number().int().positive().nullable().optional(),
@@ -87,12 +88,6 @@ const DeptBodyHead = z.looseObject({
 
 async function assertDeptBody(db: Db, actor: Actor, raw: unknown) {
   const b = parse(DeptBodyHead, raw);
-  if (b.docType === 'receipt') {
-    if (!b.urgent) throw badRequest('部门只能登记急采；按采购单收货由仓库办理');
-    if (!b.departmentId) throw badRequest('急采要选是哪个部门买的');
-    await assertVisibleDept(db, actor, b.departmentId);
-    return;
-  }
   if (!b.warehouseId || b.warehouseId === CENTRAL_WAREHOUSE_ID) throw badRequest('请选部门的小仓；总仓的单据由仓库登记');
   const wh = await warehouseRef(db, b.warehouseId);
   if (!wh || wh.departmentId === null) throw badRequest('请选部门的小仓');
@@ -109,6 +104,9 @@ export async function deptStockMeta(db: Db, actor: Actor): Promise<DeptStockMeta
     urgentCapCents: settings.urgentCapCents,
     signDueDays: ISSUE_SIGN_DUE_DAYS,
     approvalRules: settings.approvalRules,
+    // 盘点大差异（v0.7.30，A8）：页面提示要写原因（部门看不到参考价，只按比例；服务端照两样核对）
+    countBigPct: settings.countBigPct,
+    countBigCents: settings.countBigCents,
     // 台面日耗品（v0.7.13）：部门小仓不登记它的期初、耗用、报损、盘点，急采照常（验收后即算耗用）
     materials: await db<DeptStockMeta['materials']>`
       SELECT id, code, name, category, specification, inventory_unit, decimals, purchase_unit, purchase_factor_milli, counter_use, weighed
@@ -194,12 +192,4 @@ export function registerDeptStockRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/erp/dept-stock/docs/:id/refresh-book', { preHandler: anyDept }, async (req) => deptSafeDoc(sql, await refreshCountBook(deps, await visibleDoc(req), req.actor)));
   // #17 第二次验收：部门签收仓库登记的领料
   app.post('/api/erp/dept-stock/docs/:id/sign', { preHandler: anyDept }, async (req) => deptSafeDoc(sql, await signIssue(deps, await visibleDoc(req), req.body, req.actor)));
-  // #19：急采后补采购单，由本部门确认（采购模块关着时不能补单）
-  app.post('/api/erp/dept-stock/docs/:id/backfill', { preHandler: anyDept }, async (req, reply) => {
-    const id = await visibleDoc(req);
-    if (!(await enabledErpModules(sql)).has('purchasing')) throw forbidden('ERP 的「采购」模块已关闭，不能补采购单');
-    const r = await backfillPo(deps, { ...(req.body as object), receiptDocId: id }, req.actor, req.ip, { dept: true });
-    reply.code(r.replayed ? 200 : 201);
-    return { poId: r.po.id, docNo: r.po.docNo, status: r.po.status, replayed: r.replayed };
-  });
 }

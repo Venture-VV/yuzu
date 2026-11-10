@@ -750,8 +750,19 @@ export async function createDocJob(
     }
     throw error;
   }
-  if (created.queued) enqueueJob(deps, created.id, input.deviceId, log);
-  return getJob(deps.sql, created.id);
+  return readThenEnqueue(deps, created, input.deviceId, log);
+}
+
+/**
+ * 新登记的任务先读回、再交给发送队列：返回的是刚登记时的状态（排队中）。先入队再读的话，队列有时抢先领走，
+ * 返回的状态时而「排队中」时而「发送中」（main 定时测试 v0.7.29）。读回出错也照样入队（finally），不会排着没人发
+ */
+async function readThenEnqueue(deps: Deps, created: { id: number; queued: boolean }, deviceId: number, log?: (msg: string, err: unknown) => void): Promise<DeviceJob> {
+  try {
+    return await getJob(deps.sql, created.id);
+  } finally {
+    if (created.queued) enqueueJob(deps, created.id, deviceId, log);
+  }
 }
 
 export async function createJob(deps: Deps, deviceId: number, raw: unknown, ctx: OpContext, log?: (msg: string, err: unknown) => void): Promise<DeviceJob> {
@@ -793,8 +804,7 @@ export async function createJob(deps: Deps, deviceId: number, raw: unknown, ctx:
     }
     throw error;
   }
-  if (created.queued) enqueueJob(deps, created.id, deviceId, log);
-  return getJob(deps.sql, created.id);
+  return readThenEnqueue(deps, created, deviceId, log);
 }
 
 // ───────────────────────── 接口 ─────────────────────────

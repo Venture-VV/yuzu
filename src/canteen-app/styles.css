@@ -1,0 +1,262 @@
+@import 'tailwindcss' source('.');
+
+/*
+ * 柚子饭堂 · 汤崎的员工食堂（docs/CANTEEN.md 第 13 节）
+ * 照汤崎的品牌书与 VI（店主 11-06 给的飞书文件；与小程序同一套，docs/MINIPROGRAM.md 第 13 节）：木与麻的六阶做底与中性色，
+ * 文字用深胡桃色；五个概念色只做点缀（Organic 绿 = 食，也表示成功；Relax 蓝 = 疗，也表示没网与提示；Energy 橙 = 乐，点赞与印章；
+ * Pure 黄 =「清新的柑橘」，柚子与重点）；英文小标题大写加字距。餐饮的插画方向是手绘、版画、民间感：
+ * 纸的颗粒、带手抖的描边、错开一点的「套色」投影、柚黄马克笔、手绘线条的图标、圆形章印；看板娘柚子的线会轻轻「抖」（Mascot.tsx）。
+ *
+ * 旧的令牌名字（cream、leaf、peach、berry、sky）照旧能用，值已经换成品牌色：页面不用一处处改。
+ */
+@theme {
+  /* 底与卡片：木与麻里最浅的几阶（暖白、亚麻） */
+  --color-cream: #f4ede2;
+  --color-cream-2: #ebdeca;
+  --color-card: #fbf7f0;
+  --color-line: #e3d6c3;
+  --color-line-strong: #d2c1a8;
+
+  /* 文字用深胡桃色，不用纯黑和冷灰 */
+  --color-ink: #3a2c22;
+  --color-ink-2: #5c4639;
+  --color-ink-3: #8b7865;
+  --color-ink-4: #b3a595;
+
+  /* 木与麻的木色（主色，六个色阶）；按钮的底稍深一点（白字读得清）；描边与投影用深胡桃 */
+  --color-wood: #937051;
+  --color-wood-2: #ad8e69;
+  --color-wood-3: #c4a67e;
+  --color-wood-4: #d2b993;
+  --color-wood-5: #e4d0b3;
+  --color-wood-6: #ebdeca;
+  --color-wood-deep: #8a684a;
+  --color-wood-ink: #5c4639;
+
+  /* Pure 黄（「清新的柑橘」）：柚子、饭卡码、重点；柔和一点，不用荧光黄 */
+  --color-yuzu: #e9c75e;
+  --color-yuzu-deep: #7f5d10;
+  --color-yuzu-soft: #f6ebc5;
+
+  /* 概念色（点缀）：Organic 绿 = 食、Relax 蓝 = 疗、Energy 橙 = 乐（只做小面积强调） */
+  --color-organic: #6d673d;
+  --color-organic-soft: #e8e6d6;
+  --color-relax: #4d718c;
+  --color-relax-soft: #dee7ee;
+  --color-energy: #c04a1f;
+  --color-energy-soft: #f6e0d6;
+  --color-danger: #a6452f;
+  --color-danger-soft: #f3ded7;
+
+  /* 旧名字 → 品牌色 */
+  --color-leaf: #6d673d;
+  --color-leaf-deep: #57522f;
+  --color-leaf-soft: #e8e6d6;
+  --color-peach: #c04a1f;
+  --color-peach-soft: #f6e0d6;
+  --color-berry: #a6452f;
+  --color-berry-soft: #f3ded7;
+  --color-sky: #4d718c;
+  --color-sky-soft: #dee7ee;
+  --color-pine: #24493a;
+
+  --font-sans:
+    'HarmonyOS Sans SC', 'HarmonyOS Sans', 'PingFang SC', -apple-system, 'Helvetica Neue', Helvetica, Arial, 'Microsoft YaHei UI', 'Microsoft YaHei',
+    'Noto Sans CJK SC', system-ui, sans-serif;
+  --font-en: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+
+  --radius-card: 20px;
+  --shadow-soft: 0 1px 0 rgb(92 70 57 / 0.05), 0 8px 20px -14px rgb(92 70 57 / 0.4);
+  --shadow-pop: 0 16px 40px -18px rgb(92 70 57 / 0.55);
+  /* 贴纸一样的投影：往右下错开一点的实色（像版画套色错开一点） */
+  --shadow-sticker: 3px 3px 0 rgb(92 70 57 / 0.16);
+
+  --animate-pop: pop 0.38s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-rise: rise 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-wiggle: wiggle 1.6s ease-in-out infinite;
+  --animate-float: float 3s ease-in-out infinite;
+  --animate-boing: boing 0.6s cubic-bezier(0.3, 1.6, 0.5, 1) both;
+
+  @keyframes pop {
+    0% { opacity: 0; transform: scale(0.86); }
+    60% { opacity: 1; transform: scale(1.03); }
+    100% { transform: scale(1); }
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes wiggle {
+    0%, 100% { transform: rotate(-4deg); }
+    50% { transform: rotate(4deg); }
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-5px); }
+  }
+  /* 手绘动画的「压扁—弹起」：换动作时用 */
+  @keyframes boing {
+    0% { transform: scale(1, 1); }
+    25% { transform: scale(1.08, 0.9); }
+    55% { transform: scale(0.95, 1.06); }
+    100% { transform: scale(1, 1); }
+  }
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+body {
+  margin: 0;
+  background-color: var(--color-cream);
+  /* 一点纸的颗粒 */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .36 0 0 0 0 .27 0 0 0 0 .19 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  overscroll-behavior-y: none;
+}
+.num {
+  font-variant-numeric: tabular-nums;
+}
+/* 英文小标题：大写、加字距（汤崎 VI） */
+.eyebrow {
+  font-family: var(--font-en);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-wood);
+}
+/* 柚黄马克笔划一道（标题、重点） */
+.marker {
+  background-image: linear-gradient(176deg, transparent 52%, rgb(233 199 94 / 0.6) 54%, rgb(233 199 94 / 0.6) 88%, transparent 90%);
+  padding: 0 0.12em;
+  margin: 0 -0.12em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+/* 手抖的描边：边框画在伪元素上、经过 #yz-rough 的噪声推一推，字不受影响（滤镜在 App 里定义） */
+.sketch {
+  position: relative;
+}
+.sketch::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1.6px solid var(--sketch-color, rgb(92 70 57 / 0.6));
+  border-radius: inherit;
+  filter: url(#yz-rough);
+  pointer-events: none;
+}
+/* 底部导航与刘海屏 */
+.safe-bottom {
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+.safe-top {
+  padding-top: max(12px, env(safe-area-inset-top));
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+}
+:focus-visible {
+  outline: 2.5px solid var(--color-wood);
+  outline-offset: 2px;
+}
+
+/* ── 开场动画（intro/）、新手教程（tour.tsx）、跟柚子说 ── */
+@keyframes yz-wiggle {
+  0%, 100% { transform: rotate(-4deg); }
+  50% { transform: rotate(4deg); }
+}
+@keyframes yz-sway {
+  0%, 100% { transform: rotate(-1.5deg); }
+  50% { transform: rotate(1.5deg); }
+}
+@keyframes yz-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+@keyframes yz-twinkle {
+  from { transform: scale(0.6); opacity: 0.5; }
+  to { transform: scale(1.1); opacity: 1; }
+}
+@keyframes yz-boing {
+  0% { transform: scale(1, 1); }
+  25% { transform: scale(1.08, 0.9); }
+  55% { transform: scale(0.95, 1.06); }
+  100% { transform: scale(1, 1); }
+}
+@keyframes yz-ring {
+  0% { transform: scale(0.92); opacity: 0.9; }
+  70% { transform: scale(1.12); opacity: 0; }
+  100% { opacity: 0; }
+}
+@keyframes yz-caret {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+@keyframes yz-draw {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes yz-drop {
+  0% { transform: translateY(-120px) rotate(-20deg); opacity: 0; }
+  15% { opacity: 1; }
+  80% { transform: translateY(0) rotate(10deg); opacity: 1; }
+  100% { transform: translateY(6px) rotate(0); opacity: 0; }
+}
+@keyframes yz-coin {
+  0% { top: -12%; transform: rotate(-20deg); opacity: 0; }
+  12% { opacity: 1; }
+  85% { top: var(--land, 60%); transform: rotate(14deg); opacity: 1; }
+  100% { top: var(--land, 60%); transform: rotate(0) scale(0.6); opacity: 0; }
+}
+@keyframes yz-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes yz-flicker {
+  0%, 100% { transform: scale(1, 1); }
+  50% { transform: scale(0.85, 1.18); }
+}
+@keyframes yz-pop-in {
+  0% { transform: scale(0); opacity: 0; }
+  70% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); }
+}
+@keyframes yz-hop-in {
+  0% { transform: translateY(120%) scale(0.9, 1.1); }
+  60% { transform: translateY(-6%) scale(1.04, 0.96); }
+  80% { transform: translateY(2%) scale(0.98, 1.02); }
+  100% { transform: translateY(0) scale(1); }
+}
+@keyframes yz-orbit {
+  from { transform: rotate(0deg) translateX(var(--r, 120px)) rotate(0deg); }
+  to { transform: rotate(360deg) translateX(var(--r, 120px)) rotate(-360deg); }
+}
+@keyframes yz-curtain-l {
+  to { transform: perspective(600px) rotateY(70deg) translateX(-30%); opacity: 0; }
+}
+@keyframes yz-curtain-r {
+  to { transform: perspective(600px) rotateY(-70deg) translateX(30%); opacity: 0; }
+}
+@keyframes yz-fly {
+  0% { transform: translate(0, 0) scale(1) rotate(0); opacity: 1; }
+  100% { transform: translate(var(--fx, 120px), var(--fy, -260px)) scale(0.3) rotate(18deg); opacity: 0; }
+}
+@keyframes yz-confetti {
+  0% { transform: translate(0, 0) rotate(0); opacity: 1; }
+  100% { transform: translate(var(--cx, 0), var(--cy, 120px)) rotate(var(--cr, 300deg)); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

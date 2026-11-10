@@ -13,7 +13,8 @@ let today: string;
 let lastMonth: string;
 let keeper: string; // 物资经办（仓库）
 let keeperId: number;
-let buyerId: number; // 采购经办（一起验收）
+let buyerId: number; // 采购经办（一起验收；8.0.1 起登记急采、补单）
+let buyer: string;
 let approver: string; // 负责人
 let coster: string; // 财务成本岗
 let costerId: number;
@@ -100,6 +101,7 @@ beforeAll(async () => {
   await mk('wh-bath', '浴区阿梅', ['request'], bathId);
   await mk('wh-bar', '水吧小李', ['request'], barId);
   keeper = await login(ctx.app, 'wh-keeper');
+  buyer = await login(ctx.app, 'wh-buyer');
   approver = await login(ctx.app, 'wh-appr');
   coster = await login(ctx.app, 'wh-cost');
   payer = await login(ctx.app, 'wh-pay');
@@ -161,7 +163,7 @@ describe('领料：总仓出、部门小仓进；部门签收（#17）', () => {
     expect((await api(ctx.app, bath, 'GET', '/api/inventory/materials')).status).toBe(403);
     expect((await api(ctx.app, bath, 'GET', `/api/inventory/warehouses/${bathWh}/stock`)).status).toBe(403);
     const meta = (await api(ctx.app, bath, 'GET', '/api/erp/dept-stock/meta')).body;
-    expect(meta).toMatchObject({ myDepartmentId: bathId, canOperate: true, canAudit: false, urgentCapCents: 200000, departments: [{ id: bathId, name: '浴区', warehouseId: bathWh }] });
+    expect(meta).toMatchObject({ myDepartmentId: bathId, canOperate: true, canAudit: false, urgentCapCents: 3_000_000, departments: [{ id: bathId, name: '浴区', warehouseId: bathWh }] });
     expect(meta.materials[0]).not.toHaveProperty('refPriceCents');
     // 成本岗能看所有部门
     const all = (await api(ctx.app, coster, 'GET', '/api/erp/dept-stock/meta')).body;
@@ -240,24 +242,37 @@ describe('领料：总仓出、部门小仓进；部门签收（#17）', () => {
 });
 
 describe('部门小仓的盘点、耗用、报损与期初', () => {
-  it('部门盘点提交即生效、差异默认「耗用」；成本岗可给任何部门盘点；越权与总仓单据被拒绝', async () => {
+  it('部门盘点只有小差异的提交即生效、差异默认「耗用」；大差异要写原因、走审批（v0.7.30）；成本岗可给任何部门盘点；越权与总仓单据被拒绝', async () => {
     const m = await material('W002', { name: '洗发水小瓶', inventoryUnit: '瓶' });
-    await opening(m.id, q(50));
-    await issue(m.id, q(20));
+    await opening(m.id, q(500));
+    await issue(m.id, q(200));
+    // 差 2 瓶（1%）：小差异，提交即生效
     const count = await ok(
-      deptDoc(bath, { docType: 'count', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(12), expectedBookMilli: q(20) }] }),
+      deptDoc(bath, { docType: 'count', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(198), expectedBookMilli: q(200) }] }),
     );
     expect(count).toMatchObject({ status: 'confirmed', warehouse: { id: bathWh } });
-    expect(count.lines[0]).toMatchObject({ bookMilli: q(20), qtyMilli: q(-8), diffReason: 'consumed' });
-    expect(await deptStock(bathWh, m.id)).toBe(q(12));
-    expect(await central(m.id)).toBe(q(30));
+    expect(count.lines[0]).toMatchObject({ bookMilli: q(200), qtyMilli: q(-2), diffReason: 'consumed' });
+    expect(await deptStock(bathWh, m.id)).toBe(q(198));
+    expect(await central(m.id)).toBe(q(300));
     // 页面上的账面与部门小仓不一致：拒绝
-    const stale = await deptDoc(bath, { docType: 'count', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(12), expectedBookMilli: q(20) }] });
+    const stale = await deptDoc(bath, { docType: 'count', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(198), expectedBookMilli: q(200) }] });
     expect(stale.body.error.code).toBe('COUNT_STALE');
     // 成本岗（每月 1 号到部门盘点）
-    const audit = await ok(deptDoc(coster, { docType: 'count', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(11) }] }));
+    const audit = await ok(deptDoc(coster, { docType: 'count', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(197) }] }));
     expect(audit.status).toBe('confirmed');
-    expect(await deptStock(bathWh, m.id)).toBe(q(11));
+    expect(await deptStock(bathWh, m.id)).toBe(q(197));
+    // 大差异（差 20 瓶，超过账面的 2%）：没写原因拒绝提交；写了原因进审批，负责人同意后生效、原因照提交时的
+    const bigLine = { materialId: m.id, countedMilli: q(177), expectedBookMilli: q(197) };
+    const noReason = await deptDoc(bath, { docType: 'count', warehouseId: bathWh, lines: [bigLine] });
+    expect(noReason.status).toBe(422);
+    expect(noReason.body.error.code).toBe('COUNT_REASON_REQUIRED');
+    const big = await ok(deptDoc(bath, { docType: 'count', warehouseId: bathWh, lines: [{ ...bigLine, diffReason: 'damaged', diffNote: '漏水泡坏' }] }));
+    expect(big.status).toBe('submitted');
+    expect(await deptStock(bathWh, m.id)).toBe(q(197));
+    const approved = await api(ctx.app, approver, 'POST', `/api/inventory/docs/${big.id}/approve`, {});
+    expect(approved.body).toMatchObject({ status: 'confirmed' });
+    expect(approved.body.lines[0]).toMatchObject({ diffReason: 'damaged', diffNote: '漏水泡坏' });
+    expect(await deptStock(bathWh, m.id)).toBe(q(177));
     // 别的部门、总仓、领料都不能从部门入口登记
     expect((await deptDoc(bar, { docType: 'count', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(1) }] })).status).toBe(403);
     expect((await deptDoc(bath, { docType: 'count', warehouseId: 1, lines: [{ materialId: m.id, countedMilli: q(1) }] })).status).toBe(400);
@@ -268,7 +283,7 @@ describe('部门小仓的盘点、耗用、报损与期初', () => {
     const dmg = await ok(deptDoc(bath, { docType: 'damage', warehouseId: bathWh, note: '摔碎', lines: [{ materialId: m.id, qtyMilli: q(1) }] }));
     expect(dmg.status).toBe('submitted');
     expect((await api(ctx.app, approver, 'POST', `/api/inventory/docs/${dmg.id}/approve`, {})).body.status).toBe('confirmed');
-    expect(await deptStock(bathWh, m.id)).toBe(q(10));
+    expect(await deptStock(bathWh, m.id)).toBe(q(176));
     // 部门列表里的「对象」是部门
     const list = (await api(ctx.app, bath, 'GET', `/api/erp/dept-stock/${bathId}/docs`)).body;
     expect(list.find((x: { id: number }) => x.id === dmg.id)).toMatchObject({ partyName: '浴区', warehouseName: '浴区小仓' });
@@ -320,32 +335,45 @@ describe('收货必须有采购单（#19），采购和仓库一起验收（#17�
   });
 });
 
-describe('急采（#19）', () => {
-  it('部门登记（不超过上限）→ 仓库验收后进部门小仓 → 部门补采购单并自己确认', async () => {
+describe('急采（#19；8.0.1 收拢到采购、按金额分级审批，CG05）', () => {
+  it('采购登记 → 按金额审批 → 仓库到部门验收后进部门小仓 → 采购补采购单、提交即确认；部门、仓库都不能登记', async () => {
     const m = await material('W005', { name: '应急灯泡', purchaseUnit: '箱', purchaseFactorMilli: q(10) });
-    const urgent = (cookie: string, priceCents: number, accepted = q(20), departmentId = bathId) =>
-      deptDoc(cookie, {
-        docType: 'receipt',
-        urgent: true,
-        departmentId,
-        supplierId,
-        handler: '浴区阿梅',
-        lines: [{ materialId: m.id, deliveredMilli: accepted, acceptedMilli: accepted, priceCents }],
-      });
-    // 1 箱 2,100 元超过 2,000 元的上限
-    const over = await urgent(bath, 210_000, q(10));
+    const body = (priceCents: number, accepted = q(20), departmentId = bathId) => ({
+      docType: 'receipt',
+      urgent: true,
+      departmentId,
+      supplierId,
+      handler: '采购小陈',
+      lines: [{ materialId: m.id, deliveredMilli: accepted, acceptedMilli: accepted, priceCents }],
+    });
+    // 10 箱 × 3,100 元 = 31,000 元，超过急采上限（分级的最高一档，默认 30,000 元）
+    const over = await doc(buyer, body(310_000, q(100)));
     expect(over.status).toBe(422);
     expect(over.body.error.code).toBe('URGENT_OVER_CAP');
-    // 别的部门不能替浴区登记；仓库不能登记急采
-    expect((await urgent(bar, 15_000)).status).toBe(403);
-    expect((await doc(keeper, { docType: 'receipt', urgent: true, departmentId: bathId, supplierId, lines: [{ materialId: m.id, deliveredMilli: q(20), acceptedMilli: q(20), priceCents: 15_000 }] })).status).toBe(403);
+    // 8.0.1 起部门、仓库都不能登记急采
+    expect((await deptDoc(bath, body(15_000))).status).toBe(400);
+    expect((await doc(keeper, body(15_000))).status).toBe(403);
 
-    const rc = await ok(urgent(bath, 15_000));
-    expect(rc).toMatchObject({ status: 'submitted', urgent: true, noPo: true, urgentCapCents: 200_000, amountCents: 30_000, warehouse: { id: bathWh }, department: { id: bathId } });
+    const rc = await ok(doc(buyer, body(15_000)));
+    expect(rc).toMatchObject({ status: 'submitted', urgent: true, urgentApprovedAt: null, noPo: true, urgentCapCents: 3_000_000, amountCents: 30_000, warehouse: { id: bathWh }, department: { id: bathId } });
+    // 还在审批中：仓库不能验收；登记的人不能审自己的急采
+    const early = await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${rc.id}/verify-urgent`, {});
+    expect(early.status).toBe(409);
+    expect(early.body.error.code).toBe('URGENT_NOT_APPROVED');
+    // 审批中的不算「急采待仓库验收」
+    expect((await api(ctx.app, keeper, 'GET', '/api/inventory/overview')).body.urgentToVerify).toBe(0);
+    expect((await api(ctx.app, ctx.owner, 'GET', `/api/approvals?tab=all&docType=urgent_purchase`)).body).toEqual(
+      expect.arrayContaining([expect.objectContaining({ docId: rc.id, docType: 'urgent_purchase', amountCents: 30_000, departmentName: '浴区' })]),
+    );
+    // 采购规则里没指定审批人 A、B 时由负责人审
+    const approved = await api(ctx.app, approver, 'POST', `/api/inventory/docs/${rc.id}/approve`, {});
+    expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+    expect(approved.body).toMatchObject({ status: 'submitted' });
+    expect(approved.body.urgentApprovedAt).not.toBeNull();
     expect(await deptStock(bathWh, m.id)).toBe(0);
     expect((await api(ctx.app, keeper, 'GET', '/api/inventory/overview')).body.urgentToVerify).toBe(1);
-    // 登记的部门不能自己验收
-    expect((await api(ctx.app, bath, 'POST', `/api/inventory/docs/${rc.id}/verify-urgent`, {})).status).toBe(403);
+    // 登记的人不能自己验收
+    expect((await api(ctx.app, buyer, 'POST', `/api/inventory/docs/${rc.id}/verify-urgent`, {})).status).toBe(403);
     const verified = await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${rc.id}/verify-urgent`, {});
     expect(verified.body.status).toBe('confirmed');
     expect(await deptStock(bathWh, m.id)).toBe(q(20));
@@ -354,39 +382,76 @@ describe('急采（#19）', () => {
     expect(ap!.total).toBe(30_000);
     expect((await api(ctx.app, keeper, 'GET', '/api/inventory/overview')).body).toMatchObject({ urgentToVerify: 0, urgentToBackfill: 1 });
 
-    // 登记后上限调低：仓库确认时按当时的上限再核对
-    const rc2 = await ok(urgent(bath, 15_000));
-    const settings = (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/settings')).body;
-    await api(ctx.app, ctx.owner, 'PUT', '/api/inventory/settings', { ...settings, urgentCapCents: 20_000 });
+    // 批了以后上限调低：仓库验收时按当时的上限再核对
+    const rc2 = await ok(doc(buyer, body(15_000)));
+    await api(ctx.app, approver, 'POST', `/api/inventory/docs/${rc2.id}/approve`, {});
+    const rules = (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/purchase-rules')).body;
+    const lowered = await api(ctx.app, ctx.owner, 'PUT', '/api/inventory/purchase-rules', { urgentTiers: [{ maxCents: 20_000, approverIds: [] }] });
+    expect(lowered.status, JSON.stringify(lowered.body)).toBe(200);
     const late = await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${rc2.id}/verify-urgent`, {});
     expect(late.status).toBe(409);
     expect(late.body.error.code).toBe('URGENT_OVER_CAP');
-    await api(ctx.app, ctx.owner, 'PUT', '/api/inventory/settings', settings);
-    await api(ctx.app, bath, 'POST', `/api/erp/dept-stock/docs/${rc2.id}/cancel`, { reason: '重复登记' });
+    await api(ctx.app, ctx.owner, 'PUT', '/api/inventory/purchase-rules', { urgentTiers: rules.urgentTiers });
+    await api(ctx.app, buyer, 'POST', `/api/inventory/docs/${rc2.id}/cancel`, { reason: '重复登记' });
 
-    // 部门补采购单，自己确认（#19）；别的部门不能补
-    expect((await api(ctx.app, bar, 'POST', `/api/erp/dept-stock/docs/${rc.id}/backfill`, { clientKey: randomUUID() })).status).toBe(403);
-    const bf = await api(ctx.app, bath, 'POST', `/api/erp/dept-stock/docs/${rc.id}/backfill`, { clientKey: randomUUID() });
+    // 采购补采购单，提交即确认（急采已按金额审批过）；部门没有补单的入口了
+    expect((await api(ctx.app, bath, 'POST', `/api/erp/dept-stock/docs/${rc.id}/backfill`, { clientKey: randomUUID() })).status).toBe(404);
+    const bf = await api(ctx.app, buyer, 'POST', '/api/purchase-orders/backfill', { receiptDocId: rc.id, clientKey: randomUUID() });
     expect(bf.status, JSON.stringify(bf.body)).toBe(201);
-    expect(bf.body.status).toBe('approved');
-    const po = (await api(ctx.app, ctx.owner, 'GET', `/api/purchase-orders/${bf.body.poId}`)).body;
-    expect(po).toMatchObject({ backfill: true, status: 'approved', totalCents: 30_000, receiving: 'full' });
-    expect(po.approvals.map((a: { action: string; reason: string }) => [a.action, a.reason])).toEqual([
+    expect(bf.body.po).toMatchObject({ backfill: true, status: 'approved', totalCents: 30_000, receiving: 'full' });
+    expect(bf.body.po.approvals.map((a: { action: string; reason: string }) => [a.action, a.reason])).toEqual([
       ['create', ''],
       ['submit', ''],
-      ['approve', '急采补单，部门确认'],
+      ['approve', '急采补单：急采已按金额分级审批，提交即确认'],
     ]);
+    // 部门照样看得到给本部门买的急采，看不到与全公司历史成交价的比较；库存页照常有
     const linked = (await api(ctx.app, bath, 'GET', `/api/erp/dept-stock/docs/${rc.id}`)).body;
-    expect(linked.purchaseOrder.id).toBe(bf.body.poId);
-    // 部门看不到与全公司历史成交价的比较；库存页照常有
+    expect(linked.purchaseOrder.id).toBe(bf.body.po.id);
     expect(linked.lines[0]).not.toHaveProperty('compare');
     expect((await api(ctx.app, keeper, 'GET', `/api/inventory/docs/${rc.id}`)).body.lines[0]).toHaveProperty('compare');
     expect(await deptStock(bathWh, m.id)).toBe(q(20));
     const [ap2] = await ctx.sql<{ total: number }[]>`SELECT coalesce(sum(amount_delta_cents), 0) AS total FROM ap_entries WHERE supplier_id = ${supplierId}`;
     expect(ap2!.total).toBeGreaterThanOrEqual(30_000);
-    const again = await api(ctx.app, bath, 'POST', `/api/erp/dept-stock/docs/${rc.id}/backfill`, { clientKey: randomUUID() });
+    const again = await api(ctx.app, buyer, 'POST', '/api/purchase-orders/backfill', { receiptDocId: rc.id, clientKey: randomUUID() });
     expect(again.body.error.code).toBe('BACKFILL_LINKED');
     expect((await api(ctx.app, keeper, 'GET', '/api/inventory/overview')).body.urgentToBackfill).toBe(0);
+  });
+
+  it('按金额分级：≤ 第一档由审批人 A 审、≤ 第二档由审批人 B 审，别人审不了；指定的人要能用审批中心', async () => {
+    const m = await material('W015', { name: '应急插线板', purchaseUnit: '个', purchaseFactorMilli: q(1) });
+    const before = (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/purchase-rules')).body;
+    const approverId = (await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'wh-appr'`)[0]!.id;
+    // 仓库（物资经办）没有审批中心的权限，不能指定
+    const bad = await api(ctx.app, ctx.owner, 'PUT', '/api/inventory/purchase-rules', { urgentTiers: [{ maxCents: 500_000, approverIds: [keeperId] }, { maxCents: 3_000_000, approverIds: [] }] });
+    expect(bad.status).toBe(422);
+    expect(bad.body.error.code).toBe('APPROVER_INVALID');
+    // 采购经办不能改采购规则（默认只有店主有「维护采购规则」）
+    expect((await api(ctx.app, buyer, 'PUT', '/api/inventory/purchase-rules', { cutoffEnabled: false })).status).toBe(403);
+    const set = await api(ctx.app, ctx.owner, 'PUT', '/api/inventory/purchase-rules', {
+      urgentTiers: [
+        { maxCents: 500_000, approverIds: [costerId] },
+        { maxCents: 3_000_000, approverIds: [Number(approverId)] },
+      ],
+    });
+    expect(set.status, JSON.stringify(set.body)).toBe(200);
+    const one = (priceCents: number) => ok(doc(buyer, { docType: 'receipt', urgent: true, departmentId: barId, supplierId, lines: [{ materialId: m.id, deliveredMilli: q(1), acceptedMilli: q(1), priceCents }] }));
+    const small = await one(30_000);
+    const big = await one(1_000_000);
+    const req = async (docId: number) => (await ctx.sql<{ steps: unknown }[]>`SELECT steps FROM approval_requests WHERE doc_kind = 'inv_doc' AND doc_id = ${docId} AND status = 'pending'`)[0]!.steps;
+    expect(await req(small.id)).toEqual([{ staffIds: [costerId], mode: 'any' }]);
+    expect(await req(big.id)).toEqual([{ staffIds: [Number(approverId)], mode: 'any' }]);
+    // ¥300 的由 A（成本岗）审，负责人审不了；¥10,000 的由 B（负责人）审
+    const wrong = await api(ctx.app, approver, 'POST', `/api/inventory/docs/${small.id}/approve`, {});
+    expect(wrong.status).toBe(403);
+    expect(wrong.body.error.code).toBe('APPROVAL_NOT_ELIGIBLE');
+    const cards = (await api(ctx.app, coster, 'GET', '/api/approvals?tab=mine')).body as { id: number; docId: number; currentLevel: number }[];
+    const card = cards.find((c) => c.docId === small.id)!;
+    expect((await api(ctx.app, coster, 'POST', `/api/approvals/${card.id}/approve`, { level: card.currentLevel })).status).toBe(200);
+    expect((await api(ctx.app, keeper, 'GET', `/api/inventory/docs/${small.id}`)).body.urgentApprovedAt).not.toBeNull();
+    expect((await api(ctx.app, approver, 'POST', `/api/inventory/docs/${big.id}/approve`, {})).status).toBe(200);
+    // 退回：改了再提交按金额重新审批
+    await api(ctx.app, ctx.owner, 'PUT', '/api/inventory/purchase-rules', { urgentTiers: before.urgentTiers });
+    for (const id of [small.id, big.id]) await api(ctx.app, buyer, 'POST', `/api/inventory/docs/${id}/cancel`, { reason: '测试完撤回' });
   });
 });
 
@@ -497,8 +562,8 @@ describe('部门停用', () => {
     expect(blocked.status).toBe(422);
     expect(blocked.body.error.code).toBe('DEPT_STOCK_NOT_EMPTY');
     expect(blocked.body.error.message).toContain('毛巾 3 个');
-    // 盘点到 0（店主替部门盘）后可以停用
-    await ok(deptDoc(ctx.owner, { docType: 'count', warehouseId: gymWh, lines: [{ materialId: m.id, countedMilli: 0 }] }));
+    // 盘点到 0（店主替部门盘，大差异写原因、一并确认）后可以停用
+    await ok(deptDoc(ctx.owner, { docType: 'count', warehouseId: gymWh, approveNow: true, lines: [{ materialId: m.id, countedMilli: 0, diffReason: 'consumed', diffNote: '停用前清空' }] }));
     expect((await put(false)).status).toBe(200);
     const late = await doc(keeper, { docType: 'issue', departmentId: gymId, handler: 'x', lines: [{ materialId: m.id, qtyMilli: q(1) }] });
     expect(late.status).toBe(422);

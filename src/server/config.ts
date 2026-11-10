@@ -12,6 +12,8 @@ export interface AppConfig {
   timezone: string;
   sessionTtlHours: number;
   cookieSecure: boolean;
+  /** 前面的反向代理（Caddy）的地址（TRUST_PROXY，逗号分隔、可写网段）：认它转来的真实来源 IP 与 https；空为不信任转发头 */
+  trustProxy: string[];
   logLevel: string;
   /** 页面显示的版本号（不带开头的 v） */
   version: string;
@@ -22,6 +24,68 @@ export interface AppConfig {
   initOwner: { username: string; password: string; displayName: string } | null;
   /** 微信小程序（小程序线，docs/MINIPROGRAM.md 第 12 节）：单开的小程序端口，只挂给网关的 /api/mp/*；没设 MP_PORT 就不开 */
   mp: MpConfig;
+  /** 员工食堂 · 柚子饭堂（docs/CANTEEN.md）：单开的员工端口，只挂柚子饭堂的页面与 /api/canteen/*；没设 CANTEEN_PORT 就不开 */
+  canteen: CanteenConfig;
+  /** 短信通道（8.0.4 批量发券的短信通知，docs/MEMBERSHIP_V804.md 第 6 节）：没配时短信留在待发箱，页面导出手动发 */
+  sms: SmsConfig;
+}
+
+/**
+ * 短信通道（SMS_PROVIDER）：
+ *   · aliyun：阿里云短信（SMS_ACCESS_KEY_ID、SMS_ACCESS_KEY_SECRET、SMS_SIGN_NAME、SMS_TEMPLATE_COUPON 都要配；模板要先在阿里云申请）；
+ *   · mock：不真发、直接记「已发」，只给开发、测试用（APP_ENV=production 时不认，免得正式服以为发出去了）；
+ *   · 不配：不发，留在待发箱。
+ * 密钥只放 .env，不进 Git、不写日志。
+ */
+export interface SmsConfig {
+  provider: 'aliyun' | 'mock' | null;
+  accessKeyId: string;
+  accessKeySecret: string;
+  signName: string;
+  /** 「券到账」的模板编号（模板变量 count、coupon、validTo） */
+  templateCoupon: string;
+  endpoint: string;
+}
+
+export function loadSmsConfig(env: NodeJS.ProcessEnv, appEnv: AppEnv): SmsConfig {
+  const raw = env.SMS_PROVIDER?.trim().toLowerCase() || '';
+  const cfg: SmsConfig = {
+    provider: null,
+    accessKeyId: env.SMS_ACCESS_KEY_ID?.trim() ?? '',
+    accessKeySecret: env.SMS_ACCESS_KEY_SECRET?.trim() ?? '',
+    signName: env.SMS_SIGN_NAME?.trim() ?? '',
+    templateCoupon: env.SMS_TEMPLATE_COUPON?.trim() ?? '',
+    endpoint: env.SMS_ENDPOINT?.trim() || 'https://dysmsapi.aliyuncs.com/',
+  };
+  if (raw === 'aliyun' && cfg.accessKeyId && cfg.accessKeySecret && cfg.signName && cfg.templateCoupon) cfg.provider = 'aliyun';
+  else if (raw === 'mock' && appEnv !== 'production') cfg.provider = 'mock';
+  return cfg;
+}
+
+export interface CanteenConfig {
+  port: number | null;
+  host: string;
+  /** 饭卡码的密钥（CANTEEN_CODE_SECRET）：员工的码钥匙由它算出；只在 yuzu */
+  codeSecret: string | null;
+  /** 员工端走 HTTPS 时设 true（Cookie 加 Secure；店里局域网用 http 打开的不加，K18）。https 打开的不设也加 */
+  cookieSecure: boolean;
+  /** 前面的转发服务器（Caddy）的地址：限次按它转来的真实来源 IP 算；空为不信任转发头 */
+  trustProxy: string[];
+}
+
+/** 员工端口：没设 CANTEEN_PORT 不开；开了就必须配足够长的饭卡码密钥，端口不能与员工后台、小程序端口相同 */
+export function loadCanteenConfig(env: NodeJS.ProcessEnv, mainPort: number, mpPort: number | null): CanteenConfig {
+  const host = env.CANTEEN_HOST?.trim() || env.HOST || '0.0.0.0';
+  const codeSecret = env.CANTEEN_CODE_SECRET?.trim() || null;
+  const cookieSecure = env.CANTEEN_COOKIE_SECURE === 'true';
+  const trustProxy = (env.CANTEEN_TRUST_PROXY ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const raw = env.CANTEEN_PORT?.trim();
+  if (!raw) return { port: null, host, codeSecret, cookieSecure, trustProxy };
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`CANTEEN_PORT 应为 1–65535 的端口号，当前是「${raw}」`);
+  if (port === mainPort || port === mpPort) throw new Error('CANTEEN_PORT 不能与 PORT、MP_PORT 相同：员工端口只挂柚子饭堂');
+  if (!codeSecret || codeSecret.length < 32) throw new Error('开了 CANTEEN_PORT 就要配 CANTEEN_CODE_SECRET（至少 32 个字符，可以用 openssl rand -hex 32 生成）');
+  return { port, host, codeSecret, cookieSecure, trustProxy };
 }
 
 export interface MpConfig {
@@ -79,24 +143,29 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   }
   const ownerUser = process.env.INIT_OWNER_USERNAME?.trim();
   const ownerPass = process.env.INIT_OWNER_PASSWORD;
+  const mainPort = Number(process.env.PORT ?? 8080);
+  const mp = overrides.mp ?? loadMpConfig(process.env, mainPort);
   return {
     env,
     host: process.env.HOST ?? '0.0.0.0',
-    port: Number(process.env.PORT ?? 8080),
+    port: mainPort,
     databaseUrl,
     timezone: process.env.APP_TIMEZONE ?? 'Asia/Shanghai',
     sessionTtlHours: Number(process.env.SESSION_TTL_HOURS ?? 12),
     cookieSecure: process.env.COOKIE_SECURE === 'true',
+    trustProxy: (process.env.TRUST_PROXY ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     logLevel: process.env.LOG_LEVEL ?? (env === 'test' ? 'silent' : 'info'),
     // update.sh 用 git describe 写入的版本带 v 前缀，页面统一加 v，这里去掉
-    version: (process.env.APP_VERSION || '0.7.29').replace(/^v/, ''),
+    version: (process.env.APP_VERSION || '8.0.4').replace(/^v/, ''),
     commit: /^[0-9a-f]{7,40}$/.test(process.env.APP_COMMIT ?? '') ? process.env.APP_COMMIT! : '',
     instance: resolveInstance(env, process.env.YUZU_INSTANCE),
     initOwner:
       ownerUser && ownerPass
         ? { username: ownerUser, password: ownerPass, displayName: process.env.INIT_OWNER_NAME?.trim() || '店主' }
         : null,
-    mp: loadMpConfig(process.env, Number(process.env.PORT ?? 8080)),
+    mp,
+    canteen: overrides.canteen ?? loadCanteenConfig(process.env, mainPort, mp.port),
+    sms: overrides.sms ?? loadSmsConfig(process.env, env),
     ...overrides,
   };
 }

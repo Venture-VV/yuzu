@@ -4,7 +4,7 @@
 
 import { useState } from 'react';
 import { ArrowRight } from 'lucide-react';
-import { MAX_MOVE_LINES, normalizeTagCode, ZONE_LABELS, type BillLine, type BoardTag, type FrontdeskRules, type VisitDetail } from '@shared/frontdesk';
+import { MAX_MOVE_LINES, normalizeTagCode, ZONE_LABELS, type BillLine, type BoardTag, type FrontdeskBoardRules, type VisitDetail } from '@shared/frontdesk';
 import { formatYuan } from '@shared/money';
 import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
@@ -36,7 +36,7 @@ export function MoveLinesDialog({
   open: boolean;
   visit: VisitDetail;
   tags: BoardTag[];
-  rules: FrontdeskRules | undefined;
+  rules: FrontdeskBoardRules | undefined;
   onClose: () => void;
   /** 转好了：原客人的账单与目标客人的来访（刷新用） */
   onDone: (v: VisitDetail, toVisitId: number | null) => void;

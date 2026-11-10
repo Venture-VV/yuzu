@@ -38,6 +38,11 @@ export type AuditAction =
   | 'petty_doc'
   | 'petty_account'
   | 'sourcing_doc'
+  | 'approval_rule'
+  | 'approval_delegation'
+  | 'approval_batch'
+  | 'contract_doc'
+  | 'payment_doc'
   | 'purchase_request'
   | 'erp_image'
   | 'erp_op_abandoned'
@@ -134,6 +139,20 @@ export type AuditAction =
   | 'coupon_issued'
   | 'coupon_batch_created'
   | 'coupon_batch_exported'
+  // 8.0.4 会员体系整改（docs/MEMBERSHIP_V804.md）
+  | 'member_tag_saved'
+  | 'member_tags_exported'
+  | 'member_records_exported'
+  | 'coupon_campaign_created'
+  | 'coupon_campaign_finished'
+  | 'coupon_usage_exported'
+  | 'sms_outbox_exported'
+  | 'sms_sent'
+  | 'gift_out_done'
+  | 'gift_out_failed'
+  | 'gift_out_retried'
+  | 'marketing_cost_param_saved'
+  | 'marketing_cost_exported'
   | 'coupon_voided'
   // 硬件连接（RQ-001，v0.7.21）：设备登记、启用停用、按采购清单导入、打印任务
   | 'device_created'
@@ -174,7 +193,19 @@ export type AuditAction =
   | 'mp_recharge_resolved'
   // 小程序线第二期 2d：原路退回没退成的，店主重试、已另行处理
   | 'mp_refund_retried'
-  | 'mp_refund_handled';
+  | 'mp_refund_handled'
+  // 员工食堂 · 柚子饭堂（docs/CANTEEN.md）：员工名单的新建、修改、停用、重新开通、员工自己登记；跟柚子说的回信
+  | 'canteen_employee'
+  | 'canteen_feedback'
+  // 8.0.1 采购组整改：签约供应商的合同 PDF（08）、收货附件（11）、集采导入（06）、赠品台账（09）
+  | 'supplier_contract_file'
+  | 'supplier_contract_file_removed'
+  | 'receipt_attachment'
+  | 'request_import'
+  | 'gift_receipt'
+  // 8.0.3 费用预算与进项发票台账：改预算额度；台账里的发票（登记、认证状态、照片、作废）
+  | 'expense_budget'
+  | 'input_invoice';
 
 export interface AuditEntry {
   staffId: number | null;

@@ -23,7 +23,8 @@ concurrency:
 jobs:
   test:
     name: 类型检查 · 集成测试 · 构建
-    runs-on: ubuntu-latest
+    # 要 PostgreSQL 16 的 pg_dump / pg_restore（备份测试）：ubuntu-latest 换成 26.04 以后不带 16 版、apt 里也没有，固定用 24.04（自带 16）
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
@@ -182,7 +183,8 @@ jobs:
 
   demo:
     name: 演示数据：准备、重复执行与核对
-    runs-on: ubuntu-latest
+    # 同上：demo-reset 先备份，要 16 版的 pg_dump
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
@@ -428,3 +430,77 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  # 员工食堂 · 柚子饭堂（docs/CANTEEN.md 第 11 节）：应用开着员工端口（CANTEEN_PORT），在手机尺寸上走一遍——
+  # 后台加人与开通卡片 → 厨师发布菜单 → 员工开通、点赞、亮码 → 负责人「从相册选」扫码、重复扫、断网补登、手动登记 → 后台记录。
+  # 与平时的浏览器验收分开（playwright.canteen.config.ts、e2e-canteen/），不算进「浏览器验收汇总」的用例总数。
+  canteen:
+    name: 员工食堂：手机端浏览器验收
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: yuzu
+          POSTGRES_PASSWORD: yuzu_ci_only
+          POSTGRES_DB: yuzu_canteen
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U yuzu -d yuzu_canteen"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://yuzu:yuzu_ci_only@127.0.0.1:5432/yuzu_canteen
+      APP_ENV: development
+      PORT: 8080
+      CANTEEN_PORT: 8090
+      # 只给 CI 的一次性库用，不是任何门店环境的密钥
+      CANTEEN_CODE_SECRET: ci-only-canteen-code-secret-0123456789abcdef
+      # 与 compose.canteen.yaml 的默认一样：局域网 http 打开（canteen-lan.local）的登录 Cookie 照样存得下（K18）
+      CANTEEN_COOKIE_SECURE: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: 写入合成演示数据（会员演示里有店主账号 linlan）
+        run: node dist/server/cli.js seed-demo
+      - name: 启动应用（员工后台 8080、员工端口 8090）
+        run: |
+          node dist/server/index.js > app.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8090/api/canteen/ping && exit 0; sleep 1; done
+          cat app.log; exit 1
+      - name: 检查预装 Chromium 是否可用
+        id: chromium_ready
+        run: |
+          if timeout 15s node -e 'const {chromium}=require("@playwright/test"); chromium.launch().then(async b=>{await b.close()}).catch(()=>process.exit(1))'; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: 缓存 Playwright 浏览器（按依赖版本）
+        if: steps.chromium_ready.outputs.ready != 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+      - run: npx playwright install --with-deps chromium
+      - name: 员工食堂浏览器流程
+        env:
+          E2E_BASE_URL: http://localhost:8080
+          E2E_CANTEEN_URL: http://localhost:8090
+        run: npx playwright test -c playwright.canteen.config.ts
+      - name: 走完之后自检（员工食堂不碰会员、库存、前台：全部 ✓）
+        run: node dist/server/cli.js check
+      - name: 保留截图（开通卡片、首页、饭卡码、扫码结果、后台）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canteen-screens
+          path: |
+            test-results
+            app.log
+          retention-days: 7

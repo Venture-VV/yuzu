@@ -33,6 +33,7 @@ const STATUS_TONES = { active: 'moss', used_up: 'neutral', expired: 'neutral', r
 
 export function CountCardsCard({ member }: { member: MemberDetail }) {
   const can = useCan();
+  const session = useSession();
   const qc = useQueryClient();
   const cards = useQuery({ queryKey: cardsKey(member.id), queryFn: () => api.get<CountCard[]>(`/api/members/${member.id}/count-cards`) });
   const [selling, setSelling] = useState(false);
@@ -45,13 +46,20 @@ export function CountCardsCard({ member }: { member: MemberDetail }) {
   if (cards.isPending) return <Skeleton className="h-24" />;
   if (cards.error || !cards.data) return <Notice tone="error" title={cards.error?.message ?? '次卡没有加载出来'} />;
   const list = cards.data;
+  // 次卡停售（8.0.4 需求表 03）：不再显示「售次卡」；已售的卡照常列出、退卡。没有卡的会员只留待确认的提示（没有就什么都不显示）
+  const salesOpen = session.rules.countCardSales;
+  if (!salesOpen && list.length === 0) {
+    return can('countcard.sell') || can('countcard.refund') ? (
+      <ErpPendingPanel types={['count_card_sale', 'count_card_refund']} filter={ofMember} className="space-y-2" onFound={() => void refresh()} />
+    ) : null;
+  }
   return (
     <Card className="p-5" data-testid="member-count-cards">
       <SectionTitle
         aside={
           <span className="flex items-center gap-2">
             <PendingBadge title="N5：现金类收款、按项目价抵、一次一份、默认 365 天；不和券、会员折扣同用；退卡按售价折算（待店主确认）" />
-            {can('countcard.sell') && (
+            {can('countcard.sell') && salesOpen && (
               <Button size="sm" variant="secondary" icon={<Ticket className="size-3.5" />} disabled={member.status !== 'active'} onClick={() => setSelling(true)} data-testid="count-card-sell-open">
                 售次卡
               </Button>

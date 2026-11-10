@@ -22,21 +22,39 @@ import { registerPayableRoutes } from './modules/inventory/payables';
 import { registerCycleRoutes } from './modules/inventory/cycles';
 import { registerImportRoutes } from './modules/inventory/imports';
 import { registerExpenseRoutes } from './modules/expenses';
+import { registerBudgetRoutes } from './modules/budgets';
+import { registerInvoiceRoutes } from './modules/invoices';
 import { registerErpOpsRoutes } from './modules/erp-ops';
 import { registerPurchaseLedgerRoutes } from './modules/purchase-ledger';
 import { registerLegacyRoutes } from './modules/legacy';
 import { registerRequestRoutes } from './modules/requests';
+import { registerRequestImportRoutes } from './modules/request-import';
 import { registerPurchasingRoutes } from './modules/inventory/purchasing';
 import { registerPurchaseRulesRoutes } from './modules/inventory/purchase-rules';
+import { registerFileRoutes } from './modules/inventory/files';
+import { registerAttachmentRoutes } from './modules/inventory/attachments';
+import { registerCompareRoutes } from './modules/inventory/compare';
+import { registerGiftRoutes } from './modules/inventory/gifts';
 import { registerPettyAccountRoutes } from './modules/petty-accounts';
 import { registerReplenishRoutes } from './modules/inventory/replenish';
 import { registerSourcingRoutes } from './modules/inventory/sourcing';
+import { registerApprovalRoutes } from './modules/approvals/routes';
+import { registerContractRoutes } from './modules/contracts/routes';
+import { registerPaymentRoutes } from './modules/payments/routes';
 import { registerReportRoutes } from './modules/inventory/reports';
 import { registerLedgerRoutes } from './modules/ledger';
 import { registerMemberRoutes } from './modules/members';
+import { registerMemberTagRoutes } from './modules/member-tags';
+import { registerMemberRecordRoutes } from './modules/member-records';
 import { registerCouponRoutes } from './modules/coupons';
+import { registerCampaignRoutes } from './modules/coupon-campaigns';
+import { registerGiftOutRoutes } from './modules/gift-outs';
+import { registerCouponUsageRoutes } from './modules/coupon-usage';
+import { registerMarketingCostRoutes } from './modules/marketing-cost';
 import { registerMembershipRoutes } from './modules/membership';
 import { registerBenefitRoutes } from './modules/benefits';
+import { registerVipLockerRoutes } from './modules/vip-lockers';
+import { registerBenefitTierRoutes } from './modules/benefit-tiers';
 import { registerTrialRoutes } from './modules/member-trials';
 import { registerDeviceRoutes } from './modules/devices';
 import { registerOpeningRoutes } from './modules/opening';
@@ -69,6 +87,7 @@ import { registerMemberRefundRoutes } from './modules/member-refunds';
 import { registerMemberAdminRoutes } from './modules/member-admin';
 import { registerErpModuleGate, registerErpRoutes } from './modules/erp';
 import { registerMpStaffRoutes } from './modules/mp/staff';
+import { registerCanteenAdminRoutes } from './modules/canteen/admin-routes';
 
 function originHost(origin: string): string | null {
   try {
@@ -82,6 +101,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   const app = Fastify({
     logger: { level: config.logLevel },
     bodyLimit: 64 * 1024,
+    // 正式服在反向代理（Caddy）后面时设 TRUST_PROXY：来源 IP、https 按代理转来的算（8.0.0，docs/RELEASE_V800.md）
+    trustProxy: config.trustProxy.length ? config.trustProxy : false,
   });
   const deps: Deps = { sql, config };
 
@@ -109,9 +130,12 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
     }
   });
 
-  // 浏览器按声明的类型解析响应，不猜测内容类型（测试服 E2E 报告）
+  // 浏览器按声明的类型解析响应，不猜测内容类型（测试服 E2E 报告）；不让别的网站把页面嵌进去（防点击劫持），
+  // 跳到别的网站时不带地址里的内容（8.0.0：正式服放公网之前补上，docs/RELEASE_V800.md）
   app.addHook('onSend', async (_req, reply, payload) => {
     reply.header('x-content-type-options', 'nosniff');
+    reply.header('x-frame-options', 'SAMEORIGIN');
+    reply.header('referrer-policy', 'same-origin');
     return payload;
   });
 
@@ -163,9 +187,17 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerAuthRoutes(app, deps);
   registerGrantRoutes(app, deps);
   registerMemberRoutes(app, deps);
+  registerMemberTagRoutes(app, deps);
+  registerMemberRecordRoutes(app, deps);
   registerCouponRoutes(app, deps);
+  registerCampaignRoutes(app, deps);
+  registerGiftOutRoutes(app, deps);
+  registerCouponUsageRoutes(app, deps);
+  registerMarketingCostRoutes(app, deps);
   registerMembershipRoutes(app, deps);
   registerBenefitRoutes(app, deps);
+  registerVipLockerRoutes(app, deps);
+  registerBenefitTierRoutes(app, deps);
   registerTrialRoutes(app, deps);
   registerDeviceRoutes(app, deps);
   registerWalletRoutes(app, deps);
@@ -191,14 +223,27 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerDeptStockRoutes(app, deps);
   registerPurchasingRoutes(app, deps);
   registerPurchaseRulesRoutes(app, deps);
+  registerFileRoutes(app, deps);
+  registerAttachmentRoutes(app, deps);
+  registerCompareRoutes(app, deps);
+  registerGiftRoutes(app, deps);
   registerPettyAccountRoutes(app, deps);
   registerReplenishRoutes(app, deps);
   registerSourcingRoutes(app, deps);
+  // 审批中心（v0.7.30）
+  registerApprovalRoutes(app, deps);
+  // 合同与法务审查（v0.7.31）
+  registerContractRoutes(app, deps);
+  registerPaymentRoutes(app, deps);
   registerPayableRoutes(app, deps);
   registerCycleRoutes(app, deps);
   registerImportRoutes(app, deps);
   registerExpenseRoutes(app, deps);
+  // 费用预算与进项发票台账（8.0.3）
+  registerBudgetRoutes(app, deps);
+  registerInvoiceRoutes(app, deps);
   registerRequestRoutes(app, deps);
+  registerRequestImportRoutes(app, deps);
   registerErpOpsRoutes(app, deps);
   registerPurchaseLedgerRoutes(app, deps);
   registerLegacyRoutes(app, deps);
@@ -224,6 +269,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerErpRoutes(app, deps);
   // 微信小程序（小程序线）：前台用会员码查会员、解绑会员的微信、后台「小程序」
   registerMpStaffRoutes(app, deps);
+  // 员工食堂 · 柚子饭堂（docs/CANTEEN.md）：管理后台的 /api/erp/canteen；员工用的 /api/canteen/* 只在员工端口上
+  registerCanteenAdminRoutes(app, deps);
 
   // 前端静态资源（构建产物），全部从本机提供，外网中断不影响使用。
   const staticDir = resolve(process.env.STATIC_DIR ?? 'dist/client');

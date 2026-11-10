@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { spendQuotaText } from '@shared/spend-quota';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Minus, Plus, Trash2, Wallet } from 'lucide-react';
 import { splitDeduction, type DeductionRule, type WalletBalance } from '@shared/deduction';
@@ -69,6 +70,7 @@ export function ConsumeFlow({
   const split = total > 0 ? splitDeduction(total, balance, activeRule) : null;
   const confirmSplit = total > 0 ? splitDeduction(total, seenBalance, activeRule) : null;
   const limit = session.rules.maxConsumeCents;
+  const quota = member.spendQuota;
   const overLimit = total > limit;
   const grantScope = { kind: 'consume' as const, memberId: member.id, amount: total };
   const grantOk = !overLimit || overLimitGrantFits(grant, grantScope);
@@ -150,6 +152,8 @@ export function ConsumeFlow({
     if (total <= 0) return setFormError('请至少选择一个消费项目');
     if (custom && (customAmount === null || customAmount <= 0)) return setFormError('请填写正确的其他消费金额');
     if (split && !split.ok) return setFormError(`余额不足，还差 ${formatYuan(split.shortfall)}`);
+    // 充值当日的储值额度（8.0.4 需求表 04，HY02）：超了先拦下、提示剩余额度（服务端入账时再核对一遍）
+    if (quota && total > quota.remaining) return setFormError(`超过今天的储值额度：剩余 ${formatYuan(quota.remaining)}，这笔 ${formatYuan(total)}；其余请到前台用别的方式付`);
     setFormError(null);
     setNotice(null);
     setRuleOverride(null);
@@ -412,6 +416,11 @@ export function ConsumeFlow({
           </span>
           <Money cents={available} className="font-bold" />
         </div>
+        {quota && (
+          <p className={cn('mt-1.5 text-[12.5px] font-semibold', total > quota.remaining ? 'text-clay' : 'text-ember')} data-testid="consume-spend-quota">
+            {spendQuotaText(quota)}
+          </p>
+        )}
         {split?.ok && (
           <p className="mt-1.5 text-[12.5px] text-ink-3">
             按「{rule.title}」将扣本金 <Money cents={split.principal} className="font-semibold text-pine" />、赠金{' '}

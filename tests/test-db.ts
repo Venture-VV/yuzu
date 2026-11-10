@@ -1,11 +1,14 @@
 // 测试库地址与重建（集成测试按文件并行，见 vitest.config.ts）：
 //   · 并行跑时（TEST_WORKERS > 1）每个进程用自己的库，库名加 _w<进程编号>（vitest 的 VITEST_POOL_ID）；
 //   · 每个测试文件开始时，从开跑前迁移好的模板库（库名加 _tpl）整库复制出一份新的，不再整个删 public 模式：
-//     删一个迁移好的模式要拿约 3700 把锁，几个进程同时删会超出数据库的共享锁表（out of shared memory）；
-//   · 升级测试要从空库按旧版本迁移，删模式时几个进程排队（在基础库上取同一把咨询锁），同一时刻只有一个在删。
+//     一句 DROP SCHEMA 删一个迁移好的模式，要在一个事务里拿下所有表、索引、类型的锁（v0.7.30 实测约 6500 把，表越多越多），
+//     数据库的共享锁表（默认 max_locks_per_transaction 64）快被占满，同一时刻别的进程要锁就报 out of shared memory；
+//   · 要清空模式的（升级测试从空库按旧版本迁移；不并行时每个测试文件开始时）分批删表（dropPublicSchema），每批一个事务、锁随事务放掉；
+//     并行时几个进程还排队（在基础库上取同一把咨询锁），同一时刻只有一个在删。
 // 只在名字含 test 的库上做这些（防止 TEST_DATABASE_URL 误指到演示库或正式库）。
 
 import postgres from 'postgres';
+import { dropSchemaInBatches } from '../src/server/lib/drop-schema';
 
 export const BASE_TEST_DB = process.env.TEST_DATABASE_URL ?? 'postgres://yuzu:yuzu_dev_only@127.0.0.1:5432/yuzu_test';
 
@@ -72,9 +75,18 @@ export async function recreateFromTemplate(): Promise<boolean> {
   return true;
 }
 
-/** 删掉 public 模式重建（升级测试用）：并行时几个进程排队，同一时刻只有一个在删 */
+/**
+ * 清空 public 模式重建：分批删表（每批一个事务，锁随事务放掉），再删模式里剩下的函数、类型与序列（src/server/lib/drop-schema.ts，
+ * demo-reset 也用它）。不一句 DROP SCHEMA public CASCADE：那要在一个事务里拿下整个模式的锁（约 6500 把），见文件开头
+ */
+export async function dropPublicSchema(sql: { unsafe: (q: string) => PromiseLike<unknown> }): Promise<void> {
+  await dropSchemaInBatches(sql, 'public');
+  await sql.unsafe('CREATE SCHEMA public');
+}
+
+/** 删掉 public 模式重建（升级测试用）：分批删表；并行时几个进程排队，同一时刻只有一个在删 */
 export async function resetPublicSchema(sql: postgres.Sql | { unsafe: (q: string) => Promise<unknown> }) {
-  const drop = () => sql.unsafe('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+  const drop = () => dropPublicSchema(sql);
   if (!parallelDbs()) {
     await drop();
     return;

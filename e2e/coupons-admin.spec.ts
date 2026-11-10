@@ -134,7 +134,7 @@ test.describe('券与会员权益（v0.7.20）', () => {
       ]);
 
       // ⑤ 充值页：选挂了券的套餐，显示「另赠」
-      await page.getByRole('button', { name: /^充值/ }).click();
+      await page.getByRole('button', { name: /^充值(\s|$)/ }).click(); // 不是「充值记录」的展开按钮（8.0.4）
       await page.getByRole('button', { name: new RegExp(plan.name) }).first().click();
       await expect(page.getByTestId('coupon-plan-gifts')).toContainText(`另赠：${name} × 1`);
       await page.keyboard.press('Escape');

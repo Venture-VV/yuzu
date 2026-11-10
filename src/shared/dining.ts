@@ -8,6 +8,8 @@
 //   · 退菜就是作废这条明细（前台、点单页都可以），厨房屏上显示「已退」；
 //   · 下单多少分钟还没出餐标红提醒（默认 15 分钟）。
 
+import type { CheckoutMember } from './checkout';
+
 export interface DiningRules {
   /** 餐饮功能：关闭时前台挂账与升级前完全一样，主导航没有「餐饮」（默认关闭） */
   enabled: boolean;
@@ -225,7 +227,7 @@ export interface TableCheckoutPreview {
   }[];
   totalAmount: number;
   /** 这几桌登记的会员（可用储值支付），附余额 */
-  members: { id: number; name: string; memberNo: string; status: 'active' | 'frozen'; principalBalance: number; bonusBalance: number }[];
+  members: CheckoutMember[];
   /** 这些会员的券（v0.7.20）：能抵多少，不能用的写原因 */
   storeCoupons?: import('./coupons').CheckoutCouponOption[];
   pricedAt: string;

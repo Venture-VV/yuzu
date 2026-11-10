@@ -208,8 +208,8 @@ test.describe('VIP 柜与丢牌', () => {
       await expect(dialog.getByTestId('checkin-submit')).toBeDisabled();
       await dialog.getByRole('button', { name: '取消' }).click();
 
-      // 店主开启当场授权后：前台请值班经理在弹窗里输入账号密码授权
-      expect((await owner.put('/api/frontdesk/rules', { data: { vipOverrideEnabled: true } })).ok()).toBe(true);
+      // 店主开启当场授权后（8.0.4 起在「会员权益 → VIP 柜」）：前台请值班经理在弹窗里输入账号密码授权
+      expect((await owner.put('/api/vip-lockers', { data: { overrideEnabled: true } })).ok()).toBe(true);
       await page.reload();
       await pressF2(page);
       await dialog.getByLabel('第 1 位牌号').fill(vip.code);
@@ -250,7 +250,7 @@ test.describe('VIP 柜与丢牌', () => {
       const checks = (await (await page.request.get('/api/frontdesk/checks')).json()) as { ok: boolean; label: string }[];
       for (const c of checks) expect(c.ok, c.label).toBe(true);
     } finally {
-      await owner.put('/api/frontdesk/rules', { data: { vipOverrideEnabled: false } });
+      await owner.put('/api/vip-lockers', { data: { overrideEnabled: false } });
       await owner.dispose();
     }
   });

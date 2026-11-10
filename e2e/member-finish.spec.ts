@@ -222,7 +222,7 @@ test.describe('会员体系收尾', () => {
     const visitIds: number[] = [];
     try {
       // 后台列表写明「同行的门票（带 1 位）」
-      await page.goto('/admin/benefits');
+      await page.goto('/admin/benefits?view=list'); // 8.0.4 起默认「按档阶」看，原来的清单在「按类别」
       await expect(page.getByTestId('benefit-discount-QY-041')).toContainText('同行的门票（带 1 位）');
 
       const vip = await memberWith(page, 'E2E 同行会员', 30_000_00);

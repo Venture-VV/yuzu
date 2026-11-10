@@ -16,7 +16,7 @@ import { api, ApiError } from './api';
 
 export const qk = {
   session: ['session'] as const,
-  members: (q: string) => ['members', q] as const,
+  members: (q: string, tagId: number | null = null) => (tagId ? (['members', q, 'tag', tagId] as const) : (['members', q] as const)),
   member: (id: number) => ['member', id] as const,
   activity: (id: number) => ['activity', id] as const,
   catalog: (all = false) => ['catalog', all] as const,
@@ -51,16 +51,17 @@ export const memberCodeOf = (q: string): string | null => {
  * 会员码每扫进查找框一次就重新校验一次：查询键带上「第几次扫」、不留缓存，校验完成之前没有结果。
  * 同一个码先认出过、之后失效（过期、解绑）再扫时，页面不会先拿上次成功的结果选人、清空查找框（测试会话预检 a040d79）
  */
-export const useMembers = (q: string) => {
+/** tagId：按会员标签筛（8.0.4 需求表 05） */
+export const useMembers = (q: string, tagId: number | null = null) => {
   const code = memberCodeOf(q);
   // 第几次把会员码扫进来：查找框里从别的内容变成会员码时加一（按 React「记住上一次渲染的值」的写法在渲染里更新）
   const [scan, setScan] = useState<{ code: string | null; n: number }>({ code: null, n: 0 });
   const n = code === scan.code ? scan.n : code ? scan.n + 1 : scan.n;
   if (code !== scan.code) setScan({ code, n });
   return useQuery({
-    queryKey: code ? (['members', 'code', code, n] as const) : qk.members(q),
+    queryKey: code ? (['members', 'code', code, n] as const) : qk.members(q, tagId),
     queryFn: async () => {
-      if (!code) return api.get<MemberSummary[]>(`/api/members?q=${encodeURIComponent(q)}`);
+      if (!code) return api.get<MemberSummary[]>(`/api/members?q=${encodeURIComponent(q)}${tagId ? `&tagId=${tagId}` : ''}`);
       const found = await api.get<MpCodeLookup>(`/api/mp-codes/${code}`);
       return [await api.get<MemberDetail>(`/api/members/${found.memberId}`)] as MemberSummary[];
     },

@@ -3,13 +3,16 @@ import { Link } from 'react-router';
 import { Ban, CircleCheck, CornerUpLeft, RotateCcw, Send, X } from 'lucide-react';
 import { PAY_METHOD_LABELS, type OpeningPayableDoc, type PaymentDoc } from '@shared/purchasing';
 import { formatAmount, parseYuan } from '@shared/money';
-import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Dialog, Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
+import { ApprovalProgress, ApprovalResend, useApprovalGate } from '../approvals/ApprovalProgress';
+import { postDocAction } from '../approvals/uncertain';
+import type { ApprovalBrief } from '@shared/approvals';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Field, IconButton, Input, MoneyInput, Notice, Select, Spinner, InfoItem as Info } from '../../components/ui';
 import { SimRule } from '../inventory/parts';
@@ -22,13 +25,15 @@ const ACTION_LABELS: Record<string, string> = { create: '登记', submit: '提�
 type Act = 'approve' | 'return' | 'cancel' | 'void' | 'resubmit';
 
 function useActions(base: string, docNo: string) {
+  const session = useSession();
   const toast = useToast();
   const invalidate = useInvalidateAll();
   const [busy, setBusy] = useState<Act | null>(null);
   const run = async (act: Act, body: unknown = {}) => {
     setBusy(act);
     try {
-      await api.post(`${base}/${act}`, body);
+      // 确认、退回带着审批单与级别：没收到结果时记下，之后只能按原内容重新提交（uncertain.ts）
+      await postDocAction(`${base}/${act}`, body, docNo, session.staff.id);
       await invalidate();
       toast({ tone: 'success', title: { approve: '已确认', return: '已退回修改', cancel: '已撤回', void: '已冲销', resubmit: '已重新提交' }[act], body: docNo });
       return true;
@@ -62,12 +67,16 @@ function Timeline({ items }: { items: PaymentDoc['approvals'] }) {
 function Footer({
   status,
   createdBy,
+  approval,
+  kind,
   busy,
   onAct,
   onReason,
 }: {
   status: PaymentDoc['status'];
   createdBy: number;
+  approval: ApprovalBrief | null;
+  kind: 'payment' | 'opening_payable';
   busy: Act | null;
   onAct: (a: Act) => void;
   onReason: (a: 'return' | 'cancel' | 'void') => void;
@@ -76,6 +85,9 @@ function Footer({
   const session = useSession();
   const approve = can('inventory.approve');
   const manage = can('payable.manage');
+  // 审批中心（v0.7.30）：这一级不归我审时只显示在等谁；上次确认、退回没收到结果时只能按原内容重新提交
+  const gate = useApprovalGate(approval, kind);
+  const invalidate = useInvalidateAll();
   return (
     <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-line bg-card px-5 py-3.5">
       {status === 'confirmed' && can('finance.void') && (
@@ -93,13 +105,15 @@ function Footer({
           按原内容重新提交
         </Button>
       )}
-      {status === 'submitted' && approve && (
+      {status === 'submitted' && approve && gate.uncertain && <ApprovalResend sent={gate.uncertain} onDone={invalidate} />}
+      {status === 'submitted' && approve && !gate.uncertain && !gate.canActHere && gate.waiting && <span className="text-[12.5px] text-ink-3">{gate.waiting}</span>}
+      {status === 'submitted' && approve && !gate.uncertain && gate.canActHere && (
         <>
           <Button variant="secondary" icon={<CornerUpLeft className="size-4" />} onClick={() => onReason('return')}>
             退回修改
           </Button>
           <Button variant="primary" loading={busy === 'approve'} icon={<CircleCheck className="size-4" />} onClick={() => onAct('approve')}>
-            确认
+            {approval && approval.levels > 1 ? `同意（第 ${approval.currentLevel}/${approval.levels} 级）` : '确认'}
           </Button>
         </>
       )}
@@ -218,8 +232,17 @@ function PaymentBody({ p, onClose }: { p: PaymentDoc; onClose: () => void }) {
           <h3 className="mb-2 text-[13px] font-bold text-ink-2">经办记录</h3>
           <Timeline items={p.approvals} />
         </section>
+        <ApprovalProgress approval={p.approval} />
       </div>
-      <Footer status={p.status} createdBy={p.createdBy} busy={busy} onAct={(a) => void run(a)} onReason={setReason} />
+      <Footer
+        status={p.status}
+        createdBy={p.createdBy}
+        approval={p.approval}
+        kind="payment"
+        busy={busy}
+        onAct={(a) => void run(a, a === 'approve' && p.approval?.status === 'pending' ? { requestId: p.approval.requestId, level: p.approval.currentLevel } : {})}
+        onReason={setReason}
+      />
       <ReasonDialog
         open={!!reason}
         busy={!!busy}
@@ -229,7 +252,8 @@ function PaymentBody({ p, onClose }: { p: PaymentDoc; onClose: () => void }) {
         danger={reason === 'void'}
         onClose={() => setReason(null)}
         onConfirm={async (text) => {
-          if (await run(reason!, { reason: text })) setReason(null);
+          const fence = reason === 'return' && p.approval?.status === 'pending' ? { requestId: p.approval.requestId, level: p.approval.currentLevel } : {};
+          if (await run(reason!, { reason: text, ...fence })) setReason(null);
         }}
       />
     </>
@@ -284,8 +308,19 @@ export function OpeningSheet({ doc, onClose }: { doc: OpeningPayableDoc | null; 
             </div>
             <p className="text-[12.5px] text-ink-3">期初未付只记已对账确认的上期欠款，不计入本期采购或收货。</p>
             <Timeline items={doc.approvals} />
+            <ApprovalProgress approval={doc.approval} />
           </div>
-          <Footer status={doc.status} createdBy={doc.createdBy} busy={busy} onAct={(a) => void run(a).then((ok) => ok && onClose())} onReason={setReason} />
+          <Footer
+            status={doc.status}
+            createdBy={doc.createdBy}
+            approval={doc.approval}
+            kind="opening_payable"
+            busy={busy}
+            onAct={(a) =>
+              void run(a, a === 'approve' && doc.approval?.status === 'pending' ? { requestId: doc.approval.requestId, level: doc.approval.currentLevel } : {}).then((ok) => ok && onClose())
+            }
+            onReason={setReason}
+          />
           <ReasonDialog
             open={!!reason}
             busy={!!busy}
@@ -295,7 +330,8 @@ export function OpeningSheet({ doc, onClose }: { doc: OpeningPayableDoc | null; 
             danger={reason === 'void'}
             onClose={() => setReason(null)}
             onConfirm={async (text) => {
-              if (await run(reason!, { reason: text })) {
+              const fence = reason === 'return' && doc.approval?.status === 'pending' ? { requestId: doc.approval.requestId, level: doc.approval.currentLevel } : {};
+              if (await run(reason!, { reason: text, ...fence })) {
                 setReason(null);
                 onClose();
               }

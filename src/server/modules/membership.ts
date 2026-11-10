@@ -11,7 +11,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf } from '@shared/business-date';
-import { MAX_VIP_LEVEL } from '@shared/frontdesk';
 import { shiftDate } from '@shared/labels';
 import {
   asGrade,
@@ -66,6 +65,7 @@ import { onDueSettled, onGradeChanged, onMembersGraded } from './benefits';
 import { erpOpAbandoned } from './erp-ops';
 import { activeTrialsOf, convertTrials, expireTrials, hasOverdueTrials, trialSummary } from './member-trials';
 import { loadSettings } from './settings';
+import { loadVipLockerRules } from './vip-lockers';
 
 const RULES_KEY = 'membership_rules';
 /** 已有会员上线定档的标记（只做一次） */
@@ -100,9 +100,8 @@ const RulesInput = z
     topUpMinCents: centsField('续充最低', 1_000_000_00),
     reminderDays: z.array(z.number('提醒天数要是整数').int('提醒天数要是整数').min(1, '提醒天数至少 1 天').max(365, '提醒天数最多 365 天')).max(6, '提醒最多 6 档'),
     onboardMaxGrade: z.number('请选择上线定档的最高档').int().min(0).max(MAX_GRADE),
-    vipLockerLevels: z
-      .array(z.number('请填写 VIP 柜等级').int('VIP 柜等级取整数').min(0, 'VIP 柜等级不能为负').max(MAX_VIP_LEVEL, `VIP 柜最多 ${MAX_VIP_LEVEL} 级`))
-      .length(MAX_GRADE + 1, '每一档都要填能用几级 VIP 柜'),
+    // 生日礼提前几天到账（8.0.4，HY13）
+    birthdayLeadDays: z.number('请填写生日礼提前几天到账').int('天数要是整数').min(0, '天数不能为负').max(30, '最多提前 30 天'),
     // 低一档邀请体验（v0.7.25，M52）
     trialInviteDays: z.number('请填写邀请体验的天数').int('邀请体验按天').min(1, '邀请体验至少 1 天').max(90, '邀请体验最多 90 天'),
     trialInvitesPerMonth: z.number('请填写每月能邀请几次').int('次数要是整数').min(0, '次数不能为负').max(10, '每月最多 10 次'),
@@ -119,7 +118,6 @@ const RulesInput = z
     if (r.enjoyPct >= r.honorPct) issue(['enjoyPct'], '享阶比例要低于尊阶比例');
     if (new Set(r.reminderDays).size !== r.reminderDays.length) issue(['reminderDays'], '提醒天数不能重复');
     if (r.reminderDays.some((d) => d >= r.cycleDays)) issue(['reminderDays'], '提醒天数要少于会籍周期');
-    if (r.vipLockerLevels.some((v, i) => i > 0 && v < r.vipLockerLevels[i - 1]!)) issue(['vipLockerLevels'], '高档能用的 VIP 柜不能比低档少');
   })
   .transform((r) => ({ ...r, reminderDays: [...r.reminderDays].sort((a, b) => b - a) }));
 
@@ -673,7 +671,7 @@ export async function memberGradeInfo(db: Db, memberId: number, todayDate: strin
     rollingRechargeCents: rolling,
     firstRecharge: await isFirstRecharge(db, memberId),
     next: next ? { ...next, thresholdCents: rules.grades[next.grade]!.thresholdCents } : null,
-    lockerLevel: lockerLevelOf(rules, state.grade),
+    lockerLevel: lockerLevelOf(await loadVipLockerRules(db), state.grade),
     events: await gradeEvents(db, memberId, 50),
   };
 }
@@ -683,6 +681,8 @@ export async function memberGradeBadges(db: Db, memberIds: number[], todayDate: 
   const ids = [...new Set(memberIds)];
   if (!ids.length) return new Map();
   const rules = await loadMembershipRules(db);
+  // VIP 柜（8.0.4 起归「会员权益」，vip_locker_rules）
+  const vip = await loadVipLockerRules(db);
   const rows = await db<(GradeRow & { id: number; status: 'active' | 'frozen' })[]>`
     SELECT id, grade, tier, cycle_start, cycle_end, grace_until, grade_version, status FROM members WHERE id IN ${db(ids)}`;
   // 临时身份（v0.7.25，M51）：VIP 柜按自己的与临时身份的取高的；徽标仍显示自己的档阶，另外标「体验中」
@@ -704,7 +704,7 @@ export async function memberGradeBadges(db: Db, memberIds: number[], todayDate: 
           graceUntil: s.graceUntil,
           daysLeft,
           reminder: s.graceUntil === null ? reminderBucket(rules, daysLeft) : null,
-          lockerLevel: r.status !== 'active' ? 0 : Math.max(lockerLevelOf(rules, s.grade), trial ? lockerLevelOf(rules, trial.grade) : 0),
+          lockerLevel: r.status !== 'active' ? 0 : Math.max(lockerLevelOf(vip, s.grade), trial ? lockerLevelOf(vip, trial.grade) : 0),
           trial: trial && r.status === 'active' ? { grade: trial.grade, label: gradeLabel(rules, trial.grade, trial.tier), endsOn: trial.endsOn, kind: trial.kind } : null,
         },
       ];

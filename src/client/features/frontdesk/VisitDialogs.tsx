@@ -8,7 +8,7 @@ import {
   uniqueTagMatch,
   ZONE_LABELS,
   type BoardTag,
-  type FrontdeskRules,
+  type FrontdeskBoardRules,
   type VisitDetail,
 } from '@shared/frontdesk';
 import { grantCovers, type VipGrant } from '@shared/grants';
@@ -41,7 +41,7 @@ export function SwapDialog({
   open: boolean;
   visit: VisitDetail;
   tags: BoardTag[];
-  rules: FrontdeskRules | undefined;
+  rules: FrontdeskBoardRules | undefined;
   onClose: () => void;
   onDone: (v: VisitDetail) => void;
 }) {

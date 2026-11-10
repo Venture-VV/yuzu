@@ -20,7 +20,6 @@ import { lockOpKey } from '../../lib/fences';
 import { idParam, parse } from '../../lib/validate';
 import {
   assertNotFuture,
-  canOperateDept,
   docDateSchema,
   loadInventorySettings,
   logApproval,
@@ -29,12 +28,15 @@ import {
   poSettlement,
   priceBaseline,
   setTxTimeouts,
+  sourcingHolds,
   todayIn,
   weighedCapMilli,
 } from './common';
 import { hashRequest } from '../../lib/idempotency';
 import { ChannelKey, ChannelNote, loadPurchaseRules, resolveChannel, type ChannelColumns } from './purchase-rules';
 import { formatAmount } from '@shared/money';
+import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForApproval } from '../approvals/engine';
+import { assertContractForPo, poContract } from '../contracts/ledger';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -63,6 +65,10 @@ const PoBody = z.object({
   /** 采购途径与途径说明（v0.7.29，E1）：新建不传按供应商的默认、再按采购规则的第一项；修改不传保持原样 */
   channel: ChannelKey.optional(),
   channelNote: ChannelNote.optional(),
+  /** 挂的合同（v0.7.31，C9）：新建不传 = 不挂；修改不传保持原样、传 null 取消 */
+  contractId: id.nullable().optional(),
+  /** 单价超过合同价、数量超过合同剩余量时的原因（提交时核对）；修改不传保持原样 */
+  contractNote: z.string().trim().max(200, '原因最多 200 个字').optional(),
   lines: z.array(LineInput).min(1, '请至少添加一项物料').max(100, '采购单最多 100 行'),
 });
 type PoBodyInput = z.input<typeof PoBody>;
@@ -73,6 +79,15 @@ const Meta = z.object({
 });
 const CreateInput = Meta.extend({ clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试') });
 const ReasonInput = z.object({ reason: z.string().trim().min(2, '请填写原因（至少 2 个字）').max(200) });
+/** 审批（v0.7.30）：页面看到的审批单与级别（审批单已经变了、走到别的级别时拒绝），同意时的意见 */
+export const ApprovalFence = z.object({
+  requestId: id.optional(),
+  level: z.number().int().min(1).max(3).optional(),
+  comment: z.string().trim().max(200, '意见最多 200 个字').default(''),
+  /** 审批中心的批量同意（记在审批记录上） */
+  batch: z.boolean().optional(),
+});
+const ReturnInput = ReasonInput.extend(ApprovalFence.omit({ comment: true }).shape);
 
 // ───────────────────────── 读取 ─────────────────────────
 
@@ -83,7 +98,7 @@ function receivingOf(lines: { baseQtyMilli: number; receivedMilli: number }[]): 
 }
 
 export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
-  const [po] = await db<(Omit<PurchaseOrder, 'channel' | 'sourcing'> & { supplierId: number; supplierName: string; backfillReceiptId: number | null; channelKey: string | null; channelLabel: string | null; channelNote: string; sourcingId: number | null; sourcingNo: string | null; sourcingStatus: string | null })[]>`
+  const [po] = await db<(Omit<PurchaseOrder, 'channel' | 'sourcing' | 'contract' | 'contractNote' | 'contractCheck'> & { supplierId: number; supplierName: string; backfillReceiptId: number | null; channelKey: string | null; channelLabel: string | null; channelNote: string; sourcingId: number | null; sourcingNo: string | null; sourcingStatus: string | null })[]>`
     SELECT po.id, po.doc_no, po.status, po.order_date, po.expected_date, po.note, po.price_basis, po.revision, po.backfill,
            po.backfill_receipt_id, po.created_by, cb.display_name AS created_by_name, po.created_at,
            po.channel AS channel_key, po.channel_label, po.channel_note,
@@ -178,6 +193,8 @@ export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
   const { supplierId, supplierName, backfillReceiptId: _b, channelKey, channelLabel, channelNote, sourcingId, sourcingNo, sourcingStatus, ...rest } = po;
   return {
     ...rest,
+    // 挂的合同与按单价表核对（v0.7.31，C9）
+    ...(await poContract(db, poId)),
     sourcing: sourcingId ? { id: Number(sourcingId), docNo: sourcingNo!, status: sourcingStatus as 'open' | 'awarded' | 'cancelled' } : null,
     supplier: { id: supplierId, name: supplierName },
     channel: channelKey ? { key: channelKey, label: channelLabel ?? channelKey, note: channelNote } : null,
@@ -193,6 +210,8 @@ export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
     revisions,
     approvals,
     reimbursement,
+    approval: await approvalBrief(db, 'purchase_order', poId),
+    withdrawable: rest.status !== 'cancelled' && (await withdrawBlock(db, poId)) === null,
   };
 }
 
@@ -335,9 +354,17 @@ async function prepareLines(db: Db, body: z.infer<typeof PoBody>, existing: Map<
 /**
  * 转采购单（v0.7.8）：新关联的需求行要已通过、没被别的有效采购单（撤回的不算）占用；需求行选了物料的，采购单行的物料要一致。
  * 同一物料的几行需求（几个部门都要）可以合并成采购单的一行。锁需求单（id 升序）后再核对，同一行需求不会被两张采购单同时转走。
+ * 在没撤销的询价单里的需求行（v0.7.30）只能由那张询价单转采购单（sourcingEventId 是这张采购单来自的询价单）。
  * 加锁顺序：采购单 → 需求单。去掉关联（删行、撤回采购单）不需要审核权限，需求行回到「未下单」。
  */
-async function checkRequestLinks(tx: Tx, poId: number | null, lines: PreparedLine[], existing: Map<number, ExistingLine>, actor: Actor) {
+async function checkRequestLinks(
+  tx: Tx,
+  poId: number | null,
+  lines: PreparedLine[],
+  existing: Map<number, ExistingLine>,
+  actor: Actor,
+  sourcingEventId: number | null,
+) {
   const all = lines.flatMap((l) => l.requestLineIds);
   if (new Set(all).size !== all.length) throw badRequest('同一行需求在一张采购单里只能出现一次');
   if (all.length === 0) return;
@@ -350,11 +377,14 @@ async function checkRequestLinks(tx: Tx, poId: number | null, lines: PreparedLin
       WHERE r.id IN (SELECT request_id FROM purchase_request_lines WHERE id IN ${tx(added)})
       ORDER BY r.id FOR UPDATE`;
   }
-  const rows = await tx<{ id: number; name: string; materialId: number | null; status: string; docNo: string; takenBy: string | null }[]>`
+  const rows = await tx<{ id: number; name: string; materialId: number | null; status: string; docNo: string; takenBy: string | null; inSourcing: string | null }[]>`
     SELECT l.id, l.name, l.material_id, r.status, r.doc_no,
            (SELECT po.doc_no FROM purchase_order_line_requests x JOIN purchase_order_lines pl ON pl.id = x.po_line_id
               JOIN purchase_orders po ON po.id = pl.po_id
-             WHERE x.request_line_id = l.id AND po.status <> 'cancelled' ${poId ? tx`AND po.id <> ${poId}` : tx``} LIMIT 1) AS taken_by
+             WHERE x.request_line_id = l.id AND po.status <> 'cancelled' ${poId ? tx`AND po.id <> ${poId}` : tx``} LIMIT 1) AS taken_by,
+           (SELECT e.doc_no FROM sourcing_line_requests sr JOIN sourcing_lines sl ON sl.id = sr.sourcing_line_id
+              JOIN sourcing_events e ON e.id = sl.event_id
+             WHERE sr.request_line_id = l.id AND ${sourcingHolds(tx)} ${sourcingEventId ? tx`AND e.id <> ${sourcingEventId}` : tx``} LIMIT 1) AS in_sourcing
     FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
     WHERE l.id IN ${tx(all)}`;
   const byId = new Map(rows.map((r) => [Number(r.id), r]));
@@ -366,6 +396,7 @@ async function checkRequestLinks(tx: Tx, poId: number | null, lines: PreparedLin
       if (before.has(rid)) continue;
       if (r.status !== 'approved') throw conflict('REQUEST_NOT_APPROVED', `需求单 ${r.docNo} 还没通过审核，不能转采购单`);
       if (r.takenBy) throw conflict('REQUEST_LINE_ORDERED', `「${r.name}」已经在采购单 ${r.takenBy} 里`, { docNo: r.takenBy });
+      if (r.inSourcing) throw conflict('REQUEST_LINE_IN_SOURCING', `「${r.name}」在询价单 ${r.inSourcing} 里，请定标后从询价单转采购单`, { docNo: r.inSourcing });
     }
   }
 }
@@ -424,7 +455,8 @@ async function syncLineRequests(tx: Tx, poLineId: number, next: number[], prev: 
 async function checkImages(db: Db, lines: PreparedLine[]) {
   const ids = [...new Set(lines.flatMap((l) => l.imageIds))];
   if (ids.length === 0) return;
-  const found = new Set((await db<{ id: number }[]>`SELECT id FROM erp_images WHERE id IN ${db(ids)}`).map((r) => Number(r.id)));
+  // 只能挂需求单、采购单用的图片（v0.7.31 迁移 079：合同扫描件另存，挂不上）
+  const found = new Set((await db<{ id: number }[]>`SELECT id FROM erp_images WHERE id IN ${db(ids)} AND scope = 'general'`).map((r) => Number(r.id)));
   if (ids.some((i) => !found.has(i))) throw unprocessable('IMAGE_NOT_FOUND', '有图片没有上传成功，请重新上传');
 }
 
@@ -446,11 +478,12 @@ interface PoRow {
   backfill: boolean;
   backfillReceiptId: number | null;
   createdBy: number;
+  sourcingEventId: number | null;
 }
 
 async function lockPo(tx: Tx, poId: number): Promise<PoRow> {
   const [po] = await tx<PoRow[]>`
-    SELECT id, doc_no, status, supplier_id, revision, backfill, backfill_receipt_id, created_by
+    SELECT id, doc_no, status, supplier_id, revision, backfill, backfill_receipt_id, created_by, sourcing_event_id
     FROM purchase_orders WHERE id = ${poId} FOR UPDATE`;
   if (!po) throw notFound('采购单不存在');
   return po;
@@ -484,16 +517,18 @@ async function approveLocked(tx: Tx, po: PoRow, actor: Actor, reason = '') {
 /**
  * 询价门槛（v0.7.29 ERP 采购五项⑤，E5）：合计到门槛、没改过版（退回修改后再提交也算）、不是补单、不是演示数据的采购单，
  * 要来自已定标的询价单、供应商与中标的一致（QUOTES_REQUIRED）。在采购单的锁里调用；只读询价单、不加锁。
+ * 挂了合同的采购单不用询价（v0.7.32）：价格按合同的单价表，超价、超量的提交时写原因（C9）；没有合同的零星采购照旧走询价
+ * （docs/ERP_FINANCE_LEGAL_PLAN.md 第 4.2 节）。
  */
 export async function assertQuotesForPo(tx: Tx, poId: number) {
   const rules = await loadPurchaseRules(tx);
   if (rules.quoteThresholdCents <= 0) return;
-  const [po] = await tx<{ totalCents: number; revision: number; backfill: boolean; isSynthetic: boolean; supplierId: number; eventId: number | null; eventStatus: string | null; awardedSupplierId: number | null; eventNo: string | null }[]>`
-    SELECT p.total_cents, p.revision, p.backfill, p.is_synthetic, p.supplier_id, e.id AS event_id, e.status AS event_status,
+  const [po] = await tx<{ totalCents: number; revision: number; backfill: boolean; isSynthetic: boolean; supplierId: number; contractId: number | null; eventId: number | null; eventStatus: string | null; awardedSupplierId: number | null; eventNo: string | null }[]>`
+    SELECT p.total_cents, p.revision, p.backfill, p.is_synthetic, p.supplier_id, p.contract_id, e.id AS event_id, e.status AS event_status,
            q.supplier_id AS awarded_supplier_id, e.doc_no AS event_no
     FROM purchase_orders p LEFT JOIN sourcing_events e ON e.id = p.sourcing_event_id LEFT JOIN sourcing_quotes q ON q.id = e.awarded_quote_id
     WHERE p.id = ${poId}`;
-  if (!po || po.backfill || po.isSynthetic || po.revision > 1 || Number(po.totalCents) < rules.quoteThresholdCents) return;
+  if (!po || po.backfill || po.isSynthetic || po.revision > 1 || po.contractId !== null || Number(po.totalCents) < rules.quoteThresholdCents) return;
   if (po.eventId && po.eventStatus === 'awarded' && Number(po.awardedSupplierId) === Number(po.supplierId)) return;
   const amount = `¥${formatAmount(Number(po.totalCents))}`;
   const gate = `¥${formatAmount(rules.quoteThresholdCents)}`;
@@ -503,25 +538,59 @@ export async function assertQuotesForPo(tx: Tx, poId: number) {
   throw unprocessable('QUOTES_REQUIRED', `合计 ${amount} 到了询价门槛 ${gate}：请先询价（至少 ${rules.minQuotes} 家报价）并定标，再从询价单转采购单`, { threshold: rules.quoteThresholdCents });
 }
 
-/** deptConfirm：急采的补单由本部门自己确认（#19，v0.7.11），不走负责人确认 */
-async function submitLocked(tx: Tx, po: PoRow, actor: Actor, approveNow: boolean, deptConfirm = false) {
+/** 采购单每一行都来自已通过的需求单（04，CG04）；空单返回 false */
+async function allLinesFromApprovedRequests(tx: Tx, poId: number): Promise<boolean> {
+  const [row] = await tx<{ total: number; linked: number }[]>`
+    SELECT count(*)::int AS total,
+           count(*) FILTER (WHERE EXISTS (
+             SELECT 1 FROM purchase_order_line_requests x JOIN purchase_request_lines rl ON rl.id = x.request_line_id
+             JOIN purchase_requests r ON r.id = rl.request_id
+             WHERE x.po_line_id = pl.id AND r.status = 'approved'))::int AS linked
+    FROM purchase_order_lines pl WHERE pl.po_id = ${poId}`;
+  return !!row && row.total > 0 && row.linked === row.total;
+}
+
+/** 提交时按合同核对（C9）：合同仍在生效中、下单日在起止日内；超价、超量的要写原因（至少 2 个字） */
+async function assertContractDeviation(tx: Tx, poId: number) {
+  const [p] = await tx<{ supplierId: number; orderDate: string; contractId: number | null }[]>`
+    SELECT supplier_id, order_date, contract_id FROM purchase_orders WHERE id = ${poId}`;
+  if (!p || p.contractId === null) return;
+  await assertContractForPo(tx, Number(p.contractId), Number(p.supplierId), p.orderDate);
+  const { contractNote, contractCheck } = await poContract(tx, poId);
+  if (!contractCheck?.exceeded || contractNote.length >= 2) return;
+  const over = contractCheck.lines.filter((l) => l.priceOverCents > 0 || l.overQtyMilli > 0).map((l) => `第 ${l.lineNo} 行`);
+  throw unprocessable('CONTRACT_DEVIATION_REASON_REQUIRED', `${over.join('、')}的单价超过合同价或数量超过合同剩余量，请写明原因再提交`, { lines: contractCheck.lines });
+}
+
+/**
+ * deptConfirm：急采的补单提交即确认（8.0.1 起由采购补单，急采已按金额分级审批，CG05；补单与急采逐行对得上，见 approveLocked）。
+ * 其余按审批中心（v0.7.30）：命中审批规则的按规则的审批链；没有规则命中按「需要负责人确认」与免确认门槛（默认规则），与以前一样。
+ * 需求单转的采购单（8.0.1 采购组整改 04，CG04）：每一行都来自已通过的需求单的，没有规则命中时不再走默认规则，提交即确认。
+ */
+async function submitLocked(tx: Tx, po: PoRow, actor: Actor, approveNow: boolean, timeZone: string, deptConfirm = false) {
   if (po.status === 'submitted' || po.status === 'approved') return;
   if (po.status !== 'draft' && po.status !== 'returned') throw conflict('INVALID_STATE', '采购单当前状态不能提交');
   // 询价门槛（v0.7.29 E5）：合计到门槛、没改过版的采购单要来自已定标的询价单
   await assertQuotesForPo(tx, po.id);
+  // 挂了合同的（v0.7.31，C9）：合同仍要生效中；超价、超量的要写原因（在采购单的锁里再核对一次，读合同不加锁）
+  await assertContractDeviation(tx, po.id);
   await tx`UPDATE purchase_orders SET status = 'submitted', submitted_by = ${actor.id}, submitted_at = now(), updated_at = now() WHERE id = ${po.id}`;
   await logApproval(tx, 'purchase_order', po.id, 'submit', actor.id, '', po.revision);
+  if (deptConfirm) {
+    await approveLocked(tx, { ...po, status: 'submitted' }, actor, '急采补单：急采已按金额分级审批，提交即确认');
+    return;
+  }
   const settings = await loadInventorySettings(tx);
   // #18：合计不超过免确认门槛的采购单提交即确认（v0.7.12）
   const [totals] = await tx<{ totalCents: number }[]>`SELECT total_cents FROM purchase_orders WHERE id = ${po.id}`;
-  const totalCents = totals?.totalCents ?? null;
-  if (deptConfirm) {
-    await approveLocked(tx, { ...po, status: 'submitted' }, actor, '急采补单，部门确认');
-  } else if (!(settings.approvalRules.purchase_order && overThreshold(settings, totalCents))) {
-    await approveLocked(tx, { ...po, status: 'submitted' }, actor, settings.approvalRules.purchase_order ? '未超过免确认门槛，提交即确认' : '');
-  } else if (approveNow) {
-    if (!can(actor, 'inventory.approve')) throw forbidden('当前账号不能确认采购单，请提交给负责人');
-    await approveLocked(tx, { ...po, status: 'submitted' }, actor);
+  // 04（CG04）：每一行都来自已通过的需求单（供应链审核过）——只读需求单，不加锁（锁顺序：采购单 → 需求单，这里只在采购单的锁里读）
+  const fromRequests = (await loadPurchaseRules(tx)).requestPoDirect && (await allLinesFromApprovedRequests(tx, po.id));
+  const fallback = !fromRequests && settings.approvalRules.purchase_order && overThreshold(settings, totals?.totalCents ?? null);
+  if (approveNow && !can(actor, 'inventory.approve')) throw forbidden('当前账号不能确认采购单，请提交给负责人');
+  const r = await submitForApproval(tx, 'purchase_order', po.id, { actor, timeZone }, { fallback, approveNow });
+  if (r.outcome === 'effective') {
+    const reason = !r.skipped ? '' : fromRequests ? '需求单转的采购单：供应链审核需求单即可采购，提交即确认' : settings.approvalRules.purchase_order ? '未超过免确认门槛，提交即确认' : '';
+    await approveLocked(tx, { ...po, status: 'submitted' }, actor, reason);
   }
 }
 
@@ -570,17 +639,20 @@ export async function createPo(
       }
       const sup = await assertSupplier(tx, body.supplierId);
       const ch = resolveChannel(await loadPurchaseRules(tx), body, sup.defaultChannel);
+      if (body.contractId) await assertContractForPo(tx, body.contractId, body.supplierId, body.orderDate);
       const lines = await prepareLines(tx, body, new Map());
-      await checkRequestLinks(tx, null, lines, new Map(), actor);
+      await checkRequestLinks(tx, null, lines, new Map(), actor, opts.sourcingEventId ?? null);
       await checkImages(tx, lines);
       const settings = await loadInventorySettings(tx);
       const docNo = await nextDocNo(tx, 'purchase_order', 'CG', body.orderDate);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO purchase_orders (doc_no, supplier_id, status, order_date, expected_date, note, price_basis, backfill,
-                                     backfill_receipt_id, client_key, created_by, channel, channel_label, channel_note, sourcing_event_id)
+                                     backfill_receipt_id, client_key, created_by, channel, channel_label, channel_note, sourcing_event_id,
+                                     contract_id, contract_note)
         VALUES (${docNo}, ${body.supplierId}, 'draft', ${body.orderDate}, ${body.expectedDate}, ${body.note}, ${settings.priceBasis},
                 ${!!opts.backfillReceiptId}, ${opts.backfillReceiptId ?? null}, ${meta.clientKey}, ${actor.id},
-                ${ch.channel}, ${ch.channelLabel}, ${ch.channelNote}, ${opts.sourcingEventId ?? null})
+                ${ch.channel}, ${ch.channelLabel}, ${ch.channelNote}, ${opts.sourcingEventId ?? null},
+                ${body.contractId ?? null}, ${body.contractNote ?? ''})
         RETURNING id`;
       const newId = row!.id;
       const total = await syncLines(tx, newId, lines, new Map());
@@ -589,7 +661,7 @@ export async function createPo(
         INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id)
         VALUES (${meta.clientKey}, 'purchase_order', ${requestHash}, ${newId}, ${actor.id})`;
       await logApproval(tx, 'purchase_order', newId, 'create', actor.id, '', 1);
-      if (meta.action === 'submit') await submitLocked(tx, await lockPo(tx, newId), actor, meta.approveNow, opts.deptConfirm);
+      if (meta.action === 'submit') await submitLocked(tx, await lockPo(tx, newId), actor, meta.approveNow, deps.config.timezone, opts.deptConfirm);
       await writeAudit(tx, {
         staffId: actor.id,
         action: 'purchase_order',
@@ -668,16 +740,21 @@ export async function updatePo(deps: Deps, poId: number, raw: PoBodyInput & { ac
     if (!revise && received && body.supplierId !== po.supplierId) throw unprocessable('PO_SUPPLIER_LOCKED', '已有收货的采购单不能更换供应商');
     const sup = await assertSupplier(tx, body.supplierId);
     const ch = await channelForUpdate(tx, poId, body, sup.defaultChannel);
+    // 挂的合同（v0.7.31）：不传保持原样，传 null 取消；挂着的合同仍要对得上（换了供应商、改了下单日也核对）
+    const [cur] = await tx<{ contractId: number | null; contractNote: string }[]>`SELECT contract_id, contract_note FROM purchase_orders WHERE id = ${poId}`;
+    const contractId = body.contractId === undefined ? (cur!.contractId === null ? null : Number(cur!.contractId)) : body.contractId;
+    const contractNote = body.contractNote ?? cur!.contractNote;
+    if (contractId !== null) await assertContractForPo(tx, contractId, body.supplierId, body.orderDate);
     const lines = await prepareLines(tx, body, existing);
-    await checkRequestLinks(tx, poId, lines, existing, actor);
+    await checkRequestLinks(tx, poId, lines, existing, actor, po.sourcingEventId === null ? null : Number(po.sourcingEventId));
     await checkImages(tx, lines);
     const total = await syncLines(tx, poId, lines, existing);
     await tx`
       UPDATE purchase_orders SET supplier_id = ${body.supplierId}, order_date = ${body.orderDate}, expected_date = ${body.expectedDate},
              note = ${body.note}, total_cents = ${total}, channel = ${ch.channel}, channel_label = ${ch.channelLabel},
-             channel_note = ${ch.channelNote}, updated_at = now()
+             channel_note = ${ch.channelNote}, contract_id = ${contractId}, contract_note = ${contractNote}, updated_at = now()
       WHERE id = ${poId}`;
-    if (meta.action === 'submit' || revise) await submitLocked(tx, po, actor, meta.approveNow);
+    if (meta.action === 'submit' || revise) await submitLocked(tx, po, actor, meta.approveNow, deps.config.timezone);
   });
   return getPo(deps.sql, poId);
 }
@@ -685,32 +762,73 @@ export async function updatePo(deps: Deps, poId: number, raw: PoBodyInput & { ac
 export async function submitPo(deps: Deps, poId: number, actor: Actor, approveNow: boolean) {
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
-    await submitLocked(tx, await lockPo(tx, poId), actor, approveNow);
+    await submitLocked(tx, await lockPo(tx, poId), actor, approveNow, deps.config.timezone);
   });
   return getPo(deps.sql, poId);
 }
 
-export async function approvePo(deps: Deps, poId: number, actor: Actor) {
+/** 同意（v0.7.30 起走审批中心）：同意的是当前这一级，最后一级同意后采购单确认（默认规则下一次就确认，与以前一样） */
+export async function approvePo(deps: Deps, poId: number, actor: Actor, raw: unknown = {}) {
+  const fence = parse(ApprovalFence, raw ?? {});
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const po = await lockPo(tx, poId);
     if (po.status === 'approved') return;
     if (po.status !== 'submitted') throw conflict('INVALID_STATE', '只有待确认的采购单可以确认');
-    await approveLocked(tx, po, actor);
+    const step = await approveCurrent(tx, 'purchase_order', poId, { actor, timeZone: deps.config.timezone }, fence);
+    if (step === 'final') await approveLocked(tx, po, actor, fence.comment);
   });
   return getPo(deps.sql, poId);
 }
 
 export async function returnPo(deps: Deps, poId: number, raw: unknown, actor: Actor) {
-  const { reason } = parse(ReasonInput, raw);
+  const { reason, ...fence } = parse(ReturnInput, raw);
   await deps.sql.begin(async (tx) => {
     const po = await lockPo(tx, poId);
     if (po.status === 'returned') return;
     if (po.status !== 'submitted') throw conflict('INVALID_STATE', '只有待确认的采购单可以退回');
+    await returnCurrent(tx, 'purchase_order', poId, { actor, timeZone: deps.config.timezone }, { ...fence, reason });
     await tx`UPDATE purchase_orders SET status = 'returned', returned_reason = ${reason}, updated_at = now() WHERE id = ${poId}`;
     await logApproval(tx, 'purchase_order', poId, 'return', actor.id, reason, po.revision);
   });
   return getPo(deps.sql, poId);
+}
+
+/**
+ * 撤回：草稿、待确认、退回的采购单；已确认的只有「提交即确认、没经过人审批」的（需求单转的、没超过免确认门槛的，8.0.1 CG04），
+ * 需求行回到未下单；人审批过的照旧只能关闭。都要还没有收货，也还没有报销、发票、三单放行（8.0.2 起待确认、退回的也核对：
+ * 待确认的单也能登记发票，撤回了发票就挂在已撤回的单上）。
+ * 返回不能撤回的原因（错误码与说明），能撤回返回 null；撤回时在采购单的锁里调用，详情页只读地调用（显示「撤回」按钮）。
+ * 登记发票先对采购单加共享锁、锁住以后再核对状态，与这里串行；按采购单报销、三单放行也先锁采购单（8.0.2）。
+ */
+async function withdrawBlock(db: Db, poId: number): Promise<{ code: string; message: string } | null> {
+  const [po] = await db<{ status: PoStatus; backfill: boolean; reviewed: number; used: number; receipts: number }[]>`
+    SELECT p.status, p.backfill,
+           -- 这一次提交有没有经过人审批：提交与建审批单在同一个事务里，审批单的提交时间与采购单的相同
+           (SELECT count(*) FROM approval_requests a
+             WHERE a.doc_kind = 'purchase_order' AND a.doc_id = p.id AND a.submitted_at >= p.submitted_at)::int AS reviewed,
+           (SELECT count(*) FROM expense_claims WHERE purchase_order_id = p.id AND status NOT IN ('cancelled', 'voided'))::int
+             + (SELECT count(*) FROM supplier_invoice_lines l JOIN supplier_invoices i ON i.id = l.invoice_id
+                 WHERE l.purchase_order_id = p.id AND i.status = 'valid')::int
+             + (SELECT count(*) FROM po_match_releases WHERE purchase_order_id = p.id)::int AS used,
+           (SELECT count(*) FROM inv_docs WHERE purchase_order_id = p.id AND status <> 'cancelled')::int AS receipts
+    FROM purchase_orders p WHERE p.id = ${poId}`;
+  if (!po) return { code: 'NOT_FOUND', message: '采购单不存在' };
+  if (po.status === 'approved') {
+    if (po.backfill || po.reviewed > 0) return { code: 'INVALID_STATE', message: '已确认的采购单不能撤回；不再到货请关闭' };
+  } else if (!['draft', 'submitted', 'returned'].includes(po.status)) {
+    return { code: 'INVALID_STATE', message: '已确认的采购单不能撤回；不再到货请关闭' };
+  }
+  if (po.used > 0) {
+    return {
+      code: 'PO_IN_USE',
+      message: po.status === 'approved'
+        ? '这张采购单已经有报销、发票或三单放行，不能撤回；不再到货请关闭'
+        : '这张采购单已经有发票、报销或三单放行，不能撤回；发票登错了请先作废发票',
+    };
+  }
+  if (po.receipts > 0) return { code: 'PO_HAS_RECEIPTS', message: '这张采购单已有收货，不能撤回；请负责人确认后关闭' };
+  return null;
 }
 
 export async function cancelPo(deps: Deps, poId: number, raw: unknown, actor: Actor) {
@@ -718,11 +836,11 @@ export async function cancelPo(deps: Deps, poId: number, raw: unknown, actor: Ac
   await deps.sql.begin(async (tx) => {
     const po = await lockPo(tx, poId);
     if (po.status === 'cancelled') return;
-    if (!['draft', 'submitted', 'returned'].includes(po.status)) throw conflict('INVALID_STATE', '已确认的采购单不能撤回；不再到货请关闭');
-    const [rc] = await tx<{ n: number }[]>`SELECT count(*) AS n FROM inv_docs WHERE purchase_order_id = ${poId} AND status <> 'cancelled'`;
-    if (rc!.n > 0) throw conflict('PO_HAS_RECEIPTS', '这张采购单已有收货，不能撤回；请负责人确认后关闭');
+    const block = await withdrawBlock(tx, poId);
+    if (block) throw conflict(block.code, block.message);
     if (!can(actor, 'inventory.approve') && po.createdBy !== actor.id) throw forbidden('只能撤回自己创建的采购单');
     await tx`UPDATE purchase_orders SET status = 'cancelled', returned_reason = ${reason}, updated_at = now() WHERE id = ${poId}`;
+    await closeApproval(tx, 'purchase_order', poId, actor);
     await logApproval(tx, 'purchase_order', poId, 'cancel', actor.id, reason, po.revision);
   });
   return getPo(deps.sql, poId);
@@ -748,17 +866,17 @@ export async function closePo(deps: Deps, poId: number, raw: unknown, actor: Act
  * 按直接收货单（迁移 029 以前）或急采生成补单采购单（数量、价格取自收货单，不再入库或计款）。
  * dept：急采由本部门的部门申购补单并自己确认（#19，v0.7.11）。
  */
-export async function backfillPo(deps: Deps, raw: unknown, actor: Actor, ip?: string, opts: { dept?: boolean } = {}) {
+/**
+ * 补采购单：给没有采购单的收货单（急采、v0.7.11 以前的收货）按实收数量与价格生成采购单。
+ * 急采的补单（8.0.1 起只由采购补，CG05）提交即确认：急采已经按金额分级审批过，补单与急采逐行对得上（approveLocked 核对）。
+ */
+export async function backfillPo(deps: Deps, raw: unknown, actor: Actor, ip?: string) {
   const input = parse(z.object({ receiptDocId: id, clientKey: z.uuid(), approveNow: z.boolean().default(false), note: z.string().trim().max(200).default('') }), raw);
   const [rc] = await deps.sql<{ id: number; docType: string; status: string; supplierId: number; docDate: string; purchaseOrderId: number | null; docNo: string; urgent: boolean; departmentId: number | null }[]>`
     SELECT d.id, d.doc_type, d.status, d.supplier_id, d.doc_date, d.purchase_order_id, d.doc_no, d.urgent, w.department_id
     FROM inv_docs d LEFT JOIN warehouses w ON w.id = d.warehouse_id WHERE d.id = ${input.receiptDocId}`;
   if (!rc || rc.docType !== 'receipt') throw notFound('收货单不存在');
-  if (opts.dept) {
-    if (!rc.urgent) throw unprocessable('BACKFILL_NOT_URGENT', '部门只能给本部门的急采补单');
-    if (!(await canOperateDept(deps.sql, actor, rc.departmentId))) throw forbidden('只有急采部门的部门申购可以补单');
-    if (input.approveNow) throw badRequest('部门补单会直接由部门确认，不用再选「提交并确认」');
-  }
+  if (rc.urgent && input.approveNow) throw badRequest('急采的补单提交即确认，不用再选「提交并确认」');
   if (rc.status !== 'confirmed') throw unprocessable('BACKFILL_SOURCE_INVALID', '只有已生效的收货单可以补采购单');
   if (rc.purchaseOrderId) throw unprocessable('BACKFILL_LINKED', '这张收货单已关联采购单');
   const lines = await deps.sql<{ materialId: number; qtyMilli: number; factorMilli: number; priceCents: number; purchaseUnit: string }[]>`
@@ -781,7 +899,7 @@ export async function backfillPo(deps: Deps, raw: unknown, actor: Actor, ip?: st
       approveNow: input.approveNow,
     },
     actor,
-    { backfillReceiptId: rc.id, ip, deptConfirm: opts.dept },
+    { backfillReceiptId: rc.id, ip, deptConfirm: rc.urgent },
   );
 }
 
@@ -840,7 +958,7 @@ export function registerPurchasingRoutes(app: FastifyInstance, deps: Deps) {
     const { approveNow } = parse(z.object({ approveNow: z.boolean().default(false) }), req.body ?? {});
     return submitPo(deps, poId(req), req.actor, approveNow);
   });
-  app.post('/api/purchase-orders/:id/approve', { preHandler: guard('inventory.approve') }, async (req) => approvePo(deps, poId(req), req.actor));
+  app.post('/api/purchase-orders/:id/approve', { preHandler: guard('inventory.approve') }, async (req) => approvePo(deps, poId(req), req.actor, req.body ?? {}));
   app.post('/api/purchase-orders/:id/return', { preHandler: guard('inventory.approve') }, async (req) => returnPo(deps, poId(req), req.body, req.actor));
   app.post('/api/purchase-orders/:id/cancel', { preHandler: guard('purchase.manage') }, async (req) => cancelPo(deps, poId(req), req.body, req.actor));
   app.post('/api/purchase-orders/:id/close', { preHandler: guard('inventory.read') }, async (req) => {

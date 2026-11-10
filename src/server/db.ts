@@ -4,6 +4,8 @@ export type Sql = postgres.Sql<{}>;
 export type Tx = postgres.TransactionSql<{}>;
 /** 既可传入连接池，也可传入事务。 */
 export type Db = Sql | Tx;
+/** 拼进查询里的一段条件（db`...` 不带 await） */
+export type Fragment = postgres.PendingQuery<postgres.Row[]>;
 
 export function createSql(databaseUrl: string, options: { max?: number } = {}): Sql {
   return postgres(databaseUrl, {

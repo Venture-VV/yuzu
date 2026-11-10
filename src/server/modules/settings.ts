@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { HHMM } from '@shared/business-date';
 import { CASH_DRAWER_KEY, DEFAULT_CASH_DRAWERS, MAX_CASH_DRAWERS, SHIFT_MODES, type CashDrawer } from '@shared/checkout';
 import { DEDUCTION_RULES } from '@shared/deduction';
-import { MAX_MEMBER_FIELDS, MEMBER_FIELD_KEY, MEMBER_FIELD_TYPES, type MemberFieldDef } from '@shared/member-fields';
 import { DEFAULT_MEMBER_CHANNELS, MAX_MEMBER_CHANNELS, MEMBER_CHANNEL_KEY, type MemberChannel } from '@shared/members';
 import type { StoreRules } from '@shared/types';
 import type { Db } from '../db';
@@ -26,13 +25,14 @@ const KEY_MAP = {
   max_consume_cents: 'maxConsumeCents',
   reversal_window_hours: 'reversalWindowHours',
   business_hours: 'businessHours',
-  member_fields: 'memberFields',
   custom_bonus_valid_days: 'customBonusValidDays',
   require_open_shift: 'requireOpenShift',
   hide_pending_marks: 'hidePendingMarks',
   member_channels: 'memberChannels',
   shift_mode: 'shiftMode',
   cash_drawers: 'cashDrawers',
+  recharge_spend_pct: 'rechargeSpendPct',
+  count_card_sales: 'countCardSales',
 } as const satisfies Record<string, keyof StoreSettings>;
 
 /** 设置项在库里的键（规则总表按它找最近修改的时间与人） */
@@ -48,7 +48,6 @@ const DEFAULTS: StoreSettings = {
   maxConsumeCents: 50_000_000,
   reversalWindowHours: 48,
   businessHours: null,
-  memberFields: [],
   customBonusValidDays: null,
   requireOpenShift: true,
   hidePendingMarks: false,
@@ -56,6 +55,9 @@ const DEFAULTS: StoreSettings = {
   // 交班方式（v0.7.28 ⑨，N11 待确认）：默认按人交班（现在的做法）；按钱箱交班时开班选钱箱
   shiftMode: 'person',
   cashDrawers: DEFAULT_CASH_DRAWERS,
+  // 8.0.4：充值当日的储值消费不超过「充值前余额 + 当天充值 × 70%」（HY01）；次卡停售（HY05，迁移 088 也写入「关」）
+  rechargeSpendPct: 70,
+  countCardSales: false,
 };
 
 export const DEFAULT_SETTINGS: Readonly<StoreSettings> = DEFAULTS;
@@ -82,19 +84,6 @@ const SettingsInput = z
       .object({ open: z.string().regex(HHMM, '开门时间格式应为 HH:MM'), close: z.string().regex(HHMM, '打烊时间格式应为 HH:MM') })
       .refine((h) => h.open !== h.close, '开门与打烊时间不能相同；全天营业请选「全天 24 小时」')
       .nullable(),
-    memberFields: z
-      .array(
-        z.object({
-          /** 已有字段的编号；新字段不带，由服务端分配 */
-          key: z.string().regex(MEMBER_FIELD_KEY, '字段编号不正确').nullable().optional(),
-          label: z.string().trim().min(1, '请填写字段名称').max(16, '字段名称最多 16 个字'),
-          type: z.enum(MEMBER_FIELD_TYPES, '字段类型不正确'),
-          options: z.array(z.string().trim().min(1, '可选值不能为空').max(16, '可选值最多 16 个字')).max(20, '可选值最多 20 个').default([]),
-          required: z.boolean().default(false),
-          active: z.boolean().default(true),
-        }),
-      )
-      .max(MAX_MEMBER_FIELDS, `会员自定义字段最多 ${MAX_MEMBER_FIELDS} 个`),
     customBonusValidDays: z.number().int('赠金有效期按整天填写').min(1, '赠金有效期至少 1 天').max(3650, '赠金有效期最多 3650 天').nullable(),
     requireOpenShift: z.boolean('请选择是否要求先开班'),
     hidePendingMarks: z.boolean('请选择是否隐藏「待确认」标记'),
@@ -109,6 +98,8 @@ const SettingsInput = z
       )
       .max(MAX_MEMBER_CHANNELS, `渠道最多 ${MAX_MEMBER_CHANNELS} 个`),
     shiftMode: z.enum(SHIFT_MODES, '交班方式不正确'),
+    rechargeSpendPct: z.number('充值当日的消费比例请填整数').int('充值当日的消费比例请填整数').min(1, '比例至少 1%').max(100, '比例最多 100%').nullable(),
+    countCardSales: z.boolean('请选择是否售次卡'),
     cashDrawers: z
       .array(
         z.object({
@@ -122,39 +113,6 @@ const SettingsInput = z
   })
   // 只提交要修改的项（各设置卡片分别保存）；没有提交的项保持原值
   .partial();
-
-type MemberFieldInput = NonNullable<z.infer<typeof SettingsInput>['memberFields']>[number];
-const FIXED_MEMBER_FIELDS = ['姓名', '手机号', '手机', '性别', '生日', '备注', '会员号'];
-
-/**
- * 会员自定义字段的保存规则：已有字段不能删除（只能停用）、不能改类型；名称不重复、不与固定字段重名；
- * 单选至少一个可选值；新字段由服务端按顺序分配编号（f1、f2…），编号保存后不变。
- */
-function normalizeMemberFields(current: readonly MemberFieldDef[], input: MemberFieldInput[]): MemberFieldDef[] {
-  const byKey = new Map(current.map((d) => [d.key, d]));
-  const kept = new Set(input.map((f) => f.key).filter(Boolean));
-  for (const d of current) {
-    if (!kept.has(d.key)) throw badRequest(`会员字段「${d.label}」不能删除，只能停用（如果是其他人刚刚改过字段，请刷新后再改）`);
-  }
-  let next = Math.max(0, ...current.map((d) => Number(d.key.slice(1))));
-  const labels = new Set<string>();
-  return input.map((f) => {
-    const label = f.label.trim();
-    if (FIXED_MEMBER_FIELDS.includes(label)) throw badRequest(`「${label}」是固定字段，不能再建同名字段`);
-    if (labels.has(label)) throw badRequest(`会员字段「${label}」重复`);
-    labels.add(label);
-    const options = f.type === 'select' ? [...new Set(f.options)] : [];
-    if (f.type === 'select' && options.length === 0) throw badRequest(`单选字段「${label}」至少要有一个可选值`);
-    if (f.key) {
-      const old = byKey.get(f.key);
-      if (!old) throw badRequest('有未知的会员字段，请刷新页面后重试');
-      if (old.type !== f.type) throw badRequest(`会员字段「${old.label}」保存后不能改类型；需要时请停用后新建一个字段`);
-      return { key: f.key, label, type: f.type, options, required: f.required, active: f.active };
-    }
-    next += 1;
-    return { key: `f${next}`, label, type: f.type, options, required: f.required, active: f.active };
-  });
-}
 
 type ChannelInput = NonNullable<z.infer<typeof SettingsInput>['memberChannels']>[number];
 
@@ -215,7 +173,6 @@ export function registerSettingsRoutes(app: FastifyInstance, { sql }: Deps) {
       const before = await loadSettings(tx);
       const input: Partial<StoreSettings> = {
         ...parsed,
-        ...(parsed.memberFields ? { memberFields: normalizeMemberFields(before.memberFields, parsed.memberFields) } : {}),
         ...(parsed.memberChannels ? { memberChannels: normalizeChannels(before.memberChannels, parsed.memberChannels) } : {}),
         ...(parsed.cashDrawers ? { cashDrawers: normalizeDrawers(before.cashDrawers, parsed.cashDrawers) } : {}),
       } as Partial<StoreSettings>;

@@ -27,11 +27,14 @@ import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
+import { PoReceiptsList } from '../../components/ReceiptAttachments';
 import { useToast } from '../../components/Toast';
 import { Button, Field, Input, MoneyInput, Notice, Segmented, Select, Skeleton } from '../../components/ui';
 import { useDepartments } from '../inventory/queries';
 import { usePurchaseRules } from '../purchasing/queries';
 import { useAdvances, useClaimPrefill, useExpenseRules, useHandlers, useInvalidateExpenses, usePoCandidates, usePoForClaim } from './queries';
+import { useInvoiceLookup } from '../invoices/queries';
+import { BudgetHint, invoiceBlocking, InvoiceLedgerFields, useClaimOverBudget, type CategoryAmounts, type InvoiceExtras } from './ClaimExtras';
 
 interface AdhocLine {
   key: string;
@@ -67,6 +70,8 @@ export function ClaimFormPage() {
   const [invoiceType, setInvoiceType] = useState('');
   const [taxRateBp, setTaxRateBp] = useState<number | null>(null);
   const [invoiceNo, setInvoiceNo] = useState('');
+  // 进项发票台账（8.0.3）：选的台账发票、开票方、开票日、税额（自动登记进台账时用）
+  const [invExtras, setInvExtras] = useState<InvoiceExtras>({ invoiceId: null, issuer: '', date: '', tax: '' });
   const [note, setNote] = useState('');
   // 采购途径（v0.7.29，E1）：按次报销必选；按采购单报销照采购单（v0.7.29 以前的采购单没记的可以补选）
   const purchaseRules = usePurchaseRules();
@@ -175,6 +180,24 @@ export function ClaimFormPage() {
     mode === 'adhoc' ? adhocRows.reduce((t, r) => t + (r.cents ?? 0), 0) : chosenPo.reduce((t, r) => t + (r.cents ?? 0), 0) + (freightCents ?? 0);
   const threshold = rules.data?.approvalThresholdCents ?? 200_000;
   const needsApproval = total > threshold;
+  // 费用预算（8.0.3）：这张报销各科目的金额
+  const categoryAmounts: CategoryAmounts = {};
+  const addAmount = (c: ExpenseCategory | '', cents: number | null) => {
+    if (c && cents && cents > 0) categoryAmounts[c] = (categoryAmounts[c] ?? 0) + cents;
+  };
+  if (mode === 'adhoc') for (const r of adhocRows) addAmount(r.l.category, r.cents);
+  else {
+    for (const r of chosenPo) addAmount(r.pick.category, r.cents);
+    if (freightOn) addAmount('freight', freightCents);
+  }
+  const overBudget = useClaimOverBudget(departmentId, expenseDate, categoryAmounts);
+  const ledgerInvoice = !!inv?.needsNumber;
+  const invoiceLookup = useInvoiceLookup(invoiceNo.trim(), ledgerInvoice);
+  const supplierName = mode === 'po' && po.data ? po.data.supplierName : null;
+  const invoiceProblem = ledgerInvoice
+    ? invoiceBlocking(invoiceLookup.data, invoiceNo, supplierName ?? invExtras.issuer, invExtras.invoiceId) ??
+      (invExtras.tax.trim() && parseYuan(invExtras.tax) === null ? '税额格式不对' : null)
+    : null;
 
   const blocking = pending.length > 0
     ? '上一笔报销结果待确认，请先在上方查回、重新提交或作废'
@@ -196,6 +219,8 @@ export function ClaimFormPage() {
               ? '请选择税点'
               : inv.needsNumber && !invoiceNo.trim()
                 ? `${inv.label}要填发票号码`
+                : invoiceProblem
+                  ? invoiceProblem
                 : mode === 'po'
                   ? !poId
                     ? '请选择采购单'
@@ -272,6 +297,14 @@ export function ClaimFormPage() {
       invoiceType,
       taxRateBp,
       invoiceNo: invoiceNo.trim(),
+      ...(ledgerInvoice
+        ? {
+            invoiceId: invExtras.invoiceId,
+            invoiceIssuer: mode === 'adhoc' ? invExtras.issuer.trim() : '',
+            invoiceDate: invExtras.date || null,
+            invoiceTaxCents: invExtras.tax.trim() ? parseYuan(invExtras.tax) : null,
+          }
+        : {}),
       purchaseOrderId: mode === 'po' ? poId : null,
       channel: pickChannel && channelDef ? channelDef.key : null,
       channelNote: pickChannel && channelDef ? channelNote.trim() : '',
@@ -435,8 +468,33 @@ export function ClaimFormPage() {
               </Select>
             </Field>
             <Field label="发票号码" htmlFor="ex-invno" hint={inv?.needsNumber ? '有发票必须填' : '没有发票可以不填'}>
-              <Input id="ex-invno" value={invoiceNo} maxLength={40} disabled={locked} onChange={(e) => setInvoiceNo(e.target.value)} className="h-10" data-testid="ex-invoice-no" />
+              <Input
+                id="ex-invno"
+                value={invoiceNo}
+                maxLength={40}
+                disabled={locked}
+                onChange={(e) => {
+                  setInvoiceNo(e.target.value);
+                  setInvExtras((x) => ({ ...x, invoiceId: null }));
+                }}
+                className="h-10"
+                data-testid="ex-invoice-no"
+              />
             </Field>
+            {ledgerInvoice && inv && (
+              <InvoiceLedgerFields
+                invoiceNo={invoiceNo}
+                kindLabel={inv.label}
+                taxRateBp={taxRateBp}
+                totalCents={total}
+                supplierName={supplierName}
+                expenseDate={expenseDate}
+                today={session.calendarToday}
+                value={invExtras}
+                onChange={setInvExtras}
+                disabled={locked}
+              />
+            )}
             <Field label="备注" htmlFor="ex-note">
               <Input id="ex-note" value={note} maxLength={200} disabled={locked} onChange={(e) => setNote(e.target.value)} placeholder="可选" className="h-10" />
             </Field>
@@ -535,6 +593,12 @@ export function ClaimFormPage() {
                     <Button variant="ghost" size="sm" disabled={locked} onClick={() => setPoId(null)}>
                       换一张
                     </Button>
+                    {/* 收货单与附件（8.0.1 采购组整改 11） */}
+                    {po.data.receipts.length > 0 && (
+                      <div className="w-full">
+                        <PoReceiptsList receipts={po.data.receipts} />
+                      </div>
+                    )}
                   </>
                 ) : (
                   <span className="text-[12.5px] text-ink-3">只列现付供应商已确认或已关闭的采购单；挂账的在「应付货款」里付款</span>
@@ -609,6 +673,8 @@ export function ClaimFormPage() {
             </section>
           )}
 
+          <BudgetHint departmentId={departmentId} expenseDate={expenseDate} amounts={categoryAmounts} />
+
           {error && (
             <Notice tone="error" title={error} icon={<CircleAlert className="size-5" />}>
               报销没有登记，内容仍保留在页面上。
@@ -623,8 +689,12 @@ export function ClaimFormPage() {
               <span className="text-[12.5px] font-semibold text-ink-3">报销金额</span>
               <Money cents={total} className="text-[20px] font-bold text-lake" />
             </span>
-            <span className={cn('text-[12.5px] font-semibold', needsApproval ? 'text-yuzu-deep' : 'text-pine')} data-testid="claim-approval-hint">
-              {needsApproval ? `超过 ¥${formatAmount(threshold)}，提交后要负责人确认` : '不超过门槛，登记即确认'}
+            <span className={cn('text-[12.5px] font-semibold', overBudget ? 'text-clay' : needsApproval ? 'text-yuzu-deep' : 'text-pine')} data-testid="claim-approval-hint">
+              {overBudget
+                ? `${needsApproval ? `超过 ¥${formatAmount(threshold)} 且` : ''}超预算，提交后走「超预算报销」审批`
+                : needsApproval
+                  ? `超过 ¥${formatAmount(threshold)}，提交后要负责人确认`
+                  : '不超过门槛，登记即确认'}
             </span>
             {blocking && <span className="text-[12.5px] font-semibold text-clay">{blocking}</span>}
           </div>

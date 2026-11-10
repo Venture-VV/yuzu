@@ -4,13 +4,13 @@
 
 import type { Permission } from './permissions';
 
-export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'approvals', 'expenses', 'revenue'] as const;
+export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'approvals', 'contracts', 'payments', 'expenses', 'invoices', 'revenue', 'canteen'] as const;
 export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
 
 export interface ErpModuleDef {
   label: string;
   /** ERP 导航的分组 */
-  group: '供应链' | '财务';
+  group: '供应链' | '财务' | '法务' | '员工服务';
   description: string;
   /** 模块的入口页面 */
   path: string;
@@ -46,7 +46,8 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     pages: ['/purchasing'],
     // 图片（v0.7.8）：采购单与需求单的行都用，跟采购模块走（需求单依赖采购）
     // 补货建议、询价比价、价格曲线（v0.7.29 ERP 采购五项）也跟采购模块走
-    apis: ['/api/purchase-orders', '/api/purchase-baseline', '/api/erp/images', '/api/purchase-suggestions', '/api/purchase-sourcing', '/api/purchase-price-history'],
+    // 供应商比价看板（8.0.1 采购组整改 07）也跟采购模块走
+    apis: ['/api/purchase-orders', '/api/purchase-baseline', '/api/erp/images', '/api/purchase-suggestions', '/api/purchase-sourcing', '/api/purchase-price-history', '/api/purchase-compare'],
     // 物资经办要看采购单、按单收货（采购单的读接口按「查看库存与物资单据」开放）
     perms: ['inventory.read', 'purchase.manage', 'inventory.approve', 'payable.read'],
     defaultEnabled: true,
@@ -87,15 +88,45 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     requires: ['inventory'],
   },
   approvals: {
-    label: '审批待办',
+    label: '审批中心',
     group: '供应链',
-    description: '待办汇总：负责人要确认的采购、报损、盘点调整、退货、付款、期初集中在一页。关掉只是不显示这一页，各单据里的确认照常',
-    path: '/todo',
-    pages: ['/todo'],
-    apis: [],
-    perms: ['inventory.approve'],
+    description:
+      '审批规则（单据类型 × 金额 × 部门 → 一到三级审批链）、待我审批、批量同意、超时提醒、代理人，手机上也能审；采购、报损、盘点差异、退货、付款、期初、报销都走这里（v0.7.30）。' +
+      '旧的「审批待办」页照常在。关掉只是不显示这两页，各单据里的确认照常走审批规则',
+    path: '/approvals',
+    pages: ['/approvals', '/todo'],
+    apis: ['/api/approvals'],
+    perms: ['approval.act', 'inventory.approve', 'expense.approve'],
     defaultEnabled: true,
     requires: ['inventory'],
+  },
+  contracts: {
+    label: '合同',
+    group: '法务',
+    description:
+      '合同台账与四要素（单价表、付款节点、质保、验收标准），审查走审批中心（财务 → 法务 → 负责人，法务按审查清单逐条给意见），' +
+      '签署、用印、归档，变更单，到期前 60 天提醒；采购单可以挂合同、按单价表核对（v0.7.31）',
+    path: '/erp/contracts',
+    pages: ['/erp/contracts'],
+    apis: ['/api/erp/contracts'],
+    perms: ['contract.read'],
+    defaultEnabled: true,
+    // 相对方、物料在库存模块的档案里；审查走审批中心的接口（审批中心关着时各单据照常走审批规则）
+    requires: ['inventory'],
+  },
+  payments: {
+    label: '付款',
+    group: '财务',
+    description:
+      '付款申请（从合同的付款节点或没挂合同的应付发起，走审批中心：财务 → 负责人，提前付款多一级店主），批了以后按申请登记付款；' +
+      '发票登记与三单匹配（差额超过 1% 或 ¥50 挂起、财务放行），质保金台账（到期前 30 天提醒），本周应付（四周、资金缺口、导出）（v0.7.32）',
+    path: '/erp/payments',
+    pages: ['/erp/payments'],
+    apis: ['/api/erp/payments'],
+    perms: ['payable.read', 'payment.request'],
+    defaultEnabled: true,
+    // 付款登记、供应商往来在应付货款模块里；合同的付款计划、验收在合同模块里（合同模块关着时只能对没挂合同的应付提申请）
+    requires: ['inventory', 'payables'],
   },
   expenses: {
     label: '费用与备用金',
@@ -110,6 +141,21 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     // 部门、供应商档案在库存模块里；按采购单报销读采购单（采购模块关着时只能按次报销）
     requires: ['inventory'],
   },
+  // 进项发票台账（8.0.3，docs/BUDGET_INVOICES.md 第 3 节）：三单的供应商发票、报销的专票普票、直接登记的都在这里
+  invoices: {
+    label: '发票台账',
+    group: '财务',
+    description:
+      '进项发票台账：三单匹配登记的供应商发票、报销单上的专票与普票、直接登记的；认证状态与所属期、认证期限到期前提醒、' +
+      '异常票（重号、税额税率不符、过期、与报销金额不符）标记、拍照上传（8.0.3）',
+    path: '/erp/invoices',
+    pages: ['/erp/invoices'],
+    apis: ['/api/erp/invoices'],
+    perms: ['payable.read', 'expense.read', 'invoice.manage'],
+    defaultEnabled: true,
+    // 开票方可以是供应商档案里的供应商
+    requires: ['inventory'],
+  },
   revenue: {
     label: '营业数据',
     group: '财务',
@@ -119,6 +165,18 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     apis: ['/api/erp/revenue'],
     perms: ['erp.revenue'],
     defaultEnabled: true,
+    requires: [],
+  },
+  // 员工食堂 · 柚子饭堂（店主 2026-11-06，docs/CANTEEN.md）：默认关；关着时员工端口也回「饭堂还没开张」
+  canteen: {
+    label: '员工食堂',
+    group: '员工服务',
+    description: '员工手机上的「柚子饭堂」：看菜单、点赞、亮饭卡码；食堂负责人扫码打卡、厨师发布菜单。这里管员工名单、打印开通卡片、看用餐记录、设开饭时间',
+    path: '/erp/canteen',
+    pages: ['/erp/canteen'],
+    apis: ['/api/erp/canteen'],
+    perms: ['canteen.manage'],
+    defaultEnabled: false,
     requires: [],
   },
 };
@@ -190,6 +248,8 @@ export const ERP_OP_TYPES = [
   'coupon_template',
   'coupon_rule',
   'coupon_batch',
+  // 批量发券（8.0.4 需求表 06）：圈一批会员发券，没收到结果时查回、原样重提或确认作废
+  'coupon_campaign',
   'coupon_issue',
   // 硬件连接（v0.7.21）：登记设备、打印任务（断网后刷新也要能查回、重提或作废）
   'device_create',
@@ -217,6 +277,24 @@ export const ERP_OP_TYPES = [
   'doc_print',
   // 会员实体卡：发卡、补卡（v0.7.28）
   'member_card',
+  // 审批中心（v0.7.30）：新建审批规则、设代理人（Codex 自动审查 2cfd28b：没收到结果时刷新、关掉对话框后也要能查回、重提或作废）
+  'approval_rule',
+  'approval_delegation',
+  // 合同与法务审查（v0.7.31）：新建合同、变更单、用印申请
+  'contract_create',
+  'contract_change',
+  'contract_seal',
+  // 付款流（v0.7.32）：付款申请、合同付款、验收登记、质量问题登记、登记发票（按申请登记的供应商往来付款用上面的 payment）
+  'payment_request',
+  'contract_payout',
+  'contract_acceptance',
+  'contract_quality',
+  'supplier_invoice',
+  // 员工食堂第二期：柚子信箱的回信（Codex 自动审查 3bc51e6：没收到结果时关掉对话框、刷新以后也要能查回、重提或作废）
+  'canteen_reply',
+  // 8.0.1 采购组整改：集采导入（06）、赠品登记（09）
+  'request_import',
+  'gift_receipt',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -234,6 +312,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   coupon_template: '新建券模板',
   coupon_rule: '加发券规则',
   coupon_batch: '生成无记名券',
+  coupon_campaign: '批量发券',
   coupon_issue: '发券给会员',
   device_create: '登记设备',
   device_job: '测试打印',
@@ -251,6 +330,19 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   platform_settlement: '平台打款登记',
   doc_print: '打印单据',
   member_card: '发卡、补卡',
+  approval_rule: '新建审批规则',
+  approval_delegation: '设代理人',
+  contract_create: '新建合同',
+  contract_change: '新建变更单',
+  contract_seal: '用印申请',
+  payment_request: '付款申请',
+  contract_payout: '合同付款',
+  contract_acceptance: '验收登记',
+  contract_quality: '质量问题登记',
+  supplier_invoice: '登记发票',
+  canteen_reply: '柚子信箱回信',
+  request_import: '集采导入',
+  gift_receipt: '赠品登记',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

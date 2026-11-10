@@ -7,6 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { shiftDate } from '../src/shared/labels';
 import type { CouponRow, CouponTemplate, MemberCoupons } from '../src/shared/coupons';
 import { issueBirthdayCoupons } from '../src/server/modules/coupons';
 import { buildDailyRecon } from '../src/server/ops/recon';
@@ -227,12 +228,11 @@ describe('发券', () => {
     ]);
   });
 
-  it('生日礼：生日当月发，每年每条规则一次；没填生日、不是这个月的不发', async () => {
+  // 8.0.4 起生日前 3 天到账（会员规则「生日礼提前几天到账」，需求表 09）；原来是生日当月第一天
+  it('生日礼：生日前 3 天到账，每年每条规则一次；没填生日、生日还远的不发', async () => {
     await rule({ kind: 'birthday', level: 0, templateId: tpl.cash!.id });
-    const month = today.slice(5, 7);
-    const other = String((Number(month) % 12) + 1).padStart(2, '0');
-    const yes = await api(ctx.app, ctx.clerk, 'POST', '/api/members', { name: '寿星', phone: '19900008006', birthday: `1990-${month}-15` });
-    const no = await api(ctx.app, ctx.clerk, 'POST', '/api/members', { name: '下个月', phone: '19900008007', birthday: `1990-${other}-15` });
+    const yes = await api(ctx.app, ctx.clerk, 'POST', '/api/members', { name: '寿星', phone: '19900008006', birthday: `1990-${shiftDate(today, 2).slice(5)}` });
+    const no = await api(ctx.app, ctx.clerk, 'POST', '/api/members', { name: '生日还远', phone: '19900008007', birthday: `1990-${shiftDate(today, 10).slice(5)}` });
     expect(yes.status).toBe(201);
     expect(no.status).toBe(201);
     const deps = { sql: ctx.sql, config: ctx.config };
@@ -246,8 +246,7 @@ describe('发券', () => {
     // 再加一条 L2 的生日规则（这两位寿星都是 L0）：上一条用例的「寿星」已拿到 L0 的礼，却一直缺这一条，永远算候选
     const added = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/rules', { clientKey: randomUUID(), kind: 'birthday', level: 2, templateId: tpl.cash!.id, quantity: 1 });
     expect(added.status, JSON.stringify(added.body)).toBe(200);
-    const month = today.slice(5, 7);
-    const later = await api(ctx.app, ctx.clerk, 'POST', '/api/members', { name: '后来的寿星', phone: '19900008008', birthday: `1991-${month}-20` });
+    const later = await api(ctx.app, ctx.clerk, 'POST', '/api/members', { name: '后来的寿星', phone: '19900008008', birthday: `1991-${shiftDate(today, 1).slice(5)}` });
     expect(later.status).toBe(201);
     const deps = { sql: ctx.sql, config: ctx.config };
     // 每页 1 位：第一页是发不出的「寿星」，原来只看这一页，后来的寿星永远轮不到

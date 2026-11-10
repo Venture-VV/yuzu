@@ -18,6 +18,7 @@ import { DocSheet } from './DocSheet';
 import { DOC_VISUAL, Qty, SimRule } from './parts';
 import { useInvDocs, useMaterials, useWarehouses } from './queries';
 import { useReconReminders, useStocktakeReminders } from '../cycles/queries';
+import { useUrgentBackfills } from '../approvals/queries';
 
 /** 负责人待办：先处理需要确认的申请，再看需要关注的异常，最后才是经营汇总 */
 export function TodoPage() {
@@ -42,6 +43,8 @@ export function TodoPage() {
   const low = useMemo(() => (materials.data ?? []).filter((m) => m.isLow), [materials.data]);
   // 没有采购单的收货：迁移 029 以前的直接收货与急采，补单前列在这里
   const missingPo = (noPo.data ?? []).filter((d) => d.noPo && (!d.urgent || d.needsBackfill));
+  // 急采生效后超过 3 天没补单的（v0.7.30，A10）：标出超几天
+  const overdueBackfill = new Map((useUrgentBackfills(can('inventory.approve')).data ?? []).map((b) => [b.receiptId, b.daysOver]));
   const warehouses = useWarehouses();
   const centralName = warehouses.data?.find((w) => w.kind === 'central')?.name;
   const credit = (overview.data?.suppliers ?? []).filter((s) => s.balanceCents < 0);
@@ -65,6 +68,16 @@ export function TodoPage() {
         {/* 窄屏一列也要限定列宽（minmax(0,1fr)），不然一行写不下的单号、摘要会把整列撑出屏幕 */}
         <div className="mx-auto grid max-w-[1180px] grid-cols-1 gap-5 px-5 py-5 md:px-7 lg:grid-cols-[minmax(0,1fr)_340px]">
           <section className="space-y-5">
+            {session.erpModules.includes('approvals') && (
+              <Link
+                to="/approvals"
+                className="flex items-center gap-2 rounded-lg border border-lake/25 bg-lake-soft/50 px-4 py-2.5 text-[13px] font-semibold text-lake hover:bg-lake-soft"
+                data-testid="todo-to-approvals"
+              >
+                多级审批、批量同意、代理人与手机审批都在「审批中心」（v0.7.30）
+                <ArrowRight className="ml-auto size-4" />
+              </Link>
+            )}
             <div className="flex items-center gap-2">
               <h2 className="text-[15px] font-bold">待确认</h2>
               {!loading && <span className="num rounded-full bg-yuzu px-2 text-[12px] font-bold">{total}</span>}
@@ -252,6 +265,7 @@ export function TodoPage() {
                       <button type="button" onClick={() => open('doc', d.id)} className="flex w-full items-center gap-2 text-left text-[13px] hover:text-pine">
                         <span className="num font-semibold">{d.docNo}</span>
                         <span className="min-w-0 flex-1 truncate text-ink-3">{d.partyName}</span>
+                        {overdueBackfill.has(d.id) && <Badge tone="clay">超 {overdueBackfill.get(d.id)} 天</Badge>}
                         <Money cents={d.amountCents} className="font-semibold" />
                       </button>
                     </li>

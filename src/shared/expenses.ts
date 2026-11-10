@@ -1,6 +1,7 @@
 // 费用报销与备用金（v0.7.7，飞书需求 RQ-005 第一步，见 docs/EXPENSES.md）。
 // 金额为整数「分」，数量为千分之一单位，税点为万分之一（1300 = 13%）。
 
+import type { ApprovalBrief } from './approvals';
 import type { PayMethod } from './purchasing';
 
 export const EXPENSE_CATEGORIES = ['office', 'fixed_asset', 'low_value', 'freight'] as const;
@@ -38,6 +39,13 @@ export interface InvoiceTypeDef {
   needsNumber: boolean;
   /** 允许的税点（万分之一） */
   taxRatesBp: number[];
+  /** 进项发票台账（8.0.3，BI09）：这类发票要认证（可抵扣）。没设的按键：增值税专用发票（vat_special）要，其余不要 */
+  certify?: boolean;
+}
+
+/** 这类发票要不要认证（8.0.3）：规则里没设的按键，只有增值税专用发票要 */
+export function invoiceTypeCertifies(t: Pick<InvoiceTypeDef, 'key' | 'certify'>): boolean {
+  return t.certify ?? t.key === 'vat_special';
 }
 
 export interface ExpenseRules {
@@ -45,18 +53,23 @@ export interface ExpenseRules {
   approvalThresholdCents: number;
   /** 打款后超过多少天还没平账标红（12 条自检第 4 条：默认 7 天） */
   overdueDays: number;
-  /** 已下单未到货：没有预计到货日的，下单后超过多少天算超期（12 条自检第 9 条：默认 7 天，v0.7.9） */
-  arrivalOverdueDays: number;
   /** 用途（固定选项） */
   purposes: string[];
   invoiceTypes: InvoiceTypeDef[];
+  /** 费用预算（8.0.3，BI03）：已占用达到额度的百分之几亮黄灯（50–100，默认 80） */
+  budgetWarnPercent: number;
+  /** 进项发票台账（8.0.3，BI09）：要认证的发票开票日起多少天内认证（0 = 不设期限；默认 360，店里自己的期限） */
+  invoiceCertifyDays: number;
+  /** 认证期限到期前几天进待办（默认 7） */
+  invoiceRemindDays: number;
+  /** 税额与「价税合计 × 税率 ÷ (1 + 税率)」相差超过多少（分）标「税额不符」（BI10，默认 ¥1） */
+  invoiceTaxToleranceCents: number;
 }
 
 /** 默认规则（待确认）：店主在 ERP「模块设置」里改 */
 export const DEFAULT_EXPENSE_RULES: ExpenseRules = {
   approvalThresholdCents: 200_000,
   overdueDays: 7,
-  arrivalOverdueDays: 7,
   purposes: ['客用消耗', '员工用品', '办公', '维修保养', '装修改造', '营销活动', '餐饮原料', '其他'],
   invoiceTypes: [
     { key: 'vat_special', label: '增值税专用发票', needsNumber: true, taxRatesBp: [100, 300, 600, 900, 1300] },
@@ -64,6 +77,10 @@ export const DEFAULT_EXPENSE_RULES: ExpenseRules = {
     { key: 'receipt', label: '收据', needsNumber: false, taxRatesBp: [0] },
     { key: 'none', label: '无票', needsNumber: false, taxRatesBp: [0] },
   ],
+  budgetWarnPercent: 80,
+  invoiceCertifyDays: 360,
+  invoiceRemindDays: 7,
+  invoiceTaxToleranceCents: 100,
 };
 
 /** 1300 → 13%，150 → 1.5%，0 → 0 */
@@ -110,6 +127,10 @@ export interface ExpenseClaimSummary {
   channel: import('./purchasing').ChannelRef | null;
   amountCents: number;
   needsApproval: boolean;
+  /** 费用预算（8.0.3，BI04）：登记（或退回后再提交）时让某个科目的本月占用超过了额度，走「超预算报销」审批 */
+  overBudget: boolean;
+  /** 进项发票台账（8.0.3，BI11）：关联的发票；8.0.3 以前登记的、收据、无票为空 */
+  invoice: { id: number; invoiceNo: string; issuerName: string; certStatus: import('./invoices').CertStatus } | null;
   /** 前几行的名称，列表里显示 */
   summary: string;
   createdByName: string;
@@ -128,6 +149,12 @@ export interface ExpenseClaim extends ExpenseClaimSummary {
   isSynthetic: boolean;
   lines: ExpenseClaimLine[];
   approvals: { id: number; action: string; actorName: string; reason: string; createdAt: string }[];
+  /** 审批中心（v0.7.30）：在审的审批单，没有在审的取最近一张；从没走过审批中心的为空 */
+  approval: ApprovalBrief | null;
+  /** 按采购单报销的：采购单已生效的收货单与附件（8.0.1，CG11）；按次报销的为空 */
+  receipts: PoReceiptRef[];
+  /** 登记（或退回后再提交）时的预算核对（8.0.3）：只列有额度的科目；8.0.3 以前登记的为空 */
+  budgetCheck: import('./budgets').BudgetCheckItem[] | null;
 }
 
 export interface ExpenseClaimList {
@@ -233,11 +260,21 @@ export interface PoCandidate {
   openLines: number;
 }
 
+/** 采购单已生效的收货单与附件（8.0.1 采购组整改 11，CG11）：转报销、报销单上看 */
+export interface PoReceiptRef {
+  id: number;
+  docNo: string;
+  docDate: string;
+  attachments: import('./inventory').ReceiptAttachment[];
+}
+
 export interface PoForClaim {
   id: number;
   docNo: string;
   supplierName: string;
   orderDate: string;
+  /** 已生效的收货单与附件（8.0.1） */
+  receipts: PoReceiptRef[];
   /** 采购单的采购途径（v0.7.29）：报销照它记 */
   channel: import('./purchasing').ChannelRef | null;
   lines: {
@@ -275,6 +312,8 @@ export interface ToClaimPo {
   lineCount: number;
   openCents: number;
   receiving: import('./purchasing').ReceivingState;
+  /** 已生效的收货单与附件份数（8.0.1 采购组整改 11：收货生效后推送到待报销，标「已收货」） */
+  receipts: { id: number; docNo: string; docDate: string; attachmentCount: number }[];
   /** 下单后过了几天 */
   ageDays: number;
 }

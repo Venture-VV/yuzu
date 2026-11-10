@@ -3,14 +3,17 @@
 // 询价单（物料与数量建好不改）→ 各家报价（每行含税单价、运费、付款条件、交货、有效期）→ 比价（综合到价 = 货款 + 运费）
 // → 定标（选一家、写理由；有效报价不够规则要求的家数时标单一来源、由负责人定标）→ 转采购单（生成草稿，采购单记下询价单）。
 // 合计到询价门槛的采购单第一次提交时要来自已定标的询价单（purchasing.ts 的 submitLocked 里核对）。
+// v0.7.30：询价单可以从需求单发起（采购单表单里「改为询价」）或从补货建议发起；询价单的每一行记下来自哪几行需求，
+// 定标转采购单时一起带到采购单行上，需求单的进度照旧由采购单算。一行需求同时只能在一张没撤销的询价单里。
 //
 // 锁：报价、撤下、定标、撤销定标、撤销询价单都先锁询价单一行；转采购单在新建采购单的事务里锁询价单一行
-// （操作编号的咨询锁 → 询价单 → 新采购单）；采购单提交时只读询价单、不加锁。
+// （操作编号的咨询锁 → 询价单 → 新采购单 → 需求单）；采购单提交时只读询价单、不加锁。
+// 带需求行建询价单：操作编号的咨询锁 → 需求单（id 升序，与转采购单同一把锁）→ 新询价单。
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { can } from '@shared/permissions';
-import type { PriceHistory, PurchaseOrder, SourcingEvent, SourcingQuote, SourcingStatus, SourcingSummary } from '@shared/purchasing';
+import type { PriceHistory, PurchaseOrder, SourcingEvent, SourcingLineRequest, SourcingQuote, SourcingStatus, SourcingSummary } from '@shared/purchasing';
 import { formatAmount } from '@shared/money';
 import { fitsDecimals, lineAmountCents, priceChangePercent, toBaseQty } from '@shared/quantity';
 import { isUniqueViolation, readSnapshot, type Db, type Tx } from '../../db';
@@ -22,7 +25,7 @@ import { hashRequest } from '../../lib/idempotency';
 import { lockOpKey } from '../../lib/fences';
 import { idParam, parse } from '../../lib/validate';
 import { shiftDate } from '@shared/labels';
-import { docDateSchema, loadInventorySettings, nextDocNo, priceBaseline, setTxTimeouts, todayIn } from './common';
+import { docDateSchema, loadInventorySettings, nextDocNo, priceBaseline, setTxTimeouts, sourcingHolds, todayIn } from './common';
 import { loadPurchaseRules } from './purchase-rules';
 import { createPo } from './purchasing';
 
@@ -39,10 +42,19 @@ export async function getSourcing(db: Db, eventId: number): Promise<SourcingEven
     WHERE e.id = ${eventId}`;
   if (!e) throw notFound('询价单不存在');
   const settings = await loadInventorySettings(db);
-  const rawLines = await db<Omit<SourcingEvent['lines'][number], 'baseline'>[]>`
+  const rawLines = await db<Omit<SourcingEvent['lines'][number], 'baseline' | 'requests'>[]>`
     SELECT l.id, l.line_no, l.material_id, m.code AS material_code, m.name AS material_name, m.specification, l.purchase_unit,
            m.inventory_unit, l.factor_milli, l.purchase_qty_milli, l.base_qty_milli, l.spec
     FROM sourcing_lines l JOIN materials m ON m.id = l.material_id WHERE l.event_id = ${eventId} ORDER BY l.line_no`;
+  const links = rawLines.length
+    ? await db<(SourcingLineRequest & { sourcingLineId: number })[]>`
+        SELECT sr.sourcing_line_id, rl.id AS line_id, r.id AS request_id, r.doc_no AS request_no, d.name AS department_name,
+               rl.name, rl.qty_milli, rl.unit
+        FROM sourcing_line_requests sr JOIN purchase_request_lines rl ON rl.id = sr.request_line_id
+        JOIN purchase_requests r ON r.id = rl.request_id JOIN departments d ON d.id = r.department_id
+        WHERE sr.sourcing_line_id IN ${db(rawLines.map((l) => l.id))}
+        ORDER BY r.id, rl.line_no`
+    : [];
   const lines: SourcingEvent['lines'] = [];
   for (const l of rawLines) {
     const baseline = await priceBaseline(
@@ -51,7 +63,10 @@ export async function getSourcing(db: Db, eventId: number): Promise<SourcingEven
       // 收货不能记到以后的日期：最近一次成交价就是全部生效收货里最近的
       { onOrBefore: '9999-12-31' },
     );
-    lines.push({ ...l, id: Number(l.id), materialId: Number(l.materialId), factorMilli: Number(l.factorMilli), purchaseQtyMilli: Number(l.purchaseQtyMilli), baseQtyMilli: Number(l.baseQtyMilli), baseline });
+    const requests = links
+      .filter((x) => Number(x.sourcingLineId) === Number(l.id))
+      .map(({ sourcingLineId: _s, ...x }) => ({ ...x, lineId: Number(x.lineId), requestId: Number(x.requestId), qtyMilli: Number(x.qtyMilli) }));
+    lines.push({ ...l, id: Number(l.id), materialId: Number(l.materialId), factorMilli: Number(l.factorMilli), purchaseQtyMilli: Number(l.purchaseQtyMilli), baseQtyMilli: Number(l.baseQtyMilli), baseline, requests });
   }
   const quotesRaw = await db<(Omit<SourcingQuote, 'supplier' | 'prices' | 'rank' | 'landedCents'> & { supplierId: number; supplierName: string })[]>`
     SELECT q.id, q.supplier_id, s.name AS supplier_name, q.status, q.goods_cents, q.freight_cents, q.pay_terms, q.credit_days, q.delivery_days,
@@ -144,6 +159,8 @@ const CreateInput = z.object({
         materialId: id,
         purchaseQtyMilli: z.number('请填写数量').int().positive('数量必须大于 0').max(1_000_000_000_000),
         spec: z.string().trim().max(80, '规格最多 80 个字').optional(),
+        /** 来自哪几行需求（v0.7.30，从需求单发起询价时带上） */
+        requestLineIds: z.array(id).max(50, '一行最多合并 50 行需求').optional(),
       }),
     )
     .min(1, '请至少添加一项物料')
@@ -160,6 +177,43 @@ async function findByKey(db: Db, table: 'sourcing_events' | 'sourcing_quotes', k
   return Number(row.id);
 }
 
+/**
+ * 带需求行建询价单（v0.7.30）：需求行要已通过、不在有效采购单里（撤回的不算）、不在别的没撤销的询价单里；
+ * 需求行选了物料的，询价单行的物料要一致；同一物料的几行需求可以并成询价单的一行。
+ * 锁需求单（id 升序，与转采购单同一把锁）之后再核对，同一行需求不会同时进两张询价单或一张询价单加一张采购单。
+ */
+async function checkSourcingRequests(tx: Tx, lines: { materialId: number; requestLineIds?: number[] }[], actor: Actor) {
+  const all = lines.flatMap((l) => l.requestLineIds ?? []);
+  if (all.length === 0) return;
+  if (new Set(all).size !== all.length) throw badRequest('同一行需求在一张询价单里只能出现一次');
+  if (!can(actor, 'request.review')) throw forbidden('当前账号不能从需求单发起询价');
+  await tx`
+    SELECT r.id FROM purchase_requests r
+    WHERE r.id IN (SELECT request_id FROM purchase_request_lines WHERE id IN ${tx(all)})
+    ORDER BY r.id FOR UPDATE`;
+  const rows = await tx<{ id: number; name: string; materialId: number | null; status: string; docNo: string; takenBy: string | null; inSourcing: string | null }[]>`
+    SELECT l.id, l.name, l.material_id, r.status, r.doc_no,
+           (SELECT po.doc_no FROM purchase_order_line_requests x JOIN purchase_order_lines pl ON pl.id = x.po_line_id
+              JOIN purchase_orders po ON po.id = pl.po_id
+             WHERE x.request_line_id = l.id AND po.status <> 'cancelled' LIMIT 1) AS taken_by,
+           (SELECT e.doc_no FROM sourcing_line_requests sr JOIN sourcing_lines sl ON sl.id = sr.sourcing_line_id
+              JOIN sourcing_events e ON e.id = sl.event_id
+             WHERE sr.request_line_id = l.id AND ${sourcingHolds(tx)} LIMIT 1) AS in_sourcing
+    FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
+    WHERE l.id IN ${tx(all)}`;
+  const byId = new Map(rows.map((r) => [Number(r.id), r]));
+  for (const l of lines) {
+    for (const rid of l.requestLineIds ?? []) {
+      const r = byId.get(rid);
+      if (!r) throw unprocessable('REQUEST_LINE_NOT_FOUND', '需求单的行不存在，请刷新后重试');
+      if (r.materialId !== null && Number(r.materialId) !== l.materialId) throw unprocessable('REQUEST_MATERIAL_MISMATCH', `「${r.name}」的物料与需求单不一致`);
+      if (r.status !== 'approved') throw conflict('REQUEST_NOT_APPROVED', `需求单 ${r.docNo} 还没通过审核，不能发起询价`);
+      if (r.takenBy) throw conflict('REQUEST_LINE_ORDERED', `「${r.name}」已经在采购单 ${r.takenBy} 里`, { docNo: r.takenBy });
+      if (r.inSourcing) throw conflict('REQUEST_LINE_IN_SOURCING', `「${r.name}」已经在询价单 ${r.inSourcing} 里`, { docNo: r.inSourcing });
+    }
+  }
+}
+
 export async function createSourcing(deps: Deps, raw: unknown, actor: Actor, ip?: string) {
   const input = parse(CreateInput, raw);
   const ids = input.lines.map((l) => l.materialId);
@@ -173,6 +227,7 @@ export async function createSourcing(deps: Deps, raw: unknown, actor: Actor, ip?
       await lockOpKey(tx, input.clientKey);
       const existing = await findByKey(tx, 'sourcing_events', input.clientKey, requestHash);
       if (existing) return { id: existing, replayed: true };
+      await checkSourcingRequests(tx, input.lines, actor);
       const mats = new Map(
         (
           await tx<{ id: number; name: string; purchaseUnit: string; purchaseFactorMilli: number; inventoryUnit: string; decimals: number; tracked: boolean; active: boolean; specification: string }[]>`
@@ -192,11 +247,16 @@ export async function createSourcing(deps: Deps, raw: unknown, actor: Actor, ip?
         const base = toBaseQty(l.purchaseQtyMilli, Number(m.purchaseFactorMilli));
         if (base === null || !fitsDecimals(base, m.decimals)) throw badRequest(`「${m.name}」的数量换算后不是整${m.inventoryUnit}，请调整数量`);
         lineNo += 1;
-        await tx`
+        const [sl] = await tx<{ id: number }[]>`
           INSERT INTO sourcing_lines (event_id, line_no, material_id, purchase_qty_milli, purchase_unit, factor_milli, base_qty_milli, spec)
-          VALUES (${row!.id}, ${lineNo}, ${m.id}, ${l.purchaseQtyMilli}, ${m.purchaseUnit}, ${m.purchaseFactorMilli}, ${base}, ${(l.spec ?? m.specification).slice(0, 80)})`;
+          VALUES (${row!.id}, ${lineNo}, ${m.id}, ${l.purchaseQtyMilli}, ${m.purchaseUnit}, ${m.purchaseFactorMilli}, ${base}, ${(l.spec ?? m.specification).slice(0, 80)})
+          RETURNING id`;
+        for (const rid of l.requestLineIds ?? []) {
+          await tx`INSERT INTO sourcing_line_requests (sourcing_line_id, request_line_id) VALUES (${sl!.id}, ${rid})`;
+        }
       }
-      await writeAudit(tx, { staffId: actor.id, action: 'sourcing_doc', targetType: 'sourcing_event', targetId: row!.id, detail: { docNo, action: 'create' }, ip });
+      const requestLines = input.lines.reduce((n, l) => n + (l.requestLineIds?.length ?? 0), 0);
+      await writeAudit(tx, { staffId: actor.id, action: 'sourcing_doc', targetType: 'sourcing_event', targetId: row!.id, detail: { docNo, action: 'create', ...(requestLines ? { requestLines } : {}) }, ip });
       return { id: Number(row!.id), replayed: false };
     });
     eventId = r.id;
@@ -376,7 +436,7 @@ export async function cancelSourcing(deps: Deps, eventId: number, raw: unknown, 
 // ───────────────────────── 转采购单 ─────────────────────────
 
 /**
- * 定标后生成采购单草稿：供应商、物料、数量、单价按中标的报价，规格带上，备注写询价单号与运费。
+ * 定标后生成采购单草稿：供应商、物料、数量、单价按中标的报价，规格带上，备注写询价单号与运费；从需求单发起的带上需求行。
  * 在新建采购单的事务里锁询价单、核对已定标（purchasing.ts 的 createPo 收到 sourcingEventId 时做），唯一索引兜底同一张询价单只转一张。
  */
 export async function orderFromSourcing(deps: Deps, eventId: number, raw: unknown, actor: Actor, ip?: string) {
@@ -393,6 +453,15 @@ export async function orderFromSourcing(deps: Deps, eventId: number, raw: unknow
       throw conflict('SOURCING_UNIT_CHANGED', `「${l.materialName}」的采购单位或换算改过了，请重新询价`);
     }
   }
+  // 只带这张询价单还占着的需求行：转出以后从采购单上解开、放开了的不再带回来（sourcingHolds）
+  const held = new Set(
+    (
+      await deps.sql<{ requestLineId: number }[]>`
+        SELECT sr.request_line_id FROM sourcing_line_requests sr JOIN sourcing_lines sl ON sl.id = sr.sourcing_line_id
+        JOIN sourcing_events e ON e.id = sl.event_id
+        WHERE e.id = ${eventId} AND ${sourcingHolds(deps.sql)}`
+    ).map((r) => Number(r.requestLineId)),
+  );
   const today = todayIn(deps.config.timezone);
   const note = `询价单 ${e.docNo}：${e.title}${q.freightCents > 0 ? `；运费 ¥${formatAmount(q.freightCents)} 另计` : ''}`.slice(0, 200);
   return createPo(
@@ -404,7 +473,14 @@ export async function orderFromSourcing(deps: Deps, eventId: number, raw: unknow
       expectedDate: e.needBy && e.needBy >= today ? e.needBy : null,
       note,
       action: 'save',
-      lines: e.lines.map((l) => ({ materialId: l.materialId, purchaseQtyMilli: l.purchaseQtyMilli, priceCents: q.prices.find((p) => p.lineId === l.id)!.priceCents, spec: l.spec })),
+      lines: e.lines.map((l) => ({
+        materialId: l.materialId,
+        purchaseQtyMilli: l.purchaseQtyMilli,
+        priceCents: q.prices.find((p) => p.lineId === l.id)!.priceCents,
+        spec: l.spec,
+        // 从需求单发起的询价（v0.7.30）：需求行一起带到采购单行上，需求单的进度由采购单算
+        ...(l.requests.some((r) => held.has(r.lineId)) ? { requestLineIds: l.requests.filter((r) => held.has(r.lineId)).map((r) => r.lineId) } : {}),
+      })),
     },
     actor,
     { ip, sourcingEventId: eventId },
@@ -460,6 +536,11 @@ export async function sourcingChecks(db: Db): Promise<{ key: string; label: stri
       (SELECT count(*) FROM sourcing_quote_lines ql JOIN sourcing_lines sl ON sl.id = ql.sourcing_line_id AND sl.event_id = q.event_id WHERE ql.quote_id = q.id)
         <> (SELECT count(*) FROM sourcing_lines sl WHERE sl.event_id = q.event_id)
       OR q.goods_cents <> coalesce((SELECT sum(ql.amount_cents) FROM sourcing_quote_lines ql WHERE ql.quote_id = q.id), 0))
+    UNION ALL
+    SELECT min(e.doc_no), '需求行 #' || sr.request_line_id || ' 同时被 ' || count(DISTINCT e.id) || ' 张询价单占着'
+    FROM sourcing_line_requests sr JOIN sourcing_lines sl ON sl.id = sr.sourcing_line_id JOIN sourcing_events e ON e.id = sl.event_id
+    WHERE ${sourcingHolds(db)}
+    GROUP BY sr.request_line_id HAVING count(DISTINCT e.id) > 1
     ORDER BY 1 LIMIT 20`;
   const [n] = await db<{ events: number; linked: number }[]>`
     SELECT (SELECT count(*)::int FROM sourcing_events) AS events,

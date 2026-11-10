@@ -4,7 +4,11 @@
 import { useEffect, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Boxes, ClipboardList, HandCoins, Inbox, LayoutGrid, LineChart, Package, ReceiptText, ShoppingCart, SlidersHorizontal, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, Banknote, Boxes, ClipboardCheck, ClipboardList, FileSignature, FileText, HandCoins, LayoutGrid, LineChart, Package, ReceiptText, ShoppingCart, SlidersHorizontal, Soup, type LucideIcon } from 'lucide-react';
+import type { ApprovalCounts } from '@shared/approvals';
+import type { ContractExpiryItem } from '@shared/contracts';
+import type { PaymentTodo } from '@shared/payments';
+import type { InvoiceTodo } from '@shared/invoices';
 import { ERP_MODULES, erpModuleOfPage, type ErpModuleKey } from '@shared/erp';
 import { versionText } from '@shared/instance';
 import { DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
@@ -22,9 +26,13 @@ const ICONS: Record<ErpModuleKey, LucideIcon> = {
   requests: ClipboardList,
   deptStock: Package,
   payables: HandCoins,
-  approvals: Inbox,
+  approvals: ClipboardCheck,
+  contracts: FileSignature,
+  payments: Banknote,
   expenses: ReceiptText,
+  invoices: FileText,
   revenue: LineChart,
+  canteen: Soup,
 };
 
 interface Item {
@@ -34,6 +42,8 @@ interface Item {
   icon: LucideIcon;
   end?: boolean;
   badge?: number;
+  /** 数字标红（审批中心有超时的） */
+  alert?: boolean;
 }
 
 export function ErpShell() {
@@ -47,19 +57,73 @@ export function ErpShell() {
       document.title = session.storeName;
     };
   }, [session.storeName]);
+  // 审批中心（v0.7.30）：待我审批的张数加急采待补单、急采待验收（负责人）；有超时的数字标红
   const todo = useQuery({
-    queryKey: ['inv', 'todo-count'],
-    queryFn: () => api.get<{ count: number }>('/api/inventory/todo-count'),
-    enabled: access.modules.includes('approvals') && can('inventory.approve'),
+    queryKey: ['approvals', 'count'],
+    queryFn: () => api.get<ApprovalCounts>('/api/approvals/count'),
+    enabled: access.modules.includes('approvals') && (can('approval.act') || can('inventory.approve') || can('expense.approve')),
     refetchInterval: 60_000,
   });
+  // 合同（v0.7.31，C11）：60 天内到期、还没续签的份数（维护合同的人看）
+  const expiring = useQuery({
+    queryKey: ['inv', 'contracts', 'expiring'],
+    queryFn: () => api.get<ContractExpiryItem[]>('/api/erp/contracts/expiring'),
+    enabled: access.modules.includes('contracts') && can('contract.manage'),
+    refetchInterval: 300_000,
+  });
+  // 付款（v0.7.32）：批了待付款的申请（登记付款的人）、到期前 30 天的质保金（P9）
+  const payTodo = useQuery({
+    queryKey: ['inv', 'payments', 'todo'],
+    queryFn: () => api.get<PaymentTodo>('/api/erp/payments/todo'),
+    enabled: access.modules.includes('payments') && can('payable.read'),
+    refetchInterval: 300_000,
+  });
+  // 费用与备用金（8.0.1 采购组整改 11）：已收货、待报销的现付采购单张数
+  const toClaim = useQuery({
+    queryKey: ['erp', 'expenses', 'to-claim-count'],
+    queryFn: () => api.get<{ received: number }>('/api/erp/expenses/to-claim/count'),
+    enabled: access.modules.includes('expenses') && can('expense.read'),
+    refetchInterval: 300_000,
+  });
+  // 发票台账（8.0.3，BI09）：认证期限到期前几天以内（含已过期）的待认证发票
+  const invTodo = useQuery({
+    queryKey: ['erp', 'invoices', 'todo'],
+    queryFn: () => api.get<InvoiceTodo>('/api/erp/invoices/todo'),
+    enabled: access.modules.includes('invoices') && (can('payable.read') || can('expense.read') || can('invoice.manage')),
+    refetchInterval: 300_000,
+  });
   if (!access.canEnter) return <Navigate to="/" replace />;
+  const contractsDue = (expiring.data ?? []).filter((x) => !x.renewal);
+  const paymentsBadge = payTodo.data ? (can('payable.manage') ? payTodo.data.awaitingPayment : 0) + payTodo.data.warrantyDue : undefined;
 
-  const moduleItem = (k: ErpModuleKey): Item => ({ key: k, to: ERP_MODULES[k].path, label: ERP_MODULES[k].label, icon: ICONS[k], badge: k === 'approvals' ? todo.data?.count : undefined });
+  const moduleItem = (k: ErpModuleKey): Item => ({
+    key: k,
+    to: ERP_MODULES[k].path,
+    label: ERP_MODULES[k].label,
+    icon: ICONS[k],
+    badge:
+      k === 'approvals' && todo.data
+        ? todo.data.mine + todo.data.backfill + todo.data.accept
+        : k === 'contracts'
+          ? contractsDue.length
+          : k === 'payments'
+            ? paymentsBadge
+            : k === 'expenses'
+              ? toClaim.data?.received
+              : k === 'invoices'
+                ? invTodo.data?.due
+                : undefined,
+    alert:
+      (k === 'approvals' && !!todo.data?.overdue) ||
+      (k === 'contracts' && contractsDue.some((x) => x.daysLeft < 0)) ||
+      (k === 'invoices' && !!invTodo.data?.overdue),
+  });
   const groups: { title: string; items: Item[] }[] = [
     { title: '概览', items: [{ key: 'home', to: '/erp', label: 'ERP 首页', icon: LayoutGrid, end: true }] },
     { title: '供应链', items: access.modules.filter((k) => ERP_MODULES[k].group === '供应链').map(moduleItem) },
     { title: '财务', items: access.modules.filter((k) => ERP_MODULES[k].group === '财务').map(moduleItem) },
+    { title: '法务', items: access.modules.filter((k) => ERP_MODULES[k].group === '法务').map(moduleItem) },
+    { title: '员工服务', items: access.modules.filter((k) => ERP_MODULES[k].group === '员工服务').map(moduleItem) },
     { title: '设置', items: access.canSettings ? [{ key: 'modules', to: '/erp/modules', label: '模块设置', icon: SlidersHorizontal }] : [] },
   ].filter((g) => g.items.length > 0);
 
@@ -85,7 +149,11 @@ export function ErpShell() {
         <Icon className="size-4 shrink-0" />
         <span className="min-w-0 flex-1">{it.label}</span>
         {!!it.badge && (
-          <span className="num flex h-5 min-w-5 items-center justify-center rounded-full bg-yuzu px-1.5 text-[11px] font-bold text-ink" aria-hidden>
+          <span
+            className={cn('num flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold', it.alert ? 'bg-clay text-paper' : 'bg-yuzu text-ink')}
+            aria-hidden
+            data-testid={`erp-badge-${it.key}`}
+          >
             {it.badge > 99 ? '99+' : it.badge}
           </span>
         )}

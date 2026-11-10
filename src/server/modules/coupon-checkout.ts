@@ -53,15 +53,22 @@ interface CouponRowForCheckout extends CouponTerms {
   templateName: string;
   exchangeItemName: string | null;
   exchangeTicketName: string | null;
+  buyItemName: string | null;
   checkoutNo: string | null;
+  /** 买一赠一的赠品出库（8.0.4）：选了物料的结账时记一条赠品出库 */
+  giftMaterialId: number | null;
+  giftQtyMilli: number | null;
+  giftWarehouseId: number | null;
 }
 
 const COUPON_FOR_CHECKOUT = (db: Db) => db`
   SELECT c.id, c.code, c.status, c.member_id, m.name AS member_name, c.valid_from, c.valid_to, t.name AS template_name,
          t.kind, t.face_value, t.rate_percent, t.max_off, t.threshold, t.scope, t.scope_categories, t.scope_items,
-         t.exchange_item_id, t.exchange_ticket_type_id, xi.name AS exchange_item_name, xt.name AS exchange_ticket_name, ck.checkout_no
+         t.exchange_item_id, t.exchange_ticket_type_id, xi.name AS exchange_item_name, xt.name AS exchange_ticket_name, ck.checkout_no,
+         t.buy_item_id, bi.name AS buy_item_name, t.gift_material_id, t.gift_qty_milli, t.gift_warehouse_id
   FROM coupons c JOIN coupon_templates t ON t.id = c.template_id LEFT JOIN members m ON m.id = c.member_id
   LEFT JOIN service_items xi ON xi.id = t.exchange_item_id LEFT JOIN ticket_types xt ON xt.id = t.exchange_ticket_type_id
+  LEFT JOIN service_items bi ON bi.id = t.buy_item_id
   LEFT JOIN checkouts ck ON ck.id = c.checkout_id`;
 
 const termsOf = (r: CouponRowForCheckout): CouponTerms => ({
@@ -75,10 +82,14 @@ const termsOf = (r: CouponRowForCheckout): CouponTerms => ({
   scopeItems: r.scopeItems.map(Number),
   exchangeItemId: r.exchangeItemId === null ? null : Number(r.exchangeItemId),
   exchangeTicketTypeId: r.exchangeTicketTypeId === null ? null : Number(r.exchangeTicketTypeId),
+  buyItemId: r.buyItemId === null ? null : Number(r.buyItemId),
 });
 const summaryOf = (r: CouponRowForCheckout) =>
   couponTermsText(termsOf(r), {
-    items: r.exchangeItemId !== null && r.exchangeItemName ? { [Number(r.exchangeItemId)]: r.exchangeItemName } : {},
+    items: {
+      ...(r.exchangeItemId !== null && r.exchangeItemName ? { [Number(r.exchangeItemId)]: r.exchangeItemName } : {}),
+      ...(r.buyItemId !== null && r.buyItemName ? { [Number(r.buyItemId)]: r.buyItemName } : {}),
+    },
     ticketTypes: r.exchangeTicketTypeId !== null && r.exchangeTicketName ? { [Number(r.exchangeTicketTypeId)]: r.exchangeTicketName } : {},
   });
 
@@ -156,6 +167,15 @@ export async function redeemCoupon(
   await tx`
     INSERT INTO coupon_events (coupon_id, kind, checkout_id, amount, staff_id, at, business_date)
     VALUES (${r.id}, 'use', ${o.checkoutId}, ${j.amount}, ${o.staffId}, ${o.at}, ${o.date})`;
+  // 买一赠一的赠品出库（8.0.4，HY12）：模板上选了物料的，记一条「待出库」，每分钟的自动任务在选的仓开直接耗用单；
+  // 这里只写这一行、不碰库存（库存不够也不挡结账）
+  if (r.kind === 'bogo' && r.giftMaterialId !== null && r.giftQtyMilli !== null && r.giftWarehouseId !== null) {
+    await tx`
+      INSERT INTO coupon_gift_outs (coupon_id, checkout_id, template_id, item_id, material_id, qty_milli, warehouse_id, business_date)
+      SELECT ${r.id}, ${o.checkoutId}, c.template_id, ${r.exchangeItemId ?? r.buyItemId}, ${r.giftMaterialId}, ${r.giftQtyMilli}, ${r.giftWarehouseId}, ${o.date}
+      FROM coupons c WHERE c.id = ${r.id}
+      ON CONFLICT (coupon_id, checkout_id) DO NOTHING`;
+  }
   return { couponId: r.id, amount: j.amount, lineIds: j.lineIds, ref: `${r.templateName}（${formatStoreCouponCode(r.code)}）`.slice(0, 64) };
 }
 
@@ -171,6 +191,10 @@ export async function returnCheckoutCoupons(tx: Tx, o: { checkoutId: number; rea
       INSERT INTO coupon_events (coupon_id, kind, checkout_id, amount, reason, staff_id, at, business_date)
       VALUES (${p.couponId}, 'return', ${o.checkoutId}, ${p.amount}, ${o.reason.slice(0, 200)}, ${o.staffId}, ${o.at}, ${o.date})`;
   }
+  // 买一赠一的赠品出库（8.0.4，HY12）：还没出库的取消；已出库的交给自动任务冲销那张耗用单
+  await tx`
+    UPDATE coupon_gift_outs SET status = CASE status WHEN 'pending' THEN 'cancelled' WHEN 'failed' THEN 'cancelled' ELSE 'void_pending' END, updated_at = now()
+    WHERE checkout_id = ${o.checkoutId} AND status IN ('pending', 'failed', 'done')`;
 }
 
 /** 结账前核对用的明细：已挂的明细加上按此刻算出的门票（门票还没挂到账单，用负数编号代替） */

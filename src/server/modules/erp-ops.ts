@@ -16,7 +16,7 @@ import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { conflict, forbidden } from '../lib/errors';
-import { benefitUseOpRef, countCardOpRef, memberCardOpRef, couponOpRef, platformOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isCountCardOp, isDeviceOp, isFenced, isMemberOp, isPlatformOp, memberOpRef, trialOpRef } from '../lib/fences';
+import { approvalOpRef, benefitUseOpRef, contractOpRef, countCardOpRef, memberCardOpRef, couponOpRef, platformOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isContractOp, isCountCardOp, isApprovalOp, isDeviceOp, isFenced, isMemberOp, isPaymentFlowOp, isPlatformOp, memberOpRef, paymentFlowOpRef, trialOpRef } from '../lib/fences';
 import { parse } from '../lib/validate';
 import { setTxTimeouts } from '../lib/tx';
 
@@ -42,6 +42,7 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   coupon_template: ['coupon.manage'],
   coupon_rule: ['coupon.manage'],
   coupon_batch: ['coupon.manage'],
+  coupon_campaign: ['coupon.manage'],
   coupon_issue: ['coupon.issue'],
   // 硬件连接（v0.7.21）
   device_create: ['device.manage'],
@@ -69,6 +70,24 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   doc_print: ['print.network'],
   // 会员实体卡（v0.7.28）
   member_card: ['member.card'],
+  // 审批中心（v0.7.30）：新建审批规则要「维护审批规则」；设代理人与接口一致（能进审批中心的）
+  approval_rule: ['approval.rules'],
+  approval_delegation: ['approval.act', 'inventory.approve', 'expense.approve'],
+  // 合同与法务审查（v0.7.31）：新建合同、变更单、用印申请都要「维护合同」
+  contract_create: ['contract.manage'],
+  contract_change: ['contract.manage'],
+  contract_seal: ['contract.manage'],
+  // 付款流（v0.7.32）：付款申请要「发起付款申请」，合同付款、登记发票要「登记期初未付、付款……」，验收、质量问题要「维护合同」
+  payment_request: ['payment.request'],
+  contract_payout: ['payable.manage'],
+  contract_acceptance: ['contract.manage'],
+  contract_quality: ['contract.manage'],
+  // 8.0.3：台账里直接登记的发票也是这一类（要「管理进项发票」）
+  supplier_invoice: ['payable.manage', 'invoice.manage'],
+  // 员工食堂第二期：柚子信箱的回信，与回信接口一致
+  canteen_reply: ['canteen.manage'],
+  request_import: ['request.review'],
+  gift_receipt: ['inventory.operate', 'purchase.manage'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -86,6 +105,7 @@ const READ: Record<ErpOpType, Permission[]> = {
   coupon_template: ['coupon.manage'],
   coupon_rule: ['coupon.manage'],
   coupon_batch: ['coupon.manage'],
+  coupon_campaign: ['coupon.manage'],
   coupon_issue: ['coupon.issue'],
   device_create: ['device.manage'],
   device_job: ['device.test'],
@@ -103,6 +123,19 @@ const READ: Record<ErpOpType, Permission[]> = {
   platform_settlement: ['platform.settle'],
   doc_print: ['print.network'],
   member_card: ['member.card', 'member.read'],
+  approval_rule: ['approval.rules'],
+  approval_delegation: ['approval.act', 'inventory.approve', 'expense.approve'],
+  contract_create: ['contract.read'],
+  contract_change: ['contract.read'],
+  contract_seal: ['contract.read'],
+  payment_request: ['payable.read', 'payment.request'],
+  contract_payout: ['payable.read'],
+  contract_acceptance: ['contract.read'],
+  contract_quality: ['contract.read'],
+  supplier_invoice: ['payable.read', 'invoice.manage'],
+  canteen_reply: ['canteen.manage'],
+  request_import: ['request.review'],
+  gift_receipt: ['inventory.read'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {
@@ -164,6 +197,21 @@ export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise
   // 会员实体卡（v0.7.28）：refId 是那张卡
   if (type === 'member_card') {
     const refId = await memberCardOpRef(db, key);
+    if (refId !== null) return { found: true, abandoned: false, refId };
+  }
+  // 审批中心（v0.7.30）：refId 是那条审批规则、那条代理设置
+  if (isApprovalOp(type)) {
+    const refId = await approvalOpRef(db, key, type);
+    if (refId !== null) return { found: true, abandoned: false, refId };
+  }
+  // 合同与法务审查（v0.7.31）：refId 是那份合同、那张变更单、那条用印登记
+  if (isContractOp(type)) {
+    const refId = await contractOpRef(db, key, type);
+    if (refId !== null) return { found: true, abandoned: false, refId };
+  }
+  // 付款流（v0.7.32）：refId 是那张付款申请、那笔合同付款、那条验收 / 质量问题登记、那张发票
+  if (isPaymentFlowOp(type)) {
+    const refId = await paymentFlowOpRef(db, key, type);
     if (refId !== null) return { found: true, abandoned: false, refId };
   }
   return { found: false, abandoned: await isFenced(db, key, [type]) };

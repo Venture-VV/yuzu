@@ -5,8 +5,9 @@
 //   · 先按 id 升序锁定涉及的物料行（SELECT … FOR UPDATE），同一物料的收发严格串行；
 //   · 结存字段有 CHECK (>= 0) 兜底，任何情况下都不会出现负库存。
 
-import { CENTRAL_WAREHOUSE_ID, type ApprovalRules, type InventorySettings, type MoveType } from '@shared/inventory';
+import { CENTRAL_WAREHOUSE_ID, DEFAULT_COUNT_BIG_CENTS, DEFAULT_COUNT_BIG_PCT, type ApprovalRules, type InventorySettings, type MoveType } from '@shared/inventory';
 import { shiftDate } from '@shared/labels';
+import { urgentCapOf } from '@shared/purchasing';
 import { formatQty } from '@shared/quantity';
 import { z } from 'zod';
 import { can } from '@shared/permissions';
@@ -16,6 +17,7 @@ import { AppError, unprocessable } from '../../lib/errors';
 import { dateSchema } from '../../lib/validate';
 import { dateIn, todayIn } from '../../lib/dates';
 import { nextDocNo, setTxTimeouts } from '../../lib/tx';
+import { loadPurchaseRules } from './purchase-rules';
 
 // 通用的日期与事务小工具已移到 lib（v0.7.22）；库存模块内部照旧从这里取
 export { dateIn, nextDocNo, setTxTimeouts, todayIn };
@@ -37,7 +39,8 @@ export async function loadInventorySettings(db: Db): Promise<InventorySettings> 
   return {
     scopeName: (map.get('inventory_scope_name') as string) ?? '后勤总库',
     priceBasis: (map.get('inventory_price_basis') as string) ?? '含税到货价',
-    urgentCapCents: Number(map.get('inventory_urgent_cap_cents') ?? DEFAULT_URGENT_CAP_CENTS),
+    // 急采上限（8.0.1 起，CG05）= 采购规则里急采分级的最高一档；原来单独存的 inventory_urgent_cap_cents 不再用
+    urgentCapCents: urgentCapOf(await loadPurchaseRules(db)),
     approvalThresholdCents: Number(map.get('inventory_approval_threshold_cents') ?? DEFAULT_APPROVAL_THRESHOLD_CENTS),
     usageWindowDays: Number(map.get('inventory_usage_window_days') ?? DEFAULT_USAGE_WINDOW_DAYS),
     ...DEFAULT_CYCLE_RULES,
@@ -46,8 +49,8 @@ export async function loadInventorySettings(db: Db): Promise<InventorySettings> 
   };
 }
 
-/** 急采上限默认 2000 元（#19，可调） */
-export const DEFAULT_URGENT_CAP_CENTS = 200_000;
+/** 急采上限的默认（8.0.1 起 = 采购规则里急采分级默认的最高一档，CG05；原来 #19 是 2000 元） */
+export const DEFAULT_URGENT_CAP_CENTS = 3_000_000;
 /** 免确认门槛默认 2000 元（#18，可调，v0.7.12）：设为需要确认的单据，金额不超过它的提交即生效 */
 export const DEFAULT_APPROVAL_THRESHOLD_CENTS = 200_000;
 /** 可用天数按近 28 天的用量算（#22，可调，v0.7.12） */
@@ -56,7 +59,14 @@ export const DEFAULT_USAGE_WINDOW_DAYS = 28;
 /** 称重容差与盘点、对账提醒的规则（#14、#23，v0.7.13，可调）：存成一条设置 inventory_cycle_rules */
 export type CycleRules = Pick<
   InventorySettings,
-  'weighTolerancePct' | 'stocktakeDay' | 'stocktakeGraceDays' | 'monthlyReconDay' | 'monthlyReconGraceDays' | 'batchReconGraceDays'
+  | 'weighTolerancePct'
+  | 'stocktakeDay'
+  | 'stocktakeGraceDays'
+  | 'monthlyReconDay'
+  | 'monthlyReconGraceDays'
+  | 'batchReconGraceDays'
+  | 'countBigPct'
+  | 'countBigCents'
 >;
 export const DEFAULT_CYCLE_RULES: CycleRules = {
   weighTolerancePct: 10,
@@ -65,6 +75,9 @@ export const DEFAULT_CYCLE_RULES: CycleRules = {
   monthlyReconDay: 1,
   monthlyReconGraceDays: 5,
   batchReconGraceDays: 3,
+  // 盘点大差异（v0.7.30，A8）
+  countBigPct: DEFAULT_COUNT_BIG_PCT,
+  countBigCents: DEFAULT_COUNT_BIG_CENTS,
 };
 const CYCLE_RULE_KEYS = Object.keys(DEFAULT_CYCLE_RULES) as (keyof CycleRules)[];
 function pickCycleRules(raw: unknown): Partial<CycleRules> {
@@ -190,6 +203,20 @@ export async function warehouseInfo(db: Db, warehouseId: number) {
 
 
 export const docDateSchema = dateSchema();
+
+/**
+ * 询价单还占着需求行吗（v0.7.30；查询里询价单的别名是 e，询价单行与需求行的关联是 sr）：
+ *   · 询价单没撤销，而且没有转出、没撤回的采购单（转出以后需求行由采购单的需求关联算「已下单」）；
+ *   · 而且没转过采购单（询价中、已定标），或者这行需求还在最近撤回的那张采购单里（采购单撤回后回到询价中）。
+ * 转采购单以后从采购单上解开的需求行就放开了（Codex 自动审查 abe2842）：可以另转采购单、另发起询价，那张采购单撤回时也不回到这张询价单。
+ */
+export const sourcingHolds = (db: Db) => db`
+  e.status <> 'cancelled'
+  AND NOT EXISTS (SELECT 1 FROM purchase_orders hp WHERE hp.sourcing_event_id = e.id AND hp.status <> 'cancelled')
+  AND (NOT EXISTS (SELECT 1 FROM purchase_orders hp WHERE hp.sourcing_event_id = e.id)
+       OR EXISTS (SELECT 1 FROM purchase_order_line_requests hx JOIN purchase_order_lines hl ON hl.id = hx.po_line_id
+                  WHERE hx.request_line_id = sr.request_line_id
+                    AND hl.po_id = (SELECT max(hp.id) FROM purchase_orders hp WHERE hp.sourcing_event_id = e.id)))`;
 
 export function assertNotFuture(date: string, timeZone: string) {
   if (date > todayIn(timeZone)) throw unprocessable('FUTURE_DATE', '单据日期不能晚于今天');

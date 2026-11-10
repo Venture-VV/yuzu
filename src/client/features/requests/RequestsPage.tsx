@@ -1,11 +1,13 @@
 // 部门采购需求单（v0.7.8，飞书需求 RQ-005 第二步）：部门提需求、采购审核；采购勾选已通过的行转采购单。
 // 每一行的下单、到货、退货由采购单与收货单算出来（不手填）。
+// 8.0.1（采购组整改 02、03）：红点紧急、绿点普通，待审核按紧急在前、期望到货日期早的在前排；截单以后提交的当天不能通过。
 
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ClipboardList, Download, ExternalLink, PackageCheck, Pencil, Plus, ShoppingCart, X } from 'lucide-react';
 import { formatQty } from '@shared/quantity';
 import { REQUEST_STATUS_LABELS, type PurchaseRequest, type RequestLine, type RequestLineProgress, type RequestStatus } from '@shared/requests';
+import { channelLabel } from '@shared/purchasing';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
@@ -18,6 +20,7 @@ import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Input, Notice, Segmented, Select, Skeleton } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
+import { PriorityDot, PriorityTag } from './parts';
 import { useInvalidateRequests, useOpenLines, useRequest, useRequestMeta, useRequests } from './queries';
 
 export const REQUEST_STATUS_TONE: Record<RequestStatus, 'pine' | 'yuzu' | 'neutral' | 'clay'> = {
@@ -30,6 +33,7 @@ export const REQUEST_STATUS_TONE: Record<RequestStatus, 'pine' | 'yuzu' | 'neutr
 
 const PROGRESS: Record<RequestLineProgress['state'], { label: string; tone: 'neutral' | 'lake' | 'yuzu' | 'pine' }> = {
   none: { label: '未下单', tone: 'neutral' },
+  sourcing: { label: '询价中', tone: 'yuzu' },
   ordered: { label: '已下单', tone: 'lake' },
   partial: { label: '部分到货', tone: 'yuzu' },
   received: { label: '已到货', tone: 'pine' },
@@ -134,6 +138,8 @@ export function RequestsPage() {
                 <Input type="date" fullWidth={false} value={to} min={from || undefined} max={session.calendarToday} onChange={(e) => setTo(e.target.value)} className="h-9 w-36" aria-label="提交日期到" />
               </label>
               {me && !me.canReview && me.departmentName && <span className="text-[13px] text-ink-2">只显示 {me.departmentName} 的需求单与你提的</span>}
+              {status === 'submitted' && <span className="text-[12.5px] text-ink-3" data-testid="requests-review-order">按紧急在前、期望到货日期早的在前排</span>}
+              {meta.data?.cutoff.enabled && <span className="text-[12.5px] text-ink-3">每天 {meta.data.cutoff.time} 截单</span>}
             </Card>
             {list.isPending ? (
               <Skeleton className="h-64" />
@@ -152,9 +158,12 @@ export function RequestsPage() {
                         className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-4 py-3 text-left hover:bg-paper-2 md:grid-cols-[150px_minmax(0,1fr)_150px_auto]"
                         data-testid={`request-row-${r.id}`}
                       >
-                        <span className="num text-[13.5px] font-bold">
-                          {r.docNo}
-                          <span className="block font-sans text-[12px] font-medium text-ink-3">{formatDateTime(r.createdAt)}</span>
+                        <span className="num flex items-start gap-2 text-[13.5px] font-bold">
+                          <PriorityDot priority={r.priority} className="mt-1.5" />
+                          <span>
+                            {r.docNo}
+                            <span className="block font-sans text-[12px] font-medium text-ink-3">{formatDateTime(r.submittedAt)}</span>
+                          </span>
                         </span>
                         <span className="min-w-0">
                           <span className="block truncate text-[13.5px] font-semibold">
@@ -163,8 +172,14 @@ export function RequestsPage() {
                           </span>
                           <span className="block truncate text-[12px] text-ink-3">
                             {r.department.name} · {r.requester.name}
-                            {r.needBy ? ` · ${r.needBy} 前要` : ''}
+                            {r.needBy ? ` · 期望 ${r.needBy} 到货` : ''}
+                            {r.source === 'import' ? ' · 集采导入' : ''}
                           </span>
+                          {r.lockedToday && (
+                            <span className="block text-[12px] font-semibold text-clay" data-testid={`request-locked-${r.id}`}>
+                              截单以后提交，{r.approvableOn} 起可以通过
+                            </span>
+                          )}
                         </span>
                         <span className="hidden text-[12.5px] text-ink-2 md:block">
                           {r.status === 'approved' ? `已下单 ${r.orderedLines}/${r.lineCount} 行 · 到货 ${r.receivedLines} 行` : `${r.lineCount} 行`}
@@ -229,11 +244,13 @@ function OpenLines() {
             />
             <div className="min-w-0 space-y-1">
               <p className="flex flex-wrap items-baseline gap-x-2 text-[13.5px]">
+                <PriorityDot priority={l.priority} className="self-center" />
                 <span className="font-bold">{l.name}</span>
                 {l.materialId ? <span className="text-[12px] text-ink-3">物料：{l.materialName}</span> : <Badge tone="yuzu">新产品</Badge>}
                 <span className="num font-semibold">
                   {formatQty(l.qtyMilli)} {l.unit}
                 </span>
+                {l.needBy && <span className="text-[12px] text-ink-3">期望 {l.needBy} 到货</span>}
                 {l.refPriceCents !== null && (
                   <span className="text-[12px] text-ink-3">
                     参考单价 <Money cents={l.refPriceCents} />
@@ -241,8 +258,10 @@ function OpenLines() {
                 )}
               </p>
               <p className="text-[12px] text-ink-3">
-                <span className="num">{l.requestNo}</span> · {l.department.name} · {l.requesterName} · {l.purpose}
+                <span className="num">{l.requestNo}</span> · {l.department.name} · {l.applicant || l.requesterName} · {l.purpose}
                 {l.details && ` · ${l.details}`}
+                {l.channel && ` · ${channelLabel(l.channel)}`}
+                {l.supplier && ` · ${l.supplier.name}`}
               </p>
               {l.link && <ExternalLinkText href={l.link} />}
               <ImageThumbs images={l.images} size={40} />
@@ -268,6 +287,18 @@ function ProgressText({ p, canSeePo }: { p: RequestLineProgress; canSeePo: boole
   return (
     <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] text-ink-3">
       <Badge tone={s.tone}>{s.label}</Badge>
+      {!p.po && p.sourcing && (
+        <>
+          {canSeePo ? (
+            <Link to={`/purchasing/sourcing/${p.sourcing.id}`} className="num font-semibold text-lake hover:underline">
+              {p.sourcing.docNo}
+            </Link>
+          ) : (
+            <span className="num font-semibold">{p.sourcing.docNo}</span>
+          )}
+          <span>定标后转采购单</span>
+        </>
+      )}
       {p.po && (
         <>
           {canSeePo ? (
@@ -309,6 +340,9 @@ function LineCard({ l, canSeePo }: { l: RequestLine; canSeePo: boolean }) {
         )}
         {l.details && ` · ${l.details}`}
         {l.note && ` · 备注：${l.note}`}
+        {l.applicant && ` · 申请人：${l.applicant}`}
+        {l.channel && ` · ${channelLabel(l.channel)}`}
+        {l.supplier && ` · 供应商：${l.supplier.name}`}
       </p>
       {l.link && <ExternalLinkText href={l.link} />}
       <ImageThumbs images={l.images} />
@@ -372,7 +406,9 @@ function RequestSheet({ id, onClose }: { id: number | null; onClose: () => void 
           <>
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone={REQUEST_STATUS_TONE[r.status]}>{REQUEST_STATUS_LABELS[r.status]}</Badge>
-              {r.needBy && <span className="text-[12.5px] text-ink-3">{r.needBy} 前要</span>}
+              <PriorityTag priority={r.priority} />
+              {r.needBy && <span className="text-[12.5px] text-ink-3">期望 {r.needBy} 到货</span>}
+              {r.source === 'import' && <Badge tone="neutral">集采导入</Badge>}
               {r.status === 'approved' && (
                 <span className="ml-auto flex items-center gap-1 text-[12.5px] text-ink-2">
                   <PackageCheck className="size-4" />
@@ -382,6 +418,11 @@ function RequestSheet({ id, onClose }: { id: number | null; onClose: () => void 
             </div>
             {r.reason && (r.status === 'returned' || r.status === 'rejected' || r.status === 'cancelled') && (
               <Notice tone={r.status === 'returned' ? 'warning' : 'info'} title={`${REQUEST_STATUS_LABELS[r.status]}：${r.reason}`} />
+            )}
+            {r.lockedToday && (
+              <Notice tone="warning" title={`截单以后提交的需求单，${r.approvableOn} 起可以通过`} data-testid="request-cutoff-notice">
+                今天可以先退回或定为不采购；急需的请找采购走急采。
+              </Notice>
             )}
             {r.note && <p className="text-[13px] text-ink-2">备注：{r.note}</p>}
             <ul className="divide-y divide-line rounded-lg border border-line">
@@ -425,7 +466,7 @@ function RequestSheet({ id, onClose }: { id: number | null; onClose: () => void 
               <Button variant="secondary" disabled={busy} onClick={() => setReasonFor('return')} data-testid="request-return">
                 退回
               </Button>
-              <Button variant="primary" loading={busy} onClick={() => void act('approve')} data-testid="request-approve">
+              <Button variant="primary" loading={busy} disabled={r.lockedToday} title={r.lockedToday ? `${r.approvableOn} 起可以通过` : undefined} onClick={() => void act('approve')} data-testid="request-approve">
                 通过
               </Button>
             </>

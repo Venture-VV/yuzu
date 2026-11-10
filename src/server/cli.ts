@@ -755,10 +755,11 @@ async function main() {
             ? `会员到期处理（营业日 ${run.businessDate}）：处理 ${run.processed} 位，保级 ${run.retained}、进补充期 ${run.grace}、降档 ${run.downgraded}${run.trialsExpired ? `；体验到期 ${run.trialsExpired} 位` : ''}${run.error ? `；出错：${run.error}` : ''}`
             : '今天已经处理过，没有到期的会员',
         );
+        // 只写这一次新发的；运行记录一个营业日一条、同一天累加，累计的写在括号里（原来只写累计的，清单改过以后再跑、一张没发也像又发了一轮）
         const benefits = await runBenefitsDaily({ sql, config });
         console.log(
           benefits
-            ? `会员权益自动发放（营业日 ${benefits.businessDate}）：${benefits.processed} 位会员、${benefits.coupons} 张券${benefits.error ? `；出错：${benefits.error}` : ''}`
+            ? `会员权益自动发放（营业日 ${benefits.businessDate}）：${benefits.thisRun.coupons ? `这一次 ${benefits.thisRun.processed} 位会员、${benefits.thisRun.coupons} 张券` : '这一次没有要发的'}（当天累计 ${benefits.processed} 位、${benefits.coupons} 张）${benefits.error ? `；出错：${benefits.error}` : ''}`
             : '会员权益今天已经发过，权益清单之后没有改过',
         );
         // 会员挑战（v0.7.28）：这个月到店天数满了、还没送过的会员送一次

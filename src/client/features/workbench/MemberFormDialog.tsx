@@ -2,7 +2,6 @@ import { useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { MemberPhoneGrantRequest } from '@shared/grants';
 import { formatPhone } from '@shared/labels';
-import { normalizeFieldValue, type MemberFieldDef } from '@shared/member-fields';
 import type { MemberDetail, MemberSummary } from '@shared/types';
 import { api, ApiError, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
@@ -11,6 +10,7 @@ import { AuthorizeDialog } from '../../components/AuthorizeDialog';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Button, Field, Input, Notice, Segmented, Select, Textarea } from '../../components/ui';
+import { TagPicker } from '../membership/TagPicker';
 
 type Gender = 'female' | 'male' | 'unknown';
 
@@ -34,11 +34,10 @@ export function MemberFormDialog({
   const toast = useToast();
   const session = useSession();
   const can = useCan();
-  /** 启用的自定义字段（#12） */
-  const fields = session.rules.memberFields.filter((d) => d.active);
   // 启用的渠道；编辑时会员原来的渠道已停用也照常列出，不改就保留
   const channels = (session.rules.memberChannels ?? []).filter((c) => c.active || c.key === member?.channel);
-  const [custom, setCustom] = useState<Record<string, string>>({});
+  /** 会员标签（8.0.4，替代原来的自定义字段） */
+  const [tagIds, setTagIds] = useState<number[]>([]);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [gender, setGender] = useState<Gender>('unknown');
@@ -64,7 +63,7 @@ export function MemberFormDialog({
       setBirthday(member?.birthday ?? '');
       setNote(member?.note ?? '');
       setChannel(member?.channel ?? '');
-      setCustom(Object.fromEntries(Object.entries(member?.customFields ?? {}).map(([k, v]) => [k, String(v)])));
+      setTagIds((member?.tags ?? []).map((t) => t.id));
       setErrors({});
       setExisting(null);
       setPhoneReason('');
@@ -82,11 +81,6 @@ export function MemberFormDialog({
     const errs: Record<string, string> = {};
     if (!name.trim()) errs.name = '请填写会员姓名';
     if (!/^1\d{10}$/.test(cleanPhone)) errs.phone = '请输入 11 位手机号';
-    for (const f of fields) {
-      const { value, error } = normalizeFieldValue(f, custom[f.key]);
-      if (error) errs[`customFields.${f.key}`] = error;
-      else if (value === undefined && f.required) errs[`customFields.${f.key}`] = `请填写「${f.label}」`;
-    }
     if (phoneChanged && phoneReason.trim().length < 2) errs.phoneReason = '改手机号要写原因（至少 2 个字）';
     setErrors(errs);
     if (Object.keys(errs).length) return;
@@ -97,14 +91,13 @@ export function MemberFormDialog({
     }
     setSaving(true);
     setExisting(null);
-    const customFields = Object.fromEntries(fields.map((f) => [f.key, custom[f.key] ?? '']));
     const body = {
       name,
       phone: cleanPhone,
       gender: gender === 'unknown' ? null : gender,
       birthday: birthday || null,
       note,
-      customFields,
+      tagIds,
       channel: channel || null,
       ...(phoneChanged ? { phoneReason: phoneReason.trim(), ...(phoneGrantId ? { phoneGrantId } : {}) } : {}),
     };
@@ -198,19 +191,9 @@ export function MemberFormDialog({
             </Select>
           </Field>
         )}
-        {fields.length > 0 && (
-          <div className="grid gap-4 sm:grid-cols-2" data-testid="member-custom-form">
-            {fields.map((f) => (
-              <CustomFieldInput
-                key={f.key}
-                def={f}
-                value={custom[f.key] ?? ''}
-                error={errors[`customFields.${f.key}`]}
-                onChange={(v) => setCustom((c) => ({ ...c, [f.key]: v }))}
-              />
-            ))}
-          </div>
-        )}
+        <Field label="会员标签" hint="选填，例如亲子客、商务客；按标签筛选、导出在数据看板「会员总览」" error={errors.tagIds}>
+          <TagPicker value={tagIds} onChange={setTagIds} current={member?.tags ?? []} />
+        </Field>
         <Field label="备注" htmlFor="m-note" hint="选填，如偏好、过敏或注意事项">
           <Textarea id="m-note" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} />
         </Field>
@@ -240,35 +223,5 @@ export function MemberFormDialog({
         />
       )}
     </Dialog>
-  );
-}
-
-/** 一个自定义字段的输入：文字、数字、日期、单选 */
-function CustomFieldInput({ def, value, error, onChange }: { def: MemberFieldDef; value: string; error?: string; onChange: (v: string) => void }) {
-  const id = `m-field-${def.key}`;
-  return (
-    <Field label={def.label} htmlFor={id} hint={def.required ? '必填' : '选填'} error={error}>
-      {def.type === 'select' ? (
-        <Select id={id} value={value} onChange={(e) => onChange(e.target.value)} aria-invalid={!!error || undefined}>
-          <option value="">{def.required ? '请选择' : '不填'}</option>
-          {def.options.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </Select>
-      ) : (
-        <Input
-          id={id}
-          type={def.type === 'date' ? 'date' : 'text'}
-          inputMode={def.type === 'number' ? 'decimal' : undefined}
-          maxLength={def.type === 'text' ? 100 : undefined}
-          value={value}
-          invalid={!!error}
-          className={def.type === 'number' ? 'num' : undefined}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      )}
-    </Field>
   );
 }

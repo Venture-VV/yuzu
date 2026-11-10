@@ -4,19 +4,24 @@ import { Ban, CircleCheck, CornerUpLeft, FilePen, Lock, PackagePlus, Pencil, Rec
 import { CLAIM_STATUS_LABELS } from '@shared/expenses';
 import { INV_STATUS_LABELS } from '@shared/inventory';
 import { channelText, type PurchaseOrder } from '@shared/purchasing';
+import { formatAmount } from '@shared/money';
 import { formatQty } from '@shared/quantity';
-import { api, errorMessage } from '../../lib/api';
+import { errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
 import { ImageThumbs } from '../../components/Images';
 import { Money } from '../../components/Money';
 import { Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
+import { ApprovalProgress, ApprovalResend, useApprovalGate } from '../approvals/ApprovalProgress';
+import { postDocAction } from '../approvals/uncertain';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, IconButton, Notice, Spinner, InfoItem as Info } from '../../components/ui';
 import { Qty, SimRule } from '../inventory/parts';
 import { CompareChip, PoStatusChip, ReceivingChip } from './parts';
 import { useInvalidateAll, usePo } from './queries';
+import { ThreeWayBadge } from '../payments/parts';
+import { usePoThreeWay } from '../payments/queries';
 
 const ACTION_LABELS: Record<PurchaseOrder['approvals'][number]['action'], string> = {
   create: '创建',
@@ -61,12 +66,15 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
   const [dialog, setDialog] = useState<Pending>(null);
   const canManage = can('purchase.manage');
   const canApprove = can('inventory.approve');
+  // 审批中心（v0.7.30）：同意的是当前这一级，带上看到的审批单与级别；这一级不归我审时只显示在等谁
+  const gate = useApprovalGate(po.approval, 'purchase_order');
   const editable = (po.status === 'draft' || po.status === 'returned') && canManage && !po.backfill;
 
   const run = async (key: string, path: string, body: unknown, success: string) => {
     setBusy(key);
     try {
-      await api.post(`/api/purchase-orders/${po.id}/${path}`, body);
+      // 同意、退回带着审批单与级别：没收到结果时记下，之后只能按原内容重新提交（uncertain.ts）
+      await postDocAction(`/api/purchase-orders/${po.id}/${path}`, body, po.docNo, session.staff.id);
       await invalidate();
       toast({ tone: 'success', title: success, body: po.docNo });
       setDialog(null);
@@ -145,6 +153,19 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
               </Link>
             </Info>
           )}
+          {po.contract && (
+            <Info label="合同">
+              {session.erpModules.includes('contracts') && can('contract.read') ? (
+                <Link to={`/erp/contracts/${po.contract.id}`} className="num font-semibold text-lake hover:underline" data-testid="po-sheet-contract">
+                  {po.contract.contractNo}
+                </Link>
+              ) : (
+                <span className="num" data-testid="po-sheet-contract">
+                  {po.contract.contractNo}
+                </span>
+              )}
+            </Info>
+          )}
           <Info label="下单日期">
             <span className="num">{po.orderDate}</span>
           </Info>
@@ -160,6 +181,26 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
             </Info>
           )}
         </dl>
+
+        {po.contractCheck?.exceeded && (
+          <Notice tone="warning" title={`超出合同 ${po.contractCheck.contractNo} 的单价或数量`} data-testid="po-sheet-contract-exceeded">
+            {po.contractCheck.lines
+              .filter((x) => x.priceOverCents > 0 || x.overQtyMilli > 0)
+              .map((x) => {
+                const line = po.lines.find((l) => l.lineNo === x.lineNo);
+                const unit = line?.purchaseUnit ?? '';
+                return (
+                  <span key={x.lineNo} className="block">
+                    {line?.materialName ?? `第 ${x.lineNo} 行`}：
+                    {x.priceOverCents > 0 && `合同价 ¥${formatAmount(x.contractPriceCents ?? 0)}，超价 ¥${formatAmount(x.priceOverCents)} / ${unit}`}
+                    {x.priceOverCents > 0 && x.overQtyMilli > 0 && '；'}
+                    {x.overQtyMilli > 0 && `超出合同剩余量 ${formatQty(x.overQtyMilli)} ${unit}`}
+                  </span>
+                );
+              })}
+            <span className="mt-1 block font-semibold">原因：{po.contractNote || '还没写（提交时要写）'}</span>
+          </Notice>
+        )}
 
         <section>
           <h3 className="mb-2 text-[13px] font-bold text-ink-2">明细 · {po.lines.length} 行</h3>
@@ -246,6 +287,9 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
           </section>
         )}
 
+        {/* 三单匹配（v0.7.32）：采购单、收货（减退货）、发票对不对得上；付款申请要对得上或财务放行 */}
+        {po.receipts.length > 0 && <ThreeWayLine poId={po.id} />}
+
         {po.reimbursement.settlement === 'cash' && (po.reimbursement.claims.length > 0 || po.status === 'approved' || po.status === 'closed') && (
           <section data-testid="po-reimbursement">
             <h3 className="mb-2 flex items-center gap-2 text-[13px] font-bold text-ink-2">
@@ -304,6 +348,8 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
           </section>
         )}
 
+        <ApprovalProgress approval={po.approval} />
+
         <section>
           <h3 className="mb-2 text-[13px] font-bold text-ink-2">经办记录</h3>
           <ol className="space-y-2 border-l-2 border-line pl-4">
@@ -337,7 +383,7 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
             关闭
           </Button>
         )}
-        {['draft', 'submitted', 'returned'].includes(po.status) && po.receipts.length === 0 && (canApprove || (canManage && po.createdBy === session.staff.id)) && (
+        {po.withdrawable && (canApprove || (canManage && po.createdBy === session.staff.id)) && (
           <Button variant="ghost" size="sm" icon={<Ban className="size-4" />} onClick={() => setDialog('cancel')}>
             撤回
           </Button>
@@ -352,13 +398,20 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
             </Button>
           </>
         )}
-        {po.status === 'submitted' && canApprove && (
+        {po.status === 'submitted' && canApprove && gate.uncertain && <ApprovalResend sent={gate.uncertain} onDone={invalidate} />}
+        {po.status === 'submitted' && canApprove && !gate.uncertain && !gate.canActHere && gate.waiting && <span className="text-[12.5px] text-ink-3">{gate.waiting}</span>}
+        {po.status === 'submitted' && canApprove && !gate.uncertain && gate.canActHere && (
           <>
             <Button variant="secondary" icon={<CornerUpLeft className="size-4" />} onClick={() => setDialog('return')}>
               退回修改
             </Button>
-            <Button variant="primary" loading={busy === 'approve'} icon={<CircleCheck className="size-4" />} onClick={() => run('approve', 'approve', {}, '采购单已确认')}>
-              {po.backfill ? '确认补单' : '确认采购'}
+            <Button
+              variant="primary"
+              loading={busy === 'approve'}
+              icon={<CircleCheck className="size-4" />}
+              onClick={() => run('approve', 'approve', gate.fence, po.approval && po.approval.levels > po.approval.currentLevel ? `已同意第 ${po.approval.currentLevel} 级` : '采购单已确认')}
+            >
+              {po.approval && po.approval.levels > 1 ? `同意（第 ${po.approval.currentLevel}/${po.approval.levels} 级）` : po.backfill ? '确认补单' : '确认采购'}
             </Button>
           </>
         )}
@@ -378,7 +431,7 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
         label={dialog === 'return' ? '需要修改什么' : '原因'}
         confirmLabel={dialog === 'close' ? '确认关闭' : dialog === 'return' ? '退回修改' : '确认撤回'}
         onClose={() => setDialog(null)}
-        onConfirm={(reason) => void run(dialog!, dialog!, { reason }, dialog === 'close' ? '采购单已关闭' : dialog === 'return' ? '已退回修改' : '已撤回')}
+        onConfirm={(reason) => void run(dialog!, dialog!, dialog === 'return' ? { reason, ...gate.fence } : { reason }, dialog === 'close' ? '采购单已关闭' : dialog === 'return' ? '已退回修改' : '已撤回')}
       />
     </>
   );
@@ -395,3 +448,26 @@ function MoneyTile({ label, cents, hint, tone = 'ink' }: { label: string; cents:
   );
 }
 
+/** 采购单的三单比对（付款模块开着、能看货款的人才查） */
+function ThreeWayLine({ poId }: { poId: number }) {
+  const can = useCan();
+  const session = useSession();
+  const enabled = session.erpModules.includes('payments') && (can('payable.read') || can('payment.request'));
+  const q = usePoThreeWay(poId, enabled);
+  if (!enabled || !q.data) return null;
+  const t = q.data;
+  return (
+    <section data-testid="po-three-way">
+      <h3 className="mb-2 flex items-center gap-2 text-[13px] font-bold text-ink-2">
+        三单匹配 <ThreeWayBadge status={t.status} />
+      </h3>
+      <p className="text-[13px]">
+        采购单 <Money cents={t.poTotalCents} /> · 收货 <Money cents={t.receivedCents} /> · 发票 <Money cents={t.invoicedCents} />
+      </p>
+      <p className={cn('text-[12.5px]', t.status === 'held' ? 'text-clay' : 'text-ink-3')}>
+        {t.reason}
+        {t.releaseStale && '（放行以后金额变了，要重新放行）'}
+      </p>
+    </section>
+  );
+}

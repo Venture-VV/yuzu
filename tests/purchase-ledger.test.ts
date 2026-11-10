@@ -206,10 +206,9 @@ describe('12 条账目自检', () => {
     await claim({ paySource: 'petty', advanceId: old.id, expenseDate: daysAgo(11) });
     await newPo({ orderDate: daysAgo(2) });
     await newPo({ orderDate: daysAgo(2) });
-    // 约定到货天数改成 1 天：没有预计到货日的也算超期
-    const rules = (await api(ctx.app, boss, 'GET', '/api/erp/expenses/rules')).body;
-    expect(rules.arrivalOverdueDays).toBe(7);
-    expect((await api(ctx.app, boss, 'PUT', '/api/erp/expenses/rules', { ...rules, arrivalOverdueDays: 1 })).status).toBe(200);
+    // 约定到货天数改成 1 天：没有预计到货日的也算超期（8.0.1 起在「采购 → 采购规则」里改，CG01）
+    expect((await api(ctx.app, boss, 'GET', '/api/inventory/purchase-rules')).body.arrivalOverdueDays).toBe(7);
+    expect((await api(ctx.app, boss, 'PUT', '/api/inventory/purchase-rules', { arrivalOverdueDays: 1 })).status).toBe(200);
 
     const audit = (await api(ctx.app, keeper, 'GET', '/api/erp/audit')).body;
     expect(audit.rules.map((r: { no: number }) => r.no)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);

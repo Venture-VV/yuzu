@@ -2,6 +2,7 @@
 // 所有汇总只按各物料自己的库存单位统计，不跨单位求和。
 
 import type { FastifyInstance } from 'fastify';
+import { approvalChecks } from '../approvals/engine';
 import { z } from 'zod';
 import {
   CENTRAL_WAREHOUSE_ID,
@@ -158,7 +159,8 @@ export async function inventoryOverview(db: Db, timeZone: string): Promise<Inven
     SELECT
       (SELECT count(*) FROM inv_docs WHERE doc_type = 'issue' AND status = 'confirmed' AND warehouse_id IS NOT NULL
          AND dept_signed_at IS NULL AND confirmed_at < now() - make_interval(days => ${ISSUE_SIGN_DUE_DAYS})) AS unsigned_issues,
-      (SELECT count(*) FROM inv_docs WHERE doc_type = 'receipt' AND urgent AND status = 'submitted') AS urgent_to_verify,
+      -- 急采待仓库验收：已经按金额分级审批过的（8.0.1；还在审批中的不算）
+      (SELECT count(*) FROM inv_docs WHERE doc_type = 'receipt' AND urgent AND status = 'submitted' AND urgent_approved_at IS NOT NULL) AS urgent_to_verify,
       (SELECT count(*) FROM inv_docs WHERE doc_type = 'receipt' AND urgent AND status = 'confirmed' AND purchase_order_id IS NULL) AS urgent_to_backfill,
       (SELECT count(*) FROM inv_docs WHERE status = 'awaiting_supplier') AS awaiting_supplier,
       (SELECT count(*) FROM inv_docs WHERE status = 'awaiting_supplier'
@@ -442,6 +444,9 @@ export async function inventoryChecks(db: Db): Promise<CheckItem[]> {
         ? [...recon.bad, ...recon.badTotals.map((id) => `对账登记 #${id} 合计不一致`)].join('、')
         : '一致',
   });
+
+  // 审批中心（v0.7.30）
+  items.push(await approvalChecks(db));
   return items;
 }
 

@@ -36,11 +36,8 @@ export interface MembershipRules {
   reminderDays: number[];
   /** 已有会员上线、期初导入（老卡迁移）最高定到几档（会员文档：最高档要新充值达到门槛） */
   onboardMaxGrade: number;
-  /**
-   * 手牌 VIP 柜：下标 0–6 对应 L0–L6，值是这一档能用到几级 VIP 柜（0 = 不能用）。
-   * 柜子的 1–5 级沿用店主的柜号清单（2026-10-27：3 万以下、5 万、10 万、20 万、30 万以上），换算到新档级待确认
-   */
-  vipLockerLevels: number[];
+  /** 生日礼提前几天到账（8.0.4，HY13）：发券规则的生日礼、权益清单的生日礼遇都按它；0 = 生日当天 */
+  birthdayLeadDays: number;
   /**
    * 低一档邀请体验（v0.7.25，M52）：体验几天、每位会员每月能邀请几次（0 = 不开放）、
    * 受邀人多少个月内只能被邀请或赠送一次（撤销的不算）
@@ -69,8 +66,8 @@ export const DEFAULT_MEMBERSHIP_RULES: MembershipRules = {
   topUpMinCents: 5_000_00,
   reminderDays: [90, 60, 30, 7],
   onboardMaxGrade: 5,
-  // L0–L3 → 1 级柜（原来所有会员都能用 1 级柜）；L4（5 万）→ 2 级；L5（10 万）→ 4 级；L6（30 万）→ 5 级
-  vipLockerLevels: [1, 1, 1, 1, 2, 4, 5],
+  // 生日前 3 天到账（8.0.4 需求表 09；原来是生日当月第一天）
+  birthdayLeadDays: 3,
   trialInviteDays: 7,
   trialInvitesPerMonth: 1,
   trialInviteeMonths: 12,
@@ -247,8 +244,30 @@ export function daysToExpiry(state: GradeState, today: string): number | null {
   return Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
 }
 
+/**
+ * VIP 柜（8.0.4 起归「会员权益」，docs/MEMBERSHIP_V804.md 第 2 节；原来分在「会员规则」与「手牌与前台」两处）：
+ * levels 下标 0–6 对应 L0–L6，值是这一档能用到几级 VIP 柜（0 = 不能用）。柜子的 1–5 级沿用店主的柜号清单
+ * （2026-10-27：3 万以下、5 万、10 万、20 万、30 万以上），换算到新档级待确认；overrideEnabled：允许值班经理及以上
+ * 当场授权散客或等级不够的会员使用 VIP 柜
+ */
+export interface VipLockerRules {
+  levels: number[];
+  overrideEnabled: boolean;
+}
+/** L0–L3 → 1 级柜（原来所有会员都能用 1 级柜）；L4（5 万）→ 2 级；L5（10 万）→ 4 级；L6（30 万）→ 5 级；当场授权默认不开 */
+export const DEFAULT_VIP_LOCKER_RULES: VipLockerRules = { levels: [1, 1, 1, 1, 2, 4, 5], overrideEnabled: false };
+
+/** 后台「会员权益 → VIP 柜」整页：设置、最近修改、手牌池里每一级有几个在用的 VIP 柜 */
+export interface VipLockerSettings {
+  rules: VipLockerRules;
+  updatedAt: string | null;
+  updatedByName: string | null;
+  /** 1–5 级各有几个在用的 VIP 柜（停用的不算） */
+  lockerCounts: Record<number, number>;
+}
+
 /** 这一档能用到几级 VIP 柜（散客为 0） */
-export const lockerLevelOf = (rules: MembershipRules, grade: number): number => rules.vipLockerLevels[grade] ?? 0;
+export const lockerLevelOf = (vip: Pick<VipLockerRules, 'levels'>, grade: number): number => vip.levels[grade] ?? 0;
 
 /** 单笔最低充值：首充（没有充值、没有期初的会员）或续充；0 = 不限 */
 export const rechargeMinimum = (rules: MembershipRules, first: boolean): number => (first ? rules.firstRechargeMinCents : rules.topUpMinCents);
@@ -265,6 +284,53 @@ export const GRADE_STATES: { grade: Grade; tier: Tier | null }[] = [
   { grade: 0, tier: null },
   ...([1, 2, 3, 4, 5, 6] as Grade[]).flatMap((grade) => ([0, 1, 2] as Tier[]).map((tier) => ({ grade, tier }))),
 ];
+
+// ───────────────────────── 生日礼的到账日（8.0.4 需求表 09，HY13） ─────────────────────────
+
+const isLeap = (y: number) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+
+/** 某一年的生日（MM-DD）；2 月 29 日生日平年按 2 月 28 日 */
+export function birthdayIn(year: number, monthDay: string): string {
+  const md = monthDay === '02-29' && !isLeap(year) ? '02-28' : monthDay;
+  return `${year}-${md}`;
+}
+
+const monthEndOf = (date: string) => {
+  const [y, m] = [Number(date.slice(0, 4)), Number(date.slice(5, 7))];
+  const next = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
+  return shiftDate(next, -1);
+};
+
+/**
+ * 生日礼（发券规则的生日礼、权益清单的生日礼遇）这一天该不该发：生日前 leadDays 天到账，到生日当月最后一天之间都算
+ * （那几天应用没开、当月才建档或补填生日的照样补发）。返回算哪一年的生日（去重键用这个年份）；不在这段日子里为 null。
+ * 1 月初的生日提前到上一年 12 月到账的，算生日那一年。
+ */
+export function birthdayDueYear(birthday: string | null, today: string, leadDays: number): string | null {
+  if (!birthday) return null;
+  const md = birthday.slice(5, 10);
+  const ty = Number(today.slice(0, 4));
+  for (const y of [ty, ty + 1]) {
+    const day = birthdayIn(y, md);
+    if (shiftDate(day, -Math.max(0, leadDays)) <= today && today <= monthEndOf(day)) return String(y);
+  }
+  return null;
+}
+
+/** 这一天该发生日礼的生日（MM-DD）都有哪些（按上面的规则；SQL 里按它筛会员） */
+export function birthdayMonthDaysDue(today: string, leadDays: number): { monthDay: string; year: string }[] {
+  const out: { monthDay: string; year: string }[] = [];
+  for (let m = 1; m <= 12; m++) {
+    for (let d = 1; d <= 31; d++) {
+      const md = `${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      // 只取真实存在的月日（2 月 29 日按闰年 2000 年核对）
+      if (new Date(`2000-${md}T00:00:00Z`).toISOString().slice(5, 10) !== md) continue;
+      const year = birthdayDueYear(`2000-${md}`, today, leadDays);
+      if (year) out.push({ monthDay: md, year });
+    }
+  }
+  return out;
+}
 
 /** 他店查询：姓名中间遮住（两个字遮后一个） */
 export function maskName(name: string): string {

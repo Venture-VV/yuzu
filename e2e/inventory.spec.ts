@@ -135,10 +135,12 @@ test.describe('库存与采购流程', () => {
     await logout(page);
 
     await login(page, 'linlan', '会员工作台');
-    // 门店主导航里没有库存、待办；从用户菜单进 ERP，再点「审批待办」
+    // 门店主导航里没有库存、待办；从用户菜单进 ERP，再点「审批中心」（v0.7.30 起导航是审批中心，旧的审批待办页照常在）
     await expect(page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '待办', exact: true })).toHaveCount(0);
     await enterErp(page);
-    await nav(page, '审批待办').click();
+    await nav(page, '审批中心').click();
+    await expect(page).toHaveURL(/\/approvals/);
+    await page.goto('/todo');
     await page.getByRole('button', { name: /盘点/ }).filter({ hasText: '抽纸' }).first().click();
     await page.getByLabel('抽纸差异原因').selectOption('measurement');
     await page.getByRole('button', { name: '确认盘点调整' }).click();

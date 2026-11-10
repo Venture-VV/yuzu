@@ -1,9 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
-import { ArrowLeft, CircleAlert, CircleCheck, ClipboardList, CloudOff, PackagePlus, RotateCw, Search, ShoppingCart, Trash2, X } from 'lucide-react';
+import { ArrowLeft, CircleAlert, CircleCheck, ClipboardList, CloudOff, FileSearch, PackagePlus, RotateCw, Search, ShoppingCart, Trash2, X } from 'lucide-react';
+import type { ContractCheckResult, ContractLineCheck } from '@shared/contracts';
 import type { Material } from '@shared/inventory';
-import { centsToInput, parseYuan } from '@shared/money';
-import type { PoLineRequest, PriceCompare, PurchaseOrder } from '@shared/purchasing';
+import { centsToInput, formatAmount, parseYuan } from '@shared/money';
+import { DEFAULT_CHANNEL_KEY, type PoLineRequest, type PriceCompare, type PurchaseOrder } from '@shared/purchasing';
 import { fitsDecimals, formatQty, lineAmountCents, parseQty, priceChangePercent, toBaseQty } from '@shared/quantity';
 import { MAX_LINE_IMAGES, type ImageRef, type OpenRequestLine } from '@shared/requests';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
@@ -22,6 +24,8 @@ import { useInvSettings, useMaterials, useSuppliers } from '../inventory/queries
 import { CompareChip } from './parts';
 import { PriceHistoryButton } from './PriceHistory';
 import { useOpenLines } from '../requests/queries';
+import { useContractOptions } from '../contracts/queries';
+import { SourcingCreateDialog, type SourcingDraft } from './SourcingPage';
 import { useBaseline, useInvalidateAll, usePo, usePurchaseRules } from './queries';
 
 interface Line {
@@ -131,6 +135,10 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
   const [channelNote, setChannelNote] = useState(existing?.channel?.note ?? '');
   const [channelTouched, setChannelTouched] = useState(!!existing?.channel);
   const [lines, setLines] = useState<Line[]>(existing ? linesFrom(existing) : []);
+  // 挂合同（v0.7.31，C9）：同一供应商、生效中的采购合同；提交时按单价表核对，超价、超量要写原因
+  const contractsOn = session.erpModules.includes('contracts');
+  const [contractId, setContractId] = useState<number | null>(existing?.contract?.id ?? null);
+  const [contractNote, setContractNote] = useState(existing?.contractNote ?? '');
   const [approveNow, setApproveNow] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: 'edit' });
   const [error, setError] = useState<string | null>(null);
@@ -165,7 +173,8 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
   const supplierDefault = suppliers.data?.find((s) => s.id === supplierId)?.defaultChannel ?? null;
   useEffect(() => {
     if (channelTouched || channels.length === 0) return;
-    const next = channels.some((c) => c.key === supplierDefault) ? supplierDefault! : channels[0]!.key;
+    // 供应商档案没设默认途径时按「供应商」（与服务端一样，8.0.1 固定三类：第一项「网购」要写在哪买，不能当默认）
+    const next = channels.some((c) => c.key === supplierDefault) ? supplierDefault! : channels.some((c) => c.key === DEFAULT_CHANNEL_KEY) ? DEFAULT_CHANNEL_KEY : channels[0]!.key;
     if (next !== channel) setChannel(next);
   }, [channelTouched, channels, supplierDefault, channel]);
   const channelDef = channels.find((c) => c.key === channel);
@@ -249,6 +258,28 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
     // 只在需求行第一次读回时并入一次（之后的修改由采购在明细里调整）
   }, [openLines.data, materialsQ.data]);
   const patch = (key: string, p: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...p } : l)));
+  // 改为询价（v0.7.30）：合计到询价门槛的、或者想先比价的，把明细（物料、数量、规格、需求单）带到一张新询价单；这张采购单不保存
+  const [sourcingDraft, setSourcingDraft] = useState<SourcingDraft | null>(null);
+  const toSourcing = () => {
+    if (unmatched.length > 0) {
+      setError(`还有 ${unmatched.length} 行新产品没选物料：先选好物料，再改为询价`);
+      return;
+    }
+    const mats = new Map((materialsQ.data ?? []).map((m) => [m.id, m]));
+    const draftLines = lines.flatMap((l) => {
+      const m = mats.get(l.materialId);
+      if (!m) return [];
+      const docs = [...new Set(l.requests.map((r) => `${r.requestNo} ${r.departmentName}`))];
+      return [{ key: l.key, material: m, qty: l.qty, spec: l.spec, requestLineIds: l.requests.map((r) => r.lineId), sources: docs.length ? docs.join('、') : undefined }];
+    });
+    if (draftLines.length === 0) {
+      setError('请至少加一项物料');
+      return;
+    }
+    const names = draftLines.map((d) => d.material.name);
+    setError(null);
+    setSourcingDraft({ title: (names.length > 1 ? `${names[0]}等 ${names.length} 项` : names[0]!).slice(0, 40), needBy: expectedDate, note: note.trim(), lines: draftLines });
+  };
 
   const rows = lines.map((l) => {
     const m = materialsQ.data?.find((x) => x.id === l.materialId);
@@ -265,7 +296,39 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
     return { l, m, qty, base, price, err, amount, ready };
   });
   const total = rows.reduce((s, r) => s + (r.amount ?? 0), 0);
-  const needsApproval = !!settings.data?.approvalRules.purchase_order;
+  const contractOptions = useContractOptions(supplierId, contractsOn);
+  // 换了供应商：原来选的合同不是这家的就去掉（原来挂着的、可能已过生效期的留着，服务端核对）
+  useEffect(() => {
+    if (!contractId || !contractOptions.data) return;
+    if (contractOptions.data.some((o) => o.id === contractId)) return;
+    if (existing?.contract?.id === contractId && supplierId === existing.supplier.id) return;
+    setContractId(null);
+  }, [contractId, contractOptions.data, supplierId, existing]);
+  const checkInput = useMemo(
+    () => rows.flatMap((r, i) => (r.ready && r.qty !== null && r.price !== null ? [{ lineNo: i + 1, materialId: r.l.materialId, purchaseUnit: r.l.purchaseUnit, purchaseQtyMilli: r.qty, priceCents: r.price }] : [])),
+    [rows],
+  );
+  const checkKey = JSON.stringify(checkInput);
+  const [debouncedKey, setDebouncedKey] = useState(checkKey);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedKey(checkKey), 400);
+    return () => clearTimeout(t);
+  }, [checkKey]);
+  const contractCheck = useQuery({
+    queryKey: ['inv', 'contract-check', contractId, existing?.id ?? 0, debouncedKey],
+    queryFn: () =>
+      api.post<ContractCheckResult>('/api/erp/contracts/check', { contractId, poId: existing?.id ?? null, lines: JSON.parse(debouncedKey) as typeof checkInput }),
+    enabled: contractsOn && !!contractId && debouncedKey !== '[]',
+    placeholderData: keepPreviousData,
+  });
+  const checkOf = (i: number): ContractLineCheck | null => (contractId ? (contractCheck.data?.lines.find((x) => x.lineNo === i + 1) ?? null) : null);
+  const contractExceeded = !!contractId && !!contractCheck.data?.exceeded && contractCheck.data.contractId === contractId;
+  // 需求单转的采购单（8.0.1 采购组整改 04，CG04）：每一行都来自审核过的需求单时提交即确认（采购规则里可以关；命中审批规则的照规则）
+  const fromRequests = !!purchaseRules.data?.requestPoDirect && mode !== 'revise' && rows.length > 0 && rows.every((r) => r.l.requests.length > 0);
+  const needsApproval = !!settings.data?.approvalRules.purchase_order && !fromRequests;
+  // 询价门槛（E5）：没改过版、不是补单、不是从已定标的询价单转来的，合计到门槛要先询价（与服务端提交时的核对一致）
+  const quoteThreshold = purchaseRules.data?.quoteThresholdCents ?? 0;
+  const overQuote = mode !== 'revise' && quoteThreshold > 0 && total >= quoteThreshold && !existing?.sourcing && !existing?.backfill;
   const blocking = uploading.size > 0
     ? '图片还在上传，请稍等'
     : unmatched.length > 0
@@ -290,6 +353,7 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
     expectedDate: expectedDate || null,
     note: note.trim(),
     ...(channelDef ? { channel: channelDef.key, channelNote: channelNote.trim() } : {}),
+    ...(contractsOn || existing?.contract ? { contractId, contractNote: contractId ? contractNote.trim() : '' } : {}),
     action,
     approveNow: action === 'submit' && needsApproval && approveNow,
     lines: rows.map((r) => ({
@@ -426,6 +490,46 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
                 data-testid="po-channel-note"
               />
             </Field>
+            {contractsOn && supplierId && (contractId || (contractOptions.data?.length ?? 0) > 0) && (
+              <>
+                <Field label="合同" htmlFor="po-contract" className="sm:col-span-2" hint="选了合同，提交时按合同单价表核对（超价、超量要写原因）">
+                  <Select id="po-contract" value={contractId ?? ''} disabled={locked} onChange={(e) => setContractId(Number(e.target.value) || null)} data-testid="po-contract">
+                    <option value="">不挂合同</option>
+                    {existing?.contract && !contractOptions.data?.some((o) => o.id === existing.contract!.id) && supplierId === existing.supplier.id && (
+                      <option value={existing.contract.id}>
+                        {existing.contract.contractNo} · {existing.contract.title}（已不在生效期）
+                      </option>
+                    )}
+                    {contractOptions.data?.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.contractNo} · {o.title}
+                        {o.endDate ? `（至 ${o.endDate}）` : ''}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                {contractId && (
+                  <Field
+                    label="超出合同的原因"
+                    htmlFor="po-contract-note"
+                    className="sm:col-span-2"
+                    hint={contractExceeded ? '有行超出合同单价或剩余数量：提交前必须写原因（审批时看得到）' : '没超出合同时不用填'}
+                  >
+                    <Input
+                      id="po-contract-note"
+                      value={contractNote}
+                      maxLength={200}
+                      disabled={locked}
+                      onChange={(e) => setContractNote(e.target.value)}
+                      placeholder={contractExceeded ? '例如：旺季临时加量、原材料涨价供应商已发函' : '选填'}
+                      className="h-10"
+                      invalid={contractExceeded && contractNote.trim().length < 2}
+                      data-testid="po-contract-note"
+                    />
+                  </Field>
+                )}
+              </>
+            )}
             <Field label="备注" htmlFor="po-note" className="sm:col-span-2 lg:col-span-4">
               <Input id="po-note" value={note} maxLength={200} disabled={locked} onChange={(e) => setNote(e.target.value)} placeholder="例如：需求来源、送货要求" className="h-10" />
             </Field>
@@ -503,10 +607,11 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
             </div>
             {rows.length === 0 && <EmptyState art="leaf" title="还没有物料" description="搜索物料加入；同一物料在一张采购单里只出现一次。" className="py-8" />}
             <ul className="divide-y divide-line/70">
-              {rows.map((r) => (
+              {rows.map((r, i) => (
                 <PoLineRow
                   key={r.l.key}
                   row={r}
+                  contractLine={checkOf(i)}
                   locked={locked}
                   qtyRef={(el) => qtyRefs.current.set(r.l.key, el)}
                   onPatch={(p) => patch(r.l.key, p)}
@@ -525,16 +630,19 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
           {error && (
             <Notice tone="error" title={error} icon={<CircleAlert className="size-5" />}>
               内容仍保留在页面上，可修改后再提交。
-              {error.includes('询价门槛') && (
-                <>
-                  {' '}
-                  可以先点「保存草稿」，再到
-                  <Link to="/purchasing/sourcing" className="mx-1 font-bold text-lake underline">
-                    询价比价
-                  </Link>
-                  建询价单。
-                </>
-              )}
+              {error.includes('询价门槛') &&
+                (mode === 'new' ? (
+                  <> 点下面的「改为询价」，把这些物料（连同需求单）带到一张新询价单；定标后从询价单转采购单。</>
+                ) : (
+                  <>
+                    {' '}
+                    到
+                    <Link to="/purchasing/sourcing" className="mx-1 font-bold text-lake underline">
+                      询价比价
+                    </Link>
+                    建询价单，定标后从询价单转采购单。
+                  </>
+                ))}
             </Notice>
           )}
           {phase.kind === 'uncertain' && (
@@ -573,17 +681,36 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
                 <span className="flex items-center gap-2 text-yuzu-deep">
                   提交后需负责人确认 <SimRule />
                 </span>
+              ) : fromRequests ? (
+                <span className="text-pine" data-testid="po-direct">
+                  需求单转的采购单：供应链审核过需求单，提交即确认
+                </span>
               ) : (
                 <span className="text-pine">提交即确认</span>
               )}
             </span>
             {blocking && phase.kind === 'edit' && <span className="text-[12.5px] font-semibold text-clay">{blocking}</span>}
+            {contractExceeded && contractNote.trim().length < 2 && phase.kind === 'edit' && (
+              <span className="text-[12.5px] font-semibold text-clay" data-testid="po-contract-exceeded">
+                超出合同 {contractCheck.data?.contractNo}：提交前在「超出合同的原因」里写明
+              </span>
+            )}
+            {overQuote && (
+              <span className="text-[12.5px] font-semibold text-yuzu-deep" data-testid="po-over-quote">
+                合计到了询价门槛 ¥{formatAmount(quoteThreshold)}：{mode === 'new' ? '先「改为询价」，定标后再转采购单' : '要来自已定标的询价单才能提交'}
+              </span>
+            )}
           </div>
           {needsApproval && can('inventory.approve') && (
             <label className="flex cursor-pointer items-center gap-2 text-[13px] font-semibold text-ink-2">
               <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={approveNow} disabled={locked} onChange={(e) => setApproveNow(e.target.checked)} />
               同时以负责人身份确认
             </label>
+          )}
+          {mode === 'new' && (
+            <Button variant="secondary" disabled={locked || lines.length === 0} icon={<FileSearch className="size-4" />} onClick={toSourcing} data-testid="po-to-sourcing">
+              改为询价
+            </Button>
           )}
           {mode !== 'revise' && (
             <Button variant="secondary" disabled={locked || !!blocking} loading={phase.kind === 'submitting'} onClick={() => void send({ ...body('save'), clientKey })}>
@@ -605,12 +732,14 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
         }
         onSaved={(m) => creating && placeRequest(m, creating)}
       />
+      <SourcingCreateDialog open={!!sourcingDraft} onClose={() => setSourcingDraft(null)} initial={sourcingDraft ?? undefined} />
     </>
   );
 }
 
 function PoLineRow({
   row,
+  contractLine,
   locked,
   qtyRef,
   onPatch,
@@ -618,6 +747,8 @@ function PoLineRow({
   onUploading,
 }: {
   row: { l: Line; m: Material | undefined; base: number | null; price: number | null; err: string | null; amount: number | null };
+  /** 与挂的合同核对的结果（v0.7.31）；没挂合同为空 */
+  contractLine: ContractLineCheck | null;
   locked: boolean;
   qtyRef: (el: HTMLInputElement | null) => void;
   onPatch: (p: Partial<Line>) => void;
@@ -721,7 +852,28 @@ function PoLineRow({
           </p>
         )}
       </div>
+      {contractLine && <ContractLineHint check={contractLine} unit={l.purchaseUnit} />}
       {row.err && <p className="text-[12px] font-semibold text-clay @lg:col-span-3 @4xl:col-span-full">{row.err}</p>}
     </li>
+  );
+}
+
+/** 这一行与合同单价表的核对（v0.7.31，C9）：合同价、剩余量，超价、超量标出来 */
+function ContractLineHint({ check, unit }: { check: ContractLineCheck; unit: string }) {
+  if (check.notInContract || check.unitMismatch) {
+    return (
+      <p className="text-[12px] font-semibold text-ember @lg:col-span-3 @4xl:col-span-full" data-testid="po-line-contract">
+        {check.notInContract ? '合同单价表里没有这一项（不按合同核对）' : '合同里这一项的单位不同（不按合同核对）'}
+      </p>
+    );
+  }
+  const over = check.priceOverCents > 0 || check.overQtyMilli > 0;
+  return (
+    <p className={cn('num text-[12px] @lg:col-span-3 @4xl:col-span-full', over ? 'font-semibold text-clay' : 'text-ink-3')} data-testid="po-line-contract">
+      合同价 ¥{formatAmount(check.contractPriceCents ?? 0)} / {unit}
+      {check.remainingMilli !== null && ` · 合同还剩 ${formatQty(check.remainingMilli)} ${unit}`}
+      {check.priceOverCents > 0 && ` · 超价 ¥${formatAmount(check.priceOverCents)} / ${unit}`}
+      {check.overQtyMilli > 0 && ` · 超量 ${formatQty(check.overQtyMilli)} ${unit}`}
+    </p>
   );
 }

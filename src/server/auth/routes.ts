@@ -80,14 +80,14 @@ export function registerAuthRoutes(app: FastifyInstance, deps: Deps) {
 
   app.post('/api/auth/login', async (req, reply) => {
     const { username, password } = parse(LoginInput, req.body);
-    checkLock(username);
+    checkLock(username, req.ip);
     const rows = await sql<(Actor & { passwordHash: string; active: boolean })[]>`
       SELECT id, username, display_name, role, duties, must_change_password, password_hash, active
       FROM staff WHERE username = ${username}`;
     const staff = rows[0];
     const ok = staff ? await verifyPassword(password, staff.passwordHash) : false;
     if (!staff || !ok || !staff.active) {
-      recordFailure(username);
+      recordFailure(username, req.ip);
       await writeAudit(sql, {
         staffId: staff?.id ?? null,
         action: 'login_failed',
@@ -97,7 +97,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: Deps) {
       if (staff && ok && !staff.active) throw unauthorized('该账号已停用，请联系店主');
       throw unauthorized('账号或密码不正确');
     }
-    clearFailures(username);
+    clearFailures(username, req.ip);
     const token = await createSession(sql, staff.id, config.sessionTtlHours, {
       ip: req.ip,
       userAgent: req.headers['user-agent'],

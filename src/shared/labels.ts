@@ -39,6 +39,7 @@ export const DUTY_LABELS: Record<Duty, { title: string; hint: string }> = {
   approve: { title: '库存采购负责人', hint: '确认采购、报损、盘点调整、退货、付款与冲销' },
   cost: { title: '成本核算', hint: '登记费用报销（发票、税点、科目）与备用金打款、退回（v0.7.7）' },
   request: { title: '部门申购', hint: '给自己的部门提采购需求单（员工档案里要填所属部门，v0.7.8）' },
+  legal: { title: '法务', hint: '合同审查的法务那一级：按审查清单逐条给意见（v0.7.31）' },
 };
 
 export const DEDUCTION_RULE_LABELS: Record<DeductionRule, { title: string; description: string }> = {

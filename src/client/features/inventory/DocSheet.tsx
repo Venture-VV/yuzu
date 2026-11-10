@@ -8,7 +8,10 @@ import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { Dialog, Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
+import { ApprovalProgress, ApprovalResend, useApprovalGate } from '../approvals/ApprovalProgress';
+import { postDocAction } from '../approvals/uncertain';
 import { Money } from '../../components/Money';
+import { ReceiptAttachmentsPanel } from '../../components/ReceiptAttachments';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, IconButton, Notice, Select, Spinner, InfoItem as Info } from '../../components/ui';
 import { DOC_VISUAL, DocTypeChip, PackHint, Qty, SimRule, StatusChip } from './parts';
@@ -64,18 +67,26 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
 
   const meta = doc.urgent ? { ...INV_DOC_META[doc.docType], title: '急采收货' } : INV_DOC_META[doc.docType];
   const visual = DOC_VISUAL[doc.docType];
-  // v0.7.11：部门小仓的单据（耗用、报损、盘点、期初、急采）由部门在「本部门小仓」登记，这里只看、冲销与确认
-  const deptDoc = doc.warehouse?.kind === 'department' && doc.docType !== 'issue' && doc.docType !== 'issue_return';
+  // v0.7.11：部门小仓的单据（耗用、报损、盘点、期初）由部门在「本部门小仓」登记，这里只看、冲销与确认；
+  // 急采 8.0.1 起由采购在「采购 → 急采」登记（CG05），这里能改、提交、撤回
+  const deptDoc = doc.warehouse?.kind === 'department' && doc.docType !== 'issue' && doc.docType !== 'issue_return' && !doc.urgent;
   const Icon = visual.icon;
-  const operatePerm = doc.docType === 'supplier_return' ? 'supplierReturn.create' : 'inventory.operate';
+  const operatePerm = doc.urgent ? 'purchase.manage' : doc.docType === 'supplier_return' ? 'supplierReturn.create' : 'inventory.operate';
   const canOperate = can(operatePerm);
   const canApprove = can('inventory.approve');
+  // 急采按金额分级审批（8.0.1）：已提交、还没批的在审批中；批了以后等仓库到部门验收
+  const urgentPending = doc.urgent && doc.status === 'submitted' && !doc.urgentApprovedAt;
+  // 审批中心（v0.7.30）：报损、退供应商、期初、盘点、急采同意的是当前这一级，带上看到的审批单与级别
+  const gate = useApprovalGate(doc.urgent && !urgentPending ? null : doc.approval, 'inv_doc');
+  const finalLevel = !doc.approval || doc.approval.currentLevel === doc.approval.levels;
   // #21：库存冲销由仓库或财务成本岗，只限当月（v0.7.11）
   const canVoid = can('inventory.void');
   const isMine = doc.createdBy === session.staff.id;
   const editable = (doc.status === 'draft' || doc.status === 'returned') && canOperate && !deptDoc;
-  // 急采：仓库到部门验收后确认（#19）；登记的人不能自己验收
-  const canVerify = doc.urgent && doc.status === 'submitted' && (can('inventory.operate') || canApprove) && (!isMine || session.staff.role === 'owner');
+  // 急采：批了以后仓库到部门验收确认（#19）；登记的人不能自己验收
+  const canVerify = doc.urgent && doc.status === 'submitted' && !urgentPending && (can('inventory.operate') || canApprove) && (!isMine || session.staff.role === 'owner');
+  // 能在这里同意、退回的：待确认的单据（急采只在审批中时）
+  const approvable = doc.status === 'submitted' && canApprove && (!doc.urgent || urgentPending);
   // 退货等供应商确认（#20，v0.7.12）：采购登记供应商的答复
   const awaiting = doc.status === 'awaiting_supplier';
   const canAnswer = awaiting && can('supplierReturn.answer');
@@ -84,7 +95,8 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
   const run = async (key: string, url: string, body: unknown, success: string) => {
     setBusy(key);
     try {
-      await api.post(url, body);
+      // 同意、退回带着审批单与级别：没收到结果时记下，之后只能按原内容重新提交（uncertain.ts）
+      await postDocAction(url, body, doc.docNo, session.staff.id);
       await invalidate();
       toast({ tone: 'success', title: success, body: doc.docNo });
       setDialog(null);
@@ -104,7 +116,12 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
     try {
       const r = await api.post<{ po: { id: number; docNo: string } }>('/api/purchase-orders/backfill', { clientKey: uuid(), receiptDocId: doc.id });
       await invalidate();
-      toast({ tone: 'success', title: `已生成补单 ${r.po.docNo}`, body: '负责人确认后关联本收货单，不会重复入库或计款。' });
+      toast({
+        tone: 'success',
+        title: `已生成补单 ${r.po.docNo}`,
+        // 急采的补单提交即确认（8.0.1，急采已按金额分级审批过）
+        body: doc.urgent ? '急采已经审批过，补单提交即确认、关联这张急采，不会重复入库或计款。' : '负责人确认后关联本收货单，不会重复入库或计款。',
+      });
       navigate(`/purchasing?po=${r.po.id}`);
     } catch (e) {
       toast({ tone: 'error', title: errorMessage(e) });
@@ -154,16 +171,22 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
         )}
         {doc.status === 'submitted' &&
           (doc.urgent ? (
-            <Notice tone="warning" title="急采：等仓库到部门验收，确认前不影响库存与货款">
-              部门登记的急采（没有采购单），验收确认后进{doc.warehouse?.name}；合计不超过登记时的上限，确认时按现在的上限再核对一次。
-            </Notice>
+            urgentPending ? (
+              <Notice tone="warning" title="急采：按金额分级审批中，批了以后仓库到部门验收" data-testid="urgent-pending">
+                采购登记的急采（没有采购单），在审批中心按金额由指定的审批人审；批了以后仓库到部门验收，确认后进{doc.warehouse?.name}。审批与验收前都不影响库存与货款。
+              </Notice>
+            ) : (
+              <Notice tone="warning" title="急采：已批准，等仓库到部门验收，确认前不影响库存与货款">
+                验收确认后进{doc.warehouse?.name}；合计不超过登记时的上限，确认时按现在的上限再核对一次。
+              </Notice>
+            )
           ) : (
             <Notice tone="warning" title="待负责人确认，确认前不影响库存">
               {doc.docType === 'count' ? '盘点差异目前是「待核差异」，不是已认定的浪费或损失。' : '审批安排为模拟规则，待店主确认。'}
             </Notice>
           ))}
         {doc.urgent && doc.status === 'confirmed' && !doc.purchaseOrder && (
-          <Notice tone="warning" title="急采还没补采购单">部门在「本部门小仓」里补采购单并自己确认；也可以由采购补单、负责人确认。</Notice>
+          <Notice tone="warning" title="急采还没补采购单">由采购在「采购 → 急采」里补采购单，急采已经审批过，补单提交即确认。</Notice>
         )}
         {doc.deptSign && (
           <Notice tone="success" title={`${doc.deptSign.signedByName} 已签收 · ${formatDateTime(doc.deptSign.signedAt)}`}>
@@ -333,12 +356,12 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
                       <Qty milli={l.countedMilli ?? 0} unit={l.inventoryUnit} className="font-bold" />
                     </Mini>
                     {l.qtyMilli !== 0 &&
-                      (doc.status === 'submitted' && canApprove ? (
+                      (doc.status === 'submitted' && canApprove && gate.canActHere && !gate.uncertain && finalLevel ? (
                         <label className="ml-auto flex items-center gap-2">
                           <span className="font-semibold text-ink-3">确认原因</span>
                           <Select
                             fullWidth={false}
-                            value={reasons[l.id] ?? 'unknown'}
+                            value={reasons[l.id] ?? (l.diffReason && l.diffReason !== 'pending' ? l.diffReason : doc.warehouse?.kind === 'department' ? 'consumed' : 'unknown')}
                             onChange={(e) => setReasons((r) => ({ ...r, [l.id]: e.target.value as CountReason }))}
                             className="h-8 text-[12.5px]"
                             aria-label={`${l.materialName}差异原因`}
@@ -355,6 +378,7 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
                           {COUNT_REASON_LABELS[l.diffReason ?? 'pending']}
                         </Badge>
                       ))}
+                    {l.diffNote && <p className="w-full text-ink-2">差异说明：{l.diffNote}</p>}
                     {l.stale && <p className="w-full font-semibold text-clay">盘点后这项物料又有收发，需重新核对账面</p>}
                   </div>
                 )}
@@ -403,6 +427,18 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
           </section>
         )}
 
+        {/* 收货单的附件（8.0.1 采购组整改 11）：仓库、采购都能补传；现付的推送到财务待报销 */}
+        {doc.docType === 'receipt' && doc.status !== 'cancelled' && (
+          <ReceiptAttachmentsPanel
+            docId={doc.id}
+            items={doc.attachments ?? []}
+            canUpload={doc.status !== 'voided' && (can('inventory.operate') || can('purchase.manage'))}
+            onChanged={invalidate}
+          />
+        )}
+
+        <ApprovalProgress approval={doc.urgent && !doc.approval ? null : doc.approval} />
+
         <section>
           <h3 className="mb-2 text-[13px] font-bold text-ink-2">经办记录</h3>
           <ol className="space-y-2 border-l-2 border-line pl-4">
@@ -428,8 +464,8 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             领料退回
           </Button>
         )}
-        {doc.status === 'confirmed' && doc.docType === 'receipt' && doc.noPo && !doc.purchaseOrder && can('purchase.manage') && !doc.urgent && (
-          <Button variant="secondary" size="sm" loading={busy === 'backfill'} icon={<FilePlus2 className="size-4" />} onClick={backfill}>
+        {doc.status === 'confirmed' && doc.docType === 'receipt' && doc.noPo && !doc.purchaseOrder && can('purchase.manage') && (
+          <Button variant="secondary" size="sm" loading={busy === 'backfill'} icon={<FilePlus2 className="size-4" />} onClick={backfill} data-testid="doc-backfill">
             补采购单
           </Button>
         )}
@@ -459,7 +495,7 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
           </>
         )}
         {editable && (
-          <Button variant="secondary" icon={<Pencil className="size-4" />} onClick={() => navigate(`/inventory/docs/${doc.id}/edit`)}>
+          <Button variant="secondary" icon={<Pencil className="size-4" />} onClick={() => navigate(doc.urgent ? `/purchasing/urgent/${doc.id}/edit` : `/inventory/docs/${doc.id}/edit`)}>
             修改
           </Button>
         )}
@@ -479,7 +515,15 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             到部门验收确认
           </Button>
         )}
-        {doc.status === 'submitted' && canApprove && !doc.urgent && (
+        {approvable && gate.uncertain && <ApprovalResend sent={gate.uncertain} onDone={invalidate} />}
+        {(approvable || urgentPending) && !gate.uncertain && !(approvable && gate.canActHere) && gate.waiting && <span className="text-[12.5px] text-ink-3">{gate.waiting}</span>}
+        {/* 急采的审批人不一定有「确认库存单据」：到审批中心里审（审批中心按审批单核对谁能审） */}
+        {urgentPending && !canApprove && gate.canActHere && !gate.uncertain && (
+          <Link to="/approvals" className="text-[13px] font-bold text-lake hover:underline">
+            到审批中心审批
+          </Link>
+        )}
+        {approvable && !gate.uncertain && gate.canActHere && (
           <>
             <Button variant="secondary" icon={<CornerUpLeft className="size-4" />} onClick={() => setDialog({ kind: 'return' })}>
               退回修改
@@ -492,12 +536,13 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
                 run(
                   'approve',
                   `/api/inventory/docs/${doc.id}/approve`,
-                  { countReasons: Object.fromEntries(diffLines.map((l) => [String(l.id), reasons[l.id] ?? 'unknown'])) },
-                  doc.docType === 'count' ? '盘点调整已确认' : '已确认生效',
+                  // 只带确认时改过的原因；没改的照提交时写的（没写的按默认：部门小仓「耗用」、总仓「不明差异」）
+                  { ...gate.fence, countReasons: Object.fromEntries(diffLines.filter((l) => reasons[l.id]).map((l) => [String(l.id), reasons[l.id]!])) },
+                  !finalLevel ? `已同意第 ${doc.approval!.currentLevel} 级` : doc.urgent ? '急采已批准，等仓库到部门验收' : doc.docType === 'count' ? '盘点调整已确认' : '已确认生效',
                 )
               }
             >
-              {doc.docType === 'count' ? '确认盘点调整' : '确认生效'}
+              {doc.approval && doc.approval.levels > 1 ? `同意（第 ${doc.approval.currentLevel}/${doc.approval.levels} 级）` : doc.urgent ? '批准急采' : doc.docType === 'count' ? '确认盘点调整' : '确认生效'}
             </Button>
           </>
         )}
@@ -533,7 +578,7 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             void run('reject', `/api/inventory/docs/${doc.id}/supplier-answer`, { agreed: false, note: reason }, '已登记供应商不同意，退货单撤回');
             return;
           }
-          void run(kind, `/api/inventory/docs/${doc.id}/${kind}`, { reason }, kind === 'void' ? '已冲销' : kind === 'return' ? '已退回修改' : '已撤回');
+          void run(kind, `/api/inventory/docs/${doc.id}/${kind}`, kind === 'return' ? { reason, ...gate.fence } : { reason }, kind === 'void' ? '已冲销' : kind === 'return' ? '已退回修改' : '已撤回');
         }}
       />
       <AgreeDialog

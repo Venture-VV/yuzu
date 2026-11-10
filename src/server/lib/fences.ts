@@ -54,6 +54,8 @@ export const FENCED_OPS = [
   'coupon_rule',
   'coupon_batch',
   'coupon_issue',
+  // 批量发券（8.0.4，迁移 094）：编号记在发券单上（coupon_campaigns.client_key）
+  'coupon_campaign',
   // 硬件连接（v0.7.21）：编号记在设备、打印任务上（client_key）
   'device_create',
   'device_job',
@@ -83,6 +85,24 @@ export const FENCED_OPS = [
   'doc_print',
   // 会员实体卡（v0.7.28，迁移 057）：发卡、补卡；编号记在卡上（member_cards.client_key）
   'member_card',
+  // 审批中心（v0.7.30，迁移 073）：新建审批规则、设代理人；编号记在各自的行上（client_key）
+  'approval_rule',
+  'approval_delegation',
+  // 合同与法务审查（v0.7.31，迁移 077）：新建合同、变更单、用印申请；编号记在各自的行上（client_key）
+  'contract_create',
+  'contract_change',
+  'contract_seal',
+  // 付款流（v0.7.32，迁移 080、081）：付款申请、合同付款、验收登记、质量问题登记、登记发票；编号记在各自的行上（client_key）
+  'payment_request',
+  'contract_payout',
+  'contract_acceptance',
+  'contract_quality',
+  'supplier_invoice',
+  // 员工食堂第二期（迁移 092）：柚子信箱的回信；编号记在 idempotency_keys（ref_id 是那一条）
+  'canteen_reply',
+  // 8.0.1 采购组整改（迁移 093）：集采导入、赠品登记；编号记在 idempotency_keys（ref_id 是那次导入、那条赠品登记）
+  'request_import',
+  'gift_receipt',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -132,13 +152,16 @@ export async function fenceKey(
   if (isMemberOp(opType) && (await memberOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   if (isCountCardOp(opType) && (await countCardOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   if (isPlatformOp(opType) && (await platformOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
+  if (isApprovalOp(opType) && (await approvalOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
+  if (isContractOp(opType) && (await contractOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
+  if (isPaymentFlowOp(opType) && (await paymentFlowOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   const rows = await tx`
     INSERT INTO op_fences (key, op_type, staff_id) VALUES (${key}, ${opType}, ${staffId})
     ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;
   return { inserted: rows.length > 0 };
 }
 
-const COUPON_OPS = ['coupon_template', 'coupon_rule', 'coupon_batch', 'coupon_issue'] as const;
+const COUPON_OPS = ['coupon_template', 'coupon_rule', 'coupon_batch', 'coupon_issue', 'coupon_campaign'] as const;
 type CouponOp = (typeof COUPON_OPS)[number];
 export const isCouponOp = (op: string): op is CouponOp => (COUPON_OPS as readonly string[]).includes(op);
 
@@ -149,7 +172,56 @@ export async function couponOpRef(db: Db, key: string, opType: CouponOp): Promis
       ? await db<{ id: number }[]>`SELECT id FROM coupon_templates WHERE client_key = ${key}`
       : opType === 'coupon_rule'
         ? await db<{ id: number }[]>`SELECT id FROM coupon_rules WHERE client_key = ${key}`
-        : await db<{ id: number }[]>`SELECT id FROM coupon_issues WHERE client_key = ${key} AND kind = ${opType === 'coupon_batch' ? 'batch' : 'manual'}`;
+        : opType === 'coupon_campaign'
+          ? await db<{ id: number }[]>`SELECT id FROM coupon_campaigns WHERE client_key = ${key}`
+          : await db<{ id: number }[]>`SELECT id FROM coupon_issues WHERE client_key = ${key} AND kind = ${opType === 'coupon_batch' ? 'batch' : 'manual'}`;
+  return rows[0] ? Number(rows[0].id) : null;
+}
+
+const APPROVAL_OPS = ['approval_rule', 'approval_delegation'] as const;
+type ApprovalOp = (typeof APPROVAL_OPS)[number];
+export const isApprovalOp = (op: string): op is ApprovalOp => (APPROVAL_OPS as readonly string[]).includes(op);
+
+/** 审批中心（v0.7.30）的操作编号记在审批规则、代理设置上：查到时返回那一条的编号 */
+export async function approvalOpRef(db: Db, key: string, opType: ApprovalOp): Promise<number | null> {
+  const rows =
+    opType === 'approval_rule'
+      ? await db<{ id: number }[]>`SELECT id FROM approval_rules WHERE client_key = ${key}`
+      : await db<{ id: number }[]>`SELECT id FROM approval_delegations WHERE client_key = ${key}`;
+  return rows[0] ? Number(rows[0].id) : null;
+}
+
+const CONTRACT_OPS = ['contract_create', 'contract_change', 'contract_seal'] as const;
+type ContractOp = (typeof CONTRACT_OPS)[number];
+export const isContractOp = (op: string): op is ContractOp => (CONTRACT_OPS as readonly string[]).includes(op);
+
+/** 合同（v0.7.31）的操作编号记在合同、变更单、用印登记上：查到时返回那一条的编号 */
+export async function contractOpRef(db: Db, key: string, opType: ContractOp): Promise<number | null> {
+  const rows =
+    opType === 'contract_create'
+      ? await db<{ id: number }[]>`SELECT id FROM contracts WHERE client_key = ${key}`
+      : opType === 'contract_change'
+        ? await db<{ id: number }[]>`SELECT id FROM contract_changes WHERE client_key = ${key}`
+        : await db<{ id: number }[]>`SELECT id FROM contract_seals WHERE client_key = ${key}`;
+  return rows[0] ? Number(rows[0].id) : null;
+}
+
+const PAYMENT_FLOW_OPS = ['payment_request', 'contract_payout', 'contract_acceptance', 'contract_quality', 'supplier_invoice'] as const;
+type PaymentFlowOp = (typeof PAYMENT_FLOW_OPS)[number];
+export const isPaymentFlowOp = (op: string): op is PaymentFlowOp => (PAYMENT_FLOW_OPS as readonly string[]).includes(op);
+
+/** 付款流（v0.7.32）的操作编号记在付款申请、合同付款、验收登记、质量问题、发票上：查到时返回那一条的编号 */
+export async function paymentFlowOpRef(db: Db, key: string, opType: PaymentFlowOp): Promise<number | null> {
+  const rows =
+    opType === 'payment_request'
+      ? await db<{ id: number }[]>`SELECT id FROM payment_requests WHERE client_key = ${key}`
+      : opType === 'contract_payout'
+        ? await db<{ id: number }[]>`SELECT id FROM contract_payouts WHERE client_key = ${key}`
+        : opType === 'contract_acceptance'
+          ? await db<{ id: number }[]>`SELECT id FROM contract_acceptances WHERE client_key = ${key}`
+          : opType === 'contract_quality'
+            ? await db<{ id: number }[]>`SELECT id FROM contract_quality_issues WHERE client_key = ${key}`
+            : await db<{ id: number }[]>`SELECT id FROM supplier_invoices WHERE client_key = ${key}`;
   return rows[0] ? Number(rows[0].id) : null;
 }
 

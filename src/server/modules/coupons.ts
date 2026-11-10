@@ -39,7 +39,7 @@ import {
   type MemberCoupons,
 } from '@shared/coupons';
 import { shiftDate } from '@shared/labels';
-import { MAX_GRADE } from '@shared/membership';
+import { birthdayMonthDaysDue, MAX_GRADE } from '@shared/membership';
 import { can } from '@shared/permissions';
 import { isUniqueViolation, readSnapshot, type Db, type Tx } from '../db';
 import { assertNotFenced } from '../lib/fences';
@@ -70,6 +70,11 @@ const TemplateFields = z.object({
   scopeItems: z.array(z.number().int().positive()).max(100, '最多选 100 个项目').default([]),
   exchangeItemId: z.number().int().positive().nullable().default(null),
   exchangeTicketTypeId: z.number().int().positive().nullable().default(null),
+  // 买一赠一券（8.0.4，需求表 09）：买的项目；赠的项目用 exchangeItemId（不填 = 与买的同一个）；赠品出库（可选）：物料、每份数量、仓
+  buyItemId: z.number().int().positive().nullable().default(null),
+  giftMaterialId: z.number().int().positive().nullable().default(null),
+  giftQtyMilli: z.number('出库数量不对').int('出库数量不对').min(1, '出库数量要大于 0').max(1_000_000_000, '出库数量过大').nullable().default(null),
+  giftWarehouseId: z.number().int().positive().nullable().default(null),
   validity: z.enum(COUPON_VALIDITIES, '请选择有效期'),
   validFrom: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD').nullable().default(null),
   validTo: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD').nullable().default(null),
@@ -84,6 +89,11 @@ const TemplateInput = TemplateFields.superRefine((t, c) => {
   if (t.kind === 'cash' && t.faceValue === null) issue('代金券请填写面额', 'faceValue');
   if (t.kind === 'discount' && t.ratePercent === null) issue('折扣券请填写几折', 'ratePercent');
   if (t.kind === 'exchange' && (t.exchangeItemId === null) === (t.exchangeTicketTypeId === null)) issue('兑换券请选一个价目项目或一个票种', 'exchangeItemId');
+  if (t.kind === 'bogo' && t.buyItemId === null) issue('买一赠一券请选买的项目', 'buyItemId');
+  if (t.kind === 'bogo' && t.exchangeTicketTypeId !== null) issue('买一赠一券赠的是价目项目，不能选票种', 'exchangeItemId');
+  if (t.kind === 'bogo' && ![t.giftMaterialId, t.giftQtyMilli, t.giftWarehouseId].every((v) => v === null) && [t.giftMaterialId, t.giftQtyMilli, t.giftWarehouseId].some((v) => v === null)) {
+    issue('赠品出库要选物料、填每份出库数量、选出哪个仓（不出库就都不填）', 'giftMaterialId');
+  }
   if (t.kind !== 'exchange' && t.scope === 'categories' && t.scopeCategories.length === 0) issue('请选择适用的部门', 'scopeCategories');
   if (t.kind !== 'exchange' && t.scope === 'items' && t.scopeItems.length === 0) issue('请选择适用的项目', 'scopeItems');
   if (t.validity === 'fixed' && (!t.validFrom || !t.validTo)) issue('请填写起止日期', 'validFrom');
@@ -95,18 +105,27 @@ const TemplateUpdate = TemplateFields.extend({ expectedVersion: z.number().int()
 /** 只留下这个种类用得到的条件，其余清空（与数据库约束一致） */
 function normalizeTerms(t: z.infer<typeof TemplateFields>) {
   const exchange = t.kind === 'exchange';
+  const bogo = t.kind === 'bogo';
+  // 兑换券、买一赠一券都只认项目：没有门槛与适用范围
+  const itemBound = exchange || bogo;
+  const giftOut = bogo && t.giftMaterialId !== null && t.giftQtyMilli !== null && t.giftWarehouseId !== null;
   return {
     name: t.name,
     kind: t.kind,
     faceValue: t.kind === 'cash' ? t.faceValue : null,
     ratePercent: t.kind === 'discount' ? t.ratePercent : null,
     maxOff: t.kind === 'cash' ? null : t.maxOff,
-    threshold: exchange ? 0 : t.threshold,
-    scope: exchange ? ('all' as const) : t.scope,
-    scopeCategories: !exchange && t.scope === 'categories' ? [...new Set(t.scopeCategories)] : [],
-    scopeItems: !exchange && t.scope === 'items' ? [...new Set(t.scopeItems)].sort((a, b) => a - b) : [],
-    exchangeItemId: exchange ? t.exchangeItemId : null,
+    threshold: itemBound ? 0 : t.threshold,
+    scope: itemBound ? ('all' as const) : t.scope,
+    scopeCategories: !itemBound && t.scope === 'categories' ? [...new Set(t.scopeCategories)] : [],
+    scopeItems: !itemBound && t.scope === 'items' ? [...new Set(t.scopeItems)].sort((a, b) => a - b) : [],
+    // 买一赠一：赠的项目不填就是买的那一个
+    exchangeItemId: exchange ? t.exchangeItemId : bogo ? (t.exchangeItemId ?? t.buyItemId) : null,
     exchangeTicketTypeId: exchange ? t.exchangeTicketTypeId : null,
+    buyItemId: bogo ? t.buyItemId : null,
+    giftMaterialId: giftOut ? t.giftMaterialId : null,
+    giftQtyMilli: giftOut ? t.giftQtyMilli : null,
+    giftWarehouseId: giftOut ? t.giftWarehouseId : null,
     validity: t.validity,
     validFrom: t.validity === 'fixed' ? t.validFrom : null,
     validTo: t.validity === 'fixed' ? t.validTo : null,
@@ -129,17 +148,40 @@ async function assertRefs(db: Db, t: Normalized) {
   if (t.exchangeTicketTypeId !== null && !(await db`SELECT 1 FROM ticket_types WHERE id = ${t.exchangeTicketTypeId}`).length) {
     throw badRequest('兑换的票种不存在，请刷新后重选', { field: 'exchangeTicketTypeId' });
   }
+  if (t.buyItemId !== null && !(await db`SELECT 1 FROM service_items WHERE id = ${t.buyItemId}`).length) {
+    throw badRequest('买的项目不存在，请刷新后重选', { field: 'buyItemId' });
+  }
+  if (t.giftMaterialId !== null && !(await db`SELECT 1 FROM materials WHERE id = ${t.giftMaterialId}`).length) {
+    throw badRequest('赠品的物料不存在，请刷新后重选', { field: 'giftMaterialId' });
+  }
+  if (t.giftWarehouseId !== null && !(await db`SELECT 1 FROM warehouses WHERE id = ${t.giftWarehouseId}`).length) {
+    throw badRequest('出库的仓不存在，请刷新后重选', { field: 'giftWarehouseId' });
+  }
 }
 
 const TEMPLATE_SELECT = (db: Db) => db`
   SELECT t.id, t.name, t.kind, t.face_value, t.rate_percent, t.max_off, t.threshold, t.scope, t.scope_categories, t.scope_items,
-         t.exchange_item_id, t.exchange_ticket_type_id, t.validity, t.valid_from, t.valid_to, t.valid_days, t.levels, t.note, t.active,
-         t.version, t.created_at, s.display_name AS created_by_name, xi.name AS exchange_item_name, xt.name AS exchange_ticket_name,
+         t.exchange_item_id, t.exchange_ticket_type_id, t.buy_item_id, t.validity, t.valid_from, t.valid_to, t.valid_days, t.levels, t.note, t.active,
+         t.version, t.created_at, s.display_name AS created_by_name, xi.name AS exchange_item_name, xt.name AS exchange_ticket_name, bi.name AS buy_item_name,
+         t.gift_material_id, t.gift_qty_milli, t.gift_warehouse_id, gm.name AS gift_material_name, gm.inventory_unit AS gift_unit,
+         CASE WHEN gw.id IS NULL THEN NULL WHEN gw.kind = 'central'
+              THEN coalesce((SELECT value #>> '{}' FROM settings WHERE key = 'inventory_scope_name'), '后勤总库')
+              ELSE gd.name || '小仓' END AS gift_warehouse_name,
          (SELECT count(*) FROM coupons c WHERE c.template_id = t.id)::int AS issued
   FROM coupon_templates t JOIN staff s ON s.id = t.created_by
-  LEFT JOIN service_items xi ON xi.id = t.exchange_item_id LEFT JOIN ticket_types xt ON xt.id = t.exchange_ticket_type_id`;
+  LEFT JOIN service_items xi ON xi.id = t.exchange_item_id LEFT JOIN ticket_types xt ON xt.id = t.exchange_ticket_type_id
+  LEFT JOIN service_items bi ON bi.id = t.buy_item_id
+  LEFT JOIN materials gm ON gm.id = t.gift_material_id LEFT JOIN warehouses gw ON gw.id = t.gift_warehouse_id
+  LEFT JOIN departments gd ON gd.id = gw.department_id`;
 
-type TemplateRow = Omit<CouponTemplate, 'summary'> & { exchangeItemName: string | null; exchangeTicketName: string | null };
+type TemplateRow = Omit<CouponTemplate, 'summary' | 'giftOutText'> & {
+  exchangeItemName: string | null;
+  exchangeTicketName: string | null;
+  buyItemName: string | null;
+  giftMaterialName: string | null;
+  giftUnit: string | null;
+  giftWarehouseName: string | null;
+};
 
 const termsOf = (t: CouponTerms): CouponTerms => ({
   kind: t.kind,
@@ -152,21 +194,33 @@ const termsOf = (t: CouponTerms): CouponTerms => ({
   scopeItems: t.scopeItems.map(Number),
   exchangeItemId: t.exchangeItemId === null ? null : Number(t.exchangeItemId),
   exchangeTicketTypeId: t.exchangeTicketTypeId === null ? null : Number(t.exchangeTicketTypeId),
+  buyItemId: t.buyItemId === null || t.buyItemId === undefined ? null : Number(t.buyItemId),
 });
-const summaryOf = (t: CouponTerms & { exchangeItemName?: string | null; exchangeTicketName?: string | null }) =>
+const summaryOf = (t: CouponTerms & { exchangeItemName?: string | null; exchangeTicketName?: string | null; buyItemName?: string | null }) =>
   couponTermsText(termsOf(t), {
-    items: t.exchangeItemId !== null && t.exchangeItemName ? { [Number(t.exchangeItemId)]: t.exchangeItemName } : {},
+    items: {
+      ...(t.exchangeItemId !== null && t.exchangeItemName ? { [Number(t.exchangeItemId)]: t.exchangeItemName } : {}),
+      ...(t.buyItemId !== null && t.buyItemName ? { [Number(t.buyItemId)]: t.buyItemName } : {}),
+    },
     ticketTypes: t.exchangeTicketTypeId !== null && t.exchangeTicketName ? { [Number(t.exchangeTicketTypeId)]: t.exchangeTicketName } : {},
   });
 
+/** 「出 苏打水 1 瓶（水吧小仓）」：数量是库存单位的千分之一 */
+const giftOutText = (r: TemplateRow) =>
+  r.giftMaterialId === null || r.giftQtyMilli === null ? null : `出 ${r.giftMaterialName ?? '物料'} ${Number(r.giftQtyMilli) / 1000} ${r.giftUnit ?? ''}（${r.giftWarehouseName ?? '仓'}）`;
+
 function toTemplate(r: TemplateRow): CouponTemplate {
-  const { exchangeItemName: _i, exchangeTicketName: _t, ...rest } = r;
+  const { exchangeItemName: _i, exchangeTicketName: _t, buyItemName: _b, giftMaterialName: _m, giftUnit: _u, giftWarehouseName: _w, ...rest } = r;
   return {
     ...rest,
     ...termsOf(r),
     levels: r.levels.map(Number),
     createdAt: new Date(r.createdAt).toISOString(),
     summary: summaryOf(r),
+    giftMaterialId: r.giftMaterialId === null ? null : Number(r.giftMaterialId),
+    giftQtyMilli: r.giftQtyMilli === null ? null : Number(r.giftQtyMilli),
+    giftWarehouseId: r.giftWarehouseId === null ? null : Number(r.giftWarehouseId),
+    giftOutText: giftOutText(r),
   };
 }
 
@@ -202,10 +256,11 @@ export async function createTemplate(deps: Deps, raw: unknown, ctx: OpContext): 
       await assertRefs(tx, t);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO coupon_templates (name, kind, face_value, rate_percent, max_off, threshold, scope, scope_categories, scope_items,
-                                      exchange_item_id, exchange_ticket_type_id, validity, valid_from, valid_to, valid_days, levels, note, active, created_by, client_key)
+                                      exchange_item_id, exchange_ticket_type_id, buy_item_id, gift_material_id, gift_qty_milli, gift_warehouse_id,
+                                      validity, valid_from, valid_to, valid_days, levels, note, active, created_by, client_key)
         VALUES (${t.name}, ${t.kind}, ${t.faceValue}, ${t.ratePercent}, ${t.maxOff}, ${t.threshold}, ${t.scope}, ${t.scopeCategories}::text[],
-                ${t.scopeItems}::bigint[], ${t.exchangeItemId}, ${t.exchangeTicketTypeId}, ${t.validity}, ${t.validFrom}, ${t.validTo}, ${t.validDays},
-                ${t.levels}::smallint[], ${t.note}, ${t.active}, ${ctx.actor.id}, ${clientKey})
+                ${t.scopeItems}::bigint[], ${t.exchangeItemId}, ${t.exchangeTicketTypeId}, ${t.buyItemId}, ${t.giftMaterialId}, ${t.giftQtyMilli}, ${t.giftWarehouseId},
+                ${t.validity}, ${t.validFrom}, ${t.validTo}, ${t.validDays}, ${t.levels}::smallint[], ${t.note}, ${t.active}, ${ctx.actor.id}, ${clientKey})
         RETURNING id`;
       await writeAudit(tx, { staffId: ctx.actor.id, action: 'coupon_template_saved', targetType: 'coupon_template', targetId: row!.id, detail: { created: t }, ip: ctx.ip });
       return row!.id;
@@ -223,7 +278,7 @@ export async function createTemplate(deps: Deps, raw: unknown, ctx: OpContext): 
 
 const TERM_KEYS = [
   'kind', 'faceValue', 'ratePercent', 'maxOff', 'threshold', 'scope', 'scopeCategories', 'scopeItems', 'exchangeItemId', 'exchangeTicketTypeId',
-  'validity', 'validFrom', 'validTo', 'validDays', 'levels',
+  'buyItemId', 'validity', 'validFrom', 'validTo', 'validDays', 'levels',
 ] as const;
 
 /** 改模板：带版本号（对不上拒绝）；发过券的只能改名称、备注、停用 */
@@ -248,7 +303,8 @@ export async function updateTemplate(deps: Deps, id: number, raw: unknown, ctx: 
     await tx`
       UPDATE coupon_templates SET name = ${t.name}, kind = ${t.kind}, face_value = ${t.faceValue}, rate_percent = ${t.ratePercent}, max_off = ${t.maxOff},
              threshold = ${t.threshold}, scope = ${t.scope}, scope_categories = ${t.scopeCategories}::text[], scope_items = ${t.scopeItems}::bigint[],
-             exchange_item_id = ${t.exchangeItemId}, exchange_ticket_type_id = ${t.exchangeTicketTypeId}, validity = ${t.validity},
+             exchange_item_id = ${t.exchangeItemId}, exchange_ticket_type_id = ${t.exchangeTicketTypeId}, buy_item_id = ${t.buyItemId},
+             gift_material_id = ${t.giftMaterialId}, gift_qty_milli = ${t.giftQtyMilli}, gift_warehouse_id = ${t.giftWarehouseId}, validity = ${t.validity},
              valid_from = ${t.validFrom}, valid_to = ${t.validTo}, valid_days = ${t.validDays}, levels = ${t.levels}::smallint[], note = ${t.note},
              active = ${t.active}, version = version + 1, updated_at = now()
       WHERE id = ${id}`;
@@ -266,7 +322,7 @@ export async function updateTemplate(deps: Deps, id: number, raw: unknown, ctx: 
 
 // ───────────────────────── 发券 ─────────────────────────
 
-interface LockedTemplate extends CouponTerms {
+export interface LockedTemplate extends CouponTerms {
   id: number;
   name: string;
   validity: 'fixed' | 'days';
@@ -281,13 +337,13 @@ interface LockedTemplate extends CouponTerms {
 async function readTemplate(db: Db, id: number, lock: boolean): Promise<LockedTemplate | null> {
   const [t] = await db<LockedTemplate[]>`
     SELECT id, name, kind, face_value, rate_percent, max_off, threshold, scope, scope_categories, scope_items, exchange_item_id, exchange_ticket_type_id,
-           validity, valid_from, valid_to, valid_days, levels, active
+           buy_item_id, validity, valid_from, valid_to, valid_days, levels, active
     FROM coupon_templates WHERE id = ${id} ${lock ? db`FOR SHARE` : db``}`;
   return t ? { ...t, ...termsOf(t), levels: t.levels.map(Number) } : null;
 }
 
 /** 发券前对模板加共享锁（改模板加排他锁，两边串行） */
-async function lockTemplate(tx: Tx, id: number): Promise<LockedTemplate | null> {
+export async function lockTemplate(tx: Tx, id: number): Promise<LockedTemplate | null> {
   return readTemplate(tx, id, true);
 }
 
@@ -303,7 +359,7 @@ function newCode(): string {
   return s;
 }
 
-interface IssueSpec {
+export interface IssueSpec {
   kind: CouponIssueKind;
   template: LockedTemplate;
   memberId: number | null;
@@ -319,13 +375,15 @@ interface IssueSpec {
   date: string;
   /** 指定有效期（会员权益的券类：到本期最后一天）；不给按模板算 */
   range?: { from: string; to: string };
+  /** 批量发券（8.0.4）的发券单 */
+  campaignId?: number | null;
 }
 
 /**
  * 写一次发券（在调用方的事务里，模板已加共享锁）：发券记录 + quantity 张券。自动发券带去重键，已发过返回 null；
  * 模板固定有效期已过：手动、批次报错，自动的跳过（返回 null）
  */
-async function writeIssue(tx: Tx, o: IssueSpec): Promise<{ issueId: number; issueNo: string; couponIds: number[] } | null> {
+export async function writeIssue(tx: Tx, o: IssueSpec): Promise<{ issueId: number; issueNo: string; couponIds: number[] } | null> {
   const range = o.range ?? validRange(o.template, o.date);
   if (!range) {
     if (o.dedupeKey) return null;
@@ -334,9 +392,9 @@ async function writeIssue(tx: Tx, o: IssueSpec): Promise<{ issueId: number; issu
   const issueNo = await nextDocNo(tx, 'coupon_issue', 'FQ', o.date);
   const [row] = await tx<{ id: number }[]>`
     INSERT INTO coupon_issues (issue_no, kind, template_id, member_id, quantity, rule_id, recharge_id, level, reason, client_key, dedupe_key,
-                               issued_by, issued_at, business_date)
+                               issued_by, issued_at, business_date, campaign_id)
     VALUES (${issueNo}, ${o.kind}, ${o.template.id}, ${o.memberId}, ${o.quantity}, ${o.ruleId ?? null}, ${o.rechargeId ?? null}, ${o.level ?? null},
-            ${o.reason ?? ''}, ${o.clientKey ?? null}, ${o.dedupeKey ?? null}, ${o.staffId}, ${o.at}, ${o.date})
+            ${o.reason ?? ''}, ${o.clientKey ?? null}, ${o.dedupeKey ?? null}, ${o.staffId}, ${o.at}, ${o.date}, ${o.campaignId ?? null})
     ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
     RETURNING id`;
   if (!row) return null;
@@ -367,6 +425,9 @@ async function issueDate(db: Db, deps: Pick<Deps, 'config'>, at: Date) {
   const settings = await loadSettings(db);
   return businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
 }
+
+/** 现在的营业日（按营业日切换时间） */
+export const businessToday = (db: Db, deps: Pick<Deps, 'config'>) => issueDate(db, deps, new Date());
 
 /**
  * 按规则自动发券（开卡礼、升级礼、生日礼、充值赠券），在调用方的事务里：停用的规则、停用的模板、等级不在模板限定里的、
@@ -625,8 +686,9 @@ export async function issueMpClaimCoupon(tx: Tx, deps: Pick<Deps, 'config'>, raw
 const BIRTHDAY_PAGE = 500;
 
 /**
- * 生日礼：会员生日当月发（营业日的月份），每年每条规则一次，按此刻的等级选规则；当月才建档、才补填生日的下一次检查时补发。
- * 由应用的定时任务每 10 分钟调用；返回这次发了几位会员。
+ * 生日礼：生日前 N 天到账（会员规则「生日礼提前几天到账」，默认 3 天；8.0.4 需求表 09，原来是生日当月第一天），
+ * 到生日当月最后一天之间都会补发（那几天应用没开、当月才建档或才补填生日的）；每年每条规则一次（去重键是生日那一年），
+ * 按此刻的等级选规则。由应用的定时任务每 10 分钟调用；返回这次发了几位会员。
  *
  * 候选会员按编号翻页查完（Codex 审查 8e4472a）：有几级的生日规则时，已经拿到自己这一级的会员还缺别的等级的规则，
  * 会一直算候选（模板限定了等级、固定有效期已过的也一样发不出）；原来只取编号最小的 500 位，这些人一直占着名额，
@@ -640,43 +702,47 @@ export async function issueBirthdayCoupons(deps: Pick<Deps, 'sql' | 'config'>, n
     WHERE r.active AND r.kind = 'birthday' AND t.active`;
   if (!rules.length) return 0;
   const date = await issueDate(sql, deps, now);
-  const year = date.slice(0, 4);
-  const month = date.slice(5, 7);
+  // 今天该发的生日（MM-DD），按算哪一年的生日分开（1 月初的生日在上一年 12 月到账，算生日那一年）
+  const due = birthdayMonthDaysDue(date, (await loadMembershipRules(sql)).birthdayLeadDays);
+  const byYear = new Map<string, string[]>();
+  for (const d of due) byYear.set(d.year, [...(byYear.get(d.year) ?? []), d.monthDay]);
   let members = 0;
-  for (let after = 0; ; ) {
-    // 每位候选会员带上今年还没发的生日规则（只算启用的规则、启用的模板）
-    const candidates = await sql<{ id: number; missing: (number | string)[] }[]>`
-      SELECT m.id, array_agg(r.id ORDER BY r.id) AS missing
-      FROM members m
-      JOIN coupon_rules r ON r.active AND r.kind = 'birthday'
-      JOIN coupon_templates t ON t.id = r.template_id AND t.active
-      WHERE m.status = 'active' AND m.birthday IS NOT NULL AND to_char(m.birthday, 'MM') = ${month} AND m.id > ${after}
-        -- 到期还没处理的（到期处理这一位出错、锁等超时）不按旧的等级发，处理完以后下一次检查再发（Codex 自动审查 32d3f31）
-        AND NOT (m.grade > 0 AND coalesce(m.grace_until, m.cycle_end, ${date}::date) < ${date}::date)
-        AND NOT EXISTS (SELECT 1 FROM coupon_issues i WHERE i.dedupe_key = 'birthday:r' || r.id || ':m' || m.id || ':y' || ${year})
-      GROUP BY m.id
-      ORDER BY m.id
-      LIMIT ${pageSize}`;
-    if (!candidates.length) break;
-    after = Number(candidates[candidates.length - 1]!.id);
-    const grades = await sql<{ id: number; grade: number }[]>`SELECT id, grade FROM members WHERE id IN ${sql(candidates.map((c) => Number(c.id)))}`;
-    const levels = new Map(grades.map((g) => [Number(g.id), g.grade]));
-    for (const c of candidates) {
-      const memberId = Number(c.id);
-      const level = levels.get(memberId) ?? 0;
-      const missing = new Set(c.missing.map(Number));
-      // 自己这一级的规则都发过了（或没有这一级的规则）：不开事务
-      if (!rules.some((r) => r.level === level && missing.has(Number(r.id)))) continue;
-      const issued = await sql.begin(async (tx) => {
-        const out = await issueByRules(tx, { kind: 'birthday', memberId, memberLevel: level, ruleLevel: level, year, staffId: null, at: now, date });
-        if (out.length) {
-          await writeAudit(tx, { staffId: null, action: 'coupon_issued', targetType: 'member', targetId: memberId, detail: { kind: 'birthday', year, level, issued: out }, businessDate: date });
-        }
-        return out.length;
-      });
-      if (issued) members += 1;
+  for (const [year, monthDays] of byYear) {
+    for (let after = 0; ; ) {
+      // 每位候选会员带上这一年还没发的生日规则（只算启用的规则、启用的模板）
+      const candidates = await sql<{ id: number; missing: (number | string)[] }[]>`
+        SELECT m.id, array_agg(r.id ORDER BY r.id) AS missing
+        FROM members m
+        JOIN coupon_rules r ON r.active AND r.kind = 'birthday'
+        JOIN coupon_templates t ON t.id = r.template_id AND t.active
+        WHERE m.status = 'active' AND m.birthday IS NOT NULL AND to_char(m.birthday, 'MM-DD') IN ${sql(monthDays)} AND m.id > ${after}
+          -- 到期还没处理的（到期处理这一位出错、锁等超时）不按旧的等级发，处理完以后下一次检查再发（Codex 自动审查 32d3f31）
+          AND NOT (m.grade > 0 AND coalesce(m.grace_until, m.cycle_end, ${date}::date) < ${date}::date)
+          AND NOT EXISTS (SELECT 1 FROM coupon_issues i WHERE i.dedupe_key = 'birthday:r' || r.id || ':m' || m.id || ':y' || ${year})
+        GROUP BY m.id
+        ORDER BY m.id
+        LIMIT ${pageSize}`;
+      if (!candidates.length) break;
+      after = Number(candidates[candidates.length - 1]!.id);
+      const grades = await sql<{ id: number; grade: number }[]>`SELECT id, grade FROM members WHERE id IN ${sql(candidates.map((c) => Number(c.id)))}`;
+      const levels = new Map(grades.map((g) => [Number(g.id), g.grade]));
+      for (const c of candidates) {
+        const memberId = Number(c.id);
+        const level = levels.get(memberId) ?? 0;
+        const missing = new Set(c.missing.map(Number));
+        // 自己这一级的规则都发过了（或没有这一级的规则）：不开事务
+        if (!rules.some((r) => r.level === level && missing.has(Number(r.id)))) continue;
+        const issued = await sql.begin(async (tx) => {
+          const out = await issueByRules(tx, { kind: 'birthday', memberId, memberLevel: level, ruleLevel: level, year, staffId: null, at: now, date });
+          if (out.length) {
+            await writeAudit(tx, { staffId: null, action: 'coupon_issued', targetType: 'member', targetId: memberId, detail: { kind: 'birthday', year, level, issued: out }, businessDate: date });
+          }
+          return out.length;
+        });
+        if (issued) members += 1;
+      }
+      if (candidates.length < pageSize) break;
     }
-    if (candidates.length < pageSize) break;
   }
   return members;
 }
@@ -1041,6 +1107,13 @@ export async function couponMeta(db: Db): Promise<CouponMeta> {
     plans,
     // 会员体系 v2 的档级 L0–L6（升级礼不能选 L0）
     levels: rules.grades.map((g, i) => ({ level: i, name: `L${i} ${g.name}` })),
+    // 买一赠一的赠品出库（8.0.4）：记库存的物料、各仓
+    materials: await db<CouponMeta['materials']>`
+      SELECT id, name, inventory_unit AS unit, active FROM materials WHERE tracked ORDER BY active DESC, category, name`,
+    warehouses: await db<CouponMeta['warehouses']>`
+      SELECT w.id, CASE WHEN w.kind = 'central' THEN coalesce((SELECT value #>> '{}' FROM settings WHERE key = 'inventory_scope_name'), '后勤总库')
+                        ELSE d.name || '小仓' END AS name, coalesce(d.active, true) AS active
+      FROM warehouses w LEFT JOIN departments d ON d.id = w.department_id ORDER BY w.kind = 'department', w.id`,
   };
 }
 

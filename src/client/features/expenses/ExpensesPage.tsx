@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { Archive, BookOpenCheck, Download, Plus, ReceiptText, ShieldCheck, Wallet, X } from 'lucide-react';
+import { Archive, BookOpenCheck, Download, FileText, Gauge, Plus, ReceiptText, ShieldCheck, Wallet, X } from 'lucide-react';
 import {
   CLAIM_STATUS_LABELS,
   EXPENSE_CATEGORY_LABELS,
@@ -11,16 +11,22 @@ import {
   type ClaimStatus,
   type ExpenseClaim,
 } from '@shared/expenses';
+import { budgetCheckText, budgetOver } from '@shared/budgets';
+import { CERT_STATUS_LABELS } from '@shared/invoices';
+import { formatAmount } from '@shared/money';
 import { formatQty } from '@shared/quantity';
 import { channelText, RECEIVING_LABELS } from '@shared/purchasing';
-import { api, errorMessage } from '../../lib/api';
+import { errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
+import { PoReceiptsList } from '../../components/ReceiptAttachments';
 import { Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
+import { ApprovalProgress, ApprovalResend, useApprovalGate } from '../approvals/ApprovalProgress';
+import { postDocAction } from '../approvals/uncertain';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Input, Notice, Select, Skeleton } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
@@ -61,6 +67,18 @@ export function ExpensesPage() {
               备用金与每日平账
             </Button>
           </Link>
+          <Link to="/erp/expenses/budgets">
+            <Button variant="secondary" icon={<Gauge className="size-4" />} data-testid="budgets-link">
+              费用预算
+            </Button>
+          </Link>
+          {session.erpModules.includes('invoices') && (
+            <Link to="/erp/invoices">
+              <Button variant="secondary" icon={<FileText className="size-4" />} data-testid="invoices-link">
+                发票台账
+              </Button>
+            </Link>
+          )}
           <Link to="/erp/ledger">
             <Button variant="secondary" icon={<BookOpenCheck className="size-4" />}>
               采购台账
@@ -176,9 +194,10 @@ export function ExpensesPage() {
                       {PAY_SOURCE_LABELS[c.paySource]}
                       {c.advance && <span className="num block text-[11.5px] text-ink-3">{c.advance.docNo}</span>}
                     </span>
-                    <Badge tone={STATUS_TONE[c.status]} className="justify-self-start md:justify-self-auto">
-                      {CLAIM_STATUS_LABELS[c.status]}
-                    </Badge>
+                    <span className="flex flex-wrap items-center gap-1 justify-self-start md:justify-self-auto">
+                      <Badge tone={STATUS_TONE[c.status]}>{CLAIM_STATUS_LABELS[c.status]}</Badge>
+                      {c.overBudget && <Badge tone="clay">超预算</Badge>}
+                    </span>
                     <Money cents={c.amountCents} className="text-right font-bold" />
                   </button>
                 </li>
@@ -202,13 +221,17 @@ function ClaimSheet({ id, onClose }: { id: number | null; onClose: () => void })
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const c = claim.data;
+  // 审批中心（v0.7.30）：同意的是当前这一级，带上看到的审批单与级别
+  const gate = useApprovalGate(c?.approval, 'expense_claim');
 
   const act = async (action: 'approve' | 'return' | 'resubmit' | 'cancel' | 'void', reason?: string) => {
     if (!c) return;
     setBusy(true);
     setError(null);
     try {
-      await api.post<ExpenseClaim>(`/api/erp/expenses/${c.id}/${action}`, reason ? { reason } : {});
+      const fence = action === 'approve' || action === 'return' ? gate.fence : {};
+      // 确认、退回带着审批单与级别：没收到结果时记下，之后只能按原内容重新提交（uncertain.ts）
+      await postDocAction<ExpenseClaim>(`/api/erp/expenses/${c.id}/${action}`, reason ? { reason, ...fence } : fence, c.docNo, session.staff.id);
       await invalidate();
       setReasonFor(null);
       toast({ tone: 'success', title: { approve: '已确认', return: '已退回', resubmit: '已重新提交', cancel: '已撤回', void: '已冲销' }[action] });
@@ -245,11 +268,23 @@ function ClaimSheet({ id, onClose }: { id: number | null; onClose: () => void })
           <>
             <div className="flex items-center gap-2">
               <Badge tone={STATUS_TONE[c.status]}>{CLAIM_STATUS_LABELS[c.status]}</Badge>
+              {c.overBudget && <Badge tone="clay">超预算</Badge>}
               {c.needsApproval && <span className="text-[12.5px] text-ink-3">超过门槛，需负责人确认</span>}
               <Money cents={c.amountCents} className="ml-auto text-[20px] font-bold" />
             </div>
             {c.returnedReason && c.status === 'returned' && <Notice tone="warning" title={`退回：${c.returnedReason}`} />}
             {c.voidReason && <Notice tone="error" title={`冲销：${c.voidReason}（${c.voidedByName}）`} />}
+            {c.budgetCheck && c.budgetCheck.length > 0 && (
+              <Notice tone={c.overBudget ? 'warning' : 'info'} title={c.overBudget ? '超预算：走「超预算报销」审批（提交时核对）' : '提交时核对的预算'} data-testid="claim-budget-check">
+                <ul className="space-y-0.5 text-[12.5px]">
+                  {c.budgetCheck.map((b) => (
+                    <li key={b.category} className={cn(budgetOver(b) && 'font-semibold text-clay')}>
+                      {budgetCheckText(b, (cents) => `¥${formatAmount(cents)}`)}
+                    </li>
+                  ))}
+                </ul>
+              </Notice>
+            )}
             <dl className="grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[13.5px]">
               <dt className="text-ink-3">部门</dt>
               <dd>{c.department.name}</dd>
@@ -266,6 +301,11 @@ function ClaimSheet({ id, onClose }: { id: number | null; onClose: () => void })
               <dd>
                 {c.invoiceLabel} · 税点 {taxRateText(c.taxRateBp)}
                 {c.invoiceNo && <span className="num ml-1.5">{c.invoiceNo}</span>}
+                {c.invoice && session.erpModules.includes('invoices') && (
+                  <Link to={`/erp/invoices?invoice=${c.invoice.id}`} className="ml-1.5 text-[12.5px] font-semibold text-lake" data-testid="claim-invoice-link">
+                    台账 · {c.invoice.issuerName || '开票方未填'} · {CERT_STATUS_LABELS[c.invoice.certStatus]}
+                  </Link>
+                )}
               </dd>
               <dt className="text-ink-3">采购途径</dt>
               <dd data-testid="claim-channel">{channelText(c.channel)}</dd>
@@ -275,6 +315,15 @@ function ClaimSheet({ id, onClose }: { id: number | null; onClose: () => void })
                   <dd>
                     <span className="num">{c.purchaseOrder.docNo}</span> · {c.purchaseOrder.supplierName}
                   </dd>
+                  {/* 收货单与附件（8.0.1 采购组整改 11：收货确认时传的照片、送货单） */}
+                  {c.receipts.length > 0 && (
+                    <>
+                      <dt className="text-ink-3">收货附件</dt>
+                      <dd>
+                        <PoReceiptsList receipts={c.receipts} />
+                      </dd>
+                    </>
+                  )}
                 </>
               )}
               {c.note && (
@@ -306,19 +355,22 @@ function ClaimSheet({ id, onClose }: { id: number | null; onClose: () => void })
                 </li>
               ))}
             </ol>
+            <ApprovalProgress approval={c.approval} />
             {error && <Notice tone="error" title={error} />}
           </>
         )}
       </div>
       {c && (
         <div className="flex flex-wrap justify-end gap-2 border-t border-line px-5 py-3">
-          {c.status === 'submitted' && can('expense.approve') && (
+          {c.status === 'submitted' && can('expense.approve') && gate.uncertain && <ApprovalResend sent={gate.uncertain} onDone={invalidate} className="w-full" />}
+          {c.status === 'submitted' && can('expense.approve') && !gate.uncertain && !gate.canActHere && gate.waiting && <span className="self-center text-[12.5px] text-ink-3">{gate.waiting}</span>}
+          {c.status === 'submitted' && can('expense.approve') && !gate.uncertain && gate.canActHere && (
             <>
               <Button variant="secondary" disabled={busy} onClick={() => setReasonFor('return')}>
                 退回
               </Button>
               <Button variant="primary" loading={busy} onClick={() => void act('approve')} data-testid="claim-approve">
-                确认
+                {c.approval && c.approval.levels > 1 ? `同意（第 ${c.approval.currentLevel}/${c.approval.levels} 级）` : '确认'}
               </Button>
             </>
           )}
@@ -390,6 +442,13 @@ function ToClaimCard() {
                 经办 {r.createdBy.name}
                 {r.departments.length > 0 && ` · ${r.departments.join('、')}`} · {RECEIVING_LABELS[r.receiving]} · {r.openLines}/{r.lineCount} 行未报销
               </span>
+              {/* 收货生效后推送过来（8.0.1 采购组整改 11）：收货单与附件份数 */}
+              {r.receipts.length > 0 && (
+                <span className="flex flex-wrap items-center gap-1.5 text-ink-3" data-testid={`to-claim-receipts-${r.id}`}>
+                  <Badge tone="pine">已收货</Badge>
+                  收货单 {r.receipts.map((x) => x.docNo).join('、')} · 附件 {r.receipts.reduce((n, x) => n + x.attachmentCount, 0)} 份
+                </span>
+              )}
             </span>
             <Money cents={r.openCents} className="text-right font-bold" />
             {can('expense.manage') ? (

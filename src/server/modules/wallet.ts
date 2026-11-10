@@ -34,6 +34,7 @@ import { applyRechargeGrade, onStoredValueSpend, planRechargeGrade } from './mem
 import { onRecharge } from './benefits';
 import { loadPricedItems, priceLine } from './pricing';
 import { loadSettings } from './settings';
+import { assertWithinSpendQuota, spendQuotaOf } from './spend-quota';
 import { lockPaymentShift, openShiftOf } from './shifts';
 import { applyBalance, assertNotMerged, lockMember, nextDocNo, type LockedMember } from './wallet-core';
 import { hashRequest } from '../lib/idempotency';
@@ -431,6 +432,8 @@ export async function consumeForCheckout(
       limit: settings.maxConsumeCents,
     });
   }
+  // 充值当日的储值消费比例（8.0.4 需求表 04，HY01–HY02）：超过剩余额度直接拒绝并显示剩余额度，其余请用别的方式付
+  assertWithinSpendQuota(await spendQuotaOf(tx, member.id, o.businessDate, settings.rechargeSpendPct), o.amount, member.name);
   const balance = { principal: member.principalBalance, bonus: member.bonusBalance };
   const split = splitDeduction(o.amount, balance, settings.deductionRule);
   if (!split.ok) {
@@ -678,12 +681,14 @@ export async function consume(deps: Deps, raw: ConsumeInputData, ctx: OpContext)
           balance,
         });
       }
+      const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
+      // 充值当日的储值消费比例（8.0.4 需求表 04，HY01–HY02）：超过剩余额度直接拒绝，不能当场授权放行
+      assertWithinSpendQuota(await spendQuotaOf(tx, member.id, businessDate, settings.rechargeSpendPct), total, member.name);
       // 超过单笔上限：其余核对都通过后再核销授权
       const overLimit = total > settings.maxConsumeCents
         ? await approveOverLimit(tx, input.overLimitGrantId, ctx, { kind: 'consume', memberId: member.id, amount: total, limit: settings.maxConsumeCents, key })
         : null;
 
-      const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
       const { id, docNo } = await insertConsumption(tx, member, {
         total, split, rule: settings.deductionRule, lines, note: input.note, businessDate, operatorId: ctx.actor.id, at,
         overLimitApproverId: overLimit?.approverId ?? null, checkoutId: null,

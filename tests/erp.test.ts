@@ -49,11 +49,13 @@ describe('模块注册表', () => {
 });
 
 describe('ERP 模块开关', () => {
-  it('升级后默认全部开启；会话带实际能用的模块；能进 ERP 的人都能看模块列表，前台岗位不能', async () => {
-    expect(await modules(ctx.owner)).toEqual([...ERP_MODULE_KEYS]);
+  it('升级后默认开启（员工食堂默认关）；会话带实际能用的模块；能进 ERP 的人都能看模块列表，前台岗位不能', async () => {
+    // 员工食堂（docs/CANTEEN.md，K1）默认关，其余默认开
+    expect(ERP_MODULE_KEYS.filter((k) => !ERP_MODULES[k].defaultEnabled)).toEqual(['canteen']);
+    expect(await modules(ctx.owner)).toEqual(ERP_MODULE_KEYS.filter((k) => k !== 'canteen'));
     const list = await api(ctx.app, stock, 'GET', '/api/erp/modules');
     expect(list.status).toBe(200);
-    expect(list.body.modules.map((m: { key: string; enabled: boolean }) => [m.key, m.enabled])).toEqual(ERP_MODULE_KEYS.map((k) => [k, true]));
+    expect(list.body.modules.map((m: { key: string; enabled: boolean }) => [m.key, m.enabled])).toEqual(ERP_MODULE_KEYS.map((k) => [k, k !== 'canteen']));
     expect(list.body.updatedBy).toBeNull();
     expect((await api(ctx.app, ctx.clerk, 'GET', '/api/erp/modules')).status).toBe(403);
   });
@@ -73,7 +75,7 @@ describe('ERP 模块开关', () => {
     expect(await modules(boss)).toContain('revenue');
   });
 
-  it('关掉库存：库存、采购、货款、审批待办都用不了（依赖库存），接口拒绝；营业数据不受影响；再开就恢复', async () => {
+  it('关掉库存：库存、采购、货款、审批待办、合同、付款都用不了（依赖库存），接口拒绝；营业数据不受影响；再开就恢复', async () => {
     expect((await switchModules(ctx.owner, { modules: { inventory: false } })).status).toBe(200);
     try {
       const info = (await api(ctx.app, ctx.owner, 'GET', '/api/erp/modules')).body.modules as { key: string; switchedOn: boolean; enabled: boolean }[];
@@ -84,11 +86,16 @@ describe('ERP 模块开关', () => {
         ['deptStock', true, false],
         ['payables', true, false],
         ['approvals', true, false],
+        ['contracts', true, false],
+        ['payments', true, false],
         ['expenses', true, false],
+        // 发票台账（8.0.3）也依赖库存
+        ['invoices', true, false],
         ['revenue', true, true],
+        ['canteen', false, false],
       ]);
       expect(await modules(ctx.owner)).toEqual(['revenue']);
-      for (const url of ['/api/inventory/materials', '/api/inventory/todo-count', '/api/purchase-orders', '/api/purchase-baseline?materialId=1', '/api/payables/overview', '/api/erp/expenses', '/api/erp/petty/daily', '/api/erp/requests', '/api/erp/images/1', '/api/erp/dept-stock/meta']) {
+      for (const url of ['/api/inventory/materials', '/api/inventory/todo-count', '/api/purchase-orders', '/api/purchase-baseline?materialId=1', '/api/payables/overview', '/api/erp/expenses', '/api/erp/petty/daily', '/api/erp/requests', '/api/erp/images/1', '/api/erp/dept-stock/meta', '/api/erp/contracts', '/api/erp/payments/requests', '/api/erp/invoices']) {
         const r = await api(ctx.app, ctx.owner, 'GET', url);
         expect(r.status, url).toBe(403);
         expect(r.body.error.code, url).toBe('ERP_MODULE_DISABLED');
@@ -116,7 +123,7 @@ describe('ERP 模块开关', () => {
       expect((await switchModules(ctx.owner, { modules: { inventory: true } })).status).toBe(200);
     }
     expect((await api(ctx.app, ctx.owner, 'GET', '/api/inventory/materials')).status).toBe(200);
-    expect(await modules(ctx.owner)).toEqual([...ERP_MODULE_KEYS]);
+    expect(await modules(ctx.owner)).toEqual(ERP_MODULE_KEYS.filter((k) => k !== 'canteen'));
   });
 
   it('关掉采购只拦采购：库存、货款照常', async () => {

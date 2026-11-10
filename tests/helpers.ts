@@ -7,7 +7,7 @@ import { migrate } from '../src/server/migrate';
 import { createStaff } from '../src/server/modules/staff';
 import { demoSeedWindow } from '../src/server/ops/demo-time';
 
-import { recreateFromTemplate, testDbUrl } from './test-db';
+import { dropPublicSchema, recreateFromTemplate, testDbUrl } from './test-db';
 
 /** 测试库：并行跑时每个进程一个库（见 tests/test-db.ts、vitest.config.ts） */
 export const TEST_DB = testDbUrl();
@@ -31,7 +31,7 @@ export async function setup(): Promise<TestContext> {
   // 并行时从迁移好的模板库整库复制一份新的；不并行时照旧清空、迁移（见 tests/test-db.ts）
   const fresh = await recreateFromTemplate();
   const sql = createSql(TEST_DB, { max: 20 });
-  if (!fresh) await sql.unsafe('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+  if (!fresh) await dropPublicSchema(sql);
   await migrate(sql);
   // 「收款前必须先开班」（R1.2）默认开启；之前的用例按开班可选的口径编写，这里关闭，
   // 开启时的行为由 tests/r1-funds.test.ts 单独验证（openShiftRequired(ctx) 重新开启）
@@ -39,6 +39,9 @@ export async function setup(): Promise<TestContext> {
   // 会员体系 v2（v0.7.23）的首充 / 续充最低默认 5,000 元；之前的用例按小额充值编写，这里设成不限，
   // 最低充值的行为由 tests/membership.test.ts 单独验证（那里按需改回）
   await sql`INSERT INTO settings (key, value) VALUES ('membership_rules', ${sql.json({ firstRechargeMinCents: 0, topUpMinCents: 0 })})`;
+  // 8.0.4 的充值当日储值消费比例默认 70%（HY01）：之前的用例常在同一天先充值再消费，这里设成不限，
+  // 比例的行为由 tests/membership-v804.test.ts 单独验证（那里按需改回 70）
+  await sql`INSERT INTO settings (key, value) VALUES ('recharge_spend_pct', 'null'::jsonb)`;
   const ownerId = await createStaff(sql, { username: 'owner', displayName: '测试店主', role: 'owner', password: PASSWORD, mustChangePassword: false });
   const clerkId = await createStaff(sql, { username: 'clerk', displayName: '测试店员', role: 'clerk', password: PASSWORD, mustChangePassword: false });
   const app = await buildApp(sql, config);
@@ -209,6 +212,29 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '070_purchase_channels.sql',
   '071_petty_accounts.sql',
   '072_sourcing.sql',
+  '073_approval_center.sql',
+  '074_sourcing_requests.sql',
+  '075_stocktake_variance.sql',
+  '076_approval_op_fences.sql',
+  '077_contracts.sql',
+  '078_po_contracts.sql',
+  '079_contract_scan_scope.sql',
+  '080_payment_requests.sql',
+  '081_three_way_match.sql',
+  '082_purchasing_flow.sql',
+  '083_suppliers_contracts.sql',
+  '084_receipt_attachments.sql',
+  '085_gift_receipts.sql',
+  '086_expense_budgets.sql',
+  '087_input_invoices.sql',
+  '088_member_tags_vip.sql',
+  '089_coupon_campaigns.sql',
+  '090_canteen.sql',
+  '091_canteen_join.sql',
+  '092_canteen_reply_ops.sql',
+  '093_purchasing_ops.sql',
+  '094_coupon_campaign_ops.sql',
+  '095_sms_outbox_lease.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */
