@@ -1,9 +1,12 @@
 // 首页：版头大图加标志（首页轮播；没有轮播时用门店照片，再没有用木色底）、门店信息（两家店都显示，MP5）、
 // 三块业务（TASTE、WELLNESS、EXPERIENCE）、服务入口、门店公告。门店连不上时用之前的信息并标出来。
+// 会员端提醒（RQ-014）：首页显示时问一次，有收到券、券快到期的提醒就弹出来，看过记已读（utils/notices.ts）。
 import type { MpBanner, MpHome, MpStore } from '../../../../src/shared/mp';
 import { imageUrl, messageOf, show } from '../../utils/api';
 import { appData } from '../../utils/app-state';
 import { navMetrics } from '../../utils/nav';
+import { loadNotices, markRead } from '../../utils/notices';
+import type { NoticeView } from '../../utils/notices';
 
 type Banner = MpBanner & { src: string };
 const HERO_RPX = 600;
@@ -26,8 +29,15 @@ Page({
     banners: [] as Banner[],
     current: 0,
     heroImage: '',
+    /** 会员端提醒：弹着的几条；有券的提醒时多一个「看我的券」 */
+    notices: [] as NoticeView[],
+    noticeOpen: false,
+    noticeCoupon: false,
   },
   heroPx: 300,
+  /** 上次问提醒的时刻：切回首页 30 秒内不再问（弹着的时候每次都重新问，解绑、换绑以后换成那位会员的） */
+  noticeAt: 0,
+  noticeBusy: false,
 
   onLoad() {
     const n = navMetrics();
@@ -42,8 +52,42 @@ Page({
     this.load();
   },
 
+  onShow() {
+    if (this.data.noticeOpen || Date.now() - this.noticeAt > 30000) this.loadNotices();
+  },
+
   onPullDownRefresh() {
     this.load().then(() => wx.stopPullDownRefresh());
+  },
+
+  async loadNotices() {
+    if (this.noticeBusy) return;
+    this.noticeBusy = true;
+    this.noticeAt = Date.now();
+    try {
+      const notices = await loadNotices();
+      this.setData({ notices, noticeOpen: notices.length > 0, noticeCoupon: notices.some((n) => n.coupon) });
+    } finally {
+      this.noticeBusy = false;
+    }
+  },
+
+  /** 看过了：先关上，再记已读（记不上的下次打开补发，不打扰） */
+  onNoticeOk() {
+    const ids = this.data.notices.map((n) => n.id);
+    this.setData({ noticeOpen: false, notices: [], noticeCoupon: false });
+    this.noticeAt = Date.now();
+    markRead(ids);
+  },
+
+  onNoticeCoupons() {
+    this.onNoticeOk();
+    wx.navigateTo({ url: '/pages/coupons/index' });
+  },
+
+  /** 弹窗下面的页面不跟着滑 */
+  onNoticeHold() {
+    return;
   },
 
   async load() {

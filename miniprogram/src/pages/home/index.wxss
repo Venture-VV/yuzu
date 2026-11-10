@@ -234,3 +234,54 @@
   margin-top: 12rpx;
   font-size: 24rpx;
 }
+
+/* 会员端提醒（RQ-014）：盖在导航栏上面；细线分隔、留白，按钮照全局 */
+.ntc-mask {
+  position: fixed;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 48rpx;
+  background-color: rgba(28, 26, 23, 0.45);
+}
+.ntc {
+  width: 100%;
+  padding: 40rpx 36rpx 36rpx;
+  background-color: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8rpx;
+  box-sizing: border-box;
+}
+.ntc-list {
+  max-height: 52vh;
+  margin-top: 20rpx;
+  border-top: 1px solid var(--line);
+}
+.ntc-item {
+  padding: 22rpx 0;
+  border-bottom: 1px solid var(--line);
+}
+.ntc-t {
+  display: block;
+  font-weight: 600;
+}
+.ntc-b {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 26rpx;
+  color: var(--muted);
+}
+.ntc-acts {
+  display: grid;
+  grid-template-columns: 1fr;
+  margin-top: 32rpx;
+}
+.ntc-acts.two {
+  grid-template-columns: 1fr 1fr;
+  grid-gap: 20rpx;
+}

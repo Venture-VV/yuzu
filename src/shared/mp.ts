@@ -229,6 +229,31 @@ export interface MpBenefits {
   upcoming: { name: string; startLabel: string }[];
 }
 
+/**
+ * 会员端提醒（RQ-014，接主线 8.0.4 批量发券的「会员端弹窗」：member-notices.ts 的 listMemberNotices、markMemberNoticeRead；
+ * docs/MEMBERSHIP_V804.md 第 6 节，弹的时机按 HY16，待确认）：小程序首页打开时弹出，看过记已读。
+ * 只给顾客该看的：标题、正文；没有发券单、券模板与内部的日子。
+ */
+export interface MpNotice {
+  id: number;
+  /** coupon_issued 收到券、coupon_expiring 券快到期；主线以后再加的种类照标题、正文显示 */
+  kind: string;
+  /** 「收到 2 张券」「券快到期了」 */
+  title: string;
+  /** 「「50 元代金券」×2，有效期至 2026-12-31。到店出示会员码即可使用。」 */
+  body: string;
+}
+export interface MpNotices {
+  /** 这位会员今天要看的（门店营业日；没读过、在显示的日子里、券还能用的），新的在前，最多 20 条 */
+  notices: MpNotice[];
+}
+/** 一次最多记几条已读（与一次最多弹 20 条一样） */
+export const MP_NOTICE_READ_MAX = 20;
+export interface MpNoticeRead {
+  /** 这次记成已读的；之前已经读过的、不是这位会员的不在里面（重提不报错） */
+  read: number[];
+}
+
 /** 会员码（MP9）：由 yuzu 签发，每 60 秒换一次；前台扫码盒扫进会员查找框，yuzu 在本机校验 */
 export interface MpMemberCode {
   code: string;
