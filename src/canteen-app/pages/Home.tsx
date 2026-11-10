@@ -1,10 +1,10 @@
 // 首页：打招呼、现在（或下一顿）吃什么、亮出饭卡码；跟柚子说的一栏；今天的其他几顿。
 
-import { useMemo } from 'react';
-import { canScan, type CanteenMe, type Meal, type MealWindow } from '@shared/canteen';
+import { useEffect, useMemo, useState } from 'react';
+import { canScan, canUseMailbox, type CanteenMe, type Meal, type MealWindow } from '@shared/canteen';
 import { Mascot } from '../Mascot';
 import { IconArrow, IconCamera, IconLetter, IconTicket } from '../doodles';
-import { addDays, storeNow } from '../lib';
+import { addDays, call, storeNow } from '../lib';
 import { MealCard, useMenus } from '../menus';
 import { Button, Pill, Stamp } from '../ui';
 
@@ -95,6 +95,7 @@ export function HomePage({ me, offsetMs, online, go }: { me: CanteenMe; offsetMs
           <IconCamera size={26} fill="var(--color-yuzu)" /> 扫码打卡
         </Button>
       )}
+      {canUseMailbox(me.employee.role) && <MailboxEntry online={online} go={go} />}
 
       {/* 跟柚子说（第二期，K16）：员工面板上的反馈栏 */}
       <button
@@ -131,5 +132,38 @@ export function HomePage({ me, offsetMs, online, go }: { me: CanteenMe; offsetMs
       {enabled.length === 0 && <p className="text-center text-[14px] text-ink-3">管理员还没设开饭时间</p>}
       <p className="pt-2 text-center text-[13px] text-ink-3">这个月在饭堂吃了 {me.mealsThisMonth} 顿 · 喜欢的菜记得点个赞</p>
     </div>
+  );
+}
+
+/** 食堂负责人：柚子信箱的入口（店主 2026-11-10，docs/CANTEEN.md 第 18 节，K20），写着还有几条没看过 */
+function MailboxEntry({ online, go }: { online: boolean; go: (route: string) => void }) {
+  const [unread, setUnread] = useState<number | null>(null);
+  useEffect(() => {
+    if (!online) return;
+    call<{ unread: number }>('GET', '/api/canteen/mailbox/unread')
+      .then((r) => setUnread(r.unread))
+      .catch(() => undefined);
+  }, [online]);
+  return (
+    <button
+      type="button"
+      onClick={() => go('mailbox')}
+      data-testid="mailbox-entry"
+      className="flex w-full items-center gap-3 rounded-[var(--radius-card)] bg-card px-4 py-3 text-left shadow-[var(--shadow-soft)] ring-1 ring-line/80 active:scale-[0.99]"
+    >
+      <span className="text-[26px] leading-none">📮</span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[16px] font-black">柚子信箱</span>
+        <span className="block text-[13px] text-ink-2">同事们跟柚子说的话，在这里看、回信</span>
+      </span>
+      {!!unread && (
+        <span className="num rounded-full bg-energy px-2.5 py-0.5 text-[13px] font-black text-white" data-testid="mailbox-entry-unread">
+          {unread} 条没看
+        </span>
+      )}
+      <span className="text-ink-3">
+        <IconArrow size={20} />
+      </span>
+    </button>
   );
 }

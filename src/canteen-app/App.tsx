@@ -3,7 +3,7 @@
 // （扫注册二维码、点员工群里的链接来的 #reg 直接进登记），登记好或第一次登录后接着走新手教程。
 
 import { useCallback, useEffect, useState } from 'react';
-import { canEditMenu, canScan, type CanteenMe } from '@shared/canteen';
+import { canEditMenu, canScan, canUseMailbox, type CanteenMe } from '@shared/canteen';
 import { RoughDefs, IconChef, IconCamera, IconHome, IconLetter, IconMe, IconMenu, IconTicket } from './doodles';
 import { inWeChat, InstallGuide, isStandalone, WeChatTip } from './install';
 import { Intro } from './intro/Intro';
@@ -13,6 +13,7 @@ import { ClosedPage, JoinPage, LoginPage, OfflinePage } from './pages/Auth';
 import { CodePage } from './pages/Code';
 import { HomePage } from './pages/Home';
 import { KitchenPage } from './pages/Kitchen';
+import { MailboxPage } from './pages/Mailbox';
 import { MenuPage } from './pages/Menu';
 import { MePage } from './pages/Me';
 import { RegisterPage } from './pages/Register';
@@ -21,8 +22,8 @@ import { TalkPage } from './pages/Talk';
 import { Tour, tourDone, tourSteps } from './tour';
 import { Button, cn, Sheet, Toasts } from './ui';
 
-type Route = 'home' | 'menu' | 'code' | 'talk' | 'kitchen' | 'scan' | 'me';
-const ROUTES: Route[] = ['home', 'menu', 'code', 'talk', 'kitchen', 'scan', 'me'];
+type Route = 'home' | 'menu' | 'code' | 'talk' | 'kitchen' | 'scan' | 'mailbox' | 'me';
+const ROUTES: Route[] = ['home', 'menu', 'code', 'talk', 'kitchen', 'scan', 'mailbox', 'me'];
 
 /** #join=ABCD2345（开通卡片）、#reg（注册二维码；以前印的 #reg=口令 也认，口令不再看）、#/menu、#/intro 这样的地址 */
 function readHash(): { route: Route; join: string | null; reg: boolean; login: boolean; intro: boolean } {
@@ -178,7 +179,7 @@ export function App() {
 
   const { me, offsetMs } = cached;
   const role = me.employee.role;
-  const allowed = (r: Route) => (r === 'kitchen' ? canEditMenu(role) : r === 'scan' ? canScan(role) : true);
+  const allowed = (r: Route) => (r === 'kitchen' ? canEditMenu(role) : r === 'scan' ? canScan(role) : r === 'mailbox' ? canUseMailbox(role) : true);
   const route = allowed(hash.route) ? hash.route : 'home';
   const page = {
     home: <HomePage me={me} offsetMs={offsetMs} online={online} go={go} />,
@@ -187,6 +188,7 @@ export function App() {
     talk: <TalkPage me={me} online={online} />,
     kitchen: <KitchenPage me={me} offsetMs={offsetMs} />,
     scan: <ScanPage me={me} offsetMs={offsetMs} online={online} />,
+    mailbox: <MailboxPage me={me} online={online} />,
     me: (
       <MePage
         me={me}

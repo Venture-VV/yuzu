@@ -358,23 +358,31 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
     }
   });
 
-  test('负责人：从相册选员工的码打卡；同一餐再扫提示已打卡；断网扫到先记下、联网自动补登', async ({ browser }) => {
+  test('负责人：从相册选员工的码打卡；同一餐再扫提示已打卡；断网扫到先记下、联网自动补登；扫完柚子播报结果（K21）', async ({ browser }) => {
     const ctx = await phone(browser, 'android');
+    await ctx.addInitScript(fakeSpeech);
     const mgr = await join(ctx, codes.M001!, 'chen-2026');
     await mgr.getByTestId('tab-scan').click();
     await noOverflow(mgr);
     const result = mgr.getByTestId('scan-result');
+    // 柚子念了什么（打断的、点按钮时让浏览器允许出声的空句子不算）
+    const said = () => mgr.evaluate(() => (window as unknown as { __spoken: string[] }).__spoken.filter((t) => t && t !== '<cancel>'));
+    const lastSaid = async () => (await said()).at(-1);
+    await expect(mgr.getByTestId('scan-voice-toggle')).toHaveAttribute('aria-pressed', 'true');
 
     await mgr.getByTestId('scan-file').setInputFiles(`${OUT}/qr-A001.png`);
     await expect(result).toHaveAttribute('data-status', 'ok');
     await expect(result).toContainText('小林');
     await expect(result).toContainText('午餐打卡成功');
+    await expect(result.getByTestId('scan-voice-line')).toHaveText('扫码成功，可以开饭！');
+    await expect.poll(lastSaid).toBe('扫码成功，可以开饭！');
     await mgr.screenshot({ path: `${OUT}/scan-ok.png` });
     await result.click();
 
     await mgr.getByTestId('scan-file').setInputFiles(`${OUT}/qr-A001.png`);
     await expect(result).toHaveAttribute('data-status', 'already');
     await expect(result).toContainText('已经打过卡啦');
+    await expect.poll(lastSaid).toBe('这一餐已经打过卡啦！');
     await result.click();
 
     // 原大小读不出来的码：缩小再读，读出来交给门店系统（内容是编的，门店系统拒绝：码不对），不报「没找到二维码」
@@ -382,12 +390,16 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
     await mgr.getByTestId('scan-file').setInputFiles(`${OUT}/qr-hard.png`);
     await expect(result).toHaveAttribute('data-status', 'error');
     await expect(result).toHaveAttribute('data-code', 'CODE_INVALID');
+    await expect(result.getByTestId('scan-voice-line')).toHaveText('未识别到汤崎身份，不可开饭！');
+    await expect.poll(lastSaid).toBe('未识别到汤崎身份，不可开饭！');
+    await mgr.screenshot({ path: `${OUT}/scan-fail.png` });
     await result.click();
 
     await ctx.setOffline(true);
     await mgr.getByTestId('scan-file').setInputFiles(`${OUT}/qr-A002.png`);
     await expect(result).toHaveAttribute('data-status', 'queued');
     await expect(mgr.getByTestId('queued-count')).toHaveText('1');
+    await expect.poll(lastSaid).toBe('已记下，联网后自动补登。');
     await result.click();
     await ctx.setOffline(false);
     await expect(mgr.getByTestId('settled-item').first()).toContainText('小周', { timeout: 30_000 });
@@ -401,7 +413,23 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
     await mgr.getByRole('button', { name: '登记', exact: true }).click();
     await expect(result).toHaveAttribute('data-status', 'ok');
     await expect(result).toContainText('王师傅');
+    await expect.poll(lastSaid).toBe('登记成功，可以开饭！');
     await mgr.screenshot({ path: `${OUT}/scan-manual.png` });
+    await result.click();
+
+    // 关掉播报：再扫不念，这台手机记住；补登的结果（后台慢慢交的）本来就不念
+    await mgr.getByTestId('scan-voice-toggle').click();
+    await expect(mgr.getByTestId('scan-voice-toggle')).toHaveAttribute('aria-pressed', 'false');
+    expect(await mgr.evaluate(() => localStorage.getItem('yuzu.canteen.scanVoice.v1'))).toBe('off');
+    const before = (await said()).length;
+    await mgr.getByTestId('scan-file').setInputFiles(`${OUT}/qr-A001.png`);
+    await expect(result).toHaveAttribute('data-status', 'already');
+    await mgr.waitForTimeout(300);
+    expect((await said()).length).toBe(before);
+    await result.click();
+    // 再打开：念一句打招呼的（不念「可以开饭」）
+    await mgr.getByTestId('scan-voice-toggle').click();
+    await expect.poll(lastSaid).toBe('柚子来播报扫码结果啦！');
     await ctx.close();
   });
 
@@ -418,6 +446,72 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
     await admin.getByRole('radio', { name: '菜单' }).click();
     await expect(admin.getByTestId('canteen-menus').getByText('❤️1')).toBeVisible();
     await admin.screenshot({ path: `${OUT}/admin.png`, fullPage: true });
+  });
+
+  test('负责人：手机上看柚子信箱、标看过、回信（回复没收到时原样再发）；员工看到回信，后台写是哪位负责人（K20）', async ({ browser }) => {
+    // 员工跟柚子说一句
+    const ectx = await phone(browser, 'iphone');
+    const e = await ectx.newPage();
+    await e.goto(CANTEEN);
+    await e.getByLabel('账号').fill('A001');
+    await e.getByLabel('密码').fill('lin-2026');
+    await e.getByRole('button', { name: '登录' }).click();
+    await e.getByTestId('tab-talk').click();
+    await e.getByRole('radio', { name: '想要柚子做的' }).click();
+    await e.getByLabel('想跟柚子说的话').fill('想在饭堂吃一次酸菜鱼');
+    await e.getByTestId('talk-send').click();
+    await expect(e.getByText('想在饭堂吃一次酸菜鱼')).toBeVisible();
+
+    // 负责人在手机上：首页写着几条没看，点进柚子信箱
+    const mctx = await phone(browser, 'android');
+    const m = await mctx.newPage();
+    await m.goto(CANTEEN);
+    await m.getByLabel('账号').fill('M001');
+    await m.getByLabel('密码').fill('chen-2026');
+    await m.getByRole('button', { name: '登录' }).click();
+    await expect(m.getByTestId('mailbox-entry-unread')).toHaveText('1 条没看');
+    await m.getByTestId('mailbox-entry').click();
+    await expect(m.getByTestId('mailbox-page')).toBeVisible();
+    await noOverflow(m);
+    const item = m.getByTestId('mailbox-item').filter({ hasText: '想在饭堂吃一次酸菜鱼' });
+    await expect(item).toContainText('小林');
+    await expect(item).toContainText('想要柚子做的');
+    await item.getByTestId('mailbox-read').click();
+    await expect(item).toContainText('陈姐（食堂负责人） 看过了');
+
+    // 回信：第一次门店系统收到了、回复丢了——这一条留在手机上，点「原样再发」拿到同一个结果
+    let dropped = false;
+    await m.route('**/api/canteen/mailbox/*/reply', async (route) => {
+      if (dropped) return route.continue();
+      dropped = true;
+      await route.fetch();
+      await route.abort();
+    });
+    await item.getByTestId('mailbox-reply-open').click();
+    await m.getByTestId('mailbox-reply-text').fill('收到！下周三安排酸菜鱼～');
+    await m.getByTestId('mailbox-reply-send').click();
+    const pending = m.getByTestId('mailbox-pending');
+    await expect(pending).toContainText('这一条回信还没确认送到');
+    await expect(pending).toContainText('收到！下周三安排酸菜鱼～');
+    // 没确认之前不能回别的
+    await item.getByTestId('mailbox-reply-open').click();
+    await expect(m.getByTestId('mailbox-reply-text')).toHaveCount(0);
+    await m.screenshot({ path: `${OUT}/mailbox-pending.png` });
+    await pending.getByRole('button', { name: '原样再发' }).click();
+    await expect(pending).toHaveCount(0);
+    await expect(item.getByTestId('mailbox-reply')).toContainText('柚子回信 · 陈姐（食堂负责人）');
+    await expect(item.getByTestId('mailbox-reply')).toContainText('收到！下周三安排酸菜鱼～');
+    await m.screenshot({ path: `${OUT}/mailbox.png`, fullPage: true });
+
+    // 员工在「跟柚子说」里看到回信（写「柚子回信」）
+    await e.reload();
+    await expect(e.getByTestId('talk-reply').filter({ hasText: '收到！下周三安排酸菜鱼～' })).toContainText('柚子回信');
+    // 后台同一份：写是哪位负责人回的，只记了一次
+    const list = (await (await admin.request.get('/api/erp/canteen/feedback')).json()) as { rows: { content: string; reply: string; repliedByName: string; readByName: string }[] };
+    const row = list.rows.find((r) => r.content === '想在饭堂吃一次酸菜鱼');
+    expect(row).toMatchObject({ reply: '收到！下周三安排酸菜鱼～', repliedByName: '陈姐（食堂负责人）', readByName: '陈姐（食堂负责人）' });
+    await ectx.close();
+    await mctx.close();
   });
 });
 
