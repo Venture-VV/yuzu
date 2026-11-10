@@ -107,14 +107,14 @@ function RulesCard() {
         )}
         {row(
           '挂技师项目必须选技师',
-          '关闭后前台可以「暂不指定技师」，技师业绩里单列为「未指定技师」。',
+          '关闭后前台可以「交给钟房派钟」，钟房在「待派钟」里补派技师（不另挂一笔）；还没派的在技师业绩里单列为「未指定技师」。',
           <Segmented
             ariaLabel="挂技师项目必须选技师"
             value={onOff(draft.requireTechnician)}
             onChange={(v) => editable && set({ requireTechnician: v === 'on' })}
             options={[
               { value: 'on', label: '必须选', disabled: !editable },
-              { value: 'off', label: '可以暂不指定', disabled: !editable },
+              { value: 'off', label: '可以交给钟房派钟', disabled: !editable },
             ]}
           />,
           true,

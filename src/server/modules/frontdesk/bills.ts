@@ -105,9 +105,15 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
     throw forbidden('当前岗位不能手动输入金额，请从项目中选择');
   }
   const { clientKey: key, ...payload } = input;
-  // 派钟选的房间（v0.7.16）也算进摘要：同一个操作编号换了房间重发会被拒绝；没选房间时摘要与升级前完全相同
+  // 派钟选的房间（v0.7.16）、按哪张预约派（8.0.8）也算进摘要：同一个操作编号换了房间、预约重发会被拒绝；都没有时摘要与升级前完全相同
   const spaceId = options.session?.dispatch?.spaceId;
-  const requestHash = hashRequest(spaceId === undefined ? { visitId, ...payload } : { visitId, ...payload, spaceId });
+  const bookingId = options.session?.dispatch?.bookingId;
+  const requestHash = hashRequest({
+    visitId,
+    ...payload,
+    ...(spaceId === undefined ? {} : { spaceId }),
+    ...(bookingId === undefined ? {} : { bookingId }),
+  });
   // 补录纸质单：明细按纸质单上的实际时间登记（营业日按实际时间归属）
   const backfill = resolveBackfill(input.backfill, ctx.actor);
   await runIdempotent(deps, { key, opType: 'bill_post', requestHash }, async (tx) =>

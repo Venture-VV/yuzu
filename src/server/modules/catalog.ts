@@ -6,7 +6,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { defaultTier, PRICE_TIERS, sortTiers, STRENGTHS, tierPrice, type TierPrice } from '@shared/catalog';
+import { defaultTier, isCareItem, PRICE_TIERS, sortTiers, STRENGTHS, tierPrice, type TierPrice } from '@shared/catalog';
 import { PRICE_LIST_MAX_ROWS, type BuiltinPriceList, type PriceListImportReport } from '@shared/price-list-import';
 import type { Catalog, RechargePlan, ServiceItem } from '@shared/types';
 import type { Db, Sql, Tx } from '../db';
@@ -91,7 +91,7 @@ async function writeItem(tx: Tx, id: number | null, i: Omit<ItemData, 'tiers'> &
       INSERT INTO service_items (name, category, price, duration_minutes, gender, strength, essential_oil, heat_therapy, popular,
                                  technician_required, note, active, sort_order)
       VALUES (${i.name}, ${i.category}, ${price}, ${i.durationMinutes}, ${i.gender}, ${i.strength}, ${i.essentialOil},
-              ${i.heatTherapy}, ${i.popular}, ${i.technicianRequired ?? false}, ${i.note}, ${i.active}, ${i.sortOrder})
+              ${i.heatTherapy}, ${i.popular}, ${i.technicianRequired ?? isCareItem(i.category, i.name)}, ${i.note}, ${i.active}, ${i.sortOrder})
       RETURNING id`;
     itemId = row!.id;
   } else {

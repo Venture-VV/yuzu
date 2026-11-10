@@ -17,6 +17,9 @@ export interface TierPrice {
 }
 
 /** 默认档：标准 → 专业 → 优选中第一个提供的 */
+/** 护理类项目（8.0.8，F1）：类别或名称含「护理」——新建时默认「需要技师」（钟房能派钟），店主可在后台「技师」里取消 */
+export const isCareItem = (category: string, name: string) => category.includes('护理') || name.includes('护理');
+
 export function defaultTier(prices: readonly TierPrice[]): PriceTier | null {
   for (const t of PRICE_TIERS) if (prices.some((p) => p.tier === t)) return t;
   return null;

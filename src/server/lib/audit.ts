@@ -53,6 +53,8 @@ export type AuditAction =
   | 'frontdesk_cancel'
   | 'frontdesk_post'
   | 'frontdesk_void'
+  | 'clock_assign'
+  | 'clock_transfer'
   | 'frontdesk_move'
   | 'frontdesk_abandon'
   | 'frontdesk_ticket'
