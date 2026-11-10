@@ -2,7 +2,7 @@
 // 三块业务（TASTE、WELLNESS、EXPERIENCE）、服务入口、门店公告。门店连不上时用之前的信息并标出来。
 // 会员端提醒（RQ-014）：首页显示时问一次，有收到券、券快到期的提醒就弹出来，看过记已读（utils/notices.ts）。
 import type { MpBanner, MpHome, MpStore } from '../../../../src/shared/mp';
-import { imageUrl, messageOf, show } from '../../utils/api';
+import { imageUrl, latestBindVersion, messageOf, show } from '../../utils/api';
 import { appData } from '../../utils/app-state';
 import { navMetrics } from '../../utils/nav';
 import { loadNotices, markRead } from '../../utils/notices';
@@ -40,6 +40,8 @@ Page({
   noticeBusy: false,
   /** 这次打开以后点过「知道了」的：已读还没回来时同时在问的那一次不会把它们又弹出来 */
   dismissed: [] as number[],
+  /** 弹着的提醒是哪个绑定状态版本号下问到的：记已读时带上；之后见过更新的（解绑、换绑过），弹着的就不是这位会员的了 */
+  noticeVersion: -1,
 
   onLoad() {
     const n = navMetrics();
@@ -55,7 +57,10 @@ Page({
   },
 
   onShow() {
-    if (this.data.noticeOpen || Date.now() - this.noticeAt > 30000) this.loadNotices();
+    // 弹着的是换绑以前那位会员的（别的页面已经看到了更新的绑定状态）：先关上，马上重新问
+    const stale = this.data.noticeOpen && this.noticeVersion < latestBindVersion();
+    if (stale) this.setData({ noticeOpen: false, notices: [], noticeCoupon: false });
+    if (stale || this.data.noticeOpen || Date.now() - this.noticeAt > 30000) this.loadNotices();
   },
 
   onPullDownRefresh() {
@@ -70,7 +75,10 @@ Page({
       const got = await loadNotices();
       // 问不到（断网、门店连不上）：弹着的照旧
       if (got === null) return;
-      const notices = got.filter((n) => this.dismissed.indexOf(n.id) < 0);
+      // 换绑以前发出去、换绑以后才回来的旧回答：丢掉（小程序线测试 29aa0cc 的 P1）
+      if (got.bindVersion !== null && got.bindVersion < latestBindVersion()) return;
+      const notices = got.bindVersion === null ? [] : got.notices.filter((n) => this.dismissed.indexOf(n.id) < 0);
+      this.noticeVersion = got.bindVersion === null ? -1 : got.bindVersion;
       this.setData({ notices, noticeOpen: notices.length > 0, noticeCoupon: notices.some((n) => n.coupon) });
     } finally {
       this.noticeBusy = false;
@@ -83,7 +91,7 @@ Page({
     this.setData({ noticeOpen: false, notices: [], noticeCoupon: false });
     this.noticeAt = Date.now();
     this.dismissed = this.dismissed.concat(ids).slice(-100);
-    markRead(ids);
+    markRead(ids, this.noticeVersion);
   },
 
   onNoticeCoupons() {
