@@ -14,6 +14,7 @@ import { Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { AdminPage, useAdminSections } from './AdminShell';
 
 const SECTION_HINTS: Partial<Record<AdminSection, string>> = {
+  dashboard: '今日、经营总览、会员、会员体系、技师、客房、营销成本（原门店的「看板」）',
   settings: '所有规则一张表：当前值、默认值、谁改的',
   rules: '营业日、扣款顺序、上限与时限、开班、库存规则',
   members: '自定义字段、渠道来源',

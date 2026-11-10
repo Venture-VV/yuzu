@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation, useNavigate } from 'react-router';
+import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation, useNavigate, useParams } from 'react-router';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { ApiError, onAuthError } from './lib/api';
 import { qk, useSessionQuery } from './lib/queries';
@@ -13,6 +13,7 @@ import { LoginPage } from './features/auth/LoginPage';
 import { ChangePasswordPage } from './features/auth/ChangePasswordPage';
 import { WorkbenchPage } from './features/workbench/WorkbenchPage';
 import { FrontdeskPage } from './features/frontdesk/FrontdeskPage';
+import { ADMIN_SECTIONS } from '@shared/admin';
 import { adminRoutes } from './features/admin/AdminPage';
 import { useCan, useOptionalSession } from './lib/session';
 import { useErpAccess } from './features/erp/access';
@@ -30,7 +31,6 @@ const DevicesPage = lazyPage(() => import('./features/devices/DevicesPage').then
 const LedgerPage = lazyPage(() => import('./features/ledger/LedgerPage').then((m) => m.LedgerPage));
 const SettlementPage = lazyPage(() => import('./features/settlement/SettlementPage').then((m) => m.SettlementPage));
 const ShiftPage = lazyPage(() => import('./features/shift/ShiftPage').then((m) => m.ShiftPage));
-const DashboardPage = lazyPage(() => import('./features/dashboard/DashboardPage').then((m) => m.DashboardPage));
 const LookupPage = lazyPage(() => import('./features/membership/LookupPage').then((m) => m.LookupPage));
 const AdminShell = lazyPage(() => import('./features/admin/AdminShell').then((m) => m.AdminShell));
 const CheckoutPrintPage = lazyPage(() => import('./features/print/CheckoutPrintPage').then((m) => m.CheckoutPrintPage));
@@ -184,6 +184,13 @@ function Home() {
   return <Navigate to="/password" replace />;
 }
 
+/** 门店的旧地址 /dashboard、/dashboard/<页签>：看板 2026-11-10 起在后台「数据看板」，带上页签与查询参数跳过去 */
+function DashboardMoved() {
+  const { tab } = useParams();
+  const { search } = useLocation();
+  return <Navigate to={`${ADMIN_SECTIONS.dashboard.path}${tab ? `/${tab}` : ''}${search}`} replace />;
+}
+
 const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
   {
@@ -289,7 +296,8 @@ const router = createBrowserRouter([
       { path: 'ledger', element: <LedgerPage /> },
       { path: 'settlement/:date?', element: <SettlementPage /> },
       { path: 'shift', element: <ShiftPage /> },
-      { path: 'dashboard/:tab?', element: <DashboardPage /> },
+      // 看板 2026-11-10 起在后台（「数据看板」）：门店的旧地址跳过去，页签与查询参数照带
+      { path: 'dashboard/:tab?', element: <DashboardMoved /> },
       { path: 'lookup', element: <LookupPage /> },
       { path: 'password', element: <ChangePasswordPage /> },
       { path: '*', element: <Navigate to="/" replace /> },

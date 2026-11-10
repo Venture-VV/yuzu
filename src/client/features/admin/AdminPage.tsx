@@ -10,6 +10,8 @@ const AdminPage = lazyPage(() => import('./AdminShell').then((m) => m.AdminPage)
 const AuditTab = lazyPage(() => import('./AuditTab').then((m) => m.AuditTab));
 const CatalogTab = lazyPage(() => import('./CatalogTab').then((m) => m.CatalogTab));
 const CouponsSection = lazyPage(() => import('./CouponsSection').then((m) => m.CouponsSection));
+// 数据看板（店主 2026-11-10：门店主导航的「看板」整合到后台）
+const DashboardPage = lazyPage(() => import('../dashboard/DashboardPage').then((m) => m.DashboardPage));
 const DevicesSection = lazyPage(() => import('./DevicesSection').then((m) => m.DevicesSection));
 const DiningSection = lazyPage(() => import('./DiningSection').then((m) => m.DiningSection));
 const MembersSection = lazyPage(() => import('./MembersSection').then((m) => m.MembersSection));
@@ -30,6 +32,7 @@ const TechniciansSection = lazyPage(() => import('./TechniciansSection').then((m
 
 export const adminRoutes: RouteObject[] = [
   { index: true, element: <AdminHome /> },
+  { path: 'dashboard/:tab?', element: <DashboardPage /> },
   { path: 'settings', element: <RuleCatalog /> },
   {
     path: 'rules',

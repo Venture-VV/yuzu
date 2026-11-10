@@ -8,8 +8,8 @@ import type { DutyExtras } from '@shared/reports';
 import { api } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
-import { PageHeader } from '../../components/AppShell';
 import { Money } from '../../components/Money';
+import { AdminPage } from '../admin/AdminShell';
 import { Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { Columns, FitText, HBars, yuan } from './charts';
 import { MarketingCostTab } from './MarketingCostTab';
@@ -23,6 +23,9 @@ import { TechniciansTab } from './TechniciansTab';
 // v0.7.0 加「技师业绩」（店主、店总、值班经理）；技师功能关闭时不显示（店主 2026-10-30 定，数据保留，重新开启后照常显示）
 // v0.7.4 加「客房」（经营总览的岗位看）；客房功能关闭时同样不显示
 // 8.0.4 加「营销成本」（营销成本测算：店主、店总；有财务职责的账号看不到，与财务隔离）
+// 店主 2026-11-10：门店主导航的「看板」整合到后台，改叫后台「数据看板」（/admin/dashboard）；各页签与权限不变，
+// 只有看板权限的岗位进后台也只看得到这一个分区；门店的旧地址 /dashboard 跳到这里
+export const DASHBOARD_PATH = '/admin/dashboard';
 const TABS = [
   { key: 'today', label: '今日', perm: 'ledger.readToday' },
   { key: 'overview', label: '经营总览', perm: 'report.executive' },
@@ -60,60 +63,58 @@ export function DashboardPage() {
   const [pref, setPref] = useState(readPref);
   const tabs = TABS.filter((t) => can(t.perm) && (t.key !== 'technicians' || session.technicians) && (t.key !== 'rooms' || session.rooms));
   const current = tabs.find((t) => t.key === tab) ?? (tab ? undefined : (tabs.find((t) => t.key === pref) ?? tabs[0]));
-  if (!current) return <Navigate to={tabs.length ? '/dashboard' : '/'} replace />;
+  if (!current) return <Navigate to={tabs.length ? DASHBOARD_PATH : '/'} replace />;
+  const defaultButton = tabs.length > 1 && (
+    <button
+      type="button"
+      className={cn('flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 text-[12.5px] font-semibold', pref === current.key ? 'text-yuzu-deep' : 'text-ink-3 hover:text-ink')}
+      onClick={() => {
+        writePref(current.key);
+        setPref(current.key);
+      }}
+      title="打开看板时先显示这一页（只记在这台设备上）"
+    >
+      <Star className={cn('size-4', pref === current.key && 'fill-yuzu')} />
+      {pref === current.key ? '我的默认页' : '设为默认页'}
+    </button>
+  );
   return (
-    <>
-      <PageHeader title="经营看板" subtitle={current.key === 'today' ? `营业日 ${session.today} · 每分钟刷新` : '口径与日结一致：按营业日，反结账冲回'} />
+    <AdminPage section="dashboard" description={current.key === 'today' ? `营业日 ${session.today} · 每分钟刷新` : '口径与日结一致：按营业日，反结账冲回'} actions={defaultButton}>
       {tabs.length > 1 && (
-        <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-line px-5 md:px-7" role="tablist" aria-label="看板">
+        <div className="-mt-1 mb-5 flex items-center gap-1 overflow-x-auto border-b border-line" role="tablist" aria-label="看板">
           {tabs.map((t) => (
             <NavLink
               key={t.key}
-              to={`/dashboard/${t.key}`}
+              to={`${DASHBOARD_PATH}/${t.key}`}
               role="tab"
               aria-selected={t.key === current.key}
-              className={cn('relative flex h-11 items-center px-3.5 text-[14px] font-semibold whitespace-nowrap', t.key === current.key ? 'text-ink' : 'text-ink-3 hover:text-ink')}
+              className={cn('relative flex h-11 shrink-0 items-center px-3.5 text-[14px] font-semibold whitespace-nowrap', t.key === current.key ? 'text-ink' : 'text-ink-3 hover:text-ink')}
               data-testid={`dashboard-tab-${t.key}`}
             >
               {t.label}
               {t.key === current.key && <span className="absolute inset-x-2 bottom-0 h-[3px] rounded-t-full bg-pine" />}
             </NavLink>
           ))}
-          <span className="flex-1" />
-          <button
-            type="button"
-            className={cn('flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 text-[12.5px] font-semibold', pref === current.key ? 'text-yuzu-deep' : 'text-ink-3 hover:text-ink')}
-            onClick={() => {
-              writePref(current.key);
-              setPref(current.key);
-            }}
-            title="打开看板时先显示这一页（只记在这台设备上）"
-          >
-            <Star className={cn('size-4', pref === current.key && 'fill-yuzu')} />
-            {pref === current.key ? '我的默认页' : '设为默认页'}
-          </button>
         </div>
       )}
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[1080px] space-y-5 px-5 py-6 md:px-7" data-testid="dashboard">
-          {current.key === 'overview' ? (
-            <OverviewTab />
-          ) : current.key === 'members' ? (
-            <MembersTab />
-          ) : current.key === 'membership' ? (
-            <MembershipTab />
-          ) : current.key === 'technicians' ? (
-            <TechniciansTab />
-          ) : current.key === 'rooms' ? (
-            <RoomsTab />
-          ) : current.key === 'marketing' ? (
-            <MarketingCostTab />
-          ) : (
-            <TodayTab />
-          )}
-        </div>
+      <div className="space-y-5" data-testid="dashboard">
+        {current.key === 'overview' ? (
+          <OverviewTab />
+        ) : current.key === 'members' ? (
+          <MembersTab />
+        ) : current.key === 'membership' ? (
+          <MembershipTab />
+        ) : current.key === 'technicians' ? (
+          <TechniciansTab />
+        ) : current.key === 'rooms' ? (
+          <RoomsTab />
+        ) : current.key === 'marketing' ? (
+          <MarketingCostTab />
+        ) : (
+          <TodayTab />
+        )}
       </div>
-    </>
+    </AdminPage>
   );
 }
 
