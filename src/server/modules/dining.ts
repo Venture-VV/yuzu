@@ -17,7 +17,7 @@ import { writeAudit } from '../lib/audit';
 import type { Actor, Deps, OpContext } from '../lib/context';
 import { AppError, conflict, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
-import { businessDate, nextDocNo, setTxTimeouts } from './frontdesk/common';
+import { businessDate, loadFrontdeskRules, nextDocNo, setTxTimeouts } from './frontdesk/common';
 import { pricesColumn } from './pricing';
 import { ctxOf } from '../lib/context';
 import { saveRuleSetting } from '../lib/rule-settings';
@@ -187,7 +187,8 @@ export async function kitchenBoard(db: Db, deps: Deps): Promise<KitchenBoard> {
 
 export async function diningMenu(db: Db, deps: Deps): Promise<DiningMenu> {
   const today = await businessDate(db as Tx, deps, new Date());
-  return { rules: await loadDiningRules(db), businessDate: today, dishes: await kitchenDishes(db, today) };
+  const { selfVoidMinutes } = await loadFrontdeskRules(db);
+  return { rules: await loadDiningRules(db), businessDate: today, dishes: await kitchenDishes(db, today), selfVoidMinutes };
 }
 
 /** 点单页按手牌找在店客人：只给点单需要的信息（不含会员手机号、余额与账单） */
@@ -420,7 +421,12 @@ export function registerDiningRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   // 点单页：菜单与估清、按手牌找客人、下单（挂账）、催单
-  app.get('/api/dining/menu', { preHandler: guardAny('dining.order', 'dining.kitchen') }, async () => diningMenu(sql, deps));
+  // 8.0.8：前台「加项目」看余量（B03）、退菜看小额上限（B02）、收银与看日结的看桌台点单开没开（A05），都读这一份
+  app.get(
+    '/api/dining/menu',
+    { preHandler: guardAny('dining.order', 'dining.kitchen', 'frontdesk.operate', 'frontdesk.checkout', 'ledger.export', 'report.executive') },
+    async () => diningMenu(sql, deps),
+  );
 
   app.get('/api/dining/guest', { preHandler: guard('dining.order') }, async (req) => {
     const { tag } = parse(z.object({ tag: z.string().trim().min(1, '请输入手牌号').max(16) }), req.query ?? {});

@@ -46,8 +46,10 @@ export function TablesTab() {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
   const board = useTablesBoard();
-  // 8.0.8（A05）：桌台点单下架时不能开台、加菜；开着的桌照常结账、退菜
-  const tablesOn = useDiningMenu().data?.rules.tablesEnabled ?? false;
+  // 8.0.8（A05）：桌台点单下架时不能开台、加菜；开着的桌照常结账、退菜（菜单还没取到时两样都先不显示）
+  const menuRules = useDiningMenu().data?.rules;
+  const tablesOn = menuRules?.tablesEnabled ?? false;
+  const tablesOff = menuRules ? !menuRules.tablesEnabled : false;
   const now = useServerNow(board.data?.serverTime, 30_000);
   const [opening, setOpening] = useState<Tile | null>(null);
   const [sessionId, setSessionId] = useState<number | null>(null);
@@ -83,7 +85,8 @@ export function TablesTab() {
 
   const click = (t: Tile) => {
     if (t.session) setSessionId(t.session.id);
-    else if (!tablesOn) toast({ tone: 'info', title: `桌 ${t.name} 空闲`, body: '桌台点单已下架：所有消费请挂手牌点单（店主可在后台「餐饮」里重新打开）' });
+    else if (!menuRules) return;
+    else if (tablesOff) toast({ tone: 'info', title: `桌 ${t.name} 空闲`, body: '桌台点单已下架：所有消费请挂手牌点单（店主可在后台「餐饮」里重新打开）' });
     else if (canOpen) setOpening(t);
     else toast({ tone: 'info', title: `桌 ${t.name} 空闲`, body: '开台要有「餐饮点单」与「前台挂账」权限' });
   };
@@ -100,7 +103,7 @@ export function TablesTab() {
 
   return (
     <div className="mx-auto max-w-[1280px] space-y-4 px-5 py-5 md:px-7" data-testid="dining-tables-board">
-      {!tablesOn && (
+      {tablesOff && (
         <Notice tone="info" title="桌台点单已下架" data-testid="tables-disabled">
           所有消费请挂手牌点单。还开着的桌照常看明细、结账、退菜、撤台；历史桌台单在「结账记录」里查。店主可在后台「餐饮」里重新打开桌台点单。
         </Notice>

@@ -126,6 +126,8 @@ export interface DiningMenu {
   rules: DiningRules;
   businessDate: string;
   dishes: MenuDish[];
+  /** 自己点的多少分钟内能自己退（前台规则「店员自行更正时限」；8.0.8 退菜弹窗显示属于哪一档用） */
+  selfVoidMinutes: number;
 }
 
 /** 点单页按手牌找在店客人（服务员不一定有前台权限，只给点单需要的信息） */
@@ -272,6 +274,9 @@ export const MP_FOOD_ORDER_LIMITS = { maxQuantity: 20, maxTotalCents: 50_000 } a
  * 一单要更多份就分几行（一单一共几份另按设置核对，例如扫码点餐的 N1 上限可调到 200）
  */
 export const MAX_BILL_LINE_QUANTITY = 99;
+
+/** 餐饮台账、退菜记录一次最多查几天（8.0.8，F13） */
+export const MAX_DINING_LEDGER_DAYS = 92;
 
 /** 餐饮台账的一行（8.0.8，B06）：一条餐饮明细 */
 export interface DiningLedgerRow {

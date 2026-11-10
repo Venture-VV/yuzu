@@ -16,7 +16,7 @@ import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, SectionTitle, Segmented, Skeleton, Spinner } from '../../components/ui';
 import { PendingPanel, useFrontdeskOp } from '../frontdesk/pending';
-import { guestKey, useDiningMenu, useTableSession, useTablesBoard } from './queries';
+import { guestKey, menuKey, useDiningMenu, useTableSession, useTablesBoard } from './queries';
 import { DishVoidDialog } from './DishVoid';
 
 interface CartLine {
@@ -193,6 +193,9 @@ export function OrderTab() {
         body: `${named.reduce((s, n) => s + n.quantity, 0)} 份菜已送到厨房，${t ? '记在这桌的账上' : '挂在客人账上'}，结账时一起结。`,
       });
       refresh();
+    } else {
+      // 下单没成功（例如余量不够、估清了）：马上刷新菜单与余量（8.0.8，B03）
+      void qc.invalidateQueries({ queryKey: menuKey });
     }
   };
 
@@ -364,6 +367,9 @@ export function OrderTab() {
                   );
                 })}
               </div>
+              <p className="mt-2 text-[12px] text-ink-4" data-testid="dining-remaining-hint">
+                「剩 N」是厨房在「估清」里设的今天还能卖几份，没写的不限量；别的终端点了菜，10 秒内跟上。
+              </p>
             </>
           )}
         </Card>

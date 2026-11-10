@@ -41,7 +41,8 @@ export function DishVoidDialog({
   /** void 退菜 / modify 改单（退掉后放回购物车） */
   mode?: 'void' | 'modify';
   onClose: () => void;
-  onDone: (dish: VoidableDish) => void;
+  /** result 是退菜接口的返回（前台作废返回这位客人的账单） */
+  onDone: (dish: VoidableDish, result: unknown) => void;
 }) {
   const session = useSession();
   const can = useCan();
@@ -62,10 +63,13 @@ export function DishVoidDialog({
   const rules = menu.data?.rules;
   const limit = rules?.voidFreeCents ?? 0;
   const small = !!rules && isSmallDishVoid(rules, { source: 'dining', amount: dish.amount });
-  const selfMinutes = (session.rules as { selfVoidMinutes?: number }).selfVoidMinutes ?? 15;
+  const selfMinutes = menu.data?.selfVoidMinutes ?? 15;
   const mine = dish.postedBy === session.staff.id && (Date.now() - new Date(dish.postedAt).getTime()) / 60_000 <= selfMinutes;
-  const direct = !forceGrant && (small || can('frontdesk.correct') || mine);
-  const tierText = small
+  // 规则还没取到时先按「直接退」：服务端照同样的规则核对，要授权时提示后转到授权
+  const direct = !forceGrant && (!rules || small || can('frontdesk.correct') || mine);
+  const tierText = !rules
+    ? '退菜按金额分级：小额直接退，超过的请值班经理及以上当场授权'
+    : small
     ? `小额（不超过 ${formatYuan(limit)}）：写原因直接退`
     : can('frontdesk.correct')
       ? '你的岗位可以直接退'
@@ -78,8 +82,8 @@ export function DishVoidDialog({
     setBusy(true);
     setError(null);
     try {
-      await api.post(url, { reason: reason.trim(), ...(grantId ? { grantId } : {}) });
-      onDone(dish);
+      const result = await api.post<unknown>(url, { reason: reason.trim(), ...(grantId ? { grantId } : {}) });
+      onDone(dish, result);
     } catch (e) {
       if (e instanceof ApiError && e.code === 'VOID_NEEDS_GRANT') {
         setForceGrant(true);

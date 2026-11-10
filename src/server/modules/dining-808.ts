@@ -9,7 +9,7 @@ import type { FastifyInstance } from 'fastify';
 import { can } from '@shared/permissions';
 import { businessDayStart, ISO_DATE } from '@shared/business-date';
 import { formatYuan } from '@shared/money';
-import { isSmallDishVoid, type DiningLedger, type DiningLedgerRow, type DishVoidRow } from '@shared/dining';
+import { isSmallDishVoid, MAX_DINING_LEDGER_DAYS, type DiningLedger, type DiningLedgerRow, type DishVoidRow } from '@shared/dining';
 import type { Db, Tx } from '../db';
 import type { Actor, Deps } from '../lib/context';
 import { AppError, badRequest } from '../lib/errors';
@@ -77,13 +77,10 @@ const LedgerQuery = z.object({
 });
 export type DiningLedgerQuery = z.output<typeof LedgerQuery>;
 
-/** 一次最多查 92 天（F13） */
-export const MAX_LEDGER_DAYS = 92;
-
 /** 餐饮明细（手牌、桌台、小程序扫码点餐都在）：按挂账的营业日、分类、状态筛选；分类按价目表，没写的记「未分类」 */
 function checkLedgerRange(from: string, to: string) {
   checkDateRange(from, to);
-  if (daysBetween(from, to) >= MAX_LEDGER_DAYS) throw badRequest(`一次最多查 ${MAX_LEDGER_DAYS} 天`);
+  if (daysBetween(from, to) >= MAX_DINING_LEDGER_DAYS) throw badRequest(`一次最多查 ${MAX_DINING_LEDGER_DAYS} 天`);
 }
 
 export async function diningLedger(db: Db, q: DiningLedgerQuery): Promise<DiningLedger> {
@@ -177,6 +174,17 @@ export async function dishVoids(db: Db, deps: Deps, q: { from: string; to: strin
   }));
 }
 
+export function dishVoidsCsv(rows: DishVoidRow[], timeZone: string): string {
+  const at = (iso: string) =>
+    new Intl.DateTimeFormat('zh-CN', { timeZone, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
+  const yuan = (c: number) => (c / 100).toFixed(2);
+  return toCsv([
+    ['退菜时间', '手牌', '桌台', '菜名', '数量', '金额', '原因', '谁退的', '谁点的', '怎么批的'],
+    ...rows.map((r) => [at(r.voidedAt), r.tagCode, r.tableName, r.name, r.quantity, yuan(r.amount), r.voidReason ?? '', r.voidedByName, r.postedByName, r.approvalText]),
+    ['合计', '', '', `${rows.length} 条`, rows.reduce((n, r) => n + r.quantity, 0), yuan(rows.reduce((n, r) => n + Number(r.amount), 0)), '', '', '', ''],
+  ]);
+}
+
 export function registerDining808Routes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
   // 餐饮台账：点单的岗位与看日结的都能看、能导出
@@ -187,8 +195,10 @@ export function registerDining808Routes(app: FastifyInstance, deps: Deps) {
     const l = await diningLedger(sql, q);
     return csvReply(reply, `餐饮台账-${q.from}至${q.to}${q.categories.length ? `-${q.categories.join('、')}` : ''}.csv`, diningLedgerCsv(l, deps.config.timezone));
   });
-  app.get('/api/dining/voids', { preHandler: read }, async (req) => {
-    const q = parse(z.object({ from: z.string().regex(ISO_DATE), to: z.string().regex(ISO_DATE) }), req.query);
-    return dishVoids(sql, deps, q);
+  const VoidsQuery = z.object({ from: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD'), to: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD') });
+  app.get('/api/dining/voids', { preHandler: read }, async (req) => dishVoids(sql, deps, parse(VoidsQuery, req.query)));
+  app.get('/api/dining/voids/export', { preHandler: read }, async (req, reply) => {
+    const q = parse(VoidsQuery, req.query);
+    return csvReply(reply, `退菜记录-${q.from}至${q.to}.csv`, dishVoidsCsv(await dishVoids(sql, deps, q), deps.config.timezone));
   });
 }

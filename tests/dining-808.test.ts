@@ -55,6 +55,10 @@ describe('桌台点单下架（A05）', () => {
   it('默认下架：开台、给桌台加菜都拒绝；打开后能开台，再下架时开着的这桌照常结账、退菜，不能再加菜', async () => {
     const r0 = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/dining')).body.rules;
     expect(r0).toMatchObject({ tablesEnabled: false, voidFreeCents: 5000 });
+    // 菜单带上桌台开关、小额上限与「本人多少分钟内」，前台挂账（不一定有点单权限）也读得到
+    const menu = await api(ctx.app, ctx.clerk, 'GET', '/api/dining/menu');
+    expect(menu.status).toBe(200);
+    expect(menu.body).toMatchObject({ rules: { tablesEnabled: false, voidFreeCents: 5000 }, selfVoidMinutes: 15 });
     const closed = await api(ctx.app, ctx.clerk, 'POST', '/api/dining/tables/open', { clientKey: randomUUID(), tableId, guests: 2 });
     expect(closed.status).toBe(422);
     expect(closed.body.error.code).toBe('TABLES_DISABLED');
@@ -114,6 +118,13 @@ describe('退菜按金额分级（B02）', () => {
     expect(byName('鲜榨橙汁', '客人点错了')).toBe('小额直接退');
     expect(byName('海鲜拼盘', '客人不要了')).toBe('当场授权（值班经理）');
     expect(byName('海鲜拼盘', '经理处理')).toBe('经理');
+    // 退菜记录导出：一条一行，最后一行合计
+    const csv = await ctx.app.inject({ method: 'GET', url: `/api/dining/voids/export?from=${today}&to=${today}`, headers: { cookie: ctx.owner } });
+    expect(csv.statusCode).toBe(200);
+    const rows = csv.body.replace(/^\uFEFF/, '').trim().split('\r\n');
+    expect(rows.length).toBe(log.length + 2);
+    expect(rows.some((r) => r.includes('当场授权（值班经理）'))).toBe(true);
+    expect(rows.at(-1)!.startsWith('合计')).toBe(true);
   });
 
   it('上限可改：设成 0 不分级（照旧本人 15 分钟内或经理）', async () => {

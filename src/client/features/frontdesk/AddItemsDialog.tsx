@@ -17,6 +17,7 @@ import { CartLineName, cartKey, cartLines, ItemCard } from '../catalog/ItemCard'
 import { ZoneChip } from './parts';
 import { BackfillNotice, backfillBody, backfillSummary, useBackfill } from './backfill';
 import { PendingPanel, useFrontdeskOp } from './pending';
+import { useDiningMenu } from '../dining/queries';
 import { useFrontdeskTechnicians } from './queries';
 import { TechnicianPicker } from './TechnicianPicker';
 
@@ -50,6 +51,9 @@ export function AddItemsDialog({
   const [category, setCategory] = useState('全部');
   const [custom, setCustom] = useState<{ name: string; amount: string }[]>([]);
   const techs = useFrontdeskTechnicians(open);
+  // 进厨房的菜的余量（8.0.8，B03）：厨房估清设的今天还能卖几份（null 不限量，0 估清）；余量不够时服务端照旧整单拒绝
+  const dining = useDiningMenu(open && session.dining);
+  const remainingOf = useMemo(() => new Map((dining.data?.dishes ?? []).map((d) => [d.id, d.remaining])), [dining.data]);
   const techRules = techs.data?.rules;
   const techOn = !!techRules?.enabled;
   const [picking, setPicking] = useState<{ item: ServiceItem; tier: PriceTier } | null>(null);
@@ -90,6 +94,13 @@ export function AddItemsDialog({
     touch();
     setCart((m) => {
       const next = new Map(m);
+      // 限量的菜：同一道菜（不分价格档）一共不超过余量
+      const left = remainingOf.get(Number(key.split(':')[0]));
+      if (delta > 0 && left != null) {
+        const itemId = key.split(':')[0];
+        const inCart = [...next].filter(([k]) => k.split(':')[0] === itemId).reduce((n, [, q]) => n + q, 0);
+        if (inCart + delta > left) return m;
+      }
       const q = Math.min(99, Math.max(0, (next.get(key) ?? 0) + delta));
       if (q === 0) next.delete(key);
       else next.set(key, q);
@@ -118,11 +129,19 @@ export function AddItemsDialog({
     }
     return m;
   }, [cart]);
+  /** 每个项目在购物车里一共几份（不分价格档、技师），限量的菜对照余量 */
+  const cartQtyOf = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const [k, q] of cart) m.set(Number(k.split(':')[0]), (m.get(Number(k.split(':')[0])) ?? 0) + q);
+    return m;
+  }, [cart]);
   const needsTech = (i: ServiceItem) => techOn && i.technicianRequired;
   /** 只限某一性别的项目（如私汤木桶浴仅女宾）：这位客人不能用时不可选；技师名单还没加载时需要技师的项目先不能点 */
   const unavailableFor = (i: ServiceItem) =>
     i.gender && i.gender !== visit.zone
       ? `仅限${ZONE_LABELS[i.gender].title}`
+      : remainingOf.get(i.id) === 0
+        ? '已估清'
       : i.technicianRequired && techs.isPending
         ? '正在加载技师…'
         : i.technicianRequired && !techs.data
@@ -237,7 +256,15 @@ export function AddItemsDialog({
                       cart={cardCart}
                       disabled={locked}
                       unavailable={unavailableFor(i)}
-                      hint={needsTech(i) ? (techRules?.tierByGrade && i.prices.length > 1 ? '选技师 · 按技师等级取价' : '选技师') : null}
+                      hint={
+                        needsTech(i)
+                          ? techRules?.tierByGrade && i.prices.length > 1
+                            ? '选技师 · 按技师等级取价'
+                            : '选技师'
+                          : remainingOf.get(i.id)
+                            ? `剩 ${remainingOf.get(i.id)} 份${(cartQtyOf.get(i.id) ?? 0) >= (remainingOf.get(i.id) ?? 0) ? ' · 点满了' : ''}`
+                            : null
+                      }
                       onAdd={(tier) => {
                         if (!needsTech(i)) return add(cartKey(i.id, tier), 1);
                         if (locked) return;
