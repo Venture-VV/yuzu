@@ -481,6 +481,8 @@ export function BillPanel({
         onDone={(dish, result) => {
           setDishVoiding(null);
           if (result && typeof result === 'object' && 'lines' in result) onChanged(result as VisitDetail);
+          // 之前那一次已经退掉了（回复丢了）：重新取这位客人的账单
+          else void api.get<VisitDetail>(`/api/frontdesk/visits/${visit.id}`).then(onChanged, () => {});
           toast({ tone: 'success', title: `${dish.name} 已退`, body: `${dish.name} × ${dish.quantity}` });
         }}
       />

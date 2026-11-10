@@ -9,7 +9,7 @@ import { useState } from 'react';
 import { formatYuan } from '@shared/money';
 import { isSmallDishVoid } from '@shared/dining';
 import type { LineVoidGrantRequest } from '@shared/grants';
-import { api, ApiError, errorMessage } from '../../lib/api';
+import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { AuthorizeDialog } from '../../components/AuthorizeDialog';
@@ -88,6 +88,13 @@ export function DishVoidDialog({
       if (e instanceof ApiError && e.code === 'VOID_NEEDS_GRANT') {
         setForceGrant(true);
         setError(`${e.message}（点「请经理授权」）`);
+      } else if (e instanceof ApiError && e.code === 'ALREADY_VOIDED') {
+        // 这一条已经退掉了：上一次的回复丢了（超时、断网后再点一次），或别的终端刚退。一条明细只能作废一次，照退成了处理，
+        // 改单照样放回购物车（Codex 审查 b4a83d9）
+        onDone(dish, null);
+      } else if (e instanceof UncertainError) {
+        // 结果不确定：可能已经退掉了。原样再点一次就能核对——已经退掉的会直接完成，不会重复冲减
+        setError(`${e.message}，这次退菜可能已经生效。请再点一次确认核对：已经退掉的会直接完成，不会重复冲减`);
       } else setError(errorMessage(e));
     } finally {
       setBusy(false);

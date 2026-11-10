@@ -221,6 +221,22 @@ test.describe('8.0.8 前台整改', () => {
       await expect(page.getByText(`${SEAFOOD.name} 已退`)).toBeVisible();
       await expect(pending.locator(`[data-testid="dining-pending-${SEAFOOD.name}"]`)).toHaveCount(0);
 
+      // ③b 改单：服务端已经退掉、回复丢了（Codex 审查 b4a83d9）——再点一次就完成，菜放回购物车，不会卡在「已作废」
+      await send(page, 'post', '/api/dining/orders', { clientKey: randomUUID(), visitId: guest.visitId, lines: [{ itemId: juiceId, quantity: 1 }], expectedTotal: JUICE.price });
+      await page.getByTestId('dining-find').click();
+      const again = pending.getByTestId(`dining-pending-${JUICE.name}`);
+      await again.getByRole('button', { name: '改', exact: true }).click();
+      const v3 = page.getByRole('dialog').filter({ hasText: `改单 · ${JUICE.name}` });
+      await page.route('**/api/frontdesk/lines/*/void', async (route) => {
+        await route.fetch();
+        await route.abort('failed');
+      }, { times: 1 });
+      await v3.getByTestId('dish-void-confirm').click();
+      await expect(v3).toContainText('可能已经生效');
+      await v3.getByTestId('dish-void-confirm').click();
+      await expect(page.getByText(`${JUICE.name} 已退，放回了购物车`)).toBeVisible();
+      await expect(page.getByTestId('dining-cart')).toContainText(JUICE.name);
+
       // ④ 退菜记录：两条，分别是「小额直接退」「当场授权（张经理）」
       await page.getByTestId('dining-tab-voids').click();
       const voids = page.getByTestId('dining-voids');

@@ -140,6 +140,34 @@ describe('待派钟：前台点的护理项目交给钟房派钟（A01）', () =
     expect((await api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/sessions/${s.id}/finish`)).status).toBe(200);
   });
 
+  it('挂错手牌的待派钟明细先转单、再在钟房补派：转单记录与明细的自检照样一致（Codex 审查 b4a83d9）', async () => {
+    const wrong = await enter();
+    const right = await enter();
+    expect((await post(wrong, [{ itemId: care, quantity: 1, tier: 'standard' }], 19800)).status).toBe(200);
+    const [line] = await visitLines(wrong);
+    const toTag = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/visits/${right}`)).body.tag.code as string;
+    const moved = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/lines/move', { clientKey: randomUUID(), lineIds: [line!.id], toTagCode: toTag, reason: '挂错手牌了' });
+    expect(moved.status, JSON.stringify(moved.body)).toBe(200);
+    const target = (await visitLines(right)).find((l) => l.status === 'active' && l.source === 'therapist')!;
+    expect(target.technician).toBeNull();
+    expect((await assign(target.id, { technicianId: tech['12'], callType: 'designated' })).status).toBe(200);
+    const checks = (await api(ctx.app, ctx.owner, 'GET', '/api/frontdesk/checks')).body as { key: string; ok: boolean; detail: string }[];
+    const moves = checks.find((c) => c.key === 'line_moves')!;
+    expect(moves.ok, moves.detail).toBe(true);
+    // 钱的字段照旧逐项核对：改了金额的照样报出来
+    await ctx.sql`ALTER TABLE bill_lines DISABLE TRIGGER bill_lines_guard`;
+    try {
+      await ctx.sql`UPDATE bill_lines SET unit_price = unit_price + 1, amount = amount + 1 WHERE id = ${target.id}`;
+      const broken = ((await api(ctx.app, ctx.owner, 'GET', '/api/frontdesk/checks')).body as { key: string; ok: boolean }[]).find((c) => c.key === 'line_moves')!;
+      expect(broken.ok).toBe(false);
+    } finally {
+      await ctx.sql`UPDATE bill_lines SET unit_price = unit_price - 1, amount = amount - 1 WHERE id = ${target.id}`;
+      await ctx.sql`ALTER TABLE bill_lines ENABLE TRIGGER bill_lines_guard`;
+    }
+    const sid = (await board()).sessions.find((x) => x.visitId === right)!.id;
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/sessions/${sid}/finish`)).status).toBe(200);
+  });
+
   it('作废了的、客人离店的不在待派钟里；作废的不能再派', async () => {
     const v = await enter();
     expect((await post(v, [{ itemId: care, quantity: 2, tier: 'standard' }], 39600)).status).toBe(200);
