@@ -1,6 +1,7 @@
 // 退房（S7）：按此刻补齐房费（挂到住客的手牌账单上，随手牌在前台结账），押金全部原路退回，房间变待打扫。
 // 客房页的入住单与前台结账（客人还住着客房时）共用；退房有「结果待确认」。
 
+import { invalidateRevenue } from '../../lib/revenue';
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { PAYMENT_METHOD_LABELS } from '@shared/labels';
@@ -46,7 +47,7 @@ export function CloseStayDialog({ stay, onClose, onDone }: { stay: StayDetail; o
     void qc.invalidateQueries({ queryKey: stayKey(stay.id) });
     void qc.invalidateQueries({ queryKey: roomsKey });
     void qc.invalidateQueries({ queryKey: ['frontdesk'] });
-    void qc.invalidateQueries({ queryKey: shiftKeys.all });
+    invalidateRevenue(qc);
     onDone(d);
   };
   const submit = async () => {

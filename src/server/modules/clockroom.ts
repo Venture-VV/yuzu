@@ -320,6 +320,11 @@ export async function attachSessions(
       }
     }
 
+    // 预约到店派钟（8.0.8，A04）：只读核对预约（已到店、到店手牌是这位客人、技师预约），一张预约同时只有一张没取消的钟单（唯一索引兜底）；
+    // 在核对技师预约冲突之前，没点到店的提示先点到店（已到店的预约不再占技师的时段）
+    const bookingId = options.dispatch?.bookingId ?? null;
+    if (bookingId !== null) await assertBookingDispatchable(tx, bookingId, args.visitId);
+
     // 与技师预约不重叠（测试会话 ded1958 的 P2）：按这一钟计划的时段（马上上钟从此刻起，否则从这位技师手上的钟做完起）
     // 核对这位技师还占着时段的预约；这位客人自己约的不拦
     const [planned] = await tx<{ freeAt: Date | null }[]>`
@@ -334,10 +339,6 @@ export async function attachSessions(
       memberId: await visitMember(tx, args.visitId),
       timeZone: deps.config.timezone,
     });
-
-    // 预约到店派钟（8.0.8，A04）：只读核对预约（已到店、到店手牌是这位客人、技师预约），一张预约同时只有一张没取消的钟单（唯一索引兜底）
-    const bookingId = options.dispatch?.bookingId ?? null;
-    if (bookingId !== null) await assertBookingDispatchable(tx, bookingId, args.visitId);
 
     // 客人已离店、还记着在钟上的旧钟单先自动下钟，再上这一钟
     if (start) await closeStale(tx, deps, t.id, actor, at);

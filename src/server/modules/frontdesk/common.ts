@@ -167,6 +167,9 @@ export function mapUniqueViolation(error: unknown): unknown {
   if (isUniqueViolation(error, 'technician_sessions_booking_uq')) {
     return conflict('BOOKING_DISPATCHED', '这张预约刚刚已经派过钟了，请刷新');
   }
+  if (isUniqueViolation(error, 'room_stays_booking_uq')) {
+    return conflict('BOOKING_CHECKED_IN', '这张预约刚刚已经入住了，请刷新');
+  }
   if (isUniqueViolation(error, 'space_usages_one_open')) {
     return conflict('USAGE_TAKEN', '这间房刚刚被其他终端开单，先结束那张再开单');
   }

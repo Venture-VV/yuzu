@@ -5,9 +5,10 @@
 // 点待打扫、维修的房改房态。全天房每晚过了加收一晚的时刻做夜审，给在住的客人挂今晚的房费（同一晚只挂一次）。
 // 入住、续住、收退押金、退房与前台一样有「结果待确认」：断网后查回、原样重提或确认作废。
 
+import type { BookingDetail } from '@shared/bookings';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BedDouble, LayoutGrid, Map as MapIcon, MoonStar, Sparkles, Users, Wrench } from 'lucide-react';
 import { normalizeTagCode, TAG_CODE_PATTERN } from '@shared/frontdesk';
 import { PAYMENT_METHOD_LABELS, shiftDate } from '@shared/labels';
@@ -91,6 +92,22 @@ function RoomsBoardView() {
   const [usageAction, setUsageAction] = useState<Extract<MapAction, { kind: 'usage_open' | 'usage_close' }> | null>(null);
   const [usageResume, setUsageResume] = useState<UsageResume | null>(null);
   const canOperate = can('room.operate');
+
+  // 预约到店（8.0.8，A04）：从预约页过来带 ?booking=，标出预约的房型，点一间空房就入住（手牌、人数带好，入住记到这张预约）
+  const bookingParam = Number(params.get('booking')) || null;
+  const bookingQ = useQuery({ queryKey: ['bookings', 'one', bookingParam], queryFn: () => api.get<BookingDetail>(`/api/bookings/${bookingParam}`), enabled: !!bookingParam });
+  const [forBooking, setForBooking] = useState<BookingDetail | null>(null);
+  useEffect(() => {
+    const bk = bookingQ.data;
+    if (!bk || bk.id !== bookingParam) return;
+    const next = new URLSearchParams(params);
+    next.delete('booking');
+    setParams(next, { replace: true });
+    if (bk.kind !== 'room' || bk.status !== 'arrived') toast({ tone: 'error', title: `预约 ${bk.bookingNo} 不是已到店的客房预约` });
+    else if (bk.service) toast({ tone: 'info', title: `预约 ${bk.bookingNo} 已经入住了（${bk.service.no}）` });
+    else setForBooking(bk);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookingQ.data, bookingParam]);
 
   // 顶部「结果待确认」的「去处理」：入住回到那间房的入住对话框，其余回到那张入住单的对应操作
   const resume = params.get('resume');
@@ -177,6 +194,15 @@ function RoomsBoardView() {
 
       <AuditStrip board={b} onRun={canOperate ? () => setAuditing(true) : undefined} />
 
+      {forBooking && (
+        <Notice tone="info" title={`预约 ${forBooking.bookingNo} 到店：${forBooking.roomTypeName ?? ''} · 手牌 ${forBooking.arrivalTagCode ?? ''} · ${forBooking.guests} 人`} data-testid="rooms-for-booking">
+          <span className="block">点一间空闲的房入住（同房型的空房已标出）；手牌、人数已带好，入住记到这张预约，同一张预约不会重复开房。</span>
+          <Button size="sm" variant="ghost" className="mt-1" onClick={() => setForBooking(null)}>
+            不按预约开房
+          </Button>
+        </Notice>
+      )}
+
       {view === 'map' ? (
         <FloorMapView board={b} onAction={mapAction} resume={usageResume} onResumed={() => setUsageResume(null)} />
       ) : rooms.length === 0 ? (
@@ -187,7 +213,7 @@ function RoomsBoardView() {
             {floors.length > 1 && <h3 className="mb-2 text-[13px] font-bold text-ink-3">{floor ? `${floor} 楼` : '未分楼层'}</h3>}
             <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6">
               {list.map((r) => (
-                <RoomTile key={r.id} r={r} canCheckin={canOperate} onClick={() => click(r)} />
+                <RoomTile key={r.id} r={r} canCheckin={canOperate} highlight={!!forBooking && r.status === 'vacant' && r.typeName === forBooking.roomTypeName} onClick={() => click(r)} />
               ))}
             </div>
           </section>
@@ -198,6 +224,7 @@ function RoomsBoardView() {
         <CheckinDialog
           room={checkinRoom}
           board={b}
+          booking={forBooking}
           onHousekeep={
             can('room.housekeep')
               ? () => {
@@ -209,8 +236,10 @@ function RoomsBoardView() {
           onClose={() => setCheckinRoomId(null)}
           onDone={(d) => {
             setCheckinRoomId(null);
+            setForBooking(null);
             setStay({ id: d.id });
             void qc.invalidateQueries({ queryKey: roomsKey });
+            void qc.invalidateQueries({ queryKey: ['bookings'] });
           }}
         />
       )}
@@ -225,13 +254,14 @@ function RoomsBoardView() {
   );
 }
 
-function RoomTile({ r, canCheckin, onClick }: { r: RoomBoardRoom; canCheckin: boolean; onClick: () => void }) {
+function RoomTile({ r, canCheckin, highlight = false, onClick }: { r: RoomBoardRoom; canCheckin: boolean; highlight?: boolean; onClick: () => void }) {
   const s = r.stay;
   return (
     <button
       type="button"
       onClick={onClick}
-      className={cn('flex min-h-[112px] flex-col items-start rounded-lg border px-3 py-2.5 text-left transition-colors', TILE_STYLE[r.status])}
+      className={cn('flex min-h-[112px] flex-col items-start rounded-lg border px-3 py-2.5 text-left transition-colors', TILE_STYLE[r.status], highlight && 'ring-2 ring-pine ring-offset-1')}
+      data-highlight={highlight ? 'booking' : undefined}
       data-testid={`room-tile-${r.roomNo}`}
       data-state={r.status}
     >
@@ -317,12 +347,15 @@ function AuditStrip({ board, onRun }: { board: RoomBoard; onRun?: () => void }) 
 function CheckinDialog({
   room,
   board,
+  booking = null,
   onHousekeep,
   onClose,
   onDone,
 }: {
   room: RoomBoardRoom;
   board: RoomBoard;
+  /** 按预约入住（8.0.8，A04）：手牌、人数带好，入住记到这张预约 */
+  booking?: BookingDetail | null;
   /** 改房态（例如空闲的房要维修）：有「客房打扫、维修」权限时 */
   onHousekeep?: () => void;
   onClose: () => void;
@@ -332,9 +365,9 @@ function CheckinDialog({
   const qc = useQueryClient();
   const toast = useToast();
   const rules = board.rules;
-  const [tag, setTag] = useState('');
-  const [label, setLabel] = useState('');
-  const [guests, setGuests] = useState(1);
+  const [tag, setTag] = useState(booking?.arrivalTagCode ?? '');
+  const [label, setLabel] = useState(booking ? (booking.memberName ?? booking.guestName ?? '').slice(0, 16) : '');
+  const [guests, setGuests] = useState(booking ? Math.min(MAX_STAY_GUESTS, Math.max(1, booking.guests)) : 1);
   const [leave, setLeave] = useState(room.kind === 'daily' ? shiftDate(session.today, 1) : '');
   const [withDeposit, setWithDeposit] = useState(rules.defaultDeposit > 0);
   const [deposit, setDeposit] = useState<DepositDraft>({ method: 'cash', amount: rules.defaultDeposit > 0 ? centsToInput(rules.defaultDeposit) : '', ref: '' });
@@ -384,9 +417,10 @@ function CheckinDialog({
         expectedCheckoutDate: room.kind === 'daily' && leave ? leave : null,
         expectedRate: room.price,
         deposit: dep,
+        bookingId: booking?.id,
       },
       tagCodes: [`房 ${room.roomNo}`],
-      summary: `入住 ${guests} 人（${who}）${dep ? `，${PAYMENT_METHOD_LABELS[dep.method]}押金` : ''}`,
+      summary: `入住 ${guests} 人（${who}）${dep ? `，${PAYMENT_METHOD_LABELS[dep.method]}押金` : ''}${booking ? `，预约 ${booking.bookingNo}` : ''}`,
       amount: dep?.amount ?? null,
     }));
     if (d) finish(d);

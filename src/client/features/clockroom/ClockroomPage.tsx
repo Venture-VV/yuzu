@@ -3,6 +3,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router';
+import type { BookingDetail } from '@shared/bookings';
 import { ArrowDownToLine, ArrowRightLeft, BadgeX, CalendarOff, ClipboardList, Coffee, DoorOpen, Hourglass, ListOrdered, LogIn, LogOut, Play, Plus, RotateCcw, ScrollText, Square, Undo2, UsersRound } from 'lucide-react';
 import { EVENT_KIND_LABELS, TECH_FILTER_LABELS, TECH_FILTERS, techFilterOf, type BoardSession, type BoardTechnician, type ClockEvent, type ClockroomBoard, type PendingLine, type TechFilter } from '@shared/clockroom';
 import { CALL_TYPE_LABELS, gradeLabel } from '@shared/technicians';
@@ -67,6 +69,43 @@ export function ClockroomPage() {
   const [transferring, setTransferring] = useState<BoardSession | null>(null);
   const [suspending, setSuspending] = useState<BoardTechnician | null>(null);
   const [prefill, setPrefill] = useState<DispatchPrefill | null>(null);
+
+  // 预约到店（8.0.8，A04）：从预约页过来带 ?booking=，打开派钟并带好手牌、项目、技师；前台已点了这个项目的直接给那一条派（不另收费）
+  const [params, setParams] = useSearchParams();
+  const bookingParam = Number(params.get('booking')) || null;
+  const booking = useQuery({ queryKey: ['bookings', 'one', bookingParam], queryFn: () => api.get<BookingDetail>(`/api/bookings/${bookingParam}`), enabled: !!bookingParam });
+  useEffect(() => {
+    const b = booking.data;
+    const data = board.data;
+    if (!b || !data || b.id !== bookingParam) return;
+    setParams(
+      (p) => {
+        p.delete('booking');
+        return p;
+      },
+      { replace: true },
+    );
+    if (b.kind !== 'technician' || b.status !== 'arrived') {
+      toast({ tone: 'error', title: `预约 ${b.bookingNo} 不是已到店的技师预约` });
+      return;
+    }
+    if (b.service) {
+      toast({ tone: 'info', title: `预约 ${b.bookingNo} 已经派过钟（${b.service.no}）` });
+      return;
+    }
+    setPrefill({
+      tagCode: b.arrivalTagCode ?? undefined,
+      itemId: b.itemId ?? undefined,
+      technicianId: b.technicianId,
+      callType: b.technicianId ? 'designated' : 'rotation',
+      bookingId: b.id,
+      note: `预约 ${b.bookingNo} 到店（${b.memberName ?? b.guestName ?? '散客'}）：手牌、项目${b.technicianId ? '、技师' : ''}已带好`,
+    });
+    const pend = data.pending.find((p) => p.tagCode === b.arrivalTagCode && p.itemId === b.itemId);
+    if (pend) setAssigning(pend);
+    else setDispatching(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booking.data, board.data, bookingParam]);
 
   const run = async (key: string, fn: () => Promise<ClockroomBoard>, ok?: string) => {
     setBusy(key);

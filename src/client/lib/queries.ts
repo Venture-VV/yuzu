@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { REVENUE_REFRESH_MS } from './revenue';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import type {
   AuditRecord,
@@ -94,17 +95,23 @@ export const useCatalog = (all = false) =>
     staleTime: 60_000,
   });
 
-export const useLedger = (params: { date?: string; type?: string; staffId?: string; q?: string }) => {
+/** live（8.0.8，A02）：看的是今天时每 15 秒自动刷新，别的电脑收的款也能出来 */
+export const useLedger = (params: { date?: string; type?: string; staffId?: string; q?: string }, live = false) => {
   const search = new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
   return useQuery({
     queryKey: qk.ledger(params),
     queryFn: () => api.get<LedgerRow[]>(`/api/ledger?${search}`),
     placeholderData: keepPreviousData,
+    refetchInterval: live ? REVENUE_REFRESH_MS : false,
   });
 };
 
-export const useSettlement = (date: string) =>
-  useQuery({ queryKey: qk.settlement(date), queryFn: () => api.get<SettlementSummary>(`/api/settlements/${date}`) });
+export const useSettlement = (date: string, live = false) =>
+  useQuery({
+    queryKey: qk.settlement(date),
+    queryFn: () => api.get<SettlementSummary>(`/api/settlements/${date}`),
+    refetchInterval: live ? REVENUE_REFRESH_MS : false,
+  });
 
 export const useStaff = (enabled = true) =>
   useQuery({ queryKey: qk.staff, queryFn: () => api.get<StaffRecord[]>('/api/staff'), enabled });

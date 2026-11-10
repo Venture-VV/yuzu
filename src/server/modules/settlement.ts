@@ -7,7 +7,7 @@ import { businessDateOf } from '@shared/business-date';
 import { PAYMENT_METHOD_LABELS, type PaymentMethod } from '@shared/labels';
 import { formatAmount, formatYuan } from '@shared/money';
 import { businessBreakdown, CHECKOUT_METHOD_LABELS, COUPON_PLATFORM_LABELS } from '@shared/checkout';
-import type { BusinessTotals, SettlementAnomaly, SettlementCheck, SettlementDeposits, SettlementSummary, SettlementTotals } from '@shared/types';
+import type { BusinessTotals, CheckoutDaySummary, SettlementAnomaly, SettlementCheck, SettlementDeposits, SettlementSummary, SettlementTotals } from '@shared/types';
 import { readSnapshot, type Db } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
@@ -159,6 +159,21 @@ async function businessTotals(db: Db, date: string): Promise<BusinessTotals> {
     byMethod,
     coupons,
     refunds: { count: rf!.count, total: rf!.total, byMethod: refundByMethod },
+  };
+}
+
+/** 结账记录的合计（8.0.8，A02）：与日结同一个口径（businessTotals），另列没开班时收的结账 */
+export async function checkoutDaySummary(db: Db, date: string): Promise<CheckoutDaySummary> {
+  const b = await businessTotals(db, date);
+  const [u] = await db<{ count: number; total: number }[]>`
+    SELECT count(*)::int AS count, coalesce(sum(total_amount), 0)::bigint AS total FROM checkouts WHERE business_date = ${date} AND shift_id IS NULL`;
+  return {
+    businessDate: date,
+    checkouts: b.checkouts,
+    voids: b.voids,
+    refunds: { count: b.refunds.count, total: Number(b.refunds.total) },
+    net: b.net,
+    unshifted: { count: u!.count, total: Number(u!.total) },
   };
 }
 

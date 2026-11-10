@@ -5,6 +5,7 @@ import { ISO_DATE } from '@shared/business-date';
 import { can } from '@shared/permissions';
 import { guard } from '../../auth/guard';
 import { readSnapshot } from '../../db';
+import { checkoutDaySummary } from '../settlement';
 import type { Deps } from '../../lib/context';
 import { badRequest, forbidden, notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
@@ -197,6 +198,13 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/frontdesk/checkouts', { preHandler: guard('frontdesk.read') }, async (req) => {
     const { date } = parse(z.object({ date: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD').optional() }), req.query ?? {});
     return listCheckouts(sql, await resolveReadableDate(deps, req, date));
+  });
+
+  // 结账记录的合计（8.0.8，A02）：与日结同一个口径，另列没开班时收的结账；同一个快照里读
+  app.get('/api/frontdesk/checkouts/summary', { preHandler: guard('frontdesk.read') }, async (req) => {
+    const { date } = parse(z.object({ date: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD').optional() }), req.query ?? {});
+    const day = await resolveReadableDate(deps, req, date);
+    return readSnapshot(sql, (tx) => checkoutDaySummary(tx, day));
   });
 
   app.get('/api/frontdesk/checkouts/:id', { preHandler: guard('frontdesk.read') }, async (req) => {

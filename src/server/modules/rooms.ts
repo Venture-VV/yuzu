@@ -590,7 +590,33 @@ export const CheckinInput = z.object({
   /** 员工确认时看到的房价；房型刚改了价就拒绝 */
   expectedRate: positiveCents('房价'),
   deposit: DepositInput.nullish().transform((v) => v ?? null),
+  /** 预约到店入住（8.0.8，A04）；不带时与升级前的请求完全相同（幂等摘要不变） */
+  bookingId: z.number().int().positive().nullish().transform((v) => v ?? undefined),
 });
+
+/**
+ * 入住记到哪张客房预约（8.0.8，A04）：带了预约编号的核对它（客房预约、已到店、到店手牌是这位客人、还没入住）；
+ * 没带的，这位客人已到店、还没入住的客房预约自动记上（最早的一张）。只读、不锁预约单，靠入住单上预约编号的部分唯一索引兜底
+ */
+async function bookingForCheckin(tx: Tx, bookingId: number | undefined, visitId: number): Promise<number | null> {
+  if (bookingId === undefined) {
+    const [auto] = await tx<{ id: number }[]>`
+      SELECT b.id FROM bookings b
+      WHERE b.kind = 'room' AND b.status = 'arrived' AND b.arrival_visit_id = ${visitId}
+        AND NOT EXISTS (SELECT 1 FROM room_stays rs WHERE rs.booking_id = b.id AND rs.status <> 'cancelled')
+      ORDER BY b.starts_at, b.id LIMIT 1`;
+    return auto ? Number(auto.id) : null;
+  }
+  const [b] = await tx<{ bookingNo: string; kind: string; status: string; arrivalVisitId: number | null }[]>`
+    SELECT booking_no, kind, status, arrival_visit_id FROM bookings WHERE id = ${bookingId}`;
+  if (!b) throw notFound('预约单不存在');
+  if (b.kind !== 'room') throw unprocessable('BOOKING_KIND', `预约 ${b.bookingNo} 不是客房预约`);
+  if (b.status !== 'arrived') throw conflict('BOOKING_NOT_ARRIVED', `预约 ${b.bookingNo} 还没点到店，请先在预约里点到店`);
+  if (b.arrivalVisitId === null || Number(b.arrivalVisitId) !== visitId) throw conflict('BOOKING_VISIT_MISMATCH', `预约 ${b.bookingNo} 到店时登记的不是这张手牌`);
+  const [stay] = await tx<{ stayNo: string }[]>`SELECT stay_no FROM room_stays WHERE booking_id = ${bookingId} AND status <> 'cancelled' LIMIT 1`;
+  if (stay) throw conflict('BOOKING_CHECKED_IN', `预约 ${b.bookingNo} 已经入住了（${stay.stayNo}），不用再开房`);
+  return bookingId;
+}
 
 export async function checkinRoom(deps: Deps, raw: unknown, ctx: OpContext): Promise<StayDetail> {
   const input = parse(CheckinInput, raw);
@@ -624,12 +650,13 @@ export async function checkinRoom(deps: Deps, raw: unknown, ctx: OpContext): Pro
     assertOpen(visit);
     const billId = visit.billId;
     const visitId = visit.id;
+    const bookingId = await bookingForCheckin(tx, input.bookingId, visitId);
     const stayNo = await nextDocNo(tx, 'room_stay', 'RZ', date);
     const [stay] = await tx<{ id: number }[]>`
       INSERT INTO room_stays (stay_no, room_id, room_type_id, kind, rate, block_minutes, bill_id, visit_id, guest_label, guests,
-                              expected_checkout_date, business_date, checked_in_at, checked_in_by, open_key)
+                              expected_checkout_date, business_date, checked_in_at, checked_in_by, open_key, booking_id)
       VALUES (${stayNo}, ${room.id}, ${room.roomTypeId}, ${type!.kind}, ${type!.price}, ${type!.blockMinutes}, ${billId}, ${visitId},
-              ${input.guestLabel}, ${input.guests}, ${input.expectedCheckoutDate}, ${date}, ${at}, ${ctx.actor.id}, ${key})
+              ${input.guestLabel}, ${input.guests}, ${input.expectedCheckoutDate}, ${date}, ${at}, ${ctx.actor.id}, ${key}, ${bookingId})
       RETURNING id`;
     const stayId = stay!.id;
     // 第一晚 / 第一段随入住挂上
@@ -656,6 +683,7 @@ export async function checkinRoom(deps: Deps, raw: unknown, ctx: OpContext): Pro
         guestLabel: input.guestLabel,
         guests: input.guests,
         ...(input.deposit ? { deposit: { method: input.deposit.method, amount: input.deposit.amount } } : {}),
+        ...(bookingId !== null ? { bookingId } : {}),
       },
       ip: ctx.ip,
       businessDate: date,

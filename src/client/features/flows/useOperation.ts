@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { invalidateRevenue } from '../../lib/revenue';
 import { useQueryClient } from '@tanstack/react-query';
 import type { MemberDetail, OperationLookup, OperationResult } from '@shared/types';
 import { api, ApiError, UncertainError } from '../../lib/api';
@@ -83,6 +84,7 @@ export function useOperation(spec: OperationSpec) {
       void qc.invalidateQueries({ queryKey: ['settlement'] });
       void qc.invalidateQueries({ queryKey: ['consumption'] });
       void qc.invalidateQueries({ queryKey: ['shift'] }); // 交班表的充值、储值消费汇总
+      invalidateRevenue(qc); // 8.0.8（A02）：看板、结账记录等一起刷新
     },
     [qc],
   );

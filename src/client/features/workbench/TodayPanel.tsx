@@ -2,7 +2,7 @@ import { Link } from 'react-router';
 import { ArrowRight } from 'lucide-react';
 import { describeDate } from '@shared/labels';
 import { useLedger, useSettlement } from '../../lib/queries';
-import { useSession } from '../../lib/session';
+import { useBusinessToday } from '../../lib/revenue';
 import { formatTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
@@ -11,10 +11,11 @@ import { ENTRY_META } from './ActivityList';
 
 /** 工作台右栏：未进行操作时显示今日概览与快捷键 */
 export function TodayPanel() {
-  const session = useSession();
-  const s = useSettlement(session.today);
-  const ledger = useLedger({});
-  const d = describeDate(session.today);
+  // 8.0.8（A02）：「今天」跟着服务端的营业日走，每 15 秒刷新
+  const today = useBusinessToday();
+  const s = useSettlement(today, true);
+  const ledger = useLedger({}, true);
+  const d = describeDate(today);
   const recent = (ledger.data ?? []).slice(0, 6);
 
   return (
@@ -23,7 +24,7 @@ export function TodayPanel() {
       <div>
         <p className="text-[12px] font-bold tracking-[0.18em] text-ink-3">TODAY</p>
         <p className="mt-0.5 flex items-baseline gap-2">
-          <span className="font-display text-[34px] leading-none text-ink italic">{session.today.slice(5).replace('-', '.')}</span>
+          <span className="font-display text-[34px] leading-none text-ink italic">{today.slice(5).replace('-', '.')}</span>
           <span className="text-[14px] font-semibold text-ink-3">{d.weekday}</span>
         </p>
       </div>

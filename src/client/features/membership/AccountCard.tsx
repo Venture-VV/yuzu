@@ -5,6 +5,7 @@
 //     或「已在商户平台退过」（填退款单号）；没开时与 v0.7.26 一样填退款单号；
 //   · 退过的储值（退储值单）列在下面。停用 / 启用、合并在同一张卡片上（见 MemberStatusActions）。
 
+import { invalidateRevenue } from '../../lib/revenue';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { HandCoins, ShieldCheck } from 'lucide-react';
@@ -62,7 +63,7 @@ export function AccountCard({ member }: { member: MemberDetail }) {
       qc.invalidateQueries({ queryKey: ['members'] }),
       qc.invalidateQueries({ queryKey: ['activity', member.id] }),
       qc.invalidateQueries({ queryKey: ['membership'] }),
-    ]);
+    ]).then(() => invalidateRevenue(qc)); // 8.0.8（A02）：退储值也刷新日结、交班、流水
   const merged = member.mergedInto ?? null;
   const refundBlocked = merged
     ? `已合并到 ${merged.memberNo}，请到那位会员那里退`
