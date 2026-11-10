@@ -34,6 +34,52 @@ let wx: MockWxPay;
 let pay: PayRuntime;
 const plan: Record<string, number> = {};
 
+/**
+ * 有几个请求在排 holderPid 这条连接拿着的那把咨询锁：同一个数据库、同一个锁号、还没拿到的。
+ * 只数这一把——按文件并行的别的测试库（<库名>_w1…）、同一个库里别的咨询锁在排的都不算。
+ * 原来数整台数据库服务器上所有没拿到的咨询锁：并行全量时偶尔数到别的库，解绑还没排上就当排上了
+ * （主线在 #84 的报告；小程序线测试 bf79dcc 的复核）。holderPid 这条连接只拿这一把咨询锁。
+ */
+async function advisoryWaitersOn(holderPid: number): Promise<number> {
+  const [w] = await ctx.sql<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM pg_locks w
+    JOIN pg_locks h ON h.pid = ${holderPid} AND h.locktype = 'advisory' AND h.granted
+      AND w.database = h.database AND w.classid = h.classid AND w.objid = h.objid AND w.objsubid = h.objsubid
+    WHERE w.locktype = 'advisory' AND NOT w.granted`;
+  return w!.n;
+}
+
+/** 等到有 count 个请求在排 holderPid 拿着的那把咨询锁 */
+async function waitForAdvisoryWaiters(holderPid: number, count: number): Promise<void> {
+  for (let i = 0; i < 200; i++) {
+    if ((await advisoryWaitersOn(holderPid)) >= count) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error('没有排上队');
+}
+
+/** 在一条连接上拿住一把咨询锁（排他）：返回这条连接的 pid，release 放开并等事务结束 */
+async function holdAdvisory(key: string): Promise<{ pid: number; release: () => Promise<void> }> {
+  let release!: () => void;
+  const released = new Promise<void>((r) => (release = r));
+  let held!: (pid: number) => void;
+  const holding = new Promise<number>((r) => (held = r));
+  const done = ctx.sql.begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+    const [p] = await tx<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+    held(p!.pid);
+    await released;
+  });
+  const pid = await Promise.race([holding, done.then(() => Promise.reject(new Error('没拿住锁')))]);
+  return {
+    pid,
+    release: async () => {
+      release();
+      await done;
+    },
+  };
+}
+
 beforeAll(async () => {
   ctx = await setup();
   deps = { sql: ctx.sql, config: ctx.config };
@@ -493,34 +539,21 @@ describe('解绑、换绑之后的旧充值单（小程序线测试 866ccfa 的 
     const c = (await createOrder(a.openid, { amount: yuan(600) })).json();
     expect(c.payment).not.toBeNull();
     const id = await bindingOf(a.openid);
-    /** 等到有 n 个请求在排这把咨询锁 */
-    const waiters = async (count: number) => {
-      for (let i = 0; i < 200; i++) {
-        const [w] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`;
-        if (w!.n >= count) return;
-        await new Promise((r) => setTimeout(r, 25));
-      }
-      throw new Error('没有排上队');
-    };
-    // 先拿住这个微信绑定锁的排他模式，让解绑、继续支付按先后排队：解绑在前
-    let release!: () => void;
-    const released = new Promise<void>((r) => (release = r));
-    let held!: () => void;
-    const holding = new Promise<void>((r) => (held = r));
-    const holder = ctx.sql.begin(async (tx) => {
-      await tx`SELECT pg_advisory_xact_lock(hashtext(${`mp_bind:${a.openid}`}))`;
-      held();
-      await released;
-    });
-    await holding;
+    // 先拿住这个微信绑定锁的排他模式，让解绑、继续支付按先后排队：解绑在前（只数排这一把的，见 advisoryWaitersOn）
+    const holder = await holdAdvisory(`mp_bind:${a.openid}`);
     wx.setDown(true);
-    const unbinding = api(ctx.app, ctx.owner, 'POST', `/api/admin/mp/bindings/${id}/unbind`, { clientKey: randomUUID(), reason: '换手机号' });
-    await waiters(1);
-    const paying = call('POST', `/api/mp/recharge/orders/${c.order.orderNo}/pay`, a.openid, {});
-    await waiters(2);
-    release();
-    await holder;
-    const [u, p] = await Promise.all([unbinding, paying]);
+    let unbinding: ReturnType<typeof api> | undefined;
+    let paying: ReturnType<typeof call> | undefined;
+    try {
+      unbinding = api(ctx.app, ctx.owner, 'POST', `/api/admin/mp/bindings/${id}/unbind`, { clientKey: randomUUID(), reason: '换手机号' });
+      await waitForAdvisoryWaiters(holder.pid, 1);
+      paying = call('POST', `/api/mp/recharge/orders/${c.order.orderNo}/pay`, a.openid, {});
+      await waitForAdvisoryWaiters(holder.pid, 2);
+    } finally {
+      // 中途出错也放开，不让排着的请求一直等、连累后面的用例
+      await holder.release();
+    }
+    const [u, p] = await Promise.all([unbinding!, paying!]);
     wx.setDown(false);
     expect(u.status, JSON.stringify(u.body)).toBe(200);
     expect(p.statusCode, p.body).toBe(403);
@@ -907,5 +940,31 @@ describe('模拟支付与微信支付的配置', () => {
     // 实例标识是正式服、影子运行、测试服的也不开模拟
     expect(() => loadPayRuntime({ MP_PAY_MOCK: 'true' }, 'development', 'test')).toThrow('不能开在 test 实例上');
     expect(loadPayRuntime({ MP_PAY_MOCK: 'true' }, 'development', 'demo')?.mode).toBe('mock');
+  });
+});
+
+describe('测试自己的同步：等锁的计数', () => {
+  it('只数持锁那条连接拿着的那一把：同一个库里别的咨询锁在排的不算；目标锁上 0、1、2 个（主线在 #84 的报告、小程序线测试 bf79dcc 的复核）', async () => {
+    const target = await holdAdvisory('test:lockwait:target');
+    const other = await holdAdvisory('test:lockwait:other');
+    const wait = (key: string) => ctx.sql.begin((tx) => tx`SELECT pg_advisory_xact_lock(hashtext(${key}))`);
+    // 同一个库里别的咨询锁上有人在排：不算
+    const o = wait('test:lockwait:other');
+    await waitForAdvisoryWaiters(other.pid, 1);
+    expect(await advisoryWaitersOn(target.pid)).toBe(0);
+    // 目标锁上排一个、两个
+    const t1 = wait('test:lockwait:target');
+    await waitForAdvisoryWaiters(target.pid, 1);
+    expect(await advisoryWaitersOn(target.pid)).toBe(1);
+    const t2 = wait('test:lockwait:target');
+    await waitForAdvisoryWaiters(target.pid, 2);
+    expect(await advisoryWaitersOn(target.pid)).toBe(2);
+    // 别的那把放开、排的拿到了：目标锁照旧 2 个
+    await other.release();
+    await o;
+    expect(await advisoryWaitersOn(target.pid)).toBe(2);
+    // 放开以后排着的两个都拿到、做完
+    await target.release();
+    await Promise.all([t1, t2]);
   });
 });
