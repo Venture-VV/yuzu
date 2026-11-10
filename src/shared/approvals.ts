@@ -4,7 +4,7 @@
 // v0.7.31 合同与法务审查（docs/CONTRACTS.md）：加三种单据（合同、合同变更、用印）与岗位组「法务」；
 // 合同、合同变更没有规则命中时走 财务 → 法务 → 负责人，用印走一级店主（C2、C7，待确认）。
 // v0.7.32 付款流（docs/PAYMENTS.md）：加两种单据（付款申请、提前付款），挂在付款申请上；没有规则命中时付款申请走 财务 → 负责人
-// （申请金额 ≥ ¥50,000 再加一级店主），提前付款走 财务 → 负责人 → 店主（P5、P6，待确认）。
+// （申请金额 ≥ ¥50,000 再加一级店主），提前付款走 财务 → 负责人 → 店主（P5、P6；店主 2026-11-10 照默认，加店主一级的金额 8.0.6 起在「付款规则」里改）。
 
 import type { ChangeKind, ReviewView } from './contracts';
 import { can, type Duty, type Permission, type Role } from './permissions';
@@ -80,7 +80,7 @@ export const CONTRACT_DEFAULT_STEPS: ApprovalStep[] = [
 ];
 /** 用印没有规则命中时（C7）：一级店主 */
 export const SEAL_DEFAULT_STEPS: ApprovalStep[] = [{ group: 'owner', mode: 'any' }];
-/** 付款申请没有规则命中时（P5）：财务 → 负责人；申请金额 ≥ ¥50,000（PAYMENT_OWNER_LEVEL_CENTS）的再加一级店主 */
+/** 付款申请没有规则命中时（P5）：财务 → 负责人；申请金额 ≥「付款规则」里加店主一级的金额（默认 ¥50,000，8.0.6 起可改）的再加一级店主 */
 export const PAYMENT_REQUEST_DEFAULT_STEPS: ApprovalStep[] = [
   { group: 'finance', mode: 'any' },
   { group: 'manager', mode: 'any' },

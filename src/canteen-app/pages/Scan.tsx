@@ -1,19 +1,28 @@
 // 扫码打卡（食堂负责人）：相机对准员工的饭卡码，叮咚一声就记下；没带手机的同事手动登记；登记错了当天可以撤销。
 // 每一笔先存在这台手机上再交给门店系统，没网时显示「已记下」，联网后自动按原编号补交（queue.ts）。
 // 店里局域网用 http 打开时，浏览器不让网页开相机取景（K18）：改成「拍一张扫码」，用手机自带的相机拍员工的码再识别。
+// 扫完一笔柚子把结果念出来（店主 2026-11-10，K21，scan-voice.ts）：「扫码成功，可以开饭！」「未识别到汤崎身份，不可开饭！」……
+// 右上角的小喇叭能关（这台手机记住）；浏览器要先点过屏幕才肯出声，点「开始扫码」「拍一张扫码」等按钮时顺便让它允许出声。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MEAL_EMOJI, MEAL_LABELS, MEALS, type CanteenCheckinRow, type CanteenMe, type CanteenPerson, type CanteenToday, type CheckinResult } from '@shared/canteen';
+import { IconSound } from '../doodles';
 import { Mascot } from '../Mascot';
 import { ApiError, beep, call, messageOf, timeText, unlockAudio, uuid } from '../lib';
 import { enqueue, flush, loadQueue, submit, type Outcome, type QueuedScan, type ScanBody } from '../queue';
+import { SCAN_VOICE, SCAN_VOICE_LINES, SCAN_VOICE_PREF, SCAN_VOICE_RECORDED, scanVoiceIndex, scanVoiceKey, type ScanVoiceKey } from '../scan-voice';
 import { CameraError, decodeImageFile, preloadDecoder, startScanner } from '../scanner';
 import { Button, Card, cn, inputClass, Pill, Sheet, toast } from '../ui';
+import { useYuzuVoice } from '../voice';
 
-type Shown =
+type Shown = (
   | { status: 'ok' | 'already'; result: CheckinResult }
   | { status: 'error'; message: string; code: string }
-  | { status: 'queued'; label: string };
+  | { status: 'queued'; label: string }
+) & {
+  /** 柚子念的那一句 */
+  say?: ScanVoiceKey;
+};
 
 export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: number; online: boolean }) {
   const managerId = me.employee.id;
@@ -32,6 +41,15 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
   const [manual, setManual] = useState(false);
   const [voiding, setVoiding] = useState<CanteenCheckinRow | null>(null);
   const hideTimer = useRef<number | undefined>(undefined);
+  // 柚子播报：record 里拿最新的开关状态（record 不随声音重建）
+  const voice = useYuzuVoice(SCAN_VOICE_LINES, { recorded: SCAN_VOICE_RECORDED, prefKey: SCAN_VOICE_PREF });
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
+  /** 点按钮的那一下：让浏览器允许出声（之后扫到码时才念得出来） */
+  const allowSound = () => {
+    unlockAudio();
+    voice.prime();
+  };
 
   const refreshToday = useCallback(() => {
     call<CanteenToday>('GET', '/api/canteen/today')
@@ -42,8 +60,12 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
   // 先把识别二维码的程序取下来（没有系统自带识别的手机要用），断网时也能扫
   useEffect(() => preloadDecoder(), []);
 
-  const show = (s: Shown) => {
-    setShown(s);
+  /** 显示结果卡片，柚子念一句；manual：负责人手动登记的 */
+  const show = (s: Shown, manual = false) => {
+    const say = scanVoiceKey(s.status === 'error' ? { status: 'error', code: s.code } : { status: s.status }, manual);
+    setShown({ ...s, say });
+    const v = voiceRef.current;
+    if (v.on && v.available) v.autoSay(scanVoiceIndex(say));
     window.clearTimeout(hideTimer.current);
     hideTimer.current = window.setTimeout(() => setShown(null), s.status === 'ok' ? 2200 : 4500);
   };
@@ -56,25 +78,26 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
         return;
       }
       busyRef.current = true;
+      const manual = body.employeeId !== undefined;
       try {
         const full: ScanBody = { ...body, clientKey: uuid(), scannedAt: new Date(Date.now() + offsetMs).toISOString() };
         if (!enqueue(managerId, { body: full, label, savedAt: Date.now() })) {
           beep('error');
-          show({ status: 'error', code: 'STORE', message: '这台手机存不下记录（隐私模式或存储满了），为防止重复登记，这一笔没有交' });
+          show({ status: 'error', code: 'STORE', message: '这台手机存不下记录（隐私模式或存储满了），为防止重复登记，这一笔没有交' }, manual);
           return;
         }
         const outcome = await submit(managerId, full);
         setQueued(loadQueue(managerId).length);
         if (outcome.kind === 'done') {
           beep(outcome.result.status === 'ok' ? 'ok' : 'already');
-          show({ status: outcome.result.status, result: outcome.result });
+          show({ status: outcome.result.status, result: outcome.result }, manual);
           refreshToday();
         } else if (outcome.kind === 'rejected') {
           beep('error');
-          show({ status: 'error', code: outcome.error.code, message: outcome.error.message });
+          show({ status: 'error', code: outcome.error.code, message: outcome.error.message }, manual);
         } else {
           beep('queued');
-          show({ status: 'queued', label });
+          show({ status: 'queued', label }, manual);
         }
       } finally {
         busyRef.current = false;
@@ -110,7 +133,7 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
   const onText = useCallback((text: string) => void record({ code: text }, '扫码', true), [record]);
 
   const start = async () => {
-    unlockAudio();
+    allowSound();
     setCameraError('');
     setCamera('starting');
     try {
@@ -130,7 +153,7 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
 
   const pickImage = async (file: File | undefined, label = '相册') => {
     if (!file) return;
-    unlockAudio();
+    allowSound();
     try {
       const text = await decodeImageFile(file);
       if (!text) {
@@ -147,14 +170,39 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
   const current = today?.current;
   return (
     <div className="space-y-4">
-      <div className="flex items-end justify-between">
+      <div className="flex items-end justify-between gap-2">
         <h1 className="text-[24px] font-black tracking-tight">扫码打卡 📷</h1>
-        {queued > 0 && (
-          <Pill tone="sky">
-            <span data-testid="queued-count">{queued}</span> 条等联网补登
-          </Pill>
-        )}
+        <div className="flex items-center gap-2">
+          {queued > 0 && (
+            <Pill tone="sky">
+              <span data-testid="queued-count">{queued}</span> 条等联网补登
+            </Pill>
+          )}
+          {voice.available && (
+            <button
+              type="button"
+              onClick={() => voice.toggle(scanVoiceIndex('hello'))}
+              aria-pressed={voice.on}
+              aria-label={voice.on ? '关掉柚子播报' : '打开柚子播报'}
+              data-testid="scan-voice-toggle"
+              className={cn('flex h-9 items-center gap-1 rounded-full px-2.5 text-[13px] font-extrabold ring-1 active:scale-95', voice.on ? 'bg-yuzu-soft text-wood-deep ring-yuzu-deep/30' : 'bg-card text-ink-3 ring-line')}
+            >
+              <IconSound size={20} on={voice.on} fill={voice.on ? 'var(--color-yuzu)' : 'none'} />
+              {voice.on ? '播报' : '静音'}
+            </button>
+          )}
+        </div>
       </div>
+      {voice.on && voice.available && voice.blocked && (
+        <button
+          type="button"
+          onClick={() => voice.say(scanVoiceIndex(shown?.say ?? 'hello'))}
+          data-testid="scan-voice-blocked"
+          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-yuzu-soft px-4 py-2.5 text-[14px] font-bold text-wood-deep ring-1 ring-yuzu-deep/30"
+        >
+          <IconSound size={20} fill="var(--color-yuzu)" /> 点一下这里，柚子才能播报扫码结果
+        </button>
+      )}
 
       <div className="grid grid-cols-4 gap-2">
         {MEALS.filter((m) => today?.meals.find((w) => w.meal === m)?.enabled ?? m !== 'supper').map((m) => (
@@ -186,7 +234,10 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
                 <p className="text-[14px] font-bold text-white" data-testid="scan-lan-hint">
                   店里局域网打开的，网页里开不了相机取景：点下面，用手机相机拍一张员工的饭卡码
                 </p>
-                <label className="inline-flex h-14 cursor-pointer items-center justify-center gap-2 rounded-2xl bg-wood px-6 text-[17px] font-black text-white shadow-[0_4px_0_var(--color-wood-ink)] active:translate-y-[3px] active:shadow-[0_1px_0_var(--color-wood-ink)]">
+                <label
+                  onClick={allowSound}
+                  className="inline-flex h-14 cursor-pointer items-center justify-center gap-2 rounded-2xl bg-wood px-6 text-[17px] font-black text-white shadow-[0_4px_0_var(--color-wood-ink)] active:translate-y-[3px] active:shadow-[0_1px_0_var(--color-wood-ink)]"
+                >
                   📷 拍一张扫码
                   <input
                     type="file"
@@ -217,15 +268,25 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
             <p className="absolute inset-x-0 bottom-3 text-center text-[14px] font-bold text-white drop-shadow">对准员工的饭卡码</p>
           </>
         )}
-        {shown && <ResultCard shown={shown} onClose={() => setShown(null)} />}
+        {shown && <ResultCard shown={shown} speaking={voice.on && voice.speaking} onClose={() => setShown(null)} />}
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <label className="flex h-12 cursor-pointer items-center justify-center gap-2 rounded-2xl bg-white/70 text-[15px] font-bold text-ink-2 ring-1 ring-line active:scale-[0.97]">
+        <label
+          onClick={allowSound}
+          className="flex h-12 cursor-pointer items-center justify-center gap-2 rounded-2xl bg-white/70 text-[15px] font-bold text-ink-2 ring-1 ring-line active:scale-[0.97]"
+        >
           🖼️ 从相册选
           <input type="file" accept="image/*" className="hidden" data-testid="scan-file" onChange={(e) => void pickImage(e.target.files?.[0]).finally(() => (e.target.value = ''))} />
         </label>
-        <Button tone="ghost" className="h-12" onClick={() => setManual(true)}>
+        <Button
+          tone="ghost"
+          className="h-12"
+          onClick={() => {
+            allowSound();
+            setManual(true);
+          }}
+        >
           ✍️ 手动登记
         </Button>
       </div>
@@ -289,7 +350,7 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
         <ManualPicker
           onPick={(p, note) => {
             setManual(false);
-            unlockAudio();
+            allowSound();
             void record({ employeeId: p.id, note }, p.name);
           }}
         />
@@ -309,7 +370,7 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
   );
 }
 
-function ResultCard({ shown, onClose }: { shown: Shown; onClose: () => void }) {
+function ResultCard({ shown, speaking, onClose }: { shown: Shown; speaking: boolean; onClose: () => void }) {
   const tone =
     shown.status === 'ok' ? 'bg-leaf text-white' : shown.status === 'already' ? 'bg-yuzu text-ink' : shown.status === 'queued' ? 'bg-sky text-white' : 'bg-berry text-white';
   return (
@@ -340,6 +401,12 @@ function ResultCard({ shown, onClose }: { shown: Shown; onClose: () => void }) {
           <p className="text-[22px] font-black">没登记上</p>
           <p className="max-w-[300px] text-[15px] font-bold opacity-95">{shown.status === 'error' ? shown.message : ''}</p>
         </>
+      )}
+      {shown.say && (
+        <p className="mt-2 flex items-center gap-2 rounded-full bg-cream/95 py-1 pr-4 pl-1 text-[15px] font-black text-ink shadow-[var(--shadow-soft)]">
+          <Mascot mood={shown.status === 'ok' ? 'happy' : shown.status === 'error' ? 'worried' : 'wink'} talking={speaking} className="size-9" title="柚子" />
+          <span data-testid="scan-voice-line">{SCAN_VOICE[shown.say]}</span>
+        </p>
       )}
       <span className="mt-3 text-[12px] font-bold opacity-75">点一下继续扫</span>
     </button>

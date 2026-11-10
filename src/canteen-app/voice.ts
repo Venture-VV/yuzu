@@ -3,23 +3,24 @@
 // 打包时自动带上；没有录音的句子用手机自带的朗读（Web Speech API）：挑普通话的女声，音调调高一点。
 // 浏览器要先点过一下屏幕才肯出声（自动播放的限制）：没点过的那一句，等员工点一下再念（说话框里提示「点一下，听柚子说」）。
 // 念不出来的手机（没有中文朗读、部分微信里）不显示声音开关，照常看字。关掉声音这台手机会记住。
+// 扫码后柚子播报（店主 2026-11-10，第 18 节，K21）也用这一套：录音另放（scan-voice.ts），开关另记。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 const PREF_KEY = 'yuzu.canteen.voice.v1';
 
-/** 这台手机有没有关掉柚子的声音（默认开） */
-export function voicePref(): boolean {
+/** 这台手机有没有关掉柚子的声音（默认开）；prefKey 是记开关用的键（开场动画与扫码播报各记各的） */
+export function voicePref(prefKey = PREF_KEY): boolean {
   try {
-    return localStorage.getItem(PREF_KEY) !== 'off';
+    return localStorage.getItem(prefKey) !== 'off';
   } catch {
     return true;
   }
 }
-function saveVoicePref(on: boolean) {
+function saveVoicePref(on: boolean, prefKey: string) {
   try {
-    if (on) localStorage.removeItem(PREF_KEY);
-    else localStorage.setItem(PREF_KEY, 'off');
+    if (on) localStorage.removeItem(prefKey);
+    else localStorage.setItem(prefKey, 'off');
   } catch {
     /* 存不下就下次还是开着 */
   }
@@ -84,10 +85,24 @@ export interface YuzuVoice {
   stop: () => void;
   /** 开、关声音（打开时接着念第 i 句） */
   toggle: (i: number) => void;
+  /**
+   * 在点击里先让浏览器允许出声，不念任何一句（扫码播报用：结果是扫到码时才有的，不在点击里，
+   * iPhone 要先在点的那一下里出过一声，之后才肯念）。念不出来的手机什么也不做。
+   */
+  prime: () => void;
 }
 
-export function useYuzuVoice(lines: readonly string[]): YuzuVoice {
-  const [on, setOn] = useState(voicePref);
+export interface YuzuVoiceOptions {
+  /** 第几句的录音地址（没有的句子用手机自带的朗读）；默认是开场动画的录音 */
+  recorded?: readonly (string | undefined)[];
+  /** 记开关用的键（默认开场动画的那一个） */
+  prefKey?: string;
+}
+
+export function useYuzuVoice(lines: readonly string[], options: YuzuVoiceOptions = {}): YuzuVoice {
+  const recorded = options.recorded ?? recordedUrls;
+  const prefKey = options.prefKey ?? PREF_KEY;
+  const [on, setOn] = useState(() => voicePref(prefKey));
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>(() => synth()?.getVoices() ?? []);
   const [speaking, setSpeaking] = useState(false);
   const [blocked, setBlocked] = useState(false);
@@ -111,7 +126,7 @@ export function useYuzuVoice(lines: readonly string[]): YuzuVoice {
   }, []);
 
   const voice = useMemo(() => pickVoice(voices), [voices]);
-  const available = !broken && (recordedUrls.some(Boolean) || (!!synth() && !!voice));
+  const available = !broken && (recorded.some(Boolean) || (!!synth() && !!voice));
 
   const stop = useCallback(() => {
     seq.current++;
@@ -153,7 +168,7 @@ export function useYuzuVoice(lines: readonly string[]): YuzuVoice {
       };
       setTimeout(() => !begun && failed(), START_WAIT_MS);
 
-      const url = recordedUrls[i];
+      const url = recorded[i];
       if (url) {
         const a = (audio.current ??= new Audio());
         a.src = url;
@@ -178,9 +193,41 @@ export function useYuzuVoice(lines: readonly string[]): YuzuVoice {
       if (s.paused) s.resume();
       s.speak(u);
     },
-    [lines, voice, stop],
+    [lines, recorded, voice, stop],
   );
   const say = useCallback((i: number) => speak(i, true), [speak]);
+
+  const primed = useRef(false);
+  const prime = useCallback(() => {
+    if (primed.current) return;
+    primed.current = true;
+    // 系统朗读：在点的这一下里念一个空句子（不出声），之后不在点击里的也肯念
+    const s = synth();
+    if (s && voice) {
+      try {
+        const u = new SpeechSynthesisUtterance('');
+        u.volume = 0;
+        s.speak(u);
+      } catch {
+        /* 念不了就算了，到时候按「要点一下」处理 */
+      }
+    }
+    // 录音：在点的这一下里让同一个播放器静音放一下再停，之后换着放不用再点
+    const url = recorded.find(Boolean);
+    if (url) {
+      const a = (audio.current ??= new Audio());
+      a.src = url;
+      a.muted = true;
+      a.play()
+        .then(() => {
+          a.pause();
+          a.muted = false;
+        })
+        .catch(() => {
+          a.muted = false;
+        });
+    }
+  }, [recorded, voice]);
 
   const autoSay = useCallback(
     (i: number) => {
@@ -196,14 +243,14 @@ export function useYuzuVoice(lines: readonly string[]): YuzuVoice {
 
   const toggle = useCallback(
     (i: number) => {
-      saveVoicePref(!on);
+      saveVoicePref(!on, prefKey);
       setOn(!on);
       if (on) {
         stop();
         setBlocked(false);
       } else say(i);
     },
-    [on, say, stop],
+    [on, prefKey, say, stop],
   );
 
   // 切到别的应用、锁屏时别再念；离开开场时停下
@@ -217,5 +264,5 @@ export function useYuzuVoice(lines: readonly string[]): YuzuVoice {
   }, [stop]);
 
   const heard = useCallback((i: number) => said.current === i, []);
-  return { available, on, speaking, blocked, heard, say, autoSay, stop, toggle };
+  return { available, on, speaking, blocked, heard, say, autoSay, stop, toggle, prime };
 }

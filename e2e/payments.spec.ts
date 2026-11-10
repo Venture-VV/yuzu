@@ -4,11 +4,13 @@
 //   ③ 对账付款的人（这里是店主）登记付款：还没有收货单，整笔记为预付款，申请变「已付清」，合同的预付段「付清」；
 //   ④ 合同详情登记验收（合格）与质量问题（未处理 → 已处理），验收段变可付；质保段的提前申请要写原因，单据类型是「提前付款」（三级）；
 //   ⑤ ERP「付款」：发票登记分到采购单，三单「不齐」的财务放行；质保金台账、本周应付（填可用资金算缺口）；应付总览单独一列没到期的质保金。
+//   ⑥ 付款规则（8.0.6）：店主在「付款规则」里改本周应付的周数与三单差额比例，本周应付、三单的说明跟着变；最后改回默认。
 // 依赖演示数据（只在独立演示库）；账号：店主 linlan，密码 yuzu2026。会登记单据，只在门店电脑尺寸执行。
 // 每次用新的供应商、物料编码，不改演示数据里已有的档案。
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 import { LEGAL_ITEM_KEYS } from '../src/shared/contracts';
+import { DEFAULT_PAYMENT_RULES } from '../src/shared/payments';
 
 const PASSWORD = 'yuzu2026';
 
@@ -201,5 +203,42 @@ test.describe('付款流（v0.7.32）', () => {
     // 应付总览：没到期的质保金单独一列
     await page.goto('/payables');
     await expect(page.getByTestId(`warranty-held-${supCode}`)).toBeVisible();
+  });
+
+  test('付款规则（8.0.6）：店主改本周应付的周数与三单差额比例，页面跟着变；不合格的不提交；最后改回默认', async ({ page }) => {
+    await login(page, 'linlan');
+    try {
+      await page.goto('/erp/payments?tab=rules');
+      const card = page.getByTestId('payment-rules');
+      await expect(card).toBeVisible();
+      await expect(page.getByTestId('pay-rules-weeks')).toHaveValue('4');
+      await expect(page.getByTestId('pay-rules-pct')).toHaveValue('1');
+      await expect(page.getByTestId('pay-rules-cap')).toHaveValue('50');
+      await expect(page.getByTestId('pay-rules-owner')).toHaveValue('50000');
+      await expect(page.getByTestId('pay-rules-require-request')).toBeChecked();
+      await expect(card).toContainText('现在：1% 且 ¥50');
+      // 不合格的在页面上就拦住
+      await page.getByTestId('pay-rules-weeks').fill('13');
+      await page.getByTestId('payment-rules-save').click();
+      await expect(card).toContainText('本周应付的周数要是 1–12 的整数');
+      await page.getByTestId('pay-rules-weeks').fill('2');
+      await page.getByTestId('pay-rules-pct').fill('0.5');
+      await page.getByTestId('payment-rules-save').click();
+      await expect(page.getByText('付款规则已保存').first()).toBeVisible();
+      await expect(card).toContainText('现在：0.5% 且 ¥50');
+      // 本周应付按 2 周、三单的说明按新门槛
+      await page.getByTestId('payments-tab-weekly').click();
+      await expect(page.getByTestId('weekly-payables')).toContainText('起 2 周合计');
+      await expect(page.getByTestId('weekly-payables')).not.toContainText('第 3 周');
+      await page.getByTestId('payments-tab-three-way').click();
+      await expect(page.getByText('不超过收货的 0.5% 且 ¥50')).toBeVisible();
+      // 重新打开，读到的是存下的
+      await page.goto('/erp/payments?tab=rules');
+      await expect(page.getByTestId('pay-rules-weeks')).toHaveValue('2');
+    } finally {
+      // 改回默认，别的用例照默认算
+      const r = await page.request.put('/api/erp/payments/rules', { data: DEFAULT_PAYMENT_RULES });
+      expect(r.status(), await r.text()).toBe(200);
+    }
   });
 });

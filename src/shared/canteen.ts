@@ -15,6 +15,8 @@ export const CANTEEN_ROLE_LABELS: Record<CanteenRole, string> = { staff: '员工
 export const canEditMenu = (role: CanteenRole) => role === 'cook' || role === 'manager';
 /** 只有负责人能扫码打卡、手动登记、撤销 */
 export const canScan = (role: CanteenRole) => role === 'manager';
+/** 只有负责人能在手机上看柚子信箱、标看过、回信（店主 2026-11-10，docs/CANTEEN.md 第 18 节，K20） */
+export const canUseMailbox = (role: CanteenRole) => role === 'manager';
 
 // ── 餐次与开饭时间（K2）──
 
