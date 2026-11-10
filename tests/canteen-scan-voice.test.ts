@@ -1,7 +1,7 @@
 // 扫码后柚子播报（店主 2026-11-10，docs/CANTEEN.md 第 18 节，K21）：每一种结果念哪一句。不连数据库。
 //   · 店主定的两句：扫码成功「扫码成功，可以开饭！」；认不出是汤崎的人「未识别到汤崎身份，不可开饭！」——
 //     不是柚子饭堂的码、码对不上、码过期、这个人停用了、没有这位员工、照片里没找到二维码；
-//   · 其余几种（待店主确认）：手动登记成功、已经打过卡、不在开饭时间、没网先记下、别的原因没登记上（不说成「不是汤崎的人」）。
+//   · 其余几种（店主 2026-11-10：照默认）：手动登记成功、已经打过卡、不在开饭时间、没网先记下、别的原因没登记上（不说成「不是汤崎的人」）。
 
 import { describe, expect, it } from 'vitest';
 import { SCAN_VOICE, SCAN_VOICE_KEYS, SCAN_VOICE_LINES, SCAN_VOICE_RECORDED, scanVoiceIndex, scanVoiceKey } from '../src/canteen-app/scan-voice';
