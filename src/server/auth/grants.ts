@@ -148,12 +148,16 @@ export function registerGrantRoutes(app: FastifyInstance, deps: Deps) {
       if (!can(req.actor, 'member.refund')) throw forbidden();
       scope = parse(MemberRefundScopeInput, rawScope);
     } else if (input.purpose === 'line_void') {
-      // 退大额的菜（8.0.8，B02）：授权绑定那一条明细、此刻的金额与原因；自己能更正的、小额的不用授权
-      if (!can(req.actor, 'frontdesk.operate') && !can(req.actor, 'dining.order')) throw forbidden();
+      // 退大额的菜（8.0.8，B02）：授权绑定那一条明细、此刻的金额与原因；自己能更正的、小额的不用授权。
+      // 申请与退菜同一套权限（前台挂账）；只用于餐饮明细，别的明细照原来的更正流程（Codex 审查 d034bc6）
+      if (!can(req.actor, 'frontdesk.operate')) throw forbidden();
       if (can(req.actor, 'frontdesk.correct')) throw conflict('GRANT_NOT_NEEDED', '你的岗位可以直接退，不需要授权');
       const v = parse(LineVoidScopeInput, rawScope);
       const [line] = await sql<{ name: string; amount: number; status: string; source: string }[]>`SELECT name, amount, status, source FROM bill_lines WHERE id = ${v.lineId}`;
       if (!line) throw notFound('这道菜不存在');
+      if (line.source !== 'dining') {
+        throw conflict('GRANT_NOT_DINING', `「${line.name}」不是餐饮的菜，当场授权只用于退菜；请按原来的更正流程：本人 15 分钟内，或经理用自己的账号作废`);
+      }
       if (line.status !== 'active') throw conflict('ALREADY_VOIDED', `「${line.name}」已经退了`);
       const dining = await loadDiningRules(sql);
       if (line.source === 'dining' && dining.voidFreeCents > 0 && Number(line.amount) <= dining.voidFreeCents) {

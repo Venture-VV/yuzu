@@ -25,7 +25,7 @@ import { loadSettings } from './settings';
 export type VoidApproval = { approval: 'small' | 'self' | 'manager' | 'grant'; approverName?: string; approverId?: number };
 
 /**
- * 退一条明细要怎么批（8.0.8，B02）：小额的菜（单条 ≤ 上限）直接退；有更正权限的直接退；带了当场授权的核销授权；
+ * 退一条明细要怎么批（8.0.8，B02）：小额的菜（单条 ≤ 上限）直接退；有更正权限的直接退；餐饮的菜带了当场授权的核销授权；
  * 其余按原来的「本人 15 分钟内」。餐饮的菜超过上限又不能自己退时，提示请值班经理及以上当场授权（VOID_NEEDS_GRANT）。
  * 调用前已锁好来访 / 桌台、账单与这条明细
  */
@@ -41,7 +41,8 @@ export async function authorizeLineVoid(
     return { approval: 'small' };
   }
   if (can(actor, 'frontdesk.correct')) return { approval: 'manager' };
-  if (opts.grantId) {
+  // 当场授权只用于餐饮的菜：别的明细带着授权也不核销，照原来的「本人 15 分钟内」（Codex 审查 d034bc6）
+  if (opts.grantId && line.source === 'dining') {
     const g = await consumeLineVoidGrant(tx, { grantId: opts.grantId, actor, lineId: line.id, amount: Number(line.amount), usedRef: `line:${line.id}` });
     return { approval: 'grant', approverName: g.approverName, approverId: g.approverId };
   }

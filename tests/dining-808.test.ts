@@ -161,6 +161,31 @@ describe('小额退菜与下单同一套权限（B02，Codex 审查 f14210c）',
   });
 });
 
+describe('当场授权只用于餐饮的菜（B02，Codex 审查 d034bc6）', () => {
+  it('非餐饮的明细不能申请退菜授权；带着授权（升级前签发的）退也照原来的更正规则，授权不核销', async () => {
+    const created = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '茶位费', category: '其他', price: 1000 });
+    const tea = created.body.items.find((i: { name: string }) => i.name === '茶位费').id as number;
+    const v = await enter();
+    // 店主挂的（店员不是登记人），不进厨房：不是餐饮明细
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/visits/${v}/charges`, { clientKey: randomUUID(), lines: [{ itemId: tea, quantity: 1 }], expectedTotal: 1000 })).status).toBe(200);
+    const line = await lineOf(v, '茶位费');
+    const asked = await api(ctx.app, ctx.clerk, 'POST', '/api/auth/authorize', { username: 'duty', password: PASSWORD, purpose: 'line_void', scope: { lineId: line.id, reason: '客人不要了' } });
+    expect(asked.status).toBe(409);
+    expect(asked.body.error.code).toBe('GRANT_NOT_DINING');
+    // 升级前签发的同类授权（库里写一条）：带着退照样被拒，授权留着不核销
+    const dutyId = Number((await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'duty'`)[0]!.id);
+    const [legacy] = await ctx.sql<{ id: string }[]>`
+      INSERT INTO auth_grants (purpose, requested_by, approved_by, scope, expires_at)
+      VALUES ('line_void', ${ctx.clerkId}, ${dutyId}, ${ctx.sql.json({ lineId: line.id, amount: 1000, name: '茶位费', reason: '客人不要了' })}, now() + interval '5 minutes')
+      RETURNING id`;
+    expect((await voidLine(line.id, { reason: '客人不要了', grantId: legacy!.id })).status).toBe(403);
+    expect((await ctx.sql<{ usedAt: string | null }[]>`SELECT used_at FROM auth_grants WHERE id = ${legacy!.id}`)[0]!.usedAt).toBeNull();
+    expect((await lineOf(v, '茶位费'))?.id).toBe(line.id);
+    // 经理照原来的流程用自己的账号作废
+    expect((await voidLine(line.id, { reason: '经理处理' }, duty)).status).toBe(200);
+  });
+});
+
 describe('餐饮台账（B06）', () => {
   it('按起止日期、分类、状态筛选；合计与逐行一致；导出只含所选范围、最后一行是合计', async () => {
     const all = (await api(ctx.app, ctx.clerk, 'GET', `/api/dining/ledger?from=${today}&to=${today}`)).body as {
