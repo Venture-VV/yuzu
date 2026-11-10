@@ -305,6 +305,49 @@ test.describe('S5 餐饮第二步 · 桌台', () => {
     }
   });
 
+  // 8.0.8（Codex 审查 d5e0c06）：桌台点单下架以前留下的「结果待确认」，下架以后照样能回到那一桌处理（查回、原样重提或确认作废）
+  test('桌台点单没发出去、之后桌台点单下架：「去处理」照样回到这一桌，确认作废以后回到手牌点单', async ({ page, playwright, baseURL }) => {
+    await login(page, 'linlan');
+    const owner = await playwright.request.newContext({ baseURL });
+    try {
+      await prepare(page);
+      expect((await owner.post('/api/auth/login', { data: { username: 'linlan', password: PASSWORD } })).ok()).toBe(true);
+      const b1 = (await getJson<TablesBoard>(page, '/api/dining/tables')).tables.find((t) => t.name === B1)!;
+      await send(page, 'post', '/api/dining/tables/open', { clientKey: randomUUID(), tableId: b1.id, guests: 2 });
+      const s = (await sessionOf(page, B1))!;
+      await relogin(page, 'xiaozhou');
+      // 点单请求没到服务器（断网）：记在「结果待确认」
+      await page.route('**/api/dining/tables/sessions/*/orders', (route) => route.abort('connectionreset'));
+      await page.goto(`/dining/order?table=${s.id}`);
+      await expect(page.getByTestId('dining-table-selected')).toContainText(`桌 ${B1}`);
+      await page.getByTestId(`dining-dish-${TEA.name}`).click();
+      await page.getByTestId('dining-submit').click();
+      await expect(page.getByTestId('pending-op')).toContainText(`桌 ${B1}`);
+      await page.unroute('**/api/dining/tables/sessions/*/orders');
+      // 店主把桌台点单下架（另开会话）
+      expect((await owner.put('/api/admin/dining/rules', { data: { tablesEnabled: false } })).ok()).toBe(true);
+      // 顶部提醒「去处理」：照样回到这一桌的点单（只为处理这一笔），查不到 → 确认作废
+      await page.goto('/dining/tables');
+      const banner = page.getByTestId('frontdesk-pending-banner');
+      await expect(banner).toContainText(`桌 ${B1}`);
+      await banner.getByRole('button', { name: '去处理' }).click();
+      await expect(page).toHaveURL(/\/dining\/order/);
+      await expect(page.getByTestId('dining-table-selected')).toContainText(`桌 ${B1}`);
+      await expect(page.getByTestId('pending-op')).toContainText(`桌 ${B1}`);
+      await page.getByTestId('pending-abandon').click();
+      await expect(page.getByTestId('pending-op')).toHaveCount(0);
+      await expect(banner).toHaveCount(0);
+      // 处理完回到手牌点单；这一桌的账没多
+      await expect(page.getByTestId('dining-tag-only')).toBeVisible();
+      expect((await sessionOf(page, B1))!.amount).toBe(0);
+    } finally {
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+      await owner.dispose();
+      await relogin(page, 'linlan');
+      await cleanup(page);
+    }
+  });
+
   // 测试会话预检 a040d79：同一个会员码先认出过、之后失效（过期、解绑）再扫时，不能拿上一次成功的结果登记会员、清空查找框。
   // 会员码的校验结果用 page.route 模拟（浏览器验收的环境没配会员码）：第一次认出演示会员，之后都是过期
   test('开台对话框扫会员码：同一个码先登记上、「不登记」后失效再扫，写明原因、保留查找框，不登记回上一次的会员；第一次就过期的写明原因', async ({ page }) => {

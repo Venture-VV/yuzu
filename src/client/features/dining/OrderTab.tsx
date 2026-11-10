@@ -15,7 +15,7 @@ import { Money } from '../../components/Money';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, SectionTitle, Segmented, Skeleton, Spinner } from '../../components/ui';
-import { PendingPanel, useFrontdeskOp } from '../frontdesk/pending';
+import { PendingPanel, useFrontdeskOp, useFrontdeskPending } from '../frontdesk/pending';
 import { guestKey, menuKey, useDiningMenu, useTableSession, useTablesBoard } from './queries';
 import { DishVoidDialog } from './DishVoid';
 
@@ -80,14 +80,19 @@ export function OrderTab() {
 
   // 从桌台详情点「点单」、或顶部「结果待确认」的「去处理」进来：直接选好那一桌
   const fromTable = Number(params.get('table')) || null;
-  // 8.0.8（A05）：桌台点单下架时只能挂手牌点单（开着的桌在「桌台账单」里结账、退菜）
+  // 8.0.8（A05）：桌台点单下架时只能挂手牌点单（开着的桌在「桌台账单」里结账、退菜）。
+  // 但这一桌还有待确认的桌台点单（下架前、升级前留下的）时照样进来，只为查回、原样重提或确认作废那一笔（Codex 审查 d5e0c06）；
+  // 待确认时表单锁着，不能另下新单，处理完自动回到手牌点单
   const tablesOn = menu.data?.rules.tablesEnabled ?? false;
+  const allPending = useFrontdeskPending();
+  const tablePending = (sid: number | null) => sid !== null && allPending.some((p) => p.type === 'table_post' && !!p.sessionIds?.includes(sid));
   useEffect(() => {
     if (!fromTable || !menu.data) return;
-    if (tablesOn) {
+    if (tablesOn || tablePending(fromTable)) {
       setMode('table');
       setTableSession(fromTable);
       op.clearError();
+      if (!tablesOn) toast({ tone: 'info', title: '桌台点单已下架', body: '这里只处理这一桌那笔待确认的点单（查回、原样重提或确认作废）；新的消费请挂手牌点单' });
     } else {
       toast({ tone: 'info', title: '桌台点单已下架', body: '所有消费请挂手牌点单；这桌在「桌台账单」里照常结账、退菜' });
     }
@@ -96,9 +101,10 @@ export function OrderTab() {
     setParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fromTable, !!menu.data]);
+  const recovering = !tablesOn && mode === 'table' && tablePending(tableSession);
   useEffect(() => {
-    if (menu.data && !tablesOn && mode === 'table') setMode('tag');
-  }, [menu.data, tablesOn, mode]);
+    if (menu.data && !tablesOn && mode === 'table' && !recovering) setMode('tag');
+  }, [menu.data, tablesOn, mode, recovering]);
 
   const dishes = useMemo(() => menu.data?.dishes ?? [], [menu.data]);
   const byId = useMemo(() => new Map(dishes.map((d) => [d.id, d])), [dishes]);
