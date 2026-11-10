@@ -4,13 +4,17 @@
 // 第二期（第 14–16 节）：新同事扫注册二维码 → 看柚子的开场动画 → 自己登记 → 走新手教程 → 跟柚子说 → 后台柚子信箱回信。
 // 店里局域网（K18）：用 http://canteen-lan.local（浏览器解析到本机）打开——登录、饭卡码、教程第二遍、负责人拍照扫码；
 // 柚子的声音（K19）：开场动画一句一句念出来（无头浏览器里没有中文朗读，换成假的朗读记下念了什么）。
+// 桌面快捷入口与饭点提醒（K22–K24）：清单里长按图标的三个入口；员工打开提醒（无头浏览器连不上真的推送服务，换成假的订阅，
+// 推送地址指到用例自己开的模拟推送服务——应用要设 CANTEEN_PUSH_LOCAL_ENDPOINTS=true）、选哪几顿、发一条试试；
+// 后台改话术、给员工试发；推送到了 sw.js 弹出通知（精简版的无头浏览器不弹通知，这一步换完整的 Chromium）。
 // 前面那几位（开通卡片来的）在手机上先记成「看过开场、走过教程」，只测原来的流程。
 // 要应用开着员工端口：E2E_BASE_URL（员工后台，默认 http://localhost:8080）、E2E_CANTEEN_URL（员工端口，默认 http://localhost:8090），
 // 库里要有演示的店主 linlan（seed-demo）。只在独立演示库上跑：会建部门、员工、菜单与打卡。
 
 import { mkdirSync } from 'node:fs';
-import { expect, test, devices, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { chromium, expect, test, devices, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { qrShape } from '../src/shared/qr-svg';
+import { fakePhone, mockPushService } from '../tests/push-helpers';
 
 const CANTEEN = process.env.E2E_CANTEEN_URL ?? 'http://localhost:8090';
 const OUT = 'test-results/canteen';
@@ -151,6 +155,40 @@ function fakeSpeech() {
       }
     },
   });
+}
+
+/**
+ * 假的通知权限与推送订阅（饭点提醒，K23）：无头浏览器连不上真的推送服务，精简版还一律说通知「不允许」。
+ * 权限一开始是「还没决定」，点了允许就是允许；订阅的推送地址指到模拟推送服务、钥匙是用例里的假手机的。都记在本机，刷新以后还在
+ */
+function fakePush({ endpoint, p256dh, auth }: { endpoint: string; p256dh: string; auth: string }) {
+  const KEY = '__e2e_push';
+  const load = (): { perm?: NotificationPermission; key?: number[] | null } => JSON.parse(localStorage.getItem(KEY) ?? '{}');
+  const save = (s: object) => localStorage.setItem(KEY, JSON.stringify({ ...load(), ...s }));
+  Object.defineProperty(Notification, 'permission', { configurable: true, get: () => load().perm ?? 'default' });
+  Notification.requestPermission = async () => {
+    save({ perm: 'granted' });
+    return 'granted';
+  };
+  const make = (key: number[]) => ({
+    endpoint,
+    options: { applicationServerKey: new Uint8Array(key).buffer, userVisibleOnly: true },
+    toJSON: () => ({ endpoint, expirationTime: null, keys: { p256dh, auth } }),
+    unsubscribe: async () => {
+      save({ key: null });
+      return true;
+    },
+  });
+  PushManager.prototype.subscribe = async function (opts?: PushSubscriptionOptionsInit) {
+    const raw = opts?.applicationServerKey as Uint8Array;
+    const key = Array.from(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
+    save({ key });
+    return make(key) as unknown as PushSubscription;
+  };
+  PushManager.prototype.getSubscription = async function () {
+    const key = load().key;
+    return (key ? make(key) : null) as unknown as PushSubscription | null;
+  };
 }
 
 test.describe.serial('员工食堂 · 柚子饭堂', () => {
@@ -513,6 +551,148 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
     await ectx.close();
     await mctx.close();
   });
+
+  test('桌面快捷入口与饭点提醒（K22–K24）：长按图标的三个入口；员工打开提醒、选哪几顿、发一条试试；后台改话术、试发；推送到了弹通知', async ({ browser, request }) => {
+    // 长按桌面图标的三个入口（安卓上装成应用的 Chrome、Edge）：亮饭卡码、扫码、跟柚子说，各有图标
+    const manifest = await (await request.get(`${CANTEEN}/manifest.webmanifest`)).json();
+    expect(manifest.shortcuts.map((s: { name: string; url: string }) => [s.name, new URL(s.url, CANTEEN).hash])).toEqual([
+      ['亮饭卡码', '#/code'],
+      ['扫码', '#/scan'],
+      ['跟柚子说', '#/talk'],
+    ]);
+    for (const s of manifest.shortcuts as { icons: { src: string }[] }[]) {
+      const icon = await request.get(`${CANTEEN}${s.icons[0]!.src}`);
+      expect(icon.status()).toBe(200);
+      expect(icon.headers()['content-type']).toContain('image/png');
+    }
+
+    const push = await mockPushService();
+    try {
+      // 新同事小美：后台加好、手机上开通
+      const made = await admin.request.post('/api/erp/canteen/employees', { data: { empNo: 'A009', name: '小美', role: 'staff', departmentId: null } });
+      expect(made.status()).toBe(200);
+      const [card] = await (await admin.request.get(`/api/erp/canteen/activation-cards?ids=${(await made.json()).employee.id}`)).json();
+      const mine = fakePhone();
+      const ctx = await phone(browser, 'android');
+      await ctx.addInitScript(fakePush, { endpoint: `${push.base}/push/xiaomei`, p256dh: mine.p256dh, auth: mine.auth });
+      const p = await join(ctx, card.code, 'mei-2026');
+
+      // 首页问一句：要柚子到点喊你吃饭吗？（只开了午餐）点「好呀」就打开
+      const prompt = p.getByTestId('reminder-prompt');
+      await expect(prompt).toBeVisible();
+      await expect(prompt).toContainText('午餐');
+      await p.screenshot({ path: `${OUT}/reminder-prompt.png` });
+      await prompt.getByRole('button', { name: '好呀' }).click();
+      await expect(p.getByText('饭点提醒打开啦')).toBeVisible();
+      await expect(prompt).toHaveCount(0);
+
+      // 我的 → 饭点提醒：开着；只有午餐（晚餐没开饭）；关掉午餐，刷新以后还是关着，再打开
+      await p.getByTestId('tab-me').click();
+      await p.getByTestId('open-reminders').click();
+      await expect(p.getByTestId('reminder-on')).toBeVisible();
+      await expect(p.getByTestId('reminder-meal-lunch')).toHaveAttribute('aria-checked', 'true');
+      await expect(p.getByTestId('reminder-meal-dinner')).toHaveCount(0);
+      await p.getByTestId('reminder-meal-lunch').click();
+      await expect(p.getByTestId('reminder-meal-lunch')).toHaveAttribute('aria-checked', 'false');
+      await noOverflow(p);
+      await p.screenshot({ path: `${OUT}/reminder-panel.png` });
+      await p.reload();
+      await p.getByTestId('open-reminders').click();
+      await expect(p.getByTestId('reminder-meal-lunch')).toHaveAttribute('aria-checked', 'false');
+      await p.getByTestId('reminder-meal-lunch').click();
+      await expect(p.getByTestId('reminder-meal-lunch')).toHaveAttribute('aria-checked', 'true');
+
+      // 发一条试试：模拟推送服务收到加密的通知，小美手机的钥匙解得开
+      await p.getByTestId('reminder-test').click();
+      await expect(p.getByText('发出去啦')).toBeVisible();
+      await expect.poll(() => push.hits.length).toBe(1);
+      expect(JSON.parse(mine.open(push.hits[0]!.body))).toMatchObject({
+        title: '柚子来试试嗓子 🍊',
+        body: '小美，饭点提醒打开啦！到了开饭时间，柚子就在这里喊你吃饭～',
+        url: '/#/home',
+        badge: 1,
+      });
+
+      // 不是负责人的点了桌面的「扫码」入口：打开饭卡码，说一声
+      await p.goto(`${CANTEEN}/?from=shortcut#/scan`);
+      await expect(p.getByText('扫码是食堂负责人用的')).toBeVisible();
+      await expect(p.getByTestId('meal-code')).toBeVisible();
+
+      // 同一台手机、页面开着换了人（扫另一张开通卡片）：这台手机的提醒跟着改到新的人名下，不再收小美的（Codex 审查 e14089d）
+      const made2 = await admin.request.post('/api/erp/canteen/employees', { data: { empNo: 'A010', name: '小芳', role: 'staff', departmentId: null } });
+      expect(made2.status()).toBe(200);
+      const [card2] = await (await admin.request.get(`/api/erp/canteen/activation-cards?ids=${(await made2.json()).employee.id}`)).json();
+      await p.evaluate((code) => {
+        window.location.hash = `join=${code}`;
+      }, card2.code as string);
+      await expect(p.getByText(/欢迎你/)).toBeVisible();
+      await p.getByLabel('新密码', { exact: true }).fill('fang-2026');
+      await p.getByLabel('再输一遍密码').fill('fang-2026');
+      await p.getByRole('button', { name: /开吃/ }).click();
+      await expect(p.getByTestId('tab-home')).toBeVisible();
+      await expect
+        .poll(async () => ((await (await admin.request.get('/api/erp/canteen/reminders')).json()).recipients as { name: string }[]).map((r) => r.name))
+        .toEqual(['小芳']);
+      await ctx.close();
+
+      // 后台「饭点提醒」：看得到小芳开着；改午餐的标题和第一句，存好，刷新以后还在
+      await admin.goto('/erp/canteen');
+      await admin.getByRole('radio', { name: '饭点提醒' }).click();
+      await expect(admin.getByTestId('reminders-people')).toContainText('小芳');
+      const lunch = admin.getByTestId('reminder-lunch');
+      await lunch.getByLabel('午餐通知的标题').fill('开饭啦！柚子喊你吃午饭 🍱');
+      await lunch.getByLabel('午餐第 1 句', { exact: true }).fill('{名字}，午饭开饭啦～今天有{菜单}');
+      await expect(admin.getByTestId('reminder-preview-lunch')).toContainText('开饭啦！柚子喊你吃午饭');
+      await admin.getByTestId('reminders-save').click();
+      await expect(admin.getByText('饭点提醒存好了')).toBeVisible();
+      await admin.reload();
+      await admin.getByRole('radio', { name: '饭点提醒' }).click();
+      await expect(admin.getByTestId('reminder-lunch').getByLabel('午餐通知的标题')).toHaveValue('开饭啦！柚子喊你吃午饭 🍱');
+      await expect(admin.getByTestId('reminder-lunch').getByLabel('午餐第 1 句', { exact: true })).toHaveValue('{名字}，午饭开饭啦～今天有{菜单}');
+      await admin.screenshot({ path: `${OUT}/reminders-admin.png` });
+
+      // 给小芳试发今天的午餐提醒（还是这台手机，钥匙一样）
+      await admin.getByLabel('发给谁').selectOption({ label: '小芳（A010）' });
+      await admin.getByLabel('发哪一条').selectOption({ label: '今天的午餐提醒' });
+      await admin.getByTestId('reminders-test-send').click();
+      await expect(admin.getByTestId('reminders-test')).toContainText('送到了 1 台手机');
+      await expect.poll(() => push.hits.length).toBe(2);
+      const msg = JSON.parse(mine.open(push.hits[1]!.body));
+      expect(msg).toMatchObject({ title: '（试发）开饭啦！柚子喊你吃午饭 🍱', tag: 'test-lunch', url: '/#/code', badge: 1 });
+
+      // 推送到了手机上：sw.js 弹出通知，点开要去饭卡码
+      const full = await chromium.launch(process.env.PW_CHROMIUM_PATH ? { executablePath: process.env.PW_CHROMIUM_PATH } : { channel: 'chromium' });
+      try {
+        const fctx = await full.newContext({ ...PHONES.android, locale: 'zh-CN', timezoneId: tz });
+        await fctx.grantPermissions(['notifications'], { origin: CANTEEN });
+        const fp = await fctx.newPage();
+        await fp.goto(CANTEEN);
+        await fp.evaluate(async () => {
+          await navigator.serviceWorker.ready;
+        });
+        const cdp = await fctx.newCDPSession(fp);
+        const registered = new Promise<{ registrationId: string }[]>((resolve) =>
+          cdp.on('ServiceWorker.workerRegistrationUpdated', (e) => {
+            if (e.registrations.length) resolve(e.registrations);
+          }),
+        );
+        await cdp.send('ServiceWorker.enable');
+        const [reg] = await registered;
+        await cdp.send('ServiceWorker.deliverPushMessage', { origin: CANTEEN, registrationId: reg!.registrationId, data: JSON.stringify(msg) });
+        await expect
+          .poll(() =>
+            fp.evaluate(async () =>
+              (await (await navigator.serviceWorker.ready).getNotifications()).map((n) => ({ title: n.title, body: n.body, tag: n.tag, url: (n.data as { url?: string } | null)?.url })),
+            ),
+          )
+          .toEqual([{ title: msg.title, body: msg.body, tag: 'test-lunch', url: '/#/code' }]);
+      } finally {
+        await full.close();
+      }
+    } finally {
+      await push.close();
+    }
+  });
 });
 
 test.describe.serial('第二期：开场动画、新同事登记、新手教程、跟柚子说', () => {
@@ -817,6 +997,7 @@ test.describe.serial('第二期：开场动画、新同事登记、新手教程�
     await expect(intro).toHaveCount(0);
     await ctx.close();
   });
+
 });
 
 async function currentSlot(ctx: BrowserContext): Promise<{ meal: string; date: string }> {

@@ -190,6 +190,20 @@ export const IconInstall = (p: IconProps) => (
   </Doodle>
 );
 
+/** 铃铛：饭点提醒（docs/CANTEEN.md 第 19 节），带两道晃动的线 */
+export const IconBell = (p: IconProps) => (
+  <Doodle {...p}>
+    {(f) => (
+      <>
+        <path d="M9.6 21.6c.6-2.6.6-5.4.8-8 .3-3.6 2.6-6 5.6-6.1 3 .1 5.4 2.5 5.7 6.1.2 2.6.2 5.4.8 8" fill={f} />
+        <path d="M7 21.8c6-.5 12-.5 18 0M16 7.4V5.6" />
+        <path d="M13.6 24.4c.4 1.6 1.3 2.4 2.4 2.4s2-.8 2.4-2.4" />
+        <path d="M5.8 10.6c-.6 1.4-.8 2.8-.6 4.2M26.2 10.6c.6 1.4.8 2.8.6 4.2" strokeWidth={1.6} />
+      </>
+    )}
+  </Doodle>
+);
+
 /** 喇叭：on 时带两道声波，关了是一个小叉（开场动画的声音开关） */
 export const IconSound = ({ on = true, ...p }: IconProps & { on?: boolean }) => (
   <Doodle {...p}>

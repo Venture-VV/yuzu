@@ -1,8 +1,10 @@
 // 柚子饭堂的外壳：开机先问门店系统「我是谁」（连不上就用上次的，离线也能亮码）；底部五个入口按角色显示。
 // 第二期（docs/CANTEEN.md 第 14、15 节）：这台手机第一次打开时先放柚子的开场动画；没登录的进门是「新同事登记」
 // （扫注册二维码、点员工群里的链接来的 #reg 直接进登记），登记好或第一次登录后接着走新手教程。
+// 饭点提醒与桌面快捷入口（第 19 节）：打开时、换人以后核对一遍这台手机的提醒订阅，清掉桌面图标的小红点；退出登录时关掉这台手机的提醒；
+// 不是负责人的从桌面「扫码」入口进来的，打开饭卡码。
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { canEditMenu, canScan, canUseMailbox, type CanteenMe } from '@shared/canteen';
 import { RoughDefs, IconChef, IconCamera, IconHome, IconLetter, IconMe, IconMenu, IconTicket } from './doodles';
 import { inWeChat, InstallGuide, isStandalone, WeChatTip } from './install';
@@ -19,8 +21,9 @@ import { MePage } from './pages/Me';
 import { RegisterPage } from './pages/Register';
 import { ScanPage } from './pages/Scan';
 import { TalkPage } from './pages/Talk';
+import { clearBadge, disablePush, syncPush } from './push';
 import { Tour, tourDone, tourSteps } from './tour';
-import { Button, cn, Sheet, Toasts } from './ui';
+import { Button, cn, Sheet, toast, Toasts } from './ui';
 
 type Route = 'home' | 'menu' | 'code' | 'talk' | 'kitchen' | 'scan' | 'mailbox' | 'me';
 const ROUTES: Route[] = ['home', 'menu', 'code', 'talk', 'kitchen', 'scan', 'mailbox', 'me'];
@@ -111,7 +114,36 @@ export function App() {
     };
   }, [refresh]);
 
+  // 打开柚子饭堂、回到前台：清掉桌面图标的小红点；这台手机开着提醒的，登录好以后交给门店系统核对一遍
+  useEffect(() => {
+    clearBadge();
+    const on = () => document.visibilityState === 'visible' && clearBadge();
+    document.addEventListener('visibilitychange', on);
+    return () => document.removeEventListener('visibilitychange', on);
+  }, []);
+  // 每次打开核对一次；页面开着换了人（开通卡片、注册二维码打开以后另一位登录）再核对一遍，订阅改到新的人名下——
+  // 不然这台手机还收上一位的提醒（Codex 审查 e14089d）。没核对成的（没网、没登录上）下次再试
+  const syncedFor = useRef<number | null>(null);
+  const employeeId = cached?.me.employee.id ?? null;
+  useEffect(() => {
+    if (state !== 'ready' || !online || employeeId === null || syncedFor.current === employeeId) return;
+    syncedFor.current = employeeId;
+    void syncPush().catch(() => {
+      if (syncedFor.current === employeeId) syncedFor.current = null;
+    });
+  }, [state, online, employeeId]);
+  // 不是负责人的从桌面「扫码」入口进来（页面上直接打开饭卡码）：说一声
+  const scanNoticeShown = useRef(false);
+  useEffect(() => {
+    const role = cached?.me.employee.role;
+    if (state !== 'ready' || !role || hash.route !== 'scan' || canScan(role) || scanNoticeShown.current) return;
+    scanNoticeShown.current = true;
+    toast('扫码是食堂负责人用的，柚子帮你打开了饭卡码～');
+  }, [state, cached, hash.route]);
+
   const logout = async () => {
+    // 这台手机的饭点提醒跟着退出关掉（不然下一位在这台手机上登录前，还会收到上一位的提醒）
+    await disablePush('logout').catch(() => undefined);
     await call('POST', '/api/canteen/logout').catch(() => undefined);
     clearCachedMe();
     removeKey('yuzu.canteen.menus.v1');
@@ -180,7 +212,8 @@ export function App() {
   const { me, offsetMs } = cached;
   const role = me.employee.role;
   const allowed = (r: Route) => (r === 'kitchen' ? canEditMenu(role) : r === 'scan' ? canScan(role) : r === 'mailbox' ? canUseMailbox(role) : true);
-  const route = allowed(hash.route) ? hash.route : 'home';
+  // 不是负责人的点了桌面的「扫码」入口（K22）：扫码是负责人用的，给他打开饭卡码
+  const route = allowed(hash.route) ? hash.route : hash.route === 'scan' ? 'code' : 'home';
   const page = {
     home: <HomePage me={me} offsetMs={offsetMs} online={online} go={go} />,
     menu: <MenuPage me={me} offsetMs={offsetMs} />,

@@ -1,4 +1,5 @@
 // 首页：打招呼、现在（或下一顿）吃什么、亮出饭卡码；跟柚子说的一栏；今天的其他几顿。
+// 能收提醒、还没决定过的手机，问一句要不要柚子到点喊你吃饭（docs/CANTEEN.md 第 19 节）。
 
 import { useEffect, useMemo, useState } from 'react';
 import { canScan, canUseMailbox, type CanteenMe, type Meal, type MealWindow } from '@shared/canteen';
@@ -6,6 +7,7 @@ import { Mascot } from '../Mascot';
 import { IconArrow, IconCamera, IconLetter, IconTicket } from '../doodles';
 import { addDays, call, storeNow } from '../lib';
 import { MealCard, useMenus } from '../menus';
+import { ReminderPrompt } from '../reminders';
 import { Button, Pill, Stamp } from '../ui';
 
 const toMin = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
@@ -63,6 +65,7 @@ export function HomePage({ me, offsetMs, online, go }: { me: CanteenMe; offsetMs
       </header>
 
       {!online && <p className="rounded-2xl bg-sky-soft px-4 py-2.5 text-[14px] font-bold text-relax">现在没网：饭卡码照样能亮，菜单是上次看到的</p>}
+      <ReminderPrompt online={online} />
       {stale && online && <p className="rounded-2xl bg-sky-soft px-4 py-2.5 text-[14px] font-bold text-relax">菜单是上次看到的，联网后会更新</p>}
 
       <div data-tour="focus-meal">

@@ -17,6 +17,7 @@ import { activationCards, batchEmployees, createEmployee, listEmployees, reissue
 import { feedbackCsvRows, listFeedback, markFeedbackRead, replyFeedback, unreadFeedbackCount } from './feedback';
 import { listMenus, topDishes } from './menus';
 import { canteenPortOpen } from './portal';
+import { adminTestPush, reminderOverview, saveReminderSettings } from './push';
 import { registrationView, setRegistrationEnabled } from './registration';
 import { canteenDepartmentName, createCanteenDepartment, loadCanteenSettings, saveCanteenSettings } from './settings';
 
@@ -65,6 +66,14 @@ export function registerCanteenAdminRoutes(app: FastifyInstance, deps: Deps) {
   /** 选部门用：在用的部门 */
   app.get('/api/erp/canteen/departments', manage, async () =>
     sql<{ id: number; name: string }[]>`SELECT id, name FROM departments WHERE active ORDER BY sort_order, id`);
+
+  // ── 饭点提醒（店主 2026-11-10，docs/CANTEEN.md 第 19 节，K23、K24）：设置、今天发了没有、谁开着提醒、给某位员工发一条试试 ──
+  app.get('/api/erp/canteen/reminders', manage, async () => readSnapshot(sql, (tx) => reminderOverview(tx, config)));
+  app.put('/api/erp/canteen/reminders', manage, async (req) => {
+    await saveReminderSettings(sql, req.body, ctxOf(req));
+    return readSnapshot(sql, (tx) => reminderOverview(tx, config));
+  });
+  app.post('/api/erp/canteen/reminders/test', manage, async (req) => adminTestPush(sql, config, req.body));
 
   // ── 自己登记：注册二维码与开关（第二期，K12；不要注册口令，店主 2026-11-07） ──
   app.get('/api/erp/canteen/registration', manage, async () => registrationView(sql));
