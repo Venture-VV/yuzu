@@ -8,8 +8,9 @@
 
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { MP_GATEWAY_HEADER, MP_OPENID_HEADER, type MpFoodAdminData, type MpFoodBill, type MpFoodMenu, type MpFoodOrdered } from '../src/shared/mp';
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
+import { MP_FOOD_REQUEST_MAX_QUANTITY, MP_GATEWAY_HEADER, MP_OPENID_HEADER, type MpFoodAdminData, type MpFoodBill, type MpFoodMenu, type MpFoodOrdered } from '../src/shared/mp';
+import { TUNABLE_LIMITS } from '../src/shared/tunables';
 import { buildMpApp } from '../src/server/modules/mp/app';
 import { foodAdminData, foodMenu, makeTableCode, orderFood, tableIdOf } from '../src/server/modules/mp/food';
 import { consistencyChecks } from '../src/server/ops/consistency';
@@ -264,7 +265,9 @@ describe('扫码点餐', () => {
     expect(await code(order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 1 }], { table: 'A8' }))).toEqual([400, 'BAD_REQUEST']);
     expect(await code(order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 1 }], { expectedTotal: 1400 }))).toEqual([409, 'PRICE_CHANGED']);
     expect(await code(order(a.openid, [{ itemId: item['宫保鸡丁']!, quantity: 11 }]))).toEqual([422, 'MP_ORDER_LIMIT']);
-    expect(await code(order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 21 }]))).toEqual([400, 'BAD_REQUEST']);
+    // 一单最多几份按后台的设置（N1，默认 20 份）在下单时核对；格式上只挡离谱的（200 份以上）
+    expect(await code(order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 21 }]))).toEqual([422, 'MP_ORDER_LIMIT']);
+    expect(await code(order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 201 }]))).toEqual([400, 'BAD_REQUEST']);
     const version = await versionOf(a.openid);
     expect(await code(order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 1 }], { bindVersion: version + 1 }))).toEqual([409, 'BIND_STALE']);
     expect(await billLines(v.visitId)).toBe(before);
@@ -390,5 +393,44 @@ describe('扫码点餐', () => {
     const a = await member('演示·关掉以后');
     expect((await menu(a.openid)).open).toBe(false);
     expect((await call('GET', '/api/mp/me', a.openid)).json().member.foodOpen).toBe(false);
+  });
+});
+
+describe('一单的上限按后台的设置（N1，主线 8.0.7「经营规则 → 可调的数值」）', () => {
+  it('菜单上给的上限、下单时的核对都跟着设置走：调大能多点、调小就拦，金额也一样；格式上只挡 200 份以上', async () => {
+    // 请求格式的上限与后台能调到的最大份数相同
+    expect(MP_FOOD_REQUEST_MAX_QUANTITY).toBe(TUNABLE_LIMITS.mpFoodMaxQuantity.max);
+    const setLimits = async (patch: { mpFoodMaxQuantity?: number; mpFoodMaxTotalCents?: number }) => {
+      const r = await api(ctx.app, ctx.owner, 'PUT', '/api/settings', patch);
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+    };
+    // 用完改回默认（20 份、¥500），不影响别的用例
+    onTestFinished(() => setLimits({ mpFoodMaxQuantity: 20, mpFoodMaxTotalCents: 50_000 }));
+    // 前面的用例关过扫码点餐：这里自己打开、勾上柠檬茶
+    expect((await saveRules(true, ['宫保鸡丁', '柠檬茶', '玫瑰花茶'])).status).toBe(200);
+    const a = await member('演示·点餐上限');
+    await checkIn(a.id);
+    const code = async (r: Promise<{ statusCode: number; json: () => { error: { code: string } } }>) => {
+      const x = await r;
+      return [x.statusCode, x.json().error.code];
+    };
+    const tea = (quantity: number) => [{ itemId: item['柠檬茶']!, quantity }];
+    // 调大到 30 份：菜单写 30，25 份能下
+    await setLimits({ mpFoodMaxQuantity: 30 });
+    expect((await menu(a.openid)).limits).toEqual({ maxQuantity: 30, maxTotal: 50_000 });
+    const big = await order(a.openid, tea(25));
+    expect(big.statusCode, big.body).toBe(201);
+    // 调小到 10 份：15 份不让下
+    await setLimits({ mpFoodMaxQuantity: 10 });
+    expect((await menu(a.openid)).limits.maxQuantity).toBe(10);
+    expect(await code(order(a.openid, tea(15)))).toEqual([422, 'MP_ORDER_LIMIT']);
+    // 金额调到 ¥30：正好 ¥30 能下，再多一份不行
+    await setLimits({ mpFoodMaxQuantity: 20, mpFoodMaxTotalCents: 3000 });
+    expect((await menu(a.openid)).limits).toEqual({ maxQuantity: 20, maxTotal: 3000 });
+    const edge = await order(a.openid, tea(2));
+    expect(edge.statusCode, edge.body).toBe(201);
+    expect(await code(order(a.openid, tea(3)))).toEqual([422, 'MP_ORDER_LIMIT']);
+    // 格式上只挡离谱的
+    expect(await code(order(a.openid, tea(201)))).toEqual([400, 'BAD_REQUEST']);
   });
 });

@@ -451,6 +451,10 @@ describe('扫码点餐（第三期 3c）', () => {
     expect(o.json()).toMatchObject({ tagCode: 'GF01', deliverTo: 'G1', total: 3000, lines: [{ name: '网关柠檬茶', quantity: 2, amount: 3000, note: '少冰' }] });
     expect((await authed(gw, t, 'POST', '/v1/food/orders', body)).statusCode).toBe(200);
     expect((await authed(gw, t, 'POST', '/v1/food/orders', { ...body, items: [] })).statusCode).toBe(400);
+    // 一单最多几份：网关只挡离谱的（200 份以上），真正的上限由门店系统按后台的设置核对（N1，默认 20 份）
+    const over = await authed(gw, t, 'POST', '/v1/food/orders', { ...body, clientKey: randomUUID(), items: [{ itemId, quantity: 21 }], expectedTotal: 31_500 });
+    expect([over.statusCode, over.json().error.code]).toEqual([422, 'MP_ORDER_LIMIT']);
+    expect((await authed(gw, t, 'POST', '/v1/food/orders', { ...body, clientKey: randomUUID(), items: [{ itemId, quantity: 201 }] })).statusCode).toBe(400);
     const ab = await authed(gw, t, 'POST', '/v1/food/orders/abandon', { clientKey });
     expect(ab.json()).toMatchObject({ status: 'ordered', ordered: { total: 3000 } });
     const bill = await authed(gw, t, 'GET', '/v1/food/bill');

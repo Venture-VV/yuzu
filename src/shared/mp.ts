@@ -1012,6 +1012,12 @@ export const MP_FOOD_RULES_KEY = 'mp_food_rules';
 export const MP_FOOD_MAX_ITEMS = 300;
 /** 桌码：71 + 桌台编号（6 位）+ 签名（10 位），共 18 位数字；与会员码（8、9 开头，16、19 位）、手机号（11 位）不会混 */
 export const MP_TABLE_CODE = /^71\d{16}$/;
+/**
+ * 扫码点餐下单请求的格式上限：一行最多几份、一单最多几行，只挡离谱的请求（门店系统与网关都用）。
+ * 一单真正最多几份、多少钱在后台「经营规则 → 可调的数值」里改（N1，主线 8.0.7，默认 20 份、¥500），
+ * 下单时由门店系统按设置核对（MP_ORDER_LIMIT）。这个数与那里能调到的最大份数相同（TUNABLE_LIMITS，用例核对）
+ */
+export const MP_FOOD_REQUEST_MAX_QUANTITY = 200;
 /** 一道菜的口味备注最多几个字（与主线的点单一样） */
 export const MP_FOOD_NOTE_MAX = 40;
 
@@ -1044,7 +1050,7 @@ export interface MpFoodMenu {
   table: { code: string; name: string } | null;
   tableNotice: string | null;
   dishes: MpFoodDish[];
-  /** 一单的上限：份数、金额（分），MP33 */
+  /** 一单的上限：份数、金额（分），MP33；按后台「经营规则 → 可调的数值」的设置给（N1，主线 8.0.7） */
   limits: { maxQuantity: number; maxTotal: number };
 }
 

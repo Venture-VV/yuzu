@@ -11,10 +11,10 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import { MP_FOOD_ORDER_LIMITS } from '@shared/dining';
 import {
   MP_FOOD_MAX_ITEMS,
   MP_FOOD_NOTE_MAX,
+  MP_FOOD_REQUEST_MAX_QUANTITY,
   MP_FOOD_RULES_KEY,
   MP_TABLE_CODE,
   type MpFoodAbandonResult,
@@ -35,6 +35,7 @@ import { setTxTimeouts } from '../../lib/tx';
 import { parse } from '../../lib/validate';
 import { diningMenu } from '../dining';
 import { mpDiningTables, mpOpenBill, orderFoodFromMp } from '../mp-entries';
+import { loadSettings } from '../settings';
 import { bindingStateOf, lockOpenidShared } from './member';
 import { mpToday } from './public';
 import { loadFoodRules } from './rules';
@@ -172,8 +173,9 @@ const MenuQuery = z.object({ table: z.string().max(40).optional() });
 
 export async function foodMenu(deps: Deps, openid: string, query: unknown): Promise<MpFoodMenu> {
   const { table: tableCode } = parse(MenuQuery, query);
-  const [rules, state, menu] = await Promise.all([loadFoodRules(deps.sql), bindingStateOf(deps.sql, openid), diningMenu(deps.sql, deps)]);
-  const limits = { maxQuantity: MP_FOOD_ORDER_LIMITS.maxQuantity, maxTotal: MP_FOOD_ORDER_LIMITS.maxTotalCents };
+  const [rules, state, menu, settings] = await Promise.all([loadFoodRules(deps.sql), bindingStateOf(deps.sql, openid), diningMenu(deps.sql, deps), loadSettings(deps.sql)]);
+  // 一单最多几份、多少钱：按后台「经营规则 → 可调的数值」（N1，主线 8.0.7）；下单时门店系统照同一份设置核对
+  const limits = { maxQuantity: settings.mpFoodMaxQuantity, maxTotal: settings.mpFoodMaxTotalCents };
   const open = rules.enabled && menu.rules.enabled;
   if (!open) {
     return { open: false, canOrder: false, notice: '扫码点餐还没开放，请服务员点单', bindVersion: state.version, bound: state.binding !== null, tagCode: null, table: null, tableNotice: null, dishes: [], limits };
@@ -214,13 +216,14 @@ const OrderInput = z.object({
     .array(
       z.object({
         itemId: z.number('菜品不对').int('菜品不对').positive('菜品不对'),
-        quantity: z.number('份数不对').int('份数不对').min(1, '份数至少为 1').max(MP_FOOD_ORDER_LIMITS.maxQuantity, `一单最多 ${MP_FOOD_ORDER_LIMITS.maxQuantity} 份`),
+        // 一单真正的上限按设置在下单时核对（MP_ORDER_LIMIT），这里只挡离谱的请求
+        quantity: z.number('份数不对').int('份数不对').min(1, '份数至少为 1').max(MP_FOOD_REQUEST_MAX_QUANTITY, `一单最多 ${MP_FOOD_REQUEST_MAX_QUANTITY} 份`),
         note: z.string().trim().max(MP_FOOD_NOTE_MAX, `口味备注最多 ${MP_FOOD_NOTE_MAX} 字`).optional(),
       }),
       '请选择菜品',
     )
     .min(1, '请至少选一道菜')
-    .max(MP_FOOD_ORDER_LIMITS.maxQuantity, `一单最多 ${MP_FOOD_ORDER_LIMITS.maxQuantity} 份`),
+    .max(MP_FOOD_REQUEST_MAX_QUANTITY, `一单最多 ${MP_FOOD_REQUEST_MAX_QUANTITY} 份`),
   /** 扫到的桌码（没扫不带） */
   table: z.string().regex(MP_TABLE_CODE, '桌码不对，请重新扫桌上的码').optional(),
   /** 小程序上看到的合计（分）：价格刚改过时拒绝（PRICE_CHANGED） */

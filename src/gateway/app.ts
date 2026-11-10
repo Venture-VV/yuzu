@@ -16,7 +16,7 @@
 
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { MP_NOTICE_READ_MAX, MP_RECHARGE_ORDER_NO, MP_TABLE_CODE } from '@shared/mp';
+import { MP_FOOD_REQUEST_MAX_QUANTITY, MP_NOTICE_READ_MAX, MP_RECHARGE_ORDER_NO, MP_TABLE_CODE } from '@shared/mp';
 import type { GatewayConfig } from './config';
 import { ShowCache } from './cache';
 import { RateLimiter } from './ratelimit';
@@ -102,13 +102,14 @@ const FoodOrder = z.object({
     .array(
       z.object({
         itemId: z.number('菜品不对').int('菜品不对').positive('菜品不对'),
-        quantity: z.number('份数不对').int('份数不对').min(1, '份数至少为 1').max(20, '一单最多 20 份'),
+        // 一单真正的上限（后台可调，N1）由门店系统核对，网关只挡离谱的请求
+        quantity: z.number('份数不对').int('份数不对').min(1, '份数至少为 1').max(MP_FOOD_REQUEST_MAX_QUANTITY, `一单最多 ${MP_FOOD_REQUEST_MAX_QUANTITY} 份`),
         note: z.string().max(40, '口味备注最多 40 字').optional(),
       }),
       '请选择菜品',
     )
     .min(1, '请至少选一道菜')
-    .max(20, '一单最多 20 份'),
+    .max(MP_FOOD_REQUEST_MAX_QUANTITY, `一单最多 ${MP_FOOD_REQUEST_MAX_QUANTITY} 份`),
   table: z.string().regex(MP_TABLE_CODE, '桌码不对，请重新扫桌上的码').optional(),
   expectedTotal: z.number('请刷新后再下单').int().nonnegative(),
   bindVersion: z.number('请刷新后再下单').int().min(0),
