@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { NavLink, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BellRing, Minus, Plus, Search, Trash2, Undo2, Users, UtensilsCrossed, X } from 'lucide-react';
+import { BellRing, Minus, PencilLine, Plus, Search, Trash2, Undo2, Users, UtensilsCrossed, X } from 'lucide-react';
 import { KITCHEN_STATUS_LABELS, MAX_DISH_NOTE, type DiningGuest, type KitchenStatus, type MenuDish, type PendingDish, type TableSessionDetail } from '@shared/dining';
 import { ZONE_LABELS } from '@shared/frontdesk';
 import { api, errorMessage } from '../../lib/api';
@@ -17,6 +17,7 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, SectionTitle, Segmented, Skeleton, Spinner } from '../../components/ui';
 import { PendingPanel, useFrontdeskOp } from '../frontdesk/pending';
 import { guestKey, useDiningMenu, useTableSession, useTablesBoard } from './queries';
+import { DishVoidDialog } from './DishVoid';
 
 interface CartLine {
   key: string;
@@ -67,7 +68,7 @@ export function OrderTab() {
       : null;
   const [cart, setCart] = useState<CartLine[]>([]);
   const [category, setCategory] = useState('all');
-  const [voiding, setVoiding] = useState<PendingDish | null>(null);
+  const [voiding, setVoiding] = useState<{ dish: PendingDish; mode: 'void' | 'modify' } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const op = useFrontdeskOp<DiningGuest | TableSessionDetail | true>({
     type: mode === 'table' ? 'table_post' : 'bill_post',
@@ -79,16 +80,25 @@ export function OrderTab() {
 
   // 从桌台详情点「点单」、或顶部「结果待确认」的「去处理」进来：直接选好那一桌
   const fromTable = Number(params.get('table')) || null;
+  // 8.0.8（A05）：桌台点单下架时只能挂手牌点单（开着的桌在「桌台账单」里结账、退菜）
+  const tablesOn = menu.data?.rules.tablesEnabled ?? false;
   useEffect(() => {
-    if (!fromTable) return;
-    setMode('table');
-    setTableSession(fromTable);
-    op.clearError();
+    if (!fromTable || !menu.data) return;
+    if (tablesOn) {
+      setMode('table');
+      setTableSession(fromTable);
+      op.clearError();
+    } else {
+      toast({ tone: 'info', title: '桌台点单已下架', body: '所有消费请挂手牌点单；这桌在「桌台账单」里照常结账、退菜' });
+    }
     const next = new URLSearchParams(params);
     next.delete('table');
     setParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromTable]);
+  }, [fromTable, !!menu.data]);
+  useEffect(() => {
+    if (menu.data && !tablesOn && mode === 'table') setMode('tag');
+  }, [menu.data, tablesOn, mode]);
 
   const dishes = useMemo(() => menu.data?.dishes ?? [], [menu.data]);
   const byId = useMemo(() => new Map(dishes.map((d) => [d.id, d])), [dishes]);
@@ -212,17 +222,23 @@ export function OrderTab() {
     <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-5 px-5 py-5 md:px-7 lg:grid-cols-[minmax(0,1fr)_360px]" data-testid="dining-order">
       <div className="min-w-0 space-y-4">
         <Card className="p-4">
-          <Segmented
-            ariaLabel="点给谁"
-            size="sm"
-            value={mode}
-            onChange={switchMode}
-            options={[
-              { value: 'tag', label: '手牌客人' },
-              { value: 'table', label: '桌台' },
-            ]}
-            className="mb-3"
-          />
+          {tablesOn ? (
+            <Segmented
+              ariaLabel="点给谁"
+              size="sm"
+              value={mode}
+              onChange={switchMode}
+              options={[
+                { value: 'tag', label: '手牌客人' },
+                { value: 'table', label: '桌台' },
+              ]}
+              className="mb-3"
+            />
+          ) : (
+            <p className="mb-3 text-[12.5px] text-ink-3" data-testid="dining-tag-only">
+              按手牌点单：所有消费都挂在客人的手牌上（桌台点单已下架）
+            </p>
+          )}
           {mode === 'tag' ? (
             <form
               className="flex flex-wrap items-end gap-3"
@@ -506,7 +522,10 @@ export function OrderTab() {
                           催单
                         </Button>
                       )}
-                      <Button size="sm" variant="ghost" icon={<Undo2 className="size-3.5" />} onClick={() => setVoiding(p)} data-testid={`dining-void-${p.id}`}>
+                      <Button size="sm" variant="ghost" icon={<PencilLine className="size-3.5" />} onClick={() => setVoiding({ dish: p, mode: 'modify' })} data-testid={`dining-modify-${p.id}`}>
+                        改
+                      </Button>
+                      <Button size="sm" variant="ghost" icon={<Undo2 className="size-3.5" />} onClick={() => setVoiding({ dish: p, mode: 'void' })} data-testid={`dining-void-${p.id}`}>
                         退菜
                       </Button>
                     </span>
@@ -518,23 +537,21 @@ export function OrderTab() {
         )}
       </div>
 
-      <ReasonDialog
-        open={!!voiding}
-        title={voiding ? `退菜 · ${voiding.name} × ${voiding.quantity}` : '退菜'}
-        description={
-          voiding
-            ? `${voiding.status === 'done' ? '这道菜已经出餐了。' : ''}退菜就是作废这条挂账（留痕，不收这道菜的钱），厨房屏上显示「已退」${voiding.status === 'queued' ? '' : '，请当面告诉厨房'}；估清的菜按原份数加回。`
-            : undefined
-        }
-        confirmLabel="确认退菜"
-        danger
-        busy={!!voiding && busy === `void-${voiding.id}`}
+      <DishVoidDialog
+        dish={voiding ? { billLineId: voiding.dish.billLineId, name: voiding.dish.name, quantity: voiding.dish.quantity, amount: voiding.dish.amount, postedBy: voiding.dish.postedBy, postedAt: voiding.dish.postedAt, served: voiding.dish.status === 'done' } : null}
+        mode={voiding?.mode ?? 'void'}
+        // 桌台的明细在桌台账单上，退菜走桌台的接口；手牌客人的照旧走前台作废
+        url={voiding ? (t ? `/api/dining/tables/lines/${voiding.dish.billLineId}/void` : `/api/frontdesk/lines/${voiding.dish.billLineId}/void`) : ''}
         onClose={() => setVoiding(null)}
-        onConfirm={(reason) => {
-          const p = voiding!;
-          // 桌台的明细在桌台账单上，退菜走桌台的接口；手牌客人的照旧走前台作废
-          const url = t ? `/api/dining/tables/lines/${p.billLineId}/void` : `/api/frontdesk/lines/${p.billLineId}/void`;
-          void run(`void-${p.id}`, () => api.post(url, { reason }), `${p.name} 已退`).then((done) => done && setVoiding(null));
+        onDone={() => {
+          const v = voiding!;
+          setVoiding(null);
+          refresh();
+          if (v.mode === 'modify') {
+            // 改单（8.0.8，B02）：退掉以后放回购物车，改数量或换菜再下单
+            setCart((c) => [...c, { key: uuid(), dishId: v.dish.itemId, quantity: v.dish.quantity, note: v.dish.note }]);
+            toast({ tone: 'success', title: `${v.dish.name} 已退，放回了购物车`, body: '改好数量或换菜后点「下单」' });
+          } else toast({ tone: 'success', title: `${v.dish.name} 已退` });
         }}
       />
     </div>

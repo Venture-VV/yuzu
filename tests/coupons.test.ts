@@ -364,7 +364,7 @@ describe('结账用券', () => {
   });
 
   it('桌台结账输入无记名券码：核对能抵多少、结账用掉；对账包 10-券.csv 只显示券码后 4 位', async () => {
-    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/rules', { enabled: true })).status).toBe(200);
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/rules', { enabled: true, tablesEnabled: true })).status).toBe(200);
     const st = await api(ctx.app, ctx.owner, 'POST', '/api/admin/dining/stations', { name: '券热菜' });
     expect(st.status, JSON.stringify(st.body)).toBe(200);
     const stationId = st.body.stations.find((s: { name: string }) => s.name === '券热菜').id;

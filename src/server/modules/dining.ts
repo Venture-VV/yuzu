@@ -8,7 +8,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { DEFAULT_DINING_RULES, KITCHEN_STATUSES, MAX_STATION_NAME, type DiningAdmin, type DiningGuest, type DiningMenu, type DiningRules, type KitchenBoard, type KitchenItem, type KitchenStation, type KitchenStatus, type MenuDish } from '@shared/dining';
+import { DEFAULT_DINING_RULES, KITCHEN_STATUSES, MAX_STATION_NAME, MAX_VOID_FREE_CENTS, type DiningAdmin, type DiningGuest, type DiningMenu, type DiningRules, type KitchenBoard, type KitchenItem, type KitchenStation, type KitchenStatus, type MenuDish } from '@shared/dining';
 import { defaultTier, type TierPrice } from '@shared/catalog';
 import { can } from '@shared/permissions';
 import type { Db, Tx } from '../db';
@@ -210,8 +210,8 @@ export async function diningGuestOf(db: Db, visitId: number): Promise<DiningGues
     WHERE v.id = ${visitId}`;
   if (!v) throw notFound('来访不存在');
   const pending = await db<DiningGuest['pending']>`
-    SELECT k.id, k.bill_line_id, i.name, k.quantity, k.note, k.status, k.rush_count, k.created_at
-    FROM kitchen_items k JOIN service_items i ON i.id = k.item_id
+    SELECT k.id, k.bill_line_id, k.item_id, i.name, k.quantity, k.note, k.status, k.rush_count, k.created_at, l.amount, l.posted_by, l.posted_at
+    FROM kitchen_items k JOIN service_items i ON i.id = k.item_id JOIN bill_lines l ON l.id = k.bill_line_id
     WHERE k.visit_id = ${v.visitId} AND k.status IN ('queued', 'cooking', 'done') ORDER BY k.id`;
   return { visitId: v.visitId, tagCode: v.tagCode, zone: v.zone, guest: guestName(v.memberName, v.guestLabel), pending };
 }
@@ -328,6 +328,9 @@ const RulesInput = z.object({
   enabled: z.boolean(),
   trackServed: z.boolean(),
   warnMinutes: z.number('分钟数必须是整数').int('分钟数必须是整数').min(1, '至少 1 分钟').max(180, '最多 180 分钟'),
+  // 8.0.8：桌台点单开关（A05）、小额退菜上限（B02）
+  tablesEnabled: z.boolean(),
+  voidFreeCents: z.number('金额必须是整数（分）').int('金额必须是整数（分）').min(0, '不能小于 0').max(MAX_VOID_FREE_CENTS, `最多 ¥${MAX_VOID_FREE_CENTS / 100}`),
 });
 const StationInput = z.object({
   name: z.string().trim().min(1, '请填写档口名称').max(MAX_STATION_NAME, `档口名称最多 ${MAX_STATION_NAME} 字`),

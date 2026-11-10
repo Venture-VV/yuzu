@@ -32,16 +32,18 @@ import {
   type TicketGrantItem,
   type VipGrantTag,
   type VipTagScope,
+  type LineVoidScope,
 } from '@shared/grants';
 import { formatYuan } from '@shared/money';
 import { can, type Duty, type Permission, type Role } from '@shared/permissions';
 import type { Db, Tx } from '../db';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
-import { AppError, conflict, forbidden, unprocessable } from '../lib/errors';
+import { AppError, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { parse, positiveCents } from '../lib/validate';
 import { loadVipLockerRules } from '../modules/vip-lockers';
 import { loadSettings } from '../modules/settings';
+import { loadDiningRules } from '../modules/dining';
 import { guard } from './guard';
 import { checkLock, clearFailures, recordFailure } from './lockout';
 import { verifyPassword } from './password';
@@ -91,6 +93,11 @@ const MemberPhoneScopeInput = z.object({
   phone: z.string('请填写新手机号').trim().regex(/^1\d{10}$/, '手机号应为 11 位数字'),
 });
 
+const LineVoidScopeInput = z.object({
+  lineId: z.number().int().positive('请说明授权退哪一道菜'),
+  reason: z.string('请填写退菜原因').trim().min(2, '请填写退菜原因（至少 2 个字）').max(200, '原因最多 200 字'),
+});
+
 const TicketScopeInput = z.object({
   items: z
     .array(z.object({ tagCode, ticketTypeId: z.number().int().positive('请选择票种') }), '请说明授权哪张手牌改哪个票种')
@@ -107,6 +114,7 @@ const PURPOSE_RULES: Record<GrantPurpose, { approver: Permission; approverText: 
   ticket_discount: { approver: 'auth.discount', approverText: '降低票种或免票，请值班经理、店总或店主授权' },
   member_refund: { approver: 'auth.memberRefund', approverText: '退储值，请店总或店主授权' },
   member_phone: { approver: 'auth.memberPhone', approverText: '改会员手机号，请值班经理、店总或店主授权' },
+  line_void: { approver: 'frontdesk.correct', approverText: '退超过小额上限的菜，请值班经理、店总或店主授权' },
 };
 const KIND_PERMISSION: Record<OverLimitScope['kind'], Permission> = { recharge: 'recharge.create', consume: 'consume.create' };
 const KIND_LABEL: Record<OverLimitScope['kind'], string> = { recharge: '充值', consume: '消费' };
@@ -119,7 +127,7 @@ export function registerGrantRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/auth/authorize', { preHandler: guard() }, async (req): Promise<IssuedGrant> => {
     const input = parse(Credentials, req.body);
     // 先核对申请人能不能办这项业务、这项授权现在需不需要，再核对授权人的密码
-    let scope: VipTagScope | OverLimitScope | DiscountScope | TicketDiscountScope | MemberRefundScope | MemberPhoneScope;
+    let scope: VipTagScope | OverLimitScope | DiscountScope | TicketDiscountScope | MemberRefundScope | MemberPhoneScope | LineVoidScope;
     const rawScope = (req.body as { scope?: unknown }).scope;
     if (input.purpose === 'vip_tag') {
       if (!can(req.actor, 'frontdesk.operate')) throw forbidden();
@@ -139,6 +147,19 @@ export function registerGrantRoutes(app: FastifyInstance, deps: Deps) {
     } else if (input.purpose === 'member_refund') {
       if (!can(req.actor, 'member.refund')) throw forbidden();
       scope = parse(MemberRefundScopeInput, rawScope);
+    } else if (input.purpose === 'line_void') {
+      // 退大额的菜（8.0.8，B02）：授权绑定那一条明细、此刻的金额与原因；自己能更正的、小额的不用授权
+      if (!can(req.actor, 'frontdesk.operate') && !can(req.actor, 'dining.order')) throw forbidden();
+      if (can(req.actor, 'frontdesk.correct')) throw conflict('GRANT_NOT_NEEDED', '你的岗位可以直接退，不需要授权');
+      const v = parse(LineVoidScopeInput, rawScope);
+      const [line] = await sql<{ name: string; amount: number; status: string; source: string }[]>`SELECT name, amount, status, source FROM bill_lines WHERE id = ${v.lineId}`;
+      if (!line) throw notFound('这道菜不存在');
+      if (line.status !== 'active') throw conflict('ALREADY_VOIDED', `「${line.name}」已经退了`);
+      const dining = await loadDiningRules(sql);
+      if (line.source === 'dining' && dining.voidFreeCents > 0 && Number(line.amount) <= dining.voidFreeCents) {
+        throw conflict('GRANT_NOT_NEEDED', `「${line.name}」${formatYuan(Number(line.amount))} 没有超过小额退菜上限 ${formatYuan(dining.voidFreeCents)}，可以直接退`);
+      }
+      scope = { lineId: v.lineId, amount: Number(line.amount), name: line.name, reason: v.reason };
     } else if (input.purpose === 'member_phone') {
       if (!can(req.actor, 'member.write')) throw forbidden();
       // 自己能改手机号的不用授权
@@ -239,6 +260,23 @@ async function lockGrant(tx: Tx, grantId: string, purpose: GrantPurpose, actor: 
     throw unprocessable('GRANT_INVALID', '优惠 / 免单不能由收银的本人授权，请另一位值班经理、店总或店主重新授权');
   }
   return g;
+}
+
+/**
+ * 在退菜的事务里核销一次退大额菜的授权（8.0.8，B02；明细锁之后加锁）：授权必须是这一条、这个金额（改了要重新授权），
+ * 返回授权人与授权时的原因
+ */
+export async function consumeLineVoidGrant(
+  tx: Tx,
+  opts: { grantId: string; actor: Actor; lineId: number; amount: number; usedRef: string },
+): Promise<{ approverId: number; approverName: string; reason: string }> {
+  const g = await lockGrant(tx, opts.grantId, 'line_void', opts.actor);
+  const s = g.scope as LineVoidScope;
+  if (s.lineId !== opts.lineId || s.amount !== opts.amount) {
+    throw unprocessable('GRANT_SCOPE', `授权的是「${s.name}」${formatYuan(s.amount)}，与要退的这一道不一致，请按当前内容重新授权`);
+  }
+  await tx`UPDATE auth_grants SET used_at = now(), used_ref = ${opts.usedRef} WHERE id = ${opts.grantId}`;
+  return { approverId: g.approvedBy, approverName: g.approverName, reason: s.reason };
 }
 
 /**

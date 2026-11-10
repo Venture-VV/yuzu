@@ -69,7 +69,8 @@ async function prepare(page: Page) {
   }
   const items = DISHES.map((d) => ({ id: admin.items.find((i) => i.name === d.name)!.id, stationId: admin.stations.find((s) => s.name === d.station)!.id }));
   await send(page, 'put', '/api/admin/dining/items', { items });
-  await send(page, 'put', '/api/admin/dining/rules', { enabled: true, trackServed: true, warnMinutes: 15 });
+  // 8.0.8（A05）起桌台点单默认下架：这组用例测的是桌台，先打开
+  await send(page, 'put', '/api/admin/dining/rules', { enabled: true, trackServed: true, warnMinutes: 15, tablesEnabled: true });
 
   // 桌台：第一张在后台页面上建（还没有时），其余用接口；停用的重新启用
   let tables = await getJson<TablesAdmin>(page, '/api/admin/dining/tables');
@@ -108,7 +109,7 @@ async function cleanup(page: Page) {
     for (const l of d.lines.filter((x) => x.status === 'active')) await send(page, 'post', `/api/dining/tables/lines/${l.id}/void`, { reason: 'E2E：收尾' });
     await send(page, 'post', `/api/dining/tables/sessions/${s.id}/cancel`, { reason: 'E2E：收尾' });
   }
-  const res = await page.request.put('/api/admin/dining/rules', { data: { enabled: false } });
+  const res = await page.request.put('/api/admin/dining/rules', { data: { enabled: false, tablesEnabled: false } });
   expect(res.ok(), await res.text()).toBe(true);
 }
 

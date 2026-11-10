@@ -55,7 +55,8 @@ beforeAll(async () => {
   expect(
     (await api(ctx.app, boss, 'PUT', '/api/admin/dining/items', { items: [{ id: item['宫保鸡丁'], stationId: station['热菜'] }, { id: item['柠檬茶'], stationId: station['水吧'] }] })).status,
   ).toBe(200);
-  expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/rules', { enabled: true })).status).toBe(200);
+  // 8.0.8（A05）起桌台点单默认下架：这组用例测的是桌台，先打开
+  expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/rules', { enabled: true, tablesEnabled: true })).status).toBe(200);
 });
 afterAll(async () => ctx.close());
 
