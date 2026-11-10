@@ -63,6 +63,12 @@ describe.skipIf(!hasCompose && !process.env.CI)('compose.yaml：已有实例的 
     expect(Object.fromEntries(keys.map((k) => [k, on[k]]))).toEqual(set);
   });
 
+  it('企业微信每周一推（8.0.7）的机器人地址传进容器；不设时为空、不推', () => {
+    expect(app({}).environment.ERP_WECOM_WEBHOOK ?? '').toBe('');
+    const url = 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=compose-check';
+    expect(app({ ERP_WECOM_WEBHOOK: url }).environment.ERP_WECOM_WEBHOOK).toBe(url);
+  });
+
   it('COOKIE_SECURE、TRUST_PROXY 传进容器；不设时不加 Secure、不信任代理', () => {
     const off = app({}).environment;
     expect([off.COOKIE_SECURE, off.TRUST_PROXY ?? '']).toEqual(['false', '']);

@@ -13,6 +13,8 @@ import { processGiftOuts } from './modules/gift-outs';
 import { sendPendingSms } from './modules/sms';
 import { issueBirthdayCoupons } from './modules/coupons';
 import { runMembershipDaily } from './modules/membership';
+import { runWecomWeekly } from './modules/wecom';
+import { WECOM_MAX_ATTEMPTS } from '@shared/wecom';
 
 export interface JobLog {
   info: (msg: string) => void;
@@ -103,5 +105,13 @@ export async function runMinuteJobs(
     if (n > 0) log.info(`次卡：${n} 张过期作废`);
   } catch (error) {
     log.error('次卡的过期处理失败，下一分钟重试', error);
+  }
+  // 企业微信每周一推（8.0.7）：周一 9:00 以后、开关打开、.env 配了机器人地址时推这一周的（同一周只推一次）
+  try {
+    const r = await runWecomWeekly({ sql, config }, now);
+    if (r?.ok) log.info('企业微信：这一周的 ERP 提醒已推送');
+    else if (r) log.error(`企业微信每周一推没发出去（隔 5 分钟再试，最多 ${WECOM_MAX_ATTEMPTS} 次）：${r.error}`);
+  } catch (error) {
+    log.error('企业微信每周一推失败，下一分钟重试', error);
   }
 }

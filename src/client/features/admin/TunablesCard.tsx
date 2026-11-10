@@ -3,10 +3,12 @@
 // 已经办完的单据不回头改。各页面上的提示文字随会话刷新。
 
 import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { centsToInput, parseYuan } from '@shared/money';
 import { BOOL_TUNABLES, PRINT_MODE_LABELS, PRINT_MODES, TUNABLE_LIMITS, type BoolTunable, type IntTunable, type PrintMode, type Tunables } from '@shared/tunables';
+import type { WecomStatus, WecomTestResult } from '@shared/wecom';
 import { api, errorMessage } from '../../lib/api';
+import { formatDateTime } from '../../lib/utils';
 import { qk, useSettings } from '../../lib/queries';
 import { useToast } from '../../components/Toast';
 import { Button, Card, Field, Input, MoneyInput, Notice, PendingBadge, SectionTitle, Segmented, Skeleton, Textarea } from '../../components/ui';
@@ -209,6 +211,7 @@ export function TunablesCard() {
         {toggle('采购单只能给已准入的供应商（关着时待准入、暂停的只提醒，不拦）', draft.supplierApprovedOnly, (v) => set({ supplierApprovedOnly: v }), 'tun-supplierApprovedOnly')}
         {toggle('合同最近一次验收不合格时挂起付款（新的付款申请、按申请登记付款、合同付款都拒绝，重新验收合格解除）', draft.acceptanceHoldsPayment, (v) => set({ acceptanceHoldsPayment: v }), 'tun-acceptanceHoldsPayment')}
         {toggle('每周一 9:00 把本周应付、待审批、快到期的、逾期应收推到企业微信群（机器人地址在服务器 .env 的 ERP_WECOM_WEBHOOK）', draft.wecomWeeklyPush, (v) => set({ wecomWeeklyPush: v }), 'tun-wecomWeeklyPush')}
+        <WecomRow />
         <Field label="部门耗用的用途（每行一个，最多 12 个字）" htmlFor="tun-consumptionPurposes" hint="部门小仓登记耗用时从这里选（V6）" className="max-w-md">
           <Textarea id="tun-consumptionPurposes" rows={6} value={draft.consumptionPurposes} onChange={(e) => set({ consumptionPurposes: e.target.value })} data-testid="tun-consumptionPurposes" />
         </Field>
@@ -216,5 +219,53 @@ export function TunablesCard() {
 
       {error && <Notice tone="error" title={error} />}
     </Card>
+  );
+}
+
+/** 企业微信推送（V19、V20）：机器人地址配没配、最近几次推送的结果、「发一条试试」 */
+function WecomRow() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [sending, setSending] = useState(false);
+  const status = useQuery({ queryKey: ['settings', 'wecom'], queryFn: () => api.get<WecomStatus>('/api/settings/wecom') });
+  const s = status.data;
+  if (!s) return null;
+  const last = s.recent[0];
+  const test = async () => {
+    setSending(true);
+    try {
+      const r = await api.post<WecomTestResult>('/api/settings/wecom/test', {});
+      if (r.ok) toast({ tone: 'success', title: '已推送一条试发消息', body: '到企业微信群里看看收到没有' });
+      else toast({ tone: 'error', title: '没发出去', body: r.error ?? '' });
+    } catch (e) {
+      toast({ tone: 'error', title: '没发出去', body: errorMessage(e) });
+    } finally {
+      setSending(false);
+      await qc.invalidateQueries({ queryKey: ['settings', 'wecom'] });
+    }
+  };
+  return (
+    <div className="ml-6 space-y-1.5 text-[12.5px] text-ink-3" data-testid="wecom-row">
+      <p>
+        机器人地址：
+        {s.configured ? (
+          <span className="font-semibold text-ink-2">已配置</span>
+        ) : s.invalid ? (
+          <span className="font-semibold text-clay">格式不对（要企业微信群机器人的 https 地址），改好 .env 以后重启应用</span>
+        ) : (
+          <span className="font-semibold text-ink-2">没配置（服务器 .env 的 ERP_WECOM_WEBHOOK，配好以后重启应用；地址相当于密码，不发到群里、不进 Git）</span>
+        )}
+        {s.configured && !s.enabled && '；开关关着，每周一不推'}
+      </p>
+      {last && (
+        <p data-testid="wecom-last">
+          最近一次：{last.kind === 'test' ? `试发（${last.createdByName ?? ''}）` : `每周一推（${last.periodKey}）`} · {formatDateTime(last.finishedAt ?? last.createdAt)} ·{' '}
+          {last.status === 'sent' ? '已发出' : last.status === 'sending' ? '正在发' : `没发出去${last.error ? `：${last.error}` : ''}`}
+        </p>
+      )}
+      <Button size="sm" variant="secondary" disabled={!s.configured} loading={sending} onClick={() => void test()} data-testid="wecom-test">
+        发一条试试
+      </Button>
+    </div>
   );
 }
