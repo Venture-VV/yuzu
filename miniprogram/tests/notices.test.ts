@@ -5,7 +5,10 @@ import type { MpNotice } from '../../src/shared/mp';
 
 type Reply = { status: number; data: unknown } | 'fail';
 
-function installWx(routes: Record<string, Reply | ((data: unknown) => Reply)>, opts: { storageBroken?: boolean; storage?: Record<string, unknown> } = {}) {
+function installWx(
+  routes: Record<string, Reply | ((data: unknown) => Reply)>,
+  opts: { storageBroken?: boolean; removeBroken?: boolean; storage?: Record<string, unknown> } = {},
+) {
   const storage: Record<string, unknown> = opts.storage ?? {};
   const sent: { path: string; data: unknown }[] = [];
   vi.stubGlobal('wx', {
@@ -16,6 +19,7 @@ function installWx(routes: Record<string, Reply | ((data: unknown) => Reply)>, o
       storage[k] = JSON.parse(JSON.stringify(v));
     },
     removeStorageSync: (k: string) => {
+      if (opts.removeBroken && k === 'tq_notice_read_pending') throw new Error('removeStorageSync:fail');
       delete storage[k];
     },
     login: (o: { success: (r: { code: string }) => void }) => o.success({ code: 'wxcode' }),
@@ -135,6 +139,23 @@ describe('记已读', () => {
     const m2 = await load();
     await m2.markRead([30, 31]);
     expect(broken.sent).toEqual([{ path: '/v1/notices/read', data: { ids: [30, 31] } }]);
+  });
+
+  it('手机上的记录改不了（存储写坏了）：补发每批只发一次，不把同一批一直重发，接着照常问提醒（Codex 审查 53df24f 的 P2）', async () => {
+    const stored = Array.from({ length: 21 }, (_, i) => i + 1);
+    for (const opts of [{ storageBroken: true }, { storageBroken: true, removeBroken: true }]) {
+      const { sent, storage } = installWx({ '/v1/notices/read': READ, '/v1/notices': LIST(N(30)) }, { ...opts, storage: { tq_notice_read_pending: stored.slice() } });
+      const m = await load();
+      expect((await m.loadNotices())!.map((n) => n.id)).toEqual([30]);
+      expect(sent.map((x) => [x.path, x.path === '/v1/notices/read' ? (x.data as { ids: number[] }).ids.length : 0])).toEqual([
+        ['/v1/notices/read', 20],
+        ['/v1/notices/read', 1],
+        ['/v1/notices', 0],
+      ]);
+      // 改不了、删不掉的照旧留着（下次打开再补一次，还是每批一次）；最后一批发完能整个删掉的就删了
+      if (opts.removeBroken) expect(storage.tq_notice_read_pending).toEqual(stored);
+      else expect(storage.tq_notice_read_pending).toBeUndefined();
+    }
   });
 
   it('补发与这一次同时：这一次的编号也发出去，不会漏', async () => {

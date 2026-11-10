@@ -54,16 +54,23 @@ function settled(e: unknown): boolean {
 
 let flushing: Promise<void> | null = null;
 
+/**
+ * 按开始时的一份快照发，每批只发一次：手机上的记录改不了（存储写坏了）时，下一批不靠「记录变短了」往前走，
+ * 不会把同一批一直重发、直到被限频（Codex 审查 53df24f 的 P2）。这一次没发完、没删掉的，下次打开首页再补
+ */
 async function flushOnce(): Promise<void> {
-  for (;;) {
-    const chunk = readPending().slice(0, PER_REQUEST);
-    if (!chunk.length) return;
+  const snapshot = readPending();
+  // 这一次已经发完的：每批之后把它们都从记录里去掉（前一批没删掉的，这一批再删一次）
+  let done: number[] = [];
+  for (let i = 0; i < snapshot.length; i += PER_REQUEST) {
+    const chunk = snapshot.slice(i, i + PER_REQUEST);
     try {
       await member<MpNoticeRead>('POST', '/v1/notices/read', { ids: chunk });
     } catch (e) {
       if (!settled(e)) return;
     }
-    writePending(readPending().filter((id) => chunk.indexOf(id) < 0));
+    done = done.concat(chunk);
+    writePending(readPending().filter((id) => done.indexOf(id) < 0));
   }
 }
 
