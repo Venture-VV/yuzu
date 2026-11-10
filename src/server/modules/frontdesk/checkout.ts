@@ -71,6 +71,7 @@ import { memberDiscountPreview, settleMemberDiscount, type MemberDiscountEntry }
 import { memberTicketExtensions } from '../ticket-extensions';
 import { countCardOptions, redeemCountCards, returnCheckoutCountCards } from '../count-cards';
 import { lockPlatformCode, redemptionOfCode } from '../platform-redemptions';
+import { chargeOnAccount, voidChargesOfCheckout } from '../receivables';
 import { MAX_COUNT_CARD_USES, MAX_COUNT_CARDS_PER_CHECKOUT } from '@shared/count-cards';
 
 // ───────────────────────── 输入 ─────────────────────────
@@ -130,7 +131,16 @@ const CountCardPayment = z.object({
   uses: z.number('次数要是整数').int('次数要是整数').min(1, '至少抵 1 次').max(MAX_COUNT_CARD_USES, `一次最多抵 ${MAX_COUNT_CARD_USES} 次`),
   amount: positiveCents('次卡抵扣'),
 });
-export const Payment = z.union([CashPayment, WalletPayment, CouponPayment, DiscountPayment, StoreCouponPayment, MemberDiscountPayment, CountCardPayment], '收款方式不正确');
+/**
+ * 挂账（8.0.7 A3，V11、V12）：挂到协议单位、写签单人；要岗位权限「挂账」。算营业额、不算实收；额度在协议单位的锁里核对
+ */
+const OnAccountPayment = z.object({
+  method: z.literal('on_account'),
+  accountId: z.number('请选择协议单位').int().positive('请选择协议单位'),
+  signer: z.string('请写签单人').trim().min(1, '请写签单人').max(20, '签单人最多 20 个字'),
+  amount: positiveCents('挂账金额'),
+});
+export const Payment = z.union([CashPayment, WalletPayment, CouponPayment, DiscountPayment, StoreCouponPayment, MemberDiscountPayment, CountCardPayment, OnAccountPayment], '收款方式不正确');
 
 export const CheckoutInput = z.object({
   clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
@@ -332,7 +342,11 @@ export function splitPayments(payments: CheckoutPaymentInput[], actor: OpContext
   const storeCoupons = payments.filter((p) => p.method === 'store_coupon');
   const memberDiscounts = payments.filter((p) => p.method === 'member_discount');
   const countCards = payments.filter((p) => p.method === 'count_card');
+  const onAccounts = payments.filter((p) => p.method === 'on_account');
   if (discounts.length > 1) throw badRequest('优惠 / 免单最多登记一笔，请合并金额后重新授权');
+  // 挂账（8.0.7）：一张结账单最多挂一个协议单位、一笔
+  if (onAccounts.length > 1) throw badRequest('一张结账单只能挂一笔账，请合并金额');
+  if (onAccounts.length && !can(actor, 'frontdesk.onAccount')) throw forbidden('当前岗位不能挂账，请值班经理以上结账');
   // 券（v0.7.20）：每张结账单最多 1 张，不与优惠 / 免单同时用
   if (storeCoupons.length > 1) throw badRequest('每张结账单最多用 1 张券');
   if (storeCoupons.length && discounts.length) throw badRequest('券不能和优惠 / 免单同时用，请二选一');
@@ -347,7 +361,7 @@ export function splitPayments(payments: CheckoutPaymentInput[], actor: OpContext
   if (wallets.length && !can(actor, 'consume.create')) throw forbidden('当前岗位不能用会员储值收款');
   if (new Set(wallets.map((w) => w.memberId)).size !== wallets.length) throw badRequest('同一位会员的储值支付请合并为一笔');
   if (new Set(coupons.map((c) => `${c.platform}:${c.code}`)).size !== coupons.length) throw badRequest('同一张团购券不能登记两次');
-  return { wallets, coupons, discounts, storeCoupons, memberDiscounts, countCards };
+  return { wallets, coupons, discounts, storeCoupons, memberDiscounts, countCards, onAccounts };
 }
 
 /** 收款合计必须等于应收（手牌结账与桌台结账共用） */
@@ -480,8 +494,13 @@ export async function recordCheckoutPayments(
       INSERT INTO checkout_payments (checkout_id, method, amount, ref, discount_member_id, benefit_id, benefit_version, discount_rate, coupon_lines)
       VALUES (${a.checkoutId}, 'member_discount', ${d.amount}, ${d.ref}, ${d.memberId}, ${d.benefitId}, ${d.version}, ${d.rate}, ${d.lineIds}::bigint[])`;
   }
+  // 挂账（8.0.7）：在已有的锁（含券、次卡）之后锁协议单位一行，额度在锁里核对
   for (const p of a.payments) {
-    if (p.method === 'wallet' || p.method === 'coupon' || p.method === 'discount' || p.method === 'store_coupon' || p.method === 'member_discount' || p.method === 'count_card') continue;
+    if (p.method !== 'on_account') continue;
+    await chargeOnAccount(tx, { checkoutId: a.checkoutId, accountId: p.accountId, signer: p.signer, amount: p.amount, date: a.date, staffId: a.ctx.actor.id });
+  }
+  for (const p of a.payments) {
+    if (p.method === 'wallet' || p.method === 'coupon' || p.method === 'discount' || p.method === 'store_coupon' || p.method === 'member_discount' || p.method === 'count_card' || p.method === 'on_account') continue;
     await tx`
       INSERT INTO checkout_payments (checkout_id, method, amount, ref)
       VALUES (${a.checkoutId}, ${p.method}, ${p.amount}, ${p.ref})`;
@@ -700,6 +719,8 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
     if (c.status !== 'completed') throw conflict('ALREADY_VOIDED', `结账单 ${c.checkoutNo} 已反结账`);
     // 退款单（v0.7.20）：有生效的退款单的结账单不能反结账（结账单已锁，开退款单要等这里提交）
     await assertNoRefunds(tx, c);
+    // 挂账（8.0.7）：在结账单之后锁这张结账的挂账，已经回款核销过的不能反结账；没核销的作废
+    await voidChargesOfCheckout(tx, c.id, c.checkoutNo, ctx.actor.id, at);
     // 选钱箱只用于退现金（PR #17 复测 P2）：原单没收现金时，扫码等原路退回的提醒记到反结账人自己的班次，
     // 与页面一致要求先开班（R1.2），不能借别人的班次绕过；收款明细只追加不修改，在这里核对即可
     if (refundShiftId !== undefined) {

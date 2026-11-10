@@ -42,6 +42,11 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     // 赠品登记（8.0.1）：返回那条登记
     case 'gift_receipt':
       return d.gift && typeof d.gift === 'object' ? { refId: d.gift.id } : null;
+    // 回款登记（8.0.7）：返回那笔回款；资产建卡：返回建的第一张卡
+    case 'ar_collection':
+      return d.collection && typeof d.collection === 'object' ? { refId: d.collection.id } : null;
+    case 'asset_card':
+      return d.card && typeof d.card === 'object' ? { refId: d.card.id } : null;
     case 'supplier_recon':
     case 'supplier_recon_void':
       return d.reconciliation && typeof d.reconciliation === 'object' ? { refId: d.reconciliation.id } : null;

@@ -4,7 +4,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Banknote, Boxes, ClipboardCheck, ClipboardList, FileSignature, FileText, HandCoins, LayoutGrid, LineChart, Package, ReceiptText, ShoppingCart, SlidersHorizontal, Soup, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, Banknote, Boxes, ClipboardCheck, ClipboardList, FileSignature, FileText, HandCoins, Landmark, LayoutGrid, LineChart, Monitor, Package, ReceiptText, ShoppingCart, SlidersHorizontal, Soup, type LucideIcon } from 'lucide-react';
 import type { ApprovalCounts } from '@shared/approvals';
 import type { ContractExpiryItem } from '@shared/contracts';
 import type { PaymentTodo } from '@shared/payments';
@@ -26,11 +26,13 @@ const ICONS: Record<ErpModuleKey, LucideIcon> = {
   requests: ClipboardList,
   deptStock: Package,
   payables: HandCoins,
+  assets: Monitor,
   approvals: ClipboardCheck,
   contracts: FileSignature,
   payments: Banknote,
   expenses: ReceiptText,
   invoices: FileText,
+  receivables: Landmark,
   revenue: LineChart,
   canteen: Soup,
 };

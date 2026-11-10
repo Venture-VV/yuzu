@@ -16,7 +16,7 @@ import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { conflict, forbidden } from '../lib/errors';
-import { approvalOpRef, benefitUseOpRef, contractOpRef, countCardOpRef, memberCardOpRef, couponOpRef, platformOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isContractOp, isCountCardOp, isApprovalOp, isDeviceOp, isFenced, isMemberOp, isPaymentFlowOp, isPlatformOp, memberOpRef, paymentFlowOpRef, trialOpRef } from '../lib/fences';
+import { erpP2OpRef, isErpP2Op, approvalOpRef, benefitUseOpRef, contractOpRef, countCardOpRef, memberCardOpRef, couponOpRef, platformOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isContractOp, isCountCardOp, isApprovalOp, isDeviceOp, isFenced, isMemberOp, isPaymentFlowOp, isPlatformOp, memberOpRef, paymentFlowOpRef, trialOpRef } from '../lib/fences';
 import { parse } from '../lib/validate';
 import { setTxTimeouts } from '../lib/tx';
 
@@ -88,6 +88,8 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   canteen_reply: ['canteen.manage'],
   request_import: ['request.review'],
   gift_receipt: ['inventory.operate', 'purchase.manage'],
+  ar_collection: ['ar.manage'],
+  asset_card: ['asset.manage'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -136,6 +138,8 @@ const READ: Record<ErpOpType, Permission[]> = {
   canteen_reply: ['canteen.manage'],
   request_import: ['request.review'],
   gift_receipt: ['inventory.read'],
+  ar_collection: ['ar.read'],
+  asset_card: ['asset.read'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {
@@ -192,6 +196,11 @@ export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise
   // 平台核销补录（v0.7.28）：refId 是那笔补登记、那笔打款登记
   if (isPlatformOp(type)) {
     const refId = await platformOpRef(db, key, type);
+    if (refId !== null) return { found: true, abandoned: false, refId };
+  }
+  // 8.0.7 ERP P2：refId 是那笔回款登记、那张资产卡片（一次建几张的是第一张）
+  if (isErpP2Op(type)) {
+    const refId = await erpP2OpRef(db, key, type);
     if (refId !== null) return { found: true, abandoned: false, refId };
   }
   // 会员实体卡（v0.7.28）：refId 是那张卡

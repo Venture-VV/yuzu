@@ -103,6 +103,9 @@ export const FENCED_OPS = [
   // 8.0.1 采购组整改（迁移 093）：集采导入、赠品登记；编号记在 idempotency_keys（ref_id 是那次导入、那条赠品登记）
   'request_import',
   'gift_receipt',
+  // 8.0.7 ERP P2（迁移 101）：回款登记、资产建卡；编号记在各自的行上（client_key）
+  'ar_collection',
+  'asset_card',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -155,6 +158,7 @@ export async function fenceKey(
   if (isApprovalOp(opType) && (await approvalOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   if (isContractOp(opType) && (await contractOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   if (isPaymentFlowOp(opType) && (await paymentFlowOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
+  if (isErpP2Op(opType) && (await erpP2OpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   const rows = await tx`
     INSERT INTO op_fences (key, op_type, staff_id) VALUES (${key}, ${opType}, ${staffId})
     ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;
@@ -306,5 +310,18 @@ export async function platformOpRef(db: Db, key: string, op: PlatformOp): Promis
 /** 会员实体卡（v0.7.28）的发卡、补卡编号记在卡上：查到时返回那张卡的编号 */
 export async function memberCardOpRef(db: Db, key: string): Promise<number | null> {
   const [row] = await db<{ id: number }[]>`SELECT id FROM member_cards WHERE client_key = ${key}`;
+  return row ? Number(row.id) : null;
+}
+
+const ERP_P2_OPS = ['ar_collection', 'asset_card'] as const;
+type ErpP2Op = (typeof ERP_P2_OPS)[number];
+export const isErpP2Op = (op: string): op is ErpP2Op => (ERP_P2_OPS as readonly string[]).includes(op);
+
+/** 8.0.7 ERP P2 的操作编号记在回款登记、资产卡片上：查到时返回那一行的编号 */
+export async function erpP2OpRef(db: Db, key: string, op: ErpP2Op): Promise<number | null> {
+  const [row] =
+    op === 'ar_collection'
+      ? await db<{ id: number }[]>`SELECT id FROM ar_collections WHERE client_key = ${key}`
+      : await db<{ id: number }[]>`SELECT id FROM asset_cards WHERE client_key = ${key} ORDER BY id LIMIT 1`;
   return row ? Number(row.id) : null;
 }

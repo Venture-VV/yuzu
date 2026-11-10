@@ -4,7 +4,7 @@
 
 import type { Permission } from './permissions';
 
-export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'approvals', 'contracts', 'payments', 'expenses', 'invoices', 'revenue', 'canteen'] as const;
+export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'assets', 'approvals', 'contracts', 'payments', 'expenses', 'invoices', 'receivables', 'revenue', 'canteen'] as const;
 export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
 
 export interface ErpModuleDef {
@@ -87,6 +87,17 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     defaultEnabled: true,
     requires: ['inventory'],
   },
+  assets: {
+    label: '资产与易耗',
+    group: '供应链',
+    description: '资产卡片（固定资产、低值易耗）：从收货转资产建卡或手工建卡，调拨、改状态、报废都留记录；打印资产标签，扫码盘点（8.0.7）',
+    path: '/erp/assets',
+    pages: ['/erp/assets'],
+    apis: ['/api/erp/assets'],
+    perms: ['asset.read'],
+    defaultEnabled: true,
+    requires: ['inventory'],
+  },
   approvals: {
     label: '审批中心',
     group: '供应链',
@@ -156,6 +167,17 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     defaultEnabled: true,
     // 开票方可以是供应商档案里的供应商
     requires: ['inventory'],
+  },
+  receivables: {
+    label: '应收与挂账',
+    group: '财务',
+    description: '协议单位与挂账额度，前台结账挂账、回款登记与核销、平台团购回款、账龄与逾期提醒（8.0.7）',
+    path: '/erp/receivables',
+    pages: ['/erp/receivables'],
+    apis: ['/api/erp/receivables'],
+    perms: ['ar.read'],
+    defaultEnabled: true,
+    requires: [],
   },
   revenue: {
     label: '营业数据',
@@ -296,6 +318,9 @@ export const ERP_OP_TYPES = [
   // 8.0.1 采购组整改：集采导入（06）、赠品登记（09）
   'request_import',
   'gift_receipt',
+  // 8.0.7 ERP P2：回款登记（动的是钱）、资产建卡
+  'ar_collection',
+  'asset_card',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -344,6 +369,8 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   canteen_reply: '柚子信箱回信',
   request_import: '集采导入',
   gift_receipt: '赠品登记',
+  ar_collection: '回款登记',
+  asset_card: '资产建卡',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */
