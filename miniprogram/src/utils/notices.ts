@@ -2,10 +2,13 @@
 // 首页显示时问门店系统这位会员今天要看的提醒（收到券、券快到期），有就弹出来；点「知道了」或「看我的券」记已读，以后不再弹。
 //   · 哪位会员、哪天的提醒都由门店系统按这个微信此刻的绑定与门店营业日算；没绑定、门店连不上、会员功能没开时不弹、不提示
 //     （连不上时已经弹着的照旧，不关）；
-//   · 记已读：先记在手机上再发。门店系统回了（记上了；或者明确拒绝，比如已经解绑）就删掉；断网、超时、门店出错时留着，
-//     下次打开首页先补发、补发前不再弹这几条（看过了）。门店系统只记这位会员自己的提醒、同一条只记一次，
-//     所以重提、补发都不会多记，解绑或换绑以后补发的旧编号也记不到别的会员身上；
-//   · 手机上存不了也照样发：只是已读，发不出去最多下次再弹一次。
+//   · 门店系统的回答带着那一刻的绑定状态版本号：首页丢掉比见过的更旧的回答（换绑以前发出去、换绑以后才回来的）；
+//     记已读带看到提醒时的版本号，之后解绑、换绑过的门店系统拒绝（BIND_STALE），旧会员的提醒照旧没读（小程序线测试 29aa0cc 的 P1）；
+//   · 记已读：先记在手机上（编号与版本号）再发。门店系统回了（记上了；或者明确拒绝，比如已经解绑、换绑过）就删掉；
+//     断网、超时、门店出错时留着，下次打开首页先补发、补发前不再弹这几条（看过了）。重提、补发都只记一次；
+//   · 手机上存不了也照样发：只是已读，发不出去最多下次再弹一次；
+//   · 手机上的记录一时读不出来（读存储出错）不当作没有：这一次不补发、不删、不改，下次再补（小程序线测试 29aa0cc 的 P2）；
+//     问提醒时过滤看过的那一次读不出来，这次不弹（算问不到），免得看过的又弹出来（50ee567 的 P2 余项）。
 // 现有的「到期提醒我」（微信订阅消息，3a）是另一套，在 utils/reminders.ts。
 
 import type { MpNotice, MpNoticeRead, MpNotices } from '../../../src/shared/mp';
@@ -29,48 +32,81 @@ export function noticeView(n: MpNotice): NoticeView {
   return { id: n.id, title: n.title, body: n.body, coupon: n.kind === 'coupon_issued' || n.kind === 'coupon_expiring' };
 }
 
-function readPending(): number[] {
+/** 没确认的一条已读：提醒的编号，与看到它时这个微信的绑定状态版本号 */
+interface PendingRead {
+  id: number;
+  v: number;
+}
+type Stored = { ok: true; items: PendingRead[] } | { ok: false };
+
+const isInt = (x: unknown, min: number) => typeof x === 'number' && Math.floor(x) === x && x >= min;
+const same = (a: PendingRead, b: PendingRead) => a.id === b.id && a.v === b.v;
+
+/** 读手机上的记录：读出错是「读不出来」（不是没有）；认不出的条目（例如以前只存编号的）丢掉 */
+function readPending(): Stored {
+  let v: unknown;
   try {
-    const v = wx.getStorageSync(KEY);
-    return Array.isArray(v) ? v.filter((x) => typeof x === 'number' && x > 0 && Math.floor(x) === x) : [];
+    v = wx.getStorageSync(KEY);
   } catch {
-    return [];
+    return { ok: false };
   }
+  const items = Array.isArray(v)
+    ? (v as unknown[]).filter((x): x is PendingRead => !!x && typeof x === 'object' && isInt((x as PendingRead).id, 1) && isInt((x as PendingRead).v, 0))
+    : [];
+  return { ok: true, items };
 }
 
-function writePending(ids: number[]): void {
+/** 只在刚读清楚的记录上改：读不出来时调用方不会走到这里 */
+function writePending(items: PendingRead[]): void {
   try {
-    if (ids.length) wx.setStorageSync(KEY, ids.slice(-KEEP));
+    if (items.length) wx.setStorageSync(KEY, items.slice(-KEEP));
     else wx.removeStorageSync(KEY);
   } catch {
     // 存不了照样发
   }
 }
 
-/** 门店系统回了：记上了，或者明确拒绝（没绑定、编号不对）。连不上、超时、出错、太频繁的还不算 */
+/** 门店系统回了：记上了，或者明确拒绝（没绑定、换绑过、编号不对）。连不上、超时、出错、太频繁的还不算 */
 function settled(e: unknown): boolean {
   return isApiError(e) && e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429;
 }
+
+/** 按版本号分组、每组每批最多 20 条（先来的先发） */
+function batches(items: PendingRead[]): PendingRead[][] {
+  const out: PendingRead[][] = [];
+  const versions: number[] = [];
+  for (const x of items) if (versions.indexOf(x.v) < 0) versions.push(x.v);
+  for (const v of versions) {
+    const group = items.filter((x) => x.v === v);
+    for (let i = 0; i < group.length; i += PER_REQUEST) out.push(group.slice(i, i + PER_REQUEST));
+  }
+  return out;
+}
+
+const send = (batch: PendingRead[]) => member<MpNoticeRead>('POST', '/v1/notices/read', { ids: batch.map((x) => x.id), bindVersion: batch[0]!.v });
 
 let flushing: Promise<void> | null = null;
 
 /**
  * 按开始时的一份快照发，每批只发一次：手机上的记录改不了（存储写坏了）时，下一批不靠「记录变短了」往前走，
- * 不会把同一批一直重发、直到被限频（Codex 审查 53df24f 的 P2）。这一次没发完、没删掉的，下次打开首页再补
+ * 不会把同一批一直重发、直到被限频（Codex 审查 53df24f 的 P2）。这一次没发完、没删掉的，下次打开首页再补。
+ * 记录读不出来时不补发；发完一批再读不出来时就停下，不删、不改（读不出来不等于没有）
  */
 async function flushOnce(): Promise<void> {
   const snapshot = readPending();
+  if (!snapshot.ok) return;
   // 这一次已经发完的：每批之后把它们都从记录里去掉（前一批没删掉的，这一批再删一次）
-  let done: number[] = [];
-  for (let i = 0; i < snapshot.length; i += PER_REQUEST) {
-    const chunk = snapshot.slice(i, i + PER_REQUEST);
+  let done: PendingRead[] = [];
+  for (const batch of batches(snapshot.items)) {
     try {
-      await member<MpNoticeRead>('POST', '/v1/notices/read', { ids: chunk });
+      await send(batch);
     } catch (e) {
       if (!settled(e)) return;
     }
-    done = done.concat(chunk);
-    writePending(readPending().filter((id) => done.indexOf(id) < 0));
+    done = done.concat(batch);
+    const now = readPending();
+    if (!now.ok) return;
+    writePending(now.items.filter((x) => !done.some((d) => same(d, x))));
   }
 }
 
@@ -89,17 +125,19 @@ export function flushReads(): Promise<void> {
   return flushing;
 }
 
-/** 看过了：先记在手机上，再发给门店系统；存不了也照样发这一次 */
-export async function markRead(ids: number[]): Promise<void> {
+/** 看过了：先记在手机上（带看到它们时的绑定状态版本号），再发给门店系统；存不了、读不出来也照样发这一次 */
+export async function markRead(ids: number[], bindVersion: number): Promise<void> {
   if (!ids.length) return;
+  const mine = ids.map((id) => ({ id, v: bindVersion }));
   const before = readPending();
-  writePending(before.concat(ids.filter((id) => before.indexOf(id) < 0)));
+  // 读不出来时不改（不盖掉原来那些没确认的）
+  if (before.ok) writePending(before.items.concat(mine.filter((x) => !before.items.some((y) => same(x, y)))));
   const stored = readPending();
-  const unsaved = ids.filter((id) => stored.indexOf(id) < 0);
+  const unsaved = stored.ok ? mine.filter((x) => !stored.items.some((y) => same(x, y))) : mine;
   if (unsaved.length) {
     // 手机上存不了：这几条直接发一次，结果不管（发不出去最多下次再弹）
     try {
-      for (let i = 0; i < unsaved.length; i += PER_REQUEST) await member<MpNoticeRead>('POST', '/v1/notices/read', { ids: unsaved.slice(i, i + PER_REQUEST) });
+      for (const batch of batches(unsaved)) await send(batch);
     } catch {
       // 不提示
     }
@@ -109,17 +147,32 @@ export async function markRead(ids: number[]): Promise<void> {
   await flushReads();
 }
 
+export interface NoticeLoad {
+  notices: NoticeView[];
+  /** 门店系统回答时这个微信的绑定状态版本号；没绑定、会员功能没开时为空 */
+  bindVersion: number | null;
+}
+
 /**
  * 今天要弹的提醒：先补发没确认的已读，再问；还没确认已读的那几条不再弹。
  * 没绑定、会员功能没开（门店系统明确回了）是没有；断网、门店连不上、出错是问不到，回 null：页面上弹着的照旧，不关
  */
-export async function loadNotices(): Promise<NoticeView[] | null> {
+export async function loadNotices(): Promise<NoticeLoad | null> {
   await flushReads();
+  let r: MpNotices;
   try {
-    const r = await member<MpNotices>('GET', '/v1/notices');
-    const pending = readPending();
-    return (r.notices || []).filter((n) => pending.indexOf(n.id) < 0).map(noticeView);
+    r = await member<MpNotices>('GET', '/v1/notices');
   } catch (e) {
-    return settled(e) ? [] : null;
+    return settled(e) ? { notices: [], bindVersion: null } : null;
   }
+  // 要先知道哪些看过了还没确认：手机上的记录读不出来（再读一次也不行）时这次不弹，算问不到，下次再问
+  // （不当作没有：否则看过的又弹出来；小程序线测试 50ee567 的 P2 余项）
+  let pending = readPending();
+  if (!pending.ok) pending = readPending();
+  if (!pending.ok) return null;
+  const skip = pending.items.map((x) => x.id);
+  return {
+    notices: (r.notices || []).filter((n) => skip.indexOf(n.id) < 0).map(noticeView),
+    bindVersion: typeof r.bindVersion === 'number' ? r.bindVersion : null,
+  };
 }

@@ -52,7 +52,10 @@ const BindInput = z.object({
   bindVersion: z.number('请刷新小程序后再绑定').int('请刷新小程序后再绑定').min(0, '请刷新小程序后再绑定'),
 });
 const AbandonInput = z.object({ clientKey: z.uuid('操作编号不正确') });
-const NoticeRead = z.object({ ids: z.array(z.number().int().positive().max(Number.MAX_SAFE_INTEGER)).min(1).max(MP_NOTICE_READ_MAX) });
+const NoticeRead = z.object({
+  ids: z.array(z.number().int().positive().max(Number.MAX_SAFE_INTEGER)).min(1).max(MP_NOTICE_READ_MAX),
+  bindVersion: z.number('请刷新后再试').int().min(0),
+});
 const LedgerQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) });
 const FloorParams = z.object({ floor: z.string().regex(/^[A-Za-z0-9-]{1,10}$/, '楼层不正确') });
 const SvgQuery = z.object({ b: z.coerce.number().int().positive('底图批次不正确') });

@@ -134,9 +134,10 @@ describe('整条链路：小程序 → 网关 → yuzu', () => {
     // 本月可享：清单还没导入时什么都没有，档阶照给
     expect((await authed(gw, token, 'GET', '/v1/benefits')).json()).toMatchObject({ items: [], upcoming: [], label: expect.stringMatching(/^L0/) });
     // 会员端提醒（RQ-014）：没有就是空的；记已读带会话转发，编号在网关先核对（一次 1–20 条）
-    expect((await authed(gw, token, 'GET', '/v1/notices')).json()).toEqual({ notices: [] });
-    expect((await authed(gw, token, 'POST', '/v1/notices/read', { ids: [987654321] })).json()).toEqual({ read: [] });
-    for (const body of [{}, { ids: [] }, { ids: Array.from({ length: 21 }, (_, i) => i + 1) }, { ids: ['x'] }]) {
+    const meVersion = (await authed(gw, token, 'GET', '/v1/me')).json().bindVersion as number;
+    expect((await authed(gw, token, 'GET', '/v1/notices')).json()).toEqual({ notices: [], bindVersion: meVersion });
+    expect((await authed(gw, token, 'POST', '/v1/notices/read', { ids: [987654321], bindVersion: meVersion })).json()).toEqual({ read: [] });
+    for (const body of [{}, { ids: [], bindVersion: meVersion }, { ids: Array.from({ length: 21 }, (_, i) => i + 1), bindVersion: meVersion }, { ids: ['x'], bindVersion: meVersion }, { ids: [1] }]) {
       expect((await authed(gw, token, 'POST', '/v1/notices/read', body)).statusCode, JSON.stringify(body)).toBe(400);
     }
     const code = await authed(gw, token, 'POST', '/v1/code');

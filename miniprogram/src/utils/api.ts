@@ -122,7 +122,41 @@ export function switchMockUser(): string {
     // 删不了就覆盖
   }
   clearSession();
+  // 换了一个微信：版本号是另一个微信的，从头记
+  seenBindVersion = -1;
   return mockUser();
+}
+
+// ── 绑定状态版本号 ──
+
+/**
+ * 门店系统回过的最新的绑定状态版本号（这个微信每次绑定、解绑都加一，不会变小；「我的」、领券中心、提醒……的回答里带着）。
+ * 首页的会员端提醒按它丢掉换绑以前发出去、换绑以后才回来的旧回答（小程序线测试 29aa0cc 的 P1）
+ */
+let seenBindVersion = -1;
+export function latestBindVersion(): number {
+  return seenBindVersion;
+}
+/** 版本号变新时通知（首页：已经弹着的换绑以前那位会员的提醒马上关上，小程序线测试 50ee567 的 P1 余项） */
+const bindWatchers: ((v: number) => void)[] = [];
+export function watchBindVersion(fn: (v: number) => void): () => void {
+  bindWatchers.push(fn);
+  return () => {
+    const i = bindWatchers.indexOf(fn);
+    if (i >= 0) bindWatchers.splice(i, 1);
+  };
+}
+function noteBindVersion(data: unknown): void {
+  const v = data && typeof data === 'object' ? (data as { bindVersion?: unknown }).bindVersion : undefined;
+  if (typeof v !== 'number' || v <= seenBindVersion) return;
+  seenBindVersion = v;
+  for (const fn of bindWatchers.slice()) {
+    try {
+      fn(v);
+    } catch {
+      // 一个页面出错不挡别的
+    }
+  }
 }
 
 // ── 会话 ──
@@ -202,7 +236,10 @@ export async function member<T>(method: 'GET' | 'POST', path: string, body?: Rec
     clearSession();
     r = await send(method, path, body, await ensureSession());
   }
-  if (ok(r)) return r.data as T;
+  if (ok(r)) {
+    noteBindVersion(r.data);
+    return r.data as T;
+  }
   throw errorOf(r);
 }
 

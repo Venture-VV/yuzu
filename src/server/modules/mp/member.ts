@@ -97,7 +97,7 @@ export const lockOpenid = (tx: Db, openid: string) => tx`SELECT pg_advisory_xact
  */
 export const lockOpenidShared = (tx: Db, openid: string) => tx`SELECT pg_advisory_xact_lock_shared(hashtext(${`mp_bind:${openid}`}))`;
 
-export async function boundMemberId(db: Db, openid: string): Promise<number> {
+async function boundMemberId(db: Db, openid: string): Promise<number> {
   const b = await activeBinding(db, openid);
   if (!b) throw new AppError(403, 'MP_NOT_BOUND', '请先绑定会员');
   return b.memberId;
