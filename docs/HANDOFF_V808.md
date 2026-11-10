@@ -85,15 +85,15 @@ N1 把「一单最多几份」放宽到可调 200 以后，主线给小程序的
 11. **餐饮台账（B06）**：选一天、只选一个分类，只列这一类，合计与逐行相加一致；导出的 CSV 行数、合计与页面一致；超过 92 天被拒。
 12. **改房态（B04）**：把一间房从待打扫改成已打扫：先弹确认、写备注「已检查」，看板马上变；点「撤回」回到待打扫；两个窗口同时改，后一个提示已被改过；有人住的房不能改成维修、也不能撤回成维修。
 13. **房间详情（B07）**：一间房入住、点一钟足疗、点一份简餐、换房、退房：两间房的详情各自按时间列出入住 / 换出、房费、押金、足疗（技师、钟单号）、简餐、换进 / 退房、自动改待打扫，两间加起来与账单一致。
-14. **Codex 审查 `fb67dca`、`9470097` 的六条（第 1.8 节）**：在钟房补派时断网（或在开发者工具里让请求超时），派钟对话框里和顶部「结果待确认」都能查回或确认作废，作废后原请求不生效、能重新补派；店员把店主派的钟转给别人以后，作废新钟单被拒；轮钟转给排在后面的那位不用写跳过原因；改单时让退菜的回复丢了（开发者工具里断网），再点一次就完成、菜回到购物车；待派钟的明细先转单再补派，`check` 照样全 ✓；桌台点单断网留下待确认以后把桌台点单下架，「去处理」照样回到那一桌、能确认作废；前台开启「补录纸质单」后，估清的菜也能补录、不限今天的余量；客房预约到店后不入住、撤销那张手牌，预约页这个房型的余量回来。
+14. **Codex 审查的九条（第 1.8 节）**：在钟房补派时断网（或在开发者工具里让请求超时），派钟对话框里和顶部「结果待确认」都能查回或确认作废，作废后原请求不生效、能重新补派；店员把店主派的钟转给别人以后，作废新钟单被拒；轮钟转给排在后面的那位不用写跳过原因；改单时让退菜的回复丢了（开发者工具里断网），再点一次就完成、菜回到购物车；待派钟的明细先转单再补派，`check` 照样全 ✓；桌台点单断网留下待确认以后把桌台点单下架，「去处理」照样回到那一桌、能确认作废；前台开启「补录纸质单」后，估清的菜也能补录、不限今天的余量；客房预约到店后不入住、撤销那张手牌，预约页这个房型的余量回来。
 15. **扫码点餐单行份数（第 1.7 节）**：「可调的数值」把扫码点餐一单最多几份设成 200，经网关下单单行 100 份被拦在格式上（400），99 + 99 + 2 三行共 200 份能下，201 份 `MP_ORDER_LIMIT`；测完改回默认。
 
 ## 4. 已执行的验证（本机，独立的合成库）
 
 - `npm run typecheck`、`npm run build` 通过。
-- 新加的集成用例：`tests/clockroom-808.test.ts`（5 条）、`tests/frontdesk-808.test.ts`（4 条）、`tests/dining-808.test.ts`（4 条）、`tests/rooms-808.test.ts`（3 条）；`tests/mp-entries.test.ts` 加单行份数（99 / 100 / 200 / 三行 200 / 201）。跟着改的：`tests/usage-charges.test.ts`（派对房的账单名称）、`tests/dining-tables.test.ts`、`tests/coupons.test.ts`、`tests/frontdesk-duplicate.test.ts`（先打开桌台点单）、`tests/floormap.test.ts`（看板的房间多两项）。
-- `npm test` 全量（并行）：结果见 PR #88 上的说明（以最后一个改代码的提交为准）。
-- 浏览器：新建的演示库（`seed-demo`、`seed-inventory-demo`、`seed-frontdesk-demo`、`seed-billing-demo`、`seed-legacy-demo`，`check` 全 ✓）上，门店电脑尺寸新加的 `e2e/frontdesk-808.spec.ts`（3 条：护理交给钟房 → 补派 → 状态筛选；桌台下架 + 退菜分级 + 当场授权 + 退菜记录 + 台账；改房态确认 + 撤回 + 房间详情）连跑两次都过；跟着改的 `e2e/rooms.spec.ts`、`e2e/floormap.spec.ts`（改房态多一步确认、派对房的账单名称）、`e2e/dining.spec.ts`、`e2e/dining-tables.spec.ts`、`e2e/clockroom.spec.ts`、`e2e/technicians.spec.ts`、`e2e/frontdesk.spec.ts`、`e2e/bookings.spec.ts`、`e2e/viewports.spec.ts`、`e2e/cashier.spec.ts`、`e2e/line-move.spec.ts` 都过。
+- 新加的集成用例：`tests/clockroom-808.test.ts`（8 条，含补派的操作编号、先转单再补派的自检、轮钟转钟、转钟照原挂账人）、`tests/frontdesk-808.test.ts`（5 条，含已到店没入住的客房预约离店后不占名额）、`tests/dining-808.test.ts`（4 条）、`tests/rooms-808.test.ts`（3 条）；`tests/mp-entries.test.ts` 加单行份数（99 / 100 / 200 / 三行 200 / 201）。跟着改的：`tests/usage-charges.test.ts`（派对房的账单名称）、`tests/dining-tables.test.ts`、`tests/coupons.test.ts`、`tests/frontdesk-duplicate.test.ts`（先打开桌台点单）、`tests/floormap.test.ts`（看板的房间多两项）。
+- `npm test` 全量（并行）：148 个文件、1,435 条全过（`58cae02`，最后一个改代码的提交）。
+- 浏览器：新建的演示库（`seed-demo`、`seed-inventory-demo`、`seed-frontdesk-demo`、`seed-billing-demo`、`seed-legacy-demo`，`check` 全 ✓）上，门店电脑尺寸新加的 `e2e/frontdesk-808.spec.ts`（3 条：护理交给钟房 → 补派 → 状态筛选；桌台下架 + 退菜分级 + 当场授权 + 退菜记录 + 台账；改房态确认 + 撤回 + 房间详情）连跑两次都过；审查那几轮后加的两步本机都过（CI 结果见 PR #88 的说明）：退菜那条加「改单的退菜回复丢了，再点一次就完成」，`e2e/dining-tables.spec.ts` 新加「桌台点单没发出去、之后桌台点单下架」（从顶部提醒回到那一桌确认作废）；跟着改的 `e2e/rooms.spec.ts`、`e2e/floormap.spec.ts`（改房态多一步确认、派对房的账单名称）、`e2e/dining.spec.ts`、`e2e/dining-tables.spec.ts`、`e2e/clockroom.spec.ts`、`e2e/technicians.spec.ts`、`e2e/frontdesk.spec.ts`、`e2e/bookings.spec.ts`、`e2e/viewports.spec.ts`、`e2e/cashier.spec.ts`、`e2e/line-move.spec.ts` 都过。
 
 ## 5. 给小程序线
 
