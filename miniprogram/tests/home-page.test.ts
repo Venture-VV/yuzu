@@ -1,7 +1,8 @@
 // 首页的会员端提醒（RQ-014）与换绑同时（小程序线测试 29aa0cc 的 P1）：用页面真实的代码（Page 的选项）与真实的提醒、网关模块，wx 换成假的。
 //   · 换绑以前发出去、换绑以后才回来的旧回答（版本号比别的页面已经见过的旧）：丢掉，不放进弹窗；
 //   · 弹着的是换绑以前那位会员的：回到首页时先关上、重新问，换成那位会员的；
-//   · 点「知道了」：记已读带着看到这些提醒时的版本号。
+//   · 点「知道了」：记已读带着看到这些提醒时的版本号；
+//   · 离开首页再回来：回来以后弹的都是回来以后才问到的（280b08a 的 P1）；不在首页时不问、不弹（Codex 审查 83e74b3 的 P2）。
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 type Opts = Record<string, unknown> & { data: Record<string, unknown> };
@@ -196,6 +197,49 @@ describe('离开首页再回来（小程序线测试 280b08a 的 P1）：回来�
     await vi.waitFor(() => expect(page.data.noticeOpen).toBe(true));
     expect(ids(page)).toEqual([1]);
   });
+
+  for (const change of ['解绑', '换绑'] as const) {
+    it(`问还没回来时离开、回来、又离开，之后${change}（Codex 审查 83e74b3 的 P2）：不在首页时不问、不弹；30 秒内回到首页也重新问`, async () => {
+      const first = later();
+      // 门店系统那边这个微信此刻绑的是谁（前台解绑、换绑时改）
+      let bound: 'A' | 'B' | null = 'A';
+      let calls = 0;
+      const { page, sent } = await loadPage({
+        '/v1/notices': () => {
+          calls += 1;
+          if (calls === 1) return first.promise;
+          if (bound === null) return unbound;
+          return { status: 200, data: { notices: [notice(bound === 'A' ? 1 : 2)], bindVersion: bound === 'A' ? 1 : 2 } };
+        },
+      });
+      const asked = () => sent.filter((x) => x.path === '/v1/notices').length;
+      const busy = () => (page as unknown as { noticeBusy: boolean }).noticeBusy;
+      const asking = page.loadNotices();
+      // 问还没回来：离开首页、回来（约好再问）、又离开
+      page.onHide();
+      page.onShow();
+      page.onHide();
+      first.resolve({ status: 200, data: { notices: [notice(1)], bindVersion: 1 } });
+      await asking;
+      // 不在首页：不再问，也不弹
+      await new Promise((r) => setTimeout(r, 30));
+      expect(asked()).toBe(1);
+      expect(page.data.noticeOpen).toBe(false);
+      expect(ids(page)).toEqual([]);
+      // 前台这时解绑（或换绑到会员 B），小程序别的页面都还不知道；顾客 30 秒内回到首页：重新问
+      bound = change === '解绑' ? null : 'B';
+      page.onShow();
+      await vi.waitFor(() => expect(asked()).toBe(2));
+      await vi.waitFor(() => expect(busy()).toBe(false));
+      if (change === '解绑') {
+        expect(page.data.noticeOpen).toBe(false);
+        expect(ids(page)).toEqual([]);
+      } else {
+        expect(page.data.noticeOpen).toBe(true);
+        expect(ids(page)).toEqual([2]);
+      }
+    });
+  }
 
   it('没换绑：弹着的离开时收起来，回来重新问到照旧弹；换绑了：回来弹的是新会员的', async () => {
     let version = 1;

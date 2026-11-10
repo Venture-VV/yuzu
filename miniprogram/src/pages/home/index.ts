@@ -1,6 +1,7 @@
 // 首页：版头大图加标志（首页轮播；没有轮播时用门店照片，再没有用木色底）、门店信息（两家店都显示，MP5）、
 // 三块业务（TASTE、WELLNESS、EXPERIENCE）、服务入口、门店公告。门店连不上时用之前的信息并标出来。
-// 会员端提醒（RQ-014）：首页显示时问一次，有收到券、券快到期的提醒就弹出来，看过记已读（utils/notices.ts）。
+// 会员端提醒（RQ-014）：首页显示时问一次，有收到券、券快到期的提醒就弹出来，看过记已读（utils/notices.ts）；
+// 不在首页时不问、不弹，要再问的等回到首页再问。
 import type { MpBanner, MpHome, MpStore } from '../../../../src/shared/mp';
 import { imageUrl, latestBindVersion, messageOf, show, watchBindVersion } from '../../utils/api';
 import { appData } from '../../utils/app-state';
@@ -49,10 +50,15 @@ Page({
    * 回到首页以后弹的，都是回来以后才问到的（离开期间可能解绑、换绑了，小程序线测试 280b08a 的 P1）
    */
   noticeRound: 0,
+  /**
+   * 首页在显示（onShow 到 onHide 之间；微信先 onLoad 再 onShow，所以一开始算在显示）。不在显示时不问、不弹：
+   * 不在首页时问到的不会弹在看不见的首页上、回来时直接露出来（离开期间可能解绑、换绑了，Codex 审查 83e74b3 的 P2）
+   */
+  noticeShown: true,
   stopWatch: null as (() => void) | null,
 
   onLoad() {
-    // 别的页面看到了更新的绑定状态（解绑、换绑过）：弹着的是之前那位会员的，马上关上、重新问（不等回到首页）
+    // 别的页面看到了更新的绑定状态（解绑、换绑过；比如「我的」的回答晚到，顾客已经回到首页）：弹着的是之前那位会员的，马上关上、重新问
     this.stopWatch = watchBindVersion((v) => this.onBindVersion(v));
     const n = navMetrics();
     let width = 375;
@@ -69,9 +75,11 @@ Page({
   onUnload() {
     if (this.stopWatch) this.stopWatch();
     this.stopWatch = null;
+    this.noticeShown = false;
   },
 
   onShow() {
+    this.noticeShown = true;
     if (Date.now() - this.noticeAt > 30000) this.loadNotices();
   },
 
@@ -82,6 +90,7 @@ Page({
   onHide() {
     // 弹着的、正在问的：回来时一定重新问；都没有的照旧 30 秒内不再问
     const pending = this.data.noticeOpen || this.noticeBusy;
+    this.noticeShown = false;
     this.noticeRound += 1;
     if (this.data.noticeOpen) this.setData({ noticeOpen: false, notices: [], noticeCoupon: false });
     if (pending) this.noticeAt = 0;
@@ -98,8 +107,12 @@ Page({
     this.load().then(() => wx.stopPullDownRefresh());
   },
 
-  /** retry：丢掉旧回答以后再问的那一次（只再问一次，不会一直问） */
+  /** retry：丢掉旧回答以后再问的那一次（只再问一次，不会一直问）。不在首页时不问，约好回到首页再问 */
   async loadNotices(retry = false) {
+    if (!this.noticeShown) {
+      this.noticeAt = 0;
+      return;
+    }
     if (this.noticeBusy) {
       this.noticeAgain = true;
       return;
@@ -110,8 +123,8 @@ Page({
     let stale = false;
     try {
       const got = await loadNotices();
-      // 离开过首页（这是离开之前发出去的）：作废；回到首页时已经约好再问一次
-      if (round !== this.noticeRound) {
+      // 离开过首页（这是离开之前发出去的）、现在不在首页：作废；回到首页时再问
+      if (round !== this.noticeRound || !this.noticeShown) {
         this.noticeAt = 0;
         return;
       }
@@ -129,6 +142,7 @@ Page({
       this.noticeBusy = false;
       const again = this.noticeAgain || (stale && !retry);
       this.noticeAgain = false;
+      // 这时不在首页的：不问，等回到首页再问（不在看不见的首页上弹，Codex 审查 83e74b3 的 P2）
       if (again) this.loadNotices(stale);
     }
   },
