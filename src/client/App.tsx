@@ -51,6 +51,8 @@ const ClaimFormPage = lazyPage(() => import('./features/expenses/ClaimFormPage')
 const PettyPage = lazyPage(() => import('./features/expenses/PettyPage').then((m) => m.PettyPage));
 const PettyAccountsPage = lazyPage(() => import('./features/expenses/PettyAccountsPage').then((m) => m.PettyAccountsPage));
 const BudgetsPage = lazyPage(() => import('./features/expenses/BudgetsPage').then((m) => m.BudgetsPage));
+const AssetsPage = lazyPage(() => import('./features/assets/AssetsPage').then((m) => m.AssetsPage));
+const AssetLabelsPrintPage = lazyPage(() => import('./features/assets/AssetLabelsPrintPage').then((m) => m.AssetLabelsPrintPage));
 const ReceivablesPage = lazyPage(() => import('./features/receivables/ReceivablesPage').then((m) => m.ReceivablesPage));
 const InvoicesPage = lazyPage(() => import('./features/invoices/InvoicesPage').then((m) => m.InvoicesPage));
 const RequestsPage = lazyPage(() => import('./features/requests/RequestsPage').then((m) => m.RequestsPage));
@@ -202,6 +204,8 @@ const router = createBrowserRouter([
       // 员工食堂的开通卡片（A4）
       { path: 'canteen-cards/:ids', element: <CanteenCardsPrintPage /> },
       { path: 'canteen-poster', element: <CanteenPosterPrintPage /> },
+      // 资产标签（8.0.7）
+      { path: 'asset-labels/:ids', element: <AssetLabelsPrintPage /> },
     ],
   },
   // 对客导览的大屏模式（v0.7.19）：没有导航与操作，适合门店大屏常开
@@ -222,6 +226,7 @@ const router = createBrowserRouter([
       { path: 'expenses/budgets', element: <BudgetsPage /> },
       { path: 'invoices', element: <InvoicesPage /> },
       { path: 'receivables', element: <ReceivablesPage /> },
+      { path: 'assets', element: <AssetsPage /> },
       { path: 'petty', element: <PettyPage /> },
       { path: 'petty/accounts', element: <PettyAccountsPage /> },
       { path: 'requests', element: <RequestsPage /> },

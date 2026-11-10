@@ -38,6 +38,7 @@ import { registerScoreRoutes } from './modules/inventory/scores';
 import { registerSlowRoutes } from './modules/inventory/slow';
 import { registerReconLinkRoutes } from './modules/inventory/recon-links';
 import { registerReceivableRoutes } from './modules/receivables';
+import { registerAssetRoutes } from './modules/assets';
 import { registerCompareRoutes } from './modules/inventory/compare';
 import { registerGiftRoutes } from './modules/inventory/gifts';
 import { registerPettyAccountRoutes } from './modules/petty-accounts';
@@ -236,6 +237,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerSlowRoutes(app, deps);
   registerReconLinkRoutes(app, deps);
   registerReceivableRoutes(app, deps);
+  registerAssetRoutes(app, deps);
   registerCompareRoutes(app, deps);
   registerGiftRoutes(app, deps);
   registerPettyAccountRoutes(app, deps);
