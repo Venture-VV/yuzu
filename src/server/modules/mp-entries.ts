@@ -11,7 +11,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { MAX_DISH_NOTE } from '@shared/dining';
+import { MAX_BILL_LINE_QUANTITY, MAX_DISH_NOTE } from '@shared/dining';
 import { TUNABLE_LIMITS } from '@shared/tunables';
 import type { TrialRow } from '@shared/trials';
 import type { Db, Tx } from '../db';
@@ -133,8 +133,13 @@ const MpFoodInput = z.object({
     .array(
       z.object({
         itemId: z.number('菜品编号不对').int('菜品编号不对').positive('菜品编号不对'),
-        // 一单的份数与金额上限（N1，8.0.7 起在「经营规则 → 可调的数值」里改）在下单时按设置核对（MP_ORDER_LIMIT），这里只挡住离谱的请求
-        quantity: z.number('份数不对').int('份数不对').min(1, '份数至少为 1').max(TUNABLE_LIMITS.mpFoodMaxQuantity.max, `一单最多 ${TUNABLE_LIMITS.mpFoodMaxQuantity.max} 份`),
+        // 一单的份数与金额上限（N1，8.0.7 起在「经营规则 → 可调的数值」里改，最多 200 份）在下单时按设置核对（MP_ORDER_LIMIT）；
+        // 一道菜一行最多 99 份是账单一行能存的上限（bill_lines 的约束），格式上就挡住，一单更多份请分几行（8.0.8，测试会话 v8.0.7 的 P2）
+        quantity: z
+          .number('份数不对')
+          .int('份数不对')
+          .min(1, '份数至少为 1')
+          .max(MAX_BILL_LINE_QUANTITY, `一道菜一单最多 ${MAX_BILL_LINE_QUANTITY} 份，多的请服务员点`),
         note: z.string().trim().max(MAX_DISH_NOTE, `口味备注最多 ${MAX_DISH_NOTE} 字`).optional(),
       }),
       '请选择菜品',
