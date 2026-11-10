@@ -8,7 +8,7 @@ import { resolve } from 'node:path';
 import fastifyCookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
-import { canEditMenu, canScan, isLanHost, type CanteenMe } from '@shared/canteen';
+import { canEditMenu, canScan, canUseMailbox, isLanHost, type CanteenMe } from '@shared/canteen';
 import { businessDateOf } from '@shared/business-date';
 import type { AppConfig } from '../../config';
 import type { Sql } from '../../db';
@@ -17,7 +17,7 @@ import { isApiRequest, routePath } from '../../lib/paths';
 import { idParam, parse } from '../../lib/validate';
 import { enabledErpModules } from '../erp';
 import { canteenToday, mealsThisMonth, myCheckins, recordCheckin, searchPeople, voidCheckin } from './checkins';
-import { myFeedback, submitFeedback } from './feedback';
+import { managerMailbox, managerMarkRead, managerReplyFeedback, myFeedback, submitFeedback, unreadFeedbackCount } from './feedback';
 import { employeeCodeKey } from './code';
 import { likeDish, listMenus, saveMenu } from './menus';
 import {
@@ -172,6 +172,11 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
     if (!canScan(me.role)) throw forbidden('只有食堂负责人能扫码打卡');
     return me;
   };
+  const mailboxKeeper = (req: FastifyRequest) => {
+    const me = who(req);
+    if (!canUseMailbox(me.role)) throw forbidden('只有食堂负责人能看柚子信箱');
+    return me;
+  };
 
   const buildMe = async (employeeId: number): Promise<CanteenMe> => {
     const [e] = await sql<
@@ -311,6 +316,26 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
     const me = manager(req);
     const { id } = parse(idParam, req.params);
     return voidCheckin(sql, id, req.body, { employee: me }, config.timezone);
+  });
+
+  // 柚子信箱（店主 2026-11-10，docs/CANTEEN.md 第 18 节，K20）：负责人在手机上看员工跟柚子说的话、标看过、回信，不用再开电脑
+  app.get('/api/canteen/mailbox', async (req) => {
+    mailboxKeeper(req);
+    return managerMailbox(sql, req.query);
+  });
+  app.get('/api/canteen/mailbox/unread', async (req) => {
+    mailboxKeeper(req);
+    return { unread: await unreadFeedbackCount(sql) };
+  });
+  app.post('/api/canteen/mailbox/:id/read', async (req) => {
+    const me = mailboxKeeper(req);
+    const { id } = parse(idParam, req.params);
+    return managerMarkRead(sql, id, me);
+  });
+  app.post('/api/canteen/mailbox/:id/reply', async (req) => {
+    const me = mailboxKeeper(req);
+    const { id } = parse(idParam, req.params);
+    return managerReplyFeedback(sql, id, req.body, me, req.ip);
   });
 
   // ── 柚子饭堂的页面（构建产物） ──

@@ -1,9 +1,11 @@
 // 员工食堂 · 跟柚子说（docs/CANTEEN.md 第 16 节，店主 2026-11-06，K16）：员工写给柚子的心愿（想要柚子在汤崎的线上空间做的事）
 // 和碎碎念；管理员在 ERP「员工食堂 → 柚子信箱」看、标为看过、回一句话，员工在柚子饭堂里看得到回信。
+// 食堂负责人也能在手机上看柚子信箱、标看过、回信（店主 2026-11-10，第 18 节，K20，迁移 096）：看过的人记第一次看过的那位，
+// 回信的人记最后一次回信的那位，管理员记 read_by / replied_by，负责人记 read_by_employee / replied_by_employee，各自正好一个。
 //
 // 说出去的内容只追加（触发器挡着改与删），只能标看过、回信。同一个操作编号重发返回同一条（回复没收到时原样重发）。
 // 锁：员工发一条先锁那位员工一行（同一个人的几条串行，数「今天说了几条」不会多算）；看过只锁那一条；
-// 回信先取操作编号的咨询锁（与「确认作废」串行），再锁那一条。
+// 回信先取操作编号的咨询锁（管理员的与「确认作废」串行；负责人的同一个编号排队），再锁那一条。
 
 import { z } from 'zod';
 import { FEEDBACK_KINDS, FEEDBACK_KIND_LABELS, FEEDBACK_LIMITS, type CanteenFeedbackList, type CanteenFeedbackRow, type MyFeedbackRow } from '@shared/canteen';
@@ -12,7 +14,7 @@ import type { Db, Sql } from '../../db';
 import { writeAudit } from '../../lib/audit';
 import type { OpContext } from '../../lib/context';
 import { conflict, notFound, unauthorized, unprocessable } from '../../lib/errors';
-import { assertNotFenced } from '../../lib/fences';
+import { assertNotFenced, lockOpKey } from '../../lib/fences';
 import { hashRequest } from '../../lib/idempotency';
 import { setTxTimeouts } from '../../lib/tx';
 import { parse } from '../../lib/validate';
@@ -68,13 +70,17 @@ export async function myFeedback(db: Db, employeeId: number): Promise<MyFeedback
 
 // ── 管理后台：柚子信箱 ──
 
+// 看过、回信的人：管理员写系统账号的名字，食堂负责人写名单上的名字加「（食堂负责人）」
 const ADMIN_ROW = (db: Db) => db`
   SELECT f.id, f.employee_id, f.employee_name AS name, e.emp_no, e.avatar, f.kind, f.content, f.created_at,
-         f.read_at, rs.display_name AS read_by_name, f.reply, f.replied_at, ps.display_name AS replied_by_name
+         f.read_at, coalesce(rs.display_name, re.name || '（食堂负责人）') AS read_by_name,
+         f.reply, f.replied_at, coalesce(ps.display_name, pe.name || '（食堂负责人）') AS replied_by_name
   FROM canteen_feedback f
   JOIN canteen_employees e ON e.id = f.employee_id
   LEFT JOIN staff rs ON rs.id = f.read_by
-  LEFT JOIN staff ps ON ps.id = f.replied_by`;
+  LEFT JOIN staff ps ON ps.id = f.replied_by
+  LEFT JOIN canteen_employees re ON re.id = f.read_by_employee
+  LEFT JOIN canteen_employees pe ON pe.id = f.replied_by_employee`;
 
 const ListQuery = z.object({
   status: z.enum(['all', 'unread', 'read', 'replied']).default('all'),
@@ -156,9 +162,10 @@ export async function replyFeedback(sql: Sql, id: number, raw: unknown, ctx: OpC
     const [cur] = await tx<{ reply: string | null }[]>`SELECT reply FROM canteen_feedback WHERE id = ${id} FOR UPDATE`;
     if (!cur) throw notFound('没有这一条');
     if (cur.reply !== reply) {
+      // 回信的人换成这位管理员（负责人那一列清空）；看过的人只在还没人看过时记这位（负责人看过的照旧是负责人）
       await tx`
-        UPDATE canteen_feedback SET reply = ${reply}, replied_at = now(), replied_by = ${ctx.actor.id},
-               read_at = coalesce(read_at, now()), read_by = coalesce(read_by, ${ctx.actor.id})
+        UPDATE canteen_feedback SET reply = ${reply}, replied_at = now(), replied_by = ${ctx.actor.id}, replied_by_employee = NULL,
+               read_by = CASE WHEN read_at IS NULL THEN ${ctx.actor.id} ELSE read_by END, read_at = coalesce(read_at, now())
         WHERE id = ${id}`;
       await writeAudit(tx, {
         staffId: ctx.actor.id,
@@ -170,6 +177,71 @@ export async function replyFeedback(sql: Sql, id: number, raw: unknown, ctx: OpC
       });
     }
     await tx`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (${clientKey}, 'canteen_reply', ${requestHash}, ${id}, ${ctx.actor.id})`;
+    return feedbackRow(tx, id);
+  });
+}
+
+// ── 食堂负责人在手机上：柚子信箱（店主 2026-11-10，docs/CANTEEN.md 第 18 节，K20）──
+// 与后台同一份信箱：同样的筛选与排序，看过、回信两边都看得到（谁看过、谁回的写在后台）；员工看到的回信照旧是「柚子回信」。
+
+/** 手机上一次最多列这么多条（合计照实给） */
+export const MAILBOX_PAGE_LIMIT = 200;
+
+export async function managerMailbox(db: Db, raw: unknown): Promise<CanteenFeedbackList> {
+  return listFeedback(db, raw, MAILBOX_PAGE_LIMIT);
+}
+
+/** 负责人标为看过（看过的再点不变：第一次看过的那位不变） */
+export async function managerMarkRead(sql: Sql, id: number, me: CanteenSessionEmployee): Promise<CanteenFeedbackRow> {
+  return sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
+    const [cur] = await tx<{ readAt: string | null }[]>`SELECT read_at FROM canteen_feedback WHERE id = ${id} FOR UPDATE`;
+    if (!cur) throw notFound('没有这一条');
+    if (!cur.readAt) await tx`UPDATE canteen_feedback SET read_at = now(), read_by_employee = ${me.id} WHERE id = ${id}`;
+    return feedbackRow(tx, id);
+  });
+}
+
+/**
+ * 负责人回一句话（回信自动算看过；再回一次是改回信，员工看到的是最新的那句）。
+ * 结果待确认：每次回信带操作编号，记在 canteen_feedback_reply_ops。同一个编号再交只返回那一条、不再改一遍
+ * （之后改过的回信——管理员的或别的负责人的——不会被晚到的旧请求改回去）；同一个编号换了内容拒绝。
+ * 锁：操作编号的咨询锁（同一个编号的重发、连点排队）→ 那一条。
+ */
+export async function managerReplyFeedback(sql: Sql, id: number, raw: unknown, me: CanteenSessionEmployee, ip?: string): Promise<CanteenFeedbackRow> {
+  const { clientKey, reply } = parse(ReplyInput, raw);
+  const requestHash = hashRequest({ id, reply });
+  return sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
+    await lockOpKey(tx, clientKey);
+    const [done] = await tx<{ feedbackId: number; employeeId: number; requestHash: string }[]>`
+      SELECT feedback_id, employee_id, request_hash FROM canteen_feedback_reply_ops WHERE client_key = ${clientKey}`;
+    if (done) {
+      if (Number(done.employeeId) !== me.id || done.requestHash !== requestHash) {
+        throw conflict('IDEMPOTENCY_CONFLICT', '这个操作编号已经用过了（内容不一样）：刷新一下再回信');
+      }
+      return feedbackRow(tx, Number(done.feedbackId));
+    }
+    const [cur] = await tx<{ reply: string | null }[]>`SELECT reply FROM canteen_feedback WHERE id = ${id} FOR UPDATE`;
+    if (!cur) throw notFound('没有这一条');
+    if (cur.reply !== reply) {
+      // 回信的人换成这位负责人（管理员那一列清空）；看过的人只在还没人看过时记这位
+      await tx`
+        UPDATE canteen_feedback SET reply = ${reply}, replied_at = now(), replied_by = NULL, replied_by_employee = ${me.id},
+               read_by_employee = CASE WHEN read_at IS NULL THEN ${me.id} ELSE read_by_employee END, read_at = coalesce(read_at, now())
+        WHERE id = ${id}`;
+      await writeAudit(tx, {
+        staffId: null,
+        action: 'canteen_feedback',
+        targetType: 'canteen_feedback',
+        targetId: id,
+        detail: { op: cur.reply === null ? 'reply' : 'edit_reply', before: cur.reply, after: reply, by: 'canteen_manager', employeeId: me.id, employeeName: me.name },
+        ip,
+      });
+    }
+    await tx`
+      INSERT INTO canteen_feedback_reply_ops (client_key, feedback_id, employee_id, request_hash)
+      VALUES (${clientKey}, ${id}, ${me.id}, ${requestHash})`;
     return feedbackRow(tx, id);
   });
 }
