@@ -12,6 +12,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import {
+  MP_FOOD_DUPLICATE_DISH,
   MP_FOOD_MAX_ITEMS,
   MP_FOOD_LINE_MAX_QUANTITY,
   MP_FOOD_MAX_LINES,
@@ -231,7 +232,9 @@ const OrderInput = z.object({
       '请选择菜品',
     )
     .min(1, '请至少选一道菜')
-    .max(MP_FOOD_MAX_LINES, `一单最多 ${MP_FOOD_MAX_LINES} 道菜，多的请服务员点`),
+    .max(MP_FOOD_MAX_LINES, `一单最多 ${MP_FOOD_MAX_LINES} 道菜，多的请服务员点`)
+    // 一道菜只写一行（小程序购物车按菜记，本来就是一行）：「一道菜一单最多 99 份」才名副其实（小程序线测试 721174d 的 P3）
+    .refine((items) => new Set(items.map((i) => i.itemId)).size === items.length, MP_FOOD_DUPLICATE_DISH),
   /** 扫到的桌码（没扫不带） */
   table: z.string().regex(MP_TABLE_CODE, '桌码不对，请重新扫桌上的码').optional(),
   /** 小程序上看到的合计（分）：价格刚改过时拒绝（PRICE_CHANGED） */

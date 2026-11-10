@@ -1022,6 +1022,8 @@ export const MP_TABLE_CODE = /^71\d{16}$/;
  */
 export const MP_FOOD_LINE_MAX_QUANTITY = 99;
 export const MP_FOOD_MAX_LINES = 20;
+/** 同一道菜在一单里写了几行时的拒绝（格式上就挡）：一道菜只写一行，「一道菜一单最多 99 份」按一道菜算（小程序线测试 721174d 的 P3） */
+export const MP_FOOD_DUPLICATE_DISH = '同一道菜只能写一行（份数合在一起），请刷新后再下单';
 /** 一道菜的口味备注最多几个字（与主线的点单一样） */
 export const MP_FOOD_NOTE_MAX = 40;
 

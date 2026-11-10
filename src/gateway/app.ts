@@ -16,7 +16,7 @@
 
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { MP_FOOD_LINE_MAX_QUANTITY, MP_FOOD_MAX_LINES, MP_NOTICE_READ_MAX, MP_RECHARGE_ORDER_NO, MP_TABLE_CODE } from '@shared/mp';
+import { MP_FOOD_DUPLICATE_DISH, MP_FOOD_LINE_MAX_QUANTITY, MP_FOOD_MAX_LINES, MP_NOTICE_READ_MAX, MP_RECHARGE_ORDER_NO, MP_TABLE_CODE } from '@shared/mp';
 import type { GatewayConfig } from './config';
 import { ShowCache } from './cache';
 import { RateLimiter } from './ratelimit';
@@ -109,7 +109,8 @@ const FoodOrder = z.object({
       '请选择菜品',
     )
     .min(1, '请至少选一道菜')
-    .max(MP_FOOD_MAX_LINES, `一单最多 ${MP_FOOD_MAX_LINES} 道菜，多的请服务员点`),
+    .max(MP_FOOD_MAX_LINES, `一单最多 ${MP_FOOD_MAX_LINES} 道菜，多的请服务员点`)
+    .refine((items) => new Set(items.map((i) => i.itemId)).size === items.length, MP_FOOD_DUPLICATE_DISH),
   table: z.string().regex(MP_TABLE_CODE, '桌码不对，请重新扫桌上的码').optional(),
   expectedTotal: z.number('请刷新后再下单').int().nonnegative(),
   bindVersion: z.number('请刷新后再下单').int().min(0),

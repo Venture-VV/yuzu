@@ -20,6 +20,7 @@ import { sendDueReminders } from '../src/gateway/reminders';
 import { createMockWechat, createWechat, WechatError } from '../src/gateway/wechat';
 import { buildMpApp } from '../src/server/modules/mp/app';
 import { makeTableCode } from '../src/server/modules/mp/food';
+import { MP_FOOD_DUPLICATE_DISH } from '../src/shared/mp';
 import { mpToday } from '../src/server/modules/mp/public';
 import { planReminders } from '../src/server/modules/mp/reminders';
 import type { PayRuntime } from '../src/server/modules/mp/pay';
@@ -459,6 +460,28 @@ describe('扫码点餐（第三期 3c）', () => {
     expect((await authed(gw, t, 'POST', '/v1/food/orders', { ...body, clientKey: randomUUID(), items: [{ itemId, quantity: 100 }] })).statusCode).toBe(400);
     const lines21 = Array.from({ length: 21 }, () => ({ itemId, quantity: 1 }));
     expect((await authed(gw, t, 'POST', '/v1/food/orders', { ...body, clientKey: randomUUID(), items: lines21 })).statusCode).toBe(400);
+    // 同一道菜写成两行：格式上就挡（一道菜只写一行，「一道菜一单最多 99 份」按一道菜算；小程序线测试 721174d 的 P3）
+    const twice = [{ itemId, quantity: 60 }, { itemId, quantity: 60 }];
+    const dup = await authed(gw, t, 'POST', '/v1/food/orders', { ...body, clientKey: randomUUID(), items: twice, expectedTotal: 180_000 });
+    expect([dup.statusCode, dup.json().error.message]).toEqual([400, MP_FOOD_DUPLICATE_DISH]);
+    // 网关自己就挡、不转给门店系统：换一个记下转发的网关，正常的一单转了一次，重复的不转
+    const forwarded: string[] = [];
+    const counting = await buildGateway({
+      config: gatewayConfig(),
+      wechat: createMockWechat(),
+      upstream: {
+        call: async (_method, path) => {
+          forwarded.push(path);
+          return { status: 201, contentType: 'application/json', cacheControl: null, body: Buffer.from('{}') };
+        },
+      },
+    });
+    expect((await authed(counting, t, 'POST', '/v1/food/orders', { ...body, clientKey: randomUUID() })).statusCode).toBe(201);
+    expect(forwarded).toEqual(['/api/mp/food/orders']);
+    const dup2 = await authed(counting, t, 'POST', '/v1/food/orders', { ...body, clientKey: randomUUID(), items: twice, expectedTotal: 180_000 });
+    expect([dup2.statusCode, dup2.json().error.message]).toEqual([400, MP_FOOD_DUPLICATE_DISH]);
+    expect(forwarded).toEqual(['/api/mp/food/orders']);
+    await counting.close();
     const ab = await authed(gw, t, 'POST', '/v1/food/orders/abandon', { clientKey });
     expect(ab.json()).toMatchObject({ status: 'ordered', ordered: { total: 3000 } });
     const bill = await authed(gw, t, 'GET', '/v1/food/bill');

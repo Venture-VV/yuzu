@@ -9,7 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
-import { MP_FOOD_LINE_MAX_QUANTITY, MP_FOOD_MAX_LINES, MP_GATEWAY_HEADER, MP_OPENID_HEADER, type MpFoodAdminData, type MpFoodBill, type MpFoodMenu, type MpFoodOrdered } from '../src/shared/mp';
+import { MP_FOOD_DUPLICATE_DISH, MP_FOOD_LINE_MAX_QUANTITY, MP_FOOD_MAX_LINES, MP_GATEWAY_HEADER, MP_OPENID_HEADER, type MpFoodAdminData, type MpFoodBill, type MpFoodMenu, type MpFoodOrdered } from '../src/shared/mp';
 import { buildMpApp } from '../src/server/modules/mp/app';
 import { foodAdminData, foodMenu, makeTableCode, orderFood, tableIdOf } from '../src/server/modules/mp/food';
 import { consistencyChecks } from '../src/server/ops/consistency';
@@ -433,7 +433,7 @@ describe('一单的上限按后台的设置（N1，主线 8.0.7「经营规则 �
     expect(await code(order(a.openid, tea(3)))).toEqual([422, 'MP_ORDER_LIMIT']);
   });
 
-  it('上限调到 200 份：一道菜最多 99 份、最多 20 道菜（账单明细、点单记录能存的上限），超过的格式上就挡，不报 500（小程序线测试 3c2612b 的 P2）', async () => {
+  it('上限调到 200 份：一道菜最多 99 份、最多 20 道菜（账单明细、点单记录能存的上限），同一道菜只写一行，超过的格式上就挡，不报 500（小程序线测试 3c2612b 的 P2、721174d 的 P3）', async () => {
     // 两个数与数据库的约束一致：账单明细一行的份数、点单记录的行数
     const defs = await ctx.sql<{ name: string; def: string }[]>`
       SELECT conname AS name, pg_get_constraintdef(oid) AS def FROM pg_constraint
@@ -472,6 +472,12 @@ describe('一单的上限按后台的设置（N1，主线 8.0.7「经营规则 �
     const r21 = await order(a.openid, snacks.map((itemId) => ({ itemId, quantity: 1 })));
     expect([r21.statusCode, r21.json().error.code]).toEqual([400, 'BAD_REQUEST']);
     expect(r21.json().error.message).toContain('一单最多 20 道菜');
+    // 同一道菜写成两行（60 + 60，每行都不到 99 份、合计也在 200 份以内）：格式上就挡，一道菜只写一行（721174d 的 P3）
+    const dup = await order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 60 }, { itemId: item['柠檬茶']!, quantity: 60 }]);
+    expect([dup.statusCode, dup.json().error.code, dup.json().error.message]).toEqual([400, 'BAD_REQUEST', MP_FOOD_DUPLICATE_DISH]);
+    // 口味备注不同也一样（小程序一道菜一条备注）
+    const dupNote = await order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 1, note: '少冰' }, { itemId: item['柠檬茶']!, quantity: 1, note: '去冰' }]);
+    expect([dupNote.statusCode, dupNote.json().error.message]).toEqual([400, MP_FOOD_DUPLICATE_DISH]);
     // 账单上只有成功的两单：99 份柠檬茶 + 20 道小菜各 1 份
     expect(await billLines(v.visitId)).toBe(21);
   });
