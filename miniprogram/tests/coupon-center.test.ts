@@ -58,6 +58,7 @@ const CENTER: MpCouponCenter = {
     { templateId: 4, name: '饮品九折', kind: 'discount', summary: '9 折', validity: '领取后 30 天内有效', limitText: '不限领', claimed: 2, canClaim: true, reason: null },
     { templateId: 5, name: '搓澡券', kind: 'cash', summary: '代金券 ¥20.00', validity: '2026-11-01 至 2026-12-31 有效', limitText: '每人限领 1 张', claimed: 1, canClaim: false, reason: '每人限领 1 张，已经领满了' },
     { templateId: 6, name: '尊享代金券', kind: 'cash', summary: '代金券 ¥50.00', validity: '领取后 30 天内有效', limitText: '每人限领 1 张', claimed: 0, canClaim: false, reason: '只给 L3–L6 的会员领' },
+    { templateId: 7, name: '拿铁买一赠一', kind: 'bogo', summary: '买一赠一 · 买 拿铁 送 拿铁 1 份 · 最多抵 ¥30.00', validity: '领取后 30 天内有效', limitText: '每人限领 1 张', claimed: 0, canClaim: true, reason: null },
   ],
   bindVersion: 1,
 };
@@ -73,7 +74,9 @@ describe('领券中心的字', () => {
       ['9 折', '折扣券', '', '不限领 · 已领 2 张', '领取', ''],
       ['¥20', '代金券', '', '每人限领 1 张 · 已领 1 张', '已领满', '每人限领 1 张，已经领满了'],
       ['¥50', '代金券', '', '每人限领 1 张', '领不了', '只给 L3–L6 的会员领'],
+      ['买一赠一', '买一赠一券', '买 拿铁 送 拿铁 1 份 · 最多抵 ¥30', '每人限领 1 张', '领取', ''],
     ]);
+    expect(v.items.map((i) => i.bigLong)).toEqual([false, false, false, false, true]);
     expect(m.centerView({ open: false, notice: '领券中心还没开放', items: [], bindVersion: 2 })).toEqual({ open: false, notice: '领券中心还没开放', items: [], bindVersion: 2 });
     expect(m.claimedText(CLAIMED)).toBe('新客领三十（Q7K2-9XM4）已放进「我的券」，2026-11-04 至 2026-11-18');
   });

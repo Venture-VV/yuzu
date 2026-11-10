@@ -95,3 +95,21 @@
     </view>
   </block>
 </view>
+
+<!-- 会员端提醒（RQ-014）：收到券、券快到期；点「知道了」或「看我的券」记已读，以后不再弹 -->
+<view wx:if="{{noticeOpen}}" class="ntc-mask" catchtouchmove="onNoticeHold">
+  <view class="ntc" role="dialog" aria-label="会员提醒">
+    <text class="eyebrow">Notice</text>
+    <text class="h3">给你的提醒</text>
+    <scroll-view scroll-y class="ntc-list">
+      <view wx:for="{{notices}}" wx:key="id" class="ntc-item">
+        <text class="ntc-t">{{item.title}}</text>
+        <text class="ntc-b">{{item.body}}</text>
+      </view>
+    </scroll-view>
+    <view class="ntc-acts {{noticeCoupon ? 'two' : ''}}">
+      <button wx:if="{{noticeCoupon}}" class="btn ghost" hover-class="btn-hover" bindtap="onNoticeCoupons">看我的券</button>
+      <button class="btn primary" hover-class="btn-hover" bindtap="onNoticeOk">知道了</button>
+    </view>
+  </view>
+</view>

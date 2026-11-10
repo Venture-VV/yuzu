@@ -18,8 +18,10 @@ import { couponCode, couponFace } from './views';
 export interface OfferCard {
   templateId: number;
   name: string;
-  /** 券面左边的大字：「¥30」「9 折」「兑换」 */
+  /** 券面左边的大字：「¥30」「9 折」「兑换」「买一赠一」 */
   big: string;
+  /** 大字放不下一行时小一号 */
+  bigLong: boolean;
   kind: string;
   terms: string;
   validity: string;
@@ -51,6 +53,7 @@ export function centerView(c: MpCouponCenter): CenterView {
         templateId: i.templateId,
         name: i.name,
         big: face.big,
+        bigLong: face.bigLong,
         kind: face.kind,
         terms: face.terms,
         validity: i.validity,
