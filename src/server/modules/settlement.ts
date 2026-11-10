@@ -688,6 +688,8 @@ export function settlementCsv(s: SettlementSummary): string {
           ? '会员次卡抵扣（预付的次数），售卡的钱在售卡当天收'
           : m.method === 'coupon'
           ? '平台团购核销，由平台结算'
+          : m.method === 'on_account'
+          ? '协议单位挂账，回款在 ERP「应收与挂账」登记（不进交班、日结）'
           : m.method === 'discount' || m.method === 'store_coupon' || m.method === 'member_discount'
             ? '优惠，不是收款'
             : '',

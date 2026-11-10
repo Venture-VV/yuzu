@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import type { ArAccountOption } from '@shared/ar';
 import { spendQuotaText, type SpendQuota } from '@shared/spend-quota';
 import { BadgePercent, Plus, ShieldCheck, Ticket, TicketCheck, Trash2, UserRound, WalletCards } from 'lucide-react';
 import { DISCOUNT_TARGET_LABELS, rateText } from '@shared/benefits';
@@ -17,8 +19,8 @@ import { splitDeduction } from '@shared/deduction';
 import type { DiscountGrant, DiscountGrantRequest } from '@shared/grants';
 import { maskPhone, PAYMENT_METHODS } from '@shared/labels';
 import { centsToInput, formatYuan, parseYuan } from '@shared/money';
-import { errorMessage } from '../../lib/api';
-import { useSession } from '../../lib/session';
+import { api, errorMessage } from '../../lib/api';
+import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { AuthorizeDialog } from '../../components/AuthorizeDialog';
@@ -66,6 +68,9 @@ export interface PayRow {
   /** 券抵扣（v0.7.20）：选中的券（能抵多少由服务端按此刻的明细算好）；输入券码核对时的原文 */
   coupon: CheckoutCouponOption | null;
   couponInput: string;
+  /** 挂账（8.0.7 A3）：协议单位与签单人 */
+  accountId: number | null;
+  signer: string;
 }
 
 let paySeq = 1;
@@ -83,9 +88,11 @@ export const newRow = (method: CheckoutMethod, amount: number): PayRow => ({
   grant: null,
   coupon: null,
   couponInput: '',
+  accountId: null,
+  signer: '',
 });
 
-export const QUICK_METHODS: CheckoutMethod[] = ['wechat', 'alipay', 'cash', 'bank_card', 'other', 'wallet', 'coupon', 'store_coupon', 'discount'];
+export const QUICK_METHODS: CheckoutMethod[] = ['wechat', 'alipay', 'cash', 'bank_card', 'other', 'wallet', 'coupon', 'store_coupon', 'discount', 'on_account'];
 
 /** 结账用券（v0.7.20）：会员的券（结账核对里列出）与输入券码核对；没有时不显示「券抵扣」 */
 export interface CouponSource {
@@ -102,7 +109,8 @@ export type PaymentBody =
   | { method: 'store_coupon'; code: string; amount: number }
   | { method: 'member_discount'; memberId: number; benefitId: number; amount: number }
   | { method: 'count_card'; cardId: number; uses: number; amount: number }
-  | { method: Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon' | 'member_discount' | 'count_card'>; amount: number; ref: string };
+  | { method: 'on_account'; accountId: number; signer: string; amount: number }
+  | { method: Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon' | 'member_discount' | 'count_card' | 'on_account'>; amount: number; ref: string };
 
 /**
  * 收款登记的状态与核对：每笔的金额、储值扣款构成（余额不足、会员不在本次结账里）、团购券码、「其他」备注、
@@ -166,6 +174,11 @@ export function usePayRows(opts: {
       }
     }
     if (r.method === 'coupon' && !COUPON_CODE_PATTERN.test(normalizeCouponCode(r.code))) return '请填写完整券码';
+    if (r.method === 'on_account') {
+      if (!r.accountId) return '请选择协议单位';
+      if (!r.signer.trim()) return '请写签单人';
+      if (rows.filter((x) => x.method === 'on_account').length > 1) return '一张结账单只能挂一笔账，请合并金额';
+    }
     if (r.method === 'other' && !r.ref.trim()) return '「其他」收款请在备注里写明收的是什么';
     if (r.method === 'cash' && r.tendered.trim()) {
       // 「客人实给」只用来算找零，不登记；填了却少于这笔现金，说明现金没收够（测试服 E2E 报告 BUG-2）
@@ -232,7 +245,8 @@ export function usePayRows(opts: {
       if (r.method === 'coupon') return { method: 'coupon' as const, platform: r.platform, code: normalizeCouponCode(r.code), dealName: r.dealName.trim(), amount };
       if (r.method === 'discount') return { method: 'discount' as const, amount, grantId: r.grant!.grantId };
       if (r.method === 'store_coupon') return { method: 'store_coupon' as const, code: r.coupon!.code, amount };
-      return { method: r.method as Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon' | 'member_discount' | 'count_card'>, amount, ref: r.ref.trim() };
+      if (r.method === 'on_account') return { method: 'on_account' as const, accountId: r.accountId!, signer: r.signer.trim(), amount };
+      return { method: r.method as Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon' | 'member_discount' | 'count_card' | 'on_account'>, amount, ref: r.ref.trim() };
     }),
   ];
 
@@ -291,6 +305,14 @@ export function PaymentsSection({
   /** 结账用券（v0.7.20）；不传时不显示「券抵扣」 */
   coupons?: CouponSource;
 }) {
+  /** 挂账（8.0.7）：有「挂账」权限、应收与挂账模块开着、有在用的协议单位时才显示 */
+  const can = useCan();
+  const arAccounts = useQuery({
+    queryKey: ['frontdesk', 'ar-accounts'],
+    queryFn: () => api.get<ArAccountOption[]>('/api/ar-accounts/options'),
+    enabled: can('frontdesk.onAccount'),
+    staleTime: 60_000,
+  });
   /** 正在请值班经理授权优惠的那一笔 */
   const [authorizing, setAuthorizing] = useState<number | null>(null);
   const authRow = pay.rows.find((r) => r.id === authorizing) ?? null;
@@ -300,7 +322,7 @@ export function PaymentsSection({
     <div className="rounded-lg border border-line bg-paper/50 p-3">
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="mr-1 text-[13px] font-bold text-ink-2">收款</span>
-        {QUICK_METHODS.filter((m) => (m !== 'wallet' || canWallet) && (m !== 'store_coupon' || !!coupons)).map((m) => (
+        {QUICK_METHODS.filter((m) => (m !== 'wallet' || canWallet) && (m !== 'store_coupon' || !!coupons) && (m !== 'on_account' || (arAccounts.data?.length ?? 0) > 0)).map((m) => (
           <Button
             key={m}
             size="sm"
@@ -347,6 +369,7 @@ export function PaymentsSection({
               onRemove={() => pay.remove(r.id)}
               walletHint={walletHint}
               coupons={coupons}
+              arAccounts={arAccounts.data ?? []}
             />
           ))}
         </ul>
@@ -402,6 +425,7 @@ export function PayRowEditor({
   onRemove,
   walletHint = VISIT_WALLET_HINT,
   coupons,
+  arAccounts = [],
 }: {
   row: PayRow;
   cents: number | null;
@@ -417,8 +441,11 @@ export function PayRowEditor({
   /** 选储值会员时的说明（手牌结账与桌台结账不同） */
   walletHint?: WalletHint;
   coupons?: CouponSource;
+  /** 挂账能选的协议单位（8.0.7） */
+  arAccounts?: ArAccountOption[];
 }) {
   const tendered = parseYuan(row.tendered);
+  const account = arAccounts.find((a) => a.id === row.accountId) ?? null;
   return (
     <li className={cn('rounded-lg border bg-card p-3', problem ? 'border-clay/40' : 'border-line')} data-testid={`pay-row-${row.method}`}>
       <div className="flex flex-wrap items-center gap-2">
@@ -489,6 +516,27 @@ export function PayRowEditor({
 
       {row.method === 'coupon' && (
         <Input value={row.dealName} onChange={(e) => onChange({ dealName: e.target.value })} placeholder="团购项目（选填，例如「不含餐 12 小时」）" maxLength={48} disabled={locked} className="mt-2 h-9 text-[13px]" aria-label="团购项目" />
+      )}
+
+      {row.method === 'on_account' && (
+        // 挂账（8.0.7 A3）：选协议单位、写签单人；算营业额不算实收，回款在 ERP「应收与挂账」登记
+        <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="on-account-row">
+          <Select fullWidth={false} value={row.accountId ?? ''} onChange={(e) => onChange({ accountId: Number(e.target.value) || null })} disabled={locked} className="h-9 min-w-[180px] text-[13px]" aria-label="协议单位" data-testid="on-account-unit">
+            <option value="">选协议单位</option>
+            {arAccounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.code} · {a.name}
+              </option>
+            ))}
+          </Select>
+          <Input fullWidth={false} value={row.signer} onChange={(e) => onChange({ signer: e.target.value })} placeholder="签单人（必填）" maxLength={20} disabled={locked} className="h-9 w-40 text-[13px]" aria-label="签单人" data-testid="on-account-signer" />
+          {account && (
+            <span className="text-[12px] text-ink-3">
+              没结清 {formatYuan(account.outstandingCents)}
+              {account.creditLimitCents !== null ? ` · 额度 ${formatYuan(account.creditLimitCents)}，还能挂 ${formatYuan(Math.max(0, account.creditLimitCents - account.outstandingCents))}` : ' · 不限额'}
+            </span>
+          )}
+        </div>
       )}
 
       {row.method === 'store_coupon' && coupons && (

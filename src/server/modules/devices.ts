@@ -23,7 +23,6 @@ import {
   DEVICE_STATUSES,
   isDeviceErrorCode,
   isDocJobKind,
-  PRINT_WAIT_MAX_MS,
   NETWORK_CONNECTIONS,
   OFFLINE_AFTER_MS,
   plannedQuoteDevices,
@@ -412,9 +411,12 @@ export async function checkDevicesOnce(deps: Pick<Deps, 'sql'>, now = new Date()
     }[]
   >`SELECT id, kind, connection, host, port, host_device_id, options, status, status_code, last_seen_at, version FROM devices WHERE enabled`;
   const stale = (seen: string | null) => !seen || now.getTime() - Date.parse(seen) > OFFLINE_AFTER_MS;
+  // 本机打印（店主 2026-11-10）：服务器不连网口打印机，也就不探测它们（云上的正式服连不到门店局域网）
+  const localPrint = (await loadSettings(sql)).printMode === 'local';
   await Promise.all(
     rows.map(async (d) => {
       if (NETWORK_CONNECTIONS.includes(d.connection as never)) {
+        if (localPrint) return;
         if (!d.host || !d.port) {
           if (d.status !== 'unknown' || d.statusCode !== 'DEVICE_NOT_CONFIGURED') await recordStatus(sql, d.id, 'unknown', 'DEVICE_NOT_CONFIGURED', { seen: false, now, expectVersion: d.version });
           return;
@@ -575,6 +577,13 @@ async function runJob(deps: Deps, jobId: number) {
     }
     const [cur] = await tx<{ kind: DeviceJobKind }[]>`SELECT kind FROM device_jobs WHERE id = ${jobId} AND status = 'queued' FOR UPDATE`;
     if (!cur) return null;
+    // 打印方式是「本机打印」（8.0.7）：与新建时一样，排着的也不再往网口打印机发——改成本机打印之前、升级之前排下的也一样（Codex 审查 9ad0f56）
+    if ((await loadSettings(tx)).printMode === 'local') {
+      await tx`
+        UPDATE device_jobs SET status = 'failed', error_code = 'PRINT_MODE_LOCAL', error_message = ${DEVICE_ERROR_LABELS.PRINT_MODE_LOCAL}, finished_at = now()
+        WHERE id = ${jobId} AND status = 'queued'`;
+      return null;
+    }
     // 业务单据（v0.7.28）：打印机离线、故障（缺纸、开盖、报错）时不发，等它恢复（心跳看到恢复在线后改回排队）
     if (isDocJobKind(cur.kind) && (device.status === 'offline' || device.status === 'error')) {
       await toWaiting(tx, jobId, device.statusCode ?? (device.status === 'offline' ? 'DEVICE_OFFLINE' : 'DEVICE_FAULT'));
@@ -651,15 +660,23 @@ export async function recoverJobs(deps: Deps, log?: (msg: string, err: unknown) 
 
 /**
  * 断网打印队列（v0.7.28）：每轮心跳之后调用。
- *   · 等了超过 PRINT_WAIT_MAX_MS（默认 30 分钟）的不再打，记失败（DEVICE_WAIT_EXPIRED）；
+ *   · 等了超过「小票机断网时最多等几分钟」（N7，默认 30 分钟，8.0.7 起可改）的不再打，记失败（DEVICE_WAIT_EXPIRED）；
  *   · 恢复在线的打印机：先锁这台一行（共享锁，与修改、停用串行），把它等恢复的单子按提交顺序改回排队、交给按台的队列补打。
  */
 export async function resumeWaitingJobs(deps: Deps, opts: { now?: Date; log?: (msg: string, err: unknown) => void } = {}): Promise<{ resumed: number; expired: number }> {
   const { sql } = deps;
   const now = opts.now ?? new Date();
+  const { printWaitMinutes, printMode } = await loadSettings(sql);
+  // 「本机打印」（8.0.7）：服务器不往网口小票机发，等打印机恢复的单子也不再等（Codex 审查 9ad0f56）
+  if (printMode === 'local') {
+    const dropped = await sql`
+      UPDATE device_jobs SET status = 'failed', error_code = 'PRINT_MODE_LOCAL', error_message = ${DEVICE_ERROR_LABELS.PRINT_MODE_LOCAL}, finished_at = now()
+      WHERE status = 'waiting' RETURNING id`;
+    return { resumed: 0, expired: dropped.length };
+  }
   const expired = await sql`
-    UPDATE device_jobs SET status = 'failed', error_code = 'DEVICE_WAIT_EXPIRED', error_message = ${`等打印机恢复超过 ${PRINT_WAIT_MAX_MS / 60_000} 分钟，没有再打`}, finished_at = now()
-    WHERE status = 'waiting' AND first_waited_at < ${new Date(now.getTime() - PRINT_WAIT_MAX_MS)}
+    UPDATE device_jobs SET status = 'failed', error_code = 'DEVICE_WAIT_EXPIRED', error_message = ${`等打印机恢复超过 ${printWaitMinutes} 分钟，没有再打`}, finished_at = now()
+    WHERE status = 'waiting' AND first_waited_at < ${new Date(now.getTime() - printWaitMinutes * 60_000)}
     RETURNING id`;
   const ready = await sql<{ deviceId: number }[]>`
     SELECT DISTINCT j.device_id FROM device_jobs j JOIN devices d ON d.id = j.device_id
@@ -698,6 +715,16 @@ export async function cancelJob(deps: Deps, id: number, ctx: OpContext, canManag
  * 建业务单据的打印任务（v0.7.28，调用方已核对能看这张单据、排好了内容）：
  * 操作编号的咨询锁（与「确认作废」串行）→ 打印机一行；打印机离线、故障时也建，进「等打印机恢复」（不像测试页那样直接失败）。
  */
+/**
+ * 打印方式是「本机打印」（店主 2026-11-10：连接打印机由各自的电脑负责，正式服在云上时用）：服务器不往网口小票机发，
+ * 单据请用浏览器打印。原样重提（同一个编号已经建过的任务）照旧返回原来那张，不在这里拦。
+ */
+async function assertNetworkPrint(db: Db) {
+  if ((await loadSettings(db)).printMode === 'local') {
+    throw unprocessable('PRINT_MODE_LOCAL', '现在是「本机打印」：请用浏览器打印到这台电脑连的打印机（店主可以在后台「经营规则 → 可调的数值」里改打印方式）');
+  }
+}
+
 export async function createDocJob(
   deps: Deps,
   input: { clientKey: string; deviceId: number; kind: DeviceJobKind; docRef: string; docLabel: string; payload: Buffer },
@@ -714,6 +741,7 @@ export async function createDocJob(
   };
   const prior = await replay(deps.sql);
   if (prior !== null) return getJob(deps.sql, prior);
+  await assertNetworkPrint(deps.sql);
   let created: { id: number; queued: boolean };
   try {
     created = await deps.sql.begin(async (tx) => {
@@ -775,6 +803,7 @@ export async function createJob(deps: Deps, deviceId: number, raw: unknown, ctx:
   };
   const prior = await replay(deps.sql);
   if (prior !== null) return getJob(deps.sql, prior);
+  await assertNetworkPrint(deps.sql);
   let created: { id: number; queued: boolean };
   try {
     created = await deps.sql.begin(async (tx) => {

@@ -65,6 +65,8 @@ beforeAll(async () => {
   await createStaff(ctx.sql, { username: 'am', displayName: '客户经理', role: 'account_manager', password: PASSWORD, mustChangePassword: false });
   duty = await login(ctx.app, 'duty');
   am = await login(ctx.app, 'am');
+  // 打印方式默认「本机打印」（8.0.7，店主 2026-11-10）：这里测服务器直连网口小票机
+  expect((await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { printMode: 'network' })).status).toBe(200);
   printer = await startMockPrinter();
   label = await startMockPrinter();
 });

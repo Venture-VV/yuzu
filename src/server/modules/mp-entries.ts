@@ -11,7 +11,8 @@
 
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { MAX_DISH_NOTE, MP_FOOD_ORDER_LIMITS } from '@shared/dining';
+import { MAX_DISH_NOTE } from '@shared/dining';
+import { TUNABLE_LIMITS } from '@shared/tunables';
 import type { TrialRow } from '@shared/trials';
 import type { Db, Tx } from '../db';
 import type { Deps, OpContext } from '../lib/context';
@@ -132,13 +133,14 @@ const MpFoodInput = z.object({
     .array(
       z.object({
         itemId: z.number('菜品编号不对').int('菜品编号不对').positive('菜品编号不对'),
-        quantity: z.number('份数不对').int('份数不对').min(1, '份数至少为 1').max(MP_FOOD_ORDER_LIMITS.maxQuantity, `一单最多 ${MP_FOOD_ORDER_LIMITS.maxQuantity} 份`),
+        // 一单的份数与金额上限（N1，8.0.7 起在「经营规则 → 可调的数值」里改）在下单时按设置核对（MP_ORDER_LIMIT），这里只挡住离谱的请求
+        quantity: z.number('份数不对').int('份数不对').min(1, '份数至少为 1').max(TUNABLE_LIMITS.mpFoodMaxQuantity.max, `一单最多 ${TUNABLE_LIMITS.mpFoodMaxQuantity.max} 份`),
         note: z.string().trim().max(MAX_DISH_NOTE, `口味备注最多 ${MAX_DISH_NOTE} 字`).optional(),
       }),
       '请选择菜品',
     )
     .min(1, '请至少选一道菜')
-    .max(MP_FOOD_ORDER_LIMITS.maxQuantity, `一单最多 ${MP_FOOD_ORDER_LIMITS.maxQuantity} 份`),
+    .max(TUNABLE_LIMITS.mpFoodMaxQuantity.max, `一单最多 ${TUNABLE_LIMITS.mpFoodMaxQuantity.max} 份`),
   /** 扫了桌上的码：桌台名称（后台「餐饮 → 桌台」里的名字）；出品单写送到这张桌 */
   tableCode: z.string().trim().min(1, '桌号不对').max(12, '桌号不对').optional(),
   /** 小程序上看到的合计；带了就核对（价格刚改过时拒绝，PRICE_CHANGED） */
@@ -208,6 +210,7 @@ export async function orderFoodFromMp(tx: Tx, deps: Deps, raw: MpFoodInput): Pro
   const prior = await lockClaim(tx, 'mp_food', input.claimKey, requestHash);
   if (prior) return { ...(await foodOrderOf(tx, prior.refId, prior.refKey!)), replayed: true };
   if (!(await loadDiningRules(tx)).enabled) throw unprocessable('DINING_DISABLED', '餐饮功能没有开启，请服务员点单');
+  const limits = await loadSettings(tx);
   // 会员同时只有一张在店手牌（visits_member_open_uq）
   const [open] = await tx<{ id: number }[]>`SELECT id FROM visits WHERE member_id = ${input.memberId} AND status = 'open'`;
   if (!open) throw unprocessable('NO_OPEN_VISIT', '这位会员现在没有在店手牌：请先到前台开手牌，或请服务员点单');
@@ -237,8 +240,8 @@ export async function orderFoodFromMp(tx: Tx, deps: Deps, raw: MpFoodInput): Pro
       backfill: null,
       channel: {
         expectedTotal: input.expectedTotal ?? null,
-        maxQuantity: MP_FOOD_ORDER_LIMITS.maxQuantity,
-        maxTotal: MP_FOOD_ORDER_LIMITS.maxTotalCents,
+        maxQuantity: limits.mpFoodMaxQuantity,
+        maxTotal: limits.mpFoodMaxTotalCents,
         deliverTo,
         memberId: input.memberId,
       },

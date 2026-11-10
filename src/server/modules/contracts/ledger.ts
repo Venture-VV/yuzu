@@ -3,7 +3,6 @@
 
 import {
   CONTRACT_EFFECTIVE,
-  CONTRACT_EXPIRY_REMIND_DAYS,
   type ChangeKind,
   type ChangeStatus,
   type ChangeView,
@@ -29,6 +28,7 @@ import type { Db } from '../../db';
 import { notFound, unprocessable } from '../../lib/errors';
 import { approvalBrief, approvalBriefById } from '../approvals/engine';
 import { readContent } from './content';
+import { loadSettings } from '../settings';
 
 /** 采购单的状态里算「已经下单」的（草稿、退回、撤回的不算；关闭的按全数算） */
 export const PO_ORDERED_STATUSES = ['submitted', 'approved', 'closed'] as const;
@@ -107,13 +107,15 @@ export async function listContracts(
 ): Promise<ContractSummary[]> {
   const filter = f.filter ?? 'all';
   const q = f.q ? `%${f.q.replace(/[\\%_]/g, (m) => `\\${m}`)}%` : null;
+  // 到期提醒的天数（C11，8.0.7 起在「经营规则 → 可调的数值」里改）
+  const { contractRemindDays } = await loadSettings(db);
   const rows = await db<HeaderRow[]>`
     ${headerSelect(db, today)}
     WHERE true
       ${filter === 'drafting' ? db`AND c.status IN ('draft', 'returned')` : db``}
       ${filter === 'reviewing' ? db`AND c.status = 'reviewing'` : db``}
       ${filter === 'effective' ? db`AND c.status IN ('approved', 'signed', 'archived')` : db``}
-      ${filter === 'expiring' ? db`AND c.status IN ('signed', 'archived') AND c.end_date IS NOT NULL AND c.end_date - ${today}::date <= ${CONTRACT_EXPIRY_REMIND_DAYS}` : db``}
+      ${filter === 'expiring' ? db`AND c.status IN ('signed', 'archived') AND c.end_date IS NOT NULL AND c.end_date - ${today}::date <= ${contractRemindDays}` : db``}
       ${filter === 'closed' ? db`AND c.status IN ('terminated', 'voided')` : db``}
       ${f.category ? db`AND c.category = ${f.category}` : db``}
       ${q ? db`AND (c.contract_no ILIKE ${q} OR c.title ILIKE ${q} OR c.counterparty ILIKE ${q})` : db``}
@@ -271,11 +273,17 @@ async function changesOf(db: Db, contractId: number): Promise<ChangeView[]> {
 }
 
 async function filesOf(db: Db, contractId: number): Promise<ContractFileView[]> {
-  const rows = await db<{ id: number; imageId: number; sortNo: number; addedByName: string; addedAt: string }[]>`
-    SELECT f.id, f.image_id, f.sort_no, s.display_name AS added_by_name, f.added_at
+  const rows = await db<{ id: number; imageId: number | null; fileId: number | null; name: string; sortNo: number; addedByName: string; addedAt: string }[]>`
+    SELECT f.id, f.image_id, f.file_id, f.name, f.sort_no, s.display_name AS added_by_name, f.added_at
     FROM contract_files f JOIN staff s ON s.id = f.added_by
     WHERE f.contract_id = ${contractId} AND f.removed_at IS NULL ORDER BY f.sort_no`;
-  return rows.map((r) => ({ ...r, id: Number(r.id), imageId: Number(r.imageId), url: contractFileUrl(Number(r.id)) }));
+  return rows.map(({ fileId, ...r }) => ({
+    ...r,
+    id: Number(r.id),
+    imageId: r.imageId === null ? null : Number(r.imageId),
+    kind: fileId === null ? 'image' : 'pdf',
+    url: contractFileUrl(Number(r.id)),
+  }));
 }
 
 async function posOf(db: Db, contractId: number): Promise<ContractPoView[]> {
@@ -350,11 +358,12 @@ export async function getContract(db: Db, today: string, contractId: number): Pr
   };
 }
 
-/** 到期提醒（C11）：生效中、结束日在 60 天内（含已过的）、没续签生效的 */
+/** 到期提醒（C11）：生效中、结束日在 N 天内（默认 60，8.0.7 起可改；含已过的）、没续签生效的 */
 export async function expiringContracts(db: Db, today: string): Promise<ContractExpiryItem[]> {
+  const { contractRemindDays } = await loadSettings(db);
   const rows = await db<HeaderRow[]>`
     ${headerSelect(db, today)}
-    WHERE c.status IN ('signed', 'archived') AND c.end_date IS NOT NULL AND c.end_date - ${today}::date <= ${CONTRACT_EXPIRY_REMIND_DAYS}
+    WHERE c.status IN ('signed', 'archived') AND c.end_date IS NOT NULL AND c.end_date - ${today}::date <= ${contractRemindDays}
       AND NOT EXISTS (SELECT 1 FROM contracts n WHERE n.renewal_of = c.id AND n.status IN ('signed', 'archived'))
     ORDER BY c.end_date, c.id`;
   return rows.map((r) => {

@@ -235,7 +235,8 @@ test.describe('G-R1 页面回归', () => {
     for (const label of ['应收（结账 − 反结账）', '优惠 / 免单（当场授权）', '净营业额（应收 − 优惠 − 券抵扣 − 会员折扣 − 退款）', '实收（现金、扫码、银行卡、其他，减去退款）']) {
       await expect(breakdown).toContainText(label);
     }
-    await nav(page, '看板').click();
+    // 看板 2026-11-10 起在后台「数据看板」
+    await page.goto('/admin/dashboard/today');
     await expect(page.getByTestId('dashboard')).toContainText('今日净营业额（应收 − 优惠 − 券抵扣 − 会员折扣 − 退款）');
     await expect(page.getByTestId('dashboard-discount')).toContainText('优惠');
   });

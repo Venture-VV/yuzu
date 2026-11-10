@@ -6,7 +6,6 @@ import {
   APPROVAL_DOC_TYPE_LABELS,
   APPROVAL_MODE_LABELS,
   CONTRACT_REVIEW_DOC_TYPES,
-  URGENT_BACKFILL_ESCALATE_DAYS,
   isLegalStep,
   stepLabel,
   type ApprovalActionView,
@@ -56,6 +55,7 @@ import { readContent } from '../contracts/content';
 import { getPaymentRequest } from '../payments/requests';
 import { poContract, reviewsOf } from '../contracts/ledger';
 import { loadInventorySettings } from '../inventory/common';
+import { loadSettings } from '../settings';
 import { actionsOf, delegatorsOf, eligibleAt, requiredOf, staffNames, standingOf } from './engine';
 
 /** 看「全部在审」、任意一张审批单的详情：负责人（采购、物资、货款或报销的确认）与管规则的（店主） */
@@ -86,11 +86,13 @@ interface RequestRow {
 }
 
 async function loadRequests(db: Db, where: { pending?: boolean; ids?: number[]; submittedBy?: number; limit?: number }): Promise<RequestRow[]> {
+  // 超时的小时数（A6，8.0.7 起在「经营规则 → 可调的数值」里改）
+  const { approvalOverdueHours } = await loadSettings(db);
   const rows = await db<RequestRow[]>`
     SELECT r.id, r.doc_kind, r.doc_id, r.doc_type, r.doc_no, r.amount_cents, d.name AS department_name, r.rule_id, ar.note AS rule_note,
            r.steps, r.allow_self, r.current_level, r.level_started_at, r.status, r.submitted_by, s.display_name AS submitted_by_name,
            r.submitted_at, r.finished_at,
-           (r.status = 'pending' AND r.level_started_at < now() - make_interval(hours => 24)) AS overdue
+           (r.status = 'pending' AND r.level_started_at < now() - make_interval(hours => ${approvalOverdueHours})) AS overdue
     FROM approval_requests r JOIN staff s ON s.id = r.submitted_by
     LEFT JOIN departments d ON d.id = r.department_id LEFT JOIN approval_rules ar ON ar.id = r.rule_id
     WHERE true
@@ -740,15 +742,17 @@ export async function urgentBackfills(db: Db, timeZone: string): Promise<UrgentB
   // 补单要开采购单：采购模块关着时不提醒（补不了）
   if (!(await enabledErpModules(db)).has('purchasing')) return [];
   const today = todayIn(timeZone);
+  // 急采待补单升级的天数（A10，8.0.7 起可改）
+  const { urgentEscalateDays } = await loadSettings(db);
   const rows = await db<{ receiptId: number; docNo: string; departmentName: string | null; supplierName: string | null; amountCents: number; confirmedAt: string; daysOver: number; handlerName: string }[]>`
     SELECT d.id AS receipt_id, d.doc_no, wd.name AS department_name, s.name AS supplier_name, d.amount_cents, d.confirmed_at,
-           (${today}::date - (d.confirmed_at AT TIME ZONE ${timeZone})::date) - ${URGENT_BACKFILL_ESCALATE_DAYS} AS days_over,
+           (${today}::date - (d.confirmed_at AT TIME ZONE ${timeZone})::date) - ${urgentEscalateDays} AS days_over,
            cb.display_name AS handler_name
     FROM inv_docs d JOIN staff cb ON cb.id = d.created_by
     LEFT JOIN suppliers s ON s.id = d.supplier_id LEFT JOIN warehouses w ON w.id = d.warehouse_id LEFT JOIN departments wd ON wd.id = w.department_id
     WHERE d.doc_type = 'receipt' AND d.urgent AND d.status = 'confirmed' AND d.purchase_order_id IS NULL
       AND NOT EXISTS (SELECT 1 FROM purchase_orders p WHERE p.backfill_receipt_id = d.id AND p.status NOT IN ('cancelled'))
-      AND (${today}::date - (d.confirmed_at AT TIME ZONE ${timeZone})::date) > ${URGENT_BACKFILL_ESCALATE_DAYS}
+      AND (${today}::date - (d.confirmed_at AT TIME ZONE ${timeZone})::date) > ${urgentEscalateDays}
     ORDER BY d.confirmed_at, d.id`;
   return rows.map((r) => ({ ...r, receiptId: Number(r.receiptId), amountCents: Number(r.amountCents) }));
 }

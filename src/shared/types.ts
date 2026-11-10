@@ -11,6 +11,7 @@ import type { MemberTagBrief } from './member-tags';
 import type { BonusLotRow, MemberChannel } from './members';
 import type { MemberGradeFields, MemberGradeInfo } from './membership';
 import type { Duty, Permission, Role } from './permissions';
+import type { Tunables } from './tunables';
 
 export type AppEnv = 'development' | 'trial' | 'production' | 'test';
 
@@ -27,7 +28,8 @@ export interface StaffBrief {
   mustChangePassword: boolean;
 }
 
-export interface StoreRules {
+/** 经营规则（会话里带到各页面）；8.0.7 起加上「可调的数值」（Tunables，@shared/tunables） */
+export interface StoreRules extends Tunables {
   deductionRule: DeductionRule;
   businessDayStartHour: number;
   /** 单笔充值上限（店主 #9 默认 50 万元）；超过需要店主或店总当场授权 */
@@ -39,7 +41,7 @@ export interface StoreRules {
    * 「当天第一笔充值前的余额 + 当天充值实收 × 这个百分比」；null 为不限（默认 70）
    */
   rechargeSpendPct: number | null;
-  /** 次卡售卖（8.0.4 需求表 03，HY05）：默认停售，已售的照常用、退、打印；没有页面开关 */
+  /** 次卡售卖（8.0.4 需求表 03，HY05）：默认停售，已售的照常用、退、打印；8.0.7 起在「经营规则 → 可调的数值」里开关 */
   countCardSales: boolean;
   /** 撤销与反结账时限（#10，2026-10-29 签认默认 48 小时）：消费 / 结账后多少小时内可以撤销、反结账，超过后只有店主可以；null 为不限 */
   reversalWindowHours: number | null;

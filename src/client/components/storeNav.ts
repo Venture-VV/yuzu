@@ -1,8 +1,8 @@
 // 门店主导航的入口：主导航按它显示；ERP 顶栏的「返回门店」也按它判断门店那边有没有能用的页面、回到哪一页。
 // 库存、采购、货款、待办在 ERP 工作区（v0.7.3，用户菜单「进入 ERP」），不在这里。
 
-import { BedDouble, CalendarCheck2, CalendarClock, ClipboardCheck, ConciergeBell, Hourglass, LayoutDashboard, MapPinned, Printer, ReceiptText, ScanSearch, Settings2, UsersRound, UtensilsCrossed } from 'lucide-react';
-import { ADMIN_PERMISSIONS } from '@shared/admin';
+import { BedDouble, CalendarCheck2, CalendarClock, ClipboardCheck, ConciergeBell, Hourglass, MapPinned, Printer, ReceiptText, ScanSearch, Settings2, UsersRound, UtensilsCrossed } from 'lucide-react';
+import { ADMIN_ENTRY_PERMISSIONS } from '@shared/admin';
 import type { Permission } from '@shared/permissions';
 import { useCan, useSession } from '../lib/session';
 
@@ -35,7 +35,7 @@ const STORE_NAV: StoreNavItem[][] = [
     { to: '/ledger', label: '流水', icon: ReceiptText, perm: 'ledger.readToday' },
     { to: '/settlement', label: '日结', icon: CalendarCheck2, perm: 'ledger.readToday' },
     { to: '/shift', label: '交班', icon: ClipboardCheck, perm: 'ledger.readToday' },
-    { to: '/dashboard', label: '看板', icon: LayoutDashboard, perm: ['ledger.readToday', 'report.executive', 'report.members', 'report.technicians', 'member.retention'] },
+    // 看板 2026-11-10 起整合到后台「数据看板」（店主：统一在后台查看、管理）；门店的旧地址 /dashboard 跳过去
     // 他店查询（v0.7.23，会员体系 v2）：另一家店的同事按手机号或会员号查会员的档阶（只读）
     // 本店能看会员的岗位用会员工作台，不另显示
     { to: '/lookup', label: '会员查询', icon: ScanSearch, perm: 'member.lookup', when: (s) => !s.permissions.includes('member.read') },
@@ -44,8 +44,8 @@ const STORE_NAV: StoreNavItem[][] = [
     // 设备（v0.7.21，RQ-001）：一屏看全部设备、本机终端
     { to: '/devices', label: '设备', icon: Printer, perm: 'device.view' },
   ],
-  // 管理后台是单独的一套页面（规则、价目、手牌池、员工与权限）
-  [{ to: '/admin', label: '后台', icon: Settings2, perm: [...ADMIN_PERMISSIONS] }],
+  // 管理后台是单独的一套页面（规则、价目、手牌池、员工与权限、数据看板）；只有看板权限的岗位进去只看得到数据看板
+  [{ to: '/admin', label: '后台', icon: Settings2, perm: [...ADMIN_ENTRY_PERMISSIONS] }],
 ];
 
 /**

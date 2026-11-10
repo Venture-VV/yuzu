@@ -241,4 +241,32 @@ test.describe('付款流（v0.7.32）', () => {
       expect(r.status(), await r.text()).toBe(200);
     }
   });
+
+  test('付款规则：两个页面同时开着各改一项，后保存的不把先保存的改回去（Codex 审查 #82 b240f89 的 P1，8.0.7 修）', async ({ page }) => {
+    await login(page, 'linlan');
+    const other = await page.context().newPage();
+    try {
+      await page.goto('/erp/payments?tab=rules');
+      await other.goto('/erp/payments?tab=rules');
+      await expect(page.getByTestId('pay-rules-weeks')).toHaveValue('4');
+      await expect(other.getByTestId('pay-rules-weeks')).toHaveValue('4');
+      // 第一个页面改周数、保存
+      await page.getByTestId('pay-rules-weeks').fill('3');
+      await page.getByTestId('payment-rules-save').click();
+      await expect(page.getByText('付款规则已保存').first()).toBeVisible();
+      // 第二个页面还是打开时的 4 周，只改比例、保存：周数不能被改回 4
+      await other.getByTestId('pay-rules-pct').fill('0.8');
+      await other.getByTestId('payment-rules-save').click();
+      await expect(other.getByText('付款规则已保存').first()).toBeVisible();
+      const saved = (await (await page.request.get('/api/erp/payments/rules')).json()) as { weeklyWeeks: number; threeWayPctBp: number };
+      expect(saved).toMatchObject({ weeklyWeeks: 3, threeWayPctBp: 80 });
+      // 没改动时不提交
+      await other.getByTestId('payment-rules-save').click();
+      await expect(other.getByText('没有改动').first()).toBeVisible();
+    } finally {
+      await other.close();
+      const r = await page.request.put('/api/erp/payments/rules', { data: DEFAULT_PAYMENT_RULES });
+      expect(r.status(), await r.text()).toBe(200);
+    }
+  });
 });

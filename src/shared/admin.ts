@@ -1,4 +1,6 @@
 // 管理后台（v0.6.0）：后台与前台分开，规则设置集中在后台；每个分区按权限开放。
+// 数据看板（店主 2026-11-10）：门店主导航原来的「看板」整合到后台，统一在后台查看、管理；原来能看看板的岗位照旧能看——
+// 只有看板权限的岗位（值班经理、客户经理、收银）也能进后台，但只看得到「数据看板」这一个分区。
 
 import type { InstanceKind } from './instance';
 import type { EditableRole, Permission, Role, RoleOverrides } from './permissions';
@@ -9,6 +11,12 @@ export const ADMIN_SECTIONS = {
     path: '/admin',
     label: '后台首页',
     perms: ['settings.manage', 'catalog.manage', 'staff.manage', 'audit.read', 'wallet.opening', 'frontdesk.tags', 'technician.manage', 'coupon.manage', 'device.manage', 'member.rules', 'benefit.publish'],
+  },
+  // 数据看板（原门店主导航的「看板」，店主 2026-11-10 整合到后台）：各页签照旧按权限显示——今日、经营总览、会员总览、会员体系、技师业绩、客房、营销成本
+  dashboard: {
+    path: '/admin/dashboard',
+    label: '数据看板',
+    perms: ['ledger.readToday', 'report.executive', 'report.members', 'member.retention', 'report.technicians', 'marketing.cost'],
   },
   settings: { path: '/admin/settings', label: '规则总表', perms: ['settings.manage', 'audit.read'] },
   rules: { path: '/admin/rules', label: '经营规则', perms: ['settings.manage'] },
@@ -40,8 +48,10 @@ export const ADMIN_SECTIONS = {
 } as const satisfies Record<string, { path: string; label: string; perms: readonly Permission[] }>;
 
 export type AdminSection = keyof typeof ADMIN_SECTIONS;
-/** 能进后台的权限（有其一即可） */
+/** 能进后台首页、看后台各个设置分区的权限（有其一即可） */
 export const ADMIN_PERMISSIONS: readonly Permission[] = ADMIN_SECTIONS.home.perms;
+/** 能进后台的权限（有其一即可）：后台首页的权限，加上数据看板的权限（只有看板权限的只看得到数据看板） */
+export const ADMIN_ENTRY_PERMISSIONS: readonly Permission[] = [...new Set<Permission>([...ADMIN_SECTIONS.home.perms, ...ADMIN_SECTIONS.dashboard.perms])];
 
 export const RULE_GROUPS = {
   store: '门店与营业',
@@ -55,6 +65,7 @@ export const RULE_GROUPS = {
   floormap: '平面图与导览',
   locations: '实时位置',
   inventory: '库存与采购',
+  erp: 'ERP（审批中心、合同）',
   staff: '岗位与权限',
 } as const;
 export type RuleGroup = keyof typeof RULE_GROUPS;

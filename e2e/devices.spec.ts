@@ -27,6 +27,12 @@ async function postJson<T = Record<string, unknown>>(request: APIRequestContext,
   return (await r.json()) as T;
 }
 
+/** 打印方式（8.0.7，店主 2026-11-10 默认「本机打印」）：测网口小票机前改成「服务器直连网口小票机」，测完改回 */
+async function setPrintMode(request: APIRequestContext, printMode: 'local' | 'network') {
+  const r = await request.put('/api/settings', { data: { printMode } });
+  expect(r.ok(), `打印方式 → ${r.status()} ${await r.text()}`).toBe(true);
+}
+
 /** 停用测试登记的设备：不让应用之后一直去连已经关掉的模拟端口 */
 async function disable(request: APIRequestContext, code: string) {
   const list = (await (await request.get('/api/devices')).json()) as { id: number; code: string; version: number; enabled: boolean }[];
@@ -41,6 +47,7 @@ test.describe('设备', () => {
     const code = `PRN-E2E-${run}`;
     try {
       await login(page);
+      await setPrintMode(page.request, 'network');
       await postJson(page.request, '/api/devices', { clientKey: randomUUID(), code, name: `测试小票机 ${run}`, kind: 'printer', area: '收银', connection: 'network', host: printer.host, port: printer.port });
       await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '设备', exact: true }).click();
       const row = page.getByTestId(`device-${code}`);
@@ -79,6 +86,7 @@ test.describe('设备', () => {
       await expect(row).toHaveAttribute('data-status', 'online', { timeout: 10_000 });
     } finally {
       await disable(page.request, code);
+      await setPrintMode(page.request, 'local');
       await printer.close();
     }
   });

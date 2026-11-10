@@ -5,7 +5,7 @@
 // 作废、标记已处理也只锁合同一行，再改那一条。维护合同的人登记。
 
 import { z } from 'zod';
-import type { ContractStatus } from '@shared/contracts';
+import { ACCEPTANCE_ITEM_MAX_CHARS, ACCEPTANCE_ITEMS_MAX, type ContractStatus } from '@shared/contracts';
 import { isUniqueViolation, type Db, type Tx } from '../../db';
 import { writeAudit } from '../../lib/audit';
 import type { Actor, Deps } from '../../lib/context';
@@ -38,8 +38,17 @@ const AcceptanceInput = z
     result: z.enum(['pass', 'fail'], '请选择验收结果'),
     signer: z.string('请填写签字人').trim().min(1, '请填写签字人').max(20, '签字人最多 20 个字'),
     note: z.string().trim().max(200, '说明最多 200 个字').default(''),
+    /** 逐条结果（8.0.7 2.5）：按合同里的验收标准打勾；有一条不合格整次就是不合格 */
+    items: z
+      .array(z.object({ item: z.string().trim().min(1).max(ACCEPTANCE_ITEM_MAX_CHARS), pass: z.boolean('请给每条标准选合格或不合格') }))
+      .max(ACCEPTANCE_ITEMS_MAX)
+      .default([]),
   })
-  .refine((v) => v.result === 'pass' || v.note.length >= 2, { message: '不合格请写明怎么处理（至少 2 个字）', path: ['note'] });
+  .refine((v) => v.result === 'pass' || v.note.length >= 2, { message: '不合格请写明怎么处理（至少 2 个字）', path: ['note'] })
+  .refine((v) => v.items.length === 0 || v.result === (v.items.every((i) => i.pass) ? 'pass' : 'fail'), {
+    message: '有一条标准不合格，整次验收就是不合格（全部合格才是合格）',
+    path: ['result'],
+  });
 
 /** 登记验收（合格 / 不合格）：验收日不晚于今天；以最近一条没作废的为准 */
 export async function createAcceptance(deps: Deps, contractId: number, raw: unknown, actor: Actor, ip?: string): Promise<{ id: number; replayed: boolean }> {
@@ -61,8 +70,9 @@ export async function createAcceptance(deps: Deps, contractId: number, raw: unkn
       const c = await lockContractRow(tx, contractId);
       assertSigned(c);
       const [row] = await tx<{ id: number }[]>`
-        INSERT INTO contract_acceptances (contract_id, accepted_on, result, signer, note, client_key, request_hash, created_by)
-        VALUES (${contractId}, ${input.acceptedOn}, ${input.result}, ${input.signer}, ${input.note}, ${input.clientKey}, ${requestHash}, ${actor.id})
+        INSERT INTO contract_acceptances (contract_id, accepted_on, result, signer, note, items, client_key, request_hash, created_by)
+        VALUES (${contractId}, ${input.acceptedOn}, ${input.result}, ${input.signer}, ${input.note},
+                ${input.items.length ? tx.json(input.items) : null}, ${input.clientKey}, ${requestHash}, ${actor.id})
         RETURNING id`;
       await writeAudit(tx, { staffId: actor.id, action: 'contract_doc', targetType: 'contract', targetId: contractId, detail: { op: 'acceptance', contractNo: c.contractNo, result: input.result, acceptedOn: input.acceptedOn }, ip });
       return { id: Number(row!.id), replayed: false };

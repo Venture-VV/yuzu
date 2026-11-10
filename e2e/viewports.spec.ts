@@ -70,10 +70,10 @@ async function expectFits(page: Page) {
 }
 
 test.describe('视口冒烟', () => {
-  test('看板：指标卡、近几天营业额、收款构成、当班中', async ({ page }) => {
+  test('看板：指标卡、近几天营业额、收款构成、当班中（2026-11-10 起在后台「数据看板」）', async ({ page }) => {
     await login(page, 'linlan');
-    await page.goto('/dashboard');
-    await expect(page.getByRole('heading', { name: '经营看板' })).toBeVisible();
+    await page.goto('/admin/dashboard');
+    await expect(page.getByRole('heading', { name: '数据看板' })).toBeVisible();
     const board = page.getByTestId('dashboard');
     // R1.2 起指标卡是「今日净营业额（应收 − 优惠）」，v0.7.20 起「…− 券抵扣 − 退款）」，v0.7.25 起「今日净营业额（应收 − 优惠 − 券抵扣 − 会员折扣 − 退款）」
     await expect(board).toContainText('今日净营业额');
@@ -166,7 +166,7 @@ test.describe('视口冒烟', () => {
         const nav = page.getByRole('navigation', { name: '主导航' });
         const viewport = page.viewportSize()!;
         const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
-        for (const name of ['前台', '钟房', '会员', '流水', '日结', '交班', '看板', '后台']) {
+        for (const name of ['前台', '钟房', '会员', '流水', '日结', '交班', '后台']) {
           const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
           expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
           expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
@@ -202,7 +202,7 @@ test.describe('视口冒烟', () => {
         const nav = page.getByRole('navigation', { name: '主导航' });
         const viewport = page.viewportSize()!;
         const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
-        for (const name of ['前台', '钟房', '餐饮', '会员', '流水', '日结', '交班', '看板', '后台']) {
+        for (const name of ['前台', '钟房', '餐饮', '会员', '流水', '日结', '交班', '后台']) {
           const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
           expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
           expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
@@ -249,7 +249,7 @@ test.describe('视口冒烟', () => {
         const nav = page.getByRole('navigation', { name: '主导航' });
         const viewport = page.viewportSize()!;
         const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
-        for (const name of ['前台', '钟房', '餐饮', '客房', '会员', '流水', '日结', '交班', '看板', '后台']) {
+        for (const name of ['前台', '钟房', '餐饮', '客房', '会员', '流水', '日结', '交班', '后台']) {
           const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
           expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
           expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
@@ -287,13 +287,13 @@ test.describe('视口冒烟', () => {
     const nav = page.getByRole('navigation', { name: '主导航' });
     const viewport = page.viewportSize()!;
     const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
-    for (const name of ['前台', '会员', '流水', '日结', '交班', '看板', '后台']) {
+    for (const name of ['前台', '会员', '流水', '日结', '交班', '后台']) {
       const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
       expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
       expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
     }
-    // v0.7.3：库存、采购、货款、待办在 ERP 工作区，不在主导航
-    for (const name of ['库存', '采购', '货款', '待办']) await expect(nav.getByRole('link', { name, exact: true })).toHaveCount(0);
+    // v0.7.3：库存、采购、货款、待办在 ERP 工作区，不在主导航；看板 2026-11-10 起在后台「数据看板」
+    for (const name of ['库存', '采购', '货款', '待办', '看板']) await expect(nav.getByRole('link', { name, exact: true })).toHaveCount(0);
   });
 
   test('ERP 工作区：首页、库存、采购、应付货款、审批中心、营业数据、模块设置都不横向滚动，实例标识常显（v0.7.3）', async ({ page, isMobile }) => {

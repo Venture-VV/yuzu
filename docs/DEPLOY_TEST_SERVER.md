@@ -133,6 +133,8 @@ POSTGRES_IMAGE=docker.m.daocloud.io/library/postgres:16-alpine
 NPM_REGISTRY=https://registry.npmmirror.com
 ALPINE_MIRROR=https://mirrors.aliyun.com/alpine
 WECOM_WEBHOOK_URL=<测试服告警群的机器人地址，不要和正式服用同一个群>
+# 可选（8.0.7）：ERP 每周一推的群机器人，与告警群分开；测试服的推送标题带「测试服·不作数」
+# ERP_WECOM_WEBHOOK=<测试服 ERP 提醒群的机器人地址>
 ```
 
 备份写在本机硬盘（`BACKUP_DIR`），不需要外置盘的哨兵文件。v0.3.3 起备份服务每小时备份一次，每份都在临时库里试恢复、自检并记下数据指纹；hourly 保留 48 小时，daily 等保留 30 天。

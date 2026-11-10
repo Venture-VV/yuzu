@@ -136,6 +136,10 @@ export interface DeptStockMeta {
     weighed: boolean;
   }[];
   suppliers: { id: number; code: string; name: string }[];
+  /** 耗用的用途（8.0.7 2.3，「经营规则 → 可调的数值」里改） */
+  purposes: string[];
+  /** 经办人能选的员工（在职的） */
+  staff: { id: number; name: string }[];
 }
 
 /** 需要负责人确认的单据（模拟规则，待店主确认）。盘点调整固定需要确认。 */
@@ -232,6 +236,12 @@ export interface Supplier {
   contracted: boolean;
   /** 在用的合同 PDF 份数 */
   contractFiles: number;
+  /** 准入状态（8.0.7 A2，@shared/supply）：待准入 / 已准入 / 暂停 */
+  admission: import('./supply').SupplierAdmission;
+  /** 准入、暂停时写的说明 */
+  admissionNote: string;
+  /** 在用的证照里最早到期的（没有或都长期的为空）；过期的也算 */
+  licenseDue: string | null;
   active: boolean;
   isSynthetic: boolean;
 }
@@ -290,6 +300,9 @@ export interface Material {
   counterUse: boolean;
   /** 称重（#14，v0.7.13）：按实际称重记数量，收货可以比采购单多出容差 */
   weighed: boolean;
+  /** 效期管理（8.0.7 3.3）：收货要填到期日；保质期天数（可空） */
+  expiryTracked: boolean;
+  shelfLifeDays: number | null;
   tracked: boolean;
   active: boolean;
   /** 总仓结存 */
@@ -360,6 +373,11 @@ export interface InvDocLine {
   /** 物料现在是台面日耗品 / 称重（单据表单的提示用） */
   counterUse: boolean;
   weighed: boolean;
+  /** 批号、生产日期、到期日（8.0.7 3.3，收货行）；物料管不管效期 */
+  batchNo: string | null;
+  producedOn: string | null;
+  expiresOn: string | null;
+  expiryTracked: boolean;
   note: string;
   /** 收货行：与此前同口径成交价的比较 */
   compare?: PriceCompare;
@@ -386,6 +404,9 @@ export interface InvDoc {
   handler: string;
   sourceDoc: DocRef | null;
   note: string;
+  /** 耗用的用途与经办人（8.0.7 2.3）：之前的耗用单与别的单据为空 */
+  usePurpose: string | null;
+  useHandler: Ref | null;
   amountCents: number;
   noPo: boolean;
   /** 这张单动的仓；领料与退回是部门小仓（另一头是总仓）；迁移前的领料、退回为空（没进部门小仓） */

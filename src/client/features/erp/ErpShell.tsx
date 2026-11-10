@@ -4,11 +4,13 @@
 import { useEffect, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Banknote, Boxes, ClipboardCheck, ClipboardList, FileSignature, FileText, HandCoins, LayoutGrid, LineChart, Package, ReceiptText, ShoppingCart, SlidersHorizontal, Soup, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, Banknote, Boxes, ClipboardCheck, ClipboardList, FileSignature, FileText, HandCoins, Landmark, LayoutGrid, LineChart, Monitor, Package, ReceiptText, ShoppingCart, SlidersHorizontal, Soup, type LucideIcon } from 'lucide-react';
 import type { ApprovalCounts } from '@shared/approvals';
 import type { ContractExpiryItem } from '@shared/contracts';
 import type { PaymentTodo } from '@shared/payments';
 import type { InvoiceTodo } from '@shared/invoices';
+import type { SupplyTodo } from '@shared/supply';
+import type { ArTodo } from '@shared/ar';
 import { ERP_MODULES, erpModuleOfPage, type ErpModuleKey } from '@shared/erp';
 import { versionText } from '@shared/instance';
 import { DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
@@ -26,11 +28,13 @@ const ICONS: Record<ErpModuleKey, LucideIcon> = {
   requests: ClipboardList,
   deptStock: Package,
   payables: HandCoins,
+  assets: Monitor,
   approvals: ClipboardCheck,
   contracts: FileSignature,
   payments: Banknote,
   expenses: ReceiptText,
   invoices: FileText,
+  receivables: Landmark,
   revenue: LineChart,
   canteen: Soup,
 };
@@ -92,6 +96,20 @@ export function ErpShell() {
     enabled: access.modules.includes('invoices') && (can('payable.read') || can('expense.read') || can('invoice.manage')),
     refetchInterval: 300_000,
   });
+  // 供应链（8.0.7）：库存——呆滞、临期与过期的批次；采购——待准入的供应商、快到期与过期的证照
+  const supplyTodo = useQuery({
+    queryKey: ['inv', 'supply-todo'],
+    queryFn: () => api.get<SupplyTodo>('/api/inventory/supply-todo'),
+    enabled: access.modules.includes('inventory') && can('inventory.read'),
+    refetchInterval: 300_000,
+  });
+  // 应收与挂账（8.0.7）：超过提醒天数没回的挂账笔数
+  const arTodo = useQuery({
+    queryKey: ['erp', 'receivables', 'todo'],
+    queryFn: () => api.get<ArTodo>('/api/erp/receivables/todo'),
+    enabled: access.modules.includes('receivables') && can('ar.read'),
+    refetchInterval: 300_000,
+  });
   if (!access.canEnter) return <Navigate to="/" replace />;
   const contractsDue = (expiring.data ?? []).filter((x) => !x.renewal);
   const paymentsBadge = payTodo.data ? (can('payable.manage') ? payTodo.data.awaitingPayment : 0) + payTodo.data.warrantyDue : undefined;
@@ -112,11 +130,20 @@ export function ErpShell() {
               ? toClaim.data?.received
               : k === 'invoices'
                 ? invTodo.data?.due
-                : undefined,
+                : k === 'inventory' && supplyTodo.data
+                  ? supplyTodo.data.slowMoving + supplyTodo.data.expiringLots + supplyTodo.data.expiredLots || undefined
+                  : k === 'purchasing' && supplyTodo.data
+                    ? supplyTodo.data.pendingAdmission + supplyTodo.data.licensesDue || undefined
+                    : k === 'receivables' && arTodo.data
+                      ? arTodo.data.overdueCharges + (arTodo.data.platformOverdueCents > 0 ? 1 : 0) || undefined
+                      : undefined,
     alert:
       (k === 'approvals' && !!todo.data?.overdue) ||
       (k === 'contracts' && contractsDue.some((x) => x.daysLeft < 0)) ||
-      (k === 'invoices' && !!invTodo.data?.overdue),
+      (k === 'invoices' && !!invTodo.data?.overdue) ||
+      (k === 'inventory' && !!supplyTodo.data?.expiredLots) ||
+      (k === 'purchasing' && !!supplyTodo.data?.licensesExpired) ||
+      (k === 'receivables' && !!arTodo.data && (arTodo.data.overdueCharges > 0 || arTodo.data.platformOverdueCents > 0)),
   });
   const groups: { title: string; items: Item[] }[] = [
     { title: '概览', items: [{ key: 'home', to: '/erp', label: 'ERP 首页', icon: LayoutGrid, end: true }] },

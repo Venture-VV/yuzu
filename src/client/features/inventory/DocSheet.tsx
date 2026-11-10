@@ -245,6 +245,8 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             </Info>
           )}
           {doc.coAcceptor && <Info label="一起验收的采购">{doc.coAcceptor.name}</Info>}
+          {doc.docType === 'direct_use' && <Info label="用途">{doc.usePurpose ?? <span className="text-ink-3">（v8.0.7 以前没记）</span>}</Info>}
+          {doc.useHandler && <Info label="耗用经办人">{doc.useHandler.name}</Info>}
           {doc.handler && <Info label={doc.docType === 'receipt' ? '收货人' : doc.docType === 'issue' ? '领料人' : '经办人'}>{doc.handler}</Info>}
           {doc.sourceDoc && (
             <Info label="原单">
@@ -330,6 +332,13 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
                     </Mini>
                     <Mini label={`单价/${l.purchaseUnit}`}>{l.priceCents !== null ? <Money cents={l.priceCents} /> : '—'}</Mini>
                     {l.rejectReason && <p className="col-span-full text-clay">拒收原因：{l.rejectReason}（不入库、不计货款）</p>}
+                    {(l.batchNo || l.expiresOn) && (
+                      <p className="col-span-full text-ink-3">
+                        {l.batchNo ? `批号 ${l.batchNo}` : ''}
+                        {l.producedOn ? ` · 生产 ${l.producedOn}` : ''}
+                        {l.expiresOn ? ` · 到期 ${l.expiresOn}` : ''}
+                      </p>
+                    )}
                     {l.compare && (
                       <p className="col-span-full">
                         <CompareChip compare={l.compare} unit={l.purchaseUnit} />

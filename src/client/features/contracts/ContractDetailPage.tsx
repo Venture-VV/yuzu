@@ -9,6 +9,7 @@ import {
   ArrowLeft,
   FilePen,
   FileStack,
+  FileText,
   ImagePlus,
   PenLine,
   RefreshCw,
@@ -25,7 +26,6 @@ import {
   CONTRACT_CATEGORY_LABELS,
   CONTRACT_EDITABLE,
   CONTRACT_EFFECTIVE,
-  CONTRACT_EXPIRY_REMIND_DAYS,
   SEAL_STATUS_LABELS,
   SEAL_TYPES,
   SEAL_TYPE_LABELS,
@@ -36,6 +36,7 @@ import {
   type SealView,
 } from '@shared/contracts';
 import { formatAmount } from '@shared/money';
+import { pdfMaxBytes } from '@shared/tunables';
 import { PO_STATUS_LABELS, type PoStatus } from '@shared/purchasing';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
@@ -89,6 +90,7 @@ type DialogState =
   | null;
 
 function Detail({ c }: { c: ContractDetail }) {
+  const remindDays = useSession().rules.contractRemindDays;
   const can = useCan();
   const toast = useToast();
   const navigate = useNavigate();
@@ -130,7 +132,7 @@ function Detail({ c }: { c: ContractDetail }) {
           onFound={() => void invalidate()}
         />
       )}
-      {effective && c.daysLeft !== null && c.daysLeft <= CONTRACT_EXPIRY_REMIND_DAYS && !c.renewal && (
+      {effective && c.daysLeft !== null && c.daysLeft <= remindDays && !c.renewal && (
         <Notice tone={c.daysLeft < 0 ? 'error' : 'warning'} title={`${c.endDate} ${daysLeftText(c.daysLeft)}，还没有续签`} data-testid="contract-expiry-notice">
           {manage ? '要接着合作就续签（照这份合同预填一份新合同，走审查）；不再合作的可以不管，过了结束日台账里标「已过期」。' : '请经办人续签或确认不再合作。'}
         </Notice>
@@ -771,8 +773,17 @@ function SealDialog({ open, c, seal, onClose, onDone }: { open: boolean; c: Cont
 
 // ───────────────────────── 扫描件 ─────────────────────────
 
+const fileBase64 = (file: Blob) =>
+  new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ''));
+    r.onerror = () => reject(r.error ?? new Error('读不了这个文件'));
+    r.readAsDataURL(file);
+  });
+
 function FilesCard({ c, manage, onChanged }: { c: ContractDetail; manage: boolean; onChanged: () => unknown }) {
   const toast = useToast();
+  const rules = useSession().rules;
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   // 一次选了几页时逐页上传，按钮上显示进度（Codex 自动审查 d64e3ed：原来只传前 20 张、后面的悄悄丢掉）
@@ -790,7 +801,13 @@ function FilesCard({ c, manage, onChanged }: { c: ContractDetail; manage: boolea
     try {
       for (const f of list) {
         setProgress({ done, total: list.length });
-        await api.post(`/api/erp/contracts/${c.id}/files`, await imagePayload(f), { timeoutMs: 30_000 });
+        // PDF（8.0.7 起）：每份按「经营规则 → 可调的数值」的大小，最多 10 MB
+        if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) {
+          if (f.size > pdfMaxBytes(rules)) throw new Error(`「${f.name}」超过 ${rules.pdfMaxMb} MB`);
+          await api.post(`/api/erp/contracts/${c.id}/files`, { name: f.name.replace(/\.[^.]+$/, '').slice(0, 80), mime: 'application/pdf', data: await fileBase64(f) }, { timeoutMs: 60_000 });
+        } else {
+          await api.post(`/api/erp/contracts/${c.id}/files`, await imagePayload(f), { timeoutMs: 30_000 });
+        }
         done += 1;
       }
       toast({ tone: 'success', title: '扫描件已上传', body: `${c.contractNo}：${done} 页` });
@@ -824,10 +841,10 @@ function FilesCard({ c, manage, onChanged }: { c: ContractDetail; manage: boolea
     <Card className="p-5">
       <div className="mb-2 flex items-center gap-2">
         <h2 className="text-[14px] font-bold">扫描件</h2>
-        <span className="text-[12.5px] text-ink-3">签好的合同按页拍照上传；归档后只能追加</span>
+        <span className="text-[12.5px] text-ink-3">签好的合同按页拍照，或上传扫描好的 PDF；归档后只能追加</span>
         {canAdd && (
           <>
-            <input ref={input} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void upload(e.target.files)} data-testid="contract-file-input" />
+            <input ref={input} type="file" accept="image/*,application/pdf,.pdf" multiple className="hidden" onChange={(e) => void upload(e.target.files)} data-testid="contract-file-input" />
             <Button size="sm" variant="secondary" className="ml-auto" loading={busy} icon={<ImagePlus className="size-4" />} onClick={() => input.current?.click()} data-testid="contract-file-upload">
               {progress && progress.total > 1 ? `上传中 ${progress.done + 1}/${progress.total}` : '上传'}
             </Button>
@@ -840,9 +857,23 @@ function FilesCard({ c, manage, onChanged }: { c: ContractDetail; manage: boolea
         <ul className="flex flex-wrap gap-2" data-testid="contract-files">
           {c.files.map((f, i) => (
             <li key={f.id} className="relative">
-              <button type="button" onClick={() => setViewing(f.url)} className="block size-20 overflow-hidden rounded-md border border-line bg-paper-2 hover:border-line-strong" aria-label={`查看第 ${i + 1} 页`}>
-                <img src={f.url} alt="" loading="lazy" className="size-full object-cover" />
-              </button>
+              {f.kind === 'pdf' ? (
+                <a
+                  href={f.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex size-20 flex-col items-center justify-center gap-1 overflow-hidden rounded-md border border-line bg-paper-2 px-1 text-center text-[11px] font-semibold text-lake hover:border-line-strong"
+                  aria-label={`打开 PDF ${f.name}`}
+                  data-testid="contract-file-pdf"
+                >
+                  <FileText className="size-6" />
+                  <span className="line-clamp-2 break-all">{f.name || 'PDF'}</span>
+                </a>
+              ) : (
+                <button type="button" onClick={() => setViewing(f.url)} className="block size-20 overflow-hidden rounded-md border border-line bg-paper-2 hover:border-line-strong" aria-label={`查看第 ${i + 1} 页`}>
+                  <img src={f.url} alt="" loading="lazy" className="size-full object-cover" />
+                </button>
+              )}
               {canRemove && (
                 <button
                   type="button"

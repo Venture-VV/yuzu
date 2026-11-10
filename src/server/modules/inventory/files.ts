@@ -15,8 +15,10 @@ import { attachment } from '../../lib/csv';
 import type { Actor, Deps } from '../../lib/context';
 import { conflict, notFound, unprocessable } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
+import { pdfMaxBytes } from '@shared/tunables';
+import { loadSettings } from '../settings';
 
-export type FileScope = 'supplier_contract' | 'receipt' | 'invoice';
+export type FileScope = 'supplier_contract' | 'receipt' | 'invoice' | 'supplier_license' | 'contract_scan';
 
 const PdfInput = z.object({
   name: z.string().trim().min(1, '请写文件名').max(80, '文件名最多 80 个字'),
@@ -28,7 +30,9 @@ const PdfInput = z.object({
 export async function storePdf(db: Db, scope: FileScope, base64: string, actor: Actor): Promise<{ id: number; sizeBytes: number }> {
   const buf = Buffer.from(base64, 'base64');
   if (buf.length === 0 || buf.subarray(0, 5).toString('latin1') !== '%PDF-') throw unprocessable('FILE_NOT_PDF', '这不是 PDF 文件，请导出成 PDF 再上传');
-  if (buf.length > MAX_PDF_BYTES) throw unprocessable('FILE_TOO_LARGE', '文件不能超过 10 MB');
+  // 每份最大（CG08，默认 10 MB，8.0.7 起在「经营规则 → 可调的数值」里往小调）
+  const { pdfMaxMb } = await loadSettings(db);
+  if (buf.length > Math.min(MAX_PDF_BYTES, pdfMaxBytes({ pdfMaxMb }))) throw unprocessable('FILE_TOO_LARGE', `文件不能超过 ${pdfMaxMb} MB`);
   const sha256 = createHash('sha256').update(buf).digest('hex');
   await db`
     INSERT INTO erp_files (scope, sha256, mime, size_bytes, data, created_by)

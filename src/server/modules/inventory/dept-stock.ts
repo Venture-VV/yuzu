@@ -7,11 +7,16 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { CENTRAL_WAREHOUSE_ID, INV_DOC_TYPES, ISSUE_SIGN_DUE_DAYS, type DeptStockMeta, type InvDoc } from '@shared/inventory';
+import { shiftDate } from '@shared/labels';
+import type { ConsumptionRecord } from '@shared/supply';
 import { can } from '@shared/permissions';
 import { readSnapshot, type Db } from '../../db';
 import { guardAny } from '../../auth/guard';
 import type { Actor, Deps } from '../../lib/context';
 import { badRequest, forbidden, notFound } from '../../lib/errors';
+import { csvReply, toCsv } from '../../lib/csv';
+import { checkDateRange, todayIn } from '../../lib/dates';
+import { loadSettings } from '../settings';
 import { idParam, parse } from '../../lib/validate';
 import { actorDepartmentId, deptBalances, docDateSchema, loadInventorySettings } from './common';
 import {
@@ -112,7 +117,48 @@ export async function deptStockMeta(db: Db, actor: Actor): Promise<DeptStockMeta
       SELECT id, code, name, category, specification, inventory_unit, decimals, purchase_unit, purchase_factor_milli, counter_use, weighed
       FROM materials WHERE active AND tracked ORDER BY code`,
     suppliers: await db<DeptStockMeta['suppliers']>`SELECT id, code, name FROM suppliers WHERE active ORDER BY code`,
+    // 耗用的用途与经办人（8.0.7 2.3）
+    purposes: (await loadSettings(db)).consumptionPurposes,
+    staff: await db<DeptStockMeta['staff']>`SELECT id, display_name AS name FROM staff WHERE active ORDER BY display_name, id`,
   };
+}
+
+const ConsumptionQuery = z.object({
+  from: docDateSchema.optional(),
+  to: docDateSchema.optional(),
+  purpose: z.string().trim().max(12).optional(),
+  handlerId: z.coerce.number().int().positive().optional(),
+});
+
+/**
+ * 部门的耗用记录（8.0.7 2.3）：这个部门小仓生效、冲销的耗用单，按行列出（用途、经办人、说明、物料、数量）；
+ * 不给价格（部门的员工看不到采购价）。8.0.7 以前的耗用单用途、经办人为空。默认看近 31 天。
+ */
+export async function consumptionRecords(db: Db, warehouseId: number, timeZone: string, raw: unknown): Promise<ConsumptionRecord[]> {
+  const q = parse(ConsumptionQuery, raw);
+  const to = q.to ?? todayIn(timeZone);
+  const from = q.from ?? shiftDate(to, -30);
+  checkDateRange(from, to);
+  const rows = await db<ConsumptionRecord[]>`
+    SELECT d.id AS doc_id, d.doc_no, d.doc_date::text AS doc_date, dep.id AS department_id, dep.name AS department_name,
+           d.use_purpose AS purpose, d.use_handler_id AS handler_id, h.display_name AS handler_name, d.note,
+           m.code AS material_code, m.name AS material_name, m.inventory_unit, m.decimals, l.qty_milli AS quantity_milli, d.status
+    FROM inv_docs d JOIN inv_doc_lines l ON l.doc_id = d.id JOIN materials m ON m.id = l.material_id
+    JOIN warehouses w ON w.id = d.warehouse_id JOIN departments dep ON dep.id = w.department_id
+    LEFT JOIN staff h ON h.id = d.use_handler_id
+    WHERE d.doc_type = 'direct_use' AND d.warehouse_id = ${warehouseId} AND d.status IN ('confirmed', 'voided')
+      AND d.doc_date BETWEEN ${from} AND ${to}
+      ${q.purpose ? db`AND d.use_purpose = ${q.purpose}` : db``}
+      ${q.handlerId ? db`AND d.use_handler_id = ${q.handlerId}` : db``}
+    ORDER BY d.doc_date DESC, d.id DESC, l.line_no
+    LIMIT 2000`;
+  return rows.map((r) => ({
+    ...r,
+    docId: Number(r.docId),
+    departmentId: Number(r.departmentId),
+    handlerId: r.handlerId === null ? null : Number(r.handlerId),
+    quantityMilli: Number(r.quantityMilli),
+  }));
 }
 
 const DocsQuery = z.object({
@@ -146,6 +192,34 @@ export function registerDeptStockRoutes(app: FastifyInstance, deps: Deps) {
     return readSnapshot(sql, (tx) =>
       deptStocktakeReminder(tx, { id: d.warehouseId, name: `${d.name}小仓`, kind: 'department', departmentId: d.id }, deps.config.timezone),
     );
+  });
+
+  // 耗用记录（8.0.7 2.3）：按日期、用途、经办人筛，能导出
+  app.get('/api/erp/dept-stock/:id/consumption', { preHandler: anyDept }, async (req) => {
+    const d = await assertVisibleDept(sql, req.actor, parse(idParam, req.params).id);
+    return consumptionRecords(sql, d.warehouseId, deps.config.timezone, req.query);
+  });
+  app.get('/api/erp/dept-stock/:id/consumption/export', { preHandler: anyDept }, async (req, reply) => {
+    const d = await assertVisibleDept(sql, req.actor, parse(idParam, req.params).id);
+    const rows = await consumptionRecords(sql, d.warehouseId, deps.config.timezone, req.query);
+    const qty = (milli: number, decimals: number) => (milli / 1000).toFixed(decimals);
+    const csv = toCsv([
+      ['日期', '单号', '部门', '用途', '经办人', '说明', '物料编码', '物料', '数量', '单位', '状态'],
+      ...rows.map((r) => [
+        r.docDate,
+        r.docNo,
+        r.departmentName,
+        r.purpose ?? '（v8.0.7 以前没记）',
+        r.handlerName ?? '',
+        r.note,
+        r.materialCode,
+        r.materialName,
+        qty(r.quantityMilli, r.decimals),
+        r.inventoryUnit,
+        r.status === 'voided' ? '已冲销' : '已生效',
+      ]),
+    ]);
+    return csvReply(reply, `耗用记录_${d.name}.csv`, csv);
   });
 
   app.get('/api/erp/dept-stock/:id/docs', { preHandler: anyDept }, async (req) => {

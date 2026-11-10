@@ -2,11 +2,12 @@ import { SUPPLIER_SETTLEMENT_LABELS, type SupplierSettlement } from '@shared/exp
 import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileText, Plus, Search, Upload } from 'lucide-react';
-import { MAX_PDF_BYTES, RECONCILE_CYCLE_LABELS, RECONCILE_CYCLES, type Department, type Material, type ReconcileCycle, type Supplier, type SupplierContractFile } from '@shared/inventory';
+import { RECONCILE_CYCLE_LABELS, RECONCILE_CYCLES, type Department, type Material, type ReconcileCycle, type Supplier, type SupplierContractFile } from '@shared/inventory';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { conversionText, formatQty, parseQty } from '@shared/quantity';
 import { api, errorMessage } from '../../lib/api';
-import { useCan } from '../../lib/session';
+import { useCan, useSession } from '../../lib/session';
+import { pdfMaxBytes } from '@shared/tunables';
 import { cn, formatDateTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { Dialog } from '../../components/Overlay';
@@ -14,6 +15,7 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Field, Input, MoneyInput, Notice, Segmented, Select, Skeleton } from '../../components/ui';
 import { SimRule } from './parts';
 import { useDepartments, useInvalidateInventory, useMaterials, useSuppliers } from './queries';
+import { AdmissionBadges, AdmissionSection } from './SupplierAdmission';
 import { usePurchaseRules } from '../purchasing/queries';
 
 type Section = 'materials' | 'suppliers' | 'departments';
@@ -181,6 +183,8 @@ export function MaterialDialog({
       coverDays,
       counterUse: form.counterUse,
       weighed: form.weighed,
+      expiryTracked: form.expiryTracked,
+      shelfLifeDays: form.shelfLifeDays.trim() ? Number(form.shelfLifeDays) : null,
       tracked: form.tracked,
       active: form.active,
       note: form.note.trim(),
@@ -302,6 +306,20 @@ export function MaterialDialog({
               <span className="block text-[12px] text-ink-3">按斤等计量的：按实际称重记数量（至少 1 位小数），收货可以比采购单多出称重容差（规则总表里调），货款按实收重量算</span>
             </span>
           </label>
+          <label className="flex items-start gap-2.5 text-[13px]">
+            <input type="checkbox" className="mt-0.5 size-4 accent-[var(--color-pine)]" checked={form.expiryTracked} onChange={(e) => set({ expiryTracked: e.target.checked })} data-testid="m-expiry" />
+            <span>
+              <span className="font-bold">效期管理</span>
+              <span className="block text-[12px] text-ink-3">食品、药品、化学品等：收货时填批号与到期日，库存「呆滞与临期」里看快到期的批次（先进先出推算剩下的是哪几批）</span>
+              {form.expiryTracked && (
+                <span className="mt-1 flex items-center gap-1.5">
+                  保质期
+                  <Input fullWidth={false} inputMode="numeric" value={form.shelfLifeDays} onChange={(e) => set({ shelfLifeDays: e.target.value })} className="h-8 w-20" aria-label="保质期天数" />
+                  天（选填：填了的收货时只填生产日期也行）
+                </span>
+              )}
+            </span>
+          </label>
         </div>
 
         <Field label="纳入库存" className="sm:col-span-3" hint="候选物料只保留档案，不进入首轮库存">
@@ -351,6 +369,8 @@ function toForm(m: Material | null) {
     coverDays: m?.coverDays != null ? String(m.coverDays) : '',
     counterUse: m?.counterUse ?? false,
     weighed: m?.weighed ?? false,
+    expiryTracked: m?.expiryTracked ?? false,
+    shelfLifeDays: m?.shelfLifeDays != null ? String(m.shelfLifeDays) : '',
     tracked: m?.tracked ?? true,
     active: m?.active ?? true,
     note: m?.note ?? '',
@@ -361,6 +381,10 @@ function toForm(m: Material | null) {
 
 function Suppliers({ editable }: { editable: boolean }) {
   const suppliers = useSuppliers(true);
+  const can = useCan();
+  const session = useSession();
+  // 负责人（「审核」权限）没有维护档案的权限也能打开，看证照、准入或暂停（8.0.7 2.1）
+  const openable = editable || can('inventory.approve');
   const [editing, setEditing] = useState<Supplier | 'new' | null>(null);
   return (
     <>
@@ -381,7 +405,7 @@ function Suppliers({ editable }: { editable: boolean }) {
             <li key={s.id}>
               <button
                 type="button"
-                disabled={!editable}
+                disabled={!openable}
                 onClick={() => setEditing(s)}
                 className={cn('w-full rounded-lg border border-line bg-card px-4 py-3 text-left shadow-card transition-colors enabled:hover:border-line-strong', !s.active && 'opacity-55')}
               >
@@ -393,6 +417,7 @@ function Suppliers({ editable }: { editable: boolean }) {
                   {s.settlement === 'credit' && s.reconcileCycle === 'batch' && <Badge tone="lake">按批次对账</Badge>}
                   {!s.active && <Badge>已停用</Badge>}
                   {s.isSynthetic && <Badge tone="ember">合成</Badge>}
+                  <AdmissionBadges s={s} today={session.calendarToday} remindDays={session.rules.licenseRemindDays} />
                 </p>
                 <p className="mt-0.5 truncate text-[12.5px] text-ink-3">{[s.contact, s.phone].filter(Boolean).join(' · ') || '未填写联系人'}</p>
                 {s.note && <p className="truncate text-[12px] text-ink-3">{s.note}</p>}
@@ -401,12 +426,12 @@ function Suppliers({ editable }: { editable: boolean }) {
           ))}
         </ul>
       )}
-      <SupplierDialog editing={editing} onClose={() => setEditing(null)} />
+      <SupplierDialog editing={editing} readOnly={!editable} onClose={() => setEditing(null)} />
     </>
   );
 }
 
-function SupplierDialog({ editing, onClose }: { editing: Supplier | 'new' | null; onClose: () => void }) {
+function SupplierDialog({ editing, readOnly, onClose }: { editing: Supplier | 'new' | null; readOnly: boolean; onClose: () => void }) {
   const toast = useToast();
   const invalidate = useInvalidateInventory();
   const purchaseRules = usePurchaseRules(!!editing);
@@ -468,18 +493,33 @@ function SupplierDialog({ editing, onClose }: { editing: Supplier | 'new' | null
     <Dialog
       open={!!editing}
       onClose={onClose}
-      title={s ? `编辑供应商 · ${s.name}` : '新增供应商'}
+      title={s ? `${readOnly ? '' : '编辑供应商 · '}${s.name}` : '新增供应商'}
       footer={
-        <>
+        readOnly ? (
           <Button variant="secondary" onClick={onClose}>
-            取消
+            关闭
           </Button>
-          <Button variant="primary" loading={saving} onClick={save}>
-            保存
-          </Button>
-        </>
+        ) : (
+          <>
+            <Button variant="secondary" onClick={onClose}>
+              取消
+            </Button>
+            <Button variant="primary" loading={saving} onClick={save}>
+              保存
+            </Button>
+          </>
+        )
       }
     >
+      {readOnly && s ? (
+        <div className="grid gap-4 sm:grid-cols-3">
+          <p className="text-[13px] text-ink-2 sm:col-span-3">
+            <span className="num font-semibold">{s.code}</span> · {[s.contact, s.phone].filter(Boolean).join(' · ') || '未填写联系人'}
+            {s.note ? ` · ${s.note}` : ''}
+          </p>
+          <AdmissionSection supplier={s} />
+        </div>
+      ) : (
       <div className="grid gap-4 sm:grid-cols-3">
         <Field label="编码" htmlFor="s-code">
           <Input id="s-code" value={form.code} maxLength={16} onChange={(e) => setForm({ ...form, code: e.target.value })} data-autofocus />
@@ -563,8 +603,11 @@ function SupplierDialog({ editing, onClose }: { editing: Supplier | 'new' | null
           />
         </Field>
         {error && <Notice tone="error" title={error} className="sm:col-span-3" />}
+        {s && <AdmissionSection supplier={s} />}
+        {!s && <p className="text-[12.5px] text-ink-3 sm:col-span-3">新建的供应商是「待准入」：保存以后登记营业执照，由负责人准入（经营规则里打开「采购单只能给已准入的供应商」以后，没准入的不能下采购单）。</p>}
         {s && <ContractFiles supplier={s} pendingContracted={form.contracted} />}
       </div>
+      )}
     </Dialog>
   );
 }
@@ -580,6 +623,7 @@ const toBase64 = (file: File) =>
 
 /** 签约供应商的合同 PDF（8.0.1，CG08）：可以传多份、下载、撤下（撤下保留记录）；同一份文件不重复挂 */
 function ContractFiles({ supplier, pendingContracted }: { supplier: Supplier; pendingContracted: boolean }) {
+  const rules = useSession().rules;
   const can = useCan();
   const toast = useToast();
   const qc = useQueryClient();
@@ -598,7 +642,7 @@ function ContractFiles({ supplier, pendingContracted }: { supplier: Supplier; pe
     if (!file) return;
     setError(null);
     if (file.type && file.type !== 'application/pdf') return setError('只能上传 PDF 文件');
-    if (file.size > MAX_PDF_BYTES) return setError('文件不能超过 10 MB');
+    if (file.size > pdfMaxBytes(rules)) return setError(`文件不能超过 ${rules.pdfMaxMb} MB`);
     setBusy('upload');
     try {
       const name = file.name.replace(/\.pdf$/i, '').slice(0, 80) || '合同';

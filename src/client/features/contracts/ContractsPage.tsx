@@ -3,10 +3,10 @@
 
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { CalendarClock, FilePlus2, Plus, RefreshCw } from 'lucide-react';
-import { CONTRACT_CATEGORIES, CONTRACT_CATEGORY_LABELS, CONTRACT_EXPIRY_REMIND_DAYS, type ContractCategory } from '@shared/contracts';
+import { CalendarClock, FilePlus2, ListChecks, Plus, RefreshCw } from 'lucide-react';
+import { CONTRACT_CATEGORIES, CONTRACT_CATEGORY_LABELS, type ContractCategory } from '@shared/contracts';
 import { errorMessage } from '../../lib/api';
-import { useCan } from '../../lib/session';
+import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
@@ -15,6 +15,7 @@ import { Badge, Button, Card, Input, Notice, Select, Skeleton } from '../../comp
 import { ErpPage } from '../erp/ErpHome';
 import { ContractStatusBadge, daysLeftText } from './parts';
 import { useContractExpiring, useContracts, type ContractFilter } from './queries';
+import { TemplatesDialog } from './TemplatesDialog';
 
 const FILTERS: { value: ContractFilter; label: string }[] = [
   { value: 'all', label: '全部' },
@@ -26,6 +27,8 @@ const FILTERS: { value: ContractFilter; label: string }[] = [
 ];
 
 export function ContractsPage() {
+  // 到期提醒的天数（C11）8.0.7 起在「经营规则 → 可调的数值」里改
+  const remindDays = useSession().rules.contractRemindDays;
   const can = useCan();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -35,6 +38,7 @@ export function ContractsPage() {
   const list = useContracts(filter, category, q);
   const expiring = useContractExpiring();
   const manage = can('contract.manage');
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   // 还没续签的才提醒；已经在续签（新合同没作废）的列在后面、标出续签的合同号
   const due = (expiring.data ?? []).filter((x) => !x.renewal);
   const renewing = (expiring.data ?? []).filter((x) => x.renewal);
@@ -44,13 +48,19 @@ export function ContractsPage() {
       title="合同"
       description="合同台账与四要素（单价、付款节点、质保、验收），法务按审查清单逐条审；签署、用印、扫描件归档；采购单可以挂合同、按单价表核对。"
       actions={
-        manage && (
-          <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => navigate('/erp/contracts/new')} data-testid="contract-new">
-            新建合同
+        <span className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" icon={<ListChecks className="size-4" />} onClick={() => setTemplatesOpen(true)} data-testid="acceptance-templates">
+            验收标准模板
           </Button>
-        )
+          {manage && (
+            <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => navigate('/erp/contracts/new')} data-testid="contract-new">
+              新建合同
+            </Button>
+          )}
+        </span>
       }
     >
+      <TemplatesDialog open={templatesOpen} onClose={() => setTemplatesOpen(false)} manage={manage} />
       <div className="space-y-4">
         {manage && <ErpPendingPanel types={['contract_create']} onFound={(_, ref) => navigate(`/erp/contracts/${ref.refId}`)} />}
 
@@ -58,7 +68,7 @@ export function ContractsPage() {
           <Notice
             tone={due.some((x) => x.daysLeft < 0) ? 'error' : 'warning'}
             icon={<CalendarClock className="size-5" />}
-            title={due.length > 0 ? `${due.length} 份合同 ${CONTRACT_EXPIRY_REMIND_DAYS} 天内到期，还没有续签` : `快到期的合同都在续签`}
+            title={due.length > 0 ? `${due.length} 份合同 ${remindDays} 天内到期，还没有续签` : `快到期的合同都在续签`}
             data-testid="contract-expiring"
           >
             <ul className="mt-1 space-y-1">
@@ -179,7 +189,7 @@ export function ContractsPage() {
                     </span>
                     <span className="flex flex-wrap items-center justify-end gap-1.5 md:self-center">
                       {c.openChangeNo && <Badge tone="yuzu">变更中</Badge>}
-                      {c.daysLeft !== null && c.daysLeft <= CONTRACT_EXPIRY_REMIND_DAYS && !c.renewal && (
+                      {c.daysLeft !== null && c.daysLeft <= remindDays && !c.renewal && (
                         <Badge tone={c.daysLeft < 0 ? 'clay' : 'ember'}>{daysLeftText(c.daysLeft)}</Badge>
                       )}
                       {c.renewal && <Badge tone="lake">已续签</Badge>}

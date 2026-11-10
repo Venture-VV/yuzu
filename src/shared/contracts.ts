@@ -66,7 +66,22 @@ export interface Acceptance {
   signer: string;
   /** 不合格怎么扣 */
   penalty: string;
+  /** 选的验收标准模板（8.0.7 2.5；没选为空）：逐条标准写进合同内容、随合同版本走，登记验收时按条打勾 */
+  templateName: string;
+  items: string[];
 }
+/** 验收标准模板（8.0.7 2.5，ERP「合同 → 验收标准模板」） */
+export interface AcceptanceTemplate {
+  id: number;
+  name: string;
+  items: string[];
+  active: boolean;
+  version: number;
+  updatedAt: string;
+}
+/** 验收标准最多几条、每条最多几个字（8.0.7 2.5） */
+export const ACCEPTANCE_ITEMS_MAX = 20;
+export const ACCEPTANCE_ITEM_MAX_CHARS = 60;
 
 /** 单价表的一行 */
 export interface ContractLineInput {
@@ -243,7 +258,11 @@ export interface ChangeView {
 
 export interface ContractFileView {
   id: number;
-  imageId: number;
+  /** 照片的图片编号；PDF 为空（8.0.7 起扫描件可以是 PDF） */
+  imageId: number | null;
+  kind: 'image' | 'pdf';
+  /** PDF 的文件名（照片为空） */
+  name: string;
   url: string;
   sortNo: number;
   addedByName: string;
@@ -379,7 +398,7 @@ export function blankContent(): ContractContent {
     unloadingBearer: 'supplier',
     paymentTerms: DEFAULT_PAYMENT_TERMS.map((t) => ({ ...t })),
     warranty: { ...DEFAULT_WARRANTY },
-    acceptance: { method: '', signer: '', penalty: '' },
+    acceptance: { method: '', signer: '', penalty: '', templateName: '', items: [] },
     note: '',
     lines: [],
   };

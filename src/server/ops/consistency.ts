@@ -9,6 +9,7 @@ import { pettyAccountChecks } from '../modules/petty-accounts';
 import { sourcingChecks } from '../modules/inventory/sourcing';
 import { contractChecks } from '../modules/contracts/ledger';
 import { paymentChecks } from '../modules/payments/ledger';
+import { receivableChecks } from '../modules/receivables';
 import { requestChecks } from '../modules/requests';
 import { legacyChecks } from '../modules/legacy';
 import { spaceChecks } from '../modules/spaces';
@@ -61,5 +62,7 @@ export async function consistencyChecks(sql: Sql, timezone: string): Promise<Che
   const contracts = await readSnapshot(sql, contractChecks);
   // 付款流（v0.7.32）
   const payments = await readSnapshot(sql, paymentChecks);
-  return [...summary.checks, ...inventory, ...expenses, ...pettyAccounts, ...sourcing, ...requests, ...frontdesk, legacy, ...spaces, ...floorplans, ...locations, ...membership, ...benefits, ...trials, ...refunds, ...merges, ...contracts, ...payments].map(({ label, ok, detail }) => ({ label, ok, detail }));
+  // 应收与挂账（8.0.7）：挂账与结账一一对应、核销不超过挂账、回款与核销对得上
+  const receivables = await readSnapshot(sql, receivableChecks);
+  return [...summary.checks, ...inventory, ...expenses, ...pettyAccounts, ...sourcing, ...requests, ...frontdesk, legacy, ...spaces, ...floorplans, ...locations, ...membership, ...benefits, ...trials, ...refunds, ...merges, ...contracts, ...payments, ...receivables].map(({ label, ok, detail }) => ({ label, ok, detail }));
 }
