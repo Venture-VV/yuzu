@@ -1012,6 +1012,18 @@ export const MP_FOOD_RULES_KEY = 'mp_food_rules';
 export const MP_FOOD_MAX_ITEMS = 300;
 /** 桌码：71 + 桌台编号（6 位）+ 签名（10 位），共 18 位数字；与会员码（8、9 开头，16、19 位）、手机号（11 位）不会混 */
 export const MP_TABLE_CODE = /^71\d{16}$/;
+/**
+ * 扫码点餐一单的格式上限（门店系统与网关的下单请求都按这个挡；小程序购物车照菜单回答里的 limits 拦）：
+ * 一道菜一单最多 99 份——账单明细一行的份数上限（bill_lines 的约束 1–99）；
+ * 一单最多 20 道菜——点单记录的行数上限（mp_food_orders.lines 的约束 1–20）。
+ * 一单一共最多几份、多少钱在后台「经营规则 → 可调的数值」里改（N1，主线 8.0.7，默认 20 份、¥500），
+ * 下单时由门店系统按设置核对（MP_ORDER_LIMIT）。两个数与数据库的约束一致（用例核对）：
+ * 调大了的设置也不会让请求越过账单、点单记录能存的范围（小程序线测试 3c2612b 的 P2）
+ */
+export const MP_FOOD_LINE_MAX_QUANTITY = 99;
+export const MP_FOOD_MAX_LINES = 20;
+/** 同一道菜在一单里写了几行时的拒绝（格式上就挡）：一道菜只写一行，「一道菜一单最多 99 份」按一道菜算（小程序线测试 721174d 的 P3） */
+export const MP_FOOD_DUPLICATE_DISH = '同一道菜只能写一行（份数合在一起），请刷新后再下单';
 /** 一道菜的口味备注最多几个字（与主线的点单一样） */
 export const MP_FOOD_NOTE_MAX = 40;
 
@@ -1044,8 +1056,11 @@ export interface MpFoodMenu {
   table: { code: string; name: string } | null;
   tableNotice: string | null;
   dishes: MpFoodDish[];
-  /** 一单的上限：份数、金额（分），MP33 */
-  limits: { maxQuantity: number; maxTotal: number };
+  /**
+   * 一单的上限，MP33：一共几份、多少钱（分）按后台「经营规则 → 可调的数值」的设置给（N1，主线 8.0.7）；
+   * 一道菜最多几份、最多几道菜是账单、点单记录能存的上限（MP_FOOD_LINE_MAX_QUANTITY、MP_FOOD_MAX_LINES）
+   */
+  limits: { maxQuantity: number; maxTotal: number; maxLineQuantity: number; maxLines: number };
 }
 
 export interface MpFoodLine {
@@ -1130,6 +1145,8 @@ export interface MpFoodAdminData {
   dishes: MpFoodAdminDish[];
   /** 启用的桌台与桌码 */
   tables: MpFoodAdminTable[];
+  /** 一单的上限（与小程序菜单上给的相同）：一共几份、多少钱按后台「经营规则 → 可调的数值」，一道菜最多几份、最多几道菜是账单、点单记录能存的上限 */
+  limits: MpFoodMenu['limits'];
   /** 今天（营业日）小程序下了几单、合计（分） */
   today: { orders: number; total: number };
   /** 最近 50 单 */

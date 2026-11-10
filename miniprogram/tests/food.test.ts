@@ -54,7 +54,7 @@ const DISHES: MpFoodDish[] = [
   { id: 2, name: '龙虾', group: '热菜', price: 38800, remaining: 2 },
   { id: 3, name: '柠檬茶', group: '水吧', price: 1500, remaining: 0 },
 ];
-const LIMITS = { maxQuantity: 20, maxTotal: 50000 };
+const LIMITS = { maxQuantity: 20, maxTotal: 50000, maxLineQuantity: 99, maxLines: 20 };
 const ORDERED: MpFoodOrdered = {
   orderNo: 'CD20261104-0012',
   tagCode: 'F001',
@@ -119,7 +119,16 @@ describe('菜单与购物车', () => {
     expect(f.addProblem(big, DISHES[0]!, DISHES, LIMITS)).toBe('一单最多 ¥500，多的请服务员点');
     // 一单最多 20 份
     const many = { '1': { quantity: 20, note: '' } };
-    expect(f.addProblem(many, DISHES[0]!, DISHES, { maxQuantity: 20, maxTotal: 10000000 })).toBe('一单最多 20 份，多的请服务员点');
+    expect(f.addProblem(many, DISHES[0]!, DISHES, { ...LIMITS, maxTotal: 10000000 })).toBe('一单最多 20 份，多的请服务员点');
+    // 店主把一单的上限调到 200 份：一道菜最多 99 份（账单明细能存的上限），最多 20 道菜（点单记录能存的上限）（小程序线测试 3c2612b 的 P2）
+    const roomy = { ...LIMITS, maxQuantity: 200, maxTotal: 10000000 };
+    expect(f.addProblem({ '1': { quantity: 98, note: '' } }, DISHES[0]!, DISHES, roomy)).toBe('');
+    expect(f.addProblem({ '1': { quantity: 99, note: '' } }, DISHES[0]!, DISHES, roomy)).toBe('一道菜一单最多 99 份，多的请服务员点');
+    const menu20: MpFoodDish[] = Array.from({ length: 21 }, (_, i) => ({ id: 100 + i, name: '小菜' + (i + 1), group: '小吃', price: 100, remaining: null }));
+    const twenty: Record<string, { quantity: number; note: string }> = {};
+    for (const d of menu20.slice(0, 20)) twenty[String(d.id)] = { quantity: 1, note: '' };
+    expect(f.addProblem(twenty, menu20[0]!, menu20, roomy)).toBe('');
+    expect(f.addProblem(twenty, menu20[20]!, menu20, roomy)).toBe('一单最多 20 道菜，多的请服务员点');
     // 减到 0 从购物车拿掉
     expect(f.changeCount(f.changeCount({}, 1, 1), 1, -1)).toEqual({});
     expect(f.setNote({}, 1, '少辣')).toEqual({});

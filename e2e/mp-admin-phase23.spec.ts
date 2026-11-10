@@ -889,7 +889,7 @@ test.describe('后台「微信小程序」第二、三期的几页（小程序�
     let full = false;
     await patchGet<MpFoodAdminData>(page, '**/api/admin/mp/food', (real) =>
       full
-        ? { ...real, diningEnabled: true, tableCodeReady: true, dishes, tables, today: { orders: 2, total: 8_800 }, recent }
+        ? { ...real, diningEnabled: true, tableCodeReady: true, dishes, tables, today: { orders: 2, total: 8_800 }, recent, limits: { maxQuantity: 30, maxTotal: 80_000, maxLineQuantity: 99, maxLines: 20 } }
         : { ...real, diningEnabled: false, tableCodeReady: false, dishes: [], tables: [], recent: [] },
     );
     const v0 = (await adminData(page)).foodRules.version;
@@ -909,6 +909,9 @@ test.describe('后台「微信小程序」第二、三期的几页（小程序�
       await page.reload();
       await openTab(page, '扫码点餐');
       await expect(page.getByText('勾了 0 道')).toBeVisible();
+      // 一单的上限照后台的设置写（N1；这里是假数据），一道菜最多 99 份、最多 20 道菜
+      await expect(page.getByText('一单最多 30 份、¥800.00（在「经营规则 → 可调的数值」里改）')).toBeVisible();
+      await expect(page.getByText('一道菜最多 99 份、最多 20 道菜')).toBeVisible();
       await expect(page.getByText('餐饮功能还关着')).toHaveCount(0);
       await expect(page.getByText('门店系统还没配签名密钥')).toHaveCount(0);
       // 一组都勾上、再单个勾、单个去掉；估清的菜写「今天估清」
