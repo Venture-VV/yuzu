@@ -1,5 +1,7 @@
 // 管理后台（v0.6.0）：与前台分开的一套页面——规则设置、价目、手牌池、员工与岗位权限、期初与审计集中在这里，
 // 前台只管当班的业务。分区按权限开放（店主全部；店总看价目、规则总表与审计；值班经理维护手牌池）。
+// 数据看板（店主 2026-11-10）：原来门店主导航的「看板」整合到这里；只有看板权限的岗位（值班经理、客户经理、收银）
+// 也能进后台，但只看得到「数据看板」（没有后台首页，进来直接到看板）。
 
 import { useEffect, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
@@ -14,6 +16,7 @@ import {
   HandHeart,
   IdCard,
   Layers,
+  LayoutDashboard,
   LayoutGrid,
   ListChecks,
   Printer,
@@ -37,6 +40,7 @@ import { InstanceBadge } from '../../components/InstanceTag';
 
 const ICONS: Record<AdminSection, LucideIcon> = {
   home: LayoutGrid,
+  dashboard: LayoutDashboard,
   settings: ListChecks,
   rules: Scale,
   members: IdCard,
@@ -59,16 +63,17 @@ const ICONS: Record<AdminSection, LucideIcon> = {
 };
 
 const GROUPS: { title: string; items: AdminSection[] }[] = [
-  { title: '概览', items: ['home', 'settings'] },
+  { title: '概览', items: ['home', 'dashboard', 'settings'] },
   { title: '经营设置', items: ['rules', 'members', 'membership', 'benefits', 'coupons', 'catalog', 'tags', 'technicians', 'dining', 'rooms', 'bookings', 'spaces', 'mp'] },
   { title: '人员与权限', items: ['staff', 'permissions'] },
   { title: '数据', items: ['opening', 'audit'] },
 ];
 
-/** 当前账号能进的后台分区 */
+/** 当前账号能进的后台分区；进不了后台首页、只有看板权限的岗位只看得到数据看板（店主 2026-11-10） */
 export function useAdminSections() {
   const can = useCan();
-  return (Object.keys(ADMIN_SECTIONS) as AdminSection[]).filter((k) => ADMIN_SECTIONS[k].perms.some((p) => can(p)));
+  const all = (Object.keys(ADMIN_SECTIONS) as AdminSection[]).filter((k) => ADMIN_SECTIONS[k].perms.some((p) => can(p)));
+  return all.includes('home') ? all : all.filter((k) => k === 'dashboard');
 }
 
 export function AdminShell() {
@@ -81,7 +86,9 @@ export function AdminShell() {
       document.title = session.storeName;
     };
   }, [session.storeName]);
-  if (!sections.includes('home')) return <Navigate to="/" replace />;
+  if (!sections.includes('home') && !sections.includes('dashboard')) return <Navigate to="/" replace />;
+  // 只有看板权限的：没有后台首页，进来直接到数据看板
+  if (!sections.includes('home') && location.pathname.replace(/\/+$/, '') === ADMIN_SECTIONS.home.path) return <Navigate to={ADMIN_SECTIONS.dashboard.path} replace />;
 
   const groups = GROUPS.map((g) => ({ ...g, items: g.items.filter((k) => sections.includes(k)) })).filter((g) => g.items.length > 0);
   const link = (k: AdminSection, compact: boolean) => {
