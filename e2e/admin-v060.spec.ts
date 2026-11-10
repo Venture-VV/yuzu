@@ -109,9 +109,13 @@ test.describe('v0.6.0 管理后台', () => {
     expect((await page.request.get('/api/ledger?date=2020-01-01')).status()).toBe(200);
   });
 
-  test('看板按岗位：店主有今日、经营总览、会员总览；店员只有今日', async ({ page }) => {
+  test('看板按岗位（2026-11-10 起在后台「数据看板」）：店主有今日、经营总览、会员总览；店员只有今日，进后台只看得到数据看板', async ({ page }) => {
     await login(page, 'linlan');
-    await nav(page, '看板').click();
+    await expect(nav(page, '看板')).toHaveCount(0);
+    await nav(page, '后台').click();
+    await page.getByTestId('admin-nav-dashboard').click();
+    await expect(page).toHaveURL(/\/admin\/dashboard$/);
+    await page.getByTestId('dashboard-tab-today').click();
     await expect(page.getByTestId('dashboard')).toContainText('今日净营业额');
     await page.getByTestId('dashboard-tab-overview').click();
     await expect(page.getByTestId('overview-net')).toContainText('净营业额');
@@ -124,10 +128,19 @@ test.describe('v0.6.0 管理后台', () => {
     await page.request.post('/api/auth/logout');
 
     await login(page, 'xiaozhou');
-    await nav(page, '看板').click();
+    await nav(page, '后台').click();
+    // 店员没有后台首页：进来直接到数据看板，后台里只有这一个分区
+    await expect(page).toHaveURL(/\/admin\/dashboard$/);
     await expect(page.getByTestId('dashboard')).toContainText('今日净营业额');
     await expect(page.getByTestId('dashboard-tab-overview')).toHaveCount(0);
+    await expect(page.getByTestId('admin-nav-dashboard')).toHaveCount(1);
+    await expect(page.getByTestId('admin-nav-settings')).toHaveCount(0);
+    await expect(page.getByTestId('admin-nav-home')).toHaveCount(0);
+    // 门店的旧地址跳到后台；没权限的页签、别的后台分区都回到数据看板
     await page.goto('/dashboard/overview');
-    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page).toHaveURL(/\/admin\/dashboard$/);
+    await page.goto('/admin/settings');
+    await expect(page).toHaveURL(/\/admin\/dashboard$/);
+    expect((await page.request.get('/api/admin/overview')).status()).toBe(403);
   });
 });

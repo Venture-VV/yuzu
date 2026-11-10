@@ -184,11 +184,14 @@ test('请求超时：显示结果待确认，可查回原单且不重复记账',
   await expect.poll(() => availableCents(page)).toBe(before + 30000);
 });
 
-test('权限：店员看不到管理后台入口，不能查看历史营业日', async ({ page }) => {
+test('权限：店员进后台只看得到数据看板（2026-11-10 起看板在后台），不能查看历史营业日', async ({ page }) => {
   await login(page, 'xiaozhou');
-  await expect(nav(page, '后台')).toHaveCount(0);
-  await page.goto('/admin');
-  await expect(page).toHaveURL(/\/$/);
+  await nav(page, '后台').click();
+  await expect(page).toHaveURL(/\/admin\/dashboard$/);
+  await expect(page.getByTestId('admin-nav-dashboard')).toHaveCount(1);
+  await expect(page.getByTestId('admin-nav-settings')).toHaveCount(0);
+  await page.goto('/admin/staff');
+  await expect(page).toHaveURL(/\/admin\/dashboard$/);
   await page.goto('/ledger');
   await expect(page.getByRole('button', { name: '前一天' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '导出 CSV' })).toHaveCount(0);
