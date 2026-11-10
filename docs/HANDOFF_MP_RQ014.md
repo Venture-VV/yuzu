@@ -4,6 +4,8 @@
 
 **开发基础**：先把 main（8.0.4，`20472c3`）合进小程序线，合并提交是 `3b98edf`。
 
+**合并**：[PR #64](https://github.com/Venture-VV/yuzu/pull/64)（`e558887`）；小程序助手四轮复测与 Codex 审查的修正随 [PR #81](https://github.com/Venture-VV/yuzu/pull/81) 合并（`b041c65`）。
+
 **本次不涉及**：
 - 迁移；
 - 版本号（小程序线的代码随主线下一个版本标签一起发）；
