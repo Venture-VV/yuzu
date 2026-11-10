@@ -246,6 +246,8 @@ export interface MpNotice {
 export interface MpNotices {
   /** 这位会员今天要看的（门店营业日；没读过、在显示的日子里、券还能用的），新的在前，最多 20 条 */
   notices: MpNotice[];
+  /** 读的这一刻这个微信的绑定状态版本号：小程序丢掉比它见过的更旧的回答，记已读时带上（解绑、换绑过的拒绝 BIND_STALE） */
+  bindVersion: number;
 }
 /** 一次最多记几条已读（与一次最多弹 20 条一样） */
 export const MP_NOTICE_READ_MAX = 20;

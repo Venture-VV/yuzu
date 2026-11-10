@@ -325,18 +325,21 @@ describe('买一赠一券（8.0.4 的新种类，RQ-014）', () => {
     ]);
     // 后台勾选用的券模板列表也是同一句
     expect((await adminData()).templates.find((x) => x.id === other.id)?.summary).toBe(other.summary);
-    for (const id of [same.id, other.id]) {
+    for (const [id, summary] of [
+      [same.id, same.summary],
+      [other.id, other.summary],
+    ] as const) {
       const r = await claim(a.openid, id);
       expect(r.statusCode, r.body).toBe(201);
-      expect(r.json().coupon.summary).toMatch(/^买一赠一 · 买 /);
+      expect(r.json().coupon.summary).toBe(summary);
     }
     const mine = (await call('GET', '/api/mp/coupons', a.openid)).json() as MpCoupon[];
     const byName = Object.fromEntries(mine.map((c) => [c.name, c]));
     expect(byName['拿铁买一赠一']).toMatchObject({ kind: 'bogo', state: 'available' });
     expect(byName['拿铁送修脚']).toMatchObject({ kind: 'bogo', state: 'available' });
-    // 送的项目与「最多抵」照写。已发券的查询带上买的项目名称在主线 #80（8.0.5）里修，修好之前这一段写「指定项目」
-    expect(byName['拿铁买一赠一']!.summary).toMatch(/^买一赠一 · 买 (领券拿铁|指定项目) 送 领券拿铁 1 份$/);
-    expect(byName['拿铁送修脚']!.summary).toMatch(/^买一赠一 · 买 (领券拿铁|指定项目) 送 领券修脚 1 份 · 最多抵 ¥50\.00$/);
+    // 买的、送的项目与「最多抵」都照写，与模板那一句一样（已发券的查询带上买的项目：主线 #80，8.0.5）
+    expect(byName['拿铁买一赠一']!.summary).toBe(same.summary);
+    expect(byName['拿铁送修脚']!.summary).toBe(other.summary);
     await saveRules(STANDARD());
   });
 });
