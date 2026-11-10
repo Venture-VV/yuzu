@@ -4,6 +4,7 @@ import { HHMM } from '@shared/business-date';
 import { CASH_DRAWER_KEY, DEFAULT_CASH_DRAWERS, MAX_CASH_DRAWERS, SHIFT_MODES, type CashDrawer } from '@shared/checkout';
 import { DEDUCTION_RULES } from '@shared/deduction';
 import { DEFAULT_MEMBER_CHANNELS, MAX_MEMBER_CHANNELS, MEMBER_CHANNEL_KEY, type MemberChannel } from '@shared/members';
+import { DEFAULT_TUNABLES, PRINT_MODES, TUNABLE_LIMITS } from '@shared/tunables';
 import type { StoreRules } from '@shared/types';
 import type { Db } from '../db';
 import { writeAudit } from '../lib/audit';
@@ -33,6 +34,24 @@ const KEY_MAP = {
   cash_drawers: 'cashDrawers',
   recharge_spend_pct: 'rechargeSpendPct',
   count_card_sales: 'countCardSales',
+  // 8.0.7 A1：原来写死、标「待确认」的数值（@shared/tunables）
+  approval_batch_max_cents: 'approvalBatchMaxCents',
+  approval_batch_max: 'approvalBatchMax',
+  approval_overdue_hours: 'approvalOverdueHours',
+  delegation_max_days: 'delegationMaxDays',
+  urgent_escalate_days: 'urgentEscalateDays',
+  contract_remind_days: 'contractRemindDays',
+  pdf_max_mb: 'pdfMaxMb',
+  receipt_attachments_max: 'receiptAttachmentsMax',
+  mp_food_max_quantity: 'mpFoodMaxQuantity',
+  mp_food_max_total_cents: 'mpFoodMaxTotalCents',
+  platform_backfill_days: 'platformBackfillDays',
+  print_mode: 'printMode',
+  print_wait_minutes: 'printWaitMinutes',
+  campaign_max_members: 'campaignMaxMembers',
+  campaign_notice_days: 'campaignNoticeDays',
+  sms_max_attempts: 'smsMaxAttempts',
+  finance_hides_marketing_cost: 'financeHidesMarketingCost',
 } as const satisfies Record<string, keyof StoreSettings>;
 
 /** 设置项在库里的键（规则总表按它找最近修改的时间与人） */
@@ -58,6 +77,8 @@ const DEFAULTS: StoreSettings = {
   // 8.0.4：充值当日的储值消费不超过「充值前余额 + 当天充值 × 70%」（HY01）；次卡停售（HY05，迁移 088 也写入「关」）
   rechargeSpendPct: 70,
   countCardSales: false,
+  // 8.0.7 A1：与原来写死的一样（打印方式按店主 2026-11-10：默认本机打印）
+  ...DEFAULT_TUNABLES,
 };
 
 export const DEFAULT_SETTINGS: Readonly<StoreSettings> = DEFAULTS;
@@ -70,6 +91,19 @@ export async function loadSettings(db: Db): Promise<StoreSettings> {
     if (prop) settings[prop] = row.value;
   }
   return settings as unknown as StoreSettings;
+}
+
+/** 可调的整数项（8.0.7 A1）：范围见 TUNABLE_LIMITS */
+function tunableInputs() {
+  const out: Record<string, z.ZodNumber> = {};
+  for (const [key, l] of Object.entries(TUNABLE_LIMITS)) {
+    out[key] = z
+      .number({ message: `${l.label}要填数字` })
+      .int(`${l.label}要是整数`)
+      .min(l.min, `${l.label}不能小于 ${l.min}`)
+      .max(l.max, `${l.label}不能大于 ${l.max}`);
+  }
+  return out as { [K in keyof typeof TUNABLE_LIMITS]: z.ZodNumber };
 }
 
 const SettingsInput = z
@@ -100,6 +134,9 @@ const SettingsInput = z
     shiftMode: z.enum(SHIFT_MODES, '交班方式不正确'),
     rechargeSpendPct: z.number('充值当日的消费比例请填整数').int('充值当日的消费比例请填整数').min(1, '比例至少 1%').max(100, '比例最多 100%').nullable(),
     countCardSales: z.boolean('请选择是否售次卡'),
+    printMode: z.enum(PRINT_MODES, '打印方式不正确'),
+    financeHidesMarketingCost: z.boolean('请选择财务账号能不能看营销成本'),
+    ...tunableInputs(),
     cashDrawers: z
       .array(
         z.object({

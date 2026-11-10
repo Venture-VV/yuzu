@@ -6,19 +6,15 @@ import { useMemo, useState } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router';
 import { CheckCheck, ChevronDown, ChevronUp, PackageCheck, PackageX, RotateCcw, TriangleAlert } from 'lucide-react';
 import {
-  APPROVAL_BATCH_MAX,
-  APPROVAL_BATCH_MAX_CENTS,
   APPROVAL_DOC_TYPE_LABELS,
-  APPROVAL_OVERDUE_HOURS,
   NO_BATCH_DOC_TYPES,
-  URGENT_BACKFILL_ESCALATE_DAYS,
   type ApprovalCard,
   type BatchApproveResult,
   type UrgentAcceptItem,
 } from '@shared/approvals';
 import { formatAmount } from '@shared/money';
 import { errorMessage, UncertainError } from '../../lib/api';
-import { useCan } from '../../lib/session';
+import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
@@ -36,6 +32,8 @@ import { sendBatchApprove, sentLabel, useUncertainApprovals } from './uncertain'
 type Tab = ApprovalTab | 'rules' | 'delegations';
 
 export function ApprovalsPage() {
+  // 超时的小时数等（A5、A6、A10）8.0.7 起在「经营规则 → 可调的数值」里改，随会话带过来
+  const rules = useSession().rules;
   const can = useCan();
   const [params, setParams] = useSearchParams();
   const canAct = can('approval.act') || can('inventory.approve') || can('expense.approve');
@@ -73,7 +71,7 @@ export function ApprovalsPage() {
       <PageHeader
         dateMode="calendar"
         title="审批中心"
-        subtitle={`采购、报损、盘点差异、退货、付款、期初、报销的审批都在这里；当前这一级等了超过 ${APPROVAL_OVERDUE_HOURS} 小时的标「超时」、排在最前`}
+        subtitle={`采购、报损、盘点差异、退货、付款、期初、报销的审批都在这里；当前这一级等了超过 ${rules.approvalOverdueHours} 小时的标「超时」、排在最前`}
         actions={
           can('inventory.approve') && (
             <Link to="/todo" className="hidden h-8 items-center rounded-sm border border-line-strong bg-card px-3 text-[13px] font-semibold hover:border-ink-3 sm:flex">
@@ -92,7 +90,7 @@ export function ApprovalsPage() {
           </div>
           {tab === 'mine' && overdue > 0 && (
             <Notice tone="warning" icon={<TriangleAlert className="size-4" />} title={`${overdue} 张超时`} data-testid="approval-overdue">
-              当前这一级等了超过 {APPROVAL_OVERDUE_HOURS} 小时，已排在最前。
+              当前这一级等了超过 {rules.approvalOverdueHours} 小时，已排在最前。
             </Notice>
           )}
           {tab === 'rules' ? (
@@ -161,6 +159,7 @@ function UncertainPanel({ onOpen, onBatch }: { onOpen: (id: number) => void; onB
 }
 
 function CardList({ cards, tab, onOpen }: { cards: ApprovalCard[]; tab: ApprovalTab; onOpen: (id: number) => void }) {
+  const { approvalBatchMaxCents, approvalBatchMax } = useSession().rules;
   const [selected, setSelected] = useState<number[]>([]);
   const [batchOpen, setBatchOpen] = useState(false);
   // 上次同意没收到结果的单（uncertain.ts）：不能再勾进新的一批，打开后只能按原内容重新提交（页面上方「结果待确认」里也列着）
@@ -174,7 +173,7 @@ function CardList({ cards, tab, onOpen }: { cards: ApprovalCard[]; tab: Approval
     // 合同、合同变更、用印（v0.7.31）要逐张审：法务那一级按审查清单逐条给意见
     !NO_BATCH_DOC_TYPES.includes(c.docType) &&
     c.amountCents !== null &&
-    c.amountCents <= APPROVAL_BATCH_MAX_CENTS &&
+    c.amountCents <= approvalBatchMaxCents &&
     (!pickedType || c.docType === pickedType);
   const batchDialog = <BatchDialog open={batchOpen} cards={picked} onClose={() => setBatchOpen(false)} onDone={() => setSelected([])} />;
   if (cards.length === 0) {
@@ -194,7 +193,7 @@ function CardList({ cards, tab, onOpen }: { cards: ApprovalCard[]; tab: Approval
     <>
       {tab === 'mine' && (
         <p className="text-[12.5px] text-ink-3">
-          勾选同一种单据、每张不超过 ¥{formatAmount(APPROVAL_BATCH_MAX_CENTS)} 的可以一起同意（一次最多 {APPROVAL_BATCH_MAX} 张）；合同、合同变更、用印要逐张审。
+          勾选同一种单据、每张不超过 ¥{formatAmount(approvalBatchMaxCents)} 的可以一起同意（一次最多 {approvalBatchMax} 张）；合同、合同变更、用印要逐张审。
         </p>
       )}
       <ul className="space-y-2.5" data-testid="approval-cards">
@@ -207,7 +206,7 @@ function CardList({ cards, tab, onOpen }: { cards: ApprovalCard[]; tab: Approval
                 className="mt-1 size-5 shrink-0 accent-[var(--color-pine)] disabled:opacity-30"
                 disabled={!batchable(c) && !selected.includes(c.id)}
                 checked={selected.includes(c.id)}
-                onChange={(e) => setSelected((s) => (e.target.checked ? [...s, c.id].slice(0, APPROVAL_BATCH_MAX) : s.filter((x) => x !== c.id)))}
+                onChange={(e) => setSelected((s) => (e.target.checked ? [...s, c.id].slice(0, approvalBatchMax) : s.filter((x) => x !== c.id)))}
                 data-testid={`approval-pick-${c.docNo}`}
               />
             )}
@@ -409,12 +408,13 @@ function AcceptStrip({ items }: { items: UrgentAcceptItem[] }) {
 
 function BackfillStrip({ items }: { items: { receiptId: number; docNo: string; departmentName: string | null; supplierName: string | null; amountCents: number; confirmedAt: string; daysOver: number; handlerName: string }[] }) {
   const [open, setOpen] = useState(false);
+  const escalateDays = useSession().rules.urgentEscalateDays;
   return (
     <section className="rounded-lg border border-ember/30 bg-ember-soft/40 px-4 py-3" data-testid="approval-backfills">
       <button type="button" className="flex w-full items-center gap-2 text-left" onClick={() => setOpen((o) => !o)}>
         <PackageX className="size-4 text-ember" />
         <span className="text-[14px] font-bold">急采待补单 {items.length} 张</span>
-        <span className="text-[12.5px] text-ink-3">收货生效后超过 {URGENT_BACKFILL_ESCALATE_DAYS} 天还没补采购单</span>
+        <span className="text-[12.5px] text-ink-3">收货生效后超过 {escalateDays} 天还没补采购单</span>
         <span className="ml-auto">{open ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}</span>
       </button>
       {open && (

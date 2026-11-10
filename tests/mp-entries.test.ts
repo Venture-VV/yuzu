@@ -237,7 +237,9 @@ describe('3c 扫码点餐 orderFoodFromMp', () => {
     const before = await bill();
     const reject = async (input: Omit<MpFoodInput, 'memberId'>) => (await errorOf(order({ memberId: guest.id, ...input }))).code;
     expect(await reject({ items: [{ itemId: item['一次性拖鞋']!, quantity: 1 }], claimKey: 'f-x1' })).toBe('DISH_NOT_KITCHEN');
-    expect(await reject({ items: [{ itemId: item['柠檬茶']!, quantity: 21 }], claimKey: 'f-x2' })).toBe('BAD_REQUEST');
+    // 一单最多几份按设置（8.0.7 A1，默认 20）在下单时核对；超过可调范围的（200）才在格式上就挡住
+    expect(await reject({ items: [{ itemId: item['柠檬茶']!, quantity: 21 }], claimKey: 'f-x2' })).toBe('MP_ORDER_LIMIT');
+    expect(await reject({ items: [{ itemId: item['柠檬茶']!, quantity: 201 }], claimKey: 'f-x2b' })).toBe('BAD_REQUEST');
     expect(await reject({ items: [{ itemId: item['宫保鸡丁']!, quantity: 11 }], claimKey: 'f-x3' })).toBe('MP_ORDER_LIMIT');
     expect(await reject({ items: [{ itemId: item['柠檬茶']!, quantity: 1 }], tableCode: 'Z9', claimKey: 'f-x4' })).toBe('TABLE_NOT_FOUND');
     expect(await reject({ items: [{ itemId: item['柠檬茶']!, quantity: 1 }], expectedTotal: 1400, claimKey: 'f-x5' })).toBe('PRICE_CHANGED');

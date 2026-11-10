@@ -4,8 +4,10 @@
 import { useRef, useState } from 'react';
 import { FileText, Paperclip, Upload } from 'lucide-react';
 import type { PoReceiptRef } from '@shared/expenses';
-import { MAX_PDF_BYTES, MAX_RECEIPT_ATTACHMENTS, type ReceiptAttachment } from '@shared/inventory';
+import type { ReceiptAttachment } from '@shared/inventory';
+import { pdfMaxBytes } from '@shared/tunables';
 import { api, errorMessage } from '../lib/api';
+import { useSession } from '../lib/session';
 import { cn } from '../lib/utils';
 import { ImageThumbs, imagePayload } from './Images';
 import { Button, Notice } from './ui';
@@ -60,7 +62,7 @@ const toBase64 = (file: Blob) =>
   });
 
 /**
- * 收货单详情里的附件：列表 + 补传（照片压缩到 1 MB 以内；PDF ≤ 10 MB）；最多 9 份，不能删。
+ * 收货单详情里的附件：列表 + 补传（照片压缩到 1 MB 以内；PDF 与份数上限按「经营规则 → 可调的数值」，默认 10 MB、9 份）；不能删。
  * 8.0.3 起进项发票的照片也用它（uploadUrl、标题、份数上限另给）。
  */
 export function ReceiptAttachmentsPanel({
@@ -71,7 +73,7 @@ export function ReceiptAttachmentsPanel({
   uploadUrl,
   title = '附件（照片、送货单、小票）',
   note = '生效以后还能补传，不能删',
-  max = MAX_RECEIPT_ATTACHMENTS,
+  max: maxProp,
   testId = 'receipt-attachments',
 }: {
   docId: number;
@@ -85,6 +87,9 @@ export function ReceiptAttachmentsPanel({
   testId?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
+  const rules = useSession().rules;
+  // 份数上限：调用方另给的（发票照片）照它，收货单按设置（CG11）
+  const max = maxProp ?? rules.receiptAttachmentsMax;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const full = items.length >= max;
@@ -97,7 +102,7 @@ export function ReceiptAttachmentsPanel({
       for (const file of [...files].slice(0, max - items.length)) {
         const name = file.name.replace(/\.[^.]+$/, '').slice(0, 80);
         if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
-          if (file.size > MAX_PDF_BYTES) throw new Error(`「${file.name}」超过 10 MB`);
+          if (file.size > pdfMaxBytes(rules)) throw new Error(`「${file.name}」超过 ${rules.pdfMaxMb} MB`);
           await api.post(url, { name, mime: 'application/pdf', data: await toBase64(file) }, { timeoutMs: 60_000 });
         } else {
           const { mime, data } = await imagePayload(file);

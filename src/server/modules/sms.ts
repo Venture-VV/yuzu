@@ -9,7 +9,9 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import type { SmsConfig } from '../config';
 import type { Sql } from '../db';
+import { loadSettings } from './settings';
 
+/** 短信发不出去最多试几次（HY08）：默认 3，8.0.7 起在「经营规则 → 可调的数值」里改（smsMaxAttempts） */
 export const SMS_MAX_ATTEMPTS = 3;
 /** 一条最多等多久（阿里云接口的超时） */
 const SEND_TIMEOUT_MS = 10_000;
@@ -64,10 +66,11 @@ export async function sendPendingSms(deps: { sql: Sql; config: { sms: SmsConfig 
   const leaseSeconds = Math.ceil((limit * SEND_TIMEOUT_MS) / 1000) + 120;
   // 认领：在短事务里锁住没被认领（或租约已过）的待发短信，次数加一、写租约——提交以后别的批次（叠在一起的下一分钟、别的进程）
   // 不再认领这几条；之前进程断掉、次数已满、租约也过了的记失败
+  const { smsMaxAttempts } = await loadSettings(sql);
   const rows = await sql.begin(async (tx) => {
     await tx`
       UPDATE sms_outbox SET status = 'failed', last_error = coalesce(last_error, '连续 ' || attempts || ' 次没有发出去'), claimed_until = NULL
-      WHERE status = 'pending' AND attempts >= ${SMS_MAX_ATTEMPTS} AND (claimed_until IS NULL OR claimed_until < now())`;
+      WHERE status = 'pending' AND attempts >= ${smsMaxAttempts} AND (claimed_until IS NULL OR claimed_until < now())`;
     const picked = await tx<{ id: number; phone: string; params: Record<string, unknown> }[]>`
       SELECT id, phone, params FROM sms_outbox
       WHERE status = 'pending' AND (claimed_until IS NULL OR claimed_until < now())
@@ -91,7 +94,7 @@ export async function sendPendingSms(deps: { sql: Sql; config: { sms: SmsConfig 
     } catch (error) {
       const message = (error instanceof Error ? error.message : String(error)).slice(0, 300);
       await sql`
-        UPDATE sms_outbox SET last_error = ${message}, claimed_until = NULL, status = CASE WHEN attempts >= ${SMS_MAX_ATTEMPTS} THEN 'failed' ELSE 'pending' END
+        UPDATE sms_outbox SET last_error = ${message}, claimed_until = NULL, status = CASE WHEN attempts >= ${smsMaxAttempts} THEN 'failed' ELSE 'pending' END
         WHERE id = ${row.id} AND status = 'pending'`;
       failed += 1;
     }

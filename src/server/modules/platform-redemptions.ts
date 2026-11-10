@@ -9,7 +9,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf, ISO_DATE } from '@shared/business-date';
 import { COUPON_CODE_PATTERN, COUPON_PLATFORM_LABELS, COUPON_PLATFORMS, normalizeCouponCode, type CouponPlatform } from '@shared/checkout';
-import { PLATFORM_BACKFILL_DAYS, type PlatformDayTotals, type PlatformReconcile, type PlatformRedemption, type PlatformSettlement } from '@shared/platform';
+import { type PlatformDayTotals, type PlatformReconcile, type PlatformRedemption, type PlatformSettlement } from '@shared/platform';
 import { guard, guardAny } from '../auth/guard';
 import { isUniqueViolation, type Db, type Tx } from '../db';
 import { writeAudit } from '../lib/audit';
@@ -76,7 +76,9 @@ export async function registerRedemption(deps: Deps, raw: RedemptionInputData, c
   const now = ctx.at ?? new Date();
   const redeemedAt = new Date(input.redeemedAt);
   if (redeemedAt.getTime() > now.getTime() + 5 * 60_000) throw unprocessable('PLATFORM_TIME', '核销时间不能晚于现在');
-  if (redeemedAt.getTime() < now.getTime() - PLATFORM_BACKFILL_DAYS * 86_400_000) throw unprocessable('PLATFORM_TIME', `只能补登记 ${PLATFORM_BACKFILL_DAYS} 天以内的核销`);
+  // 最早能补到几天前（N6，8.0.7 起在「经营规则 → 可调的数值」里改）
+  const { platformBackfillDays } = await loadSettings(deps.sql);
+  if (redeemedAt.getTime() < now.getTime() - platformBackfillDays * 86_400_000) throw unprocessable('PLATFORM_TIME', `只能补登记 ${platformBackfillDays} 天以内的核销`);
   const { clientKey: key, ...payload } = input;
   const requestHash = hashRequest(payload);
   const replay = async (db: Db) => {

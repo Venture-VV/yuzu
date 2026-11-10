@@ -4,7 +4,8 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { ADMIN_PERMISSIONS, type AdminOverview, type RolePermissionMatrix, type RuleEntry } from '@shared/admin';
+import { ADMIN_PERMISSIONS, type AdminOverview, type RolePermissionMatrix, type RuleEntry, type RuleGroup } from '@shared/admin';
+import { PRINT_MODE_LABELS, type PrintMode } from '@shared/tunables';
 import { describeBusinessHours } from '@shared/business-date';
 import { SHIFT_MODE_LABELS } from '@shared/checkout';
 import { DEFAULT_FRONTDESK_RULES, type FrontdeskRules } from '@shared/frontdesk';
@@ -369,6 +370,33 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
     hint: '只看总仓；在途（没到的采购单）算进去；按采购单位向上取整',
     current: [pr.reorderDays, pr.targetDays], dflt: [prd.reorderDays, prd.targetDays], metaKey: 'purchase_rules',
   });
+  // ── 可调的数值（8.0.7 A1，店主 2026-11-10：有争议的规则不要写死；后台「经营规则 → 可调的数值」）──
+  const tun = (key: keyof typeof k, group: RuleGroup, label: string, show: (v: never) => string, hint?: string) => {
+    const prop = k[key] as keyof typeof s;
+    add({
+      key, group, label, value: show(s[prop] as never), defaultValue: show(d[prop] as never), pending: true, section: 'rules',
+      ...(hint ? { hint } : {}), current: s[prop], dflt: d[prop], metaKey: key,
+    });
+  };
+  const n = (unit: string) => (v: number) => `${v} ${unit}`;
+  tun('approval_batch_max_cents', 'erp', '批量同意：每张不超过', (v: number) => formatYuan(v), 'A5；超过的要打开单独审');
+  tun('approval_batch_max', 'erp', '批量同意：一次最多', n('张'), 'A5');
+  tun('approval_overdue_hours', 'erp', '审批超时', (v: number) => `当前这一级等了超过 ${v} 小时`, 'A6；超时的排在最前');
+  tun('delegation_max_days', 'erp', '代理人最长', n('天'), 'A7；含首尾');
+  tun('urgent_escalate_days', 'erp', '急采待补单升级', (v: number) => `收货生效后超过 ${v} 天没补采购单`, 'A10；进负责人待办');
+  tun('contract_remind_days', 'erp', '合同到期提醒', (v: number) => `结束日前 ${v} 天`, 'C11');
+  tun('pdf_max_mb', 'inventory', 'PDF 每份最大', n('MB'), 'CG08；签约供应商合同、收货附件、发票附件');
+  tun('receipt_attachments_max', 'inventory', '每张收货单最多附件', n('份'), 'CG11');
+  tun('mp_food_max_quantity', 'dining', '扫码点餐一单最多', n('份'), 'N1');
+  tun('mp_food_max_total_cents', 'dining', '扫码点餐一单最多金额', (v: number) => formatYuan(v), 'N1');
+  tun('platform_backfill_days', 'frontdesk', '平台核销最早补到', (v: number) => `${v} 天前`, 'N6');
+  tun('print_mode', 'frontdesk', '打印方式', (v: PrintMode) => PRINT_MODE_LABELS[v], '店主 2026-11-10：连接打印机由各自的电脑负责');
+  tun('print_wait_minutes', 'frontdesk', '小票机断网时最多等', n('分钟'), 'N7；只在「服务器直连网口小票机」时用');
+  tun('campaign_max_members', 'members', '批量发券一次最多', n('位会员'), 'HY07');
+  tun('campaign_notice_days', 'members', '到账弹窗最多显示', n('天'), 'HY16');
+  tun('sms_max_attempts', 'members', '短信最多试', n('次'), 'HY08');
+  tun('count_card_sales', 'members', '次卡', (v: boolean) => (v ? '照常售卖' : '停售（已售的照常用、退）'), 'HY05');
+  tun('finance_hides_marketing_cost', 'staff', '财务账号看营销成本', (v: boolean) => (v ? '有财务职责的看不到' : '按岗位权限给'), 'HY14');
   // ── 岗位与权限 ──
   const changed = overrideCount(overrides);
   add({

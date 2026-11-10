@@ -297,9 +297,12 @@ export const LOCKED_PERMISSIONS: readonly Permission[] = ['staff.manage', 'setti
  */
 export const FINANCE_EXCLUDED: Partial<Record<Permission, readonly Duty[]>> = { 'marketing.cost': ['payable', 'cost'] };
 
-/** 这位账号的职责把这项权限挡掉了（与财务隔离） */
-export function excludedByDuty(subject: Pick<PermissionSubject, 'role' | 'duties'>, permission: Permission): boolean {
-  if (subject.role === 'owner') return false;
+/**
+ * 这位账号的职责把这项权限挡掉了（与财务隔离）。financeExclusion 是经营规则「有财务职责的账号看不到营销成本」
+ * （HY14，默认开；8.0.7 起在「经营规则 → 可调的数值」里改，关掉以后按岗位权限给）
+ */
+export function excludedByDuty(subject: Pick<PermissionSubject, 'role' | 'duties'>, permission: Permission, financeExclusion = true): boolean {
+  if (subject.role === 'owner' || !financeExclusion) return false;
   return !!FINANCE_EXCLUDED[permission]?.some((d) => subject.duties?.includes(d));
 }
 
@@ -326,9 +329,11 @@ export function roleHas(role: Role, permission: Permission, overrides?: RoleOver
 }
 
 /** 岗位权限（按后台调整）与职责权限（固定）的并集 */
-export function permissionsOf(subject: PermissionSubject, overrides?: RoleOverrides | null): Permission[] {
+export function permissionsOf(subject: PermissionSubject, overrides?: RoleOverrides | null, opts: { financeExclusion?: boolean } = {}): Permission[] {
   return ALL_PERMISSIONS.filter(
-    (p) => !excludedByDuty(subject, p) && (roleHas(subject.role, p, overrides) || !!(PERMISSIONS[p] as Rule).duties?.some((d) => subject.duties?.includes(d))),
+    (p) =>
+      !excludedByDuty(subject, p, opts.financeExclusion ?? true) &&
+      (roleHas(subject.role, p, overrides) || !!(PERMISSIONS[p] as Rule).duties?.some((d) => subject.duties?.includes(d))),
   );
 }
 

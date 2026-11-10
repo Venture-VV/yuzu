@@ -25,7 +25,6 @@ import {
   CONTRACT_CATEGORY_LABELS,
   CONTRACT_EDITABLE,
   CONTRACT_EFFECTIVE,
-  CONTRACT_EXPIRY_REMIND_DAYS,
   SEAL_STATUS_LABELS,
   SEAL_TYPES,
   SEAL_TYPE_LABELS,
@@ -89,6 +88,7 @@ type DialogState =
   | null;
 
 function Detail({ c }: { c: ContractDetail }) {
+  const remindDays = useSession().rules.contractRemindDays;
   const can = useCan();
   const toast = useToast();
   const navigate = useNavigate();
@@ -130,7 +130,7 @@ function Detail({ c }: { c: ContractDetail }) {
           onFound={() => void invalidate()}
         />
       )}
-      {effective && c.daysLeft !== null && c.daysLeft <= CONTRACT_EXPIRY_REMIND_DAYS && !c.renewal && (
+      {effective && c.daysLeft !== null && c.daysLeft <= remindDays && !c.renewal && (
         <Notice tone={c.daysLeft < 0 ? 'error' : 'warning'} title={`${c.endDate} ${daysLeftText(c.daysLeft)}，还没有续签`} data-testid="contract-expiry-notice">
           {manage ? '要接着合作就续签（照这份合同预填一份新合同，走审查）；不再合作的可以不管，过了结束日台账里标「已过期」。' : '请经办人续签或确认不再合作。'}
         </Notice>

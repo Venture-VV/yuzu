@@ -55,6 +55,7 @@ export const RULE_GROUPS = {
   floormap: '平面图与导览',
   locations: '实时位置',
   inventory: '库存与采购',
+  erp: 'ERP（审批中心、合同）',
   staff: '岗位与权限',
 } as const;
 export type RuleGroup = keyof typeof RULE_GROUPS;

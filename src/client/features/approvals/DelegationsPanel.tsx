@@ -5,7 +5,6 @@
 
 import { useState } from 'react';
 import { Plus } from 'lucide-react';
-import { DELEGATION_MAX_DAYS } from '@shared/approvals';
 import { shiftDate } from '@shared/labels';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
@@ -46,7 +45,7 @@ export function DelegationsPanel() {
   };
   return (
     <section className="space-y-3" data-testid="approval-delegations">
-      <Notice tone="info" title={`请假时设代理人：代理期间（最多 ${DELEGATION_MAX_DAYS} 天）代理人能审你能审的单`}>
+      <Notice tone="info" title={`请假时设代理人：代理期间（最多 ${session.rules.delegationMaxDays} 天）代理人能审你能审的单`}>
         审批记录写「代理人（代 你）」。提交人不能借代理审自己提交的单。随时可以收回。
       </Notice>
       <ErpPendingPanel types={DELEGATION_PENDING} className="space-y-2" onFound={() => void refresh()} />
@@ -205,7 +204,7 @@ function DelegationDialog({ open, onClose }: { open: boolean; onClose: () => voi
             <Input id="del-start" type="date" value={startsOn} min={today} onChange={(e) => setStartsOn(e.target.value)} />
           </Field>
           <Field label="结束（含）" htmlFor="del-end">
-            <Input id="del-end" type="date" value={endsOn} min={startsOn} max={shiftDate(startsOn, DELEGATION_MAX_DAYS - 1)} onChange={(e) => setEndsOn(e.target.value)} />
+            <Input id="del-end" type="date" value={endsOn} min={startsOn} max={shiftDate(startsOn, session.rules.delegationMaxDays - 1)} onChange={(e) => setEndsOn(e.target.value)} />
           </Field>
         </div>
         <Field label="原因（选填）" htmlFor="del-reason">

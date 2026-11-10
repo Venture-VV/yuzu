@@ -34,7 +34,7 @@ export async function buildSessionInfo({ sql, config }: Deps, actor: Actor): Pro
   const { storeName, ...rules } = settings;
   return {
     staff: { id: actor.id, username: actor.username, displayName: actor.displayName, role: actor.role, duties: actor.duties, mustChangePassword: actor.mustChangePassword },
-    permissions: actor.permissions ?? permissionsOf(actor, await loadRoleOverrides(sql)),
+    permissions: actor.permissions ?? permissionsOf(actor, await loadRoleOverrides(sql), { financeExclusion: settings.financeHidesMarketingCost }),
     storeName,
     rules,
     today: businessDateOf(new Date(), config.timezone, settings.businessDayStartHour),

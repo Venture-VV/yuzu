@@ -2,11 +2,12 @@ import { SUPPLIER_SETTLEMENT_LABELS, type SupplierSettlement } from '@shared/exp
 import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileText, Plus, Search, Upload } from 'lucide-react';
-import { MAX_PDF_BYTES, RECONCILE_CYCLE_LABELS, RECONCILE_CYCLES, type Department, type Material, type ReconcileCycle, type Supplier, type SupplierContractFile } from '@shared/inventory';
+import { RECONCILE_CYCLE_LABELS, RECONCILE_CYCLES, type Department, type Material, type ReconcileCycle, type Supplier, type SupplierContractFile } from '@shared/inventory';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { conversionText, formatQty, parseQty } from '@shared/quantity';
 import { api, errorMessage } from '../../lib/api';
-import { useCan } from '../../lib/session';
+import { useCan, useSession } from '../../lib/session';
+import { pdfMaxBytes } from '@shared/tunables';
 import { cn, formatDateTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { Dialog } from '../../components/Overlay';
@@ -580,6 +581,7 @@ const toBase64 = (file: File) =>
 
 /** 签约供应商的合同 PDF（8.0.1，CG08）：可以传多份、下载、撤下（撤下保留记录）；同一份文件不重复挂 */
 function ContractFiles({ supplier, pendingContracted }: { supplier: Supplier; pendingContracted: boolean }) {
+  const rules = useSession().rules;
   const can = useCan();
   const toast = useToast();
   const qc = useQueryClient();
@@ -598,7 +600,7 @@ function ContractFiles({ supplier, pendingContracted }: { supplier: Supplier; pe
     if (!file) return;
     setError(null);
     if (file.type && file.type !== 'application/pdf') return setError('只能上传 PDF 文件');
-    if (file.size > MAX_PDF_BYTES) return setError('文件不能超过 10 MB');
+    if (file.size > pdfMaxBytes(rules)) return setError(`文件不能超过 ${rules.pdfMaxMb} MB`);
     setBusy('upload');
     try {
       const name = file.name.replace(/\.pdf$/i, '').slice(0, 80) || '合同';
