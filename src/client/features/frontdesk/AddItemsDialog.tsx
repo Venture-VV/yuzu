@@ -51,9 +51,14 @@ export function AddItemsDialog({
   const [category, setCategory] = useState('全部');
   const [custom, setCustom] = useState<{ name: string; amount: string }[]>([]);
   const techs = useFrontdeskTechnicians(open);
-  // 进厨房的菜的余量（8.0.8，B03）：厨房估清设的今天还能卖几份（null 不限量，0 估清）；余量不够时服务端照旧整单拒绝
+  // 进厨房的菜的余量（8.0.8，B03）：厨房估清设的今天还能卖几份（null 不限量，0 估清）；余量不够时服务端照旧整单拒绝。
+  // 补录纸质单时不看今天的余量：那些菜之前已经上过了，服务端补录也不扣估清（Codex 审查 fb67dca）
+  const backfill = useBackfill();
   const dining = useDiningMenu(open && session.dining);
-  const remainingOf = useMemo(() => new Map((dining.data?.dishes ?? []).map((d) => [d.id, d.remaining])), [dining.data]);
+  const remainingOf = useMemo(
+    () => new Map(backfill.state.active ? [] : (dining.data?.dishes ?? []).map((d) => [d.id, d.remaining])),
+    [dining.data, backfill.state.active],
+  );
   const techRules = techs.data?.rules;
   const techOn = !!techRules?.enabled;
   const [picking, setPicking] = useState<{ item: ServiceItem; tier: PriceTier } | null>(null);
@@ -154,7 +159,6 @@ export function AddItemsDialog({
   const total = lines.reduce((s, l) => s + l.amount, 0) + customParsed.reduce((s, c) => s + (c.amount ?? 0), 0);
   const ready = (lines.length > 0 || custom.length > 0) && customValid && total > 0 && !missingTech && !staleTech;
 
-  const backfill = useBackfill();
   const backfillBlocked = backfill.state.active && !backfill.request;
   const submit = async () => {
     if (backfillBlocked) return;

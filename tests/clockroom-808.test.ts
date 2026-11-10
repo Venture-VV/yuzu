@@ -39,7 +39,8 @@ const visitLines = async (visitId: number) =>
     voidReason: string | null;
     technician: { techNo: string; callType: string } | null;
   }[];
-const assign = (lineId: number, body: Record<string, unknown>) => api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/lines/${lineId}/assign`, { startNow: true, ...body });
+const assign = (lineId: number, body: Record<string, unknown>, key = randomUUID()) =>
+  api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/lines/${lineId}/assign`, { clientKey: key, startNow: true, ...body });
 const dispatch = (body: Record<string, unknown>) =>
   api(ctx.app, ctx.clerk, 'POST', '/api/clockroom/dispatch', { clientKey: randomUUID(), quantity: 1, startNow: true, ...body });
 const transfer = (sessionId: number, body: Record<string, unknown>, key = randomUUID()) =>
@@ -91,7 +92,16 @@ describe('待派钟：前台点的护理项目交给钟房派钟（A01）', () =
     expect(wrong.status).toBe(409);
     expect(wrong.body.error.code).toBe('TECHNICIAN_TIER');
 
-    const ok = await assign(line!.id, { technicianId: tech['11'], callType: 'rotation' });
+    // 编号作废了的原请求不会生效（「结果待确认」时确认作废，Codex 审查 fb67dca）
+    const fenced = randomUUID();
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/ops/${fenced}/abandon`, { type: 'bill_post' })).body).toEqual({ found: false, abandoned: true });
+    expect((await assign(line!.id, { technicianId: tech['11'], callType: 'rotation' }, fenced)).body.error.code).toBe('OP_ABANDONED');
+    expect((await board()).pending.map((p) => p.lineId)).toContain(line!.id);
+    // 没带操作编号的拒绝
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/lines/${line!.id}/assign`, { technicianId: tech['11'], callType: 'rotation' })).status).toBe(400);
+
+    const key = randomUUID();
+    const ok = await assign(line!.id, { technicianId: tech['11'], callType: 'rotation' }, key);
     expect(ok.status).toBe(200);
     expect(ok.body.pending).toEqual([]);
     const s = (ok.body.sessions as BoardSession[]).find((x) => x.visitId === v)!;
@@ -104,10 +114,18 @@ describe('待派钟：前台点的护理项目交给钟房派钟（A01）', () =
       SELECT b.amount_cents, b.line_count FROM bills b JOIN visits v ON v.bill_id = b.id WHERE v.id = ${v}`;
     expect(b).toEqual({ amountCents: 19800, lineCount: 1 });
 
-    // 超时后原样重点：照常返回，不再建钟单
-    const again = await assign(line!.id, { technicianId: tech['11'], callType: 'rotation' });
+    // 超时后按原编号原样重提：返回原结果，不再建钟单；按编号查回得到这位客人
+    const again = await assign(line!.id, { technicianId: tech['11'], callType: 'rotation' }, key);
     expect(again.status).toBe(200);
     expect((again.body.sessions as BoardSession[]).filter((x) => x.visitId === v)).toHaveLength(1);
+    const found = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/ops/${key}?type=bill_post`)).body;
+    expect(found).toMatchObject({ found: true, type: 'bill_post', visit: { id: v } });
+    // 同一个编号换了内容：拒绝
+    expect((await assign(line!.id, { technicianId: tech['11'], callType: 'designated' }, key)).status).toBe(409);
+    // 换了编号再派给同一位：照常返回，也不再建钟单
+    const repeat = await assign(line!.id, { technicianId: tech['11'], callType: 'rotation' });
+    expect(repeat.status).toBe(200);
+    expect((repeat.body.sessions as BoardSession[]).filter((x) => x.visitId === v)).toHaveLength(1);
     // 已经派给 11 了，再派给 12 拒绝
     const other = await assign(line!.id, { technicianId: tech['12'], callType: 'designated' });
     expect(other.status).toBe(409);

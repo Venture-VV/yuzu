@@ -264,8 +264,11 @@ async function roomTypeFree(db: Db, roomTypeId: number, date: string, today: str
     SELECT (SELECT count(*)::int FROM rooms WHERE room_type_id = ${roomTypeId} AND active AND housekeeping <> 'maintenance') AS rooms,
            (SELECT count(*)::int FROM bookings bk WHERE bk.room_type_id = ${roomTypeId} AND bk.business_date = ${date} AND bk.id <> ${excludeBookingId ?? 0}
               AND (bk.status IN ${db(ACTIVE_BOOKING_STATUSES)}
-                   -- 已到店、还没入住的（8.0.8，A04）照样占着名额，入住后由在住的房间来算
-                   OR (bk.status = 'arrived' AND NOT EXISTS (SELECT 1 FROM room_stays rs WHERE rs.booking_id = bk.id AND rs.status <> 'cancelled')))) AS booked,
+                   -- 已到店、还没入住的（8.0.8，A04）照样占着名额，入住后由在住的房间来算；
+                   -- 客人没入住就离店了（到店时的手牌已经结账或撤销）不再占（Codex 审查 fb67dca）
+                   OR (bk.status = 'arrived'
+                       AND NOT EXISTS (SELECT 1 FROM room_stays rs WHERE rs.booking_id = bk.id AND rs.status <> 'cancelled')
+                       AND EXISTS (SELECT 1 FROM visits av WHERE av.id = bk.arrival_visit_id AND av.status = 'open')))) AS booked,
            (SELECT count(*)::int FROM room_stays s JOIN rooms ro ON ro.id = s.room_id WHERE ro.room_type_id = ${roomTypeId} AND s.status = 'open') AS staying`;
   return Math.max(0, r!.rooms - r!.booked - (date === today ? r!.staying : 0));
 }

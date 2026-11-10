@@ -153,6 +153,28 @@ describe('预约到店一键派钟、入住（A04）', () => {
     const dup = await api(ctx.app, ctx.clerk, 'POST', '/api/rooms/checkin', { clientKey: randomUUID(), roomId, tagCode: tag, guests: 2, expectedRate: 38800, bookingId: id });
     expect(dup.status).toBe(409);
   });
+
+  it('客房预约到店了没入住、客人离店（手牌撤销）以后不再占房型名额（Codex 审查 fb67dca）', async () => {
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/rooms/types', { name: '预约标准间', kind: 'daily', price: 28800 })).status).toBeLessThan(300);
+    const typeId = Number((await ctx.sql<{ id: number }[]>`SELECT id FROM room_types WHERE name = '预约标准间'`)[0]!.id);
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/rooms/rooms', { roomNo: '802', floor: '8', roomTypeId: typeId })).status).toBeLessThan(300);
+    const today = (await api(ctx.app, ctx.clerk, 'GET', '/api/business-day')).body.today as string;
+    const free = async () =>
+      ((await api(ctx.app, ctx.clerk, 'GET', `/api/bookings/slots?kind=room&date=${today}&roomTypeId=${typeId}`)).body as { free: number }[])[0]?.free ?? 0;
+    expect(await free()).toBe(1);
+    const v = await enter();
+    const tag = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/visits/${v}`)).body.tag.code as string;
+    await arrive(await insertBooking({ kind: 'room', roomTypeId: typeId }), tag);
+    // 到店了、还在店里：照样占着
+    expect(await free()).toBe(0);
+    // 客人没入住就走了：作废门票、撤销来访以后不再占
+    const lines = (await api(ctx.app, ctx.owner, 'GET', `/api/frontdesk/visits/${v}`)).body.lines as { id: number; status: string }[];
+    for (const l of lines.filter((x) => x.status === 'active')) {
+      expect((await api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/lines/${l.id}/void`, { reason: '客人没入住走了' })).status).toBe(200);
+    }
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/visits/${v}/cancel`, { reason: '客人没入住走了' })).status).toBe(200);
+    expect(await free()).toBe(1);
+  });
 });
 
 describe('派对房、宠物轰趴房（A03）', () => {

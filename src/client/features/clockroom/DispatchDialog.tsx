@@ -8,7 +8,7 @@ import { TECH_FILTER_LABELS, techFilterOf, type BoardSession, type BoardTechnici
 import type { FrontdeskBoard } from '@shared/frontdesk';
 import { CALL_TYPE_LABELS, canServe, gradeLabel, tierFor, type CallType } from '@shared/technicians';
 import type { ServiceItem } from '@shared/types';
-import { api, errorMessage } from '../../lib/api';
+import { api } from '../../lib/api';
 import { useCatalog } from '../../lib/queries';
 import { useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
@@ -79,8 +79,6 @@ export function DispatchDialog({
   const [spaceId, setSpaceId] = useState<number | null>(null);
   // 补派的那一条（打开时带入，或在提示里切过去）
   const [target, setTarget] = useState<PendingLine | null>(null);
-  const [assignBusy, setAssignBusy] = useState(false);
-  const [assignError, setAssignError] = useState<string | null>(null);
   const spaces = useClockSpaces(open);
 
   // 每次打开清空上一次的填写（在打开的这一次渲染里就清空，手快时不会把刚输入的手牌号又清掉）；补派、预约带入的这里填上
@@ -97,7 +95,6 @@ export function DispatchDialog({
     setGender('all');
     setListFilter('all');
     setSpaceId(null);
-    setAssignError(null);
   });
 
   const inStore = (tags.data?.tags ?? []).filter((t) => t.visit);
@@ -168,24 +165,23 @@ export function DispatchDialog({
   const submit = async () => {
     if (problem || !visit || !item || !tech) return;
     if (target) {
-      // 补派：不挂账，同一条重点同一位技师照常返回（不走「结果待确认」）
-      setAssignBusy(true);
-      setAssignError(null);
-      try {
-        await api.post(`/api/clockroom/lines/${target.lineId}/assign`, {
+      // 补派：不另挂一笔；与派钟一样带操作编号、走「结果待确认」（超时、断网后先查回或确认作废，不能改了技师再派，Codex 审查 fb67dca）
+      const ok = await op.submit((key) => ({
+        url: `/api/clockroom/lines/${target.lineId}/assign`,
+        body: {
+          clientKey: key,
           technicianId: tech.id,
           callType,
           startNow: startNow && !tech.busy,
           skipReason: skipping ? skipReason.trim() : undefined,
           spaceId: spaceId ?? undefined,
           bookingId: prefill?.bookingId,
-        });
-        onDone();
-      } catch (e) {
-        setAssignError(errorMessage(e));
-      } finally {
-        setAssignBusy(false);
-      }
+        },
+        tagCodes: [tag!.code],
+        summary: `补派 ${target.itemName} × ${target.quantity}（${tech.techNo} 号 ${tech.name} · ${CALL_TYPE_LABELS[callType]}，前台已点、不另收费）`,
+        amount: 0,
+      }));
+      if (ok) onDone();
       return;
     }
     const ok = await op.submit((key) => ({
@@ -213,7 +209,7 @@ export function DispatchDialog({
 
   const list = callType === 'rotation' ? rotationList : designatedList;
   const base = callType === 'rotation' ? eligible : designatedBase;
-  const busyNow = op.busy || assignBusy;
+  const busyNow = op.busy;
   return (
     <Dialog
       open={open}
@@ -425,7 +421,6 @@ export function DispatchDialog({
         </div>
       </div>
       {op.state.phase === 'error' && <Notice tone="error" title={op.state.message} className="mt-4" />}
-      {assignError && <Notice tone="error" title={assignError} className="mt-4" />}
     </Dialog>
   );
 }

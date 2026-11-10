@@ -639,6 +639,8 @@ export async function setSessionSpace(deps: Deps, id: number, raw: unknown, ctx:
 // ───────────────────────── 待派钟、转钟（8.0.8） ─────────────────────────
 
 export const AssignInput = z.object({
+  /** 操作编号（与派钟、转钟一样走「结果待确认」：超时、断网后按编号查回或确认作废，Codex 审查 fb67dca） */
+  clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
   technicianId: z.number().int().positive(),
   callType: z.enum(['designated', 'rotation'], '上钟方式应为点钟或轮钟'),
   startNow: z.boolean().default(true),
@@ -675,15 +677,17 @@ async function checkTechnicianForLine(tx: Tx, line: { itemId: number; tier: Pric
  * 待派钟（8.0.8，A01）：前台已点、交给钟房派钟（没选技师）的技师明细，钟房补派——建钟单，把技师、上钟方式与钟单记到这条明细上，
  * 不另挂一笔（金额、价格档不变；明细保护触发器只放开这一种补记，补记过的不能再改）。
  * 锁：来访 → 账单 → 这条明细 → 技师队列 → 房间（共享锁）→ 技师状态 → 技师预约咨询锁（与派钟相同，只是不新增明细）。
- * 同一条明细已经派给这位技师（超时后重点）照常返回；已经派给别人的拒绝。
+ * 带操作编号（与派钟、转钟一样记成「挂账」类的编号，查回这位客人）：超时后同一编号重提返回原结果，作废了编号的原请求不会生效；
+ * 换了编号再派给同一位技师照常返回，派给别人的拒绝。
  */
 export async function assignLine(deps: Deps, lineId: number, raw: unknown, ctx: OpContext) {
   const input = parse(AssignInput, raw);
+  const { clientKey: key, ...payload } = input;
+  const requestHash = hashRequest({ lineId, ...payload });
   const [peek] = await deps.sql<{ visitId: number }[]>`
     SELECT v.id AS visit_id FROM bill_lines l JOIN visits v ON v.bill_id = l.bill_id WHERE l.id = ${lineId}`;
   if (!peek) throw notFound('这条明细不存在或不在手牌账单上');
-  await deps.sql.begin(async (tx) => {
-    await setTxTimeouts(tx);
+  await runIdempotent(deps, { key, opType: 'bill_post', requestHash }, async (tx) => {
     const at = ctx.at ?? new Date();
     const visit = (await lockVisits(tx, [peek.visitId])).get(peek.visitId)!;
     assertOpen(visit);
@@ -695,8 +699,11 @@ export async function assignLine(deps: Deps, lineId: number, raw: unknown, ctx: 
     if (!l || Number(l.billId) !== Number(visit.billId)) throw notFound('这条明细不存在');
     if (l.status !== 'active') throw conflict('LINE_VOIDED', `「${l.name}」已作废，不用再派钟`);
     if (l.technicianId !== null) {
-      // 超时后按原样重点：已经派给这位了，照常返回
-      if (Number(l.technicianId) === input.technicianId && l.sessionId !== null) return;
+      // 换了编号按原样重点：已经派给这位了，照常返回（这个编号也记下，查回得到）
+      if (Number(l.technicianId) === input.technicianId && l.sessionId !== null) {
+        await saveKey(tx, key, 'bill_post', requestHash, visit.id, ctx.actor.id);
+        return visit.id;
+      }
       const other = (await loadTechnicians(tx, [Number(l.technicianId)])).get(Number(l.technicianId));
       throw conflict('LINE_ASSIGNED', `「${l.name}」已经派给 ${other ? `${other.techNo} 号 ${other.name}` : '别的技师'}了，请刷新`);
     }
@@ -725,6 +732,8 @@ export async function assignLine(deps: Deps, lineId: number, raw: unknown, ctx: 
     });
     // 实时位置（v0.7.17）：马上上钟的，技师与客人在钟单记的房间（业务都写好之后最后记）
     await locateSession(tx, sessionId!, 'session_start', { at, staffId: ctx.actor.id });
+    await saveKey(tx, key, 'bill_post', requestHash, visit.id, ctx.actor.id);
+    return visit.id;
   });
   return clockroomBoard(deps.sql, deps);
 }
