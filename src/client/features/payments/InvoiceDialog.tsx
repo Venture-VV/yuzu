@@ -5,6 +5,7 @@
 import { useState } from 'react';
 import { formatAmount, parseYuan } from '@shared/money';
 import { parsePercentBp } from '@shared/contracts';
+import { threeWayToleranceText } from '@shared/payments';
 import { errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useSession } from '../../lib/session';
@@ -15,12 +16,13 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Button, Field, Input, MoneyInput, Notice, Select } from '../../components/ui';
 import { ThreeWayBadge } from './parts';
-import { usePaymentMeta, useSupplierPos } from './queries';
+import { usePaymentMeta, usePaymentRules, useSupplierPos } from './queries';
 
 export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplier }: { open: boolean; onClose: () => void; onDone: () => unknown; supplierId?: number | null }) {
   const session = useSession();
   const toast = useToast();
   const meta = usePaymentMeta();
+  const rules = usePaymentRules();
   const [supplierId, setSupplierId] = useState<number | null>(null);
   const pos = useSupplierPos(supplierId);
   const [invoiceNo, setInvoiceNo] = useState('');
@@ -125,7 +127,7 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
       open={open}
       onClose={busy ? () => {} : onClose}
       title="登记发票"
-      description="供应商开来的发票分到对应的采购单上；采购单的收货与发票差额超过 1% 或 ¥50 的会挂起，要财务确认放行。"
+      description={`供应商开来的发票分到对应的采购单上；采购单的收货与发票差额超过${rules.data ? ` ${threeWayToleranceText(rules.data)}` : '「付款规则」里的门槛'}的会挂起，要财务确认放行。`}
       width="max-w-2xl"
       footer={
         <>

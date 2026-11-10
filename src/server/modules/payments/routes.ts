@@ -12,7 +12,7 @@ import { WEEKLY_ITEM_LABELS } from '@shared/payments';
 import { guardAny } from '../../auth/guard';
 import { readSnapshot } from '../../db';
 import { writeAudit } from '../../lib/audit';
-import type { Deps } from '../../lib/context';
+import { ctxOf, type Deps } from '../../lib/context';
 import { csvReply, toCsv } from '../../lib/csv';
 import { todayIn } from '../../lib/dates';
 import { idParam, parse } from '../../lib/validate';
@@ -21,6 +21,7 @@ import { createAcceptance, createQualityIssue, resolveQualityIssue, voidAcceptan
 import { paymentTodo, warrantyLedger, weeklyPayables, type WarrantyFilter } from './ledger';
 import { createInvoice, getInvoice, listInvoices, poThreeWay, releasePo, threeWayList, voidInvoice } from './match';
 import { contractPlan } from './plan';
+import { loadPaymentRules, savePaymentRules } from './rules';
 import {
   actOnPaymentRequest,
   createPaymentRequest,
@@ -187,7 +188,7 @@ export function registerPaymentRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/erp/payments/weekly/export', { preHandler: guardAny('payable.read') }, async (req, reply) => {
     const w = await readSnapshot(sql, (tx) => weeklyPayables(tx, today()));
     const rows: (string | number)[][] = [
-      [`本周应付（${w.from} 起四周，导出于 ${w.today}；可付未申请的算在本周，期望付款日已过的算在本周）`],
+      [`本周应付（${w.from} 起 ${w.weeks.length} 周，导出于 ${w.today}；可付未申请的算在本周，期望付款日已过的算在本周）`],
       ['周', '日期', '类型', '收款方', '申请号', '合同', '付款节点', '金额（元）', '说明'],
     ];
     w.weeks.forEach((wk, i) => {
@@ -196,13 +197,17 @@ export function registerPaymentRoutes(app: FastifyInstance, deps: Deps) {
       }
       rows.push([`第 ${i + 1} 周合计`, '', '', '', '', '', '', yuanText(wk.totalCents), '']);
     });
-    rows.push(['四周合计', '', '', '', '', '', '', yuanText(w.totalCents), '']);
-    rows.push(['四周以后的已批待付', '', '', '', '', '', '', yuanText(w.laterCents), '']);
+    rows.push([`${w.weeks.length} 周合计`, '', '', '', '', '', '', yuanText(w.totalCents), '']);
+    rows.push([`${w.weeks.length} 周以后的已批待付`, '', '', '', '', '', '', yuanText(w.laterCents), '']);
     rows.push(['没挂合同、没提申请的应付余额（参考）', '', '', '', '', '', '', yuanText(w.otherApCents), '']);
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'weekly_payables', targetId: w.from, detail: { from: w.from }, ip: req.ip });
     return csvReply(reply, `本周应付_${w.from}.csv`, toCsv(rows));
   });
   app.get('/api/erp/payments/todo', { preHandler: READ }, async () => readSnapshot(sql, (tx) => paymentTodo(tx, today())));
+
+  // 付款规则（8.0.6）：能看付款的人都能看；改要「修改经营规则设置」（settings.manage，与费用规则、库存设置一样），只改提交的字段
+  app.get('/api/erp/payments/rules', { preHandler: READ }, async () => loadPaymentRules(sql));
+  app.put('/api/erp/payments/rules', { preHandler: guardAny('settings.manage') }, async (req) => savePaymentRules(sql, req.body, ctxOf(req)));
 
   // ───────── 合同的付款计划、验收、质量问题（跟合同模块走） ─────────
   app.get('/api/erp/contracts/:id/payment-plan', { preHandler: CONTRACT_READ }, async (req) => readSnapshot(sql, (tx) => contractPlan(tx, docId(req), today())));

@@ -19,7 +19,7 @@ import {
   type ApprovalStep,
   type ApproverSubject,
 } from '@shared/approvals';
-import { PAYMENT_OWNER_LEVEL_CENTS } from '@shared/payments';
+import { DEFAULT_PAYMENT_RULES } from '@shared/payments';
 import { can, permissionsOf, type Duty, type Role } from '@shared/permissions';
 import { lineAmountCents } from '@shared/quantity';
 import { loadRoleOverrides } from '../../auth/role-permissions';
@@ -27,6 +27,7 @@ import type { Db, Fragment, Tx } from '../../db';
 import type { Actor } from '../../lib/context';
 import { todayIn } from '../../lib/dates';
 import { AppError, conflict } from '../../lib/errors';
+import { loadPaymentRules } from '../payments/rules';
 
 /** 默认规则（没有规则命中、照现在的开关与门槛要确认的）：一级「负责人」，提交人有权限的可以一并同意 */
 export const DEFAULT_STEPS: ApprovalStep[] = [{ group: 'manager', mode: 'any' }];
@@ -95,10 +96,15 @@ const INV_TYPES: Record<string, ApprovalDocType> = { damage: 'damage', supplier_
 
 /**
  * 没有规则命中时的审批链（默认规则）：库存、采购、货款、报销是一级负责人（与 v0.7.29 一样）；
- * 合同、合同变更是 财务 → 法务 → 负责人（C2），用印是一级店主（C7）；付款申请是 财务 → 负责人，申请金额 ≥ ¥50,000 再加一级店主（P5），
- * 提前付款是 财务 → 负责人 → 店主（P6）。默认规则里提交人有资格的可以审（与 v0.7.30 的默认规则一样）
+ * 合同、合同变更是 财务 → 法务 → 负责人（C2），用印是一级店主（C7）；付款申请是 财务 → 负责人，申请金额 ≥ ownerLevelCents 再加一级店主
+ * （P5：8.0.6 起在「付款 → 付款规则」里改，默认 ¥50,000，null 为不加），提前付款是 财务 → 负责人 → 店主（P6）。
+ * 默认规则里提交人有资格的可以审（与 v0.7.30 的默认规则一样）
  */
-export function defaultPlanFor(docType: ApprovalDocType, amountCents: number | null = null): ApprovalPlan {
+export function defaultPlanFor(
+  docType: ApprovalDocType,
+  amountCents: number | null = null,
+  ownerLevelCents: number | null = DEFAULT_PAYMENT_RULES.ownerLevelCents,
+): ApprovalPlan {
   let steps: ApprovalStep[];
   switch (docType) {
     case 'contract':
@@ -110,7 +116,7 @@ export function defaultPlanFor(docType: ApprovalDocType, amountCents: number | n
       break;
     case 'payment_request':
       // 金额算不出（不该有）按大额算
-      steps = amountCents === null || amountCents >= PAYMENT_OWNER_LEVEL_CENTS ? PAYMENT_EARLY_DEFAULT_STEPS : PAYMENT_REQUEST_DEFAULT_STEPS;
+      steps = amountCents === null || (ownerLevelCents !== null && amountCents >= ownerLevelCents) ? PAYMENT_EARLY_DEFAULT_STEPS : PAYMENT_REQUEST_DEFAULT_STEPS;
       break;
     case 'payment_early':
       steps = PAYMENT_EARLY_DEFAULT_STEPS;
@@ -122,6 +128,12 @@ export function defaultPlanFor(docType: ApprovalDocType, amountCents: number | n
       steps = DEFAULT_STEPS;
   }
   return { ruleId: null, ruleVersion: null, steps, allowSelf: true };
+}
+
+/** 默认规则里要读设置的：付款申请加店主一级的金额（P5，8.0.6 起在「付款规则」里改；读不加锁，改了以后新提交的才用新值） */
+async function defaultPlanIn(db: Db, docType: ApprovalDocType, amountCents: number | null): Promise<ApprovalPlan> {
+  if (docType !== 'payment_request') return defaultPlanFor(docType, amountCents);
+  return defaultPlanFor(docType, amountCents, (await loadPaymentRules(db)).ownerLevelCents);
 }
 
 /** 单据在审批规则里的类型、金额、部门（docs/APPROVALS.md 第 2 节） */
@@ -242,7 +254,8 @@ export async function planApproval(
     LIMIT 1`;
   if (rule) return { ruleId: Number(rule.id), ruleVersion: rule.version, steps: rule.steps, allowSelf: rule.allowSelf };
   // 单据模块可以给出自己的默认审批链（急采按金额分级，8.0.1）
-  return input.fallback ? (input.defaultPlan ?? defaultPlanFor(input.docType, input.amountCents)) : null;
+  if (!input.fallback) return null;
+  return input.defaultPlan ?? defaultPlanIn(db, input.docType, input.amountCents);
 }
 
 /**
@@ -393,7 +406,7 @@ async function pendingOrDefault(tx: Tx, kind: ApprovalDocKind, docId: number, re
   if (found) return found;
   if (requestId !== undefined) throw conflict('APPROVAL_MOVED', '这张单的审批已经变了（退回、撤回或重新提交），请刷新后再看');
   const info = await describeDoc(tx, kind, docId);
-  await insertRequest(tx, kind, docId, info, defaultPlanFor(info.docType, info.amountCents), info.submittedBy);
+  await insertRequest(tx, kind, docId, info, await defaultPlanIn(tx, info.docType, info.amountCents), info.submittedBy);
   return (await lockPending(tx, kind, docId))!;
 }
 

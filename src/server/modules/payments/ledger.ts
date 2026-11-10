@@ -1,9 +1,8 @@
-// 质保金台账、本周应付、付款待办与自检（v0.7.32，docs/PAYMENTS.md 第 5、6 节，默认 P9、P11、P12 待确认）。都只读，不加锁。
+// 质保金台账、本周应付、付款待办与自检（v0.7.32，docs/PAYMENTS.md 第 5、6 节；P9、P11、P12 店主 2026-11-10 照默认）。都只读，不加锁。
+// 质保金提前几天提醒（P9）、本周应付看几周（P11）按付款规则（8.0.6，ERP「付款 → 付款规则」里改）。
 
 import { PAYMENT_STAGE_LABELS } from '@shared/contracts';
 import {
-  WARRANTY_REMIND_DAYS,
-  WEEKLY_PAYABLE_WEEKS,
   type PaymentTodo,
   type WarrantyRow,
   type WarrantyRowStatus,
@@ -15,6 +14,7 @@ import { openItems } from '../inventory/payables';
 import { invoiceChecks } from './match';
 import { ledgerChecks } from '../invoices';
 import { PAYABLE_CONTRACT_STATUSES, contractPlan, requestPaidSql } from './plan';
+import { loadPaymentRules } from './rules';
 
 const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 /** 这一天所在那一周的周一 */
@@ -32,6 +32,7 @@ export type WarrantyFilter = 'all' | 'due' | 'unsettled';
 
 /** 质保金台账：一份有质保段（比例 > 0）的合同一条（P9、P12） */
 export async function warrantyLedger(db: Db, today: string, filter: WarrantyFilter = 'all'): Promise<WarrantyRow[]> {
+  const { warrantyRemindDays } = await loadPaymentRules(db);
   const out: WarrantyRow[] = [];
   for (const contractId of await payableContracts(db)) {
     const plan = await contractPlan(db, contractId, today);
@@ -43,7 +44,7 @@ export async function warrantyLedger(db: Db, today: string, filter: WarrantyFilt
     else if (!w.startDate) rowStatus = 'not_started';
     else if (w.openIssues > 0) rowStatus = 'held';
     else if (w.daysLeft !== null && w.daysLeft <= 0) rowStatus = 'payable';
-    else if (w.daysLeft !== null && w.daysLeft <= WARRANTY_REMIND_DAYS) rowStatus = 'due_soon';
+    else if (w.daysLeft !== null && w.daysLeft <= warrantyRemindDays) rowStatus = 'due_soon';
     else rowStatus = 'running';
     const [cp] = await db<{ counterparty: string }[]>`SELECT counterparty FROM contracts WHERE id = ${contractId}`;
     out.push({
@@ -65,22 +66,23 @@ export async function warrantyLedger(db: Db, today: string, filter: WarrantyFilt
       settled: plan.settled,
     });
   }
-  const rows = filter === 'due' ? out.filter(isWarrantyDue) : filter === 'unsettled' ? out.filter((r) => !r.settled) : out;
+  const rows = filter === 'due' ? out.filter((r) => isWarrantyDue(r, warrantyRemindDays)) : filter === 'unsettled' ? out.filter((r) => !r.settled) : out;
   // 到期早的在前，没起算的、付清的在后
   const rank = (r: WarrantyRow) => (r.rowStatus === 'paid' ? 3 : r.dueDate === null ? 2 : 1);
   return rows.sort((a, b) => rank(a) - rank(b) || (a.dueDate ?? '').localeCompare(b.dueDate ?? '') || a.contractId - b.contractId);
 }
 
-/** 进待办的质保金（P9）：到期前 30 天以内（含已到期没付的），还没付清 */
-export const isWarrantyDue = (r: WarrantyRow) => r.rowStatus !== 'paid' && r.daysLeft !== null && r.daysLeft <= WARRANTY_REMIND_DAYS;
+/** 进待办的质保金（P9）：到期前 N 天以内（含已到期没付的，N 按付款规则，默认 30），还没付清 */
+export const isWarrantyDue = (r: WarrantyRow, remindDays: number) => r.rowStatus !== 'paid' && r.daysLeft !== null && r.daysLeft <= remindDays;
 
 /**
- * 本周应付（P11）：从本周一起四周，每周列出已批待付的申请（按期望付款日）、可付还没申请的合同段（算在本周）、那一周到期的质保金；
- * 期望付款日早于本周一的算在本周，晚于四周的另计。可用资金在页面上填、不存。
+ * 本周应付（P11）：从本周一起几周（按付款规则，默认四周），每周列出已批待付的申请（按期望付款日）、可付还没申请的合同段（算在本周）、
+ * 那一周到期的质保金；期望付款日早于本周一的算在本周，晚于最后一周的另计。可用资金在页面上填、不存。
  */
 export async function weeklyPayables(db: Db, today: string): Promise<WeeklyPayables> {
   const from = mondayOf(today);
-  const weeks = Array.from({ length: WEEKLY_PAYABLE_WEEKS }, (_, i) => ({ start: addDays(from, i * 7), end: addDays(from, i * 7 + 6), items: [] as WeeklyItem[], totalCents: 0 }));
+  const { weeklyWeeks } = await loadPaymentRules(db);
+  const weeks = Array.from({ length: weeklyWeeks }, (_, i) => ({ start: addDays(from, i * 7), end: addDays(from, i * 7 + 6), items: [] as WeeklyItem[], totalCents: 0 }));
   const lastEnd = weeks[weeks.length - 1]!.end;
   const weekOf = (date: string) => (date < from ? 0 : weeks.findIndex((w) => date >= w.start && date <= w.end));
   let laterCents = 0;
@@ -128,7 +130,7 @@ export async function weeklyPayables(db: Db, today: string): Promise<WeeklyPayab
     const w = plan.warranty;
     const st = plan.stages.find((s) => s.stage === 'warranty')!;
     const left = st.remainingCents;
-    // 还没到期、四周内到期的质保金（已经到期的在「可付未申请」里）
+    // 还没到期、这几周内到期的质保金（已经到期的在「可付未申请」里）
     if (left > 0 && w.dueDate && w.dueDate > today && w.dueDate <= lastEnd) {
       put({
         kind: 'warranty',
@@ -173,7 +175,7 @@ export async function weeklyPayables(db: Db, today: string): Promise<WeeklyPayab
 /** ERP 导航「付款」上的数字：批了待付款的申请、进待办的质保金；每周一另有本周应付 */
 export async function paymentTodo(db: Db, today: string): Promise<PaymentTodo> {
   const [a] = await db<{ n: number }[]>`SELECT count(*)::int AS n FROM payment_requests WHERE status = 'approved'`;
-  const warrantyDue = (await warrantyLedger(db, today)).filter(isWarrantyDue).length;
+  const warrantyDue = (await warrantyLedger(db, today, 'due')).length;
   let weekly: PaymentTodo['weekly'] = null;
   if (new Date(`${today}T00:00:00Z`).getUTCDay() === 1) {
     const w = (await weeklyPayables(db, today)).weeks[0]!;

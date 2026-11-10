@@ -1,4 +1,4 @@
-// ERP「付款」（v0.7.32，docs/PAYMENTS.md）：付款申请、发票、三单、质保金台账、本周应付。
+// ERP「付款」（v0.7.32，docs/PAYMENTS.md）：付款申请、发票、三单、质保金台账、本周应付；8.0.6 加「付款规则」（有争议的数值与开关在页面上改）。
 // 付款申请走审批中心（财务 → 负责人，提前付款多一级店主），批了以后对账付款的人在申请里登记付款。
 
 import { useRef, useState } from 'react';
@@ -6,7 +6,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router';
 import { Download, FilePlus2, Plus, ReceiptText, ShieldCheck } from 'lucide-react';
 import { PAYMENT_STAGE_LABELS, WARRANTY_BASIS_LABELS } from '@shared/contracts';
 import { formatAmount, parseYuan } from '@shared/money';
-import { WEEKLY_ITEM_LABELS, type ThreeWayRow } from '@shared/payments';
+import { threeWayToleranceText, WEEKLY_ITEM_LABELS, type ThreeWayRow } from '@shared/payments';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { cn, uuid } from '../../lib/utils';
@@ -18,11 +18,13 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Input, MoneyInput, Notice, Skeleton } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
 import { InvoiceDialog } from './InvoiceDialog';
+import { PaymentRulesCard } from './PaymentRulesCard';
 import { RequestStatusBadge, stageText, ThreeWayBadge, WarrantyBadge } from './parts';
 import {
   useInvalidatePayments,
   useInvoices,
   usePaymentRequests,
+  usePaymentRules,
   usePaymentTodo,
   useThreeWay,
   useWarranty,
@@ -37,6 +39,7 @@ const TABS = [
   { value: 'three-way', label: '三单' },
   { value: 'warranty', label: '质保金' },
   { value: 'weekly', label: '本周应付' },
+  { value: 'rules', label: '付款规则' },
 ] as const;
 type Tab = (typeof TABS)[number]['value'];
 
@@ -106,6 +109,7 @@ export function PaymentsPage() {
         {tab === 'three-way' && <ThreeWayTab />}
         {tab === 'warranty' && <WarrantyTab />}
         {tab === 'weekly' && <WeeklyTab />}
+        {tab === 'rules' && <PaymentRulesCard />}
       </div>
     </ErpPage>
   );
@@ -273,6 +277,7 @@ function ThreeWayTab() {
   const can = useCan();
   const [pending, setPending] = useState(true);
   const list = useThreeWay(pending);
+  const rules = usePaymentRules();
   const [releasing, setReleasing] = useState<ThreeWayRow | null>(null);
   return (
     <div className="space-y-3">
@@ -286,7 +291,9 @@ function ThreeWayTab() {
           onChange={(v) => setPending(v === 'pending')}
           testId="three-way-filter"
         />
-        <span className="text-[12.5px] text-ink-3">按采购单比：发票与收货（减退货）差额 ≤ 收货的 1% 且 ≤ ¥50 算对得上；付款申请要对得上或财务放行。</span>
+        <span className="text-[12.5px] text-ink-3">
+          按采购单比：发票与收货（减退货）差额{rules.data ? `不超过收货的 ${threeWayToleranceText(rules.data)}` : '在「付款规则」的门槛内'}算对得上；付款申请要对得上或财务放行。
+        </span>
       </div>
       {list.isPending ? (
         <Skeleton className="h-40" />
@@ -382,6 +389,7 @@ export function ReleaseDialog({ row, onClose }: { row: ThreeWayRow | null; onClo
 function WarrantyTab() {
   const [filter, setFilter] = useState<WarrantyFilter>('all');
   const list = useWarranty(filter);
+  const days = usePaymentRules().data?.warrantyRemindDays;
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -389,13 +397,13 @@ function WarrantyTab() {
           value={filter}
           options={[
             { value: 'all', label: '全部' },
-            { value: 'due', label: '30 天内到期' },
+            { value: 'due', label: days === undefined ? '快到期的' : `${days} 天内到期` },
             { value: 'unsettled', label: '未结项' },
           ]}
           onChange={setFilter}
           testId="warranty-filter"
         />
-        <span className="text-[12.5px] text-ink-3">一份有质保段的合同一条；到期前 30 天进待办，有未处理的质量问题时挂起。</span>
+        <span className="text-[12.5px] text-ink-3">一份有质保段的合同一条；到期前{days === undefined ? '' : ` ${days} 天`}进待办（天数在「付款规则」里改），有未处理的质量问题时挂起。</span>
       </div>
       {list.isPending ? (
         <Skeleton className="h-40" />
@@ -450,7 +458,7 @@ function WeeklyTab() {
     <div className="space-y-3" data-testid="weekly-payables">
       <div className="flex flex-wrap items-end gap-3">
         <div>
-          <p className="text-[12.5px] text-ink-3">{w.from} 起四周合计</p>
+          <p className="text-[12.5px] text-ink-3">{w.from} 起 {w.weeks.length} 周合计</p>
           <Money cents={w.totalCents} className="text-[22px] font-bold" />
         </div>
         <label className="text-[12.5px] text-ink-3">
@@ -506,12 +514,12 @@ function WeeklyTab() {
       ))}
       {(w.laterCents > 0 || w.otherApCents > 0) && (
         <p className="text-[12.5px] text-ink-3">
-          {w.laterCents > 0 && `期望付款日在四周以后的已批待付 ¥${formatAmount(w.laterCents)}；`}
+          {w.laterCents > 0 && `期望付款日在 ${w.weeks.length} 周以后的已批待付 ¥${formatAmount(w.laterCents)}；`}
           {w.otherApCents > 0 && `没挂合同、也没提申请的应付余额 ¥${formatAmount(w.otherApCents)}（没有付款日期，只作参考）。`}
         </p>
       )}
       {w.weeks.every((wk) => wk.items.length === 0) && (
-        <EmptyState art="search" title="四周内没有要付的" description="已批待付的付款申请、可付还没申请的合同段、到期的质保金会列在这里。" action={<Link to="/erp/payments/requests/new" className="inline-flex items-center gap-1 font-semibold text-lake"><FilePlus2 className="size-4" />发起付款申请</Link>} />
+        <EmptyState art="search" title={`${w.weeks.length} 周内没有要付的`} description="已批待付的付款申请、可付还没申请的合同段、到期的质保金会列在这里。" action={<Link to="/erp/payments/requests/new" className="inline-flex items-center gap-1 font-semibold text-lake"><FilePlus2 className="size-4" />发起付款申请</Link>} />
       )}
     </div>
   );
