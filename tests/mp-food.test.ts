@@ -417,6 +417,8 @@ describe('一单的上限按后台的设置（N1，主线 8.0.7「经营规则 �
     // 调大到 30 份：菜单写 30，25 份能下
     await setLimits({ mpFoodMaxQuantity: 30 });
     expect((await menu(a.openid)).limits).toEqual({ maxQuantity: 30, maxTotal: 50_000, ...LINE });
+    // 后台「微信小程序 → 扫码点餐」写的也是这一份
+    expect((await adminData()).limits).toEqual({ maxQuantity: 30, maxTotal: 50_000, ...LINE });
     const big = await order(a.openid, tea(25));
     expect(big.statusCode, big.body).toBe(201);
     // 调小到 10 份：15 份不让下

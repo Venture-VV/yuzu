@@ -1143,6 +1143,8 @@ export interface MpFoodAdminData {
   dishes: MpFoodAdminDish[];
   /** 启用的桌台与桌码 */
   tables: MpFoodAdminTable[];
+  /** 一单的上限（与小程序菜单上给的相同）：一共几份、多少钱按后台「经营规则 → 可调的数值」，一道菜最多几份、最多几道菜是账单、点单记录能存的上限 */
+  limits: MpFoodMenu['limits'];
   /** 今天（营业日）小程序下了几单、合计（分） */
   today: { orders: number; total: number };
   /** 最近 50 单 */

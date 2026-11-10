@@ -172,12 +172,18 @@ export async function saveFoodRules(deps: Deps, raw: unknown, ctx: OpContext): P
 
 const MenuQuery = z.object({ table: z.string().max(40).optional() });
 
+/**
+ * 一单的上限（菜单与后台都给这一份）：一共几份、多少钱按后台「经营规则 → 可调的数值」（N1，主线 8.0.7），下单时门店系统照同一份设置核对；
+ * 一道菜最多几份、最多几道菜是账单、点单记录能存的上限（下单请求的格式也按这个挡）
+ */
+async function foodLimits(db: Db): Promise<MpFoodMenu['limits']> {
+  const settings = await loadSettings(db);
+  return { maxQuantity: settings.mpFoodMaxQuantity, maxTotal: settings.mpFoodMaxTotalCents, maxLineQuantity: MP_FOOD_LINE_MAX_QUANTITY, maxLines: MP_FOOD_MAX_LINES };
+}
+
 export async function foodMenu(deps: Deps, openid: string, query: unknown): Promise<MpFoodMenu> {
   const { table: tableCode } = parse(MenuQuery, query);
-  const [rules, state, menu, settings] = await Promise.all([loadFoodRules(deps.sql), bindingStateOf(deps.sql, openid), diningMenu(deps.sql, deps), loadSettings(deps.sql)]);
-  // 一单最多几份、多少钱：按后台「经营规则 → 可调的数值」（N1，主线 8.0.7）；下单时门店系统照同一份设置核对。
-  // 一道菜最多几份、最多几道菜：账单、点单记录能存的上限（下单请求的格式也按这个挡）
-  const limits = { maxQuantity: settings.mpFoodMaxQuantity, maxTotal: settings.mpFoodMaxTotalCents, maxLineQuantity: MP_FOOD_LINE_MAX_QUANTITY, maxLines: MP_FOOD_MAX_LINES };
+  const [rules, state, menu, limits] = await Promise.all([loadFoodRules(deps.sql), bindingStateOf(deps.sql, openid), diningMenu(deps.sql, deps), foodLimits(deps.sql)]);
   const open = rules.enabled && menu.rules.enabled;
   if (!open) {
     return { open: false, canOrder: false, notice: '扫码点餐还没开放，请服务员点单', bindVersion: state.version, bound: state.binding !== null, tagCode: null, table: null, tableNotice: null, dishes: [], limits };
@@ -330,7 +336,13 @@ export async function foodBill(deps: Deps, openid: string): Promise<MpFoodBill> 
 // ───────────────────────── 后台 ─────────────────────────
 
 export async function foodAdminData(deps: Deps): Promise<MpFoodAdminData> {
-  const [rules, menu, tables, today] = await Promise.all([loadFoodRules(deps.sql), diningMenu(deps.sql, deps), mpDiningTables(deps.sql), mpToday(deps.sql, deps.config.timezone)]);
+  const [rules, menu, tables, today, limits] = await Promise.all([
+    loadFoodRules(deps.sql),
+    diningMenu(deps.sql, deps),
+    mpDiningTables(deps.sql),
+    mpToday(deps.sql, deps.config.timezone),
+    foodLimits(deps.sql),
+  ]);
   const open = new Set(rules.itemIds);
   const secret = deps.config.mp.codeSecret;
   const rows = await deps.sql<(FoodRow & { memberName: string })[]>`
@@ -356,6 +368,7 @@ export async function foodAdminData(deps: Deps): Promise<MpFoodAdminData> {
     tableCodeReady: secret !== null,
     dishes: menu.dishes.map((d) => ({ id: d.id, name: d.name, group: d.stationName, price: d.price, remaining: d.remaining, open: open.has(d.id) })),
     tables: tables.map((x) => ({ id: Number(x.id), name: x.name, area: x.area, code: secret ? makeTableCode(secret, Number(x.id)) : null })),
+    limits,
     today: { orders: t?.orders ?? 0, total: Number(t?.total ?? 0) },
     recent,
   };
