@@ -417,11 +417,15 @@ export async function receivableChecks(db: Db): Promise<{ key: string; label: st
     SELECT count(*)::int AS n FROM ar_collections k
     WHERE k.amount_cents <> coalesce((SELECT sum(x.amount_cents) FROM ar_allocations x WHERE x.collection_id = k.id), 0)
        OR EXISTS (SELECT 1 FROM ar_allocations x JOIN ar_charges c ON c.id = x.charge_id WHERE x.collection_id = k.id AND c.account_id <> k.account_id)`;
+  const [t] = await db<{ payments: number; charges: number; collections: number }[]>`
+    SELECT (SELECT count(*)::int FROM checkout_payments WHERE method = 'on_account') AS payments,
+           (SELECT count(*)::int FROM ar_charges) AS charges,
+           (SELECT count(*)::int FROM ar_collections) AS collections`;
   return [
-    { key: 'ar_charge_payment', label: '挂账与结账的挂账收款一一对应', ok: a!.n === 0, detail: a!.n ? `${a!.n} 笔挂账收款没有对应的挂账` : '' },
-    { key: 'ar_charge_void', label: '作废的挂账只有反结账的', ok: b!.n === 0, detail: b!.n ? `${b!.n} 笔挂账的状态与结账单不一致` : '' },
-    { key: 'ar_charge_open', label: '核销不超过挂账，作废的没有核销', ok: c!.n === 0, detail: c!.n ? `${c!.n} 笔挂账核销超了或作废后还有核销` : '' },
-    { key: 'ar_collection_alloc', label: '回款与核销对得上', ok: d!.n === 0, detail: d!.n ? `${d!.n} 笔回款的核销合计不对或核销到了别的单位` : '' },
+    { key: 'ar_charge_payment', label: '挂账与结账的挂账收款一一对应', ok: a!.n === 0, detail: a!.n ? `${a!.n} 笔挂账收款没有对应的挂账` : `共 ${t!.payments} 笔挂账收款，都有对应的挂账` },
+    { key: 'ar_charge_void', label: '作废的挂账只有反结账的', ok: b!.n === 0, detail: b!.n ? `${b!.n} 笔挂账的状态与结账单不一致` : `共 ${t!.charges} 笔挂账，状态都与结账单一致` },
+    { key: 'ar_charge_open', label: '核销不超过挂账，作废的没有核销', ok: c!.n === 0, detail: c!.n ? `${c!.n} 笔挂账核销超了或作废后还有核销` : '一致' },
+    { key: 'ar_collection_alloc', label: '回款与核销对得上', ok: d!.n === 0, detail: d!.n ? `${d!.n} 笔回款的核销合计不对或核销到了别的单位` : `共 ${t!.collections} 笔回款，核销合计都对得上` },
   ];
 }
 

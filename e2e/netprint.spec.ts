@@ -41,6 +41,9 @@ test('日结单打到小票机；拔线时排队，插回后自动补打', async
   try {
     await login(page);
     await setPrintMode(page.request, 'network');
+    // 打印方式随会话下发（session.rules）：登录时读到的还是「本机打印」，重新载入页面才拿到新的，「打到小票机」才显示
+    await page.reload();
+    await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible({ timeout: 30_000 });
     const created = await page.request.post('/api/devices', { data: { clientKey: randomUUID(), code, name, kind: 'printer', area: '收银', connection: 'network', host: printer.host, port: printer.port } });
     expect(created.ok(), await created.text()).toBe(true);
     const status = async () => ((await (await page.request.get('/api/print/printers')).json()) as { code: string; status: string }[]).find((p) => p.code === code)?.status;
