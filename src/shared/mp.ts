@@ -185,7 +185,9 @@ export interface MpLedgerRow {
 export interface MpCoupon {
   code: string;
   name: string;
+  /** cash 代金券、discount 折扣券、exchange 兑换券、bogo 买一赠一券（8.0.4）；以后再加的种类小程序认不得时照 summary 整句显示 */
   kind: string;
+  /** 门店系统给的一句话说明：「代金券 ¥30.00 · 满 ¥50.00 可用」「买一赠一 · 买 拿铁 送 拿铁 1 份 · 最多抵 ¥30.00」 */
   summary: string;
   validFrom: string;
   validTo: string;
@@ -225,6 +227,31 @@ export interface MpBenefits {
   items: MpBenefitItem[];
   /** 升档以后能享的（按起点从低到高，最多 8 项）：只给名字与起点 */
   upcoming: { name: string; startLabel: string }[];
+}
+
+/**
+ * 会员端提醒（RQ-014，接主线 8.0.4 批量发券的「会员端弹窗」：member-notices.ts 的 listMemberNotices、markMemberNoticeRead；
+ * docs/MEMBERSHIP_V804.md 第 6 节，弹的时机按 HY16，待确认）：小程序首页打开时弹出，看过记已读。
+ * 只给顾客该看的：标题、正文；没有发券单、券模板与内部的日子。
+ */
+export interface MpNotice {
+  id: number;
+  /** coupon_issued 收到券、coupon_expiring 券快到期；主线以后再加的种类照标题、正文显示 */
+  kind: string;
+  /** 「收到 2 张券」「券快到期了」 */
+  title: string;
+  /** 「「50 元代金券」×2，有效期至 2026-12-31。到店出示会员码即可使用。」 */
+  body: string;
+}
+export interface MpNotices {
+  /** 这位会员今天要看的（门店营业日；没读过、在显示的日子里、券还能用的），新的在前，最多 20 条 */
+  notices: MpNotice[];
+}
+/** 一次最多记几条已读（与一次最多弹 20 条一样） */
+export const MP_NOTICE_READ_MAX = 20;
+export interface MpNoticeRead {
+  /** 这次记成已读的；之前已经读过的、不是这位会员的不在里面（重提不报错） */
+  read: number[];
 }
 
 /** 会员码（MP9）：由 yuzu 签发，每 60 秒换一次；前台扫码盒扫进会员查找框，yuzu 在本机校验 */
@@ -613,9 +640,9 @@ export const MP_COUPON_OFFERS_MAX = 30;
 export interface MpCouponCenterItem {
   templateId: number;
   name: string;
-  /** cash 代金券、discount 折扣券、exchange 兑换券 */
+  /** cash 代金券、discount 折扣券、exchange 兑换券、bogo 买一赠一券（8.0.4） */
   kind: string;
-  /** 「代金券 ¥30.00 · 满 ¥50.00 可用」 */
+  /** 「代金券 ¥30.00 · 满 ¥50.00 可用」「买一赠一 · 买 拿铁 送 拿铁 1 份 · 最多抵 ¥30.00」 */
   summary: string;
   /** 「领取后 30 天内有效」「2026-11-01 至 2026-12-31 有效」 */
   validity: string;

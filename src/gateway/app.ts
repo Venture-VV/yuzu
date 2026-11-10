@@ -11,11 +11,12 @@
 //   · 邀请好友（第三期 3b）：/v1/invites…；好友领取先用手机号快速验证的 code 换手机号，再转给 yuzu（与绑定一样）。
 //   · 扫码点餐（第三期 3c）：/v1/food…；桌码的签名在 yuzu 核对（密钥不在网关），下单挂在顾客自己的手牌账单上。
 //   · 预约（第三期 3d）：/v1/bookings…；可约时段、预约、取消都在 yuzu 算与办，网关只转发。
+//   · 会员端提醒（RQ-014，主线 8.0.4 批量发券的会员端弹窗）：/v1/notices、/v1/notices/read 带会话转发，读写在 yuzu。
 // 网关不存会员、余额、券、订单；yuzu 返回的错误文字面向顾客，原样转给小程序。
 
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { MP_RECHARGE_ORDER_NO, MP_TABLE_CODE } from '@shared/mp';
+import { MP_NOTICE_READ_MAX, MP_RECHARGE_ORDER_NO, MP_TABLE_CODE } from '@shared/mp';
 import type { GatewayConfig } from './config';
 import { ShowCache } from './cache';
 import { RateLimiter } from './ratelimit';
@@ -51,6 +52,7 @@ const BindInput = z.object({
   bindVersion: z.number('请刷新小程序后再绑定').int('请刷新小程序后再绑定').min(0, '请刷新小程序后再绑定'),
 });
 const AbandonInput = z.object({ clientKey: z.uuid('操作编号不正确') });
+const NoticeRead = z.object({ ids: z.array(z.number().int().positive().max(Number.MAX_SAFE_INTEGER)).min(1).max(MP_NOTICE_READ_MAX) });
 const LedgerQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) });
 const FloorParams = z.object({ floor: z.string().regex(/^[A-Za-z0-9-]{1,10}$/, '楼层不正确') });
 const SvgQuery = z.object({ b: z.coerce.number().int().positive('底图批次不正确') });
@@ -159,6 +161,8 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
   const rechargeQueryLimit = new RateLimiter(60);
   // 线上领券：领取、确认作废每个微信每分钟 20 次（不限领的券也一样，MP_COUPONS.md 第 2 节）
   const couponLimit = new RateLimiter(20);
+  // 会员端提醒记已读（RQ-014）：一次最多 20 条，首页每次打开最多记一次，留足重试的余量
+  const noticeLimit = new RateLimiter(30);
   // 到期提醒：设提醒每个微信每分钟 20 次
   const reminderLimit = new RateLimiter(20);
   // 邀请好友：发起、收回每个微信每分钟 20 次；领取要验证手机号，与绑定一样每分钟 10 次
@@ -313,6 +317,13 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
   });
   app.get('/v1/coupons', async (req, reply) => member(reply, 'GET', '/api/mp/coupons', openidOf(req)));
   app.get('/v1/benefits', async (req, reply) => member(reply, 'GET', '/api/mp/benefits', openidOf(req)));
+  // 会员端提醒（RQ-014）：首页弹的提醒、看过记已读（只记这个微信此刻绑定的会员自己的）
+  app.get('/v1/notices', async (req, reply) => member(reply, 'GET', '/api/mp/notices', openidOf(req)));
+  app.post('/v1/notices/read', async (req, reply) => {
+    const openid = openidOf(req);
+    if (!noticeLimit.take(`notice:${openid}`)) throw TOO_MANY();
+    return member(reply, 'POST', '/api/mp/notices/read', openid, parse(NoticeRead, req.body));
+  });
   app.post('/v1/code', async (req, reply) => {
     const openid = openidOf(req);
     if (!codeLimit.take(`code:${openid}`)) throw TOO_MANY();
