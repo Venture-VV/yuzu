@@ -74,7 +74,8 @@ function RulesForm({ d, rules, pending }: { d: MpFoodAdminData; rules: MpAdminDa
           <p className="text-[15px] font-semibold text-ink">扫码点餐</p>
           <p className="text-[13px] text-ink-3">
             在店的会员（手牌挂上了会员卡）在小程序「我的 → 点餐」点菜、扫桌上的码写送到哪张桌；与服务员在点单页下单一样进厨房出品单、扣估清，
-            挂在自己的手牌账单上，结账照旧在前台。一单最多 20 份、¥500；顾客自己不能退菜。
+            挂在自己的手牌账单上，结账照旧在前台。一单最多 {d.limits.maxQuantity} 份、{formatYuan(d.limits.maxTotal)}（在「经营规则 → 可调的数值」里改），
+            一道菜最多 {d.limits.maxLineQuantity} 份、最多 {d.limits.maxLines} 道菜；顾客自己不能退菜。
           </p>
           {pending && <p className="text-[12.5px] text-ember">设置的修改结果待确认，先在上方处理</p>}
         </div>

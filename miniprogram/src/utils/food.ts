@@ -118,12 +118,17 @@ export function cartSum(cart: Cart, dishes: MpFoodDish[]): CartSum {
   return { quantity, total, items };
 }
 
-/** 加一份之前看看能不能加：估清、剩的份数、一单的上限；能加回空 */
+/** 加一份之前看看能不能加：估清、剩的份数、一道菜最多几份、最多几道菜、一单的上限；能加回空 */
 export function addProblem(cart: Cart, dish: MpFoodDish, dishes: MpFoodDish[], limits: MpFoodMenu['limits']): string {
   if (dish.remaining === 0) return '「' + dish.name + '」今天没有了';
   const now = countOf(cart, dish.id);
   if (dish.remaining !== null && now + 1 > dish.remaining) return '「' + dish.name + '」今天只剩 ' + dish.remaining + ' 份';
+  // 账单、点单记录能存的上限（旧的门店系统回答里没有时按 99 份、20 道菜）
+  const lineMax = limits.maxLineQuantity || 99;
+  const linesMax = limits.maxLines || 20;
+  if (now + 1 > lineMax) return '一道菜一单最多 ' + lineMax + ' 份，多的请服务员点';
   const sum = cartSum(cart, dishes);
+  if (now === 0 && sum.items.length + 1 > linesMax) return '一单最多 ' + linesMax + ' 道菜，多的请服务员点';
   if (sum.quantity + 1 > limits.maxQuantity) return '一单最多 ' + limits.maxQuantity + ' 份，多的请服务员点';
   if (sum.total + dish.price > limits.maxTotal) return '一单最多 ' + price(limits.maxTotal) + '，多的请服务员点';
   return '';

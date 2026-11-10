@@ -1,4 +1,4 @@
-// 柚子饭堂的离线外壳（docs/CANTEEN.md 第 3 节）：只缓存页面外壳与静态资源，从不缓存 /api/*。
+// 柚子饭堂的离线外壳（docs/CANTEEN.md 第 3 节）：只缓存页面外壳与静态资源，从不缓存 /api/*；饭点提醒的推送也在这里（第 19 节，文件末尾）。
 // 打开页面：先走网络，断网时用上次的外壳（饭卡码在手机上离线生成，没网也能亮码）。
 // 静态资源带内容摘要（/assets/…），缓存优先；页面每次打开把当前用到的资源告诉这里，旧的清掉。
 const CACHE = 'yuzu-canteen-v1';
@@ -68,6 +68,69 @@ self.addEventListener('message', (event) => {
       for (const path of keep) {
         if (path.startsWith('/assets/') && !(await cache.match(path))) await cache.add(path).catch(() => undefined);
       }
+    })(),
+  );
+});
+
+// ── 饭点提醒（docs/CANTEEN.md 第 19 节）：门店系统发来的推送 ──
+// 弹一条通知（同一个 tag 的新的换掉旧的），桌面上的柚子图标点上小红点（支持的手机：iPhone 16.4 起、电脑上装成应用的 Chrome、Edge）；
+// 点通知：柚子饭堂开着就切过去、打开那一页，没开就打开。内容是门店系统加密发来的 JSON：{ title, body, tag, url, badge }
+self.addEventListener('push', (event) => {
+  let msg = {};
+  try {
+    msg = event.data ? event.data.json() : {};
+  } catch {
+    msg = { body: event.data ? event.data.text() : '' };
+  }
+  const url = typeof msg.url === 'string' && msg.url.startsWith('/') && !msg.url.startsWith('//') ? msg.url : '/';
+  event.waitUntil(
+    (async () => {
+      await self.registration.showNotification(typeof msg.title === 'string' && msg.title ? msg.title : '柚子饭堂', {
+        body: typeof msg.body === 'string' ? msg.body : '',
+        icon: '/icon-192.png',
+        badge: '/badge-96.png',
+        tag: typeof msg.tag === 'string' && msg.tag ? msg.tag : 'yuzu',
+        renotify: true,
+        lang: 'zh-CN',
+        data: { url },
+      });
+      const n = Number(msg.badge);
+      if (n > 0 && self.navigator.setAppBadge) await self.navigator.setAppBadge(n).catch(() => undefined);
+    })(),
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL((event.notification.data && event.notification.data.url) || '/', self.location.origin);
+  event.waitUntil(
+    (async () => {
+      if (self.navigator.clearAppBadge) await self.navigator.clearAppBadge().catch(() => undefined);
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const open = windows.find((w) => new URL(w.url).origin === self.location.origin);
+      if (open) {
+        await open.focus();
+        open.postMessage({ type: 'open', hash: target.hash });
+        return;
+      }
+      await self.clients.openWindow(target.href);
+    })(),
+  );
+});
+
+// 浏览器换了订阅（钥匙过期等）：把新的交给门店系统（登录着才收；没登录的下次打开柚子饭堂时再核对）
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil(
+    (async () => {
+      const old = event.oldSubscription;
+      const next = event.newSubscription || (old && old.options ? await self.registration.pushManager.subscribe(old.options).catch(() => null) : null);
+      if (!next) return;
+      await fetch('/api/canteen/push/subscription', {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(next.toJSON()),
+      }).catch(() => undefined);
     })(),
   );
 });

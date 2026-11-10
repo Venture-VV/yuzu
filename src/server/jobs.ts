@@ -14,6 +14,8 @@ import { sendPendingSms } from './modules/sms';
 import { issueBirthdayCoupons } from './modules/coupons';
 import { runMembershipDaily } from './modules/membership';
 import { runWecomWeekly } from './modules/wecom';
+import { runCanteenReminders } from './modules/canteen/push';
+import { MEAL_LABELS } from '@shared/canteen';
 import { WECOM_MAX_ATTEMPTS } from '@shared/wecom';
 
 export interface JobLog {
@@ -70,6 +72,14 @@ export async function runMinuteJobs(
     if (run.cancelled || run.noShow) log.info(`预约：自动取消 ${run.cancelled} 张、记爽约 ${run.noShow} 张`);
   } catch (error) {
     log.error('预约的自动处理失败，下一分钟重试', error);
+  }
+  // 员工食堂 · 饭点提醒（docs/CANTEEN.md 第 19 节）：到点以后 30 分钟之内，每天每顿给开着提醒的员工手机发一次（几个进程同时跑也只发一次）
+  try {
+    for (const r of await runCanteenReminders({ sql, config }, now)) {
+      log.info(`饭点提醒（${r.date} ${MEAL_LABELS[r.meal]}）：送到 ${r.sent} 台手机${r.failed ? `、${r.failed} 台没送到` : ''}${r.skippedCheckedIn ? `；${r.skippedCheckedIn} 人已经打过卡、没再提醒` : ''}`);
+    }
+  } catch (error) {
+    log.error('饭点提醒没发完，下一分钟接着发', error);
   }
   // 会员挑战（v0.7.28，QY-057）：这个月到店天数满了、还没送过的会员送一次
   try {

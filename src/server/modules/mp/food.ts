@@ -11,9 +11,11 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import { MP_FOOD_ORDER_LIMITS } from '@shared/dining';
 import {
+  MP_FOOD_DUPLICATE_DISH,
   MP_FOOD_MAX_ITEMS,
+  MP_FOOD_LINE_MAX_QUANTITY,
+  MP_FOOD_MAX_LINES,
   MP_FOOD_NOTE_MAX,
   MP_FOOD_RULES_KEY,
   MP_TABLE_CODE,
@@ -35,6 +37,7 @@ import { setTxTimeouts } from '../../lib/tx';
 import { parse } from '../../lib/validate';
 import { diningMenu } from '../dining';
 import { mpDiningTables, mpOpenBill, orderFoodFromMp } from '../mp-entries';
+import { loadSettings } from '../settings';
 import { bindingStateOf, lockOpenidShared } from './member';
 import { mpToday } from './public';
 import { loadFoodRules } from './rules';
@@ -170,10 +173,18 @@ export async function saveFoodRules(deps: Deps, raw: unknown, ctx: OpContext): P
 
 const MenuQuery = z.object({ table: z.string().max(40).optional() });
 
+/**
+ * 一单的上限（菜单与后台都给这一份）：一共几份、多少钱按后台「经营规则 → 可调的数值」（N1，主线 8.0.7），下单时门店系统照同一份设置核对；
+ * 一道菜最多几份、最多几道菜是账单、点单记录能存的上限（下单请求的格式也按这个挡）
+ */
+async function foodLimits(db: Db): Promise<MpFoodMenu['limits']> {
+  const settings = await loadSettings(db);
+  return { maxQuantity: settings.mpFoodMaxQuantity, maxTotal: settings.mpFoodMaxTotalCents, maxLineQuantity: MP_FOOD_LINE_MAX_QUANTITY, maxLines: MP_FOOD_MAX_LINES };
+}
+
 export async function foodMenu(deps: Deps, openid: string, query: unknown): Promise<MpFoodMenu> {
   const { table: tableCode } = parse(MenuQuery, query);
-  const [rules, state, menu] = await Promise.all([loadFoodRules(deps.sql), bindingStateOf(deps.sql, openid), diningMenu(deps.sql, deps)]);
-  const limits = { maxQuantity: MP_FOOD_ORDER_LIMITS.maxQuantity, maxTotal: MP_FOOD_ORDER_LIMITS.maxTotalCents };
+  const [rules, state, menu, limits] = await Promise.all([loadFoodRules(deps.sql), bindingStateOf(deps.sql, openid), diningMenu(deps.sql, deps), foodLimits(deps.sql)]);
   const open = rules.enabled && menu.rules.enabled;
   if (!open) {
     return { open: false, canOrder: false, notice: '扫码点餐还没开放，请服务员点单', bindVersion: state.version, bound: state.binding !== null, tagCode: null, table: null, tableNotice: null, dishes: [], limits };
@@ -214,13 +225,16 @@ const OrderInput = z.object({
     .array(
       z.object({
         itemId: z.number('菜品不对').int('菜品不对').positive('菜品不对'),
-        quantity: z.number('份数不对').int('份数不对').min(1, '份数至少为 1').max(MP_FOOD_ORDER_LIMITS.maxQuantity, `一单最多 ${MP_FOOD_ORDER_LIMITS.maxQuantity} 份`),
+        // 一道菜最多几份是账单明细能存的上限；一单一共的上限按设置在下单时核对（MP_ORDER_LIMIT）
+        quantity: z.number('份数不对').int('份数不对').min(1, '份数至少为 1').max(MP_FOOD_LINE_MAX_QUANTITY, `一道菜一单最多 ${MP_FOOD_LINE_MAX_QUANTITY} 份，多的请服务员点`),
         note: z.string().trim().max(MP_FOOD_NOTE_MAX, `口味备注最多 ${MP_FOOD_NOTE_MAX} 字`).optional(),
       }),
       '请选择菜品',
     )
     .min(1, '请至少选一道菜')
-    .max(MP_FOOD_ORDER_LIMITS.maxQuantity, `一单最多 ${MP_FOOD_ORDER_LIMITS.maxQuantity} 份`),
+    .max(MP_FOOD_MAX_LINES, `一单最多 ${MP_FOOD_MAX_LINES} 道菜，多的请服务员点`)
+    // 一道菜只写一行（小程序购物车按菜记，本来就是一行）：「一道菜一单最多 99 份」才名副其实（小程序线测试 721174d 的 P3）
+    .refine((items) => new Set(items.map((i) => i.itemId)).size === items.length, MP_FOOD_DUPLICATE_DISH),
   /** 扫到的桌码（没扫不带） */
   table: z.string().regex(MP_TABLE_CODE, '桌码不对，请重新扫桌上的码').optional(),
   /** 小程序上看到的合计（分）：价格刚改过时拒绝（PRICE_CHANGED） */
@@ -325,7 +339,13 @@ export async function foodBill(deps: Deps, openid: string): Promise<MpFoodBill> 
 // ───────────────────────── 后台 ─────────────────────────
 
 export async function foodAdminData(deps: Deps): Promise<MpFoodAdminData> {
-  const [rules, menu, tables, today] = await Promise.all([loadFoodRules(deps.sql), diningMenu(deps.sql, deps), mpDiningTables(deps.sql), mpToday(deps.sql, deps.config.timezone)]);
+  const [rules, menu, tables, today, limits] = await Promise.all([
+    loadFoodRules(deps.sql),
+    diningMenu(deps.sql, deps),
+    mpDiningTables(deps.sql),
+    mpToday(deps.sql, deps.config.timezone),
+    foodLimits(deps.sql),
+  ]);
   const open = new Set(rules.itemIds);
   const secret = deps.config.mp.codeSecret;
   const rows = await deps.sql<(FoodRow & { memberName: string })[]>`
@@ -351,6 +371,7 @@ export async function foodAdminData(deps: Deps): Promise<MpFoodAdminData> {
     tableCodeReady: secret !== null,
     dishes: menu.dishes.map((d) => ({ id: d.id, name: d.name, group: d.stationName, price: d.price, remaining: d.remaining, open: open.has(d.id) })),
     tables: tables.map((x) => ({ id: Number(x.id), name: x.name, area: x.area, code: secret ? makeTableCode(secret, Number(x.id)) : null })),
+    limits,
     today: { orders: t?.orders ?? 0, total: Number(t?.total ?? 0) },
     recent,
   };

@@ -8,8 +8,8 @@
 
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { MP_GATEWAY_HEADER, MP_OPENID_HEADER, type MpFoodAdminData, type MpFoodBill, type MpFoodMenu, type MpFoodOrdered } from '../src/shared/mp';
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
+import { MP_FOOD_DUPLICATE_DISH, MP_FOOD_LINE_MAX_QUANTITY, MP_FOOD_MAX_LINES, MP_GATEWAY_HEADER, MP_OPENID_HEADER, type MpFoodAdminData, type MpFoodBill, type MpFoodMenu, type MpFoodOrdered } from '../src/shared/mp';
 import { buildMpApp } from '../src/server/modules/mp/app';
 import { foodAdminData, foodMenu, makeTableCode, orderFood, tableIdOf } from '../src/server/modules/mp/food';
 import { consistencyChecks } from '../src/server/ops/consistency';
@@ -264,7 +264,9 @@ describe('扫码点餐', () => {
     expect(await code(order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 1 }], { table: 'A8' }))).toEqual([400, 'BAD_REQUEST']);
     expect(await code(order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 1 }], { expectedTotal: 1400 }))).toEqual([409, 'PRICE_CHANGED']);
     expect(await code(order(a.openid, [{ itemId: item['宫保鸡丁']!, quantity: 11 }]))).toEqual([422, 'MP_ORDER_LIMIT']);
-    expect(await code(order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 21 }]))).toEqual([400, 'BAD_REQUEST']);
+    // 一单最多几份按后台的设置（N1，默认 20 份）在下单时核对；格式上按账单明细能存的上限挡（一道菜最多 99 份）
+    expect(await code(order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 21 }]))).toEqual([422, 'MP_ORDER_LIMIT']);
+    expect(await code(order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 100 }]))).toEqual([400, 'BAD_REQUEST']);
     const version = await versionOf(a.openid);
     expect(await code(order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 1 }], { bindVersion: version + 1 }))).toEqual([409, 'BIND_STALE']);
     expect(await billLines(v.visitId)).toBe(before);
@@ -390,5 +392,93 @@ describe('扫码点餐', () => {
     const a = await member('演示·关掉以后');
     expect((await menu(a.openid)).open).toBe(false);
     expect((await call('GET', '/api/mp/me', a.openid)).json().member.foodOpen).toBe(false);
+  });
+});
+
+describe('一单的上限按后台的设置（N1，主线 8.0.7「经营规则 → 可调的数值」）', () => {
+  const setLimits = async (patch: { mpFoodMaxQuantity?: number; mpFoodMaxTotalCents?: number }) => {
+    const r = await api(ctx.app, ctx.owner, 'PUT', '/api/settings', patch);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+  };
+  const code = async (r: Promise<{ statusCode: number; json: () => { error: { code: string; message: string } } }>) => {
+    const x = await r;
+    return [x.statusCode, x.json().error.code];
+  };
+  const LINE = { maxLineQuantity: MP_FOOD_LINE_MAX_QUANTITY, maxLines: MP_FOOD_MAX_LINES };
+
+  it('菜单上给的上限、下单时的核对都跟着设置走：调大能多点、调小就拦，金额也一样', async () => {
+    // 用完改回默认（20 份、¥500），不影响别的用例
+    onTestFinished(() => setLimits({ mpFoodMaxQuantity: 20, mpFoodMaxTotalCents: 50_000 }));
+    // 前面的用例关过扫码点餐：这里自己打开、勾上柠檬茶
+    expect((await saveRules(true, ['宫保鸡丁', '柠檬茶', '玫瑰花茶'])).status).toBe(200);
+    const a = await member('演示·点餐上限');
+    await checkIn(a.id);
+    const tea = (quantity: number) => [{ itemId: item['柠檬茶']!, quantity }];
+    // 调大到 30 份：菜单写 30，25 份能下
+    await setLimits({ mpFoodMaxQuantity: 30 });
+    expect((await menu(a.openid)).limits).toEqual({ maxQuantity: 30, maxTotal: 50_000, ...LINE });
+    // 后台「微信小程序 → 扫码点餐」写的也是这一份
+    expect((await adminData()).limits).toEqual({ maxQuantity: 30, maxTotal: 50_000, ...LINE });
+    const big = await order(a.openid, tea(25));
+    expect(big.statusCode, big.body).toBe(201);
+    // 调小到 10 份：15 份不让下
+    await setLimits({ mpFoodMaxQuantity: 10 });
+    expect((await menu(a.openid)).limits.maxQuantity).toBe(10);
+    expect(await code(order(a.openid, tea(15)))).toEqual([422, 'MP_ORDER_LIMIT']);
+    // 金额调到 ¥30：正好 ¥30 能下，再多一份不行
+    await setLimits({ mpFoodMaxQuantity: 20, mpFoodMaxTotalCents: 3000 });
+    expect((await menu(a.openid)).limits).toEqual({ maxQuantity: 20, maxTotal: 3000, ...LINE });
+    const edge = await order(a.openid, tea(2));
+    expect(edge.statusCode, edge.body).toBe(201);
+    expect(await code(order(a.openid, tea(3)))).toEqual([422, 'MP_ORDER_LIMIT']);
+  });
+
+  it('上限调到 200 份：一道菜最多 99 份、最多 20 道菜（账单明细、点单记录能存的上限），同一道菜只写一行，超过的格式上就挡，不报 500（小程序线测试 3c2612b 的 P2、721174d 的 P3）', async () => {
+    // 两个数与数据库的约束一致：账单明细一行的份数、点单记录的行数
+    const defs = await ctx.sql<{ name: string; def: string }[]>`
+      SELECT conname AS name, pg_get_constraintdef(oid) AS def FROM pg_constraint
+      WHERE conname IN ('bill_lines_quantity_check', 'mp_food_orders_lines_check')`;
+    expect(defs.find((d) => d.name === 'bill_lines_quantity_check')?.def).toContain(`(quantity <= ${MP_FOOD_LINE_MAX_QUANTITY})`);
+    expect(defs.find((d) => d.name === 'mp_food_orders_lines_check')?.def).toContain(`(jsonb_array_length(lines) <= ${MP_FOOD_MAX_LINES})`);
+    onTestFinished(() => setLimits({ mpFoodMaxQuantity: 20, mpFoodMaxTotalCents: 50_000 }));
+    // 再上 21 道一块钱的小菜，进厨房、勾上
+    const [station] = await ctx.sql<{ id: number }[]>`SELECT id FROM kitchen_stations WHERE name = '厨房'`;
+    const snacks: number[] = [];
+    for (let i = 1; i <= 21; i++) {
+      const name = `小菜${String(i).padStart(2, '0')}`;
+      const ri = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name, category: '小吃', price: 100, gender: null });
+      expect(ri.status, JSON.stringify(ri.body)).toBe(200);
+      const id = ri.body.items.find((x: { name: string }) => x.name === name).id as number;
+      item[name] = id;
+      PRICE[name] = 100;
+      snacks.push(id);
+    }
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/items', { items: snacks.map((id) => ({ id, stationId: station!.id })) })).status).toBe(200);
+    expect((await saveRules(true, ['宫保鸡丁', '柠檬茶', ...snacks.map((_, i) => `小菜${String(i + 1).padStart(2, '0')}`)])).status).toBe(200);
+    await setLimits({ mpFoodMaxQuantity: 200, mpFoodMaxTotalCents: 500_000 });
+    const a = await member('演示·点餐上限 200');
+    const v = await checkIn(a.id);
+    expect((await menu(a.openid)).limits).toEqual({ maxQuantity: 200, maxTotal: 500_000, ...LINE });
+    // 一道菜：99 份能下，100 份格式上就挡（原来 100、200 份撞账单明细的约束报 500）
+    const ok99 = await order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 99 }]);
+    expect(ok99.statusCode, ok99.body).toBe(201);
+    const r100 = await order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 100 }]);
+    expect([r100.statusCode, r100.json().error.code]).toEqual([400, 'BAD_REQUEST']);
+    expect(r100.json().error.message).toContain('一道菜一单最多 99 份');
+    expect(await code(order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 200 }]))).toEqual([400, 'BAD_REQUEST']);
+    // 20 道菜能下，21 道格式上就挡（原来撞点单记录的约束报 500）
+    const ok20 = await order(a.openid, snacks.slice(0, 20).map((itemId) => ({ itemId, quantity: 1 })));
+    expect(ok20.statusCode, ok20.body).toBe(201);
+    const r21 = await order(a.openid, snacks.map((itemId) => ({ itemId, quantity: 1 })));
+    expect([r21.statusCode, r21.json().error.code]).toEqual([400, 'BAD_REQUEST']);
+    expect(r21.json().error.message).toContain('一单最多 20 道菜');
+    // 同一道菜写成两行（60 + 60，每行都不到 99 份、合计也在 200 份以内）：格式上就挡，一道菜只写一行（721174d 的 P3）
+    const dup = await order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 60 }, { itemId: item['柠檬茶']!, quantity: 60 }]);
+    expect([dup.statusCode, dup.json().error.code, dup.json().error.message]).toEqual([400, 'BAD_REQUEST', MP_FOOD_DUPLICATE_DISH]);
+    // 口味备注不同也一样（小程序一道菜一条备注）
+    const dupNote = await order(a.openid, [{ itemId: item['柠檬茶']!, quantity: 1, note: '少冰' }, { itemId: item['柠檬茶']!, quantity: 1, note: '去冰' }]);
+    expect([dupNote.statusCode, dupNote.json().error.message]).toEqual([400, MP_FOOD_DUPLICATE_DISH]);
+    // 账单上只有成功的两单：99 份柠檬茶 + 20 道小菜各 1 份
+    expect(await billLines(v.visitId)).toBe(21);
   });
 });

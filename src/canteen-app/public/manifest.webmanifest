@@ -1,7 +1,7 @@
 {
   "name": "柚子饭堂",
   "short_name": "柚子饭堂",
-  "description": "员工食堂：看菜单、给菜点赞、亮饭卡码",
+  "description": "员工食堂：看菜单、给菜点赞、亮饭卡码、到点提醒吃饭",
   "lang": "zh-CN",
   "start_url": "/",
   "scope": "/",
@@ -33,6 +33,47 @@
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "亮饭卡码",
+      "short_name": "亮饭卡码",
+      "description": "开饭时亮给食堂负责人扫",
+      "url": "/?from=shortcut#/code",
+      "icons": [
+        {
+          "src": "/shortcut-code.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "扫码",
+      "short_name": "扫码",
+      "description": "食堂负责人扫员工的饭卡码打卡",
+      "url": "/?from=shortcut#/scan",
+      "icons": [
+        {
+          "src": "/shortcut-scan.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "跟柚子说",
+      "short_name": "跟柚子说",
+      "description": "心愿、碎碎念，柚子都听着",
+      "url": "/?from=shortcut#/talk",
+      "icons": [
+        {
+          "src": "/shortcut-talk.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     }
   ]
 }

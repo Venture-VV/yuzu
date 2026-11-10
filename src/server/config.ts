@@ -97,6 +97,13 @@ export interface CanteenConfig {
   cookieSecure: boolean;
   /** 前面的转发服务器（Caddy）的地址：限次按它转来的真实来源 IP 算；空为不信任转发头 */
   trustProxy: string[];
+  /**
+   * 饭点提醒（网页推送，docs/CANTEEN.md 第 19 节）告诉推送服务的联系方式（CANTEEN_PUSH_CONTACT，mailto: 或 https: 开头）；
+   * 没设时用员工打开柚子饭堂的 https 地址
+   */
+  pushContact?: string | null;
+  /** 开发、测试：认本机 http 的推送地址（CANTEEN_PUSH_LOCAL_ENDPOINTS=true，浏览器验收用模拟的推送服务）；别的环境设了也不认 */
+  pushLocalEndpoints?: boolean;
 }
 
 /** 员工端口：没设 CANTEEN_PORT 不开；开了就必须配足够长的饭卡码密钥，端口不能与员工后台、小程序端口相同 */
@@ -105,13 +112,18 @@ export function loadCanteenConfig(env: NodeJS.ProcessEnv, mainPort: number, mpPo
   const codeSecret = env.CANTEEN_CODE_SECRET?.trim() || null;
   const cookieSecure = env.CANTEEN_COOKIE_SECURE === 'true';
   const trustProxy = (env.CANTEEN_TRUST_PROXY ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const contact = env.CANTEEN_PUSH_CONTACT?.trim() ?? '';
+  const pushContact = /^(mailto:[^\s@]+@[^\s@]+|https:\/\/[^\s]+)$/.test(contact) ? contact : null;
+  const appEnv = env.APP_ENV ?? 'development';
+  const pushLocalEndpoints = env.CANTEEN_PUSH_LOCAL_ENDPOINTS === 'true' && (appEnv === 'development' || appEnv === 'test');
+  const push = { pushContact, pushLocalEndpoints };
   const raw = env.CANTEEN_PORT?.trim();
-  if (!raw) return { port: null, host, codeSecret, cookieSecure, trustProxy };
+  if (!raw) return { port: null, host, codeSecret, cookieSecure, trustProxy, ...push };
   const port = Number(raw);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`CANTEEN_PORT 应为 1–65535 的端口号，当前是「${raw}」`);
   if (port === mainPort || port === mpPort) throw new Error('CANTEEN_PORT 不能与 PORT、MP_PORT 相同：员工端口只挂柚子饭堂');
   if (!codeSecret || codeSecret.length < 32) throw new Error('开了 CANTEEN_PORT 就要配 CANTEEN_CODE_SECRET（至少 32 个字符，可以用 openssl rand -hex 32 生成）');
-  return { port, host, codeSecret, cookieSecure, trustProxy };
+  return { port, host, codeSecret, cookieSecure, trustProxy, ...push };
 }
 
 export interface MpConfig {
