@@ -137,9 +137,26 @@ let seenBindVersion = -1;
 export function latestBindVersion(): number {
   return seenBindVersion;
 }
+/** 版本号变新时通知（首页：已经弹着的换绑以前那位会员的提醒马上关上，小程序线测试 50ee567 的 P1 余项） */
+const bindWatchers: ((v: number) => void)[] = [];
+export function watchBindVersion(fn: (v: number) => void): () => void {
+  bindWatchers.push(fn);
+  return () => {
+    const i = bindWatchers.indexOf(fn);
+    if (i >= 0) bindWatchers.splice(i, 1);
+  };
+}
 function noteBindVersion(data: unknown): void {
   const v = data && typeof data === 'object' ? (data as { bindVersion?: unknown }).bindVersion : undefined;
-  if (typeof v === 'number' && v > seenBindVersion) seenBindVersion = v;
+  if (typeof v !== 'number' || v <= seenBindVersion) return;
+  seenBindVersion = v;
+  for (const fn of bindWatchers.slice()) {
+    try {
+      fn(v);
+    } catch {
+      // 一个页面出错不挡别的
+    }
+  }
 }
 
 // ── 会话 ──

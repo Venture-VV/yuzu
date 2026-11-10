@@ -2,7 +2,7 @@
 // 三块业务（TASTE、WELLNESS、EXPERIENCE）、服务入口、门店公告。门店连不上时用之前的信息并标出来。
 // 会员端提醒（RQ-014）：首页显示时问一次，有收到券、券快到期的提醒就弹出来，看过记已读（utils/notices.ts）。
 import type { MpBanner, MpHome, MpStore } from '../../../../src/shared/mp';
-import { imageUrl, latestBindVersion, messageOf, show } from '../../utils/api';
+import { imageUrl, latestBindVersion, messageOf, show, watchBindVersion } from '../../utils/api';
 import { appData } from '../../utils/app-state';
 import { navMetrics } from '../../utils/nav';
 import { loadNotices, markRead } from '../../utils/notices';
@@ -42,8 +42,13 @@ Page({
   dismissed: [] as number[],
   /** 弹着的提醒是哪个绑定状态版本号下问到的：记已读时带上；之后见过更新的（解绑、换绑过），弹着的就不是这位会员的了 */
   noticeVersion: -1,
+  /** 在问的时候又要问一次（切回首页、绑定状态变了）：这一次回来以后再问 */
+  noticeAgain: false,
+  stopWatch: null as (() => void) | null,
 
   onLoad() {
+    // 别的页面看到了更新的绑定状态（解绑、换绑过）：弹着的是之前那位会员的，马上关上、重新问（不等回到首页）
+    this.stopWatch = watchBindVersion((v) => this.onBindVersion(v));
     const n = navMetrics();
     let width = 375;
     try {
@@ -56,6 +61,11 @@ Page({
     this.load();
   },
 
+  onUnload() {
+    if (this.stopWatch) this.stopWatch();
+    this.stopWatch = null;
+  },
+
   onShow() {
     // 弹着的是换绑以前那位会员的（别的页面已经看到了更新的绑定状态）：先关上，马上重新问
     const stale = this.data.noticeOpen && this.noticeVersion < latestBindVersion();
@@ -63,25 +73,43 @@ Page({
     if (stale || this.data.noticeOpen || Date.now() - this.noticeAt > 30000) this.loadNotices();
   },
 
+  /** 绑定状态版本号变新：弹着的是之前那位会员的，关上、重新问；正在问的那一次回来时按版本号核对（旧的丢掉、再问一次） */
+  onBindVersion(v: number) {
+    if (!this.data.noticeOpen || this.noticeVersion >= v) return;
+    this.setData({ noticeOpen: false, notices: [], noticeCoupon: false });
+    if (!this.noticeBusy) this.loadNotices();
+  },
+
   onPullDownRefresh() {
     this.load().then(() => wx.stopPullDownRefresh());
   },
 
-  async loadNotices() {
-    if (this.noticeBusy) return;
+  /** retry：丢掉旧回答以后再问的那一次（只再问一次，不会一直问） */
+  async loadNotices(retry = false) {
+    if (this.noticeBusy) {
+      this.noticeAgain = true;
+      return;
+    }
     this.noticeBusy = true;
     this.noticeAt = Date.now();
+    let stale = false;
     try {
       const got = await loadNotices();
-      // 问不到（断网、门店连不上）：弹着的照旧
+      // 问不到（断网、门店连不上、手机上的记录一时读不出来）：弹着的照旧
       if (got === null) return;
-      // 换绑以前发出去、换绑以后才回来的旧回答：丢掉（小程序线测试 29aa0cc 的 P1）
-      if (got.bindVersion !== null && got.bindVersion < latestBindVersion()) return;
+      // 换绑以前发出去、换绑以后才回来的旧回答：丢掉，按现在的绑定再问一次（小程序线测试 29aa0cc 的 P1）
+      if (got.bindVersion !== null && got.bindVersion < latestBindVersion()) {
+        stale = true;
+        return;
+      }
       const notices = got.bindVersion === null ? [] : got.notices.filter((n) => this.dismissed.indexOf(n.id) < 0);
       this.noticeVersion = got.bindVersion === null ? -1 : got.bindVersion;
       this.setData({ notices, noticeOpen: notices.length > 0, noticeCoupon: notices.some((n) => n.coupon) });
     } finally {
       this.noticeBusy = false;
+      const again = this.noticeAgain || (stale && !retry);
+      this.noticeAgain = false;
+      if (again) this.loadNotices(stale);
     }
   },
 

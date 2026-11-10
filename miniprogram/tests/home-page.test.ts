@@ -8,6 +8,7 @@ type Opts = Record<string, unknown> & { data: Record<string, unknown> };
 type Reply = { status: number; data: unknown };
 interface HomePage {
   data: Record<string, unknown>;
+  onLoad(): void;
   loadNotices(): Promise<void>;
   onShow(): void;
   onNoticeOk(): void;
@@ -55,6 +56,8 @@ async function loadPage(routes: Record<string, (data: unknown) => Reply | Promis
   const page: Record<string, unknown> & { data: Record<string, unknown> } = { ...o, data: { ...o.data } };
   page.setData = (d: Record<string, unknown>) => Object.assign(page.data, d);
   for (const k of Object.keys(o)) if (typeof o[k] === 'function') page[k] = (o[k] as (...a: unknown[]) => unknown).bind(page);
+  // 页面加载（与微信一样先 onLoad：登记看绑定状态的变化、取门店信息）
+  (page as unknown as HomePage).onLoad();
   return { page: page as unknown as HomePage, sent, api };
 }
 
@@ -65,7 +68,39 @@ afterEach(() => {
 const notice = (id: number) => ({ id, kind: 'coupon_issued', title: `收到券 ${id}`, body: `正文 ${id}` });
 const ids = (page: { data: Record<string, unknown> }) => (page.data.notices as { id: number }[]).map((n) => n.id);
 
+/** 按调用的先后给回答：每次调用取下一个（可以是晚一点才回答的） */
+function queue(...replies: (Reply | Promise<Reply>)[]) {
+  let i = 0;
+  return () => replies[Math.min(i++, replies.length - 1)]!;
+}
+
 describe('首页的会员端提醒与换绑同时', () => {
+  it('旧会员的提醒先弹出来、更新的绑定状态晚一点才到：马上关上、重新问（小程序线测试 50ee567 的 P1 余项）', async () => {
+    const firstNotices = later();
+    const lateMe = later();
+    const { page, api } = await loadPage({
+      '/v1/me': queue({ status: 200, data: { bound: true, bindVersion: 1, member: null } }, lateMe.promise),
+      '/v1/notices': queue(firstNotices.promise, { status: 403, data: { error: { code: 'MP_NOT_BOUND', message: '请先绑定会员' } } }),
+    });
+    await api.member('GET', '/v1/me');
+    expect(api.latestBindVersion()).toBe(1);
+    // 首页开始问会员 A 的提醒（回答晚一点）
+    const asking = page.loadNotices();
+    // 前台解绑；顾客进「我的」，「我的」的回答也晚一点；顾客先回到首页
+    const meAsking = api.member('GET', '/v1/me');
+    // A 的提醒先回来：这时还没见过更新的绑定状态，弹出来
+    firstNotices.resolve({ status: 200, data: { notices: [notice(1)], bindVersion: 1 } });
+    await asking;
+    expect(page.data.noticeOpen).toBe(true);
+    expect(ids(page)).toEqual([1]);
+    // 「我的」晚到的回答（版本号 2，已经解绑）：首页马上关上、重新问；重新问是没绑定
+    lateMe.resolve({ status: 200, data: { bound: false, bindVersion: 2, member: null } });
+    await meAsking;
+    expect(page.data.noticeOpen).toBe(false);
+    await vi.waitFor(() => expect(ids(page)).toEqual([]));
+    expect(page.data.noticeOpen).toBe(false);
+  });
+
   it('换绑以前发出去、换绑以后才回来的旧回答：丢掉，不放进弹窗', async () => {
     const pending = later();
     const { page, api } = await loadPage({

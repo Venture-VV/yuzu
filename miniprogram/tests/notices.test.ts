@@ -230,6 +230,23 @@ describe('记已读', () => {
     expect(storage.tq_notice_read_pending).toEqual([P(21)]);
   });
 
+  it('问提醒时过滤看过的那一次读不出来：再读一次；还是读不出来就这次不弹（算问不到），看过的不会又弹出来（小程序线测试 50ee567 的 P2 余项）', async () => {
+    const routes = {
+      '/v1/notices/read': { status: 503, data: { error: { code: 'STORE_OFFLINE', message: '门店系统连接中' } } },
+      '/v1/notices': LIST(N(21), N(30)),
+    };
+    // 第 1 次读是补发的快照（门店出错，留着）；第 2 次是过滤：出错一次，再读一次读到了
+    const once = installWx(routes, { storage: { tq_notice_read_pending: [P(21)] }, readFailAt: [2] });
+    const m = await load();
+    expect((await m.loadNotices())!.notices.map((n) => n.id)).toEqual([30]);
+    expect(once.storage.tq_notice_read_pending).toEqual([P(21)]);
+    // 过滤时两次都读不出来：这次不弹
+    const twice = installWx(routes, { storage: { tq_notice_read_pending: [P(21)] }, readFailAt: [2, 3] });
+    const m2 = await load();
+    expect(await m2.loadNotices()).toBeNull();
+    expect(twice.storage.tq_notice_read_pending).toEqual([P(21)]);
+  });
+
   it('点「知道了」时读不出来：不盖掉原来没确认的，这一次的直接发', async () => {
     const { sent, storage } = installWx({ '/v1/notices/read': READ }, { storage: { tq_notice_read_pending: [P(7)] }, readFailAt: [1, 2] });
     const m = await load();

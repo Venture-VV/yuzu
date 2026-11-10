@@ -7,7 +7,8 @@
 //   · 记已读：先记在手机上（编号与版本号）再发。门店系统回了（记上了；或者明确拒绝，比如已经解绑、换绑过）就删掉；
 //     断网、超时、门店出错时留着，下次打开首页先补发、补发前不再弹这几条（看过了）。重提、补发都只记一次；
 //   · 手机上存不了也照样发：只是已读，发不出去最多下次再弹一次；
-//   · 手机上的记录一时读不出来（读存储出错）不当作没有：这一次不补发、不删、不改，下次再补（小程序线测试 29aa0cc 的 P2）。
+//   · 手机上的记录一时读不出来（读存储出错）不当作没有：这一次不补发、不删、不改，下次再补（小程序线测试 29aa0cc 的 P2）；
+//     问提醒时过滤看过的那一次读不出来，这次不弹（算问不到），免得看过的又弹出来（50ee567 的 P2 余项）。
 // 现有的「到期提醒我」（微信订阅消息，3a）是另一套，在 utils/reminders.ts。
 
 import type { MpNotice, MpNoticeRead, MpNotices } from '../../../src/shared/mp';
@@ -158,15 +159,20 @@ export interface NoticeLoad {
  */
 export async function loadNotices(): Promise<NoticeLoad | null> {
   await flushReads();
+  let r: MpNotices;
   try {
-    const r = await member<MpNotices>('GET', '/v1/notices');
-    const pending = readPending();
-    const skip = pending.ok ? pending.items.map((x) => x.id) : [];
-    return {
-      notices: (r.notices || []).filter((n) => skip.indexOf(n.id) < 0).map(noticeView),
-      bindVersion: typeof r.bindVersion === 'number' ? r.bindVersion : null,
-    };
+    r = await member<MpNotices>('GET', '/v1/notices');
   } catch (e) {
     return settled(e) ? { notices: [], bindVersion: null } : null;
   }
+  // 要先知道哪些看过了还没确认：手机上的记录读不出来（再读一次也不行）时这次不弹，算问不到，下次再问
+  // （不当作没有：否则看过的又弹出来；小程序线测试 50ee567 的 P2 余项）
+  let pending = readPending();
+  if (!pending.ok) pending = readPending();
+  if (!pending.ok) return null;
+  const skip = pending.items.map((x) => x.id);
+  return {
+    notices: (r.notices || []).filter((n) => skip.indexOf(n.id) < 0).map(noticeView),
+    bindVersion: typeof r.bindVersion === 'number' ? r.bindVersion : null,
+  };
 }
