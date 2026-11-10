@@ -140,6 +140,27 @@ describe('退菜按金额分级（B02）', () => {
   });
 });
 
+describe('小额退菜与下单同一套权限（B02，Codex 审查 f14210c）', () => {
+  it('只有「点单」、没有「前台挂账」的岗位：看得到点单页，但下单、小额退菜都被拒；权限恢复后照常小额直接退', async () => {
+    const v = await enter();
+    expect((await order(v, [{ itemId: item['鲜榨橙汁']!, quantity: 1 }], 2800, ctx.owner)).status).toBe(200);
+    const juice = await lineOf(v, '鲜榨橙汁');
+    await ctx.sql`INSERT INTO settings (key, value) VALUES ('role_permissions', ${ctx.sql.json({ clerk: { add: [], remove: ['frontdesk.operate'] } })})
+                  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+    try {
+      expect((await api(ctx.app, ctx.clerk, 'GET', '/api/dining/menu')).status).toBe(200);
+      expect((await order(v, [{ itemId: item['鲜榨橙汁']!, quantity: 1 }], 2800)).status).toBe(403);
+      expect((await voidLine(juice.id, { reason: '客人点错了' })).status).toBe(403);
+      expect((await lineOf(v, '鲜榨橙汁'))?.id).toBe(juice.id);
+    } finally {
+      await ctx.sql`DELETE FROM settings WHERE key = 'role_permissions'`;
+    }
+    expect((await voidLine(juice.id, { reason: '客人点错了' })).status).toBe(200);
+    const log = (await api(ctx.app, ctx.owner, 'GET', `/api/dining/voids?from=${today}&to=${today}`)).body as { id: number; approvalText: string }[];
+    expect(log.find((r) => r.id === juice.id)?.approvalText).toBe('小额直接退');
+  });
+});
+
 describe('餐饮台账（B06）', () => {
   it('按起止日期、分类、状态筛选；合计与逐行一致；导出只含所选范围、最后一行是合计', async () => {
     const all = (await api(ctx.app, ctx.clerk, 'GET', `/api/dining/ledger?from=${today}&to=${today}`)).body as {

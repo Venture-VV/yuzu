@@ -175,6 +175,45 @@ describe('预约到店一键派钟、入住（A04）', () => {
     expect((await api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/visits/${v}/cancel`, { reason: '客人没入住走了' })).status).toBe(200);
     expect(await free()).toBe(1);
   });
+
+  it('同一张手牌约了两种房型：直接入住按这间房的房型记预约；没有同房型的记最早的一张（换了房型入住）（Codex 审查 f14210c）', async () => {
+    const mk = async (name: string, price: number, roomNo: string) => {
+      expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/rooms/types', { name, kind: 'daily', price })).status).toBeLessThan(300);
+      const typeId = Number((await ctx.sql<{ id: number }[]>`SELECT id FROM room_types WHERE name = ${name}`)[0]!.id);
+      expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/rooms/rooms', { roomNo, floor: '8', roomTypeId: typeId })).status).toBeLessThan(300);
+      return { typeId, price, roomId: Number((await ctx.sql<{ id: number }[]>`SELECT id FROM rooms WHERE room_no = ${roomNo}`)[0]!.id) };
+    };
+    const family = await mk('预约家庭房', 48800, '811');
+    const twin = await mk('预约双床房', 32800, '812');
+    const suite = await mk('预约套房', 68800, '813');
+    const checkin = async (room: { roomId: number; price: number }, tagCode: string) => {
+      const r = await api(ctx.app, ctx.clerk, 'POST', '/api/rooms/checkin', { clientKey: randomUUID(), roomId: room.roomId, tagCode, guests: 2, expectedRate: room.price });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      return r.body.stayNo as string;
+    };
+    const tagOf = async (visitId: number) => (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/visits/${visitId}`)).body.tag.code as string;
+
+    // 一张手牌约了家庭房（先约的）和双床房，都点了到店
+    const tag = await tagOf(await enter());
+    const forFamily = await insertBooking({ kind: 'room', roomTypeId: family.typeId });
+    const forTwin = await insertBooking({ kind: 'room', roomTypeId: twin.typeId });
+    await arrive(forFamily, tag);
+    await arrive(forTwin, tag);
+    // 先住双床房：记到双床房那张预约，不是先约的家庭房（修之前记到了家庭房）
+    const twinStay = await checkin(twin, tag);
+    expect((await booking(forTwin)).service).toMatchObject({ kind: 'stay', no: twinStay });
+    expect((await booking(forFamily)).service).toBeNull();
+    // 再住家庭房：记到家庭房那张
+    const familyStay = await checkin(family, tag);
+    expect((await booking(forFamily)).service).toMatchObject({ kind: 'stay', no: familyStay });
+
+    // 只约了家庭房、住进了套房（换了房型）：照样记到这张预约，不再占家庭房的名额
+    const tag2 = await tagOf(await enter());
+    const upgraded = await insertBooking({ kind: 'room', roomTypeId: family.typeId });
+    await arrive(upgraded, tag2);
+    const suiteStay = await checkin(suite, tag2);
+    expect((await booking(upgraded)).service).toMatchObject({ kind: 'stay', no: suiteStay });
+  });
 });
 
 describe('派对房、宠物轰趴房（A03）', () => {

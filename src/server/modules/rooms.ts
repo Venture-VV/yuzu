@@ -632,15 +632,17 @@ export const CheckinInput = z.object({
 
 /**
  * 入住记到哪张客房预约（8.0.8，A04）：带了预约编号的核对它（客房预约、已到店、到店手牌是这位客人、还没入住）；
- * 没带的，这位客人已到店、还没入住的客房预约自动记上（最早的一张）。只读、不锁预约单，靠入住单上预约编号的部分唯一索引兜底
+ * 没带的，这位客人已到店、还没入住的客房预约自动记上：先挑这间房的房型（同一张手牌约了几种房型时不会记错，Codex 审查 f14210c），
+ * 没有同房型的再挑最早的一张（约的房型换了一间别的房型入住，预约照样算入住、不再占原房型的名额）。
+ * 只读、不锁预约单，靠入住单上预约编号的部分唯一索引兜底
  */
-async function bookingForCheckin(tx: Tx, bookingId: number | undefined, visitId: number): Promise<number | null> {
+async function bookingForCheckin(tx: Tx, bookingId: number | undefined, visitId: number, roomTypeId: number): Promise<number | null> {
   if (bookingId === undefined) {
     const [auto] = await tx<{ id: number }[]>`
       SELECT b.id FROM bookings b
       WHERE b.kind = 'room' AND b.status = 'arrived' AND b.arrival_visit_id = ${visitId}
         AND NOT EXISTS (SELECT 1 FROM room_stays rs WHERE rs.booking_id = b.id AND rs.status <> 'cancelled')
-      ORDER BY b.starts_at, b.id LIMIT 1`;
+      ORDER BY CASE WHEN b.room_type_id = ${roomTypeId} THEN 0 ELSE 1 END, b.starts_at, b.id LIMIT 1`;
     return auto ? Number(auto.id) : null;
   }
   const [b] = await tx<{ bookingNo: string; kind: string; status: string; arrivalVisitId: number | null }[]>`
@@ -686,7 +688,7 @@ export async function checkinRoom(deps: Deps, raw: unknown, ctx: OpContext): Pro
     assertOpen(visit);
     const billId = visit.billId;
     const visitId = visit.id;
-    const bookingId = await bookingForCheckin(tx, input.bookingId, visitId);
+    const bookingId = await bookingForCheckin(tx, input.bookingId, visitId, room.roomTypeId);
     const stayNo = await nextDocNo(tx, 'room_stay', 'RZ', date);
     const [stay] = await tx<{ id: number }[]>`
       INSERT INTO room_stays (stay_no, room_id, room_type_id, kind, rate, block_minutes, bill_id, visit_id, guest_label, guests,

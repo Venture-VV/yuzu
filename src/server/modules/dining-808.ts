@@ -1,5 +1,5 @@
 // 8.0.8 前台整改 · 餐饮（docs/FRONTDESK_V808.md 第 5 节）：
-//   · 退菜分级（B02）：小额（单条 ≤ 上限，默认 ¥50）有点单 / 前台挂账权限就能直接退；超过的照旧（本人 15 分钟内、经理），
+//   · 退菜分级（B02）：小额（单条 ≤ 上限，默认 ¥50）能下单的（前台挂账，桌台上的还要点单）就能直接退；超过的照旧（本人 15 分钟内、经理），
 //     或值班经理及以上当场授权（line_void）；怎么批的记在审计里，「退菜记录」按日期列出；
 //   · 餐饮台账（B06）：按营业日起止、菜品分类、状态筛选，页面与导出用同一个查询，合计一致。
 // 都只读，退菜的锁顺序照旧（来访 / 桌台 → 账单 → 明细 → 出品单 → 估清），授权在同一事务里核销。
@@ -35,7 +35,9 @@ export async function authorizeLineVoid(
 ): Promise<VoidApproval> {
   const { line, actor } = opts;
   const dining = await loadDiningRules(tx);
-  if (isSmallDishVoid(dining, { source: line.source, amount: Number(line.amount) }) && (can(actor, 'dining.order') || can(actor, 'frontdesk.operate'))) {
+  // 小额直接退与下单同一套权限：要「前台挂账」（手牌、桌台的退菜接口本来就要；桌台上的还要「点单」，由接口拦），
+  // 只有「点单」、没有「前台挂账」的岗位本来就不能下单，也不能退（Codex 审查 f14210c）
+  if (isSmallDishVoid(dining, { source: line.source, amount: Number(line.amount) }) && can(actor, 'frontdesk.operate')) {
     return { approval: 'small' };
   }
   if (can(actor, 'frontdesk.correct')) return { approval: 'manager' };

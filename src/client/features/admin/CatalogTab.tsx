@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { FileUp, ListChecks, Plus } from 'lucide-react';
-import { itemTags, PRICE_TIER_LABELS, PRICE_TIERS, STRENGTH_LABELS, STRENGTHS, tierPrice, type PriceTier, type Strength } from '@shared/catalog';
+import { isCareItem, itemTags, PRICE_TIER_LABELS, PRICE_TIERS, STRENGTH_LABELS, STRENGTHS, tierPrice, type PriceTier, type Strength } from '@shared/catalog';
 import { centsToInput, parseYuan } from '@shared/money';
 import { parsePriceListCsv, type BuiltinPriceList, type PriceListCsvResult, type PriceListImportReport } from '@shared/price-list-import';
 import type { TicketType } from '@shared/checkout';
@@ -273,7 +273,8 @@ function ItemDialog({ editing, onClose }: { editing: Extract<Editing, { kind: 'i
   const [essentialOil, setEssentialOil] = useState(false);
   const [heatTherapy, setHeatTherapy] = useState(false);
   const [popular, setPopular] = useState(false);
-  const [technicianRequired, setTechnicianRequired] = useState(false);
+  /** null：新建项目、还没手动选过，按名称或分类含「护理」默认需要技师（8.0.8，A01）；手动选过或编辑已有项目时是选定的值 */
+  const [technicianRequired, setTechnicianRequired] = useState<boolean | null>(null);
   const [note, setNote] = useState('');
   const [active, setActive] = useState(true);
   const [sort, setSort] = useState('0');
@@ -297,12 +298,15 @@ function ItemDialog({ editing, onClose }: { editing: Extract<Editing, { kind: 'i
     setEssentialOil(i?.essentialOil ?? false);
     setHeatTherapy(i?.heatTherapy ?? false);
     setPopular(i?.popular ?? false);
-    setTechnicianRequired(i?.technicianRequired ?? false);
+    setTechnicianRequired(i ? i.technicianRequired : null);
     setNote(i?.note ?? '');
     setActive(i?.active ?? true);
     setSort(String(i?.sortOrder ?? 0));
     setError(null);
   }
+
+  const careDefault = technicianRequired === null && isCareItem(category.trim(), name.trim());
+  const needsTechnician = technicianRequired ?? careDefault;
 
   const save = async () => {
     if (!name.trim()) return setError('请填写名称');
@@ -333,7 +337,7 @@ function ItemDialog({ editing, onClose }: { editing: Extract<Editing, { kind: 'i
         essentialOil,
         heatTherapy,
         popular,
-        technicianRequired,
+        technicianRequired: needsTechnician,
         note,
         active,
         sortOrder: Number(sort) || 0,
@@ -402,9 +406,16 @@ function ItemDialog({ editing, onClose }: { editing: Extract<Editing, { kind: 'i
             />
           </Field>
         </div>
-        <Field label="需要技师" hint="技师功能开启后，挂这个项目要选技师与点钟 / 轮钟；也可以在后台「技师」里按分类勾选">
+        <Field
+          label="需要技师"
+          hint={
+            careDefault
+              ? '名称或分类含「护理」，默认需要技师（交给钟房派钟）；不需要的点「不需要」'
+              : '技师功能开启后，挂这个项目要选技师与点钟 / 轮钟；也可以在后台「技师」里按分类勾选'
+          }
+        >
           <Segmented
-            value={technicianRequired ? 'on' : 'off'}
+            value={needsTechnician ? 'on' : 'off'}
             onChange={(v) => setTechnicianRequired(v === 'on')}
             ariaLabel="需要技师"
             options={[

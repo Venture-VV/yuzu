@@ -2,7 +2,8 @@
 //   · 钟房（A01、B01）：前台加项目时把护理项目「交给钟房派钟」→ 钟房「待派钟」→ 补派给点钟技师（不另挂一笔）→ 按状态筛出上钟中的技师；
 //   · 餐饮（A05、B02、B06）：桌台点单下架时点单页只有手牌；服务员退小额的菜写原因直接退，大额的请值班经理当场授权（弹窗里看得到菜名、金额与原因）
 //     → 「退菜记录」写明怎么批的 →「台账」按分类筛；
-//   · 客房（B04、B07）：改房态先确认「从哪到哪」、可写备注 → 撤回上一次修改 →「房间详情」里有两条房态记录（撤回过的标出来）。
+//   · 客房（B04、B07）：改房态先确认「从哪到哪」、可写备注 → 撤回上一次修改 →「房间详情」里有两条房态记录（撤回过的标出来）；
+//   · 后台新建项目（A01）：名称或分类含「护理」默认「需要技师」，手动改过的按选的保存（拦下保存请求，不写演示库）。
 // 依赖四套演示数据（仅独立演示库）；账号：店主 linlan、前台 xiaozhou、值班经理 zhangjl，密码 yuzu2026。
 // 专用项目、技师、房型、房间（E2E 808 开头）留着下次沿用；开始时收掉上次中断留下的，结束时把技师、餐饮、客房功能恢复关闭，可重复执行。
 import { randomUUID } from 'node:crypto';
@@ -326,5 +327,37 @@ test.describe('8.0.8 前台整改', () => {
       const res = await page.request.put('/api/admin/rooms/rules', { data: { ...RULES, enabled: false } });
       expect(res.ok(), await res.text()).toBe(true);
     }
+  });
+
+  test('后台新建项目：名称或分类含「护理」默认「需要技师」，手动改成「不需要」照样按选的保存（A01，Codex 审查 f14210c）', async ({ page }) => {
+    await login(page, 'linlan');
+    await page.goto('/admin/catalog');
+    // 只核对表单发出去的内容：拦下保存请求，不往演示库里写
+    const sent: { name: string; technicianRequired: boolean }[] = [];
+    await page.route('**/api/items', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      sent.push(route.request().postDataJSON() as { name: string; technicianRequired: boolean });
+      await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: { code: 'E2E_STOP', message: '浏览器用例拦下，不保存' } }) });
+    });
+    await page.getByRole('button', { name: '新增项目' }).click();
+    const dialog = page.getByRole('dialog');
+    const needs = dialog.getByRole('radiogroup', { name: '需要技师' });
+    // 名称还没写：默认不需要
+    await expect(needs.getByRole('radio', { name: '不需要' })).toHaveAttribute('aria-checked', 'true');
+    await dialog.locator('#c-name').fill('E2E 808 头部护理');
+    await expect(needs.getByRole('radio', { name: '需要技师' })).toHaveAttribute('aria-checked', 'true');
+    await expect(dialog).toContainText('名称或分类含「护理」，默认需要技师');
+    await dialog.getByLabel('标准价').fill('128');
+    await dialog.getByTestId('item-save').click();
+    await expect(dialog).toContainText('浏览器用例拦下，不保存');
+    expect(sent.at(-1)).toMatchObject({ name: 'E2E 808 头部护理', technicianRequired: true });
+    // 手动改成「不需要」：照选的发出去，改名也不再跟着变
+    await needs.getByRole('radio', { name: '不需要' }).click();
+    await dialog.locator('#c-name').fill('E2E 808 足部护理');
+    await expect(needs.getByRole('radio', { name: '不需要' })).toHaveAttribute('aria-checked', 'true');
+    await dialog.getByTestId('item-save').click();
+    await expect.poll(() => sent.length).toBe(2);
+    expect(sent.at(-1)).toMatchObject({ name: 'E2E 808 足部护理', technicianRequired: false });
+    await page.unroute('**/api/items');
   });
 });

@@ -9,7 +9,7 @@ import { BellRing, Minus, PencilLine, Plus, Search, Trash2, Undo2, Users, Utensi
 import { KITCHEN_STATUS_LABELS, MAX_DISH_NOTE, type DiningGuest, type KitchenStatus, type MenuDish, type PendingDish, type TableSessionDetail } from '@shared/dining';
 import { ZONE_LABELS } from '@shared/frontdesk';
 import { api, errorMessage } from '../../lib/api';
-import { useSession } from '../../lib/session';
+import { useCan, useSession } from '../../lib/session';
 import { cn, formatTime, uuid } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { ReasonDialog } from '../../components/ReasonDialog';
@@ -41,6 +41,8 @@ const doneOnFound = () => true as const;
 
 export function OrderTab() {
   const session = useSession();
+  /** 退菜、改单与下单同一套权限：挂到账上要「前台挂账」（桌台上的还要「点单」，这一页本来就要）（8.0.8，B02，Codex 审查 f14210c） */
+  const canVoid = useCan()('frontdesk.operate');
   const qc = useQueryClient();
   const toast = useToast();
   const menu = useDiningMenu();
@@ -489,6 +491,11 @@ export function OrderTab() {
         {target && (
           <Card className="p-4" data-testid="dining-pending">
             <SectionTitle>还没上的菜 {target.pending.length ? target.pending.length : ''}</SectionTitle>
+            {!canVoid && target.pending.length > 0 && (
+              <p className="mt-1 text-[11.5px] text-ink-4" data-testid="dining-void-no-permission">
+                退菜、改单与下单一样要有「前台挂账」权限，请找前台同事。
+              </p>
+            )}
             {target.pending.length === 0 ? (
               <p className="mt-2 text-[12.5px] text-ink-3">{t ? '这桌点的菜都上齐了' : '这位客人点的菜都上齐了'}</p>
             ) : (
@@ -534,12 +541,16 @@ export function OrderTab() {
                           催单
                         </Button>
                       )}
-                      <Button size="sm" variant="ghost" icon={<PencilLine className="size-3.5" />} onClick={() => setVoiding({ dish: p, mode: 'modify' })} data-testid={`dining-modify-${p.id}`}>
-                        改
-                      </Button>
-                      <Button size="sm" variant="ghost" icon={<Undo2 className="size-3.5" />} onClick={() => setVoiding({ dish: p, mode: 'void' })} data-testid={`dining-void-${p.id}`}>
-                        退菜
-                      </Button>
+                      {canVoid && (
+                        <>
+                          <Button size="sm" variant="ghost" icon={<PencilLine className="size-3.5" />} onClick={() => setVoiding({ dish: p, mode: 'modify' })} data-testid={`dining-modify-${p.id}`}>
+                            改
+                          </Button>
+                          <Button size="sm" variant="ghost" icon={<Undo2 className="size-3.5" />} onClick={() => setVoiding({ dish: p, mode: 'void' })} data-testid={`dining-void-${p.id}`}>
+                            退菜
+                          </Button>
+                        </>
+                      )}
                     </span>
                   </li>
                 ))}
