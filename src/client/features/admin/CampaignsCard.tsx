@@ -8,7 +8,6 @@ import { Download, Eye, MessageSquareText, Plus, Send, Smartphone } from 'lucide
 import {
   CAMPAIGN_STATUS_LABELS,
   DEFAULT_REMIND_DAYS,
-  MAX_CAMPAIGN_MEMBERS,
   MAX_REMIND_DAYS,
   type CampaignPreview,
   type CouponCampaign,
@@ -350,7 +349,7 @@ function CampaignDialog({ open, onClose, onDone }: { open: boolean; onClose: () 
             tone={preview.tooMany || preview.count === 0 ? 'error' : 'info'}
             title={
               preview.tooMany
-                ? `圈到 ${preview.count} 位，一次最多 ${MAX_CAMPAIGN_MEMBERS} 位：请缩小范围、分几次发`
+                ? `圈到 ${preview.count} 位，一次最多 ${session.rules.campaignMaxMembers} 位：请缩小范围、分几次发`
                 : preview.count === 0
                   ? '按这个条件圈到的会员是 0 位'
                   : `圈到 ${preview.count} 位会员${preview.outOfLevel ? `，其中 ${preview.outOfLevel} 位档级不在券限定的档级里、会跳过` : ''}`

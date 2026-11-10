@@ -40,8 +40,8 @@ jobs:
     env:
       TEST_DATABASE_URL: postgres://yuzu:yuzu_ci_only@127.0.0.1:5432/yuzu_test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -94,8 +94,8 @@ jobs:
       APP_ENV: development
       PORT: 8080
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -126,7 +126,7 @@ jobs:
           fi
       - name: 缓存 Playwright 浏览器（按依赖版本）
         if: steps.chromium_ready.outputs.ready != 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
@@ -139,7 +139,7 @@ jobs:
         run: node dist/server/cli.js check
       - name: 交回这一组的结果（给汇总核对）
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: e2e-results-${{ matrix.group }}
           path: e2e-results
@@ -147,7 +147,7 @@ jobs:
           retention-days: 7
       - name: 保留失败截图与日志
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: e2e-failure-${{ matrix.group }}
           path: |
@@ -163,14 +163,14 @@ jobs:
     # 有分组失败也要核对、写明哪一组；整次 CI 被取消（新的提交推上来）时不跑
     if: ${{ !cancelled() }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - name: 取回三组的结果
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: e2e-results-*
           path: e2e-results
@@ -202,8 +202,8 @@ jobs:
       APP_ENV: development
       PORT: 8080
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -274,7 +274,7 @@ jobs:
           fi
       - name: 缓存 Playwright 浏览器（按依赖版本）
         if: steps.chromium_ready.outputs.ready != 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
@@ -317,7 +317,7 @@ jobs:
           node dist/server/cli.js demo-check
       - name: 保留失败截图与日志
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: demo-failure
           path: |
@@ -345,10 +345,10 @@ jobs:
       APP_ENV: development
       PORT: 8080
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0 # 要用到版本标签与它们的提交
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -403,7 +403,7 @@ jobs:
           [ "$before" = "$after" ] || { echo "::error::只读命令改动了数据：$before → $after"; exit 1; }
       - name: 保留日志与对账包
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: upgrade-results
           path: |
@@ -421,8 +421,8 @@ jobs:
       run:
         working-directory: miniprogram
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -459,8 +459,8 @@ jobs:
       # 与 compose.canteen.yaml 的默认一样：局域网 http 打开（canteen-lan.local）的登录 Cookie 照样存得下（K18）
       CANTEEN_COOKIE_SECURE: 'true'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -483,7 +483,7 @@ jobs:
           fi
       - name: 缓存 Playwright 浏览器（按依赖版本）
         if: steps.chromium_ready.outputs.ready != 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
@@ -497,7 +497,7 @@ jobs:
         run: node dist/server/cli.js check
       - name: 保留截图（开通卡片、首页、饭卡码、扫码结果、后台）
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: canteen-screens
           path: |

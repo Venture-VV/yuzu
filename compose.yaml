@@ -37,7 +37,7 @@ services:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
         ALPINE_MIRROR: ${ALPINE_MIRROR:-}
-        APP_VERSION: ${YUZU_VERSION:-8.0.6}
+        APP_VERSION: ${YUZU_VERSION:-8.0.7}
         APP_COMMIT: ${YUZU_COMMIT:-}
     # 不同 Compose 项目使用独立标签，演示构建不会覆盖试用 / 正式镜像。
     image: ${APP_IMAGE:-yuzu-app:${COMPOSE_PROJECT_NAME:-local}}
@@ -67,6 +67,9 @@ services:
       SMS_SIGN_NAME: ${SMS_SIGN_NAME:-}
       SMS_TEMPLATE_COUPON: ${SMS_TEMPLATE_COUPON:-}
       SMS_ENDPOINT: ${SMS_ENDPOINT:-}
+      # 企业微信群机器人（8.0.7 ERP 每周一推，开关在「经营规则 → 可调的数值」）：.env 里配了才传进容器；
+      # 地址相当于密码，与看门狗的告警群（WECOM_WEBHOOK_URL，宿主机上的脚本用）分开配
+      ERP_WECOM_WEBHOOK: ${ERP_WECOM_WEBHOOK:-}
       TZ: ${APP_TIMEZONE:-Asia/Shanghai}
     # APP_PORT 只写端口（8080）时开在所有网卡上，门店局域网这样用；写成「地址:端口」只开在这个地址上：云服务器上写
     # 127.0.0.1:8080（只给本机的 Caddy）或 <Tailscale 地址>:8080——Docker 发布的端口会绕过主机防火墙，不能只靠 ufw 挡。

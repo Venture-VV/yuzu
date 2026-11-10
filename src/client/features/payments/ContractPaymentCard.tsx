@@ -74,7 +74,13 @@ export function ContractPaymentCard({ c }: { c: ContractDetail }) {
           已付 <Money cents={p.paidCents} className="font-bold" /> / 计划 <Money cents={p.plannedCents} />
         </span>
       </div>
-      {!p.canRequest && <p className="text-[13px] text-ink-3">{p.whyNot}</p>}
+      {p.acceptanceHold ? (
+        <Notice tone="warning" title="付款挂起：最近一次验收不合格" data-testid="acceptance-hold">
+          {p.whyNot}
+        </Notice>
+      ) : (
+        !p.canRequest && <p className="text-[13px] text-ink-3">{p.whyNot}</p>
+      )}
       {p.legacyPaidCents > 0 && <p className="text-[12.5px] text-ink-3">另有不带付款申请、核销到这份合同收货单上的付款 ¥{formatAmount(p.legacyPaidCents)}（v0.7.32 以前登记的，或「付款规则」关掉「挂合同的货款要先提申请」以后直接登记的；不算在各段里）。</p>}
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-[13px]" data-testid="payment-plan-stages">
@@ -170,6 +176,15 @@ export function ContractPaymentCard({ c }: { c: ContractDetail }) {
                     )}
                   </span>
                   {a.note && <span className="block text-ink-2">{a.note}</span>}
+                  {a.items && (
+                    <span className="mt-0.5 block text-ink-2">
+                      {a.items.map((x, i) => (
+                        <span key={i} className={cn('mr-2 inline-block', !x.pass && 'font-semibold text-clay')}>
+                          {x.pass ? '✓' : '✗'} {x.item}
+                        </span>
+                      ))}
+                    </span>
+                  )}
                   <span className="block text-ink-3">
                     {a.createdByName} · {formatDateTime(a.createdAt)}
                     {a.voidReason && ` · 作废：${a.voidReason}`}
@@ -262,6 +277,9 @@ function AcceptanceDialog({ open, c, onClose, onDone }: { open: boolean; c: Cont
   const [result, setResult] = useState<AcceptanceResult>('pass');
   const [signer, setSigner] = useState('');
   const [note, setNote] = useState('');
+  // 逐条标准（8.0.7 2.5）：合同里写了验收标准的按条打勾，结果跟着算（有一条不合格整次就是不合格）
+  const standards = c.content.acceptance.items;
+  const [checks, setChecks] = useState<(boolean | null)[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const url = `/api/erp/contracts/${c.id}/acceptances`;
@@ -271,17 +289,32 @@ function AcceptanceDialog({ open, c, onClose, onDone }: { open: boolean; c: Cont
     setResult('pass');
     setSigner(c.content.acceptance.signer.slice(0, 20));
     setNote('');
+    setChecks(standards.map(() => null));
     setError(null);
   });
-  const problem = pending.length > 0 ? '上一条验收登记结果待确认，请先在上方处理' : !acceptedOn || acceptedOn > session.calendarToday ? '验收日不能晚于今天' : !signer.trim() ? '请填写签字人' : result === 'fail' && note.trim().length < 2 ? '不合格请写明怎么处理' : null;
+  const byItems = standards.length > 0;
+  const effective: AcceptanceResult = byItems ? (checks.some((x) => x === false) ? 'fail' : 'pass') : result;
+  const problem =
+    pending.length > 0
+      ? '上一条验收登记结果待确认，请先在上方处理'
+      : !acceptedOn || acceptedOn > session.calendarToday
+        ? '验收日不能晚于今天'
+        : !signer.trim()
+          ? '请填写签字人'
+          : byItems && checks.some((x) => x === null)
+            ? '请给每条标准选合格或不合格'
+            : effective === 'fail' && note.trim().length < 2
+              ? '不合格请写明怎么处理'
+              : null;
   const submit = async () => {
     if (problem) return;
     setBusy(true);
     setError(null);
-    const body = { clientKey: uuid(), acceptedOn, result, signer: signer.trim(), note: note.trim() };
+    const items = byItems ? standards.map((item, i) => ({ item, pass: checks[i] === true })) : [];
+    const body = { clientKey: uuid(), acceptedOn, result: effective, signer: signer.trim(), note: note.trim(), items };
     try {
-      await sendErpOp({ key: body.clientKey, type: 'contract_acceptance', url, body, summary: `${c.contractNo} 验收 ${acceptedOn} ${ACCEPTANCE_RESULT_LABELS[result]}`, staffName: session.staff.displayName });
-      toast({ tone: 'success', title: `已登记验收（${ACCEPTANCE_RESULT_LABELS[result]}）`, body: c.contractNo });
+      await sendErpOp({ key: body.clientKey, type: 'contract_acceptance', url, body, summary: `${c.contractNo} 验收 ${acceptedOn} ${ACCEPTANCE_RESULT_LABELS[effective]}`, staffName: session.staff.displayName });
+      toast({ tone: 'success', title: `已登记验收（${ACCEPTANCE_RESULT_LABELS[effective]}）`, body: c.contractNo });
       onClose();
     } catch (e) {
       if (e instanceof UncertainError) {
@@ -314,8 +347,8 @@ function AcceptanceDialog({ open, c, onClose, onDone }: { open: boolean; c: Cont
         <Field label="验收日" htmlFor="ac-date">
           <Input id="ac-date" type="date" value={acceptedOn} max={session.calendarToday} onChange={(e) => setAcceptedOn(e.target.value)} className="h-10" />
         </Field>
-        <Field label="结果" htmlFor="ac-result">
-          <Select id="ac-result" value={result} onChange={(e) => setResult(e.target.value as AcceptanceResult)} data-testid="acceptance-result">
+        <Field label="结果" htmlFor="ac-result" hint={byItems ? '按下面逐条的结果' : undefined}>
+          <Select id="ac-result" value={effective} disabled={byItems} onChange={(e) => setResult(e.target.value as AcceptanceResult)} data-testid="acceptance-result">
             <option value="pass">合格</option>
             <option value="fail">不合格</option>
           </Select>
@@ -323,10 +356,38 @@ function AcceptanceDialog({ open, c, onClose, onDone }: { open: boolean; c: Cont
         <Field label="签字人" htmlFor="ac-signer">
           <Input id="ac-signer" value={signer} maxLength={20} onChange={(e) => setSigner(e.target.value)} className="h-10" data-testid="acceptance-signer" />
         </Field>
-        <Field label={result === 'fail' ? '怎么处理（必填）' : '说明（选填）'} htmlFor="ac-note" className="sm:col-span-3">
+        {byItems && (
+          <div className="space-y-1.5 sm:col-span-3" data-testid="acceptance-items">
+            <p className="text-[12.5px] font-bold text-ink-2">逐条验收{c.content.acceptance.templateName ? `（${c.content.acceptance.templateName}）` : ''}</p>
+            {standards.map((item, i) => (
+              <div key={`${i}-${item}`} className="flex flex-wrap items-center gap-2 rounded-md border border-line px-2.5 py-1.5 text-[13px]">
+                <span className="min-w-0 flex-1">{item}</span>
+                {([true, false] as const).map((v) => (
+                  <label key={String(v)} className="flex items-center gap-1 text-[12.5px] font-semibold">
+                    <input
+                      type="radio"
+                      name={`ac-item-${i}`}
+                      checked={checks[i] === v}
+                      onChange={() => setChecks((cur) => cur.map((x, j) => (j === i ? v : x)))}
+                      className="size-4 accent-[var(--color-pine)]"
+                      data-testid={`acceptance-item-${i}-${v ? 'pass' : 'fail'}`}
+                    />
+                    {v ? '合格' : '不合格'}
+                  </label>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+        <Field label={effective === 'fail' ? '怎么处理（必填）' : '说明（选填）'} htmlFor="ac-note" className="sm:col-span-3">
           <Textarea id="ac-note" rows={2} maxLength={200} value={note} onChange={(e) => setNote(e.target.value)} data-testid="acceptance-note" />
         </Field>
       </div>
+      {effective === 'fail' && session.rules.acceptanceHoldsPayment && (
+        <Notice tone="warning" className="mt-3" title="登记不合格以后，这份合同的付款会挂起">
+          新的付款申请、按申请登记付款、合同付款都会被拒，直到重新验收合格（可在经营规则「可调的数值」里关掉）。
+        </Notice>
+      )}
       {error && <Notice tone="error" title={error} className="mt-3" />}
     </Dialog>
   );

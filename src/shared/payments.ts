@@ -121,6 +121,8 @@ export interface AcceptanceView {
   voidedAt: string | null;
   voidedByName: string | null;
   voidReason: string | null;
+  /** 逐条结果（8.0.7 2.5，按合同里的验收标准打勾）；之前的登记、没有逐条标准的为空 */
+  items: { item: string; pass: boolean }[] | null;
 }
 
 export type QualityStatus = 'open' | 'resolved' | 'voided';
@@ -205,6 +207,8 @@ export interface ContractPaymentPlan {
   /** 能不能在这份合同上发起付款申请；不能的写原因 */
   canRequest: boolean;
   whyNot: string | null;
+  /** 最近一次验收不合格、付款挂起（8.0.7 2.5，V9）：不能申请、不能登记付款，直到重新验收合格 */
+  acceptanceHold: boolean;
   /** 采购合同：已生效的收货金额（减去生效的退货）、最后一次到货日 */
   receivedCents: number | null;
   lastDeliveryDate: string | null;

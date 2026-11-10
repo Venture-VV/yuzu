@@ -18,7 +18,7 @@ import { lockSettings } from '../../lib/rule-settings';
 const MATERIAL_COLUMNS = (db: Db) => db`
   m.id, m.code, m.name, m.category, m.specification, m.inventory_unit, m.decimals, m.purchase_unit,
   m.purchase_factor_milli, m.ref_price_cents, m.default_supplier_id, s.name AS default_supplier_name,
-  m.low_stock_milli, m.cover_days, m.counter_use, m.weighed, m.tracked, m.active, m.stock_milli,
+  m.low_stock_milli, m.cover_days, m.counter_use, m.weighed, m.expiry_tracked, m.shelf_life_days, m.tracked, m.active, m.stock_milli,
   (SELECT coalesce(sum(ws.stock_milli), 0) FROM warehouse_stock ws WHERE ws.material_id = m.id) AS dept_stock_milli,
   (m.low_stock_milli IS NOT NULL AND m.tracked AND m.stock_milli < m.low_stock_milli) AS is_low,
   (m.last_move_id IS NOT NULL) AS has_moves,
@@ -61,6 +61,9 @@ export const listSuppliers = (db: Db, includeInactive = false) =>
            CASE WHEN default_channel IS NULL OR default_channel IN ('supplier', 'online') THEN default_channel ELSE 'self' END AS default_channel,
            contracted,
            (SELECT count(*)::int FROM supplier_contract_files f WHERE f.supplier_id = suppliers.id AND f.removed_at IS NULL) AS contract_files,
+           -- 准入与证照（8.0.7 A2，迁移 097）：在用的证照里最早到期的
+           admission, admission_note,
+           (SELECT min(l.valid_until)::text FROM supplier_licenses l WHERE l.supplier_id = suppliers.id AND l.removed_at IS NULL) AS license_due,
            active, is_synthetic FROM suppliers
     ${includeInactive ? db`` : db`WHERE active`} ORDER BY active DESC, code`;
 
@@ -91,6 +94,9 @@ export const MaterialInput = z
     counterUse: z.boolean().default(false),
     /** 称重（#14，v0.7.13）：按实际称重记数量，至少 1 位小数 */
     weighed: z.boolean().default(false),
+    /** 效期管理（8.0.7 3.3）：收货要填到期日；保质期天数（填了的按生产日期自动算到期日） */
+    expiryTracked: z.boolean().default(false),
+    shelfLifeDays: z.number('保质期要填天数').int('保质期要填整天数').min(1, '保质期至少 1 天').max(3650, '保质期最多 3650 天').nullable().default(null),
     tracked: z.boolean().default(true),
     active: z.boolean().default(true),
     note: text(200, '备注').default(''),
@@ -157,10 +163,11 @@ export async function saveMaterial(db: Sql, id: number | null, raw: MaterialInpu
     if (id === null) {
       const [row] = await db<{ id: number }[]>`
         INSERT INTO materials (code, name, category, specification, inventory_unit, decimals, purchase_unit, purchase_factor_milli,
-                               ref_price_cents, default_supplier_id, low_stock_milli, cover_days, counter_use, weighed, tracked, active, note, is_synthetic)
+                               ref_price_cents, default_supplier_id, low_stock_milli, cover_days, counter_use, weighed, expiry_tracked, shelf_life_days,
+                               tracked, active, note, is_synthetic)
         VALUES (${m.code}, ${m.name}, ${m.category}, ${m.specification}, ${m.inventoryUnit}, ${m.decimals}, ${m.purchaseUnit},
                 ${m.purchaseFactorMilli}, ${m.refPriceCents}, ${m.defaultSupplierId}, ${m.lowStockMilli}, ${m.coverDays}, ${m.counterUse}, ${m.weighed},
-                ${m.tracked}, ${m.active}, ${m.note}, ${extra.isSynthetic ?? false})
+                ${m.expiryTracked}, ${m.shelfLifeDays}, ${m.tracked}, ${m.active}, ${m.note}, ${extra.isSynthetic ?? false})
         RETURNING id`;
       return row!.id;
     }
@@ -196,7 +203,7 @@ export async function saveMaterial(db: Sql, id: number | null, raw: MaterialInpu
                inventory_unit = ${m.inventoryUnit}, decimals = ${m.decimals}, purchase_unit = ${m.purchaseUnit},
                purchase_factor_milli = ${m.purchaseFactorMilli}, ref_price_cents = ${m.refPriceCents},
                default_supplier_id = ${m.defaultSupplierId}, low_stock_milli = ${m.lowStockMilli}, cover_days = ${m.coverDays},
-               counter_use = ${m.counterUse}, weighed = ${m.weighed}, tracked = ${m.tracked},
+               counter_use = ${m.counterUse}, weighed = ${m.weighed}, expiry_tracked = ${m.expiryTracked}, shelf_life_days = ${m.shelfLifeDays}, tracked = ${m.tracked},
                active = ${m.active}, note = ${m.note}, updated_at = now()
         WHERE id = ${id}`;
       return id;
@@ -211,7 +218,7 @@ export async function saveSupplier(
   db: Db,
   id: number | null,
   raw: SupplierInputData,
-  extra: { isSynthetic?: boolean; today?: string } = {},
+  extra: { isSynthetic?: boolean; today?: string; admission?: 'pending' | 'approved' } = {},
 ): Promise<number> {
   const s = parse(SupplierInput, raw);
   // 改成按批次对账的那天（#23，v0.7.13）：之前的收货不提醒对账
@@ -221,9 +228,10 @@ export async function saveSupplier(
   try {
     if (id === null) {
       const [row] = await db<{ id: number }[]>`
-        INSERT INTO suppliers (code, name, contact, phone, note, settlement, reconcile_cycle, reconcile_since, default_channel, contracted, active, is_synthetic)
+        INSERT INTO suppliers (code, name, contact, phone, note, settlement, reconcile_cycle, reconcile_since, default_channel, contracted, active, is_synthetic, admission)
         VALUES (${s.code}, ${s.name}, ${s.contact}, ${s.phone}, ${s.note}, ${s.settlement ?? 'credit'}, ${cycle ?? 'monthly'},
-                ${cycle === 'batch' ? db`coalesce(${today}::date, CURRENT_DATE)` : null}, ${s.defaultChannel ?? null}, ${s.contracted ?? false}, ${s.active}, ${extra.isSynthetic ?? false})
+                ${cycle === 'batch' ? db`coalesce(${today}::date, CURRENT_DATE)` : null}, ${s.defaultChannel ?? null}, ${s.contracted ?? false}, ${s.active}, ${extra.isSynthetic ?? false},
+                ${extra.admission ?? 'approved'})
         RETURNING id`;
       return row!.id;
     }
@@ -335,7 +343,8 @@ export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps
 
   app.get('/api/inventory/suppliers', { preHandler: guard('inventory.read') }, async (req) => listSuppliers(sql, all(req.query)));
   app.post('/api/inventory/suppliers', { preHandler: guard('inventory.master') }, async (req, reply) => {
-    const id = await saveSupplier(sql, null, req.body as SupplierInputData, { today: todayIn(config.timezone) });
+    // 页面上新建的供应商是「待准入」（8.0.7 A2，V1）：负责人登记营业执照后准入；种子、导入照旧按已准入
+    const id = await saveSupplier(sql, null, req.body as SupplierInputData, { today: todayIn(config.timezone), admission: 'pending' });
     await writeAudit(sql, { staffId: req.actor.id, action: 'inventory_master_saved', targetType: 'supplier', targetId: id, detail: req.body as Record<string, unknown>, ip: req.ip });
     reply.code(201);
     return listSuppliers(sql, true);

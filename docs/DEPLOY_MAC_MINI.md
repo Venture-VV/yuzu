@@ -40,6 +40,7 @@ open -e .env                 # 用文本编辑器修改
 | `BACKUP_DIR` | `/Volumes/YuzuBackup/yuzu` |
 | `BACKUP_REQUIRE_SENTINEL` | `true`（配合第 1 节的哨兵文件） |
 | `WECOM_WEBHOOK_URL` | 企业微信群机器人的 Webhook 地址，看门狗告警用（第 3.2 节） |
+| `ERP_WECOM_WEBHOOK` | 可选（8.0.7）：ERP 每周一推的企业微信群机器人地址（本周应付、待审批、快到期、逾期应收；开关在「经营规则 → 可调的数值」，默认关）。与告警群分开建，相当于密码；改了要重启应用 |
 | `APP_PORT` | 默认 8080 |
 
 `.env` 含密码，不会也不应提交到 GitHub。OSS 密钥和 age 公钥在做第 9 节时再写入这个文件，启动服务本身不依赖它们。

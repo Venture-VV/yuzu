@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Printer } from 'lucide-react';
-import { DEVICE_ERROR_LABELS, DEVICE_STATUS_LABELS, PRINT_WAIT_MAX_MS, type DeviceErrorCode, type DeviceJob } from '@shared/devices';
+import { DEVICE_ERROR_LABELS, DEVICE_STATUS_LABELS, type DeviceErrorCode, type DeviceJob } from '@shared/devices';
 import { PRINT_DOC_LABELS, type PrintDoc, type PrintPrinter } from '@shared/print';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
@@ -39,8 +39,10 @@ const waitText = (code: DeviceErrorCode | null) => (code ? DEVICE_ERROR_LABELS[c
 /** 浏览器打印按钮旁边的「打到小票机」：有「打印单据到小票机」权限才显示 */
 export function NetPrintButton({ doc, docName, size = 'md', testId }: { doc: PrintDoc; docName?: string; size?: 'sm' | 'md' | 'lg'; testId?: string }) {
   const can = useCan();
+  const session = useSession();
   const [open, setOpen] = useState(false);
-  if (!can('print.network')) return null;
+  // 打印方式是「本机打印」（店主 2026-11-10 默认：连接打印机由各自的电脑负责）时只留浏览器打印
+  if (!can('print.network') || session.rules.printMode === 'local') return null;
   return (
     <>
       <Button size={size} variant="ghost" icon={<Printer className="size-4" />} onClick={() => setOpen(true)} data-testid={testId}>
@@ -101,7 +103,7 @@ function NetPrintDialog({ doc, docName, onClose }: { doc: PrintDoc; docName: str
         toast({
           tone: 'info',
           title: `${printer.name}：${waitText(job.waitCode)}，${docName}已排队`,
-          body: `打印机恢复后自动补打（最多等 ${PRINT_WAIT_MAX_MS / 60_000} 分钟）。可以在「设备」页的打印队列里看或取消，先别重复打`,
+          body: `打印机恢复后自动补打（最多等 ${session.rules.printWaitMinutes} 分钟）。可以在「设备」页的打印队列里看或取消，先别重复打`,
         });
       else if (job.status === 'failed') toast({ tone: 'error', title: `${printer.name}：${docName}没打出来`, body: `${job.errorCode ? DEVICE_ERROR_LABELS[job.errorCode] : ''}${job.errorMessage ? `（${job.errorMessage}）` : ''}` });
       else if (job.status === 'canceled') toast({ tone: 'info', title: `${docName}的打印任务已取消` });
@@ -205,7 +207,7 @@ export function PrintQueueCard() {
   return (
     <div className="rounded-lg border border-line bg-card p-4" data-testid="print-queue">
       <h2 className="mb-1 text-[15px] font-bold">打印队列 · {queue.data.length} 张没打完</h2>
-      <p className="mb-2 text-[12px] text-ink-3">打印机离线或缺纸时单据在这里排队，恢复后按提交顺序自动补打；等超过 {PRINT_WAIT_MAX_MS / 60_000} 分钟的不再打。</p>
+      <p className="mb-2 text-[12px] text-ink-3">打印机离线或缺纸时单据在这里排队，恢复后按提交顺序自动补打；等超过 {session.rules.printWaitMinutes} 分钟的不再打。</p>
       <ul className="divide-y divide-line text-[13px]">
         {queue.data.map((j) => (
           <li key={j.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2" data-testid={`print-queue-${j.id}`} data-status={j.status}>

@@ -311,27 +311,31 @@ describe('部门小仓的盘点、耗用、报损与期初', () => {
   });
 });
 
-describe('收货必须有采购单（#19），采购和仓库一起验收（#17）', () => {
-  it('没有采购单不能收货；一起验收的要是另一个在职的采购经办', async () => {
+describe('收货必须有采购单（#19），采购和仓库一起验收（#17；店主 2026-11-10 CG10：采购不参与库管收货，改成选填）', () => {
+  it('没有采购单不能收货；一起验收的选了就要是另一个在职的采购经办，不选也能收', async () => {
     const m = await material('W004', { name: '纸巾' });
     const noPo = await doc(keeper, { docType: 'receipt', supplierId, lines: [{ materialId: m.id, deliveredMilli: q(10), acceptedMilli: q(10), priceCents: 1000 }] });
     expect(noPo.status).toBe(422);
     expect(noPo.body.error.code).toBe('PO_REQUIRED');
     const po = await approvedPo(m.id, q(1), 1000);
-    const body = (coAcceptorId: number | null) => ({
+    const body = (coAcceptorId: number | null, p = po) => ({
       docType: 'receipt',
       supplierId,
-      purchaseOrderId: po.id,
+      purchaseOrderId: p.id,
       coAcceptorId,
-      lines: [{ materialId: m.id, poLineId: po.lines[0]!.id, deliveredMilli: q(10), acceptedMilli: q(10) }],
+      lines: [{ materialId: m.id, poLineId: p.lines[0]!.id, deliveredMilli: q(10), acceptedMilli: q(10) }],
     });
-    expect((await doc(keeper, body(null))).status).toBe(400);
     expect((await doc(keeper, body(keeperId))).status).toBe(400);
     const notBuyer = await doc(keeper, body(costerId));
     expect(notBuyer.body.error.code).toBe('CO_ACCEPTOR_INVALID');
     const r = await ok(doc(keeper, body(buyerId)));
     expect(r).toMatchObject({ status: 'confirmed', coAcceptor: { id: buyerId, name: '采购小陈' }, noPo: false, warehouse: { id: 1 } });
     expect(await central(m.id)).toBe(q(10));
+    // CG10：不选一起验收的采购也能收货（仓库自己验收）
+    const po2 = await approvedPo(m.id, q(1), 1000);
+    const alone = await ok(doc(keeper, body(null, po2)));
+    expect(alone).toMatchObject({ status: 'confirmed', coAcceptor: null });
+    expect(await central(m.id)).toBe(q(20));
   });
 });
 

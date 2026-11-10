@@ -7,14 +7,11 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
-  APPROVAL_BATCH_MAX,
-  APPROVAL_BATCH_MAX_CENTS,
   APPROVAL_DOC_TYPES,
   APPROVAL_GROUPS,
   APPROVAL_MAX_LEVELS,
   APPROVAL_MAX_STAFF,
   CONTRACT_REVIEW_DOC_TYPES,
-  DELEGATION_MAX_DAYS,
   NO_BATCH_DOC_TYPES,
   inStep,
   stepLabel,
@@ -27,6 +24,7 @@ import {
   type DelegationView,
 } from '@shared/approvals';
 import { formatAmount } from '@shared/money';
+import { TUNABLE_LIMITS } from '@shared/tunables';
 import { can, permissionsOf, type Duty, type Role } from '@shared/permissions';
 import { isUniqueViolation, type Db } from '../../db';
 import { guard, guardAny } from '../../auth/guard';
@@ -49,6 +47,7 @@ import { actOnOpening, actOnPayment } from '../inventory/payables';
 import { approvePo, returnPo } from '../inventory/purchasing';
 import { approvalCounts, assertApprovalKindOpen, getApprovalDetail, listApprovals, urgentAwaitingAcceptance, urgentBackfills, type ApprovalTab } from './center';
 import { hasApprovalAccess, staffNames } from './engine';
+import { loadSettings } from '../settings';
 
 const id = z.number().int().positive();
 const dateStr = z.iso.date('日期格式不对');
@@ -268,7 +267,9 @@ async function createDelegation(deps: Deps, raw: unknown, actor: Actor, ip?: str
   if (d.staffId !== actor.id && !can(actor, 'approval.rules')) throw forbidden('只能给自己设代理人（给别人设要店主）');
   if (d.staffId === d.delegateId) throw badRequest('代理人不能是本人');
   if (d.endsOn < d.startsOn) throw badRequest('结束日期不能早于开始日期');
-  if (daysBetween(d.startsOn, d.endsOn) + 1 > DELEGATION_MAX_DAYS) throw badRequest(`代理最多 ${DELEGATION_MAX_DAYS} 天（含首尾）`);
+  // 代理最多几天（A7，8.0.7 起在「经营规则 → 可调的数值」里改）
+  const { delegationMaxDays } = await loadSettings(deps.sql);
+  if (daysBetween(d.startsOn, d.endsOn) + 1 > delegationMaxDays) throw badRequest(`代理最多 ${delegationMaxDays} 天（含首尾）`);
   if (d.endsOn < todayIn(deps.config.timezone)) throw badRequest('结束日期已经过了');
   const requestHash = hashRequest(d);
   const find = async (db: Db) => {
@@ -352,7 +353,8 @@ const BatchBody = z.object({
   items: z
     .array(z.object({ id, level: z.number().int().min(1).max(APPROVAL_MAX_LEVELS) }))
     .min(1, '请至少勾选一张')
-    .max(APPROVAL_BATCH_MAX, `一次最多 ${APPROVAL_BATCH_MAX} 张`),
+    // 一次最多几张按设置（A5）在处理时核对，这里只挡住离谱的请求
+    .max(TUNABLE_LIMITS.approvalBatchMax.max, `一次最多 ${TUNABLE_LIMITS.approvalBatchMax.max} 张`),
   comment: z.string().trim().max(200, '意见最多 200 个字').default(''),
 });
 
@@ -393,6 +395,9 @@ export function registerApprovalRoutes(app: FastifyInstance, deps: Deps) {
   // 批量同意（A5）：同一种单据、每张不超过 ¥5,000，一次最多 50 张；每张单独成功或失败
   app.post('/api/approvals/batch-approve', { preHandler: ACT }, async (req): Promise<BatchApproveResult> => {
     const body = parse(BatchBody, req.body);
+    // 批量同意的张数与金额上限（A5，8.0.7 起可改）
+    const { approvalBatchMax, approvalBatchMaxCents } = await loadSettings(sql);
+    if (body.items.length > approvalBatchMax) throw badRequest(`一次最多 ${approvalBatchMax} 张`);
     if (new Set(body.items.map((i) => i.id)).size !== body.items.length) throw badRequest('同一张审批单勾了两次');
     const heads = await Promise.all(body.items.map((i) => requestHead(sql, i.id)));
     if (new Set(heads.map((h) => h.docType)).size > 1) throw badRequest('批量同意只能是同一种单据');
@@ -404,8 +409,8 @@ export function registerApprovalRoutes(app: FastifyInstance, deps: Deps) {
         results.push({ id: item.id, ok: false, docNo: head.docNo, code: 'APPROVAL_NO_BATCH', message: '合同、合同变更、用印要逐张审，请打开单独审' });
         continue;
       }
-      if (head.amountCents === null || head.amountCents > APPROVAL_BATCH_MAX_CENTS) {
-        results.push({ id: item.id, ok: false, docNo: head.docNo, code: 'BATCH_OVER_LIMIT', message: `金额超过 ¥${formatAmount(APPROVAL_BATCH_MAX_CENTS)}（或算不出），请打开单独审` });
+      if (head.amountCents === null || head.amountCents > approvalBatchMaxCents) {
+        results.push({ id: item.id, ok: false, docNo: head.docNo, code: 'BATCH_OVER_LIMIT', message: `金额超过 ¥${formatAmount(approvalBatchMaxCents)}（或算不出），请打开单独审` });
         continue;
       }
       try {

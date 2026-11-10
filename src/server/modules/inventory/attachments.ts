@@ -5,7 +5,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { MAX_RECEIPT_ATTACHMENTS, type ReceiptAttachment } from '@shared/inventory';
+import type { ReceiptAttachment } from '@shared/inventory';
 import type { Db } from '../../db';
 import { guardAny } from '../../auth/guard';
 import { writeAudit } from '../../lib/audit';
@@ -15,6 +15,7 @@ import { conflict, notFound, unprocessable } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { saveImage } from '../requests';
 import { readFile, storePdf } from './files';
+import { loadSettings } from '../settings';
 
 const AttachmentInput = z.object({
   name: z.string().trim().max(80, '名称最多 80 个字').default(''),
@@ -68,7 +69,9 @@ export async function addReceiptAttachment(deps: Deps, docId: number, raw: unkno
       WHERE doc_id = ${docId} AND (image_id = ${stored.imageId} OR file_id = ${stored.fileId})`;
     if (dup) return; // 同一份已经挂着
     const [n] = await tx<{ n: number }[]>`SELECT count(*)::int AS n FROM inv_doc_attachments WHERE doc_id = ${docId}`;
-    if (n!.n >= MAX_RECEIPT_ATTACHMENTS) throw conflict('ATTACHMENT_LIMIT', `每张收货单最多 ${MAX_RECEIPT_ATTACHMENTS} 份附件`);
+    // 每张最多几份（CG11，8.0.7 起在「经营规则 → 可调的数值」里改）
+    const { receiptAttachmentsMax } = await loadSettings(tx);
+    if (n!.n >= receiptAttachmentsMax) throw conflict('ATTACHMENT_LIMIT', `每张收货单最多 ${receiptAttachmentsMax} 份附件`);
     const name = input.name || (stored.fileId ? 'PDF' : '照片');
     await tx`
       INSERT INTO inv_doc_attachments (doc_id, image_id, file_id, name, uploaded_by)

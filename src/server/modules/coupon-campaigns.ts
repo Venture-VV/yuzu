@@ -14,8 +14,6 @@ import {
   CAMPAIGN_CHUNK,
   DEFAULT_REMIND_DAYS,
   gradesText,
-  ISSUED_NOTICE_DAYS,
-  MAX_CAMPAIGN_MEMBERS,
   MAX_REMIND_DAYS,
   smsContent,
   type CampaignAudience,
@@ -103,7 +101,7 @@ export async function previewCampaign(deps: Pick<Deps, 'sql' | 'config'>, raw: u
     outOfLevel: members.filter((m) => !levelOk(template, m.grade)).length,
     sample: sample.map((m) => ({ id: Number(m.id), memberNo: m.memberNo, name: m.name, gradeLabel: gradeLabel(rules, m.grade, m.tier) })),
     validTo: validRange(template, date)?.to ?? null,
-    tooMany: members.length > MAX_CAMPAIGN_MEMBERS,
+    tooMany: members.length > (await loadSettings(sql)).campaignMaxMembers,
   };
 }
 
@@ -166,8 +164,10 @@ export async function createCampaign(deps: Deps, raw: unknown, ctx: OpContext): 
         if (!validRange(template, date)) throw unprocessable('TEMPLATE_EXPIRED', `券模板「${template.name}」的有效期到 ${template.validTo} 已经过了，不能再发；请另建模板`);
         const members = await audienceMembers(tx, audience);
         if (members.length === 0) throw unprocessable('NO_MEMBERS', '按这个条件圈到的会员是 0 位，请换个条件');
-        if (members.length > MAX_CAMPAIGN_MEMBERS) {
-          throw unprocessable('TOO_MANY_MEMBERS', `圈到 ${members.length} 位，一次最多发 ${MAX_CAMPAIGN_MEMBERS} 位；请缩小范围、分几次发`, { count: members.length });
+        // 一次最多发给几位（HY07，8.0.7 起在「经营规则 → 可调的数值」里改）
+        const { campaignMaxMembers } = await loadSettings(tx);
+        if (members.length > campaignMaxMembers) {
+          throw unprocessable('TOO_MANY_MEMBERS', `圈到 ${members.length} 位，一次最多发 ${campaignMaxMembers} 位；请缩小范围、分几次发`, { count: members.length });
         }
         const tagNames = audience.tagIds.length
           ? (await tx<{ groupName: string; name: string }[]>`SELECT group_name, name FROM member_tags WHERE id IN ${tx(audience.tagIds)} ORDER BY id`).map(tagLabel)
@@ -276,7 +276,8 @@ export async function processCampaign(deps: Pick<Deps, 'sql' | 'config'>, id: nu
         issued += 1;
         if (!done) continue;
         if (c.notifyPopup) {
-          const until = shiftDate(date, ISSUED_NOTICE_DAYS - 1) < range!.to ? shiftDate(date, ISSUED_NOTICE_DAYS - 1) : range!.to;
+          // 到账弹窗最多显示几天（HY16，8.0.7 起可改）
+          const until = shiftDate(date, settings.campaignNoticeDays - 1) < range!.to ? shiftDate(date, settings.campaignNoticeDays - 1) : range!.to;
           await tx`
             INSERT INTO member_notices (member_id, kind, title, body, campaign_id, issue_id, show_from, show_until, dedupe_key)
             VALUES (${memberId}, 'coupon_issued', ${`收到 ${c.quantity} 张券`}, ${`「${template!.name}」×${c.quantity}，有效期至 ${range!.to}。到店出示会员码即可使用。`},

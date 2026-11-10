@@ -33,6 +33,7 @@ import { parse } from '../../lib/validate';
 import { approveCurrent, closeApproval, lockPending, returnCurrent, submitForApproval, type ApproveOutcome } from '../approvals/engine';
 import { erpOpAbandoned } from '../erp-ops';
 import { saveImage } from '../requests';
+import { storePdf } from '../inventory/files';
 import { assertSubmittable, ContentInput, contentWithoutLines, normalizeContent, readContent } from './content';
 
 const id = z.number().int().positive();
@@ -731,23 +732,39 @@ export async function actOnSeal(deps: Deps, sealId: number, action: 'approve' | 
 
 // ───────────────────────── 扫描件 ─────────────────────────
 
-/** 上传一页扫描件（图片，压缩后不超过 1 MB）：作废的合同不能再传；归档以后只能追加 */
+const ScanInput = z.object({
+  mime: z.enum(['image/jpeg', 'image/png', 'image/webp', 'application/pdf'], '只能上传照片（JPEG、PNG、WebP）或 PDF'),
+  data: z.string().min(16),
+  name: z.string().trim().max(80, '文件名最多 80 个字').default(''),
+});
+
+/**
+ * 上传一份扫描件：一页照片（压缩后不超过 1 MB）或一份 PDF（8.0.7 起，每份按「经营规则 → 可调的数值」的 PDF 大小，最多 10 MB）。
+ * 作废的合同不能再传；归档以后只能追加。
+ */
 export async function addFile(deps: Deps, contractId: number, raw: unknown, actor: Actor, ip?: string) {
-  // 合同扫描件单独存（迁移 079）：通用的图片接口给不出、需求单与采购单的行挂不上
-  const img = await saveImage(deps.sql, raw, actor, 'contract');
+  const input = parse(ScanInput, raw);
+  // 合同扫描件单独存（迁移 079、099）：通用的图片接口给不出、需求单与采购单的行挂不上
+  const stored =
+    input.mime === 'application/pdf'
+      ? { imageId: null, fileId: (await storePdf(deps.sql, 'contract_scan', input.data, actor)).id }
+      : { imageId: (await saveImage(deps.sql, { mime: input.mime, data: input.data }, actor, 'contract')).id, fileId: null };
   return deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const c = await lockContract(tx, contractId);
     if (c.status === 'voided') throw conflict('INVALID_STATE', '作废的合同不能再上传扫描件');
-    // 同一张图已经挂在这份合同上（上次上传没收到结果、重新上传的）：不另记一份（图片本身按内容去重）
+    // 同一份已经挂在这份合同上（上次上传没收到结果、重新上传的）：不另记一份（内容本身按摘要去重）
     const [same] = await tx<{ id: number }[]>`
-      SELECT id FROM contract_files WHERE contract_id = ${contractId} AND image_id = ${img.id} AND removed_at IS NULL LIMIT 1`;
+      SELECT id FROM contract_files
+      WHERE contract_id = ${contractId} AND (image_id = ${stored.imageId} OR file_id = ${stored.fileId}) AND removed_at IS NULL LIMIT 1`;
     if (same) return { id: Number(same.id) };
     const [next] = await tx<{ sortNo: number }[]>`SELECT coalesce(max(sort_no), 0) + 1 AS sort_no FROM contract_files WHERE contract_id = ${contractId}`;
     const sortNo = Number(next!.sortNo);
+    const name = input.name || (stored.fileId ? 'PDF' : '');
     const [row] = await tx<{ id: number }[]>`
-      INSERT INTO contract_files (contract_id, image_id, sort_no, added_by) VALUES (${contractId}, ${img.id}, ${sortNo}, ${actor.id}) RETURNING id`;
-    await writeAudit(tx, { staffId: actor.id, action: 'contract_doc', targetType: 'contract', targetId: contractId, detail: { op: 'file_add', contractNo: c.contractNo, fileId: row!.id }, ip });
+      INSERT INTO contract_files (contract_id, image_id, file_id, name, sort_no, added_by)
+      VALUES (${contractId}, ${stored.imageId}, ${stored.fileId}, ${name}, ${sortNo}, ${actor.id}) RETURNING id`;
+    await writeAudit(tx, { staffId: actor.id, action: 'contract_doc', targetType: 'contract', targetId: contractId, detail: { op: 'file_add', contractNo: c.contractNo, fileId: row!.id, pdf: stored.fileId !== null }, ip });
     return { id: Number(row!.id) };
   });
 }

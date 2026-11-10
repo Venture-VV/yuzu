@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ReceiptText, Undo2 } from 'lucide-react';
-import { defaultRefundAmount, refundNeedsRef, type RefundDetail, type RefundMethod, type RefundOptions, type RefundSummary } from '@shared/checkout';
+import { defaultRefundAmount, refundNeedsRef, type RefundDetail, type RefundMethod, type RefundOptions, type RefundSummary, CHECKOUT_METHOD_LABELS, type CheckoutMethod } from '@shared/checkout';
 import { PAYMENT_METHOD_LABELS } from '@shared/labels';
 import { centsToInput, formatYuan, parseYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
@@ -224,7 +224,7 @@ export function RefundPanel({ checkoutId, checkoutNo, onClose, DrawerPicker }: {
           </ul>
           {o!.nonRefundable.length > 0 && (
             <p className="text-[12.5px] text-ink-3">
-              原单另有 {o!.nonRefundable.map((n) => `${n.method === 'wallet' ? '会员储值' : n.method === 'coupon' ? '团购券' : n.method === 'discount' ? '优惠 / 免单' : '券抵扣'} ${formatYuan(n.amount)}`).join('、')}，不能部分退。
+              原单另有 {o!.nonRefundable.map((n) => `${CHECKOUT_METHOD_LABELS[n.method as CheckoutMethod] ?? n.method} ${formatYuan(n.amount)}`).join('、')}，不能部分退。
             </p>
           )}
           <div className="space-y-2 rounded-md border border-line bg-card p-3" data-testid="refund-methods">

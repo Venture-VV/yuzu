@@ -713,7 +713,38 @@ describe('付款规则（8.0.6）', () => {
     if (direct.body.payment.status !== 'confirmed') await ok(api(ctx.app, mgr, 'POST', `/api/payables/payments/${direct.body.payment.id}/approve`, {}), 200);
     const p = await plan(k.id);
     expect(p).toMatchObject({ legacyPaidCents: 1_000, paidCents: 0 }); // 不算在各段里
+    // 关着时没带申请的预付款也能核销到合同的收货单上：同样记在「不带付款申请的付款」（Codex 审查 #82 b240f89 的 P2，8.0.7 补）
+    const loose = await ok<{ payment: { id: number; status: string } }>(
+      api(ctx.app, payer, 'POST', '/api/payables/payments', {
+        clientKey: randomUUID(),
+        supplierId,
+        payDate: today,
+        amountCents: 2_000,
+        method: 'bank_transfer',
+        evidence: '流水尾号 0807',
+        note: '零星预付',
+        prepay: true,
+        approveNow: false,
+        allocations: [],
+      }),
+    );
+    if (loose.payment.status !== 'confirmed') await ok(api(ctx.app, mgr, 'POST', `/api/payables/payments/${loose.payment.id}/approve`, {}), 200);
+    const offset = (amountCents: number) =>
+      api(ctx.app, payer, 'POST', '/api/payables/offsets', {
+        clientKey: randomUUID(),
+        supplierId,
+        offsetDate: today,
+        credit: { kind: 'prepayment', id: loose.payment.id },
+        lines: [{ kind: 'receipt', targetId: rc.receipt.id, amountCents }],
+      });
+    const off = await offset(1_500);
+    expect(off.status, JSON.stringify(off.body)).toBe(201);
+    expect(await plan(k.id)).toMatchObject({ legacyPaidCents: 2_500, paidCents: 0 });
+    // 冲销了的核销不算
+    await ok(api(ctx.app, payer, 'POST', `/api/payables/offsets/${off.body.offset.id}/void`, { reason: '核销错了单' }), 200);
+    expect(await plan(k.id)).toMatchObject({ legacyPaidCents: 1_000 });
     await ok(setRules({ requireRequestForContractGoods: true }), 200);
+    expect((await offset(500)).body.error.code).toBe('PAYMENT_REQUEST_REQUIRED');
     expect((await pay(1_000)).body.error.code).toBe('PAYMENT_REQUEST_REQUIRED');
     expect(await paymentChecks(ctx.sql)).toEqual([expect.objectContaining({ key: 'payments', ok: true }), expect.objectContaining({ key: 'input_invoices', ok: true })]);
   });

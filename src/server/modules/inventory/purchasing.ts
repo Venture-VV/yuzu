@@ -33,6 +33,7 @@ import {
   weighedCapMilli,
 } from './common';
 import { hashRequest } from '../../lib/idempotency';
+import { assertSupplierAdmitted } from './admission';
 import { ChannelKey, ChannelNote, loadPurchaseRules, resolveChannel, type ChannelColumns } from './purchase-rules';
 import { formatAmount } from '@shared/money';
 import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForApproval } from '../approvals/engine';
@@ -574,6 +575,8 @@ async function submitLocked(tx: Tx, po: PoRow, actor: Actor, approveNow: boolean
   await assertQuotesForPo(tx, po.id);
   // 挂了合同的（v0.7.31，C9）：合同仍要生效中；超价、超量的要写原因（在采购单的锁里再核对一次，读合同不加锁）
   await assertContractDeviation(tx, po.id);
+  // 供应商准入（8.0.7 A2，V2）：打开了「只能给已准入的供应商」时，待准入、暂停的拒绝（只读供应商）
+  await assertSupplierAdmitted(tx, po.id);
   await tx`UPDATE purchase_orders SET status = 'submitted', submitted_by = ${actor.id}, submitted_at = now(), updated_at = now() WHERE id = ${po.id}`;
   await logApproval(tx, 'purchase_order', po.id, 'submit', actor.id, '', po.revision);
   if (deptConfirm) {

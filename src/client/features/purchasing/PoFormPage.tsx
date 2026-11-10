@@ -3,7 +3,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, CircleAlert, CircleCheck, ClipboardList, CloudOff, FileSearch, PackagePlus, RotateCw, Search, ShoppingCart, Trash2, X } from 'lucide-react';
 import type { ContractCheckResult, ContractLineCheck } from '@shared/contracts';
-import type { Material } from '@shared/inventory';
+import type { Material, Supplier } from '@shared/inventory';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { DEFAULT_CHANNEL_KEY, type PoLineRequest, type PriceCompare, type PurchaseOrder } from '@shared/purchasing';
 import { fitsDecimals, formatQty, lineAmountCents, parseQty, priceChangePercent, toBaseQty } from '@shared/quantity';
@@ -436,6 +436,7 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
             </Notice>
           )}
           {existing?.status === 'returned' && existing.returnedReason && <Notice tone="warning" title="负责人退回修改">{existing.returnedReason}</Notice>}
+          <SupplierHints supplier={suppliers.data?.find((s) => s.id === supplierId) ?? null} />
 
           <section className="grid gap-4 rounded-lg border border-line bg-card p-5 shadow-card sm:grid-cols-2 lg:grid-cols-4">
             <Field label="供应商" htmlFor="po-sup" hint={hasReceipts ? '已有收货，不能更换' : undefined}>
@@ -875,5 +876,33 @@ function ContractLineHint({ check, unit }: { check: ContractLineCheck; unit: str
       {check.priceOverCents > 0 && ` · 超价 ¥${formatAmount(check.priceOverCents)} / ${unit}`}
       {check.overQtyMilli > 0 && ` · 超量 ${formatQty(check.overQtyMilli)} ${unit}`}
     </p>
+  );
+}
+
+/**
+ * 供应商的准入与观察名单提示（8.0.7 2.1、2.2）：待准入、暂停的——经营规则里打开了「只能给已准入的供应商」时提交会被拒，
+ * 关着只提醒；在观察名单上的（季度分数低于观察线）提示，不拦。
+ */
+function SupplierHints({ supplier }: { supplier: Supplier | null }) {
+  const session = useSession();
+  const watch = useQuery({ queryKey: ['inv', 'supplier-watch'], queryFn: () => api.get<{ supplierId: number; quarter: string; scoreX10: number }[]>('/api/purchase-compare/watch'), staleTime: 300_000 });
+  if (!supplier) return null;
+  const w = watch.data?.find((x) => x.supplierId === supplier.id);
+  return (
+    <>
+      {supplier.admission !== 'approved' && (
+        <Notice tone={session.rules.supplierApprovedOnly ? 'error' : 'warning'} title={`供应商「${supplier.name}」${supplier.admission === 'suspended' ? '已暂停' : '还没准入'}`} data-testid="po-admission">
+          {session.rules.supplierApprovedOnly
+            ? '经营规则设了「采购单只能给已准入的供应商」：这张采购单提交会被拒，请负责人先在供应商档案里准入（要有没过期的营业执照）。'
+            : '可以照常下单；请负责人在供应商档案里登记营业执照后准入。'}
+          {supplier.admission === 'suspended' && supplier.admissionNote ? ` 暂停原因：${supplier.admissionNote}` : ''}
+        </Notice>
+      )}
+      {w && (
+        <Notice tone="warning" title={`供应商「${supplier.name}」在观察名单上`} data-testid="po-watch">
+          {w.quarter} 季度评分 {(w.scoreX10 / 10).toFixed(1)} 分，低于观察线 {session.rules.supplierWatchScore} 分（采购 → 供应商评分）。不拦，下单前请留意。
+        </Notice>
+      )}
+    </>
   );
 }

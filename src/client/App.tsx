@@ -40,6 +40,8 @@ const CanteenCardsPrintPage = lazyPage(() => import('./features/canteen/CardsPri
 const CanteenPosterPrintPage = lazyPage(() => import('./features/canteen/PosterPrintPage').then((m) => m.CanteenPosterPrintPage));
 const ShiftPrintPage = lazyPage(() => import('./features/print/ShiftPrintPage').then((m) => m.ShiftPrintPage));
 // ERP 工作区
+// 供应商在线对账确认（8.0.7 2.6）：供应商打开链接，不用登录
+const ReconPublicPage = lazyPage(() => import('./features/payables/ReconPublicPage').then((m) => m.ReconPublicPage));
 const ErpShell = lazyPage(() => import('./features/erp/ErpShell').then((m) => m.ErpShell));
 const ErpHome = lazyPage(() => import('./features/erp/ErpHome').then((m) => m.ErpHome));
 const ErpModulesPage = lazyPage(() => import('./features/erp/ErpModulesPage').then((m) => m.ErpModulesPage));
@@ -49,6 +51,9 @@ const ClaimFormPage = lazyPage(() => import('./features/expenses/ClaimFormPage')
 const PettyPage = lazyPage(() => import('./features/expenses/PettyPage').then((m) => m.PettyPage));
 const PettyAccountsPage = lazyPage(() => import('./features/expenses/PettyAccountsPage').then((m) => m.PettyAccountsPage));
 const BudgetsPage = lazyPage(() => import('./features/expenses/BudgetsPage').then((m) => m.BudgetsPage));
+const AssetsPage = lazyPage(() => import('./features/assets/AssetsPage').then((m) => m.AssetsPage));
+const AssetLabelsPrintPage = lazyPage(() => import('./features/assets/AssetLabelsPrintPage').then((m) => m.AssetLabelsPrintPage));
+const ReceivablesPage = lazyPage(() => import('./features/receivables/ReceivablesPage').then((m) => m.ReceivablesPage));
 const InvoicesPage = lazyPage(() => import('./features/invoices/InvoicesPage').then((m) => m.InvoicesPage));
 const RequestsPage = lazyPage(() => import('./features/requests/RequestsPage').then((m) => m.RequestsPage));
 const RequestFormPage = lazyPage(() => import('./features/requests/RequestFormPage').then((m) => m.RequestFormPage));
@@ -78,6 +83,7 @@ const UrgentPage = lazyPage(() => import('./features/purchasing/UrgentPage').the
 const PurchaseRulesPage = lazyPage(() => import('./features/purchasing/PurchaseRulesPage').then((m) => m.PurchaseRulesPage));
 const RequestImportPage = lazyPage(() => import('./features/purchasing/RequestImportPage').then((m) => m.RequestImportPage));
 const ComparePage = lazyPage(() => import('./features/purchasing/ComparePage').then((m) => m.ComparePage));
+const ScoresPage = lazyPage(() => import('./features/purchasing/ScoresPage').then((m) => m.ScoresPage));
 const UrgentDocFormPage = lazyPage(() => import('./features/inventory/DocFormPage').then((m) => m.UrgentDocFormPage));
 const PayablesPage = lazyPage(() => import('./features/payables/PayablesPage').then((m) => m.PayablesPage));
 const PaymentFormPage = lazyPage(() => import('./features/payables/PaymentFormPage').then((m) => m.PaymentFormPage));
@@ -193,6 +199,7 @@ function DashboardMoved() {
 
 const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
+  { path: '/r/:token', element: <ReconPublicPage /> },
   {
     path: '/print',
     element: <AuthGate shell="bare" />,
@@ -204,6 +211,8 @@ const router = createBrowserRouter([
       // 员工食堂的开通卡片（A4）
       { path: 'canteen-cards/:ids', element: <CanteenCardsPrintPage /> },
       { path: 'canteen-poster', element: <CanteenPosterPrintPage /> },
+      // 资产标签（8.0.7）
+      { path: 'asset-labels/:ids', element: <AssetLabelsPrintPage /> },
     ],
   },
   // 对客导览的大屏模式（v0.7.19）：没有导航与操作，适合门店大屏常开
@@ -223,6 +232,8 @@ const router = createBrowserRouter([
       // 费用预算与进项发票台账（8.0.3）
       { path: 'expenses/budgets', element: <BudgetsPage /> },
       { path: 'invoices', element: <InvoicesPage /> },
+      { path: 'receivables', element: <ReceivablesPage /> },
+      { path: 'assets', element: <AssetsPage /> },
       { path: 'petty', element: <PettyPage /> },
       { path: 'petty/accounts', element: <PettyAccountsPage /> },
       { path: 'requests', element: <RequestsPage /> },
@@ -274,6 +285,7 @@ const router = createBrowserRouter([
       { path: 'purchasing/import', element: <RequestImportPage /> },
       // 供应商比价看板（8.0.1 采购组整改 07）
       { path: 'purchasing/compare', element: <ComparePage /> },
+      { path: 'purchasing/scores', element: <ScoresPage /> },
       { path: 'purchasing/:id/edit', element: <PoFormPage mode="edit" /> },
       { path: 'purchasing/:id/revise', element: <PoFormPage mode="revise" /> },
       { path: 'payables', element: <PayablesPage /> },

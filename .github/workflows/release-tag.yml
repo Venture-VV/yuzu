@@ -43,7 +43,7 @@ jobs:
       INPUT_VERSION: ${{ github.event.inputs.version }}
       INPUT_COMMIT: ${{ github.event.inputs.commit }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # 补打旧版本要在 main 的历史里找提交
           fetch-depth: 0

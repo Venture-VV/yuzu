@@ -4,7 +4,6 @@
 
 import {
   APPROVAL_MAX_LEVELS,
-  APPROVAL_OVERDUE_HOURS,
   CONTRACT_DEFAULT_STEPS,
   PAYMENT_EARLY_DEFAULT_STEPS,
   PAYMENT_REQUEST_DEFAULT_STEPS,
@@ -28,6 +27,7 @@ import type { Actor } from '../../lib/context';
 import { todayIn } from '../../lib/dates';
 import { AppError, conflict } from '../../lib/errors';
 import { loadPaymentRules } from '../payments/rules';
+import { loadSettings } from '../settings';
 
 /** 默认规则（没有规则命中、照现在的开关与门槛要确认的）：一级「负责人」，提交人有权限的可以一并同意 */
 export const DEFAULT_STEPS: ApprovalStep[] = [{ group: 'manager', mode: 'any' }];
@@ -547,6 +547,7 @@ export async function approvalBriefById(db: Db, requestId: number): Promise<Appr
 }
 
 async function briefOf(db: Db, where: Fragment): Promise<ApprovalBrief | null> {
+  const { approvalOverdueHours } = await loadSettings(db);
   const [r] = await db<{
     id: number;
     docType: ApprovalDocType;
@@ -560,7 +561,7 @@ async function briefOf(db: Db, where: Fragment): Promise<ApprovalBrief | null> {
     overdue: boolean;
   }[]>`
     SELECT id, doc_type, status, rule_id, current_level, steps, allow_self, submitted_by, level_started_at,
-           (status = 'pending' AND level_started_at < now() - make_interval(hours => ${APPROVAL_OVERDUE_HOURS})) AS overdue
+           (status = 'pending' AND level_started_at < now() - make_interval(hours => ${approvalOverdueHours})) AS overdue
     FROM approval_requests WHERE ${where}
     ORDER BY (status = 'pending') DESC, id DESC LIMIT 1`;
   if (!r) return null;

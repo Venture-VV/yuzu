@@ -19,6 +19,12 @@ async function login(page: Page, username = 'linlan') {
   await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible({ timeout: 30_000 });
 }
 
+/** 打印方式（8.0.7，店主 2026-11-10 默认「本机打印」）：测网口小票机前改成「服务器直连网口小票机」，测完改回 */
+async function setPrintMode(request: APIRequestContext, printMode: 'local' | 'network') {
+  const r = await request.put('/api/settings', { data: { printMode } });
+  expect(r.ok(), `打印方式 → ${r.status()} ${await r.text()}`).toBe(true);
+}
+
 /** 停用测试登记的设备：不让应用之后一直去连已经关掉的模拟端口 */
 async function disable(request: APIRequestContext, code: string) {
   const list = (await (await request.get('/api/devices')).json()) as { id: number; code: string; version: number; enabled: boolean }[];
@@ -34,6 +40,10 @@ test('日结单打到小票机；拔线时排队，插回后自动补打', async
   const name = `网口小票机 ${run}`;
   try {
     await login(page);
+    await setPrintMode(page.request, 'network');
+    // 打印方式随会话下发（session.rules）：登录时读到的还是「本机打印」，重新载入页面才拿到新的，「打到小票机」才显示
+    await page.reload();
+    await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible({ timeout: 30_000 });
     const created = await page.request.post('/api/devices', { data: { clientKey: randomUUID(), code, name, kind: 'printer', area: '收银', connection: 'network', host: printer.host, port: printer.port } });
     expect(created.ok(), await created.text()).toBe(true);
     const status = async () => ((await (await page.request.get('/api/print/printers')).json()) as { code: string; status: string }[]).find((p) => p.code === code)?.status;
@@ -69,6 +79,7 @@ test('日结单打到小票机；拔线时排队，插回后自动补打', async
     expect(printer.texts().at(-1)).toContain('打印机恢复后补打');
   } finally {
     await disable(page.request, code);
+    await setPrintMode(page.request, 'local');
     await printer.close();
   }
 });

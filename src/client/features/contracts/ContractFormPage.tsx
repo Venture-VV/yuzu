@@ -41,7 +41,7 @@ import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, MoneyInput, Notice, Select, Skeleton, Textarea } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
-import { useContract, useContractMeta, useInvalidateContracts } from './queries';
+import { useAcceptanceTemplates, useContract, useContractMeta, useInvalidateContracts } from './queries';
 
 export type ContractFormMode = 'new' | 'edit' | 'change' | 'change-edit';
 
@@ -67,7 +67,8 @@ interface ContentForm {
   terms: { stage: PaymentStage; percent: string; condition: string }[];
   warrantyBasis: WarrantyBasis;
   warrantyMonths: string;
-  acceptance: { method: string; signer: string; penalty: string };
+  /** 验收标准（8.0.7 2.5）：items 是每行一条的文字 */
+  acceptance: { method: string; signer: string; penalty: string; templateName: string; items: string };
   note: string;
   lines: LineForm[];
 }
@@ -94,7 +95,7 @@ function toForm(c: ContractContent): ContentForm {
     terms: c.paymentTerms.map((t) => ({ stage: t.stage, percent: bpToInput(t.percentBp), condition: t.condition })),
     warrantyBasis: c.warranty.basis,
     warrantyMonths: String(c.warranty.months),
-    acceptance: { ...c.acceptance },
+    acceptance: { ...c.acceptance, items: c.acceptance.items.join('\n') },
     note: c.note,
     lines: c.lines.map((l) => ({
       key: uuid(),
@@ -150,7 +151,16 @@ function build(f: ContentForm): { content: ContractContent; termsBp: number } | 
       unloadingBearer: f.unloadingBearer,
       paymentTerms,
       warranty: { basis: f.warrantyBasis, months },
-      acceptance: { method: f.acceptance.method.trim(), signer: f.acceptance.signer.trim(), penalty: f.acceptance.penalty.trim() },
+      acceptance: {
+        method: f.acceptance.method.trim(),
+        signer: f.acceptance.signer.trim(),
+        penalty: f.acceptance.penalty.trim(),
+        templateName: f.acceptance.templateName.trim(),
+        items: f.acceptance.items
+          .split('\n')
+          .map((x) => x.trim())
+          .filter(Boolean),
+      },
       note: f.note.trim(),
       lines,
     },
@@ -162,6 +172,57 @@ function build(f: ContentForm): { content: ContractContent; termsBp: number } | 
 function renewalContent(old: ContractDetail): ContractContent {
   const next = old.endDate ? new Date(Date.parse(`${old.endDate}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10) : null;
   return { ...old.content, startDate: next, endDate: null };
+}
+
+/** 验收标准（8.0.7 2.5）：从模板带出逐条标准（可以再改），登记验收时按条打勾，有一条不合格整次就是不合格 */
+function AcceptanceItemsField({
+  disabled,
+  templateName,
+  items,
+  onChange,
+}: {
+  disabled: boolean;
+  templateName: string;
+  items: string;
+  onChange: (patch: { templateName?: string; items?: string }) => void;
+}) {
+  const templates = useAcceptanceTemplates();
+  const pick = (id: string) => {
+    const t = templates.data?.find((x) => String(x.id) === id);
+    if (!t) return onChange({ templateName: '' });
+    onChange({ templateName: t.name, items: t.items.join('\n') });
+  };
+  const current = templates.data?.find((x) => x.name === templateName);
+  return (
+    <Field label="验收标准（每行一条）" htmlFor="ct-acc-items" className="sm:col-span-2 lg:col-span-4" hint="登记验收时按条打勾，有一条不合格整次就是不合格；不合格时这份合同的付款挂起（可在经营规则里关掉）">
+      <div className="space-y-2">
+        <Select
+          aria-label="验收标准模板"
+          value={current ? String(current.id) : ''}
+          disabled={disabled || !templates.data?.length}
+          onChange={(e) => pick(e.target.value)}
+          className="h-10 max-w-sm"
+          data-testid="ct-acc-template"
+        >
+          <option value="">{templates.data?.length ? (templateName ? `模板：${templateName}（已改过或已停用）` : '选验收标准模板…') : '还没有验收标准模板'}</option>
+          {(templates.data ?? []).map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}（{t.items.length} 条）
+            </option>
+          ))}
+        </Select>
+        <Textarea
+          id="ct-acc-items"
+          rows={4}
+          value={items}
+          disabled={disabled}
+          onChange={(e) => onChange({ items: e.target.value })}
+          placeholder={'例如：\n规格与样品一致\n洗涤 3 次不褪色、不起球\n包装完好、无破损'}
+          data-testid="ct-acc-items"
+        />
+      </div>
+    </Field>
+  );
 }
 
 export function ContractFormPage({ mode }: { mode: ContractFormMode }) {
@@ -624,6 +685,12 @@ function ContractForm({ mode, meta, contract, change, renew }: { mode: ContractF
               placeholder="例如：不合格的退换，逾期按日万分之五扣违约金"
             />
           </Field>
+          <AcceptanceItemsField
+            disabled={fieldsDisabled}
+            templateName={form.acceptance.templateName}
+            items={form.acceptance.items}
+            onChange={(patch) => setForm((f) => ({ ...f, acceptance: { ...f.acceptance, ...patch } }))}
+          />
         </div>
       </Card>
 

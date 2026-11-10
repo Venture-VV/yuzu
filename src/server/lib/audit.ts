@@ -205,7 +205,19 @@ export type AuditAction =
   | 'gift_receipt'
   // 8.0.3 费用预算与进项发票台账：改预算额度；台账里的发票（登记、认证状态、照片、作废）
   | 'expense_budget'
-  | 'input_invoice';
+  | 'input_invoice'
+  // 8.0.7 供应链收尾与 ERP P2（docs/ERP_V807.md）：证照与准入、验收标准模板、对账确认链接与供应商的回复、
+  // 协议单位与回款、资产卡片与扫码盘点、企业微信推送
+  | 'supplier_license'
+  | 'supplier_admission'
+  | 'acceptance_template'
+  | 'recon_link'
+  | 'recon_reply'
+  | 'ar_unit'
+  | 'ar_collection'
+  | 'asset_card'
+  | 'asset_stocktake'
+  | 'wecom_push';
 
 export interface AuditEntry {
   staffId: number | null;

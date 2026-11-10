@@ -28,6 +28,32 @@ export interface AppConfig {
   canteen: CanteenConfig;
   /** 短信通道（8.0.4 批量发券的短信通知，docs/MEMBERSHIP_V804.md 第 6 节）：没配时短信留在待发箱，页面导出手动发 */
   sms: SmsConfig;
+  /** 企业微信群机器人（8.0.7 ERP 每周一推，docs/ERP_V807.md 第 4 节）：没配时不推 */
+  wecom: WecomConfig;
+}
+
+/**
+ * 企业微信群机器人（ERP_WECOM_WEBHOOK）：每周一把本周应付、待审批、快到期的、逾期应收推到群里（开关在「经营规则 → 可调的数值」）。
+ * 地址里带着机器人的 key，相当于密码：只放 .env，不进 Git、不进库、不写日志。https 的地址才认；开发、测试另认 http（本机模拟）。
+ * 和看门狗的告警群（WECOM_WEBHOOK_URL）分开配：告警群里的人不一定该看到应付的金额。
+ */
+export interface WecomConfig {
+  webhook: string | null;
+  /** 配了但格式不对（不是 https 地址）：当作没配，页面上提示 */
+  invalid: boolean;
+}
+
+export function loadWecomConfig(env: NodeJS.ProcessEnv, appEnv: AppEnv): WecomConfig {
+  const raw = env.ERP_WECOM_WEBHOOK?.trim() ?? '';
+  if (!raw) return { webhook: null, invalid: false };
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return { webhook: null, invalid: true };
+  }
+  const ok = url.protocol === 'https:' || (url.protocol === 'http:' && (appEnv === 'development' || appEnv === 'test'));
+  return ok ? { webhook: raw, invalid: false } : { webhook: null, invalid: true };
 }
 
 /**
@@ -156,7 +182,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     trustProxy: (process.env.TRUST_PROXY ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     logLevel: process.env.LOG_LEVEL ?? (env === 'test' ? 'silent' : 'info'),
     // update.sh 用 git describe 写入的版本带 v 前缀，页面统一加 v，这里去掉
-    version: (process.env.APP_VERSION || '8.0.6').replace(/^v/, ''),
+    version: (process.env.APP_VERSION || '8.0.7').replace(/^v/, ''),
     commit: /^[0-9a-f]{7,40}$/.test(process.env.APP_COMMIT ?? '') ? process.env.APP_COMMIT! : '',
     instance: resolveInstance(env, process.env.YUZU_INSTANCE),
     initOwner:
@@ -166,6 +192,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     mp,
     canteen: overrides.canteen ?? loadCanteenConfig(process.env, mainPort, mp.port),
     sms: overrides.sms ?? loadSmsConfig(process.env, env),
+    wecom: overrides.wecom ?? loadWecomConfig(process.env, env),
     ...overrides,
   };
 }

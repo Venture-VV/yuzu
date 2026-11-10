@@ -21,6 +21,7 @@ import type { Db, Fragment } from '../../db';
 import { daysBetween } from '../../lib/dates';
 import { notFound } from '../../lib/errors';
 import { readContent } from '../contracts/content';
+import { loadSettings } from '../settings';
 
 const yuan = (cents: number) => `¥${formatAmount(cents)}`;
 
@@ -38,7 +39,7 @@ export const payModeOf = (category: ContractCategory): PayMode => (category === 
 export async function acceptancesOf(db: Db, contractId: number): Promise<AcceptanceView[]> {
   const rows = await db<AcceptanceView[]>`
     SELECT a.id, a.accepted_on, a.result, a.signer, a.note, cb.display_name AS created_by_name, a.created_at,
-           a.voided_at, vb.display_name AS voided_by_name, a.void_reason
+           a.voided_at, vb.display_name AS voided_by_name, a.void_reason, a.items
     FROM contract_acceptances a JOIN staff cb ON cb.id = a.created_by LEFT JOIN staff vb ON vb.id = a.voided_by
     WHERE a.contract_id = ${contractId}
     ORDER BY a.accepted_on DESC, a.id DESC`;
@@ -134,6 +135,11 @@ export async function contractPlan(db: Db, contractId: number, today: string): P
   const acceptances = await acceptancesOf(db, contractId);
   const latest = acceptances.find((a) => a.voidedAt === null) ?? null;
   const passed = latest?.result === 'pass';
+  // 验收不合格挂起付款（8.0.7 2.5，V9，「经营规则 → 可调的数值」里的开关）：最近一次验收不合格时不能申请、不能登记付款
+  const acceptanceHold = signed && latest?.result === 'fail' && (await loadSettings(db)).acceptanceHoldsPayment;
+  const holdWhy = acceptanceHold
+    ? `最近一次验收（${latest!.acceptedOn}）不合格${latest!.note ? `：${latest!.note}` : ''}，付款挂起；重新验收合格以后再申请、再付`
+    : null;
   const issues = await qualityIssuesOf(db, contractId);
   const openIssues = issues.filter((q) => q.status === 'open').length;
 
@@ -246,11 +252,20 @@ export async function contractPlan(db: Db, contractId: number, today: string): P
     };
   });
 
+  // 不带付款申请、落到这份合同收货单上的钱：直接登记付款时的核销，加上没带申请的预付款后来核销上去的
+  // （P7 关掉以后两种都允许；8.0.7 补上后一种，Codex 审查 #82 b240f89 的 P2：原来只算前一种，预付款核销以后合同上看不到）
   const [legacy] = await db<{ cents: string }[]>`
-    SELECT coalesce(sum(pa.amount_cents), 0)::text AS cents
-    FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
-    JOIN inv_docs d ON d.id = pa.receipt_doc_id JOIN purchase_orders po ON po.id = d.purchase_order_id
-    WHERE po.contract_id = ${contractId} AND p.status = 'confirmed' AND p.payment_request_id IS NULL`;
+    SELECT coalesce(sum(x.cents), 0)::text AS cents FROM (
+      SELECT pa.amount_cents AS cents
+      FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
+      JOIN inv_docs d ON d.id = pa.receipt_doc_id JOIN purchase_orders po ON po.id = d.purchase_order_id
+      WHERE po.contract_id = ${contractId} AND p.status = 'confirmed' AND p.payment_request_id IS NULL
+      UNION ALL
+      SELECT ol.amount_cents
+      FROM ap_offset_lines ol JOIN ap_offsets o ON o.id = ol.offset_id JOIN payments p ON p.id = o.credit_payment_id
+      JOIN inv_docs d ON d.id = ol.receipt_doc_id JOIN purchase_orders po ON po.id = d.purchase_order_id
+      WHERE po.contract_id = ${contractId} AND o.status = 'confirmed' AND p.status = 'confirmed' AND p.payment_request_id IS NULL
+    ) x`;
 
   return {
     contractId: Number(c.id),
@@ -264,8 +279,9 @@ export async function contractPlan(db: Db, contractId: number, today: string): P
     supplierId: c.supplierId === null ? null : Number(c.supplierId),
     payee: payMode === 'ap' ? (c.supplierName ?? c.counterparty) : c.counterparty,
     departmentId: c.departmentId === null ? null : Number(c.departmentId),
-    canRequest: signed,
-    whyNot,
+    canRequest: signed && !acceptanceHold,
+    whyNot: whyNot ?? holdWhy,
+    acceptanceHold,
     receivedCents: receipts?.receivedCents ?? null,
     lastDeliveryDate: receipts?.lastDeliveryDate ?? null,
     latestAcceptance: latest,

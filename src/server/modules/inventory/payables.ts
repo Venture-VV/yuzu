@@ -48,6 +48,7 @@ import {
 import { hashRequest } from '../../lib/idempotency';
 import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForApproval } from '../approvals/engine';
 import { contractPlan } from '../payments/plan';
+import { assertNoHoldOnReceipts } from '../payments/hold';
 import { loadPaymentRules } from '../payments/rules';
 
 const id = z.number().int().positive();
@@ -344,9 +345,12 @@ export async function contractReceiptAmong(db: Db, receiptIds: number[]): Promis
 }
 
 async function assertNoContractReceipts(db: Db, allocations: { kind: 'receipt' | 'opening'; targetId: number }[]) {
-  // 8.0.6 起是「付款 → 付款规则」里的开关（P7，默认开）；关掉时照以前直接登记，合同的付款计划里记在「不带付款申请的付款」
-  if (!allocations.some((a) => a.kind === 'receipt') || !(await loadPaymentRules(db)).requireRequestForContractGoods) return;
-  const hit = await contractReceiptAmong(db, allocations.filter((a) => a.kind === 'receipt').map((a) => a.targetId));
+  const receiptIds = allocations.filter((a) => a.kind === 'receipt').map((a) => a.targetId);
+  if (receiptIds.length === 0) return;
+  // 8.0.6 起是「付款 → 付款规则」里的开关（P7，默认开）；关掉时照以前直接登记，合同的付款计划里记在「不带付款申请的付款」，
+  // 但最近一次验收不合格、付款挂起的合同照样不付（8.0.7 V9，Codex 审查 d8b314b）
+  if (!(await loadPaymentRules(db)).requireRequestForContractGoods) return assertNoHoldOnReceipts(db, receiptIds);
+  const hit = await contractReceiptAmong(db, receiptIds);
   if (hit) {
     throw unprocessable(
       'PAYMENT_REQUEST_REQUIRED',
@@ -486,6 +490,11 @@ export async function actOnPayment(deps: Deps, paymentId: number, action: 'appro
         // v0.7.30：同意的是当前这一级，最后一级同意后确认（默认规则下一次就确认）
         const { comment, ...fence } = parse(ApproveInput, raw ?? {});
         if ((await approveCurrent(tx, 'payment', p!.id, ctx, { ...fence, comment })) !== 'final') return;
+        // 最后一级同意、确认之前再看一次：核销到的收货单挂着的合同最近一次验收不合格、付款挂起的，不确认（8.0.7 V9，Codex 审查 d8b314b）
+        if (p!.paymentRequestId === null) {
+          const held = await tx<{ id: number }[]>`SELECT receipt_doc_id AS id FROM payment_allocations WHERE payment_id = ${p!.id} AND receipt_doc_id IS NOT NULL ORDER BY receipt_doc_id`;
+          await assertNoHoldOnReceipts(tx, held.map((r) => Number(r.id)));
+        }
         return confirmPayment(tx, p!, actor, comment);
       }
       case 'return':

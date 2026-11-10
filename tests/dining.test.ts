@@ -97,7 +97,7 @@ describe('后台「餐饮」', () => {
     expect((await rules({ enabled: true })).status).toBe(200);
     expect((await api(ctx.app, ctx.clerk, 'GET', '/api/auth/me')).body.dining).toBe(true);
     const catalog = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/rules')).body as { key: string; group: string }[];
-    expect(catalog.filter((r) => r.group === 'dining').map((r) => r.key)).toEqual(['dining_rules.enabled', 'dining_rules.trackServed', 'dining_rules.warnMinutes']);
+    expect(catalog.filter((r) => r.group === 'dining').map((r) => r.key)).toEqual(['dining_rules.enabled', 'dining_rules.trackServed', 'dining_rules.warnMinutes', 'mp_food_max_quantity', 'mp_food_max_total_cents']); // 8.0.7：扫码点餐的上限（N1）可调
   });
 });
 

@@ -46,6 +46,10 @@ interface LineDraft {
   /** 合格实收是否手动改过（否则跟随送达数量） */
   acceptedTouched: boolean;
   rejectReason: string;
+  /** 批次与效期（8.0.7 3.3）：管效期的物料收货时填 */
+  batchNo?: string;
+  producedOn?: string;
+  expiresOn?: string;
   /** 每采购单位价格（元） */
   price: string;
   sourceLineId: number | null;
@@ -71,6 +75,9 @@ interface FormState {
   coAcceptorId: number | null;
   handler: string;
   note: string;
+  /** 耗用的用途与经办人（8.0.7 2.3）：用途从「经营规则 → 可调的数值」的列表选，经办人默认自己 */
+  usePurpose: string;
+  useHandlerId: number | null;
   lines: LineDraft[];
 }
 
@@ -103,6 +110,8 @@ const blankForm = (date: string): FormState => ({
   coAcceptorId: null,
   handler: '',
   note: '',
+  usePurpose: '',
+  useHandlerId: null,
   lines: [],
 });
 
@@ -176,6 +185,9 @@ function deptMaterial(m: DeptStockMeta['materials'][number], row: WarehouseStock
     lastMoveAt: row?.lastMoveAt ?? null,
     note: '',
     isSynthetic: false,
+    // 部门小仓不分批（V17）
+    expiryTracked: false,
+    shelfLifeDays: null,
   };
 }
 
@@ -201,6 +213,8 @@ function useScopeData(scope: FormScope) {
     urgentCapCents: central ? settingsQ.data?.urgentCapCents : meta.data?.urgentCapCents,
     /** 称重收货容差（%，v0.7.13）：按采购单收货只在总仓 */
     weighTolerancePct: central ? (settingsQ.data?.weighTolerancePct ?? 10) : 10,
+    /** 耗用经办人能选的员工（8.0.7 2.3，部门小仓；总仓的耗用默认是自己） */
+    staff: central ? undefined : meta.data?.staff,
     /** 盘点大差异（v0.7.30，A8） */
     countBig: {
       countBigPct: (central ? settingsQ.data?.countBigPct : meta.data?.countBigPct) ?? DEFAULT_COUNT_BIG_PCT,
@@ -216,7 +230,7 @@ function readDraft(type: InvDocType, scope: FormScope): FormState | null {
     if (!raw) return null;
     // v0.7.11 以前存下的草稿没有「一起验收的采购」
     const draft = JSON.parse(raw) as Partial<FormState>;
-    return { ...draft, coAcceptorId: draft.coAcceptorId ?? null } as FormState;
+    return { ...draft, coAcceptorId: draft.coAcceptorId ?? null, usePurpose: draft.usePurpose ?? '', useHandlerId: draft.useHandlerId ?? null } as FormState;
   } catch {
     return null;
   }
@@ -241,6 +255,8 @@ function formFromDoc(doc: InvDoc, materials: Map<number, Material>): FormState {
     coAcceptorId: doc.coAcceptor?.id ?? null,
     handler: doc.handler,
     note: doc.note,
+    usePurpose: doc.usePurpose ?? '',
+    useHandlerId: doc.useHandler?.id ?? null,
     lines: doc.lines.map((l) => {
       const m = materials.get(l.materialId) ?? { purchaseFactorMilli: l.factorMilli };
       const enteredPack = l.enteredUnit && l.enteredUnit === l.purchaseUnit && l.enteredUnit !== l.inventoryUnit;
@@ -250,6 +266,9 @@ function formFromDoc(doc: InvDoc, materials: Map<number, Material>): FormState {
         accepted: qtyEntryFromMilli(l.qtyMilli, m, 'pack'),
         acceptedTouched: true,
         rejectReason: l.rejectReason,
+        batchNo: l.batchNo ?? '',
+        producedOn: l.producedOn ?? '',
+        expiresOn: l.expiresOn ?? '',
         price: l.priceCents === null ? '' : centsToInput(l.priceCents),
         sourceLineId: l.sourceLineId,
         poLineId: l.poLineId,
@@ -619,6 +638,8 @@ function DocForm({
           rejected = delivered.milli - accepted.milli;
           if (rejected < 0) errorText = '合格实收不能多于送达';
           else if (rejected > 0 && !l.rejectReason.trim()) errorText = errorText ?? '请填写拒收原因';
+          // 管效期的物料（8.0.7 3.3）：到期日必填，填了生产日期、有保质期的可以不填
+          else if (m.expiryTracked && !l.expiresOn && !(l.producedOn && m.shelfLifeDays)) errorText = errorText ?? `「${m.name}」管效期，请填到期日`;
           after = m.stockMilli + accepted.milli;
         }
         if (!pl && l.price.trim() && price === null) errorText = errorText ?? '单价格式不正确';
@@ -687,9 +708,7 @@ function DocForm({
         ? '请选给哪个部门买的'
       : type === 'receipt' && central && !form.purchaseOrderId
         ? '请选择采购单（没有采购单不能收货；没有采购单的临时采购由采购在「采购 → 急采」登记）'
-        : type === 'receipt' && central && !form.coAcceptorId
-          ? '请选一起验收的采购'
-          : urgentOver
+        : urgentOver
             ? `急采合计超过上限 ¥${((data.urgentCapCents ?? 0) / 100).toFixed(2)}，请先开采购单`
             : type === 'issue' && !form.departmentId
         ? '请选择领料部门'
@@ -699,9 +718,11 @@ function DocForm({
             ? type === 'issue_return'
               ? '请选择原领料单'
               : '请选择原收货单'
+            : type === 'direct_use' && !form.usePurpose
+              ? '请选择用途'
             : (type === 'direct_use' || type === 'damage' || type === 'supplier_return') && form.note.trim().length < 2
               ? type === 'direct_use'
-                ? '请填写耗用用途'
+                ? '请填写说明'
                 : type === 'damage'
                   ? '请填写报损原因'
                   : '请填写退货原因'
@@ -737,6 +758,7 @@ function DocForm({
         return {
           ...base,
           ...(type === 'issue' ? { departmentId: form.departmentId, handler: form.handler.trim() } : {}),
+          ...(type === 'direct_use' ? { purpose: form.usePurpose || null, handlerId: form.useHandlerId } : {}),
           lines: lines.map((r) => ({
             materialId: r.line.materialId,
             qtyMilli: r.qty!.milli,
@@ -779,6 +801,9 @@ function DocForm({
             acceptedMilli: r.accepted!.milli,
             rejectReason: r.rejected && r.rejected > 0 ? r.line.rejectReason.trim() : '',
             priceCents: r.price,
+            batchNo: r.line.batchNo?.trim() || null,
+            producedOn: r.line.producedOn || null,
+            expiresOn: r.line.expiresOn || null,
             note: r.line.note,
           })),
         };
@@ -950,9 +975,9 @@ function DocForm({
                   </Field>
                 )}
                 {central && (
-                  <Field label="一起验收的采购" htmlFor="coAcceptor" hint="采购和仓库一起第一次验收">
+                  <Field label="一起验收的采购（选填）" htmlFor="coAcceptor" hint="采购不参与库管收货（店主 2026-11-10），仓库自己验收即可；要一起验收的照旧选上">
                     <Select id="coAcceptor" value={form.coAcceptorId ?? ''} disabled={locked} onChange={(e) => patch({ coAcceptorId: Number(e.target.value) || null })}>
-                      <option value="">请选择</option>
+                      <option value="">不选（仓库自己验收）</option>
                       {coAcceptors.data
                         ?.filter((c) => c.id !== session.staff.id)
                         .map((c) => (
@@ -1026,8 +1051,40 @@ function DocForm({
               </>
             )}
 
+            {type === 'direct_use' && (
+              <>
+                <Field label="用途" htmlFor="use-purpose" hint="在经营规则「可调的数值」里改">
+                  <Select id="use-purpose" value={form.usePurpose} disabled={locked} onChange={(e) => patch({ usePurpose: e.target.value })} className="h-10" data-testid="use-purpose">
+                    <option value="">选择用途</option>
+                    {session.rules.consumptionPurposes.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                {data.staff && (
+                  <Field label="经办人" htmlFor="use-handler">
+                    <Select
+                      id="use-handler"
+                      value={form.useHandlerId ?? session.staff.id}
+                      disabled={locked}
+                      onChange={(e) => patch({ useHandlerId: Number(e.target.value) || null })}
+                      className="h-10"
+                      data-testid="use-handler"
+                    >
+                      {data.staff.map((st) => (
+                        <option key={st.id} value={st.id}>
+                          {st.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                )}
+              </>
+            )}
             <Field
-              label={type === 'direct_use' ? '耗用用途' : type === 'damage' ? '报损原因' : type === 'supplier_return' ? '退货原因' : '备注'}
+              label={type === 'direct_use' ? '说明' : type === 'damage' ? '报损原因' : type === 'supplier_return' ? '退货原因' : '备注'}
               htmlFor="note"
               className={NOTE_SPAN[type]}
             >
@@ -1580,6 +1637,21 @@ function ReceiptCells({
         {row.amount != null ? <Money cents={row.amount} className="text-[15px] font-bold text-pine @5xl:pt-2" /> : <span className="text-ink-4 @5xl:block @5xl:pt-2.5">—</span>}
       </div>
       <span className="hidden justify-self-end @5xl:block">{remove}</span>
+      {m.expiryTracked && (
+        <div className="flex flex-wrap items-center gap-2 @lg:col-span-3 @5xl:col-span-full" data-testid="receipt-expiry">
+          <span className="text-[12px] font-semibold text-ink-3">效期</span>
+          <Input fullWidth={false} value={line.batchNo ?? ''} disabled={locked} onChange={(e) => onPatch({ batchNo: e.target.value })} placeholder="批号（选填）" maxLength={40} className="h-9 w-36 text-[13px]" aria-label="批号" />
+          <label className="flex items-center gap-1 text-[12px] text-ink-3">
+            生产日期
+            <Input fullWidth={false} type="date" value={line.producedOn ?? ''} disabled={locked} onChange={(e) => onPatch({ producedOn: e.target.value })} className="h-9 w-36 text-[13px]" aria-label="生产日期" />
+          </label>
+          <label className="flex items-center gap-1 text-[12px] text-ink-3">
+            到期日
+            <Input fullWidth={false} type="date" value={line.expiresOn ?? ''} disabled={locked} onChange={(e) => onPatch({ expiresOn: e.target.value })} className="h-9 w-36 text-[13px]" aria-label="到期日" data-testid="receipt-expires-on" />
+          </label>
+          {m.shelfLifeDays && <span className="text-[12px] text-ink-3">保质期 {m.shelfLifeDays} 天（只填生产日期的按它算）</span>}
+        </div>
+      )}
       {row.error && (line.delivered.text || line.price) && <p className="text-[12px] font-semibold text-clay @lg:col-span-3 @5xl:col-span-full">{row.error}</p>}
     </>
   );

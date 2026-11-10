@@ -27,5 +27,6 @@ export async function loadRoleOverrides(db: Db): Promise<RoleOverrides> {
 /** 按后台调整后的权限，供 can() 判断（授权人、会话都用它） */
 export async function subjectOf(db: Db, staff: { role: Role; duties: Duty[] | null }) {
   const duties = staff.duties ?? [];
-  return { role: staff.role, duties, permissions: permissionsOf({ role: staff.role, duties }, await loadRoleOverrides(db)) };
+  const [f] = await db<{ value: unknown }[]>`SELECT value FROM settings WHERE key = 'finance_hides_marketing_cost'`;
+  return { role: staff.role, duties, permissions: permissionsOf({ role: staff.role, duties }, await loadRoleOverrides(db), { financeExclusion: f?.value !== false }) };
 }

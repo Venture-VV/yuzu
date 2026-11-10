@@ -2,7 +2,7 @@
 // 缓存前缀与库存、采购、货款一样用 inv：审批中心同意或退回、「结果待确认」查回以后一起刷新。
 
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ContractCategory, ContractDetail, ContractExpiryItem, ContractMeta, ContractOption, ContractSummary } from '@shared/contracts';
+import type { AcceptanceTemplate, ContractCategory, ContractDetail, ContractExpiryItem, ContractMeta, ContractOption, ContractSummary } from '@shared/contracts';
 import { api } from '../../lib/api';
 
 export type ContractFilter = 'all' | 'drafting' | 'reviewing' | 'effective' | 'expiring' | 'closed';
@@ -47,3 +47,11 @@ export function useInvalidateContracts() {
   const qc = useQueryClient();
   return () => qc.invalidateQueries({ queryKey: ck.all });
 }
+
+/** 验收标准模板（8.0.7 2.5）：all = 含停用的（维护页用） */
+export const useAcceptanceTemplates = (all = false) =>
+  useQuery({
+    queryKey: [...ck.all, 'acceptance-templates', all],
+    queryFn: () => api.get<AcceptanceTemplate[]>(`/api/erp/contracts/acceptance-templates${all ? '?all=1' : ''}`),
+    staleTime: 60_000,
+  });

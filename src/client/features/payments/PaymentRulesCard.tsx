@@ -58,23 +58,35 @@ export function PaymentRulesCard() {
   const editable = can('settings.manage');
   const rules = usePaymentRules();
   const [draft, setDraft] = useState<Draft | null>(null);
+  // 打开时（或上次保存后）的规则：保存时只交改过的字段，两个页面同时开着时不会把别人刚改的改回去（Codex 审查 #82 b240f89 的 P1）
+  const [base, setBase] = useState<PaymentRules | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    if (rules.data && !draft) setDraft(toDraft(rules.data));
+    if (rules.data && !draft) {
+      setDraft(toDraft(rules.data));
+      setBase(rules.data);
+    }
   }, [rules.data, draft]);
 
-  if (!draft) return rules.error ? <Notice tone="error" title={errorMessage(rules.error)} /> : <Skeleton className="h-48" />;
+  if (!draft || !base) return rules.error ? <Notice tone="error" title={errorMessage(rules.error)} /> : <Skeleton className="h-48" />;
 
   const save = async () => {
     const next = fromDraft(draft);
     if (typeof next === 'string') return setError(next);
+    const changed = Object.fromEntries(Object.entries(next).filter(([k, v]) => v !== base[k as keyof PaymentRules])) as Partial<PaymentRules>;
+    if (Object.keys(changed).length === 0) {
+      setError(null);
+      toast({ tone: 'info', title: '没有改动' });
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const saved = await api.put<PaymentRules>('/api/erp/payments/rules', next);
+      const saved = await api.put<PaymentRules>('/api/erp/payments/rules', changed);
       qc.setQueryData(pk.rules, saved);
       setDraft(toDraft(saved));
+      setBase(saved);
       // 三单状态、质保金台账、本周应付都按新规则重算
       await qc.invalidateQueries({ queryKey: pk.all });
       toast({ tone: 'success', title: '付款规则已保存' });

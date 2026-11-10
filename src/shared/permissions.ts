@@ -127,6 +127,8 @@ export const PERMISSIONS = {
   'frontdesk.backfill': { roles: ['owner', 'store_manager', 'duty_manager'] },
   /** 开退款单：结账后按项部分退款、作废当班登记错的退款单（v0.7.20，飞书 RQ-006，待确认：默认值班经理及以上；超过撤销时限只有店主） */
   'frontdesk.refund': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  /** 结账时挂账到协议单位（8.0.7 A3，V12 待确认：店主、店总、值班经理） */
+  'frontdesk.onAccount': { roles: ['owner', 'store_manager', 'duty_manager'] },
   // ── 券与会员权益（v0.7.20，飞书 RQ-006；docs/COUPONS.md，默认值待确认）──
   /** 维护券模板、发券规则（开卡礼、升级礼、生日礼、充值赠券），生成与导出无记名纸质券、按批次作废没用的 */
   'coupon.manage': { roles: ['owner', 'store_manager'] },
@@ -206,6 +208,15 @@ export const PERMISSIONS = {
   'budget.manage': { roles: ['owner'] },
   /** 进项发票台账：直接登记发票、标认证与所属期、上传照片、作废（三单里分到采购单的发票照旧在付款页登记） */
   'invoice.manage': { roles: ['owner'], duties: ['payable', 'cost'] },
+  // ── 8.0.7 ERP P2（docs/ERP_V807.md，默认值待确认）──
+  /** 应收与挂账：看协议单位、挂账、回款、平台回款与账龄（店主、店总；对账付款、成本核算） */
+  'ar.read': { roles: ['owner', 'store_manager'], duties: ['payable', 'cost'] },
+  /** 维护协议单位、登记与冲销回款（店主；对账付款） */
+  'ar.manage': { roles: ['owner'], duties: ['payable'] },
+  /** 资产与易耗：看资产卡片与盘点（店主、店总；仓库、成本核算、负责人） */
+  'asset.read': { roles: ['owner', 'store_manager'], duties: ['stock', 'cost', 'approve'] },
+  /** 资产建卡、调拨、改状态、报废、扫码盘点（店主；仓库、成本核算） */
+  'asset.manage': { roles: ['owner'], duties: ['stock', 'cost'] },
   // ── 管理 ──
   // ── 当场授权（主管在弹窗里输入自己的账号密码确认）──
   /** 授权超过单笔上限的充值 / 消费 */
@@ -297,9 +308,12 @@ export const LOCKED_PERMISSIONS: readonly Permission[] = ['staff.manage', 'setti
  */
 export const FINANCE_EXCLUDED: Partial<Record<Permission, readonly Duty[]>> = { 'marketing.cost': ['payable', 'cost'] };
 
-/** 这位账号的职责把这项权限挡掉了（与财务隔离） */
-export function excludedByDuty(subject: Pick<PermissionSubject, 'role' | 'duties'>, permission: Permission): boolean {
-  if (subject.role === 'owner') return false;
+/**
+ * 这位账号的职责把这项权限挡掉了（与财务隔离）。financeExclusion 是经营规则「有财务职责的账号看不到营销成本」
+ * （HY14，默认开；8.0.7 起在「经营规则 → 可调的数值」里改，关掉以后按岗位权限给）
+ */
+export function excludedByDuty(subject: Pick<PermissionSubject, 'role' | 'duties'>, permission: Permission, financeExclusion = true): boolean {
+  if (subject.role === 'owner' || !financeExclusion) return false;
   return !!FINANCE_EXCLUDED[permission]?.some((d) => subject.duties?.includes(d));
 }
 
@@ -326,9 +340,11 @@ export function roleHas(role: Role, permission: Permission, overrides?: RoleOver
 }
 
 /** 岗位权限（按后台调整）与职责权限（固定）的并集 */
-export function permissionsOf(subject: PermissionSubject, overrides?: RoleOverrides | null): Permission[] {
+export function permissionsOf(subject: PermissionSubject, overrides?: RoleOverrides | null, opts: { financeExclusion?: boolean } = {}): Permission[] {
   return ALL_PERMISSIONS.filter(
-    (p) => !excludedByDuty(subject, p) && (roleHas(subject.role, p, overrides) || !!(PERMISSIONS[p] as Rule).duties?.some((d) => subject.duties?.includes(d))),
+    (p) =>
+      !excludedByDuty(subject, p, opts.financeExclusion ?? true) &&
+      (roleHas(subject.role, p, overrides) || !!(PERMISSIONS[p] as Rule).duties?.some((d) => subject.duties?.includes(d))),
   );
 }
 
@@ -390,6 +406,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'frontdesk.checkoutVoid': '反结账（撤销结账单）',
   'frontdesk.backfill': '按实际时间补录纸质单',
   'frontdesk.refund': '开退款单（离店后部分退款）与作废当班的退款单',
+  'frontdesk.onAccount': '结账时挂账到协议单位',
   'coupon.manage': '维护券模板、发券规则与无记名券',
   'coupon.issue': '发券给会员',
   'coupon.void': '作废会员没用过的券',
@@ -424,6 +441,10 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'payment.request': '付款：发起付款申请、修改与撤回',
   'budget.manage': '设定费用预算（部门 × 费用科目的月度额度）',
   'invoice.manage': '管理进项发票（台账里登记、标认证、上传照片、作废）',
+  'ar.read': '应收与挂账：看协议单位、挂账、回款、平台回款与账龄',
+  'ar.manage': '应收与挂账：维护协议单位、登记与冲销回款',
+  'asset.read': '资产与易耗：看资产卡片与盘点',
+  'asset.manage': '资产与易耗：建卡、调拨、改状态、报废、扫码盘点',
   'auth.overLimit': '当场授权超过单笔上限的充值 / 消费',
   'auth.memberRefund': '当场授权退储值',
   'auth.memberPhone': '当场授权改会员手机号',
@@ -469,7 +490,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   },
   {
     title: '前台手牌与账单',
-    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.refund', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen', 'room.operate', 'room.housekeep', 'booking.manage', 'platform.redeem', 'platform.void', 'platform.settle', 'location.view', 'location.report', 'guide.view'],
+    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.refund', 'frontdesk.onAccount', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen', 'room.operate', 'room.housekeep', 'booking.manage', 'platform.redeem', 'platform.void', 'platform.settle', 'location.view', 'location.report', 'guide.view'],
   },
   {
     title: '会员体系',
@@ -485,6 +506,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
       'deptStock.operate', 'deptStock.audit',
       'expense.read', 'expense.manage', 'petty.manage', 'expense.approve', 'finance.void', 'expense.export', 'request.create', 'request.review', 'erp.revenue',
       'approval.act', 'approval.rules', 'contract.read', 'contract.manage', 'payment.request', 'budget.manage', 'invoice.manage',
+      'ar.read', 'ar.manage', 'asset.read', 'asset.manage',
     ],
   },
   { title: '员工食堂', items: ['canteen.manage'] },
