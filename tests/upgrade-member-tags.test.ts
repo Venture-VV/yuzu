@@ -24,11 +24,14 @@ afterAll(async () => {
   await sql.end({ timeout: 5 });
 });
 
-/** 新建一个 8.0.3 的库（除了 8.0.4 新加的迁移都执行过） */
+/**
+ * 新建一个 8.0.3 的库：8.0.3 发布时有的迁移（`093` 及以前，除了 8.0.4 新加的）都执行过；`096` 起是之后几版的，
+ * 由下面的 migrate 按顺序补上（8.0.7 的 `105` 改 8.0.4 建的表，原来把以后的迁移也算进 8.0.3 的库就建不起来）
+ */
 async function schemaAt803() {
   await resetPublicSchema(sql);
   await sql`CREATE TABLE schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`;
-  for (const f of (await readdir(MIGRATIONS)).filter((x) => x.endsWith('.sql') && !NEW_IN_804.includes(x)).sort()) {
+  for (const f of (await readdir(MIGRATIONS)).filter((x) => x.endsWith('.sql') && !NEW_IN_804.includes(x) && x < '094_').sort()) {
     await sql.unsafe(await readFile(new URL(f, MIGRATIONS), 'utf8'));
     await sql`INSERT INTO schema_migrations (version) VALUES (${f})`;
   }
