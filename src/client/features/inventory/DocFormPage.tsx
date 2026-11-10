@@ -71,6 +71,9 @@ interface FormState {
   coAcceptorId: number | null;
   handler: string;
   note: string;
+  /** 耗用的用途与经办人（8.0.7 2.3）：用途从「经营规则 → 可调的数值」的列表选，经办人默认自己 */
+  usePurpose: string;
+  useHandlerId: number | null;
   lines: LineDraft[];
 }
 
@@ -103,6 +106,8 @@ const blankForm = (date: string): FormState => ({
   coAcceptorId: null,
   handler: '',
   note: '',
+  usePurpose: '',
+  useHandlerId: null,
   lines: [],
 });
 
@@ -201,6 +206,8 @@ function useScopeData(scope: FormScope) {
     urgentCapCents: central ? settingsQ.data?.urgentCapCents : meta.data?.urgentCapCents,
     /** 称重收货容差（%，v0.7.13）：按采购单收货只在总仓 */
     weighTolerancePct: central ? (settingsQ.data?.weighTolerancePct ?? 10) : 10,
+    /** 耗用经办人能选的员工（8.0.7 2.3，部门小仓；总仓的耗用默认是自己） */
+    staff: central ? undefined : meta.data?.staff,
     /** 盘点大差异（v0.7.30，A8） */
     countBig: {
       countBigPct: (central ? settingsQ.data?.countBigPct : meta.data?.countBigPct) ?? DEFAULT_COUNT_BIG_PCT,
@@ -216,7 +223,7 @@ function readDraft(type: InvDocType, scope: FormScope): FormState | null {
     if (!raw) return null;
     // v0.7.11 以前存下的草稿没有「一起验收的采购」
     const draft = JSON.parse(raw) as Partial<FormState>;
-    return { ...draft, coAcceptorId: draft.coAcceptorId ?? null } as FormState;
+    return { ...draft, coAcceptorId: draft.coAcceptorId ?? null, usePurpose: draft.usePurpose ?? '', useHandlerId: draft.useHandlerId ?? null } as FormState;
   } catch {
     return null;
   }
@@ -241,6 +248,8 @@ function formFromDoc(doc: InvDoc, materials: Map<number, Material>): FormState {
     coAcceptorId: doc.coAcceptor?.id ?? null,
     handler: doc.handler,
     note: doc.note,
+    usePurpose: doc.usePurpose ?? '',
+    useHandlerId: doc.useHandler?.id ?? null,
     lines: doc.lines.map((l) => {
       const m = materials.get(l.materialId) ?? { purchaseFactorMilli: l.factorMilli };
       const enteredPack = l.enteredUnit && l.enteredUnit === l.purchaseUnit && l.enteredUnit !== l.inventoryUnit;
@@ -697,9 +706,11 @@ function DocForm({
             ? type === 'issue_return'
               ? '请选择原领料单'
               : '请选择原收货单'
+            : type === 'direct_use' && !form.usePurpose
+              ? '请选择用途'
             : (type === 'direct_use' || type === 'damage' || type === 'supplier_return') && form.note.trim().length < 2
               ? type === 'direct_use'
-                ? '请填写耗用用途'
+                ? '请填写说明'
                 : type === 'damage'
                   ? '请填写报损原因'
                   : '请填写退货原因'
@@ -735,6 +746,7 @@ function DocForm({
         return {
           ...base,
           ...(type === 'issue' ? { departmentId: form.departmentId, handler: form.handler.trim() } : {}),
+          ...(type === 'direct_use' ? { purpose: form.usePurpose || null, handlerId: form.useHandlerId } : {}),
           lines: lines.map((r) => ({
             materialId: r.line.materialId,
             qtyMilli: r.qty!.milli,
@@ -1024,8 +1036,40 @@ function DocForm({
               </>
             )}
 
+            {type === 'direct_use' && (
+              <>
+                <Field label="用途" htmlFor="use-purpose" hint="在经营规则「可调的数值」里改">
+                  <Select id="use-purpose" value={form.usePurpose} disabled={locked} onChange={(e) => patch({ usePurpose: e.target.value })} className="h-10" data-testid="use-purpose">
+                    <option value="">选择用途</option>
+                    {session.rules.consumptionPurposes.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                {data.staff && (
+                  <Field label="经办人" htmlFor="use-handler">
+                    <Select
+                      id="use-handler"
+                      value={form.useHandlerId ?? session.staff.id}
+                      disabled={locked}
+                      onChange={(e) => patch({ useHandlerId: Number(e.target.value) || null })}
+                      className="h-10"
+                      data-testid="use-handler"
+                    >
+                      {data.staff.map((st) => (
+                        <option key={st.id} value={st.id}>
+                          {st.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                )}
+              </>
+            )}
             <Field
-              label={type === 'direct_use' ? '耗用用途' : type === 'damage' ? '报损原因' : type === 'supplier_return' ? '退货原因' : '备注'}
+              label={type === 'direct_use' ? '说明' : type === 'damage' ? '报损原因' : type === 'supplier_return' ? '退货原因' : '备注'}
               htmlFor="note"
               className={NOTE_SPAN[type]}
             >

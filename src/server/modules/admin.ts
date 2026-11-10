@@ -397,6 +397,17 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   tun('sms_max_attempts', 'members', '短信最多试', n('次'), 'HY08');
   tun('count_card_sales', 'members', '次卡', (v: boolean) => (v ? '照常售卖' : '停售（已售的照常用、退）'), 'HY05');
   tun('finance_hides_marketing_cost', 'staff', '财务账号看营销成本', (v: boolean) => (v ? '有财务职责的看不到' : '按岗位权限给'), 'HY14');
+  // 8.0.7 供应链收尾与应收（docs/ERP_V807.md 第 6 节）
+  tun('supplier_approved_only', 'inventory', '采购单只能给已准入的供应商', (v: boolean) => (v ? '是（待准入、暂停的拒绝）' : '否（只提醒）'), 'V2');
+  tun('license_remind_days', 'inventory', '供应商证照到期提醒', (v: number) => `到期前 ${v} 天`, 'V3');
+  tun('supplier_watch_score', 'inventory', '供应商观察名单', (v: number) => `季度分数低于 ${v} 分`, 'V5；权重准时 40、合格 40、价格 20（V4）');
+  tun('consumption_purposes', 'inventory', '部门耗用的用途', (v: string[]) => v.join('、'), 'V6');
+  tun('slow_moving_days', 'inventory', '呆滞', (v: number) => `有结存、超过 ${v} 天没出库`, 'V7；只提醒（V8）');
+  tun('acceptance_holds_payment', 'erp', '验收不合格挂起付款', (v: boolean) => (v ? '挂起，重新验收合格解除' : '不挂起'), 'V9');
+  tun('recon_link_days', 'erp', '对账确认链接有效', n('天'), 'V10；供应商只能回一次');
+  tun('ar_overdue_days', 'erp', '应收提醒', (v: number) => `超过 ${v} 天没回`, 'V14；协议单位挂账、平台回款');
+  tun('expiry_remind_days', 'inventory', '批次临期提醒', (v: number) => `到期前 ${v} 天`, 'V18');
+  tun('wecom_weekly_push', 'erp', '每周一推企业微信', (v: boolean) => (v ? '推送（机器人地址在服务器 .env）' : '不推'), 'V19、V20；每周一 9:00');
   // ── 岗位与权限 ──
   const changed = overrideCount(overrides);
   add({

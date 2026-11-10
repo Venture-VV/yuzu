@@ -15,6 +15,7 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Field, Input, MoneyInput, Notice, Segmented, Select, Skeleton } from '../../components/ui';
 import { SimRule } from './parts';
 import { useDepartments, useInvalidateInventory, useMaterials, useSuppliers } from './queries';
+import { AdmissionBadges, AdmissionSection } from './SupplierAdmission';
 import { usePurchaseRules } from '../purchasing/queries';
 
 type Section = 'materials' | 'suppliers' | 'departments';
@@ -362,6 +363,10 @@ function toForm(m: Material | null) {
 
 function Suppliers({ editable }: { editable: boolean }) {
   const suppliers = useSuppliers(true);
+  const can = useCan();
+  const session = useSession();
+  // 负责人（「审核」权限）没有维护档案的权限也能打开，看证照、准入或暂停（8.0.7 2.1）
+  const openable = editable || can('inventory.approve');
   const [editing, setEditing] = useState<Supplier | 'new' | null>(null);
   return (
     <>
@@ -382,7 +387,7 @@ function Suppliers({ editable }: { editable: boolean }) {
             <li key={s.id}>
               <button
                 type="button"
-                disabled={!editable}
+                disabled={!openable}
                 onClick={() => setEditing(s)}
                 className={cn('w-full rounded-lg border border-line bg-card px-4 py-3 text-left shadow-card transition-colors enabled:hover:border-line-strong', !s.active && 'opacity-55')}
               >
@@ -394,6 +399,7 @@ function Suppliers({ editable }: { editable: boolean }) {
                   {s.settlement === 'credit' && s.reconcileCycle === 'batch' && <Badge tone="lake">按批次对账</Badge>}
                   {!s.active && <Badge>已停用</Badge>}
                   {s.isSynthetic && <Badge tone="ember">合成</Badge>}
+                  <AdmissionBadges s={s} today={session.calendarToday} remindDays={session.rules.licenseRemindDays} />
                 </p>
                 <p className="mt-0.5 truncate text-[12.5px] text-ink-3">{[s.contact, s.phone].filter(Boolean).join(' · ') || '未填写联系人'}</p>
                 {s.note && <p className="truncate text-[12px] text-ink-3">{s.note}</p>}
@@ -402,12 +408,12 @@ function Suppliers({ editable }: { editable: boolean }) {
           ))}
         </ul>
       )}
-      <SupplierDialog editing={editing} onClose={() => setEditing(null)} />
+      <SupplierDialog editing={editing} readOnly={!editable} onClose={() => setEditing(null)} />
     </>
   );
 }
 
-function SupplierDialog({ editing, onClose }: { editing: Supplier | 'new' | null; onClose: () => void }) {
+function SupplierDialog({ editing, readOnly, onClose }: { editing: Supplier | 'new' | null; readOnly: boolean; onClose: () => void }) {
   const toast = useToast();
   const invalidate = useInvalidateInventory();
   const purchaseRules = usePurchaseRules(!!editing);
@@ -469,18 +475,33 @@ function SupplierDialog({ editing, onClose }: { editing: Supplier | 'new' | null
     <Dialog
       open={!!editing}
       onClose={onClose}
-      title={s ? `编辑供应商 · ${s.name}` : '新增供应商'}
+      title={s ? `${readOnly ? '' : '编辑供应商 · '}${s.name}` : '新增供应商'}
       footer={
-        <>
+        readOnly ? (
           <Button variant="secondary" onClick={onClose}>
-            取消
+            关闭
           </Button>
-          <Button variant="primary" loading={saving} onClick={save}>
-            保存
-          </Button>
-        </>
+        ) : (
+          <>
+            <Button variant="secondary" onClick={onClose}>
+              取消
+            </Button>
+            <Button variant="primary" loading={saving} onClick={save}>
+              保存
+            </Button>
+          </>
+        )
       }
     >
+      {readOnly && s ? (
+        <div className="grid gap-4 sm:grid-cols-3">
+          <p className="text-[13px] text-ink-2 sm:col-span-3">
+            <span className="num font-semibold">{s.code}</span> · {[s.contact, s.phone].filter(Boolean).join(' · ') || '未填写联系人'}
+            {s.note ? ` · ${s.note}` : ''}
+          </p>
+          <AdmissionSection supplier={s} />
+        </div>
+      ) : (
       <div className="grid gap-4 sm:grid-cols-3">
         <Field label="编码" htmlFor="s-code">
           <Input id="s-code" value={form.code} maxLength={16} onChange={(e) => setForm({ ...form, code: e.target.value })} data-autofocus />
@@ -564,8 +585,11 @@ function SupplierDialog({ editing, onClose }: { editing: Supplier | 'new' | null
           />
         </Field>
         {error && <Notice tone="error" title={error} className="sm:col-span-3" />}
+        {s && <AdmissionSection supplier={s} />}
+        {!s && <p className="text-[12.5px] text-ink-3 sm:col-span-3">新建的供应商是「待准入」：保存以后登记营业执照，由负责人准入（经营规则里打开「采购单只能给已准入的供应商」以后，没准入的不能下采购单）。</p>}
         {s && <ContractFiles supplier={s} pendingContracted={form.contracted} />}
       </div>
+      )}
     </Dialog>
   );
 }

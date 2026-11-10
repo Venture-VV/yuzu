@@ -5,11 +5,11 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { centsToInput, parseYuan } from '@shared/money';
-import { PRINT_MODE_LABELS, PRINT_MODES, TUNABLE_LIMITS, type IntTunable, type PrintMode, type Tunables } from '@shared/tunables';
+import { BOOL_TUNABLES, PRINT_MODE_LABELS, PRINT_MODES, TUNABLE_LIMITS, type BoolTunable, type IntTunable, type PrintMode, type Tunables } from '@shared/tunables';
 import { api, errorMessage } from '../../lib/api';
 import { qk, useSettings } from '../../lib/queries';
 import { useToast } from '../../components/Toast';
-import { Button, Card, Field, Input, MoneyInput, Notice, PendingBadge, SectionTitle, Segmented, Skeleton } from '../../components/ui';
+import { Button, Card, Field, Input, MoneyInput, Notice, PendingBadge, SectionTitle, Segmented, Skeleton, Textarea } from '../../components/ui';
 
 /** 金额项（页面上按元填） */
 const MONEY_KEYS: IntTunable[] = ['approvalBatchMaxCents', 'mpFoodMaxTotalCents'];
@@ -52,6 +52,18 @@ const GROUPS: { title: string; code: string; fields: FieldDef[] }[] = [
     ],
   },
   {
+    title: '供应链与应收（8.0.7）',
+    code: 'V3、V5、V7、V10、V14、V18',
+    fields: [
+      { key: 'licenseRemindDays', label: '供应商证照到期前几天提醒', hint: '进 ERP 待办（V3）', unit: '天' },
+      { key: 'supplierWatchScore', label: '季度评分低于几分进观察名单', hint: '权重准时 40、合格 40、价格 20（V5）', unit: '分' },
+      { key: 'slowMovingDays', label: '有结存、多少天没出库算呆滞', hint: '只提醒，处理照旧用退货、报损（V7）', unit: '天' },
+      { key: 'reconLinkDays', label: '对账确认链接有效几天', hint: '供应商只能回一次（V10）', unit: '天' },
+      { key: 'arOverdueDays', label: '应收超过几天没回进待办', hint: '协议单位挂账、平台回款（V14）', unit: '天' },
+      { key: 'expiryRemindDays', label: '批次到期前几天提醒', hint: '管效期的物料（V18）', unit: '天' },
+    ],
+  },
+  {
     title: '营销与短信',
     code: 'HY07、HY08、HY16',
     fields: [
@@ -62,12 +74,14 @@ const GROUPS: { title: string; code: string; fields: FieldDef[] }[] = [
   },
 ];
 
-type Draft = Record<IntTunable, string> & { printMode: PrintMode; printWaitMinutes: string; countCardSales: boolean; financeHidesMarketingCost: boolean };
+type Draft = Record<IntTunable, string> &
+  Record<BoolTunable, boolean> & { printMode: PrintMode; printWaitMinutes: string; countCardSales: boolean; consumptionPurposes: string };
 
 const toDraft = (s: Tunables & { countCardSales: boolean }): Draft => {
   const out = {} as Record<IntTunable, string>;
   for (const key of Object.keys(TUNABLE_LIMITS) as IntTunable[]) out[key] = MONEY_KEYS.includes(key) ? centsToInput(s[key] as number) : String(s[key]);
-  return { ...out, printMode: s.printMode, printWaitMinutes: String(s.printWaitMinutes), countCardSales: s.countCardSales, financeHidesMarketingCost: s.financeHidesMarketingCost };
+  const bools = Object.fromEntries(BOOL_TUNABLES.map((k) => [k, s[k]])) as Record<BoolTunable, boolean>;
+  return { ...out, ...bools, printMode: s.printMode, printWaitMinutes: String(s.printWaitMinutes), countCardSales: s.countCardSales, consumptionPurposes: s.consumptionPurposes.join('\n') };
 };
 
 /** 页面上先核对一遍（服务端照样核对）；不合格返回提示 */
@@ -83,7 +97,15 @@ function fromDraft(d: Draft): Partial<Tunables & { countCardSales: boolean }> | 
     }
     body[key] = value;
   }
-  return { ...body, printMode: d.printMode, countCardSales: d.countCardSales, financeHidesMarketingCost: d.financeHidesMarketingCost };
+  const purposes = d.consumptionPurposes
+    .split('\n')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (purposes.length === 0) return '部门耗用的用途至少要有一个';
+  if (purposes.some((x) => x.length > 12)) return '每个耗用用途最多 12 个字';
+  if (new Set(purposes).size !== purposes.length) return '部门耗用的用途重复了';
+  const bools = Object.fromEntries(BOOL_TUNABLES.map((k) => [k, d[k]]));
+  return { ...body, ...bools, printMode: d.printMode, countCardSales: d.countCardSales, consumptionPurposes: purposes };
 }
 
 export function TunablesCard() {
@@ -178,6 +200,18 @@ export function TunablesCard() {
         </p>
         {toggle('次卡照常售卖（关着时停售：价目与套餐不显示次卡，已售的照常用、退、打印）', draft.countCardSales, (v) => set({ countCardSales: v }), 'tun-countCardSales')}
         {toggle('有财务职责（对账付款、成本核算）的账号看不到营销成本测算（关掉以后按岗位权限给）', draft.financeHidesMarketingCost, (v) => set({ financeHidesMarketingCost: v }), 'tun-financeHidesMarketingCost')}
+      </section>
+
+      <section className="space-y-3 rounded-lg border border-line p-4">
+        <p className="text-[13.5px] font-bold">
+          供应链与付款的开关 <span className="font-normal text-ink-3">（8.0.7：V2、V6、V9、V20）</span>
+        </p>
+        {toggle('采购单只能给已准入的供应商（关着时待准入、暂停的只提醒，不拦）', draft.supplierApprovedOnly, (v) => set({ supplierApprovedOnly: v }), 'tun-supplierApprovedOnly')}
+        {toggle('合同最近一次验收不合格时挂起付款（新的付款申请、按申请登记付款、合同付款都拒绝，重新验收合格解除）', draft.acceptanceHoldsPayment, (v) => set({ acceptanceHoldsPayment: v }), 'tun-acceptanceHoldsPayment')}
+        {toggle('每周一 9:00 把本周应付、待审批、快到期的、逾期应收推到企业微信群（机器人地址在服务器 .env 的 ERP_WECOM_WEBHOOK）', draft.wecomWeeklyPush, (v) => set({ wecomWeeklyPush: v }), 'tun-wecomWeeklyPush')}
+        <Field label="部门耗用的用途（每行一个，最多 12 个字）" htmlFor="tun-consumptionPurposes" hint="部门小仓登记耗用时从这里选（V6）" className="max-w-md">
+          <Textarea id="tun-consumptionPurposes" rows={6} value={draft.consumptionPurposes} onChange={(e) => set({ consumptionPurposes: e.target.value })} data-testid="tun-consumptionPurposes" />
+        </Field>
       </section>
 
       {error && <Notice tone="error" title={error} />}

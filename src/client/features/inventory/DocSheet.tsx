@@ -245,6 +245,8 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             </Info>
           )}
           {doc.coAcceptor && <Info label="一起验收的采购">{doc.coAcceptor.name}</Info>}
+          {doc.docType === 'direct_use' && <Info label="用途">{doc.usePurpose ?? <span className="text-ink-3">（v8.0.7 以前没记）</span>}</Info>}
+          {doc.useHandler && <Info label="耗用经办人">{doc.useHandler.name}</Info>}
           {doc.handler && <Info label={doc.docType === 'receipt' ? '收货人' : doc.docType === 'issue' ? '领料人' : '经办人'}>{doc.handler}</Info>}
           {doc.sourceDoc && (
             <Info label="原单">

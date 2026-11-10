@@ -5,9 +5,12 @@
 
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { ClipboardCheck, Droplets, FilePen, Flag, PackageCheck, PackagePlus, PackageX, Send, X } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { ClipboardCheck, Download, Droplets, FilePen, Flag, PackageCheck, PackagePlus, PackageX, Send, X } from 'lucide-react';
 import { COUNT_REASON_LABELS, INV_DOC_META, type DeptStockMeta, type InvDoc, type InvDocSummary, type InvDocType } from '@shared/inventory';
 import { formatQty } from '@shared/quantity';
+import { shiftDate } from '@shared/labels';
+import type { ConsumptionRecord } from '@shared/supply';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { cn, formatDateTime, relativeTime } from '../../lib/utils';
@@ -16,14 +19,14 @@ import { Money } from '../../components/Money';
 import { Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, Card, IconButton, Notice, Segmented, Select, Skeleton, Spinner, Textarea } from '../../components/ui';
+import { Badge, Button, Card, IconButton, Input, Notice, Segmented, Select, Skeleton, Spinner, Textarea } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
 import { Qty, SimRule, StatusChip } from '../inventory/parts';
 import { useDeptDoc, useDeptDocs, useDeptMeta, useDeptStock, useInvalidateDept } from './queries';
 import { useDeptStocktake } from '../cycles/queries';
 import { StocktakeNotice } from '../cycles/StocktakeNotice';
 
-type View = 'stock' | 'sign' | 'docs';
+type View = 'stock' | 'sign' | 'docs' | 'use';
 
 /** 部门能登记的单据（领料与退回由仓库登记） */
 const ACTIONS: { type: InvDocType; label: string; icon: typeof PackagePlus; audit?: boolean }[] = [
@@ -41,7 +44,7 @@ export function DeptStockPage() {
   const departments = meta.data?.departments ?? [];
   const deptId = Number(params.get('dept')) || (meta.data?.myDepartmentId && departments.some((d) => d.id === meta.data!.myDepartmentId) ? meta.data.myDepartmentId : departments[0]?.id) || null;
   const dept = departments.find((d) => d.id === deptId) ?? null;
-  const view = (['stock', 'sign', 'docs'] as const).find((v) => v === params.get('view')) ?? 'stock';
+  const view = (['stock', 'sign', 'docs', 'use'] as const).find((v) => v === params.get('view')) ?? 'stock';
   const docId = Number(params.get('doc')) || null;
   const set = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(params);
@@ -103,6 +106,7 @@ export function DeptStockPage() {
                   { value: 'stock', label: '结存' },
                   { value: 'sign', label: `待签收${unsigned.data?.length ? ` ${unsigned.data.length}` : ''}` },
                   { value: 'docs', label: '单据' },
+                  { value: 'use', label: '耗用记录' },
                 ]}
               />
             </div>
@@ -110,6 +114,7 @@ export function DeptStockPage() {
             {view === 'stock' && <StockList deptId={dept.id} />}
             {view === 'sign' && <DocList deptId={dept.id} meta={meta.data!} filter={{ unsigned: '1' }} empty="没有待签收的领料" onOpen={(id) => set({ doc: String(id) })} />}
             {view === 'docs' && <DocsView deptId={dept.id} meta={meta.data!} onOpen={(id) => set({ doc: String(id) })} />}
+            {view === 'use' && <ConsumptionView deptId={dept.id} meta={meta.data!} onOpen={(id) => set({ doc: String(id) })} />}
           </>
         )}
       </div>
@@ -321,6 +326,8 @@ function DeptDocDetail({ id, dept, meta, onClose }: { id: number; dept: { id: nu
           <Info label="单据日期" value={doc.docDate} />
           <Info label={doc.docType === 'receipt' ? '供应商' : '部门'} value={doc.supplier?.name ?? doc.department?.name ?? '—'} />
           {doc.handler && <Info label={doc.docType === 'issue' ? '领料人' : '经手人'} value={doc.handler} />}
+          {doc.docType === 'direct_use' && <Info label="用途" value={doc.usePurpose ?? '（v8.0.7 以前没记）'} />}
+          {doc.useHandler && <Info label="耗用经办人" value={doc.useHandler.name} />}
           <Info label="登记" value={`${doc.createdByName} · ${formatDateTime(doc.createdAt)}`} />
           {doc.confirmedByName && <Info label={doc.urgent ? '仓库验收' : '生效'} value={`${doc.confirmedByName} · ${doc.confirmedAt ? formatDateTime(doc.confirmedAt) : ''}`} />}
           {doc.purchaseOrder && <Info label="补的采购单" value={doc.purchaseOrder.docNo} />}
@@ -474,5 +481,91 @@ function Info({ label, value, wide }: { label: string; value: string; wide?: boo
       <dt className="text-[12px] font-semibold text-ink-3">{label}</dt>
       <dd className="truncate">{value}</dd>
     </div>
+  );
+}
+
+/** 耗用记录（8.0.7 2.3）：这个部门小仓生效、冲销的耗用，按日期、用途、经办人筛，能导出；8.0.7 以前的单子用途为空 */
+function ConsumptionView({ deptId, meta, onOpen }: { deptId: number; meta: DeptStockMeta; onOpen: (docId: number) => void }) {
+  const session = useSession();
+  const [from, setFrom] = useState(shiftDate(session.calendarToday, -30));
+  const [to, setTo] = useState(session.calendarToday);
+  const [purpose, setPurpose] = useState('');
+  const [handlerId, setHandlerId] = useState('');
+  const qs = new URLSearchParams(Object.entries({ from, to, purpose, handlerId }).filter(([, v]) => v) as [string, string][]).toString();
+  const rows = useQuery({ queryKey: ['erp', 'dept-stock', deptId, 'consumption', qs], queryFn: () => api.get<ConsumptionRecord[]>(`/api/erp/dept-stock/${deptId}/consumption?${qs}`) });
+  return (
+    <section className="space-y-2" data-testid="dept-consumption">
+      <div className="flex flex-wrap items-center gap-2">
+        <Input type="date" fullWidth={false} value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="h-9 w-36" aria-label="从" />
+        <span className="text-[12.5px] text-ink-3">到</span>
+        <Input type="date" fullWidth={false} value={to} min={from} max={session.calendarToday} onChange={(e) => setTo(e.target.value)} className="h-9 w-36" aria-label="到" />
+        <Select fullWidth={false} value={purpose} onChange={(e) => setPurpose(e.target.value)} className="h-9 min-w-[120px] text-[13px]" aria-label="用途" data-testid="consumption-purpose">
+          <option value="">全部用途</option>
+          {meta.purposes.map((p) => (
+            <option key={p} value={p}>
+              {p}
+            </option>
+          ))}
+        </Select>
+        <Select fullWidth={false} value={handlerId} onChange={(e) => setHandlerId(e.target.value)} className="h-9 min-w-[120px] text-[13px]" aria-label="经办人">
+          <option value="">全部经办人</option>
+          {meta.staff.map((st) => (
+            <option key={st.id} value={st.id}>
+              {st.name}
+            </option>
+          ))}
+        </Select>
+        <a href={`/api/erp/dept-stock/${deptId}/consumption/export?${qs}`} className="ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3">
+          <Download className="size-4" />
+          导出
+        </a>
+      </div>
+      {rows.error ? (
+        <Notice tone="error" title={errorMessage(rows.error)} />
+      ) : rows.isPending ? (
+        <Skeleton className="h-40" />
+      ) : rows.data.length === 0 ? (
+        <p className="text-[13px] text-ink-3">这段时间没有耗用。</p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-line bg-card">
+          <table className="w-full min-w-[720px] text-[13px]">
+            <thead className="bg-paper-2 text-left text-[12px] text-ink-3">
+              <tr>
+                <th className="px-3 py-2 font-semibold">日期</th>
+                <th className="px-3 py-2 font-semibold">单号</th>
+                <th className="px-3 py-2 font-semibold">用途</th>
+                <th className="px-3 py-2 font-semibold">经办人</th>
+                <th className="px-3 py-2 font-semibold">物料</th>
+                <th className="px-3 py-2 text-right font-semibold">数量</th>
+                <th className="px-3 py-2 font-semibold">说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.data.map((r, i) => (
+                <tr key={`${r.docId}-${i}`} className={cn('border-t border-line', r.status === 'voided' && 'opacity-55')}>
+                  <td className="num px-3 py-1.5">{r.docDate}</td>
+                  <td className="px-3 py-1.5">
+                    <button type="button" className="num font-semibold text-lake hover:underline" onClick={() => onOpen(r.docId)}>
+                      {r.docNo}
+                    </button>
+                    {r.status === 'voided' && <Badge className="ml-1.5">已冲销</Badge>}
+                  </td>
+                  <td className="px-3 py-1.5">{r.purpose ?? <span className="text-ink-3">（v8.0.7 以前没记）</span>}</td>
+                  <td className="px-3 py-1.5">{r.handlerName ?? '—'}</td>
+                  <td className="px-3 py-1.5">
+                    <span className="num mr-1 text-[12px] text-ink-3">{r.materialCode}</span>
+                    {r.materialName}
+                  </td>
+                  <td className="num px-3 py-1.5 text-right">
+                    {formatQty(r.quantityMilli)} {r.inventoryUnit}
+                  </td>
+                  <td className="px-3 py-1.5 text-ink-2">{r.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }

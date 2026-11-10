@@ -1,8 +1,9 @@
 import { NavLink, Navigate, useParams } from 'react-router';
-import { Archive, BarChart3, Boxes, FileStack, Gift } from 'lucide-react';
+import { Archive, BarChart3, Boxes, FileStack, Gift, Hourglass } from 'lucide-react';
 import { useCan } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
+import { AgingTab } from './AgingTab';
 import { DocsTab } from './DocsTab';
 import { GiftsTab } from './GiftsTab';
 import { MasterTab } from './MasterTab';
@@ -14,6 +15,8 @@ const TABS = [
   { key: 'stock', label: '库存', icon: Boxes },
   { key: 'docs', label: '单据', icon: FileStack },
   { key: 'summary', label: '收发汇总', icon: BarChart3 },
+  // 呆滞与周转、临期批次（8.0.7）
+  { key: 'aging', label: '呆滞与临期', icon: Hourglass },
   // 赠品台账（8.0.1 采购组整改 09）：只记台账，不进库存
   { key: 'gifts', label: '赠品台账', icon: Gift },
   { key: 'master', label: '档案', icon: Archive },
@@ -52,6 +55,7 @@ export function InventoryPage() {
       {tab === 'stock' && <StockTab />}
       {tab === 'docs' && <DocsTab />}
       {tab === 'summary' && <SummaryTab />}
+      {tab === 'aging' && <AgingTab />}
       {tab === 'gifts' && <GiftsTab />}
       {tab === 'master' && <MasterTab />}
     </>

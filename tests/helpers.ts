@@ -240,6 +240,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '098_consumption_purpose.sql',
   '099_acceptance_templates.sql',
   '100_recon_links.sql',
+  '101_receivables.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */
