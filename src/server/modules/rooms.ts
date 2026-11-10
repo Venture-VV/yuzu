@@ -15,7 +15,9 @@ import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod } from '@sha
 import { formatYuan } from '@shared/money';
 import {
   DEFAULT_ROOM_RULES,
+  HOUSEKEEPING_LABELS,
   HOUSEKEEPING_STATES,
+  MAX_HOUSEKEEPING_NOTE,
   MAX_ROOM_FLOOR,
   MAX_ROOM_NO,
   MAX_ROOM_TYPE_NAME,
@@ -24,6 +26,8 @@ import {
   chargeLineName,
   localMinuteAt,
   roomDues,
+  type Housekeeping,
+  type HousekeepingSource,
   type RoomAuditReport,
   type RoomAuditState,
   type RoomBoard,
@@ -47,6 +51,7 @@ import { assertCanFix, assertOpen, businessDate, hashRequest, loadFrontdeskRules
 import { loadSettings } from './settings';
 import { lockPaymentShift, openShiftOf } from './shifts';
 import { leaveRoomStay, locateRoomStay } from './locations';
+import { insertHousekeepingEvent, markRoomDirty, revertHousekeeping, roomTimeline } from './rooms-808';
 import { ctxOf } from '../lib/context';
 import { saveRuleSetting } from '../lib/rule-settings';
 
@@ -410,24 +415,55 @@ export async function roomsBoard(deps: Deps): Promise<RoomBoard> {
       kind: RoomKind;
       price: number;
       blockMinutes: number | null;
-      housekeeping: string;
+      housekeeping: Housekeeping;
       maintenanceNote: string | null;
       stayId: number | null;
+      hkId: number | null;
+      hkFrom: Housekeeping | null;
+      hkTo: Housekeeping | null;
+      hkNote: string | null;
+      hkSource: HousekeepingSource | null;
+      hkRef: string | null;
+      hkAt: string | null;
+      hkStaff: string | null;
     }[]
   >`
     SELECT r.id, r.room_no, sp.display_name AS space_name, r.space_id, r.floor, t.name AS type_name, t.kind, t.price, t.block_minutes, r.housekeeping,
-           r.maintenance_note, s.id AS stay_id
+           r.maintenance_note, s.id AS stay_id,
+           hk.id AS hk_id, hk.from_state AS hk_from, hk.to_state AS hk_to, hk.note AS hk_note, hk.source AS hk_source, hk.ref AS hk_ref,
+           hk.created_at AS hk_at, hk.staff_name AS hk_staff
     FROM rooms r JOIN room_types t ON t.id = r.room_type_id LEFT JOIN room_stays s ON s.room_id = r.id AND s.status = 'open'
     LEFT JOIN spaces sp ON sp.id = r.space_id
+    -- 最近一次房态变化（8.0.8，B04）
+    LEFT JOIN LATERAL (
+      SELECT e.id, e.from_state, e.to_state, e.note, e.source, e.ref, e.created_at, st.display_name AS staff_name
+      FROM room_housekeeping_events e JOIN staff st ON st.id = e.staff_id
+      WHERE e.room_id = r.id ORDER BY e.id DESC LIMIT 1
+    ) hk ON true
     WHERE r.active OR s.id IS NOT NULL
     ORDER BY r.floor, r.sort_order, r.room_no`;
   const ids = rooms.flatMap((r) => (r.stayId ? [r.stayId] : []));
   const stays = ids.length ? await db<StayRow[]>`${staySelect(db)} WHERE s.id IN ${db(ids)}` : [];
   return {
     rules: await loadRoomRules(db),
-    rooms: rooms.map(({ stayId, housekeeping, ...r }) => {
+    rooms: rooms.map(({ stayId, hkId, hkFrom, hkTo, hkNote, hkSource, hkRef, hkAt, hkStaff, ...r }) => {
       const stay = stays.find((s) => s.id === stayId);
-      return { ...r, status: boardStatus(housekeeping, !!stay), stay: stay ? toSummary(stay) : null };
+      const lastChange =
+        hkId !== null
+          ? {
+              id: Number(hkId),
+              from: hkFrom!,
+              to: hkTo!,
+              note: hkNote ?? '',
+              source: hkSource!,
+              ref: hkRef ?? '',
+              at: hkAt!,
+              staffName: hkStaff ?? '',
+              // 撤回：最近一次是手动改的、之后房态没再变过（有人住着不能撤回成维修，撤回时再核对）
+              canRevert: hkSource === 'manual' && hkTo === r.housekeeping,
+            }
+          : null;
+      return { ...r, status: boardStatus(r.housekeeping, !!stay), lastChange, stay: stay ? toSummary(stay) : null };
     }),
     audit: await auditState(db, deps, now),
     counts: await roomStatusCounts(db),
@@ -791,7 +827,7 @@ export async function moveStay(deps: Deps, id: number, raw: unknown, ctx: OpCont
     if (busy) throw conflict('ROOM_TAKEN', `房间「${to.roomNo}」有人住（${busy.stayNo}），请换一间空房`);
     if (to.housekeeping !== 'clean') throw conflict('ROOM_NOT_READY', `房间「${to.roomNo}」${to.housekeeping === 'dirty' ? '还没打扫' : '在维修'}，请换一间空房`);
     await tx`UPDATE room_stays SET room_id = ${to.id} WHERE id = ${id}`;
-    await tx`UPDATE rooms SET housekeeping = 'dirty', maintenance_note = NULL, updated_at = now() WHERE id = ${from.id}`;
+    await markRoomDirty(tx, from.id, { ref: s.stayNo, note: `换房到 ${to.roomNo}`, staffId: ctx.actor.id, at });
     await tx`
       INSERT INTO room_moves (stay_id, from_room_id, to_room_id, reason, operator_id, created_at)
       VALUES (${id}, ${from.id}, ${to.id}, ${input.reason}, ${ctx.actor.id}, ${at})`;
@@ -830,7 +866,7 @@ export async function cancelStay(deps: Deps, id: number, raw: unknown, ctx: OpCo
     if (balance > 0) throw conflict('DEPOSIT_HELD', `这间房还有押金 ${formatYuan(balance)} 没退，请先退押金再撤销入住`);
     assertCanFix(ctx.actor, s.checkedInBy, s.checkedInAt, await loadFrontdeskRules(tx), at, '这次入住');
     await tx`UPDATE room_stays SET status = 'cancelled', closed_at = ${at}, closed_by = ${ctx.actor.id}, close_reason = ${reason} WHERE id = ${id}`;
-    await tx`UPDATE rooms SET housekeeping = 'dirty', maintenance_note = NULL, updated_at = now() WHERE id = ${s.roomId}`;
+    await markRoomDirty(tx, s.roomId, { ref: s.stayNo, note: '撤销入住', staffId: ctx.actor.id, at });
     // 实时位置（v0.7.17）：客人离开那间房，位置不明
     await leaveRoomStay(tx, s.visitId, s.roomId, id, { at, staffId: ctx.actor.id });
     await writeAudit(tx, {
@@ -1004,7 +1040,7 @@ export async function closeStay(deps: Deps, id: number, raw: unknown, ctx: OpCon
     await postRoomCharges(tx, { id: s.id, billId: s.billId, roomNo: room!.roomNo }, dues, { source: 'checkout', postKey: key, actorId: ctx.actor.id, at, date });
     const refunded = await refundAllDeposits(tx, [id], { shiftId, actorId: ctx.actor.id, date, at, reason: '退房，押金原路退回' });
     await tx`UPDATE room_stays SET status = 'checked_out', closed_at = ${at}, closed_by = ${ctx.actor.id} WHERE id = ${id}`;
-    await tx`UPDATE rooms SET housekeeping = 'dirty', maintenance_note = NULL, updated_at = now() WHERE id = ${s.roomId}`;
+    await markRoomDirty(tx, s.roomId, { ref: s.stayNo, note: '退房', staffId: ctx.actor.id, at });
     // 实时位置（v0.7.17）：客人离开那间房，位置不明
     await leaveRoomStay(tx, s.visitId, s.roomId, id, { at, staffId: ctx.actor.id });
     await saveKey(tx, key, 'room_close', requestHash, id, ctx.actor.id);
@@ -1026,15 +1062,25 @@ export async function closeStay(deps: Deps, id: number, raw: unknown, ctx: OpCon
 
 const HousekeepingInput = z.object({
   status: z.enum(HOUSEKEEPING_STATES, '请选择房态'),
-  note: z.string().trim().max(100, '维修原因最多 100 字').nullish().transform((v) => v || null),
+  /** 备注（8.0.8 起改任何房态都能写；改「维修」必须写原因） */
+  note: z.string().trim().max(MAX_HOUSEKEEPING_NOTE, `备注最多 ${MAX_HOUSEKEEPING_NOTE} 字`).nullish().transform((v) => v || null),
+  /** 改之前看到的打扫状态（8.0.8，B04）：带了就核对，房态刚被别人改过拒绝（HOUSEKEEPING_CHANGED），请刷新 */
+  expectedFrom: z.enum(HOUSEKEEPING_STATES).optional(),
 });
 
+/** 改房态（打扫好了、待打扫、维修）：房间一行 → 写房态记录（8.0.8）；房态没变的什么都不记（维修只改原因的照旧改原因） */
 export async function setHousekeeping(deps: Deps, roomId: number, raw: unknown, ctx: OpContext) {
   const input = parse(HousekeepingInput, raw);
   if (input.status === 'maintenance' && (!input.note || input.note.length < 2)) throw badRequest('请填写维修原因（至少 2 个字）');
+  const at = ctx.at ?? new Date();
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const room = (await lockRooms(tx, [roomId])).get(roomId)!;
+    const from = room.housekeeping as Housekeeping;
+    if (input.expectedFrom && from !== input.expectedFrom) {
+      throw conflict('HOUSEKEEPING_CHANGED', `房间「${room.roomNo}」的房态刚被改成「${HOUSEKEEPING_LABELS[from]}」，请刷新后再改`);
+    }
+    if (from === input.status && input.status !== 'maintenance') return;
     if (input.status === 'maintenance') {
       const [busy] = await tx<{ stayNo: string }[]>`SELECT stay_no FROM room_stays WHERE room_id = ${roomId} AND status = 'open'`;
       if (busy) throw conflict('ROOM_IN_USE', `房间「${room.roomNo}」有人住（${busy.stayNo}），换房或退房后再设为维修`);
@@ -1042,6 +1088,7 @@ export async function setHousekeeping(deps: Deps, roomId: number, raw: unknown, 
     await tx`
       UPDATE rooms SET housekeeping = ${input.status}, maintenance_note = ${input.status === 'maintenance' ? input.note : null}, updated_at = now()
       WHERE id = ${roomId}`;
+    await insertHousekeepingEvent(tx, { roomId, from, to: input.status, note: input.note ?? '', source: 'manual', staffId: ctx.actor.id, at });
     await writeAudit(tx, {
       staffId: ctx.actor.id,
       action: 'room_housekeeping',
@@ -1049,7 +1096,7 @@ export async function setHousekeeping(deps: Deps, roomId: number, raw: unknown, 
       targetId: roomId,
       detail: { room: room.roomNo, from: room.housekeeping, to: input.status, ...(input.note ? { note: input.note } : {}) },
       ip: ctx.ip,
-      businessDate: await businessDate(tx, deps, ctx.at ?? new Date()),
+      businessDate: await businessDate(tx, deps, at),
     });
   });
 }
@@ -1156,9 +1203,15 @@ export function registerRoomRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/rooms/stays/:id/cancel', { preHandler: opGuard }, async (req) => cancelStay(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
   app.post('/api/rooms/audit', { preHandler: opGuard }, async (req) => runNightAudit(deps, ctxOf(req)));
 
-  // 打扫、维修：前台与客房服务员（后勤）
+  // 打扫、维修：前台与客房服务员（后勤）；8.0.8 起能撤回上一次手动修改
   app.put('/api/rooms/:id/housekeeping', { preHandler: guard('room.housekeep') }, async (req) => {
     await setHousekeeping(deps, parse(idParam, req.params).id, req.body, ctxOf(req));
     return roomsBoard(deps);
   });
+  app.post('/api/rooms/:id/housekeeping/revert', { preHandler: guard('room.housekeep') }, async (req) => {
+    await revertHousekeeping(deps, parse(idParam, req.params).id, req.body, ctxOf(req));
+    return roomsBoard(deps);
+  });
+  // 房间详情（8.0.8，B07）：只读，与房态看板同样的岗位能看
+  app.get('/api/rooms/:id/timeline', { preHandler: readGuard }, async (req) => roomTimeline(deps, parse(idParam, req.params).id, req.query));
 }

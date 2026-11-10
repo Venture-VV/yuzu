@@ -10,15 +10,13 @@ import type { BookingDetail } from '@shared/bookings';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BedDouble, LayoutGrid, Map as MapIcon, MoonStar, PartyPopper, Sparkles, Users, Wrench } from 'lucide-react';
+import { BedDouble, History, LayoutGrid, Map as MapIcon, MoonStar, PartyPopper, Sparkles, Users, Wrench } from 'lucide-react';
 import { normalizeTagCode, TAG_CODE_PATTERN } from '@shared/frontdesk';
 import { PAYMENT_METHOD_LABELS, shiftDate } from '@shared/labels';
 import { centsToInput, formatYuan, parseYuan } from '@shared/money';
 import {
-  HOUSEKEEPING_LABELS,
   MAX_STAY_GUESTS,
   ROOM_BOARD_LABELS,
-  type Housekeeping,
   type RoomAuditReport,
   type RoomBoard,
   type RoomBoardRoom,
@@ -43,6 +41,7 @@ import { dayText, minuteText, roomsKey, useRoomBoard } from './queries';
 import { StayDialog, type StayAction } from './StayDialog';
 import { FloorMapView, type MapAction, type UsageResume } from './FloorMap';
 import { CloseUsageDialog, OpenUsageDialog } from './UsageDialogs';
+import { HousekeepingDialog, RoomDetailDialog } from './RoomDetail';
 import { FLOOR_MAP_REFRESH_MS } from './floormap-api';
 
 export function RoomsPage() {
@@ -89,6 +88,8 @@ function RoomsBoardView() {
   const [checkinRoomId, setCheckinRoomId] = useState<number | null>(null);
   const [stay, setStay] = useState<{ id: number; action?: StayAction | 'move' } | null>(null);
   const [housekeepRoom, setHousekeepRoom] = useState<RoomBoardRoom | null>(null);
+  // 房间详情（8.0.8，B07）：null 关着；0 为没选房间（从工具栏打开，默认第一间）
+  const [detailRoom, setDetailRoom] = useState<number | null>(null);
   const [auditing, setAuditing] = useState(false);
   // 派对房等的使用单（v0.7.19）：开单、结束、撤单的对话框；从顶部「结果待确认」进入时先交给平面图找到那间房
   const [usageAction, setUsageAction] = useState<Extract<MapAction, { kind: 'usage_open' | 'usage_close' }> | null>(null);
@@ -188,6 +189,11 @@ function RoomsBoardView() {
           ))}
         </span>
         <span className="flex-1" />
+        {rooms.length > 0 && (
+          <Button size="sm" variant="ghost" icon={<History className="size-4" />} onClick={() => setDetailRoom(0)} data-testid="rooms-detail">
+            房间详情
+          </Button>
+        )}
         {canOperate && (
           <Button size="sm" variant="secondary" icon={<MoonStar className="size-4" />} onClick={() => setAuditing(true)} data-testid="rooms-audit">
             夜审
@@ -248,8 +254,30 @@ function RoomsBoardView() {
           }}
         />
       )}
-      {stay && <StayDialog id={stay.id} action={stay.action} board={b} onClose={() => setStay(null)} />}
-      {housekeepRoom && <HousekeepingDialog room={housekeepRoom} onClose={() => setHousekeepRoom(null)} />}
+      {stay && (
+        <StayDialog
+          id={stay.id}
+          action={stay.action}
+          board={b}
+          onClose={() => setStay(null)}
+          onRoomDetail={(roomId) => {
+            setStay(null);
+            setDetailRoom(roomId);
+          }}
+        />
+      )}
+      {housekeepRoom && (
+        <HousekeepingDialog
+          // 看板刷新后按 id 取最新的房间（房态、上一次修改跟着变）
+          room={rooms.find((r) => r.id === housekeepRoom.id) ?? housekeepRoom}
+          onClose={() => setHousekeepRoom(null)}
+          onDetail={() => {
+            setDetailRoom(housekeepRoom.id);
+            setHousekeepRoom(null);
+          }}
+        />
+      )}
+      {detailRoom !== null && <RoomDetailDialog rooms={rooms} roomId={detailRoom || null} onClose={() => setDetailRoom(null)} />}
       {usageAction?.kind === 'usage_open' && <OpenUsageDialog space={usageAction.space} onClose={() => setUsageAction(null)} onDone={() => setUsageAction(null)} />}
       {usageAction?.kind === 'usage_close' && (
         <CloseUsageDialog usage={usageAction.usage} space={usageAction.space} mode={usageAction.mode} onClose={() => setUsageAction(null)} onDone={() => setUsageAction(null)} />
@@ -519,67 +547,6 @@ function CheckinDialog({
           )}
         </div>
         {op.state.phase === 'error' && <Notice tone="error" title={op.state.message} />}
-      </div>
-    </Dialog>
-  );
-}
-
-/** 改房态：打扫好了（已打扫）、待打扫、维修（写原因；有人住的房不能设为维修） */
-function HousekeepingDialog({ room, onClose }: { room: RoomBoardRoom; onClose: () => void }) {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const current: Housekeeping = room.status === 'vacant' ? 'clean' : room.status === 'occupied' ? 'clean' : room.status;
-  const [status, setStatus] = useState<Housekeeping>(current === 'clean' ? 'dirty' : 'clean');
-  const [note, setNote] = useState(room.maintenanceNote ?? '');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const ok = status !== 'maintenance' || note.trim().length >= 2;
-  const save = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.put<RoomBoard>(`/api/rooms/${room.id}/housekeeping`, { status, note: status === 'maintenance' ? note.trim() : null });
-      toast({ tone: 'success', title: `${room.roomNo} 已改为${HOUSEKEEPING_LABELS[status]}` });
-      void qc.invalidateQueries({ queryKey: roomsKey });
-      onClose();
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Dialog
-      open
-      onClose={busy ? () => {} : onClose}
-      title={`改房态 · ${room.roomNo}`}
-      description={`现在：${ROOM_BOARD_LABELS[room.status]}${room.maintenanceNote ? `（${room.maintenanceNote}）` : ''}。退房、换房后房间自动变为待打扫，打扫好了点「已打扫」才能再入住。`}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>
-            取消
-          </Button>
-          <Button variant="primary" loading={busy} disabled={!ok || status === current} onClick={save} data-testid="room-housekeeping-save">
-            保存
-          </Button>
-        </>
-      }
-    >
-      <div className="space-y-4" data-testid="room-housekeeping">
-        <Segmented
-          value={status}
-          onChange={setStatus}
-          ariaLabel="房态"
-          options={[
-            { value: 'clean', label: '已打扫（空闲）' },
-            { value: 'dirty', label: '待打扫' },
-            { value: 'maintenance', label: '维修' },
-          ]}
-        />
-        {status === 'maintenance' && (
-          <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="维修原因（至少 2 个字），例如：空调不制冷" maxLength={100} aria-label="维修原因" data-testid="room-maintenance-note" />
-        )}
-        {error && <Notice tone="error" title={error} />}
       </div>
     </Dialog>
   );

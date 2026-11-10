@@ -48,6 +48,68 @@ export const HOUSEKEEPING_LABELS: Record<Housekeeping, string> = { clean: '已�
 export type RoomBoardStatus = 'vacant' | 'occupied' | 'dirty' | 'maintenance';
 export const ROOM_BOARD_LABELS: Record<RoomBoardStatus, string> = { vacant: '空闲', occupied: '在住', dirty: '待打扫', maintenance: '维修' };
 
+/** 房态记录的来源（8.0.8，B04）：手动改 / 撤回上一次手动修改 / 入住、退房、换房、撤销入住时自动改 */
+export const HOUSEKEEPING_SOURCES = ['manual', 'revert', 'auto'] as const;
+export type HousekeepingSource = (typeof HOUSEKEEPING_SOURCES)[number];
+export const HOUSEKEEPING_SOURCE_LABELS: Record<HousekeepingSource, string> = { manual: '手动改', revert: '撤回', auto: '自动' };
+/** 房态备注最多 100 字（改「维修」必须写原因） */
+export const MAX_HOUSEKEEPING_NOTE = 100;
+
+/** 一次房态变化（room_housekeeping_events 一行） */
+export interface HousekeepingChange {
+  id: number;
+  from: Housekeeping;
+  to: Housekeeping;
+  note: string;
+  source: HousekeepingSource;
+  /** 自动改的那张入住单号 */
+  ref: string;
+  at: string;
+  staffName: string;
+  /** 能撤回：最近一次是手动改的、之后房态没再变过 */
+  canRevert: boolean;
+}
+
+/** 房间详情（8.0.8，B07）的一条：入住、换进换出、退房、房费、押金、住客在住期间的消费、房态 */
+export const ROOM_TIMELINE_KINDS = ['stay', 'charge', 'deposit', 'service', 'dining', 'other', 'housekeeping'] as const;
+export type RoomTimelineKind = (typeof ROOM_TIMELINE_KINDS)[number];
+export const ROOM_TIMELINE_LABELS: Record<RoomTimelineKind, string> = {
+  stay: '入住',
+  charge: '房费',
+  deposit: '押金',
+  service: '服务',
+  dining: '餐饮',
+  other: '其他',
+  housekeeping: '房态',
+};
+/** 房间详情默认看近 7 天，一次最多 92 天（F15） */
+export const DEFAULT_ROOM_TIMELINE_DAYS = 7;
+export const MAX_ROOM_TIMELINE_DAYS = 92;
+
+export interface RoomTimelineEntry {
+  /** 同一张表里唯一（种类 + 原单据的编号） */
+  key: string;
+  kind: RoomTimelineKind;
+  at: string;
+  title: string;
+  /** 补充说明：客人、手牌、技师、备注…… */
+  detail: string;
+  /** 单号：入住单、钟单、出品单…… */
+  ref: string;
+  /** 金额（分）；押金的退押金为负；没有金额的为 null */
+  amount: number | null;
+  /** 已作废、已撤销等；正常的为 null */
+  status: string | null;
+  staffName: string;
+}
+
+export interface RoomTimeline {
+  room: { id: number; roomNo: string; floor: string; typeName: string; housekeeping: Housekeeping };
+  from: string;
+  to: string;
+  entries: RoomTimelineEntry[];
+}
+
 export const STAY_STATUSES = ['open', 'checked_out', 'cancelled'] as const;
 export type StayStatus = (typeof STAY_STATUSES)[number];
 export const STAY_STATUS_LABELS: Record<StayStatus, string> = { open: '在住', checked_out: '已退房', cancelled: '已撤销' };
@@ -158,6 +220,10 @@ export interface RoomBoardRoom {
   blockMinutes: number | null;
   status: RoomBoardStatus;
   maintenanceNote: string | null;
+  /** 原始的打扫状态（在住的房看板上显示「在住」；8.0.8 改房态时带上看到的这个，房态刚被别人改过就拒绝） */
+  housekeeping: Housekeeping;
+  /** 最近一次房态变化（8.0.8，B04）；升级前改的没有记录 */
+  lastChange: HousekeepingChange | null;
   stay: StaySummary | null;
 }
 

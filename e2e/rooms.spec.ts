@@ -255,7 +255,11 @@ test.describe('S7 客房', () => {
       await page.getByTestId(`room-tile-${R1}`).click();
       const hk = page.getByRole('dialog').filter({ hasText: `改房态 · ${R1}` });
       await hk.getByRole('radio', { name: '已打扫（空闲）' }).click();
+      await hk.getByTestId('room-maintenance-note').fill('E2E 已检查');
       await hk.getByTestId('room-housekeeping-save').click();
+      // 8.0.8（B04）：先确认「从哪到哪」再改
+      await expect(hk.getByTestId('room-housekeeping-review')).toContainText(`${R1}：待打扫 → 已打扫（空闲）`);
+      await hk.getByTestId('room-housekeeping-confirm').click();
       await expect(page.getByText(`${R1} 已改为已打扫`)).toBeVisible();
       await expect(tile1).toHaveAttribute('data-state', 'vacant');
       await page.getByTestId(`room-tile-${R3}`).click();
@@ -266,6 +270,7 @@ test.describe('S7 客房', () => {
       await expect(hk3.getByTestId('room-housekeeping-save')).toBeDisabled();
       await hk3.getByTestId('room-maintenance-note').fill('E2E 空调不制冷');
       await hk3.getByTestId('room-housekeeping-save').click();
+      await hk3.getByTestId('room-housekeeping-confirm').click();
       await expect(page.getByTestId(`room-tile-${R3}`)).toHaveAttribute('data-state', 'maintenance');
       await expect(page.getByTestId(`room-tile-${R3}`)).toContainText('E2E 空调不制冷');
 
