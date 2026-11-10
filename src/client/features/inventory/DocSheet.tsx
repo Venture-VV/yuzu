@@ -332,6 +332,13 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
                     </Mini>
                     <Mini label={`单价/${l.purchaseUnit}`}>{l.priceCents !== null ? <Money cents={l.priceCents} /> : '—'}</Mini>
                     {l.rejectReason && <p className="col-span-full text-clay">拒收原因：{l.rejectReason}（不入库、不计货款）</p>}
+                    {(l.batchNo || l.expiresOn) && (
+                      <p className="col-span-full text-ink-3">
+                        {l.batchNo ? `批号 ${l.batchNo}` : ''}
+                        {l.producedOn ? ` · 生产 ${l.producedOn}` : ''}
+                        {l.expiresOn ? ` · 到期 ${l.expiresOn}` : ''}
+                      </p>
+                    )}
                     {l.compare && (
                       <p className="col-span-full">
                         <CompareChip compare={l.compare} unit={l.purchaseUnit} />

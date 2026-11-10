@@ -89,6 +89,10 @@ const ReceiptLine = z.object({
   rejectReason: z.string().trim().max(100).default(''),
   /** 每采购单位价格（分）；关联采购单时以采购单价格为准 */
   priceCents: z.number().int().nonnegative().max(100_000_000).nullable().default(null),
+  /** 批次与效期（8.0.7 3.3）：管效期的物料到期日必填（填了生产日期、物料有保质期的可以不填，按生产日期 + 保质期算），批号选填 */
+  batchNo: z.string().trim().max(40, '批号最多 40 个字').nullable().default(null),
+  producedOn: docDateSchema.nullable().default(null),
+  expiresOn: docDateSchema.nullable().default(null),
   note: note(),
 });
 
@@ -320,6 +324,7 @@ export async function getDoc(db: Db, docId: number, timeZone?: string): Promise<
            l.qty_milli, l.inventory_unit, l.purchase_unit, l.factor_milli, l.entered_qty_milli, l.entered_unit,
            l.delivered_milli, l.rejected_milli, l.reject_reason, l.price_cents, l.amount_cents, l.po_line_id,
            l.book_milli, l.counted_milli, l.diff_reason, l.diff_note, l.source_line_id, l.note, m.counter_use, m.weighed,
+           l.batch_no, l.produced_on::text AS produced_on, l.expires_on::text AS expires_on, m.expiry_tracked,
            CASE WHEN ${isDept} THEN coalesce(ws.stock_milli, 0) ELSE m.stock_milli END AS stock_milli,
            -- 台面日耗品（#14，v0.7.13）：领料、急采生效时在部门小仓自动记的耗用
            EXISTS (SELECT 1 FROM stock_moves am WHERE am.doc_line_id = l.id AND am.move_type = 'direct_use'
@@ -505,6 +510,10 @@ interface PreparedLine {
   /** 盘点：提交时写的差异原因与说明（v0.7.30） */
   diffReason?: CountReason | null;
   diffNote?: string;
+  /** 收货的批号、生产日期、到期日（8.0.7 3.3） */
+  batchNo?: string | null;
+  producedOn?: string | null;
+  expiresOn?: string | null;
 }
 
 interface Prepared {
@@ -540,6 +549,24 @@ interface MaterialInfo {
   lastMoveId: number | null;
   counterUse: boolean;
   weighed: boolean;
+  expiryTracked: boolean;
+  shelfLifeDays: number | null;
+}
+
+/**
+ * 收货行的批号与效期（8.0.7 3.3，V16）：管效期的物料到期日必填——没填的按生产日期 + 保质期算，都没有的拒绝；
+ * 不管效期的物料填了也照记（批号可以用来追溯）。
+ */
+function expiryOf(m: MaterialInfo, l: { batchNo: string | null; producedOn: string | null; expiresOn: string | null }) {
+  let expiresOn = l.expiresOn;
+  if (!expiresOn && l.producedOn && m.shelfLifeDays) {
+    expiresOn = new Date(Date.parse(`${l.producedOn}T00:00:00Z`) + m.shelfLifeDays * 86_400_000).toISOString().slice(0, 10);
+  }
+  if (m.expiryTracked && !expiresOn) {
+    throw unprocessable('EXPIRY_REQUIRED', `「${m.name}」管效期：请填到期日（或生产日期${m.shelfLifeDays ? '' : '，并在物料档案里填保质期'}）`);
+  }
+  if (l.producedOn && expiresOn && l.producedOn > expiresOn) throw badRequest(`「${m.name}」的生产日期晚于到期日`);
+  return { batchNo: l.batchNo || null, producedOn: l.producedOn, expiresOn };
 }
 
 async function loadMaterials(db: Db, ids: number[]): Promise<Map<number, MaterialInfo>> {
@@ -547,7 +574,7 @@ async function loadMaterials(db: Db, ids: number[]): Promise<Map<number, Materia
   const rows = unique.length
     ? await db<MaterialInfo[]>`
         SELECT id, name, inventory_unit, decimals, purchase_unit, purchase_factor_milli, tracked, active, stock_milli, last_move_id,
-               counter_use, weighed
+               counter_use, weighed, expiry_tracked, shelf_life_days
         FROM materials WHERE id IN ${db(unique)}`
     : [];
   const map = new Map(rows.map((r) => [r.id, r]));
@@ -940,6 +967,7 @@ async function prepare(
           amountCents,
           poLineId: body.purchaseOrderId ? l.poLineId : null,
           note: l.note,
+          ...expiryOf(m, l),
         };
       });
       if (body.purchaseOrderId) {
@@ -978,11 +1006,12 @@ async function insertLines(tx: Tx, docId: number, lines: PreparedLine[]) {
     await tx`
       INSERT INTO inv_doc_lines (doc_id, line_no, material_id, qty_milli, inventory_unit, purchase_unit, factor_milli,
                                  entered_qty_milli, entered_unit, delivered_milli, rejected_milli, reject_reason, price_cents,
-                                 amount_cents, po_line_id, book_milli, counted_milli, book_move_id, source_line_id, note, diff_reason, diff_note)
+                                 amount_cents, po_line_id, book_milli, counted_milli, book_move_id, source_line_id, note, diff_reason, diff_note,
+                                 batch_no, produced_on, expires_on)
       VALUES (${docId}, ${i + 1}, ${l.materialId}, ${l.qtyMilli}, ${l.inventoryUnit}, ${l.purchaseUnit}, ${l.factorMilli},
               ${l.enteredQtyMilli}, ${l.enteredUnit}, ${l.deliveredMilli}, ${l.rejectedMilli}, ${l.rejectReason}, ${l.priceCents},
               ${l.amountCents}, ${l.poLineId}, ${l.bookMilli}, ${l.countedMilli}, ${l.bookMoveId}, ${l.sourceLineId}, ${l.note},
-              ${l.diffReason ?? null}, ${l.diffNote ?? ''})`;
+              ${l.diffReason ?? null}, ${l.diffNote ?? ''}, ${l.batchNo ?? null}, ${l.producedOn ?? null}, ${l.expiresOn ?? null})`;
   }
 }
 

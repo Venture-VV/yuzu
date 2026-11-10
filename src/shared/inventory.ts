@@ -300,6 +300,9 @@ export interface Material {
   counterUse: boolean;
   /** 称重（#14，v0.7.13）：按实际称重记数量，收货可以比采购单多出容差 */
   weighed: boolean;
+  /** 效期管理（8.0.7 3.3）：收货要填到期日；保质期天数（可空） */
+  expiryTracked: boolean;
+  shelfLifeDays: number | null;
   tracked: boolean;
   active: boolean;
   /** 总仓结存 */
@@ -370,6 +373,11 @@ export interface InvDocLine {
   /** 物料现在是台面日耗品 / 称重（单据表单的提示用） */
   counterUse: boolean;
   weighed: boolean;
+  /** 批号、生产日期、到期日（8.0.7 3.3，收货行）；物料管不管效期 */
+  batchNo: string | null;
+  producedOn: string | null;
+  expiresOn: string | null;
+  expiryTracked: boolean;
   note: string;
   /** 收货行：与此前同口径成交价的比较 */
   compare?: PriceCompare;

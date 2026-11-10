@@ -458,3 +458,47 @@ describe('CG10 采购不参与库管收货（店主 2026-11-10）', () => {
     expect(rc.doc).toMatchObject({ status: 'confirmed', coAcceptor: null });
   });
 });
+
+describe('3.3 批次与效期', () => {
+  it('管效期的物料收货要填到期日（或生产日期 + 保质期）；先进先出推算剩下的批次；临期进待办；生效后不能改', async () => {
+    const m = await ok(api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', { code: 'S807-EXP', name: '鲜牛奶', inventoryUnit: '盒', purchaseUnit: '盒', purchaseFactorMilli: q(1), expiryTracked: true, shelfLifeDays: 10 }));
+    expect(m).toMatchObject({ expiryTracked: true, shelfLifeDays: 10 });
+    const sid = await newSupplier('S807E', '效期供应商');
+    const receiveLot = async (boxes: number, lot: Record<string, unknown>) => {
+      const po = await ok(api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId: sid, orderDate: today, approveNow: true, lines: [{ materialId: m.id, purchaseQtyMilli: q(boxes), priceCents: 5_00 }] }));
+      return api(ctx.app, keeper, 'POST', '/api/inventory/docs', {
+        clientKey: randomUUID(),
+        docDate: today,
+        docType: 'receipt',
+        supplierId: sid,
+        purchaseOrderId: po.po.id,
+        lines: [{ materialId: m.id, poLineId: po.po.lines[0].id, deliveredMilli: q(boxes), acceptedMilli: q(boxes), ...lot }],
+      });
+    };
+    const missing = await receiveLot(5, {});
+    expect(missing.status).toBe(422);
+    expect(missing.body.error.code).toBe('EXPIRY_REQUIRED');
+    // 只填生产日期：按保质期 10 天算到期日
+    const soon = await ok(receiveLot(5, { batchNo: 'B-OLD', producedOn: shiftDate(today, -7) }));
+    expect(soon.doc.lines[0]).toMatchObject({ batchNo: 'B-OLD', expiresOn: shiftDate(today, 3) });
+    const fresh = await ok(receiveLot(4, { batchNo: 'B-NEW', expiresOn: shiftDate(today, 60) }));
+    await expect(ctx.sql`UPDATE inv_doc_lines SET expires_on = ${shiftDate(today, 99)} WHERE id = ${fresh.doc.lines[0].id}`).rejects.toThrow(/不可修改/);
+    // 9 盒：最近收的 4 盒（B-NEW）与 5 盒 B-OLD；3 天后到期的在 30 天以内
+    let lots = (await api(ctx.app, keeper, 'GET', '/api/inventory/expiry-lots')).body as { batchNo: string; remainingMilli: number; daysLeft: number }[];
+    expect(lots.filter((l) => l.batchNo.startsWith('B-'))).toEqual([expect.objectContaining({ batchNo: 'B-OLD', remainingMilli: q(5), daysLeft: 3 })]);
+    let todo = (await api(ctx.app, keeper, 'GET', '/api/inventory/supply-todo')).body;
+    expect(todo.expiringLots).toBeGreaterThanOrEqual(1);
+    // 用掉 6 盒（总仓直接耗用）：先进先出，剩下的 3 盒都是 B-NEW，临期的没了
+    await ok(api(ctx.app, ctx.owner, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docType: 'direct_use', docDate: today, note: '早餐用', lines: [{ materialId: m.id, qtyMilli: q(6) }], approveNow: true }));
+    lots = (await api(ctx.app, keeper, 'GET', '/api/inventory/expiry-lots')).body;
+    expect(lots.some((l) => l.batchNo === 'B-OLD')).toBe(false);
+    await settings({ expiryRemindDays: 90 });
+    lots = (await api(ctx.app, keeper, 'GET', '/api/inventory/expiry-lots')).body;
+    expect(lots.filter((l) => l.batchNo.startsWith('B-'))).toEqual([expect.objectContaining({ batchNo: 'B-NEW', remainingMilli: q(3), daysLeft: 60 })]);
+    await settings({ expiryRemindDays: 30 });
+    todo = (await api(ctx.app, keeper, 'GET', '/api/inventory/supply-todo')).body;
+    expect(todo).toMatchObject({ expiredLots: 0 });
+    const csv = await ctx.app.inject({ method: 'GET', url: '/api/inventory/expiry-lots/export', headers: { cookie: keeper } });
+    expect(csv.statusCode).toBe(200);
+  });
+});

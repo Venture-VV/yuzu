@@ -46,6 +46,10 @@ interface LineDraft {
   /** 合格实收是否手动改过（否则跟随送达数量） */
   acceptedTouched: boolean;
   rejectReason: string;
+  /** 批次与效期（8.0.7 3.3）：管效期的物料收货时填 */
+  batchNo?: string;
+  producedOn?: string;
+  expiresOn?: string;
   /** 每采购单位价格（元） */
   price: string;
   sourceLineId: number | null;
@@ -181,6 +185,9 @@ function deptMaterial(m: DeptStockMeta['materials'][number], row: WarehouseStock
     lastMoveAt: row?.lastMoveAt ?? null,
     note: '',
     isSynthetic: false,
+    // 部门小仓不分批（V17）
+    expiryTracked: false,
+    shelfLifeDays: null,
   };
 }
 
@@ -259,6 +266,9 @@ function formFromDoc(doc: InvDoc, materials: Map<number, Material>): FormState {
         accepted: qtyEntryFromMilli(l.qtyMilli, m, 'pack'),
         acceptedTouched: true,
         rejectReason: l.rejectReason,
+        batchNo: l.batchNo ?? '',
+        producedOn: l.producedOn ?? '',
+        expiresOn: l.expiresOn ?? '',
         price: l.priceCents === null ? '' : centsToInput(l.priceCents),
         sourceLineId: l.sourceLineId,
         poLineId: l.poLineId,
@@ -628,6 +638,8 @@ function DocForm({
           rejected = delivered.milli - accepted.milli;
           if (rejected < 0) errorText = '合格实收不能多于送达';
           else if (rejected > 0 && !l.rejectReason.trim()) errorText = errorText ?? '请填写拒收原因';
+          // 管效期的物料（8.0.7 3.3）：到期日必填，填了生产日期、有保质期的可以不填
+          else if (m.expiryTracked && !l.expiresOn && !(l.producedOn && m.shelfLifeDays)) errorText = errorText ?? `「${m.name}」管效期，请填到期日`;
           after = m.stockMilli + accepted.milli;
         }
         if (!pl && l.price.trim() && price === null) errorText = errorText ?? '单价格式不正确';
@@ -789,6 +801,9 @@ function DocForm({
             acceptedMilli: r.accepted!.milli,
             rejectReason: r.rejected && r.rejected > 0 ? r.line.rejectReason.trim() : '',
             priceCents: r.price,
+            batchNo: r.line.batchNo?.trim() || null,
+            producedOn: r.line.producedOn || null,
+            expiresOn: r.line.expiresOn || null,
             note: r.line.note,
           })),
         };
@@ -1622,6 +1637,21 @@ function ReceiptCells({
         {row.amount != null ? <Money cents={row.amount} className="text-[15px] font-bold text-pine @5xl:pt-2" /> : <span className="text-ink-4 @5xl:block @5xl:pt-2.5">—</span>}
       </div>
       <span className="hidden justify-self-end @5xl:block">{remove}</span>
+      {m.expiryTracked && (
+        <div className="flex flex-wrap items-center gap-2 @lg:col-span-3 @5xl:col-span-full" data-testid="receipt-expiry">
+          <span className="text-[12px] font-semibold text-ink-3">效期</span>
+          <Input fullWidth={false} value={line.batchNo ?? ''} disabled={locked} onChange={(e) => onPatch({ batchNo: e.target.value })} placeholder="批号（选填）" maxLength={40} className="h-9 w-36 text-[13px]" aria-label="批号" />
+          <label className="flex items-center gap-1 text-[12px] text-ink-3">
+            生产日期
+            <Input fullWidth={false} type="date" value={line.producedOn ?? ''} disabled={locked} onChange={(e) => onPatch({ producedOn: e.target.value })} className="h-9 w-36 text-[13px]" aria-label="生产日期" />
+          </label>
+          <label className="flex items-center gap-1 text-[12px] text-ink-3">
+            到期日
+            <Input fullWidth={false} type="date" value={line.expiresOn ?? ''} disabled={locked} onChange={(e) => onPatch({ expiresOn: e.target.value })} className="h-9 w-36 text-[13px]" aria-label="到期日" data-testid="receipt-expires-on" />
+          </label>
+          {m.shelfLifeDays && <span className="text-[12px] text-ink-3">保质期 {m.shelfLifeDays} 天（只填生产日期的按它算）</span>}
+        </div>
+      )}
       {row.error && (line.delivered.text || line.price) && <p className="text-[12px] font-semibold text-clay @lg:col-span-3 @5xl:col-span-full">{row.error}</p>}
     </>
   );

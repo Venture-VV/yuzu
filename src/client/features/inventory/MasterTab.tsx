@@ -183,6 +183,8 @@ export function MaterialDialog({
       coverDays,
       counterUse: form.counterUse,
       weighed: form.weighed,
+      expiryTracked: form.expiryTracked,
+      shelfLifeDays: form.shelfLifeDays.trim() ? Number(form.shelfLifeDays) : null,
       tracked: form.tracked,
       active: form.active,
       note: form.note.trim(),
@@ -304,6 +306,20 @@ export function MaterialDialog({
               <span className="block text-[12px] text-ink-3">按斤等计量的：按实际称重记数量（至少 1 位小数），收货可以比采购单多出称重容差（规则总表里调），货款按实收重量算</span>
             </span>
           </label>
+          <label className="flex items-start gap-2.5 text-[13px]">
+            <input type="checkbox" className="mt-0.5 size-4 accent-[var(--color-pine)]" checked={form.expiryTracked} onChange={(e) => set({ expiryTracked: e.target.checked })} data-testid="m-expiry" />
+            <span>
+              <span className="font-bold">效期管理</span>
+              <span className="block text-[12px] text-ink-3">食品、药品、化学品等：收货时填批号与到期日，库存「呆滞与临期」里看快到期的批次（先进先出推算剩下的是哪几批）</span>
+              {form.expiryTracked && (
+                <span className="mt-1 flex items-center gap-1.5">
+                  保质期
+                  <Input fullWidth={false} inputMode="numeric" value={form.shelfLifeDays} onChange={(e) => set({ shelfLifeDays: e.target.value })} className="h-8 w-20" aria-label="保质期天数" />
+                  天（选填：填了的收货时只填生产日期也行）
+                </span>
+              )}
+            </span>
+          </label>
         </div>
 
         <Field label="纳入库存" className="sm:col-span-3" hint="候选物料只保留档案，不进入首轮库存">
@@ -353,6 +369,8 @@ function toForm(m: Material | null) {
     coverDays: m?.coverDays != null ? String(m.coverDays) : '',
     counterUse: m?.counterUse ?? false,
     weighed: m?.weighed ?? false,
+    expiryTracked: m?.expiryTracked ?? false,
+    shelfLifeDays: m?.shelfLifeDays != null ? String(m.shelfLifeDays) : '',
     tracked: m?.tracked ?? true,
     active: m?.active ?? true,
     note: m?.note ?? '',
