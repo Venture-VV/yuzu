@@ -1,12 +1,14 @@
-// 我的：换头像、这个月吃了几顿、我的记录、跟柚子说、再看一遍开场与新手教程、改密码、添加到桌面、退出。
+// 我的：换头像、这个月吃了几顿、我的记录、饭点提醒（第 19 节）、跟柚子说、再看一遍开场与新手教程、改密码、添加到桌面、退出。
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { AVATARS, CANTEEN_ROLE_LABELS, MEAL_EMOJI, MEAL_LABELS, PASSWORD_MIN, type CanteenCheckinRow, type CanteenMe } from '@shared/canteen';
 import { call, dayLabel, messageOf, monthDay, storeNow, timeText } from '../lib';
 import { Button, Card, cn, Field, inputClass, Pill, Sheet, toast } from '../ui';
 import { InstallGuide } from '../install';
-import { IconArrow, IconInstall, IconKey, IconLetter, IconPlay, IconSparkle } from '../doodles';
+import { IconArrow, IconBell, IconInstall, IconKey, IconLetter, IconPlay, IconSparkle } from '../doodles';
 import { Mascot } from '../Mascot';
+import { pushEnabledHere } from '../push';
+import { ReminderPanel } from '../reminders';
 
 /** onMe：门店系统刚给的「我」（重算时间差）；onPatch：本机改了一点（保留原来的时间差） */
 export function MePage({
@@ -34,7 +36,12 @@ export function MePage({
 }) {
   const today = storeNow(offsetMs).date;
   const [rows, setRows] = useState<CanteenCheckinRow[] | null>(null);
-  const [sheet, setSheet] = useState<'avatar' | 'password' | 'install' | null>(null);
+  const [sheet, setSheet] = useState<'avatar' | 'password' | 'install' | 'reminder' | null>(null);
+  // 这台手机开着饭点提醒没有（面板关上时再看一遍）
+  const [reminderOn, setReminderOn] = useState(false);
+  useEffect(() => {
+    if (sheet === null) void pushEnabledHere().then(setReminderOn).catch(() => setReminderOn(false));
+  }, [sheet]);
   useEffect(() => {
     if (!online) return;
     call<CanteenCheckinRow[]>('GET', `/api/canteen/me/meals?month=${today.slice(0, 7)}`)
@@ -112,6 +119,13 @@ export function MePage({
       </section>
 
       <Card className="divide-y divide-line/80 p-0">
+        <Row
+          icon={<IconBell size={24} />}
+          label="饭点提醒"
+          hint={reminderOn ? '开着：到了饭点柚子喊你吃饭' : '到了饭点柚子在手机上喊你吃饭'}
+          onClick={() => setSheet('reminder')}
+          testId="open-reminders"
+        />
         <Row icon={<IconLetter size={24} />} label="跟柚子说" hint="心愿、碎碎念，柚子都听着" onClick={() => go('talk')} />
         <Row icon={<IconPlay size={24} />} label="再看一遍开场" hint="柚子的自我介绍" onClick={onIntro} testId="replay-intro" />
         <Row icon={<IconSparkle size={24} />} label="再走一遍新手教程" hint="饭卡码、点赞、跟柚子说怎么用" onClick={onTour} testId="replay-tour" />
@@ -152,6 +166,9 @@ export function MePage({
       </Sheet>
       <Sheet open={sheet === 'install'} onClose={() => setSheet(null)} title="添加到桌面">
         <InstallGuide />
+      </Sheet>
+      <Sheet open={sheet === 'reminder'} onClose={() => setSheet(null)} title="饭点提醒">
+        <ReminderPanel online={online} />
       </Sheet>
     </div>
   );

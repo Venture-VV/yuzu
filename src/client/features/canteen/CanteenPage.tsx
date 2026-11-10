@@ -1,4 +1,4 @@
-// ERP「员工食堂」（docs/CANTEEN.md）：今天的概况、员工名单与开通卡片、菜单（只看）、用餐记录、柚子信箱、设置（含注册二维码）。
+// ERP「员工食堂」（docs/CANTEEN.md）：今天的概况、员工名单与开通卡片、菜单（只看）、用餐记录、柚子信箱、饭点提醒（第 19 节）、设置（含注册二维码）。
 // 员工、厨师、食堂负责人用的是手机上的「柚子饭堂」（员工端口）；这里给管理员管名单、看记录、回员工的话。
 
 import { useState } from 'react';
@@ -13,10 +13,11 @@ import { ErpPage } from '../erp/ErpHome';
 import { FeedbackTab } from './FeedbackTab';
 import { MenusTab } from './MenusTab';
 import { RecordsTab } from './RecordsTab';
+import { RemindersTab } from './RemindersTab';
 import { RosterTab } from './RosterTab';
 import { SettingsTab } from './SettingsTab';
 
-type Tab = 'today' | 'roster' | 'menus' | 'records' | 'mailbox' | 'settings';
+type Tab = 'today' | 'roster' | 'menus' | 'records' | 'mailbox' | 'reminders' | 'settings';
 
 export const useOverview = () => useQuery({ queryKey: ['canteen', 'overview'], queryFn: () => api.get<CanteenOverview>('/api/erp/canteen/overview'), refetchInterval: 60_000 });
 
@@ -40,6 +41,7 @@ export function CanteenPage() {
             { value: 'menus', label: '菜单' },
             { value: 'records', label: '用餐记录' },
             { value: 'mailbox', label: unread ? `柚子信箱 · ${unread}` : '柚子信箱' },
+            { value: 'reminders', label: '饭点提醒' },
             { value: 'settings', label: '设置' },
           ]}
         />
@@ -48,6 +50,7 @@ export function CanteenPage() {
         {tab === 'menus' && <MenusTab />}
         {tab === 'records' && <RecordsTab />}
         {tab === 'mailbox' && <FeedbackTab />}
+        {tab === 'reminders' && <RemindersTab />}
         {tab === 'settings' && <SettingsTab />}
       </div>
     </ErpPage>

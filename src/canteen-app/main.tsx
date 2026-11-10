@@ -26,3 +26,11 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator && window.isSecureConte
       .catch(() => undefined);
   });
 }
+
+// 点了饭点提醒的通知、柚子饭堂正开着：sw.js 叫这里打开通知要去的那一页（docs/CANTEEN.md 第 19 节）
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    const data = event.data as { type?: unknown; hash?: unknown } | null;
+    if (data?.type === 'open' && typeof data.hash === 'string' && /^#\/[a-z]+$/.test(data.hash)) window.location.hash = data.hash.slice(1);
+  });
+}

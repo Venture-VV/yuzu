@@ -20,6 +20,7 @@ import { canteenToday, mealsThisMonth, myCheckins, recordCheckin, searchPeople, 
 import { managerMailbox, managerMarkRead, managerReplyFeedback, myFeedback, submitFeedback, unreadFeedbackCount } from './feedback';
 import { employeeCodeKey } from './code';
 import { likeDish, listMenus, saveMenu } from './menus';
+import { pushInfo, removePushSubscription, saveMutedMeals, savePushSubscription, sendTestPush } from './push';
 import {
   AttemptLimiter,
   CANTEEN_COOKIE,
@@ -288,6 +289,15 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
   /** 跟柚子说（第二期，K16）：自己说过的、发一条 */
   app.get('/api/canteen/feedback', async (req) => myFeedback(sql, who(req).id));
   app.post('/api/canteen/feedback', async (req) => submitFeedback(sql, who(req), req.body, config.timezone, now()));
+
+  /** 饭点提醒（店主 2026-11-10，第 19 节，K23、K24）：这台手机打开、关掉提醒（退出登录时也关），选哪几顿，给自己发一条试试 */
+  app.get('/api/canteen/push', async (req) => pushInfo(sql, who(req).id));
+  app.put('/api/canteen/push/subscription', async (req) => savePushSubscription(sql, config, who(req).id, req.body, req.headers.origin));
+  app.post('/api/canteen/push/off', async (req) =>
+    removePushSubscription(sql, who(req).id, req.body, (req.body as { reason?: unknown } | null)?.reason === 'logout' ? 'logout' : 'off'),
+  );
+  app.put('/api/canteen/push/muted', async (req) => saveMutedMeals(sql, who(req).id, req.body));
+  app.post('/api/canteen/push/test', async (req) => sendTestPush(sql, config, who(req).id, null, new Date(now())));
 
   // ── 厨师、负责人 ──
 
