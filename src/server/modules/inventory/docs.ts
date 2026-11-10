@@ -865,10 +865,10 @@ async function prepare(
       if (!body.urgent && !body.purchaseOrderId) {
         throw unprocessable('PO_REQUIRED', `收货必须对应已确认的采购单；没有采购单的只能由部门登记急采（合计不超过 ${capText}）`);
       }
-      // #17：按采购单收货，采购和仓库一起第一次验收
+      // #17：按采购单收货，采购和仓库一起第一次验收。店主 2026-11-10（CG10）：采购不参与库管收货——一起验收的采购改成选填，
+      // 仓库自己验收即可；选了的照旧核对（在职的采购经办、不能选自己）
       let coAcceptorId: number | null = null;
-      if (!body.urgent) {
-        if (!body.coAcceptorId) throw badRequest('请选一起验收的采购经办');
+      if (!body.urgent && body.coAcceptorId) {
         if (body.coAcceptorId === actor.id) throw badRequest('一起验收的采购要另一个人，不能选自己');
         const [co] = await db<{ active: boolean; role: string; duties: string[] }[]>`
           SELECT active, role, duties FROM staff WHERE id = ${body.coAcceptorId}`;

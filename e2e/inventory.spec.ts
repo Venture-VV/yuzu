@@ -176,8 +176,8 @@ test.describe('库存与采购流程', () => {
     await page.getByRole('button', { name: new RegExp(poNo) }).click();
     await page.getByRole('button', { name: '按单收货' }).click();
     await expect(page.getByText(`按采购单 ${poNo} 收货`)).toBeVisible();
-    // 采购和仓库一起验收（#17）：没选一起验收的采购不能提交
-    await expect(page.getByRole('button', { name: /确认收货/ })).toBeDisabled();
+    // 店主 2026-11-10（CG10）：采购不参与库管收货，一起验收的采购改成选填（没选也能提交）；要一起验收的照旧能选
+    await expect(page.getByRole('button', { name: /确认收货/ })).toBeEnabled();
     await page.selectOption('#coAcceptor', { label: '周一（采购）' });
     // 送达 2 箱，只验收 1 箱
     await page.getByLabel('合格实收（箱）').fill('1');

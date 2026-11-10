@@ -687,9 +687,7 @@ function DocForm({
         ? '请选给哪个部门买的'
       : type === 'receipt' && central && !form.purchaseOrderId
         ? '请选择采购单（没有采购单不能收货；没有采购单的临时采购由采购在「采购 → 急采」登记）'
-        : type === 'receipt' && central && !form.coAcceptorId
-          ? '请选一起验收的采购'
-          : urgentOver
+        : urgentOver
             ? `急采合计超过上限 ¥${((data.urgentCapCents ?? 0) / 100).toFixed(2)}，请先开采购单`
             : type === 'issue' && !form.departmentId
         ? '请选择领料部门'
@@ -950,9 +948,9 @@ function DocForm({
                   </Field>
                 )}
                 {central && (
-                  <Field label="一起验收的采购" htmlFor="coAcceptor" hint="采购和仓库一起第一次验收">
+                  <Field label="一起验收的采购（选填）" htmlFor="coAcceptor" hint="采购不参与库管收货（店主 2026-11-10），仓库自己验收即可；要一起验收的照旧选上">
                     <Select id="coAcceptor" value={form.coAcceptorId ?? ''} disabled={locked} onChange={(e) => patch({ coAcceptorId: Number(e.target.value) || null })}>
-                      <option value="">请选择</option>
+                      <option value="">不选（仓库自己验收）</option>
                       {coAcceptors.data
                         ?.filter((c) => c.id !== session.staff.id)
                         .map((c) => (

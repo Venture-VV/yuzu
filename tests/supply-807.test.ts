@@ -429,3 +429,32 @@ describe('2.6 供应商在线对账确认', () => {
     expect((await pub('bad')).statusCode).toBe(400);
   });
 });
+
+describe('CG10 采购不参与库管收货（店主 2026-11-10）', () => {
+  it('按采购单收货不选一起验收的采购也能生效；选了的照旧核对', async () => {
+    const sid = await newSupplier('S807K', '库管收货供应商');
+    const po = await ok(
+      api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', {
+        clientKey: randomUUID(),
+        supplierId: sid,
+        orderDate: today,
+        approveNow: true,
+        lines: [{ materialId: matId, purchaseQtyMilli: q(2), priceCents: 20_00 }],
+      }),
+    );
+    const body = (extra: Record<string, unknown>) => ({
+      clientKey: randomUUID(),
+      docDate: today,
+      docType: 'receipt',
+      supplierId: sid,
+      purchaseOrderId: po.po.id,
+      lines: [{ materialId: matId, poLineId: po.po.lines[0].id, deliveredMilli: q(10), acceptedMilli: q(10) }],
+      ...extra,
+    });
+    // 选了自己：照旧拒绝
+    const [k] = await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'lixiao'`;
+    expect((await api(ctx.app, keeper, 'POST', '/api/inventory/docs', body({ coAcceptorId: Number(k!.id) }))).status).toBe(400);
+    const rc = await ok(api(ctx.app, keeper, 'POST', '/api/inventory/docs', body({})));
+    expect(rc.doc).toMatchObject({ status: 'confirmed', coAcceptor: null });
+  });
+});
