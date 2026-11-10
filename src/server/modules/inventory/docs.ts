@@ -55,6 +55,7 @@ import { hashRequest } from '../../lib/idempotency';
 import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForApproval } from '../approvals/engine';
 import { urgentPlan } from './urgent';
 import { receiptAttachments } from './attachments';
+import { loadSettings } from '../settings';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -117,7 +118,16 @@ const DocBody = z.discriminatedUnion('docType', [
   }),
   z.object({ docType: z.literal('issue'), ...Header, departmentId: id, handler: z.string().trim().min(1, '请填写领料人').max(32), lines: lines(QtyLine) }),
   z.object({ docType: z.literal('issue_return'), ...Header, sourceDocId: id, handler: z.string().trim().max(32).default(''), lines: lines(SourceLine) }),
-  z.object({ docType: z.literal('direct_use'), ...Header, ...WarehouseField, note: z.string().trim().min(2, '请填写耗用用途').max(200), lines: lines(QtyLine) }),
+  z.object({
+    docType: z.literal('direct_use'),
+    ...Header,
+    ...WarehouseField,
+    // 8.0.7 起原来的「耗用用途」文字叫「说明」（照旧必填）；用途从列表选、经办人选员工（2.3，迁移 098），自动生成的耗用不带
+    note: z.string().trim().min(2, '请填写说明').max(200),
+    purpose: z.string().trim().min(1, '请选择用途').max(12, '用途最多 12 个字').nullable().default(null),
+    handlerId: id.nullable().default(null),
+    lines: lines(QtyLine),
+  }),
   z.object({ docType: z.literal('damage'), ...Header, ...WarehouseField, note: z.string().trim().min(2, '请填写报损原因').max(200), lines: lines(QtyLine) }),
   z.object({ docType: z.literal('count'), ...Header, ...WarehouseField, lines: lines(CountLine) }),
   z.object({ docType: z.literal('supplier_return'), ...Header, note: z.string().trim().min(2, '请填写退货原因').max(200), sourceDocId: id, lines: lines(SourceLine) }),
@@ -267,7 +277,8 @@ export async function getDoc(db: Db, docId: number, timeZone?: string): Promise<
   const [d] = await db<(InvDoc & Record<string, unknown>)[]>`
     SELECT d.id, d.doc_no, d.doc_type, d.status, d.doc_date, d.handler, d.note, d.amount_cents, d.no_po, d.is_synthetic, d.created_by,
            d.created_at, d.submitted_at, d.confirmed_at, d.returned_reason, d.voided_at, d.void_reason,
-           d.warehouse_id, d.urgent, d.urgent_cap_cents, d.urgent_approved_at,
+           d.warehouse_id, d.urgent, d.urgent_cap_cents, d.urgent_approved_at, d.use_purpose,
+           CASE WHEN uh.id IS NULL THEN NULL ELSE json_build_object('id', uh.id, 'name', uh.display_name) END AS use_handler,
            CASE WHEN w.id IS NULL THEN NULL ELSE json_build_object('id', w.id, 'name', ${WAREHOUSE_NAME_SQL(db)}, 'kind', w.kind) END AS warehouse,
            CASE WHEN ca.id IS NULL THEN NULL ELSE json_build_object('id', ca.id, 'name', ca.display_name) END AS co_acceptor,
            CASE WHEN d.dept_signed_at IS NULL THEN NULL
@@ -296,6 +307,7 @@ export async function getDoc(db: Db, docId: number, timeZone?: string): Promise<
     LEFT JOIN staff ca ON ca.id = d.co_acceptor_id
     LEFT JOIN staff sg ON sg.id = d.dept_signed_by
     LEFT JOIN staff sa ON sa.id = d.supplier_answer_by
+    LEFT JOIN staff uh ON uh.id = d.use_handler_id
     WHERE d.id = ${docId}`;
   if (!d) throw notFound('单据不存在');
   // 行上的「当前结存」与盘点的账面：按这张单出库的那个仓（领料从总仓出，退回从部门小仓出）
@@ -509,6 +521,9 @@ interface Prepared {
   urgent: boolean;
   urgentCapCents: number | null;
   coAcceptorId: number | null;
+  /** 耗用的用途与经办人（8.0.7 2.3）；别的单据为空 */
+  usePurpose: string | null;
+  useHandlerId: number | null;
   lines: PreparedLine[];
 }
 
@@ -644,6 +659,25 @@ export async function receivedByPoLine(db: Db, poId: number, excludeDocId: numbe
   return new Map(rows.map((r) => [r.poLineId, r.qty]));
 }
 
+/**
+ * 耗用的用途与经办人（8.0.7 2.3）：用途要在「经营规则 → 可调的数值」的列表里；经办人要是在职员工，没选的默认是自己。
+ * 没带用途的（旧的调用、自动生成的）两样都不记。
+ */
+async function prepareUse(db: Db, purpose: string | null, handlerId: number | null, actor: Actor): Promise<{ usePurpose: string | null; useHandlerId: number | null }> {
+  if (purpose === null) {
+    if (handlerId !== null) throw badRequest('请选择用途');
+    return { usePurpose: null, useHandlerId: null };
+  }
+  const { consumptionPurposes } = await loadSettings(db);
+  if (!consumptionPurposes.includes(purpose)) {
+    throw unprocessable('PURPOSE_INVALID', `用途只能选：${consumptionPurposes.join('、')}（在「经营规则 → 可调的数值」里改）`);
+  }
+  const who = handlerId ?? actor.id;
+  const [st] = await db<{ active: boolean }[]>`SELECT active FROM staff WHERE id = ${who}`;
+  if (!st || !st.active) throw unprocessable('HANDLER_INVALID', '经办人不存在或已停用');
+  return { usePurpose: purpose, useHandlerId: who };
+}
+
 async function prepare(
   db: Db,
   deps: Deps,
@@ -670,6 +704,8 @@ async function prepare(
     urgent: false,
     urgentCapCents: null,
     coAcceptorId: null,
+    usePurpose: null,
+    useHandlerId: null,
     lines: [],
   };
 
@@ -697,8 +733,10 @@ async function prepare(
       }
       const mats = await loadMaterials(db, body.lines.map((l) => l.materialId));
       if (body.docType !== 'issue' && wh?.kind === 'department') assertNoCounterUse(mats, 'dept');
+      const use = body.docType === 'direct_use' ? await prepareUse(db, body.purpose, body.handlerId, actor) : { usePurpose: null, useHandlerId: null };
       return {
         ...empty,
+        ...use,
         departmentId: body.docType === 'issue' ? body.departmentId : empty.departmentId,
         handler: body.docType === 'issue' ? body.handler : '',
         lines: body.lines.map((l) => {
@@ -1358,11 +1396,11 @@ export async function createDoc(deps: Deps, raw: CreateDocInput, actor: Actor, i
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO inv_docs (doc_no, doc_type, status, doc_date, supplier_id, purchase_order_id, department_id, handler,
                               source_doc_id, note, amount_cents, no_po, price_basis, warehouse_id, urgent, urgent_cap_cents,
-                              co_acceptor_id, client_key, created_by)
+                              co_acceptor_id, use_purpose, use_handler_id, client_key, created_by)
         VALUES (${docNo}, ${body.docType}, 'draft', ${body.docDate}, ${prepared.supplierId}, ${prepared.purchaseOrderId},
                 ${prepared.departmentId}, ${prepared.handler}, ${prepared.sourceDocId}, ${body.note}, ${prepared.amountCents},
                 ${prepared.noPo}, ${prepared.priceBasis}, ${prepared.warehouseId}, ${prepared.urgent}, ${prepared.urgentCapCents},
-                ${prepared.coAcceptorId}, ${meta.clientKey}, ${actor.id})
+                ${prepared.coAcceptorId}, ${prepared.usePurpose}, ${prepared.useHandlerId}, ${meta.clientKey}, ${actor.id})
         RETURNING id`;
       const newId = row!.id;
       await insertLines(tx, newId, prepared.lines);
@@ -1413,7 +1451,7 @@ export async function updateDoc(deps: Deps, docId: number, raw: DocBodyInput & {
              department_id = ${prepared.departmentId}, handler = ${prepared.handler}, source_doc_id = ${prepared.sourceDocId},
              note = ${body.note}, amount_cents = ${prepared.amountCents}, no_po = ${prepared.noPo}, price_basis = ${prepared.priceBasis},
              warehouse_id = ${prepared.warehouseId}, urgent = ${prepared.urgent}, urgent_cap_cents = ${prepared.urgentCapCents},
-             co_acceptor_id = ${prepared.coAcceptorId}, updated_at = now()
+             co_acceptor_id = ${prepared.coAcceptorId}, use_purpose = ${prepared.usePurpose}, use_handler_id = ${prepared.useHandlerId}, updated_at = now()
       WHERE id = ${docId}`;
     await insertLines(tx, docId, prepared.lines);
     if (meta.action === 'submit') await submitLocked(tx, await lockDoc(tx, docId), actor, meta.approveNow, deps.config.timezone);

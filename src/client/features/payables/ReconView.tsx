@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { CalendarCheck, CircleAlert, PackageCheck } from 'lucide-react';
-import type { BatchReconItem, MonthlyReconItem, SupplierReconciliation } from '@shared/cycles';
+import { RECON_REPLY_LABELS, type BatchReconItem, type MonthlyReconItem, type SupplierReconciliation } from '@shared/cycles';
 import { formatAmount } from '@shared/money';
 import { ApiError, api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
@@ -283,7 +283,96 @@ function RecordRow({ rec, canVoid, onVoid }: { rec: SupplierReconciliation; canV
           {rec.voided.byName} 撤销 · {formatDateTime(rec.voided.at)} · {rec.voided.reason}
         </p>
       )}
+      {!rec.voided && <LinkRow rec={rec} canManage={canVoid} />}
     </li>
+  );
+}
+
+/**
+ * 供应商在线对账确认（8.0.7 2.6）：生成链接发给供应商（链接只在生成时显示一次、有效天数按设置），
+ * 看供应商的回复（确认无误 / 有异议）；没回的可以作废、重发。
+ */
+function LinkRow({ rec, canManage }: { rec: SupplierReconciliation; canManage: boolean }) {
+  const toast = useToast();
+  const invalidate = useInvalidateAll();
+  const [busy, setBusy] = useState(false);
+  const [url, setUrl] = useState<string | null>(null);
+  const l = rec.link;
+  const make = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post<{ token: string }>(`/api/payables/reconciliations/${rec.id}/links`, {});
+      setUrl(`${window.location.origin}/r/${r.token}`);
+      await invalidate();
+    } catch (e) {
+      toast({ tone: 'error', title: errorMessage(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const revoke = async () => {
+    if (!l) return;
+    setBusy(true);
+    try {
+      await api.post(`/api/payables/recon-links/${l.id}/void`, {});
+      setUrl(null);
+      await invalidate();
+    } catch (e) {
+      toast({ tone: 'error', title: errorMessage(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const copy = async () => {
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast({ tone: 'success', title: '链接已复制', body: '发给供应商（微信、短信都行），对方不用登录就能打开' });
+    } catch {
+      toast({ tone: 'info', title: '复制不了，请长按链接手动复制' });
+    }
+  };
+  const state = !l
+    ? null
+    : l.reply
+      ? { tone: l.reply === 'confirmed' ? ('pine' as const) : ('clay' as const), text: `${RECON_REPLY_LABELS[l.reply]} · ${l.replyName} · ${formatDateTime(l.repliedAt!)}` }
+      : l.voidedAt
+        ? { tone: 'neutral' as const, text: '链接已作废' }
+        : l.expired
+          ? { tone: 'neutral' as const, text: `链接已过期（${formatDateTime(l.expiresAt)}）` }
+          : { tone: 'yuzu' as const, text: `已发链接，等供应商回复（${formatDateTime(l.expiresAt)} 前有效）` };
+  return (
+    <div className="mt-1.5 space-y-1" data-testid={`recon-link-${rec.id}`}>
+      <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+        <span className="text-ink-3">供应商确认：</span>
+        {state ? <Badge tone={state.tone}>{state.text}</Badge> : <span className="text-ink-3">还没发链接</span>}
+        {canManage && !l?.reply && (
+          <>
+            <Button size="sm" variant="secondary" loading={busy} onClick={() => void make()} data-testid="recon-link-create">
+              {l && !l.voidedAt && !l.expired ? '重发链接' : '生成确认链接'}
+            </Button>
+            {l && !l.voidedAt && !l.expired && (
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => void revoke()}>
+                作废链接
+              </Button>
+            )}
+          </>
+        )}
+      </div>
+      {l?.reply === 'disputed' && l.replyNote && <p className="text-[12.5px] font-semibold text-clay">供应商的异议：{l.replyNote}</p>}
+      {l?.reply === 'confirmed' && l.replyNote && <p className="text-[12.5px] text-ink-2">供应商留言：{l.replyNote}</p>}
+      {url && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-line bg-paper-2 px-2.5 py-1.5 text-[12.5px]">
+          <span className="min-w-0 flex-1 break-all font-mono" data-testid="recon-link-url">
+            {url}
+          </span>
+          <Button size="sm" variant="secondary" onClick={() => void copy()}>
+            复制
+          </Button>
+          <span className="w-full text-ink-3">链接只显示这一次；丢了就重发一条（上一条会作废）。</span>
+        </div>
+      )}
+    </div>
   );
 }
 

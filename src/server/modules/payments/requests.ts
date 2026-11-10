@@ -42,6 +42,7 @@ import { loadExpenseRules } from '../expenses';
 import { assertNotFuture, assertSameMonth, logApproval } from '../inventory/common';
 import { checkAllocations, confirmPayment, lockSupplier, openItems, reopenPaidRequest, supplierCredits } from '../inventory/payables';
 import { contractReceivedPoIds, poThreeWay, threeWayProblems } from './match';
+import { loadSettings } from '../settings';
 import { contractPlan, requestPaidSql } from './plan';
 
 const id = z.number().int().positive();
@@ -357,6 +358,21 @@ interface ContractCheck {
  * 合同那一段能不能申请这个金额（调用前已锁住合同一行）：合同签署了、这一段有计划金额、不超过还能申请的；
  * 超过现在可付的要按提前付款申请（P6）；采购合同除预付段外要三单齐全（P8）
  */
+/**
+ * 验收不合格挂起付款（8.0.7 2.5，V9）：这份合同最近一条没作废的验收是「不合格」、开关开着时拒绝（ACCEPTANCE_HOLD）。
+ * 只读验收登记（登记验收锁合同一行，这里不锁合同：与登记同时发生时以先提交的为准）。
+ */
+async function assertNoAcceptanceHold(tx: Tx, contractId: number) {
+  const [a] = await tx<{ result: string; acceptedOn: string; note: string; contractNo: string }[]>`
+    SELECT a.result, a.accepted_on::text AS accepted_on, a.note, c.contract_no
+    FROM contract_acceptances a JOIN contracts c ON c.id = a.contract_id
+    WHERE a.contract_id = ${contractId} AND a.voided_at IS NULL
+    ORDER BY a.accepted_on DESC, a.id DESC LIMIT 1`;
+  if (!a || a.result !== 'fail') return;
+  if (!(await loadSettings(tx)).acceptanceHoldsPayment) return;
+  throw unprocessable('ACCEPTANCE_HOLD', `合同 ${a.contractNo} 最近一次验收（${a.acceptedOn}）不合格${a.note ? `：${a.note}` : ''}，付款挂起；重新验收合格以后再付`);
+}
+
 async function checkContractRequest(
   tx: Tx,
   today: string,
@@ -365,6 +381,7 @@ async function checkContractRequest(
 ): Promise<ContractCheck> {
   if (!(await enabledErpModules(tx)).has('contracts')) throw erpModuleDisabled('contracts');
   const plan = await contractPlan(tx, input.contractId, today);
+  if (plan.acceptanceHold) throw unprocessable('ACCEPTANCE_HOLD', `合同 ${plan.contractNo}：${plan.whyNot}`);
   if (!plan.canRequest) throw unprocessable('CONTRACT_NOT_PAYABLE', `合同 ${plan.contractNo}：${plan.whyNot}`);
   const st = plan.stages.find((s) => s.stage === input.stage)!;
   const label = PAYMENT_STAGE_LABELS[input.stage];
@@ -746,6 +763,7 @@ export async function payFromRequest(deps: Deps, requestId: number, raw: unknown
       if (input.amountCents > left) throw conflict('OVER_REQUEST', `申请 ${yuan(r.amountCents)}，已付 ${yuan(r.paidCents)}，这次最多付 ${yuan(left)}`, { leftCents: left });
       let note = input.note;
       if (r.contractId !== null) {
+        await assertNoAcceptanceHold(tx, r.contractId);
         if (input.allocations.some((a) => a.kind !== 'receipt')) throw badRequest('合同的付款只能核销到这份合同的收货单上');
         const ids = input.allocations.map((a) => a.targetId);
         if (ids.length) {
@@ -818,6 +836,7 @@ export async function payoutFromRequest(deps: Deps, requestId: number, raw: unkn
       const r = await lockRequest(tx, requestId);
       if (r.payMode !== 'direct') throw conflict('PAY_MODE_MISMATCH', '采购合同与没挂合同的申请请按供应商往来登记付款');
       if (r.status !== 'approved') throw conflict('INVALID_STATE', r.status === 'paid' ? '这张申请已经付清了' : '只有批过（待付款）的申请可以登记付款');
+      if (r.contractId !== null) await assertNoAcceptanceHold(tx, r.contractId);
       const left = r.amountCents - r.paidCents;
       if (input.amountCents > left) throw conflict('OVER_REQUEST', `申请 ${yuan(r.amountCents)}，已付 ${yuan(r.paidCents)}，这次最多付 ${yuan(left)}`, { leftCents: left });
       const docNo = await nextDocNo(tx, 'contract_payout', 'HF', input.payDate);

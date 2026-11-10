@@ -61,6 +61,9 @@ export const listSuppliers = (db: Db, includeInactive = false) =>
            CASE WHEN default_channel IS NULL OR default_channel IN ('supplier', 'online') THEN default_channel ELSE 'self' END AS default_channel,
            contracted,
            (SELECT count(*)::int FROM supplier_contract_files f WHERE f.supplier_id = suppliers.id AND f.removed_at IS NULL) AS contract_files,
+           -- 准入与证照（8.0.7 A2，迁移 097）：在用的证照里最早到期的
+           admission, admission_note,
+           (SELECT min(l.valid_until)::text FROM supplier_licenses l WHERE l.supplier_id = suppliers.id AND l.removed_at IS NULL) AS license_due,
            active, is_synthetic FROM suppliers
     ${includeInactive ? db`` : db`WHERE active`} ORDER BY active DESC, code`;
 
@@ -211,7 +214,7 @@ export async function saveSupplier(
   db: Db,
   id: number | null,
   raw: SupplierInputData,
-  extra: { isSynthetic?: boolean; today?: string } = {},
+  extra: { isSynthetic?: boolean; today?: string; admission?: 'pending' | 'approved' } = {},
 ): Promise<number> {
   const s = parse(SupplierInput, raw);
   // 改成按批次对账的那天（#23，v0.7.13）：之前的收货不提醒对账
@@ -221,9 +224,10 @@ export async function saveSupplier(
   try {
     if (id === null) {
       const [row] = await db<{ id: number }[]>`
-        INSERT INTO suppliers (code, name, contact, phone, note, settlement, reconcile_cycle, reconcile_since, default_channel, contracted, active, is_synthetic)
+        INSERT INTO suppliers (code, name, contact, phone, note, settlement, reconcile_cycle, reconcile_since, default_channel, contracted, active, is_synthetic, admission)
         VALUES (${s.code}, ${s.name}, ${s.contact}, ${s.phone}, ${s.note}, ${s.settlement ?? 'credit'}, ${cycle ?? 'monthly'},
-                ${cycle === 'batch' ? db`coalesce(${today}::date, CURRENT_DATE)` : null}, ${s.defaultChannel ?? null}, ${s.contracted ?? false}, ${s.active}, ${extra.isSynthetic ?? false})
+                ${cycle === 'batch' ? db`coalesce(${today}::date, CURRENT_DATE)` : null}, ${s.defaultChannel ?? null}, ${s.contracted ?? false}, ${s.active}, ${extra.isSynthetic ?? false},
+                ${extra.admission ?? 'approved'})
         RETURNING id`;
       return row!.id;
     }
@@ -335,7 +339,8 @@ export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps
 
   app.get('/api/inventory/suppliers', { preHandler: guard('inventory.read') }, async (req) => listSuppliers(sql, all(req.query)));
   app.post('/api/inventory/suppliers', { preHandler: guard('inventory.master') }, async (req, reply) => {
-    const id = await saveSupplier(sql, null, req.body as SupplierInputData, { today: todayIn(config.timezone) });
+    // 页面上新建的供应商是「待准入」（8.0.7 A2，V1）：负责人登记营业执照后准入；种子、导入照旧按已准入
+    const id = await saveSupplier(sql, null, req.body as SupplierInputData, { today: todayIn(config.timezone), admission: 'pending' });
     await writeAudit(sql, { staffId: req.actor.id, action: 'inventory_master_saved', targetType: 'supplier', targetId: id, detail: req.body as Record<string, unknown>, ip: req.ip });
     reply.code(201);
     return listSuppliers(sql, true);

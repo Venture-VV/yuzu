@@ -5,6 +5,7 @@ import { CASH_DRAWER_KEY, DEFAULT_CASH_DRAWERS, MAX_CASH_DRAWERS, SHIFT_MODES, t
 import { DEDUCTION_RULES } from '@shared/deduction';
 import { DEFAULT_MEMBER_CHANNELS, MAX_MEMBER_CHANNELS, MEMBER_CHANNEL_KEY, type MemberChannel } from '@shared/members';
 import { DEFAULT_TUNABLES, PRINT_MODES, TUNABLE_LIMITS } from '@shared/tunables';
+import { MAX_CONSUMPTION_PURPOSES } from '@shared/supply';
 import type { StoreRules } from '@shared/types';
 import type { Db } from '../db';
 import { writeAudit } from '../lib/audit';
@@ -52,6 +53,17 @@ const KEY_MAP = {
   campaign_notice_days: 'campaignNoticeDays',
   sms_max_attempts: 'smsMaxAttempts',
   finance_hides_marketing_cost: 'financeHidesMarketingCost',
+  // 8.0.7 供应链收尾与应收（docs/ERP_V807.md 第 6 节）
+  supplier_approved_only: 'supplierApprovedOnly',
+  license_remind_days: 'licenseRemindDays',
+  supplier_watch_score: 'supplierWatchScore',
+  consumption_purposes: 'consumptionPurposes',
+  slow_moving_days: 'slowMovingDays',
+  acceptance_holds_payment: 'acceptanceHoldsPayment',
+  recon_link_days: 'reconLinkDays',
+  ar_overdue_days: 'arOverdueDays',
+  expiry_remind_days: 'expiryRemindDays',
+  wecom_weekly_push: 'wecomWeeklyPush',
 } as const satisfies Record<string, keyof StoreSettings>;
 
 /** 设置项在库里的键（规则总表按它找最近修改的时间与人） */
@@ -136,6 +148,14 @@ const SettingsInput = z
     countCardSales: z.boolean('请选择是否售次卡'),
     printMode: z.enum(PRINT_MODES, '打印方式不正确'),
     financeHidesMarketingCost: z.boolean('请选择财务账号能不能看营销成本'),
+    supplierApprovedOnly: z.boolean('请选择没准入的供应商能不能下采购单'),
+    acceptanceHoldsPayment: z.boolean('请选择验收不合格时挂不挂起付款'),
+    wecomWeeklyPush: z.boolean('请选择是否推送到企业微信'),
+    consumptionPurposes: z
+      .array(z.string().trim().min(1, '耗用用途不能为空').max(12, '每个耗用用途最多 12 个字'), '耗用用途要是一组文字')
+      .min(1, '至少要有一个耗用用途')
+      .max(MAX_CONSUMPTION_PURPOSES, `耗用用途最多 ${MAX_CONSUMPTION_PURPOSES} 个`)
+      .refine((l) => new Set(l).size === l.length, '耗用用途重复了'),
     ...tunableInputs(),
     cashDrawers: z
       .array(

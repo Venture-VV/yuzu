@@ -273,11 +273,17 @@ async function changesOf(db: Db, contractId: number): Promise<ChangeView[]> {
 }
 
 async function filesOf(db: Db, contractId: number): Promise<ContractFileView[]> {
-  const rows = await db<{ id: number; imageId: number; sortNo: number; addedByName: string; addedAt: string }[]>`
-    SELECT f.id, f.image_id, f.sort_no, s.display_name AS added_by_name, f.added_at
+  const rows = await db<{ id: number; imageId: number | null; fileId: number | null; name: string; sortNo: number; addedByName: string; addedAt: string }[]>`
+    SELECT f.id, f.image_id, f.file_id, f.name, f.sort_no, s.display_name AS added_by_name, f.added_at
     FROM contract_files f JOIN staff s ON s.id = f.added_by
     WHERE f.contract_id = ${contractId} AND f.removed_at IS NULL ORDER BY f.sort_no`;
-  return rows.map((r) => ({ ...r, id: Number(r.id), imageId: Number(r.imageId), url: contractFileUrl(Number(r.id)) }));
+  return rows.map(({ fileId, ...r }) => ({
+    ...r,
+    id: Number(r.id),
+    imageId: r.imageId === null ? null : Number(r.imageId),
+    kind: fileId === null ? 'image' : 'pdf',
+    url: contractFileUrl(Number(r.id)),
+  }));
 }
 
 async function posOf(db: Db, contractId: number): Promise<ContractPoView[]> {

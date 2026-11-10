@@ -33,6 +33,10 @@ import { registerPurchasingRoutes } from './modules/inventory/purchasing';
 import { registerPurchaseRulesRoutes } from './modules/inventory/purchase-rules';
 import { registerFileRoutes } from './modules/inventory/files';
 import { registerAttachmentRoutes } from './modules/inventory/attachments';
+import { registerAdmissionRoutes } from './modules/inventory/admission';
+import { registerScoreRoutes } from './modules/inventory/scores';
+import { registerSlowRoutes } from './modules/inventory/slow';
+import { registerReconLinkRoutes } from './modules/inventory/recon-links';
 import { registerCompareRoutes } from './modules/inventory/compare';
 import { registerGiftRoutes } from './modules/inventory/gifts';
 import { registerPettyAccountRoutes } from './modules/petty-accounts';
@@ -40,6 +44,7 @@ import { registerReplenishRoutes } from './modules/inventory/replenish';
 import { registerSourcingRoutes } from './modules/inventory/sourcing';
 import { registerApprovalRoutes } from './modules/approvals/routes';
 import { registerContractRoutes } from './modules/contracts/routes';
+import { registerTemplateRoutes } from './modules/contracts/templates';
 import { registerPaymentRoutes } from './modules/payments/routes';
 import { registerReportRoutes } from './modules/inventory/reports';
 import { registerLedgerRoutes } from './modules/ledger';
@@ -225,6 +230,10 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerPurchaseRulesRoutes(app, deps);
   registerFileRoutes(app, deps);
   registerAttachmentRoutes(app, deps);
+  registerAdmissionRoutes(app, deps);
+  registerScoreRoutes(app, deps);
+  registerSlowRoutes(app, deps);
+  registerReconLinkRoutes(app, deps);
   registerCompareRoutes(app, deps);
   registerGiftRoutes(app, deps);
   registerPettyAccountRoutes(app, deps);
@@ -233,6 +242,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   // 审批中心（v0.7.30）
   registerApprovalRoutes(app, deps);
   // 合同与法务审查（v0.7.31）
+  registerTemplateRoutes(app, deps);
   registerContractRoutes(app, deps);
   registerPaymentRoutes(app, deps);
   registerPayableRoutes(app, deps);

@@ -3,6 +3,8 @@
 
 import { z } from 'zod';
 import {
+  ACCEPTANCE_ITEM_MAX_CHARS,
+  ACCEPTANCE_ITEMS_MAX,
   BEARERS,
   CONTRACT_MAX_LINES,
   PAYMENT_STAGES,
@@ -44,7 +46,17 @@ export const ContentInput = z.object({
     .array(z.object({ stage: z.enum(PAYMENT_STAGES), percentBp: bp('付款比例'), condition: text('付款条件', 60) }))
     .length(PAYMENT_STAGES.length, '付款节点要有预付、到货、验收、质保四段'),
   warranty: z.object({ basis: z.enum(WARRANTY_BASES).default('acceptance'), months: z.number().int('质保期限按整月').min(0).max(120, '质保期限最多 120 个月').default(12) }),
-  acceptance: z.object({ method: text('验收方法', 200), signer: text('验收签字', 60), penalty: text('不合格处理', 200) }),
+  acceptance: z.object({
+    method: text('验收方法', 200),
+    signer: text('验收签字', 60),
+    penalty: text('不合格处理', 200),
+    // 验收标准（8.0.7 2.5）：从模板带出、可以再改；逐条写进合同内容
+    templateName: text('验收标准模板', 40),
+    items: z
+      .array(z.string().trim().min(1, '验收标准不能有空行').max(ACCEPTANCE_ITEM_MAX_CHARS, `每条验收标准最多 ${ACCEPTANCE_ITEM_MAX_CHARS} 个字`))
+      .max(ACCEPTANCE_ITEMS_MAX, `验收标准最多 ${ACCEPTANCE_ITEMS_MAX} 条`)
+      .default([]),
+  }),
   note: text('备注', 200),
   lines: z.array(LineInput).max(CONTRACT_MAX_LINES, `单价表最多 ${CONTRACT_MAX_LINES} 行`).default([]),
 });
@@ -91,7 +103,13 @@ export async function normalizeContent(db: Db, input: ContentInputT): Promise<Co
     unloadingBearer: input.unloadingBearer,
     paymentTerms: input.paymentTerms.map((t) => ({ stage: t.stage, percentBp: t.percentBp, condition: t.condition })),
     warranty: { basis: input.warranty.basis, months: input.warranty.months },
-    acceptance: { method: input.acceptance.method, signer: input.acceptance.signer, penalty: input.acceptance.penalty },
+    acceptance: {
+      method: input.acceptance.method,
+      signer: input.acceptance.signer,
+      penalty: input.acceptance.penalty,
+      templateName: input.acceptance.templateName,
+      items: input.acceptance.items,
+    },
     note: input.note,
     lines,
   };
@@ -135,7 +153,13 @@ export function readContent(raw: unknown): ContractContent {
     unloadingBearer: c.unloadingBearer ?? 'na',
     paymentTerms: (c.paymentTerms ?? []).map((t) => ({ stage: t.stage, percentBp: Number(t.percentBp), condition: t.condition ?? '' })),
     warranty: { basis: c.warranty?.basis ?? 'acceptance', months: Number(c.warranty?.months ?? 0) },
-    acceptance: { method: c.acceptance?.method ?? '', signer: c.acceptance?.signer ?? '', penalty: c.acceptance?.penalty ?? '' },
+    acceptance: {
+      method: c.acceptance?.method ?? '',
+      signer: c.acceptance?.signer ?? '',
+      penalty: c.acceptance?.penalty ?? '',
+      templateName: c.acceptance?.templateName ?? '',
+      items: Array.isArray(c.acceptance?.items) ? c.acceptance.items.map(String) : [],
+    },
     note: c.note ?? '',
     lines: (c.lines ?? []).map((l) => ({
       materialId: l.materialId === null || l.materialId === undefined ? null : Number(l.materialId),

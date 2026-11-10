@@ -30,6 +30,7 @@ import { erpOpAbandoned } from '../erp-ops';
 import { loadInventorySettings, setTxTimeouts, todayIn } from './common';
 import { lockSupplier, statementTotals } from './payables';
 import { listWarehouses } from './reports';
+import { latestLink } from './recon-links';
 import { hashRequest } from '../../lib/idempotency';
 
 // ───────────────────────── 日期 ─────────────────────────
@@ -506,6 +507,7 @@ async function toReconciliation(db: Db, r: ReconRow): Promise<SupplierReconcilia
     createdAt: r.createdAt,
     voided: r.voidedAt ? { byName: r.voidedByName ?? '', at: r.voidedAt, reason: r.voidReason ?? '' } : null,
     changed,
+    link: await latestLink(db, r.id),
   };
 }
 

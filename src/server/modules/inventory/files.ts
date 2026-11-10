@@ -18,7 +18,7 @@ import { idParam, parse } from '../../lib/validate';
 import { pdfMaxBytes } from '@shared/tunables';
 import { loadSettings } from '../settings';
 
-export type FileScope = 'supplier_contract' | 'receipt' | 'invoice';
+export type FileScope = 'supplier_contract' | 'receipt' | 'invoice' | 'supplier_license' | 'contract_scan';
 
 const PdfInput = z.object({
   name: z.string().trim().min(1, '请写文件名').max(80, '文件名最多 80 个字'),

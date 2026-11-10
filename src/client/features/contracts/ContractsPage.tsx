@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { CalendarClock, FilePlus2, Plus, RefreshCw } from 'lucide-react';
+import { CalendarClock, FilePlus2, ListChecks, Plus, RefreshCw } from 'lucide-react';
 import { CONTRACT_CATEGORIES, CONTRACT_CATEGORY_LABELS, type ContractCategory } from '@shared/contracts';
 import { errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
@@ -15,6 +15,7 @@ import { Badge, Button, Card, Input, Notice, Select, Skeleton } from '../../comp
 import { ErpPage } from '../erp/ErpHome';
 import { ContractStatusBadge, daysLeftText } from './parts';
 import { useContractExpiring, useContracts, type ContractFilter } from './queries';
+import { TemplatesDialog } from './TemplatesDialog';
 
 const FILTERS: { value: ContractFilter; label: string }[] = [
   { value: 'all', label: '全部' },
@@ -37,6 +38,7 @@ export function ContractsPage() {
   const list = useContracts(filter, category, q);
   const expiring = useContractExpiring();
   const manage = can('contract.manage');
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   // 还没续签的才提醒；已经在续签（新合同没作废）的列在后面、标出续签的合同号
   const due = (expiring.data ?? []).filter((x) => !x.renewal);
   const renewing = (expiring.data ?? []).filter((x) => x.renewal);
@@ -46,13 +48,19 @@ export function ContractsPage() {
       title="合同"
       description="合同台账与四要素（单价、付款节点、质保、验收），法务按审查清单逐条审；签署、用印、扫描件归档；采购单可以挂合同、按单价表核对。"
       actions={
-        manage && (
-          <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => navigate('/erp/contracts/new')} data-testid="contract-new">
-            新建合同
+        <span className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" icon={<ListChecks className="size-4" />} onClick={() => setTemplatesOpen(true)} data-testid="acceptance-templates">
+            验收标准模板
           </Button>
-        )
+          {manage && (
+            <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => navigate('/erp/contracts/new')} data-testid="contract-new">
+              新建合同
+            </Button>
+          )}
+        </span>
       }
     >
+      <TemplatesDialog open={templatesOpen} onClose={() => setTemplatesOpen(false)} manage={manage} />
       <div className="space-y-4">
         {manage && <ErpPendingPanel types={['contract_create']} onFound={(_, ref) => navigate(`/erp/contracts/${ref.refId}`)} />}
 

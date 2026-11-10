@@ -106,4 +106,51 @@ export interface SupplierReconciliation {
   voided: { byName: string; at: string; reason: string } | null;
   /** 有效的登记，登记后数字又变了 */
   changed: boolean;
+  /** 最近一条对账确认链接（8.0.7 2.6）；没生成过的为空 */
+  link: ReconLinkState | null;
+}
+
+// ───────────────────────── 供应商在线对账确认（8.0.7 2.6） ─────────────────────────
+
+export type ReconReply = 'confirmed' | 'disputed';
+export const RECON_REPLY_LABELS: Record<ReconReply, string> = { confirmed: '已确认无误', disputed: '有异议' };
+
+/** 对账确认链接的状态（不含链接原文：只在生成时给一次） */
+export interface ReconLinkState {
+  id: number;
+  createdAt: string;
+  createdByName: string;
+  expiresAt: string;
+  expired: boolean;
+  voidedAt: string | null;
+  reply: ReconReply | null;
+  replyName: string | null;
+  replyNote: string;
+  repliedAt: string | null;
+}
+
+/** 生成链接时的对账单快照（供应商看到的就是这个） */
+export interface ReconSnapshot {
+  storeName: string;
+  supplierName: string;
+  kind: 'month' | 'batch';
+  /** 月结：YYYY-MM；按批次为空 */
+  month: string | null;
+  from: string | null;
+  to: string | null;
+  /** 月结：登记时的数字 */
+  totals: SupplierReconciliation['snapshot'];
+  totalCents: number;
+  /** 单据：月结是这个月的往来（收货、退货、付款……），按批次是登记的收货单 */
+  rows: { date: string; docNo: string; kind: string; amountCents: number; note: string }[];
+}
+
+/** 供应商打开链接看到的（不用登录） */
+export interface ReconPublicView {
+  snapshot: ReconSnapshot;
+  expiresAt: string;
+  reply: ReconReply | null;
+  replyName: string | null;
+  replyNote: string;
+  repliedAt: string | null;
 }

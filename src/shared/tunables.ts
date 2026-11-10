@@ -9,6 +9,7 @@ import { MP_FOOD_ORDER_LIMITS } from './dining';
 import { PRINT_WAIT_MAX_MS } from './devices';
 import { MAX_PDF_BYTES, MAX_RECEIPT_ATTACHMENTS } from './inventory';
 import { PLATFORM_BACKFILL_DAYS } from './platform';
+import { DEFAULT_CONSUMPTION_PURPOSES } from './supply';
 
 /**
  * 打印方式（店主 2026-11-10：设置打印功能就行，连接打印机让各自的电脑去负责）：
@@ -55,6 +56,27 @@ export interface Tunables {
   smsMaxAttempts: number;
   /** HY14 有财务职责（对账付款、成本核算）的账号看不到营销成本测算（默认是；关掉以后按岗位权限给） */
   financeHidesMarketingCost: boolean;
+  // ── 8.0.7 供应链收尾与应收（docs/ERP_V807.md 第 6 节，V1–V20）──
+  /** V2 采购单只能给已准入的供应商（关着时只提醒） */
+  supplierApprovedOnly: boolean;
+  /** V3 证照到期前几天进待办 */
+  licenseRemindDays: number;
+  /** V5 季度评分低于几分进观察名单 */
+  supplierWatchScore: number;
+  /** V6 部门耗用的用途 */
+  consumptionPurposes: string[];
+  /** V7 有结存、多少天没出库算呆滞 */
+  slowMovingDays: number;
+  /** V9 合同最近一次验收不合格时挂起付款 */
+  acceptanceHoldsPayment: boolean;
+  /** V10 对账确认链接有效几天 */
+  reconLinkDays: number;
+  /** V14 应收（挂账、平台）超过几天没回进待办 */
+  arOverdueDays: number;
+  /** V18 批次到期前几天进待办 */
+  expiryRemindDays: number;
+  /** V20 每周一把本周应付、待审批等推到企业微信群（机器人地址在服务器 .env 的 ERP_WECOM_WEBHOOK） */
+  wecomWeeklyPush: boolean;
 }
 
 export const DEFAULT_TUNABLES: Tunables = {
@@ -75,6 +97,16 @@ export const DEFAULT_TUNABLES: Tunables = {
   campaignNoticeDays: ISSUED_NOTICE_DAYS,
   smsMaxAttempts: 3,
   financeHidesMarketingCost: true,
+  supplierApprovedOnly: false,
+  licenseRemindDays: 30,
+  supplierWatchScore: 70,
+  consumptionPurposes: [...DEFAULT_CONSUMPTION_PURPOSES],
+  slowMovingDays: 90,
+  acceptanceHoldsPayment: true,
+  reconLinkDays: 14,
+  arOverdueDays: 60,
+  expiryRemindDays: 30,
+  wecomWeeklyPush: false,
 };
 
 /** 整数项的取值范围（页面与服务端同一份） */
@@ -95,8 +127,18 @@ export const TUNABLE_LIMITS = {
   campaignMaxMembers: { min: 1, max: 20_000, label: '批量发券一次最多几位' },
   campaignNoticeDays: { min: 1, max: 90, label: '到账弹窗最多显示几天' },
   smsMaxAttempts: { min: 1, max: 10, label: '短信最多试几次' },
+  licenseRemindDays: { min: 1, max: 365, label: '证照到期前几天提醒' },
+  supplierWatchScore: { min: 1, max: 100, label: '低于几分进观察名单' },
+  slowMovingDays: { min: 7, max: 365, label: '多少天没出库算呆滞' },
+  reconLinkDays: { min: 1, max: 90, label: '对账确认链接有效几天' },
+  arOverdueDays: { min: 1, max: 365, label: '应收超过几天没回提醒' },
+  expiryRemindDays: { min: 1, max: 365, label: '批次到期前几天提醒' },
 } as const satisfies Partial<Record<keyof Tunables, { min: number; max: number; label: string }>>;
 export type IntTunable = keyof typeof TUNABLE_LIMITS;
 export const INT_TUNABLES = Object.keys(TUNABLE_LIMITS) as IntTunable[];
 
 export const pdfMaxBytes = (t: Pick<Tunables, 'pdfMaxMb'>) => t.pdfMaxMb * 1024 * 1024;
+
+/** 开关项（8.0.7）：页面上是勾选框 */
+export const BOOL_TUNABLES = ['financeHidesMarketingCost', 'supplierApprovedOnly', 'acceptanceHoldsPayment', 'wecomWeeklyPush'] as const;
+export type BoolTunable = (typeof BOOL_TUNABLES)[number];

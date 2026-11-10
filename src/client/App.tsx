@@ -40,6 +40,8 @@ const CanteenCardsPrintPage = lazyPage(() => import('./features/canteen/CardsPri
 const CanteenPosterPrintPage = lazyPage(() => import('./features/canteen/PosterPrintPage').then((m) => m.CanteenPosterPrintPage));
 const ShiftPrintPage = lazyPage(() => import('./features/print/ShiftPrintPage').then((m) => m.ShiftPrintPage));
 // ERP 工作区
+// 供应商在线对账确认（8.0.7 2.6）：供应商打开链接，不用登录
+const ReconPublicPage = lazyPage(() => import('./features/payables/ReconPublicPage').then((m) => m.ReconPublicPage));
 const ErpShell = lazyPage(() => import('./features/erp/ErpShell').then((m) => m.ErpShell));
 const ErpHome = lazyPage(() => import('./features/erp/ErpHome').then((m) => m.ErpHome));
 const ErpModulesPage = lazyPage(() => import('./features/erp/ErpModulesPage').then((m) => m.ErpModulesPage));
@@ -186,6 +188,7 @@ function Home() {
 
 const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
+  { path: '/r/:token', element: <ReconPublicPage /> },
   {
     path: '/print',
     element: <AuthGate shell="bare" />,

@@ -109,11 +109,18 @@ export function registerContractRoutes(app: FastifyInstance, deps: Deps) {
     });
   });
   app.get('/api/erp/contracts/files/:id', { preHandler: READ }, async (req, reply) => {
-    const [img] = await sql<{ mime: string; data: Buffer }[]>`
-      SELECT i.mime, i.data FROM contract_files f JOIN erp_images i ON i.id = f.image_id WHERE f.id = ${param(req)}`;
-    if (!img) throw notFound('扫描件不存在');
-    reply.header('content-type', img.mime).header('cache-control', 'private, max-age=31536000, immutable');
-    return reply.send(img.data);
+    // 照片或 PDF（8.0.7 起，迁移 099）：PDF 在浏览器里直接打开
+    const [f] = await sql<{ mime: string; data: Buffer; pdf: boolean; name: string }[]>`
+      SELECT coalesce(i.mime, e.mime) AS mime, coalesce(i.data, e.data) AS data, f.file_id IS NOT NULL AS pdf, f.name
+      FROM contract_files f LEFT JOIN erp_images i ON i.id = f.image_id LEFT JOIN erp_files e ON e.id = f.file_id
+      WHERE f.id = ${param(req)}`;
+    if (!f) throw notFound('扫描件不存在');
+    reply.header('content-type', f.mime).header('cache-control', 'private, max-age=31536000, immutable');
+    if (f.pdf) {
+      const fileName = (f.name || '合同扫描件').replace(/\.pdf$/i, '') + '.pdf';
+      reply.header('content-disposition', `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    }
+    return reply.send(f.data);
   });
   app.get('/api/erp/contracts/:id', { preHandler: READ }, async (req) => detail(param(req)));
 
@@ -142,7 +149,8 @@ export function registerContractRoutes(app: FastifyInstance, deps: Deps) {
   }
 
   // ── 扫描件 ──
-  app.post('/api/erp/contracts/:id/files', { preHandler: MANAGE, bodyLimit: 1_600_000 }, async (req, reply) => {
+  // 照片压缩到 1 MB 以内；PDF 最多 10 MB（Base64 约 13.4 MB）
+  app.post('/api/erp/contracts/:id/files', { preHandler: MANAGE, bodyLimit: 14_500_000 }, async (req, reply) => {
     await addFile(deps, param(req), req.body, req.actor, req.ip);
     reply.code(201);
     return detail(param(req));
