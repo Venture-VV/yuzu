@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { canEditMenu, canScan, canUseMailbox, type CanteenMe } from '@shared/canteen';
-import { RoughDefs, IconChef, IconCamera, IconHome, IconLetter, IconMe, IconMenu, IconTicket } from './doodles';
+import { RoughDefs, IconChef, IconCamera, IconHome, IconLetter, IconMe, IconMenu, IconTicket, IconWork } from './doodles';
 import { inWeChat, InstallGuide, isStandalone, WeChatTip } from './install';
 import { Intro } from './intro/Intro';
 import { ApiError, call, clearCachedMe, loadCachedMe, NetworkError, readJson, removeKey, saveMe, writeJson, type CachedMe } from './lib';
@@ -18,6 +18,10 @@ import { KitchenPage } from './pages/Kitchen';
 import { MailboxPage } from './pages/Mailbox';
 import { MenuPage } from './pages/Menu';
 import { MePage } from './pages/Me';
+import { PatrolPage } from './pages/Patrol';
+import { PatrolLogPage } from './pages/PatrolLog';
+import { WorkPage } from './pages/Work';
+import { forgetPatrolLink, peekPatrolLink, rememberPatrolLink } from './patrol';
 import { RegisterPage } from './pages/Register';
 import { ScanPage } from './pages/Scan';
 import { TalkPage } from './pages/Talk';
@@ -25,12 +29,18 @@ import { clearBadge, disablePush, syncPush } from './push';
 import { Tour, tourDone, tourSteps } from './tour';
 import { Button, cn, Sheet, toast, Toasts } from './ui';
 
-type Route = 'home' | 'menu' | 'code' | 'talk' | 'kitchen' | 'scan' | 'mailbox' | 'me';
-const ROUTES: Route[] = ['home', 'menu', 'code', 'talk', 'kitchen', 'scan', 'mailbox', 'me'];
+// 工作台（8.0.9）：work 工作台、patrol 巡场、patrolLog 巡场记录
+type Route = 'home' | 'menu' | 'code' | 'talk' | 'kitchen' | 'scan' | 'mailbox' | 'me' | 'work' | 'patrol' | 'patrolLog';
+const ROUTES: Route[] = ['home', 'menu', 'code', 'talk', 'kitchen', 'scan', 'mailbox', 'me', 'work', 'patrol', 'patrolLog'];
 
-/** #join=ABCD2345（开通卡片）、#reg（注册二维码；以前印的 #reg=口令 也认，口令不再看）、#/menu、#/intro 这样的地址 */
-function readHash(): { route: Route; join: string | null; reg: boolean; login: boolean; intro: boolean } {
+/**
+ * #join=ABCD2345（开通卡片）、#reg（注册二维码；以前印的 #reg=口令 也认，口令不再看）、#/menu、#/intro 这样的地址；
+ * #patrol=场所码（8.0.9：贴着的巡场二维码，用手机相机、微信直接扫开的）
+ */
+function readHash(): { route: Route; join: string | null; reg: boolean; login: boolean; intro: boolean; patrol?: string } {
   const h = window.location.hash.replace(/^#\/?/, '');
+  const patrol = /^patrol[=/]([A-Za-z2-7]{12})$/.exec(h);
+  if (patrol) return { route: 'patrol', join: null, reg: false, login: false, intro: false, patrol: patrol[1]!.toUpperCase() };
   const join = /^join(?:=|\/)([A-Za-z0-9-]*)/.exec(h);
   if (join) return { route: 'home', join: join[1] ?? '', reg: false, login: false, intro: false };
   if (/^reg(?:[=/][A-Za-z0-9-]*)?$/.test(h)) return { route: 'home', join: null, reg: true, login: false, intro: false };
@@ -51,6 +61,16 @@ export function App() {
   const [touring, setTouring] = useState(false);
   // 刚看完开场（第一次打开）：没登录的进门就是「新同事登记」；之后再打开没登录的到登录页
   const [justIntroduced, setJustIntroduced] = useState(false);
+  // 这次打开以后从门店系统拿到过最新的「我是谁」（工作台的应用以它为准）
+  const [fresh, setFresh] = useState(false);
+
+  // 直接扫开的巡场码：先记下（没登录的登录好以后接着打卡），地址改成 #/patrol，刷新也不会再打一次
+  useEffect(() => {
+    if (!hash.patrol) return;
+    rememberPatrolLink(hash.patrol);
+    window.history.replaceState(null, '', '#/patrol');
+    setHash(readHash());
+  }, [hash.patrol]);
 
   useEffect(() => {
     const on = () => {
@@ -75,6 +95,7 @@ export function App() {
   const refresh = useCallback(async () => {
     try {
       adopt(await call<CanteenMe>('GET', '/api/canteen/me'));
+      setFresh(true);
       setOnline(true);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
@@ -141,6 +162,14 @@ export function App() {
     toast('扫码是食堂负责人用的，柚子帮你打开了饭卡码～');
   }, [state, cached, hash.route]);
 
+  // 扫了巡场码、但这位员工没有「巡场」（不在巡场部门，8.0.9）：拿到最新的「我是谁」以后说一声，记下的码不再留
+  useEffect(() => {
+    if (state !== 'ready' || !fresh || hash.route !== 'patrol' || !peekPatrolLink()) return;
+    if (cached?.me.apps?.includes('patrol')) return;
+    forgetPatrolLink();
+    toast('巡场只有巡场部门（安保）的员工能用；部门不对请找管理员改员工名单');
+  }, [state, fresh, hash.route, cached]);
+
   const logout = async () => {
     // 这台手机的饭点提醒跟着退出关掉（不然下一位在这台手机上登录前，还会收到上一位的提醒）
     await disablePush('logout').catch(() => undefined);
@@ -166,7 +195,8 @@ export function App() {
   /** 登记、开通、登录好了：进首页；这台手机没走过新手教程的接着走 */
   const signedIn = (me: CanteenMe) => {
     adopt(me);
-    window.location.hash = '/home';
+    setFresh(true);
+    window.location.hash = peekPatrolLink() ? '/patrol' : '/home';
     setHash(readHash());
     if (!tourDone()) setTouring(true);
   };
@@ -189,6 +219,14 @@ export function App() {
     return shell(<Intro cta={intro === 'replay' || signedInNow ? '进门' : hash.join !== null ? '进门开通' : '进门登记'} onDone={introDone} />);
   }
 
+  // 地址里带着刚扫的巡场码：先等上面把码记下、地址改成 #/patrol，再挂巡场页（巡场页挂上时取码打卡；
+  // 子组件的 effect 比这里的 effect 先跑，同一次渲染里就挂上会取不到码）
+  if (hash.patrol)
+    return shell(
+      <div className="flex min-h-dvh items-center justify-center">
+        <Mascot className="h-32 w-auto" title="柚子" />
+      </div>,
+    );
   if (state === 'loading')
     return shell(
       <div className="flex min-h-dvh items-center justify-center">
@@ -211,7 +249,19 @@ export function App() {
 
   const { me, offsetMs } = cached;
   const role = me.employee.role;
-  const allowed = (r: Route) => (r === 'kitchen' ? canEditMenu(role) : r === 'scan' ? canScan(role) : r === 'mailbox' ? canUseMailbox(role) : true);
+  const apps = me.apps ?? [];
+  const allowed = (r: Route) =>
+    r === 'kitchen'
+      ? canEditMenu(role)
+      : r === 'scan'
+        ? canScan(role)
+        : r === 'mailbox'
+          ? canUseMailbox(role)
+          : r === 'patrol'
+            ? apps.includes('patrol')
+            : r === 'patrolLog'
+              ? apps.includes('patrolLog')
+              : true;
   // 不是负责人的点了桌面的「扫码」入口（K22）：扫码是负责人用的，给他打开饭卡码
   const route = allowed(hash.route) ? hash.route : hash.route === 'scan' ? 'code' : 'home';
   const page = {
@@ -222,6 +272,9 @@ export function App() {
     kitchen: <KitchenPage me={me} offsetMs={offsetMs} />,
     scan: <ScanPage me={me} offsetMs={offsetMs} online={online} />,
     mailbox: <MailboxPage me={me} online={online} />,
+    work: <WorkPage me={me} go={go} />,
+    patrol: <PatrolPage me={me} offsetMs={offsetMs} online={online} go={go} />,
+    patrolLog: <PatrolLogPage me={me} go={go} />,
     me: (
       <MePage
         me={me}
@@ -243,7 +296,7 @@ export function App() {
         {route === 'home' && <InstallHint />}
         {page}
       </main>
-      <TabBar route={route} role={role} go={go} />
+      <TabBar route={route} role={role} hasWork={apps.length > 0} go={go} />
       {touring && <Tour steps={tourSteps(role)} route={route} go={go} onClose={() => setTouring(false)} />}
     </div>,
   );
@@ -251,7 +304,7 @@ export function App() {
 
 type Tab = { key: Route; label: string; icon: (fill: string) => React.ReactNode };
 
-function TabBar({ route, role, go }: { route: Route; role: CanteenMe['employee']['role']; go: (r: string) => void }) {
+function TabBar({ route, role, hasWork, go }: { route: Route; role: CanteenMe['employee']['role']; hasWork: boolean; go: (r: string) => void }) {
   const center: Tab = canScan(role)
     ? { key: 'scan', label: '扫码', icon: (f) => <IconCamera size={30} fill={f} /> }
     : { key: 'code', label: '饭卡码', icon: (f) => <IconTicket size={30} fill={f} /> };
@@ -259,9 +312,12 @@ function TabBar({ route, role, go }: { route: Route; role: CanteenMe['employee']
     { key: 'home', label: '首页', icon: (f) => <IconHome size={26} fill={f} /> },
     { key: 'menu', label: '菜单', icon: (f) => <IconMenu size={26} fill={f} /> },
     center,
-    canEditMenu(role)
-      ? { key: 'kitchen', label: '厨房', icon: (f) => <IconChef size={26} fill={f} /> }
-      : { key: 'talk', label: '跟柚子说', icon: (f) => <IconLetter size={26} fill={f} /> },
+    // 有工作台应用的人（巡场部门、能看巡场记录的人，8.0.9）：第四个入口是工作台（厨房、跟柚子说都在工作台里）
+    hasWork
+      ? { key: 'work', label: '工作台', icon: (f) => <IconWork size={26} fill={f} /> }
+      : canEditMenu(role)
+        ? { key: 'kitchen', label: '厨房', icon: (f) => <IconChef size={26} fill={f} /> }
+        : { key: 'talk', label: '跟柚子说', icon: (f) => <IconLetter size={26} fill={f} /> },
     { key: 'me', label: '我的', icon: (f) => <IconMe size={26} fill={f} /> },
   ];
   return (

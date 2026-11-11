@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { canScan, canUseMailbox, type CanteenMe, type Meal, type MealWindow } from '@shared/canteen';
 import { Mascot } from '../Mascot';
-import { IconArrow, IconCamera, IconLetter, IconTicket } from '../doodles';
+import { IconArrow, IconCamera, IconLetter, IconShield, IconTicket } from '../doodles';
 import { addDays, call, storeNow } from '../lib';
 import { MealCard, useMenus } from '../menus';
 import { ReminderPrompt } from '../reminders';
@@ -99,6 +99,22 @@ export function HomePage({ me, offsetMs, online, go }: { me: CanteenMe; offsetMs
         </Button>
       )}
       {canUseMailbox(me.employee.role) && <MailboxEntry online={online} go={go} />}
+      {/* 工作台（8.0.9）：有巡场的人直接去巡场，只看记录的去巡场记录 */}
+      {(me.apps?.length ?? 0) > 0 && (
+        <button
+          type="button"
+          onClick={() => go(me.apps!.includes('patrol') ? 'patrol' : 'patrolLog')}
+          data-testid="home-work"
+          className="sketch flex w-full items-center gap-3 rounded-[var(--radius-card)] bg-yuzu-soft px-4 py-3 text-left shadow-[var(--shadow-sticker)] active:scale-[0.99]"
+        >
+          <IconShield size={34} fill="var(--color-yuzu)" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-[17px] font-black">{me.apps!.includes('patrol') ? '巡场打卡' : '巡场记录'}</span>
+            <span className="block text-[13px] text-ink-3">{me.apps!.includes('patrol') ? '巡到哪里，扫哪里的场所二维码' : '每天谁几点巡了哪里'}</span>
+          </span>
+          <IconArrow size={22} className="shrink-0 text-wood-deep" />
+        </button>
+      )}
 
       {/* 跟柚子说（第二期，K16）：员工面板上的反馈栏 */}
       <button

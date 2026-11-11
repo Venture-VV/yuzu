@@ -38,6 +38,7 @@ const RefundPrintPage = lazyPage(() => import('./features/print/RefundPrintPage'
 const SettlementPrintPage = lazyPage(() => import('./features/print/SettlementPrintPage').then((m) => m.SettlementPrintPage));
 const CanteenCardsPrintPage = lazyPage(() => import('./features/canteen/CardsPrintPage').then((m) => m.CanteenCardsPrintPage));
 const CanteenPosterPrintPage = lazyPage(() => import('./features/canteen/PosterPrintPage').then((m) => m.CanteenPosterPrintPage));
+const PatrolCodesPrintPage = lazyPage(() => import('./features/patrol/CodesPrintPage').then((m) => m.PatrolCodesPrintPage));
 const ShiftPrintPage = lazyPage(() => import('./features/print/ShiftPrintPage').then((m) => m.ShiftPrintPage));
 // ERP 工作区
 // 供应商在线对账确认（8.0.7 2.6）：供应商打开链接，不用登录
@@ -67,6 +68,7 @@ const ContractDetailPage = lazyPage(() => import('./features/contracts/ContractD
 const ContractFormPage = lazyPage(() => import('./features/contracts/ContractFormPage').then((m) => m.ContractFormPage));
 const PaymentsPage = lazyPage(() => import('./features/payments/PaymentsPage').then((m) => m.PaymentsPage));
 const CanteenPage = lazyPage(() => import('./features/canteen/CanteenPage').then((m) => m.CanteenPage));
+const PatrolPage = lazyPage(() => import('./features/patrol/PatrolPage').then((m) => m.PatrolPage));
 const PaymentRequestPage = lazyPage(() => import('./features/payments/PaymentRequestPage').then((m) => m.PaymentRequestPage));
 const PaymentRequestFormPage = lazyPage(() => import('./features/payments/PaymentRequestFormPage').then((m) => m.PaymentRequestFormPage));
 const DocFormPage = lazyPage(() => import('./features/inventory/DocFormPage').then((m) => m.DocFormPage));
@@ -211,6 +213,7 @@ const router = createBrowserRouter([
       // 员工食堂的开通卡片（A4）
       { path: 'canteen-cards/:ids', element: <CanteenCardsPrintPage /> },
       { path: 'canteen-poster', element: <CanteenPosterPrintPage /> },
+      { path: 'patrol-codes/:ids', element: <PatrolCodesPrintPage /> },
       // 资产标签（8.0.7）
       { path: 'asset-labels/:ids', element: <AssetLabelsPrintPage /> },
     ],
@@ -258,6 +261,7 @@ const router = createBrowserRouter([
       { path: 'payments/requests/:id', element: <PaymentRequestPage /> },
       // 员工食堂 · 柚子饭堂（docs/CANTEEN.md）
       { path: 'canteen', element: <CanteenPage /> },
+      { path: 'patrol', element: <PatrolPage /> },
       { path: '*', element: <Navigate to="/erp" replace /> },
     ],
   },
