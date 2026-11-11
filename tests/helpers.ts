@@ -251,6 +251,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '109_dining_v808.sql',
   '110_technician_state_ops.sql',
   '120_canteen_push.sql',
+  '121_emenu.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

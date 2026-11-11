@@ -65,6 +65,16 @@ export function checkLock(username: string, source: string) {
   }
 }
 
+/**
+ * 还要锁多久（分钟）：这个来源被拦了、或这个名字在这个来源锁着；没锁返回 null。
+ * 给不用登录那套提示语的调用方（平板上的点单密码，8.0.10：名字是「这台平板的账号」，与登录、当场授权共用同一份计数）
+ */
+export function lockMinutesLeft(username: string, source: string): number | null {
+  const now = Date.now();
+  const until = Math.max(sources.get(source)?.lockedUntil ?? 0, accounts.get(accountKey(username, source))?.lockedUntil ?? 0);
+  return until > now ? minutesLeft(until, now) : null;
+}
+
 /** 密码错、账号不存在或已停用：账号 + 来源、来源各记一次 */
 export function recordFailure(username: string, source: string) {
   const now = Date.now();

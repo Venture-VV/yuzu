@@ -41,7 +41,9 @@ const UpdateInput = z.object({
 export async function listStaff(db: Db): Promise<StaffRecord[]> {
   return db<StaffRecord[]>`
     SELECT s.id, s.username, s.display_name, s.role, s.duties, s.department_id, d.name AS department_name, s.active, s.must_change_password,
-           s.last_login_at, s.created_at
+           s.last_login_at, s.created_at,
+           -- 点单密码（8.0.10）：只给有没有、哪天生成的，不含密码
+           (SELECT p.set_at FROM staff_order_pins p WHERE p.staff_id = s.id) AS order_pin_set_at
     FROM staff s LEFT JOIN departments d ON d.id = s.department_id
     -- 系统账号（小程序线上收款的经办人，v0.7.26）不出现在员工名单里
     WHERE NOT s.system
@@ -54,6 +56,8 @@ const uniqueDuties = (duties: Duty[] = []) => [...new Set(duties)].sort();
 function assertDutiesCompatible(role: Role, duties: readonly Duty[]) {
   // 他店查询（v0.7.23）只查会员档阶，不带库存与采购职责（带了就会多出 ERP 的权限）
   if (role === 'other_store' && duties.length) throw unprocessable('DUTY_CONFLICT', '「他店查询」只查会员档阶，不能带库存与采购职责', { field: 'duties' });
+  // 点餐平板（8.0.10）是放在餐桌上的设备账号，只能打开点餐页，不带职责（带了就会多出 ERP 的权限）
+  if (role === 'tablet' && duties.length) throw unprocessable('DUTY_CONFLICT', '「点餐平板」只用来打开点餐页，不能带库存与采购职责', { field: 'duties' });
   const groups = dutyConflict(role, duties);
   if (groups) {
     throw unprocessable('DUTY_CONFLICT', `仓库、采购、部门、财务（含成本）、负责人不兼任：这名员工的职责跨了「${groups}」，请只保留其中一组`, { field: 'duties' });

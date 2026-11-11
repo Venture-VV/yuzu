@@ -84,6 +84,8 @@ export interface SessionInfo {
   dining: boolean;
   /** 客房功能已开启（S7，v0.7.4：主导航的「客房」只在开启后显示） */
   rooms: boolean;
+  /** 平板点餐已开启（8.0.10：自己的开关与餐饮功能都开着） */
+  emenu: boolean;
   /** ERP 里能用的模块（v0.7.3：店主的模块开关与依赖算好的结果） */
   erpModules: import('./erp').ErpModuleKey[];
 }
@@ -480,6 +482,8 @@ export interface StaffRecord {
   mustChangePassword: boolean;
   lastLoginAt: string | null;
   createdAt: string;
+  /** 点单密码哪天生成的（8.0.10，平板点餐确认下单用）；没有为 null。不含密码本身 */
+  orderPinSetAt: string | null;
 }
 
 export interface AuditRecord {

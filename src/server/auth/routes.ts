@@ -12,6 +12,7 @@ import { loadSettings } from '../modules/settings';
 import { loadTechnicianRules } from '../modules/technicians';
 import { loadDiningRules } from '../modules/dining';
 import { loadRoomRules } from '../modules/rooms';
+import { emenuEnabled } from '../modules/emenu/core';
 import { enabledErpModules } from '../modules/erp';
 import { sessionOnly } from './guard';
 import { checkLock, clearFailures, recordFailure } from './lockout';
@@ -48,6 +49,7 @@ export async function buildSessionInfo({ sql, config }: Deps, actor: Actor): Pro
     technicians: (await loadTechnicianRules(sql)).enabled,
     dining: (await loadDiningRules(sql)).enabled,
     rooms: (await loadRoomRules(sql)).enabled,
+    emenu: await emenuEnabled(sql),
     erpModules: [...(await enabledErpModules(sql))],
   };
 }
