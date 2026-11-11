@@ -167,11 +167,17 @@ export interface RequestMeta {
 
 export const imageUrl = (id: number) => `/api/erp/images/${id}`;
 
-// ───────────────────────── 集采导入（8.0.1 采购组整改 06，CG06） ─────────────────────────
+// ───────────────────────── 集采导入（8.0.1 采购组整改 06，CG06；供应链二次整改 01 改成最终版） ─────────────────────────
 
-/** 标准模板的列（与采购组的「集采需求表」一样）；申请部门、物品名称、单位、数量必填 */
-export const REQUEST_IMPORT_COLUMNS = ['序号', '申请部门', '申请人', '物品名称', '单位', '数量', '采购优先级', '期望到货日期', '采购途径', '供应商名称', '备注'] as const;
-export const REQUEST_IMPORT_REQUIRED = ['申请部门', '物品名称', '单位', '数量'] as const;
+/** 集采模板就是采购组的最终版收集表（供应链二次整改 01，GY12）：第 1 行是标题、第 2 行是表头，名字与顺序都不动 */
+export const REQUEST_IMPORT_TITLE = '品牌新增寻款采购清单';
+export const REQUEST_IMPORT_COLUMNS = ['序号', '是否下单', '是否到货', '是否退货', '产品名称', '用途', '采购数量', '备注', '产品详情', '参考链接渠道'] as const;
+/** 必填（表头橙色）；表头按名字认，这两列也认 8.0.1 旧模板的「物品名称」「数量」 */
+export const REQUEST_IMPORT_REQUIRED = ['产品名称', '采购数量'] as const;
+/** 8.0.1 旧模板的列：表里有的照旧认（旧模板填的文件照样能导入） */
+export const REQUEST_IMPORT_LEGACY_COLUMNS = ['申请部门', '申请人', '物品名称', '单位', '数量', '采购优先级', '期望到货日期', '采购途径', '供应商名称'] as const;
+/** 线下跟踪的三列：只能填是、否或空着；标了「是」的行默认不导入（GY15） */
+export const REQUEST_IMPORT_OFFLINE_COLUMNS = ['是否下单', '是否到货', '是否退货'] as const;
 /** 一份文件最多多少行 */
 export const REQUEST_IMPORT_MAX_ROWS = 500;
 
@@ -183,6 +189,8 @@ export interface RequestImportRow {
   departmentText: string;
   applicant: string;
   name: string;
+  /** 用途：最终版里自由填写，原样记在需求行上（空着记「其他」） */
+  purpose: string;
   unit: string;
   qtyMilli: number | null;
   priority: RequestPriority;
@@ -190,9 +198,15 @@ export interface RequestImportRow {
   channel: 'online' | 'self' | 'supplier' | null;
   supplier: { id: number; name: string } | null;
   note: string;
+  details: string;
+  link: string;
   /** 物品名称与物料档案里的名称一样的：带上物料；不一样的按新产品 */
   material: { id: number; name: string } | null;
-  /** 这一行的问题（空 = 可以导入） */
+  /** 表里标了「是」的线下跟踪列（是否下单、是否到货、是否退货） */
+  offline: string[];
+  /** 这一行不导入（线下已经下单、到货或退货，又没勾「线下已下单的也导入」） */
+  skipped: boolean;
+  /** 这一行的问题（空 = 可以导入）；不导入的行有问题也不挡 */
   issues: string[];
 }
 
@@ -202,14 +216,67 @@ export interface RequestImportPreview {
   rows: RequestImportRow[];
   /** 合成几张需求单：部门 + 优先级 + 期望到货日期 */
   groups: { department: string; priority: RequestPriority; needBy: string | null; lines: number }[];
+  /** 要导入的行里有问题的行数 */
   issueCount: number;
+  /** 不导入的行数（线下已下单的） */
+  skippedCount: number;
   /** 这份文件已经导入过 */
   duplicate: { id: number; createdAt: string; createdByName: string } | null;
 }
 
 export interface RequestImportResult {
+  import: { id: number; fileName: string; rowCount: number; requestCount: number; skippedCount: number; createdAt: string; createdByName: string };
+  requests: { id: number; docNo: string; department: string; priority: RequestPriority; needBy: string | null; lineCount: number }[];
+  replayed: boolean;
+}
+
+// ───────────────────────── 部门表格导入（供应链二次整改 02，docs/ERP_ROUND2.md 第 3 节） ─────────────────────────
+
+/** 部门需求表的列（表头一行、不合并）；列按名字认，顺序可以换，多出来的列不管 */
+export const DEPT_SHEET_COLUMNS = ['序号', '申请部门', '物品名称', '物料编号', '用途', '数量', '单位', '采购优先级', '期望到货日期', '参考单价', '参考链接', '产品详情', '备注'] as const;
+/** 必填（表头橙色） */
+export const DEPT_SHEET_REQUIRED = ['物品名称', '用途', '数量'] as const;
+/** 一份文件最多多少行；一张需求单最多 50 行，超过的按顺序拆成几张 */
+export const DEPT_SHEET_MAX_ROWS = 500;
+export const DEPT_SHEET_LINES_PER_REQUEST = 50;
+
+export interface DeptSheetRow {
+  row: number;
+  seq: string;
+  department: { id: number; name: string } | null;
+  departmentText: string;
+  material: { id: number; code: string; name: string } | null;
+  name: string;
+  code: string;
+  purpose: string;
+  qtyMilli: number | null;
+  unit: string;
+  priority: RequestPriority;
+  needBy: string | null;
+  refPriceCents: number | null;
+  link: string;
+  details: string;
+  note: string;
+  /** 这一行的问题：「哪一列：为什么」（空 = 可以导入） */
+  issues: string[];
+}
+
+export interface DeptSheetPreview {
+  fileName: string;
+  sha256: string;
+  rows: DeptSheetRow[];
+  /** 合成几张需求单（部门 + 优先级 + 期望到货日期，一张最多 50 行） */
+  groups: { department: string; priority: RequestPriority; needBy: string | null; lines: number }[];
+  issueCount: number;
+  /** 这份文件以前导入过（最近一次）：要勾「确认再导入一次」 */
+  previous: { id: number; createdAt: string; createdByName: string; requestCount: number } | null;
+}
+
+export interface DeptSheetResult {
   import: { id: number; fileName: string; rowCount: number; requestCount: number; createdAt: string; createdByName: string };
   requests: { id: number; docNo: string; department: string; priority: RequestPriority; needBy: string | null; lineCount: number }[];
+  /** 第一张需求单（「结果待确认」查回时按它找） */
+  request: { id: number; docNo: string };
   replayed: boolean;
 }
 

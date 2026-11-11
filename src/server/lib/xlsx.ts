@@ -301,3 +301,199 @@ export function buildXlsx(sheet: XlsxSheet): Buffer {
   }
   return zip(entries);
 }
+
+// ───────────────────────── 带格式的多工作表（供应链二次整改：导入模板） ─────────────────────────
+//
+// 导入模板要的：几个工作表、标题行合并、橙色（必填）/ 灰色（选填）表头、冻结表头、列宽行高、
+// 下拉（数据验证：固定选项或引用「选项」表里的名称）与点到单元格时的填写提示、超链接（测试造文件用）。
+// 只写 Excel / WPS 都认的结构；不写图片。
+
+export type WbStyle = 'default' | 'title' | 'required' | 'optional' | 'body' | 'note';
+const WB_STYLE_ID: Record<WbStyle, number> = { default: 0, title: 1, required: 2, optional: 3, body: 4, note: 5 };
+
+export interface WbCell {
+  v: string | number | null;
+  style?: WbStyle;
+  /** 超链接地址（外部网址） */
+  link?: string;
+}
+
+export interface WbValidation {
+  /** 作用范围，如「B3:D502」，几段用空格隔开 */
+  sqref: string;
+  /** 下拉：固定选项（写进公式，总长不超过 255 个字），或工作簿里定义的名称（引用别的工作表） */
+  list?: string[] | { name: string };
+  promptTitle?: string;
+  prompt?: string;
+  /** 不在下拉里时的提示（只对下拉生效） */
+  error?: string;
+}
+
+export interface WbSheet {
+  name: string;
+  /** 每一列的宽度（字符数） */
+  widths: number[];
+  rows: { cells: (WbCell | string | number | null)[]; height?: number }[];
+  /** 合并单元格，如「A1:J1」 */
+  merges?: string[];
+  /** 冻结前几行 */
+  freezeRows?: number;
+  validations?: WbValidation[];
+  /** 打开文件时选中这一张 */
+  active?: boolean;
+}
+
+/** 工作簿里的名称（下拉引用「选项」表时用）：如 { name: 'opt_dept', sheet: '选项', range: '$A$2:$A$9' } */
+export interface WbName {
+  name: string;
+  sheet: string;
+  range: string;
+}
+
+const sheetNameOf = (name: string) => name.replace(/[[\]:*?/\\]/g, ' ').slice(0, 31);
+const quoteSheet = (name: string) => `'${sheetNameOf(name).replace(/'/g, "''")}'`;
+
+function wbCellXml(ref: string, raw: WbCell | string | number | null): string {
+  const cell: WbCell = raw !== null && typeof raw === 'object' ? raw : { v: raw };
+  return cellXml(ref, cell.v, WB_STYLE_ID[cell.style ?? 'default']);
+}
+
+function validationXml(v: WbValidation): string {
+  const attrs: string[] = [];
+  let formula = '';
+  if (v.list) {
+    attrs.push('type="list"', 'allowBlank="1"', 'showErrorMessage="1"');
+    if (Array.isArray(v.list)) {
+      const inline = v.list.map((x) => x.replace(/[",]/g, '')).join(',');
+      if (inline.length > 255) throw new Error('下拉的固定选项太长（超过 255 个字），请改用「选项」表');
+      formula = `<formula1>"${esc(inline)}"</formula1>`;
+    } else formula = `<formula1>${esc(v.list.name)}</formula1>`;
+    if (v.error) attrs.push('errorTitle="请从下拉里选"', `error="${esc(v.error.slice(0, 225))}"`);
+  } else attrs.push('allowBlank="1"');
+  if (v.prompt) {
+    attrs.push('showInputMessage="1"');
+    if (v.promptTitle) attrs.push(`promptTitle="${esc(v.promptTitle.slice(0, 32))}"`);
+    attrs.push(`prompt="${esc(v.prompt.slice(0, 255))}"`);
+  }
+  return `<dataValidation ${attrs.join(' ')} sqref="${esc(v.sqref)}">${formula}</dataValidation>`;
+}
+
+function worksheetXml(sheet: WbSheet): { xml: string; links: string[] } {
+  const width = Math.max(sheet.widths.length, ...sheet.rows.map((r) => r.cells.length), 1);
+  const rowsXml: string[] = [];
+  const links: { ref: string; target: string }[] = [];
+  sheet.rows.forEach((row, ri) => {
+    const r = ri + 1;
+    const attrs = row.height ? ` ht="${row.height}" customHeight="1"` : '';
+    const cells = row.cells.map((c, ci) => {
+      const ref = `${colName(ci)}${r}`;
+      if (c !== null && typeof c === 'object' && c.link) links.push({ ref, target: c.link });
+      return wbCellXml(ref, c);
+    });
+    rowsXml.push(`<row r="${r}"${attrs}>${cells.join('')}</row>`);
+  });
+  const lastRef = `${colName(width - 1)}${Math.max(sheet.rows.length, 1)}`;
+  const freeze = sheet.freezeRows ?? 0;
+  const pane = freeze > 0 ? `<pane ySplit="${freeze}" topLeftCell="A${freeze + 1}" activePane="bottomLeft" state="frozen"/>` : '';
+  const xml =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+    `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
+    `<dimension ref="A1:${lastRef}"/>` +
+    `<sheetViews><sheetView${sheet.active ? ' tabSelected="1"' : ''} workbookViewId="0">${pane}</sheetView></sheetViews>` +
+    `<sheetFormatPr defaultColWidth="14" defaultRowHeight="18"/>` +
+    `<cols>${sheet.widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>` +
+    `<sheetData>${rowsXml.join('')}</sheetData>` +
+    (sheet.merges?.length ? `<mergeCells count="${sheet.merges.length}">${sheet.merges.map((m) => `<mergeCell ref="${m}"/>`).join('')}</mergeCells>` : '') +
+    (sheet.validations?.length ? `<dataValidations count="${sheet.validations.length}">${sheet.validations.map(validationXml).join('')}</dataValidations>` : '') +
+    (links.length ? `<hyperlinks>${links.map((l, i) => `<hyperlink ref="${l.ref}" r:id="rId${i + 1}"/>`).join('')}</hyperlinks>` : '') +
+    `<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>` +
+    `</worksheet>`;
+  return { xml, links: links.map((l) => l.target) };
+}
+
+const WB_STYLES =
+  `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+  `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
+  `<fonts count="4"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="16"/><name val="Calibri"/></font>` +
+  `<font><b/><sz val="11"/><name val="Calibri"/></font><font><sz val="10"/><color rgb="FF595959"/><name val="Calibri"/></font></fonts>` +
+  `<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>` +
+  `<fill><patternFill patternType="solid"><fgColor rgb="FFF8CBAD"/><bgColor indexed="64"/></patternFill></fill>` +
+  `<fill><patternFill patternType="solid"><fgColor rgb="FFE7E6E6"/><bgColor indexed="64"/></patternFill></fill></fills>` +
+  `<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>` +
+  `<border><left style="thin"><color rgb="FFBFBFBF"/></left><right style="thin"><color rgb="FFBFBFBF"/></right><top style="thin"><color rgb="FFBFBFBF"/></top><bottom style="thin"><color rgb="FFBFBFBF"/></bottom><diagonal/></border></borders>` +
+  `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>` +
+  `<cellXfs count="6"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>` +
+  `<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>` +
+  `<xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>` +
+  `<xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>` +
+  `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>` +
+  `<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf></cellXfs>` +
+  `<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>` +
+  `</styleSheet>`;
+
+export function buildWorkbook(sheets: WbSheet[], names: WbName[] = []): Buffer {
+  if (sheets.length === 0) throw new Error('至少一个工作表');
+  const built = sheets.map(worksheetXml);
+  const n = sheets.length;
+  const entries: ZipEntry[] = [
+    {
+      name: '[Content_Types].xml',
+      data: Buffer.from(
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+          `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+          `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
+          `<Default Extension="xml" ContentType="application/xml"/>` +
+          `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>` +
+          sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('') +
+          `<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>` +
+          `</Types>`,
+      ),
+    },
+    {
+      name: '_rels/.rels',
+      data: Buffer.from(
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+          `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+          `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>` +
+          `</Relationships>`,
+      ),
+    },
+    {
+      name: 'xl/workbook.xml',
+      data: Buffer.from(
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+          `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
+          `<bookViews><workbookView activeTab="${Math.max(0, sheets.findIndex((s) => s.active))}"/></bookViews>` +
+          `<sheets>${sheets.map((s, i) => `<sheet name="${esc(sheetNameOf(s.name))}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets>` +
+          (names.length ? `<definedNames>${names.map((d) => `<definedName name="${esc(d.name)}">${esc(`${quoteSheet(d.sheet)}!${d.range}`)}</definedName>`).join('')}</definedNames>` : '') +
+          `</workbook>`,
+      ),
+    },
+    {
+      name: 'xl/_rels/workbook.xml.rels',
+      data: Buffer.from(
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+          `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+          sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('') +
+          `<Relationship Id="rId${n + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>` +
+          `</Relationships>`,
+      ),
+    },
+    { name: 'xl/styles.xml', data: Buffer.from(WB_STYLES) },
+  ];
+  built.forEach((b, i) => {
+    entries.push({ name: `xl/worksheets/sheet${i + 1}.xml`, data: Buffer.from(b.xml) });
+    if (b.links.length) {
+      entries.push({
+        name: `xl/worksheets/_rels/sheet${i + 1}.xml.rels`,
+        data: Buffer.from(
+          `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+            `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+            b.links.map((t, j) => `<Relationship Id="rId${j + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${esc(t)}" TargetMode="External"/>`).join('') +
+            `</Relationships>`,
+        ),
+      });
+    }
+  });
+  return zip(entries);
+}
