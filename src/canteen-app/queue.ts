@@ -43,8 +43,12 @@ export function dequeue(managerId: number, clientKey: string) {
   );
 }
 
+/** 正在交的几笔（操作编号）：补交那一轮跳过——每 10 秒的补交赶上刚扫的一笔正在交时，不把它当成补交再交一次（8.0.9） */
+const inFlight = new Set<string>();
+
 /** 交一笔：明确结果（成功、已打过卡、明确拒绝）就从本机删掉；结果不明就留着等补交 */
 export async function submit(managerId: number, body: ScanBody): Promise<Outcome> {
+  inFlight.add(body.clientKey);
   try {
     const result = await call<CheckinResult>('POST', '/api/canteen/checkins', body, 10_000);
     dequeue(managerId, body.clientKey);
@@ -55,15 +59,19 @@ export async function submit(managerId: number, body: ScanBody): Promise<Outcome
     if (e instanceof ApiError && e.status === 401) return { kind: 'queued' };
     dequeue(managerId, body.clientKey);
     return { kind: 'rejected', error: e as ApiError };
+  } finally {
+    inFlight.delete(body.clientKey);
   }
 }
 
-/** 按顺序补交本机留着的；遇到还是结果不明的就停，等下一轮 */
+/** 按顺序补交本机留着的；正在交的、这一轮里已经交完的跳过；遇到还是结果不明的就停，等下一轮。返回还等着补交的笔数 */
 export async function flush(managerId: number, onSettled: (item: QueuedScan, outcome: Outcome) => void): Promise<number> {
   for (const item of loadQueue(managerId)) {
+    const k = item.body.clientKey;
+    if (inFlight.has(k) || !loadQueue(managerId).some((x) => x.body.clientKey === k)) continue;
     const outcome = await submit(managerId, item.body);
     if (outcome.kind === 'queued') break;
     onSettled(item, outcome);
   }
-  return loadQueue(managerId).length;
+  return loadQueue(managerId).filter((x) => !inFlight.has(x.body.clientKey)).length;
 }

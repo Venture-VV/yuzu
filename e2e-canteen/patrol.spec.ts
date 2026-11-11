@@ -113,6 +113,8 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
     await expect(g).toHaveURL(/#\/patrol$/);
     await expect(g.getByTestId(`patrol-point-${names[0]}`)).toContainText('E2E 保安老张');
     await expect(g.getByTestId(`patrol-point-${names[1]}`)).toContainText('今天还没人巡');
+    // 在线直接扫的这一笔不是补交：补交那一轮不把正在交的这笔再交一次（不出现「刚补交的」）
+    await expect(g.getByText('刚补交的')).toHaveCount(0);
     // 2 分钟内再扫：刚打过卡，不重复记
     await g.goto(`${CANTEEN}/#patrol=${north.token}`);
     await expect(g.getByTestId('patrol-result')).toContainText('刚打过卡');

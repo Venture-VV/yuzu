@@ -278,7 +278,10 @@ export function PatrolPage({ me, offsetMs, online, go }: { me: CanteenMe; offset
             <li key={p.id} className="flex items-start gap-3 py-2.5" data-testid={`patrol-point-${p.name}`}>
               <span className={cn('mt-0.5 text-[18px]', p.count > 0 ? 'text-leaf-deep' : 'text-berry')}>{p.count > 0 ? '✓' : '○'}</span>
               <span className="min-w-0 flex-1">
-                <span className="block text-[15px] font-black">{p.name}</span>
+                <span className="block text-[15px] font-black">
+                  {p.name}
+                  {!p.active && <span className="ml-1 text-[12px] font-bold text-ink-3">（已停用）</span>}
+                </span>
                 {p.area && <span className="block text-[12px] text-ink-3">{p.area}</span>}
                 {p.count > 0 ? (
                   <span className="mt-0.5 block text-[13px] text-ink-2">

@@ -38,8 +38,12 @@ function dequeuePatrol(employeeId: number, clientKey: string) {
   );
 }
 
+/** 正在交的几笔（操作编号）：补交那一轮跳过，不把刚扫的这一笔当成补交再交一次 */
+const inFlight = new Set<string>();
+
 /** 交一笔：明确结果（成功、刚打过卡、明确拒绝）就从本机删掉；结果不明就留着等补交 */
 export async function submitPatrol(employeeId: number, body: PatrolScanBody): Promise<PatrolOutcome> {
+  inFlight.add(body.clientKey);
   try {
     const result = await call<PatrolCheckinResult>('POST', '/api/canteen/patrol/checkins', body, 10_000);
     dequeuePatrol(employeeId, body.clientKey);
@@ -49,17 +53,21 @@ export async function submitPatrol(employeeId: number, body: PatrolScanBody): Pr
     if (e instanceof NetworkError || (e instanceof ApiError && (e.status === 503 || e.status === 401 || e.code === 'BUSY'))) return { kind: 'queued' };
     dequeuePatrol(employeeId, body.clientKey);
     return { kind: 'rejected', error: e as ApiError };
+  } finally {
+    inFlight.delete(body.clientKey);
   }
 }
 
-/** 按顺序补交本机留着的；遇到还是结果不明的就停，等下一轮 */
+/** 按顺序补交本机留着的；正在交的、这一轮里已经交完的跳过；遇到还是结果不明的就停，等下一轮。返回还等着补交的笔数 */
 export async function flushPatrol(employeeId: number, onSettled: (item: QueuedPatrolScan, outcome: PatrolOutcome) => void): Promise<number> {
   for (const item of loadPatrolQueue(employeeId)) {
+    const k = item.body.clientKey;
+    if (inFlight.has(k) || !loadPatrolQueue(employeeId).some((x) => x.body.clientKey === k)) continue;
     const outcome = await submitPatrol(employeeId, item.body);
     if (outcome.kind === 'queued') break;
     onSettled(item, outcome);
   }
-  return loadPatrolQueue(employeeId).length;
+  return loadPatrolQueue(employeeId).filter((x) => !inFlight.has(x.body.clientKey)).length;
 }
 
 // ── 直接扫开的码（#patrol=码）：没登录时先记下，登录好以后接着打卡 ──
