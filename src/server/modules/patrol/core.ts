@@ -283,6 +283,8 @@ export async function rotatePatrolToken(sql: Sql, id: number, raw: unknown, ctx:
 
 const CheckinInput = z.object({
   clientKey: z.uuid('缺少有效的操作编号，请刷新后再扫'),
+  /** 扫码的员工（手机上这笔记在谁名下）：要与登录的员工一致——同一台手机换了人登录，上一位断网扫的不能记到这一位名下（Codex 审查 ae12728） */
+  employeeId: z.number('缺少扫码的员工，请刷新后再扫').int().positive('缺少扫码的员工，请刷新后再扫'),
   /** 扫到的文字：整个地址（…#patrol=码）或单独的场所码 */
   code: z.string('请扫场所二维码').trim().min(1, '请扫场所二维码').max(500, '这不是巡场的场所码'),
   /** 扫到的时间（手机按服务器时间差修正过）：断网补交时是手机记下的时间 */
@@ -338,6 +340,9 @@ export async function recordPatrolCheckin(
 ): Promise<PatrolCheckinResult> {
   const input = parse(CheckinInput, raw);
   const { sql, config } = deps;
+  // 这一笔是别的员工扫的（这台手机后来换了人登录）：不记、不算拒绝，手机上留着等那一位登录再交
+  if (input.employeeId !== employee.id)
+    throw conflict('PATROL_OTHER_EMPLOYEE', '这台手机现在登录的是另一位员工：这一笔是之前那位扫的，留在手机上，等他登录以后再交');
   const replay = await replayedCheckin(sql, input.clientKey, employee.id);
   if (replay) return replay;
   const token = parsePatrolToken(input.code);

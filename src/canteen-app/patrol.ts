@@ -41,16 +41,24 @@ function dequeuePatrol(employeeId: number, clientKey: string) {
 /** 正在交的几笔（操作编号）：补交那一轮跳过，不把刚扫的这一笔当成补交再交一次 */
 const inFlight = new Set<string>();
 
-/** 交一笔：明确结果（成功、刚打过卡、明确拒绝）就从本机删掉；结果不明就留着等补交 */
+/**
+ * 交一笔：明确结果（成功、刚打过卡、明确拒绝）就从本机删掉；结果不明就留着等补交。
+ * 带上这一笔记在谁名下（employeeId，队列按员工分开存）：门店系统核对与登录的员工一致——同一台手机换了人登录（另一个标签页、
+ * 开通卡片换人），上一位断网扫的不会记到这一位名下（Codex 审查 ae12728）
+ */
 export async function submitPatrol(employeeId: number, body: PatrolScanBody): Promise<PatrolOutcome> {
   inFlight.add(body.clientKey);
   try {
-    const result = await call<PatrolCheckinResult>('POST', '/api/canteen/patrol/checkins', body, 10_000);
+    const result = await call<PatrolCheckinResult>('POST', '/api/canteen/patrol/checkins', { ...body, employeeId }, 10_000);
     dequeuePatrol(employeeId, body.clientKey);
     return { kind: 'done', result };
   } catch (e) {
-    // 没网、超时、服务器出错（结果不明），饭堂 / 巡场暂时没开、正忙、要重新登录：留着补交
-    if (e instanceof NetworkError || (e instanceof ApiError && (e.status === 503 || e.status === 401 || e.code === 'BUSY'))) return { kind: 'queued' };
+    // 没网、超时、服务器出错（结果不明），饭堂 / 巡场暂时没开、正忙、要重新登录、这台手机现在登录的是另一位：留着补交
+    if (
+      e instanceof NetworkError ||
+      (e instanceof ApiError && (e.status === 503 || e.status === 401 || e.code === 'BUSY' || e.code === 'PATROL_OTHER_EMPLOYEE'))
+    )
+      return { kind: 'queued' };
     dequeuePatrol(employeeId, body.clientKey);
     return { kind: 'rejected', error: e as ApiError };
   } finally {

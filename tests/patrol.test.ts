@@ -41,8 +41,8 @@ let other: Awaited<ReturnType<typeof hire>>;
 const points: Record<string, { id: number; token: string; version: number }> = {};
 
 const addPoint = async (name: string, area = '', key = randomUUID()) => admin('POST', '/api/erp/patrol/points', { clientKey: key, name, area });
-const scan = (who: { cookie: string }, code: string, extra: Record<string, unknown> = {}, key = randomUUID()) =>
-  c(who.cookie, 'POST', '/api/canteen/patrol/checkins', { clientKey: key, code, ...extra });
+const scan = (who: { cookie: string; id: number }, code: string, extra: Record<string, unknown> = {}, key = randomUUID()) =>
+  c(who.cookie, 'POST', '/api/canteen/patrol/checkins', { clientKey: key, code, employeeId: who.id, ...extra });
 const settings = async () => (await admin('GET', '/api/erp/patrol/settings')).body as { rev: number; departmentIds: number[]; viewerIds: number[] };
 const today = async () => (await admin('GET', '/api/erp/patrol/day')).body.today as string;
 
@@ -186,6 +186,19 @@ describe('巡场打卡（员工端）', () => {
     const late = await scan(guard, fire.token, { scannedAt: new Date(nowMs - 10 * 60_000).toISOString(), via: 'scan' });
     expect(late.status, JSON.stringify(late.body)).toBe(200);
     expect(late.body.checkin.late).toBe(true);
+  });
+
+  it('这台手机换了人登录：上一位断网扫的不记到这一位名下（Codex 审查 ae12728）', async () => {
+    const north = points['北门停车场']!;
+    const before = (await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM patrol_checkins`)[0]!.n;
+    // 登录的是老张，交的这一笔记在小李名下：不记，回 409（手机上留着等小李登录再交）
+    const other = await scan(guard, north.token, { employeeId: guard2.id });
+    expect(other.status).toBe(409);
+    expect(other.body.error.code).toBe('PATROL_OTHER_EMPLOYEE');
+    // 没带是谁扫的：格式不对
+    const { status } = await c(guard.cookie, 'POST', '/api/canteen/patrol/checkins', { clientKey: randomUUID(), code: north.token });
+    expect(status).toBe(400);
+    expect((await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM patrol_checkins`)[0]!.n).toBe(before);
   });
 
   it('员工停用以后不能再打卡；员工改到别的部门以后马上没有巡场', async () => {

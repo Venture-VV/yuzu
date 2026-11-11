@@ -63,7 +63,7 @@ node dist/server/cli.js device-bridge-mock [--terminal <终端编号>] [--port 1
 E2E_BASE_URL=http://127.0.0.1:<端口> npm run e2e   # 1440×900 / 1024×768 / 820×1180，另有 1280×720 与手机只跑视口冒烟（CI 拆三组并行，见 docs/TESTING.md）
 E2E_DEMO_SHOWCASE=1 E2E_BASE_URL=… npx playwright test e2e/demo-showcase.spec.ts --project=门店电脑   # demo-prepare 准备好的库上核对演示场景
 npm run dev:canteen                        # 柚子饭堂（员工手机端，docs/CANTEEN.md）热更新：接口转到 CANTEEN_PORT（默认 8090）
-E2E_BASE_URL=… E2E_CANTEEN_URL=… npx playwright test -c playwright.canteen.config.ts   # 员工食堂的手机端流程（应用要开着员工端口，库里有 seed-demo 的店主）
+E2E_BASE_URL=… E2E_CANTEEN_URL=… npx playwright test -c playwright.canteen.config.ts   # 员工食堂的手机端流程（应用要开着员工端口、带 CANTEEN_PUSH_LOCAL_ENDPOINTS=true，库里有 seed-demo 的店主）
 E2E_MP_PORT=… E2E_MP_GATEWAY_KEY=… E2E_BASE_URL=… npx playwright test e2e/member-refund-online.spec.ts --project=门店电脑
                                            # 退储值「门店系统原路退回」（v0.7.29）：应用要用 MP_PORT、MP_GATEWAY_KEY、MP_PAY_MOCK=true 启动（只在 development、test）
 ```

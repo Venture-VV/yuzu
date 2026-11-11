@@ -6,7 +6,8 @@
 //   后台「今天」与「巡场记录」看到同样的结果。
 // 要应用开着员工端口：E2E_BASE_URL、E2E_CANTEEN_URL（见 playwright.canteen.config.ts），库里要有演示的店主 linlan（seed-demo）。
 // 可以重复跑：部门按名字沿用；员工工号、场所名称带这次的时间，场所跑完停用。
-// Codex 审查 41a2fbb 的四条也在这里：两个人同时改设置、断网扫的码离开巡场页也补交、手机上换日期没取到、记录筛选里有停用的场所。
+// Codex 审查 41a2fbb 的四条也在这里：两个人同时改设置、断网扫的码离开巡场页也补交、手机上换日期没取到、记录筛选里有停用的场所；
+// ae12728 的两条：打印的两个码正好一张 A4、同一台手机换了人登录以后上一位断网扫的不记到这一位名下。
 
 import { randomUUID } from 'node:crypto';
 import { expect, test, devices, type Browser, type BrowserContext, type APIRequestContext, type Page } from '@playwright/test';
@@ -117,6 +118,9 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
   await expect(print.getByTestId(`patrol-code-${names[1]}`)).toBeVisible();
   const qr = await print.getByTestId(`patrol-code-${names[0]}`).locator('svg[data-qr]').getAttribute('data-qr');
   expect(qr).toBe(`${CANTEEN}/#patrol=${north.token}`);
+  // 一页放得进 A4 去掉上下页边距的高度（Codex 审查 ae12728：之前每页 275mm，超出 273mm 的可打印高度，最底下一行会断到下一张）：两个码正好一张
+  const pdf = await print.pdf({ preferCSSPageSize: true, printBackground: true });
+  expect(pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g)?.length).toBe(1);
   await print.close();
   // 另建两个场所（接口建，不进上面的打印）：侧门给断网补交用；旧仓库建好就停用、今天没人巡，给记录筛选用
   type Made = { id: number; name: string; area: string; token: string; sortOrder: number; version: number };
@@ -156,6 +160,19 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
     await expect(g.getByText(/巡场打卡补交好了 1 条/)).toBeVisible({ timeout: 20_000 });
     const businessToday = (await ok<{ today: string }>(await api.get('/api/erp/patrol/day'))).today;
     expect((await ok<{ total: number }>(await api.get(`/api/erp/patrol/records?from=${businessToday}&to=${businessToday}&pointId=${gate.id}`))).total).toBe(1);
+    // 同一台手机换了人登录（Codex 审查 ae12728）：老张断网扫了屋顶（记在手机上），另一个标签页用开通卡片登录了另一位保安
+    // （登录凭证换成这一位的）；老张这页补交时门店系统核对出不是同一个人，不记、这一笔留在手机上等老张登录再交
+    const guard2 = await hire(api, `XH${stamp}`, 'E2E 保安小王', security!.id);
+    await guardPhone.route(checkins, (r) => r.abort('internetdisconnected'));
+    await g.goto(`${CANTEEN}/#patrol=${points[1]!.token}`);
+    await expect(g.getByTestId('patrol-result')).toContainText('已记在手机上');
+    const g2 = await join(guardPhone, guard2.code);
+    await guardPhone.unroute(checkins);
+    const retried = await g.waitForResponse((r) => new URL(r.url()).pathname === '/api/canteen/patrol/checkins', { timeout: 20_000 });
+    expect(retried.status()).toBe(409);
+    await expect(g.getByTestId('patrol-queued')).toHaveText('1');
+    expect((await ok<{ total: number }>(await api.get(`/api/erp/patrol/records?from=${businessToday}&to=${businessToday}&pointId=${points[1]!.id}`))).total).toBe(0);
+    await g2.close();
 
     // ⑤ 没登录的手机直接扫：先登录，登录好接着打卡（记下的码）
     const fresh = await phone(browser);
