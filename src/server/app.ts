@@ -98,6 +98,7 @@ import { registerMemberAdminRoutes } from './modules/member-admin';
 import { registerErpModuleGate, registerErpRoutes } from './modules/erp';
 import { registerMpStaffRoutes } from './modules/mp/staff';
 import { registerCanteenAdminRoutes } from './modules/canteen/admin-routes';
+import { registerPatrolAdminRoutes } from './modules/patrol/routes';
 
 function originHost(origin: string): string | null {
   try {
@@ -291,6 +292,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerMpStaffRoutes(app, deps);
   // 员工食堂 · 柚子饭堂（docs/CANTEEN.md）：管理后台的 /api/erp/canteen；员工用的 /api/canteen/* 只在员工端口上
   registerCanteenAdminRoutes(app, deps);
+  // 安保巡场（8.0.9，docs/PATROL_V809.md）：管理后台的 /api/erp/patrol；员工用的 /api/canteen/patrol/* 在员工端口上
+  registerPatrolAdminRoutes(app, deps);
 
   // 前端静态资源（构建产物），全部从本机提供，外网中断不影响使用。
   const staticDir = resolve(process.env.STATIC_DIR ?? 'dist/client');

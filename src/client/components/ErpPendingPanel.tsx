@@ -50,6 +50,9 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     // 开始扫码盘点（8.0.7）：返回那次盘点本身
     case 'asset_stocktake':
       return typeof d.id === 'number' ? { refId: d.id } : null;
+    // 新建巡场场所（8.0.9）：返回那个场所
+    case 'patrol_point':
+      return d.point && typeof d.point === 'object' ? { refId: d.point.id } : null;
     case 'supplier_recon':
     case 'supplier_recon_void':
       return d.reconciliation && typeof d.reconciliation === 'object' ? { refId: d.reconciliation.id } : null;

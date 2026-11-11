@@ -389,6 +389,11 @@ export interface CanteenMe {
   meals: MealWindow[];
   /** 这个月在饭堂吃了几顿 */
   mealsThisMonth: number;
+  /**
+   * 工作台里巡场相关的应用（8.0.9，docs/PATROL_V809.md）：巡场部门的人有 patrol，后台指定的人有 patrolLog；
+   * 安保巡场模块关着时没有。旧版本门店系统、手机上缓存的旧数据没有这一项（当作没有）
+   */
+  apps?: import('./patrol').PatrolApp[];
 }
 
 export type CheckinStatus = 'ok' | 'already';

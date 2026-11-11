@@ -4,13 +4,14 @@
 
 import type { Permission } from './permissions';
 
-export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'assets', 'approvals', 'contracts', 'payments', 'expenses', 'invoices', 'receivables', 'revenue', 'canteen'] as const;
+export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'assets', 'approvals', 'contracts', 'payments', 'expenses', 'invoices', 'receivables', 'revenue', 'canteen', 'patrol'] as const;
 export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
 
 export interface ErpModuleDef {
   label: string;
   /** ERP 导航的分组 */
-  group: '供应链' | '财务' | '法务' | '员工服务';
+  /** 员工工作台（8.0.9 起，原来叫「员工服务」）：员工端（柚子饭堂）应用的中台，一个应用一个模块 */
+  group: '供应链' | '财务' | '法务' | '员工工作台';
   description: string;
   /** 模块的入口页面 */
   path: string;
@@ -193,7 +194,7 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
   // 员工食堂 · 柚子饭堂（店主 2026-11-06，docs/CANTEEN.md）：默认关；关着时员工端口也回「饭堂还没开张」
   canteen: {
     label: '员工食堂',
-    group: '员工服务',
+    group: '员工工作台',
     description: '员工手机上的「柚子饭堂」：看菜单、点赞、亮饭卡码；食堂负责人扫码打卡、厨师发布菜单。这里管员工名单、打印开通卡片、看用餐记录、设开饭时间',
     path: '/erp/canteen',
     pages: ['/erp/canteen'],
@@ -201,6 +202,19 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     perms: ['canteen.manage'],
     defaultEnabled: false,
     requires: [],
+  },
+  patrol: {
+    label: '安保巡场',
+    group: '员工工作台',
+    description:
+      '安保部门在柚子饭堂「工作台 → 巡场」扫场所二维码打卡；这里生成、打印场所二维码，看每天的巡场清单（还没人巡的场所标出来）与记录、导出，' +
+      '设巡场部门与手机上能看记录的人（8.0.9，docs/PATROL_V809.md）。员工端口、员工账号都在员工食堂里，要先开员工食堂',
+    path: '/erp/patrol',
+    pages: ['/erp/patrol'],
+    apis: ['/api/erp/patrol'],
+    perms: ['patrol.read', 'patrol.manage'],
+    defaultEnabled: false,
+    requires: ['canteen'],
   },
 };
 
@@ -322,6 +336,8 @@ export const ERP_OP_TYPES = [
   'ar_collection',
   'asset_card',
   'asset_stocktake',
+  // 8.0.9 安保巡场：新建场所
+  'patrol_point',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -373,6 +389,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   ar_collection: '回款登记',
   asset_card: '资产建卡',
   asset_stocktake: '开始扫码盘点',
+  patrol_point: '新建巡场场所',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */
