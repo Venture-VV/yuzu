@@ -1,11 +1,14 @@
 import { useState } from 'react';
+import { REVENUE_REFRESH_MS, useBusinessToday } from '../../lib/revenue';
+import { useCheckoutDaySummary } from '../frontdesk/queries';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClipboardCheck, Clock3, Coins, LogOut, Undo2, Users } from 'lucide-react';
 import { CHECKOUT_METHOD_LABELS, COUPON_PLATFORM_LABELS, type ShiftRecord, type ShiftSummary } from '@shared/checkout';
 import { PAYMENT_METHOD_LABELS } from '@shared/labels';
 import { parseYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
-import { useSession } from '../../lib/session';
+import { useCan, useSession } from '../../lib/session';
+import { formatYuan } from '@shared/money';
 import { cn, formatDateTime, formatTime } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
@@ -21,15 +24,24 @@ import { CrossDayShiftNotice, shiftKeys, StartShiftForm, useCurrentShift, useDra
 
 export function ShiftPage() {
   const session = useSession();
+  const can = useCan();
   const current = useCurrentShift();
-  const list = useQuery({ queryKey: shiftKeys.list(session.today), queryFn: () => api.get<ShiftRecord[]>(`/api/shifts?date=${session.today}`) });
+  // 8.0.8（A02）：「今天」跟着服务端的营业日走；班次列表每 15 秒刷新；没开班时收的结账单独提示（不在任何交班里）
+  const today = useBusinessToday();
+  const list = useQuery({ queryKey: shiftKeys.list(today), queryFn: () => api.get<ShiftRecord[]>(`/api/shifts?date=${today}`), refetchInterval: REVENUE_REFRESH_MS });
+  const summary = useCheckoutDaySummary(today, can('frontdesk.read'), true);
   const shift = current.data?.shift ?? null;
   return (
     <>
-      <PageHeader title="交班" subtitle={`营业日 ${session.today} · ${session.staff.displayName}`} />
+      <PageHeader title="交班" subtitle={`营业日 ${today} · ${session.staff.displayName} · 每 15 秒自动刷新`} />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[960px] space-y-5 px-5 py-6 md:px-7">
           <CrossDayShiftNotice />
+          {(summary.data?.unshifted.count ?? 0) > 0 && (
+            <Notice tone="warning" title={`今天有 ${summary.data!.unshifted.count} 笔结账（${formatYuan(summary.data!.unshifted.total)}）收款时没有开班`} data-testid="shift-unshifted">
+              这几笔不在任何交班的合计里（日结照常算进营业额），对账时请单独核对。
+            </Notice>
+          )}
           {current.isPending ? <Skeleton className="h-48" /> : shift ? <OpenShift shift={shift} /> : <StartShift />}
           <Card className="p-5">
             <SectionTitle>今天的班次</SectionTitle>

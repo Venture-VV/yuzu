@@ -99,7 +99,9 @@ export function monthDayTime(at: Date, timeZone: string): string {
   return `${Number(p.month)}月${Number(p.day)}日 ${p.hour}:${p.minute}`;
 }
 
-type BookingRow = Omit<BookingDetail, 'startsAt' | 'endsAt' | 'holdUntil' | 'createdAt' | 'confirmedAt' | 'arrivedAt' | 'cancelledAt' | 'noShowAt' | 'technicianText'> & {
+type BookingRow = Omit<BookingDetail, 'startsAt' | 'endsAt' | 'holdUntil' | 'createdAt' | 'confirmedAt' | 'arrivedAt' | 'cancelledAt' | 'noShowAt' | 'technicianText' | 'service'> & {
+  sessionNo: string | null;
+  stayNo: string | null;
   startsAt: string;
   endsAt: string;
   holdUntil: string | null;
@@ -123,7 +125,10 @@ async function readBookingRows(db: Db, where: { id?: number; date?: string; memb
            b.item_id, i.name AS item_name, b.technician_id, t.tech_no, t.name AS tech_name,
            b.space_id, sp.code AS space_code, sp.display_name AS space_name, b.room_type_id, rt.name AS room_type_name,
            b.starts_at, b.ends_at, b.hold_until, b.note, b.business_date::text AS business_date, st.display_name AS created_by_name, b.created_at,
-           b.confirmed_at, b.arrived_at, ht.code AS arrival_tag_code, b.arrival_ref, b.cancelled_at, b.cancel_reason, b.no_show_at, b.version
+           b.confirmed_at, b.arrived_at, ht.code AS arrival_tag_code, b.arrival_ref, b.cancelled_at, b.cancel_reason, b.no_show_at, b.version,
+           (SELECT s.session_no FROM technician_sessions s WHERE s.booking_id = b.id AND s.status IN ('waiting', 'serving', 'done') ORDER BY s.id DESC LIMIT 1) AS session_no,
+           (SELECT rs.stay_no FROM room_stays rs WHERE rs.booking_id = b.id AND rs.status <> 'cancelled' ORDER BY rs.id DESC LIMIT 1) AS stay_no,
+           (SELECT h2.code FROM visits v2 JOIN hand_tags h2 ON h2.id = v2.tag_id WHERE b.member_id IS NOT NULL AND v2.member_id = b.member_id AND v2.status = 'open' LIMIT 1) AS member_open_tag
     FROM bookings b JOIN staff st ON st.id = b.created_by
     LEFT JOIN members m ON m.id = b.member_id LEFT JOIN service_items i ON i.id = b.item_id LEFT JOIN technicians t ON t.id = b.technician_id
     LEFT JOIN spaces sp ON sp.id = b.space_id LEFT JOIN room_types rt ON rt.id = b.room_type_id
@@ -132,9 +137,17 @@ async function readBookingRows(db: Db, where: { id?: number; date?: string; memb
       AND ${where.date !== undefined ? db`b.business_date = ${where.date}` : db`true`}
       AND ${where.memberId !== undefined ? db`b.member_id = ${where.memberId}` : db`true`}
     ORDER BY b.starts_at, b.id`;
-  return rows.map(({ techNo, techName, ...r }) => ({
+  return rows.map(({ techNo, techName, sessionNo, stayNo, ...r }) => ({
     ...r,
     techNo,
+    service:
+      r.kind === 'technician' && sessionNo
+        ? { kind: 'session' as const, no: sessionNo }
+        : r.kind === 'room' && stayNo
+          ? { kind: 'stay' as const, no: stayNo }
+          : r.kind === 'space' && r.arrivalRef
+            ? { kind: 'usage' as const, no: r.arrivalRef }
+            : null,
     id: Number(r.id),
     memberId: r.memberId === null ? null : Number(r.memberId),
     itemId: r.itemId === null ? null : Number(r.itemId),
@@ -249,8 +262,13 @@ async function spaceBusy(db: Db, spaceId: number, from: number, to: number, excl
 async function roomTypeFree(db: Db, roomTypeId: number, date: string, today: string, excludeBookingId?: number): Promise<number> {
   const [r] = await db<{ rooms: number; booked: number; staying: number }[]>`
     SELECT (SELECT count(*)::int FROM rooms WHERE room_type_id = ${roomTypeId} AND active AND housekeeping <> 'maintenance') AS rooms,
-           (SELECT count(*)::int FROM bookings WHERE room_type_id = ${roomTypeId} AND business_date = ${date}
-              AND status IN ${db(ACTIVE_BOOKING_STATUSES)} AND id <> ${excludeBookingId ?? 0}) AS booked,
+           (SELECT count(*)::int FROM bookings bk WHERE bk.room_type_id = ${roomTypeId} AND bk.business_date = ${date} AND bk.id <> ${excludeBookingId ?? 0}
+              AND (bk.status IN ${db(ACTIVE_BOOKING_STATUSES)}
+                   -- 已到店、还没入住的（8.0.8，A04）照样占着名额，入住后由在住的房间来算；
+                   -- 客人没入住就离店了（到店时的手牌已经结账或撤销）不再占（Codex 审查 fb67dca）
+                   OR (bk.status = 'arrived'
+                       AND NOT EXISTS (SELECT 1 FROM room_stays rs WHERE rs.booking_id = bk.id AND rs.status <> 'cancelled')
+                       AND EXISTS (SELECT 1 FROM visits av WHERE av.id = bk.arrival_visit_id AND av.status = 'open')))) AS booked,
            (SELECT count(*)::int FROM room_stays s JOIN rooms ro ON ro.id = s.room_id WHERE ro.room_type_id = ${roomTypeId} AND s.status = 'open') AS staying`;
   return Math.max(0, r!.rooms - r!.booked - (date === today ? r!.staying : 0));
 }

@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowRightLeft, BedDouble, CalendarPlus, HandCoins, LogOut, Pencil, ReceiptText, Undo2, Wallet } from 'lucide-react';
+import { ArrowRightLeft, BedDouble, CalendarPlus, HandCoins, History, LogOut, Pencil, ReceiptText, Undo2, Wallet } from 'lucide-react';
 import { PAYMENT_METHOD_LABELS, type PaymentMethod } from '@shared/labels';
 import { formatYuan, parseYuan, centsToInput } from '@shared/money';
 import { DEPOSIT_KIND_LABELS, MAX_STAY_GUESTS, STAY_STATUS_LABELS, type RoomBoard, type StayCharge, type StayDetail } from '@shared/rooms';
@@ -30,7 +30,20 @@ export type StayAction = 'extend' | 'deposit' | 'refund' | 'close';
 
 const SOURCE_LABELS: Record<StayCharge['source'], string> = { checkin: '入住', audit: '夜审', checkout: '退房', extend: '续住' };
 
-export function StayDialog({ id, action, board, onClose }: { id: number; action?: StayAction | 'move'; board: RoomBoard; onClose: () => void }) {
+export function StayDialog({
+  id,
+  action,
+  board,
+  onClose,
+  onRoomDetail,
+}: {
+  id: number;
+  action?: StayAction | 'move';
+  board: RoomBoard;
+  onClose: () => void;
+  /** 打开这间房的房间详情（8.0.8，B07） */
+  onRoomDetail?: (roomId: number) => void;
+}) {
   const can = useCan();
   const qc = useQueryClient();
   const toast = useToast();
@@ -124,6 +137,11 @@ export function StayDialog({ id, action, board, onClose }: { id: number; action?
           <span className="min-w-0 flex-1">
             手牌 <b className="num">{d.tagCode}</b>：房费挂在手牌账单 {d.billNo} 上（账单合计 <Money cents={d.billAmount} />），离店时随手牌在前台一起结账。
           </span>
+          {onRoomDetail && (
+            <button type="button" onClick={() => onRoomDetail(d.roomId)} className="inline-flex items-center gap-1 font-semibold text-pine hover:underline" data-testid="stay-room-detail">
+              <History className="size-3.5" /> 房间详情
+            </button>
+          )}
           {can('frontdesk.read') && (
             <Link to={`/frontdesk?v=${d.visitId}`} className="inline-flex items-center gap-1 font-semibold text-pine hover:underline" data-testid="stay-open-bill">
               <ReceiptText className="size-3.5" /> 打开手牌账单

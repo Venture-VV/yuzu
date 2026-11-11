@@ -48,7 +48,7 @@ const GROUPS: { title: string; code: string; fields: FieldDef[] }[] = [
     title: '扫码点餐与平台核销',
     code: 'N1、N6',
     fields: [
-      { key: 'mpFoodMaxQuantity', label: '小程序扫码点餐：一单最多几份', hint: 'N1', unit: '份' },
+      { key: 'mpFoodMaxQuantity', label: '小程序扫码点餐：一单最多几份', hint: '一道菜一单最多 99 份、一单最多 20 道菜，多的分几次点或请服务员点（N1）', unit: '份' },
       { key: 'mpFoodMaxTotalCents', label: '小程序扫码点餐：一单最多多少钱（元）', hint: 'N1' },
       { key: 'platformBackfillDays', label: '平台核销补录最早补到几天前', hint: 'N6', unit: '天' },
     ],

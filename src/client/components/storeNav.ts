@@ -27,7 +27,8 @@ const STORE_NAV: StoreNavItem[][] = [
   [
     { to: '/frontdesk', label: '前台', icon: ConciergeBell, perm: 'frontdesk.read' },
     { to: '/clockroom', label: '钟房', icon: Hourglass, perm: 'technician.dispatch', when: (s) => s.technicians },
-    { to: '/dining', label: '餐饮', icon: UtensilsCrossed, perm: ['dining.order', 'dining.kitchen', 'frontdesk.checkout'], when: (s) => s.dining },
+    // 8.0.8：看日结的（导出流水、经营总览）也能进来看「台账」「退菜记录」
+    { to: '/dining', label: '餐饮', icon: UtensilsCrossed, perm: ['dining.order', 'dining.kitchen', 'frontdesk.checkout', 'ledger.export', 'report.executive'], when: (s) => s.dining },
     { to: '/rooms', label: '客房', icon: BedDouble, perm: ['room.operate', 'room.housekeep', 'frontdesk.checkout'], when: (s) => s.rooms },
     // 预约（v0.7.28 ③）：技师、派对房等、客房电话预订的预约看板；小程序的预约在这里确认
     { to: '/bookings', label: '预约', icon: CalendarClock, perm: 'booking.manage' },

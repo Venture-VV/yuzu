@@ -29,6 +29,9 @@ export interface Technician {
   sortOrder: number;
   note: string;
   isSynthetic: boolean;
+  /** 停牌（8.0.8）：停牌的时刻与原因，没停牌为 null。停牌的不能上牌、不能派钟，一直停到复牌 */
+  suspendedAt: string | null;
+  suspendedReason: string | null;
 }
 
 export interface TechnicianRules {

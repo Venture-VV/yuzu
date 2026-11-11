@@ -24,7 +24,7 @@ beforeAll(async () => {
   const station = (await api(ctx.app, boss, 'POST', '/api/admin/dining/stations', { name: '热菜' })).body.stations.find((s: { name: string }) => s.name === '热菜').id;
   dish = (await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '宫保鸡丁', category: '热菜', price: 4800 })).body.items.find((i: { name: string }) => i.name === '宫保鸡丁').id;
   expect((await api(ctx.app, boss, 'PUT', '/api/admin/dining/items', { items: [{ id: dish, stationId: station }] })).status).toBe(200);
-  expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/rules', { enabled: true })).status).toBe(200);
+  expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/rules', { enabled: true, tablesEnabled: true })).status).toBe(200);
   for (const name of ['B1', 'B2', 'B3']) {
     const r = await api(ctx.app, boss, 'POST', '/api/admin/dining/tables', { name, area: '大厅', seats: 4 });
     table[name] = r.body.tables.find((t: { name: string }) => t.name === name).id;

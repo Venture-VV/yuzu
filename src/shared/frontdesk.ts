@@ -319,7 +319,9 @@ export type FrontdeskOpLookup =
   | { found: true; type: 'room_checkin' | 'room_extend' | 'room_deposit' | 'room_refund' | 'room_close'; stay: import('./rooms').StayDetail }
   | { found: true; type: 'usage_open' | 'usage_end' | 'usage_cancel'; usage: import('./usages').UsageDetail }
   | { found: true; type: 'checkout_refund'; refund: import('./checkout').RefundDetail }
-  | { found: true; type: 'booking_create' | 'booking_change'; booking: import('./bookings').BookingDetail };
+  | { found: true; type: 'booking_create' | 'booking_change'; booking: import('./bookings').BookingDetail }
+  /** 技师停牌、复牌、休假（8.0.8）：查回那位技师；页面按最新的钟房看板显示 */
+  | { found: true; type: 'technician_state'; technicianId: number };
 
 export interface CheckinResult {
   replayed: boolean;

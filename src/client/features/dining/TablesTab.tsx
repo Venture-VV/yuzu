@@ -3,6 +3,7 @@
 // 点单、改人数与会员、转台（写原因）、撤台（没有有效明细时）、结账（与手牌结账同一套收款）。
 // 开台、桌台点单、桌台结账与前台一样有「结果待确认」：断网后查回、原样重提或确认作废。
 
+import { DishVoidDialog } from './DishVoid';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -25,7 +26,7 @@ import { CheckoutRecordsDialog } from '../frontdesk/CheckoutDialog';
 import { PendingPanel, useFrontdeskOp } from '../frontdesk/pending';
 import { stayText } from '../frontdesk/queries';
 import { TableCheckoutDialog } from './TableCheckoutDialog';
-import { tablesKey, useServerNow, useTableSession, useTablesBoard } from './queries';
+import { tablesKey, useDiningMenu, useServerNow, useTableSession, useTablesBoard } from './queries';
 
 type Tile = TablesBoard['tables'][number];
 
@@ -45,6 +46,10 @@ export function TablesTab() {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
   const board = useTablesBoard();
+  // 8.0.8（A05）：桌台点单下架时不能开台、加菜；开着的桌照常结账、退菜（菜单还没取到时两样都先不显示）
+  const menuRules = useDiningMenu().data?.rules;
+  const tablesOn = menuRules?.tablesEnabled ?? false;
+  const tablesOff = menuRules ? !menuRules.tablesEnabled : false;
   const now = useServerNow(board.data?.serverTime, 30_000);
   const [opening, setOpening] = useState<Tile | null>(null);
   const [sessionId, setSessionId] = useState<number | null>(null);
@@ -80,6 +85,8 @@ export function TablesTab() {
 
   const click = (t: Tile) => {
     if (t.session) setSessionId(t.session.id);
+    else if (!menuRules) return;
+    else if (tablesOff) toast({ tone: 'info', title: `桌 ${t.name} 空闲`, body: '桌台点单已下架：所有消费请挂手牌点单（店主可在后台「餐饮」里重新打开）' });
     else if (canOpen) setOpening(t);
     else toast({ tone: 'info', title: `桌 ${t.name} 空闲`, body: '开台要有「餐饮点单」与「前台挂账」权限' });
   };
@@ -96,6 +103,11 @@ export function TablesTab() {
 
   return (
     <div className="mx-auto max-w-[1280px] space-y-4 px-5 py-5 md:px-7" data-testid="dining-tables-board">
+      {tablesOff && (
+        <Notice tone="info" title="桌台点单已下架" data-testid="tables-disabled">
+          所有消费请挂手牌点单。还开着的桌照常看明细、结账、退菜、撤台；历史桌台单在「结账记录」里查。店主可在后台「餐饮」里重新打开桌台点单。
+        </Notice>
+      )}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <span className="text-[13.5px] text-ink-2">
           用餐中 <b className="num text-ink">{busy.length}</b> 桌 · <b className="num text-ink">{busy.reduce((n, t) => n + t.session!.guests, 0)}</b> 人 · 空闲{' '}
@@ -353,9 +365,10 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
   const toast = useToast();
   const navigate = useNavigate();
   const detail = useTableSession(id);
+  const tablesOn = useDiningMenu().data?.rules.tablesEnabled ?? false;
   const now = useServerNow(board.serverTime, 30_000);
   const [busy, setBusy] = useState<string | null>(null);
-  const [voiding, setVoiding] = useState<{ lineId: number; name: string; quantity: number; status: KitchenStatus | null } | null>(null);
+  const [voiding, setVoiding] = useState<{ lineId: number; name: string; quantity: number; amount: number; postedBy: number; postedAt: string; status: KitchenStatus | null } | null>(null);
   const [editing, setEditing] = useState(false);
   const [moving, setMoving] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -419,7 +432,7 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
             <span className="mr-auto self-center text-[13px] text-ink-3">
               合计 <Money cents={d.amount} className="text-[18px] font-bold text-ink" />
             </span>
-            {can('dining.order') && (
+            {can('dining.order') && tablesOn && (
               <Button variant="secondary" size="lg" icon={<Plus className="size-4" />} onClick={() => navigate(`/dining/order?table=${d.id}`)} data-testid="table-order">
                 点单
               </Button>
@@ -520,7 +533,7 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
                             size="sm"
                             variant="ghost"
                             icon={<Undo2 className="size-3.5" />}
-                            onClick={() => setVoiding({ lineId: l.id, name: l.name, quantity: l.quantity, status: l.kitchen?.status ?? null })}
+                            onClick={() => setVoiding({ lineId: l.id, name: l.name, quantity: l.quantity, amount: l.amount, postedBy: l.postedById, postedAt: l.postedAt, status: l.kitchen?.status ?? null })}
                             data-testid={`table-void-${l.id}`}
                           >
                             退菜
@@ -550,21 +563,15 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
         {open && !can('frontdesk.checkout') && <p className="text-[12px] text-ink-4">结账请找有「结账收款」权限的同事。</p>}
       </div>
 
-      <ReasonDialog
-        open={!!voiding}
-        title={voiding ? `退菜 · ${voiding.name} × ${voiding.quantity}` : '退菜'}
-        description={
-          voiding
-            ? `${voiding.status === 'done' || voiding.status === 'served' ? '这道菜已经出餐了。' : ''}退菜就是作废这条明细（留痕，不收这道菜的钱），厨房屏上显示「已退」${voiding.status === 'queued' || voiding.status === null ? '' : '，请当面告诉厨房'}；估清的菜按原份数加回。`
-            : undefined
-        }
-        confirmLabel="确认退菜"
-        danger
-        busy={!!voiding && busy === `void-${voiding.lineId}`}
+      {/* 8.0.8（B02）：小额直接退；超过的本人 15 分钟内、经理，或值班经理及以上当场授权 */}
+      <DishVoidDialog
+        dish={voiding ? { billLineId: voiding.lineId, name: voiding.name, quantity: voiding.quantity, amount: voiding.amount, postedBy: voiding.postedBy, postedAt: voiding.postedAt, served: voiding.status === 'done' || voiding.status === 'served' } : null}
+        url={voiding ? `/api/dining/tables/lines/${voiding.lineId}/void` : ''}
         onClose={() => setVoiding(null)}
-        onConfirm={(reason) => {
-          const v = voiding!;
-          void run(`void-${v.lineId}`, () => api.post(`/api/dining/tables/lines/${v.lineId}/void`, { reason }), `${v.name} 已退`).then((ok) => ok && setVoiding(null));
+        onDone={(dish) => {
+          setVoiding(null);
+          toast({ tone: 'success', title: `${dish.name} 已退` });
+          refresh();
         }}
       />
       <ReasonDialog

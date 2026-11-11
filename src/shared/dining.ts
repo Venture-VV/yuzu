@@ -17,13 +17,32 @@ export interface DiningRules {
   trackServed: boolean;
   /** 下单多少分钟还没出餐标红提醒（默认 15） */
   warnMinutes: number;
+  /**
+   * 桌台点单（8.0.8，A05，F10）：默认关——店主「下架」，只能挂手牌点单；已经开着的桌台照常查看、结账、退菜、撤台、转台，
+   * 只是不能再开台、加菜。桌台档案照旧（小程序扫码点餐的送餐位置）
+   */
+  tablesEnabled: boolean;
+  /**
+   * 小额退菜上限（8.0.8，B02，F11，分）：单条明细金额不超过它的菜，能下单的（「前台挂账」，桌台上的还要「点单」）就能直接退（原因必填，记下来）；
+   * 超过的照旧（本人 15 分钟内、经理），或值班经理及以上当场授权。0 为不分级
+   */
+  voidFreeCents: number;
 }
 
 export const DEFAULT_DINING_RULES: DiningRules = {
   enabled: false,
   trackServed: true,
   warnMinutes: 15,
+  tablesEnabled: false,
+  voidFreeCents: 5000,
 };
+
+/** 小额退菜上限最多 ¥1,000 */
+export const MAX_VOID_FREE_CENTS = 100_000;
+
+/** 这道菜能不能直接退（小额，8.0.8 B02）：餐饮明细、金额不超过上限 */
+export const isSmallDishVoid = (rules: Pick<DiningRules, 'voidFreeCents'>, line: { source: string; amount: number }) =>
+  line.source === 'dining' && rules.voidFreeCents > 0 && line.amount <= rules.voidFreeCents;
 
 export const KITCHEN_STATUSES = ['queued', 'cooking', 'done', 'served', 'cancelled'] as const;
 export type KitchenStatus = (typeof KITCHEN_STATUSES)[number];
@@ -107,6 +126,8 @@ export interface DiningMenu {
   rules: DiningRules;
   businessDate: string;
   dishes: MenuDish[];
+  /** 自己点的多少分钟内能自己退（前台规则「店员自行更正时限」；8.0.8 退菜弹窗显示属于哪一档用） */
+  selfVoidMinutes: number;
 }
 
 /** 点单页按手牌找在店客人（服务员不一定有前台权限，只给点单需要的信息） */
@@ -123,12 +144,18 @@ export interface DiningGuest {
 export interface PendingDish {
   id: number;
   billLineId: number;
+  /** 菜品（8.0.8 改单时放回购物车用） */
+  itemId: number;
   name: string;
   quantity: number;
   note: string;
   status: KitchenStatus;
   rushCount: number;
   createdAt: string;
+  /** 这条明细的金额、谁什么时候点的（8.0.8，B02：退菜分级——小额直接退，超过的本人 15 分钟内 / 经理 / 当场授权） */
+  amount: number;
+  postedBy: number;
+  postedAt: string;
 }
 
 export interface DiningAdmin {
@@ -241,3 +268,56 @@ export interface TablesAdmin {
 
 /** 小程序扫码点餐（第三期 3c）主线这一端的兜底：一单的份数与金额上限（N1，与 MP33 相同，待确认） */
 export const MP_FOOD_ORDER_LIMITS = { maxQuantity: 20, maxTotalCents: 50_000 } as const;
+
+/**
+ * 账单一行最多几份（`bill_lines.quantity` 1–99，004 迁移的约束）：点单页、桌台点单、小程序扫码点餐的请求格式都按这个挡；
+ * 一单要更多份就分几行（一单一共几份另按设置核对，例如扫码点餐的 N1 上限可调到 200）
+ */
+export const MAX_BILL_LINE_QUANTITY = 99;
+
+/** 餐饮台账、退菜记录一次最多查几天（8.0.8，F13） */
+export const MAX_DINING_LEDGER_DAYS = 92;
+
+/** 餐饮台账的一行（8.0.8，B06）：一条餐饮明细 */
+export interface DiningLedgerRow {
+  id: number;
+  businessDate: string;
+  postedAt: string;
+  tagCode: string;
+  tableName: string;
+  name: string;
+  category: string;
+  quantity: number;
+  unitPrice: number;
+  amount: number;
+  status: 'active' | 'voided';
+  voidReason: string | null;
+  kitchenStatus: KitchenStatus | null;
+  postedByName: string;
+}
+
+export interface DiningLedger {
+  from: string;
+  to: string;
+  /** 这段时间里出现过的分类（筛选用） */
+  categories: string[];
+  rows: DiningLedgerRow[];
+  /** 合计：份数、金额只算有效的；已退的另列 */
+  totals: { lines: number; quantity: number; amount: number; voidedLines: number; voidedAmount: number };
+}
+
+/** 退菜记录的一行（8.0.8，B02） */
+export interface DishVoidRow {
+  id: number;
+  name: string;
+  quantity: number;
+  amount: number;
+  voidReason: string | null;
+  voidedAt: string;
+  voidedByName: string;
+  postedByName: string;
+  tagCode: string;
+  tableName: string;
+  /** 怎么批的：小额直接退 / 本人 15 分钟内 / 经理 / 当场授权（授权人） */
+  approvalText: string;
+}

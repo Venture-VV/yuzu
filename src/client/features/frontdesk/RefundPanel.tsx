@@ -4,6 +4,7 @@
 //   · 退现金选钱箱（与反结账同一套）；不退现金时记到自己的班次（要先开班）；
 //   · 带操作编号，断网走「结果待确认」（查回、原样重提、确认作废）。
 
+import { invalidateRevenue } from '../../lib/revenue';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ReceiptText, Undo2 } from 'lucide-react';
@@ -109,8 +110,7 @@ export function RefundPanel({ checkoutId, checkoutNo, onClose, DrawerPicker }: {
       body: `退 ${formatYuan(r.amount)}${cashPart ? `，其中现金 ${formatYuan(cashPart)} 计入${r.shift ? ` ${r.shift.staffName} ` : ''}当班的交班表` : ''}；扫码、银行卡请确认已在商户后台原路退回`,
     });
     void qc.invalidateQueries({ queryKey: ['frontdesk'] });
-    void qc.invalidateQueries({ queryKey: shiftKeys.all });
-    void qc.invalidateQueries({ queryKey: ['settlement'] });
+    invalidateRevenue(qc);
     onClose();
   };
   const submit = async () => {
@@ -316,7 +316,7 @@ export function RefundsList({ refunds, onChanged }: { refunds: RefundSummary[]; 
       setVoiding(null);
       setReason('');
       void qc.invalidateQueries({ queryKey: ['frontdesk'] });
-      void qc.invalidateQueries({ queryKey: shiftKeys.all });
+      invalidateRevenue(qc);
       onChanged();
     } catch (e) {
       setError(errorMessage(e));

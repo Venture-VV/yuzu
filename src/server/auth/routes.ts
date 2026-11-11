@@ -125,6 +125,12 @@ export function registerAuthRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   app.get('/api/auth/me', { preHandler: sessionOnly }, async (req) => buildSessionInfo(deps, req.actor));
+  // 当前营业日（8.0.8，A02）：页面上的「今天」跟着服务端走，过了营业日切换时间不用重新登录就换到新的一天
+  app.get('/api/business-day', { preHandler: sessionOnly }, async () => {
+    const settings = await loadSettings(deps.sql);
+    const now = new Date();
+    return { today: businessDateOf(now, deps.config.timezone, settings.businessDayStartHour), calendarToday: businessDateOf(now, deps.config.timezone, 0) };
+  });
 
   app.post('/api/auth/change-password', { preHandler: sessionOnly }, async (req) => {
     const { currentPassword, newPassword } = parse(ChangePasswordInput, req.body);

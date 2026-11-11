@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useBusinessToday } from '../../lib/revenue';
+import { useCheckoutDaySummary } from '../frontdesk/queries';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -14,6 +16,7 @@ import {
   FilePenLine,
   Hourglass,
   Lock,
+  RefreshCw,
   Ticket,
   Undo2,
   WalletMinimal,
@@ -43,8 +46,11 @@ export function SettlementPage() {
   const navigate = useNavigate();
   const params = useParams();
   const historyAllowed = can('ledger.readHistory');
-  const date = historyAllowed ? (params.date ?? session.today) : session.today;
-  const s = useSettlement(date);
+  // 8.0.8（A02）：「今天」跟着服务端的营业日走；看今天时每 15 秒自动刷新
+  const today = useBusinessToday();
+  const date = historyAllowed ? (params.date ?? today) : today;
+  const s = useSettlement(date, date === today);
+  const summary = useCheckoutDaySummary(date, can('frontdesk.read'), date === today);
   const [closing, setClosing] = useState(false);
   const d = describeDate(date);
 
@@ -75,13 +81,24 @@ export function SettlementPage() {
         }
       />
       <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-line px-5 py-3 md:px-7">
-        <DateNav value={date} today={session.today} locked={!historyAllowed} onChange={(v) => navigate(v === session.today ? '/settlement' : `/settlement/${v}`)} />
+        <DateNav value={date} today={today} locked={!historyAllowed} onChange={(v) => navigate(v === today ? '/settlement' : `/settlement/${v}`)} />
         {s.data && <CloseStatus s={s.data} />}
         <span className="flex-1" />
         <span className="flex items-center gap-1.5 text-[12px] text-ink-3">
+          {date === today && <span data-testid="settlement-live">每 15 秒自动刷新 ·</span>}
           营业日每天 {String(session.rules.businessDayStartHour).padStart(2, '0')}:00 切换 <PendingBadge />
+          <Button size="sm" variant="ghost" icon={<RefreshCw className="size-3.5" />} onClick={() => void s.refetch()} loading={s.isFetching && !s.isPending} data-testid="settlement-refresh">
+            刷新
+          </Button>
         </span>
       </div>
+      {(summary.data?.unshifted.count ?? 0) > 0 && (
+        <div className="shrink-0 px-5 pt-3 md:px-7">
+          <Notice tone="warning" title={`有 ${summary.data!.unshifted.count} 笔结账（${formatYuan(summary.data!.unshifted.total)}）收款时没有开班，不在任何交班的合计里`} data-testid="settlement-unshifted">
+            「先开班」关掉、没人开班时收的款会这样；日结照常算进营业额，交班对账时请把这几笔单独核对。
+          </Notice>
+        </div>
+      )}
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[1180px] px-5 py-6 md:px-7">

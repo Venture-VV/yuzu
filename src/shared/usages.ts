@@ -87,6 +87,30 @@ export interface UsageDetail {
   pricing?: { itemName: string; hourPrice: number; minMinutes: number; stepMinutes: number; openFee: number } | null;
 }
 
+/** 派对房看板（8.0.8，A03）：开单即占用的业态下在用、可售的房间，与开着的使用单；不需要底图 */
+export interface UsageBoardSpace {
+  id: number;
+  code: string;
+  displayName: string;
+  businessType: string;
+  capacity: number | null;
+  floorCode: string;
+  /** 这个业态设了计费：结束使用时按时长挂房费；没设的结束不收房费（开单时提醒，F7） */
+  priced: boolean;
+  /** 页面估算用的计费（此刻的价目；没设或项目停用了为空） */
+  pricing: UsageDetail['pricing'];
+  /** 开着的使用单；空闲为 null */
+  usage: UsageDetail | null;
+}
+
+export interface UsageBoard {
+  businessTypes: string[];
+  spaces: UsageBoardSpace[];
+}
+
+/** 账单上派对房房费、开台费的名称（8.0.8，A03）：带房型（业态）和房间，几种房共用一个计费项目也分得清 */
+export const usageLineName = (businessType: string, spaceCode: string, what: string) => `${businessType} ${spaceCode} ${what}`.slice(0, 48);
+
 /** 已用时长（分钟，向下取整；没结束的到 now） */
 export function usageMinutes(u: Pick<UsageDetail, 'openedAt' | 'closedAt'>, now: number): number {
   const end = u.closedAt ? new Date(u.closedAt).getTime() : now;

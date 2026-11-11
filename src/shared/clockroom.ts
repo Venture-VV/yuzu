@@ -52,13 +52,15 @@ export const AFTER_DESIGNATED_LABELS: Record<ClockroomRules['afterDesignated'], 
   end: '点钟也算一轮，排到队尾',
 };
 
-export const TECH_STATES = ['on', 'rest', 'off'] as const;
+/** 技师当天的状态：在岗（上牌）/ 休息 / 未上牌 / 休假（8.0.8，只管当天）。停牌另记在技师上（跨天，见 Technician.suspendedAt） */
+export const TECH_STATES = ['on', 'rest', 'off', 'leave'] as const;
 export type TechState = (typeof TECH_STATES)[number];
+export const TECH_STATE_LABELS: Record<TechState, string> = { on: '在岗', rest: '休息', off: '未上牌', leave: '休假' };
 
 export const SESSION_STATUSES = ['waiting', 'serving', 'done', 'cancelled', 'rejected'] as const;
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
 
-export const EVENT_KINDS = ['sign_in', 'rest', 'back', 'sign_out', 'to_end', 'dispatch', 'skip', 'start', 'extend', 'finish', 'cancel', 'reject', 'queue', 'room'] as const;
+export const EVENT_KINDS = ['sign_in', 'rest', 'back', 'sign_out', 'to_end', 'dispatch', 'skip', 'start', 'extend', 'finish', 'cancel', 'reject', 'queue', 'room', 'leave', 'suspend', 'resume', 'transfer'] as const;
 export type ClockEventKind = (typeof EVENT_KINDS)[number];
 export const EVENT_KIND_LABELS: Record<ClockEventKind, string> = {
   sign_in: '上牌',
@@ -75,6 +77,10 @@ export const EVENT_KIND_LABELS: Record<ClockEventKind, string> = {
   reject: '退钟',
   queue: '调整排位',
   room: '换房间',
+  leave: '休假',
+  suspend: '停牌',
+  resume: '复牌',
+  transfer: '转钟',
 };
 
 /** 钟房看板上的技师 */
@@ -116,6 +122,25 @@ export interface BoardSession {
   spaceVersion: number;
 }
 
+/**
+ * 待派钟（8.0.8，A01）：前台挂了需要技师的项目、交给钟房派钟（还没有技师）的明细。
+ * 钟房派钟时只把技师与钟单记到这条明细上，不另挂一笔（金额、价格档不变）
+ */
+export interface PendingLine {
+  lineId: number;
+  visitId: number;
+  tagCode: string;
+  zone: 'male' | 'female';
+  guest: string;
+  itemId: number;
+  itemName: string;
+  tier: PriceTier | null;
+  quantity: number;
+  amount: number;
+  postedAt: string;
+  postedByName: string;
+}
+
 export interface ClockroomBoard {
   serverTime: string;
   businessDate: string;
@@ -123,7 +148,34 @@ export interface ClockroomBoard {
   techRules: TechnicianRules;
   technicians: BoardTechnician[];
   sessions: BoardSession[];
+  /** 待派钟（8.0.8）：按点单先后 */
+  pending: PendingLine[];
   today: { clocks: number; designated: number; rotation: number };
+}
+
+/** 钟房按状态筛选技师（8.0.8，B01） */
+export const TECH_FILTERS = ['all', 'idle', 'serving', 'waiting', 'rest', 'leave', 'suspended', 'off'] as const;
+export type TechFilter = (typeof TECH_FILTERS)[number];
+export const TECH_FILTER_LABELS: Record<TechFilter, string> = {
+  all: '全部',
+  idle: '空闲待钟',
+  serving: '上钟中',
+  waiting: '已派待上',
+  rest: '休息',
+  leave: '休假',
+  suspended: '停牌',
+  off: '未上牌',
+};
+
+/** 这位技师现在属于哪一类：停牌优先；在钟上 / 派了钟的按钟单；其余按当天的状态（在岗且手上没钟 = 空闲待钟） */
+export function techFilterOf(t: { suspendedAt: string | null; busy: { status: 'waiting' | 'serving' } | null; state: TechState }): Exclude<TechFilter, 'all'> {
+  if (t.suspendedAt) return 'suspended';
+  if (t.busy?.status === 'serving') return 'serving';
+  if (t.busy?.status === 'waiting') return 'waiting';
+  if (t.state === 'on') return 'idle';
+  if (t.state === 'rest') return 'rest';
+  if (t.state === 'leave') return 'leave';
+  return 'off';
 }
 
 export interface ClockEvent {

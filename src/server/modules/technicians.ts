@@ -37,7 +37,7 @@ export async function loadTechnicianRules(db: Db): Promise<TechnicianRules> {
 }
 
 const TECH_COLUMNS = (db: Db) => db`
-  t.id, t.tech_no, t.name, t.gender, t.grade, t.skills, t.active, t.sort_order, t.note, t.is_synthetic`;
+  t.id, t.tech_no, t.name, t.gender, t.grade, t.skills, t.active, t.sort_order, t.note, t.is_synthetic, t.suspended_at, t.suspended_reason`;
 
 /** 按工号排序：数字工号按数值（2 号在 10 号前面），其余按字母 */
 const ORDER = (db: Db) => db`t.active DESC, t.sort_order, (t.tech_no ~ '^[0-9]+$') DESC, length(t.tech_no), t.tech_no COLLATE "C", t.id`;

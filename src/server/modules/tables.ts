@@ -9,6 +9,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { CheckoutDetail } from '@shared/checkout';
 import {
+  MAX_BILL_LINE_QUANTITY,
   MAX_DISH_NOTE,
   MAX_TABLE_AREA,
   MAX_TABLE_NAME,
@@ -32,6 +33,7 @@ import { loadSettings } from './settings';
 import { withSpendQuota } from './spend-quota';
 import { expireMemberBonus } from './bonus';
 import { cancelKitchenItem, createKitchenItems, kitchenStationsOf, loadDiningRules, takeDishLimits, type KitchenLine } from './dining';
+import { authorizeLineVoid } from './dining-808';
 import { assertSettled, getCheckout, Payment, recordCheckoutPayments, snapshotCheckoutItems, splitPayments } from './frontdesk/checkout';
 import { couponLines, memberCouponOptions } from './coupon-checkout';
 import { assertCanFix, businessDate, hashRequest, loadFrontdeskRules, nextDocNo, runIdempotent, saveKey, setTxTimeouts } from './frontdesk/common';
@@ -134,8 +136,8 @@ export async function getTableSession(db: Db, id: number): Promise<TableSessionD
     FROM bill_lines l JOIN staff p ON p.id = l.posted_by LEFT JOIN staff vs ON vs.id = l.voided_by
     WHERE l.bill_id = ${s.billId} ORDER BY l.id`;
   const pending = await db<PendingDish[]>`
-    SELECT k.id, k.bill_line_id, i.name, k.quantity, k.note, k.status, k.rush_count, k.created_at
-    FROM kitchen_items k JOIN service_items i ON i.id = k.item_id
+    SELECT k.id, k.bill_line_id, k.item_id, i.name, k.quantity, k.note, k.status, k.rush_count, k.created_at, l.amount, l.posted_by, l.posted_at
+    FROM kitchen_items k JOIN service_items i ON i.id = k.item_id JOIN bill_lines l ON l.id = k.bill_line_id
     WHERE k.table_session_id = ${id} AND k.status IN ('queued', 'cooking', 'done') ORDER BY k.id`;
   const moves = await db<TableSessionDetail['moves']>`
     SELECT ft.name AS from_table, tt.name AS to_table, mv.reason, st.display_name AS operator_name, mv.created_at AS at
@@ -178,6 +180,13 @@ async function assertDiningEnabled(db: Db) {
   if (!(await loadDiningRules(db)).enabled) throw unprocessable('DINING_DISABLED', '餐饮功能已关闭，请刷新页面');
 }
 
+/** 桌台点单下架（8.0.8，A05，F10）：不能再开台、加菜；已经开着的桌台照常查看、结账、退菜、撤台、转台 */
+async function assertTablesEnabled(db: Db) {
+  if (!(await loadDiningRules(db)).tablesEnabled) {
+    throw unprocessable('TABLES_DISABLED', '桌台点单已下架：所有消费请挂手牌点单（店主可在后台「餐饮」里重新打开桌台点单）');
+  }
+}
+
 const guestFields = {
   guests: z.number('请填写用餐人数').int('人数必须是整数').min(1, '至少 1 人').max(99, '最多 99 人'),
   guestLabel: z.string().trim().max(16, '客人称呼最多 16 字').default(''),
@@ -203,6 +212,7 @@ export async function openTable(deps: Deps, raw: unknown, ctx: OpContext): Promi
   const run = await runIdempotent(deps, { key, opType: 'table_open', requestHash }, async (tx) => {
     const at = ctx.at ?? new Date();
     await assertDiningEnabled(tx);
+    await assertTablesEnabled(tx);
     // ① 桌台：启用、空闲（部分唯一索引兜底）
     const [t] = await tx<{ id: number; name: string; active: boolean }[]>`SELECT id, name, active FROM dining_tables WHERE id = ${input.tableId} FOR UPDATE`;
     if (!t) throw notFound('桌台不存在，请刷新后重试');
@@ -344,7 +354,7 @@ export const TablePostInput = z.object({
     .array(
       z.object({
         itemId: z.number().int().positive(),
-        quantity: z.number().int().min(1, '数量至少为 1').max(99, '单项数量最多 99'),
+        quantity: z.number().int().min(1, '数量至少为 1').max(MAX_BILL_LINE_QUANTITY, `单项数量最多 ${MAX_BILL_LINE_QUANTITY}`),
         note: z
           .string()
           .trim()
@@ -366,6 +376,7 @@ export async function postTableCharges(deps: Deps, id: number, raw: unknown, ctx
   const requestHash = hashRequest({ sessionId: id, ...payload });
   await runIdempotent(deps, { key, opType: 'table_post', requestHash }, async (tx) => {
     const at = ctx.at ?? new Date();
+    await assertTablesEnabled(tx);
     // ② 开台 → 账单
     const s = (await lockSessions(tx, [id])).get(id)!;
     assertSessionOpen(s);
@@ -415,6 +426,8 @@ export async function postTableCharges(deps: Deps, id: number, raw: unknown, ctx
 
 const VoidInput = z.object({
   reason: z.string().trim().min(2, '请填写退菜原因（至少 2 个字）').max(200, '原因最多 200 字'),
+  /** 退超过小额上限的菜时值班经理及以上的当场授权（8.0.8，B02） */
+  grantId: z.uuid('授权编号不正确').optional(),
 });
 
 /** 退菜：作废桌台账单的一条明细（规则与前台作废相同）；出品单改为已退，扣过估清的按原份数加回 */
@@ -429,11 +442,12 @@ export async function voidTableLine(deps: Deps, lineId: number, raw: unknown, ct
     const s = (await lockSessions(tx, [peek.sessionId])).get(peek.sessionId)!;
     assertSessionOpen(s);
     await tx`SELECT id FROM bills WHERE id = ${s.billId} FOR UPDATE`;
-    const [line] = await tx<{ id: number; name: string; quantity: number; amount: number; status: string; postedBy: number; postedAt: string; voidedByName: string | null }[]>`
-      SELECT l.id, l.name, l.quantity, l.amount, l.status, l.posted_by, l.posted_at, vs.display_name AS voided_by_name
+    const [line] = await tx<{ id: number; name: string; source: string; quantity: number; amount: number; status: string; postedBy: number; postedAt: string; voidedByName: string | null }[]>`
+      SELECT l.id, l.name, l.source, l.quantity, l.amount, l.status, l.posted_by, l.posted_at, vs.display_name AS voided_by_name
       FROM bill_lines l LEFT JOIN staff vs ON vs.id = l.voided_by WHERE l.id = ${lineId} FOR UPDATE OF l`;
     if (line!.status === 'voided') throw conflict('ALREADY_VOIDED', `这项明细已由${line!.voidedByName ?? '其他人'}作废，不会重复冲减`);
-    assertCanFix(ctx.actor, line!.postedBy, line!.postedAt, await loadFrontdeskRules(tx), at, '这项明细');
+    // 8.0.8（B02）：小额直接退、经理、当场授权、本人 15 分钟内
+    const approval = await authorizeLineVoid(tx, { line: line!, actor: ctx.actor, at, grantId: input.grantId, what: '这项明细' });
     await tx`
       UPDATE bill_lines SET status = 'voided', void_reason = ${input.reason}, voided_by = ${ctx.actor.id}, voided_at = ${at} WHERE id = ${line!.id}`;
     await tx`UPDATE bills SET amount_cents = amount_cents - ${line!.amount}, line_count = line_count - 1 WHERE id = ${s.billId}`;
@@ -443,7 +457,7 @@ export async function voidTableLine(deps: Deps, lineId: number, raw: unknown, ct
       action: 'table_void',
       targetType: 'table_session',
       targetId: s.id,
-      detail: { sessionNo: s.sessionNo, name: line!.name, quantity: line!.quantity, amount: line!.amount, reason: input.reason },
+      detail: { sessionNo: s.sessionNo, lineId: line!.id, name: line!.name, quantity: line!.quantity, amount: line!.amount, reason: input.reason, ...approval },
       ip: ctx.ip,
       businessDate: await businessDate(tx, deps, at),
     });

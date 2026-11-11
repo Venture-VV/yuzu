@@ -364,7 +364,8 @@ test.describe('v0.7.16 房态图', () => {
       await expect(feeDlg).toBeHidden();
       await expect(page.getByText(/房费 ¥120\.00 已挂到手牌/)).toBeVisible();
       const charged = await getJson<{ lines: { name: string; amount: number; status: string }[] }>(page, `/api/frontdesk/visits/${visit}`);
-      expect(charged.lines.filter((l) => l.status === 'active' && l.name.startsWith(PARTY_FEE_ITEM)).map((l) => l.amount)).toEqual([12000]);
+      // 8.0.8（A03）：账单上的名称带业态和房间（「派对房 X201 房费（每 30 分钟）」），不再是房费项目的名字
+      expect(charged.lines.filter((l) => l.status === 'active' && l.name.startsWith('派对房 X201 房费')).map((l) => [l.name, l.amount])).toEqual([['派对房 X201 房费（每 30 分钟）', 12000]]);
       await relogin(page, 'linlan');
       await setPartyPricing(page, false);
       await relogin(page, 'xiaozhou');
@@ -399,6 +400,7 @@ test.describe('v0.7.16 房态图', () => {
       const hk = page.getByRole('dialog').filter({ hasText: '改房态 · W301' });
       await hk.getByRole('radio', { name: '已打扫（空闲）' }).click();
       await hk.getByTestId('room-housekeeping-save').click();
+      await hk.getByTestId('room-housekeeping-confirm').click();
       await expect(space(page, 'W301')).toHaveAttribute('data-state', 'vacant');
       expect((await getJson<RoomBoard>(page, '/api/rooms')).rooms.find((r) => r.id === roomId)!.status).toBe('vacant');
 
@@ -470,7 +472,7 @@ function synthetic() {
     planRooms.push({ floorCode: 'L3', code, label: `合成 ${code}`, status: 'ok', mergedWith: [], closeMm: 600, polygon: [[x, y], [x + CELL.w, y], [x + CELL.w, y + CELL.h], [x, y + CELL.h]], labelAt: [x + CELL.w / 2, y + CELL.h / 2], areaM2: 24, spaceId: i + 1, displayName: `合成${businessType}${i + 1}` });
     if (businessType === '客房') {
       const status = (['vacant', 'occupied', 'dirty', 'maintenance'] as const)[Math.floor(i / 5) % 4]!;
-      rooms.push({ id: 1000 + i, roomNo: code, spaceName: `合成客房${i + 1}`, spaceId: i + 1, floor: '3', typeName: '合成大床房', kind: 'daily', price: 28800, blockMinutes: null, status, maintenanceNote: null, stay: null });
+      rooms.push({ id: 1000 + i, roomNo: code, spaceName: `合成客房${i + 1}`, spaceId: i + 1, floor: '3', typeName: '合成大床房', kind: 'daily', price: 28800, blockMinutes: null, status, maintenanceNote: null, housekeeping: status === 'dirty' || status === 'maintenance' ? status : 'clean', lastChange: null, stay: null });
     }
     if ((businessType === 'SPA' || businessType === '足浴') && i % 3 === 0) {
       sessions.push({ id: i + 1, sessionNo: `ZD${i}`, spaceId: i + 1, techNo: String(i), techName: `合成技师${i}`, tagCode: `A${i}`, itemName: '合成项目', clocks: 1, minutes: 60, status: i % 2 ? 'serving' : 'waiting', createdAt: now, startedAt: i % 2 ? now : null, plannedEnd: null });

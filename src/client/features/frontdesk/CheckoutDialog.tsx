@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { invalidateRevenue, useBusinessToday } from '../../lib/revenue';
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { Banknote, CircleCheck, Clock3, LogOut, ReceiptText, ShieldCheck, Ticket, Undo2 } from 'lucide-react';
 import {
@@ -41,7 +42,7 @@ import { PaymentsSection, usePayRows } from './payments';
 import { allocateCountCards, type CheckoutCountCardOption, type CountCardAllocation } from '@shared/count-cards';
 import { pendingFor, PendingPanel, useFrontdeskOp, useFrontdeskPending } from './pending';
 import { RefundPanel, RefundsList } from './RefundPanel';
-import { stayText, useCheckout, useCheckoutPreview, useCheckouts, useRefreshFrontdesk, useTicketTypes } from './queries';
+import { stayText, useCheckout, useCheckoutDaySummary, useCheckoutPreview, useCheckouts, useRefreshFrontdesk, useTicketTypes } from './queries';
 
 // 结账（S3）：勾选要一起结的手牌 → 核对门票与明细 → 登记收款（可组合）→ 确认结清。
 // 应收合计、储值扣款构成以服务端为准：门票刚好跳档、余额或扣款规则变化时服务端拒绝，页面刷新后重新核对。
@@ -114,7 +115,8 @@ export function CheckoutDialog({
 
   // 结清后（含查回待确认的结账）交班表的汇总随之变化：刷新当前班次，交班页与开班提示共用这份数据
   useEffect(() => {
-    if (result) void qc.invalidateQueries({ queryKey: shiftKeys.all });
+    // 8.0.8（A02）：日结、流水、结账记录、看板等一起刷新
+    if (result) invalidateRevenue(qc);
   }, [result, qc]);
 
   const locked = op.locked;
@@ -703,29 +705,53 @@ export function CheckoutReceipt({ detail }: { detail: CheckoutDetail }) {
 
 /** 结账记录：查看结账单、反结账；可以切换营业日（过了营业日切换点仍能找到前一晚的单），之前的营业日需要历史营业日权限 */
 export function CheckoutRecordsDialog({ open, onClose, focusId }: { open: boolean; onClose: () => void; focusId?: number | null }) {
-  const session = useSession();
   const can = useCan();
-  const [date, setDate] = useState(session.today);
-  const list = useCheckouts(date, open);
+  // 8.0.8（A02）：「今天」跟着服务端的营业日走；看今天时每 15 秒刷新；上方的合计与日结同一个口径
+  const today = useBusinessToday();
+  const [date, setDate] = useState(today);
+  const isToday = date === today;
+  const list = useCheckouts(date, open, open && isToday);
+  const summary = useCheckoutDaySummary(date, open, open && isToday);
   const [openId, setOpenId] = useState<number | null>(focusId ?? null);
   useResetOnOpen(
     open,
     () => {
       setOpenId(focusId ?? null);
-      setDate(session.today);
+      setDate(today);
     },
-    [focusId, session.today],
+    [focusId, today],
   );
-  const isToday = date === session.today;
+  const sum = summary.data;
   return (
-    <Dialog open={open} onClose={onClose} width="max-w-2xl" title="结账记录" description={`营业日 ${date} 的结账单（含当天反结账的）`}>
+    <Dialog open={open} onClose={onClose} width="max-w-2xl" title="结账记录" description={`营业日 ${date} 的结账单（含当天反结账的）${isToday ? ' · 每 15 秒自动刷新' : ''}`}>
       {!openId && (
         <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="checkout-records-date">
-          <DateNav value={date} today={session.today} onChange={setDate} locked={!can('ledger.readHistory')} />
+          <DateNav value={date} today={today} onChange={setDate} locked={!can('ledger.readHistory')} />
           {isToday && can('ledger.readHistory') && (
-            <Button size="sm" variant="ghost" onClick={() => setDate(shiftDate(session.today, -1))}>
+            <Button size="sm" variant="ghost" onClick={() => setDate(shiftDate(today, -1))}>
               前一晚的单
             </Button>
+          )}
+        </div>
+      )}
+      {!openId && sum && (
+        <div className="mb-3 grid grid-cols-2 gap-2 rounded-lg border border-line bg-paper-2/40 px-3 py-2 text-[12.5px] sm:grid-cols-4" data-testid="checkout-records-summary">
+          <span>
+            结账 {sum.checkouts.count} 笔 <Money cents={sum.checkouts.total} className="font-bold" />
+          </span>
+          <span>
+            反结账 {sum.voids.count} 笔 <Money cents={-sum.voids.total} className="font-bold" />
+          </span>
+          <span>
+            退款单 {sum.refunds.count} 笔 <Money cents={-sum.refunds.total} className="font-bold" />
+          </span>
+          <span className="font-semibold">
+            营业额（与日结一致）<Money cents={sum.net} className="font-bold text-ink" data-testid="checkout-records-net" />
+          </span>
+          {sum.unshifted.count > 0 && (
+            <span className="col-span-full text-clay" data-testid="checkout-records-unshifted">
+              其中 {sum.unshifted.count} 笔（{formatYuan(sum.unshifted.total)}）收款时没有开班，不在任何交班的合计里
+            </span>
           )}
         </div>
       )}
@@ -845,7 +871,7 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
       void qc.invalidateQueries({ queryKey: ['frontdesk'] });
       void qc.invalidateQueries({ queryKey: ['dining'] });
       void qc.invalidateQueries({ queryKey: ['member'] });
-      void qc.invalidateQueries({ queryKey: shiftKeys.all });
+      invalidateRevenue(qc);
       refresh();
     } catch (e) {
       setError(errorMessage(e));

@@ -2,7 +2,7 @@
 //   · 3b createTrialInviteFromMp：与前台「邀请体验」同一套规则；经办人系统账号「小程序」；好友还不是会员的当场建档、渠道「老带新」；
 //     同一个 claimKey 再调用返回第一次那条，内容不同拒绝；拒绝时什么都不留（存档点），调用方事务还能接着用；
 //   · 3c orderFoodFromMp：挂在会员在店手牌的账单上、进厨房出品单（扣估清），桌码写进出品单；只能点进厨房的菜；
-//     一单份数、金额有上限；同一个 claimKey 只下一次（两个事务同时下也只一单）；没有在店手牌、桌号不对、价格变了都拒绝；
+//     一单份数、金额有上限（一道菜一行最多 99 份，8.0.8）；同一个 claimKey 只下一次（两个事务同时下也只一单）；没有在店手牌、桌号不对、价格变了都拒绝；
 //   · 只读：桌台、「我的账单」。
 
 import { randomUUID } from 'node:crypto';
@@ -253,6 +253,38 @@ describe('3c 扫码点餐 orderFoodFromMp', () => {
     const menu = (await api(ctx.app, ctx.clerk, 'GET', '/api/dining/menu')).body.dishes as { id: number; remaining: number | null }[];
     expect(menu.find((d) => d.id === item['宫保鸡丁'])?.remaining).toBe(0);
     await allChecksOk();
+  });
+
+  it('一单最多几份调到 200（N1）：一道菜一行最多 99 份（账单一行能存的上限），100、200 份在格式上就挡住、什么都不留；同一个 claimKey 改成分几行再下可以', async () => {
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { mpFoodMaxQuantity: 200, mpFoodMaxTotalCents: 1_000_000 })).status).toBe(200);
+    try {
+      const bill = async () => (await mpOpenBill(ctx.sql, guest.id))!.total;
+      const lines = async () => Number((await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM bill_lines WHERE bill_id = (SELECT bill_id FROM visits WHERE id = ${visit.visitId})`)[0]!.n);
+      const tea = item['柠檬茶']!;
+      const ok99 = await order({ memberId: guest.id, items: [{ itemId: tea, quantity: 99 }], claimKey: 'f-q99' });
+      expect(ok99.lines.map((l) => [l.quantity, l.amount])).toEqual([[99, 1500 * 99]]);
+      const [total, count] = [await bill(), await lines()];
+      for (const quantity of [100, 200]) {
+        const e = await errorOf(order({ memberId: guest.id, items: [{ itemId: tea, quantity }], claimKey: 'f-q200' }));
+        expect([e.code, e.status]).toEqual(['BAD_REQUEST', 400]);
+        expect(e.message).toContain('一道菜一单最多 99 份');
+      }
+      expect([await bill(), await lines()]).toEqual([total, count]);
+      expect((await ctx.sql`SELECT 1 FROM entry_claims WHERE claim_key = 'mp_food:f-q200'`).length).toBe(0);
+      // 一单 200 份分三行（99 + 99 + 2）：同一个 claimKey 接着用；再调用返回那一单
+      const split = { memberId: guest.id, items: [99, 99, 2].map((quantity) => ({ itemId: tea, quantity })), claimKey: 'f-q200' };
+      const r = await order(split);
+      expect(r.lines.map((l) => l.quantity)).toEqual([99, 99, 2]);
+      expect(r.total).toBe(1500 * 200);
+      expect(await order(split)).toMatchObject({ replayed: true, orderNo: r.orderNo, total: 1500 * 200 });
+      // 超过设置的 200 份：下单时拒绝（MP_ORDER_LIMIT），账单不变
+      const before = await bill();
+      expect((await errorOf(order({ memberId: guest.id, items: [99, 99, 3].map((quantity) => ({ itemId: tea, quantity })), claimKey: 'f-q201' }))).code).toBe('MP_ORDER_LIMIT');
+      expect(await bill()).toBe(before);
+      await allChecksOk();
+    } finally {
+      expect((await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { mpFoodMaxQuantity: 20, mpFoodMaxTotalCents: 50_000 })).status).toBe(200);
+    }
   });
 
   it('结账离店以后：NO_OPEN_VISIT，「我的账单」为空', async () => {

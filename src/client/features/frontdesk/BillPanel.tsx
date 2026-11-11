@@ -45,6 +45,7 @@ import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, IconButton, Notice, PendingBadge, Skeleton, Textarea } from '../../components/ui';
+import { DishVoidDialog } from '../dining/DishVoid';
 import { GroupMark, LONG_STAY_MINUTES, VipChip, ZoneChip, ZONE_STYLE } from './parts';
 import { FRONTDESK_OP_LABELS, useFrontdeskPending } from './pending';
 import { stayMinutes, stayText, useServerNow } from './queries';
@@ -73,6 +74,8 @@ export function BillPanel({
 }) {
   const now = useServerNow(visit?.serverTime);
   const [voiding, setVoiding] = useState<BillLine | null>(null);
+  /** 餐饮的菜按金额分级退（8.0.8，B02）：小额直接退，超过的请值班经理及以上当场授权 */
+  const [dishVoiding, setDishVoiding] = useState<BillLine | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [showVoided, setShowVoided] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -273,7 +276,14 @@ export function BillPanel({
                   </div>
                   <ul className="mt-1.5 space-y-1.5">
                     {rows.map((l) => (
-                      <LineRow key={l.id} line={l} canVoid={open && can('frontdesk.operate')} allowed={canFix(l.postedById, l.postedAt)} selfMinutes={selfMinutes} onVoid={() => setVoiding(l)} />
+                      <LineRow
+                        key={l.id}
+                        line={l}
+                        canVoid={open && can('frontdesk.operate')}
+                        allowed={l.source === 'dining' || canFix(l.postedById, l.postedAt)}
+                        selfMinutes={selfMinutes}
+                        onVoid={() => (l.source === 'dining' ? setDishVoiding(l) : setVoiding(l))}
+                      />
                     ))}
                   </ul>
                 </div>
@@ -454,6 +464,29 @@ export function BillPanel({
         )}
       </QuickReasonDialog>
 
+      <DishVoidDialog
+        dish={
+          dishVoiding && {
+            billLineId: dishVoiding.id,
+            name: dishVoiding.name,
+            quantity: dishVoiding.quantity,
+            amount: dishVoiding.amount,
+            postedBy: dishVoiding.postedById,
+            postedAt: dishVoiding.postedAt,
+            served: dishVoiding.kitchen?.status === 'served' || dishVoiding.kitchen?.status === 'done',
+          }
+        }
+        url={dishVoiding ? `/api/frontdesk/lines/${dishVoiding.id}/void` : ''}
+        onClose={() => setDishVoiding(null)}
+        onDone={(dish, result) => {
+          setDishVoiding(null);
+          if (result && typeof result === 'object' && 'lines' in result) onChanged(result as VisitDetail);
+          // 之前那一次已经退掉了（回复丢了）：重新取这位客人的账单
+          else void api.get<VisitDetail>(`/api/frontdesk/visits/${visit.id}`).then(onChanged, () => {});
+          toast({ tone: 'success', title: `${dish.name} 已退`, body: `${dish.name} × ${dish.quantity}` });
+        }}
+      />
+
       <QuickReasonDialog
         open={cancelling}
         title={`撤销来访 · ${visit.tag.code}`}
@@ -517,7 +550,13 @@ function LineRow({ line, canVoid, allowed, selfMinutes, onVoid }: { line: BillLi
           onClick={onVoid}
           disabled={!allowed}
           aria-label={`作废 ${line.name}`}
-          title={allowed ? '作废这项明细' : `超过 ${selfMinutes} 分钟或不是你登记的，请店主处理`}
+          title={
+            line.source === 'dining'
+              ? '退菜：小额直接退，超过的请值班经理及以上当场授权'
+              : allowed
+                ? '作废这项明细'
+                : `超过 ${selfMinutes} 分钟或不是你登记的，请店主处理`
+          }
           className="-mr-1 flex size-7 shrink-0 items-center justify-center rounded-md text-ink-4 transition-colors hover:bg-clay-soft hover:text-clay disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink-4"
         >
           <CircleSlash className="size-4" />

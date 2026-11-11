@@ -594,7 +594,9 @@ export async function seedShowcaseDemo(sql: Sql, config: AppConfig): Promise<Sho
     await dispatch(k.dispatchC!, visitC, 'D02', false, 'T302');
     done.push('钟单：甲 D03 已下钟（T302）、乙 D01 服务中（T301）、丙 D02 待上钟（T302）；甲入住 W301');
 
-    // 桌台开台点菜：简餐上了桌，果汁还没出；丙在手牌上点了一杯果汁；果汁估清
+    // 桌台开台点菜：简餐上了桌，果汁还没出；丙在手牌上点了一杯果汁；果汁估清。
+    // 8.0.8（A05）起桌台点单默认下架：这里先临时打开、做完再关上——演示「升级前开着的桌台照常结账，新单只能挂手牌」
+    await owner('PUT', '/api/admin/dining/rules', { tablesEnabled: true });
     await clerk('POST', '/api/dining/tables/open', { clientKey: k.table, tableId, guests: 2, guestLabel: TABLE_GUEST });
     const sessionId = await idOf(sql, sql<{ id: number }[]>`SELECT id FROM table_sessions WHERE table_id = ${tableId} AND status = 'open' ORDER BY id DESC LIMIT 1`);
     const [meal] = await itemQuery(DISHES[0]!.name);
@@ -617,7 +619,8 @@ export async function seedShowcaseDemo(sql: Sql, config: AppConfig): Promise<Sho
     }
     await clerk('POST', '/api/dining/orders', { clientKey: k.dishC, visitId: visitC, lines: [{ itemId: Number(juice!.id), quantity: 1 }], expectedTotal: Number(juice!.price) });
     await clerk('PUT', `/api/kitchen/limits/${juice!.id}`, { remaining: 0 });
-    done.push(`${TABLE.name}开台：简餐 2 份已上、果汁 1 杯待出；丙点果汁 1 杯待出；演示果汁估清`);
+    await owner('PUT', '/api/admin/dining/rules', { tablesEnabled: false });
+    done.push(`${TABLE.name}开台：简餐 2 份已上、果汁 1 杯待出；丙点果汁 1 杯待出；演示果汁估清；桌台点单随后下架（开着的这桌照常结账）`);
 
     // 房态：W302 待打扫、W303 维修
     await clerk('PUT', `/api/rooms/${rooms.W302}/housekeeping`, { status: 'dirty' });

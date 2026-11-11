@@ -69,7 +69,8 @@ async function prepare(page: Page) {
   }
   const items = DISHES.map((d) => ({ id: admin.items.find((i) => i.name === d.name)!.id, stationId: admin.stations.find((s) => s.name === d.station)!.id }));
   await send(page, 'put', '/api/admin/dining/items', { items });
-  await send(page, 'put', '/api/admin/dining/rules', { enabled: true, trackServed: true, warnMinutes: 15 });
+  // 8.0.8（A05）起桌台点单默认下架：这组用例测的是桌台，先打开
+  await send(page, 'put', '/api/admin/dining/rules', { enabled: true, trackServed: true, warnMinutes: 15, tablesEnabled: true });
 
   // 桌台：第一张在后台页面上建（还没有时），其余用接口；停用的重新启用
   let tables = await getJson<TablesAdmin>(page, '/api/admin/dining/tables');
@@ -108,7 +109,7 @@ async function cleanup(page: Page) {
     for (const l of d.lines.filter((x) => x.status === 'active')) await send(page, 'post', `/api/dining/tables/lines/${l.id}/void`, { reason: 'E2E：收尾' });
     await send(page, 'post', `/api/dining/tables/sessions/${s.id}/cancel`, { reason: 'E2E：收尾' });
   }
-  const res = await page.request.put('/api/admin/dining/rules', { data: { enabled: false } });
+  const res = await page.request.put('/api/admin/dining/rules', { data: { enabled: false, tablesEnabled: false } });
   expect(res.ok(), await res.text()).toBe(true);
 }
 
@@ -299,6 +300,49 @@ test.describe('S5 餐饮第二步 · 桌台', () => {
       expect(board.tables.filter((t) => t.name === B2 && t.session).map((t) => t.session!.guests)).toEqual([2]);
     } finally {
       await page.unrouteAll({ behavior: 'ignoreErrors' });
+      await relogin(page, 'linlan');
+      await cleanup(page);
+    }
+  });
+
+  // 8.0.8（Codex 审查 d5e0c06）：桌台点单下架以前留下的「结果待确认」，下架以后照样能回到那一桌处理（查回、原样重提或确认作废）
+  test('桌台点单没发出去、之后桌台点单下架：「去处理」照样回到这一桌，确认作废以后回到手牌点单', async ({ page, playwright, baseURL }) => {
+    await login(page, 'linlan');
+    const owner = await playwright.request.newContext({ baseURL });
+    try {
+      await prepare(page);
+      expect((await owner.post('/api/auth/login', { data: { username: 'linlan', password: PASSWORD } })).ok()).toBe(true);
+      const b1 = (await getJson<TablesBoard>(page, '/api/dining/tables')).tables.find((t) => t.name === B1)!;
+      await send(page, 'post', '/api/dining/tables/open', { clientKey: randomUUID(), tableId: b1.id, guests: 2 });
+      const s = (await sessionOf(page, B1))!;
+      await relogin(page, 'xiaozhou');
+      // 点单请求没到服务器（断网）：记在「结果待确认」
+      await page.route('**/api/dining/tables/sessions/*/orders', (route) => route.abort('connectionreset'));
+      await page.goto(`/dining/order?table=${s.id}`);
+      await expect(page.getByTestId('dining-table-selected')).toContainText(`桌 ${B1}`);
+      await page.getByTestId(`dining-dish-${TEA.name}`).click();
+      await page.getByTestId('dining-submit').click();
+      await expect(page.getByTestId('pending-op')).toContainText(`桌 ${B1}`);
+      await page.unroute('**/api/dining/tables/sessions/*/orders');
+      // 店主把桌台点单下架（另开会话）
+      expect((await owner.put('/api/admin/dining/rules', { data: { tablesEnabled: false } })).ok()).toBe(true);
+      // 顶部提醒「去处理」：照样回到这一桌的点单（只为处理这一笔），查不到 → 确认作废
+      await page.goto('/dining/tables');
+      const banner = page.getByTestId('frontdesk-pending-banner');
+      await expect(banner).toContainText(`桌 ${B1}`);
+      await banner.getByRole('button', { name: '去处理' }).click();
+      await expect(page).toHaveURL(/\/dining\/order/);
+      await expect(page.getByTestId('dining-table-selected')).toContainText(`桌 ${B1}`);
+      await expect(page.getByTestId('pending-op')).toContainText(`桌 ${B1}`);
+      await page.getByTestId('pending-abandon').click();
+      await expect(page.getByTestId('pending-op')).toHaveCount(0);
+      await expect(banner).toHaveCount(0);
+      // 处理完回到手牌点单；这一桌的账没多
+      await expect(page.getByTestId('dining-tag-only')).toBeVisible();
+      expect((await sessionOf(page, B1))!.amount).toBe(0);
+    } finally {
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+      await owner.dispose();
       await relogin(page, 'linlan');
       await cleanup(page);
     }

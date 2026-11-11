@@ -184,14 +184,18 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
     WHERE coalesce(i.amount, 0) <> c.total_amount OR coalesce(i.discount, 0) <> coalesce(d.amount, 0)
     LIMIT 5`;
   const [items] = await db<{ n: number }[]>`SELECT count(DISTINCT checkout_id)::int AS n FROM checkout_items`;
-  // ⑯ 转单（v0.7.6）：原明细已作废、在原客人的账单上；新明细在目标客人的账单上，来源、项目、名称、档位、数量、金额、技师都相同
+  // ⑯ 转单（v0.7.6）：原明细已作废、在原客人的账单上；新明细在目标客人的账单上，来源、项目、名称、档位、数量、金额、技师都相同。
+  // 8.0.8：转过来时还没派技师、转过来以后钟房补派了的（记了补派 clock_assign），技师可以不同；钱的字段照旧逐项相同（Codex 审查 b4a83d9）
   const moveDiff = await db<{ ref: string }[]>`
     SELECT '转单 ' || m.id AS ref FROM bill_line_moves m
     JOIN bill_lines f ON f.id = m.from_line_id JOIN bill_lines t ON t.id = m.to_line_id
     JOIN visits fv ON fv.id = m.from_visit_id JOIN visits tv ON tv.id = m.to_visit_id
     WHERE f.status <> 'voided' OR f.bill_id <> fv.bill_id OR t.bill_id <> tv.bill_id
-       OR (f.source, f.item_id, f.name, f.tier, f.unit_price, f.quantity, f.amount, f.technician_id, f.call_type)
-          IS DISTINCT FROM (t.source, t.item_id, t.name, t.tier, t.unit_price, t.quantity, t.amount, t.technician_id, t.call_type)
+       OR (f.source, f.item_id, f.name, f.tier, f.unit_price, f.quantity, f.amount)
+          IS DISTINCT FROM (t.source, t.item_id, t.name, t.tier, t.unit_price, t.quantity, t.amount)
+       OR ((f.technician_id, f.call_type) IS DISTINCT FROM (t.technician_id, t.call_type)
+           AND NOT (f.technician_id IS NULL AND f.call_type IS NULL AND t.session_id IS NOT NULL
+                    AND EXISTS (SELECT 1 FROM audit_logs a WHERE a.action = 'clock_assign' AND (a.detail->>'lineId')::bigint = t.id)))
     LIMIT 5`;
   const [moves] = await db<{ n: number }[]>`SELECT count(*)::int AS n FROM bill_line_moves`;
 

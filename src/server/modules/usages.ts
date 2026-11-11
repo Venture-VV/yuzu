@@ -26,6 +26,9 @@ import {
   MAX_USAGE_NOTE,
   USAGE_STEP_OPTIONS,
   usageFee,
+  usageLineName,
+  type UsageBoard,
+  type UsageBoardSpace,
   type UsageDetail,
   type UsagePricing,
   type UsageRules,
@@ -135,7 +138,7 @@ export async function usagePricingViews(db: Db, rules: UsageRules): Promise<Map<
 
 const iso = (v: string | Date | null) => (v === null ? null : new Date(v).toISOString());
 
-async function readUsages(db: Db, where: { id?: number; date?: string; spaceId?: number }): Promise<UsageDetail[]> {
+async function readUsages(db: Db, where: { id?: number; date?: string; spaceId?: number; openOnly?: boolean }): Promise<UsageDetail[]> {
   type Row = Omit<UsageDetail, 'openedAt' | 'closedAt' | 'priced' | 'fee'> & {
     openedAt: string;
     closedAt: string | null;
@@ -155,6 +158,7 @@ async function readUsages(db: Db, where: { id?: number; date?: string; spaceId?:
     WHERE ${where.id !== undefined ? db`u.id = ${where.id}` : db`true`}
       AND ${where.date !== undefined ? db`u.business_date = ${where.date}` : db`true`}
       AND ${where.spaceId !== undefined ? db`u.space_id = ${where.spaceId}` : db`true`}
+      AND ${where.openOnly ? db`u.status = 'open'` : db`true`}
     ORDER BY u.opened_at, u.id`;
   const rules = await loadUsageRules(db);
   const views = await usagePricingViews(db, rules);
@@ -175,6 +179,26 @@ export async function getUsage(db: Db, id: number): Promise<UsageDetail> {
   const [u] = await readUsages(db, { id });
   if (!u) throw notFound('使用单不存在');
   return u;
+}
+
+/**
+ * 派对房看板（8.0.8，A03）：开单即占用的业态下在用、可售的房间（按业态、楼层、编码），带开着的使用单与计费；只读。
+ * 客房页「派对房」用，不需要底图（原来只有平面图上能开单）
+ */
+export async function usageBoard(db: Db): Promise<UsageBoard> {
+  const rules = await loadUsageRules(db);
+  if (rules.businessTypes.length === 0) return { businessTypes: [], spaces: [] };
+  const views = await usagePricingViews(db, rules);
+  const spaces = await db<Omit<UsageBoardSpace, 'priced' | 'pricing' | 'usage'>[]>`
+    SELECT sp.id, sp.code, sp.display_name, sp.business_type, sp.capacity, f.code AS floor_code
+    FROM spaces sp JOIN floors f ON f.id = sp.floor_id
+    WHERE sp.active AND sp.sellable AND sp.business_type IN ${db(rules.businessTypes)}
+    ORDER BY array_position(${rules.businessTypes}::text[], sp.business_type), f.sort_order, f.code, sp.code`;
+  const open = new Map((await readUsages(db, { openOnly: true })).map((u) => [u.spaceId, u]));
+  return {
+    businessTypes: rules.businessTypes,
+    spaces: spaces.map((sp) => ({ ...sp, priced: pricingOf(rules, sp.businessType) !== null, pricing: views.get(sp.businessType) ?? null, usage: open.get(sp.id) ?? null })),
+  };
 }
 
 /** 某个营业日开的使用单（对账包、页面的当天清单） */
@@ -276,11 +300,12 @@ interface LockedUsage {
   openedBy: number;
   openedAt: string;
   spaceCode: string;
+  businessType: string;
 }
 
 async function lockUsage(tx: Tx, id: number): Promise<LockedUsage> {
   const [u] = await tx<LockedUsage[]>`
-    SELECT u.id, u.usage_no, u.space_id, u.visit_id, u.status, u.opened_by, u.opened_at, sp.code AS space_code
+    SELECT u.id, u.usage_no, u.space_id, u.visit_id, u.status, u.opened_by, u.opened_at, sp.code AS space_code, sp.business_type
     FROM space_usages u JOIN spaces sp ON sp.id = u.space_id WHERE u.id = ${id} FOR UPDATE OF u`;
   if (!u) throw notFound('使用单不存在');
   if (u.status !== 'open') {
@@ -361,7 +386,8 @@ async function chargeUsage(
       kind: 'fee',
       itemId: feeItem.item.id,
       tier: feeItem.tier,
-      name: (perStep ? `${feeItem.item.name}（每 ${pricing.stepMinutes} 分钟）` : `${feeItem.item.name}（${durationText(fee.chargedMinutes)}）`).slice(0, 32),
+      // 8.0.8（A03）：名称带房型和房间（「宠物轰趴房 X202 房费（每 30 分钟）」），与实开的房间一致
+      name: usageLineName(usage.businessType, usage.spaceCode, perStep ? `房费（每 ${pricing.stepMinutes} 分钟）` : `房费（${durationText(fee.chargedMinutes)}）`),
       unitPrice: perStep ? fee.unitPrice : fee.amount,
       quantity: perStep ? fee.steps : 1,
       amount: fee.amount,
@@ -373,7 +399,7 @@ async function chargeUsage(
     const o = priceOf(pricing.openFeeItemId, '开台费');
     if (o.price > 0) {
       openFee = o.price;
-      lines.push({ kind: 'open_fee', itemId: o.item.id, tier: o.tier, name: o.item.name.slice(0, 32), unitPrice: o.price, quantity: 1, amount: o.price, charged: 0 });
+      lines.push({ kind: 'open_fee', itemId: o.item.id, tier: o.tier, name: usageLineName(usage.businessType, usage.spaceCode, '开台费'), unitPrice: o.price, quantity: 1, amount: o.price, charged: 0 });
     }
   }
   for (const l of lines) {
@@ -522,6 +548,7 @@ export function registerUsageRoutes(app: FastifyInstance, deps: Deps) {
     const q = parse(ListQuery, req.query);
     return listUsages(sql, q.date, q.spaceId);
   });
+  app.get('/api/usages/board', { preHandler: read }, async () => usageBoard(sql));
   app.get('/api/usages/:id', { preHandler: read }, async (req) => getUsage(sql, parse(idParam, req.params).id));
   const op = guard('room.operate');
   app.post('/api/usages', { preHandler: op }, async (req) => openUsage(deps, req.body, ctxOf(req)));

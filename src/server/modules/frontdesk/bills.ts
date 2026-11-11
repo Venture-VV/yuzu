@@ -7,7 +7,7 @@ import { PRICE_TIER_LABELS, PRICE_TIERS, type PriceTier } from '@shared/catalog'
 import { can } from '@shared/permissions';
 import { MAX_MOVE_LINES, normalizeTagCode, TAG_CODE_PATTERN, ZONE_LABELS, type BillSource } from '@shared/frontdesk';
 import { CALL_TYPES, canServe, gradeLabel, technicianText, tierFor, type CallType } from '@shared/technicians';
-import { MAX_DISH_NOTE } from '@shared/dining';
+import { MAX_BILL_LINE_QUANTITY, MAX_DISH_NOTE } from '@shared/dining';
 import { writeAudit } from '../../lib/audit';
 import type { Tx } from '../../db';
 import type { Deps, OpContext } from '../../lib/context';
@@ -18,6 +18,7 @@ import { loadPricedItems, priceLine } from '../pricing';
 import { loadTechnicianRules, loadTechnicians } from '../technicians';
 import { attachSessions, lockQueue, syncSessionAfterVoid, type SessionPostOptions } from '../clockroom';
 import { cancelKitchenItem, createKitchenItems, kitchenStationsOf, takeDishLimits } from '../dining';
+import { authorizeLineVoid } from '../dining-808';
 import { assertAfterVisits, backfillDetail, BackfillInput, recordBackfill, resolveBackfill, type Backfill } from './backfill';
 import { getVisit } from './visits';
 import { locateCharges, locateSession } from '../locations';
@@ -30,7 +31,7 @@ export const PostInput = z
         z
           .object({
             itemId: z.number().int().positive(),
-            quantity: z.number().int().min(1, '数量至少为 1').max(99, '单项数量最多 99'),
+            quantity: z.number().int().min(1, '数量至少为 1').max(MAX_BILL_LINE_QUANTITY, `单项数量最多 ${MAX_BILL_LINE_QUANTITY}`),
             /** 价格档；不带时按项目的默认档计价（升级前留下的待确认请求不带这一项） */
             tier: z.enum(PRICE_TIERS, '价格档不正确').optional(),
             /** 技师与点钟 / 轮钟（v0.7.0，需要技师的项目）；不带时与升级前的请求完全相同（幂等摘要不变） */
@@ -105,9 +106,15 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
     throw forbidden('当前岗位不能手动输入金额，请从项目中选择');
   }
   const { clientKey: key, ...payload } = input;
-  // 派钟选的房间（v0.7.16）也算进摘要：同一个操作编号换了房间重发会被拒绝；没选房间时摘要与升级前完全相同
+  // 派钟选的房间（v0.7.16）、按哪张预约派（8.0.8）也算进摘要：同一个操作编号换了房间、预约重发会被拒绝；都没有时摘要与升级前完全相同
   const spaceId = options.session?.dispatch?.spaceId;
-  const requestHash = hashRequest(spaceId === undefined ? { visitId, ...payload } : { visitId, ...payload, spaceId });
+  const bookingId = options.session?.dispatch?.bookingId;
+  const requestHash = hashRequest({
+    visitId,
+    ...payload,
+    ...(spaceId === undefined ? {} : { spaceId }),
+    ...(bookingId === undefined ? {} : { bookingId }),
+  });
   // 补录纸质单：明细按纸质单上的实际时间登记（营业日按实际时间归属）
   const backfill = resolveBackfill(input.backfill, ctx.actor);
   await runIdempotent(deps, { key, opType: 'bill_post', requestHash }, async (tx) =>
@@ -280,6 +287,8 @@ export async function postChargesTx(
 
 export const VoidInput = z.object({
   reason: z.string().trim().min(2, '请填写作废原因（至少 2 个字）').max(200, '原因最多 200 字'),
+  /** 退超过小额上限的菜时值班经理及以上的当场授权（8.0.8，B02） */
+  grantId: z.uuid('授权编号不正确').optional(),
 });
 
 export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: OpContext) {
@@ -294,13 +303,14 @@ export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: Op
     const visit = (await lockVisits(tx, [peek.visitId])).get(peek.visitId)!;
     assertOpen(visit);
     await tx`SELECT id FROM bills WHERE id = ${visit.billId} FOR UPDATE`;
-    const [line] = await tx<{ id: number; name: string; quantity: number; amount: number; status: string; postedBy: number; postedAt: string; voidedByName: string | null; sessionId: number | null }[]>`
-      SELECT l.id, l.name, l.quantity, l.amount, l.status, l.posted_by, l.posted_at, s.display_name AS voided_by_name, l.session_id
+    const [line] = await tx<{ id: number; name: string; source: string; quantity: number; amount: number; status: string; postedBy: number; postedAt: string; voidedByName: string | null; sessionId: number | null }[]>`
+      SELECT l.id, l.name, l.source, l.quantity, l.amount, l.status, l.posted_by, l.posted_at, s.display_name AS voided_by_name, l.session_id
       FROM bill_lines l LEFT JOIN staff s ON s.id = l.voided_by WHERE l.id = ${lineId} FOR UPDATE OF l`;
     if (line!.status === 'voided') {
       throw conflict('ALREADY_VOIDED', `这项明细已由${line!.voidedByName ?? '其他人'}作废，不会重复冲减`);
     }
-    assertCanFix(ctx.actor, line!.postedBy, line!.postedAt, await loadFrontdeskRules(tx), at, '这项明细');
+    // 8.0.8（B02）：餐饮的菜小额直接退；超过的经理、当场授权或本人 15 分钟内（其他明细照旧）
+    const approval = await authorizeLineVoid(tx, { line: line!, actor: ctx.actor, at, grantId: input.grantId, what: '这项明细' });
     await tx`
       UPDATE bill_lines SET status = 'voided', void_reason = ${input.reason}, voided_by = ${ctx.actor.id}, voided_at = ${at}
       WHERE id = ${line!.id}`;
@@ -317,7 +327,7 @@ export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: Op
       action: 'frontdesk_void',
       targetType: 'visit',
       targetId: visit.id,
-      detail: { visitNo: visit.visitNo, lineId: line!.id, name: line!.name, quantity: line!.quantity, amount: line!.amount, reason: input.reason },
+      detail: { visitNo: visit.visitNo, lineId: line!.id, name: line!.name, quantity: line!.quantity, amount: line!.amount, reason: input.reason, ...approval },
       ip: ctx.ip,
       businessDate: await businessDate(tx, deps, at),
     });

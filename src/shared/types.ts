@@ -427,6 +427,20 @@ export interface BusinessTotals {
   refunds: { count: number; total: number; byMethod: { method: PaymentMethod; count: number; amount: number }[] };
 }
 
+/**
+ * 结账记录的合计（8.0.8，A02）：口径与日结的营业额相同（当天结账计正、当天反结账计负、当天的退款单另列）；
+ * 收款时没有开班的结账（「先开班」关掉、没人开班时）单列——这几笔不在任何交班的合计里
+ */
+export interface CheckoutDaySummary {
+  businessDate: string;
+  checkouts: { count: number; total: number };
+  voids: { count: number; total: number };
+  refunds: { count: number; total: number };
+  /** 营业额（净额）= 结账合计 − 反结账合计（与日结相同；退款单另列） */
+  net: number;
+  unshifted: { count: number; total: number };
+}
+
 export interface SettlementSummary extends SettlementTotals {
   businessDate: string;
   isToday: boolean;

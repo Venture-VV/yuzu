@@ -10,6 +10,7 @@ import { ADMIN_SECTIONS } from '@shared/admin';
 import {
   DEFAULT_DINING_RULES,
   MAX_STATION_NAME,
+  MAX_VOID_FREE_CENTS,
   MAX_TABLE_AREA,
   MAX_TABLE_NAME,
   type DiningAdmin,
@@ -18,6 +19,7 @@ import {
   type KitchenStation,
   type TablesAdmin,
 } from '@shared/dining';
+import { formatYuan, parseYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
 import { qk } from '../../lib/queries';
 import { useCan } from '../../lib/session';
@@ -25,7 +27,7 @@ import { cn, formatDateTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, Card, Field, Input, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton } from '../../components/ui';
+import { Badge, Button, Card, Field, Input, MoneyInput, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton } from '../../components/ui';
 import { AdminPage } from './AdminShell';
 
 const adminKey = ['admin', 'dining'] as const;
@@ -52,6 +54,8 @@ function RulesCard() {
   const toast = useToast();
   const admin = useDiningAdmin();
   const [draft, setDraft] = useState<DiningRules | null>(null);
+  /** 小额退菜上限的输入（元）；null 为照规则里的值显示 */
+  const [freeText, setFreeText] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (admin.data && !draft) setDraft(admin.data.rules);
@@ -60,6 +64,8 @@ function RulesCard() {
   const dirty = JSON.stringify(draft) !== JSON.stringify(admin.data.rules);
   const set = (patch: Partial<DiningRules>) => setDraft({ ...draft, ...patch });
   const minutesOk = Number.isInteger(draft.warnMinutes) && draft.warnMinutes >= 1 && draft.warnMinutes <= 180;
+  const freeCents = freeText === null ? draft.voidFreeCents : freeText.trim() === '' ? null : parseYuan(freeText);
+  const freeOk = freeCents !== null && freeCents >= 0 && freeCents <= MAX_VOID_FREE_CENTS;
   const mapped = admin.data.items.filter((i) => i.stationId !== null && !i.technicianRequired).length;
 
   const save = async () => {
@@ -69,6 +75,7 @@ function RulesCard() {
       const next = await api.put<DiningAdmin>('/api/admin/dining/rules', draft);
       qc.setQueryData(adminKey, next);
       setDraft(next.rules);
+      setFreeText(null);
       await qc.invalidateQueries({ queryKey: qk.session });
       await qc.invalidateQueries({ queryKey: ['dining'] });
       toast({ tone: 'success', title: '餐饮规则已保存', body: next.rules.enabled ? '主导航有「餐饮」：点单、厨房出品与估清。' : '餐饮功能已关闭，前台挂账与升级前一样。' });
@@ -143,20 +150,64 @@ function RulesCard() {
           </span>,
           true,
         )}
+        {row(
+          '桌台点单',
+          '下架时（默认）点单页只能挂手牌点单，不能开台、点到桌台；已经开着的桌在「桌台账单」里照常结账、退菜。桌台档案照旧（小程序扫码点餐的送餐位置）。',
+          <Segmented
+            ariaLabel="桌台点单"
+            value={draft.tablesEnabled ? 'on' : 'off'}
+            onChange={(v) => editable && set({ tablesEnabled: v === 'on' })}
+            options={[
+              { value: 'off', label: '下架', disabled: !editable },
+              { value: 'on', label: '开放', disabled: !editable },
+            ]}
+          />,
+        )}
+        {row(
+          '小额退菜上限',
+          '单条不超过这个金额的菜，服务员写原因就能直接退；超过的本人点的、规定时间内或经理照旧直接退，其余请值班经理及以上当场授权。填 0 不分级。退菜记录在「餐饮 → 退菜记录」。',
+          <span className="w-32 shrink-0">
+            <MoneyInput
+              value={freeText ?? (draft.voidFreeCents / 100).toString()}
+              disabled={!editable}
+              invalid={!freeOk}
+              onChange={(e) => {
+                setFreeText(e.target.value);
+                const cents = e.target.value.trim() === '' ? null : parseYuan(e.target.value);
+                if (cents !== null && cents >= 0 && cents <= MAX_VOID_FREE_CENTS) set({ voidFreeCents: cents });
+              }}
+              aria-label="小额退菜上限（元）"
+              data-testid="dining-void-free"
+            />
+          </span>,
+          true,
+        )}
       </div>
       {!minutesOk && <Notice tone="error" title="分钟数要在 1 到 180 之间" className="mt-3" />}
+      {!freeOk && <Notice tone="error" title={`小额退菜上限填 0 到 ${formatYuan(MAX_VOID_FREE_CENTS)} 之间的金额`} className="mt-3" />}
       {error && <Notice tone="error" title={error} className="mt-3" />}
       <div className="mt-3 flex flex-wrap items-center justify-end gap-3">
         <span className="mr-auto text-[12px] text-ink-4">
           {admin.data.rulesUpdatedAt ? `最近由${admin.data.rulesUpdatedBy ?? '系统'}于 ${formatDateTime(admin.data.rulesUpdatedAt)} 修改` : '一直按默认'}
         </span>
-        {editable && (draft.trackServed !== DEFAULT_DINING_RULES.trackServed || draft.warnMinutes !== DEFAULT_DINING_RULES.warnMinutes) && (
-          <Button size="sm" variant="ghost" onClick={() => setDraft({ ...DEFAULT_DINING_RULES, enabled: draft.enabled })}>
+        {editable &&
+          (draft.trackServed !== DEFAULT_DINING_RULES.trackServed ||
+            draft.warnMinutes !== DEFAULT_DINING_RULES.warnMinutes ||
+            draft.tablesEnabled !== DEFAULT_DINING_RULES.tablesEnabled ||
+            draft.voidFreeCents !== DEFAULT_DINING_RULES.voidFreeCents) && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setDraft({ ...DEFAULT_DINING_RULES, enabled: draft.enabled });
+              setFreeText(null);
+            }}
+          >
             其他规则恢复默认
           </Button>
         )}
         {editable && (
-          <Button variant="primary" loading={busy} disabled={!dirty || !minutesOk} onClick={save} data-testid="dining-rules-save">
+          <Button variant="primary" loading={busy} disabled={!dirty || !minutesOk || !freeOk} onClick={save} data-testid="dining-rules-save">
             保存餐饮规则
           </Button>
         )}

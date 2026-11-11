@@ -3,7 +3,7 @@
 // 写操作与前台一样有「结果待确认」：断网后查回、原样重提或确认作废。
 
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Plus } from 'lucide-react';
 import {
@@ -154,14 +154,20 @@ function BookingRow({ b, focused, onAction }: { b: BookingDetail; focused: boole
           </Button>
         </span>
       )}
-      {b.status === 'arrived' && b.kind === 'technician' && (
-        <Link to="/clockroom" className="text-[13px] font-semibold text-pine hover:underline">
-          去钟房派钟 →
+      {b.status === 'arrived' && b.service && (
+        <Badge tone="pine" data-testid={`booking-service-${b.bookingNo}`}>
+          {b.service.kind === 'session' ? '已派钟' : b.service.kind === 'stay' ? '已入住' : '已开单'} {b.service.no}
+        </Badge>
+      )}
+      {/* 8.0.8（A04）：已到店还没派钟、没入住的，点了带着手牌、项目、技师、房型过去 */}
+      {b.status === 'arrived' && !b.service && b.kind === 'technician' && (
+        <Link to={`/clockroom?booking=${b.id}`} className="text-[13px] font-semibold text-pine hover:underline" data-testid={`booking-go-dispatch-${b.bookingNo}`}>
+          去派钟 →
         </Link>
       )}
-      {b.status === 'arrived' && b.kind === 'room' && (
-        <Link to="/rooms" className="text-[13px] font-semibold text-pine hover:underline">
-          去客房开房 →
+      {b.status === 'arrived' && !b.service && b.kind === 'room' && (
+        <Link to={`/rooms?booking=${b.id}`} className="text-[13px] font-semibold text-pine hover:underline" data-testid={`booking-go-checkin-${b.bookingNo}`}>
+          去开房 →
         </Link>
       )}
     </div>
@@ -408,7 +414,9 @@ function BookingActionDialog({ board, booking: b, action, onClose }: { board: Bo
   const session = useSession();
   const qc = useQueryClient();
   const toast = useToast();
-  const [tag, setTag] = useState('');
+  const navigate = useNavigate();
+  // 8.0.8（A04）：这位会员此刻在店的，手牌自动带出（可改）
+  const [tag, setTag] = useState(action === 'arrive' ? (b.memberOpenTag ?? '') : '');
   const [reason, setReason] = useState('');
   const [date, setDate] = useState(b.businessDate);
   const [startsAt, setStartsAt] = useState<string | null>(null);
@@ -427,6 +435,11 @@ function BookingActionDialog({ board, booking: b, action, onClose }: { board: Bo
     void qc.invalidateQueries({ queryKey: ['bookings'] });
     toast({ tone: 'success', title: `${b.bookingNo} ${BOOKING_STATUS_LABELS[r.status]}`, body: r.arrivalRef ? `已开使用单 ${r.arrivalRef}` : undefined });
     onClose();
+    // 8.0.8（A04）：到店后一步到位——技师预约直接打开派钟、客房预约到客房页挑这个房型的空房（带着手牌、项目、技师、房型）
+    if (action === 'arrive' && r.status === 'arrived' && !r.service) {
+      if (r.kind === 'technician') navigate(`/clockroom?booking=${r.id}`);
+      if (r.kind === 'room') navigate(`/rooms?booking=${r.id}`);
+    }
   };
   const submit = async () => {
     if (!ok) return;
@@ -446,8 +459,8 @@ function BookingActionDialog({ board, booking: b, action, onClose }: { board: Bo
   const hint = useMemo(() => {
     if (action !== 'arrive') return null;
     if (b.kind === 'space') return `到店即在 ${b.spaceCode} 开使用单（开单即占用），使用人是这张手牌。`;
-    if (b.kind === 'technician') return '到店后去钟房派钟（指定了技师的选这位技师、点钟）。';
-    return '到店后去客房开房（选这个房型的一间）。';
+    if (b.kind === 'technician') return '到店后直接打开钟房派钟，手牌、项目、技师都带好（约了技师按点钟，没约按轮钟）。';
+    return '到店后打开客房页，标出这个房型的空房，点一间就入住（手牌、人数带好）。';
   }, [action, b]);
   return (
     <Dialog

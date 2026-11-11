@@ -29,7 +29,7 @@ export function TechnicianPicker({
   loading: boolean;
   callType: CallType;
   onCallType: (v: CallType) => void;
-  /** 选了技师（tier 为实际计价的档）；null 为暂不指定 */
+  /** 选了技师（tier 为实际计价的档）；null 为交给钟房派钟（原「暂不指定」，钟房在「待派钟」里补派） */
   onPick: (pick: { tech: Tech; tier: PriceTier } | null) => void;
   onCancel: () => void;
 }) {
@@ -123,7 +123,7 @@ export function TechnicianPicker({
       )}
       {rules && !rules.requireTechnician && (
         <Button className="mt-3" size="sm" variant="secondary" icon={<UserRoundX className="size-4" />} onClick={() => onPick(null)} data-testid="tech-none">
-          暂不指定技师
+          交给钟房派钟
         </Button>
       )}
     </div>

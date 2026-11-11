@@ -1,4 +1,6 @@
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { REVENUE_REFRESH_MS } from '../../lib/revenue';
+import type { CheckoutDaySummary } from '@shared/types';
 import type { CheckoutDetail, CheckoutPreview, CheckoutSummary, TicketType } from '@shared/checkout';
 import type { FrontdeskBoard, FrontdeskCheck, PreviewBill, VisitDetail } from '@shared/frontdesk';
 import type { MemberGradeBadge } from '@shared/membership';
@@ -39,8 +41,23 @@ export const useCheckoutPreview = (ids: number[], enabled: boolean, at?: string)
     refetchInterval: at ? false : 30_000,
   });
 
-export const useCheckouts = (date: string, enabled = true) =>
-  useQuery({ queryKey: fk.checkouts(date), queryFn: () => api.get<CheckoutSummary[]>(`/api/frontdesk/checkouts?date=${date}`), enabled });
+/** live（8.0.8，A02）：看的是今天时每 15 秒刷新，别的电脑结的账也会出现 */
+export const useCheckouts = (date: string, enabled = true, live = false) =>
+  useQuery({
+    queryKey: fk.checkouts(date),
+    queryFn: () => api.get<CheckoutSummary[]>(`/api/frontdesk/checkouts?date=${date}`),
+    enabled,
+    refetchInterval: live ? REVENUE_REFRESH_MS : false,
+  });
+
+/** 结账记录的合计（8.0.8，A02）：与日结同一个口径；没开班时收的结账单列 */
+export const useCheckoutDaySummary = (date: string, enabled = true, live = false) =>
+  useQuery({
+    queryKey: ['frontdesk', 'checkouts-summary', date],
+    queryFn: () => api.get<CheckoutDaySummary>(`/api/frontdesk/checkouts/summary?date=${date}`),
+    enabled,
+    refetchInterval: live ? REVENUE_REFRESH_MS : false,
+  });
 
 export const useCheckout = (id: number | null) =>
   useQuery({ queryKey: fk.checkout(id ?? 0), queryFn: () => api.get<CheckoutDetail>(`/api/frontdesk/checkouts/${id}`), enabled: !!id });

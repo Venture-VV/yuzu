@@ -135,6 +135,8 @@ describe('状态口径（共用的纯函数）', () => {
     blockMinutes: null,
     status,
     maintenanceNote: null,
+    housekeeping: status === 'dirty' || status === 'maintenance' ? status : 'clean',
+    lastChange: null,
     stay: null,
   });
   const session = (status: 'waiting' | 'serving', spaceId = 1): FloorMapSession => ({

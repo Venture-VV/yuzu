@@ -79,6 +79,7 @@ import { registerTechnicianRoutes } from './modules/technicians';
 import { registerClockroomRoutes } from './modules/clockroom';
 import { registerDiningRoutes } from './modules/dining';
 import { registerTableRoutes } from './modules/tables';
+import { registerDining808Routes } from './modules/dining-808';
 import { registerRoomRoutes } from './modules/rooms';
 import { registerSpaceRoutes } from './modules/spaces';
 import { registerFloorplanRoutes } from './modules/floorplans';
@@ -270,6 +271,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerClockroomRoutes(app, deps);
   registerDiningRoutes(app, deps);
   registerTableRoutes(app, deps);
+  registerDining808Routes(app, deps);
   registerRoomRoutes(app, deps);
   registerSpaceRoutes(app, deps);
   registerFloorplanRoutes(app, deps);

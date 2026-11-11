@@ -3,6 +3,7 @@
 // 当场授权（这几桌、这个金额）；收款前先开班。应收合计、储值扣款构成以服务端为准，变化时拒绝并重新核对。
 // 反结账在「结账记录」里，与手牌结账相同（桌台须仍空闲）。
 
+import { invalidateRevenue } from '../../lib/revenue';
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Banknote, CircleCheck } from 'lucide-react';
@@ -91,8 +92,7 @@ export function TableCheckoutDialog({
   useEffect(() => {
     if (!result) return;
     void qc.invalidateQueries({ queryKey: tablesKey });
-    void qc.invalidateQueries({ queryKey: shiftKeys.all });
-    void qc.invalidateQueries({ queryKey: ['frontdesk', 'checkouts'] });
+    invalidateRevenue(qc);
   }, [result, qc]);
 
   const locked = op.locked;

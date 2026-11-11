@@ -112,6 +112,13 @@ export interface BookingDetail {
   cancelReason: string | null;
   noShowAt: string | null;
   version: number;
+  /**
+   * 到店之后开的单（8.0.8，A04）：技师预约派的钟单、客房预约的入住单、派对房预约的使用单；还没有为 null。
+   * 取消、退钟了的钟单与撤销了的入住单不算（可以再派、再入住）
+   */
+  service: { kind: 'session' | 'stay' | 'usage'; no: string } | null;
+  /** 这位会员此刻在店的手牌（点到店时自动带出，8.0.8）；不是会员、不在店为 null */
+  memberOpenTag: string | null;
 }
 
 export interface BookingBoard {
