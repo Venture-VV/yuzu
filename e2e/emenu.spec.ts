@@ -130,6 +130,37 @@ async function prepareTablet(page: Page): Promise<{ id: number; temporaryPasswor
 const tabletContext = (browser: Browser, baseURL: string | undefined) =>
   browser.newContext({ baseURL, viewport: { width: 1024, height: 768 }, hasTouch: true, locale: 'zh-CN', timezoneId: 'Asia/Shanghai' });
 
+/** 合成的菜单（只读用例用，代替接口）：两个分类，一页「两菜 · 并排」、一页「分类封面」 */
+function syntheticMenu(): EmenuMenu {
+  const dish = (id: number, name: string, nameEn: string, price: number) => ({
+    id,
+    name,
+    nameEn,
+    tagline: '',
+    description: '',
+    attrs: [],
+    unit: '份',
+    imageUrl: null,
+    detailUrl: null,
+    specs: [{ itemId: 9000 + id, label: '', price, state: 'ok' as const, remaining: null }],
+  });
+  return {
+    serverTime: new Date().toISOString(),
+    businessDate: '2026-11-11',
+    enabled: true,
+    rules: { footerText: 'COPYRIGHT©2026 汤崎 ALL RIGHTS RESERVED', avoidOptions: ['不加香菜'], serveOptions: ['即起'], idleMinutes: 0, offHours: 'hide', coverUrl: null },
+    categories: [
+      { id: 1, name: '西式午餐', nameEn: 'WESTERN LUNCH', window: null, open: true, pages: [{ layout: 'duo_row', title: '', titleEn: '', dishes: [dish(1, '温泉蛋黑松露奶油意粉', 'Hot Spring Egg And Black Truffle Cream Spaghetti', 4200), dish(2, '和牛牛肉汉堡', 'Wagyu Beef Burger', 4200)] }] },
+      { id: 2, name: '中式午餐', nameEn: 'CHINESE LUNCH', window: null, open: true, pages: [{ layout: 'cover', title: '', titleEn: '', dishes: [dish(3, '广式猪脚姜浸花胶', 'Cantonese Pork Trotter Ginger Vinegar Fish Maw', 4200)] }] },
+    ],
+    later: [],
+    tables: [],
+  };
+}
+
+/** 清掉这台浏览器里平板点餐页存的东西（这一次点餐、待确认的记录） */
+const clearEmenuStorage = (page: Page) => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('yuzu.emenu.')).forEach((k) => localStorage.removeItem(k)));
+
 test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
   test('后台排菜单、发点单密码 → 平板账号登录 → 点餐、备注、服务员确认下单 → 账单与厨房屏 → 估清 → 结束点餐', async ({ page, browser, baseURL }, info) => {
     test.skip(info.project.name !== '门店电脑', '会写数据的流程只在门店电脑这一组执行一次（平板那一段另开 1024×768 的窗口）');
@@ -397,30 +428,7 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
   });
 
   test('各尺寸：整页按 1024×768 等比缩放、不出滚动条；1024×768 时文字在设计稿量的位置上（合成菜单，只读）', async ({ page }, info) => {
-    const dish = (id: number, name: string, nameEn: string, price: number) => ({
-      id,
-      name,
-      nameEn,
-      tagline: '',
-      description: '',
-      attrs: [],
-      unit: '份',
-      imageUrl: null,
-      detailUrl: null,
-      specs: [{ itemId: 9000 + id, label: '', price, state: 'ok' as const, remaining: null }],
-    });
-    const menu: EmenuMenu = {
-      serverTime: new Date().toISOString(),
-      businessDate: '2026-11-11',
-      enabled: true,
-      rules: { footerText: 'COPYRIGHT©2026 汤崎 ALL RIGHTS RESERVED', avoidOptions: ['不加香菜'], serveOptions: ['即起'], idleMinutes: 0, offHours: 'hide', coverUrl: null },
-      categories: [
-        { id: 1, name: '西式午餐', nameEn: 'WESTERN LUNCH', window: null, open: true, pages: [{ layout: 'duo_row', title: '', titleEn: '', dishes: [dish(1, '温泉蛋黑松露奶油意粉', 'Hot Spring Egg And Black Truffle Cream Spaghetti', 4200), dish(2, '和牛牛肉汉堡', 'Wagyu Beef Burger', 4200)] }] },
-        { id: 2, name: '中式午餐', nameEn: 'CHINESE LUNCH', window: null, open: true, pages: [{ layout: 'cover', title: '', titleEn: '', dishes: [dish(3, '广式猪脚姜浸花胶', 'Cantonese Pork Trotter Ginger Vinegar Fish Maw', 4200)] }] },
-      ],
-      later: [],
-      tables: [],
-    };
+    const menu = syntheticMenu();
     const writes: string[] = [];
     await page.route('**/api/emenu/**', (route) => {
       const url = new URL(route.request().url());
@@ -437,7 +445,7 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await loginStaff(page, 'linlan');
     // 上一条用例（或上一次没走完）留在这台浏览器里的点餐状态不要
-    await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('yuzu.emenu.')).forEach((k) => localStorage.removeItem(k)));
+    await clearEmenuStorage(page);
     await page.goto('/emenu');
     await expect(page.getByTestId('emenu-start')).toBeVisible();
     const viewport = page.viewportSize()!;
@@ -513,6 +521,104 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     await noScroll(page);
     expect(writes).toEqual([]);
     // 不把这一次合成的点餐留在浏览器里
-    await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('yuzu.emenu.')).forEach((k) => localStorage.removeItem(k)));
+    await clearEmenuStorage(page);
+  });
+
+  test('下单的请求还在路上：不自动查回、「下单」不放开、只发一次；没有答复 → 结果待确认；重新提交被拒绝时说清楚没有下成（合成接口，只读）', async ({ page }, info) => {
+    test.skip(info.project.name !== '门店电脑', '这一条看的是下单的先后，与屏幕尺寸无关，只跑一次');
+    const menu = syntheticMenu();
+    const guest = { visitId: 1, tagCode: 'A8060', ordered: [], orderedTotal: 0 };
+    const seen = { posts: [] as string[], lookups: 0, abandons: 0 };
+    let mode: 'slow_ok' | 'drop' | 'reject' = 'slow_ok';
+    await page.route('**/api/emenu/**', async (route) => {
+      const req = route.request();
+      const url = new URL(req.url());
+      if (url.pathname === '/api/emenu/menu') return route.fulfill({ json: menu });
+      if (url.pathname === '/api/emenu/guest') return route.fulfill({ json: guest });
+      if (url.pathname === '/api/emenu/table') return route.fulfill({ json: { tableName: 'A01' } });
+      if (url.pathname === '/api/emenu/orders' && req.method() === 'POST') {
+        const body = req.postDataJSON() as { clientKey: string; expectedTotal: number };
+        seen.posts.push(body.clientKey);
+        if (mode === 'drop') return route.abort('connectionreset');
+        if (mode === 'reject') return route.fulfill({ status: 422, json: { error: { code: 'DISH_SOLD_OUT', message: '「广式猪脚姜浸花胶」今天已经估清了' } } });
+        // 门店系统要 1.5 秒才答复（排锁、网慢）
+        await new Promise((r) => setTimeout(r, 1500));
+        return route.fulfill({ json: { orderNo: 'D0001', tableName: 'A01', guests: 2, total: body.expectedTotal, quantity: 1, waiterName: '测试服务员', replayed: false, guest } });
+      }
+      if (url.pathname.startsWith('/api/emenu/orders/by-key/')) {
+        if (req.method() === 'GET') {
+          seen.lookups += 1;
+          return route.fulfill({ json: { found: false, abandoned: false } });
+        }
+        seen.abandons += 1;
+        return route.fulfill({ json: { found: false, abandoned: true } });
+      }
+      return route.fulfill({ status: 404, json: { error: { code: 'NOT_FOUND', message: '没有' } } });
+    });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await loginStaff(page, 'linlan');
+    await clearEmenuStorage(page);
+    await page.goto('/emenu');
+    await page.getByTestId('emenu-start').click();
+    for (const d of '8060') await page.getByTestId(`emenu-key-${d}`).click();
+    await page.getByTestId('emenu-field-table').click();
+    await page.getByTestId('emenu-key-clear').click();
+    for (const d of '01') await page.getByTestId(`emenu-key-${d}`).click();
+    await page.getByTestId('emenu-field-guests').click();
+    await page.getByTestId('emenu-key-2').click();
+    await page.getByTestId('emenu-ask-go').click();
+    await page.getByTestId('emenu-cat-2').click();
+    const toConfirm = async () => {
+      await page.getByTestId('emenu-add-3').click();
+      await page.getByTestId('emenu-order-open').click();
+      await page.getByTestId('emenu-submit').click();
+      for (const d of '135790') await page.getByTestId('emenu-confirm').getByTestId(`emenu-key-${d}`).click();
+    };
+
+    // ① 答复慢：发出去以后这一单已经记在平板上，但不去查回（查不到会把按钮放开、再点就是第二单）；按钮一直是「正在下单…」
+    await toConfirm();
+    const go = page.getByTestId('emenu-confirm-go');
+    await go.click();
+    await expect(go).toBeDisabled();
+    await page.waitForTimeout(900);
+    await expect(go).toBeDisabled();
+    await expect(go).toHaveText('正在下单…');
+    expect(seen.lookups).toBe(0);
+    await expect(page.getByTestId('emenu-success')).toBeVisible();
+    await expect(page.getByTestId('emenu-success')).toBeHidden({ timeout: 10_000 });
+    expect(seen.posts).toHaveLength(1);
+    expect(seen.lookups).toBe(0);
+    expect(await page.evaluate(() => localStorage.getItem('yuzu.emenu.pending.v1'))).toBeNull();
+
+    // ② 没有答复：弹出「结果待确认」，记录留在平板上；刷新以后还在、进菜单自动查回一次（只读）
+    mode = 'drop';
+    await toConfirm();
+    await go.click();
+    const pendingModal = page.getByTestId('emenu-pending');
+    await expect(pendingModal).toBeVisible();
+    expect(seen.posts).toHaveLength(2);
+    const firstKey = seen.posts[1]!;
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('yuzu.emenu.pending.v1') ?? '{}').key)).toBe(firstKey);
+    await page.reload();
+    await expect(page.getByTestId('emenu-order-count')).toHaveText('!');
+    await expect.poll(() => seen.lookups).toBe(1);
+    // 点订单图标：出来的是「结果待确认」，不是未下单——处理完之前这台平板不能下新的一单
+    await page.getByTestId('emenu-order-open').click();
+    await expect(pendingModal).toBeVisible();
+
+    // ③ 重新提交（同一个编号）被门店系统明确拒绝：先作废编号，再告诉服务员没有下成、为什么；菜还在未下单里
+    mode = 'reject';
+    for (const d of '135790') await pendingModal.getByTestId(`emenu-key-${d}`).click();
+    await pendingModal.getByTestId('emenu-pending-retry').click();
+    const notice = page.getByTestId('emenu-notice');
+    await expect(notice).toContainText('这一单没有下成');
+    await expect(notice).toContainText('今天已经估清了');
+    expect(seen.posts).toEqual([seen.posts[0], firstKey, firstKey]);
+    expect(seen.abandons).toBe(1);
+    expect(await page.evaluate(() => localStorage.getItem('yuzu.emenu.pending.v1'))).toBeNull();
+    await notice.getByTestId('emenu-notice-ok').click();
+    await expect(page.getByTestId('emenu-cart-9003')).toContainText('广式猪脚姜浸花胶');
+    await expect(page.getByTestId('emenu-submit')).toBeEnabled();
+    await clearEmenuStorage(page);
   });
 });

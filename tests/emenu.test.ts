@@ -470,7 +470,23 @@ describe('点单密码', () => {
     const other = await order(line, 3800, { cookie: pad2, pin: bad });
     expect(other.body.error.code).toBe('PIN_INVALID');
     resetLoginThrottle();
-    expect((await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'order_pin_failed'`)[0]!.n).toBeGreaterThanOrEqual(6);
+    const failures = async () => (await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'order_pin_failed'`)[0]!.n;
+    expect(await failures()).toBeGreaterThanOrEqual(6);
+    // 同时发来一大批错的：同一台平板一个一个核对，也是错满 5 次就锁，后面的不再核对（审计里只多 5 条）
+    const before = await failures();
+    const burst = await Promise.all(Array.from({ length: 40 }, () => order(line, 3800, { pin: bad })));
+    const codes = burst.map((r) => r.body.error?.code as string);
+    expect(codes.filter((c) => c === 'PIN_INVALID')).toHaveLength(4);
+    expect(codes.filter((c) => c === 'PIN_LOCKED')).toHaveLength(36);
+    expect((await failures()) - before).toBe(5);
+    // 锁着的时候对的密码回的与错的一样（分不出哪个是对的），没有下成单
+    const lockedRight = await order(line, 3800);
+    expect([lockedRight.status, lockedRight.body.error.code]).toEqual([429, 'PIN_LOCKED']);
+    // 点单密码单独计数：平板上错了这么多次，这个来源照常能登录；换个来源地址也还是锁着（只按平板的账号记）
+    expect(await login(ctx.app, 'clerk')).toContain('yuzu_sid=');
+    const elsewhere = await ctx.app.inject({ method: 'POST', url: '/api/emenu/orders', remoteAddress: '10.9.8.7', headers: { cookie: pad }, payload: { clientKey: randomUUID(), visitId: visit.A8001, tagCode: 'A8001', tableName: 'A01', guests: 2, lines: line, avoid: [], serve: null, customNote: '', expectedTotal: 3800, pin: clerkPin } });
+    expect(elsewhere.json().error.code).toBe('PIN_LOCKED');
+    resetLoginThrottle();
     // 格式不对不算输错
     expect((await order(line, 3800, { pin: '12345' })).status).toBe(400);
     expect((await order(line, 3800, { pin: 'abcdef' })).status).toBe(400);

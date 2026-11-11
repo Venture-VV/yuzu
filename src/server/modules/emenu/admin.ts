@@ -348,11 +348,12 @@ async function writeSpecs(tx: Tx, dishId: number, d: DishData) {
 }
 
 /** 约束拦下时翻译成看得懂的提示：项目已经在别的菜里、项目或图片不存在 */
-async function dishError(db: Db, error: unknown, d: DishData): Promise<unknown> {
+async function dishError(db: Db, error: unknown, d: DishData, selfId: number | null): Promise<unknown> {
   if (isUniqueViolation(error, 'emenu_dish_specs_item_uq')) {
+    // 找占着这个项目的别的菜（正在改的这道菜自己的规格不算）
     const [taken] = await db<{ itemName: string; dishName: string }[]>`
       SELECT i.name AS item_name, d.name AS dish_name FROM emenu_dish_specs sp JOIN service_items i ON i.id = sp.item_id JOIN emenu_dishes d ON d.id = sp.dish_id
-      WHERE sp.item_id IN ${db(d.specs.map((s) => s.itemId))} LIMIT 1`;
+      WHERE sp.item_id IN ${db(d.specs.map((s) => s.itemId))} AND sp.dish_id <> ${selfId ?? 0} ORDER BY sp.item_id LIMIT 1`;
     return conflict('ITEM_IN_OTHER_DISH', taken ? `价目项目「${taken.itemName}」已经在菜品「${taken.dishName}」里了，一个项目只能放进一道菜` : '有价目项目已经在别的菜品里了');
   }
   if (isForeignKeyViolation(error)) return unprocessable('DISH_REF_NOT_FOUND', '选的价目项目或图片不存在，请重新载入后再试');
@@ -372,7 +373,7 @@ export async function createEmenuDish(deps: Deps, raw: unknown, ctx: OpContext):
       await writeAudit(tx, { staffId: ctx.actor.id, action: 'emenu_saved', targetType: 'emenu_dish', targetId: row!.id, detail: { summary: `新建电子菜单菜品「${d.name}」` }, ip: ctx.ip });
     });
   } catch (error) {
-    throw await dishError(deps.sql, error, d);
+    throw await dishError(deps.sql, error, d, null);
   }
   return emenuAdmin(deps.sql);
 }
@@ -394,7 +395,7 @@ export async function updateEmenuDish(deps: Deps, id: number, raw: unknown, ctx:
       await writeAudit(tx, { staffId: ctx.actor.id, action: 'emenu_saved', targetType: 'emenu_dish', targetId: id, detail: { summary: `修改电子菜单菜品「${cur.name}」${d.active ? '' : '（停用）'}` }, ip: ctx.ip });
     });
   } catch (error) {
-    throw await dishError(deps.sql, error, d);
+    throw await dishError(deps.sql, error, d, id);
   }
   return emenuAdmin(deps.sql);
 }
@@ -453,6 +454,10 @@ export async function generateEmenuDraft(deps: Deps, ctx: OpContext): Promise<Em
       });
     }
     return { dishes: items.length, categories, pages };
+  }).catch((error: unknown) => {
+    // 生成的时候别人正好把同一个项目放进了菜品、或新建了同名的分类：整批不写，请他再点一次（只补还没有的）
+    if (isUniqueViolation(error)) throw changed('电子菜单');
+    throw error;
   });
   return { ...(await emenuAdmin(deps.sql)), draft };
 }

@@ -115,12 +115,17 @@ function notify() {
   listeners.forEach((fn) => fn());
 }
 
-/** 提交前保存；保存不了返回 false，调用方不得发出请求 */
-export function savePending(p: PendingOrder): boolean {
-  if (current()?.key === p.key) return true; // 原样重提：记录已在本机
-  if (!write(PENDING_KEY, p)) return false;
+/**
+ * 提交前保存。saved 以外都不得发出请求：
+ *   failed 存不进这台平板；other 这台平板上还有另一单结果待确认（不覆盖它——覆盖了那一单的编号就找不回来了）。
+ */
+export function savePending(p: PendingOrder): 'saved' | 'failed' | 'other' {
+  const cur = current();
+  if (cur?.key === p.key) return 'saved'; // 原样重提：记录已在本机
+  if (cur) return 'other';
+  if (!write(PENDING_KEY, p)) return 'failed';
   notify();
-  return true;
+  return 'saved';
 }
 
 export function removePending(key: string) {

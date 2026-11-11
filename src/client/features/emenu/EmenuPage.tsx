@@ -68,7 +68,8 @@ type Overlay =
   | { kind: 'search' }
   | { kind: 'drawer'; tab: 'cart' | 'ordered' }
   | { kind: 'remark' }
-  | { kind: 'confirm' }
+  | { kind: 'confirm'; total: number }
+  | { kind: 'notice'; text: string }
   | { kind: 'success' }
   | { kind: 'pending' }
   | { kind: 'end' }
@@ -248,8 +249,16 @@ export function EmenuPage() {
   const guest = guestQ.data && session && guestQ.data.visitId === session.visitId ? guestQ.data : null;
 
   // ───────────── 下单与结果待确认 ─────────────
-  const [opBusy, setOpBusy] = useState(false);
+  // 几件事在办（下单、查回、作废）：用计数，一件办完不会把另一件还没办完的也当成办完
+  const [opCount, setOpCount] = useState(0);
+  const opBusy = opCount > 0;
+  const opBegin = () => setOpCount((n) => n + 1);
+  const opEnd = () => setOpCount((n) => Math.max(0, n - 1));
   const [opNote, setOpNote] = useState<{ error?: string; hint?: string } | null>(null);
+  /** 正在发的那一单的操作编号（发出去到有答复之间） */
+  const sending = useRef<string | null>(null);
+  /** 已经自动查回过、或是这一页自己发出去的操作编号：不再自动查 */
+  const autoChecked = useRef<string | null>(null);
 
   const finish = useCallback(
     (order: EmenuOrderResult) => {
@@ -264,32 +273,44 @@ export function EmenuPage() {
     [qc],
   );
 
-  /** 发出一单（新的一单或原样重提）。返回：ok 成功；rejected 被明确拒绝；uncertain 结果不明 */
+  /**
+   * 发出一单（新的一单或原样重提）。返回：ok 成功；rejected 被明确拒绝（message 是原因）；uncertain 结果不明。
+   * 发出去到有答复之间，这一单已经记在平板上（pending 不为空）——这段时间不自动查回：查不到会把「下单」按钮放开，
+   * 再点一次就是另一个操作编号的第二单。
+   */
   const send = useCallback(
-    async (p: PendingOrder, pin: string, isRetry: boolean): Promise<'ok' | 'rejected' | 'uncertain'> => {
-      // 记录存不进这台平板：一旦回复丢了就找不回原编号，所以这一单不发
-      if (!savePending(p)) {
-        setOpNote({ error: PENDING_STORE_FAILED });
-        return 'rejected';
+    async (p: PendingOrder, pin: string, isRetry: boolean): Promise<{ outcome: 'ok' | 'rejected' | 'uncertain'; message?: string }> => {
+      const rejected = (message: string) => {
+        setOpNote({ error: message });
+        return { outcome: 'rejected' as const, message };
+      };
+      const saved = savePending(p);
+      // 这台平板上还有另一单结果待确认：先处理完，不发新的（也不覆盖那一单的记录）
+      if (saved === 'other') {
+        setOverlay({ kind: 'pending' });
+        return rejected('这台平板上还有一单结果待确认，请先处理完再下新的一单');
       }
-      setOpBusy(true);
+      // 记录存不进这台平板：一旦回复丢了就找不回原编号，所以这一单不发
+      if (saved === 'failed') return rejected(PENDING_STORE_FAILED);
+      autoChecked.current = p.key;
+      sending.current = p.key;
+      opBegin();
       try {
         const order = await api.post<EmenuOrderResult>('/api/emenu/orders', { ...p.body, pin });
         removePending(p.key);
         finish(order);
-        return 'ok';
+        return { outcome: 'ok' };
       } catch (error) {
         if (error instanceof ApiError && error.status < 500) {
           // 点单密码不对、锁了、这位员工没有权限：门店系统在动账单之前就拒绝了，这一次什么都没做
           const pinProblem = PIN_ERRORS.includes(error.code) || error.status === 401;
           if (!isRetry) {
             removePending(p.key);
-            setOpNote({ error: error.message });
-            return 'rejected';
+            return rejected(error.message);
           }
           if (pinProblem) {
             setOpNote({ error: `${error.message}（原来那一单仍待确认）` });
-            return 'uncertain';
+            return { outcome: 'uncertain' };
           }
           if (error.code !== 'OP_ABANDONED') {
             // 重提被明确拒绝，不代表之前那次结果不明的请求不会随后生效：先在门店系统作废编号，再下结论
@@ -302,23 +323,23 @@ export function EmenuPage() {
             if (fenced?.found) {
               removePending(p.key);
               finish(fenced.order);
-              return 'ok';
+              return { outcome: 'ok' };
             }
             if (!fenced?.abandoned) {
               setOpNote({ error: `重新提交被拒绝（${error.message}），但原来那一单会不会生效还不确定` });
-              return 'uncertain';
+              return { outcome: 'uncertain' };
             }
           }
           // 门店系统明确拒绝（含这个编号已经作废）：没有生效
           removePending(p.key);
-          setOpNote({ error: error.message });
-          return 'rejected';
+          return rejected(error.message);
         }
         const reason = error instanceof UncertainError && error.reason !== 'server' ? error.message : '门店系统出了点问题';
         setOpNote({ error: `${reason}，这一单有没有下成暂时不确定` });
-        return 'uncertain';
+        return { outcome: 'uncertain' };
       } finally {
-        setOpBusy(false);
+        sending.current = null;
+        opEnd();
       }
     },
     [finish],
@@ -344,35 +365,35 @@ export function EmenuPage() {
 
   const checkPending = useCallback(async () => {
     if (!pending) return;
-    setOpBusy(true);
+    opBegin();
     try {
       settle(pending.key, await api.get<EmenuOpLookup>(`/api/emenu/orders/by-key/${pending.key}`), '暂时没有查到已经下单，原来的请求可能还在路上。可以输点单密码重新提交（不会重复），或者作废后重填。');
     } catch (error) {
       setOpNote({ error: `还是确认不了：${errorMessage(error)}` });
     } finally {
-      setOpBusy(false);
+      opEnd();
     }
   }, [pending, settle]);
 
   const abandonPending = useCallback(
     async (pin: string) => {
       if (!pending) return;
-      setOpBusy(true);
+      opBegin();
       try {
         settle(pending.key, await api.post<EmenuOpLookup>(`/api/emenu/orders/by-key/${pending.key}/abandon`, { pin }), '作废没有完成，原来那一单仍待确认');
       } catch (error) {
         setOpNote({ error: error instanceof ApiError && error.status < 500 ? error.message : `作废没有完成，原来那一单仍待确认：${errorMessage(error)}` });
       } finally {
-        setOpBusy(false);
+        opEnd();
       }
     },
     [pending, settle],
   );
 
-  // 刚出现待确认的记录（这次没下成，或上次留下的）：进菜单时自动只读查一次
-  const autoChecked = useRef<string | null>(null);
+  // 上一次留下的待确认记录（页面被刷新、平板重开）：进菜单时自动只读查一次。
+  // 这一页自己发出去的一单不在这里查（send 已经记进 autoChecked）：正在发的时候查不到不说明什么，发完没有答复会弹出「结果待确认」
   useEffect(() => {
-    if (!pending || phase !== 'menu' || autoChecked.current === pending.key) return;
+    if (!pending || phase !== 'menu' || sending.current || autoChecked.current === pending.key) return;
     autoChecked.current = pending.key;
     void checkPending();
   }, [pending, phase, checkPending]);
@@ -570,7 +591,8 @@ export function EmenuPage() {
           onRemark={() => setOverlay({ kind: 'remark' })}
           onSubmit={() => {
             setOpNote(null);
-            setOverlay({ kind: 'confirm' });
+            // 记下客人这时看到的合计：输密码的这段时间菜单又取了一次、价格变了的话，门店系统按这个数拒绝（PRICE_CHANGED），不会按没看过的价格下单
+            setOverlay({ kind: 'confirm', total });
           }}
           onClose={() => setOverlay(null)}
         />
@@ -596,6 +618,11 @@ export function EmenuPage() {
           }}
           onResolved={(next) => setSession(next)}
           onSubmit={async (next, pin) => {
+            // 还有一单结果待确认（正在发的也算）：不发新的
+            if (pending) {
+              setOverlay({ kind: 'pending' });
+              return;
+            }
             const body: EmenuOrderBody = {
               clientKey: uuid(),
               visitId: next.visitId,
@@ -606,12 +633,12 @@ export function EmenuPage() {
               avoid: remark.avoid,
               serve: remark.serve,
               customNote: remark.custom.trim(),
-              expectedTotal: total,
+              expectedTotal: overlay.total,
             };
             const result = await send({ key: body.clientKey, body, quantity: count, createdAt: new Date().toISOString() }, pin, false);
-            if (result === 'uncertain') setOverlay({ kind: 'pending' });
+            if (result.outcome === 'uncertain') setOverlay({ kind: 'pending' });
             // 价格、估清、时段刚变过的：马上取一次最新的菜单
-            if (result === 'rejected') void qc.invalidateQueries({ queryKey: MENU_KEY });
+            if (result.outcome === 'rejected') void qc.invalidateQueries({ queryKey: MENU_KEY });
           }}
         />
       )}
@@ -625,11 +652,33 @@ export function EmenuPage() {
             setOverlay(null);
           }}
           onCheck={() => void checkPending()}
-          onRetry={(pin) => void send(pending, pin, true)}
+          onRetry={(pin) =>
+            void send(pending, pin, true).then((r) => {
+              // 重新提交被明确拒绝：待确认的记录已经没有了（弹窗跟着关），要告诉服务员这一单没有下成、为什么
+              if (r.outcome === 'rejected') {
+                void qc.invalidateQueries({ queryKey: MENU_KEY });
+                setOverlay({ kind: 'notice', text: `这一单没有下成：${r.message ?? '门店系统拒绝了'}。菜还在「未下单」里，可以改了再下单。` });
+              }
+            })
+          }
           onAbandon={(pin) => void abandonPending(pin)}
         />
       )}
       {overlay?.kind === 'success' && <SuccessModal onDone={() => setOverlay((o) => (o?.kind === 'success' ? null : o))} />}
+      {overlay?.kind === 'notice' && (
+        <SmallDialog
+          title="没有下成"
+          subtitle="ORDER NOT PLACED"
+          testId="emenu-notice"
+          actions={
+            <ModalButton x={110} y={196} w={140} primary onClick={() => setOverlay(session ? { kind: 'drawer', tab: 'cart' } : null)} testId="emenu-notice-ok">
+              知道了
+            </ModalButton>
+          }
+        >
+          {overlay.text}
+        </SmallDialog>
+      )}
       {overlay?.kind === 'end' && session && (
         <SmallDialog
           title="结束点餐"

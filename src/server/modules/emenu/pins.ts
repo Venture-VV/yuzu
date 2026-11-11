@@ -3,7 +3,8 @@
 //   · 系统生成、当场显示一次（不让自己挑：撞上别人的时候等于告诉他别人的密码）；店主在后台「员工账号」给人生成、重置、收回，
 //     本人登录后也能在「修改密码」页自己重新生成；
 //   · 只凭密码认人：库里另存前三位（slot，系统生成时保证不重复），按它找到那位员工，再核对整个密码的 scrypt 摘要；
-//   · 输错限次与登录、当场授权共用同一份计数（auth/lockout.ts）：按「这台平板登录的账号 + 来源地址」记，15 分钟内错 5 次锁 5 分钟；
+//   · 输错限次是单独的一份计数（auth/lockout.ts 的「点单密码」一段）：只按「这台平板登录的账号」记、不分来源地址，15 分钟内错 5 次锁 5 分钟；
+//     同一台平板一次只核对一个（排队），同时发来一批也是错满 5 次就锁；不计入登录的按来源计数（平板在客人手里，乱按不会拦住店里的登录）；
 //   · 6 位数字只有一百万种，库泄露后怎么存都能很快试出来，防护在线上：要先登录平板账号、输错限次、每次确认都记审计。
 // 加锁：生成、重置、收回先取这位员工的点单密码咨询锁（同一位员工的几次串行）；前三位撞了靠唯一约束兜底、换一个再试。
 
@@ -11,7 +12,7 @@ import { randomInt } from 'node:crypto';
 import { EMENU_PIN_LENGTH, type OrderPinStatus } from '@shared/emenu';
 import { can, type Duty, type Role } from '@shared/permissions';
 import { isUniqueViolation, type Db } from '../../db';
-import { checkLock, clearFailures, lockMinutesLeft, recordFailure } from '../../auth/lockout';
+import { clearOrderPinFailures, orderPinLockMinutes, recordOrderPinFailure, serialOrderPin } from '../../auth/lockout';
 import { hashPassword, verifyPassword } from '../../auth/password';
 import { subjectOf } from '../../auth/role-permissions';
 import { writeAudit } from '../../lib/audit';
@@ -121,27 +122,29 @@ async function findByPin(db: Db, pin: string): Promise<PinStaff | null> {
 
 /**
  * 平板上输的点单密码 → 确认下单的那位服务员（按后台调整后的岗位权限算好权限）。
- * 密码不对、员工已停用：记一次失败（PIN_INVALID，403——不用 401，免得把平板的登录踢掉）；这台平板错太多次：PIN_LOCKED（429）；
- * 密码对、但没有「餐饮点单」+「前台挂账」：PIN_NO_PERMISSION（403，不算输错）。
- * device：这台平板登录的账号；source：来源地址。
+ * 密码不对、员工已停用：这台平板记一次失败（PIN_INVALID，403——不用 401，免得把平板的登录踢掉）；这台平板错太多次：PIN_LOCKED（429），
+ * 锁着的时候不再核对，对的、错的回的都一样；密码对、但没有「餐饮点单」+「前台挂账」：PIN_NO_PERMISSION（403，不算输错）。
+ * 限次是单独的一份计数（auth/lockout.ts 的「点单密码」一段）：只按这台平板登录的账号记，同一台平板一次只核对一个。
+ * device：这台平板登录的账号；source：来源地址（只记进审计）。
  */
 export async function resolveWaiter(deps: Deps, pin: unknown, device: Actor, source: string): Promise<Actor> {
-  const name = `order-pin#${device.id}`;
-  const locked = lockMinutesLeft(name, source);
-  if (locked !== null) throw new AppError(429, 'PIN_LOCKED', `点单密码输错的次数太多，请 ${locked} 分钟后再试`, { minutes: locked });
-  if (typeof pin !== 'string' || !PIN_PATTERN.test(pin)) throw new AppError(400, 'BAD_REQUEST', `请输入 ${EMENU_PIN_LENGTH} 位点单密码`, { field: 'pin' });
-  const staff = await findByPin(deps.sql, pin);
-  if (!staff || !staff.active) {
-    recordFailure(name, source);
-    await writeAudit(deps.sql, { staffId: device.id, action: 'order_pin_failed', detail: { reason: staff ? 'inactive' : 'bad_pin' }, ip: source });
-    // 这一次正好到上限：直接告诉他锁了多久
-    const now = lockMinutesLeft(name, source);
-    if (now !== null) throw new AppError(429, 'PIN_LOCKED', `点单密码输错的次数太多，请 ${now} 分钟后再试`, { minutes: now });
-    throw new AppError(403, 'PIN_INVALID', '点单密码不正确');
-  }
-  // 与登录共用的检查都过了才清计数；checkLock 留给来源被拦的情形（lockMinutesLeft 已经看过，这里再走一遍只为与登录同一套）
-  checkLock(name, source);
-  clearFailures(name, source);
+  const key = String(device.id);
+  const lockedError = (minutes: number) => new AppError(429, 'PIN_LOCKED', `点单密码输错的次数太多，请 ${minutes} 分钟后再试`, { minutes });
+  const staff = await serialOrderPin(key, async () => {
+    const locked = orderPinLockMinutes(key);
+    if (locked !== null) throw lockedError(locked);
+    if (typeof pin !== 'string' || !PIN_PATTERN.test(pin)) throw new AppError(400, 'BAD_REQUEST', `请输入 ${EMENU_PIN_LENGTH} 位点单密码`, { field: 'pin' });
+    const found = await findByPin(deps.sql, pin);
+    if (!found || !found.active) {
+      recordOrderPinFailure(key);
+      await writeAudit(deps.sql, { staffId: device.id, action: 'order_pin_failed', detail: { reason: found ? 'inactive' : 'bad_pin' }, ip: source });
+      // 这一次正好到上限：直接告诉他锁了多久
+      const now = orderPinLockMinutes(key);
+      throw now !== null ? lockedError(now) : new AppError(403, 'PIN_INVALID', '点单密码不正确');
+    }
+    clearOrderPinFailures(key);
+    return found;
+  });
   const subject = await subjectOf(deps.sql, staff);
   const actor: Actor = {
     id: staff.id,

@@ -415,8 +415,10 @@ function PagesTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
         onClose={() => setEditing(null)}
         onSaved={(next, id) => {
           const saved = next.categories.find((c) => c.id === id);
-          // 自己刚改了这个分类的名称、时段：版本号跟着变，手上没保存的版面接着用新的版本号
-          if (saved && draft && draft.id === id) setDraft({ ...draft, version: saved.version });
+          const before = data.categories.find((c) => c.id === id);
+          // 自己刚改了这个分类的名称、时段：版本号跟着变，手上没保存的版面接着用新的版本号。
+          // 手上的版面本来就是照旧版本排的（别人改过、还没载入最新的）：不跟，保存时照旧被拒，免得盖掉别人排的页
+          if (saved && draft && draft.id === id && before && draft.version === before.version) setDraft({ ...draft, version: saved.version });
           apply(next);
           if (saved && !dirty) setSelectedId(saved.id);
         }}
