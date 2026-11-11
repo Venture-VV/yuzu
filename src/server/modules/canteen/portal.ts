@@ -36,6 +36,8 @@ import {
 } from './portal-auth';
 import { registerEmployee, registerInfo } from './registration';
 import { loadCanteenSettings } from './settings';
+import { patrolAppsFor } from '../patrol/core';
+import { registerPatrolPortalRoutes } from '../patrol/routes';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -197,6 +199,7 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
       today,
       meals: settings.meals,
       mealsThisMonth: await mealsThisMonth(sql, e.id, today),
+      apps: await patrolAppsFor(sql, e.id),
     };
   };
 
@@ -267,6 +270,9 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
   // ── 员工 ──
 
   app.get('/api/canteen/me', async (req) => buildMe(who(req).id));
+
+  // 工作台 · 巡场（8.0.9，docs/PATROL_V809.md）：巡场部门的人打卡、看今天，后台指定的人看记录
+  registerPatrolPortalRoutes(app, sql, config, { who, now, openCacheMs: opts.openCacheMs });
 
   app.put('/api/canteen/me/avatar', async (req) => ({ avatar: await setCanteenAvatar(sql, who(req), req.body) }));
 
