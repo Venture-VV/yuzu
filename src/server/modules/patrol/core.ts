@@ -25,6 +25,7 @@ import {
   type PatrolCheckinRow,
   type PatrolDay,
   type PatrolPoint,
+  type PatrolPointOption,
   type PatrolPointsAdmin,
   type PatrolPortalDay,
   type PatrolRecords,
@@ -162,6 +163,11 @@ export async function patrolPointsAdmin(db: Db, config: AppConfig): Promise<Patr
     FROM patrol_points p ORDER BY p.active DESC, p.sort_order, p.id`;
   const canteen = await loadCanteenSettings(db);
   return { points, portalUrl: canteen.portalUrl, today };
+}
+
+/** 巡场记录筛选用的全部场所（含停用的、不含场所码）：停用的场所以前的记录照样能单独筛、单独导出（Codex 审查 41a2fbb） */
+export async function patrolPointOptions(db: Db): Promise<PatrolPointOption[]> {
+  return db<PatrolPointOption[]>`SELECT p.id, p.name, p.area, p.active FROM patrol_points p ORDER BY p.active DESC, p.sort_order, p.id`;
 }
 
 const nameField = z

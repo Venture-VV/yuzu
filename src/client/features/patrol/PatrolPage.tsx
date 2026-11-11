@@ -14,11 +14,12 @@ import {
   PATROL_VIA_LABELS,
   type PatrolDay,
   type PatrolPoint,
+  type PatrolPointOption,
   type PatrolPointsAdmin,
   type PatrolRecords,
   type PatrolSettingsAdmin,
 } from '@shared/patrol';
-import { api, errorMessage, UncertainError } from '../../lib/api';
+import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { cn, downloadUrl, formatDateTime, formatTime, uuid } from '../../lib/utils';
@@ -169,7 +170,8 @@ function RecordsTab({ manage }: { manage: boolean }) {
   const [employeeId, setEmployeeId] = useState('');
   const [voiding, setVoiding] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
-  const day = useQuery({ queryKey: [...KEY, 'day', null], queryFn: () => api.get<PatrolDay>('/api/erp/patrol/day') });
+  // 筛选用全部场所（含停用的）：停用的场所以前的记录也能单独筛、单独导出（Codex 审查 41a2fbb）
+  const pointOptions = useQuery({ queryKey: [...KEY, 'point-options'], queryFn: () => api.get<{ points: PatrolPointOption[] }>('/api/erp/patrol/point-options') });
   const base = new URLSearchParams({ from, to, ...(pointId ? { pointId } : {}) });
   const records = useQuery({
     queryKey: [...KEY, 'records', from, to, pointId],
@@ -213,9 +215,9 @@ function RecordsTab({ manage }: { manage: boolean }) {
         <Field label="场所" htmlFor="patrol-point">
           <Select id="patrol-point" value={pointId} onChange={(e) => setPointId(e.target.value)} fullWidth={false} className="w-44" data-testid="patrol-records-point">
             <option value="">全部场所</option>
-            {(day.data?.points ?? []).map((p) => (
+            {(pointOptions.data?.points ?? []).map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name}
+                {p.active ? p.name : `${p.name}（已停用）`}
               </option>
             ))}
           </Select>
@@ -520,31 +522,45 @@ function SettingsTab() {
   const qc = useQueryClient();
   const toast = useToast();
   const s = useQuery({ queryKey: [...KEY, 'settings'], queryFn: () => api.get<PatrolSettingsAdmin>('/api/erp/patrol/settings') });
-  const [deps, setDeps] = useState<number[] | null>(null);
-  const [viewers, setViewers] = useState<number[] | null>(null);
+  // 改动中的设置：第一次勾选时记下当时的两份名单与版本号，保存交的就是这个版本号——页面在后台重新取数（切回窗口时）
+  // 不会把别人刚保存的版本号换进来，后保存的照样被拒，不会悄悄盖掉别人的修改（Codex 审查 41a2fbb，P1）
+  const [draft, setDraft] = useState<{ departmentIds: number[]; viewerIds: number[]; rev: number } | null>(null);
+  const [stale, setStale] = useState(false);
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const data = s.data;
-  const depIds = deps ?? data?.departmentIds ?? [];
-  const viewerIds = viewers ?? data?.viewerIds ?? [];
-  const dirty = deps !== null || viewers !== null;
+  const depIds = draft?.departmentIds ?? data?.departmentIds ?? [];
+  const viewerIds = draft?.viewerIds ?? data?.viewerIds ?? [];
+  const dirty = draft !== null;
   const toggle = (list: number[], id: number) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+  const edit = (patch: { departmentIds?: number[]; viewerIds?: number[] }) => {
+    if (!data) return;
+    setDraft((d) => ({ ...(d ?? { departmentIds: data.departmentIds, viewerIds: data.viewerIds, rev: data.rev }), ...patch }));
+  };
   const shownEmployees = (data?.employees ?? []).filter((e) => e.active || viewerIds.includes(e.id)).filter((e) => !search.trim() || `${e.name}${e.empNo}${e.department}`.includes(search.trim()));
 
   const save = async () => {
-    if (!data) return;
+    if (!draft) return;
     setBusy(true);
     try {
-      const next = await api.put<PatrolSettingsAdmin>('/api/erp/patrol/settings', { departmentIds: depIds, viewerIds, rev: data.rev });
+      const next = await api.put<PatrolSettingsAdmin>('/api/erp/patrol/settings', draft);
       qc.setQueryData([...KEY, 'settings'], next);
-      setDeps(null);
-      setViewers(null);
+      setDraft(null);
+      setStale(false);
       toast({ tone: 'success', title: '已保存', body: `巡场部门里现在有 ${next.patrolStaffCount} 位员工` });
     } catch (e) {
-      toast({ tone: 'error', title: errorMessage(e) });
+      // 别人刚改过、或者没收到结果（可能已经保存好了）：不当作没改成，留着这次的勾选，请看过最新的再改
+      if ((e instanceof ApiError && e.code === 'PATROL_SETTINGS_CHANGED') || e instanceof UncertainError) setStale(true);
+      else toast({ tone: 'error', title: errorMessage(e) });
     } finally {
       setBusy(false);
     }
+  };
+  /** 放弃这次的勾选，看最新保存的设置 */
+  const reload = async () => {
+    setDraft(null);
+    setStale(false);
+    await s.refetch();
   };
 
   if (s.error) return <Notice tone="error" title={errorMessage(s.error)} />;
@@ -558,7 +574,7 @@ function SettingsTab() {
           {data.departments.length === 0 && <p className="text-[13px] text-ink-3">还没有部门</p>}
           {data.departments.map((d) => (
             <label key={d.id} className={cn('flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-[13px]', depIds.includes(d.id) ? 'border-pine bg-pine/10' : 'border-line')}>
-              <input type="checkbox" checked={depIds.includes(d.id)} onChange={() => setDeps(toggle(depIds, d.id))} data-testid={`patrol-dept-${d.name}`} />
+              <input type="checkbox" checked={depIds.includes(d.id)} onChange={() => edit({ departmentIds: toggle(depIds, d.id) })} data-testid={`patrol-dept-${d.name}`} />
               {d.name}
               {!d.active && <span className="text-ink-4">（已停用）</span>}
             </label>
@@ -573,15 +589,29 @@ function SettingsTab() {
         <div className="mt-3 grid max-h-72 grid-cols-1 gap-1.5 overflow-y-auto sm:grid-cols-2">
           {shownEmployees.map((e) => (
             <label key={e.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-[13px] hover:bg-paper-2">
-              <input type="checkbox" checked={viewerIds.includes(e.id)} onChange={() => setViewers(toggle(viewerIds, e.id))} data-testid={`patrol-viewer-${e.empNo}`} />
+              <input type="checkbox" checked={viewerIds.includes(e.id)} onChange={() => edit({ viewerIds: toggle(viewerIds, e.id) })} data-testid={`patrol-viewer-${e.empNo}`} />
               {e.name} <span className="text-ink-3">{e.empNo}</span>
               {e.department && <span className="text-ink-4">· {e.department}</span>}
             </label>
           ))}
         </div>
       </Card>
+      {stale && (
+        <Notice
+          tone="warning"
+          title="巡场设置刚被别人改过（或者刚才那一下已经保存好了），这次的勾选没有保存"
+          action={
+            <Button size="sm" onClick={() => void reload()} data-testid="patrol-settings-reload">
+              看最新的
+            </Button>
+          }
+          data-testid="patrol-settings-stale"
+        >
+          点「看最新的」放弃这次的勾选、重新载入，看过以后再按需要改。
+        </Notice>
+      )}
       <div className="flex items-center gap-3">
-        <Button variant="primary" disabled={!dirty} loading={busy} onClick={() => void save()} data-testid="patrol-settings-save">
+        <Button variant="primary" disabled={!dirty || stale} loading={busy} onClick={() => void save()} data-testid="patrol-settings-save">
           保存
         </Button>
         {data.updatedAt && (

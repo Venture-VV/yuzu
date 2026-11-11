@@ -11,6 +11,8 @@ import { Button, Card, Pill, cn } from '../ui';
 export function PatrolLogPage({ me, go }: { me: CanteenMe; go: (route: string) => void }) {
   const [date, setDate] = useState<string | null>(null);
   const [day, setDay] = useState<PatrolPortalDay | null>(null);
+  /** 门店的今天（营业日）：取到过一次就记着，换日期、没取到时也知道今天是哪天 */
+  const [today, setToday] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [person, setPerson] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -18,11 +20,12 @@ export function PatrolLogPage({ me, go }: { me: CanteenMe; go: (route: string) =
   useEffect(() => {
     let alive = true;
     setLoading(true);
+    setError('');
     call<PatrolPortalDay>('GET', `/api/canteen/patrol/day${date ? `?date=${date}` : ''}`)
       .then((d) => {
         if (!alive) return;
         setDay(d);
-        setError('');
+        setToday(d.today);
       })
       .catch((e: unknown) => alive && setError(e instanceof Error ? e.message : '这一天的巡场没取到'))
       .finally(() => alive && setLoading(false));
@@ -31,10 +34,11 @@ export function PatrolLogPage({ me, go }: { me: CanteenMe; go: (route: string) =
     };
   }, [date]);
 
-  const today = day?.today ?? null;
   const shownDate = date ?? today;
+  // 只显示选的这一天的：换了日期还没取到、或者没取到时，不把前一天的数字显示在新日期下面（Codex 审查 41a2fbb）
+  const shown = day && day.date === shownDate ? day : null;
   const oldest = today ? addDays(today, -PATROL_MAX_DAYS) : null;
-  const points = (day?.points ?? [])
+  const points = (shown?.points ?? [])
     .map((p) => ({ ...p, scans: person === null ? p.scans : p.scans.filter((s) => s.employeeId === person) }))
     .sort((a, b) => Number(a.count > 0) - Number(b.count > 0));
 
@@ -62,35 +66,40 @@ export function PatrolLogPage({ me, go }: { me: CanteenMe; go: (route: string) =
           后一天 ›
         </Button>
       </div>
-      {error && <p className="rounded-2xl bg-peach-soft px-4 py-2.5 text-[14px] font-bold text-berry">{error}</p>}
+      {error && (
+        <p className="rounded-2xl bg-peach-soft px-4 py-2.5 text-[14px] font-bold text-berry" data-testid="patrol-log-error">
+          {error}
+        </p>
+      )}
+      {!shown && !error && loading && <p className="py-6 text-center text-[14px] text-ink-3">正在取这一天的巡场…</p>}
 
-      {day && (
+      {shown && (
         <>
           <div className="grid grid-cols-3 gap-2 text-center">
             <Card className="px-2 py-2">
               <p className="text-[12px] font-bold text-ink-3">巡了</p>
               <p className="num text-[22px] font-black" data-testid="patrol-log-total">
-                {day.total}
+                {shown.total}
               </p>
             </Card>
             <Card className="px-2 py-2">
               <p className="text-[12px] font-bold text-ink-3">还没人巡</p>
-              <p className={cn('num text-[22px] font-black', day.missing > 0 && 'text-berry')} data-testid="patrol-log-missing">
-                {day.missing}
+              <p className={cn('num text-[22px] font-black', shown.missing > 0 && 'text-berry')} data-testid="patrol-log-missing">
+                {shown.missing}
               </p>
             </Card>
             <Card className="px-2 py-2">
               <p className="text-[12px] font-bold text-ink-3">巡场的人</p>
-              <p className="num text-[22px] font-black">{day.people.length}</p>
+              <p className="num text-[22px] font-black">{shown.people.length}</p>
             </Card>
           </div>
 
-          {day.people.length > 0 && (
+          {shown.people.length > 0 && (
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => setPerson(null)}>
                 <Pill tone={person === null ? 'yuzu' : 'ink'}>全部</Pill>
               </button>
-              {day.people.map((p) => (
+              {shown.people.map((p) => (
                 <button key={p.employeeId} type="button" onClick={() => setPerson(p.employeeId)}>
                   <Pill tone={person === p.employeeId ? 'yuzu' : 'ink'}>
                     {p.name} · {p.count} 次

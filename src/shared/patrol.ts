@@ -52,6 +52,14 @@ export interface PatrolPoint {
   todayCount: number;
 }
 
+/** 巡场记录筛选用的场所（含停用的、不含场所码；有「看记录」权限就能取，Codex 审查 41a2fbb） */
+export interface PatrolPointOption {
+  id: number;
+  name: string;
+  area: string;
+  active: boolean;
+}
+
 export interface PatrolPointsAdmin {
   points: PatrolPoint[];
   /** 员工入口地址（「员工食堂 → 设置」里填的）：打印二维码用；没填为空 */

@@ -16,6 +16,7 @@ import {
   createPatrolPoint,
   patrolDayAdmin,
   patrolDayPortal,
+  patrolPointOptions,
   patrolPointsAdmin,
   patrolRecords,
   patrolRecordsCsv,
@@ -42,6 +43,8 @@ export function registerPatrolAdminRoutes(app: FastifyInstance, deps: Deps) {
     const q = parse(RecordsQuery, req.query ?? {});
     return csvReply(reply, `巡场记录-${q.from}至${q.to}.csv`, patrolRecordsCsv(await patrolRecords(sql, q), config.timezone));
   });
+  // 记录筛选用的场所：含停用的、不含场所码，看记录的权限就能取
+  app.get('/api/erp/patrol/point-options', { preHandler: read }, async () => ({ points: await patrolPointOptions(sql) }));
   app.post('/api/erp/patrol/checkins/:id/void', { preHandler: manage }, async (req) => voidPatrolCheckin(sql, parse(idParam, req.params).id, req.body, ctxOf(req)));
 
   // 场所与二维码：场所码只有「场所与设置」权限看得到（打印、换码）

@@ -21,7 +21,7 @@ import { MePage } from './pages/Me';
 import { PatrolPage } from './pages/Patrol';
 import { PatrolLogPage } from './pages/PatrolLog';
 import { WorkPage } from './pages/Work';
-import { forgetPatrolLink, peekPatrolLink, rememberPatrolLink } from './patrol';
+import { flushPatrol, forgetPatrolLink, loadPatrolQueue, peekPatrolLink, rememberPatrolLink } from './patrol';
 import { RegisterPage } from './pages/Register';
 import { ScanPage } from './pages/Scan';
 import { TalkPage } from './pages/Talk';
@@ -169,6 +169,37 @@ export function App() {
     forgetPatrolLink();
     toast('巡场只有巡场部门（安保）的员工能用；部门不对请找管理员改员工名单');
   }, [state, fresh, hash.route, cached]);
+
+  // 没网时扫的巡场码记在手机上：离开巡场页（回首页、亮饭卡码……）以后也照样每 10 秒、联网时补交（Codex 审查 41a2fbb）——
+  // 不然要等重新打开巡场页才交，超过 24 小时门店系统就不收了。巡场页开着时由巡场页自己补交（它要显示刚补交的、还剩几条）
+  const onPatrolPage = hash.route === 'patrol' && !!cached?.me.apps?.includes('patrol');
+  useEffect(() => {
+    if (state !== 'ready' || employeeId === null || onPatrolPage) return;
+    let running = false;
+    const round = async () => {
+      if (running || !loadPatrolQueue(employeeId).length) return;
+      running = true;
+      try {
+        let done = 0;
+        const rejected: string[] = [];
+        await flushPatrol(employeeId, (_item, outcome) => {
+          if (outcome.kind === 'done') done += 1;
+          else if (outcome.kind === 'rejected') rejected.push(outcome.error.message);
+        });
+        if (done) toast(`没网时扫的巡场打卡补交好了 ${done} 条`, 'ok');
+        if (rejected.length) toast(`有 ${rejected.length} 条巡场打卡没交上：${rejected[0]}`, 'error');
+      } finally {
+        running = false;
+      }
+    };
+    const timer = setInterval(() => void round(), 10_000);
+    window.addEventListener('online', round);
+    void round();
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('online', round);
+    };
+  }, [state, employeeId, onPatrolPage]);
 
   const logout = async () => {
     // 这台手机的饭点提醒跟着退出关掉（不然下一位在这台手机上登录前，还会收到上一位的提醒）

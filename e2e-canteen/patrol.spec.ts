@@ -6,7 +6,9 @@
 //   后台「今天」与「巡场记录」看到同样的结果。
 // 要应用开着员工端口：E2E_BASE_URL、E2E_CANTEEN_URL（见 playwright.canteen.config.ts），库里要有演示的店主 linlan（seed-demo）。
 // 可以重复跑：部门按名字沿用；员工工号、场所名称带这次的时间，场所跑完停用。
+// Codex 审查 41a2fbb 的四条也在这里：两个人同时改设置、断网扫的码离开巡场页也补交、手机上换日期没取到、记录筛选里有停用的场所。
 
+import { randomUUID } from 'node:crypto';
 import { expect, test, devices, type Browser, type BrowserContext, type APIRequestContext, type Page } from '@playwright/test';
 
 const CANTEEN = process.env.E2E_CANTEEN_URL ?? 'http://localhost:8090';
@@ -79,6 +81,22 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
     await save.click();
     await expect(page.getByText('已保存')).toBeVisible();
   }
+  // 两个人同时改设置（Codex 审查 41a2fbb）：这边勾了一下还没保存，别人先保存了；切回这个窗口（页面重新取数）以后再保存，
+  // 照样被拒、不盖掉别人刚保存的；点「看最新的」放弃这次的勾选
+  const outsiderBox = page.getByTestId(`patrol-viewer-${outsider.empNo}`);
+  await outsiderBox.check();
+  const latest = await ok<{ departmentIds: number[]; viewerIds: number[]; rev: number }>(await api.get('/api/erp/patrol/settings'));
+  await ok(await api.put('/api/erp/patrol/settings', { data: { departmentIds: latest.departmentIds, viewerIds: latest.viewerIds, rev: latest.rev } }));
+  await page.waitForTimeout(5_500); // 页面上的数据过 5 秒才算旧：切回窗口时重新取
+  const refetched = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/erp/patrol/settings' && r.request().method() === 'GET');
+  await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
+  await refetched;
+  await page.getByTestId('patrol-settings-save').click();
+  await expect(page.getByTestId('patrol-settings-stale')).toBeVisible();
+  expect((await ok<{ viewerIds: number[] }>(await api.get('/api/erp/patrol/settings'))).viewerIds).not.toContain(outsider.id);
+  await page.getByTestId('patrol-settings-reload').click();
+  await expect(outsiderBox).not.toBeChecked();
+  await expect(page.getByTestId('patrol-settings-stale')).toHaveCount(0);
 
   // ③ 场所与二维码：新增两个场所（名称带这次的时间），打印页里两个码都在
   const names = [`E2E北门${stamp}`, `E2E屋顶${stamp}`];
@@ -100,6 +118,12 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
   const qr = await print.getByTestId(`patrol-code-${names[0]}`).locator('svg[data-qr]').getAttribute('data-qr');
   expect(qr).toBe(`${CANTEEN}/#patrol=${north.token}`);
   await print.close();
+  // 另建两个场所（接口建，不进上面的打印）：侧门给断网补交用；旧仓库建好就停用、今天没人巡，给记录筛选用
+  type Made = { id: number; name: string; area: string; token: string; sortOrder: number; version: number };
+  const addPoint = async (name: string) => (await ok<{ point: Made }>(await api.post('/api/erp/patrol/points', { data: { clientKey: randomUUID(), name, area: 'E2E 位置' } }))).point;
+  const gate = await addPoint(`E2E侧门${stamp}`);
+  const old = await addPoint(`E2E旧仓库${stamp}`);
+  await ok(await api.put(`/api/erp/patrol/points/${old.id}`, { data: { name: old.name, area: old.area, sortOrder: old.sortOrder, active: false, version: old.version } }));
 
   try {
     // ④ 保安：工作台里有巡场；直接扫开场所码就打卡
@@ -118,6 +142,20 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
     // 2 分钟内再扫：刚打过卡，不重复记
     await g.goto(`${CANTEEN}/#patrol=${north.token}`);
     await expect(g.getByTestId('patrol-result')).toContainText('刚打过卡');
+    // 断网扫的码离开巡场页也照样补交（Codex 审查 41a2fbb）：扫侧门时交不上（拦掉打卡请求），记在手机上；
+    // 回首页以后联网，柚子饭堂在后台补交、提示补交好了，后台记录里有这一条
+    const checkins = (u: URL) => u.pathname === '/api/canteen/patrol/checkins';
+    await guardPhone.route(checkins, (r) => r.abort('internetdisconnected'));
+    await g.goto(`${CANTEEN}/#patrol=${gate.token}`);
+    await expect(g.getByTestId('patrol-result')).toContainText('已记在手机上');
+    await expect(g.getByTestId('patrol-queued')).toHaveText('1');
+    await g.getByTestId('tab-home').click();
+    await expect(g.getByTestId('show-code')).toBeVisible();
+    await guardPhone.unroute(checkins);
+    await g.evaluate(() => window.dispatchEvent(new Event('online')));
+    await expect(g.getByText(/巡场打卡补交好了 1 条/)).toBeVisible({ timeout: 20_000 });
+    const businessToday = (await ok<{ today: string }>(await api.get('/api/erp/patrol/day'))).today;
+    expect((await ok<{ total: number }>(await api.get(`/api/erp/patrol/records?from=${businessToday}&to=${businessToday}&pointId=${gate.id}`))).total).toBe(1);
 
     // ⑤ 没登录的手机直接扫：先登录，登录好接着打卡（记下的码）
     const fresh = await phone(browser);
@@ -137,6 +175,13 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
     await v.getByTestId('work-patrolLog').click();
     await expect(v.getByTestId(`patrol-log-point-${names[0]}`)).toContainText('E2E 保安老张');
     await expect(v.getByTestId(`patrol-log-point-${names[1]}`)).toContainText('E2E 保安老张');
+    // 换日期没取到（Codex 审查 41a2fbb）：只显示出错，不把今天的数字显示在前一天下面
+    const pastDay = (u: URL) => u.pathname === '/api/canteen/patrol/day' && u.searchParams.has('date');
+    await viewerPhone.route(pastDay, (r) => r.abort('internetdisconnected'));
+    await v.getByTestId('patrol-log-prev').click();
+    await expect(v.getByTestId('patrol-log-error')).toBeVisible();
+    await expect(v.getByTestId('patrol-log-total')).toHaveCount(0);
+    await viewerPhone.unroute(pastDay);
     await viewerPhone.close();
 
     // ⑦ 别的部门的员工：没有工作台；直接扫码提示不在巡场部门
@@ -152,12 +197,14 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
     await expect(page.getByTestId(`patrol-day-point-${names[0]}`)).toContainText('E2E 保安老张');
     await expect(page.getByTestId(`patrol-day-point-${names[1]}`)).toContainText('1 次');
     await page.getByRole('radio', { name: '巡场记录' }).click();
+    // 停用、今天没人巡的场所也能筛（以前的记录照样能单独筛、单独导出；Codex 审查 41a2fbb）
+    await expect(page.getByTestId('patrol-records-point').locator('option', { hasText: old.name })).toHaveText(`${old.name}（已停用）`);
     await page.getByTestId('patrol-records-point').selectOption({ label: names[0] });
     await expect(page.getByTestId('patrol-records-total')).toContainText('共 1 次');
   } finally {
     // 跑完停用这次新增的场所（场所不能删）
     const fresh = (await ok<{ points: { id: number; name: string; area: string; sortOrder: number; active: boolean; version: number }[] }>(await api.get('/api/erp/patrol/points'))).points;
-    for (const p of fresh.filter((x) => names.includes(x.name) && x.active)) {
+    for (const p of fresh.filter((x) => [...names, gate.name].includes(x.name) && x.active)) {
       await api.put(`/api/erp/patrol/points/${p.id}`, { data: { name: p.name, area: p.area, sortOrder: p.sortOrder, active: false, version: p.version } });
     }
   }

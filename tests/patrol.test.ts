@@ -249,6 +249,21 @@ describe('每天的清单、记录与导出、作废', () => {
     await expect(ctx.sql`DELETE FROM patrol_points WHERE id = ${points['北门停车场']!.id}`).rejects.toThrow(/禁止删除/);
     // 查询范围
     expect((await admin('GET', `/api/erp/patrol/records?from=2026-01-01&to=2026-12-31`)).status).toBe(400);
+    // 记录筛选用的场所（Codex 审查 41a2fbb）：停用的也在（以前的记录照样能单独筛、单独导出），不带场所码；店员取不到
+    const fire = points['三楼消防通道']!;
+    const off = await admin('PUT', `/api/erp/patrol/points/${fire.id}`, { name: '三楼消防通道', area: '东侧楼梯口', sortOrder: 0, active: false, version: fire.version });
+    expect(off.status, JSON.stringify(off.body)).toBe(200);
+    fire.version = off.body.point.version;
+    const opts = await admin('GET', '/api/erp/patrol/point-options');
+    expect(opts.status).toBe(200);
+    expect((opts.body.points as { name: string; active: boolean }[]).map((p) => [p.name, p.active])).toEqual([
+      ['北门停车场', true],
+      ['屋顶水箱间', true],
+      ['三楼消防通道', false],
+    ]);
+    expect(JSON.stringify(opts.body)).not.toMatch(/token/i);
+    expect((await admin('GET', `/api/erp/patrol/records?from=${d}&to=${d}&pointId=${fire.id}`)).body.total).toBe(1);
+    expect((await api(ctx.app, ctx.clerk, 'GET', '/api/erp/patrol/point-options')).status).toBe(403);
   });
 
   it('安保巡场模块关掉：员工端回「巡场还没开」、工作台里没有巡场，后台接口按模块拦截', async () => {
