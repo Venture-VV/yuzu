@@ -28,6 +28,8 @@ const PlatformPage = lazyPage(() => import('./features/platform/PlatformPage').t
 const GuidePage = lazyPage(() => import('./features/guide/GuidePage').then((m) => m.GuidePage));
 const GuideScreenPage = lazyPage(() => import('./features/guide/GuidePage').then((m) => m.GuideScreenPage));
 const DevicesPage = lazyPage(() => import('./features/devices/DevicesPage').then((m) => m.DevicesPage));
+// 点餐系统 · 平板电子菜单（8.0.10，docs/EMENU.md）：放在餐桌上的平板，没有导航
+const EmenuPage = lazyPage(() => import('./features/emenu/EmenuPage').then((m) => m.EmenuPage));
 const LedgerPage = lazyPage(() => import('./features/ledger/LedgerPage').then((m) => m.LedgerPage));
 const SettlementPage = lazyPage(() => import('./features/settlement/SettlementPage').then((m) => m.SettlementPage));
 const ShiftPage = lazyPage(() => import('./features/shift/ShiftPage').then((m) => m.ShiftPage));
@@ -179,6 +181,8 @@ function Home() {
   const session = useOptionalSession();
   const dining = session?.dining ?? false;
   if (can('member.read')) return <WorkbenchPage />;
+  // 「点餐平板」账号（8.0.10）：只能打开点餐页，登录后直接进去
+  if (can('emenu.view') && !can('frontdesk.read')) return <Navigate to="/emenu" replace />;
   // 他店查询（v0.7.23）：另一家店的同事只能查会员档阶
   if (can('member.lookup')) return <Navigate to="/lookup" replace />;
   if (erp.landing) return <Navigate to={erp.landing} replace />;
@@ -217,6 +221,8 @@ const router = createBrowserRouter([
   },
   // 对客导览的大屏模式（v0.7.19）：没有导航与操作，适合门店大屏常开
   { path: '/guide/screen', element: <AuthGate shell="bare" />, children: [{ index: true, element: <GuideScreenPage /> }] },
+  // 平板点餐页（8.0.10）：整页是设计师的电子菜单，没有门店系统的导航
+  { path: '/emenu', element: <AuthGate shell="bare" />, children: [{ index: true, element: <EmenuPage /> }] },
   { path: '/admin', element: <AuthGate shell="admin" />, children: adminRoutes },
   // ERP 工作区（v0.7.3）：首页、模块设置、营业数据，以及库存、采购、货款、待办（原来的地址不变，门店主导航里不再有）。
   // 页面属于哪个模块按注册表（@shared/erp）里的页面前缀认，模块关着时 ERP 外壳提示没有开启
