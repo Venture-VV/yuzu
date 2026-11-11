@@ -10,6 +10,7 @@ import { sweepBookings } from './modules/bookings';
 import { expireCountCards } from './modules/count-cards';
 import { resumeCampaigns } from './modules/coupon-campaigns';
 import { processGiftOuts } from './modules/gift-outs';
+import { sweepDrafts } from './modules/request-drafts';
 import { sendPendingSms } from './modules/sms';
 import { issueBirthdayCoupons } from './modules/coupons';
 import { runMembershipDaily } from './modules/membership';
@@ -87,6 +88,13 @@ export async function runMinuteJobs(
     if (r.members > 0) log.info(`会员挑战：${r.members} 位会员满了，发券 ${r.coupons} 张`);
   } catch (error) {
     log.error('会员挑战的发放失败，下一分钟重试', error);
+  }
+  // 草稿箱（供应链二次整改 03）：30 天没再保存的草稿、关闭（已提交、已删除）满一天的清掉
+  try {
+    const n = await sweepDrafts(sql, now);
+    if (n > 0) log.info(`草稿箱：清理 ${n} 份过期或已关闭的草稿`);
+  } catch (error) {
+    log.error('草稿清理失败，下一分钟重试', error);
   }
   // 批量发券（8.0.4）：请求断了、进程重启时没发完的发券单接着发（同一个人不会发两次）
   try {

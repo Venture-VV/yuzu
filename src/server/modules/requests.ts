@@ -36,6 +36,7 @@ import type { Actor, Deps } from '../lib/context';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
 import { erpOpAbandoned } from './erp-ops';
+import { closeDraftsOfRequest, closeDraftsOnSubmit, DraftRef } from './request-drafts';
 import { loadExpenseRules } from './expenses';
 import { docDateSchema, logApproval, sourcingHolds } from './inventory/common';
 import { clockIn, todayIn } from '../lib/dates';
@@ -322,6 +323,9 @@ export async function approvableOnFor(db: Db, timezone: string, at: Date = new D
 
 export async function createRequest(deps: Deps, raw: unknown, actor: Actor, ip?: string) {
   const input = parse(CreateInput, raw);
+  // 这一页的草稿（供应链二次整改 03）：提交成功时在同一个事务里关掉。另外解析，不算进原请求的摘要——
+  // 升级前记在本机的「结果待确认」没有这一项，原样重提时摘要要与当时的一样
+  const { draftKey } = parse(DraftRef, raw);
   const requestHash = hashRequest({ ...input, clientKey: undefined });
   const findExisting = async (db: Db) => {
     const [row] = await db<{ opType: string; requestHash: string; refId: number }[]>`SELECT op_type, request_hash, ref_id FROM idempotency_keys WHERE key = ${input.clientKey}`;
@@ -350,6 +354,7 @@ export async function createRequest(deps: Deps, raw: unknown, actor: Actor, ip?:
       await tx`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (${input.clientKey}, 'purchase_request', ${requestHash}, ${row!.id}, ${actor.id})`;
       await logApproval(tx, 'purchase_request', row!.id, 'create', actor.id);
       await logApproval(tx, 'purchase_request', row!.id, 'submit', actor.id);
+      await closeDraftsOnSubmit(tx, actor.id, { draftKey });
       await writeAudit(tx, { staffId: actor.id, action: 'purchase_request', targetType: 'purchase_request', targetId: row!.id, detail: { docNo, lines: input.lines.length }, ip });
       return { id: row!.id, replayed: false };
     });
@@ -376,6 +381,7 @@ async function lockRequest(tx: Db, requestId: number) {
 /** 提交后、退回后由提单人修改（整单替换明细），改完回到待审核 */
 export async function updateRequest(deps: Deps, requestId: number, raw: unknown, actor: Actor, ip?: string) {
   const input = parse(BodyInput, raw);
+  const { draftKey } = parse(DraftRef, raw);
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const r = await lockRequest(tx, requestId);
@@ -393,6 +399,8 @@ export async function updateRequest(deps: Deps, requestId: number, raw: unknown,
              submitted_at = now(), approvable_on = ${approvableOn}, updated_at = now()
       WHERE id = ${requestId}`;
     await logApproval(tx, 'purchase_request', requestId, r.status === 'returned' ? 'submit' : 'revise', actor.id);
+    // 改好提交了：这张需求单的修改草稿（自己的）关掉
+    await closeDraftsOnSubmit(tx, actor.id, { draftKey, requestId });
   });
   await writeAudit(deps.sql, { staffId: actor.id, action: 'purchase_request', targetType: 'purchase_request', targetId: requestId, detail: { action: 'update' }, ip });
   return getRequest(deps.sql, actor, requestId, deps.config.timezone);
@@ -413,6 +421,7 @@ export async function actOnRequest(deps: Deps, requestId: number, action: 'appro
           throw conflict('CUTOFF_LOCKED', `这张需求单是截单以后提交的，今天不能审核通过，${r.approvableOn} 起可以通过（可以先退回或定为不采购）`, { approvableOn: r.approvableOn });
         }
         await tx`UPDATE purchase_requests SET status = 'approved', reviewed_by = ${actor.id}, reviewed_at = now(), reason = NULL, updated_at = now() WHERE id = ${requestId}`;
+        await closeDraftsOfRequest(tx, requestId);
         return logApproval(tx, 'purchase_request', requestId, 'approve', actor.id);
       case 'return':
         if (!can(actor, 'request.review')) throw forbidden('当前账号不能审核需求单');
@@ -425,12 +434,14 @@ export async function actOnRequest(deps: Deps, requestId: number, action: 'appro
         if (r.status === 'rejected') return;
         if (r.status !== 'submitted' && r.status !== 'returned') throw conflict('INVALID_STATE', '只有待审核或退回的需求单可以定为不采购');
         await tx`UPDATE purchase_requests SET status = 'rejected', reviewed_by = ${actor.id}, reviewed_at = now(), reason = ${reason}, updated_at = now() WHERE id = ${requestId}`;
+        await closeDraftsOfRequest(tx, requestId);
         return logApproval(tx, 'purchase_request', requestId, 'cancel', actor.id, `不采购：${reason}`);
       case 'cancel':
         if (r.requesterId !== actor.id && actor.role !== 'owner') throw forbidden('只能撤回自己提的需求单');
         if (r.status === 'cancelled') return;
         if (r.status !== 'submitted' && r.status !== 'returned') throw conflict('INVALID_STATE', '需求单已结束审核，不能撤回');
         await tx`UPDATE purchase_requests SET status = 'cancelled', reason = ${reason}, updated_at = now() WHERE id = ${requestId}`;
+        await closeDraftsOfRequest(tx, requestId);
         return logApproval(tx, 'purchase_request', requestId, 'cancel', actor.id, reason);
     }
   });
@@ -488,8 +499,8 @@ export async function requestChecks(db: Db) {
     WHERE po.status <> 'cancelled' AND r.status <> 'approved'
     UNION ALL
     SELECT r.doc_no, '新产品「' || l.name || '」没有链接或图片' FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
-    -- 集采导入的不要求链接和图片（8.0.1 CG06）
-    WHERE l.material_id IS NULL AND r.source = 'form'
+    -- 集采导入的不要求链接和图片（8.0.1 CG06）；部门表格导入的（sheet）只收物料档案里的，之后在页面上改成新产品的照样要
+    WHERE l.material_id IS NULL AND r.source <> 'import'
       AND (l.link = '' OR NOT EXISTS (SELECT 1 FROM purchase_request_line_images i WHERE i.request_line_id = l.id))`;
   const [n] = await db<{ requests: number; images: number; bytes: number }[]>`
     SELECT (SELECT count(*)::int FROM purchase_requests) AS requests, (SELECT count(*)::int FROM erp_images) AS images,
@@ -650,7 +661,8 @@ export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
   });
   app.get('/api/erp/images/:id', { preHandler: guardAny('request.create', 'request.review', 'inventory.read', 'expense.read') }, async (req, reply) => {
     const imageId = docId(req);
-    // 数据隔离（v0.7.30，A9）：只有「部门申购」的账号只能看自己上传的、本部门与自己提的需求单里的图片（编号是连续的，不能靠猜）
+    // 数据隔离（v0.7.30，A9）：只有「部门申购」的账号只能看自己上传的、本部门与自己提的需求单里的图片（编号是连续的，不能靠猜）；
+    // 自己草稿里的图片也能看（供应链二次整改 03：同一张图别人先传过时，草稿恢复也要看得到）
     if (!can(req.actor, 'request.review') && !can(req.actor, 'inventory.read') && !can(req.actor, 'expense.read')) {
       const me = await myContext(sql, req.actor);
       const [mine] = await sql<{ ok: boolean }[]>`
@@ -659,7 +671,8 @@ export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
           AND (i.created_by = ${req.actor.id} OR EXISTS (
             SELECT 1 FROM purchase_request_line_images li JOIN purchase_request_lines l ON l.id = li.request_line_id
             JOIN purchase_requests r ON r.id = l.request_id
-            WHERE li.image_id = i.id AND (r.requester_id = ${req.actor.id} OR r.department_id = ${me.departmentId ?? 0})))`;
+            WHERE li.image_id = i.id AND (r.requester_id = ${req.actor.id} OR r.department_id = ${me.departmentId ?? 0}))
+            OR EXISTS (SELECT 1 FROM erp_drafts d WHERE d.staff_id = ${req.actor.id} AND d.closed_at IS NULL AND i.id = ANY(d.image_ids)))`;
       if (!mine) throw notFound('图片不存在');
     }
     // 合同扫描件不经这里给（v0.7.31 迁移 079）：只经合同的接口看，要「查看合同」、合同模块开着

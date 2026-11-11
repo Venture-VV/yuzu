@@ -101,8 +101,8 @@ export interface PurchaseRequestSummary {
   approvableOn: string | null;
   /** 截单后提交、今天还不能通过 */
   lockedToday: boolean;
-  /** 填单的还是集采导入的（06） */
-  source: 'form' | 'import';
+  /** 填单的、集采导入的（06），还是部门表格导入的（供应链二次整改 02） */
+  source: 'form' | 'import' | 'sheet';
   lineCount: number;
   /** 前几行的名称 */
   summary: string;
@@ -211,4 +211,76 @@ export interface RequestImportResult {
   import: { id: number; fileName: string; rowCount: number; requestCount: number; createdAt: string; createdByName: string };
   requests: { id: number; docNo: string; department: string; priority: RequestPriority; needBy: string | null; lineCount: number }[];
   replayed: boolean;
+}
+
+// ───────────────────────── 草稿箱（供应链二次整改 03，docs/ERP_ROUND2.md） ─────────────────────────
+
+/** 填单页每隔多少秒自动存一次草稿 */
+export const DRAFT_AUTOSAVE_SECONDS = 30;
+/** 草稿多少天没再保存就自动清理 */
+export const DRAFT_KEEP_DAYS = 30;
+/** 每人最多几份草稿 */
+export const DRAFT_MAX_PER_STAFF = 20;
+/** 草稿里各栏最多多少个字（比提交时宽：草稿不按提交的规则核对，页面上填到哪存到哪） */
+export const DRAFT_LIMITS = { name: 80, purpose: 40, qty: 30, unit: 20, refPrice: 30, link: 600, details: 300, lineNote: 200, note: 300 } as const;
+
+/** 草稿里的一行：就是填单页上的一行 */
+export interface RequestDraftLine {
+  kind: 'material' | 'new';
+  materialId: number | null;
+  name: string;
+  purpose: string;
+  qty: string;
+  unit: string;
+  refPrice: string;
+  link: string;
+  details: string;
+  note: string;
+  images: ImageRef[];
+}
+
+export interface RequestDraftBody {
+  departmentId: number | null;
+  needBy: string;
+  priority: RequestPriority;
+  note: string;
+  lines: RequestDraftLine[];
+}
+
+export interface RequestDraftSummary {
+  /** 草稿编号（页面生成的 UUID） */
+  key: string;
+  /** 修改哪张需求单的草稿；新提的为空 */
+  request: { id: number; docNo: string } | null;
+  departmentName: string | null;
+  /** 前几行的名称 */
+  title: string;
+  lineCount: number;
+  /** 版本号：保存时带上，对不上说明在别处改过 */
+  rev: number;
+  createdAt: string;
+  updatedAt: string;
+  /** 什么时候过期（最后一次保存之后 DRAFT_KEEP_DAYS 天） */
+  expiresAt: string;
+}
+
+export interface RequestDraft extends RequestDraftSummary {
+  body: RequestDraftBody;
+}
+
+export interface RequestDraftsList {
+  drafts: RequestDraftSummary[];
+  max: number;
+  keepDays: number;
+}
+
+/** 保存草稿时发的一行（图片只发编号） */
+export type RequestDraftLineInput = Omit<RequestDraftLine, 'images'> & { imageIds: number[] };
+export interface RequestDraftSaveInput {
+  /** 看到的版本；第一次保存是 0 */
+  rev: number;
+  /** 这一次保存的编号：没收到回复、再发一次的同一次保存只算一次 */
+  saveId: string;
+  requestId: number | null;
+  body: Omit<RequestDraftBody, 'lines'> & { lines: RequestDraftLineInput[] };
 }
