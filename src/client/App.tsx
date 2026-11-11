@@ -183,6 +183,7 @@ function Home() {
   const erp = useErpAccess();
   const session = useOptionalSession();
   const dining = session?.dining ?? false;
+  if (can('concierge.read') && !can('member.read')) return <Navigate to="/admin/concierge" replace />;
   if (can('member.read')) return <WorkbenchPage />;
   // 「点餐平板」账号（8.0.10）：只能打开点餐页，登录后直接进去
   if (can('emenu.view') && !can('frontdesk.read')) return <Navigate to="/emenu" replace />;

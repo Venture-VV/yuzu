@@ -1,0 +1,6400 @@
+.concierge-workspace {
+  --ink: #193b32;
+  --text: #293d36;
+  --muted: #8a9691;
+  --green: #29795b;
+  --green-dark: #1d654b;
+  --line: #e9ede8;
+  --paper: #f7f8f4;
+  --orange: #ba7a40;
+  --radius: 12px;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+}
+.concierge-workspace * {
+  box-sizing: border-box;
+}
+.concierge-workspace {
+  margin: 0;
+  background: var(--paper);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.concierge-workspace button,
+.concierge-workspace input,
+.concierge-workspace textarea,
+.concierge-workspace select {
+  font: inherit;
+}
+.concierge-workspace button,
+.concierge-workspace a,
+.concierge-workspace input,
+.concierge-workspace select,
+.concierge-workspace textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+.concierge-workspace button {
+  cursor: pointer;
+}
+.concierge-workspace button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.concierge-workspace button {
+  border: 0;
+  background: none;
+  color: inherit;
+}
+.concierge-workspace a {
+  color: inherit;
+  text-decoration: none;
+}
+.concierge-workspace h1,
+.concierge-workspace h2,
+.concierge-workspace h3,
+.concierge-workspace p {
+  margin: 0;
+}
+.concierge-workspace input,
+.concierge-workspace select,
+.concierge-workspace textarea {
+  color: var(--text);
+}
+.concierge-workspace input:focus,
+.concierge-workspace select:focus,
+.concierge-workspace textarea:focus {
+  outline: 2px solid #8cb8a2;
+  outline-offset: 1px;
+}
+.concierge-workspace button:focus-visible,
+.concierge-workspace a:focus-visible {
+  outline: 2px solid #67a88b;
+  outline-offset: 4px;
+}
+.concierge-workspace svg {
+  flex-shrink: 0;
+}
+.concierge-workspace button svg {
+  vertical-align: middle;
+}
+.concierge-workspace ::selection {
+  background: #dcecdf;
+}
+.concierge-workspace .workspace-shell {
+  min-height: 100vh;
+}
+.concierge-workspace .sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 224px;
+  background: #173b31;
+  color: #a2b8ac;
+  z-index: 30;
+  padding: 32px 18px 0;
+  display: flex;
+  flex-direction: column;
+}
+.concierge-workspace .brand {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 0 10px;
+}
+.concierge-workspace .brand-symbol {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 46px;
+  border: 1px solid #7e9a76;
+  border-radius: 11px;
+  color: #dacba4;
+  font-size: 27px;
+  font-family: serif;
+  line-height: 1;
+}
+.concierge-workspace .brand strong {
+  font-size: 18px;
+  letter-spacing: 1px;
+  color: #f4f5e9;
+  font-weight: 600;
+}
+.concierge-workspace .brand small {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 2.6px;
+  color: #9cb2a0;
+  margin-top: 3px;
+}
+.concierge-workspace .store-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 30px 12px 24px;
+  font-size: 12px;
+  color: #c2d0c4;
+}
+.concierge-workspace .store-dot {
+  width: 5px;
+  height: 5px;
+  background: #a7b98c;
+  border-radius: 50%;
+}
+.concierge-workspace .store-state {
+  font-size: 11px;
+  color: #88a696;
+  background: #294b3e;
+  padding: 3px 6px;
+  border-radius: 4px;
+  margin-left: auto;
+}
+.concierge-workspace .nav-caption {
+  font-size: 12px;
+  letter-spacing: 1.5px;
+  color: #789889;
+  padding: 0 15px;
+  margin: 0 0 12px;
+}
+.concierge-workspace .nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 47px;
+  border-radius: 7px;
+  padding: 0 15px;
+  gap: 13px;
+  margin-bottom: 7px;
+  color: #abc0b2;
+  text-align: left;
+  font-size: 13px;
+}
+.concierge-workspace .nav-item:hover {
+  background: #214638;
+  color: #fff;
+}
+.concierge-workspace .nav-item.active {
+  color: #f2f4e9;
+  background: #2b5442;
+}
+.concierge-workspace .nav-item.active > svg {
+  color: #d0debc;
+}
+.concierge-workspace .nav-item.active > i {
+  position: absolute;
+  left: -18px;
+  top: 15px;
+  height: 17px;
+  width: 3px;
+  background: #bfcca3;
+  border-radius: 0 3px 3px 0;
+}
+.concierge-workspace .nav-item > b {
+  font-size: 12px;
+  margin-left: auto;
+  color: #dec59e;
+  font-weight: 500;
+  background: #47604a;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.concierge-workspace .nav-divider {
+  height: 1px;
+  background: #355448;
+  margin: 21px 14px;
+}
+.concierge-workspace .sidebar-bottom {
+  margin-top: auto;
+}
+.concierge-workspace .sidebar-note {
+  display: flex;
+  gap: 10px;
+  border-bottom: 1px solid #355448;
+  margin: 30px 9px 0;
+  padding: 18px 0 24px;
+  color: #a5baa8;
+  font-size: 12px;
+}
+.concierge-workspace .sidebar-note svg {
+  color: #a6ba93;
+}
+.concierge-workspace .sidebar-note small {
+  display: block;
+  color: #729784;
+  font-size: 11px;
+  margin-top: 4px;
+}
+.concierge-workspace .current-user {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 23px 11px 25px;
+}
+.concierge-workspace .user-avatar,
+.concierge-workspace .header-avatar {
+  display: grid;
+  place-items: center;
+  background: #d7dcc4;
+  color: #3b5c45;
+  border-radius: 50%;
+  font-size: 13px;
+  width: 34px;
+  height: 34px;
+}
+.concierge-workspace .current-user strong {
+  display: block;
+  color: #dfe7d7;
+  font-size: 12px;
+  font-weight: 500;
+}
+.concierge-workspace .current-user small {
+  display: block;
+  font-size: 11px;
+  margin-top: 3px;
+  color: #819e8b;
+}
+.concierge-workspace .online-dot {
+  width: 6px;
+  height: 6px;
+  background: #8eb08a;
+  border-radius: 50%;
+  margin-left: auto;
+}
+.concierge-workspace .workspace-main {
+  margin-left: 224px;
+}
+.concierge-workspace .topbar {
+  height: 73px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 39px;
+  gap: 20px;
+}
+.concierge-workspace .breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  font-size: 12px;
+  color: #8c9991;
+}
+.concierge-workspace .breadcrumb svg {
+  color: #afbab3;
+}
+.concierge-workspace .breadcrumb strong {
+  color: #3d5649;
+  font-weight: 500;
+}
+.concierge-workspace .topbar-right {
+  display: flex;
+  gap: 22px;
+  align-items: center;
+}
+.concierge-workspace .live-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #83998b;
+}
+.concierge-workspace .live-status i,
+.concierge-workspace .footer-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  background: #84a78e;
+  border-radius: 50%;
+}
+.concierge-workspace .header-avatar {
+  width: 29px;
+  height: 29px;
+  font-size: 12px;
+  background: #f0f2e9;
+  border: 1px solid #dfe4d4;
+}
+.concierge-workspace .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  color: #819087;
+  flex-shrink: 0;
+}
+.concierge-workspace .icon-btn:hover {
+  background: #f1f4ef;
+  color: #2a7453;
+}
+.concierge-workspace .page-content {
+  max-width: 1600px;
+  margin: auto;
+  padding: 34px 39px 18px;
+}
+.concierge-workspace .page-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 27px;
+}
+.concierge-workspace .eyebrow {
+  color: #6a776c;
+  letter-spacing: 2px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+.concierge-workspace .page-heading h1 {
+  font-weight: 600;
+  font-size: 27px;
+  letter-spacing: 0.4px;
+  color: #244536;
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  line-height: 1.4;
+}
+.concierge-workspace .heading-date {
+  font-weight: 400;
+  font-size: 12px;
+  letter-spacing: 0;
+  color: #6c766e;
+}
+.concierge-workspace .page-heading p {
+  font-size: 12px;
+  color: #6c7570;
+  margin-top: 8px;
+}
+.concierge-workspace .heading-actions {
+  display: flex;
+  gap: 10px;
+}
+.concierge-workspace .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 7px;
+  padding: 11px 17px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  line-height: 1.2;
+  min-height: 37px;
+  transition: background 0.15s;
+}
+.concierge-workspace .btn-primary {
+  color: #fff;
+  background: var(--green);
+}
+.concierge-workspace .btn-primary:hover {
+  background: var(--green-dark);
+}
+.concierge-workspace .btn-secondary {
+  background: #fff;
+  border: 1px solid #dfe6dd;
+  color: #536f5c;
+}
+.concierge-workspace .btn-secondary:hover {
+  background: #f2f5ef;
+}
+.concierge-workspace .small-btn {
+  font-size: 12px;
+  padding: 9px 12px;
+  min-height: 32px;
+}
+.concierge-workspace .full-width {
+  width: 100%;
+}
+.concierge-workspace .welcome-strip {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  background: #ecf1e7;
+  border: 1px solid #e2e9dc;
+  border-radius: 9px;
+  padding: 20px 22px;
+  margin-bottom: 24px;
+}
+.concierge-workspace .welcome-mark {
+  background: #dde7d5;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  color: #59795a;
+  width: 43px;
+  height: 43px;
+}
+.concierge-workspace .welcome-strip strong {
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  font-weight: 500;
+  color: #4c674d;
+}
+.concierge-workspace .welcome-strip p {
+  font-size: 12px;
+  color: #6c7767;
+  margin-top: 5px;
+}
+.concierge-workspace .new-system-label {
+  font-size: 11px;
+  color: #6b7862;
+  margin-left: auto;
+  padding: 5px 9px;
+  border: 1px solid #d2ddc9;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.concierge-workspace .stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 26px;
+}
+.concierge-workspace .stat-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 20px 21px 17px;
+  min-width: 0;
+}
+.concierge-workspace .stat-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  font-size: 12px;
+  color: #69776f;
+}
+.concierge-workspace .stat-icon {
+  height: 31px;
+  width: 31px;
+  display: grid;
+  place-items: center;
+  background: #eff5ee;
+  color: #6a9472;
+  border-radius: 8px;
+}
+.concierge-workspace .stat-blue .stat-icon {
+  background: #edf3f3;
+  color: #5c7c78;
+}
+.concierge-workspace .stat-orange .stat-icon {
+  background: #faf1e5;
+  color: #8a6d4a;
+}
+.concierge-workspace .stat-purple .stat-icon {
+  background: #f1eef6;
+  color: #786a89;
+}
+.concierge-workspace .stat-value {
+  font-family: var(--font-sans);
+  color: #2c4c3a;
+  font-size: 28px;
+  letter-spacing: 0.4px;
+  font-weight: 500;
+  margin-top: 12px;
+  white-space: nowrap;
+}
+.concierge-workspace .stat-value small {
+  font-size: 11px;
+  color: #69786c;
+  margin-left: 8px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.concierge-workspace .stat-card p {
+  font-size: 11px;
+  color: #6d756e;
+  margin-top: 10px;
+}
+.concierge-workspace .dashboard-grid {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  gap: 22px;
+  align-items: stretch;
+  margin-bottom: 24px;
+}
+.concierge-workspace .panel {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+  min-width: 0;
+}
+.concierge-workspace .panel-header {
+  min-height: 66px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  padding: 18px 22px;
+  border-bottom: 1px solid #eff2ec;
+}
+.concierge-workspace .panel-header > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.concierge-workspace .panel-header h2 {
+  font-size: 12px;
+  font-weight: 600;
+  color: #36533e;
+  white-space: nowrap;
+}
+.concierge-workspace .section-dot {
+  width: 4px;
+  height: 13px;
+  background: #749879;
+  border-radius: 3px;
+}
+.concierge-workspace .section-dot.orange {
+  background: #c9a576;
+}
+.concierge-workspace .count-tag {
+  font-size: 11px;
+  background: #f0f4eb;
+  color: #6a7a60;
+  border-radius: 4px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+.concierge-workspace .orange-count {
+  background: #fbf2e6;
+  color: #8e6d41;
+}
+.concierge-workspace .text-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #789578;
+  font-size: 12px;
+  padding: 3px 0;
+  white-space: nowrap;
+}
+.concierge-workspace .text-btn:hover {
+  color: #226a4c;
+}
+.concierge-workspace .panel-footer {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  min-height: 42px;
+  background: #fbfcf8;
+  border-top: 1px solid #edf0e8;
+  padding: 12px 21px;
+  font-size: 11px;
+  color: #6c7768;
+}
+.concierge-workspace .empty-state {
+  min-height: 229px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 35px 20px;
+  text-align: center;
+}
+.concierge-workspace .empty-icon {
+  width: 53px;
+  height: 53px;
+  border: 1px solid #e6ecdf;
+  background: #f6f8f2;
+  border-radius: 15px;
+  display: grid;
+  place-items: center;
+  color: #6e7665;
+  margin-bottom: 15px;
+}
+.concierge-workspace .empty-state h3 {
+  font-size: 12px;
+  font-weight: 500;
+  color: #7c917e;
+}
+.concierge-workspace .empty-state p {
+  font-size: 12px;
+  color: #6d766c;
+  margin-top: 7px;
+  max-width: 290px;
+  line-height: 1.8;
+}
+.concierge-workspace .empty-state .btn {
+  margin-top: 20px;
+  font-size: 12px;
+  min-height: 31px;
+  padding: 9px 13px;
+}
+.concierge-workspace .followup-panel {
+  display: flex;
+  flex-direction: column;
+}
+.concierge-workspace .followup-panel .empty-state {
+  flex: 1;
+  min-height: 214px;
+}
+.concierge-workspace .followup-panel .panel-footer {
+  margin-top: auto;
+}
+.concierge-workspace .table-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+.concierge-workspace .data-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  white-space: nowrap;
+}
+.concierge-workspace .data-table th {
+  font-size: 11px;
+  font-weight: 400;
+  color: #6c7769;
+  background: #fafbf7;
+  padding: 13px 22px;
+  border-bottom: 1px solid #eef1e9;
+}
+.concierge-workspace .data-table td {
+  padding: 17px 22px;
+  font-size: 12px;
+  border-bottom: 1px solid #f0f2ec;
+  color: #6e8471;
+}
+.concierge-workspace .data-table tr:last-child td {
+  border-bottom: 0;
+}
+.concierge-workspace .data-table tbody tr:hover {
+  background: #fcfdf9;
+}
+.concierge-workspace .text-right {
+  text-align: right;
+}
+.concierge-workspace .member-cell {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  text-align: left;
+  padding: 0;
+  min-width: 120px;
+}
+.concierge-workspace .member-cell strong {
+  display: block;
+  font-size: 12px;
+  color: #4b6651;
+  font-weight: 500;
+}
+.concierge-workspace .member-cell small {
+  display: block;
+  font-size: 11px;
+  color: #6d766b;
+  margin-top: 3px;
+}
+.concierge-workspace .avatar {
+  height: 33px;
+  width: 33px;
+  display: grid;
+  place-items: center;
+  background: #edf1e6;
+  color: #6e7a55;
+  font-size: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.concierge-workspace .avatar-1 {
+  background: #f2eadd;
+  color: #827053;
+}
+.concierge-workspace .avatar-2 {
+  background: #e9eef0;
+  color: #647878;
+}
+.concierge-workspace .tier-tag {
+  display: inline-block;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: #f2f4ed;
+  color: #6e785e;
+  font-size: 11px;
+}
+.concierge-workspace .balance-amount {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 500;
+  color: #57765c;
+}
+.concierge-workspace .orange-text {
+  color: #8f6d41 !important;
+}
+.concierge-workspace .cell-sub {
+  display: block;
+  font-size: 10px;
+  color: #6d766c;
+  margin-top: 3px;
+}
+.concierge-workspace .staff-name {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.concierge-workspace .staff-name i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #b8c7ae;
+}
+.concierge-workspace .table-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.concierge-workspace .table-actions .text-btn {
+  font-size: 11px;
+}
+.concierge-workspace .filter-bar {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 19px 22px;
+  border-bottom: 1px solid #eff2eb;
+}
+.concierge-workspace .search-field {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #e4e9de;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #6b7769;
+  max-width: 330px;
+  flex: 1;
+  background: #fff;
+}
+.concierge-workspace .search-field input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  padding: 0;
+  outline: none;
+}
+.concierge-workspace .search-field input:focus {
+  outline: none;
+}
+.concierge-workspace .search-field input::placeholder {
+  color: #6d766a;
+}
+.concierge-workspace .search-field button {
+  padding: 0;
+  color: #6e766a;
+}
+.concierge-workspace .filter-selects {
+  display: flex;
+  gap: 9px;
+}
+.concierge-workspace .filter-selects select {
+  font-size: 11px;
+  border: 1px solid #e4e9de;
+  border-radius: 6px;
+  padding: 8px 25px 8px 10px;
+  background: #fff;
+  color: #6c7865;
+  max-width: 165px;
+}
+.concierge-workspace .table-footer {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #6c7769;
+  padding: 17px 22px;
+  border-top: 1px solid #edf0e8;
+}
+.concierge-workspace .table-footer span {
+  color: #6e756c;
+}
+.concierge-workspace .workspace-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 28px;
+  color: #6f756d;
+  font-size: 10px;
+}
+.concierge-workspace .workspace-footer > span:first-child {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.concierge-workspace .footer-dot {
+  width: 4px;
+  height: 4px;
+  background: #b0c0a4;
+}
+.concierge-workspace .info-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid #e5ebdd;
+  background: #f0f4eb;
+  color: #6b7962;
+  padding: 13px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.8;
+  margin-bottom: 20px;
+}
+.concierge-workspace .info-strip svg {
+  margin-top: 1px;
+}
+.concierge-workspace .info-strip.warm {
+  background: #faf4ea;
+  color: #866f4f;
+  border-color: #f0e4d3;
+}
+.concierge-workspace .appointment-list {
+  padding: 7px 22px;
+}
+.concierge-workspace .appointment-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 19px 0;
+  border-bottom: 1px solid #f0f2ec;
+  min-width: 0;
+}
+.concierge-workspace .appointment-row:last-child {
+  border-bottom: 0;
+}
+.concierge-workspace .appointment-time {
+  width: 45px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+.concierge-workspace .appointment-time strong {
+  font-size: 12px;
+  font-weight: 500;
+  color: #61765b;
+}
+.concierge-workspace .appointment-time small {
+  font-size: 11px;
+  color: #6e7669;
+  margin-top: 3px;
+}
+.concierge-workspace .appointment-line {
+  height: 39px;
+  width: 2px;
+  background: #dbe6d2;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.concierge-workspace .appointment-info {
+  flex: 1;
+  min-width: 0;
+}
+.concierge-workspace .name-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #526b4d;
+  text-align: left;
+  padding: 0;
+}
+.concierge-workspace .name-button .muted {
+  font-size: 11px;
+  font-weight: 400;
+}
+.concierge-workspace .appointment-info p {
+  font-size: 12px;
+  color: #6d7861;
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+.concierge-workspace .appointment-info > small {
+  font-size: 10px;
+  color: #6e7667;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.concierge-workspace .appointment-tail {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.concierge-workspace .status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: #f0f2ed;
+  color: #6d7668;
+  white-space: nowrap;
+}
+.concierge-workspace .status i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.concierge-workspace .status-green {
+  color: #729474;
+  background: #edf4e9;
+}
+.concierge-workspace .status-orange {
+  color: #886f47;
+  background: #fcf6e7;
+}
+.concierge-workspace .status-gray {
+  color: #6e7669;
+  background: #f2f4ef;
+}
+.concierge-workspace .date-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.concierge-workspace .date-controls input {
+  border: 1px solid #e4e9de;
+  border-radius: 5px;
+  padding: 5px 8px;
+  font-size: 12px;
+  min-width: 0;
+}
+.concierge-workspace .attention-list {
+  padding: 2px 21px;
+}
+.concierge-workspace .attention-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 18px 0;
+  border-bottom: 1px solid #f0f2e9;
+}
+.concierge-workspace .attention-item:last-child {
+  border: 0;
+}
+.concierge-workspace .attention-item > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.concierge-workspace .attention-item strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: #5a704f;
+}
+.concierge-workspace .attention-item small {
+  display: block;
+  font-size: 10px;
+  color: #6f7667;
+  margin-top: 4px;
+}
+.concierge-workspace .attention-amount {
+  font-size: 12px;
+  color: #896e4b;
+  text-align: right;
+  white-space: nowrap;
+}
+.concierge-workspace .attention-amount small {
+  font-size: 10px;
+  color: #807056;
+}
+.concierge-workspace .segments-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-bottom: 22px;
+}
+.concierge-workspace .segment-card {
+  background: #fff;
+  border: 1px solid #e7ecdf;
+  border-radius: 10px;
+  padding: 24px;
+  text-align: left;
+  position: relative;
+}
+.concierge-workspace .segment-card.selected {
+  border-color: #86ab83;
+  background: #f7faf3;
+  box-shadow: 0 0 0 1px #86ab83;
+}
+.concierge-workspace .segment-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  background: #edf3e7;
+  color: #677c5e;
+  display: grid;
+  place-items: center;
+  margin-bottom: 16px;
+}
+.concierge-workspace .segment-card.orange .segment-icon {
+  background: #fbf2e3;
+  color: #876e4e;
+}
+.concierge-workspace .segment-card.gray .segment-icon {
+  background: #f0f2ed;
+  color: #6f756b;
+}
+.concierge-workspace .segment-count {
+  position: absolute;
+  right: 24px;
+  top: 25px;
+  color: #5b7550;
+  font-size: 30px;
+  font-weight: 500;
+}
+.concierge-workspace .segment-count small {
+  font-size: 11px;
+  margin-left: 6px;
+  color: #6e7668;
+}
+.concierge-workspace .segment-card > strong {
+  display: block;
+  font-weight: 500;
+  font-size: 13px;
+  color: #607b53;
+}
+.concierge-workspace .segment-card > p {
+  font-size: 12px;
+  color: #6e7766;
+  margin-top: 6px;
+}
+.concierge-workspace .segment-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #687b5c;
+  margin-top: 21px;
+}
+.concierge-workspace .small {
+  font-size: 11px;
+}
+.concierge-workspace .muted {
+  color: #6d7768;
+}
+.concierge-workspace .truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.concierge-workspace .note-preview {
+  display: block;
+  max-width: 220px;
+}
+.concierge-workspace .self-label {
+  display: inline !important;
+  font-size: 10px !important;
+  color: #6c7864 !important;
+  margin-left: 6px;
+}
+.concierge-workspace .manager-tag {
+  background: #e9f1e5;
+  color: #657e58;
+}
+.concierge-workspace .mobile-menu {
+  display: none;
+}
+.concierge-workspace .alert {
+  padding: 12px 15px;
+  border-radius: 7px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 18px;
+}
+.concierge-workspace .alert-error {
+  background: #fff0ec;
+  border: 1px solid #ecd0c6;
+  color: #a15d48;
+}
+.concierge-workspace .alert > span {
+  flex: 1;
+}
+.concierge-workspace .alert button {
+  margin-left: auto;
+  padding: 0;
+  color: inherit;
+}
+.concierge-workspace .toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 110;
+  background: #eaf3e5;
+  border: 1px solid #d8e8cb;
+  color: #60824e;
+  padding: 12px 20px;
+  border-radius: 8px;
+  box-shadow: 0 6px 30px #203b2514;
+  font-size: 12px;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+.concierge-workspace .drawer-layer,
+.concierge-workspace .modal-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+}
+.concierge-workspace .drawer-scrim,
+.concierge-workspace .modal-scrim {
+  position: absolute;
+  inset: 0;
+  background: #173b314d;
+  backdrop-filter: blur(2px);
+}
+.concierge-workspace .member-drawer {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 540px;
+  max-width: 100%;
+  background: #fff;
+  box-shadow: -15px 0 60px #173b3110;
+  display: flex;
+  flex-direction: column;
+}
+.concierge-workspace .drawer-heading {
+  height: 60px;
+  padding: 16px 25px;
+  border-bottom: 1px solid #edf1e7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #6c7865;
+  flex-shrink: 0;
+}
+.concierge-workspace .drawer-profile {
+  padding: 28px 25px 25px;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-shrink: 0;
+}
+.concierge-workspace .big-avatar {
+  width: 58px;
+  height: 58px;
+  border-radius: 17px;
+  font-size: 23px;
+  color: #697c56;
+}
+.concierge-workspace .drawer-profile h2 {
+  font-size: 22px;
+  font-weight: 500;
+  color: #4c6b3f;
+}
+.concierge-workspace .drawer-profile p {
+  font-size: 12px;
+  color: #6e7763;
+  margin: 4px 0 7px;
+}
+.concierge-workspace .drawer-profile > .btn {
+  margin-left: auto;
+  align-self: flex-start;
+}
+.concierge-workspace .drawer-balance {
+  margin: 0 25px 22px;
+  background: #f3f6ee;
+  border: 1px solid #e8eedf;
+  border-radius: 9px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px;
+}
+.concierge-workspace .drawer-balance small {
+  font-size: 12px;
+  color: #6e7761;
+}
+.concierge-workspace .drawer-balance strong {
+  display: block;
+  margin-top: 7px;
+}
+.concierge-workspace .drawer-balance .balance-amount {
+  font-size: 24px;
+  color: #6a8a51;
+  font-weight: 500;
+}
+.concierge-workspace .drawer-balance p {
+  font-size: 11px;
+  color: #6e7860;
+  margin-top: 6px;
+}
+.concierge-workspace .drawer-tabs {
+  display: flex;
+  gap: 25px;
+  border-bottom: 1px solid #e9efde;
+  padding: 0 25px;
+  flex-shrink: 0;
+}
+.concierge-workspace .drawer-tabs button {
+  font-size: 12px;
+  padding: 12px 0 13px;
+  color: #6e785f;
+  border-bottom: 2px solid transparent;
+}
+.concierge-workspace .drawer-tabs button.selected {
+  color: #628548;
+  border-color: #628548;
+}
+.concierge-workspace .drawer-body {
+  padding: 23px 25px 30px;
+  overflow-y: auto;
+  flex: 1;
+}
+.concierge-workspace .detail-section-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: #6e8955;
+  margin-bottom: 18px;
+}
+.concierge-workspace .detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px 20px;
+  margin: 0 0 30px;
+}
+.concierge-workspace .detail-grid dt {
+  font-size: 11px;
+  color: #6d785e;
+  margin-bottom: 6px;
+}
+.concierge-workspace .detail-grid dd {
+  margin: 0;
+  color: #708b57;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.concierge-workspace .preferences-box {
+  font-size: 12px;
+  line-height: 1.9;
+  background: #fafbf6;
+  border: 1px solid #edf1e4;
+  color: #6d795b;
+  border-radius: 7px;
+  padding: 16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-bottom: 22px;
+}
+.concierge-workspace .detail-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.8;
+  background: #f6f8f0;
+  color: #6d795a;
+  border: 1px solid #e9efdd;
+  padding: 12px 13px;
+  border-radius: 6px;
+  margin: 17px 0;
+}
+.concierge-workspace .detail-notice > svg {
+  margin-top: 2px;
+}
+.concierge-workspace .history-list {
+  margin: 22px 0 0 7px;
+  border-left: 1px solid #e0e9d2;
+  padding-left: 22px;
+}
+.concierge-workspace .history-item {
+  position: relative;
+  padding-bottom: 28px;
+  line-height: 1.8;
+}
+.concierge-workspace .timeline-dot {
+  position: absolute;
+  top: 6px;
+  left: -27px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #a2ba84;
+  border: 2px solid white;
+  box-shadow: 0 0 0 1px #dce6cd;
+}
+.concierge-workspace .history-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+}
+.concierge-workspace .history-top strong {
+  font-size: 12px;
+  color: #789756;
+  font-weight: 500;
+}
+.concierge-workspace .history-top small {
+  color: #6f7663;
+  font-size: 11px;
+}
+.concierge-workspace .history-item p {
+  font-size: 12px;
+  color: #6e7958;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.concierge-workspace .history-item > small {
+  font-size: 11px;
+  color: #6f775f;
+}
+.concierge-workspace .history-note {
+  font-size: 12px;
+  color: #6b7c53;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 7px 0;
+  line-height: 1.9;
+}
+.concierge-workspace .note-form {
+  border: 1px solid #e4ecd7;
+  background: #fbfcf8;
+  border-radius: 8px;
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  margin-bottom: 25px;
+}
+.concierge-workspace .note-form > label {
+  font-size: 12px;
+  color: #6a7d4f;
+}
+.concierge-workspace .note-form textarea,
+.concierge-workspace .field input,
+.concierge-workspace .field select,
+.concierge-workspace .field textarea {
+  width: 100%;
+  border: 1px solid #e1e8d6;
+  background: #fff;
+  border-radius: 6px;
+  padding: 10px 11px;
+  font-size: 12px;
+  color: #607a48;
+  min-width: 0;
+}
+.concierge-workspace .note-form textarea::placeholder,
+.concierge-workspace .field input::placeholder,
+.concierge-workspace .field textarea::placeholder {
+  color: #6f7760;
+}
+.concierge-workspace .note-form .btn {
+  align-self: flex-end;
+}
+.concierge-workspace .field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+.concierge-workspace .field > span {
+  color: #6b7a5a;
+  font-size: 12px;
+}
+.concierge-workspace .field small {
+  font-size: 10px;
+  color: #6f7760;
+  line-height: 1.6;
+}
+.concierge-workspace .modal-layer {
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.concierge-workspace .modal-box {
+  position: relative;
+  width: 610px;
+  max-width: 100%;
+  max-height: calc(100dvh - 48px);
+  background: #fff;
+  border: 1px solid #eef2e4;
+  box-shadow: 0 20px 90px #173b3126;
+  border-radius: 13px;
+  display: flex;
+  flex-direction: column;
+}
+.concierge-workspace .modal-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 23px 27px;
+  border-bottom: 1px solid #e9efdc;
+  flex-shrink: 0;
+}
+.concierge-workspace .modal-heading h2 {
+  font-size: 20px;
+  color: #587b3d;
+  font-weight: 500;
+}
+.concierge-workspace .modal-heading .eyebrow {
+  font-size: 10px;
+  color: #6d795d;
+  margin-bottom: 5px;
+}
+.concierge-workspace .modal-box form {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.concierge-workspace .modal-content {
+  padding: 22px 27px 25px;
+  overflow-y: auto;
+}
+.concierge-workspace .form-intro {
+  font-size: 12px;
+  color: #6d785d;
+  margin-bottom: 24px;
+  line-height: 1.9;
+}
+.concierge-workspace .form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 17px 19px;
+}
+.concierge-workspace .field-wide {
+  grid-column: 1/-1;
+}
+.concierge-workspace .form-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #6b7c51;
+  border-top: 1px solid #edf2e1;
+  padding-top: 21px;
+  margin: 25px 0 18px;
+}
+.concierge-workspace .form-section-title > span {
+  font-size: 11px;
+  color: #6e785f;
+  margin-left: auto;
+}
+.concierge-workspace .modal-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 27px;
+  border-top: 1px solid #e8efda;
+  flex-shrink: 0;
+}
+.concierge-workspace .modal-footer > span {
+  margin-right: auto;
+  color: #6f7760;
+}
+.concierge-workspace .modal-footer .btn {
+  min-width: 68px;
+}
+.concierge-workspace .form-member-summary {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  background: #f6f9ef;
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 24px;
+}
+.concierge-workspace .form-member-summary strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: #697e4b;
+}
+.concierge-workspace .form-member-summary small {
+  display: block;
+  font-size: 12px;
+  color: #6e7958;
+  margin-top: 5px;
+}
+.concierge-workspace .amount-input {
+  display: flex;
+  align-items: center;
+  border: 1px solid #e1e8d6;
+  border-radius: 6px;
+  padding: 0 12px;
+  gap: 10px;
+}
+.concierge-workspace .amount-input > span {
+  font-size: 20px;
+  color: #6d7a56;
+}
+.concierge-workspace .amount-input input {
+  border: 0 !important;
+  font-size: 25px !important;
+  padding: 13px 0 !important;
+}
+.concierge-workspace .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 0;
+  font-size: 12px;
+  color: #6c7b54;
+}
+.concierge-workspace .checkbox-label input {
+  width: 15px;
+  height: 15px;
+  accent-color: #7b9d54;
+}
+.concierge-workspace .role-explainer {
+  background: #f9fbf4;
+  border-radius: 7px;
+  padding: 16px;
+  margin-top: 25px;
+}
+.concierge-workspace .role-explainer strong {
+  font-size: 12px;
+  color: #6a7d4f;
+  font-weight: 500;
+}
+.concierge-workspace .role-explainer p {
+  font-size: 12px;
+  color: #6e7958;
+  line-height: 1.9;
+  margin: 5px 0 13px;
+}
+.concierge-workspace .role-explainer p:last-child {
+  margin-bottom: 0;
+}
+.concierge-workspace .spin,
+.concierge-workspace .spinning > svg {
+  animation: rotate 1s linear infinite;
+}
+@keyframes rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (min-width: 1450px) {
+  .concierge-workspace .page-content {
+    padding-top: 41px;
+  }
+  .concierge-workspace .stats-grid {
+    gap: 22px;
+  }
+  .concierge-workspace .stat-card {
+    padding: 24px;
+  }
+  .concierge-workspace .stat-value {
+    font-size: 33px;
+  }
+  .concierge-workspace .dashboard-grid {
+    grid-template-columns: 1.35fr 1fr;
+  }
+  .concierge-workspace .empty-state {
+    min-height: 250px;
+  }
+}
+@media (max-width: 1200px) {
+  .concierge-workspace .sidebar {
+    width: 202px;
+    padding-left: 13px;
+    padding-right: 13px;
+  }
+  .concierge-workspace .nav-item.active > i {
+    left: -13px;
+  }
+  .concierge-workspace .workspace-main {
+    margin-left: 202px;
+  }
+  .concierge-workspace .topbar {
+    padding: 0 27px;
+  }
+  .concierge-workspace .page-content {
+    padding: 29px 27px 18px;
+  }
+  .concierge-workspace .stat-card {
+    padding: 17px 16px;
+  }
+  .concierge-workspace .stat-value {
+    font-size: 23px;
+  }
+  .concierge-workspace .stat-card p {
+    font-size: 10px;
+  }
+  .concierge-workspace .dashboard-grid {
+    gap: 17px;
+  }
+  .concierge-workspace .data-table th,
+  .concierge-workspace .data-table td {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .concierge-workspace .heading-date {
+    display: none;
+  }
+  .concierge-workspace .appointment-list {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .concierge-workspace .appointment-row {
+    gap: 10px;
+  }
+  .concierge-workspace .appointment-tail {
+    gap: 3px;
+  }
+  .concierge-workspace .welcome-strip {
+    padding: 17px;
+  }
+  .concierge-workspace .welcome-strip p {
+    font-size: 11px;
+  }
+  .concierge-workspace .new-system-label {
+    font-size: 10px;
+  }
+}
+@media (max-width: 1000px) {
+  .concierge-workspace .sidebar {
+    width: 186px;
+    padding-top: 26px;
+  }
+  .concierge-workspace .workspace-main {
+    margin-left: 186px;
+  }
+  .concierge-workspace .brand {
+    padding: 0 6px;
+    gap: 9px;
+  }
+  .concierge-workspace .brand strong {
+    font-size: 16px;
+  }
+  .concierge-workspace .brand small {
+    font-size: 9px;
+    letter-spacing: 2px;
+  }
+  .concierge-workspace .brand-symbol {
+    width: 35px;
+    height: 39px;
+    font-size: 24px;
+  }
+  .concierge-workspace .nav-item {
+    gap: 10px;
+    font-size: 12px;
+    padding-left: 12px;
+  }
+  .concierge-workspace .store-label {
+    margin-left: 8px;
+    margin-right: 8px;
+    font-size: 12px;
+  }
+  .concierge-workspace .store-state {
+    font-size: 10px;
+  }
+  .concierge-workspace .page-content {
+    padding: 25px 23px 17px;
+  }
+  .concierge-workspace .topbar {
+    padding: 0 23px;
+    height: 65px;
+  }
+  .concierge-workspace .page-heading h1 {
+    font-size: 24px;
+  }
+  .concierge-workspace .page-heading p {
+    font-size: 12px;
+  }
+  .concierge-workspace .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .concierge-workspace .stat-value {
+    font-size: 28px;
+  }
+  .concierge-workspace .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+  .concierge-workspace .dashboard-grid .empty-state {
+    min-height: 200px;
+  }
+  .concierge-workspace .new-system-label {
+    display: none;
+  }
+  .concierge-workspace .segments-grid {
+    gap: 12px;
+  }
+  .concierge-workspace .segment-card {
+    padding: 19px 17px;
+  }
+  .concierge-workspace .segment-count {
+    right: 17px;
+    font-size: 25px;
+  }
+  .concierge-workspace .segment-card > strong {
+    font-size: 12px;
+  }
+  .concierge-workspace .segment-card > p {
+    font-size: 11px;
+  }
+  .concierge-workspace .filter-bar {
+    flex-wrap: wrap;
+  }
+  .concierge-workspace .search-field {
+    max-width: none;
+  }
+  .concierge-workspace .panel-header {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .concierge-workspace .panel-header .small {
+    font-size: 10px;
+  }
+}
+@media (max-width: 760px) {
+  .concierge-workspace .sidebar {
+    transform: translateX(-100%);
+    width: 230px;
+    transition: transform 0.2s;
+    z-index: 62;
+    padding-top: 30px;
+  }
+  .concierge-workspace .sidebar-open {
+    transform: translateX(0);
+  }
+  .concierge-workspace .sidebar-scrim {
+    position: fixed;
+    inset: 0;
+    background: #173b315c;
+    z-index: 61;
+  }
+  .concierge-workspace .workspace-main {
+    margin-left: 0;
+  }
+  .concierge-workspace .topbar {
+    height: 61px;
+    padding: 0 19px;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: #ffffffed;
+    backdrop-filter: blur(8px);
+  }
+  .concierge-workspace .mobile-menu {
+    display: inline-flex;
+    margin-left: -6px;
+    margin-right: 0;
+  }
+  .concierge-workspace .breadcrumb {
+    gap: 8px;
+    font-size: 12px;
+  }
+  .concierge-workspace .topbar-right {
+    gap: 15px;
+  }
+  .concierge-workspace .live-status {
+    font-size: 11px;
+  }
+  .concierge-workspace .header-avatar {
+    width: 27px;
+    height: 27px;
+  }
+  .concierge-workspace .page-content {
+    padding: 25px 19px 18px;
+  }
+  .concierge-workspace .page-heading {
+    align-items: flex-start;
+    margin-bottom: 22px;
+    gap: 14px;
+  }
+  .concierge-workspace .page-heading h1 {
+    font-size: 24px;
+  }
+  .concierge-workspace .eyebrow {
+    font-size: 10px;
+    letter-spacing: 1.6px;
+  }
+  .concierge-workspace .page-heading p {
+    max-width: 250px;
+    line-height: 1.8;
+    font-size: 12px;
+  }
+  .concierge-workspace .heading-actions {
+    gap: 7px;
+    padding-top: 19px;
+  }
+  .concierge-workspace .heading-actions .btn {
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+  .concierge-workspace .heading-actions .btn-secondary {
+    padding: 10px;
+    min-width: 34px;
+  }
+  .concierge-workspace .heading-actions .btn-secondary svg {
+    width: 14px;
+  }
+  .concierge-workspace .welcome-strip {
+    padding: 15px 13px;
+    gap: 11px;
+    margin-bottom: 19px;
+  }
+  .concierge-workspace .welcome-mark {
+    width: 37px;
+    height: 37px;
+    flex-shrink: 0;
+  }
+  .concierge-workspace .welcome-mark svg {
+    width: 19px;
+  }
+  .concierge-workspace .welcome-strip strong {
+    font-size: 12px;
+  }
+  .concierge-workspace .welcome-strip p {
+    font-size: 11px;
+    line-height: 1.9;
+  }
+  .concierge-workspace .stats-grid {
+    gap: 11px;
+    margin-bottom: 19px;
+  }
+  .concierge-workspace .stat-card {
+    padding: 16px 14px;
+    border-radius: 8px;
+  }
+  .concierge-workspace .stat-top {
+    font-size: 11px;
+  }
+  .concierge-workspace .stat-icon {
+    width: 27px;
+    height: 27px;
+  }
+  .concierge-workspace .stat-icon svg {
+    width: 15px;
+  }
+  .concierge-workspace .stat-value {
+    font-size: 25px;
+    margin-top: 9px;
+  }
+  .concierge-workspace .stat-value small {
+    font-size: 10px;
+    margin-left: 5px;
+  }
+  .concierge-workspace .stat-card p {
+    font-size: 10px;
+    line-height: 1.7;
+    margin-top: 7px;
+    min-height: 13px;
+  }
+  .concierge-workspace .dashboard-grid {
+    margin-bottom: 19px;
+    gap: 19px;
+  }
+  .concierge-workspace .panel {
+    border-radius: 9px;
+  }
+  .concierge-workspace .panel-header {
+    min-height: 60px;
+    padding: 17px 16px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .concierge-workspace .panel-header h2 {
+    font-size: 12px;
+  }
+  .concierge-workspace .panel-header .small {
+    font-size: 10px;
+  }
+  .concierge-workspace .panel-header > span.small {
+    width: 100%;
+  }
+  .concierge-workspace .panel-header .text-btn {
+    font-size: 11px;
+  }
+  .concierge-workspace .empty-state {
+    min-height: 225px;
+    padding: 30px 17px;
+  }
+  .concierge-workspace .empty-state h3 {
+    font-size: 12px;
+  }
+  .concierge-workspace .empty-state p {
+    font-size: 12px;
+  }
+  .concierge-workspace .empty-state .btn {
+    font-size: 12px;
+  }
+  .concierge-workspace .panel-footer {
+    padding: 12px 16px;
+    font-size: 10px;
+    line-height: 1.8;
+  }
+  .concierge-workspace .table-scroll {
+    scrollbar-width: thin;
+  }
+  .concierge-workspace .data-table th {
+    font-size: 11px;
+    padding: 12px 15px;
+  }
+  .concierge-workspace .data-table td {
+    padding: 16px 15px;
+  }
+  .concierge-workspace .data-table .member-cell {
+    min-width: 125px;
+  }
+  .concierge-workspace .data-table .balance-amount {
+    font-size: 12px;
+  }
+  .concierge-workspace .filter-bar {
+    padding: 15px 16px;
+    gap: 11px;
+  }
+  .concierge-workspace .search-field {
+    flex-basis: 100%;
+    padding: 9px 10px;
+  }
+  .concierge-workspace .search-field input {
+    font-size: 12px;
+  }
+  .concierge-workspace .filter-selects {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 9px;
+  }
+  .concierge-workspace .filter-selects select {
+    max-width: 100%;
+    width: 100%;
+    font-size: 12px;
+    padding: 9px;
+  }
+  .concierge-workspace .table-footer {
+    padding: 14px 16px;
+    font-size: 10px;
+    gap: 12px;
+  }
+  .concierge-workspace .segments-grid {
+    gap: 9px;
+    margin-bottom: 17px;
+  }
+  .concierge-workspace .segment-card {
+    padding: 15px 12px;
+    border-radius: 8px;
+  }
+  .concierge-workspace .segment-icon {
+    width: 31px;
+    height: 31px;
+    margin-bottom: 12px;
+  }
+  .concierge-workspace .segment-icon svg {
+    width: 17px;
+  }
+  .concierge-workspace .segment-count {
+    top: 13px;
+    right: 12px;
+    font-size: 22px;
+  }
+  .concierge-workspace .segment-count small {
+    font-size: 9px;
+    margin-left: 3px;
+  }
+  .concierge-workspace .segment-card > strong {
+    font-size: 12px;
+  }
+  .concierge-workspace .segment-card > p {
+    font-size: 10px;
+    line-height: 1.8;
+    min-height: 28px;
+  }
+  .concierge-workspace .segment-link {
+    font-size: 10px;
+    margin-top: 14px;
+    gap: 3px;
+  }
+  .concierge-workspace .segment-link svg {
+    width: 12px;
+  }
+  .concierge-workspace .info-strip {
+    font-size: 11px;
+    padding: 12px 13px;
+    gap: 8px;
+    margin-bottom: 17px;
+  }
+  .concierge-workspace .info-strip svg {
+    width: 15px;
+  }
+  .concierge-workspace .appointment-list {
+    padding: 3px 16px;
+  }
+  .concierge-workspace .appointment-row {
+    gap: 10px;
+    padding: 18px 0;
+  }
+  .concierge-workspace .appointment-tail {
+    gap: 3px;
+  }
+  .concierge-workspace .appointment-header {
+    flex-wrap: wrap;
+  }
+  .concierge-workspace .date-controls {
+    gap: 5px;
+    margin-left: auto;
+  }
+  .concierge-workspace .date-controls input {
+    font-size: 12px;
+    width: 123px;
+    padding: 6px;
+  }
+  .concierge-workspace .date-controls > .text-btn {
+    font-size: 12px;
+    margin-left: 5px;
+  }
+  .concierge-workspace .date-controls .icon-btn {
+    width: 24px;
+  }
+  .concierge-workspace .workspace-footer {
+    font-size: 9px;
+    gap: 12px;
+    margin-top: 24px;
+    align-items: flex-start;
+  }
+  .concierge-workspace .toast {
+    width: max-content;
+    max-width: calc(100% - 30px);
+    font-size: 12px;
+    padding: 12px 15px;
+    top: 12px;
+  }
+  .concierge-workspace .member-drawer {
+    width: 100%;
+  }
+  .concierge-workspace .drawer-heading {
+    padding: 15px 20px;
+  }
+  .concierge-workspace .drawer-profile {
+    padding: 25px 20px 22px;
+    gap: 12px;
+  }
+  .concierge-workspace .drawer-balance {
+    margin: 0 20px 20px;
+    padding: 17px;
+  }
+  .concierge-workspace .drawer-tabs {
+    padding: 0 20px;
+    gap: 25px;
+  }
+  .concierge-workspace .drawer-tabs button {
+    font-size: 12px;
+  }
+  .concierge-workspace .drawer-body {
+    padding: 22px 20px;
+  }
+  .concierge-workspace .drawer-profile h2 {
+    font-size: 23px;
+  }
+  .concierge-workspace .big-avatar {
+    width: 53px;
+    height: 53px;
+  }
+  .concierge-workspace .modal-layer {
+    padding: 13px;
+  }
+  .concierge-workspace .modal-box {
+    max-height: calc(100dvh - 26px);
+    border-radius: 12px;
+  }
+  .concierge-workspace .modal-heading {
+    padding: 20px;
+  }
+  .concierge-workspace .modal-heading h2 {
+    font-size: 19px;
+  }
+  .concierge-workspace .modal-content {
+    padding: 20px;
+  }
+  .concierge-workspace .form-grid {
+    gap: 15px 13px;
+  }
+  .concierge-workspace .field input,
+  .concierge-workspace .field select,
+  .concierge-workspace .field textarea {
+    font-size: 12px;
+    min-height: 41px;
+    padding: 10px;
+  }
+  .concierge-workspace .field > span {
+    font-size: 12px;
+  }
+  .concierge-workspace .field small {
+    font-size: 11px;
+  }
+  .concierge-workspace .form-intro {
+    font-size: 12px;
+    margin-bottom: 20px;
+  }
+  .concierge-workspace .modal-footer {
+    padding: 16px 20px;
+    gap: 8px;
+  }
+  .concierge-workspace .modal-footer > span {
+    font-size: 10px;
+    max-width: 120px;
+  }
+  .concierge-workspace .modal-footer .btn {
+    min-width: 60px;
+    padding: 11px 13px;
+  }
+  .concierge-workspace .detail-notice {
+    font-size: 12px;
+  }
+  .concierge-workspace .note-form textarea {
+    font-size: 12px;
+  }
+  .concierge-workspace .note-form .btn {
+    font-size: 12px;
+  }
+  .concierge-workspace .note-form .field input {
+    font-size: 12px;
+  }
+  .concierge-workspace .detail-grid dt {
+    font-size: 12px;
+  }
+  .concierge-workspace .detail-grid dd {
+    font-size: 12px;
+  }
+  .concierge-workspace .preferences-box,
+  .concierge-workspace .history-note {
+    font-size: 12px;
+  }
+  .concierge-workspace .history-top strong {
+    font-size: 12px;
+  }
+}
+@media (max-width: 400px) {
+  .concierge-workspace .page-content {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  .concierge-workspace .page-heading h1 {
+    font-size: 22px;
+  }
+  .concierge-workspace .page-heading p {
+    max-width: 200px;
+    font-size: 11px;
+  }
+  .concierge-workspace .heading-actions .btn {
+    font-size: 11px;
+    padding: 10px;
+  }
+  .concierge-workspace .heading-actions .btn-secondary {
+    font-size: 0;
+    gap: 0;
+  }
+  .concierge-workspace .heading-actions .btn-secondary svg {
+    width: 15px;
+  }
+  .concierge-workspace .stat-card {
+    padding: 14px 12px;
+  }
+  .concierge-workspace .stat-value {
+    font-size: 22px;
+  }
+  .concierge-workspace .stat-value small {
+    font-size: 9px;
+  }
+  .concierge-workspace .stat-top {
+    font-size: 10px;
+  }
+  .concierge-workspace .stat-icon {
+    width: 23px;
+    height: 23px;
+  }
+  .concierge-workspace .stat-card p {
+    font-size: 9px;
+  }
+  .concierge-workspace .segments-grid {
+    gap: 7px;
+  }
+  .concierge-workspace .segment-card {
+    padding: 13px 10px;
+  }
+  .concierge-workspace .segment-count {
+    right: 10px;
+    font-size: 20px;
+  }
+  .concierge-workspace .segment-card > strong {
+    font-size: 11px;
+  }
+  .concierge-workspace .segment-card > p {
+    font-size: 9px;
+  }
+  .concierge-workspace .segment-link {
+    font-size: 9px;
+  }
+  .concierge-workspace .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .concierge-workspace .field-wide {
+    grid-column: auto;
+  }
+  .concierge-workspace .drawer-profile > .btn {
+    padding: 8px;
+    font-size: 11px;
+  }
+  .concierge-workspace .drawer-profile {
+    gap: 10px;
+  }
+  .concierge-workspace .drawer-profile h2 {
+    font-size: 20px;
+  }
+  .concierge-workspace .modal-footer > span {
+    font-size: 9px;
+    max-width: 95px;
+  }
+  .concierge-workspace .modal-heading,
+  .concierge-workspace .modal-content,
+  .concierge-workspace .modal-footer {
+    padding-left: 17px;
+    padding-right: 17px;
+  }
+  .concierge-workspace .breadcrumb {
+    font-size: 11px;
+  }
+  .concierge-workspace .topbar-right {
+    gap: 10px;
+  }
+  .concierge-workspace .topbar-right .live-status {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .concierge-workspace * {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Expanded member workspace */
+.concierge-workspace .sidebar {
+  padding-top: 26px;
+}
+.concierge-workspace .nav-item {
+  height: 42px;
+  margin-bottom: 4px;
+}
+.concierge-workspace .nav-divider {
+  margin-top: 16px;
+  margin-bottom: 15px;
+}
+.concierge-workspace .sidebar-note {
+  margin-top: 15px;
+  padding-bottom: 17px;
+}
+.concierge-workspace .current-user {
+  padding-top: 18px;
+  padding-bottom: 20px;
+}
+.concierge-workspace .page-content {
+  padding-top: 30px;
+}
+.concierge-workspace .brand strong {
+  letter-spacing: 0.5px;
+}
+.concierge-workspace .stat-card {
+  display: block;
+  text-align: left;
+}
+.concierge-workspace .clickable-stat {
+  transition:
+    transform 0.15s,
+    border-color 0.15s;
+}
+.concierge-workspace .clickable-stat:hover {
+  transform: translateY(-2px);
+  border-color: #bfd1bc;
+}
+.concierge-workspace .clickable-stat p {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.concierge-workspace .clickable-stat .stat-top {
+  font-size: 12px;
+}
+.concierge-workspace .stat-value {
+  font-variant-numeric: tabular-nums;
+}
+.concierge-workspace .quick-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 23px;
+}
+.concierge-workspace .quick-action {
+  display: flex;
+  align-items: center;
+  text-align: left;
+  gap: 12px;
+  padding: 17px 15px;
+  background: #fff;
+  border: 1px solid #e4eadf;
+  border-radius: 9px;
+}
+.concierge-workspace .quick-action:hover {
+  background: #f4f8f0;
+  border-color: #c6d6bd;
+}
+.concierge-workspace .quick-action > span {
+  width: 35px;
+  height: 37px;
+  background: #f0f5eb;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: #7b9c66;
+  flex-shrink: 0;
+}
+.concierge-workspace .quick-action > div {
+  min-width: 0;
+  flex: 1;
+}
+.concierge-workspace .quick-action strong {
+  display: block;
+  font-size: 12px;
+  color: #57764a;
+  font-weight: 500;
+}
+.concierge-workspace .quick-action small {
+  display: block;
+  font-size: 10px;
+  color: #87977a;
+  margin-top: 4px;
+}
+.concierge-workspace .quick-action > svg {
+  color: #a0b18d;
+}
+.concierge-workspace .member-code {
+  font-style: normal;
+  font-size: 9px;
+  color: #91a47f;
+  font-weight: 400;
+  margin-left: 7px;
+  font-variant-numeric: tabular-nums;
+}
+.concierge-workspace .code-label {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  letter-spacing: 1px;
+  font-weight: 500;
+  color: #66854e;
+}
+.concierge-workspace .record-actor {
+  margin-left: 9px;
+  padding-left: 9px;
+  border-left: 1px solid #dde7d2;
+  font-size: 9px;
+}
+.concierge-workspace .row-mini-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+  justify-content: flex-end;
+}
+.concierge-workspace .appointment-tail {
+  display: block;
+  text-align: right;
+}
+.concierge-workspace .appointment-time {
+  align-self: flex-start;
+  padding-top: 2px;
+}
+.concierge-workspace .appointment-info > small {
+  flex-wrap: wrap;
+  line-height: 1.6;
+}
+.concierge-workspace .compact-task-list {
+  padding: 4px 20px;
+}
+.concierge-workspace .compact-task {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 18px 0;
+  text-align: left;
+  border-bottom: 1px solid #ecf1e5;
+}
+.concierge-workspace .compact-task:last-child {
+  border: 0;
+}
+.concierge-workspace .compact-task > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.concierge-workspace .compact-task strong {
+  display: block;
+  color: #6d8758;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 290px;
+}
+.concierge-workspace .compact-task small {
+  display: block;
+  color: #8f9f7b;
+  font-size: 10px;
+  margin-top: 5px;
+}
+.concierge-workspace .task-dot {
+  width: 6px;
+  height: 6px;
+  background: #bdcfa5;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.concierge-workspace .sectiontabs {
+  display: flex;
+  gap: 25px;
+  padding: 0 22px;
+  border-bottom: 1px solid #e7eddf;
+  overflow-x: auto;
+  white-space: nowrap;
+  background: #fff;
+}
+.concierge-workspace .sectiontabs > button {
+  padding: 17px 0 15px;
+  border-bottom: 2px solid transparent;
+  color: #8c9d7b;
+  font-size: 12px;
+  font-weight: 500;
+}
+.concierge-workspace .sectiontabs > button.selected {
+  color: #537e3c;
+  border-bottom-color: #537e3c;
+}
+.concierge-workspace .sectiontabs button > span {
+  font-size: 10px;
+  margin-left: 7px;
+  background: #edf3e5;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.concierge-workspace .admin-tabs {
+  border: 1px solid #e4ecdc;
+  border-radius: 8px;
+  margin-bottom: 22px;
+  gap: 28px;
+}
+.concierge-workspace .record-list {
+  padding: 0 20px;
+}
+.concierge-workspace .record-card {
+  padding: 20px 0;
+  border-bottom: 1px solid #edf2e5;
+}
+.concierge-workspace .record-card:last-child {
+  border: 0;
+}
+.concierge-workspace .record-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.concierge-workspace .record-card > p {
+  font-size: 11px;
+  color: #879a70;
+  margin: 9px 0 0;
+  line-height: 1.8;
+}
+.concierge-workspace .record-copy {
+  font-size: 12px;
+  color: #6f8758;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-top: 9px;
+}
+.concierge-workspace .record-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.concierge-workspace .record-footer > small {
+  font-size: 10px;
+  color: #92a37e;
+  margin-right: auto;
+}
+.concierge-workspace .record-footer .text-btn {
+  font-size: 11px;
+}
+.concierge-workspace .task-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.concierge-workspace .task-content {
+  color: #5b7948;
+}
+.concierge-workspace .task-card.overdue .task-title > .tier-tag {
+  background: #fbf0df;
+  color: #b18a54;
+}
+.concierge-workspace .task-toolbar {
+  padding: 18px 20px;
+  border-bottom: 1px solid #edf1e5;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  flex-wrap: wrap;
+}
+.concierge-workspace .task-toolbar > select,
+.concierge-workspace .timeline-controls select,
+.concierge-workspace .timeline-controls input,
+.concierge-workspace .audit-filters > select,
+.concierge-workspace .audit-filters > input {
+  background: #fff;
+  border: 1px solid #dde7d3;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #778f5e;
+  font-size: 11px;
+}
+.concierge-workspace .task-toolbar .search-field {
+  max-width: none;
+  min-width: 220px;
+}
+.concierge-workspace .segmented {
+  display: flex;
+  border: 1px solid #e0e9d6;
+  padding: 3px;
+  border-radius: 6px;
+  background: #f8faf4;
+  flex-shrink: 0;
+}
+.concierge-workspace .segmented > button {
+  padding: 6px 11px;
+  font-size: 11px;
+  border-radius: 4px;
+  color: #8b9f74;
+}
+.concierge-workspace .segmented > button.active {
+  background: #e5efd9;
+  color: #668b44;
+}
+.concierge-workspace .audit-stream {
+  padding: 0 22px;
+}
+.concierge-workspace .audit-stream-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  border-bottom: 1px solid #eef3e5;
+  padding: 17px 0;
+}
+.concierge-workspace .audit-stream-row:last-child {
+  border: 0;
+}
+.concierge-workspace .audit-stream-row > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.concierge-workspace .audit-stream-row strong {
+  display: block;
+  font-size: 12px;
+  color: #6c8c50;
+  font-weight: 500;
+}
+.concierge-workspace .audit-stream-row em {
+  font-style: normal;
+  font-weight: 400;
+  color: #94a77c;
+  font-size: 11px;
+  margin-left: 12px;
+}
+.concierge-workspace .audit-stream-row small {
+  display: block;
+  font-size: 10px;
+  color: #93a67b;
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.concierge-workspace .audit-stream-row time {
+  font-size: 10px;
+  color: #9dae85;
+  white-space: nowrap;
+}
+.concierge-workspace .audit-stream-row > svg {
+  color: #b2c39c;
+}
+.concierge-workspace .audit-filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 20px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #edf1e5;
+}
+.concierge-workspace .audit-filters > span {
+  font-size: 10px;
+  color: #97aa7c;
+}
+.concierge-workspace .audit-filters .search-field {
+  max-width: none;
+  min-width: 200px;
+}
+.concierge-workspace .audit-diff {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.concierge-workspace .audit-diff h3 {
+  font-size: 12px;
+  color: #6e8a52;
+  margin-bottom: 10px;
+}
+.concierge-workspace .audit-diff pre {
+  font:
+    10px/1.9 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  background: #f7faf2;
+  border: 1px solid #e3ecd7;
+  border-radius: 7px;
+  padding: 14px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+  max-height: 420px;
+  color: #7b9460;
+}
+.concierge-workspace .team-actions {
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.concierge-workspace .staff-login-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: #7c9b5e;
+  padding: 0 0 18px;
+}
+.concierge-workspace .backup-content {
+  padding: 40px 30px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.concierge-workspace .backup-symbol {
+  background: #eff5e5;
+  border: 1px solid #dce9cd;
+  border-radius: 18px;
+  color: #94b171;
+  display: grid;
+  place-items: center;
+  width: 79px;
+  height: 79px;
+  margin-bottom: 23px;
+}
+.concierge-workspace .backup-content h3 {
+  font-weight: 500;
+  font-size: 20px;
+  color: #668849;
+}
+.concierge-workspace .backup-content > p {
+  font-size: 12px;
+  color: #879f6b;
+  max-width: 580px;
+  line-height: 2;
+  margin-top: 14px;
+}
+.concierge-workspace .backup-facts {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 23px;
+  margin: 26px 0 27px;
+  flex-wrap: wrap;
+}
+.concierge-workspace .backup-facts > span {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 11px;
+  color: #8aa56a;
+}
+.concierge-workspace .backup-content > small {
+  font-size: 10px;
+  line-height: 1.9;
+  color: #99ad7b;
+  margin-top: 17px;
+  max-width: 490px;
+}
+.concierge-workspace .backup-secondary {
+  border-top: 1px solid #e9efdd;
+  margin-top: 33px;
+  padding-top: 24px;
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.concierge-workspace .mobile-bottom-nav {
+  display: none;
+}
+.concierge-workspace .sync-failed {
+  color: #b58b53 !important;
+}
+.concierge-workspace .sync-failed i {
+  background: #cfaa73 !important;
+}
+.concierge-workspace .logout-button {
+  width: 24px;
+  height: 27px;
+}
+.concierge-workspace .topbar-right form {
+  margin: 0;
+}
+.concierge-workspace .balance-stats .stat-value {
+  font-size: 23px;
+}
+.concierge-workspace .member-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  padding: 0 25px 22px;
+}
+.concierge-workspace .member-quick-actions button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  color: #819c61;
+  padding: 12px 3px;
+  background: #f8fbf3;
+  border: 1px solid #e6eedb;
+  border-radius: 7px;
+}
+.concierge-workspace .member-quick-actions button:hover {
+  background: #eaf3df;
+}
+.concierge-workspace .timeline-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 23px;
+  flex-wrap: wrap;
+}
+.concierge-workspace .timeline-controls input {
+  max-width: 160px;
+}
+.concierge-workspace .timeline-controls > span {
+  font-size: 10px;
+  color: #97aa7e;
+  margin-left: auto;
+}
+.concierge-workspace .timeline-money {
+  font-size: 15px;
+  color: #71994b;
+  margin: 8px 0;
+  font-variant-numeric: tabular-nums;
+}
+.concierge-workspace .history-top strong .tier-tag {
+  margin-right: 4px;
+}
+.concierge-workspace .history-note {
+  white-space: pre-wrap;
+}
+.concierge-workspace .note-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 13px;
+}
+.concierge-workspace .note-form-actions .text-btn {
+  font-size: 10px;
+}
+.concierge-workspace .form-subtitle {
+  font-size: 11px;
+  color: #8ea574;
+  margin-top: 6px;
+  line-height: 1.7;
+}
+.concierge-workspace .form-history {
+  font-size: 10px;
+  color: #91a979;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  margin-top: 18px;
+}
+.concierge-workspace .optional-fields {
+  border-top: 1px solid #e8efdc;
+  margin-top: 23px;
+  padding-top: 16px;
+}
+.concierge-workspace .optional-fields summary {
+  font-size: 12px;
+  color: #839f63;
+  cursor: pointer;
+  padding: 4px 0;
+  list-style-position: inside;
+}
+.concierge-workspace .optional-fields[open] summary {
+  margin-bottom: 17px;
+}
+.concierge-workspace .optional-fields > .field {
+  margin-top: 14px;
+}
+.concierge-workspace .modal-wide {
+  width: 1080px;
+}
+.concierge-workspace .modal-wide .modal-content {
+  padding-top: 20px;
+}
+.concierge-workspace .capture-content {
+  display: flex;
+  flex-direction: column;
+  gap: 19px;
+}
+.concierge-workspace .capture-content > .detail-notice {
+  margin: 0;
+}
+.concierge-workspace .capture-upload {
+  border: 1px dashed #cadcb4;
+  background: #f8fbf2;
+  border-radius: 10px;
+  padding: 29px 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  color: #9db980;
+}
+.concierge-workspace .capture-upload h3 {
+  font-size: 15px;
+  font-weight: 500;
+  color: #6d9151;
+  margin-top: 13px;
+}
+.concierge-workspace .capture-upload p {
+  font-size: 11px;
+  line-height: 1.9;
+  color: #90a974;
+  max-width: 380px;
+  margin-top: 8px;
+}
+.concierge-workspace .capture-buttons {
+  display: flex;
+  gap: 11px;
+  margin-top: 20px;
+}
+.concierge-workspace .capture-buttons label {
+  cursor: pointer;
+}
+.concierge-workspace .capture-buttons input {
+  display: none;
+}
+.concierge-workspace .capture-previews {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 11px;
+}
+.concierge-workspace .capture-previews > div {
+  position: relative;
+  border: 1px solid #dfebd1;
+  border-radius: 7px;
+  background: #f8fbf3;
+  overflow: hidden;
+}
+.concierge-workspace .capture-previews img {
+  width: 100%;
+  height: 145px;
+  object-fit: contain;
+  display: block;
+  background: #f0f3e9;
+}
+.concierge-workspace .capture-previews span {
+  display: block;
+  font-size: 10px;
+  text-align: center;
+  color: #94ab78;
+  padding: 6px;
+}
+.concierge-workspace .capture-previews button {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+  background: #ffffffe8;
+  display: grid;
+  place-items: center;
+  color: #6c8554;
+}
+.concierge-workspace .ocr-progress {
+  padding: 17px;
+  border: 1px solid #dce9ce;
+  background: #f3f8ec;
+  border-radius: 8px;
+}
+.concierge-workspace .ocr-progress > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #6b9050;
+  font-size: 12px;
+}
+.concierge-workspace .ocr-progress strong {
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.concierge-workspace .ocr-progress progress {
+  width: 100%;
+  height: 6px;
+  accent-color: #88a965;
+  border: 0;
+  margin: 13px 0 7px;
+  display: block;
+}
+.concierge-workspace .ocr-progress small {
+  display: block;
+  font-size: 10px;
+  color: #96ac7b;
+  line-height: 1.8;
+}
+.concierge-workspace .receipt-review-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 26px;
+  align-items: start;
+}
+.concierge-workspace .receipt-image-pane {
+  position: sticky;
+  top: 0;
+  min-width: 0;
+}
+.concierge-workspace .receipt-image-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.concierge-workspace .receipt-image-header strong {
+  font-size: 12px;
+  color: #759658;
+  font-weight: 500;
+}
+.concierge-workspace .receipt-image-header span {
+  font-size: 10px;
+  color: #9cb580;
+}
+.concierge-workspace .receipt-original {
+  height: 490px;
+  background: #edf0e7;
+  border: 1px solid #dce7cf;
+  border-radius: 7px;
+  overflow: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 10px;
+}
+.concierge-workspace .receipt-original img {
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+  transform-origin: center center;
+  transition: transform 0.15s;
+}
+.concierge-workspace .receipt-original.zoomed {
+  display: block;
+}
+.concierge-workspace .receipt-original.zoomed img {
+  max-width: none;
+  width: 160%;
+  height: auto;
+}
+.concierge-workspace .receipt-image-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.concierge-workspace .receipt-image-tools .text-btn {
+  font-size: 9px;
+}
+.concierge-workspace .ocr-text-details {
+  border-top: 1px solid #e4ecd7;
+  margin-top: 17px;
+  padding-top: 12px;
+}
+.concierge-workspace .ocr-text-details summary {
+  font-size: 11px;
+  color: #91a975;
+  cursor: pointer;
+}
+.concierge-workspace .ocr-text-details pre {
+  font: 10px/1.9 var(--font-sans);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #91a975;
+  background: #f8fbf3;
+  padding: 12px;
+  max-height: 250px;
+  overflow: auto;
+  border-radius: 6px;
+}
+.concierge-workspace .receipt-fields {
+  min-width: 0;
+}
+.concierge-workspace .receipt-fields fieldset {
+  border: 0;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+}
+.concierge-workspace .receipt-fields fieldset:disabled {
+  opacity: 0.72;
+}
+.concierge-workspace .receipt-section-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding-bottom: 15px;
+  margin-bottom: 17px;
+  border-bottom: 1px solid #e8efdb;
+}
+.concierge-workspace .receipt-section-title > span {
+  background: #eaf3de;
+  border-radius: 5px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  color: #88a967;
+}
+.concierge-workspace .receipt-section-title h3 {
+  font-size: 13px;
+  font-weight: 500;
+  color: #71964f;
+}
+.concierge-workspace .receipt-section-title:not(:first-child) {
+  margin-top: 25px;
+}
+.concierge-workspace .receipt-fields .field input,
+.concierge-workspace .receipt-fields .field select,
+.concierge-workspace .receipt-fields .field textarea {
+  font-size: 12px;
+}
+.concierge-workspace .payment-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 17px;
+}
+.concierge-workspace .payment-input-row {
+  background: #f7faf1;
+  border: 1px solid #e0ead3;
+  border-radius: 7px;
+  padding: 12px;
+}
+.concierge-workspace .payment-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+  margin-bottom: 9px;
+  font-size: 10px;
+  color: #8ba96a;
+}
+.concierge-workspace .payment-row-top .text-btn {
+  font-size: 10px;
+}
+.concierge-workspace .payment-row-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+.concierge-workspace .payment-row-grid > select,
+.concierge-workspace .payment-row-grid > input,
+.concierge-workspace .payment-member {
+  width: 100%;
+  border: 1px solid #dce7cd;
+  border-radius: 5px;
+  padding: 8px 9px;
+  background: #fff;
+  font-size: 11px;
+  color: #789a58;
+  min-width: 0;
+}
+.concierge-workspace .payment-member {
+  margin-top: 10px;
+}
+.concierge-workspace .payment-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.concierge-workspace .payment-summary > span {
+  font-size: 10px;
+}
+.concierge-workspace .payment-summary .text-btn {
+  font-size: 10px;
+}
+.concierge-workspace .green-text {
+  color: #779c55 !important;
+}
+.concierge-workspace .danger-text {
+  color: #b48962 !important;
+}
+.concierge-workspace .receipt-confirm-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 15px;
+  background: #f1f7e8;
+  border: 1px solid #dcebc8;
+  border-radius: 7px;
+  color: #7a9b58;
+  font-size: 11px;
+  line-height: 1.9;
+  margin-top: 20px;
+}
+.concierge-workspace .receipt-confirm-check input {
+  margin-top: 5px;
+  accent-color: #7f9f58;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+.concierge-workspace .no-receipt-image {
+  height: 300px;
+  background: #f5f8ef;
+  border: 1px dashed #cddcbd;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #a7bf8a;
+  padding: 30px;
+  text-align: center;
+}
+.concierge-workspace .no-receipt-image p {
+  font-size: 11px;
+  color: #9ab27b;
+  line-height: 1.9;
+  margin-top: 15px;
+  max-width: 250px;
+}
+.concierge-workspace .receipt-editor-content {
+  max-height: calc(100dvh - 235px);
+}
+@media (max-height: 800px) and (min-width: 761px) {
+  .concierge-workspace .sidebar {
+    padding-top: 20px;
+  }
+  .concierge-workspace .store-label {
+    margin-top: 20px;
+    margin-bottom: 18px;
+  }
+  .concierge-workspace .nav-item {
+    height: 37px;
+    margin-bottom: 3px;
+  }
+  .concierge-workspace .nav-caption {
+    margin-bottom: 8px;
+  }
+  .concierge-workspace .nav-divider {
+    margin: 12px;
+  }
+  .concierge-workspace .sidebar-note {
+    display: none;
+  }
+  .concierge-workspace .current-user {
+    padding: 15px 10px;
+  }
+  .concierge-workspace .brand-symbol {
+    height: 39px;
+  }
+  .concierge-workspace .brand strong {
+    font-size: 16px;
+  }
+}
+@media (max-width: 1200px) {
+  .concierge-workspace .quick-actions {
+    gap: 11px;
+  }
+  .concierge-workspace .quick-action {
+    padding: 15px 12px;
+    gap: 9px;
+  }
+  .concierge-workspace .quick-action > span {
+    width: 31px;
+    height: 33px;
+  }
+  .concierge-workspace .quick-action strong {
+    font-size: 11px;
+  }
+  .concierge-workspace .quick-action small {
+    font-size: 9px;
+  }
+  .concierge-workspace .record-actor {
+    font-size: 9px;
+  }
+  .concierge-workspace .receipt-original {
+    height: 430px;
+  }
+  .concierge-workspace .modal-wide {
+    width: 1000px;
+  }
+}
+@media (max-width: 1000px) {
+  .concierge-workspace .quick-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .concierge-workspace .quick-action {
+    padding: 16px;
+  }
+  .concierge-workspace .quick-action strong {
+    font-size: 12px;
+  }
+  .concierge-workspace .quick-action small {
+    font-size: 10px;
+  }
+  .concierge-workspace .admin-tabs {
+    gap: 22px;
+  }
+  .concierge-workspace .receipt-review-grid {
+    gap: 19px;
+  }
+  .concierge-workspace .receipt-original {
+    height: 400px;
+  }
+  .concierge-workspace .receipt-fields .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .concierge-workspace .receipt-fields .field-wide {
+    grid-column: auto;
+  }
+  .concierge-workspace .receipt-image-tools {
+    gap: 5px;
+  }
+  .concierge-workspace .receipt-image-tools .text-btn {
+    font-size: 9px;
+  }
+  .concierge-workspace .balance-stats .stat-value {
+    font-size: 22px;
+  }
+}
+@media (max-width: 760px) {
+  .concierge-workspace .page-content {
+    padding-bottom: 100px;
+  }
+  .concierge-workspace .topbar-right {
+    gap: 10px;
+  }
+  .concierge-workspace .topbar-right .header-avatar {
+    display: none;
+  }
+  .concierge-workspace .topbar-right .live-status {
+    display: flex;
+    font-size: 9px;
+  }
+  .concierge-workspace .topbar-right .logout-button {
+    width: 23px;
+  }
+  .concierge-workspace .topbar-right .icon-btn {
+    width: 26px;
+  }
+  .concierge-workspace .mobile-bottom-nav {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 25;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    background: #fffffff5;
+    border-top: 1px solid #dfe8d5;
+    backdrop-filter: blur(12px);
+    padding: 8px 15px max(9px, env(safe-area-inset-bottom));
+    box-shadow: 0 -4px 20px #34512706;
+  }
+  .concierge-workspace .mobile-bottom-nav button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 4px;
+    color: #94aa7e;
+    position: relative;
+    padding: 4px 0;
+    font-size: 10px;
+    min-height: 45px;
+  }
+  .concierge-workspace .mobile-bottom-nav button.active {
+    color: #467b3c;
+  }
+  .concierge-workspace .mobile-bottom-nav button.active:before {
+    position: absolute;
+    content: "";
+    width: 40px;
+    height: 29px;
+    border-radius: 12px;
+    background: #ecf5e3;
+    top: -1px;
+    z-index: -1;
+  }
+  .concierge-workspace .mobile-bottom-nav i {
+    position: absolute;
+    width: 5px;
+    height: 5px;
+    background: #c8a36c;
+    border-radius: 50%;
+    top: 2px;
+    right: calc(50% - 18px);
+  }
+  .concierge-workspace .quick-actions {
+    gap: 10px;
+    margin-bottom: 19px;
+  }
+  .concierge-workspace .quick-action {
+    padding: 15px 12px;
+    gap: 10px;
+  }
+  .concierge-workspace .quick-action strong {
+    font-size: 12px;
+  }
+  .concierge-workspace .quick-action small {
+    font-size: 10px;
+    line-height: 1.6;
+  }
+  .concierge-workspace .quick-action > span {
+    width: 31px;
+    height: 35px;
+  }
+  .concierge-workspace .quick-action > svg {
+    width: 12px;
+  }
+  .concierge-workspace .welcome-strip {
+    margin-bottom: 16px;
+  }
+  .concierge-workspace .welcome-strip strong {
+    font-size: 12px;
+  }
+  .concierge-workspace .welcome-strip p {
+    font-size: 10px;
+  }
+  .concierge-workspace .clickable-stat .stat-top {
+    font-size: 11px;
+  }
+  .concierge-workspace .clickable-stat p {
+    font-size: 9px;
+    line-height: 1.7;
+  }
+  .concierge-workspace .stat-value {
+    font-size: 29px;
+  }
+  .concierge-workspace .stat-value small {
+    font-size: 10px;
+  }
+  .concierge-workspace .stats-grid {
+    gap: 11px;
+  }
+  .concierge-workspace .compact-task strong {
+    max-width: 190px;
+    font-size: 12px;
+  }
+  .concierge-workspace .compact-task small {
+    font-size: 10px;
+  }
+  .concierge-workspace .compact-task-list {
+    padding-left: 17px;
+    padding-right: 17px;
+  }
+  .concierge-workspace .compact-task .status {
+    font-size: 10px;
+  }
+  .concierge-workspace .record-actor {
+    font-size: 9px;
+    margin-left: 5px;
+    padding-left: 5px;
+  }
+  .concierge-workspace .appointment-info > small {
+    font-size: 10px;
+  }
+  .concierge-workspace .appointment-info p {
+    font-size: 11px;
+  }
+  .concierge-workspace .name-button {
+    font-size: 12px;
+  }
+  .concierge-workspace .name-button .muted {
+    font-size: 10px;
+  }
+  .concierge-workspace .appointment-time strong {
+    font-size: 13px;
+  }
+  .concierge-workspace .appointment-time small {
+    font-size: 10px;
+  }
+  .concierge-workspace .status {
+    font-size: 10px;
+  }
+  .concierge-workspace .row-mini-actions {
+    gap: 5px;
+    margin-top: 7px;
+  }
+  .concierge-workspace .row-mini-actions .text-btn {
+    font-size: 10px;
+  }
+  .concierge-workspace .row-mini-actions .icon-btn {
+    width: 24px;
+    height: 24px;
+  }
+  .concierge-workspace .record-list {
+    padding: 0 17px;
+  }
+  .concierge-workspace .record-card {
+    padding: 19px 0;
+  }
+  .concierge-workspace .record-card > p {
+    font-size: 11px;
+  }
+  .concierge-workspace .record-copy {
+    font-size: 12px;
+  }
+  .concierge-workspace .record-footer {
+    gap: 12px;
+    margin-top: 13px;
+  }
+  .concierge-workspace .record-footer .text-btn {
+    font-size: 11px;
+  }
+  .concierge-workspace .record-footer > small {
+    font-size: 10px;
+  }
+  .concierge-workspace .record-heading .name-button {
+    font-size: 13px;
+  }
+  .concierge-workspace .sectiontabs {
+    padding-left: 17px;
+    padding-right: 17px;
+    gap: 25px;
+  }
+  .concierge-workspace .sectiontabs > button {
+    font-size: 12px;
+    padding-top: 16px;
+    padding-bottom: 14px;
+  }
+  .concierge-workspace .task-toolbar {
+    padding: 15px 17px;
+    gap: 10px;
+  }
+  .concierge-workspace .task-toolbar > select {
+    font-size: 11px;
+    padding: 9px 8px;
+    flex: 1;
+    min-width: 125px;
+  }
+  .concierge-workspace .task-toolbar .search-field {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+  .concierge-workspace .segmented > button {
+    padding: 7px 10px;
+    font-size: 11px;
+  }
+  .concierge-workspace .task-title .tier-tag {
+    font-size: 10px;
+  }
+  .concierge-workspace .admin-tabs {
+    padding: 0 16px;
+    gap: 23px;
+    margin-bottom: 18px;
+    border-radius: 8px;
+  }
+  .concierge-workspace .admin-tabs > button {
+    font-size: 11px;
+  }
+  .concierge-workspace .audit-filters {
+    padding: 15px 17px;
+    gap: 8px;
+  }
+  .concierge-workspace .audit-filters > select {
+    width: calc(50% - 4px);
+    font-size: 11px;
+  }
+  .concierge-workspace .audit-filters > input {
+    width: calc(50% - 14px);
+    font-size: 10px;
+  }
+  .concierge-workspace .audit-filters > .search-field {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+  .concierge-workspace .audit-stream {
+    padding: 0 17px;
+  }
+  .concierge-workspace .audit-stream-row {
+    gap: 10px;
+    padding: 16px 0;
+  }
+  .concierge-workspace .audit-stream-row strong {
+    font-size: 11px;
+  }
+  .concierge-workspace .audit-stream-row em {
+    font-size: 10px;
+    margin-left: 8px;
+  }
+  .concierge-workspace .audit-stream-row small {
+    font-size: 9px;
+  }
+  .concierge-workspace .audit-stream-row time {
+    font-size: 9px;
+  }
+  .concierge-workspace .audit-stream-row > .avatar {
+    width: 29px;
+    height: 29px;
+  }
+  .concierge-workspace .audit-diff {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .concierge-workspace .audit-diff pre {
+    font-size: 10px;
+    max-height: 300px;
+  }
+  .concierge-workspace .backup-content {
+    padding: 30px 22px;
+  }
+  .concierge-workspace .backup-content h3 {
+    font-size: 18px;
+  }
+  .concierge-workspace .backup-content > p {
+    font-size: 12px;
+  }
+  .concierge-workspace .backup-facts {
+    gap: 12px 17px;
+  }
+  .concierge-workspace .backup-facts > span {
+    font-size: 10px;
+  }
+  .concierge-workspace .backup-content > small {
+    font-size: 10px;
+  }
+  .concierge-workspace .backup-secondary {
+    gap: 12px;
+  }
+  .concierge-workspace .backup-secondary .btn {
+    font-size: 11px;
+  }
+  .concierge-workspace .staff-login-link {
+    font-size: 11px;
+  }
+  .concierge-workspace .balance-stats .stat-value {
+    font-size: 21px;
+  }
+  .concierge-workspace .balance-stats .stat-top {
+    font-size: 11px;
+  }
+  .concierge-workspace .member-code {
+    font-size: 10px;
+  }
+  .concierge-workspace .data-table .member-cell strong {
+    font-size: 12px;
+  }
+  .concierge-workspace .data-table .member-cell small {
+    font-size: 10px;
+  }
+  .concierge-workspace .data-table td {
+    font-size: 11px;
+  }
+  .concierge-workspace .data-table th {
+    font-size: 10px;
+  }
+  .concierge-workspace .data-table .cell-sub {
+    font-size: 10px;
+  }
+  .concierge-workspace .data-table .tier-tag {
+    font-size: 10px;
+  }
+  .concierge-workspace .data-table .text-btn {
+    font-size: 10px;
+  }
+  .concierge-workspace .data-table .balance-amount {
+    font-size: 12px;
+  }
+  .concierge-workspace .member-quick-actions {
+    padding: 0 20px 21px;
+    gap: 7px;
+  }
+  .concierge-workspace .member-quick-actions button {
+    padding: 12px 3px;
+    font-size: 10px;
+  }
+  .concierge-workspace .drawer-balance .balance-amount {
+    font-size: 25px;
+  }
+  .concierge-workspace .drawer-profile p {
+    font-size: 12px;
+  }
+  .concierge-workspace .drawer-profile .tier-tag {
+    font-size: 10px;
+  }
+  .concierge-workspace .drawer-tabs {
+    gap: 23px;
+  }
+  .concierge-workspace .drawer-tabs button {
+    font-size: 11px;
+  }
+  .concierge-workspace .timeline-controls select,
+  .concierge-workspace .timeline-controls input {
+    font-size: 11px;
+    padding: 8px;
+  }
+  .concierge-workspace .timeline-controls input {
+    max-width: 145px;
+  }
+  .concierge-workspace .timeline-controls > span {
+    font-size: 10px;
+  }
+  .concierge-workspace .history-top {
+    align-items: flex-start;
+  }
+  .concierge-workspace .history-top strong {
+    font-size: 12px;
+    line-height: 1.8;
+    flex: 1;
+  }
+  .concierge-workspace .history-top small {
+    font-size: 9px;
+    white-space: nowrap;
+    margin-top: 3px;
+  }
+  .concierge-workspace .history-item p {
+    font-size: 11px;
+    line-height: 1.8;
+  }
+  .concierge-workspace .history-item > small {
+    font-size: 10px;
+  }
+  .concierge-workspace .history-note {
+    font-size: 12px;
+  }
+  .concierge-workspace .history-item .text-btn {
+    font-size: 11px;
+  }
+  .concierge-workspace .note-form-actions {
+    flex-wrap: wrap;
+  }
+  .concierge-workspace .note-form-actions .text-btn {
+    font-size: 10px;
+  }
+  .concierge-workspace .note-form-actions .btn {
+    margin-left: auto;
+    font-size: 11px;
+  }
+  .concierge-workspace .detail-grid dt {
+    font-size: 11px;
+  }
+  .concierge-workspace .detail-grid dd {
+    font-size: 12px;
+  }
+  .concierge-workspace .detail-section-title {
+    font-size: 13px;
+  }
+  .concierge-workspace .form-subtitle {
+    font-size: 10px;
+    max-width: 270px;
+  }
+  .concierge-workspace .modal-wide {
+    width: 100%;
+  }
+  .concierge-workspace .receipt-review-grid {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  .concierge-workspace .receipt-image-pane {
+    position: static;
+  }
+  .concierge-workspace .receipt-original {
+    height: 300px;
+    padding: 10px;
+  }
+  .concierge-workspace .receipt-image-tools .text-btn {
+    font-size: 10px;
+  }
+  .concierge-workspace .receipt-image-header strong {
+    font-size: 12px;
+  }
+  .concierge-workspace .receipt-image-header span {
+    font-size: 10px;
+  }
+  .concierge-workspace .receipt-fields .form-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .concierge-workspace .receipt-fields .field-wide {
+    grid-column: 1/-1;
+  }
+  .concierge-workspace .receipt-editor-content {
+    max-height: calc(100dvh - 218px);
+  }
+  .concierge-workspace .receipt-fields .field input,
+  .concierge-workspace .receipt-fields .field select,
+  .concierge-workspace .receipt-fields .field textarea {
+    font-size: 12px;
+  }
+  .concierge-workspace .receipt-section-title h3 {
+    font-size: 13px;
+  }
+  .concierge-workspace .receipt-section-title > span {
+    font-size: 10px;
+  }
+  .concierge-workspace .payment-row-grid > select,
+  .concierge-workspace .payment-row-grid > input,
+  .concierge-workspace .payment-member {
+    font-size: 12px;
+    padding: 10px;
+    min-height: 40px;
+  }
+  .concierge-workspace .payment-row-top {
+    font-size: 11px;
+  }
+  .concierge-workspace .payment-summary > span,
+  .concierge-workspace .payment-summary .text-btn {
+    font-size: 10px;
+  }
+  .concierge-workspace .receipt-confirm-check {
+    font-size: 11px;
+  }
+  .concierge-workspace .form-history {
+    font-size: 10px;
+  }
+  .concierge-workspace .capture-content {
+    gap: 17px;
+  }
+  .concierge-workspace .capture-upload {
+    padding: 24px 17px;
+  }
+  .concierge-workspace .capture-upload h3 {
+    font-size: 15px;
+  }
+  .concierge-workspace .capture-upload p {
+    font-size: 11px;
+  }
+  .concierge-workspace .capture-buttons .btn {
+    font-size: 12px;
+  }
+  .concierge-workspace .capture-previews {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .concierge-workspace .capture-previews img {
+    height: 160px;
+  }
+  .concierge-workspace .capture-previews span {
+    font-size: 10px;
+  }
+  .concierge-workspace .capture-previews button {
+    width: 26px;
+    height: 26px;
+  }
+  .concierge-workspace .ocr-progress > div {
+    font-size: 11px;
+  }
+  .concierge-workspace .ocr-progress small {
+    font-size: 10px;
+  }
+  .concierge-workspace .modal-footer .btn {
+    font-size: 11px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .concierge-workspace .modal-footer > span {
+    font-size: 9px;
+    max-width: 145px;
+  }
+  .concierge-workspace .optional-fields summary {
+    font-size: 12px;
+  }
+  .concierge-workspace .capture-content + .modal-footer {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .concierge-workspace .capture-content + .modal-footer .btn {
+    flex: 1;
+    min-width: 105px;
+  }
+  .concierge-workspace .capture-content + .modal-footer .btn:first-child {
+    flex: 0;
+    min-width: 65px;
+  }
+  .concierge-workspace .optional-fields .form-grid {
+    margin-top: 17px;
+  }
+  .concierge-workspace .team-actions {
+    gap: 14px;
+  }
+  .concierge-workspace .backup-content .btn {
+    font-size: 11px;
+  }
+  .concierge-workspace .alert {
+    font-size: 11px;
+  }
+  .concierge-workspace .alert .text-btn {
+    font-size: 10px;
+  }
+  .concierge-workspace .page-heading p {
+    font-size: 11px;
+  }
+  .concierge-workspace .heading-actions .btn {
+    font-size: 11px;
+  }
+  .concierge-workspace .info-strip {
+    font-size: 10px;
+  }
+  .concierge-workspace .workspace-footer {
+    font-size: 9px;
+  }
+  .concierge-workspace .empty-state p {
+    font-size: 11px;
+  }
+  .concierge-workspace .empty-state h3 {
+    font-size: 13px;
+  }
+  .concierge-workspace .empty-state .btn {
+    font-size: 11px;
+  }
+}
+@media (max-width: 400px) {
+  .concierge-workspace .quick-action {
+    padding: 13px 10px;
+    gap: 8px;
+  }
+  .concierge-workspace .quick-action strong {
+    font-size: 11px;
+  }
+  .concierge-workspace .quick-action small {
+    font-size: 9px;
+  }
+  .concierge-workspace .quick-action > span {
+    width: 28px;
+    height: 32px;
+  }
+  .concierge-workspace .quick-action > svg {
+    display: none;
+  }
+  .concierge-workspace .clickable-stat .stat-top {
+    font-size: 10px;
+  }
+  .concierge-workspace .stat-value {
+    font-size: 26px;
+  }
+  .concierge-workspace .page-heading p {
+    max-width: 210px;
+    font-size: 10px;
+  }
+  .concierge-workspace .heading-actions .btn {
+    font-size: 10px;
+    padding: 10px;
+  }
+  .concierge-workspace .balance-stats .stat-value {
+    font-size: 19px;
+  }
+  .concierge-workspace .record-footer {
+    gap: 10px;
+  }
+  .concierge-workspace .receipt-fields .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .concierge-workspace .receipt-fields .field-wide {
+    grid-column: auto;
+  }
+  .concierge-workspace .member-quick-actions {
+    gap: 5px;
+  }
+  .concierge-workspace .member-quick-actions button {
+    font-size: 9px;
+  }
+  .concierge-workspace .drawer-tabs {
+    gap: 20px;
+  }
+  .concierge-workspace .drawer-tabs button {
+    font-size: 10px;
+  }
+  .concierge-workspace .modal-footer > span {
+    max-width: 120px;
+    font-size: 8px;
+  }
+  .concierge-workspace .capture-previews img {
+    height: 140px;
+  }
+  .concierge-workspace .capture-content + .modal-footer .btn {
+    font-size: 10px;
+  }
+  .concierge-workspace .audit-stream-row time {
+    font-size: 8px;
+  }
+  .concierge-workspace .topbar-right .live-status {
+    display: none;
+  }
+}
+
+/* Item-level receipt review and evidence details */
+.concierge-workspace .receipt-experience-layer {
+  z-index: 90;
+}
+.concierge-workspace .detailed-review-grid {
+  grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
+  gap: 26px;
+}
+.concierge-workspace .receipt-left-column {
+  position: sticky;
+  top: 0;
+  min-width: 0;
+}
+.concierge-workspace .receipt-left-column .receipt-image-pane {
+  position: static;
+}
+.concierge-workspace .receipt-experience-layer .modal-wide {
+  width: 1180px;
+}
+.concierge-workspace .receipt-detail-fields {
+  min-width: 0;
+}
+.concierge-workspace .receipt-detail-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px solid #dce8d3;
+  background: #f1f6eb;
+  border-radius: 10px;
+  padding: 20px 23px;
+  margin-bottom: 24px;
+}
+.concierge-workspace .receipt-detail-banner > div > span {
+  display: block;
+  font-size: 11px;
+  color: #7c9566;
+}
+.concierge-workspace .receipt-detail-banner strong {
+  display: block;
+  font-size: 29px;
+  font-weight: 500;
+  color: #466b35;
+  line-height: 1.4;
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.concierge-workspace .receipt-detail-banner p {
+  font-size: 11px;
+  color: #6f875d;
+  line-height: 1.8;
+  margin-top: 7px;
+}
+.concierge-workspace .receipt-detail-banner > .status {
+  align-self: flex-start;
+  font-size: 11px;
+}
+.concierge-workspace .receipt-detail-section {
+  margin-top: 29px;
+}
+.concierge-workspace .receipt-detail-items {
+  border: 1px solid #e0e9d5;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.concierge-workspace .receipt-detail-item {
+  padding: 15px;
+  border-bottom: 1px solid #e8efdf;
+  background: #fff;
+}
+.concierge-workspace .receipt-detail-item:nth-child(even) {
+  background: #fafcf7;
+}
+.concierge-workspace .receipt-detail-item:last-child {
+  border: 0;
+}
+.concierge-workspace .receipt-detail-item-name {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  min-width: 0;
+}
+.concierge-workspace .receipt-detail-item-name > span {
+  width: 21px;
+  height: 21px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  background: #edf4e5;
+  font-size: 10px;
+  color: #849d6d;
+}
+.concierge-workspace .receipt-detail-item-name strong {
+  font-size: 13px;
+  color: #4f7040;
+  font-weight: 500;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+}
+.concierge-workspace .receipt-detail-item-name b {
+  font-size: 12px;
+  color: #5d7f48;
+  font-weight: 500;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.concierge-workspace .receipt-detail-item-name .zero-price {
+  color: #698e52;
+  border-radius: 4px;
+  background: #edf5e6;
+  padding: 1px 5px;
+}
+.concierge-workspace .receipt-detail-item-meta {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 9px;
+  margin-left: 30px;
+  color: #788f67;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.concierge-workspace .receipt-detail-item-meta em {
+  font-size: 10px;
+  font-style: normal;
+  color: #719254;
+  background: #edf5e5;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.concierge-workspace .item-raw-text {
+  margin-top: 10px;
+}
+.concierge-workspace .item-raw-text summary {
+  font-size: 10px;
+  cursor: pointer;
+  color: #90a27d;
+}
+.concierge-workspace .item-raw-text p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #778c64;
+  background: #f5f8ef;
+  padding: 9px;
+  border-radius: 5px;
+  font-size: 10px;
+  line-height: 1.8;
+  margin-top: 7px;
+}
+.concierge-workspace .item-detail-summary {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 13px 0;
+  font-size: 11px;
+  color: #7c9369;
+}
+.concierge-workspace .item-detail-summary strong {
+  font-size: 13px;
+  font-weight: 500;
+  color: #5c7c45;
+  font-variant-numeric: tabular-nums;
+}
+.concierge-workspace .item-detail-summary small {
+  flex-basis: 100%;
+  font-size: 10px;
+  color: #9a875d;
+}
+.concierge-workspace .items-help {
+  font-size: 11px;
+  line-height: 1.9;
+  color: #768c64;
+  margin: 0 0 15px;
+  overflow-wrap: anywhere;
+}
+.concierge-workspace .receipt-totals-list {
+  margin: 0;
+  border: 1px solid #e0ead5;
+  border-radius: 8px;
+  padding: 0 15px;
+}
+.concierge-workspace .receipt-totals-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+  border-bottom: 1px solid #edf2e5;
+  padding: 12px 0;
+  font-size: 12px;
+}
+.concierge-workspace .receipt-totals-list > div:last-child {
+  border: 0;
+}
+.concierge-workspace .receipt-totals-list dt {
+  color: #7b9067;
+}
+.concierge-workspace .receipt-totals-list dd {
+  margin: 0;
+  color: #577940;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.concierge-workspace .receipt-totals-list > div:last-child dd {
+  font-size: 14px;
+  font-weight: 500;
+}
+.concierge-workspace .receipt-payment-details {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.concierge-workspace .receipt-payment-details article {
+  padding: 14px 15px;
+  background: #f7faf2;
+  border: 1px solid #e1ead6;
+  border-radius: 7px;
+}
+.concierge-workspace .receipt-payment-details article > div {
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  align-items: center;
+}
+.concierge-workspace .receipt-payment-details strong {
+  font-size: 12px;
+  font-weight: 500;
+  color: #5f7d49;
+}
+.concierge-workspace .receipt-payment-details b {
+  font-size: 13px;
+  color: #5b7b45;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.concierge-workspace .receipt-payment-details p {
+  font-size: 11px;
+  color: #778e63;
+  line-height: 1.8;
+  margin-top: 7px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.concierge-workspace .receipt-header-details {
+  gap: 19px;
+}
+.concierge-workspace .receipt-header-details dt {
+  font-size: 10px;
+}
+.concierge-workspace .receipt-header-details dd {
+  font-size: 12px;
+  color: #627f4d;
+  white-space: pre-wrap;
+}
+.concierge-workspace .receipt-audit-info {
+  margin-top: 27px;
+  padding-top: 21px;
+  border-top: 1px solid #e5edda;
+  gap: 20px;
+}
+.concierge-workspace .receipt-audit-info dt {
+  font-size: 10px;
+}
+.concierge-workspace .receipt-audit-info dd {
+  font-size: 11px;
+  color: #6a8455;
+}
+.concierge-workspace .legacy-items-empty,
+.concierge-workspace .items-empty {
+  padding: 24px 17px;
+  background: #f8faf4;
+  border: 1px dashed #d4e0c7;
+  border-radius: 8px;
+  color: #9aae82;
+  text-align: center;
+}
+.concierge-workspace .legacy-items-empty h4 {
+  font-size: 12px;
+  color: #758f5d;
+  font-weight: 500;
+  margin: 10px 0 0;
+}
+.concierge-workspace .legacy-items-empty p,
+.concierge-workspace .items-empty p {
+  font-size: 11px;
+  color: #869a70;
+  line-height: 1.9;
+  margin-top: 9px;
+}
+.concierge-workspace .legacy-items-empty pre {
+  font: 11px/1.9 var(--font-sans);
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #7f946a;
+  margin: 16px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid #e1ead5;
+}
+.concierge-workspace .ocr-warning-box {
+  border: 1px solid #e9dac0;
+  background: #fcf7ed;
+  padding: 15px 18px;
+  border-radius: 8px;
+  margin: 0 0 22px;
+}
+.concierge-workspace .ocr-warning-box h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #a58652;
+}
+.concierge-workspace .ocr-warning-box ul {
+  padding-left: 19px;
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.9;
+  color: #977c50;
+}
+.concierge-workspace .ocr-warning-box p {
+  font-size: 10px;
+  color: #ad986e;
+  margin-top: 10px;
+}
+.concierge-workspace .receipt-item-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+.concierge-workspace .receipt-item-row {
+  background: #fafcf6;
+  border: 1px solid #dfe9d3;
+  border-radius: 8px;
+  padding: 14px;
+}
+.concierge-workspace .receipt-item-row.reviewed {
+  background: #f6faf1;
+  border-color: #bfd4ab;
+}
+.concierge-workspace .receipt-item-row-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.concierge-workspace .receipt-item-row-top > strong {
+  font-size: 11px;
+  color: #718f55;
+  font-weight: 500;
+  margin-right: auto;
+}
+.concierge-workspace .receipt-item-row-top > label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: #75915c;
+  white-space: nowrap;
+}
+.concierge-workspace .receipt-item-row-top input,
+.concierge-workspace .review-all-items input {
+  width: 14px;
+  height: 14px;
+  accent-color: #7d9d5a;
+}
+.concierge-workspace .receipt-item-row-top .text-btn {
+  font-size: 10px;
+}
+.concierge-workspace .receipt-item-grid {
+  display: grid;
+  grid-template-columns: 0.7fr 1fr 1fr;
+  gap: 10px;
+}
+.concierge-workspace .receipt-item-grid .field-wide {
+  grid-column: 1/-1;
+}
+.concierge-workspace .receipt-item-grid .field > span {
+  font-size: 10px;
+  color: #7c9467;
+}
+.concierge-workspace .receipt-item-grid .field input {
+  font-size: 12px;
+  padding: 9px 10px;
+}
+.concierge-workspace .items-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 15px;
+}
+.concierge-workspace .items-controls > span {
+  font-size: 10px;
+  color: #7f956d;
+  line-height: 1.8;
+}
+.concierge-workspace .items-reviewed-count {
+  margin-left: auto !important;
+  width: auto !important;
+  background: none !important;
+  font-size: 10px !important;
+  white-space: nowrap;
+  color: #88a374 !important;
+}
+.concierge-workspace .review-all-items {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 17px;
+  border: 1px solid #d6e5c8;
+  background: #f1f7e9;
+  padding: 12px 13px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #66874e;
+  cursor: pointer;
+}
+.concierge-workspace .notice-warm {
+  border-color: #e9dcc3;
+  background: #fcf7ed;
+  color: #9b8257;
+}
+.concierge-workspace .receipt-experience-layer .field {
+  margin-bottom: 12px;
+}
+.concierge-workspace .receipt-experience-layer .form-grid .field {
+  margin-bottom: 0;
+}
+.concierge-workspace .receipt-experience-layer .payment-input-row > .field {
+  margin-top: 12px;
+  margin-bottom: 0;
+}
+.concierge-workspace .evidence-thumbnails {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.concierge-workspace .evidence-thumbnails button {
+  border: 1px solid #dfebd1;
+  border-radius: 5px;
+  padding: 3px;
+  flex-shrink: 0;
+  position: relative;
+  background: #f5f8ef;
+  width: 50px;
+  height: 62px;
+}
+.concierge-workspace .evidence-thumbnails button.selected {
+  border-color: #89a972;
+  box-shadow: 0 0 0 1px #89a972;
+}
+.concierge-workspace .evidence-thumbnails img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.concierge-workspace .evidence-thumbnails span {
+  position: absolute;
+  bottom: 1px;
+  right: 2px;
+  border-radius: 3px;
+  padding: 0 4px;
+  background: #fffffff2;
+  font-size: 9px;
+  color: #7c9368;
+}
+.concierge-workspace .image-load-failed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  gap: 12px;
+  color: #98ad80;
+  font-size: 12px;
+  text-align: center;
+}
+.concierge-workspace .image-load-failed a {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #769459;
+  font-size: 11px;
+}
+.concierge-workspace .balance-open-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  text-align: left;
+  padding: 0;
+}
+.concierge-workspace .balance-open-button > svg {
+  color: #9bb484;
+}
+.concierge-workspace .balance-open-button:hover .balance-amount {
+  color: #4b7739;
+}
+.concierge-workspace .balance-history-open {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  text-align: left;
+  margin-top: 12px;
+  padding: 12px 13px;
+  border: 1px solid #dfead3;
+  border-radius: 7px;
+  background: #f8fbf3;
+  width: 100%;
+  font-size: 10px;
+  color: #7d9864;
+}
+.concierge-workspace .balance-history-open > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.8;
+}
+.concierge-workspace .balance-history-open:hover {
+  background: #eef6e5;
+}
+.concierge-workspace .balance-evidence-picker {
+  margin-top: 24px;
+  padding-top: 4px;
+  min-width: 0;
+}
+.concierge-workspace .balance-evidence-picker .receipt-section-title {
+  margin-bottom: 12px;
+}
+.concierge-workspace .balance-evidence-picker .items-help {
+  font-size: 11px;
+}
+.concierge-workspace .evidence-pick-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.concierge-workspace .evidence-pick-actions > label {
+  cursor: pointer;
+}
+.concierge-workspace .evidence-pick-actions input[type="file"] {
+  display: none;
+}
+.concierge-workspace .evidence-uploading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  color: #849e6b;
+}
+.concierge-workspace .new-evidence-images {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 0 0 13px;
+  max-width: 100%;
+}
+.concierge-workspace .new-evidence-images > div {
+  width: 82px;
+  height: 107px;
+  border: 1px solid #dae7cd;
+  border-radius: 6px;
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+.concierge-workspace .new-evidence-images img {
+  height: 100%;
+  width: 100%;
+  object-fit: contain;
+  background: #f5f9ef;
+}
+.concierge-workspace .new-evidence-images button {
+  position: absolute;
+  right: 3px;
+  top: 3px;
+  background: #fffffff2;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  color: #82996b;
+}
+.concierge-workspace .receipt-link-search {
+  max-width: none;
+  margin-bottom: 12px;
+}
+.concierge-workspace .receipt-link-options {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid #e0ead6;
+  border-radius: 7px;
+}
+.concierge-workspace .receipt-link-options > .items-help {
+  padding: 15px;
+  margin: 0;
+}
+.concierge-workspace .receipt-link-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 13px;
+  border-bottom: 1px solid #e9f0e0;
+  cursor: pointer;
+}
+.concierge-workspace .receipt-link-option:last-child {
+  border: 0;
+}
+.concierge-workspace .receipt-link-option > input {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  margin-top: 3px;
+  accent-color: #85a866;
+}
+.concierge-workspace .receipt-link-option > span {
+  flex: 1;
+  min-width: 0;
+}
+.concierge-workspace .receipt-link-option strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  font-weight: 500;
+  color: #64814e;
+  overflow-wrap: anywhere;
+}
+.concierge-workspace .receipt-link-option em {
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 400;
+  background: #f0f5e9;
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: #8ba474;
+}
+.concierge-workspace .receipt-link-option b {
+  font-size: 9px;
+  font-weight: 400;
+  color: #99ac83;
+}
+.concierge-workspace .receipt-link-option small {
+  display: block;
+  font-size: 10px;
+  color: #899f73;
+  line-height: 1.9;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+.concierge-workspace .receipt-link-option.already-linked {
+  background: #f7faf2;
+  cursor: default;
+  opacity: 0.7;
+}
+.concierge-workspace .balance-detail-content {
+  max-height: calc(100dvh - 217px);
+}
+.concierge-workspace .balance-detail-banner {
+  margin-bottom: 16px;
+}
+.concierge-workspace .balance-detail-banner > svg {
+  color: #91ae74;
+}
+.concierge-workspace .balance-evidence-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 26px;
+  align-items: start;
+  margin-top: 24px;
+}
+.concierge-workspace .balance-evidence-grid > section {
+  min-width: 0;
+}
+.concierge-workspace .balance-evidence-grid .receipt-image-pane {
+  position: static;
+}
+.concierge-workspace .balance-evidence-grid .receipt-original {
+  height: 400px;
+}
+.concierge-workspace .balance-evidence-grid .detail-grid dd {
+  overflow-wrap: anywhere;
+}
+.concierge-workspace .linked-receipts {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-bottom: 19px;
+}
+.concierge-workspace .linked-receipt {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px;
+  border: 1px solid #dfead4;
+  border-radius: 7px;
+  background: #f8fbf3;
+  color: #91aa76;
+}
+.concierge-workspace .linked-receipt:hover {
+  background: #edf5e3;
+}
+.concierge-workspace .linked-receipt > span {
+  flex: 1;
+  min-width: 0;
+}
+.concierge-workspace .linked-receipt strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: #64834d;
+  overflow-wrap: anywhere;
+}
+.concierge-workspace .linked-receipt small {
+  display: block;
+  color: #889f72;
+  font-size: 10px;
+  line-height: 1.8;
+  margin-top: 4px;
+}
+.concierge-workspace .linked-receipt > b {
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: #73925b;
+}
+.concierge-workspace .unlinked-balance {
+  padding: 22px 17px;
+  border: 1px dashed #d4e2c5;
+  border-radius: 8px;
+  background: #f8fbf3;
+  text-align: center;
+  color: #9cb386;
+  margin-bottom: 19px;
+}
+.concierge-workspace .unlinked-balance strong {
+  display: block;
+  color: #7e9966;
+  font-size: 12px;
+  font-weight: 500;
+  margin-top: 11px;
+}
+.concierge-workspace .unlinked-balance p {
+  font-size: 11px;
+  line-height: 1.9;
+  color: #8fa57a;
+  margin-top: 8px;
+}
+.concierge-workspace .linked-record-missing {
+  font-size: 11px;
+  color: #9b9778;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+  padding: 13px;
+  border: 1px solid #e7e7d6;
+  border-radius: 6px;
+}
+.concierge-workspace .append-evidence-form {
+  border: 1px solid #dce8d0;
+  border-radius: 9px;
+  padding: 0 20px 19px;
+  background: #fbfdf8;
+  margin-top: 27px;
+}
+.concierge-workspace .append-evidence-form > .field {
+  margin-top: 17px;
+}
+.concierge-workspace .append-evidence-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 18px;
+}
+.concierge-workspace .append-evidence-actions > small {
+  font-size: 10px;
+  color: #8ca476;
+  line-height: 1.8;
+}
+.concierge-workspace .drawer-tabs {
+  overflow-x: auto;
+  white-space: nowrap;
+  gap: 22px;
+}
+.concierge-workspace .drawer-tabs button {
+  flex-shrink: 0;
+}
+.concierge-workspace .receipt-experience-layer .modal-content {
+  min-width: 0;
+}
+.concierge-workspace .receipt-experience-layer .receipt-fields {
+  min-width: 0;
+}
+.concierge-workspace .receipt-experience-layer fieldset {
+  min-width: 0;
+}
+@media (max-width: 1000px) {
+  .concierge-workspace .detailed-review-grid {
+    grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
+    gap: 19px;
+  }
+  .concierge-workspace .receipt-left-column .receipt-original {
+    height: 420px;
+  }
+  .concierge-workspace .receipt-item-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .concierge-workspace .receipt-item-grid .field-wide {
+    grid-column: 1/-1;
+  }
+  .concierge-workspace .balance-evidence-grid {
+    grid-template-columns: 1fr 1.1fr;
+    gap: 20px;
+  }
+  .concierge-workspace .balance-evidence-grid .receipt-original {
+    height: 340px;
+  }
+  .concierge-workspace .receipt-detail-item-name {
+    flex-wrap: wrap;
+  }
+  .concierge-workspace .receipt-detail-item-name strong {
+    flex-basis: calc(100% - 30px);
+  }
+  .concierge-workspace .receipt-detail-item-name > b {
+    margin-left: 30px;
+  }
+  .concierge-workspace .receipt-detail-item-meta {
+    gap: 9px;
+  }
+}
+@media (max-width: 760px) {
+  .concierge-workspace .receipt-experience-layer .modal-wide {
+    width: 100%;
+  }
+  .concierge-workspace .detailed-review-grid,
+  .concierge-workspace .balance-evidence-grid {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  .concierge-workspace .receipt-left-column {
+    position: static;
+  }
+  .concierge-workspace .receipt-left-column .receipt-original,
+  .concierge-workspace .balance-evidence-grid .receipt-original {
+    height: 310px;
+  }
+  .concierge-workspace .receipt-detail-banner {
+    padding: 17px;
+    margin-bottom: 20px;
+    gap: 12px;
+  }
+  .concierge-workspace .receipt-detail-banner strong {
+    font-size: 27px;
+  }
+  .concierge-workspace .receipt-detail-banner p {
+    font-size: 11px;
+  }
+  .concierge-workspace .receipt-detail-banner > div > span {
+    font-size: 11px;
+  }
+  .concierge-workspace .receipt-detail-banner > .status {
+    font-size: 10px;
+  }
+  .concierge-workspace .receipt-item-row {
+    padding: 13px;
+  }
+  .concierge-workspace .receipt-item-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 11px;
+  }
+  .concierge-workspace .receipt-item-grid .field-wide {
+    grid-column: 1/-1;
+  }
+  .concierge-workspace .receipt-item-grid .field > span {
+    font-size: 11px;
+  }
+  .concierge-workspace .receipt-item-grid .field input {
+    font-size: 13px;
+    min-height: 42px;
+  }
+  .concierge-workspace .receipt-item-row-top {
+    gap: 10px;
+    margin-bottom: 13px;
+  }
+  .concierge-workspace .receipt-item-row-top > strong {
+    font-size: 11px;
+  }
+  .concierge-workspace .receipt-item-row-top > label {
+    font-size: 10px;
+  }
+  .concierge-workspace .receipt-item-row-top .text-btn {
+    font-size: 10px;
+  }
+  .concierge-workspace .receipt-item-row-top input,
+  .concierge-workspace .review-all-items input {
+    width: 16px;
+    height: 16px;
+  }
+  .concierge-workspace .items-help {
+    font-size: 11px;
+  }
+  .concierge-workspace .items-controls > span {
+    font-size: 10px;
+  }
+  .concierge-workspace .items-controls .btn {
+    font-size: 11px;
+  }
+  .concierge-workspace .review-all-items {
+    font-size: 12px;
+    padding: 13px;
+  }
+  .concierge-workspace .receipt-detail-item {
+    padding: 14px;
+  }
+  .concierge-workspace .receipt-detail-item-name {
+    flex-wrap: nowrap;
+    align-items: flex-start;
+  }
+  .concierge-workspace .receipt-detail-item-name strong {
+    flex-basis: auto;
+    font-size: 13px;
+    line-height: 1.8;
+  }
+  .concierge-workspace .receipt-detail-item-name > b {
+    margin-left: 0;
+    font-size: 12px;
+  }
+  .concierge-workspace .receipt-detail-item-meta {
+    gap: 10px;
+    font-size: 11px;
+    margin-top: 8px;
+    line-height: 1.9;
+  }
+  .concierge-workspace .receipt-detail-item-name > span {
+    font-size: 10px;
+  }
+  .concierge-workspace .item-raw-text summary,
+  .concierge-workspace .item-raw-text p {
+    font-size: 10px;
+  }
+  .concierge-workspace .item-detail-summary {
+    font-size: 11px;
+  }
+  .concierge-workspace .item-detail-summary strong {
+    font-size: 13px;
+  }
+  .concierge-workspace .receipt-totals-list > div {
+    font-size: 12px;
+    padding: 13px 0;
+  }
+  .concierge-workspace .receipt-totals-list > div:last-child dd {
+    font-size: 14px;
+  }
+  .concierge-workspace .receipt-payment-details strong {
+    font-size: 12px;
+  }
+  .concierge-workspace .receipt-payment-details b {
+    font-size: 13px;
+  }
+  .concierge-workspace .receipt-payment-details p {
+    font-size: 11px;
+  }
+  .concierge-workspace .receipt-header-details dt,
+  .concierge-workspace .receipt-audit-info dt {
+    font-size: 11px;
+  }
+  .concierge-workspace .receipt-header-details dd,
+  .concierge-workspace .receipt-audit-info dd {
+    font-size: 12px;
+  }
+  .concierge-workspace .ocr-warning-box {
+    padding: 14px;
+  }
+  .concierge-workspace .ocr-warning-box h3 {
+    font-size: 12px;
+  }
+  .concierge-workspace .ocr-warning-box ul {
+    font-size: 11px;
+    line-height: 1.9;
+  }
+  .concierge-workspace .ocr-warning-box p {
+    font-size: 10px;
+  }
+  .concierge-workspace .legacy-items-empty p {
+    font-size: 11px;
+  }
+  .concierge-workspace .receipt-experience-layer .detail-section-title {
+    font-size: 13px;
+  }
+  .concierge-workspace .receipt-experience-layer .field > span {
+    font-size: 11px;
+  }
+  .concierge-workspace
+    .receipt-experience-layer
+    .payment-input-row
+    .field
+    input {
+    font-size: 12px;
+  }
+  .concierge-workspace .receipt-experience-layer .form-grid .field input {
+    font-size: 13px;
+  }
+  .concierge-workspace .balance-history-open {
+    font-size: 10px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 9px;
+    padding: 12px;
+  }
+  .concierge-workspace .balance-history-open > span:last-child {
+    justify-content: space-between;
+    font-size: 11px;
+    color: #6b9050;
+  }
+  .concierge-workspace .balance-evidence-picker .receipt-section-title h3 {
+    font-size: 13px;
+  }
+  .concierge-workspace .balance-evidence-picker .items-help {
+    font-size: 11px;
+  }
+  .concierge-workspace .evidence-pick-actions {
+    gap: 9px;
+  }
+  .concierge-workspace .evidence-pick-actions .btn {
+    font-size: 11px;
+  }
+  .concierge-workspace .evidence-uploading {
+    font-size: 10px;
+    flex-basis: 100%;
+  }
+  .concierge-workspace .new-evidence-images > div {
+    width: 75px;
+    height: 98px;
+  }
+  .concierge-workspace .new-evidence-images button {
+    width: 24px;
+    height: 24px;
+  }
+  .concierge-workspace .receipt-link-option {
+    padding: 13px 12px;
+    gap: 9px;
+  }
+  .concierge-workspace .receipt-link-option strong {
+    font-size: 12px;
+  }
+  .concierge-workspace .receipt-link-option small {
+    font-size: 11px;
+    line-height: 1.9;
+  }
+  .concierge-workspace .receipt-link-option > input {
+    width: 17px;
+    height: 17px;
+  }
+  .concierge-workspace .receipt-link-option em,
+  .concierge-workspace .receipt-link-option b {
+    font-size: 10px;
+  }
+  .concierge-workspace .balance-detail-content {
+    max-height: calc(100dvh - 205px);
+  }
+  .concierge-workspace .balance-evidence-grid {
+    margin-top: 22px;
+  }
+  .concierge-workspace .balance-evidence-grid .detail-grid dt {
+    font-size: 11px;
+  }
+  .concierge-workspace .balance-evidence-grid .detail-grid dd {
+    font-size: 12px;
+  }
+  .concierge-workspace .linked-receipt {
+    gap: 9px;
+    padding: 13px 11px;
+  }
+  .concierge-workspace .linked-receipt strong {
+    font-size: 12px;
+  }
+  .concierge-workspace .linked-receipt small {
+    font-size: 10px;
+  }
+  .concierge-workspace .linked-receipt > b {
+    font-size: 11px;
+  }
+  .concierge-workspace .unlinked-balance strong {
+    font-size: 12px;
+  }
+  .concierge-workspace .unlinked-balance p {
+    font-size: 11px;
+  }
+  .concierge-workspace .append-evidence-form {
+    padding: 0 14px 16px;
+  }
+  .concierge-workspace .append-evidence-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 12px;
+  }
+  .concierge-workspace .append-evidence-actions > small {
+    font-size: 10px;
+    flex-basis: 100%;
+  }
+  .concierge-workspace .append-evidence-actions > .btn {
+    font-size: 11px;
+  }
+  .concierge-workspace .drawer-tabs {
+    gap: 21px;
+  }
+  .concierge-workspace .drawer-tabs button {
+    font-size: 11px;
+  }
+  .concierge-workspace .evidence-thumbnails button {
+    width: 46px;
+    height: 58px;
+  }
+  .concierge-workspace .receipt-detail-section {
+    margin-top: 25px;
+  }
+}
+@media (max-width: 400px) {
+  .concierge-workspace .receipt-experience-layer .modal-heading,
+  .concierge-workspace .receipt-experience-layer .modal-content,
+  .concierge-workspace .receipt-experience-layer .modal-footer {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  .concierge-workspace .receipt-detail-item-name {
+    flex-wrap: wrap;
+  }
+  .concierge-workspace .receipt-detail-item-name strong {
+    flex-basis: calc(100% - 32px);
+  }
+  .concierge-workspace .receipt-detail-item-name > b {
+    margin-left: 30px;
+  }
+  .concierge-workspace .receipt-item-row-top {
+    gap: 8px;
+  }
+  .concierge-workspace .receipt-item-row-top > label {
+    font-size: 10px;
+  }
+  .concierge-workspace .receipt-detail-banner strong {
+    font-size: 24px;
+  }
+  .concierge-workspace .receipt-detail-banner p {
+    font-size: 10px;
+  }
+  .concierge-workspace .receipt-item-grid {
+    gap: 10px;
+  }
+  .concierge-workspace .receipt-item-grid .field > span {
+    font-size: 10px;
+  }
+  .concierge-workspace .receipt-item-grid .field input {
+    font-size: 12px;
+    padding: 9px 8px;
+  }
+  .concierge-workspace .linked-receipt {
+    flex-wrap: wrap;
+  }
+  .concierge-workspace .linked-receipt > b {
+    margin-left: 28px;
+  }
+  .concierge-workspace .linked-receipt > svg:last-child {
+    margin-left: auto;
+  }
+  .concierge-workspace .receipt-experience-layer .modal-footer > span {
+    max-width: 110px;
+    font-size: 9px;
+  }
+  .concierge-workspace .receipt-experience-layer .modal-footer .btn {
+    font-size: 10px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .concierge-workspace .drawer-tabs {
+    gap: 18px;
+  }
+  .concierge-workspace .drawer-tabs button {
+    font-size: 10px;
+  }
+}
+.concierge-workspace .history-balance-amount {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  text-align: left;
+}
+.concierge-workspace .history-balance-amount > svg {
+  color: #91a978;
+}
+.concierge-workspace .history-balance-amount:hover strong {
+  color: #577f3f;
+}
+.concierge-workspace .receipt-link-selection-count {
+  font-size: 10px;
+  color: #7e956b;
+  line-height: 1.8;
+  margin: 0 0 9px;
+}
+@media (max-width: 760px) {
+  .concierge-workspace .receipt-link-selection-count {
+    font-size: 11px;
+  }
+}
+.concierge-workspace .receipt-rerun-ocr {
+  border: 1px solid #dce8d1;
+  background: #f7fbf1;
+  border-radius: 8px;
+  padding: 13px;
+  margin-bottom: 18px;
+}
+.concierge-workspace .receipt-rerun-ocr > p {
+  font-size: 11px;
+  color: #7b9367;
+  line-height: 1.8;
+  margin-top: 9px;
+}
+.concierge-workspace .receipt-rerun-ocr .ocr-progress {
+  margin-top: 13px;
+  padding: 12px;
+}
+.concierge-workspace .receipt-rerun-ocr .ocr-progress > div {
+  font-size: 11px;
+  line-height: 1.8;
+  align-items: flex-start;
+}
+.concierge-workspace .receipt-rerun-ocr .ocr-progress small {
+  font-size: 10px;
+}
+@media (max-width: 760px) {
+  .concierge-workspace .receipt-rerun-ocr {
+    padding: 12px;
+  }
+  .concierge-workspace .receipt-rerun-ocr > .btn {
+    font-size: 12px;
+  }
+  .concierge-workspace .receipt-rerun-ocr > p {
+    font-size: 11px;
+  }
+  .concierge-workspace .receipt-rerun-ocr .ocr-progress > div {
+    font-size: 11px;
+  }
+}
+
+/* Exception-first receipt review and approved names */
+.concierge-workspace .exception-editor-content {
+  padding-top: 20px;
+}
+.concierge-workspace .exception-editor-content .exception-main-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.concierge-workspace .exception-overview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid #dce8d0;
+  background: #f3f8ed;
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin-bottom: 17px;
+}
+.concierge-workspace .exception-overview > div {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-width: 0;
+}
+.concierge-workspace .exception-overview > div > span {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: #e3efd7;
+  color: #7f9f61;
+}
+.concierge-workspace .exception-overview strong {
+  display: block;
+  font-size: 16px;
+  font-weight: 500;
+  color: #4f743b;
+  line-height: 1.6;
+}
+.concierge-workspace .exception-overview p {
+  font-size: 11px;
+  color: #799365;
+  margin-top: 4px;
+}
+.concierge-workspace .exception-overview.has-issues {
+  background: #fcf6ed;
+  border-color: #e9dcc7;
+}
+.concierge-workspace .exception-overview.has-issues > div > span {
+  background: #f1e4d1;
+  color: #b08c55;
+}
+.concierge-workspace .exception-overview.has-issues strong {
+  color: #937342;
+}
+.concierge-workspace .exception-overview.has-issues p {
+  color: #a28c69;
+}
+.concierge-workspace .receipt-evidence-fold,
+.concierge-workspace .receipt-header-fold,
+.concierge-workspace .payment-review-fold {
+  border: 1px solid #e0e9d7;
+  border-radius: 8px;
+  background: #fcfdf9;
+  padding: 0 16px;
+  margin: 16px 0 20px;
+  min-width: 0;
+}
+.concierge-workspace .receipt-evidence-fold > summary,
+.concierge-workspace .receipt-header-fold > summary,
+.concierge-workspace .payment-review-fold > summary {
+  list-style-position: inside;
+  padding: 13px 0;
+  font-size: 12px;
+  color: #6c8c54;
+  cursor: pointer;
+  line-height: 1.8;
+}
+.concierge-workspace .receipt-evidence-fold > summary > span,
+.concierge-workspace .receipt-header-fold > summary > span,
+.concierge-workspace .payment-review-fold > summary > span {
+  float: right;
+  font-size: 10px;
+  color: #92a77e;
+  line-height: 2.1;
+  margin-left: 12px;
+}
+.concierge-workspace .receipt-evidence-fold[open],
+.concierge-workspace .receipt-header-fold[open],
+.concierge-workspace .payment-review-fold[open] {
+  padding-bottom: 17px;
+}
+.concierge-workspace .receipt-header-fold .form-grid,
+.concierge-workspace .payment-review-fold .form-grid {
+  margin-top: 13px;
+}
+.concierge-workspace .fold-evidence-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr);
+  gap: 21px;
+  padding-top: 8px;
+  min-width: 0;
+}
+.concierge-workspace .fold-evidence-grid .receipt-image-pane {
+  position: static;
+}
+.concierge-workspace .fold-evidence-grid .receipt-original {
+  height: 390px;
+}
+.concierge-workspace .fold-evidence-grid .ocr-text-details {
+  margin-top: 0;
+}
+.concierge-workspace .fold-evidence-grid .ocr-text-details pre {
+  max-height: 350px;
+}
+.concierge-workspace .fold-evidence-grid .ocr-text-details ul {
+  font-size: 10px;
+  line-height: 1.9;
+  color: #9a835d;
+  padding-left: 20px;
+}
+.concierge-workspace .compact-rerun {
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 6px 0 20px;
+}
+.concierge-workspace .compact-rerun > .text-btn {
+  font-size: 11px;
+}
+.concierge-workspace .receipt-whole-summary {
+  border: 1px solid #dce8d1;
+  border-radius: 9px;
+  background: #f9fcf5;
+  padding: 17px 19px;
+  margin-top: 17px;
+}
+.concierge-workspace .receipt-whole-summary > h3 {
+  font-size: 13px;
+  color: #5d8046;
+  font-weight: 500;
+  margin-bottom: 15px;
+}
+.concierge-workspace .receipt-whole-summary .form-grid {
+  align-items: start;
+}
+.concierge-workspace .receipt-whole-summary .amount-input {
+  height: 43px;
+  background: #fff;
+}
+.concierge-workspace .receipt-whole-summary .amount-input input {
+  font-size: 20px !important;
+  padding: 6px 0 !important;
+}
+.concierge-workspace .receipt-summary-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 10px;
+  line-height: 1.9;
+  color: #91a37d;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #e3ecd9;
+  overflow-wrap: anywhere;
+}
+.concierge-workspace .general-review-issues {
+  margin: 20px 0;
+}
+.concierge-workspace .general-review-issues > h3 {
+  font-size: 12px;
+  color: #9e7b49;
+  font-weight: 500;
+  margin-bottom: 10px;
+}
+.concierge-workspace .exception-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid #eadcc7;
+  background: #fcf7ee;
+  border-radius: 6px;
+  padding: 10px 11px;
+  font-size: 11px;
+  line-height: 1.9;
+  color: #987c50;
+  margin-top: 8px;
+  min-width: 0;
+}
+.concierge-workspace .exception-message > svg {
+  margin-top: 3px;
+  color: #ba9a64;
+}
+.concierge-workspace .exception-message > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.concierge-workspace .exception-message > b {
+  font-size: 9px;
+  font-weight: 400;
+  background: #f5e5d5;
+  color: #aa7e48;
+  border-radius: 4px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+.concierge-workspace .exception-message > label {
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.concierge-workspace .exception-message input {
+  width: 14px;
+  height: 14px;
+  accent-color: #91ac6c;
+}
+.concierge-workspace .exception-message.requires-fix {
+  border-color: #e9d0c4;
+  background: #fff5f0;
+  color: #a66f51;
+}
+.concierge-workspace .exception-items-section {
+  margin-top: 23px;
+}
+.concierge-workspace .exception-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.concierge-workspace .exception-section-heading > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.concierge-workspace .exception-section-heading h3 {
+  font-size: 14px;
+  color: #5b7e44;
+  font-weight: 500;
+}
+.concierge-workspace .exception-section-heading > div > span {
+  background: #edf4e4;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 10px;
+  color: #839f68;
+}
+.concierge-workspace .exception-section-heading > .text-btn {
+  font-size: 11px;
+}
+.concierge-workspace .catalog-first-calibration {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid #e6ddc8;
+  background: #fcf8ef;
+  padding: 13px 14px;
+  border-radius: 7px;
+  font-size: 11px;
+  line-height: 1.9;
+  color: #a18b61;
+  margin-bottom: 16px;
+}
+.concierge-workspace .catalog-first-calibration svg {
+  color: #b69a69;
+  margin-top: 2px;
+}
+.concierge-workspace .exception-item-editor {
+  gap: 15px;
+}
+.concierge-workspace .exception-item-editor .receipt-item-row {
+  padding: 16px;
+}
+.concierge-workspace .exception-item-editor .receipt-item-row.has-exception {
+  background: #fffaf4;
+  border-color: #e6d3b8;
+}
+.concierge-workspace
+  .exception-item-editor
+  .receipt-item-row.exception-reviewed {
+  background: #f6faf1;
+  border-color: #c7dcaf;
+}
+.concierge-workspace .exception-item-editor .receipt-item-row.normal-item {
+  background: #fafcf6;
+  border-color: #e0ead4;
+}
+.concierge-workspace .exception-item-editor .receipt-item-grid {
+  grid-template-columns: 1fr 1fr;
+}
+.concierge-workspace .exception-item-editor .receipt-item-row-top > strong {
+  font-size: 11px;
+}
+.concierge-workspace .item-match-state {
+  font-size: 10px;
+  border-radius: 4px;
+  padding: 2px 6px;
+  background: #f2e8d7;
+  color: #a18555;
+}
+.concierge-workspace .item-match-state.matched {
+  background: #eaf3df;
+  color: #759858;
+}
+.concierge-workspace .item-ocr-name {
+  font-size: 10px;
+  color: #8d9e7b;
+  line-height: 1.9;
+  margin: 10px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.concierge-workspace .item-ocr-name > span {
+  display: block;
+  color: #739359;
+}
+.concierge-workspace .catalog-candidates {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin: 12px 0 0;
+}
+.concierge-workspace .catalog-candidates > span {
+  flex-basis: 100%;
+  font-size: 10px;
+  color: #947d56;
+  line-height: 1.8;
+}
+.concierge-workspace .catalog-candidates > button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 7px 9px;
+  border-radius: 5px;
+  border: 1px solid #d4e3c4;
+  background: #f1f8e9;
+  color: #6b8f4c;
+  font-size: 11px;
+  line-height: 1.7;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.concierge-workspace .catalog-candidates > button > small {
+  font-size: 9px;
+  color: #9db383;
+}
+.concierge-workspace .catalog-candidates > button:hover {
+  background: #e6f2da;
+  border-color: #acc891;
+}
+.concierge-workspace .package-included-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 10px;
+  color: #839869;
+  line-height: 1.8;
+  margin: 12px 0;
+}
+.concierge-workspace .package-included-toggle > input {
+  width: 14px;
+  height: 14px;
+  accent-color: #90aa69;
+  margin-top: 3px;
+}
+.concierge-workspace .package-included-toggle small {
+  font-size: 9px;
+  color: #a0b08b;
+  margin-left: 8px;
+}
+.concierge-workspace .item-exception-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 12px;
+  border: 1px solid #dfd0b7;
+  background: #fcf5e9;
+  border-radius: 6px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: #967747;
+  line-height: 1.9;
+  cursor: pointer;
+}
+.concierge-workspace .item-exception-ack input {
+  width: 15px;
+  height: 15px;
+  accent-color: #8fac67;
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.concierge-workspace .item-exception-ack small {
+  display: block;
+  font-size: 9px;
+  color: #aa9470;
+  line-height: 1.8;
+  margin-top: 2px;
+}
+.concierge-workspace .item-exception-ack.acknowledged {
+  border-color: #c8dbb5;
+  background: #eff7e7;
+  color: #709450;
+}
+.concierge-workspace .item-exception-ack.acknowledged small {
+  color: #92a97c;
+}
+.concierge-workspace .catalog-approve-trigger {
+  margin-top: 13px;
+  font-size: 11px;
+  color: #648a48;
+}
+.concierge-workspace .catalog-approval-panel {
+  padding: 15px;
+  border: 1px solid #bcd3a7;
+  background: #f3f9ec;
+  border-radius: 8px;
+  margin-top: 14px;
+}
+.concierge-workspace .catalog-panel-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.concierge-workspace .catalog-panel-heading > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.concierge-workspace .catalog-panel-heading strong {
+  font-size: 12px;
+  font-weight: 500;
+  color: #5f8542;
+}
+.concierge-workspace .catalog-panel-heading svg {
+  color: #83a563;
+}
+.concierge-workspace .catalog-approval-panel > p {
+  font-size: 10px;
+  color: #879e71;
+  line-height: 1.9;
+  margin-bottom: 16px;
+}
+.concierge-workspace .catalog-approval-panel fieldset,
+.concierge-workspace .catalog-manager-form fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.concierge-workspace .catalog-approval-panel .field input,
+.concierge-workspace .catalog-approval-panel .field textarea {
+  font-size: 12px;
+  background: #fff;
+}
+.concierge-workspace .catalog-approval-panel .field > span {
+  font-size: 10px;
+  color: #7a9661;
+}
+.concierge-workspace .catalog-approval-panel .field small {
+  font-size: 10px;
+  color: #93a77d;
+}
+.concierge-workspace .catalog-package-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 16px;
+  font-size: 11px;
+  line-height: 1.9;
+  color: #79975c;
+}
+.concierge-workspace .catalog-package-check input {
+  width: 15px;
+  height: 15px;
+  accent-color: #89a968;
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+.concierge-workspace .catalog-package-check small {
+  display: block;
+  font-size: 9px;
+  color: #9baf83;
+  margin-top: 3px;
+}
+.concierge-workspace .catalog-panel-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 17px;
+}
+.concierge-workspace .normal-items-collapsed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 26px 20px;
+  background: #f5f9ee;
+  border: 1px solid #dfead4;
+  border-radius: 8px;
+  color: #96ad7e;
+  text-align: center;
+}
+.concierge-workspace .normal-items-collapsed strong {
+  font-size: 13px;
+  font-weight: 500;
+  color: #6b8b51;
+  margin-top: 11px;
+}
+.concierge-workspace .normal-items-collapsed p {
+  font-size: 11px;
+  color: #92a77c;
+  margin-top: 8px;
+  line-height: 1.9;
+}
+.concierge-workspace .totals-review-grid {
+  padding-top: 18px;
+  margin-top: 18px !important;
+  border-top: 1px solid #e4edda;
+}
+.concierge-workspace .whole-receipt-confirm {
+  font-size: 12px;
+  margin-top: 22px;
+}
+.concierge-workspace .whole-receipt-confirm small {
+  display: block;
+  font-size: 10px;
+  color: #91a97b;
+  margin-top: 6px;
+  line-height: 1.9;
+}
+.concierge-workspace .catalog-card-list {
+  padding: 0 21px;
+}
+.concierge-workspace .catalog-item-card {
+  padding: 20px 0;
+  border-bottom: 1px solid #e8efdf;
+}
+.concierge-workspace .catalog-item-card:last-child {
+  border: 0;
+}
+.concierge-workspace .catalog-item-card.inactive {
+  opacity: 0.65;
+}
+.concierge-workspace .catalog-item-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.concierge-workspace .catalog-item-title > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.concierge-workspace .catalog-item-title strong {
+  font-size: 14px;
+  color: #557b3e;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.concierge-workspace .catalog-item-title > div > span {
+  font-size: 11px;
+  color: #8da676;
+}
+.concierge-workspace .catalog-item-title em {
+  font-size: 10px;
+  font-style: normal;
+  background: #eef5e5;
+  color: #8eaa71;
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+.concierge-workspace .catalog-item-card > p {
+  font-size: 10px;
+  color: #90a67c;
+  margin: 9px 0 0;
+}
+.concierge-workspace .catalog-aliases {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 13px;
+}
+.concierge-workspace .catalog-aliases > span {
+  font-size: 10px;
+  color: #9aae85;
+  margin-right: 3px;
+}
+.concierge-workspace .catalog-aliases > b {
+  font-size: 10px;
+  font-weight: 400;
+  border: 1px solid #e0ead6;
+  background: #fafcf6;
+  color: #7f9c65;
+  border-radius: 4px;
+  padding: 3px 7px;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.concierge-workspace .catalog-aliases > small {
+  font-size: 10px;
+  color: #adbb9b;
+}
+.concierge-workspace .catalog-item-footer {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-top: 15px;
+}
+.concierge-workspace .catalog-item-footer > small {
+  font-size: 9px;
+  color: #a0b28d;
+  margin-right: auto;
+  line-height: 1.8;
+}
+.concierge-workspace .catalog-item-footer > .text-btn {
+  font-size: 10px;
+}
+.concierge-workspace .catalog-manager-editor {
+  margin-top: 23px;
+}
+.concierge-workspace .catalog-manager-form {
+  padding: 22px;
+}
+.concierge-workspace .catalog-manager-form .field input,
+.concierge-workspace .catalog-manager-form .field textarea {
+  font-size: 12px;
+}
+.concierge-workspace .catalog-manager-form .field > span {
+  font-size: 11px;
+}
+.concierge-workspace .exception-editor-content .catalog-approval-panel .alert {
+  font-size: 11px;
+}
+.concierge-workspace .exception-editor-content + .modal-footer {
+  gap: 8px;
+}
+.concierge-workspace .exception-editor-content + .modal-footer > .small {
+  max-width: 190px;
+}
+.concierge-workspace .exception-editor-content + .modal-footer > .btn {
+  font-size: 11px;
+  min-width: 68px;
+}
+.concierge-workspace .exception-editor-content .form-grid {
+  min-width: 0;
+}
+@media (max-width: 760px) {
+  .concierge-workspace .exception-editor-content {
+    padding-top: 17px;
+  }
+  .concierge-workspace .exception-overview {
+    padding: 14px;
+    gap: 10px;
+  }
+  .concierge-workspace .exception-overview > div {
+    gap: 10px;
+  }
+  .concierge-workspace .exception-overview > div > span {
+    width: 35px;
+    height: 37px;
+  }
+  .concierge-workspace .exception-overview strong {
+    font-size: 14px;
+  }
+  .concierge-workspace .exception-overview p {
+    font-size: 10px;
+    line-height: 1.8;
+  }
+  .concierge-workspace .exception-overview > .text-btn {
+    font-size: 10px;
+    flex-shrink: 0;
+  }
+  .concierge-workspace .receipt-evidence-fold,
+  .concierge-workspace .receipt-header-fold,
+  .concierge-workspace .payment-review-fold {
+    padding: 0 13px;
+    margin-top: 14px;
+    margin-bottom: 17px;
+  }
+  .concierge-workspace .receipt-evidence-fold > summary,
+  .concierge-workspace .receipt-header-fold > summary,
+  .concierge-workspace .payment-review-fold > summary {
+    font-size: 11px;
+    line-height: 1.9;
+    padding: 12px 0;
+  }
+  .concierge-workspace .receipt-evidence-fold > summary > span,
+  .concierge-workspace .receipt-header-fold > summary > span,
+  .concierge-workspace .payment-review-fold > summary > span {
+    font-size: 9px;
+    float: none;
+    display: block;
+    margin-left: 16px;
+    margin-top: 3px;
+  }
+  .concierge-workspace .fold-evidence-grid {
+    grid-template-columns: 1fr;
+    gap: 15px;
+  }
+  .concierge-workspace .fold-evidence-grid .receipt-original {
+    height: 300px;
+  }
+  .concierge-workspace .fold-evidence-grid .ocr-text-details pre {
+    max-height: 260px;
+  }
+  .concierge-workspace .fold-evidence-grid .ocr-text-details ul {
+    font-size: 10px;
+  }
+  .concierge-workspace .compact-rerun {
+    margin-bottom: 17px;
+  }
+  .concierge-workspace .compact-rerun > .text-btn {
+    font-size: 11px;
+  }
+  .concierge-workspace .receipt-whole-summary {
+    padding: 15px 13px;
+  }
+  .concierge-workspace .receipt-whole-summary > h3 {
+    font-size: 13px;
+  }
+  .concierge-workspace .receipt-whole-summary .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .concierge-workspace .receipt-whole-summary .field input,
+  .concierge-workspace .receipt-whole-summary .field select {
+    font-size: 13px;
+    min-height: 42px;
+  }
+  .concierge-workspace .receipt-whole-summary .amount-input {
+    height: 45px;
+  }
+  .concierge-workspace .receipt-whole-summary .amount-input input {
+    font-size: 23px !important;
+  }
+  .concierge-workspace .receipt-summary-line {
+    font-size: 10px;
+    gap: 8px;
+    flex-direction: column;
+    margin-top: 11px;
+    padding-top: 10px;
+  }
+  .concierge-workspace .general-review-issues > h3 {
+    font-size: 12px;
+  }
+  .concierge-workspace .exception-message {
+    font-size: 11px;
+    padding: 10px;
+    gap: 7px;
+    flex-wrap: wrap;
+  }
+  .concierge-workspace .exception-message > span {
+    flex-basis: calc(100% - 25px);
+  }
+  .concierge-workspace .exception-message > b {
+    margin-left: 21px;
+    font-size: 9px;
+  }
+  .concierge-workspace .exception-message > label {
+    font-size: 11px;
+    margin-left: 21px;
+    white-space: normal;
+    line-height: 1.9;
+  }
+  .concierge-workspace .exception-message input {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+  .concierge-workspace .exception-section-heading {
+    gap: 11px;
+    align-items: center;
+  }
+  .concierge-workspace .exception-section-heading h3 {
+    font-size: 13px;
+  }
+  .concierge-workspace .exception-section-heading > .text-btn {
+    font-size: 10px;
+  }
+  .concierge-workspace .exception-section-heading > div > span {
+    font-size: 10px;
+  }
+  .concierge-workspace .catalog-first-calibration {
+    font-size: 11px;
+    padding: 12px;
+    gap: 8px;
+  }
+  .concierge-workspace .exception-item-editor .receipt-item-row {
+    padding: 13px;
+  }
+  .concierge-workspace .exception-item-editor .receipt-item-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .concierge-workspace .exception-item-editor .receipt-item-grid .field-wide {
+    grid-column: 1/-1;
+  }
+  .concierge-workspace .exception-item-editor .receipt-item-row-top {
+    gap: 8px;
+  }
+  .concierge-workspace .exception-item-editor .receipt-item-row-top > strong {
+    font-size: 11px;
+  }
+  .concierge-workspace .item-match-state {
+    font-size: 9px;
+    padding: 2px 5px;
+  }
+  .concierge-workspace .item-ocr-name {
+    font-size: 10px;
+  }
+  .concierge-workspace .catalog-candidates > span {
+    font-size: 10px;
+  }
+  .concierge-workspace .catalog-candidates > button {
+    font-size: 11px;
+    padding: 8px 9px;
+    line-height: 1.9;
+    min-height: 35px;
+  }
+  .concierge-workspace .catalog-candidates > button > small {
+    font-size: 10px;
+  }
+  .concierge-workspace .package-included-toggle {
+    font-size: 11px;
+    gap: 8px;
+  }
+  .concierge-workspace .package-included-toggle > input {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+  .concierge-workspace .package-included-toggle small {
+    font-size: 9px;
+    display: block;
+    margin-left: 0;
+  }
+  .concierge-workspace .item-exception-ack {
+    font-size: 11px;
+    padding: 12px 10px;
+  }
+  .concierge-workspace .item-exception-ack input {
+    width: 17px;
+    height: 17px;
+  }
+  .concierge-workspace .item-exception-ack small {
+    font-size: 10px;
+  }
+  .concierge-workspace .catalog-approve-trigger {
+    font-size: 11px;
+  }
+  .concierge-workspace .catalog-approval-panel {
+    padding: 13px;
+  }
+  .concierge-workspace .catalog-panel-heading strong {
+    font-size: 12px;
+  }
+  .concierge-workspace .catalog-approval-panel > p {
+    font-size: 10px;
+  }
+  .concierge-workspace .catalog-approval-panel .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .concierge-workspace .catalog-approval-panel .field-wide {
+    grid-column: auto;
+  }
+  .concierge-workspace .catalog-approval-panel .field input,
+  .concierge-workspace .catalog-approval-panel .field textarea {
+    font-size: 13px;
+    min-height: 41px;
+  }
+  .concierge-workspace .catalog-approval-panel .field > span {
+    font-size: 11px;
+  }
+  .concierge-workspace .catalog-approval-panel .field small {
+    font-size: 10px;
+  }
+  .concierge-workspace .catalog-package-check {
+    font-size: 11px;
+  }
+  .concierge-workspace .catalog-package-check input {
+    width: 17px;
+    height: 17px;
+  }
+  .concierge-workspace .catalog-package-check small {
+    font-size: 10px;
+  }
+  .concierge-workspace .catalog-panel-actions .btn {
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: normal;
+  }
+  .concierge-workspace .normal-items-collapsed {
+    padding: 23px 16px;
+  }
+  .concierge-workspace .normal-items-collapsed strong {
+    font-size: 13px;
+  }
+  .concierge-workspace .normal-items-collapsed p {
+    font-size: 11px;
+  }
+  .concierge-workspace .whole-receipt-confirm {
+    font-size: 12px;
+  }
+  .concierge-workspace .whole-receipt-confirm small {
+    font-size: 10px;
+  }
+  .concierge-workspace .exception-editor-content + .modal-footer {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    padding: 14px;
+  }
+  .concierge-workspace .exception-editor-content + .modal-footer > .small {
+    max-width: none;
+    flex-basis: 100%;
+    font-size: 10px;
+    margin-right: 0;
+    line-height: 1.8;
+  }
+  .concierge-workspace .exception-editor-content + .modal-footer > .btn {
+    font-size: 11px;
+    min-width: 61px;
+    padding: 10px 12px;
+    min-height: 37px;
+  }
+  .concierge-workspace .catalog-card-list {
+    padding: 0 17px;
+  }
+  .concierge-workspace .catalog-item-card {
+    padding: 18px 0;
+  }
+  .concierge-workspace .catalog-item-title strong {
+    font-size: 13px;
+  }
+  .concierge-workspace .catalog-item-title > div > span {
+    font-size: 11px;
+  }
+  .concierge-workspace .catalog-item-title em {
+    font-size: 9px;
+  }
+  .concierge-workspace .catalog-item-title > .status {
+    font-size: 10px;
+  }
+  .concierge-workspace .catalog-aliases > span {
+    font-size: 10px;
+  }
+  .concierge-workspace .catalog-aliases > b {
+    font-size: 10px;
+    line-height: 1.7;
+  }
+  .concierge-workspace .catalog-aliases > small {
+    font-size: 10px;
+  }
+  .concierge-workspace .catalog-item-footer {
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .concierge-workspace .catalog-item-footer > small {
+    font-size: 10px;
+    max-width: 180px;
+  }
+  .concierge-workspace .catalog-item-footer > .text-btn {
+    font-size: 11px;
+  }
+  .concierge-workspace .catalog-manager-form {
+    padding: 18px 17px;
+  }
+  .concierge-workspace .catalog-manager-form .field input,
+  .concierge-workspace .catalog-manager-form .field textarea {
+    font-size: 13px;
+  }
+  .concierge-workspace .catalog-manager-form .field > span {
+    font-size: 11px;
+  }
+  .concierge-workspace
+    .exception-editor-content
+    .receipt-header-fold
+    .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .concierge-workspace
+    .exception-editor-content
+    .receipt-header-fold
+    .field-wide {
+    grid-column: auto;
+  }
+  .concierge-workspace .exception-editor-content .totals-review-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .concierge-workspace .exception-editor-content .payment-input-row > .field {
+    margin-top: 12px;
+  }
+}
+@media (max-width: 400px) {
+  .concierge-workspace .exception-overview {
+    align-items: flex-start;
+  }
+  .concierge-workspace .exception-overview > div {
+    gap: 8px;
+  }
+  .concierge-workspace .exception-overview strong {
+    font-size: 13px;
+  }
+  .concierge-workspace .exception-overview p {
+    font-size: 9px;
+  }
+  .concierge-workspace .exception-overview > .text-btn {
+    font-size: 9px;
+  }
+  .concierge-workspace .exception-overview > div > span {
+    width: 29px;
+    height: 33px;
+  }
+  .concierge-workspace .exception-overview > div > span svg {
+    width: 19px;
+  }
+  .concierge-workspace .exception-editor-content .totals-review-grid {
+    grid-template-columns: 1fr;
+  }
+  .concierge-workspace .catalog-panel-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .concierge-workspace .catalog-panel-actions .btn {
+    font-size: 10px;
+  }
+  .concierge-workspace .exception-item-editor .receipt-item-row-top {
+    flex-wrap: wrap;
+  }
+  .concierge-workspace
+    .exception-item-editor
+    .receipt-item-row-top
+    .item-match-state {
+    margin-left: auto;
+  }
+  .concierge-workspace .catalog-item-footer > small {
+    max-width: 145px;
+  }
+  .concierge-workspace .exception-editor-content + .modal-footer > .btn {
+    font-size: 10px;
+    padding: 10px;
+    min-width: 59px;
+  }
+}
+
+/* Embedded in yuzu AdminShell; every rule stays within this module. */
+.concierge-workspace {
+  --paper: #f7f8f4;
+  --ink: #193b32;
+  --text: #293d36;
+  --muted: #748278;
+  --line: #e9ede8;
+  min-width: 0;
+  isolation: isolate;
+}
+.concierge-workspace .workspace-shell {
+  min-height: 0;
+}
+.concierge-workspace .workspace-main {
+  margin-left: 0;
+  min-height: 0;
+}
+.concierge-workspace .workspace-content {
+  padding: 24px;
+  max-width: 1600px;
+  margin: auto;
+}
+.concierge-workspace .concierge-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  background: var(--paper);
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.concierge-workspace .concierge-toolbar nav {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.concierge-workspace .concierge-toolbar nav button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: #fff;
+}
+.concierge-workspace .concierge-toolbar nav button.selected {
+  background: #1d654b;
+  color: #fff;
+}
+.concierge-workspace .integration-note {
+  padding: 8px 24px;
+  color: #69786e;
+  font-size: 12px;
+}
+.concierge-workspace .receipt-archive {
+  margin: 20px 0;
+}
+.concierge-workspace .archive-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.concierge-workspace .inline-form {
+  display: flex;
+  gap: 8px;
+}
+.concierge-workspace .inline-form input {
+  flex: 1;
+  min-width: 0;
+}
+.concierge-workspace .native-link {
+  color: #29795b;
+  text-decoration: underline;
+  font-size: 13px;
+}
+.concierge-workspace .mobile-bottom-nav {
+  left: 0;
+  z-index: 20;
+}
+.concierge-workspace .drawer-layer,
+.concierge-workspace .modal-layer {
+  z-index: 80;
+}
+@media (max-width: 600px) {
+  .concierge-workspace .workspace-content {
+    padding: 16px 12px 80px;
+  }
+  .concierge-workspace .concierge-toolbar {
+    padding: 8px;
+  }
+  .concierge-workspace .integration-note {
+    padding: 8px 12px;
+  }
+  .concierge-workspace .modal-box {
+    max-height: 96dvh;
+  }
+  .concierge-workspace .page-heading {
+    flex-wrap: wrap;
+  }
+}

@@ -1,0 +1,730 @@
+import { randomUUID } from "node:crypto";
+import { can } from "@shared/permissions";
+import {
+  normalizeReceiptPaymentMethod,
+  normalizeCatalogText,
+} from "@shared/concierge/receipt-review";
+import type { TeamUser } from "@shared/concierge/types";
+import type { Db, Tx } from "../../db";
+import type { Actor, Deps } from "../../lib/context";
+import { writeAudit } from "../../lib/audit";
+import { hashRequest } from "../../lib/idempotency";
+import { setTxTimeouts } from "../../lib/tx";
+import { mapActor, listTeam, requireMember } from "./store";
+import { buildReceipt } from "./receipt";
+import {
+  WorkspaceError,
+  text,
+  dateTime,
+  amountCents,
+  checkedTime,
+  version,
+  idList,
+} from "./validation";
+const now = () => new Date().toISOString();
+const integer = (x: unknown, label: string) => {
+  const n = Number(x);
+  if (!Number.isSafeInteger(n) || n < 1)
+    throw new WorkspaceError(`${label}不正确`);
+  return n;
+};
+export async function moduleLock(tx: Tx) {
+  await setTxTimeouts(tx);
+  await tx`SELECT pg_advisory_xact_lock(8012,135)`;
+}
+async function oldRecord(
+  tx: Tx,
+  id: string,
+  kind: string,
+  p: Record<string, any>,
+) {
+  const [r] =
+    await tx`SELECT * FROM concierge_records WHERE id::text=${id} AND kind=${kind} FOR UPDATE`;
+  if (!r) throw new WorkspaceError("记录不存在", 404);
+  if (r.version !== version(p.version))
+    throw new WorkspaceError("资料已被同事修改，请刷新核对后重试", 409);
+  return r;
+}
+async function audit(
+  tx: Tx,
+  actor: Actor,
+  label: string,
+  type: string,
+  id: string,
+  memberId: string,
+  before: any,
+  after: any,
+  reason = "",
+  ip?: string,
+) {
+  await writeAudit(tx, {
+    staffId: actor.id,
+    action: "concierge_record",
+    targetType: `concierge_${type}`,
+    targetId: id,
+    detail: {
+      actorName: actor.displayName,
+      label,
+      objectType: type,
+      memberId,
+      before,
+      after,
+      reason,
+    },
+    ip,
+  });
+}
+async function revision(
+  tx: Tx,
+  type: string,
+  id: string,
+  v: number,
+  snapshot: any,
+  actor: Actor,
+  reason: string,
+) {
+  await tx`INSERT INTO concierge_revisions(object_type,object_id,version,snapshot,actor_id,reason) VALUES(${type},${id},${v},${tx.json(snapshot)},${actor.id},${reason})`;
+}
+async function saveRecord(
+  tx: Tx,
+  kind: string,
+  id: string,
+  memberId: string,
+  data: any,
+  actor: Actor,
+  before: any,
+  reason: string,
+  ip?: string,
+  nativeBookingId: number | null = null,
+  nativeCheckoutId: number | null = null,
+) {
+  const v = before ? before.version + 1 : 1;
+  data.createdByName = before?.data.createdByName || actor.displayName;
+  data.updatedByName = actor.displayName;
+  if (before)
+    await tx`UPDATE concierge_records SET member_id=${memberId || null},data=${tx.json(data)},version=${v},updated_by=${actor.id},updated_at=now(),native_booking_id=${nativeBookingId},native_checkout_id=${nativeCheckoutId} WHERE id=${id}`;
+  else
+    await tx`INSERT INTO concierge_records(id,kind,member_id,data,created_by,updated_by,native_booking_id,native_checkout_id) VALUES(${id},${kind},${memberId || null},${tx.json(data)},${actor.id},${actor.id},${nativeBookingId},${nativeCheckoutId})`;
+  await revision(tx, kind, id, v, data, actor, reason);
+  await audit(
+    tx,
+    actor,
+    (
+      {
+        balance: "核对余额",
+        note: "服务记录",
+        appointment: before ? "调整协调预约" : "登记协调预约",
+        visit: "到店接待",
+        task: "回访交班",
+        receipt: "消费凭证",
+        catalog: "核准常用项目",
+      } as Record<string, string>
+    )[kind] || kind,
+    kind,
+    id,
+    memberId,
+    before?.data ?? null,
+    data,
+    reason,
+    ip,
+  );
+  return { id };
+}
+async function evidence(db: Db, memberId: string, p: Record<string, any>) {
+  const uploadIds = idList(p.uploadIds),
+    receiptIds = idList(p.receiptIds);
+  for (const id of uploadIds) {
+    const [r] =
+      await db`SELECT member_id FROM concierge_uploads WHERE id::text=${id}`;
+    if (!r || r.memberId !== memberId)
+      throw new WorkspaceError("余额照片必须属于当前会员");
+  }
+  for (const id of receiptIds) {
+    const [r] =
+      await db`SELECT member_id,data FROM concierge_records WHERE id::text=${id} AND kind='receipt'`;
+    if (
+      !r ||
+      (r.memberId !== memberId &&
+        !r.data.payments?.some(
+          (p: any) =>
+            normalizeReceiptPaymentMethod(p.method) === "会员扣卡" &&
+            p.memberId === memberId,
+        ))
+    )
+      throw new WorkspaceError("消费依据必须属于当前会员");
+  }
+  return { uploadIds, receiptIds };
+}
+async function assignee(db: Db, id: string) {
+  if (id && !(await listTeam(db)).some((t) => t.id === id && t.active))
+    throw new WorkspaceError("负责人不存在、已停用或没有管家权限");
+}
+async function nativeMember(db: Db, value: unknown) {
+  if (value == null || value === "") return null;
+  const id = integer(value, "企业会员编号");
+  const [r] =
+    await db`SELECT id,merged_into_id,status FROM members WHERE id=${id}`;
+  if (!r || r.mergedIntoId || r.status !== "active")
+    throw new WorkspaceError("企业会员不存在、已合并或不可用");
+  return id;
+}
+async function checkNativeBooking(db: Db, memberId: string, id: number) {
+  const [b] = await db`SELECT member_id FROM bookings WHERE id=${id}`;
+  const [m] =
+    await db`SELECT native_member_id FROM concierge_members WHERE id::text=${memberId}`;
+  if (
+    !b ||
+    !m?.nativeMemberId ||
+    Number(b.memberId) !== Number(m.nativeMemberId)
+  )
+    throw new WorkspaceError("前台预约与当前关联企业会员不匹配");
+}
+async function checkNativeCheckout(db: Db, memberId: string, id: number) {
+  const [m] =
+    await db`SELECT native_member_id FROM concierge_members WHERE id::text=${memberId}`;
+  if (!m?.nativeMemberId)
+    throw new WorkspaceError("请先关联企业会员，再关联同一位会员的结账");
+  const [hit] =
+    await db`SELECT c.id FROM checkouts c WHERE c.id=${id} AND (EXISTS(SELECT 1 FROM checkout_bills cb JOIN visits v ON v.id=cb.visit_id WHERE cb.checkout_id=c.id AND v.member_id=${m.nativeMemberId}) OR EXISTS(SELECT 1 FROM checkout_payments cp WHERE cp.checkout_id=c.id AND cp.method='wallet' AND cp.consumption_id IS NOT NULL AND cp.member_id=${m.nativeMemberId}))`;
+  if (!hit) throw new WorkspaceError("企业结账不属于当前关联会员");
+}
+async function execute(
+  tx: Tx,
+  actor: Actor,
+  action: string,
+  p: Record<string, any>,
+  ip?: string,
+) {
+  const user: TeamUser = mapActor(actor);
+  const ts = now();
+  if (action === "createMember" || action === "updateMember") {
+    const id = action === "createMember" ? randomUUID() : text(p.id, 80, true);
+    const [before] =
+      action === "updateMember"
+        ? await tx`SELECT * FROM concierge_members WHERE id::text=${id} FOR UPDATE`
+        : [];
+    if (
+      action === "updateMember" &&
+      (!before || before.version !== version(p.version))
+    )
+      throw new WorkspaceError("会员资料已更新，请刷新核对", 409);
+    const reason =
+      action === "updateMember"
+        ? text(p.changeReason ?? p.reason, 1000, true)
+        : "管家首次纳入";
+    const name = text(p.name, 60, true),
+      phone = text(p.phone, 30),
+      cardNo = text(p.cardNo, 60),
+      ownerId = text(p.ownerId, 80);
+    if (!phone && !cardNo)
+      throw new WorkspaceError("手机号和收银卡号至少填一项");
+    if (phone && !/^[+\d\s()-]{5,30}$/.test(phone))
+      throw new WorkspaceError("联系电话格式不正确");
+    await assignee(tx, ownerId);
+    const joinedAt = text(p.joinedAt, 10);
+    if (
+      joinedAt &&
+      (!/^\d{4}-\d\d-\d\d$/.test(joinedAt) ||
+        !Number.isFinite(Date.parse(joinedAt)) ||
+        new Date(joinedAt).toISOString().slice(0, 10) !== joinedAt)
+    )
+      throw new WorkspaceError("建档日期不存在");
+    if (
+      p.nativeMemberId !== undefined &&
+      String(p.nativeMemberId || "") !== String(before?.nativeMemberId || "") &&
+      !can(actor, "member.read")
+    )
+      throw new WorkspaceError("关联企业会员需要原生会员查看权限", 403);
+    const nativeId =
+      p.nativeMemberId === undefined
+        ? (before?.nativeMemberId ?? null)
+        : await nativeMember(tx, p.nativeMemberId);
+    if (before && nativeId !== (before.nativeMemberId ?? null)) {
+      const [linked] =
+        await tx`SELECT id FROM concierge_records WHERE member_id::text=${id} AND (native_booking_id IS NOT NULL OR native_checkout_id IS NOT NULL) LIMIT 1`;
+      if (linked)
+        throw new WorkspaceError(
+          "已有前台单据关联，请先核对并解除原关联，再调整企业会员",
+        );
+    }
+    const data = {
+      name,
+      phone,
+      cardNo,
+      ownerId,
+      cardTier: text(p.cardTier, 60),
+      preferences: text(p.preferences, 2000),
+      source: text(p.source, 100),
+      joinedAt,
+    };
+    if (before)
+      await tx`UPDATE concierge_members SET data=${tx.json(data)},native_member_id=${nativeId},version=version+1,updated_by=${actor.id},updated_at=now() WHERE id=${id}`;
+    else
+      await tx`INSERT INTO concierge_members(id,native_member_id,data,created_by,updated_by) VALUES(${id},${nativeId},${tx.json(data)},${actor.id},${actor.id})`;
+    await revision(
+      tx,
+      "member",
+      id,
+      before ? before.version + 1 : 1,
+      { ...data, nativeMemberId: nativeId },
+      actor,
+      reason,
+    );
+    await audit(
+      tx,
+      actor,
+      before ? "修改会员" : "新建会员",
+      "member",
+      id,
+      id,
+      before ? { ...before.data, nativeMemberId: before.nativeMemberId } : null,
+      { ...data, nativeMemberId: nativeId },
+      reason,
+      ip,
+    );
+    if (!before && p.openingBalance !== undefined && p.openingBalance !== "")
+      await saveRecord(
+        tx,
+        "balance",
+        randomUUID(),
+        id,
+        {
+          memberId: id,
+          amountCents: amountCents(p.openingBalance),
+          checkedAt: checkedTime(p.checkedAt),
+          source: "收银人工核对",
+          note: text(p.balanceNote, 1000) || "建档首次核对",
+          actorName: actor.displayName,
+          uploadIds: [],
+          receiptIds: [],
+        },
+        actor,
+        null,
+        "建档首次核对",
+        ip,
+      );
+    return { id };
+  }
+  if (action === "saveBalance") {
+    const memberId = text(p.memberId, 80, true);
+    await requireMember(tx, memberId);
+    const [old] =
+      await tx`SELECT id,data FROM concierge_records WHERE kind='balance' AND member_id::text=${memberId} ORDER BY ordinal DESC LIMIT 1`;
+    const expected =
+      p.expectedBalanceId === null ? null : text(p.expectedBalanceId, 80, true);
+    if ((old ? String(old.id) : null) !== expected)
+      throw new WorkspaceError("余额已被同事核对，请刷新后重试", 409);
+    const checkedAt = checkedTime(p.checkedAt);
+    if (old && checkedAt < old.data.checkedAt)
+      throw new WorkspaceError("较早核对不能覆盖较新的余额");
+    const links = await evidence(tx, memberId, p);
+    return saveRecord(
+      tx,
+      "balance",
+      randomUUID(),
+      memberId,
+      {
+        memberId,
+        amountCents: amountCents(p.amount),
+        checkedAt,
+        note: text(p.note, 1000, true),
+        source: text(p.source, 100) || "收银人工核对",
+        actorName: actor.displayName,
+        ...links,
+      },
+      actor,
+      null,
+      text(p.note, 1000, true),
+      ip,
+    );
+  }
+  if (action === "attachBalanceEvidence") {
+    const id = text(p.balanceId ?? p.id, 80, true);
+    const [old] =
+      await tx`SELECT * FROM concierge_records WHERE id::text=${id} AND kind='balance' FOR UPDATE`;
+    if (!old) throw new WorkspaceError("核对记录不存在", 404);
+    const links = await evidence(tx, String(old.memberId), p);
+    if (!links.uploadIds.length && !links.receiptIds.length)
+      throw new WorkspaceError("请至少选择一张照片或消费凭证");
+    // Balance snapshots are immutable; append evidence in its own table/revision stream.
+    const reason = text(p.reason, 1000) || "补充核对依据";
+    const before = await balanceEvidence(tx, id);
+    for (const uploadId of links.uploadIds)
+      await tx`INSERT INTO concierge_balance_evidence(balance_id,upload_id,created_by) VALUES(${id},${uploadId},${actor.id}) ON CONFLICT DO NOTHING`;
+    for (const receiptId of links.receiptIds)
+      await tx`INSERT INTO concierge_balance_evidence(balance_id,receipt_id,created_by) VALUES(${id},${receiptId},${actor.id}) ON CONFLICT DO NOTHING`;
+    const after = await balanceEvidence(tx, id);
+    await audit(
+      tx,
+      actor,
+      "追加余额证据",
+      "balance",
+      id,
+      String(old.memberId),
+      before,
+      after,
+      reason,
+      ip,
+    );
+    return { id };
+  }
+  if (action === "saveNote") {
+    const memberId = text(p.memberId, 80, true);
+    await requireMember(tx, memberId);
+    return saveRecord(
+      tx,
+      "note",
+      randomUUID(),
+      memberId,
+      {
+        memberId,
+        content: text(p.content, 3000, true),
+        nextAt: dateTime(p.nextAt),
+        actorName: actor.displayName,
+      },
+      actor,
+      null,
+      "",
+      ip,
+    );
+  }
+  if (action === "saveCatalogItem") {
+    if (!can(actor, "concierge.manage"))
+      throw new WorkspaceError("只有管家经理可以核准名称", 403);
+    const id = p.id ? text(p.id, 80, true) : randomUUID(),
+      before = p.id ? await oldRecord(tx, id, "catalog", p) : null;
+    const previous = before?.data || {};
+    const name = text(p.name ?? previous.name, 200, true),
+      spec = text(p.spec ?? previous.spec, 100),
+      code = text(p.code ?? previous.code, 80),
+      aliases = p.aliases ?? previous.aliases ?? [];
+    if (!Array.isArray(aliases) || aliases.length > 50)
+      throw new WorkspaceError("核准别名最多50条");
+    if (
+      (p.active !== undefined && typeof p.active !== "boolean") ||
+      (p.packageIncluded !== undefined &&
+        typeof p.packageIncluded !== "boolean")
+    )
+      throw new WorkspaceError("启用或套餐标记错误");
+    const data = {
+      name,
+      spec,
+      code,
+      aliases: [
+        ...new Map(
+          aliases.map((x) => {
+            const v = text(x, 300, true);
+            return [normalizeCatalogText(v), v];
+          }),
+        ).values(),
+      ],
+      normalizedName: normalizeCatalogText(name),
+      normalizedSpec: normalizeCatalogText(spec),
+      packageIncluded: p.packageIncluded ?? previous.packageIncluded ?? false,
+      active: p.active ?? previous.active ?? true,
+    };
+    return saveRecord(
+      tx,
+      "catalog",
+      id,
+      "",
+      data,
+      actor,
+      before,
+      text(p.reason, 1000) || "经理核准名称",
+      ip,
+    );
+  }
+  if (
+    [
+      "createAppointment",
+      "updateAppointment",
+      "saveVisit",
+      "saveTask",
+      "saveReceipt",
+    ].includes(action)
+  ) {
+    const kind = action.endsWith("Appointment")
+      ? "appointment"
+      : action === "saveVisit"
+        ? "visit"
+        : action === "saveTask"
+          ? "task"
+          : "receipt";
+    const id = p.id ? text(p.id, 80, true) : randomUUID();
+    const before = p.id ? await oldRecord(tx, id, kind, p) : null;
+    const memberId = text(
+      p.memberId === undefined ? before?.data.memberId : p.memberId,
+      80,
+      kind !== "receipt",
+    );
+    if (memberId) await requireMember(tx, memberId);
+    const reason = text(
+      p.changeReason ?? p.reason,
+      1000,
+      kind === "appointment" && !!before,
+    );
+    let data: any;
+    let nativeBookingId: number | null = before?.nativeBookingId ?? null;
+    let nativeCheckoutId: number | null = before?.nativeCheckoutId ?? null;
+    if (kind === "appointment") {
+      const startAt = dateTime(p.startAt, true),
+        endAt = dateTime(p.endAt),
+        status = text(p.status, 20, true),
+        resource = text(p.resource, 100),
+        hostId = text(p.hostId, 80),
+        partySize = integer(p.partySize, "人数");
+      await assignee(tx, hostId);
+      if (
+        partySize > 9999 ||
+        !["待确认", "已确认", "已到店", "已完成", "已取消", "未到店"].includes(
+          status,
+        )
+      )
+        throw new WorkspaceError("人数或预约状态不正确");
+      if (
+        endAt &&
+        (endAt <= startAt ||
+          Date.parse(endAt) - Date.parse(startAt) > 7 * 86400000)
+      )
+        throw new WorkspaceError("结束应晚于开始，单次不超过7天");
+      if (resource && ["已确认", "已到店"].includes(status) && !endAt)
+        throw new WorkspaceError("指定协调资源请填写结束时间");
+      if (resource && endAt && ["已确认", "已到店"].includes(status)) {
+        const [hit] =
+          await tx`SELECT id FROM concierge_records WHERE kind='appointment' AND id::text<>${id} AND lower(data->>'resource')=lower(${resource}) AND data->>'status' IN ('已确认','已到店') AND data->>'startAt'<${endAt} AND data->>'endAt'>${startAt}`;
+        if (hit) throw new WorkspaceError("管家协调安排已有时段冲突", 409);
+      }
+      if (p.nativeBookingId !== undefined) {
+        nativeBookingId =
+          p.nativeBookingId === "" || p.nativeBookingId === null
+            ? null
+            : integer(p.nativeBookingId, "前台预约编号");
+        if (
+          nativeBookingId !== (before?.nativeBookingId ?? null) &&
+          !can(actor, "booking.manage")
+        )
+          throw new WorkspaceError("关联前台正式预约需要原生预约权限", 403);
+      }
+      if (nativeBookingId)
+        await checkNativeBooking(tx, memberId, nativeBookingId);
+      data = {
+        memberId,
+        startAt,
+        endAt,
+        status,
+        resource,
+        hostId,
+        partySize,
+        service: text(p.service, 100, true),
+        note: text(p.note, 2000),
+        changeReason: reason,
+        nativeBookingId,
+      };
+    }
+    if (kind === "visit") {
+      const hostId = text(p.hostId, 80),
+        partySize = integer(p.partySize, "人数"),
+        status = text(p.status, 20, true),
+        appointmentId = text(p.appointmentId, 80);
+      await assignee(tx, hostId);
+      if (partySize > 9999 || !["接待中", "已完成"].includes(status))
+        throw new WorkspaceError("接待人数或状态不正确");
+      if (appointmentId) {
+        const [appt] =
+          await tx`SELECT * FROM concierge_records WHERE id::text=${appointmentId} AND kind='appointment' FOR UPDATE`;
+        if (
+          !appt ||
+          appt.memberId !== memberId ||
+          ["已取消", "未到店"].includes(appt.data.status)
+        )
+          throw new WorkspaceError("关联协调预约不匹配或已取消");
+        if (appt.data.resource && appt.data.endAt && status === "接待中") {
+          const [hit] =
+            await tx`SELECT id FROM concierge_records WHERE kind='appointment' AND id<>${appt.id} AND lower(data->>'resource')=lower(${appt.data.resource}) AND data->>'status' IN ('已确认','已到店') AND data->>'startAt'<${appt.data.endAt} AND data->>'endAt'>${appt.data.startAt}`;
+          if (hit)
+            throw new WorkspaceError(
+              "协调资源已有冲突，请先调整预约再开始接待",
+              409,
+            );
+        }
+        if (
+          before?.data.appointmentId &&
+          before.data.appointmentId !== appointmentId
+        )
+          throw new WorkspaceError("接待已关联预约，不能换单");
+        await saveRecord(
+          tx,
+          "appointment",
+          String(appt.id),
+          memberId,
+          { ...appt.data, status: status === "已完成" ? "已完成" : "已到店" },
+          actor,
+          appt,
+          "接待状态接续",
+          ip,
+          appt.nativeBookingId,
+        );
+      }
+      data = {
+        memberId,
+        hostId,
+        partySize,
+        status,
+        appointmentId,
+        feedback: text(p.feedback, 2000),
+        pending: text(p.pending, 1000),
+      };
+    }
+    if (kind === "task") {
+      const taskKind = text(p.kind, 10, true),
+        status = text(p.status, 20, true),
+        assigneeId = text(p.assigneeId, 80, true);
+      await assignee(tx, assigneeId);
+      if (
+        !["回访", "交班"].includes(taskKind) ||
+        !["待处理", "处理中", "待接收", "已接收", "已完成"].includes(status)
+      )
+        throw new WorkspaceError("待办类别或状态不正确");
+      if (
+        before &&
+        before.data.assigneeId !== assigneeId &&
+        !can(actor, "concierge.manage")
+      )
+        throw new WorkspaceError("已交出的事项改派需经理处理", 403);
+      if (
+        status === "已接收" &&
+        String(actor.id) !== assigneeId &&
+        !can(actor, "concierge.manage")
+      )
+        throw new WorkspaceError("请由接班人确认接收", 403);
+      const result = text(p.result, 1000);
+      if (status === "已完成" && !result)
+        throw new WorkspaceError("完成事项请记录实际结果");
+      data = {
+        memberId,
+        kind: taskKind,
+        status,
+        assigneeId,
+        category: text(p.category, 60),
+        content: text(p.content, 1500, true),
+        dueAt: dateTime(p.dueAt, true),
+        result,
+        nextAction: text(p.nextAction, 1000),
+      };
+    }
+    if (kind === "receipt") {
+      data = await buildReceipt(
+        tx,
+        p,
+        before?.data ?? null,
+        user,
+        id,
+        memberId,
+      );
+      const references =
+        await tx`SELECT b.member_id FROM concierge_balance_evidence e JOIN concierge_records b ON b.id=e.balance_id WHERE e.receipt_id::text=${id} UNION SELECT member_id FROM concierge_records WHERE kind='balance' AND (data->'receiptIds') ? ${id}`;
+      for (const ref of references)
+        if (
+          ref.memberId !== memberId &&
+          !data.payments.some(
+            (pay: any) =>
+              normalizeReceiptPaymentMethod(pay.method) === "会员扣卡" &&
+              pay.memberId === ref.memberId,
+          )
+        )
+          throw new WorkspaceError(
+            "此单已作为其他扣卡会员的余额依据，不能移除该会员关联；请另存更正依据",
+          );
+      // Photo ownership is checked separately from the current receipt member: initial uploads may be unmatched.
+      for (const image of data.uploadIds) {
+        const [u] =
+          await tx`SELECT member_id FROM concierge_uploads WHERE id::text=${image}`;
+        if (u?.memberId && memberId && u.memberId !== memberId)
+          throw new WorkspaceError("凭证照片属于另一位会员，请核对");
+      }
+      if (p.nativeCheckoutId !== undefined) {
+        nativeCheckoutId =
+          p.nativeCheckoutId === "" || p.nativeCheckoutId === null
+            ? null
+            : integer(p.nativeCheckoutId, "企业结账编号");
+        if (
+          nativeCheckoutId !== (before?.nativeCheckoutId ?? null) &&
+          !can(actor, "frontdesk.read")
+        )
+          throw new WorkspaceError("关联结账需要原生前台查看权限", 403);
+      }
+      if (nativeCheckoutId)
+        await checkNativeCheckout(tx, memberId, nativeCheckoutId);
+      data.nativeCheckoutId = nativeCheckoutId;
+    }
+    return saveRecord(
+      tx,
+      kind,
+      id,
+      memberId,
+      data,
+      actor,
+      before,
+      reason,
+      ip,
+      nativeBookingId,
+      nativeCheckoutId,
+    );
+  }
+  throw new WorkspaceError(
+    "不支持的管家业务操作；账号和密码请在企业员工后台管理",
+  );
+}
+export async function balanceEvidence(db: Db, id: string) {
+  const rows =
+    await db`SELECT upload_id,receipt_id FROM concierge_balance_evidence WHERE balance_id::text=${id} ORDER BY id`;
+  return {
+    uploadIds: rows.flatMap((r) => (r.uploadId ? [String(r.uploadId)] : [])),
+    receiptIds: rows.flatMap((r) => (r.receiptId ? [String(r.receiptId)] : [])),
+  };
+}
+export async function mutate(
+  deps: Deps,
+  actor: Actor,
+  action: string,
+  p: Record<string, any>,
+  requestId: string,
+  ip?: string,
+) {
+  if (!can(actor, "concierge.operate"))
+    throw new WorkspaceError("没有管家录入权限", 403);
+  const key = text(requestId, 100, true),
+    hash = hashRequest({ action, payload: p });
+  try {
+    return await deps.sql.begin(async (tx) => {
+      await moduleLock(tx);
+      const [old] =
+        await tx`SELECT * FROM concierge_operations WHERE actor_id=${actor.id} AND request_id=${key}`;
+      if (old) {
+        if (old.abandoned)
+          throw new WorkspaceError(
+            "此操作编号已标记不再执行，请核对记录后重新录入",
+            409,
+          );
+        if (old.requestHash !== hash)
+          throw new WorkspaceError(
+            "相同操作编号的内容不一致，请核对原请求",
+            409,
+          );
+        return old.response;
+      }
+      const response = await execute(tx, actor, action, p, ip);
+      await tx`INSERT INTO concierge_operations(actor_id,request_id,request_hash,response) VALUES(${actor.id},${key},${hash},${tx.json(response)})`;
+      return response;
+    });
+  } catch (error) {
+    const e = error as { code?: string; constraint_name?: string };
+    if (e.code === "23505")
+      throw new WorkspaceError(
+        "会员卡号、关联会员、消费单、接待或名称已经存在，请打开已有记录核对",
+        409,
+      );
+    throw error;
+  }
+}
