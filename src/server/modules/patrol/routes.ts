@@ -38,10 +38,10 @@ export function registerPatrolAdminRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/erp/patrol/day', { preHandler: read }, async (req) => patrolDayAdmin(sql, config, req.query ?? {}));
 
   // 巡场记录：按营业日起止、场所、人筛选；导出与页面同一个查询
-  app.get('/api/erp/patrol/records', { preHandler: read }, async (req) => patrolRecords(sql, req.query ?? {}));
+  app.get('/api/erp/patrol/records', { preHandler: read }, async (req) => patrolRecords(sql, config, req.query ?? {}));
   app.get('/api/erp/patrol/records/export', { preHandler: read }, async (req, reply) => {
     const q = parse(RecordsQuery, req.query ?? {});
-    return csvReply(reply, `巡场记录-${q.from}至${q.to}.csv`, patrolRecordsCsv(await patrolRecords(sql, q), config.timezone));
+    return csvReply(reply, `巡场记录-${q.from}至${q.to}.csv`, patrolRecordsCsv(await patrolRecords(sql, config, q), config.timezone));
   });
   // 记录筛选用的场所：含停用的、不含场所码，看记录的权限就能取
   app.get('/api/erp/patrol/point-options', { preHandler: read }, async () => ({ points: await patrolPointOptions(sql) }));
@@ -53,10 +53,10 @@ export function registerPatrolAdminRoutes(app: FastifyInstance, deps: Deps) {
   app.put('/api/erp/patrol/points/:id', { preHandler: manage }, async (req) => ({ point: await updatePatrolPoint(sql, parse(idParam, req.params).id, req.body, ctxOf(req)) }));
   app.post('/api/erp/patrol/points/:id/token', { preHandler: manage }, async (req) => ({ point: await rotatePatrolToken(sql, parse(idParam, req.params).id, req.body, ctxOf(req)) }));
 
-  // 设置：巡场部门、手机上能看记录的人
+  // 设置：巡场部门、手机上能看记录的人、巡场间隔
   app.get('/api/erp/patrol/settings', { preHandler: manage }, async () => patrolSettingsAdmin(sql));
   app.put('/api/erp/patrol/settings', { preHandler: manage }, async (req) => {
-    await savePatrolSettings(sql, req.body, ctxOf(req));
+    await savePatrolSettings(sql, config, req.body, ctxOf(req));
     return patrolSettingsAdmin(sql);
   });
 }

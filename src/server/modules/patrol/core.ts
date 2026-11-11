@@ -1,7 +1,8 @@
 // 8.0.9 安保巡场（docs/PATROL_V809.md）：设置、谁能用、场所与场所码、巡场打卡、每天的清单、记录与导出、作废。
+// 8.0.11 巡场轮次（第 11 节）：营业日按巡场间隔分轮，同一个场所每轮只记一次打卡（XC13–XC15）。
 //
-// 锁（AGENTS.md）：打卡：员工一行（共享锁，与停用、重新开通串行，同食堂打卡）→「员工 + 场所」的咨询锁（2 分钟内去重时串行）
-// → 场所一行（共享锁，与停用、换码串行）→ 写打卡，同一个操作编号靠唯一约束兜底；场所：新建先取操作编号的咨询锁（与「确认作废」串行），
+// 锁（AGENTS.md）：打卡：员工一行（共享锁，与停用、重新开通串行，同食堂打卡）→「场所」的咨询锁（同一个场所的打卡串行，判断这一轮有没有人打过）
+// → 场所一行（共享锁，与停用、换码串行）→ 写打卡，同一个操作编号靠唯一约束兜底、同一个场所同一轮靠部分唯一索引兜底；场所：新建先取操作编号的咨询锁（与「确认作废」串行），
 // 名称靠部分唯一索引兜底，修改、停用 / 启用、换码只锁场所一行（带版本号）；作废打卡只锁那一条；设置走规则锁（带版本号）。
 
 import { randomBytes } from 'node:crypto';
@@ -12,14 +13,20 @@ import {
   MAX_PATROL_POINT_AREA,
   MAX_PATROL_POINT_NAME,
   MAX_PATROL_VOID_REASON,
-  PATROL_DEDUP_MINUTES,
   PATROL_LATE_MINUTES,
   PATROL_MAX_DAYS,
   PATROL_MAX_LATE_HOURS,
+  PATROL_ROUND_DEFAULT_MINUTES,
+  PATROL_ROUND_MAX_MINUTES,
+  PATROL_ROUND_MIN_MINUTES,
+  PATROL_ROUND_STEP_MINUTES,
   PATROL_TOKEN_LENGTH,
   PATROL_VIA_LABELS,
   PATROL_VIAS,
   parsePatrolToken,
+  patrolRoundAt,
+  patrolRoundMinutesOn,
+  patrolRoundsOf,
   type PatrolApp,
   type PatrolCheckinResult,
   type PatrolCheckinRow,
@@ -29,6 +36,10 @@ import {
   type PatrolPointsAdmin,
   type PatrolPortalDay,
   type PatrolRecords,
+  type PatrolRound,
+  type PatrolRoundChange,
+  type PatrolRoundSpan,
+  type PatrolScan,
   type PatrolSettings,
   type PatrolSettingsAdmin,
 } from '@shared/patrol';
@@ -60,26 +71,62 @@ export async function patrolDateOf(db: Db, config: AppConfig, at: Date): Promise
   return businessDateOf(at, config.timezone, s.businessDayStartHour);
 }
 
+/** 某个营业日的各轮（按这一天的巡场间隔，XC13） */
+async function roundsOn(db: Db, config: AppConfig, date: string, settings?: PatrolSettings): Promise<{ minutes: number; rounds: PatrolRoundSpan[] }> {
+  const s = settings ?? (await loadPatrolSettings(db));
+  const { businessDayStartHour } = await loadSettings(db);
+  const minutes = patrolRoundMinutesOn(s.roundChanges, date);
+  return { minutes, rounds: patrolRoundsOf(date, config.timezone, businessDayStartHour, minutes) };
+}
+
 const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
 // ───────────────────────── 设置（XC1、XC2） ─────────────────────────
 
 const idList = (x: unknown) => (Array.isArray(x) ? [...new Set(x.filter((n): n is number => typeof n === 'number' && Number.isInteger(n) && n > 0))] : []);
 
+const validRoundMinutes = (n: unknown): n is number =>
+  typeof n === 'number' && Number.isInteger(n) && n >= PATROL_ROUND_MIN_MINUTES && n <= PATROL_ROUND_MAX_MINUTES && n % PATROL_ROUND_STEP_MINUTES === 0;
+
+const roundChangeList = (x: unknown): PatrolRoundChange[] =>
+  (Array.isArray(x) ? x : [])
+    .filter((c): c is PatrolRoundChange => !!c && typeof c === 'object' && typeof c.from === 'string' && ISO_DATE.test(c.from) && validRoundMinutes(c.minutes))
+    .map((c) => ({ from: c.from, minutes: c.minutes }))
+    .sort((a, b) => a.from.localeCompare(b.from));
+
+/** 最多留这么多条巡场间隔的改动（够看一年多以前的） */
+const MAX_ROUND_CHANGES = 400;
+
 export async function loadPatrolSettings(db: Db): Promise<PatrolSettings> {
   const [row] = await db<{ value: Record<string, unknown> }[]>`SELECT value FROM settings WHERE key = 'patrol'`;
   const v = row?.value ?? {};
-  return { departmentIds: idList(v.departmentIds), viewerIds: idList(v.viewerIds), rev: typeof v.rev === 'number' ? v.rev : 0 };
+  const roundChanges = roundChangeList(v.roundChanges);
+  return {
+    departmentIds: idList(v.departmentIds),
+    viewerIds: idList(v.viewerIds),
+    roundMinutes: roundChanges.at(-1)?.minutes ?? PATROL_ROUND_DEFAULT_MINUTES,
+    roundChanges,
+    rev: typeof v.rev === 'number' ? v.rev : 0,
+  };
 }
 
 const SettingsInput = z.object({
   departmentIds: z.array(z.number().int().positive(), '请选巡场部门').max(20, '巡场部门最多 20 个'),
   viewerIds: z.array(z.number().int().positive(), '请选能看记录的人').max(50, '能看记录的人最多 50 位'),
+  /** 巡场间隔（分钟，XC13）：不传就不改 */
+  roundMinutes: z
+    .number('巡场间隔要是数字')
+    .int('巡场间隔按半小时调')
+    .min(PATROL_ROUND_MIN_MINUTES, `巡场间隔最短 ${PATROL_ROUND_MIN_MINUTES} 分钟`)
+    .max(PATROL_ROUND_MAX_MINUTES, '巡场间隔最长 24 小时')
+    .refine((n) => n % PATROL_ROUND_STEP_MINUTES === 0, '巡场间隔按半小时调')
+    .optional(),
   /** 打开时看到的版本：别人刚改过就拒绝，不把别人的修改盖掉 */
   rev: z.number('缺少版本号，请刷新').int().min(0),
 });
 
-export async function savePatrolSettings(sql: Sql, raw: unknown, ctx: OpContext): Promise<PatrolSettings> {
+/** 保存设置；改了巡场间隔的，从今天（营业日）起按新的间隔分轮，以前的营业日照旧（XC15） */
+export async function savePatrolSettings(sql: Sql, config: AppConfig, raw: unknown, ctx: OpContext): Promise<PatrolSettings> {
   const input = parse(SettingsInput, raw);
   const departmentIds = [...new Set(input.departmentIds)];
   const viewerIds = [...new Set(input.viewerIds)];
@@ -97,7 +144,12 @@ export async function savePatrolSettings(sql: Sql, raw: unknown, ctx: OpContext)
         const rows = await tx<{ id: number }[]>`SELECT id FROM canteen_employees WHERE id IN ${tx(viewerIds)}`;
         if (rows.length !== viewerIds.length) throw badRequest('选的员工有不存在的，请刷新');
       }
-      return { departmentIds, viewerIds, rev: before.rev + 1 };
+      let roundChanges = before.roundChanges;
+      if (input.roundMinutes !== undefined && input.roundMinutes !== before.roundMinutes) {
+        const today = await patrolDateOf(tx, config, new Date());
+        roundChanges = [...before.roundChanges.filter((c) => c.from < today), { from: today, minutes: input.roundMinutes }].slice(-MAX_ROUND_CHANGES);
+      }
+      return { departmentIds, viewerIds, roundMinutes: roundChanges.at(-1)?.minutes ?? PATROL_ROUND_DEFAULT_MINUTES, roundChanges, rev: before.rev + 1 };
     },
     ctx,
   );
@@ -298,6 +350,7 @@ const MAX_AHEAD_MS = 2 * MINUTE;
 interface CheckinFull {
   id: number;
   employeeId: number;
+  employeeName: string;
   pointName: string;
   area: string;
   scannedAt: string;
@@ -308,39 +361,45 @@ interface CheckinFull {
 
 async function checkinById(db: Db, where: Fragment): Promise<CheckinFull | null> {
   const [c] = await db<CheckinFull[]>`
-    SELECT c.id, c.employee_id, c.point_name, p.area, c.scanned_at, c.recorded_at, c.business_date, c.point_id
-    FROM patrol_checkins c JOIN patrol_points p ON p.id = c.point_id WHERE ${where} LIMIT 1`;
+    SELECT c.id, c.employee_id, c.employee_name, c.point_name, p.area, c.scanned_at, c.recorded_at, c.business_date, c.point_id
+    FROM patrol_checkins c JOIN patrol_points p ON p.id = c.point_id WHERE ${where} ORDER BY c.scanned_at, c.id LIMIT 1`;
   return c ?? null;
 }
 
-async function resultOf(db: Db, c: CheckinFull, status: PatrolCheckinResult['status']): Promise<PatrolCheckinResult> {
+async function resultOf(db: Db, c: CheckinFull, status: PatrolCheckinResult['status'], viewerId: number, rounds: readonly PatrolRoundSpan[]): Promise<PatrolCheckinResult> {
   const [n] = await db<{ n: number }[]>`
     SELECT count(*)::int AS n FROM patrol_checkins WHERE point_id = ${c.pointId} AND business_date = ${c.businessDate} AND voided_at IS NULL`;
   const late = Date.parse(c.recordedAt) - Date.parse(c.scannedAt) > PATROL_LATE_MINUTES * MINUTE;
-  return { status, checkin: { id: Number(c.id), pointName: c.pointName, area: c.area, at: c.scannedAt, late }, pointCount: n!.n };
+  return {
+    status,
+    checkin: { id: Number(c.id), pointName: c.pointName, area: c.area, at: c.scannedAt, late, employeeName: c.employeeName, mine: Number(c.employeeId) === viewerId },
+    round: patrolRoundAt(rounds, c.scannedAt),
+    pointCount: n!.n,
+  };
 }
 
 /**
  * 同一个操作编号已经交过：原样返回第一次的结果（回复没收到时重提、断网补交重复交）；别人的编号拒绝。
- * 记下的那一笔返回「打卡成功」；当时算作 2 分钟内重复（「刚打过卡」）的，返回指向的那一条——那一条之后被作废也一样，
- * 不会因为重提再记一条新的（Codex 审查 94f53d5，迁移 112）
+ * 记下的那一笔返回「打卡成功」；当时算作这一轮已经打过（「这一轮已打过卡」，8.0.9 是 2 分钟内重复）的，返回指向的那一条——
+ * 那一条之后被作废也一样，不会因为重提再记一条新的（Codex 审查 94f53d5，迁移 112）
  */
-async function replayedCheckin(db: Db, clientKey: string, employeeId: number): Promise<PatrolCheckinResult | null> {
+async function replayedCheckin(db: Db, config: AppConfig, clientKey: string, employeeId: number): Promise<PatrolCheckinResult | null> {
   const c = await checkinById(db, db`c.client_key = ${clientKey}`);
   if (c) {
     if (Number(c.employeeId) !== employeeId) throw conflict('IDEMPOTENCY_CONFLICT', '这一笔的操作编号不对，请刷新后再扫');
-    return resultOf(db, c, 'ok');
+    return resultOf(db, c, 'ok', employeeId, (await roundsOn(db, config, c.businessDate)).rounds);
   }
   const [r] = await db<{ checkinId: number; employeeId: number }[]>`SELECT checkin_id, employee_id FROM patrol_checkin_repeats WHERE client_key = ${clientKey}`;
   if (!r) return null;
   if (Number(r.employeeId) !== employeeId) throw conflict('IDEMPOTENCY_CONFLICT', '这一笔的操作编号不对，请刷新后再扫');
   const first = await checkinById(db, db`c.id = ${r.checkinId}`);
-  return resultOf(db, first!, 'already');
+  return resultOf(db, first!, 'already', employeeId, (await roundsOn(db, config, first!.businessDate)).rounds);
 }
 
 /**
  * 巡场打卡：登录的员工要在巡场部门（XC1）；扫到的码要是启用场所的当前码（换过码的旧码认不出，XC8；停用的提示停用，XC9）；
- * 同一个人 2 分钟内重复扫同一个码只记一次（XC5）；扫到的时间不能比门店快 2 分钟以上、不能是 24 小时以前（XC7）。
+ * 同一个场所每一轮只记一次打卡（XC14，不论是谁打的；8.0.9 的「同一个人 2 分钟内只记一次」并进这一条）；
+ * 扫到的时间不能比门店快 2 分钟以上、不能是 24 小时以前（XC7）。
  */
 export async function recordPatrolCheckin(
   deps: { sql: Sql; config: AppConfig },
@@ -353,7 +412,7 @@ export async function recordPatrolCheckin(
   // 这一笔是别的员工扫的（这台手机后来换了人登录）：不记、不算拒绝，手机上留着等那一位登录再交
   if (input.employeeId !== employee.id)
     throw conflict('PATROL_OTHER_EMPLOYEE', '这台手机现在登录的是另一位员工：这一笔是之前那位扫的，留在手机上，等他登录以后再交');
-  const replay = await replayedCheckin(sql, input.clientKey, employee.id);
+  const replay = await replayedCheckin(sql, config, input.clientKey, employee.id);
   if (replay) return replay;
   const token = parsePatrolToken(input.code);
   if (!token) throw unprocessable('PATROL_CODE_INVALID', '这不是巡场的场所码：请扫贴在场所里的巡场二维码');
@@ -362,6 +421,9 @@ export async function recordPatrolCheckin(
   if (atMs < nowMs - PATROL_MAX_LATE_HOURS * 60 * MINUTE) throw unprocessable('SCAN_TOO_OLD', `这一笔是 ${PATROL_MAX_LATE_HOURS} 小时以前扫的，太久了，不能补交`);
   const settings = await loadPatrolSettings(sql);
   const date = await patrolDateOf(sql, config, new Date(atMs));
+  const { minutes, rounds } = await roundsOn(sql, config, date, settings);
+  const round = patrolRoundAt(rounds, new Date(atMs));
+  if (!round) throw unprocessable('PATROL_ROUND_UNKNOWN', '算不出这一笔在第几轮，请刷新后再扫');
 
   return sql.begin(async (tx) => {
     await setTxTimeouts(tx);
@@ -376,44 +438,57 @@ export async function recordPatrolCheckin(
     }
     const [p] = await tx<{ id: number; name: string; area: string; active: boolean }[]>`SELECT id, name, area, active FROM patrol_points WHERE token = ${token}`;
     if (!p) throw unprocessable('PATROL_CODE_UNKNOWN', '认不出这个码：可能已经换过码了，请找管理员要新打印的码');
-    // 同一个人同一个场所的打卡排队：2 分钟内去重时，同时扫的两笔不会都记上
-    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`patrol:${e.id}:${p.id}`}, 0))`;
+    // 同一个场所的打卡排队：判断这一轮有没有人打过时，同时扫的两笔不会都记上（XC14）
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`patrol:point:${p.id}`}, 0))`;
     const [point] = await tx<{ token: string; active: boolean; name: string }[]>`SELECT token, active, name FROM patrol_points WHERE id = ${p.id} FOR SHARE`;
     if (!point || point.token !== token) throw unprocessable('PATROL_CODE_UNKNOWN', '认不出这个码：刚换过码了，请找管理员要新打印的码');
     if (!point.active) throw unprocessable('PATROL_POINT_INACTIVE', `「${point.name}」已停用，不用巡了`);
     // 同一个编号在等锁时被另一个请求记下（并发重提）：原样返回
-    const again = await replayedCheckin(tx, input.clientKey, e.id);
+    const again = await replayedCheckin(tx, config, input.clientKey, e.id);
     if (again) return again;
+    // 这一轮（按扫到的时间）这个场所已经有没作废的打卡：不另记（按时间找，巡场间隔当天改过也照样只认一条）
     const dup = await checkinById(
       tx,
-      tx`c.employee_id = ${e.id} AND c.point_id = ${p.id} AND c.voided_at IS NULL
-         AND c.scanned_at > ${new Date(atMs - PATROL_DEDUP_MINUTES * MINUTE)} AND c.scanned_at < ${new Date(atMs + PATROL_DEDUP_MINUTES * MINUTE)}`,
+      tx`c.point_id = ${p.id} AND c.voided_at IS NULL AND c.scanned_at >= ${new Date(round.start)} AND c.scanned_at < ${new Date(round.end)}`,
     );
     if (dup) {
-      // 这一笔也记下操作编号：回复丢了原样重提时返回同样的「刚打过卡」，不看那一条之后有没有被作废
+      // 这一笔也记下操作编号：回复丢了原样重提时返回同样的「这一轮已打过卡」，不看那一条之后有没有被作废
       await tx`INSERT INTO patrol_checkin_repeats (client_key, checkin_id, employee_id) VALUES (${input.clientKey}, ${dup.id}, ${e.id})`;
-      return resultOf(tx, dup, 'already');
+      return resultOf(tx, dup, 'already', e.id, rounds);
     }
-    const [row] = await tx<{ id: number }[]>`
-      INSERT INTO patrol_checkins (point_id, point_name, employee_id, emp_no, employee_name, department_name, business_date, scanned_at, via, client_key)
-      VALUES (${p.id}, ${point.name}, ${e.id}, ${e.empNo}, ${e.name}, ${e.department}, ${date}, ${new Date(atMs)}, ${input.via}, ${input.clientKey})
-      RETURNING id`;
-    const c = await checkinById(tx, tx`c.id = ${row!.id}`);
-    return resultOf(tx, c!, 'ok');
+    try {
+      await tx.savepoint(async (sp) => {
+        await sp`
+          INSERT INTO patrol_checkins (point_id, point_name, employee_id, emp_no, employee_name, department_name, business_date, scanned_at, via, client_key, round_start, round_minutes)
+          VALUES (${p.id}, ${point.name}, ${e.id}, ${e.empNo}, ${e.name}, ${e.department}, ${date}, ${new Date(atMs)}, ${input.via}, ${input.clientKey},
+                  ${new Date(round.start)}, ${minutes})`;
+      });
+    } catch (error) {
+      // 同一轮的判断在锁里，这里只是兜底（巡场间隔刚好在这一刻改了）：请再扫一次，按新的间隔再判断
+      if (isUniqueViolation(error, 'patrol_checkins_round_uq')) throw conflict('PATROL_ROUND_TAKEN', '这个场所这一轮刚有人打过卡：请再扫一次看看');
+      throw error;
+    }
+    const c = await checkinById(tx, tx`c.client_key = ${input.clientKey}`);
+    return resultOf(tx, c!, 'ok', e.id, rounds);
   });
 }
 
 // ───────────────────────── 每天的清单（后台「今天」、手机「巡场记录」） ─────────────────────────
 
-export async function patrolDay(db: Db, date: string, today: string): Promise<PatrolDay> {
-  const points = await db<{ id: number; name: string; area: string; active: boolean }[]>`
-    SELECT p.id, p.name, p.area, p.active FROM patrol_points p
+/**
+ * 一天的巡场清单：每个场所这一天的打卡，按轮分好（XC13–XC15）。一个场所在某一轮要不要巡：这一轮结束前建好的启用场所要巡；
+ * 停用的场所只有这一轮有人巡过才列出来。今天的各轮按 nowMs 分成过去、正在巡、还没到。
+ */
+export async function patrolDay(db: Db, config: AppConfig, date: string, today: string, nowMs = Date.now()): Promise<PatrolDay> {
+  const { minutes, rounds: spans } = await roundsOn(db, config, date);
+  const points = await db<{ id: number; name: string; area: string; active: boolean; createdAt: string }[]>`
+    SELECT p.id, p.name, p.area, p.active, p.created_at FROM patrol_points p
     WHERE p.active OR EXISTS (SELECT 1 FROM patrol_checkins c WHERE c.point_id = p.id AND c.business_date = ${date} AND c.voided_at IS NULL)
     ORDER BY p.sort_order, p.id`;
   const scans = await db<{ id: number; pointId: number; at: string; recordedAt: string; employeeId: number; name: string; empNo: string; via: PatrolDay['points'][number]['scans'][number]['via'] }[]>`
     SELECT c.id, c.point_id, c.scanned_at AS at, c.recorded_at, c.employee_id, c.employee_name AS name, c.emp_no, c.via
     FROM patrol_checkins c WHERE c.business_date = ${date} AND c.voided_at IS NULL ORDER BY c.scanned_at, c.id`;
-  const byPoint = new Map<number, PatrolDay['points'][number]['scans']>();
+  const byPoint = new Map<number, PatrolScan[]>();
   const people = new Map<number, PatrolDay['people'][number]>();
   for (const s of scans) {
     const late = Date.parse(s.recordedAt) - Date.parse(s.at) > PATROL_LATE_MINUTES * MINUTE;
@@ -426,15 +501,32 @@ export async function patrolDay(db: Db, date: string, today: string): Promise<Pa
   }
   const rows = points.map((p) => {
     const list = byPoint.get(Number(p.id)) ?? [];
-    return { id: Number(p.id), name: p.name, area: p.area, active: p.active, count: list.length, scans: list };
+    const created = Date.parse(p.createdAt);
+    const byRound = spans.map((r) => {
+      const inRound = list.filter((x) => Date.parse(x.at) >= Date.parse(r.start) && Date.parse(x.at) < Date.parse(r.end));
+      if (inRound.length) return inRound;
+      return p.active && created < Date.parse(r.end) ? [] : null;
+    });
+    return { id: Number(p.id), name: p.name, area: p.area, active: p.active, count: list.length, scans: list, byRound };
   });
+  const rounds: PatrolRound[] = spans.map((r, i) => {
+    const state: PatrolRound['state'] =
+      date < today || nowMs >= Date.parse(r.end) ? 'past' : nowMs >= Date.parse(r.start) ? 'current' : 'future';
+    const cells = rows.map((p) => p.byRound[i]).filter((x): x is PatrolScan[] => x !== null);
+    return { ...r, state, expected: cells.length, done: cells.filter((x) => x.length > 0).length };
+  });
+  const current = rounds.find((r) => r.state === 'current') ?? null;
   return {
     date,
     today,
+    roundMinutes: minutes,
+    rounds,
+    currentRound: current?.no ?? null,
     points: rows,
     people: [...people.values()].sort((a, b) => b.count - a.count || a.empNo.localeCompare(b.empNo)),
     total: scans.length,
-    missing: rows.filter((p) => p.active && p.count === 0).length,
+    missed: rounds.filter((r) => r.state === 'past').reduce((n, r) => n + r.expected - r.done, 0),
+    currentMissing: current ? current.expected - current.done : null,
   };
 }
 
@@ -446,7 +538,7 @@ export async function patrolDayAdmin(db: Db, config: AppConfig, raw: unknown): P
   const today = await patrolDateOf(db, config, new Date());
   const date = q.date ?? today;
   checkDayInRange(date, today);
-  return patrolDay(db, date, today);
+  return patrolDay(db, config, date, today);
 }
 
 function checkDayInRange(date: string, today: string) {
@@ -463,7 +555,7 @@ export async function patrolDayPortal(db: Db, config: AppConfig, employee: Cante
   const date = q.date ?? today;
   if (date !== today && !access.view) throw forbidden('只能看今天的巡场；要看以前的请找管理员');
   checkDayInRange(date, today);
-  const day = await patrolDay(db, date, today);
+  const day = await patrolDay(db, config, date, today, nowMs);
   const mine = day.points.reduce((n, p) => n + p.scans.filter((s) => s.employeeId === employee.id).length, 0);
   return { ...day, mine, canViewHistory: access.view };
 }
@@ -480,11 +572,11 @@ export const RecordsQuery = z.object({
 });
 export type PatrolRecordsQuery = z.output<typeof RecordsQuery>;
 
-export async function patrolRecords(db: Db, raw: unknown): Promise<PatrolRecords> {
+export async function patrolRecords(db: Db, config: AppConfig, raw: unknown): Promise<PatrolRecords> {
   const q = parse(RecordsQuery, raw);
   if (q.from > q.to) throw badRequest('开始日期不能晚于结束日期');
   if (daysBetween(q.from, q.to) >= PATROL_MAX_DAYS) throw badRequest(`一次最多查 ${PATROL_MAX_DAYS} 天`);
-  const rows = await db<(Omit<PatrolCheckinRow, 'late'> & { late: boolean })[]>`
+  const rows = await db<Omit<PatrolCheckinRow, 'roundNo'>[]>`
     SELECT c.id, c.point_id, c.point_name, c.employee_id, c.emp_no, c.employee_name AS name, c.department_name AS department,
            c.business_date, c.scanned_at, c.recorded_at, c.via,
            (c.recorded_at - c.scanned_at) > ${`${PATROL_LATE_MINUTES} minutes`}::interval AS late,
@@ -495,7 +587,17 @@ export async function patrolRecords(db: Db, raw: unknown): Promise<PatrolRecords
       AND ${q.employeeId ? db`c.employee_id = ${q.employeeId}` : db`true`}
       AND ${q.voided === 'exclude' ? db`c.voided_at IS NULL` : db`true`}
     ORDER BY c.scanned_at DESC, c.id DESC`;
-  const list = rows.map((r) => ({ ...r, id: Number(r.id), pointId: Number(r.pointId), employeeId: Number(r.employeeId) }));
+  // 每条在那一天的第几轮（按那一天的巡场间隔）
+  const settings = await loadPatrolSettings(db);
+  const roundsByDate = new Map<string, PatrolRoundSpan[]>();
+  for (const date of new Set(rows.map((r) => r.businessDate))) roundsByDate.set(date, (await roundsOn(db, config, date, settings)).rounds);
+  const list = rows.map((r) => ({
+    ...r,
+    id: Number(r.id),
+    pointId: Number(r.pointId),
+    employeeId: Number(r.employeeId),
+    roundNo: patrolRoundAt(roundsByDate.get(r.businessDate) ?? [], r.scannedAt)?.no ?? null,
+  }));
   return { rows: list, total: list.filter((r) => !r.voidedAt).length, voided: list.filter((r) => r.voidedAt).length };
 }
 
@@ -503,10 +605,11 @@ export async function patrolRecords(db: Db, raw: unknown): Promise<PatrolRecords
 export function patrolRecordsCsv(r: PatrolRecords, timezone: string): string {
   const fmt = new Intl.DateTimeFormat('zh-CN', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   const time = (iso: string) => fmt.format(new Date(iso)).replace(/\//g, '-');
-  const rows: (string | number)[][] = [['营业日', '扫到的时间', '入库时间', '场所', '工号', '姓名', '部门', '怎么扫的', '离线补登', '状态', '作废原因', '作废人']];
+  const rows: (string | number)[][] = [['营业日', '轮次', '扫到的时间', '入库时间', '场所', '工号', '姓名', '部门', '怎么扫的', '离线补登', '状态', '作废原因', '作废人']];
   for (const x of r.rows) {
     rows.push([
       x.businessDate,
+      x.roundNo ? `第 ${x.roundNo} 轮` : '',
       time(x.scannedAt),
       time(x.recordedAt),
       x.pointName,
@@ -520,7 +623,7 @@ export function patrolRecordsCsv(r: PatrolRecords, timezone: string): string {
       x.voidedByName ?? '',
     ]);
   }
-  rows.push(['合计', `${r.total} 次`, '', '', '', '', '', '', '', r.voided ? `另有作废 ${r.voided} 次` : '', '', '']);
+  rows.push(['合计', '', `${r.total} 次`, '', '', '', '', '', '', '', r.voided ? `另有作废 ${r.voided} 次` : '', '', '']);
   return toCsv(rows);
 }
 

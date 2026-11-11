@@ -1,10 +1,11 @@
 // 工作台 · 巡场（8.0.9，docs/PATROL_V809.md 第 3.2 节）：安保部门的人巡到哪里，就扫那里贴的场所二维码打卡。
 // 网页里取景扫码（https），店里局域网用 http 打开时拍一张扫码；用手机相机、微信直接扫开的码在 App 里先记下、到这一页接着打卡。
-// 断网也能扫：先记在这台手机上，联网后按原来的操作编号补交（XC7）。下面列今天每个场所谁几点巡过、还没人巡的。
+// 断网也能扫：先记在这台手机上，联网后按原来的操作编号补交（XC7）。
+// 8.0.11 巡场轮次（第 11 节）：一天按巡场间隔分轮，同一个场所每轮只记一次；下面列这一轮每个场所巡了没有，以及今天各轮的情况。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CanteenMe } from '@shared/canteen';
-import { parsePatrolToken, type PatrolCheckinResult, type PatrolPortalDay, type PatrolVia } from '@shared/patrol';
+import { parsePatrolToken, patrolIntervalText, type PatrolCheckinResult, type PatrolPortalDay, type PatrolRound, type PatrolScan, type PatrolVia } from '@shared/patrol';
 import { Mascot } from '../Mascot';
 import { IconShield } from '../doodles';
 import { beep, call, timeText, unlockAudio, uuid } from '../lib';
@@ -183,7 +184,14 @@ export function PatrolPage({ me, offsetMs, online, go }: { me: CanteenMe; offset
     }
   };
 
-  const points = day ? [...day.points].sort((a, b) => Number(a.count > 0) - Number(b.count > 0)) : [];
+  const current = day?.rounds.find((r) => r.state === 'current') ?? null;
+  const ci = current ? day!.rounds.indexOf(current) : -1;
+  // 这一轮要巡、还没巡的排在前面
+  const points = day
+    ? day.points
+        .filter((p) => ci < 0 || p.byRound[ci] !== null)
+        .sort((a, b) => Number(ci >= 0 && (a.byRound[ci]?.length ?? 0) > 0) - Number(ci >= 0 && (b.byRound[ci]?.length ?? 0) > 0))
+    : [];
   return (
     <div className="space-y-4" data-testid="patrol-page">
       <div className="flex items-end justify-between gap-2">
@@ -257,16 +265,20 @@ export function PatrolPage({ me, offsetMs, online, go }: { me: CanteenMe; offset
             <>
               <p className="text-[26px] font-black text-leaf-deep">✓ {shown.result.checkin.pointName}</p>
               <p className="mt-1 text-[15px] font-bold text-ink-2">
-                {timeText(shown.result.checkin.at)} 打卡成功 · 今天这里第 {shown.result.pointCount} 次{shown.result.checkin.late ? '（离线补交）' : ''}
+                {timeText(shown.result.checkin.at)} 打卡成功
+                {shown.result.round ? ` · 第 ${shown.result.round.no} 轮（${timeText(shown.result.round.start)}–${timeText(shown.result.round.end)}）` : ''}
+                {shown.result.checkin.late ? '（离线补交）' : ''}
               </p>
             </>
           )}
           {shown.status === 'already' && (
             <>
-              <p className="text-[22px] font-black text-wood-deep">刚打过卡啦</p>
-              <p className="mt-1 text-[15px] font-bold text-ink-2">
-                {shown.result.checkin.pointName} · {timeText(shown.result.checkin.at)} 已经记过，不重复记
+              <p className="text-[22px] font-black text-wood-deep">这一轮已打过卡</p>
+              <p className="mt-1 text-[15px] font-bold text-ink-2" data-testid="patrol-already">
+                {shown.result.checkin.pointName}
+                {shown.result.round ? ` 第 ${shown.result.round.no} 轮` : ''} 已由{shown.result.checkin.mine ? '你' : ` ${shown.result.checkin.employeeName} `}在 {timeText(shown.result.checkin.at)} 打过，不重复记
               </p>
+              {shown.result.round && <p className="mt-0.5 text-[13px] text-ink-3">下一轮 {timeText(shown.result.round.end)} 开始</p>}
             </>
           )}
           {shown.status === 'queued' && <p className="text-[17px] font-black text-relax">已记在手机上，联网后自动补交</p>}
@@ -281,7 +293,7 @@ export function PatrolPage({ me, offsetMs, online, go }: { me: CanteenMe; offset
             {settled.slice(0, 5).map(({ item, outcome }) => (
               <li key={item.body.clientKey} className={cn(outcome.kind === 'rejected' ? 'text-berry' : 'text-ink-2')}>
                 {timeText(item.body.scannedAt)}{' '}
-                {outcome.kind === 'done' ? `✓ ${outcome.result.checkin.pointName}${outcome.result.status === 'already' ? '（已记过）' : ''}` : outcome.kind === 'rejected' ? `✗ ${outcome.error.message}` : ''}
+                {outcome.kind === 'done' ? `✓ ${outcome.result.checkin.pointName}${outcome.result.status === 'already' ? '（这一轮已打过）' : ''}` : outcome.kind === 'rejected' ? `✗ ${outcome.error.message}` : ''}
               </li>
             ))}
           </ul>
@@ -289,39 +301,61 @@ export function PatrolPage({ me, offsetMs, online, go }: { me: CanteenMe; offset
       )}
 
       <Card className="px-4 py-3" data-testid="patrol-today">
-        <div className="flex items-baseline justify-between">
-          <p className="text-[17px] font-black">今天的巡场</p>
+        <div className="flex items-baseline justify-between gap-2">
+          <p className="text-[17px] font-black">{current ? `这一轮 · 第 ${current.no} 轮` : '今天的巡场'}</p>
           {day && (
             <p className="text-[13px] font-bold text-ink-3">
-              我巡了 <b className="num text-ink">{day.mine}</b> 次 · 还没人巡 <b className={cn('num', day.missing > 0 ? 'text-berry' : 'text-ink')}>{day.missing}</b> 处
+              我今天巡了 <b className="num text-ink">{day.mine}</b> 次
             </p>
           )}
         </div>
+        {current && (
+          <p className="mt-0.5 text-[13px] font-bold text-ink-2" data-testid="patrol-current-round">
+            {timeText(current.start)}–{timeText(current.end)} · 巡了 {current.done}/{current.expected} 处 · 还没巡{' '}
+            <b className={cn('num', (day?.currentMissing ?? 0) > 0 ? 'text-berry' : 'text-ink')}>{day?.currentMissing ?? 0}</b> 处
+          </p>
+        )}
+        {day && <p className="mt-0.5 text-[12px] text-ink-3">每 {patrolIntervalText(day.roundMinutes)}一轮，同一个场所每轮只记一次；今天已经漏巡 {day.missed} 处次</p>}
         {dayError && <p className="mt-2 text-[13px] font-bold text-berry">{dayError}</p>}
         {day && points.length === 0 && <p className="mt-2 text-[14px] text-ink-3">还没有场所：请管理员在后台「安保巡场」里添加</p>}
         <ul className="mt-2 divide-y divide-line">
-          {points.map((p) => (
-            <li key={p.id} className="flex items-start gap-3 py-2.5" data-testid={`patrol-point-${p.name}`}>
-              <span className={cn('mt-0.5 text-[18px]', p.count > 0 ? 'text-leaf-deep' : 'text-berry')}>{p.count > 0 ? '✓' : '○'}</span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[15px] font-black">
-                  {p.name}
-                  {!p.active && <span className="ml-1 text-[12px] font-bold text-ink-3">（已停用）</span>}
-                </span>
-                {p.area && <span className="block text-[12px] text-ink-3">{p.area}</span>}
-                {p.count > 0 ? (
-                  <span className="mt-0.5 block text-[13px] text-ink-2">
-                    {p.scans.map((s) => `${timeText(s.at)} ${s.name}${s.late ? '（补交）' : ''}`).join('、')}
+          {points.map((p) => {
+            const now = ci >= 0 ? p.byRound[ci] ?? [] : p.scans;
+            return (
+              <li key={p.id} className="flex items-start gap-3 py-2.5" data-testid={`patrol-point-${p.name}`}>
+                <span className={cn('mt-0.5 text-[18px]', now.length > 0 ? 'text-leaf-deep' : 'text-berry')}>{now.length > 0 ? '✓' : '○'}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[15px] font-black">
+                    {p.name}
+                    {!p.active && <span className="ml-1 text-[12px] font-bold text-ink-3">（已停用）</span>}
                   </span>
-                ) : (
-                  <span className="mt-0.5 block text-[13px] font-bold text-berry">今天还没人巡</span>
-                )}
-              </span>
-              {p.count > 0 && <span className="num shrink-0 text-[15px] font-black">{p.count} 次</span>}
-            </li>
-          ))}
+                  {p.area && <span className="block text-[12px] text-ink-3">{p.area}</span>}
+                  {now.length > 0 ? (
+                    <span className="mt-0.5 block text-[13px] text-ink-2">{now.map((x) => `${timeText(x.at)} ${x.name}${x.late ? '（补交）' : ''}`).join('、')}</span>
+                  ) : (
+                    <span className="mt-0.5 block text-[13px] font-bold text-berry">{ci >= 0 ? '这一轮还没巡' : '今天还没人巡'}</span>
+                  )}
+                  {day && <RoundDots rounds={day.rounds} cells={p.byRound} />}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       </Card>
     </div>
+  );
+}
+
+/** 一个场所今天各轮的小圆点：绿 = 巡了，红 = 漏巡，黄 = 正在巡、还没打，灰 = 还没到；不用巡的那一轮空着 */
+export function RoundDots({ rounds, cells }: { rounds: PatrolRound[]; cells: (PatrolScan[] | null)[] }) {
+  return (
+    <span className="mt-1 flex flex-wrap gap-1" aria-label="今天各轮">
+      {rounds.map((r, i) => {
+        const c = cells[i] ?? null;
+        const tone = c === null ? 'bg-transparent ring-1 ring-line' : c.length > 0 ? 'bg-organic' : r.state === 'past' ? 'bg-berry' : r.state === 'current' ? 'bg-yuzu' : 'bg-cream-2';
+        const label = `第 ${r.no} 轮 ${timeText(r.start)}–${timeText(r.end)}：${c === null ? '不用巡' : c.length > 0 ? `${timeText(c[0]!.at)} ${c[0]!.name}` : r.state === 'past' ? '漏巡' : r.state === 'current' ? '还没巡' : '还没到'}`;
+        return <span key={r.no} title={label} aria-label={label} className={cn('inline-block size-2.5 rounded-full', tone, r.state === 'current' && 'outline-2 outline-offset-1 outline-yuzu-deep/50')} />;
+      })}
+    </span>
   );
 }
