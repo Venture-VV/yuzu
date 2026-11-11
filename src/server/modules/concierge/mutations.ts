@@ -20,6 +20,7 @@ import {
   checkedTime,
   version,
   idList,
+  uuid,
 } from "./validation";
 const now = () => new Date().toISOString();
 const integer = (x: unknown, label: string) => {
@@ -32,6 +33,21 @@ export async function moduleLock(tx: Tx) {
   await setTxTimeouts(tx);
   await tx`SELECT pg_advisory_xact_lock(8012,135)`;
 }
+/**
+ * 管家部自己的同步版本号（整改）：每次写入在模块锁里加一，页面每 3 秒只比这个数。
+ * 原来比的是全店 audit_logs 的最大编号——别的模块登录、结账一条审计，所有开着管家部的页面都要重新取一遍整个工作区。
+ */
+export async function bumpRevision(tx: Tx) {
+  await tx`UPDATE concierge_sync SET revision=revision+1`;
+}
+/** 审计里不放整段识别原文（最长各 6 万字）：完整快照在 concierge_revisions 里，一版一份 */
+const slim = (v: any) => {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return v;
+  const { rawText, itemsText, ...rest } = v;
+  return rawText === undefined && itemsText === undefined
+    ? v
+    : { ...rest, rawTextLength: String(rawText ?? "").length, itemsTextLength: String(itemsText ?? "").length };
+};
 async function oldRecord(
   tx: Tx,
   id: string,
@@ -39,7 +55,7 @@ async function oldRecord(
   p: Record<string, any>,
 ) {
   const [r] =
-    await tx`SELECT * FROM concierge_records WHERE id::text=${id} AND kind=${kind} FOR UPDATE`;
+    await tx`SELECT * FROM concierge_records WHERE id=${uuid(id)}::uuid AND kind=${kind} FOR UPDATE`;
   if (!r) throw new WorkspaceError("记录不存在", 404);
   if (r.version !== version(p.version))
     throw new WorkspaceError("资料已被同事修改，请刷新核对后重试", 409);
@@ -67,8 +83,8 @@ async function audit(
       label,
       objectType: type,
       memberId,
-      before,
-      after,
+      before: slim(before),
+      after: slim(after),
       reason,
     },
     ip,
@@ -135,15 +151,16 @@ async function evidence(db: Db, memberId: string, p: Record<string, any>) {
     receiptIds = idList(p.receiptIds);
   for (const id of uploadIds) {
     const [r] =
-      await db`SELECT member_id FROM concierge_uploads WHERE id::text=${id}`;
+      await db`SELECT member_id FROM concierge_uploads WHERE id=${uuid(id)}::uuid`;
     if (!r || r.memberId !== memberId)
       throw new WorkspaceError("余额照片必须属于当前会员");
   }
   for (const id of receiptIds) {
     const [r] =
-      await db`SELECT member_id,data FROM concierge_records WHERE id::text=${id} AND kind='receipt'`;
+      await db`SELECT member_id,data FROM concierge_records WHERE id=${uuid(id)}::uuid AND kind='receipt'`;
     if (
       !r ||
+      r.data.status === "已作废" ||
       (r.memberId !== memberId &&
         !r.data.payments?.some(
           (p: any) =>
@@ -169,9 +186,10 @@ async function nativeMember(db: Db, value: unknown) {
   return id;
 }
 async function checkNativeBooking(db: Db, memberId: string, id: number) {
+  if (!memberId) throw new WorkspaceError("前台预约与当前关联企业会员不匹配");
   const [b] = await db`SELECT member_id FROM bookings WHERE id=${id}`;
   const [m] =
-    await db`SELECT native_member_id FROM concierge_members WHERE id::text=${memberId}`;
+    await db`SELECT native_member_id FROM concierge_members WHERE id=${uuid(memberId)}::uuid`;
   if (
     !b ||
     !m?.nativeMemberId ||
@@ -180,12 +198,14 @@ async function checkNativeBooking(db: Db, memberId: string, id: number) {
     throw new WorkspaceError("前台预约与当前关联企业会员不匹配");
 }
 async function checkNativeCheckout(db: Db, memberId: string, id: number) {
+  if (!memberId)
+    throw new WorkspaceError("请先关联企业会员，再关联同一位会员的结账");
   const [m] =
-    await db`SELECT native_member_id FROM concierge_members WHERE id::text=${memberId}`;
+    await db`SELECT native_member_id FROM concierge_members WHERE id=${uuid(memberId)}::uuid`;
   if (!m?.nativeMemberId)
     throw new WorkspaceError("请先关联企业会员，再关联同一位会员的结账");
   const [hit] =
-    await db`SELECT c.id FROM checkouts c WHERE c.id=${id} AND (EXISTS(SELECT 1 FROM checkout_bills cb JOIN visits v ON v.id=cb.visit_id WHERE cb.checkout_id=c.id AND v.member_id=${m.nativeMemberId}) OR EXISTS(SELECT 1 FROM checkout_payments cp WHERE cp.checkout_id=c.id AND cp.method='wallet' AND cp.consumption_id IS NOT NULL AND cp.member_id=${m.nativeMemberId}))`;
+    await db`SELECT c.id FROM checkouts c WHERE c.id=${id} AND c.status<>'voided' AND (EXISTS(SELECT 1 FROM checkout_bills cb JOIN visits v ON v.id=cb.visit_id WHERE cb.checkout_id=c.id AND v.member_id=${m.nativeMemberId}) OR EXISTS(SELECT 1 FROM checkout_payments cp WHERE cp.checkout_id=c.id AND cp.method='wallet' AND cp.consumption_id IS NOT NULL AND cp.member_id=${m.nativeMemberId}))`;
   if (!hit) throw new WorkspaceError("企业结账不属于当前关联会员");
 }
 async function execute(
@@ -201,7 +221,7 @@ async function execute(
     const id = action === "createMember" ? randomUUID() : text(p.id, 80, true);
     const [before] =
       action === "updateMember"
-        ? await tx`SELECT * FROM concierge_members WHERE id::text=${id} FOR UPDATE`
+        ? await tx`SELECT * FROM concierge_members WHERE id=${uuid(id)}::uuid FOR UPDATE`
         : [];
     if (
       action === "updateMember" &&
@@ -235,13 +255,18 @@ async function execute(
       !can(actor, "member.read")
     )
       throw new WorkspaceError("关联企业会员需要原生会员查看权限", 403);
-    const nativeId =
-      p.nativeMemberId === undefined
-        ? (before?.nativeMemberId ?? null)
-        : await nativeMember(tx, p.nativeMemberId);
+    // 只在关联变了的时候核对企业会员还在用：页面每次保存都带着原来的关联，
+    // 关联的企业会员后来被停用、被合并以后，这份管家档案照样要能改（整改：原来每次都核对，档案就再也存不了）
+    const sameLink =
+      p.nativeMemberId === undefined ||
+      (!!before &&
+        String(p.nativeMemberId ?? "") === String(before.nativeMemberId ?? ""));
+    const nativeId = sameLink
+      ? (before?.nativeMemberId ?? null)
+      : await nativeMember(tx, p.nativeMemberId);
     if (before && nativeId !== (before.nativeMemberId ?? null)) {
       const [linked] =
-        await tx`SELECT id FROM concierge_records WHERE member_id::text=${id} AND (native_booking_id IS NOT NULL OR native_checkout_id IS NOT NULL) LIMIT 1`;
+        await tx`SELECT id FROM concierge_records WHERE member_id=${uuid(id)}::uuid AND (native_booking_id IS NOT NULL OR native_checkout_id IS NOT NULL) LIMIT 1`;
       if (linked)
         throw new WorkspaceError(
           "已有前台单据关联，请先核对并解除原关联，再调整企业会员",
@@ -309,7 +334,7 @@ async function execute(
     const memberId = text(p.memberId, 80, true);
     await requireMember(tx, memberId);
     const [old] =
-      await tx`SELECT id,data FROM concierge_records WHERE kind='balance' AND member_id::text=${memberId} ORDER BY ordinal DESC LIMIT 1`;
+      await tx`SELECT id,data FROM concierge_records WHERE kind='balance' AND member_id=${uuid(memberId)}::uuid ORDER BY ordinal DESC LIMIT 1`;
     const expected =
       p.expectedBalanceId === null ? null : text(p.expectedBalanceId, 80, true);
     if ((old ? String(old.id) : null) !== expected)
@@ -341,7 +366,7 @@ async function execute(
   if (action === "attachBalanceEvidence") {
     const id = text(p.balanceId ?? p.id, 80, true);
     const [old] =
-      await tx`SELECT * FROM concierge_records WHERE id::text=${id} AND kind='balance' FOR UPDATE`;
+      await tx`SELECT * FROM concierge_records WHERE id=${uuid(id)}::uuid AND kind='balance' FOR UPDATE`;
     if (!old) throw new WorkspaceError("核对记录不存在", 404);
     const links = await evidence(tx, String(old.memberId), p);
     if (!links.uploadIds.length && !links.receiptIds.length)
@@ -492,7 +517,7 @@ async function execute(
         throw new WorkspaceError("指定协调资源请填写结束时间");
       if (resource && endAt && ["已确认", "已到店"].includes(status)) {
         const [hit] =
-          await tx`SELECT id FROM concierge_records WHERE kind='appointment' AND id::text<>${id} AND lower(data->>'resource')=lower(${resource}) AND data->>'status' IN ('已确认','已到店') AND data->>'startAt'<${endAt} AND data->>'endAt'>${startAt}`;
+          await tx`SELECT id FROM concierge_records WHERE kind='appointment' AND id<>${uuid(id)}::uuid AND lower(data->>'resource')=lower(${resource}) AND data->>'status' IN ('已确认','已到店') AND data->>'startAt'<${endAt} AND data->>'endAt'>${startAt}`;
         if (hit) throw new WorkspaceError("管家协调安排已有时段冲突", 409);
       }
       if (p.nativeBookingId !== undefined) {
@@ -530,9 +555,16 @@ async function execute(
       await assignee(tx, hostId);
       if (partySize > 9999 || !["接待中", "已完成"].includes(status))
         throw new WorkspaceError("接待人数或状态不正确");
+      // 接待关联的协调预约定了就不能换、也不能摘掉（整改：原来这条核对写在「带了预约」的分支里，
+      // 先传空摘掉、下一次再挂另一张就绕过去了）
+      if (
+        before?.data.appointmentId &&
+        before.data.appointmentId !== appointmentId
+      )
+        throw new WorkspaceError("接待已关联预约，不能换单");
       if (appointmentId) {
         const [appt] =
-          await tx`SELECT * FROM concierge_records WHERE id::text=${appointmentId} AND kind='appointment' FOR UPDATE`;
+          await tx`SELECT * FROM concierge_records WHERE id=${uuid(appointmentId)}::uuid AND kind='appointment' FOR UPDATE`;
         if (
           !appt ||
           appt.memberId !== memberId ||
@@ -548,23 +580,23 @@ async function execute(
               409,
             );
         }
-        if (
-          before?.data.appointmentId &&
-          before.data.appointmentId !== appointmentId
-        )
-          throw new WorkspaceError("接待已关联预约，不能换单");
-        await saveRecord(
-          tx,
-          "appointment",
-          String(appt.id),
-          memberId,
-          { ...appt.data, status: status === "已完成" ? "已完成" : "已到店" },
-          actor,
-          appt,
-          "接待状态接续",
-          ip,
-          appt.nativeBookingId,
-        );
+        // 预约状态只往前走、变了才写（整改：原来每次保存接待都重写一版，
+        // 预约已经「已完成」以后再改一下还在「接待中」的接待，会把它退回「已到店」）
+        const rank = (x: string) => (x === "已完成" ? 2 : x === "已到店" ? 1 : 0);
+        const next = status === "已完成" ? "已完成" : "已到店";
+        if (rank(next) > rank(appt.data.status))
+          await saveRecord(
+            tx,
+            "appointment",
+            String(appt.id),
+            memberId,
+            { ...appt.data, status: next },
+            actor,
+            appt,
+            "接待状态接续",
+            ip,
+            appt.nativeBookingId,
+          );
       }
       data = {
         memberId,
@@ -623,7 +655,7 @@ async function execute(
         memberId,
       );
       const references =
-        await tx`SELECT b.member_id FROM concierge_balance_evidence e JOIN concierge_records b ON b.id=e.balance_id WHERE e.receipt_id::text=${id} UNION SELECT member_id FROM concierge_records WHERE kind='balance' AND (data->'receiptIds') ? ${id}`;
+        await tx`SELECT b.member_id FROM concierge_balance_evidence e JOIN concierge_records b ON b.id=e.balance_id WHERE e.receipt_id=${uuid(id)}::uuid UNION SELECT member_id FROM concierge_records WHERE kind='balance' AND (data->'receiptIds') ? ${id}`;
       for (const ref of references)
         if (
           ref.memberId !== memberId &&
@@ -639,7 +671,7 @@ async function execute(
       // Photo ownership is checked separately from the current receipt member: initial uploads may be unmatched.
       for (const image of data.uploadIds) {
         const [u] =
-          await tx`SELECT member_id FROM concierge_uploads WHERE id::text=${image}`;
+          await tx`SELECT member_id FROM concierge_uploads WHERE id=${uuid(image)}::uuid`;
         if (u?.memberId && memberId && u.memberId !== memberId)
           throw new WorkspaceError("凭证照片属于另一位会员，请核对");
       }
@@ -678,7 +710,7 @@ async function execute(
 }
 export async function balanceEvidence(db: Db, id: string) {
   const rows =
-    await db`SELECT upload_id,receipt_id FROM concierge_balance_evidence WHERE balance_id::text=${id} ORDER BY id`;
+    await db`SELECT upload_id,receipt_id FROM concierge_balance_evidence WHERE balance_id=${uuid(id)}::uuid ORDER BY id`;
   return {
     uploadIds: rows.flatMap((r) => (r.uploadId ? [String(r.uploadId)] : [])),
     receiptIds: rows.flatMap((r) => (r.receiptId ? [String(r.receiptId)] : [])),
@@ -715,6 +747,7 @@ export async function mutate(
         return old.response;
       }
       const response = await execute(tx, actor, action, p, ip);
+      await bumpRevision(tx);
       await tx`INSERT INTO concierge_operations(actor_id,request_id,request_hash,response) VALUES(${actor.id},${key},${hash},${tx.json(response)})`;
       return response;
     });

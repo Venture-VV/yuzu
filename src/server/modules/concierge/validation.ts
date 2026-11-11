@@ -18,9 +18,17 @@ export function text(v: unknown, max = 200, required = false): string {
   if (v !== undefined && v !== null && typeof v !== "string")
     throw new WorkspaceError("输入格式不正确");
   const s = String(v ?? "").trim();
+  // PostgreSQL 的 text / jsonb 存不了 NUL：带着它入库会报 500，前端按「结果待确认」处理、怎么重试都不成
+  if (s.includes("\u0000")) throw new WorkspaceError("输入里有无法保存的字符，请重新输入");
   if (s.length > max) throw new WorkspaceError(`文字不能超过${max}字`);
   if (required && !s) throw new WorkspaceError("请填写必填信息");
   return s;
+}
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** 管家记录的编号都是 UUID：先核对格式，查询里按 uuid 比（走主键），不合格式的当作不存在 */
+export function uuid(v: string): string {
+  if (!UUID.test(v)) throw new WorkspaceError("记录不存在，请刷新", 404);
+  return v.toLowerCase();
 }
 export function amountCents(v: unknown) {
   const s = text(v, 16, true);

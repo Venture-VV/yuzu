@@ -183,13 +183,15 @@ function Home() {
   const erp = useErpAccess();
   const session = useOptionalSession();
   const dining = session?.dining ?? false;
-  if (can('concierge.read') && !can('member.read')) return <Navigate to="/admin/concierge" replace />;
   if (can('member.read')) return <WorkbenchPage />;
   // 「点餐平板」账号（8.0.10）：只能打开点餐页，登录后直接进去
   if (can('emenu.view') && !can('frontdesk.read')) return <Navigate to="/emenu" replace />;
   // 他店查询（v0.7.23）：另一家店的同事只能查会员档阶
   if (can('member.lookup')) return <Navigate to="/lookup" replace />;
   if (erp.landing) return <Navigate to={erp.landing} replace />;
+  // 管家（8.0.12）：后勤岗位加了管家职责的，登录后直接进管家部。排在「点餐平板」「他店查询」「只用 ERP」之后——
+  // 原来排在最前面：以后给别的岗位勾上管家部的查看权限，平板、库管、采购登录都会被带到管家部（整改）
+  if (can('concierge.read')) return <Navigate to={ADMIN_SECTIONS.concierge.path} replace />;
   if (dining && (can('dining.kitchen') || can('dining.order'))) return <Navigate to="/dining" replace />;
   if (session?.rooms && (can('room.operate') || can('room.housekeep'))) return <Navigate to="/rooms" replace />;
   if (erp.canEnter) return <Navigate to="/erp" replace />;

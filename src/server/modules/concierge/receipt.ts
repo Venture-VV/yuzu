@@ -24,15 +24,16 @@ import {
   receiptReview,
   objectField,
   WorkspaceError,
+  uuid,
 } from "./validation";
 import { requireMember, readCatalog } from "./store";
 async function findRecordUpload(db: Db, id: string) {
-  const [r] = await db`SELECT id FROM concierge_uploads WHERE id::text=${id}`;
+  const [r] = await db`SELECT id FROM concierge_uploads WHERE id=${uuid(id)}::uuid`;
   return r;
 }
 async function findReceipt(db: Db, id: string) {
   const [r] =
-    await db`SELECT data FROM concierge_records WHERE id::text=${id} AND kind='receipt'`;
+    await db`SELECT data FROM concierge_records WHERE id=${uuid(id)}::uuid AND kind='receipt'`;
   return r;
 }
 async function findConfirmedReceipt(
@@ -47,7 +48,7 @@ async function findConfirmedReceipt(
     .toISOString()
     .slice(0, 10);
   const [r] =
-    await db`SELECT id FROM concierge_records WHERE kind='receipt' AND id::text<>${id} AND data->>'number'=${number} AND data->>'store'=${store} AND data->>'receiptDay'=${day} AND data->>'kind'=${kind} AND data->>'status'='已确认'`;
+    await db`SELECT id FROM concierge_records WHERE kind='receipt' AND id<>${uuid(id)}::uuid AND data->>'number'=${number} AND data->>'store'=${store} AND data->>'receiptDay'=${day} AND data->>'kind'=${kind} AND data->>'status'='已确认'`;
   return r;
 }
 export async function buildReceipt(
@@ -92,6 +93,21 @@ export async function buildReceipt(
   for (const image of uploadIds)
     if (!(await findRecordUpload(db, image)))
       throw new WorkspaceError("原图不存在，请重新上传");
+  // 列表里的凭证是摘要（不带逐项明细与识别原文）。拿摘要去保存，会把库里的明细与原文清成空的——
+  // 页面已经改成先取完整的再编辑，这里再兜一道：原来有明细、有识别原文，这次两样都是空的，按「没载入明细」拒绝。
+  if (
+    before &&
+    Array.isArray(p.items) &&
+    p.items.length === 0 &&
+    Array.isArray(before.items) &&
+    before.items.length > 0 &&
+    !rawText &&
+    !!before.rawText
+  )
+    throw new WorkspaceError(
+      "这张凭证的逐项明细还没有载入，请刷新后重新打开再保存",
+      409,
+    );
   const catalog = await readCatalog(db),
     items =
       p.items === undefined
@@ -152,14 +168,13 @@ export async function buildReceipt(
       throw new WorkspaceError(
         "支付方式未明确，请核对后选择会员扣卡、现金、微信、支付宝或银行卡",
       );
+    // 只留认得的字段（整改：原来把页面发来的整个对象原样存下，多出来的键也进了库）
     payments.push({
-      ...payment,
       method,
       amountCents: cents,
       memberId: paymentMember,
       originalMethod,
-    });
-    delete (payments[payments.length - 1] as any).amount;
+    } as Payment);
   }
   if (status === "已确认") {
     if (receiptKind === "消费清单")

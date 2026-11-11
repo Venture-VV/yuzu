@@ -3,7 +3,7 @@ import {
   ReceiptArchive,
   EnterpriseAccount,
 } from "./Components";
-import { loadReceipt, pendingRequests } from "./api";
+import { loadReceipt, loadWorkspace, pendingRequests } from "./api";
 import { api } from "../../lib/api";
 import { useCan } from "../../lib/session";
 import { conciergeFetch as fetch } from "./api";
@@ -498,50 +498,85 @@ export default function Workspace({
   const overdue = openTasks.filter(
     (t) => t.dueAt && new Date(t.dueAt).getTime() < Date.now(),
   );
+  // 自动同步（整改）：上一次还没回来不再发下一次；连不上时逐步放慢（最多隔 30 秒），连上就恢复；
+  // 同步版本号没变就不换数据——原来每 3 秒不管变没变都整个换一遍，整页重新渲染、开着的编辑器跟着重算。
+  const polling = useRef(false);
+  const pollSkip = useRef(0);
+  const pollFailures = useRef(0);
   const refresh = useCallback(async (quiet = false, force = false) => {
     if (saving.current && !force) return;
+    if (quiet && !force) {
+      if (polling.current) return;
+      if (pollSkip.current > 0) {
+        pollSkip.current -= 1;
+        return;
+      }
+    }
     if (!quiet) setRefreshing(true);
     const id = ++request.current;
+    polling.current = true;
     try {
-      const res = await fetch("/api/concierge/workspace", {
-        cache: "no-store",
-      });
-      const body = (await res.json()) as WorkspaceData & {
-        error?: string;
-        data?: WorkspaceData;
-      };
-      if (!res.ok) throw new Error(body.error || "同步失败");
+      const { data: loaded, changed } = await loadWorkspace();
+      pollFailures.current = 0;
+      pollSkip.current = 0;
       if (mounted.current && id === request.current) {
-        const next = body.data || body;
-        currentData.current = next;
-        setData(next);
-        setLastSync(next.sync?.serverTime || new Date().toISOString());
+        if (changed || currentData.current !== loaded) {
+          // 换一个新的对象引用，页面才会重新渲染
+          const next = { ...loaded };
+          currentData.current = loaded;
+          setData(next);
+        }
+        setLastSync(loaded.sync?.serverTime || new Date().toISOString());
         setSyncError("");
       }
     } catch (e) {
+      pollFailures.current = Math.min(pollFailures.current + 1, 4);
+      // 3 秒一拍：失败 1、2、3、4 次以后分别隔 1、3、5、9 拍再试
+      pollSkip.current = [0, 1, 3, 5, 9][pollFailures.current]!;
       if (mounted.current)
         setSyncError(e instanceof Error ? e.message : "网络连接失败");
     } finally {
+      polling.current = false;
       if (mounted.current && !quiet) setRefreshing(false);
     }
   }, []);
   useEffect(() => {
     mounted.current = true;
     const sync = () => {
-      if (document.visibilityState === "visible") void refresh(true);
+      if (document.visibilityState === "visible" && navigator.onLine !== false)
+        void refresh(true);
+    };
+    // 回到页面、数据有变、重新联网：马上同步一次，不等放慢的那几拍
+    const now = () => {
+      pollSkip.current = 0;
+      sync();
     };
     const timer = setInterval(sync, 3000);
-    window.addEventListener("concierge-data-changed", sync);
-    window.addEventListener("focus", sync);
-    document.addEventListener("visibilitychange", sync);
+    window.addEventListener("concierge-data-changed", now);
+    window.addEventListener("focus", now);
+    window.addEventListener("online", now);
+    document.addEventListener("visibilitychange", now);
     return () => {
       mounted.current = false;
       clearInterval(timer);
-      window.removeEventListener("concierge-data-changed", sync);
-      window.removeEventListener("focus", sync);
-      document.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("concierge-data-changed", now);
+      window.removeEventListener("focus", now);
+      window.removeEventListener("online", now);
+      document.removeEventListener("visibilitychange", now);
     };
   }, [refresh]);
+  // 凭证详情开着的时候同事保存了这一张：同步回来的是新版本的摘要（没有明细），重新取完整的，
+  // 不让详情悄悄变成空的
+  const detailReload = useRef("");
+  useEffect(() => {
+    if (!receiptDetailId) return;
+    const shown = data.receipts.find((r) => r.id === receiptDetailId);
+    if (!shown || (shown as { items?: unknown }).items !== undefined) return;
+    const mark = `${shown.id}:${shown.version}`;
+    if (detailReload.current === mark) return;
+    detailReload.current = mark;
+    void setReceiptDetailId(receiptDetailId);
+  }, [data.receipts, receiptDetailId]);
   useEffect(() => {
     if (!drawerId) return;
     const before = document.body.style.overflow;
@@ -660,9 +695,22 @@ export default function Workspace({
     setReceiptDetailId(r.id);
     setError("");
   }
-  function editReceipt(r: Receipt) {
-    setReceiptEditor({ receipt: r, key: uid() });
+  // 编辑前一定先取完整的这一张（整改）：列表里的是摘要，没有逐项明细与识别原文。
+  // 原来直接拿列表里的去编辑——同事刚保存过、列表换成新摘要以后点「编辑」再保存，明细与原文就被清空了。
+  async function editReceipt(r: Receipt) {
     setError("");
+    try {
+      const full = await loadReceipt(r.id);
+      setData((d) => ({
+        ...d,
+        receipts: [full, ...d.receipts.filter((x) => x.id !== full.id)],
+      }));
+      setReceiptEditor({ receipt: full, key: uid() });
+    } catch (e) {
+      setError(
+        `这张凭证的明细没有取到，请联网后再点编辑：${e instanceof Error ? e.message : ""}`,
+      );
+    }
   }
   const matches = (m: Member) => {
     const q = search.trim().toLowerCase();
@@ -3945,7 +3993,7 @@ export default function Workspace({
             onEdit={() => {
               const r = receipts.find((x) => x.id === receiptDetailId);
               setReceiptDetailId(null);
-              if (r) editReceipt(r);
+              if (r) void editReceipt(r);
             }}
           />
         )}

@@ -1579,9 +1579,9 @@
 }
 .concierge-workspace .spin,
 .concierge-workspace .spinning > svg {
-  animation: rotate 1s linear infinite;
+  animation: concierge-rotate 1s linear infinite;
 }
-@keyframes rotate {
+@keyframes concierge-rotate {
   to {
     transform: rotate(360deg);
   }
@@ -6397,4 +6397,40 @@
   .concierge-workspace .page-heading {
     flex-wrap: wrap;
   }
+}
+
+/* 主线整改（8.0.12）：手机上输入框的字号不小于 16px——小于 16px 时 iOS 在聚焦的那一下会把整页放大，
+   录手机号、金额时页面来回跳。原来这些输入框是 10–13px。只管触屏窄屏，电脑上照旧。 */
+@media (max-width: 760px) and (pointer: coarse) {
+  .concierge-workspace input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+  .concierge-workspace select,
+  .concierge-workspace textarea {
+    font-size: 16px;
+  }
+}
+
+/* 管家部自己的「修改密码 · 退出企业账号」：原来没有样式，是一行 12px 的普通文字，看不出能点 */
+.concierge-workspace .enterprise-account {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.concierge-workspace .enterprise-account a,
+.concierge-workspace .enterprise-account button {
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.concierge-workspace .enterprise-account small {
+  flex-basis: 100%;
+  color: #b42318;
 }

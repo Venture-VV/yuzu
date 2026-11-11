@@ -390,7 +390,7 @@ describe("8.0.12 管家部原生集成", () => {
   });
   it("草稿更换会员而省略企业结账字段时仍重验保留的关联", async () => {
     const native = await createMember(ctx, "合成关联会员", "19900002001");
-    await ctx.sql`UPDATE concierge_members SET native_member_id=${native.id} WHERE id=${memberId}`;
+    await ctx.sql`UPDATE concierge_members SET native_member_id=${native.id},version=version+1 WHERE id=${memberId}`;
     const [checkout] =
       await ctx.sql`INSERT INTO checkouts(checkout_no,client_key,total_amount,paid_amount,business_date,operator_id,created_at) VALUES('SYNTHETIC-LINK',${randomUUID()},0,0,'2026-11-11',${ctx.ownerId},now()) RETURNING id`;
     const id = randomUUID();

@@ -39,16 +39,46 @@ OCR仍可能错字或漏字，首次名称校准不能省略；没有准确率�
 
 写操作先在设备读回验证操作编号可持久保存，再发送。断网/超时/5xx进入结果待确认，保留原编号与请求；可查回、原样重试，或在服务端同一把锁下确认不再执行。曾不确定的请求不会因后续4xx丢失恢复编号，未决时不能修改同一表单的内容另建一笔。
 
-每3秒先查轻量修订号，有变动才同步工作区。近期列表最多500份消费摘要，完整项目及识别原文按需获取；全部历史可分页检索。操作列表保留最近2000条轻量摘要，点开读取完整前后值；按筛选条件导出的CSV读取全部匹配审计并流式输出，不限于列表2000条。处理待确认结果不会重建工作台或清空当前编辑。
+每3秒先查管家部自己的同步版本号（`concierge_sync`，管家部每写一次加一；别的模块的操作不动它），有变动才同步工作区；没变化时页面不重新渲染，连不上时逐步放慢。近期列表最多500份消费摘要，完整项目及识别原文按需获取；全部历史可分页检索。操作列表保留最近2000条轻量摘要，点开读取完整前后值；按筛选条件导出的CSV读取全部匹配审计并流式输出，不限于列表2000条。处理待确认结果不会重建工作台或清空当前编辑。
 
 照片使用原有 `erp_images` 的私有 `concierge` 用途，按SHA去重并通过专用鉴权接口读取。采购和合同图片接口不能借用编号读取管家照片。原图bytea及新业务表随既有pg_dump备份、恢复和数据指纹自动覆盖。模块JSON导出不含企业密码/会话，原图超过20MiB时明确拒绝，改用完整企业数据库备份。
 
 ## 构建资源
 
-约64MiB的本机OCR资源随应用部署。三份较大的模型/运行文件在源码中按小分片保存，`scripts/prepare-concierge-assets.mjs` 逐字节重组并检查总大小及SHA256。`npm run build:client`、`npm run dev:client` 自动调用；不从外部下载模型、不涉及客户图片。许可与名称资源哈希清单随源码保留。
+本机 OCR 的资源约 43 MiB，随应用部署、从本站同源加载，不从外部下载、不涉及客户图片。都在 `src/client/public/concierge/ocr/`，原样放在仓库里（不拆分片，构建时不需要额外步骤）：
+
+| 文件 | 大小 | 来源（npm 包与包里的文件逐字节相同） |
+| --- | --- | --- |
+| `tesseract.min.js`、`worker.min.js` | 0.2 MiB | `tesseract.js@6.0.1`，Apache-2.0 |
+| `core/tesseract-core-simd-lstm.wasm.js`、`core/tesseract-core-lstm.wasm.js` | 各 3.8 MiB | `tesseract.js-core@6.1.2`，Apache-2.0（后一个只给不支持 WASM SIMD 的旧浏览器） |
+| `lang/chi_sim.traineddata.gz`、`lang/eng.traineddata.gz` | 1.6、2.8 MiB | `@tesseract.js-data/chi_sim@1.0.0`、`eng@1.0.0` 的 `4.0.0_best_int` |
+| `name-runtime/ort.wasm.min.js`、`ort-wasm-simd-threaded.mjs`、`.wasm` | 14.2 MiB | `onnxruntime-web@1.31.1`，MIT |
+| `name-model.onnx`、`name-characters.json` | 15.9、0.1 MiB | PP-OCRv5 mobile rec（RapidOCR v3.10.0 发布的 ONNX），Apache-2.0，见 `name-NOTICE.txt` |
+
+- 每个文件的大小与 SHA-256 记在 `assets.sha256.json`；`scripts/check-ocr-assets.mjs` 在 `npm run build:client` 的最后核对构建产物（`dist/client/concierge/ocr`），`tests/concierge-assets.test.ts` 核对仓库里的。缺一个、错一个构建就失败。
+- 升级这些库：换文件、改 `assets.sha256.json`（写上新的 npm 版本），跑 `node scripts/check-ocr-assets.mjs`。
+- 资源只在拍单识别时才加载（先金额与票面，名称增强最后才取，约 31 MiB）；手机第一次用要等下载。`/concierge/ocr/` 与 `/assets/` 下缺的文件回 404，不拿页面顶替。
+- `.gitattributes` 里这个目录标了 `-text`（Windows 签出不做换行符转换，否则对不上 SHA-256）。
+
+Codex 最初的做法（PR #96）是把三份大文件拆成 2 MiB 的分片、构建前用脚本拼回去，并带了四个用不到的识别内核文件（共约 21 MiB）；主线整改时去掉了分片与用不到的文件。当时的构建还会把两份语言模型当成「上次留下的压缩文件」删掉——只有开发模式能识别，打包后的系统识别不了；见 `docs/HANDOFF_V8012.md`「主线整改」。
 
 ## 迁移与接口
 
-迁移 `135_concierge.sql` 新建管家档案、分类JSONB业务记录、修订历史、图片引用、余额依据及幂等结果；只扩大员工职责和图片用途约束，不改已有钱包、余额、订单或会员资料。
+迁移 `135_concierge.sql` 新建管家档案、分类JSONB业务记录、修订历史、图片引用、余额依据、幂等结果与同步版本号（`concierge_sync`）；管家档案不能删、编号与建档信息不能改，能改的记录每改一次版本号加一（数据库触发器）；只扩大员工职责和图片用途约束，不改已有钱包、余额、订单或会员资料。
 
 核心接口为 `/api/concierge/workspace`、`/revision`、`/receipts`、`/receipts/:id`、`/uploads`、`/uploads/:id`、`/ops/:id`、`/ops/:id/abandon`、`/audits/:id`、`/audits/export`、`/native-members`、`/backup`。均复用企业登录，图片和导出禁止公共缓存。
+
+## 加锁与幂等（与主线其余模块的不同之处）
+
+- 管家部所有写入（`POST /workspace` 的各个动作、上传照片、确认不再执行）先取同一把模块咨询锁 `pg_advisory_xact_lock(8012,135)`，全部串行；之后才锁管家自己的行（`concierge_members` / `concierge_records` 一行，`FOR UPDATE`）。只读地核对企业会员、前台预约、结账（外键检查会对那一行加共享锁），不写钱包、预约、结账。写入的最后在锁里把 `concierge_sync` 加一。
+- 幂等用管家部自己的表 `concierge_operations`（按「员工 + 操作编号」记原请求摘要与结果；「确认不再执行」也记在这张表），不走全店的 `idempotency_keys` 与「确认作废」登记：这是从独立系统接过来时保留的做法，功能上等价（同编号原样重提返回第一次的结果、换内容拒绝、确认不再执行与原请求在模块锁里串行）。新代码不要照这个另起一套；以后要统一时改这里。
+- 页面：操作编号与原请求先存在本机并读回再发；结果不明的记为「结果待确认」，处理完之前不能发新的写入（查回、原样重试、确认不再执行）。
+
+## 已知的限度（之后再做）
+
+- 工作区一次取全部管家会员与历史记录（凭证只取最近 500 张的摘要）：7 位员工、从零开始的名单够用，记录多了以后要分页。
+- 页面是从独立系统移过来的一整套（自己的弹窗、表单、样式），还没有换成主线的组件；里面有几段用不到的独立站代码（员工账号弹窗）没有清。
+- 页面按「是不是经理」显示按钮，没有按 `concierge.operate` / `concierge.export` 逐个隐藏（接口照常逐项校验；默认岗位下有查看就有录入）。
+- 关联的企业会员被合并以后，管家档案的关联还指着被合并掉的那一位（档案照常能改，要换关联由有会员权限的人改）。
+- 模块 JSON 备份（`/backup`）在原图合计超过 20 MiB 时拒绝，实际用起来很快就会超；完整备份用企业数据库备份。
+- `.wasm`、`.onnx` 没有预压缩，手机第一次识别要下约 37 MiB。

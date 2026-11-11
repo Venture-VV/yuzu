@@ -58,6 +58,11 @@ BEGIN
  IF TG_OP='DELETE' OR OLD.kind IN ('balance','note') OR NEW.kind<>OLD.kind OR NEW.created_by<>OLD.created_by OR NEW.created_at<>OLD.created_at THEN
   RAISE EXCEPTION '管家核对快照、服务事实及创建信息只追加';
  END IF;
+ -- 主线整改：能改的记录（预约、接待、待办、凭证、名称）每改一次版本号加一，编号与顺序号不能动——
+ -- 每一版都在 concierge_revisions 里有一份，绕过应用直接改库也留得下痕迹（已确认凭证的更正也在内）
+ IF NEW.id<>OLD.id OR NEW.ordinal<>OLD.ordinal OR NEW.version<>OLD.version+1 THEN
+  RAISE EXCEPTION '管家记录的修改要带上新的版本号，编号不能改';
+ END IF;
  RETURN NEW;
 END $$;
 CREATE TRIGGER concierge_records_guard BEFORE UPDATE OR DELETE ON concierge_records FOR EACH ROW EXECUTE FUNCTION yuzu_concierge_record_guard();
@@ -75,3 +80,27 @@ CREATE TABLE concierge_balance_evidence (
  UNIQUE(balance_id,upload_id), UNIQUE(balance_id,receipt_id)
 );
 CREATE TRIGGER concierge_balance_evidence_append_only BEFORE UPDATE OR DELETE ON concierge_balance_evidence FOR EACH ROW EXECUTE FUNCTION yuzu_forbid_mutation();
+
+-- ───────── 主线整改（8.0.12 合并前；这个迁移还没有发布到任何环境）─────────
+
+-- 管家会员档案：不能删，编号、六位编码与建档信息不能改，每改一次版本号加一（原来这张表没有任何保护）
+CREATE FUNCTION yuzu_concierge_member_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF TG_OP='DELETE' THEN RAISE EXCEPTION '管家会员档案不能删除'; END IF;
+ IF NEW.id<>OLD.id OR NEW.code<>OLD.code OR NEW.created_by<>OLD.created_by OR NEW.created_at<>OLD.created_at OR NEW.version<>OLD.version+1 THEN
+  RAISE EXCEPTION '管家会员的编号与建档信息不能改，修改要带上新的版本号';
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER concierge_members_guard BEFORE UPDATE OR DELETE ON concierge_members FOR EACH ROW EXECUTE FUNCTION yuzu_concierge_member_guard();
+
+-- 同步版本号：管家部每次写入在模块锁里加一，页面每 3 秒只比这个数。
+-- 原来比的是全店 audit_logs 的最大编号：别的模块每记一条审计，所有开着管家部的页面都要重新取一遍整个工作区。
+CREATE TABLE concierge_sync (
+ only_row boolean PRIMARY KEY DEFAULT true CHECK (only_row),
+ revision bigint NOT NULL DEFAULT 0 CHECK (revision >= 0)
+);
+INSERT INTO concierge_sync DEFAULT VALUES;
+
+-- 管家部的操作列表、导出按编号倒序读这两类审计；审计表原来没有能用的索引，要扫全表
+CREATE INDEX audit_logs_concierge ON audit_logs (id DESC) WHERE action IN ('concierge_record','concierge_upload');

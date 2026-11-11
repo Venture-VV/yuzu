@@ -1,0 +1,2 @@
+# 管家部本机 OCR 的第三方文件（8.0.12）：按 SHA-256 核对，签出时不能换行符转换
+src/client/public/concierge/ocr/** -text

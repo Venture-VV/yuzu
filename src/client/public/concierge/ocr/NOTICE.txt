@@ -1,3 +1,6 @@
 Tesseract.js 6.0.1 and Tesseract.js-core 6.1.2, Apache-2.0. Official source: https://github.com/naptha/tesseract.js and https://github.com/naptha/tesseract.js-core .
 Language models: official @tesseract.js-data chi_sim and eng 4.0.0_best_int distributions.
+The traineddata files are the tessdata "best_int" models redistributed by @tesseract.js-data (npm 1.0.0), Apache-2.0 (https://github.com/tesseract-ocr/tessdata_best).
+tesseract.js-core bundles Tesseract (Apache-2.0) and Leptonica (BSD-2-Clause) with libpng, libjpeg and zlib under their own permissive licences; see core/LICENSE and the upstream repository for the full texts.
+Only the two LSTM cores are shipped (SIMD and non-SIMD); every file is byte-identical to the npm package listed in assets.sha256.json.
 All OCR runtime resources are served from this Site. Receipt recognition runs in the user browser.

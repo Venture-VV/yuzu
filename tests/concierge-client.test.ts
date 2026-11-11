@@ -20,6 +20,9 @@ import {
   pendingRequests,
   setConciergeActor,
   loadReceipt,
+  loadWorkspace,
+  unresolvedPending,
+  retryPending,
 } from "../src/client/features/concierge/api";
 let actor = 1000;
 let storage = new Map<string, string>();
@@ -117,5 +120,92 @@ describe("管家持久操作编号与按需详情", () => {
       await conciergeFetch("/api/concierge/workspace")
     ).json();
     expect(result.receipts[0]).toEqual(full);
+  });
+  // ── 主线整改（docs/HANDOFF_V8012.md）──
+  it("正在发的请求不算「结果待确认」；没有明确结果以后才算", async () => {
+    let seenWhileSending = -1;
+    mocks.request.mockImplementationOnce(async () => {
+      // 请求在路上：本机已经记下（发之前存的），但不显示成待确认
+      expect(pendingRequests()).toHaveLength(1);
+      seenWhileSending = unresolvedPending().length;
+      throw new UncertainError("timeout");
+    });
+    await expect(
+      conciergeFetch("/api/concierge/workspace", input()),
+    ).rejects.toThrow("结果待确认");
+    expect(seenWhileSending).toBe(0);
+    expect(unresolvedPending().map((p) => p.requestId)).toEqual(["original-id"]);
+  });
+  it("有一笔结果待确认时，不发新的写入（换个编号重新填一遍也不行）；原编号原样重试可以", async () => {
+    mocks.request.mockRejectedValueOnce(new UncertainError("timeout"));
+    await expect(
+      conciergeFetch("/api/concierge/workspace", input()),
+    ).rejects.toThrow();
+    mocks.request.mockClear();
+    const again = {
+      method: "POST",
+      body: JSON.stringify({
+        requestId: "second-id",
+        action: "createMember",
+        payload: { name: "合成客户", cardNo: "QA" },
+      }),
+    };
+    await expect(
+      conciergeFetch("/api/concierge/workspace", again),
+    ).rejects.toThrow("尚未发送");
+    expect(mocks.request).not.toHaveBeenCalled();
+    expect(pendingRequests().map((p) => p.requestId)).toEqual(["original-id"]);
+    // 原编号、原内容重试：照常发；成功以后清掉，别的写入恢复
+    mocks.request.mockResolvedValueOnce({ id: "m1" });
+    await conciergeFetch("/api/concierge/workspace", input());
+    expect(mocks.request).toHaveBeenCalledTimes(1);
+    expect(unresolvedPending()).toHaveLength(0);
+    mocks.request.mockResolvedValueOnce({ id: "m2" });
+    await conciergeFetch("/api/concierge/workspace", again);
+    expect(mocks.request).toHaveBeenCalledTimes(2);
+  });
+  it("待确认面板的「原样重试」只发原来的操作、内容与编号", async () => {
+    mocks.request.mockRejectedValueOnce(new UncertainError("timeout"));
+    await expect(
+      conciergeFetch("/api/concierge/workspace", input()),
+    ).rejects.toThrow();
+    mocks.post.mockResolvedValueOnce({ id: "m1" });
+    await retryPending(unresolvedPending()[0]!);
+    expect(mocks.post).toHaveBeenCalledWith("/api/concierge/workspace", {
+      action: "createMember",
+      payload: { name: "合成客户", cardNo: "QA" },
+      requestId: "original-id",
+    });
+    expect(pendingRequests()).toHaveLength(0);
+  });
+  it("同步版本号没变：不重新取工作区、告诉页面没有变化；取到凭证明细以后算有变化", async () => {
+    const full = { id: "r1", version: 1, rawText: "原文", items: [{ name: "项目" }] };
+    let rev = "7";
+    mocks.get.mockImplementation(async (url: string) =>
+      url.endsWith("/revision")
+        ? { revision: rev }
+        : url.endsWith("/receipts/r1")
+          ? full
+          : { receipts: [{ id: "r1", version: 1 }] },
+    );
+    const first = await loadWorkspace();
+    expect(first.changed).toBe(true);
+    const second = await loadWorkspace();
+    expect(second.changed).toBe(false);
+    expect(second.data).toBe(first.data);
+    expect(mocks.get.mock.calls.filter((c) => c[0] === "/api/concierge/workspace")).toHaveLength(1);
+    await loadReceipt("r1");
+    const third = await loadWorkspace();
+    expect(third.changed).toBe(true);
+    expect(third.data.receipts[0]).toEqual(full);
+    expect((await loadWorkspace()).changed).toBe(false);
+    rev = "8";
+    expect((await loadWorkspace()).changed).toBe(true);
+    expect(mocks.get.mock.calls.filter((c) => c[0] === "/api/concierge/workspace")).toHaveLength(2);
+  });
+  it("本机存的待确认记录不是数组（被别的东西写坏）时当作没有，不让页面崩掉", () => {
+    storage.set(`yuzu:concierge:pending:${actor}`, JSON.stringify({ broken: true }));
+    expect(pendingRequests()).toEqual([]);
+    expect(unresolvedPending()).toEqual([]);
   });
 });

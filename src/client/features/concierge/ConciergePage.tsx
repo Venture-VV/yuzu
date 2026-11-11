@@ -8,14 +8,39 @@ import {
   conciergeFetch,
   setConciergeActor,
   forgetPending,
-  pendingRequests,
+  unresolvedPending,
   checkPending,
   retryPending,
   abandonPending,
   type Pending,
   loadReceipt,
 } from "./api";
+import { Button } from "../../components/ui";
 import "./concierge.css";
+/** 待确认的那一笔是什么：操作、对象、什么时候发的（整改：原来只显示一串编号，分不清是哪一笔） */
+const ACTION_LABELS: Record<string, string> = {
+  createMember: "新建会员",
+  updateMember: "修改会员",
+  saveBalance: "核对余额",
+  attachBalanceEvidence: "追加余额依据",
+  saveNote: "服务记录",
+  saveCatalogItem: "核准项目名称",
+  createAppointment: "登记协调预约",
+  updateAppointment: "调整协调预约",
+  saveVisit: "到店接待",
+  saveTask: "回访 / 交班",
+  saveReceipt: "消费凭证",
+};
+function describePending(op: Pending): string {
+  const p = op.payload as Record<string, unknown>;
+  const pick = (k: string) => (typeof p[k] === "string" ? (p[k] as string).trim() : "");
+  const what = pick("name") || pick("number") || pick("content").slice(0, 20) || pick("service") || (pick("amount") ? `¥${pick("amount")}` : "");
+  const at = new Date(op.createdAt);
+  const time = Number.isFinite(at.getTime())
+    ? at.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })
+    : "";
+  return [ACTION_LABELS[op.action] ?? op.action, what, time && `${time} 提交`].filter(Boolean).join(" · ");
+}
 export function ConciergePage() {
   const session = useSession(),
     can = useCan();
@@ -69,16 +94,23 @@ export function ConciergePage() {
   );
 }
 function PendingPanel({ onResolved }: { onResolved: () => void }) {
-  const [items, setItems] = useState<Pending[]>(pendingRequests()),
+  const [items, setItems] = useState<Pending[]>(unresolvedPending()),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false);
   useEffect(() => {
-    const update = () => setItems(pendingRequests());
+    const update = () => setItems(unresolvedPending());
     window.addEventListener("concierge-pending-changed", update);
     return () =>
       window.removeEventListener("concierge-pending-changed", update);
   }, []);
   const act = async (op: Pending, mode: "check" | "retry" | "abandon") => {
+    if (
+      mode === "abandon" &&
+      !window.confirm(
+        `确认不再执行这一笔？\n${describePending(op)}\n\n门店系统会登记这个编号作废：它如果其实已经成功，记录还在、不会被撤销；如果还没成功，以后也不会再生效。`,
+      )
+    )
+      return;
     setBusy(true);
     try {
       const result =
@@ -120,21 +152,33 @@ function PendingPanel({ onResolved }: { onResolved: () => void }) {
         <section
           className="border-b border-amber-300 bg-amber-50 p-3"
           aria-label="管家操作结果待确认"
+          data-testid="concierge-pending"
         >
           <strong>结果待确认 · {items.length}笔</strong>
-          <p>不要另建同一笔；查回或按原编号重试。</p>
+          <p className="text-[13px]">
+            这几笔发出去以后没有收到明确的结果。处理完之前不能继续录入：先查回；查不到的按原内容重试，或确认不再执行。
+          </p>
           {items.map((op) => (
-            <div key={op.requestId} className="my-2 flex flex-wrap gap-2">
-              <code>{op.requestId}</code>
-              <button disabled={busy} onClick={() => void act(op, "check")}>
+            <div
+              key={op.requestId}
+              className="my-2 flex flex-wrap items-center gap-2"
+              data-testid="concierge-pending-item"
+            >
+              <span className="min-w-0 flex-1 basis-56 text-[14px]">
+                <b>{describePending(op)}</b>
+                <code className="block truncate text-[11px] opacity-70">
+                  操作编号 {op.requestId}
+                </code>
+              </span>
+              <Button size="sm" disabled={busy} onClick={() => void act(op, "check")}>
                 查回结果
-              </button>
-              <button disabled={busy} onClick={() => void act(op, "retry")}>
+              </Button>
+              <Button size="sm" disabled={busy} onClick={() => void act(op, "retry")}>
                 原样重试
-              </button>
-              <button disabled={busy} onClick={() => void act(op, "abandon")}>
-                确认不再执行此编号
-              </button>
+              </Button>
+              <Button size="sm" variant="danger" disabled={busy} onClick={() => void act(op, "abandon")}>
+                确认不再执行
+              </Button>
             </div>
           ))}
         </section>

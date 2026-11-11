@@ -8,9 +8,9 @@ import type {
   CatalogItem,
   Receipt,
 } from "@shared/concierge/types";
-import { WorkspaceError } from "./validation";
+import { WorkspaceError, uuid } from "./validation";
 export async function requireMember(db: Db, id: string) {
-  const [r] = await db`SELECT id FROM concierge_members WHERE id::text=${id}`;
+  const [r] = await db`SELECT id FROM concierge_members WHERE id=${uuid(id)}::uuid`;
   if (!r) throw new WorkspaceError("管家会员不存在，请刷新", 404);
 }
 export async function readCatalog(db: Db): Promise<CatalogItem[]> {
@@ -59,7 +59,8 @@ export async function listTeam(db: Db): Promise<TeamUser[]> {
             userId: String(s.id),
             name: s.displayName,
             email: "",
-            login: s.username,
+            // 同事的登录名不发给页面（整改：原来把店主、店总等所有管家账号的登录名都发给了每个管家）
+            login: "",
             role: perms.includes("concierge.manage")
               ? ("manager" as const)
               : ("butler" as const),
@@ -71,7 +72,7 @@ export async function listTeam(db: Db): Promise<TeamUser[]> {
 }
 export async function receiptDetail(db: Db, id: string): Promise<Receipt> {
   const [r] =
-    await db`SELECT id,data,version,created_at,updated_at FROM concierge_records WHERE id::text=${id} AND kind='receipt'`;
+    await db`SELECT id,data,version,created_at,updated_at FROM concierge_records WHERE id=${uuid(id)}::uuid AND kind='receipt'`;
   if (!r) throw new WorkspaceError("消费单不存在", 404);
   return {
     ...r.data,

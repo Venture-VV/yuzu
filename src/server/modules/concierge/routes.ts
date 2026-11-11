@@ -12,8 +12,9 @@ import {
   briefReceipt,
   requireMember,
 } from "./store";
-import { mutate, moduleLock, balanceEvidence } from "./mutations";
-import { WorkspaceError, text } from "./validation";
+import { can } from "@shared/permissions";
+import { mutate, moduleLock, bumpRevision } from "./mutations";
+import { WorkspaceError, text, uuid } from "./validation";
 const object = (v: unknown): Record<string, any> => {
   if (!v || typeof v !== "object" || Array.isArray(v))
     throw new WorkspaceError("请求格式不正确");
@@ -49,9 +50,10 @@ export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
     { preHandler: guard("concierge.read") },
     async (_req, reply) => {
       reply.header("Cache-Control", "private, no-store");
+      // 管家部自己的同步版本号（整改，见 mutations.ts bumpRevision）
       const [r] =
-        await sql`SELECT coalesce(max(id),0)::text AS revision FROM audit_logs`;
-      return { revision: r!.revision };
+        await sql`SELECT revision::text AS revision FROM concierge_sync`;
+      return { revision: r?.revision ?? "0" };
     },
   );
   app.get(
@@ -217,6 +219,19 @@ export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
             cursor = String(BigInt(rows.at(-1)!.id) - 1n);
           }
         }
+        // 导出留痕（整改：原来两种导出都不记审计；别的模块的导出都记）
+        await writeAudit(sql, {
+          staffId: req.actor.id,
+          action: "concierge_record",
+          targetType: "concierge_export",
+          detail: {
+            actorName: req.actor.displayName,
+            label: "导出操作记录",
+            objectType: "export",
+            filters: { actor, type, q: search, from, to },
+          },
+          ip: req.ip,
+        });
         reply
           .header("Cache-Control", "private, no-store")
           .header(
@@ -233,9 +248,11 @@ export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
     async (req, reply) =>
       run(async () => {
         reply.header("Cache-Control", "private, no-store");
-        const id = text((req.params as any).id, 80, true);
+        const id = text((req.params as any).id, 20, true);
+        if (!/^[1-9]\d{0,17}$/.test(id))
+          throw new WorkspaceError("操作日志不存在", 404);
         const [a] =
-          await sql`SELECT id,staff_id,target_type,target_id,detail,created_at FROM audit_logs WHERE id::text=${id} AND action IN ('concierge_record','concierge_upload') AND (${req.actor.permissions?.includes("concierge.manage") ?? req.actor.role === "owner"} OR staff_id=${req.actor.id})`;
+          await sql`SELECT id,staff_id,target_type,target_id,detail,created_at FROM audit_logs WHERE id=${id}::bigint AND action IN ('concierge_record','concierge_upload') AND (${can(req.actor, "concierge.manage")} OR staff_id=${req.actor.id})`;
         if (!a) throw new WorkspaceError("操作日志不存在", 404);
         return {
           id: String(a.id),
@@ -303,6 +320,7 @@ export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
               const [saved] =
                 await tx`INSERT INTO concierge_uploads(id,member_id,image_id,created_by) VALUES(${id},${memberId || null},${image!.id},${req.actor.id}) RETURNING created_at`;
               createdAt = saved!.createdAt;
+              await bumpRevision(tx);
               await writeAudit(tx, {
                 staffId: req.actor.id,
                 action: "concierge_upload",
@@ -342,7 +360,7 @@ export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
       run(async () => {
         const id = text((req.params as any).id, 80, true);
         const [r] =
-          await sql`SELECT i.data,i.mime FROM concierge_uploads u JOIN erp_images i ON i.id=u.image_id AND i.scope='concierge' WHERE u.id::text=${id}`;
+          await sql`SELECT i.data,i.mime FROM concierge_uploads u JOIN erp_images i ON i.id=u.image_id AND i.scope='concierge' WHERE u.id=${uuid(id)}::uuid`;
         if (!r) throw new WorkspaceError("凭证照片不存在", 404);
         reply
           .header("Cache-Control", "private, no-store")
@@ -421,6 +439,18 @@ export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
             tables,
             images,
           };
+        });
+        await writeAudit(sql, {
+          staffId: req.actor.id,
+          action: "concierge_record",
+          targetType: "concierge_export",
+          detail: {
+            actorName: req.actor.displayName,
+            label: "导出模块备份（含原图）",
+            objectType: "export",
+            images: (backup.images as unknown[]).length,
+          },
+          ip: req.ip,
         });
         reply.header("Cache-Control", "private, no-store");
         return backup;
