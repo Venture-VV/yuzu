@@ -230,7 +230,7 @@ describe('后台「电子菜单」', () => {
     const west = await api<EmenuAdmin>(ctx.app, ctx.owner, 'POST', '/api/admin/emenu/categories', { name: '西式午餐', nameEn: 'WESTERN LUNCH', sortOrder: 1 });
     cat.west = west.body.categories.find((c) => c.name === '西式午餐')!.id;
 
-    const save = (id: number, version: number, pages: unknown[]) => api<EmenuAdmin>(ctx.app, ctx.owner, 'PUT', `/api/admin/emenu/categories/${id}/pages`, { version, pages });
+    const save = (id: number, version: number, pages: unknown[]) => api(ctx.app, ctx.owner, 'PUT', `/api/admin/emenu/categories/${id}/pages`, { version, pages });
     const v0 = (await admin()).categories.find((c) => c.id === cat.lunch)!.version;
     expect((await save(cat.lunch!, v0, [{ layout: 'single_wide', dishIds: [dish.eel, dish.wine] }])).body.error.code).toBe('PAGE_TOO_MANY');
     expect((await save(cat.lunch!, v0, [{ layout: 'trio_row', dishIds: [null, null] }])).body.error.code).toBe('PAGE_EMPTY');
@@ -241,7 +241,7 @@ describe('后台「电子菜单」', () => {
       { layout: 'list_text', title: '酒水', titleEn: 'BEVERAGE', dishIds: [dish.wine, null, dish.eel, null] },
     ]);
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
-    const saved = ok.body.categories.find((c) => c.id === cat.lunch)!;
+    const saved = (ok.body as EmenuAdmin).categories.find((c) => c.id === cat.lunch)!;
     expect(saved.version).toBe(v0 + 1);
     // 没有竖排小标题的版面不存小标题；末尾的空位去掉、中间的留着
     expect(saved.pages).toEqual([
@@ -667,7 +667,7 @@ describe('并发与自检', () => {
 
   it('退菜以后点餐单照旧对得上；前台自检全部通过，点餐单那一条数得出张数；改坏了能查出来', async () => {
     const [line] = await ctx.sql<{ id: number }[]>`
-      SELECT l.id FROM bill_lines l JOIN visits v ON v.bill_id = l.bill_id WHERE v.id = ${visit.A8006} AND l.name = '华夫牛角' AND l.status = 'active' LIMIT 1`;
+      SELECT l.id FROM bill_lines l JOIN visits v ON v.bill_id = l.bill_id WHERE v.id = ${visit.A8006!} AND l.name = '华夫牛角' AND l.status = 'active' LIMIT 1`;
     expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/lines/${line!.id}/void`, { reason: '客人不要了' })).status).toBe(200);
     const g = (await api(ctx.app, pad, 'GET', '/api/emenu/guest?tag=A8006')).body;
     expect(g.ordered.map((l: { name: string }) => l.name)).not.toContain('华夫牛角');
