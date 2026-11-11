@@ -12,6 +12,9 @@ import { REQUEST_IMPORT_COLUMNS } from '../src/shared/requests';
 import { seedInventoryDemo } from '../src/server/seed-inventory';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
+/** 8.0.1 旧模板（集采需求表）的表头 */
+const REQUEST_IMPORT_LEGACY_HEADER = ['序号', '申请部门', '申请人', '物品名称', '单位', '数量', '采购优先级', '期望到货日期', '采购途径', '供应商名称', '备注'];
+
 let ctx: TestContext;
 let today: string;
 let boss: string; // 演示店主 linlan
@@ -492,20 +495,19 @@ describe('收货附件推送到财务待报销（11）', () => {
 
 describe('集采模板与一键导入（06）', () => {
   it('下载模板；预览逐行核对；有错整份不导；按部门 + 优先级 + 期望到货日期合成已通过的需求单；同一份文件只能导一次', async () => {
-    // 模板：一张「集采需求表」，表头与采购组的一样
+    // 模板：供应链二次整改 01 起是采购组的最终版（第 1 行标题、第 2 行表头，见 request-sheet.test.ts）
     const tpl = await ctx.app.inject({ method: 'GET', url: '/api/erp/requests/import/template', headers: { cookie: buyer } });
     expect(tpl.statusCode).toBe(200);
     const book = readXlsx(tpl.rawPayload);
-    expect(book.sheets[0]!.name).toBe('集采需求表');
-    const rows = book.sheets[0]!.rows;
-    const head = rows.get(Math.min(...rows.keys()))!;
+    const head = book.sheets[0]!.rows.get(2)!;
     expect(REQUEST_IMPORT_COLUMNS.map((_, c) => head.get(c)?.value)).toEqual([...REQUEST_IMPORT_COLUMNS]);
     expect((await ctx.app.inject({ method: 'GET', url: '/api/erp/requests/import/template', headers: { cookie: reqA } })).statusCode).toBe(403);
 
     const sups = (await api(ctx.app, boss, 'GET', '/api/inventory/suppliers?all=1')).body as { code: string; name: string; id: number }[];
     const s4 = sups.find((x) => x.code === 'S004')!;
     const later = shiftDate(today, 3);
-    const header = REQUEST_IMPORT_COLUMNS.join(',');
+    // 8.0.1 旧模板的列：照旧能导入（GY13）
+    const header = REQUEST_IMPORT_LEGACY_HEADER.join(',');
     const good = [
       `1,客房部,小李,${mat.name},箱,2,紧急,${later},供应商,${s4.name},加厚`,
       `2,客房部,小王,香薰扩香石,个,10,紧急,${later},网购,,白色`,
