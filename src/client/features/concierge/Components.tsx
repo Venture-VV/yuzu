@@ -1,7 +1,5 @@
 import { useState } from "react";
 import { api } from "../../lib/api";
-import { useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router";
 import { useCan } from "../../lib/session";
 import { loadReceipt } from "./api";
 import type { Receipt } from "./types";
@@ -137,31 +135,5 @@ export function ReceiptArchive({
         </div>
       )}
     </section>
-  );
-}
-
-export function EnterpriseAccount() {
-  const qc = useQueryClient(),
-    navigate = useNavigate();
-  const [error, setError] = useState("");
-  return (
-    <span className="enterprise-account">
-      <Link to="/password">修改密码</Link> ·{" "}
-      <button
-        type="button"
-        onClick={() =>
-          void api
-            .post("/api/auth/logout")
-            .then(() => {
-              qc.clear();
-              navigate("/login", { replace: true });
-            })
-            .catch((e) => setError(e.message))
-        }
-      >
-        退出企业账号
-      </button>
-      {error && <small role="alert">{error}</small>}
-    </span>
   );
 }

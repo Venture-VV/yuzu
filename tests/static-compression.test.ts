@@ -74,7 +74,7 @@ describe('静态资源预压缩', () => {
       expect(res.headers['cache-control'], url).toBe('no-store');
       expect(res.body, url).not.toContain('浴族');
     }
-    const page = await app.inject({ url: '/admin/concierge' });
+    const page = await app.inject({ url: '/concierge' });
     expect(page.statusCode).toBe(200);
     expect(page.body).toContain('浴族');
   });

@@ -35,7 +35,6 @@ import { ADMIN_SECTIONS, type AdminSection } from '@shared/admin';
 import { versionText } from '@shared/instance';
 import { ROLE_LABELS } from '@shared/labels';
 import { useCan, useSession } from '../../lib/session';
-import { useStoreNav } from '../../components/storeNav';
 import { cn } from '../../lib/utils';
 import { LogoMark } from '../../components/Brand';
 import { InstanceBadge } from '../../components/InstanceTag';
@@ -43,7 +42,6 @@ import { InstanceBadge } from '../../components/InstanceTag';
 const ICONS: Record<AdminSection, LucideIcon> = {
   home: LayoutGrid,
   dashboard: LayoutDashboard,
-  concierge: HandHeart,
   settings: ListChecks,
   rules: Scale,
   members: IdCard,
@@ -67,7 +65,7 @@ const ICONS: Record<AdminSection, LucideIcon> = {
 };
 
 const GROUPS: { title: string; items: AdminSection[] }[] = [
-  { title: '概览', items: ['home', 'dashboard', 'concierge', 'settings'] },
+  { title: '概览', items: ['home', 'dashboard', 'settings'] },
   { title: '经营设置', items: ['rules', 'members', 'membership', 'benefits', 'coupons', 'catalog', 'tags', 'technicians', 'dining', 'emenu', 'rooms', 'bookings', 'spaces', 'mp'] },
   { title: '人员与权限', items: ['staff', 'permissions'] },
   { title: '数据', items: ['opening', 'audit'] },
@@ -77,14 +75,11 @@ const GROUPS: { title: string; items: AdminSection[] }[] = [
 export function useAdminSections() {
   const can = useCan();
   const all = (Object.keys(ADMIN_SECTIONS) as AdminSection[]).filter((k) => ADMIN_SECTIONS[k].perms.some((p) => can(p)));
-  return all.includes('home') ? all : all.filter((k) => k === 'dashboard' || k === 'concierge');
+  return all.includes('home') ? all : all.filter((k) => k === 'dashboard');
 }
 
 export function AdminShell() {
   const session = useSession();
-  const can = useCan();
-  // 门店主导航里第一个能用的页面（对客导览不算）
-  const storeHome = useStoreNav().flat().find((n) => !n.guestFacing)?.to ?? null;
   const sections = useAdminSections();
   const location = useLocation();
   useEffect(() => {
@@ -93,10 +88,9 @@ export function AdminShell() {
       document.title = session.storeName;
     };
   }, [session.storeName]);
-  const exit = can('member.read') ? '/' : storeHome && storeHome !== '/' ? storeHome : null;
-  if (!sections.includes('home') && !sections.includes('dashboard') && !sections.includes('concierge')) return <Navigate to="/" replace />;
+  if (!sections.includes('home') && !sections.includes('dashboard')) return <Navigate to="/" replace />;
   // 只有看板权限的：没有后台首页，进来直接到数据看板
-  if (!sections.includes('home') && location.pathname.replace(/\/+$/, '') === ADMIN_SECTIONS.home.path) return <Navigate to={sections.includes('concierge') ? ADMIN_SECTIONS.concierge.path : ADMIN_SECTIONS.dashboard.path} replace />;
+  if (!sections.includes('home') && location.pathname.replace(/\/+$/, '') === ADMIN_SECTIONS.home.path) return <Navigate to={ADMIN_SECTIONS.dashboard.path} replace />;
 
   const groups = GROUPS.map((g) => ({ ...g, items: g.items.filter((k) => sections.includes(k)) })).filter((g) => g.items.length > 0);
   const link = (k: AdminSection, compact: boolean) => {
@@ -138,18 +132,14 @@ export function AdminShell() {
         <span className="hidden text-[12.5px] text-paper/75 md:inline">
           {session.staff.displayName} · {ROLE_LABELS[session.staff.role]}
         </span>
-        {/* 没有会员工作台的账号（例如只在管家部的管家）：「返回前台」回门店主导航里第一个能用的页面（餐饮、客房……）；
-            一个都没有就不显示——原来一律回「/」，首页又把人送回管家部，点了等于没点（8.0.12 整改） */}
-        {exit && (
-          <NavLink
-            to={exit}
-            className="flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3.5 text-[13px] font-semibold text-paper hover:bg-white/18"
-            data-testid="admin-exit"
-          >
-            <ArrowLeft className="size-4" />
-            返回前台
-          </NavLink>
-        )}
+        <NavLink
+          to="/"
+          className="flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3.5 text-[13px] font-semibold text-paper hover:bg-white/18"
+          data-testid="admin-exit"
+        >
+          <ArrowLeft className="size-4" />
+          返回前台
+        </NavLink>
       </header>
       {/* 窄屏：分区横排在顶部，可横向滑动 */}
       <nav aria-label="后台分区" className="flex shrink-0 gap-1.5 overflow-x-auto border-b border-line bg-card px-3 py-2 lg:hidden">

@@ -32,10 +32,7 @@ const StaffTab = lazyPage(() => import('./StaffTab').then((m) => m.StaffTab));
 const TagsTab = lazyPage(() => import('./TagsTab').then((m) => m.TagsTab));
 const TechniciansSection = lazyPage(() => import('./TechniciansSection').then((m) => m.TechniciansSection));
 
-const ConciergePage = lazyPage(() => import('../concierge/ConciergePage').then(m => m.ConciergePage));
-
 export const adminRoutes: RouteObject[] = [
-  { path: 'concierge', element: <ConciergePage /> },
   { index: true, element: <AdminHome /> },
   { path: 'dashboard/:tab?', element: <DashboardPage /> },
   { path: 'settings', element: <RuleCatalog /> },

@@ -24,6 +24,7 @@ const ClockroomPage = lazyPage(() => import('./features/clockroom/ClockroomPage'
 const DiningPage = lazyPage(() => import('./features/dining/DiningPage').then((m) => m.DiningPage));
 const RoomsPage = lazyPage(() => import('./features/rooms/RoomsPage').then((m) => m.RoomsPage));
 const BookingsPage = lazyPage(() => import('./features/bookings/BookingsPage').then((m) => m.BookingsPage));
+const ConciergePage = lazyPage(() => import('./features/concierge/ConciergePage').then((m) => m.ConciergePage));
 const PlatformPage = lazyPage(() => import('./features/platform/PlatformPage').then((m) => m.PlatformPage));
 const GuidePage = lazyPage(() => import('./features/guide/GuidePage').then((m) => m.GuidePage));
 const GuideScreenPage = lazyPage(() => import('./features/guide/GuidePage').then((m) => m.GuideScreenPage));
@@ -191,7 +192,7 @@ function Home() {
   if (erp.landing) return <Navigate to={erp.landing} replace />;
   // 管家（8.0.12）：后勤岗位加了管家职责的，登录后直接进管家部。排在「点餐平板」「他店查询」「只用 ERP」之后——
   // 原来排在最前面：以后给别的岗位勾上管家部的查看权限，平板、库管、采购登录都会被带到管家部（整改）
-  if (can('concierge.read')) return <Navigate to={ADMIN_SECTIONS.concierge.path} replace />;
+  if (can('concierge.read')) return <Navigate to="/concierge" replace />;
   if (dining && (can('dining.kitchen') || can('dining.order'))) return <Navigate to="/dining" replace />;
   if (session?.rooms && (can('room.operate') || can('room.housekeep'))) return <Navigate to="/rooms" replace />;
   if (erp.canEnter) return <Navigate to="/erp" replace />;
@@ -230,6 +231,7 @@ const router = createBrowserRouter([
   { path: '/guide/screen', element: <AuthGate shell="bare" />, children: [{ index: true, element: <GuideScreenPage /> }] },
   // 平板点餐页（8.0.10）：整页是设计师的电子菜单，没有门店系统的导航
   { path: '/emenu', element: <AuthGate shell="bare" />, children: [{ index: true, element: <EmenuPage /> }] },
+  { path: '/admin/concierge', element: <Navigate to="/concierge" replace /> },
   { path: '/admin', element: <AuthGate shell="admin" />, children: adminRoutes },
   // ERP 工作区（v0.7.3）：首页、模块设置、营业数据，以及库存、采购、货款、待办（原来的地址不变，门店主导航里不再有）。
   // 页面属于哪个模块按注册表（@shared/erp）里的页面前缀认，模块关着时 ERP 外壳提示没有开启
@@ -317,6 +319,8 @@ const router = createBrowserRouter([
       { path: 'dining/:tab?', element: <DiningPage /> },
       { path: 'rooms', element: <RoomsPage /> },
       { path: 'bookings', element: <BookingsPage /> },
+      // 管家部（8.0.12）：门店的工作页面；/admin/concierge 是 Codex 最初放的地址，留着跳过来
+      { path: 'concierge', element: <ConciergePage /> },
       { path: 'platform', element: <PlatformPage /> },
       { path: 'guide', element: <GuidePage /> },
       { path: 'devices', element: <DevicesPage /> },

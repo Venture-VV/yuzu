@@ -1,7 +1,6 @@
 import {
   NativeMemberField,
   ReceiptArchive,
-  EnterpriseAccount,
 } from "./Components";
 import { loadReceipt, loadWorkspace, pendingRequests } from "./api";
 import { api } from "../../lib/api";
@@ -359,7 +358,6 @@ function Dialog({
       >
         <div className="modal-heading">
           <div>
-            <div className="eyebrow">TANGQI CONCIERGE</div>
             <h2>{title}</h2>
             {subtitle && <p className="form-subtitle">{subtitle}</p>}
           </div>
@@ -1585,8 +1583,7 @@ export default function Workspace({
             </button>
           </header>
           <div className="integration-note">
-            企业账号 · {data.user.name} · 人工余额与消费凭证不改变收银钱包{" "}
-            <EnterpriseAccount />
+            这里的余额是人工核对的记录，消费凭证只登记事实：都不收款、不扣卡，不改收银里的钱包。
           </div>
           <main className="page-content">
             {success && (
@@ -1617,7 +1614,6 @@ export default function Workspace({
             )}
             <div className="page-heading">
               <div>
-                <div className="eyebrow">TANGQI CONCIERGE</div>
                 <h1>
                   {TITLES[view][0]}
                   {view === "dashboard" && (
@@ -1682,18 +1678,6 @@ export default function Workspace({
             </div>
             {view === "dashboard" && (
               <>
-                <section className="welcome-strip">
-                  <div className="welcome-mark">
-                    <Sparkles size={22} />
-                  </div>
-                  <div>
-                    <strong>从一次接待，到持续服务</strong>
-                    <p>会员、预约、小票与交接，共用一份可以追溯的服务档案。</p>
-                  </div>
-                  <span className="new-system-label">
-                    全新会员系统 · 从零建档
-                  </span>
-                </section>
                 <div className="quick-actions">
                   {[
                     {

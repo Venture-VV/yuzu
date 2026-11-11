@@ -1,16 +1,16 @@
 .concierge-workspace {
-  --ink: #193b32;
-  --text: #293d36;
-  --muted: #8a9691;
-  --green: #29795b;
-  --green-dark: #1d654b;
-  --line: #e9ede8;
-  --paper: #f7f8f4;
-  --orange: #ba7a40;
-  --radius: 12px;
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
-    sans-serif;
+  /* 主线整改（8.0.12）：颜色、字体用现有系统的设计变量（src/client/styles.css）。
+     这份样式是从独立系统移过来的，原来写死了五百多种深浅不一的绿色、灰色；下面整份按色相与明度
+     对到现有的变量上（纸色、卡片、分隔线、墨色、松绿、苔绿、柚黄、陶红），以后主题改了它跟着变。 */
+  --ink: var(--color-ink);
+  --text: var(--color-ink);
+  --muted: var(--color-ink-3);
+  --green: var(--color-pine);
+  --green-dark: var(--color-pine-hover);
+  --line: var(--color-line);
+  --paper: var(--color-paper);
+  --orange: var(--color-yuzu-deep);
+  --radius: var(--radius-md);
 }
 .concierge-workspace * {
   box-sizing: border-box;
@@ -71,7 +71,7 @@
 }
 .concierge-workspace button:focus-visible,
 .concierge-workspace a:focus-visible {
-  outline: 2px solid #67a88b;
+  outline: 2px solid var(--color-pine);
   outline-offset: 4px;
 }
 .concierge-workspace svg {
@@ -81,7 +81,7 @@
   vertical-align: middle;
 }
 .concierge-workspace ::selection {
-  background: #dcecdf;
+  background: var(--color-pine-soft);
 }
 .concierge-workspace .workspace-shell {
   min-height: 100vh;
@@ -90,8 +90,8 @@
   position: fixed;
   inset: 0 auto 0 0;
   width: 224px;
-  background: #173b31;
-  color: #a2b8ac;
+  background: var(--color-ink);
+  color: var(--color-ink-4);
   z-index: 30;
   padding: 32px 18px 0;
   display: flex;
@@ -108,7 +108,7 @@
   place-items: center;
   width: 42px;
   height: 46px;
-  border: 1px solid #7e9a76;
+  border: 1px solid var(--color-ink-3);
   border-radius: 11px;
   color: #dacba4;
   font-size: 27px;
@@ -118,14 +118,14 @@
 .concierge-workspace .brand strong {
   font-size: 18px;
   letter-spacing: 1px;
-  color: #f4f5e9;
+  color: var(--color-paper-2);
   font-weight: 600;
 }
 .concierge-workspace .brand small {
   display: block;
   font-size: 10px;
   letter-spacing: 2.6px;
-  color: #9cb2a0;
+  color: var(--color-ink-4);
   margin-top: 3px;
 }
 .concierge-workspace .store-label {
@@ -134,7 +134,7 @@
   gap: 7px;
   margin: 30px 12px 24px;
   font-size: 12px;
-  color: #c2d0c4;
+  color: var(--color-line-strong);
 }
 .concierge-workspace .store-dot {
   width: 5px;
@@ -144,8 +144,8 @@
 }
 .concierge-workspace .store-state {
   font-size: 11px;
-  color: #88a696;
-  background: #294b3e;
+  color: var(--color-ink-3);
+  background: var(--color-ink);
   padding: 3px 6px;
   border-radius: 4px;
   margin-left: auto;
@@ -153,7 +153,7 @@
 .concierge-workspace .nav-caption {
   font-size: 12px;
   letter-spacing: 1.5px;
-  color: #789889;
+  color: var(--color-ink-3);
   padding: 0 15px;
   margin: 0 0 12px;
 }
@@ -167,17 +167,17 @@
   padding: 0 15px;
   gap: 13px;
   margin-bottom: 7px;
-  color: #abc0b2;
+  color: var(--color-ink-4);
   text-align: left;
   font-size: 13px;
 }
 .concierge-workspace .nav-item:hover {
-  background: #214638;
-  color: #fff;
+  background: var(--color-ink);
+  color: var(--color-card);
 }
 .concierge-workspace .nav-item.active {
-  color: #f2f4e9;
-  background: #2b5442;
+  color: var(--color-moss-soft);
+  background: var(--color-ink);
 }
 .concierge-workspace .nav-item.active > svg {
   color: #d0debc;
@@ -196,13 +196,13 @@
   margin-left: auto;
   color: #dec59e;
   font-weight: 500;
-  background: #47604a;
+  background: var(--color-ink);
   padding: 1px 6px;
   border-radius: 4px;
 }
 .concierge-workspace .nav-divider {
   height: 1px;
-  background: #355448;
+  background: var(--color-ink);
   margin: 21px 14px;
 }
 .concierge-workspace .sidebar-bottom {
@@ -211,10 +211,10 @@
 .concierge-workspace .sidebar-note {
   display: flex;
   gap: 10px;
-  border-bottom: 1px solid #355448;
+  border-bottom: 1px solid var(--color-ink);
   margin: 30px 9px 0;
   padding: 18px 0 24px;
-  color: #a5baa8;
+  color: var(--color-ink-4);
   font-size: 12px;
 }
 .concierge-workspace .sidebar-note svg {
@@ -222,7 +222,7 @@
 }
 .concierge-workspace .sidebar-note small {
   display: block;
-  color: #729784;
+  color: var(--color-ink-3);
   font-size: 11px;
   margin-top: 4px;
 }
@@ -237,7 +237,7 @@
   display: grid;
   place-items: center;
   background: #d7dcc4;
-  color: #3b5c45;
+  color: var(--color-ink);
   border-radius: 50%;
   font-size: 13px;
   width: 34px;
@@ -245,7 +245,7 @@
 }
 .concierge-workspace .current-user strong {
   display: block;
-  color: #dfe7d7;
+  color: var(--color-moss-soft);
   font-size: 12px;
   font-weight: 500;
 }
@@ -253,12 +253,12 @@
   display: block;
   font-size: 11px;
   margin-top: 3px;
-  color: #819e8b;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .online-dot {
   width: 6px;
   height: 6px;
-  background: #8eb08a;
+  background: var(--color-ink-3);
   border-radius: 50%;
   margin-left: auto;
 }
@@ -268,7 +268,7 @@
 .concierge-workspace .topbar {
   height: 73px;
   border-bottom: 1px solid var(--line);
-  background: #fff;
+  background: var(--color-card);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -280,13 +280,13 @@
   align-items: center;
   gap: 13px;
   font-size: 12px;
-  color: #8c9991;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .breadcrumb svg {
-  color: #afbab3;
+  color: var(--color-ink-4);
 }
 .concierge-workspace .breadcrumb strong {
-  color: #3d5649;
+  color: var(--color-ink);
   font-weight: 500;
 }
 .concierge-workspace .topbar-right {
@@ -299,22 +299,22 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #83998b;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .live-status i,
 .concierge-workspace .footer-dot {
   display: inline-block;
   width: 5px;
   height: 5px;
-  background: #84a78e;
+  background: var(--color-ink-3);
   border-radius: 50%;
 }
 .concierge-workspace .header-avatar {
   width: 29px;
   height: 29px;
   font-size: 12px;
-  background: #f0f2e9;
-  border: 1px solid #dfe4d4;
+  background: var(--color-moss-soft);
+  border: 1px solid var(--color-moss-soft);
 }
 .concierge-workspace .icon-btn {
   display: inline-flex;
@@ -323,12 +323,12 @@
   width: 30px;
   height: 30px;
   border-radius: 6px;
-  color: #819087;
+  color: var(--color-ink-3);
   flex-shrink: 0;
 }
 .concierge-workspace .icon-btn:hover {
-  background: #f1f4ef;
-  color: #2a7453;
+  background: var(--color-moss-soft);
+  color: var(--color-pine);
 }
 .concierge-workspace .page-content {
   max-width: 1600px;
@@ -343,7 +343,7 @@
   margin-bottom: 27px;
 }
 .concierge-workspace .eyebrow {
-  color: #6a776c;
+  color: var(--color-ink-3);
   letter-spacing: 2px;
   font-size: 11px;
   font-weight: 500;
@@ -353,7 +353,7 @@
   font-weight: 600;
   font-size: 27px;
   letter-spacing: 0.4px;
-  color: #244536;
+  color: var(--color-ink);
   display: flex;
   align-items: baseline;
   gap: 18px;
@@ -363,11 +363,11 @@
   font-weight: 400;
   font-size: 12px;
   letter-spacing: 0;
-  color: #6c766e;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .page-heading p {
   font-size: 12px;
-  color: #6c7570;
+  color: var(--color-ink-3);
   margin-top: 8px;
 }
 .concierge-workspace .heading-actions {
@@ -389,19 +389,19 @@
   transition: background 0.15s;
 }
 .concierge-workspace .btn-primary {
-  color: #fff;
+  color: var(--color-card);
   background: var(--green);
 }
 .concierge-workspace .btn-primary:hover {
   background: var(--green-dark);
 }
 .concierge-workspace .btn-secondary {
-  background: #fff;
-  border: 1px solid #dfe6dd;
-  color: #536f5c;
+  background: var(--color-card);
+  border: 1px solid var(--color-paper-2);
+  color: var(--color-ink-2);
 }
 .concierge-workspace .btn-secondary:hover {
-  background: #f2f5ef;
+  background: var(--color-moss-soft);
 }
 .concierge-workspace .small-btn {
   font-size: 12px;
@@ -415,18 +415,18 @@
   display: flex;
   align-items: center;
   gap: 15px;
-  background: #ecf1e7;
-  border: 1px solid #e2e9dc;
+  background: var(--color-moss-soft);
+  border: 1px solid var(--color-moss-soft);
   border-radius: 9px;
   padding: 20px 22px;
   margin-bottom: 24px;
 }
 .concierge-workspace .welcome-mark {
-  background: #dde7d5;
+  background: var(--color-moss-soft);
   border-radius: 9px;
   display: grid;
   place-items: center;
-  color: #59795a;
+  color: var(--color-ink-2);
   width: 43px;
   height: 43px;
 }
@@ -434,16 +434,16 @@
   font-size: 12px;
   letter-spacing: 0.3px;
   font-weight: 500;
-  color: #4c674d;
+  color: var(--color-ink-2);
 }
 .concierge-workspace .welcome-strip p {
   font-size: 12px;
-  color: #6c7767;
+  color: var(--color-ink-3);
   margin-top: 5px;
 }
 .concierge-workspace .new-system-label {
   font-size: 11px;
-  color: #6b7862;
+  color: var(--color-ink-3);
   margin-left: auto;
   padding: 5px 9px;
   border: 1px solid #d2ddc9;
@@ -457,7 +457,7 @@
   margin-bottom: 26px;
 }
 .concierge-workspace .stat-card {
-  background: #fff;
+  background: var(--color-card);
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 20px 21px 17px;
@@ -469,24 +469,24 @@
   justify-content: space-between;
   gap: 7px;
   font-size: 12px;
-  color: #69776f;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .stat-icon {
   height: 31px;
   width: 31px;
   display: grid;
   place-items: center;
-  background: #eff5ee;
-  color: #6a9472;
+  background: var(--color-moss-soft);
+  color: var(--color-ink-3);
   border-radius: 8px;
 }
 .concierge-workspace .stat-blue .stat-icon {
-  background: #edf3f3;
-  color: #5c7c78;
+  background: var(--color-lake-soft);
+  color: var(--color-ink-3);
 }
 .concierge-workspace .stat-orange .stat-icon {
-  background: #faf1e5;
-  color: #8a6d4a;
+  background: var(--color-yuzu-soft);
+  color: var(--color-yuzu-deep);
 }
 .concierge-workspace .stat-purple .stat-icon {
   background: #f1eef6;
@@ -494,7 +494,7 @@
 }
 .concierge-workspace .stat-value {
   font-family: var(--font-sans);
-  color: #2c4c3a;
+  color: var(--color-ink);
   font-size: 28px;
   letter-spacing: 0.4px;
   font-weight: 500;
@@ -503,14 +503,14 @@
 }
 .concierge-workspace .stat-value small {
   font-size: 11px;
-  color: #69786c;
+  color: var(--color-ink-3);
   margin-left: 8px;
   font-weight: 400;
   letter-spacing: 0;
 }
 .concierge-workspace .stat-card p {
   font-size: 11px;
-  color: #6d756e;
+  color: var(--color-ink-3);
   margin-top: 10px;
 }
 .concierge-workspace .dashboard-grid {
@@ -523,7 +523,7 @@
 .concierge-workspace .panel {
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--color-card);
   overflow: hidden;
   min-width: 0;
 }
@@ -534,7 +534,7 @@
   align-items: center;
   gap: 15px;
   padding: 18px 22px;
-  border-bottom: 1px solid #eff2ec;
+  border-bottom: 1px solid var(--color-moss-soft);
 }
 .concierge-workspace .panel-header > div {
   display: flex;
@@ -545,13 +545,13 @@
 .concierge-workspace .panel-header h2 {
   font-size: 12px;
   font-weight: 600;
-  color: #36533e;
+  color: var(--color-ink);
   white-space: nowrap;
 }
 .concierge-workspace .section-dot {
   width: 4px;
   height: 13px;
-  background: #749879;
+  background: var(--color-ink-3);
   border-radius: 3px;
 }
 .concierge-workspace .section-dot.orange {
@@ -559,38 +559,38 @@
 }
 .concierge-workspace .count-tag {
   font-size: 11px;
-  background: #f0f4eb;
-  color: #6a7a60;
+  background: var(--color-moss-soft);
+  color: var(--color-ink-3);
   border-radius: 4px;
   padding: 2px 6px;
   white-space: nowrap;
 }
 .concierge-workspace .orange-count {
-  background: #fbf2e6;
-  color: #8e6d41;
+  background: var(--color-yuzu-soft);
+  color: var(--color-yuzu-deep);
 }
 .concierge-workspace .text-btn {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  color: #789578;
+  color: var(--color-ink-3);
   font-size: 12px;
   padding: 3px 0;
   white-space: nowrap;
 }
 .concierge-workspace .text-btn:hover {
-  color: #226a4c;
+  color: var(--color-pine);
 }
 .concierge-workspace .panel-footer {
   display: flex;
   gap: 7px;
   align-items: center;
   min-height: 42px;
-  background: #fbfcf8;
-  border-top: 1px solid #edf0e8;
+  background: var(--color-card);
+  border-top: 1px solid var(--color-moss-soft);
   padding: 12px 21px;
   font-size: 11px;
-  color: #6c7768;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .empty-state {
   min-height: 229px;
@@ -604,22 +604,22 @@
 .concierge-workspace .empty-icon {
   width: 53px;
   height: 53px;
-  border: 1px solid #e6ecdf;
-  background: #f6f8f2;
+  border: 1px solid var(--color-moss-soft);
+  background: var(--color-paper);
   border-radius: 15px;
   display: grid;
   place-items: center;
-  color: #6e7665;
+  color: var(--color-ink-3);
   margin-bottom: 15px;
 }
 .concierge-workspace .empty-state h3 {
   font-size: 12px;
   font-weight: 500;
-  color: #7c917e;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .empty-state p {
   font-size: 12px;
-  color: #6d766c;
+  color: var(--color-ink-3);
   margin-top: 7px;
   max-width: 290px;
   line-height: 1.8;
@@ -654,22 +654,22 @@
 .concierge-workspace .data-table th {
   font-size: 11px;
   font-weight: 400;
-  color: #6c7769;
-  background: #fafbf7;
+  color: var(--color-ink-3);
+  background: var(--color-card);
   padding: 13px 22px;
-  border-bottom: 1px solid #eef1e9;
+  border-bottom: 1px solid var(--color-moss-soft);
 }
 .concierge-workspace .data-table td {
   padding: 17px 22px;
   font-size: 12px;
-  border-bottom: 1px solid #f0f2ec;
-  color: #6e8471;
+  border-bottom: 1px solid var(--color-moss-soft);
+  color: var(--color-ink-3);
 }
 .concierge-workspace .data-table tr:last-child td {
   border-bottom: 0;
 }
 .concierge-workspace .data-table tbody tr:hover {
-  background: #fcfdf9;
+  background: var(--color-card);
 }
 .concierge-workspace .text-right {
   text-align: right;
@@ -685,13 +685,13 @@
 .concierge-workspace .member-cell strong {
   display: block;
   font-size: 12px;
-  color: #4b6651;
+  color: var(--color-ink);
   font-weight: 500;
 }
 .concierge-workspace .member-cell small {
   display: block;
   font-size: 11px;
-  color: #6d766b;
+  color: var(--color-ink-3);
   margin-top: 3px;
 }
 .concierge-workspace .avatar {
@@ -699,41 +699,41 @@
   width: 33px;
   display: grid;
   place-items: center;
-  background: #edf1e6;
-  color: #6e7a55;
+  background: var(--color-moss-soft);
+  color: var(--color-ink-2);
   font-size: 12px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 .concierge-workspace .avatar-1 {
-  background: #f2eadd;
-  color: #827053;
+  background: var(--color-paper-2);
+  color: var(--color-yuzu-deep);
 }
 .concierge-workspace .avatar-2 {
-  background: #e9eef0;
-  color: #647878;
+  background: var(--color-lake-soft);
+  color: var(--color-ink-3);
 }
 .concierge-workspace .tier-tag {
   display: inline-block;
   padding: 3px 7px;
   border-radius: 4px;
-  background: #f2f4ed;
-  color: #6e785e;
+  background: var(--color-moss-soft);
+  color: var(--color-ink-2);
   font-size: 11px;
 }
 .concierge-workspace .balance-amount {
   font-variant-numeric: tabular-nums;
   font-size: 12px;
   font-weight: 500;
-  color: #57765c;
+  color: var(--color-ink-2);
 }
 .concierge-workspace .orange-text {
-  color: #8f6d41 !important;
+  color: var(--color-yuzu-deep) !important;
 }
 .concierge-workspace .cell-sub {
   display: block;
   font-size: 10px;
-  color: #6d766c;
+  color: var(--color-ink-3);
   margin-top: 3px;
 }
 .concierge-workspace .staff-name {
@@ -759,19 +759,19 @@
   justify-content: space-between;
   gap: 14px;
   padding: 19px 22px;
-  border-bottom: 1px solid #eff2eb;
+  border-bottom: 1px solid var(--color-moss-soft);
 }
 .concierge-workspace .search-field {
   display: flex;
   align-items: center;
   gap: 9px;
-  border: 1px solid #e4e9de;
+  border: 1px solid var(--color-moss-soft);
   border-radius: 6px;
   padding: 8px 10px;
-  color: #6b7769;
+  color: var(--color-ink-3);
   max-width: 330px;
   flex: 1;
-  background: #fff;
+  background: var(--color-card);
 }
 .concierge-workspace .search-field input {
   width: 100%;
@@ -786,11 +786,11 @@
   outline: none;
 }
 .concierge-workspace .search-field input::placeholder {
-  color: #6d766a;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .search-field button {
   padding: 0;
-  color: #6e766a;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .filter-selects {
   display: flex;
@@ -798,30 +798,30 @@
 }
 .concierge-workspace .filter-selects select {
   font-size: 11px;
-  border: 1px solid #e4e9de;
+  border: 1px solid var(--color-moss-soft);
   border-radius: 6px;
   padding: 8px 25px 8px 10px;
-  background: #fff;
-  color: #6c7865;
+  background: var(--color-card);
+  color: var(--color-ink-3);
   max-width: 165px;
 }
 .concierge-workspace .table-footer {
   display: flex;
   justify-content: space-between;
   font-size: 11px;
-  color: #6c7769;
+  color: var(--color-ink-3);
   padding: 17px 22px;
-  border-top: 1px solid #edf0e8;
+  border-top: 1px solid var(--color-moss-soft);
 }
 .concierge-workspace .table-footer span {
-  color: #6e756c;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .workspace-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-top: 28px;
-  color: #6f756d;
+  color: var(--color-ink-3);
   font-size: 10px;
 }
 .concierge-workspace .workspace-footer > span:first-child {
@@ -838,9 +838,9 @@
   display: flex;
   align-items: flex-start;
   gap: 9px;
-  border: 1px solid #e5ebdd;
-  background: #f0f4eb;
-  color: #6b7962;
+  border: 1px solid var(--color-moss-soft);
+  background: var(--color-moss-soft);
+  color: var(--color-ink-3);
   padding: 13px 16px;
   border-radius: 8px;
   font-size: 12px;
@@ -851,9 +851,9 @@
   margin-top: 1px;
 }
 .concierge-workspace .info-strip.warm {
-  background: #faf4ea;
-  color: #866f4f;
-  border-color: #f0e4d3;
+  background: var(--color-yuzu-soft);
+  color: var(--color-yuzu-deep);
+  border-color: var(--color-paper-2);
 }
 .concierge-workspace .appointment-list {
   padding: 7px 22px;
@@ -863,7 +863,7 @@
   align-items: center;
   gap: 15px;
   padding: 19px 0;
-  border-bottom: 1px solid #f0f2ec;
+  border-bottom: 1px solid var(--color-moss-soft);
   min-width: 0;
 }
 .concierge-workspace .appointment-row:last-child {
@@ -878,17 +878,17 @@
 .concierge-workspace .appointment-time strong {
   font-size: 12px;
   font-weight: 500;
-  color: #61765b;
+  color: var(--color-ink-2);
 }
 .concierge-workspace .appointment-time small {
   font-size: 11px;
-  color: #6e7669;
+  color: var(--color-ink-3);
   margin-top: 3px;
 }
 .concierge-workspace .appointment-line {
   height: 39px;
   width: 2px;
-  background: #dbe6d2;
+  background: var(--color-moss-soft);
   border-radius: 3px;
   flex-shrink: 0;
 }
@@ -902,7 +902,7 @@
   gap: 8px;
   font-size: 12px;
   font-weight: 500;
-  color: #526b4d;
+  color: var(--color-ink-2);
   text-align: left;
   padding: 0;
 }
@@ -912,13 +912,13 @@
 }
 .concierge-workspace .appointment-info p {
   font-size: 12px;
-  color: #6d7861;
+  color: var(--color-ink-3);
   margin: 4px 0;
   overflow-wrap: anywhere;
 }
 .concierge-workspace .appointment-info > small {
   font-size: 10px;
-  color: #6e7667;
+  color: var(--color-ink-3);
   display: flex;
   align-items: center;
   gap: 4px;
@@ -935,8 +935,8 @@
   font-size: 11px;
   padding: 3px 6px;
   border-radius: 4px;
-  background: #f0f2ed;
-  color: #6d7668;
+  background: var(--color-paper);
+  color: var(--color-ink-3);
   white-space: nowrap;
 }
 .concierge-workspace .status i {
@@ -946,16 +946,16 @@
   background: currentColor;
 }
 .concierge-workspace .status-green {
-  color: #729474;
-  background: #edf4e9;
+  color: var(--color-ink-3);
+  background: var(--color-moss-soft);
 }
 .concierge-workspace .status-orange {
-  color: #886f47;
-  background: #fcf6e7;
+  color: var(--color-yuzu-deep);
+  background: var(--color-yuzu-soft);
 }
 .concierge-workspace .status-gray {
-  color: #6e7669;
-  background: #f2f4ef;
+  color: var(--color-ink-3);
+  background: var(--color-moss-soft);
 }
 .concierge-workspace .date-controls {
   display: flex;
@@ -963,7 +963,7 @@
   gap: 8px;
 }
 .concierge-workspace .date-controls input {
-  border: 1px solid #e4e9de;
+  border: 1px solid var(--color-moss-soft);
   border-radius: 5px;
   padding: 5px 8px;
   font-size: 12px;
@@ -979,7 +979,7 @@
   width: 100%;
   text-align: left;
   padding: 18px 0;
-  border-bottom: 1px solid #f0f2e9;
+  border-bottom: 1px solid var(--color-moss-soft);
 }
 .concierge-workspace .attention-item:last-child {
   border: 0;
@@ -992,23 +992,23 @@
   display: block;
   font-size: 12px;
   font-weight: 500;
-  color: #5a704f;
+  color: var(--color-ink-2);
 }
 .concierge-workspace .attention-item small {
   display: block;
   font-size: 10px;
-  color: #6f7667;
+  color: var(--color-ink-3);
   margin-top: 4px;
 }
 .concierge-workspace .attention-amount {
   font-size: 12px;
-  color: #896e4b;
+  color: var(--color-yuzu-deep);
   text-align: right;
   white-space: nowrap;
 }
 .concierge-workspace .attention-amount small {
   font-size: 10px;
-  color: #807056;
+  color: var(--color-yuzu-deep);
 }
 .concierge-workspace .segments-grid {
   display: grid;
@@ -1017,58 +1017,58 @@
   margin-bottom: 22px;
 }
 .concierge-workspace .segment-card {
-  background: #fff;
-  border: 1px solid #e7ecdf;
+  background: var(--color-card);
+  border: 1px solid var(--color-moss-soft);
   border-radius: 10px;
   padding: 24px;
   text-align: left;
   position: relative;
 }
 .concierge-workspace .segment-card.selected {
-  border-color: #86ab83;
-  background: #f7faf3;
-  box-shadow: 0 0 0 1px #86ab83;
+  border-color: var(--color-ink-3);
+  background: var(--color-paper);
+  box-shadow: 0 0 0 1px var(--color-ink-3);
 }
 .concierge-workspace .segment-icon {
   width: 38px;
   height: 38px;
   border-radius: 9px;
-  background: #edf3e7;
-  color: #677c5e;
+  background: var(--color-moss-soft);
+  color: var(--color-ink-3);
   display: grid;
   place-items: center;
   margin-bottom: 16px;
 }
 .concierge-workspace .segment-card.orange .segment-icon {
-  background: #fbf2e3;
-  color: #876e4e;
+  background: var(--color-yuzu-soft);
+  color: var(--color-yuzu-deep);
 }
 .concierge-workspace .segment-card.gray .segment-icon {
-  background: #f0f2ed;
-  color: #6f756b;
+  background: var(--color-paper);
+  color: var(--color-ink-3);
 }
 .concierge-workspace .segment-count {
   position: absolute;
   right: 24px;
   top: 25px;
-  color: #5b7550;
+  color: var(--color-ink-2);
   font-size: 30px;
   font-weight: 500;
 }
 .concierge-workspace .segment-count small {
   font-size: 11px;
   margin-left: 6px;
-  color: #6e7668;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .segment-card > strong {
   display: block;
   font-weight: 500;
   font-size: 13px;
-  color: #607b53;
+  color: var(--color-ink-2);
 }
 .concierge-workspace .segment-card > p {
   font-size: 12px;
-  color: #6e7766;
+  color: var(--color-ink-3);
   margin-top: 6px;
 }
 .concierge-workspace .segment-link {
@@ -1076,14 +1076,14 @@
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: #687b5c;
+  color: var(--color-ink-3);
   margin-top: 21px;
 }
 .concierge-workspace .small {
   font-size: 11px;
 }
 .concierge-workspace .muted {
-  color: #6d7768;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .truncate {
   overflow: hidden;
@@ -1097,12 +1097,12 @@
 .concierge-workspace .self-label {
   display: inline !important;
   font-size: 10px !important;
-  color: #6c7864 !important;
+  color: var(--color-ink-3) !important;
   margin-left: 6px;
 }
 .concierge-workspace .manager-tag {
-  background: #e9f1e5;
-  color: #657e58;
+  background: var(--color-moss-soft);
+  color: var(--color-ink-2);
 }
 .concierge-workspace .mobile-menu {
   display: none;
@@ -1117,9 +1117,9 @@
   margin-bottom: 18px;
 }
 .concierge-workspace .alert-error {
-  background: #fff0ec;
+  background: var(--color-clay-soft);
   border: 1px solid #ecd0c6;
-  color: #a15d48;
+  color: var(--color-clay);
 }
 .concierge-workspace .alert > span {
   flex: 1;
@@ -1135,12 +1135,12 @@
   left: 50%;
   transform: translateX(-50%);
   z-index: 110;
-  background: #eaf3e5;
+  background: var(--color-moss-soft);
   border: 1px solid #d8e8cb;
-  color: #60824e;
+  color: var(--color-moss);
   padding: 12px 20px;
   border-radius: 8px;
-  box-shadow: 0 6px 30px #203b2514;
+  box-shadow: 0 6px 30px #1c231f14;
   font-size: 12px;
   display: flex;
   gap: 9px;
@@ -1156,7 +1156,7 @@
 .concierge-workspace .modal-scrim {
   position: absolute;
   inset: 0;
-  background: #173b314d;
+  background: #1c231f4d;
   backdrop-filter: blur(2px);
 }
 .concierge-workspace .member-drawer {
@@ -1166,20 +1166,20 @@
   bottom: 0;
   width: 540px;
   max-width: 100%;
-  background: #fff;
-  box-shadow: -15px 0 60px #173b3110;
+  background: var(--color-card);
+  box-shadow: -15px 0 60px #1c231f10;
   display: flex;
   flex-direction: column;
 }
 .concierge-workspace .drawer-heading {
   height: 60px;
   padding: 16px 25px;
-  border-bottom: 1px solid #edf1e7;
+  border-bottom: 1px solid var(--color-moss-soft);
   display: flex;
   align-items: center;
   justify-content: space-between;
   font-size: 12px;
-  color: #6c7865;
+  color: var(--color-ink-3);
   flex-shrink: 0;
 }
 .concierge-workspace .drawer-profile {
@@ -1194,16 +1194,16 @@
   height: 58px;
   border-radius: 17px;
   font-size: 23px;
-  color: #697c56;
+  color: var(--color-ink-2);
 }
 .concierge-workspace .drawer-profile h2 {
   font-size: 22px;
   font-weight: 500;
-  color: #4c6b3f;
+  color: var(--color-ink-2);
 }
 .concierge-workspace .drawer-profile p {
   font-size: 12px;
-  color: #6e7763;
+  color: var(--color-ink-3);
   margin: 4px 0 7px;
 }
 .concierge-workspace .drawer-profile > .btn {
@@ -1212,8 +1212,8 @@
 }
 .concierge-workspace .drawer-balance {
   margin: 0 25px 22px;
-  background: #f3f6ee;
-  border: 1px solid #e8eedf;
+  background: var(--color-moss-soft);
+  border: 1px solid var(--color-moss-soft);
   border-radius: 9px;
   display: flex;
   justify-content: space-between;
@@ -1222,7 +1222,7 @@
 }
 .concierge-workspace .drawer-balance small {
   font-size: 12px;
-  color: #6e7761;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .drawer-balance strong {
   display: block;
@@ -1230,30 +1230,30 @@
 }
 .concierge-workspace .drawer-balance .balance-amount {
   font-size: 24px;
-  color: #6a8a51;
+  color: var(--color-moss);
   font-weight: 500;
 }
 .concierge-workspace .drawer-balance p {
   font-size: 11px;
-  color: #6e7860;
+  color: var(--color-ink-3);
   margin-top: 6px;
 }
 .concierge-workspace .drawer-tabs {
   display: flex;
   gap: 25px;
-  border-bottom: 1px solid #e9efde;
+  border-bottom: 1px solid var(--color-moss-soft);
   padding: 0 25px;
   flex-shrink: 0;
 }
 .concierge-workspace .drawer-tabs button {
   font-size: 12px;
   padding: 12px 0 13px;
-  color: #6e785f;
+  color: var(--color-ink-3);
   border-bottom: 2px solid transparent;
 }
 .concierge-workspace .drawer-tabs button.selected {
-  color: #628548;
-  border-color: #628548;
+  color: var(--color-moss);
+  border-color: var(--color-moss);
 }
 .concierge-workspace .drawer-body {
   padding: 23px 25px 30px;
@@ -1263,7 +1263,7 @@
 .concierge-workspace .detail-section-title {
   font-size: 12px;
   font-weight: 500;
-  color: #6e8955;
+  color: var(--color-moss);
   margin-bottom: 18px;
 }
 .concierge-workspace .detail-grid {
@@ -1274,21 +1274,21 @@
 }
 .concierge-workspace .detail-grid dt {
   font-size: 11px;
-  color: #6d785e;
+  color: var(--color-ink-2);
   margin-bottom: 6px;
 }
 .concierge-workspace .detail-grid dd {
   margin: 0;
-  color: #708b57;
+  color: var(--color-moss);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
 .concierge-workspace .preferences-box {
   font-size: 12px;
   line-height: 1.9;
-  background: #fafbf6;
-  border: 1px solid #edf1e4;
-  color: #6d795b;
+  background: var(--color-paper);
+  border: 1px solid var(--color-moss-soft);
+  color: var(--color-ink-2);
   border-radius: 7px;
   padding: 16px;
   white-space: pre-wrap;
@@ -1301,9 +1301,9 @@
   gap: 8px;
   font-size: 12px;
   line-height: 1.8;
-  background: #f6f8f0;
-  color: #6d795a;
-  border: 1px solid #e9efdd;
+  background: var(--color-paper);
+  color: var(--color-ink-2);
+  border: 1px solid var(--color-moss-soft);
   padding: 12px 13px;
   border-radius: 6px;
   margin: 17px 0;
@@ -1313,7 +1313,7 @@
 }
 .concierge-workspace .history-list {
   margin: 22px 0 0 7px;
-  border-left: 1px solid #e0e9d2;
+  border-left: 1px solid var(--color-moss-soft);
   padding-left: 22px;
 }
 .concierge-workspace .history-item {
@@ -1340,35 +1340,35 @@
 }
 .concierge-workspace .history-top strong {
   font-size: 12px;
-  color: #789756;
+  color: var(--color-moss);
   font-weight: 500;
 }
 .concierge-workspace .history-top small {
-  color: #6f7663;
+  color: var(--color-ink-3);
   font-size: 11px;
 }
 .concierge-workspace .history-item p {
   font-size: 12px;
-  color: #6e7958;
+  color: var(--color-ink-2);
   display: flex;
   gap: 4px;
   align-items: center;
 }
 .concierge-workspace .history-item > small {
   font-size: 11px;
-  color: #6f775f;
+  color: var(--color-ink-2);
 }
 .concierge-workspace .history-note {
   font-size: 12px;
-  color: #6b7c53;
+  color: var(--color-ink-2);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   margin: 7px 0;
   line-height: 1.9;
 }
 .concierge-workspace .note-form {
-  border: 1px solid #e4ecd7;
-  background: #fbfcf8;
+  border: 1px solid var(--color-moss-soft);
+  background: var(--color-card);
   border-radius: 8px;
   padding: 15px;
   display: flex;
@@ -1378,25 +1378,25 @@
 }
 .concierge-workspace .note-form > label {
   font-size: 12px;
-  color: #6a7d4f;
+  color: var(--color-moss);
 }
 .concierge-workspace .note-form textarea,
 .concierge-workspace .field input,
 .concierge-workspace .field select,
 .concierge-workspace .field textarea {
   width: 100%;
-  border: 1px solid #e1e8d6;
-  background: #fff;
+  border: 1px solid var(--color-moss-soft);
+  background: var(--color-card);
   border-radius: 6px;
   padding: 10px 11px;
   font-size: 12px;
-  color: #607a48;
+  color: var(--color-moss);
   min-width: 0;
 }
 .concierge-workspace .note-form textarea::placeholder,
 .concierge-workspace .field input::placeholder,
 .concierge-workspace .field textarea::placeholder {
-  color: #6f7760;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .note-form .btn {
   align-self: flex-end;
@@ -1408,12 +1408,12 @@
   min-width: 0;
 }
 .concierge-workspace .field > span {
-  color: #6b7a5a;
+  color: var(--color-ink-2);
   font-size: 12px;
 }
 .concierge-workspace .field small {
   font-size: 10px;
-  color: #6f7760;
+  color: var(--color-ink-3);
   line-height: 1.6;
 }
 .concierge-workspace .modal-layer {
@@ -1428,9 +1428,9 @@
   width: 610px;
   max-width: 100%;
   max-height: calc(100dvh - 48px);
-  background: #fff;
-  border: 1px solid #eef2e4;
-  box-shadow: 0 20px 90px #173b3126;
+  background: var(--color-card);
+  border: 1px solid var(--color-moss-soft);
+  box-shadow: 0 20px 90px #1c231f26;
   border-radius: 13px;
   display: flex;
   flex-direction: column;
@@ -1440,17 +1440,17 @@
   justify-content: space-between;
   align-items: center;
   padding: 23px 27px;
-  border-bottom: 1px solid #e9efdc;
+  border-bottom: 1px solid var(--color-moss-soft);
   flex-shrink: 0;
 }
 .concierge-workspace .modal-heading h2 {
   font-size: 20px;
-  color: #587b3d;
+  color: var(--color-moss);
   font-weight: 500;
 }
 .concierge-workspace .modal-heading .eyebrow {
   font-size: 10px;
-  color: #6d795d;
+  color: var(--color-ink-2);
   margin-bottom: 5px;
 }
 .concierge-workspace .modal-box form {
@@ -1464,7 +1464,7 @@
 }
 .concierge-workspace .form-intro {
   font-size: 12px;
-  color: #6d785d;
+  color: var(--color-ink-2);
   margin-bottom: 24px;
   line-height: 1.9;
 }
@@ -1481,14 +1481,14 @@
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: #6b7c51;
-  border-top: 1px solid #edf2e1;
+  color: var(--color-moss);
+  border-top: 1px solid var(--color-moss-soft);
   padding-top: 21px;
   margin: 25px 0 18px;
 }
 .concierge-workspace .form-section-title > span {
   font-size: 11px;
-  color: #6e785f;
+  color: var(--color-ink-3);
   margin-left: auto;
 }
 .concierge-workspace .modal-footer {
@@ -1496,12 +1496,12 @@
   align-items: center;
   gap: 10px;
   padding: 18px 27px;
-  border-top: 1px solid #e8efda;
+  border-top: 1px solid var(--color-moss-soft);
   flex-shrink: 0;
 }
 .concierge-workspace .modal-footer > span {
   margin-right: auto;
-  color: #6f7760;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .modal-footer .btn {
   min-width: 68px;
@@ -1510,7 +1510,7 @@
   display: flex;
   gap: 12px;
   align-items: center;
-  background: #f6f9ef;
+  background: var(--color-paper);
   padding: 15px;
   border-radius: 8px;
   margin-bottom: 24px;
@@ -1519,25 +1519,25 @@
   display: block;
   font-size: 12px;
   font-weight: 500;
-  color: #697e4b;
+  color: var(--color-moss);
 }
 .concierge-workspace .form-member-summary small {
   display: block;
   font-size: 12px;
-  color: #6e7958;
+  color: var(--color-ink-2);
   margin-top: 5px;
 }
 .concierge-workspace .amount-input {
   display: flex;
   align-items: center;
-  border: 1px solid #e1e8d6;
+  border: 1px solid var(--color-moss-soft);
   border-radius: 6px;
   padding: 0 12px;
   gap: 10px;
 }
 .concierge-workspace .amount-input > span {
   font-size: 20px;
-  color: #6d7a56;
+  color: var(--color-ink-2);
 }
 .concierge-workspace .amount-input input {
   border: 0 !important;
@@ -1550,27 +1550,27 @@
   gap: 8px;
   padding: 9px 0;
   font-size: 12px;
-  color: #6c7b54;
+  color: var(--color-ink-2);
 }
 .concierge-workspace .checkbox-label input {
   width: 15px;
   height: 15px;
-  accent-color: #7b9d54;
+  accent-color: var(--color-moss);
 }
 .concierge-workspace .role-explainer {
-  background: #f9fbf4;
+  background: var(--color-paper);
   border-radius: 7px;
   padding: 16px;
   margin-top: 25px;
 }
 .concierge-workspace .role-explainer strong {
   font-size: 12px;
-  color: #6a7d4f;
+  color: var(--color-moss);
   font-weight: 500;
 }
 .concierge-workspace .role-explainer p {
   font-size: 12px;
-  color: #6e7958;
+  color: var(--color-ink-2);
   line-height: 1.9;
   margin: 5px 0 13px;
 }
@@ -1774,7 +1774,7 @@
   .concierge-workspace .sidebar-scrim {
     position: fixed;
     inset: 0;
-    background: #173b315c;
+    background: #1c231f5c;
     z-index: 61;
   }
   .concierge-workspace .workspace-main {
@@ -1786,7 +1786,7 @@
     position: sticky;
     top: 0;
     z-index: 20;
-    background: #ffffffed;
+    background: #fffdf8ed;
     backdrop-filter: blur(8px);
   }
   .concierge-workspace .mobile-menu {
@@ -2346,22 +2346,22 @@
   text-align: left;
   gap: 12px;
   padding: 17px 15px;
-  background: #fff;
-  border: 1px solid #e4eadf;
+  background: var(--color-card);
+  border: 1px solid var(--color-moss-soft);
   border-radius: 9px;
 }
 .concierge-workspace .quick-action:hover {
-  background: #f4f8f0;
+  background: var(--color-paper);
   border-color: #c6d6bd;
 }
 .concierge-workspace .quick-action > span {
   width: 35px;
   height: 37px;
-  background: #f0f5eb;
+  background: var(--color-moss-soft);
   border-radius: 8px;
   display: grid;
   place-items: center;
-  color: #7b9c66;
+  color: var(--color-moss);
   flex-shrink: 0;
 }
 .concierge-workspace .quick-action > div {
@@ -2371,13 +2371,13 @@
 .concierge-workspace .quick-action strong {
   display: block;
   font-size: 12px;
-  color: #57764a;
+  color: var(--color-moss);
   font-weight: 500;
 }
 .concierge-workspace .quick-action small {
   display: block;
   font-size: 10px;
-  color: #87977a;
+  color: var(--color-ink-3);
   margin-top: 4px;
 }
 .concierge-workspace .quick-action > svg {
@@ -2386,7 +2386,7 @@
 .concierge-workspace .member-code {
   font-style: normal;
   font-size: 9px;
-  color: #91a47f;
+  color: var(--color-ink-3);
   font-weight: 400;
   margin-left: 7px;
   font-variant-numeric: tabular-nums;
@@ -2396,12 +2396,12 @@
   font-size: 12px;
   letter-spacing: 1px;
   font-weight: 500;
-  color: #66854e;
+  color: var(--color-moss);
 }
 .concierge-workspace .record-actor {
   margin-left: 9px;
   padding-left: 9px;
-  border-left: 1px solid #dde7d2;
+  border-left: 1px solid var(--color-moss-soft);
   font-size: 9px;
 }
 .concierge-workspace .row-mini-actions {
@@ -2433,7 +2433,7 @@
   width: 100%;
   padding: 18px 0;
   text-align: left;
-  border-bottom: 1px solid #ecf1e5;
+  border-bottom: 1px solid var(--color-moss-soft);
 }
 .concierge-workspace .compact-task:last-child {
   border: 0;
@@ -2444,7 +2444,7 @@
 }
 .concierge-workspace .compact-task strong {
   display: block;
-  color: #6d8758;
+  color: var(--color-moss);
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
@@ -2454,7 +2454,7 @@
 }
 .concierge-workspace .compact-task small {
   display: block;
-  color: #8f9f7b;
+  color: var(--color-ink-3);
   font-size: 10px;
   margin-top: 5px;
 }
@@ -2469,31 +2469,31 @@
   display: flex;
   gap: 25px;
   padding: 0 22px;
-  border-bottom: 1px solid #e7eddf;
+  border-bottom: 1px solid var(--color-moss-soft);
   overflow-x: auto;
   white-space: nowrap;
-  background: #fff;
+  background: var(--color-card);
 }
 .concierge-workspace .sectiontabs > button {
   padding: 17px 0 15px;
   border-bottom: 2px solid transparent;
-  color: #8c9d7b;
+  color: var(--color-ink-3);
   font-size: 12px;
   font-weight: 500;
 }
 .concierge-workspace .sectiontabs > button.selected {
-  color: #537e3c;
-  border-bottom-color: #537e3c;
+  color: var(--color-moss);
+  border-bottom-color: var(--color-moss);
 }
 .concierge-workspace .sectiontabs button > span {
   font-size: 10px;
   margin-left: 7px;
-  background: #edf3e5;
+  background: var(--color-moss-soft);
   border-radius: 4px;
   padding: 1px 5px;
 }
 .concierge-workspace .admin-tabs {
-  border: 1px solid #e4ecdc;
+  border: 1px solid var(--color-moss-soft);
   border-radius: 8px;
   margin-bottom: 22px;
   gap: 28px;
@@ -2503,7 +2503,7 @@
 }
 .concierge-workspace .record-card {
   padding: 20px 0;
-  border-bottom: 1px solid #edf2e5;
+  border-bottom: 1px solid var(--color-moss-soft);
 }
 .concierge-workspace .record-card:last-child {
   border: 0;
@@ -2516,13 +2516,13 @@
 }
 .concierge-workspace .record-card > p {
   font-size: 11px;
-  color: #879a70;
+  color: var(--color-ink-3);
   margin: 9px 0 0;
   line-height: 1.8;
 }
 .concierge-workspace .record-copy {
   font-size: 12px;
-  color: #6f8758;
+  color: var(--color-moss);
   line-height: 1.9;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -2537,7 +2537,7 @@
 }
 .concierge-workspace .record-footer > small {
   font-size: 10px;
-  color: #92a37e;
+  color: var(--color-ink-3);
   margin-right: auto;
 }
 .concierge-workspace .record-footer .text-btn {
@@ -2549,15 +2549,15 @@
   gap: 9px;
 }
 .concierge-workspace .task-content {
-  color: #5b7948;
+  color: var(--color-moss);
 }
 .concierge-workspace .task-card.overdue .task-title > .tier-tag {
-  background: #fbf0df;
-  color: #b18a54;
+  background: var(--color-yuzu-soft);
+  color: var(--color-yuzu-deep);
 }
 .concierge-workspace .task-toolbar {
   padding: 18px 20px;
-  border-bottom: 1px solid #edf1e5;
+  border-bottom: 1px solid var(--color-moss-soft);
   display: flex;
   align-items: center;
   gap: 13px;
@@ -2568,11 +2568,11 @@
 .concierge-workspace .timeline-controls input,
 .concierge-workspace .audit-filters > select,
 .concierge-workspace .audit-filters > input {
-  background: #fff;
-  border: 1px solid #dde7d3;
+  background: var(--color-card);
+  border: 1px solid var(--color-moss-soft);
   border-radius: 6px;
   padding: 8px 10px;
-  color: #778f5e;
+  color: var(--color-moss);
   font-size: 11px;
 }
 .concierge-workspace .task-toolbar .search-field {
@@ -2581,21 +2581,21 @@
 }
 .concierge-workspace .segmented {
   display: flex;
-  border: 1px solid #e0e9d6;
+  border: 1px solid var(--color-moss-soft);
   padding: 3px;
   border-radius: 6px;
-  background: #f8faf4;
+  background: var(--color-paper);
   flex-shrink: 0;
 }
 .concierge-workspace .segmented > button {
   padding: 6px 11px;
   font-size: 11px;
   border-radius: 4px;
-  color: #8b9f74;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .segmented > button.active {
-  background: #e5efd9;
-  color: #668b44;
+  background: var(--color-moss-soft);
+  color: var(--color-moss);
 }
 .concierge-workspace .audit-stream {
   padding: 0 22px;
@@ -2606,7 +2606,7 @@
   align-items: center;
   gap: 12px;
   text-align: left;
-  border-bottom: 1px solid #eef3e5;
+  border-bottom: 1px solid var(--color-moss-soft);
   padding: 17px 0;
 }
 .concierge-workspace .audit-stream-row:last-child {
@@ -2619,20 +2619,20 @@
 .concierge-workspace .audit-stream-row strong {
   display: block;
   font-size: 12px;
-  color: #6c8c50;
+  color: var(--color-moss);
   font-weight: 500;
 }
 .concierge-workspace .audit-stream-row em {
   font-style: normal;
   font-weight: 400;
-  color: #94a77c;
+  color: var(--color-ink-3);
   font-size: 11px;
   margin-left: 12px;
 }
 .concierge-workspace .audit-stream-row small {
   display: block;
   font-size: 10px;
-  color: #93a67b;
+  color: var(--color-ink-3);
   margin-top: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2640,7 +2640,7 @@
 }
 .concierge-workspace .audit-stream-row time {
   font-size: 10px;
-  color: #9dae85;
+  color: var(--color-moss);
   white-space: nowrap;
 }
 .concierge-workspace .audit-stream-row > svg {
@@ -2652,11 +2652,11 @@
   gap: 10px;
   padding: 18px 20px;
   flex-wrap: wrap;
-  border-bottom: 1px solid #edf1e5;
+  border-bottom: 1px solid var(--color-moss-soft);
 }
 .concierge-workspace .audit-filters > span {
   font-size: 10px;
-  color: #97aa7c;
+  color: var(--color-moss);
 }
 .concierge-workspace .audit-filters .search-field {
   max-width: none;
@@ -2669,7 +2669,7 @@
 }
 .concierge-workspace .audit-diff h3 {
   font-size: 12px;
-  color: #6e8a52;
+  color: var(--color-moss);
   margin-bottom: 10px;
 }
 .concierge-workspace .audit-diff pre {
@@ -2678,15 +2678,15 @@
     SFMono-Regular,
     Menlo,
     monospace;
-  background: #f7faf2;
-  border: 1px solid #e3ecd7;
+  background: var(--color-paper);
+  border: 1px solid var(--color-moss-soft);
   border-radius: 7px;
   padding: 14px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   overflow: auto;
   max-height: 420px;
-  color: #7b9460;
+  color: var(--color-moss);
 }
 .concierge-workspace .team-actions {
   gap: 18px;
@@ -2697,7 +2697,7 @@
   align-items: center;
   gap: 7px;
   font-size: 11px;
-  color: #7c9b5e;
+  color: var(--color-moss);
   padding: 0 0 18px;
 }
 .concierge-workspace .backup-content {
@@ -2708,10 +2708,10 @@
   text-align: center;
 }
 .concierge-workspace .backup-symbol {
-  background: #eff5e5;
+  background: var(--color-moss-soft);
   border: 1px solid #dce9cd;
   border-radius: 18px;
-  color: #94b171;
+  color: var(--color-moss);
   display: grid;
   place-items: center;
   width: 79px;
@@ -2721,11 +2721,11 @@
 .concierge-workspace .backup-content h3 {
   font-weight: 500;
   font-size: 20px;
-  color: #668849;
+  color: var(--color-moss);
 }
 .concierge-workspace .backup-content > p {
   font-size: 12px;
-  color: #879f6b;
+  color: var(--color-moss);
   max-width: 580px;
   line-height: 2;
   margin-top: 14px;
@@ -2743,17 +2743,17 @@
   gap: 6px;
   align-items: center;
   font-size: 11px;
-  color: #8aa56a;
+  color: var(--color-moss);
 }
 .concierge-workspace .backup-content > small {
   font-size: 10px;
   line-height: 1.9;
-  color: #99ad7b;
+  color: var(--color-moss);
   margin-top: 17px;
   max-width: 490px;
 }
 .concierge-workspace .backup-secondary {
-  border-top: 1px solid #e9efdd;
+  border-top: 1px solid var(--color-moss-soft);
   margin-top: 33px;
   padding-top: 24px;
   display: flex;
@@ -2765,7 +2765,7 @@
   display: none;
 }
 .concierge-workspace .sync-failed {
-  color: #b58b53 !important;
+  color: var(--color-yuzu-deep) !important;
 }
 .concierge-workspace .sync-failed i {
   background: #cfaa73 !important;
@@ -2792,14 +2792,14 @@
   align-items: center;
   gap: 7px;
   font-size: 10px;
-  color: #819c61;
+  color: var(--color-moss);
   padding: 12px 3px;
-  background: #f8fbf3;
-  border: 1px solid #e6eedb;
+  background: var(--color-paper);
+  border: 1px solid var(--color-moss-soft);
   border-radius: 7px;
 }
 .concierge-workspace .member-quick-actions button:hover {
-  background: #eaf3df;
+  background: var(--color-moss-soft);
 }
 .concierge-workspace .timeline-controls {
   display: flex;
@@ -2813,12 +2813,12 @@
 }
 .concierge-workspace .timeline-controls > span {
   font-size: 10px;
-  color: #97aa7e;
+  color: var(--color-moss);
   margin-left: auto;
 }
 .concierge-workspace .timeline-money {
   font-size: 15px;
-  color: #71994b;
+  color: var(--color-moss);
   margin: 8px 0;
   font-variant-numeric: tabular-nums;
 }
@@ -2839,25 +2839,25 @@
 }
 .concierge-workspace .form-subtitle {
   font-size: 11px;
-  color: #8ea574;
+  color: var(--color-moss);
   margin-top: 6px;
   line-height: 1.7;
 }
 .concierge-workspace .form-history {
   font-size: 10px;
-  color: #91a979;
+  color: var(--color-moss);
   line-height: 1.9;
   white-space: pre-wrap;
   margin-top: 18px;
 }
 .concierge-workspace .optional-fields {
-  border-top: 1px solid #e8efdc;
+  border-top: 1px solid var(--color-moss-soft);
   margin-top: 23px;
   padding-top: 16px;
 }
 .concierge-workspace .optional-fields summary {
   font-size: 12px;
-  color: #839f63;
+  color: var(--color-moss);
   cursor: pointer;
   padding: 4px 0;
   list-style-position: inside;
@@ -2884,25 +2884,25 @@
 }
 .concierge-workspace .capture-upload {
   border: 1px dashed #cadcb4;
-  background: #f8fbf2;
+  background: var(--color-paper);
   border-radius: 10px;
   padding: 29px 22px;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
-  color: #9db980;
+  color: var(--color-moss);
 }
 .concierge-workspace .capture-upload h3 {
   font-size: 15px;
   font-weight: 500;
-  color: #6d9151;
+  color: var(--color-moss);
   margin-top: 13px;
 }
 .concierge-workspace .capture-upload p {
   font-size: 11px;
   line-height: 1.9;
-  color: #90a974;
+  color: var(--color-moss);
   max-width: 380px;
   margin-top: 8px;
 }
@@ -2924,9 +2924,9 @@
 }
 .concierge-workspace .capture-previews > div {
   position: relative;
-  border: 1px solid #dfebd1;
+  border: 1px solid var(--color-moss-soft);
   border-radius: 7px;
-  background: #f8fbf3;
+  background: var(--color-paper);
   overflow: hidden;
 }
 .concierge-workspace .capture-previews img {
@@ -2934,13 +2934,13 @@
   height: 145px;
   object-fit: contain;
   display: block;
-  background: #f0f3e9;
+  background: var(--color-moss-soft);
 }
 .concierge-workspace .capture-previews span {
   display: block;
   font-size: 10px;
   text-align: center;
-  color: #94ab78;
+  color: var(--color-moss);
   padding: 6px;
 }
 .concierge-workspace .capture-previews button {
@@ -2950,22 +2950,22 @@
   width: 23px;
   height: 23px;
   border-radius: 50%;
-  background: #ffffffe8;
+  background: #fffdf8e8;
   display: grid;
   place-items: center;
-  color: #6c8554;
+  color: var(--color-moss);
 }
 .concierge-workspace .ocr-progress {
   padding: 17px;
-  border: 1px solid #dce9ce;
-  background: #f3f8ec;
+  border: 1px solid var(--color-moss-soft);
+  background: var(--color-moss-soft);
   border-radius: 8px;
 }
 .concierge-workspace .ocr-progress > div {
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  color: #6b9050;
+  color: var(--color-moss);
   font-size: 12px;
 }
 .concierge-workspace .ocr-progress strong {
@@ -2976,7 +2976,7 @@
 .concierge-workspace .ocr-progress progress {
   width: 100%;
   height: 6px;
-  accent-color: #88a965;
+  accent-color: var(--color-moss);
   border: 0;
   margin: 13px 0 7px;
   display: block;
@@ -2984,7 +2984,7 @@
 .concierge-workspace .ocr-progress small {
   display: block;
   font-size: 10px;
-  color: #96ac7b;
+  color: var(--color-moss);
   line-height: 1.8;
 }
 .concierge-workspace .receipt-review-grid {
@@ -3007,16 +3007,16 @@
 }
 .concierge-workspace .receipt-image-header strong {
   font-size: 12px;
-  color: #759658;
+  color: var(--color-moss);
   font-weight: 500;
 }
 .concierge-workspace .receipt-image-header span {
   font-size: 10px;
-  color: #9cb580;
+  color: var(--color-moss);
 }
 .concierge-workspace .receipt-original {
   height: 490px;
-  background: #edf0e7;
+  background: var(--color-moss-soft);
   border: 1px solid #dce7cf;
   border-radius: 7px;
   overflow: auto;
@@ -3052,21 +3052,21 @@
   font-size: 9px;
 }
 .concierge-workspace .ocr-text-details {
-  border-top: 1px solid #e4ecd7;
+  border-top: 1px solid var(--color-moss-soft);
   margin-top: 17px;
   padding-top: 12px;
 }
 .concierge-workspace .ocr-text-details summary {
   font-size: 11px;
-  color: #91a975;
+  color: var(--color-moss);
   cursor: pointer;
 }
 .concierge-workspace .ocr-text-details pre {
   font: 10px/1.9 var(--font-sans);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  color: #91a975;
-  background: #f8fbf3;
+  color: var(--color-moss);
+  background: var(--color-paper);
   padding: 12px;
   max-height: 250px;
   overflow: auto;
@@ -3090,22 +3090,22 @@
   gap: 9px;
   padding-bottom: 15px;
   margin-bottom: 17px;
-  border-bottom: 1px solid #e8efdb;
+  border-bottom: 1px solid var(--color-moss-soft);
 }
 .concierge-workspace .receipt-section-title > span {
-  background: #eaf3de;
+  background: var(--color-moss-soft);
   border-radius: 5px;
   width: 24px;
   height: 24px;
   display: grid;
   place-items: center;
   font-size: 10px;
-  color: #88a967;
+  color: var(--color-moss);
 }
 .concierge-workspace .receipt-section-title h3 {
   font-size: 13px;
   font-weight: 500;
-  color: #71964f;
+  color: var(--color-moss);
 }
 .concierge-workspace .receipt-section-title:not(:first-child) {
   margin-top: 25px;
@@ -3122,8 +3122,8 @@
   margin-top: 17px;
 }
 .concierge-workspace .payment-input-row {
-  background: #f7faf1;
-  border: 1px solid #e0ead3;
+  background: var(--color-paper);
+  border: 1px solid var(--color-moss-soft);
   border-radius: 7px;
   padding: 12px;
 }
@@ -3134,7 +3134,7 @@
   gap: 9px;
   margin-bottom: 9px;
   font-size: 10px;
-  color: #8ba96a;
+  color: var(--color-moss);
 }
 .concierge-workspace .payment-row-top .text-btn {
   font-size: 10px;
@@ -3151,9 +3151,9 @@
   border: 1px solid #dce7cd;
   border-radius: 5px;
   padding: 8px 9px;
-  background: #fff;
+  background: var(--color-card);
   font-size: 11px;
-  color: #789a58;
+  color: var(--color-moss);
   min-width: 0;
 }
 .concierge-workspace .payment-member {
@@ -3174,34 +3174,34 @@
   font-size: 10px;
 }
 .concierge-workspace .green-text {
-  color: #779c55 !important;
+  color: var(--color-moss) !important;
 }
 .concierge-workspace .danger-text {
-  color: #b48962 !important;
+  color: var(--color-yuzu-deep) !important;
 }
 .concierge-workspace .receipt-confirm-check {
   display: flex;
   align-items: flex-start;
   gap: 10px;
   padding: 15px;
-  background: #f1f7e8;
+  background: var(--color-moss-soft);
   border: 1px solid #dcebc8;
   border-radius: 7px;
-  color: #7a9b58;
+  color: var(--color-moss);
   font-size: 11px;
   line-height: 1.9;
   margin-top: 20px;
 }
 .concierge-workspace .receipt-confirm-check input {
   margin-top: 5px;
-  accent-color: #7f9f58;
+  accent-color: var(--color-moss);
   width: 15px;
   height: 15px;
   flex-shrink: 0;
 }
 .concierge-workspace .no-receipt-image {
   height: 300px;
-  background: #f5f8ef;
+  background: var(--color-moss-soft);
   border: 1px dashed #cddcbd;
   border-radius: 8px;
   display: flex;
@@ -3214,7 +3214,7 @@
 }
 .concierge-workspace .no-receipt-image p {
   font-size: 11px;
-  color: #9ab27b;
+  color: var(--color-moss);
   line-height: 1.9;
   margin-top: 15px;
   max-width: 250px;
@@ -3345,11 +3345,11 @@
     z-index: 25;
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    background: #fffffff5;
-    border-top: 1px solid #dfe8d5;
+    background: #fffdf8f5;
+    border-top: 1px solid var(--color-moss-soft);
     backdrop-filter: blur(12px);
     padding: 8px 15px max(9px, env(safe-area-inset-bottom));
-    box-shadow: 0 -4px 20px #34512706;
+    box-shadow: 0 -4px 20px #4a524c06;
   }
   .concierge-workspace .mobile-bottom-nav button {
     display: flex;
@@ -3357,14 +3357,14 @@
     justify-content: center;
     flex-direction: column;
     gap: 4px;
-    color: #94aa7e;
+    color: var(--color-moss);
     position: relative;
     padding: 4px 0;
     font-size: 10px;
     min-height: 45px;
   }
   .concierge-workspace .mobile-bottom-nav button.active {
-    color: #467b3c;
+    color: var(--color-moss);
   }
   .concierge-workspace .mobile-bottom-nav button.active:before {
     position: absolute;
@@ -3372,7 +3372,7 @@
     width: 40px;
     height: 29px;
     border-radius: 12px;
-    background: #ecf5e3;
+    background: var(--color-moss-soft);
     top: -1px;
     z-index: -1;
   }
@@ -3380,7 +3380,7 @@
     position: absolute;
     width: 5px;
     height: 5px;
-    background: #c8a36c;
+    background: var(--color-yuzu-deep);
     border-radius: 50%;
     top: 2px;
     right: calc(50% - 18px);
@@ -3999,8 +3999,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  border: 1px solid #dce8d3;
-  background: #f1f6eb;
+  border: 1px solid var(--color-moss-soft);
+  background: var(--color-moss-soft);
   border-radius: 10px;
   padding: 20px 23px;
   margin-bottom: 24px;
@@ -4008,20 +4008,20 @@
 .concierge-workspace .receipt-detail-banner > div > span {
   display: block;
   font-size: 11px;
-  color: #7c9566;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .receipt-detail-banner strong {
   display: block;
   font-size: 29px;
   font-weight: 500;
-  color: #466b35;
+  color: var(--color-ink-2);
   line-height: 1.4;
   margin-top: 6px;
   font-variant-numeric: tabular-nums;
 }
 .concierge-workspace .receipt-detail-banner p {
   font-size: 11px;
-  color: #6f875d;
+  color: var(--color-ink-3);
   line-height: 1.8;
   margin-top: 7px;
 }
@@ -4033,17 +4033,17 @@
   margin-top: 29px;
 }
 .concierge-workspace .receipt-detail-items {
-  border: 1px solid #e0e9d5;
+  border: 1px solid var(--color-moss-soft);
   border-radius: 8px;
   overflow: hidden;
 }
 .concierge-workspace .receipt-detail-item {
   padding: 15px;
-  border-bottom: 1px solid #e8efdf;
-  background: #fff;
+  border-bottom: 1px solid var(--color-moss-soft);
+  background: var(--color-card);
 }
 .concierge-workspace .receipt-detail-item:nth-child(even) {
-  background: #fafcf7;
+  background: var(--color-card);
 }
 .concierge-workspace .receipt-detail-item:last-child {
   border: 0;
@@ -4061,13 +4061,13 @@
   display: grid;
   place-items: center;
   border-radius: 5px;
-  background: #edf4e5;
+  background: var(--color-moss-soft);
   font-size: 10px;
-  color: #849d6d;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .receipt-detail-item-name strong {
   font-size: 13px;
-  color: #4f7040;
+  color: var(--color-ink-2);
   font-weight: 500;
   flex: 1;
   min-width: 0;
@@ -4076,15 +4076,15 @@
 }
 .concierge-workspace .receipt-detail-item-name b {
   font-size: 12px;
-  color: #5d7f48;
+  color: var(--color-moss);
   font-weight: 500;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 .concierge-workspace .receipt-detail-item-name .zero-price {
-  color: #698e52;
+  color: var(--color-moss);
   border-radius: 4px;
-  background: #edf5e6;
+  background: var(--color-moss-soft);
   padding: 1px 5px;
 }
 .concierge-workspace .receipt-detail-item-meta {
@@ -4093,15 +4093,15 @@
   flex-wrap: wrap;
   margin-top: 9px;
   margin-left: 30px;
-  color: #788f67;
+  color: var(--color-ink-3);
   font-size: 11px;
   line-height: 1.7;
 }
 .concierge-workspace .receipt-detail-item-meta em {
   font-size: 10px;
   font-style: normal;
-  color: #719254;
-  background: #edf5e5;
+  color: var(--color-moss);
+  background: var(--color-moss-soft);
   padding: 1px 6px;
   border-radius: 4px;
 }
@@ -4111,13 +4111,13 @@
 .concierge-workspace .item-raw-text summary {
   font-size: 10px;
   cursor: pointer;
-  color: #90a27d;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .item-raw-text p {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  color: #778c64;
-  background: #f5f8ef;
+  color: var(--color-ink-3);
+  background: var(--color-moss-soft);
   padding: 9px;
   border-radius: 5px;
   font-size: 10px;
@@ -4132,29 +4132,29 @@
   align-items: center;
   padding: 13px 0;
   font-size: 11px;
-  color: #7c9369;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .item-detail-summary strong {
   font-size: 13px;
   font-weight: 500;
-  color: #5c7c45;
+  color: var(--color-moss);
   font-variant-numeric: tabular-nums;
 }
 .concierge-workspace .item-detail-summary small {
   flex-basis: 100%;
   font-size: 10px;
-  color: #9a875d;
+  color: var(--color-yuzu-deep);
 }
 .concierge-workspace .items-help {
   font-size: 11px;
   line-height: 1.9;
-  color: #768c64;
+  color: var(--color-ink-3);
   margin: 0 0 15px;
   overflow-wrap: anywhere;
 }
 .concierge-workspace .receipt-totals-list {
   margin: 0;
-  border: 1px solid #e0ead5;
+  border: 1px solid var(--color-moss-soft);
   border-radius: 8px;
   padding: 0 15px;
 }
@@ -4163,7 +4163,7 @@
   justify-content: space-between;
   gap: 18px;
   align-items: center;
-  border-bottom: 1px solid #edf2e5;
+  border-bottom: 1px solid var(--color-moss-soft);
   padding: 12px 0;
   font-size: 12px;
 }
@@ -4171,11 +4171,11 @@
   border: 0;
 }
 .concierge-workspace .receipt-totals-list dt {
-  color: #7b9067;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .receipt-totals-list dd {
   margin: 0;
-  color: #577940;
+  color: var(--color-moss);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
@@ -4190,8 +4190,8 @@
 }
 .concierge-workspace .receipt-payment-details article {
   padding: 14px 15px;
-  background: #f7faf2;
-  border: 1px solid #e1ead6;
+  background: var(--color-paper);
+  border: 1px solid var(--color-moss-soft);
   border-radius: 7px;
 }
 .concierge-workspace .receipt-payment-details article > div {
@@ -4203,17 +4203,17 @@
 .concierge-workspace .receipt-payment-details strong {
   font-size: 12px;
   font-weight: 500;
-  color: #5f7d49;
+  color: var(--color-moss);
 }
 .concierge-workspace .receipt-payment-details b {
   font-size: 13px;
-  color: #5b7b45;
+  color: var(--color-moss);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 .concierge-workspace .receipt-payment-details p {
   font-size: 11px;
-  color: #778e63;
+  color: var(--color-ink-3);
   line-height: 1.8;
   margin-top: 7px;
   white-space: pre-wrap;
@@ -4227,13 +4227,13 @@
 }
 .concierge-workspace .receipt-header-details dd {
   font-size: 12px;
-  color: #627f4d;
+  color: var(--color-moss);
   white-space: pre-wrap;
 }
 .concierge-workspace .receipt-audit-info {
   margin-top: 27px;
   padding-top: 21px;
-  border-top: 1px solid #e5edda;
+  border-top: 1px solid var(--color-moss-soft);
   gap: 20px;
 }
 .concierge-workspace .receipt-audit-info dt {
@@ -4241,27 +4241,27 @@
 }
 .concierge-workspace .receipt-audit-info dd {
   font-size: 11px;
-  color: #6a8455;
+  color: var(--color-moss);
 }
 .concierge-workspace .legacy-items-empty,
 .concierge-workspace .items-empty {
   padding: 24px 17px;
-  background: #f8faf4;
+  background: var(--color-paper);
   border: 1px dashed #d4e0c7;
   border-radius: 8px;
-  color: #9aae82;
+  color: var(--color-moss);
   text-align: center;
 }
 .concierge-workspace .legacy-items-empty h4 {
   font-size: 12px;
-  color: #758f5d;
+  color: var(--color-moss);
   font-weight: 500;
   margin: 10px 0 0;
 }
 .concierge-workspace .legacy-items-empty p,
 .concierge-workspace .items-empty p {
   font-size: 11px;
-  color: #869a70;
+  color: var(--color-ink-3);
   line-height: 1.9;
   margin-top: 9px;
 }
@@ -4270,14 +4270,14 @@
   text-align: left;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  color: #7f946a;
+  color: var(--color-ink-3);
   margin: 16px 0 0;
   padding-top: 12px;
-  border-top: 1px solid #e1ead5;
+  border-top: 1px solid var(--color-moss-soft);
 }
 .concierge-workspace .ocr-warning-box {
   border: 1px solid #e9dac0;
-  background: #fcf7ed;
+  background: var(--color-yuzu-tint);
   padding: 15px 18px;
   border-radius: 8px;
   margin: 0 0 22px;
@@ -4288,18 +4288,18 @@
   gap: 7px;
   font-size: 12px;
   font-weight: 500;
-  color: #a58652;
+  color: var(--color-yuzu-deep);
 }
 .concierge-workspace .ocr-warning-box ul {
   padding-left: 19px;
   margin: 10px 0 0;
   font-size: 11px;
   line-height: 1.9;
-  color: #977c50;
+  color: var(--color-yuzu-deep);
 }
 .concierge-workspace .ocr-warning-box p {
   font-size: 10px;
-  color: #ad986e;
+  color: var(--color-yuzu-deep);
   margin-top: 10px;
 }
 .concierge-workspace .receipt-item-editor {
@@ -4308,13 +4308,13 @@
   gap: 13px;
 }
 .concierge-workspace .receipt-item-row {
-  background: #fafcf6;
-  border: 1px solid #dfe9d3;
+  background: var(--color-card);
+  border: 1px solid var(--color-moss-soft);
   border-radius: 8px;
   padding: 14px;
 }
 .concierge-workspace .receipt-item-row.reviewed {
-  background: #f6faf1;
+  background: var(--color-paper);
   border-color: #bfd4ab;
 }
 .concierge-workspace .receipt-item-row-top {
@@ -4325,7 +4325,7 @@
 }
 .concierge-workspace .receipt-item-row-top > strong {
   font-size: 11px;
-  color: #718f55;
+  color: var(--color-moss);
   font-weight: 500;
   margin-right: auto;
 }
@@ -4334,14 +4334,14 @@
   align-items: center;
   gap: 6px;
   font-size: 10px;
-  color: #75915c;
+  color: var(--color-moss);
   white-space: nowrap;
 }
 .concierge-workspace .receipt-item-row-top input,
 .concierge-workspace .review-all-items input {
   width: 14px;
   height: 14px;
-  accent-color: #7d9d5a;
+  accent-color: var(--color-moss);
 }
 .concierge-workspace .receipt-item-row-top .text-btn {
   font-size: 10px;
@@ -4356,7 +4356,7 @@
 }
 .concierge-workspace .receipt-item-grid .field > span {
   font-size: 10px;
-  color: #7c9467;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .receipt-item-grid .field input {
   font-size: 12px;
@@ -4372,7 +4372,7 @@
 }
 .concierge-workspace .items-controls > span {
   font-size: 10px;
-  color: #7f956d;
+  color: var(--color-ink-3);
   line-height: 1.8;
 }
 .concierge-workspace .items-reviewed-count {
@@ -4381,7 +4381,7 @@
   background: none !important;
   font-size: 10px !important;
   white-space: nowrap;
-  color: #88a374 !important;
+  color: var(--color-moss) !important;
 }
 .concierge-workspace .review-all-items {
   display: flex;
@@ -4389,17 +4389,17 @@
   gap: 9px;
   margin-top: 17px;
   border: 1px solid #d6e5c8;
-  background: #f1f7e9;
+  background: var(--color-moss-soft);
   padding: 12px 13px;
   border-radius: 6px;
   font-size: 11px;
-  color: #66874e;
+  color: var(--color-moss);
   cursor: pointer;
 }
 .concierge-workspace .notice-warm {
   border-color: #e9dcc3;
-  background: #fcf7ed;
-  color: #9b8257;
+  background: var(--color-yuzu-tint);
+  color: var(--color-yuzu-deep);
 }
 .concierge-workspace .receipt-experience-layer .field {
   margin-bottom: 12px;
@@ -4419,18 +4419,18 @@
   padding-bottom: 4px;
 }
 .concierge-workspace .evidence-thumbnails button {
-  border: 1px solid #dfebd1;
+  border: 1px solid var(--color-moss-soft);
   border-radius: 5px;
   padding: 3px;
   flex-shrink: 0;
   position: relative;
-  background: #f5f8ef;
+  background: var(--color-moss-soft);
   width: 50px;
   height: 62px;
 }
 .concierge-workspace .evidence-thumbnails button.selected {
-  border-color: #89a972;
-  box-shadow: 0 0 0 1px #89a972;
+  border-color: var(--color-moss);
+  box-shadow: 0 0 0 1px var(--color-moss);
 }
 .concierge-workspace .evidence-thumbnails img {
   width: 100%;
@@ -4443,9 +4443,9 @@
   right: 2px;
   border-radius: 3px;
   padding: 0 4px;
-  background: #fffffff2;
+  background: #fffdf8f2;
   font-size: 9px;
-  color: #7c9368;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .image-load-failed {
   display: flex;
@@ -4455,7 +4455,7 @@
   width: 100%;
   height: 100%;
   gap: 12px;
-  color: #98ad80;
+  color: var(--color-moss);
   font-size: 12px;
   text-align: center;
 }
@@ -4463,7 +4463,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  color: #769459;
+  color: var(--color-moss);
   font-size: 11px;
 }
 .concierge-workspace .balance-open-button {
@@ -4474,10 +4474,10 @@
   padding: 0;
 }
 .concierge-workspace .balance-open-button > svg {
-  color: #9bb484;
+  color: var(--color-moss);
 }
 .concierge-workspace .balance-open-button:hover .balance-amount {
-  color: #4b7739;
+  color: var(--color-ink-2);
 }
 .concierge-workspace .balance-history-open {
   display: flex;
@@ -4487,12 +4487,12 @@
   text-align: left;
   margin-top: 12px;
   padding: 12px 13px;
-  border: 1px solid #dfead3;
+  border: 1px solid var(--color-moss-soft);
   border-radius: 7px;
-  background: #f8fbf3;
+  background: var(--color-paper);
   width: 100%;
   font-size: 10px;
-  color: #7d9864;
+  color: var(--color-moss);
 }
 .concierge-workspace .balance-history-open > span {
   display: flex;
@@ -4501,7 +4501,7 @@
   line-height: 1.8;
 }
 .concierge-workspace .balance-history-open:hover {
-  background: #eef6e5;
+  background: var(--color-moss-soft);
 }
 .concierge-workspace .balance-evidence-picker {
   margin-top: 24px;
@@ -4532,7 +4532,7 @@
   align-items: center;
   gap: 7px;
   font-size: 10px;
-  color: #849e6b;
+  color: var(--color-moss);
 }
 .concierge-workspace .new-evidence-images {
   display: flex;
@@ -4554,19 +4554,19 @@
   height: 100%;
   width: 100%;
   object-fit: contain;
-  background: #f5f9ef;
+  background: var(--color-paper);
 }
 .concierge-workspace .new-evidence-images button {
   position: absolute;
   right: 3px;
   top: 3px;
-  background: #fffffff2;
+  background: #fffdf8f2;
   border-radius: 50%;
   width: 22px;
   height: 22px;
   display: grid;
   place-items: center;
-  color: #82996b;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .receipt-link-search {
   max-width: none;
@@ -4575,7 +4575,7 @@
 .concierge-workspace .receipt-link-options {
   max-height: 240px;
   overflow-y: auto;
-  border: 1px solid #e0ead6;
+  border: 1px solid var(--color-moss-soft);
   border-radius: 7px;
 }
 .concierge-workspace .receipt-link-options > .items-help {
@@ -4587,7 +4587,7 @@
   align-items: flex-start;
   gap: 10px;
   padding: 13px;
-  border-bottom: 1px solid #e9f0e0;
+  border-bottom: 1px solid var(--color-moss-soft);
   cursor: pointer;
 }
 .concierge-workspace .receipt-link-option:last-child {
@@ -4598,7 +4598,7 @@
   height: 15px;
   flex-shrink: 0;
   margin-top: 3px;
-  accent-color: #85a866;
+  accent-color: var(--color-moss);
 }
 .concierge-workspace .receipt-link-option > span {
   flex: 1;
@@ -4611,33 +4611,33 @@
   flex-wrap: wrap;
   font-size: 11px;
   font-weight: 500;
-  color: #64814e;
+  color: var(--color-moss);
   overflow-wrap: anywhere;
 }
 .concierge-workspace .receipt-link-option em {
   font-size: 9px;
   font-style: normal;
   font-weight: 400;
-  background: #f0f5e9;
+  background: var(--color-moss-soft);
   padding: 2px 5px;
   border-radius: 4px;
-  color: #8ba474;
+  color: var(--color-moss);
 }
 .concierge-workspace .receipt-link-option b {
   font-size: 9px;
   font-weight: 400;
-  color: #99ac83;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .receipt-link-option small {
   display: block;
   font-size: 10px;
-  color: #899f73;
+  color: var(--color-ink-3);
   line-height: 1.9;
   margin-top: 6px;
   overflow-wrap: anywhere;
 }
 .concierge-workspace .receipt-link-option.already-linked {
-  background: #f7faf2;
+  background: var(--color-paper);
   cursor: default;
   opacity: 0.7;
 }
@@ -4648,7 +4648,7 @@
   margin-bottom: 16px;
 }
 .concierge-workspace .balance-detail-banner > svg {
-  color: #91ae74;
+  color: var(--color-moss);
 }
 .concierge-workspace .balance-evidence-grid {
   display: grid;
@@ -4682,13 +4682,13 @@
   align-items: center;
   gap: 11px;
   padding: 13px;
-  border: 1px solid #dfead4;
+  border: 1px solid var(--color-moss-soft);
   border-radius: 7px;
-  background: #f8fbf3;
-  color: #91aa76;
+  background: var(--color-paper);
+  color: var(--color-moss);
 }
 .concierge-workspace .linked-receipt:hover {
-  background: #edf5e3;
+  background: var(--color-moss-soft);
 }
 .concierge-workspace .linked-receipt > span {
   flex: 1;
@@ -4698,12 +4698,12 @@
   display: block;
   font-size: 12px;
   font-weight: 500;
-  color: #64834d;
+  color: var(--color-moss);
   overflow-wrap: anywhere;
 }
 .concierge-workspace .linked-receipt small {
   display: block;
-  color: #889f72;
+  color: var(--color-ink-3);
   font-size: 10px;
   line-height: 1.8;
   margin-top: 4px;
@@ -4712,20 +4712,20 @@
   font-size: 11px;
   font-weight: 500;
   white-space: nowrap;
-  color: #73925b;
+  color: var(--color-moss);
 }
 .concierge-workspace .unlinked-balance {
   padding: 22px 17px;
   border: 1px dashed #d4e2c5;
   border-radius: 8px;
-  background: #f8fbf3;
+  background: var(--color-paper);
   text-align: center;
-  color: #9cb386;
+  color: var(--color-moss);
   margin-bottom: 19px;
 }
 .concierge-workspace .unlinked-balance strong {
   display: block;
-  color: #7e9966;
+  color: var(--color-ink-3);
   font-size: 12px;
   font-weight: 500;
   margin-top: 11px;
@@ -4733,23 +4733,23 @@
 .concierge-workspace .unlinked-balance p {
   font-size: 11px;
   line-height: 1.9;
-  color: #8fa57a;
+  color: var(--color-ink-3);
   margin-top: 8px;
 }
 .concierge-workspace .linked-record-missing {
   font-size: 11px;
-  color: #9b9778;
+  color: var(--color-yuzu-deep);
   line-height: 1.9;
   overflow-wrap: anywhere;
   padding: 13px;
-  border: 1px solid #e7e7d6;
+  border: 1px solid var(--color-paper-2);
   border-radius: 6px;
 }
 .concierge-workspace .append-evidence-form {
-  border: 1px solid #dce8d0;
+  border: 1px solid var(--color-moss-soft);
   border-radius: 9px;
   padding: 0 20px 19px;
-  background: #fbfdf8;
+  background: var(--color-card);
   margin-top: 27px;
 }
 .concierge-workspace .append-evidence-form > .field {
@@ -4764,7 +4764,7 @@
 }
 .concierge-workspace .append-evidence-actions > small {
   font-size: 10px;
-  color: #8ca476;
+  color: var(--color-moss);
   line-height: 1.8;
 }
 .concierge-workspace .drawer-tabs {
@@ -5000,7 +5000,7 @@
   .concierge-workspace .balance-history-open > span:last-child {
     justify-content: space-between;
     font-size: 11px;
-    color: #6b9050;
+    color: var(--color-moss);
   }
   .concierge-workspace .balance-evidence-picker .receipt-section-title h3 {
     font-size: 13px;
@@ -5176,14 +5176,14 @@
   text-align: left;
 }
 .concierge-workspace .history-balance-amount > svg {
-  color: #91a978;
+  color: var(--color-moss);
 }
 .concierge-workspace .history-balance-amount:hover strong {
-  color: #577f3f;
+  color: var(--color-moss);
 }
 .concierge-workspace .receipt-link-selection-count {
   font-size: 10px;
-  color: #7e956b;
+  color: var(--color-ink-3);
   line-height: 1.8;
   margin: 0 0 9px;
 }
@@ -5193,15 +5193,15 @@
   }
 }
 .concierge-workspace .receipt-rerun-ocr {
-  border: 1px solid #dce8d1;
-  background: #f7fbf1;
+  border: 1px solid var(--color-moss-soft);
+  background: var(--color-paper);
   border-radius: 8px;
   padding: 13px;
   margin-bottom: 18px;
 }
 .concierge-workspace .receipt-rerun-ocr > p {
   font-size: 11px;
-  color: #7b9367;
+  color: var(--color-ink-3);
   line-height: 1.8;
   margin-top: 9px;
 }
@@ -5247,8 +5247,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  border: 1px solid #dce8d0;
-  background: #f3f8ed;
+  border: 1px solid var(--color-moss-soft);
+  background: var(--color-moss-soft);
   border-radius: 10px;
   padding: 18px 20px;
   margin-bottom: 17px;
@@ -5266,41 +5266,41 @@
   width: 42px;
   height: 42px;
   border-radius: 10px;
-  background: #e3efd7;
-  color: #7f9f61;
+  background: var(--color-moss-soft);
+  color: var(--color-moss);
 }
 .concierge-workspace .exception-overview strong {
   display: block;
   font-size: 16px;
   font-weight: 500;
-  color: #4f743b;
+  color: var(--color-ink-2);
   line-height: 1.6;
 }
 .concierge-workspace .exception-overview p {
   font-size: 11px;
-  color: #799365;
+  color: var(--color-ink-3);
   margin-top: 4px;
 }
 .concierge-workspace .exception-overview.has-issues {
-  background: #fcf6ed;
+  background: var(--color-yuzu-tint);
   border-color: #e9dcc7;
 }
 .concierge-workspace .exception-overview.has-issues > div > span {
-  background: #f1e4d1;
-  color: #b08c55;
+  background: var(--color-paper-2);
+  color: var(--color-yuzu-deep);
 }
 .concierge-workspace .exception-overview.has-issues strong {
-  color: #937342;
+  color: var(--color-yuzu-deep);
 }
 .concierge-workspace .exception-overview.has-issues p {
-  color: #a28c69;
+  color: var(--color-yuzu-deep);
 }
 .concierge-workspace .receipt-evidence-fold,
 .concierge-workspace .receipt-header-fold,
 .concierge-workspace .payment-review-fold {
-  border: 1px solid #e0e9d7;
+  border: 1px solid var(--color-moss-soft);
   border-radius: 8px;
-  background: #fcfdf9;
+  background: var(--color-card);
   padding: 0 16px;
   margin: 16px 0 20px;
   min-width: 0;
@@ -5311,7 +5311,7 @@
   list-style-position: inside;
   padding: 13px 0;
   font-size: 12px;
-  color: #6c8c54;
+  color: var(--color-moss);
   cursor: pointer;
   line-height: 1.8;
 }
@@ -5320,7 +5320,7 @@
 .concierge-workspace .payment-review-fold > summary > span {
   float: right;
   font-size: 10px;
-  color: #92a77e;
+  color: var(--color-ink-3);
   line-height: 2.1;
   margin-left: 12px;
 }
@@ -5355,7 +5355,7 @@
 .concierge-workspace .fold-evidence-grid .ocr-text-details ul {
   font-size: 10px;
   line-height: 1.9;
-  color: #9a835d;
+  color: var(--color-yuzu-deep);
   padding-left: 20px;
 }
 .concierge-workspace .compact-rerun {
@@ -5368,15 +5368,15 @@
   font-size: 11px;
 }
 .concierge-workspace .receipt-whole-summary {
-  border: 1px solid #dce8d1;
+  border: 1px solid var(--color-moss-soft);
   border-radius: 9px;
-  background: #f9fcf5;
+  background: var(--color-paper);
   padding: 17px 19px;
   margin-top: 17px;
 }
 .concierge-workspace .receipt-whole-summary > h3 {
   font-size: 13px;
-  color: #5d8046;
+  color: var(--color-moss);
   font-weight: 500;
   margin-bottom: 15px;
 }
@@ -5385,7 +5385,7 @@
 }
 .concierge-workspace .receipt-whole-summary .amount-input {
   height: 43px;
-  background: #fff;
+  background: var(--color-card);
 }
 .concierge-workspace .receipt-whole-summary .amount-input input {
   font-size: 20px !important;
@@ -5397,10 +5397,10 @@
   gap: 16px;
   font-size: 10px;
   line-height: 1.9;
-  color: #91a37d;
+  color: var(--color-ink-3);
   margin-top: 14px;
   padding-top: 12px;
-  border-top: 1px solid #e3ecd9;
+  border-top: 1px solid var(--color-moss-soft);
   overflow-wrap: anywhere;
 }
 .concierge-workspace .general-review-issues {
@@ -5408,7 +5408,7 @@
 }
 .concierge-workspace .general-review-issues > h3 {
   font-size: 12px;
-  color: #9e7b49;
+  color: var(--color-yuzu-deep);
   font-weight: 500;
   margin-bottom: 10px;
 }
@@ -5417,18 +5417,18 @@
   align-items: flex-start;
   gap: 8px;
   border: 1px solid #eadcc7;
-  background: #fcf7ee;
+  background: var(--color-yuzu-tint);
   border-radius: 6px;
   padding: 10px 11px;
   font-size: 11px;
   line-height: 1.9;
-  color: #987c50;
+  color: var(--color-yuzu-deep);
   margin-top: 8px;
   min-width: 0;
 }
 .concierge-workspace .exception-message > svg {
   margin-top: 3px;
-  color: #ba9a64;
+  color: var(--color-yuzu-deep);
 }
 .concierge-workspace .exception-message > span {
   flex: 1;
@@ -5438,8 +5438,8 @@
 .concierge-workspace .exception-message > b {
   font-size: 9px;
   font-weight: 400;
-  background: #f5e5d5;
-  color: #aa7e48;
+  background: var(--color-yuzu-soft);
+  color: var(--color-yuzu-deep);
   border-radius: 4px;
   padding: 1px 5px;
   flex-shrink: 0;
@@ -5455,12 +5455,12 @@
 .concierge-workspace .exception-message input {
   width: 14px;
   height: 14px;
-  accent-color: #91ac6c;
+  accent-color: var(--color-moss);
 }
 .concierge-workspace .exception-message.requires-fix {
   border-color: #e9d0c4;
-  background: #fff5f0;
-  color: #a66f51;
+  background: var(--color-clay-soft);
+  color: var(--color-clay);
 }
 .concierge-workspace .exception-items-section {
   margin-top: 23px;
@@ -5479,15 +5479,15 @@
 }
 .concierge-workspace .exception-section-heading h3 {
   font-size: 14px;
-  color: #5b7e44;
+  color: var(--color-moss);
   font-weight: 500;
 }
 .concierge-workspace .exception-section-heading > div > span {
-  background: #edf4e4;
+  background: var(--color-moss-soft);
   border-radius: 4px;
   padding: 2px 6px;
   font-size: 10px;
-  color: #839f68;
+  color: var(--color-moss);
 }
 .concierge-workspace .exception-section-heading > .text-btn {
   font-size: 11px;
@@ -5497,16 +5497,16 @@
   align-items: flex-start;
   gap: 9px;
   border: 1px solid #e6ddc8;
-  background: #fcf8ef;
+  background: var(--color-yuzu-tint);
   padding: 13px 14px;
   border-radius: 7px;
   font-size: 11px;
   line-height: 1.9;
-  color: #a18b61;
+  color: var(--color-yuzu-deep);
   margin-bottom: 16px;
 }
 .concierge-workspace .catalog-first-calibration svg {
-  color: #b69a69;
+  color: var(--color-yuzu-deep);
   margin-top: 2px;
 }
 .concierge-workspace .exception-item-editor {
@@ -5516,18 +5516,18 @@
   padding: 16px;
 }
 .concierge-workspace .exception-item-editor .receipt-item-row.has-exception {
-  background: #fffaf4;
+  background: var(--color-yuzu-tint);
   border-color: #e6d3b8;
 }
 .concierge-workspace
   .exception-item-editor
   .receipt-item-row.exception-reviewed {
-  background: #f6faf1;
+  background: var(--color-paper);
   border-color: #c7dcaf;
 }
 .concierge-workspace .exception-item-editor .receipt-item-row.normal-item {
-  background: #fafcf6;
-  border-color: #e0ead4;
+  background: var(--color-card);
+  border-color: var(--color-moss-soft);
 }
 .concierge-workspace .exception-item-editor .receipt-item-grid {
   grid-template-columns: 1fr 1fr;
@@ -5539,16 +5539,16 @@
   font-size: 10px;
   border-radius: 4px;
   padding: 2px 6px;
-  background: #f2e8d7;
-  color: #a18555;
+  background: var(--color-paper-2);
+  color: var(--color-yuzu-deep);
 }
 .concierge-workspace .item-match-state.matched {
-  background: #eaf3df;
-  color: #759858;
+  background: var(--color-moss-soft);
+  color: var(--color-moss);
 }
 .concierge-workspace .item-ocr-name {
   font-size: 10px;
-  color: #8d9e7b;
+  color: var(--color-ink-3);
   line-height: 1.9;
   margin: 10px 0 0;
   white-space: pre-wrap;
@@ -5556,7 +5556,7 @@
 }
 .concierge-workspace .item-ocr-name > span {
   display: block;
-  color: #739359;
+  color: var(--color-moss);
 }
 .concierge-workspace .catalog-candidates {
   display: flex;
@@ -5567,7 +5567,7 @@
 .concierge-workspace .catalog-candidates > span {
   flex-basis: 100%;
   font-size: 10px;
-  color: #947d56;
+  color: var(--color-yuzu-deep);
   line-height: 1.8;
 }
 .concierge-workspace .catalog-candidates > button {
@@ -5579,8 +5579,8 @@
   padding: 7px 9px;
   border-radius: 5px;
   border: 1px solid #d4e3c4;
-  background: #f1f8e9;
-  color: #6b8f4c;
+  background: var(--color-moss-soft);
+  color: var(--color-moss);
   font-size: 11px;
   line-height: 1.7;
   text-align: left;
@@ -5588,10 +5588,10 @@
 }
 .concierge-workspace .catalog-candidates > button > small {
   font-size: 9px;
-  color: #9db383;
+  color: var(--color-moss);
 }
 .concierge-workspace .catalog-candidates > button:hover {
-  background: #e6f2da;
+  background: var(--color-moss-soft);
   border-color: #acc891;
 }
 .concierge-workspace .package-included-toggle {
@@ -5599,19 +5599,19 @@
   align-items: flex-start;
   gap: 8px;
   font-size: 10px;
-  color: #839869;
+  color: var(--color-ink-3);
   line-height: 1.8;
   margin: 12px 0;
 }
 .concierge-workspace .package-included-toggle > input {
   width: 14px;
   height: 14px;
-  accent-color: #90aa69;
+  accent-color: var(--color-moss);
   margin-top: 3px;
 }
 .concierge-workspace .package-included-toggle small {
   font-size: 9px;
-  color: #a0b08b;
+  color: var(--color-ink-3);
   margin-left: 8px;
 }
 .concierge-workspace .item-exception-ack {
@@ -5620,45 +5620,45 @@
   gap: 9px;
   padding: 11px 12px;
   border: 1px solid #dfd0b7;
-  background: #fcf5e9;
+  background: var(--color-yuzu-soft);
   border-radius: 6px;
   margin-top: 10px;
   font-size: 11px;
-  color: #967747;
+  color: var(--color-yuzu-deep);
   line-height: 1.9;
   cursor: pointer;
 }
 .concierge-workspace .item-exception-ack input {
   width: 15px;
   height: 15px;
-  accent-color: #8fac67;
+  accent-color: var(--color-moss);
   flex-shrink: 0;
   margin-top: 3px;
 }
 .concierge-workspace .item-exception-ack small {
   display: block;
   font-size: 9px;
-  color: #aa9470;
+  color: var(--color-yuzu-deep);
   line-height: 1.8;
   margin-top: 2px;
 }
 .concierge-workspace .item-exception-ack.acknowledged {
   border-color: #c8dbb5;
-  background: #eff7e7;
-  color: #709450;
+  background: var(--color-moss-soft);
+  color: var(--color-moss);
 }
 .concierge-workspace .item-exception-ack.acknowledged small {
-  color: #92a97c;
+  color: var(--color-moss);
 }
 .concierge-workspace .catalog-approve-trigger {
   margin-top: 13px;
   font-size: 11px;
-  color: #648a48;
+  color: var(--color-moss);
 }
 .concierge-workspace .catalog-approval-panel {
   padding: 15px;
   border: 1px solid #bcd3a7;
-  background: #f3f9ec;
+  background: var(--color-moss-soft);
   border-radius: 8px;
   margin-top: 14px;
 }
@@ -5677,14 +5677,14 @@
 .concierge-workspace .catalog-panel-heading strong {
   font-size: 12px;
   font-weight: 500;
-  color: #5f8542;
+  color: var(--color-moss);
 }
 .concierge-workspace .catalog-panel-heading svg {
-  color: #83a563;
+  color: var(--color-moss);
 }
 .concierge-workspace .catalog-approval-panel > p {
   font-size: 10px;
-  color: #879e71;
+  color: var(--color-ink-3);
   line-height: 1.9;
   margin-bottom: 16px;
 }
@@ -5698,15 +5698,15 @@
 .concierge-workspace .catalog-approval-panel .field input,
 .concierge-workspace .catalog-approval-panel .field textarea {
   font-size: 12px;
-  background: #fff;
+  background: var(--color-card);
 }
 .concierge-workspace .catalog-approval-panel .field > span {
   font-size: 10px;
-  color: #7a9661;
+  color: var(--color-moss);
 }
 .concierge-workspace .catalog-approval-panel .field small {
   font-size: 10px;
-  color: #93a77d;
+  color: var(--color-ink-3);
 }
 .concierge-workspace .catalog-package-check {
   display: flex;
@@ -5715,19 +5715,19 @@
   margin-top: 16px;
   font-size: 11px;
   line-height: 1.9;
-  color: #79975c;
+  color: var(--color-moss);
 }
 .concierge-workspace .catalog-package-check input {
   width: 15px;
   height: 15px;
-  accent-color: #89a968;
+  accent-color: var(--color-moss);
   margin-top: 3px;
   flex-shrink: 0;
 }
 .concierge-workspace .catalog-package-check small {
   display: block;
   font-size: 9px;
-  color: #9baf83;
+  color: var(--color-moss);
   margin-top: 3px;
 }
 .concierge-workspace .catalog-panel-actions {
@@ -5743,28 +5743,28 @@
   justify-content: center;
   flex-direction: column;
   padding: 26px 20px;
-  background: #f5f9ee;
-  border: 1px solid #dfead4;
+  background: var(--color-moss-soft);
+  border: 1px solid var(--color-moss-soft);
   border-radius: 8px;
-  color: #96ad7e;
+  color: var(--color-moss);
   text-align: center;
 }
 .concierge-workspace .normal-items-collapsed strong {
   font-size: 13px;
   font-weight: 500;
-  color: #6b8b51;
+  color: var(--color-moss);
   margin-top: 11px;
 }
 .concierge-workspace .normal-items-collapsed p {
   font-size: 11px;
-  color: #92a77c;
+  color: var(--color-ink-3);
   margin-top: 8px;
   line-height: 1.9;
 }
 .concierge-workspace .totals-review-grid {
   padding-top: 18px;
   margin-top: 18px !important;
-  border-top: 1px solid #e4edda;
+  border-top: 1px solid var(--color-moss-soft);
 }
 .concierge-workspace .whole-receipt-confirm {
   font-size: 12px;
@@ -5773,7 +5773,7 @@
 .concierge-workspace .whole-receipt-confirm small {
   display: block;
   font-size: 10px;
-  color: #91a97b;
+  color: var(--color-moss);
   margin-top: 6px;
   line-height: 1.9;
 }
@@ -5782,7 +5782,7 @@
 }
 .concierge-workspace .catalog-item-card {
   padding: 20px 0;
-  border-bottom: 1px solid #e8efdf;
+  border-bottom: 1px solid var(--color-moss-soft);
 }
 .concierge-workspace .catalog-item-card:last-child {
   border: 0;
@@ -5805,25 +5805,25 @@
 }
 .concierge-workspace .catalog-item-title strong {
   font-size: 14px;
-  color: #557b3e;
+  color: var(--color-moss);
   font-weight: 500;
   overflow-wrap: anywhere;
 }
 .concierge-workspace .catalog-item-title > div > span {
   font-size: 11px;
-  color: #8da676;
+  color: var(--color-moss);
 }
 .concierge-workspace .catalog-item-title em {
   font-size: 10px;
   font-style: normal;
-  background: #eef5e5;
-  color: #8eaa71;
+  background: var(--color-moss-soft);
+  color: var(--color-moss);
   border-radius: 4px;
   padding: 2px 6px;
 }
 .concierge-workspace .catalog-item-card > p {
   font-size: 10px;
-  color: #90a67c;
+  color: var(--color-ink-3);
   margin: 9px 0 0;
 }
 .concierge-workspace .catalog-aliases {
@@ -5835,15 +5835,15 @@
 }
 .concierge-workspace .catalog-aliases > span {
   font-size: 10px;
-  color: #9aae85;
+  color: var(--color-moss);
   margin-right: 3px;
 }
 .concierge-workspace .catalog-aliases > b {
   font-size: 10px;
   font-weight: 400;
-  border: 1px solid #e0ead6;
-  background: #fafcf6;
-  color: #7f9c65;
+  border: 1px solid var(--color-moss-soft);
+  background: var(--color-card);
+  color: var(--color-moss);
   border-radius: 4px;
   padding: 3px 7px;
   overflow-wrap: anywhere;
@@ -6295,11 +6295,11 @@
 
 /* Embedded in yuzu AdminShell; every rule stays within this module. */
 .concierge-workspace {
-  --paper: #f7f8f4;
-  --ink: #193b32;
-  --text: #293d36;
-  --muted: #748278;
-  --line: #e9ede8;
+  --paper: var(--color-paper);
+  --ink: var(--color-ink);
+  --text: var(--color-ink);
+  --muted: var(--color-ink-3);
+  --line: var(--color-paper);
   min-width: 0;
   isolation: isolate;
 }
@@ -6339,15 +6339,15 @@
   gap: 5px;
   padding: 9px 12px;
   border-radius: 8px;
-  background: #fff;
+  background: var(--color-card);
 }
 .concierge-workspace .concierge-toolbar nav button.selected {
-  background: #1d654b;
-  color: #fff;
+  background: var(--color-pine);
+  color: var(--color-card);
 }
 .concierge-workspace .integration-note {
   padding: 8px 24px;
-  color: #69786e;
+  color: var(--color-ink-3);
   font-size: 12px;
 }
 .concierge-workspace .receipt-archive {
@@ -6369,12 +6369,14 @@
   min-width: 0;
 }
 .concierge-workspace .native-link {
-  color: #29795b;
+  color: var(--color-pine);
   text-decoration: underline;
   font-size: 13px;
 }
+/* 手机上底部的常用入口：让开门店外壳左边的导航栏（宽 76px）——盖住的话，导航栏最下面的头像
+   （修改密码、退出登录）就点不到了（主线整改：管家部从后台挪到门店主导航以后） */
 .concierge-workspace .mobile-bottom-nav {
-  left: 0;
+  left: 76px;
   z-index: 20;
 }
 .concierge-workspace .drawer-layer,
@@ -6432,5 +6434,5 @@
 }
 .concierge-workspace .enterprise-account small {
   flex-basis: 100%;
-  color: #b42318;
+  color: var(--color-clay);
 }

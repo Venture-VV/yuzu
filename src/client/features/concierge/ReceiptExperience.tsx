@@ -331,7 +331,6 @@ function Dialog({
       >
         <div className="modal-heading">
           <div>
-            <div className="eyebrow">TANGQI CONCIERGE</div>
             <h2>{title}</h2>
             {subtitle && <p className="form-subtitle">{subtitle}</p>}
           </div>

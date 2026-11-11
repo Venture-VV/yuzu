@@ -21,8 +21,19 @@ const object = (v: unknown): Record<string, any> => {
   return v as Record<string, any>;
 };
 const fail = (e: unknown): never => {
+  // 错误码按类型分（整改：原来 400 / 403 / 404 / 409 都是 CONCIERGE_VALIDATION，日志与页面分不出是没权限、不存在还是被同事改过）
   if (e instanceof WorkspaceError)
-    throw new AppError(e.status, "CONCIERGE_VALIDATION", e.message);
+    throw new AppError(
+      e.status,
+      e.status === 403
+        ? "FORBIDDEN"
+        : e.status === 404
+          ? "NOT_FOUND"
+          : e.status === 409
+            ? "CONCIERGE_CONFLICT"
+            : "CONCIERGE_VALIDATION",
+      e.message,
+    );
   throw e;
 };
 async function run<T>(f: () => Promise<T>) {

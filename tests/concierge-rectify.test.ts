@@ -197,4 +197,17 @@ describe('8.0.12 管家部 · 主线整改', () => {
     await expect(ctx.sql`UPDATE concierge_records SET data = data || '{"status":"已完成"}'::jsonb WHERE id = ${t.body.id}`).rejects.toMatchObject({ code: 'P0001' });
     await expect(ctx.sql`UPDATE concierge_sync SET revision = -1`).rejects.toMatchObject({ code: '23514' });
   });
+
+  it('自检：管家部的记录与修订历史一致；被绕过应用改过的认得出', async () => {
+    const mine = async () => ((await api(ctx.app, ctx.owner, 'GET', '/api/frontdesk/checks')).body as { key: string; ok: boolean; detail: string }[]).find((c) => c.key === 'concierge_records')!;
+    const ok = await mine();
+    expect(ok.ok, ok.detail).toBe(true);
+    expect(ok.detail).toContain('每一版都有修订快照');
+    // 直接改库（带上新版本号能过触发器）但不留修订：自检认得出
+    const [m] = await ctx.sql<{ id: string }[]>`SELECT id FROM concierge_members ORDER BY code LIMIT 1`;
+    await ctx.sql`UPDATE concierge_members SET version = version + 1 WHERE id = ${m!.id}`;
+    const broken = await mine();
+    expect(broken.ok).toBe(false);
+    expect(broken.detail).toContain('管家会员');
+  });
 });

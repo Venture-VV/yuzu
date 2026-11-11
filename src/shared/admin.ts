@@ -18,7 +18,6 @@ export const ADMIN_SECTIONS = {
     label: '数据看板',
     perms: ['ledger.readToday', 'report.executive', 'report.members', 'member.retention', 'report.technicians', 'marketing.cost'],
   },
-  concierge: { path: '/admin/concierge', label: '管家部', perms: ['concierge.read'] },
   settings: { path: '/admin/settings', label: '规则总表', perms: ['settings.manage', 'audit.read'] },
   rules: { path: '/admin/rules', label: '经营规则', perms: ['settings.manage'] },
   members: { path: '/admin/members', label: '会员与渠道', perms: ['settings.manage'] },
@@ -54,7 +53,7 @@ export type AdminSection = keyof typeof ADMIN_SECTIONS;
 /** 能进后台首页、看后台各个设置分区的权限（有其一即可） */
 export const ADMIN_PERMISSIONS: readonly Permission[] = ADMIN_SECTIONS.home.perms;
 /** 能进后台的权限（有其一即可）：后台首页的权限，加上数据看板的权限（只有看板权限的只看得到数据看板） */
-export const ADMIN_ENTRY_PERMISSIONS: readonly Permission[] = [...new Set<Permission>([...ADMIN_SECTIONS.home.perms, ...ADMIN_SECTIONS.dashboard.perms, ...ADMIN_SECTIONS.concierge.perms])];
+export const ADMIN_ENTRY_PERMISSIONS: readonly Permission[] = [...new Set<Permission>([...ADMIN_SECTIONS.home.perms, ...ADMIN_SECTIONS.dashboard.perms])];
 
 export const RULE_GROUPS = {
   store: '门店与营业',

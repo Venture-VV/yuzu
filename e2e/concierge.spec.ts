@@ -12,7 +12,12 @@ async function login(page: Page) {
 }
 test("管家部嵌入企业后台并可从手机布局打开", async ({ page }) => {
   await login(page);
+  // 管家部在门店主导航里（与前台、预约、会员并列）；Codex 最初放的后台地址跳过来
   await page.goto("/admin/concierge");
+  await expect(page).toHaveURL(/\/concierge$/);
+  await expect(
+    page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "管家" }),
+  ).toHaveAttribute("aria-current", "page");
   await expect(
     // The dashboard heading includes today's date after its title.
     page.getByRole("heading", { level: 1, name: /^今日工作台/ }),
@@ -20,9 +25,14 @@ test("管家部嵌入企业后台并可从手机布局打开", async ({ page }) 
   await expect(
     page.getByRole("navigation", { name: "管家业务模块" }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "退出企业账号", exact: true }),
-  ).toBeVisible();
+  // 独立站留下的品牌字样不再出现；手机上底部的常用入口不盖住左边的主导航（头像那里是改密码、退出）
+  await expect(page.getByText("TANGQI CONCIERGE")).toHaveCount(0);
+  const bottom = page.getByRole("navigation", { name: "手机常用入口" });
+  if (await bottom.isVisible()) {
+    const rail = (await page.getByRole("navigation", { name: "主导航" }).boundingBox())!;
+    const bar = (await bottom.boundingBox())!;
+    expect(bar.x).toBeGreaterThanOrEqual(rail.x + rail.width - 1);
+  }
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth + 2,
@@ -37,7 +47,7 @@ test("管家仅卡号建档与人工余额留痕，不要求建立企业钱包",
     "变更流程只在门店电脑组执行；其余视口仅执行布局冒烟",
   );
   await login(page);
-  await page.goto("/admin/concierge");
+  await page.goto("/concierge");
   await page
     .getByRole("button", { name: "新增会员", exact: true })
     .first()
@@ -126,14 +136,16 @@ test("只有管家职责的后勤账号：登录直接进管家部；手机上�
     await pw.nth(1).fill("E2e-guanjia-2027");
     await pw.nth(2).fill("E2e-guanjia-2027");
     await p.getByRole("button", { name: "保存新密码" }).click();
-    // 直接进管家部（不是会员工作台，也不是餐饮、客房）；页面上有改密码、退出
-    await expect(p).toHaveURL(/\/admin\/concierge$/, { timeout: 20_000 });
+    // 直接进管家部（不是会员工作台，也不是餐饮、客房）
+    await expect(p).toHaveURL(/\/concierge$/, { timeout: 20_000 });
     await expect(p.getByRole("heading", { level: 1, name: /^今日工作台/ })).toBeVisible();
-    await expect(p.getByRole("button", { name: "退出企业账号", exact: true })).toBeVisible();
-    await expect(p.getByRole("link", { name: "修改密码" })).toBeVisible();
-    // 「返回前台」不能把人送回管家部自己：有别的门店页面就去那一页，没有就不显示
-    const exit = p.getByTestId("admin-exit");
-    if (await exit.count()) expect(await exit.getAttribute("href")).not.toBe("/");
+    // 管家在门店主导航里只看得到自己能用的页面：有「管家」，没有「后台」「会员」「流水」
+    const nav = p.getByRole("navigation", { name: "主导航" });
+    await expect(nav.getByRole("link", { name: "管家" })).toBeVisible();
+    for (const hidden of ["后台", "会员", "流水", "前台"]) await expect(nav.getByRole("link", { name: hidden, exact: true })).toHaveCount(0);
+    // 后台进不去：回到管家部
+    await p.goto("/admin");
+    await expect(p).toHaveURL(/\/concierge$/);
     // 建一位管家会员（接口），再拍单
     const number = `E2E${stamp}`;
     const member = await p.request.post("/api/concierge/workspace", { data: { action: "createMember", requestId: randomUUID(), payload: { name: `E2E拍单-${stamp}`, phone: "", cardNo: `E2E-OCR-${stamp}`, ownerId: "", cardTier: "", preferences: "", source: "", joinedAt: "" } } });
