@@ -1,8 +1,8 @@
-// ERP「员工工作台 → 安保巡场」（8.0.9，docs/PATROL_V809.md 第 4 节）：
-//   · 今天：每个场所今天（营业日）谁几点巡过，还没人巡的排在前面；可以换日期看前几天；
+// ERP「员工工作台 → 安保巡场」（8.0.9，docs/PATROL_V809.md 第 4 节；8.0.11 巡场轮次，第 11 节）：
+//   · 今天：按轮（巡场间隔）列每个场所这一天每一轮谁几点巡过、漏巡、待巡；可以换日期看前几天；
 //   · 巡场记录：按营业日起止、场所、巡场的人筛选，导出与页面同一个查询；测试或扫错的可以作废（写原因）；
 //   · 场所与二维码：新增（带操作编号，回复丢了在页面上方「结果待确认」里处理）、改名称与位置、停用 / 启用、换码、打印二维码；
-//   · 设置：巡场部门、手机上能看巡场记录的人。
+//   · 设置：巡场部门、巡场间隔、手机上能看巡场记录的人。
 
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -11,12 +11,18 @@ import {
   MAX_PATROL_POINT_AREA,
   MAX_PATROL_POINT_NAME,
   PATROL_MAX_DAYS,
+  PATROL_ROUND_MAX_MINUTES,
+  PATROL_ROUND_MIN_MINUTES,
+  PATROL_ROUND_STEP_MINUTES,
   PATROL_VIA_LABELS,
+  patrolIntervalText,
   type PatrolDay,
   type PatrolPoint,
   type PatrolPointOption,
   type PatrolPointsAdmin,
   type PatrolRecords,
+  type PatrolRound,
+  type PatrolScan,
   type PatrolSettingsAdmin,
 } from '@shared/patrol';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
@@ -42,7 +48,7 @@ export function PatrolPage() {
   return (
     <ErpPage
       title="安保巡场"
-      description="安保部门在柚子饭堂「工作台 → 巡场」扫场所二维码打卡。这里看每天的巡场清单（还没人巡的场所排在前面）、巡场记录与导出；管场所与二维码、巡场部门、手机上能看记录的人。"
+      description="安保部门在柚子饭堂「工作台 → 巡场」扫场所二维码打卡。每天按巡场间隔（默认 3 小时）分轮，同一个场所每轮只记一次。这里按轮看每个场所巡了没有、巡场记录与导出；管场所与二维码、巡场部门、巡场间隔、手机上能看记录的人。"
     >
       <div className="space-y-5" data-testid="patrol-admin">
         {manage && <ErpPendingPanel types={['patrol_point']} />}
@@ -72,6 +78,28 @@ export function PatrolPage() {
 
 // ───────────────────────── 今天 ─────────────────────────
 
+const roundSpan = (r: { start: string; end: string }) => `${formatTime(r.start)}–${formatTime(r.end)}`;
+
+/** 一个场所在一轮里的样子：巡过（谁几点）、漏巡（已经过去的）、待巡（正在巡的这一轮）、还没到、不用巡 */
+function RoundCell({ scans, state }: { scans: PatrolScan[] | null; state: PatrolRound['state'] }) {
+  if (scans === null) return <span className="text-ink-4">·</span>;
+  if (scans.length > 0) {
+    return (
+      <span className="block space-y-0.5">
+        {scans.map((x) => (
+          <span key={x.id} className="block whitespace-nowrap text-pine">
+            ✓ {formatTime(x.at)} {x.name}
+            {x.late && <span className="ml-1 text-[11px] text-clay">补登</span>}
+          </span>
+        ))}
+      </span>
+    );
+  }
+  if (state === 'past') return <span className="font-semibold text-clay">漏巡</span>;
+  if (state === 'current') return <span className="font-semibold text-ember">待巡</span>;
+  return <span className="text-ink-4">—</span>;
+}
+
 function DayTab() {
   const [date, setDate] = useState<string | null>(null);
   const day = useQuery({
@@ -80,7 +108,8 @@ function DayTab() {
     refetchInterval: 60_000,
   });
   const d = day.data;
-  const points = useMemo(() => (d ? [...d.points].sort((a, b) => Number(a.count > 0 || !a.active) - Number(b.count > 0 || !b.active)) : []), [d]);
+  const current = d?.rounds.find((r) => r.state === 'current') ?? null;
+  const finished = d?.rounds.filter((r) => r.state === 'past') ?? [];
   return (
     <div className="space-y-4" data-testid="patrol-day">
       <div className="flex flex-wrap items-end gap-3">
@@ -92,22 +121,41 @@ function DayTab() {
             回到今天
           </Button>
         )}
+        {d && (
+          <span className="pb-2 text-[12.5px] text-ink-3" data-testid="patrol-day-interval">
+            每 {patrolIntervalText(d.roundMinutes)}一轮 · 这一天共 {d.rounds.length} 轮；同一个场所每轮只记一次打卡
+          </span>
+        )}
       </div>
       {day.error && <Notice tone="error" title={errorMessage(day.error)} />}
       {!d && day.isPending && <Skeleton className="h-40" />}
       {d && (
         <>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Card className="p-4">
-              <p className="text-[12.5px] text-ink-3">巡场次数</p>
-              <p className="num text-[24px] font-bold" data-testid="patrol-day-total">
-                {d.total}
-              </p>
+              <p className="text-[12.5px] text-ink-3">{current ? `正在巡：第 ${current.no} 轮` : '这一天的轮次'}</p>
+              {current ? (
+                <>
+                  <p className="num text-[24px] font-bold" data-testid="patrol-day-current">
+                    {current.done} / {current.expected}
+                  </p>
+                  <p className="mt-0.5 text-[12px] text-ink-3">{roundSpan(current)} · 还没巡 {d.currentMissing ?? 0} 处</p>
+                </>
+              ) : (
+                <p className="num text-[24px] font-bold">{d.rounds.length} 轮</p>
+              )}
             </Card>
             <Card className="p-4">
-              <p className="text-[12.5px] text-ink-3">还没人巡的场所</p>
-              <p className={cn('num text-[24px] font-bold', d.missing > 0 && 'text-clay')} data-testid="patrol-day-missing">
-                {d.missing}
+              <p className="text-[12.5px] text-ink-3">漏巡（已经结束的 {finished.length} 轮）</p>
+              <p className={cn('num text-[24px] font-bold', d.missed > 0 && 'text-clay')} data-testid="patrol-day-missed">
+                {d.missed}
+              </p>
+              <p className="mt-0.5 text-[12px] text-ink-3">按「场所 × 轮」算</p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-[12.5px] text-ink-3">打卡次数</p>
+              <p className="num text-[24px] font-bold" data-testid="patrol-day-total">
+                {d.total}
               </p>
             </Card>
             <Card className="p-4">
@@ -117,39 +165,55 @@ function DayTab() {
             </Card>
           </div>
           <Card className="p-0">
-            {points.length === 0 ? (
+            {d.points.length === 0 ? (
               <p className="px-4 py-8 text-center text-[13px] text-ink-3">还没有场所：在「场所与二维码」里新增</p>
             ) : (
-              <ul className="divide-y divide-line/70">
-                {points.map((p) => (
-                  <li key={p.id} className="flex flex-wrap items-start gap-x-3 gap-y-1 px-4 py-3" data-testid={`patrol-day-point-${p.name}`}>
-                    <span className="min-w-0 flex-1 basis-56">
-                      <span className="text-[14px] font-semibold">{p.name}</span>
-                      {p.area && <span className="ml-2 text-[12px] text-ink-3">{p.area}</span>}
-                      {!p.active && (
-                        <Badge tone="neutral" className="ml-2">
-                          已停用
-                        </Badge>
-                      )}
-                      <span className="mt-1 block text-[12.5px] text-ink-2">
-                        {p.count > 0 ? (
-                          p.scans.map((s) => (
-                            <span key={s.id} className="mr-3 inline-block">
-                              {formatTime(s.at)} {s.name}
-                              {s.late && <span className="ml-1 text-[11.5px] text-clay">离线补登</span>}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="font-semibold text-clay">{d.date === d.today ? '今天还没人巡' : '这一天没人巡'}</span>
-                        )}
-                      </span>
-                    </span>
-                    <span className="num text-[14px] font-bold">{p.count} 次</span>
-                  </li>
-                ))}
-              </ul>
+              <div className="overflow-x-auto">
+                <table className="min-w-full border-collapse text-[12.5px]" data-testid="patrol-day-grid">
+                  <thead>
+                    <tr className="border-b border-line bg-paper-2/60 text-left">
+                      <th className="sticky left-0 z-10 min-w-40 bg-paper-2 px-3 py-2 font-semibold">场所</th>
+                      {d.rounds.map((r) => (
+                        <th
+                          key={r.no}
+                          className={cn('min-w-28 px-3 py-2 font-semibold whitespace-nowrap', r.state === 'current' && 'bg-ember-soft', r.state === 'future' && 'text-ink-4')}
+                          data-testid={`patrol-day-round-${r.no}`}
+                        >
+                          第 {r.no} 轮
+                          <span className="block text-[11.5px] font-normal text-ink-3">{roundSpan(r)}</span>
+                          <span className={cn('block text-[11.5px] font-normal', r.state === 'past' && r.done < r.expected ? 'text-clay' : 'text-ink-3')}>
+                            {r.state === 'future' ? '还没到' : `巡了 ${r.done} / ${r.expected}`}
+                          </span>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.points.map((p) => (
+                      <tr key={p.id} className="border-b border-line/70 align-top" data-testid={`patrol-day-point-${p.name}`}>
+                        <td className="sticky left-0 z-10 bg-card px-3 py-2">
+                          <span className="font-semibold">{p.name}</span>
+                          {!p.active && (
+                            <Badge tone="neutral" className="ml-2">
+                              已停用
+                            </Badge>
+                          )}
+                          {p.area && <span className="block text-[11.5px] text-ink-3">{p.area}</span>}
+                          <span className="block text-[11.5px] text-ink-3">今天 {p.count} 次</span>
+                        </td>
+                        {d.rounds.map((r, i) => (
+                          <td key={r.no} className={cn('px-3 py-2', r.state === 'current' && 'bg-ember-soft/40')}>
+                            <RoundCell scans={p.byRound[i] ?? null} state={r.state} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </Card>
+          <p className="text-[12px] text-ink-3">「漏巡」是已经结束的那一轮没人打卡；「待巡」是正在巡的这一轮还没打；「·」是那一轮还没建这个场所（或已停用）、不用巡。</p>
         </>
       )}
     </div>
@@ -255,10 +319,11 @@ function RecordsTab({ manage }: { manage: boolean }) {
         共 {total} 次{rows.length > total ? `，另有作废 ${rows.length - total} 次` : ''}
       </p>
       <Card className="overflow-x-auto p-0">
-        <table className="w-full min-w-[720px] text-[13px]">
+        <table className="w-full min-w-[780px] text-[13px]">
           <thead className="bg-paper-2 text-left text-[12px] text-ink-3">
             <tr>
               <th className="px-3 py-2 font-semibold">营业日</th>
+              <th className="px-3 py-2 font-semibold">轮次</th>
               <th className="px-3 py-2 font-semibold">时间</th>
               <th className="px-3 py-2 font-semibold">场所</th>
               <th className="px-3 py-2 font-semibold">巡场的人</th>
@@ -270,7 +335,7 @@ function RecordsTab({ manage }: { manage: boolean }) {
           <tbody className="divide-y divide-line/70">
             {rows.length === 0 && (
               <tr>
-                <td colSpan={manage ? 7 : 6} className="px-3 py-8 text-center text-ink-3">
+                <td colSpan={manage ? 8 : 7} className="px-3 py-8 text-center text-ink-3">
                   {records.isPending ? '正在取…' : '这段时间没有巡场记录'}
                 </td>
               </tr>
@@ -278,6 +343,7 @@ function RecordsTab({ manage }: { manage: boolean }) {
             {rows.map((r) => (
               <tr key={r.id} className={cn(r.voidedAt && 'text-ink-4 line-through')} data-testid={`patrol-record-${r.id}`}>
                 <td className="num px-3 py-2">{r.businessDate}</td>
+                <td className="num px-3 py-2 whitespace-nowrap">{r.roundNo ? `第 ${r.roundNo} 轮` : '—'}</td>
                 <td className="num px-3 py-2">
                   {formatTime(r.scannedAt)}
                   {r.late && <span className="ml-1 text-[11.5px] text-clay no-underline">离线补登</span>}
@@ -537,19 +603,27 @@ function SettingsTab() {
   const s = useQuery({ queryKey: [...KEY, 'settings'], queryFn: () => api.get<PatrolSettingsAdmin>('/api/erp/patrol/settings') });
   // 改动中的设置：第一次勾选时记下当时的两份名单与版本号，保存交的就是这个版本号——页面在后台重新取数（切回窗口时）
   // 不会把别人刚保存的版本号换进来，后保存的照样被拒，不会悄悄盖掉别人的修改（Codex 审查 41a2fbb，P1）
-  const [draft, setDraft] = useState<{ departmentIds: number[]; viewerIds: number[]; rev: number } | null>(null);
+  const [draft, setDraft] = useState<{ departmentIds: number[]; viewerIds: number[]; roundMinutes: number; rev: number } | null>(null);
   const [stale, setStale] = useState(false);
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const data = s.data;
   const depIds = draft?.departmentIds ?? data?.departmentIds ?? [];
   const viewerIds = draft?.viewerIds ?? data?.viewerIds ?? [];
+  const roundMinutes = draft?.roundMinutes ?? data?.roundMinutes ?? 180;
   const dirty = draft !== null;
   const toggle = (list: number[], id: number) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
-  const edit = (patch: { departmentIds?: number[]; viewerIds?: number[] }) => {
+  const edit = (patch: { departmentIds?: number[]; viewerIds?: number[]; roundMinutes?: number }) => {
     if (!data) return;
-    setDraft((d) => ({ ...(d ?? { departmentIds: data.departmentIds, viewerIds: data.viewerIds, rev: data.rev }), ...patch }));
+    setDraft((d) => ({ ...(d ?? { departmentIds: data.departmentIds, viewerIds: data.viewerIds, roundMinutes: data.roundMinutes, rev: data.rev }), ...patch }));
   };
+  /** 巡场间隔的选项：半小时一档，30 分钟到 24 小时 */
+  const intervalOptions = useMemo(() => {
+    const list: number[] = [];
+    for (let m = PATROL_ROUND_MIN_MINUTES; m <= PATROL_ROUND_MAX_MINUTES; m += PATROL_ROUND_STEP_MINUTES) list.push(m);
+    return list;
+  }, []);
+  const roundsPerDay = Math.ceil(1440 / roundMinutes);
   const shownEmployees = (data?.employees ?? []).filter((e) => e.active || viewerIds.includes(e.id)).filter((e) => !search.trim() || `${e.name}${e.empNo}${e.department}`.includes(search.trim()));
 
   const save = async () => {
@@ -594,6 +668,30 @@ function SettingsTab() {
           ))}
         </div>
         <p className="mt-2 text-[12.5px] text-ink-3">保存后巡场部门里有 {data.patrolStaffCount} 位启用的员工。</p>
+      </Card>
+      <Card className="p-5">
+        <SectionTitle>巡场间隔</SectionTitle>
+        <p className="mt-1 text-[12.5px] text-ink-3">
+          营业日从切换时间起按这个间隔分成几轮，同一个场所每轮只记一次打卡（不论是谁打的）；这一轮已经有人打过的，再扫提示「这一轮已打过卡」、不另记。
+          改了以后从今天（营业日）起按新的间隔分轮，今天已经打的卡按新的间隔重新归到各轮；以前的日子照旧按当时的间隔。
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <Select
+            aria-label="巡场间隔"
+            value={String(roundMinutes)}
+            onChange={(e) => edit({ roundMinutes: Number(e.target.value) })}
+            fullWidth={false}
+            className="w-44"
+            data-testid="patrol-round-minutes"
+          >
+            {intervalOptions.map((m) => (
+              <option key={m} value={m}>
+                每 {patrolIntervalText(m)}一轮
+              </option>
+            ))}
+          </Select>
+          <span className="text-[12.5px] text-ink-3">一天 {roundsPerDay} 轮{1440 % roundMinutes ? '（除不尽，最后一轮短一些）' : ''}</span>
+        </div>
       </Card>
       <Card className="p-5">
         <SectionTitle>手机上能看巡场记录的人</SectionTitle>
