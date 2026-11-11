@@ -168,6 +168,8 @@ function RecordsTab({ manage }: { manage: boolean }) {
   const [to, setTo] = useState(today);
   const [pointId, setPointId] = useState('');
   const [employeeId, setEmployeeId] = useState('');
+  /** 选中的那个人的名字：换了场所、日期以后结果里没有他，也留在选项里，看得出正在按谁筛（Codex 审查 b0a8bf6） */
+  const [employeeLabel, setEmployeeLabel] = useState('');
   const [voiding, setVoiding] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   // 筛选用全部场所（含停用的）：停用的场所以前的记录也能单独筛、单独导出（Codex 审查 41a2fbb）
@@ -181,8 +183,9 @@ function RecordsTab({ manage }: { manage: boolean }) {
   const people = useMemo(() => {
     const m = new Map<number, string>();
     for (const r of records.data?.rows ?? []) m.set(r.employeeId, `${r.name}（${r.empNo}）`);
+    if (employeeId && !m.has(Number(employeeId))) m.set(Number(employeeId), employeeLabel || '选中的人');
     return [...m.entries()];
-  }, [records.data]);
+  }, [records.data, employeeId, employeeLabel]);
   const rows = (records.data?.rows ?? []).filter((r) => !employeeId || r.employeeId === Number(employeeId));
   const total = rows.filter((r) => !r.voidedAt).length;
   const tooLong = from && to && (Date.parse(to) - Date.parse(from)) / 86_400_000 >= PATROL_MAX_DAYS;
@@ -223,7 +226,17 @@ function RecordsTab({ manage }: { manage: boolean }) {
           </Select>
         </Field>
         <Field label="巡场的人" htmlFor="patrol-person">
-          <Select id="patrol-person" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} fullWidth={false} className="w-44" data-testid="patrol-records-person">
+          <Select
+            id="patrol-person"
+            value={employeeId}
+            onChange={(e) => {
+              setEmployeeId(e.target.value);
+              setEmployeeLabel(e.target.selectedOptions[0]?.text ?? '');
+            }}
+            fullWidth={false}
+            className="w-44"
+            data-testid="patrol-records-person"
+          >
             <option value="">全部</option>
             {people.map(([id, label]) => (
               <option key={id} value={id}>

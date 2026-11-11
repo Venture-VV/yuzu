@@ -8,7 +8,8 @@
 // 可以重复跑：部门按名字沿用；员工工号、场所名称带这次的时间，场所跑完停用。
 // Codex 审查 41a2fbb 的四条也在这里：两个人同时改设置、断网扫的码离开巡场页也补交、手机上换日期没取到、记录筛选里有停用的场所；
 // ae12728 的两条：打印的两个码正好一张 A4、同一台手机换了人登录以后上一位断网扫的不记到这一位名下；
-// 7ae94b1 的一条：手机上「巡场记录」第一次没取到，联网自动再取、也能点「再试一次」。
+// 7ae94b1 的一条：手机上「巡场记录」第一次没取到，联网自动再取、也能点「再试一次」；
+// b0a8bf6 的两条：手机上「巡场记录」回到前台重新取、后台按人筛以后换场所，选中的人留在选项里。
 
 import { randomUUID } from 'node:crypto';
 import { expect, test, devices, type Browser, type BrowserContext, type APIRequestContext, type Page } from '@playwright/test';
@@ -210,6 +211,10 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
     await v.getByTestId('patrol-log-retry').click();
     await expect(v.getByTestId('patrol-log-total')).toBeVisible();
     await expect(v.getByTestId('patrol-log-error')).toHaveCount(0);
+    // 页面回到前台：重新取一次（过了营业日切换时间「今天」跟着门店系统变；Codex 审查 b0a8bf6）
+    const again = v.waitForRequest((r) => new URL(r.url()).pathname === '/api/canteen/patrol/day', { timeout: 10_000 });
+    await v.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await again;
     await viewerPhone.close();
 
     // ⑦ 别的部门的员工：没有工作台；直接扫码提示不在巡场部门
@@ -229,6 +234,11 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
     await expect(page.getByTestId('patrol-records-point').locator('option', { hasText: old.name })).toHaveText(`${old.name}（已停用）`);
     await page.getByTestId('patrol-records-point').selectOption({ label: names[0] });
     await expect(page.getByTestId('patrol-records-total')).toContainText('共 1 次');
+    // 先按人筛、再换到这个人没巡过的场所：选中的人留在选项里，看得出正在按谁筛（Codex 审查 b0a8bf6）
+    await page.getByTestId('patrol-records-person').selectOption({ value: String(guard.id) });
+    await page.getByTestId('patrol-records-point').selectOption({ label: `${old.name}（已停用）` });
+    await expect(page.getByTestId('patrol-records-total')).toContainText('共 0 次');
+    await expect(page.getByTestId('patrol-records-person')).toHaveValue(String(guard.id));
   } finally {
     // 跑完停用这次新增的场所（场所不能删）
     const fresh = (await ok<{ points: { id: number; name: string; area: string; sortOrder: number; active: boolean; version: number }[] }>(await api.get('/api/erp/patrol/points'))).points;

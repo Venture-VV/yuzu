@@ -42,6 +42,16 @@ export function PatrolLogPage({ me, go }: { me: CanteenMe; go: (route: string) =
     window.addEventListener('online', retry);
     return () => window.removeEventListener('online', retry);
   }, [error]);
+  // 页面回到前台、开着每 5 分钟：重新取一次，过了营业日切换时间「今天」跟着门店系统变（Codex 审查 b0a8bf6）
+  useEffect(() => {
+    const again = () => document.visibilityState === 'visible' && setAttempt((n) => n + 1);
+    document.addEventListener('visibilitychange', again);
+    const timer = setInterval(again, 5 * 60_000);
+    return () => {
+      document.removeEventListener('visibilitychange', again);
+      clearInterval(timer);
+    };
+  }, []);
 
   const shownDate = date ?? today;
   // 只显示选的这一天的：换了日期还没取到、或者没取到时，不把前一天的数字显示在新日期下面（Codex 审查 41a2fbb）
