@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>汤崎 · 品牌概念片《动静之间》</title>
+<style>
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+  /* 预览时把画面缩进窗口里；渲染时（?render=1）视口就是画面大小，不缩放 */
+  body.fit canvas { max-width: 100vw; max-height: calc(100vh - 34px); margin: 0 auto; }
+  #bar { position: fixed; left: 0; right: 0; bottom: 0; height: 34px; display: flex; align-items: center; gap: 12px;
+         padding: 0 12px; background: #17110d; color: #ebdeca; font: 12px/1 system-ui, sans-serif; }
+  #bar input { flex: 1; }
+  #bar[hidden] { display: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="bar" hidden><span>0.00s</span><input type="range" min="0" value="0" step="1"><em>空格播放 / 暂停</em></div>
+<script>if (!new URLSearchParams(location.search).get('render')) document.body.classList.add('fit');</script>
+<script type="module" src="main.js"></script>
+</body>
+</html>
