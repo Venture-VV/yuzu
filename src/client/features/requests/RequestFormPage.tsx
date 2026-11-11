@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
-import { ArrowLeft, CircleAlert, CircleCheck, ClipboardList, Inbox, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, CircleAlert, CircleCheck, ClipboardList, Download, FileUp, Inbox, Plus, Trash2 } from 'lucide-react';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { formatQty, parseQty } from '@shared/quantity';
 import {
@@ -469,9 +469,26 @@ function RequestForm({
         }
         subtitle="已有的物料从档案里选；新产品写名称，必须带参考链接和图片。提交后由采购审核。"
         actions={
-          <Button variant="secondary" size="sm" icon={<Inbox className="size-4" />} onClick={() => setBoxOpen(true)} data-testid="rq-draft-box">
-            草稿箱
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {/* 部门表格导入（供应链二次整改 02）：一次填好多行，导入后都是待审核 */}
+            {!existing && (
+              <>
+                <a href="/api/erp/requests/sheet/template" download data-testid="rq-sheet-template">
+                  <Button variant="secondary" size="sm" icon={<Download className="size-4" />}>
+                    下载模板
+                  </Button>
+                </a>
+                <Link to="/erp/requests/import">
+                  <Button variant="secondary" size="sm" icon={<FileUp className="size-4" />} data-testid="rq-sheet-import">
+                    导入表格
+                  </Button>
+                </Link>
+              </>
+            )}
+            <Button variant="secondary" size="sm" icon={<Inbox className="size-4" />} onClick={() => setBoxOpen(true)} data-testid="rq-draft-box">
+              草稿箱
+            </Button>
+          </div>
         }
       />
       <DraftBox open={boxOpen} onClose={() => setBoxOpen(false)} currentKey={draftKey} />
