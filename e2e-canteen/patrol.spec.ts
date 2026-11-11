@@ -1,7 +1,9 @@
 // 8.0.9 安保巡场（docs/PATROL_V809.md）的浏览器流程：
 //   后台（电脑尺寸）：ERP「员工工作台 → 安保巡场」设巡场部门与手机上能看记录的人、新增场所、打印二维码（码里是员工入口地址 + #patrol=场所码）；
 //   安保部门的员工（手机）：底部第四个入口是「工作台」，里面有「巡场」；用手机相机直接扫开场所码（打开 #patrol=码）就打卡，
-//   巡场页列出今天各场所谁几点巡过、还没人巡的；2 分钟内再扫提示刚打过卡；没登录的先登录、登录好接着打卡；
+//   巡场页列出这一轮各场所谁几点巡过、还没巡的；没登录的先登录、登录好接着打卡；
+//   8.0.11 巡场轮次（第 11 节）：营业日按巡场间隔分轮，同一个场所每轮只记一次——这一轮打过的再扫（自己、别的保安）都提示
+//   「这一轮已打过卡」、写是谁打的，不另记；手机「巡场记录」按轮列，后台「今天」是「场所 × 轮」的表，记录多一列「轮次」；
 //   指定能看记录的员工：工作台里有「巡场记录」；别的部门的员工没有工作台、直接扫码提示不在巡场部门；
 //   后台「今天」与「巡场记录」看到同样的结果。
 // 要应用开着员工端口：E2E_BASE_URL、E2E_CANTEEN_URL（见 playwright.canteen.config.ts），库里要有演示的店主 linlan（seed-demo）。
@@ -10,6 +12,7 @@
 // ae12728 的两条：打印的两个码正好一张 A4、同一台手机换了人登录以后上一位断网扫的不记到这一位名下；
 // 7ae94b1 的一条：手机上「巡场记录」第一次没取到，联网自动再取、也能点「再试一次」；
 // b0a8bf6 的两条：手机上「巡场记录」回到前台重新取、后台按人筛以后换场所，选中的人留在选项里。
+// 这条用例里的打卡要落在同一轮里：正在巡的这一轮快结束（不到 4 分钟）时先等它过去再开始扫。
 
 import { randomUUID } from 'node:crypto';
 import { expect, test, devices, type Browser, type BrowserContext, type APIRequestContext, type Page } from '@playwright/test';
@@ -32,6 +35,9 @@ async function ok<T = unknown>(res: Awaited<ReturnType<APIRequestContext['get']>
   expect(res.ok(), `${res.url()} → ${res.status()} ${await res.text()}`).toBe(true);
   return (await res.json()) as T;
 }
+
+/** 后台「今天」的清单里这条用例用到的几样（`PatrolDay`） */
+type Day = { today: string; roundMinutes: number; currentRound: number | null; rounds: { no: number; start: string; end: string; state: 'past' | 'current' | 'future' }[] };
 
 /** 加一位员工（工号带这次的时间，可以重复跑），给一张开通码 */
 async function hire(api: APIRequestContext, empNo: string, name: string, departmentId: number | null): Promise<{ id: number; code: string; empNo: string }> {
@@ -79,6 +85,8 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
   if (!(await deptBox.isChecked())) await deptBox.check();
   const viewerBox = page.getByTestId(`patrol-viewer-${viewer.empNo}`);
   if (!(await viewerBox.isChecked())) await viewerBox.check();
+  const dayBefore = await ok<Day>(await api.get('/api/erp/patrol/day'));
+  await expect(page.getByTestId('patrol-round-minutes')).toHaveValue(String(dayBefore.roundMinutes));
   const save = page.getByTestId('patrol-settings-save');
   if (await save.isEnabled()) {
     await save.click();
@@ -131,8 +139,24 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
   const old = await addPoint(`E2E旧仓库${stamp}`);
   await ok(await api.put(`/api/erp/patrol/points/${old.id}`, { data: { name: old.name, area: old.area, sortOrder: old.sortOrder, active: false, version: old.version } }));
 
+  // 下面的打卡要在同一轮里（同一个场所每轮只记一次）：这一轮剩下不到 4 分钟就等到下一轮开始
+  const ROUND_MARGIN_MS = 240_000;
+  const nowRound = async () => {
+    const d = await ok<Day>(await api.get('/api/erp/patrol/day'));
+    const r = d.rounds.find((x) => x.no === d.currentRound);
+    expect(r, '今天应该有一轮正在巡').toBeTruthy();
+    return r!;
+  };
+  let round = await nowRound();
+  const left = new Date(round.end).getTime() - Date.now();
+  if (left < ROUND_MARGIN_MS) {
+    test.setTimeout(120_000 + left + 10_000);
+    await page.waitForTimeout(left + 2_000);
+    round = await nowRound();
+  }
+
   try {
-    // ④ 保安：工作台里有巡场；直接扫开场所码就打卡
+    // ④ 保安：工作台里有巡场；直接扫开场所码就打卡，写着是第几轮
     const guardPhone = await phone(browser);
     const g = await join(guardPhone, guard.code);
     await expect(g.getByTestId('tab-work')).toBeVisible();
@@ -140,14 +164,17 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
     await expect(g.getByTestId('work-patrol')).toBeVisible();
     await g.goto(`${CANTEEN}/#patrol=${north.token}`);
     await expect(g.getByTestId('patrol-result')).toContainText(`✓ ${names[0]}`);
+    await expect(g.getByTestId('patrol-result')).toContainText(`打卡成功 · 第 ${round.no} 轮`);
     await expect(g).toHaveURL(/#\/patrol$/);
+    await expect(g.getByTestId('patrol-today')).toContainText(`这一轮 · 第 ${round.no} 轮`);
     await expect(g.getByTestId(`patrol-point-${names[0]}`)).toContainText('E2E 保安老张');
-    await expect(g.getByTestId(`patrol-point-${names[1]}`)).toContainText('今天还没人巡');
+    await expect(g.getByTestId(`patrol-point-${names[1]}`)).toContainText('这一轮还没巡');
     // 在线直接扫的这一笔不是补交：补交那一轮不把正在交的这笔再交一次（不出现「刚补交的」）
     await expect(g.getByText('刚补交的')).toHaveCount(0);
-    // 2 分钟内再扫：刚打过卡，不重复记
+    // 同一轮再扫同一个场所（8.0.11，XC14）：这一轮已打过卡、写是谁打的，不重复记
     await g.goto(`${CANTEEN}/#patrol=${north.token}`);
-    await expect(g.getByTestId('patrol-result')).toContainText('刚打过卡');
+    await expect(g.getByTestId('patrol-result')).toContainText('这一轮已打过卡');
+    await expect(g.getByTestId('patrol-already')).toContainText(`${names[0]} 第 ${round.no} 轮 已由你在`);
     // 断网扫的码离开巡场页也照样补交（Codex 审查 41a2fbb）：扫侧门时交不上（拦掉打卡请求），记在手机上；
     // 回首页以后联网，柚子饭堂在后台补交、提示补交好了，后台记录里有这一条
     const checkins = (u: URL) => u.pathname === '/api/canteen/patrol/checkins';
@@ -186,8 +213,23 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
     await expect(f.getByTestId('patrol-result')).toContainText(`✓ ${names[1]}`);
     await fresh.close();
     await guardPhone.close();
+    // 另一位保安用自己的手机扫同一个场所（同一轮，XC14：不论是谁打的）：这一轮已打过卡、写着是老张打的；扫北门也一样，记录里各只有一条
+    const otherPhone = await phone(browser);
+    const w = await otherPhone.newPage();
+    await w.goto(`${CANTEEN}/#patrol=${points[1]!.token}`);
+    await w.getByLabel('账号').fill(guard2.empNo);
+    await w.getByLabel('密码', { exact: true }).fill(STAFF_PASSWORD);
+    await w.getByRole('button', { name: '登录', exact: true }).click();
+    await expect(w.getByTestId('patrol-result')).toContainText('这一轮已打过卡');
+    await expect(w.getByTestId('patrol-already')).toContainText('E2E 保安老张');
+    await w.goto(`${CANTEEN}/#patrol=${north.token}`);
+    await expect(w.getByTestId('patrol-already')).toContainText('E2E 保安老张');
+    await otherPhone.close();
+    for (const p of points) {
+      expect((await ok<{ total: number }>(await api.get(`/api/erp/patrol/records?from=${businessToday}&to=${businessToday}&pointId=${p.id}`))).total).toBe(1);
+    }
 
-    // ⑥ 指定能看记录的人：工作台里有巡场记录，看到今天两处都巡过
+    // ⑥ 指定能看记录的人：工作台里有巡场记录，按轮列；正在巡的这一轮展开着，两处都巡过
     const viewerPhone = await phone(browser);
     const v = await join(viewerPhone, viewer.code);
     await v.getByTestId('tab-work').click();
@@ -198,8 +240,11 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
     await expect(v.getByTestId('patrol-log-error')).toBeVisible();
     await viewerPhone.unroute(anyDay);
     await v.evaluate(() => window.dispatchEvent(new Event('online')));
-    await expect(v.getByTestId(`patrol-log-point-${names[0]}`)).toContainText('E2E 保安老张');
-    await expect(v.getByTestId(`patrol-log-point-${names[1]}`)).toContainText('E2E 保安老张');
+    await expect(v.getByTestId(`patrol-log-round-${round.no}`)).toContainText('正在巡');
+    await expect(v.getByTestId(`patrol-log-point-${round.no}-${names[0]}`)).toContainText('E2E 保安老张');
+    await expect(v.getByTestId(`patrol-log-point-${round.no}-${names[1]}`)).toContainText('E2E 保安老张');
+    // 侧门是断网扫、联网补交的：按扫到的时间归在这一轮（隔了不到 2 分钟就交上的不标「补交」）
+    await expect(v.getByTestId(`patrol-log-point-${round.no}-${gate.name}`)).toContainText('E2E 保安老张');
     // 换日期没取到（Codex 审查 41a2fbb）：只显示出错，不把今天的数字显示在前一天下面
     const pastDay = (u: URL) => u.pathname === '/api/canteen/patrol/day' && u.searchParams.has('date');
     await viewerPhone.route(pastDay, (r) => r.abort('internetdisconnected'));
@@ -225,15 +270,20 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
     await expect(o.getByText('巡场只有巡场部门（安保）的员工能用')).toBeVisible();
     await outsiderPhone.close();
 
-    // ⑧ 后台「今天」「巡场记录」：两处都巡过，记录里有这两条
+    // ⑧ 后台「今天」是「场所 × 轮」的表：两处在这一轮都巡过（各一次），停用、没人巡的旧仓库不列；「巡场记录」里有这两条、写着第几轮
     await page.getByRole('radio', { name: '今天' }).click();
+    await expect(page.getByTestId('patrol-day-grid')).toBeVisible();
+    await expect(page.getByTestId(`patrol-day-round-${round.no}`)).toBeVisible();
     await expect(page.getByTestId(`patrol-day-point-${names[0]}`)).toContainText('E2E 保安老张');
-    await expect(page.getByTestId(`patrol-day-point-${names[1]}`)).toContainText('1 次');
+    await expect(page.getByTestId(`patrol-day-point-${names[0]}`)).toContainText('今天 1 次');
+    await expect(page.getByTestId(`patrol-day-point-${names[1]}`)).toContainText('今天 1 次');
+    await expect(page.getByTestId(`patrol-day-point-${old.name}`)).toHaveCount(0);
     await page.getByRole('radio', { name: '巡场记录' }).click();
     // 停用、今天没人巡的场所也能筛（以前的记录照样能单独筛、单独导出；Codex 审查 41a2fbb）
     await expect(page.getByTestId('patrol-records-point').locator('option', { hasText: old.name })).toHaveText(`${old.name}（已停用）`);
     await page.getByTestId('patrol-records-point').selectOption({ label: names[0] });
     await expect(page.getByTestId('patrol-records-total')).toContainText('共 1 次');
+    await expect(page.getByTestId('patrol-records').locator('tbody tr').first()).toContainText(`第 ${round.no} 轮`);
     // 先按人筛、再换到这个人没巡过的场所：选中的人留在选项里，看得出正在按谁筛（Codex 审查 b0a8bf6）
     await page.getByTestId('patrol-records-person').selectOption({ value: String(guard.id) });
     await page.getByTestId('patrol-records-point').selectOption({ label: `${old.name}（已停用）` });
