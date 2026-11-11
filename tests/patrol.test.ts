@@ -279,6 +279,26 @@ describe('每天的清单、记录与导出、作废', () => {
     expect((await api(ctx.app, ctx.clerk, 'GET', '/api/erp/patrol/point-options')).status).toBe(403);
   });
 
+  it('2 分钟内重复的那一笔也记下操作编号：原来那条后来被作废，重提照样是「刚打过卡」、不再记一条（Codex 审查 94f53d5）', async () => {
+    const water = points['屋顶水箱']!;
+    const first = await scan(guard, water.token);
+    expect(first.body).toMatchObject({ status: 'ok' });
+    nowMs += 60_000;
+    const key = randomUUID();
+    const dup = await scan(guard, water.token, {}, key);
+    expect(dup.body).toMatchObject({ status: 'already', checkin: { id: first.body.checkin.id } });
+    // 「刚打过卡」的回复丢了；重提之前后台把原来那条作废了
+    expect((await admin('POST', `/api/erp/patrol/checkins/${first.body.checkin.id}/void`, { reason: '测试扫的' })).status).toBe(200);
+    const again = await scan(guard, water.token, {}, key);
+    expect(again.status, JSON.stringify(again.body)).toBe(200);
+    expect(again.body).toMatchObject({ status: 'already', checkin: { id: first.body.checkin.id } });
+    const valid = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM patrol_checkins WHERE point_id = ${water.id} AND voided_at IS NULL`;
+    expect(valid[0]!.n).toBe(0);
+    // 别人拿这个编号：拒绝；这张表只追加
+    expect((await scan(guard2, water.token, {}, key)).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+    await expect(ctx.sql`DELETE FROM patrol_checkin_repeats WHERE client_key = ${key}`).rejects.toThrow(/只追加/);
+  });
+
   it('安保巡场模块关掉：员工端回「巡场还没开」、工作台里没有巡场，后台接口按模块拦截', async () => {
     expect((await admin('PUT', '/api/erp/modules', { modules: { canteen: true, patrol: false } })).status).toBe(200);
     expect((await scan(guard, points['北门停车场']!.token)).body.error.code).toBe('PATROL_CLOSED');

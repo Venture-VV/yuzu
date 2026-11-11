@@ -251,6 +251,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '109_dining_v808.sql',
   '110_technician_state_ops.sql',
   '111_patrol.sql',
+  '112_patrol_repeats.sql',
   '120_canteen_push.sql',
 ];
 

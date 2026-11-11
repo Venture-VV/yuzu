@@ -320,12 +320,22 @@ async function resultOf(db: Db, c: CheckinFull, status: PatrolCheckinResult['sta
   return { status, checkin: { id: Number(c.id), pointName: c.pointName, area: c.area, at: c.scannedAt, late }, pointCount: n!.n };
 }
 
-/** 同一个操作编号已经记过：原样返回（回复没收到时重提、断网补交重复交）；别人的编号拒绝 */
+/**
+ * 同一个操作编号已经交过：原样返回第一次的结果（回复没收到时重提、断网补交重复交）；别人的编号拒绝。
+ * 记下的那一笔返回「打卡成功」；当时算作 2 分钟内重复（「刚打过卡」）的，返回指向的那一条——那一条之后被作废也一样，
+ * 不会因为重提再记一条新的（Codex 审查 94f53d5，迁移 112）
+ */
 async function replayedCheckin(db: Db, clientKey: string, employeeId: number): Promise<PatrolCheckinResult | null> {
   const c = await checkinById(db, db`c.client_key = ${clientKey}`);
-  if (!c) return null;
-  if (Number(c.employeeId) !== employeeId) throw conflict('IDEMPOTENCY_CONFLICT', '这一笔的操作编号不对，请刷新后再扫');
-  return resultOf(db, c, 'ok');
+  if (c) {
+    if (Number(c.employeeId) !== employeeId) throw conflict('IDEMPOTENCY_CONFLICT', '这一笔的操作编号不对，请刷新后再扫');
+    return resultOf(db, c, 'ok');
+  }
+  const [r] = await db<{ checkinId: number; employeeId: number }[]>`SELECT checkin_id, employee_id FROM patrol_checkin_repeats WHERE client_key = ${clientKey}`;
+  if (!r) return null;
+  if (Number(r.employeeId) !== employeeId) throw conflict('IDEMPOTENCY_CONFLICT', '这一笔的操作编号不对，请刷新后再扫');
+  const first = await checkinById(db, db`c.id = ${r.checkinId}`);
+  return resultOf(db, first!, 'already');
 }
 
 /**
@@ -379,7 +389,11 @@ export async function recordPatrolCheckin(
       tx`c.employee_id = ${e.id} AND c.point_id = ${p.id} AND c.voided_at IS NULL
          AND c.scanned_at > ${new Date(atMs - PATROL_DEDUP_MINUTES * MINUTE)} AND c.scanned_at < ${new Date(atMs + PATROL_DEDUP_MINUTES * MINUTE)}`,
     );
-    if (dup) return resultOf(tx, dup, 'already');
+    if (dup) {
+      // 这一笔也记下操作编号：回复丢了原样重提时返回同样的「刚打过卡」，不看那一条之后有没有被作废
+      await tx`INSERT INTO patrol_checkin_repeats (client_key, checkin_id, employee_id) VALUES (${input.clientKey}, ${dup.id}, ${e.id})`;
+      return resultOf(tx, dup, 'already');
+    }
     const [row] = await tx<{ id: number }[]>`
       INSERT INTO patrol_checkins (point_id, point_name, employee_id, emp_no, employee_name, department_name, business_date, scanned_at, via, client_key)
       VALUES (${p.id}, ${point.name}, ${e.id}, ${e.empNo}, ${e.name}, ${e.department}, ${date}, ${new Date(atMs)}, ${input.via}, ${input.clientKey})
