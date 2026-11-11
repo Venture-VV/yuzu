@@ -42,7 +42,8 @@ export async function request<T>(
   method: 'GET' | 'POST' | 'PUT',
   url: string,
   body?: unknown,
-  options: { timeoutMs?: number } = {},
+  /** keepalive：页面关掉、切走时发的请求也让浏览器发完（草稿自动保存用；请求体超过 64 KB 时浏览器会拒绝，当作没发出去） */
+  options: { timeoutMs?: number; keepalive?: boolean } = {},
 ): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 15_000);
@@ -54,6 +55,7 @@ export async function request<T>(
       headers: body === undefined ? {} : { 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal,
+      ...(options.keepalive ? { keepalive: true } : {}),
     });
   } catch (error) {
     throw new UncertainError(controller.signal.aborted ? 'timeout' : 'network');
@@ -95,7 +97,7 @@ export async function request<T>(
 export const api = {
   get: <T>(url: string) => request<T>('GET', url),
   post: <T>(url: string, body?: unknown, options?: { timeoutMs?: number }) => request<T>('POST', url, body ?? {}, options),
-  put: <T>(url: string, body: unknown) => request<T>('PUT', url, body),
+  put: <T>(url: string, body: unknown, options?: { timeoutMs?: number; keepalive?: boolean }) => request<T>('PUT', url, body, options),
 };
 
 export function errorMessage(error: unknown): string {

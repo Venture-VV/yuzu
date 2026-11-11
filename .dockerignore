@@ -11,3 +11,4 @@ playwright-report
 *.log
 *.dump
 miniprogram
+brand

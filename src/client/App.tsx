@@ -60,6 +60,7 @@ const ReceivablesPage = lazyPage(() => import('./features/receivables/Receivable
 const InvoicesPage = lazyPage(() => import('./features/invoices/InvoicesPage').then((m) => m.InvoicesPage));
 const RequestsPage = lazyPage(() => import('./features/requests/RequestsPage').then((m) => m.RequestsPage));
 const RequestFormPage = lazyPage(() => import('./features/requests/RequestFormPage').then((m) => m.RequestFormPage));
+const RequestSheetImportPage = lazyPage(() => import('./features/requests/RequestSheetImportPage').then((m) => m.RequestSheetImportPage));
 const DeptStockPage = lazyPage(() => import('./features/dept-stock/DeptStockPage').then((m) => m.DeptStockPage));
 const DeptDocFormPage = lazyPage(() => import('./features/dept-stock/DeptDocFormPage').then((m) => m.DeptDocFormPage));
 const PurchaseLedgerPage = lazyPage(() => import('./features/purchase-ledger/PurchaseLedgerPage').then((m) => m.PurchaseLedgerPage));
@@ -250,6 +251,7 @@ const router = createBrowserRouter([
       { path: 'dept-stock/new/:type', element: <DeptDocFormPage /> },
       { path: 'dept-stock/docs/:id/edit', element: <DeptDocFormPage /> },
       { path: 'requests/new', element: <RequestFormPage mode="new" /> },
+      { path: 'requests/import', element: <RequestSheetImportPage /> },
       { path: 'requests/:id/edit', element: <RequestFormPage mode="edit" /> },
       { path: 'ledger', element: <PurchaseLedgerPage /> },
       { path: 'audit', element: <AuditPage /> },

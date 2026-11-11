@@ -1,0 +1,6 @@
+# 字体文件不进仓库（鸿蒙字体的许可不允许单独再分发）：tools/fetch-fonts.sh 会下载
+fonts/
+# 渲染时的帧图与中间文件
+out/.frames/
+out/stills/
+audio/score.wav
