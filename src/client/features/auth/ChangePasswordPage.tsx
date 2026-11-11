@@ -1,11 +1,13 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router';
-import { useQueryClient } from '@tanstack/react-query';
-import { ShieldCheck } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ShieldCheck, UtensilsCrossed } from 'lucide-react';
+import type { OrderPinStatus } from '@shared/emenu';
 import type { SessionInfo } from '@shared/types';
 import { api, ApiError, errorMessage } from '../../lib/api';
 import { qk } from '../../lib/queries';
-import { useSession } from '../../lib/session';
+import { useCan, useSession } from '../../lib/session';
+import { relativeTime } from '../../lib/utils';
 import { LogoMark } from '../../components/Brand';
 import { PageHeader } from '../../components/AppShell';
 import { useToast } from '../../components/Toast';
@@ -91,7 +93,85 @@ export function ChangePasswordPage({ forced = false }: { forced?: boolean }) {
           </div>
           {form}
         </Card>
+        <OrderPinCard />
       </div>
     </>
+  );
+}
+
+/**
+ * 本人的点单密码（8.0.10，docs/EMENU.md 第 3.7 节）：在点餐平板上确认下单用的 6 位数字。
+ * 系统生成、只显示一次；能点单的岗位、平板点餐开着才显示这一块。
+ */
+function OrderPinCard() {
+  const session = useSession();
+  const can = useCan();
+  const toast = useToast();
+  const qc = useQueryClient();
+  const show = session.emenu && can('dining.order') && can('frontdesk.operate');
+  const status = useQuery({ queryKey: ['auth', 'order-pin'], queryFn: () => api.get<OrderPinStatus>('/api/auth/order-pin'), enabled: show });
+  const [pin, setPin] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  if (!show) return null;
+
+  const make = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post<{ pin: string }>('/api/auth/order-pin');
+      setPin(r.pin);
+      setConfirming(false);
+      void qc.invalidateQueries({ queryKey: ['auth', 'order-pin'] });
+    } catch (err) {
+      toast({ tone: 'error', title: errorMessage(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="mx-auto mt-5 max-w-md p-6" data-testid="order-pin-card">
+      <div className="mb-4 flex items-center gap-3">
+        <span className="flex size-10 items-center justify-center rounded-full bg-yuzu-soft text-yuzu-deep">
+          <UtensilsCrossed className="size-5" />
+        </span>
+        <div>
+          <p className="text-[15px] font-bold">点单密码</p>
+          <p className="text-[13px] text-ink-2">客人在餐桌的平板上选好菜，你输这 6 位数字确认下单，这一单记在你名下。</p>
+        </div>
+      </div>
+      {pin ? (
+        <div className="rounded-lg border border-dashed border-pine/40 bg-pine-tint px-4 py-5 text-center">
+          <p className="text-[13px] text-ink-2">你的新点单密码（只显示这一次，请记住）</p>
+          <p className="num mt-2 text-[26px] font-bold tracking-wider text-pine select-all" data-testid="order-pin-value">
+            {pin}
+          </p>
+          <Button className="mt-4" variant="secondary" size="sm" onClick={() => setPin(null)}>
+            我记住了
+          </Button>
+        </div>
+      ) : (
+        <>
+          <p className="text-[13.5px] text-ink-2" data-testid="order-pin-status">
+            {status.isPending ? '正在查…' : status.isError ? '没查到，稍后再试。' : status.data.has ? `已有点单密码（${relativeTime(status.data.setAt)}生成）。忘了可以重新生成，旧的马上失效。` : '还没有点单密码。'}
+          </p>
+          {confirming ? (
+            <div className="mt-4 flex items-center gap-2">
+              <span className="text-[13px] text-ink-2">重新生成后旧密码马上失效，确定吗？</span>
+              <Button variant="primary" size="sm" loading={busy} onClick={make} data-testid="order-pin-confirm">
+                确定
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setConfirming(false)}>
+                取消
+              </Button>
+            </div>
+          ) : (
+            <Button className="mt-4" variant="secondary" loading={busy} disabled={status.isPending} onClick={() => (status.data?.has ? setConfirming(true) : void make())} data-testid="order-pin-make">
+              {status.data?.has ? '重新生成' : '生成点单密码'}
+            </Button>
+          )}
+        </>
+      )}
+    </Card>
   );
 }

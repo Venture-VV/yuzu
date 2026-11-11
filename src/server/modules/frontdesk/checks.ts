@@ -8,6 +8,7 @@ import { usageCheck } from '../usages';
 import { bookingChecks } from '../bookings';
 import { countCardChecks } from '../count-cards';
 import { platformChecks } from '../platform-redemptions';
+import { emenuCheck } from '../emenu/checks';
 
 export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
   // ① 每张账单的合计 / 行数 = 其有效明细之和（未结明细合计 == 未结账单总额）
@@ -332,6 +333,8 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
     await platformChecks(db),
     // ㉒ 班次与当班的人（v0.7.28 按钱箱交班）
     await shiftMemberCheck(db),
+    // ㉓ 平板点餐单（8.0.10）
+    await emenuCheck(db),
   ];
 }
 

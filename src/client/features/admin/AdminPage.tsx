@@ -14,6 +14,8 @@ const CouponsSection = lazyPage(() => import('./CouponsSection').then((m) => m.C
 const DashboardPage = lazyPage(() => import('../dashboard/DashboardPage').then((m) => m.DashboardPage));
 const DevicesSection = lazyPage(() => import('./DevicesSection').then((m) => m.DevicesSection));
 const DiningSection = lazyPage(() => import('./DiningSection').then((m) => m.DiningSection));
+// 电子菜单（8.0.10，docs/EMENU.md）：餐桌平板上的菜单在这里排
+const EmenuAdminSection = lazyPage(() => import('../emenu/EmenuAdminSection').then((m) => m.EmenuAdminSection));
 const MembersSection = lazyPage(() => import('./MembersSection').then((m) => m.MembersSection));
 // 微信小程序（小程序线）
 const MpAdminSection = lazyPage(() => import('../mp/MpAdminSection').then((m) => m.MpAdminSection));
@@ -66,6 +68,7 @@ export const adminRoutes: RouteObject[] = [
   },
   { path: 'technicians', element: <TechniciansSection /> },
   { path: 'dining', element: <DiningSection /> },
+  { path: 'emenu', element: <EmenuAdminSection /> },
   { path: 'rooms', element: <RoomsSection /> },
   { path: 'bookings', element: <BookingsSection /> },
   { path: 'spaces', element: <SpacesSection /> },

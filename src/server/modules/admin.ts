@@ -15,6 +15,7 @@ import { DEFAULT_MEMBERSHIP_RULES, type MembershipRules } from '@shared/membersh
 import { CALL_TYPE_LABELS, DEFAULT_TECHNICIAN_RULES } from '@shared/technicians';
 import { AFTER_DESIGNATED_LABELS, AFTER_ROTATION_LABELS, DEFAULT_CLOCKROOM_RULES, DEFAULT_COMMISSION_RULES, describeCommissionBase } from '@shared/clockroom';
 import { DEFAULT_DINING_RULES } from '@shared/dining';
+import { DEFAULT_EMENU_RULES } from '@shared/emenu';
 import { DEFAULT_ROOM_RULES } from '@shared/rooms';
 import { formatYuan } from '@shared/money';
 import { DEFAULT_PURCHASE_RULES } from '@shared/purchasing';
@@ -56,6 +57,7 @@ import { loadClockroomRules } from './clockroom';
 import { loadPurchaseRules } from './inventory/purchase-rules';
 import { commissionSettings } from './commission';
 import { loadDiningRules } from './dining';
+import { loadEmenuRules } from './emenu/core';
 import { loadRoomRules } from './rooms';
 import { loadLocationRules } from './locations';
 import { DEFAULT_LOCATION_RULES } from '@shared/locations';
@@ -251,6 +253,15 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   add({ key: 'dining_rules.enabled', group: 'dining', label: '餐饮功能', value: onOff(dn.enabled, '开启（点单、厨房出品屏、估清）', '关闭（与升级前一样）'), defaultValue: '关闭（与升级前一样）', pending: false, section: 'dining', current: dn.enabled, dflt: dnd.enabled, metaKey: 'dining_rules' });
   add({ key: 'dining_rules.trackServed', group: 'dining', label: '上菜确认', value: onOff(dn.trackServed, '出餐后服务员点「上菜」', '出餐即算上菜'), defaultValue: '出餐后服务员点「上菜」', pending: true, section: 'dining', current: dn.trackServed, dflt: dnd.trackServed, metaKey: 'dining_rules' });
   add({ key: 'dining_rules.warnMinutes', group: 'dining', label: '出品超时提醒', value: `下单 ${dn.warnMinutes} 分钟还没出餐标红`, defaultValue: `下单 ${dnd.warnMinutes} 分钟还没出餐标红`, pending: true, section: 'dining', current: dn.warnMinutes, dflt: dnd.warnMinutes, metaKey: 'dining_rules' });
+  // ── 点餐系统 · 平板电子菜单（8.0.10，docs/EMENU.md）──
+  const em = await loadEmenuRules(db);
+  const emd = DEFAULT_EMENU_RULES;
+  const idleText = (m: number) => (m === 0 ? '不自动回' : `${m} 分钟没人动回到起始页、清掉没下单的菜`);
+  add({ key: 'emenu_rules.enabled', group: 'emenu', label: '平板点餐', value: onOff(em.enabled, '开启（餐桌平板翻菜单，服务员输点单密码确认）', '关闭（与升级前一样）'), defaultValue: '关闭（与升级前一样）', pending: false, section: 'emenu', current: em.enabled, dflt: emd.enabled, metaKey: 'emenu_rules' });
+  add({ key: 'emenu_rules.avoidOptions', group: 'emenu', label: '忌口选项', value: em.avoidOptions.join('、') || '没有', defaultValue: emd.avoidOptions.join('、'), pending: true, section: 'emenu', hint: '多选，写在这一单每道菜的口味备注上', current: em.avoidOptions, dflt: emd.avoidOptions, metaKey: 'emenu_rules' });
+  add({ key: 'emenu_rules.serveOptions', group: 'emenu', label: '起菜方式', value: em.serveOptions.join('、') || '没有', defaultValue: emd.serveOptions.join('、'), pending: true, section: 'emenu', hint: '单选，可以不选', current: em.serveOptions, dflt: emd.serveOptions, metaKey: 'emenu_rules' });
+  add({ key: 'emenu_rules.idleMinutes', group: 'emenu', label: '没人动多久回到起始页', value: idleText(em.idleMinutes), defaultValue: idleText(emd.idleMinutes), pending: true, section: 'emenu', current: em.idleMinutes, dflt: emd.idleMinutes, metaKey: 'emenu_rules' });
+  add({ key: 'emenu_rules.offHours', group: 'emenu', label: '不在供应时段的分类', value: em.offHours === 'hide' ? '平板上不显示' : '显示但不能点', defaultValue: emd.offHours === 'hide' ? '平板上不显示' : '显示但不能点', pending: true, section: 'emenu', current: em.offHours, dflt: emd.offHours, metaKey: 'emenu_rules' });
   // ── 客房（S7，v0.7.4）──
   const rm = await loadRoomRules(db);
   const rmd = DEFAULT_ROOM_RULES;

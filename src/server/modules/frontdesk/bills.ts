@@ -80,6 +80,8 @@ export interface PostTxMeta {
    * 出品单写送到哪张桌；锁住来访后核对还是这位会员的在店手牌
    */
   channel?: { expectedTotal: number | null; maxQuantity: number; maxTotal: number; deliverTo: string; memberId: number };
+  /** 平板点餐（8.0.10）：出品单写送到哪张桌（服务员输点单密码确认的，不走渠道入口的限制） */
+  deliverTo?: string;
 }
 
 export interface PostedLine {
@@ -124,7 +126,8 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
 }
 
 /**
- * 挂账（调用方的事务里；前台、点单页、钟房经 postCharges 的幂等外壳调用，小程序扫码点餐经 mp-entries.ts 调用）。
+ * 挂账（调用方的事务里；前台、点单页、钟房经 postCharges 的幂等外壳调用，小程序扫码点餐经 mp-entries.ts 调用，
+ * 平板点餐经 emenu/core.ts 调用（8.0.10：经办人是输点单密码的服务员））。
  * 锁：来访 → 账单 →（技师队列 → 钟单 → 技师状态）→ 估清 → 出品单
  */
 export async function postChargesTx(
@@ -136,7 +139,7 @@ export async function postChargesTx(
   ctx: OpContext,
   options: PostOptions = {},
 ): Promise<PostResult> {
-  const { key, requestHash, backfill, channel } = meta;
+  const { key, requestHash, backfill, channel, deliverTo } = meta;
   const at = backfill?.at ?? ctx.at ?? new Date();
   // ③ 来访 → 账单
   const visit = (await lockVisits(tx, [visitId])).get(visitId)!;
@@ -253,7 +256,7 @@ export async function postChargesTx(
   const orderNo = await createKitchenItems(tx, {
     visitId: visit.id,
     tableSessionId: null,
-    deliverTo: channel?.deliverTo ?? '',
+    deliverTo: channel?.deliverTo ?? deliverTo ?? '',
     lines: dishLines.map((l) => ({ billLineId: lineIds.get(l)!, itemId: l.itemId!, stationId: l.stationId!, quantity: l.quantity, note: l.note, limitTaken: limited.has(l.itemId!) })),
     date,
     at,

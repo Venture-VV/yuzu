@@ -83,6 +83,13 @@ export type AuditAction =
   | 'table_cancel'
   | 'table_post'
   | 'table_void'
+  // 点餐系统 · 平板电子菜单（8.0.10，docs/EMENU.md）：平板下单、电子菜单的保存与生成初稿、点单密码
+  | 'emenu_order'
+  | 'emenu_saved'
+  | 'emenu_draft'
+  | 'order_pin_set'
+  | 'order_pin_cleared'
+  | 'order_pin_failed'
   // 客房（S7，v0.7.4）
   | 'room_type_saved'
   | 'room_saved'

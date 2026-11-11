@@ -1,0 +1,243 @@
+/*
+ * 点餐系统 · 平板电子菜单（8.0.10，docs/EMENU.md）的样式：照 UI 设计师的《点餐系统版面模板-26.11.11》。
+ * 这套页面是给客人看的，用汤崎的品牌样式（暖白底、深棕字、卡其色按钮、朱雀仿宋），与门店系统自己的设计语言（docs/DESIGN.md）分开，
+ * 所有规则都限定在 .emenu 里面，不影响别的页面。
+ *
+ * 字体（DC14）：
+ *   · 中文：朱雀仿宋（设计稿用的，SIL OFL 开源，随应用打包；按字符区间分成小文件，用到哪些字才下载哪些）；
+ *   · 英文与数字：设计稿用的是 ABC Arizona Flare 的试用版（商业字体，没有网页授权不能随应用发），用随应用打包的开源字体
+ *     Average Sans 顶替（SIL OFL；字高、数字的宽窄与设计稿的最接近，数字 0 与字母 O 分得清）。字距是照 Average Sans 调的；
+ *     买了授权换上原字体时，把 .em-en 的 letter-spacing 与各处全大写小标题的字距去掉。
+ *
+ * 行框（Em Box Zh / Em Box En）：两个只有 612 字节的小字体，里面没有任何常用字的字形（只映射了私用区的一个码位），只规定
+ * 一行字的上沿、下沿——中文 0.707 / 0.293、英文 0.745 / 0.255（都是 1em 的比例，加起来正好 1），与设计稿 PDF 里两种字体的
+ * 文字框一模一样。它们排在字体列表最前面：浏览器按列表里第一个字体定一行的基线，字形照旧由后面的朱雀仿宋、Average Sans 出。
+ * 这样页面上「文字框的上沿」就是设计稿里量出来的那个位置，不用每处手调；也不受平台影响（朱雀仿宋自带的行高信息在苹果与
+ * 安卓 / Windows 上取值不同，直接用会差 0.1em）。行高为 1 时一行只有 1em 高，字的上缘会略微伸出行框——裁剪溢出的单行文字
+ * 要么给够行高、要么留上下内边距（见 .em-clip）。
+ * 这两个字体是用 fontTools 的 FontBuilder 生成的（1000 单位；hhea、OS/2 typo、win 三套行高取同样的值）：
+ *   fb = FontBuilder(1000, isTTF=True); fb.setupGlyphOrder(['.notdef', 'box']); fb.setupCharacterMap({0xF8F0: 'box'})
+ *   fb.setupGlyf({两个空字形}); fb.setupHorizontalMetrics({'.notdef': (500, 0), 'box': (500, 0)})
+ *   fb.setupHorizontalHeader(ascent=707, descent=-293, lineGap=0); fb.setupNameTable({'familyName': 'Em Box Zh', 'styleName': 'Regular'})
+ *   fb.setupOS2(version=4, sTypoAscender=707, sTypoDescender=-293, sTypoLineGap=0, usWinAscent=707, usWinDescent=293, fsSelection=0xC0, ...)
+ *   fb.setupPost()          # 英文的把 707 / 293 换成 745 / 255
+ */
+@import '@free-fonts/zhuque-fangsong/zhuque-fangsong.css';
+@import '@fontsource/average-sans/latin-400.css';
+
+@font-face {
+  font-family: 'Em Box Zh';
+  font-display: block;
+  src: url('data:font/ttf;base64,AAEAAAAKAIAAAwAgT1MvMkBYTkgAAAEoAAAAYGNtYXAADPlDAAABkAAAADRnbHlmAAAAAAAAAcwAAAABaGVhZC1KHJYAAACsAAAANmhoZWECxQDRAAAA5AAAACRobXR4AfQAAAAAAYgAAAAGbG9jYQAAAAAAAAHEAAAABm1heHAAAwACAAABCAAAACBuYW1lCwediAAAAdAAAABmcG9zdHB+A2IAAAI4AAAAKgABAAAAAQAAybaRVF8PPPUAAwPoAAAAAOcZ7dsAAAAA5xnt2wAAAAAAAAAAAAAAAwACAAAAAAAAAAEAAALD/tsAAAH0AAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAEAAAACAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAABAH0AZAABQAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAPz8/PwDA+PD48ALD/tsAAALDASUAAAAAAAAAAAHCAocAAAAgAAAB9AAAAAAAAAAAAAIAAAADAAAAFAADAAEAAAAUAAQAIAAAAAQABAABAAD48P//AAD48P//BxEAAQAAAAAAAAAAAAAAAAAAAAAAAAAEADYAAQAAAAAAAQAJAAAAAQAAAAAAAgAHAAkAAwABBAkAAQASABAAAwABBAkAAgAOACJFbSBCb3ggWmhSZWd1bGFyAEUAbQAgAEIAbwB4ACAAWgBoAFIAZQBnAHUAbABhAHIAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAECA2JveAAA') format('truetype');
+}
+@font-face {
+  font-family: 'Em Box En';
+  font-display: block;
+  src: url('data:font/ttf;base64,AAEAAAAKAIAAAwAgT1MvMkB+TpQAAAEoAAAAYGNtYXAADPlDAAABkAAAADRnbHlmAAAAAAAAAcwAAAABaGVhZC1KHJYAAACsAAAANmhoZWEC6wD3AAAA5AAAACRobXR4AfQAAAAAAYgAAAAGbG9jYQAAAAAAAAHEAAAABm1heHAAAwACAAABCAAAACBuYW1lCt2jjgAAAdAAAABmcG9zdHB+A2IAAAI4AAAAKgABAAAAAQAAyXKEZF8PPPUAAwPoAAAAAOcZ7dsAAAAA5xnt2wAAAAAAAAAAAAAAAwACAAAAAAAAAAEAAALp/wEAAAH0AAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAEAAAACAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAABAH0AZAABQAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAPz8/PwDA+PD48ALp/wEAAALpAP8AAAAAAAAAAAHCAq0AAAAgAAAB9AAAAAAAAAAAAAIAAAADAAAAFAADAAEAAAAUAAQAIAAAAAQABAABAAD48P//AAD48P//BxEAAQAAAAAAAAAAAAAAAAAAAAAAAAAEADYAAQAAAAAAAQAJAAAAAQAAAAAAAgAHAAkAAwABBAkAAQASABAAAwABBAkAAgAOACJFbSBCb3ggRW5SZWd1bGFyAEUAbQAgAEIAbwB4ACAARQBuAFIAZQBnAHUAbABhAHIAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAECA2JveAAA') format('truetype');
+}
+
+.emenu {
+  --em-ink: #4b392a;
+  --em-mute: #a59c95;
+  --em-tan: #a6947a;
+  --em-bg: #f4f3f2;
+  --em-modal: #f7f8f8;
+  --em-band: #f8f7db;
+  --em-key: #f4f3f2;
+  --em-key-2: #dbdbdb;
+  --em-photo: #d3d3d3;
+  --em-light: #efefef;
+  --em-error: #a2412b;
+  --em-zh: 'Em Box Zh', 'Zhuque Fangsong', 'FangSong', 'STFangsong', 'Songti SC', 'Noto Serif CJK SC', serif;
+  --em-en: 'Em Box En', 'Average Sans', 'Optima', 'Zhuque Fangsong', 'FangSong', 'STFangsong', sans-serif;
+
+  font-family: var(--em-zh);
+  color: var(--em-ink);
+  line-height: 1;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* 英文、数字、价格。顶替字体 Average Sans 比设计稿的原字体窄 5–7%：每个字补 0.027em，宽度就与设计稿对上了（全大写的小标题另补到 0.05em 左右） */
+.emenu .em-en {
+  font-family: var(--em-en);
+  letter-spacing: 0.027em;
+}
+
+.emenu button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.emenu button:disabled {
+  cursor: default;
+}
+.emenu input,
+.emenu textarea {
+  font: inherit;
+  color: inherit;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.emenu :focus-visible {
+  outline: 1.5px solid var(--em-tan);
+  outline-offset: 2px;
+}
+
+/*
+ * 放不下就省略的单行文字。行框只有 1em 高（见上面「行框」），字的上缘会伸出去一点：横向裁掉、纵向不裁。
+ * 不认识 overflow: clip 的旧浏览器（iPadOS 15 以前）退回两个方向都裁，字的上缘可能被切掉一丝。
+ */
+.emenu .em-clip {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+@supports (overflow: clip) {
+  .emenu .em-clip {
+    overflow-x: clip;
+    overflow-y: visible;
+  }
+}
+
+/* 菜单页横向一页一页翻：原生滚动 + 吸附，不显示滚动条 */
+.emenu-strip {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.emenu-strip::-webkit-scrollbar {
+  display: none;
+}
+.emenu-strip > * {
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+
+.emenu-scroll {
+  overflow-y: auto;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+.emenu-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes em-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes em-drawer {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes em-pop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes em-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* 下单成功的对勾：先画圆、再画勾（设计稿「勾勾动态展示」） */
+@keyframes em-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+/* 搜索跳过来的那道菜闪几下 */
+@keyframes em-flash {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: rgb(166 148 122 / 0.22);
+  }
+}
+@keyframes em-bump {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.35);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.em-fade {
+  animation: em-fade 0.22s ease-out both;
+}
+.em-drawer {
+  animation: em-drawer 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.em-pop {
+  animation: em-pop 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.em-rise {
+  animation: em-rise 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.em-flash {
+  animation: em-flash 0.7s ease-in-out 3 both;
+  border-radius: 4px;
+}
+.em-bump {
+  animation: em-bump 0.36s ease-out both;
+}
+.em-check-circle {
+  stroke-dasharray: 600;
+  stroke-dashoffset: 600;
+  animation: em-draw 0.55s ease-out 0.1s forwards;
+}
+.em-check-mark {
+  stroke-dasharray: 180;
+  stroke-dashoffset: 180;
+  animation: em-draw 0.4s ease-out 0.6s forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .em-fade,
+  .em-drawer,
+  .em-pop,
+  .em-rise,
+  .em-flash,
+  .em-bump {
+    animation: none;
+  }
+  .em-check-circle,
+  .em-check-mark {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .emenu-strip {
+    scroll-behavior: auto;
+  }
+}

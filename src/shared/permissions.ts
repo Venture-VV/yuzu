@@ -23,8 +23,10 @@
 // v0.7.31 合同与法务审查：新职责「法务」（单独一组），新增「查看合同」「维护合同」（docs/CONTRACTS.md C4、C12，待确认）。
 // 8.0.4 会员体系整改：新增「营销成本测算」（docs/MEMBERSHIP_V804.md 第 10 节，HY14）：默认店主、店总；
 // 与财务隔离——有财务职责（对账付款、成本核算）的账号一律没有，后台岗位权限加了也不生效（店主除外，FINANCE_EXCLUDED）。
+// 8.0.10 点餐系统 · 平板电子菜单（docs/EMENU.md，DC1、DC16 待确认）：新岗位「点餐平板」（放在餐桌上的平板登录用，只能打开点餐页），
+// 新增「打开平板点餐」「维护电子菜单」。平板上确认下单的服务员照旧要「餐饮点单」+「前台挂账」（凭点单密码认人）。
 
-export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice', 'other_store'] as const;
+export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice', 'other_store', 'tablet'] as const;
 export type Role = (typeof ROLES)[number];
 
 export const DUTIES = ['stock', 'purchase', 'payable', 'approve', 'cost', 'request', 'legal'] as const;
@@ -242,6 +244,13 @@ export const PERMISSIONS = {
   'dining.order': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 厨房出品屏：开始做、出餐、估清（S5 第一步，待确认：前台岗位与后勤人员；厨房可以用后勤账号） */
   'dining.kitchen': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk', 'backoffice'] },
+  /**
+   * 打开平板点餐（8.0.10，DC16 待确认：能点单的前台岗位与「点餐平板」）：看电子菜单、按手牌找在店客人、看这张手牌点过的菜；
+   * 下单另要一位有「餐饮点单」+「前台挂账」的员工输点单密码确认
+   */
+  'emenu.view': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk', 'tablet'] },
+  /** 维护电子菜单（8.0.10，DC16 待确认：店主、店总，与管理价目同一批人）：分类与供应时段、版面、菜品图文与图片、设置 */
+  'emenu.manage': { roles: ['owner', 'store_manager'] },
   /** 客房：入住、续住、换房、退房、收退押金、撤销入住、夜审（S7，v0.7.4，待确认：前台岗位都能做） */
   'room.operate': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 预约（v0.7.28，待确认：前台岗位都能做）：预约技师、派对房、客房电话预订；确认、改时间、到店、取消、记爽约 */
@@ -462,6 +471,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'technician.dispatch': '钟房派钟、上下钟、加钟、退钟、上牌',
   'dining.order': '餐饮点单、催单、上菜',
   'dining.kitchen': '厨房出品屏：开始做、出餐、估清',
+  'emenu.view': '打开平板点餐（电子菜单；下单要服务员输点单密码）',
+  'emenu.manage': '维护电子菜单（分类、版面、菜品图文、设置）',
   'room.operate': '客房入住、续住、换房、退房、押金、夜审',
   'booking.manage': '预约：新建、确认、改时间、到店、取消、记爽约',
   'room.housekeep': '客房打扫、维修（房态）',
@@ -496,7 +507,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   },
   {
     title: '前台手牌与账单',
-    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.refund', 'frontdesk.onAccount', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen', 'room.operate', 'room.housekeep', 'booking.manage', 'platform.redeem', 'platform.void', 'platform.settle', 'location.view', 'location.report', 'guide.view'],
+    items: ['frontdesk.read', 'frontdesk.operate', 'frontdesk.correct', 'frontdesk.tags', 'frontdesk.checkout', 'frontdesk.checkoutVoid', 'frontdesk.refund', 'frontdesk.onAccount', 'frontdesk.backfill', 'technician.dispatch', 'dining.order', 'dining.kitchen', 'emenu.view', 'room.operate', 'room.housekeep', 'booking.manage', 'platform.redeem', 'platform.void', 'platform.settle', 'location.view', 'location.report', 'guide.view'],
   },
   {
     title: '会员体系',
@@ -518,5 +529,5 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   { title: '员工工作台', items: ['canteen.manage', 'patrol.read', 'patrol.manage'] },
   { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount', 'auth.memberRefund', 'auth.memberPhone'] },
   { title: '数据看板', items: ['report.executive', 'report.members', 'report.technicians', 'report.commission', 'marketing.cost'] },
-  { title: '管理后台', items: ['staff.manage', 'catalog.manage', 'technician.manage', 'settings.manage', 'audit.read'] },
+  { title: '管理后台', items: ['staff.manage', 'catalog.manage', 'emenu.manage', 'technician.manage', 'settings.manage', 'audit.read'] },
 ];

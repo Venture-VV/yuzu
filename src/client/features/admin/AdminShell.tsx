@@ -9,6 +9,7 @@ import {
   ArchiveRestore,
   ArrowLeft,
   BedDouble,
+  BookOpenText,
   CalendarClock,
   ClipboardList,
   Crown,
@@ -51,6 +52,7 @@ const ICONS: Record<AdminSection, LucideIcon> = {
   tags: Tags,
   technicians: HandHeart,
   dining: UtensilsCrossed,
+  emenu: BookOpenText,
   rooms: BedDouble,
   bookings: CalendarClock,
   spaces: Layers,
@@ -64,7 +66,7 @@ const ICONS: Record<AdminSection, LucideIcon> = {
 
 const GROUPS: { title: string; items: AdminSection[] }[] = [
   { title: '概览', items: ['home', 'dashboard', 'settings'] },
-  { title: '经营设置', items: ['rules', 'members', 'membership', 'benefits', 'coupons', 'catalog', 'tags', 'technicians', 'dining', 'rooms', 'bookings', 'spaces', 'mp'] },
+  { title: '经营设置', items: ['rules', 'members', 'membership', 'benefits', 'coupons', 'catalog', 'tags', 'technicians', 'dining', 'emenu', 'rooms', 'bookings', 'spaces', 'mp'] },
   { title: '人员与权限', items: ['staff', 'permissions'] },
   { title: '数据', items: ['opening', 'audit'] },
 ];

@@ -253,6 +253,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '111_patrol.sql',
   '112_patrol_repeats.sql',
   '120_canteen_push.sql',
+  '121_emenu.sql',
   '130_request_drafts_imports.sql',
 ];
 

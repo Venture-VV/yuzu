@@ -77,8 +77,53 @@ export function clearFailures(username: string, source: string) {
   accounts.delete(accountKey(username, source));
 }
 
+// ───────────── 点单密码（8.0.10，docs/EMENU.md 第 3.7 节）─────────────
+// 服务员在餐桌的平板上确认下单用的 6 位数字。平板在客人手里，所以单独一份计数，与上面登录的计数分开：
+//   · 只按「这台平板登录的账号」记，不分来源地址——平板的登录凭证被拿到别处用，换了地址也是同一份计数；
+//   · 不计入上面「按来源」的计数——客人在餐桌上乱按，不会把店里别的设备的登录拦住；
+//   · 同一台平板一次只核对一个密码（排队）：并发发来一批，也是错满 5 次就锁，锁着的时候后面的不再核对，
+//     对的、错的回的都是同一句「请 N 分钟后再试」，分不出哪个是对的。
+// 次数与登录相同：15 分钟内错 5 次，锁 5 分钟。
+
+/** 这台平板 → 计数 */
+const orderPins = new Map<string, Counter>();
+/** 这台平板 → 排在最后的那一次核对 */
+const orderPinQueues = new Map<string, Promise<void>>();
+
+/** 这台平板的点单密码还要锁多久（分钟）；没锁返回 null */
+export function orderPinLockMinutes(device: string): number | null {
+  const now = Date.now();
+  const c = orderPins.get(device);
+  return c && c.lockedUntil > now ? minutesLeft(c.lockedUntil, now) : null;
+}
+
+/** 点单密码不对：这台平板记一次 */
+export function recordOrderPinFailure(device: string) {
+  bump(orderPins, device, Date.now(), ACCOUNT_MAX, ACCOUNT_WINDOW_MS, ACCOUNT_LOCK_MS);
+}
+
+/** 点单密码对了：清掉这台平板的计数 */
+export function clearOrderPinFailures(device: string) {
+  orderPins.delete(device);
+}
+
+/** 同一台平板的核对一个接一个做：前一个记完失败、该锁的锁上了，后一个才开始 */
+export function serialOrderPin<T>(device: string, attempt: () => Promise<T>): Promise<T> {
+  const run = (orderPinQueues.get(device) ?? Promise.resolve()).then(attempt);
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  orderPinQueues.set(device, tail);
+  void tail.then(() => {
+    if (orderPinQueues.get(device) === tail) orderPinQueues.delete(device);
+  });
+  return run;
+}
+
 /** 只给测试用：清空所有计数 */
 export function resetLoginThrottle() {
   accounts.clear();
   sources.clear();
+  orderPins.clear();
 }

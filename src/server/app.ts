@@ -82,6 +82,7 @@ import { registerClockroomRoutes } from './modules/clockroom';
 import { registerDiningRoutes } from './modules/dining';
 import { registerTableRoutes } from './modules/tables';
 import { registerDining808Routes } from './modules/dining-808';
+import { registerEmenuRoutes } from './modules/emenu/routes';
 import { registerRoomRoutes } from './modules/rooms';
 import { registerSpaceRoutes } from './modules/spaces';
 import { registerFloorplanRoutes } from './modules/floorplans';
@@ -169,7 +170,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
       const path = routePath(req);
       const what = path.startsWith('/api/inventory') || path.startsWith('/api/purchase') || path.startsWith('/api/payables')
         ? '相关物料或单据'
-        : path.startsWith('/api/frontdesk')
+        : path.startsWith('/api/frontdesk') || path.startsWith('/api/emenu')
           ? '这张手牌或账单'
           : path.startsWith('/api/admin/spaces')
             ? '空间台账'
@@ -277,6 +278,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerDiningRoutes(app, deps);
   registerTableRoutes(app, deps);
   registerDining808Routes(app, deps);
+  // 点餐系统 · 平板电子菜单（8.0.10）
+  registerEmenuRoutes(app, deps);
   registerRoomRoutes(app, deps);
   registerSpaceRoutes(app, deps);
   registerFloorplanRoutes(app, deps);

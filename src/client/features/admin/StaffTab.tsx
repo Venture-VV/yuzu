@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { KeyRound, UserPlus } from 'lucide-react';
+import { KeyRound, TabletSmartphone, UserPlus, UtensilsCrossed } from 'lucide-react';
 import { DUTY_LABELS, ROLE_HINTS, ROLE_LABELS } from '@shared/labels';
 import { DUTIES, dutyConflict, type Duty, type Role } from '@shared/permissions';
 import type { StaffRecord } from '@shared/types';
@@ -19,17 +19,48 @@ export function StaffTab() {
   const qc = useQueryClient();
   const toast = useToast();
   const [editing, setEditing] = useState<StaffRecord | 'new' | null>(null);
-  const [secret, setSecret] = useState<{ name: string; password: string } | null>(null);
+  const [secret, setSecret] = useState<{ name: string; password: string; kind: 'password' | 'pin' } | null>(null);
   const [resetting, setResetting] = useState<StaffRecord | null>(null);
+  // 点单密码（8.0.10，docs/EMENU.md）：服务员在点餐平板上确认下单用的 6 位数字，系统生成、只显示一次
+  const [pinTarget, setPinTarget] = useState<StaffRecord | null>(null);
+  const [pinBusy, setPinBusy] = useState(false);
 
   const reset = async (s: StaffRecord) => {
     try {
       const r = await api.post<{ temporaryPassword: string }>(`/api/staff/${s.id}/reset-password`);
       setResetting(null);
-      setSecret({ name: s.displayName, password: r.temporaryPassword });
+      setSecret({ name: s.displayName, password: r.temporaryPassword, kind: 'password' });
       void qc.invalidateQueries({ queryKey: qk.staff });
     } catch (err) {
       toast({ tone: 'error', title: errorMessage(err) });
+    }
+  };
+
+  const makePin = async (s: StaffRecord) => {
+    setPinBusy(true);
+    try {
+      const r = await api.post<{ pin: string }>(`/api/staff/${s.id}/order-pin`);
+      setPinTarget(null);
+      setSecret({ name: s.displayName, password: r.pin, kind: 'pin' });
+      void qc.invalidateQueries({ queryKey: qk.staff });
+    } catch (err) {
+      toast({ tone: 'error', title: errorMessage(err) });
+    } finally {
+      setPinBusy(false);
+    }
+  };
+
+  const clearPin = async (s: StaffRecord) => {
+    setPinBusy(true);
+    try {
+      await api.post(`/api/staff/${s.id}/order-pin/clear`);
+      setPinTarget(null);
+      toast({ tone: 'success', title: `已收回 ${s.displayName} 的点单密码` });
+      void qc.invalidateQueries({ queryKey: qk.staff });
+    } catch (err) {
+      toast({ tone: 'error', title: errorMessage(err) });
+    } finally {
+      setPinBusy(false);
     }
   };
 
@@ -67,7 +98,12 @@ export function StaffTab() {
                   </p>
                 </div>
                 <span className="flex flex-wrap gap-1">
-                  <Badge tone={s.role === 'owner' ? 'pine' : s.role === 'backoffice' || s.role === 'other_store' ? 'lake' : s.role === 'clerk' ? 'neutral' : 'yuzu'}>{ROLE_LABELS[s.role]}</Badge>
+                  <Badge
+                    tone={s.role === 'owner' ? 'pine' : s.role === 'backoffice' || s.role === 'other_store' ? 'lake' : s.role === 'clerk' || s.role === 'tablet' ? 'neutral' : 'yuzu'}
+                    icon={s.role === 'tablet' ? <TabletSmartphone className="size-3" /> : undefined}
+                  >
+                    {ROLE_LABELS[s.role]}
+                  </Badge>
                   {s.role !== 'owner' &&
                     s.duties.map((d) => (
                       <Badge key={d} tone="moss">
@@ -79,7 +115,17 @@ export function StaffTab() {
                 {!s.active && <Badge tone="clay">已停用</Badge>}
                 {s.active && dutyConflict(s.role, s.duties) && <Badge tone="ember">职责跨组</Badge>}
                 {s.mustChangePassword && s.active && <Badge tone="yuzu">待首次改密</Badge>}
+                {s.orderPinSetAt && s.active && (
+                  <span data-testid={`staff-pin-badge-${s.username}`}>
+                    <Badge tone="moss">有点单密码</Badge>
+                  </span>
+                )}
                 <div className="flex gap-1.5">
+                  {s.active && s.role !== 'tablet' && (
+                    <Button size="sm" variant="ghost" icon={<UtensilsCrossed className="size-3.5" />} onClick={() => setPinTarget(s)} data-testid={`staff-pin-${s.username}`}>
+                      点单密码
+                    </Button>
+                  )}
                   <Button size="sm" variant="ghost" icon={<KeyRound className="size-3.5" />} onClick={() => setResetting(s)}>
                     重置密码
                   </Button>
@@ -94,7 +140,7 @@ export function StaffTab() {
       <StaffDialog
         target={editing}
         onClose={() => setEditing(null)}
-        onCreated={(name, password) => setSecret({ name, password })}
+        onCreated={(name, password) => setSecret({ name, password, kind: 'password' })}
       />
 
       <Dialog
@@ -117,9 +163,41 @@ export function StaffTab() {
       </Dialog>
 
       <Dialog
+        open={!!pinTarget}
+        onClose={() => setPinTarget(null)}
+        title="点单密码"
+        description={pinTarget ? `${pinTarget.displayName}（${pinTarget.username}）` : ''}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setPinTarget(null)}>
+              取消
+            </Button>
+            {pinTarget?.orderPinSetAt && (
+              <Button variant="secondary" loading={pinBusy} onClick={() => pinTarget && clearPin(pinTarget)} data-testid="staff-pin-clear">
+                收回
+              </Button>
+            )}
+            <Button variant="primary" loading={pinBusy} onClick={() => pinTarget && makePin(pinTarget)} data-testid="staff-pin-make">
+              {pinTarget?.orderPinSetAt ? '重新生成' : '生成点单密码'}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-2 text-[14px] text-ink-2">
+          <p>点单密码是 6 位数字：客人在餐桌的平板上选好菜，服务员输自己的点单密码确认下单，这一单记在这位服务员名下。</p>
+          <p>
+            {pinTarget?.orderPinSetAt
+              ? `现在的密码是 ${relativeTime(pinTarget.orderPinSetAt)}生成的。重新生成后旧密码马上失效；收回后这位员工不能在平板上确认下单。`
+              : '密码由系统生成、只显示一次，请当面告诉本人；本人登录后也能在「修改密码」页自己重新生成。'}
+          </p>
+          <p className="text-[12.5px] text-ink-3">岗位要有「餐饮点单」和「前台挂账」两项权限，点单密码才用得上（见「岗位权限」）。</p>
+        </div>
+      </Dialog>
+
+      <Dialog
         open={!!secret}
         onClose={() => setSecret(null)}
-        title="临时密码"
+        title={secret?.kind === 'pin' ? '点单密码' : '临时密码'}
         description="只显示这一次，请当面告知员工。"
         footer={
           <Button variant="primary" onClick={() => setSecret(null)}>
@@ -128,8 +206,12 @@ export function StaffTab() {
         }
       >
         <div className="rounded-lg border border-dashed border-pine/40 bg-pine-tint px-4 py-5 text-center">
-          <p className="text-[13px] text-ink-2">{secret?.name} 的临时密码</p>
-          <p className="num mt-2 text-[26px] font-bold tracking-wider text-pine select-all">{secret?.password}</p>
+          <p className="text-[13px] text-ink-2">
+            {secret?.name} 的{secret?.kind === 'pin' ? '点单密码' : '临时密码'}
+          </p>
+          <p className="num mt-2 text-[26px] font-bold tracking-wider text-pine select-all" data-testid="staff-secret">
+            {secret?.password}
+          </p>
         </div>
       </Dialog>
     </div>
@@ -181,7 +263,7 @@ function StaffDialog({
           username,
           displayName: name,
           role,
-          duties: role === 'owner' || role === 'other_store' ? [] : duties,
+          duties: role === 'owner' || role === 'other_store' || role === 'tablet' ? [] : duties,
           departmentId: departments.data ? departmentId : null,
         });
         onCreated(name, r.temporaryPassword);
@@ -189,7 +271,7 @@ function StaffDialog({
         await api.put(`/api/staff/${existing.id}`, {
           displayName: name,
           role,
-          duties: role === 'owner' || role === 'other_store' ? [] : duties,
+          duties: role === 'owner' || role === 'other_store' || role === 'tablet' ? [] : duties,
           active,
           ...(departments.data ? { departmentId } : {}),
         });
@@ -209,7 +291,7 @@ function StaffDialog({
       open={!!target}
       onClose={onClose}
       title={isNew ? '添加员工' : '编辑员工'}
-      description={isNew ? '保存后会生成临时密码，员工首次登录时设置自己的密码。' : existing?.username}
+      description={isNew ? (role === 'tablet' ? '保存后会生成临时密码；在平板上用它登录、设好新密码，之后这台平板一直停在点餐页。' : '保存后会生成临时密码，员工首次登录时设置自己的密码。') : existing?.username}
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
@@ -242,6 +324,7 @@ function StaffDialog({
               { value: 'store_manager', label: '店总' },
               { value: 'backoffice', label: '后勤人员' },
               { value: 'other_store', label: '他店查询' },
+              { value: 'tablet', label: '点餐平板' },
               { value: 'owner', label: '店主' },
             ]}
           />
@@ -252,6 +335,8 @@ function StaffDialog({
             <p className="rounded-md bg-paper-2/70 px-3 py-2.5 text-[13px] text-ink-2">店主默认拥有全部库存与采购权限。</p>
           ) : role === 'other_store' ? (
             <p className="rounded-md bg-paper-2/70 px-3 py-2.5 text-[13px] text-ink-2">他店查询只查会员档阶，没有库存与采购职责。</p>
+          ) : role === 'tablet' ? (
+            <p className="rounded-md bg-paper-2/70 px-3 py-2.5 text-[13px] text-ink-2">点餐平板是放在餐桌上的设备账号，只能打开平板点餐（下单要服务员输点单密码），没有库存与采购职责。</p>
           ) : (
             <div className="grid gap-2 sm:grid-cols-2">
               {DUTIES.map((d) => {
@@ -279,10 +364,10 @@ function StaffDialog({
               })}
             </div>
           )}
-          {role !== 'owner' && dutyConflict(role, duties) && (
+          {role !== 'owner' && role !== 'tablet' && dutyConflict(role, duties) && (
             <p className="text-[12.5px] font-semibold text-clay">职责跨了「{dutyConflict(role, duties)}」：只能在一组里（对账付款与成本核算同属财务，可以同时有）。</p>
           )}
-          {role !== 'owner' && <p className="text-[12px] text-ink-3">库存职责不会带来会员钱包、撤销或日结权限。</p>}
+          {role !== 'owner' && role !== 'tablet' && <p className="text-[12px] text-ink-3">库存职责不会带来会员钱包、撤销或日结权限。</p>}
         </Field>
         {departments.data && (
           <Field label="所属部门" htmlFor="s-dept" hint="部门申购只能给所属部门提采购需求单">
