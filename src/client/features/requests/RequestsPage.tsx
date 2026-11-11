@@ -4,7 +4,7 @@
 
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { ClipboardList, Download, ExternalLink, PackageCheck, Pencil, Plus, ShoppingCart, X } from 'lucide-react';
+import { ClipboardList, Download, ExternalLink, Inbox, PackageCheck, Pencil, Plus, ShoppingCart, X } from 'lucide-react';
 import { formatQty } from '@shared/quantity';
 import { REQUEST_STATUS_LABELS, type PurchaseRequest, type RequestLine, type RequestLineProgress, type RequestStatus } from '@shared/requests';
 import { channelLabel } from '@shared/purchasing';
@@ -20,6 +20,8 @@ import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Input, Notice, Segmented, Select, Skeleton } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
+import { DraftBox } from './DraftBox';
+import { useDrafts } from './drafts';
 import { PriorityDot, PriorityTag } from './parts';
 import { useInvalidateRequests, useOpenLines, useRequest, useRequestMeta, useRequests } from './queries';
 
@@ -68,6 +70,10 @@ export function RequestsPage() {
   const setView = (v: 'list' | 'open') => setParams(v === 'open' ? { view: 'open' } : {}, { replace: true });
   const open = (id: number | null) => setParams(id ? { request: String(id) } : {}, { replace: true });
   const me = list.data?.me ?? meta.data?.me;
+  // 草稿箱（供应链二次整改 03）：自己没提交的草稿
+  const drafts = useDrafts(null, can('request.create'));
+  const [boxOpen, setBoxOpen] = useState(false);
+  const draftCount = drafts.data?.drafts.length ?? 0;
 
   return (
     <ErpPage
@@ -83,6 +89,11 @@ export function RequestsPage() {
             </a>
           )}
           {can('request.create') && (
+            <Button variant="secondary" icon={<Inbox className="size-4" />} onClick={() => setBoxOpen(true)} data-testid="requests-draft-box">
+              草稿箱{draftCount > 0 ? `（${draftCount}）` : ''}
+            </Button>
+          )}
+          {can('request.create') && (
             <Link to="/erp/requests/new">
               <Button variant="primary" icon={<Plus className="size-4" />} data-testid="request-new">
                 提需求
@@ -92,6 +103,7 @@ export function RequestsPage() {
         </div>
       }
     >
+      <DraftBox open={boxOpen} onClose={() => setBoxOpen(false)} />
       <div className="space-y-4" data-testid="requests-page">
         <ErpPendingPanel types={['purchase_request']} onFound={(_, ref) => open(ref.refId)} />
         {me && !me.canReview && me.canCreate && !me.departmentId && (
@@ -173,7 +185,7 @@ export function RequestsPage() {
                           <span className="block truncate text-[12px] text-ink-3">
                             {r.department.name} · {r.requester.name}
                             {r.needBy ? ` · 期望 ${r.needBy} 到货` : ''}
-                            {r.source === 'import' ? ' · 集采导入' : ''}
+                            {r.source === 'import' ? ' · 集采导入' : r.source === 'sheet' ? ' · 表格导入' : ''}
                           </span>
                           {r.lockedToday && (
                             <span className="block text-[12px] font-semibold text-clay" data-testid={`request-locked-${r.id}`}>
@@ -409,6 +421,7 @@ function RequestSheet({ id, onClose }: { id: number | null; onClose: () => void 
               <PriorityTag priority={r.priority} />
               {r.needBy && <span className="text-[12.5px] text-ink-3">期望 {r.needBy} 到货</span>}
               {r.source === 'import' && <Badge tone="neutral">集采导入</Badge>}
+              {r.source === 'sheet' && <Badge tone="neutral">表格导入</Badge>}
               {r.status === 'approved' && (
                 <span className="ml-auto flex items-center gap-1 text-[12.5px] text-ink-2">
                   <PackageCheck className="size-4" />
