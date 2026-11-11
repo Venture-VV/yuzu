@@ -48,14 +48,17 @@ describe('模块注册表', () => {
   });
 });
 
+/** 新装的门店默认关着的模块：员工食堂、安保巡场（8.0.9） */
+const OFF_BY_DEFAULT: string[] = ['canteen', 'patrol'];
+
 describe('ERP 模块开关', () => {
-  it('升级后默认开启（员工食堂默认关）；会话带实际能用的模块；能进 ERP 的人都能看模块列表，前台岗位不能', async () => {
-    // 员工食堂（docs/CANTEEN.md，K1）默认关，其余默认开
-    expect(ERP_MODULE_KEYS.filter((k) => !ERP_MODULES[k].defaultEnabled)).toEqual(['canteen']);
-    expect(await modules(ctx.owner)).toEqual(ERP_MODULE_KEYS.filter((k) => k !== 'canteen'));
+  it('升级后默认开启（员工食堂、安保巡场默认关）；会话带实际能用的模块；能进 ERP 的人都能看模块列表，前台岗位不能', async () => {
+    // 员工食堂（docs/CANTEEN.md，K1）、安保巡场（8.0.9，docs/PATROL_V809.md，依赖员工食堂）默认关，其余默认开
+    expect(ERP_MODULE_KEYS.filter((k) => !ERP_MODULES[k].defaultEnabled)).toEqual(OFF_BY_DEFAULT);
+    expect(await modules(ctx.owner)).toEqual(ERP_MODULE_KEYS.filter((k) => !OFF_BY_DEFAULT.includes(k)));
     const list = await api(ctx.app, stock, 'GET', '/api/erp/modules');
     expect(list.status).toBe(200);
-    expect(list.body.modules.map((m: { key: string; enabled: boolean }) => [m.key, m.enabled])).toEqual(ERP_MODULE_KEYS.map((k) => [k, k !== 'canteen']));
+    expect(list.body.modules.map((m: { key: string; enabled: boolean }) => [m.key, m.enabled])).toEqual(ERP_MODULE_KEYS.map((k) => [k, !OFF_BY_DEFAULT.includes(k)]));
     expect(list.body.updatedBy).toBeNull();
     expect((await api(ctx.app, ctx.clerk, 'GET', '/api/erp/modules')).status).toBe(403);
   });
@@ -97,6 +100,7 @@ describe('ERP 模块开关', () => {
         ['receivables', true, true],
         ['revenue', true, true],
         ['canteen', false, false],
+        ['patrol', false, false],
       ]);
       expect(await modules(ctx.owner)).toEqual(['receivables', 'revenue']);
       for (const url of ['/api/inventory/materials', '/api/inventory/todo-count', '/api/purchase-orders', '/api/purchase-baseline?materialId=1', '/api/payables/overview', '/api/erp/expenses', '/api/erp/petty/daily', '/api/erp/requests', '/api/erp/images/1', '/api/erp/dept-stock/meta', '/api/erp/contracts', '/api/erp/payments/requests', '/api/erp/invoices']) {
@@ -127,7 +131,7 @@ describe('ERP 模块开关', () => {
       expect((await switchModules(ctx.owner, { modules: { inventory: true } })).status).toBe(200);
     }
     expect((await api(ctx.app, ctx.owner, 'GET', '/api/inventory/materials')).status).toBe(200);
-    expect(await modules(ctx.owner)).toEqual(ERP_MODULE_KEYS.filter((k) => k !== 'canteen'));
+    expect(await modules(ctx.owner)).toEqual(ERP_MODULE_KEYS.filter((k) => !OFF_BY_DEFAULT.includes(k)));
   });
 
   it('关掉采购只拦采购：库存、货款照常', async () => {

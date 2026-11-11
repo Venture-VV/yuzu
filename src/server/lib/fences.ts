@@ -110,6 +110,8 @@ export const FENCED_OPS = [
   'asset_stocktake',
   // 8.0.8 合并前 Codex 审查（迁移 110）：技师停牌、复牌、休假；编号记在 idempotency_keys（ref_id 是那位技师）
   'technician_state',
+  // 8.0.9 安保巡场（迁移 111）：新建场所；编号记在场所上（patrol_points.client_key）
+  'patrol_point',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -317,17 +319,19 @@ export async function memberCardOpRef(db: Db, key: string): Promise<number | nul
   return row ? Number(row.id) : null;
 }
 
-const ERP_P2_OPS = ['ar_collection', 'asset_card', 'asset_stocktake'] as const;
+const ERP_P2_OPS = ['ar_collection', 'asset_card', 'asset_stocktake', 'patrol_point'] as const;
 type ErpP2Op = (typeof ERP_P2_OPS)[number];
 export const isErpP2Op = (op: string): op is ErpP2Op => (ERP_P2_OPS as readonly string[]).includes(op);
 
-/** 8.0.7 ERP P2 的操作编号记在回款登记、资产卡片、扫码盘点上：查到时返回那一行的编号 */
+/** 8.0.7 ERP P2 的操作编号记在回款登记、资产卡片、扫码盘点上（8.0.9 起还有巡场场所）：查到时返回那一行的编号 */
 export async function erpP2OpRef(db: Db, key: string, op: ErpP2Op): Promise<number | null> {
   const [row] =
     op === 'ar_collection'
       ? await db<{ id: number }[]>`SELECT id FROM ar_collections WHERE client_key = ${key}`
       : op === 'asset_stocktake'
         ? await db<{ id: number }[]>`SELECT id FROM asset_stocktakes WHERE client_key = ${key}`
+        : op === 'patrol_point'
+          ? await db<{ id: number }[]>`SELECT id FROM patrol_points WHERE client_key = ${key}`
         : await db<{ id: number }[]>`SELECT id FROM asset_cards WHERE client_key = ${key} ORDER BY id LIMIT 1`;
   return row ? Number(row.id) : null;
 }

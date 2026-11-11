@@ -55,7 +55,7 @@ yuzu 数据库（名单、菜单、点赞、打卡都在这里）← 管理后�
 
 - **为什么不再建一个库同步**：食堂只是名单、菜单和打卡，没有必要维护两份数据和一套同步协议（还要两边分别备份、恢复时对齐版本号）。小程序已经定了「公网服务器只转发、数据只在门店」，柚子饭堂照同一个做法，部署时只是在同一台网关服务器的 Caddy 里多加一个站点。
 - **员工端口的边界**：只挂柚子饭堂的静态页面和 `/api/canteen/*`；写请求核对来源（Origin 与 Host 一致）；会话 Cookie 单独一个名字（`yuzu_canteen_sid`，HttpOnly、SameSite=Strict，HTTPS 时加 Secure）；登录、开通按工号与来源 IP 限次；请求体上限 32 KB。主端口上没有 `/api/canteen/*`，员工端口上也没有 `/api/erp/*`。
-- **模块开关**：ERP 注册表里加模块「员工食堂」（分组「员工服务」，**默认关**）。关着时后台接口按 ERP 规则拦截，员工端口的接口一律回「饭堂还没开张」。没设 `CANTEEN_PORT` 的实例不开员工端口，其余一切照旧。
+- **模块开关**：ERP 注册表里加模块「员工食堂」（分组「员工服务」，8.0.9 起改名「员工工作台」，**默认关**）。关着时后台接口按 ERP 规则拦截，员工端口的接口一律回「饭堂还没开张」。没设 `CANTEEN_PORT` 的实例不开员工端口，其余一切照旧。
 - **门店系统连不上时**：员工照样能亮码（离线生成）、能看上次打开时的菜单；负责人扫到的码先存在手机上，显示「已记下，联网后自动补登」，恢复后按原操作编号补交（第 6 节）。
 
 ## 4. 数据（迁移 `090_canteen.sql`，只建自己的表）
@@ -153,7 +153,7 @@ staff.<域名> {
 | `src/canteen-app/` | 手机端「柚子饭堂」（Vite 单独构建到 `dist/canteen-app`，员工端口托管）：看板娘 `Mascot.tsx`、手绘图标 `doodles.tsx`、开场动画 `intro/`（柚子的声音 `voice.ts`，录音放 `intro/voice/`）、新手教程 `tour.tsx`、首页、菜单、饭卡码、跟柚子说、我的、厨房、扫码（扫完柚子播报 `scan-voice.ts`，录音放 `scan-voice/`）、负责人的柚子信箱 `pages/Mailbox.tsx`；离线外壳 `public/sw.js` |
 | `src/client/features/canteen/` | ERP「员工食堂」：今天、员工名单、菜单、用餐记录、柚子信箱、饭点提醒（`RemindersTab.tsx`，第 19 节）、设置（含注册二维码）；开通卡片的打印页 `/print/canteen-cards/:ids`、注册海报 `/print/canteen-poster` |
 | 饭点提醒（第 19 节） | 服务端 `src/server/lib/web-push.ts`（网页推送的加密、签名、发送与推送地址的白名单）、`src/server/modules/canteen/push.ts`（钥匙、订阅、设置、到点发、试发、后台的情况，每分钟的自动任务 `jobs.ts` 调它）；共用 `src/shared/canteen-reminders.ts`（默认话术与规则）；手机端 `src/canteen-app/push.ts`、`reminders.tsx`，`public/sw.js` 的 push / notificationclick / pushsubscriptionchange，清单 `public/manifest.webmanifest` 的长按入口与图标 `public/shortcut-*.png`、状态栏小图标 `public/badge-96.png` |
-| 登记处 | ERP 注册表加模块 `canteen`（分组「员工服务」，默认关）、权限 `canteen.manage`、审计动作 `canteen_employee`、`app.ts` 挂管理接口、`index.ts` 开员工端口 |
+| 登记处 | ERP 注册表加模块 `canteen`（分组「员工服务」，8.0.9 起叫「员工工作台」，默认关）、权限 `canteen.manage`、审计动作 `canteen_employee`、`app.ts` 挂管理接口、`index.ts` 开员工端口 |
 
 本机看界面：`npm run build` 后用独立演示库起应用（`CANTEEN_PORT=8090 CANTEEN_CODE_SECRET=<32 位以上> node dist/server/index.js`），手机尺寸打开 `http://localhost:8090`；改界面时 `npm run dev:canteen` 热更新。
 
@@ -324,3 +324,13 @@ staff.<域名> {
 
 **锁**：订阅、员工的选择只写自己那一行（推送地址、员工编号的唯一约束兜底），不锁员工（发的时候只发在用的人）；提醒的设置走规则锁、带 rev；到点发：先认领（「哪天哪顿」的唯一约束兜底，写 10 分钟租约，发得久了每分钟顺延），每台手机先记一行再发（主键兜底：同一次提醒同一台手机只发一次；进程中断后租约过期，由下一分钟接着发没记过的，结果不明的不重发），都在事务外发送、不等业务锁；读打卡、菜单不加锁。
 
+## 20. 工作台（8.0.9，安保巡场）
+
+柚子饭堂慢慢变成员工端平台（店主 2026-11-10）：员工能用的应用放在 **工作台** 里，按部门、角色显示，后台对应 ERP「员工工作台」分组（原来的「员工服务」），一个应用一个模块、一个开关。第一个应用是 **安保巡场**，设计与规则见 `docs/PATROL_V809.md`、`PENDING_DECISIONS.md`「8.0.9」（XC1–XC12）。
+
+- **底部第四个入口**：有工作台应用的人（巡场部门的人、后台指定能看巡场记录的人）换成「工作台」；别的人照旧（厨房 / 跟柚子说），不受影响。首页多一张巡场卡片。
+- **能用哪些应用**：门店系统在「我是谁」（`/api/canteen/me` 的 `apps`）里告诉手机，5 分钟自动刷新、离线用上次的；员工端接口每次按名单当场核对，手机上的入口只是方便。
+- **直接扫开的码**：场所码是「员工入口地址 + `#patrol=场所码`」，手机相机、微信直接扫开就打卡；没登录的先登录、登录好接着打卡（码记在手机上 10 分钟）。与开通卡片（`#join=`）同一个做法。
+- **断网**：与食堂负责人扫码同一个做法（先存手机、读回核对、按原来的操作编号补交），24 小时内的收；离开巡场页（回首页、亮饭卡码）以后柚子饭堂照样每 10 秒、联网时补交，补交好了、被拒了都提示一句；正在交的那一笔，补交那一轮跳过（8.0.9 起食堂扫码也一样）。
+- **代码**：员工端 `src/canteen-app/pages/Work.tsx`、`Patrol.tsx`、`PatrolLog.tsx`、`src/canteen-app/patrol.ts`；接口 `src/server/modules/patrol/`（员工端 `/api/canteen/patrol/*` 挂在员工端口，后台 `/api/erp/patrol/*`）；浏览器用例 `e2e-canteen/patrol.spec.ts`。
+- **以后加应用**（排班、请假、报修、公告……）：注册表加一个模块、`PATROL_APPS` 那样在「我是谁」里加应用键、工作台加一个格子、后台加一页，员工端接口挂在员工端口上。

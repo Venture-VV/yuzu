@@ -173,6 +173,10 @@ export const PERMISSIONS = {
   'erp.revenue': { roles: ['owner', 'store_manager'] },
   /** 员工食堂 · 柚子饭堂（docs/CANTEEN.md，K1，待确认：默认店主与店总）：员工名单、开通卡片、用餐记录、设置 */
   'canteen.manage': { roles: ['owner', 'store_manager'] },
+  /** 安保巡场（8.0.9，docs/PATROL_V809.md，XC3 待确认：默认店主与店总）：看每天的巡场清单、巡场记录与导出 */
+  'patrol.read': { roles: ['owner', 'store_manager'] },
+  /** 安保巡场：场所与二维码（新增、换码、停用、打印）、设置（巡场部门、手机上能看记录的人）、作废记录 */
+  'patrol.manage': { roles: ['owner', 'store_manager'] },
   // ── 费用报销与备用金（v0.7.7，飞书需求 RQ-005；D10：按现有的岗位 + 职责，见 docs/EXPENSES.md）──
   /** 查看费用报销、备用金与每日平账（物资经办、采购经办、负责人只读） */
   'expense.read': { roles: ['owner'], duties: ['stock', 'purchase', 'payable', 'cost', 'approve'] },
@@ -436,6 +440,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'inventory.export': '导出库存与对账',
   'erp.revenue': 'ERP：看营业数据（只读）',
   'canteen.manage': '员工食堂：名单、开通卡片、用餐记录与设置',
+  'patrol.read': '安保巡场：看巡场清单、记录与导出',
+  'patrol.manage': '安保巡场：场所与二维码、设置、作废记录',
   'expense.read': '查看费用报销、备用金与每日平账',
   'expense.manage': '登记费用报销（发票、税点、科目）',
   'petty.manage': '登记备用金打款、退回、补付',
@@ -520,7 +526,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
       'ar.read', 'ar.manage', 'asset.read', 'asset.manage',
     ],
   },
-  { title: '员工食堂', items: ['canteen.manage'] },
+  { title: '员工工作台', items: ['canteen.manage', 'patrol.read', 'patrol.manage'] },
   { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount', 'auth.memberRefund', 'auth.memberPhone'] },
   { title: '数据看板', items: ['report.executive', 'report.members', 'report.technicians', 'report.commission', 'marketing.cost'] },
   { title: '管理后台', items: ['staff.manage', 'catalog.manage', 'emenu.manage', 'technician.manage', 'settings.manage', 'audit.read'] },
