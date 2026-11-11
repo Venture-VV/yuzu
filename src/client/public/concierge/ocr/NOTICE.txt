@@ -1,0 +1,3 @@
+Tesseract.js 6.0.1 and Tesseract.js-core 6.1.2, Apache-2.0. Official source: https://github.com/naptha/tesseract.js and https://github.com/naptha/tesseract.js-core .
+Language models: official @tesseract.js-data chi_sim and eng 4.0.0_best_int distributions.
+All OCR runtime resources are served from this Site. Receipt recognition runs in the user browser.

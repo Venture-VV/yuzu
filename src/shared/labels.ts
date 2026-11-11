@@ -35,6 +35,8 @@ export const ROLE_HINTS: Record<Role, string> = {
 };
 
 export const DUTY_LABELS: Record<Duty, { title: string; hint: string }> = {
+  concierge: { title: '管家员工', hint: '管家部共享会员、协调预约、拍单、人工余额核对与交班；无收银扣款权限' },
+  concierge_manager: { title: '管家经理', hint: '管家部业务监管、核准项目名称、凭证更正与导出；无员工账号管理权限' },
   stock: { title: '物资经办', hint: '期初、收货、领用、退回、耗用、报损申请、盘点录入' },
   purchase: { title: '采购经办', hint: '维护档案、编制采购单、跟进价格与到货' },
   payable: { title: '对账付款', hint: '核对货款、登记期初未付与实际付款' },

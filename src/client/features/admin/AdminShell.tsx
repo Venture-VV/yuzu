@@ -42,6 +42,7 @@ import { InstanceBadge } from '../../components/InstanceTag';
 const ICONS: Record<AdminSection, LucideIcon> = {
   home: LayoutGrid,
   dashboard: LayoutDashboard,
+  concierge: HandHeart,
   settings: ListChecks,
   rules: Scale,
   members: IdCard,
@@ -65,7 +66,7 @@ const ICONS: Record<AdminSection, LucideIcon> = {
 };
 
 const GROUPS: { title: string; items: AdminSection[] }[] = [
-  { title: '概览', items: ['home', 'dashboard', 'settings'] },
+  { title: '概览', items: ['home', 'dashboard', 'concierge', 'settings'] },
   { title: '经营设置', items: ['rules', 'members', 'membership', 'benefits', 'coupons', 'catalog', 'tags', 'technicians', 'dining', 'emenu', 'rooms', 'bookings', 'spaces', 'mp'] },
   { title: '人员与权限', items: ['staff', 'permissions'] },
   { title: '数据', items: ['opening', 'audit'] },
@@ -75,7 +76,7 @@ const GROUPS: { title: string; items: AdminSection[] }[] = [
 export function useAdminSections() {
   const can = useCan();
   const all = (Object.keys(ADMIN_SECTIONS) as AdminSection[]).filter((k) => ADMIN_SECTIONS[k].perms.some((p) => can(p)));
-  return all.includes('home') ? all : all.filter((k) => k === 'dashboard');
+  return all.includes('home') ? all : all.filter((k) => k === 'dashboard' || k === 'concierge');
 }
 
 export function AdminShell() {
@@ -88,9 +89,9 @@ export function AdminShell() {
       document.title = session.storeName;
     };
   }, [session.storeName]);
-  if (!sections.includes('home') && !sections.includes('dashboard')) return <Navigate to="/" replace />;
+  if (!sections.includes('home') && !sections.includes('dashboard') && !sections.includes('concierge')) return <Navigate to="/" replace />;
   // 只有看板权限的：没有后台首页，进来直接到数据看板
-  if (!sections.includes('home') && location.pathname.replace(/\/+$/, '') === ADMIN_SECTIONS.home.path) return <Navigate to={ADMIN_SECTIONS.dashboard.path} replace />;
+  if (!sections.includes('home') && location.pathname.replace(/\/+$/, '') === ADMIN_SECTIONS.home.path) return <Navigate to={sections.includes('concierge') ? ADMIN_SECTIONS.concierge.path : ADMIN_SECTIONS.dashboard.path} replace />;
 
   const groups = GROUPS.map((g) => ({ ...g, items: g.items.filter((k) => sections.includes(k)) })).filter((g) => g.items.length > 0);
   const link = (k: AdminSection, compact: boolean) => {

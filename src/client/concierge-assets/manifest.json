@@ -1,0 +1,42 @@
+[
+  {
+    "target": "name-model.onnx",
+    "bytes": 16631306,
+    "sha256": "5825fc7ebf84ae7a412be049820b4d86d77620f204a041697b0494669b1742c5",
+    "parts": [
+      "name-model.onnx.part00",
+      "name-model.onnx.part01",
+      "name-model.onnx.part02",
+      "name-model.onnx.part03",
+      "name-model.onnx.part04",
+      "name-model.onnx.part05",
+      "name-model.onnx.part06",
+      "name-model.onnx.part07"
+    ]
+  },
+  {
+    "target": "name-runtime/ort-wasm-simd-threaded.wasm",
+    "bytes": 14848852,
+    "sha256": "4b884c203b0fa48d057be3332c65513ff85aa3c5bddd6946acc0fab7ecda001d",
+    "parts": [
+      "ort-wasm-simd-threaded.wasm.part00",
+      "ort-wasm-simd-threaded.wasm.part01",
+      "ort-wasm-simd-threaded.wasm.part02",
+      "ort-wasm-simd-threaded.wasm.part03",
+      "ort-wasm-simd-threaded.wasm.part04",
+      "ort-wasm-simd-threaded.wasm.part05",
+      "ort-wasm-simd-threaded.wasm.part06",
+      "ort-wasm-simd-threaded.wasm.part07"
+    ]
+  },
+  {
+    "target": "core/tesseract-core.wasm.js",
+    "bytes": 4750805,
+    "sha256": "e66872f6a76f5ad414d73d21512245df0de3060ad4871a97c47efceaab27b955",
+    "parts": [
+      "tesseract-core.wasm.js.part00",
+      "tesseract-core.wasm.js.part01",
+      "tesseract-core.wasm.js.part02"
+    ]
+  }
+]

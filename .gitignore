@@ -15,3 +15,8 @@ coverage/
 .watchdog/
 .offsite/
 recon/
+
+# Reconstructed from verified source parts by prepare:concierge-assets
+src/client/public/concierge/ocr/name-model.onnx
+src/client/public/concierge/ocr/name-runtime/ort-wasm-simd-threaded.wasm
+src/client/public/concierge/ocr/core/tesseract-core.wasm.js

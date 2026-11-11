@@ -1,6 +1,6 @@
 {
   "name": "yuzu",
-  "version": "8.0.10",
+  "version": "8.0.12",
   "private": true,
   "description": "浴族 yuzu · 汤泉门店经营系统（会员充值、消费、撤销、流水与日结）",
   "type": "module",
@@ -23,7 +23,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "prepare:concierge-assets": "node scripts/prepare-concierge-assets.mjs",
+    "prebuild:client": "npm run prepare:concierge-assets",
+    "predev:client": "npm run prepare:concierge-assets"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.3",
