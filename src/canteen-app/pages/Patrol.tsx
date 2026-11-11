@@ -127,12 +127,15 @@ export function PatrolPage({ me, offsetMs, online, go }: { me: CanteenMe; offset
   }, [employeeId, refreshDay]);
 
   const onText = useCallback((text: string) => void record(text, 'scan', { fromCamera: true }), [record]);
+  // 相机识别到码时调用最新的那个（换了人以后不会还记在上一位名下，Codex 审查 5966502）
+  const onTextRef = useRef(onText);
+  onTextRef.current = onText;
   const start = async () => {
     unlockAudio();
     setCameraError('');
     setCamera('starting');
     try {
-      stopRef.current = await startScanner(video.current!, onText);
+      stopRef.current = await startScanner(video.current!, (text) => onTextRef.current(text));
       setCamera('on');
     } catch (e) {
       setCamera('off');
@@ -145,6 +148,19 @@ export function PatrolPage({ me, offsetMs, online, go }: { me: CanteenMe; offset
     setCamera('off');
   };
   useEffect(() => () => stopRef.current?.(), []);
+  // 换了人（同一台手机另一个标签页登录了别人，这一页刷新成那一位）：关掉还开着的相机、要这一位自己再点开，
+  // 等补交的笔数、刚补交的也换成这一位的（Codex 审查 5966502）
+  const shownFor = useRef(employeeId);
+  useEffect(() => {
+    if (shownFor.current === employeeId) return;
+    shownFor.current = employeeId;
+    stopRef.current?.();
+    stopRef.current = null;
+    setCamera('off');
+    setQueued(loadPatrolQueue(employeeId).length);
+    setSettled([]);
+    setShown(null);
+  }, [employeeId]);
 
   const pickImage = async (file: File | undefined) => {
     if (!file) return;
