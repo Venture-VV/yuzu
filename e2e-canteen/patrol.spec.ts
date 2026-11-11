@@ -7,7 +7,8 @@
 // 要应用开着员工端口：E2E_BASE_URL、E2E_CANTEEN_URL（见 playwright.canteen.config.ts），库里要有演示的店主 linlan（seed-demo）。
 // 可以重复跑：部门按名字沿用；员工工号、场所名称带这次的时间，场所跑完停用。
 // Codex 审查 41a2fbb 的四条也在这里：两个人同时改设置、断网扫的码离开巡场页也补交、手机上换日期没取到、记录筛选里有停用的场所；
-// ae12728 的两条：打印的两个码正好一张 A4、同一台手机换了人登录以后上一位断网扫的不记到这一位名下。
+// ae12728 的两条：打印的两个码正好一张 A4、同一台手机换了人登录以后上一位断网扫的不记到这一位名下；
+// 7ae94b1 的一条：手机上「巡场记录」第一次没取到，联网自动再取、也能点「再试一次」。
 
 import { randomUUID } from 'node:crypto';
 import { expect, test, devices, type Browser, type BrowserContext, type APIRequestContext, type Page } from '@playwright/test';
@@ -189,7 +190,13 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
     const viewerPhone = await phone(browser);
     const v = await join(viewerPhone, viewer.code);
     await v.getByTestId('tab-work').click();
+    // 打开时没网、第一次就没取到（Codex 审查 7ae94b1）：联网以后自动再取一次，不用退出再进来
+    const anyDay = (u: URL) => u.pathname === '/api/canteen/patrol/day';
+    await viewerPhone.route(anyDay, (r) => r.abort('internetdisconnected'));
     await v.getByTestId('work-patrolLog').click();
+    await expect(v.getByTestId('patrol-log-error')).toBeVisible();
+    await viewerPhone.unroute(anyDay);
+    await v.evaluate(() => window.dispatchEvent(new Event('online')));
     await expect(v.getByTestId(`patrol-log-point-${names[0]}`)).toContainText('E2E 保安老张');
     await expect(v.getByTestId(`patrol-log-point-${names[1]}`)).toContainText('E2E 保安老张');
     // 换日期没取到（Codex 审查 41a2fbb）：只显示出错，不把今天的数字显示在前一天下面
@@ -199,6 +206,10 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
     await expect(v.getByTestId('patrol-log-error')).toBeVisible();
     await expect(v.getByTestId('patrol-log-total')).toHaveCount(0);
     await viewerPhone.unroute(pastDay);
+    // 点「再试一次」：取到前一天的
+    await v.getByTestId('patrol-log-retry').click();
+    await expect(v.getByTestId('patrol-log-total')).toBeVisible();
+    await expect(v.getByTestId('patrol-log-error')).toHaveCount(0);
     await viewerPhone.close();
 
     // ⑦ 别的部门的员工：没有工作台；直接扫码提示不在巡场部门

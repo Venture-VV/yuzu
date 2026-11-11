@@ -16,6 +16,8 @@ export function PatrolLogPage({ me, go }: { me: CanteenMe; go: (route: string) =
   const [error, setError] = useState('');
   const [person, setPerson] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
+  /** 再取一次（点「再试一次」、没取到以后联网了）：第一次就没取到时连今天是哪天都不知道，换日期的按钮用不了（Codex 审查 7ae94b1） */
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -32,7 +34,14 @@ export function PatrolLogPage({ me, go }: { me: CanteenMe; go: (route: string) =
     return () => {
       alive = false;
     };
-  }, [date]);
+  }, [date, attempt]);
+  // 没取到的：联网了自动再取一次
+  useEffect(() => {
+    if (!error) return;
+    const retry = () => setAttempt((n) => n + 1);
+    window.addEventListener('online', retry);
+    return () => window.removeEventListener('online', retry);
+  }, [error]);
 
   const shownDate = date ?? today;
   // 只显示选的这一天的：换了日期还没取到、或者没取到时，不把前一天的数字显示在新日期下面（Codex 审查 41a2fbb）
@@ -67,9 +76,12 @@ export function PatrolLogPage({ me, go }: { me: CanteenMe; go: (route: string) =
         </Button>
       </div>
       {error && (
-        <p className="rounded-2xl bg-peach-soft px-4 py-2.5 text-[14px] font-bold text-berry" data-testid="patrol-log-error">
-          {error}
-        </p>
+        <div className="flex items-center gap-2 rounded-2xl bg-peach-soft px-4 py-2.5" data-testid="patrol-log-error">
+          <p className="min-w-0 flex-1 text-[14px] font-bold text-berry">{error}</p>
+          <Button tone="leaf" className="h-9 shrink-0 px-3 text-[14px]" disabled={loading} onClick={() => setAttempt((n) => n + 1)} data-testid="patrol-log-retry">
+            再试一次
+          </Button>
+        </div>
       )}
       {!shown && !error && loading && <p className="py-6 text-center text-[14px] text-ink-3">正在取这一天的巡场…</p>}
 

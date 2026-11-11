@@ -43,6 +43,11 @@ export function PatrolPage({ me, offsetMs, online, go }: { me: CanteenMe; offset
       .catch((e: unknown) => setDayError(e instanceof Error ? e.message : '今天的巡场没取到'));
   }, []);
   useEffect(() => refreshDay(), [refreshDay]);
+  // 联网了：今天的巡场也跟着重新取（打开时没网没取到的，Codex 审查 7ae94b1）
+  useEffect(() => {
+    window.addEventListener('online', refreshDay);
+    return () => window.removeEventListener('online', refreshDay);
+  }, [refreshDay]);
   // 先把识别二维码的程序取下来（没有系统自带识别的手机要用），断网时也能扫
   useEffect(() => preloadDecoder(), []);
 
