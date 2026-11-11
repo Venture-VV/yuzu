@@ -275,7 +275,16 @@ describe('后台「电子菜单」', () => {
     expect(long.body.error.code).toBe('REMARK_OPTIONS_TOO_LONG');
     expect((await rules({ avoidOptions: ['少辣', '少辣'] })).status).toBe(400);
     expect((await rules({ coverImageId: 999999 })).body.error.code).toBe('IMAGE_NOT_FOUND');
+    // 规则总表有「点餐系统」一组（不混进「餐饮」那一组）；改过的那一项标出来，改回默认以后不标
+    type Entry = { key: string; group: string; isDefault: boolean; value: string; section: string; updatedBy: string | null };
+    let catalog = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/rules')).body as Entry[];
+    expect(catalog.filter((r) => r.group === 'emenu').map((r) => r.key)).toEqual(['emenu_rules.enabled', 'emenu_rules.avoidOptions', 'emenu_rules.serveOptions', 'emenu_rules.idleMinutes', 'emenu_rules.offHours']);
+    expect(catalog.find((r) => r.key === 'emenu_rules.idleMinutes')).toMatchObject({ isDefault: false, value: '5 分钟没人动回到起始页、清掉没下单的菜', section: 'emenu' });
+    expect(catalog.find((r) => r.key === 'emenu_rules.idleMinutes')!.updatedBy).not.toBeNull();
+    expect(catalog.find((r) => r.key === 'emenu_rules.offHours')).toMatchObject({ isDefault: true, value: '平板上不显示' });
     expect((await rules({ idleMinutes: 10 })).status).toBe(200);
+    catalog = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/rules')).body as Entry[];
+    expect(catalog.find((r) => r.key === 'emenu_rules.idleMinutes')).toMatchObject({ isDefault: true });
   });
 
   it('从价目表生成初稿：只补还没进电子菜单的菜，再点一次什么都不加', async () => {

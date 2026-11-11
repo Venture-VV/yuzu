@@ -1,0 +1,518 @@
+// 8.0.10 点餐系统 · 平板电子菜单的浏览器验收（docs/EMENU.md 第 10 节）。
+// ① 会写数据的整套流程（只在门店电脑这一组执行一次；平板那一段另开 1024×768 的浏览器窗口）：
+//    后台排菜单（分类、版面、菜品图文、设置）→ 员工账号里给服务员生成点单密码、本人在「修改密码」页重新生成
+//    →「点餐平板」账号首次登录改密码后直接进点餐页，别的页面与接口进不去 → 输手牌、桌号、人数 → 翻页、加菜、
+//    多规格进详情选、搜索 → 未下单里加减、备注 → 旧的点单密码被拒、新的下单成功 → 已下单；
+//    前台账单与厨房屏有这一单（经办人是服务员、带桌号与整单备注）；估清后平板标「已售罄」；点手牌结束点餐。
+// ② 各尺寸（门店电脑、平板横屏、平板竖屏）：合成菜单代替接口、只读——整页按 1024×768 等比缩放、不出滚动条，
+//    1024×768 时几处文字正好在设计稿量的位置上。
+// 依赖四套演示数据（仅独立演示库）；账号：店主 linlan、前台 xiaozhou，密码 yuzu2026。
+// 专用的菜品、档口、分类（E2E 开头）与平板账号 e2epad 留着下次沿用；结束时关掉平板点餐与餐饮、停用平板账号，可重复执行。
+import { randomUUID } from 'node:crypto';
+import { expect, test, type Browser, type Page } from '@playwright/test';
+import type { DiningAdmin, KitchenBoard } from '../src/shared/dining';
+import type { EmenuAdmin, EmenuMenu } from '../src/shared/emenu';
+import type { StaffRecord } from '../src/shared/types';
+
+const PASSWORD = 'yuzu2026';
+const PAD = { username: 'e2epad', password: 'e2e-pad-2026' };
+const CATEGORY = 'E2E 平板点餐';
+const STATION = 'E2E 热菜';
+const ITEMS = [
+  { name: 'E2E 平板砂锅鱼（大份）', price: 8800 },
+  { name: 'E2E 平板砂锅鱼（小份）', price: 4200 },
+  { name: 'E2E 平板小炒肉', price: 4800 },
+  { name: 'E2E 平板柠檬茶', price: 1500 },
+] as const;
+const FISH = { name: 'E2E 平板砂锅鱼', nameEn: 'E2E Casserole Fish', specs: [ITEMS[0], ITEMS[1]] };
+const PORK = { name: 'E2E 平板小炒肉', nameEn: 'E2E Stir Fried Pork', specs: [ITEMS[2]] };
+const TEA = { name: 'E2E 平板柠檬茶', nameEn: 'E2E Lemon Tea', specs: [ITEMS[3]] };
+
+async function login(page: Page, username: string, password = PASSWORD) {
+  await page.goto('/login');
+  await page.fill('#username', username);
+  await page.fill('#password', password);
+  await page.getByRole('button', { name: '登录' }).click();
+}
+
+async function loginStaff(page: Page, username: string) {
+  await login(page, username);
+  await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible({ timeout: 30_000 });
+}
+
+async function getJson<T>(page: Page, url: string): Promise<T> {
+  const res = await page.request.get(url);
+  expect(res.ok(), `${url} → ${res.status()}`).toBe(true);
+  return (await res.json()) as T;
+}
+
+async function send<T = unknown>(page: Page, method: 'post' | 'put', url: string, data?: unknown): Promise<T> {
+  const res = await page.request[method](url, data === undefined ? {} : { data });
+  expect(res.ok(), `${url} → ${res.status()} ${await res.text()}`).toBe(true);
+  return (await res.json()) as T;
+}
+
+const noScroll = async (page: Page) =>
+  expect(await page.evaluate(() => [document.documentElement.scrollWidth - window.innerWidth, document.documentElement.scrollHeight - window.innerHeight])).toEqual([0, 0]);
+
+interface BoardTag {
+  code: string;
+  zone: 'male' | 'female';
+  kind: 'normal' | 'vip';
+  active: boolean;
+  locked: boolean;
+  visit: { id: number } | null;
+}
+type Line = { id: number; name: string; quantity: number; status: string; source: string; kitchen: { status: string; note: string } | null };
+
+/** 店主：专用的价目项目、档口、菜品图文、分类（接口办理），餐饮开着；版面与开关留给页面上做。返回菜品与项目的编号 */
+async function prepareByApi(page: Page) {
+  let catalog = (await getJson<{ items: { id: number; name: string; active: boolean }[] }>(page, '/api/catalog?all=1')).items;
+  for (const it of ITEMS) {
+    const old = catalog.find((i) => i.name === it.name);
+    const body = { name: it.name, category: 'E2E 平板', price: it.price };
+    if (!old) await send(page, 'post', '/api/items', body);
+    else if (!old.active) await send(page, 'put', `/api/items/${old.id}`, { ...body, active: true });
+  }
+  catalog = (await getJson<{ items: { id: number; name: string; active: boolean }[] }>(page, '/api/catalog?all=1')).items;
+  const itemId = (name: string) => catalog.find((i) => i.name === name)!.id;
+  let dining = await getJson<DiningAdmin>(page, '/api/admin/dining');
+  const station = dining.stations.find((s) => s.name === STATION);
+  if (!station) dining = await send<DiningAdmin>(page, 'post', '/api/admin/dining/stations', { name: STATION });
+  else if (!station.active) dining = await send<DiningAdmin>(page, 'put', `/api/admin/dining/stations/${station.id}`, { name: STATION, sortOrder: station.sortOrder, active: true });
+  const stationId = dining.stations.find((s) => s.name === STATION)!.id;
+  await send(page, 'put', '/api/admin/dining/items', { items: ITEMS.map((it) => ({ id: itemId(it.name), stationId })) });
+  await send(page, 'put', '/api/admin/dining/rules', { enabled: true, trackServed: true, warnMinutes: 15 });
+  // 上一轮留下的估清先取消
+  for (const it of ITEMS) await send(page, 'put', `/api/kitchen/limits/${itemId(it.name)}`, { remaining: null });
+
+  let admin = await getJson<EmenuAdmin>(page, '/api/admin/emenu');
+  for (const d of [FISH, PORK, TEA]) {
+    const specs = d.specs.map((s) => ({ itemId: itemId(s.name), label: d.specs.length > 1 ? (s.name.includes('大份') ? '大份' : '小份') : '' }));
+    const body = { name: d.name, nameEn: d.nameEn, tagline: '', description: d === FISH ? 'E2E：砂锅慢焗的鱼。' : '', attrs: [], unit: '份', imageId: null, detailImageId: null, specs };
+    const old = admin.dishes.find((x) => x.name === d.name);
+    admin = old ? await send<EmenuAdmin>(page, 'put', `/api/admin/emenu/dishes/${old.id}`, { ...body, active: true, version: old.version }) : await send<EmenuAdmin>(page, 'post', '/api/admin/emenu/dishes', body);
+  }
+  // 分类留着就清空各页（下面在页面上重新排）；设置恢复默认、先关着
+  const cat = admin.categories.find((c) => c.name === CATEGORY);
+  if (cat) {
+    admin = await send<EmenuAdmin>(page, 'put', `/api/admin/emenu/categories/${cat.id}`, { name: CATEGORY, nameEn: 'E2E TABLET', window: null, sortOrder: cat.sortOrder, active: true, version: cat.version });
+    const again = admin.categories.find((c) => c.name === CATEGORY)!;
+    admin = await send<EmenuAdmin>(page, 'put', `/api/admin/emenu/categories/${again.id}/pages`, { version: again.version, pages: [] });
+  }
+  admin = await send<EmenuAdmin>(page, 'put', '/api/admin/emenu/rules', {
+    rev: admin.rulesRev,
+    enabled: false,
+    avoidOptions: ['不加香菜', '不加辣椒', '少辣', '不加洋葱', '不加香葱', '重辣'],
+    serveOptions: ['即起', '慢起'],
+    idleMinutes: 10,
+    offHours: 'hide',
+  });
+  const dishId = (name: string) => admin.dishes.find((x) => x.name === name)!.id;
+  return { itemId, dishId, hadCategory: !!cat, tables: admin.tables };
+}
+
+/** 店主：平板账号 e2epad（没有就建、停用的启用），每次都重置出一个临时密码 */
+async function prepareTablet(page: Page): Promise<{ id: number; temporaryPassword: string }> {
+  let staff = await getJson<StaffRecord[]>(page, '/api/staff');
+  let pad = staff.find((s) => s.username === PAD.username);
+  if (!pad) {
+    await send(page, 'post', '/api/staff', { username: PAD.username, displayName: 'E2E 点餐平板', role: 'tablet', duties: [] });
+    staff = await getJson<StaffRecord[]>(page, '/api/staff');
+    pad = staff.find((s) => s.username === PAD.username)!;
+  } else if (!pad.active || pad.role !== 'tablet') {
+    await send(page, 'put', `/api/staff/${pad.id}`, { displayName: pad.displayName, role: 'tablet', duties: [], active: true });
+  }
+  const { temporaryPassword } = await send<{ temporaryPassword: string }>(page, 'post', `/api/staff/${pad.id}/reset-password`);
+  return { id: pad.id, temporaryPassword };
+}
+
+const tabletContext = (browser: Browser, baseURL: string | undefined) =>
+  browser.newContext({ baseURL, viewport: { width: 1024, height: 768 }, hasTouch: true, locale: 'zh-CN', timezoneId: 'Asia/Shanghai' });
+
+test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
+  test('后台排菜单、发点单密码 → 平板账号登录 → 点餐、备注、服务员确认下单 → 账单与厨房屏 → 估清 → 结束点餐', async ({ page, browser, baseURL }, info) => {
+    test.skip(info.project.name !== '门店电脑', '会写数据的流程只在门店电脑这一组执行一次（平板那一段另开 1024×768 的窗口）');
+    test.setTimeout(300_000);
+    await loginStaff(page, 'linlan');
+    const clerkPage = await (await browser.newContext({ baseURL, locale: 'zh-CN', timezoneId: 'Asia/Shanghai' })).newPage();
+    const pad = await (await tabletContext(browser, baseURL)).newPage();
+    let visitId: number | null = null;
+    let padId: number | null = null;
+    try {
+      const prep = await prepareByApi(page);
+      const fishId = prep.dishId(FISH.name);
+      const porkId = prep.dishId(PORK.name);
+      const teaId = prep.dishId(TEA.name);
+      const [fishBig, fishSmall, porkItem, teaItem] = ITEMS.map((it) => prep.itemId(it.name)) as [number, number, number, number];
+
+      // ① 后台「电子菜单」：还没开时列出还差什么；建分类（上一轮留着的沿用）、排两页、保存
+      await page.goto('/admin/emenu');
+      await expect(page.getByTestId('emenu-admin-status')).toContainText('平板点餐还没开启');
+      if (!prep.hadCategory) {
+        await page.getByTestId('emenu-admin-category-new').click();
+        const dialog = page.getByRole('dialog').filter({ hasText: '新建分类' });
+        await dialog.getByLabel('名称', { exact: true }).fill(CATEGORY);
+        await dialog.getByLabel('英文名').fill('E2E TABLET');
+        await dialog.getByTestId('emenu-admin-category-save').click();
+        await expect(page.getByText(`已新建分类「${CATEGORY}」`)).toBeVisible();
+      }
+      await page.getByTestId(`emenu-admin-category-${CATEGORY}`).click();
+      await page.getByTestId('emenu-admin-page-add').click();
+      await page.getByTestId('emenu-admin-page-layout-0').selectOption('duo_row');
+      await page.getByTestId('emenu-admin-slot-0-0').selectOption(String(porkId));
+      // 同一道菜放两次：页面上先说、不能保存
+      await page.getByTestId('emenu-admin-slot-0-1').selectOption(String(porkId));
+      await expect(page.getByTestId('emenu-admin-page-problem-0')).toContainText('放了两次');
+      await expect(page.getByTestId('emenu-admin-pages-save')).toBeDisabled();
+      await page.getByTestId('emenu-admin-slot-0-1').selectOption(String(teaId));
+      await page.getByTestId('emenu-admin-page-add').click();
+      await page.getByTestId('emenu-admin-page-layout-1').selectOption('list_text');
+      await page.getByTestId('emenu-admin-page-title-1').fill('招牌');
+      await page.getByTestId('emenu-admin-slot-1-0').selectOption(String(fishId));
+      // 预览照平板的样子画：第 1 页里有这两道菜
+      await expect(page.getByTestId('emenu-admin-page-0').getByTestId('emenu-admin-preview')).toContainText(PORK.name);
+      await expect(page.getByTestId('emenu-admin-page-0').getByTestId('emenu-admin-preview')).toContainText(TEA.name);
+      await page.getByTestId('emenu-admin-pages-save').click();
+      await expect(page.getByText(`「${CATEGORY}」的版面已保存`)).toBeVisible();
+      // 菜品图文：改一道菜的小字
+      await page.getByRole('radio', { name: /菜品图文/ }).click();
+      await page.getByTestId(`emenu-admin-dish-${PORK.name}`).click();
+      const dishDialog = page.getByRole('dialog').filter({ hasText: '修改菜品' });
+      await dishDialog.getByLabel('名称后的小字').fill('例份');
+      await dishDialog.getByTestId('emenu-admin-dish-save').click();
+      await expect(page.getByText('菜品已保存')).toBeVisible();
+      await expect(page.getByTestId(`emenu-admin-dish-${PORK.name}`)).toContainText('例份');
+      // 设置：打开平板点餐
+      await page.getByRole('radio', { name: '设置', exact: true }).click();
+      await page.getByTestId('emenu-admin-settings').getByRole('radiogroup', { name: '平板点餐' }).getByRole('radio', { name: '开启' }).click();
+      await page.getByTestId('emenu-admin-settings-save').click();
+      await expect(page.getByText('电子菜单的设置已保存')).toBeVisible();
+      // 规则总表里有这一项
+      await page.goto('/admin/settings');
+      await expect(page.getByText('平板点餐', { exact: true }).first()).toBeVisible();
+
+      // ② 员工账号：给前台小周生成点单密码（只显示一次）；岗位里有「点餐平板」
+      const tablet = await prepareTablet(page);
+      padId = tablet.id;
+      await page.goto('/admin/staff');
+      await expect(page.getByText('E2E 点餐平板')).toBeVisible();
+      await page.getByTestId('staff-pin-xiaozhou').click();
+      await page.getByTestId('staff-pin-make').click();
+      const firstPin = (await page.getByTestId('staff-secret').innerText()).trim();
+      expect(firstPin).toMatch(/^\d{6}$/);
+      await page.getByRole('button', { name: '我已告知' }).click();
+      await expect(page.getByTestId('staff-pin-badge-xiaozhou')).toBeVisible();
+      // 本人在「修改密码」页重新生成：旧的马上失效
+      await loginStaff(clerkPage, 'xiaozhou');
+      await clerkPage.goto('/password');
+      const card = clerkPage.getByTestId('order-pin-card');
+      await expect(card.getByTestId('order-pin-status')).toContainText('已有点单密码');
+      await card.getByTestId('order-pin-make').click();
+      await card.getByTestId('order-pin-confirm').click();
+      const pin = (await card.getByTestId('order-pin-value').innerText()).trim();
+      expect(pin).toMatch(/^\d{6}$/);
+      expect(pin).not.toBe(firstPin);
+
+      // ③ 接待一位客人（接口办理）
+      const board = await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board');
+      const tag = board.tags.filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse()[0]!;
+      await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'male', guestLabel: 'E2E 平板点餐客人' }] });
+      visitId = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags.find((t) => t.code === tag)!.visit!.id;
+      // 桌号：店里建了桌台的用第一张（平板上只输里面的数字，对得上几张时点选）；没建桌台的照输入的记
+      const table = prep.tables.find((t) => /\d/.test(t.name))?.name ?? (prep.tables.length ? prep.tables[0]!.name : 'E2E01');
+      const tableTyped = prep.tables.length ? table.replace(/\D/g, '') || table : table;
+
+      // ④ 平板：「点餐平板」账号首次登录先改密码，之后直接进点餐页；别的页面回到点餐页，门店系统别的接口被拒
+      await login(pad, PAD.username, tablet.temporaryPassword);
+      await expect(pad.getByRole('heading', { name: '设置你的密码' })).toBeVisible({ timeout: 30_000 });
+      await pad.fill('#cur', tablet.temporaryPassword);
+      await pad.fill('#new', PAD.password);
+      await pad.fill('#confirm', PAD.password);
+      await pad.getByRole('button', { name: '保存新密码' }).click();
+      await expect(pad).toHaveURL(/\/emenu$/, { timeout: 30_000 });
+      await expect(pad.getByTestId('emenu-start')).toBeVisible();
+      await noScroll(pad);
+      await pad.goto('/admin');
+      await expect(pad).toHaveURL(/\/emenu$/);
+      await pad.goto('/frontdesk');
+      await expect(pad).toHaveURL(/\/emenu$/);
+      expect((await pad.request.get('/api/members?q=1')).status()).toBe(403);
+      expect((await pad.request.get('/api/frontdesk/board')).status()).toBe(403);
+
+      // ⑤ 输入信息：手牌用键盘打（扫码枪也是这样进来的），桌号、人数用弹窗上的数字键盘
+      await pad.getByTestId('emenu-start').click();
+      await expect(pad.getByTestId('emenu-ask')).toBeVisible();
+      await pad.keyboard.type(tag);
+      await expect(pad.getByTestId('emenu-field-tag')).toHaveAttribute('data-value', tag);
+      await pad.getByTestId('emenu-field-table').click();
+      await pad.getByTestId('emenu-key-clear').click();
+      await pad.keyboard.type(tableTyped);
+      await pad.getByTestId('emenu-field-guests').click();
+      await pad.getByTestId('emenu-key-3').click();
+      await pad.getByTestId('emenu-ask-go').click();
+      const pickTable = pad.getByTestId(`emenu-pick-${table}`);
+      await expect(pad.getByTestId('emenu-header').or(pickTable)).toBeVisible();
+      if (await pickTable.isVisible()) await pickTable.click();
+      await expect(pad.getByTestId('emenu-header')).toBeVisible();
+      await expect(pad.getByTestId('emenu-tag')).toContainText(tag);
+
+      // ⑥ 菜单：点分类页签到这一类的第 1 页；单规格的直接加，多规格的进详情选
+      const menu = await getJson<EmenuMenu>(page, '/api/emenu/menu');
+      const cat = menu.categories.find((c) => c.name === CATEGORY)!;
+      expect(cat.pages.map((p) => p.layout)).toEqual(['duo_row', 'list_text']);
+      await pad.getByTestId(`emenu-cat-${cat.id}`).click();
+      const page1 = pad.locator('[data-layout=duo_row]').filter({ has: pad.getByTestId(`emenu-dish-${porkId}`) });
+      await expect(page1.getByTestId(`emenu-dish-${porkId}`)).toContainText(PORK.name);
+      await expect(page1.getByTestId(`emenu-dish-${porkId}`)).toContainText('(例份)');
+      await expect(page1.getByTestId(`emenu-dish-${porkId}`)).toContainText('48');
+      await page1.getByTestId(`emenu-add-${porkId}`).click();
+      await page1.getByTestId(`emenu-add-${porkId}`).click();
+      await expect(pad.getByTestId('emenu-order-count')).toHaveText('2');
+      // 搜索：跳到那道菜所在的页
+      await pad.getByTestId('emenu-search-open').click();
+      await pad.getByTestId('emenu-search-input').fill('砂锅鱼');
+      await pad.getByTestId(`emenu-search-hit-${fishId}`).click();
+      const fishRow = pad.getByTestId(`emenu-dish-${fishId}`);
+      await expect(fishRow).toBeInViewport();
+      await expect(pad.locator('[data-layout=list_text]').filter({ has: fishRow }).getByTestId('emenu-vtitle')).toHaveText('招牌');
+      // 多规格：点加号进详情，选「小份」再加
+      await pad.getByTestId(`emenu-add-${fishId}`).click();
+      const detail = pad.getByTestId('emenu-detail');
+      await expect(detail.getByTestId('emenu-detail-name')).toContainText(FISH.name);
+      await expect(detail.getByTestId('emenu-detail-price')).toContainText('88');
+      await detail.getByTestId(`emenu-spec-${fishSmall}`).click();
+      await expect(detail.getByTestId('emenu-detail-price')).toContainText('42');
+      await detail.getByTestId('emenu-detail-add').click();
+      await detail.getByTestId('emenu-detail-close').click();
+      await expect(pad.getByTestId('emenu-order-count')).toHaveText('3');
+
+      // ⑦ 订单抽屉：未下单里加减；备注（忌口多选、起菜方式单选、自己写）
+      await pad.getByTestId('emenu-order-open').click();
+      const drawer = pad.getByTestId('emenu-drawer');
+      await expect(drawer.getByTestId(`emenu-cart-${porkItem}`)).toContainText(PORK.name);
+      await expect(drawer.getByTestId(`emenu-cart-${fishSmall}`)).toContainText('小份');
+      await drawer.getByTestId(`emenu-minus-${porkItem}`).click();
+      await expect(drawer.getByTestId(`emenu-qty-${porkItem}`)).toHaveText('1');
+      await drawer.getByTestId(`emenu-plus-${fishSmall}`).click();
+      await expect(drawer.getByTestId(`emenu-qty-${fishSmall}`)).toHaveText('2');
+      await expect(drawer.getByTestId('emenu-cart-note')).toContainText('¥132');
+      await drawer.getByTestId('emenu-remark-open').click();
+      const remark = pad.getByTestId('emenu-remark');
+      await remark.getByTestId('emenu-remark-不加香菜').click();
+      await remark.getByTestId('emenu-remark-少辣').click();
+      await remark.getByTestId('emenu-remark-tab-serve').click();
+      await remark.getByTestId('emenu-remark-即起').click();
+      await remark.getByTestId('emenu-remark-custom-open').click();
+      await remark.getByTestId('emenu-remark-custom').fill('鱼要嫩一点');
+      await remark.getByTestId('emenu-remark-done').click();
+      await expect(pad.getByTestId('emenu-remark-open')).toContainText('不加香菜，少辣，即起，鱼要嫩一点');
+
+      // ⑧ 确认下单：带出手牌、桌号、人数；旧的点单密码被拒；新的下单成功
+      await pad.getByTestId('emenu-submit').click();
+      const confirm = pad.getByTestId('emenu-confirm');
+      await expect(confirm.getByTestId('emenu-field-tag')).toHaveAttribute('data-value', tag);
+      await expect(confirm.getByTestId('emenu-field-guests')).toHaveAttribute('data-value', '3');
+      const press = async (digits: string) => {
+        for (const d of digits) await confirm.getByTestId(`emenu-key-${d}`).click();
+      };
+      await press(firstPin);
+      await expect(confirm.getByTestId('emenu-field-pin')).toHaveAttribute('data-value', '******');
+      await confirm.getByTestId('emenu-confirm-go').click();
+      await expect(confirm.getByTestId('emenu-error')).toContainText('点单密码不正确');
+      await press(pin);
+      await confirm.getByTestId('emenu-confirm-go').click();
+      await expect(pad.getByTestId('emenu-success')).toBeVisible();
+      await expect(pad.getByTestId('emenu-success')).toBeHidden({ timeout: 10_000 });
+      // 已下单：这张手牌点过的菜与合计；未下单清空了
+      await pad.getByTestId('emenu-order-open').click();
+      await pad.getByTestId('emenu-tab-ordered').click();
+      await expect(pad.getByTestId('emenu-ordered-total')).toContainText('132');
+      await expect(pad.getByTestId('emenu-ordered')).toContainText(PORK.name);
+      await pad.getByTestId('emenu-tab-cart').click();
+      await expect(pad.getByTestId('emenu-cart')).toContainText('还没有点菜');
+      // 点抽屉左边压暗的地方关掉抽屉
+      await pad.mouse.click(100, 400);
+      await expect(pad.getByTestId('emenu-drawer')).toBeHidden();
+
+      // ⑨ 门店系统这边：账单上有这两道菜（餐饮、带整单备注），厨房屏上写着送到哪张桌、经办人是服务员
+      const lines = (await getJson<{ lines: Line[] }>(page, `/api/frontdesk/visits/${visitId}`)).lines.filter((l) => l.status === 'active');
+      expect(lines.map((l) => [l.name, l.quantity, l.source, l.kitchen?.note]).sort()).toEqual(
+        [
+          [ITEMS[2].name, 1, 'dining', '不加香菜，少辣，即起，鱼要嫩一点'],
+          [ITEMS[1].name, 2, 'dining', '不加香菜，少辣，即起，鱼要嫩一点'],
+        ].sort(),
+      );
+      const kitchen = (await getJson<KitchenBoard>(page, '/api/kitchen')).items.filter((i) => i.visitId === visitId);
+      expect(kitchen).toHaveLength(2);
+      const clerk = (await getJson<StaffRecord[]>(page, '/api/staff')).find((s) => s.username === 'xiaozhou')!;
+      for (const k of kitchen) {
+        expect(k.deliverTo).toBe(table);
+        expect(k.postedByName).toBe(clerk.displayName);
+        expect(k.tagCode).toBe(tag);
+      }
+      // 前台账单页也看得到
+      await page.goto('/frontdesk');
+      await page.getByTestId(`tag-${tag}`).click();
+      await expect(page.getByTestId('bill-panel')).toContainText(ITEMS[1].name);
+      await expect(page.getByTestId('bill-panel')).toContainText(ITEMS[2].name);
+
+      // ⑩ 估清：厨房把柠檬茶设成估清，平板刷新后标「已售罄」、加号点不了；这一次点餐（手牌、桌号）刷新后还在
+      await send(page, 'put', `/api/kitchen/limits/${teaItem}`, { remaining: 0 });
+      await pad.reload();
+      await expect(pad.getByTestId('emenu-tag')).toContainText(tag);
+      await pad.getByTestId(`emenu-cat-${cat.id}`).click();
+      const tea = pad.getByTestId(`emenu-dish-${teaId}`);
+      await expect(tea).toHaveAttribute('data-block', 'sold_out');
+      await expect(tea).toContainText('已售罄');
+      await expect(pad.getByTestId(`emenu-add-${teaId}`)).toBeDisabled();
+      await send(page, 'put', `/api/kitchen/limits/${teaItem}`, { remaining: null });
+      expect(fishBig).toBeGreaterThan(0);
+
+      // ⑪ 点手牌结束点餐：回到起始页
+      await pad.getByTestId('emenu-tag').click();
+      await pad.getByTestId('emenu-end-ok').click();
+      await expect(pad.getByTestId('emenu-start')).toBeVisible();
+
+      // ⑫ 自检全部一致（平板点餐单与餐饮明细）
+      const checks = await getJson<{ key: string; ok: boolean }[]>(page, '/api/frontdesk/checks');
+      expect(checks.map((c) => c.key)).toContain('emenu_orders');
+      expect(checks.filter((c) => !c.ok)).toEqual([]);
+    } finally {
+      // 收尾：退掉没上的菜、撤销来访；关掉平板点餐与餐饮；停用平板账号（分类、菜品图文、点单密码留着）
+      await page.request.post('/api/auth/logout');
+      await loginStaff(page, 'linlan');
+      if (visitId !== null) {
+        const left = (await getJson<{ lines: Line[] }>(page, `/api/frontdesk/visits/${visitId}`)).lines.filter((l) => l.status === 'active');
+        for (const l of left) await send(page, 'post', `/api/frontdesk/lines/${l.id}/void`, { reason: 'E2E：收尾' });
+        await send(page, 'post', `/api/frontdesk/visits/${visitId}/cancel`, { reason: 'E2E：平板点餐流程收尾' });
+      }
+      const admin = await getJson<EmenuAdmin>(page, '/api/admin/emenu');
+      await send(page, 'put', '/api/admin/emenu/rules', { rev: admin.rulesRev, enabled: false });
+      await send(page, 'put', '/api/admin/dining/rules', { enabled: false });
+      if (padId !== null) await send(page, 'put', `/api/staff/${padId}`, { displayName: 'E2E 点餐平板', role: 'tablet', duties: [], active: false });
+      await clerkPage.context().close();
+      await pad.context().close();
+    }
+  });
+
+  test('各尺寸：整页按 1024×768 等比缩放、不出滚动条；1024×768 时文字在设计稿量的位置上（合成菜单，只读）', async ({ page }, info) => {
+    const dish = (id: number, name: string, nameEn: string, price: number) => ({
+      id,
+      name,
+      nameEn,
+      tagline: '',
+      description: '',
+      attrs: [],
+      unit: '份',
+      imageUrl: null,
+      detailUrl: null,
+      specs: [{ itemId: 9000 + id, label: '', price, state: 'ok' as const, remaining: null }],
+    });
+    const menu: EmenuMenu = {
+      serverTime: new Date().toISOString(),
+      businessDate: '2026-11-11',
+      enabled: true,
+      rules: { footerText: 'COPYRIGHT©2026 汤崎 ALL RIGHTS RESERVED', avoidOptions: ['不加香菜'], serveOptions: ['即起'], idleMinutes: 0, offHours: 'hide', coverUrl: null },
+      categories: [
+        { id: 1, name: '西式午餐', nameEn: 'WESTERN LUNCH', window: null, open: true, pages: [{ layout: 'duo_row', title: '', titleEn: '', dishes: [dish(1, '温泉蛋黑松露奶油意粉', 'Hot Spring Egg And Black Truffle Cream Spaghetti', 4200), dish(2, '和牛牛肉汉堡', 'Wagyu Beef Burger', 4200)] }] },
+        { id: 2, name: '中式午餐', nameEn: 'CHINESE LUNCH', window: null, open: true, pages: [{ layout: 'cover', title: '', titleEn: '', dishes: [dish(3, '广式猪脚姜浸花胶', 'Cantonese Pork Trotter Ginger Vinegar Fish Maw', 4200)] }] },
+      ],
+      later: [],
+      tables: [],
+    };
+    const writes: string[] = [];
+    await page.route('**/api/emenu/**', (route) => {
+      const url = new URL(route.request().url());
+      if (route.request().method() !== 'GET') {
+        writes.push(url.pathname);
+        return route.abort();
+      }
+      if (url.pathname === '/api/emenu/menu') return route.fulfill({ json: menu });
+      if (url.pathname === '/api/emenu/guest') return route.fulfill({ json: { visitId: 1, tagCode: 'A8060', ordered: [], orderedTotal: 0 } });
+      if (url.pathname === '/api/emenu/table') return route.fulfill({ json: { tableName: 'A01' } });
+      return route.fulfill({ status: 404, json: { error: { code: 'NOT_FOUND', message: '没有' } } });
+    });
+    // 弹窗、抽屉的出场动画关掉（页面认「减少动态效果」），量位置时不用等
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await loginStaff(page, 'linlan');
+    // 上一条用例（或上一次没走完）留在这台浏览器里的点餐状态不要
+    await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('yuzu.emenu.')).forEach((k) => localStorage.removeItem(k)));
+    await page.goto('/emenu');
+    await expect(page.getByTestId('emenu-start')).toBeVisible();
+    const viewport = page.viewportSize()!;
+    const scale = Math.min(viewport.width / 1024, viewport.height / 768);
+    // 舞台：1024×768 等比缩放、居中、不出滚动条
+    const stage = await page.locator('[data-emenu-stage]').boundingBox();
+    expect(stage!.width).toBeCloseTo(1024 * scale, 0);
+    expect(stage!.height).toBeCloseTo(768 * scale, 0);
+    expect(stage!.x).toBeCloseTo((viewport.width - 1024 * scale) / 2, 0);
+    expect(stage!.y).toBeCloseTo((viewport.height - 768 * scale) / 2, 0);
+    await noScroll(page);
+    /** 元素在设计稿坐标里的位置（把屏幕上的位置换算回 1024×768） */
+    const at = async (testId: string) => {
+      const b = (await page.getByTestId(testId).first().boundingBox())!;
+      return { x: (b.x - stage!.x) / scale, y: (b.y - stage!.y) / scale, w: b.width / scale, h: b.height / scale };
+    };
+    const near = (actual: number, expected: number) => expect(Math.abs(actual - expected), `${actual} ≈ ${expected}`).toBeLessThanOrEqual(1);
+
+    // 输入信息：弹窗与数字键盘在设计稿的位置（弹窗 297.5, 133.7, 429.1 × 500.6；「1」键 448.2, 262.5）
+    await page.getByTestId('emenu-start').click();
+    const ask = await at('emenu-ask');
+    near(ask.x, 297.5);
+    near(ask.y, 133.7);
+    near(ask.w, 429.1);
+    near(ask.h, 500.6);
+    const key1 = await at('emenu-key-1');
+    near(key1.x, 448.2);
+    near(key1.y, 262.5);
+    for (const d of '8060') await page.getByTestId(`emenu-key-${d}`).click();
+    await page.getByTestId('emenu-field-table').click();
+    await page.getByTestId('emenu-key-clear').click();
+    for (const d of '01') await page.getByTestId(`emenu-key-${d}`).click();
+    await page.getByTestId('emenu-field-guests').click();
+    await page.getByTestId('emenu-key-2').click();
+    await page.getByTestId('emenu-ask-go').click();
+    await expect(page.getByTestId('emenu-header')).toBeVisible();
+    await noScroll(page);
+
+    // 顶栏：手牌的色块（898.2, 44.3，高 22.3）、搜索（795.4, 45.4）
+    const tag = await at('emenu-tag');
+    near(tag.x, 898.2);
+    near(tag.y, 44.3);
+    near(tag.h, 22.3);
+    const search = await at('emenu-search-open');
+    near(search.x, 795.4);
+    near(search.y, 45.4);
+    // 「两菜 · 并排」：两道菜的文字在 39.7 / 426.2、557.1（设计稿）
+    const first = await at('emenu-dish-1');
+    near(first.x, 39.7);
+    near(first.y, 557.1);
+    near((await at('emenu-dish-2')).x, 426.2);
+    // 分类封面：大标题 37.4, 218.5、48 号字
+    await page.getByTestId('emenu-cat-2').click();
+    await expect(page.getByTestId('emenu-cover-title')).toBeInViewport();
+    await page.waitForTimeout(600);
+    const title = await at('emenu-cover-title');
+    near(title.x, 37.4);
+    near(title.y, 218.5);
+    near(title.h, 48);
+
+    // 加菜、订单抽屉（从 598.3 到右边）、备注；不提交
+    await page.getByTestId('emenu-add-3').click();
+    await expect(page.getByTestId('emenu-order-count')).toHaveText('1');
+    await page.getByTestId('emenu-order-open').click();
+    const drawer = await at('emenu-drawer');
+    near(drawer.x, 598.3);
+    near(drawer.w, 425.7);
+    await expect(page.getByTestId('emenu-cart-9003')).toContainText('广式猪脚姜浸花胶');
+    await page.getByTestId('emenu-remark-open').click();
+    await page.getByTestId('emenu-remark-不加香菜').click();
+    await page.getByTestId('emenu-remark-done').click();
+    await expect(page.getByTestId('emenu-remark-open')).toContainText('不加香菜');
+    await noScroll(page);
+    expect(writes).toEqual([]);
+    // 不把这一次合成的点餐留在浏览器里
+    await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('yuzu.emenu.')).forEach((k) => localStorage.removeItem(k)));
+  });
+});

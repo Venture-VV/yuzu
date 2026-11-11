@@ -62,6 +62,7 @@ export const RULE_GROUPS = {
   frontdesk: '前台与结账',
   technicians: '技师',
   dining: '餐饮',
+  emenu: '点餐系统（平板电子菜单）',
   rooms: '客房',
   bookings: '预约',
   floormap: '平面图与导览',

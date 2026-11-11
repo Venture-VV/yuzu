@@ -145,6 +145,19 @@ function Checklist({ data, onSettings, onDishes }: { data: EmenuAdmin; onSetting
         」里添加，每台平板登录一个
       </>,
     );
+  // 平板上只有数字键盘：桌号靠名称里的数字找（输「8」找到「A08」「8 号桌」），名称里没有数字的输不了
+  const noDigit = data.tables.filter((t) => !/\d/.test(t.name)).map((t) => t.name);
+  if (noDigit.length > 0)
+    todo.push(
+      <>
+        这几张桌的名称里没有数字，平板的数字键盘输不了：{noDigit.slice(0, 6).join('、')}
+        {noDigit.length > 6 ? ` 等 ${noDigit.length} 张` : ''}。到「
+        <Link to="/admin/dining" className={link}>
+          餐饮
+        </Link>
+        」的桌台里改成带编号的名称
+      </>,
+    );
   if (data.pinHolders === 0)
     todo.push(
       <>

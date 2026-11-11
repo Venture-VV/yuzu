@@ -257,11 +257,11 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   const em = await loadEmenuRules(db);
   const emd = DEFAULT_EMENU_RULES;
   const idleText = (m: number) => (m === 0 ? '不自动回' : `${m} 分钟没人动回到起始页、清掉没下单的菜`);
-  add({ key: 'emenu_rules.enabled', group: 'dining', label: '平板点餐', value: onOff(em.enabled, '开启（餐桌平板翻菜单，服务员输点单密码确认）', '关闭（与升级前一样）'), defaultValue: '关闭（与升级前一样）', pending: false, section: 'emenu', current: em.enabled, dflt: emd.enabled, metaKey: 'emenu_rules' });
-  add({ key: 'emenu_rules.avoidOptions', group: 'dining', label: '平板点餐的忌口选项', value: em.avoidOptions.join('、') || '没有', defaultValue: emd.avoidOptions.join('、'), pending: true, section: 'emenu', hint: '多选，写在这一单每道菜的口味备注上', current: em.avoidOptions, dflt: emd.avoidOptions, metaKey: 'emenu_rules' });
-  add({ key: 'emenu_rules.serveOptions', group: 'dining', label: '平板点餐的起菜方式', value: em.serveOptions.join('、') || '没有', defaultValue: emd.serveOptions.join('、'), pending: true, section: 'emenu', hint: '单选，可以不选', current: em.serveOptions, dflt: emd.serveOptions, metaKey: 'emenu_rules' });
-  add({ key: 'emenu_rules.idleMinutes', group: 'dining', label: '平板没人动多久回到起始页', value: idleText(em.idleMinutes), defaultValue: idleText(emd.idleMinutes), pending: true, section: 'emenu', current: em.idleMinutes, dflt: emd.idleMinutes, metaKey: 'emenu_rules' });
-  add({ key: 'emenu_rules.offHours', group: 'dining', label: '不在供应时段的分类', value: em.offHours === 'hide' ? '平板上不显示' : '显示但不能点', defaultValue: emd.offHours === 'hide' ? '平板上不显示' : '显示但不能点', pending: true, section: 'emenu', current: em.offHours, dflt: emd.offHours, metaKey: 'emenu_rules' });
+  add({ key: 'emenu_rules.enabled', group: 'emenu', label: '平板点餐', value: onOff(em.enabled, '开启（餐桌平板翻菜单，服务员输点单密码确认）', '关闭（与升级前一样）'), defaultValue: '关闭（与升级前一样）', pending: false, section: 'emenu', current: em.enabled, dflt: emd.enabled, metaKey: 'emenu_rules' });
+  add({ key: 'emenu_rules.avoidOptions', group: 'emenu', label: '忌口选项', value: em.avoidOptions.join('、') || '没有', defaultValue: emd.avoidOptions.join('、'), pending: true, section: 'emenu', hint: '多选，写在这一单每道菜的口味备注上', current: em.avoidOptions, dflt: emd.avoidOptions, metaKey: 'emenu_rules' });
+  add({ key: 'emenu_rules.serveOptions', group: 'emenu', label: '起菜方式', value: em.serveOptions.join('、') || '没有', defaultValue: emd.serveOptions.join('、'), pending: true, section: 'emenu', hint: '单选，可以不选', current: em.serveOptions, dflt: emd.serveOptions, metaKey: 'emenu_rules' });
+  add({ key: 'emenu_rules.idleMinutes', group: 'emenu', label: '没人动多久回到起始页', value: idleText(em.idleMinutes), defaultValue: idleText(emd.idleMinutes), pending: true, section: 'emenu', current: em.idleMinutes, dflt: emd.idleMinutes, metaKey: 'emenu_rules' });
+  add({ key: 'emenu_rules.offHours', group: 'emenu', label: '不在供应时段的分类', value: em.offHours === 'hide' ? '平板上不显示' : '显示但不能点', defaultValue: emd.offHours === 'hide' ? '平板上不显示' : '显示但不能点', pending: true, section: 'emenu', current: em.offHours, dflt: emd.offHours, metaKey: 'emenu_rules' });
   // ── 客房（S7，v0.7.4）──
   const rm = await loadRoomRules(db);
   const rmd = DEFAULT_ROOM_RULES;
