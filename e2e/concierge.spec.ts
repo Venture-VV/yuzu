@@ -14,7 +14,8 @@ test("管家部嵌入企业后台并可从手机布局打开", async ({ page }) 
   await login(page);
   await page.goto("/admin/concierge");
   await expect(
-    page.getByRole("heading", { name: "今日工作台", exact: true }),
+    // The dashboard heading includes today's date after its title.
+    page.getByRole("heading", { level: 1, name: /^今日工作台/ }),
   ).toBeVisible();
   await expect(
     page.getByRole("navigation", { name: "管家业务模块" }),
@@ -30,11 +31,10 @@ test("管家部嵌入企业后台并可从手机布局打开", async ({ page }) 
 });
 test("管家仅卡号建档与人工余额留痕，不要求建立企业钱包", async ({
   page,
-  viewport,
-}) => {
+}, testInfo) => {
   test.skip(
-    (viewport?.width ?? 0) < 1280,
-    "变更流程在电脑尺寸执行；其余视口仅执行布局冒烟",
+    testInfo.project.name !== "门店电脑",
+    "变更流程只在门店电脑组执行；其余视口仅执行布局冒烟",
   );
   await login(page);
   await page.goto("/admin/concierge");
