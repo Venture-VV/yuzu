@@ -35,7 +35,7 @@ import { writeAudit } from '../../lib/audit';
 import type { Deps, OpContext } from '../../lib/context';
 import { conflict, notFound, unprocessable } from '../../lib/errors';
 import { hashRequest } from '../../lib/idempotency';
-import { saveRuleSetting, sameJson } from '../../lib/rule-settings';
+import { saveRuleSetting } from '../../lib/rule-settings';
 import { setTxTimeouts } from '../../lib/tx';
 import { parse } from '../../lib/validate';
 import { loadDiningRules } from '../dining';
@@ -456,6 +456,3 @@ export async function generateEmenuDraft(deps: Deps, ctx: OpContext): Promise<Em
   });
   return { ...(await emenuAdmin(deps.sql)), draft };
 }
-
-/** 设置有没有改过（规则总表用）：与默认值比 */
-export const emenuRulesChanged = (rules: EmenuRules) => !sameJson(rules, DEFAULT_EMENU_RULES);

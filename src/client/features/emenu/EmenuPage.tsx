@@ -28,8 +28,8 @@ import {
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { uuid } from '../../lib/utils';
-import { OrderIcon, SearchIcon } from './icons';
-import { LogoRow, LogoStacked } from './logo';
+import { Header } from './header';
+import { LogoStacked } from './logo';
 import { Backdrop, InfoModal, ModalButton, ModalNote, SmallDialog, SuccessModal, Toast, type InfoField } from './modals';
 import { DishDetail, OrderDrawer, RemarkDrawer, SearchOverlay, type CartRow, type SearchHit } from './overlays';
 import { PageCanvas, yuan, type PageCtx } from './pages';
@@ -751,10 +751,19 @@ function StartPage({
           }}
           onPointerUp={() => hold.current && window.clearTimeout(hold.current)}
           onPointerLeave={() => hold.current && window.clearTimeout(hold.current)}
-          style={{ ...box(0, 714.6, 1024), textAlign: 'center', fontSize: 12, lineHeight: '13px', letterSpacing: '0.35px', color: tone }}
+          style={{ ...box(0, 715.2, 1024), textAlign: 'center', fontSize: 12, lineHeight: '12px', letterSpacing: '0.09em', color: tone }}
           data-testid="emenu-footer"
         >
-          {menu.rules.footerText}
+          {/* 设计稿：英文 12 号、夹在中间的中文（汤崎）13 号，同一条基线 */}
+          {menu.rules.footerText.split(/([\u2E80-\u9FFF\uF900-\uFAFF]+)/).map((part, i) =>
+            i % 2 ? (
+              <span key={i} style={{ fontFamily: 'var(--em-zh)', fontSize: 13, letterSpacing: '0.5px' }}>
+                {part}
+              </span>
+            ) : (
+              part
+            ),
+          )}
         </div>
       </div>
       {asking && <AskInfo onCancel={onCancel} onReady={onReady} />}
@@ -967,10 +976,10 @@ function ConfirmOrder({
         testId="emenu-confirm"
         footer={
           <>
-            <ModalButton x={21.4} y={424.5} w={119} onClick={onCancel} disabled={off} testId="emenu-confirm-cancel">
+            <ModalButton x={21.4} y={423.8} w={119} onClick={onCancel} disabled={off} testId="emenu-confirm-cancel">
               取消
             </ModalButton>
-            <ModalButton x={150.6} y={424.5} w={257} primary onClick={() => void go()} disabled={off} testId="emenu-confirm-go">
+            <ModalButton x={150.7} y={423.8} w={256.9} primary onClick={() => void go()} disabled={off} testId="emenu-confirm-go">
               {off ? '正在下单…' : '下单'}
             </ModalButton>
             <ModalNote
@@ -1040,13 +1049,13 @@ function PendingOrderModal({
             {info('手牌', pending.body.tagCode, 0)}
             {info('桌号', pending.body.tableName, 1)}
             {info('这一单', `${pending.quantity} 份 ¥${yuan(pending.body.expectedTotal)}`, 2)}
-            <ModalButton x={21.4} y={424.5} w={119} onClick={onCheck} disabled={busy} testId="emenu-pending-check">
+            <ModalButton x={21.4} y={423.8} w={119} onClick={onCheck} disabled={busy} testId="emenu-pending-check">
               查回结果
             </ModalButton>
-            <ModalButton x={150.6} y={424.5} w={124} primary onClick={needPin(onRetry)} disabled={busy} testId="emenu-pending-retry">
+            <ModalButton x={150.7} y={423.8} w={124} primary onClick={needPin(onRetry)} disabled={busy} testId="emenu-pending-retry">
               重新提交
             </ModalButton>
-            <ModalButton x={283.6} y={424.5} w={124} onClick={needPin(onAbandon)} disabled={busy} testId="emenu-pending-abandon">
+            <ModalButton x={283.6} y={423.8} w={124} onClick={needPin(onAbandon)} disabled={busy} testId="emenu-pending-abandon">
               作废重填
             </ModalButton>
             <ModalNote
@@ -1064,99 +1073,6 @@ function PendingOrderModal({
 }
 
 // ───────────────────────── 顶栏、翻页小点、没有菜单 ─────────────────────────
-
-function Header({
-  categories,
-  activeId,
-  onCategory,
-  tagCode,
-  count,
-  bump,
-  pending,
-  onSearch,
-  onOrder,
-  onTag,
-}: {
-  categories: EmenuCategoryView[];
-  activeId: number | null;
-  onCategory: (id: number) => void;
-  tagCode: string;
-  count: number;
-  bump: number;
-  pending: boolean;
-  onSearch: () => void;
-  onOrder: () => void;
-  onTag: () => void;
-}) {
-  // 设计稿两个分类的中心在 367.6 与 514.5（相距 147）：分类多了往两边排开，放不下就挤一点
-  const n = categories.length;
-  const gap = Math.min(147, 610 / Math.max(n, 1));
-  const first = 441 - ((n - 1) * gap) / 2;
-  const icon = (onClick: () => void, x: number, y: number, w: number, h: number, label: string, testId: string, children: ReactNode) => (
-    <button type="button" onClick={onClick} aria-label={label} style={{ ...box(x, y, w, h), padding: 0, border: 0, background: 'none' }} data-testid={testId}>
-      <span style={{ position: 'absolute', inset: -11 }} />
-      {children}
-    </button>
-  );
-  return (
-    <div style={{ ...box(0, 0, 1024, 102), background: 'var(--em-bg)' }} data-testid="emenu-header">
-      <div style={{ ...box(40, 48.6) }}>
-        <LogoRow />
-      </div>
-      {categories.map((c, i) => {
-        const on = c.id === activeId;
-        return (
-          <button
-            key={c.id}
-            type="button"
-            onClick={() => onCategory(c.id)}
-            aria-pressed={on}
-            style={{ ...box(first + i * gap - gap / 2, 34, gap, 46), padding: 0, border: 0, background: 'none', color: on ? 'var(--em-ink)' : 'var(--em-mute)', textAlign: 'center', overflow: 'hidden' }}
-            data-testid={`emenu-cat-${c.id}`}
-          >
-            <span style={{ display: 'block', marginTop: 11.7, fontSize: 14, lineHeight: '14px', whiteSpace: 'nowrap' }}>{c.name}</span>
-            <span className="em-en" style={{ display: 'block', marginTop: 0.6, fontSize: 8, lineHeight: '9px', whiteSpace: 'nowrap', letterSpacing: '0.1px' }}>
-              {c.nameEn}
-            </span>
-          </button>
-        );
-      })}
-      {icon(onSearch, 795.4, 45.4, 20.5, 20.5, '搜索', 'emenu-search-open', <SearchIcon />)}
-      {icon(
-        onOrder,
-        837.5,
-        45.2,
-        17.9,
-        20.4,
-        pending ? '订单（有一单结果待确认）' : `订单（未下单 ${count} 份）`,
-        'emenu-order-open',
-        <>
-          <OrderIcon />
-          {(count > 0 || pending) && (
-            <span
-              key={bump}
-              className="em-en em-bump"
-              style={{ ...box(10.6, -6.6, undefined, 11.4), minWidth: 11.4, padding: '0 2.6px', boxSizing: 'border-box', borderRadius: 6, background: pending ? 'var(--em-error)' : 'var(--em-tan)', color: '#fff', fontSize: 8, lineHeight: '11.4px', textAlign: 'center' }}
-              data-testid="emenu-order-count"
-            >
-              {pending ? '!' : count}
-            </span>
-          )}
-        </>,
-      )}
-      <button
-        type="button"
-        onClick={onTag}
-        aria-label={`手牌 ${tagCode}，点这里结束点餐`}
-        style={{ ...box(898.2, 44.3, undefined, 22.3), minWidth: 85.8, right: undefined, padding: '0 5.9px', border: 0, borderRadius: 2, background: 'var(--em-tan)', color: 'var(--em-light)', fontSize: 14, lineHeight: '22.3px', whiteSpace: 'nowrap', textAlign: 'left' }}
-        data-testid="emenu-tag"
-      >
-        <span style={{ position: 'absolute', inset: '-11px -6px' }} />
-        手牌<span className="em-en">: {tagCode}</span>
-      </button>
-    </div>
-  );
-}
 
 /** 页面底部的翻页小点（设计稿之外补的）：只画当前分类的各页 */
 function PageDots({ flat, index, onGo }: { flat: FlatPage[]; index: number; onGo: (i: number) => void }) {

@@ -10,7 +10,7 @@ export const ADMIN_SECTIONS = {
   home: {
     path: '/admin',
     label: '后台首页',
-    perms: ['settings.manage', 'catalog.manage', 'staff.manage', 'audit.read', 'wallet.opening', 'frontdesk.tags', 'technician.manage', 'coupon.manage', 'device.manage', 'member.rules', 'benefit.publish'],
+    perms: ['settings.manage', 'catalog.manage', 'staff.manage', 'audit.read', 'wallet.opening', 'frontdesk.tags', 'technician.manage', 'coupon.manage', 'device.manage', 'member.rules', 'benefit.publish', 'emenu.manage'],
   },
   // 数据看板（原门店主导航的「看板」，店主 2026-11-10 整合到后台）：各页签照旧按权限显示——今日、经营总览、会员总览、会员体系、技师业绩、客房、营销成本
   dashboard: {
@@ -31,6 +31,8 @@ export const ADMIN_SECTIONS = {
   tags: { path: '/admin/tags', label: '手牌与前台', perms: ['frontdesk.tags', 'settings.manage'] },
   technicians: { path: '/admin/technicians', label: '技师', perms: ['technician.manage', 'settings.manage', 'catalog.manage', 'audit.read'] },
   dining: { path: '/admin/dining', label: '餐饮', perms: ['settings.manage', 'catalog.manage'] },
+  // 电子菜单（8.0.10，docs/EMENU.md）：餐桌平板上的菜单——分类与版面、菜品图文、平板点餐的设置；默认店主、店总
+  emenu: { path: '/admin/emenu', label: '电子菜单', perms: ['emenu.manage'] },
   rooms: { path: '/admin/rooms', label: '客房', perms: ['settings.manage', 'catalog.manage'] },
   // 预约（v0.7.28 ③）：能约的时段、小程序预约的限制、爽约规则
   bookings: { path: '/admin/bookings', label: '预约', perms: ['settings.manage'] },

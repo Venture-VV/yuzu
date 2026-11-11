@@ -48,12 +48,13 @@ export function MinusDot({ size = 12.6 }: { size?: number }) {
   );
 }
 
-/** 菜品详情右上角的关闭（设计稿直径 21） */
-export function CloseDot({ size = 21 }: { size?: number }) {
+/** 菜品详情右上角的关闭（设计稿直径 30） */
+export function CloseDot({ size = 30 }: { size?: number }) {
+  // 设计稿：直径 30 的灰圆（PDF 里圆上的点在四个斜角，量出来的外框 21.2 是 30 × 0.707），里面的叉 11.2 见方
   return (
-    <svg width={size} height={size} viewBox="0 0 21 21" aria-hidden style={{ display: 'block' }}>
-      <circle cx="10.5" cy="10.5" r="10.5" fill="#afafaf" />
-      <path d="M6.6 6.6l7.8 7.8M14.4 6.6l-7.8 7.8" stroke="#f0f0f0" strokeWidth="0.7" />
+    <svg width={size} height={size} viewBox="0 0 30 30" aria-hidden style={{ display: 'block' }}>
+      <circle cx="15" cy="15" r="15" fill="#afafaf" />
+      <path d="M9.4 9.35l11.2 11.3M20.6 9.35l-11.2 11.3" stroke="#f0f0f0" strokeWidth="0.9" />
     </svg>
   );
 }
@@ -63,7 +64,7 @@ export function ArrowDot({ dir, size = 30 }: { dir: 'left' | 'right'; size?: num
   return (
     <svg width={size} height={size} viewBox="0 0 30 30" aria-hidden style={{ display: 'block', transform: dir === 'left' ? 'scaleX(-1)' : undefined }}>
       <circle cx="15" cy="15" r="15" fill="#afafaf" />
-      <path d="M12 7.8l7.2 7.2-7.2 7.2" stroke="#f0f0f0" strokeWidth="0.8" fill="none" />
+      <path d="M12 7.7 19.6 15 12 22.3" stroke="#f0f0f0" strokeWidth="0.9" fill="none" />
     </svg>
   );
 }
@@ -82,8 +83,9 @@ export function BackspaceIcon() {
 export function CheckMark({ style }: { style?: CSSProperties }) {
   return (
     <svg width="201" height="201" viewBox="0 0 201 201" fill="none" aria-hidden style={style}>
-      <circle className="em-check-circle" cx="100.5" cy="100.5" r="90.5" stroke={INK} strokeWidth="10" transform="rotate(-90 100.5 100.5)" />
-      <path className="em-check-mark" d="M42 94l42 40 73-70" stroke={INK} strokeWidth="10" />
+      {/* 设计稿：圆心在画布正中、半径 95.4（线宽 10 的中线），对勾三个点 (37.6, 94.5) → (82.3, 139.4) → (162.3, 59.3) */}
+      <circle className="em-check-circle" cx="100.5" cy="100.5" r="95.4" stroke={INK} strokeWidth="10" transform="rotate(-90 100.5 100.5)" />
+      <path className="em-check-mark" d="M37.6 94.5 82.3 139.4 162.3 59.3" stroke={INK} strokeWidth="10" />
     </svg>
   );
 }

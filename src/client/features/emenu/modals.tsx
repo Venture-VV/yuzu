@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, type ReactNode } from 'react';
 import { BackspaceIcon, CheckMark } from './icons';
-import { box } from './stage';
+import { box, Hairline } from './stage';
 
 /** 弹窗的位置与大小（设计稿） */
 const M = { x: 297.5, y: 133.7, w: 429.1, h: 500.6 };
@@ -35,7 +35,7 @@ function Frame({ title, subtitle, children, testId }: { title: string; subtitle:
       <div style={{ ...box(0, 0, M.w, 84.5), background: 'var(--em-band)' }} />
       <div style={{ ...box(21.4, 84.2, 386.2, 0), borderTop: LINE }} />
       <div style={{ ...box(0, 25.4, M.w), textAlign: 'center', fontSize: 24, lineHeight: '24px' }}>{title}</div>
-      <div className="em-en" style={{ ...box(0, 50.4, M.w), textAlign: 'center', fontSize: 12, lineHeight: '12px', color: 'var(--em-mute)', letterSpacing: '0.2px' }}>
+      <div className="em-en" style={{ ...box(0, 50.6, M.w), textAlign: 'center', fontSize: 12, lineHeight: '12px', color: 'var(--em-mute)', letterSpacing: '0.05em' }}>
         {subtitle}
       </div>
       {children}
@@ -151,9 +151,10 @@ export function InfoModal({
       disabled={disabled}
       onClick={onPress}
       aria-label={opts.aria}
-      style={{ ...box(x, y, w, h), background: opts.alt ? 'var(--em-key-2)' : 'var(--em-key)', border: LINE, borderRadius: 2, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      style={{ ...box(x, y, w, h), background: opts.alt ? 'var(--em-key-2)' : 'var(--em-key)', border: 0, borderRadius: 2, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       data-testid={opts.testId}
     >
+      <Hairline radius={2} />
       {label}
     </button>
   );
@@ -181,9 +182,14 @@ export function InfoModal({
             data-value={f.mask ? '*'.repeat(f.value.length) : f.value}
           >
             <span style={{ ...box(0, 8), fontSize: 16, lineHeight: '16px' }}>{f.label}</span>
-            <span className="em-en" style={{ ...box(41, 7.4, 78), fontSize: 16, lineHeight: '16px', whiteSpace: 'nowrap', overflow: 'hidden', letterSpacing: f.mask ? '0.5px' : undefined }}>
+            <span className="em-en" style={{ ...box(41, 7.4, 78), fontSize: 16, lineHeight: '16px', whiteSpace: 'nowrap', overflow: 'hidden', letterSpacing: f.mask ? '-0.87px' : undefined }}>
               {f.mask ? '*'.repeat(f.value.length) : f.value}
-              {on && !disabled && <span style={{ display: 'inline-block', width: 0.8, height: 15, background: 'var(--em-ink)', marginLeft: 1.5, verticalAlign: -2, opacity: 0.75 }} />}
+              {/* 光标：占位是 0 高，画在里面绝对定位的一条上（直接放一条 15 高的会把这一行顶高、字往下掉 1 像素） */}
+              {on && !disabled && (
+                <span style={{ position: 'relative', display: 'inline-block', width: 0, height: 0 }}>
+                  <span style={{ position: 'absolute', left: 1.5, top: -12.6, width: 0.8, height: 15, background: 'var(--em-ink)', opacity: 0.75 }} />
+                </span>
+              )}
             </span>
             <span style={{ ...box(36.8, 24.8, 79.3, 0), borderTop: on ? '0.8px solid var(--em-ink)' : LINE }} />
           </button>
@@ -195,7 +201,12 @@ export function InfoModal({
       {key(digit('.'), 282.3, 326, 59.5, 59.5, () => type('.'), { aria: '点', testId: 'emenu-key-dot' })}
       {key(<BackspaceIcon />, 348.3, 128.9, 59.5, 125.3, erase, { alt: true, aria: '退格', testId: 'emenu-key-back' })}
       {key(
-        <span style={{ fontSize: 18, lineHeight: '21.6px', width: 18, wordBreak: 'break-all' }}>清空</span>,
+        // 设计稿：「清」的文字框在键上沿往下 44.1、左边往右 20.7，「空」再往下 21.6。
+        // 一字一块、行高等于字号：行高比字号多出来的不是偶数像素时，各家浏览器把字放在行里的位置差零点几像素
+        <span style={{ ...box(20.7, 44.1, 18), fontSize: 18, lineHeight: '18px' }}>
+          <span style={{ display: 'block' }}>清</span>
+          <span style={{ display: 'block', marginTop: 3.6 }}>空</span>
+        </span>,
         348.1,
         260.3,
         59.5,
@@ -239,15 +250,16 @@ export function ModalButton({
         borderRadius: 1.5,
         fontSize: 16,
         lineHeight: '16px',
-        letterSpacing: '1px',
         background: primary ? 'var(--em-tan)' : 'transparent',
-        border: primary ? 0 : LINE,
+        border: 0,
         color: primary ? 'var(--em-light)' : 'var(--em-mute)',
         opacity: disabled ? 0.5 : 1,
       }}
       data-testid={testId}
     >
-      {children}
+      {!primary && <Hairline />}
+      {/* 设计稿里字的文字框在按钮上沿往下 8（不是正中：正中是 6.15） */}
+      <span style={{ position: 'absolute', left: 0, right: 0, top: 8, textAlign: 'center', whiteSpace: 'nowrap' }}>{children}</span>
     </button>
   );
 }
@@ -289,7 +301,7 @@ export function SuccessModal({ onDone }: { onDone: () => void }) {
   return (
     <Backdrop onClick={onDone}>
       <Frame title="下单成功" subtitle="ORDER CONFIRMED" testId="emenu-success">
-        <CheckMark style={{ ...box(114.5, 175.3) }} />
+        <CheckMark style={{ ...box(114, 174.9) }} />
       </Frame>
     </Backdrop>
   );
@@ -324,7 +336,7 @@ export function SmallDialog({
         <div style={{ ...box(0, 0, 360, 72), background: 'var(--em-band)' }} />
         <div style={{ ...box(21.4, 71.7, 317.2, 0), borderTop: LINE }} />
         <div style={{ ...box(0, 19, 360), textAlign: 'center', fontSize: 22, lineHeight: '22px' }}>{title}</div>
-        <div className="em-en" style={{ ...box(0, 44, 360), textAlign: 'center', fontSize: 11, lineHeight: '11px', color: 'var(--em-mute)' }}>
+        <div className="em-en" style={{ ...box(0, 44, 360), textAlign: 'center', fontSize: 11, lineHeight: '11px', color: 'var(--em-mute)', letterSpacing: '0.05em' }}>
           {subtitle}
         </div>
         <div style={{ ...box(28, 96, 304, 88), fontSize: 13, lineHeight: '21px', color: 'var(--em-ink)', textAlign: 'center' }}>{children}</div>

@@ -6,7 +6,7 @@ import { dishBlock, EMENU_BLOCK_LABELS, EMENU_MAX_CUSTOM_NOTE, type EmenuDishVie
 import { ArrowDot, CloseDot, MinusDot, PlusDot, SearchIcon } from './icons';
 import { Backdrop } from './modals';
 import { displaySpec, wrapParen, yuan } from './pages';
-import { box, HEADER_H } from './stage';
+import { box, Hairline, HEADER_H } from './stage';
 import type { CartLine, Remark } from './store';
 
 const MUTE = 'var(--em-mute)';
@@ -56,33 +56,34 @@ export function DishDetail({
           </span>
         </div>
       )}
-      {round(onClose, 958, 139, 21, <CloseDot />, '关闭', 'emenu-detail-close')}
+      {round(onClose, 954, 134.4, 30, <CloseDot />, '关闭', 'emenu-detail-close')}
       {round(onPrev, 40, 369, 30, <ArrowDot dir="left" />, '上一道', 'emenu-detail-prev')}
       {round(onNext, 954, 369, 30, <ArrowDot dir="right" />, '下一道', 'emenu-detail-next')}
 
       <div className="em-rise" style={{ ...box(40, 575 - HEADER_H, 944, 153), background: 'var(--em-bg)', borderRadius: 3 }}>
-        <div style={{ ...box(23, 21, 760), fontSize: 18, lineHeight: '18px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} data-testid="emenu-detail-name">
+        <div className="em-clip" style={{ ...box(23.3, 20.7, 760), fontSize: 18, lineHeight: '18px' }} data-testid="emenu-detail-name">
           {dish.name}
-          {dish.tagline && <span style={{ fontSize: 10, color: MUTE, marginLeft: 3 }}>{wrapParen(dish.tagline)}</span>}
+          {dish.tagline && <span style={{ fontSize: 10, lineHeight: 0, color: MUTE, marginLeft: 2.6 }}>{wrapParen(dish.tagline)}</span>}
         </div>
         {dish.nameEn && (
-          <div className="em-en" style={{ ...box(23, 38.4, 760), fontSize: 9, lineHeight: '10px', color: MUTE, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <div className="em-en em-clip" style={{ ...box(23.3, 38.1, 760), fontSize: 9, lineHeight: '9px', color: MUTE }}>
             {dish.nameEn}
           </div>
         )}
-        <div style={{ ...box(23, 64.6, 520), fontSize: 12, lineHeight: '14px', letterSpacing: '1.1px', color: MUTE, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>
+        {/* 设计稿：12 号、行距 14，一行 39 个字正好到 567.6（字距 0.955） */}
+        <div style={{ ...box(23.3, 65.1, 510), fontSize: 12, lineHeight: '14px', letterSpacing: '0.955px', color: MUTE, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>
           {dish.description}
           {dish.attrs.length > 0 && <span>{dish.description ? '　' : ''}{dish.attrs.join('　')}</span>}
         </div>
         {spec && (
-          <div className="em-en" style={{ position: 'absolute', right: 32, top: 26.5, display: 'flex', alignItems: 'baseline', whiteSpace: 'nowrap' }} data-testid="emenu-detail-price">
-            <span style={{ fontSize: 12, marginRight: 2 }}>¥</span>
+          <div className="em-en" style={{ position: 'absolute', right: 32.5, top: 27.1, display: 'flex', alignItems: 'baseline', whiteSpace: 'nowrap' }} data-testid="emenu-detail-price">
+            <span style={{ fontSize: 12, width: 7.3, marginRight: 1.6 }}>¥</span>
             <span style={{ fontSize: 24, lineHeight: '24px' }}>{yuan(spec.price)}</span>
-            <span style={{ fontFamily: 'var(--em-zh)', fontSize: 12, marginLeft: 1 }}>/{dish.unit}</span>
+            <span style={{ fontFamily: 'var(--em-zh)', fontSize: 12, letterSpacing: 0 }}>/{dish.unit}</span>
           </div>
         )}
         {dish.specs.length > 1 && (
-          <div style={{ ...box(23, 119), display: 'flex', gap: 11 }}>
+          <div style={{ ...box(23.3, 118.9), display: 'flex', gap: 11 }}>
             {dish.specs.map((s) => {
               const on = s.itemId === spec?.itemId;
               return (
@@ -93,21 +94,25 @@ export function DishDetail({
                   aria-pressed={on}
                   style={{
                     position: 'relative',
-                    minWidth: 40,
-                    height: 16,
-                    padding: '0 8px',
+                    minWidth: 40.1,
+                    height: 15.5,
+                    // 字的文字框在上沿往下 3.2（设计稿）
+                    padding: '3.2px 8.1px 0',
                     borderRadius: 1.5,
                     fontSize: 12,
-                    lineHeight: '15px',
+                    lineHeight: '12px',
                     background: on ? 'var(--em-tan)' : 'transparent',
-                    border: on ? '0.5px solid var(--em-tan)' : LINE,
+                    border: 0,
                     color: on ? '#fff' : MUTE,
                     textDecoration: s.state === 'ok' ? undefined : 'line-through',
+                    display: 'block',
+                    whiteSpace: 'nowrap',
                   }}
                   data-testid={`emenu-spec-${s.itemId}`}
                 >
                   <span style={{ position: 'absolute', inset: '-12px -4px' }} />
-                  {s.label}
+                  {!on && <Hairline />}
+                  <span style={{ display: 'block', height: 12.3 }}>{s.label}</span>
                 </button>
               );
             })}
@@ -119,11 +124,11 @@ export function DishDetail({
           disabled={specBlocked}
           onClick={() => spec && onAdd(spec)}
           aria-label={`把${dish.name}加进未下单`}
-          style={{ ...box(850, 107, 71, 27), padding: 0, border: 0, borderRadius: 1.5, background: 'var(--em-tan)', opacity: specBlocked ? 0.35 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          style={{ ...box(850.5, 107.1, 70.9, 27.3), padding: 0, border: 0, borderRadius: 1.5, background: 'var(--em-tan)', opacity: specBlocked ? 0.35 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           data-testid="emenu-detail-add"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
-            <path d="M0 7h14M7 0v14" stroke="#fff" strokeWidth="0.8" />
+            <path d="M0 7h14M7 0v14" stroke="#fff" strokeWidth="1" />
           </svg>
         </button>
       </div>
@@ -146,7 +151,7 @@ export function SearchOverlay({ hits, onPick, onClose }: { hits: (q: string) => 
   const found = useMemo(() => (q.trim() ? hits(q.trim()).slice(0, 8) : []), [q, hits]);
   return (
     <Backdrop onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ ...box(166, 44.1, 689, 34.3), background: 'var(--em-bg)', borderRadius: 2 }} data-testid="emenu-search">
+      <div onClick={(e) => e.stopPropagation()} style={{ ...box(166.4, 44.3, 689, 34.2), background: 'var(--em-bg)', borderRadius: 2 }} data-testid="emenu-search">
         <input
           ref={input}
           value={q}
@@ -162,29 +167,34 @@ export function SearchOverlay({ hits, onPick, onClose }: { hits: (q: string) => 
           spellCheck={false}
           enterKeyHint="search"
           aria-label="搜一搜想吃的菜"
-          style={{ ...box(40, 0, 609, 34.3), border: 0, outline: 'none', background: 'transparent', textAlign: 'center', fontSize: 16, padding: 0 }}
+          // 设计稿里提示字的文字框在框上沿往下 11.5（正中是 9.1）：输入框里的字浏览器自己上下居中，用上内边距往下推
+          style={{ ...box(40, 0, 605, 34.2), border: 0, outline: 'none', background: 'transparent', textAlign: 'center', fontSize: 16, lineHeight: '16px', padding: '4.8px 0 0' }}
           data-testid="emenu-search-input"
         />
-        <span style={{ ...box(654, 9) }}>
-          <SearchIcon size={17} />
+        <span style={{ ...box(654.3, 8.9) }}>
+          <SearchIcon size={16.9} />
         </span>
       </div>
       {q.trim() && (
-        <div onClick={(e) => e.stopPropagation()} className="em-rise" style={{ ...box(166, 84.7, 689), background: 'var(--em-bg)', borderRadius: 2 }} data-testid="emenu-search-results">
+        <div onClick={(e) => e.stopPropagation()} className="em-rise" style={{ ...box(166.4, 84.6, 689), background: 'var(--em-bg)', borderRadius: 2 }} data-testid="emenu-search-results">
           {found.length === 0 ? (
-            <div style={{ height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: MUTE }}>没有找到，换个字试试</div>
+            <div style={{ height: 34.2, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: MUTE }}>没有找到，换个字试试</div>
           ) : (
             found.map((h, i) => (
               <button
                 key={h.dish.id}
                 type="button"
                 onClick={() => onPick(h)}
-                style={{ display: 'flex', alignItems: 'baseline', width: '100%', height: 34, padding: '0 17px', border: 0, background: 'transparent', textAlign: 'left', borderTop: i === 0 ? 0 : LINE, backgroundClip: 'padding-box' }}
+                style={{ position: 'relative', display: 'block', width: '100%', height: 34.2, padding: 0, border: 0, background: 'transparent', textAlign: 'left' }}
                 data-testid={`emenu-search-hit-${h.dish.id}`}
               >
-                <span style={{ fontSize: 16, lineHeight: '34px', whiteSpace: 'nowrap' }}>{h.dish.name}</span>
-                <span className="em-en" style={{ fontSize: 10, color: MUTE, marginLeft: 5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {h.dish.nameEn}
+                {/* 设计稿：每行 34.2，菜名的文字框在行上沿往下 11.2、左边往右 16.2，英文名跟在后面同一条基线；行与行之间的线左右各缩进 17 */}
+                {i > 0 && <span style={{ ...box(17.9, 0, 654.7, 0), borderTop: LINE }} />}
+                <span className="em-clip" style={{ ...box(16.2, 11.2, 656), fontSize: 16, lineHeight: '16px' }}>
+                  {h.dish.name}
+                  <span className="em-en" style={{ fontSize: 10, lineHeight: 0, color: MUTE, marginLeft: 3.2 }}>
+                    {h.dish.nameEn}
+                  </span>
                 </span>
               </button>
             ))
@@ -197,17 +207,18 @@ export function SearchOverlay({ hits, onPick, onClose }: { hits: (q: string) => 
 
 // ───────────────────────── 抽屉 ─────────────────────────
 
-/** 右侧抽屉的壳（设计稿：从 598 起、宽 426，左边的页面压暗） */
+/** 右侧抽屉的壳（设计稿：从 598.3 起到右边，里面的内容从 640.7 到 984，左边的页面压暗）。DX 是内容左边离抽屉左边多远 */
+const DX = 42.4;
 function Drawer({ title, subtitle, tableName, onClose, children, testId }: { title: string; subtitle: string; tableName: string; onClose: () => void; children: ReactNode; testId: string }) {
   return (
     <Backdrop onClick={onClose}>
-      <div className="em-drawer" role="dialog" aria-label={title} onClick={(e) => e.stopPropagation()} style={{ ...box(598, 0, 426, 768), background: 'var(--em-bg)' }} data-testid={testId}>
-        <div style={{ ...box(43, 47), fontSize: 22, lineHeight: '22px' }}>{title}</div>
-        <div className="em-en" style={{ ...box(43, 69.4), fontSize: 11, lineHeight: '11px', color: MUTE, letterSpacing: '0.2px' }}>
+      <div className="em-drawer" role="dialog" aria-label={title} onClick={(e) => e.stopPropagation()} style={{ ...box(598.3, 0, 425.7, 768), background: 'var(--em-bg)' }} data-testid={testId}>
+        <div style={{ ...box(DX, 46.9), fontSize: 22, lineHeight: '22px' }}>{title}</div>
+        <div className="em-en" style={{ ...box(DX, 68.7), fontSize: 11, lineHeight: '11px', color: MUTE, letterSpacing: '0.05em' }}>
           {subtitle}
         </div>
         {tableName && (
-          <div style={{ position: 'absolute', right: 40, top: 45.6, fontSize: 14, lineHeight: '14px', color: MUTE, whiteSpace: 'nowrap' }}>
+          <div style={{ position: 'absolute', right: 40, top: 45.7, fontSize: 14, lineHeight: '14px', color: MUTE, whiteSpace: 'nowrap' }}>
             桌号：<span className="em-en">{tableName}</span>
           </div>
         )}
@@ -217,16 +228,17 @@ function Drawer({ title, subtitle, tableName, onClose, children, testId }: { tit
   );
 }
 
-function DrawerButton({ onClick, disabled, children, testId }: { onClick: () => void; disabled?: boolean; children: ReactNode; testId: string }) {
+function DrawerButton({ onClick, disabled, children, testId, shift = 0 }: { onClick: () => void; disabled?: boolean; children: ReactNode; testId: string; shift?: number }) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
-      style={{ ...box(43, 700, 343, 28.3), padding: 0, border: 0, borderRadius: 1.5, background: 'var(--em-tan)', color: 'var(--em-bg)', fontSize: 16, lineHeight: '16px', letterSpacing: '1px', opacity: disabled ? 0.45 : 1 }}
+      style={{ ...box(DX, 700.2, 343.3, 28.3), padding: 0, border: 0, borderRadius: 1.5, background: 'var(--em-tan)', color: 'var(--em-bg)', fontSize: 16, lineHeight: '16px', opacity: disabled ? 0.45 : 1 }}
       data-testid={testId}
     >
-      {children}
+      {/* 字的文字框在按钮上沿往下 8.1（设计稿；浏览器自己居中的话是 6.15） */}
+      <span style={{ position: 'absolute', left: shift * 2, right: 0, top: 8.1, textAlign: 'center', whiteSpace: 'nowrap' }}>{children}</span>
     </button>
   );
 }
@@ -239,21 +251,21 @@ function Pill({ x, y, on, onClick, children, testId, disabled }: { x: number; y:
       disabled={disabled}
       aria-pressed={on}
       style={{
-        ...box(x, y, 102, 28),
+        ...box(x, y, 102, 28.3),
         padding: 0,
         borderRadius: 1.5,
         fontSize: 14,
         lineHeight: '14px',
-        letterSpacing: '0.6px',
         background: on ? 'var(--em-tan)' : 'transparent',
-        border: on ? 0 : LINE,
+        border: 0,
         color: on ? 'var(--em-light)' : MUTE,
-        whiteSpace: 'nowrap',
         overflow: 'hidden',
       }}
       data-testid={testId}
     >
-      {children}
+      {!on && <Hairline />}
+      {/* 字的文字框在上沿往下 8.85（设计稿） */}
+      <span style={{ position: 'absolute', left: 0, right: 0, top: 8.85, textAlign: 'center', whiteSpace: 'nowrap' }}>{children}</span>
     </button>
   );
 }
@@ -306,24 +318,24 @@ export function OrderDrawer({
   onClose: () => void;
 }) {
   const step = (onClick: () => void, icon: ReactNode, x: number, label: string, testId: string, disabled?: boolean) => (
-    <button type="button" onClick={onClick} disabled={disabled} aria-label={label} style={{ ...box(x, -0.6, 12.6, 12.6), padding: 0, border: 0, background: 'none' }} data-testid={testId}>
+    <button type="button" onClick={onClick} disabled={disabled} aria-label={label} style={{ ...box(x, 14.6, 12.6, 12.6), padding: 0, border: 0, background: 'none' }} data-testid={testId}>
       <span style={{ position: 'absolute', inset: -12 }} />
       {icon}
     </button>
   );
   return (
     <Drawer title="菜品信息" subtitle="DISH INFORMATION" tableName={tableName} onClose={onClose} testId="emenu-drawer">
-      <Pill x={43} y={100} on={tab === 'cart'} onClick={() => onTab('cart')} testId="emenu-tab-cart">
+      <Pill x={DX} y={100.5} on={tab === 'cart'} onClick={() => onTab('cart')} testId="emenu-tab-cart">
         未下单
       </Pill>
-      <Pill x={164} y={100} on={tab === 'ordered'} onClick={() => onTab('ordered')} testId="emenu-tab-ordered">
+      <Pill x={DX + 120.7} y={100.5} on={tab === 'ordered'} onClick={() => onTab('ordered')} testId="emenu-tab-ordered">
         已下单
       </Pill>
-      <div style={{ ...box(43, 152, 343, 0), borderTop: LINE }} />
+      <div style={{ ...box(DX, 152.2, 343.3, 0), borderTop: LINE }} />
 
       {tab === 'cart' ? (
         <>
-          <div className="emenu-scroll" style={{ ...box(43, 160, 343, 506) }} data-testid="emenu-cart">
+          <div className="emenu-scroll" style={{ ...box(DX, 160, 343.3, 506) }} data-testid="emenu-cart">
             {rows.length === 0 ? (
               <div style={{ paddingTop: 90, textAlign: 'center', fontSize: 13, lineHeight: '22px', color: MUTE }}>
                 还没有点菜
@@ -332,34 +344,34 @@ export function OrderDrawer({
               </div>
             ) : (
               rows.map((r) => (
-                <div key={r.itemId} style={{ position: 'relative', height: 45.3, opacity: r.problem ? 0.55 : 1 }} data-testid={`emenu-cart-${r.itemId}`}>
-                  <div style={{ ...box(0, 16.2, 270), fontSize: 14, lineHeight: '14px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <div key={r.itemId} style={{ position: 'relative', height: 45.4, opacity: r.problem ? 0.55 : 1 }} data-testid={`emenu-cart-${r.itemId}`}>
+                  <div className="em-clip" style={{ ...box(0.5, 15.9, 270), fontSize: 14, lineHeight: '14px' }}>
                     {r.name}
-                    {r.label && <span style={{ fontSize: 10, color: MUTE }}>（{r.label}）</span>}
-                    {r.tagline && <span style={{ fontSize: 10, color: MUTE }}>{wrapParen(r.tagline)}</span>}
+                    {r.label && <span style={{ fontSize: 10, lineHeight: 0, color: MUTE }}>（{r.label}）</span>}
+                    {r.tagline && <span style={{ fontSize: 10, lineHeight: 0, color: MUTE }}>{wrapParen(r.tagline)}</span>}
                   </div>
-                  <div className="em-en" style={{ ...box(0, 31.2, 270), fontSize: 8, lineHeight: '9px', color: r.problem ? 'var(--em-error)' : MUTE, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: r.problem ? 'var(--em-zh)' : undefined }}>
+                  <div className="em-en em-clip" style={{ ...box(0.5, 30.6, 270), fontSize: 8, lineHeight: '8px', color: r.problem ? 'var(--em-error)' : MUTE, fontFamily: r.problem ? 'var(--em-zh)' : undefined }}>
                     {r.problem ?? r.nameEn}
                   </div>
-                  <div style={{ ...box(283, 15.8, 60, 13) }}>
-                    {step(() => onQuantity(r.itemId, r.quantity - 1), <MinusDot />, 0, `${r.name}少一份`, `emenu-minus-${r.itemId}`, locked)}
-                    <span className="em-en" style={{ ...box(12.6, 0.4, 34.8), textAlign: 'center', fontSize: 12, lineHeight: '12px' }} data-testid={`emenu-qty-${r.itemId}`}>
-                      {r.quantity}
-                    </span>
-                    {step(() => onQuantity(r.itemId, r.quantity + 1), <PlusDot />, 47.4, `${r.name}多一份`, `emenu-plus-${r.itemId}`, locked || !!r.problem || r.quantity >= 99)}
-                  </div>
+                  {/* 减号 283.6、加号 330.7（离内容左边），份数在两个圆点中间；圆点比菜名高 1.3 */}
+                  {step(() => onQuantity(r.itemId, r.quantity - 1), <MinusDot />, 283.6, `${r.name}少一份`, `emenu-minus-${r.itemId}`, locked)}
+                  <span className="em-en" style={{ ...box(296.2, 16.2, 34.5), textAlign: 'center', fontSize: 12, lineHeight: '12px', letterSpacing: 0 }} data-testid={`emenu-qty-${r.itemId}`}>
+                    {r.quantity}
+                  </span>
+                  {step(() => onQuantity(r.itemId, r.quantity + 1), <PlusDot />, 330.7, `${r.name}多一份`, `emenu-plus-${r.itemId}`, locked || !!r.problem || r.quantity >= 99)}
                 </div>
               ))
             )}
           </div>
-          <button type="button" onClick={onRemark} disabled={locked} style={{ ...box(43, 674, 343, 26), padding: 0, border: 0, background: 'none', fontSize: 12, lineHeight: '12px', color: MUTE, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} data-testid="emenu-remark-open">
-            {remarkText ? `备注：${remarkText}` : '备注'}
+          <button type="button" onClick={onRemark} disabled={locked} style={{ ...box(DX, 674, 343.3, 26), padding: 0, border: 0, background: 'none', fontSize: 12, lineHeight: '12px', color: MUTE }} data-testid="emenu-remark-open">
+            <span className="em-clip" style={{ ...box(0, 8.8, 343.3), textAlign: 'center' }}>{remarkText ? `备注：${remarkText}` : '备注'}</span>
           </button>
-          <DrawerButton onClick={onSubmit} disabled={!!problem || locked} testId="emenu-submit">
+          {/* 设计稿里这一行字比按钮正中偏右 4.45 */}
+          <DrawerButton onClick={onSubmit} disabled={!!problem || locked} testId="emenu-submit" shift={4.45}>
             下单（请呼叫服务员）
           </DrawerButton>
           {rows.length > 0 && (
-            <div style={{ ...box(43, 734, 343), textAlign: 'center', fontSize: 11, lineHeight: '14px', color: problem ? 'var(--em-error)' : MUTE }} data-testid="emenu-cart-note">
+            <div style={{ ...box(DX, 734, 343.3), textAlign: 'center', fontSize: 11, lineHeight: '14px', color: problem ? 'var(--em-error)' : MUTE }} data-testid="emenu-cart-note">
               {problem ?? (
                 <>
                   这一单 <span className="em-en">¥{yuan(total)}</span>，记在手牌上，离店时一起结
@@ -370,7 +382,7 @@ export function OrderDrawer({
         </>
       ) : (
         <>
-          <div className="emenu-scroll" style={{ ...box(43, 160, 343, 470) }} data-testid="emenu-ordered">
+          <div className="emenu-scroll" style={{ ...box(DX, 160, 343.3, 470) }} data-testid="emenu-ordered">
             {!guest ? (
               <div style={{ paddingTop: 90, textAlign: 'center', fontSize: 13, color: MUTE }}>{guestLoading ? '正在取…' : '暂时取不到已下单的菜'}</div>
             ) : guest.ordered.length === 0 ? (
@@ -378,15 +390,15 @@ export function OrderDrawer({
             ) : (
               guest.ordered.map((l) => (
                 <div key={l.lineId} style={{ position: 'relative', height: 46 }} data-testid={`emenu-ordered-${l.lineId}`}>
-                  <div style={{ ...box(0, 16.2, 270), fontSize: 14, lineHeight: '14px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <div className="em-clip" style={{ ...box(0.5, 15.9, 270), fontSize: 14, lineHeight: '14px' }}>
                     {l.name}
-                    {l.quantity > 1 && <span className="em-en" style={{ fontSize: 11, color: MUTE, marginLeft: 4 }}>× {l.quantity}</span>}
+                    {l.quantity > 1 && <span className="em-en" style={{ fontSize: 11, lineHeight: 0, color: MUTE, marginLeft: 4 }}>× {l.quantity}</span>}
                   </div>
-                  <div className="em-en" style={{ ...box(0, 31.2, 270), fontSize: 8, lineHeight: '9px', color: MUTE, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <div className="em-en em-clip" style={{ ...box(0.5, 30.6, 270), fontSize: 8, lineHeight: '8px', color: MUTE }}>
                     {l.nameEn}
                   </div>
-                  <div className="em-en" style={{ position: 'absolute', right: 0, top: 14.6, display: 'flex', alignItems: 'baseline' }}>
-                    <span style={{ fontSize: 8, marginRight: 1.4 }}>¥</span>
+                  <div className="em-en" style={{ position: 'absolute', right: 0, top: 14.9, display: 'flex', alignItems: 'baseline' }}>
+                    <span style={{ fontSize: 8, width: 4.9, marginRight: 0.9 }}>¥</span>
                     <span style={{ fontSize: 16, lineHeight: '16px' }}>{yuan(l.amount)}</span>
                   </div>
                 </div>
@@ -394,9 +406,10 @@ export function OrderDrawer({
             )}
           </div>
           {guest && (
-            <div style={{ position: 'absolute', right: 40, top: 650, display: 'flex', alignItems: 'baseline', whiteSpace: 'nowrap' }} data-testid="emenu-ordered-total">
+            <div style={{ position: 'absolute', right: 42.1, top: 650.6, display: 'flex', alignItems: 'baseline', whiteSpace: 'nowrap' }} data-testid="emenu-ordered-total">
               <span style={{ fontSize: 14 }}>整单合计：</span>
-              <span className="em-en" style={{ fontSize: 16, marginRight: 2 }}>¥</span>
+              {/* 设计稿里 ¥ 往回压在全角冒号的空白上 */}
+              <span className="em-en" style={{ fontSize: 16, marginLeft: -4.6, marginRight: 1.9 }}>¥</span>
               <span className="em-en" style={{ fontSize: 34, lineHeight: '34px' }}>{yuan(guest.orderedTotal)}</span>
             </div>
           )}
@@ -433,19 +446,20 @@ export function RemarkDrawer({
       type="button"
       onClick={() => setTab(key)}
       aria-pressed={tab === key}
-      style={{ ...box(x - 18, 106, w + 36, 44), padding: 0, border: 0, background: 'none', fontSize: 18, lineHeight: '18px', letterSpacing: '1.5px', color: tab === key ? 'var(--em-ink)' : MUTE }}
+      style={{ ...box(x - 18, 106, w + 36, 44), padding: 0, border: 0, background: 'none', fontSize: 18, lineHeight: '18px', color: tab === key ? 'var(--em-ink)' : MUTE }}
       data-testid={`emenu-remark-tab-${key}`}
     >
-      {label}
-      {tab === key && <span style={{ ...box(0, 38.6, w + 36, 0), borderTop: '1px solid var(--em-tan)' }} />}
+      {/* 字的文字框上沿 116.3、下面的线 144.9（设计稿） */}
+      <span style={{ ...box(0, 10.3, w + 36), textAlign: 'center', whiteSpace: 'nowrap' }}>{label}</span>
+      {tab === key && <span style={{ ...box(0, 38.4, w + 36, 0), borderTop: '1px solid var(--em-tan)' }} />}
     </button>
   );
   const options = tab === 'avoid' ? avoidOptions : serveOptions;
   return (
     <Drawer title="备注" subtitle="REMARKS" tableName={tableName} onClose={onDone} testId="emenu-remark">
-      <div style={{ ...box(43, 101, 343, 0), borderTop: LINE }} />
-      {tabButton('avoid', '忌口', 76, 36)}
-      {tabButton('serve', '起菜方式', 178, 72)}
+      <div style={{ ...box(DX, 100.4, 343.3, 0), borderTop: LINE }} />
+      {tabButton('avoid', '忌口', 75.4, 36)}
+      {tabButton('serve', '起菜方式', 178.1, 72)}
       {options.map((o, i) => {
         const on = tab === 'avoid' ? remark.avoid.includes(o) : remark.serve === o;
         const toggle = () =>
@@ -455,14 +469,14 @@ export function RemarkDrawer({
               : { ...remark, serve: on ? null : o },
           );
         return (
-          <Pill key={o} x={43 + (i % 3) * 120.5} y={167 + Math.floor(i / 3) * 44} on={on} onClick={toggle} testId={`emenu-remark-${o}`}>
+          <Pill key={o} x={DX + (i % 3) * 120.65} y={166.7 + Math.floor(i / 3) * 44.1} on={on} onClick={toggle} testId={`emenu-remark-${o}`}>
             {o}
           </Pill>
         );
       })}
-      {options.length === 0 && <div style={{ ...box(43, 176, 343), textAlign: 'center', fontSize: 13, color: MUTE }}>没有可选的项</div>}
+      {options.length === 0 && <div style={{ ...box(DX, 176, 343.3), textAlign: 'center', fontSize: 13, color: MUTE }}>没有可选的项</div>}
       {custom && (
-        <div style={{ ...box(43, 628, 343, 30) }}>
+        <div style={{ ...box(DX, 628, 343.3, 30) }}>
           <input
             ref={input}
             value={remark.custom}
@@ -484,10 +498,10 @@ export function RemarkDrawer({
           setCustom(true);
           setTimeout(() => input.current?.focus(), 0);
         }}
-        style={{ ...box(43, 674, 343, 26), padding: 0, border: 0, background: 'none', fontSize: 12, lineHeight: '12px', color: MUTE }}
+        style={{ ...box(DX, 674, 343.3, 26), padding: 0, border: 0, background: 'none', fontSize: 12, lineHeight: '12px', color: MUTE }}
         data-testid="emenu-remark-custom-open"
       >
-        自定义备注
+        <span style={{ ...box(0, 8.8, 343.3), textAlign: 'center' }}>自定义备注</span>
       </button>
       <DrawerButton onClick={onDone} testId="emenu-remark-done">
         备注完成

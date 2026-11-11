@@ -53,6 +53,14 @@ export function Stage({ children, testId }: { children: ReactNode; testId?: stri
   );
 }
 
+/**
+ * 细边（设计稿的 0.5 描边）：画在一层不占位置的框上，不用元素自己的 border。
+ * 0.5px 的边在不同屏幕上实际占的宽度不一样（普通屏算 1px、高清屏 0.5px），用 border 会把里面按设计稿定位的字挤偏。
+ */
+export function Hairline({ color = 'var(--em-mute)', radius = 1.5 }: { color?: string; radius?: number }) {
+  return <span aria-hidden style={{ position: 'absolute', inset: 0, border: `0.5px solid ${color}`, borderRadius: radius, pointerEvents: 'none' }} />;
+}
+
 /** 设计稿上的一个矩形：左、上、宽、高 */
 export const box = (x: number, y: number, w?: number, h?: number): CSSProperties => ({
   position: 'absolute',
