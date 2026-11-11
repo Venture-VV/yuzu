@@ -1,7 +1,7 @@
 // 门店主导航的入口：主导航按它显示；ERP 顶栏的「返回门店」也按它判断门店那边有没有能用的页面、回到哪一页。
 // 库存、采购、货款、待办在 ERP 工作区（v0.7.3，用户菜单「进入 ERP」），不在这里。
 
-import { BedDouble, CalendarCheck2, CalendarClock, ClipboardCheck, ConciergeBell, Hourglass, MapPinned, Printer, ReceiptText, ScanSearch, Settings2, UsersRound, UtensilsCrossed } from 'lucide-react';
+import { BedDouble, CalendarCheck2, CalendarClock, ClipboardCheck, ConciergeBell, Hourglass, MapPinned, Printer, ReceiptText, ScanSearch, Settings2, UsersRound, UtensilsCrossed, HandHeart } from 'lucide-react';
 import { ADMIN_ENTRY_PERMISSIONS } from '@shared/admin';
 import type { Permission } from '@shared/permissions';
 import { useCan, useSession } from '../lib/session';
@@ -33,6 +33,9 @@ const STORE_NAV: StoreNavItem[][] = [
     // 预约（v0.7.28 ③）：技师、派对房等、客房电话预订的预约看板；小程序的预约在这里确认
     { to: '/bookings', label: '预约', icon: CalendarClock, perm: 'booking.manage' },
     { to: '/', label: '会员', icon: UsersRound, end: true, perm: 'member.read' },
+    // 管家部（8.0.12）：管家的日常工作页面（管家会员、人工余额、协调预约与接待、拍单、交班），与前台、预约、会员并列；
+    // Codex 最初放在「管理后台」里，主线整改时挪到这里——后台是给店主、店总做设置与监管的，管家不该进后台
+    { to: '/concierge', label: '管家', icon: HandHeart, perm: 'concierge.read' },
     { to: '/ledger', label: '流水', icon: ReceiptText, perm: 'ledger.readToday' },
     { to: '/settlement', label: '日结', icon: CalendarCheck2, perm: 'ledger.readToday' },
     { to: '/shift', label: '交班', icon: ClipboardCheck, perm: 'ledger.readToday' },

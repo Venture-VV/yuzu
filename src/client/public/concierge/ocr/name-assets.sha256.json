@@ -1,0 +1,72 @@
+{
+  "purpose": "Optional browser-only receipt project-name recognition; no amount changes",
+  "runtime": {
+    "name": "ONNX Runtime Web",
+    "version": "1.31.1",
+    "source": "https://www.npmjs.com/package/onnxruntime-web/v/1.31.1",
+    "license": "MIT"
+  },
+  "model": {
+    "name": "PP-OCRv5 mobile rec",
+    "source": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv5/rec/ch_PP-OCRv5_rec_mobile.onnx",
+    "registry": "https://github.com/RapidAI/RapidOCR/blob/main/python/rapidocr/default_models.yaml",
+    "sha256": "5825fc7ebf84ae7a412be049820b4d86d77620f204a041697b0494669b1742c5",
+    "license": "Apache-2.0"
+  },
+  "dictionary": {
+    "source": "Model metadata.character split by newline, blank prepended and ASCII space appended",
+    "entries": 18385
+  },
+  "files": [
+    {
+      "path": "/concierge/ocr/name-characters.json",
+      "bytes": 110793,
+      "sha256": "697040d5c2a023b46bb0949280b526ea2e10e8f6c4671b57f7cecdde1e34bffe"
+    },
+    {
+      "path": "/concierge/ocr/name-LICENSE-ONNXRuntime.txt",
+      "bytes": 1073,
+      "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+    },
+    {
+      "path": "/concierge/ocr/name-LICENSE-PaddleOCR.txt",
+      "bytes": 11376,
+      "sha256": "3840c5c0c61c294264d2dd77b8777be6ddd90121ef4e0e64abcd22edea581d6e"
+    },
+    {
+      "path": "/concierge/ocr/name-model.onnx",
+      "bytes": 16631306,
+      "sha256": "5825fc7ebf84ae7a412be049820b4d86d77620f204a041697b0494669b1742c5"
+    },
+    {
+      "path": "/concierge/ocr/name-NOTICE.txt",
+      "bytes": 2181,
+      "sha256": "ebe2de803f04467d5ec6e35453e2d624c529cc2760ec3a47bf09d8c3319ee456"
+    },
+    {
+      "path": "/concierge/ocr/name-runtime/ort-wasm-simd-threaded.mjs",
+      "bytes": 24738,
+      "sha256": "30ed0b5cd1182ede931fea448afb567d4dc705ec957af09f108a2be5f770dac3"
+    },
+    {
+      "path": "/concierge/ocr/name-runtime/ort-wasm-simd-threaded.wasm",
+      "bytes": 14848852,
+      "sha256": "4b884c203b0fa48d057be3332c65513ff85aa3c5bddd6946acc0fab7ecda001d"
+    },
+    {
+      "path": "/concierge/ocr/name-runtime/ort.wasm.min.js",
+      "bytes": 53796,
+      "sha256": "b8a78c408c40da65fdc8ba0846f7b2948e92a4c6d6b23cc8e4165e428ad95443"
+    },
+    {
+      "path": "/concierge/ocr/name-ThirdPartyNotices-ONNXRuntime.txt",
+      "bytes": 338088,
+      "sha256": "143764b952fdb1a7c69ce653bfba74a7744d6a8a573bfb73e235fba356c83de3"
+    },
+    {
+      "path": "/concierge/ocr/name-worker.js",
+      "bytes": 4037,
+      "sha256": "6fca68049d7e84d220dd3b2633f8116e8c6708bb6665699f469f1d1381053e68"
+    }
+  ]
+}

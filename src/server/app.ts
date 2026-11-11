@@ -101,6 +101,7 @@ import { registerMemberAdminRoutes } from './modules/member-admin';
 import { registerErpModuleGate, registerErpRoutes } from './modules/erp';
 import { registerMpStaffRoutes } from './modules/mp/staff';
 import { registerCanteenAdminRoutes } from './modules/canteen/admin-routes';
+import { registerConciergeRoutes } from './modules/concierge/routes';
 import { registerPatrolAdminRoutes } from './modules/patrol/routes';
 
 function originHost(origin: string): string | null {
@@ -198,6 +199,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
 
   // ERP 关闭的模块：按接口前缀统一拦截（先于各接口注册，所有接口都经过它）
   registerErpModuleGate(app, deps);
+  registerConciergeRoutes(app, deps);
   registerAuthRoutes(app, deps);
   registerGrantRoutes(app, deps);
   registerMemberRoutes(app, deps);
@@ -319,6 +321,13 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   app.setNotFoundHandler((req, reply) => {
     if (isApiRequest(req) || !hasClient || req.method !== 'GET') {
       reply.status(404).send({ error: { code: 'NOT_FOUND', message: '接口不存在' } });
+      return;
+    }
+    // 构建产物里的脚本、模型这类文件缺了就是缺了：回 404，不拿页面顶替。
+    // （管家部本机 OCR 的识别库把收到的内容直接当模型用、还会存在浏览器里；回页面的话坏的那份会一直留着，8.0.12 整改）
+    const path = req.url.split('?')[0]!;
+    if (path.startsWith('/assets/') || path.startsWith('/concierge/ocr/')) {
+      reply.status(404).header('cache-control', 'no-store').type('text/plain; charset=utf-8').send('Not Found');
       return;
     }
     reply.header('cache-control', 'no-cache').sendFile('index.html');

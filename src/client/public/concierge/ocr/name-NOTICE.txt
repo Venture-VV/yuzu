@@ -1,0 +1,41 @@
+Optional device-local Chinese receipt project-name recognition
+
+The cropped text lines are processed in a dedicated browser worker. This
+component does not call an external OCR API. Existing receipt evidence uploads
+are handled separately by the application.
+
+MODEL AND DICTIONARY
+The PP-OCRv5 mobile recognition model is derived from an official PaddleOCR
+model. Upstream weights are copyright Baidu and/or the applicable PaddleOCR
+rights holders and are licensed under Apache License 2.0.
+The ONNX representation and embedded character metadata used here were
+distributed by RapidAI/RapidOCR. Conversion does not transfer ownership of the
+upstream weights. Retain PaddleOCR/Baidu and RapidOCR attribution.
+
+Model source:
+https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv5/rec/ch_PP-OCRv5_rec_mobile.onnx
+Official artifact registry and SHA-256:
+https://github.com/RapidAI/RapidOCR/blob/main/python/rapidocr/default_models.yaml
+Upstream model and license:
+https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec_onnx
+
+The application character table is extracted from the model's character
+metadata, with the CTC blank token prepended and an ASCII space appended, as
+specified by RapidOCR. The original model bytes are unchanged.
+
+The preprocessing and CTC decoding implementation follows the Apache-2.0
+licensed RapidOCR/PaddleOCR implementation, adapted to JavaScript/Canvas:
+https://github.com/RapidAI/RapidOCR/blob/v3.9.2/python/rapidocr/ch_ppocr_rec/main.py
+https://github.com/RapidAI/RapidOCR/blob/v3.9.2/python/rapidocr/ch_ppocr_rec/utils.py
+Copyright (c) 2020 PaddlePaddle Authors; RapidOCR engineering components are
+copyright the RapidOCR Authors. See name-LICENSE-PaddleOCR.txt.
+
+RUNTIME
+ONNX Runtime Web 1.31.1, Copyright (c) Microsoft Corporation, MIT License.
+https://github.com/microsoft/onnxruntime
+https://www.npmjs.com/package/onnxruntime-web/v/1.31.1
+See name-LICENSE-ONNXRuntime.txt and name-ThirdPartyNotices-ONNXRuntime.txt.
+
+The distributed asset hashes are recorded in name-assets.sha256.json.
+Model outputs are fallible suggestions. This component does not change any
+receipt amount, item quantity, account balance or payment.

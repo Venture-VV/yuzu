@@ -21,8 +21,11 @@ async function* files(dir) {
 
 const all = [];
 for await (const path of files(root)) all.push(path);
-// 先清掉上一次留下的压缩文件（只单独重跑这个脚本时才会有），再重新压缩
-for (const path of all.filter((p) => p.endsWith('.gz') || p.endsWith('.br'))) await rm(path);
+// 先清掉上一次留下的压缩文件（只单独重跑这个脚本时才会有），再重新压缩。
+// 只清「原文件还在」的那些（x.gz 旁边有 x）：本来就以 .gz 发布的文件不是我们压出来的，不能删——
+// 管家部本机 OCR 的语言模型就是 chi_sim.traineddata.gz（8.0.12 整改：原来一律删，打包后的系统识别不了小票）。
+const present = new Set(all);
+for (const path of all.filter((p) => (p.endsWith('.gz') || p.endsWith('.br')) && present.has(p.slice(0, -3)))) await rm(path);
 
 let count = 0;
 let raw = 0;

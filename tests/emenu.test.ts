@@ -701,7 +701,7 @@ describe('并发与自检', () => {
     const mine = checks.find((c) => c.key === 'emenu_orders')!;
     const [n] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM emenu_orders`;
     expect(mine.detail).toContain(`${n!.n} 张`);
-    expect(checks.at(-1)!.key).toBe('emenu_orders');
+    expect(checks.map((c) => c.key)).toContain('emenu_orders');
     // 点餐单只追加
     await expect(ctx.sql`UPDATE emenu_orders SET guests = 9`).rejects.toThrow();
     await expect(ctx.sql`DELETE FROM emenu_orders`).rejects.toThrow();

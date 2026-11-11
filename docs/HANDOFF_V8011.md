@@ -24,7 +24,7 @@
 - 迁移 `122_patrol_rounds.sql`（`docs/ROADMAP.md` 第 7 节已登记），只增：`patrol_checkins` 加 `round_start`、`round_minutes`（两列同时有或同时空；之前的打卡为空）；部分唯一索引 `patrol_checkins_round_uq`（场所、`round_start`、`round_minutes`，没作废的）；打卡保护触发器的函数换成新的，把这两列也保护起来。
 - 巡场间隔存在 `settings` 的 `patrol` 一项里（`roundChanges`：从哪个营业日起、多少分钟），没有新表。
 - 演示数据与固定预期（`src/server/demo/*-expected.json`）没有改；`demo-prepare` 不加巡场数据。
-- 从 v8.0.10 升级只执行 `122` 这一个迁移。主线之后的迁移号从 `123` 起（到 `129`，再往后从 `135` 起）。
+- 从 v8.0.10 升级只执行 `122` 这一个迁移。主线之后的迁移号从 `123` 起（到 `129`，再往后从 `136` 起（`135` 后来给了 8.0.12 管家部））。
 
 ## 3. 验收要点
 

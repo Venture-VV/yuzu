@@ -8,6 +8,7 @@ import { usageCheck } from '../usages';
 import { bookingChecks } from '../bookings';
 import { countCardChecks } from '../count-cards';
 import { platformChecks } from '../platform-redemptions';
+import { conciergeCheck } from '../concierge/checks';
 import { emenuCheck } from '../emenu/checks';
 
 export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
@@ -335,6 +336,7 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
     await shiftMemberCheck(db),
     // ㉓ 平板点餐单（8.0.10）
     await emenuCheck(db),
+    await conciergeCheck(db),
   ];
 }
 

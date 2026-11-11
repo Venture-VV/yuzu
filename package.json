@@ -1,6 +1,6 @@
 {
   "name": "yuzu",
-  "version": "8.0.11",
+  "version": "8.0.12",
   "private": true,
   "description": "浴族 yuzu · 汤泉门店经营系统（会员充值、消费、撤销、流水与日结）",
   "type": "module",
@@ -12,7 +12,7 @@
     "dev:server": "tsx watch --clear-screen=false src/server/index.ts",
     "dev:client": "vite",
     "build": "npm run build:client && npm run build:server",
-    "build:client": "vite build && node scripts/compress-assets.mjs && npm run build:canteen",
+    "build:client": "vite build && node scripts/compress-assets.mjs && node scripts/check-ocr-assets.mjs dist/client/concierge/ocr && npm run build:canteen",
     "build:canteen": "vite build -c vite.canteen.config.ts && node scripts/compress-assets.mjs dist/canteen-app",
     "dev:canteen": "vite -c vite.canteen.config.ts",
     "build:server": "node scripts/build-server.mjs",

@@ -1,0 +1,91 @@
+{
+  "note": "管家部本机 OCR 用到的第三方文件：大小与 SHA-256。带 npm 的条目与 npm 上对应版本的包里那个文件逐字节相同（2026-11-12 核对）。scripts/check-ocr-assets.mjs 在构建后与测试里核对。",
+  "files": [
+    {
+      "path": "tesseract.min.js",
+      "bytes": 62961,
+      "sha256": "10fff78484067759c43028a02a72d76d0b90eb17302bb23b58a9ec5410bc928b",
+      "npm": "tesseract.js@6.0.1",
+      "file": "dist/tesseract.min.js",
+      "license": "Apache-2.0"
+    },
+    {
+      "path": "worker.min.js",
+      "bytes": 111162,
+      "sha256": "38645599043239c0eb6db08a6504a92dcdc292200535f3e9339cd77c4443b842",
+      "npm": "tesseract.js@6.0.1",
+      "file": "dist/worker.min.js",
+      "license": "Apache-2.0"
+    },
+    {
+      "path": "core/tesseract-core-simd-lstm.wasm.js",
+      "bytes": 3954569,
+      "sha256": "9d7c43fb206dc9f48475228b46bf35f888fa9e6259da2e67d5a75c77049f2dc7",
+      "npm": "tesseract.js-core@6.1.2",
+      "file": "tesseract-core-simd-lstm.wasm.js",
+      "license": "Apache-2.0"
+    },
+    {
+      "path": "core/tesseract-core-lstm.wasm.js",
+      "bytes": 3954181,
+      "sha256": "775a35df6f2ae100e02609443e6bd5cafcd07983dd6175454ca4a432a7730687",
+      "npm": "tesseract.js-core@6.1.2",
+      "file": "tesseract-core-lstm.wasm.js",
+      "license": "Apache-2.0"
+    },
+    {
+      "path": "lang/chi_sim.traineddata.gz",
+      "bytes": 1718768,
+      "sha256": "b8a23f10c7de500891eb458a8adc9cc58ab7f242f08b7d149f5e9aea4ad5db7c",
+      "npm": "@tesseract.js-data/chi_sim@1.0.0",
+      "file": "4.0.0_best_int/chi_sim.traineddata.gz",
+      "license": "Apache-2.0"
+    },
+    {
+      "path": "lang/eng.traineddata.gz",
+      "bytes": 2952873,
+      "sha256": "45b4cb346724ac1774f1c36f42f182b887bcdb28ebe63e6fff90ac41f3fcff91",
+      "npm": "@tesseract.js-data/eng@1.0.0",
+      "file": "4.0.0_best_int/eng.traineddata.gz",
+      "license": "Apache-2.0"
+    },
+    {
+      "path": "name-runtime/ort.wasm.min.js",
+      "bytes": 53796,
+      "sha256": "b8a78c408c40da65fdc8ba0846f7b2948e92a4c6d6b23cc8e4165e428ad95443",
+      "npm": "onnxruntime-web@1.31.1",
+      "file": "dist/ort.wasm.min.js",
+      "license": "MIT"
+    },
+    {
+      "path": "name-runtime/ort-wasm-simd-threaded.mjs",
+      "bytes": 24738,
+      "sha256": "30ed0b5cd1182ede931fea448afb567d4dc705ec957af09f108a2be5f770dac3",
+      "npm": "onnxruntime-web@1.31.1",
+      "file": "dist/ort-wasm-simd-threaded.mjs",
+      "license": "MIT"
+    },
+    {
+      "path": "name-runtime/ort-wasm-simd-threaded.wasm",
+      "bytes": 14848852,
+      "sha256": "4b884c203b0fa48d057be3332c65513ff85aa3c5bddd6946acc0fab7ecda001d",
+      "npm": "onnxruntime-web@1.31.1",
+      "file": "dist/ort-wasm-simd-threaded.wasm",
+      "license": "MIT"
+    },
+    {
+      "path": "name-model.onnx",
+      "bytes": 16631306,
+      "sha256": "5825fc7ebf84ae7a412be049820b4d86d77620f204a041697b0494669b1742c5",
+      "source": "PP-OCRv5 mobile rec（RapidAI/RapidOCR v3.10.0 发布的 ONNX，原始字节未改；见 name-NOTICE.txt）",
+      "license": "Apache-2.0"
+    },
+    {
+      "path": "name-characters.json",
+      "bytes": 110793,
+      "sha256": "697040d5c2a023b46bb0949280b526ea2e10e8f6c4671b57f7cecdde1e34bffe",
+      "source": "从模型的 character 元数据取出的字符表（见 name-NOTICE.txt）",
+      "license": "Apache-2.0"
+    }
+  ]
+}

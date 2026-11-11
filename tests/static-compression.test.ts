@@ -66,6 +66,19 @@ describe('静态资源预压缩', () => {
     expect(gunzipSync(gz.rawPayload).toString()).toBe(js);
   });
 
+  it('构建产物里缺的脚本、模型回 404，不拿首页顶替（8.0.12：识别库会把收到的页面当成模型存下来）；前端路由照常回首页', async () => {
+    for (const url of ['/assets/missing-abc123.js', '/concierge/ocr/lang/chi_sim.traineddata.gz', '/concierge/ocr/name-model.onnx?v=1']) {
+      const res = await app.inject({ url, headers: { 'accept-encoding': 'br, gzip' } });
+      expect(res.statusCode, url).toBe(404);
+      expect(res.headers['content-type'], url).toMatch(/^text\/plain/);
+      expect(res.headers['cache-control'], url).toBe('no-store');
+      expect(res.body, url).not.toContain('浴族');
+    }
+    const page = await app.inject({ url: '/concierge' });
+    expect(page.statusCode).toBe(200);
+    expect(page.body).toContain('浴族');
+  });
+
   it('不支持压缩时发原文件；首页与前端路由照常不缓存', async () => {
     const plain = await app.inject({ url: '/assets/app-abc123.js', headers: { 'accept-encoding': 'identity' } });
     expect(plain.headers['content-encoding']).toBeUndefined();

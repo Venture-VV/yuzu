@@ -40,6 +40,9 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   frontdesk_cancel: { label: '撤销来访', tone: 'clay' },
   frontdesk_post: { label: '手牌挂账', tone: 'yuzu' },
   emenu_order: { label: '平板点餐下单', tone: 'yuzu' },
+  // 管家部（8.0.12）：建档、余额核对、凭证、预约接待、交班、名称核准、导出等都记在这一类，详情里的「label」写着具体是哪一样
+  concierge_record: { label: '管家部记录', tone: 'pine' },
+  concierge_upload: { label: '管家部上传凭证照片', tone: 'lake' },
   emenu_saved: { label: '电子菜单', tone: 'neutral' },
   emenu_draft: { label: '电子菜单初稿', tone: 'neutral' },
   order_pin_set: { label: '生成点单密码', tone: 'ember' },

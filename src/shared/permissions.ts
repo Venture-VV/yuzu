@@ -29,14 +29,14 @@
 export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice', 'other_store', 'tablet'] as const;
 export type Role = (typeof ROLES)[number];
 
-export const DUTIES = ['stock', 'purchase', 'payable', 'approve', 'cost', 'request', 'legal'] as const;
+export const DUTIES = ['stock', 'purchase', 'payable', 'approve', 'cost', 'request', 'legal', 'concierge', 'concierge_manager'] as const;
 export type Duty = (typeof DUTIES)[number];
 
 /**
  * 分岗不兼任（#17 后半句，v0.7.12）：职责分五组，一名员工的职责只能在一组里；财务组内对账付款、成本核算可以同时有。
  * 店主不受限制。后台保存员工时校验；已有跨组的员工不自动改，后台员工页提示（不进自检）。
  */
-export const DUTY_GROUPS: { key: 'stock' | 'purchase' | 'department' | 'finance' | 'approve' | 'legal'; label: string; duties: readonly Duty[] }[] = [
+export const DUTY_GROUPS: { key: 'stock' | 'purchase' | 'department' | 'finance' | 'approve' | 'legal' | 'concierge'; label: string; duties: readonly Duty[] }[] = [
   { key: 'stock', label: '仓库', duties: ['stock'] },
   { key: 'purchase', label: '采购', duties: ['purchase'] },
   { key: 'department', label: '部门', duties: ['request'] },
@@ -44,6 +44,7 @@ export const DUTY_GROUPS: { key: 'stock' | 'purchase' | 'department' | 'finance'
   { key: 'approve', label: '负责人', duties: ['approve'] },
   // 法务（v0.7.31，C4）：合同审查的法务那一级，不和别的职责兼任
   { key: 'legal', label: '法务', duties: ['legal'] },
+  { key: 'concierge', label: '管家部', duties: ['concierge', 'concierge_manager'] },
 ];
 
 /** 职责跨组时返回涉及的组名（如「仓库、采购」），不跨组返回 null；店主不受限制 */
@@ -66,6 +67,10 @@ interface Rule {
 }
 
 export const PERMISSIONS = {
+  'concierge.read': { roles: ['owner', 'store_manager'], duties: ['concierge', 'concierge_manager'] },
+  'concierge.operate': { roles: ['owner', 'store_manager'], duties: ['concierge', 'concierge_manager'] },
+  'concierge.manage': { roles: ['owner', 'store_manager'], duties: ['concierge_manager'] },
+  'concierge.export': { roles: ['owner', 'store_manager'], duties: ['concierge_manager'] },
   // ── 会员与储值 ──
   'member.read': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk'] },
   'member.write': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk'] },
@@ -383,6 +388,10 @@ export function overridesFrom(target: Partial<Record<EditableRole, readonly Perm
 }
 
 export const PERMISSION_LABELS: Record<Permission, string> = {
+  'concierge.read': '管家部：查看共享会员、协调预约与凭证',
+  'concierge.operate': '管家部：建档、拍单、人工余额核对、服务与交班',
+  'concierge.manage': '管家部：经理监管、名称核准、已确认凭证更正',
+  'concierge.export': '管家部：业务与原图导出',
   'member.read': '查找与查看会员',
   'member.write': '新建与编辑会员',
   'recharge.create': '确认充值入账',
@@ -501,6 +510,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
 };
 
 export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
+  { title: '管家部', items: ['concierge.read', 'concierge.operate', 'concierge.manage', 'concierge.export'] },
   {
     title: '会员与储值',
     items: ['member.read', 'member.write', 'recharge.create', 'recharge.customBonus', 'consume.create', 'consume.customAmount', 'consume.reverse', 'ledger.readToday', 'ledger.readHistory', 'ledger.export', 'settlement.close', 'wallet.opening'],

@@ -1,6 +1,8 @@
 import type { Db } from '../db';
 
 export type AuditAction =
+  | 'concierge_record'
+  | 'concierge_upload'
   | 'login'
   | 'login_failed'
   | 'auth_granted'
