@@ -324,6 +324,8 @@
 - 系统设置了「减少动态效果」的设备上全部关掉；后台「设置 → 动效」也可以改成「简洁」（老平板卡的时候用）。
 - 动效只用位移、缩放与透明度，不改版面：中文模式下各元素静止时的位置仍是设计稿量的位置。
 
+这一版设计稿之外补的（请设计师过目）：顶栏与起始页的「中 | EN」开关（有它时分类页签最多排到 705，超过 3 个分类会比原来挤一点）；英文模式下各处的字号与排法（英文菜名 14 号、放不下折两行，中文名 9 号小字；弹窗与抽屉的标题英文在上、中文在下）；上表的全部动效。截图：`docs/screenshots/emenu/en-1-list.png`、`en-2-detail.png`、`en-3-remark.png`、`en-4-search-keyboard.png`（把窗口压矮模拟键盘）、`admin-5-dish-english.png`、`admin-6-settings-english.png`。
+
 ### 11.4 数据与接口
 
 - 迁移 `123`：`emenu_dishes` 加 `tagline_en`、`description_en`、`attrs_en`、`unit_en`，`emenu_dish_specs` 加 `label_en`（都有默认值，旧数据不动）。

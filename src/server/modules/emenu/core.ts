@@ -115,6 +115,10 @@ interface DishRow {
   description: string;
   attrs: string[];
   unit: string;
+  taglineEn: string;
+  descriptionEn: string;
+  attrsEn: string[];
+  unitEn: string;
   imageId: number | null;
   detailImageId: number | null;
   active: boolean;
@@ -124,6 +128,7 @@ interface SpecRow {
   dishId: number;
   itemId: number;
   label: string;
+  labelEn: string;
   itemActive: boolean;
   technicianRequired: boolean;
   inKitchen: boolean;
@@ -144,9 +149,10 @@ export async function dishViews(db: Db, dishIds: number[], today: string, dining
   const ids = [...new Set(dishIds)];
   if (ids.length === 0) return new Map();
   const dishes = await db<DishRow[]>`
-    SELECT id, name, name_en, tagline, description, attrs, unit, image_id, detail_image_id, active FROM emenu_dishes WHERE id IN ${db(ids)}`;
+    SELECT id, name, name_en, tagline, description, attrs, unit, tagline_en, description_en, attrs_en, unit_en, image_id, detail_image_id, active
+    FROM emenu_dishes WHERE id IN ${db(ids)}`;
   const specs = await db<SpecRow[]>`
-    SELECT sp.dish_id, sp.item_id, sp.label, i.active AS item_active, i.technician_required, (st.id IS NOT NULL) AS in_kitchen, ${pricesColumn(db)} AS prices,
+    SELECT sp.dish_id, sp.item_id, sp.label, sp.label_en, i.active AS item_active, i.technician_required, (st.id IS NOT NULL) AS in_kitchen, ${pricesColumn(db)} AS prices,
            (SELECT dl.remaining FROM dish_limits dl WHERE dl.item_id = i.id AND dl.business_date = ${today}) AS remaining
     FROM emenu_dish_specs sp JOIN service_items i ON i.id = sp.item_id LEFT JOIN kitchen_stations st ON st.id = i.station_id AND st.active
     WHERE sp.dish_id IN ${db(ids)} ORDER BY sp.dish_id, sp.sort_no, sp.item_id`;
@@ -160,6 +166,10 @@ export async function dishViews(db: Db, dishIds: number[], today: string, dining
       description: d.description,
       attrs: d.attrs,
       unit: d.unit,
+      taglineEn: d.taglineEn,
+      descriptionEn: d.descriptionEn,
+      attrsEn: d.attrsEn,
+      unitEn: d.unitEn,
       imageUrl: emenuImageUrl(d.imageId),
       detailUrl: emenuImageUrl(d.detailImageId),
       specs: specs
@@ -167,7 +177,7 @@ export async function dishViews(db: Db, dishIds: number[], today: string, dining
         .map((s) => {
           const off = !diningOn || !d.active || !s.itemActive || s.technicianRequired || !s.inKitchen;
           const state: EmenuSpecState = off ? 'off' : s.remaining === 0 ? 'sold_out' : 'ok';
-          return { itemId: Number(s.itemId), label: s.label, price: defaultPrice(s.prices), state, remaining: s.remaining };
+          return { itemId: Number(s.itemId), label: s.label, labelEn: s.labelEn, price: defaultPrice(s.prices), state, remaining: s.remaining };
         }),
     });
   }
@@ -227,6 +237,9 @@ export async function emenuMenu(db: Db, deps: Deps): Promise<EmenuMenu> {
       serveOptions: rules.serveOptions,
       idleMinutes: rules.idleMinutes,
       offHours: rules.offHours,
+      langSwitch: rules.langSwitch,
+      optionsEn: rules.optionsEn,
+      motion: rules.motion,
       coverUrl: emenuImageUrl(rules.coverImageId),
     },
     categories,

@@ -2,7 +2,9 @@
 // 以及设计稿之外补的小确认框与提示条（docs/EMENU.md 第 3.11 节）。坐标都是设计稿 1024×768 上量的。
 
 import { useEffect, useRef, type ReactNode } from 'react';
+import { namePair, useLang, useM } from './i18n';
 import { BackspaceIcon, CheckMark } from './icons';
+import { useExitGhost } from './motion';
 import { box, Hairline } from './stage';
 
 /** 弹窗的位置与大小（设计稿） */
@@ -10,11 +12,15 @@ const M = { x: 297.5, y: 133.7, w: 429.1, h: 500.6 };
 const LINE = '0.5px solid var(--em-mute)';
 
 /** 盖在整页上的半透明层（设计稿里弹窗后面的页面压暗约四成）；blur：起始页输入信息时把氛围图虚化 */
-export function Backdrop({ onClick, blur, children }: { onClick?: () => void; blur?: boolean; children?: ReactNode }) {
+export function Backdrop({ onClick, blur, kind = 'modal', still, children }: { onClick?: () => void; blur?: boolean; kind?: string; /** 不播淡入（抽屉里换内容时背景本来就在） */ still?: boolean; children?: ReactNode }) {
+  // 关掉时留一个影子播退场动画（motion.tsx）：背景淡出，里面的弹窗缩小、抽屉滑出
+  const ref = useExitGhost<HTMLDivElement>(kind);
   return (
     <div
-      className="em-fade"
+      ref={ref}
+      className={still ? undefined : 'em-fade'}
       onClick={onClick}
+      data-em-kind={kind}
       style={{ ...box(0, 0, 1024, 768), background: blur ? 'rgb(211 211 211 / 0.55)' : 'rgb(0 0 0 / 0.4)', backdropFilter: blur ? 'blur(14px)' : undefined, WebkitBackdropFilter: blur ? 'blur(14px)' : undefined }}
     >
       {children}
@@ -22,10 +28,31 @@ export function Backdrop({ onClick, blur, children }: { onClick?: () => void; bl
   );
 }
 
+/** 弹窗的标题两行：中文大、英文小；切到英文时对调（英文大、中文小）。w 是弹窗的宽，y 是两行文字框的上沿 */
+function Titles({ title, subtitle, w, y, size }: { title: string; subtitle: string; w: number; y: [number, number]; size: [number, number] }) {
+  const t = namePair(title, subtitle, useLang());
+  return t.mainEn ? (
+    <>
+      <div className="em-en" style={{ ...box(0, y[0] + 3, w), textAlign: 'center', fontSize: size[0] * 0.78, lineHeight: `${size[0] * 0.78}px`, letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
+        {t.main}
+      </div>
+      <div style={{ ...box(0, y[1] - 0.5, w), textAlign: 'center', fontSize: size[1] + 1, lineHeight: `${size[1] + 1}px`, color: 'var(--em-mute)', whiteSpace: 'nowrap' }}>{t.sub}</div>
+    </>
+  ) : (
+    <>
+      <div style={{ ...box(0, y[0], w), textAlign: 'center', fontSize: size[0], lineHeight: `${size[0]}px` }}>{t.main}</div>
+      <div className="em-en" style={{ ...box(0, y[1], w), textAlign: 'center', fontSize: size[1], lineHeight: `${size[1]}px`, color: 'var(--em-mute)', letterSpacing: '0.05em' }}>
+        {t.sub}
+      </div>
+    </>
+  );
+}
+
 function Frame({ title, subtitle, children, testId }: { title: string; subtitle: string; children: ReactNode; testId?: string }) {
   return (
     <div
       className="em-pop"
+      data-em-out="pop"
       role="dialog"
       aria-label={title}
       onClick={(e) => e.stopPropagation()}
@@ -34,10 +61,7 @@ function Frame({ title, subtitle, children, testId }: { title: string; subtitle:
     >
       <div style={{ ...box(0, 0, M.w, 84.5), background: 'var(--em-band)' }} />
       <div style={{ ...box(21.4, 84.2, 386.2, 0), borderTop: LINE }} />
-      <div style={{ ...box(0, 25.4, M.w), textAlign: 'center', fontSize: 24, lineHeight: '24px' }}>{title}</div>
-      <div className="em-en" style={{ ...box(0, 50.6, M.w), textAlign: 'center', fontSize: 12, lineHeight: '12px', color: 'var(--em-mute)', letterSpacing: '0.05em' }}>
-        {subtitle}
-      </div>
+      <Titles title={title} subtitle={subtitle} w={M.w} y={[25.4, 50.6]} size={[24, 12]} />
       {children}
     </div>
   );
@@ -48,6 +72,8 @@ export type FieldKind = 'tag' | 'table' | 'digits';
 export interface InfoField {
   key: string;
   label: string;
+  /** 切到英文时的标签（Tag、Table、Guests、PIN） */
+  labelEn?: string;
   value: string;
   kind: FieldKind;
   maxLength: number;
@@ -101,6 +127,8 @@ export function InfoModal({
   disabled?: boolean;
   testId?: string;
 }) {
+  const en = useLang() === 'en';
+  const m = useM();
   const field = fields.find((f) => f.key === active && !f.readOnly) ?? null;
   const state = useRef({ field, fields, onChange, onActive, onEnter, disabled });
   state.current = { field, fields, onChange, onActive, onEnter, disabled };
@@ -151,6 +179,7 @@ export function InfoModal({
       disabled={disabled}
       onClick={onPress}
       aria-label={opts.aria}
+      className="em-tap-soft"
       style={{ ...box(x, y, w, h), background: opts.alt ? 'var(--em-key-2)' : 'var(--em-key)', border: 0, borderRadius: 2, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       data-testid={opts.testId}
     >
@@ -181,7 +210,13 @@ export function InfoModal({
             data-testid={`emenu-field-${f.key}`}
             data-value={f.mask ? '*'.repeat(f.value.length) : f.value}
           >
-            <span style={{ ...box(0, 8), fontSize: 16, lineHeight: '16px' }}>{f.label}</span>
+            {en && f.labelEn ? (
+              <span className="em-en" style={{ ...box(0, 10.4), fontSize: 12, lineHeight: '12px', whiteSpace: 'nowrap' }}>
+                {f.labelEn}
+              </span>
+            ) : (
+              <span style={{ ...box(0, 8), fontSize: 16, lineHeight: '16px' }}>{f.label}</span>
+            )}
             <span className="em-en" style={{ ...box(41, 7.4, 78), fontSize: 16, lineHeight: '16px', whiteSpace: 'nowrap', overflow: 'hidden', letterSpacing: f.mask ? '-0.87px' : undefined }}>
               {f.mask ? '*'.repeat(f.value.length) : f.value}
               {/* 光标：占位是 0 高，画在里面绝对定位的一条上（直接放一条 15 高的会把这一行顶高、字往下掉 1 像素） */}
@@ -199,20 +234,26 @@ export function InfoModal({
       {KEY_ROWS.map((row, r) => row.map((d, c) => key(digit(d), KEY_X[c]!, KEY_Y[r]!, 59.5, 59.5, () => type(d), { aria: d, testId: `emenu-key-${d}` })))}
       {key(digit('0'), 150.7, 326, 125.3, 59.5, () => type('0'), { aria: '0', testId: 'emenu-key-0' })}
       {key(digit('.'), 282.3, 326, 59.5, 59.5, () => type('.'), { aria: '点', testId: 'emenu-key-dot' })}
-      {key(<BackspaceIcon />, 348.3, 128.9, 59.5, 125.3, erase, { alt: true, aria: '退格', testId: 'emenu-key-back' })}
+      {key(<BackspaceIcon />, 348.3, 128.9, 59.5, 125.3, erase, { alt: true, aria: m.keyBack, testId: 'emenu-key-back' })}
       {key(
         // 设计稿：「清」的文字框在键上沿往下 44.1、左边往右 20.7，「空」再往下 21.6。
         // 一字一块、行高等于字号：行高比字号多出来的不是偶数像素时，各家浏览器把字放在行里的位置差零点几像素
-        <span style={{ ...box(20.7, 44.1, 18), fontSize: 18, lineHeight: '18px' }}>
-          <span style={{ display: 'block' }}>清</span>
-          <span style={{ display: 'block', marginTop: 3.6 }}>空</span>
-        </span>,
+        en ? (
+          <span className="em-en" style={{ fontSize: 13, lineHeight: '13px' }}>
+            {m.keyClear}
+          </span>
+        ) : (
+          <span style={{ ...box(20.7, 44.1, 18), fontSize: 18, lineHeight: '18px' }}>
+            <span style={{ display: 'block' }}>清</span>
+            <span style={{ display: 'block', marginTop: 3.6 }}>空</span>
+          </span>
+        ),
         348.1,
         260.3,
         59.5,
         125.3,
         clear,
-        { alt: true, aria: '清空', testId: 'emenu-key-clear' },
+        { alt: true, aria: m.keyClear, testId: 'emenu-key-clear' },
       )}
       {footer}
     </Frame>
@@ -244,6 +285,7 @@ export function ModalButton({
       type="button"
       disabled={disabled}
       onClick={onClick}
+      className="em-tap-soft"
       style={{
         ...box(x, y, w, 28.3),
         padding: 0,
@@ -327,6 +369,7 @@ export function SmallDialog({
     <Backdrop onClick={onClose}>
       <div
         className="em-pop"
+        data-em-out="pop"
         role="dialog"
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
@@ -335,10 +378,7 @@ export function SmallDialog({
       >
         <div style={{ ...box(0, 0, 360, 72), background: 'var(--em-band)' }} />
         <div style={{ ...box(21.4, 71.7, 317.2, 0), borderTop: LINE }} />
-        <div style={{ ...box(0, 19, 360), textAlign: 'center', fontSize: 22, lineHeight: '22px' }}>{title}</div>
-        <div className="em-en" style={{ ...box(0, 44, 360), textAlign: 'center', fontSize: 11, lineHeight: '11px', color: 'var(--em-mute)', letterSpacing: '0.05em' }}>
-          {subtitle}
-        </div>
+        <Titles title={title} subtitle={subtitle} w={360} y={[19, 44]} size={[22, 11]} />
         <div style={{ ...box(28, 96, 304, 88), fontSize: 13, lineHeight: '21px', color: 'var(--em-ink)', textAlign: 'center' }}>{children}</div>
         {actions}
       </div>
@@ -351,7 +391,7 @@ export function Toast({ text }: { text: string | null }) {
   if (!text) return null;
   return (
     <div style={{ ...box(0, 700, 1024), display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
-      <span className="em-rise" role="status" style={{ background: 'rgb(75 57 42 / 0.9)', color: 'var(--em-light)', fontSize: 12, lineHeight: '12px', padding: '9px 16px', borderRadius: 2, letterSpacing: '0.5px' }} data-testid="emenu-toast">
+      <span key={text} className="em-toast" role="status" style={{ background: 'rgb(75 57 42 / 0.9)', color: 'var(--em-light)', fontSize: 12, lineHeight: '12px', padding: '9px 16px', borderRadius: 2, letterSpacing: '0.5px' }} data-testid="emenu-toast">
         {text}
       </span>
     </div>

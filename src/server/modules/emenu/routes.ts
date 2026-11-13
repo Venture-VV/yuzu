@@ -7,8 +7,9 @@ import type { FastifyInstance } from 'fastify';
 import { guard, guardAny } from '../../auth/guard';
 import { readSnapshot } from '../../db';
 import { ctxOf, type Deps } from '../../lib/context';
+import { csvReply } from '../../lib/csv';
 import { idParam, parse } from '../../lib/validate';
-import { createEmenuCategory, createEmenuDish, emenuAdmin, generateEmenuDraft, saveEmenuPages, saveEmenuRules, updateEmenuCategory, updateEmenuDish } from './admin';
+import { createEmenuCategory, createEmenuDish, emenuAdmin, emenuEnglishCsv, generateEmenuDraft, importEmenuEnglish, saveEmenuPages, saveEmenuRules, updateEmenuCategory, updateEmenuDish } from './admin';
 import { abandonEmenuOrder, checkEmenuTable, emenuGuest, emenuImage, emenuMenu, emenuOpLookup, placeEmenuOrder, saveEmenuImage } from './core';
 import { clearOrderPin, orderPinStatus, setOrderPin } from './pins';
 
@@ -47,6 +48,9 @@ export function registerEmenuRoutes(app: FastifyInstance, deps: Deps) {
     return img;
   });
   app.post('/api/admin/emenu/draft', { preHandler: manage }, async (req) => generateEmenuDraft(deps, ctxOf(req)));
+  // 英文对照表（8.0.13）：导出所有菜的中文与英文各列；填好再导入（只更新英文、空着的不动）
+  app.get('/api/admin/emenu/english.csv', { preHandler: manage }, async (_req, reply) => csvReply(reply, '电子菜单英文对照表.csv', await readSnapshot(sql, emenuEnglishCsv)));
+  app.post('/api/admin/emenu/english', { preHandler: manage, bodyLimit: 4_000_000 }, async (req) => importEmenuEnglish(deps, req.body, ctxOf(req)));
 
   // ── 点单密码 ──
   // 店主给一位员工生成 / 重置（当场显示一次）、收回

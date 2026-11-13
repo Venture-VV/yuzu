@@ -4,6 +4,7 @@
 // 下单走的是点单页同一条挂账路径（frontdesk/bills.ts 的 postChargesTx），这里只管菜单怎么排、怎么显示，以及点餐单这张记录。
 // 没定的规则按默认（PENDING_DECISIONS.md「8.0.10」DC1–DC18，待确认），能调的在后台「电子菜单 → 设置」里改。
 
+import { parseCsvRecords, unclosedQuoteMessage } from './csv-read';
 import { normalizeTagCode, tagDigits } from './frontdesk';
 
 // ───────────────────────── 设置 ─────────────────────────
@@ -23,6 +24,12 @@ export interface EmenuRules {
   idleMinutes: number;
   /** 不在供应时段的分类：hide 不显示（默认），show 显示但不能点（DC9） */
   offHours: 'hide' | 'show';
+  /** 中英切换（8.0.13，EN9）：开着时起始页与顶栏有「中 | EN」开关（默认开）；关掉后页面只有中文 */
+  langSwitch: boolean;
+  /** 忌口、起菜方式各选项的英文（键是中文选项）。没填的用内置的常见译法，内置也没有就显示中文（EN5） */
+  optionsEn: Record<string, string>;
+  /** 动效（EN12）：true 丰富（默认），false 简洁（老平板卡的时候用）；系统「减少动态效果」时总是简洁 */
+  motion: boolean;
 }
 
 export const DEFAULT_EMENU_RULES: EmenuRules = {
@@ -33,6 +40,9 @@ export const DEFAULT_EMENU_RULES: EmenuRules = {
   serveOptions: ['即起', '慢起'],
   idleMinutes: 10,
   offHours: 'hide',
+  langSwitch: true,
+  optionsEn: {},
+  motion: true,
 };
 
 /** 点单密码：6 位数字（设计稿「密码 ******」） */
@@ -52,6 +62,132 @@ export const EMENU_MAX_IDLE_MINUTES = 120;
 /** 一个分类最多 60 页 */
 export const EMENU_MAX_PAGES = 60;
 export const EMENU_MAX_GUESTS = 99;
+/** 忌口、起菜方式一个选项的英文最多 24 个字符 */
+export const EMENU_MAX_OPTION_EN = 24;
+
+// ───────────────────────── 中 / EN（8.0.13，docs/EMENU.md 第 11.1 节） ─────────────────────────
+
+export type EmenuLang = 'zh' | 'en';
+
+/** 单位常见的英文（后台没填「单位的英文」时用；这里也没有就显示中文） */
+export const EMENU_UNIT_EN: Readonly<Record<string, string>> = {
+  份: 'portion',
+  例: 'serving',
+  客: 'serving',
+  位: 'person',
+  人: 'person',
+  只: 'pc',
+  个: 'pc',
+  件: 'pc',
+  块: 'pc',
+  条: 'pc',
+  颗: 'pc',
+  粒: 'pc',
+  片: 'slice',
+  串: 'skewer',
+  瓶: 'bottle',
+  支: 'bottle',
+  杯: 'glass',
+  壶: 'pot',
+  扎: 'jug',
+  听: 'can',
+  罐: 'can',
+  碗: 'bowl',
+  盅: 'cup',
+  盘: 'plate',
+  碟: 'plate',
+  锅: 'pot',
+  煲: 'pot',
+  笼: 'basket',
+  桶: 'bucket',
+  盒: 'box',
+  包: 'pack',
+  套: 'set',
+  打: 'dozen',
+  半打: 'half dozen',
+  斤: '500g',
+  两: '50g',
+  克: 'g',
+};
+
+/** 规格常见的英文（后台没填「规格的英文」时用） */
+export const EMENU_SPEC_EN: Readonly<Record<string, string>> = {
+  大份: 'Large',
+  中份: 'Medium',
+  小份: 'Small',
+  例份: 'Regular',
+  标准: 'Regular',
+  加大: 'Extra large',
+  半份: 'Half',
+  整份: 'Full',
+  大: 'Large',
+  中: 'Medium',
+  小: 'Small',
+  整只: 'Whole',
+  半只: 'Half',
+  整条: 'Whole',
+  半条: 'Half',
+  单人: 'For 1',
+  双人: 'For 2',
+  大杯: 'Large',
+  中杯: 'Medium',
+  小杯: 'Small',
+  大瓶: 'Large bottle',
+  小瓶: 'Small bottle',
+  整瓶: 'Bottle',
+  单杯: 'Glass',
+  一打: 'Dozen',
+  半打: 'Half dozen',
+  冷: 'Iced',
+  冰: 'Iced',
+  热: 'Hot',
+  常温: 'Room temp',
+};
+
+/** 忌口、起菜方式常见选项的英文（后台「设置」里没填时用） */
+export const EMENU_OPTION_EN: Readonly<Record<string, string>> = {
+  不加香菜: 'No cilantro',
+  不加辣椒: 'No chili',
+  不加洋葱: 'No onion',
+  不加香葱: 'No scallion',
+  不加葱: 'No scallion',
+  不加蒜: 'No garlic',
+  不加姜: 'No ginger',
+  不加花生: 'No peanuts',
+  不加味精: 'No MSG',
+  不加糖: 'No sugar',
+  不加冰: 'No ice',
+  免葱: 'No scallion',
+  免蒜: 'No garlic',
+  免辣: 'Not spicy',
+  去冰: 'No ice',
+  少冰: 'Less ice',
+  少盐: 'Less salt',
+  少油: 'Less oil',
+  少糖: 'Less sugar',
+  不辣: 'Not spicy',
+  微辣: 'Mild',
+  少辣: 'Mild',
+  中辣: 'Medium spicy',
+  重辣: 'Extra spicy',
+  特辣: 'Extra spicy',
+  素食: 'Vegetarian',
+  即起: 'Serve now',
+  慢起: 'Serve later',
+  叫起: 'Serve on call',
+};
+
+/** 单位的英文：后台填的 → 内置的 → 中文 */
+export const emenuUnitEn = (unit: string, unitEn: string): string => unitEn.trim() || EMENU_UNIT_EN[unit.trim()] || unit;
+/** 规格名的英文：后台填的 → 内置的 → 中文 */
+export const emenuSpecLabelEn = (label: string, labelEn: string): string => labelEn.trim() || EMENU_SPEC_EN[label.trim()] || label;
+/** 忌口、起菜方式一个选项的英文：设置里填的 → 内置的 → 中文 */
+export const emenuOptionEn = (option: string, optionsEn: Readonly<Record<string, string>>): string => optionsEn[option]?.trim() || EMENU_OPTION_EN[option] || option;
+
+/** 这道菜切到英文时还缺什么：没有英文名，或有中文介绍、没有英文介绍（后台打「缺英文」标记用） */
+export function dishMissingEnglish(d: { nameEn: string; description: string; descriptionEn: string }): boolean {
+  return !d.nameEn.trim() || (!!d.description.trim() && !d.descriptionEn.trim());
+}
 
 /** 整单备注拼成一句：忌口、起菜方式、自定义，用「，」隔开（写到这一单每道菜的口味备注上） */
 export function composeEmenuNote(avoid: readonly string[], serve: string | null, custom: string): string {
@@ -149,6 +285,8 @@ export interface EmenuSpecView {
   itemId: number;
   /** 规格名（大份、小份）；只有一个规格的为空 */
   label: string;
+  /** 规格名的英文（后台填的；空着时页面用内置的常见译法） */
+  labelEn: string;
   /** 默认价格档的单价（分） */
   price: number;
   state: EmenuSpecState;
@@ -164,6 +302,11 @@ export interface EmenuDishView {
   description: string;
   attrs: string[];
   unit: string;
+  /** 英文（8.0.13）：没填的为空，页面上显示中文 */
+  taglineEn: string;
+  descriptionEn: string;
+  attrsEn: string[];
+  unitEn: string;
   imageUrl: string | null;
   detailUrl: string | null;
   specs: EmenuSpecView[];
@@ -192,7 +335,7 @@ export interface EmenuMenu {
   businessDate: string;
   /** 平板点餐与餐饮功能都开着 */
   enabled: boolean;
-  rules: Pick<EmenuRules, 'footerText' | 'avoidOptions' | 'serveOptions' | 'idleMinutes' | 'offHours'> & { coverUrl: string | null };
+  rules: Pick<EmenuRules, 'footerText' | 'avoidOptions' | 'serveOptions' | 'idleMinutes' | 'offHours' | 'langSwitch' | 'optionsEn' | 'motion'> & { coverUrl: string | null };
   /** 现在显示的分类（按排序；不在时段的只有设置成「显示」时才在） */
   categories: EmenuCategoryView[];
   /** 不在时段、没显示出来的分类（没有分类可点时告诉客人什么时候供应） */
@@ -330,11 +473,15 @@ export interface EmenuDishAdmin {
   description: string;
   attrs: string[];
   unit: string;
+  taglineEn: string;
+  descriptionEn: string;
+  attrsEn: string[];
+  unitEn: string;
   imageId: number | null;
   detailImageId: number | null;
   active: boolean;
   version: number;
-  specs: { itemId: number; label: string; itemName: string; price: number; orderable: boolean }[];
+  specs: { itemId: number; label: string; labelEn: string; itemName: string; price: number; orderable: boolean }[];
   /** 放在哪几个分类里（提示用） */
   usedIn: string[];
 }
@@ -382,4 +529,98 @@ export const emenuImageUrl = (id: number | null | undefined) => (id ? `/api/emen
 export interface OrderPinStatus {
   has: boolean;
   setAt: string | null;
+}
+
+// ───────────────────────── 英文对照表（8.0.13，后台「菜品图文」导出 / 导入） ─────────────────────────
+
+/** 导出的列（导入时按表头的名字找列，列的先后、多出来的列都不要紧） */
+export const EMENU_ENGLISH_COLUMNS = ['编号', '菜名', '英文名', '名称后的小字', '小字的英文', '介绍', '英文介绍', '属性行', '属性行的英文', '单位', '单位的英文'] as const;
+/** 属性行在一个格子里用竖线隔开：产地：法国 | 年份：NV */
+export const EMENU_ATTR_SEPARATOR = ' | ';
+export const EMENU_ENGLISH_MAX_ROWS = 3000;
+
+/** 一道菜要改的英文：没给的项不动（空着的格子不会把原来的英文清掉） */
+export interface EmenuEnglishRow {
+  id: number;
+  nameEn?: string;
+  taglineEn?: string;
+  descriptionEn?: string;
+  attrsEn?: string[];
+  unitEn?: string;
+}
+
+export interface EmenuEnglishParsed {
+  rows: EmenuEnglishRow[];
+  /** 读不了的地方（整份不能导：没有表头、引号不配对；或某一行不对：编号不是数字、太长），带行号 */
+  problems: string[];
+}
+
+const ENGLISH_LIMITS = { nameEn: 80, taglineEn: 80, descriptionEn: 400, unitEn: 12 } as const;
+const ENGLISH_HEADERS: Record<keyof typeof ENGLISH_LIMITS | 'attrsEn', string> = { nameEn: '英文名', taglineEn: '小字的英文', descriptionEn: '英文介绍', attrsEn: '属性行的英文', unitEn: '单位的英文' };
+export const EMENU_ATTR_EN_MAX = 48;
+
+/** 读英文对照表（CSV）：按表头找「编号」与各英文列；空行、英文各列都空着的行跳过 */
+export function parseEmenuEnglishCsv(text: string): EmenuEnglishParsed {
+  const { records, unclosedQuoteLine } = parseCsvRecords(text.replace(/^\uFEFF/, ''));
+  if (unclosedQuoteLine !== null) return { rows: [], problems: [unclosedQuoteMessage(unclosedQuoteLine)] };
+  const filled = records.filter((r) => r.cells.some((c) => c.trim()));
+  const header = filled[0];
+  if (!header) return { rows: [], problems: ['文件是空的'] };
+  const col = (name: string) => header.cells.findIndex((c) => c.trim() === name);
+  const idCol = col('编号');
+  if (idCol < 0) return { rows: [], problems: ['第一行要是表头，并且有「编号」这一列（请用「导出英文对照表」导出的文件来填）'] };
+  const cols = Object.fromEntries(Object.entries(ENGLISH_HEADERS).map(([k, name]) => [k, col(name)])) as Record<keyof typeof ENGLISH_HEADERS, number>;
+  if (Object.values(cols).every((i) => i < 0)) return { rows: [], problems: [`没有找到英文的列（${Object.values(ENGLISH_HEADERS).join('、')}）`] };
+  const rows: EmenuEnglishRow[] = [];
+  const problems: string[] = [];
+  const seen = new Set<number>();
+  for (const r of filled.slice(1)) {
+    const idText = (r.cells[idCol] ?? '').trim();
+    const cell = (k: keyof typeof ENGLISH_HEADERS) => (cols[k] < 0 ? '' : (r.cells[cols[k]] ?? '').trim());
+    const row: EmenuEnglishRow = { id: Number(idText) };
+    let bad = false;
+    for (const k of Object.keys(ENGLISH_LIMITS) as (keyof typeof ENGLISH_LIMITS)[]) {
+      const v = cell(k);
+      if (!v) continue;
+      if (v.length > ENGLISH_LIMITS[k]) {
+        problems.push(`第 ${r.line} 行：「${ENGLISH_HEADERS[k]}」最多 ${ENGLISH_LIMITS[k]} 个字符（现在 ${v.length}）`);
+        bad = true;
+      }
+      row[k] = v;
+    }
+    const attrs = cell('attrsEn')
+      .split(/[|｜\n]/)
+      .map((a) => a.trim())
+      .filter(Boolean);
+    if (attrs.length) {
+      if (attrs.length > 3 || attrs.some((a) => a.length > EMENU_ATTR_EN_MAX)) {
+        problems.push(`第 ${r.line} 行：「属性行的英文」最多 3 条、每条 ${EMENU_ATTR_EN_MAX} 个字符，用竖线 | 隔开`);
+        bad = true;
+      }
+      row.attrsEn = attrs;
+    }
+    if (Object.keys(row).length === 1) continue;
+    if (!/^[0-9]{1,12}$/.test(idText) || row.id <= 0) {
+      problems.push(`第 ${r.line} 行：编号「${idText}」不是数字（编号请不要改）`);
+      continue;
+    }
+    if (seen.has(row.id)) {
+      problems.push(`第 ${r.line} 行：编号 ${row.id} 出现了两次`);
+      continue;
+    }
+    seen.add(row.id);
+    if (!bad) rows.push(row);
+  }
+  if (rows.length > EMENU_ENGLISH_MAX_ROWS) return { rows: [], problems: [`一次最多导入 ${EMENU_ENGLISH_MAX_ROWS} 行`] };
+  return { rows, problems };
+}
+
+/** 导入的结果 */
+export interface EmenuEnglishResult {
+  /** 改了几道菜 */
+  updated: number;
+  /** 内容与现在一样、没有动的 */
+  unchanged: number;
+  /** 编号对不上的（菜品不存在） */
+  missing: number[];
 }
